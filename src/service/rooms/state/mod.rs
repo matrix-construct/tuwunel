@@ -3,6 +3,7 @@ use std::{collections::HashMap, fmt::Write, iter::once, sync::Arc};
 use conduwuit::{
 	err,
 	result::FlatOk,
+	state_res::{self, StateMap},
 	utils::{
 		calculate_hash,
 		stream::{BroadbandExt, TryIgnore},
@@ -20,7 +21,6 @@ use ruma::{
 		AnyStrippedStateEvent, StateEventType, TimelineEventType,
 	},
 	serde::Raw,
-	state_res::{self, StateMap},
 	EventId, OwnedEventId, OwnedRoomId, RoomId, RoomVersionId, UserId,
 };
 

@@ -3,12 +3,15 @@ use std::{
 	sync::Arc,
 };
 
-use conduwuit::{debug_warn, err, implement, PduEvent, Result};
+use conduwuit::{
+	debug_warn, err, implement,
+	state_res::{self},
+	PduEvent, Result,
+};
 use futures::{future, FutureExt};
 use ruma::{
-	int,
-	state_res::{self},
-	uint, CanonicalJsonValue, MilliSecondsSinceUnixEpoch, OwnedEventId, RoomId, ServerName, UInt,
+	int, uint, CanonicalJsonValue, MilliSecondsSinceUnixEpoch, OwnedEventId, RoomId, ServerName,
+	UInt,
 };
 
 use super::check_room_id;

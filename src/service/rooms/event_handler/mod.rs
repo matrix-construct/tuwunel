@@ -19,12 +19,12 @@ use std::{
 
 use conduwuit::{
 	utils::{MutexMap, TryFutureExtExt},
-	Err, PduEvent, Result, Server,
+	Err, PduEvent, Result, RoomVersion, Server,
 };
 use futures::TryFutureExt;
 use ruma::{
-	events::room::create::RoomCreateEventContent, state_res::RoomVersion, OwnedEventId,
-	OwnedRoomId, RoomId, RoomVersionId,
+	events::room::create::RoomCreateEventContent, OwnedEventId, OwnedRoomId, RoomId,
+	RoomVersionId,
 };
 
 use crate::{globals, rooms, sending, server_keys, Dep};

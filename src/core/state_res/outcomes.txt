@@ -1,0 +1,104 @@
+11/29/2020 BRANCH: timo-spec-comp REV: d2a85669cc6056679ce6ca0fde4658a879ad2b08
+lexicographical topological sort
+                        time:   [1.7123 us 1.7157 us 1.7199 us]
+                        change: [-1.7584% -1.5433% -1.3205%] (p = 0.00 < 0.05)
+                        Performance has improved.
+Found 8 outliers among 100 measurements (8.00%)
+  2 (2.00%) low mild
+  5 (5.00%) high mild
+  1 (1.00%) high severe
+
+resolve state of 5 events one fork
+                        time:   [10.981 us 10.998 us 11.020 us]
+Found 3 outliers among 100 measurements (3.00%)
+  3 (3.00%) high mild
+
+resolve state of 10 events 3 conflicting
+                        time:   [26.858 us 26.946 us 27.037 us]
+
+11/29/2020 BRANCH: event-trait REV: f0eb1310efd49d722979f57f20bd1ac3592b0479
+lexicographical topological sort
+                        time:   [1.7686 us 1.7738 us 1.7810 us]
+                        change: [-3.2752% -2.4634% -1.7635%] (p = 0.00 < 0.05)
+                        Performance has improved.
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high severe
+
+resolve state of 5 events one fork
+                        time:   [10.643 us 10.656 us 10.669 us]
+                        change: [-4.9990% -3.8078% -2.8319%] (p = 0.00 < 0.05)
+                        Performance has improved.
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high severe
+
+resolve state of 10 events 3 conflicting
+                        time:   [29.149 us 29.252 us 29.375 us]
+                        change: [-0.8433% -0.3270% +0.2656%] (p = 0.25 > 0.05)
+                        No change in performance detected.
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+
+4/26/2020 BRANCH: fix-test-serde REV:
+lexicographical topological sort
+                        time:   [1.6793 us 1.6823 us 1.6857 us]
+Found 9 outliers among 100 measurements (9.00%)
+  1 (1.00%) low mild
+  4 (4.00%) high mild
+  4 (4.00%) high severe
+
+resolve state of 5 events one fork
+                        time:   [9.9993 us 10.062 us 10.159 us]
+Found 9 outliers among 100 measurements (9.00%)
+  7 (7.00%) high mild
+  2 (2.00%) high severe
+
+resolve state of 10 events 3 conflicting
+                        time:   [26.004 us 26.092 us 26.195 us]
+Found 16 outliers among 100 measurements (16.00%)
+  11 (11.00%) high mild
+  5 (5.00%) high severe
+
+6/30/2021 BRANCH: state-closure REV: 174c3e2a72232ad75b3fb14b3551f5f746f4fe84
+lexicographical topological sort
+                        time:   [1.5496 us 1.5536 us 1.5586 us]
+Found 9 outliers among 100 measurements (9.00%)
+  1 (1.00%) low mild
+  1 (1.00%) high mild
+  7 (7.00%) high severe
+
+resolve state of 5 events one fork
+                        time:   [10.319 us 10.333 us 10.347 us]
+Found 2 outliers among 100 measurements (2.00%)
+  2 (2.00%) high severe
+
+resolve state of 10 events 3 conflicting
+                        time:   [25.770 us 25.805 us 25.839 us]
+Found 7 outliers among 100 measurements (7.00%)
+  5 (5.00%) high mild
+  2 (2.00%) high severe
+
+7/20/2021 BRANCH stateres-result REV:
+This marks the switch to HashSet/Map
+lexicographical topological sort
+                        time:   [1.8122 us 1.8177 us 1.8233 us]
+                        change: [+15.205% +15.919% +16.502%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+Found 7 outliers among 100 measurements (7.00%)
+  5 (5.00%) high mild
+  2 (2.00%) high severe
+
+resolve state of 5 events one fork
+                        time:   [11.966 us 12.010 us 12.059 us]
+                        change: [+16.089% +16.730% +17.469%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+Found 7 outliers among 100 measurements (7.00%)
+  3 (3.00%) high mild
+  4 (4.00%) high severe
+
+resolve state of 10 events 3 conflicting
+                        time:   [29.092 us 29.201 us 29.311 us]
+                        change: [+12.447% +12.847% +13.280%] (p = 0.00 < 0.05)
+                        Performance has regressed.
+Found 9 outliers among 100 measurements (9.00%)
+  6 (6.00%) high mild
+  3 (3.00%) high severe

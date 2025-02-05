@@ -12,7 +12,7 @@ use conduwuit::{
 	at, debug, debug_info, debug_warn, err, info,
 	pdu::{gen_event_id_canonical_json, PduBuilder},
 	result::FlatOk,
-	trace,
+	state_res, trace,
 	utils::{self, shuffle, IterStream, ReadyExt},
 	warn, Err, PduEvent, Result,
 };
@@ -40,8 +40,8 @@ use ruma::{
 		},
 		StateEventType,
 	},
-	state_res, CanonicalJsonObject, CanonicalJsonValue, OwnedEventId, OwnedRoomId,
-	OwnedServerName, OwnedUserId, RoomId, RoomVersionId, ServerName, UserId,
+	CanonicalJsonObject, CanonicalJsonValue, OwnedEventId, OwnedRoomId, OwnedServerName,
+	OwnedUserId, RoomId, RoomVersionId, ServerName, UserId,
 };
 use service::{
 	appservice::RegistrationInfo,

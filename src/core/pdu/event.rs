@@ -1,8 +1,8 @@
-pub use ruma::state_res::Event;
 use ruma::{events::TimelineEventType, MilliSecondsSinceUnixEpoch, OwnedEventId, RoomId, UserId};
 use serde_json::value::RawValue as RawJsonValue;
 
 use super::Pdu;
+pub use crate::state_res::Event;
 
 impl Event for Pdu {
 	type Id = OwnedEventId;

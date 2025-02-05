@@ -8,6 +8,7 @@ pub mod metrics;
 pub mod mods;
 pub mod pdu;
 pub mod server;
+pub mod state_res;
 pub mod utils;
 
 pub use ::arrayvec;
@@ -22,6 +23,7 @@ pub use error::Error;
 pub use info::{rustc_flags_capture, version, version::version};
 pub use pdu::{Event, PduBuilder, PduCount, PduEvent, PduId, RawPduId, StateKey};
 pub use server::Server;
+pub use state_res::{EventTypeExt, RoomVersion, StateMap, TypeStateKey};
 pub use utils::{ctor, dtor, implement, result, result::Result};
 
 pub use crate as conduwuit_core;

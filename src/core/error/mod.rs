@@ -121,7 +121,7 @@ pub enum Error {
 	#[error(transparent)]
 	Signatures(#[from] ruma::signatures::Error),
 	#[error(transparent)]
-	StateRes(#[from] ruma::state_res::Error),
+	StateRes(#[from] crate::state_res::Error),
 	#[error("uiaa")]
 	Uiaa(ruma::api::client::uiaa::UiaaInfo),
 

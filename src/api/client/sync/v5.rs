@@ -11,7 +11,7 @@ use conduwuit::{
 		math::{ruma_from_usize, usize_from_ruma},
 		BoolExt, IterStream, ReadyExt, TryFutureExtExt,
 	},
-	warn, Error, Result,
+	warn, Error, Result, TypeStateKey,
 };
 use futures::{FutureExt, StreamExt, TryFutureExt};
 use ruma::{
@@ -24,7 +24,6 @@ use ruma::{
 		AnyRawAccountDataEvent, AnySyncEphemeralRoomEvent, StateEventType, TimelineEventType,
 	},
 	serde::Raw,
-	state_res::TypeStateKey,
 	uint, DeviceId, OwnedEventId, OwnedRoomId, RoomId, UInt, UserId,
 };
 use service::{rooms::read_receipt::pack_receipts, PduCount};

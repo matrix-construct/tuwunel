@@ -5,15 +5,14 @@ use std::{
 };
 
 use conduwuit::{
-	err, implement, trace,
+	err, implement,
+	state_res::{self, StateMap},
+	trace,
 	utils::stream::{automatic_width, IterStream, ReadyExt, TryWidebandExt, WidebandExt},
 	Error, Result,
 };
 use futures::{future::try_join, FutureExt, StreamExt, TryFutureExt, TryStreamExt};
-use ruma::{
-	state_res::{self, StateMap},
-	OwnedEventId, RoomId, RoomVersionId,
-};
+use ruma::{OwnedEventId, RoomId, RoomVersionId};
 
 use crate::rooms::state_compressor::CompressedState;
 

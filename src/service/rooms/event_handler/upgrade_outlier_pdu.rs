@@ -1,16 +1,12 @@
 use std::{borrow::Borrow, collections::BTreeMap, iter::once, sync::Arc, time::Instant};
 
 use conduwuit::{
-	debug, debug_info, err, implement, trace,
+	debug, debug_info, err, implement, state_res, trace,
 	utils::stream::{BroadbandExt, ReadyExt},
-	warn, Err, PduEvent, Result,
+	warn, Err, EventTypeExt, PduEvent, Result,
 };
 use futures::{future::ready, FutureExt, StreamExt};
-use ruma::{
-	events::StateEventType,
-	state_res::{self, EventTypeExt},
-	CanonicalJsonValue, RoomId, ServerName,
-};
+use ruma::{events::StateEventType, CanonicalJsonValue, RoomId, ServerName};
 
 use super::{get_room_version_id, to_room_version};
 use crate::rooms::{

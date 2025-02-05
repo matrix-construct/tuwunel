@@ -3,10 +3,12 @@ use std::{
 	sync::Arc,
 };
 
-use conduwuit::{debug, debug_info, err, implement, trace, warn, Err, Error, PduEvent, Result};
+use conduwuit::{
+	debug, debug_info, err, implement, state_res, trace, warn, Err, Error, PduEvent, Result,
+};
 use futures::{future::ready, TryFutureExt};
 use ruma::{
-	api::client::error::ErrorKind, events::StateEventType, state_res, CanonicalJsonObject,
+	api::client::error::ErrorKind, events::StateEventType, CanonicalJsonObject,
 	CanonicalJsonValue, EventId, RoomId, ServerName,
 };
 

@@ -8,10 +8,10 @@ use std::{
 use conduwuit::{
 	debug, err, implement, trace,
 	utils::stream::{BroadbandExt, IterStream, ReadyExt, TryBroadbandExt, TryWidebandExt},
-	PduEvent, Result,
+	PduEvent, Result, StateMap,
 };
 use futures::{future::try_join, FutureExt, StreamExt, TryFutureExt, TryStreamExt};
-use ruma::{state_res::StateMap, OwnedEventId, RoomId, RoomVersionId};
+use ruma::{OwnedEventId, RoomId, RoomVersionId};
 
 use crate::rooms::short::ShortStateHash;
 

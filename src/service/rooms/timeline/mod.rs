@@ -12,6 +12,7 @@ use std::{
 use conduwuit::{
 	at, debug, debug_warn, err, error, implement, info,
 	pdu::{gen_event_id, EventHash, PduBuilder, PduCount, PduEvent},
+	state_res::{self, Event, RoomVersion},
 	utils::{
 		self, future::TryExtExt, stream::TryIgnore, IterStream, MutexMap, MutexMapGuard, ReadyExt,
 	},
@@ -36,7 +37,6 @@ use ruma::{
 		GlobalAccountDataEventType, StateEventType, TimelineEventType,
 	},
 	push::{Action, Ruleset, Tweak},
-	state_res::{self, Event, RoomVersion},
 	uint, CanonicalJsonObject, CanonicalJsonValue, EventId, OwnedEventId, OwnedRoomId,
 	OwnedServerName, RoomId, RoomVersionId, ServerName, UserId,
 };
