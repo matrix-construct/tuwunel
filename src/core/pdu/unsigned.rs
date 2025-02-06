@@ -9,11 +9,13 @@ use crate::{err, implement, is_true, Result};
 
 #[implement(Pdu)]
 pub fn remove_transaction_id(&mut self) -> Result {
+	use BTreeMap as Map;
+
 	let Some(unsigned) = &self.unsigned else {
 		return Ok(());
 	};
 
-	let mut unsigned: BTreeMap<String, Box<RawJsonValue>> = serde_json::from_str(unsigned.get())
+	let mut unsigned: Map<&str, Box<RawJsonValue>> = serde_json::from_str(unsigned.get())
 		.map_err(|e| err!(Database("Invalid unsigned in pdu event: {e}")))?;
 
 	unsigned.remove("transaction_id");
@@ -26,10 +28,13 @@ pub fn remove_transaction_id(&mut self) -> Result {
 
 #[implement(Pdu)]
 pub fn add_age(&mut self) -> Result {
-	let mut unsigned: BTreeMap<String, Box<RawJsonValue>> = self
+	use BTreeMap as Map;
+
+	let mut unsigned: Map<&str, Box<RawJsonValue>> = self
 		.unsigned
-		.as_ref()
-		.map_or_else(|| Ok(BTreeMap::new()), |u| serde_json::from_str(u.get()))
+		.as_deref()
+		.map(RawJsonValue::get)
+		.map_or_else(|| Ok(Map::new()), serde_json::from_str)
 		.map_err(|e| err!(Database("Invalid unsigned in pdu event: {e}")))?;
 
 	// deliberately allowing for the possibility of negative age
@@ -37,10 +42,8 @@ pub fn add_age(&mut self) -> Result {
 	let then: i128 = self.origin_server_ts.into();
 	let this_age = now.saturating_sub(then);
 
-	unsigned.insert("age".to_owned(), to_raw_value(&this_age).expect("age is valid"));
-	self.unsigned = to_raw_value(&unsigned)
-		.map(Some)
-		.expect("unsigned is valid");
+	unsigned.insert("age", to_raw_value(&this_age)?);
+	self.unsigned = Some(to_raw_value(&unsigned)?);
 
 	Ok(())
 }
@@ -51,8 +54,9 @@ pub fn add_relation(&mut self, name: &str, pdu: Option<&Pdu>) -> Result {
 
 	let mut unsigned: Map<String, JsonValue> = self
 		.unsigned
-		.as_ref()
-		.map_or_else(|| Ok(Map::new()), |u| serde_json::from_str(u.get()))
+		.as_deref()
+		.map(RawJsonValue::get)
+		.map_or_else(|| Ok(Map::new()), serde_json::from_str)
 		.map_err(|e| err!(Database("Invalid unsigned in pdu event: {e}")))?;
 
 	let pdu = pdu
@@ -64,12 +68,9 @@ pub fn add_relation(&mut self, name: &str, pdu: Option<&Pdu>) -> Result {
 		.entry("m.relations")
 		.or_insert(JsonValue::Object(Map::new()))
 		.as_object_mut()
-		.unwrap()
-		.insert(name.to_owned(), pdu);
+		.map(|object| object.insert(name.to_owned(), pdu));
 
-	self.unsigned = to_raw_value(&unsigned)
-		.map(Some)
-		.expect("unsigned is valid");
+	self.unsigned = Some(to_raw_value(&unsigned)?);
 
 	Ok(())
 }
