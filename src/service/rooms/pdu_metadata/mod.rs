@@ -2,7 +2,7 @@ mod data;
 use std::sync::Arc;
 
 use conduwuit::{PduCount, Result};
-use futures::StreamExt;
+use futures::{future::try_join, StreamExt};
 use ruma::{api::Direction, EventId, RoomId, UserId};
 
 use self::data::{Data, PdusIterItem};
@@ -54,10 +54,16 @@ impl Service {
 		max_depth: u8,
 		dir: Direction,
 	) -> Vec<PdusIterItem> {
-		let room_id = self.services.short.get_or_create_shortroomid(room_id).await;
+		let room_id = self.services.short.get_shortroomid(room_id);
 
-		let target = match self.services.timeline.get_pdu_count(target).await {
-			| Ok(PduCount::Normal(c)) => c,
+		let target = self.services.timeline.get_pdu_count(target);
+
+		let Ok((room_id, target)) = try_join(room_id, target).await else {
+			return Vec::new();
+		};
+
+		let target = match target {
+			| PduCount::Normal(c) => c,
 			// TODO: Support backfilled relations
 			| _ => 0, // This will result in an empty iterator
 		};
@@ -68,7 +74,11 @@ impl Service {
 			.collect()
 			.await;
 
-		let mut stack: Vec<_> = pdus.iter().map(|pdu| (pdu.clone(), 1)).collect();
+		let mut stack: Vec<_> = pdus
+			.iter()
+			.filter(|_| max_depth > 0)
+			.map(|pdu| (pdu.clone(), 1))
+			.collect();
 
 		'limit: while let Some(stack_pdu) = stack.pop() {
 			let target = match stack_pdu.0 .0 {
