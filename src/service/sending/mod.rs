@@ -22,7 +22,7 @@ use ruma::{
 	RoomId, ServerName, UserId,
 };
 use smallvec::SmallVec;
-use tokio::task::JoinSet;
+use tokio::{task, task::JoinSet};
 
 use self::data::Data;
 pub use self::{
@@ -111,8 +111,15 @@ impl crate::Service for Service {
 				.enumerate()
 				.fold(JoinSet::new(), |mut joinset, (id, _)| {
 					let self_ = self.clone();
+					let worker = self_.sender(id);
+					let worker = if self.unconstrained() {
+						task::unconstrained(worker).boxed()
+					} else {
+						worker.boxed()
+					};
+
 					let runtime = self.server.runtime();
-					let _abort = joinset.spawn_on(self_.sender(id).boxed(), runtime);
+					let _abort = joinset.spawn_on(worker, runtime);
 					joinset
 				});
 
@@ -139,6 +146,8 @@ impl crate::Service for Service {
 	}
 
 	fn name(&self) -> &str { crate::service::make_name(std::module_path!()) }
+
+	fn unconstrained(&self) -> bool { true }
 }
 
 impl Service {
