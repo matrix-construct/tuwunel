@@ -1089,6 +1089,13 @@ pub struct Config {
 	#[serde(default = "true_fn")]
 	pub rocksdb_checksums: bool,
 
+	/// Enables the "atomic flush" mode in rocksdb. This option is not intended
+	/// for users. It may be removed or ignored in future versions. Atomic flush
+	/// may be enabled by the paranoid to possibly improve database integrity at
+	/// the cost of performance.
+	#[serde(default)]
+	pub rocksdb_atomic_flush: bool,
+
 	/// Database repair mode (for RocksDB SST corruption).
 	///
 	/// Use this option when the server reports corruption while running or
