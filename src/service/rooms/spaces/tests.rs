@@ -1,5 +1,3 @@
-#![cfg(test)]
-
 use std::str::FromStr;
 
 use ruma::{
@@ -69,15 +67,22 @@ fn get_summary_children() {
 	}
 	.into();
 
-	assert_eq!(get_parent_children_via(&summary, false), vec![
-		(owned_room_id!("!foo:example.org"), vec![owned_server_name!("example.org")]),
-		(owned_room_id!("!bar:example.org"), vec![owned_server_name!("example.org")]),
-		(owned_room_id!("!baz:example.org"), vec![owned_server_name!("example.org")])
-	]);
-	assert_eq!(get_parent_children_via(&summary, true), vec![(
-		owned_room_id!("!bar:example.org"),
-		vec![owned_server_name!("example.org")]
-	)]);
+	assert_eq!(
+		get_parent_children_via(&summary, false)
+			.map(|(k, v)| (k, v.collect::<Vec<_>>()))
+			.collect::<Vec<_>>(),
+		vec![
+			(owned_room_id!("!foo:example.org"), vec![owned_server_name!("example.org")]),
+			(owned_room_id!("!bar:example.org"), vec![owned_server_name!("example.org")]),
+			(owned_room_id!("!baz:example.org"), vec![owned_server_name!("example.org")])
+		]
+	);
+	assert_eq!(
+		get_parent_children_via(&summary, true)
+			.map(|(k, v)| (k, v.collect::<Vec<_>>()))
+			.collect::<Vec<_>>(),
+		vec![(owned_room_id!("!bar:example.org"), vec![owned_server_name!("example.org")])]
+	);
 }
 
 #[test]

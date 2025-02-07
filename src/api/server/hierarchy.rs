@@ -1,10 +1,11 @@
 use axum::extract::State;
-use conduwuit::{Err, Result};
-use ruma::{api::federation::space::get_hierarchy, RoomId, ServerName};
-use service::{
-	rooms::spaces::{get_parent_children_via, Identifier, SummaryAccessibility},
-	Services,
+use conduwuit::{
+	utils::stream::{BroadbandExt, IterStream},
+	Err, Result,
 };
+use futures::{FutureExt, StreamExt};
+use ruma::api::federation::space::get_hierarchy;
+use service::rooms::spaces::{get_parent_children_via, Identifier, SummaryAccessibility};
 
 use crate::Ruma;
 
@@ -20,54 +21,51 @@ pub(crate) async fn get_hierarchy_route(
 		return Err!(Request(NotFound("Room does not exist.")));
 	}
 
-	get_hierarchy(&services, &body.room_id, body.origin(), body.suggested_only).await
-}
-
-/// Gets the response for the space hierarchy over federation request
-///
-/// Errors if the room does not exist, so a check if the room exists should
-/// be done
-async fn get_hierarchy(
-	services: &Services,
-	room_id: &RoomId,
-	server_name: &ServerName,
-	suggested_only: bool,
-) -> Result<get_hierarchy::v1::Response> {
+	let room_id = &body.room_id;
+	let suggested_only = body.suggested_only;
+	let ref identifier = Identifier::ServerName(body.origin());
 	match services
 		.rooms
 		.spaces
-		.get_summary_and_children_local(&room_id.to_owned(), Identifier::ServerName(server_name))
+		.get_summary_and_children_local(room_id, identifier)
 		.await?
 	{
-		| Some(SummaryAccessibility::Accessible(room)) => {
-			let mut children = Vec::new();
-			let mut inaccessible_children = Vec::new();
+		| None => Err!(Request(NotFound("The requested room was not found"))),
 
-			for (child, _via) in get_parent_children_via(&room, suggested_only) {
-				match services
-					.rooms
-					.spaces
-					.get_summary_and_children_local(&child, Identifier::ServerName(server_name))
-					.await?
-				{
-					| Some(SummaryAccessibility::Accessible(summary)) => {
-						children.push((*summary).into());
-					},
-					| Some(SummaryAccessibility::Inaccessible) => {
-						inaccessible_children.push(child);
-					},
-					| None => (),
-				}
-			}
-
-			Ok(get_hierarchy::v1::Response {
-				room: *room,
-				children,
-				inaccessible_children,
-			})
-		},
 		| Some(SummaryAccessibility::Inaccessible) =>
 			Err!(Request(NotFound("The requested room is inaccessible"))),
-		| None => Err!(Request(NotFound("The requested room was not found"))),
+
+		| Some(SummaryAccessibility::Accessible(room)) => {
+			let (children, inaccessible_children) =
+				get_parent_children_via(&room, suggested_only)
+					.stream()
+					.broad_filter_map(|(child, _via)| async move {
+						match services
+							.rooms
+							.spaces
+							.get_summary_and_children_local(&child, identifier)
+							.await
+							.ok()?
+						{
+							| None => None,
+
+							| Some(SummaryAccessibility::Inaccessible) =>
+								Some((None, Some(child))),
+
+							| Some(SummaryAccessibility::Accessible(summary)) =>
+								Some((Some(summary), None)),
+						}
+					})
+					.unzip()
+					.map(|(children, inaccessible_children): (Vec<_>, Vec<_>)| {
+						(
+							children.into_iter().flatten().map(Into::into).collect(),
+							inaccessible_children.into_iter().flatten().collect(),
+						)
+					})
+					.await;
+
+			Ok(get_hierarchy::v1::Response { room, children, inaccessible_children })
+		},
 	}
 }
