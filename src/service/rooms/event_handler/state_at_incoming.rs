@@ -172,7 +172,6 @@ async fn state_at_incoming_fork(
 				.short
 				.get_statekey_from_short(*k)
 				.map_ok(|(ty, sk)| ((ty, sk), id.clone()))
-				.map_ok(|((ty, sk), id)| ((ty, sk.as_str().to_owned()), id))
 		})
 		.ready_filter_map(Result::ok)
 		.collect()

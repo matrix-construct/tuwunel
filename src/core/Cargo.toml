@@ -116,5 +116,8 @@ nix.workspace = true
 hardened_malloc-rs.workspace = true
 hardened_malloc-rs.optional = true
 
+[dev-dependencies]
+maplit.workspace = true
+
 [lints]
 workspace = true

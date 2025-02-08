@@ -14,7 +14,7 @@ use conduwuit::{
 	result::FlatOk,
 	state_res, trace,
 	utils::{self, shuffle, IterStream, ReadyExt},
-	warn, Err, PduEvent, Result,
+	warn, Err, PduEvent, Result, StateKey,
 };
 use futures::{join, FutureExt, StreamExt, TryFutureExt};
 use ruma::{
@@ -1151,8 +1151,8 @@ async fn join_room_by_id_helper_remote(
 
 	debug!("Running send_join auth check");
 	let fetch_state = &state;
-	let state_fetch = |k: &'static StateEventType, s: String| async move {
-		let shortstatekey = services.rooms.short.get_shortstatekey(k, &s).await.ok()?;
+	let state_fetch = |k: StateEventType, s: StateKey| async move {
+		let shortstatekey = services.rooms.short.get_shortstatekey(&k, &s).await.ok()?;
 
 		let event_id = fetch_state.get(&shortstatekey)?;
 		services.rooms.timeline.get_pdu(event_id).await.ok()
@@ -1162,7 +1162,7 @@ async fn join_room_by_id_helper_remote(
 		&state_res::RoomVersion::new(&room_version_id)?,
 		&parsed_join_pdu,
 		None, // TODO: third party invite
-		|k, s| state_fetch(k, s.to_owned()),
+		|k, s| state_fetch(k.clone(), s.into()),
 	)
 	.await
 	.map_err(|e| err!(Request(Forbidden(warn!("Auth check failed: {e:?}")))))?;

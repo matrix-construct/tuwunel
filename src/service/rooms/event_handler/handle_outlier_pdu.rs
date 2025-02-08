@@ -133,7 +133,7 @@ pub(super) async fn handle_outlier_pdu<'a>(
 		));
 	}
 
-	let state_fetch = |ty: &'static StateEventType, sk: &str| {
+	let state_fetch = |ty: &StateEventType, sk: &str| {
 		let key = (ty.to_owned(), sk.into());
 		ready(auth_events.get(&key))
 	};

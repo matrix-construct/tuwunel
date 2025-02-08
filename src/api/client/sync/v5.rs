@@ -223,7 +223,11 @@ async fn fetch_subscriptions(
 
 		let limit: UInt = room.timeline_limit;
 
-		todo_room.0.extend(room.required_state.iter().cloned());
+		todo_room.0.extend(
+			room.required_state
+				.iter()
+				.map(|(ty, sk)| (ty.clone(), sk.as_str().into())),
+		);
 		todo_room.1 = todo_room.1.max(usize_from_ruma(limit));
 		// 0 means unknown because it got out of date
 		todo_room.2 = todo_room.2.min(
@@ -303,9 +307,12 @@ async fn handle_lists<'a>(
 
 				let limit: usize = usize_from_ruma(list.room_details.timeline_limit).min(100);
 
-				todo_room
-					.0
-					.extend(list.room_details.required_state.iter().cloned());
+				todo_room.0.extend(
+					list.room_details
+						.required_state
+						.iter()
+						.map(|(ty, sk)| (ty.clone(), sk.as_str().into())),
+				);
 
 				todo_room.1 = todo_room.1.max(limit);
 				// 0 means unknown because it got out of date

@@ -3,7 +3,7 @@ use std::{borrow::Borrow, collections::BTreeMap, iter::once, sync::Arc, time::In
 use conduwuit::{
 	debug, debug_info, err, implement, state_res, trace,
 	utils::stream::{BroadbandExt, ReadyExt},
-	warn, Err, EventTypeExt, PduEvent, Result,
+	warn, Err, EventTypeExt, PduEvent, Result, StateKey,
 };
 use futures::{future::ready, FutureExt, StreamExt};
 use ruma::{events::StateEventType, CanonicalJsonValue, RoomId, ServerName};
@@ -71,8 +71,8 @@ pub(super) async fn upgrade_outlier_to_timeline_pdu(
 	debug!("Performing auth check");
 	// 11. Check the auth of the event passes based on the state of the event
 	let state_fetch_state = &state_at_incoming_event;
-	let state_fetch = |k: &'static StateEventType, s: String| async move {
-		let shortstatekey = self.services.short.get_shortstatekey(k, &s).await.ok()?;
+	let state_fetch = |k: StateEventType, s: StateKey| async move {
+		let shortstatekey = self.services.short.get_shortstatekey(&k, &s).await.ok()?;
 
 		let event_id = state_fetch_state.get(&shortstatekey)?;
 		self.services.timeline.get_pdu(event_id).await.ok()
@@ -82,7 +82,7 @@ pub(super) async fn upgrade_outlier_to_timeline_pdu(
 		&room_version,
 		&incoming_pdu,
 		None, // TODO: third party invite
-		|k, s| state_fetch(k, s.to_owned()),
+		|ty, sk| state_fetch(ty.clone(), sk.into()),
 	)
 	.await
 	.map_err(|e| err!(Request(Forbidden("Auth check failed: {e:?}"))))?;
@@ -104,7 +104,7 @@ pub(super) async fn upgrade_outlier_to_timeline_pdu(
 		)
 		.await?;
 
-	let state_fetch = |k: &'static StateEventType, s: &str| {
+	let state_fetch = |k: &StateEventType, s: &str| {
 		let key = k.with_state_key(s);
 		ready(auth_events.get(&key).cloned())
 	};

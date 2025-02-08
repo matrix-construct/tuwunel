@@ -379,6 +379,7 @@ features = [
     "unstable-msc4203", # sending to-device events to appservices 
     "unstable-msc4210", # remove legacy mentions
     "unstable-extensible-events",
+    "unstable-pdu",
 ]
 
 [workspace.dependencies.rust-rocksdb]
@@ -526,6 +527,9 @@ features = ["std"]
 [workspace.dependencies.minicbor-serde]
 version = "0.3.2"
 features = ["std"]
+
+[workspace.dependencies.maplit]
+version = "1.0.2"
 
 #
 # Patches

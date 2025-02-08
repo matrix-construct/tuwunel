@@ -63,7 +63,6 @@ pub async fn resolve_state(
 				.multi_get_statekey_from_short(shortstatekeys)
 				.zip(event_ids)
 				.ready_filter_map(|(ty_sk, id)| Some((ty_sk.ok()?, id)))
-				.map(|((ty, sk), id)| ((ty, sk.as_str().to_owned()), id))
 				.collect()
 		})
 		.map(Ok::<_, Error>)

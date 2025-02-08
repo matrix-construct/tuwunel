@@ -747,7 +747,7 @@ impl Service {
 		};
 
 		let auth_fetch = |k: &StateEventType, s: &str| {
-			let key = (k.clone(), s.to_owned());
+			let key = (k.clone(), s.into());
 			ready(auth_events.get(&key))
 		};
 

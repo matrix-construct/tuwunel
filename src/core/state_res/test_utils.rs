@@ -7,28 +7,28 @@ use std::{
 	},
 };
 
-use futures_util::future::ready;
-use js_int::{int, uint};
-use ruma_common::{
-	event_id, room_id, user_id, EventId, MilliSecondsSinceUnixEpoch, OwnedEventId, RoomId,
-	RoomVersionId, ServerSignatures, UserId,
-};
-use ruma_events::{
-	pdu::{EventHash, Pdu, RoomV3Pdu},
-	room::{
-		join_rules::{JoinRule, RoomJoinRulesEventContent},
-		member::{MembershipState, RoomMemberEventContent},
+use futures::future::ready;
+use ruma::{
+	event_id,
+	events::{
+		pdu::{EventHash, Pdu, RoomV3Pdu},
+		room::{
+			join_rules::{JoinRule, RoomJoinRulesEventContent},
+			member::{MembershipState, RoomMemberEventContent},
+		},
+		TimelineEventType,
 	},
-	TimelineEventType,
+	int, room_id, uint, user_id, EventId, MilliSecondsSinceUnixEpoch, OwnedEventId, RoomId,
+	RoomVersionId, ServerSignatures, UserId,
 };
 use serde_json::{
 	json,
 	value::{to_raw_value as to_raw_json_value, RawValue as RawJsonValue},
 };
-use tracing::info;
 
 pub(crate) use self::event::PduEvent;
-use crate::{auth_types_for_event, Error, Event, EventTypeExt, Result, StateMap};
+use super::auth_types_for_event;
+use crate::{info, Event, EventTypeExt, Result, StateMap};
 
 static SERVER_TIMESTAMP: AtomicU64 = AtomicU64::new(0);
 
@@ -88,7 +88,7 @@ pub(crate) async fn do_check(
 
 	// Resolve the current state and add it to the state_at_event map then continue
 	// on in "time"
-	for node in crate::lexicographical_topological_sort(&graph, &|_id| async {
+	for node in super::lexicographical_topological_sort(&graph, &|_id| async {
 		Ok((int!(0), MilliSecondsSinceUnixEpoch(uint!(0))))
 	})
 	.await
@@ -135,7 +135,7 @@ pub(crate) async fn do_check(
 			let event_map = &event_map;
 			let fetch = |id: <PduEvent as Event>::Id| ready(event_map.get(&id).cloned());
 			let exists = |id: <PduEvent as Event>::Id| ready(event_map.get(&id).is_some());
-			let resolved = crate::resolve(
+			let resolved = super::resolve(
 				&RoomVersionId::V6,
 				state_sets,
 				&auth_chain_sets,
@@ -223,7 +223,7 @@ pub(crate) async fn do_check(
                 // Filter out the dummy messages events.
                 // These act as points in time where there should be a known state to
                 // test against.
-                && **k != ("m.room.message".into(), "dummy".to_owned())
+                && **k != ("m.room.message".into(), "dummy".into())
 		})
 		.map(|(k, v)| (k.clone(), v.clone()))
 		.collect::<StateMap<OwnedEventId>>();
@@ -239,7 +239,8 @@ impl<E: Event> TestStore<E> {
 		self.0
 			.get(event_id)
 			.cloned()
-			.ok_or_else(|| Error::NotFound(format!("{event_id} not found")))
+			.ok_or_else(|| super::Error::NotFound(format!("{event_id} not found")))
+			.map_err(Into::into)
 	}
 
 	/// Returns a Vec of the related auth events to the given `event`.
@@ -582,8 +583,10 @@ pub(crate) fn INITIAL_EDGES() -> Vec<OwnedEventId> {
 }
 
 pub(crate) mod event {
-	use ruma_common::{MilliSecondsSinceUnixEpoch, OwnedEventId, RoomId, UserId};
-	use ruma_events::{pdu::Pdu, TimelineEventType};
+	use ruma::{
+		events::{pdu::Pdu, TimelineEventType},
+		MilliSecondsSinceUnixEpoch, OwnedEventId, RoomId, UserId,
+	};
 	use serde::{Deserialize, Serialize};
 	use serde_json::value::RawValue as RawJsonValue;
 

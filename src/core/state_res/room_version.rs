@@ -32,6 +32,7 @@ pub enum StateResolutionVersion {
 }
 
 #[cfg_attr(not(feature = "unstable-exhaustive-types"), non_exhaustive)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct RoomVersion {
 	/// The stability of this room.
 	pub disposition: RoomDisposition,

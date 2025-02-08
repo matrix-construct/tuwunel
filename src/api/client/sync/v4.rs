@@ -395,9 +395,12 @@ pub(crate) async fn sync_events_v4_route(
 							.map_or(10, usize_from_u64_truncated)
 							.min(100);
 
-						todo_room
-							.0
-							.extend(list.room_details.required_state.iter().cloned());
+						todo_room.0.extend(
+							list.room_details
+								.required_state
+								.iter()
+								.map(|(ty, sk)| (ty.clone(), sk.as_str().into())),
+						);
 
 						todo_room.1 = todo_room.1.max(limit);
 						// 0 means unknown because it got out of date
@@ -449,7 +452,11 @@ pub(crate) async fn sync_events_v4_route(
 			.map_or(10, usize_from_u64_truncated)
 			.min(100);
 
-		todo_room.0.extend(room.required_state.iter().cloned());
+		todo_room.0.extend(
+			room.required_state
+				.iter()
+				.map(|(ty, sk)| (ty.clone(), sk.as_str().into())),
+		);
 		todo_room.1 = todo_room.1.max(limit);
 		// 0 means unknown because it got out of date
 		todo_room.2 = todo_room.2.min(
