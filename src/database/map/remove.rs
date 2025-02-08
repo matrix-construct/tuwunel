@@ -1,7 +1,6 @@
 use std::{convert::AsRef, fmt::Debug, io::Write};
 
-use arrayvec::ArrayVec;
-use conduwuit::implement;
+use conduwuit::{arrayvec::ArrayVec, implement};
 use serde::Serialize;
 
 use crate::{keyval::KeyBuf, ser, util::or_else};

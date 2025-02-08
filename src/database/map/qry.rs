@@ -1,7 +1,6 @@
 use std::{convert::AsRef, fmt::Debug, io::Write, sync::Arc};
 
-use arrayvec::ArrayVec;
-use conduwuit::{implement, Result};
+use conduwuit::{arrayvec::ArrayVec, implement, Result};
 use futures::Future;
 use serde::Serialize;
 

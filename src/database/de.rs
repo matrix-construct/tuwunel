@@ -1,5 +1,6 @@
-use arrayvec::ArrayVec;
-use conduwuit::{checked, debug::DebugInspect, err, utils::string, Error, Result};
+use conduwuit::{
+	arrayvec::ArrayVec, checked, debug::DebugInspect, err, utils::string, Error, Result,
+};
 use serde::{
 	de,
 	de::{DeserializeSeed, Visitor},

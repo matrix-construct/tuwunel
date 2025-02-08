@@ -34,7 +34,6 @@ zstd_compression = [
 ]
 
 [dependencies]
-arrayvec.workspace = true
 async-channel.workspace = true
 conduwuit-core.workspace = true
 const-str.workspace = true
@@ -45,7 +44,6 @@ minicbor-serde.workspace = true
 rust-rocksdb.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-smallvec.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 

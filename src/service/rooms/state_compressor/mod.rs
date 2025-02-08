@@ -5,8 +5,8 @@ use std::{
 	sync::{Arc, Mutex},
 };
 
-use arrayvec::ArrayVec;
 use conduwuit::{
+	arrayvec::ArrayVec,
 	at, checked, err, expected, utils,
 	utils::{bytes, math::usize_from_f64, stream::IterStream},
 	Result,

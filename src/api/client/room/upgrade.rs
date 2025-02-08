@@ -1,7 +1,7 @@
 use std::cmp::max;
 
 use axum::extract::State;
-use conduwuit::{err, info, pdu::PduBuilder, Error, Result};
+use conduwuit::{err, info, pdu::PduBuilder, Error, Result, StateKey};
 use futures::StreamExt;
 use ruma::{
 	api::client::{error::ErrorKind, room::upgrade_room},
@@ -77,7 +77,7 @@ pub(crate) async fn upgrade_room_route(
 		.rooms
 		.timeline
 		.build_and_append_pdu(
-			PduBuilder::state(String::new(), &RoomTombstoneEventContent {
+			PduBuilder::state(StateKey::new(), &RoomTombstoneEventContent {
 				body: "This room has been replaced".to_owned(),
 				replacement_room: replacement_room.clone(),
 			}),
@@ -159,7 +159,7 @@ pub(crate) async fn upgrade_room_route(
 				content: to_raw_value(&create_event_content)
 					.expect("event is valid, we just created it"),
 				unsigned: None,
-				state_key: Some(String::new()),
+				state_key: Some(StateKey::new()),
 				redacts: None,
 				timestamp: None,
 			},
@@ -188,7 +188,7 @@ pub(crate) async fn upgrade_room_route(
 				})
 				.expect("event is valid, we just created it"),
 				unsigned: None,
-				state_key: Some(sender_user.to_string()),
+				state_key: Some(sender_user.as_str().into()),
 				redacts: None,
 				timestamp: None,
 			},
@@ -217,7 +217,7 @@ pub(crate) async fn upgrade_room_route(
 				PduBuilder {
 					event_type: event_type.to_string().into(),
 					content: event_content,
-					state_key: Some(String::new()),
+					state_key: Some(StateKey::new()),
 					..Default::default()
 				},
 				sender_user,
@@ -272,7 +272,7 @@ pub(crate) async fn upgrade_room_route(
 		.rooms
 		.timeline
 		.build_and_append_pdu(
-			PduBuilder::state(String::new(), &RoomPowerLevelsEventContent {
+			PduBuilder::state(StateKey::new(), &RoomPowerLevelsEventContent {
 				events_default: new_level,
 				invite: new_level,
 				..power_levels_event_content

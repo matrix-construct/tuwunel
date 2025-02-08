@@ -441,7 +441,7 @@ async fn handle_left_room(
 			kind: RoomMember,
 			content: serde_json::from_str(r#"{"membership":"leave"}"#)
 				.expect("this is valid JSON"),
-			state_key: Some(sender_user.to_string()),
+			state_key: Some(sender_user.as_str().into()),
 			unsigned: None,
 			// The following keys are dropped on conversion
 			room_id: room_id.clone(),

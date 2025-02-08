@@ -1,7 +1,7 @@
 use std::{net::IpAddr, sync::Arc, time::SystemTime};
 
-use arrayvec::ArrayVec;
 use conduwuit::{
+	arrayvec::ArrayVec,
 	at, err, implement,
 	utils::{math::Expected, rand, stream::TryIgnore},
 	Result,

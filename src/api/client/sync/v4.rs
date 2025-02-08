@@ -29,7 +29,7 @@ use ruma::{
 		TimelineEventType::*,
 	},
 	serde::Raw,
-	uint, MilliSecondsSinceUnixEpoch, OwnedEventId, OwnedRoomId, OwnedUserId, RoomId, UInt,
+	uint, MilliSecondsSinceUnixEpoch, OwnedEventId, OwnedRoomId, RoomId, UInt, UserId,
 };
 use service::rooms::read_receipt::pack_receipts;
 
@@ -258,12 +258,9 @@ pub(crate) async fn sync_events_v4_route(
 								continue;
 							};
 							if pdu.kind == RoomMember {
-								if let Some(state_key) = &pdu.state_key {
-									let user_id =
-										OwnedUserId::parse(state_key.clone()).map_err(|_| {
-											Error::bad_database("Invalid UserId in member PDU.")
-										})?;
-
+								if let Some(Ok(user_id)) =
+									pdu.state_key.as_deref().map(UserId::parse)
+								{
 									if user_id == *sender_user {
 										continue;
 									}
@@ -275,18 +272,18 @@ pub(crate) async fn sync_events_v4_route(
 											if !share_encrypted_room(
 												&services,
 												sender_user,
-												&user_id,
+												user_id,
 												Some(room_id),
 											)
 											.await
 											{
-												device_list_changes.insert(user_id);
+												device_list_changes.insert(user_id.to_owned());
 											}
 										},
 										| MembershipState::Leave => {
 											// Write down users that have left encrypted rooms we
 											// are in
-											left_encrypted_users.insert(user_id);
+											left_encrypted_users.insert(user_id.to_owned());
 										},
 										| _ => {},
 									}

@@ -172,7 +172,7 @@ async fn send_state_event_for_key_helper(
 			PduBuilder {
 				event_type: event_type.to_string().into(),
 				content: serde_json::from_str(json.json().get())?,
-				state_key: Some(String::from(state_key)),
+				state_key: Some(state_key.into()),
 				timestamp,
 				..Default::default()
 			},

@@ -7,6 +7,8 @@ use ruma::{
 use serde::Deserialize;
 use serde_json::value::{to_raw_value, RawValue as RawJsonValue};
 
+use super::StateKey;
+
 /// Build the start of a PDU in order to add it to the Database.
 #[derive(Debug, Deserialize)]
 pub struct Builder {
@@ -17,7 +19,7 @@ pub struct Builder {
 
 	pub unsigned: Option<Unsigned>,
 
-	pub state_key: Option<String>,
+	pub state_key: Option<StateKey>,
 
 	pub redacts: Option<OwnedEventId>,
 
@@ -29,15 +31,16 @@ pub struct Builder {
 type Unsigned = BTreeMap<String, serde_json::Value>;
 
 impl Builder {
-	pub fn state<T>(state_key: String, content: &T) -> Self
+	pub fn state<S, T>(state_key: S, content: &T) -> Self
 	where
 		T: EventContent<EventType = StateEventType>,
+		S: Into<StateKey>,
 	{
 		Self {
 			event_type: content.event_type().into(),
 			content: to_raw_value(content)
 				.expect("Builder failed to serialize state event content to RawValue"),
-			state_key: Some(state_key),
+			state_key: Some(state_key.into()),
 			..Self::default()
 		}
 	}

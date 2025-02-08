@@ -822,6 +822,8 @@ dependencies = [
  "serde_json",
  "serde_regex",
  "serde_yaml",
+ "smallstr",
+ "smallvec",
  "thiserror 2.0.11",
  "tikv-jemalloc-ctl",
  "tikv-jemalloc-sys",
@@ -839,7 +841,6 @@ dependencies = [
 name = "conduwuit_database"
 version = "0.5.0"
 dependencies = [
- "arrayvec",
  "async-channel",
  "conduwuit_core",
  "const-str",
@@ -850,7 +851,6 @@ dependencies = [
  "rust-rocksdb-uwu",
  "serde",
  "serde_json",
- "smallvec",
  "tokio",
  "tracing",
 ]
@@ -902,7 +902,6 @@ dependencies = [
 name = "conduwuit_service"
 version = "0.5.0"
 dependencies = [
- "arrayvec",
  "async-trait",
  "base64 0.22.1",
  "blurhash",
@@ -929,7 +928,6 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "sha2",
- "smallvec",
  "termimad",
  "tokio",
  "tracing",
@@ -4273,6 +4271,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8f92a496fb766b417c996b9c5e57daf2f7ad3b0bebe1ccfca4856390e3d3bb67"
 dependencies = [
  "autocfg",
+]
+
+[[package]]
+name = "smallstr"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "63b1aefdf380735ff8ded0b15f31aab05daf1f70216c01c02a12926badd1df9d"
+dependencies = [
+ "serde",
+ "smallvec",
 ]
 
 [[package]]

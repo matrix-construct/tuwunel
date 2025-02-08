@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use axum::extract::State;
 use conduwuit::{
-	debug_info, debug_warn, err, error, info, pdu::PduBuilder, warn, Err, Error, Result,
+	debug_info, debug_warn, err, error, info, pdu::PduBuilder, warn, Err, Error, Result, StateKey,
 };
 use futures::FutureExt;
 use ruma::{
@@ -198,7 +198,7 @@ pub(crate) async fn create_room_route(
 				event_type: TimelineEventType::RoomCreate,
 				content: to_raw_value(&create_content)
 					.expect("create event content serialization"),
-				state_key: Some(String::new()),
+				state_key: Some(StateKey::new()),
 				..Default::default()
 			},
 			sender_user,
@@ -267,7 +267,7 @@ pub(crate) async fn create_room_route(
 				event_type: TimelineEventType::RoomPowerLevels,
 				content: to_raw_value(&power_levels_content)
 					.expect("serialized power_levels event content"),
-				state_key: Some(String::new()),
+				state_key: Some(StateKey::new()),
 				..Default::default()
 			},
 			sender_user,
@@ -371,7 +371,7 @@ pub(crate) async fn create_room_route(
 		}
 
 		// Implicit state key defaults to ""
-		pdu_builder.state_key.get_or_insert_with(String::new);
+		pdu_builder.state_key.get_or_insert_with(StateKey::new);
 
 		// Silently skip encryption events if they are not allowed
 		if pdu_builder.event_type == TimelineEventType::RoomEncryption

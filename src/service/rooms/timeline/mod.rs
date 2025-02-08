@@ -38,7 +38,7 @@ use ruma::{
 	push::{Action, Ruleset, Tweak},
 	state_res::{self, Event, RoomVersion},
 	uint, CanonicalJsonObject, CanonicalJsonValue, EventId, OwnedEventId, OwnedRoomId,
-	OwnedServerName, OwnedUserId, RoomId, RoomVersionId, ServerName, UserId,
+	OwnedServerName, RoomId, RoomVersionId, ServerName, UserId,
 };
 use serde::Deserialize;
 use serde_json::value::{to_raw_value, RawValue as RawJsonValue};
@@ -387,10 +387,10 @@ impl Service {
 
 		if pdu.kind == TimelineEventType::RoomMember {
 			if let Some(state_key) = &pdu.state_key {
-				let target_user_id = OwnedUserId::parse(state_key)?;
+				let target_user_id = UserId::parse(state_key)?;
 
-				if self.services.users.is_active_local(&target_user_id).await {
-					push_target.insert(target_user_id);
+				if self.services.users.is_active_local(target_user_id).await {
+					push_target.insert(target_user_id.to_owned());
 				}
 			}
 		}

@@ -6,7 +6,7 @@ use conduwuit::{
 		result::FlatOk,
 		stream::{BroadbandExt, IterStream, ReadyExt, TryExpect},
 	},
-	PduEvent, Result,
+	PduEvent, Result, StateKey,
 };
 use database::Deserialized;
 use futures::{future::try_join, pin_mut, FutureExt, Stream, StreamExt, TryFutureExt};
@@ -192,7 +192,7 @@ pub fn state_keys_with_ids<'a, Id>(
 	&'a self,
 	shortstatehash: ShortStateHash,
 	event_type: &'a StateEventType,
-) -> impl Stream<Item = (String, Id)> + Send + 'a
+) -> impl Stream<Item = (StateKey, Id)> + Send + 'a
 where
 	Id: for<'de> Deserialize<'de> + Send + Sized + ToOwned + 'a,
 	<Id as ToOwned>::Owned: Borrow<EventId>,
@@ -200,7 +200,7 @@ where
 	let state_keys_with_short_ids = self
 		.state_keys_with_shortids(shortstatehash, event_type)
 		.unzip()
-		.map(|(ssks, sids): (Vec<String>, Vec<u64>)| (ssks, sids))
+		.map(|(ssks, sids): (Vec<StateKey>, Vec<u64>)| (ssks, sids))
 		.shared();
 
 	let state_keys = state_keys_with_short_ids
@@ -230,7 +230,7 @@ pub fn state_keys_with_shortids<'a>(
 	&'a self,
 	shortstatehash: ShortStateHash,
 	event_type: &'a StateEventType,
-) -> impl Stream<Item = (String, ShortEventId)> + Send + 'a {
+) -> impl Stream<Item = (StateKey, ShortEventId)> + Send + 'a {
 	let short_ids = self
 		.state_full_shortids(shortstatehash)
 		.expect_ok()
@@ -267,7 +267,7 @@ pub fn state_keys<'a>(
 	&'a self,
 	shortstatehash: ShortStateHash,
 	event_type: &'a StateEventType,
-) -> impl Stream<Item = String> + Send + 'a {
+) -> impl Stream<Item = StateKey> + Send + 'a {
 	let short_ids = self
 		.state_full_shortids(shortstatehash)
 		.expect_ok()
@@ -314,7 +314,7 @@ pub fn state_added(
 pub fn state_full(
 	&self,
 	shortstatehash: ShortStateHash,
-) -> impl Stream<Item = ((StateEventType, String), PduEvent)> + Send + '_ {
+) -> impl Stream<Item = ((StateEventType, StateKey), PduEvent)> + Send + '_ {
 	self.state_full_pdus(shortstatehash)
 		.ready_filter_map(|pdu| {
 			Some(((pdu.kind.to_string().into(), pdu.state_key.clone()?), pdu))

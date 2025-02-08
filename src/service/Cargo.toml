@@ -47,7 +47,6 @@ zstd_compression = [
 blurhashing = ["dep:image","dep:blurhash"]
 
 [dependencies]
-arrayvec.workspace = true
 async-trait.workspace = true
 base64.workspace = true
 bytes.workspace = true
@@ -75,7 +74,6 @@ serde_json.workspace = true
 serde.workspace = true
 serde_yaml.workspace = true
 sha2.workspace = true
-smallvec.workspace = true
 termimad.workspace = true
 termimad.optional = true
 tokio.workspace = true

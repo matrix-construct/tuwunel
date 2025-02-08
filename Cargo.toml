@@ -40,6 +40,10 @@ features = [
 	"write",
 ]
 
+[workspace.dependencies.smallstr]
+version = "0.3"
+features = ["ffi", "std", "union"]
+
 [workspace.dependencies.const-str]
 version = "0.5.7"
 

@@ -25,7 +25,7 @@ use ruma::{
 	},
 	serde::Raw,
 	state_res::TypeStateKey,
-	uint, DeviceId, OwnedEventId, OwnedRoomId, OwnedUserId, RoomId, UInt, UserId,
+	uint, DeviceId, OwnedEventId, OwnedRoomId, RoomId, UInt, UserId,
 };
 use service::{rooms::read_receipt::pack_receipts, PduCount};
 
@@ -765,13 +765,9 @@ async fn collect_e2ee<'a>(
 							continue;
 						};
 						if pdu.kind == TimelineEventType::RoomMember {
-							if let Some(state_key) = &pdu.state_key {
-								let user_id =
-									OwnedUserId::parse(state_key.clone()).map_err(|_| {
-										Error::bad_database("Invalid UserId in member PDU.")
-									})?;
-
-								if user_id == *sender_user {
+							if let Some(Ok(user_id)) = pdu.state_key.as_deref().map(UserId::parse)
+							{
+								if user_id == sender_user {
 									continue;
 								}
 
@@ -782,18 +778,18 @@ async fn collect_e2ee<'a>(
 										if !share_encrypted_room(
 											&services,
 											sender_user,
-											&user_id,
+											user_id,
 											Some(room_id),
 										)
 										.await
 										{
-											device_list_changes.insert(user_id);
+											device_list_changes.insert(user_id.to_owned());
 										}
 									},
 									| MembershipState::Leave => {
 										// Write down users that have left encrypted rooms we
 										// are in
-										left_encrypted_users.insert(user_id);
+										left_encrypted_users.insert(user_id.to_owned());
 									},
 									| _ => {},
 								}

@@ -13,6 +13,7 @@ use std::{
 use async_trait::async_trait;
 use conduwuit::{
 	debug, debug_warn, err, error,
+	smallvec::SmallVec,
 	utils::{available_parallelism, math::usize_from_u64_truncated, ReadyExt, TryReadyExt},
 	warn, Result, Server,
 };
@@ -21,7 +22,6 @@ use ruma::{
 	api::{appservice::Registration, OutgoingRequest},
 	RoomId, ServerName, UserId,
 };
-use smallvec::SmallVec;
 use tokio::{task, task::JoinSet};
 
 use self::data::Data;

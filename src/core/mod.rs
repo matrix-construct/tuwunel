@@ -10,14 +10,17 @@ pub mod pdu;
 pub mod server;
 pub mod utils;
 
+pub use ::arrayvec;
 pub use ::http;
 pub use ::ruma;
+pub use ::smallstr;
+pub use ::smallvec;
 pub use ::toml;
 pub use ::tracing;
 pub use config::Config;
 pub use error::Error;
 pub use info::{rustc_flags_capture, version, version::version};
-pub use pdu::{Event, PduBuilder, PduCount, PduEvent, PduId, RawPduId};
+pub use pdu::{Event, PduBuilder, PduCount, PduEvent, PduId, RawPduId, StateKey};
 pub use server::Server;
 pub use utils::{ctor, dtor, implement, result, result::Result};
 

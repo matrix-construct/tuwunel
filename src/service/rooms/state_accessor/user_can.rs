@@ -175,7 +175,7 @@ pub async fn user_can_invite(
 		.timeline
 		.create_hash_and_sign_event(
 			PduBuilder::state(
-				target_user.into(),
+				target_user.as_str(),
 				&RoomMemberEventContent::new(MembershipState::Invite),
 			),
 			sender,

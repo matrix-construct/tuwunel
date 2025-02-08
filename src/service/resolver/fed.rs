@@ -4,8 +4,7 @@ use std::{
 	net::{IpAddr, SocketAddr},
 };
 
-use arrayvec::ArrayString;
-use conduwuit::utils::math::Expected;
+use conduwuit::{arrayvec::ArrayString, utils::math::Expected};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]

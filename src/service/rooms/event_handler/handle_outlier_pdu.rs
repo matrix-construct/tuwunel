@@ -6,10 +6,8 @@ use std::{
 use conduwuit::{debug, debug_info, err, implement, trace, warn, Err, Error, PduEvent, Result};
 use futures::{future::ready, TryFutureExt};
 use ruma::{
-	api::client::error::ErrorKind,
-	events::StateEventType,
-	state_res::{self, EventTypeExt},
-	CanonicalJsonObject, CanonicalJsonValue, EventId, RoomId, ServerName,
+	api::client::error::ErrorKind, events::StateEventType, state_res, CanonicalJsonObject,
+	CanonicalJsonValue, EventId, RoomId, ServerName,
 };
 
 use super::{check_room_id, get_room_version_id, to_room_version};
@@ -123,7 +121,7 @@ pub(super) async fn handle_outlier_pdu<'a>(
 	// The original create event must be in the auth events
 	if !matches!(
 		auth_events
-			.get(&(StateEventType::RoomCreate, String::new()))
+			.get(&(StateEventType::RoomCreate, String::new().into()))
 			.map(AsRef::as_ref),
 		Some(_) | None
 	) {
@@ -134,7 +132,7 @@ pub(super) async fn handle_outlier_pdu<'a>(
 	}
 
 	let state_fetch = |ty: &'static StateEventType, sk: &str| {
-		let key = ty.with_state_key(sk);
+		let key = (ty.to_owned(), sk.into());
 		ready(auth_events.get(&key))
 	};
 

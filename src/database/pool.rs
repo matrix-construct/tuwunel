@@ -14,6 +14,7 @@ use async_channel::{QueueStrategy, Receiver, RecvError, Sender};
 use conduwuit::{
 	debug, debug_warn, err, error, implement,
 	result::DebugInspect,
+	smallvec::SmallVec,
 	trace,
 	utils::sys::compute::{get_affinity, nth_core_available, set_affinity},
 	Error, Result, Server,
@@ -21,7 +22,6 @@ use conduwuit::{
 use futures::{channel::oneshot, TryFutureExt};
 use oneshot::Sender as ResultSender;
 use rocksdb::Direction;
-use smallvec::SmallVec;
 
 use self::configure::configure;
 use crate::{keyval::KeyBuf, stream, Handle, Map};

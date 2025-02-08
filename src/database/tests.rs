@@ -2,8 +2,10 @@
 
 use std::fmt::Debug;
 
-use arrayvec::ArrayVec;
-use conduwuit::ruma::{serde::Raw, EventId, RoomId, UserId};
+use conduwuit::{
+	arrayvec::ArrayVec,
+	ruma::{serde::Raw, EventId, RoomId, UserId},
+};
 use serde::Serialize;
 
 use crate::{

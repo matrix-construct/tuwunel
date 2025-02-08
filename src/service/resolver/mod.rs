@@ -6,8 +6,7 @@ mod tests;
 
 use std::sync::Arc;
 
-use arrayvec::ArrayString;
-use conduwuit::{utils::MutexMap, Result, Server};
+use conduwuit::{arrayvec::ArrayString, utils::MutexMap, Result, Server};
 
 use self::{cache::Cache, dns::Resolver};
 use crate::{client, Dep};

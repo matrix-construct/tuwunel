@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
-use arrayvec::ArrayVec;
 use conduwuit::{
+	arrayvec::ArrayVec,
 	implement,
 	utils::{
 		set,
