@@ -9,7 +9,7 @@ use std::{
 use axum::extract::State;
 use axum_client_ip::InsecureClientIp;
 use conduwuit::{
-	at, debug, debug_info, debug_warn, err, info,
+	at, debug, debug_info, debug_warn, err, error, info,
 	pdu::{gen_event_id_canonical_json, PduBuilder},
 	result::FlatOk,
 	state_res, trace,
@@ -1011,10 +1011,17 @@ async fn join_room_by_id_helper_remote(
 			.await,
 	};
 
-	let send_join_response = services
+	let send_join_response = match services
 		.sending
 		.send_synapse_request(&remote_server, send_join_request)
-		.await?;
+		.await
+	{
+		| Ok(response) => response,
+		| Err(e) => {
+			error!("send_join failed: {e}");
+			return Err(e);
+		},
+	};
 
 	info!("send_join finished");
 
