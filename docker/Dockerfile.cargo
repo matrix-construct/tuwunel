@@ -1,0 +1,37 @@
+# syntax = docker/dockerfile:1.11-labs
+
+FROM input AS cargo
+ARG sys_target
+ARG rust_toolchain
+ARG RUSTUP_HOME
+ARG CARGO_HOME
+ARG CARGO_TARGET
+ARG CARGO_TARGET_DIR
+ARG cargo_profile
+ARG cargo_features
+ARG cargo_cmd
+ARG cargo_args=""
+
+WORKDIR /usr/lib/${sys_target}
+COPY --link --from=rocksdb . .
+
+WORKDIR /usr/src/conduwuit
+RUN \
+--mount=type=cache,dst=${RUSTUP_HOME},sharing=locked \
+--mount=type=cache,dst=${CARGO_HOME},sharing=locked \
+--mount=type=cache,dst=${CARGO_TARGET_DIR},sharing=shared \
+<<EOF
+	env
+	set -eux
+	rustup run ${rust_toolchain} \
+		cargo ${cargo_cmd} \
+			--frozen \
+			--workspace \
+			--no-default-features \
+			--features "${cargo_features}" \
+			--profile "${cargo_profile}" \
+			--target "${CARGO_TARGET}" \
+			--target-dir "${CARGO_TARGET_DIR}" \
+			--manifest-path Cargo.toml \
+			${cargo_args}
+EOF

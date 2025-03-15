@@ -1,0 +1,81 @@
+name: Bakery
+
+on:
+  workflow_call:
+    inputs:
+      id:
+        type: string
+        required: false
+        description: Dockerhub acct/repo identity.
+      bake_targets:
+        type: string
+        required: false
+        default: '["check"]'
+        description: Bake targets
+      cargo_profiles:
+        type: string
+        required: false
+        default: '["test", "bench"]'
+        description: Cargo profiles
+      feat_sets:
+        type: string
+        required: false
+        default: '["none", "default", "all"]'
+        description: Cargo feature groups
+      rust_toolchains:
+        type: string
+        required: false
+        default: '["nightly", "stable"]'
+        description: Rust toolchains
+      rust_targets:
+        type: string
+        required: false
+        default: '["x86_64-unknown-linux-gnu"]'
+        description: Rust targets
+      systems:
+        type: string
+        required: false
+        default: '["debian--testing-slim--x86_64-linux-gnu"]'
+        description: System targets
+      machines:
+        type: string
+        required: false
+        default: '["x86_64"]'
+        description: Hardware platform vector
+
+concurrency:
+  group: ${{github.workflow}}-${{inputs}}
+  cancel-in-progress: false
+
+env:
+  uwu_id: ${{inputs.id}}
+
+jobs:
+  build:
+    name: build images
+    runs-on: ${{matrix.machine}}
+    strategy:
+      fail-fast: false
+      matrix:
+        bake_target: ${{fromJSON(inputs.bake_targets)}}
+        cargo_profile: ${{fromJSON(inputs.cargo_profiles)}}
+        feat_set: ${{fromJSON(inputs.feat_sets)}}
+        rust_toolchain: ${{fromJSON(inputs.rust_toolchains)}}
+        rust_target: ${{fromJSON(inputs.rust_targets)}}
+        system: ${{fromJSON(inputs.systems)}}
+        machine: ${{fromJSON(inputs.machines)}}
+
+    steps:
+    - uses: actions/checkout@v3
+    - name: build
+      env:
+        bake_target: ${{matrix.bake_target}}
+        cargo_profile: ${{matrix.cargo_profile}}
+        feat_set: ${{matrix.feat_set}}
+        rust_toolchain: ${{matrix.rust_toolchain}}
+        rust_target: ${{matrix.rust_target}}
+        system: ${{matrix.system}}
+        machine: ${{matrix.machine}}
+
+      run: |
+        docker/bake.sh

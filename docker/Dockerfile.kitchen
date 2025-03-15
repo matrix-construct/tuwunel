@@ -1,0 +1,30 @@
+# syntax = docker/dockerfile:1.11-labs
+
+FROM input AS kitchen
+ARG var_cache
+ARG var_lib_apt
+ARG packages
+
+ENV DEBIAN_FRONTEND="noninteractive"
+ENV packages="\
+bzip2 \
+ca-certificates \
+clang \
+cmake \
+curl \
+git \
+libc6-dev \
+make \
+pkg-config \
+pkgconf \
+xz-utils \
+${packages} \
+"
+
+RUN  \
+--mount=type=cache,dst=${var_cache},sharing=locked \
+--mount=type=cache,dst=${var_lib_apt},sharing=locked \
+<<EOF
+	set -eux
+	apt-get -y -U install --no-install-recommends ${packages}
+EOF

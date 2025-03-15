@@ -1,0 +1,36 @@
+name: Linting
+
+on:
+  push:
+    branches:
+      - main
+
+  workflow_dispatch:
+    inputs:
+      baket:
+        type: string
+        required: false
+        description: JSON Object of inputs passed to the environment
+
+concurrency:
+  group: ${{github.ref}}
+  cancel-in-progress: true
+
+env:
+  uwu_id: ${{vars.DOCKER_ID}}
+
+jobs:
+  clippy:
+    if: ${{contains(fromJSON(github.event.inputs).bake.commands || vars.COMMANDS, 'clippy')}}
+
+    name: Clippy
+    uses: ./.github/workflows/bake.yml
+    with:
+      id: ${{github.env.uwu_id}}
+      bake_targets: '["clippy"]'
+      cargo_profiles: ${{fromJSON(fromJSON(github.event.inputs).bake.cargo_profiles || vars.CARGO_PROFILES || '["test"]')}}
+      feat_sets: ${{fromJSON(fromJSON(github.event.inputs).bake.feat_sets || vars.FEAT_SETS || '["none"]')}}
+      rust_toolchains: ${{fromJSON(fromJSON(github.event.inputs).bake.rust_toolchains || vars.RUST_TOOLCHAINS) || '["stable"]'}}
+      rust_targets: ${{fromJSON(fromJSON(github.event.inputs).bake.rust_targets || vars.RUST_TARGETS || '["x86_64-unknown-linux-gnu"]')}}
+      systems: ${{fromJSON(fromJSON(github.event.inputs).bake.systems || vars.SYSTEMS || '["debian--testing-slim--x86_64-linux-gnu"]')}}
+      machines: ${{fromJSON(fromJSON(github.event.inputs).bake.machines || vars.MACHINES || '["x86_64"]')}}
