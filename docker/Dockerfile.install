@@ -1,0 +1,75 @@
+# syntax = docker/dockerfile:1.11-labs
+
+FROM input AS installer
+ARG sys_target
+ARG rust_toolchain
+ARG RUSTUP_HOME
+ARG CARGO_HOME
+ARG CARGO_TARGET
+ARG CARGO_TARGET_DIR
+ARG cargo_profile
+ARG cargo_features
+ARG cargo_args=""
+ARG crate_path="src/main"
+ARG crate_ident=""
+ARG install_temp="/usr/src/conduwuit/install"
+
+WORKDIR /usr/lib/${sys_target}
+COPY --link --from=rocksdb . .
+
+WORKDIR /usr/src/conduwuit
+RUN \
+--mount=type=cache,dst=${RUSTUP_HOME},sharing=locked \
+--mount=type=cache,dst=${CARGO_HOME},sharing=locked \
+--mount=type=cache,dst=${CARGO_TARGET_DIR},sharing=shared \
+<<EOF
+	env
+	set -eux
+	case "$cargo_profile" in
+		    "dev") profile_dir="debug";;
+		   "test") profile_dir="debug";;
+		"release") profile_dir="release";;
+		  "bench") profile_dir="release";;
+		        *) profile_dir="$cargp_profile";;
+	esac
+
+	rustup run ${rust_toolchain} \
+		cargo install \
+			--locked \
+			--no-track \
+			--no-default-features \
+			--features "${cargo_features}" \
+			--profile "${cargo_profile}" \
+			--target "${CARGO_TARGET}" \
+			--target-dir "${CARGO_TARGET_DIR}" \
+			--root "${install_temp}" \
+			--path "${crate_path}" \
+			${cargo_args} \
+			${crate_ident}
+EOF
+RUN [ -f "${install_temp}/bin/conduwuit" ]
+
+
+FROM input AS install
+ARG sys_target
+ARG CARGO_INSTALL_ROOT
+ARG install_temp="/usr/src/conduwuit/install"
+
+WORKDIR /usr/lib/${sys_target}
+COPY --from=rocksdb --exclude=librocksdb.a . .
+
+WORKDIR /
+RUN \
+--mount=type=bind,from=output,src=${install_temp},dst=/mnt/install \
+<<EOF
+	env
+	set -eux
+	cp -ndR --preserve=all -t ${CARGO_INSTALL_ROOT} /mnt/install/*
+EOF
+ENV bin_path="${CARGO_INSTALL_ROOT}/bin/conduwuit"
+RUN <<EOF
+	set -eux
+	ldd -v ${bin_path}
+	du -h ${bin_path}
+	sha1sum ${bin_path}
+EOF

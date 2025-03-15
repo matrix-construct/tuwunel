@@ -647,7 +647,8 @@ lto = "fat"
 codegen-units = 1
 panic = "abort"
 
-# do not use without profile-rustflags enabled
+# do not use without profile-rustflags enabled. uncomment ALL the sections for
+# profile.release-max-perf
 [profile.release-max-perf]
 inherits = "release"
 strip = "symbols"
@@ -689,7 +690,8 @@ inherits = "release-max-perf.build-override"
 #]
 
 [profile.bench]
-inherits = "release"
+debug = "limited"
+strip = false
 #rustflags = [
 #	"-Cremark=all",
 #	'-Ztime-passes',
@@ -710,10 +712,6 @@ inherits = "release"
 
 [profile.dev]
 debug = "full"
-opt-level = 0
-panic = "unwind"
-debug-assertions = true
-incremental = true
 #rustflags = [
 #	'--cfg', 'conduwuit_mods',
 #	'-Ztime-passes',
@@ -732,9 +730,9 @@ incremental = true
 #	'-Clink-arg=-Wl,-z,lazy',
 #]
 
-[profile.dev.package.conduwuit_core]
-inherits = "dev"
-incremental = false
+#[profile.dev.package.conduwuit_core]
+#inherits = "dev"
+#incremental = false
 #rustflags = [
 #	'--cfg', 'conduwuit_mods',
 #	'-Ztime-passes',
@@ -753,8 +751,8 @@ incremental = false
 #	'-Clink-arg=-Wl,-z,nodelete',
 #]
 
-[profile.dev.package.conduwuit]
-inherits = "dev"
+#[profile.dev.package.conduwuit]
+#inherits = "dev"
 #rustflags = [
 #	'--cfg', 'conduwuit_mods',
 #	'-Ztime-passes',
@@ -773,7 +771,7 @@ inherits = "dev"
 
 [profile.dev.package.'*']
 inherits = "dev"
-debug = 'limited'
+debug = "limited"
 incremental = false
 codegen-units = 1
 opt-level = 'z'
@@ -792,19 +790,13 @@ opt-level = 'z'
 
 # primarily used for CI
 [profile.test]
-inherits = "dev"
-strip = false
-opt-level = 0
-codegen-units = 16
-incremental = false
+debug = "limited"
 
 [profile.test.package.'*']
-inherits = "dev"
-debug = 0
-strip = false
-opt-level = 0
-codegen-units = 16
+inherits = "test"
 incremental = false
+codegen-units = 1
+opt-level = 'z'
 
 ###############################################################################
 #

@@ -1,0 +1,47 @@
+# syntax = docker/dockerfile:1.11-labs
+
+FROM input AS deps
+ARG sys_target
+ARG rust_toolchain
+ARG RUSTUP_HOME
+ARG CARGO_HOME
+ARG CARGO_TARGET
+ARG CARGO_TARGET_DIR
+ARG cargo_profile
+ARG cargo_features
+ARG cook_args
+ARG git_checkout
+
+WORKDIR /usr/lib/${sys_target}
+COPY --from=rocksdb . .
+
+WORKDIR /usr/src/conduwuit
+COPY --link --from=recipe recipe.json .
+
+RUN \
+--mount=type=cache,dst=${RUSTUP_HOME},sharing=locked \
+--mount=type=cache,dst=${CARGO_HOME},sharing=locked \
+--mount=type=cache,dst=${CARGO_TARGET_DIR},sharing=locked \
+<<EOF
+	env
+	set -eux
+	rustup run ${rust_toolchain} \
+		cargo chef cook ${cook_args} \
+			--frozen \
+			--workspace \
+			--no-default-features \
+			--features "${cargo_features}" \
+			--profile "${cargo_profile}" \
+			--target "${CARGO_TARGET}" \
+			--target-dir "${CARGO_TARGET_DIR}" \
+			--manifest-path Cargo.toml \
+			--recipe-path recipe.json
+
+	# If this image is further reused with other cargo commands, all
+	# modifications made by cargo chef cook outside of target-dir have to be
+	# cleared. If not, resulting build artifacts will link incorrectly, even
+	# without error. For example, a target executable may be produced which
+	# does nothing except exit(0). If you have observed a smoketest failing in
+	# such a manner, investigate this as a cause of the issue.
+	git restore -W -S --source=${git_checkout} .
+EOF

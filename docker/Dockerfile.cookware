@@ -1,0 +1,63 @@
+# syntax = docker/dockerfile:1.11-labs
+
+FROM input AS cookware
+ARG rust_toolchain
+ARG RUSTUP_HOME
+ARG CARGO_HOME
+ARG CARGO_TARGET
+ARG rustup_version="1.28.1"
+
+WORKDIR /opt
+RUN \
+--mount=type=cache,dst=${RUSTUP_HOME},sharing=locked \
+--mount=type=cache,dst=${CARGO_HOME},sharing=locked \
+<<EOF
+	env
+	set -eux
+
+	url="https://static.rust-lang.org/rustup/archive/${rustup_version}/${CARGO_TARGET}/rustup-init"
+	curl -S -O -s "$url"
+	chmod o+x rustup-init
+	./rustup-init -y \
+		--verbose \
+		--profile minimal \
+		--no-modify-path \
+		--no-update-default-toolchain \
+		--default-host ${CARGO_TARGET} \
+		--default-toolchain ${rust_toolchain}
+
+	chmod -R go+rw $CARGO_HOME $RUSTUP_HOME
+	rm rustup-init
+EOF
+ENV PATH="${CARGO_HOME}/bin:$PATH"
+RUN \
+--mount=type=cache,dst=${RUSTUP_HOME},sharing=locked \
+--mount=type=cache,dst=${CARGO_HOME},sharing=locked \
+<<EOF
+	env
+	set -eux
+	rustup component add \
+		--toolchain ${rust_toolchain} \
+		--target ${CARGO_TARGET} \
+		clippy
+EOF
+
+
+FROM input AS chef
+ARG rust_toolchain
+ARG RUSTUP_HOME
+ARG CARGO_HOME
+ARG CARGO_TARGET
+
+RUN \
+--mount=type=cache,dst=${RUSTUP_HOME},sharing=locked \
+--mount=type=cache,dst=${CARGO_HOME},sharing=locked \
+<<EOF
+	env
+    set -eux
+    rustup run --install ${rust_toolchain} \
+        cargo install \
+            --locked \
+            --target ${CARGO_TARGET} \
+            cargo-chef
+EOF

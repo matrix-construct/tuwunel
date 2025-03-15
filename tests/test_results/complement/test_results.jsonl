@@ -502,6 +502,7 @@
 {"Action":"pass","Test":"TestRoomDeleteAlias/Parallel/Deleting_a_non-existent_alias_should_return_a_404"}
 {"Action":"pass","Test":"TestRoomDeleteAlias/Parallel/Regular_users_can_add_and_delete_aliases_in_the_default_room_configuration"}
 {"Action":"pass","Test":"TestRoomDeleteAlias/Parallel/Users_can't_delete_other's_aliases"}
+{"Action":"pass","Test":"TestRoomDeleteAlias/Parallel/Users_with_sufficient_power-level_can_delete_other's_aliases"}
 {"Action":"fail","Test":"TestRoomForget"}
 {"Action":"fail","Test":"TestRoomForget/Parallel"}
 {"Action":"pass","Test":"TestRoomForget/Parallel/Can't_forget_room_you're_still_in"}
@@ -606,10 +607,9 @@
 {"Action":"fail","Test":"TestThreadedReceipts"}
 {"Action":"fail","Test":"TestThreadsEndpoint"}
 {"Action":"pass","Test":"TestToDeviceMessages"}
-{"Action":"fail","Test":"TestToDeviceMessagesOverFederation"}
+{"Action":"pass","Test":"TestToDeviceMessagesOverFederation"}
 {"Action":"pass","Test":"TestToDeviceMessagesOverFederation/good_connectivity"}
 {"Action":"pass","Test":"TestToDeviceMessagesOverFederation/interrupted_connectivity"}
-{"Action":"fail","Test":"TestToDeviceMessagesOverFederation/stopped_server"}
 {"Action":"fail","Test":"TestTxnIdWithRefreshToken"}
 {"Action":"fail","Test":"TestTxnIdempotency"}
 {"Action":"pass","Test":"TestTxnIdempotencyScopedToDevice"}

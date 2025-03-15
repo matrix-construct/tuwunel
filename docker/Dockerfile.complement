@@ -1,0 +1,269 @@
+# syntax = docker/dockerfile:1.11-labs
+
+FROM input AS key-gen-base
+ARG var_cache
+ARG var_lib_apt
+
+RUN \
+--mount=type=cache,dst=${var_cache},sharing=locked \
+--mount=type=cache,dst=${var_lib_apt},sharing=locked \
+<<EOF
+	set -eux
+	apt-get -y -U install --no-install-recommends openssl gawk
+EOF
+
+
+FROM key-gen-base AS key-gen
+
+WORKDIR /complement
+COPY <<EOF v3.ext
+	authorityKeyIdentifier=keyid,issuer
+	basicConstraints=CA:FALSE
+	keyUsage = digitalSignature, nonRepudiation, keyEncipherment, dataEncipherment
+	subjectAltName = @alt_names
+	[alt_names]
+	DNS.1 = hs1
+	DNS.2 = hs2
+	DNS.3 = hs3
+EOF
+RUN <<EOF
+	set -eux
+	mkdir ca
+	openssl genrsa \
+		-out private_key.pem \
+		2048
+
+	openssl req \
+		-new \
+		-sha256 \
+		-key private_key.pem \
+		-subj "/C=US/ST=CA/O=MyOrg, Inc./CN=hs1" \
+		-addext "subjectAltName = DNS:hs1, DNS:hs2, DNS:hs3" \
+		-out signing_request.csr
+
+	openssl x509 \
+		-req \
+		-extfile v3.ext \
+		-in signing_request.csr \
+		-key private_key.pem \
+		-out certificate.crt \
+		-days 1 \
+		-sha256
+EOF
+RUN [ -f certificate.crt ] && [ -f private_key.pem ]
+
+
+FROM scratch AS complement-config
+WORKDIR /complement
+COPY --from=key-gen /complement/* .
+COPY --from=source /usr/src/conduwuit/tests/test_results/complement/test_results.jsonl old_results.jsonl
+COPY <<EOF complement.toml
+	[global]
+	address = "0.0.0.0"
+	allow_device_name_federation = true
+	allow_guest_registration = true
+	allow_public_room_directory_over_federation = true
+	allow_public_room_directory_without_auth = true
+	allow_registration = true
+	database_path = "/database"
+	log = "debug,conduwuit=trace,h2=warn,hyper=warn"
+	port = [8008, 8448]
+	trusted_servers = []
+	only_query_trusted_key_servers = false
+	query_trusted_key_servers_first = false
+	query_trusted_key_servers_first_on_join = false
+	yes_i_am_very_very_sure_i_want_an_open_registration_server_prone_to_abuse = true
+	ip_range_denylist = []
+	url_preview_domain_contains_allowlist = ["*"]
+	url_preview_domain_explicit_denylist = ["*"]
+	media_compat_file_link = false
+	media_startup_check = true
+	prune_missing_media = true
+	log_colors = false
+	admin_room_notices = false
+	allow_check_for_updates = false
+	intentionally_unknown_config_option_for_testing = true
+	rocksdb_log_level = "debug"
+	rocksdb_max_log_files = 1
+	rocksdb_recovery_mode = 0
+	rocksdb_paranoid_file_checks = true
+	log_guest_registrations = false
+	allow_legacy_media = true
+	startup_netburst = true
+	startup_netburst_keep = -1
+	# valgrind makes things so slow
+	dns_timeout = 60
+	dns_attempts = 20
+	request_conn_timeout = 60
+	request_timeout = 120
+	well_known_conn_timeout = 60
+	well_known_timeout = 60
+	federation_idle_timeout = 300
+	sender_timeout = 300
+	sender_idle_timeout = 300
+	sender_retry_backoff_limit = 300
+	allow_invalid_tls_certificates_yes_i_know_what_the_fuck_i_am_doing_with_this_and_i_know_this_is_insecure = true
+
+	[global.tls]
+	certs = "/complement/certificate.crt"
+	dual_protocol = true
+	key = "/complement/private_key.pem"
+EOF
+
+
+FROM input AS complement-testee
+
+EXPOSE 8008 8448
+RUN mkdir /database
+COPY --from=complement-config * /complement/
+ENV CONDUWUIT_CONFIG="/complement/complement.toml"
+ENTRYPOINT conduwuit -Oserver_name=\""$SERVER_NAME\""
+
+
+FROM input AS complement-testee-valgrind
+
+EXPOSE 8008 8448
+RUN mkdir /database
+COPY --from=complement-config * /complement/
+ENV CONDUWUIT_CONFIG="/complement/complement.toml"
+ENTRYPOINT valgrind \
+	--leak-check=no \
+	--undef-value-errors=no \
+	--exit-on-first-error=yes \
+	--error-exitcode=1 \
+	conduwuit \
+		-Oserver_name=\""$SERVER_NAME\""
+
+
+FROM input AS complement-base
+ARG var_cache
+ARG var_lib_apt
+ARG complement_tags="conduwuit_blacklist"
+ARG complement_tests="./tests/..."
+ARG complement_run=".*"
+
+WORKDIR /
+RUN \
+--mount=type=cache,dst=${var_cache},sharing=locked \
+--mount=type=cache,dst=${var_lib_apt},sharing=locked \
+--mount=type=cache,dst=/go/pkg/mod/cache,sharing=locked \
+<<EOF
+	set -eux
+	apt-get -y -U install --no-install-recommends golang-go jq
+EOF
+
+WORKDIR /usr/src
+ADD https://github.com/girlbossceo/complement.git complement
+
+WORKDIR /usr/src/complement
+ENV COMPLEMENT_BASE_IMAGE="complement-testee"
+RUN \
+--mount=type=cache,dst=/go/pkg/mod/cache,sharing=locked \
+<<EOF
+	env
+	set -eux
+	go test -tags="$complement_tags" -list="$complement_run" $complement_tests
+EOF
+
+
+FROM input AS complement-tester
+ARG complement_debug=0
+ARG complement_count=1
+ARG complement_parallel=16
+ARG complement_shuffle=1337
+ARG complement_timeout="1h"
+ARG complement_run=".*"
+ARG complement_skip=""
+ARG complement_tags="conduwuit_blacklist"
+ARG complement_tests="./tests/..."
+ARG complement_base_image
+
+ENV COMPLEMENT_DEBUG=$complement_debug
+ENV complement_parallel="$complement_parallel"
+ENV complement_shuffle="$complement_shuffle"
+ENV complement_tags="$complement_tags"
+ENV complement_timeout="$complement_timeout"
+ENV complement_count="$complement_count"
+ENV complement_tests="$complement_tests"
+ENV complement_skip="$complement_skip"
+ENV complement_run="$complement_run"
+ENV complement_tests="$complement_tests"
+ENV COMPLEMENT_HOSTNAME_RUNNING_COMPLEMENT="host.docker.internal"
+ENV COMPLEMENT_HOST_MOUNTS="/var/run/docker.sock:/var/run/docker.sock"
+ENV jq_res='{Action: .Action, Test: .Test}'
+ENV jq_sel='select((.Action == \"pass\" or .Action == \"fail\" or .Action == \"skip\") and .Test != null)'
+ENV jq_tab='([\"RESULT\",\"TEST\"] | (., map(length*\"-\"))), (.[] | [.Action, .Test]) | @tsv'
+WORKDIR /usr/src/complement
+COPY --from=complement-config /complement/old_results.jsonl .
+COPY <<EOF uwu.sh
+	env;
+	set -eux;
+
+	COMPLEMENT_BASE_IMAGE="\${1:-$complement_base_image}"
+	go test
+		-json
+		-shuffle="${complement_shuffle}"
+		-parallel="${complement_parallel}"
+		-timeout="${complement_timeout}"
+		-count="${complement_count}"
+		-tags="${complement_tags}"
+		-skip="${complement_skip}"
+		-run="${complement_run}"
+		"${complement_tests}"
+	| jq -c "${jq_sel} | ${jq_res}"
+	| tee results.jsonl
+	| jq -s -r "${jq_tab}"
+	;
+
+	jq -s -c "sort_by(.Test)[]" < results.jsonl | uniq > new_results.jsonl;
+
+	wc -l old_results.jsonl new_results.jsonl;
+
+	diff -w -y -t --width=275 --suppress-common-lines old_results.jsonl new_results.jsonl;
+EOF
+RUN echo $(tr -d '\n' < uwu.sh) > uwu.sh
+ENTRYPOINT ["/bin/bash", "/usr/src/complement/uwu.sh"]
+
+
+FROM input AS complement-tester-valgrind
+ARG complement_debug=0
+ARG complement_count=1
+ARG complement_parallel=16
+ARG complement_shuffle=1337
+ARG complement_timeout="1h"
+ARG complement_run=".*"
+ARG complement_skip=""
+ARG complement_tags="conduwuit_blacklist"
+ARG complement_tests="./tests/..."
+ARG complement_base_image
+
+ENV COMPLEMENT_DEBUG=$complement_debug
+ENV complement_parallel="$complement_parallel"
+ENV complement_shuffle="$complement_shuffle"
+ENV complement_tags="$complement_tags"
+ENV complement_timeout="$complement_timeout"
+ENV complement_count="$complement_count"
+ENV complement_tests="$complement_tests"
+ENV complement_skip="$complement_skip"
+ENV complement_run="$complement_run"
+ENV complement_tests="$complement_tests"
+ENV COMPLEMENT_HOSTNAME_RUNNING_COMPLEMENT="host.docker.internal"
+ENV COMPLEMENT_HOST_MOUNTS="/var/run/docker.sock:/var/run/docker.sock"
+WORKDIR /usr/src/complement
+COPY <<EOF valgrind.sh
+	env;
+	set -eux;
+
+	COMPLEMENT_BASE_IMAGE="\${1:-$complement_base_image}"
+	go test
+		-shuffle="${complement_shuffle}"
+		-parallel="${complement_parallel}"
+		-timeout="${complement_timeout}"
+		-count="${complement_count}"
+		-tags="${complement_tags}"
+		-skip="${complement_skip}"
+		-run="${complement_run}"
+		"${complement_tests}"
+EOF
+RUN echo $(tr -d '\n' < valgrind.sh) > valgrind.sh
+ENTRYPOINT ["/bin/bash", "/usr/src/complement/valgrind.sh"]
