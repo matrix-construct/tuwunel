@@ -179,7 +179,7 @@ where
 			(next_short_room_ids.iter().ne(short_room_ids) && !next_short_room_ids.is_empty())
 				.then_some(PaginationToken {
 					short_room_ids: next_short_room_ids,
-					limit: max_depth.try_into().ok()?,
+					limit: limit.try_into().ok()?,
 					max_depth: max_depth.try_into().ok()?,
 					suggested_only,
 				})
