@@ -121,7 +121,9 @@ where
 					.map(|(key, val)| (key, val.collect()))
 					.collect();
 
-				if !populate {
+				if populate {
+					rooms.push(summary_to_chunk(summary.clone()));
+				} else {
 					children = children
 						.iter()
 						.rev()
@@ -144,10 +146,8 @@ where
 						.collect();
 				}
 
-				if populate {
-					rooms.push(summary_to_chunk(summary.clone()));
-				} else if queue.is_empty() && children.is_empty() {
-					return Err!(Request(InvalidParam("Room IDs in token were not found.")));
+				if queue.is_empty() && children.is_empty() {
+					break;
 				}
 
 				parents.insert(current_room.clone());
