@@ -1123,8 +1123,8 @@ pub struct Config {
 	#[serde(default = "true_fn")]
 	pub rocksdb_compaction_ioprio_idle: bool,
 
-	/// Disables RocksDB compaction. You should never ever have to set this
-	/// option to true. If you for some reason find yourself needing to use this
+	/// Enables RocksDB compaction. You should never ever have to set this
+	/// option to false. If you for some reason find yourself needing to use this
 	/// option as part of troubleshooting or a bug, please reach out to us in
 	/// the conduwuit Matrix room with information and details.
 	///
