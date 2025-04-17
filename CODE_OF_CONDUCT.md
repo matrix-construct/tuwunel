@@ -6,9 +6,9 @@
 We as members, contributors, and leaders pledge to make participation in our
 community a harassment-free experience for everyone, regardless of age, body
 size, visible or invisible disability, ethnicity, sex characteristics, gender
-identity and expression, level of experience, education, socio-economic status,
-nationality, personal appearance, race, caste, color, religion, or sexual
-identity and orientation.
+identity and expression, sexual identity and orientation, level of experience, 
+education, socio-economic status, nationality, personal appearance, race, 
+caste, color or religion.
 
 We pledge to act and interact in ways that contribute to an open, welcoming,
 diverse, inclusive, and healthy community.
@@ -34,6 +34,7 @@ Examples of unacceptable behavior include:
 * Public or private harassment
 * Publishing others' private information, such as a physical or email address,
   without their explicit permission
+* Purely retaliatory actions from privileged members against others
 * Other conduct which could reasonably be considered inappropriate in a
   professional setting
 
@@ -61,7 +62,7 @@ representative at an online or offline event.
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
 reported to the community leaders responsible for enforcement over email at
-<strawberry@puppygock.gay> or over Matrix at @strawberry:puppygock.gay.
+`<TO_BE_FILLED>` or over Matrix at `@TO_BE_SPECIFIED`.
 All complaints will be reviewed and investigated promptly and fairly.
 
 All community leaders are obligated to respect the privacy and security of the
