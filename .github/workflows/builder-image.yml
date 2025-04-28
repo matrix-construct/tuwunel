@@ -13,7 +13,7 @@ jobs:
             packages: write
         env:
             RUST_VERSION: 1.86
-            IMAGE_NAME: tuwenel-builder
+            IMAGE_NAME: tuwunel-builder
         steps:
             - name: Checkout Code
               uses: actions/checkout@v3
