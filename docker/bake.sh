@@ -18,19 +18,19 @@ default_sys_versions='["testing-slim"]'
 default_sys_names='["debian"]'
 
 if test ! -z "$cargo_profile"; then
-	env_cargo_profiles="[\"${cargo_profile}\"]"
+    env_cargo_profiles="[\"${cargo_profile}\"]"
 fi
 
 if test ! -z "$feat_set"; then
-	env_feat_sets="[\"${feat_set}\"]"
+    env_feat_sets="[\"${feat_set}\"]"
 fi
 
 if test ! -z "$rust_toolchain"; then
-	env_rust_toolchains="[\"${rust_toolchain}\"]"
+    env_rust_toolchains="[\"${rust_toolchain}\"]"
 fi
 
 if test ! -z "$rust_target"; then
-	env_rust_targets="[\"${rust_target}\"]"
+    env_rust_targets="[\"${rust_target}\"]"
 fi
 
 set -a
@@ -62,23 +62,23 @@ set +a
 
 export DOCKER_BUILDKIT=1
 if test "$CI" = 1; then
-	export BUILDKIT_PROGRESS="plain"
-	echo "plain"
+    export BUILDKIT_PROGRESS="plain"
+    echo "plain"
 fi
 
 args="$uwu_docker_build_args"
 args="$args --set *.platform=${sys_platform}"
 
 if test ! -z "$runner_num"; then
-	cpu_num=$(expr $runner_num % $(nproc))
-	args="$args --cpuset-cpus=${cpu_num}"
-	args="$args --set *.args.nprocs=1"
-	# https://github.com/moby/buildkit/issues/1276
-	:
+    cpu_num=$(expr $runner_num % $(nproc))
+    args="$args --cpuset-cpus=${cpu_num}"
+    args="$args --set *.args.nprocs=1"
+    # https://github.com/moby/buildkit/issues/1276
+    :
 else
-	nprocs=$(nproc)
-	args="$args --set *.args.nprocs=${nprocs}"
-	:
+    nprocs=$(nproc)
+    args="$args --set *.args.nprocs=${nprocs}"
+    :
 fi
 
 trap 'set +x; date; echo -e "\033[1;41;37mFAIL\033[0m"' ERR
@@ -87,11 +87,11 @@ date
 
 arg="$args -f $BASEDIR/bake.hcl"
 if test "$BUILDKIT_PROGRESS" = "plain"; then
-	docker buildx bake --print $arg $bake_target
+    docker buildx bake --print $arg $bake_target
 fi
 
 if test "$NO_BAKE" = "1"; then
-	exit 0
+    exit 0
 fi
 
 trap '' ERR

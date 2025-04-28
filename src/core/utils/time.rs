@@ -84,15 +84,18 @@ pub fn whole_and_frac(d: Duration) -> (Unit, f64) {
 	use Unit::*;
 
 	let whole = whole_unit(d);
-	(whole, match whole {
-		| Days(_) => (d.as_secs() % 86_400) as f64 / 86_400.0,
-		| Hours(_) => (d.as_secs() % 3_600) as f64 / 3_600.0,
-		| Mins(_) => (d.as_secs() % 60) as f64 / 60.0,
-		| Secs(_) => f64::from(d.subsec_millis()) / 1000.0,
-		| Millis(_) => f64::from(d.subsec_micros()) / 1000.0,
-		| Micros(_) => f64::from(d.subsec_nanos()) / 1000.0,
-		| Nanos(_) => 0.0,
-	})
+	(
+		whole,
+		match whole {
+			| Days(_) => (d.as_secs() % 86_400) as f64 / 86_400.0,
+			| Hours(_) => (d.as_secs() % 3_600) as f64 / 3_600.0,
+			| Mins(_) => (d.as_secs() % 60) as f64 / 60.0,
+			| Secs(_) => f64::from(d.subsec_millis()) / 1000.0,
+			| Millis(_) => f64::from(d.subsec_micros()) / 1000.0,
+			| Micros(_) => f64::from(d.subsec_nanos()) / 1000.0,
+			| Nanos(_) => 0.0,
+		},
+	)
 }
 
 /// Return the largest Unit which represents the duration. The value is

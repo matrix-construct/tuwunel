@@ -65,7 +65,9 @@ where
 }
 
 /// Get the core affinity for this thread.
-pub fn get_affinity() -> impl Iterator<Item = Id> { from_mask(CORE_AFFINITY.get()) }
+pub fn get_affinity() -> impl Iterator<Item = Id> {
+	from_mask(CORE_AFFINITY.get())
+}
 
 /// List the cores sharing SMT-tier resources
 pub fn smt_siblings() -> impl Iterator<Item = Id> {
@@ -110,22 +112,30 @@ pub fn node_affinity(id: Id) -> impl Iterator<Item = Id> {
 /// constraints of this system.
 #[inline]
 #[must_use]
-pub fn available_parallelism() -> usize { cores_available().count() }
+pub fn available_parallelism() -> usize {
+	cores_available().count()
+}
 
 /// Gets the ID of the nth core available. This bijects our sequence of cores to
 /// actual ID's which may have gaps for cores which are not available.
 #[inline]
 #[must_use]
-pub fn nth_core_available(i: usize) -> Option<Id> { cores_available().nth(i) }
+pub fn nth_core_available(i: usize) -> Option<Id> {
+	cores_available().nth(i)
+}
 
 /// Determine if core (by id) is available to the process.
 #[inline]
 #[must_use]
-pub fn is_core_available(id: Id) -> bool { cores_available().any(is_equal_to!(id)) }
+pub fn is_core_available(id: Id) -> bool {
+	cores_available().any(is_equal_to!(id))
+}
 
 /// Get the list of cores available. The values were recorded at program start.
 #[inline]
-pub fn cores_available() -> impl Iterator<Item = Id> { from_mask(*CORES_AVAILABLE) }
+pub fn cores_available() -> impl Iterator<Item = Id> {
+	from_mask(*CORES_AVAILABLE)
+}
 
 #[cfg(target_os = "linux")]
 #[inline]
@@ -154,7 +164,9 @@ pub fn getcpu() -> Result<usize> {
 
 #[cfg(not(target_os = "linux"))]
 #[inline]
-pub fn getcpu() -> Result<usize> { Err(crate::Error::Io(std::io::ErrorKind::Unsupported.into())) }
+pub fn getcpu() -> Result<usize> {
+	Err(crate::Error::Io(std::io::ErrorKind::Unsupported.into()))
+}
 
 fn query_cores_available() -> impl Iterator<Item = Id> {
 	core_affinity::get_core_ids()
@@ -163,9 +175,13 @@ fn query_cores_available() -> impl Iterator<Item = Id> {
 		.map(|core_id| core_id.id)
 }
 
-fn init_smt_topology() -> [Mask; MASK_BITS] { [Mask::default(); MASK_BITS] }
+fn init_smt_topology() -> [Mask; MASK_BITS] {
+	[Mask::default(); MASK_BITS]
+}
 
-fn init_node_topology() -> [Mask; MASK_BITS] { [Mask::default(); MASK_BITS] }
+fn init_node_topology() -> [Mask; MASK_BITS] {
+	[Mask::default(); MASK_BITS]
+}
 
 fn into_mask<I>(ids: I) -> Mask
 where

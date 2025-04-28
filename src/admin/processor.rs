@@ -36,7 +36,9 @@ use tuwunel_service::{
 use crate::{admin, admin::AdminCommand, context::Context};
 
 #[must_use]
-pub(super) fn complete(line: &str) -> String { complete_command(AdminCommand::command(), line) }
+pub(super) fn complete(line: &str) -> String {
+	complete_command(AdminCommand::command(), line)
+}
 
 #[must_use]
 pub(super) fn dispatch(services: Arc<Services>, command: CommandInput) -> ProcessorFuture {
@@ -78,8 +80,9 @@ async fn process_command(services: Arc<Services>, input: &CommandInput) -> Proce
 		String::from_utf8(take(output.get_mut())).expect("invalid utf8 in command output stream");
 
 	match result {
-		| Ok(()) if logs.is_empty() =>
-			Ok(Some(reply(RoomMessageEventContent::notice_markdown(output), context.reply_id))),
+		| Ok(()) if logs.is_empty() => {
+			Ok(Some(reply(RoomMessageEventContent::notice_markdown(output), context.reply_id)))
+		},
 
 		| Ok(()) => {
 			logs.write_str(output.as_str())
@@ -97,8 +100,7 @@ async fn process_command(services: Arc<Services>, input: &CommandInput) -> Proce
 
 #[allow(clippy::result_large_err)]
 fn handle_panic(error: &Error, command: &CommandInput) -> ProcessorResult {
-	let link =
-		"Please submit a [bug report](https://github.com/matrix-construct/tuwunel/issues/new). \
+	let link = "Please submit a [bug report](https://github.com/matrix-construct/tuwunel/issues/new). \
 		 🥺";
 	let msg = format!("Panic occurred while processing command:\n```\n{error:#?}\n```\n{link}");
 	let content = RoomMessageEventContent::notice_markdown(msg);

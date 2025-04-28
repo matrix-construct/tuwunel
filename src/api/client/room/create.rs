@@ -128,13 +128,14 @@ pub(crate) async fn create_room_route(
 	let state_lock = services.rooms.state.mutex.lock(&room_id).await;
 
 	let alias: Option<OwnedRoomAliasId> = match body.room_alias_name.as_ref() {
-		| Some(alias) =>
-			Some(room_alias_check(&services, alias, body.appservice_info.as_ref()).await?),
+		| Some(alias) => {
+			Some(room_alias_check(&services, alias, body.appservice_info.as_ref()).await?)
+		},
 		| _ => None,
 	};
 
 	let room_version = match body.room_version.clone() {
-		| Some(room_version) =>
+		| Some(room_version) => {
 			if services
 				.server
 				.supported_room_version(&room_version)
@@ -145,7 +146,8 @@ pub(crate) async fn create_room_route(
 					ErrorKind::UnsupportedRoomVersion,
 					"This server does not support that room version.",
 				));
-			},
+			}
+		},
 		| None => services
 			.server
 			.config
@@ -191,8 +193,9 @@ pub(crate) async fn create_room_route(
 			use RoomVersionId::*;
 
 			let content = match room_version {
-				| V1 | V2 | V3 | V4 | V5 | V6 | V7 | V8 | V9 | V10 =>
-					RoomCreateEventContent::new_v1(sender_user.clone()),
+				| V1 | V2 | V3 | V4 | V5 | V6 | V7 | V8 | V9 | V10 => {
+					RoomCreateEventContent::new_v1(sender_user.clone())
+				},
 				| _ => RoomCreateEventContent::new_v11(),
 			};
 			let mut content = serde_json::from_str::<CanonicalJsonObject>(
@@ -235,13 +238,16 @@ pub(crate) async fn create_room_route(
 		.rooms
 		.timeline
 		.build_and_append_pdu(
-			PduBuilder::state(sender_user.to_string(), &RoomMemberEventContent {
-				displayname: services.users.displayname(sender_user).await.ok(),
-				avatar_url: services.users.avatar_url(sender_user).await.ok(),
-				blurhash: services.users.blurhash(sender_user).await.ok(),
-				is_direct: Some(body.is_direct),
-				..RoomMemberEventContent::new(MembershipState::Join)
-			}),
+			PduBuilder::state(
+				sender_user.to_string(),
+				&RoomMemberEventContent {
+					displayname: services.users.displayname(sender_user).await.ok(),
+					avatar_url: services.users.avatar_url(sender_user).await.ok(),
+					blurhash: services.users.blurhash(sender_user).await.ok(),
+					is_direct: Some(body.is_direct),
+					..RoomMemberEventContent::new(MembershipState::Join)
+				},
+			),
 			sender_user,
 			&room_id,
 			&state_lock,
@@ -314,10 +320,13 @@ pub(crate) async fn create_room_route(
 			.rooms
 			.timeline
 			.build_and_append_pdu(
-				PduBuilder::state(String::new(), &RoomCanonicalAliasEventContent {
-					alias: Some(room_alias_id.to_owned()),
-					alt_aliases: vec![],
-				}),
+				PduBuilder::state(
+					String::new(),
+					&RoomCanonicalAliasEventContent {
+						alias: Some(room_alias_id.to_owned()),
+						alt_aliases: vec![],
+					},
+				),
 				sender_user,
 				&room_id,
 				&state_lock,

@@ -37,7 +37,9 @@ pub fn recursion_depth(args: TokenStream, input: TokenStream) -> TokenStream {
 }
 
 #[proc_macro]
-pub fn rustc_flags_capture(args: TokenStream) -> TokenStream { rustc::flags_capture(args) }
+pub fn rustc_flags_capture(args: TokenStream) -> TokenStream {
+	rustc::flags_capture(args)
+}
 
 #[proc_macro_attribute]
 pub fn refutable(args: TokenStream, input: TokenStream) -> TokenStream {

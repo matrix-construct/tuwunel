@@ -16,18 +16,26 @@ pub(crate) struct Keys<'a> {
 
 impl<'a> From<State<'a>> for Keys<'a> {
 	#[inline]
-	fn from(state: State<'a>) -> Self { Self { state } }
+	fn from(state: State<'a>) -> Self {
+		Self { state }
+	}
 }
 
 impl<'a> Cursor<'a, Key<'a>> for Keys<'a> {
 	#[inline]
-	fn state(&self) -> &State<'a> { &self.state }
+	fn state(&self) -> &State<'a> {
+		&self.state
+	}
 
 	#[inline]
-	fn fetch(&self) -> Option<Key<'a>> { self.state.fetch_key().map(slice_longevity) }
+	fn fetch(&self) -> Option<Key<'a>> {
+		self.state.fetch_key().map(slice_longevity)
+	}
 
 	#[inline]
-	fn seek(&mut self) { self.state.seek_fwd(); }
+	fn seek(&mut self) {
+		self.state.seek_fwd();
+	}
 }
 
 impl<'a> Stream for Keys<'a> {
@@ -40,5 +48,7 @@ impl<'a> Stream for Keys<'a> {
 
 impl FusedStream for Keys<'_> {
 	#[inline]
-	fn is_terminated(&self) -> bool { !self.state.init && !self.state.valid() }
+	fn is_terminated(&self) -> bool {
+		!self.state.init && !self.state.valid()
+	}
 }

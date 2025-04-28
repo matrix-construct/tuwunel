@@ -18,19 +18,19 @@ default_sys_versions='["testing-slim"]'
 default_sys_names='["debian"]'
 
 if test ! -z "$cargo_profile"; then
-	env_cargo_profiles="[\"${cargo_profile}\"]"
+    env_cargo_profiles="[\"${cargo_profile}\"]"
 fi
 
 if test ! -z "$feat_set"; then
-	env_feat_sets="[\"${feat_set}\"]"
+    env_feat_sets="[\"${feat_set}\"]"
 fi
 
 if test ! -z "$rust_toolchain"; then
-	env_rust_toolchains="[\"${rust_toolchain}\"]"
+    env_rust_toolchains="[\"${rust_toolchain}\"]"
 fi
 
 if test ! -z "$rust_target"; then
-	env_rust_targets="[\"${rust_target}\"]"
+    env_rust_targets="[\"${rust_target}\"]"
 fi
 
 set -a

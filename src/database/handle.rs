@@ -11,7 +11,9 @@ pub struct Handle<'a> {
 }
 
 impl<'a> From<DBPinnableSlice<'a>> for Handle<'a> {
-	fn from(val: DBPinnableSlice<'a>) -> Self { Self { val } }
+	fn from(val: DBPinnableSlice<'a>) -> Self {
+		Self { val }
+	}
 }
 
 impl Debug for Handle<'_> {
@@ -65,17 +67,23 @@ impl<'a> Deserialized for &'a Handle<'a> {
 }
 
 impl From<Handle<'_>> for Vec<u8> {
-	fn from(handle: Handle<'_>) -> Self { handle.deref().to_vec() }
+	fn from(handle: Handle<'_>) -> Self {
+		handle.deref().to_vec()
+	}
 }
 
 impl Deref for Handle<'_> {
 	type Target = Slice;
 
 	#[inline]
-	fn deref(&self) -> &Self::Target { &self.val }
+	fn deref(&self) -> &Self::Target {
+		&self.val
+	}
 }
 
 impl AsRef<Slice> for Handle<'_> {
 	#[inline]
-	fn as_ref(&self) -> &Slice { &self.val }
+	fn as_ref(&self) -> &Slice {
+		&self.val
+	}
 }

@@ -47,7 +47,9 @@ pub(crate) fn legacy_is_cargo_build() -> bool {
 		.is_some()
 }
 
-pub(crate) fn is_cargo_test() -> bool { std::env::args().any(|flag| flag == "--test") }
+pub(crate) fn is_cargo_test() -> bool {
+	std::env::args().any(|flag| flag == "--test")
+}
 
 pub(crate) fn get_named_generics(args: &[Meta], name: &str) -> Result<Generics> {
 	const DEFAULT: &str = "<>";
@@ -89,4 +91,6 @@ pub(crate) fn camel_to_snake_string(s: &str) -> String {
 }
 
 #[inline]
-pub(crate) fn exchange<T>(state: &mut T, source: T) -> T { std::mem::replace(state, source) }
+pub(crate) fn exchange<T>(state: &mut T, source: T) -> T {
+	std::mem::replace(state, source)
+}

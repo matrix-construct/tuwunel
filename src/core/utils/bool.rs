@@ -44,28 +44,44 @@ pub trait BoolExt {
 
 impl BoolExt for bool {
 	#[inline]
-	fn and<T>(self, t: Option<T>) -> Option<T> { self.then_some(t).flatten() }
+	fn and<T>(self, t: Option<T>) -> Option<T> {
+		self.then_some(t).flatten()
+	}
 
 	#[inline]
-	fn and_then<T, F: FnOnce() -> Option<T>>(self, f: F) -> Option<T> { self.then(f).flatten() }
+	fn and_then<T, F: FnOnce() -> Option<T>>(self, f: F) -> Option<T> {
+		self.then(f).flatten()
+	}
 
 	#[inline]
-	fn clone_or<T: Clone>(self, err: T, t: &T) -> T { self.map_or(err, || t.clone()) }
+	fn clone_or<T: Clone>(self, err: T, t: &T) -> T {
+		self.map_or(err, || t.clone())
+	}
 
 	#[inline]
-	fn copy_or<T: Copy>(self, err: T, t: T) -> T { self.map_or(err, || t) }
+	fn copy_or<T: Copy>(self, err: T, t: T) -> T {
+		self.map_or(err, || t)
+	}
 
 	#[inline]
-	fn expect(self, msg: &str) -> Self { self.then_some(true).expect(msg) }
+	fn expect(self, msg: &str) -> Self {
+		self.then_some(true).expect(msg)
+	}
 
 	#[inline]
-	fn expect_false(self, msg: &str) -> Self { (!self).then_some(false).expect(msg) }
+	fn expect_false(self, msg: &str) -> Self {
+		(!self).then_some(false).expect(msg)
+	}
 
 	#[inline]
-	fn into_option(self) -> Option<()> { self.then_some(()) }
+	fn into_option(self) -> Option<()> {
+		self.then_some(())
+	}
 
 	#[inline]
-	fn into_result(self) -> Result<(), ()> { self.ok_or(()) }
+	fn into_result(self) -> Result<(), ()> {
+		self.ok_or(())
+	}
 
 	#[inline]
 	fn map<T, F: FnOnce(Self) -> T>(self, f: F) -> T
@@ -81,7 +97,9 @@ impl BoolExt for bool {
 	}
 
 	#[inline]
-	fn map_or<T, F: FnOnce() -> T>(self, err: T, f: F) -> T { self.then(f).unwrap_or(err) }
+	fn map_or<T, F: FnOnce() -> T>(self, err: T, f: F) -> T {
+		self.then(f).unwrap_or(err)
+	}
 
 	#[inline]
 	fn map_or_else<T, F: FnOnce() -> T>(self, err: F, f: F) -> T {
@@ -89,7 +107,9 @@ impl BoolExt for bool {
 	}
 
 	#[inline]
-	fn ok_or<E>(self, err: E) -> Result<(), E> { self.into_option().ok_or(err) }
+	fn ok_or<E>(self, err: E) -> Result<(), E> {
+		self.into_option().ok_or(err)
+	}
 
 	#[inline]
 	fn ok_or_else<E, F: FnOnce() -> E>(self, err: F) -> Result<(), E> {
@@ -97,8 +117,12 @@ impl BoolExt for bool {
 	}
 
 	#[inline]
-	fn or<T, F: FnOnce() -> T>(self, f: F) -> Option<T> { (!self).then(f) }
+	fn or<T, F: FnOnce() -> T>(self, f: F) -> Option<T> {
+		(!self).then(f)
+	}
 
 	#[inline]
-	fn or_some<T>(self, t: T) -> Option<T> { (!self).then_some(t) }
+	fn or_some<T>(self, t: T) -> Option<T> {
+		(!self).then_some(t)
+	}
 }

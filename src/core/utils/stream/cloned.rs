@@ -16,5 +16,7 @@ where
 	T: Clone + 'a,
 {
 	#[inline]
-	fn cloned(self) -> Map<S, fn(&T) -> T> { self.map(Clone::clone) }
+	fn cloned(self) -> Map<S, fn(&T) -> T> {
+		self.map(Clone::clone)
+	}
 }

@@ -121,7 +121,9 @@ impl crate::Service for Service {
 			.clear();
 	}
 
-	fn name(&self) -> &str { crate::service::make_name(std::module_path!()) }
+	fn name(&self) -> &str {
+		crate::service::make_name(std::module_path!())
+	}
 }
 
 impl Service {
@@ -317,11 +319,14 @@ impl Service {
 
 		if parent_states.is_empty() {
 			// There is no parent layer, create a new state
-			self.save_statediff(shortstatehash, &StateDiff {
-				parent: None,
-				added: statediffnew,
-				removed: statediffremoved,
-			});
+			self.save_statediff(
+				shortstatehash,
+				&StateDiff {
+					parent: None,
+					added: statediffnew,
+					removed: statediffremoved,
+				},
+			);
 
 			return Ok(());
 		}
@@ -369,11 +374,14 @@ impl Service {
 			)?;
 		} else {
 			// Diff small enough, we add diff as layer on top of parent
-			self.save_statediff(shortstatehash, &StateDiff {
-				parent: Some(parent.shortstatehash),
-				added: statediffnew,
-				removed: statediffremoved,
-			});
+			self.save_statediff(
+				shortstatehash,
+				&StateDiff {
+					parent: Some(parent.shortstatehash),
+					added: statediffnew,
+					removed: statediffremoved,
+				},
+			);
 		}
 
 		Ok(())

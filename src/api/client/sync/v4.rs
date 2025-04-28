@@ -382,74 +382,79 @@ pub(crate) async fn sync_events_v4_route(
 		let mut new_known_rooms: BTreeSet<OwnedRoomId> = BTreeSet::new();
 
 		let ranges = list.ranges.clone();
-		lists.insert(list_id.clone(), sync_events::v4::SyncList {
-			ops: ranges
-				.into_iter()
-				.map(|mut r| {
-					r.0 = r.0.clamp(
-						uint!(0),
-						UInt::try_from(active_rooms.len().saturating_sub(1)).unwrap_or(UInt::MAX),
-					);
-					r.1 = r.1.clamp(
-						r.0,
-						UInt::try_from(active_rooms.len().saturating_sub(1)).unwrap_or(UInt::MAX),
-					);
-
-					let room_ids = if !active_rooms.is_empty() {
-						active_rooms[usize_from_ruma(r.0)..=usize_from_ruma(r.1)].to_vec()
-					} else {
-						Vec::new()
-					};
-
-					new_known_rooms.extend(
-						room_ids
-							.clone()
-							.into_iter()
-							.map(ToOwned::to_owned),
-					);
-					for room_id in &room_ids {
-						let todo_room = todo_rooms
-							.entry((*room_id).to_owned())
-							.or_insert((BTreeSet::new(), 0_usize, u64::MAX));
-
-						let limit: usize = list
-							.room_details
-							.timeline_limit
-							.map(u64::from)
-							.map_or(10, usize_from_u64_truncated)
-							.min(100);
-
-						todo_room.0.extend(
-							list.room_details
-								.required_state
-								.iter()
-								.map(|(ty, sk)| (ty.clone(), sk.as_str().into())),
+		lists.insert(
+			list_id.clone(),
+			sync_events::v4::SyncList {
+				ops: ranges
+					.into_iter()
+					.map(|mut r| {
+						r.0 = r.0.clamp(
+							uint!(0),
+							UInt::try_from(active_rooms.len().saturating_sub(1))
+								.unwrap_or(UInt::MAX),
+						);
+						r.1 = r.1.clamp(
+							r.0,
+							UInt::try_from(active_rooms.len().saturating_sub(1))
+								.unwrap_or(UInt::MAX),
 						);
 
-						todo_room.1 = todo_room.1.max(limit);
-						// 0 means unknown because it got out of date
-						todo_room.2 = todo_room.2.min(
-							known_rooms
-								.get(list_id.as_str())
-								.and_then(|k| k.get(*room_id))
-								.copied()
-								.unwrap_or(0),
+						let room_ids = if !active_rooms.is_empty() {
+							active_rooms[usize_from_ruma(r.0)..=usize_from_ruma(r.1)].to_vec()
+						} else {
+							Vec::new()
+						};
+
+						new_known_rooms.extend(
+							room_ids
+								.clone()
+								.into_iter()
+								.map(ToOwned::to_owned),
 						);
-					}
-					sync_events::v4::SyncOp {
-						op: SlidingOp::Sync,
-						range: Some(r),
-						index: None,
-						room_ids: room_ids
-							.into_iter()
-							.map(ToOwned::to_owned)
-							.collect(),
-						room_id: None,
-					}
-				})
-				.collect(),
-			count: ruma_from_usize(active_rooms.len()),
-		});
+						for room_id in &room_ids {
+							let todo_room = todo_rooms
+								.entry((*room_id).to_owned())
+								.or_insert((BTreeSet::new(), 0_usize, u64::MAX));
+
+							let limit: usize = list
+								.room_details
+								.timeline_limit
+								.map(u64::from)
+								.map_or(10, usize_from_u64_truncated)
+								.min(100);
+
+							todo_room.0.extend(
+								list.room_details
+									.required_state
+									.iter()
+									.map(|(ty, sk)| (ty.clone(), sk.as_str().into())),
+							);
+
+							todo_room.1 = todo_room.1.max(limit);
+							// 0 means unknown because it got out of date
+							todo_room.2 = todo_room.2.min(
+								known_rooms
+									.get(list_id.as_str())
+									.and_then(|k| k.get(*room_id))
+									.copied()
+									.unwrap_or(0),
+							);
+						}
+						sync_events::v4::SyncOp {
+							op: SlidingOp::Sync,
+							range: Some(r),
+							index: None,
+							room_ids: room_ids
+								.into_iter()
+								.map(ToOwned::to_owned)
+								.collect(),
+							room_id: None,
+						}
+					})
+					.collect(),
+				count: ruma_from_usize(active_rooms.len()),
+			},
+		);
 
 		if let Some(conn_id) = &body.conn_id {
 			let db_key = into_db_key(sender_user, sender_device, conn_id);
@@ -726,78 +731,81 @@ pub(crate) async fn sync_events_v4_route(
 			None
 		};
 
-		rooms.insert(room_id.clone(), sync_events::v4::SlidingSyncRoom {
-			name: services
-				.rooms
-				.state_accessor
-				.get_name(room_id)
-				.await
-				.ok()
-				.or(name),
-			avatar: match heroes_avatar {
-				| Some(heroes_avatar) => ruma::JsOption::Some(heroes_avatar),
-				| _ => match services
+		rooms.insert(
+			room_id.clone(),
+			sync_events::v4::SlidingSyncRoom {
+				name: services
 					.rooms
 					.state_accessor
-					.get_avatar(room_id)
+					.get_name(room_id)
 					.await
-				{
-					| ruma::JsOption::Some(avatar) => ruma::JsOption::from_option(avatar.url),
-					| ruma::JsOption::Null => ruma::JsOption::Null,
-					| ruma::JsOption::Undefined => ruma::JsOption::Undefined,
+					.ok()
+					.or(name),
+				avatar: match heroes_avatar {
+					| Some(heroes_avatar) => ruma::JsOption::Some(heroes_avatar),
+					| _ => match services
+						.rooms
+						.state_accessor
+						.get_avatar(room_id)
+						.await
+					{
+						| ruma::JsOption::Some(avatar) => ruma::JsOption::from_option(avatar.url),
+						| ruma::JsOption::Null => ruma::JsOption::Null,
+						| ruma::JsOption::Undefined => ruma::JsOption::Undefined,
+					},
 				},
-			},
-			initial: Some(roomsince == &0),
-			is_dm: None,
-			invite_state,
-			unread_notifications: UnreadNotificationsCount {
-				highlight_count: Some(
+				initial: Some(roomsince == &0),
+				is_dm: None,
+				invite_state,
+				unread_notifications: UnreadNotificationsCount {
+					highlight_count: Some(
+						services
+							.rooms
+							.user
+							.highlight_count(sender_user, room_id)
+							.await
+							.try_into()
+							.expect("notification count can't go that high"),
+					),
+					notification_count: Some(
+						services
+							.rooms
+							.user
+							.notification_count(sender_user, room_id)
+							.await
+							.try_into()
+							.expect("notification count can't go that high"),
+					),
+				},
+				timeline: room_events,
+				required_state,
+				prev_batch,
+				limited,
+				joined_count: Some(
 					services
 						.rooms
-						.user
-						.highlight_count(sender_user, room_id)
+						.state_cache
+						.room_joined_count(room_id)
 						.await
+						.unwrap_or(0)
 						.try_into()
-						.expect("notification count can't go that high"),
+						.unwrap_or_else(|_| uint!(0)),
 				),
-				notification_count: Some(
+				invited_count: Some(
 					services
 						.rooms
-						.user
-						.notification_count(sender_user, room_id)
+						.state_cache
+						.room_invited_count(room_id)
 						.await
+						.unwrap_or(0)
 						.try_into()
-						.expect("notification count can't go that high"),
+						.unwrap_or_else(|_| uint!(0)),
 				),
+				num_live: None, // Count events in timeline greater than global sync counter
+				timestamp,
+				heroes: Some(heroes),
 			},
-			timeline: room_events,
-			required_state,
-			prev_batch,
-			limited,
-			joined_count: Some(
-				services
-					.rooms
-					.state_cache
-					.room_joined_count(room_id)
-					.await
-					.unwrap_or(0)
-					.try_into()
-					.unwrap_or_else(|_| uint!(0)),
-			),
-			invited_count: Some(
-				services
-					.rooms
-					.state_cache
-					.room_invited_count(room_id)
-					.await
-					.unwrap_or(0)
-					.try_into()
-					.unwrap_or_else(|_| uint!(0)),
-			),
-			num_live: None, // Count events in timeline greater than global sync counter
-			timestamp,
-			heroes: Some(heroes),
-		});
+		);
 	}
 
 	if rooms.iter().all(|(id, r)| {

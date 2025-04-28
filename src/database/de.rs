@@ -91,7 +91,9 @@ impl<'de> Deserializer<'de> {
 	/// Ignore at the top-level, but it can be provided in a sequence to Ignore
 	/// all remaining elements.
 	#[inline]
-	fn record_ignore_all(&mut self) { self.record_trail(); }
+	fn record_ignore_all(&mut self) {
+		self.record_trail();
+	}
 
 	/// Consume the current record. The position pointer is moved to the start
 	/// of the next record. Slice of the current record is returned.
@@ -160,7 +162,9 @@ impl<'de> Deserializer<'de> {
 	}
 
 	#[inline]
-	fn inc_rec(&mut self, n: usize) { self.rec = self.rec.saturating_add(n); }
+	fn inc_rec(&mut self, n: usize) {
+		self.rec = self.rec.saturating_add(n);
+	}
 
 	/// Unconsumed input bytes.
 	#[inline]
@@ -475,7 +479,9 @@ impl<'a, 'de: 'a> de::MapAccess<'de> for &'a mut Deserializer<'de> {
 // activate when stable; too soon now
 //#[cfg(debug_assertions)]
 #[inline]
-fn deserialize_str(input: &[u8]) -> Result<&str> { string::str_from_bytes(input) }
+fn deserialize_str(input: &[u8]) -> Result<&str> {
+	string::str_from_bytes(input)
+}
 
 //#[cfg(not(debug_assertions))]
 #[cfg(disable)]

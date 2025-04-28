@@ -44,11 +44,17 @@ async fn long_file_names_works() {
 			Ok(key)
 		}
 
-		fn delete_file_mxc(&self, _mxc: String) -> Result<()> { todo!() }
+		fn delete_file_mxc(&self, _mxc: String) -> Result<()> {
+			todo!()
+		}
 
-		fn search_mxc_metadata_prefix(&self, _mxc: String) -> Result<Vec<Vec<u8>>> { todo!() }
+		fn search_mxc_metadata_prefix(&self, _mxc: String) -> Result<Vec<Vec<u8>>> {
+			todo!()
+		}
 
-		fn get_all_media_keys(&self) -> Vec<Vec<u8>> { todo!() }
+		fn get_all_media_keys(&self) -> Vec<Vec<u8>> {
+			todo!()
+		}
 
 		fn search_file_metadata(
 			&self,
@@ -59,7 +65,9 @@ async fn long_file_names_works() {
 			todo!()
 		}
 
-		fn remove_url_preview(&self, _url: &str) -> Result<()> { todo!() }
+		fn remove_url_preview(&self, _url: &str) -> Result<()> {
+			todo!()
+		}
 
 		fn set_url_preview(
 			&self,
@@ -70,7 +78,9 @@ async fn long_file_names_works() {
 			todo!()
 		}
 
-		fn get_url_preview(&self, _url: &str) -> Option<UrlPreviewData> { todo!() }
+		fn get_url_preview(&self, _url: &str) -> Option<UrlPreviewData> {
+			todo!()
+		}
 	}
 
 	let db: Arc<MockedKVDatabase> = Arc::new(MockedKVDatabase);

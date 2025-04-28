@@ -63,7 +63,9 @@ impl RawId {
 
 impl AsRef<[u8]> for RawId {
 	#[inline]
-	fn as_ref(&self) -> &[u8] { self.as_bytes() }
+	fn as_ref(&self) -> &[u8] {
+		self.as_bytes()
+	}
 }
 
 impl From<&[u8]> for RawId {

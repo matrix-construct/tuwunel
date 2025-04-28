@@ -22,7 +22,9 @@ type ScopeNames = ArrayVec<&'static str, 32>;
 
 impl Layer {
 	#[inline]
-	pub fn new(state: &Arc<State>) -> Self { Self { state: state.clone() } }
+	pub fn new(state: &Arc<State>) -> Self {
+		Self { state: state.clone() }
+	}
 }
 
 impl fmt::Debug for Layer {
@@ -93,5 +95,7 @@ impl Visit for Visitor {
 		self.values.push((f.name(), format!("{v:?}")));
 	}
 
-	fn record_str(&mut self, f: &Field, v: &str) { self.values.push((f.name(), v.to_owned())); }
+	fn record_str(&mut self, f: &Field, v: &str) {
+		self.values.push((f.name(), v.to_owned()));
+	}
 }

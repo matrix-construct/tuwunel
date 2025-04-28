@@ -43,7 +43,9 @@ impl crate::Service for Service {
 		}))
 	}
 
-	fn name(&self) -> &str { crate::service::make_name(std::module_path!()) }
+	fn name(&self) -> &str {
+		crate::service::make_name(std::module_path!())
+	}
 }
 
 impl Service {
@@ -101,10 +103,13 @@ impl Service {
 			event_id,
 			BTreeMap::from_iter([(
 				ruma::events::receipt::ReceiptType::ReadPrivate,
-				BTreeMap::from_iter([(user_id, ruma::events::receipt::Receipt {
-					ts: None, // TODO: start storing the timestamp so we can return one
-					thread: ruma::events::receipt::ReceiptThread::Unthreaded,
-				})]),
+				BTreeMap::from_iter([(
+					user_id,
+					ruma::events::receipt::Receipt {
+						ts: None, // TODO: start storing the timestamp so we can return one
+						thread: ruma::events::receipt::ReceiptThread::Unthreaded,
+					},
+				)]),
 			)]),
 		)]);
 		let receipt_event_content = ReceiptEventContent(content);
@@ -168,10 +173,11 @@ where
 			value.json().get(),
 		);
 		match receipt {
-			| Ok(value) =>
+			| Ok(value) => {
 				for (event, receipt) in value.content {
 					json.insert(event, receipt);
-				},
+				}
+			},
 			| _ => {
 				debug!("failed to parse receipt: {:?}", receipt);
 			},

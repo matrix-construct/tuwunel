@@ -6,5 +6,7 @@ pub trait IntoIsOk<T, E> {
 
 impl<T, E> IntoIsOk<T, E> for Result<T, E> {
 	#[inline]
-	fn into_is_ok(self) -> bool { self.is_ok() }
+	fn into_is_ok(self) -> bool {
+		self.is_ok()
+	}
 }

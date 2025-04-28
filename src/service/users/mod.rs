@@ -94,7 +94,9 @@ impl crate::Service for Service {
 		}))
 	}
 
-	fn name(&self) -> &str { crate::service::make_name(std::module_path!()) }
+	fn name(&self) -> &str {
+		crate::service::make_name(std::module_path!())
+	}
 }
 
 impl Service {
@@ -171,7 +173,9 @@ impl Service {
 
 	/// Returns the number of users registered on this server.
 	#[inline]
-	pub async fn count(&self) -> usize { self.db.userid_password.count().await }
+	pub async fn count(&self) -> usize {
+		self.db.userid_password.count().await
+	}
 
 	/// Find out which user an access token belongs to.
 	pub async fn find_from_token(&self, token: &str) -> Result<(OwnedUserId, OwnedDeviceId)> {

@@ -11,11 +11,15 @@ impl RefUnwindSafe for Error {}
 
 impl Error {
 	#[inline]
-	pub fn panic(self) -> ! { panic_any(self.into_panic()) }
+	pub fn panic(self) -> ! {
+		panic_any(self.into_panic())
+	}
 
 	#[must_use]
 	#[inline]
-	pub fn from_panic(e: Box<dyn Any + Send>) -> Self { Self::Panic(debug::panic_str(&e), e) }
+	pub fn from_panic(e: Box<dyn Any + Send>) -> Self {
+		Self::Panic(debug::panic_str(&e), e)
+	}
 
 	#[inline]
 	pub fn into_panic(self) -> Box<dyn Any + Send + 'static> {

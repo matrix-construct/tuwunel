@@ -4,14 +4,14 @@ FROM input AS rocksdb-fetch
 WORKDIR /usr/src
 COPY --link --from=recipe rocksdb.url .
 RUN <<EOF
-	set -eux
-	submodule="librocksdb-sys/rocksdb"
-	url="$(cat rocksdb.url)"
-	git clone \
-		--depth 1 \
-		--recurse-submodules="${submodule}" \
-		"${url}" \
-		/usr/src/rocksdb
+    set -eux
+    submodule="librocksdb-sys/rocksdb"
+    url="$(cat rocksdb.url)"
+    git clone \
+        --depth 1 \
+        --recurse-submodules="${submodule}" \
+        "${url}" \
+        /usr/src/rocksdb
 EOF
 
 
@@ -37,39 +37,39 @@ ENV CXX="clang++"
 WORKDIR /usr/src/rocksdb/librocksdb-sys/rocksdb
 ENV nprocs=${nprocs}
 RUN <<EOF
-	set -eux
+    set -eux
 
-	LDFLAGS="-Wl,--strip-all" \
-	cmake -H. -Bbuild \
-		"-DCMAKE_RULE_MESSAGES:BOOL=${rocksdb_make_rule_messages}" \
-		"-DCMAKE_VERBOSE_MAKEFILE:BOOL=${rocksdb_make_verbose}" \
-		"-DCMAKE_BUILD_TYPE=${rocksdb_build_type}" \
-		"-DBUILD_SHARED_LIBS=${rocksdb_shared}" \
-		"-DCMAKE_CXX_FLAGS:STRING=${rocksdb_cxx_flags}" \
-		"-DCMAKE_CXX_FLAGS_RELEASE:STRING=-g0 -O${rocksdb_opt_level}" \
-		"-DPORTABLE=${rocksdb_portable}" \
-		"-DFAIL_ON_WARNINGS=0" \
-		"-DUSE_RTTI=1" \
-		"-DWITH_JNI=0" \
-		"-DWITH_BENCHMARK_TOOLS=0" \
-		"-DWITH_TRACE_TOOLS=0" \
-		"-DWITH_CORE_TOOLS=0" \
-		"-DWITH_TOOLS=0" \
-		"-DWITH_TESTS=0" \
-		"-DWITH_GFLAGS=0" \
-		"-DWITH_LIBURING=${rocksdb_iouring}" \
-		"-DWITH_JEMALLOC=${rocksdb_jemalloc}" \
-		"-DWITH_ZSTD=${rocksdb_zstd}" \
-		"-DWITH_LZ4=${rocksdb_lz4}" \
-		"-DWITH_BZ2=${rocksdb_bz2}" \
-		"-DWITH_ZLIB=${rocksdb_zlib}" \
-		"-DWITH_SNAPPY=${rocksdb_snappy}"
+    LDFLAGS="-Wl,--strip-all" \
+    cmake -H. -Bbuild \
+        "-DCMAKE_RULE_MESSAGES:BOOL=${rocksdb_make_rule_messages}" \
+        "-DCMAKE_VERBOSE_MAKEFILE:BOOL=${rocksdb_make_verbose}" \
+        "-DCMAKE_BUILD_TYPE=${rocksdb_build_type}" \
+        "-DBUILD_SHARED_LIBS=${rocksdb_shared}" \
+        "-DCMAKE_CXX_FLAGS:STRING=${rocksdb_cxx_flags}" \
+        "-DCMAKE_CXX_FLAGS_RELEASE:STRING=-g0 -O${rocksdb_opt_level}" \
+        "-DPORTABLE=${rocksdb_portable}" \
+        "-DFAIL_ON_WARNINGS=0" \
+        "-DUSE_RTTI=1" \
+        "-DWITH_JNI=0" \
+        "-DWITH_BENCHMARK_TOOLS=0" \
+        "-DWITH_TRACE_TOOLS=0" \
+        "-DWITH_CORE_TOOLS=0" \
+        "-DWITH_TOOLS=0" \
+        "-DWITH_TESTS=0" \
+        "-DWITH_GFLAGS=0" \
+        "-DWITH_LIBURING=${rocksdb_iouring}" \
+        "-DWITH_JEMALLOC=${rocksdb_jemalloc}" \
+        "-DWITH_ZSTD=${rocksdb_zstd}" \
+        "-DWITH_LZ4=${rocksdb_lz4}" \
+        "-DWITH_BZ2=${rocksdb_bz2}" \
+        "-DWITH_ZLIB=${rocksdb_zlib}" \
+        "-DWITH_SNAPPY=${rocksdb_snappy}"
 
-	nprocs=${nprocs:=$(nproc)}
-	cmake \
-		--build build \
-		--target install \
-		--parallel ${nprocs}
+    nprocs=${nprocs:=$(nproc)}
+    cmake \
+        --build build \
+        --target install \
+        --parallel ${nprocs}
 EOF
 
 

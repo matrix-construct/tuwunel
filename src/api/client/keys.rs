@@ -678,9 +678,12 @@ pub(crate) async fn claim_keys_helper(
 				server,
 				services
 					.sending
-					.send_federation_request(server, federation::keys::claim_keys::v1::Request {
-						one_time_keys: one_time_keys_input_fed,
-					})
+					.send_federation_request(
+						server,
+						federation::keys::claim_keys::v1::Request {
+							one_time_keys: one_time_keys_input_fed,
+						},
+					)
 					.await,
 			)
 		})

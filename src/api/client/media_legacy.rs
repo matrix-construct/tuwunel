@@ -168,7 +168,7 @@ pub(crate) async fn get_content_legacy_route(
 				cache_control: Some(CACHE_CONTROL_IMMUTABLE.into()),
 			})
 		},
-		| _ =>
+		| _ => {
 			if !services.globals.server_is_ours(&body.server_name) && body.allow_remote {
 				let response = services
 					.media
@@ -193,7 +193,8 @@ pub(crate) async fn get_content_legacy_route(
 				})
 			} else {
 				Err!(Request(NotFound("Media not found.")))
-			},
+			}
+		},
 	}
 }
 
@@ -259,7 +260,7 @@ pub(crate) async fn get_content_as_filename_legacy_route(
 				cache_control: Some(CACHE_CONTROL_IMMUTABLE.into()),
 			})
 		},
-		| _ =>
+		| _ => {
 			if !services.globals.server_is_ours(&body.server_name) && body.allow_remote {
 				let response = services
 					.media
@@ -284,7 +285,8 @@ pub(crate) async fn get_content_as_filename_legacy_route(
 				})
 			} else {
 				Err!(Request(NotFound("Media not found.")))
-			},
+			}
+		},
 	}
 }
 
@@ -350,7 +352,7 @@ pub(crate) async fn get_content_thumbnail_legacy_route(
 				content_disposition: Some(content_disposition),
 			})
 		},
-		| _ =>
+		| _ => {
 			if !services.globals.server_is_ours(&body.server_name) && body.allow_remote {
 				let response = services
 					.media
@@ -375,7 +377,8 @@ pub(crate) async fn get_content_thumbnail_legacy_route(
 				})
 			} else {
 				Err!(Request(NotFound("Media not found.")))
-			},
+			}
+		},
 	}
 }
 

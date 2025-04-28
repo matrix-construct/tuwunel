@@ -42,7 +42,9 @@ impl ConsoleWriter {
 impl<'a> MakeWriter<'a> for ConsoleWriter {
 	type Writer = &'a Self;
 
-	fn make_writer(&'a self) -> Self::Writer { self }
+	fn make_writer(&'a self) -> Self::Writer {
+		self
+	}
 }
 
 impl io::Write for &'_ ConsoleWriter {
@@ -158,4 +160,6 @@ fn get_journal_stream() -> (u64, u64) {
 
 #[inline]
 #[must_use]
-pub fn is_systemd_mode() -> bool { *SYSTEMD_MODE }
+pub fn is_systemd_mode() -> bool {
+	*SYSTEMD_MODE
+}

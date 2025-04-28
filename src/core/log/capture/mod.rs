@@ -44,5 +44,7 @@ impl Capture {
 		Guard { capture: self.clone() }
 	}
 
-	pub fn stop(self: &Arc<Self>) { self.state.del(self); }
+	pub fn stop(self: &Arc<Self>) {
+		self.state.del(self);
+	}
 }

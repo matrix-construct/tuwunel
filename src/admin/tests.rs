@@ -1,13 +1,19 @@
 #![cfg(test)]
 
 #[test]
-fn get_help_short() { get_help_inner("-h"); }
+fn get_help_short() {
+	get_help_inner("-h");
+}
 
 #[test]
-fn get_help_long() { get_help_inner("--help"); }
+fn get_help_long() {
+	get_help_inner("--help");
+}
 
 #[test]
-fn get_help_subcommand() { get_help_inner("help"); }
+fn get_help_subcommand() {
+	get_help_inner("help");
+}
 
 fn get_help_inner(input: &str) {
 	use clap::Parser;

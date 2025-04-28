@@ -70,10 +70,11 @@ impl Server {
 		);
 
 		Ok(Arc::new(Self {
-			server: Arc::new(tuwunel_core::Server::new(config, runtime.cloned(), Log {
-				reload: tracing_reload_handle,
-				capture,
-			})),
+			server: Arc::new(tuwunel_core::Server::new(
+				config,
+				runtime.cloned(),
+				Log { reload: tracing_reload_handle, capture },
+			)),
 
 			services: None.into(),
 

@@ -16,14 +16,14 @@ RUN \
 --mount=type=cache,dst=${var_cache},sharing=locked \
 --mount=type=cache,dst=${var_lib_apt},sharing=locked \
 <<EOF
-	echo $(uname -a) $0 $-
-	set -eux
+    echo $(uname -a) $0 $-
+    set -eux
 
-	keep_downloaded='Binary::apt::APT::Keep-Downloaded-Packages "true";'
-	echo "$keep_downloaded" > /etc/apt/apt.conf.d/keep-downloaded
-	rm -f /etc/apt/apt.conf.d/docker-clean
+    keep_downloaded='Binary::apt::APT::Keep-Downloaded-Packages "true";'
+    echo "$keep_downloaded" > /etc/apt/apt.conf.d/keep-downloaded
+    rm -f /etc/apt/apt.conf.d/docker-clean
 
-	apt-get -y -U install --no-install-recommends ${packages}
+    apt-get -y -U install --no-install-recommends ${packages}
 EOF
 
 
@@ -35,8 +35,8 @@ RUN \
 --mount=type=cache,dst=${var_cache},sharing=locked \
 --mount=type=cache,dst=${var_lib_apt},sharing=locked \
 <<EOF
-	set -eux
-	apt-get -y -U install --no-install-recommends valgrind
+    set -eux
+    apt-get -y -U install --no-install-recommends valgrind
 EOF
 
 
@@ -48,6 +48,6 @@ RUN \
 --mount=type=cache,dst=${var_cache},sharing=locked \
 --mount=type=cache,dst=${var_lib_apt},sharing=locked \
 <<EOF
-	set -eux
-	apt-get -y -U install --no-install-recommends perf-tools-unstable
+    set -eux
+    apt-get -y -U install --no-install-recommends perf-tools-unstable
 EOF

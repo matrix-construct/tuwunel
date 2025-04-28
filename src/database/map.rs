@@ -83,16 +83,24 @@ impl Map {
 	}
 
 	#[inline]
-	pub fn property(&self, name: &str) -> Result<String> { self.db.property(&self.cf(), name) }
+	pub fn property(&self, name: &str) -> Result<String> {
+		self.db.property(&self.cf(), name)
+	}
 
 	#[inline]
-	pub fn name(&self) -> &str { self.name }
+	pub fn name(&self) -> &str {
+		self.name
+	}
 
 	#[inline]
-	pub(crate) fn db(&self) -> &Arc<Engine> { &self.db }
+	pub(crate) fn db(&self) -> &Arc<Engine> {
+		&self.db
+	}
 
 	#[inline]
-	pub(crate) fn cf(&self) -> impl AsColumnFamilyRef + '_ { &*self.cf }
+	pub(crate) fn cf(&self) -> impl AsColumnFamilyRef + '_ {
+		&*self.cf
+	}
 }
 
 impl Debug for Map {
@@ -102,5 +110,7 @@ impl Debug for Map {
 }
 
 impl Display for Map {
-	fn fmt(&self, out: &mut fmt::Formatter<'_>) -> fmt::Result { write!(out, "{0}", self.name) }
+	fn fmt(&self, out: &mut fmt::Formatter<'_>) -> fmt::Result {
+		write!(out, "{0}", self.name)
+	}
 }

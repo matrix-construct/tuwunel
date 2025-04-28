@@ -44,7 +44,9 @@ pub(super) fn verify_password(password: &str, password_hash: &str) -> Result<()>
 		.map_err(map_err)
 }
 
-fn map_err(e: password_hash::Error) -> Error { err!("{e}") }
+fn map_err(e: password_hash::Error) -> Error {
+	err!("{e}")
+}
 
 #[cfg(test)]
 mod tests {

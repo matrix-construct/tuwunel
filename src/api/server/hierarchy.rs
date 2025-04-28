@@ -55,11 +55,13 @@ pub(crate) async fn get_hierarchy_route(
 						{
 							| None => None,
 
-							| Some(SummaryAccessibility::Inaccessible) =>
-								Some((None, Some(child))),
+							| Some(SummaryAccessibility::Inaccessible) => {
+								Some((None, Some(child)))
+							},
 
-							| Some(SummaryAccessibility::Accessible(summary)) =>
-								Some((Some(summary), None)),
+							| Some(SummaryAccessibility::Accessible(summary)) => {
+								Some((Some(summary), None))
+							},
 						}
 					})
 					.unzip()

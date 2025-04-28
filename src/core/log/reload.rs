@@ -28,9 +28,13 @@ pub trait ReloadHandle<L> {
 }
 
 impl<L: Clone, S> ReloadHandle<L> for reload::Handle<L, S> {
-	fn current(&self) -> Option<L> { Self::clone_current(self) }
+	fn current(&self) -> Option<L> {
+		Self::clone_current(self)
+	}
 
-	fn reload(&self, new_value: L) -> Result<(), reload::Error> { Self::reload(self, new_value) }
+	fn reload(&self, new_value: L) -> Result<(), reload::Error> {
+		Self::reload(self, new_value)
+	}
 }
 
 #[derive(Clone)]

@@ -46,19 +46,29 @@ impl Cache {
 }
 
 #[implement(Cache)]
-pub async fn clear(&self) { join(self.clear_destinations(), self.clear_overrides()).await; }
+pub async fn clear(&self) {
+	join(self.clear_destinations(), self.clear_overrides()).await;
+}
 
 #[implement(Cache)]
-pub async fn clear_destinations(&self) { self.destinations.clear().await; }
+pub async fn clear_destinations(&self) {
+	self.destinations.clear().await;
+}
 
 #[implement(Cache)]
-pub async fn clear_overrides(&self) { self.overrides.clear().await; }
+pub async fn clear_overrides(&self) {
+	self.overrides.clear().await;
+}
 
 #[implement(Cache)]
-pub fn del_destination(&self, name: &ServerName) { self.destinations.remove(name); }
+pub fn del_destination(&self, name: &ServerName) {
+	self.destinations.remove(name);
+}
 
 #[implement(Cache)]
-pub fn del_override(&self, name: &ServerName) { self.overrides.remove(name); }
+pub fn del_override(&self, name: &ServerName) {
+	self.overrides.remove(name);
+}
 
 #[implement(Cache)]
 pub fn set_destination(&self, name: &ServerName, dest: &CachedDest) {
@@ -125,7 +135,9 @@ pub fn overrides(&self) -> impl Stream<Item = (&ServerName, CachedOverride)> + S
 impl CachedDest {
 	#[inline]
 	#[must_use]
-	pub fn valid(&self) -> bool { self.expire > SystemTime::now() }
+	pub fn valid(&self) -> bool {
+		self.expire > SystemTime::now()
+	}
 
 	#[must_use]
 	pub(crate) fn default_expire() -> SystemTime {
@@ -145,7 +157,9 @@ impl CachedDest {
 impl CachedOverride {
 	#[inline]
 	#[must_use]
-	pub fn valid(&self) -> bool { self.expire > SystemTime::now() }
+	pub fn valid(&self) -> bool {
+		self.expire > SystemTime::now()
+	}
 
 	#[must_use]
 	pub(crate) fn default_expire() -> SystemTime {
@@ -154,5 +168,7 @@ impl CachedOverride {
 
 	#[inline]
 	#[must_use]
-	pub fn size(&self) -> usize { size_of_val(self) }
+	pub fn size(&self) -> usize {
+		size_of_val(self)
+	}
 }

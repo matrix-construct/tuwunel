@@ -81,21 +81,33 @@ impl Pdu {
 impl Event for Pdu {
 	type Id = OwnedEventId;
 
-	fn event_id(&self) -> &Self::Id { &self.event_id }
+	fn event_id(&self) -> &Self::Id {
+		&self.event_id
+	}
 
-	fn room_id(&self) -> &RoomId { &self.room_id }
+	fn room_id(&self) -> &RoomId {
+		&self.room_id
+	}
 
-	fn sender(&self) -> &UserId { &self.sender }
+	fn sender(&self) -> &UserId {
+		&self.sender
+	}
 
-	fn event_type(&self) -> &TimelineEventType { &self.kind }
+	fn event_type(&self) -> &TimelineEventType {
+		&self.kind
+	}
 
-	fn content(&self) -> &RawJsonValue { &self.content }
+	fn content(&self) -> &RawJsonValue {
+		&self.content
+	}
 
 	fn origin_server_ts(&self) -> MilliSecondsSinceUnixEpoch {
 		MilliSecondsSinceUnixEpoch(self.origin_server_ts)
 	}
 
-	fn state_key(&self) -> Option<&str> { self.state_key.as_deref() }
+	fn state_key(&self) -> Option<&str> {
+		self.state_key.as_deref()
+	}
 
 	fn prev_events(&self) -> impl DoubleEndedIterator<Item = &Self::Id> + Send + '_ {
 		self.prev_events.iter()
@@ -105,7 +117,9 @@ impl Event for Pdu {
 		self.auth_events.iter()
 	}
 
-	fn redacts(&self) -> Option<&Self::Id> { self.redacts.as_ref() }
+	fn redacts(&self) -> Option<&Self::Id> {
+		self.redacts.as_ref()
+	}
 }
 
 /// Prevent derived equality which wouldn't limit itself to event_id
@@ -113,15 +127,21 @@ impl Eq for Pdu {}
 
 /// Equality determined by the Pdu's ID, not the memory representations.
 impl PartialEq for Pdu {
-	fn eq(&self, other: &Self) -> bool { self.event_id == other.event_id }
+	fn eq(&self, other: &Self) -> bool {
+		self.event_id == other.event_id
+	}
 }
 
 /// Ordering determined by the Pdu's ID, not the memory representations.
 impl Ord for Pdu {
-	fn cmp(&self, other: &Self) -> Ordering { self.event_id.cmp(&other.event_id) }
+	fn cmp(&self, other: &Self) -> Ordering {
+		self.event_id.cmp(&other.event_id)
+	}
 }
 
 /// Ordering determined by the Pdu's ID, not the memory representations.
 impl PartialOrd for Pdu {
-	fn partial_cmp(&self, other: &Self) -> Option<Ordering> { Some(self.cmp(other)) }
+	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+		Some(self.cmp(other))
+	}
 }

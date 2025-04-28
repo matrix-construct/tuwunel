@@ -9,5 +9,7 @@ pub struct Guard {
 
 impl Drop for Guard {
 	#[inline]
-	fn drop(&mut self) { self.capture.stop(); }
+	fn drop(&mut self) {
+		self.capture.stop();
+	}
 }

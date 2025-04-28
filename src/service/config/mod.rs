@@ -31,14 +31,18 @@ impl crate::Service for Service {
 		Ok(())
 	}
 
-	fn name(&self) -> &str { crate::service::make_name(std::module_path!()) }
+	fn name(&self) -> &str {
+		crate::service::make_name(std::module_path!())
+	}
 }
 
 impl Deref for Service {
 	type Target = Arc<Config>;
 
 	#[inline]
-	fn deref(&self) -> &Self::Target { &self.server.config }
+	fn deref(&self) -> &Self::Target {
+		&self.server.config
+	}
 }
 
 #[implement(Service)]

@@ -3,10 +3,10 @@
 FROM input AS smoketest-version
 
 RUN <<EOF
-	set -eux
-	conduwuit -V
-	version=$(conduwuit -V)
-	/bin/test -n "$version"
+    set -eux
+    conduwuit -V
+    version=$(conduwuit -V)
+    /bin/test -n "$version"
 EOF
 
 
@@ -15,13 +15,13 @@ FROM input AS smoketest-startup
 ENV CONDUWUIT_LOG="info"
 ENV CONDUWUIT__DATABASE_PATH="/tmp/smoketest.db"
 RUN <<EOF
-	set -eux
-	conduwuit \
-		-Otest='["smoke"]' \
-		-Oserver_name=\"localhost\" \
-		-Odatabase_path=\"${CONDUWUIT__DATABASE_PATH}\"
+    set -eux
+    conduwuit \
+        -Otest='["smoke"]' \
+        -Oserver_name=\"localhost\" \
+        -Odatabase_path=\"${CONDUWUIT__DATABASE_PATH}\"
 
-	rm -rf "${CONDUWUIT__DATABASE_PATH}"
+    rm -rf "${CONDUWUIT__DATABASE_PATH}"
 EOF
 
 
@@ -33,18 +33,18 @@ COPY --link --from=valgrind . .
 ENV CONDUWUIT_LOG="info"
 ENV CONDUWUIT__DATABASE_PATH="/tmp/smoketest.db"
 RUN <<EOF
-	set -eux
-	valgrind \
-		--leak-check=no \
-		--undef-value-errors=no \
-		--exit-on-first-error=yes \
-		--error-exitcode=1 \
-		conduwuit \
-			-Otest='["smoke"]' \
-			-Oserver_name=\"localhost\" \
-			-Odatabase_path=\"${CONDUWUIT__DATABASE_PATH}\"
+    set -eux
+    valgrind \
+        --leak-check=no \
+        --undef-value-errors=no \
+        --exit-on-first-error=yes \
+        --error-exitcode=1 \
+        conduwuit \
+            -Otest='["smoke"]' \
+            -Oserver_name=\"localhost\" \
+            -Odatabase_path=\"${CONDUWUIT__DATABASE_PATH}\"
 
-	rm -rf "${CONDUWUIT__DATABASE_PATH}"
+    rm -rf "${CONDUWUIT__DATABASE_PATH}"
 EOF
 
 
@@ -56,14 +56,14 @@ COPY --link --from=perf . .
 ENV CONDUWUIT_LOG="error"
 ENV CONDUWUIT__DATABASE_PATH="/tmp/smoketest.db"
 RUN <<EOF
-	set -eux
-	perf stat \
-		-j \
-		-ddd \
-		conduwuit \
-			-Otest='["smoke"]' \
-			-Oserver_name=\"localhost\" \
-			-Odatabase_path=\"${CONDUWUIT__DATABASE_PATH}\"
+    set -eux
+    perf stat \
+        -j \
+        -ddd \
+        conduwuit \
+            -Otest='["smoke"]' \
+            -Oserver_name=\"localhost\" \
+            -Odatabase_path=\"${CONDUWUIT__DATABASE_PATH}\"
 
-	rm -rf "${CONDUWUIT__DATABASE_PATH}"
+    rm -rf "${CONDUWUIT__DATABASE_PATH}"
 EOF

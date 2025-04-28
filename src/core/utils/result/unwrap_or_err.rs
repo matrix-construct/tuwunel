@@ -11,5 +11,7 @@ pub trait UnwrapOrErr<T> {
 
 impl<T> UnwrapOrErr<T> for Result<T, T> {
 	#[inline]
-	fn unwrap_or_err(self) -> T { self.unwrap_or_else(identity::<T>) }
+	fn unwrap_or_err(self) -> T {
+		self.unwrap_or_else(identity::<T>)
+	}
 }

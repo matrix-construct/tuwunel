@@ -14,7 +14,9 @@ pub struct Unquoted(str);
 impl<'a> Unquoted {
 	#[inline]
 	#[must_use]
-	pub fn as_str(&'a self) -> &'a str { &self.0 }
+	pub fn as_str(&'a self) -> &'a str {
+		&self.0
+	}
 }
 
 impl<'a, 'de: 'a> Deserialize<'de> for &'a Unquoted {
@@ -44,9 +46,13 @@ impl<'a> From<&'a str> for &'a Unquoted {
 impl Deref for Unquoted {
 	type Target = str;
 
-	fn deref(&self) -> &Self::Target { &self.0 }
+	fn deref(&self) -> &Self::Target {
+		&self.0
+	}
 }
 
 impl<'a> AsRef<str> for &'a Unquoted {
-	fn as_ref(&self) -> &'a str { &self.0 }
+	fn as_ref(&self) -> &'a str {
+		&self.0
+	}
 }

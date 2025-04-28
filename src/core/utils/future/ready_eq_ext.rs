@@ -18,8 +18,12 @@ where
 	T: PartialEq + Send + Sync,
 {
 	#[inline]
-	fn eq(self, t: &T) -> impl Future<Output = bool> + Send { self.map(move |r| r.eq(t)) }
+	fn eq(self, t: &T) -> impl Future<Output = bool> + Send {
+		self.map(move |r| r.eq(t))
+	}
 
 	#[inline]
-	fn ne(self, t: &T) -> impl Future<Output = bool> + Send { self.map(move |r| r.ne(t)) }
+	fn ne(self, t: &T) -> impl Future<Output = bool> + Send {
+		self.map(move |r| r.ne(t))
+	}
 }

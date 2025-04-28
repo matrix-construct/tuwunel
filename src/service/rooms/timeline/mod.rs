@@ -154,7 +154,9 @@ impl crate::Service for Service {
 		Ok(())
 	}
 
-	fn name(&self) -> &str { crate::service::make_name(std::module_path!()) }
+	fn name(&self) -> &str {
+		crate::service::make_name(std::module_path!())
+	}
 }
 
 impl Service {
@@ -506,7 +508,7 @@ impl Service {
 					},
 				}
 			},
-			| TimelineEventType::SpaceChild =>
+			| TimelineEventType::SpaceChild => {
 				if let Some(_state_key) = &pdu.state_key {
 					self.services
 						.spaces
@@ -514,7 +516,8 @@ impl Service {
 						.lock()
 						.await
 						.remove(&pdu.room_id);
-				},
+				}
+			},
 			| TimelineEventType::RoomMember => {
 				if let Some(state_key) = &pdu.state_key {
 					// if the state_key fails

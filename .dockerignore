@@ -5,11 +5,14 @@ target/
 # Docker files
 Dockerfile*
 docker/
+buildx-cache/
 
 # IDE files
 .vscode
 .idea
 *.iml
+
+.
 
 # Git folder
 #.git

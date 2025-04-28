@@ -92,9 +92,10 @@ async fn fetch_thumbnail_authenticated(
 		.await?;
 
 	match content {
-		| FileOrLocation::File(content) =>
+		| FileOrLocation::File(content) => {
 			self.handle_thumbnail_file(mxc, user, dim, content)
-				.await,
+				.await
+		},
 		| FileOrLocation::Location(location) => self.handle_location(mxc, user, &location).await,
 	}
 }
@@ -371,17 +372,20 @@ pub async fn fetch_remote_thumbnail_legacy(
 	let reponse = self
 		.services
 		.sending
-		.send_federation_request(mxc.server_name, media::get_content_thumbnail::v3::Request {
-			allow_remote: body.allow_remote,
-			height: body.height,
-			width: body.width,
-			method: body.method.clone(),
-			server_name: body.server_name.clone(),
-			media_id: body.media_id.clone(),
-			timeout_ms: body.timeout_ms,
-			allow_redirect: body.allow_redirect,
-			animated: body.animated,
-		})
+		.send_federation_request(
+			mxc.server_name,
+			media::get_content_thumbnail::v3::Request {
+				allow_remote: body.allow_remote,
+				height: body.height,
+				width: body.width,
+				method: body.method.clone(),
+				server_name: body.server_name.clone(),
+				media_id: body.media_id.clone(),
+				timeout_ms: body.timeout_ms,
+				allow_redirect: body.allow_redirect,
+				animated: body.animated,
+			},
+		)
 		.await?;
 
 	let dim = Dim::from_ruma(body.width, body.height, body.method.clone())?;
@@ -404,13 +408,16 @@ pub async fn fetch_remote_content_legacy(
 	let response = self
 		.services
 		.sending
-		.send_federation_request(mxc.server_name, media::get_content::v3::Request {
-			allow_remote: true,
-			server_name: mxc.server_name.into(),
-			media_id: mxc.media_id.into(),
-			timeout_ms,
-			allow_redirect,
-		})
+		.send_federation_request(
+			mxc.server_name,
+			media::get_content::v3::Request {
+				allow_remote: true,
+				server_name: mxc.server_name.into(),
+				media_id: mxc.media_id.into(),
+				timeout_ms,
+				allow_redirect,
+			},
+		)
 		.await?;
 
 	let content_disposition = make_content_disposition(

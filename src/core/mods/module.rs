@@ -13,7 +13,9 @@ pub struct Module {
 }
 
 impl Module {
-	pub fn from_name(name: &str) -> Result<Self> { Self::from_path(path::from_name(name)?) }
+	pub fn from_name(name: &str) -> Result<Self> {
+		Self::from_path(path::from_name(name)?)
+	}
 
 	pub fn from_path(path: OsString) -> Result<Self> {
 		Ok(Self {
@@ -59,10 +61,14 @@ impl Module {
 		Ok(res)
 	}
 
-	pub fn name(&self) -> Result<String> { path::to_name(self.path()) }
+	pub fn name(&self) -> Result<String> {
+		path::to_name(self.path())
+	}
 
 	#[must_use]
-	pub fn path(&self) -> &OsString { &self.path }
+	pub fn path(&self) -> &OsString {
+		&self.path
+	}
 }
 
 impl Drop for Module {

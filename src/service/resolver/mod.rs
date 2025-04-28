@@ -50,5 +50,7 @@ impl crate::Service for Service {
 		self.cache.clear().await;
 	}
 
-	fn name(&self) -> &str { crate::service::make_name(std::module_path!()) }
+	fn name(&self) -> &str {
+		crate::service::make_name(std::module_path!())
+	}
 }

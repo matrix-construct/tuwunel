@@ -115,7 +115,9 @@ impl crate::Service for Service {
 		}))
 	}
 
-	fn name(&self) -> &str { service::make_name(std::module_path!()) }
+	fn name(&self) -> &str {
+		service::make_name(std::module_path!())
+	}
 }
 
 fn base(config: &Config) -> Result<reqwest::ClientBuilder> {

@@ -15,8 +15,9 @@ pub fn to_canonical_object<T: serde::Serialize>(
 
 	match serde_json::to_value(value).map_err(CanonicalJsonError::SerDe)? {
 		| serde_json::Value::Object(map) => try_from_json_map(map),
-		| _ =>
-			Err(CanonicalJsonError::SerDe(serde_json::Error::custom("Value must be an object"))),
+		| _ => {
+			Err(CanonicalJsonError::SerDe(serde_json::Error::custom("Value must be an object")))
+		},
 	}
 }
 

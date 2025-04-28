@@ -87,7 +87,9 @@ fn get_summary_children() {
 
 #[test]
 fn invalid_pagination_tokens() {
-	fn token_is_err(token: &str) { PaginationToken::from_str(token).unwrap_err(); }
+	fn token_is_err(token: &str) {
+		PaginationToken::from_str(token).unwrap_err();
+	}
 
 	token_is_err("231_2_noabool");
 	token_is_err("");

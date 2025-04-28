@@ -109,9 +109,10 @@ pub fn redacts_id(&self, room_version: &RoomVersionId) -> Option<OwnedEventId> {
 
 	match *room_version {
 		| V1 | V2 | V3 | V4 | V5 | V6 | V7 | V8 | V9 | V10 => self.redacts.clone(),
-		| _ =>
+		| _ => {
 			self.get_content::<RoomRedactionEventContent>()
 				.ok()?
-				.redacts,
+				.redacts
+		},
 	}
 }

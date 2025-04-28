@@ -16,18 +16,26 @@ pub(crate) struct ItemsRev<'a> {
 
 impl<'a> From<State<'a>> for ItemsRev<'a> {
 	#[inline]
-	fn from(state: State<'a>) -> Self { Self { state } }
+	fn from(state: State<'a>) -> Self {
+		Self { state }
+	}
 }
 
 impl<'a> Cursor<'a, KeyVal<'a>> for ItemsRev<'a> {
 	#[inline]
-	fn state(&self) -> &State<'a> { &self.state }
+	fn state(&self) -> &State<'a> {
+		&self.state
+	}
 
 	#[inline]
-	fn fetch(&self) -> Option<KeyVal<'a>> { self.state.fetch().map(keyval_longevity) }
+	fn fetch(&self) -> Option<KeyVal<'a>> {
+		self.state.fetch().map(keyval_longevity)
+	}
 
 	#[inline]
-	fn seek(&mut self) { self.state.seek_rev(); }
+	fn seek(&mut self) {
+		self.state.seek_rev();
+	}
 }
 
 impl<'a> Stream for ItemsRev<'a> {
@@ -40,5 +48,7 @@ impl<'a> Stream for ItemsRev<'a> {
 
 impl FusedStream for ItemsRev<'_> {
 	#[inline]
-	fn is_terminated(&self) -> bool { !self.state.init && !self.state.valid() }
+	fn is_terminated(&self) -> bool {
+		!self.state.init && !self.state.valid()
+	}
 }

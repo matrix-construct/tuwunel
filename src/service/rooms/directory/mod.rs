@@ -22,14 +22,20 @@ impl crate::Service for Service {
 		}))
 	}
 
-	fn name(&self) -> &str { crate::service::make_name(std::module_path!()) }
+	fn name(&self) -> &str {
+		crate::service::make_name(std::module_path!())
+	}
 }
 
 #[implement(Service)]
-pub fn set_public(&self, room_id: &RoomId) { self.db.publicroomids.insert(room_id, []); }
+pub fn set_public(&self, room_id: &RoomId) {
+	self.db.publicroomids.insert(room_id, []);
+}
 
 #[implement(Service)]
-pub fn set_not_public(&self, room_id: &RoomId) { self.db.publicroomids.remove(room_id); }
+pub fn set_not_public(&self, room_id: &RoomId) {
+	self.db.publicroomids.remove(room_id);
+}
 
 #[implement(Service)]
 pub fn public_rooms(&self) -> impl Stream<Item = &RoomId> + Send {

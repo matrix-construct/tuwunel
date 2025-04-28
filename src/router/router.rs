@@ -22,4 +22,6 @@ async fn not_found(_uri: Uri) -> impl IntoResponse {
 	Error::Request(ErrorKind::Unrecognized, "Not Found".into(), StatusCode::NOT_FOUND)
 }
 
-async fn it_works() -> &'static str { "hewwo from tuwunel woof!" }
+async fn it_works() -> &'static str {
+	"hewwo from tuwunel woof!"
+}

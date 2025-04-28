@@ -617,14 +617,17 @@ pub(crate) async fn kick_user_route(
 		.rooms
 		.timeline
 		.build_and_append_pdu(
-			PduBuilder::state(body.user_id.to_string(), &RoomMemberEventContent {
-				membership: MembershipState::Leave,
-				reason: body.reason.clone(),
-				is_direct: None,
-				join_authorized_via_users_server: None,
-				third_party_invite: None,
-				..event
-			}),
+			PduBuilder::state(
+				body.user_id.to_string(),
+				&RoomMemberEventContent {
+					membership: MembershipState::Leave,
+					reason: body.reason.clone(),
+					is_direct: None,
+					join_authorized_via_users_server: None,
+					third_party_invite: None,
+					..event
+				},
+			),
 			body.sender_user(),
 			&body.room_id,
 			&state_lock,
@@ -667,16 +670,19 @@ pub(crate) async fn ban_user_route(
 		.rooms
 		.timeline
 		.build_and_append_pdu(
-			PduBuilder::state(body.user_id.to_string(), &RoomMemberEventContent {
-				membership: MembershipState::Ban,
-				reason: body.reason.clone(),
-				displayname: None, // display name may be offensive
-				avatar_url: None,  // avatar may be offensive
-				is_direct: None,
-				join_authorized_via_users_server: None,
-				third_party_invite: None,
-				..current_member_content
-			}),
+			PduBuilder::state(
+				body.user_id.to_string(),
+				&RoomMemberEventContent {
+					membership: MembershipState::Ban,
+					reason: body.reason.clone(),
+					displayname: None, // display name may be offensive
+					avatar_url: None,  // avatar may be offensive
+					is_direct: None,
+					join_authorized_via_users_server: None,
+					third_party_invite: None,
+					..current_member_content
+				},
+			),
 			sender_user,
 			&body.room_id,
 			&state_lock,
@@ -720,14 +726,17 @@ pub(crate) async fn unban_user_route(
 		.rooms
 		.timeline
 		.build_and_append_pdu(
-			PduBuilder::state(body.user_id.to_string(), &RoomMemberEventContent {
-				membership: MembershipState::Leave,
-				reason: body.reason.clone(),
-				join_authorized_via_users_server: None,
-				third_party_invite: None,
-				is_direct: None,
-				..current_member_content
-			}),
+			PduBuilder::state(
+				body.user_id.to_string(),
+				&RoomMemberEventContent {
+					membership: MembershipState::Leave,
+					reason: body.reason.clone(),
+					join_authorized_via_users_server: None,
+					third_party_invite: None,
+					is_direct: None,
+					..current_member_content
+				},
+			),
 			body.sender_user(),
 			&body.room_id,
 			&state_lock,
@@ -1760,22 +1769,25 @@ pub(crate) async fn invite_helper(
 
 		let response = services
 			.sending
-			.send_federation_request(user_id.server_name(), create_invite::v2::Request {
-				room_id: room_id.to_owned(),
-				event_id: (*pdu.event_id).to_owned(),
-				room_version: room_version_id.clone(),
-				event: services
-					.sending
-					.convert_to_outgoing_federation_event(pdu_json.clone())
-					.await,
-				invite_room_state,
-				via: services
-					.rooms
-					.state_cache
-					.servers_route_via(room_id)
-					.await
-					.ok(),
-			})
+			.send_federation_request(
+				user_id.server_name(),
+				create_invite::v2::Request {
+					room_id: room_id.to_owned(),
+					event_id: (*pdu.event_id).to_owned(),
+					room_version: room_version_id.clone(),
+					event: services
+						.sending
+						.convert_to_outgoing_federation_event(pdu_json.clone())
+						.await,
+					invite_room_state,
+					via: services
+						.rooms
+						.state_cache
+						.servers_route_via(room_id)
+						.await
+						.ok(),
+				},
+			)
 			.await?;
 
 		// We do not add the event_id field to the pdu here because of signature and
@@ -2028,13 +2040,16 @@ pub async fn leave_room(
 			.rooms
 			.timeline
 			.build_and_append_pdu(
-				PduBuilder::state(user_id.to_string(), &RoomMemberEventContent {
-					membership: MembershipState::Leave,
-					reason,
-					join_authorized_via_users_server: None,
-					is_direct: None,
-					..event
-				}),
+				PduBuilder::state(
+					user_id.to_string(),
+					&RoomMemberEventContent {
+						membership: MembershipState::Leave,
+						reason,
+						join_authorized_via_users_server: None,
+						is_direct: None,
+						..event
+					},
+				),
 				user_id,
 				room_id,
 				&state_lock,

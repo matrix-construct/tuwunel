@@ -25,6 +25,6 @@ RUN  \
 --mount=type=cache,dst=${var_cache},sharing=locked \
 --mount=type=cache,dst=${var_lib_apt},sharing=locked \
 <<EOF
-	set -eux
-	apt-get -y -U install --no-install-recommends ${packages}
+    set -eux
+    apt-get -y -U install --no-install-recommends ${packages}
 EOF

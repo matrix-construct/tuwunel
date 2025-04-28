@@ -15,15 +15,23 @@ static USER_AGENT: OnceLock<String> = OnceLock::new();
 
 #[inline]
 #[must_use]
-pub fn name() -> &'static str { BRANDING }
+pub fn name() -> &'static str {
+	BRANDING
+}
 
 #[inline]
-pub fn version() -> &'static str { VERSION.get_or_init(init_version) }
+pub fn version() -> &'static str {
+	VERSION.get_or_init(init_version)
+}
 
 #[inline]
-pub fn user_agent() -> &'static str { USER_AGENT.get_or_init(init_user_agent) }
+pub fn user_agent() -> &'static str {
+	USER_AGENT.get_or_init(init_user_agent)
+}
 
-fn init_user_agent() -> String { format!("{}/{}", name(), version()) }
+fn init_user_agent() -> String {
+	format!("{}/{}", name(), version())
+}
 
 fn init_version() -> String {
 	option_env!("TUWUNEL_VERSION_EXTRA")

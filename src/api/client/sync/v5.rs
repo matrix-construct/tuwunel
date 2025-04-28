@@ -310,7 +310,7 @@ where
 		let active_rooms = match list.filters.as_ref().map(|f| &f.not_room_types) {
 			| None => active_rooms,
 			| Some(filter) if filter.is_empty() => active_rooms,
-			| Some(value) =>
+			| Some(value) => {
 				filter_rooms(
 					services,
 					value,
@@ -318,7 +318,8 @@ where
 					active_rooms.iter().stream().map(Deref::deref),
 				)
 				.collect()
-				.await,
+				.await
+			},
 		};
 
 		let mut new_known_rooms: BTreeSet<OwnedRoomId> = BTreeSet::new();
@@ -369,11 +370,12 @@ where
 				);
 			}
 		}
-		response
-			.lists
-			.insert(list_id.clone(), sync_events::v5::response::List {
+		response.lists.insert(
+			list_id.clone(),
+			sync_events::v5::response::List {
 				count: ruma_from_usize(active_rooms.len()),
-			});
+			},
+		);
 
 		if let Some(conn_id) = body.conn_id.clone() {
 			let snake_key = into_snake_key(sender_user, sender_device, conn_id);
@@ -618,78 +620,81 @@ where
 			None
 		};
 
-		rooms.insert(room_id.clone(), sync_events::v5::response::Room {
-			name: services
-				.rooms
-				.state_accessor
-				.get_name(room_id)
-				.await
-				.ok()
-				.or(name),
-			avatar: match heroes_avatar {
-				| Some(heroes_avatar) => ruma::JsOption::Some(heroes_avatar),
-				| _ => match services
+		rooms.insert(
+			room_id.clone(),
+			sync_events::v5::response::Room {
+				name: services
 					.rooms
 					.state_accessor
-					.get_avatar(room_id)
+					.get_name(room_id)
 					.await
-				{
-					| ruma::JsOption::Some(avatar) => ruma::JsOption::from_option(avatar.url),
-					| ruma::JsOption::Null => ruma::JsOption::Null,
-					| ruma::JsOption::Undefined => ruma::JsOption::Undefined,
+					.ok()
+					.or(name),
+				avatar: match heroes_avatar {
+					| Some(heroes_avatar) => ruma::JsOption::Some(heroes_avatar),
+					| _ => match services
+						.rooms
+						.state_accessor
+						.get_avatar(room_id)
+						.await
+					{
+						| ruma::JsOption::Some(avatar) => ruma::JsOption::from_option(avatar.url),
+						| ruma::JsOption::Null => ruma::JsOption::Null,
+						| ruma::JsOption::Undefined => ruma::JsOption::Undefined,
+					},
 				},
-			},
-			initial: Some(roomsince == &0),
-			is_dm: None,
-			invite_state,
-			unread_notifications: UnreadNotificationsCount {
-				highlight_count: Some(
+				initial: Some(roomsince == &0),
+				is_dm: None,
+				invite_state,
+				unread_notifications: UnreadNotificationsCount {
+					highlight_count: Some(
+						services
+							.rooms
+							.user
+							.highlight_count(sender_user, room_id)
+							.await
+							.try_into()
+							.expect("notification count can't go that high"),
+					),
+					notification_count: Some(
+						services
+							.rooms
+							.user
+							.notification_count(sender_user, room_id)
+							.await
+							.try_into()
+							.expect("notification count can't go that high"),
+					),
+				},
+				timeline: room_events,
+				required_state,
+				prev_batch,
+				limited,
+				joined_count: Some(
 					services
 						.rooms
-						.user
-						.highlight_count(sender_user, room_id)
+						.state_cache
+						.room_joined_count(room_id)
 						.await
+						.unwrap_or(0)
 						.try_into()
-						.expect("notification count can't go that high"),
+						.unwrap_or_else(|_| uint!(0)),
 				),
-				notification_count: Some(
+				invited_count: Some(
 					services
 						.rooms
-						.user
-						.notification_count(sender_user, room_id)
+						.state_cache
+						.room_invited_count(room_id)
 						.await
+						.unwrap_or(0)
 						.try_into()
-						.expect("notification count can't go that high"),
+						.unwrap_or_else(|_| uint!(0)),
 				),
+				num_live: None, // Count events in timeline greater than global sync counter
+				bump_stamp: timestamp,
+				heroes: Some(heroes),
 			},
-			timeline: room_events,
-			required_state,
-			prev_batch,
-			limited,
-			joined_count: Some(
-				services
-					.rooms
-					.state_cache
-					.room_joined_count(room_id)
-					.await
-					.unwrap_or(0)
-					.try_into()
-					.unwrap_or_else(|_| uint!(0)),
-			),
-			invited_count: Some(
-				services
-					.rooms
-					.state_cache
-					.room_invited_count(room_id)
-					.await
-					.unwrap_or(0)
-					.try_into()
-					.unwrap_or_else(|_| uint!(0)),
-			),
-			num_live: None, // Count events in timeline greater than global sync counter
-			bump_stamp: timestamp,
-			heroes: Some(heroes),
-		});
+		);
 	}
 	Ok(rooms)
 }

@@ -92,10 +92,13 @@ pub(crate) async fn upgrade_room_route(
 		.rooms
 		.timeline
 		.build_and_append_pdu(
-			PduBuilder::state(StateKey::new(), &RoomTombstoneEventContent {
-				body: "This room has been replaced".to_owned(),
-				replacement_room: replacement_room.clone(),
-			}),
+			PduBuilder::state(
+				StateKey::new(),
+				&RoomTombstoneEventContent {
+					body: "This room has been replaced".to_owned(),
+					replacement_room: replacement_room.clone(),
+				},
+			),
 			sender_user,
 			&body.room_id,
 			&state_lock,
@@ -292,11 +295,14 @@ pub(crate) async fn upgrade_room_route(
 		.rooms
 		.timeline
 		.build_and_append_pdu(
-			PduBuilder::state(StateKey::new(), &RoomPowerLevelsEventContent {
-				events_default: new_level,
-				invite: new_level,
-				..power_levels_event_content
-			}),
+			PduBuilder::state(
+				StateKey::new(),
+				&RoomPowerLevelsEventContent {
+					events_default: new_level,
+					invite: new_level,
+					..power_levels_event_content
+				},
+			),
 			sender_user,
 			&body.room_id,
 			&state_lock,

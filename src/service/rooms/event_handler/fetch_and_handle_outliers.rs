@@ -103,10 +103,13 @@ pub(super) async fn fetch_and_handle_outliers<'a>(
 			match self
 				.services
 				.sending
-				.send_federation_request(origin, get_event::v1::Request {
-					event_id: (*next_id).to_owned(),
-					include_unredacted_content: None,
-				})
+				.send_federation_request(
+					origin,
+					get_event::v1::Request {
+						event_id: (*next_id).to_owned(),
+						include_unredacted_content: None,
+					},
+				)
 				.await
 			{
 				| Ok(res) => {
@@ -206,10 +209,11 @@ pub(super) async fn fetch_and_handle_outliers<'a>(
 			))
 			.await
 			{
-				| Ok((pdu, json)) =>
+				| Ok((pdu, json)) => {
 					if next_id == *id {
 						pdus.push((pdu, Some(json)));
-					},
+					}
+				},
 				| Err(e) => {
 					warn!("Authentication of event {next_id} failed: {e:?}");
 					back_off(next_id);

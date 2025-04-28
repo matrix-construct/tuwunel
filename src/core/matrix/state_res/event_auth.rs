@@ -424,12 +424,13 @@ where
 	// or equal to the invite level
 	if *incoming_event.event_type() == TimelineEventType::RoomThirdPartyInvite {
 		let invite_level = match &power_levels_event {
-			| Some(power_levels) =>
+			| Some(power_levels) => {
 				deserialize_power_levels_content_invite(
 					power_levels.content().get(),
 					room_version,
 				)?
-				.invite,
+				.invite
+			},
 			| None => int!(0),
 		};
 
@@ -460,11 +461,12 @@ where
 			power_levels_event.as_ref(),
 			sender_power_level,
 		) {
-			| Some(required_pwr_lvl) =>
+			| Some(required_pwr_lvl) => {
 				if !required_pwr_lvl {
 					warn!("m.room.power_levels was not allowed");
 					return Ok(false);
-				},
+				}
+			},
 			| _ => {
 				warn!("m.room.power_levels was not allowed");
 				return Ok(false);
@@ -485,8 +487,9 @@ where
 		&& *incoming_event.event_type() == TimelineEventType::RoomRedaction
 	{
 		let redact_level = match power_levels_event {
-			| Some(pl) =>
-				deserialize_power_levels_content_redact(pl.content().get(), room_version)?.redact,
+			| Some(pl) => {
+				deserialize_power_levels_content_redact(pl.content().get(), room_version)?.redact
+			},
 			| None => int!(50),
 		};
 
@@ -672,7 +675,7 @@ fn valid_membership_change(
 		| MembershipState::Invite => {
 			// If content has third_party_invite key
 			match third_party_invite.and_then(|i| i.deserialize().ok()) {
-				| Some(tp_id) =>
+				| Some(tp_id) => {
 					if target_user_current_membership == MembershipState::Ban {
 						warn!(?target_user_membership_event_id, "Can't invite banned user");
 						false
@@ -687,7 +690,8 @@ fn valid_membership_change(
 							warn!("Third party invite invalid");
 						}
 						allow
-					},
+					}
+				},
 				| _ => {
 					if !sender_is_joined
 						|| target_user_current_membership == MembershipState::Join
@@ -716,7 +720,7 @@ fn valid_membership_change(
 				},
 			}
 		},
-		| MembershipState::Leave =>
+		| MembershipState::Leave => {
 			if sender == target_user {
 				let allow = target_user_current_membership == MembershipState::Join
 					|| target_user_current_membership == MembershipState::Invite
@@ -753,8 +757,9 @@ fn valid_membership_change(
 					);
 				}
 				allow
-			},
-		| MembershipState::Ban =>
+			}
+		},
+		| MembershipState::Ban => {
 			if !sender_is_joined {
 				warn!(?sender_membership_event_id, "Can't ban user if sender is not joined");
 				false
@@ -770,7 +775,8 @@ fn valid_membership_change(
 					);
 				}
 				allow
-			},
+			}
+		},
 		| MembershipState::Knock if room_version.allow_knocking => {
 			// 1. If the `join_rule` is anything other than `knock` or `knock_restricted`,
 			//    reject.

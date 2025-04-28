@@ -386,17 +386,29 @@ pub(crate) fn event_id(id: &str) -> OwnedEventId {
 	format!("${id}:foo").try_into().unwrap()
 }
 
-pub(crate) fn alice() -> &'static UserId { user_id!("@alice:foo") }
+pub(crate) fn alice() -> &'static UserId {
+	user_id!("@alice:foo")
+}
 
-pub(crate) fn bob() -> &'static UserId { user_id!("@bob:foo") }
+pub(crate) fn bob() -> &'static UserId {
+	user_id!("@bob:foo")
+}
 
-pub(crate) fn charlie() -> &'static UserId { user_id!("@charlie:foo") }
+pub(crate) fn charlie() -> &'static UserId {
+	user_id!("@charlie:foo")
+}
 
-pub(crate) fn ella() -> &'static UserId { user_id!("@ella:foo") }
+pub(crate) fn ella() -> &'static UserId {
+	user_id!("@ella:foo")
+}
 
-pub(crate) fn zara() -> &'static UserId { user_id!("@zara:foo") }
+pub(crate) fn zara() -> &'static UserId {
+	user_id!("@zara:foo")
+}
 
-pub(crate) fn room_id() -> &'static RoomId { room_id!("!test:foo") }
+pub(crate) fn room_id() -> &'static RoomId {
+	room_id!("!test:foo")
+}
 
 pub(crate) fn member_content_ban() -> Box<RawJsonValue> {
 	to_raw_json_value(&RoomMemberEventContent::new(MembershipState::Ban)).unwrap()
@@ -611,7 +623,9 @@ pub(crate) mod event {
 	impl Event for PduEvent {
 		type Id = OwnedEventId;
 
-		fn event_id(&self) -> &Self::Id { &self.event_id }
+		fn event_id(&self) -> &Self::Id {
+			&self.event_id
+		}
 
 		fn room_id(&self) -> &RoomId {
 			match &self.rest {

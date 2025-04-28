@@ -113,19 +113,29 @@ impl<'a> State<'a> {
 	}
 
 	#[inline]
-	fn fetch_key(&self) -> Option<Key<'_>> { self.inner.key() }
+	fn fetch_key(&self) -> Option<Key<'_>> {
+		self.inner.key()
+	}
 
 	#[inline]
-	fn _fetch_val(&self) -> Option<Val<'_>> { self.inner.value() }
+	fn _fetch_val(&self) -> Option<Val<'_>> {
+		self.inner.value()
+	}
 
 	#[inline]
-	fn fetch(&self) -> Option<KeyVal<'_>> { self.inner.item() }
+	fn fetch(&self) -> Option<KeyVal<'_>> {
+		self.inner.item()
+	}
 
 	#[inline]
-	pub(super) fn status(&self) -> Option<rocksdb::Error> { self.inner.status().err() }
+	pub(super) fn status(&self) -> Option<rocksdb::Error> {
+		self.inner.status().err()
+	}
 
 	#[inline]
-	pub(super) fn valid(&self) -> bool { self.inner.valid() }
+	pub(super) fn valid(&self) -> bool {
+		self.inner.valid()
+	}
 }
 
 fn keyval_longevity<'a, 'b: 'a>(item: KeyVal<'a>) -> KeyVal<'b> {

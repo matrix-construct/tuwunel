@@ -71,10 +71,10 @@ pub fn content_disposition_type(content_type: Option<&str>) -> ContentDispositio
 /// `sanitize_filename` crate
 #[tracing::instrument(level = "debug")]
 pub fn sanitise_filename(filename: &str) -> String {
-	sanitize_filename::sanitize_with_options(filename, sanitize_filename::Options {
-		truncate: false,
-		..Default::default()
-	})
+	sanitize_filename::sanitize_with_options(
+		filename,
+		sanitize_filename::Options { truncate: false, ..Default::default() },
+	)
 }
 
 /// creates the final Content-Disposition based on whether the filename exists
@@ -127,12 +127,14 @@ mod tests {
 	fn empty_sanitisation() {
 		use crate::utils::string::EMPTY;
 
-		let result =
-			sanitize_filename::sanitize_with_options(EMPTY, sanitize_filename::Options {
+		let result = sanitize_filename::sanitize_with_options(
+			EMPTY,
+			sanitize_filename::Options {
 				windows: true,
 				truncate: true,
 				replacement: "",
-			});
+			},
+		);
 
 		assert_eq!(EMPTY, result);
 	}

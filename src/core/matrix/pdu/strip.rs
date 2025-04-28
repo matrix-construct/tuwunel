@@ -48,7 +48,9 @@ pub fn into_any_event_value(self) -> JsonValue {
 #[implement(super::Pdu)]
 #[must_use]
 #[inline]
-pub fn into_room_event(self) -> Raw<AnyTimelineEvent> { self.to_room_event() }
+pub fn into_room_event(self) -> Raw<AnyTimelineEvent> {
+	self.to_room_event()
+}
 
 #[implement(super::Pdu)]
 #[must_use]
@@ -86,7 +88,9 @@ pub fn to_room_event_value(&self) -> JsonValue {
 #[implement(super::Pdu)]
 #[must_use]
 #[inline]
-pub fn into_message_like_event(self) -> Raw<AnyMessageLikeEvent> { self.to_message_like_event() }
+pub fn into_message_like_event(self) -> Raw<AnyMessageLikeEvent> {
+	self.to_message_like_event()
+}
 
 #[implement(super::Pdu)]
 #[must_use]
@@ -125,7 +129,9 @@ pub fn to_message_like_event_value(&self) -> JsonValue {
 #[implement(super::Pdu)]
 #[must_use]
 #[inline]
-pub fn into_sync_room_event(self) -> Raw<AnySyncTimelineEvent> { self.to_sync_room_event() }
+pub fn into_sync_room_event(self) -> Raw<AnySyncTimelineEvent> {
+	self.to_sync_room_event()
+}
 
 #[implement(super::Pdu)]
 #[must_use]

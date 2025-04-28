@@ -358,16 +358,19 @@ pub async fn update_displayname(
 		.iter()
 		.try_stream()
 		.and_then(|room_id: &OwnedRoomId| async move {
-			let pdu = PduBuilder::state(user_id.to_string(), &RoomMemberEventContent {
-				displayname: displayname.clone(),
-				membership: MembershipState::Join,
-				avatar_url: avatar_url.clone(),
-				blurhash: blurhash.clone(),
-				join_authorized_via_users_server: None,
-				reason: None,
-				is_direct: None,
-				third_party_invite: None,
-			});
+			let pdu = PduBuilder::state(
+				user_id.to_string(),
+				&RoomMemberEventContent {
+					displayname: displayname.clone(),
+					membership: MembershipState::Join,
+					avatar_url: avatar_url.clone(),
+					blurhash: blurhash.clone(),
+					join_authorized_via_users_server: None,
+					reason: None,
+					is_direct: None,
+					third_party_invite: None,
+				},
+			);
 
 			Ok((pdu, room_id))
 		})
@@ -415,16 +418,19 @@ pub async fn update_avatar_url(
 		.iter()
 		.try_stream()
 		.and_then(|room_id: &OwnedRoomId| async move {
-			let pdu = PduBuilder::state(user_id.to_string(), &RoomMemberEventContent {
-				avatar_url: avatar_url.clone(),
-				blurhash: blurhash.clone(),
-				membership: MembershipState::Join,
-				displayname: displayname.clone(),
-				join_authorized_via_users_server: None,
-				reason: None,
-				is_direct: None,
-				third_party_invite: None,
-			});
+			let pdu = PduBuilder::state(
+				user_id.to_string(),
+				&RoomMemberEventContent {
+					avatar_url: avatar_url.clone(),
+					blurhash: blurhash.clone(),
+					membership: MembershipState::Join,
+					displayname: displayname.clone(),
+					join_authorized_via_users_server: None,
+					reason: None,
+					is_direct: None,
+					third_party_invite: None,
+				},
+			);
 
 			Ok((pdu, room_id))
 		})

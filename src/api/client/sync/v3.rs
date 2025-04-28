@@ -1134,8 +1134,9 @@ async fn calculate_state_incremental<'a>(
 
 			match content.membership {
 				| Leave => leu.insert(user_id),
-				| Join if joined_since_last_sync || !shares_encrypted_room(&user_id).await =>
-					dlu.insert(user_id),
+				| Join if joined_since_last_sync || !shares_encrypted_room(&user_id).await => {
+					dlu.insert(user_id)
+				},
 				| _ => false,
 			};
 

@@ -21,7 +21,9 @@ pub static FLAGS: Mutex<BTreeMap<&str, &[&str]>> = Mutex::new(BTreeMap::new());
 static FEATURES: OnceLock<Vec<&'static str>> = OnceLock::new();
 
 /// List of features enabled for the project.
-pub fn features() -> &'static Vec<&'static str> { FEATURES.get_or_init(init_features) }
+pub fn features() -> &'static Vec<&'static str> {
+	FEATURES.get_or_init(init_features)
+}
 
 fn init_features() -> Vec<&'static str> {
 	let mut features = Vec::new();

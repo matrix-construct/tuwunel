@@ -1,0 +1,60 @@
+name: Rust Build and Release
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Set up Rust
+        uses: actions/setup-rust@v1
+        with:
+          rust-version: 1.86
+
+      - name: Cache Cargo registry and build
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Clean up Cargo cache
+        run: |
+#          cargo clean --release
+          cargo fetch --locked
+
+      - name: Build release-debuginfo profile
+        run: |
+          cargo fetch
+          cargo build --profile release-debuginfo --all-features
+
+      - name: Build release profile
+        run: |
+          cargo build --release --all-features
+
+      - name: Prepare release artefacts
+        run: |
+          mkdir -p release
+          cp -r target/release/* release/
+          cp -r target/release-debuginfo/* release/
+
+      - name: Upload release artefacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: rust-release-artifacts
+          path: release/
+

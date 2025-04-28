@@ -14,10 +14,14 @@ pub struct Data<'a> {
 
 impl Data<'_> {
 	#[must_use]
-	pub fn our_modules(&self) -> bool { self.mod_name().starts_with(info::CRATE_PREFIX) }
+	pub fn our_modules(&self) -> bool {
+		self.mod_name().starts_with(info::CRATE_PREFIX)
+	}
 
 	#[must_use]
-	pub fn level(&self) -> Level { *self.event.metadata().level() }
+	pub fn level(&self) -> Level {
+		*self.event.metadata().level()
+	}
 
 	#[must_use]
 	pub fn mod_name(&self) -> &str {

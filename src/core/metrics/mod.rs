@@ -65,7 +65,9 @@ impl Metrics {
 	}
 
 	#[inline]
-	pub fn task_root(&self) -> Option<&TaskMonitor> { self.task_monitor.as_ref() }
+	pub fn task_root(&self) -> Option<&TaskMonitor> {
+		self.task_monitor.as_ref()
+	}
 
 	#[inline]
 	pub fn num_workers(&self) -> usize {

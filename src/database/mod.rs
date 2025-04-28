@@ -73,15 +73,21 @@ impl Database {
 	}
 
 	#[inline]
-	pub fn keys(&self) -> impl Iterator<Item = &MapsKey> + Send + '_ { self.maps.keys() }
+	pub fn keys(&self) -> impl Iterator<Item = &MapsKey> + Send + '_ {
+		self.maps.keys()
+	}
 
 	#[inline]
 	#[must_use]
-	pub fn is_read_only(&self) -> bool { self.db.is_read_only() }
+	pub fn is_read_only(&self) -> bool {
+		self.db.is_read_only()
+	}
 
 	#[inline]
 	#[must_use]
-	pub fn is_secondary(&self) -> bool { self.db.is_secondary() }
+	pub fn is_secondary(&self) -> bool {
+		self.db.is_secondary()
+	}
 }
 
 impl Index<&str> for Database {

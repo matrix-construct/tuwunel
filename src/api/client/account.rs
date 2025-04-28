@@ -288,12 +288,13 @@ pub(crate) async fn register_route(
 
 	if body.body.login_type == Some(LoginType::ApplicationService) {
 		match body.appservice_info {
-			| Some(ref info) =>
+			| Some(ref info) => {
 				if !info.is_user_match(&user_id) && !emergency_mode_enabled {
 					return Err!(Request(Exclusive(
 						"Username is not in an appservice namespace."
 					)));
-				},
+				}
+			},
 			| _ => {
 				return Err!(Request(MissingToken("Missing appservice token.")));
 			},

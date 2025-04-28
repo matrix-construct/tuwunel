@@ -23,29 +23,29 @@ RUN \
 --mount=type=cache,dst=${CARGO_HOME},sharing=locked \
 --mount=type=cache,dst=${CARGO_TARGET_DIR},sharing=shared \
 <<EOF
-	env
-	set -eux
-	case "$cargo_profile" in
-		    "dev") profile_dir="debug";;
-		   "test") profile_dir="debug";;
-		"release") profile_dir="release";;
-		  "bench") profile_dir="release";;
-		        *) profile_dir="$cargp_profile";;
-	esac
+    env
+    set -eux
+    case "$cargo_profile" in
+            "dev") profile_dir="debug";;
+           "test") profile_dir="debug";;
+        "release") profile_dir="release";;
+          "bench") profile_dir="release";;
+                *) profile_dir="$cargp_profile";;
+    esac
 
-	rustup run ${rust_toolchain} \
-		cargo install \
-			--locked \
-			--no-track \
-			--no-default-features \
-			--features "${cargo_features}" \
-			--profile "${cargo_profile}" \
-			--target "${CARGO_TARGET}" \
-			--target-dir "${CARGO_TARGET_DIR}" \
-			--root "${install_temp}" \
-			--path "${crate_path}" \
-			${cargo_args} \
-			${crate_ident}
+    rustup run ${rust_toolchain} \
+        cargo install \
+            --locked \
+            --no-track \
+            --no-default-features \
+            --features "${cargo_features}" \
+            --profile "${cargo_profile}" \
+            --target "${CARGO_TARGET}" \
+            --target-dir "${CARGO_TARGET_DIR}" \
+            --root "${install_temp}" \
+            --path "${crate_path}" \
+            ${cargo_args} \
+            ${crate_ident}
 EOF
 RUN [ -f "${install_temp}/bin/conduwuit" ]
 
@@ -62,14 +62,14 @@ WORKDIR /
 RUN \
 --mount=type=bind,from=output,src=${install_temp},dst=/mnt/install \
 <<EOF
-	env
-	set -eux
-	cp -ndR --preserve=all -t ${CARGO_INSTALL_ROOT} /mnt/install/*
+    env
+    set -eux
+    cp -ndR --preserve=all -t ${CARGO_INSTALL_ROOT} /mnt/install/*
 EOF
 ENV bin_path="${CARGO_INSTALL_ROOT}/bin/conduwuit"
 RUN <<EOF
-	set -eux
-	ldd -v ${bin_path}
-	du -h ${bin_path}
-	sha1sum ${bin_path}
+    set -eux
+    ldd -v ${bin_path}
+    du -h ${bin_path}
+    sha1sum ${bin_path}
 EOF

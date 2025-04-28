@@ -12,34 +12,34 @@ RUN \
 --mount=type=cache,dst=${RUSTUP_HOME},sharing=locked \
 --mount=type=cache,dst=${CARGO_HOME},sharing=locked \
 <<EOF
-	env
-	set -eux
+    env
+    set -eux
 
-	url="https://static.rust-lang.org/rustup/archive/${rustup_version}/${CARGO_TARGET}/rustup-init"
-	curl -S -O -s "$url"
-	chmod o+x rustup-init
-	./rustup-init -y \
-		--verbose \
-		--profile minimal \
-		--no-modify-path \
-		--no-update-default-toolchain \
-		--default-host ${CARGO_TARGET} \
-		--default-toolchain ${rust_toolchain}
+    url="https://static.rust-lang.org/rustup/archive/${rustup_version}/${CARGO_TARGET}/rustup-init"
+    curl -S -O -s "$url"
+    chmod o+x rustup-init
+    ./rustup-init -y \
+        --verbose \
+        --profile minimal \
+        --no-modify-path \
+        --no-update-default-toolchain \
+        --default-host ${CARGO_TARGET} \
+        --default-toolchain ${rust_toolchain}
 
-	chmod -R go+rw $CARGO_HOME $RUSTUP_HOME
-	rm rustup-init
+    chmod -R go+rw $CARGO_HOME $RUSTUP_HOME
+    rm rustup-init
 EOF
 ENV PATH="${CARGO_HOME}/bin:$PATH"
 RUN \
 --mount=type=cache,dst=${RUSTUP_HOME},sharing=locked \
 --mount=type=cache,dst=${CARGO_HOME},sharing=locked \
 <<EOF
-	env
-	set -eux
-	rustup component add \
-		--toolchain ${rust_toolchain} \
-		--target ${CARGO_TARGET} \
-		clippy
+    env
+    set -eux
+    rustup component add \
+        --toolchain ${rust_toolchain} \
+        --target ${CARGO_TARGET} \
+        clippy
 EOF
 
 
@@ -53,7 +53,7 @@ RUN \
 --mount=type=cache,dst=${RUSTUP_HOME},sharing=locked \
 --mount=type=cache,dst=${CARGO_HOME},sharing=locked \
 <<EOF
-	env
+    env
     set -eux
     rustup run --install ${rust_toolchain} \
         cargo install \

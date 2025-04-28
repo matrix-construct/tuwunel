@@ -22,7 +22,9 @@ pub(crate) struct ActualDest {
 
 impl ActualDest {
 	#[inline]
-	pub(crate) fn string(&self) -> String { self.dest.https_string() }
+	pub(crate) fn string(&self) -> String {
+		self.dest.https_string()
+	}
 }
 
 impl super::Service {
@@ -68,7 +70,7 @@ impl super::Service {
 		let mut host = dest.as_str().to_owned();
 		let actual_dest = match get_ip_with_port(dest.as_str()) {
 			| Some(host_port) => Self::actual_dest_1(host_port)?,
-			| None =>
+			| None => {
 				if let Some(pos) = dest.as_str().find(':') {
 					self.actual_dest_2(dest, cache, pos).await?
 				} else {
@@ -76,17 +78,20 @@ impl super::Service {
 						.await?;
 					self.services.server.check_running()?;
 					match self.request_well_known(dest.as_str()).await? {
-						| Some(delegated) =>
+						| Some(delegated) => {
 							self.actual_dest_3(&mut host, cache, delegated)
-								.await?,
+								.await?
+						},
 						| _ => match self.query_srv_record(dest.as_str()).await? {
-							| Some(overrider) =>
+							| Some(overrider) => {
 								self.actual_dest_4(&host, cache, overrider)
-									.await?,
+									.await?
+							},
 							| _ => self.actual_dest_5(dest, cache).await?,
 						},
 					}
-				},
+				}
+			},
 		};
 
 		// Can't use get_ip_with_port here because we don't want to add a port
@@ -142,18 +147,20 @@ impl super::Service {
 		*host = add_port_to_hostname(&delegated).uri_string();
 		match get_ip_with_port(&delegated) {
 			| Some(host_and_port) => Self::actual_dest_3_1(host_and_port),
-			| None =>
+			| None => {
 				if let Some(pos) = delegated.find(':') {
 					self.actual_dest_3_2(cache, delegated, pos).await
 				} else {
 					trace!("Delegated hostname has no port in this branch");
 					match self.query_srv_record(&delegated).await? {
-						| Some(overrider) =>
+						| Some(overrider) => {
 							self.actual_dest_3_3(cache, delegated, overrider)
-								.await,
+								.await
+						},
 						| _ => self.actual_dest_3_4(cache, delegated).await,
 					}
-				},
+				}
+			},
 		}
 	}
 
@@ -301,15 +308,17 @@ impl super::Service {
 		{
 			| Err(e) => Self::handle_resolve_error(&e, hostname),
 			| Ok(override_ip) => {
-				self.cache
-					.set_override(untername, &CachedOverride {
+				self.cache.set_override(
+					untername,
+					&CachedOverride {
 						ips: override_ip.into_iter().take(MAX_IPS).collect(),
 						port,
 						expire: CachedOverride::default_expire(),
 						overriding: (hostname != untername)
 							.then_some(hostname.into())
 							.inspect(|_| debug_info!("{untername:?} overriden by {hostname:?}")),
-					});
+					},
+				);
 
 				Ok(())
 			},

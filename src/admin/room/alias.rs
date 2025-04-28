@@ -75,12 +75,13 @@ pub(super) async fn process(command: RoomAliasCommand, context: &Context<'_>) ->
 								server_user,
 							) {
 								| Err(err) => Err!("Failed to remove alias: {err}"),
-								| Ok(()) =>
+								| Ok(()) => {
 									context
 										.write_str(&format!(
 											"Successfully overwrote alias (formerly {id})"
 										))
-										.await,
+										.await
+								},
 							}
 						},
 						| (false, Ok(id)) => Err!(
@@ -114,10 +115,11 @@ pub(super) async fn process(command: RoomAliasCommand, context: &Context<'_>) ->
 							.await
 						{
 							| Err(err) => Err!("Failed to remove alias: {err}"),
-							| Ok(()) =>
+							| Ok(()) => {
 								context
 									.write_str(&format!("Removed alias from {id}"))
-									.await,
+									.await
+							},
 						},
 					}
 				},
@@ -129,16 +131,17 @@ pub(super) async fn process(command: RoomAliasCommand, context: &Context<'_>) ->
 						.await
 					{
 						| Err(_) => Err!("Alias isn't in use."),
-						| Ok(id) =>
+						| Ok(id) => {
 							context
 								.write_str(&format!("Alias resolves to {id}"))
-								.await,
+								.await
+						},
 					}
 				},
 				| RoomAliasCommand::List { .. } => unreachable!(),
 			}
 		},
-		| RoomAliasCommand::List { room_id } =>
+		| RoomAliasCommand::List { room_id } => {
 			if let Some(room_id) = room_id {
 				let aliases: Vec<OwnedRoomAliasId> = services
 					.rooms
@@ -178,6 +181,7 @@ pub(super) async fn process(command: RoomAliasCommand, context: &Context<'_>) ->
 
 				let plain = format!("Aliases:\n{plain_list}");
 				context.write_str(&plain).await
-			},
+			}
+		},
 	}
 }

@@ -76,7 +76,9 @@ where
 {
 	type Target = T;
 
-	fn deref(&self) -> &Self::Target { &self.body }
+	fn deref(&self) -> &Self::Target {
+		&self.body
+	}
 }
 
 #[async_trait]
