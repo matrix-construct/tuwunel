@@ -34,7 +34,6 @@ jobs:
 
       - name: Clean up Cargo cache
         run: |
-#          cargo clean --release
           cargo fetch --locked
 
       - name: Build release-debuginfo profile
