@@ -44,11 +44,16 @@ jobs:
         run: |
           mkdir -p release
           cp -r target/release/* release/
-          cp -r target/release-debuginfo/* release/
+          cp -r target/release-debuginfo/* release-debuginfo/
 
       - name: Upload release artefacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
-          name: rust-release-artifacts
+          name: release
           path: release/
+      - name: Upload release artefacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-debug
+          path: release-debuginfo/
 
