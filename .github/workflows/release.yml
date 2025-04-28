@@ -33,7 +33,6 @@ jobs:
 
       - name: Build release-debuginfo profile
         run: |
-          cargo fetch
           cargo build --profile release-debuginfo --all-features
 
       - name: Build release profile
@@ -43,8 +42,14 @@ jobs:
       - name: Prepare release artefacts
         run: |
           mkdir -p release
-          cp -r target/release/* release/
-          cp -r target/release-debuginfo/* release-debuginfo/
+           cd target/release
+          find . -maxdepth 2 -mindepth 2 \( -type f -o -type d \) \
+          ! -path "./.fingerprint*" ! -path "./build*" ! -path "./deps*" ! -path "./incremental*" \
+          -exec cp -r '{}' /release ';'
+          cd target/release-debuginfo
+          find . -maxdepth 2 -mindepth 2 \( -type f -o -type d \) \
+          ! -path "./.fingerprint*" ! -path "./build*" ! -path "./deps*" ! -path "./incremental*" \
+          -exec cp -r '{}' /release-debuginfo ';'
 
       - name: Upload release artefacts
         uses: actions/upload-artifact@v4
