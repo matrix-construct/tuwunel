@@ -11,7 +11,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    container: rust:1.86
+    container: ghcr.io/jakguel/tuwunel-builder:1.86
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
@@ -31,10 +31,6 @@ jobs:
         run: |
           cargo fetch --locked
 
-      - name: Build release-debuginfo profile
-        run: |
-          cargo build --profile release-debuginfo --all-features
-
       - name: Build release profile
         run: |
           cargo build --release --all-features
@@ -42,14 +38,10 @@ jobs:
       - name: Prepare release artefacts
         run: |
           mkdir -p release
-           cd target/release
+          cd ${ GITHUB_WORKSPACE }/target/release
           find . -maxdepth 2 -mindepth 2 \( -type f -o -type d \) \
           ! -path "./.fingerprint*" ! -path "./build*" ! -path "./deps*" ! -path "./incremental*" \
           -exec cp -r '{}' /release ';'
-          cd target/release
-          find . -maxdepth 2 -mindepth 2 \( -type f -o -type d \) \
-          ! -path "./.fingerprint*" ! -path "./build*" ! -path "./deps*" ! -path "./incremental*" \
-          -exec cp -r '{}' /release-debuginfo ';'
 
       - name: Upload release artefacts
         uses: actions/upload-artifact@v4
@@ -62,3 +54,12 @@ jobs:
           name: release-debug
           path: release-debuginfo/
 
+
+#      - name: Build release-debuginfo profile
+#        run: |
+#          cargo build --profile release-debuginfo --all-features
+#
+#          cd ${ GITHUB_WORKSPACE }/target/release-debuginfo
+#          find . -maxdepth 2 -mindepth 2 \( -type f -o -type d \) \
+#          ! -path "./.fingerprint*" ! -path "./build*" ! -path "./deps*" ! -path "./incremental*" \
+#          -exec cp -r '{}' /release-debuginfo ';'
