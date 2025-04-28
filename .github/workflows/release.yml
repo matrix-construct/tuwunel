@@ -46,7 +46,7 @@ jobs:
           find . -maxdepth 2 -mindepth 2 \( -type f -o -type d \) \
           ! -path "./.fingerprint*" ! -path "./build*" ! -path "./deps*" ! -path "./incremental*" \
           -exec cp -r '{}' /release ';'
-          cd target/release-debuginfo
+          cd target/release
           find . -maxdepth 2 -mindepth 2 \( -type f -o -type d \) \
           ! -path "./.fingerprint*" ! -path "./build*" ! -path "./deps*" ! -path "./incremental*" \
           -exec cp -r '{}' /release-debuginfo ';'
