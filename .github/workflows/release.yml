@@ -10,7 +10,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     container: ghcr.io/jakguel/tuwunel-builder:1.86
     steps:
       - name: Checkout Code
