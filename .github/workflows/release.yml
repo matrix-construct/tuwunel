@@ -36,7 +36,7 @@ jobs:
           cargo build --release --all-features
 
       - name: Prepare release artefacts
-        working-directory: ${{ GITHUB_WORKSPACE }}/target/release
+        working-directory: target/release
         run: |
           mkdir -p /release
           find -maxdepth 2 -mindepth 2 -type d -not -ipath './.fingerprint*' -not -ipath './build*' -not -ipath './deps*' -not -ipath './incremental*' -exec cp -r '{}' '/release' ';'
