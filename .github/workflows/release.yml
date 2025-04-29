@@ -31,14 +31,10 @@ jobs:
         uses: corca-ai/local-cache@v2 # actions/cache@v4
         with:
           path: |
-            /usr/local/cargo/bin/
-            /usr/local/cargo/registry/index/
-            /usr/local/cargo/registry/cache/
-            /usr/local/cargo/git/db
+            /usr/local/cargo/registry
+            /usr/local/cargo/git
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
 
       - name: Clean up Cargo cache
         run: |
