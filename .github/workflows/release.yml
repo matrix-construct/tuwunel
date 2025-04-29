@@ -36,10 +36,11 @@ jobs:
           cargo build --release --all-features
 
       - name: Prepare release artefacts
+        working-directory: ${{ GITHUB_WORKSPACE }}/target/release
         run: |
           mkdir -p /release
-          cd $GITHUB_WORKSPACE/target/release
-          find . -maxdepth 2 -mindepth 2 -not -path "./.fingerprint*" -not -path "./build*" -not -path "./deps*" -not -path "./incremental*" -exec cp -r '{}' /release ';'
+          find -maxdepth 2 -mindepth 2 -type d -not -ipath './.fingerprint*' -not -ipath './build*' -not -ipath './deps*' -not -ipath './incremental*' -exec cp -r '{}' '/release' ';'
+          find -maxdepth 2 -mindepth 2 -type f -not -ipath './.fingerprint*' -not -ipath './build*' -not -ipath './deps*' -not -ipath './incremental*' -exec cp -r '{}' '/release' ';'
 
       - name: Upload release artefacts
         uses: actions/upload-artifact@v4
