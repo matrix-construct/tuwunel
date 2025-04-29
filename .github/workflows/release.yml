@@ -38,7 +38,7 @@ jobs:
       - name: Prepare release artefacts
         run: |
           mkdir -p /release
-          cd $env:GITHUB_WORKSPACE/target/release
+          cd $GITHUB_WORKSPACE/target/release
           find . -maxdepth 2 -mindepth 2 -type f -o -type d -not -path "./.fingerprint*" -not -path "./build*" -not -path "./deps*" -not -path "./incremental*" -exec cp -r '{}' /release ';'
 
       - name: Upload release artefacts
