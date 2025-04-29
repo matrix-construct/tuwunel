@@ -10,7 +10,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: F
     container: ghcr.io/jakguel/tuwunel-builder:1.86
     steps:
       - name: Checkout Code
@@ -47,12 +47,12 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: release
-          path: release/
+          path: /release/
       - name: Upload release artefacts
         uses: actions/upload-artifact@v4
         with:
           name: release-debug
-          path: release-debuginfo/
+          path: /release-debuginfo/
 
 
 #      - name: Build release-debuginfo profile
