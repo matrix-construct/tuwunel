@@ -46,12 +46,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: release
-          path: /release/
-      - name: Upload release artefacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-debug
-          path: /release-debuginfo/
+          path: target/release
 
 
 #      - name: Build release-debuginfo profile
