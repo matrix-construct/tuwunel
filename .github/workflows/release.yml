@@ -36,17 +36,19 @@ jobs:
           cargo build --release --all-features
 
       - name: Prepare release artefacts
-        working-directory: target/release
         run: |
+          eval export WORKSPACE=$PWD
           mkdir -p /release
-          find -maxdepth 2 -mindepth 2 -type d -not -ipath './.fingerprint*' -not -ipath './build*' -not -ipath './deps*' -not -ipath './incremental*' -exec cp -r '{}' '/release' ';'
-          find -maxdepth 2 -mindepth 2 -type f -not -ipath './.fingerprint*' -not -ipath './build*' -not -ipath './deps*' -not -ipath './incremental*' -exec cp -r '{}' '/release' ';'
+          cd $WORKSPACE/target/release
+          find -maxdepth 1 -type d -not -ipath './.fingerprint*' -not -ipath './build*' -not -ipath './deps*' -not -ipath './incremental*' -exec cp -r '{}' '/release' ';'
+          find -maxdepth 1 -type f -not -ipath './.fingerprint*' -not -ipath './build*' -not -ipath './deps*' -not -ipath './incremental*' -exec cp -r '{}' '/release' ';'
 
       - name: Upload release artefacts
         uses: actions/upload-artifact@v4
         with:
           name: release
           path: target/release
+
 
 
 #      - name: Build release-debuginfo profile
