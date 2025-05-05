@@ -40,7 +40,7 @@ jobs:
 #         todo: add branch name to this key
 
       - name: Cache Cargo registry and build
-        uses: corca-ai/local-cache@v2
+        uses: jiyan/local-cache@v1
         id: build-cache
         with:
           path: target
