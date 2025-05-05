@@ -16,25 +16,37 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v3
 
-      - name: Cache Cargo registry and build
-        uses: actions/cache@v4
-        with:
-          path: |
-            /usr/local/cargo/registry
-            /usr/local/cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
+      #- name: Cache Cargo registry and build
+      #  uses: actions/cache@v4
+      #  with:
+      #    path: |
+      #      /usr/local/cargo/registry
+      #      /usr/local/cargo/git
+      #      target
+      #    key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+      #    restore-keys: |
+      #      ${{ runner.os }}-cargo-
 
       - name: Cache Cargo registry and build
-        uses: corca-ai/local-cache@v2 # actions/cache@v4
+        uses: MasterworksIO/action-local-cache@2
+        id: cargo-cache
         with:
           path: |
-            /usr/local/cargo/registry
-            /usr/local/cargo/git
+            /usr/local/cargo/bin/
+            /usr/local/cargo/registry/index/
+            /usr/local/cargo/registry/cache/
+            /usr/local/cargo/git/db
+          key: cargo-${{ hashFiles('**/Cargo.lock') }}
+#         todo: add branch name to this key
+
+      - name: Cache Cargo registry and build
+        uses: MasterworksIO/action-local-cache@2
+        id: build-cache
+        with:
+          path: |
             target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: build-${{ hashFiles('**/Cargo.lock') }}
+#         todo: add branch name to this key
 
       - name: Clean up Cargo cache
         run: |
@@ -45,12 +57,14 @@ jobs:
           cargo build --release --all-features
 
       - name: Prepare release artefacts
-        run: |
-          eval export WORKSPACE=$PWD
-          mkdir -p /release
-          cd $WORKSPACE/target/release
-          find -maxdepth 2 -type d -not -ipath './.fingerprint*' -not -ipath './build*' -not -ipath './deps*' -not -ipath './incremental*' -exec cp -r '{}' '/release' ';'
-          find -maxdepth 2 -type f -not -ipath './.fingerprint*' -not -ipath './build*' -not -ipath './deps*' -not -ipath './incremental*' -exec cp -r '{}' '/release' ';'
+        uses: mathiasvr/command-output@v2.0.0
+        with:
+          run: |
+            eval export WORKSPACE=$PWD
+            mkdir -p /release
+            cd $WORKSPACE/target/release
+            find -maxdepth 1 -type d -not -ipath './.fingerprint*' -not -ipath './build*' -not -ipath './deps*' -not -ipath './incremental*' -exec cp -r '{}' '/release' ';'
+            find -maxdepth 1 -type f -not -ipath './.fingerprint*' -not -ipath './build*' -not -ipath './deps*' -not -ipath './incremental*' -exec cp '{}' '/release' ';'
 
       - name: Upload release artefacts
         uses: actions/upload-artifact@v4
