@@ -28,7 +28,7 @@ jobs:
       #      ${{ runner.os }}-cargo-
 
       - name: Cache Cargo registry and build
-        uses: corca-ai/local-cache@v2
+        uses: jiyan/local-cache@v1
         id: cargo-cache
         with:
           path: /usr/local/cargo
