@@ -11,7 +11,14 @@ on:
 jobs:
   build:
     runs-on: self-hosted
-    container: ghcr.io/jakguel/tuwunel-builder:1.86
+    container:
+      image: ghcr.io/jakguel/tuwunel-builder:1.86
+      volumes:
+        - cache_volume:/home/ubuntu/.cache/
+      #        - cache_cargo_bin:/usr/local/cargo/bin
+      #        - cache_cargo_registry_index:/usr/local/cargo/registry/index
+      #        - cache_cargo_registry_cache:/usr/local/cargo/registry/cache
+      #        - cache_cargo_git_db:/usr/local/cargo/git/db
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
@@ -32,10 +39,6 @@ jobs:
         id: cargo-cache
         with:
           path: /usr/local/cargo
-#            /usr/local/cargo/bin/
-#            /usr/local/cargo/registry/index/
-#            /usr/local/cargo/registry/cache/
-#            /usr/local/cargo/git/db
           key: cargo-${{ hashFiles('**/Cargo.lock') }}
 #         todo: add branch name to this key
 
