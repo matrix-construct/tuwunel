@@ -28,7 +28,7 @@ jobs:
       #      ${{ runner.os }}-cargo-
 
       - name: Cache Cargo registry and build
-        uses: jiyan/local-cache@v1
+        uses: jakguel/local-cache@v1
         id: cargo-cache
         with:
           path: /usr/local/cargo
@@ -40,7 +40,7 @@ jobs:
 #         todo: add branch name to this key
 
       - name: Cache Cargo registry and build
-        uses: jiyan/local-cache@v1
+        uses: jakguel/local-cache@v1
         id: build-cache
         with:
           path: target
