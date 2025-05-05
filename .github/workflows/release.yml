@@ -28,23 +28,22 @@ jobs:
       #      ${{ runner.os }}-cargo-
 
       - name: Cache Cargo registry and build
-        uses: MasterworksIO/action-local-cache@2
+        uses: corca-ai/local-cache@v2
         id: cargo-cache
         with:
-          path: |
-            /usr/local/cargo/bin/
-            /usr/local/cargo/registry/index/
-            /usr/local/cargo/registry/cache/
-            /usr/local/cargo/git/db
+          path: /usr/local/cargo
+#            /usr/local/cargo/bin/
+#            /usr/local/cargo/registry/index/
+#            /usr/local/cargo/registry/cache/
+#            /usr/local/cargo/git/db
           key: cargo-${{ hashFiles('**/Cargo.lock') }}
 #         todo: add branch name to this key
 
       - name: Cache Cargo registry and build
-        uses: MasterworksIO/action-local-cache@2
+        uses: corca-ai/local-cache@v2
         id: build-cache
         with:
-          path: |
-            target
+          path: target
           key: build-${{ hashFiles('**/Cargo.lock') }}
 #         todo: add branch name to this key
 
@@ -63,8 +62,10 @@ jobs:
             eval export WORKSPACE=$PWD
             mkdir -p /release
             cd $WORKSPACE/target/release
-            find -maxdepth 1 -type d -not -ipath './.fingerprint*' -not -ipath './build*' -not -ipath './deps*' -not -ipath './incremental*' -exec cp -r '{}' '/release' ';'
+            find -maxdepth 1 -mindepth 1 -type d -not -ipath './.fingerprint*' -not -ipath './build*' -not -ipath './deps*' -not -ipath './incremental*' -exec cp -r '{}' '/release' ';'
             find -maxdepth 1 -type f -not -ipath './.fingerprint*' -not -ipath './build*' -not -ipath './deps*' -not -ipath './incremental*' -exec cp '{}' '/release' ';'
+
+      - run: echo ${{ steps.today.outputs.stdout }}
 
       - name: Upload release artefacts
         uses: actions/upload-artifact@v4
