@@ -57,6 +57,7 @@ jobs:
 
       - name: Prepare release artefacts
         uses: mathiasvr/command-output@v2.0.0
+        id: artifacts
         with:
           run: |
             eval export WORKSPACE=$PWD
@@ -65,7 +66,7 @@ jobs:
             find -maxdepth 1 -mindepth 1 -type d -not -ipath './.fingerprint*' -not -ipath './build*' -not -ipath './deps*' -not -ipath './incremental*' -exec cp -r '{}' '/release' ';'
             find -maxdepth 1 -type f -not -ipath './.fingerprint*' -not -ipath './build*' -not -ipath './deps*' -not -ipath './incremental*' -exec cp '{}' '/release' ';'
 
-      - run: echo ${{ steps.today.outputs.stdout }}
+      - run: echo ${{ steps.artifacts.outputs.stdout }}
 
       - name: Upload release artefacts
         uses: actions/upload-artifact@v4
