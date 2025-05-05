@@ -35,7 +35,7 @@ jobs:
       #      ${{ runner.os }}-cargo-
 
       - name: Cache Cargo registry and build
-        uses: jakguel/local-cache@v2
+        uses: jakguel/local-cache@v1
         id: cargo-cache
         with:
           path: /usr/local/cargo
