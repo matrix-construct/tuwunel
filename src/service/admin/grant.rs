@@ -187,3 +187,7 @@ async fn set_room_tag(&self, room_id: &RoomId, user_id: &UserId, tag: &str) -> R
 		)
 		.await
 }
+
+/// Demote an admin, removing its rights.
+#[implement(super::Service)]
+pub async fn demote_admin(&self, _user_id: &UserId) -> Result { todo!() }

@@ -91,9 +91,9 @@ async fn ldap_login(
 	lowercased_user_id: &UserId,
 	password: &str,
 ) -> Result<OwnedUserId> {
-	let user_dn = match services.config.ldap.bind_dn.as_ref() {
+	let (user_dn, is_ldap_admin) = match services.config.ldap.bind_dn.as_ref() {
 		| Some(bind_dn) if bind_dn.contains("{username}") =>
-			bind_dn.replace("{username}", lowercased_user_id.localpart()),
+			(bind_dn.replace("{username}", lowercased_user_id.localpart()), false),
 		| _ => {
 			debug!("Searching user in LDAP");
 
@@ -102,11 +102,11 @@ async fn ldap_login(
 				return Err!(Ldap("LDAP search returned two or more results"));
 			}
 
-			let Some(user_dn) = dns.first() else {
+			let Some((user_dn, is_admin)) = dns.first() else {
 				return password_login(services, user_id, lowercased_user_id, password).await;
 			};
 
-			user_dn.clone()
+			(user_dn.clone(), *is_admin)
 		},
 	};
 
@@ -121,6 +121,23 @@ async fn ldap_login(
 		services
 			.users
 			.create(lowercased_user_id, Some("*"), Some("ldap"))
+			.await?;
+	}
+
+	let is_tuwunel_admin = !services
+		.admin
+		.user_is_admin(lowercased_user_id)
+		.await;
+
+	if is_ldap_admin && !is_tuwunel_admin {
+		services
+			.admin
+			.make_user_admin(lowercased_user_id)
+			.await?;
+	} else if !is_ldap_admin && is_tuwunel_admin {
+		services
+			.admin
+			.demote_admin(lowercased_user_id)
 			.await?;
 	}
 

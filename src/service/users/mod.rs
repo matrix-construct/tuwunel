@@ -1178,11 +1178,18 @@ impl Service {
 		}
 	}
 
+	/// Performs a LDAP search for the given user.
+	///
+	/// Returns the list of matching users, with a boolean for each result set
+	/// to true if the user is an admin.
 	#[cfg(feature = "ldap")]
-	pub async fn search_ldap(&self, user_id: &UserId) -> Result<Vec<String>> {
+	pub async fn search_ldap(&self, user_id: &UserId) -> Result<Vec<(String, bool)>> {
 		use itertools::Itertools;
 		use ldap3::{LdapConnAsync, Scope, SearchEntry};
 		use tuwunel_core::{debug, error, result::LogErr};
+
+		let localpart = user_id.localpart().to_owned();
+		let lowercased_localpart = localpart.to_lowercase();
 
 		let config = &self.services.server.config.ldap;
 		let uri = config
@@ -1215,18 +1222,18 @@ impl Service {
 
 		let attr = [&config.uid_attribute, &config.name_attribute];
 
-		let filter = &config.filter;
+		let user_filter = &config
+			.filter
+			.replace("{username}", &lowercased_localpart);
 
 		let (entries, _result) = ldap
-			.search(&config.base_dn, Scope::Subtree, filter, &attr)
+			.search(&config.base_dn, Scope::Subtree, user_filter, &attr)
 			.await
 			.and_then(ldap3::SearchResult::success)
 			.inspect(|(entries, result)| trace!(?entries, ?result, "LDAP Search"))
-			.map_err(|e| err!(Ldap(error!(?attr, ?filter, "LDAP search error: {e}"))))?;
+			.map_err(|e| err!(Ldap(error!(?attr, ?user_filter, "LDAP search error: {e}"))))?;
 
-		let localpart = user_id.localpart().to_owned();
-		let lowercased_localpart = localpart.to_lowercase();
-		let dns = entries
+		let mut dns = entries
 			.into_iter()
 			.filter_map(|entry| {
 				let search_entry = SearchEntry::construct(entry);
@@ -1237,9 +1244,49 @@ impl Service {
 					.into_iter()
 					.chain(search_entry.attrs.get(&config.name_attribute))
 					.any(|ids| ids.contains(&localpart) || ids.contains(&lowercased_localpart))
-					.then_some(search_entry.dn)
+					.then_some((search_entry.dn, false))
 			})
 			.collect_vec();
+
+		if !config.admin_base_dn.is_empty() {
+			let admin_base_dn = if config.admin_base_dn.is_empty() {
+				&config.base_dn
+			} else {
+				&config.admin_base_dn
+			};
+
+			let admin_filter = &config
+				.admin_filter
+				.replace("{username}", &lowercased_localpart);
+
+			let (admin_entries, _result) = ldap
+				.search(admin_base_dn, Scope::Subtree, admin_filter, &attr)
+				.await
+				.and_then(ldap3::SearchResult::success)
+				.inspect(|(entries, result)| trace!(?entries, ?result, "LDAP Admin Search"))
+				.map_err(|e| {
+					err!(Ldap(error!(?attr, ?user_filter, "Ldap admin search error: {e}")))
+				})?;
+
+			let mut admin_dns = admin_entries
+				.into_iter()
+				.filter_map(|entry| {
+					let search_entry = SearchEntry::construct(entry);
+					debug!(?search_entry, "LDAP search entry");
+					search_entry
+						.attrs
+						.get(&config.uid_attribute)
+						.into_iter()
+						.chain(search_entry.attrs.get(&config.name_attribute))
+						.any(|ids| {
+							ids.contains(&localpart) || ids.contains(&lowercased_localpart)
+						})
+						.then_some((search_entry.dn, true))
+				})
+				.collect_vec();
+
+			dns.append(&mut admin_dns);
+		}
 
 		ldap.unbind()
 			.await
@@ -1251,7 +1298,7 @@ impl Service {
 	}
 
 	#[cfg(not(feature = "ldap"))]
-	pub async fn search_ldap(&self, _user_id: &UserId) -> Result<Vec<String>> {
+	pub async fn search_ldap(&self, _user_id: &UserId) -> Result<Vec<(String, bool)>> {
 		Err!(FeatureDisabled("ldap"))
 	}
 
