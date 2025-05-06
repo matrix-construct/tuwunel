@@ -1915,7 +1915,8 @@ pub struct LdapConfig {
 	/// You can use the variable `{username}` that will be replaced by the
 	/// entered username. In such case, the password used to bind will be the
 	/// one provided for the login and not the one given by
-	/// `bind_password_file`.
+	/// `bind_password_file`. Beware: automatically granting admin rights will
+	/// not work if you use this direct bind instead of a LDAP search.
 	///
 	/// example: "cn=ldap-reader,dc=example,dc=org" or
 	/// "cn={username},ou=users,dc=example,dc=org"
@@ -1930,6 +1931,9 @@ pub struct LdapConfig {
 	pub bind_password_file: Option<PathBuf>,
 
 	/// Search filter to limit user searches.
+	///
+	/// You can use the variable `{username}` that will be replaced by the
+	/// entered username for more complex filters.
 	///
 	/// example: "(&(objectClass=person)(memberOf=matrix))"
 	///
@@ -1960,6 +1964,26 @@ pub struct LdapConfig {
 	/// default: "givenName"
 	#[serde(default = "default_ldap_name_attribute")]
 	pub name_attribute: String,
+
+	/// Root of the searches for admin users.
+	///
+	/// Defaults to `base_dn` if empty.
+	///
+	/// example: "ou=admins,dc=example,dc=org"
+	#[serde(default)]
+	pub admin_base_dn: String,
+
+	/// The LDAP search filter to find administrative users for tuwunel.
+	///
+	/// If left blank, administrative state must be configured manually for each
+	/// user.
+	///
+	/// You can use the variable `{username}` that will be replaced by the
+	/// entered username for more complex filters.
+	///
+	/// example: "(objectClass=tuwunelAdmin)" or "(uid={username})"
+	#[serde(default)]
+	pub admin_filter: String,
 }
 
 #[derive(Deserialize, Clone, Debug)]
