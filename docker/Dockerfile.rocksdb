@@ -37,7 +37,7 @@ ENV CXX="clang++"
 WORKDIR /usr/src/rocksdb/librocksdb-sys/rocksdb
 ENV nprocs=${nprocs}
 RUN \
---mount=type=cache,dst=/var/lock/uwu/${rocksdb_jemalloc}/${rocksdb_iouring},sharing=locked \
+--mount=type=cache,dst=/var/lock/uwu/${rocksdb_jemalloc}/${rocksdb_iouring}/${rocksdb_portable},sharing=locked \
 <<EOF
     set -eux
 

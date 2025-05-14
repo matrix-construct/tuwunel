@@ -1108,7 +1108,7 @@ target "deps-base" {
     contexts = {
         input = elem("target:ingredients", [rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target])
         recipe = elem("target:recipe", [rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target])
-        rocksdb = elem("target:rocksdb", [rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target])
+        rocksdb = elem("target:rocksdb", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target])
     }
     args = {
         cargo_profile = cargo_profile
@@ -1133,28 +1133,28 @@ target "deps-base" {
 #
 
 target "rocksdb" {
-    name = elem("rocksdb", [rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target])
+    name = elem("rocksdb", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target])
     tags = [
-        elem_tag("rocksdb", [rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target], "latest"),
+        elem_tag("rocksdb", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target], "latest"),
     ]
     target = "rocksdb"
     output = ["type=cacheonly,compression=zstd,mode=min"]
-    matrix = rust_feat_sys
+    matrix = cargo_rust_feat_sys
     inherits = [
-        elem("rocksdb-build", [rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target])
+        elem("rocksdb-build", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target])
     ]
     contexts = {
-        input = elem("target:rocksdb-build", [rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target])
+        input = elem("target:rocksdb-build", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target])
     }
 }
 
 target "rocksdb-build" {
-    name = elem("rocksdb-build", [rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target])
+    name = elem("rocksdb-build", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target])
     tags = [
-        elem_tag("rocksdb-build", [rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target], "latest")
+        elem_tag("rocksdb-build", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target], "latest")
     ]
     target = "rocksdb-build"
-    matrix = rust_feat_sys
+    matrix = cargo_rust_feat_sys
     inherits = [
         elem("rocksdb-fetch", [rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target])
     ]
@@ -1162,12 +1162,12 @@ target "rocksdb-build" {
         input = elem("target:rocksdb-fetch", [rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target])
     }
     args = {
-        rocksdb_zstd = contains(split(",", cargo_feat_sets[feat_set]), "zstd_compression")? 1: 0,
-        rocksdb_jemalloc = contains(split(",", cargo_feat_sets[feat_set]), "jemalloc")? 1: 0,
-        rocksdb_iouring = contains(split(",", cargo_feat_sets[feat_set]), "io_uring")? 1: 0,
+        rocksdb_zstd = contains(split(",", cargo_feat_sets[feat_set]), "zstd_compression")? 1: 0
+        rocksdb_jemalloc = contains(split(",", cargo_feat_sets[feat_set]), "jemalloc")? 1: 0
+        rocksdb_iouring = contains(split(",", cargo_feat_sets[feat_set]), "io_uring")? 1: 0
+        rocksdb_portable = cargo_profile == "release_max_perf"? 0: rocksdb_portable
         rocksdb_build_type = rocksdb_build_type
         rocksdb_opt_level = rocksdb_opt_level
-        rocksdb_portable = rocksdb_portable
         rocksdb_shared = 0
     }
 }

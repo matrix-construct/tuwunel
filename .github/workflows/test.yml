@@ -73,7 +73,7 @@ jobs:
       rust_targets: ${{inputs.rust_targets}}
       sys_targets: ${{inputs.sys_targets}}
       machines: ${{inputs.machines}}
-      excludes: '[{"cargo_profile": "release", "rust_toolchain": "nightly"}, {"cargo_profile": "release-debuginfo", "rust_toolchain": "nightly"}, {"cargo_profile": "test", "feat_set": "default"}]'
+      excludes: '[{"cargo_profile": "release", "rust_toolchain": "nightly"}, {"cargo_profile": "release-debuginfo", "rust_toolchain": "nightly"}, {"cargo_profile": "test", "feat_set": "default"}, {"cargo_profile": "release-max-perf", "rust_toolchain": "stable"}, {"cargo_profile": "release-max-perf", "feat_set": "none"}]'
       includes: ${{inputs.includes}}
 
   complement:
