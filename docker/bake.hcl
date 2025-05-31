@@ -305,7 +305,6 @@ target "tuwunel" {
     target = "tuwunel"
     dockerfile-inline =<<EOF
         FROM input AS tuwunel
-        COPY --link --from=input . .
         EXPOSE 8008 8448
         ENTRYPOINT ["${cargo_install_root}/bin/tuwunel"]
 EOF
@@ -1050,6 +1049,10 @@ target "deps-check" {
     }
 }
 
+variable "cargo_target_dir_base" {
+    default = "/usr/src/tuwunel/target"
+}
+
 target "deps-base" {
     name = elem("deps-base", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target])
     tags = [
@@ -1071,12 +1074,23 @@ target "deps-base" {
     args = {
         cargo_profile = cargo_profile
         cook_args = "--all-targets --no-build"
-        CARGO_TARGET_DIR = "/usr/src/tuwunel/target/${sys_name}/${sys_version}/${rust_toolchain}/${cargo_profile}/${feat_set}"
-        CARGO_TARGET_CACHE = "/usr/src/tuwunel/target/${sys_name}/${sys_version}/_shared_cache"
+
+        cargo_target_dir_base = cargo_target_dir_base
+        cargo_target_dir_sub = "${sys_name}/${sys_version}/${rust_toolchain}/${cargo_profile}/${feat_set}"
+        cargo_target_dst_prof = (
+            (cargo_profile == "dev" || cargo_profile == "test")? "debug":
+            (cargo_profile == "release" || cargo_profile == "bench")? "release":
+            cargo_profile
+        )
+        cargo_target_cache = "${cargo_target_dir_base}/${sys_name}/${sys_version}/_shared_cache"
+        cargo_target_dst = "${cargo_target_dir_base}/${sys_name}/${sys_version}/${rust_toolchain}/${cargo_profile}/${feat_set}/${rust_target}"
+        CARGO_TARGET_DIR = "${cargo_target_dir_base}/${sys_name}/${sys_version}/${rust_toolchain}/${cargo_profile}/${feat_set}"
+
         CARGO_PROFILE_test_DEBUG = "0"
         CARGO_PROFILE_bench_DEBUG = "0"
         CARGO_PROFILE_bench_LTO = "0"
         CARGO_PROFILE_bench_CODEGEN_UNITS = "1"
+
         CARGO_BUILD_RUSTFLAGS = (
             cargo_profile == "release-max-perf"?
                 join(" ", [

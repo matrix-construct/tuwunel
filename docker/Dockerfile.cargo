@@ -7,7 +7,9 @@ ARG RUSTUP_HOME
 ARG CARGO_HOME
 ARG CARGO_TARGET
 ARG CARGO_TARGET_DIR
-ARG CARGO_TARGET_CACHE
+ARG cargo_target_dst
+ARG cargo_target_dst_prof
+ARG cargo_target_cache
 ARG cargo_profile
 ARG cargo_features
 ARG cargo_spec_features
@@ -25,10 +27,10 @@ RUN \
 --mount=type=cache,dst=${RUSTUP_HOME},sharing=locked \
 --mount=type=cache,dst=${CARGO_HOME},sharing=locked \
 --mount=type=cache,dst=${CARGO_TARGET_DIR},sharing=locked \
---mount=type=cache,dst=${CARGO_TARGET_DIR}/deps,id=${CARGO_TARGET_CACHE}/deps,sharing=shared \
---mount=type=cache,dst=${CARGO_TARGET_DIR}/build,id=${CARGO_TARGET_CACHE}/build,sharing=shared \
---mount=type=cache,dst=${CARGO_TARGET_DIR}/incremental,id=${CARGO_TARGET_CACHE}/incremental,sharing=shared \
---mount=type=cache,dst=${CARGO_TARGET_DIR}/.fingerprint,id=${CARGO_TARGET_CACHE}/fingerprint,sharing=shared \
+--mount=type=cache,dst=${cargo_target_dst}/${cargo_target_dst_prof}/deps,id=${cargo_target_cache}/deps,sharing=shared \
+--mount=type=cache,dst=${cargo_target_dst}/${cargo_target_dst_prof}/build,id=${cargo_target_cache}/build,sharing=shared \
+--mount=type=cache,dst=${cargo_target_dst}/${cargo_target_dst_prof}/incremental,id=${cargo_target_cache}/incremental,sharing=shared \
+--mount=type=cache,dst=${cargo_target_dst}/${cargo_target_dst_prof}/.fingerprint,id=${cargo_target_cache}/fingerprint,sharing=shared \
 <<EOF
     set -eux
     rustup run ${rust_toolchain} \
