@@ -81,6 +81,7 @@ tuwunel-database.workspace = true
 tuwunel-macros.workspace = true
 tuwunel-service.workspace = true
 const-str.workspace = true
+ctor.workspace = true
 futures.workspace = true
 log.workspace = true
 ruma.workspace = true

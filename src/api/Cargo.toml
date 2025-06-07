@@ -73,6 +73,7 @@ axum-extra.workspace = true
 axum.workspace = true
 base64.workspace = true
 bytes.workspace = true
+ctor.workspace = true
 tuwunel-core.workspace = true
 tuwunel-service.workspace = true
 const-str.workspace = true

@@ -48,6 +48,7 @@ zstd_compression = [
 [dependencies]
 async-channel.workspace = true
 const-str.workspace = true
+ctor.workspace = true
 futures.workspace = true
 log.workspace = true
 minicbor.workspace = true
