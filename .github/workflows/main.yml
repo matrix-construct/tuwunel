@@ -85,7 +85,7 @@ jobs:
       with:
         release_name: Release ${{github.ref_name}}
         tag_name: ${{github.ref}}
-        body_path: NEWS.md
+        body_path: RELEASE.md
         draft: ${{ contains(github.ref, '-draft') }}
         prerelease: ${{ contains(github.ref, '-rc') }}
 
@@ -171,7 +171,7 @@ jobs:
       !failure() && !cancelled()
 
     name: Package
-    needs: [init, lint]
+    needs: [init, test]
     uses: ./.github/workflows/package.yml
     with:
       release_url: ${{needs.init.outputs.release_url}}
@@ -203,7 +203,7 @@ jobs:
       !failure() && !cancelled()
 
     name: Publish
-    needs: [init, package, test]
+    needs: [init, package]
     uses: ./.github/workflows/publish.yml
     with:
       docker_repo: ${{vars.DOCKER_REPO}}

@@ -142,6 +142,7 @@ jobs:
       && contains(fromJSON(inputs.feat_sets), fromJSON('["all"]')[0])
       && contains(fromJSON(inputs.cargo_profiles), fromJSON('["release"]')[0])
       && contains(fromJSON(inputs.rust_toolchains), fromJSON('["stable"]')[0])
+      && github.ref == 'refs/heads/main'
 
     name: Distro Packages
     uses: ./.github/workflows/bake.yml
@@ -178,6 +179,7 @@ jobs:
       && contains(fromJSON(inputs.feat_sets), fromJSON('["all"]')[0])
       && contains(fromJSON(inputs.cargo_profiles), fromJSON('["release"]')[0])
       && contains(fromJSON(inputs.rust_toolchains), fromJSON('["stable"]')[0])
+      && github.ref == 'refs/heads/main'
       && false
 
     name: Check Packages
