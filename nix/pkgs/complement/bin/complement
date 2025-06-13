@@ -15,7 +15,7 @@ LOG_FILE="${2:-complement_test_logs.jsonl}"
 # A `.jsonl` file to write test results to
 RESULTS_FILE="${3:-complement_test_results.jsonl}"
 
-COMPLEMENT_BASE_IMAGE="${COMPLEMENT_BASE_IMAGE:-complement-conduwuit:main}"
+COMPLEMENT_BASE_IMAGE="${COMPLEMENT_BASE_IMAGE:-complement-tuwunel:main}"
 
 # Complement tests that are skipped due to flakiness/reliability issues or we don't implement such features and won't for a long time
 SKIPPED_COMPLEMENT_TESTS='TestPartialStateJoin.*|TestRoomDeleteAlias/Parallel/Regular_users_can_add_and_delete_aliases_when_m.*|TestRoomDeleteAlias/Parallel/Can_delete_canonical_alias|TestUnbanViaInvite.*|TestRoomState/Parallel/GET_/publicRooms_lists.*"|TestRoomDeleteAlias/Parallel/Users_with_sufficient_power-level_can_delete_other.*'
@@ -35,20 +35,20 @@ toplevel="$(git rev-parse --show-toplevel)"
 pushd "$toplevel" > /dev/null
 
 if [ ! -f "complement_oci_image.tar.gz" ]; then
-    echo "building complement conduwuit image"
+    echo "building complement tuwunel image"
 
     # if using macOS, use linux-complement
     #bin/nix-build-and-cache just .#linux-complement
     bin/nix-build-and-cache just .#complement
     #nix build -L .#complement
 
-    echo "complement conduwuit image tar.gz built at \"result\""
+    echo "complement tuwunel image tar.gz built at \"result\""
 
     echo "loading into docker"
     docker load < result
     popd > /dev/null
 else
-    echo "skipping building a complement conduwuit image as complement_oci_image.tar.gz was already found, loading this"
+    echo "skipping building a complement tuwunel image as complement_oci_image.tar.gz was already found, loading this"
 
     docker load < complement_oci_image.tar.gz
     popd > /dev/null

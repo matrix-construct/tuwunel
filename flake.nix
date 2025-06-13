@@ -2,14 +2,14 @@
   inputs = {
     attic.url = "github:zhaofengli/attic?ref=main";
     cachix.url = "github:cachix/cachix?ref=master";
-    complement = { url = "github:girlbossceo/complement?ref=main"; flake = false; };
+    complement = { url = "github:matrix-construct/complement?ref=main"; flake = false; };
     crane = { url = "github:ipetkov/crane?ref=master"; };
     fenix = { url = "github:nix-community/fenix?ref=main"; inputs.nixpkgs.follows = "nixpkgs"; };
     flake-compat = { url = "github:edolstra/flake-compat?ref=master"; flake = false; };
     flake-utils.url = "github:numtide/flake-utils?ref=main";
     nix-filter.url = "github:numtide/nix-filter?ref=main";
     nixpkgs.url = "github:NixOS/nixpkgs?ref=nixpkgs-unstable";
-    rocksdb = { url = "github:girlbossceo/rocksdb?ref=v9.11.1"; flake = false; };
+    rocksdb = { url = "github:matrix-construct/rocksdb?ref=tuwunel-changes"; flake = false; };
     liburing = { url = "github:axboe/liburing?ref=master"; flake = false; };
   };
 
@@ -197,8 +197,8 @@
                 "jemalloc_stats"
                 # this is non-functional on nix for some reason
                 "hardened_malloc"
-                # conduwuit_mods is a development-only hot reload feature
-                "conduwuit_mods"
+                # tuwunel_mods is a development-only hot reload feature
+                "tuwunel_mods"
             ];
         };
         default-debug = scopeHost.main.override {
@@ -210,8 +210,8 @@
                 "experimental"
                 # this is non-functional on nix for some reason
                 "hardened_malloc"
-                # conduwuit_mods is a development-only hot reload feature
-                "conduwuit_mods"
+                # tuwunel_mods is a development-only hot reload feature
+                "tuwunel_mods"
             ];
         };
         # just a test profile used for things like CI and complement
@@ -223,8 +223,8 @@
                 "experimental"
                 # this is non-functional on nix for some reason
                 "hardened_malloc"
-                # conduwuit_mods is a development-only hot reload feature
-                "conduwuit_mods"
+                # tuwunel_mods is a development-only hot reload feature
+                "tuwunel_mods"
             ];
         };
         all-features = scopeHost.main.override {
@@ -238,8 +238,8 @@
                 "jemalloc_stats"
                 # this is non-functional on nix for some reason
                 "hardened_malloc"
-                # conduwuit_mods is a development-only hot reload feature
-                "conduwuit_mods"
+                # tuwunel_mods is a development-only hot reload feature
+                "tuwunel_mods"
             ];
         };
         all-features-debug = scopeHost.main.override {
@@ -252,8 +252,8 @@
                 "experimental"
                 # this is non-functional on nix for some reason
                 "hardened_malloc"
-                # conduwuit_mods is a development-only hot reload feature
-                "conduwuit_mods"
+                # tuwunel_mods is a development-only hot reload feature
+                "tuwunel_mods"
             ];
         };
         hmalloc = scopeHost.main.override { features = ["hardened_malloc"]; };
@@ -271,8 +271,8 @@
                 "jemalloc_stats"
                 # this is non-functional on nix for some reason
                 "hardened_malloc"
-                # conduwuit_mods is a development-only hot reload feature
-                "conduwuit_mods"
+                # tuwunel_mods is a development-only hot reload feature
+                "tuwunel_mods"
             ];
           };
         };
@@ -287,8 +287,8 @@
                 "experimental"
                 # this is non-functional on nix for some reason
                 "hardened_malloc"
-                # conduwuit_mods is a development-only hot reload feature
-                "conduwuit_mods"
+                # tuwunel_mods is a development-only hot reload feature
+                "tuwunel_mods"
             ];
           };
         };
@@ -352,8 +352,8 @@
                         "experimental"
                         # this is non-functional on nix for some reason
                         "hardened_malloc"
-                        # conduwuit_mods is a development-only hot reload feature
-                        "conduwuit_mods"
+                        # tuwunel_mods is a development-only hot reload feature
+                        "tuwunel_mods"
                     ];
                   };
                 }
@@ -372,8 +372,8 @@
                         "jemalloc_stats"
                         # this is non-functional on nix for some reason
                         "hardened_malloc"
-                        # conduwuit_mods is a development-only hot reload feature
-                        "conduwuit_mods"
+                        # tuwunel_mods is a development-only hot reload feature
+                        "tuwunel_mods"
                     ];
                   };
                 }
@@ -393,8 +393,8 @@
                         "jemalloc_stats"
                         # this is non-functional on nix for some reason
                         "hardened_malloc"
-                        # conduwuit_mods is a development-only hot reload feature
-                        "conduwuit_mods"
+                        # tuwunel_mods is a development-only hot reload feature
+                        "tuwunel_mods"
                     ];
                     x86_64_haswell_target_optimised = (if (crossSystem == "x86_64-linux-gnu" || crossSystem == "x86_64-linux-musl") then true else false);
                   };
@@ -413,8 +413,8 @@
                         "experimental"
                         # this is non-functional on nix for some reason
                         "hardened_malloc"
-                        # conduwuit_mods is a development-only hot reload feature
-                        "conduwuit_mods"
+                        # tuwunel_mods is a development-only hot reload feature
+                        "tuwunel_mods"
                     ];
                   };
                 }
@@ -471,8 +471,8 @@
                         "jemalloc_stats"
                         # this is non-functional on nix for some reason
                         "hardened_malloc"
-                        # conduwuit_mods is a development-only hot reload feature
-                        "conduwuit_mods"
+                        # tuwunel_mods is a development-only hot reload feature
+                        "tuwunel_mods"
                       ];
                     };
                   };
@@ -494,8 +494,8 @@
                         "jemalloc_stats"
                         # this is non-functional on nix for some reason
                         "hardened_malloc"
-                        # conduwuit_mods is a development-only hot reload feature
-                        "conduwuit_mods"
+                        # tuwunel_mods is a development-only hot reload feature
+                        "tuwunel_mods"
                       ];
                       x86_64_haswell_target_optimised = (if (crossSystem == "x86_64-linux-gnu" || crossSystem == "x86_64-linux-musl") then true else false);
                     };
@@ -516,8 +516,8 @@
                         "experimental"
                         # this is non-functional on nix for some reason
                         "hardened_malloc"
-                        # conduwuit_mods is a development-only hot reload feature
-                        "conduwuit_mods"
+                        # tuwunel_mods is a development-only hot reload feature
+                        "tuwunel_mods"
                       ];
                     };
                   };
@@ -564,8 +564,8 @@
                 "jemalloc_stats"
                 # this is non-functional on nix for some reason
                 "hardened_malloc"
-                # conduwuit_mods is a development-only hot reload feature
-                "conduwuit_mods"
+                # tuwunel_mods is a development-only hot reload feature
+                "tuwunel_mods"
             ];
         };
         }));

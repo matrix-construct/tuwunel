@@ -25,8 +25,8 @@
   "jemalloc_stats"
   # this is non-functional on nix for some reason
   "hardened_malloc"
-  # conduwuit_mods is a development-only hot reload feature
-  "conduwuit_mods"
+  # tuwunel_mods is a development-only hot reload feature
+  "tuwunel_mods"
 ]
 , disable_release_max_log_level ? false
 , features ? []
@@ -130,7 +130,7 @@ buildDepsOnlyEnv =
   });
 
 buildPackageEnv = {
-  CONDUWUIT_VERSION_EXTRA = inputs.self.shortRev or inputs.self.dirtyShortRev or "";
+  TUWUNEL_VERSION_EXTRA = inputs.self.shortRev or inputs.self.dirtyShortRev or "";
 } // buildDepsOnlyEnv // {
   # Only needed in static stdenv because these are transitive dependencies of rocksdb
   CARGO_BUILD_RUSTFLAGS = buildDepsOnlyEnv.CARGO_BUILD_RUSTFLAGS

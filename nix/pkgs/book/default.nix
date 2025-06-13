@@ -13,14 +13,16 @@ stdenv.mkDerivation {
     root = inputs.self;
     include = [
       "book.toml"
-      "conduwuit-example.toml"
+      "tuwunel-example.toml"
       "CODE_OF_CONDUCT.md"
       "CONTRIBUTING.md"
       "README.md"
       "development.md"
-      "debian/conduwuit.service"
+      "debian/tuwunel.service"
       "debian/README.md"
-      "arch/conduwuit.service"
+      "arch/tuwunel.service"
+      "rpm/tuwunel.service"
+      "rpm/README.md"
       "docs"
       "theme"
     ];

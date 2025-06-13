@@ -31,7 +31,7 @@ let
         "gzip_compression"
         "zstd_compression"
         # complement doesn't need hot reloading
-        "conduwuit_mods"
+        "tuwunel_mods"
         # complement doesn't have URL preview media tests
         "url_preview"
     ];
@@ -41,13 +41,13 @@ let
     set -euxo pipefail
 
     ${lib.getExe' coreutils "env"} \
-      CONDUWUIT_SERVER_NAME="$SERVER_NAME" \
+      TUWUNEL_SERVER_NAME="$SERVER_NAME" \
       ${lib.getExe main'}
   '';
 in
 
 dockerTools.buildImage {
-  name = "complement-conduwuit";
+  name = "complement-tuwunel";
   tag = "main";
 
   copyToRoot = buildEnv {
@@ -75,9 +75,9 @@ dockerTools.buildImage {
       else [];
 
     Env = [
-      "CONDUWUIT_TLS__KEY=${./private_key.key}"
-      "CONDUWUIT_TLS__CERTS=${./certificate.crt}"
-      "CONDUWUIT_CONFIG=${./config.toml}"
+      "TUWUNEL_TLS__KEY=${./private_key.key}"
+      "TUWUNEL_TLS__CERTS=${./certificate.crt}"
+      "TUWUNEL_CONFIG=${./config.toml}"
       "RUST_BACKTRACE=full"
     ];
 
