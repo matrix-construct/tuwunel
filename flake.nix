@@ -53,7 +53,7 @@
         };
         rocksdb = (pkgs.rocksdb.override {
           liburing = self.liburing;
-        }).overrideAttrs (old: {
+        }).overrideAttrs (final: old: {
           src = inputs.rocksdb;
           version = pkgs.lib.removePrefix
             "v"
@@ -62,6 +62,15 @@
           # we have this already at https://github.com/girlbossceo/rocksdb/commit/a935c0273e1ba44eacf88ce3685a9b9831486155
           # unsetting this so i don't have to revert it and make this nix exclusive
           patches = [];
+          postPatch =
+            pkgs.lib.optionalString (pkgs.lib.versionOlder final.version "8") ''
+              # Fix gcc-13 build failures due to missing <cstdint> and
+              # <system_error> includes, fixed upstyream sice 8.x
+              sed -e '1i #include <cstdint>' -i db/compaction/compaction_iteration_stats.h
+              sed -e '1i #include <cstdint>' -i table/block_based/data_block_hash_index.h
+              sed -e '1i #include <cstdint>' -i util/string_util.h
+              sed -e '1i #include <cstdint>' -i include/rocksdb/utilities/checkpoint.h
+            '';
           cmakeFlags = pkgs.lib.subtractLists
             [
               # no real reason to have snappy or zlib, no one uses this
