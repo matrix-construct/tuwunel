@@ -4,17 +4,18 @@ This chapter describes various ways to configure Tuwunel.
 
 ## Basics
 
-Tuwunel uses a config file for the majority of the settings, but also supports
+Tuwunel uses a config file for the majority of the settings, but also supports 
 setting individual config options via commandline.
 
-Please refer to the [example config
-file](./configuration/examples.md#example-configuration) for all of those
-settings.
+Please refer to the [example config file](./configuration/examples.md#example-configuration) for all of those settings.
 
 The config file to use can be specified on the commandline when running
-Tuwunel by specifying the `-c`, `--config` flag. Alternatively, you can use
-the environment variable `TUWUNEL_CONFIG` to specify the config file to used.
-Conduit's environment variables are supported for backwards compatibility.
+Tuwunel by specifying the `-c`, `--config` flag. It is also possible to specify 
+more than one config file.
+
+Alternatively, you can use the environment variable `TUWUNEL_CONFIG` to specify 
+the config file to used. Conduit's environment variables are supported for 
+backwards compatibility.
 
 ## Option commandline flag
 
@@ -30,6 +31,20 @@ string. This does not apply to options that take booleans or numbers:
 - `-O server_name=example.com` does not work ❌
 - `--option log=\"debug\"` works ✅
 - `--option server_name='"example.com'"` works ✅
+
+## Relevance of configuration settings
+
+There is a specific sequence for reading and overwriting the settings. The 
+latest setting takes precedence and defines the configuration.
+
+1. Set in `CONDUIT_CONFIG`.
+2. Set in `CONDUWUIT_CONFIG`.
+3. Set in `TUWUNEL_CONFIG`.
+4. Set in the first config file on the command line (e.g. `-c config_file_1.toml`).
+5. Set in the second config file on the command line (e.g. `-c config_file_2.toml`).
+6. Set in any additional config file on the command line (e.g. `-c config_file_n.toml`).
+7. Set within the options (again, the latest opton in the list counts).
+
 
 ## Execute commandline flag
 
