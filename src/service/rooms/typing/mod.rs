@@ -195,17 +195,15 @@ impl Service {
 	}
 
 	/// Returns a new typing EDU.
-	pub async fn typings_all(
+	pub async fn typing_users_for_user(
 		&self,
 		room_id: &RoomId,
 		sender_user: &UserId,
-	) -> Result<SyncEphemeralRoomEvent<ruma::events::typing::TypingEventContent>> {
+	) -> Result<Vec<OwnedUserId>> {
 		let room_typing_indicators = self.typing.read().await.get(room_id).cloned();
 
 		let Some(typing_indicators) = room_typing_indicators else {
-			return Ok(SyncEphemeralRoomEvent {
-				content: ruma::events::typing::TypingEventContent { user_ids: Vec::new() },
-			});
+			return Ok(Vec::new());
 		};
 
 		let user_ids: Vec<_> = typing_indicators
@@ -222,8 +220,20 @@ impl Service {
 			.collect()
 			.await;
 
+		Ok(user_ids)
+	}
+
+	pub async fn typings_event_for_user(
+		&self,
+		room_id: &RoomId,
+		sender_user: &UserId,
+	) -> Result<SyncEphemeralRoomEvent<ruma::events::typing::TypingEventContent>> {
 		Ok(SyncEphemeralRoomEvent {
-			content: ruma::events::typing::TypingEventContent { user_ids },
+			content: ruma::events::typing::TypingEventContent {
+				user_ids: self
+					.typing_users_for_user(room_id, sender_user)
+					.await?,
+			},
 		})
 	}
 
