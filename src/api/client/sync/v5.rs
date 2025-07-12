@@ -18,6 +18,7 @@ use ruma::{
 	events::{
 		AnyRawAccountDataEvent, AnySyncEphemeralRoomEvent, StateEventType, TimelineEventType,
 		room::member::{MembershipState, RoomMemberEventContent},
+		typing::TypingEventContent,
 	},
 	serde::Raw,
 	uint,
@@ -173,12 +174,16 @@ pub(crate) async fn sync_events_v5_route(
 		sync_info,
 		all_invited_rooms.clone(),
 		all_joined_rooms.clone(),
-		all_rooms,
+		all_rooms.clone(),
 		&mut todo_rooms,
 		&known_rooms,
 		&mut response,
 	)
 	.await;
+
+	let all_rooms: Vec<OwnedRoomId> = all_rooms.map(ToOwned::to_owned).collect();
+	let typing = collect_typing_events(services, sender_user, &body, &all_rooms).await?;
+	response.extensions.typing = typing;
 
 	fetch_subscriptions(services, sync_info, &known_rooms, &mut todo_rooms).await;
 
@@ -338,7 +343,7 @@ where
 				.collect();
 
 			new_known_rooms.extend(new_rooms);
-			//new_known_rooms.extend(room_ids..cloned());
+			// new_known_rooms.extend(room_ids..cloned());
 			for room_id in room_ids {
 				let todo_room = todo_rooms.entry(room_id.to_owned()).or_insert((
 					BTreeSet::new(),
@@ -959,6 +964,70 @@ async fn collect_to_device(
 			.collect()
 			.await,
 	})
+}
+
+async fn collect_typing_events(
+	services: &Services,
+	sender_user: &UserId,
+	body: &sync_events::v5::Request,
+	all_rooms: &Vec<OwnedRoomId>,
+) -> Result<sync_events::v5::response::Typing> {
+	if !body.extensions.typing.enabled.unwrap_or(false) {
+		return Ok(sync_events::v5::response::Typing::default());
+	}
+	let rooms: Vec<_> = body
+		.extensions
+		.typing
+		.rooms
+		.clone()
+		.unwrap_or_else(|| {
+			body.room_subscriptions
+				.keys()
+				.map(ToOwned::to_owned)
+				.collect()
+		});
+	let lists: Vec<_> = body
+		.extensions
+		.typing
+		.lists
+		.clone()
+		.unwrap_or_else(|| {
+			body.lists
+				.keys()
+				.map(ToOwned::to_owned)
+				.collect::<Vec<_>>()
+		});
+
+	if rooms.is_empty() && lists.is_empty() {
+		return Ok(sync_events::v5::response::Typing::default());
+	}
+
+	// TODO filter rooms with lists
+
+	let mut typing_response = sync_events::v5::response::Typing::default();
+
+	for room_id in all_rooms {
+		match services
+			.rooms
+			.typing
+			.typing_users_for_user(room_id, sender_user)
+			.await
+		{
+			| Ok(typing_users) => {
+				typing_response.rooms.insert(
+					room_id.to_owned(), // Already OwnedRoomId
+					Raw::new(&ruma::events::typing::SyncTypingEvent {
+						content: TypingEventContent::new(typing_users),
+					})?,
+				);
+			},
+			| Err(e) => {
+				warn!(%room_id, "Failed to get typing events for room: {}", e);
+			},
+		}
+	}
+
+	Ok(typing_response)
 }
 
 async fn collect_receipts(_services: &Services) -> sync_events::v5::response::Receipts {
