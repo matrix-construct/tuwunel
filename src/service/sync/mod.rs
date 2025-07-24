@@ -5,14 +5,7 @@ use std::{
 	sync::{Arc, Mutex, Mutex as StdMutex},
 };
 
-use ruma::{
-	OwnedDeviceId, OwnedRoomId, OwnedUserId,
-	api::client::sync::sync_events::{
-		self,
-		v4::{ExtensionsConfig, SyncRequestList},
-		v5,
-	},
-};
+use ruma::{OwnedDeviceId, OwnedRoomId, OwnedUserId, api::client::sync::sync_events::v5};
 use tuwunel_core::{Result, Server};
 use tuwunel_database::Map;
 
@@ -21,7 +14,6 @@ use crate::{Dep, rooms};
 pub struct Service {
 	db: Data,
 	services: Services,
-	connections: DbConnections<DbConnectionsKey, DbConnectionsVal>,
 	snake_connections: DbConnections<SnakeConnectionsKey, SnakeConnectionsVal>,
 }
 
@@ -46,14 +38,6 @@ struct Services {
 	typing: Dep<rooms::typing::Service>,
 }
 
-struct SlidingSyncCache {
-	lists: BTreeMap<String, SyncRequestList>,
-	subscriptions: BTreeMap<OwnedRoomId, sync_events::v4::RoomSubscription>,
-	// For every room, the roomsince number
-	known_rooms: BTreeMap<String, BTreeMap<OwnedRoomId, u64>>,
-	extensions: ExtensionsConfig,
-}
-
 #[derive(Default)]
 struct SnakeSyncCache {
 	lists: BTreeMap<String, v5::request::List>,
@@ -63,8 +47,6 @@ struct SnakeSyncCache {
 }
 
 type DbConnections<K, V> = Mutex<BTreeMap<K, V>>;
-type DbConnectionsKey = (OwnedUserId, OwnedDeviceId, String);
-type DbConnectionsVal = Arc<Mutex<SlidingSyncCache>>;
 type SnakeConnectionsKey = (OwnedUserId, OwnedDeviceId, Option<String>);
 type SnakeConnectionsVal = Arc<Mutex<SnakeSyncCache>>;
 
@@ -90,7 +72,6 @@ impl crate::Service for Service {
 				state_cache: args.depend::<rooms::state_cache::Service>("rooms::state_cache"),
 				typing: args.depend::<rooms::typing::Service>("rooms::typing"),
 			},
-			connections: StdMutex::new(BTreeMap::new()),
 			snake_connections: StdMutex::new(BTreeMap::new()),
 		}))
 	}
@@ -108,20 +89,6 @@ impl Service {
 
 	pub fn forget_snake_sync_connection(&self, key: &SnakeConnectionsKey) {
 		self.snake_connections
-			.lock()
-			.expect("locked")
-			.remove(key);
-	}
-
-	pub fn remembered(&self, key: &DbConnectionsKey) -> bool {
-		self.connections
-			.lock()
-			.expect("locked")
-			.contains_key(key)
-	}
-
-	pub fn forget_sync_request_connection(&self, key: &DbConnectionsKey) {
-		self.connections
 			.lock()
 			.expect("locked")
 			.remove(key);
@@ -231,162 +198,6 @@ impl Service {
 		cached.known_rooms.clone()
 	}
 
-	pub fn update_sync_request_with_cache(
-		&self,
-		key: &SnakeConnectionsKey,
-		request: &mut sync_events::v4::Request,
-	) -> BTreeMap<String, BTreeMap<OwnedRoomId, u64>> {
-		let Some(conn_id) = request.conn_id.clone() else {
-			return BTreeMap::new();
-		};
-
-		let key = into_db_key(key.0.clone(), key.1.clone(), conn_id);
-		let mut cache = self.connections.lock().expect("locked");
-		let cached = Arc::clone(cache.entry(key).or_insert_with(|| {
-			Arc::new(Mutex::new(SlidingSyncCache {
-				lists: BTreeMap::new(),
-				subscriptions: BTreeMap::new(),
-				known_rooms: BTreeMap::new(),
-				extensions: ExtensionsConfig::default(),
-			}))
-		}));
-		let cached = &mut cached.lock().expect("locked");
-		drop(cache);
-
-		for (list_id, list) in &mut request.lists {
-			if let Some(cached_list) = cached.lists.get(list_id) {
-				list_or_sticky(&mut list.sort, &cached_list.sort);
-				list_or_sticky(
-					&mut list.room_details.required_state,
-					&cached_list.room_details.required_state,
-				);
-				some_or_sticky(
-					&mut list.room_details.timeline_limit,
-					cached_list.room_details.timeline_limit,
-				);
-				some_or_sticky(
-					&mut list.include_old_rooms,
-					cached_list.include_old_rooms.clone(),
-				);
-				match (&mut list.filters, cached_list.filters.clone()) {
-					| (Some(filter), Some(cached_filter)) => {
-						some_or_sticky(&mut filter.is_dm, cached_filter.is_dm);
-						list_or_sticky(&mut filter.spaces, &cached_filter.spaces);
-						some_or_sticky(&mut filter.is_encrypted, cached_filter.is_encrypted);
-						some_or_sticky(&mut filter.is_invite, cached_filter.is_invite);
-						list_or_sticky(&mut filter.room_types, &cached_filter.room_types);
-						// Should be made possible to change
-						list_or_sticky(&mut filter.not_room_types, &cached_filter.not_room_types);
-						some_or_sticky(&mut filter.room_name_like, cached_filter.room_name_like);
-						list_or_sticky(&mut filter.tags, &cached_filter.tags);
-						list_or_sticky(&mut filter.not_tags, &cached_filter.not_tags);
-					},
-					| (_, Some(cached_filters)) => list.filters = Some(cached_filters),
-					| (Some(list_filters), _) => list.filters = Some(list_filters.clone()),
-					| (..) => {},
-				}
-				list_or_sticky(&mut list.bump_event_types, &cached_list.bump_event_types);
-			}
-			cached.lists.insert(list_id.clone(), list.clone());
-		}
-
-		cached
-			.subscriptions
-			.extend(request.room_subscriptions.clone());
-		request
-			.room_subscriptions
-			.extend(cached.subscriptions.clone());
-
-		request.extensions.e2ee.enabled = request
-			.extensions
-			.e2ee
-			.enabled
-			.or(cached.extensions.e2ee.enabled);
-
-		request.extensions.to_device.enabled = request
-			.extensions
-			.to_device
-			.enabled
-			.or(cached.extensions.to_device.enabled);
-
-		request.extensions.account_data.enabled = request
-			.extensions
-			.account_data
-			.enabled
-			.or(cached.extensions.account_data.enabled);
-		request.extensions.account_data.lists = request
-			.extensions
-			.account_data
-			.lists
-			.clone()
-			.or_else(|| cached.extensions.account_data.lists.clone());
-		request.extensions.account_data.rooms = request
-			.extensions
-			.account_data
-			.rooms
-			.clone()
-			.or_else(|| cached.extensions.account_data.rooms.clone());
-
-		cached.extensions = request.extensions.clone();
-
-		cached.known_rooms.clone()
-	}
-
-	pub fn update_sync_subscriptions(
-		&self,
-		key: &DbConnectionsKey,
-		subscriptions: BTreeMap<OwnedRoomId, sync_events::v4::RoomSubscription>,
-	) {
-		let mut cache = self.connections.lock().expect("locked");
-		let cached = Arc::clone(cache.entry(key.clone()).or_insert_with(|| {
-			Arc::new(Mutex::new(SlidingSyncCache {
-				lists: BTreeMap::new(),
-				subscriptions: BTreeMap::new(),
-				known_rooms: BTreeMap::new(),
-				extensions: ExtensionsConfig::default(),
-			}))
-		}));
-		let cached = &mut cached.lock().expect("locked");
-		drop(cache);
-
-		cached.subscriptions = subscriptions;
-	}
-
-	pub fn update_sync_known_rooms(
-		&self,
-		key: &DbConnectionsKey,
-		list_id: String,
-		new_cached_rooms: BTreeSet<OwnedRoomId>,
-		globalsince: u64,
-	) {
-		let mut cache = self.connections.lock().expect("locked");
-		let cached = Arc::clone(cache.entry(key.clone()).or_insert_with(|| {
-			Arc::new(Mutex::new(SlidingSyncCache {
-				lists: BTreeMap::new(),
-				subscriptions: BTreeMap::new(),
-				known_rooms: BTreeMap::new(),
-				extensions: ExtensionsConfig::default(),
-			}))
-		}));
-		let cached = &mut cached.lock().expect("locked");
-		drop(cache);
-
-		for (room_id, lastsince) in cached
-			.known_rooms
-			.entry(list_id.clone())
-			.or_default()
-			.iter_mut()
-		{
-			if !new_cached_rooms.contains(room_id) {
-				*lastsince = 0;
-			}
-		}
-		let list = cached.known_rooms.entry(list_id).or_default();
-		for room_id in new_cached_rooms {
-			list.insert(room_id, globalsince);
-		}
-	}
-
 	pub fn update_snake_sync_known_rooms(
 		&self,
 		key: &SnakeConnectionsKey,
@@ -444,16 +255,6 @@ where
 	U: Into<OwnedUserId>,
 	D: Into<OwnedDeviceId>,
 	C: Into<Option<String>>,
-{
-	(user_id.into(), device_id.into(), conn_id.into())
-}
-
-#[inline]
-pub fn into_db_key<U, D, C>(user_id: U, device_id: D, conn_id: C) -> DbConnectionsKey
-where
-	U: Into<OwnedUserId>,
-	D: Into<OwnedDeviceId>,
-	C: Into<String>,
 {
 	(user_id.into(), device_id.into(), conn_id.into())
 }
