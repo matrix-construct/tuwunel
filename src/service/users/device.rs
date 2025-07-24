@@ -154,9 +154,9 @@ pub async fn add_to_device_event(
 	event_type: &str,
 	content: serde_json::Value,
 ) {
-	let count = self.services.globals.next_count().unwrap();
+	let count = self.services.globals.next_count();
 
-	let key = (target_user_id, target_device_id, count);
+	let key = (target_user_id, target_device_id, *count);
 	self.db.todeviceid_events.put(
 		key,
 		Json(json!({

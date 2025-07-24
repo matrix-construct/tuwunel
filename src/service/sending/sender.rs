@@ -378,7 +378,7 @@ impl Service {
 	async fn select_edus(&self, server_name: &ServerName) -> Result<(EduVec, u64)> {
 		// selection window
 		let since = self.db.get_latest_educount(server_name).await;
-		let since_upper = self.services.globals.current_count()?;
+		let since_upper = self.services.globals.current_count();
 		let batch = (since, since_upper);
 		debug_assert!(batch.0 <= batch.1, "since range must not be negative");
 

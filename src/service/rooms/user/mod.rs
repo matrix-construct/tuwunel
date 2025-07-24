@@ -47,6 +47,8 @@ impl crate::Service for Service {
 
 #[implement(Service)]
 pub fn reset_notification_counts(&self, user_id: &UserId, room_id: &RoomId) {
+	let count = self.services.globals.next_count();
+
 	let userroom_id = (user_id, room_id);
 	self.db
 		.userroomid_highlightcount
@@ -56,10 +58,9 @@ pub fn reset_notification_counts(&self, user_id: &UserId, room_id: &RoomId) {
 		.put(userroom_id, 0_u64);
 
 	let roomuser_id = (room_id, user_id);
-	let count = self.services.globals.next_count().unwrap();
 	self.db
 		.roomuserid_lastnotificationread
-		.put(roomuser_id, count);
+		.put(roomuser_id, *count);
 }
 
 #[implement(Service)]

@@ -159,20 +159,20 @@ where
 		.await;
 
 	let insert_lock = self.mutex_insert.lock(pdu.room_id()).await;
-
-	let count1 = self.services.globals.next_count().unwrap();
+	let count1 = self.services.globals.next_count();
+	let count2 = self.services.globals.next_count();
 
 	// Mark as read first so the sending client doesn't get a notification even if
 	// appending fails
 	self.services
 		.read_receipt
-		.private_read_set(pdu.room_id(), pdu.sender(), count1);
+		.private_read_set(pdu.room_id(), pdu.sender(), *count1);
 
 	self.services
 		.user
 		.reset_notification_counts(pdu.sender(), pdu.room_id());
 
-	let count2 = PduCount::Normal(self.services.globals.next_count().unwrap());
+	let count2 = PduCount::Normal(*count2);
 	let pdu_id: RawPduId = PduId { shortroomid, shorteventid: count2 }.into();
 
 	// Insert pdu

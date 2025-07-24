@@ -71,6 +71,8 @@ impl Service {
 			return Err!(Request(Forbidden("Only the server user can set this alias")));
 		}
 
+		let count = self.services.globals.next_count();
+
 		// Comes first as we don't want a stuck alias
 		self.db
 			.alias_userid
@@ -82,7 +84,8 @@ impl Service {
 
 		let mut aliasid = room_id.as_bytes().to_vec();
 		aliasid.push(0xFF);
-		aliasid.extend_from_slice(&self.services.globals.next_count()?.to_be_bytes());
+		aliasid.extend_from_slice(&count.to_be_bytes());
+
 		self.db
 			.aliasid_alias
 			.insert(&aliasid, alias.as_bytes());

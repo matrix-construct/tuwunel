@@ -81,18 +81,18 @@ where
 fn create_shorteventid(&self, event_id: &EventId) -> ShortEventId {
 	const BUFSIZE: usize = size_of::<ShortEventId>();
 
-	let short = self.services.globals.next_count().unwrap();
-	debug_assert!(size_of_val(&short) == BUFSIZE, "buffer requirement changed");
+	let short = self.services.globals.next_count();
+	debug_assert!(size_of_val(&*short) == BUFSIZE, "buffer requirement changed");
 
 	self.db
 		.eventid_shorteventid
-		.raw_aput::<BUFSIZE, _, _>(event_id, short);
+		.raw_aput::<BUFSIZE, _, _>(event_id, *short);
 
 	self.db
 		.shorteventid_eventid
-		.aput_raw::<BUFSIZE, _, _>(short, event_id);
+		.aput_raw::<BUFSIZE, _, _>(*short, event_id);
 
-	short
+	*short
 }
 
 #[implement(Service)]
@@ -120,18 +120,19 @@ pub async fn get_or_create_shortstatekey(
 	}
 
 	let key = (event_type, state_key);
-	let shortstatekey = self.services.globals.next_count().unwrap();
-	debug_assert!(size_of_val(&shortstatekey) == BUFSIZE, "buffer requirement changed");
+	let shortstatekey = self.services.globals.next_count();
+
+	debug_assert!(size_of_val(&*shortstatekey) == BUFSIZE, "buffer requirement changed");
 
 	self.db
 		.statekey_shortstatekey
-		.put_aput::<BUFSIZE, _, _>(key, shortstatekey);
+		.put_aput::<BUFSIZE, _, _>(key, *shortstatekey);
 
 	self.db
 		.shortstatekey_statekey
-		.aput_put::<BUFSIZE, _, _>(shortstatekey, key);
+		.aput_put::<BUFSIZE, _, _>(*shortstatekey, key);
 
-	shortstatekey
+	*shortstatekey
 }
 
 #[implement(Service)]
@@ -226,14 +227,14 @@ pub async fn get_or_create_shortstatehash(&self, state_hash: &[u8]) -> (ShortSta
 		return (shortstatehash, true);
 	}
 
-	let shortstatehash = self.services.globals.next_count().unwrap();
-	debug_assert!(size_of_val(&shortstatehash) == BUFSIZE, "buffer requirement changed");
+	let shortstatehash = self.services.globals.next_count();
+	debug_assert!(size_of_val(&*shortstatehash) == BUFSIZE, "buffer requirement changed");
 
 	self.db
 		.statehash_shortstatehash
-		.raw_aput::<BUFSIZE, _, _>(state_hash, shortstatehash);
+		.raw_aput::<BUFSIZE, _, _>(state_hash, *shortstatehash);
 
-	(shortstatehash, false)
+	(*shortstatehash, false)
 }
 
 #[implement(Service)]
@@ -255,13 +256,13 @@ pub async fn get_or_create_shortroomid(&self, room_id: &RoomId) -> ShortRoomId {
 		.unwrap_or_else(|_| {
 			const BUFSIZE: usize = size_of::<ShortRoomId>();
 
-			let short = self.services.globals.next_count().unwrap();
-			debug_assert!(size_of_val(&short) == BUFSIZE, "buffer requirement changed");
+			let short = self.services.globals.next_count();
+			debug_assert!(size_of_val(&*short) == BUFSIZE, "buffer requirement changed");
 
 			self.db
 				.roomid_shortroomid
-				.raw_aput::<BUFSIZE, _, _>(room_id, short);
+				.raw_aput::<BUFSIZE, _, _>(room_id, *short);
 
-			short
+			*short
 		})
 }

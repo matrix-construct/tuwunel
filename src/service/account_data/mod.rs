@@ -63,8 +63,8 @@ pub async fn update(
 		return Err!(Request(InvalidParam("Account data doesn't have all required fields.")));
 	}
 
-	let count = self.services.globals.next_count().unwrap();
-	let roomuserdataid = (room_id, user_id, count, &event_type);
+	let count = self.services.globals.next_count();
+	let roomuserdataid = (room_id, user_id, *count, &event_type);
 	self.db
 		.roomuserdataid_accountdata
 		.put(roomuserdataid, Json(data));

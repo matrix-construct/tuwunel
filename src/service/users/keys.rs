@@ -52,14 +52,14 @@ pub async fn add_one_time_key(
 			.as_bytes(),
 	);
 
+	let count = self.services.globals.next_count();
+
 	self.db
 		.onetimekeyid_onetimekeys
 		.raw_put(key, Json(one_time_key_value));
-
-	let count = self.services.globals.next_count().unwrap();
 	self.db
 		.userid_lastonetimekeyupdate
-		.raw_put(user_id, count);
+		.raw_put(user_id, *count);
 
 	Ok(())
 }
@@ -81,10 +81,10 @@ pub async fn take_one_time_key(
 	device_id: &DeviceId,
 	key_algorithm: &OneTimeKeyAlgorithm,
 ) -> Result<(OwnedKeyId<OneTimeKeyAlgorithm, OneTimeKeyName>, Raw<OneTimeKey>)> {
-	let count = self.services.globals.next_count()?.to_be_bytes();
+	let count = self.services.globals.next_count();
 	self.db
 		.userid_lastonetimekeyupdate
-		.insert(user_id, count);
+		.insert(user_id, count.to_be_bytes());
 
 	let mut prefix = user_id.as_bytes().to_vec();
 	prefix.push(0xFF);
@@ -340,7 +340,7 @@ fn keys_changed_user_or_room<'a>(
 
 #[implement(super::Service)]
 pub async fn mark_device_key_update(&self, user_id: &UserId) {
-	let count = self.services.globals.next_count().unwrap();
+	let count = self.services.globals.next_count();
 
 	self.services
 			.state_cache
@@ -348,12 +348,12 @@ pub async fn mark_device_key_update(&self, user_id: &UserId) {
 			// Don't send key updates to unencrypted rooms
 			.filter(|room_id| self.services.state_accessor.is_encrypted_room(room_id))
 			.ready_for_each(|room_id| {
-				let key = (room_id, count);
+				let key = (room_id, *count);
 				self.db.keychangeid_userid.put_raw(key, user_id);
 			})
 			.await;
 
-	let key = (user_id, count);
+	let key = (user_id, *count);
 	self.db.keychangeid_userid.put_raw(key, user_id);
 }
 

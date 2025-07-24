@@ -52,17 +52,18 @@ pub fn create_backup(
 	user_id: &UserId,
 	backup_metadata: &Raw<BackupAlgorithm>,
 ) -> Result<String> {
-	let version = self.services.globals.next_count()?.to_string();
-	let count = self.services.globals.next_count()?;
+	let version = self.services.globals.next_count();
+	let count = self.services.globals.next_count();
 
-	let key = (user_id, &version);
+	let version_string = version.to_string();
+	let key = (user_id, &version_string);
 	self.db
 		.backupid_algorithm
 		.put(key, Json(backup_metadata));
 
-	self.db.backupid_etag.put(key, count);
+	self.db.backupid_etag.put(key, *count);
 
-	Ok(version)
+	Ok(version_string)
 }
 
 #[implement(Service)]
@@ -100,8 +101,8 @@ pub async fn update_backup<'a>(
 		return Err!(Request(NotFound("Tried to update nonexistent backup.")));
 	}
 
-	let count = self.services.globals.next_count().unwrap();
-	self.db.backupid_etag.put(key, count);
+	let count = self.services.globals.next_count();
+	self.db.backupid_etag.put(key, *count);
 	self.db
 		.backupid_algorithm
 		.put_raw(key, backup_metadata.json().get());
@@ -175,8 +176,8 @@ pub async fn add_key(
 		return Err!(Request(NotFound("Tried to update nonexistent backup.")));
 	}
 
-	let count = self.services.globals.next_count().unwrap();
-	self.db.backupid_etag.put(key, count);
+	let count = self.services.globals.next_count();
+	self.db.backupid_etag.put(key, *count);
 
 	let key = (user_id, version, room_id, session_id);
 	self.db

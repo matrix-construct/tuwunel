@@ -160,7 +160,7 @@ pub(crate) async fn build_sync_events(
 ) -> Result<sync_events::v3::Response, RumaResponse<UiaaResponse>> {
 	let (sender_user, sender_device) = body.sender();
 
-	let next_batch = services.globals.current_count()?;
+	let next_batch = services.globals.current_count();
 	let since = body
 		.body
 		.since

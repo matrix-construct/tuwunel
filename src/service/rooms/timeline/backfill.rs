@@ -181,13 +181,9 @@ pub async fn backfill_pdu(&self, origin: &ServerName, pdu: Box<RawJsonValue>) ->
 
 	let insert_lock = self.mutex_insert.lock(&room_id).await;
 
-	let count: i64 = self
-		.services
-		.globals
-		.next_count()
-		.unwrap()
-		.try_into()?;
+	let count = self.services.globals.next_count();
 
+	let count: i64 = (*count).try_into()?;
 	let pdu_id: RawPduId = PduId {
 		shortroomid,
 		shorteventid: PduCount::Backfilled(validated!(0 - count)),

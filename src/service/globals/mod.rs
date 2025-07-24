@@ -103,10 +103,10 @@ impl crate::Service for Service {
 
 impl Service {
 	#[inline]
-	pub fn next_count(&self) -> Result<u64> { self.db.next_count() }
+	pub fn next_count(&self) -> data::Permit { self.db.next_count() }
 
 	#[inline]
-	pub fn current_count(&self) -> Result<u64> { Ok(self.db.current_count()) }
+	pub fn current_count(&self) -> u64 { self.db.current_count() }
 
 	#[inline]
 	pub fn server_name(&self) -> &ServerName { self.server.name.as_ref() }

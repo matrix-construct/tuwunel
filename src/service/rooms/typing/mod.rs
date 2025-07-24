@@ -53,6 +53,7 @@ impl Service {
 	/// roomtyping_remove is called.
 	pub async fn typing_add(&self, user_id: &UserId, room_id: &RoomId, timeout: u64) -> Result {
 		debug_info!("typing started {user_id:?} in {room_id:?} timeout:{timeout:?}");
+
 		// update clients
 		self.typing
 			.write()
@@ -61,10 +62,11 @@ impl Service {
 			.or_default()
 			.insert(user_id.to_owned(), timeout);
 
+		let count = self.services.globals.next_count();
 		self.last_typing_update
 			.write()
 			.await
-			.insert(room_id.to_owned(), self.services.globals.next_count()?);
+			.insert(room_id.to_owned(), *count);
 
 		if self
 			.typing_update_sender
@@ -86,6 +88,7 @@ impl Service {
 	/// Removes a user from typing before the timeout is reached.
 	pub async fn typing_remove(&self, user_id: &UserId, room_id: &RoomId) -> Result {
 		debug_info!("typing stopped {user_id:?} in {room_id:?}");
+
 		// update clients
 		self.typing
 			.write()
@@ -94,10 +97,11 @@ impl Service {
 			.or_default()
 			.remove(user_id);
 
+		let count = self.services.globals.next_count();
 		self.last_typing_update
 			.write()
 			.await
-			.insert(room_id.to_owned(), self.services.globals.next_count()?);
+			.insert(room_id.to_owned(), *count);
 
 		if self
 			.typing_update_sender
@@ -146,16 +150,18 @@ impl Service {
 		if !removable.is_empty() {
 			let typing = &mut self.typing.write().await;
 			let room = typing.entry(room_id.to_owned()).or_default();
+
 			for user in &removable {
 				debug_info!("typing timeout {user:?} in {room_id:?}");
 				room.remove(user);
 			}
 
 			// update clients
+			let count = self.services.globals.next_count();
 			self.last_typing_update
 				.write()
 				.await
-				.insert(room_id.to_owned(), self.services.globals.next_count()?);
+				.insert(room_id.to_owned(), *count);
 
 			if self
 				.typing_update_sender

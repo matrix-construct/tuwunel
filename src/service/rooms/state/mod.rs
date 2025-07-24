@@ -305,7 +305,7 @@ impl Service {
 				}
 
 				// TODO: statehash with deterministic inputs
-				let shortstatehash = self.services.globals.next_count()?;
+				let shortstatehash = self.services.globals.next_count();
 
 				let mut statediffnew = CompressedState::new();
 				statediffnew.insert(new);
@@ -318,14 +318,14 @@ impl Service {
 				self.services
 					.state_compressor
 					.save_state_from_diff(
-						shortstatehash,
+						*shortstatehash,
 						Arc::new(statediffnew),
 						Arc::new(statediffremoved),
 						2,
 						states_parents,
 					)?;
 
-				Ok(shortstatehash)
+				Ok(*shortstatehash)
 			},
 			| _ =>
 				Ok(previous_shortstatehash.expect("first event in room must be a state event")),

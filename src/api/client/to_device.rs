@@ -41,7 +41,6 @@ pub(crate) async fn send_event_to_device_route(
 				map.insert(target_device_id_maybe.clone(), event.clone());
 				let mut messages = BTreeMap::new();
 				messages.insert(target_user_id.clone(), map);
-				let count = services.globals.next_count()?;
 
 				let mut buf = EduBuf::new();
 				serde_json::to_writer(
@@ -49,7 +48,7 @@ pub(crate) async fn send_event_to_device_route(
 					&federation::transactions::edu::Edu::DirectToDevice(DirectDeviceContent {
 						sender: sender_user.to_owned(),
 						ev_type: body.event_type.clone(),
-						message_id: count.to_string().into(),
+						message_id: services.globals.next_count().to_string().into(),
 						messages,
 					}),
 				)

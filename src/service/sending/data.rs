@@ -126,8 +126,9 @@ impl Data {
 				if let SendingEvent::Pdu(value) = event {
 					key.extend(value.as_ref());
 				} else {
-					let count = self.services.globals.next_count().unwrap();
-					key.extend(&count.to_be_bytes());
+					let count = self.services.globals.next_count();
+					let count = count.to_be_bytes();
+					key.extend(&count);
 				}
 
 				key
