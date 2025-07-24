@@ -103,42 +103,67 @@ impl crate::Service for Service {
 
 impl Service {
 	#[inline]
+	#[must_use]
 	pub fn next_count(&self) -> data::Permit { self.db.next_count() }
 
 	#[inline]
+	#[must_use]
 	pub fn current_count(&self) -> u64 { self.db.current_count() }
 
 	#[inline]
+	#[must_use]
 	pub fn server_name(&self) -> &ServerName { self.server.name.as_ref() }
 
+	#[inline]
+	#[must_use]
 	pub fn allow_public_room_directory_over_federation(&self) -> bool {
 		self.server
 			.config
 			.allow_public_room_directory_over_federation
 	}
 
+	#[inline]
+	#[must_use]
 	pub fn allow_device_name_federation(&self) -> bool {
 		self.server.config.allow_device_name_federation
 	}
 
+	#[inline]
+	#[must_use]
 	pub fn allow_room_creation(&self) -> bool { self.server.config.allow_room_creation }
 
+	#[inline]
+	#[must_use]
 	pub fn new_user_displayname_suffix(&self) -> &String {
 		&self.server.config.new_user_displayname_suffix
 	}
 
+	#[inline]
+	#[must_use]
 	pub fn trusted_servers(&self) -> &[OwnedServerName] { &self.server.config.trusted_servers }
 
+	#[inline]
+	#[must_use]
 	pub fn turn_password(&self) -> &String { &self.server.config.turn_password }
 
+	#[inline]
+	#[must_use]
 	pub fn turn_ttl(&self) -> u64 { self.server.config.turn_ttl }
 
+	#[inline]
+	#[must_use]
 	pub fn turn_uris(&self) -> &[String] { &self.server.config.turn_uris }
 
+	#[inline]
+	#[must_use]
 	pub fn turn_username(&self) -> &String { &self.server.config.turn_username }
 
+	#[inline]
+	#[must_use]
 	pub fn notification_push_path(&self) -> &String { &self.server.config.notification_push_path }
 
+	#[inline]
+	#[must_use]
 	pub fn url_preview_domain_contains_allowlist(&self) -> &Vec<String> {
 		&self
 			.server
@@ -146,6 +171,8 @@ impl Service {
 			.url_preview_domain_contains_allowlist
 	}
 
+	#[inline]
+	#[must_use]
 	pub fn url_preview_domain_explicit_allowlist(&self) -> &Vec<String> {
 		&self
 			.server
@@ -153,6 +180,8 @@ impl Service {
 			.url_preview_domain_explicit_allowlist
 	}
 
+	#[inline]
+	#[must_use]
 	pub fn url_preview_domain_explicit_denylist(&self) -> &Vec<String> {
 		&self
 			.server
@@ -160,6 +189,8 @@ impl Service {
 			.url_preview_domain_explicit_denylist
 	}
 
+	#[inline]
+	#[must_use]
 	pub fn url_preview_url_contains_allowlist(&self) -> &Vec<String> {
 		&self
 			.server
@@ -167,29 +198,40 @@ impl Service {
 			.url_preview_url_contains_allowlist
 	}
 
+	#[inline]
+	#[must_use]
 	pub fn url_preview_max_spider_size(&self) -> usize {
 		self.server.config.url_preview_max_spider_size
 	}
 
+	#[inline]
+	#[must_use]
 	pub fn url_preview_check_root_domain(&self) -> bool {
 		self.server.config.url_preview_check_root_domain
 	}
 
+	#[inline]
+	#[must_use]
 	pub fn forbidden_alias_names(&self) -> &RegexSet { &self.server.config.forbidden_alias_names }
 
+	#[inline]
+	#[must_use]
 	pub fn forbidden_usernames(&self) -> &RegexSet { &self.server.config.forbidden_usernames }
 
 	/// checks if `user_id` is local to us via server_name comparison
 	#[inline]
+	#[must_use]
 	pub fn user_is_local(&self, user_id: &UserId) -> bool {
 		self.server_is_ours(user_id.server_name())
 	}
 
 	#[inline]
+	#[must_use]
 	pub fn server_is_ours(&self, server_name: &ServerName) -> bool {
 		server_name == self.server_name()
 	}
 
 	#[inline]
+	#[must_use]
 	pub fn is_read_only(&self) -> bool { self.db.db.is_read_only() }
 }
