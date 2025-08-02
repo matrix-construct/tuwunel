@@ -1,7 +1,7 @@
 use clap::Subcommand;
 use futures::StreamExt;
 use ruma::OwnedRoomId;
-use tuwunel_core::{Err, Result};
+use tuwunel_core::Result;
 
 use crate::{Context, PAGE_SIZE, get_room_info};
 
@@ -57,7 +57,11 @@ pub(super) async fn process(command: RoomDirectoryCommand, context: &Context<'_>
 				.collect();
 
 			if rooms.is_empty() {
-				return Err!("No more rooms.");
+				context
+					.write_str("No rooms are published.")
+					.await?;
+
+				return Ok(());
 			}
 
 			let body = rooms
