@@ -95,14 +95,29 @@ pub(super) async fn auth(
 	}
 
 	match (metadata.authentication, token) {
-		| (AccessToken, Appservice(info)) => Ok(auth_appservice(services, request, info).await?),
+		| (AuthScheme::None, Invalid)
+			if request.query.access_token.is_some()
+				&& metadata == &get_openid_userinfo::v1::Request::METADATA =>
+		{
+			// OpenID federation endpoint uses a query param with the same name, drop this
+			// once query params for user auth are removed from the spec. This is
+			// required to make integration manager work.
+			Ok(Auth::default())
+		},
 
-		| (AccessToken | AccessTokenOptional | AuthScheme::None, User(user)) => Ok(Auth {
-			sender_user: Some(user.0),
-			sender_device: Some(user.1),
-			_expires_at: user.2,
-			..Auth::default()
-		}),
+		| (_, Invalid) =>
+			Err(BadRequest(UnknownToken { soft_logout: false }, "Unknown access token.")),
+
+		| (_, Expired((user_id, device_id))) => {
+			services
+				.users
+				.remove_access_token(&user_id, &device_id)
+				.await
+				.log_debug_err()
+				.ok();
+
+			Err(BadRequest(UnknownToken { soft_logout: true }, "Expired access token."))
+		},
 
 		| (AccessToken, Token::None) => match metadata {
 			| &get_turn_server_info::v3::Request::METADATA
@@ -120,6 +135,15 @@ pub(super) async fn auth(
 
 		| (ServerSignatures, Token::None) => Ok(auth_server(services, request, json_body).await?),
 
+		| (AccessToken, Appservice(info)) => Ok(auth_appservice(services, request, info).await?),
+
+		| (AccessToken | AccessTokenOptional | AuthScheme::None, User(user)) => Ok(Auth {
+			sender_user: Some(user.0),
+			sender_device: Some(user.1),
+			_expires_at: user.2,
+			..Auth::default()
+		}),
+
 		| (AuthScheme::None | AccessTokenOptional | AppserviceToken, Appservice(info)) =>
 			Ok(Auth {
 				appservice_info: Some(*info),
@@ -128,30 +152,6 @@ pub(super) async fn auth(
 
 		| (AuthScheme::None | AccessTokenOptional | AppserviceToken, Token::None) =>
 			Ok(Auth::default()),
-
-		| (AuthScheme::None, Invalid)
-			if request.query.access_token.is_some()
-				&& metadata == &get_openid_userinfo::v1::Request::METADATA =>
-		{
-			// OpenID federation endpoint uses a query param with the same name, drop this
-			// once query params for user auth are removed from the spec. This is
-			// required to make integration manager work.
-			Ok(Auth::default())
-		},
-
-		| (_, Expired((user_id, device_id))) => {
-			services
-				.users
-				.remove_access_token(&user_id, &device_id)
-				.await
-				.log_debug_err()
-				.ok();
-
-			Err(BadRequest(UnknownToken { soft_logout: true }, "Expired access token."))
-		},
-
-		| (_, Invalid) =>
-			Err(BadRequest(UnknownToken { soft_logout: false }, "Unknown access token.")),
 	}
 }
 
