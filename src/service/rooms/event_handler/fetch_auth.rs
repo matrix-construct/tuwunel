@@ -35,7 +35,7 @@ pub(super) async fn fetch_auth<'a, Events>(
 	room_version: &RoomVersionId,
 ) -> Vec<(PduEvent, Option<CanonicalJsonObject>)>
 where
-	Events: Iterator<Item = &'a EventId> + Clone + Send,
+	Events: Iterator<Item = &'a EventId> + Send,
 {
 	let events_with_auth_events: Vec<_> = events
 		.stream()
