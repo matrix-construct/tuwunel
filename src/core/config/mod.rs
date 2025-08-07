@@ -7,7 +7,6 @@ use std::{
 	net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
 	path::{Path, PathBuf},
 };
-
 use either::{
 	Either,
 	Either::{Left, Right},
@@ -1208,8 +1207,23 @@ pub struct Config {
 	#[serde(default = "default_rocksdb_stats_level")]
 	pub rocksdb_stats_level: u8,
 
+
+	/// The server bot is automatically created when the database is created.
+	/// Originally the account was `conduit`; this is also why it is still default.
+	/// When creating a new database, it is suggested to be done with `tuwunel`; when
+	/// using an existing database, then the default `conduit` must be used.
+	///
+	/// There are only the values `conduit` or `tuwunel`accepted, anything else or
+	/// `@` as a prefix will raise an error when starting up.
+	///
+	/// default: conduit
+	#[serde(default = "default_server_user")]
+	#[serde(deserialize_with = "validate_server_user")]
+	pub server_user: String,
+
+
 	/// This is a password that can be configured that will let you login to the
-	/// server bot account (currently `@conduit`) for emergency troubleshooting
+	/// server bot account (`@tuwunel` or `@conduit`) for emergency troubleshooting
 	/// purposes such as recovering/recreating your admin room, or inviting
 	/// yourself back.
 	///
@@ -2576,6 +2590,26 @@ fn default_rocksdb_compression_level() -> i32 { 32767 }
 fn default_rocksdb_bottommost_compression_level() -> i32 { 32767 }
 
 fn default_rocksdb_stats_level() -> u8 { 1 }
+
+
+fn default_server_user() -> String {
+	"conduit".to_string()
+}
+
+// This ensures that only "tuwunel" or "conduit" are accepted.
+fn validate_server_user<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+	D: serde::Deserializer<'de>,
+{
+	let s: String = String::deserialize(deserializer)?;
+	match s.as_str() {
+		"tuwunel" | "conduit" => Ok(s),
+		_ => Err(serde::de::Error::custom(
+			"server_user must be either 'tuwunel' or 'conduit'"
+		))
+	}
+}
+
 
 // I know, it's a great name
 #[must_use]
