@@ -11,7 +11,7 @@ use ruma::{
 use tuwunel_core::{
 	Error, PduCount, Result,
 	matrix::pdu::PduEvent,
-	utils::stream::{BroadbandExt, ReadyExt, TryIgnore},
+	utils::stream::{BroadbandExt, ReadyExt},
 };
 use tuwunel_service::Services;
 
@@ -27,22 +27,22 @@ async fn load_timeline(
 	roomsincecount: PduCount,
 	next_batch: Option<PduCount>,
 	limit: usize,
-) -> Result<(Vec<(PduCount, PduEvent)>, bool), Error> {
+) -> Result<(Vec<(PduCount, PduEvent)>, bool, PduCount), Error> {
 	let last_timeline_count = services
 		.rooms
 		.timeline
-		.last_timeline_count(Some(sender_user), room_id)
+		.last_timeline_count(Some(sender_user), room_id, next_batch)
 		.await?;
 
 	if last_timeline_count <= roomsincecount {
-		return Ok((Vec::new(), false));
+		return Ok((Vec::new(), false, last_timeline_count));
 	}
 
 	let non_timeline_pdus = services
 		.rooms
 		.timeline
 		.pdus_rev(Some(sender_user), room_id, None)
-		.ignore_err()
+		.ready_filter_map(Result::ok)
 		.ready_skip_while(|&(pducount, _)| pducount > next_batch.unwrap_or_else(PduCount::max))
 		.ready_take_while(|&(pducount, _)| pducount > roomsincecount);
 
@@ -60,7 +60,7 @@ async fn load_timeline(
 	// is limited unless there are events in non_timeline_pdus
 	let limited = non_timeline_pdus.next().await.is_some();
 
-	Ok((timeline_pdus, limited))
+	Ok((timeline_pdus, limited, last_timeline_count))
 }
 
 async fn share_encrypted_room(

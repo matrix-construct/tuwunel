@@ -6,7 +6,7 @@ use std::{
 use axum::extract::State;
 use futures::{
 	FutureExt, StreamExt, TryFutureExt, TryStreamExt,
-	future::{OptionFuture, join, join3, join4, join5, try_join4},
+	future::{OptionFuture, join, join3, join4, join5, try_join3},
 	pin_mut,
 };
 use ruma::{
@@ -668,15 +668,6 @@ async fn load_joined_room(
 	full_state: bool,
 	filter: &FilterDefinition,
 ) -> Result<(JoinedRoom, HashSet<OwnedUserId>, HashSet<OwnedUserId>)> {
-	let sincecount = PduCount::Normal(since);
-	let next_batchcount = PduCount::Normal(next_batch);
-
-	let current_shortstatehash = services
-		.rooms
-		.state
-		.get_room_shortstatehash(room_id)
-		.map_err(|_| err!(Database(error!("Room {room_id} has no state"))));
-
 	let since_shortstatehash = services
 		.rooms
 		.user
@@ -695,8 +686,8 @@ async fn load_joined_room(
 		services,
 		sender_user,
 		room_id,
-		sincecount,
-		Some(next_batchcount),
+		PduCount::Normal(since),
+		Some(PduCount::Normal(next_batch)),
 		timeline_limit,
 	);
 
@@ -714,24 +705,42 @@ async fn load_joined_room(
 		.collect::<HashMap<OwnedUserId, Raw<AnySyncEphemeralRoomEvent>>>()
 		.map(Ok);
 
-	let (current_shortstatehash, since_shortstatehash, (timeline_pdus, limited), receipt_events) =
-		try_join4(current_shortstatehash, since_shortstatehash, timeline, receipt_events)
+	let (since_shortstatehash, (timeline_pdus, limited, last_timeline_count), receipt_events) =
+		try_join3(since_shortstatehash, timeline, receipt_events)
 			.boxed()
 			.await?;
 
-	// State was changed after the cutoff for this sync; similar to other handlers.
-	if current_shortstatehash > next_batch {
-		// Transfer the since_shortstatehash not the current over to the next sync.
-		if let Some(since_shortstatehash) = since_shortstatehash {
+	let horizon_shortstatehash: OptionFuture<_> = timeline_pdus
+		.iter()
+		.map(at!(0))
+		.map(PduCount::into_unsigned)
+		.map(|shorteventid| {
 			services
 				.rooms
-				.user
-				.associate_token_shortstatehash(room_id, next_batch, since_shortstatehash)
-				.await;
-		}
+				.state_accessor
+				.get_shortstatehash(shorteventid)
+		})
+		.next()
+		.into();
 
-		return Ok((JoinedRoom::default(), HashSet::new(), HashSet::new()));
-	}
+	let current_shortstatehash = services
+		.rooms
+		.state_accessor
+		.get_shortstatehash(last_timeline_count.into_unsigned())
+		.or_else(|_| {
+			services
+				.rooms
+				.state
+				.get_room_shortstatehash(room_id)
+		});
+
+	let (horizon_shortstatehash, current_shortstatehash) =
+		join(horizon_shortstatehash, current_shortstatehash)
+			.boxed()
+			.await;
+
+	let current_shortstatehash = current_shortstatehash
+		.map_err(|_| err!(Database(error!("Room {room_id} has no state"))))?;
 
 	let associate_token = services
 		.rooms
@@ -783,19 +792,6 @@ async fn load_joined_room(
 		})
 		.into();
 
-	let horizon_shortstatehash: OptionFuture<_> = timeline_pdus
-		.iter()
-		.map(at!(0))
-		.map(PduCount::into_unsigned)
-		.map(|shorteventid| {
-			services
-				.rooms
-				.state_accessor
-				.get_shortstatehash(shorteventid)
-		})
-		.next()
-		.into();
-
 	let last_notification_read: OptionFuture<_> = timeline_pdus
 		.is_empty()
 		.then(|| {
@@ -819,8 +815,7 @@ async fn load_joined_room(
 	let encrypted_room = services
 		.rooms
 		.state_accessor
-		.state_get(current_shortstatehash, &StateEventType::RoomEncryption, "")
-		.is_ok();
+		.is_encrypted_room(room_id);
 
 	let last_privateread_update = services
 		.rooms
@@ -828,13 +823,13 @@ async fn load_joined_room(
 		.last_privateread_update(sender_user, room_id);
 
 	let (
-		witness,
-		(encrypted_room, last_privateread_update, last_notification_read),
-		(since_sender_member, horizon_shortstatehash, ()),
+		(witness, since_sender_member),
+		(encrypted_room, ()),
+		(last_privateread_update, last_notification_read),
 	) = join3(
-		witness,
-		join3(encrypted_room, last_privateread_update, last_notification_read),
-		join3(since_sender_member, horizon_shortstatehash, associate_token),
+		join(witness, since_sender_member),
+		join(encrypted_room, associate_token),
+		join(last_privateread_update, last_notification_read),
 	)
 	.boxed()
 	.await;

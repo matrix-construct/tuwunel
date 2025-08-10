@@ -36,7 +36,7 @@ pub(super) async fn last(&self, room_id: OwnedRoomOrAliasId) -> Result {
 		.services
 		.rooms
 		.timeline
-		.last_timeline_count(None, &room_id)
+		.last_timeline_count(None, &room_id, None)
 		.await?;
 
 	self.write_str(&format!("{result:#?}")).await

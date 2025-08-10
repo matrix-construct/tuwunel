@@ -222,11 +222,14 @@ pub async fn last_timeline_count(
 	&self,
 	sender_user: Option<&UserId>,
 	room_id: &RoomId,
+	upper_bound: Option<PduCount>,
 ) -> Result<PduCount> {
+	let upper_bound = upper_bound.unwrap_or_else(PduCount::max);
 	let pdus_rev = self.pdus_rev(sender_user, room_id, None);
 
 	pin_mut!(pdus_rev);
 	let last_count = pdus_rev
+		.ready_try_skip_while(|&(pducount, _)| Ok(pducount > upper_bound))
 		.try_next()
 		.await?
 		.map(at!(0))
