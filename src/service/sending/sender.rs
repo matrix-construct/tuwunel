@@ -39,7 +39,7 @@ use ruma::{
 };
 use serde_json::value::{RawValue as RawJsonValue, to_raw_value};
 use tuwunel_core::{
-	Error, Event, Result, debug, err, error, implement,
+	Error, Event, Result, debug, err, error, implement, is_equal_to,
 	matrix::room_version,
 	result::LogErr,
 	trace,
@@ -989,6 +989,12 @@ async fn strip_outgoing_federation_event(&self, pdu_json: &mut CanonicalJsonObje
 		.event_format
 		.require_room_create_room_id
 	{
-		pdu_json.remove("room_id");
+		if pdu_json
+			.get("type")
+			.and_then(CanonicalJsonValue::as_str)
+			.is_some_and(is_equal_to!("m.room.create"))
+		{
+			pdu_json.remove("room_id");
+		}
 	}
 }
