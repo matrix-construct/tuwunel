@@ -153,7 +153,7 @@ and enter this (substitute for your server name).
 ```caddyfile
 your.server.name, your.server.name:8448 {
     # TCP reverse_proxy
-    reverse_proxy 127.0.0.1:6167
+    reverse_proxy localhost:8008
     # UNIX socket
     #reverse_proxy unix//run/tuwunel/tuwunel.sock
 }

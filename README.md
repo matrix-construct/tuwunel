@@ -57,12 +57,12 @@ using the configuration and Tuwunel can be deployed without a reverse proxy. Exa
 `/etc/caddy/Caddyfile` configuration with [Element](https://github.com/element-hq/element-web/releases)
 unzipped to `/var/www/element`:
 ```
-https://tuwunel.me:8448 {
-	reverse_proxy http://127.0.0.1:8008
+tuwunel.me, tuwunel.me:8448 {
+    reverse_proxy localhost:8008
 }
-https://tuwunel.me:443 {
-	root * /var/www/element/
-	file_server
+web.tuwunel.me {
+    root * /var/www/element/
+    file_server
 }
 ```
 `caddy reload --config /etc/caddy/Caddyfile`
@@ -75,7 +75,7 @@ granted server admin.
 
  🤗 Did you find this and other documentation helpful? We would love to hear feedback about setting
  up Tuwunel.
-	
+
 
 ### Migrating to Tuwunel
 
