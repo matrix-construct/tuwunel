@@ -69,10 +69,10 @@ impl crate::Service for Service {
 			admin_alias: OwnedRoomAliasId::try_from(format!("#admins:{}", &args.server.name))
 				.expect("#admins:server_name is valid alias name"),
 			server_user: UserId::parse_with_server_name(
-				String::from("conduit"),
+				&config.server_user,
 				&args.server.name,
 			)
-			.expect("@conduit:server_name is valid"),
+			.expect("server user is valid"),
 			turn_secret,
 			registration_token,
 		}))
