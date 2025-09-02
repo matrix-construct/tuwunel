@@ -1094,6 +1094,17 @@
 #
 #presence_timeout_remote_users = true
 
+# Suppresses push notifications for users marked as active.
+#
+# When enabled, users with `Online` presence and recent activity
+# (based on presence state and sync activity) won’t receive push
+# notifications, reducing duplicate alerts while they're active
+# elsewhere.
+#
+# Disabled by default to preserve legacy behavior.
+#
+#suppress_push_when_active = false
+
 # Allow receiving incoming read receipts from remote servers.
 #
 #allow_incoming_read_receipts = true

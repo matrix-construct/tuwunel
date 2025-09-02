@@ -1,7 +1,8 @@
 mod data;
 mod presence;
 
-use std::{sync::Arc, time::Duration};
+use std::{collections::HashMap, sync::Arc, time::Duration};
+use tokio::sync::RwLock;
 
 use async_trait::async_trait;
 use futures::{Stream, StreamExt, TryFutureExt, stream::FuturesUnordered};
@@ -19,6 +20,7 @@ pub struct Service {
 	offline_timeout: u64,
 	db: Data,
 	services: Arc<crate::services::OnceServices>,
+	last_sync_seen: RwLock<HashMap<OwnedUserId, u64>>,
 }
 
 type TimerType = (OwnedUserId, Duration);
@@ -36,6 +38,7 @@ impl crate::Service for Service {
 			offline_timeout: checked!(offline_timeout_s * 1_000)?,
 			db: Data::new(&args),
 			services: args.services.clone(),
+			last_sync_seen: RwLock::new(HashMap::new()),
 		}))
 	}
 
@@ -88,6 +91,21 @@ impl crate::Service for Service {
 }
 
 impl Service {
+	/// record that a user has just successfully completed a /sync (or equivalent activity)
+	pub async fn note_sync(&self, user_id: &UserId) {
+		let now = tuwunel_core::utils::millis_since_unix_epoch();
+		self.last_sync_seen.write().await.insert(user_id.to_owned(), now);
+	}
+
+	/// Returns milliseconds since last observed sync for user (if any)
+	pub async fn last_sync_gap_ms(&self, user_id: &UserId) -> Option<u64> {
+		let now = tuwunel_core::utils::millis_since_unix_epoch();
+		self.last_sync_seen
+			.read()
+			.await
+			.get(user_id)
+			.map(|ts| now.saturating_sub(*ts))
+	}
 	/// Returns the latest presence event for the given user.
 	pub async fn get_presence(&self, user_id: &UserId) -> Result<PresenceEvent> {
 		self.db
