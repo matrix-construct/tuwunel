@@ -229,6 +229,13 @@ pub fn check(config: &Config) -> Result {
 		));
 	}
 
+	if config.suppress_push_when_active {
+		warn!(
+			"Push suppression when active is enabled (EXPERIMENTAL): behavior may change or be \
+			 unstable. Disable by removing or setting suppress_push_when_active to false."
+		);
+	}
+
 	if config
 		.url_preview_domain_contains_allowlist
 		.contains(&"*".to_owned())
