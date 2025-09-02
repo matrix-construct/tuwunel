@@ -2,13 +2,12 @@ mod data;
 mod presence;
 
 use std::{collections::HashMap, sync::Arc, time::Duration};
-use tokio::sync::RwLock;
 
 use async_trait::async_trait;
 use futures::{Stream, StreamExt, TryFutureExt, stream::FuturesUnordered};
 use loole::{Receiver, Sender};
 use ruma::{OwnedUserId, UInt, UserId, events::presence::PresenceEvent, presence::PresenceState};
-use tokio::time::sleep;
+use tokio::{sync::RwLock, time::sleep};
 use tuwunel_core::{Error, Result, checked, debug, debug_warn, error, result::LogErr, trace};
 
 use self::{data::Data, presence::Presence};
@@ -91,10 +90,14 @@ impl crate::Service for Service {
 }
 
 impl Service {
-	/// record that a user has just successfully completed a /sync (or equivalent activity)
+	/// record that a user has just successfully completed a /sync (or
+	/// equivalent activity)
 	pub async fn note_sync(&self, user_id: &UserId) {
 		let now = tuwunel_core::utils::millis_since_unix_epoch();
-		self.last_sync_seen.write().await.insert(user_id.to_owned(), now);
+		self.last_sync_seen
+			.write()
+			.await
+			.insert(user_id.to_owned(), now);
 	}
 
 	/// Returns milliseconds since last observed sync for user (if any)
@@ -106,6 +109,7 @@ impl Service {
 			.get(user_id)
 			.map(|ts| now.saturating_sub(*ts))
 	}
+
 	/// Returns the latest presence event for the given user.
 	pub async fn get_presence(&self, user_id: &UserId) -> Result<PresenceEvent> {
 		self.db

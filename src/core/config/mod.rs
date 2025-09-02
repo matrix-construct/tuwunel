@@ -1288,13 +1288,12 @@ pub struct Config {
 	#[serde(default = "true_fn")]
 	pub presence_timeout_remote_users: bool,
 
-
-	/// Suppresses push notifications for users marked as active.
+	/// Suppresses push notifications for users marked as active. (Experimental)
 	///
-	/// when enabled, users with `Online` presence and recent activity
+	/// When enabled, users with `Online` presence and recent activity
 	/// (based on presence state and sync activity) won’t receive push
 	/// notifications, reducing duplicate alerts while they're active
-	/// elsewhere.
+	/// on another client.
 	///
 	/// Disabled by default to preserve legacy behavior.
 	#[serde(default)]
