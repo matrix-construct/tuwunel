@@ -436,6 +436,7 @@ version = "2.7"
 version = "0.3"
 features = [
 	"ffi",
+	"serde",
 	"std",
 	"union",
 ]
