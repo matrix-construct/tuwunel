@@ -116,4 +116,4 @@ pub fn type_name<T: ?Sized>() -> &'static str { std::any::type_name::<T>() }
 
 #[must_use]
 #[inline]
-pub const fn logging() -> bool { cfg!(debug_assertions) }
+pub const fn logging() -> bool { cfg!(debug_assertions) || cfg!(tuwunel_debug) }
