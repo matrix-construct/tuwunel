@@ -134,9 +134,10 @@ pub(crate) async fn sync_events_route(
 			.log_err()
 			.ok();
 
-		// Record that this user was actively syncing now (for push suppression
-		// heuristic)
-		services.presence.note_sync(sender_user).await;
+		// Record user as actively syncing for push suppression heuristic.
+		if services.config.suppress_push_when_active {
+			services.presence.note_sync(sender_user).await;
+		}
 	}
 
 	let mut since = body
