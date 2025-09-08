@@ -121,5 +121,5 @@ pub fn type_name<T: ?Sized>() -> &'static str { std::any::type_name::<T>() }
 #[must_use]
 #[inline]
 pub const fn logging() -> bool {
-	cfg!(debug_assertions) || cfg!(tuwunel_debug) || cfg!(not(feature = "release_max_log_level"))
+	cfg!(debug_assertions) || cfg!(tuwunel_debug) || !cfg!(feature = "release_max_log_level")
 }
