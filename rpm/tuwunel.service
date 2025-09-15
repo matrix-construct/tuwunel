@@ -2,7 +2,6 @@
 Description=Tuwunel Matrix homeserver
 Wants=network-online.target
 After=network-online.target
-Alias=matrix-tuwunel.service
 Documentation=https://tuwunel.chat/
 
 [Service]
@@ -63,3 +62,4 @@ StartLimitBurst=5
 
 [Install]
 WantedBy=multi-user.target
+Alias=matrix-tuwunel.service

@@ -4,7 +4,6 @@ Wants=network-online.target
 After=network-online.target
 Documentation=https://tuwunel.chat/
 RequiresMountsFor=/var/lib/private/tuwunel
-Alias=matrix-tuwunel.service
 
 [Service]
 DynamicUser=yes
@@ -77,3 +76,4 @@ StartLimitBurst=5
 
 [Install]
 WantedBy=multi-user.target
+Alias=matrix-tuwunel.service
