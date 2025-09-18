@@ -1761,15 +1761,22 @@
 #
 #server =
 
-# This item is undocumented. Please contribute documentation for it.
+# The URL of the support web page. This and the below generate
+# the content of /.well-known/matrix/support
+#
+# example: "https://example.com/support"
 #
 #support_page =
 
-# This item is undocumented. Please contribute documentation for it.
+# The name of the support role
+#
+# example: "m.role.admin"
 #
 #support_role =
 
-# This item is undocumented. Please contribute documentation for it.
+# The email address for the above support role
+#
+# example: "admin@example.com"
 #
 #support_email =
 
