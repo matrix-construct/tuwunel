@@ -53,10 +53,10 @@ impl crate::Service for Service {
 			db,
 			server: args.server.clone(),
 			server_user: UserId::parse_with_server_name(
-				String::from("conduit"),
+				&config.server_user,
 				&args.server.name,
 			)
-			.expect("@conduit:server_name is valid"),
+			.expect("server user is valid"),
 			turn_secret,
 			registration_token,
 		}))
