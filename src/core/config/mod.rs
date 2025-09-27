@@ -76,14 +76,14 @@ pub struct Config {
 	/// WIPE.
 	///
 	/// example: "girlboss.ceo"
+	#[cfg_attr(test, serde(default = "default_server_name"))]
 	pub server_name: OwnedServerName,
 
 	/// This is the only directory where tuwunel will save its data, including
 	/// media. Note: this was previously "/var/lib/matrix-conduit".
 	///
-	/// YOU NEED TO EDIT THIS.
-	///
-	/// example: "/var/lib/tuwunel"
+	/// default: "/var/lib/tuwunel"
+	#[serde(default = "default_database_path")]
 	pub database_path: PathBuf,
 
 	/// Text which will be added to the end of the user's displayname upon
@@ -1870,6 +1870,12 @@ pub struct Config {
 	#[serde(default)]
 	pub tokio_console: bool,
 
+	/// Arbitrary argument vector for integration testing. Functionality in the
+	/// server is altered or informed for the requirements of integration tests.
+	/// - "smoke" performs a shutdown after startup admin commands rather than
+	///   hanging on client handling.
+	///
+	/// default: []
 	#[serde(default)]
 	pub test: BTreeSet<String>,
 
@@ -2570,6 +2576,22 @@ impl Config {
 }
 
 fn true_fn() -> bool { true }
+
+#[cfg(test)]
+fn default_server_name() -> OwnedServerName { ruma::owned_server_name!("localhost") }
+
+fn default_database_path() -> PathBuf {
+	nix::unistd::geteuid()
+		.is_root()
+		.eq(&false)
+		.then(|| {
+			let home = std::env::home_dir()?;
+			let home = home.as_path().to_str()?;
+			Some(format!("{home}/.local/state/tuwunel/").into())
+		})
+		.flatten()
+		.unwrap_or_else(|| "/var/lib/tuwunel".to_owned().into())
+}
 
 fn default_address() -> ListeningAddr {
 	ListeningAddr {

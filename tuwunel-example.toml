@@ -39,11 +39,7 @@
 # This is the only directory where tuwunel will save its data, including
 # media. Note: this was previously "/var/lib/matrix-conduit".
 #
-# YOU NEED TO EDIT THIS.
-#
-# example: "/var/lib/tuwunel"
-#
-#database_path =
+#database_path = "/var/lib/tuwunel"
 
 # Text which will be added to the end of the user's displayname upon
 # registration with a space before the text. In Conduit, this was the
@@ -1613,9 +1609,12 @@
 #
 #tokio_console = false
 
-# This item is undocumented. Please contribute documentation for it.
+# Arbitrary argument vector for integration testing. Functionality in the
+# server is altered or informed for the requirements of integration tests.
+# - "smoke" performs a shutdown after startup admin commands rather than
+#   hanging on client handling.
 #
-#test = false
+#test = []
 
 # Controls whether admin room notices like account registrations, password
 # changes, account deactivations, room directory publications, etc will be

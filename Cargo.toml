@@ -272,7 +272,10 @@ features = ["std"]
 [workspace.dependencies.nix]
 version = "0.30"
 default-features = false
-features = ["resource"]
+features = [
+	"resource",
+	"user",
+]
 
 [workspace.dependencies.num-traits]
 version = "0.2"

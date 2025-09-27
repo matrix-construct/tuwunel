@@ -1,7 +1,7 @@
 #![cfg(test)]
 
 use tuwunel::Server;
-use tuwunel_core::{Result, runtime};
+use tuwunel_core::{Args, Result, runtime};
 
 #[test]
 fn dummy() {}
@@ -12,8 +12,9 @@ fn panic_dummy() { panic!("dummy") }
 
 #[test]
 fn smoke() -> Result {
-	let runtime = runtime::new(None)?;
-	let server = Server::new(None, Some(runtime.handle()))?;
+	let args = Args::default_test("smoke");
+	let runtime = runtime::new(Some(&args))?;
+	let server = Server::new(Some(&args), Some(runtime.handle()))?;
 
 	tuwunel::exec(&server, runtime)
 }
