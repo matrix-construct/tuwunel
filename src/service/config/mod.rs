@@ -20,11 +20,15 @@ impl crate::Service for Service {
 	}
 
 	async fn worker(self: Arc<Self>) -> Result {
+		let mut signaled = self.server.signal.subscribe();
 		while self.server.running() {
-			if self.server.signal.subscribe().recv().await == Ok(SIGNAL) {
-				if let Err(e) = self.handle_reload() {
-					error!("Failed to reload config: {e}");
-				}
+			tokio::select! {
+				_ = self.server.until_shutdown() => break,
+				signal = signaled.recv() => if signal !=  Ok(SIGNAL) { continue; },
+			}
+
+			if let Err(e) = self.handle_reload() {
+				error!("Failed to reload config: {e}");
 			}
 		}
 
