@@ -5,7 +5,11 @@ mod preview;
 mod remote;
 mod tests;
 mod thumbnail;
-use std::{path::PathBuf, sync::Arc, time::SystemTime};
+use std::{
+	path::PathBuf,
+	sync::Arc,
+	time::{Duration, SystemTime},
+};
 
 use async_trait::async_trait;
 use base64::{Engine as _, engine::general_purpose};
@@ -65,6 +69,53 @@ impl crate::Service for Service {
 }
 
 impl Service {
+	pub async fn get_or_fetch_thumbnail_meta(
+		&self,
+		mxc: &Mxc<'_>,
+		user: Option<&UserId>,
+		timeout_ms: Duration,
+		dim: &Dim,
+	) -> Result<FileMeta> {
+		let dim = dim.normalized();
+
+		if let Some(filemeta) = self.get_thumbnail(mxc, &dim).await? {
+			return Ok(filemeta);
+		}
+
+		if self
+			.services
+			.globals
+			.server_is_ours(mxc.server_name)
+		{
+			return Err!(Request(NotFound("Local thumbnail not found.")));
+		}
+
+		self.fetch_remote_thumbnail(mxc, user, None, timeout_ms, &dim)
+			.await
+	}
+
+	pub async fn get_or_fetch_file_meta(
+		&self,
+		mxc: &Mxc<'_>,
+		user: Option<&UserId>,
+		timeout_ms: Duration,
+	) -> Result<FileMeta> {
+		if let Some(filemeta) = self.get(mxc).await? {
+			return Ok(filemeta);
+		}
+
+		if self
+			.services
+			.globals
+			.server_is_ours(mxc.server_name)
+		{
+			return Err!(Request(NotFound("Local media not found.")));
+		}
+
+		self.fetch_remote_content(mxc, user, None, timeout_ms)
+			.await
+	}
+
 	/// Uploads a file.
 	pub async fn create(
 		&self,
@@ -295,7 +346,7 @@ impl Service {
 		}
 
 		if remote_mxcs.is_empty() {
-			return Err!(Database("Did not found any eligible MXCs to delete."));
+			return Err!(Database("Did not find any eligible MXCs to delete."));
 		}
 
 		debug_info!("Deleting media now in the past {time:?}");
