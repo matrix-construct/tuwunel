@@ -360,89 +360,6 @@ fn handle_federation_error(
 }
 
 #[implement(super::Service)]
-#[expect(deprecated)]
-pub async fn fetch_remote_thumbnail_legacy(
-	&self,
-	body: &media::get_content_thumbnail::v3::Request,
-) -> Result<media::get_content_thumbnail::v3::Response> {
-	let mxc = Mxc {
-		server_name: &body.server_name,
-		media_id: &body.media_id,
-	};
-
-	self.check_legacy_freeze()?;
-	self.check_fetch_authorized(&mxc)?;
-	let response = self
-		.services
-		.federation
-		.execute(mxc.server_name, media::get_content_thumbnail::v3::Request {
-			allow_remote: body.allow_remote,
-			height: body.height,
-			width: body.width,
-			method: body.method.clone(),
-			server_name: body.server_name.clone(),
-			media_id: body.media_id.clone(),
-			timeout_ms: body.timeout_ms,
-			allow_redirect: body.allow_redirect,
-			animated: body.animated,
-		})
-		.await?;
-
-	let dim = Dim::from_ruma(body.width, body.height, body.method.clone())?;
-	self.upload_thumbnail(
-		&mxc,
-		None,
-		None,
-		response.content_type.as_deref(),
-		&dim,
-		&response.file,
-	)
-	.await?;
-
-	Ok(response)
-}
-
-#[implement(super::Service)]
-#[expect(deprecated)]
-pub async fn fetch_remote_content_legacy(
-	&self,
-	mxc: &Mxc<'_>,
-	allow_redirect: bool,
-	timeout_ms: Duration,
-) -> Result<media::get_content::v3::Response, Error> {
-	self.check_legacy_freeze()?;
-	self.check_fetch_authorized(mxc)?;
-	let response = self
-		.services
-		.federation
-		.execute(mxc.server_name, media::get_content::v3::Request {
-			allow_remote: true,
-			server_name: mxc.server_name.into(),
-			media_id: mxc.media_id.into(),
-			timeout_ms,
-			allow_redirect,
-		})
-		.await?;
-
-	let content_disposition = make_content_disposition(
-		response.content_disposition.as_ref(),
-		response.content_type.as_deref(),
-		None,
-	);
-
-	self.create(
-		mxc,
-		None,
-		Some(&content_disposition),
-		response.content_type.as_deref(),
-		&response.file,
-	)
-	.await?;
-
-	Ok(response)
-}
-
-#[implement(super::Service)]
 fn check_fetch_authorized(&self, mxc: &Mxc<'_>) -> Result {
 	if self
 		.services
@@ -464,14 +381,4 @@ fn check_fetch_authorized(&self, mxc: &Mxc<'_>) -> Result {
 	}
 
 	Ok(())
-}
-
-#[implement(super::Service)]
-fn check_legacy_freeze(&self) -> Result {
-	self.services
-		.server
-		.config
-		.freeze_legacy_media
-		.then_some(())
-		.ok_or(err!(Request(NotFound("Remote media is frozen."))))
 }

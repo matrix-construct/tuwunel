@@ -1,15 +1,14 @@
 use axum::extract::State;
 use axum_client_ip::InsecureClientIp;
-use ruma::{
-	Mxc,
-	api::federation::authenticated_media::{
-		Content, ContentMetadata, FileOrLocation, get_content, get_content_thumbnail,
-	},
+use ruma::api::federation::authenticated_media::{
+	Content, ContentMetadata, FileOrLocation, get_content, get_content_thumbnail,
 };
-use tuwunel_core::{Err, Result, utils::content_disposition::make_content_disposition};
-use tuwunel_service::media::{Dim, FileMeta};
+use tuwunel_core::Result;
 
-use crate::Ruma;
+use crate::{
+	Ruma,
+	utils::{get_file, get_thumbnail},
+};
 
 /// # `GET /_matrix/federation/v1/media/download/{mediaId}`
 ///
@@ -25,30 +24,22 @@ pub(crate) async fn get_content_route(
 	InsecureClientIp(client): InsecureClientIp,
 	body: Ruma<get_content::v1::Request>,
 ) -> Result<get_content::v1::Response> {
-	let mxc = Mxc {
-		server_name: services.globals.server_name(),
-		media_id: &body.media_id,
-	};
-
-	let Some(FileMeta {
-		content,
-		content_type,
-		content_disposition,
-	}) = services.media.get(&mxc).await?
-	else {
-		return Err!(Request(NotFound("Media not found.")));
-	};
-
-	let content_disposition =
-		make_content_disposition(content_disposition.as_ref(), content_type.as_deref(), None);
-	let content = Content {
-		file: content.expect("entire file contents"),
-		content_type: content_type.map(Into::into),
-		content_disposition: Some(content_disposition),
-	};
+	let file_meta = get_file(
+		&services,
+		services.globals.server_name(),
+		&body.media_id,
+		None,
+		body.timeout_ms,
+		None,
+	)
+	.await?;
 
 	Ok(get_content::v1::Response {
-		content: FileOrLocation::File(content),
+		content: FileOrLocation::File(Content {
+			file: file_meta.content.expect("entire file contents"),
+			content_type: file_meta.content_type.map(Into::into),
+			content_disposition: file_meta.content_disposition,
+		}),
 		metadata: ContentMetadata::new(),
 	})
 }
@@ -67,31 +58,24 @@ pub(crate) async fn get_content_thumbnail_route(
 	InsecureClientIp(client): InsecureClientIp,
 	body: Ruma<get_content_thumbnail::v1::Request>,
 ) -> Result<get_content_thumbnail::v1::Response> {
-	let dim = Dim::from_ruma(body.width, body.height, body.method.clone())?;
-	let mxc = Mxc {
-		server_name: services.globals.server_name(),
-		media_id: &body.media_id,
-	};
-
-	let Some(FileMeta {
-		content,
-		content_type,
-		content_disposition,
-	}) = services.media.get_thumbnail(&mxc, &dim).await?
-	else {
-		return Err!(Request(NotFound("Media not found.")));
-	};
-
-	let content_disposition =
-		make_content_disposition(content_disposition.as_ref(), content_type.as_deref(), None);
-	let content = Content {
-		file: content.expect("entire file contents"),
-		content_type: content_type.map(Into::into),
-		content_disposition: Some(content_disposition),
-	};
+	let file_meta = get_thumbnail(
+		&services,
+		services.globals.server_name(),
+		&body.media_id,
+		None,
+		body.timeout_ms,
+		body.width,
+		body.height,
+		body.method.as_ref(),
+	)
+	.await?;
 
 	Ok(get_content_thumbnail::v1::Response {
-		content: FileOrLocation::File(content),
+		content: FileOrLocation::File(Content {
+			file: file_meta.content.expect("entire file contents"),
+			content_type: file_meta.content_type.map(Into::into),
+			content_disposition: file_meta.content_disposition,
+		}),
 		metadata: ContentMetadata::new(),
 	})
 }

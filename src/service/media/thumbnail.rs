@@ -61,10 +61,7 @@ impl super::Service {
 	/// which crops the image afterwards.
 	#[tracing::instrument(skip(self), name = "thumbnail", level = "debug")]
 	pub async fn get_thumbnail(&self, mxc: &Mxc<'_>, dim: &Dim) -> Result<Option<FileMeta>> {
-		// 0, 0 because that's the original file
-		let dim = dim.normalized();
-
-		match self.db.search_file_metadata(mxc, &dim).await {
+		match self.db.search_file_metadata(mxc, dim).await {
 			| Ok(metadata) => self.get_thumbnail_saved(metadata).await,
 			| _ => match self
 				.db
@@ -72,7 +69,7 @@ impl super::Service {
 				.await
 			{
 				| Ok(metadata) =>
-					self.get_thumbnail_generate(mxc, &dim, metadata)
+					self.get_thumbnail_generate(mxc, dim, metadata)
 						.await,
 				| _ => Ok(None),
 			},

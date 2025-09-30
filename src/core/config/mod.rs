@@ -1549,9 +1549,6 @@ pub struct Config {
 	#[serde(default)]
 	pub request_legacy_media: bool,
 
-	#[serde(default = "true_fn")]
-	pub freeze_legacy_media: bool,
-
 	/// Check consistency of the media directory at startup:
 	/// 1. When `media_compat_file_link` is enabled, this check will upgrade
 	///    media when switching back and forth between Conduit and tuwunel. Both

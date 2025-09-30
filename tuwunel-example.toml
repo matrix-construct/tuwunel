@@ -1329,10 +1329,6 @@
 #
 #request_legacy_media = false
 
-# This item is undocumented. Please contribute documentation for it.
-#
-#freeze_legacy_media = true
-
 # Check consistency of the media directory at startup:
 # 1. When `media_compat_file_link` is enabled, this check will upgrade
 #    media when switching back and forth between Conduit and tuwunel. Both
