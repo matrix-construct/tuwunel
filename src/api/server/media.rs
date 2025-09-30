@@ -31,6 +31,7 @@ pub(crate) async fn get_content_route(
 		None,
 		body.timeout_ms,
 		None,
+		false,
 	)
 	.await?;
 
@@ -67,6 +68,7 @@ pub(crate) async fn get_content_thumbnail_route(
 		body.width,
 		body.height,
 		body.method.as_ref(),
+		false,
 	)
 	.await?;
 

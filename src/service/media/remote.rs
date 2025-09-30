@@ -130,7 +130,7 @@ async fn fetch_content_authenticated(
 
 #[expect(deprecated)]
 #[implement(super::Service)]
-async fn fetch_thumbnail_unauthenticated(
+pub(super) async fn fetch_thumbnail_unauthenticated(
 	&self,
 	mxc: &Mxc<'_>,
 	user: Option<&UserId>,
@@ -166,7 +166,7 @@ async fn fetch_thumbnail_unauthenticated(
 
 #[expect(deprecated)]
 #[implement(super::Service)]
-async fn fetch_content_unauthenticated(
+pub(super) async fn fetch_content_unauthenticated(
 	&self,
 	mxc: &Mxc<'_>,
 	user: Option<&UserId>,
