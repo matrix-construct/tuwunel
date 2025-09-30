@@ -106,7 +106,7 @@ pub(crate) async fn get_content_legacy_route(
 	body: Ruma<get_content::v3::Request>,
 ) -> Result<get_content::v3::Response> {
 	let file_meta =
-		get_file(&services, &body.server_name, &body.media_id, None, body.timeout_ms, None)
+		get_file(&services, &body.server_name, &body.media_id, None, body.timeout_ms, None, true)
 			.await?;
 
 	Ok(get_content::v3::Response {
@@ -139,6 +139,7 @@ pub(crate) async fn get_content_as_filename_legacy_route(
 		None,
 		body.timeout_ms,
 		Some(&body.filename),
+		true,
 	)
 	.await?;
 
@@ -174,6 +175,7 @@ pub(crate) async fn get_content_thumbnail_legacy_route(
 		body.width,
 		body.height,
 		body.method.as_ref(),
+		true,
 	)
 	.await?;
 

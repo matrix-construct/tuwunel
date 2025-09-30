@@ -14,11 +14,12 @@ pub(crate) async fn get_file(
 	user: Option<&UserId>,
 	timeout_ms: Duration,
 	filename: Option<&str>,
+	force_unauth: bool,
 ) -> Result<FileMeta> {
 	let mxc = Mxc { server_name, media_id };
 	let mut file_meta = services
 		.media
-		.get_or_fetch_file_meta(&mxc, user, timeout_ms)
+		.get_or_fetch_file_meta(&mxc, user, timeout_ms, force_unauth)
 		.await?;
 
 	transform_content_disposition(&mut file_meta, filename);
@@ -35,6 +36,7 @@ pub(crate) async fn get_thumbnail(
 	width: UInt,
 	height: UInt,
 	method: Option<&Method>,
+	force_unauth: bool,
 ) -> Result<FileMeta> {
 	let mxc = Mxc { server_name, media_id };
 
@@ -42,7 +44,7 @@ pub(crate) async fn get_thumbnail(
 
 	let mut file_meta = services
 		.media
-		.get_or_fetch_thumbnail_meta(&mxc, user, timeout_ms, &dim)
+		.get_or_fetch_thumbnail_meta(&mxc, user, timeout_ms, &dim, force_unauth)
 		.await?;
 
 	transform_content_disposition(&mut file_meta, None);

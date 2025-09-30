@@ -75,6 +75,7 @@ impl Service {
 		user: Option<&UserId>,
 		timeout_ms: Duration,
 		dim: &Dim,
+		force_unauth: bool,
 	) -> Result<FileMeta> {
 		let dim = dim.normalized();
 
@@ -90,8 +91,13 @@ impl Service {
 			return Err!(Request(NotFound("Local thumbnail not found.")));
 		}
 
-		self.fetch_remote_thumbnail(mxc, user, None, timeout_ms, &dim)
-			.await
+		if force_unauth {
+			self.fetch_thumbnail_unauthenticated(mxc, user, None, timeout_ms, &dim)
+				.await
+		} else {
+			self.fetch_remote_thumbnail(mxc, user, None, timeout_ms, &dim)
+				.await
+		}
 	}
 
 	pub async fn get_or_fetch_file_meta(
@@ -99,6 +105,7 @@ impl Service {
 		mxc: &Mxc<'_>,
 		user: Option<&UserId>,
 		timeout_ms: Duration,
+		force_unauth: bool,
 	) -> Result<FileMeta> {
 		if let Some(filemeta) = self.get(mxc).await? {
 			return Ok(filemeta);
@@ -112,8 +119,13 @@ impl Service {
 			return Err!(Request(NotFound("Local media not found.")));
 		}
 
-		self.fetch_remote_content(mxc, user, None, timeout_ms)
-			.await
+		if force_unauth {
+			self.fetch_content_unauthenticated(mxc, user, None, timeout_ms)
+				.await
+		} else {
+			self.fetch_remote_content(mxc, user, None, timeout_ms)
+				.await
+		}
 	}
 
 	/// Uploads a file.

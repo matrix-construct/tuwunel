@@ -107,6 +107,7 @@ pub(crate) async fn get_content_thumbnail_route(
 		body.width,
 		body.height,
 		body.method.as_ref(),
+		false,
 	)
 	.await?;
 
@@ -139,8 +140,16 @@ pub(crate) async fn get_content_route(
 		content,
 		content_type,
 		content_disposition,
-	} = get_file(&services, &body.server_name, &body.media_id, Some(user), body.timeout_ms, None)
-		.await?;
+	} = get_file(
+		&services,
+		&body.server_name,
+		&body.media_id,
+		Some(user),
+		body.timeout_ms,
+		None,
+		false,
+	)
+	.await?;
 
 	Ok(get_content::v1::Response {
 		file: content.expect("entire file contents"),
@@ -178,6 +187,7 @@ pub(crate) async fn get_content_as_filename_route(
 		Some(user),
 		body.timeout_ms,
 		Some(&body.filename),
+		false,
 	)
 	.await?;
 
