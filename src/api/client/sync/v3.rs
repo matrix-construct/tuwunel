@@ -1126,11 +1126,8 @@ async fn calculate_state_changes<'a>(
 		.chain(lazy_state_ids.stream())
 		.broad_filter_map(|shorteventid| {
 			services
-				.short
-				.get_eventid_from_short(shorteventid)
-				.and_then(async |event_id: OwnedEventId| {
-					services.timeline.get_pdu(&event_id).await
-				})
+				.timeline
+				.get_pdu_from_shorteventid(shorteventid)
 				.ok()
 		})
 		.collect::<Vec<_>>()

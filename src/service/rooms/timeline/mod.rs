@@ -258,27 +258,6 @@ pub async fn get_shortstatehash(
 		.await
 }
 
-/// Returns the `shorteventid` from the `pdu_id`
-#[implement(Service)]
-pub async fn get_shorteventid_from_pdu_id(&self, pdu_id: &PduId) -> Result<ShortEventId> {
-	let event_id = self.get_event_id_from_pdu_id(pdu_id).await?;
-
-	self.services
-		.short
-		.get_shorteventid(&event_id)
-		.await
-}
-
-/// Returns the `event_id` from the `pdu_id`
-#[implement(Service)]
-pub async fn get_event_id_from_pdu_id(&self, pdu_id: &PduId) -> Result<OwnedEventId> {
-	let pdu_id: RawPduId = (*pdu_id).into();
-
-	self.get_pdu_from_id(&pdu_id)
-		.map_ok(|pdu| pdu.event_id)
-		.await
-}
-
 /// Returns the shorteventid in the room preceding the exclusive `before` param.
 /// `before` does not have to be a valid shorteventid or in the room.
 #[implement(Service)]
@@ -447,6 +426,20 @@ fn pdu_count_to_id(shortroomid: ShortRoomId, count: PduCount, dir: Direction) ->
 	pdu_id.into()
 }
 
+/// Returns the pdu from shorteventid
+///
+/// Checks the `eventid_outlierpdu` Tree if not found in the timeline.
+#[implement(Service)]
+pub async fn get_pdu_from_shorteventid(&self, shorteventid: ShortEventId) -> Result<PduEvent> {
+	let event_id: OwnedEventId = self
+		.services
+		.short
+		.get_eventid_from_short(shorteventid)
+		.await?;
+
+	self.get_pdu(&event_id).await
+}
+
 /// Returns the pdu.
 ///
 /// Checks the `eventid_outlierpdu` Tree if not found in the timeline.
@@ -565,6 +558,39 @@ pub async fn get_pdu_count(&self, event_id: &EventId) -> Result<PduCount> {
 	self.get_pdu_id(event_id)
 		.await
 		.map(RawPduId::pdu_count)
+}
+
+/// Returns the `shorteventid` from the `pdu_id`
+#[implement(Service)]
+pub async fn get_shorteventid_from_pdu_id(&self, pdu_id: &PduId) -> Result<ShortEventId> {
+	let event_id = self.get_event_id_from_pdu_id(pdu_id).await?;
+
+	self.services
+		.short
+		.get_shorteventid(&event_id)
+		.await
+}
+
+/// Returns the `event_id` from the `pdu_id`
+#[implement(Service)]
+pub async fn get_event_id_from_pdu_id(&self, pdu_id: &PduId) -> Result<OwnedEventId> {
+	let pdu_id: RawPduId = (*pdu_id).into();
+
+	self.get_pdu_from_id(&pdu_id)
+		.map_ok(|pdu| pdu.event_id)
+		.await
+}
+
+/// Returns the `pdu_id` from the `shorteventid`
+#[implement(Service)]
+pub async fn get_pdu_id_from_shorteventid(&self, shorteventid: ShortEventId) -> Result<RawPduId> {
+	let event_id: OwnedEventId = self
+		.services
+		.short
+		.get_eventid_from_short(shorteventid)
+		.await?;
+
+	self.get_pdu_id(&event_id).await
 }
 
 /// Returns the pdu's id.
