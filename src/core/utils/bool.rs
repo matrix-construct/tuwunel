@@ -23,6 +23,9 @@ pub trait BoolExt {
 	#[allow(clippy::result_unit_err)]
 	fn into_result(self) -> Result<(), ()>;
 
+	#[must_use]
+	fn is_false(&self) -> Self;
+
 	fn map<T, F: FnOnce(Self) -> T>(self, f: F) -> T
 	where
 		Self: Sized;
@@ -65,13 +68,16 @@ impl BoolExt for bool {
 	fn expect(self, msg: &str) -> Self { self.then_some(true).expect(msg) }
 
 	#[inline]
-	fn expect_false(self, msg: &str) -> Self { (!self).then_some(false).expect(msg) }
+	fn expect_false(self, msg: &str) -> Self { self.is_false().then_some(false).expect(msg) }
 
 	#[inline]
 	fn into_option(self) -> Option<()> { self.then_some(()) }
 
 	#[inline]
 	fn into_result(self) -> Result<(), ()> { self.ok_or(()) }
+
+	#[inline]
+	fn is_false(&self) -> Self { self.eq(&false) }
 
 	#[inline]
 	fn map<T, F: FnOnce(Self) -> T>(self, f: F) -> T
@@ -103,10 +109,10 @@ impl BoolExt for bool {
 	}
 
 	#[inline]
-	fn or<T, F: FnOnce() -> T>(self, f: F) -> Option<T> { (!self).then(f) }
+	fn or<T, F: FnOnce() -> T>(self, f: F) -> Option<T> { self.is_false().then(f) }
 
 	#[inline]
-	fn or_some<T>(self, t: T) -> Option<T> { (!self).then_some(t) }
+	fn or_some<T>(self, t: T) -> Option<T> { self.is_false().then_some(t) }
 
 	#[inline]
 	fn then_none<T>(self) -> Option<T> { Option::<T>::None }
