@@ -11,7 +11,7 @@ use ruma::{
 use serde::Deserialize;
 use tuwunel_core::{
 	Result, at, err, implement,
-	matrix::{Event, StateKey},
+	matrix::{Event, Pdu, StateKey},
 	pair_of,
 	utils::{
 		result::FlatOk,
@@ -64,7 +64,7 @@ pub async fn state_get_content<T>(
 	state_key: &str,
 ) -> Result<T>
 where
-	T: for<'de> Deserialize<'de>,
+	T: for<'de> Deserialize<'de> + Send,
 {
 	self.state_get(shortstatehash, event_type, state_key)
 		.await
@@ -127,10 +127,12 @@ pub async fn state_get(
 	shortstatehash: ShortStateHash,
 	event_type: &StateEventType,
 	state_key: &str,
-) -> Result<impl Event> {
-	self.state_get_id(shortstatehash, event_type, state_key)
-		.and_then(async |event_id: OwnedEventId| self.services.timeline.get_pdu(&event_id).await)
-		.await
+) -> Result<Pdu> {
+	let event_id: OwnedEventId = self
+		.state_get_id(shortstatehash, event_type, state_key)
+		.await?;
+
+	self.services.timeline.get_pdu(&event_id).await
 }
 
 /// Returns a single EventId from `room_id` with key (`event_type`,
@@ -143,7 +145,7 @@ pub async fn state_get_id<Id>(
 	state_key: &str,
 ) -> Result<Id>
 where
-	Id: for<'de> Deserialize<'de> + Sized + ToOwned,
+	Id: for<'de> Deserialize<'de> + Send + Sized + ToOwned,
 	<Id as ToOwned>::Owned: Borrow<EventId>,
 {
 	let shorteventid = self

@@ -149,7 +149,7 @@ pub async fn get_shortstatekey(
 #[implement(Service)]
 pub async fn get_eventid_from_short<Id>(&self, shorteventid: ShortEventId) -> Result<Id>
 where
-	Id: for<'de> Deserialize<'de> + Sized + ToOwned,
+	Id: for<'de> Deserialize<'de> + Send + Sized + ToOwned,
 	<Id as ToOwned>::Owned: Borrow<EventId>,
 {
 	const BUFSIZE: usize = size_of::<ShortEventId>();
@@ -169,7 +169,7 @@ pub fn multi_get_eventid_from_short<'a, Id, S>(
 ) -> impl Stream<Item = Result<Id>> + Send + 'a
 where
 	S: Stream<Item = ShortEventId> + Send + 'a,
-	Id: for<'de> Deserialize<'de> + Sized + ToOwned + 'a,
+	Id: for<'de> Deserialize<'de> + Send + Sized + ToOwned + 'a,
 	<Id as ToOwned>::Owned: Borrow<EventId>,
 {
 	shorteventid

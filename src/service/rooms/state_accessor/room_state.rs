@@ -5,7 +5,7 @@ use ruma::{EventId, RoomId, events::StateEventType};
 use serde::Deserialize;
 use tuwunel_core::{
 	Result, err, implement,
-	matrix::{Event, StateKey},
+	matrix::{Event, Pdu, StateKey},
 };
 
 /// Returns a single PDU from `room_id` with key (`event_type`,`state_key`).
@@ -17,7 +17,7 @@ pub async fn room_state_get_content<T>(
 	state_key: &str,
 ) -> Result<T>
 where
-	T: for<'de> Deserialize<'de>,
+	T: for<'de> Deserialize<'de> + Send,
 {
 	self.room_state_get(room_id, event_type, state_key)
 		.await
@@ -69,7 +69,7 @@ pub async fn room_state_get_id<Id>(
 	state_key: &str,
 ) -> Result<Id>
 where
-	Id: for<'de> Deserialize<'de> + Sized + ToOwned,
+	Id: for<'de> Deserialize<'de> + Send + Sized + ToOwned,
 	<Id as ToOwned>::Owned: Borrow<EventId>,
 {
 	self.services
@@ -88,7 +88,7 @@ pub async fn room_state_get(
 	room_id: &RoomId,
 	event_type: &StateEventType,
 	state_key: &str,
-) -> Result<impl Event> {
+) -> Result<Pdu> {
 	self.services
 		.state
 		.get_room_shortstatehash(room_id)

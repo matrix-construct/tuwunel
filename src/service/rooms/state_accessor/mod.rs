@@ -29,7 +29,7 @@ use ruma::{
 };
 use tuwunel_core::{
 	Result, err,
-	matrix::{Event, room_version, state_res::events::RoomCreateEvent},
+	matrix::{Pdu, room_version, state_res::events::RoomCreateEvent},
 };
 
 pub struct Service {
@@ -65,7 +65,7 @@ impl Service {
 		Ok(RoomPowerLevels::new(power_levels.into(), &rules.authorization, creators))
 	}
 
-	pub async fn get_create(&self, room_id: &RoomId) -> Result<RoomCreateEvent<impl Event>> {
+	pub async fn get_create(&self, room_id: &RoomId) -> Result<RoomCreateEvent<Pdu>> {
 		self.room_state_get(room_id, &StateEventType::RoomCreate, "")
 			.await
 			.map(RoomCreateEvent::new)
