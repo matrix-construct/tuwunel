@@ -52,7 +52,7 @@ ARG sys_target
 WORKDIR /
 COPY --link --from=build-nix . .
 
-WORKDIR /tmp/tuwunel
+WORKDIR /opt/tuwunel
 ENV TUWUNEL_DATABASE_PATH="/tmp/tuwunel/smoketest.db"
 ENV TUWUNEL_LOG="info"
 RUN \
@@ -62,8 +62,6 @@ RUN \
 <<EOF
     set -eux
 
-    #TODO: result disappeared after doCheck disabled?
-    exit 0;
     bin/tuwunel \
         -Otest='["smoke", "fresh"]' \
         -Oserver_name=\"localhost\" \
@@ -86,4 +84,6 @@ RUN \
 <<EOF
 	set -eux
     #TODO: extract derivation?
+    mkdir -p /opt/tuwunel
+    touch /opt/tuwunel/tuwunel.drv
 EOF
