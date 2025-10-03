@@ -404,7 +404,7 @@ async fn build_sync_events(
 
 	// If the user doesn't share an encrypted room with the target anymore, we need
 	// to tell them
-	let device_list_left: HashSet<_> = left_encrypted_users
+	let device_list_left = left_encrypted_users
 		.into_iter()
 		.stream()
 		.broad_filter_map(async |user_id: OwnedUserId| {
@@ -427,8 +427,8 @@ async fn build_sync_events(
 	Ok(sync_events::v3::Response {
 		account_data: GlobalAccountData { events: account_data },
 		device_lists: DeviceLists {
+			left: device_list_left,
 			changed: device_list_updates.into_iter().collect(),
-			left: device_list_left.into_iter().collect(),
 		},
 		device_one_time_keys_count,
 		// Fallback keys are not yet supported
