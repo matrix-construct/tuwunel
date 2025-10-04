@@ -119,14 +119,14 @@ pub(crate) async fn sync_events_v5_route(
 
 	let all_invited_rooms = services
 		.state_cache
-		.rooms_invited_state(sender_user)
-		.map(|r| r.0)
+		.rooms_invited(sender_user)
+		.map(ToOwned::to_owned)
 		.collect::<Vec<OwnedRoomId>>();
 
 	let all_knocked_rooms = services
 		.state_cache
-		.rooms_knocked_state(sender_user)
-		.map(|r| r.0)
+		.rooms_knocked(sender_user)
+		.map(ToOwned::to_owned)
 		.collect::<Vec<OwnedRoomId>>();
 
 	let (all_joined_rooms, all_invited_rooms, all_knocked_rooms) =

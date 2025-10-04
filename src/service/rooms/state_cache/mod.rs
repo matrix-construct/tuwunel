@@ -399,6 +399,45 @@ pub fn rooms_joined<'a>(
 /// Returns an iterator over all rooms a user was invited to.
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "debug")]
+pub fn rooms_invited<'a>(
+	&'a self,
+	user_id: &'a UserId,
+) -> impl Stream<Item = &RoomId> + Send + 'a {
+	self.db
+		.userroomid_invitestate
+		.keys_raw_prefix(user_id)
+		.ignore_err()
+		.map(|(_, room_id): (Ignore, &RoomId)| room_id)
+}
+
+/// Returns an iterator over all rooms a user is currently knocking.
+#[implement(Service)]
+#[tracing::instrument(skip(self), level = "debug")]
+pub fn rooms_knocked<'a>(
+	&'a self,
+	user_id: &'a UserId,
+) -> impl Stream<Item = &RoomId> + Send + 'a {
+	self.db
+		.userroomid_knockedstate
+		.keys_raw_prefix(user_id)
+		.ignore_err()
+		.map(|(_, room_id): (Ignore, &RoomId)| room_id)
+}
+
+/// Returns an iterator over all rooms a user left.
+#[implement(Service)]
+#[tracing::instrument(skip(self), level = "debug")]
+pub fn rooms_left<'a>(&'a self, user_id: &'a UserId) -> impl Stream<Item = &RoomId> + Send + 'a {
+	self.db
+		.userroomid_leftstate
+		.keys_raw_prefix(user_id)
+		.ignore_err()
+		.map(|(_, room_id): (Ignore, &RoomId)| room_id)
+}
+
+/// Returns an iterator over all rooms a user was invited to.
+#[implement(Service)]
+#[tracing::instrument(skip(self), level = "debug")]
 pub fn rooms_invited_state<'a>(
 	&'a self,
 	user_id: &'a UserId,
