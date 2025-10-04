@@ -109,6 +109,18 @@ impl Service {
 		registration: &Registration,
 		appservice_config_body: &str,
 	) -> Result {
+		let appservice_user = UserId::parse_with_server_name(
+			&registration.sender_localpart,
+			&self.services.config.server_name,
+		)?;
+
+		if !self.services.users.exists(&appservice_user).await {
+			self.services
+				.users
+				.create(&appservice_user, None, None)
+				.await?;
+		}
+
 		//TODO: Check for collisions between exclusive appservice namespaces
 		self.registration_info
 			.write()
