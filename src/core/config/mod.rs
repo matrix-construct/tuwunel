@@ -869,6 +869,10 @@ pub struct Config {
 	#[serde(default = "true_fn", alias = "log_colours")]
 	pub log_colors: bool,
 
+	/// Sets the log format to compact mode.
+	#[serde(default)]
+	pub log_compact: bool,
+
 	/// Configures the span events which will be outputted with the log.
 	///
 	/// default: "none"

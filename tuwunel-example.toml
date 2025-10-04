@@ -716,6 +716,10 @@
 #
 #log_colors = true
 
+# Sets the log format to compact mode.
+#
+#log_compact = false
+
 # Configures the span events which will be outputted with the log.
 #
 #log_span_events = "none"

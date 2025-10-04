@@ -64,7 +64,8 @@ impl io::Write for &'_ ConsoleWriter {
 }
 
 pub struct ConsoleFormat {
-	_compact: Format<Compact>,
+	compact_mode: bool,
+	compact: Format<Compact>,
 	full: Format<Full>,
 	pretty: Format<Pretty>,
 }
@@ -73,7 +74,8 @@ impl ConsoleFormat {
 	#[must_use]
 	pub fn new(config: &Config) -> Self {
 		Self {
-			_compact: fmt::format()
+			compact_mode: config.log_compact,
+			compact: fmt::format()
 				.compact()
 				.with_ansi(config.log_colors),
 
@@ -111,6 +113,7 @@ where
 				.any(|field| field.name() == "_debug");
 
 		match *event.metadata().level() {
+			| _ if self.compact_mode => self.compact.format_event(ctx, writer, event),
 			| Level::ERROR if !is_debug => self.pretty.format_event(ctx, writer, event),
 			| _ => self.full.format_event(ctx, writer, event),
 		}
