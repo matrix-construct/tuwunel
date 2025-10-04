@@ -74,6 +74,10 @@ pub(crate) enum RoomStateCacheCommand {
 		user_id: OwnedUserId,
 		room_id: OwnedRoomId,
 	},
+
+	UserMemberships {
+		user_id: OwnedUserId,
+	},
 }
 
 pub(super) async fn process(subcommand: RoomStateCacheCommand, context: &Context<'_>) -> Result {
@@ -313,6 +317,22 @@ pub(super) async fn process(subcommand: RoomStateCacheCommand, context: &Context
 			let results = services
 				.state_cache
 				.invite_state(&user_id, &room_id)
+				.await;
+			let query_time = timer.elapsed();
+
+			context
+				.write_str(&format!(
+					"Query completed in {query_time:?}:\n\n```rs\n{results:#?}\n```"
+				))
+				.await
+		},
+		| RoomStateCacheCommand::UserMemberships { user_id } => {
+			let timer = tokio::time::Instant::now();
+			let results = services
+				.state_cache
+				.all_user_memberships(&user_id)
+				.map(|(membership, room_id)| (membership, room_id.to_owned()))
+				.collect::<Vec<_>>()
 				.await;
 			let query_time = timer.elapsed();
 
