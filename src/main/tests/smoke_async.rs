@@ -1,8 +1,8 @@
 #![cfg(test)]
 
 use insta::{assert_debug_snapshot, with_settings};
-use tuwunel::Server;
-use tuwunel_core::{Args, Result, runtime};
+use tuwunel::{Args, Server, runtime};
+use tuwunel_core::Result;
 
 #[test]
 fn smoke_async() -> Result {
@@ -17,7 +17,7 @@ fn smoke_async() -> Result {
 			tuwunel::async_exec(&server).await
 		});
 
-		runtime::shutdown(&server.server, runtime)?;
+		runtime::shutdown(&server, runtime)?;
 		assert_debug_snapshot!(result);
 		result
 	})

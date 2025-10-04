@@ -1,7 +1,7 @@
 use criterion::{Criterion, criterion_group, criterion_main};
 use tracing::Level;
-use tuwunel::Server;
-use tuwunel_core::{Args, result::ErrLog, runtime};
+use tuwunel::{Args, Server, runtime};
+use tuwunel_core::result::ErrLog;
 
 criterion_group!(
 	name = benches;
@@ -31,5 +31,5 @@ fn smoke(c: &mut Criterion) {
 		})
 		.unwrap();
 
-	tuwunel::shutdown(&server.server, runtime).unwrap();
+	tuwunel::shutdown(&server, runtime).unwrap();
 }

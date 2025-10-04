@@ -10,13 +10,14 @@ use std::{
 
 use tokio::runtime::Builder;
 pub use tokio::runtime::{Handle, Runtime};
-
 #[cfg(all(not(target_env = "msvc"), feature = "jemalloc"))]
-use crate::result::LogDebugErr;
-use crate::{
-	Args, Result, Server, debug, is_true,
+use tuwunel_core::result::LogDebugErr;
+use tuwunel_core::{
+	Result, debug, is_true,
 	utils::sys::compute::{nth_core_available, set_affinity},
 };
+
+use crate::{Args, Server};
 
 const WORKER_NAME: &str = "tuwunel:worker";
 const WORKER_MIN: usize = 2;
@@ -102,11 +103,12 @@ pub fn shutdown(server: &Arc<Server>, runtime: Runtime) -> Result {
 
 	wait_shutdown(server, runtime);
 	let runtime_metrics = server
+		.server
 		.metrics
 		.runtime_interval()
 		.unwrap_or_default();
 
-	crate::event!(LEVEL, ?runtime_metrics, "Final runtime metrics");
+	tuwunel_core::event!(LEVEL, ?runtime_metrics, "Final runtime metrics");
 	Ok(())
 }
 
@@ -127,7 +129,7 @@ fn wait_shutdown(_server: &Arc<Server>, runtime: Runtime) {
 
 	// Join any jemalloc threads so they don't appear in use at exit.
 	#[cfg(all(not(target_env = "msvc"), feature = "jemalloc"))]
-	crate::alloc::je::background_thread_enable(false)
+	tuwunel_core::alloc::je::background_thread_enable(false)
 		.log_debug_err()
 		.ok();
 }
@@ -173,7 +175,7 @@ fn set_worker_affinity() {
 
 #[cfg(all(not(target_env = "msvc"), feature = "jemalloc"))]
 fn set_worker_mallctl(id: usize) {
-	use crate::alloc::je::{
+	use tuwunel_core::alloc::je::{
 		is_affine_arena,
 		this_thread::{set_arena, set_muzzy_decay},
 	};
@@ -186,7 +188,8 @@ fn set_worker_mallctl(id: usize) {
 		.get()
 		.expect("GC_MUZZY initialized by runtime::new()");
 
-	let muzzy_auto_disable = crate::utils::available_parallelism() >= DISABLE_MUZZY_THRESHOLD;
+	let muzzy_auto_disable =
+		tuwunel_core::utils::available_parallelism() >= DISABLE_MUZZY_THRESHOLD;
 
 	if matches!(muzzy_option, Some(false) | None if muzzy_auto_disable) {
 		set_muzzy_decay(-1).log_debug_err().ok();
@@ -240,7 +243,7 @@ fn thread_park() {
 
 fn gc_on_park() {
 	#[cfg(all(not(target_env = "msvc"), feature = "jemalloc"))]
-	crate::alloc::je::this_thread::decay()
+	tuwunel_core::alloc::je::this_thread::decay()
 		.log_debug_err()
 		.ok();
 }

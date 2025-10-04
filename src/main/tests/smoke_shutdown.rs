@@ -2,8 +2,8 @@
 
 use insta::{assert_debug_snapshot, with_settings};
 use tracing::Level;
-use tuwunel::Server;
-use tuwunel_core::{Args, Result, runtime, utils::result::ErrLog};
+use tuwunel::{Args, Server, runtime};
+use tuwunel_core::{Result, utils::result::ErrLog};
 
 #[test]
 fn smoke_shutdown() -> Result {
@@ -22,7 +22,7 @@ fn smoke_shutdown() -> Result {
 			tuwunel::async_stop(&server).await
 		});
 
-		runtime::shutdown(&server.server, runtime)?;
+		runtime::shutdown(&server, runtime)?;
 		assert_debug_snapshot!(result);
 		result
 	})

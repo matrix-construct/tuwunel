@@ -1,7 +1,7 @@
 use std::sync::atomic::Ordering;
 
-use tuwunel::{Server, restart};
-use tuwunel_core::{Result, args, debug_info, runtime};
+use tuwunel::{Server, args, restart, runtime};
+use tuwunel_core::{Result, debug_info};
 
 fn main() -> Result {
 	let args = args::parse();

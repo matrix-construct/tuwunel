@@ -3,8 +3,7 @@
 use std::path::PathBuf;
 
 use clap::{ArgAction, Parser};
-
-use crate::{
+use tuwunel_core::{
 	Err, Result,
 	config::{Figment, FigmentValue},
 	err, toml,
@@ -17,7 +16,7 @@ use crate::{
 	about,
 	long_about = None,
 	name = "tuwunel",
-	version = crate::version(),
+	version = tuwunel_core::version(),
 )]
 pub struct Args {
 	#[arg(short, long)]

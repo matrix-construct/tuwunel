@@ -1,8 +1,8 @@
 #![cfg(test)]
 
 use insta::{assert_debug_snapshot, with_settings};
-use tuwunel::Server;
-use tuwunel_core::{Args, Result, runtime};
+use tuwunel::{Args, Server, runtime};
+use tuwunel_core::Result;
 
 #[test]
 fn dummy() {}

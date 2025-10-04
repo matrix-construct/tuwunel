@@ -1,19 +1,24 @@
 #![type_length_limit = "4096"] //TODO: reduce me
 
+pub mod args;
 pub mod logging;
 pub mod mods;
 pub mod restart;
+pub mod runtime;
 pub mod sentry;
 pub mod server;
 pub mod signals;
 
 use std::sync::Arc;
 
-pub use tuwunel_core::runtime::shutdown;
-use tuwunel_core::{Result, Runtime, debug_info, error, mod_ctor, mod_dtor, rustc_flags_capture};
+use tuwunel_core::{Result, debug_info, error, mod_ctor, mod_dtor, rustc_flags_capture};
 use tuwunel_service::Services;
 
-pub use self::server::Server;
+pub use self::{
+	args::Args,
+	runtime::{Runtime, shutdown},
+	server::Server,
+};
 
 mod_ctor! {}
 mod_dtor! {}
@@ -21,7 +26,7 @@ rustc_flags_capture! {}
 
 pub fn exec(server: &Arc<Server>, runtime: Runtime) -> Result {
 	run(server, &runtime)?;
-	shutdown(&server.server, runtime)
+	shutdown(server, runtime)
 }
 
 pub fn run(server: &Arc<Server>, runtime: &Runtime) -> Result {
