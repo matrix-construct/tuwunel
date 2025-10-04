@@ -470,6 +470,30 @@ target "matrix-rust-sdk-integration" {
     }
 }
 
+target "integration-valgrind" {
+    name = elem("integration-valgrind", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target])
+    tags = [
+        elem_tag("integration-valgrind", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target], "latest"),
+    ]
+    matrix = cargo_rust_feat_sys
+    inherits = [
+        elem("integration", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target]),
+    ]
+    contexts = {
+        input = elem("target:integration", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target])
+    }
+    args = {
+        cargo_cmd = "valgrind test"
+        cargo_args = "--test='*' --bench='*'"
+        VALGRINDFLAGS =<<EOF
+            --error-exitcode=1
+            --exit-on-first-error=yes
+            --undef-value-errors=no
+            --leak-check=no
+EOF
+    }
+}
+
 target "integration" {
     name = elem("integration", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target])
     tags = [
@@ -1636,11 +1660,12 @@ rustup_components = [
 ]
 
 cargo_installs = [
-    "cargo-chef",
     "cargo-audit",
-    "cargo-deb",
     #"cargo-arch",
+    "cargo-chef",
+    "cargo-deb",
     "cargo-generate-rpm",
+    "cargo-valgrind",
     #"lychee",
     "mdbook",
     "typos-cli",
@@ -1737,6 +1762,7 @@ kitchen_packages = [
     "openssl",
     "pkg-config",
     "pkgconf",
+    "valgrind",
     "xz-utils",
 ]
 
