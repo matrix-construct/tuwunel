@@ -137,10 +137,10 @@ impl Service {
 		statuses: &mut CurTransactionStatus,
 	) {
 		match response {
+			| Err((dest, e)) => Self::handle_response_err(dest, statuses, &e),
 			| Ok(dest) =>
 				self.handle_response_ok(&dest, futures, statuses)
 					.await,
-			| Err((dest, e)) => Self::handle_response_err(dest, statuses, &e),
 		}
 	}
 
@@ -149,8 +149,10 @@ impl Service {
 		statuses.entry(dest).and_modify(|e| {
 			*e = match e {
 				| TransactionStatus::Running => TransactionStatus::Failed(1, Instant::now()),
+
 				| &mut TransactionStatus::Retrying(ref n) =>
 					TransactionStatus::Failed(n.saturating_add(1), Instant::now()),
+
 				| TransactionStatus::Failed(..) => {
 					panic!("Request that was not even running failed?!")
 				},

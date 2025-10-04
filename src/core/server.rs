@@ -104,10 +104,7 @@ impl Server {
 	}
 
 	pub fn signal(&self, sig: &'static str) -> Result {
-		if let Err(e) = self.signal.send(sig) {
-			return Err!("Failed to send signal: {e}");
-		}
-
+		self.signal.send(sig).ok();
 		Ok(())
 	}
 
