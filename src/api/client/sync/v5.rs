@@ -31,7 +31,9 @@ use ruma::{
 };
 use tokio::time::{Instant, timeout_at};
 use tuwunel_core::{
-	Err, Result, apply, at, debug_error, error, extract_variant, is_equal_to,
+	Err, Result, apply, at, debug_error, error,
+	error::inspect_log,
+	extract_variant, is_equal_to,
 	matrix::{Event, StateKey, TypeStateKey, pdu::PduCount},
 	pair_of, ref_at, trace,
 	utils::{
@@ -112,6 +114,12 @@ pub(crate) async fn sync_events_v5_route(
 		.sync
 		.update_snake_sync_request_with_cache(&snake_key, &mut request);
 
+	let ping_presence = services
+		.presence
+		.maybe_ping_presence(sender_user, &request.set_presence)
+		.inspect_err(inspect_log)
+		.ok();
+
 	let all_joined_rooms = services
 		.state_cache
 		.rooms_joined(sender_user)
@@ -130,8 +138,8 @@ pub(crate) async fn sync_events_v5_route(
 		.map(ToOwned::to_owned)
 		.collect::<Vec<OwnedRoomId>>();
 
-	let (all_joined_rooms, all_invited_rooms, all_knocked_rooms) =
-		join3(all_joined_rooms, all_invited_rooms, all_knocked_rooms).await;
+	let (all_joined_rooms, all_invited_rooms, all_knocked_rooms, _) =
+		join4(all_joined_rooms, all_invited_rooms, all_knocked_rooms, ping_presence).await;
 
 	let all_invited_rooms = all_invited_rooms.iter().map(AsRef::as_ref);
 	let all_knocked_rooms = all_knocked_rooms.iter().map(AsRef::as_ref);
