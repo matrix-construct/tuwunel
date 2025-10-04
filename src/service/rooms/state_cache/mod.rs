@@ -399,7 +399,7 @@ pub fn rooms_joined<'a>(
 /// Returns an iterator over all rooms a user was invited to.
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "debug")]
-pub fn rooms_invited<'a>(
+pub fn rooms_invited_state<'a>(
 	&'a self,
 	user_id: &'a UserId,
 ) -> impl Stream<Item = StrippedStateEventItem> + Send + 'a {
@@ -419,7 +419,7 @@ pub fn rooms_invited<'a>(
 /// Returns an iterator over all rooms a user is currently knocking.
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "trace")]
-pub fn rooms_knocked<'a>(
+pub fn rooms_knocked_state<'a>(
 	&'a self,
 	user_id: &'a UserId,
 ) -> impl Stream<Item = StrippedStateEventItem> + Send + 'a {
@@ -429,6 +429,26 @@ pub fn rooms_knocked<'a>(
 	let prefix = (user_id, Interfix);
 	self.db
 		.userroomid_knockedstate
+		.stream_prefix(&prefix)
+		.ignore_err()
+		.map(|((_, room_id), state): KeyVal<'_>| (room_id.to_owned(), state))
+		.map(|(room_id, state)| Ok((room_id, state.deserialize_as_unchecked()?)))
+		.ignore_err()
+}
+
+/// Returns an iterator over all rooms a user left.
+#[implement(Service)]
+#[tracing::instrument(skip(self), level = "debug")]
+pub fn rooms_left_state<'a>(
+	&'a self,
+	user_id: &'a UserId,
+) -> impl Stream<Item = SyncStateEventItem> + Send + 'a {
+	type KeyVal<'a> = (Key<'a>, Raw<Vec<Raw<AnySyncStateEvent>>>);
+	type Key<'a> = (&'a UserId, &'a RoomId);
+
+	let prefix = (user_id, Interfix);
+	self.db
+		.userroomid_leftstate
 		.stream_prefix(&prefix)
 		.ignore_err()
 		.map(|((_, room_id), state): KeyVal<'_>| (room_id.to_owned(), state))
@@ -488,26 +508,6 @@ pub async fn left_state(
 		.and_then(|val: Raw<Vec<AnyStrippedStateEvent>>| {
 			val.deserialize_as_unchecked().map_err(Into::into)
 		})
-}
-
-/// Returns an iterator over all rooms a user left.
-#[implement(Service)]
-#[tracing::instrument(skip(self), level = "debug")]
-pub fn rooms_left<'a>(
-	&'a self,
-	user_id: &'a UserId,
-) -> impl Stream<Item = SyncStateEventItem> + Send + 'a {
-	type KeyVal<'a> = (Key<'a>, Raw<Vec<Raw<AnySyncStateEvent>>>);
-	type Key<'a> = (&'a UserId, &'a RoomId);
-
-	let prefix = (user_id, Interfix);
-	self.db
-		.userroomid_leftstate
-		.stream_prefix(&prefix)
-		.ignore_err()
-		.map(|((_, room_id), state): KeyVal<'_>| (room_id.to_owned(), state))
-		.map(|(room_id, state)| Ok((room_id, state.deserialize_as_unchecked()?)))
-		.ignore_err()
 }
 
 #[implement(Service)]

@@ -123,13 +123,13 @@ impl Service {
 		let rooms_invited = self
 			.services
 			.state_cache
-			.rooms_invited(user_id)
+			.rooms_invited_state(user_id)
 			.map(|(r, _)| r);
 
 		let rooms_knocked = self
 			.services
 			.state_cache
-			.rooms_knocked(user_id)
+			.rooms_knocked_state(user_id)
 			.map(|(r, _)| r);
 
 		let all_rooms: Vec<_> = rooms_joined

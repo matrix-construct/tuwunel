@@ -279,7 +279,7 @@ async fn build_sync_events(
 
 	let left_rooms = services
 		.state_cache
-		.rooms_left(sender_user)
+		.rooms_left_state(sender_user)
 		.ready_filter(|(room_id, _)| filter.room.matches(room_id))
 		.broad_filter_map(|(room_id, _)| {
 			handle_left_room(
@@ -299,7 +299,7 @@ async fn build_sync_events(
 
 	let invited_rooms = services
 		.state_cache
-		.rooms_invited(sender_user)
+		.rooms_invited_state(sender_user)
 		.ready_filter(|(room_id, _)| filter.room.matches(room_id))
 		.fold_default(async |mut invited_rooms: BTreeMap<_, _>, (room_id, invite_state)| {
 			let invite_count = services
@@ -323,7 +323,7 @@ async fn build_sync_events(
 
 	let knocked_rooms = services
 		.state_cache
-		.rooms_knocked(sender_user)
+		.rooms_knocked_state(sender_user)
 		.ready_filter(|(room_id, _)| filter.room.matches(room_id))
 		.fold_default(async |mut knocked_rooms: BTreeMap<_, _>, (room_id, knock_state)| {
 			let knock_count = services

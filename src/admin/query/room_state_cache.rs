@@ -282,7 +282,7 @@ pub(super) async fn process(subcommand: RoomStateCacheCommand, context: &Context
 			let timer = tokio::time::Instant::now();
 			let results: Vec<_> = services
 				.state_cache
-				.rooms_invited(&user_id)
+				.rooms_invited_state(&user_id)
 				.collect()
 				.await;
 			let query_time = timer.elapsed();
@@ -297,7 +297,7 @@ pub(super) async fn process(subcommand: RoomStateCacheCommand, context: &Context
 			let timer = tokio::time::Instant::now();
 			let results: Vec<_> = services
 				.state_cache
-				.rooms_left(&user_id)
+				.rooms_left_state(&user_id)
 				.collect()
 				.await;
 			let query_time = timer.elapsed();
