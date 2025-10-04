@@ -36,13 +36,13 @@ struct Data {
 	roomid_joinedcount: Arc<Map>,
 	roomserverids: Arc<Map>,
 	roomuserid_invitecount: Arc<Map>,
-	roomuserid_joined: Arc<Map>,
+	roomuserid_joinedcount: Arc<Map>,
 	roomuserid_leftcount: Arc<Map>,
 	roomuserid_knockedcount: Arc<Map>,
 	roomuseroncejoinedids: Arc<Map>,
 	serverroomids: Arc<Map>,
 	userroomid_invitestate: Arc<Map>,
-	userroomid_joined: Arc<Map>,
+	userroomid_joinedcount: Arc<Map>,
 	userroomid_leftstate: Arc<Map>,
 	userroomid_knockedstate: Arc<Map>,
 }
@@ -63,13 +63,13 @@ impl crate::Service for Service {
 				roomid_joinedcount: args.db["roomid_joinedcount"].clone(),
 				roomserverids: args.db["roomserverids"].clone(),
 				roomuserid_invitecount: args.db["roomuserid_invitecount"].clone(),
-				roomuserid_joined: args.db["roomuserid_joined"].clone(),
+				roomuserid_joinedcount: args.db["roomuserid_joined"].clone(),
 				roomuserid_leftcount: args.db["roomuserid_leftcount"].clone(),
 				roomuserid_knockedcount: args.db["roomuserid_knockedcount"].clone(),
 				roomuseroncejoinedids: args.db["roomuseroncejoinedids"].clone(),
 				serverroomids: args.db["serverroomids"].clone(),
 				userroomid_invitestate: args.db["userroomid_invitestate"].clone(),
-				userroomid_joined: args.db["userroomid_joined"].clone(),
+				userroomid_joinedcount: args.db["userroomid_joined"].clone(),
 				userroomid_leftstate: args.db["userroomid_leftstate"].clone(),
 				userroomid_knockedstate: args.db["userroomid_knockedstate"].clone(),
 			},
@@ -219,7 +219,7 @@ pub fn room_members<'a>(
 ) -> impl Stream<Item = &UserId> + Send + 'a {
 	let prefix = (room_id, Interfix);
 	self.db
-		.roomuserid_joined
+		.roomuserid_joinedcount
 		.keys_prefix(&prefix)
 		.ignore_err()
 		.map(|(_, user_id): (Ignore, &UserId)| user_id)
@@ -376,7 +376,7 @@ pub async fn get_left_count(&self, room_id: &RoomId, user_id: &UserId) -> Result
 pub async fn get_joined_count(&self, room_id: &RoomId, user_id: &UserId) -> Result<u64> {
 	let key = (room_id, user_id);
 	self.db
-		.roomuserid_joined
+		.roomuserid_joinedcount
 		.qry(&key)
 		.await
 		.deserialized()
@@ -390,7 +390,7 @@ pub fn rooms_joined<'a>(
 	user_id: &'a UserId,
 ) -> impl Stream<Item = &RoomId> + Send + 'a {
 	self.db
-		.userroomid_joined
+		.userroomid_joinedcount
 		.keys_raw_prefix(user_id)
 		.ignore_err()
 		.map(|(_, room_id): (Ignore, &RoomId)| room_id)
@@ -540,18 +540,17 @@ pub async fn user_membership(
 #[tracing::instrument(skip(self), level = "debug")]
 pub async fn once_joined(&self, user_id: &UserId, room_id: &RoomId) -> bool {
 	let key = (user_id, room_id);
-	self.db
-		.roomuseroncejoinedids
-		.qry(&key)
-		.await
-		.is_ok()
+	self.db.roomuseroncejoinedids.contains(&key).await
 }
 
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "trace")]
 pub async fn is_joined<'a>(&'a self, user_id: &'a UserId, room_id: &'a RoomId) -> bool {
 	let key = (user_id, room_id);
-	self.db.userroomid_joined.qry(&key).await.is_ok()
+	self.db
+		.userroomid_joinedcount
+		.contains(&key)
+		.await
 }
 
 #[implement(Service)]
@@ -560,9 +559,8 @@ pub async fn is_knocked<'a>(&'a self, user_id: &'a UserId, room_id: &'a RoomId) 
 	let key = (user_id, room_id);
 	self.db
 		.userroomid_knockedstate
-		.qry(&key)
+		.contains(&key)
 		.await
-		.is_ok()
 }
 
 #[implement(Service)]
@@ -571,20 +569,15 @@ pub async fn is_invited(&self, user_id: &UserId, room_id: &RoomId) -> bool {
 	let key = (user_id, room_id);
 	self.db
 		.userroomid_invitestate
-		.qry(&key)
+		.contains(&key)
 		.await
-		.is_ok()
 }
 
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "trace")]
 pub async fn is_left(&self, user_id: &UserId, room_id: &RoomId) -> bool {
 	let key = (user_id, room_id);
-	self.db
-		.userroomid_leftstate
-		.qry(&key)
-		.await
-		.is_ok()
+	self.db.userroomid_leftstate.contains(&key).await
 }
 
 #[implement(Service)]
@@ -629,16 +622,16 @@ pub async fn delete_room_join_counts(&self, room_id: &RoomId, force: bool) -> Re
 		.await;
 
 	self.db
-		.roomuserid_joined
+		.roomuserid_joinedcount
 		.keys_prefix(&prefix)
 		.ignore_err()
 		.ready_for_each(|key: (&RoomId, &UserId)| {
 			trace!("Removing key: {key:?}");
-			self.db.roomuserid_joined.del(key);
+			self.db.roomuserid_joinedcount.del(key);
 
 			let reverse_key = (key.1, key.0);
 			trace!("Removing reverse key: {reverse_key:?}");
-			self.db.userroomid_joined.del(reverse_key);
+			self.db.userroomid_joinedcount.del(reverse_key);
 		})
 		.await;
 

@@ -246,10 +246,10 @@ pub(crate) fn mark_as_joined(&self, user_id: &UserId, room_id: &RoomId, count: P
 	let roomuser_id = serialize_key(roomuser_id).expect("failed to serialize roomuser_id");
 
 	self.db
-		.userroomid_joined
+		.userroomid_joinedcount
 		.raw_aput::<8, _, _>(&userroom_id, count.into_unsigned());
 	self.db
-		.roomuserid_joined
+		.roomuserid_joinedcount
 		.raw_aput::<8, _, _>(&roomuser_id, count.into_unsigned());
 
 	self.db
@@ -294,8 +294,12 @@ pub(crate) fn mark_as_left(&self, user_id: &UserId, room_id: &RoomId, count: Pdu
 		.roomuserid_leftcount
 		.raw_aput::<8, _, _>(&roomuser_id, count.into_unsigned());
 
-	self.db.userroomid_joined.remove(&userroom_id);
-	self.db.roomuserid_joined.remove(&roomuser_id);
+	self.db
+		.userroomid_joinedcount
+		.remove(&userroom_id);
+	self.db
+		.roomuserid_joinedcount
+		.remove(&roomuser_id);
 
 	self.db
 		.userroomid_invitestate
@@ -339,8 +343,12 @@ pub(crate) fn _mark_as_knocked(
 		.roomuserid_knockedcount
 		.raw_aput::<8, _, _>(&roomuser_id, count.into_unsigned());
 
-	self.db.userroomid_joined.remove(&userroom_id);
-	self.db.roomuserid_joined.remove(&roomuser_id);
+	self.db
+		.userroomid_joinedcount
+		.remove(&userroom_id);
+	self.db
+		.roomuserid_joinedcount
+		.remove(&roomuser_id);
 
 	self.db
 		.userroomid_invitestate
@@ -396,8 +404,12 @@ pub(crate) async fn mark_as_invited(
 		.roomuserid_invitecount
 		.raw_aput::<8, _, _>(&roomuser_id, count.into_unsigned());
 
-	self.db.userroomid_joined.remove(&userroom_id);
-	self.db.roomuserid_joined.remove(&roomuser_id);
+	self.db
+		.userroomid_joinedcount
+		.remove(&userroom_id);
+	self.db
+		.roomuserid_joinedcount
+		.remove(&roomuser_id);
 
 	self.db.userroomid_leftstate.remove(&userroom_id);
 	self.db.roomuserid_leftcount.remove(&roomuser_id);
