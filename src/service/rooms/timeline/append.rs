@@ -4,6 +4,7 @@ use std::{
 };
 
 use futures::StreamExt;
+use tracing::warn;
 use ruma::{
 	CanonicalJsonObject, CanonicalJsonValue, EventId, OwnedUserId, RoomId, RoomVersionId, UserId,
 	events::{
@@ -285,7 +286,7 @@ where
 	self.increment_notification_counts(pdu.room_id(), notifies, highlights);
 
 	match *pdu.kind() {
-		| TimelineEventType::RoomRedaction => {
+				| TimelineEventType::RoomRedaction => {
 			use RoomVersionId::*;
 
 			let room_version_id = self
@@ -305,6 +306,8 @@ where
 						{
 							self.redact_pdu(redact_id, pdu, shortroomid)
 								.await?;
+							// media retention decrement
+							self.services.media.retention_decrement_on_redaction(redact_id.as_str()).await;
 						}
 					}
 				},
@@ -319,6 +322,7 @@ where
 						{
 							self.redact_pdu(redact_id, pdu, shortroomid)
 								.await?;
+							self.services.media.retention_decrement_on_redaction(redact_id.as_str()).await;
 						}
 					}
 				},
@@ -367,7 +371,7 @@ where
 					.await?;
 			}
 		},
-		| TimelineEventType::RoomMessage => {
+				| TimelineEventType::RoomMessage => {
 			let content: ExtractBody = pdu.get_content()?;
 			if let Some(body) = content.body {
 				self.services
@@ -383,6 +387,32 @@ where
 					.userroom
 					.message_hook(&pdu.event_id, &pdu.room_id, &pdu.sender, &body)
 					.await;
+			}
+			// media retention insertion (structured extraction + fallback JSON scan)
+			if let Ok(msg_full) = pdu.get_content::<ruma::events::room::message::RoomMessageEventContent>() {
+				warn!(event_id=%pdu.event_id(), msg=?msg_full, "retention: debug message content");
+				use ruma::events::room::MediaSource;
+				let mut mxcs: Vec<(String,bool,String)> = Vec::new();
+				let push_media = |mxcs: &mut Vec<(String,bool,String)>, src: &MediaSource, label: &str, this: &super::Service| {
+					let (maybe_mxc, enc) = match src { MediaSource::Plain(m) => (Some(m.to_string()), false), MediaSource::Encrypted(f) => (Some(f.url.to_string()), true) };
+					if let Some(uri) = maybe_mxc { if uri.starts_with("mxc://") {
+						let local = <ruma::Mxc<'_>>::try_from(uri.as_str()).map(|p| this.services.globals.server_is_ours(p.server_name)).unwrap_or(false);
+						mxcs.push((uri.clone(), local, label.to_owned()));
+						if enc { warn!(event_id=%pdu.event_id(), label=%label, mxc=%uri, local, "retention: extracted encrypted media"); } else { warn!(event_id=%pdu.event_id(), label=%label, mxc=%uri, local, "retention: extracted plain media"); }
+					}}
+				};
+				match &msg_full.msgtype {
+					ruma::events::room::message::MessageType::Image(c) => { push_media(&mut mxcs, &c.source, "image.source", self); if let Some(info)=c.info.as_ref(){ if let Some(th)=info.thumbnail_source.as_ref(){ push_media(&mut mxcs, th, "image.thumbnail_source", self); } } },
+					ruma::events::room::message::MessageType::File(c) => { push_media(&mut mxcs, &c.source, "file.source", self); if let Some(info)=c.info.as_ref(){ if let Some(th)=info.thumbnail_source.as_ref(){ push_media(&mut mxcs, th, "file.thumbnail_source", self); } } },
+					ruma::events::room::message::MessageType::Video(c) => { push_media(&mut mxcs, &c.source, "video.source", self); if let Some(info)=c.info.as_ref(){ if let Some(th)=info.thumbnail_source.as_ref(){ push_media(&mut mxcs, th, "video.thumbnail_source", self); } } },
+					ruma::events::room::message::MessageType::Audio(c) => { push_media(&mut mxcs, &c.source, "audio.source", self); },
+					_ => {},
+				}
+				// (fallback JSON scan removed for now, structured extraction should capture supported media types)
+				if mxcs.is_empty() { warn!(event_id=%pdu.event_id(), "retention: no media sources extracted"); }
+				else { warn!(event_id=%pdu.event_id(), count=mxcs.len(), "retention: inserting media refs"); self.services.media.retention_insert_mxcs_on_event(pdu.event_id().as_str(), pdu.room_id().as_str(), &mxcs); }
+			} else {
+				warn!(event_id=%pdu.event_id(), "retention: failed to decode RoomMessageEventContent for extraction");
 			}
 		},
 		| _ => {},

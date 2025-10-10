@@ -1530,6 +1530,10 @@ pub struct Config {
 	#[serde(default, with = "serde_regex")]
 	pub forbidden_remote_server_names: RegexSet,
 
+	/// Media retention configuration (flattened; formerly media.retention.*)
+	#[serde(default, alias = "media", alias = "media.retention")]
+	pub media: MediaRetentionConfig,
+
 	/// List of forbidden server names via regex patterns that we will block all
 	/// outgoing federated room directory requests for. Useful for preventing
 	/// our users from wandering into bad servers or spaces.
@@ -2132,6 +2136,26 @@ pub struct WellKnownConfig {
 	pub support_mxid: Option<OwnedUserId>,
 }
 
+#[derive(Clone, Debug, Deserialize, Default)]
+#[config_example_generator(
+	filename = "tuwunel-example.toml",
+	section = "global.media"
+)]
+pub struct MediaRetentionConfig {
+	/// What to do with local media when an event referencing it is redacted.
+	/// keep | delete_if_unreferenced | force_delete_local
+	/// default: "keep"
+	#[serde(default = "default_media_retention_on_redaction")]
+	pub on_redaction: String,
+
+	/// Grace period in seconds before deleting queued media.
+	/// default: 0
+	#[serde(default)]
+	pub grace_period_secs: u64,
+}
+
+fn default_media_retention_on_redaction() -> String { "keep".to_owned() }
+
 #[derive(Clone, Copy, Debug, Deserialize, Default)]
 #[allow(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 #[config_example_generator(
@@ -2573,6 +2597,11 @@ impl Config {
 	}
 
 	pub fn check(&self) -> Result<(), Error> { check(self) }
+
+	// Media retention helpers
+	pub fn media_retention_on_redaction(&self) -> &str { self.media.on_redaction.as_str() }
+
+	pub fn media_retention_grace_period_secs(&self) -> u64 { self.media.grace_period_secs }
 }
 
 fn true_fn() -> bool { true }

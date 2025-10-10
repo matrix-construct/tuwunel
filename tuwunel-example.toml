@@ -1321,6 +1321,10 @@
 #
 #forbidden_remote_server_names = []
 
+# Media retention configuration (flattened; formerly media.retention.*)
+#
+#media = false
+
 # List of forbidden server names via regex patterns that we will block all
 # outgoing federated room directory requests for. Useful for preventing
 # our users from wandering into bad servers or spaces.
@@ -1820,6 +1824,17 @@
 # example "@admin:example.com"
 #
 #support_mxid =
+
+#[global.media]
+
+# What to do with local media when an event referencing it is redacted.
+# keep | delete_if_unreferenced | force_delete_local
+#
+#on_redaction = "keep"
+
+# Grace period in seconds before deleting queued media.
+#
+#grace_period_secs = 0
 
 #[global.blurhashing]
 

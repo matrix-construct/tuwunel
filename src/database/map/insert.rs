@@ -59,3 +59,33 @@ where
 		self.engine.flush().expect("database flush error");
 	}
 }
+
+/// Atomically write a batch of raw put and delete operations.
+#[implement(super::Map)]
+#[tracing::instrument(skip(self, puts, dels), fields(%self), level = "trace")]
+pub fn write_batch_raw<Ip, Ik>(&self, puts: Ip, dels: Ik)
+where
+	Ip: IntoIterator<Item = (Vec<u8>, Vec<u8>)>,
+	Ik: IntoIterator<Item = Vec<u8>>,
+{
+	let mut batch = WriteBatchWithTransaction::<false>::default();
+	let cf = self.cf();
+	for (k, v) in puts {
+		batch.put_cf(&cf, &k, &v);
+	}
+	for k in dels {
+		batch.delete_cf(&cf, &k);
+	}
+
+	let write_options = &self.write_options;
+	use crate::util::or_else as db_or_else;
+	self.engine
+		.db
+		.write_opt(batch, write_options)
+		.or_else(db_or_else)
+		.expect("database write batch error");
+
+	if !self.engine.corked() {
+		self.engine.flush().expect("database flush error");
+	}
+}

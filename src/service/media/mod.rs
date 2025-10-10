@@ -1,11 +1,12 @@
 pub mod blurhash;
 mod data;
+mod retention;
 pub(super) mod migrations;
 mod preview;
 mod remote;
 mod tests;
 mod thumbnail;
-use std::{path::PathBuf, sync::Arc, time::SystemTime};
+use std::{path::PathBuf, sync::Arc, time::{Duration, SystemTime}};
 
 use async_trait::async_trait;
 use base64::{Engine as _, engine::general_purpose};
@@ -15,12 +16,11 @@ use tokio::{
 	io::{AsyncReadExt, AsyncWriteExt, BufReader},
 };
 use tuwunel_core::{
-	Err, Result, debug, debug_error, debug_info, debug_warn, err, error, trace,
-	utils::{self, MutexMap},
-	warn,
+	Err, Result, debug, debug_error, debug_info, debug_warn, err, error, trace, utils::{self, MutexMap}, warn
 };
 
 use self::data::{Data, Metadata};
+use self::retention::Retention;
 pub use self::thumbnail::Dim;
 
 #[derive(Debug)]
@@ -34,6 +34,7 @@ pub struct Service {
 	url_preview_mutex: MutexMap<String, ()>,
 	pub(super) db: Data,
 	services: Arc<crate::services::OnceServices>,
+    retention: Retention,
 }
 
 /// generated MXC ID (`media-id`) length
@@ -52,11 +53,29 @@ impl crate::Service for Service {
 			url_preview_mutex: MutexMap::new(),
 			db: Data::new(args.db),
 			services: args.services.clone(),
+			retention: Retention::new(args.db),
 		}))
 	}
 
 	async fn worker(self: Arc<Self>) -> Result {
 		self.create_media_dir().await?;
+
+		// startup summary for retention configuration
+		warn!(policy = self.services.server.config.media_retention_on_redaction(), grace = self.services.server.config.media_retention_grace_period_secs(), "retention: startup configuration");
+
+		// deletion worker loop (scaffold): runs periodically respecting grace period
+		let grace = Duration::from_secs(self.services.server.config.media_retention_grace_period_secs());
+		let retention = self.retention.clone();
+		let this = self.clone();
+		warn!("creating media deletion worker");
+		tokio::spawn(async move {
+			loop {
+				if let Err(e) = retention.worker_process_queue(&this, grace).await {
+					debug_warn!("media retention worker error: {e}");
+				}
+				tokio::time::sleep(Duration::from_secs(10)).await;
+			}
+		});
 
 		Ok(())
 	}
@@ -65,6 +84,45 @@ impl crate::Service for Service {
 }
 
 impl Service {
+	// below helpers can be called by message processing pipelines when events are created/edited/redacted.
+	pub fn retention_insert_mxcs_on_event(&self, event_id: &str, room_id: &str, mxcs: &[(String, bool, String)]) {
+		self.retention.insert_mxcs_on_event(event_id, room_id, mxcs);
+	}
+
+	pub async fn retention_decrement_on_redaction(&self, event_id: &str) {
+		use self::retention::RetentionPolicy;
+		let policy = RetentionPolicy::from_str(self.services.server.config.media_retention_on_redaction());
+		// try normal path
+		if let Ok(deleted) = self.retention.decrement_refcount_on_redaction(event_id, policy).await {
+			if !deleted.is_empty() { return; }
+		}
+		// fallback: attempt reconstruction if no mer: entries existed
+		// fetch original PDU JSON; if found, scan for mxc:// URIs
+		if let Ok(parsed_eid) = ruma::EventId::parse(event_id) { if let Ok(json_obj) = self.services.timeline.get_pdu_json(&parsed_eid).await {
+			let event_type = json_obj.get("type").cloned();
+			let unsigned_val = json_obj.get("unsigned").cloned();
+			let unsigned_keys = unsigned_val.as_ref().and_then(|u| u.as_object()).map(|obj| obj.keys().cloned().collect::<Vec<_>>());
+			let content_debug = json_obj.get("content").cloned();
+			warn!(event_id, ?event_type, keys=?json_obj.keys().collect::<Vec<_>>(), ?unsigned_keys, ?unsigned_val, ?content_debug, "retention: fallback inspecting raw event");
+			let mut mxcs = std::collections::HashSet::new();
+			fn scan(val: &ruma::CanonicalJsonValue, out: &mut std::collections::HashSet<String>) {
+				match val {
+					ruma::CanonicalJsonValue::String(s) if s.starts_with("mxc://") => { out.insert(s.clone()); },
+					ruma::CanonicalJsonValue::Object(map) => { for v in map.values() { scan(v, out); } },
+					ruma::CanonicalJsonValue::Array(arr) => { for v in arr { scan(v, out); } },
+					_ => {},
+				}
+			}
+			scan(&ruma::CanonicalJsonValue::Object(json_obj.clone()), &mut mxcs);
+			let mxcs_len = mxcs.len();
+			for mxc in mxcs {
+				if policy == RetentionPolicy::ForceDeleteLocal {
+					self.retention.queue_media_for_deletion(&mxc);
+				}
+			}
+			warn!(event_id, count=mxcs_len, "retention: fallback redaction scan queued media"); }}
+	}
+
 	/// Uploads a file.
 	pub async fn create(
 		&self,
