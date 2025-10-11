@@ -10,8 +10,8 @@ use ruma::{
 	events::{
 		StateEventType, TimelineEventType,
 		room::{
+			message::{MessageType, RoomMessageEventContent},
 			power_levels::RoomPowerLevelsEventContent,
-				message::{RoomMessageEventContent, MessageType},
 			redaction::RoomRedactionEventContent,
 		},
 	},
@@ -222,33 +222,66 @@ pub async fn backfill_pdu(
 		if let Ok(full) = pdu.get_content::<RoomMessageEventContent>() {
 			use ruma::events::room::MediaSource;
 			let mut mxcs: Vec<(String, bool, String)> = Vec::new();
-			let push_plain = |mxcs: &mut Vec<(String, bool, String)>, src: &MediaSource, label: &str| {
-				if let MediaSource::Plain(mxc) = src { let s = mxc.to_string(); if s.starts_with("mxc://") { mxcs.push((s, true, label.to_owned())); } }
-			};
+			let push_plain =
+				|mxcs: &mut Vec<(String, bool, String)>, src: &MediaSource, label: &str| {
+					if let MediaSource::Plain(mxc) = src {
+						let s = mxc.to_string();
+						if s.starts_with("mxc://") {
+							mxcs.push((s, true, label.to_owned()));
+						}
+					}
+				};
 			match &full.msgtype {
-				MessageType::Image(c) => {
+				| MessageType::Image(c) => {
 					push_plain(&mut mxcs, &c.source, "image.source");
-					if let Some(info) = c.info.as_ref() { if let Some(th) = info.thumbnail_source.as_ref() { push_plain(&mut mxcs, th, "image.thumbnail_source"); } }
+					if let Some(info) = c.info.as_ref() {
+						if let Some(th) = info.thumbnail_source.as_ref() {
+							push_plain(&mut mxcs, th, "image.thumbnail_source");
+						}
+					}
 				},
-				MessageType::File(c) => {
+				| MessageType::File(c) => {
 					push_plain(&mut mxcs, &c.source, "file.source");
-					if let Some(info) = c.info.as_ref() { if let Some(th) = info.thumbnail_source.as_ref() { push_plain(&mut mxcs, th, "file.thumbnail_source"); } }
+					if let Some(info) = c.info.as_ref() {
+						if let Some(th) = info.thumbnail_source.as_ref() {
+							push_plain(&mut mxcs, th, "file.thumbnail_source");
+						}
+					}
 				},
-				MessageType::Video(c) => {
+				| MessageType::Video(c) => {
 					push_plain(&mut mxcs, &c.source, "video.source");
-					if let Some(info) = c.info.as_ref() { if let Some(th) = info.thumbnail_source.as_ref() { push_plain(&mut mxcs, th, "video.thumbnail_source"); } }
+					if let Some(info) = c.info.as_ref() {
+						if let Some(th) = info.thumbnail_source.as_ref() {
+							push_plain(&mut mxcs, th, "video.thumbnail_source");
+						}
+					}
 				},
-				MessageType::Audio(c) => {
+				| MessageType::Audio(c) => {
 					push_plain(&mut mxcs, &c.source, "audio.source");
 				},
-				_ => {},
+				| _ => {},
 			}
-			if !mxcs.is_empty() { self.services.media.retention_insert_mxcs_on_event(pdu.event_id().as_str(), pdu.room_id().as_str(), &mxcs); }
+			if !mxcs.is_empty() {
+				self.services
+					.media
+					.retention_insert_mxcs_on_event(
+						pdu.event_id().as_str(),
+						pdu.room_id().as_str(),
+						&mxcs,
+					);
+			}
 		}
 	}
 
 	if pdu.kind == TimelineEventType::RoomRedaction {
-		if let Ok(red) = pdu.get_content::<RoomRedactionEventContent>() { if let Some(rid) = red.redacts { self.services.media.retention_decrement_on_redaction(rid.as_str()).await; } }
+		if let Ok(red) = pdu.get_content::<RoomRedactionEventContent>() {
+			if let Some(rid) = red.redacts {
+				self.services
+					.media
+					.retention_decrement_on_redaction(rid.as_str())
+					.await;
+			}
+		}
 	}
 	drop(mutex_lock);
 

@@ -2137,10 +2137,7 @@ pub struct WellKnownConfig {
 }
 
 #[derive(Clone, Debug, Deserialize, Default)]
-#[config_example_generator(
-	filename = "tuwunel-example.toml",
-	section = "global.media"
-)]
+#[config_example_generator(filename = "tuwunel-example.toml", section = "global.media")]
 pub struct MediaRetentionConfig {
 	/// What to do with local media when an event referencing it is redacted.
 	/// keep | delete_if_unreferenced | force_delete_local

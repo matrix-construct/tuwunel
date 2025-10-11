@@ -5,10 +5,11 @@ use ruma::{
 	events::room::{
 		guest_access::GuestAccess,
 		member::{MembershipState, RoomMemberEventContent},
+		message::RoomMessageEventContent,
 	},
 	room::JoinRule,
 };
-use tuwunel_core::{Result, debug_info, pdu::PduBuilder};
+use tuwunel_core::{Result, debug_info, debug_warn, pdu::PduBuilder};
 
 use crate::command::{CommandResult, CommandSystem};
 
@@ -77,7 +78,7 @@ impl Service {
 		debug_info!("Inviting user {user_id} to user room {room_id}");
 		self.services
 			.timeline
-			.build_and_append_pdu(
+			.build_and_append_pdu_without_retention(
 				PduBuilder::state(
 					String::from(user_id),
 					&RoomMemberEventContent::new(MembershipState::Invite),
@@ -91,7 +92,7 @@ impl Service {
 		debug_info!("Force joining user {user_id} to user room {room_id}");
 		self.services
 			.timeline
-			.build_and_append_pdu(
+			.build_and_append_pdu_without_retention(
 				PduBuilder::state(
 					String::from(user_id),
 					&RoomMemberEventContent::new(MembershipState::Join),
@@ -105,7 +106,36 @@ impl Service {
 		Ok(())
 	}
 
-	pub async fn send_text(&self, user_id: &UserId, body: &str) -> Result { Ok(()) }
+	pub async fn send_text(&self, user_id: &UserId, body: &str) -> Result {
+		if !self.services.globals.user_is_local(user_id) {
+			debug_info!(%user_id, "Skipping user room send for remote user");
+			return Ok(());
+		}
+
+		let room_id = match self.get_user_room(user_id).await {
+			| Ok(room_id) => room_id,
+			| Err(e) => {
+				debug_warn!(%user_id, error = %e, "User room missing; unable to deliver message");
+				return Ok(());
+			},
+		};
+
+		let state_lock = self.services.state.mutex.lock(&room_id).await;
+		let content = RoomMessageEventContent::text_markdown(body);
+
+		self.services
+			.timeline
+			.build_and_append_pdu_without_retention(
+				PduBuilder::timeline(&content),
+				&self.services.globals.server_user,
+				&room_id,
+				&state_lock,
+			)
+			//.boxed()
+			.await?;
+
+		Ok(())
+	}
 
 	pub async fn message_hook(
 		&self,

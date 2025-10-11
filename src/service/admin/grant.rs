@@ -143,7 +143,7 @@ pub async fn make_user_admin(&self, user_id: &UserId) -> Result {
 
 	if self.services.server.config.admin_room_notices {
 		let welcome_message = String::from(
-			"## Thank you for trying out tuwunel!\n\nTuwunel is a continuation of conduwuit which was technically a hard fork of Conduit.\n\nHelpful links:\n> GitHub Repo: https://github.com/matrix-construct/tuwunel\n> Documentation: https://github.com/matrix-construct/tuwunel\n> Report issues: https://github.com/matri-construct/tuwunel/issues\n\nFor a list of available commands, send the following message in this room: `!admin --help`"
+			"## Thank you for trying out tuwunel!\n\nTuwunel is a continuation of conduwuit which was technically a hard fork of Conduit.\n\nHelpful links:\n> GitHub Repo: https://github.com/matrix-construct/tuwunel\n> Documentation: https://github.com/matrix-construct/tuwunel\n> Report issues: https://github.com/matri-construct/tuwunel/issues\n\nFor a list of available commands, send the following message in this room: `!admin --help`",
 		);
 
 		// Send welcome message
@@ -209,8 +209,9 @@ pub async fn revoke_admin(&self, user_id: &UserId) -> Result {
 
 		| Err(e) => return Err!(error!(?e, "Failure occurred while attempting revoke.")),
 
-		| Ok(event) if !matches!(event.membership, Invite | Knock | Join) =>
-			return Err!("Cannot revoke {user_id} in membership state {:?}.", event.membership),
+		| Ok(event) if !matches!(event.membership, Invite | Knock | Join) => {
+			return Err!("Cannot revoke {user_id} in membership state {:?}.", event.membership);
+		},
 
 		| Ok(event) => {
 			assert!(

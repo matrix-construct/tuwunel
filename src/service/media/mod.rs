@@ -1,27 +1,40 @@
 pub mod blurhash;
 mod data;
-mod retention;
 pub(super) mod migrations;
 mod preview;
 mod remote;
+mod retention;
 mod tests;
 mod thumbnail;
-use std::{path::PathBuf, sync::Arc, time::{Duration, SystemTime}};
+use std::{
+	collections::HashSet,
+	path::PathBuf,
+	sync::Arc,
+	time::{Duration, SystemTime},
+};
 
 use async_trait::async_trait;
 use base64::{Engine as _, engine::general_purpose};
-use ruma::{Mxc, OwnedMxcUri, UserId, http_headers::ContentDisposition};
+use ruma::{
+	Mxc, OwnedMxcUri, OwnedUserId, UserId, events::GlobalAccountDataEventType,
+	http_headers::ContentDisposition,
+};
+use serde_json::Value;
 use tokio::{
 	fs,
 	io::{AsyncReadExt, AsyncWriteExt, BufReader},
 };
 use tuwunel_core::{
-	Err, Result, debug, debug_error, debug_info, debug_warn, err, error, trace, utils::{self, MutexMap}, warn
+	Err, Result, debug, debug_error, debug_info, debug_warn, err, error, trace,
+	utils::{self, MutexMap},
+	warn,
 };
 
-use self::data::{Data, Metadata};
-use self::retention::Retention;
 pub use self::thumbnail::Dim;
+use self::{
+	data::{Data, Metadata},
+	retention::Retention,
+};
 
 #[derive(Debug)]
 pub struct FileMeta {
@@ -34,7 +47,35 @@ pub struct Service {
 	url_preview_mutex: MutexMap<String, ()>,
 	pub(super) db: Data,
 	services: Arc<crate::services::OnceServices>,
-    retention: Retention,
+	retention: Retention,
+}
+
+const MEDIA_RETENTION_ACCOUNT_DATA_KIND: &str = "im.tuwunel.media.retention";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UserRetentionPreference {
+	Ask,
+	Delete,
+	Keep,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CandidateAction {
+	DeleteImmediately,
+	AwaitConfirmation,
+	Skip,
+}
+
+#[derive(Debug, Clone)]
+struct RetentionCandidate {
+	mxc: String,
+	room_id: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct CandidateDecision {
+	action: CandidateAction,
+	owner: Option<OwnedUserId>,
 }
 
 /// generated MXC ID (`media-id`) length
@@ -61,10 +102,27 @@ impl crate::Service for Service {
 		self.create_media_dir().await?;
 
 		// startup summary for retention configuration
-		warn!(policy = self.services.server.config.media_retention_on_redaction(), grace = self.services.server.config.media_retention_grace_period_secs(), "retention: startup configuration");
+		warn!(
+			policy = self
+				.services
+				.server
+				.config
+				.media_retention_on_redaction(),
+			grace = self
+				.services
+				.server
+				.config
+				.media_retention_grace_period_secs(),
+			"retention: startup configuration"
+		);
 
 		// deletion worker loop (scaffold): runs periodically respecting grace period
-		let grace = Duration::from_secs(self.services.server.config.media_retention_grace_period_secs());
+		let grace = Duration::from_secs(
+			self.services
+				.server
+				.config
+				.media_retention_grace_period_secs(),
+		);
 		let retention = self.retention.clone();
 		let this = self.clone();
 		warn!("creating media deletion worker");
@@ -84,43 +142,253 @@ impl crate::Service for Service {
 }
 
 impl Service {
-	// below helpers can be called by message processing pipelines when events are created/edited/redacted.
-	pub fn retention_insert_mxcs_on_event(&self, event_id: &str, room_id: &str, mxcs: &[(String, bool, String)]) {
-		self.retention.insert_mxcs_on_event(event_id, room_id, mxcs);
+	// below helpers can be called by message processing pipelines when events are
+	// created/edited/redacted.
+	pub fn retention_insert_mxcs_on_event(
+		&self,
+		event_id: &str,
+		room_id: &str,
+		mxcs: &[(String, bool, String)],
+	) {
+		self.retention
+			.insert_mxcs_on_event(event_id, room_id, mxcs);
 	}
 
 	pub async fn retention_decrement_on_redaction(&self, event_id: &str) {
 		use self::retention::RetentionPolicy;
-		let policy = RetentionPolicy::from_str(self.services.server.config.media_retention_on_redaction());
-		// try normal path
-		if let Ok(deleted) = self.retention.decrement_refcount_on_redaction(event_id, policy).await {
-			if !deleted.is_empty() { return; }
+
+		let policy = RetentionPolicy::from_str(
+			self.services
+				.server
+				.config
+				.media_retention_on_redaction(),
+		);
+		let mut candidates: Vec<RetentionCandidate> = Vec::new();
+		let mut event_value: Option<Value> = None;
+
+		if let Ok(primary) = self
+			.retention
+			.decrement_refcount_on_redaction(event_id, policy)
+			.await
+		{
+			if !primary.is_empty() {
+				candidates.extend(
+					primary
+						.into_iter()
+						.map(|(mxc, room_id)| RetentionCandidate { mxc, room_id: Some(room_id) }),
+				);
+			}
 		}
-		// fallback: attempt reconstruction if no mer: entries existed
-		// fetch original PDU JSON; if found, scan for mxc:// URIs
-		if let Ok(parsed_eid) = ruma::EventId::parse(event_id) { if let Ok(json_obj) = self.services.timeline.get_pdu_json(&parsed_eid).await {
-			let event_type = json_obj.get("type").cloned();
-			let unsigned_val = json_obj.get("unsigned").cloned();
-			let unsigned_keys = unsigned_val.as_ref().and_then(|u| u.as_object()).map(|obj| obj.keys().cloned().collect::<Vec<_>>());
-			let content_debug = json_obj.get("content").cloned();
-			warn!(event_id, ?event_type, keys=?json_obj.keys().collect::<Vec<_>>(), ?unsigned_keys, ?unsigned_val, ?content_debug, "retention: fallback inspecting raw event");
-			let mut mxcs = std::collections::HashSet::new();
-			fn scan(val: &ruma::CanonicalJsonValue, out: &mut std::collections::HashSet<String>) {
-				match val {
-					ruma::CanonicalJsonValue::String(s) if s.starts_with("mxc://") => { out.insert(s.clone()); },
-					ruma::CanonicalJsonValue::Object(map) => { for v in map.values() { scan(v, out); } },
-					ruma::CanonicalJsonValue::Array(arr) => { for v in arr { scan(v, out); } },
-					_ => {},
+
+		if let Ok(parsed_eid) = ruma::EventId::parse(event_id) {
+			match self
+				.services
+				.timeline
+				.get_pdu_json(&parsed_eid)
+				.await
+			{
+				| Ok(canonical) => match serde_json::to_value(&canonical) {
+					| Ok(val) => {
+						if candidates.is_empty() {
+							let mut discovered = HashSet::new();
+							collect_mxcs(&val, &mut discovered);
+							if !discovered.is_empty() {
+								let room_id = val
+									.get("room_id")
+									.and_then(|v| v.as_str())
+									.map(str::to_owned);
+								candidates.extend(discovered.into_iter().map(|mxc| {
+									RetentionCandidate { mxc, room_id: room_id.clone() }
+								}));
+							}
+						}
+						event_value = Some(val);
+					},
+					| Err(e) => {
+						warn!(%event_id, "retention: failed to convert canonical event to json value: {e}")
+					},
+				},
+				| Err(e) => {
+					debug_warn!(%event_id, "retention: unable to load original event for redaction: {e}")
+				},
+			}
+		}
+
+		if candidates.is_empty() {
+			debug!(%event_id, "retention: no media discovered for redaction");
+			return;
+		}
+
+		for candidate in candidates {
+			let decision = self
+				.evaluate_retention_candidate(policy, event_value.as_ref(), &candidate)
+				.await;
+
+			match (decision.action, decision.owner) {
+				| (CandidateAction::DeleteImmediately, owner) => {
+					self.retention.queue_media_for_deletion(
+						&candidate.mxc,
+						owner.as_deref(),
+						false,
+					);
+				},
+				| (CandidateAction::AwaitConfirmation, Some(owner)) => {
+					self.retention.queue_media_for_deletion(
+						&candidate.mxc,
+						Some(owner.as_ref()),
+						true,
+					);
+
+					if self
+						.services
+						.globals
+						.user_is_local(owner.as_ref())
+					{
+						let body = self.build_retention_notice(&candidate, event_value.as_ref());
+						if let Err(e) = self
+							.services
+							.userroom
+							.send_text(owner.as_ref(), &body)
+							.await
+						{
+							warn!(
+								%event_id,
+								mxc = %candidate.mxc,
+								user = owner.as_str(),
+								"retention: failed to notify user about pending deletion: {e}",
+							);
+						} else {
+							debug_info!(
+								%event_id,
+								mxc = %candidate.mxc,
+								user = owner.as_str(),
+								"retention: sent user confirmation request"
+							);
+						}
+					}
+				},
+				| (CandidateAction::AwaitConfirmation, None) => {
+					warn!(%event_id, mxc = %candidate.mxc, "retention: confirmation requested but owner is unknown");
+				},
+				| (CandidateAction::Skip, _) => {
+					debug!(%event_id, mxc = %candidate.mxc, "retention: skipping deletion for candidate");
+				},
+			}
+		}
+	}
+
+	async fn evaluate_retention_candidate(
+		&self,
+		policy: retention::RetentionPolicy,
+		event_value: Option<&Value>,
+		candidate: &RetentionCandidate,
+	) -> CandidateDecision {
+		use self::retention::RetentionPolicy;
+
+		if matches!(policy, RetentionPolicy::Keep) {
+			return CandidateDecision {
+				action: CandidateAction::Skip,
+				owner: None,
+			};
+		}
+
+		let mut owner = self.db.get_media_owner(&candidate.mxc).await;
+		if owner.is_none() {
+			if let Some(val) = event_value {
+				if let Some(sender) = val.get("sender").and_then(|s| s.as_str()) {
+					if let Ok(parsed) = OwnedUserId::try_from(sender.to_owned()) {
+						owner = Some(parsed);
+					}
 				}
 			}
-			scan(&ruma::CanonicalJsonValue::Object(json_obj.clone()), &mut mxcs);
-			let mxcs_len = mxcs.len();
-			for mxc in mxcs {
-				if policy == RetentionPolicy::ForceDeleteLocal {
-					self.retention.queue_media_for_deletion(&mxc);
-				}
+		}
+
+		if let Some(owner_id) = owner.as_ref() {
+			if !self
+				.services
+				.globals
+				.user_is_local(owner_id.as_ref())
+			{
+				let action = match policy {
+					| RetentionPolicy::Keep => CandidateAction::Skip,
+					| RetentionPolicy::DeleteIfUnreferenced
+					| RetentionPolicy::ForceDeleteLocal => CandidateAction::DeleteImmediately,
+				};
+				return CandidateDecision { action, owner };
 			}
-			warn!(event_id, count=mxcs_len, "retention: fallback redaction scan queued media"); }}
+
+			match self
+				.user_retention_preference(owner_id.as_ref())
+				.await
+			{
+				| UserRetentionPreference::Delete => CandidateDecision {
+					action: CandidateAction::DeleteImmediately,
+					owner,
+				},
+				| UserRetentionPreference::Keep =>
+					CandidateDecision { action: CandidateAction::Skip, owner },
+				| UserRetentionPreference::Ask => CandidateDecision {
+					action: CandidateAction::AwaitConfirmation,
+					owner,
+				},
+			}
+		} else {
+			let action = match policy {
+				| RetentionPolicy::Keep => CandidateAction::Skip,
+				| RetentionPolicy::DeleteIfUnreferenced | RetentionPolicy::ForceDeleteLocal =>
+					CandidateAction::DeleteImmediately,
+			};
+			CandidateDecision { action, owner: None }
+		}
+	}
+
+	fn build_retention_notice(
+		&self,
+		candidate: &RetentionCandidate,
+		event_value: Option<&Value>,
+	) -> String {
+		let room_segment = candidate
+			.room_id
+			.as_deref()
+			.map(|room| format!(" in room {room}"))
+			.unwrap_or_default();
+
+		let timestamp = event_value
+			.and_then(|val| val.get("origin_server_ts"))
+			.and_then(canonical_json_to_u64)
+			.map(|ts| format!(" at {ts}"))
+			.unwrap_or_default();
+
+		format!(
+			"A piece of media ({mxc}) you uploaded{room_segment}{timestamp} is pending deletion. \
+			Run `!user retention confirm {mxc}` here to delete it now, or update your media retention preference to keep it.",
+			mxc = candidate.mxc
+		)
+	}
+
+	pub async fn retention_confirm_deletion(&self, user: &UserId, mxc: &str) -> Result<u64> {
+		self.retention.confirm_candidate(self, mxc, user).await
+	}
+
+	async fn user_retention_preference(&self, user: &UserId) -> UserRetentionPreference {
+		if !self.services.globals.user_is_local(user) {
+			return UserRetentionPreference::Delete;
+		}
+
+		let kind = GlobalAccountDataEventType::from(MEDIA_RETENTION_ACCOUNT_DATA_KIND);
+		match self
+			.services
+			.account_data
+			.get_global::<Value>(user, kind)
+			.await
+		{
+			| Ok(value) =>
+				parse_user_retention_preference(&value).unwrap_or(UserRetentionPreference::Ask),
+			| Err(e) => {
+				debug!(user = user.as_str(), "retention: failed to load user preference: {e}");
+				UserRetentionPreference::Ask
+			},
+		}
 	}
 
 	/// Uploads a file.
@@ -474,6 +742,63 @@ impl Service {
 		r.push(self.services.server.config.database_path.clone());
 		r.push("media");
 		r
+	}
+}
+
+fn parse_user_retention_preference(value: &Value) -> Option<UserRetentionPreference> {
+	if let Some(mode) = value.get("mode").and_then(|v| v.as_str()) {
+		return match mode {
+			| "delete" | "auto" => Some(UserRetentionPreference::Delete),
+			| "keep" => Some(UserRetentionPreference::Keep),
+			| "ask" => Some(UserRetentionPreference::Ask),
+			| _ => None,
+		};
+	}
+
+	if let Some(confirm) = value
+		.get("confirm_before_delete")
+		.and_then(|v| v.as_bool())
+	{
+		return Some(if confirm {
+			UserRetentionPreference::Ask
+		} else {
+			UserRetentionPreference::Delete
+		});
+	}
+
+	if let Some(keep) = value.get("retain").and_then(|v| v.as_bool()) {
+		return Some(if keep {
+			UserRetentionPreference::Keep
+		} else {
+			UserRetentionPreference::Delete
+		});
+	}
+
+	None
+}
+
+fn collect_mxcs(value: &Value, out: &mut HashSet<String>) {
+	match value {
+		| Value::String(s) if s.starts_with("mxc://") => {
+			out.insert(s.to_owned());
+		},
+		| Value::Array(arr) =>
+			for item in arr {
+				collect_mxcs(item, out);
+			},
+		| Value::Object(map) =>
+			for item in map.values() {
+				collect_mxcs(item, out);
+			},
+		| _ => {},
+	}
+}
+
+fn canonical_json_to_u64(value: &Value) -> Option<u64> {
+	match value {
+		| Value::Number(num) => num.as_u64(),
+		| Value::String(s) => s.parse::<u64>().ok(),
+		| _ => None,
 	}
 }
 
