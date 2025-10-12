@@ -388,7 +388,7 @@ impl super::Service {
 					.message_hook(&pdu.event_id, &pdu.room_id, &pdu.sender, &body)
 					.await;
 			}
-			// media retention insertion (structured extraction + fallback JSON scan)
+			// media retention insertion (structured extraction for unencrypted messages)
 			if let Ok(msg_full) = pdu.get_content::<ruma::events::room::message::RoomMessageEventContent>() {
 				warn!(event_id=%pdu.event_id(), msg=?msg_full, "retention: debug message content");
 				use ruma::events::room::MediaSource;
@@ -408,12 +408,23 @@ impl super::Service {
 					ruma::events::room::message::MessageType::Audio(c) => { push_media(&mut mxcs, &c.source, "audio.source", self); },
 					_ => {},
 				}
-				// (fallback JSON scan removed for now, structured extraction should capture supported media types)
 				if mxcs.is_empty() { warn!(event_id=%pdu.event_id(), "retention: no media sources extracted"); }
-				else { warn!(event_id=%pdu.event_id(), count=mxcs.len(), "retention: inserting media refs"); self.services.media.retention_insert_mxcs_on_event(pdu.event_id().as_str(), pdu.room_id().as_str(), &mxcs); }
-			} else {
-				warn!(event_id=%pdu.event_id(), "retention: failed to decode RoomMessageEventContent for extraction");
+				else { warn!(event_id=%pdu.event_id(), count=mxcs.len(), "retention: inserting media refs"); self.services.media.retention_insert_mxcs_on_event(pdu.event_id().as_str(), pdu.room_id().as_str(), pdu.sender().as_str(), &mxcs); }
 			}
+		},
+		| TimelineEventType::RoomEncrypted => {
+			// For encrypted rooms: We can't read the content (it's E2EE), so we can't extract MXC URIs.
+			// Instead, we track the encrypted event metadata so when it's redacted, we can query
+			// the database for media uploaded by this user around this time.
+			// Track using a special marker that will be recognized during redaction handling.
+			warn!(event_id=%pdu.event_id(), sender=%pdu.sender(), room=%pdu.room_id(), "retention: tracking encrypted event");
+			let marker = format!("encrypted-event:{}", pdu.event_id());
+			self.services.media.retention_insert_mxcs_on_event(
+				pdu.event_id().as_str(), 
+				pdu.room_id().as_str(), 
+				pdu.sender().as_str(), 
+				&vec![(marker, false, "encrypted.marker".to_owned())]
+			);
 		},
 		| _ => {},
 	}
@@ -605,6 +616,7 @@ fn increment_notification_counts(
 		increment(&self.db.userroomid_highlightcount, &userroom_id);
 	}
 }
+
 
 //TODO: this is an ABA
 fn increment(db: &Arc<Map>, key: &[u8]) {

@@ -267,6 +267,7 @@ pub async fn backfill_pdu(
 					.retention_insert_mxcs_on_event(
 						pdu.event_id().as_str(),
 						pdu.room_id().as_str(),
+						pdu.sender().as_str(),
 						&mxcs,
 					);
 			}

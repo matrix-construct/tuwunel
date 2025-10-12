@@ -30,6 +30,8 @@ pub(crate) struct MediaEventRef {
 	pub mxc: String,
 	pub room_id: String,
 	pub kind: String, // "content.url", "thumbnail_url"
+	#[serde(default)]
+	pub sender: Option<String>, // user ID who uploaded/sent this media
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -113,10 +115,12 @@ impl Retention {
 	///
 	/// assumptions:
 	/// - `mxcs` is a slice of (mxc_uri, local, kind)
+	/// - `sender` is the user ID who sent/uploaded this media
 	pub(super) fn insert_mxcs_on_event(
 		&self,
 		event_id: &str,
 		room_id: &str,
+		sender: &str,
 		mxcs: &[(String, bool, String)],
 	) {
 		let now = SystemTime::now()
@@ -127,7 +131,7 @@ impl Retention {
 			warn!(%event_id, "retention: insert called with zero MXCs");
 			return;
 		}
-		warn!(%event_id, count = mxcs.len(), %room_id, "retention: inserting media refs for event");
+		warn!(%event_id, count = mxcs.len(), %room_id, sender=%sender, "retention: inserting media refs for event");
 
 		let mut puts: Vec<(Vec<u8>, Vec<u8>)> = Vec::with_capacity(mxcs.len() * 2);
 		for (mxc, local, kind) in mxcs.iter() {
@@ -136,6 +140,7 @@ impl Retention {
 				mxc: mxc.clone(),
 				room_id: room_id.to_owned(),
 				kind: kind.clone(),
+				sender: Some(sender.to_owned()),
 			};
 			let key_mer = Self::key_mer(event_id, kind).into_bytes();
 			let val_mer = serialize_val(Cbor(&mer))
@@ -177,15 +182,16 @@ impl Retention {
 
 	/// decrement refcounts for all MediaEventRef mapped by this event id.
 	/// if policy is set to delete unreferenced/local, enqueue for deletion
+	/// Returns Vec<(mxc, room_id, sender)>
 	pub(super) async fn decrement_refcount_on_redaction(
 		&self,
 		event_id: &str,
 		policy: RetentionPolicy,
-	) -> Result<Vec<(String, String)>> {
+	) -> Result<Vec<(String, String, Option<String>)>> {
 		warn!(%event_id, ?policy, "retention: redaction decrement start");
 		let prefix = format!("{K_MER}{event_id}:");
 		let prefixb = prefix.as_bytes().to_vec();
-		let mut to_delete: Vec<(String, String)> = Vec::new();
+		let mut to_delete: Vec<(String, String, Option<String>)> = Vec::new();
 		let mut puts: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
 		let mut dels: Vec<Vec<u8>> = Vec::new();
 		let mut processed = 0usize;
@@ -208,12 +214,12 @@ impl Retention {
 					| RetentionPolicy::DeleteIfUnreferenced => mr.refcount == 0,
 					| RetentionPolicy::ForceDeleteLocal => mr.local,
 				};
-				warn!(%event_id, mxc = %mer.mxc, kind = %mer.kind, new_refcount = mr.refcount, should_queue, local = mr.local, "retention: redaction updated ref");
+				warn!(%event_id, mxc = %mer.mxc, kind = %mer.kind, new_refcount = mr.refcount, should_queue, local = mr.local, sender = ?mer.sender, "retention: redaction updated ref");
 				let val_mref = serialize_val(Cbor(&mr))?.to_vec();
 				puts.push((key_mref.into_bytes(), val_mref));
 				if should_queue {
-					warn!(%event_id, mxc = %mer.mxc, room = %mer.room_id, "retention: media candidate ready for deletion");
-					to_delete.push((mer.mxc.clone(), mer.room_id.clone()));
+					warn!(%event_id, mxc = %mer.mxc, room = %mer.room_id, sender = ?mer.sender, "retention: media candidate ready for deletion");
+					to_delete.push((mer.mxc.clone(), mer.room_id.clone(), mer.sender.clone()));
 				}
 			}
 

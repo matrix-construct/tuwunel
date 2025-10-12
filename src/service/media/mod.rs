@@ -70,6 +70,7 @@ enum CandidateAction {
 struct RetentionCandidate {
 	mxc: String,
 	room_id: Option<String>,
+	sender: Option<String>, // user ID who uploaded the media
 }
 
 #[derive(Debug, Clone)]
@@ -148,10 +149,11 @@ impl Service {
 		&self,
 		event_id: &str,
 		room_id: &str,
+		sender: &str,
 		mxcs: &[(String, bool, String)],
 	) {
 		self.retention
-			.insert_mxcs_on_event(event_id, room_id, mxcs);
+			.insert_mxcs_on_event(event_id, room_id, sender, mxcs);
 	}
 
 	pub async fn retention_decrement_on_redaction(&self, event_id: &str) {
@@ -172,11 +174,32 @@ impl Service {
 			.await
 		{
 			if !primary.is_empty() {
-				candidates.extend(
-					primary
-						.into_iter()
-						.map(|(mxc, room_id)| RetentionCandidate { mxc, room_id: Some(room_id) }),
-				);
+				// Check if this is an encrypted event marker
+				let is_encrypted_marker = primary.iter().any(|(mxc, _, _)| mxc.starts_with("encrypted-event:"));
+				
+				if is_encrypted_marker {
+					// For encrypted events, we can't see the content, so we don't know what media was in it.
+					// Just get the sender from the marker and we'll handle it below
+					for (marker, room_id, sender) in primary {
+						if marker.starts_with("encrypted-event:") {
+							// This is a marker, not a real MXC. We'll ask the user about recent uploads.
+							if let Some(sender_str) = sender {
+								candidates.push(RetentionCandidate { 
+									mxc: marker,  // Keep the marker so we can identify it later
+									room_id: Some(room_id), 
+									sender: Some(sender_str) 
+								});
+							}
+						}
+					}
+				} else {
+					// Normal unencrypted media references
+					candidates.extend(
+						primary
+							.into_iter()
+							.map(|(mxc, room_id, sender)| RetentionCandidate { mxc, room_id: Some(room_id), sender }),
+					);
+				}
 			}
 		}
 
@@ -198,7 +221,7 @@ impl Service {
 									.and_then(|v| v.as_str())
 									.map(str::to_owned);
 								candidates.extend(discovered.into_iter().map(|mxc| {
-									RetentionCandidate { mxc, room_id: room_id.clone() }
+									RetentionCandidate { mxc, room_id: room_id.clone(), sender: None }
 								}));
 							}
 						}
@@ -220,6 +243,26 @@ impl Service {
 		}
 
 		for candidate in candidates {
+			// Skip encrypted markers - they're not real MXCs, just notifications
+			if candidate.mxc.starts_with("encrypted-event:") {
+				// For encrypted events, we notify the user but don't queue anything for automatic deletion
+				// The user will have to manually confirm with the actual MXC URI of their media
+				if let Some(sender_str) = &candidate.sender {
+					if let Ok(owner) = OwnedUserId::try_from(sender_str.clone()) {
+						if self.services.globals.user_is_local(&owner) {
+							let body = self.build_retention_notice(&candidate, event_value.as_ref());
+							if let Err(e) = self.services.userroom.send_text(&owner, &body).await {
+								warn!(%event_id, user = %owner, "retention: failed to notify user about encrypted event redaction: {e}");
+							} else {
+								debug_info!(%event_id, user = %owner, "retention: notified user about encrypted event redaction");
+							}
+						}
+					}
+				}
+				continue;
+			}
+
+			// Evaluate candidate using policy and user preferences
 			let decision = self
 				.evaluate_retention_candidate(policy, event_value.as_ref(), &candidate)
 				.await;
@@ -239,11 +282,8 @@ impl Service {
 						true,
 					);
 
-					if self
-						.services
-						.globals
-						.user_is_local(owner.as_ref())
-					{
+					// Send notification to the uploader's user room (not the room where it was posted!)
+					if self.services.globals.user_is_local(owner.as_ref()) {
 						let body = self.build_retention_notice(&candidate, event_value.as_ref());
 						if let Err(e) = self
 							.services
@@ -262,7 +302,7 @@ impl Service {
 								%event_id,
 								mxc = %candidate.mxc,
 								user = owner.as_str(),
-								"retention: sent user confirmation request"
+								"retention: sent user confirmation request to their user room"
 							);
 						}
 					}
@@ -292,7 +332,18 @@ impl Service {
 			};
 		}
 
-		let mut owner = self.db.get_media_owner(&candidate.mxc).await;
+		// Prefer sender from candidate (who uploaded the media) over database lookup
+		let mut owner: Option<OwnedUserId> = candidate
+			.sender
+			.as_deref()
+			.and_then(|s| OwnedUserId::try_from(s.to_owned()).ok());
+		
+		// Fallback to database lookup if sender not in candidate
+		if owner.is_none() {
+			owner = self.db.get_media_owner(&candidate.mxc).await;
+		}
+		
+		// Last resort: try to get from event value
 		if owner.is_none() {
 			if let Some(val) = event_value {
 				if let Some(sender) = val.get("sender").and_then(|s| s.as_str()) {
@@ -347,6 +398,29 @@ impl Service {
 		candidate: &RetentionCandidate,
 		event_value: Option<&Value>,
 	) -> String {
+		// Check if this is an encrypted event marker
+		if candidate.mxc.starts_with("encrypted-event:") {
+			let room_segment = candidate
+				.room_id
+				.as_deref()
+				.map(|room| format!(" in room {room}"))
+				.unwrap_or_default();
+
+			let timestamp = event_value
+				.and_then(|val| val.get("origin_server_ts"))
+				.and_then(canonical_json_to_u64)
+				.map(|ts| format!(" at {ts}"))
+				.unwrap_or_default();
+
+			return format!(
+				"You redacted an encrypted message{room_segment}{timestamp}. \
+				If that message contained media you'd like to delete, reply with the MXC URI using: \
+				`!user retention confirm mxc://...` \
+				or update your media retention preference to automatically handle it.",
+			);
+		}
+
+		// Regular unencrypted media
 		let room_segment = candidate
 			.room_id
 			.as_deref()
