@@ -7,7 +7,7 @@ use futures::StreamExt;
 use std::pin::Pin;
 use tracing::warn;
 use ruma::{
-	CanonicalJsonObject, CanonicalJsonValue, EventId, OwnedEventId, OwnedUserId, RoomId, RoomVersionId, UserId,
+	CanonicalJsonObject, CanonicalJsonValue, EventId, OwnedUserId, RoomId, RoomVersionId, UserId,
 	events::{
 		GlobalAccountDataEventType, TimelineEventType,
 		push_rules::PushRulesEvent,
@@ -94,13 +94,12 @@ impl super::Service {
 		mut pdu_json: CanonicalJsonObject,
 		leafs: Leafs,
 		state_lock: &'a RoomMutexGuard,
-	) -> Result<(RawPduId, Vec<OwnedEventId>)>
+	) -> Result<RawPduId>
 	where
 		Leafs: Iterator<Item = &'a EventId> + Send + 'a,
 	{
 	// Coalesce database writes for the remainder of this scope.
 	let _cork = self.db.db.cork_and_flush();
-	let mut retention_targets: Vec<OwnedEventId> = Vec::new();
 
 	let shortroomid = self
 		.services
@@ -305,9 +304,14 @@ impl super::Service {
 							.user_can_redact(redact_id, pdu.sender(), pdu.room_id(), false)
 							.await?
 						{
+							let fut = self
+								.services
+								.media
+								.retention_decrement_on_redaction(redact_id.as_str());
+							Pin::from(Box::new(fut)).await;
+							
 							self.redact_pdu(redact_id, pdu, shortroomid)
 								.await?;
-							retention_targets.push(redact_id.to_owned());
 						}
 					}
 				},
@@ -320,9 +324,14 @@ impl super::Service {
 							.user_can_redact(redact_id, pdu.sender(), pdu.room_id(), false)
 							.await?
 						{
+							let fut = self
+								.services
+								.media
+								.retention_decrement_on_redaction(redact_id.as_str());
+							Pin::from(Box::new(fut)).await;
+							
 							self.redact_pdu(redact_id, pdu, shortroomid)
 								.await?;
-							retention_targets.push(redact_id.to_owned());
 						}
 					}
 				},
@@ -559,7 +568,7 @@ impl super::Service {
 		}
 	}
 
-		Ok((pdu_id, retention_targets))
+		Ok(pdu_id)
 	}
 }
 
@@ -575,19 +584,8 @@ pub async fn append_pdu<'a, Leafs>(
 where
 	Leafs: Iterator<Item = &'a EventId> + Send + 'a,
 {
-	let (pdu_id, retention_targets) = self
-		.append_pdu_inner::<Leafs>(pdu, pdu_json, leafs, state_lock)
-		.await?;
-
-	for event_id in retention_targets {
-		let fut = self
-			.services
-			.media
-			.retention_decrement_on_redaction(event_id.as_str());
-		Pin::from(Box::new(fut)).await;
-	}
-
-	Ok(pdu_id)
+	self.append_pdu_inner::<Leafs>(pdu, pdu_json, leafs, state_lock)
+		.await
 }
 
 #[implement(super::Service)]
@@ -602,11 +600,8 @@ pub async fn append_pdu_without_retention<'a, Leafs>(
 where
 	Leafs: Iterator<Item = &'a EventId> + Send + 'a,
 {
-	let (pdu_id, _) = self
-		.append_pdu_inner::<Leafs>(pdu, pdu_json, leafs, state_lock)
-		.await?;
-
-	Ok(pdu_id)
+	self.append_pdu_inner::<Leafs>(pdu, pdu_json, leafs, state_lock)
+		.await
 }
 
 #[implement(super::Service)]
