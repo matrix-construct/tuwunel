@@ -156,10 +156,12 @@ impl Service {
 			.insert_mxcs_on_event(event_id, room_id, sender, mxcs);
 	}
 
+	/// Track a media upload for potential association with an upcoming encrypted event.
 	pub fn retention_track_pending_upload(&self, user_id: &str, mxc: &str) {
 		self.retention.track_pending_upload(user_id, mxc);
 	}
 
+	/// Consume pending uploads for a user and return them as MXC refs for an encrypted event.
 	pub async fn retention_consume_pending_uploads(
 		&self,
 		user_id: &str,

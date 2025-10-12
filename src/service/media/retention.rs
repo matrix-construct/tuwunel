@@ -250,6 +250,8 @@ impl Retention {
 		Ok(to_delete)
 	}
 
+	/// Track a media upload that might be used in an upcoming encrypted message.
+	/// These pending uploads will be matched to encrypted events within a time window.
 	pub(super) fn track_pending_upload(&self, user_id: &str, mxc: &str) {
 		let upload_ts = SystemTime::now()
 			.duration_since(UNIX_EPOCH)
@@ -266,13 +268,17 @@ impl Retention {
 		warn!(user_id, mxc, upload_ts, "retention: tracking pending upload for encrypted event association");
 		self.cf.raw_put(key, Cbor(&pending));
 
+		// Clean up old pending uploads (older than 60 seconds) asynchronously
 		self.cleanup_old_pending_uploads(user_id, upload_ts);
 	}
 
+	/// Find and consume pending uploads for a user within the last N seconds.
+	/// Returns Vec<(mxc, local, kind)> suitable for insert_mxcs_on_event.
+	/// Time window: 60 seconds (uploads must have happened within last minute).
 	pub(super) async fn consume_pending_uploads(
 		&self,
 		user_id: &str,
-		event_ts: u64,
+		event_ts: u64, // event timestamp in milliseconds
 	) -> Vec<(String, bool, String)> {
 		let window_ms = 60_000u64; // 60 seconds
 		let cutoff_ts = event_ts.saturating_sub(window_ms);
@@ -288,7 +294,10 @@ impl Retention {
 		while let Some(item) = stream.next().await.transpose().ok().flatten() {
 			let (key, Cbor(pending)) = item;
 
+			// Only match uploads within the time window
 			if pending.upload_ts >= cutoff_ts && pending.upload_ts <= event_ts {
+				// Assume local=true since user uploaded to our server
+				// Mark as encrypted media
 				found_mxcs.push((pending.mxc.clone(), true, "encrypted.media".to_owned()));
 				to_delete.push(key.as_bytes().to_vec());
 				warn!(
@@ -299,10 +308,12 @@ impl Retention {
 					"retention: consuming pending upload for encrypted event"
 				);
 			} else if pending.upload_ts < cutoff_ts {
+				// Too old, clean it up
 				to_delete.push(key.as_bytes().to_vec());
 			}
 		}
 
+		// Remove consumed/old pending uploads
 		if !to_delete.is_empty() {
 			self.cf.write_batch_raw(std::iter::empty(), to_delete);
 		}
@@ -310,6 +321,7 @@ impl Retention {
 		found_mxcs
 	}
 
+	/// Clean up pending uploads older than 60 seconds for a specific user.
 	fn cleanup_old_pending_uploads(&self, user_id: &str, current_ts: u64) {
 		let cf = self.cf.clone();
 		let user_id = user_id.to_owned();
