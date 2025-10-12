@@ -482,6 +482,18 @@ impl super::Service {
 					.add_to_thread(&thread.event_id, pdu)
 					.await?;
 			},
+			| Relation::Annotation(annotation) => {
+				self.services
+					.userroom
+					.reaction_hook(
+						pdu.event_id(),
+						pdu.room_id(),
+						pdu.sender(),
+						&annotation.event_id,
+						&annotation.key,
+					)
+					.await;
+			},
 			| _ => {}, // TODO: Aggregate other types
 		}
 	}

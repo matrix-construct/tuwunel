@@ -50,6 +50,15 @@ pub(crate) struct DeletionCandidate {
 	pub user_id: Option<String>,
 	#[serde(default)]
 	pub awaiting_confirmation: bool,
+	/// Event ID of the notification message sent to the user (for reaction handling)
+	#[serde(default)]
+	pub notification_event_id: Option<String>,
+	/// Event ID of the ✅ reaction (for cleanup)
+	#[serde(default)]
+	pub confirm_reaction_id: Option<String>,
+	/// Event ID of the ❌ reaction (for cleanup)
+	#[serde(default)]
+	pub cancel_reaction_id: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -355,6 +364,9 @@ impl Retention {
 		mxc: &str,
 		owner: Option<&UserId>,
 		awaiting_confirmation: bool,
+		notification_event_id: Option<String>,
+		confirm_reaction_id: Option<String>,
+		cancel_reaction_id: Option<String>,
 	) {
 		let key = Self::key_queue(mxc);
 		// overwrite / insert candidate with fresh timestamp
@@ -363,6 +375,9 @@ impl Retention {
 			enqueued_ts: now_secs(),
 			user_id: owner.map(|u| u.to_string()),
 			awaiting_confirmation,
+			notification_event_id,
+			confirm_reaction_id,
+			cancel_reaction_id,
 		};
 		warn!(
 			mxc,
@@ -378,7 +393,7 @@ impl Retention {
 		service: &Service,
 		mxc: &str,
 		requester: &UserId,
-	) -> Result<u64> {
+	) -> Result<(u64, Option<String>)> {
 		let key = Self::key_queue(mxc);
 		let handle = self
 			.cf
@@ -392,12 +407,15 @@ impl Retention {
 		};
 		if owner != requester.as_str() {
 			return Err(err!(Request(Forbidden("media candidate owned by another user"))));
-		}
+		};
 		if !candidate.awaiting_confirmation {
 			return Err(err!(Request(InvalidParam(
 				"media deletion already processed",
 			))));
 		}
+
+		// Save the cancel reaction ID to redact it
+		let cancel_reaction_to_redact = candidate.cancel_reaction_id.clone();
 
 		candidate.awaiting_confirmation = false;
 		candidate.enqueued_ts = now_secs();
@@ -408,7 +426,53 @@ impl Retention {
 		dels.push(Self::key_mref(mxc).into_bytes());
 		self.cf.write_batch_raw(std::iter::empty(), dels);
 		warn!(mxc, bytes = deleted_bytes, user = requester.as_str(), "retention: media deletion confirmed by user");
-		Ok(deleted_bytes)
+		Ok((deleted_bytes, cancel_reaction_to_redact))
+	}
+
+	/// Find MXC by notification event ID (for reaction-based confirmation)
+	pub(super) async fn find_mxc_by_notification_event(&self, notification_event_id: &str) -> Option<String> {
+		let prefix = K_QUEUE.as_bytes();
+		let mut stream = self
+			.cf
+			.stream_raw_prefix::<&str, Cbor<DeletionCandidate>, _>(&prefix);
+
+		while let Some(item) = stream.next().await.transpose().ok().flatten() {
+			let (_key, Cbor(cand)) = item;
+			if let Some(ref stored_event_id) = cand.notification_event_id {
+				if stored_event_id == notification_event_id {
+					return Some(cand.mxc.clone());
+				}
+			}
+		}
+
+		None
+	}
+
+	/// Cancel a deletion candidate (remove from queue)
+	/// Returns the confirm reaction ID to redact it
+	pub(super) async fn cancel_candidate(&self, mxc: &str, requester: &UserId) -> Result<Option<String>> {
+		let key = Self::key_queue(mxc);
+		match self.cf.get(&key).await {
+			| Ok(handle) => {
+				let Cbor(candidate) = handle.deserialized::<Cbor<DeletionCandidate>>()?;
+
+				let Some(owner) = candidate.user_id.as_deref() else {
+					return Err(err!(Request(Forbidden("media candidate owner unknown"))));
+				};
+				if owner != requester.as_str() {
+					return Err(err!(Request(Forbidden("media candidate owned by another user"))));
+				}
+
+				// Save the confirm reaction ID to redact it
+				let confirm_reaction_to_redact = candidate.confirm_reaction_id.clone();
+
+				// Remove from queue
+				self.cf.remove(key.as_str());
+				warn!(mxc, user = requester.as_str(), "retention: media deletion cancelled by user");
+				Ok(confirm_reaction_to_redact)
+			},
+			| Err(_) => Err(err!(Request(NotFound("no pending deletion for this media")))),
+		}
 	}
 
 	/// worker: processes queued deletion candidates after grace period.

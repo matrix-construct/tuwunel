@@ -16,7 +16,7 @@ use std::{
 use async_trait::async_trait;
 use base64::{Engine as _, engine::general_purpose};
 use ruma::{
-	Mxc, OwnedMxcUri, OwnedUserId, UserId, events::GlobalAccountDataEventType,
+	EventId, Mxc, OwnedMxcUri, OwnedUserId, UserId, events::GlobalAccountDataEventType,
 	http_headers::ContentDisposition,
 };
 use serde_json::Value;
@@ -196,7 +196,7 @@ impl Service {
 			}
 		}
 
-		if let Ok(parsed_eid) = ruma::EventId::parse(event_id) {
+		if let Ok(parsed_eid) = EventId::parse(event_id) {
 			match self
 				.services
 				.timeline
@@ -247,39 +247,69 @@ impl Service {
 						&candidate.mxc,
 						owner.as_deref(),
 						false,
+						None, // No notification for immediate deletion
+						None, // No reactions
+						None, // No reactions
 					);
 				},
 				| (CandidateAction::AwaitConfirmation, Some(owner)) => {
+					// Send notification to the uploader's user room (not the room where it was posted!)
+					let (notification_event_id, confirm_reaction_id, cancel_reaction_id) = 
+						if self.services.globals.user_is_local(owner.as_ref()) {
+							let body = self.build_retention_notice(&candidate, event_value.as_ref());
+							match self
+								.services
+								.userroom
+								.send_text_with_event_id(owner.as_ref(), &body)
+								.await
+							{
+								| Ok(event_id) => {
+									// Add reaction options: ✅ to confirm deletion, ❌ to cancel
+									let confirm_id = match self.services.userroom.add_reaction(owner.as_ref(), &event_id, "✅").await {
+										| Ok(id) => Some(id.to_string()),
+										| Err(e) => {
+											warn!(%event_id, "retention: failed to add ✅ reaction: {e}");
+											None
+										}
+									};
+									let cancel_id = match self.services.userroom.add_reaction(owner.as_ref(), &event_id, "❌").await {
+										| Ok(id) => Some(id.to_string()),
+										| Err(e) => {
+											warn!(%event_id, "retention: failed to add ❌ reaction: {e}");
+											None
+										}
+									};
+
+									debug_info!(
+										%event_id,
+										mxc = %candidate.mxc,
+										user = owner.as_str(),
+										"retention: sent user confirmation request with reactions to their user room"
+									);
+									(Some(event_id.to_string()), confirm_id, cancel_id)
+								},
+								| Err(e) => {
+									warn!(
+										mxc = %candidate.mxc,
+										user = owner.as_str(),
+										"retention: failed to notify user about pending deletion: {e}",
+									);
+									(None, None, None)
+								},
+							}
+						} else {
+							(None, None, None)
+						};
+
+					// Queue for deletion with the notification and reaction event IDs
 					self.retention.queue_media_for_deletion(
 						&candidate.mxc,
 						Some(owner.as_ref()),
 						true,
+						notification_event_id,
+						confirm_reaction_id,
+						cancel_reaction_id,
 					);
-
-					// Send notification to the uploader's user room (not the room where it was posted!)
-					if self.services.globals.user_is_local(owner.as_ref()) {
-						let body = self.build_retention_notice(&candidate, event_value.as_ref());
-						if let Err(e) = self
-							.services
-							.userroom
-							.send_text(owner.as_ref(), &body)
-							.await
-						{
-							warn!(
-								%event_id,
-								mxc = %candidate.mxc,
-								user = owner.as_str(),
-								"retention: failed to notify user about pending deletion: {e}",
-							);
-						} else {
-							debug_info!(
-								%event_id,
-								mxc = %candidate.mxc,
-								user = owner.as_str(),
-								"retention: sent user confirmation request to their user room"
-							);
-						}
-					}
 				},
 				| (CandidateAction::AwaitConfirmation, None) => {
 					warn!(%event_id, mxc = %candidate.mxc, "retention: confirmation requested but owner is unknown");
@@ -385,14 +415,65 @@ impl Service {
 			.unwrap_or_default();
 
 		format!(
-			"A piece of media ({mxc}) you uploaded{room_segment}{timestamp} is pending deletion. \
-			Run `!user retention confirm {mxc}` here to delete it now, or update your media retention preference to keep it.",
+			"A piece of media ({mxc}) you uploaded{room_segment}{timestamp} is pending deletion.\n\n\
+			React with ✅ to confirm deletion or ❌ to keep it.\n\
+			(You can also run `!user retention confirm {mxc}` to delete it manually.)",
 			mxc = candidate.mxc
 		)
 	}
-
 	pub async fn retention_confirm_deletion(&self, user: &UserId, mxc: &str) -> Result<u64> {
-		self.retention.confirm_candidate(self, mxc, user).await
+		let (deleted_bytes, cancel_reaction_id) = self.retention.confirm_candidate(self, mxc, user).await?;
+		
+		// Redact the unused ❌ reaction to clean up the UI (spawned as background task)
+		if let Some(reaction_id_str) = cancel_reaction_id {
+			if let Ok(reaction_id) = EventId::parse(&reaction_id_str) {
+				self.services.userroom.redact_reaction(user, &reaction_id);
+			}
+		}
+		
+		Ok(deleted_bytes)
+	}
+
+	/// Confirm deletion (✅ reaction) on the notification message
+	pub async fn retention_confirm_by_reaction(&self, user: &UserId, notification_event_id: &EventId) -> Result<u64> {
+		// Find the deletion candidate by notification event ID
+		if let Some(mxc) = self.retention.find_mxc_by_notification_event(notification_event_id.as_str()).await {
+			debug_info!(user = %user, event_id = %notification_event_id, mxc = %mxc, "retention: user confirmed deletion via ✅ reaction");
+			let (deleted_bytes, cancel_reaction_id) = self.retention.confirm_candidate(self, &mxc, user).await?;
+			
+			// Redact the unused ❌ reaction to clean up the UI (spawned as background task)
+			if let Some(reaction_id_str) = cancel_reaction_id {
+				if let Ok(reaction_id) = EventId::parse(&reaction_id_str) {
+					self.services.userroom.redact_reaction(user, &reaction_id);
+				}
+			}
+			
+			Ok(deleted_bytes)
+		} else {
+			warn!(user = %user, event_id = %notification_event_id, "retention: no pending deletion found for reaction");
+			Ok(0)
+		}
+	}
+
+	/// Cancel deletion (❌ reaction) on the notification message
+	pub async fn retention_cancel_by_reaction(&self, user: &UserId, notification_event_id: &EventId) -> Result {
+		// Find and remove the deletion candidate
+		if let Some(mxc) = self.retention.find_mxc_by_notification_event(notification_event_id.as_str()).await {
+			debug_info!(user = %user, event_id = %notification_event_id, mxc = %mxc, "retention: user cancelled deletion via ❌ reaction");
+			let confirm_reaction_id = self.retention.cancel_candidate(&mxc, user).await?;
+			
+			// Redact the unused ✅ reaction to clean up the UI (spawned as background task)
+			if let Some(reaction_id_str) = confirm_reaction_id {
+				if let Ok(reaction_id) = EventId::parse(&reaction_id_str) {
+					self.services.userroom.redact_reaction(user, &reaction_id);
+				}
+			}
+			
+			Ok(())
+		} else {
+			warn!(user = %user, event_id = %notification_event_id, "retention: no pending deletion found for reaction");
+			Ok(())
+		}
 	}
 
 	async fn user_retention_preference(&self, user: &UserId) -> UserRetentionPreference {
