@@ -413,18 +413,43 @@ impl super::Service {
 			}
 		},
 		| TimelineEventType::RoomEncrypted => {
-			// For encrypted rooms: We can't read the content (it's E2EE), so we can't extract MXC URIs.
-			// Instead, we track the encrypted event metadata so when it's redacted, we can query
-			// the database for media uploaded by this user around this time.
-			// Track using a special marker that will be recognized during redaction handling.
-			warn!(event_id=%pdu.event_id(), sender=%pdu.sender(), room=%pdu.room_id(), "retention: tracking encrypted event");
-			let marker = format!("encrypted-event:{}", pdu.event_id());
-			self.services.media.retention_insert_mxcs_on_event(
-				pdu.event_id().as_str(), 
-				pdu.room_id().as_str(), 
-				pdu.sender().as_str(), 
-				&vec![(marker, false, "encrypted.marker".to_owned())]
-			);
+			// For encrypted rooms: We can't read the content (it's E2EE), so we can't extract MXC URIs directly.
+			// However, we CAN associate recent media uploads with this encrypted event
+			// Strategy: When user uploads media, we track it as "pending". When they send an encrypted event
+			// within 60 seconds, we consume those pending uploads and associate them with this event.
+			// todo: find a more realistic time window, 60s may be a bit long
+			
+			// Get the event timestamp (milliseconds since epoch)
+			let event_ts: u64 = pdu.origin_server_ts().get().into();
+			
+			// Consume any pending uploads from this user within the last 60 seconds
+			let pending_mxcs = self.services
+				.media
+				.retention_consume_pending_uploads(pdu.sender().as_str(), event_ts)
+				.await;
+
+			if !pending_mxcs.is_empty() {
+				warn!(
+					event_id=%pdu.event_id(), 
+					sender=%pdu.sender(), 
+					room=%pdu.room_id(),
+					count=pending_mxcs.len(),
+					"retention: associated pending uploads with encrypted event"
+				);
+				self.services.media.retention_insert_mxcs_on_event(
+					pdu.event_id().as_str(), 
+					pdu.room_id().as_str(), 
+					pdu.sender().as_str(), 
+					&pending_mxcs
+				);
+			} else {
+				warn!(
+					event_id=%pdu.event_id(), 
+					sender=%pdu.sender(), 
+					room=%pdu.room_id(),
+					"retention: no pending uploads found for encrypted event"
+				);
+			}
 		},
 		| _ => {},
 	}

@@ -16,6 +16,14 @@ use super::Service;
 const K_MREF: &str = "mref:"; // mref:<mxc>
 const K_MER: &str = "mer:"; // mer:<event_id>:<kind>
 const K_QUEUE: &str = "qdel:"; // qdel:<mxc> => DeletionCandidate
+const K_PENDING: &str = "pending:"; // pending:<user_id>:<timestamp_ms> => PendingUpload
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub(crate) struct PendingUpload {
+	pub mxc: String,
+	pub user_id: String,
+	pub upload_ts: u64, // milliseconds since epoch
+}
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub(crate) struct MediaRef {
@@ -79,6 +87,14 @@ impl Retention {
 
 	#[inline]
 	fn key_queue(mxc: &str) -> String { format!("{K_QUEUE}{mxc}") }
+
+	#[inline]
+	fn key_pending(user_id: &str, timestamp_ms: u64) -> String {
+		format!("{K_PENDING}{user_id}:{timestamp_ms}")
+	}
+
+	#[inline]
+	fn pending_prefix(user_id: &str) -> String { format!("{K_PENDING}{user_id}:") }
 
 	#[allow(dead_code)]
 	pub(super) async fn get_media_ref(&self, mxc: &str) -> Result<Option<MediaRef>> {
@@ -232,6 +248,93 @@ impl Retention {
 		}
 		warn!(%event_id, queued = to_delete.len(), processed, "retention: redaction decrement complete");
 		Ok(to_delete)
+	}
+
+	pub(super) fn track_pending_upload(&self, user_id: &str, mxc: &str) {
+		let upload_ts = SystemTime::now()
+			.duration_since(UNIX_EPOCH)
+			.unwrap_or_default()
+			.as_millis() as u64;
+
+		let pending = PendingUpload {
+			mxc: mxc.to_owned(),
+			user_id: user_id.to_owned(),
+			upload_ts,
+		};
+
+		let key = Self::key_pending(user_id, upload_ts);
+		warn!(user_id, mxc, upload_ts, "retention: tracking pending upload for encrypted event association");
+		self.cf.raw_put(key, Cbor(&pending));
+
+		self.cleanup_old_pending_uploads(user_id, upload_ts);
+	}
+
+	pub(super) async fn consume_pending_uploads(
+		&self,
+		user_id: &str,
+		event_ts: u64,
+	) -> Vec<(String, bool, String)> {
+		let window_ms = 60_000u64; // 60 seconds
+		let cutoff_ts = event_ts.saturating_sub(window_ms);
+
+		let prefix = Self::pending_prefix(user_id);
+		let mut found_mxcs: Vec<(String, bool, String)> = Vec::new();
+		let mut to_delete: Vec<Vec<u8>> = Vec::new();
+
+		let mut stream = self
+			.cf
+			.stream_raw_prefix::<&str, Cbor<PendingUpload>, _>(prefix.as_bytes());
+
+		while let Some(item) = stream.next().await.transpose().ok().flatten() {
+			let (key, Cbor(pending)) = item;
+
+			if pending.upload_ts >= cutoff_ts && pending.upload_ts <= event_ts {
+				found_mxcs.push((pending.mxc.clone(), true, "encrypted.media".to_owned()));
+				to_delete.push(key.as_bytes().to_vec());
+				warn!(
+					user_id,
+					mxc = %pending.mxc,
+					upload_ts = pending.upload_ts,
+					event_ts,
+					"retention: consuming pending upload for encrypted event"
+				);
+			} else if pending.upload_ts < cutoff_ts {
+				to_delete.push(key.as_bytes().to_vec());
+			}
+		}
+
+		if !to_delete.is_empty() {
+			self.cf.write_batch_raw(std::iter::empty(), to_delete);
+		}
+
+		found_mxcs
+	}
+
+	fn cleanup_old_pending_uploads(&self, user_id: &str, current_ts: u64) {
+		let cf = self.cf.clone();
+		let user_id = user_id.to_owned();
+		let cutoff = current_ts.saturating_sub(60_000);
+
+		// Spawn cleanup task to avoid blocking
+		tokio::spawn(async move {
+			let prefix = Self::pending_prefix(&user_id);
+			let mut to_delete: Vec<Vec<u8>> = Vec::new();
+
+			let mut stream = cf.stream_raw_prefix::<&str, Cbor<PendingUpload>, _>(prefix.as_bytes());
+
+			while let Some(item) = stream.next().await.transpose().ok().flatten() {
+				let (key, Cbor(pending)) = item;
+				if pending.upload_ts < cutoff {
+					to_delete.push(key.as_bytes().to_vec());
+				}
+			}
+
+			if !to_delete.is_empty() {
+				let count = to_delete.len();
+				cf.write_batch_raw(std::iter::empty(), to_delete);
+				trace!(user_id, count, "retention: cleaned up old pending uploads");
+			}
+		});
 	}
 
 	/// qeue a media item for deletion (idempotent best-effort).
