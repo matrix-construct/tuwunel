@@ -12,11 +12,34 @@ use tuwunel_database::{Cbor, Deserialized, Map, keyval::serialize_val};
 
 use super::Service;
 
+//todo: split into multiple files
+
 /// keyspace prefixes inside the `media_retention` CF
 const K_MREF: &str = "mref:"; // mref:<mxc>
 const K_MER: &str = "mer:"; // mer:<event_id>:<kind>
 const K_QUEUE: &str = "qdel:"; // qdel:<mxc> => DeletionCandidate
 const K_PENDING: &str = "pending:"; // pending:<user_id>:<timestamp_ms> => PendingUpload
+const K_PREFS: &str = "prefs:"; // prefs:<user_id> => UserRetentionPrefs
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct UserRetentionPrefs {
+	/// Auto-delete media in unencrypted rooms without asking
+	#[serde(default)]
+	pub auto_delete_unencrypted: bool,
+	/// Auto-delete media in encrypted rooms without asking
+	/// Warning: Detection is based on pending uploads, may have false positives
+	#[serde(default)]
+	pub auto_delete_encrypted: bool,
+}
+
+impl Default for UserRetentionPrefs {
+	fn default() -> Self {
+		Self {
+			auto_delete_unencrypted: false,
+			auto_delete_encrypted: false,
+		}
+	}
+}
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub(crate) struct PendingUpload {
@@ -59,6 +82,13 @@ pub(crate) struct DeletionCandidate {
 	/// Event ID of the ❌ reaction (for cleanup)
 	#[serde(default)]
 	pub cancel_reaction_id: Option<String>,
+	/// Event ID of the ⚙️ reaction (always auto-delete for this room type)
+	#[serde(default)]
+	pub auto_reaction_id: Option<String>,
+	/// Was this media detected as being from an encrypted room?
+	/// (based on pending upload matching, may have false positives)
+	#[serde(default)]
+	pub from_encrypted_room: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -79,7 +109,7 @@ impl RetentionPolicy {
 }
 
 #[derive(Clone)]
-pub(super) struct Retention {
+pub struct Retention {
 	cf: Arc<Map>,
 }
 
@@ -104,6 +134,31 @@ impl Retention {
 
 	#[inline]
 	fn pending_prefix(user_id: &str) -> String { format!("{K_PENDING}{user_id}:") }
+
+	#[inline]
+	fn key_prefs(user_id: &str) -> String { format!("{K_PREFS}{user_id}") }
+
+	/// Get user's retention preferences
+	pub async fn get_user_prefs(&self, user_id: &str) -> UserRetentionPrefs {
+		let key = Self::key_prefs(user_id);
+		match self.cf.get(&key).await {
+			| Ok(handle) => match handle.deserialized::<Cbor<UserRetentionPrefs>>() {
+				| Ok(Cbor(prefs)) => prefs,
+				| Err(e) => {
+					warn!(%user_id, "retention: failed to deserialize user prefs: {e}");
+					UserRetentionPrefs::default()
+				},
+			},
+			| Err(_) => UserRetentionPrefs::default(),
+		}
+	}
+
+	/// Save user's retention preferences
+	pub async fn set_user_prefs(&self, user_id: &str, prefs: &UserRetentionPrefs) -> Result<()> {
+		let key = Self::key_prefs(user_id);
+		self.cf.raw_put(&key, Cbor(prefs));
+		Ok(())
+	}
 
 	#[allow(dead_code)]
 	pub(super) async fn get_media_ref(&self, mxc: &str) -> Result<Option<MediaRef>> {
@@ -367,6 +422,8 @@ impl Retention {
 		notification_event_id: Option<String>,
 		confirm_reaction_id: Option<String>,
 		cancel_reaction_id: Option<String>,
+		auto_reaction_id: Option<String>,
+		from_encrypted_room: bool,
 	) {
 		let key = Self::key_queue(mxc);
 		// overwrite / insert candidate with fresh timestamp
@@ -378,11 +435,14 @@ impl Retention {
 			notification_event_id,
 			confirm_reaction_id,
 			cancel_reaction_id,
+			auto_reaction_id,
+			from_encrypted_room,
 		};
 		warn!(
 			mxc,
 			awaiting_confirmation,
 			owner = owner.map(UserId::as_str),
+			from_encrypted = from_encrypted_room,
 			"retention: queue media for deletion"
 		);
 		self.cf.raw_put(key, Cbor(&cand));
@@ -470,6 +530,59 @@ impl Retention {
 				self.cf.remove(key.as_str());
 				warn!(mxc, user = requester.as_str(), "retention: media deletion cancelled by user");
 				Ok(confirm_reaction_to_redact)
+			},
+			| Err(_) => Err(err!(Request(NotFound("no pending deletion for this media")))),
+		}
+	}
+
+	/// Enable auto-delete for the room type (encrypted/unencrypted) and confirm deletion
+	/// Returns: (deleted_bytes, confirm_reaction_id, cancel_reaction_id) to redact unused reactions
+	pub(super) async fn auto_delete_candidate(
+		&self,
+		service: &Service,
+		mxc: &str,
+		requester: &UserId,
+	) -> Result<(u64, Option<String>, Option<String>, bool)> {
+		let key = Self::key_queue(mxc);
+		match self.cf.get(&key).await {
+			| Ok(handle) => {
+				let Cbor(candidate) = handle.deserialized::<Cbor<DeletionCandidate>>()?;
+
+				let Some(owner) = candidate.user_id.as_deref() else {
+					return Err(err!(Request(Forbidden("media candidate owner unknown"))));
+				};
+				if owner != requester.as_str() {
+					return Err(err!(Request(Forbidden("media candidate owned by another user"))));
+				}
+
+				let from_encrypted_room = candidate.from_encrypted_room;
+
+				let mut prefs = self.get_user_prefs(requester.as_str()).await;
+				if from_encrypted_room {
+					prefs.auto_delete_encrypted = true;
+					warn!(user = %requester, "retention: enabled auto-delete for encrypted rooms");
+				} else {
+					prefs.auto_delete_unencrypted = true;
+					warn!(user = %requester, "retention: enabled auto-delete for unencrypted rooms");
+				}
+				self.set_user_prefs(requester.as_str(), &prefs).await?;
+
+				let confirm_reaction_to_redact = candidate.confirm_reaction_id.clone();
+				let cancel_reaction_to_redact = candidate.cancel_reaction_id.clone();
+
+				let deleted_bytes = self.delete_local_media(service, mxc).await?;
+				let mut dels = Vec::with_capacity(2);
+				dels.push(key.into_bytes());
+				dels.push(Self::key_mref(mxc).into_bytes());
+				self.cf.write_batch_raw(std::iter::empty(), dels);
+				warn!(
+					mxc,
+					bytes = deleted_bytes,
+					user = requester.as_str(),
+					from_encrypted = from_encrypted_room,
+					"retention: media auto-deleted and preference saved"
+				);
+				Ok((deleted_bytes, confirm_reaction_to_redact, cancel_reaction_to_redact, from_encrypted_room))
 			},
 			| Err(_) => Err(err!(Request(NotFound("no pending deletion for this media")))),
 		}

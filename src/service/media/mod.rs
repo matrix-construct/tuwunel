@@ -47,7 +47,7 @@ pub struct Service {
 	url_preview_mutex: MutexMap<String, ()>,
 	pub(super) db: Data,
 	services: Arc<crate::services::OnceServices>,
-	retention: Retention,
+	pub retention: Retention,
 }
 
 const MEDIA_RETENTION_ACCOUNT_DATA_KIND: &str = "im.tuwunel.media.retention";
@@ -71,6 +71,7 @@ struct RetentionCandidate {
 	mxc: String,
 	room_id: Option<String>,
 	sender: Option<String>, // user ID who uploaded the media
+	from_encrypted_room: bool, // Was this from m.room.encrypted event?
 }
 
 #[derive(Debug, Clone)]
@@ -181,6 +182,18 @@ impl Service {
 		);
 		let mut candidates: Vec<RetentionCandidate> = Vec::new();
 		let mut event_value: Option<Value> = None;
+		let mut is_encrypted_event = false;
+
+		if let Ok(parsed_eid) = EventId::parse(event_id) {
+			if let Ok(canonical) = self.services.timeline.get_pdu_json(&parsed_eid).await {
+				if let Ok(val) = serde_json::to_value(&canonical) {
+					if let Some(event_type) = val.get("type").and_then(|v| v.as_str()) {
+						is_encrypted_event = event_type == "m.room.encrypted";
+					}
+					event_value = Some(val);
+				}
+			}
+		}
 
 		if let Ok(primary) = self
 			.retention
@@ -191,42 +204,34 @@ impl Service {
 				candidates.extend(
 					primary
 						.into_iter()
-						.map(|(mxc, room_id, sender)| RetentionCandidate { mxc, room_id: Some(room_id), sender }),
+						.map(|(mxc, room_id, sender)| RetentionCandidate { 
+							mxc, 
+							room_id: Some(room_id), 
+							sender,
+							from_encrypted_room: is_encrypted_event,
+						}),
 				);
 			}
 		}
 
-		if let Ok(parsed_eid) = EventId::parse(event_id) {
-			match self
-				.services
-				.timeline
-				.get_pdu_json(&parsed_eid)
-				.await
-			{
-				| Ok(canonical) => match serde_json::to_value(&canonical) {
-					| Ok(val) => {
-						if candidates.is_empty() {
-							let mut discovered = HashSet::new();
-							collect_mxcs(&val, &mut discovered);
-							if !discovered.is_empty() {
-								let room_id = val
-									.get("room_id")
-									.and_then(|v| v.as_str())
-									.map(str::to_owned);
-								candidates.extend(discovered.into_iter().map(|mxc| {
-									RetentionCandidate { mxc, room_id: room_id.clone(), sender: None }
-								}));
-							}
+		if candidates.is_empty() {
+			if let Some(ref val) = event_value {
+				let mut discovered = HashSet::new();
+				collect_mxcs(&val, &mut discovered);
+				if !discovered.is_empty() {
+					let room_id = val
+						.get("room_id")
+						.and_then(|v| v.as_str())
+						.map(str::to_owned);
+					candidates.extend(discovered.into_iter().map(|mxc| {
+						RetentionCandidate { 
+							mxc, 
+							room_id: room_id.clone(), 
+							sender: None,
+							from_encrypted_room: is_encrypted_event,
 						}
-						event_value = Some(val);
-					},
-					| Err(e) => {
-						warn!(%event_id, "retention: failed to convert canonical event to json value: {e}")
-					},
-				},
-				| Err(e) => {
-					debug_warn!(%event_id, "retention: unable to load original event for redaction: {e}")
-				},
+					}));
+				}
 			}
 		}
 
@@ -236,7 +241,50 @@ impl Service {
 		}
 
 		for candidate in candidates {
-			// Evaluate candidate using policy and user preferences
+			// Check user preferences for auto-deletion
+			let user_prefs = if let Some(ref sender) = candidate.sender {
+				self.retention.get_user_prefs(sender).await
+			} else {
+				Default::default()
+			};
+
+			let should_auto_delete = if candidate.from_encrypted_room {
+				user_prefs.auto_delete_encrypted
+			} else {
+				user_prefs.auto_delete_unencrypted
+			};
+
+			debug!(
+				mxc = %candidate.mxc,
+				sender = ?candidate.sender,
+				from_encrypted = candidate.from_encrypted_room,
+				should_auto_delete,
+				prefs_encrypted = user_prefs.auto_delete_encrypted,
+				prefs_unencrypted = user_prefs.auto_delete_unencrypted,
+				"retention: checking auto-delete preferences"
+			);
+
+			if should_auto_delete {
+				warn!(
+					mxc = %candidate.mxc,
+					sender = ?candidate.sender,
+					from_encrypted = candidate.from_encrypted_room,
+					"retention: auto-deleting per user preferences"
+				);
+				self.retention.queue_media_for_deletion(
+					&candidate.mxc,
+					candidate.sender.as_ref().and_then(|s| UserId::parse(s).ok()).as_deref(),
+					false, // No confirmation needed
+					None, // No notification
+					None, // No reactions
+					None, // No reactions
+					None, // No auto-delete reaction
+					candidate.from_encrypted_room,
+				);
+				continue;
+			}
+
+			// Eval candidate using policy and user preferences
 			let decision = self
 				.evaluate_retention_candidate(policy, event_value.as_ref(), &candidate)
 				.await;
@@ -247,14 +295,16 @@ impl Service {
 						&candidate.mxc,
 						owner.as_deref(),
 						false,
-						None, // No notification for immediate deletion
-						None, // No reactions
-						None, // No reactions
+						None,
+						None,
+						None,
+						None,
+						candidate.from_encrypted_room,
 					);
 				},
 				| (CandidateAction::AwaitConfirmation, Some(owner)) => {
 					// Send notification to the uploader's user room (not the room where it was posted!)
-					let (notification_event_id, confirm_reaction_id, cancel_reaction_id) = 
+					let (notification_event_id, confirm_reaction_id, cancel_reaction_id, auto_reaction_id) = 
 						if self.services.globals.user_is_local(owner.as_ref()) {
 							let body = self.build_retention_notice(&candidate, event_value.as_ref());
 							match self
@@ -264,7 +314,10 @@ impl Service {
 								.await
 							{
 								| Ok(event_id) => {
-									// Add reaction options: ✅ to confirm deletion, ❌ to cancel
+									// add reaction options: 
+									// ✅ to confirm deletion
+									// ❌ to cancel
+									// ⚙️ to always auto-delete for room type
 									let confirm_id = match self.services.userroom.add_reaction(owner.as_ref(), &event_id, "✅").await {
 										| Ok(id) => Some(id.to_string()),
 										| Err(e) => {
@@ -279,6 +332,13 @@ impl Service {
 											None
 										}
 									};
+									let auto_id = match self.services.userroom.add_reaction(owner.as_ref(), &event_id, "⚙️").await {
+										| Ok(id) => Some(id.to_string()),
+										| Err(e) => {
+											warn!(%event_id, "retention: failed to add ⚙️ reaction: {e}");
+											None
+										}
+									};
 
 									debug_info!(
 										%event_id,
@@ -286,7 +346,7 @@ impl Service {
 										user = owner.as_str(),
 										"retention: sent user confirmation request with reactions to their user room"
 									);
-									(Some(event_id.to_string()), confirm_id, cancel_id)
+									(Some(event_id.to_string()), confirm_id, cancel_id, auto_id)
 								},
 								| Err(e) => {
 									warn!(
@@ -294,11 +354,11 @@ impl Service {
 										user = owner.as_str(),
 										"retention: failed to notify user about pending deletion: {e}",
 									);
-									(None, None, None)
+									(None, None, None, None)
 								},
 							}
 						} else {
-							(None, None, None)
+							(None, None, None, None)
 						};
 
 					// Queue for deletion with the notification and reaction event IDs
@@ -309,6 +369,8 @@ impl Service {
 						notification_event_id,
 						confirm_reaction_id,
 						cancel_reaction_id,
+						auto_reaction_id,
+						candidate.from_encrypted_room,
 					);
 				},
 				| (CandidateAction::AwaitConfirmation, None) => {
@@ -414,9 +476,22 @@ impl Service {
 			.map(|ts| format!(" at {ts}"))
 			.unwrap_or_default();
 
+		let encryption_warning = if candidate.from_encrypted_room {
+			"\n\n⚠️ WARNING: This media was detected from an encrypted room based on upload timing. \
+			Detection may have false positives since the server cannot read encrypted messages. \
+			Use auto-delete at your own risk."
+		} else {
+			""
+		};
+
+		let room_type = if candidate.from_encrypted_room { "encrypted rooms" } else { "unencrypted rooms" };
+
 		format!(
-			"A piece of media ({mxc}) you uploaded{room_segment}{timestamp} is pending deletion.\n\n\
-			React with ✅ to confirm deletion or ❌ to keep it.\n\
+			"A piece of media ({mxc}) you uploaded{room_segment}{timestamp} is pending deletion.{encryption_warning}\n\n\
+			React with:\n\
+			✅ to confirm deletion\n\
+			❌ to keep it\n\
+			⚙️ to always auto-delete media in {room_type}\n\n\
 			(You can also run `!user retention confirm {mxc}` to delete it manually.)",
 			mxc = candidate.mxc
 		)
@@ -456,8 +531,8 @@ impl Service {
 	}
 
 	/// Cancel deletion (❌ reaction) on the notification message
-	pub async fn retention_cancel_by_reaction(&self, user: &UserId, notification_event_id: &EventId) -> Result {
-		// Find and remove the deletion candidate
+	pub async fn retention_cancel_by_reaction(&self, user: &UserId, notification_event_id: &EventId) -> Result<()> {
+		// Find the deletion candidate by notification event ID
 		if let Some(mxc) = self.retention.find_mxc_by_notification_event(notification_event_id.as_str()).await {
 			debug_info!(user = %user, event_id = %notification_event_id, mxc = %mxc, "retention: user cancelled deletion via ❌ reaction");
 			let confirm_reaction_id = self.retention.cancel_candidate(&mxc, user).await?;
@@ -473,6 +548,46 @@ impl Service {
 		} else {
 			warn!(user = %user, event_id = %notification_event_id, "retention: no pending deletion found for reaction");
 			Ok(())
+		}
+	}
+
+	/// Auto-delete (⚙️ reaction) - enable auto-delete for this room type and delete immediately
+	pub async fn retention_auto_by_reaction(&self, user: &UserId, notification_event_id: &EventId) -> Result<u64> {
+		// Find the deletion candidate by notification event ID
+		if let Some(mxc) = self.retention.find_mxc_by_notification_event(notification_event_id.as_str()).await {
+			debug_info!(user = %user, event_id = %notification_event_id, mxc = %mxc, "retention: user enabled auto-delete via ⚙️ reaction");
+			let (deleted_bytes, confirm_reaction_id, cancel_reaction_id, from_encrypted_room) = 
+				self.retention.auto_delete_candidate(self, &mxc, user).await?;
+			
+			let room_type = if from_encrypted_room { "encrypted" } else { "unencrypted" };
+			let command = if from_encrypted_room { "prefs-encrypted-off" } else { "prefs-unencrypted-off" };
+			
+			// Send confirmation message in background to avoid async recursion
+			self.services.userroom.send_text_background(
+				user, 
+				&format!(
+					"✅ Auto-delete enabled for {} rooms.\n\n\
+					To disable: `!user retention {}`",
+					room_type, command
+				)
+			);
+
+			// Redact both unused reactions to clean up the UI (spawned as background tasks)
+			if let Some(reaction_id_str) = confirm_reaction_id {
+				if let Ok(reaction_id) = EventId::parse(&reaction_id_str) {
+					self.services.userroom.redact_reaction(user, &reaction_id);
+				}
+			}
+			if let Some(reaction_id_str) = cancel_reaction_id {
+				if let Ok(reaction_id) = EventId::parse(&reaction_id_str) {
+					self.services.userroom.redact_reaction(user, &reaction_id);
+				}
+			}
+			
+			Ok(deleted_bytes)
+		} else {
+			warn!(user = %user, event_id = %notification_event_id, "retention: no pending deletion found for reaction");
+			Ok(0)
 		}
 	}
 

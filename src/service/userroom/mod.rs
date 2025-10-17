@@ -137,6 +137,37 @@ impl Service {
 		Ok(())
 	}
 
+	/// Send a text message to the user's admin room in the background (non-blocking).
+	/// This is useful to avoid async recursion.
+	pub fn send_text_background(&self, user_id: &UserId, body: &str) {
+		let user_id = user_id.to_owned();
+		let body = body.to_owned();
+		let services = self.services.clone();
+
+		tokio::spawn(async move {
+			if !services.globals.user_is_local(&user_id) {
+				return;
+			}
+
+			let Ok(room_id) = services.userroom.get_user_room(&user_id).await else {
+				return;
+			};
+
+			let state_lock = services.state.mutex.lock(&room_id).await;
+			let content = RoomMessageEventContent::text_markdown(&body);
+
+			let _ = services
+				.timeline
+				.build_and_append_pdu_without_retention(
+					PduBuilder::timeline(&content),
+					&services.globals.server_user,
+					&room_id,
+					&state_lock,
+				)
+				.await;
+		});
+	}
+
 	/// Send a text message to the user's admin room and return the event ID.
 	/// This allows adding reactions or further processing.
 	pub async fn send_text_with_event_id(&self, user_id: &UserId, body: &str) -> Result<OwnedEventId> {
@@ -318,15 +349,25 @@ impl Service {
 		}
 
 		// Check if this is a media retention confirmation reaction
-		if emoji == "✅" {
-			// User confirmed deletion - the media service will redact the unused ❌ reaction
-			if let Err(e) = self.services.media.retention_confirm_by_reaction(sender, relates_to_event).await {
-				debug_warn!(user = %sender, reaction_to = %relates_to_event, "retention: failed to process ✅ reaction: {e}");
+		//todo: maybe dont match for emojis here
+		match emoji {
+			"✅" => {
+				if let Err(e) = self.services.media.retention_confirm_by_reaction(sender, relates_to_event).await {
+					debug_warn!(user = %sender, reaction_to = %relates_to_event, "retention: failed to process ✅ reaction: {e}");
+				}
 			}
-		} else if emoji == "❌" {
-			// User cancelled deletion - the media service will redact the unused ✅ reaction
-			if let Err(e) = self.services.media.retention_cancel_by_reaction(sender, relates_to_event).await {
-				debug_warn!(user = %sender, reaction_to = %relates_to_event, "retention: failed to process ❌ reaction: {e}");
+			"❌" => {
+				if let Err(e) = self.services.media.retention_cancel_by_reaction(sender, relates_to_event).await {
+					debug_warn!(user = %sender, reaction_to = %relates_to_event, "retention: failed to process ❌ reaction: {e}");
+				}
+			}
+			"⚙️" => {
+				if let Err(e) = self.services.media.retention_auto_by_reaction(sender, relates_to_event).await {
+					debug_warn!(user = %sender, reaction_to = %relates_to_event, "retention: failed to process ⚙️ reaction: {e}");
+				}
+			}
+			_ => {
+				debug_warn!("Unknown reaction emoji in user room: {}", emoji);
 			}
 		}
 	}
