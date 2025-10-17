@@ -1,6 +1,6 @@
 use std::{collections::HashSet, iter::once};
 
-use futures::{FutureExt, StreamExt};
+use futures::StreamExt;
 use ruma::{
 	OwnedEventId, OwnedServerName, RoomId, RoomVersionId, UserId,
 	events::{
@@ -19,18 +19,17 @@ use tuwunel_core::{
 
 use super::RoomMutexGuard;
 
-/// Creates a new persisted data unit and adds it to a room. This function
-/// takes a roomid_mutex_state, meaning that only this function is able to
-/// mutate the room state.
-#[implement(super::Service)]
-#[tracing::instrument(skip(self, state_lock), level = "debug", ret)]
-pub async fn build_and_append_pdu(
-	&self,
-	pdu_builder: PduBuilder,
-	sender: &UserId,
-	room_id: &RoomId,
-	state_lock: &RoomMutexGuard,
-) -> Result<OwnedEventId> {
+impl super::Service {
+	/// Creates a new persisted data unit and adds it to a room. This function
+	/// takes a roomid_mutex_state, meaning that only this fnuction is able to
+	/// mutate the room state.
+	async fn build_and_append_pdu_inner<const DO_MEDIA_RETENTION: bool>(
+		&self,
+		pdu_builder: PduBuilder,
+		sender: &UserId,
+		room_id: &RoomId,
+		state_lock: &RoomMutexGuard,
+	) -> Result<OwnedEventId> {
 	let (pdu, pdu_json) = self
 		.create_hash_and_sign_event(pdu_builder, sender, room_id, state_lock)
 		.await?;
@@ -50,8 +49,8 @@ pub async fn build_and_append_pdu(
 		.is_admin_room(pdu.room_id())
 		.await
 	{
-		self.check_pdu_for_admin_room(&pdu, sender)
-			.boxed()
+		self
+			.check_pdu_for_admin_room(&pdu, sender)
 			.await?;
 	}
 
@@ -123,16 +122,29 @@ pub async fn build_and_append_pdu(
 	// fail.
 	let statehashid = self.services.state.append_to_state(&pdu).await?;
 
-	let pdu_id = self
-		.append_pdu(
-			&pdu,
-			pdu_json,
-			// Since this PDU references all pdu_leaves we can update the leaves
-			// of the room
-			once(pdu.event_id()),
-			state_lock,
-		)
-		.await?;
+	let pdu_id = if DO_MEDIA_RETENTION {
+		self
+			.append_pdu(
+				&pdu,
+				pdu_json,
+				// Since this PDU references all pdu_leaves we can update the leaves
+				// of the room
+				once(pdu.event_id()),
+				state_lock,
+			)
+			.await?
+	} else {
+		self
+			.append_pdu_without_retention(
+				&pdu,
+				pdu_json,
+				// Since this PDU references all pdu_leaves we can update the leaves
+				// of the room
+				once(pdu.event_id()),
+				state_lock,
+			)
+			.await?
+	};
 
 	// We set the room state after inserting the pdu, so that we never have a moment
 	// in time where events in the current room state do not exist
@@ -169,7 +181,36 @@ pub async fn build_and_append_pdu(
 		.send_pdu_servers(servers.iter().map(AsRef::as_ref).stream(), &pdu_id)
 		.await?;
 
-	Ok(pdu.event_id().to_owned())
+		Ok(pdu.event_id().to_owned())
+	}
+}
+
+#[implement(super::Service)]
+#[tracing::instrument(skip(self, state_lock), level = "debug", ret)]
+pub async fn build_and_append_pdu(
+	&self,
+	pdu_builder: PduBuilder,
+	sender: &UserId,
+	room_id: &RoomId,
+	state_lock: &RoomMutexGuard,
+) -> Result<OwnedEventId> {
+	self
+		.build_and_append_pdu_inner::<true>(pdu_builder, sender, room_id, state_lock)
+		.await
+}
+
+#[implement(super::Service)]
+#[tracing::instrument(skip(self, state_lock), level = "debug", ret)]
+pub async fn build_and_append_pdu_without_retention(
+	&self,
+	pdu_builder: PduBuilder,
+	sender: &UserId,
+	room_id: &RoomId,
+	state_lock: &RoomMutexGuard,
+) -> Result<OwnedEventId> {
+	self
+		.build_and_append_pdu_inner::<false>(pdu_builder, sender, room_id, state_lock)
+		.await
 }
 
 #[implement(super::Service)]

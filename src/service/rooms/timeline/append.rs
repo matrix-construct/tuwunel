@@ -4,6 +4,8 @@ use std::{
 };
 
 use futures::StreamExt;
+use std::pin::Pin;
+use tracing::warn;
 use ruma::{
 	CanonicalJsonObject, CanonicalJsonValue, EventId, OwnedUserId, RoomId, RoomVersionId, UserId,
 	events::{
@@ -79,24 +81,23 @@ where
 	Ok(Some(pdu_id))
 }
 
-/// Creates a new persisted data unit and adds it to a room.
-///
-/// By this point the incoming event should be fully authenticated, no auth
-/// happens in `append_pdu`.
-///
-/// Returns pdu id
-#[implement(super::Service)]
-#[tracing::instrument(name = "append", level = "debug", skip_all, ret(Debug))]
-pub async fn append_pdu<'a, Leafs>(
-	&'a self,
-	pdu: &'a PduEvent,
-	mut pdu_json: CanonicalJsonObject,
-	leafs: Leafs,
-	state_lock: &'a RoomMutexGuard,
-) -> Result<RawPduId>
-where
-	Leafs: Iterator<Item = &'a EventId> + Send + 'a,
-{
+impl super::Service {
+	/// Creates a new persisted data unit and adds it to a room.
+	///
+	/// By this point the incoming event should be fully authenticated, no auth
+	/// happens in `append_pdu`.
+	///
+	/// Returns pdu id
+	async fn append_pdu_inner<'a, Leafs>(
+		&'a self,
+		pdu: &'a PduEvent,
+		mut pdu_json: CanonicalJsonObject,
+		leafs: Leafs,
+		state_lock: &'a RoomMutexGuard,
+	) -> Result<RawPduId>
+	where
+		Leafs: Iterator<Item = &'a EventId> + Send + 'a,
+	{
 	// Coalesce database writes for the remainder of this scope.
 	let _cork = self.db.db.cork_and_flush();
 
@@ -285,7 +286,7 @@ where
 	self.increment_notification_counts(pdu.room_id(), notifies, highlights);
 
 	match *pdu.kind() {
-		| TimelineEventType::RoomRedaction => {
+				| TimelineEventType::RoomRedaction => {
 			use RoomVersionId::*;
 
 			let room_version_id = self
@@ -303,6 +304,12 @@ where
 							.user_can_redact(redact_id, pdu.sender(), pdu.room_id(), false)
 							.await?
 						{
+							let fut = self
+								.services
+								.media
+								.retention_decrement_on_redaction(redact_id.as_str());
+							Pin::from(Box::new(fut)).await;
+							
 							self.redact_pdu(redact_id, pdu, shortroomid)
 								.await?;
 						}
@@ -317,6 +324,12 @@ where
 							.user_can_redact(redact_id, pdu.sender(), pdu.room_id(), false)
 							.await?
 						{
+							let fut = self
+								.services
+								.media
+								.retention_decrement_on_redaction(redact_id.as_str());
+							Pin::from(Box::new(fut)).await;
+							
 							self.redact_pdu(redact_id, pdu, shortroomid)
 								.await?;
 						}
@@ -367,7 +380,7 @@ where
 					.await?;
 			}
 		},
-		| TimelineEventType::RoomMessage => {
+				| TimelineEventType::RoomMessage => {
 			let content: ExtractBody = pdu.get_content()?;
 			if let Some(body) = content.body {
 				self.services
@@ -383,6 +396,68 @@ where
 					.userroom
 					.message_hook(&pdu.event_id, &pdu.room_id, &pdu.sender, &body)
 					.await;
+			}
+			// media retention insertion (structured extraction for unencrypted messages)
+			if let Ok(msg_full) = pdu.get_content::<ruma::events::room::message::RoomMessageEventContent>() {
+				warn!(event_id=%pdu.event_id(), msg=?msg_full, "retention: debug message content");
+				use ruma::events::room::MediaSource;
+				let mut mxcs: Vec<(String,bool,String)> = Vec::new();
+				let push_media = |mxcs: &mut Vec<(String,bool,String)>, src: &MediaSource, label: &str, this: &super::Service| {
+					let (maybe_mxc, enc) = match src { MediaSource::Plain(m) => (Some(m.to_string()), false), MediaSource::Encrypted(f) => (Some(f.url.to_string()), true) };
+					if let Some(uri) = maybe_mxc { if uri.starts_with("mxc://") {
+						let local = <ruma::Mxc<'_>>::try_from(uri.as_str()).map(|p| this.services.globals.server_is_ours(p.server_name)).unwrap_or(false);
+						mxcs.push((uri.clone(), local, label.to_owned()));
+						if enc { warn!(event_id=%pdu.event_id(), label=%label, mxc=%uri, local, "retention: extracted encrypted media"); } else { warn!(event_id=%pdu.event_id(), label=%label, mxc=%uri, local, "retention: extracted plain media"); }
+					}}
+				};
+				match &msg_full.msgtype {
+					ruma::events::room::message::MessageType::Image(c) => { push_media(&mut mxcs, &c.source, "image.source", self); if let Some(info)=c.info.as_ref(){ if let Some(th)=info.thumbnail_source.as_ref(){ push_media(&mut mxcs, th, "image.thumbnail_source", self); } } },
+					ruma::events::room::message::MessageType::File(c) => { push_media(&mut mxcs, &c.source, "file.source", self); if let Some(info)=c.info.as_ref(){ if let Some(th)=info.thumbnail_source.as_ref(){ push_media(&mut mxcs, th, "file.thumbnail_source", self); } } },
+					ruma::events::room::message::MessageType::Video(c) => { push_media(&mut mxcs, &c.source, "video.source", self); if let Some(info)=c.info.as_ref(){ if let Some(th)=info.thumbnail_source.as_ref(){ push_media(&mut mxcs, th, "video.thumbnail_source", self); } } },
+					ruma::events::room::message::MessageType::Audio(c) => { push_media(&mut mxcs, &c.source, "audio.source", self); },
+					_ => {},
+				}
+				if mxcs.is_empty() { warn!(event_id=%pdu.event_id(), "retention: no media sources extracted"); }
+				else { warn!(event_id=%pdu.event_id(), count=mxcs.len(), "retention: inserting media refs"); self.services.media.retention_insert_mxcs_on_event(pdu.event_id().as_str(), pdu.room_id().as_str(), pdu.sender().as_str(), &mxcs); }
+			}
+		},
+		| TimelineEventType::RoomEncrypted => {
+			// For encrypted rooms: We can't read the content (it's E2EE), so we can't extract MXC URIs directly.
+			// However, we CAN associate recent media uploads with this encrypted event
+			// Strategy: When user uploads media, we track it as "pending". When they send an encrypted event
+			// within 60 seconds, we consume those pending uploads and associate them with this event.
+			// todo: find a more realistic time window, 60s may be a bit long
+			
+			// Get the event timestamp (milliseconds since epoch)
+			let event_ts: u64 = pdu.origin_server_ts().get().into();
+			
+			// Consume any pending uploads from this user within the last 60 seconds
+			let pending_mxcs = self.services
+				.media
+				.retention_consume_pending_uploads(pdu.sender().as_str(), event_ts)
+				.await;
+
+			if !pending_mxcs.is_empty() {
+				warn!(
+					event_id=%pdu.event_id(), 
+					sender=%pdu.sender(), 
+					room=%pdu.room_id(),
+					count=pending_mxcs.len(),
+					"retention: associated pending uploads with encrypted event"
+				);
+				self.services.media.retention_insert_mxcs_on_event(
+					pdu.event_id().as_str(), 
+					pdu.room_id().as_str(), 
+					pdu.sender().as_str(), 
+					&pending_mxcs
+				);
+			} else {
+				warn!(
+					event_id=%pdu.event_id(), 
+					sender=%pdu.sender(), 
+					room=%pdu.room_id(),
+					"retention: no pending uploads found for encrypted event"
+				);
 			}
 		},
 		| _ => {},
@@ -415,6 +490,18 @@ where
 					.threads
 					.add_to_thread(&thread.event_id, pdu)
 					.await?;
+			},
+			| Relation::Annotation(annotation) => {
+				self.services
+					.userroom
+					.reaction_hook(
+						pdu.event_id(),
+						pdu.room_id(),
+						pdu.sender(),
+						&annotation.event_id,
+						&annotation.key,
+					)
+					.await;
 			},
 			| _ => {}, // TODO: Aggregate other types
 		}
@@ -481,7 +568,40 @@ where
 		}
 	}
 
-	Ok(pdu_id)
+		Ok(pdu_id)
+	}
+}
+
+#[implement(super::Service)]
+#[tracing::instrument(name = "append", level = "debug", skip_all, ret(Debug))]
+pub async fn append_pdu<'a, Leafs>(
+	&'a self,
+	pdu: &'a PduEvent,
+	pdu_json: CanonicalJsonObject,
+	leafs: Leafs,
+	state_lock: &'a RoomMutexGuard,
+) -> Result<RawPduId>
+where
+	Leafs: Iterator<Item = &'a EventId> + Send + 'a,
+{
+	self.append_pdu_inner::<Leafs>(pdu, pdu_json, leafs, state_lock)
+		.await
+}
+
+#[implement(super::Service)]
+#[tracing::instrument(name = "append", level = "debug", skip_all, ret(Debug))]
+pub async fn append_pdu_without_retention<'a, Leafs>(
+	&'a self,
+	pdu: &'a PduEvent,
+	pdu_json: CanonicalJsonObject,
+	leafs: Leafs,
+	state_lock: &'a RoomMutexGuard,
+) -> Result<RawPduId>
+where
+	Leafs: Iterator<Item = &'a EventId> + Send + 'a,
+{
+	self.append_pdu_inner::<Leafs>(pdu, pdu_json, leafs, state_lock)
+		.await
 }
 
 #[implement(super::Service)]
@@ -528,6 +648,7 @@ fn increment_notification_counts(
 		increment(&self.db.userroomid_highlightcount, &userroom_id);
 	}
 }
+
 
 //TODO: this is an ABA
 fn increment(db: &Arc<Map>, key: &[u8]) {

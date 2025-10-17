@@ -66,6 +66,11 @@ pub(crate) async fn create_content_route(
 		.create(mxc, Some(user), Some(&content_disposition), content_type, &body.file)
 		.await?;
 
+	// Track this upload as potentially being used in an encrypted message soon
+	services
+		.media
+		.retention_track_pending_upload(user.as_str(), &mxc.to_string());
+
 	let blurhash = body.generate_blurhash.then(|| {
 		services
 			.media

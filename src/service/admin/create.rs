@@ -30,7 +30,10 @@ pub async fn create_admin_room(&self) -> Result {
 	let server_user = self.services.globals.server_user.as_ref();
 
 	let name = format!("{} Admin Room", self.services.config.server_name);
-	let topic = format!("Manage {} | Run commands prefixed with `!admin` | Run `!admin -h` for help | Documentation: https://github.com/matrix-construct/tuwunel/", self.services.config.server_name);
+	let topic = format!(
+		"Manage {} | Run commands prefixed with `!admin` | Run `!admin -h` for help | Documentation: https://github.com/matrix-construct/tuwunel/",
+		self.services.config.server_name
+	);
 
 	self.services
 		.create
