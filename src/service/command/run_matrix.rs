@@ -100,13 +100,14 @@ impl Service {
 		if let Some(capture_level) = capture_level {
 			output.push_str(&format_logs(&result.logs, capture_level));
 		}
-		if result.err {
-			output.push_str("Command completed with error:\n");
-		} else {
-			output.push_str("Command completed:\n");
+		if !result.output.starts_with("Usage:") {
+			if result.err {
+				output.push_str("Command completed with error:\n");
+			} else {
+				output.push_str("Command completed:\n");
+			}
 		}
 		output.push_str(&result.output);
-
 		let mut content = RoomMessageEventContent::notice_markdown(output);
 		content.relates_to = Some(Relation::Reply {
 			in_reply_to: InReplyTo { event_id: reply_id.to_owned() },

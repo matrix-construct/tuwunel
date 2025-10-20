@@ -1828,13 +1828,20 @@
 #[global.media]
 
 # What to do with local media when an event referencing it is redacted.
-# keep | delete_if_unreferenced | force_delete_local
 #
-#on_redaction = "keep"
-
-# Grace period in seconds before deleting queued media.
+# Options:
+#   "keep" - Never delete media (feature disabled)
+#   "ask_sender" - Ask the user who sent the message via DM (shows
+#   ✅/❌/⚙️ reactions)   
+#   "delete_always" - Always delete unreferenced media immediately
 #
-#grace_period_secs = 0
+# Default: "keep"
+#
+# Note: Deletion is event-driven and immediate. Users can set
+# per-room-type auto-delete preferences using `!user retention` commands
+# or the ⚙️ reaction when `ask_sender` is enabled.
+#
+#on_redaction =
 
 #[global.blurhashing]
 

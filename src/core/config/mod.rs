@@ -2140,15 +2140,20 @@ pub struct WellKnownConfig {
 #[config_example_generator(filename = "tuwunel-example.toml", section = "global.media")]
 pub struct MediaRetentionConfig {
 	/// What to do with local media when an event referencing it is redacted.
-	/// keep | delete_if_unreferenced | force_delete_local
-	/// default: "keep"
+	///
+	/// Options:
+	///   "keep" - Never delete media (feature disabled)
+	///   "ask_sender" - Ask the user who sent the message via DM (shows
+	///   ✅/❌/⚙️ reactions)   
+	///   "delete_always" - Always delete unreferenced media immediately
+	///
+	/// Default: "keep"
+	///
+	/// Note: Deletion is event-driven and immediate. Users can set
+	/// per-room-type auto-delete preferences using `!user retention` commands
+	/// or the ⚙️ reaction when `ask_sender` is enabled.
 	#[serde(default = "default_media_retention_on_redaction")]
 	pub on_redaction: String,
-
-	/// Grace period in seconds before deleting queued media.
-	/// default: 0
-	#[serde(default)]
-	pub grace_period_secs: u64,
 }
 
 fn default_media_retention_on_redaction() -> String { "keep".to_owned() }
@@ -2597,8 +2602,6 @@ impl Config {
 
 	// Media retention helpers
 	pub fn media_retention_on_redaction(&self) -> &str { self.media.on_redaction.as_str() }
-
-	pub fn media_retention_grace_period_secs(&self) -> u64 { self.media.grace_period_secs }
 }
 
 fn true_fn() -> bool { true }

@@ -5,12 +5,19 @@ use tuwunel_macros::{command, command_dispatch};
 use crate::user::{debug::Cmd as DebugCmd, retention::Cmd as RetentionCmd};
 
 #[derive(Debug, Parser)]
-#[command(name = "tuwunel", version = tuwunel_core::version())]
+#[command(name = "user", version = tuwunel_core::version())]
+#[command(
+	arg_required_else_help = true,
+	subcommand_required = true,
+	subcommand_value_name = "COMMAND"
+)]
 #[command_dispatch]
 pub(super) enum UserCommand {
 	#[command(subcommand)]
+	/// Debugging and diagnostic commands
 	Debug(DebugCmd),
 	#[command(subcommand)]
+	/// Media retention and auto-delete preferences
 	Retention(RetentionCmd),
 }
 
@@ -22,6 +29,7 @@ mod debug {
 	#[command_dispatch]
 	#[derive(Debug, Subcommand)]
 	pub(crate) enum Cmd {
+		/// Echo test command
 		Echo {},
 	}
 

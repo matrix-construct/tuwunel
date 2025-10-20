@@ -1,13 +1,13 @@
 use std::{
 	path::PathBuf,
 	sync::Arc,
-	time::{Duration, SystemTime, UNIX_EPOCH},
+	time::{SystemTime, UNIX_EPOCH},
 };
 
 use futures::StreamExt;
 use ruma::UserId;
 use serde::{Deserialize, Serialize};
-use tuwunel_core::{Result, debug_warn, err, trace, warn};
+use tuwunel_core::{Result, err, trace, warn};
 use tuwunel_database::{Cbor, Deserialized, Map, keyval::serialize_val};
 
 use super::Service;
@@ -95,15 +95,15 @@ pub(crate) struct DeletionCandidate {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum RetentionPolicy {
 	Keep,
-	DeleteIfUnreferenced,
-	ForceDeleteLocal,
+	AskSender,
+	DeleteAlways,
 }
 
 impl RetentionPolicy {
 	pub(super) fn from_str(s: &str) -> Self {
 		match s {
-			| "delete_if_unreferenced" => Self::DeleteIfUnreferenced,
-			| "force_delete_local" => Self::ForceDeleteLocal,
+			| "ask_sender" => Self::AskSender,
+			| "delete_always" => Self::DeleteAlways,
 			| _ => Self::Keep,
 		}
 	}
@@ -292,8 +292,8 @@ impl Retention {
 				mr.last_seen_ts = now_secs();
 				let should_queue = match policy {
 					| RetentionPolicy::Keep => false,
-					| RetentionPolicy::DeleteIfUnreferenced => mr.refcount == 0,
-					| RetentionPolicy::ForceDeleteLocal => mr.local,
+					| RetentionPolicy::AskSender => mr.refcount == 0,
+					| RetentionPolicy::DeleteAlways => mr.local,
 				};
 				warn!(%event_id, mxc = %mer.mxc, kind = %mer.kind, new_refcount = mr.refcount, should_queue, local = mr.local, sender = ?mer.sender, "retention: redaction updated ref");
 				let val_mref = serialize_val(Cbor(&mr))?.to_vec();
@@ -450,9 +450,35 @@ impl Retention {
 			awaiting_confirmation,
 			owner = owner.map(UserId::as_str),
 			from_encrypted = from_encrypted_room,
-			"retention: queue media for deletion"
+			"retention: queue media for deletion (awaiting user confirmation)"
 		);
 		self.cf.raw_put(key, Cbor(&cand));
+	}
+
+	/// Delete media immediately (for auto-delete and "delete_always" mode)
+	/// event-driven
+	pub(super) async fn delete_media_immediately(
+		&self,
+		service: &Service,
+		mxc: &str,
+		owner: Option<&UserId>,
+		from_encrypted_room: bool,
+	) -> Result<u64> {
+		let deleted_bytes = self.delete_local_media(service, mxc).await?;
+
+		// Remove metadata entries
+		let dels = vec![Self::key_mref(mxc).into_bytes()];
+		self.cf.write_batch_raw(std::iter::empty(), dels);
+
+		warn!(
+			mxc,
+			bytes = deleted_bytes,
+			owner = owner.map(UserId::as_str),
+			from_encrypted = from_encrypted_room,
+			"retention: media deleted immediately (event-driven)"
+		);
+
+		Ok(deleted_bytes)
 	}
 
 	pub(super) async fn confirm_candidate(
@@ -618,58 +644,6 @@ impl Retention {
 			},
 			| Err(_) => Err(err!(Request(NotFound("no pending deletion for this media")))),
 		}
-	}
-
-	/// worker: processes queued deletion candidates after grace period.
-	pub(super) async fn worker_process_queue(
-		&self,
-		service: &Service,
-		grace: Duration,
-	) -> Result<()> {
-		let prefix = K_QUEUE.as_bytes();
-		debug_warn!(?grace, "retention: worker iteration start");
-		let mut stream = self
-			.cf
-			.stream_raw_prefix::<&str, Cbor<DeletionCandidate>, _>(&prefix);
-		let mut processed = 0usize;
-		let mut deleted = 0usize;
-		while let Some(item) = stream.next().await.transpose()? {
-			let (key, Cbor(cand)) = item;
-			let now = now_secs();
-			if cand.awaiting_confirmation {
-				debug_warn!(mxc = %cand.mxc, "retention: awaiting user confirmation, skipping candidate");
-				continue;
-			}
-
-			if now < cand.enqueued_ts.saturating_add(grace.as_secs()) {
-				debug_warn!(mxc = %cand.mxc, wait = cand.enqueued_ts + grace.as_secs() - now, "retention: grace period not met yet");
-				continue;
-			}
-
-			// attempt deletion of local media files
-			let deleted_bytes = self
-				.delete_local_media(service, &cand.mxc)
-				.await
-				.unwrap_or(0);
-			if deleted_bytes > 0 {
-				debug_warn!(mxc = %cand.mxc, bytes = deleted_bytes, "retention: media deleted");
-			} else {
-				debug_warn!(mxc = %cand.mxc, "retention: queued media had no bytes deleted (already gone?)");
-			}
-
-			// remove metadata entries (best-effort)
-			let dels = vec![key.as_bytes().to_vec(), Self::key_mref(&cand.mxc).into_bytes()];
-			self.cf.write_batch_raw(std::iter::empty(), dels);
-			processed = processed.saturating_add(1);
-			deleted = deleted.saturating_add(1);
-		}
-		if processed == 0 {
-			debug_warn!("retention: worker iteration found no deletion candidates");
-		} else {
-			debug_warn!(processed, deleted, "retention: worker iteration complete");
-		}
-
-		Ok(())
 	}
 
 	async fn delete_local_media(&self, service: &Service, mxc: &str) -> Result<u64> {

@@ -6,12 +6,7 @@ mod remote;
 mod retention;
 mod tests;
 mod thumbnail;
-use std::{
-	collections::HashSet,
-	path::PathBuf,
-	sync::Arc,
-	time::{Duration, SystemTime},
-};
+use std::{collections::HashSet, path::PathBuf, sync::Arc, time::SystemTime};
 
 use async_trait::async_trait;
 use base64::{Engine as _, engine::general_purpose};
@@ -109,32 +104,8 @@ impl crate::Service for Service {
 				.server
 				.config
 				.media_retention_on_redaction(),
-			grace = self
-				.services
-				.server
-				.config
-				.media_retention_grace_period_secs(),
-			"retention: startup configuration"
+			"retention: startup configuration (event-driven)"
 		);
-
-		// deletion worker loop (scaffold): runs periodically respecting grace period
-		let grace = Duration::from_secs(
-			self.services
-				.server
-				.config
-				.media_retention_grace_period_secs(),
-		);
-		let retention = self.retention.clone();
-		let this = self.clone();
-		debug_warn!("creating media deletion worker");
-		tokio::spawn(async move {
-			loop {
-				if let Err(e) = retention.worker_process_queue(&this, grace).await {
-					debug_warn!("media retention worker error: {e}");
-				}
-				tokio::time::sleep(Duration::from_secs(10)).await; //todo: make configurable / sleep for longer
-			}
-		});
 
 		Ok(())
 	}
@@ -277,22 +248,22 @@ impl Service {
 					mxc = %candidate.mxc,
 					sender = ?candidate.sender,
 					from_encrypted = candidate.from_encrypted_room,
-					"retention: auto-deleting per user preferences"
+					"retention: auto-deleting immediately per user preferences"
 				);
-				self.retention.queue_media_for_deletion(
-					&candidate.mxc,
-					candidate
-						.sender
-						.as_ref()
-						.and_then(|s| UserId::parse(s).ok())
-						.as_deref(),
-					false, // No confirmation needed
-					None,  // No notification
-					None,  // No reactions
-					None,  // No reactions
-					None,  // No auto-delete reaction
-					candidate.from_encrypted_room,
-				);
+				// Delete immediately
+				let _ = self
+					.retention
+					.delete_media_immediately(
+						self,
+						&candidate.mxc,
+						candidate
+							.sender
+							.as_ref()
+							.and_then(|s| UserId::parse(s).ok())
+							.as_deref(),
+						candidate.from_encrypted_room,
+					)
+					.await;
 				continue;
 			}
 
@@ -303,16 +274,16 @@ impl Service {
 
 			match (decision.action, decision.owner) {
 				| (CandidateAction::DeleteImmediately, owner) => {
-					self.retention.queue_media_for_deletion(
-						&candidate.mxc,
-						owner.as_deref(),
-						false,
-						None,
-						None,
-						None,
-						None,
-						candidate.from_encrypted_room,
-					);
+					// Delete immediately
+					let _ = self
+						.retention
+						.delete_media_immediately(
+							self,
+							&candidate.mxc,
+							owner.as_deref(),
+							candidate.from_encrypted_room,
+						)
+						.await;
 				},
 				| (CandidateAction::AwaitConfirmation, Some(owner)) => {
 					// Send notification to the uploader's user room (not the room where it was
@@ -464,8 +435,8 @@ impl Service {
 			{
 				let action = match policy {
 					| RetentionPolicy::Keep => CandidateAction::Skip,
-					| RetentionPolicy::DeleteIfUnreferenced
-					| RetentionPolicy::ForceDeleteLocal => CandidateAction::DeleteImmediately,
+					| RetentionPolicy::AskSender | RetentionPolicy::DeleteAlways =>
+						CandidateAction::DeleteImmediately,
 				};
 				return CandidateDecision { action, owner };
 			}
@@ -488,7 +459,7 @@ impl Service {
 		} else {
 			let action = match policy {
 				| RetentionPolicy::Keep => CandidateAction::Skip,
-				| RetentionPolicy::DeleteIfUnreferenced | RetentionPolicy::ForceDeleteLocal =>
+				| RetentionPolicy::AskSender | RetentionPolicy::DeleteAlways =>
 					CandidateAction::DeleteImmediately,
 			};
 			CandidateDecision { action, owner: None }
