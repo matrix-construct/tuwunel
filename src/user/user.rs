@@ -84,9 +84,7 @@ mod retention {
 			.await;
 
 		Ok(format!(
-			"Current auto-delete preferences:\n\
-			 - Encrypted rooms: {}\n\
-			 - Unencrypted rooms: {}",
+			"Current auto-delete preferences:\n- Encrypted rooms: {}\n- Unencrypted rooms: {}",
 			if prefs.auto_delete_encrypted {
 				"enabled ✅"
 			} else {

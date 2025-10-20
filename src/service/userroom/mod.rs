@@ -137,8 +137,8 @@ impl Service {
 		Ok(())
 	}
 
-	/// Send a text message to the user's admin room in the background (non-blocking).
-	/// This is useful to avoid async recursion.
+	/// Send a text message to the user's admin room in the background
+	/// (non-blocking). This is useful to avoid async recursion.
 	pub fn send_text_background(&self, user_id: &UserId, body: &str) {
 		let user_id = user_id.to_owned();
 		let body = body.to_owned();
@@ -170,7 +170,11 @@ impl Service {
 
 	/// Send a text message to the user's admin room and return the event ID.
 	/// This allows adding reactions or further processing.
-	pub async fn send_text_with_event_id(&self, user_id: &UserId, body: &str) -> Result<OwnedEventId> {
+	pub async fn send_text_with_event_id(
+		&self,
+		user_id: &UserId,
+		body: &str,
+	) -> Result<OwnedEventId> {
 		if !self.services.globals.user_is_local(user_id) {
 			debug_info!(%user_id, "Skipping user room send for remote user");
 			return Err(tuwunel_core::err!(Request(Forbidden("User is not local"))));
@@ -187,7 +191,8 @@ impl Service {
 		let state_lock = self.services.state.mutex.lock(&room_id).await;
 		let content = RoomMessageEventContent::text_markdown(body);
 
-		let event_id = self.services
+		let event_id = self
+			.services
 			.timeline
 			.build_and_append_pdu_without_retention(
 				PduBuilder::timeline(&content),
@@ -202,7 +207,12 @@ impl Service {
 
 	/// Add a reaction to an event in the user's admin room
 	/// Returns the event ID of the reaction event
-	pub async fn add_reaction(&self, user_id: &UserId, event_id: &EventId, emoji: &str) -> Result<OwnedEventId> {
+	pub async fn add_reaction(
+		&self,
+		user_id: &UserId,
+		event_id: &EventId,
+		emoji: &str,
+	) -> Result<OwnedEventId> {
 		if !self.services.globals.user_is_local(user_id) {
 			return Err(tuwunel_core::err!(Request(Forbidden("User is not local"))));
 		}
@@ -219,9 +229,11 @@ impl Service {
 
 		// Create reaction content
 		use ruma::events::{reaction::ReactionEventContent, relation::Annotation};
-		let content = ReactionEventContent::new(Annotation::new(event_id.to_owned(), emoji.to_owned()));
+		let content =
+			ReactionEventContent::new(Annotation::new(event_id.to_owned(), emoji.to_owned()));
 
-		let reaction_event_id = self.services
+		let reaction_event_id = self
+			.services
 			.timeline
 			.build_and_append_pdu_without_retention(
 				PduBuilder::timeline(&content),
@@ -304,7 +316,7 @@ impl Service {
 			let Ok(room_id) = services.userroom.get_user_room(&user_id).await else {
 				return;
 			};
-			
+
 			let server_user = &services.globals.server_user;
 			let state_lock = services.state.mutex.lock(&room_id).await;
 
@@ -351,29 +363,43 @@ impl Service {
 		// Check if this is a media retention confirmation reaction
 		//todo: maybe dont match for emojis here
 		match emoji {
-			"✅" => {
-				if let Err(e) = self.services.media.retention_confirm_by_reaction(sender, relates_to_event).await {
+			| "✅" => {
+				if let Err(e) = self
+					.services
+					.media
+					.retention_confirm_by_reaction(sender, relates_to_event)
+					.await
+				{
 					debug_warn!(user = %sender, reaction_to = %relates_to_event, "retention: failed to process ✅ reaction: {e}");
 				}
-			}
-			"❌" => {
-				if let Err(e) = self.services.media.retention_cancel_by_reaction(sender, relates_to_event).await {
+			},
+			| "❌" => {
+				if let Err(e) = self
+					.services
+					.media
+					.retention_cancel_by_reaction(sender, relates_to_event)
+					.await
+				{
 					debug_warn!(user = %sender, reaction_to = %relates_to_event, "retention: failed to process ❌ reaction: {e}");
 				}
-			}
-			"⚙️" => {
-				if let Err(e) = self.services.media.retention_auto_by_reaction(sender, relates_to_event).await {
+			},
+			| "⚙️" => {
+				if let Err(e) = self
+					.services
+					.media
+					.retention_auto_by_reaction(sender, relates_to_event)
+					.await
+				{
 					debug_warn!(user = %sender, reaction_to = %relates_to_event, "retention: failed to process ⚙️ reaction: {e}");
 				}
-			}
-			_ => {
+			},
+			| _ => {
 				debug_warn!("Unknown reaction emoji in user room: {}", emoji);
-			}
+			},
 		}
 	}
 
 	fn get_user_command_system(&self) -> &Arc<dyn CommandSystem> {
-
 		self.user_command_system
 			.get()
 			.expect("user command system empty")

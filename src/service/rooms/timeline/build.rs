@@ -30,156 +30,153 @@ impl super::Service {
 		room_id: &RoomId,
 		state_lock: &RoomMutexGuard,
 	) -> Result<OwnedEventId> {
-	let (pdu, pdu_json) = self
-		.create_hash_and_sign_event(pdu_builder, sender, room_id, state_lock)
-		.await?;
-
-	//TODO: Use proper room version here
-	if *pdu.kind() == TimelineEventType::RoomCreate && pdu.room_id().server_name().is_none() {
-		let _short_id = self
-			.services
-			.short
-			.get_or_create_shortroomid(pdu.room_id())
-			.await;
-	}
-
-	if self
-		.services
-		.admin
-		.is_admin_room(pdu.room_id())
-		.await
-	{
-		self
-			.check_pdu_for_admin_room(&pdu, sender)
+		let (pdu, pdu_json) = self
+			.create_hash_and_sign_event(pdu_builder, sender, room_id, state_lock)
 			.await?;
-	}
 
-	// If redaction event is not authorized, do not append it to the timeline
-	if *pdu.kind() == TimelineEventType::RoomRedaction {
-		use RoomVersionId::*;
-		match self
+		//TODO: Use proper room version here
+		if *pdu.kind() == TimelineEventType::RoomCreate && pdu.room_id().server_name().is_none() {
+			let _short_id = self
+				.services
+				.short
+				.get_or_create_shortroomid(pdu.room_id())
+				.await;
+		}
+
+		if self
 			.services
+			.admin
+			.is_admin_room(pdu.room_id())
+			.await
+		{
+			self.check_pdu_for_admin_room(&pdu, sender)
+				.await?;
+		}
+
+		// If redaction event is not authorized, do not append it to the timeline
+		if *pdu.kind() == TimelineEventType::RoomRedaction {
+			use RoomVersionId::*;
+			match self
+				.services
+				.state
+				.get_room_version(pdu.room_id())
+				.await?
+			{
+				| V1 | V2 | V3 | V4 | V5 | V6 | V7 | V8 | V9 | V10 => {
+					if let Some(redact_id) = pdu.redacts() {
+						if !self
+							.services
+							.state_accessor
+							.user_can_redact(redact_id, pdu.sender(), pdu.room_id(), false)
+							.await?
+						{
+							return Err!(Request(Forbidden("User cannot redact this event.")));
+						}
+					}
+				},
+				| _ => {
+					let content: RoomRedactionEventContent = pdu.get_content()?;
+					if let Some(redact_id) = &content.redacts {
+						if !self
+							.services
+							.state_accessor
+							.user_can_redact(redact_id, pdu.sender(), pdu.room_id(), false)
+							.await?
+						{
+							return Err!(Request(Forbidden("User cannot redact this event.")));
+						}
+					}
+				},
+			}
+		}
+
+		if *pdu.kind() == TimelineEventType::RoomMember {
+			let content: RoomMemberEventContent = pdu.get_content()?;
+
+			if content.join_authorized_via_users_server.is_some()
+				&& content.membership != MembershipState::Join
+			{
+				return Err!(Request(BadJson(
+					"join_authorised_via_users_server is only for member joins"
+				)));
+			}
+
+			if content
+				.join_authorized_via_users_server
+				.as_ref()
+				.is_some_and(|authorising_user| {
+					!self
+						.services
+						.globals
+						.user_is_local(authorising_user)
+				}) {
+				return Err!(Request(InvalidParam(
+					"Authorising user does not belong to this homeserver"
+				)));
+			}
+		}
+
+		// We append to state before appending the pdu, so we don't have a moment in
+		// time with the pdu without it's state. This is okay because append_pdu can't
+		// fail.
+		let statehashid = self.services.state.append_to_state(&pdu).await?;
+
+		let pdu_id = if DO_MEDIA_RETENTION {
+			self.append_pdu(
+				&pdu,
+				pdu_json,
+				// Since this PDU references all pdu_leaves we can update the leaves
+				// of the room
+				once(pdu.event_id()),
+				state_lock,
+			)
+			.await?
+		} else {
+			self.append_pdu_without_retention(
+				&pdu,
+				pdu_json,
+				// Since this PDU references all pdu_leaves we can update the leaves
+				// of the room
+				once(pdu.event_id()),
+				state_lock,
+			)
+			.await?
+		};
+
+		// We set the room state after inserting the pdu, so that we never have a moment
+		// in time where events in the current room state do not exist
+		self.services
 			.state
-			.get_room_version(pdu.room_id())
-			.await?
-		{
-			| V1 | V2 | V3 | V4 | V5 | V6 | V7 | V8 | V9 | V10 => {
-				if let Some(redact_id) = pdu.redacts() {
-					if !self
-						.services
-						.state_accessor
-						.user_can_redact(redact_id, pdu.sender(), pdu.room_id(), false)
-						.await?
-					{
-						return Err!(Request(Forbidden("User cannot redact this event.")));
-					}
-				}
-			},
-			| _ => {
-				let content: RoomRedactionEventContent = pdu.get_content()?;
-				if let Some(redact_id) = &content.redacts {
-					if !self
-						.services
-						.state_accessor
-						.user_can_redact(redact_id, pdu.sender(), pdu.room_id(), false)
-						.await?
-					{
-						return Err!(Request(Forbidden("User cannot redact this event.")));
-					}
-				}
-			},
-		}
-	}
+			.set_room_state(pdu.room_id(), statehashid, state_lock);
 
-	if *pdu.kind() == TimelineEventType::RoomMember {
-		let content: RoomMemberEventContent = pdu.get_content()?;
+		let mut servers: HashSet<OwnedServerName> = self
+			.services
+			.state_cache
+			.room_servers(pdu.room_id())
+			.map(ToOwned::to_owned)
+			.collect()
+			.await;
 
-		if content.join_authorized_via_users_server.is_some()
-			&& content.membership != MembershipState::Join
-		{
-			return Err!(Request(BadJson(
-				"join_authorised_via_users_server is only for member joins"
-			)));
+		// In case we are kicking or banning a user, we need to inform their server of
+		// the change
+		if *pdu.kind() == TimelineEventType::RoomMember {
+			if let Some(state_key_uid) = &pdu
+				.state_key
+				.as_ref()
+				.and_then(|state_key| UserId::parse(state_key.as_str()).ok())
+			{
+				servers.insert(state_key_uid.server_name().to_owned());
+			}
 		}
 
-		if content
-			.join_authorized_via_users_server
-			.as_ref()
-			.is_some_and(|authorising_user| {
-				!self
-					.services
-					.globals
-					.user_is_local(authorising_user)
-			}) {
-			return Err!(Request(InvalidParam(
-				"Authorising user does not belong to this homeserver"
-			)));
-		}
-	}
+		// Remove our server from the server list since it will be added to it by
+		// room_servers() and/or the if statement above
+		servers.remove(self.services.globals.server_name());
 
-	// We append to state before appending the pdu, so we don't have a moment in
-	// time with the pdu without it's state. This is okay because append_pdu can't
-	// fail.
-	let statehashid = self.services.state.append_to_state(&pdu).await?;
-
-	let pdu_id = if DO_MEDIA_RETENTION {
-		self
-			.append_pdu(
-				&pdu,
-				pdu_json,
-				// Since this PDU references all pdu_leaves we can update the leaves
-				// of the room
-				once(pdu.event_id()),
-				state_lock,
-			)
-			.await?
-	} else {
-		self
-			.append_pdu_without_retention(
-				&pdu,
-				pdu_json,
-				// Since this PDU references all pdu_leaves we can update the leaves
-				// of the room
-				once(pdu.event_id()),
-				state_lock,
-			)
-			.await?
-	};
-
-	// We set the room state after inserting the pdu, so that we never have a moment
-	// in time where events in the current room state do not exist
-	self.services
-		.state
-		.set_room_state(pdu.room_id(), statehashid, state_lock);
-
-	let mut servers: HashSet<OwnedServerName> = self
-		.services
-		.state_cache
-		.room_servers(pdu.room_id())
-		.map(ToOwned::to_owned)
-		.collect()
-		.await;
-
-	// In case we are kicking or banning a user, we need to inform their server of
-	// the change
-	if *pdu.kind() == TimelineEventType::RoomMember {
-		if let Some(state_key_uid) = &pdu
-			.state_key
-			.as_ref()
-			.and_then(|state_key| UserId::parse(state_key.as_str()).ok())
-		{
-			servers.insert(state_key_uid.server_name().to_owned());
-		}
-	}
-
-	// Remove our server from the server list since it will be added to it by
-	// room_servers() and/or the if statement above
-	servers.remove(self.services.globals.server_name());
-
-	self.services
-		.sending
-		.send_pdu_servers(servers.iter().map(AsRef::as_ref).stream(), &pdu_id)
-		.await?;
+		self.services
+			.sending
+			.send_pdu_servers(servers.iter().map(AsRef::as_ref).stream(), &pdu_id)
+			.await?;
 
 		Ok(pdu.event_id().to_owned())
 	}
@@ -194,8 +191,7 @@ pub async fn build_and_append_pdu(
 	room_id: &RoomId,
 	state_lock: &RoomMutexGuard,
 ) -> Result<OwnedEventId> {
-	self
-		.build_and_append_pdu_inner::<true>(pdu_builder, sender, room_id, state_lock)
+	self.build_and_append_pdu_inner::<true>(pdu_builder, sender, room_id, state_lock)
 		.await
 }
 
@@ -208,8 +204,7 @@ pub async fn build_and_append_pdu_without_retention(
 	room_id: &RoomId,
 	state_lock: &RoomMutexGuard,
 ) -> Result<OwnedEventId> {
-	self
-		.build_and_append_pdu_inner::<false>(pdu_builder, sender, room_id, state_lock)
+	self.build_and_append_pdu_inner::<false>(pdu_builder, sender, room_id, state_lock)
 		.await
 }
 

@@ -7,7 +7,7 @@ use std::{
 use futures::StreamExt;
 use ruma::UserId;
 use serde::{Deserialize, Serialize};
-use tuwunel_core::{Result, err, trace, warn};
+use tuwunel_core::{Result, debug_warn, err, trace, warn};
 use tuwunel_database::{Cbor, Deserialized, Map, keyval::serialize_val};
 
 use super::Service;
@@ -73,7 +73,8 @@ pub(crate) struct DeletionCandidate {
 	pub user_id: Option<String>,
 	#[serde(default)]
 	pub awaiting_confirmation: bool,
-	/// Event ID of the notification message sent to the user (for reaction handling)
+	/// Event ID of the notification message sent to the user (for reaction
+	/// handling)
 	#[serde(default)]
 	pub notification_event_id: Option<String>,
 	/// Event ID of the ✅ reaction (for cleanup)
@@ -314,8 +315,9 @@ impl Retention {
 		Ok(to_delete)
 	}
 
-	/// Track a media upload that might be used in an upcoming encrypted message.
-	/// These pending uploads will be matched to encrypted events within a time window.
+	/// Track a media upload that might be used in an upcoming encrypted
+	/// message. These pending uploads will be matched to encrypted events
+	/// within a time window.
 	pub(super) fn track_pending_upload(&self, user_id: &str, mxc: &str) {
 		let upload_ts = SystemTime::now()
 			.duration_since(UNIX_EPOCH)
@@ -329,7 +331,10 @@ impl Retention {
 		};
 
 		let key = Self::key_pending(user_id, upload_ts);
-		warn!(user_id, mxc, upload_ts, "retention: tracking pending upload for encrypted event association");
+		warn!(
+			user_id,
+			mxc, upload_ts, "retention: tracking pending upload for encrypted event association"
+		);
 		self.cf.raw_put(key, Cbor(&pending));
 
 		// Clean up old pending uploads (older than 60 seconds) asynchronously
@@ -379,7 +384,8 @@ impl Retention {
 
 		// Remove consumed/old pending uploads
 		if !to_delete.is_empty() {
-			self.cf.write_batch_raw(std::iter::empty(), to_delete);
+			self.cf
+				.write_batch_raw(std::iter::empty(), to_delete);
 		}
 
 		found_mxcs
@@ -396,7 +402,8 @@ impl Retention {
 			let prefix = Self::pending_prefix(&user_id);
 			let mut to_delete: Vec<Vec<u8>> = Vec::new();
 
-			let mut stream = cf.stream_raw_prefix::<&str, Cbor<PendingUpload>, _>(prefix.as_bytes());
+			let mut stream =
+				cf.stream_raw_prefix::<&str, Cbor<PendingUpload>, _>(prefix.as_bytes());
 
 			while let Some(item) = stream.next().await.transpose().ok().flatten() {
 				let (key, Cbor(pending)) = item;
@@ -469,9 +476,7 @@ impl Retention {
 			return Err(err!(Request(Forbidden("media candidate owned by another user"))));
 		};
 		if !candidate.awaiting_confirmation {
-			return Err(err!(Request(InvalidParam(
-				"media deletion already processed",
-			))));
+			return Err(err!(Request(InvalidParam("media deletion already processed",))));
 		}
 
 		// Save the cancel reaction ID to redact it
@@ -485,12 +490,20 @@ impl Retention {
 		dels.push(key.into_bytes());
 		dels.push(Self::key_mref(mxc).into_bytes());
 		self.cf.write_batch_raw(std::iter::empty(), dels);
-		warn!(mxc, bytes = deleted_bytes, user = requester.as_str(), "retention: media deletion confirmed by user");
+		warn!(
+			mxc,
+			bytes = deleted_bytes,
+			user = requester.as_str(),
+			"retention: media deletion confirmed by user"
+		);
 		Ok((deleted_bytes, cancel_reaction_to_redact))
 	}
 
 	/// Find MXC by notification event ID (for reaction-based confirmation)
-	pub(super) async fn find_mxc_by_notification_event(&self, notification_event_id: &str) -> Option<String> {
+	pub(super) async fn find_mxc_by_notification_event(
+		&self,
+		notification_event_id: &str,
+	) -> Option<String> {
 		let prefix = K_QUEUE.as_bytes();
 		let mut stream = self
 			.cf
@@ -510,7 +523,11 @@ impl Retention {
 
 	/// Cancel a deletion candidate (remove from queue)
 	/// Returns the confirm reaction ID to redact it
-	pub(super) async fn cancel_candidate(&self, mxc: &str, requester: &UserId) -> Result<Option<String>> {
+	pub(super) async fn cancel_candidate(
+		&self,
+		mxc: &str,
+		requester: &UserId,
+	) -> Result<Option<String>> {
 		let key = Self::key_queue(mxc);
 		match self.cf.get(&key).await {
 			| Ok(handle) => {
@@ -520,7 +537,9 @@ impl Retention {
 					return Err(err!(Request(Forbidden("media candidate owner unknown"))));
 				};
 				if owner != requester.as_str() {
-					return Err(err!(Request(Forbidden("media candidate owned by another user"))));
+					return Err(err!(Request(Forbidden(
+						"media candidate owned by another user"
+					))));
 				}
 
 				// Save the confirm reaction ID to redact it
@@ -528,15 +547,20 @@ impl Retention {
 
 				// Remove from queue
 				self.cf.remove(key.as_str());
-				warn!(mxc, user = requester.as_str(), "retention: media deletion cancelled by user");
+				warn!(
+					mxc,
+					user = requester.as_str(),
+					"retention: media deletion cancelled by user"
+				);
 				Ok(confirm_reaction_to_redact)
 			},
 			| Err(_) => Err(err!(Request(NotFound("no pending deletion for this media")))),
 		}
 	}
 
-	/// Enable auto-delete for the room type (encrypted/unencrypted) and confirm deletion
-	/// Returns: (deleted_bytes, confirm_reaction_id, cancel_reaction_id) to redact unused reactions
+	/// Enable auto-delete for the room type (encrypted/unencrypted) and confirm
+	/// deletion Returns: (deleted_bytes, confirm_reaction_id,
+	/// cancel_reaction_id) to redact unused reactions
 	pub(super) async fn auto_delete_candidate(
 		&self,
 		service: &Service,
@@ -552,7 +576,9 @@ impl Retention {
 					return Err(err!(Request(Forbidden("media candidate owner unknown"))));
 				};
 				if owner != requester.as_str() {
-					return Err(err!(Request(Forbidden("media candidate owned by another user"))));
+					return Err(err!(Request(Forbidden(
+						"media candidate owned by another user"
+					))));
 				}
 
 				let from_encrypted_room = candidate.from_encrypted_room;
@@ -565,7 +591,8 @@ impl Retention {
 					prefs.auto_delete_unencrypted = true;
 					warn!(user = %requester, "retention: enabled auto-delete for unencrypted rooms");
 				}
-				self.set_user_prefs(requester.as_str(), &prefs).await?;
+				self.set_user_prefs(requester.as_str(), &prefs)
+					.await?;
 
 				let confirm_reaction_to_redact = candidate.confirm_reaction_id.clone();
 				let cancel_reaction_to_redact = candidate.cancel_reaction_id.clone();
@@ -582,7 +609,12 @@ impl Retention {
 					from_encrypted = from_encrypted_room,
 					"retention: media auto-deleted and preference saved"
 				);
-				Ok((deleted_bytes, confirm_reaction_to_redact, cancel_reaction_to_redact, from_encrypted_room))
+				Ok((
+					deleted_bytes,
+					confirm_reaction_to_redact,
+					cancel_reaction_to_redact,
+					from_encrypted_room,
+				))
 			},
 			| Err(_) => Err(err!(Request(NotFound("no pending deletion for this media")))),
 		}
@@ -595,7 +627,7 @@ impl Retention {
 		grace: Duration,
 	) -> Result<()> {
 		let prefix = K_QUEUE.as_bytes();
-		warn!(?grace, "retention: worker iteration start");
+		debug_warn!(?grace, "retention: worker iteration start");
 		let mut stream = self
 			.cf
 			.stream_raw_prefix::<&str, Cbor<DeletionCandidate>, _>(&prefix);
@@ -605,12 +637,12 @@ impl Retention {
 			let (key, Cbor(cand)) = item;
 			let now = now_secs();
 			if cand.awaiting_confirmation {
-				warn!(mxc = %cand.mxc, "retention: awaiting user confirmation, skipping candidate");
+				debug_warn!(mxc = %cand.mxc, "retention: awaiting user confirmation, skipping candidate");
 				continue;
 			}
 
 			if now < cand.enqueued_ts.saturating_add(grace.as_secs()) {
-				warn!(mxc = %cand.mxc, wait = cand.enqueued_ts + grace.as_secs() - now, "retention: grace period not met yet");
+				debug_warn!(mxc = %cand.mxc, wait = cand.enqueued_ts + grace.as_secs() - now, "retention: grace period not met yet");
 				continue;
 			}
 
@@ -620,9 +652,9 @@ impl Retention {
 				.await
 				.unwrap_or(0);
 			if deleted_bytes > 0 {
-				warn!(mxc = %cand.mxc, bytes = deleted_bytes, "retention: media deleted");
+				debug_warn!(mxc = %cand.mxc, bytes = deleted_bytes, "retention: media deleted");
 			} else {
-				warn!(mxc = %cand.mxc, "retention: queued media had no bytes deleted (already gone?)");
+				debug_warn!(mxc = %cand.mxc, "retention: queued media had no bytes deleted (already gone?)");
 			}
 
 			// remove metadata entries (best-effort)
@@ -632,9 +664,9 @@ impl Retention {
 			deleted = deleted.saturating_add(1);
 		}
 		if processed == 0 {
-			warn!("retention: worker iteration found no deletion candidates");
+			debug_warn!("retention: worker iteration found no deletion candidates");
 		} else {
-			warn!(processed, deleted, "retention: worker iteration complete");
+			debug_warn!(processed, deleted, "retention: worker iteration complete");
 		}
 
 		Ok(())
