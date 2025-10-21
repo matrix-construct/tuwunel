@@ -28,9 +28,12 @@ use tuwunel_core::{
 	utils::{self, ReadyExt},
 };
 use tuwunel_database::{Json, Map};
+use ruma::events::room::MediaSource;
 
 use super::{ExtractBody, ExtractRelatesTo, ExtractRelatesToEventId, RoomMutexGuard};
 use crate::{appservice::NamespaceRegex, rooms::state_compressor::CompressedState};
+
+
 
 /// Append the incoming event setting the state snapshot to the state from
 /// the server that sent the event.
@@ -402,7 +405,6 @@ impl super::Service {
 					pdu.get_content::<ruma::events::room::message::RoomMessageEventContent>()
 				{
 					warn!(event_id=%pdu.event_id(), msg=?msg_full, "retention: debug message content");
-					use ruma::events::room::MediaSource;
 					let mut mxcs: Vec<(String, bool, String)> = Vec::new();
 					let push_media = |mxcs: &mut Vec<(String, bool, String)>,
 					                  src: &MediaSource,

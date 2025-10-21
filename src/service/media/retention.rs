@@ -207,7 +207,7 @@ impl Retention {
 		}
 		warn!(%event_id, count = mxcs.len(), %room_id, sender=%sender, "retention: inserting media refs for event");
 
-		let mut puts: Vec<(Vec<u8>, Vec<u8>)> = Vec::with_capacity(mxcs.len() * 2);
+		let mut puts: Vec<(Vec<u8>, Vec<u8>)> = Vec::with_capacity(mxcs.len().saturating_mul(2));
 		for (mxc, local, kind) in mxcs {
 			// update MediaEventRef
 			let mer = MediaEventRef {
@@ -315,7 +315,8 @@ impl Retention {
 		let upload_ts = SystemTime::now()
 			.duration_since(UNIX_EPOCH)
 			.unwrap_or_default()
-			.as_millis() as u64;
+			.as_millis().try_into()
+			.unwrap_or_default();
 
 		let pending = PendingUpload {
 			mxc: mxc.to_owned(),
@@ -505,9 +506,7 @@ impl Retention {
 		candidate.enqueued_ts = now_secs();
 
 		let deleted_bytes = self.delete_local_media(service, mxc).await?;
-		let mut dels = Vec::with_capacity(2);
-		dels.push(key.into_bytes());
-		dels.push(Self::key_mref(mxc).into_bytes());
+		let dels = vec![key.into_bytes(), Self::key_mref(mxc).into_bytes()];
 		self.cf.write_batch_raw(std::iter::empty(), dels);
 		warn!(
 			mxc,
@@ -617,9 +616,7 @@ impl Retention {
 				let cancel_reaction_to_redact = candidate.cancel_reaction_id.clone();
 
 				let deleted_bytes = self.delete_local_media(service, mxc).await?;
-				let mut dels = Vec::with_capacity(2);
-				dels.push(key.into_bytes());
-				dels.push(Self::key_mref(mxc).into_bytes());
+				let dels = vec![key.into_bytes(), Self::key_mref(mxc).into_bytes()];
 				self.cf.write_batch_raw(std::iter::empty(), dels);
 				warn!(
 					mxc,
@@ -655,9 +652,9 @@ impl Retention {
 		let mut total = 0_u64;
 		for key in keys {
 			let path = service.get_media_file(&key);
-			total = total.saturating_add(remove_file_tolerant(path));
+			total = total.saturating_add(remove_file_tolerant(&path));
 			let legacy = service.get_media_file_b64(&key);
-			total = total.saturating_add(remove_file_tolerant(legacy));
+			total = total.saturating_add(remove_file_tolerant(&legacy));
 		}
 		warn!("retention: total bytes deleted {total}");
 		Ok(total)
@@ -671,11 +668,11 @@ fn now_secs() -> u64 {
 		.as_secs()
 }
 
-fn remove_file_tolerant(path: PathBuf) -> u64 {
-	match std::fs::metadata(&path) {
+fn remove_file_tolerant(path: &PathBuf) -> u64 {
+	match std::fs::metadata(path) {
 		| Ok(meta) => {
 			let len = meta.len();
-			if let Err(e) = std::fs::remove_file(&path) {
+			if let Err(e) = std::fs::remove_file(path) {
 				trace!(?path, "ignore remove error: {e}");
 				0
 			} else {

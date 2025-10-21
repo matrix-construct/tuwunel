@@ -1,5 +1,6 @@
 #![allow(clippy::wildcard_imports)]
 #![allow(clippy::enum_glob_use)]
+#![allow(clippy::large_futures)]
 
 pub(crate) mod admin;
 mod tests;

@@ -65,6 +65,7 @@ impl CommandSystem for UserCommandSystem {
 
 pub(crate) struct Context<'a> {
 	pub services: &'a Services,
+	#[allow(dead_code)]
 	pub input: &'a str,
 	pub sender: &'a UserId,
 }

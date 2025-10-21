@@ -99,6 +99,7 @@ pub(crate) async fn get_message_events_route(
 		services
 			.timeline
 			.backfill_if_required(room_id, from)
+			.boxed()
 			.await
 			.log_err()
 			.ok();

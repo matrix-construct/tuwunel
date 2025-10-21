@@ -2,10 +2,14 @@ use std::sync::{Arc, OnceLock};
 
 use ruma::{
 	EventId, OwnedEventId, OwnedRoomAliasId, OwnedRoomId, RoomAliasId, RoomId, UserId,
-	events::room::{
-		guest_access::GuestAccess,
-		member::{MembershipState, RoomMemberEventContent},
-		message::RoomMessageEventContent,
+	events::{
+		reaction::ReactionEventContent,
+		relation::Annotation,
+		room::{
+			guest_access::GuestAccess,
+			member::{MembershipState, RoomMemberEventContent},
+			message::RoomMessageEventContent,
+		},
 	},
 	room::JoinRule,
 };
@@ -156,7 +160,7 @@ impl Service {
 			let state_lock = services.state.mutex.lock(&room_id).await;
 			let content = RoomMessageEventContent::text_markdown(&body);
 
-			let _ = services
+			let _: Result<_> = services
 				.timeline
 				.build_and_append_pdu_without_retention(
 					PduBuilder::timeline(&content),
@@ -228,7 +232,6 @@ impl Service {
 		let state_lock = self.services.state.mutex.lock(&room_id).await;
 
 		// Create reaction content
-		use ruma::events::{reaction::ReactionEventContent, relation::Annotation};
 		let content =
 			ReactionEventContent::new(Annotation::new(event_id.to_owned(), emoji.to_owned()));
 
@@ -269,7 +272,7 @@ impl Service {
 			return;
 		}
 
-		let command = &command[1..];
+		let command = command.strip_prefix('!').unwrap_or(command);
 
 		self.services.command.run_command_matrix_detached(
 			self.get_user_command_system(),
@@ -321,7 +324,7 @@ impl Service {
 			let state_lock = services.state.mutex.lock(&room_id).await;
 
 			// Redact the reaction event to remove it from the UI
-			let _ = services
+			let _: Result<_> = services
 				.timeline
 				.build_and_append_pdu_without_retention(
 					PduBuilder {

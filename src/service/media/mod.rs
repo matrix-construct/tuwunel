@@ -6,7 +6,7 @@ mod remote;
 mod retention;
 mod tests;
 mod thumbnail;
-use std::{collections::HashSet, path::PathBuf, sync::Arc, time::SystemTime};
+use std::{collections::HashSet, path::PathBuf, sync::Arc, time::{Duration, SystemTime, UNIX_EPOCH}};
 
 use async_trait::async_trait;
 use base64::{Engine as _, engine::general_purpose};
@@ -251,7 +251,7 @@ impl Service {
 					"retention: auto-deleting immediately per user preferences"
 				);
 				// Delete immediately
-				let _ = self
+				self
 					.retention
 					.delete_media_immediately(
 						self,
@@ -262,7 +262,8 @@ impl Service {
 							.and_then(|s| UserId::parse(s).ok()),
 						candidate.from_encrypted_room,
 					)
-					.await;
+					.await
+					.unwrap_or_default();
 				continue;
 			}
 
@@ -274,7 +275,7 @@ impl Service {
 			match (decision.action, decision.owner) {
 				| (CandidateAction::DeleteImmediately, owner) => {
 					// Delete immediately
-					let _ = self
+					self
 						.retention
 						.delete_media_immediately(
 							self,
@@ -282,7 +283,8 @@ impl Service {
 							owner.as_deref(),
 							candidate.from_encrypted_room,
 						)
-						.await;
+						.await
+						.unwrap_or_default();
 				},
 				| (CandidateAction::AwaitConfirmation, Some(owner)) => {
 					// Send notification to the uploader's user room (not the room where it was
@@ -498,24 +500,20 @@ impl Service {
 			.and_then(|val| val.get("origin_server_ts"))
 			.and_then(canonical_json_to_u64)
 			.and_then(|ts_millis| {
-				use std::time::{Duration, UNIX_EPOCH};
 				let duration = Duration::from_millis(ts_millis);
-				let datetime = UNIX_EPOCH + duration;
-				let now = SystemTime::now();
-
-				if let Ok(elapsed) = now.duration_since(datetime) {
-					let secs = elapsed.as_secs();
-					if secs < 60 {
-						Some(" (just now)".to_owned())
-					} else if secs < 3600 {
-						Some(format!(" ({} minutes ago)", secs / 60))
-					} else if secs < 86400 {
-						Some(format!(" ({} hours ago)", secs / 3600))
-					} else {
-						Some(format!(" ({} days ago)", secs / 86400))
-					}
+				UNIX_EPOCH.checked_add(duration)
+			})
+			.and_then(|event_time| SystemTime::now().duration_since(event_time).ok())
+			.map(|elapsed| {
+				let secs = elapsed.as_secs();
+				if secs < 60 {
+					" (just now)".to_owned()
+				} else if secs < 3600 {
+					format!(" ({} minutes ago)", secs / 60)
+				} else if secs < 86400 {
+					format!(" ({} hours ago)", secs / 3600)
 				} else {
-					None
+					format!(" ({} days ago)", secs / 86400)
 				}
 			})
 			.unwrap_or_default();
@@ -602,31 +600,31 @@ impl Service {
 		notification_event_id: &EventId,
 	) -> Result<()> {
 		// Find the deletion candidate by notification event ID
-		if let Some(mxc) = self
+		let Some(mxc) = self
 			.retention
 			.find_mxc_by_notification_event(notification_event_id.as_str())
 			.await
-		{
-			debug_info!(user = %user, event_id = %notification_event_id, mxc = %mxc, "retention: user cancelled deletion via ❌ reaction");
-			let confirm_reaction_id = self
-				.retention
-				.cancel_candidate(&mxc, user)
-				.await?;
-
-			// Redact the unused ✅ reaction to clean up the UI (spawned as background task)
-			if let Some(reaction_id_str) = confirm_reaction_id {
-				if let Ok(reaction_id) = EventId::parse(&reaction_id_str) {
-					self.services
-						.userroom
-						.redact_reaction(user, reaction_id);
-				}
-			}
-
-			Ok(())
-		} else {
+		else {
 			debug_warn!(user = %user, event_id = %notification_event_id, "retention: no pending deletion found for reaction");
-			Ok(())
+			return Ok(());
+		};
+
+		debug_info!(user = %user, event_id = %notification_event_id, mxc = %mxc, "retention: user cancelled deletion via ❌ reaction");
+		let confirm_reaction_id = self
+			.retention
+			.cancel_candidate(&mxc, user)
+			.await?;
+
+		// Redact the unused ✅ reaction to clean up the UI (spawned as background task)
+		if let Some(reaction_id_str) = confirm_reaction_id {
+			if let Ok(reaction_id) = EventId::parse(&reaction_id_str) {
+				self.services
+					.userroom
+					.redact_reaction(user, reaction_id);
+			}
 		}
+
+		Ok(())
 	}
 
 	/// Auto-delete (♻️ reaction) - enable auto-delete for this room type and
