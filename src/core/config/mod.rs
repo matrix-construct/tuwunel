@@ -2156,6 +2156,7 @@ pub struct MediaRetentionConfig {
 	pub on_redaction: String,
 }
 
+#[must_use]
 fn default_media_retention_on_redaction() -> String { "keep".to_owned() }
 
 #[derive(Clone, Copy, Debug, Deserialize, Default)]

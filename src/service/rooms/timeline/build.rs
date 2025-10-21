@@ -21,7 +21,7 @@ use super::RoomMutexGuard;
 
 impl super::Service {
 	/// Creates a new persisted data unit and adds it to a room. This function
-	/// takes a roomid_mutex_state, meaning that only this fnuction is able to
+	/// takes a roomid_mutex_state, meaning that only this function is able to
 	/// mutate the room state.
 	async fn build_and_append_pdu_inner<const DO_MEDIA_RETENTION: bool>(
 		&self,

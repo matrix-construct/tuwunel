@@ -420,7 +420,7 @@ impl Retention {
 		});
 	}
 
-	/// qeue a media item for deletion (idempotent best-effort).
+	/// queue a media item for deletion (idempotent best-effort).
 	pub(super) fn queue_media_for_deletion(
 		&self,
 		mxc: &str,

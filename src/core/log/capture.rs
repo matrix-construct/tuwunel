@@ -38,7 +38,14 @@ impl EventData {
 	}
 }
 
+impl Default for CaptureManager {
+	fn default() -> Self {
+		Self::new()
+	}
+}
+
 impl CaptureManager {
+	#[must_use] 
 	pub fn new() -> Self { Self { captures: Mutex::new(Vec::new()) } }
 
 	pub fn start_capture(&self, span_id: &Id) {

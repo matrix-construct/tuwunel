@@ -361,7 +361,6 @@ impl Service {
 		}
 
 		// Check if this is a media retention confirmation reaction
-		//todo: maybe dont match for emojis here
 		match emoji {
 			| "✅" => {
 				if let Err(e) = self
