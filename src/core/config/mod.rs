@@ -1530,6 +1530,10 @@ pub struct Config {
 	#[serde(default, with = "serde_regex")]
 	pub forbidden_remote_server_names: RegexSet,
 
+	/// Media retention configuration (flattened; formerly media.retention.*)
+	#[serde(default, alias = "media", alias = "media.retention")]
+	pub media: MediaRetentionConfig,
+
 	/// List of forbidden server names via regex patterns that we will block all
 	/// outgoing federated room directory requests for. Useful for preventing
 	/// our users from wandering into bad servers or spaces.
@@ -2132,6 +2136,28 @@ pub struct WellKnownConfig {
 	pub support_mxid: Option<OwnedUserId>,
 }
 
+#[derive(Clone, Debug, Deserialize, Default)]
+#[config_example_generator(filename = "tuwunel-example.toml", section = "global.media")]
+pub struct MediaRetentionConfig {
+	/// What to do with local media when an event referencing it is redacted.
+	///
+	/// Options:
+	///   "keep" - Never delete media (feature disabled)
+	///   "ask_sender" - Ask the user who sent the message via DM (shows
+	///   ✅/❌/♻️ reactions)   
+	///   "delete_always" - Always delete unreferenced media immediately
+	///
+	/// Default: "keep"
+	///
+	/// Note: Deletion is event-driven and immediate. Users can set
+	/// per-room-type auto-delete preferences using `!user retention` commands
+	/// or the ♻️ reaction when `ask_sender` is enabled.
+	#[serde(default = "default_media_retention_on_redaction")]
+	pub on_redaction: String,
+}
+
+fn default_media_retention_on_redaction() -> String { "keep".to_owned() }
+
 #[derive(Clone, Copy, Debug, Deserialize, Default)]
 #[allow(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 #[config_example_generator(
@@ -2573,6 +2599,10 @@ impl Config {
 	}
 
 	pub fn check(&self) -> Result<(), Error> { check(self) }
+
+	// Media retention helpers
+	#[must_use]
+	pub fn media_retention_on_redaction(&self) -> &str { self.media.on_redaction.as_str() }
 }
 
 fn true_fn() -> bool { true }

@@ -10,7 +10,8 @@ use crate::{
 };
 
 #[derive(Debug, Parser)]
-#[command(name = "tuwunel", version = tuwunel_core::version())]
+#[command(name = "admin", version = tuwunel_core::version())]
+#[command(arg_required_else_help = true)]
 #[command_dispatch]
 pub(super) enum AdminCommand {
 	#[command(subcommand)]

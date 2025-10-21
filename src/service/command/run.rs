@@ -47,12 +47,12 @@ impl Service {
 			let error = Error::from_panic(panic);
 			error!("Panic while processing command: {error:?}");
 			Err(format!(
-						"Panic occurred while processing command:\n\
+				"Panic occurred while processing command:\n\
 						```\n\
 						{error:#?}\n\
 						```\n\
 						Please submit a [bug report](https://github.com/matrix-construct/tuwunel/issues/new).🥺"
-					))
+			))
 		});
 
 		let (output, err) = match result {

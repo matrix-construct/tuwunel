@@ -1,7 +1,7 @@
 use std::{sync::Arc, time::Duration};
 
 use futures::StreamExt;
-use ruma::{Mxc, OwnedMxcUri, UserId, http_headers::ContentDisposition};
+use ruma::{Mxc, OwnedMxcUri, OwnedUserId, UserId, http_headers::ContentDisposition};
 use tuwunel_core::{
 	Err, Result, debug, debug_info, err,
 	utils::{ReadyExt, str_from_bytes, stream::TryIgnore, string_from_bytes},
@@ -151,6 +151,24 @@ impl Data {
 			})
 			.collect()
 			.await
+	}
+
+	pub(super) async fn get_media_owner(&self, mxc: &str) -> Option<OwnedUserId> {
+		let prefix = (mxc, Interfix);
+		let mut stream = self
+			.mediaid_user
+			.stream_prefix_raw(&prefix)
+			.ignore_err();
+
+		while let Some((_, raw_user)) = stream.next().await {
+			if let Ok(user) = string_from_bytes(raw_user) {
+				if let Ok(user_id) = OwnedUserId::try_from(user) {
+					return Some(user_id);
+				}
+			}
+		}
+
+		None
 	}
 
 	/// Gets all the media keys in our database (this includes all the metadata

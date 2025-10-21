@@ -166,7 +166,7 @@ sudo systemctl enable --now caddy
 
 ### Other Reverse Proxies
 
-As we would prefer our users to use Caddy, we will not provide configuration files for other proxys.
+As we would prefer our users to use Caddy, we will not provide configuration files for other proxies.
 
 You will need to reverse proxy everything under following routes:
 - `/_matrix/` - core Matrix C-S and S-S APIs

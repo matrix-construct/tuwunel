@@ -44,7 +44,7 @@ pub(crate) async fn get_hierarchy_route(
 		.as_ref()
 		.and_then(|s| PaginationToken::from_str(s).ok());
 
-	// Should prevent unexpeded behaviour in (bad) clients
+	// Should prevent unexpected behaviour in (bad) clients
 	if let Some(ref token) = key {
 		if token.suggested_only != body.suggested_only || token.max_depth != max_depth {
 			return Err!(Request(InvalidParam(

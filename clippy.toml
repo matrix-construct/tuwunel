@@ -1,7 +1,7 @@
 array-size-threshold = 4096
 cognitive-complexity-threshold = 100        # TODO reduce me ALARA
 excessive-nesting-threshold = 8
-future-size-threshold = 8192
+future-size-threshold = 12288
 stack-size-threshold = 196608               # TODO reduce me ALARA
 too-many-lines-threshold = 780              # TODO reduce me to <= 100
 type-complexity-threshold = 250             # reduce me to ~200

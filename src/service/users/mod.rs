@@ -261,7 +261,7 @@ impl Service {
 	}
 
 	/// Sets a new displayname or removes it if displayname is None. You still
-	/// need to nofify all rooms of this change.
+	/// need to notify all rooms of this change.
 	pub fn set_displayname(&self, user_id: &UserId, displayname: Option<String>) {
 		if let Some(displayname) = displayname {
 			self.db

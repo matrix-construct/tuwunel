@@ -141,7 +141,7 @@ impl Service {
 			.await?;
 
 		// 3. Power levels
-		let power_levels_content = self.build_power_levels_content(
+		let power_levels_content = Self::build_power_levels_content(
 			&version_rules,
 			power_level_content_override,
 			publish,
@@ -472,7 +472,6 @@ impl Service {
 	}
 
 	fn build_power_levels_content(
-		&self,
 		version_rules: &RoomVersionRules,
 		power_level_content_override: Option<&Raw<RoomPowerLevelsEventContent>>,
 		publish: bool,

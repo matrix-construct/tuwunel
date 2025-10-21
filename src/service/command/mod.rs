@@ -16,7 +16,7 @@ pub struct CommandResult {
 
 pub struct CompletionTree {
 	pub name: String,
-	pub nodes: Vec<CompletionTree>,
+	pub nodes: Vec<Self>,
 }
 
 #[async_trait]

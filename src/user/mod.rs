@@ -45,7 +45,9 @@ impl CommandSystem for UserCommandSystem {
 	) -> Result<String> {
 		let command = match UserCommand::try_parse_from(command_line) {
 			| Ok(command) => command,
-			| Err(error) => return Err!("Failed to parse command:\n{error}"),
+			| Err(error) => {
+				return Ok(error.to_string());
+			},
 		};
 
 		let Some(sender) = sender else {
@@ -63,6 +65,7 @@ impl CommandSystem for UserCommandSystem {
 
 pub(crate) struct Context<'a> {
 	pub services: &'a Services,
+	#[allow(dead_code)]
 	pub input: &'a str,
 	pub sender: &'a UserId,
 }

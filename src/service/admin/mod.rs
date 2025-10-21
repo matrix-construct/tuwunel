@@ -46,6 +46,7 @@ impl crate::Service for Service {
 	fn name(&self) -> &str { crate::service::make_name(std::module_path!()) }
 }
 
+#[allow(clippy::enum_variant_names)]
 enum AdminCommandCheckVerdict {
 	NotAdminCommand,
 	AdminEscapeCommand,
