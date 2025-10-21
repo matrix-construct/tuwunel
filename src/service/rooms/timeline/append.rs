@@ -11,6 +11,7 @@ use ruma::{
 		GlobalAccountDataEventType, TimelineEventType,
 		push_rules::PushRulesEvent,
 		room::{
+			MediaSource,
 			encrypted::Relation,
 			member::{MembershipState, RoomMemberEventContent},
 			redaction::RoomRedactionEventContent,
@@ -28,12 +29,9 @@ use tuwunel_core::{
 	utils::{self, ReadyExt},
 };
 use tuwunel_database::{Json, Map};
-use ruma::events::room::MediaSource;
 
 use super::{ExtractBody, ExtractRelatesTo, ExtractRelatesToEventId, RoomMutexGuard};
 use crate::{appservice::NamespaceRegex, rooms::state_compressor::CompressedState};
-
-
 
 /// Append the incoming event setting the state snapshot to the state from
 /// the server that sent the event.

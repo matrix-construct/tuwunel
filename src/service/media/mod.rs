@@ -6,7 +6,12 @@ mod remote;
 mod retention;
 mod tests;
 mod thumbnail;
-use std::{collections::HashSet, path::PathBuf, sync::Arc, time::{Duration, SystemTime, UNIX_EPOCH}};
+use std::{
+	collections::HashSet,
+	path::PathBuf,
+	sync::Arc,
+	time::{Duration, SystemTime, UNIX_EPOCH},
+};
 
 use async_trait::async_trait;
 use base64::{Engine as _, engine::general_purpose};
@@ -251,8 +256,7 @@ impl Service {
 					"retention: auto-deleting immediately per user preferences"
 				);
 				// Delete immediately
-				self
-					.retention
+				self.retention
 					.delete_media_immediately(
 						self,
 						&candidate.mxc,
@@ -275,8 +279,7 @@ impl Service {
 			match (decision.action, decision.owner) {
 				| (CandidateAction::DeleteImmediately, owner) => {
 					// Delete immediately
-					self
-						.retention
+					self.retention
 						.delete_media_immediately(
 							self,
 							&candidate.mxc,
@@ -661,7 +664,8 @@ impl Service {
 			self.services.userroom.send_text_background(
 				user,
 				&format!(
-					"✅ Auto-delete enabled for {room_type} rooms.\n\nTo disable: `!user retention {command}`"
+					"✅ Auto-delete enabled for {room_type} rooms.\n\nTo disable: `!user \
+					 retention {command}`"
 				),
 			);
 

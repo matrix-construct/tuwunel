@@ -48,11 +48,10 @@ impl crate::Service for Service {
 
 #[allow(clippy::enum_variant_names)]
 enum AdminCommandCheckVerdict {
-    NotAdminCommand,
-    AdminEscapeCommand,
-    AdminRoomCommand,
+	NotAdminCommand,
+	AdminEscapeCommand,
+	AdminRoomCommand,
 }
-
 
 impl Service {
 	/// Sends markdown notice to the admin room as the admin user.

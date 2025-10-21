@@ -21,8 +21,7 @@ const K_QUEUE: &str = "qdel:"; // qdel:<mxc> => DeletionCandidate
 const K_PENDING: &str = "pending:"; // pending:<user_id>:<timestamp_ms> => PendingUpload
 const K_PREFS: &str = "prefs:"; // prefs:<user_id> => UserRetentionPrefs
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[derive(Default)]
+#[derive(Clone, Debug, Deserialize, Serialize, Default)]
 pub struct UserRetentionPrefs {
 	/// Auto-delete media in unencrypted rooms without asking
 	#[serde(default)]
@@ -32,7 +31,6 @@ pub struct UserRetentionPrefs {
 	#[serde(default)]
 	pub auto_delete_encrypted: bool,
 }
-
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub(crate) struct PendingUpload {
@@ -315,7 +313,8 @@ impl Retention {
 		let upload_ts = SystemTime::now()
 			.duration_since(UNIX_EPOCH)
 			.unwrap_or_default()
-			.as_millis().try_into()
+			.as_millis()
+			.try_into()
 			.unwrap_or_default();
 
 		let pending = PendingUpload {
