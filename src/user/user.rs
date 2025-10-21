@@ -1,6 +1,6 @@
 use clap::Parser;
 use tuwunel_core::Result;
-use tuwunel_macros::{command, command_dispatch};
+use tuwunel_macros::command_dispatch;
 
 use crate::user::{debug::Cmd as DebugCmd, retention::Cmd as RetentionCmd};
 

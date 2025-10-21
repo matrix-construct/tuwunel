@@ -22,6 +22,7 @@ const K_PENDING: &str = "pending:"; // pending:<user_id>:<timestamp_ms> => Pendi
 const K_PREFS: &str = "prefs:"; // prefs:<user_id> => UserRetentionPrefs
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Default)]
 pub struct UserRetentionPrefs {
 	/// Auto-delete media in unencrypted rooms without asking
 	#[serde(default)]
@@ -32,14 +33,6 @@ pub struct UserRetentionPrefs {
 	pub auto_delete_encrypted: bool,
 }
 
-impl Default for UserRetentionPrefs {
-	fn default() -> Self {
-		Self {
-			auto_delete_unencrypted: false,
-			auto_delete_encrypted: false,
-		}
-	}
-}
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub(crate) struct PendingUpload {
@@ -215,7 +208,7 @@ impl Retention {
 		warn!(%event_id, count = mxcs.len(), %room_id, sender=%sender, "retention: inserting media refs for event");
 
 		let mut puts: Vec<(Vec<u8>, Vec<u8>)> = Vec::with_capacity(mxcs.len() * 2);
-		for (mxc, local, kind) in mxcs.iter() {
+		for (mxc, local, kind) in mxcs {
 			// update MediaEventRef
 			let mer = MediaEventRef {
 				mxc: mxc.clone(),
@@ -275,7 +268,7 @@ impl Retention {
 		let mut to_delete: Vec<(String, String, Option<String>)> = Vec::new();
 		let mut puts: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
 		let mut dels: Vec<Vec<u8>> = Vec::new();
-		let mut processed = 0usize;
+		let mut processed = 0_usize;
 
 		let mut stream = self
 			.cf
@@ -349,7 +342,7 @@ impl Retention {
 		user_id: &str,
 		event_ts: u64, // event timestamp in milliseconds
 	) -> Vec<(String, bool, String)> {
-		let window_ms = 60_000u64; // 60 seconds
+		let window_ms = 60_000_u64; // 60 seconds
 		let cutoff_ts = event_ts.saturating_sub(window_ms);
 
 		let prefix = Self::pending_prefix(user_id);
@@ -437,7 +430,7 @@ impl Retention {
 		let cand = DeletionCandidate {
 			mxc: mxc.to_owned(),
 			enqueued_ts: now_secs(),
-			user_id: owner.map(|u| u.to_string()),
+			user_id: owner.map(ToString::to_string),
 			awaiting_confirmation,
 			notification_event_id,
 			confirm_reaction_id,
@@ -500,7 +493,7 @@ impl Retention {
 		};
 		if owner != requester.as_str() {
 			return Err(err!(Request(Forbidden("media candidate owned by another user"))));
-		};
+		}
 		if !candidate.awaiting_confirmation {
 			return Err(err!(Request(InvalidParam("media deletion already processed",))));
 		}
@@ -659,7 +652,7 @@ impl Retention {
 			.search_mxc_metadata_prefix(&mxc_parsed)
 			.await
 			.unwrap_or_default();
-		let mut total = 0u64;
+		let mut total = 0_u64;
 		for key in keys {
 			let path = service.get_media_file(&key);
 			total = total.saturating_add(remove_file_tolerant(path));

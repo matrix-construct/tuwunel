@@ -407,7 +407,7 @@ impl super::Service {
 					let push_media = |mxcs: &mut Vec<(String, bool, String)>,
 					                  src: &MediaSource,
 					                  label: &str,
-					                  this: &super::Service| {
+					                  this: &Self| {
 						let (maybe_mxc, enc) = match src {
 							| MediaSource::Plain(m) => (Some(m.to_string()), false),
 							| MediaSource::Encrypted(f) => (Some(f.url.to_string()), true),

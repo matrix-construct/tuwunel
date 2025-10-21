@@ -162,7 +162,7 @@ impl Service {
 			if let Ok(canonical) = self
 				.services
 				.timeline
-				.get_pdu_json(&parsed_eid)
+				.get_pdu_json(parsed_eid)
 				.await
 			{
 				if let Ok(val) = serde_json::to_value(&canonical) {
@@ -194,7 +194,7 @@ impl Service {
 		if candidates.is_empty() {
 			if let Some(ref val) = event_value {
 				let mut discovered = HashSet::new();
-				collect_mxcs(&val, &mut discovered);
+				collect_mxcs(val, &mut discovered);
 				if !discovered.is_empty() {
 					let room_id = val
 						.get("room_id")
@@ -259,8 +259,7 @@ impl Service {
 						candidate
 							.sender
 							.as_ref()
-							.and_then(|s| UserId::parse(s).ok())
-							.as_deref(),
+							.and_then(|s| UserId::parse(s).ok()),
 						candidate.from_encrypted_room,
 					)
 					.await;
@@ -480,7 +479,7 @@ impl Service {
 				if let Ok(name) = self
 					.services
 					.state_accessor
-					.get_name(&room_id)
+					.get_name(room_id)
 					.await
 				{
 					format!(" in room \"{name}\"")
@@ -507,7 +506,7 @@ impl Service {
 				if let Ok(elapsed) = now.duration_since(datetime) {
 					let secs = elapsed.as_secs();
 					if secs < 60 {
-						Some(format!(" (just now)"))
+						Some(" (just now)".to_owned())
 					} else if secs < 3600 {
 						Some(format!(" ({} minutes ago)", secs / 60))
 					} else if secs < 86400 {
@@ -555,7 +554,7 @@ impl Service {
 			if let Ok(reaction_id) = EventId::parse(&reaction_id_str) {
 				self.services
 					.userroom
-					.redact_reaction(user, &reaction_id);
+					.redact_reaction(user, reaction_id);
 			}
 		}
 
@@ -585,7 +584,7 @@ impl Service {
 				if let Ok(reaction_id) = EventId::parse(&reaction_id_str) {
 					self.services
 						.userroom
-						.redact_reaction(user, &reaction_id);
+						.redact_reaction(user, reaction_id);
 				}
 			}
 
@@ -619,7 +618,7 @@ impl Service {
 				if let Ok(reaction_id) = EventId::parse(&reaction_id_str) {
 					self.services
 						.userroom
-						.redact_reaction(user, &reaction_id);
+						.redact_reaction(user, reaction_id);
 				}
 			}
 
@@ -664,8 +663,7 @@ impl Service {
 			self.services.userroom.send_text_background(
 				user,
 				&format!(
-					"✅ Auto-delete enabled for {} rooms.\n\nTo disable: `!user retention {}`",
-					room_type, command
+					"✅ Auto-delete enabled for {room_type} rooms.\n\nTo disable: `!user retention {command}`"
 				),
 			);
 
@@ -674,14 +672,14 @@ impl Service {
 				if let Ok(reaction_id) = EventId::parse(&reaction_id_str) {
 					self.services
 						.userroom
-						.redact_reaction(user, &reaction_id);
+						.redact_reaction(user, reaction_id);
 				}
 			}
 			if let Some(reaction_id_str) = cancel_reaction_id {
 				if let Ok(reaction_id) = EventId::parse(&reaction_id_str) {
 					self.services
 						.userroom
-						.redact_reaction(user, &reaction_id);
+						.redact_reaction(user, reaction_id);
 				}
 			}
 
@@ -1079,7 +1077,7 @@ fn parse_user_retention_preference(value: &Value) -> Option<UserRetentionPrefere
 
 	if let Some(confirm) = value
 		.get("confirm_before_delete")
-		.and_then(|v| v.as_bool())
+		.and_then(Value::as_bool)
 	{
 		return Some(if confirm {
 			UserRetentionPreference::Ask
@@ -1088,7 +1086,7 @@ fn parse_user_retention_preference(value: &Value) -> Option<UserRetentionPrefere
 		});
 	}
 
-	if let Some(keep) = value.get("retain").and_then(|v| v.as_bool()) {
+	if let Some(keep) = value.get("retain").and_then(Value::as_bool) {
 		return Some(if keep {
 			UserRetentionPreference::Keep
 		} else {

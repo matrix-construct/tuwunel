@@ -53,12 +53,12 @@ impl Service {
 		let server_user = &self.services.globals.server_user;
 		let alias = self.get_user_room_alias(user_id);
 		let name = format!("User Room of {user_id}");
-		let topic = format!("eeeeee .-.");
+		let topic = "eeeeee .-.".to_owned();
 		let (room_id, state_lock) = self
 			.services
 			.create
 			.create_room(
-				&server_user,
+				server_user,
 				None,
 				None,
 				Some(&alias),
