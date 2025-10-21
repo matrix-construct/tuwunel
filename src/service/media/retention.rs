@@ -83,7 +83,7 @@ pub(crate) struct DeletionCandidate {
 	/// Event ID of the ❌ reaction (for cleanup)
 	#[serde(default)]
 	pub cancel_reaction_id: Option<String>,
-	/// Event ID of the ⚙️ reaction (always auto-delete for this room type)
+	/// Event ID of the ♻️ reaction (always auto-delete for this room type)
 	#[serde(default)]
 	pub auto_reaction_id: Option<String>,
 	/// Was this media detected as being from an encrypted room?

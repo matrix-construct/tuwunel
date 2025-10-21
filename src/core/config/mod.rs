@@ -2144,19 +2144,18 @@ pub struct MediaRetentionConfig {
 	/// Options:
 	///   "keep" - Never delete media (feature disabled)
 	///   "ask_sender" - Ask the user who sent the message via DM (shows
-	///   ✅/❌/⚙️ reactions)   
+	///   ✅/❌/♻️ reactions)   
 	///   "delete_always" - Always delete unreferenced media immediately
 	///
 	/// Default: "keep"
 	///
 	/// Note: Deletion is event-driven and immediate. Users can set
 	/// per-room-type auto-delete preferences using `!user retention` commands
-	/// or the ⚙️ reaction when `ask_sender` is enabled.
+	/// or the ♻️ reaction when `ask_sender` is enabled.
 	#[serde(default = "default_media_retention_on_redaction")]
 	pub on_redaction: String,
 }
 
-#[must_use]
 fn default_media_retention_on_redaction() -> String { "keep".to_owned() }
 
 #[derive(Clone, Copy, Debug, Deserialize, Default)]
@@ -2602,6 +2601,7 @@ impl Config {
 	pub fn check(&self) -> Result<(), Error> { check(self) }
 
 	// Media retention helpers
+	#[must_use]
 	pub fn media_retention_on_redaction(&self) -> &str { self.media.on_redaction.as_str() }
 }
 

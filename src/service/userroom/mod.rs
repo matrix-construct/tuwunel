@@ -361,6 +361,7 @@ impl Service {
 		}
 
 		// Check if this is a media retention confirmation reaction
+		//todo: maybe dont match for emojis here
 		match emoji {
 			| "✅" => {
 				if let Err(e) = self
@@ -382,14 +383,14 @@ impl Service {
 					debug_warn!(user = %sender, reaction_to = %relates_to_event, "retention: failed to process ❌ reaction: {e}");
 				}
 			},
-			| "⚙️" => {
+			| "♻️" => {
 				if let Err(e) = self
 					.services
 					.media
 					.retention_auto_by_reaction(sender, relates_to_event)
 					.await
 				{
-					debug_warn!(user = %sender, reaction_to = %relates_to_event, "retention: failed to process ⚙️ reaction: {e}");
+					debug_warn!(user = %sender, reaction_to = %relates_to_event, "retention: failed to process ♻️ reaction: {e}");
 				}
 			},
 			| _ => {

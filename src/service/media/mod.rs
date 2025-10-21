@@ -298,7 +298,9 @@ impl Service {
 						.globals
 						.user_is_local(owner.as_ref())
 					{
-						let body = self.build_retention_notice(&candidate, event_value.as_ref());
+						let body = self
+							.build_retention_notice(&candidate, event_value.as_ref())
+							.await;
 						match self
 							.services
 							.userroom
@@ -309,7 +311,7 @@ impl Service {
 								// add reaction options:
 								// ✅ to confirm deletion
 								// ❌ to cancel
-								// ⚙️ to always auto-delete for room type
+								// ♻️ to always auto-delete for room type
 								let confirm_id = match self
 									.services
 									.userroom
@@ -337,12 +339,12 @@ impl Service {
 								let auto_id = match self
 									.services
 									.userroom
-									.add_reaction(owner.as_ref(), &event_id, "⚙️")
+									.add_reaction(owner.as_ref(), &event_id, "♻️")
 									.await
 								{
 									| Ok(id) => Some(id.to_string()),
 									| Err(e) => {
-										debug_warn!(%event_id, "retention: failed to add ⚙️ reaction: {e}");
+										debug_warn!(%event_id, "retention: failed to add ♻️ reaction: {e}");
 										None
 									},
 								};
@@ -466,42 +468,78 @@ impl Service {
 		}
 	}
 
-	fn build_retention_notice(
+	async fn build_retention_notice(
 		&self,
 		candidate: &RetentionCandidate,
 		event_value: Option<&Value>,
 	) -> String {
-		let room_segment = candidate
-			.room_id
-			.as_deref()
-			.map(|room| format!(" in room {room}"))
-			.unwrap_or_default();
+		// Try to get the room name instead of just the ID
+		let room_segment = if let Some(room_id_str) = candidate.room_id.as_deref() {
+			if let Ok(room_id) = ruma::RoomId::parse(room_id_str) {
+				// Try to get the room name
+				if let Ok(name) = self
+					.services
+					.state_accessor
+					.get_name(&room_id)
+					.await
+				{
+					format!(" in room \"{name}\"")
+				} else {
+					format!(" in room {room_id_str}")
+				}
+			} else {
+				format!(" in room {room_id_str}")
+			}
+		} else {
+			String::new()
+		};
 
+		// Format timestamp in a human-readable way
 		let timestamp = event_value
 			.and_then(|val| val.get("origin_server_ts"))
 			.and_then(canonical_json_to_u64)
-			.map(|ts| format!(" at {ts}"))
+			.and_then(|ts_millis| {
+				use std::time::{Duration, UNIX_EPOCH};
+				let duration = Duration::from_millis(ts_millis);
+				let datetime = UNIX_EPOCH + duration;
+				let now = SystemTime::now();
+
+				if let Ok(elapsed) = now.duration_since(datetime) {
+					let secs = elapsed.as_secs();
+					if secs < 60 {
+						Some(format!(" (just now)"))
+					} else if secs < 3600 {
+						Some(format!(" ({} minutes ago)", secs / 60))
+					} else if secs < 86400 {
+						Some(format!(" ({} hours ago)", secs / 3600))
+					} else {
+						Some(format!(" ({} days ago)", secs / 86400))
+					}
+				} else {
+					None
+				}
+			})
 			.unwrap_or_default();
 
 		let encryption_warning = if candidate.from_encrypted_room {
-			"\n\n⚠️ WARNING: This media was detected from an encrypted room based on upload \
+			"\n\n**Warning:** This media was uploaded from an encrypted room based on upload \
 			 timing. Detection may have false positives since the server cannot read encrypted \
-			 messages. Use auto-delete at your own risk."
+			 messages. It is accurate, but use auto-delete in encrypted rooms at your own risk."
 		} else {
 			""
 		};
 
 		let room_type = if candidate.from_encrypted_room {
-			"encrypted rooms"
+			"**encrypted rooms**"
 		} else {
-			"unencrypted rooms"
+			"**unencrypted rooms**"
 		};
 
 		format!(
-			"A piece of media ({mxc}) you uploaded{room_segment}{timestamp} is pending \
-			 deletion.{encryption_warning}\n\nReact with:\n✅ to confirm deletion\n❌ to keep \
-			 it\n⚙️ to always auto-delete media in {room_type}\n\n(You can also run `!user \
-			 retention confirm {mxc}` to delete it manually.)",
+			"A piece of media ({mxc}) you uploaded{timestamp}{room_segment} is pending deletion \
+			 because you redacted it.{encryption_warning}\n\nReact with:\n✅ to confirm \
+			 deletion\n❌ to keep it\n♻️ to always auto-delete media in {room_type}\n\n(You can \
+			 also run `!user retention confirm {mxc}` to delete it manually.)",
 			mxc = candidate.mxc
 		)
 	}
@@ -592,7 +630,7 @@ impl Service {
 		}
 	}
 
-	/// Auto-delete (⚙️ reaction) - enable auto-delete for this room type and
+	/// Auto-delete (♻️ reaction) - enable auto-delete for this room type and
 	/// delete immediately
 	pub async fn retention_auto_by_reaction(
 		&self,
@@ -605,7 +643,7 @@ impl Service {
 			.find_mxc_by_notification_event(notification_event_id.as_str())
 			.await
 		{
-			debug_info!(user = %user, event_id = %notification_event_id, mxc = %mxc, "retention: user enabled auto-delete via ⚙️ reaction");
+			debug_info!(user = %user, event_id = %notification_event_id, mxc = %mxc, "retention: user enabled auto-delete via ♻️ reaction");
 			let (deleted_bytes, confirm_reaction_id, cancel_reaction_id, from_encrypted_room) =
 				self.retention
 					.auto_delete_candidate(self, &mxc, user)
