@@ -23,12 +23,12 @@ use tuwunel_core::{
 		event::Event,
 		pdu::{PduCount, PduEvent, PduId, RawPduId},
 	},
-	utils::{self, ReadyExt},
+	utils::{self, ReadyExt, result::LogErr},
 };
 use tuwunel_database::{Json, Map};
 
 use super::{ExtractBody, ExtractRelatesTo, ExtractRelatesToEventId, RoomMutexGuard};
-use crate::{appservice::NamespaceRegex, rooms::state_compressor::CompressedState};
+use crate::rooms::state_compressor::CompressedState;
 
 /// Append the incoming event setting the state snapshot to the state from
 /// the server that sent the event.
@@ -426,63 +426,12 @@ where
 	drop(next_count1);
 	drop(next_count2);
 
-	for appservice in self.services.appservice.read().await.values() {
-		if self
-			.services
-			.state_cache
-			.appservice_in_room(pdu.room_id(), appservice)
-			.await
-		{
-			self.services
-				.sending
-				.send_pdu_appservice(appservice.registration.id.clone(), pdu_id)?;
-
-			continue;
-		}
-
-		// If the RoomMember event has a non-empty state_key, it is targeted at someone.
-		// If it is our appservice user, we send this PDU to it.
-		if *pdu.kind() == TimelineEventType::RoomMember {
-			if let Some(state_key_uid) = &pdu
-				.state_key
-				.as_ref()
-				.and_then(|state_key| UserId::parse(state_key.as_str()).ok())
-			{
-				let appservice_uid = appservice.registration.sender_localpart.as_str();
-				if state_key_uid == &appservice_uid {
-					self.services
-						.sending
-						.send_pdu_appservice(appservice.registration.id.clone(), pdu_id)?;
-
-					continue;
-				}
-			}
-		}
-
-		let matching_users = |users: &NamespaceRegex| {
-			appservice.users.is_match(pdu.sender().as_str())
-				|| *pdu.kind() == TimelineEventType::RoomMember
-					&& pdu
-						.state_key
-						.as_ref()
-						.is_some_and(|state_key| users.is_match(state_key))
-		};
-		let matching_aliases = |aliases: NamespaceRegex| {
-			self.services
-				.alias
-				.local_aliases_for_room(pdu.room_id())
-				.ready_any(move |room_alias| aliases.is_match(room_alias.as_str()))
-		};
-
-		if matching_aliases(appservice.aliases.clone()).await
-			|| appservice.rooms.is_match(pdu.room_id().as_str())
-			|| matching_users(&appservice.users)
-		{
-			self.services
-				.sending
-				.send_pdu_appservice(appservice.registration.id.clone(), pdu_id)?;
-		}
-	}
+	self.services
+		.appservice
+		.append_pdu(pdu_id, pdu)
+		.await
+		.log_err()
+		.ok();
 
 	Ok(pdu_id)
 }

@@ -1,3 +1,4 @@
+mod append;
 mod namespace_regex;
 mod registration_info;
 
