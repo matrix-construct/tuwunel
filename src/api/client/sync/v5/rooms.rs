@@ -176,6 +176,7 @@ async fn handle_room(
 				.binary_search(pdu.event_type())
 				.is_ok()
 		})
+		.filter(|(_, pdu)| !pdu.is_redacted())
 		.map(at!(0))
 		.filter(|count| matches!(count, PduCount::Normal(_)))
 		.map(PduCount::into_unsigned)
