@@ -155,6 +155,7 @@ EOF
 FROM input AS complement-tester
 ARG complement_verbose=0
 ARG complement_debug=0
+ARG complement_dirty=0
 ARG complement_count=1
 ARG complement_parallel=16
 ARG complement_shuffle=1337
@@ -179,6 +180,7 @@ ENV complement_tests="$complement_tests"
 ENV complement_skip="$complement_skip"
 ENV complement_run="$complement_run"
 ENV complement_tests="$complement_tests"
+ENV COMPLEMENT_ENABLE_DIRTY_RUNS="$complement_dirty"
 ENV COMPLEMENT_ALWAYS_PRINT_SERVER_LOGS="$complement_verbose"
 ENV COMPLEMENT_HOSTNAME_RUNNING_COMPLEMENT="host.docker.internal"
 ENV COMPLEMENT_HOST_MOUNTS="/var/run/docker.sock:/var/run/docker.sock"

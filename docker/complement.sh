@@ -16,6 +16,7 @@ default_sys_target="x86_64-v1-linux-gnu"
 default_sys_version="testing-slim"
 
 default_complement_verbose=0
+default_complement_dirty=1
 default_complement_count=1
 default_complement_parallel=1
 default_complement_shuffle=0
@@ -53,6 +54,7 @@ set +a
 envs=""
 envs="$envs -e complement_verbose=${complement_verbose:-$default_complement_verbose}"
 envs="$envs -e complement_count=${complement_count:-$default_complement_count}"
+envs="$envs -e complement_dirty=${complement_dirty:-$default_complement_dirty}"
 envs="$envs -e complement_parallel=${complement_parallel:-$default_complement_parallel}"
 envs="$envs -e complement_shuffle=${complement_shuffle:-$default_complement_shuffle}"
 envs="$envs -e complement_timeout=${complement_timeout:-$default_complement_timeout}"
