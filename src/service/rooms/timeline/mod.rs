@@ -49,8 +49,6 @@ struct Data {
 	eventid_outlierpdu: Arc<Map>,
 	eventid_pduid: Arc<Map>,
 	pduid_pdu: Arc<Map>,
-	userroomid_highlightcount: Arc<Map>,
-	userroomid_notificationcount: Arc<Map>,
 	db: Arc<Database>,
 }
 
@@ -89,8 +87,6 @@ impl crate::Service for Service {
 				eventid_outlierpdu: args.db["eventid_outlierpdu"].clone(),
 				eventid_pduid: args.db["eventid_pduid"].clone(),
 				pduid_pdu: args.db["pduid_pdu"].clone(),
-				userroomid_highlightcount: args.db["userroomid_highlightcount"].clone(),
-				userroomid_notificationcount: args.db["userroomid_notificationcount"].clone(),
 				db: args.db.clone(),
 			},
 			mutex_insert: RoomMutexMap::new(),

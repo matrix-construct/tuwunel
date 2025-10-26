@@ -1,3 +1,5 @@
+mod append;
+
 use std::{fmt::Debug, mem, sync::Arc};
 
 use bytes::BytesMut;
@@ -30,7 +32,7 @@ use tuwunel_core::{
 	},
 	warn,
 };
-use tuwunel_database::{Deserialized, Ignore, Interfix, Json, Map};
+use tuwunel_database::{Database, Deserialized, Ignore, Interfix, Json, Map};
 
 pub struct Service {
 	db: Data,
@@ -40,6 +42,9 @@ pub struct Service {
 struct Data {
 	senderkey_pusher: Arc<Map>,
 	pushkey_deviceid: Arc<Map>,
+	userroomid_highlightcount: Arc<Map>,
+	userroomid_notificationcount: Arc<Map>,
+	db: Arc<Database>,
 }
 
 impl crate::Service for Service {
@@ -48,6 +53,9 @@ impl crate::Service for Service {
 			db: Data {
 				senderkey_pusher: args.db["senderkey_pusher"].clone(),
 				pushkey_deviceid: args.db["pushkey_deviceid"].clone(),
+				userroomid_highlightcount: args.db["userroomid_highlightcount"].clone(),
+				userroomid_notificationcount: args.db["userroomid_notificationcount"].clone(),
+				db: args.db.clone(),
 			},
 			services: args.services.clone(),
 		}))
