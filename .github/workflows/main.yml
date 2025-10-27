@@ -48,7 +48,7 @@ jobs:
       docker_repo: ${{vars.DOCKER_REPO}}
       release_url: ${{steps.release.outputs.upload_url}}
       pages_url: 'https://matrix-construct.github.io/tuwunel/'
-      rust_sdk_integration: ${{vars.RUST_SDK_INTEGRATION || 'true'}}
+      rust_sdk_integ: ${{vars.RUST_SDK_INTEGRATION || 'true'}}
       head_msg: ${{github.event.head_commit.message || github.event.workflow_run.head_commit.message}}
 
     strategy:
@@ -176,7 +176,7 @@ jobs:
     with:
       head_msg: ${{needs.init.outputs.head_msg}}
       build_nix: ${{fromJSON(needs.init.outputs.build_nix)}}
-      rust_sdk_integration: ${{fromJSON(needs.init.outputs.rust_sdk_integration)}}
+      rust_sdk_integ: ${{fromJSON(needs.init.outputs.rust_sdk_integ)}}
       complement: ${{fromJSON(needs.init.outputs.complement)}}
       complement_runner: ${{needs.init.outputs.complement_runner}}
       cargo_profiles: ${{needs.init.outputs.cargo_profiles}}
