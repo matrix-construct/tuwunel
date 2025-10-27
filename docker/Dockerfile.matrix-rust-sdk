@@ -1,25 +1,28 @@
 # syntax = docker/dockerfile:1.11-labs
 
-FROM input AS matrix-rust-sdk-integration
+FROM input AS rust-sdk-integration
 ARG sys_name
 ARG sys_version
-ARG rust_toolchain
+ARG feat_set
 ARG rust_target
+ARG rust_toolchain
+ARG cargo_profile
 ARG RUSTUP_HOME
 ARG CARGO_HOME
 ARG CARGO_TARGET
-ARG MRSDK_TARGET_DIR="/usr/src/matrix-rust-sdk"
-ARG mrsdk_profile="release"
-ARG mrsdk_target_share="${MRSDK_TARGET_DIR}/${sys_name}/${sys_version}/${rust_target}/${rust_toolchain}/${mrsdk_profile}/_shared_cache"
+ARG MRSDK_TARGET_DIR="/usr/src/matrix-rust-sdk/target"
+ARG mrsdk_target_share
+#ARG mrsdk_ref="integration"
+ARG mrsdk_ref="tuwunel-changes"
 ARG mrsdk_test_args=""
 ARG mrsdk_test_opts=""
 ARG mrsdk_skip_list=""
-
-WORKDIR /
-COPY --link --from=input . .
+ARG mrsdk_parallel=2
+ARG mrsdk_startup_delay="10s"
+ARG mrsdk_testee="/usr/bin/tuwunel"
 
 WORKDIR /usr/src
-ADD --link https://github.com/matrix-construct/matrix-rust-sdk.git#integration matrix-rust-sdk
+ADD --link https://github.com/matrix-construct/matrix-rust-sdk.git#${mrsdk_ref} matrix-rust-sdk
 
 WORKDIR /etc
 COPY <<EOF tuwunel.toml
@@ -59,49 +62,39 @@ WORKDIR /usr/bin
 COPY --link --from=install /usr/bin/tuwunel .
 
 WORKDIR /usr/src/matrix-rust-sdk
-ENV targ_dir="${MRSDK_TARGET_DIR}/${mrsdk_profile}"
-ENV targ_targ_dir="${MRSDK_TARGET_DIR}/${rust_target}/${mrsdk_profile}"
+SHELL ["/bin/bash", "-c"]
 ENV RUST_BACKTRACE="full"
 ENV TUWUNEL_CONFIG="/etc/tuwunel.toml"
 ENV TUWUNEL_DATABASE_PATH="/var/db/tuwunel"
-ENV TUWUNEL_SERVER_NAME="localhost:6167"
-ENV TUWUNEL_PORT="[6167]"
-ENV HOMESERVER_URL="http://localhost:6167"
+ENV TUWUNEL_SERVER_NAME="localhost"
+ENV TUWUNEL_PORT="[8448]"
+ENV HOMESERVER_URL="http://localhost:8448"
 RUN \
 --mount=type=cache,dst=${RUSTUP_HOME}/downloads,sharing=shared \
 --mount=type=cache,dst=${CARGO_HOME}/registry,sharing=shared \
 --mount=type=cache,dst=${CARGO_HOME}/git,sharing=shared \
---mount=type=cache,dst=${targ_dir}/deps,id=${mrsdk_target_share}/deps,sharing=locked \
---mount=type=cache,dst=${targ_dir}/build,id=${mrsdk_target_share}/build,sharing=locked \
---mount=type=cache,dst=${targ_dir}/examples,id=${mrsdk_target_share}/examples,sharing=locked \
---mount=type=cache,dst=${targ_dir}/incremental,id=${mrsdk_target_share}/incremental,sharing=locked \
---mount=type=cache,dst=${targ_dir}/.fingerprint,id=${mrsdk_target_share}/fingerprint,sharing=locked \
---mount=type=cache,dst=${targ_targ_dir}/deps,id=${mrsdk_target_share}/deps,sharing=locked \
---mount=type=cache,dst=${targ_targ_dir}/build,id=${mrsdk_target_share}/build,sharing=locked \
---mount=type=cache,dst=${targ_targ_dir}/examples,id=${mrsdk_target_share}/examples,sharing=locked \
---mount=type=cache,dst=${targ_targ_dir}/incremental,id=${mrsdk_target_share}/incremental,sharing=locked \
---mount=type=cache,dst=${targ_targ_dir}/.fingerprint,id=${mrsdk_target_share}/fingerprint,sharing=locked \
+--mount=type=cache,dst=${MRSDK_TARGET_DIR},id=${mrsdk_target_share},sharing=locked \
 <<EOF
     set -eux
 
-    nohup /usr/bin/tuwunel 1> /var/log/tuwunel.log &
-    PID=$!; trap "sleep 10s; set +ex; kill -QUIT ${PID}; wait ${PID}" EXIT
-    sleep 3s
+    nohup ${mrsdk_testee[@]} 1> /var/log/tuwunel.log &
+    PID=$!; trap "sleep 10s; set +e; kill -QUIT ${PID}; wait ${PID}" EXIT
+    sleep "${mrsdk_startup_delay}"
 
     rustup run ${rust_toolchain} \
         cargo test \
             --locked \
             --release \
-            --color always \
-            --features default \
-            --target "${rust_target}" \
-            --target-dir "${MRSDK_TARGET_DIR}" \
-            --package matrix-sdk-integration-testing \
-            ${mrsdk_test_args} \
+            "--color=always" \
+            "--features=default" \
+            "--target=${rust_target}" \
+            "--target-dir=${MRSDK_TARGET_DIR}" \
+            "--package=matrix-sdk-integration-testing" \
+            ${mrsdk_test_args[@]} \
             -- \
-            --test-threads 1 \
-            --color always \
-            ${mrsdk_skip_list} \
-            ${mrsdk_test_opts} \
+            "--color=always" \
+            "--test-threads=${mrsdk_parallel}" \
+            ${mrsdk_skip_list[@]} \
+            ${mrsdk_test_opts[@]} \
             ;
 EOF

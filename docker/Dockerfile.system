@@ -12,9 +12,6 @@ ARG var_lib_apt
 ARG packages
 ARG DEBIAN_FRONTEND
 
-WORKDIR /
-COPY --link --from=input . .
-
 ENV DEBIAN_FRONTEND="${DEBIAN_FRONTEND}"
 RUN \
 --mount=type=cache,dst=/var/cache,id=${var_cache},sharing=locked \

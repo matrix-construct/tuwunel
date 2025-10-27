@@ -3,9 +3,6 @@
 FROM input AS source
 ARG git_checkout
 
-WORKDIR /
-COPY --link --from=input . .
-
 ADD --link --keep-git-dir . /usr/src/tuwunel
 WORKDIR /usr/src/tuwunel
 RUN <<EOF
@@ -30,7 +27,6 @@ ARG JEMALLOC_OVERRIDE
 ARG ROCKSDB_LIB_DIR
 
 WORKDIR /
-COPY --link --from=input . .
 COPY --link --from=rust ${RUST_HOME} ${RUST_HOME}
 COPY --link --from=source /usr/src/tuwunel /usr/src/tuwunel
 
@@ -66,9 +62,6 @@ ARG rust_toolchain
 ARG RUSTUP_HOME
 ARG CARGO_HOME
 ARG CARGO_TARGET
-
-WORKDIR /
-COPY --link --from=input . .
 
 WORKDIR /usr/src/tuwunel
 RUN \

@@ -6,9 +6,6 @@ ARG rust_target
 ARG rustup_version="1.28.2"
 ARG rustup_profile="minimal"
 
-WORKDIR /
-COPY --link --from=input . .
-
 WORKDIR ${RUST_HOME}
 RUN <<EOF
     set -eux
@@ -31,9 +28,6 @@ ARG rustup_profile="minimal"
 ARG CARGO_TERM_VERBOSE
 ARG rustup_components
 ARG cargo_installs
-
-WORKDIR /
-COPY --link --from=input . .
 
 WORKDIR ${RUST_HOME}
 ENV CARGO_TARGET="${rust_target}"

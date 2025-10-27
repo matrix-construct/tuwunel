@@ -40,7 +40,7 @@ on:
         default: true
       complement_runner:
         type: string
-      rust_sdk_integration:
+      rust_sdk_integ:
         type: boolean
         default: true
       build_nix:
@@ -81,10 +81,10 @@ jobs:
       && contains(fromJSON(inputs.rust_toolchains), fromJSON('["nightly"]')[0])
       && contains(fromJSON(inputs.sys_targets), fromJSON('["x86_64-v1-linux-gnu"]')[0])
 
-    name: Unit
+    name: Module
     uses: ./.github/workflows/bake.yml
     with:
-      bake_targets: '["unit", "integration"]'
+      bake_targets: '["unit", "integ"]'
       cargo_profiles: '["test"]'
       feat_sets: '["all"]'
       rust_toolchains: ${{inputs.rust_toolchains}}
@@ -107,7 +107,7 @@ jobs:
     name: Bench
     uses: ./.github/workflows/bake.yml
     with:
-      bake_targets: '["unit", "integration"]'
+      bake_targets: '["unit", "integ"]'
       cargo_profiles: '["bench"]'
       feat_sets: '["all"]'
       rust_toolchains: '["nightly"]'
@@ -119,7 +119,7 @@ jobs:
       excludes: ${{inputs.excludes}}
       includes: ${{inputs.includes}}
 
-  valgrind:
+  memcheck:
     if: >
       !contains(inputs.head_msg, '[ci only it]')
       && contains(fromJSON(inputs.cargo_profiles), fromJSON('["bench"]')[0])
@@ -130,8 +130,9 @@ jobs:
     name: Memcheck
     uses: ./.github/workflows/bake.yml
     with:
-      bake_targets: '["integration-valgrind"]'
-      cargo_profiles: '["bench"]'
+      #bake_targets: '["unit-valgrind", "integ-valgrind"]'
+      bake_targets: '["integ-valgrind"]'
+      cargo_profiles: '["bench"]' # use bench not release for debug syms
       feat_sets: '["all"]'
       rust_toolchains: '["nightly"]'
       sys_names: ${{inputs.sys_names}}
@@ -139,8 +140,8 @@ jobs:
       rust_targets: ${{inputs.rust_targets}}
       sys_targets: '["x86_64-v3-linux-gnu"]'
       machines: ${{inputs.machines}}
-      excludes: ${{inputs.excludes}}
       includes: ${{inputs.includes}}
+      excludes: ${{inputs.excludes}}
 
   smoke:
     if: >
@@ -222,6 +223,7 @@ jobs:
       !failure() && !cancelled()
       && !contains(inputs.head_msg, '[ci only it]')
       && !contains(inputs.head_msg, '[ci no build]')
+      && !contains(github.ref, 'refs/pull')
       && contains(fromJSON(inputs.cargo_profiles), fromJSON('["release"]')[0])
       && contains(fromJSON(inputs.feat_sets), fromJSON('["all"]')[0])
       && contains(fromJSON(inputs.rust_toolchains), fromJSON('["stable"]')[0])
@@ -243,45 +245,56 @@ jobs:
       excludes: ${{inputs.excludes}}
       includes: ${{inputs.includes}}
 
-  matrix-rust-sdk-integration:
+  rust-sdk-integ:
     if: >
       !failure() && !cancelled()
       && !contains(inputs.head_msg, '[ci no build]')
-      && inputs.rust_sdk_integration
+      && inputs.rust_sdk_integ
       && contains(fromJSON(inputs.feat_sets), fromJSON('["all"]')[0])
       && contains(fromJSON(inputs.rust_toolchains), fromJSON('["nightly"]')[0])
       && contains(fromJSON(inputs.rust_targets), fromJSON('["x86_64-unknown-linux-gnu"]')[0])
-      && contains(fromJSON(inputs.sys_targets), fromJSON('["x86_64-v1-linux-gnu"]')[0])
 
     name: Matrix SDK Integration
     needs: [smoke]
     uses: ./.github/workflows/bake.yml
     with:
-      bake_targets: '["matrix-rust-sdk-integration"]'
+      #bake_targets: '["rust-sdk-integ", "rust-sdk-valgrind"]'
+      bake_targets: '["rust-sdk-integ"]'
       cargo_profiles: ${{inputs.cargo_profiles}}
       feat_sets: '["all"]'
       rust_toolchains: '["nightly"]'
       sys_names: ${{inputs.sys_names}}
       sys_versions: ${{inputs.sys_versions}}
       rust_targets: '["x86_64-unknown-linux-gnu"]'
-      sys_targets: '["x86_64-v1-linux-gnu"]'
+      sys_targets: ${{inputs.sys_targets}}
       machines: '["X64"]'
       runner: ${{inputs.complement_runner}}
       includes: ${{inputs.includes}}
       artifact: >
         {
-          "matrix-rust-sdk-integration": {
+          "rust-sdk-integ": {
             "src": "/var/log/tuwunel.log",
-            "dst": "matrix-rust-sdk-integration.tuwunel.log",
+            "dst": "rust-sdk-integ.tuwunel.log",
+          },
+          "rust-sdk-valgrind": {
+            "src": "/var/log/tuwunel.log",
+            "dst": "rust-sdk-valgrind.tuwunel.log",
           }
         }
       excludes: >
         [
+          {"bake_target": "rust-sdk-valgrind", "cargo_profile": "test"},
           {"feat_set": "none"},
           {"feat_set": "logging"},
           {"cargo_profile": "release"},
           {"cargo_profile": "release-debuginfo"},
           {"cargo_profile": "release-native"},
+          {"cargo_profile": "test", "sys_target": "x86_64-v2-linux-gnu"},
+          {"cargo_profile": "test", "sys_target": "x86_64-v3-linux-gnu"},
+          {"cargo_profile": "bench", "sys_target": "x86_64-v1-linux-gnu"},
+          {"cargo_profile": "bench", "sys_target": "x86_64-v2-linux-gnu"},
+          {"rust_target": "aarch64-unknown-linux-gnu"},
+          {"sys_target": "aarch64-v8-linux-gnu"},
         ]
 
   complement:

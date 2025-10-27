@@ -703,7 +703,6 @@
 {"Action":"pass","Test":"TestSyncTimelineGap/full"}
 {"Action":"pass","Test":"TestSyncTimelineGap/incremental"}
 {"Action":"pass","Test":"TestTentativeEventualJoiningAfterRejecting"}
-{"Action":"fail","Test":"TestThreadReceiptsInSyncMSC4102"}
 {"Action":"fail","Test":"TestThreadSubscriptions"}
 {"Action":"fail","Test":"TestThreadSubscriptions/Can_create_automatic_subscription_to_a_thread"}
 {"Action":"fail","Test":"TestThreadSubscriptions/Can_subscribe_to_and_unsubscribe_from_a_thread"}

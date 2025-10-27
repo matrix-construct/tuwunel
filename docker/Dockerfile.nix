@@ -4,6 +4,7 @@ FROM input AS nix-base
 
 WORKDIR /
 COPY --link --from=input . .
+
 RUN \
 --mount=type=cache,dst=/nix,sharing=shared \
 --mount=type=cache,dst=/root/.cache/nix,sharing=shared \

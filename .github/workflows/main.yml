@@ -20,13 +20,13 @@ jobs:
     name: Init
     runs-on: ${{matrix.runner}}
     env:
-      default_cargo_profiles: '["test", "release"]'
+      default_cargo_profiles: '["test", "bench", "release"]'
       default_feat_sets: '["none", "default", "all"]'
       default_rust_toolchains: '["nightly", "stable"]'
       default_sys_names: '["debian"]'
       default_sys_versions: '["testing-slim"]'
       default_rust_targets: '["x86_64-unknown-linux-gnu"]'
-      default_sys_targets: '["x86_64-v1-linux-gnu"]'
+      default_sys_targets: '["x86_64-v1-linux-gnu", "x86_64-v3-linux-gnu"]'
       default_machines: '["X64"]'
 
     outputs:
@@ -38,17 +38,17 @@ jobs:
       sys_targets: ${{vars.SYS_TARGETS || env.default_sys_targets}}
       sys_versions: ${{vars.SYS_VERSIONS || env.default_sys_versions}}
       machines: ${{vars.MACHINES || env.default_machines}}
-      package: ${{vars.PACKAGE || !contains(github.ref, 'refs/pull/')}}
-      publish: ${{vars.PUBLISH || !contains(github.ref, 'refs/pull/')}}
-      build_nix: ${{vars.BUILD_NIX || !contains(github.ref, 'refs/pull/')}}
+      package: ${{vars.PACKAGE != 'false'}}
+      publish: ${{vars.PUBLISH != 'false'}}
+      build_nix: ${{vars.BUILD_NIX != 'false'}}
       build_pkgs: ${{vars.BUILD_PKGS || github.ref == 'refs/heads/main' || contains(github.ref, 'tags/v')}}
       check_pkgs: ${{vars.CHECK_PKGS || 'false'}}
-      complement: ${{vars.COMPLEMENT || 'true'}}
+      complement: ${{vars.COMPLEMENT != 'false'}}
       complement_runner: 'het'
       docker_repo: ${{vars.DOCKER_REPO}}
       release_url: ${{steps.release.outputs.upload_url}}
       pages_url: 'https://matrix-construct.github.io/tuwunel/'
-      rust_sdk_integration: ${{vars.RUST_SDK_INTEGRATION || 'true'}}
+      rust_sdk_integ: ${{vars.RUST_SDK_INTEGRATION != 'false'}}
       head_msg: ${{github.event.head_commit.message || github.event.workflow_run.head_commit.message}}
 
     strategy:
@@ -176,7 +176,7 @@ jobs:
     with:
       head_msg: ${{needs.init.outputs.head_msg}}
       build_nix: ${{fromJSON(needs.init.outputs.build_nix)}}
-      rust_sdk_integration: ${{fromJSON(needs.init.outputs.rust_sdk_integration)}}
+      rust_sdk_integ: ${{fromJSON(needs.init.outputs.rust_sdk_integ)}}
       complement: ${{fromJSON(needs.init.outputs.complement)}}
       complement_runner: ${{needs.init.outputs.complement_runner}}
       cargo_profiles: ${{needs.init.outputs.cargo_profiles}}
@@ -222,6 +222,7 @@ jobs:
     if: >
       !failure() && !cancelled()
       && needs.init.outputs.package
+      && !contains(github.ref, 'refs/pull')
       && !contains(needs.init.outputs.head_msg, '[ci only it]')
       && !contains(needs.init.outputs.head_msg, '[ci no build]')
       && !contains(needs.init.outputs.head_msg, '[ci no package]')
@@ -285,6 +286,7 @@ jobs:
     if: >
       !failure() && !cancelled()
       && needs.init.outputs.publish
+      && !contains(github.ref, 'refs/pull')
       && !contains(needs.init.outputs.head_msg, '[ci only it]')
       && !contains(needs.init.outputs.head_msg, '[ci no build]')
       && !contains(needs.init.outputs.head_msg, '[ci no package]')

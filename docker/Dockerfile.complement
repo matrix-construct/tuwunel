@@ -103,9 +103,6 @@ EOF
 
 FROM input AS complement-testee
 
-WORKDIR /
-COPY --link --from=input . .
-
 EXPOSE 8008 8448
 RUN mkdir /database
 COPY --from=complement-config * /complement/
@@ -114,9 +111,6 @@ ENTRYPOINT tuwunel -Oserver_name=\""$SERVER_NAME\""
 
 
 FROM input AS complement-testee-valgrind
-
-WORKDIR /
-COPY --link --from=input . .
 
 EXPOSE 8008 8448
 RUN mkdir /database
@@ -166,9 +160,6 @@ ARG complement_skip=""
 ARG complement_tags="conduwuit_blacklist"
 ARG complement_tests="./tests/..."
 ARG complement_base_image
-
-WORKDIR /
-COPY --link --from=input . .
 
 WORKDIR /usr/src/complement
 ENV COMPLEMENT_DEBUG=$complement_debug
