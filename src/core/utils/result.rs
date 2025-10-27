@@ -4,6 +4,7 @@ mod filter;
 mod flat_ok;
 mod inspect_log;
 mod into_is_ok;
+mod is_err_or;
 mod log_debug_err;
 mod log_err;
 mod map_expect;
@@ -19,6 +20,7 @@ pub use self::{
 	flat_ok::FlatOk,
 	inspect_log::{ErrDebugLog, ErrLog},
 	into_is_ok::IntoIsOk,
+	is_err_or::IsErrOr,
 	log_debug_err::LogDebugErr,
 	log_err::LogErr,
 	map_expect::MapExpect,
