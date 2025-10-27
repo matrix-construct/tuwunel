@@ -10,9 +10,12 @@ ARG CARGO_TARGET_DIR
 ARG cargo_target_profile
 ARG cargo_target_artifact
 ARG cargo_target_share
+ARG cargo_share
 ARG cargo_profile
 ARG cargo_features
 ARG cargo_spec_features
+ARG targ_dir="${CARGO_TARGET_DIR}/${cargo_target_profile}"
+ARG targ_targ_dir="${CARGO_TARGET_DIR}/${rust_target}/${cargo_target_profile}"
 ARG pkg_dir
 ARG deb_args=""
 
@@ -20,17 +23,15 @@ WORKDIR /
 COPY --link --from=input . .
 
 WORKDIR /usr/src/tuwunel
-ENV targ_dir="${CARGO_TARGET_DIR}/${cargo_target_profile}"
-ENV targ_targ_dir="${CARGO_TARGET_DIR}/${rust_target}/${cargo_target_profile}"
 RUN \
 --mount=type=cache,dst=${RUSTUP_HOME}/downloads,sharing=shared \
 --mount=type=cache,dst=${CARGO_HOME}/registry,sharing=shared \
 --mount=type=cache,dst=${CARGO_HOME}/git,sharing=shared \
---mount=type=cache,dst=${targ_dir}/deps,id=${cargo_target_share}/deps,sharing=locked \
---mount=type=cache,dst=${targ_dir}/build,id=${cargo_target_share}/build,sharing=locked \
---mount=type=cache,dst=${targ_dir}/examples,id=${cargo_target_share}/examples,sharing=locked \
---mount=type=cache,dst=${targ_dir}/incremental,id=${cargo_target_share}/incremental,sharing=locked \
---mount=type=cache,dst=${targ_dir}/.fingerprint,id=${cargo_target_share}/fingerprint,sharing=locked \
+--mount=type=cache,dst=${targ_dir}/deps,id=${cargo_share}/deps,sharing=locked \
+--mount=type=cache,dst=${targ_dir}/build,id=${cargo_share}/build,sharing=locked \
+--mount=type=cache,dst=${targ_dir}/examples,id=${cargo_share}/examples,sharing=locked \
+--mount=type=cache,dst=${targ_dir}/incremental,id=${cargo_share}/incremental,sharing=locked \
+--mount=type=cache,dst=${targ_dir}/.fingerprint,id=${cargo_share}/fingerprint,sharing=locked \
 --mount=type=cache,dst=${targ_targ_dir}/deps,id=${cargo_target_share}/deps,sharing=locked \
 --mount=type=cache,dst=${targ_targ_dir}/build,id=${cargo_target_share}/build,sharing=locked \
 --mount=type=cache,dst=${targ_targ_dir}/examples,id=${cargo_target_share}/examples,sharing=locked \

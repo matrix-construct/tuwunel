@@ -703,8 +703,8 @@ inherits = "release-native.build-override"
 #]
 
 [profile.bench]
-debug = false
-strip = false
+debug = "limited"
+strip = "none"
 #rustflags = [
 #	"-Cremark=all",
 #	'-Ztime-passes',
