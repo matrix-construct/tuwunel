@@ -9,10 +9,29 @@ use ruma::{
 	serde::Raw,
 };
 use tuwunel_core::{
-	Err, Error, Result, err, implement,
+	Err, Error, Result, debug_error, err, implement,
 	utils::{ReadyExt, stream::TryIgnore, string::Unquoted},
 };
 use tuwunel_database::{Deserialized, Ignore, Json};
+
+#[implement(super::Service)]
+pub async fn add_one_time_keys<'a, Keys>(
+	&self,
+	user_id: &UserId,
+	device_id: &DeviceId,
+	keys: Keys,
+) -> Result
+where
+	Keys: Iterator<Item = (&'a OneTimeKeyId, &'a Raw<OneTimeKey>)> + Send + 'a,
+{
+	for (id, key) in keys {
+		self.add_one_time_key(user_id, device_id, id, key)
+			.await
+			.ok();
+	}
+
+	Ok(())
+}
 
 #[implement(super::Service)]
 pub async fn add_one_time_key(
@@ -22,22 +41,25 @@ pub async fn add_one_time_key(
 	one_time_key_key: &KeyId<OneTimeKeyAlgorithm, OneTimeKeyName>,
 	one_time_key_value: &Raw<OneTimeKey>,
 ) -> Result {
-	// All devices have metadata
-	// Only existing devices should be able to call this, but we shouldn't assert
-	// either...
-	let key = (user_id, device_id);
-	if self
-		.db
-		.userdeviceid_metadata
-		.qry(&key)
-		.await
-		.is_err()
-	{
+	if !self.device_exists(user_id, device_id).await {
 		return Err!(Database(error!(
 			?user_id,
 			?device_id,
 			"User does not exist or device has no metadata."
 		)));
+	}
+
+	if let Err(e) = one_time_key_value
+		.deserialize()
+		.map_err(Into::into)
+	{
+		debug_error!(
+			?one_time_key_key,
+			?one_time_key_value,
+			"Invalid one time key JSON submitted by client, skipping: {e}"
+		);
+
+		return Err(e);
 	}
 
 	let mut key = user_id.as_bytes().to_vec();
@@ -46,17 +68,14 @@ pub async fn add_one_time_key(
 	key.push(0xFF);
 	// TODO: Use DeviceKeyId::to_string when it's available (and update everything,
 	// because there are no wrapping quotation marks anymore)
-	key.extend_from_slice(
-		serde_json::to_string(one_time_key_key)
-			.expect("DeviceKeyId::to_string always works")
-			.as_bytes(),
-	);
+	key.extend_from_slice(serde_json::to_string(one_time_key_key)?.as_bytes());
 
 	let count = self.services.globals.next_count();
 
 	self.db
 		.onetimekeyid_onetimekeys
 		.raw_put(key, Json(one_time_key_value));
+
 	self.db
 		.userid_lastonetimekeyupdate
 		.raw_put(user_id, *count);

@@ -392,6 +392,14 @@ pub async fn get_device_metadata(
 }
 
 #[implement(super::Service)]
+pub async fn device_exists(&self, user_id: &UserId, device_id: &DeviceId) -> bool {
+	self.db
+		.userdeviceid_metadata
+		.contains(&(user_id, device_id))
+		.await
+}
+
+#[implement(super::Service)]
 pub async fn get_devicelist_version(&self, user_id: &UserId) -> Result<u64> {
 	self.db
 		.userid_devicelistversion

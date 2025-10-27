@@ -37,30 +37,16 @@ pub(crate) async fn upload_keys_route(
 ) -> Result<upload_keys::v3::Response> {
 	let (sender_user, sender_device) = body.sender();
 
-	for (key_id, one_time_key) in body
+	let one_time_keys = body
 		.one_time_keys
 		.iter()
 		.take(services.config.one_time_key_limit)
-	{
-		if one_time_key
-			.deserialize()
-			.inspect_err(|e| {
-				debug_warn!(
-					?key_id,
-					?one_time_key,
-					"Invalid one time key JSON submitted by client, skipping: {e}"
-				);
-			})
-			.is_err()
-		{
-			continue;
-		}
+		.map(|(id, val)| (id.as_ref(), val));
 
-		services
-			.users
-			.add_one_time_key(sender_user, sender_device, key_id, one_time_key)
-			.await?;
-	}
+	services
+		.users
+		.add_one_time_keys(sender_user, sender_device, one_time_keys)
+		.await?;
 
 	if let Some(device_keys) = &body.device_keys {
 		let deser_device_keys = device_keys.deserialize().map_err(|e| {
