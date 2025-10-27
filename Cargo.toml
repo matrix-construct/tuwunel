@@ -339,6 +339,7 @@ features = [
     "unstable-msc2870",
     "unstable-msc3026",
     "unstable-msc3061",
+    "unstable-msc3814",
     "unstable-msc3245",
     "unstable-msc3381", # polls
     "unstable-msc3489", # beacon / live location

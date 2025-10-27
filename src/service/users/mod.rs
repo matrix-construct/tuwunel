@@ -1,3 +1,4 @@
+mod dehydrated_device;
 pub mod device;
 mod keys;
 mod ldap;
@@ -45,6 +46,7 @@ struct Data {
 	userfilterid_filter: Arc<Map>,
 	userid_avatarurl: Arc<Map>,
 	userid_blurhash: Arc<Map>,
+	userid_dehydrateddevice: Arc<Map>,
 	userid_devicelistversion: Arc<Map>,
 	userid_displayname: Arc<Map>,
 	userid_lastonetimekeyupdate: Arc<Map>,
@@ -74,6 +76,7 @@ impl crate::Service for Service {
 				userfilterid_filter: args.db["userfilterid_filter"].clone(),
 				userid_avatarurl: args.db["userid_avatarurl"].clone(),
 				userid_blurhash: args.db["userid_blurhash"].clone(),
+				userid_dehydrateddevice: args.db["userid_dehydrateddevice"].clone(),
 				userid_devicelistversion: args.db["userid_devicelistversion"].clone(),
 				userid_displayname: args.db["userid_displayname"].clone(),
 				userid_lastonetimekeyupdate: args.db["userid_lastonetimekeyupdate"].clone(),

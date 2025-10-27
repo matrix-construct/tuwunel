@@ -10,7 +10,7 @@ use ruma::{
 };
 use serde_json::json;
 use tuwunel_core::{
-	Err, Result, at, implement,
+	Err, Result, implement,
 	utils::{
 		self, ReadyExt,
 		stream::{IterStream, TryIgnore},
@@ -89,6 +89,11 @@ pub async fn remove_device(&self, user_id: &UserId, device_id: &DeviceId) {
 				.await;
 		})
 		.await;
+
+	// Removes the dehydrated device if the ID matches, otherwise no-op
+	self.remove_dehydrated_device(user_id, Some(device_id))
+		.await
+		.ok();
 
 	// TODO: Remove onetimekeys
 
