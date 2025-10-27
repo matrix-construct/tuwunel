@@ -116,7 +116,7 @@ pub(crate) async fn login_route(
 			.create_device(
 				&user_id,
 				&device_id,
-				(&access_token, expires_in),
+				(Some(&access_token), expires_in),
 				refresh_token.as_deref(),
 				body.initial_device_display_name.clone(),
 				Some(client.to_string()),

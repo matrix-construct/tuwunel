@@ -24,12 +24,12 @@ pub const TOKEN_LENGTH: usize = 32;
 
 /// Adds a new device to a user.
 #[implement(super::Service)]
-#[tracing::instrument(level = "debug", skip(self))]
+#[tracing::instrument(level = "info", skip(self, access_token))]
 pub async fn create_device(
 	&self,
 	user_id: &UserId,
 	device_id: &DeviceId,
-	(access_token, expires_in): (&str, Option<Duration>),
+	(access_token, expires_in): (Option<&str>, Option<Duration>),
 	refresh_token: Option<&str>,
 	initial_device_display_name: Option<String>,
 	client_ip: Option<String>,
@@ -50,13 +50,18 @@ pub async fn create_device(
 
 	increment(&self.db.userid_devicelistversion, user_id.as_bytes());
 	self.db.userdeviceid_metadata.put(key, Json(val));
-	self.set_access_token(user_id, device_id, access_token, expires_in, refresh_token)
-		.await
+
+	if let Some(access_token) = access_token {
+		self.set_access_token(user_id, device_id, access_token, expires_in, refresh_token)
+			.await?;
+	}
+
+	Ok(())
 }
 
 /// Removes a device from a user.
 #[implement(super::Service)]
-#[tracing::instrument(level = "debug", skip(self))]
+#[tracing::instrument(level = "info", skip(self))]
 pub async fn remove_device(&self, user_id: &UserId, device_id: &DeviceId) {
 	// Remove access tokens
 	self.remove_tokens(user_id, device_id).await;
@@ -155,6 +160,11 @@ pub async fn set_access_token(
 	expires_in: Option<Duration>,
 	refresh_token: Option<&str>,
 ) -> Result {
+	assert!(
+		access_token.len() >= TOKEN_LENGTH,
+		"Caller must supply an access_token >= {TOKEN_LENGTH} chars."
+	);
+
 	if let Some(refresh_token) = refresh_token {
 		self.set_refresh_token(user_id, device_id, refresh_token)
 			.await?;
