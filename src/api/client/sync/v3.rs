@@ -375,6 +375,7 @@ async fn build_sync_events(
 	let to_device_events = services
 		.users
 		.get_to_device_events(sender_user, sender_device, Some(since), Some(next_batch))
+		.map(at!(1))
 		.collect::<Vec<_>>();
 
 	let device_one_time_keys_count = services

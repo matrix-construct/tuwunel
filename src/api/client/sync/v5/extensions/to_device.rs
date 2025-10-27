@@ -1,6 +1,6 @@
 use futures::StreamExt;
 use ruma::api::client::sync::sync_events::v5::response;
-use tuwunel_core::{self, Result};
+use tuwunel_core::{self, Result, at};
 
 use super::{Connection, SyncInfo};
 
@@ -17,6 +17,7 @@ pub(super) async fn collect(
 	let events: Vec<_> = services
 		.users
 		.get_to_device_events(sender_user, sender_device, None, Some(conn.next_batch))
+		.map(at!(1))
 		.collect()
 		.await;
 

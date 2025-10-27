@@ -319,7 +319,7 @@ pub fn get_to_device_events<'a>(
 	device_id: &'a DeviceId,
 	since: Option<u64>,
 	to: Option<u64>,
-) -> impl Stream<Item = Raw<AnyToDeviceEvent>> + Send + 'a {
+) -> impl Stream<Item = (u64, Raw<AnyToDeviceEvent>)> + Send + 'a {
 	type Key<'a> = (&'a UserId, &'a DeviceId, u64);
 
 	let from = (user_id, device_id, since.map_or(0, |since| since.saturating_add(1)));
@@ -331,7 +331,7 @@ pub fn get_to_device_events<'a>(
 		.ready_take_while(move |((user_id_, device_id_, count), _): &(Key<'_>, _)| {
 			user_id == *user_id_ && device_id == *device_id_ && to.is_none_or(|to| *count <= to)
 		})
-		.map(at!(1))
+		.map(|((_, _, count), event)| (count, event))
 }
 
 #[implement(super::Service)]
