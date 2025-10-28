@@ -1820,6 +1820,23 @@
 #
 #support_mxid =
 
+# RTC transports configuration for MatrixRTC (MSC4143).
+# This is served to allow clients to discover
+# available RTC infrastructure like SFUs.
+#
+# This should be an array of transport objects. Each transport needs at minimum:
+# - "type": the transport type (e.g., "livekit_multi_sfu")
+# - Additional fields specific to that transport type
+#
+# Example for Element Call with LiveKit:
+# ```toml
+# [[global.well_known.rtc_transports]]
+# type = "livekit_multi_sfu"
+# livekit_service_url = "https://livekit.example.com"
+# ```
+#
+#rtc_transports = false
+
 #[global.blurhashing]
 
 # blurhashing x component, 4 is recommended by https://blurha.sh/

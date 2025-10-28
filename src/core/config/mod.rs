@@ -2134,6 +2134,26 @@ pub struct WellKnownConfig {
 	///
 	/// example "@admin:example.com"
 	pub support_mxid: Option<OwnedUserId>,
+
+	/// Element Call / MatrixRTC configuration (MSC4143).
+	/// Configures the LiveKit SFU server for voice/video calls.
+	///
+	/// Requires a LiveKit server with JWT authentication.
+	/// The `livekit_service_url` should point to your LiveKit JWT endpoint.
+	///
+	/// Note: You must also set `client` above to your homeserver URL.
+	///
+	/// Example:
+	/// ```toml
+	/// [global.well_known]
+	/// client = "https://matrix.yourdomain.com"
+	///
+	/// [[global.well_known.rtc_transports]]
+	/// type = "livekit"
+	/// livekit_service_url = "https://livekit.yourdomain.com"
+	/// ```
+	#[serde(default)]
+	pub rtc_transports: Vec<serde_json::Value>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Default)]

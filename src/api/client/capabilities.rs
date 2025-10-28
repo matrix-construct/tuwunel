@@ -51,5 +51,16 @@ pub(crate) async fn get_capabilities_route(
 		json!({"enabled": services.config.forget_forced_upon_leave}),
 	)?;
 
+	// MSC4143: MatrixRTC - advertise RTC transport support
+	if !services
+		.server
+		.config
+		.well_known
+		.rtc_transports
+		.is_empty()
+	{
+		capabilities.set("org.matrix.msc4143.rtc_foci", json!({"supported": true}))?;
+	}
+
 	Ok(get_capabilities::v3::Response { capabilities })
 }

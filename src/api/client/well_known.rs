@@ -1,8 +1,6 @@
 use axum::{Json, extract::State, response::IntoResponse};
-use ruma::api::client::discovery::{
-	discover_homeserver::{self, HomeserverInfo},
-	discover_support::{self, Contact},
-};
+use ruma::api::client::discovery::discover_support::{self, Contact};
+use serde_json::{Value, json};
 use tuwunel_core::{Err, Result};
 
 use crate::Ruma;
@@ -10,20 +8,58 @@ use crate::Ruma;
 /// # `GET /.well-known/matrix/client`
 ///
 /// Returns the .well-known URL if it is configured, otherwise returns 404.
+/// Also includes RTC transport configuration for Element Call (MSC4143).
 pub(crate) async fn well_known_client(
 	State(services): State<crate::State>,
-	_body: Ruma<discover_homeserver::Request>,
-) -> Result<discover_homeserver::Response> {
+) -> Result<Json<Value>> {
 	let client_url = match services.server.config.well_known.client.as_ref() {
 		| Some(url) => url.to_string(),
 		| None => return Err!(Request(NotFound("Not found."))),
 	};
 
-	Ok(discover_homeserver::Response {
-		homeserver: HomeserverInfo { base_url: client_url },
-		identity_server: None,
-		tile_server: None,
-	})
+	let mut response = json!({
+		"m.homeserver": {
+			"base_url": client_url
+		}
+	});
+
+	// Add RTC transport configuration if available (MSC4143 / Element Call)
+	// Element Call has evolved through several versions with different field
+	// expectations
+	if !services
+		.server
+		.config
+		.well_known
+		.rtc_transports
+		.is_empty()
+	{
+		if let Some(obj) = response.as_object_mut() {
+			// Element Call expects "org.matrix.msc4143.rtc_foci" (not rtc_foci_preferred)
+			// with an array of transport objects
+			obj.insert(
+				"org.matrix.msc4143.rtc_foci".to_owned(),
+				json!(services.server.config.well_known.rtc_transports),
+			);
+
+			// Also add the LiveKit URL directly for backward compatibility
+			if let Some(first_transport) = services
+				.server
+				.config
+				.well_known
+				.rtc_transports
+				.first()
+			{
+				if let Some(livekit_url) = first_transport.get("livekit_service_url") {
+					obj.insert(
+						"org.matrix.msc4143.livekit_service_url".to_owned(),
+						livekit_url.clone(),
+					);
+				}
+			}
+		}
+	}
+
+	Ok(Json(response))
 }
 
 /// # `GET /.well-known/matrix/support`

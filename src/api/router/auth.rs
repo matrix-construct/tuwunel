@@ -122,11 +122,13 @@ pub(super) async fn auth(
 			Err(BadRequest(UnknownToken { soft_logout: true }, "Expired access token."))
 		},
 
-		| (AppserviceToken, User(_)) =>
-			Err!(Request(Unauthorized("Appservice tokens must be used on this endpoint."))),
+		| (AppserviceToken, User(_)) => {
+			Err!(Request(Unauthorized("Appservice tokens must be used on this endpoint.")))
+		},
 
-		| (ServerSignatures, Appservice(_) | User(_)) =>
-			Err!(Request(Unauthorized("Server signatures must be used on this endpoint."))),
+		| (ServerSignatures, Appservice(_) | User(_)) => {
+			Err!(Request(Unauthorized("Server signatures must be used on this endpoint.")))
+		},
 
 		| (ServerSignatures, Token::None) => Ok(auth_server(services, request, json_body).await?),
 
@@ -182,8 +184,9 @@ fn check_auth_still_required(services: &Services, metadata: &Metadata, token: &T
 				.require_auth_for_profile_requests =>
 			match token {
 				| Token::Appservice(_) | Token::User(_) => Ok(()),
-				| Token::None | Token::Expired(_) | Token::Invalid =>
-					Err!(Request(MissingToken("Missing or invalid access token."))),
+				| Token::None | Token::Expired(_) | Token::Invalid => {
+					Err!(Request(MissingToken("Missing or invalid access token.")))
+				},
 			},
 		| &get_public_rooms::v3::Request::METADATA
 			if !services
@@ -192,8 +195,9 @@ fn check_auth_still_required(services: &Services, metadata: &Metadata, token: &T
 				.allow_public_room_directory_without_auth =>
 			match token {
 				| Token::Appservice(_) | Token::User(_) => Ok(()),
-				| Token::None | Token::Expired(_) | Token::Invalid =>
-					Err!(Request(MissingToken("Missing or invalid access token."))),
+				| Token::None | Token::Expired(_) | Token::Invalid => {
+					Err!(Request(MissingToken("Missing or invalid access token.")))
+				},
 			},
 		| _ => Ok(()),
 	}
