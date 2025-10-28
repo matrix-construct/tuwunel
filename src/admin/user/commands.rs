@@ -2,7 +2,7 @@ use std::{collections::BTreeMap, fmt::Write as _};
 
 use futures::{FutureExt, StreamExt};
 use ruma::{
-	Int, OwnedEventId, OwnedRoomId, OwnedRoomOrAliasId, OwnedUserId, UserId,
+	Int, OwnedDeviceId, OwnedEventId, OwnedRoomId, OwnedRoomOrAliasId, OwnedUserId, UserId,
 	events::{
 		RoomAccountDataEventType, StateEventType,
 		room::{
@@ -221,6 +221,25 @@ pub(super) async fn deactivate(&self, no_leave_rooms: bool, user_id: String) -> 
 	deactivate_user(self.services, &user_id, no_leave_rooms).await?;
 
 	self.write_str(&format!("User {user_id} has been deactivated"))
+		.await
+}
+
+#[admin_command]
+pub(super) async fn delete_device(
+	&self,
+	user_id: OwnedUserId,
+	device_id: OwnedDeviceId,
+) -> Result {
+	if !self.services.globals.user_is_local(&user_id) {
+		return Err!("Cannot delete device of remote user");
+	}
+
+	self.services
+		.users
+		.remove_device(&user_id, &device_id)
+		.await;
+
+	self.write_str(&format!("User {user_id}'s device {device_id} removed."))
 		.await
 }
 

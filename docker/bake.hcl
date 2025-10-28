@@ -527,16 +527,16 @@ group "smoke" {
 }
 
 target "smoke-nix" {
-    name = elem("smoke-nix", [sys_name, sys_version, sys_target])
+    name = elem("smoke-nix", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target])
     tags = [
-        elem_tag("smoke-nix", [sys_name, sys_version, sys_target], "latest"),
+        elem_tag("smoke-nix", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target], "latest"),
     ]
     output = ["type=cacheonly,compression=zstd,mode=min,compression-level=${cache_compress_level}"]
     dockerfile = "${docker_dir}/Dockerfile.nix"
     target = "smoke-nix"
-    matrix = sys
+    matrix = cargo_rust_feat_sys
     inherits = [
-        elem("build-nix", [sys_name, sys_version, sys_target]),
+        elem("build-nix", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target]),
     ]
 }
 
@@ -961,20 +961,20 @@ target "nix" {
     target = "nix-pkg"
     matrix = cargo_rust_feat_sys
     inherits = [
-        elem("build-nix", [sys_name, sys_version, sys_target]),
+        elem("build-nix", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target]),
     ]
 }
 
 target "build-nix" {
-    name = elem("build-nix", [sys_name, sys_version, sys_target])
+    name = elem("build-nix", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target])
     tags = [
-        elem_tag("build-nix", [sys_name, sys_version, sys_target], "latest"),
+        elem_tag("build-nix", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target], "latest"),
     ]
     output = ["type=cacheonly,compression=zstd,mode=min,compression-level=${cache_compress_level}"]
     cache_to = ["type=local,compression=zstd,mode=max,compression-level=${cache_compress_level}"]
     dockerfile = "${docker_dir}/Dockerfile.nix"
     target = "build-nix"
-    matrix = sys
+    matrix = cargo_rust_feat_sys
     inherits = [
         elem("builder", [sys_name, sys_version, sys_target]),
         elem("source", [sys_name, sys_version, sys_target]),

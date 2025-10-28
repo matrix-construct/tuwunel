@@ -1,7 +1,7 @@
 mod commands;
 
 use clap::Subcommand;
-use ruma::{OwnedEventId, OwnedRoomId, OwnedRoomOrAliasId};
+use ruma::{OwnedDeviceId, OwnedEventId, OwnedRoomId, OwnedRoomOrAliasId, OwnedUserId};
 use tuwunel_core::Result;
 
 use crate::admin_command_dispatch;
@@ -57,6 +57,12 @@ pub(super) enum UserCommand {
 		#[arg(short, long)]
 		/// Also deactivate admin accounts and will assume leave all rooms too
 		force: bool,
+	},
+
+	/// - Deletes a user's device.
+	DeleteDevice {
+		user_id: OwnedUserId,
+		device_id: OwnedDeviceId,
 	},
 
 	/// - List local users in the database

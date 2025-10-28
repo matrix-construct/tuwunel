@@ -9,7 +9,7 @@ use tuwunel_core::{
 };
 
 use crate::{
-	Ignore, Interfix, de, ser,
+	Cbor, Ignore, Interfix, de, ser,
 	ser::{Json, serialize_to_vec},
 };
 
@@ -202,6 +202,53 @@ fn ser_json_raw_json() {
 	let a = serialize_to_vec(Json(value)).expect("failed to serialize json value");
 	let s = String::from_utf8_lossy(&a);
 	assert_eq!(&s, r#"{"event_fields":["content.body"]}"#);
+}
+
+#[test]
+fn ser_cbor() {
+	use tuwunel_core::ruma::api::client::filter::FilterDefinition;
+
+	let filter = FilterDefinition {
+		event_fields: Some(vec!["content.body".to_owned()]),
+		..Default::default()
+	};
+
+	let serialized = serialize_to_vec(Cbor(&filter)).expect("failed to serialize cbor");
+	let deserialized: FilterDefinition = de::from_slice::<Cbor<_>>(&serialized)
+		.expect("failed to deserialize cbor")
+		.0;
+
+	assert_eq!(filter.event_fields, deserialized.event_fields);
+}
+
+#[test]
+#[cfg(disable)]
+fn ser_cbor_ruma_raw() {
+	use serde_json::value::RawValue;
+	use tuwunel_core::ruma::api::client::filter::FilterDefinition;
+
+	struct Foo {
+		a: String,
+		b: Box<RawValue>,
+	}
+
+	let filter = FilterDefinition {
+		event_fields: Some(vec!["content.body".to_owned()]),
+		..Default::default()
+	};
+
+	let foo = Foo {
+		a: "test".into(),
+		b: serde_json::value::to_raw_value(&filter).expect("failed to serialize to raw value"),
+	};
+
+	let serialized = serialize_to_vec(Cbor(&foo)).expect("failed to serialize cbor");
+	let deserialized: Foo = de::from_slice::<Cbor<_>>(&serialized)
+		.expect("failed to deserialize cbor")
+		.0;
+
+	assert_eq!(foo.a, deserialized.a);
+	assert_eq!(foo.a.get(), deserialized.b.get());
 }
 
 #[test]

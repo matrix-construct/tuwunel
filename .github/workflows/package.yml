@@ -181,10 +181,10 @@ jobs:
             "mime": "application/x-rpm"
           },
           "nix": {
-            "dst": "tuwunel.drv.tar.zst",
-            "src": "/opt/tuwunel/tuwunel.drv",
+            "dst": "tuwunel.nix.tar.zst",
+            "src": "/opt/tuwunel.nix.tar",
             "mime": "application/zstd",
-            "zstd": 6
+            "zstd": 11
           }
         }
 
