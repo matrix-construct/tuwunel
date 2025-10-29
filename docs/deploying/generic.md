@@ -141,46 +141,31 @@ sudo chmod 700 /var/lib/tuwunel/
 
 ## Setting up the Reverse Proxy
 
-We recommend Caddy as a reverse proxy, as it is trivial to use, handling TLS certificates, reverse proxy headers, etc transparently with proper defaults.
-For other software, please refer to their respective documentation or online guides.
+We recommend Caddy as a reverse proxy, as it is trivial to use, handling TLS certificates, reverse proxy headers, etc. transparently with proper defaults. However, Nginx is also well-supported and widely used.
 
-### Caddy
+**Choose your reverse proxy:**
 
-After installing Caddy via your preferred method, create `/etc/caddy/conf.d/tuwunel_caddyfile`
-and enter this (substitute for your server name).
+- **[Caddy Setup Guide](reverse-proxy-caddy.md)** - Recommended for ease of use and automatic TLS
+- **[Nginx Setup Guide](reverse-proxy-nginx.md)** - Popular choice with extensive documentation
 
-```caddyfile
-your.server.name, your.server.name:8448 {
-    # TCP reverse_proxy
-    reverse_proxy localhost:8008
-    # UNIX socket
-    #reverse_proxy unix//run/tuwunel/tuwunel.sock
-}
-```
+### Quick Overview
 
-That's it! Just start and enable the service and you're set.
+Regardless of which reverse proxy you choose, you will need to:
 
-```bash
-sudo systemctl enable --now caddy
-```
+1. **Reverse proxy the following routes:**
+   - `/_matrix/` - core Matrix C-S and S-S APIs
+   - `/_tuwunel/` - ad-hoc Tuwunel routes such as `/local_user_count` and `/server_version`
 
-### Other Reverse Proxies
+2. **Optionally reverse proxy (recommended):**
+   - `/.well-known/matrix/client` and `/.well-known/matrix/server` if using Tuwunel to perform delegation (see the `[global.well_known]` config section)
+   - `/.well-known/matrix/support` if using Tuwunel to send the homeserver admin contact and support page (formerly known as MSC1929)
+   - `/` if you would like to see `hewwo from tuwunel woof!` at the root
 
-_Specific contributions for other proxies are welcome!_
+3. **Handle ports:**
+   - Port 443 (HTTPS) for client-server API
+   - Port 8448 for federation (if federating with other homeservers)
 
-You will need to reverse proxy everything under following routes:
-- `/_matrix/` - core Matrix C-S and S-S APIs
-- `/_tuwunel/` - ad-hoc Tuwunel routes such as `/local_user_count` and
-`/server_version`
-
-You can optionally reverse proxy the following individual routes:
-- `/.well-known/matrix/client` and `/.well-known/matrix/server` if using
-Tuwunel to perform delegation (see the `[global.well_known]` config section)
-- `/.well-known/matrix/support` if using Tuwunel to send the homeserver admin
-contact and support page (formerly known as MSC1929)
-- `/` if you would like to see `hewwo from tuwunel woof!` at the root
-
-See the following spec pages for more details on these files:
+See the following spec pages for more details on well-known files:
 - [`/.well-known/matrix/server`](https://spec.matrix.org/latest/client-server-api/#getwell-knownmatrixserver)
 - [`/.well-known/matrix/client`](https://spec.matrix.org/latest/client-server-api/#getwell-knownmatrixclient)
 - [`/.well-known/matrix/support`](https://spec.matrix.org/latest/client-server-api/#getwell-knownmatrixsupport)
@@ -189,19 +174,13 @@ Examples of delegation:
 - <https://matrix.org/.well-known/matrix/server>
 - <https://matrix.org/.well-known/matrix/client>
 
-For Apache and Nginx there are many examples available online.
+### Other Reverse Proxies
 
-Lighttpd is not supported as it seems to mess with the `X-Matrix` Authorization
-header, making federation non-functional. If a workaround is found, feel free to share to get it added to the documentation here.
+_Specific contributions for other proxies are welcome!_
 
-If using Apache, you need to use `nocanon` in your `ProxyPass` directive to prevent httpd from messing with the `X-Matrix` header (note that Apache isn't very good as a general reverse proxy and we discourage the usage of it if you can).
-
-If using Nginx, you need to give Tuwunel the request URI using `$request_uri`, or like so:
-- `proxy_pass http://127.0.0.1:6167$request_uri;`
-- `proxy_pass http://127.0.0.1:6167;`
-
-Nginx users need to increase `client_max_body_size` (default is 1M) to match
-`max_request_size` defined in tuwunel.toml.
+**Not Recommended:**
+- **Apache**: While possible, Apache requires special configuration (`nocanon` in `ProxyPass`) to prevent corruption of the `X-Matrix` header.
+- **Lighttpd**: Its proxy module alters the `X-Matrix` authorization header, breaking federation functionality.
 
 ## You're done
 
