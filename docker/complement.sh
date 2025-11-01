@@ -16,7 +16,7 @@ default_sys_target="x86_64-v1-linux-gnu"
 default_sys_version="testing-slim"
 
 default_complement_verbose=0
-default_complement_dirty=1
+default_complement_dirty=0
 default_complement_count=1
 default_complement_parallel=1
 default_complement_shuffle=0
@@ -32,9 +32,6 @@ skip="${skip}|TestRoomCreate/Parallel/POST_/createRoom_makes_a_room_with_a_topic
 skip="${skip}|TestLogin/parallel/POST_/"
 skip="${skip}|TestUnbanViaInvite"
 skip="${skip}|TestRoomState/Parallel/GET_/publicRooms_lists_newly-created_room"
-# flakes due to timeout in debug-mode
-skip="${skip}|TestMSC4297StateResolutionV2_1_starts_from_empty_set"
-skip="${skip}|TestMSC4297StateResolutionV2_1_includes_conflicted_subgraph"
 
 set -a
 cargo_profile="${cargo_profile:-$default_cargo_profile}"

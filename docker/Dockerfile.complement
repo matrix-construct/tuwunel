@@ -134,12 +134,13 @@ ENTRYPOINT valgrind \
 FROM input AS complement-base
 ARG var_cache
 ARG var_lib_apt
+ARG complement_ref="426bc3458e5287398ec39ab7d2b8f2e3103dcf39"
 ARG complement_tags="conduwuit_blacklist"
 ARG complement_tests="./tests/..."
 ARG complement_run=".*"
 
 WORKDIR /usr/src
-ADD https://github.com/matrix-construct/complement.git#403840348f6bcc9cc8ed1671dc2f638c2b1ce4ac complement
+ADD https://github.com/matrix-construct/complement.git#${complement_ref} complement
 
 WORKDIR /usr/src/complement
 ENV COMPLEMENT_BASE_IMAGE="complement-testee"
