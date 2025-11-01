@@ -3,7 +3,8 @@ use std::collections::BTreeMap;
 use axum::extract::State;
 use futures::{FutureExt, future::OptionFuture};
 use ruma::{
-	CanonicalJsonObject, Int, OwnedRoomAliasId, OwnedRoomId, OwnedUserId, RoomId, RoomVersionId,
+	CanonicalJsonObject, EventEncryptionAlgorithm, Int, OwnedRoomAliasId, OwnedRoomId,
+	OwnedUserId, RoomId, RoomVersionId,
 	api::client::room::{
 		self, create_room,
 		create_room::v3::{CreationContent, RoomPreset},
@@ -13,6 +14,7 @@ use ruma::{
 		room::{
 			canonical_alias::RoomCanonicalAliasEventContent,
 			create::RoomCreateEventContent,
+			encryption::RoomEncryptionEventContent,
 			guest_access::{GuestAccess, RoomGuestAccessEventContent},
 			history_visibility::{HistoryVisibility, RoomHistoryVisibilityEventContent},
 			join_rules::{JoinRule, RoomJoinRulesEventContent},
@@ -262,6 +264,7 @@ pub(crate) async fn create_room_route(
 		.await?;
 
 	// 6. Events listed in initial_state
+	let mut is_encrypted = false;
 	for event in &body.initial_state {
 		let mut pdu_builder = event
 			.deserialize_as_unchecked::<PduBuilder>()
@@ -292,11 +295,42 @@ pub(crate) async fn create_room_route(
 			continue;
 		}
 
+		if pdu_builder.event_type == TimelineEventType::RoomEncryption {
+			is_encrypted = true;
+		}
+
 		services
 			.timeline
 			.build_and_append_pdu(pdu_builder, sender_user, &room_id, &state_lock)
 			.boxed()
 			.await?;
+	}
+
+	if services.config.allow_encryption && !is_encrypted {
+		use RoomPreset::*;
+
+		let config = services
+			.config
+			.encryption_enabled_by_default_for_room_type
+			.as_deref()
+			.unwrap_or("off");
+
+		let invite = matches!(config, "invite");
+		let always = matches!(config, "all" | "invite");
+		if always || (invite && matches!(preset, PrivateChat | TrustedPrivateChat)) {
+			let algorithm = EventEncryptionAlgorithm::MegolmV1AesSha2;
+			let content = RoomEncryptionEventContent::new(algorithm);
+			services
+				.timeline
+				.build_and_append_pdu(
+					PduBuilder::state(String::new(), &content),
+					sender_user,
+					&room_id,
+					&state_lock,
+				)
+				.boxed()
+				.await?;
+		}
 	}
 
 	// 7. Events implied by name and topic

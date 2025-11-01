@@ -590,6 +590,17 @@ pub struct Config {
 	#[serde(default = "true_fn")]
 	pub allow_encryption: bool,
 
+	/// Controls whether locally-created rooms should be end-to-end encrypted by
+	/// default. This option is equivalent to the one found in Synapse.
+	///
+	/// Options:
+	/// - "all": All created rooms are encrypted.
+	/// - "invite": Any room created with `private_chat` or
+	///   `trusted_private_chat` presets.
+	/// - Other values default to no effect.
+	#[serde(default)]
+	pub encryption_enabled_by_default_for_room_type: Option<String>,
+
 	/// Controls whether federation is allowed or not. It is not recommended to
 	/// disable this after installation due to potential federation breakage but
 	/// this is technically not a permanent setting.
