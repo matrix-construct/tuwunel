@@ -16,7 +16,7 @@ fn common_prefix_empty() {
 
 #[test]
 fn common_prefix_none() {
-	let input = [];
+	let input: [&str; 0] = [];
 	let output = super::common_prefix(&input);
 	assert_eq!(output, "");
 }
