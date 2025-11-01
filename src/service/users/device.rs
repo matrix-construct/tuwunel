@@ -40,16 +40,13 @@ pub async fn create_device(
 		))));
 	}
 
-	let key = (user_id, device_id);
-	let val = Device {
+	let notify = true;
+	self.put_device_metadata(user_id, notify, &Device {
 		device_id: device_id.into(),
 		display_name: initial_device_display_name,
 		last_seen_ip: client_ip,
 		last_seen_ts: Some(MilliSecondsSinceUnixEpoch::now()),
-	};
-
-	increment(&self.db.userid_devicelistversion, user_id.as_bytes());
-	self.db.userdeviceid_metadata.put(key, Json(val));
+	});
 
 	if let Some(access_token) = access_token {
 		self.set_access_token(user_id, device_id, access_token, expires_in, refresh_token)
@@ -97,11 +94,11 @@ pub async fn remove_device(&self, user_id: &UserId, device_id: &DeviceId) {
 
 	// TODO: Remove onetimekeys
 
-	increment(&self.db.userid_devicelistversion, user_id.as_bytes());
-
 	let userdeviceid = (user_id, device_id);
 	self.db.userdeviceid_metadata.del(userdeviceid);
+
 	self.mark_device_key_update(user_id).await;
+	increment(&self.db.userid_devicelistversion, user_id.as_bytes());
 }
 
 /// Returns an iterator over all device ids of this user.
@@ -366,20 +363,15 @@ pub async fn remove_to_device_events<Until>(
 }
 
 #[implement(super::Service)]
-pub async fn update_device_metadata(
-	&self,
-	user_id: &UserId,
-	device_id: &DeviceId,
-	device: &Device,
-) -> Result {
-	increment(&self.db.userid_devicelistversion, user_id.as_bytes());
-
-	let key = (user_id, device_id);
+pub fn put_device_metadata(&self, user_id: &UserId, notify: bool, device: &Device) {
+	let key = (user_id, &device.device_id);
 	self.db
 		.userdeviceid_metadata
 		.put(key, Json(device));
 
-	Ok(())
+	if notify {
+		increment(&self.db.userid_devicelistversion, user_id.as_bytes());
+	}
 }
 
 /// Get device metadata.
@@ -394,6 +386,9 @@ pub async fn get_device_metadata(
 		.qry(&(user_id, device_id))
 		.await
 		.deserialized()
+		.inspect(|device: &Device| {
+			debug_assert_eq!(&device.device_id, device_id, "device_id mismatch");
+		})
 }
 
 #[implement(super::Service)]

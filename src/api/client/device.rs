@@ -61,18 +61,21 @@ pub(crate) async fn update_device_route(
 		.await
 	{
 		| Ok(mut device) => {
+			let notify = device.display_name != body.display_name;
 			device.display_name.clone_from(&body.display_name);
+
 			device
 				.last_seen_ip
 				.clone_from(&Some(client.to_string()));
+
 			device
 				.last_seen_ts
 				.clone_from(&Some(MilliSecondsSinceUnixEpoch::now()));
 
+			assert_eq!(device.device_id, body.device_id, "device_id mismatch");
 			services
 				.users
-				.update_device_metadata(sender_user, &body.device_id, &device)
-				.await?;
+				.put_device_metadata(sender_user, notify, &device);
 
 			Ok(update_device::v3::Response {})
 		},
@@ -80,6 +83,7 @@ pub(crate) async fn update_device_route(
 			let Some(appservice) = appservice else {
 				return Err!(Request(NotFound("Device not found.")));
 			};
+
 			if !appservice.registration.device_management {
 				return Err!(Request(NotFound("Device not found.")));
 			}
