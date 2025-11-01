@@ -1,13 +1,17 @@
 use axum::extract::State;
-use futures::{FutureExt, StreamExt, TryFutureExt};
-use ruma::api::{
-	client::error::ErrorKind,
-	federation::{
-		device::get_devices::{self, v1::UserDevice},
-		keys::{claim_keys, get_keys},
+use futures::{FutureExt, StreamExt, TryFutureExt, future::join4};
+use ruma::{
+	UserId,
+	api::{
+		client::device::Device,
+		federation::{
+			device::get_devices::{self, v1::UserDevice},
+			keys::{claim_keys, get_keys},
+		},
 	},
+	uint,
 };
-use tuwunel_core::{Error, Result};
+use tuwunel_core::{Err, Result, utils::future::TryExtExt};
 
 use crate::{
 	Ruma,
@@ -21,54 +25,65 @@ pub(crate) async fn get_devices_route(
 	State(services): State<crate::State>,
 	body: Ruma<get_devices::v1::Request>,
 ) -> Result<get_devices::v1::Response> {
-	if !services.globals.user_is_local(&body.user_id) {
-		return Err(Error::BadRequest(
-			ErrorKind::InvalidParam,
-			"Tried to access user from other server.",
-		));
+	let user_id = &body.user_id;
+	if !services.globals.user_is_local(user_id) {
+		return Err!(Request(InvalidParam("Tried to access user from other server.")));
 	}
 
-	let user_id = &body.user_id;
-	Ok(get_devices::v1::Response {
-		user_id: user_id.clone(),
-		stream_id: services
-			.users
-			.get_devicelist_version(user_id)
-			.await
-			.unwrap_or(0)
-			.try_into()?,
-		devices: services
-			.users
-			.all_devices_metadata(user_id)
-			.filter_map(async |metadata| {
-				let device_id = metadata.device_id.clone();
-				let device_id_clone = device_id.clone();
-				let device_id_string = device_id.as_str().to_owned();
-				let device_display_name = if services.config.allow_device_name_federation {
-					metadata.display_name.clone()
-				} else {
-					Some(device_id_string)
-				};
+	let allowed_signatures = |u: &UserId| u.server_name() == body.origin();
 
-				services
-					.users
-					.get_device_keys(user_id, &device_id_clone)
-					.map_ok(|keys| UserDevice { device_id, keys, device_display_name })
-					.map(Result::ok)
-					.await
-			})
-			.collect()
-			.await,
-		master_key: services
-			.users
-			.get_master_key(None, &body.user_id, &|u| u.server_name() == body.origin())
-			.await
-			.ok(),
-		self_signing_key: services
-			.users
-			.get_self_signing_key(None, &body.user_id, &|u| u.server_name() == body.origin())
-			.await
-			.ok(),
+	let master_key = services
+		.users
+		.get_master_key(None, user_id, &allowed_signatures)
+		.ok();
+
+	let self_signing_key = services
+		.users
+		.get_self_signing_key(None, user_id, &allowed_signatures)
+		.ok();
+
+	let stream_id = services
+		.users
+		.get_devicelist_version(user_id)
+		.map_ok(TryInto::try_into)
+		.map_ok(Result::ok)
+		.ok();
+
+	let devices = services
+		.users
+		.all_devices_metadata(user_id)
+		.filter_map(async |Device { device_id, display_name, .. }: Device| {
+			let device_display_name = services
+				.config
+				.allow_device_name_federation
+				.then_some(display_name)
+				.flatten()
+				.or_else(|| Some(device_id.as_str().to_owned()));
+
+			services
+				.users
+				.get_device_keys(user_id, &device_id)
+				.map_ok(|keys| UserDevice {
+					device_id: device_id.clone(),
+					device_display_name,
+					keys,
+				})
+				.map(Result::ok)
+				.await
+		})
+		.collect::<Vec<_>>();
+
+	let (stream_id, master_key, self_signing_key, devices) =
+		join4(stream_id, master_key, self_signing_key, devices)
+			.boxed()
+			.await;
+
+	Ok(get_devices::v1::Response {
+		user_id: body.body.user_id,
+		stream_id: stream_id.flatten().unwrap_or_else(|| uint!(0)),
+		devices,
+		self_signing_key,
+		master_key,
 	})
 }
 
@@ -84,10 +99,7 @@ pub(crate) async fn get_keys_route(
 		.iter()
 		.any(|(u, _)| !services.globals.user_is_local(u))
 	{
-		return Err(Error::BadRequest(
-			ErrorKind::InvalidParam,
-			"User does not belong to this server.",
-		));
+		return Err!(Request(InvalidParam("User does not belong to this server.")));
 	}
 
 	let result = get_keys_helper(
@@ -118,10 +130,7 @@ pub(crate) async fn claim_keys_route(
 		.iter()
 		.any(|(u, _)| !services.globals.user_is_local(u))
 	{
-		return Err(Error::BadRequest(
-			ErrorKind::InvalidParam,
-			"Tried to access user from other server.",
-		));
+		return Err!(Request(InvalidParam("Tried to access user from other server.")));
 	}
 
 	let result = claim_keys_helper(&services, &body.one_time_keys).await?;
