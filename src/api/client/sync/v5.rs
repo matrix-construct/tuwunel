@@ -108,7 +108,7 @@ pub(crate) async fn sync_events_v5_route(
 	let conn = conn_val.lock();
 	let ping_presence = services
 		.presence
-		.maybe_ping_presence(sender_user, &request.set_presence)
+		.maybe_ping_presence(sender_user, Some(sender_device), &request.set_presence)
 		.inspect_err(inspect_log)
 		.ok();
 

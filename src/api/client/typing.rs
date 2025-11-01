@@ -66,7 +66,11 @@ pub(crate) async fn create_typing_event_route(
 	// ping presence
 	services
 		.presence
-		.maybe_ping_presence(&body.user_id, &ruma::presence::PresenceState::Online)
+		.maybe_ping_presence(
+			&body.user_id,
+			body.sender_device.as_deref(),
+			&ruma::presence::PresenceState::Online,
+		)
 		.await?;
 
 	Ok(create_typing_event::v3::Response {})

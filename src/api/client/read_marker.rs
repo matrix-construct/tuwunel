@@ -93,7 +93,11 @@ pub(crate) async fn set_read_marker_route(
 
 		services
 			.presence
-			.maybe_ping_presence(sender_user, &ruma::presence::PresenceState::Online)
+			.maybe_ping_presence(
+				sender_user,
+				body.sender_device.as_deref(),
+				&ruma::presence::PresenceState::Online,
+			)
 			.await
 			.ok();
 	}
@@ -165,7 +169,11 @@ pub(crate) async fn create_receipt_route(
 
 			services
 				.presence
-				.maybe_ping_presence(sender_user, &ruma::presence::PresenceState::Online)
+				.maybe_ping_presence(
+					sender_user,
+					body.sender_device.as_deref(),
+					&ruma::presence::PresenceState::Online,
+				)
 				.await
 				.ok();
 		},

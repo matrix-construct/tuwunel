@@ -4,11 +4,20 @@ mod presence;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
-use futures::{Stream, StreamExt, TryFutureExt, stream::FuturesUnordered};
+use futures::{
+	Stream, StreamExt, TryFutureExt,
+	future::{OptionFuture, try_join},
+	stream::FuturesUnordered,
+};
 use loole::{Receiver, Sender};
-use ruma::{OwnedUserId, UInt, UserId, events::presence::PresenceEvent, presence::PresenceState};
+use ruma::{
+	DeviceId, OwnedUserId, UInt, UserId, events::presence::PresenceEvent, presence::PresenceState,
+};
 use tokio::{sync::RwLock, time::sleep};
-use tuwunel_core::{Error, Result, checked, debug, debug_warn, error, result::LogErr, trace};
+use tuwunel_core::{
+	Error, Result, checked, debug, debug_warn, error, result::LogErr, trace,
+	utils::future::OptionExt,
+};
 
 use self::{data::Data, presence::Presence};
 
@@ -46,7 +55,7 @@ impl crate::Service for Service {
 		// online
 		self.unset_all_presence().await;
 		_ = self
-			.maybe_ping_presence(&self.services.globals.server_user, &PresenceState::Online)
+			.maybe_ping_presence(&self.services.globals.server_user, None, &PresenceState::Online)
 			.await;
 
 		let receiver = self.timer_channel.1.clone();
@@ -73,7 +82,11 @@ impl crate::Service for Service {
 	async fn interrupt(&self) {
 		// set the server user as offline
 		_ = self
-			.maybe_ping_presence(&self.services.globals.server_user, &PresenceState::Offline)
+			.maybe_ping_presence(
+				&self.services.globals.server_user,
+				None,
+				&PresenceState::Offline,
+			)
 			.await;
 
 		let (timer_sender, _) = &self.timer_channel;
@@ -118,11 +131,12 @@ impl Service {
 			.await
 	}
 
-	/// Pings the presence of the given user in the given room, setting the
-	/// specified state.
+	/// Pings the presence of the given user, setting the specified state. When
+	/// device_id is supplied.
 	pub async fn maybe_ping_presence(
 		&self,
 		user_id: &UserId,
+		device_id: Option<&DeviceId>,
 		new_state: &PresenceState,
 	) -> Result {
 		const REFRESH_TIMEOUT: u64 = 60 * 1000;
@@ -150,6 +164,14 @@ impl Service {
 			return Ok(());
 		}
 
+		let update_device_seen: OptionFuture<_> = device_id
+			.map(|device_id| {
+				self.services
+					.users
+					.update_device_last_seen(user_id, device_id, None)
+			})
+			.into();
+
 		let status_msg = match last_presence {
 			| Ok((_, ref presence)) => presence.content.status_msg.clone(),
 			| Err(_) => Some(String::new()),
@@ -157,7 +179,16 @@ impl Service {
 
 		let last_active_ago = UInt::new(0);
 		let currently_active = *new_state == PresenceState::Online;
-		self.set_presence(user_id, new_state, Some(currently_active), last_active_ago, status_msg)
+		let set_presence = self.set_presence(
+			user_id,
+			new_state,
+			Some(currently_active),
+			last_active_ago,
+			status_msg,
+		);
+
+		try_join(set_presence, update_device_seen.unwrap_or(Ok(())))
+			.map_ok(|_| ())
 			.await
 	}
 
