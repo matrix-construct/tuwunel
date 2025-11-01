@@ -130,7 +130,7 @@ pub(crate) async fn sync_events_route(
 
 	let ping_presence = services
 		.presence
-		.maybe_ping_presence(sender_user, &body.body.set_presence)
+		.maybe_ping_presence(sender_user, Some(sender_device), &body.body.set_presence)
 		.inspect_err(inspect_log)
 		.ok();
 

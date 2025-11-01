@@ -49,7 +49,7 @@ pub(crate) async fn set_displayname_route(
 	// Presence update
 	services
 		.presence
-		.maybe_ping_presence(&body.user_id, &PresenceState::Online)
+		.maybe_ping_presence(&body.user_id, body.sender_device.as_deref(), &PresenceState::Online)
 		.await?;
 
 	Ok(set_display_name::v3::Response {})
@@ -149,7 +149,7 @@ pub(crate) async fn set_avatar_url_route(
 	// Presence update
 	services
 		.presence
-		.maybe_ping_presence(&body.user_id, &PresenceState::Online)
+		.maybe_ping_presence(&body.user_id, body.sender_device.as_deref(), &PresenceState::Online)
 		.await
 		.ok();
 

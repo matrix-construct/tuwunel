@@ -76,7 +76,7 @@ pub(crate) async fn delete_timezone_key_route(
 	// Presence update
 	services
 		.presence
-		.maybe_ping_presence(&body.user_id, &PresenceState::Online)
+		.maybe_ping_presence(&body.user_id, body.sender_device.as_deref(), &PresenceState::Online)
 		.await?;
 
 	Ok(delete_timezone_key::unstable::Response {})
@@ -104,7 +104,7 @@ pub(crate) async fn set_timezone_key_route(
 	// Presence update
 	services
 		.presence
-		.maybe_ping_presence(&body.user_id, &PresenceState::Online)
+		.maybe_ping_presence(&body.user_id, body.sender_device.as_deref(), &PresenceState::Online)
 		.await?;
 
 	Ok(set_timezone_key::unstable::Response {})
@@ -170,7 +170,7 @@ pub(crate) async fn set_profile_field_route(
 	// Presence update
 	services
 		.presence
-		.maybe_ping_presence(&body.user_id, &PresenceState::Online)
+		.maybe_ping_presence(&body.user_id, body.sender_device.as_deref(), &PresenceState::Online)
 		.await?;
 
 	Ok(set_profile_field::v3::Response {})
@@ -224,7 +224,7 @@ pub(crate) async fn delete_profile_field_route(
 	// Presence update
 	services
 		.presence
-		.maybe_ping_presence(&body.user_id, &PresenceState::Online)
+		.maybe_ping_presence(&body.user_id, body.sender_device.as_deref(), &PresenceState::Online)
 		.await?;
 
 	Ok(delete_profile_field::v3::Response {})

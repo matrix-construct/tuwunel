@@ -363,6 +363,26 @@ pub async fn remove_to_device_events<Until>(
 }
 
 #[implement(super::Service)]
+pub async fn update_device_last_seen(
+	&self,
+	user_id: &UserId,
+	device_id: &DeviceId,
+	last_seen: Option<MilliSecondsSinceUnixEpoch>,
+) -> Result {
+	let mut device = self
+		.get_device_metadata(user_id, device_id)
+		.await?;
+
+	device
+		.last_seen_ts
+		.replace(last_seen.unwrap_or_else(MilliSecondsSinceUnixEpoch::now));
+
+	self.put_device_metadata(user_id, false, &device);
+
+	Ok(())
+}
+
+#[implement(super::Service)]
 pub fn put_device_metadata(&self, user_id: &UserId, notify: bool, device: &Device) {
 	let key = (user_id, &device.device_id);
 	self.db
