@@ -6,8 +6,8 @@ use ruma::{
 	serde::Raw,
 };
 use serde::{Deserialize, Serialize};
-use tuwunel_core::{Err, Result, implement, trace};
-use tuwunel_database::{Deserialized, Json};
+use tuwunel_core::{Err, Result, at, implement, trace};
+use tuwunel_database::{Cbor, Deserialized};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DehydratedDevice {
@@ -62,7 +62,7 @@ pub async fn set_dehydrated_device(&self, user_id: &UserId, request: Request) ->
 	trace!(device_data = ?request.device_data);
 	self.db.userid_dehydrateddevice.raw_put(
 		user_id,
-		Json(&DehydratedDevice {
+		Cbor(DehydratedDevice {
 			device_id: request.device_id.clone(),
 			device_data: request.device_data,
 		}),
@@ -124,19 +124,6 @@ pub(super) async fn remove_dehydrated_device(
 	Ok(device_id)
 }
 
-/// Get the device_id of the user's dehydrated device.
-#[implement(super::Service)]
-#[tracing::instrument(
-	level = "debug",
-	skip_all,
-	fields(%user_id)
-)]
-pub async fn get_dehydrated_device_id(&self, user_id: &UserId) -> Result<OwnedDeviceId> {
-	self.get_dehydrated_device(user_id)
-		.await
-		.map(|device| device.device_id)
-}
-
 /// Get the dehydrated device private data
 #[implement(super::Service)]
 #[tracing::instrument(
@@ -150,6 +137,23 @@ pub async fn get_dehydrated_device(&self, user_id: &UserId) -> Result<Dehydrated
 		.userid_dehydrateddevice
 		.get(user_id)
 		.await
-		.deserialized::<String>()
-		.and_then(|raw| serde_json::from_str(&raw).map_err(Into::into))
+		.deserialized::<Cbor<_>>()
+		.map(at!(0))
+}
+
+/// Get the device_id of the user's dehydrated device.
+#[implement(super::Service)]
+#[tracing::instrument(
+	level = "debug",
+	skip_all,
+	fields(%user_id)
+)]
+pub async fn get_dehydrated_device_id(&self, user_id: &UserId) -> Result<OwnedDeviceId> {
+	self.db
+		.userid_dehydrateddevice
+		.get(user_id)
+		.await
+		.deserialized::<Cbor<_>>()
+		.map(at!(0))
+		.map(|device: DehydratedDevice| device.device_id)
 }

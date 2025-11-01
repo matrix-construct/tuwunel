@@ -189,7 +189,8 @@ pub fn build(router: Router<State>, server: &Server) -> Router<State> {
 			get(client::get_room_summary_legacy)
 		)
 		.ruma_route(&client::well_known_support)
-		.ruma_route(&client::well_known_client)
+		// this is the only thing currently needed to support Element Video Rooms / Calls.
+		.route("/.well-known/matrix/client", get(client::well_known_client))
 		.route("/_tuwunel/server_version", get(client::tuwunel_server_version))
 		.ruma_route(&client::room_initial_sync_route)
 		.route("/client/server.json", get(client::syncv3_client_server_json));

@@ -5,6 +5,8 @@
   - [Examples](configuration/examples.md)
 - [Deploying](deploying.md)
   - [Generic](deploying/generic.md)
+    - [Reverse Proxy - Caddy](deploying/reverse-proxy-caddy.md)
+    - [Reverse Proxy - Nginx](deploying/reverse-proxy-nginx.md)
   - [NixOS](deploying/nixos.md)
   - [Docker](deploying/docker.md)
   - [Kubernetes](deploying/kubernetes.md)

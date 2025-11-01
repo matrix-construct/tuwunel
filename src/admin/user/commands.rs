@@ -263,8 +263,9 @@ pub(super) async fn reset_password(&self, username: String, password: Option<Str
 		.await
 	{
 		| Err(e) => return Err!("Couldn't reset the password for user {user_id}: {e}"),
-		| Ok(()) =>
-			write!(self, "Successfully reset the password for user {user_id}: `{new_password}`"),
+		| Ok(()) => {
+			write!(self, "Successfully reset the password for user {user_id}: `{new_password}`")
+		},
 	}
 	.await
 }
