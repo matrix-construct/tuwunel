@@ -21,7 +21,6 @@ media_startup_check = true
 prune_missing_media = true
 log_colors = true
 admin_room_notices = false
-allow_check_for_updates = false
 intentionally_unknown_config_option_for_testing = true
 rocksdb_log_level = "info"
 rocksdb_max_log_files = 1

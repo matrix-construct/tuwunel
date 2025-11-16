@@ -36,7 +36,6 @@ services:
             TUWUNEL_REGISTRATION_TOKEN: 'YOUR_TOKEN' # A registration token is required when registration is allowed.
             #TUWUNEL_YES_I_AM_VERY_VERY_SURE_I_WANT_AN_OPEN_REGISTRATION_SERVER_PRONE_TO_ABUSE: 'true'
             TUWUNEL_ALLOW_FEDERATION: 'true'
-            TUWUNEL_ALLOW_CHECK_FOR_UPDATES: 'true'
             TUWUNEL_TRUSTED_SERVERS: '["matrix.org"]'
             #TUWUNEL_LOG: warn,state_res=warn
             TUWUNEL_ADDRESS: 0.0.0.0

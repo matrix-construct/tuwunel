@@ -26,7 +26,6 @@ services:
       # TUWUNEL_LOG: info  # default is: "warn,state_res=warn"
       # TUWUNEL_ALLOW_ENCRYPTION: 'true'
       # TUWUNEL_ALLOW_FEDERATION: 'true'
-      # TUWUNEL_ALLOW_CHECK_FOR_UPDATES: 'true'
       # TUWUNEL_ALLOW_INCOMING_PRESENCE: true
       # TUWUNEL_ALLOW_OUTGOING_PRESENCE: true
       # TUWUNEL_ALLOW_LOCAL_PRESENCE: true
