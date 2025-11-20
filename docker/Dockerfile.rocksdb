@@ -28,10 +28,12 @@ FROM input AS rocksdb-build
 ARG rocksdb_shared=0
 ARG rocksdb_portable="1"
 ARG rocksdb_opt_level="3"
+ARG rocksdb_lto="-flto -ffat-lto-objects"
 ARG rocksdb_build_type="Release"
 ARG rocksdb_cxx_flags="-ftls-model=initial-exec"
 ARG rocksdb_make_verbose="ON"
 ARG rocksdb_make_rule_messages="OFF"
+ARG rocksdb_numa=0
 ARG rocksdb_jemalloc=1
 ARG rocksdb_iouring=1
 ARG rocksdb_zstd=1
@@ -59,7 +61,7 @@ RUN <<EOF
         "-DBUILD_SHARED_LIBS=${rocksdb_shared}" \
         "-DROCKSDB_BUILD_SHARED=${rocksdb_shared}" \
         "-DCMAKE_CXX_FLAGS:STRING=${rocksdb_cxx_flags}" \
-        "-DCMAKE_CXX_FLAGS_RELEASE:STRING=-g0 -O${rocksdb_opt_level} -DNDEBUG" \
+        "-DCMAKE_CXX_FLAGS_RELEASE:STRING=-g0 -O${rocksdb_opt_level} -DNDEBUG ${rocksdb_lto}" \
         "-DPORTABLE=${rocksdb_portable}" \
         "-DFAIL_ON_WARNINGS=0" \
         "-DUSE_RTTI=0" \
@@ -73,6 +75,7 @@ RUN <<EOF
         "-DWITH_TOOLS=0" \
         "-DWITH_TESTS=0" \
         "-DWITH_GFLAGS=0" \
+        "-DWITH_NUMA=${rocksdb_numa}" \
         "-DWITH_LIBURING=${rocksdb_iouring}" \
         "-DWITH_JEMALLOC=${rocksdb_jemalloc}" \
         "-DWITH_ZSTD=${rocksdb_zstd}" \

@@ -84,6 +84,9 @@ variable "rocksdb_build_type" {
 variable "rocksdb_make_verbose" {
     default = "ON"
 }
+variable "rocksdb_numa" {
+    default = "0"
+}
 
 # Complement options
 variable "complement_count" {
@@ -1552,6 +1555,7 @@ target "rocksdb-build" {
         rocksdb_zstd = contains(split(",", cargo_feat_sets[feat_set]), "zstd_compression")? 1: 0
         rocksdb_jemalloc = contains(split(",", cargo_feat_sets[feat_set]), "jemalloc")? 1: 0
         rocksdb_iouring = contains(split(",", cargo_feat_sets[feat_set]), "io_uring")? 1: 0
+        rocksdb_numa = rocksdb_numa
         rocksdb_shared = 0
         rocksdb_opt_level = rocksdb_opt_level
         rocksdb_build_type = rocksdb_build_type
@@ -1805,6 +1809,7 @@ kitchen_packages = [
     "gzip",
     "jq",
     "libc6-dev",
+    "libnuma-dev",
     "libssl-dev",
     "libsqlite3-dev",
     "make",
