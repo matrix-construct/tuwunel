@@ -368,14 +368,16 @@ default-features = false
 
 [workspace.dependencies.rust-rocksdb]
 git = "https://github.com/matrix-construct/rust-rocksdb"
-rev = "225a42519276e502205bdc845cebdb22d70ee245"
+rev = "f111d191918372e3178a3662f5e4b210c0ce2505"
 default-features = false
 features = [
 	"bzip2",
+	"lto",
 	"lz4",
 	"multi-threaded-cf",
-	"mt_static",
+	"serde1",
 	"zstd",
+	"zstd-static-linking-only",
 ]
 
 [workspace.dependencies.sanitize-filename]

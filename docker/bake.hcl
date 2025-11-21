@@ -1420,7 +1420,7 @@ target "deps-base" {
                     join(" ", static_rustflags),
                     join(" ", static_nightly_rustflags),
                     join(" ", native_rustflags),
-                    "-C link-arg=-L/usr/lib/gcc/${sys_target_triple(sys_target)}/14", #FIXME
+                    "-C link-arg=-L/usr/lib/gcc/${sys_target_triple(sys_target)}/15", #FIXME
                     contains(split(",", cargo_feat_sets[feat_set]), "bzip2_compression")?
                         "-C link-arg=-l:libbz2.a": "",
                     contains(split(",", cargo_feat_sets[feat_set]), "lz4_compression")?
@@ -1442,7 +1442,7 @@ target "deps-base" {
                     join(" ", static_nightly_rustflags),
                     sys_target_triple(sys_target) == "x86_64-linux-gnu"?
                         "-C target-cpu=${sys_target_isa(sys_target)}": "",
-                    "-C link-arg=-L/usr/lib/gcc/${sys_target_triple(sys_target)}/14", #FIXME
+                    "-C link-arg=-L/usr/lib/gcc/${sys_target_triple(sys_target)}/15", #FIXME
                     contains(split(",", cargo_feat_sets[feat_set]), "bzip2_compression")?
                         "-C link-arg=-l:libbz2.a": "",
                     contains(split(",", cargo_feat_sets[feat_set]), "lz4_compression")?
@@ -1462,7 +1462,7 @@ target "deps-base" {
                     join(" ", static_rustflags),
                     sys_target_triple(sys_target) == "x86_64-linux-gnu"?
                         "-C target-cpu=${sys_target_isa(sys_target)}": "",
-                    "-C link-arg=-L/usr/lib/gcc/${sys_target_triple(sys_target)}/14", #FIXME
+                    "-C link-arg=-L/usr/lib/gcc/${sys_target_triple(sys_target)}/15", #FIXME
                     contains(split(",", cargo_feat_sets[feat_set]), "bzip2_compression")?
                         "-C link-arg=-l:libbz2.a": "",
                     contains(split(",", cargo_feat_sets[feat_set]), "lz4_compression")?
@@ -1482,7 +1482,7 @@ target "deps-base" {
                     join(" ", static_rustflags),
                     sys_target_triple(sys_target) == "x86_64-linux-gnu"?
                         "-C target-cpu=${sys_target_isa(sys_target)}": "",
-                    "-C link-arg=-L/usr/lib/gcc/${sys_target_triple(sys_target)}/14", #FIXME
+                    "-C link-arg=-L/usr/lib/gcc/${sys_target_triple(sys_target)}/15", #FIXME
                     contains(split(",", cargo_feat_sets[feat_set]), "bzip2_compression")?
                         "-C link-arg=-l:libbz2.a": "",
                     contains(split(",", cargo_feat_sets[feat_set]), "lz4_compression")?
@@ -1815,6 +1815,7 @@ kitchen_packages = [
     "gzip",
     "jq",
     "libc6-dev",
+    "libclang-dev",
     "libnuma-dev",
     "libssl-dev",
     "libsqlite3-dev",

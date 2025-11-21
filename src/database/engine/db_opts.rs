@@ -37,11 +37,10 @@ pub(crate) fn db_options(config: &Config, env: &Env, row_cache: &Cache) -> Resul
 		opts.set_use_direct_io_for_flush_and_compaction(true);
 	}
 	if config.rocksdb_optimize_for_spinning_disks {
-		// speeds up opening DB on hard drives
-		opts.set_skip_checking_sst_file_sizes_on_db_open(true);
 		opts.set_skip_stats_update_on_db_open(true);
 		//opts.set_max_file_opening_threads(threads.try_into().unwrap());
 	} else {
+		opts.set_max_file_opening_threads(num_threads(config)?);
 		opts.set_compaction_readahead_size(1024 * 512);
 	}
 
@@ -123,7 +122,7 @@ fn set_logging_defaults(opts: &mut Options, config: &Config) {
 	if config.rocksdb_log_stderr {
 		opts.set_stderr_logger(rocksdb_log_level, "rocksdb");
 	} else {
-		opts.set_callback_logger(rocksdb_log_level, &handle_log);
+		opts.set_callback_logger(rocksdb_log_level, handle_log);
 	}
 }
 
