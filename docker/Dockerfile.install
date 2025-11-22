@@ -15,15 +15,17 @@ ENV src_path="${CARGO_TARGET_DIR}/${rust_target}/${cargo_target_profile}/tuwunel
 ENV dst_path="${install_prefix}/bin/tuwunel"
 COPY --from=bins $src_path $dst_path
 RUN <<EOF
-    ret=$(ldd "${dst_path}")
+    ldd -v "${dst_path}"
+    ret=$?
     if [ "$ret" = "0" ] && [ "$assert_linkage" = "static" ]; then
+        echo "($ret) expected a static binary"
         exit 1
     elif [ "$ret" != "0" ] && [ "$assert_linkage" = "dynamic" ]; then
+        echo "($ret) expected a dynamic binary"
         exit 1
     fi
 
     set -eux
-    ldd -v ${dst_path} || true
-    du -h ${dst_path}
-    sha1sum ${dst_path}
+    du -h "${dst_path}"
+    sha1sum "${dst_path}"
 EOF

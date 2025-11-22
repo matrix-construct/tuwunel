@@ -868,6 +868,12 @@ target "install" {
     }
     args = {
         install_prefix = install_prefix
+        assert_linkage = (
+            substr(cargo_profile, 0, 5) == "bench"?     "static":
+            substr(cargo_profile, 0, 7) == "release"?   "static":
+            substr(rust_toolchain, 0, 6) == "stable"?   "static":
+            ""
+        )
     }
 }
 
