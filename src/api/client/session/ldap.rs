@@ -1,6 +1,6 @@
 use futures::FutureExt;
 use ruma::{OwnedUserId, UserId};
-use tuwunel_core::{Err, Result, debug};
+use tuwunel_core::{Err, Result, debug, error, info, warn};
 use tuwunel_service::Services;
 
 use super::password_login;
@@ -53,6 +53,67 @@ pub(super) async fn ldap_login(
 			.users
 			.create(lowercased_user_id, Some("*"), Some("ldap"))
 			.await?;
+
+		// Auto-join rooms for newly created LDAP users
+		if !services.server.config.auto_join_rooms.is_empty() {
+			for room in &services.server.config.auto_join_rooms {
+				let Ok(room_id) = services.alias.maybe_resolve(room).await else {
+					error!(
+						"Failed to resolve room alias to room ID when attempting to auto join \
+						 {room}, skipping"
+					);
+					continue;
+				};
+
+				if !services
+					.state_cache
+					.server_in_room(services.globals.server_name(), &room_id)
+					.await
+				{
+					warn!(
+						"Skipping room {room} to automatically join as we have never joined \
+						 before."
+					);
+					continue;
+				}
+
+				if let Some(room_server_name) = room.server_name() {
+					let state_lock = services.state.mutex.lock(&room_id).await;
+
+					match services
+						.membership
+						.join(
+							lowercased_user_id,
+							&room_id,
+							Some("Automatically joining this room upon first login".to_owned()),
+							&[
+								services.globals.server_name().to_owned(),
+								room_server_name.to_owned(),
+							],
+							&None,
+							&state_lock,
+						)
+						.boxed()
+						.await
+					{
+						| Err(e) => {
+							// don't return this error so we don't fail logins
+							error!(
+								"Failed to automatically join room {room} for user \
+								 {lowercased_user_id}: {e}"
+							);
+						},
+						| _ => {
+							info!(
+								"Automatically joined room {room} for user {lowercased_user_id}"
+							);
+						},
+					}
+
+					drop(state_lock);
+				}
+			}
+		}
 	}
 
 	let is_tuwunel_admin = services
