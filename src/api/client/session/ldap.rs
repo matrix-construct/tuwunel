@@ -85,9 +85,7 @@ pub(super) async fn ldap_login(
 						.join(
 							lowercased_user_id,
 							&room_id,
-							Some(
-								"Automatically joining this room upon first login".to_owned(),
-							),
+							Some("Automatically joining this room upon first login".to_owned()),
 							&[
 								services.globals.server_name().to_owned(),
 								room_server_name.to_owned(),
