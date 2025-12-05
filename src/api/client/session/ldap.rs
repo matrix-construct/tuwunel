@@ -51,7 +51,7 @@ pub(super) async fn ldap_login(
 	if !services.users.exists(lowercased_user_id).await {
 		services
 			.users
-			.create(lowercased_user_id, Some("*"), Some("ldap"))
+			.full_register(lowercased_user_id, Some("*"), Some("ldap"), None, false)
 			.await?;
 	}
 

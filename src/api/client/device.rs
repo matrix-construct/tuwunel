@@ -2,14 +2,14 @@ use axum::extract::State;
 use axum_client_ip::InsecureClientIp;
 use futures::StreamExt;
 use ruma::{
-	MilliSecondsSinceUnixEpoch, OwnedDeviceId,
+	MilliSecondsSinceUnixEpoch,
 	api::client::device::{
 		self, delete_device, delete_devices, get_device, get_devices, update_device,
 	},
 };
-use tuwunel_core::{Err, Result, debug, err, utils, utils::string::to_small_string};
+use tuwunel_core::{Err, Result, debug, err, utils::string::to_small_string};
 
-use crate::{Ruma, client::DEVICE_ID_LENGTH, router::auth_uiaa};
+use crate::{Ruma, router::auth_uiaa};
 
 /// # `GET /_matrix/client/r0/devices`
 ///
@@ -94,13 +94,11 @@ pub(crate) async fn update_device_route(
 				appservice.registration.id
 			);
 
-			let device_id = OwnedDeviceId::from(utils::random_string(DEVICE_ID_LENGTH));
-
 			services
 				.users
 				.create_device(
 					sender_user,
-					&device_id,
+					None,
 					(Some(&appservice.registration.as_token), None),
 					None,
 					None,

@@ -55,7 +55,7 @@ pub(crate) async fn get_room_summary(
 ) -> Result<get_summary::v1::Response> {
 	let (room_id, servers) = services
 		.alias
-		.maybe_resolve_with_servers(&body.room_id_or_alias, Some(body.via.clone()))
+		.maybe_resolve_with_servers(&body.room_id_or_alias, Some(&body.via))
 		.await?;
 
 	if services.metadata.is_banned(&room_id).await {

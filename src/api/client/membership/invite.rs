@@ -22,8 +22,7 @@ pub(crate) async fn invite_user_route(
 
 	invite_check(&services, sender_user, room_id).await?;
 
-	banned_room_check(&services, sender_user, Some(room_id), room_id.server_name(), client)
-		.await?;
+	banned_room_check(&services, sender_user, room_id, None, client).await?;
 
 	let invite_user::v3::InvitationRecipient::UserId { user_id } = &body.recipient else {
 		return Err!(Request(ThreepidDenied("Third party identifiers are not implemented")));

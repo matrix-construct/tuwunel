@@ -88,9 +88,6 @@ pub(super) use user_directory::*;
 pub(super) use voip::*;
 pub(super) use well_known::*;
 
-/// generated device ID length
-const DEVICE_ID_LENGTH: usize = 10;
-
 /// generated user access token length
 const TOKEN_LENGTH: usize = tuwunel_service::users::device::TOKEN_LENGTH;
 

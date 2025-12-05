@@ -51,10 +51,10 @@ pub async fn set_dehydrated_device(&self, user_id: &UserId, request: Request) ->
 
 	self.create_device(
 		user_id,
-		&request.device_id,
+		Some(&request.device_id),
 		(None, None),
 		None,
-		request.initial_device_display_name.clone(),
+		request.initial_device_display_name.as_deref(),
 		None,
 	)
 	.await?;

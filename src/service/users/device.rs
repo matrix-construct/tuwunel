@@ -19,6 +19,9 @@ use tuwunel_core::{
 };
 use tuwunel_database::{Deserialized, Ignore, Interfix, Json, Map};
 
+/// generated device ID length
+const DEVICE_ID_LENGTH: usize = 10;
+
 /// generated user access token length
 pub const TOKEN_LENGTH: usize = 32;
 
@@ -28,12 +31,16 @@ pub const TOKEN_LENGTH: usize = 32;
 pub async fn create_device(
 	&self,
 	user_id: &UserId,
-	device_id: &DeviceId,
+	device_id: Option<&DeviceId>,
 	(access_token, expires_in): (Option<&str>, Option<Duration>),
 	refresh_token: Option<&str>,
-	initial_device_display_name: Option<String>,
+	initial_device_display_name: Option<&str>,
 	client_ip: Option<String>,
-) -> Result {
+) -> Result<OwnedDeviceId> {
+	let device_id = device_id
+		.map(ToOwned::to_owned)
+		.unwrap_or_else(|| OwnedDeviceId::from(utils::random_string(DEVICE_ID_LENGTH)));
+
 	if !self.exists(user_id).await {
 		return Err!(Request(InvalidParam(error!(
 			"Called create_device for non-existent user {user_id}"
@@ -42,18 +49,18 @@ pub async fn create_device(
 
 	let notify = true;
 	self.put_device_metadata(user_id, notify, &Device {
-		device_id: device_id.into(),
+		device_id: device_id.clone(),
 		display_name: initial_device_display_name.map(Into::into),
 		last_seen_ip: client_ip.map(Into::into),
 		last_seen_ts: Some(MilliSecondsSinceUnixEpoch::now()),
 	});
 
 	if let Some(access_token) = access_token {
-		self.set_access_token(user_id, device_id, access_token, expires_in, refresh_token)
+		self.set_access_token(user_id, &device_id, access_token, expires_in, refresh_token)
 			.await?;
 	}
 
-	Ok(())
+	Ok(device_id)
 }
 
 /// Removes a device from a user.

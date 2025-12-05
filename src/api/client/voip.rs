@@ -27,7 +27,7 @@ pub(crate) async fn turn_server_route(
 
 	let turn_secret = &services.globals.turn_secret;
 
-	let (username, password) = if !turn_secret.is_empty() {
+	let (username, password) = if let Some(turn_secret) = turn_secret {
 		let expiry = SecondsSinceUnixEpoch::from_system_time(
 			SystemTime::now()
 				.checked_add(Duration::from_secs(services.config.turn_ttl))

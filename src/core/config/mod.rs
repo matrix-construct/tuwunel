@@ -1006,7 +1006,7 @@ pub struct Config {
 	///
 	/// display: sensitive
 	#[serde(default)]
-	pub turn_secret: String,
+	pub turn_secret: Option<String>,
 
 	/// TURN secret to use that's read from the file path specified.
 	///

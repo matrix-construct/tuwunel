@@ -2,6 +2,7 @@ mod ban;
 mod invite;
 mod join;
 mod kick;
+mod knock;
 mod leave;
 mod unban;
 

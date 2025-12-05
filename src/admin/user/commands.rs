@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, fmt::Write as _};
+use std::collections::BTreeMap;
 
 use futures::{FutureExt, StreamExt};
 use ruma::{
@@ -13,10 +13,9 @@ use ruma::{
 	},
 };
 use tuwunel_core::{
-	Err, Result, debug, debug_warn, error, info, is_equal_to,
+	Err, Result, debug_warn, info,
 	matrix::{Event, pdu::PduBuilder},
 	utils::{self, ReadyExt},
-	warn,
 };
 use tuwunel_service::Services;
 
@@ -62,147 +61,10 @@ pub(super) async fn create_user(&self, username: String, password: Option<String
 
 	let password = password.unwrap_or_else(|| utils::random_string(AUTO_GEN_PASSWORD_LENGTH));
 
-	// Create user
 	self.services
 		.users
-		.create(&user_id, Some(password.as_str()), None)
+		.full_register(&user_id, Some(&password), None, None, false)
 		.await?;
-
-	// Default to pretty displayname
-	let mut displayname = user_id.localpart().to_owned();
-
-	// If `new_user_displayname_suffix` is set, registration will push whatever
-	// content is set to the user's display name with a space before it
-	if !self
-		.services
-		.server
-		.config
-		.new_user_displayname_suffix
-		.is_empty()
-	{
-		write!(
-			displayname,
-			" {}",
-			self.services
-				.server
-				.config
-				.new_user_displayname_suffix
-		)?;
-	}
-
-	self.services
-		.users
-		.set_displayname(&user_id, Some(displayname));
-
-	// Initial account data
-	self.services
-		.account_data
-		.update(
-			None,
-			&user_id,
-			ruma::events::GlobalAccountDataEventType::PushRules
-				.to_string()
-				.into(),
-			&serde_json::to_value(ruma::events::push_rules::PushRulesEvent {
-				content: ruma::events::push_rules::PushRulesEventContent {
-					global: ruma::push::Ruleset::server_default(&user_id),
-				},
-			})?,
-		)
-		.await?;
-
-	if !self
-		.services
-		.server
-		.config
-		.auto_join_rooms
-		.is_empty()
-	{
-		for room in &self.services.server.config.auto_join_rooms {
-			let Ok(room_id) = self.services.alias.maybe_resolve(room).await else {
-				error!(
-					%user_id,
-					"Failed to resolve room alias to room ID when attempting to auto join {room}, skipping"
-				);
-				continue;
-			};
-
-			if !self
-				.services
-				.state_cache
-				.server_in_room(self.services.globals.server_name(), &room_id)
-				.await
-			{
-				warn!(
-					"Skipping room {room} to automatically join as we have never joined before."
-				);
-				continue;
-			}
-
-			let state_lock = self.services.state.mutex.lock(&room_id).await;
-
-			if let Some(room_server_name) = room.server_name() {
-				match self
-					.services
-					.membership
-					.join(
-						&user_id,
-						&room_id,
-						Some("Automatically joining this room upon registration".to_owned()),
-						&[
-							self.services.globals.server_name().to_owned(),
-							room_server_name.to_owned(),
-						],
-						&None,
-						&state_lock,
-					)
-					.await
-				{
-					| Ok(_response) => {
-						info!("Automatically joined room {room} for user {user_id}");
-					},
-					| Err(e) => {
-						// don't return this error so we don't fail registrations
-						error!(
-							"Failed to automatically join room {room} for user {user_id}: {e}"
-						);
-						self.services
-							.admin
-							.send_text(&format!(
-								"Failed to automatically join room {room} for user {user_id}: \
-								 {e}"
-							))
-							.await;
-					},
-				}
-
-				drop(state_lock);
-			}
-		}
-	}
-
-	// we dont add a device since we're not the user, just the creator
-
-	// if this account creation is from the CLI / --execute, invite the first user
-	// to admin room
-	if let Ok(admin_room) = self.services.admin.get_admin_room().await {
-		if self
-			.services
-			.state_cache
-			.room_joined_count(&admin_room)
-			.await
-			.is_ok_and(is_equal_to!(1))
-		{
-			self.services
-				.admin
-				.make_user_admin(&user_id)
-				.boxed()
-				.await?;
-			warn!("Granting {user_id} admin privileges as the first user");
-		}
-	} else {
-		debug!("create_user admin command called without an admin room being available");
-	}
 
 	self.write_str(&format!("Created user with user_id: {user_id} and password: `{password}`"))
 		.await
@@ -403,7 +265,7 @@ pub(super) async fn list_joined_rooms(&self, user_id: String) -> Result {
 #[admin_command]
 pub(super) async fn force_join_list_of_local_users(
 	&self,
-	room_id: OwnedRoomOrAliasId,
+	room: OwnedRoomOrAliasId,
 	yes_i_want_to_do_this: bool,
 ) -> Result {
 	if self.body.len() < 2
@@ -415,7 +277,7 @@ pub(super) async fn force_join_list_of_local_users(
 
 	if !yes_i_want_to_do_this {
 		return Err!(
-			"You must pass the --yes-i-want-to-do-this-flag to ensure you really want to force \
+			"You must pass the --yes-i-want-to-do-this flag to ensure you really want to force \
 			 bulk join all specified local users.",
 		);
 	}
@@ -427,7 +289,7 @@ pub(super) async fn force_join_list_of_local_users(
 	let (room_id, servers) = self
 		.services
 		.alias
-		.maybe_resolve_with_servers(&room_id, None)
+		.maybe_resolve_with_servers(&room, None)
 		.await?;
 
 	if !self
@@ -505,9 +367,10 @@ pub(super) async fn force_join_list_of_local_users(
 			.join(
 				&user_id,
 				&room_id,
+				Some(&room),
 				Some(String::from(BULK_JOIN_REASON)),
 				&servers,
-				&None,
+				false,
 				&state_lock,
 			)
 			.await
@@ -534,7 +397,7 @@ pub(super) async fn force_join_list_of_local_users(
 #[admin_command]
 pub(super) async fn force_join_all_local_users(
 	&self,
-	room_id: OwnedRoomOrAliasId,
+	room: OwnedRoomOrAliasId,
 	yes_i_want_to_do_this: bool,
 ) -> Result {
 	if !yes_i_want_to_do_this {
@@ -551,7 +414,7 @@ pub(super) async fn force_join_all_local_users(
 	let (room_id, servers) = self
 		.services
 		.alias
-		.maybe_resolve_with_servers(&room_id, None)
+		.maybe_resolve_with_servers(&room, None)
 		.await?;
 
 	if !self
@@ -600,9 +463,10 @@ pub(super) async fn force_join_all_local_users(
 			.join(
 				user_id,
 				&room_id,
+				Some(&room),
 				Some(String::from(BULK_JOIN_REASON)),
 				&servers,
-				&None,
+				false,
 				&state_lock,
 			)
 			.await
@@ -627,16 +491,12 @@ pub(super) async fn force_join_all_local_users(
 }
 
 #[admin_command]
-pub(super) async fn force_join_room(
-	&self,
-	user_id: String,
-	room_id: OwnedRoomOrAliasId,
-) -> Result {
+pub(super) async fn force_join_room(&self, user_id: String, room: OwnedRoomOrAliasId) -> Result {
 	let user_id = parse_local_user_id(self.services, &user_id)?;
 	let (room_id, servers) = self
 		.services
 		.alias
-		.maybe_resolve_with_servers(&room_id, None)
+		.maybe_resolve_with_servers(&room, None)
 		.await?;
 
 	assert!(
@@ -648,7 +508,7 @@ pub(super) async fn force_join_room(
 
 	self.services
 		.membership
-		.join(&user_id, &room_id, None, &servers, &None, &state_lock)
+		.join(&user_id, &room_id, Some(&room), None, &servers, false, &state_lock)
 		.await?;
 
 	drop(state_lock);

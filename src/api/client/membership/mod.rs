@@ -8,15 +8,12 @@ mod leave;
 mod members;
 mod unban;
 
-use std::{cmp::Ordering, net::IpAddr};
+use std::net::IpAddr;
 
 use axum::extract::State;
 use futures::{FutureExt, StreamExt};
-use ruma::{
-	OwnedRoomId, OwnedServerName, RoomId, RoomOrAliasId, ServerName, UserId,
-	api::client::membership::joined_rooms,
-};
-use tuwunel_core::{Err, Result, result::LogErr, utils::shuffle, warn};
+use ruma::{RoomId, RoomOrAliasId, UserId, api::client::membership::joined_rooms};
+use tuwunel_core::{Err, Result, result::LogErr, warn};
 use tuwunel_service::Services;
 
 pub(crate) use self::{
@@ -58,57 +55,42 @@ pub(crate) async fn joined_rooms_route(
 pub(crate) async fn banned_room_check(
 	services: &Services,
 	user_id: &UserId,
-	room_id: Option<&RoomId>,
-	server_name: Option<&ServerName>,
+	room_id: &RoomId,
+	orig_room_id: Option<&RoomOrAliasId>,
 	client_ip: IpAddr,
 ) -> Result {
 	if services.users.is_admin(user_id).await {
 		return Ok(());
 	}
 
-	// TODO: weird condition
-	if let Some(room_id) = room_id {
-		if services.metadata.is_banned(room_id).await
-			|| (room_id.server_name().is_some()
-				&& services
-					.config
-					.forbidden_remote_server_names
-					.is_match(
-						room_id
-							.server_name()
-							.expect("legacy room mxid")
-							.host(),
-					)) {
-			warn!(
-				"User {user_id} who is not an admin attempted to send an invite for or \
-				 attempted to join a banned room or banned room server name: {room_id}"
-			);
+	// room id is banned ...
+	if services.metadata.is_banned(room_id).await
+		// ... or legacy room id server is banned ...
+		|| room_id.server_name().is_some_and(|server_name| {
+			services
+				.config
+				.forbidden_remote_server_names
+				.is_match(server_name.host())
+		})
+		// ... or alias server is banned
+		|| orig_room_id.is_some_and(|orig_room_id| {
+			orig_room_id.server_name().is_some_and(|orig_server_name|
+			services
+				.config
+				.forbidden_remote_server_names
+				.is_match(orig_server_name.host()))
+	}) {
+		warn!(
+			"User {user_id} who is not an admin attempted to send an invite for or attempted to \
+			 join a banned room or banned room server name: {room_id}"
+		);
 
-			maybe_deactivate(services, user_id, client_ip)
-				.await
-				.log_err()
-				.ok();
+		maybe_deactivate(services, user_id, client_ip)
+			.await
+			.log_err()
+			.ok();
 
-			return Err!(Request(Forbidden("This room is banned on this homeserver.")));
-		}
-	} else if let Some(server_name) = server_name {
-		if services
-			.config
-			.forbidden_remote_server_names
-			.is_match(server_name.host())
-		{
-			warn!(
-				"User {user_id} who is not an admin tried joining a room which has the server \
-				 name {server_name} that is globally forbidden. Rejecting.",
-			);
-
-			maybe_deactivate(services, user_id, client_ip)
-				.await
-				.log_err()
-				.ok();
-
-			return Err!(Request(Forbidden("This remote server is banned on this homeserver.")));
-		}
+		return Err!(Request(Forbidden("This room is banned on this homeserver.")));
 	}
 
 	Ok(())
@@ -120,16 +102,15 @@ async fn maybe_deactivate(services: &Services, user_id: &UserId, client_ip: IpAd
 		.config
 		.auto_deactivate_banned_room_attempts
 	{
-		warn!("Automatically deactivating user {user_id} due to attempted banned room join");
+		let notice = format!(
+			"Automatically deactivating user {user_id} due to attempted banned room join from \
+			 IP {client_ip}"
+		);
+
+		warn!("{notice}");
 
 		if services.server.config.admin_room_notices {
-			services
-				.admin
-				.send_text(&format!(
-					"Automatically deactivating user {user_id} due to attempted banned room \
-					 join from IP {client_ip}"
-				))
-				.await;
+			services.admin.send_text(&notice).await;
 		}
 
 		services
@@ -140,100 +121,4 @@ async fn maybe_deactivate(services: &Services, user_id: &UserId, client_ip: IpAd
 	}
 
 	Ok(())
-}
-
-// TODO: should this be in services? banned check would have to resolve again if
-// room_id is not available at callsite
-async fn get_join_params(
-	services: &Services,
-	user_id: &UserId,
-	room_id_or_alias: &RoomOrAliasId,
-	via: &[OwnedServerName],
-) -> Result<(OwnedRoomId, Vec<OwnedServerName>)> {
-	// servers tried first, additional_servers shuffled then tried after
-	let (room_id, mut primary_servers, mut additional_servers) =
-		match OwnedRoomId::try_from(room_id_or_alias.to_owned()) {
-			// if room id, shuffle via + room_id server_name ...
-			| Ok(room_id) => {
-				let mut additional_servers = via.to_vec();
-
-				if let Some(server) = room_id.server_name() {
-					additional_servers.push(server.to_owned());
-				}
-
-				(room_id, Vec::new(), additional_servers)
-			},
-			// ... if room alias, resolve and don't shuffle ...
-			| Err(room_alias) => {
-				let (room_id, servers) = services.alias.resolve_alias(&room_alias).await?;
-
-				(room_id, servers, Vec::new())
-			},
-		};
-
-	// either way, add invited vias
-	additional_servers.extend(
-		services
-			.state_cache
-			.servers_invite_via(&room_id)
-			.map(ToOwned::to_owned)
-			.collect::<Vec<_>>()
-			.await,
-	);
-
-	// either way, add invite senders' servers
-	additional_servers.extend(
-		services
-			.state_cache
-			.invite_state(user_id, &room_id)
-			.await
-			.unwrap_or_default()
-			.iter()
-			.filter_map(|event| event.get_field("sender").ok().flatten())
-			.filter_map(|sender: &str| UserId::parse(sender).ok())
-			.map(|user| user.server_name().to_owned()),
-	);
-
-	primary_servers.sort_unstable();
-	primary_servers.dedup();
-	shuffle(&mut primary_servers);
-
-	// shuffle additionals, append to base servers
-	additional_servers.sort_unstable();
-	additional_servers.dedup();
-	shuffle(&mut additional_servers);
-
-	let mut servers: Vec<_> = room_id_or_alias
-		.server_name()
-		.filter(|_| room_id_or_alias.is_room_alias_id())
-		.map(ToOwned::to_owned)
-		.into_iter()
-		.chain(primary_servers.into_iter())
-		.chain(additional_servers.into_iter())
-		.collect();
-
-	// sort deprioritized servers last
-	servers.sort_by(|a, b| {
-		let a_matches = services
-			.server
-			.config
-			.deprioritize_joins_through_servers
-			.is_match(a.host());
-
-		let b_matches = services
-			.server
-			.config
-			.deprioritize_joins_through_servers
-			.is_match(b.host());
-
-		if a_matches && !b_matches {
-			Ordering::Greater
-		} else if !a_matches && b_matches {
-			Ordering::Less
-		} else {
-			Ordering::Equal
-		}
-	});
-
-	Ok((room_id, servers))
 }

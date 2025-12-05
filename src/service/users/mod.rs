@@ -3,6 +3,7 @@ pub mod device;
 mod keys;
 mod ldap;
 mod profile;
+mod register;
 
 use std::sync::Arc;
 
@@ -124,10 +125,8 @@ impl Service {
 		password: Option<&str>,
 		origin: Option<&str>,
 	) -> Result {
-		origin.map_or_else(
-			|| self.db.userid_origin.insert(user_id, "password"),
-			|origin| self.db.userid_origin.insert(user_id, origin),
-		);
+		let origin = origin.unwrap_or("password");
+		self.db.userid_origin.insert(user_id, origin);
 		self.set_password(user_id, password).await
 	}
 

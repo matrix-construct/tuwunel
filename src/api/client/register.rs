@@ -2,7 +2,6 @@ use std::fmt::Write;
 
 use axum::extract::State;
 use axum_client_ip::InsecureClientIp;
-use futures::FutureExt;
 use register::RegistrationKind;
 use ruma::{
 	UserId,
@@ -13,15 +12,11 @@ use ruma::{
 		},
 		uiaa::{AuthFlow, AuthType, UiaaInfo},
 	},
-	events::GlobalAccountDataEventType,
-	push,
 };
-use tuwunel_core::{
-	Err, Error, Result, debug_info, debug_warn, error, info, is_equal_to, utils, warn,
-};
+use tuwunel_core::{Err, Error, Result, debug_info, debug_warn, info, utils};
 use tuwunel_service::users::device::generate_refresh_token;
 
-use super::{DEVICE_ID_LENGTH, SESSION_ID_LENGTH};
+use super::SESSION_ID_LENGTH;
 use crate::Ruma;
 
 const RANDOM_USER_ID_LENGTH: usize = 10;
@@ -48,15 +43,10 @@ pub(crate) async fn get_register_available_route(
 		.appservice_info
 		.as_ref()
 		.is_some_and(|appservice| {
-			appservice.registration.id == "irc"
-				|| appservice
-					.registration
-					.id
-					.contains("matrix-appservice-irc")
-				|| appservice
-					.registration
-					.id
-					.contains("matrix_appservice_irc")
+			let id = &appservice.registration.id;
+			id == "irc"
+				|| id.contains("matrix-appservice-irc")
+				|| id.contains("matrix_appservice_irc")
 		});
 
 	if services
@@ -148,69 +138,30 @@ pub(crate) async fn register_route(
 	let is_guest = body.kind == RegistrationKind::Guest;
 	let emergency_mode_enabled = services.config.emergency_password.is_some();
 
+	let user = body.username.as_deref().unwrap_or("");
+	let device_name = body
+		.initial_device_display_name
+		.as_deref()
+		.unwrap_or("");
+
 	if !services.config.allow_registration && body.appservice_info.is_none() {
-		match (body.username.as_ref(), body.initial_device_display_name.as_ref()) {
-			| (Some(username), Some(device_display_name)) => {
-				info!(
-					%is_guest,
-					user = %username,
-					device_name = %device_display_name,
-					"Rejecting registration attempt as registration is disabled"
-				);
-			},
-			| (Some(username), _) => {
-				info!(
-					%is_guest,
-					user = %username,
-					"Rejecting registration attempt as registration is disabled"
-				);
-			},
-			| (_, Some(device_display_name)) => {
-				info!(
-					%is_guest,
-					device_name = %device_display_name,
-					"Rejecting registration attempt as registration is disabled"
-				);
-			},
-			| (None, _) => {
-				info!(
-					%is_guest,
-					"Rejecting registration attempt as registration is disabled"
-				);
-			},
-		}
+		info!(
+			%is_guest,
+			%user,
+			%device_name,
+			"Rejecting registration attempt as registration is disabled"
+		);
 
 		return Err!(Request(Forbidden("Registration has been disabled.")));
 	}
 
 	if is_guest && !services.config.allow_guest_registration {
-		let display_name = body
-			.initial_device_display_name
-			.as_deref()
-			.unwrap_or("");
-
 		debug_warn!(
-			"Guest registration disabled / registration enabled with token configured, \
-			 rejecting guest registration attempt, initial device name: \"{display_name}\""
+			%device_name,
+			"Guest registration disabled, rejecting guest registration attempt"
 		);
 
 		return Err!(Request(GuestAccessForbidden("Guest registration is disabled.")));
-	}
-
-	// forbid guests from registering if there is not a real admin user yet. give
-	// generic user error.
-	if is_guest && services.users.count().await < 2 {
-		let display_name = body
-			.initial_device_display_name
-			.as_deref()
-			.unwrap_or("");
-
-		warn!(
-			"Guest account attempted to register before a real admin user has been registered, \
-			 rejecting registration. Guest's initial device name: \"{display_name}\""
-		);
-
-		return Err!(Request(Forbidden("Registration is temporarily disabled.")));
 	}
 
 	let user_id = match (body.username.as_ref(), is_guest) {
@@ -313,7 +264,13 @@ pub(crate) async fn register_route(
 
 	// UIAA
 	let mut uiaainfo;
-	let skip_auth = if services.globals.registration_token.is_some() && !is_guest {
+	let skip_auth = if !services
+		.globals
+		.get_registration_tokens()
+		.await
+		.is_empty()
+		&& !is_guest
+	{
 		// Registration token required
 		uiaainfo = UiaaInfo {
 			flows: vec![AuthFlow {
@@ -378,45 +335,9 @@ pub(crate) async fn register_route(
 
 	let password = if is_guest { None } else { body.password.as_deref() };
 
-	// Create user
 	services
 		.users
-		.create(&user_id, password, None)
-		.await?;
-
-	// Default to pretty displayname
-	let mut displayname = user_id.localpart().to_owned();
-
-	// If `new_user_displayname_suffix` is set, registration will push whatever
-	// content is set to the user's display name with a space before it
-	if !services
-		.config
-		.new_user_displayname_suffix
-		.is_empty()
-		&& body.appservice_info.is_none()
-	{
-		write!(displayname, " {}", services.server.config.new_user_displayname_suffix)?;
-	}
-
-	services
-		.users
-		.set_displayname(&user_id, Some(displayname.clone()));
-
-	// Initial account data
-	services
-		.account_data
-		.update(
-			None,
-			&user_id,
-			GlobalAccountDataEventType::PushRules
-				.to_string()
-				.into(),
-			&serde_json::to_value(ruma::events::push_rules::PushRulesEvent {
-				content: ruma::events::push_rules::PushRulesEventContent {
-					global: push::Ruleset::server_default(&user_id),
-				},
-			})?,
-		)
+		.full_register(&user_id, password, None, body.appservice_info.as_ref(), is_guest)
 		.await?;
 
 	if (!is_guest && body.inhibit_login)
@@ -426,169 +347,56 @@ pub(crate) async fn register_route(
 			.is_some_and(|appservice| appservice.registration.device_management)
 	{
 		return Ok(register::v3::Response {
-			access_token: None,
 			user_id,
 			device_id: None,
+			access_token: None,
 			refresh_token: None,
 			expires_in: None,
 		});
 	}
 
-	// Generate new device id if the user didn't specify one
-	let device_id = if is_guest { None } else { body.device_id.clone() }
-		.unwrap_or_else(|| utils::random_string(DEVICE_ID_LENGTH).into());
+	let device_id = if is_guest { None } else { body.device_id.as_deref() };
 
 	// Generate new token for the device
 	let (access_token, expires_in) = services
 		.users
-		.generate_access_token(body.body.refresh_token);
+		.generate_access_token(body.refresh_token);
 
 	// Generate a new refresh_token if requested by client
 	let refresh_token = expires_in.is_some().then(generate_refresh_token);
 
 	// Create device for this account
-	services
+	let device_id = services
 		.users
 		.create_device(
 			&user_id,
-			&device_id,
+			device_id,
 			(Some(&access_token), expires_in),
 			refresh_token.as_deref(),
-			body.initial_device_display_name.clone(),
+			body.initial_device_display_name.as_deref(),
 			Some(client.to_string()),
 		)
 		.await?;
 
 	debug_info!(%user_id, %device_id, "User account was created");
 
-	let device_display_name = body
-		.initial_device_display_name
-		.as_deref()
-		.unwrap_or("");
+	if body.appservice_info.is_none() && (!is_guest || services.config.log_guest_registrations) {
+		let mut notice = String::from(if is_guest { "New guest user" } else { "New user" });
 
-	// log in conduit admin channel if a non-guest user registered
-	if body.appservice_info.is_none() && !is_guest {
-		if !device_display_name.is_empty() {
-			let notice = format!(
-				"New user \"{user_id}\" registered on this server from IP {client} and device \
-				 display name \"{device_display_name}\""
-			);
+		write!(notice, " registered on this server from IP {client}")?;
 
-			info!("{notice}");
-			if services.server.config.admin_room_notices {
-				services.admin.notice(&notice).await;
-			}
-		} else {
-			let notice = format!("New user \"{user_id}\" registered on this server.");
-
-			info!("{notice}");
-			if services.server.config.admin_room_notices {
-				services.admin.notice(&notice).await;
-			}
+		if let Some(device_name) = body.initial_device_display_name.as_deref() {
+			write!(notice, " with device name {device_name}")?;
 		}
-	}
 
-	// log in conduit admin channel if a guest registered
-	if body.appservice_info.is_none() && is_guest && services.config.log_guest_registrations {
-		debug_info!("New guest user \"{user_id}\" registered on this server.");
-
-		if !device_display_name.is_empty() {
-			if services.server.config.admin_room_notices {
-				services
-					.admin
-					.notice(&format!(
-						"Guest user \"{user_id}\" with device display name \
-						 \"{device_display_name}\" registered on this server from IP {client}"
-					))
-					.await;
-			}
+		if !is_guest {
+			info!("{notice}");
 		} else {
-			#[allow(clippy::collapsible_else_if)]
-			if services.server.config.admin_room_notices {
-				services
-					.admin
-					.notice(&format!(
-						"Guest user \"{user_id}\" with no device display name registered on \
-						 this server from IP {client}",
-					))
-					.await;
-			}
+			debug_info!("{notice}");
 		}
-	}
 
-	// If this is the first real user, grant them admin privileges except for guest
-	// users
-	// Note: the server user is generated first
-	if !is_guest
-		&& services.config.grant_admin_to_first_user
-		&& let Ok(admin_room) = services.admin.get_admin_room().await
-		&& services
-			.state_cache
-			.room_joined_count(&admin_room)
-			.await
-			.is_ok_and(is_equal_to!(1))
-	{
-		services
-			.admin
-			.make_user_admin(&user_id)
-			.boxed()
-			.await?;
-		warn!("Granting {user_id} admin privileges as the first user");
-	}
-
-	if body.appservice_info.is_none()
-		&& !services.server.config.auto_join_rooms.is_empty()
-		&& (services.config.allow_guests_auto_join_rooms || !is_guest)
-	{
-		for room in &services.server.config.auto_join_rooms {
-			let Ok(room_id) = services.alias.maybe_resolve(room).await else {
-				error!(
-					"Failed to resolve room alias to room ID when attempting to auto join \
-					 {room}, skipping"
-				);
-				continue;
-			};
-
-			if !services
-				.state_cache
-				.server_in_room(services.globals.server_name(), &room_id)
-				.await
-			{
-				warn!(
-					"Skipping room {room} to automatically join as we have never joined before."
-				);
-				continue;
-			}
-
-			if let Some(room_server_name) = room.server_name() {
-				let state_lock = services.state.mutex.lock(&room_id).await;
-
-				match services
-					.membership
-					.join(
-						&user_id,
-						&room_id,
-						Some("Automatically joining this room upon registration".to_owned()),
-						&[services.globals.server_name().to_owned(), room_server_name.to_owned()],
-						&body.appservice_info,
-						&state_lock,
-					)
-					.boxed()
-					.await
-				{
-					| Err(e) => {
-						// don't return this error so we don't fail registrations
-						error!(
-							"Failed to automatically join room {room} for user {user_id}: {e}"
-						);
-					},
-					| _ => {
-						info!("Automatically joined room {room} for user {user_id}");
-					},
-				}
-
-				drop(state_lock);
-			}
+		if services.server.config.admin_room_notices {
+			services.admin.notice(&notice).await;
 		}
 	}
 
@@ -611,9 +419,13 @@ pub(crate) async fn check_registration_token_validity(
 	State(services): State<crate::State>,
 	body: Ruma<check_registration_token_validity::v1::Request>,
 ) -> Result<check_registration_token_validity::v1::Response> {
-	let Some(reg_token) = services.globals.registration_token.clone() else {
-		return Err!(Request(Forbidden("Server does not allow token registration")));
-	};
+	let tokens = services.globals.get_registration_tokens().await;
 
-	Ok(check_registration_token_validity::v1::Response { valid: reg_token == body.token })
+	if tokens.is_empty() {
+		return Err!(Request(Forbidden("Server does not allow token registration")));
+	}
+
+	let valid = tokens.contains(&body.token);
+
+	Ok(check_registration_token_validity::v1::Response { valid })
 }

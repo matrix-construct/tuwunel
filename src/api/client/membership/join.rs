@@ -2,13 +2,13 @@ use axum::extract::State;
 use axum_client_ip::InsecureClientIp;
 use futures::FutureExt;
 use ruma::{
-	RoomId, RoomOrAliasId,
+	RoomId,
 	api::client::membership::{join_room_by_id, join_room_by_id_or_alias},
 };
 use tuwunel_core::{Result, warn};
 
 use super::banned_room_check;
-use crate::{Ruma, client::membership::get_join_params};
+use crate::Ruma;
 
 /// # `POST /_matrix/client/r0/rooms/{roomId}/join`
 ///
@@ -28,23 +28,20 @@ pub(crate) async fn join_room_by_id_route(
 
 	let room_id: &RoomId = &body.room_id;
 
-	banned_room_check(&services, sender_user, Some(room_id), room_id.server_name(), client)
-		.await?;
+	banned_room_check(&services, sender_user, room_id, None, client).await?;
 
-	let (room_id, servers) =
-		get_join_params(&services, sender_user, <&RoomOrAliasId>::from(room_id), &[]).await?;
-
-	let state_lock = services.state.mutex.lock(&room_id).await;
+	let state_lock = services.state.mutex.lock(room_id).await;
 
 	let mut errors = 0_usize;
 	while let Err(e) = services
 		.membership
 		.join(
 			sender_user,
-			&room_id,
+			room_id,
+			None,
 			body.reason.clone(),
-			&servers,
-			&body.appservice_info,
+			&[],
+			body.appservice_info.is_some(),
 			&state_lock,
 		)
 		.boxed()
@@ -62,7 +59,7 @@ pub(crate) async fn join_room_by_id_route(
 
 	drop(state_lock);
 
-	Ok(join_room_by_id::v3::Response { room_id })
+	Ok(join_room_by_id::v3::Response { room_id: room_id.to_owned() })
 }
 
 /// # `POST /_matrix/client/r0/join/{roomIdOrAlias}`
@@ -83,10 +80,12 @@ pub(crate) async fn join_room_by_id_or_alias_route(
 	let sender_user = body.sender_user();
 	let appservice_info = &body.appservice_info;
 
-	let (room_id, servers) =
-		get_join_params(&services, sender_user, &body.room_id_or_alias, &body.via).await?;
+	let (room_id, servers) = services
+		.alias
+		.maybe_resolve_with_servers(&body.room_id_or_alias, Some(&body.via))
+		.await?;
 
-	banned_room_check(&services, sender_user, Some(&room_id), room_id.server_name(), client)
+	banned_room_check(&services, sender_user, &room_id, Some(&body.room_id_or_alias), client)
 		.await?;
 
 	let state_lock = services.state.mutex.lock(&room_id).await;
@@ -97,9 +96,10 @@ pub(crate) async fn join_room_by_id_or_alias_route(
 		.join(
 			sender_user,
 			&room_id,
+			Some(&body.room_id_or_alias),
 			body.reason.clone(),
 			&servers,
-			appservice_info,
+			appservice_info.is_some(),
 			&state_lock,
 		)
 		.boxed()
@@ -117,5 +117,5 @@ pub(crate) async fn join_room_by_id_or_alias_route(
 
 	drop(state_lock);
 
-	Ok(join_room_by_id_or_alias::v3::Response { room_id })
+	Ok(join_room_by_id_or_alias::v3::Response { room_id: room_id.clone() })
 }

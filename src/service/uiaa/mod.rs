@@ -1,5 +1,5 @@
 use std::{
-	collections::{BTreeMap, HashSet},
+	collections::BTreeMap,
 	sync::{Arc, RwLock},
 };
 
@@ -43,32 +43,6 @@ impl crate::Service for Service {
 	}
 
 	fn name(&self) -> &str { crate::service::make_name(std::module_path!()) }
-}
-
-#[implement(Service)]
-pub async fn read_tokens(&self) -> Result<HashSet<String>> {
-	let mut tokens = HashSet::new();
-	if let Some(file) = &self
-		.services
-		.config
-		.registration_token_file
-		.as_ref()
-	{
-		match std::fs::read_to_string(file) {
-			| Err(e) => error!("Failed to read the registration token file: {e}"),
-			| Ok(text) => {
-				text.split_ascii_whitespace().for_each(|token| {
-					tokens.insert(token.to_owned());
-				});
-			},
-		}
-	}
-
-	if let Some(token) = &self.services.config.registration_token {
-		tokens.insert(token.to_owned());
-	}
-
-	Ok(tokens)
 }
 
 /// Creates a new Uiaa session. Make sure the session token is unique.
@@ -175,7 +149,11 @@ pub async fn try_auth(
 			uiaainfo.completed.push(AuthType::Password);
 		},
 		| AuthData::RegistrationToken(t) => {
-			let tokens = self.read_tokens().await?;
+			let tokens = self
+				.services
+				.globals
+				.get_registration_tokens()
+				.await;
 			if tokens.contains(t.token.trim()) {
 				uiaainfo
 					.completed

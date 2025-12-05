@@ -109,10 +109,10 @@ impl Service {
 	pub async fn maybe_resolve_with_servers(
 		&self,
 		room: &RoomOrAliasId,
-		servers: Option<Vec<OwnedServerName>>,
+		servers: Option<&[OwnedServerName]>,
 	) -> Result<(OwnedRoomId, Vec<OwnedServerName>)> {
 		match <&RoomId>::try_from(room) {
-			| Ok(room_id) => Ok((room_id.to_owned(), servers.unwrap_or_default())),
+			| Ok(room_id) => Ok((room_id.to_owned(), Vec::from(servers.unwrap_or_default()))),
 			| Err(alias) => self.resolve_alias(alias).await,
 		}
 	}
