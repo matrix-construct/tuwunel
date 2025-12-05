@@ -38,7 +38,7 @@ development. It is now maintained by full-time staff.
 - Static binaries available as [releases](https://github.com/matrix-construct/tuwunel/releases) or [build artifacts](https://github.com/matrix-construct/tuwunel/actions?query=branch%3Amain).
 - Deb and RPM packages available as [releases](https://github.com/matrix-construct/tuwunel/releases) or [build artifacts](https://github.com/matrix-construct/tuwunel/actions?query=branch%3Amain).
 - Arch package available as [tuwunel](https://aur.archlinux.org/packages/tuwunel) or [tuwunel-git](https://aur.archlinux.org/packages/tuwunel-git).
-- Nix package still [needs some love](https://github.com/NixOS/nixpkgs/issues/415469).
+- Nix package available as [`matrix-tuwunel`](https://search.nixos.org/packages?query=matrix-tuwunel) and NixOS module available as [`services.matrix-tuwunel`](https://search.nixos.org/options?query=services.matrix-tuwunel).
 
 **1.** [Configure](https://matrix-construct.github.io/tuwunel/configuration.html) by
 copying and editing the `tuwunel-example.toml`. The `server_name` and `database_path` must be
