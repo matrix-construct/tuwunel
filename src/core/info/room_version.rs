@@ -22,7 +22,7 @@ pub const STABLE_ROOM_VERSIONS: &[RoomVersionId] = &[
 ];
 
 /// Experimental and prototype room versions under development.
-pub const EXPERIMENTAL_ROOM_VERSIONS: &[RoomVersionId] = &[];
+pub const EXPERIMENTAL_ROOM_VERSIONS: &[RoomVersionId] = &[RoomVersionId::MSC4361];
 
 type RoomVersion = (RoomVersionId, RoomVersionStability);
 
