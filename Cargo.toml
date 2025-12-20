@@ -324,7 +324,7 @@ default-features = false
 
 [workspace.dependencies.ruma]
 git = "https://github.com/x86pup/ruma"
-rev = "3e64ef7f4a55ac4a77bc8d14fc45d86cb4c273f2"
+rev = "12dca91760ff8483e09fd600385b9e5069150870"
 features = [
     "__compat",
     "appservice-api-c",

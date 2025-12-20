@@ -132,6 +132,7 @@ pub async fn full_register(
 					&room_id,
 					Some(room),
 					Some("Automatically joining this room upon registration".to_owned()),
+					None,
 					&[],
 					false,
 					&state_lock,

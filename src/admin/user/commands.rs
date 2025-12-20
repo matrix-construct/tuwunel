@@ -125,8 +125,9 @@ pub(super) async fn reset_password(&self, username: String, password: Option<Str
 		.await
 	{
 		| Err(e) => return Err!("Couldn't reset the password for user {user_id}: {e}"),
-		| Ok(()) =>
-			write!(self, "Successfully reset the password for user {user_id}: `{new_password}`"),
+		| Ok(()) => {
+			write!(self, "Successfully reset the password for user {user_id}: `{new_password}`")
+		},
 	}
 	.await
 }
@@ -369,6 +370,7 @@ pub(super) async fn force_join_list_of_local_users(
 				&room_id,
 				Some(&room),
 				Some(String::from(BULK_JOIN_REASON)),
+				None,
 				&servers,
 				false,
 				&state_lock,
@@ -465,6 +467,7 @@ pub(super) async fn force_join_all_local_users(
 				&room_id,
 				Some(&room),
 				Some(String::from(BULK_JOIN_REASON)),
+				None,
 				&servers,
 				false,
 				&state_lock,
@@ -508,7 +511,7 @@ pub(super) async fn force_join_room(&self, user_id: String, room: OwnedRoomOrAli
 
 	self.services
 		.membership
-		.join(&user_id, &room_id, Some(&room), None, &servers, false, &state_lock)
+		.join(&user_id, &room_id, Some(&room), None, None, &servers, false, &state_lock)
 		.await?;
 
 	drop(state_lock);
