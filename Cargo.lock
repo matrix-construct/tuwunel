@@ -2302,7 +2302,7 @@ checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 [[package]]
 name = "lber"
 version = "0.4.3"
-source = "git+https://github.com/matrix-construct/ldap3?rev=7d423314b9dbc66347284e38fc2b78c3d8f3d494#7d423314b9dbc66347284e38fc2b78c3d8f3d494"
+source = "git+https://github.com/x86pup/ldap3?rev=0a4c62831ffef36c56e307fb6df8c9198d4af734#0a4c62831ffef36c56e307fb6df8c9198d4af734"
 dependencies = [
  "bytes",
  "nom 7.1.3",
@@ -2311,7 +2311,7 @@ dependencies = [
 [[package]]
 name = "ldap3"
 version = "0.11.3"
-source = "git+https://github.com/matrix-construct/ldap3?rev=7d423314b9dbc66347284e38fc2b78c3d8f3d494#7d423314b9dbc66347284e38fc2b78c3d8f3d494"
+source = "git+https://github.com/x86pup/ldap3?rev=0a4c62831ffef36c56e307fb6df8c9198d4af734#0a4c62831ffef36c56e307fb6df8c9198d4af734"
 dependencies = [
  "async-trait",
  "bytes",
@@ -2322,7 +2322,6 @@ dependencies = [
  "log",
  "nom 7.1.3",
  "percent-encoding",
- "ring",
  "rustls",
  "rustls-native-certs",
  "thiserror 1.0.69",

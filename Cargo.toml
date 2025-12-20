@@ -241,8 +241,8 @@ default-features = false
 features = ["use_pem"]
 
 [workspace.dependencies.ldap3]
-git = "https://github.com/matrix-construct/ldap3"
-rev = "7d423314b9dbc66347284e38fc2b78c3d8f3d494"
+git = "https://github.com/x86pup/ldap3"
+rev = "0a4c62831ffef36c56e307fb6df8c9198d4af734"
 default-features = false
 features = ["sync", "tls-rustls"]
 
