@@ -54,7 +54,7 @@ pub type ProcessorFuture = Pin<Box<dyn Future<Output = ProcessorResult> + Send>>
 /// events which have digested any prior errors. The wrapping preserves whether
 /// the command failed without interpreting the text. Ok(None) outputs are
 /// dropped to produce no response.
-pub type ProcessorResult = Result<Option<CommandOutput>, CommandOutput>;
+pub type ProcessorResult = Result<Option<CommandOutput>, Box<CommandOutput>>;
 
 /// Alias for the output structure.
 pub type CommandOutput = RoomMessageEventContent;
@@ -199,12 +199,16 @@ impl Service {
 
 	async fn handle_command(&self, command: CommandInput) {
 		match self.process_command(command).await {
+			| Err(output) => self.handle_command_output(*output).await,
+			| Ok(Some(output)) => self.handle_command_output(output).await,
 			| Ok(None) => debug!("Command successful with no response"),
-			| Ok(Some(output)) | Err(output) => self
-				.handle_response(output)
-				.await
-				.unwrap_or_else(default_log),
 		}
+	}
+
+	async fn handle_command_output(&self, content: RoomMessageEventContent) {
+		self.handle_response(content)
+			.await
+			.unwrap_or_else(default_log);
 	}
 
 	async fn process_command(&self, command: CommandInput) -> ProcessorResult {
