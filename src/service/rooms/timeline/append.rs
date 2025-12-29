@@ -248,12 +248,7 @@ async fn append_pdu_effects(
 		},
 		| TimelineEventType::SpaceChild =>
 			if let Some(_state_key) = pdu.state_key() {
-				self.services
-					.spaces
-					.roomid_spacehierarchy_cache
-					.lock()
-					.await
-					.remove(pdu.room_id());
+				self.services.spaces.cache_evict(pdu.room_id());
 			},
 		| TimelineEventType::RoomMember => {
 			if let Some(state_key) = pdu.state_key() {

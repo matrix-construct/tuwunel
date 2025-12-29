@@ -6,7 +6,7 @@ use ruma::{
 	OwnedRoomId, OwnedServerName, RoomId, UInt, UserId, api::client::space::get_hierarchy,
 };
 use tuwunel_core::{
-	Err, Result, debug_error,
+	Err, Result, debug, debug_error, error, trace,
 	utils::{future::TryExtExt, option::OptionExt, stream::IterStream},
 };
 use tuwunel_service::{
@@ -14,7 +14,8 @@ use tuwunel_service::{
 	rooms::{
 		short::ShortRoomId,
 		spaces::{
-			PaginationToken, SummaryAccessibility, get_parent_children_via, summary_to_chunk,
+			Accessibility, PaginationToken, get_parent_children_via, is_summary_serializable,
+			summary_to_chunk,
 		},
 	},
 };
@@ -91,7 +92,7 @@ where
 
 		let summary = services
 			.spaces
-			.get_summary_and_children_client(room_id, suggested_only, sender_user, &via)
+			.get_summary_and_children_client(room_id, sender_user, &via)
 			.await;
 
 		(room_id.to_owned(), via, summary)
@@ -100,27 +101,30 @@ where
 	let mut parents = BTreeSet::new();
 	let mut rooms = Vec::with_capacity(limit);
 	let mut queue: FuturesOrdered<_> = once(initial.boxed()).collect();
-
 	while let Some((current_room, via, summary)) = queue.next().await {
-		let summary = match summary {
-			| Ok(summary) => summary,
-			| Err(e) => {
-				debug_error!(?current_room, ?via, ?e, "error getting summary");
+		match (summary, current_room == room_id) {
+			| (Err(e), true) if !e.is_not_found() => {
+				error!(?current_room, ?via, "Failed to gather space hierarchy: {e}");
+				return Err(e);
+			},
+			| (Err(e), true) => {
+				debug_error!(?current_room, ?via, "Space hierarchy error: {e}");
+				return Err(e);
+			},
+			| (Err(e), _) if !e.is_not_found() => {
+				error!(?current_room, ?room_id, ?via, "Error gathering spaces: {e}");
 				continue;
 			},
-		};
-
-		match (summary, current_room == room_id) {
-			| (None | Some(SummaryAccessibility::Inaccessible), false) => {
-				// Just ignore other unavailable rooms
+			| (Err(_) | Ok(Accessibility::Inaccessible), false) => {
+				trace!(?current_room, ?room_id, "Child room missing or inaccessible.");
+				continue;
 			},
-			| (None, true) => {
-				return Err!(Request(Forbidden("The requested room was not found")));
+			| (Ok(Accessibility::Inaccessible), true) => {
+				return Err!(Request(Forbidden(debug_error!(
+					"The requested room is inaccessible."
+				))));
 			},
-			| (Some(SummaryAccessibility::Inaccessible), true) => {
-				return Err!(Request(Forbidden("The requested room is inaccessible")));
-			},
-			| (Some(SummaryAccessibility::Accessible(summary)), _) => {
+			| (Ok(Accessibility::Accessible(summary)), _) => {
 				let populate = parents.len() >= short_room_ids.clone().count();
 
 				let mut children: Vec<Entry> = get_parent_children_via(&summary, suggested_only)
@@ -130,7 +134,9 @@ where
 					.collect();
 
 				if populate {
-					rooms.push(summary_to_chunk(summary.clone()));
+					if is_summary_serializable(&summary) {
+						rooms.push(summary_to_chunk(summary.clone()));
+					}
 				} else {
 					children = children
 						.iter()
@@ -153,30 +159,28 @@ where
 						.collect();
 				}
 
-				if queue.is_empty() && children.is_empty() {
-					break;
-				}
-
 				parents.insert(current_room.clone());
-				if rooms.len() >= limit {
+				if queue.is_empty() && children.is_empty() {
+					debug!(?current_room, rooms = rooms.len(), "finished");
 					break;
 				}
 
-				if parents.len() > max_depth {
+				if rooms.len() >= limit {
+					debug!(?current_room, rooms = rooms.len(), "limit exceeded");
+					break;
+				}
+
+				if parents.len() >= max_depth {
+					trace!(?current_room, parents = parents.len(), "depth exceeded");
 					continue;
 				}
 
 				children
 					.into_iter()
-					.map(|(room_id, via)| async move {
+					.map(async |(room_id, via)| {
 						let summary = services
 							.spaces
-							.get_summary_and_children_client(
-								&room_id,
-								suggested_only,
-								sender_user,
-								&via,
-							)
+							.get_summary_and_children_client(&room_id, sender_user, &via)
 							.await;
 
 						(room_id, via, summary)

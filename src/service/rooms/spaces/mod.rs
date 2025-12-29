@@ -2,16 +2,15 @@ mod pagination_token;
 #[cfg(test)]
 mod tests;
 
-use std::{fmt::Write, sync::Arc};
+use std::{sync::Arc, time::SystemTime};
 
 use async_trait::async_trait;
 use futures::{FutureExt, Stream, StreamExt, TryFutureExt, pin_mut, stream::FuturesUnordered};
-use lru_cache::LruCache;
 use ruma::{
 	OwnedEventId, OwnedRoomId, OwnedServerName, RoomId, ServerName, UserId,
 	api::{
 		client::space::SpaceHierarchyRoomsChunk,
-		federation::{self, space::SpaceHierarchyParentSummary},
+		federation::space::SpaceHierarchyParentSummary as ParentSummary,
 	},
 	events::{
 		StateEventType,
@@ -20,176 +19,187 @@ use ruma::{
 	room::{JoinRuleSummary, RoomSummary},
 	serde::Raw,
 };
-use tokio::sync::{Mutex, MutexGuard};
+use serde::{Deserialize, Serialize};
 use tuwunel_core::{
-	Err, Error, Event, Result, implement,
+	Err, Error, Event, Result, at, debug, error, implement,
 	utils::{
-		IterStream,
 		future::{BoolExt, TryExtExt},
-		math::usize_from_f64,
-		stream::{BroadbandExt, ReadyExt, TryReadyExt},
+		rand::time_from_now_secs,
+		stream::{BroadbandExt, IterStream, ReadyExt, TryReadyExt},
+		timepoint_has_passed,
 	},
 };
-
-pub use self::pagination_token::PaginationToken;
+use tuwunel_database::{Deserialized, Json, Map};
 
 pub struct Service {
 	services: Arc<crate::services::OnceServices>,
-	pub roomid_spacehierarchy_cache: Mutex<Cache>,
+	db: Db,
 }
 
-pub struct CachedSpaceHierarchySummary {
-	summary: SpaceHierarchyParentSummary,
+struct Db {
+	roomid_spacehierarchy: Arc<Map>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct Cached {
+	expires: SystemTime,
+	summary: Option<ParentSummary>,
 }
 
 #[allow(clippy::large_enum_variant)]
-pub enum SummaryAccessibility {
-	Accessible(SpaceHierarchyParentSummary),
+#[derive(Clone, Debug)]
+pub enum Accessibility {
+	Accessible(ParentSummary),
 	Inaccessible,
 }
 
 /// Identifier used to check if rooms are accessible. None is used if you want
 /// to return the room, no matter if accessible or not
+#[derive(Debug)]
 pub enum Identifier<'a> {
 	UserId(&'a UserId),
 	ServerName(&'a ServerName),
 }
 
-type Cache = LruCache<OwnedRoomId, Option<CachedSpaceHierarchySummary>>;
+pub use self::pagination_token::PaginationToken;
 
 #[async_trait]
 impl crate::Service for Service {
 	fn build(args: &crate::Args<'_>) -> Result<Arc<Self>> {
-		let config = &args.server.config;
-		let cache_size = f64::from(config.roomid_spacehierarchy_cache_capacity);
-		let cache_size = cache_size * config.cache_capacity_modifier;
 		Ok(Arc::new(Self {
 			services: args.services.clone(),
-			roomid_spacehierarchy_cache: Mutex::new(LruCache::new(usize_from_f64(cache_size)?)),
+			db: Db {
+				roomid_spacehierarchy: args.db["roomid_spacehierarchy"].clone(),
+			},
 		}))
 	}
 
-	async fn memory_usage(&self, out: &mut (dyn Write + Send)) -> Result {
-		let roomid_spacehierarchy_cache = self
-			.roomid_spacehierarchy_cache
-			.lock()
-			.await
-			.len();
-
-		writeln!(out, "roomid_spacehierarchy_cache: {roomid_spacehierarchy_cache}")?;
-
-		Ok(())
-	}
-
-	async fn clear_cache(&self) {
-		self.roomid_spacehierarchy_cache
-			.lock()
-			.await
-			.clear();
-	}
+	async fn clear_cache(&self) { self.db.roomid_spacehierarchy.clear().await; }
 
 	fn name(&self) -> &str { crate::service::make_name(std::module_path!()) }
 }
 
+#[implement(Service)]
+#[inline]
+#[tracing::instrument(name = "evict", level = "debug", skip(self))]
+pub fn cache_evict(&self, room_id: &RoomId) { self.db.roomid_spacehierarchy.remove(room_id); }
+
 /// Gets the summary of a space using either local or remote (federation)
 /// sources
 #[implement(Service)]
+#[tracing::instrument(
+	name = "summary",
+	level = "debug",
+	skip_all,
+	fields(
+		?room_id,
+		?user_id,
+		via = via.len(),
+	)
+)]
 pub async fn get_summary_and_children_client(
 	&self,
-	current_room: &RoomId,
-	suggested_only: bool,
+	room_id: &RoomId,
 	user_id: &UserId,
 	via: &[OwnedServerName],
-) -> Result<Option<SummaryAccessibility>> {
-	let identifier = Identifier::UserId(user_id);
-
-	if let Ok(Some(response)) = self
-		.get_summary_and_children_local(current_room, &identifier)
-		.await
-	{
-		return Ok(Some(response));
-	}
-
-	self.get_summary_and_children_federation(current_room, suggested_only, user_id, via)
+) -> Result<Accessibility> {
+	self.get_summary_and_children_local(room_id, Identifier::UserId(user_id))
+		.or_else(async |e| match e {
+			| _ if !e.is_not_found() => Err(e),
+			| _ if via.is_empty() =>
+				Err!(Request(NotFound("No servers provided for federation request."))),
+			| _ =>
+				self.get_summary_and_children_federation(room_id, user_id, via)
+					.boxed()
+					.await,
+		})
 		.await
 }
 
 /// Gets the summary of a space using solely local information
 #[implement(Service)]
+#[tracing::instrument(name = "local", level = "debug", skip_all)]
 pub async fn get_summary_and_children_local(
 	&self,
 	current_room: &RoomId,
-	identifier: &Identifier<'_>,
-) -> Result<Option<SummaryAccessibility>> {
+	identifier: Identifier<'_>,
+) -> Result<Accessibility> {
+	use Accessibility::{Accessible, Inaccessible};
+
 	match self
-		.roomid_spacehierarchy_cache
-		.lock()
+		.db
+		.roomid_spacehierarchy
+		.get(current_room)
 		.await
-		.get_mut(current_room)
-		.as_ref()
+		.deserialized::<Json<_>>()
+		.map(at!(0))
 	{
-		| None => (), // cache miss
-		| Some(None) => return Ok(None),
-		| Some(Some(cached)) => {
-			let join_rule = &cached.summary.summary.join_rule;
-			let is_accessible_child = self.is_accessible_child(
-				current_room,
-				join_rule,
-				identifier,
-				join_rule.allowed_room_ids(),
-			);
-
-			let accessibility = if is_accessible_child.await {
-				SummaryAccessibility::Accessible(cached.summary.clone())
-			} else {
-				SummaryAccessibility::Inaccessible
-			};
-
-			return Ok(Some(accessibility));
+		| Err(e) if !e.is_not_found() => {
+			error!(?current_room, "cache error: {e}");
+			return Err(e);
+		},
+		| Err(_) => {
+			debug!(?current_room, "cache miss");
+			return Err!(Request(NotFound("Space room not found.")));
+		},
+		| Ok(Cached { expires, .. }) if timepoint_has_passed(expires) => {
+			debug!(?current_room, ?expires, "cache expired");
+			return Err!(Request(NotFound("Space room not found. (cached; expired)")));
+		},
+		| Ok(Cached { expires, summary: Some(cached) }) => {
+			debug!(?current_room, ?expires, "cache hit");
+			return self
+				.is_accessible_child(
+					current_room,
+					&cached.summary.join_rule,
+					identifier,
+					cached.summary.join_rule.allowed_room_ids(),
+				)
+				.await
+				.then(|| Ok(Accessible(cached)))
+				.unwrap_or(Ok(Inaccessible));
+		},
+		| Ok(Cached { expires, summary: None, .. }) => {
+			debug!(?current_room, ?expires, "cache negative");
 		},
 	}
 
-	let children_pdus: Vec<_> = self
+	let children_state: Vec<_> = self
 		.get_space_child_events(current_room)
 		.map(Event::into_format)
 		.collect()
 		.await;
 
-	let Ok(summary) = self
-		.get_room_summary(current_room, children_pdus, identifier)
+	let summary = self
+		.get_room_summary(current_room, children_state, identifier)
 		.boxed()
-		.await
-	else {
-		return Ok(None);
-	};
+		.await?;
 
-	self.roomid_spacehierarchy_cache
-		.lock()
-		.await
-		.insert(
-			current_room.to_owned(),
-			Some(CachedSpaceHierarchySummary { summary: summary.clone() }),
-		);
+	if let Accessible(summary) = &summary {
+		self.cache_put(current_room, Some(summary.clone()));
+	}
 
-	Ok(Some(SummaryAccessibility::Accessible(summary)))
+	Ok(summary)
 }
 
 /// Gets the summary of a space using solely federation
 #[implement(Service)]
-#[tracing::instrument(level = "debug", skip(self))]
+#[tracing::instrument(name = "federation", level = "debug", skip(self))]
 async fn get_summary_and_children_federation(
 	&self,
 	current_room: &RoomId,
-	suggested_only: bool,
 	user_id: &UserId,
 	via: &[OwnedServerName],
-) -> Result<Option<SummaryAccessibility>> {
-	let request = federation::space::get_hierarchy::v1::Request {
+) -> Result<Accessibility> {
+	use Accessibility::{Accessible, Inaccessible};
+	use ruma::api::federation::space::get_hierarchy::v1::{Request, Response};
+
+	let request = Request {
 		room_id: current_room.to_owned(),
-		suggested_only,
+		suggested_only: false,
 	};
 
-	let mut requests: FuturesUnordered<_> = via
+	let requests: FuturesUnordered<_> = via
 		.iter()
 		.map(|server| {
 			self.services
@@ -198,54 +208,119 @@ async fn get_summary_and_children_federation(
 		})
 		.collect();
 
-	let Some(Ok(response)) = requests.next().await else {
-		self.roomid_spacehierarchy_cache
-			.lock()
-			.await
-			.insert(current_room.to_owned(), None);
-
-		return Ok(None);
+	pin_mut!(requests);
+	debug!(?current_room, ?user_id, requests = requests.len(), "requesting...");
+	let Some(Ok(Response { room, children, .. })) = requests.next().await else {
+		self.cache_put(current_room, None);
+		return Err!(Request(NotFound("Space room not found over federation.")));
 	};
 
-	let summary = response.room;
-	self.roomid_spacehierarchy_cache
-		.lock()
-		.await
-		.insert(
-			current_room.to_owned(),
-			Some(CachedSpaceHierarchySummary { summary: summary.clone() }),
-		);
+	self.cache_put(current_room, Some(room.clone()));
 
-	response
-		.children
+	children
 		.into_iter()
 		.stream()
-		.then(|child| {
-			self.roomid_spacehierarchy_cache
-				.lock()
-				.map(|lock| (child, lock))
+		.filter_map(async |child| {
+			self.db
+				.roomid_spacehierarchy
+				.get(&child.room_id)
+				.await
+				.deserialized::<Json<Cached>>()
+				.ok()
+				.map(at!(0))
+				.map(|cached| cached.expires)
+				.is_none_or(timepoint_has_passed)
+				.then_some(child)
 		})
-		.ready_filter_map(|(child, mut cache)| {
-			(!cache.contains_key(current_room)).then_some((child, cache))
+		.broad_then(async |child| ParentSummary {
+			children_state: self
+				.get_space_child_events(&child.room_id)
+				.map(Event::into_format)
+				.collect()
+				.await,
+
+			summary: child,
 		})
-		.for_each(|(child, cache)| self.cache_insert(cache, current_room, child))
+		.for_each(async |summary| {
+			let room_id = summary.summary.room_id.clone();
+			self.cache_put(&room_id, Some(summary));
+		})
 		.await;
 
-	let identifier = Identifier::UserId(user_id);
-	let join_rule = &summary.summary.join_rule;
-	let allowed_room_ids = join_rule.allowed_room_ids();
+	self.is_accessible_child(
+		current_room,
+		&room.summary.join_rule,
+		Identifier::UserId(user_id),
+		room.summary.join_rule.allowed_room_ids(),
+	)
+	.await
+	.then(|| Ok(Accessible(room)))
+	.unwrap_or(Ok(Inaccessible))
+}
 
-	let is_accessible_child = self
-		.is_accessible_child(current_room, join_rule, &identifier, allowed_room_ids)
-		.await;
+/// Returns the children of a SpaceHierarchyParentSummary, making use of the
+/// children_state field
+pub fn get_parent_children_via(
+	parent: &ParentSummary,
+	suggested_only: bool,
+) -> impl DoubleEndedIterator<
+	Item = (OwnedRoomId, impl Iterator<Item = OwnedServerName> + Send + use<>),
+> + '_ {
+	parent
+		.children_state
+		.iter()
+		.map(Raw::deserialize)
+		.filter_map(Result::ok)
+		.filter_map(move |ce| {
+			(!suggested_only || ce.content.suggested)
+				.then_some((ce.state_key, ce.content.via.into_iter()))
+		})
+}
 
-	let accessibility = if is_accessible_child {
-		SummaryAccessibility::Accessible(summary)
-	} else {
-		SummaryAccessibility::Inaccessible
-	};
+/// Simply returns the stripped m.space.child events of a room
+#[implement(Service)]
+pub fn get_space_children<'a>(
+	&'a self,
+	room_id: &'a RoomId,
+) -> impl Stream<Item = OwnedRoomId> + Send + 'a {
+	self.services
+		.state_accessor
+		.room_state_keys(room_id, &StateEventType::SpaceChild)
+		.ready_and_then(|state_key| OwnedRoomId::parse(state_key.as_str()).map_err(Into::into))
+		.ready_filter_map(Result::ok)
+}
 
-	Ok(Some(accessibility))
+/// Simply returns the stripped m.space.child events of a room
+#[implement(Service)]
+fn get_space_child_events<'a>(
+	&'a self,
+	room_id: &'a RoomId,
+) -> impl Stream<Item = impl Event> + Send + 'a {
+	self.services
+		.state_accessor
+		.room_state_keys_with_ids(room_id, &StateEventType::SpaceChild)
+		.ready_filter_map(Result::ok)
+		.broad_filter_map(async |(state_key, event_id): (_, OwnedEventId)| {
+			self.services
+				.timeline
+				.get_pdu(&event_id)
+				.map_ok(move |pdu| (state_key, pdu))
+				.ok()
+				.await
+		})
+		.ready_filter_map(|(state_key, pdu)| {
+			if let Ok(content) = pdu.get_content::<SpaceChildEventContent>()
+				&& content.via.is_empty()
+			{
+				//return None;
+			}
+
+			if RoomId::parse(&state_key).is_err() {
+				return None;
+			}
+
+			Some(pdu)
+		})
 }
 
 #[implement(Service)]
@@ -253,8 +328,8 @@ async fn get_room_summary(
 	&self,
 	room_id: &RoomId,
 	children_state: Vec<Raw<HierarchySpaceChildEvent>>,
-	identifier: &Identifier<'_>,
-) -> Result<SpaceHierarchyParentSummary, Error> {
+	identifier: Identifier<'_>,
+) -> Result<Accessibility, Error> {
 	let join_rule = self
 		.services
 		.state_accessor
@@ -271,7 +346,7 @@ async fn get_room_summary(
 		.await;
 
 	if !is_accessible_child {
-		return Err!(Request(Forbidden("User is not allowed to see the room")));
+		return Ok(Accessibility::Inaccessible);
 	}
 
 	let name = self
@@ -353,7 +428,7 @@ async fn get_room_summary(
 		encryption,
 	);
 
-	let summary = SpaceHierarchyParentSummary {
+	let summary = ParentSummary {
 		children_state,
 		summary: RoomSummary {
 			avatar_url: avatar_url.flatten(),
@@ -371,7 +446,7 @@ async fn get_room_summary(
 		},
 	};
 
-	Ok(summary)
+	Ok(Accessibility::Accessible(summary))
 }
 
 /// With the given identifier, checks if a room is accessible
@@ -380,7 +455,7 @@ async fn is_accessible_child<'a, I>(
 	&self,
 	current_room: &RoomId,
 	join_rule: &JoinRuleSummary,
-	identifier: &Identifier<'_>,
+	identifier: Identifier<'_>,
 	allowed_rooms: I,
 ) -> bool
 where
@@ -420,6 +495,7 @@ where
 		| JoinRuleSummary::Public
 		| JoinRuleSummary::Knock
 		| JoinRuleSummary::KnockRestricted(_) => true,
+
 		| JoinRuleSummary::Restricted(_) =>
 			allowed_rooms
 				.stream()
@@ -429,6 +505,7 @@ where
 							.state_cache
 							.is_joined(user, room)
 							.await,
+
 					| Identifier::ServerName(server) =>
 						self.services
 							.state_cache
@@ -437,111 +514,62 @@ where
 				})
 				.await,
 
-		// Invite only, Private, or Custom join rule
-		| _ => false,
+		| _ => false, // Invite only, Private, or Custom join rule
 	}
 }
 
-/// Returns the children of a SpaceHierarchyParentSummary, making use of the
-/// children_state field
-pub fn get_parent_children_via(
-	parent: &SpaceHierarchyParentSummary,
-	suggested_only: bool,
-) -> impl DoubleEndedIterator<
-	Item = (OwnedRoomId, impl Iterator<Item = OwnedServerName> + Send + use<>),
-> + '_ {
-	parent
-		.children_state
-		.iter()
-		.map(Raw::deserialize)
-		.filter_map(Result::ok)
-		.filter_map(move |ce| {
-			(!suggested_only || ce.content.suggested)
-				.then_some((ce.state_key, ce.content.via.into_iter()))
-		})
+#[implement(Service)]
+#[tracing::instrument(
+	level = "debug",
+	skip(self, summary),
+	fields(summary = summary.is_some())
+)]
+fn cache_put(&self, room_id: &RoomId, summary: Option<ParentSummary>) {
+	debug!("cache put");
+	self.db.roomid_spacehierarchy.raw_put(
+		room_id,
+		Json(Cached {
+			expires: self.generate_ttl(),
+			summary: summary.filter(is_summary_serializable),
+		}),
+	);
 }
 
 #[implement(Service)]
-async fn cache_insert(
-	&self,
-	mut cache: MutexGuard<'_, Cache>,
-	current_room: &RoomId,
-	child: RoomSummary,
-) {
-	let summary = SpaceHierarchyParentSummary {
-		children_state: self
-			.get_space_child_events(&child.room_id)
-			.map(Event::into_format)
-			.collect()
-			.await,
-
-		summary: child,
-	};
-
-	cache.insert(current_room.to_owned(), Some(CachedSpaceHierarchySummary { summary }));
-}
-
-/// Simply returns the stripped m.space.child events of a room
-#[implement(Service)]
-fn get_space_child_events<'a>(
-	&'a self,
-	room_id: &'a RoomId,
-) -> impl Stream<Item = impl Event> + Send + 'a {
-	self.services
-		.state_accessor
-		.room_state_keys_with_ids(room_id, &StateEventType::SpaceChild)
-		.ready_filter_map(Result::ok)
-		.broad_filter_map(async |(state_key, event_id): (_, OwnedEventId)| {
-			self.services
-				.timeline
-				.get_pdu(&event_id)
-				.map_ok(move |pdu| (state_key, pdu))
-				.ok()
-				.await
-		})
-		.ready_filter_map(|(state_key, pdu)| {
-			if let Ok(content) = pdu.get_content::<SpaceChildEventContent>()
-				&& content.via.is_empty()
-			{
-				return None;
-			}
-
-			if RoomId::parse(&state_key).is_err() {
-				return None;
-			}
-
-			Some(pdu)
-		})
-}
-
-/// Simply returns the stripped m.space.child events of a room
-#[implement(Service)]
-pub fn get_space_children<'a>(
-	&'a self,
-	room_id: &'a RoomId,
-) -> impl Stream<Item = OwnedRoomId> + Send + 'a {
-	self.services
-		.state_accessor
-		.room_state_keys(room_id, &StateEventType::SpaceChild)
-		.ready_and_then(|state_key| OwnedRoomId::parse(state_key.as_str()).map_err(Into::into))
-		.ready_filter_map(Result::ok)
-}
-
-// Here because cannot implement `From` across ruma-federation-api and
-// ruma-client-api types
-impl From<CachedSpaceHierarchySummary> for SpaceHierarchyRoomsChunk {
-	fn from(value: CachedSpaceHierarchySummary) -> Self {
-		let SpaceHierarchyParentSummary { children_state, summary } = value.summary;
-
-		Self { children_state, summary }
-	}
+fn generate_ttl(&self) -> SystemTime {
+	time_from_now_secs(
+		self.services.config.spacehierarchy_cache_ttl_min
+			..self.services.config.spacehierarchy_cache_ttl_max,
+	)
 }
 
 /// Here because cannot implement `From` across ruma-federation-api and
 /// ruma-client-api types
+#[inline]
 #[must_use]
-pub fn summary_to_chunk(summary: SpaceHierarchyParentSummary) -> SpaceHierarchyRoomsChunk {
-	let SpaceHierarchyParentSummary { children_state, summary } = summary;
-
+pub fn summary_to_chunk(
+	ParentSummary { children_state, summary }: ParentSummary,
+) -> SpaceHierarchyRoomsChunk {
 	SpaceHierarchyRoomsChunk { children_state, summary }
+}
+
+/// Here because cannot implement `From` across ruma-federation-api and
+/// ruma-client-api types
+impl From<Cached> for Option<SpaceHierarchyRoomsChunk> {
+	#[inline]
+	fn from(value: Cached) -> Self {
+		value
+			.summary
+			.map(|ParentSummary { children_state, summary }: ParentSummary| {
+				SpaceHierarchyRoomsChunk { children_state, summary }
+			})
+	}
+}
+
+#[inline]
+#[must_use]
+pub fn is_summary_serializable(summary: &ParentSummary) -> bool {
+	// Ignore case to workaround a Ruma issue which refuses to serialize unknown
+	// join rule types.
+	!matches!(summary.summary.join_rule, JoinRuleSummary::_Custom(_))
 }

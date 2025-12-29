@@ -182,9 +182,15 @@
 #
 #stateinfo_cache_capacity = varies by system
 
-# This item is undocumented. Please contribute documentation for it.
+# Minimum time-to-live in seconds for room summary entries in the spaces
+# cache.
 #
-#roomid_spacehierarchy_cache_capacity = varies by system
+#spacehierarchy_cache_ttl_min = 21600
+
+# Maximum time-to-live in seconds for room summary entries in the spaces
+# cache.
+#
+#spacehierarchy_cache_ttl_max = 129600
 
 # Minimum timeout a client can request for long-polling sync. Requests
 # will be clamped up to this value if smaller.

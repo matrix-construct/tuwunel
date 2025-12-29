@@ -5,7 +5,7 @@ use tuwunel_core::{
 	Err, Result,
 	utils::stream::{BroadbandExt, IterStream},
 };
-use tuwunel_service::rooms::spaces::{Identifier, SummaryAccessibility, get_parent_children_via};
+use tuwunel_service::rooms::spaces::{Accessibility, Identifier, get_parent_children_via};
 
 use crate::Ruma;
 
@@ -23,36 +23,29 @@ pub(crate) async fn get_hierarchy_route(
 
 	let room_id = &body.room_id;
 	let suggested_only = body.suggested_only;
-	let ref identifier = Identifier::ServerName(body.origin());
+	let identifier = Identifier::ServerName(body.origin());
 	match services
 		.spaces
 		.get_summary_and_children_local(room_id, identifier)
 		.await?
 	{
-		| None => Err!(Request(NotFound("The requested room was not found"))),
+		| Accessibility::Inaccessible =>
+			Err!(Request(NotFound("The requested room is inaccessible"))),
 
-		| Some(SummaryAccessibility::Inaccessible) => {
-			Err!(Request(NotFound("The requested room is inaccessible")))
-		},
-
-		| Some(SummaryAccessibility::Accessible(room)) => {
+		| Accessibility::Accessible(room) => {
 			let (children, inaccessible_children) =
 				get_parent_children_via(&room, suggested_only)
 					.stream()
 					.broad_filter_map(async |(child, _via)| {
+						let identifier = Identifier::ServerName(body.origin());
 						match services
 							.spaces
 							.get_summary_and_children_local(&child, identifier)
 							.await
 							.ok()?
 						{
-							| None => None,
-
-							| Some(SummaryAccessibility::Inaccessible) =>
-								Some((None, Some(child))),
-
-							| Some(SummaryAccessibility::Accessible(summary)) =>
-								Some((Some(summary), None)),
+							| Accessibility::Inaccessible => Some((None, Some(child))),
+							| Accessibility::Accessible(summary) => Some((Some(summary), None)),
 						}
 					})
 					.unzip()

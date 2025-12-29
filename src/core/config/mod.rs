@@ -249,9 +249,19 @@ pub struct Config {
 	#[serde(default = "default_stateinfo_cache_capacity")]
 	pub stateinfo_cache_capacity: u32,
 
-	/// default: varies by system
-	#[serde(default = "default_roomid_spacehierarchy_cache_capacity")]
-	pub roomid_spacehierarchy_cache_capacity: u32,
+	/// Minimum time-to-live in seconds for room summary entries in the spaces
+	/// cache.
+	///
+	/// default: 21600
+	#[serde(default = "default_spacehierarchy_cache_ttl_min")]
+	pub spacehierarchy_cache_ttl_min: u64,
+
+	/// Maximum time-to-live in seconds for room summary entries in the spaces
+	/// cache.
+	///
+	/// default: 129600
+	#[serde(default = "default_spacehierarchy_cache_ttl_max")]
+	pub spacehierarchy_cache_ttl_max: u64,
 
 	/// Minimum timeout a client can request for long-polling sync. Requests
 	/// will be clamped up to this value if smaller.
@@ -2961,7 +2971,9 @@ fn default_servernameevent_data_cache_capacity() -> u32 {
 
 fn default_stateinfo_cache_capacity() -> u32 { parallelism_scaled_u32(100) }
 
-fn default_roomid_spacehierarchy_cache_capacity() -> u32 { parallelism_scaled_u32(1000) }
+fn default_spacehierarchy_cache_ttl_min() -> u64 { 60 * 60 * 3 }
+
+fn default_spacehierarchy_cache_ttl_max() -> u64 { 60 * 60 * 18 }
 
 fn default_dns_cache_entries() -> u32 { 32768 }
 
