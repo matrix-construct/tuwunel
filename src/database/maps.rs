@@ -245,6 +245,11 @@ pub(super) static MAPS: &[Descriptor] = &[
 		..descriptor::RANDOM_SMALL
 	},
 	Descriptor {
+		name: "roomid_spacehierarchy",
+		limit_size: 1024 * 1024 * 64,
+		..descriptor::RANDOM_SMALL_CACHE
+	},
+	Descriptor {
 		name: "roomid_ts_pducount",
 		val_size_hint: Some(8),
 		..descriptor::RANDOM

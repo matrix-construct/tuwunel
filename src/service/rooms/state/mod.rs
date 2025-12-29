@@ -142,12 +142,7 @@ pub async fn force_state(
 					.await
 			},
 			| TimelineEventType::SpaceChild => {
-				self.services
-					.spaces
-					.roomid_spacehierarchy_cache
-					.lock()
-					.await
-					.remove(&pdu.room_id);
+				self.services.spaces.cache_evict(pdu.room_id());
 
 				Ok(())
 			},
