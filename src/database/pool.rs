@@ -19,7 +19,7 @@ use tuwunel_core::{
 	result::DebugInspect,
 	smallvec::SmallVec,
 	trace,
-	utils::sys::compute::{get_affinity, nth_core_available, set_affinity},
+	utils::sys::compute::{get_affinity, set_affinity},
 };
 
 use self::configure::configure;
@@ -76,10 +76,11 @@ const WORKER_NAME: &str = "tuwunel:db";
 pub(crate) fn new(server: &Arc<Server>) -> Result<Arc<Self>> {
 	const CHAN_SCHED: (QueueStrategy, QueueStrategy) = (QueueStrategy::Fifo, QueueStrategy::Lifo);
 
-	let (total_workers, queue_sizes, topology) = configure(server);
+	let (topology, workers, queues) = configure(server);
 
-	let (senders, receivers): (Vec<_>, Vec<_>) = queue_sizes
+	let (senders, receivers): (Vec<_>, Vec<_>) = queues
 		.into_iter()
+		.map(|cap| cap.max(QUEUE_LIMIT.0))
 		.map(|cap| async_channel::bounded_with_queue_strategy(cap, CHAN_SCHED))
 		.unzip();
 
@@ -92,7 +93,9 @@ pub(crate) fn new(server: &Arc<Server>) -> Result<Arc<Self>> {
 		queued_max: AtomicUsize::default(),
 	});
 
-	pool.spawn_until(&receivers, total_workers)?;
+	for (chan_id, &count) in workers.iter().enumerate() {
+		pool.spawn_group(&receivers, chan_id, count)?;
+	}
 
 	Ok(pool)
 }
@@ -157,10 +160,11 @@ pub(crate) fn close(&self) {
 }
 
 #[implement(Pool)]
-fn spawn_until(self: &Arc<Self>, recv: &[Receiver<Cmd>], count: usize) -> Result {
+fn spawn_group(self: &Arc<Self>, recv: &[Receiver<Cmd>], chan_id: usize, count: usize) -> Result {
 	let mut workers = self.workers.lock().expect("locked");
-	while workers.len() < count {
-		self.clone().spawn_one(&mut workers, recv)?;
+	for _ in 0..count {
+		self.clone()
+			.spawn_one(&mut workers, recv, chan_id)?;
 	}
 
 	Ok(())
@@ -177,18 +181,18 @@ fn spawn_one(
 	self: Arc<Self>,
 	workers: &mut Vec<JoinHandle<()>>,
 	recv: &[Receiver<Cmd>],
+	chan_id: usize,
 ) -> Result {
 	debug_assert!(!self.queues.is_empty(), "Must have at least one queue");
 	debug_assert!(!recv.is_empty(), "Must have at least one receiver");
 
 	let id = workers.len();
-	let group = id.overflowing_rem(self.queues.len()).0;
-	let recv = recv[group].clone();
+	let recv = recv[chan_id].clone();
 
 	let handle = thread::Builder::new()
 		.name(WORKER_NAME.into())
 		.stack_size(WORKER_STACK_SIZE)
-		.spawn(move || self.worker(id, &recv))?;
+		.spawn(move || self.worker(id, chan_id, &recv))?;
 
 	workers.push(handle);
 
@@ -227,8 +231,12 @@ pub(crate) async fn execute_iter(self: &Arc<Self>, mut cmd: Seek) -> Result<stre
 
 #[implement(Pool)]
 fn select_queue(&self) -> &Sender<Cmd> {
-	let core_id = get_affinity().next().unwrap_or(0);
+	let core_id = get_affinity()
+		.next()
+		.expect("Affinity mask should be available.");
+
 	let chan_id = self.topology[core_id];
+
 	self.queues
 		.get(chan_id)
 		.unwrap_or_else(|| &self.queues[0])
@@ -262,33 +270,33 @@ async fn execute(&self, queue: &Sender<Cmd>, cmd: Cmd) -> Result {
 #[tracing::instrument(
 	parent = None,
 	level = "debug",
-	skip(self, recv),
+	skip_all,
 	fields(
-		tid = ?thread::current().id(),
+		id,
+		chan_id,
+		thread_id = ?thread::current().id(),
 	),
 )]
-fn worker(self: Arc<Self>, id: usize, recv: &Receiver<Cmd>) {
-	self.worker_init(id);
+fn worker(self: Arc<Self>, id: usize, chan_id: usize, recv: &Receiver<Cmd>) {
+	self.worker_init(id, chan_id);
 	self.worker_loop(recv);
 }
 
 #[implement(Pool)]
-fn worker_init(&self, id: usize) {
-	let group = id.overflowing_rem(self.queues.len()).0;
+fn worker_init(&self, id: usize, chan_id: usize) {
 	let affinity = self
 		.topology
 		.iter()
 		.enumerate()
-		.filter(|_| self.queues.len() > 1)
 		.filter(|_| self.server.config.db_pool_affinity)
-		.filter_map(|(core_id, &queue_id)| (group == queue_id).then_some(core_id))
-		.filter_map(nth_core_available);
+		.filter_map(|(core_id, &queue_id)| (chan_id == queue_id).then_some(core_id));
 
 	// affinity is empty (no-op) if there's only one queue
 	set_affinity(affinity.clone());
 
 	trace!(
-		?group,
+		?id,
+		?chan_id,
 		affinity = ?affinity.collect::<Vec<_>>(),
 		"worker ready"
 	);

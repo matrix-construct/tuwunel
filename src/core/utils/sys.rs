@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 pub use compute::available_parallelism;
 
-use crate::{Result, debug};
+use crate::{Result, at, debug};
 
 /// This is needed for opening lots of file descriptors, which tends to
 /// happen more often when using RocksDB and making lots of federation
@@ -50,4 +50,16 @@ pub fn current_exe_deleted() -> bool {
 		exe.to_str()
 			.is_some_and(|exe| exe.ends_with(" (deleted)"))
 	})
+}
+
+/// Parse the `KEY=VALUE` contents of a `uevent` file searching for `key` and
+/// returning the `value`.
+#[inline]
+#[must_use]
+pub fn uevent_find<'a>(uevent: &'a str, key: &'a str) -> Option<&'a str> {
+	uevent
+		.lines()
+		.filter_map(|line| line.split_once('='))
+		.find(|&(key_, _)| key.eq(key_))
+		.map(at!(1))
 }

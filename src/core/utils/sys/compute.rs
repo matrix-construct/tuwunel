@@ -9,7 +9,11 @@ type Id = usize;
 type Mask = u128;
 type Masks = [Mask; MASK_BITS];
 
-const MASK_BITS: usize = 128;
+const MASK_BITS: usize = CORES_MAX;
+
+/// Maximum number of cores we support; for now limited to bits of our mask
+/// integral.
+pub const CORES_MAX: usize = 128;
 
 /// The mask of logical cores available to the process (at startup).
 static CORES_AVAILABLE: LazyLock<Mask> = LazyLock::new(|| into_mask(query_cores_available()));
