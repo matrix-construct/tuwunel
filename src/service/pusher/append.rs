@@ -14,9 +14,9 @@ use tuwunel_core::{
 		event::Event,
 		pdu::{Count, Pdu, PduId, RawPduId},
 	},
-	utils::{self, BoolExt, ReadyExt, future::TryExtExt, time::now_millis},
+	utils::{BoolExt, ReadyExt, future::TryExtExt, time::now_millis},
 };
-use tuwunel_database::{Json, Map};
+use tuwunel_database::{Deserialized, Json, Map};
 
 use crate::rooms::short::ShortRoomId;
 
@@ -159,13 +159,14 @@ pub(crate) async fn append_pdu(&self, pdu_id: RawPduId, pdu: &Pdu) -> Result {
 		}
 	}
 
-	self.increment_notification_counts(pdu.room_id(), notifies, highlights);
+	self.increment_notification_counts(pdu.room_id(), notifies, highlights)
+		.await;
 
 	Ok(())
 }
 
 #[implement(super::Service)]
-fn increment_notification_counts(
+async fn increment_notification_counts(
 	&self,
 	room_id: &RoomId,
 	notifies: Vec<OwnedUserId>,
@@ -174,23 +175,17 @@ fn increment_notification_counts(
 	let _cork = self.db.db.cork();
 
 	for user in notifies {
-		let mut userroom_id = user.as_bytes().to_vec();
-		userroom_id.push(0xFF);
-		userroom_id.extend_from_slice(room_id.as_bytes());
-		increment(&self.db.userroomid_notificationcount, &userroom_id);
+		increment(&self.db.userroomid_notificationcount, (&user, room_id)).await;
 	}
 
 	for user in highlights {
-		let mut userroom_id = user.as_bytes().to_vec();
-		userroom_id.push(0xFF);
-		userroom_id.extend_from_slice(room_id.as_bytes());
-		increment(&self.db.userroomid_highlightcount, &userroom_id);
+		increment(&self.db.userroomid_highlightcount, (&user, room_id)).await;
 	}
 }
 
-//TODO: this is an ABA
-fn increment(db: &Arc<Map>, key: &[u8]) {
-	let old = db.get_blocking(key);
-	let new = utils::increment(old.ok().as_deref());
-	db.insert(key, new);
+// TODO: this is an ABA problem
+async fn increment(db: &Arc<Map>, key: (&UserId, &RoomId)) {
+	let old: u64 = db.qry(&key).await.deserialized().unwrap_or(0);
+	let new = old.saturating_add(1);
+	db.put(key, new);
 }
