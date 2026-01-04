@@ -125,20 +125,20 @@ async fn send_notice<Pdu: Event>(
 			}
 
 			let d = vec![device];
-			let mut notifi = Notification::new(d);
+			let mut notify = Notification::new(d);
 
-			notifi.event_id = Some(event.event_id().to_owned());
-			notifi.room_id = Some(event.room_id().to_owned());
+			notify.event_id = Some(event.event_id().to_owned());
+			notify.room_id = Some(event.room_id().to_owned());
 			if http
 				.data
 				.get("org.matrix.msc4076.disable_badge_count")
 				.is_none() && http.data.get("disable_badge_count").is_none()
 			{
-				notifi.counts = NotificationCounts::new(unread, uint!(0));
+				notify.counts = NotificationCounts::new(unread, uint!(0));
 			} else {
 				// counts will not be serialised if it's the default (0, 0)
 				// skip_serializing_if = "NotificationCounts::is_default"
-				notifi.counts = NotificationCounts::default();
+				notify.counts = NotificationCounts::default();
 			}
 
 			if !event_id_only {
@@ -147,33 +147,33 @@ async fn send_notice<Pdu: Event>(
 						.iter()
 						.any(|t| matches!(t, Tweak::Highlight(true) | Tweak::Sound(_)))
 				{
-					notifi.prio = NotificationPriority::High;
+					notify.prio = NotificationPriority::High;
 				} else {
-					notifi.prio = NotificationPriority::Low;
+					notify.prio = NotificationPriority::Low;
 				}
-				notifi.sender = Some(event.sender().to_owned());
-				notifi.event_type = Some(event.kind().to_owned());
-				notifi.content = serde_json::value::to_raw_value(event.content()).ok();
+				notify.sender = Some(event.sender().to_owned());
+				notify.event_type = Some(event.kind().to_owned());
+				notify.content = serde_json::value::to_raw_value(event.content()).ok();
 
 				if *event.kind() == TimelineEventType::RoomMember {
-					notifi.user_is_target = event.state_key() == Some(event.sender().as_str());
+					notify.user_is_target = event.state_key() == Some(event.sender().as_str());
 				}
 
-				notifi.sender_display_name = self
+				notify.sender_display_name = self
 					.services
 					.users
 					.displayname(event.sender())
 					.await
 					.ok();
 
-				notifi.room_name = self
+				notify.room_name = self
 					.services
 					.state_accessor
 					.get_name(event.room_id())
 					.await
 					.ok();
 
-				notifi.room_alias = self
+				notify.room_alias = self
 					.services
 					.state_accessor
 					.get_canonical_alias(event.room_id())
@@ -181,7 +181,7 @@ async fn send_notice<Pdu: Event>(
 					.ok();
 			}
 
-			self.send_request(&http.url, send_event_notification::v1::Request::new(notifi))
+			self.send_request(&http.url, send_event_notification::v1::Request::new(notify))
 				.await?;
 
 			Ok(())
