@@ -1,0 +1,27 @@
+name: Update .rpm SPEC files
+on:
+  # Allows for manually running an update from the actions tab
+  workflow_dispatch:
+
+  schedule:
+    # Runs every day at ~12am UTC - see https://crontab.guru/
+    - cron: '0 0 * * *'
+
+# Revoke all default permissions
+permissions: {}
+
+jobs:
+  update:
+    name: update
+    runs-on: ubuntu-latest
+    permissions:
+      # needed to push commits to this repo
+      # see `check` mode if you don't want to give this permission
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: aidandenlinger/autocopr@v1 # Or a specific release tag, or commit
+        with:
+          mode: "push"
