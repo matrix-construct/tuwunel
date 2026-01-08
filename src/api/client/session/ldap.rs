@@ -60,22 +60,25 @@ pub(super) async fn ldap_login(
 			.await?;
 	}
 
-	let is_tuwunel_admin = services
-		.admin
-		.user_is_admin(lowercased_user_id)
-		.await;
+	// only perform admin add/remove check if admin_filter is set
+	if !services.config.ldap.admin_filter.is_empty() {
+		let is_tuwunel_admin = services
+			.admin
+			.user_is_admin(lowercased_user_id)
+			.await;
 
-	if is_ldap_admin && !is_tuwunel_admin {
-		services
-			.admin
-			.make_user_admin(lowercased_user_id)
-			.boxed()
-			.await?;
-	} else if !is_ldap_admin && is_tuwunel_admin {
-		services
-			.admin
-			.revoke_admin(lowercased_user_id)
-			.await?;
+		if is_ldap_admin && !is_tuwunel_admin {
+			services
+				.admin
+				.make_user_admin(lowercased_user_id)
+				.boxed()
+				.await?;
+		} else if !is_ldap_admin && is_tuwunel_admin {
+			services
+				.admin
+				.revoke_admin(lowercased_user_id)
+				.await?;
+		}
 	}
 
 	Ok(user_id)
