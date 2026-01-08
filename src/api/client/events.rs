@@ -51,7 +51,7 @@ pub(crate) async fn events_route(
 
 	if !services
 		.state_accessor
-		.user_can_see_state_events(sender_user, room_id)
+		.user_can_access_room(sender_user, room_id)
 		.await
 	{
 		return Err!(Request(Forbidden("No room preview available.")));

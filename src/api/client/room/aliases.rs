@@ -19,7 +19,7 @@ pub(crate) async fn get_room_aliases_route(
 
 	if !services
 		.state_accessor
-		.user_can_see_state_events(sender_user, &body.room_id)
+		.user_can_access_room(sender_user, &body.room_id)
 		.await
 	{
 		return Err!(Request(Forbidden("You don't have permission to view this room.",)));

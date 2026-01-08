@@ -23,7 +23,7 @@ pub(crate) async fn room_initial_sync_route(
 
 	if !services
 		.state_accessor
-		.user_can_see_state_events(body.sender_user(), room_id)
+		.user_can_access_room(body.sender_user(), room_id)
 		.await
 	{
 		return Err!(Request(Forbidden("No room preview available.")));

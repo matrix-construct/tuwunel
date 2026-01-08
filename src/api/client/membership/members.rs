@@ -36,7 +36,7 @@ pub(crate) async fn get_member_events_route(
 ) -> Result<get_member_events::v3::Response> {
 	if !services
 		.state_accessor
-		.user_can_see_state_events(body.sender_user(), &body.room_id)
+		.user_can_access_room(body.sender_user(), &body.room_id)
 		.await
 	{
 		return Err!(Request(Forbidden(

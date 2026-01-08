@@ -208,7 +208,7 @@ async fn check_room_visible(
 	let state_visible = !check_state
 		|| services
 			.state_accessor
-			.user_can_see_state_events(user_id, room_id)
+			.user_can_access_room(user_id, room_id)
 			.await;
 
 	if !is_joined || !state_visible {

@@ -1,7 +1,7 @@
 use axum::extract::State;
-use futures::{FutureExt, TryFutureExt, TryStreamExt};
+use futures::{FutureExt, StreamExt, TryFutureExt};
 use ruma::{
-	OwnedEventId, RoomId, UserId,
+	RoomId, UserId,
 	api::client::state::{get_state_event_for_key, get_state_events, send_state_event},
 	events::{
 		AnyStateEventContent, StateEventType,
@@ -33,23 +33,38 @@ pub(crate) async fn send_state_event_for_key_route(
 	body: Ruma<send_state_event::v3::Request>,
 ) -> Result<send_state_event::v3::Response> {
 	let sender_user = body.sender_user();
+	let room_id = &body.room_id;
 
-	Ok(send_state_event::v3::Response {
-		event_id: send_state_event_for_key_helper(
-			&services,
-			sender_user,
-			&body.room_id,
-			&body.event_type,
-			&body.body.body,
-			&body.state_key,
-			if body.appservice_info.is_some() {
-				body.timestamp
-			} else {
-				None
+	let event_type = &body.event_type;
+	let state_key = &body.state_key;
+	let json = &body.body.body;
+
+	allowed_to_send_state_event(&services, room_id, event_type, state_key, json).await?;
+
+	let state_lock = services.state.mutex.lock(room_id).await;
+
+	let event_id = services
+		.timeline
+		.build_and_append_pdu(
+			PduBuilder {
+				event_type: event_type.to_string().into(),
+				content: serde_json::from_str(json.json().get())?,
+				state_key: Some(state_key.as_str().into()),
+				timestamp: if body.appservice_info.is_some() {
+					body.timestamp
+				} else {
+					None
+				},
+				..Default::default()
 			},
+			sender_user,
+			room_id,
+			&state_lock,
 		)
-		.await?,
-	})
+		.boxed()
+		.await?;
+
+	Ok(send_state_event::v3::Response { event_id })
 }
 
 /// # `PUT /_matrix/client/*/rooms/{roomId}/state/{eventType}`
@@ -77,21 +92,18 @@ pub(crate) async fn get_state_events_route(
 ) -> Result<get_state_events::v3::Response> {
 	let sender_user = body.sender_user();
 
-	if !services
+	let shortstatehash = services
 		.state_accessor
-		.user_can_see_state_events(sender_user, &body.room_id)
-		.await
-	{
-		return Err!(Request(Forbidden("You don't have permission to view the room state.")));
-	}
+		.get_last_accessible_state_for_user(&body.room_id, sender_user)
+		.await?;
 
 	Ok(get_state_events::v3::Response {
 		room_state: services
 			.state_accessor
-			.room_state_full_pdus(&body.room_id)
-			.map_ok(Event::into_format)
-			.try_collect()
-			.await?,
+			.state_full_pdus(shortstatehash)
+			.map(Event::into_format)
+			.collect()
+			.await,
 	})
 }
 
@@ -109,19 +121,14 @@ pub(crate) async fn get_state_events_for_key_route(
 ) -> Result<get_state_event_for_key::v3::Response> {
 	let sender_user = body.sender_user();
 
-	if !services
+	let shortstatehash = services
 		.state_accessor
-		.user_can_see_state_events(sender_user, &body.room_id)
-		.await
-	{
-		return Err!(Request(NotFound(debug_warn!(
-			"You don't have permission to view the room state."
-		))));
-	}
+		.get_last_accessible_state_for_user(&body.room_id, sender_user)
+		.await?;
 
 	let event = services
 		.state_accessor
-		.room_state_get(&body.room_id, &body.event_type, &body.state_key)
+		.state_get(shortstatehash, &body.event_type, &body.state_key)
 		.await
 		.map_err(|_| {
 			err!(Request(NotFound(debug_warn!(
@@ -168,37 +175,6 @@ pub(crate) async fn get_state_events_for_empty_key_route(
 	get_state_events_for_key_route(State(services), body)
 		.await
 		.map(RumaResponse)
-}
-
-async fn send_state_event_for_key_helper(
-	services: &Services,
-	sender: &UserId,
-	room_id: &RoomId,
-	event_type: &StateEventType,
-	json: &Raw<AnyStateEventContent>,
-	state_key: &str,
-	timestamp: Option<ruma::MilliSecondsSinceUnixEpoch>,
-) -> Result<OwnedEventId> {
-	allowed_to_send_state_event(services, room_id, event_type, state_key, json).await?;
-	let state_lock = services.state.mutex.lock(room_id).await;
-	let event_id = services
-		.timeline
-		.build_and_append_pdu(
-			PduBuilder {
-				event_type: event_type.to_string().into(),
-				content: serde_json::from_str(json.json().get())?,
-				state_key: Some(state_key.into()),
-				timestamp,
-				..Default::default()
-			},
-			sender,
-			room_id,
-			&state_lock,
-		)
-		.boxed()
-		.await?;
-
-	Ok(event_id)
 }
 
 async fn allowed_to_send_state_event(

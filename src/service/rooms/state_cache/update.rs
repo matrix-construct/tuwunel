@@ -65,64 +65,8 @@ pub async fn update_membership(
 				// Add the user ID to the join list then
 				self.mark_as_once_joined(user_id, room_id);
 
-				// Check if the room has a predecessor
-				if let Ok(Some(predecessor)) = self
-					.services
-					.state_accessor
-					.room_state_get_content(room_id, &StateEventType::RoomCreate, "")
-					.await
-					.map(|content: RoomCreateEventContent| content.predecessor)
-				{
-					// Copy old tags to new room
-					if let Ok(tag_event) = self
-						.services
-						.account_data
-						.get_room(&predecessor.room_id, user_id, RoomAccountDataEventType::Tag)
-						.await
-					{
-						self.services
-							.account_data
-							.update(
-								Some(room_id),
-								user_id,
-								RoomAccountDataEventType::Tag,
-								&tag_event,
-							)
-							.await
-							.ok();
-					}
-
-					// Copy direct chat flag
-					if let Ok(mut direct_event) = self
-						.services
-						.account_data
-						.get_global::<DirectEvent>(user_id, GlobalAccountDataEventType::Direct)
-						.await
-					{
-						let mut room_ids_updated = false;
-						for room_ids in direct_event.content.0.values_mut() {
-							if room_ids.iter().any(|r| r == &predecessor.room_id) {
-								room_ids.push(room_id.to_owned());
-								room_ids_updated = true;
-							}
-						}
-
-						if room_ids_updated {
-							self.services
-								.account_data
-								.update(
-									None,
-									user_id,
-									GlobalAccountDataEventType::Direct
-										.to_string()
-										.into(),
-									&serde_json::to_value(&direct_event)
-										.expect("to json always works"),
-								)
-								.await?;
-						}
-					}
-				}
+				self.copy_predecessor_tags(room_id, user_id)
+					.await?;
 			}
 
 			self.mark_as_joined(user_id, room_id, count);
@@ -231,6 +175,64 @@ pub async fn update_joined_count(&self, room_id: &RoomId) {
 		.write()
 		.expect("locked")
 		.remove(room_id);
+}
+
+#[implement(super::Service)]
+#[tracing::instrument(level = "debug", skip(self))]
+async fn copy_predecessor_tags(&self, room_id: &RoomId, user_id: &UserId) -> Result {
+	if let Ok(Some(predecessor)) = self
+		.services
+		.state_accessor
+		.room_state_get_content(room_id, &StateEventType::RoomCreate, "")
+		.await
+		.map(|content: RoomCreateEventContent| content.predecessor)
+	{
+		// Copy old tags to new room
+		if let Ok(tag_event) = self
+			.services
+			.account_data
+			.get_room(&predecessor.room_id, user_id, RoomAccountDataEventType::Tag)
+			.await
+		{
+			self.services
+				.account_data
+				.update(Some(room_id), user_id, RoomAccountDataEventType::Tag, &tag_event)
+				.await
+				.ok();
+		}
+
+		// Copy direct chat flag
+		if let Ok(mut direct_event) = self
+			.services
+			.account_data
+			.get_global::<DirectEvent>(user_id, GlobalAccountDataEventType::Direct)
+			.await
+		{
+			let mut room_ids_updated = false;
+			for room_ids in direct_event.content.0.values_mut() {
+				if room_ids.iter().any(|r| r == &predecessor.room_id) {
+					room_ids.push(room_id.to_owned());
+					room_ids_updated = true;
+				}
+			}
+
+			if room_ids_updated {
+				self.services
+					.account_data
+					.update(
+						None,
+						user_id,
+						GlobalAccountDataEventType::Direct
+							.to_string()
+							.into(),
+						&serde_json::to_value(&direct_event).expect("to json always works"),
+					)
+					.await?;
+			}
+		}
+	}
+
+	Ok(())
 }
 
 /// Direct DB function to directly mark a user as joined. It is not
