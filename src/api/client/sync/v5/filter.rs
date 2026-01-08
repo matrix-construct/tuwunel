@@ -143,8 +143,14 @@ pub(super) async fn filter_room_meta(
 		.user_can_see_state_events(sender_user, room_id)
 		.is_false();
 
-	pin_mut!(not_visible, not_exists, is_disabled, is_banned);
+	let not_invited = services
+		.state_cache
+		.is_invited(sender_user, room_id)
+		.is_false();
+
+	pin_mut!(not_visible, not_invited, not_exists, is_disabled, is_banned);
 	not_visible
+		.and(not_invited)
 		.or(not_exists)
 		.or(is_disabled)
 		.or(is_banned)
