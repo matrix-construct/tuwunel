@@ -284,7 +284,7 @@ where
 		| Some(sender_user) => {
 			let user_can_see_state_events = services
 				.state_accessor
-				.user_can_see_state_events(sender_user, room_id);
+				.user_can_access_room(sender_user, room_id);
 
 			let is_guest = services
 				.users

@@ -147,9 +147,10 @@ async fn paginate_relations_with_filter(
 		.map_ok(PduId::from)
 		.map_ok(Ok::<_, Error>);
 
+	// optimization, individual events are filtered by user_can_see_event anyway
 	let visible = services
-		.state_accessor
-		.user_can_see_state_events(sender_user, room_id)
+		.state_cache
+		.once_joined(sender_user, room_id)
 		.map(|visible| {
 			visible.ok_or_else(|| err!(Request(Forbidden("You cannot view this room."))))
 		});
@@ -174,8 +175,8 @@ async fn paginate_relations_with_filter(
 		services
 			.pdu_metadata
 			.get_relations(shortroomid, count, from, dir, Some(sender_user))
+			.ready_filter(|(count, _)| matches!(count, PduCount::Normal(_)))
 			.map(move |(count, pdu)| (depth, count, pdu))
-			.ready_filter(|(_, count, _)| matches!(count, PduCount::Normal(_)))
 			.boxed()
 	};
 
@@ -193,11 +194,9 @@ async fn paginate_relations_with_filter(
 		filter_event_type
 			.as_ref()
 			.is_none_or(|kind| kind == pdu.kind())
-	})
-	.ready_filter(|(_, _, pdu)| {
-		filter_rel_type
-			.as_ref()
-			.is_none_or(|rel_type| rel_type.relation_type_equal(pdu))
+			&& filter_rel_type
+				.as_ref()
+				.is_none_or(|rel_type| rel_type.relation_type_equal(pdu))
 	})
 	.wide_filter_map(async |(depth, count, pdu)| {
 		services

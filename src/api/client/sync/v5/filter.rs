@@ -129,7 +129,7 @@ pub(super) async fn filter_room_meta(
 
 	let not_visible = services
 		.state_accessor
-		.user_can_see_state_events(sender_user, room_id)
+		.user_can_access_room(sender_user, room_id)
 		.is_false();
 
 	let not_invited = services

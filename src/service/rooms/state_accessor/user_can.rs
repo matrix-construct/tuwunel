@@ -129,7 +129,7 @@ pub async fn user_can_see_event(
 /// the room's history_visibility at that event's state.
 #[implement(super::Service)]
 #[tracing::instrument(skip_all, level = "trace")]
-pub async fn user_can_see_state_events(&self, user_id: &UserId, room_id: &RoomId) -> bool {
+pub async fn user_can_access_room(&self, user_id: &UserId, room_id: &RoomId) -> bool {
 	if self
 		.services
 		.state_cache
@@ -140,29 +140,16 @@ pub async fn user_can_see_state_events(&self, user_id: &UserId, room_id: &RoomId
 	}
 
 	let history_visibility = self
-		.room_state_get_content(room_id, &StateEventType::RoomHistoryVisibility, "")
+		.room_state_get_content::<RoomHistoryVisibilityEventContent>(
+			room_id,
+			&StateEventType::RoomHistoryVisibility,
+			"",
+		)
 		.await
-		.map_or(HistoryVisibility::Shared, |c: RoomHistoryVisibilityEventContent| {
-			c.history_visibility
-		});
+		.ok()
+		.map(|content| content.history_visibility);
 
-	match history_visibility {
-		| HistoryVisibility::WorldReadable => true,
-
-		| HistoryVisibility::Invited =>
-			self.services
-				.state_cache
-				.is_invited(user_id, room_id)
-				.await,
-
-		| HistoryVisibility::Shared =>
-			self.services
-				.state_cache
-				.once_joined(user_id, room_id)
-				.await,
-
-		| _ => false,
-	}
+	return matches!(history_visibility, Some(HistoryVisibility::WorldReadable));
 }
 
 #[implement(super::Service)]
@@ -217,4 +204,62 @@ pub async fn user_can_tombstone(
 		)
 		.await
 		.is_ok()
+}
+
+#[implement(super::Service)]
+pub async fn get_last_accessible_state_for_user(
+	&self,
+	room_id: &RoomId,
+	user_id: &UserId,
+) -> Result<u64> {
+	if !self
+		.services
+		.state_cache
+		.once_joined(user_id, room_id)
+		.await
+	{
+		return Err!(Request(NotFound(debug_warn!(
+			"You don't have permission to view the room state."
+		))));
+	}
+
+	let room_shortstatehash = self
+		.services
+		.state
+		.get_room_shortstatehash(room_id)
+		.await?;
+
+	let shortstatehash = if self
+		.services
+		.state_cache
+		.is_joined(user_id, room_id)
+		.await
+	{
+		room_shortstatehash
+	} else {
+		let pdu = self
+			.services
+			.state_accessor
+			.state_get(room_shortstatehash, &StateEventType::RoomMember, user_id.as_str())
+			.await
+			.expect("membership event to be present if user was once joined");
+
+		let event_id = pdu.event_id();
+
+		debug_assert!(
+			!matches!(
+				pdu.get_content::<RoomMemberEventContent>()?
+					.membership,
+				MembershipState::Join
+			),
+			"user is not joined but last pdu membership is Joined, event id {event_id}",
+		);
+
+		self.services
+			.state
+			.pdu_shortstatehash(event_id)
+			.await?
+	};
+
+	Ok(shortstatehash)
 }
