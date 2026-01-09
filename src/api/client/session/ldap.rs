@@ -60,7 +60,6 @@ pub(super) async fn ldap_login(
 			.await?;
 	}
 
-
 	// only perform admin add/remove check if admin_filter is set
 	if !services.config.ldap.admin_filter.is_empty() {
 		let is_tuwunel_admin = services
