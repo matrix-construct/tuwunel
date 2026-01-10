@@ -2517,7 +2517,15 @@ pub struct IdentityProvider {
 	/// Secret key the provider generated for you along with the `client_id`
 	/// above. Unlike the `client_id`, the `client_secret` can be changed here
 	/// whenever the provider regenerates one for you.
-	pub client_secret: String,
+	pub client_secret: Option<String>,
+
+	/// Secret key to use that's read from the file path specified.
+	///
+	/// This takes priority over "client_secret" first, and falls back to
+	/// "client_secret" if invalid or failed to open.
+	///
+	/// example: "/etc/tuwunel/.client_secret"
+	pub client_secret_file: Option<PathBuf>,
 
 	/// The callback URL configured when registering the OAuth application with
 	/// the provider. Tuwunel's callback URL must be strictly formatted exactly
@@ -2613,6 +2621,21 @@ pub struct IdentityProvider {
 impl IdentityProvider {
 	#[must_use]
 	pub fn id(&self) -> &str { self.client_id.as_str() }
+
+	pub async fn get_client_secret(&self) -> Result<String> {
+		if let Some(client_secret) = &self.client_secret {
+			return Ok(client_secret.clone());
+		}
+
+		futures::future::OptionFuture::from(
+			self.client_secret_file
+				.as_ref()
+				.map(tokio::fs::read_to_string),
+		)
+		.await
+		.transpose()?
+		.ok_or_else(|| err!("No client secret or client secret file configured"))
+	}
 }
 
 impl Hash for IdentityProvider {

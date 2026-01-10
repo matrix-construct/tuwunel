@@ -288,6 +288,35 @@ pub fn check(config: &Config) -> Result {
 		));
 	}
 
+	for (i, provider) in config.identity_provider.iter().enumerate() {
+		if provider.client_secret.is_some() {
+			continue;
+		}
+
+		let Some(secret_path) = &provider.client_secret_file else {
+			return Err!(Config(
+				"client_secret",
+				"Either client secret or a client secret file must be set on identity provider \
+				 №{i}."
+			));
+		};
+
+		let Ok(secret) = std::fs::read_to_string(secret_path) else {
+			return Err!(Config(
+				"client_secret_file",
+				"Client secret file was specified but failed to be read at identity provider \
+				 №{i}"
+			));
+		};
+
+		if secret.is_empty() {
+			return Err!(Config(
+				"client_secret_file",
+				"Client secret file was specified but is empty on identity provider №{i}"
+			));
+		}
+	}
+
 	Ok(())
 }
 
