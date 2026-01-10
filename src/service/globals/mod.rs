@@ -106,7 +106,7 @@ impl Service {
 	#[must_use]
 	pub fn is_read_only(&self) -> bool { self.db.db.is_read_only() }
 
-	pub async fn get_registration_tokens(&self) -> HashSet<String> {
+	pub fn get_registration_tokens(&self) -> HashSet<String> {
 		let mut tokens = HashSet::new();
 		if let Some(file) = &self
 			.server

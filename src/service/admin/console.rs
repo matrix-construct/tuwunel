@@ -38,16 +38,16 @@ impl Console {
 		})
 	}
 
-	pub(super) async fn handle_signal(self: &Arc<Self>, sig: &'static str) {
+	pub(super) fn handle_signal(self: &Arc<Self>, sig: &'static str) {
 		if !self.server.running() {
 			self.interrupt();
 		} else if sig == "SIGINT" {
 			self.interrupt_command();
-			self.start().await;
+			self.start();
 		}
 	}
 
-	pub async fn start(self: &Arc<Self>) {
+	pub fn start(self: &Arc<Self>) {
 		let mut worker_join = self.worker_join.lock().expect("locked");
 		if worker_join.is_none() {
 			let self_ = Arc::clone(self);

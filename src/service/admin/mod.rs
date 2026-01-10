@@ -194,7 +194,7 @@ impl Service {
 		}
 
 		#[cfg(feature = "console")]
-		self.console.handle_signal(sig).await;
+		self.console.handle_signal(sig);
 	}
 
 	async fn handle_command(&self, command: CommandInput) {

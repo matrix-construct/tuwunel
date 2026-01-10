@@ -300,13 +300,13 @@ pub fn generate_refresh_token() -> String {
 }
 
 #[implement(super::Service)]
-pub async fn add_to_device_event(
+pub fn add_to_device_event(
 	&self,
 	sender: &UserId,
 	target_user_id: &UserId,
 	target_device_id: &DeviceId,
 	event_type: &str,
-	content: serde_json::Value,
+	content: &serde_json::Value,
 ) {
 	let count = self.services.globals.next_count();
 

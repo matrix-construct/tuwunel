@@ -929,7 +929,6 @@ single_match_else = { level = "allow", priority = 1 }
 struct_excessive_bools = { level = "allow", priority = 1 }
 struct_field_names = { level = "allow", priority = 1 }
 unnecessary_wraps = { level = "allow", priority = 1 }
-unused_async = { level = "allow", priority = 1 }
 
 ###################
 perf = { level = "warn", priority = -1 }

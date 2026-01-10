@@ -1,7 +1,6 @@
 use std::collections::BTreeMap;
 
 use axum::extract::State;
-use futures::StreamExt;
 use ruma::{
 	api::{
 		client::{error::ErrorKind, to_device::send_event_to_device},
@@ -9,7 +8,7 @@ use ruma::{
 	},
 	to_device::DeviceIdOrAllDevices,
 };
-use tuwunel_core::{Error, Result};
+use tuwunel_core::{Error, Result, utils::ReadyExt};
 use tuwunel_service::sending::EduBuf;
 
 use crate::Ruma;
@@ -69,31 +68,27 @@ pub(crate) async fn send_event_to_device_route(
 
 			match target_device_id_maybe {
 				| DeviceIdOrAllDevices::DeviceId(target_device_id) => {
-					services
-						.users
-						.add_to_device_event(
-							sender_user,
-							target_user_id,
-							target_device_id,
-							event_type,
-							event,
-						)
-						.await;
+					services.users.add_to_device_event(
+						sender_user,
+						target_user_id,
+						target_device_id,
+						event_type,
+						&event,
+					);
 				},
 
 				| DeviceIdOrAllDevices::AllDevices => {
-					let (event_type, event) = (&event_type, &event);
 					services
 						.users
 						.all_device_ids(target_user_id)
-						.for_each(|target_device_id| {
+						.ready_for_each(|target_device_id| {
 							services.users.add_to_device_event(
 								sender_user,
 								target_user_id,
 								target_device_id,
 								event_type,
-								event.clone(),
-							)
+								&event,
+							);
 						})
 						.await;
 				},

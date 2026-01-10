@@ -172,7 +172,6 @@ impl Service {
 		self.services
 			.state
 			.delete_room_shortstatehash(room_id, &state_lock)
-			.await
 			.log_err()
 			.ok();
 

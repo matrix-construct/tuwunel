@@ -10,11 +10,12 @@ use crate::{
 };
 
 pub(super) fn command(mut item: ItemFn, _args: &[Meta]) -> Result<TokenStream> {
-	let attr: Attribute = parse_quote! {
+	let attr: Vec<Attribute> = parse_quote! {
 		#[tuwunel_macros::implement(crate::Context, params = "<'_>")]
+		#[allow(clippy::unused_async)]
 	};
 
-	item.attrs.push(attr);
+	item.attrs.extend(attr);
 	Ok(item.into_token_stream().into())
 }
 
