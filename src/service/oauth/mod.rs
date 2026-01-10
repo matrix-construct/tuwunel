@@ -97,9 +97,11 @@ pub async fn revoke_token(&self, (provider, session): (&Provider, &Session)) -> 
 		client_secret: &'a str,
 	}
 
+	let client_secret = provider.get_client_secret().await?;
+
 	let query = RevokeQuery {
 		client_id: &provider.client_id,
-		client_secret: &provider.client_secret,
+		client_secret: &client_secret,
 	};
 
 	let url = provider
@@ -130,9 +132,11 @@ pub async fn request_token(
 		redirect_uri: Option<&'a str>,
 	}
 
+	let client_secret = provider.get_client_secret().await?;
+
 	let query = TokenQuery {
 		client_id: &provider.client_id,
-		client_secret: &provider.client_secret,
+		client_secret: &client_secret,
 		grant_type: "authorization_code",
 		code,
 		code_verifier: session.code_verifier.as_deref(),
