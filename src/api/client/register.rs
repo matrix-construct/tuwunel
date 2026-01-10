@@ -266,7 +266,6 @@ pub(crate) async fn register_route(
 	let skip_auth = if !services
 		.globals
 		.get_registration_tokens()
-		.await
 		.is_empty()
 		&& !is_guest
 	{
@@ -425,7 +424,7 @@ pub(crate) async fn check_registration_token_validity(
 	State(services): State<crate::State>,
 	body: Ruma<check_registration_token_validity::v1::Request>,
 ) -> Result<check_registration_token_validity::v1::Response> {
-	let tokens = services.globals.get_registration_tokens().await;
+	let tokens = services.globals.get_registration_tokens();
 
 	if tokens.is_empty() {
 		return Err!(Request(Forbidden("Server does not allow token registration")));

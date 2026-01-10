@@ -198,7 +198,7 @@ async fn hooked_resolve(
 	name: Name,
 ) -> Result<Addrs, Box<dyn std::error::Error + Send + Sync>> {
 	match cache.get_override(name.as_str()).await {
-		| Ok(cached) if cached.valid() => cached_to_reqwest(cached).await,
+		| Ok(cached) if cached.valid() => cached_to_reqwest(cached),
 		| Ok(CachedOverride { overriding, .. }) if overriding.is_some() =>
 			resolve_to_reqwest(
 				server,
@@ -241,7 +241,7 @@ async fn resolve_to_reqwest(
 	}
 }
 
-async fn cached_to_reqwest(cached: CachedOverride) -> ResolvingResult {
+fn cached_to_reqwest(cached: CachedOverride) -> ResolvingResult {
 	let addrs = cached
 		.ips
 		.into_iter()

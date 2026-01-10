@@ -4,7 +4,6 @@ use std::{
 };
 
 use axum_server::Handle as ServerHandle;
-use futures::FutureExt;
 use tokio::{
 	sync::broadcast::{self, Sender},
 	task::JoinHandle,
@@ -106,14 +105,11 @@ pub(crate) async fn stop(services: Arc<Services>) -> Result {
 
 #[tracing::instrument(skip_all)]
 async fn signal(server: Arc<Server>, tx: Sender<()>, handle: axum_server::Handle) {
-	server
-		.clone()
-		.until_shutdown()
-		.then(move |()| handle_shutdown(server, tx, handle))
-		.await;
+	server.until_shutdown().await;
+	handle_shutdown(&server, &tx, &handle);
 }
 
-async fn handle_shutdown(server: Arc<Server>, tx: Sender<()>, handle: axum_server::Handle) {
+fn handle_shutdown(server: &Arc<Server>, tx: &Sender<()>, handle: &axum_server::Handle) {
 	if let Err(e) = tx.send(()) {
 		error!("failed sending shutdown transaction to channel: {e}");
 	}

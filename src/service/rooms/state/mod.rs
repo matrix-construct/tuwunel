@@ -526,7 +526,7 @@ pub async fn get_shortstatehash(&self, shorteventid: ShortEventId) -> Result<Sho
 }
 
 #[implement(Service)]
-pub(super) async fn delete_room_shortstatehash(
+pub(super) fn delete_room_shortstatehash(
 	&self,
 	room_id: &RoomId,
 	_mutex_lock: &Guard<OwnedRoomId, ()>,

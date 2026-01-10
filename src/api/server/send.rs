@@ -538,24 +538,27 @@ async fn handle_edu_direct_to_device_event(
 ) {
 	match target_device_id_maybe {
 		| DeviceIdOrAllDevices::DeviceId(ref target_device_id) => {
-			services
-				.users
-				.add_to_device_event(sender, target_user_id, target_device_id, ev_type, event)
-				.await;
+			services.users.add_to_device_event(
+				sender,
+				target_user_id,
+				target_device_id,
+				ev_type,
+				&event,
+			);
 		},
 
 		| DeviceIdOrAllDevices::AllDevices => {
 			services
 				.users
 				.all_device_ids(target_user_id)
-				.for_each(|target_device_id| {
+				.ready_for_each(|target_device_id| {
 					services.users.add_to_device_event(
 						sender,
 						target_user_id,
 						target_device_id,
 						ev_type,
-						event.clone(),
-					)
+						&event,
+					);
 				})
 				.await;
 		},
