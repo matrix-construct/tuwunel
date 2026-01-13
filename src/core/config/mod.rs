@@ -2422,6 +2422,7 @@ pub struct JwtConfig {
 	/// - HMAC is a plaintext shared-secret private-key.
 	/// - B64HMAC is a base64-encoded version of HMAC.
 	/// - ECDSA is a PEM-encoded public-key.
+	/// - EDDSA is a PEM-encoded Ed25519 public-key.
 	///
 	/// default: "HMAC"
 	#[serde(default = "default_jwt_format")]

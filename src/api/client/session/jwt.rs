@@ -66,16 +66,19 @@ fn validate(config: &JwtConfig, token: &str) -> Result<Claim> {
 
 fn init_verifier(config: &JwtConfig) -> Result<DecodingKey> {
 	let key = &config.key;
-	let format = config.format.as_str();
+	let format = config.format.to_uppercase();
 
-	Ok(match format {
+	Ok(match format.as_str() {
 		| "HMAC" => DecodingKey::from_secret(key.as_bytes()),
 
 		| "HMACB64" => DecodingKey::from_base64_secret(key.as_str())
 			.map_err(|e| err!(Config("jwt.key", "JWT key is not valid base64: {e}")))?,
 
 		| "ECDSA" => DecodingKey::from_ec_pem(key.as_bytes())
-			.map_err(|e| err!(Config("jwt.key", "JWT key is not valid PEM: {e}")))?,
+			.map_err(|e| err!(Config("jwt.key", "JWT key is not valid ECDSA PEM: {e}")))?,
+
+		| "EDDSA" => DecodingKey::from_ed_pem(key.as_bytes())
+			.map_err(|e| err!(Config("jwt.key", "JWT key is not valid EDDSA PEM: {e}")))?,
 
 		| _ => return Err!(Config("jwt.format", "Key format {format:?} is not supported.")),
 	})
