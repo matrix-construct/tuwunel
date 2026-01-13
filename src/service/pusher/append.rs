@@ -1,8 +1,11 @@
 use std::{collections::HashSet, sync::Arc};
 
-use futures::{FutureExt, StreamExt, future::join};
+use futures::{
+	FutureExt, StreamExt,
+	future::{OptionFuture, join},
+};
 use ruma::{
-	OwnedUserId, RoomId, UserId,
+	RoomId, UserId,
 	api::client::push::ProfileTag,
 	events::{GlobalAccountDataEventType, TimelineEventType, push_rules::PushRulesEvent},
 	push::{Action, Actions, Ruleset, Tweak},
@@ -68,9 +71,6 @@ pub(crate) async fn append_pdu(&self, pdu_id: RawPduId, pdu: &Pdu) -> Result {
 
 	let (mut push_target, power_levels) = join(push_target, power_levels).boxed().await;
 
-	let mut notifies = Vec::with_capacity(push_target.len().saturating_add(1));
-	let mut highlights = Vec::with_capacity(push_target.len().saturating_add(1));
-
 	if *pdu.kind() == TimelineEventType::RoomMember {
 		if let Some(Ok(target_user_id)) = pdu.state_key().map(UserId::parse) {
 			if self
@@ -85,6 +85,7 @@ pub(crate) async fn append_pdu(&self, pdu_id: RawPduId, pdu: &Pdu) -> Result {
 	}
 
 	let serialized = pdu.to_format();
+	let _cork = self.db.db.cork();
 	for user in &push_target {
 		let rules_for_user = self
 			.services
@@ -96,37 +97,29 @@ pub(crate) async fn append_pdu(&self, pdu_id: RawPduId, pdu: &Pdu) -> Result {
 				|ev: PushRulesEvent| ev.content.global,
 			);
 
-		let mut highlight = false;
-		let mut notify = false;
-
 		let actions = self
 			.services
 			.pusher
 			.get_actions(user, &rules_for_user, power_levels.as_ref(), &serialized, pdu.room_id())
 			.await;
 
-		for action in actions {
-			match action {
-				| Action::Notify => notify = true,
-				| Action::SetTweak(Tweak::Highlight(true)) => {
-					highlight = true;
-				},
-				| _ => {},
-			}
+		let notify = actions
+			.iter()
+			.any(|action| matches!(action, Action::Notify));
 
-			// Break early if both conditions are true
-			if notify && highlight {
-				break;
-			}
-		}
+		let highlight = actions
+			.iter()
+			.any(|action| matches!(action, Action::SetTweak(Tweak::Highlight(true))));
 
-		if notify {
-			notifies.push(user.clone());
-		}
+		let increment_notify: OptionFuture<_> = notify
+			.then(|| self.increment_notificationcount(pdu.room_id(), user))
+			.into();
 
-		if highlight {
-			highlights.push(user.clone());
-		}
+		let increment_highlight: OptionFuture<_> = highlight
+			.then(|| self.increment_highlightcount(pdu.room_id(), user))
+			.into();
+
+		join(increment_notify, increment_highlight).await;
 
 		if notify || highlight {
 			let id: PduId = pdu_id.into();
@@ -159,31 +152,27 @@ pub(crate) async fn append_pdu(&self, pdu_id: RawPduId, pdu: &Pdu) -> Result {
 		}
 	}
 
-	self.increment_notification_counts(pdu.room_id(), notifies, highlights)
-		.await;
-
 	Ok(())
 }
 
 #[implement(super::Service)]
-async fn increment_notification_counts(
-	&self,
-	room_id: &RoomId,
-	notifies: Vec<OwnedUserId>,
-	highlights: Vec<OwnedUserId>,
-) {
-	let _cork = self.db.db.cork();
+async fn increment_notificationcount(&self, room_id: &RoomId, user_id: &UserId) {
+	let db = &self.db.userroomid_notificationcount;
+	let key = (room_id.to_owned(), user_id.to_owned());
+	let _lock = self.notification_increment_mutex.lock(&key).await;
 
-	for user in notifies {
-		increment(&self.db.userroomid_notificationcount, (&user, room_id)).await;
-	}
-
-	for user in highlights {
-		increment(&self.db.userroomid_highlightcount, (&user, room_id)).await;
-	}
+	increment(db, (user_id, room_id)).await;
 }
 
-// TODO: this is an ABA problem
+#[implement(super::Service)]
+async fn increment_highlightcount(&self, room_id: &RoomId, user_id: &UserId) {
+	let db = &self.db.userroomid_highlightcount;
+	let key = (room_id.to_owned(), user_id.to_owned());
+	let _lock = self.highlight_increment_mutex.lock(&key).await;
+
+	increment(db, (user_id, room_id)).await;
+}
+
 async fn increment(db: &Arc<Map>, key: (&UserId, &RoomId)) {
 	let old: u64 = db.qry(&key).await.deserialized().unwrap_or(0);
 	let new = old.saturating_add(1);

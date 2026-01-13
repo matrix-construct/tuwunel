@@ -8,7 +8,7 @@ use std::sync::Arc;
 use futures::{Stream, StreamExt, TryFutureExt, future::join};
 use ipaddress::IPAddress;
 use ruma::{
-	DeviceId, OwnedDeviceId, RoomId, UserId,
+	DeviceId, OwnedDeviceId, OwnedRoomId, OwnedUserId, RoomId, UserId,
 	api::client::push::{Pusher, PusherKind, set_pusher},
 	events::{AnySyncTimelineEvent, room::power_levels::RoomPowerLevels},
 	push::{Action, PushConditionPowerLevelsCtx, PushConditionRoomCtx, Ruleset},
@@ -18,6 +18,7 @@ use ruma::{
 use tuwunel_core::{
 	Err, Result, err, implement,
 	utils::{
+		MutexMap,
 		future::TryExtExt,
 		stream::{BroadbandExt, ReadyExt, TryIgnore},
 	},
@@ -27,24 +28,30 @@ use tuwunel_database::{Database, Deserialized, Ignore, Interfix, Json, Map};
 pub use self::append::Notified;
 
 pub struct Service {
-	db: Data,
 	services: Arc<crate::services::OnceServices>,
+	notification_increment_mutex: MutexMap<(OwnedRoomId, OwnedUserId), ()>,
+	highlight_increment_mutex: MutexMap<(OwnedRoomId, OwnedUserId), ()>,
+	db: Data,
 }
 
 struct Data {
+	db: Arc<Database>,
 	senderkey_pusher: Arc<Map>,
 	pushkey_deviceid: Arc<Map>,
 	useridcount_notification: Arc<Map>,
 	userroomid_highlightcount: Arc<Map>,
 	userroomid_notificationcount: Arc<Map>,
 	roomuserid_lastnotificationread: Arc<Map>,
-	db: Arc<Database>,
 }
 
 impl crate::Service for Service {
 	fn build(args: &crate::Args<'_>) -> Result<Arc<Self>> {
 		Ok(Arc::new(Self {
+			services: args.services.clone(),
+			notification_increment_mutex: MutexMap::new(),
+			highlight_increment_mutex: MutexMap::new(),
 			db: Data {
+				db: args.db.clone(),
 				senderkey_pusher: args.db["senderkey_pusher"].clone(),
 				pushkey_deviceid: args.db["pushkey_deviceid"].clone(),
 				useridcount_notification: args.db["useridcount_notification"].clone(),
@@ -52,9 +59,7 @@ impl crate::Service for Service {
 				userroomid_notificationcount: args.db["userroomid_notificationcount"].clone(),
 				roomuserid_lastnotificationread: args.db["roomuserid_lastnotificationread"]
 					.clone(),
-				db: args.db.clone(),
 			},
-			services: args.services.clone(),
 		}))
 	}
 
