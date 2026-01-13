@@ -43,7 +43,7 @@ impl super::Service {
 			return Ok((result, true));
 		}
 
-		let _dedup = self.resolving.lock(server_name.as_str());
+		let _dedup = self.resolving.lock(server_name);
 		if let Ok(result) = self.cache.get_destination(server_name).await {
 			return Ok((result, true));
 		}

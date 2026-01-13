@@ -1,4 +1,5 @@
 use std::{
+	borrow::ToOwned,
 	fmt::Debug,
 	hash::Hash,
 	sync::{Arc, TryLockError::WouldBlock},
@@ -38,17 +39,15 @@ where
 	}
 
 	#[tracing::instrument(level = "trace", skip(self))]
-	pub async fn lock<'a, K>(&'a self, k: &'a K) -> Guard<Key, Val>
+	pub async fn lock<K>(&self, k: &K) -> Guard<Key, Val>
 	where
-		K: Debug + Send + ?Sized + Sync,
-		Key: TryFrom<&'a K>,
-		<Key as TryFrom<&'a K>>::Error: Debug,
+		K: Debug + Send + ?Sized + Sync + ToOwned<Owned = Key>,
 	{
 		let val = self
 			.map
 			.lock()
 			.expect("locked")
-			.entry(k.try_into().expect("failed to construct key"))
+			.entry(k.to_owned())
 			.or_default()
 			.clone();
 
@@ -59,17 +58,15 @@ where
 	}
 
 	#[tracing::instrument(level = "trace", skip(self))]
-	pub fn try_lock<'a, K>(&self, k: &'a K) -> Result<Guard<Key, Val>>
+	pub fn try_lock<K>(&self, k: &K) -> Result<Guard<Key, Val>>
 	where
-		K: Debug + Send + ?Sized + Sync,
-		Key: TryFrom<&'a K>,
-		<Key as TryFrom<&'a K>>::Error: Debug,
+		K: Debug + Send + ?Sized + Sync + ToOwned<Owned = Key>,
 	{
 		let val = self
 			.map
 			.lock()
 			.expect("locked")
-			.entry(k.try_into().expect("failed to construct key"))
+			.entry(k.to_owned())
 			.or_default()
 			.clone();
 
@@ -82,11 +79,9 @@ where
 	}
 
 	#[tracing::instrument(level = "trace", skip(self))]
-	pub fn try_try_lock<'a, K>(&self, k: &'a K) -> Result<Guard<Key, Val>>
+	pub fn try_try_lock<K>(&self, k: &K) -> Result<Guard<Key, Val>>
 	where
-		K: Debug + Send + ?Sized + Sync,
-		Key: TryFrom<&'a K>,
-		<Key as TryFrom<&'a K>>::Error: Debug,
+		K: Debug + Send + ?Sized + Sync + ToOwned<Owned = Key>,
 	{
 		let val = self
 			.map
@@ -95,7 +90,7 @@ where
 				| WouldBlock => err!("would block"),
 				| _ => panic!("{e:?}"),
 			})?
-			.entry(k.try_into().expect("failed to construct key"))
+			.entry(k.to_owned())
 			.or_default()
 			.clone();
 

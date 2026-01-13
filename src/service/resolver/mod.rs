@@ -9,7 +9,8 @@ mod well_known;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use tuwunel_core::{Result, arrayvec::ArrayString, smallstr::SmallString, utils::MutexMap};
+use ruma::OwnedServerName;
+use tuwunel_core::{Result, smallstr::SmallString, utils::MutexMap};
 
 use self::{cache::Cache, dns::Resolver, fed::FedDest};
 
@@ -21,8 +22,7 @@ pub struct Service {
 }
 
 pub(crate) type DestString = SmallString<[u8; 40]>;
-type Resolving = MutexMap<NameBuf, ()>;
-type NameBuf = ArrayString<256>;
+type Resolving = MutexMap<OwnedServerName, ()>;
 
 #[async_trait]
 impl crate::Service for Service {
