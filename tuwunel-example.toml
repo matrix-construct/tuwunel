@@ -2140,6 +2140,15 @@
 #
 #client_secret =
 
+# Secret key to use that's read from the file path specified.
+#
+# This takes priority over "client_secret" first, and falls back to
+# "client_secret" if invalid or failed to open.
+#
+# example: "/etc/tuwunel/.client_secret"
+#
+#client_secret_file =
+
 # The callback URL configured when registering the OAuth application with
 # the provider. Tuwunel's callback URL must be strictly formatted exactly
 # as instructed. The URL host must point directly at the matrix server and
