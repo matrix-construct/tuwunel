@@ -2139,6 +2139,19 @@ pub struct Config {
 	#[serde(default = "default_one_time_key_limit")]
 	pub one_time_key_limit: usize,
 
+	/// This option is relevant when more than one identity_provider has been
+	/// configured and `sso_custom_providers_page` is false. Set this option to
+	/// the `client_id` of the provider to use for requests to
+	/// `/_matrix/client/v3/login/sso/redirect` (the url lacks a `client_id`).
+	///
+	/// This *must* be configured for some clients (e.g. fluffychat) to work
+	/// properly when the above conditions require it.
+	///
+	/// When only one identity_provider is configured that will be used as the
+	/// default and this does not have to be set.
+	#[serde(default)]
+	pub sso_default_provider_id: String,
+
 	/// Setting this option to true replaces the list of identity providers on
 	/// the client's login screen with a single button "Sign in with single
 	/// sign-on" linking to the URL `/_matrix/client/v3/login/sso/redirect`. The

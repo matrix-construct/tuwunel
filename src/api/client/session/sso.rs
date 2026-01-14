@@ -1,4 +1,4 @@
-use std::{borrow::Cow, time::Duration};
+use std::{borrow::Cow, net::IpAddr, time::Duration};
 
 use axum::extract::State;
 use axum_client_ip::InsecureClientIp;
@@ -63,6 +63,10 @@ struct GrantCookie<'a> {
 
 static GRANT_SESSION_COOKIE: &str = "tuwunel_grant_session";
 
+/// # `GET /_matrix/client/v3/login/sso/redirect`
+///
+/// A web-based Matrix client should instruct the user’s browser to navigate to
+/// this endpoint in order to log in via SSO.
 #[tracing::instrument(
 	name = "sso_login",
 	level = "debug",
@@ -70,16 +74,47 @@ static GRANT_SESSION_COOKIE: &str = "tuwunel_grant_session";
 	fields(%client),
 )]
 pub(crate) async fn sso_login_route(
-	State(_services): State<crate::State>,
+	State(services): State<crate::State>,
 	InsecureClientIp(client): InsecureClientIp,
-	_body: Ruma<sso_login::v3::Request>,
+	body: Ruma<sso_login::v3::Request>,
 ) -> Result<sso_login::v3::Response> {
-	Err!(Request(NotImplemented(
-		"sso_custom_providers_page has been enabled but this URL has not been overridden with \
-		 any custom page listing the available providers..."
-	)))
+	if services.config.sso_custom_providers_page {
+		return Err!(Request(NotImplemented(
+			"sso_custom_providers_page has been enabled but this URL has not been overridden \
+			 with any custom page listing the available providers..."
+		)));
+	}
+
+	if services.config.identity_provider.len() > 1 {
+		return Err!(Config(
+			"sso_default_provider_id",
+			"This must be set when using more than one identity provider."
+		));
+	}
+
+	let idp_id = services
+		.config
+		.identity_provider
+		.iter()
+		.next()
+		.map(|idp| idp.client_id.clone())
+		.unwrap_or_default();
+
+	let redirect_url = body.body.redirect_url;
+
+	handle_sso_login(&services, &client, idp_id, redirect_url)
+		.map_ok(|response| sso_login::v3::Response {
+			location: response.location,
+			cookie: response.cookie,
+		})
+		.await
 }
 
+/// # `GET /_matrix/client/v3/login/sso/redirect/{idpId}`
+///
+/// This endpoint is the same as /login/sso/redirect, though with an IdP ID from
+/// the original identity_providers array to inform the server of which IdP the
+/// client/user would like to continue with.
 #[tracing::instrument(
 	name = "sso_login_with_provider",
 	level = "info",
@@ -95,7 +130,18 @@ pub(crate) async fn sso_login_with_provider_route(
 	InsecureClientIp(client): InsecureClientIp,
 	body: Ruma<sso_login_with_provider::v3::Request>,
 ) -> Result<sso_login_with_provider::v3::Response> {
-	let sso_login_with_provider::v3::Request { idp_id, redirect_url } = body.body;
+	let idp_id = body.body.idp_id;
+	let redirect_url = body.body.redirect_url;
+
+	handle_sso_login(&services, &client, idp_id, redirect_url).await
+}
+
+async fn handle_sso_login(
+	services: &Services,
+	_client: &IpAddr,
+	idp_id: String,
+	redirect_url: String,
+) -> Result<sso_login_with_provider::v3::Response> {
 	let Ok(redirect_url) = redirect_url.parse::<Url>() else {
 		return Err!(Request(InvalidParam("Invalid redirect_url")));
 	};
