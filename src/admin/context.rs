@@ -23,13 +23,11 @@ impl Context<'_> {
 		arguments: fmt::Arguments<'_>,
 	) -> impl Future<Output = Result> + Send + '_ + use<'_> {
 		let buf = format!("{arguments}");
-		self.output.lock().then(async move |mut output| {
-			output
-				.write_all(buf.as_bytes())
-				.map_err(Into::into)
-				.await
-		})
+		self.write_string(buf)
 	}
+
+	#[inline]
+	pub(crate) async fn write_string(&self, s: String) -> Result { self.write_str(&s).await }
 
 	pub(crate) fn write_str<'a>(
 		&'a self,
