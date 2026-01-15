@@ -920,7 +920,6 @@ if_then_some_else_none = { level = "allow", priority = 1 }
 inline_always = { level = "allow", priority = 1 }
 map_unwrap_or = { level = "allow", priority = 1 }
 match_bool = { level = "allow", priority = 1 }
-match_same_arms = { level = "allow", priority = 1 }
 missing_docs_in_private_items = { level = "allow", priority = 1 }
 missing_errors_doc = { level = "allow", priority = 1 }
 missing_panics_doc = { level = "allow", priority = 1 }
