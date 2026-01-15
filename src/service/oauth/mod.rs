@@ -46,6 +46,8 @@ impl crate::Service for Service {
 	fn name(&self) -> &str { crate::service::make_name(std::module_path!()) }
 }
 
+/// Network request to a Provider returning userinfo for a Session. The session
+/// must have a valid access token.
 #[implement(Service)]
 #[tracing::instrument(level = "debug", skip_all, ret)]
 pub async fn request_userinfo(
@@ -66,6 +68,8 @@ pub async fn request_userinfo(
 		.log_err()
 }
 
+/// Network request to a Provider returning information for a Session based on
+/// its access token.
 #[implement(Service)]
 #[tracing::instrument(level = "debug", skip_all, ret)]
 pub async fn request_tokeninfo(
@@ -88,6 +92,7 @@ pub async fn request_tokeninfo(
 		.log_err()
 }
 
+/// Network request to a Provider revoking a Session's token.
 #[implement(Service)]
 #[tracing::instrument(level = "debug", skip_all, ret)]
 pub async fn revoke_token(&self, (provider, session): (&Provider, &Session)) -> Result {
@@ -115,6 +120,8 @@ pub async fn revoke_token(&self, (provider, session): (&Provider, &Session)) -> 
 		.map(|_| ())
 }
 
+/// Network request to a Provider to obtain an access token for a Session using
+/// a provided code.
 #[implement(Service)]
 #[tracing::instrument(level = "debug", skip_all, ret)]
 pub async fn request_token(
@@ -224,21 +231,29 @@ pub async fn get_user(&self, user_id: &UserId) -> Result<(Provider, Session)> {
 	Ok((provider, session))
 }
 
+/// Generate a unique-id string determined by the combination of `Provider` and
+/// `Session` instances.
 #[inline]
 pub fn unique_id((provider, session): (&Provider, &Session)) -> Result<String> {
 	unique_id_parts((provider, session)).and_then(unique_id_iss_sub)
 }
 
+/// Generate a unique-id string determined by the combination of `Provider`
+/// instance and `sub` string.
 #[inline]
 pub fn unique_id_sub((provider, sub): (&Provider, &str)) -> Result<String> {
 	unique_id_sub_parts((provider, sub)).and_then(unique_id_iss_sub)
 }
 
+/// Generate a unique-id string determined by the combination of `issuer_url`
+/// and `Session` instance.
 #[inline]
 pub fn unique_id_iss((iss, session): (&str, &Session)) -> Result<String> {
 	unique_id_iss_parts((iss, session)).and_then(unique_id_iss_sub)
 }
 
+/// Generate a unique-id string determined by the `issuer_url` and the `sub`
+/// strings directly.
 pub fn unique_id_iss_sub((iss, sub): (&str, &str)) -> Result<String> {
 	let hash = sha256::delimited([iss, sub].iter());
 	let b64 = b64encode.encode(hash);

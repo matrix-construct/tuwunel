@@ -164,6 +164,8 @@ async fn configure(&self, mut provider: Provider) -> Result<Provider> {
 	Ok(provider)
 }
 
+/// Send a network request to a provider at the computed location of the
+/// `.well-known/openid-configuration`, returning the configuration.
 #[implement(Providers)]
 #[tracing::instrument(level = "debug", ret(level = "trace"), skip(self))]
 pub async fn discover(&self, provider: &Provider) -> Result<JsonValue> {
@@ -179,6 +181,8 @@ pub async fn discover(&self, provider: &Provider) -> Result<JsonValue> {
 		.map_err(Into::into)
 }
 
+/// Compute the location of the `/.well-known/openid-configuration` based on the
+/// local provider config.
 fn discovery_url(provider: &Provider) -> Result<Url> {
 	let default_url = provider
 		.discovery
