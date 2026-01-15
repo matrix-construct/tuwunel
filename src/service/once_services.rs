@@ -30,6 +30,7 @@ impl Deref for OnceServices {
 	fn deref(&self) -> &Self::Target { self.get() }
 }
 
+#[cfg(not(tuwunel_always_prove_sendness))]
 // SAFETY: Services has a lot of circularity inherited from Conduit's original
 // design. This stresses the trait solver which twists itself into a knot
 // proving Sendness. This issue was a lot worse in conduwuit where we used an
@@ -41,12 +42,17 @@ impl Deref for OnceServices {
 // The prior incarnation required this unsafety or it would blow through the
 // recursion_limit; that no longer happens. Nevertheless compile times are
 // still substantially reduced by asserting Sendness here. Prove sendness
-// by simply commenting this out, it will just take longer.
+// by simply commenting this out or using `--cfg tuwunel_always_prove_sendness`,
+// it will just take longer.
 unsafe impl Send for OnceServices {}
 
+#[cfg(not(tuwunel_always_prove_syncness))]
 // SAFETY: Similar to Send as explained above, we further reduce compile-times
 // by manually asserting Syncness of this type. The only threading contention
 // concerns for this would be on startup but this server has a very well defined
 // initialization sequence. After that this structure is purely read-only shared
 // without concern.
+//
+// Proof can be verified by using `--cfg tuwunel_always_prove_syncness` at the
+// cost of additional build time.
 unsafe impl Sync for OnceServices {}
