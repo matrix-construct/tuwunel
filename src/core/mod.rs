@@ -36,6 +36,8 @@ rustc_flags_capture! {}
 
 #[cfg(any(not(tuwunel_mods), not(feature = "tuwunel_mods")))]
 pub mod mods {
+	use log as _;
+
 	#[macro_export]
 	macro_rules! mod_ctor {
 		() => {};

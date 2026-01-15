@@ -9,6 +9,7 @@ mod serve;
 use std::{panic::AssertUnwindSafe, pin::Pin, sync::Arc};
 
 use futures::{Future, FutureExt, TryFutureExt};
+use log as _;
 use tuwunel_core::{Error, Result, Server};
 use tuwunel_service::Services;
 

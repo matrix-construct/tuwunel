@@ -23,6 +23,7 @@ pub(crate) mod util;
 
 use std::{ops::Index, sync::Arc};
 
+use log as _;
 use tuwunel_core::{Result, Server, err};
 
 pub use self::{

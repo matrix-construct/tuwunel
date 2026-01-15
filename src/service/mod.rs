@@ -37,6 +37,8 @@ pub(crate) use service::{Args, Service};
 
 pub(crate) type SelfServices = std::sync::Arc<OnceServices>;
 
+use log as _;
+
 pub use crate::services::Services;
 
 tuwunel_core::mod_ctor! {}

@@ -74,7 +74,6 @@ zstd_compression = [
 ]
 
 [dependencies]
-async-trait.workspace = true
 axum-client-ip.workspace = true
 axum-extra.workspace = true
 axum.workspace = true
@@ -87,7 +86,7 @@ hmac.workspace = true
 http.workspace = true
 http-body-util.workspace = true
 hyper.workspace = true
-ipaddress.workspace = true
+itertools.workspace = true
 log.workspace = true
 rand.workspace = true
 reqwest.workspace = true

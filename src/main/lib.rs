@@ -11,6 +11,7 @@ pub mod signals;
 
 use std::sync::Arc;
 
+use log as _;
 use tuwunel_core::{Result, debug_info, error, mod_ctor, mod_dtor, rustc_flags_capture};
 use tuwunel_service::Services;
 
