@@ -1,9 +1,9 @@
 use clap::Subcommand;
 use ruma::OwnedUserId;
 use tuwunel_core::Result;
+use tuwunel_macros::{admin_command, admin_command_dispatch};
 
-use crate::Context;
-
+#[admin_command_dispatch]
 #[derive(Debug, Subcommand)]
 pub(crate) enum PusherCommand {
 	/// - Returns all the pushers for the user.
@@ -13,17 +13,12 @@ pub(crate) enum PusherCommand {
 	},
 }
 
-pub(super) async fn process(subcommand: PusherCommand, context: &Context<'_>) -> Result {
-	let services = context.services;
+#[admin_command]
+pub(super) async fn get_pushers(&self, user_id: OwnedUserId) -> Result {
+	let timer = tokio::time::Instant::now();
+	let results = self.services.pusher.get_pushers(&user_id).await;
+	let query_time = timer.elapsed();
 
-	match subcommand {
-		| PusherCommand::GetPushers { user_id } => {
-			let timer = tokio::time::Instant::now();
-			let results = services.pusher.get_pushers(&user_id).await;
-			let query_time = timer.elapsed();
-
-			write!(context, "Query completed in {query_time:?}:\n\n```rs\n{results:#?}\n```")
-		},
-	}
-	.await
+	self.write_string(format!("Query completed in {query_time:?}:\n\n```rs\n{results:#?}```"))
+		.await
 }
