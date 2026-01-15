@@ -31,12 +31,12 @@ pub async fn redact_pdu<Pdu: Event + Send + Sync>(
 			err!(Database(error!(?pdu_id, ?event_id, ?e, "PDU ID points to invalid PDU.")))
 		})?;
 
-	if let Ok(content) = pdu.get_content::<ExtractBody>() {
-		if let Some(body) = content.body {
-			self.services
-				.search
-				.deindex_pdu(shortroomid, &pdu_id, &body);
-		}
+	if let Ok(content) = pdu.get_content::<ExtractBody>()
+		&& let Some(body) = content.body
+	{
+		self.services
+			.search
+			.deindex_pdu(shortroomid, &pdu_id, &body);
 	}
 
 	let room_version_id = self

@@ -174,12 +174,12 @@ async fn fini(server: &Arc<Server>, listener: UnixListener, mut tasks: JoinSet<(
 	debug!("Shutting down...");
 	tasks.shutdown().await;
 
-	if let Ok(local) = local {
-		if let Some(path) = local.as_pathname() {
-			debug!(?path, "Removing unix socket file.");
-			if let Err(e) = fs::remove_file(path).await {
-				warn!(?path, "Failed to remove UNIX socket file: {e}");
-			}
+	if let Ok(local) = local
+		&& let Some(path) = local.as_pathname()
+	{
+		debug!(?path, "Removing unix socket file.");
+		if let Err(e) = fs::remove_file(path).await {
+			warn!(?path, "Failed to remove UNIX socket file: {e}");
 		}
 	}
 }

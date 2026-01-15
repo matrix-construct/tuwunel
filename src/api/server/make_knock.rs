@@ -46,14 +46,13 @@ pub(crate) async fn create_knock_event_template_route(
 		return Err!(Request(Forbidden("Server is banned on this homeserver.")));
 	}
 
-	if let Some(server) = body.room_id.server_name() {
-		if services
+	if let Some(server) = body.room_id.server_name()
+		&& services
 			.config
 			.forbidden_remote_server_names
 			.is_match(server.host())
-		{
-			return Err!(Request(Forbidden("Server is banned on this homeserver.")));
-		}
+	{
+		return Err!(Request(Forbidden("Server is banned on this homeserver.")));
 	}
 
 	let room_version = services
@@ -80,17 +79,15 @@ pub(crate) async fn create_knock_event_template_route(
 	if let Ok(membership) = services
 		.state_accessor
 		.get_member(&body.room_id, &body.user_id)
-		.await
+		.await && membership.membership == MembershipState::Ban
 	{
-		if membership.membership == MembershipState::Ban {
-			debug_warn!(
-				"Remote user {} is banned from {} but attempted to knock",
-				&body.user_id,
-				&body.room_id
-			);
+		debug_warn!(
+			"Remote user {} is banned from {} but attempted to knock",
+			&body.user_id,
+			&body.room_id
+		);
 
-			return Err!(Request(Forbidden("You cannot knock on a room you are banned from.")));
-		}
+		return Err!(Request(Forbidden("You cannot knock on a room you are banned from.")));
 	}
 
 	let pdu_json = services

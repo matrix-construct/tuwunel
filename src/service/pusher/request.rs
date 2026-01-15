@@ -36,10 +36,10 @@ where
 	let reqwest_request = reqwest::Request::try_from(http_request)?;
 	if let Some(url_host) = reqwest_request.url().host_str() {
 		trace!("Checking request URL for IP");
-		if let Ok(ip) = IPAddress::parse(url_host) {
-			if !self.services.client.valid_cidr_range(&ip) {
-				return Err!(BadServerResponse("Not allowed to send requests to this IP"));
-			}
+		if let Ok(ip) = IPAddress::parse(url_host)
+			&& !self.services.client.valid_cidr_range(&ip)
+		{
+			return Err!(BadServerResponse("Not allowed to send requests to this IP"));
 		}
 	}
 
@@ -55,14 +55,11 @@ where
 			// reqwest::Response -> http::Response conversion
 
 			trace!("Checking response destination's IP");
-			if let Some(remote_addr) = response.remote_addr() {
-				if let Ok(ip) = IPAddress::parse(remote_addr.ip().to_string()) {
-					if !self.services.client.valid_cidr_range(&ip) {
-						return Err!(BadServerResponse(
-							"Not allowed to send requests to this IP"
-						));
-					}
-				}
+			if let Some(remote_addr) = response.remote_addr()
+				&& let Ok(ip) = IPAddress::parse(remote_addr.ip().to_string())
+				&& !self.services.client.valid_cidr_range(&ip)
+			{
+				return Err!(BadServerResponse("Not allowed to send requests to this IP"));
 			}
 
 			let status = response.status();

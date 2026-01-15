@@ -484,10 +484,10 @@ where
 		{
 			self_signing_keys.insert(user_id.to_owned(), self_signing_key);
 		}
-		if Some(user_id) == sender_user {
-			if let Ok(user_signing_key) = services.users.get_user_signing_key(user_id).await {
-				user_signing_keys.insert(user_id.to_owned(), user_signing_key);
-			}
+		if Some(user_id) == sender_user
+			&& let Ok(user_signing_key) = services.users.get_user_signing_key(user_id).await
+		{
+			user_signing_keys.insert(user_id.to_owned(), user_signing_key);
 		}
 	}
 

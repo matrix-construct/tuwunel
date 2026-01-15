@@ -325,15 +325,15 @@ impl Service {
 		}
 
 		// Add EDU's into the transaction
-		if let Destination::Federation(server_name) = dest {
-			if let Ok((select_edus, last_count)) = self.select_edus(server_name).await {
-				debug_assert!(select_edus.len() <= EDU_LIMIT, "exceeded edus limit");
-				let select_edus = select_edus.into_iter().map(SendingEvent::Edu);
+		if let Destination::Federation(server_name) = dest
+			&& let Ok((select_edus, last_count)) = self.select_edus(server_name).await
+		{
+			debug_assert!(select_edus.len() <= EDU_LIMIT, "exceeded edus limit");
+			let select_edus = select_edus.into_iter().map(SendingEvent::Edu);
 
-				events.extend(select_edus);
-				self.db
-					.set_latest_educount(server_name, last_count);
-			}
+			events.extend(select_edus);
+			self.db
+				.set_latest_educount(server_name, last_count);
 		}
 
 		Ok(Some(events))
@@ -735,12 +735,11 @@ impl Service {
 					}
 				},
 				| SendingEvent::Edu(edu) =>
-					if appservice.receive_ephemeral {
-						if let Ok(edu) =
+					if appservice.receive_ephemeral
+						&& let Ok(edu) =
 							serde_json::from_slice(edu).and_then(|edu| Raw::new(&edu))
-						{
-							edu_jsons.push(edu);
-						}
+					{
+						edu_jsons.push(edu);
 					},
 				| SendingEvent::Flush => {}, // flush only; no new content
 			}

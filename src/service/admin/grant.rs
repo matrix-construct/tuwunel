@@ -132,15 +132,14 @@ pub async fn make_user_admin(&self, user_id: &UserId) -> Result {
 		.admin_room_tag
 		.as_str();
 
-	if !room_tag.is_empty() {
-		if let Err(e) = self
+	if !room_tag.is_empty()
+		&& let Err(e) = self
 			.services
 			.account_data
 			.set_room_tag(user_id, &room_id, room_tag.into(), None)
 			.await
-		{
-			error!(?room_id, ?user_id, ?room_tag, "Failed to set tag for admin grant: {e}");
-		}
+	{
+		error!(?room_id, ?user_id, ?room_tag, "Failed to set tag for admin grant: {e}");
 	}
 
 	if self.services.server.config.admin_room_notices {

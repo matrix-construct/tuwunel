@@ -987,7 +987,6 @@ style = { level = "warn", priority = -1 }
 assertions_on_constants = { level = "allow", priority = 1 }
 module_inception = { level = "allow", priority = 1 }
 obfuscated_if_else = { level = "allow", priority = 1 }
-collapsible_if = { level = "allow", priority = 1 }                   # TODO stable v. nightly 05-21-25
 toplevel-ref-arg = { level = "allow", priority = 1 }
 
 ###################

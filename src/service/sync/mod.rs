@@ -247,10 +247,10 @@ pub fn store(&self, service: &Service, key: &ConnectionKey) {
 #[tracing::instrument(level = "debug", skip(self))]
 pub fn update_rooms_prologue(&mut self, retard_since: Option<u64>) {
 	self.rooms.values_mut().for_each(|room| {
-		if let Some(retard_since) = retard_since {
-			if room.roomsince > retard_since {
-				room.roomsince = retard_since;
-			}
+		if let Some(retard_since) = retard_since
+			&& room.roomsince > retard_since
+		{
+			room.roomsince = retard_since;
 		}
 	});
 }

@@ -96,12 +96,10 @@ pub async fn join(
 		.services
 		.state_accessor
 		.get_member(room_id, sender_user)
-		.await
+		.await && membership.membership == MembershipState::Ban
 	{
-		if membership.membership == MembershipState::Ban {
-			debug_warn!("{sender_user} is banned from {room_id} but attempted to join");
-			return Err!(Request(Forbidden("You are banned from the room.")));
-		}
+		debug_warn!("{sender_user} is banned from {room_id} but attempted to join");
+		return Err!(Request(Forbidden("You are banned from the room.")));
 	}
 
 	let server_in_room = self
@@ -249,57 +247,54 @@ pub async fn join_remote(
 		);
 	}
 
-	if join_authorized_via_users_server.is_some() {
-		if let Some(signed_raw) = &response.event {
-			debug_info!(
-				"There is a signed event with join_authorized_via_users_server. This room is \
-				 probably using restricted joins. Adding signature to our event"
-			);
+	if join_authorized_via_users_server.is_some()
+		&& let Some(signed_raw) = &response.event
+	{
+		debug_info!(
+			"There is a signed event with join_authorized_via_users_server. This room is \
+			 probably using restricted joins. Adding signature to our event"
+		);
 
-			let (signed_event_id, signed_value) =
-				gen_event_id_canonical_json(signed_raw, &room_version_id).map_err(|e| {
-					err!(Request(BadJson(warn!(
-						"Could not convert event to canonical JSON: {e}"
-					))))
-				})?;
+		let (signed_event_id, signed_value) =
+			gen_event_id_canonical_json(signed_raw, &room_version_id).map_err(|e| {
+				err!(Request(BadJson(warn!("Could not convert event to canonical JSON: {e}"))))
+			})?;
 
-			if signed_event_id != event_id {
-				return Err!(Request(BadJson(warn!(
-					%signed_event_id, %event_id,
-					"Server {remote_server} sent event with wrong event ID"
-				))));
-			}
+		if signed_event_id != event_id {
+			return Err!(Request(BadJson(warn!(
+				%signed_event_id, %event_id,
+				"Server {remote_server} sent event with wrong event ID"
+			))));
+		}
 
-			match signed_value["signatures"]
-				.as_object()
-				.ok_or_else(|| {
+		match signed_value["signatures"]
+			.as_object()
+			.ok_or_else(|| {
+				err!(BadServerResponse(warn!(
+					"Server {remote_server} sent invalid signatures type"
+				)))
+			})
+			.and_then(|e| {
+				e.get(remote_server.as_str()).ok_or_else(|| {
 					err!(BadServerResponse(warn!(
-						"Server {remote_server} sent invalid signatures type"
+						"Server {remote_server} did not send its signature for a restricted room"
 					)))
 				})
-				.and_then(|e| {
-					e.get(remote_server.as_str()).ok_or_else(|| {
-						err!(BadServerResponse(warn!(
-							"Server {remote_server} did not send its signature for a restricted \
-							 room"
-						)))
-					})
-				}) {
-				| Ok(signature) => {
-					join_event
-						.get_mut("signatures")
-						.expect("we created a valid pdu")
-						.as_object_mut()
-						.expect("we created a valid pdu")
-						.insert(remote_server.as_str().into(), signature.clone());
-				},
-				| Err(e) => {
-					warn!(
-						"Server {remote_server} sent invalid signature in send_join signatures \
-						 for event {signed_value:?}: {e:?}",
-					);
-				},
-			}
+			}) {
+			| Ok(signature) => {
+				join_event
+					.get_mut("signatures")
+					.expect("we created a valid pdu")
+					.as_object_mut()
+					.expect("we created a valid pdu")
+					.insert(remote_server.as_str().into(), signature.clone());
+			},
+			| Err(e) => {
+				warn!(
+					"Server {remote_server} sent invalid signature in send_join signatures for \
+					 event {signed_value:?}: {e:?}",
+				);
+			},
 		}
 	}
 

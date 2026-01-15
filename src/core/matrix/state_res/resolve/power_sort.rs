@@ -201,15 +201,14 @@ where
 	let mut room_create_event = None;
 	let mut room_power_levels_event = None;
 	let event = fetch(event_id.to_owned()).await;
-	if let Ok(event) = &event {
-		if rules
+	if let Ok(event) = &event
+		&& rules
 			.authorization
 			.room_create_event_id_as_room_id
-		{
-			let create_id = event.room_id().as_event_id()?;
-			let fetched = fetch(create_id).await?;
-			room_create_event = Some(RoomCreateEvent::new(fetched));
-		}
+	{
+		let create_id = event.room_id().as_event_id()?;
+		let fetched = fetch(create_id).await?;
+		room_create_event = Some(RoomCreateEvent::new(fetched));
 	}
 
 	for auth_event_id in event

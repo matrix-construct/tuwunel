@@ -82,31 +82,28 @@ pub async fn get_verify_key(
 		return Ok(result);
 	}
 
-	if notary_first {
-		if let Ok(result) = self
+	if notary_first
+		&& let Ok(result) = self
 			.get_verify_key_from_notaries(origin, key_id)
 			.await
-		{
-			return Ok(result);
-		}
+	{
+		return Ok(result);
 	}
 
-	if !notary_only {
-		if let Ok(result) = self
+	if !notary_only
+		&& let Ok(result) = self
 			.get_verify_key_from_origin(origin, key_id)
 			.await
-		{
-			return Ok(result);
-		}
+	{
+		return Ok(result);
 	}
 
-	if !notary_first {
-		if let Ok(result) = self
+	if !notary_first
+		&& let Ok(result) = self
 			.get_verify_key_from_notaries(origin, key_id)
 			.await
-		{
-			return Ok(result);
-		}
+	{
+		return Ok(result);
 	}
 
 	Err!(BadServerResponse(debug_error!(

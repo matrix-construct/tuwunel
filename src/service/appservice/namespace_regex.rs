@@ -18,10 +18,10 @@ impl NamespaceRegex {
 			return true;
 		}
 
-		if let Some(non_exclusive) = &self.non_exclusive {
-			if non_exclusive.is_match(heystack) {
-				return true;
-			}
+		if let Some(non_exclusive) = &self.non_exclusive
+			&& non_exclusive.is_match(heystack)
+		{
+			return true;
 		}
 		false
 	}
@@ -30,10 +30,10 @@ impl NamespaceRegex {
 	#[inline]
 	#[must_use]
 	pub fn is_exclusive_match(&self, heystack: &str) -> bool {
-		if let Some(exclusive) = &self.exclusive {
-			if exclusive.is_match(heystack) {
-				return true;
-			}
+		if let Some(exclusive) = &self.exclusive
+			&& exclusive.is_match(heystack)
+		{
+			return true;
 		}
 		false
 	}

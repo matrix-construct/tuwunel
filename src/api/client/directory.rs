@@ -301,30 +301,26 @@ pub(crate) async fn get_public_rooms_filtered_helper(
 				return None;
 			}
 
-			if let Some(query) = search_room_id {
-				if chunk.room_id.as_str().contains(query) {
+			if let Some(query) = search_room_id
+				&& chunk.room_id.as_str().contains(query) {
 					return Some(chunk);
 				}
-			}
 
 			if let Some(query) = search_term.as_deref() {
-				if let Some(name) = &chunk.name {
-					if name.as_str().to_lowercase().contains(query) {
+				if let Some(name) = &chunk.name
+					&& name.as_str().to_lowercase().contains(query) {
 						return Some(chunk);
 					}
-				}
 
-				if let Some(topic) = &chunk.topic {
-					if topic.to_lowercase().contains(query) {
+				if let Some(topic) = &chunk.topic
+					&& topic.to_lowercase().contains(query) {
 						return Some(chunk);
 					}
-				}
 
-				if let Some(canonical_alias) = &chunk.canonical_alias {
-					if canonical_alias.as_str().to_lowercase().contains(query) {
+				if let Some(canonical_alias) = &chunk.canonical_alias
+					&& canonical_alias.as_str().to_lowercase().contains(query) {
 						return Some(chunk);
 					}
-				}
 
 				return None;
 			}

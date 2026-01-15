@@ -51,14 +51,13 @@ pub(crate) async fn create_invite_route(
 		));
 	}
 
-	if let Some(server) = body.room_id.server_name() {
-		if services
+	if let Some(server) = body.room_id.server_name()
+		&& services
 			.config
 			.forbidden_remote_server_names
 			.is_match(server.host())
-		{
-			return Err!(Request(Forbidden("Server is banned on this homeserver.")));
-		}
+	{
+		return Err!(Request(Forbidden("Server is banned on this homeserver.")));
 	}
 
 	if services

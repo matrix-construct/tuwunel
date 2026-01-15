@@ -269,13 +269,13 @@ pub fn check(config: &Config) -> Result {
 		);
 	}
 
-	if let Some(Either::Right(_)) = config.url_preview_bound_interface.as_ref() {
-		if !matches!(OS, "android" | "fuchsia" | "linux") {
-			return Err!(Config(
-				"url_preview_bound_interface",
-				"Not a valid IP address. Interface names not supported on {OS}."
-			));
-		}
+	if let Some(Either::Right(_)) = config.url_preview_bound_interface.as_ref()
+		&& !matches!(OS, "android" | "fuchsia" | "linux")
+	{
+		return Err!(Config(
+			"url_preview_bound_interface",
+			"Not a valid IP address. Interface names not supported on {OS}."
+		));
 	}
 
 	if !Server::available_room_versions()

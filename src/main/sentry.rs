@@ -70,10 +70,10 @@ fn before_send(event: Event<'static>) -> Option<Event<'static>> {
 		}
 
 		//NOTE: we can enable this to specify error!(sentry = true, ...)
-		if let Some(Context::Other(context)) = event.contexts.get("Rust Tracing Fields") {
-			if !context.contains_key("sentry") {
-				//return None;
-			}
+		if let Some(Context::Other(context)) = event.contexts.get("Rust Tracing Fields")
+			&& !context.contains_key("sentry")
+		{
+			//return None;
 		}
 	}
 

@@ -49,10 +49,10 @@ pub(super) async fn create_user(&self, username: String, password: Option<String
 	// Validate user id
 	let user_id = parse_local_user_id(self.services, &username)?;
 
-	if let Err(e) = user_id.validate_strict() {
-		if self.services.config.emergency_password.is_none() {
-			return Err!("Username {user_id} contains disallowed characters or spaces: {e}");
-		}
+	if let Err(e) = user_id.validate_strict()
+		&& self.services.config.emergency_password.is_none()
+	{
+		return Err!("Username {user_id} contains disallowed characters or spaces: {e}");
 	}
 
 	if self.services.users.exists(&user_id).await {

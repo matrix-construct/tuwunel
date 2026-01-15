@@ -110,12 +110,11 @@ pub async fn set_pusher(
 
 				if let Ok(ip) =
 					IPAddress::parse(url.host_str().expect("URL previously validated"))
+					&& !self.services.client.valid_cidr_range(&ip)
 				{
-					if !self.services.client.valid_cidr_range(&ip) {
-						return Err!(Request(InvalidParam(
-							warn!(%url, "HTTP pusher URL is a forbidden remote address")
-						)));
-					}
+					return Err!(Request(InvalidParam(
+						warn!(%url, "HTTP pusher URL is a forbidden remote address")
+					)));
 				}
 			}
 

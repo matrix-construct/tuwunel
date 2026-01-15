@@ -35,10 +35,10 @@ async fn destinations_cache(&self, server_name: Option<OwnedServerName>) -> Resu
 		.boxed();
 
 	while let Some((name, CachedDest { dest, host, expire })) = destinations.next().await {
-		if let Some(server_name) = server_name.as_ref() {
-			if name != server_name {
-				continue;
-			}
+		if let Some(server_name) = server_name.as_ref()
+			&& name != server_name
+		{
+			continue;
 		}
 
 		let expire = time::format(expire, "%+");
@@ -61,10 +61,10 @@ async fn overrides_cache(&self, server_name: Option<String>) -> Result {
 	while let Some((name, CachedOverride { ips, port, expire, overriding })) =
 		overrides.next().await
 	{
-		if let Some(server_name) = server_name.as_ref() {
-			if name != server_name {
-				continue;
-			}
+		if let Some(server_name) = server_name.as_ref()
+			&& name != server_name
+		{
+			continue;
 		}
 
 		let expire = time::format(expire, "%+");

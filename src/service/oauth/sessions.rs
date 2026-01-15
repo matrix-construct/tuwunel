@@ -129,26 +129,22 @@ pub async fn delete(&self, sess_id: &str) {
 
 	// Check the user_id still points to this sess_id before deleting. If not, the
 	// association was updated to a newer session.
-	if let Some(user_id) = session.user_id.as_deref() {
-		if let Ok(assoc_id) = self.get_sess_id_by_user(user_id).await {
-			if assoc_id == sess_id {
-				self.db.userid_oauthid.remove(user_id);
-			}
-		}
+	if let Some(user_id) = session.user_id.as_deref()
+		&& let Ok(assoc_id) = self.get_sess_id_by_user(user_id).await
+		&& assoc_id == sess_id
+	{
+		self.db.userid_oauthid.remove(user_id);
 	}
 
 	// Check the unique identity still points to this sess_id before deleting. If
 	// not, the association was updated to a newer session.
-	if let Some(idp_id) = session.idp_id.as_ref() {
-		if let Ok(provider) = self.providers.get(idp_id).await {
-			if let Ok(unique_id) = unique_id((&provider, &session)) {
-				if let Ok(assoc_id) = self.get_sess_id_by_unique_id(&unique_id).await {
-					if assoc_id == sess_id {
-						self.db.oauthuniqid_oauthid.remove(&unique_id);
-					}
-				}
-			}
-		}
+	if let Some(idp_id) = session.idp_id.as_ref()
+		&& let Ok(provider) = self.providers.get(idp_id).await
+		&& let Ok(unique_id) = unique_id((&provider, &session))
+		&& let Ok(assoc_id) = self.get_sess_id_by_unique_id(&unique_id).await
+		&& assoc_id == sess_id
+	{
+		self.db.oauthuniqid_oauthid.remove(&unique_id);
 	}
 
 	self.db.oauthid_session.remove(sess_id);
@@ -166,14 +162,13 @@ pub async fn put(&self, sess_id: &str, session: &Session) {
 		self.db.userid_oauthid.insert(user_id, sess_id);
 	}
 
-	if let Some(idp_id) = session.idp_id.as_ref() {
-		if let Ok(provider) = self.providers.get(idp_id).await {
-			if let Ok(unique_id) = unique_id((&provider, session)) {
-				self.db
-					.oauthuniqid_oauthid
-					.insert(&unique_id, sess_id);
-			}
-		}
+	if let Some(idp_id) = session.idp_id.as_ref()
+		&& let Ok(provider) = self.providers.get(idp_id).await
+		&& let Ok(unique_id) = unique_id((&provider, session))
+	{
+		self.db
+			.oauthuniqid_oauthid
+			.insert(&unique_id, sess_id);
 	}
 }
 

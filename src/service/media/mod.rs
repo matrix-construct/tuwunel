@@ -337,10 +337,10 @@ impl Service {
 		let file_rm = fs::remove_file(&path);
 		let legacy_rm = fs::remove_file(&legacy);
 		let (file_rm, legacy_rm) = tokio::join!(file_rm, legacy_rm);
-		if let Err(e) = legacy_rm {
-			if self.services.server.config.media_compat_file_link {
-				debug_error!(?key, ?legacy, "Failed to remove legacy media symlink: {e}");
-			}
+		if let Err(e) = legacy_rm
+			&& self.services.server.config.media_compat_file_link
+		{
+			debug_error!(?key, ?legacy, "Failed to remove legacy media symlink: {e}");
 		}
 
 		Ok(file_rm?)

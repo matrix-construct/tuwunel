@@ -50,10 +50,10 @@ async fn ban_room(&self, room: OwnedRoomOrAliasId) -> Result {
 
 	let admin_room_alias = &self.services.admin.admin_alias;
 
-	if let Ok(admin_room_id) = self.services.admin.get_admin_room().await {
-		if room.to_string().eq(&admin_room_id) || room.to_string().eq(admin_room_alias) {
-			return Err!("Not allowed to ban the admin room.");
-		}
+	if let Ok(admin_room_id) = self.services.admin.get_admin_room().await
+		&& (room.to_string().eq(&admin_room_id) || room.to_string().eq(admin_room_alias))
+	{
+		return Err!("Not allowed to ban the admin room.");
 	}
 
 	let room_id = if room.is_room_id() {
@@ -217,12 +217,12 @@ async fn ban_list_of_rooms(&self) -> Result {
 	for &room in &rooms_s {
 		match <&RoomOrAliasId>::try_from(room) {
 			| Ok(room_alias_or_id) => {
-				if let Ok(admin_room_id) = self.services.admin.get_admin_room().await {
-					if room.to_owned().eq(&admin_room_id) || room.to_owned().eq(admin_room_alias)
-					{
-						warn!("User specified admin room in bulk ban list, ignoring");
-						continue;
-					}
+				if let Ok(admin_room_id) = self.services.admin.get_admin_room().await
+					&& (room.to_owned().eq(&admin_room_id)
+						|| room.to_owned().eq(admin_room_alias))
+				{
+					warn!("User specified admin room in bulk ban list, ignoring");
+					continue;
 				}
 
 				if room_alias_or_id.is_room_id() {

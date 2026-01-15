@@ -115,10 +115,10 @@ pub(crate) async fn send_transaction_message_route(
 		"Finished txn",
 	);
 	for (id, result) in &results {
-		if let Err(e) = result {
-			if matches!(e, Error::BadRequest(ErrorKind::NotFound, _)) {
-				warn!("Incoming PDU failed {id}: {e:?}");
-			}
+		if let Err(e) = result
+			&& matches!(e, Error::BadRequest(ErrorKind::NotFound, _))
+		{
+			warn!("Incoming PDU failed {id}: {e:?}");
 		}
 	}
 

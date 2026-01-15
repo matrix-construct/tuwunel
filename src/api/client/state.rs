@@ -276,21 +276,21 @@ async fn allowed_to_send_state_event(
 			},
 		| StateEventType::RoomJoinRules => {
 			// admin room is a sensitive room, it should not ever be made public
-			if let Ok(admin_room_id) = services.admin.get_admin_room().await {
-				if admin_room_id == room_id {
-					match json.deserialize_as_unchecked::<RoomJoinRulesEventContent>() {
-						| Ok(join_rule) =>
-							if join_rule.join_rule == JoinRule::Public {
-								return Err!(Request(Forbidden(
-									"Admin room is a sensitive room, it cannot be made public"
-								)));
-							},
-						| Err(e) => {
-							return Err!(Request(BadJson(debug_warn!(
-								"Room join rules event is invalid: {e}"
-							))));
+			if let Ok(admin_room_id) = services.admin.get_admin_room().await
+				&& admin_room_id == room_id
+			{
+				match json.deserialize_as_unchecked::<RoomJoinRulesEventContent>() {
+					| Ok(join_rule) =>
+						if join_rule.join_rule == JoinRule::Public {
+							return Err!(Request(Forbidden(
+								"Admin room is a sensitive room, it cannot be made public"
+							)));
 						},
-					}
+					| Err(e) => {
+						return Err!(Request(BadJson(debug_warn!(
+							"Room join rules event is invalid: {e}"
+						))));
+					},
 				}
 			}
 		},

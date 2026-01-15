@@ -39,20 +39,19 @@ pub(crate) async fn create_knock_event_v1_route(
 		return Err!(Request(Forbidden("Server is banned on this homeserver.")));
 	}
 
-	if let Some(server) = body.room_id.server_name() {
-		if services
+	if let Some(server) = body.room_id.server_name()
+		&& services
 			.config
 			.forbidden_remote_server_names
 			.is_match(server.host())
-		{
-			warn!(
-				"Server {} tried knocking room ID {} which has a server name that is globally \
-				 forbidden. Rejecting.",
-				body.origin(),
-				&body.room_id,
-			);
-			return Err!(Request(Forbidden("Server is banned on this homeserver.")));
-		}
+	{
+		warn!(
+			"Server {} tried knocking room ID {} which has a server name that is globally \
+			 forbidden. Rejecting.",
+			body.origin(),
+			&body.room_id,
+		);
+		return Err!(Request(Forbidden("Server is banned on this homeserver.")));
 	}
 
 	if !services.metadata.exists(&body.room_id).await {

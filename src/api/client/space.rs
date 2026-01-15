@@ -45,12 +45,12 @@ pub(crate) async fn get_hierarchy_route(
 		.and_then(|s| PaginationToken::from_str(s).ok());
 
 	// Should prevent unexpected behaviour in (bad) clients
-	if let Some(ref token) = key {
-		if token.suggested_only != body.suggested_only || token.max_depth != max_depth {
-			return Err!(Request(InvalidParam(
-				"suggested_only and max_depth cannot change on paginated requests"
-			)));
-		}
+	if let Some(ref token) = key
+		&& (token.suggested_only != body.suggested_only || token.max_depth != max_depth)
+	{
+		return Err!(Request(InvalidParam(
+			"suggested_only and max_depth cannot change on paginated requests"
+		)));
 	}
 
 	get_client_hierarchy(

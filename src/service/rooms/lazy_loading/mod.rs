@@ -93,11 +93,11 @@ pub async fn witness_retain(&self, senders: Witness, ctx: &Context<'_>) -> Witne
 			continue;
 		}
 
-		if let Status::Seen(seen) = status {
-			if seen == 0 || ctx.token == Some(seen) {
-				senders.insert(sender.into());
-				continue;
-			}
+		if let Status::Seen(seen) = status
+			&& (seen == 0 || ctx.token == Some(seen))
+		{
+			senders.insert(sender.into());
+			continue;
 		}
 	}
 

@@ -141,16 +141,16 @@ pub async fn verify_key_exists(&self, origin: &ServerName, key_id: &ServerSignin
 		return false;
 	};
 
-	if let Ok(Some(verify_keys)) = keys.get_field::<KeysMap<'_>>("verify_keys") {
-		if verify_keys.contains_key(key_id) {
-			return true;
-		}
+	if let Ok(Some(verify_keys)) = keys.get_field::<KeysMap<'_>>("verify_keys")
+		&& verify_keys.contains_key(key_id)
+	{
+		return true;
 	}
 
-	if let Ok(Some(old_verify_keys)) = keys.get_field::<KeysMap<'_>>("old_verify_keys") {
-		if old_verify_keys.contains_key(key_id) {
-			return true;
-		}
+	if let Ok(Some(old_verify_keys)) = keys.get_field::<KeysMap<'_>>("old_verify_keys")
+		&& old_verify_keys.contains_key(key_id)
+	{
+		return true;
 	}
 
 	false

@@ -49,11 +49,9 @@ pub(crate) async fn invite_user_route(
 	if let Ok(target_user_membership) = services
 		.state_accessor
 		.get_member(room_id, user_id)
-		.await
+		.await && target_user_membership.membership == MembershipState::Ban
 	{
-		if target_user_membership.membership == MembershipState::Ban {
-			return Err!(Request(Forbidden("User is banned from this room.")));
-		}
+		return Err!(Request(Forbidden("User is banned from this room.")));
 	}
 
 	if recipient_ignored_by_sender {

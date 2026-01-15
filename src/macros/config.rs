@@ -146,11 +146,11 @@ fn generate_example(input: &ItemStruct, args: &[Meta], write: bool) -> Result<To
 		}
 	}
 
-	if let Some(file) = file.as_mut() {
-		if let Some(footer) = settings.get("footer") {
-			file.write_all(footer.as_bytes())
-				.expect("written to config file");
-		}
+	if let Some(file) = file.as_mut()
+		&& let Some(footer) = settings.get("footer")
+	{
+		file.write_all(footer.as_bytes())
+			.expect("written to config file");
 	}
 
 	let struct_name = &input.ident;

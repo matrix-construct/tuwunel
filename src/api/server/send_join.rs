@@ -285,23 +285,22 @@ pub(crate) async fn create_join_event_v1_route(
 		return Err!(Request(Forbidden("Server is banned on this homeserver.")));
 	}
 
-	if let Some(server) = body.room_id.server_name() {
-		if services
+	if let Some(server) = body.room_id.server_name()
+		&& services
 			.config
 			.forbidden_remote_server_names
 			.is_match(server.host())
-		{
-			warn!(
-				"Server {} tried joining room ID {} through us which has a server name that is \
-				 globally forbidden. Rejecting.",
-				body.origin(),
-				&body.room_id,
-			);
+	{
+		warn!(
+			"Server {} tried joining room ID {} through us which has a server name that is \
+			 globally forbidden. Rejecting.",
+			body.origin(),
+			&body.room_id,
+		);
 
-			return Err!(Request(Forbidden(warn!(
-				"Room ID server name {server} is banned on this homeserver."
-			))));
-		}
+		return Err!(Request(Forbidden(warn!(
+			"Room ID server name {server} is banned on this homeserver."
+		))));
 	}
 
 	Ok(create_join_event::v1::Response {
@@ -326,23 +325,22 @@ pub(crate) async fn create_join_event_v2_route(
 		return Err!(Request(Forbidden("Server is banned on this homeserver.")));
 	}
 
-	if let Some(server) = body.room_id.server_name() {
-		if services
+	if let Some(server) = body.room_id.server_name()
+		&& services
 			.config
 			.forbidden_remote_server_names
 			.is_match(server.host())
-		{
-			warn!(
-				"Server {} tried joining room ID {} through us which has a server name that is \
-				 globally forbidden. Rejecting.",
-				body.origin(),
-				&body.room_id,
-			);
+	{
+		warn!(
+			"Server {} tried joining room ID {} through us which has a server name that is \
+			 globally forbidden. Rejecting.",
+			body.origin(),
+			&body.room_id,
+		);
 
-			return Err!(Request(Forbidden(warn!(
-				"Room ID server name {server} is banned on this homeserver."
-			))));
-		}
+		return Err!(Request(Forbidden(warn!(
+			"Room ID server name {server} is banned on this homeserver."
+		))));
 	}
 
 	let create_join_event::v1::RoomState { auth_chain, state, event } =

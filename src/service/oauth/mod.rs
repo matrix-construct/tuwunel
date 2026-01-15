@@ -195,10 +195,10 @@ where
 			.body(body);
 	}
 
-	if let Some(session) = session {
-		if let Some(access_token) = session.access_token.clone() {
-			request = request.bearer_auth(access_token);
-		}
+	if let Some(session) = session
+		&& let Some(access_token) = session.access_token.clone()
+	{
+		request = request.bearer_auth(access_token);
 	}
 
 	let response: JsonValue = request

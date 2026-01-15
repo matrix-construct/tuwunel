@@ -50,10 +50,10 @@ pub(super) async fn startup_execute(&self) -> Result {
 	sleep(Duration::from_millis(500)).await;
 
 	for (i, command) in commands.iter().enumerate() {
-		if let Err(e) = self.execute_command(i, command.clone()).await {
-			if !errors {
-				return Err(e);
-			}
+		if let Err(e) = self.execute_command(i, command.clone()).await
+			&& !errors
+		{
+			return Err(e);
 		}
 
 		tokio::task::yield_now().await;
@@ -92,10 +92,10 @@ pub(super) async fn signal_execute(&self) -> Result {
 		.admin_execute_errors_ignore;
 
 	for (i, command) in commands.iter().enumerate() {
-		if let Err(e) = self.execute_command(i, command.clone()).await {
-			if !ignore_errors {
-				return Err(e);
-			}
+		if let Err(e) = self.execute_command(i, command.clone()).await
+			&& !ignore_errors
+		{
+			return Err(e);
 		}
 
 		tokio::task::yield_now().await;

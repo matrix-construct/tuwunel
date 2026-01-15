@@ -53,13 +53,13 @@ fn append_features(features: &mut Vec<&'static str>, flags: &[&'static str]) {
 	for flag in flags {
 		let is_cfg = *flag == "--cfg";
 		let is_feature = flag.starts_with("feature=");
-		if replace(&mut next_is_cfg, is_cfg) && is_feature {
-			if let Some(feature) = flag
+		if replace(&mut next_is_cfg, is_cfg)
+			&& is_feature
+			&& let Some(feature) = flag
 				.split_once('=')
 				.map(|(_, feature)| feature.trim_matches('"'))
-			{
-				features.push(feature);
-			}
+		{
+			features.push(feature);
 		}
 	}
 }

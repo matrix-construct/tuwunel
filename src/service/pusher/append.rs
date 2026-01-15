@@ -68,17 +68,15 @@ pub(crate) async fn append_pdu(&self, pdu_id: RawPduId, pdu: &Pdu) -> Result {
 
 	let (mut push_target, power_levels) = join(push_target, power_levels).boxed().await;
 
-	if *pdu.kind() == TimelineEventType::RoomMember {
-		if let Some(Ok(target_user_id)) = pdu.state_key().map(UserId::parse) {
-			if self
-				.services
-				.users
-				.is_active_local(target_user_id)
-				.await
-			{
-				push_target.insert(target_user_id.to_owned());
-			}
-		}
+	if *pdu.kind() == TimelineEventType::RoomMember
+		&& let Some(Ok(target_user_id)) = pdu.state_key().map(UserId::parse)
+		&& self
+			.services
+			.users
+			.is_active_local(target_user_id)
+			.await
+	{
+		push_target.insert(target_user_id.to_owned());
 	}
 
 	let serialized = pdu.to_format();

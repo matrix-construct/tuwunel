@@ -132,10 +132,10 @@ async fn handle_services_poll(
 ) -> Result {
 	debug!("Service manager finished: {result:?}");
 
-	if server.running() {
-		if let Err(e) = server.shutdown() {
-			error!("Failed to send shutdown signal: {e}");
-		}
+	if server.running()
+		&& let Err(e) = server.shutdown()
+	{
+		error!("Failed to send shutdown signal: {e}");
 	}
 
 	if let Err(e) = listener.await {

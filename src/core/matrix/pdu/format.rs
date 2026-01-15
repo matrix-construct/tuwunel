@@ -32,14 +32,12 @@ pub fn into_outgoing_federation(
 	if !room_rules
 		.event_format
 		.require_room_create_room_id
-	{
-		if pdu_json
+		&& pdu_json
 			.get("type")
 			.and_then(CanonicalJsonValue::as_str)
 			.is_some_and(is_equal_to!("m.room.create"))
-		{
-			pdu_json.remove("room_id");
-		}
+	{
+		pdu_json.remove("room_id");
 	}
 
 	if matches!(room_rules.events_reference_format, EventsReferenceFormatVersion::V1) {

@@ -646,8 +646,9 @@ async fn try_user_id(
 
 fn parse_user_id(server_name: &ServerName, username: &str) -> Result<OwnedUserId> {
 	match UserId::parse_with_server_name(username, server_name) {
-		| Err(e) =>
-			Err!(Request(InvalidUsername(debug_error!("Username {username} is not valid: {e}")))),
+		| Err(e) => {
+			Err!(Request(InvalidUsername(debug_error!("Username {username} is not valid: {e}"))))
+		},
 		| Ok(user_id) => match user_id.validate_strict() {
 			| Ok(()) => Ok(user_id),
 			| Err(e) => Err!(Request(InvalidUsername(debug_error!(

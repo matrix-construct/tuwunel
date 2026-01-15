@@ -70,28 +70,26 @@ pub async fn build_and_append_pdu(
 			.await?
 		{
 			| V1 | V2 | V3 | V4 | V5 | V6 | V7 | V8 | V9 | V10 => {
-				if let Some(redact_id) = pdu.redacts() {
-					if !self
+				if let Some(redact_id) = pdu.redacts()
+					&& !self
 						.services
 						.state_accessor
 						.user_can_redact(redact_id, pdu.sender(), pdu.room_id(), false)
 						.await?
-					{
-						return Err!(Request(Forbidden("User cannot redact this event.")));
-					}
+				{
+					return Err!(Request(Forbidden("User cannot redact this event.")));
 				}
 			},
 			| _ => {
 				let content: RoomRedactionEventContent = pdu.get_content()?;
-				if let Some(redact_id) = &content.redacts {
-					if !self
+				if let Some(redact_id) = &content.redacts
+					&& !self
 						.services
 						.state_accessor
 						.user_can_redact(redact_id, pdu.sender(), pdu.room_id(), false)
 						.await?
-					{
-						return Err!(Request(Forbidden("User cannot redact this event.")));
-					}
+				{
+					return Err!(Request(Forbidden("User cannot redact this event.")));
 				}
 			},
 		}
@@ -155,14 +153,13 @@ pub async fn build_and_append_pdu(
 
 	// In case we are kicking or banning a user, we need to inform their server of
 	// the change
-	if *pdu.kind() == TimelineEventType::RoomMember {
-		if let Some(state_key_uid) = &pdu
+	if *pdu.kind() == TimelineEventType::RoomMember
+		&& let Some(state_key_uid) = &pdu
 			.state_key
 			.as_ref()
 			.and_then(|state_key| UserId::parse(state_key.as_str()).ok())
-		{
-			servers.insert(state_key_uid.server_name().to_owned());
-		}
+	{
+		servers.insert(state_key_uid.server_name().to_owned());
 	}
 
 	// Remove our server from the server list since it will be added to it by

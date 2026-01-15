@@ -113,34 +113,32 @@ where
 				.services
 				.state
 				.pdu_shortstatehash(pdu.event_id())
+				.await && let Ok(prev_state) = self
+				.services
+				.state_accessor
+				.state_get(shortstatehash, &pdu.kind().to_string().into(), state_key)
 				.await
 			{
-				if let Ok(prev_state) = self
-					.services
-					.state_accessor
-					.state_get(shortstatehash, &pdu.kind().to_string().into(), state_key)
-					.await
-				{
-					unsigned.insert(
-						"prev_content".into(),
-						CanonicalJsonValue::Object(
-							utils::to_canonical_object(prev_state.get_content_as_value())
-								.map_err(|e| {
-									err!(Database(error!(
-										"Failed to convert prev_state to canonical JSON: {e}",
-									)))
-								})?,
-						),
-					);
-					unsigned.insert(
-						"prev_sender".into(),
-						CanonicalJsonValue::String(prev_state.sender().to_string()),
-					);
-					unsigned.insert(
-						"replaces_state".into(),
-						CanonicalJsonValue::String(prev_state.event_id().to_string()),
-					);
-				}
+				unsigned.insert(
+					"prev_content".into(),
+					CanonicalJsonValue::Object(
+						utils::to_canonical_object(prev_state.get_content_as_value()).map_err(
+							|e| {
+								err!(Database(error!(
+									"Failed to convert prev_state to canonical JSON: {e}",
+								)))
+							},
+						)?,
+					),
+				);
+				unsigned.insert(
+					"prev_sender".into(),
+					CanonicalJsonValue::String(prev_state.sender().to_string()),
+				);
+				unsigned.insert(
+					"replaces_state".into(),
+					CanonicalJsonValue::String(prev_state.event_id().to_string()),
+				);
 			}
 		} else {
 			error!("Invalid unsigned type in pdu.");
@@ -222,30 +220,28 @@ async fn append_pdu_effects(
 
 			match room_version_id {
 				| V1 | V2 | V3 | V4 | V5 | V6 | V7 | V8 | V9 | V10 => {
-					if let Some(redact_id) = pdu.redacts() {
-						if self
+					if let Some(redact_id) = pdu.redacts()
+						&& self
 							.services
 							.state_accessor
 							.user_can_redact(redact_id, pdu.sender(), pdu.room_id(), false)
 							.await?
-						{
-							self.redact_pdu(redact_id, pdu, shortroomid)
-								.await?;
-						}
+					{
+						self.redact_pdu(redact_id, pdu, shortroomid)
+							.await?;
 					}
 				},
 				| _ => {
 					let content: RoomRedactionEventContent = pdu.get_content()?;
-					if let Some(redact_id) = &content.redacts {
-						if self
+					if let Some(redact_id) = &content.redacts
+						&& self
 							.services
 							.state_accessor
 							.user_can_redact(redact_id, pdu.sender(), pdu.room_id(), false)
 							.await?
-						{
-							self.redact_pdu(redact_id, pdu, shortroomid)
-								.await?;
-						}
+					{
+						self.redact_pdu(redact_id, pdu, shortroomid)
+							.await?;
 					}
 				},
 			}
@@ -317,15 +313,14 @@ async fn append_pdu_effects(
 		| _ => {},
 	}
 
-	if let Ok(content) = pdu.get_content::<ExtractRelatesToEventId>() {
-		if let Ok(related_pducount) = self
+	if let Ok(content) = pdu.get_content::<ExtractRelatesToEventId>()
+		&& let Ok(related_pducount) = self
 			.get_pdu_count(&content.relates_to.event_id)
 			.await
-		{
-			self.services
-				.pdu_metadata
-				.add_relation(count, related_pducount);
-		}
+	{
+		self.services
+			.pdu_metadata
+			.add_relation(count, related_pducount);
 	}
 
 	if let Ok(content) = pdu.get_content::<ExtractRelatesTo>() {

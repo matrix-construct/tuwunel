@@ -65,10 +65,10 @@ fn matches_user_id(user_id: &UserId, filter: &Filter) -> bool {
 		return false;
 	}
 
-	if let Some(senders) = filter.senders.as_ref() {
-		if !senders.iter().any(is_equal_to!(user_id)) {
-			return false;
-		}
+	if let Some(senders) = filter.senders.as_ref()
+		&& !senders.iter().any(is_equal_to!(user_id))
+	{
+		return false;
 	}
 
 	true
@@ -79,10 +79,10 @@ fn matches_room_id(room_id: &RoomId, filter: &RoomFilter) -> bool {
 		return false;
 	}
 
-	if let Some(rooms) = filter.rooms.as_ref() {
-		if !rooms.iter().any(is_equal_to!(room_id)) {
-			return false;
-		}
+	if let Some(rooms) = filter.rooms.as_ref()
+		&& !rooms.iter().any(is_equal_to!(room_id))
+	{
+		return false;
 	}
 
 	true
@@ -97,10 +97,10 @@ fn matches_room<E: Event>(event: &E, filter: &RoomEventFilter) -> bool {
 		return false;
 	}
 
-	if let Some(rooms) = filter.rooms.as_ref() {
-		if !rooms.iter().any(is_equal_to!(event.room_id())) {
-			return false;
-		}
+	if let Some(rooms) = filter.rooms.as_ref()
+		&& !rooms.iter().any(is_equal_to!(event.room_id()))
+	{
+		return false;
 	}
 
 	true
@@ -115,10 +115,10 @@ fn matches_sender<E: Event>(event: &E, filter: &RoomEventFilter) -> bool {
 		return false;
 	}
 
-	if let Some(senders) = filter.senders.as_ref() {
-		if !senders.iter().any(is_equal_to!(event.sender())) {
-			return false;
-		}
+	if let Some(senders) = filter.senders.as_ref()
+		&& !senders.iter().any(is_equal_to!(event.sender()))
+	{
+		return false;
 	}
 
 	true
@@ -131,10 +131,10 @@ fn matches_type<E: Event>(event: &E, filter: &RoomEventFilter) -> bool {
 		return false;
 	}
 
-	if let Some(types) = filter.types.as_ref() {
-		if !types.iter().any(is_equal_to!(&kind)) {
-			return false;
-		}
+	if let Some(types) = filter.types.as_ref()
+		&& !types.iter().any(is_equal_to!(&kind))
+	{
+		return false;
 	}
 
 	true

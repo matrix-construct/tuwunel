@@ -104,12 +104,12 @@ async fn send_notice<Pdu: Event>(
 				)));
 			}
 
-			if let Ok(ip) = IPAddress::parse(url.host_str().expect("URL previously validated")) {
-				if !self.services.client.valid_cidr_range(&ip) {
-					return Err!(Request(InvalidParam(
-						warn!(%url, "HTTP pusher URL is a forbidden remote address")
-					)));
-				}
+			if let Ok(ip) = IPAddress::parse(url.host_str().expect("URL previously validated"))
+				&& !self.services.client.valid_cidr_range(&ip)
+			{
+				return Err!(Request(InvalidParam(
+					warn!(%url, "HTTP pusher URL is a forbidden remote address")
+				)));
 			}
 
 			// TODO (timo): can pusher/devices have conflicting formats

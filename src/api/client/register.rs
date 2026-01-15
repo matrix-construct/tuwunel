@@ -93,10 +93,10 @@ pub(crate) async fn get_register_available_route(
 		return Err!(Request(UserInUse("User ID is not available.")));
 	}
 
-	if let Some(ref info) = body.appservice_info {
-		if !info.is_user_match(&user_id) {
-			return Err!(Request(Exclusive("Username is not in an appservice namespace.")));
-		}
+	if let Some(ref info) = body.appservice_info
+		&& !info.is_user_match(&user_id)
+	{
+		return Err!(Request(Exclusive("Username is not in an appservice namespace.")));
 	}
 
 	if services

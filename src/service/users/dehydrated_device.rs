@@ -113,10 +113,10 @@ pub(super) async fn remove_dehydrated_device(
 		return Err!(Request(NotFound("No dehydrated device for this user.")));
 	};
 
-	if let Some(maybe_device_id) = maybe_device_id {
-		if maybe_device_id != device_id {
-			return Err!(Request(NotFound("Not the user's dehydrated device.")));
-		}
+	if let Some(maybe_device_id) = maybe_device_id
+		&& maybe_device_id != device_id
+	{
+		return Err!(Request(NotFound("Not the user's dehydrated device.")));
 	}
 
 	self.db.userid_dehydrateddevice.remove(user_id);
