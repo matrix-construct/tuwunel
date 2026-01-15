@@ -11,6 +11,15 @@ pub(crate) enum PusherCommand {
 		/// Full user ID
 		user_id: OwnedUserId,
 	},
+
+	/// - Manually delete a pusher for a user.
+	RemovePusher {
+		/// Full user ID
+		user_id: OwnedUserId,
+
+		/// Pushkey
+		pushkey: String,
+	},
 }
 
 #[admin_command]
@@ -21,4 +30,27 @@ pub(super) async fn get_pushers(&self, user_id: OwnedUserId) -> Result {
 
 	self.write_string(format!("Query completed in {query_time:?}:\n\n```rs\n{results:#?}```"))
 		.await
+}
+
+#[admin_command]
+pub(super) async fn remove_pusher(&self, user_id: OwnedUserId, pushkey: String) -> Result {
+	let exists = self
+		.services
+		.pusher
+		.get_pusher(&user_id, &pushkey)
+		.await
+		.is_ok();
+
+	self.services
+		.pusher
+		.delete_pusher(&user_id, &pushkey)
+		.await;
+
+	let message = if exists {
+		"Pusher deleted."
+	} else {
+		"Pusher was not found but deletion was still attempted."
+	};
+
+	self.write_str(message).await
 }
