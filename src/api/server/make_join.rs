@@ -12,7 +12,7 @@ use ruma::{
 	},
 };
 use tuwunel_core::{
-	Err, Error, Result, at, debug_info, matrix::pdu::PduBuilder, utils::IterStream, warn,
+	Err, Error, Result, at, debug_info, matrix::pdu::PduBuilder, utils::IterStream,
 };
 use tuwunel_service::Services;
 
@@ -38,21 +38,6 @@ pub(crate) async fn create_join_event_template_route(
 		.event_handler
 		.acl_check(body.origin(), &body.room_id)
 		.await?;
-
-	if services
-		.config
-		.forbidden_remote_server_names
-		.is_match(body.origin().host())
-	{
-		warn!(
-			"Server {} for remote user {} tried joining room ID {} which has a server name that \
-			 is globally forbidden. Rejecting.",
-			body.origin(),
-			&body.user_id,
-			&body.room_id,
-		);
-		return Err!(Request(Forbidden("Server is banned on this homeserver.")));
-	}
 
 	if let Some(server) = body.room_id.server_name()
 		&& services

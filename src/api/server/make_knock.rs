@@ -6,7 +6,7 @@ use ruma::{
 	api::{client::error::ErrorKind, federation::membership::prepare_knock_event},
 	events::room::member::{MembershipState, RoomMemberEventContent},
 };
-use tuwunel_core::{Err, Error, Result, at, debug_warn, matrix::pdu::PduBuilder, warn};
+use tuwunel_core::{Err, Error, Result, at, debug_warn, matrix::pdu::PduBuilder};
 
 use crate::Ruma;
 
@@ -30,21 +30,6 @@ pub(crate) async fn create_knock_event_template_route(
 		.event_handler
 		.acl_check(body.origin(), &body.room_id)
 		.await?;
-
-	if services
-		.config
-		.forbidden_remote_server_names
-		.is_match(body.origin().host())
-	{
-		warn!(
-			"Server {} for remote user {} tried knocking room ID {} which has a server name \
-			 that is globally forbidden. Rejecting.",
-			body.origin(),
-			&body.user_id,
-			&body.room_id,
-		);
-		return Err!(Request(Forbidden("Server is banned on this homeserver.")));
-	}
 
 	if let Some(server) = body.room_id.server_name()
 		&& services

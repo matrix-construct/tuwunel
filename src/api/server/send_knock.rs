@@ -25,20 +25,6 @@ pub(crate) async fn create_knock_event_v1_route(
 	State(services): State<crate::State>,
 	body: Ruma<create_knock_event::v1::Request>,
 ) -> Result<create_knock_event::v1::Response> {
-	if services
-		.config
-		.forbidden_remote_server_names
-		.is_match(body.origin().host())
-	{
-		warn!(
-			"Server {} tried knocking room ID {} who has a server name that is globally \
-			 forbidden. Rejecting.",
-			body.origin(),
-			&body.room_id,
-		);
-		return Err!(Request(Forbidden("Server is banned on this homeserver.")));
-	}
-
 	if let Some(server) = body.room_id.server_name()
 		&& services
 			.config

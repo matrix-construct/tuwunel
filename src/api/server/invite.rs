@@ -21,7 +21,6 @@ use tuwunel_core::{
 	matrix::{Event, PduCount, PduEvent, event::gen_event_id},
 	utils,
 	utils::hash::sha256,
-	warn,
 };
 
 use crate::Ruma;
@@ -57,20 +56,6 @@ pub(crate) async fn create_invite_route(
 			.forbidden_remote_server_names
 			.is_match(server.host())
 	{
-		return Err!(Request(Forbidden("Server is banned on this homeserver.")));
-	}
-
-	if services
-		.config
-		.forbidden_remote_server_names
-		.is_match(body.origin().host())
-	{
-		warn!(
-			"Received federated/remote invite from banned server {} for room ID {}. Rejecting.",
-			body.origin(),
-			body.room_id
-		);
-
 		return Err!(Request(Forbidden("Server is banned on this homeserver.")));
 	}
 
