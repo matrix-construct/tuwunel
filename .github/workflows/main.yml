@@ -11,6 +11,9 @@ on:
       - "**"
   workflow_dispatch:
     inputs:
+      pipeline:
+        type: string
+        description: Specify e.g. '[ci only it]' here instead of commit message.
       complement_logs:
         type: boolean
         default: true
@@ -61,7 +64,7 @@ jobs:
       release_url: ${{steps.release.outputs.upload_url}}
       pages_url: 'https://matrix-construct.github.io/tuwunel/'
       rust_sdk_integ: ${{vars.RUST_SDK_INTEGRATION != 'false'}}
-      head_msg: ${{github.event.head_commit.message || github.event.workflow_run.head_commit.message}}
+      pipeline: ${{github.event.inputs.pipeline || github.event.head_commit.message || github.event.workflow_run.head_commit.message}}
 
     strategy:
       fail-fast: true
@@ -130,8 +133,8 @@ jobs:
     if: >
       !failure() && !cancelled()
       && !contains(github.ref, 'refs/tags/v')
-      && !contains(needs.init.outputs.head_msg, '[ci no lint]')
-      && !contains(needs.init.outputs.head_msg, '[ci only it]')
+      && !contains(needs.init.outputs.pipeline, '[ci no lint]')
+      && !contains(needs.init.outputs.pipeline, '[ci only it]')
 
     name: Lint
     needs: [init] #needs: [init, deps]
@@ -180,13 +183,13 @@ jobs:
     if: >
       !failure() && !cancelled()
       && !contains(github.ref, 'refs/tags/v')
-      && !contains(needs.init.outputs.head_msg, '[ci no test]')
+      && !contains(needs.init.outputs.pipeline, '[ci no test]')
 
     name: Test
     needs: [init, lint]
     uses: ./.github/workflows/test.yml
     with:
-      head_msg: ${{needs.init.outputs.head_msg}}
+      pipeline: ${{needs.init.outputs.pipeline}}
       build_nix: ${{fromJSON(needs.init.outputs.build_nix)}}
       rust_sdk_integ: ${{fromJSON(needs.init.outputs.rust_sdk_integ)}}
       complement: ${{fromJSON(needs.init.outputs.complement)}}
@@ -237,9 +240,9 @@ jobs:
       !failure() && !cancelled()
       && needs.init.outputs.package
       && !contains(github.ref, 'refs/pull')
-      && !contains(needs.init.outputs.head_msg, '[ci only it]')
-      && !contains(needs.init.outputs.head_msg, '[ci no build]')
-      && !contains(needs.init.outputs.head_msg, '[ci no package]')
+      && !contains(needs.init.outputs.pipeline, '[ci only it]')
+      && !contains(needs.init.outputs.pipeline, '[ci no build]')
+      && !contains(needs.init.outputs.pipeline, '[ci no package]')
 
     name: Package
     needs: [init, test]
@@ -301,10 +304,10 @@ jobs:
       !failure() && !cancelled()
       && needs.init.outputs.publish
       && !contains(github.ref, 'refs/pull')
-      && !contains(needs.init.outputs.head_msg, '[ci only it]')
-      && !contains(needs.init.outputs.head_msg, '[ci no build]')
-      && !contains(needs.init.outputs.head_msg, '[ci no package]')
-      && !contains(needs.init.outputs.head_msg, '[ci no publish]')
+      && !contains(needs.init.outputs.pipeline, '[ci only it]')
+      && !contains(needs.init.outputs.pipeline, '[ci no build]')
+      && !contains(needs.init.outputs.pipeline, '[ci no package]')
+      && !contains(needs.init.outputs.pipeline, '[ci no publish]')
 
     name: Publish
     needs: [init, test, package]
