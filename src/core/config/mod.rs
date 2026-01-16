@@ -674,6 +674,14 @@ pub struct Config {
 	#[serde(default = "true_fn")]
 	pub allow_unlisted_room_search_by_id: bool,
 
+	/// Show all local users in user directory. With this set to false, only
+	/// users in public rooms or those that share a room with the user making
+	/// the search will be shown.
+	///
+	/// default: false
+	#[serde(default)]
+	pub show_all_local_users_in_user_directory: bool,
+
 	/// Allow guests/unauthenticated users to access TURN credentials.
 	///
 	/// This is the equivalent of Synapse's `turn_allow_guests` config option.
