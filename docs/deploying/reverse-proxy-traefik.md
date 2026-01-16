@@ -7,6 +7,10 @@
 Install Traefik via your preferred method. You can read the official [docker quickstart guide](https://doc.traefik.io/traefik/getting-started/docker/) or the [in-depth walkthrough](https://doc.traefik.io/traefik/setup/docker/)
 
 ## Configuration
+### TLS certificates
+
+You can setup auto renewing certificates with different kinds of [acme challenges](https://doc.traefik.io/traefik/reference/install-configuration/tls/certificate-resolvers/acme/).
+### Router configurations
 You only have to do any one of these methods.
 
 Be sure to change the `your.server.name` to your actual tuwunel domain. and the `yourcertresolver` should be changed to whatever you named it in your traefik config.
@@ -62,6 +66,7 @@ http:
 >
 > [Encoded Character Filtering](https://doc.traefik.io/traefik/security/request-path/#encoded-character-filtering)
 > options must be set to `true`. This only applies to traefik version 3.6.4 to 3.6.6 and 2.11.32 to 2.11.34
+
 
 ## Verification
 
