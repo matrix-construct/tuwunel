@@ -28,6 +28,7 @@ EOF
 FROM input AS smoke-valgrind
 ARG leak_check="no"
 ARG undef_value_errors="no"
+ARG db_pool_max_workers=128
 COPY --link --from=input . .
 ENV TUWUNEL_LOG="info"
 ENV TUWUNEL_DATABASE_PATH="/tmp/smoketest.db"
@@ -42,7 +43,8 @@ RUN <<EOF
         tuwunel \
             -Otest='["smoke"]' \
             -Oserver_name=\"localhost\" \
-            -Odatabase_path=\"${TUWUNEL_DATABASE_PATH}\"
+            -Odatabase_path=\"${TUWUNEL_DATABASE_PATH}\" \
+            -Odb_pool_max_workers=${db_pool_max_workers}
 
     rm -rf "${TUWUNEL_DATABASE_PATH}"
 EOF

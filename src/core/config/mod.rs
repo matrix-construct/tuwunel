@@ -2003,6 +2003,20 @@ pub struct Config {
 	#[serde(default = "default_db_pool_workers_limit")]
 	pub db_pool_workers_limit: usize,
 
+	/// Limits the total number of workers across all worker groups. When the
+	/// sum of all groups exceeds this value the worker counts are reduced until
+	/// this constraint is satisfied.
+	///
+	/// By default this value is only effective on larger systems (e.g. 16+
+	/// cores) where it will tamper the overall thread-count. The thread-pool
+	/// model will never achieve hardware capacity but this value can be raised
+	/// on huge systems if the scheduling overhead is determined to not
+	/// bottleneck and the worker groups are divided too small.
+	///
+	/// default: 2048
+	#[serde(default = "default_db_pool_max_workers")]
+	pub db_pool_max_workers: usize,
+
 	/// Determines the size of the queues feeding the database's frontend-pool.
 	/// The size of the queue is determined by multiplying this value with the
 	/// number of pool workers. When this queue is full, tokio tasks conducting
@@ -3148,6 +3162,8 @@ fn default_db_pool_workers() -> usize {
 }
 
 fn default_db_pool_workers_limit() -> usize { 64 }
+
+fn default_db_pool_max_workers() -> usize { 2048 }
 
 fn default_db_pool_queue_mult() -> usize { 4 }
 

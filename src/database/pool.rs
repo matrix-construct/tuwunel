@@ -65,8 +65,8 @@ pub(crate) type BatchQuery<'a> = SmallVec<[KeyBuf; BATCH_INLINE]>;
 pub(crate) type BatchResult<'a> = SmallVec<[ResultHandle<'a>; BATCH_INLINE]>;
 pub(crate) type ResultHandle<'a> = Result<Handle<'a>>;
 
-const WORKER_LIMIT: (usize, usize) = (1, 1024);
-const QUEUE_LIMIT: (usize, usize) = (1, 4096);
+const WORKER_LIMIT: (usize, usize) = (1, 4096);
+const QUEUE_LIMIT: (usize, usize) = (1, 1024);
 const BATCH_INLINE: usize = 1;
 
 const WORKER_STACK_SIZE: usize = 1_048_576;

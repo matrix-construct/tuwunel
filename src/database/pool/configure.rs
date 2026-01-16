@@ -124,6 +124,7 @@ pub(super) fn configure(server: &Arc<Server>) -> (Vec<usize>, Vec<usize>, Vec<us
 		.filter_map(|mq| mq.nr_tags)
 		.chain(default_worker_count.into_iter())
 		.fold(0_usize, usize::saturating_add)
+		.min(config.db_pool_max_workers)
 		.clamp(WORKER_LIMIT.0, WORKER_LIMIT.1);
 
 	// Tamper for the total number of workers by reducing the count for each group.

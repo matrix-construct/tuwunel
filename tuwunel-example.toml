@@ -1725,6 +1725,18 @@
 #
 #db_pool_workers_limit = 64
 
+# Limits the total number of workers across all worker groups. When the
+# sum of all groups exceeds this value the worker counts are reduced until
+# this constraint is satisfied.
+#
+# By default this value is only effective on larger systems (e.g. 16+
+# cores) where it will tamper the overall thread-count. The thread-pool
+# model will never achieve hardware capacity but this value can be raised
+# on huge systems if the scheduling overhead is determined to not
+# bottleneck and the worker groups are divided too small.
+#
+#db_pool_max_workers = 2048
+
 # Determines the size of the queues feeding the database's frontend-pool.
 # The size of the queue is determined by multiplying this value with the
 # number of pool workers. When this queue is full, tokio tasks conducting

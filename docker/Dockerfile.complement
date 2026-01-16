@@ -111,6 +111,7 @@ ENTRYPOINT tuwunel -Oserver_name=\""$SERVER_NAME\""
 
 
 FROM input AS complement-testee-valgrind
+ARG db_pool_max_workers=128
 
 EXPOSE 8008 8448
 RUN mkdir /database
@@ -122,7 +123,8 @@ ENTRYPOINT valgrind \
     --exit-on-first-error=yes \
     --error-exitcode=1 \
     tuwunel \
-        -Oserver_name=\""$SERVER_NAME\""
+        -Oserver_name=\""$SERVER_NAME\"" \
+        -Odb_pool_max_workers=${db_pool_max_workers}
 
 
 FROM input AS complement-base
