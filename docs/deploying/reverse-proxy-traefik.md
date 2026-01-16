@@ -9,24 +9,27 @@ Install Traefik via your preferred method. You can read the official [docker qui
 ## Configuration
 You only have to do any one of these methods.
 
-Be sure to change the `your.server.name` to your actual tuwunel domain. and the certresolver should be changed to whatever you named it in your traefik config.
+Be sure to change the `your.server.name` to your actual tuwunel domain. and the `yourcertresolver` should be changed to whatever you named it in your traefik config.
 ### Labels
 To use labels with traefik you need to configure a [docker provider](https://doc.traefik.io/traefik/reference/install-configuration/providers/docker/).
 
 Then add the labels in your tuwunel's docker compose file.
 ```yaml
-labels:
-    - "traefik.enable=true"
-    - "traefik.http.routers.tuwunel.entrypoints=web"
-    - "traefik.http.routers.tuwunel.rule=Host(`your.server.name`)"
-    - "traefik.http.routers.tuwunel.middlewares=https-redirect@file"
-    - "traefik.http.routers.tuwunel-secure.entrypoints=websecure"
-    - "traefik.http.routers.tuwunel-secure.rule=Host(`your.server.name`)"
-    - "traefik.http.routers.tuwunel-secure.tls=true"
-    - "traefik.http.routers.tuwunel-secure.service=tuwunel"
-    - "traefik.http.services.tuwunel.loadbalancer.server.port=6167"
-    - "traefik.http.routers.tuwunel-secure.tls.certresolver=letsencrypt"
-    - "traefik.docker.network=proxy"
+services:
+    tuwunel:
+        # ...
+        labels:
+            - "traefik.enable=true"
+            - "traefik.http.routers.tuwunel.entrypoints=web"
+            - "traefik.http.routers.tuwunel.rule=Host(`your.server.name`)"
+            - "traefik.http.routers.tuwunel.middlewares=https-redirect@file"
+            - "traefik.http.routers.tuwunel-secure.entrypoints=websecure"
+            - "traefik.http.routers.tuwunel-secure.rule=Host(`your.server.name`)"
+            - "traefik.http.routers.tuwunel-secure.tls=true"
+            - "traefik.http.routers.tuwunel-secure.service=tuwunel"
+            - "traefik.http.services.tuwunel.loadbalancer.server.port=6167"
+            - "traefik.http.routers.tuwunel-secure.tls.certresolver=yourcertresolver"
+            - "traefik.docker.network=proxy"
 ```
 ### Config File
 To use the config file you need to configure a [file provider](https://doc.traefik.io/traefik/reference/install-configuration/providers/others/file/).
@@ -43,7 +46,7 @@ http:
             middlewares:
                 - https-redirect
             tls:
-                certResolver: "letsencrypt"
+                certResolver: "yourcertresolver"
             service: tuwunel
     services:
         tuwunel:
