@@ -10,6 +10,15 @@ on:
     branches:
       - "**"
   workflow_dispatch:
+    inputs:
+      complement_logs:
+        type: boolean
+        default: true
+        description: Upload complement logs even after success.
+      complement_verbose:
+        type: boolean
+        default: false
+        description: Include successful tests in complement logs.
 
 concurrency:
   group: ${{github.workflow}}-${{github.ref}}
@@ -45,6 +54,8 @@ jobs:
       check_pkgs: ${{vars.CHECK_PKGS || github.ref == 'refs/heads/test'}}
       complement: ${{vars.COMPLEMENT != 'false'}}
       complement_runner: 'het'
+      complement_logs: ${{inputs.complement_logs || 'true'}}
+      complement_verbose: ${{inputs.complement_verbose || 'false'}}
       docker_repo: ${{vars.DOCKER_REPO}}
       docker_acct: ${{vars.DOCKER_ACCT}}
       release_url: ${{steps.release.outputs.upload_url}}
@@ -180,6 +191,8 @@ jobs:
       rust_sdk_integ: ${{fromJSON(needs.init.outputs.rust_sdk_integ)}}
       complement: ${{fromJSON(needs.init.outputs.complement)}}
       complement_runner: ${{needs.init.outputs.complement_runner}}
+      complement_logs: ${{fromJSON(needs.init.outputs.complement_logs)}}
+      complement_verbose: ${{fromJSON(needs.init.outputs.complement_verbose)}}
       cargo_profiles: ${{needs.init.outputs.cargo_profiles}}
       feat_sets: ${{needs.init.outputs.feat_sets}}
       rust_toolchains: ${{needs.init.outputs.rust_toolchains}}

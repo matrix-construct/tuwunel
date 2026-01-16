@@ -40,6 +40,15 @@ on:
         default: true
       complement_runner:
         type: string
+        default: 'het'
+      complement_logs:
+        type: boolean
+        default: true
+        description: Upload complement logs artifact even when passing.
+      complement_verbose:
+        type: boolean
+        default: false
+        description: Include complement logs from successful tests.
       rust_sdk_integ:
         type: boolean
         default: true
@@ -48,6 +57,7 @@ on:
         default: true
       head_msg:
         type: string
+        default: ${{github.event.workflow_run.head_commit.message}}
 
 jobs:
   docs:
@@ -358,6 +368,7 @@ jobs:
     - name: Execute
       id: execute
       env:
+        complement_verbose: ${{inputs.complement_verbose && 1 || 0}}
         cargo_profile: ${{matrix.cargo_profile}}
         rust_toolchain: ${{matrix.rust_toolchain}}
         rust_target: ${{matrix.rust_target}}
@@ -389,7 +400,7 @@ jobs:
         name: complement_results-${{matrix.feat_set}}-${{matrix.sys_name}}-${{matrix.sys_target}}.jsonl
         path: ./tests/complement/results.jsonl
 
-    - if: failure() && steps.execute.outcome == 'failure'
+    - if: inputs.complement_logs || (failure() && steps.execute.outcome == 'failure')
       name: Upload Failure Output
       id: upload-output
       uses: actions/upload-artifact@v4
