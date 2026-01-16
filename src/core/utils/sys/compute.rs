@@ -65,7 +65,15 @@ where
 }
 
 /// Get the core affinity for this thread.
-pub fn get_affinity() -> impl Iterator<Item = Id> { from_mask(CORE_AFFINITY.get()) }
+pub fn get_affinity() -> impl Iterator<Item = Id> {
+	CORE_AFFINITY
+		.get()
+		.ne(&0)
+		.then_some(from_mask(CORE_AFFINITY.get()))
+		.or_else(|| Some(from_mask(*CORES_AVAILABLE)))
+		.into_iter()
+		.flatten()
+}
 
 /// List the cores sharing SMT-tier resources
 pub fn smt_siblings() -> impl Iterator<Item = Id> {
