@@ -13,7 +13,8 @@ pub(super) async fn check_all_users(&self) -> Result {
 	let users = self
 		.services
 		.users
-		.iter()
+		.stream()
+		.map(ToOwned::to_owned)
 		.collect::<Vec<_>>()
 		.await;
 	let query_time = timer.elapsed();

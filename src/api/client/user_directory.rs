@@ -32,7 +32,7 @@ pub(crate) async fn search_users_route(
 ) -> Result<search_users::v3::Response> {
 	let sender_user = body.sender_user();
 	let limit = usize::try_from(body.limit)
-		.map_or(LIMIT_DEFAULT, usize::from)
+		.unwrap_or(LIMIT_DEFAULT)
 		.min(LIMIT_MAX);
 
 	let search_term = body.search_term.to_lowercase();

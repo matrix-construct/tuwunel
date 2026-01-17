@@ -128,7 +128,11 @@ pub fn check(config: &Config) -> Result {
 		));
 	}
 
-	if config.emergency_password == Some(String::from("F670$2CP@Hw8mG7RY1$%!#Ic7YA")) {
+	if config
+		.emergency_password
+		.as_ref()
+		.is_some_and(|emergency_password| emergency_password == "F670$2CP@Hw8mG7RY1$%!#Ic7YA")
+	{
 		return Err!(Config(
 			"emergency_password",
 			"The public example emergency password is being used, this is insecure. Please \
@@ -136,7 +140,11 @@ pub fn check(config: &Config) -> Result {
 		));
 	}
 
-	if config.emergency_password == Some(String::new()) {
+	if config
+		.emergency_password
+		.as_ref()
+		.is_some_and(String::is_empty)
+	{
 		return Err!(Config(
 			"emergency_password",
 			"Emergency password was set to an empty string, this is not valid. Unset \
@@ -145,7 +153,11 @@ pub fn check(config: &Config) -> Result {
 	}
 
 	// check if the user specified a registration token as `""`
-	if config.registration_token == Some(String::new()) {
+	if config
+		.registration_token
+		.as_ref()
+		.is_some_and(String::is_empty)
+	{
 		return Err!(Config(
 			"registration_token",
 			"Registration token was specified but is empty (\"\")"

@@ -257,26 +257,23 @@ where
 		return true;
 	}
 
-	let ignored_type = IGNORED_MESSAGE_TYPES
+	if IGNORED_MESSAGE_TYPES
 		.binary_search(event.kind())
-		.is_ok();
+		.is_err()
+	{
+		return false;
+	}
 
 	let ignored_server = services
 		.config
 		.forbidden_remote_server_names
 		.is_match(event.sender().server_name().host());
 
-	if ignored_type
-		&& (ignored_server
-			|| services
-				.users
-				.user_is_ignored(event.sender(), user_id)
-				.await)
-	{
-		return true;
-	}
-
-	false
+	ignored_server
+		|| services
+			.users
+			.user_is_ignored(event.sender(), user_id)
+			.await
 }
 
 #[inline]
