@@ -6,7 +6,7 @@ use std::{
 use axum::extract::State;
 use futures::{
 	FutureExt, StreamExt, TryFutureExt,
-	future::{OptionFuture, join, join3, join4, join5},
+	future::{join, join3, join4, join5},
 	pin_mut,
 };
 use ruma::{
@@ -52,6 +52,7 @@ use tuwunel_core::{
 		self, BoolExt, FutureBoolExt, IterStream, ReadyExt, TryFutureExtExt,
 		future::{OptionStream, ReadyBoolExt},
 		math::ruma_from_u64,
+		option::OptionExt,
 		result::MapExpect,
 		stream::{BroadbandExt, Tools, TryExpect, WidebandExt},
 		string::to_small_string,
@@ -130,19 +131,18 @@ pub(crate) async fn sync_events_route(
 	let sender_user = body.sender_user();
 	let sender_device = body.sender_device.as_deref();
 
-	let filter: OptionFuture<_> = body
+	let filter = body
 		.body
 		.filter
 		.as_ref()
-		.map(async |filter| match filter {
+		.map_async(async |filter| match filter {
 			| Filter::FilterDefinition(filter) => filter.clone(),
 			| Filter::FilterId(filter_id) => services
 				.users
 				.get_filter(sender_user, filter_id)
 				.await
 				.unwrap_or_default(),
-		})
-		.into();
+		});
 
 	let filter = filter.map(Option::unwrap_or_default);
 	let full_state = body.body.full_state;
@@ -243,16 +243,13 @@ async fn build_empty_response(
 	sender_device: Option<&DeviceId>,
 	next_batch: u64,
 ) -> sync_events::v3::Response {
-	let device_one_time_keys_count: OptionFuture<_> = sender_device
-		.map(|sender_device| {
-			services
-				.users
-				.count_one_time_keys(sender_user, sender_device)
-		})
-		.into();
-
 	sync_events::v3::Response {
-		device_one_time_keys_count: device_one_time_keys_count
+		device_one_time_keys_count: sender_device
+			.map_async(|sender_device| {
+				services
+					.users
+					.count_one_time_keys(sender_user, sender_device)
+			})
 			.await
 			.unwrap_or_default(),
 
@@ -380,11 +377,12 @@ async fn build_sync_events(
 			knocked_rooms
 		});
 
-	let presence_updates: OptionFuture<_> = services
+	let presence_updates = services
 		.config
 		.allow_local_presence
-		.then(|| process_presence_updates(services, since, next_batch, sender_user, filter))
-		.into();
+		.then_async(|| {
+			process_presence_updates(services, since, next_batch, sender_user, filter)
+		});
 
 	let account_data = services
 		.account_data
@@ -399,32 +397,26 @@ async fn build_sync_events(
 		.map(ToOwned::to_owned)
 		.collect::<HashSet<_>>();
 
-	let to_device_events: OptionFuture<_> = sender_device
-		.map(|sender_device| {
-			services
-				.users
-				.get_to_device_events(sender_user, sender_device, Some(since), Some(next_batch))
-				.map(at!(1))
-				.collect::<Vec<_>>()
-		})
-		.into();
+	let to_device_events = sender_device.map_async(|sender_device| {
+		services
+			.users
+			.get_to_device_events(sender_user, sender_device, Some(since), Some(next_batch))
+			.map(at!(1))
+			.collect::<Vec<_>>()
+	});
 
-	let device_one_time_keys_count: OptionFuture<_> = sender_device
-		.map(|sender_device| {
-			services
-				.users
-				.count_one_time_keys(sender_user, sender_device)
-		})
-		.into();
+	let device_one_time_keys_count = sender_device.map_async(|sender_device| {
+		services
+			.users
+			.count_one_time_keys(sender_user, sender_device)
+	});
 
 	// Remove all to-device events the device received *last time*
-	let remove_to_device_events: OptionFuture<_> = sender_device
-		.map(|sender_device| {
-			services
-				.users
-				.remove_to_device_events(sender_user, sender_device, since)
-		})
-		.into();
+	let remove_to_device_events = sender_device.map_async(|sender_device| {
+		services
+			.users
+			.remove_to_device_events(sender_user, sender_device, since)
+	});
 
 	let (
 		account_data,
@@ -643,17 +635,16 @@ async fn load_left_room(
 		.prev_shortstatehash(room_id, PduCount::Normal(since).saturating_add(1))
 		.ok();
 
-	let horizon_shortstatehash: OptionFuture<_> = timeline_pdus
+	let horizon_shortstatehash = timeline_pdus
 		.first()
 		.map(at!(0))
-		.map(|count| {
+		.map_async(|count| {
 			services
 				.timeline
 				.get_shortstatehash(room_id, count)
 				.inspect_err(inspect_debug_log)
 				.ok()
-		})
-		.into();
+		});
 
 	let left_shortstatehash = services
 		.timeline
@@ -790,40 +781,34 @@ async fn load_joined_room(
 		"if timeline events, last_timeline_count must be in the since window."
 	);
 
-	let since_shortstatehash: OptionFuture<_> = timeline_changed
-		.then(|| {
-			services
-				.timeline
-				.prev_shortstatehash(room_id, PduCount::Normal(since).saturating_add(1))
-				.ok()
-		})
-		.into();
+	let since_shortstatehash = timeline_changed.then_async(|| {
+		services
+			.timeline
+			.prev_shortstatehash(room_id, PduCount::Normal(since).saturating_add(1))
+			.ok()
+	});
 
-	let horizon_shortstatehash: OptionFuture<_> = timeline_pdus
+	let horizon_shortstatehash = timeline_pdus
 		.first()
 		.map(at!(0))
-		.map(|count| {
+		.map_async(|count| {
 			services
 				.timeline
 				.get_shortstatehash(room_id, count)
 				.inspect_err(inspect_debug_log)
-		})
-		.into();
+		});
 
-	let current_shortstatehash: OptionFuture<_> = timeline_changed
-		.then(|| {
-			services
-				.timeline
-				.get_shortstatehash(room_id, last_timeline_count)
-				.inspect_err(inspect_debug_log)
-				.or_else(|_| services.state.get_room_shortstatehash(room_id))
-				.map_err(|_| err!(Database(error!("Room {room_id} has no state"))))
-		})
-		.into();
+	let current_shortstatehash = timeline_changed.then_async(|| {
+		services
+			.timeline
+			.get_shortstatehash(room_id, last_timeline_count)
+			.inspect_err(inspect_debug_log)
+			.or_else(|_| services.state.get_room_shortstatehash(room_id))
+			.map_err(|_| err!(Database(error!("Room {room_id} has no state"))))
+	});
 
-	let encrypted_room: OptionFuture<_> = timeline_changed
-		.then(|| services.state_accessor.is_encrypted_room(room_id))
-		.into();
+	let encrypted_room =
+		timeline_changed.then_async(|| services.state_accessor.is_encrypted_room(room_id));
 
 	let receipt_events = services
 		.read_receipt
@@ -873,53 +858,43 @@ async fn load_joined_room(
 	};
 
 	// Reset lazy loading because this is an initial sync
-	let lazy_load_reset: OptionFuture<_> = initial
-		.then(|| services.lazy_loading.reset(lazy_loading_context))
-		.into();
+	let lazy_load_reset =
+		initial.then_async(|| services.lazy_loading.reset(lazy_loading_context));
 
 	lazy_load_reset.await;
-	let witness: OptionFuture<_> = lazy_loading_enabled
-		.then(|| {
-			let witness: Witness = timeline_pdus
-				.iter()
-				.map(ref_at!(1))
-				.map(Event::sender)
-				.map(Into::into)
-				.chain(receipt_events.keys().map(Into::into))
-				.collect();
+	let witness = lazy_loading_enabled.then_async(|| {
+		let witness: Witness = timeline_pdus
+			.iter()
+			.map(ref_at!(1))
+			.map(Event::sender)
+			.map(Into::into)
+			.chain(receipt_events.keys().map(Into::into))
+			.collect();
 
-			services
-				.lazy_loading
-				.witness_retain(witness, lazy_loading_context)
-		})
-		.into();
+		services
+			.lazy_loading
+			.witness_retain(witness, lazy_loading_context)
+	});
 
-	let sender_joined_count: OptionFuture<_> = timeline_changed
-		.then(|| {
-			services
-				.state_cache
-				.get_joined_count(room_id, sender_user)
-				.unwrap_or(0)
-		})
-		.into();
+	let sender_joined_count = timeline_changed.then_async(|| {
+		services
+			.state_cache
+			.get_joined_count(room_id, sender_user)
+			.unwrap_or(0)
+	});
 
-	let since_encryption: OptionFuture<_> = since_shortstatehash
-		.map(|shortstatehash| {
-			services
-				.state_accessor
-				.state_get(shortstatehash, &StateEventType::RoomEncryption, "")
-		})
-		.into();
+	let since_encryption = since_shortstatehash.map_async(|shortstatehash| {
+		services
+			.state_accessor
+			.state_get(shortstatehash, &StateEventType::RoomEncryption, "")
+	});
 
-	let last_notification_read: OptionFuture<_> = timeline_pdus
-		.is_empty()
-		.then(|| {
-			services
-				.pusher
-				.last_notification_read(sender_user, room_id)
-				.ok()
-		})
-		.into();
+	let last_notification_read = timeline_pdus.is_empty().then_async(|| {
+		services
+			.pusher
+			.last_notification_read(sender_user, room_id)
+			.ok()
+	});
 
 	let last_privateread_update = services
 		.read_receipt
@@ -941,21 +916,19 @@ async fn load_joined_room(
 
 	let joined_since_last_sync = sender_joined_count.unwrap_or(0) > since;
 
-	let state_changes: OptionFuture<_> = current_shortstatehash
-		.map(|current_shortstatehash| {
-			calculate_state_changes(
-				services,
-				sender_user,
-				room_id,
-				full_state || initial,
-				since_shortstatehash,
-				horizon_shortstatehash,
-				current_shortstatehash,
-				joined_since_last_sync,
-				witness.as_ref(),
-			)
-		})
-		.into();
+	let state_changes = current_shortstatehash.map_async(|current_shortstatehash| {
+		calculate_state_changes(
+			services,
+			sender_user,
+			room_id,
+			full_state || initial,
+			since_shortstatehash,
+			horizon_shortstatehash,
+			current_shortstatehash,
+			joined_since_last_sync,
+			witness.as_ref(),
+		)
+	});
 
 	let StateChanges {
 		heroes,
@@ -1002,35 +975,28 @@ async fn load_joined_room(
 	let send_notification_count_filter =
 		|count: &UInt| *count != uint!(0) || send_notification_resets;
 
-	let notification_count: OptionFuture<_> = send_notification_counts
-		.then(|| {
-			services
-				.pusher
-				.notification_count(sender_user, room_id)
-				.map(TryInto::try_into)
-				.unwrap_or(uint!(0))
-		})
-		.into();
+	let notification_count = send_notification_counts.then_async(|| {
+		services
+			.pusher
+			.notification_count(sender_user, room_id)
+			.map(TryInto::try_into)
+			.unwrap_or(uint!(0))
+	});
 
-	let highlight_count: OptionFuture<_> = send_notification_counts
-		.then(|| {
-			services
-				.pusher
-				.highlight_count(sender_user, room_id)
-				.map(TryInto::try_into)
-				.unwrap_or(uint!(0))
-		})
-		.into();
+	let highlight_count = send_notification_counts.then_async(|| {
+		services
+			.pusher
+			.highlight_count(sender_user, room_id)
+			.map(TryInto::try_into)
+			.unwrap_or(uint!(0))
+	});
 
-	let private_read_event: OptionFuture<_> = last_privateread_update
-		.gt(&since)
-		.then(|| {
-			services
-				.read_receipt
-				.private_read_get(room_id, sender_user)
-				.map(Result::ok)
-		})
-		.into();
+	let private_read_event = last_privateread_update.gt(&since).then_async(|| {
+		services
+			.read_receipt
+			.private_read_get(room_id, sender_user)
+			.map(Result::ok)
+	});
 
 	let typing_events = services
 		.typing
@@ -1226,37 +1192,31 @@ async fn calculate_state_changes<'a>(
 			.ok()
 	};
 
-	let lazy_state_ids: OptionFuture<_> = witness
-		.map(|witness| {
-			witness
-				.iter()
-				.stream()
-				.ready_filter(|&user_id| user_id != sender_user)
-				.broad_filter_map(|user_id| state_get_shorteventid(user_id))
-				.into_future()
-		})
-		.into();
+	let lazy_state_ids = witness.map_async(|witness| {
+		witness
+			.iter()
+			.stream()
+			.ready_filter(|&user_id| user_id != sender_user)
+			.broad_filter_map(|user_id| state_get_shorteventid(user_id))
+			.into_future()
+	});
 
-	let state_diff_ids: OptionFuture<_> = incremental
-		.then(|| {
-			services
-				.state_accessor
-				.state_added((since_shortstatehash, horizon_shortstatehash))
-				.boxed()
-				.into_future()
-		})
-		.into();
+	let state_diff_ids = incremental.then_async(|| {
+		services
+			.state_accessor
+			.state_added((since_shortstatehash, horizon_shortstatehash))
+			.boxed()
+			.into_future()
+	});
 
-	let current_state_ids: OptionFuture<_> = (!incremental)
-		.then(|| {
-			services
-				.state_accessor
-				.state_full_shortids(horizon_shortstatehash)
-				.expect_ok()
-				.boxed()
-				.into_future()
-		})
-		.into();
+	let current_state_ids = (!incremental).then_async(|| {
+		services
+			.state_accessor
+			.state_full_shortids(horizon_shortstatehash)
+			.expect_ok()
+			.boxed()
+			.into_future()
+	});
 
 	let state_events = current_state_ids
 		.stream()
@@ -1278,9 +1238,8 @@ async fn calculate_state_changes<'a>(
 		.iter()
 		.any(|event| *event.kind() == RoomMember);
 
-	let member_counts: OptionFuture<_> = send_member_counts
-		.then(|| calculate_counts(services, room_id, sender_user))
-		.into();
+	let member_counts =
+		send_member_counts.then_async(|| calculate_counts(services, room_id, sender_user));
 
 	let (joined_member_count, invited_member_count, heroes) =
 		member_counts.await.unwrap_or((None, None, None));
@@ -1334,12 +1293,11 @@ async fn calculate_counts(
 
 	let small_room = joined_member_count.saturating_add(invited_member_count) <= 5;
 
-	let heroes: OptionFuture<_> = services
+	let heroes = services
 		.config
 		.calculate_heroes
 		.and_is(small_room)
-		.then(|| calculate_heroes(services, room_id, sender_user))
-		.into();
+		.then_async(|| calculate_heroes(services, room_id, sender_user));
 
 	(Some(joined_member_count), Some(invited_member_count), heroes.await)
 }

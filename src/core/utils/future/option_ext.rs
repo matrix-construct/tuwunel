@@ -2,7 +2,7 @@
 
 use futures::{Future, FutureExt, future::OptionFuture};
 
-pub trait OptionExt<T> {
+pub trait OptionFutureExt<T> {
 	fn is_none_or(self, f: impl FnOnce(&T) -> bool + Send) -> impl Future<Output = bool> + Send;
 
 	fn is_some_and(self, f: impl FnOnce(&T) -> bool + Send) -> impl Future<Output = bool> + Send;
@@ -16,7 +16,7 @@ pub trait OptionExt<T> {
 		T: Default;
 }
 
-impl<T, Fut> OptionExt<T> for OptionFuture<Fut>
+impl<T, Fut> OptionFutureExt<T> for OptionFuture<Fut>
 where
 	Fut: Future<Output = T> + Send,
 	T: Send,

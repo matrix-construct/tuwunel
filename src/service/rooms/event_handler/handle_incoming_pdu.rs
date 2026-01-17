@@ -1,7 +1,4 @@
-use futures::{
-	FutureExt, TryFutureExt, TryStreamExt,
-	future::{OptionFuture, try_join5},
-};
+use futures::{FutureExt, TryFutureExt, TryStreamExt, future::try_join5};
 use ruma::{CanonicalJsonObject, EventId, RoomId, ServerName, UserId, events::StateEventType};
 use tuwunel_core::{
 	Err, Result, debug,
@@ -9,7 +6,7 @@ use tuwunel_core::{
 	err, implement,
 	matrix::{Event, room_version},
 	trace,
-	utils::stream::IterStream,
+	utils::{BoolExt, stream::IterStream},
 	warn,
 };
 
@@ -83,11 +80,10 @@ pub async fn handle_incoming_pdu<'a>(
 		.try_into()
 		.map_err(|e| err!(Request(InvalidParam("PDU does not have a valid sender key: {e}"))))?;
 
-	let sender_acl_check: OptionFuture<_> = sender
+	let sender_acl_check = sender
 		.server_name()
 		.ne(origin)
-		.then(|| self.acl_check(sender.server_name(), room_id))
-		.into();
+		.then_async(|| self.acl_check(sender.server_name(), room_id));
 
 	// Fetch create event
 	let create_event =

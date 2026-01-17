@@ -11,7 +11,7 @@ use std::{
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use futures::{
 	FutureExt, StreamExt, TryFutureExt,
-	future::{BoxFuture, OptionFuture, join3, try_join3},
+	future::{BoxFuture, join3, try_join3},
 	pin_mut,
 	stream::FuturesUnordered,
 };
@@ -43,7 +43,7 @@ use tuwunel_core::{
 	result::LogErr,
 	trace,
 	utils::{
-		ReadyExt, calculate_hash, continue_exponential_backoff_secs,
+		BoolExt, ReadyExt, calculate_hash, continue_exponential_backoff_secs,
 		future::TryExtExt,
 		stream::{BroadbandExt, IterStream, WidebandExt},
 	},
@@ -388,19 +388,17 @@ impl Service {
 		let device_changes =
 			self.select_edus_device_changes(server_name, batch, &max_edu_count, &events_len);
 
-		let receipts: OptionFuture<_> = self
+		let receipts = self
 			.server
 			.config
 			.allow_outgoing_read_receipts
-			.then(|| self.select_edus_receipts(server_name, batch, &max_edu_count))
-			.into();
+			.then_async(|| self.select_edus_receipts(server_name, batch, &max_edu_count));
 
-		let presence: OptionFuture<_> = self
+		let presence = self
 			.server
 			.config
 			.allow_outgoing_presence
-			.then(|| self.select_edus_presence(server_name, batch, &max_edu_count))
-			.into();
+			.then_async(|| self.select_edus_presence(server_name, batch, &max_edu_count));
 
 		let (device_changes, receipts, presence) =
 			join3(device_changes, receipts, presence).await;

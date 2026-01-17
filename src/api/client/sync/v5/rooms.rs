@@ -5,7 +5,7 @@ use std::{
 
 use futures::{
 	FutureExt, StreamExt, TryFutureExt, TryStreamExt,
-	future::{OptionFuture, join, join3, join4},
+	future::{join, join3, join4},
 };
 use ruma::{
 	JsOption, MxcUri, OwnedMxcUri, OwnedRoomId, RoomId, UserId,
@@ -131,19 +131,16 @@ async fn handle_room(
 			(timeline_limit, required_state)
 		});
 
-	let timeline: OptionFuture<_> = is_invite
-		.is_false()
-		.then(|| {
-			load_timeline(
-				services,
-				sender_user,
-				room_id,
-				PduCount::Normal(roomsince),
-				Some(PduCount::from(conn.next_batch)),
-				timeline_limit,
-			)
-		})
-		.into();
+	let timeline = is_invite.is_false().then_async(|| {
+		load_timeline(
+			services,
+			sender_user,
+			room_id,
+			PduCount::Normal(roomsince),
+			Some(PduCount::from(conn.next_batch)),
+			timeline_limit,
+		)
+	});
 
 	let (timeline_pdus, limited, _lastcount) = timeline
 		.await
@@ -182,18 +179,17 @@ async fn handle_room(
 		.map(TryInto::try_into)
 		.flat_ok();
 
-	let num_live: OptionFuture<_> = roomsince
+	let num_live = roomsince
 		.ne(&0)
 		.and_is(limited || timeline_pdus.len() >= timeline_limit)
-		.then(|| {
+		.then_async(|| {
 			services
 				.timeline
 				.pdus(None, room_id, Some(roomsince.into()))
 				.count()
 				.map(TryInto::try_into)
 				.map(Result::ok)
-		})
-		.into();
+		});
 
 	let lazy = required_state
 		.iter()
@@ -249,14 +245,12 @@ async fn handle_room(
 		.collect();
 
 	// TODO: figure out a timestamp we can use for remote invites
-	let invite_state: OptionFuture<_> = is_invite
-		.then(|| {
-			services
-				.state_cache
-				.invite_state(sender_user, room_id)
-				.ok()
-		})
-		.into();
+	let invite_state = is_invite.then_async(|| {
+		services
+			.state_cache
+			.invite_state(sender_user, room_id)
+			.ok()
+	});
 
 	let room_name = services
 		.state_accessor
@@ -327,10 +321,10 @@ async fn handle_room(
 		.boxed()
 		.await;
 
-	let heroes: OptionFuture<_> = services
+	let heroes = services
 		.config
 		.calculate_heroes
-		.then(|| {
+		.then_async(|| {
 			calculate_heroes(
 				services,
 				sender_user,
@@ -339,9 +333,10 @@ async fn handle_room(
 				room_avatar.as_deref(),
 			)
 		})
-		.into();
+		.await
+		.unwrap_or_default();
 
-	let (heroes, heroes_name, heroes_avatar) = heroes.await.unwrap_or_default();
+	let (heroes, heroes_name, heroes_avatar) = heroes;
 
 	Ok(response::Room {
 		initial: roomsince.eq(&0).then_some(true),
@@ -388,17 +383,15 @@ async fn calculate_heroes(
 				.await
 				.ok()?;
 
-			let name: OptionFuture<_> = content
+			let name = content
 				.displayname
 				.is_none()
-				.then(|| services.users.displayname(&user_id).ok())
-				.into();
+				.then_async(|| services.users.displayname(&user_id).ok());
 
-			let avatar: OptionFuture<_> = content
+			let avatar = content
 				.avatar_url
 				.is_none()
-				.then(|| services.users.avatar_url(&user_id).ok())
-				.into();
+				.then_async(|| services.users.avatar_url(&user_id).ok());
 
 			let (name, avatar) = join(name, avatar).await;
 			let hero = response::Hero {

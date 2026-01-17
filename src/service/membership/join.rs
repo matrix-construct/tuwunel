@@ -8,7 +8,7 @@ use std::{
 
 use futures::{
 	FutureExt, StreamExt, TryFutureExt, TryStreamExt,
-	future::{OptionFuture, join3, join4},
+	future::{join3, join4},
 };
 use ruma::{
 	CanonicalJsonObject, CanonicalJsonValue, OwnedEventId, OwnedServerName, OwnedUserId, RoomId,
@@ -31,7 +31,7 @@ use tuwunel_core::{
 	matrix::{event::gen_event_id_canonical_json, room_version},
 	pdu::{PduBuilder, format::from_incoming_federation},
 	state_res, trace,
-	utils::{self, IterStream, ReadyExt, future::TryExtExt, math::Expected, shuffle},
+	utils::{self, BoolExt, IterStream, ReadyExt, future::TryExtExt, math::Expected, shuffle},
 	warn,
 };
 
@@ -544,25 +544,23 @@ pub async fn join_local(
 		})
 		.await;
 
-	let join_authorized_via_users_server: OptionFuture<_> = is_joined_restricted_rooms
-		.then(async || {
-			self.services
-				.state_cache
-				.local_users_in_room(room_id)
-				.filter(|user| {
-					self.services.state_accessor.user_can_invite(
-						room_id,
-						user,
-						sender_user,
-						state_lock,
-					)
-				})
-				.map(ToOwned::to_owned)
-				.boxed()
-				.next()
-				.await
-		})
-		.into();
+	let join_authorized_via_users_server = is_joined_restricted_rooms.then_async(async || {
+		self.services
+			.state_cache
+			.local_users_in_room(room_id)
+			.filter(|user| {
+				self.services.state_accessor.user_can_invite(
+					room_id,
+					user,
+					sender_user,
+					state_lock,
+				)
+			})
+			.map(ToOwned::to_owned)
+			.boxed()
+			.next()
+			.await
+	});
 
 	let displayname = self.services.users.displayname(sender_user).ok();
 

@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use axum::extract::State;
-use futures::{FutureExt, StreamExt, TryFutureExt, TryStreamExt, future::OptionFuture};
+use futures::{FutureExt, StreamExt, TryFutureExt, TryStreamExt};
 use ruma::{
 	OwnedRoomId, RoomId, UInt, UserId,
 	api::client::search::search_events::{
@@ -16,7 +16,7 @@ use tuwunel_core::{
 	Err, Result, at, is_true,
 	matrix::Event,
 	result::FlatOk,
-	utils::{IterStream, stream::ReadyExt},
+	utils::{IterStream, option::OptionExt, stream::ReadyExt},
 };
 use tuwunel_service::{Services, rooms::search::RoomQuery};
 
@@ -41,18 +41,17 @@ pub(crate) async fn search_events_route(
 ) -> Result<Response> {
 	let sender_user = body.sender_user();
 	let next_batch = body.next_batch.as_deref();
-	let room_events_result: OptionFuture<_> = body
+	let room_events = body
 		.search_categories
 		.room_events
 		.as_ref()
-		.map(|criteria| category_room_events(&services, sender_user, next_batch, criteria))
-		.into();
+		.map_async(|criteria| category_room_events(&services, sender_user, next_batch, criteria))
+		.await
+		.transpose()?;
 
 	Ok(Response {
 		search_categories: ResultCategories {
-			room_events: room_events_result
-				.await
-				.unwrap_or_else(|| Ok(ResultRoomEvents::default()))?,
+			room_events: room_events.unwrap_or_default(),
 		},
 	})
 }

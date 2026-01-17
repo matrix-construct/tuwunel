@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use futures::{
 	FutureExt, StreamExt, TryFutureExt,
-	future::{OptionFuture, join, join3},
+	future::{join, join3},
 	stream::once,
 };
 use ruma::{
@@ -71,15 +71,12 @@ pub(super) async fn collect(
 	let device_one_time_keys_count = services
 		.users
 		.last_one_time_keys_update(sender_user)
-		.then(|since| -> OptionFuture<_> {
-			since
-				.gt(&conn.globalsince)
-				.then(|| {
-					services
-						.users
-						.count_one_time_keys(sender_user, sender_device)
-				})
-				.into()
+		.then(|since| {
+			since.gt(&conn.globalsince).then_async(|| {
+				services
+					.users
+					.count_one_time_keys(sender_user, sender_device)
+			})
 		})
 		.map(Option::unwrap_or_default);
 
@@ -164,9 +161,8 @@ async fn collect_room(
 
 	let encrypted_since_last_sync = !since_encryption;
 	let joined_since_last_sync = sender_joined_count.is_ok_and(|count| count > conn.globalsince);
-	let joined_members_burst: OptionFuture<_> = (joined_since_last_sync
-		|| encrypted_since_last_sync)
-		.then(|| {
+	let joined_members_burst =
+		(joined_since_last_sync || encrypted_since_last_sync).then_async(|| {
 			services
 				.state_cache
 				.room_members(room_id)
@@ -175,8 +171,7 @@ async fn collect_room(
 				.map(|user_id| (MembershipState::Join, user_id))
 				.boxed()
 				.into_future()
-		})
-		.into();
+		});
 
 	services
 		.state_accessor

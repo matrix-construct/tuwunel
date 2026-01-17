@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use axum::extract::State;
-use futures::{FutureExt, future::OptionFuture};
+use futures::FutureExt;
 use ruma::{
 	CanonicalJsonObject, EventEncryptionAlgorithm, Int, OwnedRoomAliasId, OwnedRoomId,
 	OwnedUserId, RoomId, RoomVersionId,
@@ -32,7 +32,7 @@ use serde_json::{json, value::to_raw_value};
 use tuwunel_core::{
 	Err, Result, debug_info, debug_warn, err, info,
 	matrix::{StateKey, pdu::PduBuilder, room_version},
-	utils::BoolExt,
+	utils::{BoolExt, option::OptionExt},
 	warn,
 };
 use tuwunel_service::{Services, appservice::RegistrationInfo, rooms::state::RoomMutexGuard};
@@ -72,11 +72,10 @@ pub(crate) async fn create_room_route(
 			| _ => RoomPreset::PrivateChat, // Room visibility should not be custom
 		});
 
-	let alias: OptionFuture<_> = body
+	let alias = body
 		.room_alias_name
 		.as_ref()
-		.map(|alias| room_alias_check(&services, alias, body.appservice_info.as_ref()))
-		.into();
+		.map_async(|alias| room_alias_check(&services, alias, body.appservice_info.as_ref()));
 
 	// Determine room version
 	let (room_version, version_rules) = body

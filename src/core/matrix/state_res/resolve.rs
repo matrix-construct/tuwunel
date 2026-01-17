@@ -11,7 +11,7 @@ mod topological_sort;
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use futures::{FutureExt, Stream, StreamExt, TryFutureExt, future::OptionFuture};
+use futures::{FutureExt, Stream, StreamExt, TryFutureExt};
 use ruma::{OwnedEventId, events::StateEventType, room_version_rules::RoomVersionRules};
 
 pub use self::topological_sort::topological_sort;
@@ -26,7 +26,11 @@ use crate::{
 	Result, debug,
 	matrix::{Event, TypeStateKey},
 	trace,
-	utils::stream::{BroadbandExt, IterStream},
+	utils::{
+		BoolExt,
+		option::OptionExt,
+		stream::{BroadbandExt, IterStream},
+	},
 };
 
 /// ConflictMap of OwnedEventId specifically.
@@ -102,10 +106,9 @@ where
 		|| backport_css;
 
 	// Since `org.matrix.hydra.11`, fetch the conflicted state subgraph.
-	let conflicted_subgraph: OptionFuture<_> = consider_conflicted_subgraph
+	let conflicted_subgraph = consider_conflicted_subgraph
 		.then(|| conflicted_states.clone().into_values().flatten())
-		.map(async |ids| conflicted_subgraph_dfs(ids.stream(), fetch))
-		.into();
+		.map_async(async |ids| conflicted_subgraph_dfs(ids.stream(), fetch));
 
 	let conflicted_subgraph = conflicted_subgraph
 		.await
@@ -180,9 +183,8 @@ where
 	// 3. Take all remaining events that weren’t picked in step 1 and order them by
 	//    the mainline ordering based on the power level in the partially resolved
 	//    state obtained in step 2.
-	let sorted_remaining_events: OptionFuture<_> = have_remaining_events
-		.then(move || mainline_sort(power_event.cloned(), remaining_events, fetch))
-		.into();
+	let sorted_remaining_events = have_remaining_events
+		.then_async(move || mainline_sort(power_event.cloned(), remaining_events, fetch));
 
 	let sorted_remaining_events = sorted_remaining_events
 		.await

@@ -8,7 +8,7 @@ use ruma::{
 use tuwunel_core::{
 	Result,
 	utils::{
-		future::BoolExt,
+		BoolExt, FutureBoolExt,
 		stream::{BroadbandExt, ReadyExt},
 	},
 };
@@ -52,11 +52,12 @@ pub(crate) async fn search_users_route(
 				&search_term,
 			)
 			.await
-			.then_some(search_users::v3::User {
+			.then_async(async || search_users::v3::User {
 				user_id: user_id.clone(),
 				display_name,
 				avatar_url: services.users.avatar_url(&user_id).await.ok(),
 			})
+			.await
 		});
 
 	pin_mut!(users);

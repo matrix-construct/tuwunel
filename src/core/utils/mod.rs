@@ -9,6 +9,7 @@ pub mod hash;
 pub mod json;
 pub mod math;
 pub mod mutex_map;
+pub mod option;
 pub mod rand;
 pub mod result;
 pub mod set;

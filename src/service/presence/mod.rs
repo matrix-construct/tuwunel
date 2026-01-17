@@ -4,19 +4,17 @@ mod presence;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
-use futures::{
-	Stream, StreamExt, TryFutureExt,
-	future::{OptionFuture, try_join},
-	stream::FuturesUnordered,
-};
+use futures::{Stream, StreamExt, TryFutureExt, future::try_join, stream::FuturesUnordered};
 use loole::{Receiver, Sender};
 use ruma::{
 	DeviceId, OwnedUserId, UInt, UserId, events::presence::PresenceEvent, presence::PresenceState,
 };
 use tokio::{sync::RwLock, time::sleep};
 use tuwunel_core::{
-	Error, Result, checked, debug, debug_warn, error, result::LogErr, trace,
-	utils::future::OptionExt,
+	Error, Result, checked, debug, debug_warn, error,
+	result::LogErr,
+	trace,
+	utils::{future::OptionFutureExt, option::OptionExt},
 };
 
 use self::{data::Data, presence::Presence};
@@ -164,13 +162,11 @@ impl Service {
 			return Ok(());
 		}
 
-		let update_device_seen: OptionFuture<_> = device_id
-			.map(|device_id| {
-				self.services
-					.users
-					.update_device_last_seen(user_id, device_id, None)
-			})
-			.into();
+		let update_device_seen = device_id.map_async(|device_id| {
+			self.services
+				.users
+				.update_device_last_seen(user_id, device_id, None)
+		});
 
 		let status_msg = match last_presence {
 			| Ok((_, ref presence)) => presence.content.status_msg.clone(),

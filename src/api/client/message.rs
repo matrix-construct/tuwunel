@@ -1,9 +1,5 @@
 use axum::extract::State;
-use futures::{
-	FutureExt, StreamExt, TryFutureExt,
-	future::{Either, OptionFuture},
-	pin_mut,
-};
+use futures::{FutureExt, StreamExt, TryFutureExt, future::Either, pin_mut};
 use ruma::{
 	RoomId, UserId,
 	api::{
@@ -21,7 +17,7 @@ use tuwunel_core::{
 	},
 	ref_at,
 	utils::{
-		IterStream, ReadyExt,
+		BoolExt, IterStream, ReadyExt,
 		result::{FlatOk, LogErr},
 		stream::{BroadbandExt, TryIgnore, WidebandExt},
 	},
@@ -140,11 +136,10 @@ pub(crate) async fn get_message_events_route(
 		options: Some(&filter.lazy_load_options),
 	};
 
-	let witness: OptionFuture<_> = filter
+	let witness = filter
 		.lazy_load_options
 		.is_enabled()
-		.then(|| lazy_loading_witness(&services, &lazy_loading_context, events.iter()))
-		.into();
+		.then_async(|| lazy_loading_witness(&services, &lazy_loading_context, events.iter()));
 
 	let state = witness
 		.map(Option::into_iter)

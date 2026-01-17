@@ -1,6 +1,6 @@
-use futures::{FutureExt, StreamExt, future::OptionFuture, join};
+use futures::{FutureExt, StreamExt, join};
 use ruma::{EventId, RoomId, ServerName};
-use tuwunel_core::{Err, Result, implement, is_false};
+use tuwunel_core::{Err, Result, implement, is_false, utils::option::OptionExt};
 use tuwunel_service::Services;
 
 pub(super) struct AccessCheck<'a> {
@@ -36,14 +36,11 @@ pub(super) async fn check(&self) -> Result {
 		.room_members_knocked(self.room_id)
 		.count();
 
-	let server_can_see: OptionFuture<_> = self
-		.event_id
-		.map(|event_id| {
-			self.services
-				.state_accessor
-				.server_can_see_event(self.origin, self.room_id, event_id)
-		})
-		.into();
+	let server_can_see = self.event_id.map_async(|event_id| {
+		self.services
+			.state_accessor
+			.server_can_see_event(self.origin, self.room_id, event_id)
+	});
 
 	let (world_readable, server_in_room, server_can_see, acl_check, user_is_knocking) =
 		join!(world_readable, server_in_room, server_can_see, acl_check, user_is_knocking);

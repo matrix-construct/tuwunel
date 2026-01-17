@@ -1,10 +1,6 @@
 use axum::extract::State;
 use axum_client_ip::InsecureClientIp;
-use futures::{
-	FutureExt, StreamExt, TryFutureExt,
-	future::{OptionFuture, join3},
-	stream::FuturesUnordered,
-};
+use futures::{FutureExt, StreamExt, TryFutureExt, future::join3, stream::FuturesUnordered};
 use ruma::{
 	OwnedServerName, RoomId, UserId,
 	api::{
@@ -16,7 +12,7 @@ use ruma::{
 };
 use tuwunel_core::{
 	Err, Result, debug_warn, trace,
-	utils::{IterStream, future::TryExtExt},
+	utils::{IterStream, future::TryExtExt, option::OptionExt},
 };
 use tuwunel_service::Services;
 
@@ -158,14 +154,12 @@ async fn local_room_summary_response(
 		.room_joined_count(room_id)
 		.unwrap_or(0);
 
-	let membership: OptionFuture<_> = sender_user
-		.map(|sender_user| {
-			services
-				.state_accessor
-				.get_member(room_id, sender_user)
-				.map_ok_or(MembershipState::Leave, |content| content.membership)
-		})
-		.into();
+	let membership = sender_user.map_async(|sender_user| {
+		services
+			.state_accessor
+			.get_member(room_id, sender_user)
+			.map_ok_or(MembershipState::Leave, |content| content.membership)
+	});
 
 	let (
 		canonical_alias,

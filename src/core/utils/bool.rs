@@ -1,5 +1,7 @@
 //! Trait BoolExt
 
+use futures::future::OptionFuture;
+
 /// Boolean extensions and chain.starters
 pub trait BoolExt {
 	fn and<T>(self, t: Option<T>) -> Option<T>;
@@ -49,6 +51,8 @@ pub trait BoolExt {
 	fn or<T, F: FnOnce() -> T>(self, f: F) -> Option<T>;
 
 	fn or_some<T>(self, t: T) -> Option<T>;
+
+	fn then_async<O: Future, F: FnOnce() -> O>(self, f: F) -> OptionFuture<O>;
 
 	fn then_none<T>(self) -> Option<T>;
 
@@ -125,6 +129,11 @@ impl BoolExt for bool {
 
 	#[inline]
 	fn or_some<T>(self, t: T) -> Option<T> { self.is_false().then_some(t) }
+
+	#[inline]
+	fn then_async<O: Future, F: FnOnce() -> O>(self, f: F) -> OptionFuture<O> {
+		OptionFuture::<_>::from(self.then(f))
+	}
 
 	#[inline]
 	fn then_none<T>(self) -> Option<T> { Option::<T>::None }

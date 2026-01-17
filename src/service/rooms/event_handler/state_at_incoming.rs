@@ -3,16 +3,16 @@ use std::{
 	iter::{Iterator, once},
 };
 
-use futures::{
-	FutureExt, StreamExt, TryFutureExt, TryStreamExt,
-	future::{OptionFuture, try_join},
-};
+use futures::{FutureExt, StreamExt, TryFutureExt, TryStreamExt, future::try_join};
 use ruma::{OwnedEventId, RoomId, RoomVersionId};
 use tuwunel_core::{
 	Result, apply, err, implement,
 	matrix::{Event, StateMap, state_res::AuthSet},
 	ref_at, trace,
-	utils::stream::{BroadbandExt, IterStream, ReadyExt, TryBroadbandExt, TryWidebandExt},
+	utils::{
+		option::OptionExt,
+		stream::{BroadbandExt, IterStream, ReadyExt, TryBroadbandExt, TryWidebandExt},
+	},
 };
 
 use crate::rooms::short::ShortStateHash;
@@ -174,16 +174,15 @@ async fn state_at_incoming_fork<Pdu>(
 where
 	Pdu: Event,
 {
-	let leaf: OptionFuture<_> = prev_event
+	let leaf = prev_event
 		.state_key()
-		.map(async |state_key| {
+		.map_async(async |state_key| {
 			self.services
 				.short
 				.get_or_create_shortstatekey(&prev_event.kind().to_cow_str().into(), state_key)
 				.map(|shortstatekey| once((shortstatekey, prev_event.event_id().to_owned())))
 				.await
-		})
-		.into();
+		});
 
 	let leaf_state_after_event: Vec<_> = self
 		.services

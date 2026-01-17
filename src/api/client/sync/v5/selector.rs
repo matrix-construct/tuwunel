@@ -1,9 +1,6 @@
 use std::cmp::Ordering;
 
-use futures::{
-	FutureExt, StreamExt, TryFutureExt,
-	future::{OptionFuture, join5},
-};
+use futures::{FutureExt, StreamExt, TryFutureExt, future::join5};
 use ruma::{OwnedRoomId, UInt, events::room::member::MembershipState, uint};
 use tuwunel_core::{
 	apply, is_true,
@@ -12,6 +9,7 @@ use tuwunel_core::{
 	utils::{
 		BoolExt, TryFutureExtExt,
 		math::usize_from_ruma,
+		option::OptionExt,
 		stream::{BroadbandExt, IterStream},
 	},
 };
@@ -80,15 +78,11 @@ async fn matcher(
 		.iter()
 		.stream()
 		.filter_map(async |(id, list)| {
-			let filter: OptionFuture<_> = list
-				.filters
+			list.filters
 				.clone()
-				.map(async |filters| {
+				.map_async(async |filters| {
 					filter_room(sync_info, &filters, &room_id, membership.as_ref()).await
 				})
-				.into();
-
-			filter
 				.await
 				.is_none_or(is_true!())
 				.then(|| id.clone())
@@ -97,50 +91,40 @@ async fn matcher(
 		.map(|lists| (lists.is_empty().is_false(), lists))
 		.await;
 
-	let last_notification: OptionFuture<_> = matched
-		.then(|| {
-			services
-				.pusher
-				.last_notification_read(sender_user, &room_id)
-				.unwrap_or_default()
-		})
-		.into();
+	let last_notification = matched.then_async(|| {
+		services
+			.pusher
+			.last_notification_read(sender_user, &room_id)
+			.unwrap_or_default()
+	});
 
-	let last_privateread: OptionFuture<_> = matched
-		.then(|| {
-			services
-				.read_receipt
-				.last_privateread_update(sender_user, &room_id)
-		})
-		.into();
+	let last_privateread = matched.then_async(|| {
+		services
+			.read_receipt
+			.last_privateread_update(sender_user, &room_id)
+	});
 
-	let last_receipt: OptionFuture<_> = matched
-		.then(|| {
-			services
-				.read_receipt
-				.last_receipt_count(&room_id, sender_user.into(), None)
-				.unwrap_or_default()
-		})
-		.into();
+	let last_receipt = matched.then_async(|| {
+		services
+			.read_receipt
+			.last_receipt_count(&room_id, sender_user.into(), None)
+			.unwrap_or_default()
+	});
 
-	let last_account: OptionFuture<_> = matched
-		.then(|| {
-			services
-				.account_data
-				.last_count(Some(room_id.as_ref()), sender_user, Some(conn.next_batch))
-				.unwrap_or_default()
-		})
-		.into();
+	let last_account = matched.then_async(|| {
+		services
+			.account_data
+			.last_count(Some(room_id.as_ref()), sender_user, Some(conn.next_batch))
+			.unwrap_or_default()
+	});
 
-	let last_timeline: OptionFuture<_> = matched
-		.then(|| {
-			services
-				.timeline
-				.last_timeline_count(None, &room_id, Some(conn.next_batch.into()))
-				.map_ok(PduCount::into_unsigned)
-				.unwrap_or_default()
-		})
-		.into();
+	let last_timeline = matched.then_async(|| {
+		services
+			.timeline
+			.last_timeline_count(None, &room_id, Some(conn.next_batch.into()))
+			.map_ok(PduCount::into_unsigned)
+			.unwrap_or_default()
+	});
 
 	let (last_timeline, last_notification, last_account, last_receipt, last_privateread) =
 		join5(last_timeline, last_notification, last_account, last_receipt, last_privateread)

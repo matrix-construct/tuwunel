@@ -1,7 +1,7 @@
 use axum::extract::State;
 use futures::{
 	FutureExt, StreamExt, TryFutureExt, TryStreamExt,
-	future::{OptionFuture, join, join3, try_join3},
+	future::{join, join3, try_join3},
 };
 use ruma::{OwnedEventId, UserId, api::client::context::get_context, events::StateEventType};
 use tuwunel_core::{
@@ -9,6 +9,7 @@ use tuwunel_core::{
 	utils::{
 		IterStream,
 		future::TryExtExt,
+		option::OptionExt,
 		stream::{BroadbandExt, ReadyExt, TryIgnore, WidebandExt},
 	},
 };
@@ -116,7 +117,7 @@ pub(crate) async fn get_context_route(
 		options: Some(&filter.lazy_load_options),
 	};
 
-	let lazy_loading_witnessed: OptionFuture<_> = filter
+	let lazy_loading_witnessed = filter
 		.lazy_load_options
 		.is_enabled()
 		.then_some(
@@ -125,8 +126,7 @@ pub(crate) async fn get_context_route(
 				.chain(events_before.iter())
 				.chain(events_after.iter()),
 		)
-		.map(|witnessed| lazy_loading_witness(&services, &lazy_loading_context, witnessed))
-		.into();
+		.map_async(|witnessed| lazy_loading_witness(&services, &lazy_loading_context, witnessed));
 
 	let state_at = events_after
 		.last()

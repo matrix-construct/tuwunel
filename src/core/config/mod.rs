@@ -29,8 +29,7 @@ pub use self::{check::check, manager::Manager};
 use crate::{
 	Result, err,
 	error::Error,
-	utils,
-	utils::{string::EMPTY, sys},
+	utils::{self, option::OptionExt, string::EMPTY, sys},
 };
 
 /// All the config options for tuwunel.
@@ -2663,14 +2662,12 @@ impl IdentityProvider {
 			return Ok(client_secret.clone());
 		}
 
-		futures::future::OptionFuture::from(
-			self.client_secret_file
-				.as_ref()
-				.map(tokio::fs::read_to_string),
-		)
-		.await
-		.transpose()?
-		.ok_or_else(|| err!("No client secret or client secret file configured"))
+		self.client_secret_file
+			.as_ref()
+			.map_async(tokio::fs::read_to_string)
+			.await
+			.transpose()?
+			.ok_or_else(|| err!("No client secret or client secret file configured"))
 	}
 }
 

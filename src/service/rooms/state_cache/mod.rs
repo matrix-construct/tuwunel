@@ -6,11 +6,7 @@ use std::{
 	sync::{Arc, RwLock},
 };
 
-use futures::{
-	Stream, StreamExt,
-	future::{OptionFuture, join5},
-	pin_mut,
-};
+use futures::{Stream, StreamExt, future::join5, pin_mut};
 use ruma::{
 	OwnedRoomId, RoomId, ServerName, UserId,
 	events::{AnyStrippedStateEvent, AnySyncStateEvent, room::member::MembershipState},
@@ -21,6 +17,7 @@ use tuwunel_core::{
 	result::LogErr,
 	trace,
 	utils::{
+		BoolExt,
 		future::OptionStream,
 		stream::{BroadbandExt, ReadyExt, TryIgnore},
 	},
@@ -411,45 +408,41 @@ pub fn user_memberships<'a>(
 	use MembershipState::*;
 	use futures::stream::select;
 
-	let joined: OptionFuture<_> = mask
+	let joined = mask
 		.is_none_or(|mask| mask.contains(&Join))
-		.then(|| {
+		.then_async(|| {
 			self.rooms_joined(user_id)
 				.map(|room_id| (Join, room_id))
 				.boxed()
 				.into_future()
-		})
-		.into();
+		});
 
-	let invited: OptionFuture<_> = mask
+	let invited = mask
 		.is_none_or(|mask| mask.contains(&Invite))
-		.then(|| {
+		.then_async(|| {
 			self.rooms_invited(user_id)
 				.map(|room_id| (Invite, room_id))
 				.boxed()
 				.into_future()
-		})
-		.into();
+		});
 
-	let knocked: OptionFuture<_> = mask
+	let knocked = mask
 		.is_none_or(|mask| mask.contains(&Knock))
-		.then(|| {
+		.then_async(|| {
 			self.rooms_knocked(user_id)
 				.map(|room_id| (Knock, room_id))
 				.boxed()
 				.into_future()
-		})
-		.into();
+		});
 
-	let left: OptionFuture<_> = mask
+	let left = mask
 		.is_none_or(|mask| mask.contains(&Leave))
-		.then(|| {
+		.then_async(|| {
 			self.rooms_left(user_id)
 				.map(|room_id| (Leave, room_id))
 				.boxed()
 				.into_future()
-		})
-		.into();
+		});
 
 	select(
 		select(joined.stream(), left.stream()),

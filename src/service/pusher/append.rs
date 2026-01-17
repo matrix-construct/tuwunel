@@ -1,9 +1,6 @@
 use std::{collections::HashSet, sync::Arc};
 
-use futures::{
-	FutureExt, StreamExt,
-	future::{OptionFuture, join},
-};
+use futures::{FutureExt, StreamExt, future::join};
 use ruma::{
 	RoomId, UserId,
 	api::client::push::ProfileTag,
@@ -111,13 +108,11 @@ pub(crate) async fn append_pdu(&self, pdu_id: RawPduId, pdu: &Pdu) -> Result {
 			.iter()
 			.any(|action| matches!(action, Action::SetTweak(Tweak::Highlight(true))));
 
-		let increment_notify: OptionFuture<_> = notify
-			.then(|| self.increment_notificationcount(pdu.room_id(), user))
-			.into();
+		let increment_notify =
+			notify.then_async(|| self.increment_notificationcount(pdu.room_id(), user));
 
-		let increment_highlight: OptionFuture<_> = highlight
-			.then(|| self.increment_highlightcount(pdu.room_id(), user))
-			.into();
+		let increment_highlight =
+			highlight.then_async(|| self.increment_highlightcount(pdu.room_id(), user));
 
 		join(increment_notify, increment_highlight).await;
 

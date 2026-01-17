@@ -1,13 +1,13 @@
 use std::{collections::BTreeSet, iter::once, str::FromStr};
 
 use axum::extract::State;
-use futures::{FutureExt, StreamExt, TryFutureExt, future::OptionFuture, stream::FuturesOrdered};
+use futures::{FutureExt, StreamExt, TryFutureExt, stream::FuturesOrdered};
 use ruma::{
 	OwnedRoomId, OwnedServerName, RoomId, UInt, UserId, api::client::space::get_hierarchy,
 };
 use tuwunel_core::{
 	Err, Result, debug_error,
-	utils::{future::TryExtExt, stream::IterStream},
+	utils::{future::TryExtExt, option::OptionExt, stream::IterStream},
 };
 use tuwunel_service::{
 	Services,
@@ -187,30 +187,26 @@ where
 		}
 	}
 
-	let next_batch: OptionFuture<_> = queue
-		.next()
-		.await
-		.map(async |(room, ..)| {
-			parents.insert(room);
+	let next_batch = queue.next().await.map_async(async |(room, ..)| {
+		parents.insert(room);
 
-			let next_short_room_ids: Vec<_> = parents
-				.iter()
-				.stream()
-				.filter_map(|room_id| services.short.get_shortroomid(room_id).ok())
-				.collect()
-				.await;
+		let next_short_room_ids: Vec<_> = parents
+			.iter()
+			.stream()
+			.filter_map(|room_id| services.short.get_shortroomid(room_id).ok())
+			.collect()
+			.await;
 
-			(next_short_room_ids.iter().ne(short_room_ids) && !next_short_room_ids.is_empty())
-				.then_some(PaginationToken {
-					short_room_ids: next_short_room_ids,
-					limit: limit.try_into().ok()?,
-					max_depth: max_depth.try_into().ok()?,
-					suggested_only,
-				})
-				.as_ref()
-				.map(PaginationToken::to_string)
-		})
-		.into();
+		(next_short_room_ids.iter().ne(short_room_ids) && !next_short_room_ids.is_empty())
+			.then_some(PaginationToken {
+				short_room_ids: next_short_room_ids,
+				limit: limit.try_into().ok()?,
+				max_depth: max_depth.try_into().ok()?,
+				suggested_only,
+			})
+			.as_ref()
+			.map(PaginationToken::to_string)
+	});
 
 	Ok(get_hierarchy::v1::Response {
 		next_batch: next_batch.await.flatten(),

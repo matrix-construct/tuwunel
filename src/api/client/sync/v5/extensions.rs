@@ -6,10 +6,7 @@ mod typing;
 
 use std::fmt::Debug;
 
-use futures::{
-	FutureExt,
-	future::{OptionFuture, join5},
-};
+use futures::{FutureExt, future::join5};
 use ruma::{
 	RoomId,
 	api::client::sync::sync_events::v5::{ListId, request::ExtensionRoomConfig, response},
@@ -37,45 +34,40 @@ pub(super) async fn handle(
 ) -> Result<response::Extensions> {
 	let SyncInfo { .. } = sync_info;
 
-	let account_data: OptionFuture<_> = conn
+	let account_data = conn
 		.extensions
 		.account_data
 		.enabled
 		.unwrap_or(false)
-		.then(|| account_data::collect(sync_info, conn, window))
-		.into();
+		.then_async(|| account_data::collect(sync_info, conn, window));
 
-	let receipts: OptionFuture<_> = conn
+	let receipts = conn
 		.extensions
 		.receipts
 		.enabled
 		.unwrap_or(false)
-		.then(|| receipts::collect(sync_info, conn, window))
-		.into();
+		.then_async(|| receipts::collect(sync_info, conn, window));
 
-	let typing: OptionFuture<_> = conn
+	let typing = conn
 		.extensions
 		.typing
 		.enabled
 		.unwrap_or(false)
-		.then(|| typing::collect(sync_info, conn, window))
-		.into();
+		.then_async(|| typing::collect(sync_info, conn, window));
 
-	let to_device: OptionFuture<_> = conn
+	let to_device = conn
 		.extensions
 		.to_device
 		.enabled
 		.unwrap_or(false)
-		.then(|| to_device::collect(sync_info, conn))
-		.into();
+		.then_async(|| to_device::collect(sync_info, conn));
 
-	let e2ee: OptionFuture<_> = conn
+	let e2ee = conn
 		.extensions
 		.e2ee
 		.enabled
 		.unwrap_or(false)
-		.then(|| e2ee::collect(sync_info, conn))
-		.into();
+		.then_async(|| e2ee::collect(sync_info, conn));
 
 	let (account_data, receipts, typing, to_device, e2ee) =
 		join5(account_data, receipts, typing, to_device, e2ee)

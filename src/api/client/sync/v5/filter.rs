@@ -1,4 +1,4 @@
-use futures::{StreamExt, future::OptionFuture, pin_mut};
+use futures::{StreamExt, pin_mut};
 use ruma::{
 	RoomId, api::client::sync::sync_events::v5::request::ListFilters, directory::RoomTypeFilter,
 	events::room::member::MembershipState,
@@ -7,7 +7,8 @@ use tuwunel_core::{
 	is_equal_to, is_true,
 	utils::{
 		BoolExt, FutureBoolExt, IterStream, ReadyExt,
-		future::{self, OptionExt, ReadyBoolExt},
+		future::{self, OptionFutureExt, ReadyBoolExt},
+		option::OptionExt,
 	},
 };
 
@@ -20,56 +21,49 @@ pub(super) async fn filter_room(
 	room_id: &RoomId,
 	membership: Option<&MembershipState>,
 ) -> bool {
-	let match_invite: OptionFuture<_> = filter
-		.is_invite
-		.map(async |is_invite| match (membership, is_invite) {
-			| (Some(MembershipState::Invite), true) => true,
-			| (Some(MembershipState::Invite), false) => false,
-			| (Some(_), true) => false,
-			| (Some(_), false) => true,
-			| _ =>
-				services
-					.state_cache
-					.is_invited(sender_user, room_id)
-					.await == is_invite,
-		})
-		.into();
+	let match_invite =
+		filter
+			.is_invite
+			.map_async(async |is_invite| match (membership, is_invite) {
+				| (Some(MembershipState::Invite), true) => true,
+				| (Some(MembershipState::Invite), false) => false,
+				| (Some(_), true) => false,
+				| (Some(_), false) => true,
+				| _ =>
+					services
+						.state_cache
+						.is_invited(sender_user, room_id)
+						.await == is_invite,
+			});
 
-	let match_direct: OptionFuture<_> = filter
-		.is_dm
-		.map(async |is_dm| {
-			services
-				.account_data
-				.is_direct(sender_user, room_id)
-				.await == is_dm
-		})
-		.into();
+	let match_direct = filter.is_dm.map_async(async |is_dm| {
+		services
+			.account_data
+			.is_direct(sender_user, room_id)
+			.await == is_dm
+	});
 
-	let match_direct_member: OptionFuture<_> = filter
-		.is_dm
-		.map(async |is_dm| {
-			services
-				.state_accessor
-				.is_direct(room_id, sender_user)
-				.await == is_dm
-		})
-		.into();
+	let match_direct_member = filter.is_dm.map_async(async |is_dm| {
+		services
+			.state_accessor
+			.is_direct(room_id, sender_user)
+			.await == is_dm
+	});
 
-	let match_encrypted: OptionFuture<_> = filter
+	let match_encrypted = filter
 		.is_encrypted
-		.map(async |is_encrypted| {
+		.map_async(async |is_encrypted| {
 			services
 				.state_accessor
 				.is_encrypted_room(room_id)
 				.await == is_encrypted
-		})
-		.into();
+		});
 
-	let match_space_child: OptionFuture<_> = filter
+	let match_space_child = filter
 		.spaces
 		.is_empty()
 		.is_false()
-		.then(async || {
+		.then_async(async || {
 			filter
 				.spaces
 				.iter()
@@ -77,43 +71,38 @@ pub(super) async fn filter_room(
 				.flat_map(|room_id| services.spaces.get_space_children(room_id))
 				.ready_any(is_equal_to!(room_id))
 				.await
-		})
-		.into();
+		});
 
 	let fetch_tags = !filter.tags.is_empty() || !filter.not_tags.is_empty();
-	let match_room_tag: OptionFuture<_> = fetch_tags
-		.then(async || {
-			if let Some(tags) = services
-				.account_data
-				.get_room_tags(sender_user, room_id)
-				.await
-				.ok()
-				.filter(|tags| !tags.is_empty())
-			{
-				tags.keys().any(|tag| {
-					(filter.not_tags.is_empty() || !filter.not_tags.contains(tag))
-						|| (!filter.tags.is_empty() && filter.tags.contains(tag))
-				})
-			} else {
-				filter.tags.is_empty()
-			}
-		})
-		.into();
+	let match_room_tag = fetch_tags.then_async(async || {
+		if let Some(tags) = services
+			.account_data
+			.get_room_tags(sender_user, room_id)
+			.await
+			.ok()
+			.filter(|tags| !tags.is_empty())
+		{
+			tags.keys().any(|tag| {
+				(filter.not_tags.is_empty() || !filter.not_tags.contains(tag))
+					|| (!filter.tags.is_empty() && filter.tags.contains(tag))
+			})
+		} else {
+			filter.tags.is_empty()
+		}
+	});
 
 	let fetch_room_type = !filter.room_types.is_empty() || !filter.not_room_types.is_empty();
-	let match_room_type: OptionFuture<_> = fetch_room_type
-		.then(async || {
-			let room_type = services
-				.state_accessor
-				.get_room_type(room_id)
-				.await
-				.ok();
+	let match_room_type = fetch_room_type.then_async(async || {
+		let room_type = services
+			.state_accessor
+			.get_room_type(room_id)
+			.await
+			.ok();
 
-			let room_type = RoomTypeFilter::from(room_type);
-			(filter.not_room_types.is_empty() || !filter.not_room_types.contains(&room_type))
-				&& (filter.room_types.is_empty() || filter.room_types.contains(&room_type))
-		})
-		.into();
+		let room_type = RoomTypeFilter::from(room_type);
+		(filter.not_room_types.is_empty() || !filter.not_room_types.contains(&room_type))
+			&& (filter.room_types.is_empty() || filter.room_types.contains(&room_type))
+	});
 
 	future::and7(
 		match_invite.is_none_or(is_true!()),

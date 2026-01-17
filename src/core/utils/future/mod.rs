@@ -9,7 +9,7 @@ mod try_ext_ext;
 pub use self::{
 	bool_ext::{BoolExt, and, and4, and5, and6, and7, or},
 	ext_ext::ExtExt,
-	option_ext::OptionExt,
+	option_ext::OptionFutureExt,
 	option_stream::OptionStream,
 	ready_bool_ext::ReadyBoolExt,
 	ready_eq_ext::ReadyEqExt,
