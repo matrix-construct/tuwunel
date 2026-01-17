@@ -38,20 +38,33 @@ on:
       release_url:
         type: string
         description: For release assets
-      build_pkgs:
+      enable_book:
         type: string
         default: 'true'
-      check_pkgs:
-        type: string
-        default: 'false'
-      build_nix:
+      enable_binary:
         type: string
         default: 'true'
+      enable_container:
+        type: string
+        default: 'true'
+      enable_distro:
+        type: string
+        default: 'true'
+      enable_checks:
+        type: string
+        default: 'true'
+      containers:
+        type: string
+        default: '[]'
+      distros:
+        type: string
+        default: '[]'
 
 jobs:
   book:
     if: >
       !failure() && !cancelled()
+      && fromJSON(inputs.enable_book)
       && contains(fromJSON(inputs.cargo_profiles), fromJSON('["release"]')[0])
       && contains(fromJSON(inputs.feat_sets), fromJSON('["default"]')[0])
       && contains(fromJSON(inputs.rust_toolchains), fromJSON('["stable"]')[0])
@@ -85,6 +98,7 @@ jobs:
   binary:
     if: >
       !failure() && !cancelled()
+      && fromJSON(inputs.enable_binary)
 
     name: Binaries
     uses: ./.github/workflows/bake.yml
@@ -115,11 +129,12 @@ jobs:
   container:
     if: >
       !failure() && !cancelled()
+      && fromJSON(inputs.enable_container)
 
     name: Containers
     uses: ./.github/workflows/bake.yml
     with:
-      bake_targets: '["docker", "oci"]'
+      bake_targets: ${{inputs.containers}}
       cargo_profiles: ${{inputs.cargo_profiles}}
       feat_sets: ${{inputs.feat_sets}}
       rust_toolchains: ${{inputs.rust_toolchains}}
@@ -147,18 +162,18 @@ jobs:
           }
         }
 
-  pkgs:
+  distro:
     if: >
       !failure() && !cancelled()
+      && fromJSON(inputs.enable_distro)
       && contains(fromJSON(inputs.feat_sets), fromJSON('["all"]')[0])
       && contains(fromJSON(inputs.cargo_profiles), fromJSON('["release"]')[0])
       && contains(fromJSON(inputs.rust_toolchains), fromJSON('["stable"]')[0])
-      && fromJSON(inputs.build_pkgs)
 
     name: Distro Packages
     uses: ./.github/workflows/bake.yml
     with:
-      bake_targets: '["deb", "rpm", "nix"]'
+      bake_targets: ${{inputs.distros}}
       cargo_profiles: '["release"]'
       feat_sets: '["all"]'
       rust_toolchains: '["stable"]'
@@ -188,16 +203,16 @@ jobs:
           }
         }
 
-  check_pkgs:
+  checks:
     if: >
       !failure() && !cancelled()
+      && fromJSON(inputs.enable_checks)
       && contains(fromJSON(inputs.feat_sets), fromJSON('["all"]')[0])
       && contains(fromJSON(inputs.cargo_profiles), fromJSON('["release"]')[0])
       && contains(fromJSON(inputs.rust_toolchains), fromJSON('["stable"]')[0])
-      && fromJSON(inputs.check_pkgs)
 
     name: Check Packages
-    needs: [pkgs]
+    needs: [distro]
     uses: ./.github/workflows/bake.yml
     with:
       bake_targets: '["deb-install", "rpm-install"]'
