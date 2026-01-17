@@ -64,13 +64,24 @@ http:
                 passHostHeader: true
 ```
 ### Federation
+If you will use a .well-known file you can use traefik to redirect .well-known/matrix to tuwunel built-in .well-known file.
+
+replace the rule in either of the methods from
+```
+Host(`your.server.name`)
+```
+to
+```
+Host(`your.tuwunel.domain`) || Host(`your.server.name`) && PathPrefix(`/.well-known/matrix`)
+```
 If you are not using a .well-known file you will need to add and expose port 8448 to a [traefik entrypoint](https://doc.traefik.io/traefik/reference/install-configuration/entrypoints/).
 
 You can then add these to your preferred traefik config method.
+you should replace `matrixfederationentry` with what you named your entrypoint.
 
 Labels:
 ```yaml
-            - "traefik.http.routers.matrix-federation.entrypoints=matrixfederation"
+            - "traefik.http.routers.matrix-federation.entrypoints=matrixfederationentry"
             - "traefik.http.routers.matrix-federation.rule=Host(`your.server.name`)"
             - "traefik.http.routers.matrix-federation.tls=true"
             - "traefik.http.routers.matrix-federation.service=matrix-federation"
@@ -82,7 +93,7 @@ Config file:
         entryPoints:
             - "web"
             - "websecure"
-            - "matrix-federation"
+            - "matrixfederationentry"
 ```
 > [!IMPORTANT]
 >
