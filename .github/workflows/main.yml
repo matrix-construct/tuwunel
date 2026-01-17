@@ -13,15 +13,70 @@ on:
     inputs:
       pipeline:
         type: string
-        description: Specify e.g. '[ci only it]' here instead of commit message.
-      complement_logs:
+        description: "Directives e.g. '[ci only it]'"
+      checkout:
+        type: string
+        description: "Checkout commit instead of HEAD"
+      cargo_profiles:
+        type: string
+        default: '["test", "bench", "release", "release-debuginfo", "release-native"]'
+        description: "Matrix Selector: Cargo profiles"
+      feat_sets:
+        type: string
+        default: '["none", "default", "logging", "all"]'
+        description: "Matrix Selector: Cargo feature sets"
+      rust_toolchains:
+        type: string
+        default: '["nightly", "stable"]'
+        description: "Matrix Selector: Rust toolchains"
+      rust_targets:
+        type: string
+        default: '["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu"]'
+        description: "Matrix Selector: Rust targets"
+      sys_names:
+        type: string
+        default: '["debian"]'
+        description: "Matrix Selector: System names"
+      sys_targets:
+        type: string
+        default: '["x86_64-v1-linux-gnu", "x86_64-v2-linux-gnu", "x86_64-v3-linux-gnu", "aarch64-v8-linux-gnu"]'
+        description: "Matrix Selector: System targets"
+      sys_versions:
+        type: string
+        default: '["testing-slim"]'
+        description: "Matrix Selector: System versions"
+      machines:
+        type: string
+        default: '["X64", "ARM64"]'
+        description: "Matrix Selector: Machine architectures"
+      runners:
+        type: string
+        default: '["het", "aws"]'
+        description: "Matrix Selector: Runner labels"
+      package_containers:
+        type: string
+        default: '["docker", "oci"]'
+        description: "Bake Selector: Container packages"
+      package_distros:
+        type: string
+        default: '["deb", "rpm", "nix"]'
+        description: "Bake Selector: Distro packages"
+      enable_lint:
         type: boolean
         default: true
-        description: Upload complement logs even after success.
-      complement_verbose:
+        description: Enable linting stage
+      enable_test:
+        type: boolean
+        default: true
+        description: Enable testing stage
+      enable_package:
         type: boolean
         default: false
-        description: Include successful tests in complement logs.
+        description: Enable packaging stage
+      enable_publish:
+        type: boolean
+        default: false
+        description: Enable publication stage
 
 concurrency:
   group: ${{github.workflow}}-${{github.ref}}
@@ -40,37 +95,52 @@ jobs:
       default_rust_targets: '["x86_64-unknown-linux-gnu"]'
       default_sys_targets: '["x86_64-v1-linux-gnu", "x86_64-v3-linux-gnu"]'
       default_machines: '["X64"]'
+      default_package_containers: '["docker", "oci"]'
+      default_package_distros: '["deb", "rpm", "nix"]'
 
     outputs:
-      cargo_profiles: ${{vars.CARGO_PROFILES || env.default_cargo_profiles}}
-      feat_sets: ${{vars.FEAT_SETS || env.default_feat_sets}}
-      rust_toolchains: ${{vars.RUST_TOOLCHAINS || env.default_rust_toolchains}}
-      rust_targets: ${{vars.RUST_TARGETS || env.default_rust_targets}}
-      sys_names: ${{vars.SYS_NAMES || env.default_sys_names}}
-      sys_targets: ${{vars.SYS_TARGETS || env.default_sys_targets}}
-      sys_versions: ${{vars.SYS_VERSIONS || env.default_sys_versions}}
-      machines: ${{vars.MACHINES || env.default_machines}}
-      package: ${{vars.PACKAGE != 'false'}}
-      publish: ${{vars.PUBLISH != 'false'}}
-      build_nix: ${{vars.BUILD_NIX != 'false'}}
-      build_pkgs: ${{vars.BUILD_PKGS || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/test' || contains(github.ref, 'tags/v')}}
-      check_pkgs: ${{vars.CHECK_PKGS || github.ref == 'refs/heads/test'}}
-      complement: ${{vars.COMPLEMENT != 'false'}}
+      cargo_profiles: ${{inputs.cargo_profiles || vars.CARGO_PROFILES || env.default_cargo_profiles}}
+      feat_sets: ${{inputs.feat_sets || vars.FEAT_SETS || env.default_feat_sets}}
+      rust_toolchains: ${{inputs.rust_toolchains || vars.RUST_TOOLCHAINS || env.default_rust_toolchains}}
+      rust_targets: ${{inputs.rust_targets || vars.RUST_TARGETS || env.default_rust_targets}}
+      sys_names: ${{inputs.sys_names || vars.SYS_NAMES || env.default_sys_names}}
+      sys_targets: ${{inputs.sys_targets || vars.SYS_TARGETS || env.default_sys_targets}}
+      sys_versions: ${{inputs.sys_versions || vars.SYS_VERSIONS || env.default_sys_versions}}
+      machines: ${{inputs.machines || vars.MACHINES || env.default_machines}}
+      pipeline: ${{inputs.pipeline || github.event.head_commit.message || github.event.workflow_run.head_commit.message}}
+      checkout: ${{inputs.checkout || github.sha}}
+      enable_lint: ${{fromJSON(inputs.enable_lint || 'true')}}
+      enable_test: ${{fromJSON(inputs.enable_test || 'true')}}
+      enable_test_unit: ${{fromJSON(inputs.enable_test_unit || 'true')}}
+      enable_test_docs: ${{fromJSON(inputs.enable_test_docs || 'true')}}
+      enable_test_bench: ${{fromJSON(inputs.enable_test_bench || 'true')}}
+      enable_test_memcheck: ${{fromJSON(inputs.enable_test_memcheck || 'true')}}
+      enable_test_smoke: ${{fromJSON(inputs.enable_test_smoke || 'true')}}
+      enable_test_nix: ${{fromJSON(inputs.enable_test_nix || 'true')}}
+      enable_test_rustsdk: ${{fromJSON(inputs.enable_test_rustsdk || 'true')}}
+      enable_test_complement: ${{fromJSON(inputs.enable_test_complement || 'true')}}
+      complement_logs: ${{fromJSON(inputs.complement_logs || 'true')}}
+      complement_verbose: ${{fromJSON(inputs.complement_verbose || 'false')}}
       complement_runner: 'het'
-      complement_logs: ${{inputs.complement_logs || 'true'}}
-      complement_verbose: ${{inputs.complement_verbose || 'false'}}
+      enable_package: ${{fromJSON(inputs.enable_package || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/test' || contains(github.ref, 'tags/v'))}}
+      enable_package_book: ${{fromJSON(inputs.enable_package_book || 'true')}}
+      enable_package_binary: ${{fromJSON(inputs.enable_package_binary || 'true')}}
+      enable_package_container: ${{fromJSON(inputs.enable_package_container || 'true')}}
+      package_containers: ${{inputs.package_containers || env.default_package_containers}}
+      enable_package_distro: ${{fromJSON(inputs.enable_package_distro || 'true')}}
+      package_distros: ${{inputs.package_distros || env.default_package_distros}}
+      enable_package_checks: ${{fromJSON(inputs.enable_package_checks || github.ref == 'refs/heads/test')}}
+      enable_publish: ${{fromJSON(inputs.enable_publish || 'true')}}
+      pages_url: 'https://matrix-construct.github.io/tuwunel/'
+      release_url: ${{steps.release.outputs.upload_url}}
       docker_repo: ${{vars.DOCKER_REPO}}
       docker_acct: ${{vars.DOCKER_ACCT}}
-      release_url: ${{steps.release.outputs.upload_url}}
-      pages_url: 'https://matrix-construct.github.io/tuwunel/'
-      rust_sdk_integ: ${{vars.RUST_SDK_INTEGRATION != 'false'}}
-      pipeline: ${{github.event.inputs.pipeline || github.event.head_commit.message || github.event.workflow_run.head_commit.message}}
 
     strategy:
       fail-fast: true
       matrix:
-        runner: ${{fromJSON(vars.RUNNERS || '["het"]')}}
-        machine: ${{fromJSON(vars.MACHINES || '["X64"]')}}
+        runner: ${{fromJSON(inputs.runners || vars.RUNNERS || '["het"]')}}
+        machine: ${{fromJSON(inputs.machines || vars.MACHINES || '["X64"]')}}
         exclude: ${{fromJSON(vars.RUNNERS_EXCLUDES || '[]')}}
 
     steps:
@@ -79,6 +149,7 @@ jobs:
         runner: ${{matrix.runner}}
         reserved_space: '{"het": "192GB", "aws": "48GB", "gcp": "160GB"}'
         max_used_space: '{"het": "384GB", "aws": "64GB", "gcp": "192GB"}'
+        min_free_space: '{"het": "512GB", "aws": "16GB", "gcp": "16GB"}'
       run: |
         set +e
         docker buildx inspect "${GITHUB_ACTOR}"
@@ -89,6 +160,7 @@ jobs:
         set -eux
         reserved_space=$(echo -n "$reserved_space" | jq -r ".$runner")
         max_used_space=$(echo -n "$max_used_space" | jq -r ".$runner")
+        min_free_space=$(echo -n "$min_free_space" | jq -r ".$runner")
         cat <<EOF > ./buildkitd.toml
         [system]
           platformsCacheMaxAge = "504h"
@@ -98,10 +170,15 @@ jobs:
           gc = true
           reservedSpace = "${reserved_space}"
           maxUsedSpace = "${max_used_space}"
+          minFreeSpace = "${min_free_space}"
         [[worker.oci.gcpolicy]]
           reservedSpace = "${reserved_space}"
           maxUsedSpace = "${max_used_space}"
+          minFreeSpace = "${min_free_space}"
           filters = ["label!=cache==pin"]
+          all = true
+        [[worker.oci.gcpolicy]]
+          minFreeSpace = "${min_free_space}"
           all = true
         EOF
 
@@ -132,6 +209,7 @@ jobs:
   lint:
     if: >
       !failure() && !cancelled()
+      && needs.init.outputs.enable_lint
       && !contains(github.ref, 'refs/tags/v')
       && !contains(needs.init.outputs.pipeline, '[ci no lint]')
       && !contains(needs.init.outputs.pipeline, '[ci only it]')
@@ -140,6 +218,7 @@ jobs:
     needs: [init] #needs: [init, deps]
     uses: ./.github/workflows/lint.yml
     with:
+      checkout: ${{needs.init.outputs.checkout}}
       cargo_profiles: ${{needs.init.outputs.cargo_profiles}}
       feat_sets: ${{needs.init.outputs.feat_sets}}
       rust_toolchains: ${{needs.init.outputs.rust_toolchains}}
@@ -182,6 +261,7 @@ jobs:
   test:
     if: >
       !failure() && !cancelled()
+      && needs.init.outputs.enable_test
       && !contains(github.ref, 'refs/tags/v')
       && !contains(needs.init.outputs.pipeline, '[ci no test]')
 
@@ -190,12 +270,18 @@ jobs:
     uses: ./.github/workflows/test.yml
     with:
       pipeline: ${{needs.init.outputs.pipeline}}
-      build_nix: ${{fromJSON(needs.init.outputs.build_nix)}}
-      rust_sdk_integ: ${{fromJSON(needs.init.outputs.rust_sdk_integ)}}
-      complement: ${{fromJSON(needs.init.outputs.complement)}}
+      checkout: ${{needs.init.outputs.checkout}}
+      enable_docs: ${{needs.init.outputs.enable_test_docs}}
+      enable_unit: ${{needs.init.outputs.enable_test_unit}}
+      enable_bench: ${{needs.init.outputs.enable_test_bench}}
+      enable_memcheck: ${{needs.init.outputs.enable_test_memcheck}}
+      enable_smoke: ${{needs.init.outputs.enable_test_smoke}}
+      enable_nix: ${{needs.init.outputs.enable_test_nix}}
+      enable_rustsdk: ${{needs.init.outputs.enable_test_rustsdk}}
+      enable_complement: ${{needs.init.outputs.enable_test_complement}}
       complement_runner: ${{needs.init.outputs.complement_runner}}
-      complement_logs: ${{fromJSON(needs.init.outputs.complement_logs)}}
-      complement_verbose: ${{fromJSON(needs.init.outputs.complement_verbose)}}
+      complement_logs: ${{needs.init.outputs.complement_logs}}
+      complement_verbose: ${{needs.init.outputs.complement_verbose}}
       cargo_profiles: ${{needs.init.outputs.cargo_profiles}}
       feat_sets: ${{needs.init.outputs.feat_sets}}
       rust_toolchains: ${{needs.init.outputs.rust_toolchains}}
@@ -238,7 +324,7 @@ jobs:
   package:
     if: >
       !failure() && !cancelled()
-      && needs.init.outputs.package
+      && needs.init.outputs.enable_package
       && !contains(github.ref, 'refs/pull')
       && !contains(needs.init.outputs.pipeline, '[ci only it]')
       && !contains(needs.init.outputs.pipeline, '[ci no build]')
@@ -248,10 +334,15 @@ jobs:
     needs: [init, test]
     uses: ./.github/workflows/package.yml
     with:
+      enable_book: ${{needs.init.outputs.enable_package_book}}
+      enable_binary: ${{needs.init.outputs.enable_package_binary}}
+      enable_container: ${{needs.init.outputs.enable_package_container}}
+      enable_distro: ${{needs.init.outputs.enable_package_distro}}
+      enable_checks: ${{needs.init.outputs.enable_package_checks}}
+      distros: ${{needs.init.outputs.package_distros}}
+      containers: ${{needs.init.outputs.package_containers}}
+      checkout: ${{needs.init.outputs.checkout}}
       release_url: ${{needs.init.outputs.release_url}}
-      check_pkgs: ${{needs.init.outputs.check_pkgs}}
-      build_pkgs: ${{needs.init.outputs.build_pkgs}}
-      build_nix: ${{fromJSON(needs.init.outputs.build_nix)}}
       cargo_profiles: ${{needs.init.outputs.cargo_profiles}}
       feat_sets: ${{needs.init.outputs.feat_sets}}
       rust_toolchains: ${{needs.init.outputs.rust_toolchains}}
@@ -302,7 +393,7 @@ jobs:
   publish:
     if: >
       !failure() && !cancelled()
-      && needs.init.outputs.publish
+      && needs.init.outputs.enable_publish
       && !contains(github.ref, 'refs/pull')
       && !contains(needs.init.outputs.pipeline, '[ci only it]')
       && !contains(needs.init.outputs.pipeline, '[ci no build]')
@@ -313,6 +404,7 @@ jobs:
     needs: [init, test, package]
     uses: ./.github/workflows/publish.yml
     with:
+      checkout: ${{needs.init.outputs.checkout}}
       docker_repo: ${{needs.init.outputs.docker_repo}}
       docker_acct: ${{needs.init.outputs.docker_acct}}
       release_url: ${{needs.init.outputs.release_url}}

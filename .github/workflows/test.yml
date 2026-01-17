@@ -35,34 +35,51 @@ on:
         type: string
         default: '[]'
         description: Matrix inclusions
-      complement:
-        type: boolean
-        default: true
+      pipeline:
+        type: string
+        default: ${{github.event.inputs.pipeline || github.event.workflow_run.head_commit.message}}
+      checkout:
+        type: string
+        default: 'HEAD'
+      enable_docs:
+        type: string
+        default: 'true'
+      enable_unit:
+        type: string
+        default: 'true'
+      enable_bench:
+        type: string
+        default: 'true'
+      enable_memcheck:
+        type: string
+        default: 'true'
+      enable_smoke:
+        type: string
+        default: 'true'
+      enable_nix:
+        type: string
+        default: 'true'
+      enable_rustsdk:
+        type: string
+        default: 'true'
+      enable_complement:
+        type: string
+        default: 'true'
       complement_runner:
         type: string
         default: 'het'
       complement_logs:
-        type: boolean
-        default: true
-        description: Upload complement logs artifact even when passing.
-      complement_verbose:
-        type: boolean
-        default: false
-        description: Include complement logs from successful tests.
-      rust_sdk_integ:
-        type: boolean
-        default: true
-      build_nix:
-        type: boolean
-        default: true
-      pipeline:
         type: string
-        default: ${{github.event.inputs.pipeline || github.event.workflow_run.head_commit.message}}
+        default: 'true'
+      complement_verbose:
+        type: string
+        default: 'false'
 
 jobs:
   docs:
     if: >
-      !contains(inputs.pipeline, '[ci only it]')
+      fromJSON(inputs.enable_docs)
+      && !contains(inputs.pipeline, '[ci only it]')
       && contains(fromJSON(inputs.cargo_profiles), fromJSON('["test"]')[0])
       && contains(fromJSON(inputs.feat_sets), fromJSON('["all"]')[0])
       && contains(fromJSON(inputs.rust_toolchains), fromJSON('["nightly"]')[0])
@@ -82,10 +99,12 @@ jobs:
       machines: ${{inputs.machines}}
       excludes: ${{inputs.excludes}}
       includes: ${{inputs.includes}}
+      checkout: ${{inputs.checkout}}
 
   unit:
     if: >
-      !contains(inputs.pipeline, '[ci only it]')
+      fromJSON(inputs.enable_unit)
+      && !contains(inputs.pipeline, '[ci only it]')
       && contains(fromJSON(inputs.cargo_profiles), fromJSON('["test"]')[0])
       && contains(fromJSON(inputs.feat_sets), fromJSON('["all"]')[0])
       && contains(fromJSON(inputs.rust_toolchains), fromJSON('["nightly"]')[0])
@@ -105,10 +124,12 @@ jobs:
       machines: ${{inputs.machines}}
       excludes: ${{inputs.excludes}}
       includes: ${{inputs.includes}}
+      checkout: ${{inputs.checkout}}
 
   bench:
     if: >
-      !contains(inputs.pipeline, '[ci only it]')
+      fromJSON(inputs.enable_bench)
+      && !contains(inputs.pipeline, '[ci only it]')
       && contains(fromJSON(inputs.cargo_profiles), fromJSON('["bench"]')[0])
       && contains(fromJSON(inputs.feat_sets), fromJSON('["all"]')[0])
       && contains(fromJSON(inputs.rust_toolchains), fromJSON('["nightly"]')[0])
@@ -128,10 +149,12 @@ jobs:
       machines: ${{inputs.machines}}
       excludes: ${{inputs.excludes}}
       includes: ${{inputs.includes}}
+      checkout: ${{inputs.checkout}}
 
   memcheck:
     if: >
-      !contains(inputs.pipeline, '[ci only it]')
+      fromJSON(inputs.enable_memcheck)
+      && !contains(inputs.pipeline, '[ci only it]')
       && contains(fromJSON(inputs.cargo_profiles), fromJSON('["bench"]')[0])
       && contains(fromJSON(inputs.feat_sets), fromJSON('["all"]')[0])
       && contains(fromJSON(inputs.rust_toolchains), fromJSON('["nightly"]')[0])
@@ -152,10 +175,12 @@ jobs:
       machines: ${{inputs.machines}}
       includes: ${{inputs.includes}}
       excludes: ${{inputs.excludes}}
+      checkout: ${{inputs.checkout}}
 
   smoke:
     if: >
       !failure() && !cancelled()
+      && fromJSON(inputs.enable_smoke)
       && !contains(inputs.pipeline, '[ci only it]')
       && !contains(inputs.pipeline, '[ci no build]')
       && inputs.cargo_profiles
@@ -174,6 +199,7 @@ jobs:
       sys_targets: ${{inputs.sys_targets}}
       machines: ${{inputs.machines}}
       includes: ${{inputs.includes}}
+      checkout: ${{inputs.checkout}}
       excludes: >
         [
           {"cargo_profile": "test", "feat_set": "default"},
@@ -231,6 +257,7 @@ jobs:
   nix:
     if: >
       !failure() && !cancelled()
+      && fromJSON(inputs.enable_nix)
       && !contains(inputs.pipeline, '[ci only it]')
       && !contains(inputs.pipeline, '[ci no build]')
       && !contains(github.ref, 'refs/pull')
@@ -238,7 +265,6 @@ jobs:
       && contains(fromJSON(inputs.feat_sets), fromJSON('["all"]')[0])
       && contains(fromJSON(inputs.rust_toolchains), fromJSON('["stable"]')[0])
       && contains(fromJSON(inputs.sys_targets), fromJSON('["x86_64-v1-linux-gnu"]')[0])
-      && fromJSON(inputs.build_nix)
 
     name: Smoke NixOS
     uses: ./.github/workflows/bake.yml
@@ -254,12 +280,13 @@ jobs:
       machines: ${{inputs.machines}}
       excludes: ${{inputs.excludes}}
       includes: ${{inputs.includes}}
+      checkout: ${{inputs.checkout}}
 
   rust-sdk-integ:
     if: >
       !failure() && !cancelled()
+      && fromJSON(inputs.enable_rustsdk)
       && !contains(inputs.pipeline, '[ci no build]')
-      && inputs.rust_sdk_integ
       && contains(fromJSON(inputs.feat_sets), fromJSON('["all"]')[0])
       && contains(fromJSON(inputs.rust_toolchains), fromJSON('["nightly"]')[0])
       && contains(fromJSON(inputs.rust_targets), fromJSON('["x86_64-unknown-linux-gnu"]')[0])
@@ -279,6 +306,7 @@ jobs:
       sys_targets: ${{inputs.sys_targets}}
       machines: '["X64"]'
       runner: ${{inputs.complement_runner}}
+      checkout: ${{inputs.checkout}}
       includes: ${{inputs.includes}}
       artifact: >
         {
@@ -310,8 +338,8 @@ jobs:
   complement:
     if: >
       !failure() && !cancelled()
+      && fromJSON(inputs.enable_complement)
       && !contains(inputs.pipeline, '[ci no build]')
-      && inputs.complement
       && contains(fromJSON(inputs.cargo_profiles), fromJSON('["bench"]')[0])
       && contains(fromJSON(inputs.rust_toolchains), fromJSON('["nightly"]')[0])
       && contains(fromJSON(inputs.sys_targets), fromJSON('["x86_64-v3-linux-gnu"]')[0])
@@ -331,12 +359,13 @@ jobs:
       runner: ${{inputs.complement_runner}}
       excludes: ${{inputs.excludes}}
       includes: ${{inputs.includes}}
+      checkout: ${{inputs.checkout}}
 
   compliance:
     if: >
       !failure() && !cancelled()
+      && fromJSON(inputs.enable_complement)
       && !contains(inputs.pipeline, '[ci no build]')
-      && inputs.complement
       && inputs.machines
       && contains(fromJSON(inputs.cargo_profiles), fromJSON('["bench"]')[0])
       && contains(fromJSON(inputs.rust_toolchains), fromJSON('["nightly"]')[0])

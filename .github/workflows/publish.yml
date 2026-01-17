@@ -38,6 +38,9 @@ on:
         type: string
         default: '[]'
         description: Matrix inclusions
+      checkout:
+        type: string
+        default: 'HEAD'
       docker_repo:
         type: string
         description: DockerHub Repository
@@ -131,6 +134,7 @@ jobs:
           sys_version: ${{matrix.sys_version}}
           sys_target: ${{matrix.sys_target}}
           machine: ${{matrix.machine}}
+          git_checkout: ${{inputs.checkout}}
           acct: ${{github.actor}}
           repo: ${{github.repository}}
           docker_repo: ${{inputs.docker_repo}}

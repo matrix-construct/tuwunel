@@ -42,6 +42,10 @@ on:
         type: string
         default: '[]'
         description: Matrix inclusions
+      checkout:
+        type: string
+        default: 'HEAD'
+        description: Specific commit to checkout
       max-parallel:
         type: number
         default: 128
@@ -131,6 +135,7 @@ jobs:
         CI_VERBOSE_ENV: ${{inputs.verbose_env}}
         CI_SILENT_BAKE: ${{inputs.silent_bake}}
         CI_PRINT_BAKE: ${{inputs.print_bake}}
+        git_checkout: ${{inputs.checkout}}
 
       run: |
         docker/bake.sh "${{matrix.bake_target}}"
