@@ -14,6 +14,8 @@ You can setup auto renewing certificates with different kinds of [acme challenge
 You only have to do any one of these methods.
 
 Be sure to change the `your.server.name` to your actual tuwunel domain. and the `yourcertresolver` should be changed to whatever you named it in your traefik config.
+
+
 ### Labels
 To use labels with traefik you need to configure a [docker provider](https://doc.traefik.io/traefik/reference/install-configuration/providers/docker/).
 
@@ -61,7 +63,27 @@ http:
                     - url: "http://tuwunel:6167"
                 passHostHeader: true
 ```
+### Federation
+If you are not using a .well-known file you will need to add and expose port 8448 to a [traefik entrypoint](https://doc.traefik.io/traefik/reference/install-configuration/entrypoints/).
 
+You can then add these to your preferred traefik config method.
+
+Labels:
+```yaml
+            - "traefik.http.routers.matrix-federation.entrypoints=matrixfederation"
+            - "traefik.http.routers.matrix-federation.rule=Host(`your.server.name`)"
+            - "traefik.http.routers.matrix-federation.tls=true"
+            - "traefik.http.routers.matrix-federation.service=matrix-federation"
+            - "traefik.http.services.matrix-federation.loadbalancer.server.port=6167"
+            - "traefik.http.routers.matrix-federation.tls.certresolver=yourcertresolver"
+```
+Config file:
+```yaml
+        entryPoints:
+            - "web"
+            - "websecure"
+            - "matrix-federation"
+```
 > [!IMPORTANT]
 >
 > [Encoded Character Filtering](https://doc.traefik.io/traefik/security/request-path/#encoded-character-filtering)
