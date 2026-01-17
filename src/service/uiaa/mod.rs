@@ -11,8 +11,8 @@ use ruma::{
 	},
 };
 use tuwunel_core::{
-	Err, Result, debug_warn, err, error, implement, utils,
-	utils::{hash, string::EMPTY},
+	Err, Result, debug_warn, err, error, extract, implement,
+	utils::{self, BoolExt, hash, string::EMPTY},
 };
 use tuwunel_database::{Deserialized, Json, Map};
 
@@ -89,15 +89,9 @@ pub async fn try_auth(
 	match auth {
 		// Find out what the user completed
 		| AuthData::Password(Password { identifier, password, user, .. }) => {
-			let username = if let Some(UserIdentifier::UserIdOrLocalpart(username)) = identifier {
-				username
-			} else if cfg!(feature = "element_hacks")
-				&& let Some(username) = user
-			{
-				username
-			} else {
-				return Err!(Request(Unrecognized("Identifier type not recognized.")));
-			};
+			let username = extract!(identifier, x in Some(UserIdentifier::UserIdOrLocalpart(x)))
+				.or_else(|| cfg!(feature = "element_hacks").and(user.as_ref()))
+				.ok_or(err!(Request(Unrecognized("Identifier type not recognized."))))?;
 
 			let user_id_from_username = UserId::parse_with_server_name(
 				username.clone(),

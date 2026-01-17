@@ -61,6 +61,16 @@ macro_rules! extract_variant {
 	};
 }
 
+#[macro_export]
+macro_rules! extract {
+	($e:expr_2021, $out:ident in $variant:pat) => {
+		match $e {
+			| $variant => Some($out),
+			| _ => None,
+		}
+	};
+}
+
 /// Functor for !is_empty()
 #[macro_export]
 macro_rules! is_not_empty {
