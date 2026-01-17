@@ -269,12 +269,8 @@ impl Service {
 
 			trace!(%mxc, ?path, "File metadata: {file_metadata:?}");
 
-			let file_created_at = match file_metadata.created() {
+			let file_created_at = match file_metadata.modified() {
 				| Ok(value) => value,
-				| Err(err) if err.kind() == std::io::ErrorKind::Unsupported => {
-					debug!("btime is unsupported, using mtime instead");
-					file_metadata.modified()?
-				},
 				| Err(err) => {
 					error!("Could not delete MXC {mxc} at path {path:?}: {err:?}. Skipping...");
 					continue;
