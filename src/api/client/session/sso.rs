@@ -5,7 +5,6 @@ use axum_client_ip::InsecureClientIp;
 use axum_extra::extract::cookie::{Cookie, SameSite};
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD as b64};
 use futures::{StreamExt, TryFutureExt, future::try_join};
-use itertools::Itertools;
 use reqwest::header::{CONTENT_TYPE, HeaderValue};
 use ruma::{
 	Mxc, OwnedRoomId, OwnedUserId, ServerName, UserId,
@@ -16,7 +15,9 @@ use tuwunel_core::{
 	Err, Result, at,
 	config::IdentityProvider,
 	debug::INFO_SPAN_LEVEL,
-	debug_info, debug_warn, err, info, utils,
+	debug_info, debug_warn, err, info,
+	itertools::Itertools,
+	utils,
 	utils::{
 		content_disposition::make_content_disposition,
 		hash::sha256,
@@ -30,8 +31,7 @@ use tuwunel_service::{
 	Services,
 	media::MXC_LENGTH,
 	oauth::{
-		CODE_VERIFIER_LENGTH, Provider, SESSION_ID_LENGTH, Session, UserInfo, unique_id,
-		unique_id_sub,
+		CODE_VERIFIER_LENGTH, Provider, SESSION_ID_LENGTH, Session, UserInfo, unique_id_sub,
 	},
 	users::Register,
 };
@@ -341,13 +341,15 @@ pub(crate) async fn sso_callback_route(
 		.request_userinfo((&provider, &session))
 		.await?;
 
+	let unique_id = unique_id_sub((&provider, &userinfo.sub))?;
+
 	// Check for an existing session from this identity. We want to maintain one
 	// session for each identity and keep the newer one which has up-to-date state
 	// and access.
 	let (user_id, old_sess_id) = match services
 		.oauth
 		.sessions
-		.get_by_unique_id(&unique_id_sub((&provider, &userinfo.sub))?)
+		.get_by_unique_id(&unique_id)
 		.await
 	{
 		| Ok(session) => (session.user_id, session.sess_id),
@@ -364,7 +366,7 @@ pub(crate) async fn sso_callback_route(
 	// Keep the user_id from the old session as best as possible.
 	let user_id = match user_id {
 		| Some(user_id) => user_id,
-		| None => decide_user_id(&services, &provider, &session, &userinfo).await?,
+		| None => decide_user_id(&services, &provider, &userinfo, &unique_id).await?,
 	};
 
 	// Update the session with user_id
@@ -538,9 +540,24 @@ async fn set_avatar(
 async fn decide_user_id(
 	services: &Services,
 	provider: &Provider,
-	session: &Session,
 	userinfo: &UserInfo,
+	unique_id: &str,
 ) -> Result<OwnedUserId> {
+	if let Some(user_id) = services
+		.oauth
+		.sessions
+		.find_user_association_pending(provider.id(), userinfo)
+	{
+		debug_info!(
+			provider = ?provider.id(),
+			?user_id,
+			?userinfo,
+			"Matched pending association"
+		);
+
+		return Ok(user_id);
+	}
+
 	let allowed =
 		|claim: &str| provider.userid_claims.is_empty() || provider.userid_claims.contains(claim);
 
@@ -576,13 +593,10 @@ async fn decide_user_id(
 		}
 	}
 
-	if let Ok(infallible) = unique_id((provider, session))
-		.map(|h| truncate_deterministic(&h, Some(15..23)).to_lowercase())
-		.log_err()
-	{
-		if let Some(user_id) = try_user_id(services, &infallible, true).await {
-			return Ok(user_id);
-		}
+	let length = Some(15..23);
+	let infallible = truncate_deterministic(unique_id, length).to_lowercase();
+	if let Some(user_id) = try_user_id(services, &infallible, true).await {
+		return Ok(user_id);
 	}
 
 	Err!(Request(UserInUse("User ID is not available.")))

@@ -1,4 +1,9 @@
-use std::{sync::Arc, time::SystemTime};
+pub mod association;
+
+use std::{
+	sync::{Arc, Mutex},
+	time::SystemTime,
+};
 
 use futures::{Stream, StreamExt, TryFutureExt};
 use ruma::{OwnedUserId, UserId};
@@ -12,6 +17,7 @@ use crate::SelfServices;
 
 pub struct Sessions {
 	_services: SelfServices,
+	association_pending: Mutex<association::Pending>,
 	providers: Arc<Providers>,
 	db: Data,
 }
@@ -94,6 +100,7 @@ pub const SESSION_ID_LENGTH: usize = 32;
 pub(super) fn build(args: &crate::Args<'_>, providers: Arc<Providers>) -> Self {
 	Self {
 		_services: args.services.clone(),
+		association_pending: Default::default(),
 		providers,
 		db: Data {
 			oauthid_session: args.db["oauthid_session"].clone(),
