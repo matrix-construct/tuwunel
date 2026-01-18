@@ -43,6 +43,20 @@ impl Data {
 		Ok((count, event))
 	}
 
+	pub(super) async fn get_presence_raw(&self, user_id: &UserId) -> Result<(u64, Presence)> {
+		let count = self
+			.userid_presenceid
+			.get(user_id)
+			.await
+			.deserialized::<u64>()?;
+
+		let key = presenceid_key(count, user_id);
+		let bytes = self.presenceid_presence.get(&key).await?;
+		let presence = Presence::from_json_bytes(&bytes)?;
+
+		Ok((count, presence))
+	}
+
 	pub(super) async fn set_presence(
 		&self,
 		user_id: &UserId,
@@ -50,7 +64,7 @@ impl Data {
 		currently_active: Option<bool>,
 		last_active_ago: Option<UInt>,
 		status_msg: Option<String>,
-	) -> Result {
+	) -> Result<Option<u64>> {
 		let last_presence = self.get_presence(user_id).await;
 		let state_changed = match last_presence {
 			| Err(_) => true,
@@ -96,7 +110,7 @@ impl Data {
 				"presence spam {user_id:?} last_active_ts:{last_active_ts:?} < \
 				 {last_last_active_ts:?}",
 			);
-			return Ok(());
+			return Ok(None);
 		}
 
 		let status_msg = if status_msg.as_ref().is_some_and(String::is_empty) {
@@ -124,7 +138,7 @@ impl Data {
 			self.presenceid_presence.remove(&key);
 		}
 
-		Ok(())
+		Ok(Some(*count))
 	}
 
 	#[inline]

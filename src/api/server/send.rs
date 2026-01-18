@@ -268,11 +268,11 @@ async fn handle_edu_presence_update(
 
 	services
 		.presence
-		.set_presence(
+		.set_presence_from_federation(
 			&update.user_id,
 			&update.presence,
-			Some(update.currently_active),
-			Some(update.last_active_ago),
+			update.currently_active,
+			update.last_active_ago,
 			update.status_msg.clone(),
 		)
 		.await

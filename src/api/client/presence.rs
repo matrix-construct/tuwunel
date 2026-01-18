@@ -23,7 +23,13 @@ pub(crate) async fn set_presence_route(
 
 	services
 		.presence
-		.set_presence(body.sender_user(), &body.presence, None, None, body.status_msg.clone())
+		.set_presence_for_device(
+			body.sender_user(),
+			body.sender_device.as_deref(),
+			&body.presence,
+			body.status_msg.clone(),
+			PresenceUpdateReason::ClientRequest,
+		)
 		.await?;
 
 	Ok(set_presence::v3::Response {})

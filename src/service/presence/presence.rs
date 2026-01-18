@@ -40,6 +40,15 @@ impl Presence {
 			.map_err(|_| Error::bad_database("Invalid presence data in database"))
 	}
 
+	#[inline]
+	pub(super) fn state(&self) -> &PresenceState { &self.state }
+
+	#[inline]
+	pub(super) fn last_active_ts(&self) -> u64 { self.last_active_ts }
+
+	#[inline]
+	pub(super) fn status_msg(&self) -> Option<String> { self.status_msg.clone() }
+
 	/// Creates a PresenceEvent from available data.
 	pub(super) async fn to_presence_event(
 		&self,
