@@ -95,8 +95,15 @@ jobs:
       default_rust_targets: '["x86_64-unknown-linux-gnu"]'
       default_sys_targets: '["x86_64-v1-linux-gnu", "x86_64-v3-linux-gnu"]'
       default_machines: '["X64"]'
-      default_package_containers: '["docker", "oci"]'
-      default_package_distros: '["deb", "rpm", "nix"]'
+      default_package_containers: '[]'
+      default_package_distros: '[]'
+      is_release: ${{contains(github.ref, 'tags/v')}}
+      is_branch: ${{contains(github.ref, 'refs/heads')}}
+      is_pull: ${{contains(github.ref, 'refs/pull')}}
+      is_main: ${{github.ref == 'refs/heads/main'}}
+      is_test: ${{github.ref == 'refs/heads/test'}}
+      is_dev: ${{contains(github.ref, 'refs/heads') && github.ref != 'refs/heads/main' && github.ref != 'refs/heads/test'}}
+      is_fat: ${{contains(github.ref, 'tags/v') && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/test')}}
 
     outputs:
       cargo_profiles: ${{inputs.cargo_profiles || vars.CARGO_PROFILES || env.default_cargo_profiles}}
@@ -106,7 +113,7 @@ jobs:
       sys_names: ${{inputs.sys_names || vars.SYS_NAMES || env.default_sys_names}}
       sys_targets: ${{inputs.sys_targets || vars.SYS_TARGETS || env.default_sys_targets}}
       sys_versions: ${{inputs.sys_versions || vars.SYS_VERSIONS || env.default_sys_versions}}
-      machines: ${{inputs.machines || vars.MACHINES || env.default_machines}}
+      machines: ${{inputs.machines || (fromJSON(env.is_fat) && vars.MACHINES) || env.default_machines}}
       pipeline: ${{inputs.pipeline || github.event.head_commit.message || github.event.workflow_run.head_commit.message}}
       checkout: ${{inputs.checkout || github.sha}}
       enable_lint: ${{fromJSON(inputs.enable_lint || 'true')}}
@@ -122,15 +129,21 @@ jobs:
       complement_logs: ${{fromJSON(inputs.complement_logs || 'true')}}
       complement_verbose: ${{fromJSON(inputs.complement_verbose || 'false')}}
       complement_runner: 'het'
-      enable_package: ${{fromJSON(inputs.enable_package || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/test' || contains(github.ref, 'tags/v'))}}
+      enable_package: ${{fromJSON(inputs.enable_package || 'true')}}
       enable_package_book: ${{fromJSON(inputs.enable_package_book || 'true')}}
       enable_package_binary: ${{fromJSON(inputs.enable_package_binary || 'true')}}
-      enable_package_container: ${{fromJSON(inputs.enable_package_container || 'true')}}
+      enable_package_container: ${{fromJSON(inputs.enable_package_container || env.is_fat || 'true')}}
       package_containers: ${{inputs.package_containers || env.default_package_containers}}
-      enable_package_distro: ${{fromJSON(inputs.enable_package_distro || 'true')}}
+      enable_package_distro: ${{fromJSON(inputs.enable_package_distro || env.is_fat || 'false')}}
       package_distros: ${{inputs.package_distros || env.default_package_distros}}
-      enable_package_checks: ${{fromJSON(inputs.enable_package_checks || github.ref == 'refs/heads/test')}}
+      enable_package_checks: ${{fromJSON(inputs.enable_package_checks || env.is_test || 'false')}}
       enable_publish: ${{fromJSON(inputs.enable_publish || 'true')}}
+      is_release: ${{fromJSON(env.is_release || 'false')}}
+      is_main: ${{fromJSON(env.is_main || 'false')}}
+      is_test: ${{fromJSON(env.is_test || 'false')}}
+      is_pull: ${{fromJSON(env.is_pull || 'false')}}
+      is_fat: ${{fromJSON(env.is_fat || 'false')}}
+      is_dev: ${{fromJSON(env.is_dev || 'true')}}
       pages_url: 'https://matrix-construct.github.io/tuwunel/'
       release_url: ${{steps.release.outputs.upload_url}}
       docker_repo: ${{vars.DOCKER_REPO}}
@@ -209,8 +222,8 @@ jobs:
   lint:
     if: >
       !failure() && !cancelled()
-      && needs.init.outputs.enable_lint
-      && !contains(github.ref, 'refs/tags/v')
+      && fromJSON(needs.init.outputs.enable_lint)
+      && !fromJSON(needs.init.outputs.is_release)
       && !contains(needs.init.outputs.pipeline, '[ci no lint]')
       && !contains(needs.init.outputs.pipeline, '[ci only it]')
 
@@ -261,8 +274,8 @@ jobs:
   test:
     if: >
       !failure() && !cancelled()
-      && needs.init.outputs.enable_test
-      && !contains(github.ref, 'refs/tags/v')
+      && fromJSON(needs.init.outputs.enable_test)
+      && !fromJSON(needs.init.outputs.is_release)
       && !contains(needs.init.outputs.pipeline, '[ci no test]')
 
     name: Test
@@ -324,8 +337,8 @@ jobs:
   package:
     if: >
       !failure() && !cancelled()
-      && needs.init.outputs.enable_package
-      && !contains(github.ref, 'refs/pull')
+      && fromJSON(needs.init.outputs.enable_package)
+      && !fromJSON(needs.init.outputs.is_fat)
       && !contains(needs.init.outputs.pipeline, '[ci only it]')
       && !contains(needs.init.outputs.pipeline, '[ci no build]')
       && !contains(needs.init.outputs.pipeline, '[ci no package]')
@@ -393,8 +406,8 @@ jobs:
   publish:
     if: >
       !failure() && !cancelled()
-      && needs.init.outputs.enable_publish
-      && !contains(github.ref, 'refs/pull')
+      && fromJSON(needs.init.outputs.enable_publish)
+      && !fromJSON(needs.init.outputs.is_fat)
       && !contains(needs.init.outputs.pipeline, '[ci only it]')
       && !contains(needs.init.outputs.pipeline, '[ci no build]')
       && !contains(needs.init.outputs.pipeline, '[ci no package]')
