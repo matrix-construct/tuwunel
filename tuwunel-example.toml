@@ -2168,6 +2168,16 @@
 #
 #client_secret_file =
 
+# Issuer URL the provider publishes for you. We have pre-supplied default
+# values for some of the canonical public providers, making this field
+# optional based on the `brand` set above. Otherwise it is required to
+# find self-hosted providers. It must be identical to what is configured
+# and expected by the provider and must never change because we associate
+# identities to it. If the `/.well-known/openid-configuration` is not
+# found behind this URL see `base_path` below as a workaround.
+#
+#issuer_url =
+
 # The callback URL configured when registering the OAuth application with
 # the provider. Tuwunel's callback URL must be strictly formatted exactly
 # as instructed. The URL host must point directly at the matrix server and
@@ -2212,31 +2222,24 @@
 #
 #scope = []
 
-# List of userinfo claims which shape and restrict the way we compute a
-# Matrix UserId for new registrations. Reviewing Tuwunel's documentation
-# will be necessary for a complete description in detail. An empty array
-# imposes no restriction here, avoiding generated fallbacks as much as
-# possible. For simplicity we reserve a claim called "unique" which can be
-# listed alone to ensure *only* generated ID's are used for registrations.
+# Optional list of userinfo claims which shape and restrict the way we
+# compute a Matrix UserId for new registrations. Reviewing Tuwunel's
+# documentation will be necessary for a complete description in detail. An
+# empty array imposes no restriction here, avoiding generated fallbacks as
+# much as possible. For simplicity we reserve a claim called "unique"
+# which can be listed alone to ensure *only* generated ID's are used for
+# registrations.
 #
 #userid_claims = []
 
-# Issuer URL the provider publishes for you. We have pre-supplied default
-# values for some of the canonical providers, making this field optional
-# based on the `brand` set above. Otherwise it is required for OIDC
-# discovery to acquire additional provider configuration, and it must be
-# correct to pass validations during various interactions.
-#
-#issuer_url =
-
-# Extra path components after the issuer_url leading to the location of
-# the `.well-known` directory used for discovery. This will be empty for
-# specification-compliant providers. We have supplied any known values
-# based on `brand` (e.g. `/login/oauth` for GitHub).
+# Optional extra path components after the issuer_url leading to the
+# location of the `.well-known` directory used for discovery. This will be
+# empty for specification-compliant providers. We have supplied any known
+# values based on `brand` (e.g. `/login/oauth` for GitHub).
 #
 #base_path =
 
-# Overrides the `.well-known` location where the provider's OIDC
+# Overrides the `.well-known` location where the provider's openid
 # configuration is found. It is very unlikely you will need to set this;
 # available for developers or special purposes only.
 #

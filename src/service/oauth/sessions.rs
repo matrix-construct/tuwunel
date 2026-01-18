@@ -170,7 +170,7 @@ pub async fn put(&self, sess_id: &str, session: &Session) {
 	}
 }
 
-/// Fetch database state for a session from its associated `sub`, in case
+/// Fetch database state for a session from its associated `(iss,sub)`, in case
 /// `sess_id` is not known.
 #[implement(Sessions)]
 #[tracing::instrument(level = "debug", skip(self), ret(level = "debug"))]
@@ -213,7 +213,7 @@ pub async fn get_sess_id_by_user(&self, user_id: &UserId) -> Result<String> {
 		.deserialized()
 }
 
-/// Resolve the `sess_id` from an associated provider subject id.
+/// Resolve the `sess_id` from an associated provider issuer and subject hash.
 #[implement(Sessions)]
 #[tracing::instrument(level = "debug", skip(self), ret(level = "debug"))]
 pub async fn get_sess_id_by_unique_id(&self, unique_id: &str) -> Result<String> {
