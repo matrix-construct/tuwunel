@@ -28,33 +28,80 @@ pub(super) fn build(args: &crate::Args<'_>) -> Self {
 #[implement(Providers)]
 #[tracing::instrument(level = "debug", skip(self))]
 pub async fn get(&self, id: &str) -> Result<Provider> {
-	if let Some(provider) = self.providers.read().await.get(id).cloned() {
+	if let Some(provider) = self.get_cached(id).await {
 		return Ok(provider);
 	}
 
 	let config = self.get_config(id)?;
+	let id = config.id().to_owned();
 	let mut map = self.providers.write().await;
-	let config = self.configure(config).await?;
+	let provider = self.configure(config).await?;
 
-	debug!(?id, ?config);
-	_ = map.insert(id.into(), config.clone());
+	debug!(?id, ?provider);
+	_ = map.insert(id, provider.clone());
 
-	Ok(config)
+	Ok(provider)
 }
 
 /// Get the admin-configured Provider which exists prior to any
 /// reconciliation with the well-known discovery (the server's config is
 /// immutable); though it is important to note the server config can be
 /// reloaded. This will Err NotFound for a non-existent idp.
+///
+/// When no provider is found with a matching client_id, providers are then
+/// searched by brand. Brand matching will be invalidated when more than one
+/// provider matches the brand.
 #[implement(Providers)]
 pub fn get_config(&self, id: &str) -> Result<Provider> {
-	self.services
-		.config
-		.identity_provider
+	let providers = &self.services.config.identity_provider;
+
+	if let Some(provider) = providers
 		.iter()
 		.find(|config| config.id() == id)
 		.cloned()
-		.ok_or_else(|| err!(Request(NotFound("Unrecognized Identity Provider"))))
+	{
+		return Ok(provider);
+	}
+
+	if let Some(provider) = providers
+		.iter()
+		.find(|config| config.brand == id.to_lowercase())
+		.filter(|_| {
+			providers
+				.iter()
+				.filter(|config| config.brand == id.to_lowercase())
+				.count()
+				.eq(&1)
+		})
+		.cloned()
+	{
+		return Ok(provider);
+	}
+
+	Err!(Request(NotFound("Unrecognized Identity Provider")))
+}
+
+/// Get the discovered provider from the runtime cache. ID may be client_id or
+/// brand if brand is unique among provider configurations.
+#[implement(Providers)]
+async fn get_cached(&self, id: &str) -> Option<Provider> {
+	let providers = self.providers.read().await;
+
+	if let Some(provider) = providers.get(id).cloned() {
+		return Some(provider);
+	}
+
+	providers
+		.values()
+		.find(|provider| provider.brand == id.to_lowercase())
+		.filter(|_| {
+			providers
+				.values()
+				.filter(|provider| provider.brand == id.to_lowercase())
+				.count()
+				.eq(&1)
+		})
+		.cloned()
 }
 
 /// Configure an identity provider; takes the admin-configured instance from the

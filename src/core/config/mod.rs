@@ -2525,8 +2525,13 @@ pub struct IdentityProvider {
 	/// for your convenience. For certain brands we apply essential internal
 	/// workarounds specific to that provider; it is important to configure this
 	/// field properly when a provider needs to be recognized (like GitHub for
-	/// example). Several configured providers can share the same brand name. It
-	/// is not case-sensitive.
+	/// example).
+	///
+	/// Several configured providers can share the same brand name. It is not
+	/// case-sensitive. As a convenience for common simple deployments we can
+	/// identify this provider by brand in addition to the unique `client_id` if
+	/// and only if there is a single provider for the brand; see notes for
+	/// `client_id`.
 	#[serde(deserialize_with = "utils::string::de::to_lowercase")]
 	pub brand: String,
 
@@ -2534,6 +2539,11 @@ pub struct IdentityProvider {
 	/// registration. This ID then uniquely identifies this configuration
 	/// instance itself, becoming the identity provider's ID and must be unique
 	/// and remain unchanged.
+	///
+	/// As a convenience we also identify this config by `brand` if and only if
+	/// there is a single provider configured for a `brand`. Note carefully that
+	/// multiple providers configured with the same `brand` is not an error and
+	/// this provider will simply not be found when querying by `brand`.
 	pub client_id: String,
 
 	/// Secret key the provider generated for you along with the `client_id`
