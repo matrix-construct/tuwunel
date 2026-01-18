@@ -14,7 +14,7 @@ use ruma::{
 	events::{GlobalAccountDataEventType, ignored_user_list::IgnoredUserListEvent},
 };
 use tuwunel_core::{
-	Err, Result, debug_warn, err,
+	Err, Result, debug_warn, err, is_equal_to,
 	pdu::PduBuilder,
 	trace,
 	utils::{self, ReadyExt, result::LogErr, stream::TryIgnore},
@@ -238,26 +238,37 @@ impl Service {
 		// - a `None` password can be used to deactivate a LDAP user
 		// - a "*" password is used as the default password of an active LDAP user
 		//
-		// The above now applies to all non-password origin users including SSO
-		// users. Note that users with no origin are also password-origin users.
-		if password.is_some()
-			&& password != Some("*")
-			&& let Ok(origin) = self.origin(user_id).await
-			&& origin != "password"
+		// The above now applies to all non-password origin users by default unless an
+		// exception is made for that origin in the condition below. Note that users
+		// with no origin are also password-origin users.
+		let allowed_origins = ["password", "sso"];
+
+		if let Some(password) = password
+			&& password != "*"
 		{
-			return Err!(Request(InvalidParam("Cannot change password of an {origin:?} user.")));
+			let origin = self.origin(user_id).await;
+			let origin = origin.as_deref().unwrap_or("password");
+
+			if !allowed_origins.iter().any(is_equal_to!(&origin)) {
+				return Err!(Request(InvalidParam(
+					"Cannot change password of an {origin:?} user."
+				)));
+			}
 		}
 
-		password
-			.map(utils::hash::password)
-			.transpose()
-			.map_err(|e| {
-				err!(Request(InvalidParam("Password does not meet the requirements: {e}")))
-			})?
-			.map_or_else(
-				|| self.db.userid_password.insert(user_id, b""),
-				|hash| self.db.userid_password.insert(user_id, hash),
-			);
+		match password.map(utils::hash::password) {
+			| None => {
+				self.db.userid_password.insert(user_id, b"");
+			},
+			| Some(Ok(hash)) => {
+				self.db.userid_password.insert(user_id, hash);
+				self.db.userid_origin.insert(user_id, "password");
+			},
+			| Some(Err(e)) =>
+				return Err!(Request(InvalidParam(
+					"Password does not meet the requirements: {e}"
+				))),
+		}
 
 		Ok(())
 	}
