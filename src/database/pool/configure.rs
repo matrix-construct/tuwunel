@@ -33,12 +33,12 @@ use super::{QUEUE_LIMIT, WORKER_LIMIT};
 /// - `workers` Vector mapping hardware queues to the number of threads to spawn
 ///   in service of that queue. Systems with fewer queues than cores will set an
 ///   affinity mask for each thread to multiple cores based on the topology.
-///   Systems with equal or more hardware queue to cores will set a simple
-///   affinity for each thread in a pool.
+///   Systems with equal or more hardware queues than cores will set a single
+///   affinity for each thread.
 /// - `queues` Vector of software mpmc queues to create and the size of each
 ///   queue. Each indice is associated with a thread-pool of workers which it
-///   feeds from requests from various tokio tasks. When this queue reaches
-///   capacity the tokio task must yield.
+///   feeds requests from various tokio tasks. When this queue reaches capacity
+///   the tokio task must yield.
 #[tracing::instrument(
 	level = INFO_SPAN_LEVEL,
 	skip_all,
@@ -206,7 +206,7 @@ pub(super) fn configure(server: &Arc<Server>) -> (Vec<usize>, Vec<usize>, Vec<us
 	// Total number of workers to spawn.
 	let total_workers = workers.iter().sum::<usize>();
 
-	// Total capacity of all software qeueus.
+	// Total capacity of all software queues.
 	let total_capacity = queues.iter().sum::<usize>();
 
 	// Discount queues with zero capacity for a proper denominator.
