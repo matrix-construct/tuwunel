@@ -3,7 +3,7 @@ use std::env::consts::OS;
 use either::Either;
 use figment::Figment;
 
-use super::DEPRECATED_KEYS;
+use super::{DEPRECATED_KEYS, IdentityProvider};
 use crate::{Config, Err, Result, Server, debug, debug_info, debug_warn, error, warn};
 
 /// Performs check() with additional checks specific to reloading old config
@@ -315,6 +315,43 @@ pub fn check(config: &Config) -> Result {
 				"Client secret file was specified but is empty on identity provider №{i}"
 			));
 		}
+	}
+
+	if config
+		.identity_provider
+		.iter()
+		.filter(|idp| idp.default)
+		.count()
+		.gt(&1)
+	{
+		return Err!(Config(
+			"identity_provider.default",
+			"More than one identity_provider is configured with `default = true`. Only one can \
+			 be set to default.",
+		));
+	}
+
+	if !config.sso_custom_providers_page
+		&& config.identity_provider.len() > 1
+		&& config
+			.identity_provider
+			.iter()
+			.filter(|idp| idp.default)
+			.count()
+			.eq(&0)
+	{
+		let default = config
+			.identity_provider
+			.iter()
+			.next()
+			.map(IdentityProvider::id)
+			.expect("Check at least one provider is configured to reach here");
+
+		warn!(
+			"More than one identity_provider has been configured without any default selected. \
+			 To prevent this warning set `default = true` for one provider. Considering \
+			 {default} the default for now..."
+		);
 	}
 
 	Ok(())

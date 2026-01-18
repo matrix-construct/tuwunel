@@ -14,6 +14,7 @@ use ruma::{
 use serde::{Deserialize, Serialize};
 use tuwunel_core::{
 	Err, Result, at,
+	config::IdentityProvider,
 	debug::INFO_SPAN_LEVEL,
 	debug_info, debug_warn, err, info, utils,
 	utils::{
@@ -85,24 +86,19 @@ pub(crate) async fn sso_login_route(
 		)));
 	}
 
-	if services.config.identity_provider.len() > 1 {
-		return Err!(Config(
-			"sso_default_provider_id",
-			"This must be set when using more than one identity provider."
-		));
-	}
-
-	let idp_id = services
+	let default_idp_id = services
 		.config
 		.identity_provider
 		.iter()
-		.next()
-		.map(|idp| idp.client_id.clone())
+		.find(|idp| idp.default)
+		.or_else(|| services.config.identity_provider.iter().next())
+		.map(IdentityProvider::id)
+		.map(ToOwned::to_owned)
 		.unwrap_or_default();
 
 	let redirect_url = body.body.redirect_url;
 
-	handle_sso_login(&services, &client, idp_id, redirect_url)
+	handle_sso_login(&services, &client, default_idp_id, redirect_url)
 		.map_ok(|response| sso_login::v3::Response {
 			location: response.location,
 			cookie: response.cookie,

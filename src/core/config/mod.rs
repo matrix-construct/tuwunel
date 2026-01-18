@@ -2160,19 +2160,6 @@ pub struct Config {
 	#[serde(default = "default_one_time_key_limit")]
 	pub one_time_key_limit: usize,
 
-	/// This option is relevant when more than one identity_provider has been
-	/// configured and `sso_custom_providers_page` is false. Set this option to
-	/// the `client_id` of the provider to use for requests to
-	/// `/_matrix/client/v3/login/sso/redirect` (the url lacks a `client_id`).
-	///
-	/// This *must* be configured for some clients (e.g. fluffychat) to work
-	/// properly when the above conditions require it.
-	///
-	/// When only one identity_provider is configured that will be used as the
-	/// default and this does not have to be set.
-	#[serde(default)]
-	pub sso_default_provider_id: String,
-
 	/// Setting this option to true replaces the list of identity providers on
 	/// the client's login screen with a single button "Sign in with single
 	/// sign-on" linking to the URL `/_matrix/client/v3/login/sso/redirect`. The
@@ -2569,6 +2556,20 @@ pub struct IdentityProvider {
 	/// `/_matrix/client/unstable/login/sso/callback/<client_id>` where
 	/// `<client_id>` is the same one configured for this provider above.
 	pub callback_url: Option<Url>,
+
+	/// When more than one identity_provider has been configured and
+	/// `sso_custom_providers_page` is false this will determine the results
+	/// for the `/_matrix/client/v3/login/sso/redirect` endpoint (note the url
+	/// lacks a trailing `client_id`).
+	///
+	/// When only one identity_provider is configured it will be interpreted
+	/// as the default and this does not have to be set. Otherwise a default
+	/// *must* be selected for some clients (e.g. fluffychat) to work properly
+	/// when the above conditions require it. For compatibility if not set a
+	/// warning will be logged on startup and the first provider listed will be
+	/// considered the default.
+	#[serde(default)]
+	pub default: bool,
 
 	/// Optional display-name for this provider instance seen on the login page
 	/// by users. It defaults to `brand`. When configuring multiple providers
