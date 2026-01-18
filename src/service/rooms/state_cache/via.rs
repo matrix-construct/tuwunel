@@ -1,5 +1,4 @@
 use futures::{Stream, StreamExt, stream::iter};
-use itertools::Itertools;
 use ruma::{
 	OwnedServerName, RoomId, ServerName,
 	events::{StateEventType, room::power_levels::RoomPowerLevelsEventContent},
@@ -7,6 +6,7 @@ use ruma::{
 };
 use tuwunel_core::{
 	Result, implement,
+	itertools::Itertools,
 	utils::{StreamTools, stream::TryIgnore},
 	warn,
 };

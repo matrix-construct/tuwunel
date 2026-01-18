@@ -14,6 +14,7 @@ pub mod utils;
 
 pub use ::arrayvec;
 pub use ::http;
+pub use ::itertools;
 pub use ::jsonwebtoken as jwt;
 pub use ::ruma;
 pub use ::smallstr;

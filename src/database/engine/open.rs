@@ -4,9 +4,10 @@ use std::{
 	sync::{Arc, atomic::AtomicU32},
 };
 
-use itertools::Itertools;
 use rocksdb::{ColumnFamilyDescriptor, Options};
-use tuwunel_core::{Result, debug, debug_warn, implement, info, trace, warn};
+use tuwunel_core::{
+	Result, debug, debug_warn, implement, info, itertools::Itertools, trace, warn,
+};
 
 use super::{
 	Db, Engine, cf_opts::cf_options, context, db_opts::db_options, descriptor,

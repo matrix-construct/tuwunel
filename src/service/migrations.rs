@@ -1,7 +1,6 @@
 use std::cmp;
 
 use futures::{FutureExt, StreamExt};
-use itertools::Itertools;
 use ruma::{
 	OwnedUserId, RoomId, UserId,
 	events::{
@@ -11,6 +10,7 @@ use ruma::{
 };
 use tuwunel_core::{
 	Err, Result, debug, debug_info, debug_warn, error, info,
+	itertools::Itertools,
 	matrix::PduCount,
 	result::NotFound,
 	utils::{

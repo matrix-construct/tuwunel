@@ -3,7 +3,6 @@ use std::{collections::BTreeMap, net::IpAddr, time::Instant};
 use axum::extract::State;
 use axum_client_ip::InsecureClientIp;
 use futures::{FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt};
-use itertools::Itertools;
 use ruma::{
 	CanonicalJsonObject, OwnedEventId, OwnedRoomId, OwnedUserId, RoomId, ServerName, UserId,
 	api::{
@@ -25,6 +24,7 @@ use tuwunel_core::{
 	Err, Error, Result, debug,
 	debug::INFO_SPAN_LEVEL,
 	debug_warn, err, error,
+	itertools::Itertools,
 	result::LogErr,
 	trace,
 	utils::{

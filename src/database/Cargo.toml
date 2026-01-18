@@ -57,7 +57,6 @@ async-channel.workspace = true
 const-str.workspace = true
 ctor.workspace = true
 futures.workspace = true
-itertools.workspace = true
 log.workspace = true
 minicbor.workspace = true
 minicbor-serde.workspace = true

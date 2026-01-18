@@ -97,7 +97,6 @@ http.workspace = true
 image.workspace = true
 image.optional = true
 ipaddress.workspace = true
-itertools.workspace = true
 ldap3.workspace = true
 ldap3.optional = true
 log.workspace = true
