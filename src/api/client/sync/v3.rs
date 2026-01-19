@@ -966,11 +966,11 @@ async fn load_joined_room(
 
 	let send_notification_counts = last_notification_read
 		.flatten()
-		.is_none_or(|last_count| last_count.gt(&since));
+		.is_none_or(|last_count| last_count > since && last_count <= next_batch);
 
 	let send_notification_resets = last_notification_read
 		.flatten()
-		.is_some_and(|last_count| last_count.gt(&since));
+		.is_some_and(|last_count| last_count > since);
 
 	let send_notification_count_filter =
 		|count: &UInt| *count != uint!(0) || send_notification_resets;
