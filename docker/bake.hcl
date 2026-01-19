@@ -450,8 +450,16 @@ group "integration" {
     ]
 }
 
+variable "valgrind_max_workers" {
+    default = 128
+}
+
 variable "valgrind_flags" {
     default = "--error-exitcode=1 --exit-on-first-error=yes --undef-value-errors=no --leak-check=no"
+}
+
+variable "valgrind_testee_args" {
+    default = "-Odb_pool_max_workers=${valgrind_max_workers}"
 }
 
 target "rust-sdk-valgrind" {
@@ -469,7 +477,7 @@ target "rust-sdk-valgrind" {
     }
     args = {
         VALGRINDFLAGS = "${valgrind_flags}"
-        mrsdk_testee = "valgrind ${valgrind_flags} /usr/bin/tuwunel"
+        mrsdk_testee = "valgrind ${valgrind_flags} /usr/bin/tuwunel ${valgrind_testee_args}"
         mrsdk_test_args = ""
         mrsdk_startup_delay = "30s"
         mrsdk_skip_list =<<EOF
@@ -522,6 +530,7 @@ target "integ-valgrind" {
         input = elem("target:build-tests", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target])
     }
     args = {
+        VALGRIND_MAX_WORKERS = "${valgrind_max_workers}"
         VALGRINDFLAGS = "${valgrind_flags}"
         cargo_cmd = "valgrind test"
         cargo_args = "--test=*"

@@ -1987,8 +1987,7 @@ pub struct Config {
 	/// Sets the number of worker threads in the frontend-pool of the database.
 	/// This number should reflect the I/O capabilities of the system,
 	/// such as the queue-depth or the number of simultaneous requests in
-	/// flight. Defaults to 32 or four times the number of CPU cores, whichever
-	/// is greater.
+	/// flight. Defaults to 32 times the number of CPU cores.
 	///
 	/// Note: This value is only used if db_pool_affinity is disabled or not
 	/// detected on the system, otherwise it is determined automatically.

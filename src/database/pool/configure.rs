@@ -69,7 +69,8 @@ pub(super) fn configure(server: &Arc<Server>) -> (Vec<usize>, Vec<usize>, Vec<us
 	// The default worker count is masked-on if we didn't find better information.
 	let default_worker_count = topology_detected
 		.is_false()
-		.then_some(config.db_pool_workers);
+		.then_some(config.db_pool_workers)
+		.map(|workers| workers.saturating_mul(num_cores));
 
 	// Sum the total number of possible tags. When no hardware detected this will
 	// default to the default_worker_count. Note well that the thread-worker model
