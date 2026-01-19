@@ -58,10 +58,10 @@ on:
         default: 'true'
       containers:
         type: string
-        default: '[]'
+        default: '["docker", "oci"]'
       distros:
         type: string
-        default: '[]'
+        default: '["deb", "rpm", "nix"]'
 
 jobs:
   book:

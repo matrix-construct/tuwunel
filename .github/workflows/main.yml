@@ -95,15 +95,15 @@ jobs:
       default_rust_targets: '["x86_64-unknown-linux-gnu"]'
       default_sys_targets: '["x86_64-v1-linux-gnu", "x86_64-v3-linux-gnu"]'
       default_machines: '["X64"]'
-      default_package_containers: '[]'
-      default_package_distros: '[]'
+      default_package_containers: '["docker", "oci"]'
+      default_package_distros: '["deb", "rpm", "nix"]'
       is_release: ${{contains(github.ref, 'tags/v')}}
       is_branch: ${{contains(github.ref, 'refs/heads')}}
       is_pull: ${{contains(github.ref, 'refs/pull')}}
       is_main: ${{github.ref == 'refs/heads/main'}}
       is_test: ${{github.ref == 'refs/heads/test'}}
       is_dev: ${{contains(github.ref, 'refs/heads') && github.ref != 'refs/heads/main' && github.ref != 'refs/heads/test'}}
-      is_fat: ${{contains(github.ref, 'tags/v') && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/test')}}
+      is_fat: ${{contains(github.ref, 'tags/v') || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/test'}}
 
     outputs:
       cargo_profiles: ${{inputs.cargo_profiles || vars.CARGO_PROFILES || env.default_cargo_profiles}}
@@ -338,7 +338,6 @@ jobs:
     if: >
       !failure() && !cancelled()
       && fromJSON(needs.init.outputs.enable_package)
-      && !fromJSON(needs.init.outputs.is_fat)
       && !contains(needs.init.outputs.pipeline, '[ci only it]')
       && !contains(needs.init.outputs.pipeline, '[ci no build]')
       && !contains(needs.init.outputs.pipeline, '[ci no package]')
@@ -407,7 +406,6 @@ jobs:
     if: >
       !failure() && !cancelled()
       && fromJSON(needs.init.outputs.enable_publish)
-      && !fromJSON(needs.init.outputs.is_fat)
       && !contains(needs.init.outputs.pipeline, '[ci only it]')
       && !contains(needs.init.outputs.pipeline, '[ci no build]')
       && !contains(needs.init.outputs.pipeline, '[ci no package]')
