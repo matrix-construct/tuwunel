@@ -6,7 +6,7 @@ use std::{
 use futures::{FutureExt, StreamExt, TryFutureExt, TryStreamExt, future::try_join};
 use ruma::{OwnedEventId, RoomId, RoomVersionId};
 use tuwunel_core::{
-	Result, apply, err, implement,
+	Result, apply, debug, debug_warn, err, implement,
 	matrix::{Event, StateMap, state_res::AuthSet},
 	ref_at, trace,
 	utils::{
@@ -42,10 +42,13 @@ where
 		.services
 		.state
 		.pdu_shortstatehash(prev_event_id)
+		.inspect_err(|e| debug_warn!(?prev_event_id, "Missing state at prev_event: {e}"))
 		.await
 	else {
 		return Ok(None);
 	};
+
+	debug!(?prev_event_id, ?prev_event_sstatehash, "Resolving state at prev_event.");
 
 	let prev_event = self
 		.services
@@ -62,6 +65,13 @@ where
 
 	let (prev_event, mut state) = try_join(prev_event, state).await?;
 
+	debug!(
+		?prev_event_id,
+		?prev_event_sstatehash,
+		state_ids = state.len(),
+		"Resolved state at prev_event.",
+	);
+
 	if let Some(state_key) = prev_event.state_key() {
 		let prev_event_type = prev_event.event_type().to_cow_str().into();
 
@@ -73,6 +83,14 @@ where
 
 		state.insert(shortstatekey, prev_event.event_id().into());
 		// Now it's the state after the pdu
+		debug!(
+			?prev_event_id,
+			?prev_event_type,
+			?prev_event_sstatehash,
+			?shortstatekey,
+			state_ids = state.len(),
+			"Added prev_event to state.",
+		);
 	}
 
 	debug_assert!(!state.is_empty(), "should be returning None for empty HashMap result");
@@ -101,14 +119,16 @@ where
 		.prev_events()
 		.try_stream()
 		.broad_and_then(|prev_event_id| {
-			let prev_event = self.services.timeline.get_pdu(prev_event_id);
-
 			let sstatehash = self
 				.services
 				.state
 				.pdu_shortstatehash(prev_event_id);
 
-			try_join(sstatehash, prev_event)
+			let prev_event = self.services.timeline.get_pdu(prev_event_id);
+
+			try_join(sstatehash, prev_event).inspect_err(move |e| {
+				debug_warn!(?prev_event_id, "Missing state at prev_event: {e}");
+			})
 		})
 		.try_collect::<HashMap<_, _>>()
 		.await
@@ -133,12 +153,12 @@ where
 	trace!("Resolving state");
 	let Ok(new_state) = self
 		.state_resolution(room_version_id, fork_states, auth_chain_sets)
+		.inspect_ok(|_| trace!("State resolution done."))
 		.await
 	else {
 		return Ok(None);
 	};
 
-	trace!("State resolution done.");
 	new_state
 		.into_iter()
 		.stream()
@@ -149,7 +169,8 @@ where
 				.map(move |shortstatekey| (shortstatekey, event_id))
 				.await
 		})
-		.collect()
+		.collect::<HashMap<_, _>>()
+		.inspect(|state| trace!(state = state.len(), "Created shortstatekeys."))
 		.map(Some)
 		.map(Ok)
 		.await
@@ -191,6 +212,13 @@ where
 		.chain(leaf.await.into_iter().flatten().stream())
 		.collect()
 		.await;
+
+	trace!(
+		prev_event = ?prev_event.event_id(),
+		?sstatehash,
+		leaf_states = leaf_state_after_event.len(),
+		"leaf state after event"
+	);
 
 	let starting_events = leaf_state_after_event
 		.iter()

@@ -8,7 +8,7 @@ use futures::{Future, FutureExt, Stream, StreamExt};
 use ruma::OwnedEventId;
 
 use crate::{
-	Result,
+	Result, debug,
 	matrix::Event,
 	utils::stream::{IterStream, automatic_width},
 };
@@ -52,6 +52,12 @@ where
 				.await;
 
 			let mut state = state.subgraph.lock().expect("locked");
+			debug!(
+				input_event = conflicted_event_ids.len(),
+				output_events = state.len(),
+				"conflicted subgraph state"
+			);
+
 			take(&mut *state)
 		})
 		.map(Set::into_iter)

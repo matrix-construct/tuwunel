@@ -19,7 +19,12 @@ use crate::rooms::{
 };
 
 #[implement(super::Service)]
-#[tracing::instrument(name = "upgrade", level = "debug", skip_all, ret(Debug))]
+#[tracing::instrument(
+	name = "upgrade",
+	level = "debug",
+	skip_all,
+	ret(level = "debug")
+)]
 pub(super) async fn upgrade_outlier_to_timeline_pdu(
 	&self,
 	origin: &ServerName,
@@ -30,13 +35,14 @@ pub(super) async fn upgrade_outlier_to_timeline_pdu(
 	create_event_id: &EventId,
 ) -> Result<Option<(RawPduId, bool)>> {
 	// Skip the PDU if we already have it as a timeline event
-	if let Ok(pduid) = self
+	if let Ok(pdu_id) = self
 		.services
 		.timeline
 		.get_pdu_id(incoming_pdu.event_id())
 		.await
 	{
-		return Ok(Some((pduid, false)));
+		debug!(?pdu_id, "Exists.");
+		return Ok(Some((pdu_id, false)));
 	}
 
 	if self
@@ -48,17 +54,19 @@ pub(super) async fn upgrade_outlier_to_timeline_pdu(
 		return Err!(Request(InvalidParam("Event has been soft failed")));
 	}
 
-	debug!("Upgrading to timeline pdu");
+	trace!("Upgrading to timeline pdu");
+
 	let timer = Instant::now();
 	let room_rules = room_version::rules(room_version)?;
 
+	trace!(format = ?room_rules.event_format, "Checking format");
 	state_res::check_pdu_format(&val, &room_rules.event_format)?;
 
 	// 10. Fetch missing state and auth chain events by calling /state_ids at
 	//     backwards extremities doing all the checks in this list starting at 1.
 	//     These are not timeline events.
+	trace!("Resolving state at event");
 
-	debug!("Resolving state at event");
 	let mut state_at_incoming_event = if incoming_pdu.prev_events().count() == 1 {
 		self.state_at_incoming_degree_one(&incoming_pdu)
 			.await?
@@ -78,8 +86,8 @@ pub(super) async fn upgrade_outlier_to_timeline_pdu(
 	let state_at_incoming_event =
 		state_at_incoming_event.expect("we always set this to some above");
 
-	debug!("Performing auth check");
 	// 11. Check the auth of the event passes based on the state of the event
+
 	let state_fetch = async |k: StateEventType, s: StateKey| {
 		let shortstatekey = self
 			.services
@@ -99,9 +107,11 @@ pub(super) async fn upgrade_outlier_to_timeline_pdu(
 	};
 
 	let event_fetch = async |event_id: OwnedEventId| self.event_fetch(&event_id).await;
+
+	trace!("Performing auth check");
 	state_res::auth_check(&room_rules, &incoming_pdu, &event_fetch, &state_fetch).await?;
 
-	debug!("Gathering auth events");
+	trace!("Gathering auth events");
 	let auth_events = self
 		.services
 		.state
@@ -123,10 +133,11 @@ pub(super) async fn upgrade_outlier_to_timeline_pdu(
 			.ok_or_else(|| err!(Request(NotFound("state event not found"))))
 	};
 
+	trace!("Performing auth check");
 	state_res::auth_check(&room_rules, &incoming_pdu, &event_fetch, &state_fetch).await?;
 
 	// Soft fail check before doing state res
-	debug!("Performing soft-fail check");
+	trace!("Performing soft-fail check");
 	let soft_fail = match incoming_pdu.redacts_id(room_version) {
 		| None => false,
 		| Some(redact_id) =>
@@ -138,7 +149,6 @@ pub(super) async fn upgrade_outlier_to_timeline_pdu(
 	};
 
 	// 13. Use state resolution to find new room state
-
 	// We start looking at current room state now, so lets lock the room
 	trace!("Locking the room");
 	let state_lock = self.services.state.mutex.lock(room_id).await;
@@ -170,11 +180,12 @@ pub(super) async fn upgrade_outlier_to_timeline_pdu(
 		.await;
 
 	debug!(
-		"Retained {} extremities checked against {} prev_events",
-		extremities.len(),
-		incoming_pdu.prev_events().count()
+		retained = extremities.len(),
+		prev_events = incoming_pdu.prev_events().count(),
+		"Retained extremities checked against prev_events.",
 	);
 
+	trace!("Compressing state...");
 	let state_ids_compressed: Arc<CompressedState> = self
 		.services
 		.state_compressor
@@ -188,34 +199,49 @@ pub(super) async fn upgrade_outlier_to_timeline_pdu(
 		.await;
 
 	if incoming_pdu.state_key().is_some() {
-		debug!("Event is a state-event. Deriving new room state");
-
 		// We also add state after incoming event to the fork states
 		let mut state_after = state_at_incoming_event.clone();
 		if let Some(state_key) = incoming_pdu.state_key() {
+			let event_id = incoming_pdu.event_id();
+			let event_type = incoming_pdu.kind();
 			let shortstatekey = self
 				.services
 				.short
-				.get_or_create_shortstatekey(&incoming_pdu.kind().to_string().into(), state_key)
+				.get_or_create_shortstatekey(&event_type.to_string().into(), state_key)
 				.await;
 
-			let event_id = incoming_pdu.event_id();
 			state_after.insert(shortstatekey, event_id.to_owned());
+			// Now it's the state after the event.
+			debug!(
+				?event_id,
+				?event_type,
+				?state_key,
+				?shortstatekey,
+				state_after = state_after.len(),
+				"Adding event to state."
+			);
 		}
 
+		trace!("Resolving new room state.");
 		let new_room_state = self
 			.resolve_state(room_id, room_version, state_after)
 			.boxed()
 			.await?;
 
 		// Set the new room state to the resolved state
-		debug!("Forcing new room state");
+		trace!("Saving resolved state.");
 		let HashSetCompressStateEvent { shortstatehash, added, removed } = self
 			.services
 			.state_compressor
 			.save_state(room_id, new_room_state)
 			.await?;
 
+		debug!(
+			?shortstatehash,
+			added = added.len(),
+			removed = removed.len(),
+			"Forcing new room state."
+		);
 		self.services
 			.state
 			.force_state(room_id, shortstatehash, added, removed, &state_lock)

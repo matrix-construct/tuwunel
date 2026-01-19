@@ -27,6 +27,11 @@ use tuwunel_core::{
 /// c. Ask origin server over federation
 /// d. TODO: Ask other servers over federation?
 #[implement(super::Service)]
+#[tracing::instrument(
+	level = "debug",
+	skip_all,
+	fields(%origin),
+)]
 pub(super) async fn fetch_auth<'a, Events>(
 	&self,
 	origin: &ServerName,
@@ -96,6 +101,12 @@ where
 }
 
 #[implement(super::Service)]
+#[tracing::instrument(
+	name = "chain",
+	level = "trace",
+	skip_all,
+	fields(%event_id),
+)]
 async fn fetch_auth_chain(
 	&self,
 	origin: &ServerName,
@@ -127,7 +138,7 @@ async fn fetch_auth_chain(
 			start: Duration::from_secs(2 * 60),
 			end: Duration::from_secs(60 * 60 * 8),
 		}) {
-			debug_warn!("Backing off from {next_id}");
+			debug_warn!("Backed off from {next_id}");
 			continue;
 		}
 
@@ -144,6 +155,7 @@ async fn fetch_auth_chain(
 			.await
 			.inspect_err(|e| debug_error!("Failed to fetch event {next_id}: {e}"))
 		else {
+			debug_warn!("Backing off from {next_id}");
 			self.back_off(&next_id);
 			continue;
 		};

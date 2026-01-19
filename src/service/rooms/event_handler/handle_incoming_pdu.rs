@@ -45,7 +45,7 @@ use crate::rooms::timeline::RawPduId;
 	level = INFO_SPAN_LEVEL,
 	skip_all,
 	fields(%room_id, %event_id),
-	ret(Debug),
+	ret(level = "debug"),
 )]
 pub async fn handle_incoming_pdu<'a>(
 	&'a self,
@@ -57,7 +57,7 @@ pub async fn handle_incoming_pdu<'a>(
 ) -> Result<Option<(RawPduId, bool)>> {
 	// 1. Skip the PDU if we already have it as a timeline event
 	if let Ok(pdu_id) = self.services.timeline.get_pdu_id(event_id).await {
-		trace!(?event_id, "exists");
+		debug!(?pdu_id, "Exists.");
 		return Ok(Some((pdu_id, false)));
 	}
 
@@ -116,6 +116,10 @@ pub async fn handle_incoming_pdu<'a>(
 
 	// 8. if not timeline event: stop
 	if !is_timeline_event {
+		debug!(
+			kind = ?incoming_pdu.event_type(),
+			"Not a timeline event.",
+		);
 		return Ok(None);
 	}
 
@@ -128,6 +132,11 @@ pub async fn handle_incoming_pdu<'a>(
 		.origin_server_ts();
 
 	if incoming_pdu.origin_server_ts() < first_ts_in_room {
+		debug!(
+			origin_server_ts = ?incoming_pdu.origin_server_ts(),
+			?first_ts_in_room,
+			"Skipping old event."
+		);
 		return Ok(None);
 	}
 
@@ -137,11 +146,11 @@ pub async fn handle_incoming_pdu<'a>(
 		.fetch_prev(origin, room_id, incoming_pdu.prev_events(), &room_version, first_ts_in_room)
 		.await?;
 
-	debug!(
-		events = ?sorted_prev_events,
+	trace!(
+		events = sorted_prev_events.len(),
+		event_ids = ?sorted_prev_events,
 		"Handling previous events"
 	);
-
 	sorted_prev_events
 		.iter()
 		.try_stream()

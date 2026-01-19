@@ -92,8 +92,19 @@ where
 	// Split the unconflicted state map and the conflicted state set.
 	let (unconflicted_state, conflicted_states) = split_conflicted_state(state_maps).await;
 
-	trace!(?unconflicted_state, unconflicted = unconflicted_state.len(), "unresolved state");
-	debug!(?conflicted_states, conflicted = conflicted_states.len(), "unresolved states");
+	debug!(
+		unconflicted = unconflicted_state.len(),
+		conflicted = conflicted_states.len(),
+		"unresolved states",
+	);
+
+	trace!(
+		?unconflicted_state,
+		?conflicted_states,
+		unconflicted = unconflicted_state.len(),
+		conflicted = conflicted_states.len(),
+		"unresolved states",
+	);
 
 	if conflicted_states.is_empty() {
 		return Ok(unconflicted_state.into_iter().collect());

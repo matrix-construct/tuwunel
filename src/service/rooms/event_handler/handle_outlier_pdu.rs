@@ -23,6 +23,8 @@ pub(super) async fn handle_outlier_pdu(
 	room_version: &RoomVersionId,
 	auth_events_known: bool,
 ) -> Result<(PduEvent, CanonicalJsonObject)> {
+	debug!(?event_id, ?auth_events_known, "handle outlier");
+
 	// 1. Remove unsigned field
 	pdu_json.remove("unsigned");
 

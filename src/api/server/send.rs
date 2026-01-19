@@ -28,7 +28,9 @@ use tuwunel_core::{
 	result::LogErr,
 	trace,
 	utils::{
-		IterStream, ReadyExt, millis_since_unix_epoch,
+		IterStream, ReadyExt,
+		debug::str_truncated,
+		millis_since_unix_epoch,
 		stream::{BroadbandExt, TryBroadbandExt, automatic_width},
 	},
 	warn,
@@ -52,7 +54,8 @@ type Pdu = (OwnedRoomId, OwnedEventId, CanonicalJsonObject);
 	skip_all,
 	fields(
 		%client,
-		origin = body.origin().as_str()
+		origin = body.origin().as_str(),
+		txn = str_truncated(body.transaction_id.as_str(), 20),
 	),
 )]
 pub(crate) async fn send_transaction_message_route(
@@ -83,8 +86,6 @@ pub(crate) async fn send_transaction_message_route(
 		pdus = body.pdus.len(),
 		edus = body.edus.len(),
 		elapsed = ?txn_start_time.elapsed(),
-		id = ?body.transaction_id,
-		origin =?body.origin(),
 		"Starting txn",
 	);
 
@@ -104,16 +105,20 @@ pub(crate) async fn send_transaction_message_route(
 		.filter_map(Result::ok)
 		.stream();
 
+	trace!(
+		elapsed = ?txn_start_time.elapsed(),
+		"Parsed txn",
+	);
+
 	let results = handle(&services, &client, body.origin(), txn_start_time, pdus, edus).await?;
 
 	debug!(
 		pdus = body.pdus.len(),
 		edus = body.edus.len(),
 		elapsed = ?txn_start_time.elapsed(),
-		id = ?body.transaction_id,
-		origin =?body.origin(),
 		"Finished txn",
 	);
+
 	for (id, result) in &results {
 		if let Err(e) = result
 			&& matches!(e, Error::BadRequest(ErrorKind::NotFound, _))
@@ -140,11 +145,12 @@ async fn handle(
 ) -> Result<ResolvedMap> {
 	// group pdus by room
 	let pdus = pdus
+		.enumerate()
 		.collect()
 		.map(|mut pdus: Vec<_>| {
-			pdus.sort_by(|(room_a, ..), (room_b, ..)| room_a.cmp(room_b));
+			pdus.sort_by(|(_, (room_a, ..)), (_, (room_b, ..))| room_a.cmp(room_b));
 			pdus.into_iter()
-				.into_grouping_map_by(|(room_id, ..)| room_id.clone())
+				.into_grouping_map_by(|(_, (room_id, ..))| room_id.clone())
 				.collect()
 		})
 		.await;
@@ -164,7 +170,10 @@ async fn handle(
 		.await?;
 
 	// evaluate edus after pdus, at least for now.
-	edus.for_each_concurrent(automatic_width(), |edu| handle_edu(services, client, origin, edu))
+	edus.enumerate()
+		.for_each_concurrent(automatic_width(), |(i, edu)| {
+			handle_edu(services, client, origin, i, edu)
+		})
 		.await;
 
 	Ok(results)
@@ -176,7 +185,7 @@ async fn handle_room(
 	origin: &ServerName,
 	txn_start_time: &Instant,
 	ref room_id: OwnedRoomId,
-	pdus: impl Iterator<Item = Pdu> + Send,
+	pdus: impl Iterator<Item = (usize, Pdu)> + Send,
 ) -> Result<ResolvedMap> {
 	let _room_lock = services
 		.event_handler
@@ -184,8 +193,9 @@ async fn handle_room(
 		.lock(room_id)
 		.await;
 
-	pdus.try_stream()
-		.and_then(async |(room_id, event_id, value)| {
+	pdus.enumerate()
+		.try_stream()
+		.and_then(async |(ri, (ti, (room_id, event_id, value)))| {
 			services.server.check_running()?;
 			let pdu_start_time = Instant::now();
 			let result = services
@@ -195,9 +205,13 @@ async fn handle_room(
 				.await;
 
 			debug!(
+				%event_id,
+				%room_id,
+				ri,
+				ti,
 				pdu_elapsed = ?pdu_start_time.elapsed(),
 				txn_elapsed = ?txn_start_time.elapsed(),
-				"Finished PDU {event_id}",
+				"Finished PDU",
 			);
 
 			Ok((event_id, result))
@@ -207,7 +221,13 @@ async fn handle_room(
 		.await
 }
 
-async fn handle_edu(services: &Services, client: &IpAddr, origin: &ServerName, edu: Edu) {
+async fn handle_edu(
+	services: &Services,
+	client: &IpAddr,
+	origin: &ServerName,
+	i: usize,
+	edu: Edu,
+) {
 	match edu {
 		| Edu::Presence(presence) if services.server.config.allow_incoming_presence =>
 			handle_edu_presence(services, client, origin, presence).await,
@@ -231,9 +251,9 @@ async fn handle_edu(services: &Services, client: &IpAddr, origin: &ServerName, e
 		| Edu::SigningKeyUpdate(content) =>
 			handle_edu_signing_key_update(services, client, origin, content).await,
 
-		| Edu::_Custom(ref _custom) => debug_warn!(?edu, "received custom/unknown EDU"),
+		| Edu::_Custom(ref _custom) => debug_warn!(?i, ?edu, "received custom/unknown EDU"),
 
-		| _ => trace!(?edu, "skipped"),
+		| _ => trace!(?i, ?edu, "skipped"),
 	}
 }
 
