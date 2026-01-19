@@ -1987,8 +1987,7 @@ pub struct Config {
 	/// Sets the number of worker threads in the frontend-pool of the database.
 	/// This number should reflect the I/O capabilities of the system,
 	/// such as the queue-depth or the number of simultaneous requests in
-	/// flight. Defaults to 32 or four times the number of CPU cores, whichever
-	/// is greater.
+	/// flight. Defaults to 32 times the number of CPU cores.
 	///
 	/// Note: This value is only used if db_pool_affinity is disabled or not
 	/// detected on the system, otherwise it is determined automatically.
@@ -1996,6 +1995,18 @@ pub struct Config {
 	/// default: 32
 	#[serde(default = "default_db_pool_workers")]
 	pub db_pool_workers: usize,
+
+	/// Lower-limit for the number threads per worker group. This applies in all
+	/// cases, whether hardware is detected or not. It also takes precedence
+	/// over `db_pool_max_workers` if necessary.
+	///
+	/// This option is intended for many-core systems where hardware is not
+	/// detected; in such cases conservative system-wide estimates are split
+	/// too finely, below the actual capabilities.
+	///
+	/// default: 16
+	#[serde(default = "default_db_pool_workers_min")]
+	pub db_pool_workers_min: usize,
 
 	/// When db_pool_affinity is enabled and detected, the size of any worker
 	/// group will not exceed the determined value. This is necessary when
@@ -3179,6 +3190,8 @@ fn default_db_pool_workers() -> usize {
 		.saturating_mul(4)
 		.clamp(32, 1024)
 }
+
+fn default_db_pool_workers_min() -> usize { 16 }
 
 fn default_db_pool_workers_limit() -> usize { 64 }
 

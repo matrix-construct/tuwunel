@@ -1712,13 +1712,22 @@
 # Sets the number of worker threads in the frontend-pool of the database.
 # This number should reflect the I/O capabilities of the system,
 # such as the queue-depth or the number of simultaneous requests in
-# flight. Defaults to 32 or four times the number of CPU cores, whichever
-# is greater.
+# flight. Defaults to 32 times the number of CPU cores.
 #
 # Note: This value is only used if db_pool_affinity is disabled or not
 # detected on the system, otherwise it is determined automatically.
 #
 #db_pool_workers = 32
+
+# Lower-limit for the number threads per worker group. This applies in all
+# cases, whether hardware is detected or not. It also takes precedence
+# over `db_pool_max_workers` if necessary.
+#
+# This option is intended for many-core systems where hardware is not
+# detected; in such cases conservative system-wide estimates are split
+# too finely, below the actual capabilities.
+#
+#db_pool_workers_min = 16
 
 # When db_pool_affinity is enabled and detected, the size of any worker
 # group will not exceed the determined value. This is necessary when
