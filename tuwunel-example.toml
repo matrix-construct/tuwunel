@@ -311,9 +311,9 @@
 #
 #dns_case_randomization = false
 
-# Max request size for file uploads in bytes. Defaults to 20MB.
+# Max request size for file uploads in bytes.
 #
-#max_request_size = 20971520
+#max_request_size = 24 MiB
 
 # This item is undocumented. Please contribute documentation for it.
 #

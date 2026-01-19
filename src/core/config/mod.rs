@@ -398,9 +398,9 @@ pub struct Config {
 	#[serde(default)]
 	pub dns_case_randomization: bool,
 
-	/// Max request size for file uploads in bytes. Defaults to 20MB.
+	/// Max request size for file uploads in bytes.
 	///
-	/// default: 20971520
+	/// default: 24 MiB
 	#[serde(default = "default_max_request_size")]
 	pub max_request_size: usize,
 
@@ -2976,9 +2976,7 @@ fn default_dns_timeout() -> u64 { 10 }
 
 fn default_ip_lookup_strategy() -> u8 { 5 }
 
-fn default_max_request_size() -> usize {
-	20 * 1024 * 1024 // Default to 20 MB
-}
+fn default_max_request_size() -> usize { 24 * 1024 * 1024 }
 
 fn default_request_conn_timeout() -> u64 { 10 }
 
