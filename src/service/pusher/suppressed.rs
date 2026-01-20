@@ -1,3 +1,8 @@
+//! Deferred push suppression queues.
+//!
+//! Stores suppressed push events in memory until they can be flushed. This is
+//! intentionally in-memory only: suppressed events are discarded on restart.
+
 use std::collections::{HashMap, VecDeque};
 use std::sync::Mutex;
 
@@ -50,6 +55,7 @@ impl SuppressedQueue {
 	}
 }
 
+/// Enqueue a PDU for later push delivery when suppression is active.
 #[implement(super::Service)]
 pub fn queue_suppressed_push(
 	&self,
@@ -123,6 +129,7 @@ pub fn queue_suppressed_push(
 	true
 }
 
+/// Take and remove all suppressed PDUs for a given user + pushkey.
 #[implement(super::Service)]
 pub fn take_suppressed_for_pushkey(
 	&self,
@@ -149,6 +156,7 @@ pub fn take_suppressed_for_pushkey(
 		.collect()
 }
 
+/// Take and remove all suppressed PDUs for a given user across all pushkeys.
 #[implement(super::Service)]
 pub fn take_suppressed_for_user(
 	&self,
@@ -172,6 +180,7 @@ pub fn take_suppressed_for_user(
 		.collect()
 }
 
+/// Clear suppressed PDUs for a specific room (across all pushkeys).
 #[implement(super::Service)]
 pub fn clear_suppressed_room(&self, user_id: &UserId, room_id: &RoomId) -> usize {
 	let mut inner = self.suppressed.lock();
@@ -196,6 +205,7 @@ pub fn clear_suppressed_room(&self, user_id: &UserId, room_id: &RoomId) -> usize
 	removed
 }
 
+/// Clear suppressed PDUs for a specific pushkey.
 #[implement(super::Service)]
 pub fn clear_suppressed_pushkey(&self, user_id: &UserId, pushkey: &str) -> usize {
 	let mut inner = self.suppressed.lock();

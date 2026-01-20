@@ -1,3 +1,9 @@
+//! Presence aggregation across devices.
+//!
+//! This module keeps per-device presence snapshots and computes a single
+//! user-level presence view. Aggregation applies idle/offline thresholds,
+//! favors higher-ranked states, and prunes stale devices to cap memory.
+
 use std::collections::HashMap;
 
 use ruma::{OwnedDeviceId, OwnedUserId, UInt, UserId, presence::PresenceState};
@@ -35,12 +41,15 @@ pub(crate) struct PresenceAggregator {
 }
 
 impl PresenceAggregator {
+	/// Create a new, empty aggregator.
 	pub(crate) fn new() -> Self { Self::default() }
 
+	/// Clear all tracked device state.
 	pub(crate) async fn clear(&self) {
 		self.inner.write().await.clear();
 	}
 
+	/// Update presence state for a single device.
 	pub(crate) async fn update(
 		&self,
 		user_id: &UserId,
@@ -76,6 +85,10 @@ impl PresenceAggregator {
 		}
 	}
 
+	/// Aggregate per-device state into a single presence snapshot.
+	///
+	/// Prunes devices that have not updated within the offline timeout to keep
+	/// the map bounded.
 	pub(crate) async fn aggregate(
 		&self,
 		user_id: &UserId,
