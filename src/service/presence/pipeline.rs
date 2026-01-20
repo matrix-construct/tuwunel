@@ -7,14 +7,19 @@
 use std::time::Duration;
 
 use futures::TryFutureExt;
-use ruma::{DeviceId, OwnedUserId, UInt, UserId, presence::PresenceState};
+use ruma::{
+	DeviceId, OwnedUserId, UInt, UserId,
+	events::presence::PresenceEvent,
+	presence::PresenceState,
+};
+use tokio::time::sleep;
 use tuwunel_core::{
 	Error, Result, debug, error, trace,
 	result::LogErr,
 	utils::{future::OptionFutureExt, option::OptionExt},
 };
 
-use super::{aggregate, Service};
+use super::{TimerFired, aggregate, Service};
 
 impl Service {
 	fn device_key(device_id: Option<&DeviceId>, is_remote: bool) -> aggregate::DeviceKey {
@@ -52,6 +57,30 @@ impl Service {
 				error!("Failed to add presence timer: {}", e);
 				Error::bad_database("Failed to add presence timer")
 			})
+	}
+
+	fn refresh_skip_decision(
+		refresh_window_ms: Option<u64>,
+		last_event: Option<&PresenceEvent>,
+		last_count: Option<u64>,
+	) -> Option<(u64, u64)> {
+		let (Some(refresh_ms), Some(event), Some(count)) =
+			(refresh_window_ms, last_event, last_count)
+		else {
+			return None;
+		};
+
+		let last_last_active_ago: u64 = event
+			.content
+			.last_active_ago
+			.unwrap_or_default()
+			.into();
+
+		(last_last_active_ago < refresh_ms).then_some((count, last_last_active_ago))
+	}
+
+	fn timer_is_stale(expected_count: u64, current_count: u64) -> bool {
+		expected_count != current_count
 	}
 
 	async fn apply_device_presence_update(
@@ -110,26 +139,26 @@ impl Service {
 		};
 
 		if !state_changed {
-			if let (Some(refresh_ms), Some(event), Some(count)) =
-				(refresh_window_ms, &last_event, last_count)
-			{
-				let last_last_active_ago: u64 = event
-					.content
-					.last_active_ago
-					.unwrap_or_default()
-					.into();
-				if last_last_active_ago < refresh_ms {
-					self.schedule_presence_timer(user_id, &event.content.presence, count)
-						.log_err()
-						.ok();
-					debug!(
-						?user_id,
-						?state,
-						last_last_active_ago,
-						"Skipping presence update: refresh window (timer rescheduled)"
-					);
-					return Ok(());
-				}
+			if let Some((count, last_last_active_ago)) = Self::refresh_skip_decision(
+				refresh_window_ms,
+				last_event.as_ref(),
+				last_count,
+			) {
+				let presence = last_event
+					.as_ref()
+					.map(|event| &event.content.presence)
+					.unwrap_or(state);
+
+				self.schedule_presence_timer(user_id, presence, count)
+					.log_err()
+					.ok();
+				debug!(
+					?user_id,
+					?state,
+					last_last_active_ago,
+					"Skipping presence update: refresh window (timer rescheduled)"
+				);
+				return Ok(());
 			}
 		}
 
@@ -284,7 +313,7 @@ impl Service {
 			| Err(_) => return Ok(()),
 		};
 
-		if current_count != expected_count {
+		if Self::timer_is_stale(expected_count, current_count) {
 			trace!(
 				?user_id,
 				expected_count,
@@ -354,5 +383,52 @@ impl Service {
 		.await?;
 
 		Ok(())
+	}
+}
+
+pub(super) async fn presence_timer(
+	user_id: OwnedUserId,
+	timeout: Duration,
+	count: u64,
+) -> TimerFired {
+	sleep(timeout).await;
+
+	(user_id, count)
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use ruma::{presence::PresenceState, uint, user_id};
+
+	#[test]
+	fn refresh_window_skip_decision() {
+		let user_id = user_id!("@alice:example.com");
+		let event = PresenceEvent {
+			sender: user_id.to_owned(),
+			content: ruma::events::presence::PresenceEventContent {
+				presence: PresenceState::Online,
+				status_msg: None,
+				currently_active: Some(true),
+				last_active_ago: Some(uint!(10)),
+				avatar_url: None,
+				displayname: None,
+			},
+		};
+
+		let decision = Service::refresh_skip_decision(Some(20), Some(&event), Some(5));
+		assert_eq!(decision, Some((5, 10)));
+
+		let decision = Service::refresh_skip_decision(Some(5), Some(&event), Some(5));
+		assert_eq!(decision, None);
+
+		let decision = Service::refresh_skip_decision(Some(20), None, Some(5));
+		assert_eq!(decision, None);
+	}
+
+	#[test]
+	fn timer_stale_detection() {
+		assert!(Service::timer_is_stale(2, 3));
+		assert!(!Service::timer_is_stale(2, 2));
 	}
 }

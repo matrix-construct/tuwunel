@@ -148,6 +148,13 @@ impl PresenceAggregator {
 
 		if device_count == 0 {
 			guard.remove(user_id);
+			return AggregatedPresence {
+				state: PresenceState::Offline,
+				currently_active: false,
+				last_active_ts: now_ms,
+				status_msg: None,
+				device_count: 0,
+			};
 		}
 
 		debug!(
@@ -203,5 +210,101 @@ fn state_rank(state: &PresenceState) -> u8 {
 		| PresenceState::Unavailable => 1,
 		| PresenceState::Offline => 0,
 		| _ => 0,
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use ruma::{device_id, uint, user_id};
+
+	#[tokio::test]
+	async fn aggregates_rank_and_status_msg() {
+		let aggregator = PresenceAggregator::new();
+		let user = user_id!("@alice:example.com");
+		let now = 1_000_u64;
+
+		aggregator
+			.update(
+				user,
+				DeviceKey::Device(device_id!("DEVICE_A").to_owned()),
+				&PresenceState::Unavailable,
+				Some(false),
+				Some(uint!(50)),
+				Some("away".to_owned()),
+				now,
+			)
+			.await;
+
+		aggregator
+			.update(
+				user,
+				DeviceKey::Device(device_id!("DEVICE_B").to_owned()),
+				&PresenceState::Online,
+				Some(true),
+				Some(uint!(10)),
+				Some("online".to_owned()),
+				now + 10,
+			)
+			.await;
+
+		let aggregated = aggregator
+			.aggregate(user, now + 10, 100, 300)
+			.await;
+
+		assert_eq!(aggregated.state, PresenceState::Online);
+		assert!(aggregated.currently_active);
+		assert_eq!(aggregated.status_msg.as_deref(), Some("online"));
+		assert_eq!(aggregated.device_count, 2);
+	}
+
+	#[tokio::test]
+	async fn degrades_online_to_unavailable_after_idle() {
+		let aggregator = PresenceAggregator::new();
+		let user = user_id!("@bob:example.com");
+		let now = 10_000_u64;
+
+		aggregator
+			.update(
+				user,
+				DeviceKey::Device(device_id!("DEVICE_IDLE").to_owned()),
+				&PresenceState::Online,
+				Some(true),
+				Some(uint!(500)),
+				None,
+				now,
+			)
+			.await;
+
+		let aggregated = aggregator
+			.aggregate(user, now + 500, 100, 1_000)
+			.await;
+
+		assert_eq!(aggregated.state, PresenceState::Unavailable);
+	}
+
+	#[tokio::test]
+	async fn drops_stale_devices_on_aggregate() {
+		let aggregator = PresenceAggregator::new();
+		let user = user_id!("@carol:example.com");
+
+		aggregator
+			.update(
+				user,
+				DeviceKey::Device(device_id!("DEVICE_STALE").to_owned()),
+				&PresenceState::Online,
+				Some(true),
+				Some(uint!(10)),
+				None,
+				0,
+			)
+			.await;
+
+		let aggregated = aggregator
+			.aggregate(user, 1_000, 100, 100)
+			.await;
+
+		assert_eq!(aggregated.device_count, 0);
+		assert_eq!(aggregated.state, PresenceState::Offline);
 	}
 }

@@ -1,5 +1,6 @@
 mod aggregate;
 mod data;
+// Write/update pipeline lives in pipeline.rs.
 mod pipeline;
 mod presence;
 
@@ -11,7 +12,7 @@ use loole::{Receiver, Sender};
 use ruma::{
 	OwnedUserId, UserId, events::presence::PresenceEvent, presence::PresenceState,
 };
-use tokio::{sync::RwLock, time::sleep};
+use tokio::sync::RwLock;
 use tuwunel_core::{
 	Result, checked, debug, debug_warn,
 	result::LogErr,
@@ -95,7 +96,7 @@ impl crate::Service for Service {
 
 						let (handle, reg) = AbortHandle::new_pair();
 						presence_timers.push(Abortable::new(
-							presence_timer(user_id.clone(), timeout, count),
+							pipeline::presence_timer(user_id.clone(), timeout, count),
 							reg,
 						));
 						timer_handles.insert(user_id, (count, handle));
@@ -244,8 +245,4 @@ impl Service {
 	}
 }
 
-async fn presence_timer(user_id: OwnedUserId, timeout: Duration, count: u64) -> TimerFired {
-	sleep(timeout).await;
-
-	(user_id, count)
-}
+// presence_timer lives in pipeline.rs alongside the timer handling logic.
