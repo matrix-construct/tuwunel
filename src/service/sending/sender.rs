@@ -50,9 +50,8 @@ use tuwunel_core::{
 	warn,
 };
 
-use crate::rooms::timeline::RawPduId;
-
 use super::{Destination, EduBuf, EduVec, Msg, SendingEvent, Service, data::QueueItem};
+use crate::rooms::timeline::RawPduId;
 
 #[derive(Debug)]
 enum TransactionStatus {
@@ -736,13 +735,14 @@ impl Service {
 						pdu_jsons.push(pdu.to_format());
 					}
 				},
-				| SendingEvent::Edu(edu) =>
+				| SendingEvent::Edu(edu) => {
 					if appservice.receive_ephemeral
 						&& let Ok(edu) =
 							serde_json::from_slice(edu).and_then(|edu| Raw::new(&edu))
 					{
 						edu_jsons.push(edu);
-					},
+					}
+				},
 				| SendingEvent::Flush => {}, // flush only; no new content
 			}
 		}
@@ -875,15 +875,13 @@ impl Service {
 		});
 	}
 
-	pub fn schedule_flush_suppressed_for_user(
-		&self,
-		user_id: OwnedUserId,
-		reason: &'static str,
-	) {
+	pub fn schedule_flush_suppressed_for_user(&self, user_id: OwnedUserId, reason: &'static str) {
 		let sending = self.services.sending.clone();
 		let runtime = self.server.runtime();
 		runtime.spawn(async move {
-			sending.flush_suppressed_for_user(user_id, reason).await;
+			sending
+				.flush_suppressed_for_user(user_id, reason)
+				.await;
 		});
 	}
 
@@ -899,7 +897,12 @@ impl Service {
 				continue;
 			};
 
-			let Ok(pdu) = self.services.timeline.get_pdu_from_id(pdu_id).await else {
+			let Ok(pdu) = self
+				.services
+				.timeline
+				.get_pdu_from_id(pdu_id)
+				.await
+			else {
 				debug!(?user_id, ?pdu_id, "Suppressing push but PDU is missing");
 				continue;
 			};
@@ -909,11 +912,12 @@ impl Service {
 				continue;
 			}
 
-			if self
-				.services
-				.pusher
-				.queue_suppressed_push(user_id, pushkey, pdu.room_id(), *pdu_id)
-			{
+			if self.services.pusher.queue_suppressed_push(
+				user_id,
+				pushkey,
+				pdu.room_id(),
+				*pdu_id,
+			) {
 				queued = queued.saturating_add(1);
 			}
 		}
@@ -934,12 +938,7 @@ impl Service {
 			return;
 		}
 
-		debug!(
-			?user_id,
-			pushkey,
-			rooms = rooms.len(),
-			"Flushing suppressed pushes ({reason})"
-		);
+		debug!(?user_id, pushkey, rooms = rooms.len(), "Flushing suppressed pushes ({reason})");
 
 		for (room_id, pdu_ids) in rooms {
 			let unread = self
@@ -948,16 +947,17 @@ impl Service {
 				.notification_count(user_id, &room_id)
 				.await;
 			if unread == 0 {
-				trace!(
-					?user_id,
-					?room_id,
-					"Skipping suppressed push flush: no unread"
-				);
+				trace!(?user_id, ?room_id, "Skipping suppressed push flush: no unread");
 				continue;
 			}
 
 			for pdu_id in pdu_ids {
-				let Ok(pdu) = self.services.timeline.get_pdu_from_id(&pdu_id).await else {
+				let Ok(pdu) = self
+					.services
+					.timeline
+					.get_pdu_from_id(&pdu_id)
+					.await
+				else {
 					debug!(?user_id, ?pdu_id, "Suppressed PDU missing during flush");
 					continue;
 				};
@@ -973,12 +973,10 @@ impl Service {
 					.send_push_notice(user_id, pusher, rules_for_user, &pdu)
 					.await
 				{
-					let requeued = self.services.pusher.queue_suppressed_push(
-						user_id,
-						pushkey,
-						&room_id,
-						pdu_id,
-					);
+					let requeued = self
+						.services
+						.pusher
+						.queue_suppressed_push(user_id, pushkey, &room_id, pdu_id);
 					warn!(
 						?user_id,
 						?room_id,
@@ -1005,7 +1003,12 @@ impl Service {
 			return;
 		}
 
-		let pusher = match self.services.pusher.get_pusher(&user_id, &pushkey).await {
+		let pusher = match self
+			.services
+			.pusher
+			.get_pusher(&user_id, &pushkey)
+			.await
+		{
 			| Ok(pusher) => pusher,
 			| Err(error) => {
 				warn!(?user_id, pushkey, ?error, "Missing pusher for suppressed flush");
@@ -1034,12 +1037,11 @@ impl Service {
 		.await;
 	}
 
-	pub async fn flush_suppressed_for_user(
-		&self,
-		user_id: OwnedUserId,
-		reason: &'static str,
-	) {
-		let suppressed = self.services.pusher.take_suppressed_for_user(&user_id);
+	pub async fn flush_suppressed_for_user(&self, user_id: OwnedUserId, reason: &'static str) {
+		let suppressed = self
+			.services
+			.pusher
+			.take_suppressed_for_user(&user_id);
 		if suppressed.is_empty() {
 			return;
 		}
@@ -1055,7 +1057,12 @@ impl Service {
 		};
 
 		for (pushkey, rooms) in suppressed {
-			let pusher = match self.services.pusher.get_pusher(&user_id, &pushkey).await {
+			let pusher = match self
+				.services
+				.pusher
+				.get_pusher(&user_id, &pushkey)
+				.await
+			{
 				| Ok(pusher) => pusher,
 				| Err(error) => {
 					warn!(?user_id, pushkey, ?error, "Missing pusher for suppressed flush");
@@ -1104,11 +1111,7 @@ impl Service {
 			.unwrap_or(u64::MAX);
 
 		if presence_age_ms >= 65_000 {
-			debug!(
-				?user_id,
-				presence_age_ms,
-				"push not suppressed: presence too old"
-			);
+			debug!(?user_id, presence_age_ms, "push not suppressed: presence too old");
 			return false;
 		}
 
@@ -1121,10 +1124,18 @@ impl Service {
 		let considered_active = sync_gap_ms.is_some_and(|gap| gap < 32_000);
 
 		match sync_gap_ms {
-			| Some(gap) if gap < 32_000 =>
-				debug!(?user_id, presence_age_ms, sync_gap_ms = gap, "suppressing push: active heuristic"),
-			| Some(gap) =>
-				debug!(?user_id, presence_age_ms, sync_gap_ms = gap, "push not suppressed: sync gap too large"),
+			| Some(gap) if gap < 32_000 => debug!(
+				?user_id,
+				presence_age_ms,
+				sync_gap_ms = gap,
+				"suppressing push: active heuristic"
+			),
+			| Some(gap) => debug!(
+				?user_id,
+				presence_age_ms,
+				sync_gap_ms = gap,
+				"push not suppressed: sync gap too large"
+			),
 			| None => debug!(?user_id, presence_age_ms, "push not suppressed: no recent sync"),
 		}
 

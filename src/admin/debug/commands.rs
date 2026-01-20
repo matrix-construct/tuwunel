@@ -242,10 +242,11 @@ pub(super) async fn get_remote_pdu(
 		})
 		.await
 	{
-		| Err(e) =>
+		| Err(e) => {
 			return Err!(
 				"Remote server did not have PDU or failed sending request to remote server: {e}"
-			),
+			);
+		},
 		| Ok(response) => {
 			let json: CanonicalJsonObject =
 				serde_json::from_str(response.pdu.get()).map_err(|e| {
@@ -383,8 +384,9 @@ pub(super) async fn change_log_level(&self, filter: Option<String>, reset: bool)
 			.reload
 			.reload(&old_filter_layer, Some(handles))
 		{
-			| Err(e) =>
-				return Err!("Failed to modify and reload the global tracing log level: {e}"),
+			| Err(e) => {
+				return Err!("Failed to modify and reload the global tracing log level: {e}");
+			},
 			| Ok(()) => {
 				let value = &self.services.server.config.log;
 				let out = format!("Successfully changed log level back to config value {value}");
@@ -406,12 +408,14 @@ pub(super) async fn change_log_level(&self, filter: Option<String>, reset: bool)
 			.reload
 			.reload(&new_filter_layer, Some(handles))
 		{
-			| Ok(()) =>
+			| Ok(()) => {
 				return self
 					.write_str("Successfully changed log level")
-					.await,
-			| Err(e) =>
-				return Err!("Failed to modify and reload the global tracing log level: {e}"),
+					.await;
+			},
+			| Err(e) => {
+				return Err!("Failed to modify and reload the global tracing log level: {e}");
+			},
 		}
 	}
 

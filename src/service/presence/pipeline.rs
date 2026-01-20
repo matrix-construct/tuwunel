@@ -8,18 +8,17 @@ use std::time::Duration;
 
 use futures::TryFutureExt;
 use ruma::{
-	DeviceId, OwnedUserId, UInt, UserId,
-	events::presence::PresenceEvent,
-	presence::PresenceState,
+	DeviceId, OwnedUserId, UInt, UserId, events::presence::PresenceEvent, presence::PresenceState,
 };
 use tokio::time::sleep;
 use tuwunel_core::{
-	Error, Result, debug, error, trace,
+	Error, Result, debug, error,
 	result::LogErr,
+	trace,
 	utils::{future::OptionFutureExt, option::OptionExt},
 };
 
-use super::{TimerFired, aggregate, Service};
+use super::{Service, TimerFired, aggregate};
 
 impl Service {
 	fn device_key(device_id: Option<&DeviceId>, is_remote: bool) -> aggregate::DeviceKey {
@@ -46,8 +45,16 @@ impl Service {
 		}
 
 		let timeout = match presence_state {
-			| PresenceState::Online => self.services.server.config.presence_idle_timeout_s,
-			| _ => self.services.server.config.presence_offline_timeout_s,
+			| PresenceState::Online =>
+				self.services
+					.server
+					.config
+					.presence_idle_timeout_s,
+			| _ =>
+				self.services
+					.server
+					.config
+					.presence_offline_timeout_s,
 		};
 
 		self.timer_channel
@@ -136,27 +143,25 @@ impl Service {
 		};
 
 		if !state_changed
-			&& let Some((count, last_last_active_ago)) = Self::refresh_skip_decision(
-				refresh_window_ms,
-				last_event.as_ref(),
-				last_count,
-			) {
-				let presence = last_event
-					.as_ref()
-					.map(|event| &event.content.presence)
-					.unwrap_or(state);
+			&& let Some((count, last_last_active_ago)) =
+				Self::refresh_skip_decision(refresh_window_ms, last_event.as_ref(), last_count)
+		{
+			let presence = last_event
+				.as_ref()
+				.map(|event| &event.content.presence)
+				.unwrap_or(state);
 
-				self.schedule_presence_timer(user_id, presence, count)
-					.log_err()
-					.ok();
-				debug!(
-					?user_id,
-					?state,
-					last_last_active_ago,
-					"Skipping presence update: refresh window (timer rescheduled)"
-				);
-				return Ok(());
-			}
+			self.schedule_presence_timer(user_id, presence, count)
+				.log_err()
+				.ok();
+			debug!(
+				?user_id,
+				?state,
+				last_last_active_ago,
+				"Skipping presence update: refresh window (timer rescheduled)"
+			);
+			return Ok(());
+		}
 
 		let fallback_status = last_event
 			.and_then(|event| event.content.status_msg)
@@ -213,12 +218,7 @@ impl Service {
 			Some(REFRESH_TIMEOUT),
 		);
 
-		debug!(
-			?user_id,
-			?new_state,
-			currently_active,
-			"Presence ping accepted"
-		);
+		debug!(?user_id, ?new_state, currently_active, "Presence ping accepted");
 
 		futures::future::try_join(set_presence, update_device_seen.unwrap_or(Ok(())))
 			.map_ok(|_| ())
@@ -309,12 +309,7 @@ impl Service {
 		};
 
 		if Self::timer_is_stale(expected_count, current_count) {
-			trace!(
-				?user_id,
-				expected_count,
-				current_count,
-				"Skipping stale presence timer"
-			);
+			trace!(?user_id, expected_count, current_count, "Skipping stale presence timer");
 			return Ok(());
 		}
 
@@ -339,24 +334,21 @@ impl Service {
 			};
 
 			debug!(
-				"Processed presence timer for user '{user_id}': Old state = {presence_state}, New \
-				 state = {new_state:?}"
+				"Processed presence timer for user '{user_id}': Old state = {presence_state}, \
+				 New state = {new_state:?}"
 			);
 
 			if let Some(new_state) = new_state {
 				if matches!(new_state, PresenceState::Unavailable | PresenceState::Offline) {
 					self.services
 						.sending
-						.schedule_flush_suppressed_for_user(user_id.to_owned(), "presence->inactive");
+						.schedule_flush_suppressed_for_user(
+							user_id.to_owned(),
+							"presence->inactive",
+						);
 				}
-				self.set_presence(
-					user_id,
-					&new_state,
-					Some(false),
-					last_active_ago,
-					status_msg,
-				)
-				.await?;
+				self.set_presence(user_id, &new_state, Some(false), last_active_ago, status_msg)
+					.await?;
 			}
 
 			return Ok(());
@@ -369,16 +361,15 @@ impl Service {
 			return Ok(());
 		}
 
-		if matches!(
-			aggregated.state,
-			PresenceState::Unavailable | PresenceState::Offline
-		) {
+		if matches!(aggregated.state, PresenceState::Unavailable | PresenceState::Offline) {
 			self.services
 				.sending
 				.schedule_flush_suppressed_for_user(user_id.to_owned(), "presence->inactive");
 		}
 
-		let status_msg = aggregated.status_msg.or_else(|| presence.status_msg());
+		let status_msg = aggregated
+			.status_msg
+			.or_else(|| presence.status_msg());
 		let last_active_ago =
 			Some(UInt::new_saturating(now.saturating_sub(aggregated.last_active_ts)));
 
@@ -407,8 +398,9 @@ pub(super) async fn presence_timer(
 
 #[cfg(test)]
 mod tests {
-	use super::*;
 	use ruma::{presence::PresenceState, uint, user_id};
+
+	use super::*;
 
 	#[test]
 	fn refresh_window_skip_decision() {

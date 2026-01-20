@@ -264,10 +264,11 @@ impl Service {
 				self.db.userid_password.insert(user_id, hash);
 				self.db.userid_origin.insert(user_id, "password");
 			},
-			| Some(Err(e)) =>
+			| Some(Err(e)) => {
 				return Err!(Request(InvalidParam(
 					"Password does not meet the requirements: {e}"
-				))),
+				)));
+			},
 		}
 
 		Ok(())

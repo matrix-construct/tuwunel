@@ -3,8 +3,10 @@
 //! Stores suppressed push events in memory until they can be flushed. This is
 //! intentionally in-memory only: suppressed events are discarded on restart.
 
-use std::collections::{HashMap, VecDeque};
-use std::sync::Mutex;
+use std::{
+	collections::{HashMap, VecDeque},
+	sync::Mutex,
+};
 
 use ruma::{OwnedRoomId, OwnedUserId, RoomId, UserId};
 use tuwunel_core::{debug, implement, trace, utils};
@@ -45,7 +47,10 @@ impl SuppressedQueue {
 	}
 
 	fn drain_room(queue: VecDeque<SuppressedEvent>) -> Vec<RawPduId> {
-		queue.into_iter().map(|event| event.pdu_id).collect()
+		queue
+			.into_iter()
+			.map(|event| event.pdu_id)
+			.collect()
 	}
 
 	fn drop_one_front(queue: &mut VecDeque<SuppressedEvent>, total_events: &mut usize) -> bool {
@@ -69,9 +74,7 @@ pub fn queue_suppressed_push(
 ) -> bool {
 	let mut inner = self.suppressed.lock();
 	let user_entry = inner.entry(user_id.to_owned()).or_default();
-	let push_entry = user_entry
-		.entry(pushkey.to_owned())
-		.or_default();
+	let push_entry = user_entry.entry(pushkey.to_owned()).or_default();
 
 	if !push_entry.rooms.contains_key(room_id)
 		&& push_entry.rooms.len() >= SUPPRESSED_MAX_ROOMS_PER_PUSHKEY
@@ -95,12 +98,7 @@ pub fn queue_suppressed_push(
 		.back()
 		.is_some_and(|event| event.pdu_id == pdu_id)
 	{
-		trace!(
-			?user_id,
-			?room_id,
-			pushkey,
-			"Suppressed push event is duplicate; skipping"
-		);
+		trace!(?user_id, ?room_id, pushkey, "Suppressed push event is duplicate; skipping");
 		return false;
 	}
 
@@ -161,10 +159,7 @@ pub fn take_suppressed_for_pushkey(
 
 /// Take and remove all suppressed PDUs for a given user across all pushkeys.
 #[implement(super::Service)]
-pub fn take_suppressed_for_user(
-	&self,
-	user_id: &UserId,
-) -> SuppressedPushes {
+pub fn take_suppressed_for_user(&self, user_id: &UserId) -> SuppressedPushes {
 	let mut inner = self.suppressed.lock();
 	let Some(user_entry) = inner.remove(user_id) else {
 		return Vec::new();
@@ -195,7 +190,9 @@ pub fn clear_suppressed_room(&self, user_id: &UserId, room_id: &RoomId) -> usize
 	user_entry.retain(|_, push_entry| {
 		if let Some(queue) = push_entry.rooms.remove(room_id) {
 			removed = removed.saturating_add(queue.len());
-			push_entry.total_events = push_entry.total_events.saturating_sub(queue.len());
+			push_entry.total_events = push_entry
+				.total_events
+				.saturating_sub(queue.len());
 		}
 
 		!push_entry.rooms.is_empty()

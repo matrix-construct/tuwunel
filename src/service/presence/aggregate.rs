@@ -7,8 +7,8 @@
 use std::collections::HashMap;
 
 use ruma::{OwnedDeviceId, OwnedUserId, UInt, UserId, presence::PresenceState};
-use tuwunel_core::debug;
 use tokio::sync::RwLock;
+use tuwunel_core::debug;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum DeviceKey {
@@ -45,9 +45,7 @@ impl PresenceAggregator {
 	pub(crate) fn new() -> Self { Self::default() }
 
 	/// Clear all tracked device state.
-	pub(crate) async fn clear(&self) {
-		self.inner.write().await.clear();
-	}
+	pub(crate) async fn clear(&self) { self.inner.write().await.clear(); }
 
 	/// Update presence state for a single device.
 	#[allow(clippy::too_many_arguments)]
@@ -69,13 +67,15 @@ impl PresenceAggregator {
 			| Some(ago) => now_ms.saturating_sub(ago.into()),
 		};
 
-		let entry = devices.entry(device_key).or_insert_with(|| DevicePresence {
-			state: state.clone(),
-			currently_active: currently_active.unwrap_or(false),
-			last_active_ts,
-			last_update_ts: now_ms,
-			status_msg: status_msg.clone(),
-		});
+		let entry = devices
+			.entry(device_key)
+			.or_insert_with(|| DevicePresence {
+				state: state.clone(),
+				currently_active: currently_active.unwrap_or(false),
+				last_active_ts,
+				last_update_ts: now_ms,
+				status_msg: status_msg.clone(),
+			});
 
 		entry.state = state.clone();
 		entry.currently_active = currently_active.unwrap_or(false);
@@ -131,14 +131,19 @@ impl PresenceAggregator {
 				best_state = effective_state.clone();
 			}
 
-			if (effective_state == PresenceState::Online || effective_state == PresenceState::Busy)
+			if (effective_state == PresenceState::Online
+				|| effective_state == PresenceState::Busy)
 				&& device.currently_active
 				&& last_active_age < idle_timeout_ms
 			{
 				any_currently_active = true;
 			}
 
-			if let Some(msg) = device.status_msg.as_ref().filter(|msg| !msg.is_empty()) {
+			if let Some(msg) = device
+				.status_msg
+				.as_ref()
+				.filter(|msg| !msg.is_empty())
+			{
 				match latest_status {
 					| None => {
 						latest_status = Some((device.last_update_ts, msg.clone()));
@@ -199,20 +204,18 @@ fn effective_device_state(
 	offline_timeout_ms: u64,
 ) -> PresenceState {
 	match state {
-		| PresenceState::Busy | PresenceState::Online => {
+		| PresenceState::Busy | PresenceState::Online =>
 			if last_active_age >= idle_timeout_ms {
 				PresenceState::Unavailable
 			} else {
 				state.clone()
-			}
-		},
-		| PresenceState::Unavailable => {
+			},
+		| PresenceState::Unavailable =>
 			if last_active_age >= offline_timeout_ms {
 				PresenceState::Offline
 			} else {
 				PresenceState::Unavailable
-			}
-		},
+			},
 		| PresenceState::Offline => PresenceState::Offline,
 		| _ => state.clone(),
 	}
@@ -229,8 +232,9 @@ fn state_rank(state: &PresenceState) -> u8 {
 
 #[cfg(test)]
 mod tests {
-	use super::*;
 	use ruma::{device_id, uint, user_id};
+
+	use super::*;
 
 	#[tokio::test]
 	async fn aggregates_rank_and_status_msg() {
@@ -314,9 +318,7 @@ mod tests {
 			)
 			.await;
 
-		let aggregated = aggregator
-			.aggregate(user, 1_000, 100, 100)
-			.await;
+		let aggregated = aggregator.aggregate(user, 1_000, 100, 100).await;
 
 		assert_eq!(aggregated.device_count, 0);
 		assert_eq!(aggregated.state, PresenceState::Offline);

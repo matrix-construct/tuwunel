@@ -7,17 +7,15 @@ mod presence;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
-use futures::{Stream, StreamExt, TryFutureExt, future::{AbortHandle, Abortable}, stream::FuturesUnordered};
+use futures::{
+	Stream, StreamExt, TryFutureExt,
+	future::{AbortHandle, Abortable},
+	stream::FuturesUnordered,
+};
 use loole::{Receiver, Sender};
-use ruma::{
-	OwnedUserId, UserId, events::presence::PresenceEvent, presence::PresenceState,
-};
+use ruma::{OwnedUserId, UserId, events::presence::PresenceEvent, presence::PresenceState};
 use tokio::sync::RwLock;
-use tuwunel_core::{
-	Result, checked, debug, debug_warn,
-	result::LogErr,
-	trace,
-};
+use tuwunel_core::{Result, checked, debug, debug_warn, result::LogErr, trace};
 
 use self::{aggregate::PresenceAggregator, data::Data, presence::Presence};
 
