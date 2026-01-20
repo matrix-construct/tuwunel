@@ -19,7 +19,7 @@ use tuwunel_core::{
 	Error, Result, checked, debug, debug_warn, error,
 	result::LogErr,
 	trace,
-	utils::{future::OptionFutureExt, option::OptionExt},
+	utils::future::OptionFutureExt,
 };
 
 use self::{aggregate::PresenceAggregator, data::Data, presence::Presence};
@@ -176,7 +176,6 @@ impl Service {
 		currently_active: Option<bool>,
 		last_active_ago: Option<UInt>,
 		status_msg: Option<String>,
-		reason: PresenceUpdateReason,
 		refresh_window_ms: Option<u64>,
 	) -> Result {
 		let now = tuwunel_core::utils::millis_since_unix_epoch();
@@ -186,7 +185,6 @@ impl Service {
 			?state,
 			currently_active,
 			last_active_ago = last_active_ago.map(u64::from),
-			?reason,
 			"Presence update received"
 		);
 		self.device_presence
@@ -262,7 +260,6 @@ impl Service {
 			Some(aggregated.currently_active),
 			last_active_ago,
 			status_msg,
-			reason,
 		)
 		.await
 	}
@@ -334,7 +331,6 @@ impl Service {
 			Some(currently_active),
 			UInt::new(0),
 			None,
-			PresenceUpdateReason::Ping,
 			Some(REFRESH_TIMEOUT),
 		);
 
@@ -357,7 +353,6 @@ impl Service {
 		device_id: Option<&DeviceId>,
 		state: &PresenceState,
 		status_msg: Option<String>,
-		reason: PresenceUpdateReason,
 	) -> Result {
 		let currently_active = *state == PresenceState::Online;
 		self.apply_device_presence_update(
@@ -367,7 +362,6 @@ impl Service {
 			Some(currently_active),
 			None,
 			status_msg,
-			reason,
 			None,
 		)
 		.await
@@ -381,7 +375,6 @@ impl Service {
 		currently_active: bool,
 		last_active_ago: UInt,
 		status_msg: Option<String>,
-		reason: PresenceUpdateReason,
 	) -> Result {
 		self.apply_device_presence_update(
 			user_id,
@@ -390,7 +383,6 @@ impl Service {
 			Some(currently_active),
 			Some(last_active_ago),
 			status_msg,
-			reason,
 			None,
 		)
 		.await
@@ -416,56 +408,12 @@ impl Service {
 			.await?;
 
 		if let Some(count) = count {
-			if (self.timeout_remote_users || self.services.globals.user_is_local(user_id))
-				&& user_id != self.services.globals.server_user
-			{
-				let timeout = match presence_state {
-					| PresenceState::Online =>
-						self.services
-							.server
-							.config
-							.presence_idle_timeout_s,
-					| _ =>
-						self.services
-							.server
-							.config
-							.presence_offline_timeout_s,
-				};
+			let is_local = self.services.globals.user_is_local(user_id);
+			let is_server_user = user_id == self.services.globals.server_user;
+			let allow_timeout = self.timeout_remote_users || is_local;
 
-				let timeout_kind = match presence_state {
-					| PresenceState::Online => "idle_timeout_s",
-					| _ => "offline_timeout_s",
-				};
-
-				debug!(
-					?user_id,
-					?presence_state,
-					currently_active,
-					last_active_ago = last_active_ago.map(u64::from),
-					status_msg = status_msg_log.as_deref(),
-					count,
-					timeout_s = timeout,
-					timeout_kind,
-					timeout_remote_users = self.timeout_remote_users,
-					is_local,
-					is_server_user,
-					"Scheduling presence timer"
-				);
-
+			if allow_timeout && !is_server_user {
 				self.schedule_presence_timer(user_id, presence_state, count)?;
-			} else {
-				debug!(
-					?user_id,
-					?presence_state,
-					currently_active,
-					last_active_ago = last_active_ago.map(u64::from),
-					status_msg = status_msg_log.as_deref(),
-					count,
-					timeout_remote_users = self.timeout_remote_users,
-					is_local,
-					is_server_user,
-					"Presence timer not scheduled"
-				);
 			}
 		}
 
@@ -597,19 +545,12 @@ impl Service {
 			);
 
 			if let Some(new_state) = new_state {
-				let reason = match new_state {
-					| PresenceState::Unavailable => PresenceUpdateReason::TimerIdle,
-					| PresenceState::Offline => PresenceUpdateReason::TimerOffline,
-					| _ => PresenceUpdateReason::Ping,
-				};
-
 				self.set_presence(
 					user_id,
 					&new_state,
 					Some(false),
 					last_active_ago,
 					status_msg,
-					reason,
 				)
 				.await?;
 			}
@@ -624,12 +565,6 @@ impl Service {
 			return Ok(());
 		}
 
-		let reason = match aggregated.state {
-			| PresenceState::Unavailable => PresenceUpdateReason::TimerIdle,
-			| PresenceState::Offline => PresenceUpdateReason::TimerOffline,
-			| _ => PresenceUpdateReason::Ping,
-		};
-
 		let status_msg = aggregated.status_msg.or_else(|| presence.status_msg());
 		let last_active_ago =
 			Some(UInt::new_saturating(now.saturating_sub(aggregated.last_active_ts)));
@@ -640,7 +575,6 @@ impl Service {
 			Some(aggregated.currently_active),
 			last_active_ago,
 			status_msg,
-			reason,
 		)
 		.await?;
 

@@ -28,7 +28,6 @@ pub(crate) async fn set_presence_route(
 			body.sender_device.as_deref(),
 			&body.presence,
 			body.status_msg.clone(),
-			PresenceUpdateReason::ClientRequest,
 		)
 		.await?;
 
