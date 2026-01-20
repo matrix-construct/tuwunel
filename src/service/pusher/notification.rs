@@ -22,6 +22,11 @@ pub fn reset_notification_counts(&self, user_id: &UserId, room_id: &RoomId) {
 	self.db
 		.roomuserid_lastnotificationread
 		.put(roomuser_id, *count);
+
+	let removed = self.clear_suppressed_room(user_id, room_id);
+	if removed > 0 {
+		trace!(?user_id, ?room_id, removed, "Cleared suppressed push events after read");
+	}
 }
 
 #[implement(super::Service)]

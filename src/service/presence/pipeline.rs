@@ -70,11 +70,7 @@ impl Service {
 			return None;
 		};
 
-		let last_last_active_ago: u64 = event
-			.content
-			.last_active_ago
-			.unwrap_or_default()
-			.into();
+		let last_last_active_ago: u64 = event.content.last_active_ago?.into();
 
 		(last_last_active_ago < refresh_ms).then_some((count, last_last_active_ago))
 	}
@@ -349,6 +345,11 @@ impl Service {
 			);
 
 			if let Some(new_state) = new_state {
+				if matches!(new_state, PresenceState::Unavailable | PresenceState::Offline) {
+					self.services
+						.sending
+						.schedule_flush_suppressed_for_user(user_id.to_owned(), "presence->inactive");
+				}
 				self.set_presence(
 					user_id,
 					&new_state,
@@ -367,6 +368,15 @@ impl Service {
 				.log_err()
 				.ok();
 			return Ok(());
+		}
+
+		if matches!(
+			aggregated.state,
+			PresenceState::Unavailable | PresenceState::Offline
+		) {
+			self.services
+				.sending
+				.schedule_flush_suppressed_for_user(user_id.to_owned(), "presence->inactive");
 		}
 
 		let status_msg = aggregated.status_msg.or_else(|| presence.status_msg());
@@ -420,6 +430,22 @@ mod tests {
 		assert_eq!(decision, Some((5, 10)));
 
 		let decision = Service::refresh_skip_decision(Some(5), Some(&event), Some(5));
+		assert_eq!(decision, None);
+
+		let event_missing_ago = PresenceEvent {
+			sender: user_id.to_owned(),
+			content: ruma::events::presence::PresenceEventContent {
+				presence: PresenceState::Online,
+				status_msg: None,
+				currently_active: Some(true),
+				last_active_ago: None,
+				avatar_url: None,
+				displayname: None,
+			},
+		};
+
+		let decision =
+			Service::refresh_skip_decision(Some(20), Some(&event_missing_ago), Some(5));
 		assert_eq!(decision, None);
 
 		let decision = Service::refresh_skip_decision(Some(20), None, Some(5));

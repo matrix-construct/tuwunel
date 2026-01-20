@@ -2,6 +2,7 @@ mod append;
 mod notification;
 mod request;
 mod send;
+mod suppressed;
 
 use std::sync::Arc;
 
@@ -32,6 +33,7 @@ pub struct Service {
 	notification_increment_mutex: MutexMap<(OwnedRoomId, OwnedUserId), ()>,
 	highlight_increment_mutex: MutexMap<(OwnedRoomId, OwnedUserId), ()>,
 	db: Data,
+	suppressed: suppressed::SuppressedQueue,
 }
 
 struct Data {
@@ -60,6 +62,7 @@ impl crate::Service for Service {
 				roomuserid_lastnotificationread: args.db["roomuserid_lastnotificationread"]
 					.clone(),
 			},
+			suppressed: suppressed::SuppressedQueue::default(),
 		}))
 	}
 
@@ -139,6 +142,7 @@ pub async fn delete_pusher(&self, sender: &UserId, pushkey: &str) {
 	let key = (sender, pushkey);
 	self.db.senderkey_pusher.del(key);
 	self.db.pushkey_deviceid.remove(pushkey);
+	self.clear_suppressed_pushkey(sender, pushkey);
 
 	self.services
 		.sending
