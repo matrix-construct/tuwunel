@@ -1,11 +1,9 @@
-use ruma::EventId;
-use tuwunel_core::{
-	Result, err, implement,
-	matrix::event::Event,
-	utils::{self},
+use ruma::{
+	EventId, RoomId,
+	canonical_json::{RedactedBecause, redact_in_place},
 };
+use tuwunel_core::{Result, err, implement, matrix::event::Event};
 
-use super::ExtractBody;
 use crate::rooms::short::ShortRoomId;
 
 /// Replace a PDU with the redacted form.
@@ -17,39 +15,51 @@ pub async fn redact_pdu<Pdu: Event + Send + Sync>(
 	reason: &Pdu,
 	shortroomid: ShortRoomId,
 ) -> Result {
-	// TODO: Don't reserialize, keep original json
 	let Ok(pdu_id) = self.get_pdu_id(event_id).await else {
 		// If event does not exist, just noop
+		// TODO this is actually wrong!
 		return Ok(());
 	};
 
 	let mut pdu = self
-		.get_pdu_from_id(&pdu_id)
+		.get_pdu_json_from_id(&pdu_id)
 		.await
-		.map(Event::into_pdu)
 		.map_err(|e| {
 			err!(Database(error!(?pdu_id, ?event_id, ?e, "PDU ID points to invalid PDU.")))
 		})?;
 
-	if let Ok(content) = pdu.get_content::<ExtractBody>()
-		&& let Some(body) = content.body
-	{
+	let body = pdu["content"]
+		.as_object()
+		.unwrap()
+		.get("body")
+		.and_then(|body| body.as_str());
+
+	if let Some(body) = body {
 		self.services
 			.search
-			.deindex_pdu(shortroomid, &pdu_id, &body);
+			.deindex_pdu(shortroomid, &pdu_id, body);
 	}
+
+	let room_id = RoomId::parse(pdu["room_id"].as_str().unwrap()).unwrap();
 
 	let room_version_id = self
 		.services
 		.state
-		.get_room_version(pdu.room_id())
+		.get_room_version(room_id)
 		.await?;
 
-	pdu.redact(&room_version_id, reason.to_value())?;
-
-	let obj = utils::to_canonical_object(&pdu).map_err(|e| {
-		err!(Database(error!(?event_id, ?e, "Failed to convert PDU to canonical JSON")))
+	let room_version_rules = room_version_id.rules().ok_or_else(|| {
+		err!(Request(UnsupportedRoomVersion(
+			"Cannot redact event for unknown room version {room_version_id:?}."
+		)))
 	})?;
 
-	self.replace_pdu(&pdu_id, &obj).await
+	redact_in_place(
+		&mut pdu,
+		&room_version_rules.redaction,
+		Some(RedactedBecause::from_json(reason.to_canonical_object())),
+	)
+	.map_err(|err| err!("invalid event: {err}"))?;
+
+	self.replace_pdu(&pdu_id, &pdu).await
 }

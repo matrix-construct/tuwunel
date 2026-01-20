@@ -218,32 +218,23 @@ async fn append_pdu_effects(
 				.get_room_version(pdu.room_id())
 				.await?;
 
-			match room_version_id {
-				| V1 | V2 | V3 | V4 | V5 | V6 | V7 | V8 | V9 | V10 => {
-					if let Some(redact_id) = pdu.redacts()
-						&& self
-							.services
-							.state_accessor
-							.user_can_redact(redact_id, pdu.sender(), pdu.room_id(), false)
-							.await?
-					{
-						self.redact_pdu(redact_id, pdu, shortroomid)
-							.await?;
-					}
-				},
+			let content: RoomRedactionEventContent;
+			let event_id = match room_version_id {
+				| V1 | V2 | V3 | V4 | V5 | V6 | V7 | V8 | V9 | V10 => pdu.redacts(),
 				| _ => {
-					let content: RoomRedactionEventContent = pdu.get_content()?;
-					if let Some(redact_id) = &content.redacts
-						&& self
-							.services
-							.state_accessor
-							.user_can_redact(redact_id, pdu.sender(), pdu.room_id(), false)
-							.await?
-					{
-						self.redact_pdu(redact_id, pdu, shortroomid)
-							.await?;
-					}
+					content = pdu.get_content()?;
+					content.redacts.as_deref()
 				},
+			};
+			if let Some(redact_id) = event_id
+				&& self
+					.services
+					.state_accessor
+					.user_can_redact(redact_id, pdu.sender(), pdu.room_id(), false)
+					.await?
+			{
+				self.redact_pdu(redact_id, pdu, shortroomid)
+					.await?;
 			}
 		},
 		| TimelineEventType::SpaceChild =>

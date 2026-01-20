@@ -4,7 +4,6 @@ pub mod format;
 mod hashes;
 mod id;
 mod raw_id;
-mod redact;
 #[cfg(test)]
 mod tests;
 mod unsigned;
