@@ -1990,6 +1990,32 @@ pub struct Config {
 	#[serde(default = "true_fn")]
 	pub admin_room_notices: bool,
 
+	/// Save original events before applying redaction to them.
+	///
+	/// They can be retrieved with `admin debug get-retained-pdu` or MSC2815.
+	///
+	/// default: true
+	#[serde(default)]
+	pub save_unredacted_events: bool,
+
+	/// Redaction retention period in seconds.
+	///
+	/// By default the unredacted events are stored forever.
+	///
+	/// default: disabled
+	#[serde(default)]
+	pub redaction_retention_seconds: u64,
+
+	/// Allows users with `redact` power level to request unredacted events with
+	/// MSC2815.
+	///
+	/// Server admins can request unredacted events regardless of the value of
+	/// this option.
+	///
+	/// default: true
+	#[serde(default = "true_fn")]
+	pub allow_room_admins_to_request_unredacted_events: bool,
+
 	/// Enable database pool affinity support. On supporting systems, block
 	/// device queue topologies are detected and the request pool is optimized
 	/// for the hardware; db_pool_workers is determined automatically.

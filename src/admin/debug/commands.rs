@@ -1023,3 +1023,19 @@ pub(super) async fn resync_database(&self) -> Result {
 		.update()
 		.map_err(|e| err!("Failed to update from primary: {e:?}"))
 }
+
+#[admin_command]
+pub(super) async fn get_retained_pdu(&self, event_id: OwnedEventId) -> Result {
+	let pdu = self
+		.services
+		.retention
+		.get_original_pdu_json(&event_id)
+		.await?;
+
+	let text = serde_json::to_string_pretty(&pdu)?;
+
+	self.write_str(&format!("Original PDU:\n```json\n{text}```"))
+		.await?;
+
+	Ok(())
+}

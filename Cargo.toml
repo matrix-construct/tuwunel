@@ -342,6 +342,7 @@ features = [
     "ring-compat",
     "unstable-msc2448",
     "unstable-msc2666",
+    "unstable-msc2815",
     "unstable-msc2867",
     "unstable-msc2870",
     "unstable-msc3026",

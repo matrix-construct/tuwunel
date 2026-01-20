@@ -7,6 +7,7 @@ pub mod lazy_loading;
 pub mod metadata;
 pub mod pdu_metadata;
 pub mod read_receipt;
+pub mod retention;
 pub mod search;
 pub mod short;
 pub mod spaces;

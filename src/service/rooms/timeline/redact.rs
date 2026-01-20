@@ -28,6 +28,10 @@ pub async fn redact_pdu<Pdu: Event + Send + Sync>(
 			err!(Database(error!(?pdu_id, ?event_id, ?e, "PDU ID points to invalid PDU.")))
 		})?;
 
+	self.services
+		.retention
+		.save_original_pdu(event_id, &pdu);
+
 	let body = pdu["content"]
 		.as_object()
 		.unwrap()

@@ -1,7 +1,11 @@
 use axum::extract::State;
-use futures::{FutureExt, TryFutureExt, future::try_join};
+use futures::{TryFutureExt, future::join3, pin_mut};
 use ruma::api::client::room::get_room_event;
-use tuwunel_core::{Err, Event, Result, err};
+use tuwunel_core::{
+	Err, Event, Pdu, Result, err,
+	result::IsErrOr,
+	utils::{BoolExt, FutureBoolExt, TryFutureExtExt, future::OptionFutureExt},
+};
 
 use crate::{Ruma, client::is_ignored_pdu};
 
@@ -9,9 +13,10 @@ use crate::{Ruma, client::is_ignored_pdu};
 ///
 /// Gets a single event.
 pub(crate) async fn get_room_event_route(
-	State(ref services): State<crate::State>,
-	ref body: Ruma<get_room_event::v3::Request>,
+	State(services): State<crate::State>,
+	body: Ruma<get_room_event::v3::Request>,
 ) -> Result<get_room_event::v3::Response> {
+	let sender_user = body.sender_user();
 	let event_id = &body.event_id;
 	let room_id = &body.room_id;
 
@@ -20,14 +25,51 @@ pub(crate) async fn get_room_event_route(
 		.get_pdu(event_id)
 		.map_err(|_| err!(Request(NotFound("Event {} not found.", event_id))));
 
+	let retained_event = body
+		.include_unredacted_content
+		.then_async(async || {
+			let is_admin = services
+				.config
+				.allow_room_admins_to_request_unredacted_events
+				.then_async(|| services.admin.user_is_admin(sender_user))
+				.unwrap_or(false);
+
+			let can_redact = services
+				.state_accessor
+				.get_power_levels(room_id)
+				.map_ok_or(false, |power_levels| {
+					power_levels.for_user(sender_user) >= power_levels.redact
+				});
+
+			pin_mut!(is_admin, can_redact);
+
+			if is_admin.or(can_redact).await {
+				services
+					.retention
+					.get_original_pdu(event_id)
+					.await
+					.map_err(|_| err!(Request(NotFound("Event {} not found.", event_id))))
+			} else {
+				Err!(Request(Forbidden("You are not allowed to see the original event")))
+			}
+		});
+
 	let visible = services
 		.state_accessor
-		.user_can_see_event(body.sender_user(), room_id, event_id)
-		.map(Ok);
+		.user_can_see_event(sender_user, room_id, event_id);
 
-	let (mut event, visible) = try_join(event, visible).await?;
+	let (mut event, retained_event, visible): (Result<Pdu>, Option<Result<Pdu>>, _) =
+		join3(event, retained_event, visible).await;
 
-	if !visible || is_ignored_pdu(services, &event, body.sender_user()).await {
+	if event.as_ref().is_err_or(Event::is_redacted)
+		&& let Some(retained_event) = retained_event
+	{
+		event = retained_event;
+	}
+
+	let mut event = event?;
+
+	if !visible || is_ignored_pdu(&services, &event, body.sender_user()).await {
 		return Err!(Request(Forbidden("You don't have permission to view this event.")));
 	}
 
