@@ -79,6 +79,7 @@ impl Service {
 		expected_count != current_count
 	}
 
+	#[allow(clippy::too_many_arguments)]
 	async fn apply_device_presence_update(
 		&self,
 		user_id: &UserId,
@@ -134,8 +135,8 @@ impl Service {
 			| None => true,
 		};
 
-		if !state_changed {
-			if let Some((count, last_last_active_ago)) = Self::refresh_skip_decision(
+		if !state_changed
+			&& let Some((count, last_last_active_ago)) = Self::refresh_skip_decision(
 				refresh_window_ms,
 				last_event.as_ref(),
 				last_count,
@@ -156,7 +157,6 @@ impl Service {
 				);
 				return Ok(());
 			}
-		}
 
 		let fallback_status = last_event
 			.and_then(|event| event.content.status_msg)
@@ -304,9 +304,8 @@ impl Service {
 		user_id: &OwnedUserId,
 		expected_count: u64,
 	) -> Result {
-		let (current_count, presence) = match self.db.get_presence_raw(user_id).await {
-			| Ok(presence) => presence,
-			| Err(_) => return Ok(()),
+		let Ok((current_count, presence)) = self.db.get_presence_raw(user_id).await else {
+			return Ok(());
 		};
 
 		if Self::timer_is_stale(expected_count, current_count) {

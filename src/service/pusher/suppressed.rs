@@ -15,6 +15,9 @@ const SUPPRESSED_MAX_EVENTS_PER_ROOM: usize = 512;
 const SUPPRESSED_MAX_EVENTS_PER_PUSHKEY: usize = 4096;
 const SUPPRESSED_MAX_ROOMS_PER_PUSHKEY: usize = 256;
 
+type SuppressedRooms = Vec<(OwnedRoomId, Vec<RawPduId>)>;
+type SuppressedPushes = Vec<(String, SuppressedRooms)>;
+
 #[derive(Default)]
 pub(super) struct SuppressedQueue {
 	inner: Mutex<HashMap<OwnedUserId, HashMap<String, PushkeyQueue>>>,
@@ -38,7 +41,7 @@ impl SuppressedQueue {
 	) -> std::sync::MutexGuard<'_, HashMap<OwnedUserId, HashMap<String, PushkeyQueue>>> {
 		self.inner
 			.lock()
-			.unwrap_or_else(|e| e.into_inner())
+			.unwrap_or_else(std::sync::PoisonError::into_inner)
 	}
 
 	fn drain_room(queue: VecDeque<SuppressedEvent>) -> Vec<RawPduId> {
@@ -86,7 +89,7 @@ pub fn queue_suppressed_push(
 	let queue = push_entry
 		.rooms
 		.entry(room_id.to_owned())
-		.or_insert_with(VecDeque::new);
+		.or_default();
 
 	if queue
 		.back()
@@ -161,7 +164,7 @@ pub fn take_suppressed_for_pushkey(
 pub fn take_suppressed_for_user(
 	&self,
 	user_id: &UserId,
-) -> Vec<(String, Vec<(OwnedRoomId, Vec<RawPduId>)>)> {
+) -> SuppressedPushes {
 	let mut inner = self.suppressed.lock();
 	let Some(user_entry) = inner.remove(user_id) else {
 		return Vec::new();

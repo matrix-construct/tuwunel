@@ -50,6 +50,7 @@ impl PresenceAggregator {
 	}
 
 	/// Update presence state for a single device.
+	#[allow(clippy::too_many_arguments)]
 	pub(crate) async fn update(
 		&self,
 		user_id: &UserId,
@@ -68,7 +69,7 @@ impl PresenceAggregator {
 			| Some(ago) => now_ms.saturating_sub(ago.into()),
 		};
 
-		let entry = devices.entry(device_key).or_insert(DevicePresence {
+		let entry = devices.entry(device_key).or_insert_with(|| DevicePresence {
 			state: state.clone(),
 			currently_active: currently_active.unwrap_or(false),
 			last_active_ts,
@@ -130,10 +131,11 @@ impl PresenceAggregator {
 				best_state = effective_state.clone();
 			}
 
-			if effective_state == PresenceState::Online || effective_state == PresenceState::Busy {
-				if device.currently_active && last_active_age < idle_timeout_ms {
-					any_currently_active = true;
-				}
+			if (effective_state == PresenceState::Online || effective_state == PresenceState::Busy)
+				&& device.currently_active
+				&& last_active_age < idle_timeout_ms
+			{
+				any_currently_active = true;
 			}
 
 			if let Some(msg) = device.status_msg.as_ref().filter(|msg| !msg.is_empty()) {
@@ -221,7 +223,6 @@ fn state_rank(state: &PresenceState) -> u8 {
 		| PresenceState::Busy => 3,
 		| PresenceState::Online => 2,
 		| PresenceState::Unavailable => 1,
-		| PresenceState::Offline => 0,
 		| _ => 0,
 	}
 }

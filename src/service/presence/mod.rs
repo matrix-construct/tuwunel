@@ -73,11 +73,10 @@ impl crate::Service for Service {
 						continue;
 					};
 
-					if let Some((current_count, _)) = timer_handles.get(&user_id) {
-						if *current_count != count {
-							trace!(?user_id, count, current_count, "Skipping stale presence timer");
-							continue;
-						}
+					if let Some((current_count, _)) = timer_handles.get(&user_id)
+						&& *current_count != count {
+						trace!(?user_id, count, current_count, "Skipping stale presence timer");
+						continue;
 					}
 
 					timer_handles.remove(&user_id);
