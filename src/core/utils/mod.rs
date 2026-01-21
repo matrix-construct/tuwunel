@@ -33,6 +33,7 @@ pub use self::{
 	hash::sha256::delimited as calculate_hash,
 	json::{deserialize_from_str, to_canonical_object},
 	mutex_map::{Guard as MutexMapGuard, MutexMap},
+	option::OptionExt,
 	rand::{shuffle, string as random_string},
 	stream::{IterStream, ReadyExt, Tools as StreamTools, TryReadyExt},
 	string::{str_from_bytes, string_from_bytes},

@@ -1,11 +1,39 @@
-use futures::future::OptionFuture;
+use futures::{FutureExt, Stream, future::OptionFuture};
 
-pub trait OptionExt<T> {
-	fn map_async<O: Future, F: FnOnce(T) -> O>(self, f: F) -> OptionFuture<O>;
+use super::IterStream;
+
+pub trait OptionExt<Fut, T, U>
+where
+	Fut: Future<Output = U> + Send,
+	U: Send,
+{
+	fn map_async<F>(self, f: F) -> OptionFuture<Fut>
+	where
+		F: FnOnce(T) -> Fut;
+
+	#[inline]
+	fn map_stream<F>(self, f: F) -> impl Stream<Item = U> + Send
+	where
+		F: FnOnce(T) -> Fut,
+		Self: Sized,
+	{
+		self.map_async(f)
+			.map(Option::into_iter)
+			.map(IterStream::stream)
+			.flatten_stream()
+	}
 }
 
-impl<T> OptionExt<T> for Option<T> {
-	fn map_async<O: Future, F: FnOnce(T) -> O>(self, f: F) -> OptionFuture<O> {
-		OptionFuture::<_>::from(self.map(f))
+impl<Fut, T, U> OptionExt<Fut, T, U> for Option<T>
+where
+	Fut: Future<Output = U> + Send,
+	U: Send,
+{
+	#[inline]
+	fn map_async<F>(self, f: F) -> OptionFuture<Fut>
+	where
+		F: FnOnce(T) -> Fut,
+	{
+		self.map(f).into()
 	}
 }
