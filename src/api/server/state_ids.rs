@@ -1,7 +1,7 @@
 use std::{borrow::Borrow, iter::once};
 
 use axum::extract::State;
-use futures::{FutureExt, StreamExt, TryStreamExt, future::try_join};
+use futures::{FutureExt, StreamExt, TryFutureExt, TryStreamExt, future::try_join};
 use ruma::{OwnedEventId, api::federation::event::get_room_state_ids};
 use tuwunel_core::{Result, at, err};
 
@@ -28,12 +28,15 @@ pub(crate) async fn get_room_state_ids_route(
 	let shortstatehash = services
 		.state
 		.pdu_shortstatehash(&body.event_id)
-		.await
-		.map_err(|_| err!(Request(NotFound("Pdu state not found."))))?;
+		.map_err(|_| err!(Request(NotFound("Pdu state not found."))));
+
+	let room_version = services.state.get_room_version(&body.room_id);
+
+	let (shortstatehash, room_version) = try_join(shortstatehash, room_version).await?;
 
 	let auth_chain_ids = services
 		.auth_chain
-		.event_ids_iter(&body.room_id, once(body.event_id.borrow()))
+		.event_ids_iter(&body.room_id, &room_version, once(body.event_id.borrow()))
 		.try_collect();
 
 	let pdu_ids = services

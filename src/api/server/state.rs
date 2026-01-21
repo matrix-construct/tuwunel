@@ -1,17 +1,11 @@
 use std::{borrow::Borrow, iter::once};
 
 use axum::extract::State;
-use futures::{
-	FutureExt, StreamExt, TryFutureExt, TryStreamExt,
-	future::{join, try_join},
-};
+use futures::{FutureExt, StreamExt, TryFutureExt, TryStreamExt, future::try_join};
 use ruma::{OwnedEventId, api::federation::event::get_room_state};
 use tuwunel_core::{
 	Result, at, err,
-	utils::{
-		future::TryExtExt,
-		stream::{IterStream, TryBroadbandExt},
-	},
+	utils::stream::{IterStream, TryBroadbandExt},
 };
 
 use super::AccessCheck;
@@ -43,25 +37,23 @@ pub(crate) async fn get_room_state_route(
 		.state_accessor
 		.state_full_ids(shortstatehash)
 		.map(at!(1))
-		.collect::<Vec<OwnedEventId>>();
+		.collect::<Vec<OwnedEventId>>()
+		.map(Ok);
 
-	let room_version = services
-		.state
-		.get_room_version(&body.room_id)
-		.ok();
+	let room_version = services.state.get_room_version(&body.room_id);
 
-	let (room_version, state_ids) = join(room_version, state_ids).await;
+	let (room_version, state_ids) = try_join(room_version, state_ids).await?;
 
 	let into_federation_format = |pdu| {
 		services
 			.federation
-			.format_pdu_into(pdu, room_version.as_ref())
+			.format_pdu_into(pdu, Some(&room_version))
 			.map(Ok)
 	};
 
 	let auth_chain = services
 		.auth_chain
-		.event_ids_iter(&body.room_id, once(body.event_id.borrow()))
+		.event_ids_iter(&body.room_id, &room_version, once(body.event_id.borrow()))
 		.broad_and_then(async |id| {
 			services
 				.timeline

@@ -104,7 +104,7 @@ pub(super) async fn state_at_incoming_resolved<Pdu>(
 	&self,
 	incoming_pdu: &Pdu,
 	room_id: &RoomId,
-	room_version_id: &RoomVersionId,
+	room_version: &RoomVersionId,
 ) -> Result<Option<HashMap<u64, OwnedEventId>>>
 where
 	Pdu: Event,
@@ -141,7 +141,7 @@ where
 		.into_iter()
 		.try_stream()
 		.wide_and_then(|(sstatehash, prev_event)| {
-			self.state_at_incoming_fork(room_id, sstatehash, prev_event)
+			self.state_at_incoming_fork(room_id, room_version, sstatehash, prev_event)
 		})
 		.try_collect()
 		.map_ok(Vec::into_iter)
@@ -152,7 +152,7 @@ where
 
 	trace!("Resolving state");
 	let Ok(new_state) = self
-		.state_resolution(room_version_id, fork_states, auth_chain_sets)
+		.state_resolution(room_version, fork_states, auth_chain_sets)
 		.inspect_ok(|_| trace!("State resolution done."))
 		.await
 	else {
@@ -189,6 +189,7 @@ where
 async fn state_at_incoming_fork<Pdu>(
 	&self,
 	room_id: &RoomId,
+	room_version: &RoomVersionId,
 	sstatehash: ShortStateHash,
 	prev_event: Pdu,
 ) -> Result<(StateMap<OwnedEventId>, AuthSet<OwnedEventId>)>
@@ -228,7 +229,7 @@ where
 	let auth_chain = self
 		.services
 		.auth_chain
-		.event_ids_iter(room_id, starting_events)
+		.event_ids_iter(room_id, room_version, starting_events)
 		.try_collect();
 
 	let fork_state = leaf_state_after_event

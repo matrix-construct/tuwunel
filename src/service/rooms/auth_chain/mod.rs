@@ -11,10 +11,10 @@ use futures::{
 	FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt, pin_mut,
 	stream::{FuturesUnordered, unfold},
 };
-use ruma::{EventId, OwnedEventId, RoomId, room_version_rules::RoomVersionRules};
+use ruma::{EventId, OwnedEventId, RoomId, RoomVersionId, room_version_rules::RoomVersionRules};
 use tuwunel_core::{
 	Err, Result, at, debug, debug_error, err, implement,
-	matrix::{Event, PduEvent},
+	matrix::{Event, PduEvent, room_version},
 	pdu::AuthEvents,
 	trace, utils,
 	utils::{
@@ -60,12 +60,13 @@ impl crate::Service for Service {
 pub fn event_ids_iter<'a, I>(
 	&'a self,
 	room_id: &'a RoomId,
+	room_version: &'a RoomVersionId,
 	starting_events: I,
 ) -> impl Stream<Item = Result<OwnedEventId>> + Send + 'a
 where
 	I: Iterator<Item = &'a EventId> + Clone + Debug + ExactSizeIterator + Send + 'a,
 {
-	self.get_auth_chain(room_id, starting_events)
+	self.get_auth_chain(room_id, room_version, starting_events)
 		.map_ok(|chain| {
 			self.services
 				.short
@@ -85,6 +86,7 @@ where
 pub async fn get_auth_chain<'a, I>(
 	&'a self,
 	room_id: &RoomId,
+	room_version: &RoomVersionId,
 	starting_events: I,
 ) -> Result<Vec<ShortEventId>>
 where
@@ -94,12 +96,7 @@ where
 	const BUCKET: Bucket<'_> = BTreeSet::new();
 
 	let started = Instant::now();
-	let room_rules = self
-		.services
-		.state
-		.get_room_version_rules(room_id)
-		.await?;
-
+	let room_rules = room_version::rules(room_version)?;
 	let starting_ids = self
 		.services
 		.short

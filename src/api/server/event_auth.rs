@@ -46,22 +46,18 @@ pub(crate) async fn get_event_authorization_route(
 	let room_id = <&RoomId>::try_from(room_id_str)
 		.map_err(|_| Error::bad_database("Invalid room_id in event in database."))?;
 
-	let room_version = services
-		.state
-		.get_room_version(room_id)
-		.await
-		.ok();
+	let room_version = services.state.get_room_version(room_id).await?;
 
 	let auth_chain = services
 		.auth_chain
-		.event_ids_iter(room_id, once(body.event_id.borrow()))
+		.event_ids_iter(room_id, &room_version, once(body.event_id.borrow()))
 		.ready_filter_map(Result::ok)
 		.broad_filter_map(async |id| {
 			let pdu = services.timeline.get_pdu_json(&id).await.ok()?;
 
 			let pdu = services
 				.federation
-				.format_pdu_into(pdu, room_version.as_ref())
+				.format_pdu_into(pdu, Some(&room_version))
 				.await;
 
 			Some(pdu)

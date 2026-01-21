@@ -57,11 +57,17 @@ pub(super) async fn get_auth_chain(&self, event_id: OwnedEventId) -> Result {
 	let room_id = <&RoomId>::try_from(room_id_str)
 		.map_err(|_| err!(Database("Invalid room id field in event in database")))?;
 
+	let room_version = self
+		.services
+		.state
+		.get_room_version(room_id)
+		.await?;
+
 	let start = Instant::now();
 	let count = self
 		.services
 		.auth_chain
-		.event_ids_iter(room_id, once(event_id.as_ref()))
+		.event_ids_iter(room_id, &room_version, once(event_id.as_ref()))
 		.ready_filter_map(Result::ok)
 		.count()
 		.await;

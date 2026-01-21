@@ -50,9 +50,9 @@ async fn create_join_event(
 
 	// We do not add the event_id field to the pdu here because of signature and
 	// hashes checks
-	let room_version_id = services.state.get_room_version(room_id).await?;
+	let room_version = services.state.get_room_version(room_id).await?;
 
-	let Ok((event_id, mut value)) = gen_event_id_canonical_json(pdu, &room_version_id) else {
+	let Ok((event_id, mut value)) = gen_event_id_canonical_json(pdu, &room_version) else {
 		// Event could not be converted to canonical json
 		return Err!(Request(BadJson("Could not convert event to canonical json.")));
 	};
@@ -136,9 +136,9 @@ async fn create_join_event(
 	if let Some(authorising_user) = content.join_authorized_via_users_server {
 		use ruma::RoomVersionId::*;
 
-		if matches!(room_version_id, V1 | V2 | V3 | V4 | V5 | V6 | V7) {
+		if matches!(room_version, V1 | V2 | V3 | V4 | V5 | V6 | V7) {
 			return Err!(Request(InvalidParam(
-				"Room version {room_version_id} does not support restricted rooms but \
+				"Room version {room_version} does not support restricted rooms but \
 				 join_authorised_via_users_server ({authorising_user}) was found in the event."
 			)));
 		}
@@ -161,13 +161,8 @@ async fn create_join_event(
 			)));
 		}
 
-		if !super::user_can_perform_restricted_join(
-			services,
-			&state_key,
-			room_id,
-			&room_version_id,
-		)
-		.await?
+		if !super::user_can_perform_restricted_join(services, &state_key, room_id, &room_version)
+			.await?
 		{
 			return Err!(Request(UnableToAuthorizeJoin(
 				"Joining user did not pass restricted room's rules."
@@ -177,7 +172,7 @@ async fn create_join_event(
 
 	services
 		.server_keys
-		.hash_and_sign_event(&mut value, &room_version_id)
+		.hash_and_sign_event(&mut value, &room_version)
 		.map_err(|e| err!(Request(InvalidParam(warn!("Failed to sign send_join event: {e}")))))?;
 
 	let origin: OwnedServerName = serde_json::from_value(
@@ -216,7 +211,7 @@ async fn create_join_event(
 	// Join event for new server.
 	let event = services
 		.federation
-		.format_pdu_into(value, Some(&room_version_id))
+		.format_pdu_into(value, Some(&room_version))
 		.map(Some)
 		.map(Ok);
 
@@ -229,13 +224,13 @@ async fn create_join_event(
 	let into_federation_format = |pdu| {
 		services
 			.federation
-			.format_pdu_into(pdu, Some(&room_version_id))
+			.format_pdu_into(pdu, Some(&room_version))
 			.map(Ok)
 	};
 
 	let auth_chain = services
 		.auth_chain
-		.event_ids_iter(room_id, auth_heads)
+		.event_ids_iter(room_id, &room_version, auth_heads)
 		.broad_and_then(async |event_id| {
 			services
 				.timeline

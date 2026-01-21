@@ -17,7 +17,7 @@ use crate::rooms::state_compressor::CompressedState;
 pub async fn resolve_state(
 	&self,
 	room_id: &RoomId,
-	room_version_id: &RoomVersionId,
+	room_version: &RoomVersionId,
 	incoming_state: HashMap<u64, OwnedEventId>,
 ) -> Result<Arc<CompressedState>> {
 	trace!("Loading current room state ids");
@@ -43,7 +43,7 @@ pub async fn resolve_state(
 		.wide_and_then(|state| {
 			self.services
 				.auth_chain
-				.event_ids_iter(room_id, state.values().map(Borrow::borrow))
+				.event_ids_iter(room_id, room_version, state.values().map(Borrow::borrow))
 				.try_collect::<AuthSet<OwnedEventId>>()
 		})
 		.ready_filter_map(Result::ok);
@@ -64,7 +64,7 @@ pub async fn resolve_state(
 
 	trace!("Resolving state");
 	let state = self
-		.state_resolution(room_version_id, fork_states, auth_chain_sets)
+		.state_resolution(room_version, fork_states, auth_chain_sets)
 		.await?;
 
 	trace!("State resolution done.");
