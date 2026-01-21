@@ -1,7 +1,4 @@
-use std::{
-	collections::HashMap,
-	iter::{Iterator, once},
-};
+use std::{collections::HashMap, iter::Iterator};
 
 use futures::{FutureExt, StreamExt, TryFutureExt, TryStreamExt, future::try_join};
 use ruma::{OwnedEventId, RoomId, RoomVersionId};
@@ -198,19 +195,23 @@ where
 {
 	let leaf = prev_event
 		.state_key()
-		.map_async(async |state_key| {
-			self.services
+		.map_stream(async |state_key| {
+			let event_id = prev_event.event_id();
+			let event_type = prev_event.kind().to_cow_str().into();
+			let shortstatekey = self
+				.services
 				.short
-				.get_or_create_shortstatekey(&prev_event.kind().to_cow_str().into(), state_key)
-				.map(|shortstatekey| once((shortstatekey, prev_event.event_id().to_owned())))
-				.await
+				.get_or_create_shortstatekey(&event_type, state_key)
+				.await;
+
+			(shortstatekey, event_id.to_owned())
 		});
 
 	let leaf_state_after_event: Vec<_> = self
 		.services
 		.state_accessor
 		.state_full_ids(sstatehash)
-		.chain(leaf.await.into_iter().flatten().stream())
+		.chain(leaf)
 		.collect()
 		.await;
 
