@@ -153,6 +153,17 @@ pub(crate) static SEQUENTIAL_SMALL: Descriptor = Descriptor {
 	..SEQUENTIAL
 };
 
+/// Descriptor for large persistent caches with random updates. Oldest entries
+/// are deleted after limit_size reached.
+pub(crate) static RANDOM_CACHE: Descriptor = Descriptor {
+	compaction: CompactionStyle::Fifo,
+	cache_disp: CacheDisp::Unique,
+	limit_size: 1024 * 1024 * 1024 * 2,
+	ttl: 60 * 60 * 24 * 180,
+	file_shape: 2,
+	..RANDOM
+};
+
 /// Descriptor for small persistent caches with random updates. Oldest entries
 /// are deleted after limit_size reached.
 pub(crate) static RANDOM_SMALL_CACHE: Descriptor = Descriptor {
