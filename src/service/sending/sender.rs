@@ -938,6 +938,7 @@ impl Service {
 			return;
 		}
 
+		let mut sent = 0_usize;
 		debug!(?user_id, pushkey, rooms = rooms.len(), "Flushing suppressed pushes ({reason})");
 
 		for (room_id, pdu_ids) in rooms {
@@ -984,9 +985,13 @@ impl Service {
 						requeued,
 						"Failed to send suppressed push notification"
 					);
+				} else {
+					sent = sent.saturating_add(1);
 				}
 			}
 		}
+
+		debug!(?user_id, pushkey, sent, "Flushed suppressed push notifications");
 	}
 
 	async fn flush_suppressed_for_pushkey(
