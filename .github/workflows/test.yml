@@ -230,7 +230,6 @@ jobs:
           {"cargo_profile": "release-native", "sys_target": "x86_64-v4-linux-gnu"},
           {"rust_target": "aarch64-unknown-linux-gnu", "feat_set": "none"},
           {"rust_target": "aarch64-unknown-linux-gnu", "feat_set": "default"},
-          {"rust_target": "aarch64-unknown-linux-gnu", "feat_set": "logging"},
           {"rust_target": "aarch64-unknown-linux-gnu", "sys_target": "x86_64-v1-linux-gnu"},
           {"rust_target": "aarch64-unknown-linux-gnu", "sys_target": "x86_64-v2-linux-gnu"},
           {"rust_target": "aarch64-unknown-linux-gnu", "sys_target": "x86_64-v3-linux-gnu"},
