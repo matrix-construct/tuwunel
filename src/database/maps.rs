@@ -39,8 +39,8 @@ pub(super) static MAPS: &[Descriptor] = &[
 		cache_disp: CacheDisp::SharedWith("shorteventid_authchain"),
 		index_size: 512,
 		block_size: 4096,
-		key_size_hint: Some(8),
-		val_size_hint: Some(1024),
+		key_size_hint: Some(8), // intentionally match shorteventid_authchain
+		val_size_hint: Some(256),
 		..descriptor::RANDOM_CACHE
 	},
 	Descriptor {
@@ -290,7 +290,7 @@ pub(super) static MAPS: &[Descriptor] = &[
 		name: "shorteventid_authchain",
 		cache_disp: CacheDisp::SharedWith("authchainkey_authchain"),
 		key_size_hint: Some(8),
-		val_size_hint: Some(1024),
+		val_size_hint: Some(256),
 		index_size: 512,
 		block_size: 4096,
 		..descriptor::SEQUENTIAL
