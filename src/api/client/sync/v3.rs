@@ -525,7 +525,6 @@ async fn process_presence_updates(
 		full = %full_state,
 	),
 )]
-#[allow(clippy::too_many_arguments)]
 async fn handle_left_room(
 	services: &Services,
 	since: u64,
@@ -744,7 +743,7 @@ async fn load_left_room(
 		room_id = ?room_id,
 	),
 )]
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 async fn load_joined_room(
 	services: &Services,
 	sender_user: &UserId,
@@ -1163,7 +1162,7 @@ async fn load_joined_room(
 	    cs = %current_shortstatehash,
     )
 )]
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 async fn calculate_state_changes<'a>(
 	services: &Services,
 	sender_user: &UserId,

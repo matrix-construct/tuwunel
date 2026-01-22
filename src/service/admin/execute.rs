@@ -6,7 +6,7 @@ pub(super) const SIGNAL: &str = "SIGUSR2";
 
 /// Possibly spawn the terminal console at startup if configured.
 #[implement(super::Service)]
-#[allow(clippy::unused_async)]
+#[expect(clippy::unused_async)]
 pub(super) async fn console_auto_start(&self) {
 	#[cfg(feature = "console")]
 	if self
@@ -23,7 +23,7 @@ pub(super) async fn console_auto_start(&self) {
 
 /// Shutdown the console when the admin worker terminates.
 #[implement(super::Service)]
-#[allow(clippy::unused_async)]
+#[expect(clippy::unused_async)]
 pub(super) async fn console_auto_stop(&self) {
 	#[cfg(feature = "console")]
 	self.console.close().await;

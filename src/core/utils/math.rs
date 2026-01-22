@@ -42,7 +42,7 @@ macro_rules! expected {
 #[collapse_debuginfo(yes)]
 macro_rules! validated {
 	($($input:tt)+) => {
-		//#[allow(clippy::arithmetic_side_effects)] {
+		//#[expect(clippy::arithmetic_side_effects)] {
 		//Some($($input)*)
 		//	.ok_or_else(|| $crate::err!(Arithmetic("this error should never been seen")))
 		//}
@@ -62,7 +62,6 @@ macro_rules! validated {
 }
 
 #[inline]
-#[allow(clippy::as_conversions)]
 pub fn usize_from_f64(val: f64) -> Result<usize, Error> {
 	if val < 0.0 {
 		return Err!(Arithmetic("Converting negative float to unsigned integer"));
@@ -92,7 +91,7 @@ pub fn ruma_from_usize(val: usize) -> ruma::UInt {
 
 #[inline]
 #[must_use]
-#[allow(clippy::as_conversions, clippy::cast_possible_truncation)]
+#[expect(clippy::as_conversions, clippy::cast_possible_truncation)]
 pub fn usize_from_u64_truncated(val: u64) -> usize { val as usize }
 
 #[inline]

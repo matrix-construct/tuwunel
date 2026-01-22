@@ -1,4 +1,4 @@
-#![allow(dead_code)]
+#![expect(dead_code)]
 
 use ruma::{OwnedRoomId, OwnedUserId, RoomId, UserId};
 use tuwunel_core::{Err, Result, err};

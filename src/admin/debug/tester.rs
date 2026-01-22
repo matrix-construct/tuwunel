@@ -46,7 +46,7 @@ async fn timer(&self) -> Result {
 
 #[inline(never)]
 #[rustfmt::skip]
-#[allow(unused_variables)]
+#[expect(unused_variables)]
 fn timed(body: &[&str]) {
 
 }

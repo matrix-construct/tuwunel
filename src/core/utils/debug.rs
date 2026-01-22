@@ -60,7 +60,7 @@ impl<T: fmt::Debug> fmt::Debug for TruncatedSlice<'_, T> {
 }
 
 impl fmt::Debug for TruncatedStr<'_> {
-	#[allow(clippy::string_slice)]
+	#[expect(clippy::string_slice)]
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		if self.inner.len() <= self.max_len {
 			write!(f, "{:?}", self.inner)

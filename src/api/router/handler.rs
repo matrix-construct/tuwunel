@@ -35,6 +35,7 @@ impl RouterExt for Router<State> {
 
 macro_rules! ruma_handler {
 	( $($tx:ident),* $(,)? ) => {
+		#[allow(clippy::allow_attributes)]
 		#[allow(non_snake_case)]
 		impl<Err, Req, Fut, Fun, $($tx,)*> RumaHandler<($($tx,)* Ruma<Req>,)> for Fun
 		where

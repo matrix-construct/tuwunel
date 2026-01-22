@@ -183,7 +183,6 @@ impl<W: Write> ser::Serializer for &mut Serializer<'_, W> {
 		unhandled!("serialize Struct Variant not implemented")
 	}
 
-	#[allow(clippy::needless_borrows_for_generic_args)] // buggy
 	fn serialize_newtype_struct<T>(self, name: &'static str, value: &T) -> Result<Self::Ok>
 	where
 		T: Serialize + ?Sized,

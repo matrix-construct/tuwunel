@@ -42,7 +42,7 @@ pub struct CachedSpaceHierarchySummary {
 	summary: SpaceHierarchyParentSummary,
 }
 
-#[allow(clippy::large_enum_variant)]
+#[expect(clippy::large_enum_variant)]
 pub enum SummaryAccessibility {
 	Accessible(SpaceHierarchyParentSummary),
 	Inaccessible,

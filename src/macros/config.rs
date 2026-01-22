@@ -17,7 +17,7 @@ const UNDOCUMENTED: &str = "# This item is undocumented. Please contribute docum
 
 const HIDDEN: &[&str] = &["default", "display"];
 
-#[allow(clippy::needless_pass_by_value)]
+#[expect(clippy::needless_pass_by_value)]
 pub(super) fn example_generator(input: ItemStruct, args: &[Meta]) -> Result<TokenStream> {
 	let write = is_cargo_build() && !is_cargo_test();
 	let additional = generate_example(&input, args, write)?;

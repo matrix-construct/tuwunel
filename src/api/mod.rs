@@ -1,5 +1,5 @@
 #![type_length_limit = "262144"] //TODO: REDUCE ME
-#![allow(clippy::toplevel_ref_arg)]
+#![expect(clippy::toplevel_ref_arg)]
 
 pub mod client;
 pub mod router;

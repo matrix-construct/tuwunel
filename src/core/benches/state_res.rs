@@ -197,7 +197,7 @@ fn resolve_deeper_event_set(c: &mut Criterion) {
 /////////////////////////////////////////////////////////////////////*/
 struct TestStore<E: Event>(HashMap<OwnedEventId, E>);
 
-#[allow(unused)]
+#[expect(unused)]
 impl<E: Event> TestStore<E> {
 	fn get_event(&self, room_id: &RoomId, event_id: &EventId) -> Result<E> {
 		self.0
@@ -278,7 +278,7 @@ impl<E: Event> TestStore<E> {
 }
 
 impl TestStore<PduEvent> {
-	#[allow(clippy::type_complexity)]
+	#[expect(clippy::type_complexity)]
 	fn set_up(
 		&mut self,
 	) -> (StateMap<OwnedEventId>, StateMap<OwnedEventId>, StateMap<OwnedEventId>) {
@@ -463,7 +463,7 @@ where
 }
 
 // all graphs start with these input events
-#[allow(non_snake_case)]
+#[expect(non_snake_case)]
 fn INITIAL_EVENTS() -> HashMap<OwnedEventId, PduEvent> {
 	vec![
 		to_pdu_event::<&EventId>(
@@ -545,7 +545,7 @@ fn INITIAL_EVENTS() -> HashMap<OwnedEventId, PduEvent> {
 }
 
 // all graphs start with these input events
-#[allow(non_snake_case)]
+#[expect(non_snake_case)]
 fn BAN_STATE_SET() -> HashMap<OwnedEventId, PduEvent> {
 	vec![
 		to_pdu_event(

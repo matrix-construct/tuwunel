@@ -270,7 +270,7 @@ pub(crate) fn cache_size(config: &Config, base_size: u32, entity_size: usize) ->
 	cache_size_f64(config, f64::from(base_size), entity_size)
 }
 
-#[allow(
+#[expect(
 	clippy::as_conversions,
 	clippy::cast_sign_loss,
 	clippy::cast_possible_truncation

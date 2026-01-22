@@ -34,7 +34,7 @@ impl<'a> From<&'a str> for &'a Unquoted {
 
 		//SAFETY: This is a pattern I lifted from ruma-identifiers for strong-type strs
 		// by wrapping in a tuple-struct.
-		#[allow(clippy::transmute_ptr_to_ptr)]
+		#[expect(clippy::transmute_ptr_to_ptr)]
 		unsafe {
 			std::mem::transmute(s)
 		}

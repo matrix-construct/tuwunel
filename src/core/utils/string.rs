@@ -65,7 +65,7 @@ pub fn camel_to_snake_string(s: &str) -> String {
 }
 
 #[inline]
-#[allow(clippy::unbuffered_bytes)] // these are allocated string utilities, not file I/O utils
+#[expect(clippy::unbuffered_bytes)] // these are allocated string utilities, not file I/O utils
 pub fn camel_to_snake_case<I, O>(output: &mut O, input: I) -> Result
 where
 	I: std::io::Read,
@@ -95,7 +95,7 @@ where
 /// common_prefix(&input) == "con";
 /// ```
 #[must_use]
-#[allow(clippy::string_slice)]
+#[expect(clippy::string_slice)]
 pub fn common_prefix<T: AsRef<str>>(choice: &[T]) -> &str {
 	choice.first().map_or(EMPTY, move |best| {
 		choice
@@ -114,7 +114,7 @@ pub fn common_prefix<T: AsRef<str>>(choice: &[T]) -> &str {
 
 #[inline]
 #[must_use]
-#[allow(clippy::arithmetic_side_effects)]
+#[expect(clippy::arithmetic_side_effects)]
 pub fn truncate_deterministic(str: &str, range: Option<Range<usize>>) -> &str {
 	let range = range.unwrap_or(0..str.len());
 	let len = str

@@ -19,7 +19,6 @@ pub(super) fn manifest(item: ItemConst, args: &[Meta]) -> Result<TokenStream> {
 	Ok(ret.into())
 }
 
-#[allow(clippy::option_env_unwrap)]
 fn manifest_path(member: Option<&str>) -> Result<PathBuf> {
 	let Some(path) = option_env!("CARGO_MANIFEST_DIR") else {
 		return Err(Error::new(

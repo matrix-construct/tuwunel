@@ -179,7 +179,7 @@ pub fn name_from_path(path: &Path) -> Result<String> {
 }
 
 /// Get the (major, minor) of the block device on which Path is mounted.
-#[allow(
+#[expect(
 	clippy::useless_conversion,
 	clippy::unnecessary_fallible_conversions
 )]

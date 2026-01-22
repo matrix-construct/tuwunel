@@ -1,4 +1,4 @@
-#![allow(
+#![expect(
 	clippy::cast_possible_wrap,
 	clippy::cast_sign_loss,
 	clippy::as_conversions

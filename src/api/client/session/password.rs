@@ -17,7 +17,7 @@ pub(super) async fn handle_login(
 	body: &Ruma<Request>,
 	info: &Password,
 ) -> Result<OwnedUserId> {
-	#[allow(deprecated)]
+	#[expect(deprecated)]
 	let Password { identifier, password, user, .. } = info;
 
 	let user_id = if let Some(uiaa::UserIdentifier::UserIdOrLocalpart(user_id)) = identifier {

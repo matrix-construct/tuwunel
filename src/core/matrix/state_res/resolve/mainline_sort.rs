@@ -146,7 +146,7 @@ where
 	Ok(0)
 }
 
-#[allow(clippy::redundant_closure)]
+#[expect(clippy::redundant_closure)]
 #[tracing::instrument(level = "trace", skip_all)]
 async fn get_power_levels_auth_event<Fetch, Fut, Pdu>(
 	event: &Pdu,

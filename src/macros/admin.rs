@@ -12,7 +12,7 @@ use crate::{
 pub(super) fn command(mut item: ItemFn, _args: &[Meta]) -> Result<TokenStream> {
 	let attr: Vec<Attribute> = parse_quote! {
 		#[tuwunel_macros::implement(crate::Context, params = "<'_>")]
-		#[allow(clippy::unused_async)]
+		#[expect(clippy::unused_async)]
 	};
 
 	item.attrs.extend(attr);
@@ -34,13 +34,13 @@ pub(super) fn command_dispatch(item: ItemEnum, args: &[Meta]) -> Result<TokenStr
 		.try_collect()?;
 
 	let switch = quote! {
-		#[allow(clippy::large_stack_frames)] //TODO: fixme
+		#[expect(clippy::large_stack_frames)] //TODO: fixme
 		pub(super) async fn process(
 			command: #name,
 			context: &crate::Context<'_>
 		) -> Result {
 			use #name::*;
-			#[allow(non_snake_case)]
+			#[expect(non_snake_case)]
 			match command {
 				#( #arm )*
 			}

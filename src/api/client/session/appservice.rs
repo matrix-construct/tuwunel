@@ -15,7 +15,7 @@ pub(super) fn handle_login(
 	body: &Ruma<Request>,
 	info: &ApplicationService,
 ) -> Result<OwnedUserId> {
-	#[allow(deprecated)]
+	#[expect(deprecated)]
 	let ApplicationService { identifier, user } = info;
 
 	let Some(ref info) = body.appservice_info else {

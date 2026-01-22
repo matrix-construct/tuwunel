@@ -6,7 +6,7 @@ use crate::{Result, err};
 
 #[inline]
 #[must_use]
-#[allow(clippy::as_conversions, clippy::cast_possible_truncation)]
+#[expect(clippy::as_conversions, clippy::cast_possible_truncation)]
 pub fn now_millis() -> u64 { now().as_millis() as u64 }
 
 #[inline]
@@ -87,7 +87,7 @@ pub fn format(ts: SystemTime, str: &str) -> String {
 }
 
 #[must_use]
-#[allow(
+#[expect(
 	clippy::as_conversions,
 	clippy::cast_possible_truncation,
 	clippy::cast_sign_loss
@@ -113,7 +113,7 @@ pub fn pretty(d: Duration) -> String {
 /// part is the largest Unit containing a non-zero value, the frac part is a
 /// rational remainder left over.
 #[must_use]
-#[allow(clippy::as_conversions, clippy::cast_precision_loss)]
+#[expect(clippy::as_conversions, clippy::cast_precision_loss)]
 pub fn whole_and_frac(d: Duration) -> (Unit, f64) {
 	use Unit::*;
 

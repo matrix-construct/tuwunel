@@ -24,5 +24,5 @@ pub(crate) fn check_and_reset() -> bool { STATIC_DTORS.swap(0, ORDERING) == 0 }
 /// Called by Module::unload() after unload to verify static destruction took
 /// place. A call to prepare() must be made prior to Module::unload() and making
 /// this call.
-#[allow(dead_code)]
+#[expect(dead_code)]
 pub(crate) fn check() -> bool { STATIC_DTORS.load(ORDERING) == 0 }

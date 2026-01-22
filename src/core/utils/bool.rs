@@ -28,7 +28,7 @@ pub trait BoolExt {
 
 	fn into_option(self) -> Option<()>;
 
-	#[allow(clippy::result_unit_err)]
+	#[expect(clippy::result_unit_err)]
 	fn into_result(self) -> Result<(), ()>;
 
 	#[must_use]

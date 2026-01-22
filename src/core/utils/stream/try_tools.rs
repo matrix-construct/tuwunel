@@ -1,5 +1,5 @@
 //! TryStreamTools for futures::TryStream
-#![allow(clippy::type_complexity)]
+#![expect(clippy::type_complexity)]
 
 use futures::{TryStream, TryStreamExt, future, future::Ready, stream::TryTakeWhile};
 

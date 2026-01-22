@@ -1,4 +1,4 @@
-#![allow(deprecated)]
+#![expect(deprecated)]
 
 use axum::extract::State;
 use futures::FutureExt;

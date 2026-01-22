@@ -165,7 +165,7 @@ pub async fn download_image(&self, url: &str) -> Result<UrlPreviewData> {
 
 #[cfg(not(feature = "url_preview"))]
 #[implement(Service)]
-#[allow(clippy::unused_async)]
+#[expect(clippy::unused_async)]
 pub async fn download_image(&self, _url: &str) -> Result<UrlPreviewData> {
 	Err!(FeatureDisabled("url_preview"))
 }
@@ -215,7 +215,7 @@ async fn download_html(&self, url: &str) -> Result<UrlPreviewData> {
 
 #[cfg(not(feature = "url_preview"))]
 #[implement(Service)]
-#[allow(clippy::unused_async)]
+#[expect(clippy::unused_async)]
 async fn download_html(&self, _url: &str) -> Result<UrlPreviewData> {
 	Err!(FeatureDisabled("url_preview"))
 }

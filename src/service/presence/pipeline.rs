@@ -86,7 +86,7 @@ impl Service {
 		expected_count != current_count
 	}
 
-	#[allow(clippy::too_many_arguments)]
+	#[expect(clippy::too_many_arguments)]
 	async fn apply_device_presence_update(
 		&self,
 		user_id: &UserId,

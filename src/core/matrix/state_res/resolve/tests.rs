@@ -652,7 +652,7 @@ async fn join_rule_with_auth_chain() {
 	do_check(&join_rule.values().cloned().collect::<Vec<_>>(), edges, expected_state_ids).await;
 }
 
-#[allow(non_snake_case)]
+#[expect(non_snake_case)]
 fn BAN_STATE_SET() -> HashMap<OwnedEventId, PduEvent> {
 	vec![
 		to_pdu_event(
@@ -697,7 +697,7 @@ fn BAN_STATE_SET() -> HashMap<OwnedEventId, PduEvent> {
 	.collect()
 }
 
-#[allow(non_snake_case)]
+#[expect(non_snake_case)]
 fn JOIN_RULE() -> HashMap<OwnedEventId, PduEvent> {
 	vec![
 		to_pdu_event(
@@ -726,7 +726,7 @@ fn JOIN_RULE() -> HashMap<OwnedEventId, PduEvent> {
 
 macro_rules! state_set {
     ($($kind:expr => $key:expr => $id:expr),* $(,)?) => {{
-        #[allow(unused_mut)]
+        #[expect(unused_mut)]
         let mut x = StateMap::new();
         $(
             x.insert(($kind, $key.into()), $id);

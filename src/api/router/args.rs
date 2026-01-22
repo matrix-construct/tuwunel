@@ -153,7 +153,7 @@ fn into_http_request(request: &Request, body: Bytes) -> hyper::Request<Bytes> {
 		.expect("http request body")
 }
 
-#[allow(clippy::needless_pass_by_value)]
+#[expect(clippy::needless_pass_by_value)]
 fn take_body(
 	services: &Services,
 	request: &mut Request,

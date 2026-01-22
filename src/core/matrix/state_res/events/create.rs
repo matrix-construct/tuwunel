@@ -22,11 +22,9 @@ impl<E: Event> RoomCreateEvent<E> {
 	pub fn new(event: E) -> Self { Self(event) }
 
 	/// The version of the room.
-	#[allow(dead_code)]
 	pub fn room_version(&self) -> Result<RoomVersionId> {
 		#[derive(Deserialize)]
 		struct RoomCreateContentRoomVersion {
-			#[allow(dead_code)]
 			room_version: Option<RoomVersionId>,
 		}
 

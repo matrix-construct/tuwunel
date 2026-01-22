@@ -21,7 +21,7 @@ pub(super) async fn filter_room(
 	room_id: &RoomId,
 	membership: Option<&MembershipState>,
 ) -> bool {
-	#[allow(clippy::match_same_arms)] // helps readability
+	#[expect(clippy::match_same_arms)] // helps readability
 	let match_invite = filter
 		.is_invite
 		.map_async(async |is_invite| match (membership, is_invite) {

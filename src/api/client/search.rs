@@ -56,7 +56,7 @@ pub(crate) async fn search_events_route(
 	})
 }
 
-#[allow(clippy::map_unwrap_or)]
+#[expect(clippy::map_unwrap_or)]
 async fn category_room_events(
 	services: &Services,
 	sender_user: &UserId,

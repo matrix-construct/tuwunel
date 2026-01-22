@@ -1,5 +1,3 @@
-#![allow(clippy::disallowed_macros)]
-
 pub mod capture;
 pub mod color;
 pub mod console;

@@ -248,7 +248,7 @@ pub(super) async fn do_check(
 	assert_eq!(expected_state, end_state);
 }
 
-#[allow(clippy::exhaustive_structs)]
+#[expect(clippy::exhaustive_structs)]
 pub(super) struct TestStore(pub(super) HashMap<OwnedEventId, PduEvent>);
 
 impl TestStore {
@@ -286,7 +286,7 @@ impl TestStore {
 }
 
 // A StateStore implementation for testing
-#[allow(clippy::type_complexity)]
+#[expect(clippy::type_complexity)]
 impl TestStore {
 	pub(super) fn set_up(
 		&mut self,
@@ -646,7 +646,7 @@ pub(super) fn room_create_hydra_pdu_event(
 }
 
 // all graphs start with these input events
-#[allow(non_snake_case)]
+#[expect(non_snake_case)]
 pub(super) fn INITIAL_EVENTS() -> HashMap<OwnedEventId, PduEvent> {
 	vec![
 		to_pdu_event::<&EventId>(
@@ -729,7 +729,7 @@ pub(super) fn INITIAL_EVENTS() -> HashMap<OwnedEventId, PduEvent> {
 
 /// Batch of initial events to use for incoming events from room version
 /// `org.matrix.hydra.11` onwards.
-#[allow(non_snake_case)]
+#[expect(non_snake_case)]
 pub(super) fn INITIAL_HYDRA_EVENTS() -> HashMap<OwnedEventId, PduEvent> {
 	vec![
 		room_create_hydra_pdu_event(
@@ -807,7 +807,7 @@ pub(super) fn INITIAL_HYDRA_EVENTS() -> HashMap<OwnedEventId, PduEvent> {
 }
 
 // all graphs start with these input events
-#[allow(non_snake_case)]
+#[expect(non_snake_case)]
 pub(super) fn INITIAL_EVENTS_CREATE_ROOM() -> HashMap<OwnedEventId, PduEvent> {
 	vec![to_pdu_event::<&EventId>(
 		"CREATE",
@@ -823,7 +823,7 @@ pub(super) fn INITIAL_EVENTS_CREATE_ROOM() -> HashMap<OwnedEventId, PduEvent> {
 	.collect()
 }
 
-#[allow(non_snake_case)]
+#[expect(non_snake_case)]
 pub(super) fn INITIAL_EDGES() -> Vec<OwnedEventId> {
 	vec!["START", "IMC", "IMB", "IJR", "IPOWER", "IMA", "CREATE"]
 		.into_iter()

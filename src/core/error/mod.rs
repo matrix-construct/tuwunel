@@ -239,7 +239,7 @@ impl<T> From<PoisonError<T>> for Error {
 	fn from(e: PoisonError<T>) -> Self { Self::Poison(e.to_string().into()) }
 }
 
-#[allow(clippy::fallible_impl_from)]
+#[expect(clippy::fallible_impl_from)]
 impl From<Infallible> for Error {
 	#[cold]
 	#[inline(never)]
@@ -257,5 +257,5 @@ pub fn infallible(_e: &Infallible) {
 /// Convenience functor for fundamental Error::sanitized_message(); see member.
 #[inline]
 #[must_use]
-#[allow(clippy::needless_pass_by_value)]
+#[expect(clippy::needless_pass_by_value)]
 pub fn sanitized_message(e: Error) -> String { e.sanitized_message() }

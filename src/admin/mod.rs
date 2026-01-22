@@ -1,6 +1,5 @@
-#![allow(clippy::wildcard_imports)]
-#![allow(clippy::enum_glob_use)]
-#![allow(clippy::too_many_arguments)]
+#![expect(clippy::enum_glob_use)]
+#![expect(clippy::too_many_arguments)]
 
 pub(crate) mod admin;
 pub(crate) mod context;

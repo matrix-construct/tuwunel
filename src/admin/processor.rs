@@ -173,7 +173,7 @@ fn capture_create(context: &Context<'_>) -> (Arc<Capture>, Arc<Mutex<String>>) {
 }
 
 /// Parse chat messages from the admin room into an AdminCommand object
-#[allow(clippy::result_large_err)]
+#[expect(clippy::result_large_err)]
 fn parse<'a>(
 	services: &Arc<Services>,
 	input: &'a CommandInput,

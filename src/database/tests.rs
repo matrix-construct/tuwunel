@@ -1,4 +1,4 @@
-#![allow(clippy::needless_borrows_for_generic_args)]
+#![expect(clippy::needless_borrows_for_generic_args)]
 
 use std::fmt::Debug;
 

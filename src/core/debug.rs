@@ -1,5 +1,3 @@
-#![allow(clippy::disallowed_macros)]
-
 use std::{any::Any, env, panic, sync::LazyLock};
 
 use tracing::Level;
@@ -73,7 +71,6 @@ fn set_panic_trap() {
 
 #[cold]
 #[inline(never)]
-#[allow(deprecated_in_future)]
 pub fn panic_handler(info: &panic::PanicHookInfo<'_>, next: &dyn Fn(&panic::PanicHookInfo<'_>)) {
 	trap();
 	next(info);

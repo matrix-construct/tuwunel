@@ -48,7 +48,7 @@ impl PresenceAggregator {
 	pub(crate) async fn clear(&self) { self.inner.write().await.clear(); }
 
 	/// Update presence state for a single device.
-	#[allow(clippy::too_many_arguments)]
+	#[expect(clippy::too_many_arguments)]
 	pub(crate) async fn update(
 		&self,
 		user_id: &UserId,

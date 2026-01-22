@@ -33,8 +33,8 @@ use crate::{
 };
 
 /// All the config options for tuwunel.
-#[allow(clippy::struct_excessive_bools)]
-#[allow(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
+#[expect(clippy::struct_excessive_bools)]
+#[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 #[derive(Clone, Debug, Deserialize)]
 #[config_example_generator(
 	filename = "tuwunel-example.toml",
@@ -97,7 +97,7 @@ pub struct Config {
 	#[serde(default = "default_new_user_displayname_suffix")]
 	pub new_user_displayname_suffix: String,
 
-	#[allow(clippy::doc_link_with_quotes)]
+	#[expect(clippy::doc_link_with_quotes)]
 	/// The default address (IPv4 or IPv6) tuwunel will listen on.
 	///
 	/// If you are using Docker or a container NAT networking setup, this must
@@ -821,7 +821,7 @@ pub struct Config {
 	#[serde(default)]
 	pub proxy: ProxyConfig,
 
-	#[allow(clippy::doc_link_with_quotes)]
+	#[expect(clippy::doc_link_with_quotes)]
 	/// Servers listed here will be used to gather public keys of other servers
 	/// (notary trusted key servers).
 	///
@@ -1007,7 +1007,7 @@ pub struct Config {
 	#[serde(default)]
 	pub turn_password: String,
 
-	#[allow(clippy::doc_link_with_quotes)]
+	#[expect(clippy::doc_link_with_quotes)]
 	/// Vector list of TURN URIs/servers to use.
 	///
 	/// Replace "example.turn.uri" with your TURN domain, such as the coturn
@@ -1045,7 +1045,7 @@ pub struct Config {
 	#[serde(default = "default_turn_ttl")]
 	pub turn_ttl: u64,
 
-	#[allow(clippy::doc_link_with_quotes)]
+	#[expect(clippy::doc_link_with_quotes)]
 	/// List/vector of room IDs or room aliases that tuwunel will make newly
 	/// registered users join. The rooms specified must be rooms that you have
 	/// joined at least once on the server, and must be public.
@@ -1624,7 +1624,7 @@ pub struct Config {
 	#[serde(default, with = "serde_regex")]
 	pub forbidden_remote_room_directory_server_names: RegexSet,
 
-	#[allow(clippy::doc_link_with_quotes)]
+	#[expect(clippy::doc_link_with_quotes)]
 	/// Vector list of IPv4 and IPv6 CIDR ranges / subnets *in quotes* that you
 	/// do not want tuwunel to send outbound requests to. Defaults to
 	/// RFC1918, unroutable, loopback, multicast, and testnet addresses for
@@ -1842,7 +1842,7 @@ pub struct Config {
 	#[serde(default)]
 	pub admin_console_automatic: bool,
 
-	#[allow(clippy::doc_link_with_quotes)]
+	#[expect(clippy::doc_link_with_quotes)]
 	/// List of admin commands to execute on startup.
 	///
 	/// This option can also be configured with the `--execute` tuwunel
@@ -2229,7 +2229,7 @@ pub struct Config {
 	pub identity_provider: HashSet<IdentityProvider>,
 
 	#[serde(flatten)]
-	#[allow(clippy::zero_sized_map_values)]
+	#[expect(clippy::zero_sized_map_values)]
 	// this is a catchall, the map shouldn't be zero at runtime
 	catchall: BTreeMap<String, IgnoredAny>,
 }
@@ -2252,7 +2252,7 @@ pub struct TlsConfig {
 	pub dual_protocol: bool,
 }
 
-#[allow(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
+#[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 #[derive(Clone, Debug, Deserialize, Default)]
 #[config_example_generator(
 	filename = "tuwunel-example.toml",
@@ -2317,7 +2317,7 @@ pub struct WellKnownConfig {
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Default)]
-#[allow(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
+#[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 #[config_example_generator(
 	filename = "tuwunel-example.toml",
 	section = "global.blurhashing"
@@ -3129,13 +3129,13 @@ fn default_rocksdb_compression_algo() -> String {
 /// Default RocksDB compression level is 32767, which is internally read by
 /// RocksDB as the default magic number and translated to the library's default
 /// compression level as they all differ. See their `kDefaultCompressionLevel`.
-#[allow(clippy::doc_markdown)]
+#[expect(clippy::doc_markdown)]
 fn default_rocksdb_compression_level() -> i32 { 32767 }
 
 /// Default RocksDB compression level is 32767, which is internally read by
 /// RocksDB as the default magic number and translated to the library's default
 /// compression level as they all differ. See their `kDefaultCompressionLevel`.
-#[allow(clippy::doc_markdown)]
+#[expect(clippy::doc_markdown)]
 fn default_rocksdb_bottommost_compression_level() -> i32 { 32767 }
 
 fn default_rocksdb_stats_level() -> u8 { 1 }
@@ -3198,7 +3198,7 @@ fn default_admin_log_capture() -> String {
 
 fn default_admin_room_tag() -> String { "m.server_notice".to_owned() }
 
-#[allow(clippy::as_conversions, clippy::cast_precision_loss)]
+#[expect(clippy::as_conversions, clippy::cast_precision_loss)]
 fn parallelism_scaled_f64(val: f64) -> f64 { val * (sys::available_parallelism() as f64) }
 
 fn parallelism_scaled_u32(val: u32) -> u32 {

@@ -1,4 +1,4 @@
-#![allow(deprecated)]
+#![expect(deprecated)]
 
 use axum::extract::State;
 use axum_client_ip::InsecureClientIp;

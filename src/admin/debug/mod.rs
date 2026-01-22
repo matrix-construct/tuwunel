@@ -252,7 +252,6 @@ pub(super) enum DebugCommand {
 
 	/// - Developer test stubs
 	#[command(subcommand)]
-	#[allow(non_snake_case)]
 	#[clap(hide(true))]
 	Tester(TesterCommand),
 }

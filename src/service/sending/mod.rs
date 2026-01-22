@@ -41,7 +41,7 @@ struct Msg {
 	queue_id: Vec<u8>,
 }
 
-#[allow(clippy::module_name_repetitions)]
+#[expect(clippy::module_name_repetitions)]
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum SendingEvent {
 	Pdu(RawPduId), // pduid

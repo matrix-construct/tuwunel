@@ -160,7 +160,6 @@ impl Service {
 	/// Removes the presence record for the given user from the database.
 	///
 	/// TODO: Why is this not used?
-	#[allow(dead_code)]
 	pub async fn remove_presence(&self, user_id: &UserId) {
 		self.db.remove_presence(user_id).await;
 	}

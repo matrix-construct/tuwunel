@@ -127,7 +127,7 @@ pub(crate) async fn get_register_available_route(
 /// - Creates a new account and populates it with default account data
 /// - If `inhibit_login` is false: Creates a device and returns device id and
 ///   access_token
-#[allow(clippy::doc_markdown)]
+#[expect(clippy::doc_markdown)]
 #[tracing::instrument(skip_all, fields(%client), name = "register")]
 pub(crate) async fn register_route(
 	State(services): State<crate::State>,

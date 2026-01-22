@@ -1,8 +1,8 @@
 //! Extended external extensions to futures::TryFutureExt
-#![allow(clippy::type_complexity)]
+#![expect(clippy::type_complexity)]
 // is_ok() has to consume *self rather than borrow. This extension is for a
 // caller only ever caring about result status while discarding all contents.
-#![allow(clippy::wrong_self_convention)]
+#![expect(clippy::wrong_self_convention)]
 
 use std::marker::Unpin;
 
@@ -22,7 +22,7 @@ where
 	where
 		Self: Sized;
 
-	#[allow(clippy::wrong_self_convention)]
+	#[expect(clippy::wrong_self_convention)]
 	fn is_ok(
 		self,
 	) -> MapOkOrElse<Self, impl FnOnce(Self::Ok) -> bool, impl FnOnce(Self::Error) -> bool>

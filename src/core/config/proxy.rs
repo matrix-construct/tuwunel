@@ -127,7 +127,7 @@ impl WildCardedDomain {
 impl std::str::FromStr for WildCardedDomain {
 	type Err = std::convert::Infallible;
 
-	#[allow(clippy::string_slice)]
+	#[expect(clippy::string_slice)]
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
 		// maybe do some domain validation?
 		Ok(if s.starts_with("*.") {

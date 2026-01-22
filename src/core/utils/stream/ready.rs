@@ -1,5 +1,5 @@
 //! Synchronous combinator extensions to futures::Stream
-#![allow(clippy::type_complexity)]
+#![expect(clippy::type_complexity)]
 
 use futures::{
 	future::{FutureExt, Ready, ready},
@@ -198,7 +198,7 @@ where
 	}
 
 	#[inline]
-	#[allow(clippy::unit_arg)]
+	#[expect(clippy::unit_arg)]
 	fn ready_for_each<F>(
 		self,
 		mut f: F,

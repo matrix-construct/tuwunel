@@ -45,7 +45,6 @@ impl crate::Service for Service {
 
 /// Places one event in the account data of the user and removes the
 /// previous entry.
-#[allow(clippy::needless_pass_by_value)]
 #[implement(Service)]
 pub async fn update(
 	&self,

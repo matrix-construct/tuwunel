@@ -108,11 +108,7 @@ impl Resolver {
 		Ok((conf, opts))
 	}
 
-	#[allow(
-		clippy::as_conversions,
-		clippy::cast_sign_loss,
-		clippy::cast_possible_truncation
-	)]
+	#[expect(clippy::as_conversions)]
 	fn configure_opts(server: &Arc<Server>, mut opts: ResolverOpts) -> ResolverOpts {
 		let config = &server.config;
 

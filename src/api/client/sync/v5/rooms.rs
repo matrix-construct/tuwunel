@@ -73,7 +73,6 @@ pub(super) async fn handle(
 	skip_all,
 	fields(room_id, roomsince)
 )]
-#[allow(clippy::too_many_arguments)]
 async fn handle_room(
 	SyncInfo { services, sender_user, .. }: SyncInfo<'_>,
 	conn: &Connection,
@@ -360,7 +359,6 @@ async fn handle_room(
 }
 
 #[tracing::instrument(name = "heroes", level = "trace", skip_all)]
-#[allow(clippy::type_complexity)]
 async fn calculate_heroes(
 	services: &Services,
 	sender_user: &UserId,

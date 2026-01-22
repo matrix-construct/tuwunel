@@ -1,4 +1,4 @@
-#![allow(clippy::wrong_self_convention)]
+#![expect(clippy::wrong_self_convention)]
 
 use futures::Future;
 

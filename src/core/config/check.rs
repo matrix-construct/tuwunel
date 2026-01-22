@@ -22,7 +22,6 @@ pub fn reload(old: &Config, new: &Config) -> Result {
 	Ok(())
 }
 
-#[allow(clippy::cognitive_complexity)]
 pub fn check(config: &Config) -> Result {
 	if cfg!(debug_assertions) {
 		warn!("Note: tuwunel was built without optimisations (i.e. debug build)");

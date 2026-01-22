@@ -68,7 +68,7 @@ impl FedDest {
 	}
 
 	#[inline]
-	#[allow(clippy::string_slice)]
+	#[expect(clippy::string_slice)]
 	pub(crate) fn port(&self) -> Option<u16> {
 		match &self {
 			| Self::Literal(addr) => Some(addr.port()),

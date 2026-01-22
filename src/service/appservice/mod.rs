@@ -199,7 +199,6 @@ impl Service {
 	/// Checks if a given room id matches any exclusive appservice regex
 	///
 	/// TODO: use this?
-	#[allow(dead_code)]
 	pub async fn is_exclusive_room_id(&self, room_id: &RoomId) -> bool {
 		self.read()
 			.await

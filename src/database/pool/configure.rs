@@ -255,7 +255,7 @@ pub(super) fn configure(server: &Arc<Server>) -> (Vec<usize>, Vec<usize>, Vec<us
 	(topology, workers, queues)
 }
 
-#[allow(clippy::as_conversions, clippy::cast_precision_loss)]
+#[expect(clippy::as_conversions, clippy::cast_precision_loss)]
 fn update_stream_width(
 	server: &Arc<Server>,
 	num_queues: usize,

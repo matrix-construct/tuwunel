@@ -75,7 +75,7 @@ impl PartialOrd for TieBreaker<'_> {
 		graph = graph.len(),
 	)
 )]
-#[allow(clippy::implicit_hasher)]
+#[expect(clippy::implicit_hasher)]
 pub async fn topological_sort<Query, Fut>(
 	graph: &HashMap<OwnedEventId, HashSet<OwnedEventId>>,
 	query: &Query,

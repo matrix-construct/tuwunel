@@ -1,5 +1,5 @@
 //! Extended external extensions to futures::FutureExt
-#![allow(clippy::many_single_char_names, clippy::impl_trait_in_params)]
+#![expect(clippy::many_single_char_names, clippy::impl_trait_in_params)]
 
 use std::marker::Unpin;
 

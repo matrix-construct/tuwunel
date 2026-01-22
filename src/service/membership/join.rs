@@ -50,7 +50,7 @@ use crate::{
 	skip_all,
 	fields(%sender_user, %room_id)
 )]
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub async fn join(
 	&self,
 	sender_user: &UserId,

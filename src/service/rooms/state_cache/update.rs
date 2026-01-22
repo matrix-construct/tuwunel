@@ -30,7 +30,7 @@ use tuwunel_database::{Json, serialize_key};
 			?membership_event,
 		),
 	)]
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub async fn update_membership(
 	&self,
 	room_id: &RoomId,
@@ -48,7 +48,7 @@ pub async fn update_membership(
 	//
 	// TODO: use futures to update remote profiles without blocking the membership
 	// update
-	#[allow(clippy::collapsible_if)]
+	#[expect(clippy::collapsible_if)]
 	if !self.services.globals.user_is_local(user_id) {
 		if !self.services.users.exists(user_id).await {
 			self.services

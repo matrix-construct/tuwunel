@@ -1,6 +1,6 @@
 #![recursion_limit = "256"]
 #![type_length_limit = "98304"]
-#![allow(refining_impl_trait)]
+#![expect(refining_impl_trait)]
 
 mod manager;
 mod migrations;

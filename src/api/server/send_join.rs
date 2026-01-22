@@ -1,4 +1,4 @@
-#![allow(deprecated)]
+#![expect(deprecated)]
 
 use std::borrow::Borrow;
 

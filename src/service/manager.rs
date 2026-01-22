@@ -88,7 +88,6 @@ impl Manager {
 		Ok(())
 	}
 
-	#[allow(clippy::unused_self)]
 	fn handle_abort(&self, _workers: &mut WorkersLocked<'_>, error: &Error) -> Result {
 		// not supported until service can be associated with abort
 		unimplemented!("unexpected worker task abort {error:?}");
@@ -106,7 +105,7 @@ impl Manager {
 		}
 	}
 
-	#[allow(clippy::unused_self)]
+	#[expect(clippy::unused_self)]
 	fn handle_finished(
 		&self,
 		_workers: &mut WorkersLocked<'_>,

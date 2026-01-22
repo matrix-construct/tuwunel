@@ -1,4 +1,4 @@
-#![allow(clippy::disallowed_methods)]
+#![expect(clippy::disallowed_methods)]
 
 use crate::utils;
 
@@ -109,7 +109,7 @@ async fn mutex_map_contend() {
 }
 
 #[test]
-#[allow(clippy::iter_on_single_items, clippy::many_single_char_names)]
+#[expect(clippy::iter_on_single_items, clippy::many_single_char_names)]
 fn set_intersection_none() {
 	use utils::set::intersection;
 
@@ -139,7 +139,7 @@ fn set_intersection_none() {
 }
 
 #[test]
-#[allow(clippy::iter_on_single_items, clippy::many_single_char_names)]
+#[expect(clippy::iter_on_single_items, clippy::many_single_char_names)]
 fn set_intersection_all() {
 	use utils::set::intersection;
 
@@ -167,7 +167,7 @@ fn set_intersection_all() {
 }
 
 #[test]
-#[allow(clippy::iter_on_single_items, clippy::many_single_char_names)]
+#[expect(clippy::iter_on_single_items, clippy::many_single_char_names)]
 fn set_intersection_some() {
 	use utils::set::intersection;
 
@@ -189,7 +189,7 @@ fn set_intersection_some() {
 }
 
 #[test]
-#[allow(clippy::iter_on_single_items, clippy::many_single_char_names)]
+#[expect(clippy::iter_on_single_items, clippy::many_single_char_names)]
 fn set_intersection_sorted_some() {
 	use utils::set::intersection_sorted;
 
@@ -211,7 +211,7 @@ fn set_intersection_sorted_some() {
 }
 
 #[test]
-#[allow(clippy::iter_on_single_items, clippy::many_single_char_names)]
+#[expect(clippy::iter_on_single_items, clippy::many_single_char_names)]
 fn set_intersection_sorted_all() {
 	use utils::set::intersection_sorted;
 

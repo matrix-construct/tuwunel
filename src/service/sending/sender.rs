@@ -159,7 +159,7 @@ impl Service {
 		});
 	}
 
-	#[allow(clippy::needless_pass_by_ref_mut)]
+	#[expect(clippy::needless_pass_by_ref_mut)]
 	async fn handle_response_ok<'a>(
 		&'a self,
 		dest: &Destination,
@@ -192,7 +192,7 @@ impl Service {
 		}
 	}
 
-	#[allow(clippy::needless_pass_by_ref_mut)]
+	#[expect(clippy::needless_pass_by_ref_mut)]
 	#[tracing::instrument(name = "request", level = "debug", skip_all)]
 	async fn handle_request<'a>(
 		&'a self,
@@ -245,7 +245,7 @@ impl Service {
 		skip_all,
 		fields(futures = %futures.len()),
 	)]
-	#[allow(clippy::needless_pass_by_ref_mut)]
+	#[expect(clippy::needless_pass_by_ref_mut)]
 	async fn startup_netburst<'a>(
 		&'a self,
 		id: usize,

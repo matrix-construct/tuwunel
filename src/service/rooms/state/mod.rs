@@ -365,7 +365,7 @@ pub fn set_room_state(
 
 /// This fetches auth events from the current state.
 #[implement(Service)]
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 #[tracing::instrument(skip(self, content), level = "debug")]
 pub async fn get_auth_events(
 	&self,

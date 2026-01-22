@@ -192,7 +192,7 @@ fn body_limit_layer(server: &Server) -> DefaultBodyLimit {
 }
 
 #[tracing::instrument(name = "panic", level = "error", skip_all)]
-#[allow(clippy::needless_pass_by_value)]
+#[expect(clippy::needless_pass_by_value)]
 fn catch_panic(
 	err: Box<dyn Any + Send + 'static>,
 	services: Arc<Services>,

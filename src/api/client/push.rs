@@ -157,7 +157,7 @@ pub(crate) async fn get_pushrules_all_route(
 
 	// remove old deprecated mentions push rules as per MSC4210
 	// and update the stored server default push rules
-	#[allow(deprecated)]
+	#[expect(deprecated)]
 	{
 		use ruma::push::RuleKind::*;
 		if global_ruleset
@@ -245,7 +245,7 @@ pub(crate) async fn get_pushrules_global_route(
 
 	// remove old deprecated mentions push rules as per MSC4210
 	// and update the stored server default push rules
-	#[allow(deprecated)]
+	#[expect(deprecated)]
 	{
 		use ruma::push::RuleKind::*;
 		if global_ruleset
@@ -303,7 +303,7 @@ pub(crate) async fn get_pushrule_route(
 		.expect("user is authenticated");
 
 	// remove old deprecated mentions push rules as per MSC4210
-	#[allow(deprecated)]
+	#[expect(deprecated)]
 	if body.rule_id.as_str() == PredefinedContentRuleId::ContainsUserName.as_str()
 		|| body.rule_id.as_str() == PredefinedOverrideRuleId::ContainsDisplayName.as_str()
 		|| body.rule_id.as_str() == PredefinedOverrideRuleId::RoomNotif.as_str()
@@ -396,7 +396,7 @@ pub(crate) async fn get_pushrule_actions_route(
 	let sender_user = body.sender_user();
 
 	// remove old deprecated mentions push rules as per MSC4210
-	#[allow(deprecated)]
+	#[expect(deprecated)]
 	if body.rule_id.as_str() == PredefinedContentRuleId::ContainsUserName.as_str()
 		|| body.rule_id.as_str() == PredefinedOverrideRuleId::ContainsDisplayName.as_str()
 		|| body.rule_id.as_str() == PredefinedOverrideRuleId::RoomNotif.as_str()
@@ -463,7 +463,7 @@ pub(crate) async fn get_pushrule_enabled_route(
 	let sender_user = body.sender_user();
 
 	// remove old deprecated mentions push rules as per MSC4210
-	#[allow(deprecated)]
+	#[expect(deprecated)]
 	if body.rule_id.as_str() == PredefinedContentRuleId::ContainsUserName.as_str()
 		|| body.rule_id.as_str() == PredefinedOverrideRuleId::ContainsDisplayName.as_str()
 		|| body.rule_id.as_str() == PredefinedOverrideRuleId::RoomNotif.as_str()

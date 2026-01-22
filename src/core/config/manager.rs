@@ -107,7 +107,7 @@ fn load(&self, handle: &mut [Option<Arc<Config>>]) -> &'static Arc<Config> {
 	skip_all,
 	fields(%index, ?config)
 )]
-#[allow(clippy::transmute_ptr_to_ptr)]
+#[expect(clippy::transmute_ptr_to_ptr)]
 fn load_miss(
 	handle: &mut [Option<Arc<Config>>],
 	index: usize,

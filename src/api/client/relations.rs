@@ -108,7 +108,7 @@ pub(crate) async fn get_relating_events_route(
 	.await
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 #[tracing::instrument(
 	name = "relations",
 	level = "debug",

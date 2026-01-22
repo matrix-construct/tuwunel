@@ -128,7 +128,7 @@ async fn fetch_content_authenticated(
 	}
 }
 
-#[allow(deprecated)]
+#[expect(deprecated)]
 #[implement(super::Service)]
 async fn fetch_thumbnail_unauthenticated(
 	&self,
@@ -164,7 +164,7 @@ async fn fetch_thumbnail_unauthenticated(
 		.await
 }
 
-#[allow(deprecated)]
+#[expect(deprecated)]
 #[implement(super::Service)]
 async fn fetch_content_unauthenticated(
 	&self,
@@ -360,7 +360,7 @@ fn handle_federation_error(
 }
 
 #[implement(super::Service)]
-#[allow(deprecated)]
+#[expect(deprecated)]
 pub async fn fetch_remote_thumbnail_legacy(
 	&self,
 	body: &media::get_content_thumbnail::v3::Request,
@@ -403,7 +403,7 @@ pub async fn fetch_remote_thumbnail_legacy(
 }
 
 #[implement(super::Service)]
-#[allow(deprecated)]
+#[expect(deprecated)]
 pub async fn fetch_remote_content_legacy(
 	&self,
 	mxc: &Mxc<'_>,

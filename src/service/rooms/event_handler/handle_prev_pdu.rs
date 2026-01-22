@@ -12,7 +12,7 @@ use tuwunel_core::{
 };
 
 #[implement(super::Service)]
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 #[tracing::instrument(
 	name = "prev",
 	level = INFO_SPAN_LEVEL,

@@ -17,7 +17,6 @@ pub(crate) type TracingFlameGuard =
 #[cfg(not(feature = "perf_measurements"))]
 pub(crate) type TracingFlameGuard = Option<()>;
 
-#[allow(clippy::redundant_clone)]
 pub(crate) fn init(config: &Config) -> Result<(TracingFlameGuard, Logging)> {
 	let reload_handles = LogLevelReloadHandles::default();
 	let cap_state = Arc::new(capture::State::new());
@@ -118,10 +117,6 @@ pub(crate) fn init(config: &Config) -> Result<(TracingFlameGuard, Logging)> {
 	};
 
 	#[cfg(not(feature = "perf_measurements"))]
-	#[cfg_attr(
-		not(feature = "perf_measurements"),
-		allow(clippy::let_unit_value)
-	)]
 	let flame_guard = None;
 
 	let subscriber = Arc::new(subscriber);

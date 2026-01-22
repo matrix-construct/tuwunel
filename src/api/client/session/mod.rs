@@ -177,7 +177,7 @@ pub(crate) async fn login_route(
 		.map(HomeserverInfo::new)
 		.map(DiscoveryInfo::new);
 
-	#[allow(deprecated)]
+	#[expect(deprecated)]
 	Ok(login::v3::Response {
 		user_id,
 		access_token,

@@ -26,7 +26,6 @@ pub struct Dim {
 
 impl super::Service {
 	/// Uploads or replaces a file thumbnail.
-	#[allow(clippy::too_many_arguments)]
 	pub async fn upload_thumbnail(
 		&self,
 		mxc: &Mxc<'_>,
