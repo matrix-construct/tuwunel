@@ -16,6 +16,7 @@
   - [Red Hat](deploying/redhat.md)
   - [FreeBSD](deploying/freebsd.md)
 - [TURN](turn.md)
+- [Matrix RTC (Element Call)](matrix_rtc.md)
 - [Appservices](appservices.md)
 - [Maintenance](maintenance.md)
 - [Troubleshooting](troubleshooting.md)
