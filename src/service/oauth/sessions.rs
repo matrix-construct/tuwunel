@@ -1,15 +1,19 @@
 pub mod association;
 
 use std::{
+	iter::once,
 	sync::{Arc, Mutex},
 	time::SystemTime,
 };
 
-use futures::{Stream, StreamExt, TryFutureExt};
+use futures::{FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt};
 use ruma::{OwnedUserId, UserId};
 use serde::{Deserialize, Serialize};
-use tuwunel_core::{Err, Result, at, implement, utils::stream::TryExpect};
-use tuwunel_database::{Cbor, Deserialized, Map};
+use tuwunel_core::{
+	Err, Result, at, implement,
+	utils::stream::{IterStream, ReadyExt, TryExpect},
+};
+use tuwunel_database::{Cbor, Deserialized, Ignore, Map};
 use url::Url;
 
 use super::{Provider, Providers, UserInfo, unique_id};
@@ -41,7 +45,7 @@ pub struct Session {
 	pub idp_id: Option<String>,
 
 	/// Session ID used as the index key for this session itself.
-	pub sess_id: Option<String>,
+	pub sess_id: Option<SessionId>,
 
 	/// Token type (bearer, mac, etc).
 	pub token_type: Option<String>,
@@ -89,6 +93,9 @@ pub struct Session {
 	pub user_info: Option<UserInfo>,
 }
 
+/// Session Identifier type.
+pub type SessionId = String;
+
 /// Number of characters generated for our code_verifier. The code_verifier is a
 /// random string which must be between 43 and 128 characters.
 pub const CODE_VERIFIER_LENGTH: usize = 64;
@@ -110,15 +117,6 @@ pub(super) fn build(args: &crate::Args<'_>, providers: Arc<Providers>) -> Self {
 	}
 }
 
-#[implement(Sessions)]
-pub fn users(&self) -> impl Stream<Item = OwnedUserId> + Send {
-	self.db
-		.userid_oauthid
-		.keys()
-		.expect_ok()
-		.map(UserId::to_owned)
-}
-
 /// Delete database state for the session.
 #[implement(Sessions)]
 #[tracing::instrument(level = "debug", skip(self))]
@@ -127,13 +125,19 @@ pub async fn delete(&self, sess_id: &str) {
 		return;
 	};
 
-	// Check the user_id still points to this sess_id before deleting. If not, the
-	// association was updated to a newer session.
-	if let Some(user_id) = session.user_id.as_deref()
-		&& let Ok(assoc_id) = self.get_sess_id_by_user(user_id).await
-		&& assoc_id == sess_id
-	{
-		self.db.userid_oauthid.remove(user_id);
+	if let Some(user_id) = session.user_id.as_deref() {
+		let sess_ids: Vec<_> = self
+			.get_sess_id_by_user(user_id)
+			.ready_filter_map(Result::ok)
+			.ready_filter(|assoc_id| assoc_id != sess_id)
+			.collect()
+			.await;
+
+		if !sess_ids.is_empty() {
+			self.db.userid_oauthid.raw_put(user_id, sess_ids);
+		} else {
+			self.db.userid_oauthid.remove(user_id);
+		}
 	}
 
 	// Check the unique identity still points to this sess_id before deleting. If
@@ -153,14 +157,15 @@ pub async fn delete(&self, sess_id: &str) {
 /// Create or overwrite database state for the session.
 #[implement(Sessions)]
 #[tracing::instrument(level = "info", skip(self))]
-pub async fn put(&self, sess_id: &str, session: &Session) {
+pub async fn put(&self, session: &Session) {
+	let sess_id = session
+		.sess_id
+		.as_deref()
+		.expect("Missing session.sess_id required for sessions.put()");
+
 	self.db
 		.oauthid_session
 		.raw_put(sess_id, Cbor(session));
-
-	if let Some(user_id) = session.user_id.as_deref() {
-		self.db.userid_oauthid.insert(user_id, sess_id);
-	}
 
 	if let Some(idp_id) = session.idp_id.as_ref()
 		&& let Ok(provider) = self.providers.get(idp_id).await
@@ -169,6 +174,22 @@ pub async fn put(&self, sess_id: &str, session: &Session) {
 		self.db
 			.oauthuniqid_oauthid
 			.insert(&unique_id, sess_id);
+	}
+
+	if let Some(user_id) = session.user_id.as_deref() {
+		let sess_ids = self
+			.get_sess_id_by_user(user_id)
+			.ready_filter_map(Result::ok)
+			.chain(once(sess_id.to_owned()).stream())
+			.collect::<Vec<_>>()
+			.map(|mut ids| {
+				ids.sort_unstable();
+				ids.dedup();
+				ids
+			})
+			.await;
+
+		self.db.userid_oauthid.raw_put(user_id, sess_ids);
 	}
 }
 
@@ -182,14 +203,13 @@ pub async fn get_by_unique_id(&self, unique_id: &str) -> Result<Session> {
 		.await
 }
 
-/// Fetch database state for a session from its associated `user_id`, in case
-/// `sess_id` is not known.
+/// Fetch database state for one or more sessions from its associated `user_id`,
+/// in case `sess_id` is not known.
 #[implement(Sessions)]
-#[tracing::instrument(level = "debug", skip(self), ret(level = "debug"))]
-pub async fn get_by_user(&self, user_id: &UserId) -> Result<Session> {
+#[tracing::instrument(level = "debug", skip(self))]
+pub fn get_by_user(&self, user_id: &UserId) -> impl Stream<Item = Result<Session>> + Send {
 	self.get_sess_id_by_user(user_id)
 		.and_then(async |sess_id| self.get(&sess_id).await)
-		.await
 }
 
 /// Fetch database state for a session from its `sess_id`.
@@ -204,15 +224,17 @@ pub async fn get(&self, sess_id: &str) -> Result<Session> {
 		.map(at!(0))
 }
 
-/// Resolve the `sess_id` from an associated `user_id`.
+/// Resolve the `sess_id` associations with a `user_id`.
 #[implement(Sessions)]
-#[tracing::instrument(level = "debug", skip(self), ret(level = "debug"))]
-pub async fn get_sess_id_by_user(&self, user_id: &UserId) -> Result<String> {
+#[tracing::instrument(level = "debug", skip(self))]
+pub fn get_sess_id_by_user(&self, user_id: &UserId) -> impl Stream<Item = Result<String>> + Send {
 	self.db
 		.userid_oauthid
 		.get(user_id)
-		.await
-		.deserialized()
+		.map(Deserialized::deserialized)
+		.map_ok(Vec::into_iter)
+		.map_ok(IterStream::try_stream)
+		.try_flatten_stream()
 }
 
 /// Resolve the `sess_id` from an associated provider issuer and subject hash.
@@ -224,6 +246,24 @@ pub async fn get_sess_id_by_unique_id(&self, unique_id: &str) -> Result<String> 
 		.get(unique_id)
 		.await
 		.deserialized()
+}
+
+#[implement(Sessions)]
+pub fn users(&self) -> impl Stream<Item = OwnedUserId> + Send {
+	self.db
+		.userid_oauthid
+		.keys()
+		.expect_ok()
+		.map(UserId::to_owned)
+}
+
+#[implement(Sessions)]
+pub fn stream(&self) -> impl Stream<Item = Session> + Send {
+	self.db
+		.oauthid_session
+		.stream()
+		.expect_ok()
+		.map(|(_, session): (Ignore, Cbor<_>)| session.0)
 }
 
 #[implement(Sessions)]

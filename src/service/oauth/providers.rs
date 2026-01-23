@@ -8,11 +8,15 @@ use url::Url;
 
 use crate::SelfServices;
 
+/// Discovered providers
 #[derive(Default)]
 pub struct Providers {
 	services: SelfServices,
-	providers: RwLock<BTreeMap<String, Provider>>,
+	providers: RwLock<BTreeMap<ProviderId, Provider>>,
 }
+
+/// Identity Provider ID
+pub type ProviderId = String;
 
 #[implement(Providers)]
 pub(super) fn build(args: &crate::Args<'_>) -> Self {

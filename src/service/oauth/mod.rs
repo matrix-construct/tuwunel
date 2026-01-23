@@ -5,6 +5,7 @@ pub mod user_info;
 use std::sync::Arc;
 
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD as b64encode};
+use futures::{Stream, StreamExt, TryStreamExt};
 use reqwest::{
 	Method,
 	header::{ACCEPT, CONTENT_TYPE},
@@ -14,16 +15,16 @@ use serde::Serialize;
 use serde_json::Value as JsonValue;
 use tuwunel_core::{
 	Err, Result, err, implement,
-	utils::{hash::sha256, result::LogErr},
+	utils::{hash::sha256, result::LogErr, stream::ReadyExt},
 };
 use url::Url;
 
+use self::{providers::Providers, sessions::Sessions};
 pub use self::{
-	providers::Provider,
-	sessions::{CODE_VERIFIER_LENGTH, SESSION_ID_LENGTH, Session},
+	providers::{Provider, ProviderId},
+	sessions::{CODE_VERIFIER_LENGTH, SESSION_ID_LENGTH, Session, SessionId},
 	user_info::UserInfo,
 };
-use self::{providers::Providers, sessions::Sessions};
 use crate::SelfServices;
 
 pub struct Service {
@@ -44,6 +45,48 @@ impl crate::Service for Service {
 	}
 
 	fn name(&self) -> &str { crate::service::make_name(std::module_path!()) }
+}
+
+/// Remove all session state for a user. For debug and developer use only;
+/// deleting state can cause registration conflicts and unintended
+/// re-registrations.
+#[implement(Service)]
+#[tracing::instrument(level = "debug", skip(self))]
+pub async fn delete_user_sessions(&self, user_id: &UserId) {
+	self.user_sessions(user_id)
+		.ready_filter_map(Result::ok)
+		.ready_filter_map(|(_, session)| session.sess_id)
+		.for_each(async |sess_id| {
+			self.sessions.delete(&sess_id).await;
+		})
+		.await;
+}
+
+/// Revoke all session tokens for a user.
+#[implement(Service)]
+#[tracing::instrument(level = "debug", skip(self))]
+pub async fn revoke_user_tokens(&self, user_id: &UserId) {
+	self.user_sessions(user_id)
+		.ready_filter_map(Result::ok)
+		.for_each(async |(provider, session)| {
+			self.revoke_token((&provider, &session))
+				.await
+				.log_err()
+				.ok();
+		})
+		.await;
+}
+
+/// Get user's authorizations. Lists pairs of `(Provider, Session)` for a user.
+#[implement(Service)]
+#[tracing::instrument(level = "debug", skip(self))]
+pub fn user_sessions(
+	&self,
+	user_id: &UserId,
+) -> impl Stream<Item = Result<(Provider, Session)>> + Send {
+	self.sessions
+		.get_by_user(user_id)
+		.and_then(async |session| Ok((self.sessions.provider(&session).await?, session)))
 }
 
 /// Network request to a Provider returning userinfo for a Session. The session
@@ -220,15 +263,6 @@ where
 	}
 
 	Ok(response)
-}
-
-#[implement(Service)]
-#[tracing::instrument(level = "debug", skip(self))]
-pub async fn get_user(&self, user_id: &UserId) -> Result<(Provider, Session)> {
-	let session = self.sessions.get_by_user(user_id).await?;
-	let provider = self.sessions.provider(&session).await?;
-
-	Ok((provider, session))
 }
 
 /// Generate a unique-id string determined by the combination of `Provider` and

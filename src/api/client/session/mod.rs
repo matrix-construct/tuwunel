@@ -22,10 +22,7 @@ use ruma::api::client::session::{
 		v3::{DiscoveryInfo, HomeserverInfo, LoginInfo},
 	},
 };
-use tuwunel_core::{
-	Err, Result, info,
-	utils::{BoolExt, stream::ReadyExt},
-};
+use tuwunel_core::{Err, Result, info, utils::stream::ReadyExt};
 use tuwunel_service::users::device::generate_refresh_token;
 
 use self::{ldap::ldap_login, password::password_login};
@@ -50,13 +47,13 @@ pub(crate) async fn get_login_types_route(
 ) -> Result<get_login_types::v3::Response> {
 	let get_login_token = services.config.login_via_existing_session;
 
-	let identity_providers = services
+	let list_idps = !services.config.sso_custom_providers_page && !services.config.single_sso;
+
+	let identity_providers: Vec<_> = services
 		.config
-		.sso_custom_providers_page
-		.is_false()
-		.then(|| services.config.identity_provider.iter())
-		.into_iter()
-		.flatten()
+		.identity_provider
+		.iter()
+		.filter(|_| list_idps)
 		.cloned()
 		.map(|config| IdentityProvider {
 			id: config.id().to_owned(),
@@ -70,8 +67,8 @@ pub(crate) async fn get_login_types_route(
 		LoginType::ApplicationService(ApplicationServiceLoginType::default()),
 		LoginType::Jwt(JwtLoginType::default()),
 		LoginType::Password(PasswordLoginType::default()),
-		LoginType::Sso(SsoLoginType { identity_providers }),
 		LoginType::Token(TokenLoginType { get_login_token }),
+		LoginType::Sso(SsoLoginType { identity_providers }),
 	];
 
 	Ok(get_login_types::v3::Response {
@@ -79,8 +76,7 @@ pub(crate) async fn get_login_types_route(
 			.into_iter()
 			.filter(|login_type| match login_type {
 				| LoginType::Sso(SsoLoginType { identity_providers })
-					if !services.config.sso_custom_providers_page
-						&& identity_providers.is_empty() =>
+					if list_idps && identity_providers.is_empty() =>
 					false,
 
 				| _ => true,

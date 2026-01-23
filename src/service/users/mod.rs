@@ -17,7 +17,7 @@ use tuwunel_core::{
 	Err, Result, debug_warn, err, is_equal_to,
 	pdu::PduBuilder,
 	trace,
-	utils::{self, ReadyExt, result::LogErr, stream::TryIgnore},
+	utils::{self, ReadyExt, stream::TryIgnore},
 	warn,
 };
 use tuwunel_database::{Deserialized, Json, Map};
@@ -133,14 +133,10 @@ impl Service {
 	/// Deactivate account
 	pub async fn deactivate_account(&self, user_id: &UserId) -> Result {
 		// Revoke any SSO authorizations
-		if let Ok((provider, session)) = self.services.oauth.get_user(user_id).await {
-			self.services
-				.oauth
-				.revoke_token((&provider, &session))
-				.await
-				.log_err()
-				.ok();
-		}
+		self.services
+			.oauth
+			.revoke_user_tokens(user_id)
+			.await;
 
 		// Remove all associated devices
 		self.all_device_ids(user_id)

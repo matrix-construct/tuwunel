@@ -317,20 +317,6 @@ pub fn check(config: &Config) -> Result {
 		}
 	}
 
-	if config
-		.identity_provider
-		.iter()
-		.filter(|idp| idp.default)
-		.count()
-		.gt(&1)
-	{
-		return Err!(Config(
-			"identity_provider.default",
-			"More than one identity_provider is configured with `default = true`. Only one can \
-			 be set to default.",
-		));
-	}
-
 	if !config.sso_custom_providers_page
 		&& config.identity_provider.len() > 1
 		&& config

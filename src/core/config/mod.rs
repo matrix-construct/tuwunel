@@ -2173,6 +2173,24 @@ pub struct Config {
 	#[serde(default = "default_one_time_key_limit")]
 	pub one_time_key_limit: usize,
 
+	/// (EXPERIMENTAL) Setting this option to true replaces the list of identity
+	/// providers displayed on a client's login page with a single button "Sign
+	/// in with single sign-on" linking to the URL
+	/// `/_matrix/client/v3/login/sso/redirect`. All configured providers are
+	/// attempted for authorization. All authorizations associate with the same
+	/// Matrix user. NOTE: All authorizations must succeed, as there is no
+	/// reliable way to skip a provider.
+	///
+	/// This option is disabled by default, allowing the client to list
+	/// configured providers and permitting privacy-conscious users to authorize
+	/// only their choice.
+	///
+	/// Note that fluffychat always displays a single button anyway. You do not
+	/// need to enable this to use fluffychat; instead we offer a
+	/// default-provider option, see `default` in the provider config section.
+	#[serde(default)]
+	pub single_sso: bool,
+
 	/// Setting this option to true replaces the list of identity providers on
 	/// the client's login screen with a single button "Sign in with single
 	/// sign-on" linking to the URL `/_matrix/client/v3/login/sso/redirect`. The
@@ -2590,16 +2608,25 @@ pub struct IdentityProvider {
 	pub callback_url: Option<Url>,
 
 	/// When more than one identity_provider has been configured and
-	/// `sso_custom_providers_page` is false this will determine the results
-	/// for the `/_matrix/client/v3/login/sso/redirect` endpoint (note the url
-	/// lacks a trailing `client_id`).
+	/// `single_sso` is false and `sso_custom_providers_page` is false this will
+	/// determine the behavior of the `/_matrix/client/v3/login/sso/redirect`
+	/// endpoint (note the url lacks a trailing `client_id`).
 	///
 	/// When only one identity_provider is configured it will be interpreted
-	/// as the default and this does not have to be set. Otherwise a default
+	/// as the default and this does not need to be set. Otherwise a default
 	/// *must* be selected for some clients (e.g. fluffychat) to work properly
-	/// when the above conditions require it. For compatibility if not set a
-	/// warning will be logged on startup and the first provider listed will be
-	/// considered the default.
+	/// when the above conditions require it. To operate out-of-the-box we
+	/// default to one configured provider if none are explicitly default; a
+	/// warning will be logged on startup for this condition.
+	///
+	/// (EXPERIMENTAL) Multiple providers can be set to default. All providers
+	/// configured with this option set to `true` will associate with the same
+	/// Matrix account when a client flows through
+	/// `/_matrix/client/v3/login/sso/redirect`.
+	///
+	/// When a user authorizes any provider configured default, the flow will
+	/// include all other providers configured default as well for association.
+	/// NOTE: authorization must succeed for ALL default providers.
 	#[serde(default)]
 	pub default: bool,
 
@@ -2676,6 +2703,8 @@ pub struct IdentityProvider {
 	pub discovery: bool,
 
 	/// The duration in seconds before a grant authorization session expires.
+	///
+	/// default: 300
 	#[serde(default = "default_sso_grant_session_duration")]
 	pub grant_session_duration: Option<u64>,
 }
@@ -3251,4 +3280,4 @@ fn default_max_make_join_attempts_per_join_attempt() -> usize { 48 }
 
 fn default_max_join_attempts_per_join_request() -> usize { 3 }
 
-fn default_sso_grant_session_duration() -> Option<u64> { Some(180) }
+fn default_sso_grant_session_duration() -> Option<u64> { Some(300) }
