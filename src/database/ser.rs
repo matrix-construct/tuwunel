@@ -88,10 +88,12 @@ impl<W: Write> Serializer<'_, W> {
 	fn sequence_start(&mut self) {
 		debug_assert!(!self.is_finalized(), "Sequence start with finalization set");
 		cfg!(debug_assertions).then(|| self.depth = self.depth.saturating_add(1));
+		self.sep = false;
 	}
 
 	fn sequence_end(&mut self) -> Result {
 		cfg!(debug_assertions).then(|| self.depth = self.depth.saturating_sub(1));
+		self.sep = false;
 		Ok(())
 	}
 
@@ -264,7 +266,7 @@ impl<W: Write> ser::Serializer for &mut Serializer<'_, W> {
 			"serializing byte array at the top-level; you can skip serialization instead"
 		);
 
-		self.write(v)
+		self.write(v).inspect(|()| self.sep = true)
 	}
 
 	fn serialize_f64(self, _v: f64) -> Result<Self::Ok> {
@@ -275,9 +277,15 @@ impl<W: Write> ser::Serializer for &mut Serializer<'_, W> {
 		unhandled!("serialize f32 not implemented")
 	}
 
-	fn serialize_i64(self, v: i64) -> Result<Self::Ok> { self.write(&v.to_be_bytes()) }
+	fn serialize_i64(self, v: i64) -> Result<Self::Ok> {
+		self.write(&v.to_be_bytes())
+			.inspect(|()| self.sep = false)
+	}
 
-	fn serialize_i32(self, v: i32) -> Result<Self::Ok> { self.write(&v.to_be_bytes()) }
+	fn serialize_i32(self, v: i32) -> Result<Self::Ok> {
+		self.write(&v.to_be_bytes())
+			.inspect(|()| self.sep = false)
+	}
 
 	fn serialize_i16(self, _v: i16) -> Result<Self::Ok> {
 		unhandled!("serialize i16 not implemented")
@@ -287,15 +295,23 @@ impl<W: Write> ser::Serializer for &mut Serializer<'_, W> {
 		unhandled!("serialize i8 not implemented")
 	}
 
-	fn serialize_u64(self, v: u64) -> Result<Self::Ok> { self.write(&v.to_be_bytes()) }
+	fn serialize_u64(self, v: u64) -> Result<Self::Ok> {
+		self.write(&v.to_be_bytes())
+			.inspect(|()| self.sep = false)
+	}
 
-	fn serialize_u32(self, v: u32) -> Result<Self::Ok> { self.write(&v.to_be_bytes()) }
+	fn serialize_u32(self, v: u32) -> Result<Self::Ok> {
+		self.write(&v.to_be_bytes())
+			.inspect(|()| self.sep = false)
+	}
 
 	fn serialize_u16(self, _v: u16) -> Result<Self::Ok> {
 		unhandled!("serialize u16 not implemented")
 	}
 
-	fn serialize_u8(self, v: u8) -> Result<Self::Ok> { self.write(&[v]) }
+	fn serialize_u8(self, v: u8) -> Result<Self::Ok> {
+		self.write(&[v]).inspect(|()| self.sep = false)
+	}
 
 	fn serialize_bool(self, _v: bool) -> Result<Self::Ok> {
 		unhandled!("serialize bool not implemented")
@@ -309,6 +325,7 @@ impl<W: Write> ser::SerializeSeq for &mut Serializer<'_, W> {
 	type Ok = ();
 
 	fn serialize_element<T: Serialize + ?Sized>(&mut self, val: &T) -> Result<Self::Ok> {
+		self.record_start()?;
 		val.serialize(&mut **self)
 	}
 
@@ -322,6 +339,7 @@ impl<W: Write> ser::SerializeTuple for &mut Serializer<'_, W> {
 	fn serialize_element<T: Serialize + ?Sized>(&mut self, val: &T) -> Result<Self::Ok> {
 		self.record_start()?;
 		val.serialize(&mut **self)
+			.inspect(|()| self.sep = true)
 	}
 
 	fn end(self) -> Result<Self::Ok> { self.tuple_end() }
@@ -334,6 +352,7 @@ impl<W: Write> ser::SerializeTupleStruct for &mut Serializer<'_, W> {
 	fn serialize_field<T: Serialize + ?Sized>(&mut self, val: &T) -> Result<Self::Ok> {
 		self.record_start()?;
 		val.serialize(&mut **self)
+			.inspect(|()| self.sep = true)
 	}
 
 	fn end(self) -> Result<Self::Ok> { self.tuple_end() }
@@ -346,6 +365,7 @@ impl<W: Write> ser::SerializeTupleVariant for &mut Serializer<'_, W> {
 	fn serialize_field<T: Serialize + ?Sized>(&mut self, val: &T) -> Result<Self::Ok> {
 		self.record_start()?;
 		val.serialize(&mut **self)
+			.inspect(|()| self.sep = true)
 	}
 
 	fn end(self) -> Result<Self::Ok> { self.tuple_end() }

@@ -392,7 +392,7 @@ fn de_json_raw_array() {
 }
 
 #[test]
-fn ser_array() {
+fn ser_array_integer() {
 	let a: u64 = 123_456;
 	let b: u64 = 987_654;
 
@@ -410,13 +410,81 @@ fn ser_array() {
 	let s = serialize_to_vec(arv.as_slice()).expect("failed to serialize arrayvec");
 	assert_eq!(&s, &v, "arrayvec serialization does not match");
 
-	let s = serialize_to_vec(&vec).expect("failed to serialize vec");
+	let s = serialize_to_vec(&vec).expect("failed to serialize borrowed vec");
+	assert_eq!(&s, &v, "borrowed vec serialization does not match");
+
+	let s = serialize_to_vec(vec).expect("failed to serialize vec");
 	assert_eq!(&s, &v, "vec serialization does not match");
 }
 
 #[test]
+fn ser_array_string() {
+	let a = "foo";
+	let b = "bar";
+
+	let arr_str: &[&str] = &[a, b];
+	let arr_string: &[String] = &[a.to_owned(), b.to_owned()];
+	let vec_str: Vec<&str> = vec![a, b];
+	let vec_string: Vec<String> = vec![a.to_owned(), b.to_owned()];
+	let arv_str: ArrayVec<&str, 2> = [a, b].into();
+	let arv_string: ArrayVec<String, 2> = [a.to_owned(), b.to_owned()].into();
+
+	let v = b"foo\xFFbar";
+
+	let s = serialize_to_vec(arr_str).expect("failed to serialize arr_str");
+	assert_eq!(&s, &v, "arr_str serialization does not match");
+
+	let s = serialize_to_vec(arr_string).expect("failed to serialize arr_string");
+	assert_eq!(&s, &v, "arr_string serialization does not match");
+
+	let s = serialize_to_vec(vec_str).expect("failed to serialize vec_str");
+	assert_eq!(&s, &v, "vec_str serialization does not match");
+
+	let s = serialize_to_vec(vec_string).expect("failed to serialize vec_string");
+	assert_eq!(&s, &v, "vec_string serialization does not match");
+
+	let s = serialize_to_vec(arv_str).expect("failed to serialize arv_str");
+	assert_eq!(&s, &v, "arv_str serialization does not match");
+
+	let s = serialize_to_vec(arv_string).expect("failed to serialize arv_string");
+	assert_eq!(&s, &v, "arv_string serialization does not match");
+}
+
+#[test]
+fn ser_array_one_string() {
+	let a = "foo";
+
+	let arr_str: &[&str] = &[a];
+	let arr_string: &[String] = &[a.to_owned()];
+	let vec_str: Vec<&str> = vec![a];
+	let vec_string: Vec<String> = vec![a.to_owned()];
+	let arv_str: ArrayVec<&str, 1> = [a].into();
+	let arv_string: ArrayVec<String, 1> = [a.to_owned()].into();
+
+	let v = b"foo";
+
+	let s = serialize_to_vec(arr_str).expect("failed to serialize arr_str");
+	assert_eq!(&s, &v, "arr_str serialization does not match");
+
+	let s = serialize_to_vec(arr_string).expect("failed to serialize arr_string");
+	assert_eq!(&s, &v, "arr_string serialization does not match");
+
+	let s = serialize_to_vec(vec_str).expect("failed to serialize vec_str");
+	assert_eq!(&s, &v, "vec_str serialization does not match");
+
+	let s = serialize_to_vec(vec_string).expect("failed to serialize vec_string");
+	assert_eq!(&s, &v, "vec_string serialization does not match");
+
+	let s = serialize_to_vec(arv_str).expect("failed to serialize arv_str");
+	assert_eq!(&s, &v, "arv_str serialization does not match");
+
+	let s = serialize_to_vec(arv_string).expect("failed to serialize arv_string");
+	assert_eq!(&s, &v, "arv_string serialization does not match");
+}
+
+#[test]
 #[ignore = "does not work yet. TODO! Fixme!"]
-fn de_array() {
+fn de_array_integer() {
 	let a: u64 = 123_456;
 	let b: u64 = 987_654;
 
@@ -444,6 +512,93 @@ fn de_array() {
 
 	assert_eq!(vec[0], a, "deserialized vec [0] does not match");
 	assert_eq!(vec[1], b, "deserialized vec [1] does not match");
+}
+
+#[test]
+fn de_array_string() {
+	let a = "foo";
+	let b = "bar";
+	let v = b"foo\xFFbar";
+
+	let arv: ArrayVec<&str, 2> = de::from_slice::<ArrayVec<&str, 2>>(v)
+		.map(TryInto::try_into)
+		.expect("failed to deserialize to arrayvec")
+		.expect("failed to deserialize into");
+	assert_eq!(arv[0], a, "deserialized arv [0] does not match");
+	assert_eq!(arv[1], b, "deserialized arv [1] does not match");
+	assert_eq!(arv.len(), 2);
+
+	let arv: ArrayVec<String, 2> = de::from_slice::<ArrayVec<String, 2>>(v)
+		.map(TryInto::try_into)
+		.expect("failed to deserialize to arrayvec")
+		.expect("failed to deserialize into");
+	assert_eq!(arv[0], a, "deserialized arv [0] does not match");
+	assert_eq!(arv[1], b, "deserialized arv [1] does not match");
+	assert_eq!(arv.len(), 2);
+
+	let arr: [&str; 2] = de::from_slice::<[&str; 2]>(v)
+		.map(TryInto::try_into)
+		.expect("failed to deserialize to array")
+		.expect("failed to deserialize into");
+	assert_eq!(arr[0], a, "deserialized arr [0] does not match");
+	assert_eq!(arr[1], b, "deserialized arr [1] does not match");
+
+	let arr: [String; 2] = de::from_slice::<[String; 2]>(v)
+		.map(TryInto::try_into)
+		.expect("failed to deserialize to array")
+		.expect("failed to deserialize into");
+	assert_eq!(arr[0], a, "deserialized arr [0] does not match");
+	assert_eq!(arr[1], b, "deserialized arr [1] does not match");
+
+	let vec: Vec<&str> = de::from_slice(v).expect("failed to deserialize to vec");
+	assert_eq!(vec[0], a, "deserialized vec [0] does not match");
+	assert_eq!(vec[1], b, "deserialized vec [1] does not match");
+	assert_eq!(vec.len(), 2);
+
+	let vec: Vec<String> = de::from_slice(v).expect("failed to deserialize to vec");
+	assert_eq!(vec[0], a, "deserialized vec [0] does not match");
+	assert_eq!(vec[1], b, "deserialized vec [1] does not match");
+	assert_eq!(vec.len(), 2);
+}
+
+#[test]
+fn de_array_one_string() {
+	let a = "foo";
+	let v = b"foo";
+
+	let arv: ArrayVec<&str, 1> = de::from_slice::<ArrayVec<&str, 1>>(v)
+		.map(TryInto::try_into)
+		.expect("failed to deserialize to arrayvec")
+		.expect("failed to deserialize into");
+	assert_eq!(arv[0], a, "deserialized arv [0] does not match");
+	assert_eq!(arv.len(), 1);
+
+	let arv: ArrayVec<String, 1> = de::from_slice::<ArrayVec<String, 1>>(v)
+		.map(TryInto::try_into)
+		.expect("failed to deserialize to arrayvec")
+		.expect("failed to deserialize into");
+	assert_eq!(arv[0], a, "deserialized arv [0] does not match");
+	assert_eq!(arv.len(), 1);
+
+	let arr: [&str; 1] = de::from_slice::<[&str; 1]>(v)
+		.map(TryInto::try_into)
+		.expect("failed to deserialize to array")
+		.expect("failed to deserialize into");
+	assert_eq!(arr[0], a, "deserialized arr [0] does not match");
+
+	let arr: [String; 1] = de::from_slice::<[String; 1]>(v)
+		.map(TryInto::try_into)
+		.expect("failed to deserialize to array")
+		.expect("failed to deserialize into");
+	assert_eq!(arr[0], a, "deserialized arr [0] does not match");
+
+	let vec: Vec<&str> = de::from_slice(v).expect("failed to deserialize to vec");
+	assert_eq!(vec[0], a, "deserialized vec [0] does not match");
+	assert_eq!(vec.len(), 1);
+
+	let vec: Vec<String> = de::from_slice(v).expect("failed to deserialize to vec");
+	assert_eq!(vec[0], a, "deserialized vec [0] does not match");
+	assert_eq!(vec.len(), 1);
 }
 
 #[test]
