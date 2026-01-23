@@ -3,10 +3,9 @@ use std::{
 	time::Duration,
 };
 
-use either::Either;
 use ipaddress::IPAddress;
 use reqwest::{dns::Resolve, redirect};
-use tuwunel_core::{Config, Result, err, implement, trace};
+use tuwunel_core::{Config, Result, either::Either, err, implement, trace};
 
 use crate::{service, services::OnceServices};
 

@@ -90,7 +90,6 @@ base64.workspace = true
 bytes.workspace = true
 const-str.workspace = true
 ctor.workspace = true
-either.workspace = true
 futures.workspace = true
 hickory-resolver.workspace = true
 http.workspace = true

@@ -13,6 +13,7 @@ pub mod server;
 pub mod utils;
 
 pub use ::arrayvec;
+pub use ::either;
 pub use ::http;
 pub use ::itertools;
 pub use ::jsonwebtoken as jwt;
