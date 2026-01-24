@@ -263,12 +263,7 @@ pub(crate) async fn register_route(
 
 	// UIAA
 	let mut uiaainfo;
-	let skip_auth = if !services
-		.globals
-		.get_registration_tokens()
-		.is_empty()
-		&& !is_guest
-	{
+	let skip_auth = if services.registration_tokens.is_enabled().await && !is_guest {
 		// Registration token required
 		uiaainfo = UiaaInfo {
 			flows: vec![AuthFlow {
@@ -424,13 +419,15 @@ pub(crate) async fn check_registration_token_validity(
 	State(services): State<crate::State>,
 	body: Ruma<check_registration_token_validity::v1::Request>,
 ) -> Result<check_registration_token_validity::v1::Response> {
-	let tokens = services.globals.get_registration_tokens();
-
-	if tokens.is_empty() {
+	if !services.registration_tokens.is_enabled().await {
 		return Err!(Request(Forbidden("Server does not allow token registration")));
 	}
 
-	let valid = tokens.contains(&body.token);
+	let valid = services
+		.registration_tokens
+		.is_token_valid(&body.token)
+		.await
+		.is_ok();
 
 	Ok(check_registration_token_validity::v1::Response { valid })
 }

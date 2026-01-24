@@ -15,6 +15,7 @@ pub(crate) mod media;
 pub(crate) mod query;
 pub(crate) mod room;
 pub(crate) mod server;
+pub(crate) mod token;
 pub(crate) mod user;
 
 pub(crate) use tuwunel_macros::{admin_command, admin_command_dispatch};

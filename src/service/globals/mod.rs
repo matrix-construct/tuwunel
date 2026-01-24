@@ -1,6 +1,6 @@
 mod data;
 
-use std::{collections::HashSet, ops::Range, sync::Arc};
+use std::{ops::Range, sync::Arc};
 
 use data::Data;
 use ruma::{OwnedUserId, RoomAliasId, ServerName, UserId};
@@ -105,31 +105,6 @@ impl Service {
 	#[inline]
 	#[must_use]
 	pub fn is_read_only(&self) -> bool { self.db.db.is_read_only() }
-
-	pub fn get_registration_tokens(&self) -> HashSet<String> {
-		let mut tokens = HashSet::new();
-		if let Some(file) = &self
-			.server
-			.config
-			.registration_token_file
-			.as_ref()
-		{
-			match std::fs::read_to_string(file) {
-				| Err(e) => error!("Failed to read the registration token file: {e}"),
-				| Ok(text) => {
-					text.split_ascii_whitespace().for_each(|token| {
-						tokens.insert(token.to_owned());
-					});
-				},
-			}
-		}
-
-		if let Some(token) = &self.server.config.registration_token {
-			tokens.insert(token.to_owned());
-		}
-
-		tokens
-	}
 
 	pub fn init_rustls_provider(&self) -> Result {
 		if rustls::crypto::CryptoProvider::get_default().is_none() {

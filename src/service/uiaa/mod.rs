@@ -143,8 +143,14 @@ pub async fn try_auth(
 			uiaainfo.completed.push(AuthType::Password);
 		},
 		| AuthData::RegistrationToken(t) => {
-			let tokens = self.services.globals.get_registration_tokens();
-			if tokens.contains(t.token.trim()) {
+			let token = t.token.trim();
+			if self
+				.services
+				.registration_tokens
+				.try_consume(token)
+				.await
+				.is_ok()
+			{
 				uiaainfo
 					.completed
 					.push(AuthType::RegistrationToken);
