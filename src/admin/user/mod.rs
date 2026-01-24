@@ -65,6 +65,12 @@ pub(super) enum UserCommand {
 		device_id: OwnedDeviceId,
 	},
 
+	/// - List local users by recent activity.
+	LastActive {
+		#[arg(short, long)]
+		limit: Option<usize>,
+	},
+
 	/// - List local users in the database
 	#[clap(alias = "list")]
 	ListUsers,

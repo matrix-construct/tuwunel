@@ -1,6 +1,6 @@
-use std::collections::BTreeMap;
+use std::{cmp, collections::BTreeMap};
 
-use futures::{FutureExt, StreamExt};
+use futures::{FutureExt, StreamExt, TryStreamExt};
 use ruma::{
 	Int, OwnedDeviceId, OwnedEventId, OwnedRoomId, OwnedRoomOrAliasId, OwnedUserId, UserId,
 	events::{
@@ -11,11 +11,12 @@ use ruma::{
 		},
 		tag::{TagEvent, TagEventContent, TagInfo},
 	},
+	uint,
 };
 use tuwunel_core::{
 	Err, Result, debug_warn, info,
 	matrix::{Event, pdu::PduBuilder},
-	utils::{self, ReadyExt},
+	utils::{self, ReadyExt, stream::IterStream},
 };
 use tuwunel_service::{Services, users::Register};
 
@@ -884,4 +885,40 @@ pub(super) async fn redact_event(&self, event_id: OwnedEventId) -> Result {
 		"Successfully redacted event. Redaction event ID: {redaction_event_id}"
 	))
 	.await
+}
+
+#[admin_command]
+pub(super) async fn last_active(&self, limit: Option<usize>) -> Result {
+	self.services
+		.users
+		.list_local_users()
+		.map(ToOwned::to_owned)
+		.then(async |user_id| {
+			self.services
+				.users
+				.all_devices_metadata(&user_id)
+				.ready_filter_map(|device| device.last_seen_ts)
+				.ready_fold_default(cmp::max)
+				.map(|last_seen_ts| (last_seen_ts, user_id.clone()))
+				.await
+		})
+		.ready_filter(|(ts, _)| ts.get() > uint!(0))
+		.collect::<Vec<_>>()
+		.map(|mut vec| {
+			vec.sort_by(|a, b| b.0.cmp(&a.0));
+			vec
+		})
+		.map(Vec::into_iter)
+		.map(IterStream::try_stream)
+		.flatten_stream()
+		.take(limit.unwrap_or(48))
+		.try_for_each(async |(last_seen_ts, user_id)| {
+			let ago = last_seen_ts;
+			let user_id = user_id.localpart();
+			let line = format!("{ago:?} {user_id}\n");
+
+			self.write_str(&line).await
+		})
+		.boxed()
+		.await
 }
