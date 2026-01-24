@@ -44,7 +44,7 @@ pub(super) enum RoomCommand {
 	Moderation(RoomModerationCommand),
 
 	#[command(subcommand)]
-	/// - Manage rooms' aliases
+	/// - Manage room aliases
 	Alias(RoomAliasCommand),
 
 	#[command(subcommand)]
