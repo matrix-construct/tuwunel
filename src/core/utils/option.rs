@@ -2,19 +2,19 @@ use futures::{FutureExt, Stream, future::OptionFuture};
 
 use super::IterStream;
 
-pub trait OptionExt<Fut, T, U>
-where
-	Fut: Future<Output = U> + Send,
-	U: Send,
-{
-	fn map_async<F>(self, f: F) -> OptionFuture<Fut>
-	where
-		F: FnOnce(T) -> Fut;
-
-	#[inline]
-	fn map_stream<F>(self, f: F) -> impl Stream<Item = U> + Send
+pub trait OptionExt<T> {
+	fn map_async<F, Fut, U>(self, f: F) -> OptionFuture<Fut>
 	where
 		F: FnOnce(T) -> Fut,
+		Fut: Future<Output = U> + Send,
+		U: Send;
+
+	#[inline]
+	fn map_stream<F, Fut, U>(self, f: F) -> impl Stream<Item = U> + Send
+	where
+		F: FnOnce(T) -> Fut,
+		Fut: Future<Output = U> + Send,
+		U: Send,
 		Self: Sized,
 	{
 		self.map_async(f)
@@ -24,15 +24,13 @@ where
 	}
 }
 
-impl<Fut, T, U> OptionExt<Fut, T, U> for Option<T>
-where
-	Fut: Future<Output = U> + Send,
-	U: Send,
-{
+impl<T> OptionExt<T> for Option<T> {
 	#[inline]
-	fn map_async<F>(self, f: F) -> OptionFuture<Fut>
+	fn map_async<F, Fut, U>(self, f: F) -> OptionFuture<Fut>
 	where
 		F: FnOnce(T) -> Fut,
+		Fut: Future<Output = U> + Send,
+		U: Send,
 	{
 		self.map(f).into()
 	}
