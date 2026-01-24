@@ -44,7 +44,6 @@ pub(crate) enum RoomAliasCommand {
 
 pub(super) async fn process(command: RoomAliasCommand, context: &Context<'_>) -> Result {
 	let services = context.services;
-	let server_user = &services.globals.server_user;
 
 	match command {
 		| RoomAliasCommand::Set { ref room_alias_localpart, .. }
@@ -68,10 +67,7 @@ pub(super) async fn process(command: RoomAliasCommand, context: &Context<'_>) ->
 							.await,
 					) {
 						| (true, Ok(id)) => {
-							match services
-								.alias
-								.set_alias(&room_alias, &room_id, server_user)
-							{
+							match services.alias.set_alias(&room_alias, &room_id) {
 								| Err(err) => Err!("Failed to remove alias: {err}"),
 								| Ok(()) =>
 									context
@@ -85,14 +81,9 @@ pub(super) async fn process(command: RoomAliasCommand, context: &Context<'_>) ->
 							"Refusing to overwrite in use alias for {id}, use -f or --force to \
 							 overwrite"
 						),
-						| (_, Err(_)) => {
-							match services
-								.alias
-								.set_alias(&room_alias, &room_id, server_user)
-							{
-								| Err(err) => Err!("Failed to remove alias: {err}"),
-								| Ok(()) => context.write_str("Successfully set alias").await,
-							}
+						| (_, Err(_)) => match services.alias.set_alias(&room_alias, &room_id) {
+							| Err(err) => Err!("Failed to remove alias: {err}"),
+							| Ok(()) => context.write_str("Successfully set alias").await,
 						},
 					}
 				},
@@ -103,11 +94,7 @@ pub(super) async fn process(command: RoomAliasCommand, context: &Context<'_>) ->
 						.await
 					{
 						| Err(_) => Err!("Alias isn't in use."),
-						| Ok(id) => match services
-							.alias
-							.remove_alias(&room_alias, server_user)
-							.await
-						{
+						| Ok(id) => match services.alias.remove_alias(&room_alias).await {
 							| Err(err) => Err!("Failed to remove alias: {err}"),
 							| Ok(()) =>
 								context

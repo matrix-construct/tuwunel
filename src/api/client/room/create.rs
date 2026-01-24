@@ -403,7 +403,7 @@ pub(crate) async fn create_room_route(
 	if let Some(alias) = alias {
 		services
 			.alias
-			.set_alias(&alias, &room_id, sender_user)?;
+			.set_alias_by(&alias, &room_id, sender_user)?;
 	}
 
 	if body.visibility == room::Visibility::Public {

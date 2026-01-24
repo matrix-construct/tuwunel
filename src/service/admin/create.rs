@@ -201,9 +201,7 @@ pub async fn create_admin_room(services: &Services) -> Result {
 		.boxed()
 		.await?;
 
-	services
-		.alias
-		.set_alias(alias, &room_id, server_user)?;
+	services.alias.set_alias(alias, &room_id)?;
 
 	// 7. (ad-hoc) Disable room URL previews for everyone by default
 	services
