@@ -55,10 +55,13 @@ pub(super) fn command_dispatch(item: ItemEnum, args: &[Meta]) -> Result<TokenStr
 
 fn dispatch_arm(v: &Variant, prefix: &str) -> Result<TokenStream2> {
 	let name = &v.ident;
-	let target = camel_to_snake_string(&format!("{name}"));
-	let target = format!("{prefix}{target}");
+	let mut target = camel_to_snake_string(&format!("{name}"));
+	if !matches!(&v.fields, Fields::Unnamed(_)) {
+		target = format!("{prefix}{target}");
+	}
 	let handler = Ident::new(&target, Span::call_site().into());
 	let res = match &v.fields {
+		// command with args
 		| Fields::Named(fields) => {
 			let field = fields
 				.named
@@ -72,6 +75,15 @@ fn dispatch_arm(v: &Variant, prefix: &str) -> Result<TokenStream2> {
 				},
 			}
 		},
+		// command without args
+		| Fields::Unit => {
+			quote! {
+				#name => {
+					Box::pin(context.#handler()).await
+				},
+			}
+		},
+		// subcommand
 		| Fields::Unnamed(fields) => {
 			let Some(ref field) = fields.unnamed.first() else {
 				return Err(Error::new(Span::call_site().into(), "One unnamed field required"));
@@ -81,13 +93,6 @@ fn dispatch_arm(v: &Variant, prefix: &str) -> Result<TokenStream2> {
 				#name ( #field ) => {
 					Box::pin(#handler::process(#field, context)).await
 				}
-			}
-		},
-		| Fields::Unit => {
-			quote! {
-				#name => {
-					Box::pin(context.#handler()).await
-				},
 			}
 		},
 	};
