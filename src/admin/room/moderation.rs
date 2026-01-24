@@ -1,11 +1,12 @@
 use clap::Subcommand;
 use futures::{FutureExt, StreamExt};
-use ruma::{OwnedRoomId, OwnedRoomOrAliasId, RoomAliasId, RoomId, RoomOrAliasId};
+use ruma::{OwnedRoomId, OwnedRoomOrAliasId, RoomId, RoomOrAliasId};
 use tuwunel_core::{
-	Err, Result, debug,
+	Err, Result, debug, is_equal_to,
 	utils::{IterStream, ReadyExt},
 	warn,
 };
+use tuwunel_service::Services;
 
 use crate::{admin_command, admin_command_dispatch, get_room_info};
 
@@ -44,6 +45,59 @@ pub(crate) enum RoomModerationCommand {
 	},
 }
 
+async fn do_ban_room(services: &Services, room_id: &RoomId) {
+	services.metadata.ban_room(room_id);
+
+	debug!("Banned {room_id} successfully");
+
+	debug!("Making all users leave the room {room_id} and forgetting it");
+	let mut users = services
+		.state_cache
+		.room_members(room_id)
+		.ready_filter(|user| services.globals.user_is_local(user))
+		.map(ToOwned::to_owned)
+		.boxed();
+
+	while let Some(ref user_id) = users.next().await {
+		debug!(
+			"Attempting leave for user {user_id} in room {room_id} (ignoring all errors, \
+			 evicting admins too)",
+		);
+
+		let state_lock = services.state.mutex.lock(room_id).await;
+
+		if let Err(e) = services
+			.membership
+			.leave(user_id, room_id, None, false, &state_lock)
+			.boxed()
+			.await
+		{
+			warn!("Failed to leave room: {e}");
+		}
+
+		drop(state_lock);
+
+		services.state_cache.forget(room_id, user_id);
+	}
+
+	// remove any local aliases, ignore errors
+	services
+		.alias
+		.local_aliases_for_room(room_id)
+		.map(ToOwned::to_owned)
+		.for_each(async |local_alias| {
+			if let Err(e) = services.alias.remove_alias(&local_alias).await {
+				warn!("Error removing alias {local_alias} for {room_id}: {e}");
+			}
+		})
+		.await;
+
+	// unpublish from room directory, ignore errors
+	services.directory.set_not_public(room_id);
+
+	services.metadata.disable_room(room_id);
+}
+
 #[admin_command]
 async fn ban_room(&self, room: OwnedRoomOrAliasId) -> Result {
 	debug!("Got room alias or ID: {}", room);
@@ -56,137 +110,9 @@ async fn ban_room(&self, room: OwnedRoomOrAliasId) -> Result {
 		return Err!("Not allowed to ban the admin room.");
 	}
 
-	let room_id = if room.is_room_id() {
-		let room_id = match RoomId::parse(&room) {
-			| Ok(room_id) => room_id,
-			| Err(e) => {
-				return Err!(
-					"Failed to parse room ID {room}. Please note that this requires a full room \
-					 ID (`!awIh6gGInaS5wLQJwa:example.com`) or a room alias \
-					 (`#roomalias:example.com`): {e}"
-				);
-			},
-		};
+	let room_id = self.services.alias.maybe_resolve(&room).await?;
 
-		debug!("Room specified is a room ID, banning room ID");
-		self.services.metadata.ban_room(room_id);
-
-		room_id.to_owned()
-	} else if room.is_room_alias_id() {
-		let room_alias = match RoomAliasId::parse(&room) {
-			| Ok(room_alias) => room_alias,
-			| Err(e) => {
-				return Err!(
-					"Failed to parse room ID {room}. Please note that this requires a full room \
-					 ID (`!awIh6gGInaS5wLQJwa:example.com`) or a room alias \
-					 (`#roomalias:example.com`): {e}"
-				);
-			},
-		};
-
-		debug!(
-			"Room specified is not a room ID, attempting to resolve room alias to a room ID \
-			 locally, if not using get_alias_helper to fetch room ID remotely"
-		);
-
-		let room_id = match self
-			.services
-			.alias
-			.resolve_local_alias(room_alias)
-			.await
-		{
-			| Ok(room_id) => room_id,
-			| _ => {
-				debug!(
-					"We don't have this room alias to a room ID locally, attempting to fetch \
-					 room ID over federation"
-				);
-
-				match self
-					.services
-					.alias
-					.resolve_alias(room_alias)
-					.await
-				{
-					| Ok((room_id, servers)) => {
-						debug!(
-							?room_id,
-							?servers,
-							"Got federation response fetching room ID for {room_id}"
-						);
-						room_id
-					},
-					| Err(e) => {
-						return Err!(
-							"Failed to resolve room alias {room_alias} to a room ID: {e}"
-						);
-					},
-				}
-			},
-		};
-
-		self.services.metadata.ban_room(&room_id);
-
-		room_id
-	} else {
-		return Err!(
-			"Room specified is not a room ID or room alias. Please note that this requires a \
-			 full room ID (`!awIh6gGInaS5wLQJwa:example.com`) or a room alias \
-			 (`#roomalias:example.com`)",
-		);
-	};
-
-	debug!("Making all users leave the room {room_id} and forgetting it");
-	let mut users = self
-		.services
-		.state_cache
-		.room_members(&room_id)
-		.map(ToOwned::to_owned)
-		.ready_filter(|user| self.services.globals.user_is_local(user))
-		.boxed();
-
-	while let Some(ref user_id) = users.next().await {
-		debug!(
-			"Attempting leave for user {user_id} in room {room_id} (ignoring all errors, \
-			 evicting admins too)",
-		);
-
-		let state_lock = self.services.state.mutex.lock(&room_id).await;
-
-		if let Err(e) = self
-			.services
-			.membership
-			.leave(user_id, &room_id, None, false, &state_lock)
-			.boxed()
-			.await
-		{
-			warn!("Failed to leave room: {e}");
-		}
-
-		drop(state_lock);
-
-		self.services
-			.state_cache
-			.forget(&room_id, user_id);
-	}
-
-	self.services
-		.alias
-		.local_aliases_for_room(&room_id)
-		.map(ToOwned::to_owned)
-		.for_each(async |local_alias| {
-			self.services
-				.alias
-				.remove_alias(&local_alias, &self.services.globals.server_user)
-				.await
-				.ok();
-		})
-		.await;
-
-	// unpublish from room directory
-	self.services.directory.set_not_public(&room_id);
-
-	self.services.metadata.disable_room(&room_id);
+	do_ban_room(self.services, &room_id).await;
 
 	self.write_str(
 		"Room banned, removed all our local users, and disabled incoming federation with room.",
@@ -209,164 +135,51 @@ async fn ban_list_of_rooms(&self) -> Result {
 		.drain(1..self.body.len().saturating_sub(1))
 		.collect::<Vec<_>>();
 
-	let admin_room_alias = &self.services.admin.admin_alias;
+	let admin_room_id = self.services.admin.get_admin_room().await.ok();
 
-	let mut room_ban_count: usize = 0;
-	let mut room_ids: Vec<OwnedRoomId> = Vec::new();
+	let mut room_ids: Vec<OwnedRoomId> = Vec::with_capacity(rooms_s.len());
 
-	for &room in &rooms_s {
-		match <&RoomOrAliasId>::try_from(room) {
-			| Ok(room_alias_or_id) => {
-				if let Ok(admin_room_id) = self.services.admin.get_admin_room().await
-					&& (room.to_owned().eq(&admin_room_id)
-						|| room.to_owned().eq(admin_room_alias))
-				{
-					warn!("User specified admin room in bulk ban list, ignoring");
-					continue;
-				}
-
-				if room_alias_or_id.is_room_id() {
-					let room_id = match RoomId::parse(room_alias_or_id) {
-						| Ok(room_id) => room_id,
-						| Err(e) => {
-							// ignore rooms we failed to parse
-							warn!(
-								"Error parsing room \"{room}\" during bulk room banning, \
-								 ignoring error and logging here: {e}"
-							);
-							continue;
-						},
-					};
-
-					room_ids.push(room_id.to_owned());
-				}
-
-				if room_alias_or_id.is_room_alias_id() {
-					match RoomAliasId::parse(room_alias_or_id) {
-						| Ok(room_alias) => {
-							let room_id = match self
-								.services
-								.alias
-								.resolve_local_alias(room_alias)
-								.await
-							{
-								| Ok(room_id) => room_id,
-								| _ => {
-									debug!(
-										"We don't have this room alias to a room ID locally, \
-										 attempting to fetch room ID over federation"
-									);
-
-									match self
-										.services
-										.alias
-										.resolve_alias(room_alias)
-										.await
-									{
-										| Ok((room_id, servers)) => {
-											debug!(
-												?room_id,
-												?servers,
-												"Got federation response fetching room ID for \
-												 {room}",
-											);
-											room_id
-										},
-										| Err(e) => {
-											warn!(
-												"Failed to resolve room alias {room} to a room \
-												 ID: {e}"
-											);
-											continue;
-										},
-									}
-								},
-							};
-
-							room_ids.push(room_id);
-						},
-						| Err(e) => {
-							warn!(
-								"Error parsing room \"{room}\" during bulk room banning, \
-								 ignoring error and logging here: {e}"
-							);
-							continue;
-						},
-					}
-				}
-			},
+	for room in rooms_s {
+		let room_alias_or_id = match <&RoomOrAliasId>::try_from(room) {
+			| Ok(room_alias_or_id) => room_alias_or_id,
 			| Err(e) => {
-				warn!(
-					"Error parsing room \"{room}\" during bulk room banning, ignoring error and \
-					 logging here: {e}"
-				);
+				warn!("Error parsing room {room} during bulk room banning, ignoring: {e}");
 				continue;
 			},
+		};
+
+		let room_id = match self
+			.services
+			.alias
+			.maybe_resolve(room_alias_or_id)
+			.await
+		{
+			| Ok(room_id) => room_id,
+			| Err(e) => {
+				warn!("Failed to resolve room alias {room_alias_or_id} to a room ID: {e}");
+				continue;
+			},
+		};
+
+		if admin_room_id
+			.as_ref()
+			.is_some_and(is_equal_to!(&room_id))
+		{
+			warn!("User specified admin room in bulk ban list, ignoring");
+			continue;
 		}
+
+		room_ids.push(room_id);
 	}
 
+	let rooms_len = room_ids.len();
+
 	for room_id in room_ids {
-		self.services.metadata.ban_room(&room_id);
-
-		debug!("Banned {room_id} successfully");
-		room_ban_count = room_ban_count.saturating_add(1);
-
-		debug!("Making all users leave the room {room_id} and forgetting it");
-		let mut users = self
-			.services
-			.state_cache
-			.room_members(&room_id)
-			.map(ToOwned::to_owned)
-			.ready_filter(|user| self.services.globals.user_is_local(user))
-			.boxed();
-
-		while let Some(ref user_id) = users.next().await {
-			debug!(
-				"Attempting leave for user {user_id} in room {room_id} (ignoring all errors, \
-				 evicting admins too)",
-			);
-
-			let state_lock = self.services.state.mutex.lock(&room_id).await;
-
-			if let Err(e) = self
-				.services
-				.membership
-				.leave(user_id, &room_id, None, false, &state_lock)
-				.boxed()
-				.await
-			{
-				warn!("Failed to leave room: {e}");
-			}
-
-			drop(state_lock);
-
-			self.services
-				.state_cache
-				.forget(&room_id, user_id);
-		}
-
-		// remove any local aliases, ignore errors
-		self.services
-			.alias
-			.local_aliases_for_room(&room_id)
-			.map(ToOwned::to_owned)
-			.for_each(async |local_alias| {
-				self.services
-					.alias
-					.remove_alias(&local_alias, &self.services.globals.server_user)
-					.await
-					.ok();
-			})
-			.await;
-
-		// unpublish from room directory, ignore errors
-		self.services.directory.set_not_public(&room_id);
-
-		self.services.metadata.disable_room(&room_id);
+		do_ban_room(self.services, &room_id).await;
 	}
 
 	self.write_str(&format!(
-		"Finished bulk room ban, banned {room_ban_count} total rooms, evicted all users, and \
+		"Finished bulk room ban, banned {rooms_len} total rooms, evicted all users, and \
 		 disabled incoming federation with the room."
 	))
 	.await
@@ -374,84 +187,9 @@ async fn ban_list_of_rooms(&self) -> Result {
 
 #[admin_command]
 async fn unban_room(&self, room: OwnedRoomOrAliasId) -> Result {
-	let room_id = if room.is_room_id() {
-		let room_id = match RoomId::parse(&room) {
-			| Ok(room_id) => room_id,
-			| Err(e) => {
-				return Err!(
-					"Failed to parse room ID {room}. Please note that this requires a full room \
-					 ID (`!awIh6gGInaS5wLQJwa:example.com`) or a room alias \
-					 (`#roomalias:example.com`): {e}"
-				);
-			},
-		};
+	let room_id = self.services.alias.maybe_resolve(&room).await?;
 
-		debug!("Room specified is a room ID, unbanning room ID");
-		self.services.metadata.unban_room(room_id);
-
-		room_id.to_owned()
-	} else if room.is_room_alias_id() {
-		let room_alias = match RoomAliasId::parse(&room) {
-			| Ok(room_alias) => room_alias,
-			| Err(e) => {
-				return Err!(
-					"Failed to parse room ID {room}. Please note that this requires a full room \
-					 ID (`!awIh6gGInaS5wLQJwa:example.com`) or a room alias \
-					 (`#roomalias:example.com`): {e}"
-				);
-			},
-		};
-
-		debug!(
-			"Room specified is not a room ID, attempting to resolve room alias to a room ID \
-			 locally, if not using get_alias_helper to fetch room ID remotely"
-		);
-
-		let room_id = match self
-			.services
-			.alias
-			.resolve_local_alias(room_alias)
-			.await
-		{
-			| Ok(room_id) => room_id,
-			| _ => {
-				debug!(
-					"We don't have this room alias to a room ID locally, attempting to fetch \
-					 room ID over federation"
-				);
-
-				match self
-					.services
-					.alias
-					.resolve_alias(room_alias)
-					.await
-				{
-					| Ok((room_id, servers)) => {
-						debug!(
-							?room_id,
-							?servers,
-							"Got federation response fetching room ID for room {room}"
-						);
-						room_id
-					},
-					| Err(e) => {
-						return Err!("Failed to resolve room alias {room} to a room ID: {e}");
-					},
-				}
-			},
-		};
-
-		self.services.metadata.unban_room(&room_id);
-
-		room_id
-	} else {
-		return Err!(
-			"Room specified is not a room ID or room alias. Please note that this requires a \
-			 full room ID (`!awIh6gGInaS5wLQJwa:example.com`) or a room alias \
-			 (`#roomalias:example.com`)",
-		);
-	};
-
+	self.services.metadata.unban_room(&room_id);
 	self.services.metadata.enable_room(&room_id);
 	self.write_str("Room unbanned and federation re-enabled.")
 		.await
