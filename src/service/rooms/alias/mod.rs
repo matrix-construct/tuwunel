@@ -41,8 +41,19 @@ impl crate::Service for Service {
 }
 
 impl Service {
+	pub fn set_alias(&self, alias: &RoomAliasId, room_id: &RoomId) -> Result {
+		self.check_alias_local(alias)?;
+
+		self.set_alias_by(alias, room_id, &self.services.globals.server_user)
+	}
+
 	#[tracing::instrument(skip(self))]
-	pub fn set_alias(&self, alias: &RoomAliasId, room_id: &RoomId, user_id: &UserId) -> Result {
+	pub fn set_alias_by(
+		&self,
+		alias: &RoomAliasId,
+		room_id: &RoomId,
+		user_id: &UserId,
+	) -> Result {
 		self.check_alias_local(alias)?;
 
 		if alias == self.services.admin.admin_alias
@@ -53,32 +64,30 @@ impl Service {
 
 		let count = self.services.globals.next_count();
 
+		let localpart = alias.alias();
+
 		// Comes first as we don't want a stuck alias
-		self.db
-			.alias_userid
-			.insert(alias.alias().as_bytes(), user_id.as_bytes());
+		self.db.alias_userid.insert(localpart, user_id);
 
-		self.db
-			.alias_roomid
-			.insert(alias.alias().as_bytes(), room_id.as_bytes());
-
-		let mut aliasid = room_id.as_bytes().to_vec();
-		aliasid.push(0xFF);
-		aliasid.extend_from_slice(&count.to_be_bytes());
+		self.db.alias_roomid.insert(localpart, room_id);
 
 		self.db
 			.aliasid_alias
-			.insert(&aliasid, alias.as_bytes());
+			.put_raw((room_id, *count), alias);
 
 		Ok(())
 	}
 
-	#[tracing::instrument(skip(self))]
-	pub async fn remove_alias(&self, alias: &RoomAliasId, user_id: &UserId) -> Result {
+	pub async fn remove_alias_by(&self, alias: &RoomAliasId, user_id: &UserId) -> Result {
 		if !self.user_can_remove_alias(alias, user_id).await? {
 			return Err!(Request(Forbidden("User is not permitted to remove this alias.")));
 		}
 
+		self.remove_alias(alias).await
+	}
+
+	#[tracing::instrument(skip(self))]
+	pub async fn remove_alias(&self, alias: &RoomAliasId) -> Result {
 		let alias = alias.alias();
 		let Ok(room_id) = self.db.alias_roomid.get(&alias).await else {
 			return Err!(Request(NotFound("Alias does not exist or is invalid.")));
@@ -198,16 +207,12 @@ impl Service {
 			.await
 			.map_err(|_| err!(Request(NotFound("Alias not found."))))?;
 
-		let server_user = &self.services.globals.server_user;
-
 		// The creator of an alias can remove it
 		if self
             .who_created_alias(alias).await
             .is_ok_and(|user| user == user_id)
             // Server admins can remove any local alias
             || self.services.admin.user_is_admin(user_id).await
-            // Always allow the server service account to remove the alias, since there may not be an admin room
-            || server_user == user_id
 		{
 			return Ok(true);
 		}
