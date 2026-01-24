@@ -67,7 +67,7 @@ pub fn create(
 }
 
 #[implement(Service)]
-#[expect(clippy::useless_let_if_seq)]
+#[allow(clippy::useless_let_if_seq)]
 pub async fn try_auth(
 	&self,
 	user_id: &UserId,

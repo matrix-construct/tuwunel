@@ -278,7 +278,6 @@ impl<E: Event> TestStore<E> {
 }
 
 impl TestStore<PduEvent> {
-	#[expect(clippy::type_complexity)]
 	fn set_up(
 		&mut self,
 	) -> (StateMap<OwnedEventId>, StateMap<OwnedEventId>, StateMap<OwnedEventId>) {

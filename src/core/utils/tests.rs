@@ -1,5 +1,3 @@
-#![expect(clippy::disallowed_methods)]
-
 use crate::utils;
 
 #[test]
@@ -109,7 +107,6 @@ async fn mutex_map_contend() {
 }
 
 #[test]
-#[expect(clippy::iter_on_single_items, clippy::many_single_char_names)]
 fn set_intersection_none() {
 	use utils::set::intersection;
 

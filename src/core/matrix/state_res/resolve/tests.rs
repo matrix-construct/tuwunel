@@ -726,7 +726,6 @@ fn JOIN_RULE() -> HashMap<OwnedEventId, PduEvent> {
 
 macro_rules! state_set {
     ($($kind:expr => $key:expr => $id:expr),* $(,)?) => {{
-        #[expect(unused_mut)]
         let mut x = StateMap::new();
         $(
             x.insert(($kind, $key.into()), $id);

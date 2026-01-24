@@ -248,7 +248,6 @@ pub(super) async fn do_check(
 	assert_eq!(expected_state, end_state);
 }
 
-#[expect(clippy::exhaustive_structs)]
 pub(super) struct TestStore(pub(super) HashMap<OwnedEventId, PduEvent>);
 
 impl TestStore {
@@ -286,7 +285,6 @@ impl TestStore {
 }
 
 // A StateStore implementation for testing
-#[expect(clippy::type_complexity)]
 impl TestStore {
 	pub(super) fn set_up(
 		&mut self,
