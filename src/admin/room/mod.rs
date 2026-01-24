@@ -63,4 +63,10 @@ pub(super) enum RoomCommand {
 		#[arg(short, long)]
 		force: bool,
 	},
+
+	/// - Prune empty rooms
+	PruneEmpty {
+		#[arg(short, long)]
+		force: bool,
+	},
 }
