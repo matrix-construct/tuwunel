@@ -100,7 +100,7 @@ impl Service {
 			.for_each(async |local_alias| {
 				self.services
 					.alias
-					.remove_alias(local_alias, &self.services.globals.server_user)
+					.remove_alias(local_alias)
 					.await
 					.log_err()
 					.ok();

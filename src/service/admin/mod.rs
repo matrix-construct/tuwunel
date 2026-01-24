@@ -223,6 +223,10 @@ impl Service {
 
 	/// Checks whether a given user is an admin of this server
 	pub async fn user_is_admin(&self, user_id: &UserId) -> bool {
+		if user_id == self.services.globals.server_user {
+			return true;
+		}
+
 		let Ok(admin_room) = self.get_admin_room().await else {
 			return false;
 		};

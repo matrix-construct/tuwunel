@@ -44,7 +44,7 @@ pub(crate) async fn create_alias_route(
 
 	services
 		.alias
-		.set_alias(&body.room_alias, &body.room_id, sender_user)?;
+		.set_alias_by(&body.room_alias, &body.room_id, sender_user)?;
 
 	Ok(create_alias::v3::Response::new())
 }
@@ -66,7 +66,7 @@ pub(crate) async fn delete_alias_route(
 
 	services
 		.alias
-		.remove_alias(&body.room_alias, sender_user)
+		.remove_alias_by(&body.room_alias, sender_user)
 		.await?;
 
 	// TODO: update alt_aliases?
