@@ -1,6 +1,6 @@
-use futures::StreamExt;
+use futures::{FutureExt, StreamExt};
 use ruma::OwnedRoomId;
-use tuwunel_core::{Err, Result};
+use tuwunel_core::{Err, Result, utils::FutureBoolExt};
 
 use crate::{PAGE_SIZE, admin_command, get_room_info};
 
@@ -80,6 +80,54 @@ pub(super) async fn room_delete(&self, room_id: OwnedRoomId, force: bool) -> Res
 		.await?;
 
 	self.write_str("Successfully deleted the room from our database.")
+		.await?;
+
+	Ok(())
+}
+
+#[admin_command]
+pub(super) async fn room_prune_empty(&self, force: bool) -> Result {
+	let rooms = self
+		.services
+		.metadata
+		.iter_ids()
+		.filter(|room_id| {
+			let has_no_local_users = self
+				.services
+				.state_cache
+				.local_users_in_room(room_id)
+				.boxed()
+				.into_future()
+				.map(|(next, ..)| next.is_none())
+				.boxed();
+
+			let has_no_local_invites = self
+				.services
+				.state_cache
+				.local_users_invited_to_room(room_id)
+				.boxed()
+				.into_future()
+				.map(|(next, ..)| next.is_none())
+				.boxed();
+
+			has_no_local_users.and(has_no_local_invites)
+		})
+		.map(ToOwned::to_owned)
+		.collect::<Vec<_>>()
+		.await;
+
+	let rooms_len = rooms.len();
+
+	for room_id in rooms {
+		let state_lock = self.services.state.mutex.lock(&room_id).await;
+
+		self.services
+			.delete
+			.delete_room(&room_id, force, state_lock)
+			.await?;
+	}
+
+	self.write_str(&format!("Successfully deleted {rooms_len} rooms from our database."))
 		.await?;
 
 	Ok(())
