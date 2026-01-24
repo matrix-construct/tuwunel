@@ -5,7 +5,7 @@ use tuwunel_core::{Err, Result};
 use crate::{PAGE_SIZE, admin_command, get_room_info};
 
 #[admin_command]
-pub(super) async fn list_rooms(
+pub(super) async fn room_list(
 	&self,
 	page: Option<usize>,
 	exclude_disabled: bool,
@@ -60,14 +60,14 @@ pub(super) async fn list_rooms(
 }
 
 #[admin_command]
-pub(super) async fn exists(&self, room_id: OwnedRoomId) -> Result {
+pub(super) async fn room_exists(&self, room_id: OwnedRoomId) -> Result {
 	let result = self.services.metadata.exists(&room_id).await;
 
 	self.write_str(&format!("{result}")).await
 }
 
 #[admin_command]
-pub(super) async fn delete_room(&self, room_id: OwnedRoomId, force: bool) -> Result {
+pub(super) async fn room_delete(&self, room_id: OwnedRoomId, force: bool) -> Result {
 	if self.services.admin.is_admin_room(&room_id).await {
 		return Err!("Cannot delete admin room");
 	}
