@@ -3,10 +3,13 @@ use std::fmt::Write;
 use clap::Subcommand;
 use futures::StreamExt;
 use ruma::{OwnedRoomAliasId, OwnedRoomId};
-use tuwunel_core::{Err, Result};
+use tuwunel_core::{Err, Result, err};
+use tuwunel_macros::{admin_command, admin_command_dispatch};
+use tuwunel_service::Services;
 
 use crate::Context;
 
+#[admin_command_dispatch(handler_prefix = "alias")]
 #[derive(Debug, Subcommand)]
 pub(crate) enum RoomAliasCommand {
 	/// - Make an alias point to a room.
@@ -42,121 +45,135 @@ pub(crate) enum RoomAliasCommand {
 	},
 }
 
-pub(super) async fn process(command: RoomAliasCommand, context: &Context<'_>) -> Result {
-	let services = context.services;
+fn parse_alias_from_localpart(
+	services: &Services,
+	room_alias_localpart: &String,
+) -> Result<OwnedRoomAliasId> {
+	let room_alias_str = format!("#{}:{}", room_alias_localpart, services.globals.server_name());
 
-	match command {
-		| RoomAliasCommand::Set { ref room_alias_localpart, .. }
-		| RoomAliasCommand::Remove { ref room_alias_localpart }
-		| RoomAliasCommand::Which { ref room_alias_localpart } => {
-			let room_alias_str =
-				format!("#{}:{}", room_alias_localpart, services.globals.server_name());
-			let room_alias = match OwnedRoomAliasId::parse(room_alias_str) {
-				| Ok(alias) => alias,
-				| Err(err) => {
-					return Err!("Failed to parse alias: {err}");
-				},
-			};
-			match command {
-				| RoomAliasCommand::Set { force, room_id, .. } => {
-					match (
-						force,
-						services
-							.alias
-							.resolve_local_alias(&room_alias)
-							.await,
-					) {
-						| (true, Ok(id)) => {
-							match services.alias.set_alias(&room_alias, &room_id) {
-								| Err(err) => Err!("Failed to remove alias: {err}"),
-								| Ok(()) =>
-									context
-										.write_str(&format!(
-											"Successfully overwrote alias (formerly {id})"
-										))
-										.await,
-							}
-						},
-						| (false, Ok(id)) => Err!(
-							"Refusing to overwrite in use alias for {id}, use -f or --force to \
-							 overwrite"
-						),
-						| (_, Err(_)) => match services.alias.set_alias(&room_alias, &room_id) {
-							| Err(err) => Err!("Failed to remove alias: {err}"),
-							| Ok(()) => context.write_str("Successfully set alias").await,
-						},
-					}
-				},
-				| RoomAliasCommand::Remove { .. } => {
-					match services
-						.alias
-						.resolve_local_alias(&room_alias)
-						.await
-					{
-						| Err(_) => Err!("Alias isn't in use."),
-						| Ok(id) => match services.alias.remove_alias(&room_alias).await {
-							| Err(err) => Err!("Failed to remove alias: {err}"),
-							| Ok(()) =>
-								context
-									.write_str(&format!("Removed alias from {id}"))
-									.await,
-						},
-					}
-				},
-				| RoomAliasCommand::Which { .. } => {
-					match services
-						.alias
-						.resolve_local_alias(&room_alias)
-						.await
-					{
-						| Err(_) => Err!("Alias isn't in use."),
-						| Ok(id) =>
-							context
-								.write_str(&format!("Alias resolves to {id}"))
-								.await,
-					}
-				},
-				| RoomAliasCommand::List { .. } => unreachable!(),
+	Ok(OwnedRoomAliasId::try_from(room_alias_str)?)
+}
+
+#[admin_command]
+pub(super) async fn alias_set(
+	&self,
+	force: bool,
+	room_id: OwnedRoomId,
+	room_alias_localpart: String,
+) -> Result {
+	let room_alias = parse_alias_from_localpart(self.services, &room_alias_localpart)?;
+
+	match self
+		.services
+		.alias
+		.resolve_local_alias(&room_alias)
+		.await
+	{
+		| Ok(id) => {
+			if !force {
+				return Err!(
+					"Refusing to overwrite in use alias for {id}, use -f or --force to overwrite"
+				);
 			}
+
+			self.services
+				.alias
+				.set_alias(&room_alias, &room_id)
+				.map_err(|err| err!("Failed to remove alias: {err}"))?;
+
+			self.write_str(&format!("Successfully overwrote alias (formerly {id})"))
+				.await
 		},
-		| RoomAliasCommand::List { room_id } =>
-			if let Some(room_id) = room_id {
-				let aliases: Vec<OwnedRoomAliasId> = services
-					.alias
-					.local_aliases_for_room(&room_id)
-					.map(Into::into)
-					.collect()
-					.await;
+		| _ => {
+			self.services
+				.alias
+				.set_alias(&room_alias, &room_id)
+				.map_err(|err| err!("Failed to remove alias: {err}"))?;
 
-				let plain_list = aliases
-					.iter()
-					.fold(String::new(), |mut output, alias| {
-						writeln!(output, "- {alias}")
-							.expect("should be able to write to string buffer");
-						output
-					});
-
-				let plain = format!("Aliases for {room_id}:\n{plain_list}");
-				context.write_str(&plain).await
-			} else {
-				let aliases = services
-					.alias
-					.all_local_aliases()
-					.map(|(room_id, localpart)| (room_id.into(), localpart.into()))
-					.collect::<Vec<(OwnedRoomId, String)>>()
-					.await;
-
-				let server_name = services.globals.server_name();
-				let plain_list = aliases
-					.iter()
-					.fold(String::new(), |mut output, (alias, id)| {
-						writeln!(output, "- `{alias}` -> #{id}:{server_name}")
-							.expect("should be able to write to string buffer");
-						output
-					});
-
-				let plain = format!("Aliases:\n{plain_list}");
-				context.write_str(&plain).await
-			},
+			self.write_str("Successfully set alias").await
+		},
 	}
+}
+
+#[admin_command]
+pub(super) async fn alias_remove(&self, room_alias_localpart: String) -> Result {
+	let room_alias = parse_alias_from_localpart(self.services, &room_alias_localpart)?;
+
+	let id = self
+		.services
+		.alias
+		.resolve_local_alias(&room_alias)
+		.await
+		.map_err(|_| err!("Alias isn't in use."))?;
+
+	self.services
+		.alias
+		.remove_alias(&room_alias)
+		.await
+		.map_err(|err| err!("Failed to remove alias: {err}"))?;
+
+	self.write_str(&format!("Removed alias from {id}"))
+		.await
+}
+
+#[admin_command]
+pub(super) async fn alias_which(&self, room_alias_localpart: String) -> Result {
+	let room_alias = parse_alias_from_localpart(self.services, &room_alias_localpart)?;
+
+	let id = self
+		.services
+		.alias
+		.resolve_local_alias(&room_alias)
+		.await
+		.map_err(|_| err!("Alias isn't in use."))?;
+
+	self.write_str(&format!("Alias resolves to {id}"))
+		.await
+}
+
+#[admin_command]
+pub(super) async fn alias_list(&self, room_id: Option<OwnedRoomId>) -> Result {
+	match room_id {
+		| Some(room_id) => list_aliases_for_room(self, room_id).await,
+		| None => list_all_aliases(self).await,
+	}
+}
+
+async fn list_aliases_for_room(context: &Context<'_>, room_id: OwnedRoomId) -> Result {
+	let aliases: Vec<OwnedRoomAliasId> = context
+		.services
+		.alias
+		.local_aliases_for_room(&room_id)
+		.map(Into::into)
+		.collect()
+		.await;
+
+	let mut plain_list = String::new();
+
+	for alias in aliases {
+		writeln!(plain_list, "- {alias}")?;
+	}
+
+	let plain = format!("Aliases for {room_id}:\n{plain_list}");
+	context.write_str(&plain).await
+}
+
+async fn list_all_aliases(context: &Context<'_>) -> Result {
+	let aliases = context
+		.services
+		.alias
+		.all_local_aliases()
+		.map(|(room_id, localpart)| (room_id.to_owned(), localpart.to_owned()))
+		.collect::<Vec<_>>()
+		.await;
+
+	let server_name = context.services.globals.server_name();
+
+	let mut plain_list = String::new();
+	for (room_id, alias_id) in aliases {
+		writeln!(plain_list, "- `{room_id}` -> #{alias_id}:{server_name}")?;
+	}
+
+	let plain = format!("Aliases:\n{plain_list}");
+	context.write_str(&plain).await
 }
