@@ -51,6 +51,12 @@ async fn remote_invite(
 		let state_lock = self.services.state.mutex.lock(room_id).await;
 
 		let content = RoomMemberEventContent {
+			displayname: self
+				.services
+				.users
+				.displayname(user_id)
+				.await
+				.ok(),
 			avatar_url: self.services.users.avatar_url(user_id).await.ok(),
 			is_direct: Some(is_direct),
 			reason: reason.cloned(),
