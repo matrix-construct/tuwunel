@@ -25,6 +25,7 @@ use crate::validated;
 /// ## Returns
 ///
 /// Returns an `(unconflicted_state, conflicted_states)` tuple.
+#[tracing::instrument(name = "split", level = "debug", skip_all)]
 pub(super) async fn split_conflicted_state<'a, Maps, Id>(
 	state_maps: Maps,
 ) -> (StateMap<Id>, StateMap<Vec<Id>>)

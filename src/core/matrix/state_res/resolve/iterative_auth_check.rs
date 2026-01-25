@@ -79,11 +79,11 @@ where
 
 #[tracing::instrument(
 	name = "check",
-	level = "debug",
+	level = "trace",
 	skip_all,
 	fields(
 		%event_id,
-		%state_key,
+		?state_key,
 	)
 )]
 async fn auth_check<Fetch, Fut, Pdu>(

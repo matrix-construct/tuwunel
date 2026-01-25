@@ -17,7 +17,7 @@ use crate::rooms::short::ShortStateHash;
 // TODO: if we know the prev_events of the incoming event we can avoid the
 #[implement(super::Service)]
 // request and build the state from a known point and resolve if > 1 prev_event
-#[tracing::instrument(name = "state", level = "debug", skip_all)]
+#[tracing::instrument(name = "state1", level = "debug", skip_all)]
 pub(super) async fn state_at_incoming_degree_one<Pdu>(
 	&self,
 	incoming_pdu: &Pdu,
@@ -96,7 +96,7 @@ where
 }
 
 #[implement(super::Service)]
-#[tracing::instrument(name = "state", level = "debug", skip_all)]
+#[tracing::instrument(name = "stateN", level = "debug", skip_all)]
 pub(super) async fn state_at_incoming_resolved<Pdu>(
 	&self,
 	incoming_pdu: &Pdu,
@@ -149,7 +149,7 @@ where
 
 	trace!("Resolving state");
 	let Ok(new_state) = self
-		.state_resolution(room_version, fork_states, auth_chain_sets)
+		.state_resolution(room_id, room_version, fork_states, auth_chain_sets)
 		.inspect_ok(|_| trace!("State resolution done."))
 		.await
 	else {

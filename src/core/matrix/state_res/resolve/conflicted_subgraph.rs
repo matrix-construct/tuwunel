@@ -25,6 +25,7 @@ struct Local {
 	stack: Vec<Vec<OwnedEventId>>,
 }
 
+#[tracing::instrument(name = "conflicted_subgraph", level = "debug", skip_all)]
 pub(super) fn conflicted_subgraph_dfs<ConflictedEventIds, Fetch, Fut, Pdu>(
 	conflicted_event_ids: ConflictedEventIds,
 	fetch: &Fetch,
@@ -65,6 +66,15 @@ where
 		.flatten_stream()
 }
 
+#[tracing::instrument(
+	name = "descent",
+	level = "trace",
+	skip_all,
+	fields(
+		event_id = %conflicted_event_id,
+		event_ids = conflicted_event_ids.len(),
+	)
+)]
 async fn subgraph_descent<Fetch, Fut, Pdu>(
 	state: Arc<Global>,
 	conflicted_event_id: OwnedEventId,

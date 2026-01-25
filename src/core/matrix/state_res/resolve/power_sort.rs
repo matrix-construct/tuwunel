@@ -98,6 +98,7 @@ where
 /// Add the event with the given event ID and all the events in its auth chain
 /// that are in the full conflicted set to the graph.
 #[tracing::instrument(
+	name = "auth_chain",
 	level = "trace",
 	skip_all,
 	fields(
@@ -182,6 +183,7 @@ where
 /// Returns the power level of the sender of the event or an `Err(_)` if one of
 /// the auth events if malformed.
 #[tracing::instrument(
+	name = "sender_power",
 	level = "trace",
 	skip_all,
 	fields(

@@ -13,7 +13,14 @@ use tuwunel_core::{
 use crate::rooms::state_compressor::CompressedState;
 
 #[implement(super::Service)]
-#[tracing::instrument(name = "resolve", level = "debug", skip_all)]
+#[tracing::instrument(
+	name = "state",
+	level = "debug",
+	skip_all,
+	fields(
+		incoming = ?incoming_state.len()
+	),
+)]
 pub async fn resolve_state(
 	&self,
 	room_id: &RoomId,
@@ -64,7 +71,7 @@ pub async fn resolve_state(
 
 	trace!("Resolving state");
 	let state = self
-		.state_resolution(room_version, fork_states, auth_chain_sets)
+		.state_resolution(room_id, room_version, fork_states, auth_chain_sets)
 		.await?;
 
 	trace!("State resolution done.");
@@ -96,8 +103,15 @@ pub async fn resolve_state(
 }
 
 #[implement(super::Service)]
+#[tracing::instrument(
+	name = "resolve",
+	level = "debug",
+	skip_all,
+	fields(%room_id),
+)]
 pub(super) async fn state_resolution<StateSets, AuthSets>(
 	&self,
+	room_id: &RoomId,
 	room_version: &RoomVersionId,
 	state_sets: StateSets,
 	auth_chains: AuthSets,
