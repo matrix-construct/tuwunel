@@ -37,7 +37,7 @@ use tokio::time;
 use tuwunel_core::{
 	Result, at,
 	debug::INFO_SPAN_LEVEL,
-	err,
+	debug_error, err,
 	error::{inspect_debug_log, inspect_log},
 	extract_variant, is_equal_to, is_false, is_true,
 	matrix::{
@@ -192,7 +192,10 @@ pub(crate) async fn sync_events_route(
 			.watch(sender_user, sender_device, watch_rooms);
 
 		let next_batch = services.globals.wait_pending().await?;
-		debug_assert!(since <= next_batch, "next_batch is monotonic");
+		if since > next_batch {
+			debug_error!(since, next_batch, "received since > next_batch, clamping");
+			since = next_batch;
+		}
 
 		if since < next_batch || full_state {
 			let response = build_sync_events(
@@ -221,6 +224,7 @@ pub(crate) async fn sync_events_route(
 		if time::timeout_at(stop_at, watchers).await.is_err() || services.server.is_stopping() {
 			let response =
 				build_empty_response(&services, sender_user, sender_device, next_batch).await;
+
 			trace!(since, next_batch, "empty response");
 			return Ok(response);
 		}
