@@ -1,181 +1,120 @@
 use std::time::Duration;
 
-use ruma::{Mxc, OwnedEventId, OwnedMxcUri, OwnedServerName};
+use ruma::{CanonicalJsonValue, Mxc, OwnedEventId, OwnedMxcUri, OwnedServerName};
 use tuwunel_core::{
-	Err, Result, debug, debug_info, debug_warn, error, info, trace,
-	utils::time::parse_timepoint_ago, warn,
+	Err, Result, debug, err, error, info, trace,
+	utils::{math::Expected, time::parse_timepoint_ago},
+	warn,
 };
 use tuwunel_service::media::Dim;
 
 use crate::{admin_command, utils::parse_local_user_id};
 
 #[admin_command]
-pub(super) async fn delete(
-	&self,
-	mxc: Option<OwnedMxcUri>,
-	event_id: Option<OwnedEventId>,
-) -> Result {
-	if event_id.is_some() && mxc.is_some() {
-		return Err!("Please specify either an MXC or an event ID, not both.",);
+pub(super) async fn delete(&self, mxc: OwnedMxcUri) -> Result {
+	self.services
+		.media
+		.delete(&mxc.as_str().try_into()?)
+		.await?;
+
+	Err!("Deleted the MXC from our database and on our filesystem.")
+}
+
+#[admin_command]
+pub(super) async fn delete_by_event(&self, event_id: OwnedEventId) -> Result {
+	let mut mxc_urls = Vec::with_capacity(3);
+
+	// parsing the PDU for any MXC URLs begins here
+	let event_json = self
+		.services
+		.timeline
+		.get_pdu_json(&event_id)
+		.await
+		.map_err(|_| err!("Event ID does not exist or is not known to us."))?;
+
+	let content = event_json
+		.get("content")
+		.and_then(CanonicalJsonValue::as_object)
+		.ok_or_else(|| {
+			err!(
+				"Event ID does not have a \"content\" key, this is not a message or an event \
+				 type that contains media.",
+			)
+		})?;
+
+	// 1. attempts to parse the "url" key
+	debug!("Attempting to go into \"url\" key for main media file");
+	if let Some(url) = content
+		.get("url")
+		.and_then(CanonicalJsonValue::as_str)
+	{
+		debug!("Got a URL in the event ID {event_id}: {url}");
+
+		mxc_urls.push(url.to_owned());
+	} else {
+		debug!("No main media found.");
 	}
 
-	if let Some(mxc) = mxc {
-		trace!("Got MXC URL: {mxc}");
-		self.services
-			.media
-			.delete(&mxc.as_str().try_into()?)
-			.await?;
+	// 2. attempts to parse the "info" key
+	debug!("Attempting to go into \"info\" key for thumbnails");
+	if let Some(thumbnail_url) = content
+		.get("info")
+		.and_then(CanonicalJsonValue::as_object)
+		.and_then(|info| info.get("thumbnail_url"))
+		.and_then(CanonicalJsonValue::as_str)
+	{
+		debug!("Found a thumbnail_url in info key: {thumbnail_url}");
 
-		return Err!("Deleted the MXC from our database and on our filesystem.",);
+		mxc_urls.push(thumbnail_url.to_owned());
+	} else {
+		debug!("No thumbnails found.");
 	}
 
-	if let Some(event_id) = event_id {
-		trace!("Got event ID to delete media from: {event_id}");
+	// 3. attempts to parse the "file" key
+	debug!("Attempting to go into \"file\" key");
+	if let Some(url) = content
+		.get("file")
+		.and_then(CanonicalJsonValue::as_object)
+		.and_then(|file| file.get("url"))
+		.and_then(CanonicalJsonValue::as_str)
+	{
+		debug!("Found url in file key: {url}");
 
-		let mut mxc_urls = Vec::with_capacity(4);
+		mxc_urls.push(url.to_owned());
+	} else {
+		debug!("No \"url\" key in \"file\" key.");
+	}
 
-		// parsing the PDU for any MXC URLs begins here
-		match self
-			.services
-			.timeline
-			.get_pdu_json(&event_id)
-			.await
-		{
-			| Ok(event_json) => {
-				if let Some(content_key) = event_json.get("content") {
-					debug!("Event ID has \"content\".");
-					let content_obj = content_key.as_object();
+	if mxc_urls.is_empty() {
+		return Err!("Parsed event ID but found no MXC URLs.",);
+	}
 
-					if let Some(content) = content_obj {
-						// 1. attempts to parse the "url" key
-						debug!("Attempting to go into \"url\" key for main media file");
-						if let Some(url) = content.get("url") {
-							debug!("Got a URL in the event ID {event_id}: {url}");
+	let mut mxc_deletion_count: usize = 0;
 
-							if url.to_string().starts_with("\"mxc://") {
-								debug!("Pushing URL {url} to list of MXCs to delete");
-								let final_url = url.to_string().replace('"', "");
-								mxc_urls.push(final_url);
-							} else {
-								info!(
-									"Found a URL in the event ID {event_id} but did not start \
-									 with mxc://, ignoring"
-								);
-							}
-						}
+	for mxc_url in mxc_urls {
+		if !mxc_url.starts_with("mxc://") {
+			warn!("Ignoring non-mxc url {mxc_url}");
+			continue;
+		}
 
-						// 2. attempts to parse the "info" key
-						debug!("Attempting to go into \"info\" key for thumbnails");
-						if let Some(info_key) = content.get("info") {
-							debug!("Event ID has \"info\".");
-							let info_obj = info_key.as_object();
+		let mxc: Mxc<'_> = mxc_url.as_str().try_into()?;
 
-							if let Some(info) = info_obj {
-								if let Some(thumbnail_url) = info.get("thumbnail_url") {
-									debug!("Found a thumbnail_url in info key: {thumbnail_url}");
-
-									if thumbnail_url.to_string().starts_with("\"mxc://") {
-										debug!(
-											"Pushing thumbnail URL {thumbnail_url} to list of \
-											 MXCs to delete"
-										);
-										let final_thumbnail_url =
-											thumbnail_url.to_string().replace('"', "");
-										mxc_urls.push(final_thumbnail_url);
-									} else {
-										info!(
-											"Found a thumbnail URL in the event ID {event_id} \
-											 but did not start with mxc://, ignoring"
-										);
-									}
-								} else {
-									info!(
-										"No \"thumbnail_url\" key in \"info\" key, assuming no \
-										 thumbnails."
-									);
-								}
-							}
-						}
-
-						// 3. attempts to parse the "file" key
-						debug!("Attempting to go into \"file\" key");
-						if let Some(file_key) = content.get("file") {
-							debug!("Event ID has \"file\".");
-							let file_obj = file_key.as_object();
-
-							if let Some(file) = file_obj {
-								if let Some(url) = file.get("url") {
-									debug!("Found url in file key: {url}");
-
-									if url.to_string().starts_with("\"mxc://") {
-										debug!("Pushing URL {url} to list of MXCs to delete");
-										let final_url = url.to_string().replace('"', "");
-										mxc_urls.push(final_url);
-									} else {
-										warn!(
-											"Found a URL in the event ID {event_id} but did not \
-											 start with mxc://, ignoring"
-										);
-									}
-								} else {
-									error!("No \"url\" key in \"file\" key.");
-								}
-							}
-						}
-					} else {
-						return Err!(
-							"Event ID does not have a \"content\" key or failed parsing the \
-							 event ID JSON.",
-						);
-					}
-				} else {
-					return Err!(
-						"Event ID does not have a \"content\" key, this is not a message or an \
-						 event type that contains media.",
-					);
-				}
+		match self.services.media.delete(&mxc).await {
+			| Ok(()) => {
+				info!("Successfully deleted {mxc_url} from filesystem and database");
+				mxc_deletion_count = mxc_deletion_count.saturating_add(1);
 			},
-			| _ => {
-				return Err!("Event ID does not exist or is not known to us.",);
+			| Err(e) => {
+				warn!("Failed to delete {mxc_url}, ignoring error and skipping: {e}");
 			},
 		}
-
-		if mxc_urls.is_empty() {
-			return Err!("Parsed event ID but found no MXC URLs.",);
-		}
-
-		let mut mxc_deletion_count: usize = 0;
-
-		for mxc_url in mxc_urls {
-			match self
-				.services
-				.media
-				.delete(&mxc_url.as_str().try_into()?)
-				.await
-			{
-				| Ok(()) => {
-					debug_info!("Successfully deleted {mxc_url} from filesystem and database");
-					mxc_deletion_count = mxc_deletion_count.saturating_add(1);
-				},
-				| Err(e) => {
-					debug_warn!("Failed to delete {mxc_url}, ignoring error and skipping: {e}");
-					continue;
-				},
-			}
-		}
-
-		return self
-			.write_str(&format!(
-				"Deleted {mxc_deletion_count} total MXCs from our database and the filesystem \
-				 from event ID {event_id}."
-			))
-			.await;
 	}
 
-	Err!(
-		"Please specify either an MXC using --mxc or an event ID using --event-id of the \
-		 message containing an image. See --help for details."
-	)
+	self.write_str(&format!(
+		"Deleted {mxc_deletion_count} total MXCs from our database and the filesystem from \
+		 event ID {event_id}."
+	))
+	.await
 }
 
 #[admin_command]
@@ -192,12 +131,12 @@ pub(super) async fn delete_list(&self) -> Result {
 	let mxc_list = self
 		.body
 		.to_vec()
-		.drain(1..self.body.len().checked_sub(1).unwrap())
+		.drain(1..self.body.len().expected_sub(1))
 		.filter_map(|mxc_s| {
 			mxc_s
 				.try_into()
 				.inspect_err(|e| {
-					debug_warn!("Failed to parse user-provided MXC URI: {e}");
+					warn!("Failed to parse user-provided MXC URI: {e}");
 					failed_parsed_mxcs = failed_parsed_mxcs.saturating_add(1);
 				})
 				.ok()
@@ -210,11 +149,11 @@ pub(super) async fn delete_list(&self) -> Result {
 		trace!(%failed_parsed_mxcs, %mxc_deletion_count, "Deleting MXC {mxc} in bulk");
 		match self.services.media.delete(mxc).await {
 			| Ok(()) => {
-				debug_info!("Successfully deleted {mxc} from filesystem and database");
+				info!("Successfully deleted {mxc} from filesystem and database");
 				mxc_deletion_count = mxc_deletion_count.saturating_add(1);
 			},
 			| Err(e) => {
-				debug_warn!("Failed to delete {mxc}, ignoring error and skipping: {e}");
+				warn!("Failed to delete {mxc}, ignoring error and skipping: {e}");
 				continue;
 			},
 		}
@@ -238,7 +177,6 @@ pub(super) async fn delete_past_remote_media(
 	if before && after {
 		return Err!("Please only pick one argument, --before or --after.",);
 	}
-	assert!(!(before && after), "--before and --after should not be specified together");
 
 	let duration = parse_timepoint_ago(&duration)?;
 	let deleted_count = self
@@ -294,7 +232,7 @@ pub(super) async fn delete_all_from_server(
 
 	for mxc in all_mxcs {
 		let Ok(mxc_server_name) = mxc.server_name().inspect_err(|e| {
-			debug_warn!(
+			warn!(
 				"Failed to parse MXC {mxc} server name from database, ignoring error and \
 				 skipping: {e}"
 			);
@@ -302,13 +240,7 @@ pub(super) async fn delete_all_from_server(
 			continue;
 		};
 
-		if mxc_server_name != server_name
-			|| (self
-				.services
-				.globals
-				.server_is_ours(mxc_server_name)
-				&& !yes_i_want_to_delete_local_media)
-		{
+		if mxc_server_name != server_name {
 			trace!("skipping MXC URI {mxc}");
 			continue;
 		}
@@ -320,8 +252,7 @@ pub(super) async fn delete_all_from_server(
 				deleted_count = deleted_count.saturating_add(1);
 			},
 			| Err(e) => {
-				debug_warn!("Failed to delete {mxc}, ignoring error and skipping: {e}");
-				continue;
+				warn!("Failed to delete {mxc}, ignoring error and skipping: {e}");
 			},
 		}
 	}
