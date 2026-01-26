@@ -88,10 +88,7 @@ pub(crate) async fn create_invite_route(
 		.map(UserId::to_owned)
 		.map_err(|e| err!(Request(InvalidParam("Invalid state_key property: {e}"))))?;
 
-	if !services
-		.globals
-		.server_is_ours(invited_user.server_name())
-	{
+	if !services.globals.user_is_local(&invited_user) {
 		return Err!(Request(InvalidParam("User does not belong to this homeserver.")));
 	}
 

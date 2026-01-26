@@ -2978,13 +2978,8 @@ impl Config {
 
 		let invalid_toml_files = toml_files
 			.iter()
-			.filter_map(|path| {
-				if !path.exists() {
-					Some(path.clone().into_os_string())
-				} else {
-					None
-				}
-			})
+			.filter(|path| !path.exists())
+			.map(|path| path.clone().into_os_string())
 			.collect_vec();
 
 		if !invalid_toml_files.is_empty() {

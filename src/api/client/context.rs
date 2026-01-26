@@ -7,9 +7,8 @@ use ruma::{OwnedEventId, UserId, api::client::context::get_context, events::Stat
 use tuwunel_core::{
 	Err, Event, Result, at, debug_warn, err, ref_at,
 	utils::{
-		IterStream,
+		BoolExt, IterStream,
 		future::TryExtExt,
-		option::OptionExt,
 		stream::{BroadbandExt, ReadyExt, TryIgnore, WidebandExt},
 	},
 };
@@ -120,13 +119,14 @@ pub(crate) async fn get_context_route(
 	let lazy_loading_witnessed = filter
 		.lazy_load_options
 		.is_enabled()
-		.then_some(
-			base_event
+		.then_async(|| {
+			let witnessed = base_event
 				.iter()
 				.chain(events_before.iter())
-				.chain(events_after.iter()),
-		)
-		.map_async(|witnessed| lazy_loading_witness(&services, &lazy_loading_context, witnessed));
+				.chain(events_after.iter());
+
+			lazy_loading_witness(&services, &lazy_loading_context, witnessed)
+		});
 
 	let state_at = events_after
 		.last()

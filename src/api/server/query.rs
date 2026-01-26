@@ -70,10 +70,7 @@ pub(crate) async fn get_profile_information_route(
 		)));
 	}
 
-	if !services
-		.globals
-		.server_is_ours(body.user_id.server_name())
-	{
+	if !services.globals.user_is_local(&body.user_id) {
 		return Err!(Request(InvalidParam("User does not belong to this server.",)));
 	}
 
