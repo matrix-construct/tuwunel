@@ -56,7 +56,7 @@ pub(crate) async fn send_message_event_route(
 	}
 
 	// Forbid m.room.encrypted if encryption is disabled
-	if MessageLikeEventType::RoomEncrypted == body.event_type && !services.config.allow_encryption
+	if !services.config.allow_encryption && MessageLikeEventType::RoomEncrypted == body.event_type
 	{
 		return Err!(Request(Forbidden("Encryption has been disabled")));
 	}

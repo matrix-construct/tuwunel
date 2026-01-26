@@ -30,7 +30,7 @@ pub(crate) async fn report_room_route(
 		body.room_id, body.reason,
 	);
 
-	if body.reason.len().gt(&REASON_MAX_LEN) {
+	if body.reason.len() > REASON_MAX_LEN {
 		return Err!(Request(InvalidParam(
 			"Reason too long, should be {REASON_MAX_LEN} characters or fewer"
 		)));

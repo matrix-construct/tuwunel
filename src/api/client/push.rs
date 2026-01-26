@@ -338,7 +338,6 @@ pub(crate) async fn set_pushrule_route(
 	body: Ruma<set_pushrule::v3::Request>,
 ) -> Result<set_pushrule::v3::Response> {
 	let sender_user = body.sender_user();
-	let body = &body.body;
 	let mut account_data: PushRulesEvent = services
 		.account_data
 		.get_global(sender_user, GlobalAccountDataEventType::PushRules)
