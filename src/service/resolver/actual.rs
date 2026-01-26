@@ -314,7 +314,8 @@ impl super::Service {
 
 	#[tracing::instrument(name = "srv", level = "debug", skip(self))]
 	async fn query_srv_record(&self, hostname: &'_ str) -> Result<Option<FedDest>> {
-		let hostnames = [format!("_matrix-fed._tcp.{hostname}.")];
+		let hostnames =
+			[format!("_matrix-fed._tcp.{hostname}."), format!("_matrix._tcp.{hostname}.")];
 
 		for hostname in hostnames {
 			self.services.server.check_running()?;
