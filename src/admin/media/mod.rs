@@ -11,16 +11,18 @@ use crate::admin_command_dispatch;
 #[derive(Debug, Subcommand)]
 pub(super) enum MediaCommand {
 	/// - Deletes a single media file from our database and on the filesystem
-	///   via a single MXC URL or event ID (not redacted)
+	///   via a single MXC URL
 	Delete {
 		/// The MXC URL to delete
 		#[arg(long)]
-		mxc: Option<OwnedMxcUri>,
+		mxc: OwnedMxcUri,
+	},
 
-		/// - The message event ID which contains the media and thumbnail MXC
-		///   URLs
+	/// - Deletes media files referenced by event
+	DeleteByEvent {
+		/// - The event ID which contains the media and thumbnail MXC URLs
 		#[arg(long)]
-		event_id: Option<OwnedEventId>,
+		event_id: OwnedEventId,
 	},
 
 	/// - Deletes a codeblock list of MXC URLs from our database and on the
