@@ -241,8 +241,7 @@ async fn deactivate_user(services: &Services, user_id: &UserId, no_leave_rooms: 
 
 #[admin_command]
 pub(super) async fn list_joined_rooms(&self, user_id: String) -> Result {
-	// Validate user id
-	let user_id = parse_local_user_id(self.services, &user_id)?;
+	let user_id = parse_user_id(self.services, &user_id)?;
 
 	let mut rooms: Vec<(OwnedRoomId, u64, String)> = self
 		.services
