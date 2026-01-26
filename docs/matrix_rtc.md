@@ -62,16 +62,13 @@ keys:
 #### 3.1. .well-known served by Tuwunel
 ***Follow this step if your .well-known configuration is served by tuwunel. Otherwise follow Step 3.2***
 1. Open your tuwunel.toml file. e.g. `nano /etc/tuwunel/tuwunel.toml`.
-2. Find the line reading `#rtc_transports = []` and edit it to be:
+2. Find the line reading `#rtc_transports = []` and replace it with:
 ```toml
-rtc_transports = [
-  { 
-    type = "livekit", 
-    livekit_service_url = "https://matrix-rtc.yourdomain.com" 
-  }
-]
+[[global.well_known.rtc_transports]]
+type = "livekit"
+livekit_service_url = "https://matrix-rtc.yourdomain.com"
 ```
-3. Close the file.
+4. Close the file.
 
 #### 3.2. .well-known served independently
 ***Follow this step if you serve your .well-known/matrix files directly. Otherwise follow Step 3.1***
