@@ -1,7 +1,7 @@
 mod commands;
 
 use clap::Subcommand;
-use ruma::{OwnedRoomId, OwnedServerName, OwnedUserId};
+use ruma::{OwnedRoomId, OwnedServerName};
 use tuwunel_core::Result;
 
 use crate::admin_command_dispatch;
@@ -33,10 +33,5 @@ pub(super) enum FederationCommand {
 	/// easily fetch that information.
 	FetchSupportWellKnown {
 		server_name: OwnedServerName,
-	},
-
-	/// - Lists all the rooms we share/track with the specified *remote* user
-	RemoteUserInRooms {
-		user_id: OwnedUserId,
 	},
 }
