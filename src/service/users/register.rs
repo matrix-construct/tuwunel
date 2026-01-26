@@ -67,27 +67,17 @@ pub async fn full_register(
 		.new_user_displayname_suffix
 		.as_str();
 
-	let add_displayname_suffix = !displayname_suffix.is_empty() && !omit_displayname_suffix;
+	let mut displayname = displayname.unwrap_or_else(|| user_id.localpart());
 
-	if let Some(displayname) =
-		displayname.or_else(|| add_displayname_suffix.then(|| user_id.localpart()))
-	{
-		// If `new_user_displayname_suffix` is set, registration will push whatever
-		// content is set to the user's display name with a space before it
-		let displayname = format!(
-			"{displayname}{}{}",
-			add_displayname_suffix
-				.then_some(" ")
-				.unwrap_or(""),
-			add_displayname_suffix
-				.then_some(displayname_suffix)
-				.unwrap_or("")
-		);
-
-		self.services
-			.users
-			.set_displayname(user_id, Some(&displayname));
+	let displayname_with_suffix;
+	if !displayname_suffix.is_empty() && !omit_displayname_suffix {
+		displayname_with_suffix = format!("{displayname} {displayname_suffix}");
+		displayname = &displayname_with_suffix;
 	}
+
+	self.services
+		.users
+		.set_displayname(user_id, Some(displayname));
 
 	// Initial account data
 	self.services
