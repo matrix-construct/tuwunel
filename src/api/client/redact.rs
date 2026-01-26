@@ -16,7 +16,6 @@ pub(crate) async fn redact_event_route(
 	body: Ruma<redact_event::v3::Request>,
 ) -> Result<redact_event::v3::Response> {
 	let sender_user = body.sender_user();
-	let body = &body.body;
 
 	if services.config.disable_local_redactions
 		&& !services.admin.user_is_admin(sender_user).await

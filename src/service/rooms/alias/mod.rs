@@ -131,11 +131,7 @@ impl Service {
 		&self,
 		room_alias: &RoomAliasId,
 	) -> Result<(OwnedRoomId, Vec<OwnedServerName>)> {
-		if self
-			.services
-			.globals
-			.server_is_ours(room_alias.server_name())
-		{
+		if self.services.globals.alias_is_local(room_alias) {
 			if let Ok(room_id) = self.resolve_local_alias(room_alias).await {
 				return Ok((room_id, Vec::new()));
 			}

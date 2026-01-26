@@ -334,10 +334,6 @@ pub(super) async fn get_room_state(
 
 #[admin_command]
 pub(super) async fn ping(&self, server: OwnedServerName) -> Result {
-	if server == self.services.globals.server_name() {
-		return Err!("Not allowed to send federation requests to ourselves.");
-	}
-
 	let timer = tokio::time::Instant::now();
 
 	let response = self
