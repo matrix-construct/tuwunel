@@ -1,8 +1,7 @@
-use futures::StreamExt;
-use ruma::{OwnedRoomId, OwnedServerName, OwnedUserId};
-use tuwunel_core::{Err, Result};
+use ruma::{OwnedRoomId, OwnedServerName};
+use tuwunel_core::{Err, Result, err};
 
-use crate::{admin_command, get_room_info};
+use crate::admin_command;
 
 #[admin_command]
 pub(super) async fn disable_room(&self, room_id: OwnedRoomId) -> Result {
@@ -43,59 +42,10 @@ pub(super) async fn fetch_support_well_known(&self, server_name: OwnedServerName
 		);
 	}
 
-	let json: serde_json::Value = match serde_json::from_str(&text) {
-		| Ok(json) => json,
-		| Err(_) => {
-			return Err!("Response text/body is not valid JSON.",);
-		},
-	};
-
-	let pretty_json: String = match serde_json::to_string_pretty(&json) {
-		| Ok(json) => json,
-		| Err(_) => {
-			return Err!("Response text/body is not valid JSON.",);
-		},
-	};
+	let pretty_json = serde_json::from_str(&text)
+		.and_then(|json: serde_json::Value| serde_json::to_string_pretty(&json))
+		.map_err(|_| err!("Response text/body is not valid JSON."))?;
 
 	self.write_str(&format!("Got JSON response:\n\n```json\n{pretty_json}\n```"))
-		.await
-}
-
-#[admin_command]
-pub(super) async fn remote_user_in_rooms(&self, user_id: OwnedUserId) -> Result {
-	if user_id.server_name() == self.services.server.name {
-		return Err!(
-			"User belongs to our server, please use `list-joined-rooms` user admin command \
-			 instead.",
-		);
-	}
-
-	if !self.services.users.exists(&user_id).await {
-		return Err!("Remote user does not exist in our database.",);
-	}
-
-	let mut rooms: Vec<(OwnedRoomId, u64, String)> = self
-		.services
-		.state_cache
-		.rooms_joined(&user_id)
-		.then(|room_id| get_room_info(self.services, room_id))
-		.collect()
-		.await;
-
-	if rooms.is_empty() {
-		return Err!("User is not in any rooms.");
-	}
-
-	rooms.sort_by_key(|r| r.1);
-	rooms.reverse();
-
-	let num = rooms.len();
-	let body = rooms
-		.iter()
-		.map(|(id, members, name)| format!("{id} | Members: {members} | Name: {name}"))
-		.collect::<Vec<_>>()
-		.join("\n");
-
-	self.write_str(&format!("Rooms {user_id} shares with us ({num}):\n```\n{body}\n```",))
 		.await
 }
