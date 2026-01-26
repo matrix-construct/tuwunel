@@ -1,6 +1,6 @@
 use futures::{FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt, future::join3};
 use ruma::{
-	OwnedMxcUri, OwnedRoomId, UserId,
+	MxcUri, OwnedMxcUri, OwnedRoomId, UserId,
 	events::room::member::{MembershipState, RoomMemberEventContent},
 };
 use tuwunel_core::{
@@ -17,7 +17,7 @@ use tuwunel_database::{Deserialized, Ignore, Interfix, Json};
 pub async fn update_displayname(
 	&self,
 	user_id: &UserId,
-	displayname: Option<String>,
+	displayname: Option<&str>,
 	rooms: &[OwnedRoomId],
 ) {
 	let (current_avatar_url, current_blurhash, current_displayname) = join3(
@@ -27,13 +27,13 @@ pub async fn update_displayname(
 	)
 	.await;
 
-	if displayname == current_displayname {
+	if displayname == current_displayname.as_deref() {
 		return;
 	}
 
 	self.services
 		.users
-		.set_displayname(user_id, displayname.clone());
+		.set_displayname(user_id, displayname);
 
 	// Send a new join membership event into rooms
 	let avatar_url = &current_avatar_url;
@@ -44,7 +44,7 @@ pub async fn update_displayname(
 		.try_stream()
 		.and_then(async |room_id: &OwnedRoomId| {
 			let pdu = PduBuilder::state(user_id.to_string(), &RoomMemberEventContent {
-				displayname: displayname.clone(),
+				displayname: displayname.map(ToOwned::to_owned),
 				membership: MembershipState::Join,
 				avatar_url: avatar_url.clone(),
 				blurhash: blurhash.clone(),
@@ -68,7 +68,7 @@ pub async fn update_displayname(
 /// Sets a new displayname or removes it if displayname is None. You still
 /// need to notify all rooms of this change.
 #[implement(super::Service)]
-pub fn set_displayname(&self, user_id: &UserId, displayname: Option<String>) {
+pub fn set_displayname(&self, user_id: &UserId, displayname: Option<&str>) {
 	if let Some(displayname) = displayname {
 		self.db
 			.userid_displayname
@@ -92,8 +92,8 @@ pub async fn displayname(&self, user_id: &UserId) -> Result<String> {
 pub async fn update_avatar_url(
 	&self,
 	user_id: &UserId,
-	avatar_url: Option<OwnedMxcUri>,
-	blurhash: Option<String>,
+	avatar_url: Option<&MxcUri>,
+	blurhash: Option<&str>,
 	rooms: &[OwnedRoomId],
 ) {
 	let (current_avatar_url, current_blurhash, current_displayname) = join3(
@@ -103,30 +103,27 @@ pub async fn update_avatar_url(
 	)
 	.await;
 
-	if current_avatar_url == avatar_url && current_blurhash == blurhash {
+	if current_avatar_url.as_deref() == avatar_url && current_blurhash.as_deref() == blurhash {
 		return;
 	}
 
 	self.services
 		.users
-		.set_avatar_url(user_id, avatar_url.clone());
+		.set_avatar_url(user_id, avatar_url);
 	self.services
 		.users
-		.set_blurhash(user_id, blurhash.clone());
+		.set_blurhash(user_id, blurhash);
 
 	// Send a new join membership event into rooms
-	let avatar_url = &avatar_url;
-	let blurhash = &blurhash;
-	let displayname = &current_displayname;
 	let rooms: Vec<_> = rooms
 		.iter()
 		.try_stream()
 		.and_then(async |room_id: &OwnedRoomId| {
 			let pdu = PduBuilder::state(user_id.to_string(), &RoomMemberEventContent {
-				avatar_url: avatar_url.clone(),
-				blurhash: blurhash.clone(),
+				avatar_url: avatar_url.map(ToOwned::to_owned),
+				blurhash: blurhash.map(ToOwned::to_owned),
 				membership: MembershipState::Join,
-				displayname: displayname.clone(),
+				displayname: current_displayname.clone(),
 				join_authorized_via_users_server: None,
 				reason: None,
 				is_direct: None,
@@ -146,16 +143,13 @@ pub async fn update_avatar_url(
 
 /// Sets a new avatar_url or removes it if avatar_url is None.
 #[implement(super::Service)]
-pub fn set_avatar_url(&self, user_id: &UserId, avatar_url: Option<OwnedMxcUri>) {
-	match avatar_url {
-		| Some(avatar_url) => {
-			self.db
-				.userid_avatarurl
-				.insert(user_id, &avatar_url);
-		},
-		| _ => {
-			self.db.userid_avatarurl.remove(user_id);
-		},
+pub fn set_avatar_url(&self, user_id: &UserId, avatar_url: Option<&MxcUri>) {
+	if let Some(avatar_url) = avatar_url {
+		self.db
+			.userid_avatarurl
+			.insert(user_id, avatar_url);
+	} else {
+		self.db.userid_avatarurl.remove(user_id);
 	}
 }
 
@@ -171,7 +165,7 @@ pub async fn avatar_url(&self, user_id: &UserId) -> Result<OwnedMxcUri> {
 
 /// Sets a new avatar_url or removes it if avatar_url is None.
 #[implement(super::Service)]
-pub fn set_blurhash(&self, user_id: &UserId, blurhash: Option<String>) {
+pub fn set_blurhash(&self, user_id: &UserId, blurhash: Option<&str>) {
 	if let Some(blurhash) = blurhash {
 		self.db.userid_blurhash.insert(user_id, blurhash);
 	} else {
@@ -191,14 +185,14 @@ pub async fn blurhash(&self, user_id: &UserId) -> Result<String> {
 
 /// Sets a new timezone or removes it if timezone is None.
 #[implement(super::Service)]
-pub fn set_timezone(&self, user_id: &UserId, timezone: Option<String>) {
+pub fn set_timezone(&self, user_id: &UserId, timezone: Option<&str>) {
 	// TODO: insert to the stable MSC4175 key when it's stable
 	let key = (user_id, "us.cloke.msc4175.tz");
 
 	if let Some(timezone) = timezone {
 		self.db
 			.useridprofilekey_value
-			.put_raw(key, &timezone);
+			.put_raw(key, timezone);
 	} else {
 		self.db.useridprofilekey_value.del(key);
 	}
@@ -243,7 +237,7 @@ pub fn set_profile_key(
 	&self,
 	user_id: &UserId,
 	profile_key: &str,
-	profile_key_value: Option<serde_json::Value>,
+	profile_key_value: Option<&serde_json::Value>,
 ) {
 	// TODO: insert to the stable MSC4175 key when it's stable
 	let key = (user_id, profile_key);

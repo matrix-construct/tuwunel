@@ -43,7 +43,7 @@ pub(crate) async fn set_displayname_route(
 
 	services
 		.users
-		.update_displayname(&body.user_id, body.displayname.clone(), &all_joined_rooms)
+		.update_displayname(&body.user_id, body.displayname.as_deref(), &all_joined_rooms)
 		.await;
 
 	// Presence update
@@ -87,13 +87,13 @@ pub(crate) async fn get_displayname_route(
 
 			services
 				.users
-				.set_displayname(&body.user_id, response.displayname.clone());
+				.set_displayname(&body.user_id, response.displayname.as_deref());
 			services
 				.users
-				.set_avatar_url(&body.user_id, response.avatar_url.clone());
+				.set_avatar_url(&body.user_id, response.avatar_url.as_deref());
 			services
 				.users
-				.set_blurhash(&body.user_id, response.blurhash.clone());
+				.set_blurhash(&body.user_id, response.blurhash.as_deref());
 
 			return Ok(get_display_name::v3::Response { displayname: response.displayname });
 		}
@@ -140,8 +140,8 @@ pub(crate) async fn set_avatar_url_route(
 		.users
 		.update_avatar_url(
 			&body.user_id,
-			body.avatar_url.clone(),
-			body.blurhash.clone(),
+			body.avatar_url.as_deref(),
+			body.blurhash.as_deref(),
 			&all_joined_rooms,
 		)
 		.await;
@@ -188,13 +188,13 @@ pub(crate) async fn get_avatar_url_route(
 
 			services
 				.users
-				.set_displayname(&body.user_id, response.displayname.clone());
+				.set_displayname(&body.user_id, response.displayname.as_deref());
 			services
 				.users
-				.set_avatar_url(&body.user_id, response.avatar_url.clone());
+				.set_avatar_url(&body.user_id, response.avatar_url.as_deref());
 			services
 				.users
-				.set_blurhash(&body.user_id, response.blurhash.clone());
+				.set_blurhash(&body.user_id, response.blurhash.as_deref());
 
 			return Ok(get_avatar_url::v3::Response {
 				avatar_url: response.avatar_url,
@@ -250,22 +250,22 @@ pub(crate) async fn get_profile_route(
 
 			services
 				.users
-				.set_displayname(&body.user_id, response.displayname.clone());
+				.set_displayname(&body.user_id, response.displayname.as_deref());
 			services
 				.users
-				.set_avatar_url(&body.user_id, response.avatar_url.clone());
+				.set_avatar_url(&body.user_id, response.avatar_url.as_deref());
 			services
 				.users
-				.set_blurhash(&body.user_id, response.blurhash.clone());
+				.set_blurhash(&body.user_id, response.blurhash.as_deref());
 			services
 				.users
-				.set_timezone(&body.user_id, response.tz.clone());
+				.set_timezone(&body.user_id, response.tz.as_deref());
 
 			for (profile_key, profile_key_value) in &response.custom_profile_fields {
 				services.users.set_profile_key(
 					&body.user_id,
 					profile_key,
-					Some(profile_key_value.clone()),
+					Some(profile_key_value),
 				);
 			}
 
