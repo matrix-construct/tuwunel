@@ -13,8 +13,6 @@ pub(crate) enum UsersCommand {
 
 	IterUsers,
 
-	IterUsers2,
-
 	PasswordHash {
 		user_id: OwnedUserId,
 	},
@@ -254,22 +252,6 @@ async fn iter_users(&self) -> Result {
 	let query_time = timer.elapsed();
 
 	self.write_str(&format!("Query completed in {query_time:?}:\n\n```rs\n{result:#?}\n```"))
-		.await
-}
-
-#[admin_command]
-async fn iter_users2(&self) -> Result {
-	let timer = tokio::time::Instant::now();
-	let result: Vec<_> = self.services.users.stream().collect().await;
-	let result: Vec<_> = result
-		.into_iter()
-		.map(ruma::UserId::as_bytes)
-		.map(String::from_utf8_lossy)
-		.collect();
-
-	let query_time = timer.elapsed();
-
-	self.write_str(&format!("Query completed in {query_time:?}:\n\n```rs\n{result:?}\n```"))
 		.await
 }
 
