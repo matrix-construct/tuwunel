@@ -7,7 +7,7 @@ use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD as b64};
 use futures::{FutureExt, StreamExt, TryFutureExt, future::try_join};
 use reqwest::header::{CONTENT_TYPE, HeaderValue};
 use ruma::{
-	Mxc, OwnedRoomId, OwnedUserId, ServerName, UserId,
+	Mxc, OwnedMxcUri, OwnedRoomId, OwnedUserId, ServerName, UserId,
 	api::client::session::{sso_callback, sso_login, sso_login_with_provider},
 };
 use serde::{Deserialize, Serialize};
@@ -556,10 +556,10 @@ async fn set_avatar(
 		.collect()
 		.await;
 
-	let mxc_uri = mxc.to_string().into();
+	let mxc_uri: OwnedMxcUri = mxc.to_string().into();
 	services
 		.users
-		.update_avatar_url(user_id, Some(mxc_uri), None, &all_joined_rooms)
+		.update_avatar_url(user_id, Some(&mxc_uri), None, &all_joined_rooms)
 		.await;
 
 	Ok(())

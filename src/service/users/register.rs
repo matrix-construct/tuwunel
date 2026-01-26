@@ -86,7 +86,7 @@ pub async fn full_register(
 
 		self.services
 			.users
-			.set_displayname(user_id, Some(displayname));
+			.set_displayname(user_id, Some(&displayname));
 	}
 
 	// Initial account data

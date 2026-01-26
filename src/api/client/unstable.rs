@@ -16,7 +16,7 @@ use ruma::{
 	},
 	presence::PresenceState,
 };
-use tuwunel_core::{Err, Error, Result};
+use tuwunel_core::{Err, Error, Result, err};
 
 use crate::Ruma;
 
@@ -99,7 +99,7 @@ pub(crate) async fn set_timezone_key_route(
 
 	services
 		.users
-		.set_timezone(&body.user_id, body.tz.clone());
+		.set_timezone(&body.user_id, body.tz.as_deref());
 
 	// Presence update
 	services
@@ -129,42 +129,40 @@ pub(crate) async fn set_profile_field_route(
 		return Err!(Request(BadJson("Key names cannot be longer than 128 bytes")));
 	}
 
-	if body.value.field_name() == ProfileFieldName::DisplayName {
-		let all_joined_rooms: Vec<OwnedRoomId> = services
-			.state_cache
-			.rooms_joined(&body.user_id)
-			.map(Into::into)
-			.collect()
-			.await;
+	match &body.value {
+		| ProfileFieldValue::DisplayName(displayname) => {
+			let all_joined_rooms: Vec<OwnedRoomId> = services
+				.state_cache
+				.rooms_joined(&body.user_id)
+				.map(Into::into)
+				.collect()
+				.await;
 
-		services
-			.users
-			.update_displayname(
+			services
+				.users
+				.update_displayname(&body.user_id, Some(displayname), &all_joined_rooms)
+				.await;
+		},
+		| ProfileFieldValue::AvatarUrl(avatar_url) => {
+			let all_joined_rooms: Vec<OwnedRoomId> = services
+				.state_cache
+				.rooms_joined(&body.user_id)
+				.map(Into::into)
+				.collect()
+				.await;
+
+			services
+				.users
+				.update_avatar_url(&body.user_id, Some(avatar_url), None, &all_joined_rooms)
+				.await;
+		},
+		| _ => {
+			services.users.set_profile_key(
 				&body.user_id,
-				Some(body.value.value().to_string()),
-				&all_joined_rooms,
-			)
-			.await;
-	} else if body.value.field_name() == ProfileFieldName::AvatarUrl {
-		let mxc = ruma::OwnedMxcUri::from(body.value.value().to_string());
-
-		let all_joined_rooms: Vec<OwnedRoomId> = services
-			.state_cache
-			.rooms_joined(&body.user_id)
-			.map(Into::into)
-			.collect()
-			.await;
-
-		services
-			.users
-			.update_avatar_url(&body.user_id, Some(mxc), None, &all_joined_rooms)
-			.await;
-	} else {
-		services.users.set_profile_key(
-			&body.user_id,
-			body.value.field_name().as_str(),
-			Some(body.value.value().into_owned()),
-		);
+				body.value.field_name().as_str(),
+				Some(&body.value.value()),
+			);
+		},
 	}
 
 	// Presence update
@@ -191,34 +189,38 @@ pub(crate) async fn delete_profile_field_route(
 		return Err!(Request(Forbidden("You cannot update the profile of another user")));
 	}
 
-	if body.field == ProfileFieldName::DisplayName {
-		let all_joined_rooms: Vec<OwnedRoomId> = services
-			.state_cache
-			.rooms_joined(&body.user_id)
-			.map(Into::into)
-			.collect()
-			.await;
+	match body.field {
+		| ProfileFieldName::DisplayName => {
+			let all_joined_rooms: Vec<OwnedRoomId> = services
+				.state_cache
+				.rooms_joined(&body.user_id)
+				.map(Into::into)
+				.collect()
+				.await;
 
-		services
-			.users
-			.update_displayname(&body.user_id, None, &all_joined_rooms)
-			.await;
-	} else if body.field == ProfileFieldName::AvatarUrl {
-		let all_joined_rooms: Vec<OwnedRoomId> = services
-			.state_cache
-			.rooms_joined(&body.user_id)
-			.map(Into::into)
-			.collect()
-			.await;
+			services
+				.users
+				.update_displayname(&body.user_id, None, &all_joined_rooms)
+				.await;
+		},
+		| ProfileFieldName::AvatarUrl => {
+			let all_joined_rooms: Vec<OwnedRoomId> = services
+				.state_cache
+				.rooms_joined(&body.user_id)
+				.map(Into::into)
+				.collect()
+				.await;
 
-		services
-			.users
-			.update_avatar_url(&body.user_id, None, None, &all_joined_rooms)
-			.await;
-	} else {
-		services
-			.users
-			.set_profile_key(&body.user_id, body.field.as_str(), None);
+			services
+				.users
+				.update_avatar_url(&body.user_id, None, None, &all_joined_rooms)
+				.await;
+		},
+		| _ => {
+			services
+				.users
+				.set_profile_key(&body.user_id, body.field.as_str(), None);
+		},
 	}
 
 	// Presence update
@@ -262,19 +264,19 @@ pub(crate) async fn get_timezone_key_route(
 
 			services
 				.users
-				.set_displayname(&body.user_id, response.displayname.clone());
+				.set_displayname(&body.user_id, response.displayname.as_deref());
 
 			services
 				.users
-				.set_avatar_url(&body.user_id, response.avatar_url.clone());
+				.set_avatar_url(&body.user_id, response.avatar_url.as_deref());
 
 			services
 				.users
-				.set_blurhash(&body.user_id, response.blurhash.clone());
+				.set_blurhash(&body.user_id, response.blurhash.as_deref());
 
 			services
 				.users
-				.set_timezone(&body.user_id, response.tz.clone());
+				.set_timezone(&body.user_id, response.tz.as_deref());
 
 			return Ok(get_timezone_key::unstable::Response { tz: response.tz });
 		}
@@ -323,43 +325,34 @@ pub(crate) async fn get_profile_field_route(
 
 			services
 				.users
-				.set_displayname(&body.user_id, response.displayname.clone());
+				.set_displayname(&body.user_id, response.displayname.as_deref());
 
 			services
 				.users
-				.set_avatar_url(&body.user_id, response.avatar_url.clone());
+				.set_avatar_url(&body.user_id, response.avatar_url.as_deref());
 
 			services
 				.users
-				.set_blurhash(&body.user_id, response.blurhash.clone());
+				.set_blurhash(&body.user_id, response.blurhash.as_deref());
 
 			services
 				.users
-				.set_timezone(&body.user_id, response.tz.clone());
+				.set_timezone(&body.user_id, response.tz.as_deref());
 
-			let profile_key_value: Option<ProfileFieldValue> = match response
+			let value = response
 				.custom_profile_fields
 				.get(body.field.as_str())
-			{
-				| Some(value) => {
-					services.users.set_profile_key(
-						&body.user_id,
-						body.field.as_str(),
-						Some(value.clone()),
-					);
+				.ok_or_else(|| {
+					err!(Request(NotFound("The requested profile key does not exist.")))
+				})?;
 
-					Some(ProfileFieldValue::new(body.field.as_str(), value.clone())?)
-				},
-				| _ => {
-					return Err!(Request(NotFound("The requested profile key does not exist.")));
-				},
-			};
+			services
+				.users
+				.set_profile_key(&body.user_id, body.field.as_str(), Some(value));
 
-			if profile_key_value.is_none() {
-				return Err!(Request(NotFound("The requested profile key does not exist.")));
-			}
+			let profile_key_value = ProfileFieldValue::new(body.field.as_str(), value.clone())?;
 
-			return Ok(get_profile_field::v3::Response { value: profile_key_value });
+			return Ok(get_profile_field::v3::Response { value: Some(profile_key_value) });
 		}
 	}
 
@@ -369,20 +362,13 @@ pub(crate) async fn get_profile_field_route(
 		return Err!(Request(NotFound("Profile was not found.")));
 	}
 
-	let profile_key_value: Option<ProfileFieldValue> = match services
+	let value = services
 		.users
 		.profile_key(&body.user_id, body.field.as_str())
 		.await
-	{
-		| Ok(value) => Some(ProfileFieldValue::new(body.field.as_str(), value)?),
-		| _ => {
-			return Err!(Request(NotFound("The requested profile key does not exist.")));
-		},
-	};
+		.map_err(|_| err!(Request(NotFound("The requested profile key does not exist."))))?;
 
-	if profile_key_value.is_none() {
-		return Err!(Request(NotFound("The requested profile key does not exist.")));
-	}
+	let profile_key_value = ProfileFieldValue::new(body.field.as_str(), value)?;
 
-	Ok(get_profile_field::v3::Response { value: profile_key_value })
+	Ok(get_profile_field::v3::Response { value: Some(profile_key_value) })
 }
