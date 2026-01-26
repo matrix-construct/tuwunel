@@ -3,7 +3,6 @@ use tuwunel_core::Result;
 
 use crate::{
 	appservice::{self, AppserviceCommand},
-	check::{self, CheckCommand},
 	context::Context,
 	debug::{self, DebugCommand},
 	federation::{self, FederationCommand},
@@ -43,10 +42,6 @@ pub(super) enum AdminCommand {
 	Media(MediaCommand),
 
 	#[command(subcommand)]
-	/// - Commands for checking integrity
-	Check(CheckCommand),
-
-	#[command(subcommand)]
 	/// - Commands for debugging things
 	Debug(DebugCommand),
 
@@ -72,7 +67,6 @@ pub(super) async fn process(command: AdminCommand, context: &Context<'_>) -> Res
 		| Server(command) => server::process(command, context).await,
 		| Debug(command) => debug::process(command, context).await,
 		| Query(command) => query::process(command, context).await,
-		| Check(command) => check::process(command, context).await,
 		| Token(command) => token::process(command, context).await,
 	}
 }
