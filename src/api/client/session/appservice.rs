@@ -5,7 +5,7 @@ use ruma::{
 		uiaa,
 	},
 };
-use tuwunel_core::{Err, Result, err};
+use tuwunel_core::{Err, Result, err, extract};
 use tuwunel_service::Services;
 
 use crate::Ruma;
@@ -22,17 +22,17 @@ pub(super) fn handle_login(
 		return Err!(Request(MissingToken("Missing appservice token.")));
 	};
 
-	let user_id = if let Some(uiaa::UserIdentifier::UserIdOrLocalpart(user_id)) = identifier {
-		UserId::parse_with_server_name(user_id, &services.config.server_name)
-	} else if let Some(user) = user {
-		UserId::parse_with_server_name(user, &services.config.server_name)
-	} else {
-		return Err!(Request(Unknown(debug_warn!(
-			?body.login_info,
-			"Valid identifier or username was not provided (invalid or unsupported login type?)"
-		))));
-	}
-	.map_err(|e| err!(Request(InvalidUsername(warn!("Username is invalid: {e}")))))?;
+	let user_id = extract!(identifier, x in Some(uiaa::UserIdentifier::UserIdOrLocalpart(x)))
+		.or(user.as_ref())
+		.ok_or_else(|| {
+			err!(Request(Unknown(debug_warn!(
+				?body.login_info,
+				"Valid identifier or username was not provided (invalid or unsupported login type?)"
+			))))
+		})?;
+
+	let user_id = UserId::parse_with_server_name(user_id, &services.config.server_name)
+		.map_err(|e| err!(Request(InvalidUsername(warn!("Username is invalid: {e}")))))?;
 
 	if !services.globals.user_is_local(&user_id) {
 		return Err!(Request(Unknown("User ID does not belong to this homeserver")));
