@@ -68,7 +68,7 @@ keys:
 type = "livekit"
 livekit_service_url = "https://matrix-rtc.yourdomain.com"
 ```
-4. Close the file.
+3. Close the file.
 
 #### 3.2. .well-known served independently
 ***Follow this step if you serve your .well-known/matrix files directly. Otherwise follow Step 3.1***
