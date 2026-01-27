@@ -21,7 +21,7 @@ pub struct Register<'a> {
 ///
 /// Returns a device id and access token for the registered user
 #[implement(super::Service)]
-#[tracing::instrument(level = "info", skip(self))]
+#[tracing::instrument(level = "info", skip(self, password))]
 pub async fn full_register(
 	&self,
 	Register {
