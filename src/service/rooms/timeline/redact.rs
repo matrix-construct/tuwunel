@@ -4,7 +4,7 @@ use ruma::{
 };
 use tuwunel_core::{Result, err, implement, matrix::event::Event};
 
-use crate::rooms::short::ShortRoomId;
+use crate::rooms::{short::ShortRoomId, timeline::RoomMutexGuard};
 
 /// Replace a PDU with the redacted form.
 #[implement(super::Service)]
@@ -14,6 +14,7 @@ pub async fn redact_pdu<Pdu: Event + Send + Sync>(
 	event_id: &EventId,
 	reason: &Pdu,
 	shortroomid: ShortRoomId,
+	state_lock: &RoomMutexGuard,
 ) -> Result {
 	let Ok(pdu_id) = self.get_pdu_id(event_id).await else {
 		// If event does not exist, just noop
@@ -30,7 +31,8 @@ pub async fn redact_pdu<Pdu: Event + Send + Sync>(
 
 	self.services
 		.retention
-		.save_original_pdu(event_id, &pdu);
+		.save_original_pdu(event_id, &pdu, state_lock)
+		.await;
 
 	let body = pdu["content"]
 		.as_object()

@@ -10,6 +10,8 @@ use tuwunel_core::{
 };
 use tuwunel_database::{Deserialized, Json, Map};
 
+use crate::rooms::timeline::RoomMutexGuard;
+
 pub struct Service {
 	services: Arc<crate::services::OnceServices>,
 	eventid_originalpdu: Arc<Map>,
@@ -83,8 +85,22 @@ pub async fn get_original_pdu_json(&self, event_id: &EventId) -> Result<Canonica
 }
 
 #[implement(Service)]
-pub fn save_original_pdu(&self, event_id: &EventId, pdu: &CanonicalJsonObject) {
+pub async fn save_original_pdu(
+	&self,
+	event_id: &EventId,
+	pdu: &CanonicalJsonObject,
+	_state_lock: &RoomMutexGuard,
+) {
 	if !self.services.config.save_unredacted_events {
+		return;
+	}
+
+	if self
+		.eventid_originalpdu
+		.exists(event_id)
+		.await
+		.is_ok()
+	{
 		return;
 	}
 

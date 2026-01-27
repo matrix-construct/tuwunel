@@ -184,7 +184,7 @@ where
 		.log_err()
 		.ok();
 
-	self.append_pdu_effects(pdu_id, pdu, shortroomid, count)
+	self.append_pdu_effects(pdu_id, pdu, shortroomid, count, state_lock)
 		.await?;
 
 	drop(next_count1);
@@ -207,6 +207,7 @@ async fn append_pdu_effects(
 	pdu: &PduEvent,
 	shortroomid: ShortRoomId,
 	count: PduCount,
+	state_lock: &RoomMutexGuard,
 ) -> Result {
 	match *pdu.kind() {
 		| TimelineEventType::RoomRedaction => {
@@ -233,7 +234,7 @@ async fn append_pdu_effects(
 					.user_can_redact(redact_id, pdu.sender(), pdu.room_id(), false)
 					.await?
 			{
-				self.redact_pdu(redact_id, pdu, shortroomid)
+				self.redact_pdu(redact_id, pdu, shortroomid, state_lock)
 					.await?;
 			}
 		},
