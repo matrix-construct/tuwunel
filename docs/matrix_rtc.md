@@ -20,7 +20,7 @@ services:
     container_name: matrix-rtc-jwt
     environment:
       - LIVEKIT_JWT_PORT=8081
-      - LIVEKIT_URL=https://matrix-rtc.yourdomain.com/livekit/sfu
+      - LIVEKIT_URL=https://matrix-rtc.yourdomain.com
       - LIVEKIT_KEY=mrtckey
       - LIVEKIT_SECRET=mrtcsecret
       - LIVEKIT_FULL_ACCESS_HOMESERVERS=yourdomain.com
@@ -167,7 +167,7 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
     # livekit
-    location /livekit/sfu/ {
+    location / {
        proxy_pass http://localhost:7880;
        proxy_http_version 1.1;
 
@@ -183,11 +183,6 @@ server {
         # Optional timeouts per LiveKit
         proxy_read_timeout 300s;
         proxy_send_timeout 300s;
-    }
-
-    # Redirect root / at /livekit/sfu/
-    location = / {
-        return 301 /livekit/sfu/;
     }
 }
 ```
