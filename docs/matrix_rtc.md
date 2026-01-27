@@ -202,34 +202,20 @@ min-port=50201
 max-port=65535
 ```
 
-If you have Coturn configured, you can use it as a TURN server for Livekit to improve call reliability. Unfortunately, Livekit does not support using static-auth-secret to authenticate with TURN servers, and you cannot combine credential and auth-secret authentication. Luckily, it is possible to use multiple instances of `static-auth-secret` within you `turnserver.conf`, and you can generate a username and password from the secret as a workaround.
+If you have Coturn configured, you can use it as a TURN server for Livekit to improve call reliability. As Coturn allows multiple instances of `static-auth-secret`, it is suggested that the secret used for Livekit is different to that used for tuwunel.
 
-1. To create a credential for use with Livekit and Coturn, run the following command. AUTH_SECRET should be replaced with a 64 digit alphanumeric string. For more information on the command see [this post](https://wiki.lenuagemagique.com/doku.php?id=unable_to_use_lt-cred-mech_webrtc_and_static-auth-secret_restapi_at_the_same_time).
-```
-secret=AUTH_SECRET && \
-time=$(date +%s) && \
-expiry=8640000 && \
-username=$(( $time + $expiry )) && \
-echo username: $username && \
-echo password: $(echo -n $username | openssl dgst -binary -sha1 -hmac $secret | openssl base64)
-```
-This should produce output in the following format:
-```
-username: USERNAME
-password: PASSWORD
-```
-2. Add the following line to the end of your `turnserver.conf`. AUTH_SECRET is the same as that used in Step 1.
+1. Create a secret for Coturn. It is suggested that this should be a random 64 character alphanumeric string.
+3. Add the following line to the end of your `turnserver.conf`. `AUTH_SECRET` is the secret created in Step 1.
 ```
 static-auth-secret=AUTH_SECRET
 ```
-3. Add the following to the end of the `rtc` block in your `livekit.yaml`. USERNAME and PASSWORD should be replaced with the corresponding values in the output of Step 1. `turn.yourdomain.com` should be replaced with your actual turn domain.
+3. Add the following to the end of the `rtc` block in your `livekit.yaml`. `AUTH_SECRET` is the same as above. `turn.yourdomain.com` should be replaced with your actual TURN domain.
 ```
   turn_servers:
     - host: turn.yourdomain.com
       port: 5349
       protocol: tls
-      username: "USERNAME"
-      credential: "PASSWORD"
+      secret: "AUTH_SECRET"
 ```
 
 ### Using the Livekit Built In TURN Server
