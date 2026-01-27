@@ -20,7 +20,7 @@ services:
     container_name: matrix-rtc-jwt
     environment:
       - LIVEKIT_JWT_PORT=8081
-      - LIVEKIT_URL=https://matrix-rtc.yourdomain.com
+      - LIVEKIT_URL=wss://matrix-rtc.yourdomain.com
       - LIVEKIT_KEY=mrtckey
       - LIVEKIT_SECRET=mrtcsecret
       - LIVEKIT_FULL_ACCESS_HOMESERVERS=yourdomain.com
