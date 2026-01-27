@@ -205,7 +205,7 @@ max-port=65535
 If you have Coturn configured, you can use it as a TURN server for Livekit to improve call reliability. As Coturn allows multiple instances of `static-auth-secret`, it is suggested that the secret used for Livekit is different to that used for tuwunel.
 
 1. Create a secret for Coturn. It is suggested that this should be a random 64 character alphanumeric string.
-3. Add the following line to the end of your `turnserver.conf`. `AUTH_SECRET` is the secret created in Step 1.
+2. Add the following line to the end of your `turnserver.conf`. `AUTH_SECRET` is the secret created in Step 1.
 ```
 static-auth-secret=AUTH_SECRET
 ```
