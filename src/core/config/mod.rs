@@ -2000,10 +2000,10 @@ pub struct Config {
 
 	/// Redaction retention period in seconds.
 	///
-	/// By default the unredacted events are stored forever.
+	/// By default the unredacted events are stored for one year.
 	///
-	/// default: disabled
-	#[serde(default)]
+	/// default: 31536000
+	#[serde(default = "default_redaction_retention_seconds")]
 	pub redaction_retention_seconds: u64,
 
 	/// Allows users with `redact` power level to request unredacted events with
@@ -3307,3 +3307,5 @@ fn default_max_make_join_attempts_per_join_attempt() -> usize { 48 }
 fn default_max_join_attempts_per_join_request() -> usize { 3 }
 
 fn default_sso_grant_session_duration() -> Option<u64> { Some(300) }
+
+fn default_redaction_retention_seconds() -> u64 { 31_536_000 }

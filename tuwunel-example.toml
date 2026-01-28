@@ -1721,9 +1721,9 @@
 
 # Redaction retention period in seconds.
 #
-# By default the unredacted events are stored forever.
+# By default the unredacted events are stored for one year.
 #
-#redaction_retention_seconds = disabled
+#redaction_retention_seconds = 31536000
 
 # Allows users with `redact` power level to request unredacted events with
 # MSC2815.
