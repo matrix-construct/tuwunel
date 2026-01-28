@@ -9,7 +9,7 @@
 , rocksdb
 , removeReferencesTo
 , rust
-, rust-jemalloc-sys
+, rust-jemalloc-sys-unprefixed
 , stdenv
 
 # Options (keep sorted)
@@ -62,7 +62,7 @@ enableLiburing = featureEnabled "io_uring" && !stdenv.hostPlatform.isDarwin;
 # own. In order for this to work, we need to set flags on the build that match
 # whatever flags tikv-jemalloc-sys was going to use. These are dependent on
 # which features we enable in tikv-jemalloc-sys.
-rust-jemalloc-sys' = (rust-jemalloc-sys.override {
+rust-jemalloc-sys' = (rust-jemalloc-sys-unprefixed.override {
   # tikv-jemalloc-sys/unprefixed_malloc_on_supported_platforms feature
   unprefixed = true;
 }).overrideAttrs (old: {
@@ -171,15 +171,12 @@ commonAttrs = {
     dontStrip = profile == "dev" || profile == "test";
     dontPatchELF = profile == "dev" || profile == "test";
 
-    buildInputs = lib.optional (featureEnabled "jemalloc") rust-jemalloc-sys'
+    buildInputs = lib.optional (featureEnabled "jemalloc") rust-jemalloc-sys-unprefixed
     # needed to build Rust applications on macOS
     ++ lib.optionals stdenv.hostPlatform.isDarwin [
         # https://github.com/NixOS/nixpkgs/issues/206242
         # ld: library not found for -liconv
         libiconv
-        # https://stackoverflow.com/questions/69869574/properly-adding-darwin-apple-sdk-to-a-nix-shell
-        # https://discourse.nixos.org/t/compile-a-rust-binary-on-macos-dbcrossbar/8612
-        pkgsBuildHost.darwin.apple_sdk.frameworks.Security
       ];
 
     nativeBuildInputs = [
