@@ -905,7 +905,7 @@ pub(super) async fn last_active(&self, limit: Option<usize>) -> Result {
 		.ready_filter(|(ts, _)| ts.get() > uint!(0))
 		.collect::<Vec<_>>()
 		.map(|mut vec| {
-			vec.sort_by(|a, b| b.0.cmp(&a.0));
+			vec.sort_by_key(|k| cmp::Reverse(k.0));
 			vec
 		})
 		.map(Vec::into_iter)

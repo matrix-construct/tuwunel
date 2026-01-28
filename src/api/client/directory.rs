@@ -1,3 +1,5 @@
+use std::cmp;
+
 use axum::extract::State;
 use axum_client_ip::InsecureClientIp;
 use futures::{
@@ -328,7 +330,7 @@ pub(crate) async fn get_public_rooms_filtered_helper(
 		.collect()
 		.await;
 
-	all_rooms.sort_by(|l, r| r.num_joined_members.cmp(&l.num_joined_members));
+	all_rooms.sort_by_key(|r| cmp::Reverse(r.num_joined_members));
 
 	let total_room_count_estimate = UInt::try_from(all_rooms.len())
 		.unwrap_or_else(|_| uint!(0))
