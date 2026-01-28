@@ -1,6 +1,7 @@
 #![recursion_limit = "256"]
 #![type_length_limit = "98304"]
 #![expect(refining_impl_trait)]
+#![expect(clippy::duration_suboptimal_units)] // remove after MSRV 1.91
 
 mod manager;
 mod migrations;

@@ -1,4 +1,5 @@
 #![type_length_limit = "4096"] //TODO: reduce me
+#![expect(clippy::duration_suboptimal_units)] // remove after MSRV 1.91
 
 pub mod args;
 pub mod logging;
