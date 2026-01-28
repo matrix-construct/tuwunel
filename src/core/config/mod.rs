@@ -1995,7 +1995,7 @@ pub struct Config {
 	/// They can be retrieved with `admin debug get-retained-pdu` or MSC2815.
 	///
 	/// default: true
-	#[serde(default)]
+	#[serde(default = "true_fn")]
 	pub save_unredacted_events: bool,
 
 	/// Redaction retention period in seconds.
