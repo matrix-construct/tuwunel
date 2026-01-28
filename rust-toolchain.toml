@@ -9,7 +9,7 @@
 # If you're having trouble making the relevant changes, bug a maintainer.
 
 [toolchain]
-channel = "1.89.0"
+channel = "1.91.1"
 profile = "minimal"
 components = [
     # For rust-analyzer
