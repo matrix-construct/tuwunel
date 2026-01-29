@@ -9,6 +9,7 @@
 , rocksdb
 , removeReferencesTo
 , rust
+, autoPatchelfHook
 , rust-jemalloc-sys-unprefixed
 , stdenv
 
@@ -62,11 +63,10 @@ enableLiburing = featureEnabled "io_uring" && !stdenv.hostPlatform.isDarwin;
 # own. In order for this to work, we need to set flags on the build that match
 # whatever flags tikv-jemalloc-sys was going to use. These are dependent on
 # which features we enable in tikv-jemalloc-sys.
-rust-jemalloc-sys' = (rust-jemalloc-sys-unprefixed.override {
+rust-jemalloc-sys' =
   # tikv-jemalloc-sys/unprefixed_malloc_on_supported_platforms feature
-  unprefixed = true;
-}).overrideAttrs (old: {
-  configureFlags = old.configureFlags ++
+  rust-jemalloc-sys-unprefixed
+.overrideAttrs (old: { configureFlags = old.configureFlags ++
     # we dont need docs
     [ "--disable-doc" ] ++
     # we dont need cxx/C++ integration
@@ -77,45 +77,43 @@ rust-jemalloc-sys' = (rust-jemalloc-sys-unprefixed.override {
     (if (featureEnabled "jemalloc_stats") then [ "--enable-stats" ] else [ "--disable-stats" ]);
 });
 
-buildDepsOnlyEnv =
-  let
-    rocksdb' = (rocksdb.override {
-      jemalloc = lib.optional (featureEnabled "jemalloc") rust-jemalloc-sys';
-      # rocksdb fails to build with prefixed jemalloc, which is required on
-      # darwin due to [1]. In this case, fall back to building rocksdb with
-      # libc malloc. This should not cause conflicts, because all of the
-      # jemalloc symbols are prefixed.
-      #
-      # [1]: https://github.com/tikv/jemallocator/blob/ab0676d77e81268cd09b059260c75b38dbef2d51/jemalloc-sys/src/env.rs#L17
-      enableJemalloc = featureEnabled "jemalloc" && !stdenv.hostPlatform.isDarwin;
+rocksdb' = (rocksdb.override {
+  jemalloc = lib.optional (featureEnabled "jemalloc") rust-jemalloc-sys';
+  # rocksdb fails to build with prefixed jemalloc, which is required on
+  # darwin due to [1]. In this case, fall back to building rocksdb with
+  # libc malloc. This should not cause conflicts, because all of the
+  # jemalloc symbols are prefixed.
+  #
+  # [1]: https://github.com/tikv/jemallocator/blob/ab0676d77e81268cd09b059260c75b38dbef2d51/jemalloc-sys/src/env.rs#L17
+  enableJemalloc = featureEnabled "jemalloc" && !stdenv.hostPlatform.isDarwin;
 
-      # for some reason enableLiburing in nixpkgs rocksdb is default true
-      # which breaks Darwin entirely
-      enableLiburing = enableLiburing;
-    }).overrideAttrs (old: {
-      enableLiburing = enableLiburing;
-      cmakeFlags = (if x86_64_haswell_target_optimised then (lib.subtractLists [
-        # dont make a portable build if x86_64_haswell_target_optimised is enabled
-        "-DPORTABLE=1"
-      ] old.cmakeFlags
-      ++ [ "-DPORTABLE=haswell" ]) else ([ "-DPORTABLE=1" ])
-      )
-      ++ old.cmakeFlags;
+  # for some reason enableLiburing in nixpkgs rocksdb is default true
+  # which breaks Darwin entirely
+  enableLiburing = enableLiburing;
+}).overrideAttrs (old: {
+  enableLiburing = enableLiburing;
+  cmakeFlags = (if x86_64_haswell_target_optimised then (lib.subtractLists [
+    # dont make a portable build if x86_64_haswell_target_optimised is enabled
+    "-DPORTABLE=1"
+  ] old.cmakeFlags
+  ++ [ "-DPORTABLE=haswell" ]) else ([ "-DPORTABLE=1" ])
+  )
+  ++ old.cmakeFlags;
 
-      # outputs has "tools" which we dont need or use
-      outputs = [ "out" ];
+  # outputs has "tools" which we dont need or use
+  outputs = [ "out" ];
 
-      # preInstall hooks has stuff for messing with ldb/sst_dump which we dont need or use
-      preInstall = "";
-    });
-  in
-  {
-    # https://crane.dev/faq/rebuilds-bindgen.html
-    NIX_OUTPATH_USED_AS_RANDOM_SEED = "aaaaaaaaaa";
+  # preInstall hooks has stuff for messing with ldb/sst_dump which we dont need or use
+  preInstall = "";
+});
 
-    CARGO_PROFILE = profile;
-    ROCKSDB_INCLUDE_DIR = "${rocksdb'}/include";
-    ROCKSDB_LIB_DIR = "${rocksdb'}/lib";
+buildDepsOnlyEnv = {
+  # https://crane.dev/faq/rebuilds-bindgen.html
+  NIX_OUTPATH_USED_AS_RANDOM_SEED = "aaaaaaaaaa";
+
+  CARGO_PROFILE = profile;
+  ROCKSDB_INCLUDE_DIR = "${rocksdb'}/include";
+  ROCKSDB_LIB_DIR = "${rocksdb'}/lib";
   }
   //
   (import ./cross-compilation-env.nix {
@@ -194,14 +192,23 @@ commonAttrs = {
  };
 in
 
-craneLib.buildPackage ( commonAttrs // {
+craneLib.buildPackage ( commonAttrs // rec {
   cargoArtifacts = craneLib.buildDepsOnly (commonAttrs // {
     env = buildDepsOnlyEnv;
   });
 
+  buildInputs = (commonAttrs.buildInputs or []) ++ [
+    rocksdb'
+  ];
+
+  nativeBuildInputs = (commonAttrs.nativeBuildInputs or []) ++ [
+    autoPatchelfHook
+  ];
+
   nativeCheckInputs = [
     pkgsBuildHost.libredirect.hook
   ];
+  LD_LIBRARY_PATH = lib.makeLibraryPath buildInputs;
 
   preCheck =
     let
