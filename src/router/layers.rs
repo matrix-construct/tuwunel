@@ -15,7 +15,6 @@ use tower_http::{
 	catch_panic::CatchPanicLayer,
 	cors::{AllowOrigin, CorsLayer},
 	sensitive_headers::SetSensitiveHeadersLayer,
-	set_header::SetResponseHeaderLayer,
 	timeout::{RequestBodyTimeoutLayer, ResponseBodyTimeoutLayer, TimeoutLayer},
 	trace::{DefaultOnFailure, DefaultOnRequest, DefaultOnResponse, TraceLayer},
 };
@@ -25,16 +24,6 @@ use tuwunel_core::{Result, Server, debug, error};
 use tuwunel_service::Services;
 
 use crate::{request, router};
-
-const TUWUNEL_CSP: &[&str; 5] = &[
-	"default-src 'none'",
-	"frame-ancestors 'none'",
-	"form-action 'none'",
-	"base-uri 'none'",
-	"sandbox",
-];
-
-const TUWUNEL_PERMISSIONS_POLICY: &[&str; 2] = &["interest-cohort=()", "browsing-topics=()"];
 
 pub(crate) fn build(services: &Arc<Services>) -> Result<(Router, Guard)> {
 	let server = &services.server;
@@ -71,31 +60,6 @@ pub(crate) fn build(services: &Arc<Services>) -> Result<(Router, Guard)> {
 		.layer(TimeoutLayer::with_status_code(
 			StatusCode::REQUEST_TIMEOUT,
 			Duration::from_secs(server.config.client_request_timeout),
-		))
-		.layer(SetResponseHeaderLayer::if_not_present(
-			// https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Origin-Agent-Cluster
-			HeaderName::from_static("origin-agent-cluster"),
-			HeaderValue::from_static("?1"),
-		))
-		.layer(SetResponseHeaderLayer::if_not_present(
-			header::X_CONTENT_TYPE_OPTIONS,
-			HeaderValue::from_static("nosniff"),
-		))
-		.layer(SetResponseHeaderLayer::if_not_present(
-			header::X_XSS_PROTECTION,
-			HeaderValue::from_static("0"),
-		))
-		.layer(SetResponseHeaderLayer::if_not_present(
-			header::X_FRAME_OPTIONS,
-			HeaderValue::from_static("DENY"),
-		))
-		.layer(SetResponseHeaderLayer::if_not_present(
-			HeaderName::from_static("permissions-policy"),
-			HeaderValue::from_str(&TUWUNEL_PERMISSIONS_POLICY.join(","))?,
-		))
-		.layer(SetResponseHeaderLayer::if_not_present(
-			header::CONTENT_SECURITY_POLICY,
-			HeaderValue::from_str(&TUWUNEL_CSP.join(";"))?,
 		))
 		.layer(cors_layer(server))
 		.layer(body_limit_layer(server))
