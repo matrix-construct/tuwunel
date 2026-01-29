@@ -2,6 +2,7 @@ use std::env::consts::OS;
 
 use either::Either;
 use figment::Figment;
+use itertools::Itertools;
 
 use super::{DEPRECATED_KEYS, IdentityProvider};
 use crate::{Config, Err, Result, Server, debug, debug_info, debug_warn, error, warn};
@@ -35,7 +36,7 @@ pub fn check(config: &Config) -> Result {
 	}
 
 	warn_deprecated(config);
-	warn_unknown_key(config);
+	warn_unknown_key(config)?;
 
 	if config.sentry && config.sentry_endpoint.is_none() {
 		return Err!(Config(
@@ -358,34 +359,47 @@ pub fn check(config: &Config) -> Result {
 /// deprecated key specified
 fn warn_deprecated(config: &Config) {
 	debug!("Checking for deprecated config keys");
-	let mut was_deprecated = false;
-	for key in config
+	let found_deprecated_keys = config
 		.catchall
 		.keys()
 		.filter(|key| DEPRECATED_KEYS.iter().any(|s| s == key))
-	{
-		warn!("Config parameter \"{}\" is deprecated, ignoring.", key);
-		was_deprecated = true;
-	}
+		.inspect(|key| warn!("Config parameter \"{key}\" is deprecated, ignoring."))
+		.next()
+		.is_some();
 
-	if was_deprecated {
+	if found_deprecated_keys {
 		warn!(
-			"Read tuwunel config documentation at https://tuwunel.chat/configuration.html and \
+			"Deprecated config keys were found. Read tuwunel config documentation at https://tuwunel.chat/configuration.html and \
 			 check your configuration if any new configuration parameters should be adjusted"
 		);
 	}
 }
 
-/// iterates over all the catchall keys (unknown config options) and warns
-/// if there are any.
-fn warn_unknown_key(config: &Config) {
+/// iterates over all the catchall keys (unknown config options) and warns or
+/// errors if there are any.
+fn warn_unknown_key(config: &Config) -> Result {
 	debug!("Checking for unknown config keys");
-	for key in config
+	let unknown_keys = config
 		.catchall
 		.keys()
-		.filter(|key| "config".to_owned().ne(key.to_owned()) /* "config" is expected */)
-	{
-		warn!("Config parameter \"{}\" is unknown to tuwunel, ignoring.", key);
+		.filter_map(|key| {
+			if key == "config" {
+				None
+			} else {
+				if config.error_on_unknown_config_opts {
+					error!("Config parameter \"{key}\" is unknown to tuwunel");
+				} else {
+					warn!("Config parameter \"{key}\" is unknown to tuwunel, ignoring.");
+				}
+				Some(key.as_str())
+			}
+		})
+		.collect_vec();
+
+	if !unknown_keys.is_empty() && config.error_on_unknown_config_opts {
+		Err!("Unknown config options were found: {unknown_keys:?}")
+	} else {
+		Ok(())
 	}
 }
 

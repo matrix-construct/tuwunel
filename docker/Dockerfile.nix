@@ -65,6 +65,7 @@ RUN \
             -- \
             -Otest='["smoke", "fresh"]' \
             -Oserver_name=\"localhost\" \
+            -Oerror_on_unknown_config_opts=true \
 EOF
 
 

@@ -35,6 +35,7 @@ COPY <<EOF tuwunel.toml
     allow_public_room_directory_without_auth = true
     allow_registration = true
     create_admin_room = false
+    error_on_unknown_config_opts = true
     ip_range_denylist = []
     log = "debug,tuwunel=trace,h2=warn,hyper=warn"
     log_colors = false

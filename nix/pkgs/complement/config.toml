@@ -6,6 +6,7 @@ allow_public_room_directory_over_federation = true
 allow_public_room_directory_without_auth = true
 allow_registration = true
 database_path = "/database"
+error_on_unknown_config_opts = true
 log = "trace,h2=debug,hyper=debug"
 port = [8008, 8448]
 trusted_servers = []

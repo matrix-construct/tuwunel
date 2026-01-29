@@ -146,6 +146,14 @@ pub struct Config {
 	#[serde(default = "default_unix_socket_perms")]
 	pub unix_socket_perms: u32,
 
+	/// Error on startup if any config option specified is unknown to Tuwunel.
+	///
+	/// This is false by default to allow easier deprecation or removal of
+	/// config options in the future without breaking existing deployments. The
+	/// default behaviour is to simply warn on startup.
+	#[serde(default)]
+	pub error_on_unknown_config_opts: bool,
+
 	/// tuwunel supports online database backups using RocksDB's Backup engine
 	/// API. To use this, set a database backup path that tuwunel can write
 	/// to.

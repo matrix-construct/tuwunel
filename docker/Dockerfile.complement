@@ -62,8 +62,8 @@ COPY <<EOF complement.toml
     database_path = "/database"
     dns_attempts = 20
     dns_timeout = 60
+    error_on_unknown_config_opts = true
     federation_idle_timeout = 300
-    intentionally_unknown_config_option_for_testing = true
     ip_range_denylist = []
     log = "debug,tuwunel=trace,h2=warn,hyper=warn"
     log_colors = false

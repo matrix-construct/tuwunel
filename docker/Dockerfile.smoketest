@@ -19,7 +19,8 @@ RUN <<EOF
     tuwunel \
         -Otest='["smoke"]' \
         -Oserver_name=\"localhost\" \
-        -Odatabase_path=\"${TUWUNEL_DATABASE_PATH}\"
+        -Odatabase_path=\"${TUWUNEL_DATABASE_PATH}\" \
+        -Oerror_on_unknown_config_opts=true
 
     rm -rf "${TUWUNEL_DATABASE_PATH}"
 EOF
@@ -44,7 +45,8 @@ RUN <<EOF
             -Otest='["smoke"]' \
             -Oserver_name=\"localhost\" \
             -Odatabase_path=\"${TUWUNEL_DATABASE_PATH}\" \
-            -Odb_pool_max_workers=${db_pool_max_workers}
+            -Odb_pool_max_workers=${db_pool_max_workers} \
+            -Oerror_on_unknown_config_opts=true
 
     rm -rf "${TUWUNEL_DATABASE_PATH}"
 EOF
@@ -62,7 +64,8 @@ RUN <<EOF
         tuwunel \
             -Otest='["smoke"]' \
             -Oserver_name=\"localhost\" \
-            -Odatabase_path=\"${TUWUNEL_DATABASE_PATH}\"
+            -Odatabase_path=\"${TUWUNEL_DATABASE_PATH}\" \
+            -Oerror_on_unknown_config_opts=true
 
     rm -rf "${TUWUNEL_DATABASE_PATH}"
 EOF
