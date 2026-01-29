@@ -68,9 +68,6 @@ on:
       complement_runner:
         type: string
         default: 'het'
-      complement_logs:
-        type: string
-        default: 'true'
       complement_verbose:
         type: string
         default: 'false'
@@ -428,8 +425,8 @@ jobs:
         name: complement_results-${{matrix.feat_set}}-${{matrix.sys_name}}-${{matrix.sys_target}}.jsonl
         path: ./tests/complement/results.jsonl
 
-    - if: inputs.complement_logs || (failure() && steps.execute.outcome == 'failure')
-      name: Upload Failure Output
+    - if: success() || (failure() && steps.execute.outcome == 'failure')
+      name: Upload Log Output
       id: upload-output
       uses: actions/upload-artifact@v4
       with:

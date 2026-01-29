@@ -126,7 +126,6 @@ jobs:
       enable_test_nix: ${{fromJSON(inputs.enable_test_nix || 'true')}}
       enable_test_rustsdk: ${{fromJSON(inputs.enable_test_rustsdk || 'true')}}
       enable_test_complement: ${{fromJSON(inputs.enable_test_complement || 'true')}}
-      complement_logs: ${{fromJSON(inputs.complement_logs || 'true')}}
       complement_verbose: ${{fromJSON(inputs.complement_verbose || 'false')}}
       complement_runner: 'het'
       enable_package: ${{fromJSON(inputs.enable_package || 'true')}}
@@ -293,7 +292,6 @@ jobs:
       enable_rustsdk: ${{needs.init.outputs.enable_test_rustsdk}}
       enable_complement: ${{needs.init.outputs.enable_test_complement}}
       complement_runner: ${{needs.init.outputs.complement_runner}}
-      complement_logs: ${{needs.init.outputs.complement_logs}}
       complement_verbose: ${{needs.init.outputs.complement_verbose}}
       cargo_profiles: ${{needs.init.outputs.cargo_profiles}}
       feat_sets: ${{needs.init.outputs.feat_sets}}

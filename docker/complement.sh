@@ -99,6 +99,7 @@ docker logs -f "$cid"
 docker wait "$cid" 2>/dev/null
 
 extract_results
+extract_output
 git diff -U0 --color --shortstat "$result_dst" | (grep "$run" || true)
 
 git diff --quiet --exit-code "$result_dst"
