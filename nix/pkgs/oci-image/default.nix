@@ -1,11 +1,12 @@
-{ inputs
+{
+  inputs,
 
-# Dependencies
-, dockerTools
-, lib
-, main
-, stdenv
-, tini
+  # Dependencies
+  dockerTools,
+  lib,
+  main,
+  stdenv,
+  tini,
 }:
 
 dockerTools.buildLayeredImage {
@@ -17,11 +18,18 @@ dockerTools.buildLayeredImage {
     main
   ];
   config = {
-    Entrypoint = if !stdenv.hostPlatform.isDarwin
+    Entrypoint =
+      if
+        !stdenv.hostPlatform.isDarwin
       # Use the `tini` init system so that signals (e.g. ctrl+c/SIGINT)
       # are handled as expected
-      then [ "${lib.getExe' tini "tini"}" "--" ]
-      else [];
+      then
+        [
+          "${lib.getExe' tini "tini"}"
+          "--"
+        ]
+      else
+        [ ];
     Cmd = [
       "${lib.getExe main}"
     ];
@@ -29,9 +37,10 @@ dockerTools.buildLayeredImage {
       "RUST_BACKTRACE=full"
     ];
     Labels = {
-      "org.opencontainers.image.authors" = "June Clementine Strawberry <june@girlboss.ceo> and Jason Volk
+      "org.opencontainers.image.authors" =
+        "June Clementine Strawberry <june@girlboss.ceo> and Jason Volk
       <jason@zemos.net>";
-      "org.opencontainers.image.created" ="@${toString inputs.self.lastModified}";
+      "org.opencontainers.image.created" = "@${toString inputs.self.lastModified}";
       "org.opencontainers.image.description" = "a very cool Matrix chat homeserver written in Rust";
       "org.opencontainers.image.documentation" = "https://conduwuit.puppyirl.gay/";
       "org.opencontainers.image.licenses" = "Apache-2.0";
