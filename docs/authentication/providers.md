@@ -5,19 +5,12 @@ configured provider appears as an option on the client's login page. Users are
 redirected to the provider to authenticate, then returned to Tuwunel which
 maps their identity to a Matrix account.
 
-## How it works
+### Provider guides
 
-1. The client fetches `/_matrix/client/v3/login` and finds an `m.login.sso`
-   entry listing configured providers.
-2. The user selects a provider; the client redirects to
-   `/_matrix/client/v3/login/sso/redirect/<client_id>`.
-3. Tuwunel redirects the user to the provider's authorization endpoint.
-4. The provider authenticates the user and redirects back to
-   `/_matrix/client/unstable/login/sso/callback/<client_id>`.
-5. Tuwunel exchanges the code for tokens, fetches user claims, maps them to a
-   Matrix user ID, and issues a login token back to the client.
+- [Authelia](providers/authelia.md)
+- _Please contribute documentation for yours here!_
 
-## Configuring a provider
+## Configuring Tuwunel
 
 Each provider is a `[[global.identity_provider]]` table in your configuration
 file. Multiple providers can be configured by repeating the table header.
@@ -89,7 +82,8 @@ them for non-standard or undiscoverable providers.
 | `grant_session_duration` | `300` | Seconds the authorization session stays valid before expiring (default: 5 minutes). |
 | `check_cookie` | `true` | Verify the redirect cookie during the callback for CSRF protection. Disable only if a reverse proxy strips cookies. |
 
-## Examples
+
+## Example configurartions
 
 ### GitHub
 
@@ -188,3 +182,15 @@ These admin room commands help manage OAuth state:
 | `!admin query oauth associate <provider_id> @user:example.com --claim key=value` | Associate an existing Matrix account with future OAuth claims from a provider. Useful for onboarding existing users to SSO. |
 | `!admin query oauth revoke <session_id\|@user>` | Revoke tokens for a session or all sessions of a user. |
 | `!admin query oauth delete <session_id\|@user>` | Remove OAuth state entirely (destructive). |
+
+## Protocol flow reference
+
+1. The client fetches `/_matrix/client/v3/login` and finds an `m.login.sso`
+   entry listing configured providers.
+2. The user selects a provider; the client redirects to
+   `/_matrix/client/v3/login/sso/redirect/<client_id>`.
+3. Tuwunel redirects the user to the provider's authorization endpoint.
+4. The provider authenticates the user and redirects back to
+   `/_matrix/client/unstable/login/sso/callback/<client_id>`.
+5. Tuwunel exchanges the code for tokens, fetches user claims, maps them to a
+   Matrix user ID, and issues a login token back to the client.

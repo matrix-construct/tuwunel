@@ -20,6 +20,7 @@
 - [Authentication System](authentication.md)
   - [Legacy Registration](authentication/legacy.md)
   - [Identity Providers](authentication/providers.md)
+    - [Authelia](authentication/providers/authelia.md)
   - [OIDC Authorization](authentication/oidc-server.md)
 - [TURN](turn.md)
 - [Matrix RTC (Element Call)](matrix_rtc.md)
