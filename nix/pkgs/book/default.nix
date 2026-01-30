@@ -1,9 +1,10 @@
-{ inputs
+{
+  inputs,
 
-# Dependencies
-, main
-, mdbook
-, stdenv
+  # Dependencies
+  main,
+  mdbook,
+  stdenv,
 }:
 
 stdenv.mkDerivation {
