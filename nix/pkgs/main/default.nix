@@ -197,18 +197,19 @@ craneLib.buildPackage ( commonAttrs // rec {
     env = buildDepsOnlyEnv;
   });
 
+  # Adds runpath settings to the resulting binary
   buildInputs = (commonAttrs.buildInputs or []) ++ [
     rocksdb'
   ];
-
   nativeBuildInputs = (commonAttrs.nativeBuildInputs or []) ++ [
     autoPatchelfHook
   ];
+  # This is needed for tests to link
+  LD_LIBRARY_PATH = lib.makeLibraryPath buildInputs;
 
   nativeCheckInputs = [
     pkgsBuildHost.libredirect.hook
   ];
-  LD_LIBRARY_PATH = lib.makeLibraryPath buildInputs;
 
   preCheck =
     let
