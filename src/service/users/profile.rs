@@ -186,8 +186,7 @@ pub async fn blurhash(&self, user_id: &UserId) -> Result<String> {
 /// Sets a new timezone or removes it if timezone is None.
 #[implement(super::Service)]
 pub fn set_timezone(&self, user_id: &UserId, timezone: Option<&str>) {
-	// TODO: insert to the stable MSC4175 key when it's stable
-	let key = (user_id, "us.cloke.msc4175.tz");
+	let key = (user_id, "m.tz");
 
 	if let Some(timezone) = timezone {
 		self.db
@@ -201,16 +200,13 @@ pub fn set_timezone(&self, user_id: &UserId, timezone: Option<&str>) {
 /// Get the timezone of a user.
 #[implement(super::Service)]
 pub async fn timezone(&self, user_id: &UserId) -> Result<String> {
-	// TODO: transparently migrate unstable key usage to the stable key once MSC4133
-	// and MSC4175 are stable, likely a remove/insert in this block.
-
-	// first check the unstable prefix then check the stable prefix
-	let unstable_key = (user_id, "us.cloke.msc4175.tz");
+	//TODO: remove unstable key eventually.
 	let stable_key = (user_id, "m.tz");
+	let unstable_key = (user_id, "us.cloke.msc4175.tz");
 	self.db
 		.useridprofilekey_value
-		.qry(&unstable_key)
-		.or_else(|_| self.db.useridprofilekey_value.qry(&stable_key))
+		.qry(&stable_key)
+		.or_else(|_| self.db.useridprofilekey_value.qry(&unstable_key))
 		.await
 		.deserialized()
 }

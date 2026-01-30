@@ -273,7 +273,7 @@ pub(crate) async fn get_profile_route(
 				("avatar_url", response.avatar_url.map(Into::into)),
 				("blurhash", response.blurhash),
 				("displayname", response.displayname),
-				("tz", response.tz),
+				("m.tz", response.tz),
 			];
 
 			let response = canonical_fields
@@ -314,7 +314,7 @@ pub(crate) async fn get_profile_route(
 		("avatar_url", avatar_url.map(Into::into)),
 		("blurhash", blurhash),
 		("displayname", displayname),
-		("tz", tz),
+		("m.tz", tz),
 	];
 
 	let response = canonical_fields
