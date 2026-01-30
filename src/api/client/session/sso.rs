@@ -92,7 +92,7 @@ pub(crate) async fn sso_login_route(
 		.identity_provider
 		.iter()
 		.find(|idp| idp.default)
-		.or_else(|| services.config.identity_provider.iter().next())
+		.or_else(|| services.config.identity_provider.first())
 		.map(IdentityProvider::id)
 		.map(ToOwned::to_owned)
 		.unwrap_or_default();

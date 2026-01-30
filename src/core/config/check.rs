@@ -300,6 +300,23 @@ pub fn check(config: &Config) -> Result {
 		));
 	}
 
+	for a in &config.identity_provider {
+		let count = config
+			.identity_provider
+			.iter()
+			.filter(|b| a.id().eq(b.id()))
+			.count();
+
+		debug_assert_ne!(count, 0, "expected at least one identity_provider");
+		if count > 1 {
+			return Err!(Config(
+				"client_id",
+				"Duplicate identity_provider with client_id {}",
+				a.client_id
+			));
+		}
+	}
+
 	for (i, provider) in config.identity_provider.iter().enumerate() {
 		if provider.client_secret.is_some() {
 			continue;
@@ -340,8 +357,7 @@ pub fn check(config: &Config) -> Result {
 	{
 		let default = config
 			.identity_provider
-			.iter()
-			.next()
+			.first()
 			.map(IdentityProvider::id)
 			.expect("Check at least one provider is configured to reach here");
 

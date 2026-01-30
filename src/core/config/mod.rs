@@ -3,8 +3,7 @@ pub mod manager;
 pub mod proxy;
 
 use std::{
-	collections::{BTreeMap, BTreeSet, HashSet},
-	hash::{Hash, Hasher},
+	collections::{BTreeMap, BTreeSet},
 	net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
 	path::{Path, PathBuf},
 };
@@ -2260,7 +2259,7 @@ pub struct Config {
 
 	// external structure; separate sections
 	#[serde(default)]
-	pub identity_provider: HashSet<IdentityProvider>,
+	pub identity_provider: Vec<IdentityProvider>,
 
 	#[serde(flatten)]
 	#[expect(clippy::zero_sized_map_values)]
@@ -2578,7 +2577,7 @@ pub struct JwtConfig {
 	pub validate_signature: bool,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Eq)]
 #[config_example_generator(
 	filename = "tuwunel-example.toml",
 	section = "[global.identity_provider]"
@@ -2761,8 +2760,8 @@ impl IdentityProvider {
 	}
 }
 
-impl Hash for IdentityProvider {
-	fn hash<H: Hasher>(&self, state: &mut H) { self.id().hash(state) }
+impl PartialEq for IdentityProvider {
+	fn eq(&self, other: &Self) -> bool { self.id().eq(other.id()) }
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
