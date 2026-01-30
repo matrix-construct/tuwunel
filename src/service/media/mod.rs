@@ -40,7 +40,7 @@ pub struct Service {
 pub const MXC_LENGTH: usize = 32;
 
 /// Cache control for immutable objects.
-pub const CACHE_CONTROL_IMMUTABLE: &str = "public,max-age=31536000,immutable";
+pub const CACHE_CONTROL_IMMUTABLE: &str = "private,max-age=31536000,immutable";
 
 /// Default cross-origin resource policy.
 pub const CORP_CROSS_ORIGIN: &str = "cross-origin";
