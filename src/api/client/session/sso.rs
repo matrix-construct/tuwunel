@@ -90,9 +90,9 @@ pub(crate) async fn sso_login_route(
 	let default_idp_id = services
 		.config
 		.identity_provider
-		.iter()
+		.values()
 		.find(|idp| idp.default)
-		.or_else(|| services.config.identity_provider.iter().next())
+		.or_else(|| services.config.identity_provider.values().next())
 		.map(IdentityProvider::id)
 		.map(ToOwned::to_owned)
 		.unwrap_or_default();
@@ -419,7 +419,7 @@ pub(crate) async fn sso_callback_route(
 	let next_idp_url = services
 		.config
 		.identity_provider
-		.iter()
+		.values()
 		.filter(|idp| idp.default || services.config.single_sso)
 		.skip_while(|idp| idp.id() != idp_id)
 		.nth(1)

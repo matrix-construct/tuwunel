@@ -52,7 +52,7 @@ pub(crate) async fn get_login_types_route(
 	let identity_providers: Vec<_> = services
 		.config
 		.identity_provider
-		.iter()
+		.values()
 		.filter(|_| list_idps)
 		.cloned()
 		.map(|config| IdentityProvider {

@@ -60,7 +60,7 @@ pub fn get_config(&self, id: &str) -> Result<Provider> {
 	let providers = &self.services.config.identity_provider;
 
 	if let Some(provider) = providers
-		.iter()
+		.values()
 		.find(|config| config.id() == id)
 		.cloned()
 	{
@@ -68,11 +68,11 @@ pub fn get_config(&self, id: &str) -> Result<Provider> {
 	}
 
 	if let Some(provider) = providers
-		.iter()
+		.values()
 		.find(|config| config.brand == id.to_lowercase())
 		.filter(|_| {
 			providers
-				.iter()
+				.values()
 				.filter(|config| config.brand == id.to_lowercase())
 				.count()
 				.eq(&1)

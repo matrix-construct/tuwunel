@@ -3,8 +3,7 @@ pub mod manager;
 pub mod proxy;
 
 use std::{
-	collections::{BTreeMap, BTreeSet, HashSet},
-	hash::{Hash, Hasher},
+	collections::{BTreeMap, BTreeSet},
 	net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
 	path::{Path, PathBuf},
 };
@@ -2259,8 +2258,8 @@ pub struct Config {
 	pub appservice: BTreeMap<String, AppService>,
 
 	// external structure; separate sections
-	#[serde(default)]
-	pub identity_provider: HashSet<IdentityProvider>,
+	#[serde(default, with = "identity_provider_serde")]
+	pub identity_provider: BTreeMap<String, IdentityProvider>,
 
 	#[serde(flatten)]
 	#[expect(clippy::zero_sized_map_values)]
@@ -2578,7 +2577,7 @@ pub struct JwtConfig {
 	pub validate_signature: bool,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Debug, Deserialize)]
 #[config_example_generator(
 	filename = "tuwunel-example.toml",
 	section = "[global.identity_provider]"
@@ -2763,8 +2762,50 @@ impl IdentityProvider {
 	}
 }
 
-impl Hash for IdentityProvider {
-	fn hash<H: Hasher>(&self, state: &mut H) { self.id().hash(state) }
+mod identity_provider_serde {
+	use std::{collections::BTreeMap, fmt, marker::PhantomData};
+
+	use serde::{
+		Deserializer, de,
+		de::{MapAccess, SeqAccess},
+	};
+
+	struct Visitor(PhantomData<IdentityProviders>);
+
+	type IdentityProviders = BTreeMap<String, super::IdentityProvider>;
+
+	pub(super) fn deserialize<'de, D>(de: D) -> Result<IdentityProviders, D::Error>
+	where
+		D: Deserializer<'de>,
+	{
+		de.deserialize_any(Visitor(PhantomData))
+	}
+
+	impl<'de> de::Visitor<'de> for Visitor {
+		type Value = IdentityProviders;
+
+		fn expecting(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
+			fmt.write_str("Mapping or Sequence")
+		}
+
+		fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+			let mut ret = Self::Value::new();
+			while let Some((k, v)) = map.next_entry()? {
+				ret.insert(k, v);
+			}
+
+			Ok(ret)
+		}
+
+		fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+			let mut ret = Self::Value::new();
+			while let Some(v) = seq.next_element()? {
+				ret.insert(ret.len().to_string(), v);
+			}
+
+			Ok(ret)
+		}
+	}
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]

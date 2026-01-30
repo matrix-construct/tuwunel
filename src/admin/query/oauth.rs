@@ -140,7 +140,7 @@ pub(super) async fn oauth_list_providers(&self) -> Result {
 	self.services
 		.config
 		.identity_provider
-		.iter()
+		.values()
 		.try_stream()
 		.map_ok(Provider::id)
 		.map_ok(|id| format!("{id}\n"))
