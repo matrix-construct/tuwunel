@@ -15,6 +15,7 @@ use either::{
 };
 use figment::providers::{Env, Format, Toml};
 pub use figment::{Figment, value::Value as FigmentValue};
+use itertools::Itertools;
 use regex::RegexSet;
 use ruma::{
 	OwnedMxcUri, OwnedRoomOrAliasId, OwnedServerName, OwnedUserId, RoomVersionId,
@@ -27,8 +28,7 @@ use url::Url;
 use self::proxy::ProxyConfig;
 pub use self::{check::check, manager::Manager};
 use crate::{
-	Result, err,
-	error::Error,
+	Err, Result, err,
 	utils::{self, option::OptionExt, string::EMPTY, sys},
 };
 
@@ -2923,11 +2923,34 @@ impl Config {
 			Env::var("TUWUNEL_CONFIG"),
 		];
 
-		let config = envs
-			.into_iter()
+		let toml_files = envs
+			.iter()
 			.flatten()
+			.map(PathBuf::from)
+			.chain(paths.map(Path::to_path_buf))
+			.collect_vec();
+
+		let invalid_toml_files = toml_files
+			.iter()
+			.filter_map(|path| {
+				if !path.exists() {
+					Some(path.clone().into_os_string())
+				} else {
+					None
+				}
+			})
+			.collect_vec();
+
+		if !invalid_toml_files.is_empty() {
+			return Err!(
+				"The following config files do not exist or have broken symlinks: \
+				 {invalid_toml_files:?}"
+			);
+		}
+
+		let config = toml_files
+			.iter()
 			.map(Toml::file)
-			.chain(paths.map(Toml::file))
 			.fold(Figment::new(), |config, file| config.merge(file.nested()))
 			.merge(Env::prefixed("CONDUIT_").global().split("__"))
 			.merge(Env::prefixed("CONDUWUIT_").global().split("__"))
@@ -2978,7 +3001,7 @@ impl Config {
 		}
 	}
 
-	pub fn check(&self) -> Result<(), Error> { check(self) }
+	pub fn check(&self) -> Result { check(self) }
 }
 
 fn true_fn() -> bool { true }
