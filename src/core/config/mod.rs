@@ -2614,6 +2614,8 @@ pub struct IdentityProvider {
 	/// Secret key the provider generated for you along with the `client_id`
 	/// above. Unlike the `client_id`, the `client_secret` can be changed here
 	/// whenever the provider regenerates one for you.
+	///
+	/// display: sensitive
 	pub client_secret: Option<String>,
 
 	/// Secret key to use that's read from the file path specified.
