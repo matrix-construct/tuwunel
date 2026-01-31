@@ -220,7 +220,7 @@ services:
         - "traefik.http.routers.matrixrtcjwt.tls=true"
         - "traefik.http.routers.matrixrtcjwt.service=matrixrtcjwt"
         - "traefik.http.services.matrixrtcjwt.loadbalancer.server.port=8081"
-        - "traefik.http.routers.matrixrtcjwt.tls.certresolver=yourcertresolver"
+        - "traefik.http.routers.matrixrtcjwt.tls.certresolver=yourcertresolver" # change to your cert resolver's name
         - "traefik.docker.network=proxy" # your traefik network name
 
   matrix-rtc-livekit:
@@ -232,7 +232,7 @@ services:
         - "traefik.http.routers.livekit.tls=true"
         - "traefik.http.routers.livekit.service=livekit"
         - "traefik.http.services.livekit.loadbalancer.server.port=7880"
-        - "traefik.http.routers.livekit.tls.certresolver=yourcertresolver"
+        - "traefik.http.routers.livekit.tls.certresolver=yourcertresolver" # change to your cert resolver's name
         - "traefik.docker.network=proxy" # your traefik network name
 ```
 2.2 Config file
@@ -244,14 +244,14 @@ http:
                 - "websecure"
             rule: "Host(`matrix-rtc.yourdomain.com`) && PathPrefix(`/sfu/get`) || PathPrefix(`/healthz`)"
             tls:
-                certResolver: "yourcertresolver"
+                certResolver: "yourcertresolver" # change to your cert resolver's name
             service: matrixrtcjwt
         livekit:
             entryPoints:
                 - "websecure"
             rule: "Host(`matrix-rtc.yourdomain.com`)"
             tls:
-                certResolver: "yourcertresolver"
+                certResolver: "yourcertresolver" # change to your cert resolver's name
             service: livekit
     services:
         matrixrtcjwt:
