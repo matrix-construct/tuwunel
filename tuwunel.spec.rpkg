@@ -1,0 +1,57 @@
+%bcond_without check
+
+# prevent library files from being installed
+%global cargo_install_lib 0
+
+%global crate tuwunel
+
+Name:       tuwunel
+Version:    1.4.9.1
+Release:    %autorelease
+Summary:    High Performance Matrix Homeserver in Rust
+
+License:    Apache-2.0
+URL:        https://github.com/matrix-construct/tuwunel
+VCS:        {{{ git_dir_vcs }}}
+
+BuildRequires: cargo-rpm-macros
+BuildRequires: liburing-devel
+BuildRequires: clang-devel
+
+%description
+High Performance Matrix Homeserver in Rust
+
+%prep
+{{{ git_dir_setup_macro }}}
+%cargo_prep
+
+%generate_buildrequires
+%cargo_generate_buildrequires -a
+
+%build
+%cargo_build -a
+
+%install
+
+mkdir -p %{buildroot}%{_sbindir}
+mkdir -p %{buildroot}%{_sysconfdir}/%{name}
+
+install -p -m 755 target/release/%{crate} %{buildroot}%{_sbindir}/%{crate}
+install -Dm 640 tuwunel-example.toml %{buildroot}%{_sysconfdir}/%{name}/tuwunel.toml
+install -Dm 644 rpm/tuwunel.service %{buildroot}%{_unitdir}/tuwunel.service
+
+%if %{with check}
+%check
+%cargo_test -a
+%endif
+
+%files
+%license LICENSE
+rpm/tuwunel.service
+%config(noreplace) %{_sysconfdir}/%{name}/tuwunel.toml
+target/release/tuwunel
+%doc README.md
+
+%changelog
+%autochangelog
+
