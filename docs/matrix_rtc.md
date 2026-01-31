@@ -214,7 +214,7 @@ services:
     # ...
     labels:
         - "traefik.enable=true"
-        - "traefik.http.routers.matrixrtcjwt.entrypoints=https"
+        - "traefik.http.routers.matrixrtcjwt.entrypoints=websecure"
         - "traefik.http.routers.matrixrtcjwt.rule=Host(`matrix-rtc.yourdomain.com`) && PathPrefix(`/sfu/get`) || PathPrefix(`/healthz`)"
         - "traefik.http.routers.matrixrtcjwt.tls=true"
         - "traefik.http.routers.matrixrtcjwt.service=matrixrtcjwt"
@@ -226,7 +226,7 @@ services:
     # ...
     labels:
         - "traefik.enable=true"
-        - "traefik.http.routers.livekit-secure.entrypoints=https"
+        - "traefik.http.routers.livekit-secure.entrypoints=websecure"
         - "traefik.http.routers.livekit-secure.rule=Host(`matrix-rtc.yourdomain.com`)"
         - "traefik.http.routers.livekit-secure.tls=true"
         - "traefik.http.routers.livekit-secure.service=livekit"
