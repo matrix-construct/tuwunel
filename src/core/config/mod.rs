@@ -13,7 +13,7 @@ use either::{
 	Either,
 	Either::{Left, Right},
 };
-use figment::providers::{Env, Format, Toml};
+use figment::providers::{Data, Env, Format, Toml};
 pub use figment::{Figment, value::Value as FigmentValue};
 use itertools::Itertools;
 use regex::RegexSet;
@@ -2951,7 +2951,8 @@ impl Config {
 		let config = toml_files
 			.iter()
 			.map(Toml::file)
-			.fold(Figment::new(), |config, file| config.merge(file.nested()))
+			.map(Data::nested)
+			.fold(Figment::new(), Figment::merge)
 			.merge(Env::prefixed("CONDUIT_").global().split("__"))
 			.merge(Env::prefixed("CONDUWUIT_").global().split("__"))
 			.merge(Env::prefixed("TUWUNEL_").global().split("__"));
