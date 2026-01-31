@@ -207,6 +207,7 @@ networks:
         external: true
 ```
 2. Configure with either one of the methods below
+
 2.1 Labels
 ```yaml
 services:
