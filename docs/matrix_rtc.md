@@ -227,12 +227,12 @@ services:
     # ...
     labels:
         - "traefik.enable=true"
-        - "traefik.http.routers.livekit-secure.entrypoints=websecure"
-        - "traefik.http.routers.livekit-secure.rule=Host(`matrix-rtc.yourdomain.com`)"
-        - "traefik.http.routers.livekit-secure.tls=true"
-        - "traefik.http.routers.livekit-secure.service=livekit"
+        - "traefik.http.routers.livekit.entrypoints=websecure"
+        - "traefik.http.routers.livekit.rule=Host(`matrix-rtc.yourdomain.com`)"
+        - "traefik.http.routers.livekit.tls=true"
+        - "traefik.http.routers.livekit.service=livekit"
         - "traefik.http.services.livekit.loadbalancer.server.port=7880"
-        - "traefik.http.routers.livekit-secure.tls.certresolver=yourcertresolver"
+        - "traefik.http.routers.livekit.tls.certresolver=yourcertresolver"
         - "traefik.docker.network=proxy" # your traefik network name
 ```
 2.2 Config file
