@@ -113,6 +113,7 @@ fn init_validator(config: &JwtConfig) -> Result<Validation> {
 		validator.set_issuer(&config.issuer);
 	}
 
+	#[expect(deprecated)]
 	if cfg!(debug_assertions) && !config.validate_signature {
 		warn!("JWT signature validation is disabled!");
 		validator.insecure_disable_signature_validation();

@@ -28,13 +28,6 @@ pub fn check(config: &Config) -> Result {
 		warn!("Note: tuwunel was built without optimisations (i.e. debug build)");
 	}
 
-	if config.allow_invalid_tls_certificates {
-		warn!(
-			"\n\nWARNING: \n\nTLS CERTIFICATE VALIDATION IS DISABLED, THIS IS HIGHLY INSECURE \
-			 AND SHOULD NOT BE USED IN PRODUCTION.\n\n"
-		);
-	}
-
 	warn_deprecated(config);
 	warn_unknown_key(config)?;
 

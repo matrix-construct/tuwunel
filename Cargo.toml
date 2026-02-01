@@ -102,7 +102,7 @@ features = [
 ]
 
 [workspace.dependencies.bytes]
-version = "1.10"
+version = "1.11"
 
 [workspace.dependencies.bytesize]
 version = "2.1"
@@ -193,7 +193,7 @@ version = "1.3"
 version = "0.1"
 
 [workspace.dependencies.hyper]
-version = "1.7"
+version = "1.8"
 default-features = false
 features = [
 	"server",
@@ -202,7 +202,7 @@ features = [
 ]
 
 [workspace.dependencies.hyper-util]
-version = "0.1.14"
+version = "0.1.20"
 default-features = false
 features = [
 	"server-auto",
@@ -237,7 +237,7 @@ git = "https://github.com/matrix-construct/jevmalloc"
 rev = "93795449913f65ab533b7fa482333eef63fc3ae0"
 
 [workspace.dependencies.jsonwebtoken]
-version = "9.3"
+version = "10.3"
 default-features = false
 features = ["use_pem"]
 
@@ -310,14 +310,15 @@ version = "0.8"
 version = "1.12"
 
 [workspace.dependencies.reqwest]
-version = "0.12"
+version = "0.13"
 default-features = false
 features = [
 	"charset",
 	"hickory-dns",
 	"http2",
 	"json",
-	"rustls-tls-native-roots",
+	"rustls",
+	"rustls-native-certs",
 	"socks",
 ]
 
@@ -490,7 +491,7 @@ version = "2.0"
 default-features = false
 
 [workspace.dependencies.tokio]
-version = "1.48"
+version = "1.49"
 default-features = false
 features = [
 	"fs",
@@ -552,7 +553,6 @@ features = [
 	"ansi",
 	"env-filter",
 	"fmt",
-	"std",
 	"tracing",
 	"tracing-log",
 ]
@@ -594,7 +594,7 @@ rev = "ff148c2985cbaff3e6e953d45cda4d7696f38d75"
 # reverts hyperium#148 conflicting with our delicate federation resolver hooks
 [patch.crates-io.hyper-util]
 git = "https://github.com/matrix-construct/hyper-util"
-rev = "c4fd9b4cd3a59fcfd28ca3802d68a8ea8988d9a3"
+rev = "a3f59c4e51af19570a9f92839ecfe0ad6482e9e5"
 
 # allows no-aaaa option in resolv.conf
 # bumps rust edition and toolchain to 1.86.0 and 2024

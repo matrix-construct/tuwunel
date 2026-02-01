@@ -42,7 +42,7 @@ impl crate::Service for Service {
 
 		Ok(Arc::new(Self {
 			default: create_client!(config, services; base(config)?
-				.dns_resolver2(Arc::clone(&services.resolver.resolver))),
+				.dns_resolver(Arc::clone(&services.resolver.resolver))),
 
 			url_preview: create_client!(config, services; {
 				let url_preview_bind_addr = config
@@ -60,16 +60,16 @@ impl crate::Service for Service {
 					builder_interface(builder, url_preview_bind_iface.as_deref())
 				})?
 				.local_address(url_preview_bind_addr)
-				.dns_resolver2(Arc::clone(&services.resolver.resolver))
+				.dns_resolver(Arc::clone(&services.resolver.resolver))
 				.redirect(redirect::Policy::limited(3))
 			}),
 
 			extern_media: create_client!(config, services; base(config)?
-				.dns_resolver2(Arc::clone(&services.resolver.resolver))
+				.dns_resolver(Arc::clone(&services.resolver.resolver))
 				.redirect(redirect::Policy::limited(3))),
 
 			well_known: create_client!(config, services; base(config)?
-				.dns_resolver2(Arc::clone(&services.resolver.resolver))
+				.dns_resolver(Arc::clone(&services.resolver.resolver))
 				.connect_timeout(Duration::from_secs(config.well_known_conn_timeout))
 				.read_timeout(Duration::from_secs(config.well_known_timeout))
 				.timeout(Duration::from_secs(config.well_known_timeout))
@@ -77,20 +77,20 @@ impl crate::Service for Service {
 				.redirect(redirect::Policy::limited(4))),
 
 			federation: create_client!(config, services; base(config)?
-				.dns_resolver2(Arc::clone(&services.resolver.resolver.hooked))
+				.dns_resolver(Arc::clone(&services.resolver.resolver.hooked))
 				.read_timeout(Duration::from_secs(config.federation_timeout))
 				.pool_max_idle_per_host(config.federation_idle_per_host.into())
 				.pool_idle_timeout(Duration::from_secs(config.federation_idle_timeout))
 				.redirect(redirect::Policy::limited(3))),
 
 			synapse: create_client!(config, services; base(config)?
-				.dns_resolver2(Arc::clone(&services.resolver.resolver.hooked))
+				.dns_resolver(Arc::clone(&services.resolver.resolver.hooked))
 				.read_timeout(Duration::from_secs(305))
 				.pool_max_idle_per_host(0)
 				.redirect(redirect::Policy::limited(3))),
 
 			sender: create_client!(config, services; base(config)?
-				.dns_resolver2(Arc::clone(&services.resolver.resolver.hooked))
+				.dns_resolver(Arc::clone(&services.resolver.resolver.hooked))
 				.read_timeout(Duration::from_secs(config.sender_timeout))
 				.timeout(Duration::from_secs(config.sender_timeout))
 				.pool_max_idle_per_host(1)
@@ -98,7 +98,7 @@ impl crate::Service for Service {
 				.redirect(redirect::Policy::limited(2))),
 
 			appservice: create_client!(config, services; base(config)?
-				.dns_resolver2(appservice_resolver(&services))
+				.dns_resolver(appservice_resolver(&services))
 				.connect_timeout(Duration::from_secs(5))
 				.read_timeout(Duration::from_secs(config.appservice_timeout))
 				.timeout(Duration::from_secs(config.appservice_timeout))
@@ -107,13 +107,13 @@ impl crate::Service for Service {
 				.redirect(redirect::Policy::limited(2))),
 
 			pusher: create_client!(config, services; base(config)?
-				.dns_resolver2(Arc::clone(&services.resolver.resolver))
+				.dns_resolver(Arc::clone(&services.resolver.resolver))
 				.pool_max_idle_per_host(1)
 				.pool_idle_timeout(Duration::from_secs(config.pusher_idle_timeout))
 				.redirect(redirect::Policy::limited(2))),
 
 			oauth: create_client!(config, services; base(config)?
-				.dns_resolver2(Arc::clone(&services.resolver.resolver))
+				.dns_resolver(Arc::clone(&services.resolver.resolver))
 				.redirect(redirect::Policy::limited(0))
 				.pool_max_idle_per_host(1)),
 
