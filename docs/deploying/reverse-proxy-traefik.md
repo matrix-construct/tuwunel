@@ -11,9 +11,22 @@ Install Traefik via your preferred method. You can read the official [docker qui
 
 You can setup auto renewing certificates with different kinds of [acme challenges](https://doc.traefik.io/traefik/reference/install-configuration/tls/certificate-resolvers/acme/).
 ### Router configurations
-You only have to do any one of these methods.
+Add tuwunel to your traefik's network.
+
+```yaml
+services:
+    tuwunel:
+    # ...
+    networks:
+        - proxy # your traefik network name
+networks:
+    proxy: # your traefik network name
+        external: true
+```
 
 Be sure to change the `your.server.name` to your actual tuwunel domain. and the `yourcertresolver` should be changed to whatever you named it in your traefik config.
+
+You only have to do any one of these methods below.
 
 
 ### Labels

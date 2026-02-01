@@ -188,6 +188,83 @@ server {
 ```
 2. Restart Nginx.
 
+#### 5.3. Traefik
+1. Add your `matrix-rtc-jwt` `matrix-rtc-livekit` to your traefik's network
+```yaml
+services:
+  matrix-rtc-jwt:
+    # ...
+    networks:
+        - proxy # your traefik network name
+
+  matrix-rtc-livekit:
+    # ...
+    networks:
+        - proxy # your traefik network name
+
+networks:
+    proxy: # your traefik network name
+        external: true
+```
+2. Configure with either one of the methods below
+
+2.1 Labels
+```yaml
+services:
+  matrix-rtc-jwt:
+    # ...
+    labels:
+        - "traefik.enable=true"
+        - "traefik.http.routers.matrixrtcjwt.entrypoints=websecure"
+        - "traefik.http.routers.matrixrtcjwt.rule=Host(`matrix-rtc.yourdomain.com`) && PathPrefix(`/sfu/get`) || PathPrefix(`/healthz`)"
+        - "traefik.http.routers.matrixrtcjwt.tls=true"
+        - "traefik.http.routers.matrixrtcjwt.service=matrixrtcjwt"
+        - "traefik.http.services.matrixrtcjwt.loadbalancer.server.port=8081"
+        - "traefik.http.routers.matrixrtcjwt.tls.certresolver=yourcertresolver" # change to your cert resolver's name
+        - "traefik.docker.network=proxy" # your traefik network name
+
+  matrix-rtc-livekit:
+    # ...
+    labels:
+        - "traefik.enable=true"
+        - "traefik.http.routers.livekit.entrypoints=websecure"
+        - "traefik.http.routers.livekit.rule=Host(`matrix-rtc.yourdomain.com`)"
+        - "traefik.http.routers.livekit.tls=true"
+        - "traefik.http.routers.livekit.service=livekit"
+        - "traefik.http.services.livekit.loadbalancer.server.port=7880"
+        - "traefik.http.routers.livekit.tls.certresolver=yourcertresolver" # change to your cert resolver's name
+        - "traefik.docker.network=proxy" # your traefik network name
+```
+2.2 Config file
+```yaml
+http:
+    routers:
+        matrixrtcjwt:
+            entryPoints:
+                - "websecure"
+            rule: "Host(`matrix-rtc.yourdomain.com`) && PathPrefix(`/sfu/get`) || PathPrefix(`/healthz`)"
+            tls:
+                certResolver: "yourcertresolver" # change to your cert resolver's name
+            service: matrixrtcjwt
+        livekit:
+            entryPoints:
+                - "websecure"
+            rule: "Host(`matrix-rtc.yourdomain.com`)"
+            tls:
+                certResolver: "yourcertresolver" # change to your cert resolver's name
+            service: livekit
+    services:
+        matrixrtcjwt:
+            loadBalancer:
+                servers:
+                    - url: "http://matrix-rtc-jwt:8081"
+                passHostHeader: true
+        livekit:
+            loadBalancer:
+                servers:
+                    - url: "http://matrix-rtc-livekit:7880"
+                passHostHeader: true
+```
 ### 6. Start Docker Containers
 1. Ensure you are in your matrix-rtc directory. e.g. `cd /opt/matrix-rtc`.
 2. Start containers: `docker compose up -d`.
