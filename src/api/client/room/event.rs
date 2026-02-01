@@ -28,18 +28,20 @@ pub(crate) async fn get_room_event_route(
 	let retained_event = body
 		.include_unredacted_content
 		.then_async(async || {
-			let is_admin = services
-				.config
-				.allow_room_admins_to_request_unredacted_events
-				.then_async(|| services.admin.user_is_admin(sender_user))
-				.unwrap_or(false);
+			let is_admin = services.admin.user_is_admin(sender_user);
 
 			let can_redact = services
-				.state_accessor
-				.get_power_levels(room_id)
-				.map_ok_or(false, |power_levels| {
-					power_levels.for_user(sender_user) >= power_levels.redact
-				});
+				.config
+				.allow_room_admins_to_request_unredacted_events
+				.then_async(|| {
+					services
+						.state_accessor
+						.get_power_levels(room_id)
+						.map_ok_or(false, |power_levels| {
+							power_levels.for_user(sender_user) >= power_levels.redact
+						})
+				})
+				.unwrap_or(false);
 
 			pin_mut!(is_admin, can_redact);
 
