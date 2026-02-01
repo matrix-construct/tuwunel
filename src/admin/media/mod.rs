@@ -90,10 +90,10 @@ pub(super) enum MediaCommand {
 		#[arg(short, long, default_value("10000"))]
 		timeout: u32,
 
-		#[arg(short, long, default_value("800"))]
+		#[arg(long, default_value("800"))]
 		width: u32,
 
-		#[arg(short, long, default_value("800"))]
+		#[arg(long, default_value("800"))]
 		height: u32,
 	},
 }
