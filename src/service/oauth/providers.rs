@@ -123,6 +123,25 @@ async fn configure(&self, mut provider: Provider) -> Result<Provider> {
 		.name
 		.get_or_insert_with(|| provider.brand.clone());
 
+	if provider.callback_url.is_none() {
+		let server_url = self
+			.services
+			.config
+			.well_known
+			.client
+			.as_ref()
+			.expect("should be set");
+
+		let callback_path =
+			format!("_matrix/client/unstable/login/sso/callback/{}", provider.client_id);
+
+		provider.callback_url = Some(
+			server_url
+				.join(&callback_path)
+				.expect("valid callback url"),
+		);
+	}
+
 	if provider.brand == "github" {
 		configure_github(&mut provider);
 		return Ok(provider);
