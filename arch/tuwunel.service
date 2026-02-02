@@ -25,6 +25,8 @@ TTYRows=40
 AmbientCapabilities=
 CapabilityBoundingSet=
 
+ManagedOOMPreference=avoid
+
 DevicePolicy=closed
 LockPersonality=yes
 MemoryDenyWriteExecute=yes

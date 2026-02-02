@@ -18,6 +18,8 @@ ReadWritePaths=/var/lib/tuwunel /etc/tuwunel
 AmbientCapabilities=
 CapabilityBoundingSet=
 
+ManagedOOMPreference=avoid
+
 DevicePolicy=closed
 LockPersonality=yes
 MemoryDenyWriteExecute=yes
