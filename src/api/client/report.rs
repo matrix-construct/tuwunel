@@ -1,15 +1,11 @@
-use std::time::Duration;
-
 use axum::extract::State;
 use axum_client_ip::InsecureClientIp;
-use rand::Rng;
 use ruma::{
 	EventId, RoomId, UserId,
 	api::client::room::{report_content, report_room},
 	events::room::message,
 	int,
 };
-use tokio::time::sleep;
 use tuwunel_core::{Err, Result, debug_info, info, matrix::pdu::PduEvent, utils::ReadyExt};
 use tuwunel_service::Services;
 
@@ -39,8 +35,6 @@ pub(crate) async fn report_room_route(
 			"Reason too long, should be {REASON_MAX_LEN} characters or fewer"
 		)));
 	}
-
-	delay_response().await;
 
 	if !services
 		.state_cache
@@ -87,8 +81,6 @@ pub(crate) async fn report_event_route(
 		body.event_id,
 		body.reason.as_deref().unwrap_or("")
 	);
-
-	delay_response().await;
 
 	// check if we know about the reported event ID or if it's invalid
 	let Ok(pdu) = services.timeline.get_pdu(&body.event_id).await else {
@@ -170,17 +162,4 @@ async fn is_event_report_valid(
 	}
 
 	Ok(())
-}
-
-/// even though this is kinda security by obscurity, let's still make a small
-/// random delay sending a response per spec suggestion regarding
-/// enumerating for potential events existing in our server.
-async fn delay_response() {
-	let time_to_wait = rand::thread_rng().gen_range(2..5);
-	debug_info!(
-		"Got successful /report request, waiting {time_to_wait} seconds before sending \
-		 successful response."
-	);
-
-	sleep(Duration::from_secs(time_to_wait)).await;
 }
