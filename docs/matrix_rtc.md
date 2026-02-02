@@ -1,8 +1,9 @@
 # Matrix RTC/Element Call Setup
 
 ## Notes
+- This guide assumes that you are using docker compose for deployment. 
 - `yourdomain.com` is whatever you have set as `server_name` in your tuwunel.toml. This needs to be replaced with the actual domain. It is assumed that you will be hosting MatrixRTC at `matrix-rtc.yourdomain.com`. If you wish to host this service at a different subdomain, this needs to be replaced as well.
-- This guide provides example configuration for Caddy and Nginx reverse proxies. Others can be used, but the configuration will need to be adapted.
+- This guide provides example configuration for Caddy, Nginx and Traefik reverse proxies. Others can be used, but the configuration will need to be adapted.
 
 ## Instructions
 ### 1. Set Up DNS
@@ -12,37 +13,38 @@ Create a DNS record for `matrix-rtc.yourdomain.com` pointing to your server.
 1. Create a directory for your MatrixRTC setup e.g. `mkdir /opt/matrix-rtc`.
 2. Change directory to your new directory. e.g. `cd /opt/matrix-rtc`.
 3. Create and open a compose.yaml file for MatrixRTC. e.g. `nano compose.yaml`.
-4. Add the following. `mrtckey` and `mrtcsecret` should be random strings. It is suggested that `mrtckey` is 20 characters and `mrtcsecret` is 64 characters.
+4. Add the following. `MRTCKEY` and `MRTCSECRET` should be random strings. It is suggested that `MRTCKEY` is 20 characters and `MRTCSECRET` is 64 characters.
 ```yaml
 services:
   matrix-rtc-jwt:
     image: ghcr.io/element-hq/lk-jwt-service:latest
     container_name: matrix-rtc-jwt
     environment:
-      - LIVEKIT_JWT_PORT=8081
+      - LIVEKIT_JWT_BIND=:8080
       - LIVEKIT_URL=wss://matrix-rtc.yourdomain.com
-      - LIVEKIT_KEY=mrtckey
-      - LIVEKIT_SECRET=mrtcsecret
+      - LIVEKIT_KEY=MRTCKEY
+      - LIVEKIT_SECRET=MRTCSECRET
       - LIVEKIT_FULL_ACCESS_HOMESERVERS=yourdomain.com
     restart: unless-stopped
     ports:
-      - "8081:8081"
+      - "8081:8080"
 
   matrix-rtc-livekit:
     image: livekit/livekit-server:latest
     container_name: matrix-rtc-livekit
     command: --config /etc/livekit.yaml
-    ports:
-      - 7880:7880/tcp
-      - 7881:7881/tcp
-      - 50100-50200:50100-50200/udp
     restart: unless-stopped
     volumes:
       - ./livekit.yaml:/etc/livekit.yaml:ro
+    network_mode: "host"
+    # Uncomment the lines below and comment `network_mode: "host"` above to specify port mappings.
+#    ports:
+#      - "7880:7880/tcp"
+#      - "7881:7881/tcp"
+#      - "50100-50200:50100-50200/udp"
 ```
-4. Close the file.
 5. Create and open a livekit.yaml file. e.g. `nano livekit.yaml`.
-6. Add the following. `mrtckey` and `mrtcsecret` should be the same as those from compose.yaml. 
+6. Add the following. `MRTCKEY` and `MRTCSECRET` should be the same as those from compose.yaml. 
 ```yaml
 port: 7880
 bind_addresses:
@@ -54,13 +56,12 @@ rtc:
   use_external_ip: true
   enable_loopback_candidate: false
 keys:
-  mrtckey: "mrtcsecret"
+  MRTCKEY: MRTCSECRET
 ```
-7. Close the file.
 
 ### 3. Configure .well-known
 #### 3.1. .well-known served by Tuwunel
-***Follow this step if your .well-known configuration is served by tuwunel. Otherwise follow Step 3.2***
+***Follow this step if your .well-known configuration is served by Tuwunel. Otherwise follow Step 3.2***
 1. Open your tuwunel.toml file. e.g. `nano /etc/tuwunel/tuwunel.toml`.
 2. Find the line reading `#rtc_transports = []` and replace it with:
 ```toml
@@ -68,7 +69,6 @@ keys:
 type = "livekit"
 livekit_service_url = "https://matrix-rtc.yourdomain.com"
 ```
-3. Close the file.
 
 #### 3.2. .well-known served independently
 ***Follow this step if you serve your .well-known/matrix files directly. Otherwise follow Step 3.1***
@@ -97,14 +97,13 @@ The final file should look something like this:
 }
 
 ```
-3. Close the file.
 
 ### 4. Configure Firewall
 You will need to allow ports `7881/tcp` and `50100:50200/udp` through your firewall. If you use UFW, the commands are: `ufw allow 7881/tcp` and `ufw allow 50100:50200/udp`.
 
 ### 5. Configure Reverse Proxy
 As reverse proxies can be installed in different ways, step by step instructions are not given for this section.
-If you use Caddy as your reverse proxy, follow step 5.1. If you use Nginx, follow step 5.2.
+If you use Caddy as your reverse proxy, follow step 5.1. If you use Nginx, follow step 5.2. If you use Traefik, follow step 5.3.
 
 #### 5.1. Caddy
 1. Add the following to your Caddyfile. If you are running Caddy in Docker, replace `localhost` with `matrix-rtc-jwt` in the first instance, and `matrix-rtc-livekit` in the second.
@@ -115,24 +114,13 @@ matrix-rtc.yourdomain.com {
         path /sfu/get* /healthz*
     }
     handle @jwt_service {
-        reverse_proxy localhost:8081 {
-            header_up Host {host}
-            header_up X-Forwarded-Server {host}
-            header_up X-Real-IP {remote}
-            header_up X-Forwarded-For {remote}
-            header_up X-Forwarded-Proto {scheme}
-        }
+        reverse_proxy localhost:8081
     }
     # This is livekit
     handle {
         reverse_proxy localhost:7880 {
             header_up Connection "upgrade"
             header_up Upgrade {http.request.header.Upgrade}
-            header_up Host {host}
-            header_up X-Forwarded-Server {host}
-            header_up X-Real-IP {remote}
-            header_up X-Forwarded-For {remote}
-            header_up X-Forwarded-Proto {scheme}
         }
     }
 }
