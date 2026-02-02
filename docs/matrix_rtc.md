@@ -19,7 +19,7 @@ services:
     image: ghcr.io/element-hq/lk-jwt-service:latest
     container_name: matrix-rtc-jwt
     environment:
-      - LIVEKIT_JWT_PORT=8081
+      - LIVEKIT_JWT_BIND=:8081
       - LIVEKIT_URL=wss://matrix-rtc.yourdomain.com
       - LIVEKIT_KEY=mrtckey
       - LIVEKIT_SECRET=mrtcsecret
