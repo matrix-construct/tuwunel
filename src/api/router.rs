@@ -198,8 +198,10 @@ pub fn build(router: Router<State>, server: &Server) -> Router<State> {
 		.ruma_route(&client::room_initial_sync_route)
 		.route("/client/server.json", get(client::syncv3_client_server_json));
 
-	// SS endpoint not related to federation
-	router = router.ruma_route(&server::get_openid_userinfo_route);
+	// SS endpoints not related to federation
+	router = router
+		.ruma_route(&server::well_known_server)
+		.ruma_route(&server::get_openid_userinfo_route);
 
 	if config.allow_federation {
 		router = router
@@ -233,14 +235,12 @@ pub fn build(router: Router<State>, server: &Server) -> Router<State> {
 			.ruma_route(&server::get_keys_route)
 			.ruma_route(&server::claim_keys_route)
 			.ruma_route(&server::get_hierarchy_route)
-			.ruma_route(&server::well_known_server)
 			.ruma_route(&server::get_content_route)
 			.ruma_route(&server::get_content_thumbnail_route)
 			.route("/_tuwunel/local_user_count", get(client::tuwunel_local_user_count));
 	} else {
 		router = router
 			.route("/_matrix/federation/{*path}", any(federation_disabled))
-			.route("/.well-known/matrix/server", any(federation_disabled))
 			.route("/_matrix/key/{*path}", any(federation_disabled))
 			.route("/_tuwunel/local_user_count", any(federation_disabled));
 	}
