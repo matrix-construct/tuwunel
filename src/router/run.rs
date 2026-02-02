@@ -3,15 +3,11 @@ use std::{
 	time::Duration,
 };
 
-use axum_server::Handle as ServerHandle;
-use tokio::{
-	sync::broadcast::{self, Sender},
-	task::JoinHandle,
-};
+use futures::FutureExt;
 use tuwunel_core::{Error, Result, Server, debug, debug_error, debug_info, error, info};
 use tuwunel_service::Services;
 
-use crate::serve;
+use crate::{handle::ServerHandle, serve};
 
 /// Main loop base
 #[tracing::instrument(skip_all)]
@@ -24,20 +20,30 @@ pub(crate) async fn run(services: Arc<Services>) -> Result {
 
 	// Setup shutdown/signal handling
 	let handle = ServerHandle::new();
-	let (tx, _) = broadcast::channel::<()>(1);
 	let sigs = server
 		.runtime()
-		.spawn(signal(server.clone(), tx.clone(), handle.clone()));
+		.spawn(signal(server.clone(), handle.clone()));
 
-	let mut listener =
+	let mut listener = if services.config.listening {
+		let future = serve::serve(services.clone(), handle);
 		server
 			.runtime()
-			.spawn(serve::serve(services.clone(), handle.clone(), tx.subscribe()));
+			.spawn(future)
+			.map(|res| res.map_err(Error::from).unwrap_or_else(Err))
+			.boxed()
+	} else {
+		let server = server.clone();
+		async move {
+			server.until_shutdown().await;
+			Ok(())
+		}
+		.boxed()
+	};
 
 	// Focal point
 	debug!("Running");
 	let res = tokio::select! {
-		res = &mut listener => res.map_err(Error::from).unwrap_or_else(Err),
+		res = &mut listener => res,
 		res = services.poll() => handle_services_poll(server, res, listener).await,
 	};
 
@@ -104,16 +110,12 @@ pub(crate) async fn stop(services: Arc<Services>) -> Result {
 }
 
 #[tracing::instrument(skip_all)]
-async fn signal(server: Arc<Server>, tx: Sender<()>, handle: axum_server::Handle) {
+async fn signal(server: Arc<Server>, handle: ServerHandle) {
 	server.until_shutdown().await;
-	handle_shutdown(&server, &tx, &handle);
+	handle_shutdown(&server, &handle);
 }
 
-fn handle_shutdown(server: &Arc<Server>, tx: &Sender<()>, handle: &axum_server::Handle) {
-	if let Err(e) = tx.send(()) {
-		error!("failed sending shutdown transaction to channel: {e}");
-	}
-
+fn handle_shutdown(server: &Arc<Server>, handle: &ServerHandle) {
 	let timeout = server.config.client_shutdown_timeout;
 	let timeout = Duration::from_secs(timeout);
 	debug!(
@@ -128,7 +130,7 @@ fn handle_shutdown(server: &Arc<Server>, tx: &Sender<()>, handle: &axum_server::
 async fn handle_services_poll(
 	server: &Arc<Server>,
 	result: Result,
-	listener: JoinHandle<Result>,
+	listener: impl Future<Output = Result>,
 ) -> Result {
 	debug!("Service manager finished: {result:?}");
 

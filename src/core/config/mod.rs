@@ -105,8 +105,8 @@ pub struct Config {
 	/// "::1"]
 	///
 	/// default: ["127.0.0.1", "::1"]
-	#[serde(default = "default_address")]
-	address: ListeningAddr,
+	#[serde(default)]
+	address: Option<ListeningAddr>,
 
 	/// The port(s) tuwunel will listen on.
 	///
@@ -127,9 +127,6 @@ pub struct Config {
 	pub tls: TlsConfig,
 
 	/// The UNIX socket tuwunel will listen on.
-	///
-	/// tuwunel cannot listen on both an IP address and a UNIX socket. If
-	/// listening on a UNIX socket, you MUST remove/comment the `address` key.
 	///
 	/// Remember to make sure that your reverse proxy has access to this socket
 	/// file, either by adding your reverse proxy to the 'tuwunel' group or
@@ -3010,10 +3007,16 @@ impl Config {
 			.extract::<Self>()
 			.map_err(|e| err!("There was a problem with your configuration file: {e}"))?;
 
-		// don't start if we're listening on both UNIX sockets and TCP at same time
-		check::is_dual_listening(raw_config)?;
-
 		Ok(config)
+	}
+
+	pub fn get_unix_socket_perms(&self) -> Result<u32> {
+		let octal_perms = self.unix_socket_perms.to_string();
+		let socket_perms = u32::from_str_radix(&octal_perms, 8).map_err(|_| {
+			err!(Config("unix_socket_perms", "failed to convert octal permissions"))
+		})?;
+
+		Ok(socket_perms)
 	}
 
 	#[must_use]
@@ -3021,7 +3024,7 @@ impl Config {
 		let mut addrs = Vec::with_capacity(
 			self.get_bind_hosts()
 				.len()
-				.saturating_add(self.get_bind_ports().len()),
+				.saturating_mul(self.get_bind_ports().len()),
 		);
 		for host in &self.get_bind_hosts() {
 			for port in &self.get_bind_ports() {
@@ -3033,9 +3036,15 @@ impl Config {
 	}
 
 	fn get_bind_hosts(&self) -> Vec<IpAddr> {
-		match &self.address.addrs {
-			| Left(addr) => vec![*addr],
-			| Right(addrs) => addrs.clone(),
+		if let Some(address) = &self.address {
+			match &address.addrs {
+				| Left(addr) => vec![*addr],
+				| Right(addrs) => addrs.clone(),
+			}
+		} else if self.unix_socket_path.is_some() {
+			vec![]
+		} else {
+			vec![Ipv4Addr::LOCALHOST.into(), Ipv6Addr::LOCALHOST.into()]
 		}
 	}
 
@@ -3055,12 +3064,6 @@ fn true_fn() -> bool { true }
 fn default_server_name() -> OwnedServerName { ruma::owned_server_name!("localhost") }
 
 fn default_database_path() -> PathBuf { "/var/lib/tuwunel".to_owned().into() }
-
-fn default_address() -> ListeningAddr {
-	ListeningAddr {
-		addrs: Right(vec![Ipv4Addr::LOCALHOST.into(), Ipv6Addr::LOCALHOST.into()]),
-	}
-}
 
 fn default_port() -> ListeningPort { ListeningPort { ports: Left(8008) } }
 

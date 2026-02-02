@@ -74,9 +74,6 @@
 
 # The UNIX socket tuwunel will listen on.
 #
-# tuwunel cannot listen on both an IP address and a UNIX socket. If
-# listening on a UNIX socket, you MUST remove/comment the `address` key.
-#
 # Remember to make sure that your reverse proxy has access to this socket
 # file, either by adding your reverse proxy to the 'tuwunel' group or
 # granting world R/W permissions with `unix_socket_perms` (666 minimum).

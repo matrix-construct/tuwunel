@@ -1,6 +1,7 @@
 #![type_length_limit = "32768"] //TODO: reduce me
 #![expect(clippy::duration_suboptimal_units)] // remove after MSRV 1.91
 
+mod handle;
 mod layers;
 mod request;
 mod router;

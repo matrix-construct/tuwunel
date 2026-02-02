@@ -82,11 +82,12 @@ features = [
 ]
 
 [workspace.dependencies.axum-server]
-version = "0.7"
+version = "0.8"
 default-features = false
 
 [workspace.dependencies.axum-server-dual-protocol]
-version = "0.7"
+git = "https://github.com/matrix-construct/axum-server-dual-protocol"
+rev = "76c782fa6f129f83ffdca59e903093e798d4a82f"
 default-features = false
 
 [workspace.dependencies.base64]
@@ -199,15 +200,6 @@ features = [
 	"server",
 	"http1",
 	"http2",
-]
-
-[workspace.dependencies.hyper-util]
-version = "0.1.20"
-default-features = false
-features = [
-	"server-auto",
-	"server-graceful",
-	"tokio",
 ]
 
 [workspace.dependencies.image]
