@@ -299,6 +299,7 @@ turn:
 ```
 It is strongly recommended that you use `network_mode: "host"`; however if it is necessary to specify port mappings, the following ports should be added to `matrix-rtc-livekit` in your `compose.yaml`:
 ```
+ports:
       - 3478:3478/udp
       - 50300-65535:50300-65535/udp
 ```
@@ -314,6 +315,7 @@ Some WebRTC software will not accept certificates provided by Let's Encrypt. It 
 3. Add the certificates as volumes for `matrix-rtc-livekit` in your `compose.yaml`.
 For example:
 ```
+volumes:
       - ./certs/privkey.pem:/certs/privkey.pem:ro
       - ./certs/fullchain.pem:/certs/fullchain.pem:ro
 ```
@@ -332,6 +334,7 @@ turn:
 ```
 5. It is strongly recommended that you use `network_mode: "host"`; however if it is necessary to specify port mappings, the following ports should be added to `matrix-rtc-livekit` in your `compose.yaml`:
 ```
+ports:
       - 3478:3478/udp
       - 5349:5349/tcp
       - 50300-65535:50300-65535/udp
