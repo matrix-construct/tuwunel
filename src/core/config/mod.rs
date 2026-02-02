@@ -2631,15 +2631,14 @@ pub struct IdentityProvider {
 	/// find self-hosted providers. It must be identical to what is configured
 	/// and expected by the provider and must never change because we associate
 	/// identities to it. If the `/.well-known/openid-configuration` is not
-	/// found behind this URL see `base_path` below as a workaround.
+	/// found behind this URL see `discovery_url` below as a workaround.
 	pub issuer_url: Option<Url>,
 
-	/// The callback URL configured when registering the OAuth application with
-	/// the provider. Tuwunel's callback URL must be strictly formatted exactly
-	/// as instructed. The URL host must point directly at the matrix server and
-	/// use the following path:
-	/// `/_matrix/client/unstable/login/sso/callback/<client_id>` where
-	/// `<client_id>` is the same one configured for this provider above.
+	/// The callback URL that needs to be configured when registering Tuwunel
+	/// with the provider. This doesn't need to be set manually, it
+	/// will be constructed as:
+	/// `<global.well_known.client>/_matrix/client/unstable/login/sso/callback/
+	/// <client_id>`
 	pub callback_url: Option<Url>,
 
 	/// When more than one identity_provider has been configured and
@@ -2698,20 +2697,14 @@ pub struct IdentityProvider {
 	#[serde(default)]
 	pub userid_claims: BTreeSet<String>,
 
-	/// Optional extra path components after the issuer_url leading to the
-	/// location of the `.well-known` directory used for discovery. This will be
-	/// empty for specification-compliant providers. We have supplied any known
-	/// values based on `brand` (e.g. `/login/oauth` for GitHub).
-	pub base_path: Option<String>,
-
-	/// Overrides the `.well-known` location where the provider's openid
-	/// configuration is found. It is very unlikely you will need to set this;
-	/// available for developers or special purposes only.
+	/// Overrides the location where the provider's openid
+	/// configuration is found. Usually this is derived from the issuer + the
+	/// well-known path. It is very unlikely you will need to set this.
 	pub discovery_url: Option<Url>,
 
 	/// Overrides the authorize URL requested during the grant phase. This is
-	/// generally discovered or derived automatically, but may be required as a
-	/// workaround for any non-standard or undiscoverable provider.
+	/// generally discovered automatically, but may be required as a
+	/// workaround for any undiscoverable provider.
 	pub authorization_url: Option<Url>,
 
 	/// Overrides the access token URL; the same caveats apply as with the other
@@ -2733,7 +2726,8 @@ pub struct IdentityProvider {
 	/// Whether to perform discovery and adjust this provider's configuration
 	/// accordingly. This defaults to true. When true, it is an error when
 	/// discovery fails and authorizations will not be attempted to the
-	/// provider.
+	/// provider. When false, the above URLs, except for `discovery_url`, need
+	/// to be set
 	#[serde(default = "true_fn")]
 	pub discovery: bool,
 
