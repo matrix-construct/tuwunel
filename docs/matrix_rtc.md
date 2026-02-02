@@ -260,14 +260,14 @@ http:
 Element Call should now be working.
 
 ## Additional Configuration
-### TURN Integration
-If you follow this guide, and also set up Coturn as per the tuwunel documentation, there will be a port clash between the two services. To avoid this, the following must be added to your `coturn.conf`:
+### External TURN Integration
+If you follow this guide, and also set up Coturn as per the Tuwunel documentation, there will be a port clash between the two services. To avoid this, the following must be added to your `coturn.conf`:
 ```
 min-port=50201
 max-port=65535
 ```
 
-If you have Coturn configured, you can use it as a TURN server for Livekit to improve call reliability. As Coturn allows multiple instances of `static-auth-secret`, it is suggested that the secret used for Livekit is different to that used for tuwunel.
+If you have Coturn configured, you can use it as a TURN server for Livekit to improve call reliability. As Coturn allows multiple instances of `static-auth-secret`, it is suggested that the secret used for Livekit is different to that used for Tuwunel.
 
 1. Create a secret for Coturn. It is suggested that this should be a random 64 character alphanumeric string.
 2. Add the following line to the end of your `turnserver.conf`. `AUTH_SECRET` is the secret created in Step 1.
@@ -284,4 +284,57 @@ static-auth-secret=AUTH_SECRET
 ```
 
 ### Using the Livekit Built In TURN Server
-It is also possible to use the built in Livekit TURN server. Getting this to work can be a somewhat involved process, and a TURN server is not usually required for Matrix RTC calls. Consequently, instructions are not provided here at this time. If you would like to configure this, more information can be found [here](https://docs.livekit.io/transport/self-hosting/deployment/#improving-connectivity-with-turn).
+Livekit includes a built in TURN server which can be used in place of an external option.
+It should be noted that this TURN server will only work with Livekit, and is not compatible with traditional Matrix calling. For that, see the section on [TURN](turn.md).
+
+#### Basic Setup
+The simplest way to enable this is to add the following to your `livekit.yaml`:
+```
+turn:
+  enabled: true
+  udp_port: 3478
+  relay_range_start: 50300
+  relay_range_end: 65535
+  domain: matrix-rtc.yourdomain.com
+```
+It is strongly recommended that you use `network_mode: "host"`; however if it is necessary to specify port mappings, the following ports should be added to `matrix-rtc-livekit` in your `compose.yaml`:
+```
+      - 3478:3478/udp
+      - 50300-65535:50300-65535/udp
+```
+
+You will need to allow ports `3478` and `50300:65535/udp` through your firewall. If you use UFW, the commands are: `ufw allow 3478` and `ufw allow 50300:65535/udp`.
+
+#### Setup With TLS
+To enable TLS for the TURN server, the process is slightly more complicated.
+Some WebRTC software will not accept certificates provided by Let's Encrypt. It is therefore suggested that you use [ZeroSSL](https://zerossl.com/) as an alternative.
+
+1. Create a DNS record for e.g. `matrix-turn.yourdomain.com` pointing to your server.
+2. Get a certificate for this subdomain.
+3. Add the certificates as volumes for `matrix-rtc-livekit` in your `compose.yaml`.
+For example:
+```
+      - ./certs/privkey.pem:/certs/privkey.pem:ro
+      - ./certs/fullchain.pem:/certs/fullchain.pem:ro
+```
+4. Add the following to the bottom of your `livekit.yaml`. The values for `cert_file` and `key_file` should match where these files are mounted in the container.
+```
+turn:
+  enabled: true
+  udp_port: 3478
+  tls_port: 5349
+  relay_range_start: 50300
+  relay_range_end: 65535
+  external_tls: false
+  domain: matrix-turn.yourdomain.com
+  cert_file: /certs/fullchain.pem
+  key_file: /certs/privkey.pem
+```
+5. It is strongly recommended that you use `network_mode: "host"`; however if it is necessary to specify port mappings, the following ports should be added to `matrix-rtc-livekit` in your `compose.yaml`:
+```
+      - 3478:3478/udp
+      - 5349:5349/tcp
+      - 50300-65535:50300-65535/udp
+```
+5. You will need to allow ports `3478`, `5349` and `50300:65535/udp` through your firewall. If you use UFW, the commands are: `ufw allow 3478`, `ufw allow 5349` and `ufw allow 50300:65535/udp`.
+6. Restart the containers.
