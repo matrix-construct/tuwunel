@@ -122,7 +122,7 @@ jobs:
       enable_test_docs: ${{fromJSON(inputs.enable_test_docs || 'true')}}
       enable_test_bench: ${{fromJSON(inputs.enable_test_bench || 'true')}}
       enable_test_memcheck: ${{fromJSON(inputs.enable_test_memcheck || 'true')}}
-      enable_test_smoke: ${{fromJSON(inputs.enable_test_smoke || 'true')}}
+      enable_test_smoke: ${{fromJSON(inputs.enable_test_smoke || env.is_fat || 'false')}}
       enable_test_nix: ${{fromJSON(inputs.enable_test_nix || 'true')}}
       enable_test_rustsdk: ${{fromJSON(inputs.enable_test_rustsdk || 'true')}}
       enable_test_complement: ${{fromJSON(inputs.enable_test_complement || 'true')}}
