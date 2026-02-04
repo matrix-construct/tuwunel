@@ -1738,6 +1738,12 @@
 #
 #allow_room_admins_to_request_unredacted_events = true
 
+# Prevents local users from sending redactions.
+#
+# This check does not apply to server admins.
+#
+#disable_local_redactions = false
+
 # Enable database pool affinity support. On supporting systems, block
 # device queue topologies are detected and the request pool is optimized
 # for the hardware; db_pool_workers is determined automatically.
