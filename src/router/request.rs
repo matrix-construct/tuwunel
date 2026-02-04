@@ -10,7 +10,7 @@ use axum::{
 };
 use futures::FutureExt;
 use http::{Method, StatusCode, Uri};
-use tokio::time::sleep;
+use tokio::{task, time::sleep};
 use tracing::Span;
 use tuwunel_core::{Result, debug, debug_error, debug_warn, err, error, trace};
 use tuwunel_service::Services;
@@ -21,6 +21,7 @@ use tuwunel_service::Services;
 	skip_all,
 	err(Debug, level = "debug")
 	fields(
+		task = %task::id(),
 		id = %services
 			.server
 			.metrics
@@ -72,6 +73,9 @@ pub(crate) async fn handle(
 	parent = parent,
 	skip_all,
 	ret(level = "trace"),
+	fields(
+		task = %task::id(),
+	)
 )]
 #[cfg_attr(not(debug_assertions), expect(unused_variables))]
 async fn execute(
