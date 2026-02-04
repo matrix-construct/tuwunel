@@ -107,12 +107,6 @@ impl Service {
 			})
 	}
 
-	/// Check if a user is an admin
-	#[inline]
-	pub async fn is_admin(&self, user_id: &UserId) -> bool {
-		self.services.admin.user_is_admin(user_id).await
-	}
-
 	/// Create a new user account on this homeserver.
 	///
 	/// User origin is by default "password" (meaning that it will login using

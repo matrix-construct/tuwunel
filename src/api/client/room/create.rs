@@ -807,7 +807,10 @@ async fn can_publish_directory_check(
 		.lockdown_public_room_directory
 		|| body.appservice_info.is_some()
 		|| body.visibility != room::Visibility::Public
-		|| services.users.is_admin(body.sender_user()).await
+		|| services
+			.admin
+			.user_is_admin(body.sender_user())
+			.await
 	{
 		return Ok(());
 	}
@@ -832,7 +835,10 @@ async fn can_create_room_check(
 ) -> Result {
 	if !services.config.allow_room_creation
 		&& body.appservice_info.is_none()
-		&& !services.users.is_admin(body.sender_user()).await
+		&& !services
+			.admin
+			.user_is_admin(body.sender_user())
+			.await
 	{
 		return Err!(Request(Forbidden("Room creation has been disabled.",)));
 	}
