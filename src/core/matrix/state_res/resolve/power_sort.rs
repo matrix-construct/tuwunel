@@ -15,7 +15,7 @@ use super::{
 		RoomCreateEvent, RoomPowerLevelsEvent, RoomPowerLevelsIntField, is_power_event,
 		power_levels::RoomPowerLevelsEventOptionExt,
 	},
-	AuthSet, topological_sort,
+	topological_sort,
 };
 use crate::{
 	Result, err,
@@ -50,7 +50,7 @@ use crate::{
 )]
 pub(super) async fn power_sort<Fetch, Fut, Pdu>(
 	rules: &RoomVersionRules,
-	full_conflicted_set: &AuthSet<OwnedEventId>,
+	full_conflicted_set: &HashSet<OwnedEventId>,
 	fetch: &Fetch,
 ) -> Result<Vec<OwnedEventId>>
 where
@@ -108,7 +108,7 @@ where
 )]
 async fn add_event_auth_chain<Fetch, Fut, Pdu>(
 	mut graph: HashMap<OwnedEventId, HashSet<OwnedEventId>>,
-	full_conflicted_set: &AuthSet<OwnedEventId>,
+	full_conflicted_set: &HashSet<OwnedEventId>,
 	event_id: &EventId,
 	fetch: &Fetch,
 ) -> HashMap<OwnedEventId, HashSet<OwnedEventId>>

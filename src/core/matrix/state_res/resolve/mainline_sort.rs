@@ -1,13 +1,13 @@
-use std::collections::HashMap;
-
-use futures::{Stream, StreamExt, TryStreamExt, pin_mut};
+use futures::{
+	FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt, pin_mut, stream::try_unfold,
+};
 use ruma::{EventId, OwnedEventId, events::TimelineEventType};
 
 use crate::{
-	Result,
+	Error, Result, at, is_equal_to,
 	matrix::Event,
 	trace,
-	utils::stream::{IterStream, TryReadyExt, WidebandExt},
+	utils::stream::{BroadbandExt, IterStream, TryReadyExt},
 };
 
 /// Perform mainline ordering of the given events.
@@ -39,11 +39,14 @@ use crate::{
 	level = "debug",
 	skip_all,
 	fields(
-		?power_level,
+		event_id = power_level_event_id
+			.as_deref()
+			.map(EventId::as_str)
+			.unwrap_or_default(),
 	)
 )]
 pub(super) async fn mainline_sort<'a, RemainingEvents, Fetch, Fut, Pdu>(
-	mut power_level: Option<OwnedEventId>,
+	power_level_event_id: Option<OwnedEventId>,
 	events: RemainingEvents,
 	fetch: &Fetch,
 ) -> Result<Vec<OwnedEventId>>
@@ -54,49 +57,60 @@ where
 	Pdu: Event,
 {
 	// Populate the mainline of the power level.
-	let mut mainline = vec![];
-	while let Some(power_level_event_id) = power_level {
+	let mainline: Vec<_> = try_unfold(power_level_event_id, async |power_level_event_id| {
+		let Some(power_level_event_id) = power_level_event_id else {
+			return Ok::<_, Error>(None);
+		};
+
 		let power_level_event = fetch(power_level_event_id).await?;
+		let this_event_id = power_level_event.event_id().to_owned();
+		let next_event_id = get_power_levels_auth_event(&power_level_event, fetch)
+			.map_ok(|event| {
+				event
+					.as_ref()
+					.map(Event::event_id)
+					.map(ToOwned::to_owned)
+			})
+			.await?;
 
-		mainline.push(power_level_event.event_id().to_owned());
-		power_level = get_power_levels_auth_event(&power_level_event, fetch)
-			.await?
-			.map(|event| event.event_id().to_owned());
-	}
+		trace!(?this_event_id, ?next_event_id, "mainline descent",);
 
-	let mainline_map: HashMap<_, _> = mainline
-		.iter()
-		.rev()
-		.enumerate()
-		.map(|(idx, event_id)| (event_id.clone(), idx))
-		.collect();
+		Ok(Some((this_event_id, next_event_id)))
+	})
+	.try_collect()
+	.await?;
 
-	let order_map: HashMap<_, _> = events
-		.wide_filter_map(async |event_id| {
-			let event = fetch(event_id.to_owned()).await.ok()?;
-			let position = mainline_position(&event, &mainline_map, fetch)
+	let mainline = mainline.iter().rev().map(AsRef::as_ref);
+
+	events
+		.map(ToOwned::to_owned)
+		.broad_filter_map(async |event_id| {
+			let event = fetch(event_id.clone()).await.ok()?;
+			let origin_server_ts = event.origin_server_ts();
+			let position = mainline_position(Some(event), &mainline, fetch)
 				.await
 				.ok()?;
 
-			let event_id = event.event_id().to_owned();
-			let origin_server_ts = event.origin_server_ts();
 			Some((event_id, (position, origin_server_ts)))
 		})
+		.inspect(|(event_id, (position, origin_server_ts))| {
+			trace!(position, ?origin_server_ts, ?event_id, "mainline position");
+		})
 		.collect()
-		.await;
+		.map(|mut vec: Vec<_>| {
+			vec.sort_by(|a, b| {
+				let (a_pos, a_ots) = &a.1;
+				let (b_pos, b_ots) = &b.1;
+				a_pos
+					.cmp(b_pos)
+					.then(a_ots.cmp(b_ots))
+					.then(a.cmp(b))
+			});
 
-	let mut sorted_event_ids: Vec<_> = order_map.keys().cloned().collect();
-
-	sorted_event_ids.sort_by(|a, b| {
-		let (a_pos, a_ots) = &order_map[a];
-		let (b_pos, b_ots) = &order_map[b];
-		a_pos
-			.cmp(b_pos)
-			.then(a_ots.cmp(b_ots))
-			.then(a.cmp(b))
-	});
-
-	Ok(sorted_event_ids)
+			vec.into_iter().map(at!(0)).collect()
+		})
+		.map(Ok)
+		.await
 }
 
 /// Get the mainline position of the given event from the given mainline map.
@@ -112,30 +126,38 @@ where
 /// Returns the mainline position of the event, or an `Err(_)` if one of the
 /// events in the auth chain of the event was not found.
 #[tracing::instrument(
+	name = "position",
 	level = "trace",
+	ret(level = "trace"),
 	skip_all,
 	fields(
-		event = ?event.event_id(),
-		mainline = mainline_map.len(),
+		mainline = mainline.clone().count(),
+		event = ?current_event.as_ref().map(Event::event_id).map(ToOwned::to_owned),
 	)
 )]
-async fn mainline_position<Fetch, Fut, Pdu>(
-	event: &Pdu,
-	mainline_map: &HashMap<OwnedEventId, usize>,
+async fn mainline_position<'a, Mainline, Fetch, Fut, Pdu>(
+	mut current_event: Option<Pdu>,
+	mainline: &Mainline,
 	fetch: &Fetch,
 ) -> Result<usize>
 where
+	Mainline: Iterator<Item = &'a EventId> + Clone + Send + Sync,
 	Fetch: Fn(OwnedEventId) -> Fut + Sync,
 	Fut: Future<Output = Result<Pdu>> + Send,
 	Pdu: Event,
 {
-	let mut current_event = Some(event.clone());
 	while let Some(event) = current_event {
-		trace!(event_id = ?event.event_id(), "mainline");
+		trace!(
+			event_id = ?event.event_id(),
+			"mainline position search",
+		);
 
 		// If the current event is in the mainline map, return its position.
-		if let Some(position) = mainline_map.get(event.event_id()) {
-			return Ok(*position);
+		if let Some(position) = mainline
+			.clone()
+			.position(is_equal_to!(event.event_id()))
+		{
+			return Ok(position);
 		}
 
 		// Look for the power levels event in the auth events.

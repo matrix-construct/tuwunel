@@ -12,6 +12,7 @@ use super::{
 use crate::{
 	Error, Result, debug_warn, err, error,
 	matrix::{Event, EventTypeExt, StateKey},
+	smallvec::SmallVec,
 	trace,
 	utils::stream::{IterStream, ReadyExt, TryReadyExt, TryWidebandExt},
 };
@@ -170,10 +171,10 @@ where
 			Ok(key_val)
 		});
 
-	let auth_events: Vec<_> = auth_events
+	let auth_events = auth_events
 		.chain(auth_types_events)
 		.try_collect()
-		.map_ok(|mut vec: Vec<_>| {
+		.map_ok(|mut vec: SmallVec<[_; 4]>| {
 			vec.sort_by(|a, b| a.0.cmp(&b.0));
 			vec.reverse();
 			vec.dedup_by(|a, b| a.0.eq(&b.0));

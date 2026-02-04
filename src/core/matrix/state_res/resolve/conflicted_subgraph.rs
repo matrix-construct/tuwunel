@@ -1,5 +1,6 @@
 use std::{
 	collections::HashSet as Set,
+	iter::once,
 	mem::take,
 	sync::{Arc, Mutex},
 };
@@ -9,7 +10,8 @@ use ruma::OwnedEventId;
 
 use crate::{
 	Result, debug,
-	matrix::Event,
+	matrix::{Event, pdu::AuthEvents},
+	smallvec::SmallVec,
 	utils::stream::{IterStream, automatic_width},
 };
 
@@ -19,11 +21,18 @@ struct Global {
 	seen: Mutex<Set<OwnedEventId>>,
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 struct Local {
-	path: Vec<OwnedEventId>,
-	stack: Vec<Vec<OwnedEventId>>,
+	path: Path,
+	stack: Stack,
 }
+
+type Path = SmallVec<[OwnedEventId; PATH_INLINE]>;
+type Stack = SmallVec<[Frame; STACK_INLINE]>;
+type Frame = AuthEvents;
+
+const PATH_INLINE: usize = 48;
+const STACK_INLINE: usize = 48;
 
 #[tracing::instrument(name = "conflicted_subgraph", level = "debug", skip_all)]
 pub(super) fn conflicted_subgraph_dfs<ConflictedEventIds, Fetch, Fut, Pdu>(
@@ -52,9 +61,11 @@ where
 				})
 				.await;
 
+			let seen = state.seen.lock().expect("locked");
 			let mut state = state.subgraph.lock().expect("locked");
 			debug!(
-				input_event = conflicted_event_ids.len(),
+				input_events = conflicted_event_ids.len(),
+				seen_events = seen.len(),
 				output_events = state.len(),
 				"conflicted subgraph state"
 			);
@@ -71,8 +82,8 @@ where
 	level = "trace",
 	skip_all,
 	fields(
-		event_id = %conflicted_event_id,
 		event_ids = conflicted_event_ids.len(),
+		event_id = %conflicted_event_id,
 	)
 )]
 async fn subgraph_descent<Fetch, Fut, Pdu>(
@@ -89,8 +100,8 @@ where
 	let Global { subgraph, seen } = &*state;
 
 	let mut local = Local {
-		path: vec![conflicted_event_id.clone()],
-		stack: vec![vec![conflicted_event_id]],
+		path: once(conflicted_event_id.clone()).collect(),
+		stack: once(once(conflicted_event_id).collect()).collect(),
 	};
 
 	while let Some(event_id) = pop(&mut local) {
@@ -128,13 +139,13 @@ where
 fn pop(local: &mut Local) -> Option<OwnedEventId> {
 	let Local { path, stack } = local;
 
-	while stack.last().is_some_and(Vec::is_empty) {
+	while stack.last().is_some_and(Frame::is_empty) {
 		stack.pop();
 		path.pop();
 	}
 
 	stack
 		.last_mut()
-		.and_then(Vec::pop)
+		.and_then(Frame::pop)
 		.inspect(|event_id| path.push(event_id.clone()))
 }

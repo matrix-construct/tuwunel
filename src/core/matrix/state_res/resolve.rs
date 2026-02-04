@@ -9,9 +9,10 @@ mod power_sort;
 mod split_conflicted;
 mod topological_sort;
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use futures::{FutureExt, Stream, StreamExt, TryFutureExt};
+use itertools::Itertools;
 use ruma::{OwnedEventId, events::StateEventType, room_version_rules::RoomVersionRules};
 
 pub use self::topological_sort::topological_sort;
@@ -25,6 +26,7 @@ use super::test_utils;
 use crate::{
 	Result, debug,
 	matrix::{Event, TypeStateKey},
+	smallvec::SmallVec,
 	trace,
 	utils::{
 		BoolExt,
@@ -33,9 +35,6 @@ use crate::{
 	},
 };
 
-/// ConflictMap of OwnedEventId specifically.
-pub type ConflictMap = StateMap<ConflictVec>;
-
 /// A mapping of event type and state_key to some value `T`, usually an
 /// `EventId`.
 pub type StateMap<Id> = BTreeMap<TypeStateKey, Id>;
@@ -43,8 +42,11 @@ pub type StateMap<Id> = BTreeMap<TypeStateKey, Id>;
 /// Full recursive set of `auth_events` for each event in a StateMap.
 pub type AuthSet<Id> = BTreeSet<Id>;
 
+/// ConflictMap of OwnedEventId specifically.
+pub type ConflictMap<Id> = StateMap<ConflictVec<Id>>;
+
 /// List of conflicting event_ids
-type ConflictVec = Vec<OwnedEventId>;
+type ConflictVec<Id> = SmallVec<[Id; 2]>;
 
 /// Apply the [state resolution] algorithm introduced in room version 2 to
 /// resolve the state of a room.
@@ -116,24 +118,25 @@ where
 		.is_some_and(|rules| rules.consider_conflicted_state_subgraph)
 		|| backport_css;
 
+	let conflicted_states = conflicted_states.values().flatten().cloned();
+
 	// Since `org.matrix.hydra.11`, fetch the conflicted state subgraph.
 	let conflicted_subgraph = consider_conflicted_subgraph
-		.then(|| conflicted_states.clone().into_values().flatten())
-		.map_async(async |ids| conflicted_subgraph_dfs(ids.stream(), fetch));
-
-	let conflicted_subgraph = conflicted_subgraph
-		.await
-		.into_iter()
-		.stream()
-		.flatten();
+		.then(|| conflicted_states.clone().stream())
+		.map_async(async |ids| conflicted_subgraph_dfs(ids, fetch))
+		.map(Option::into_iter)
+		.map(IterStream::stream)
+		.flatten_stream()
+		.flatten()
+		.boxed();
 
 	// 0. The full conflicted set is the union of the conflicted state set and the
 	//    auth difference. Don't honor events that don't exist.
-	let full_conflicted_set: AuthSet<_> = auth_difference(auth_sets)
-		.chain(conflicted_states.into_values().flatten().stream())
+	let full_conflicted_set = auth_difference(auth_sets)
+		.chain(conflicted_states.stream())
 		.broad_filter_map(async |id| exists(id.clone()).await.then_some(id))
 		.chain(conflicted_subgraph)
-		.collect::<AuthSet<_>>()
+		.collect::<HashSet<_>>()
 		.inspect(|set| debug!(count = set.len(), "full conflicted set"))
 		.inspect(|set| trace!(?set, "full conflicted set"))
 		.await;
@@ -142,14 +145,15 @@ where
 	//    set. For each such power event P, enlarge X by adding the events in the
 	//    auth chain of P which also belong to the full conflicted set. Sort X into
 	//    a list using the reverse topological power ordering.
-	let sorted_power_events: Vec<_> = power_sort(rules, &full_conflicted_set, fetch)
+	let sorted_power_set: Vec<_> = power_sort(rules, &full_conflicted_set, fetch)
 		.inspect_ok(|list| debug!(count = list.len(), "sorted power events"))
 		.inspect_ok(|list| trace!(?list, "sorted power events"))
+		.boxed()
 		.await?;
 
-	let sorted_power_events_set: AuthSet<_> = sorted_power_events.iter().collect();
+	let power_set_event_ids: Vec<_> = sorted_power_set.iter().sorted().collect();
 
-	let sorted_power_events = sorted_power_events
+	let sorted_power_set = sorted_power_set
 		.iter()
 		.stream()
 		.map(AsRef::as_ref);
@@ -167,9 +171,10 @@ where
 	//    state map, to the list of events from the previous step to get a partially
 	//    resolved state.
 	let partially_resolved_state =
-		iterative_auth_check(rules, sorted_power_events, initial_state, fetch)
+		iterative_auth_check(rules, sorted_power_set, initial_state, fetch)
 			.inspect_ok(|map| debug!(count = map.len(), "partially resolved power state"))
 			.inspect_ok(|map| trace!(?map, "partially resolved power state"))
+			.boxed()
 			.await?;
 
 	// This "epochs" power level event
@@ -179,7 +184,7 @@ where
 
 	let remaining_events: Vec<_> = full_conflicted_set
 		.into_iter()
-		.filter(|id| !sorted_power_events_set.contains(id))
+		.filter(|id| power_set_event_ids.binary_search(&id).is_err())
 		.collect();
 
 	debug!(count = remaining_events.len(), "remaining events");
@@ -195,7 +200,8 @@ where
 	//    the mainline ordering based on the power level in the partially resolved
 	//    state obtained in step 2.
 	let sorted_remaining_events = have_remaining_events
-		.then_async(move || mainline_sort(power_event.cloned(), remaining_events, fetch));
+		.then_async(move || mainline_sort(power_event.cloned(), remaining_events, fetch))
+		.boxed();
 
 	let sorted_remaining_events = sorted_remaining_events
 		.await
@@ -213,6 +219,7 @@ where
 	//    and the list of events from the previous step.
 	let mut resolved_state =
 		iterative_auth_check(rules, sorted_remaining_events, partially_resolved_state, fetch)
+			.boxed()
 			.await?;
 
 	// 5. Update the result by replacing any event with the event with the same key

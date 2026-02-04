@@ -1,4 +1,7 @@
-use std::collections::HashMap;
+use std::{
+	collections::{HashMap, HashSet},
+	iter::once,
+};
 
 use futures::StreamExt;
 use maplit::{hashmap, hashset};
@@ -16,7 +19,7 @@ use ruma::{
 use serde_json::{json, value::to_raw_value as to_raw_json_value};
 
 use super::{
-	AuthSet, StateMap,
+	StateMap,
 	test_utils::{
 		INITIAL_EVENTS, TestStore, alice, bob, charlie, do_check, ella, event_id,
 		member_content_ban, member_content_join, not_found, room_id, to_init_pdu_event,
@@ -39,7 +42,7 @@ async fn test_event_sort() {
 	let rules = RoomVersionRules::V6;
 	let events = INITIAL_EVENTS();
 
-	let auth_chain: AuthSet<OwnedEventId> = AuthSet::new();
+	let auth_chain: HashSet<OwnedEventId> = HashSet::new();
 
 	let sorted_power_events = super::power_sort(&rules, &auth_chain, &async |id| {
 		events.get(&id).cloned().ok_or_else(not_found)
@@ -752,9 +755,9 @@ async fn split_conflicted_state_set_conflicted_unique_state_keys() {
 
 	assert_eq!(unconflicted, StateMap::new());
 	assert_eq!(conflicted, state_set![
-		StateEventType::RoomMember => "@a:hs1" => vec![0],
-		StateEventType::RoomMember => "@b:hs1" => vec![1],
-		StateEventType::RoomMember => "@c:hs1" => vec![2],
+		StateEventType::RoomMember => "@a:hs1" => once(0).collect(),
+		StateEventType::RoomMember => "@b:hs1" => once(1).collect(),
+		StateEventType::RoomMember => "@c:hs1" => once(2).collect(),
 	],);
 }
 
@@ -781,7 +784,7 @@ async fn split_conflicted_state_set_conflicted_same_state_key() {
 
 	assert_eq!(unconflicted, StateMap::new());
 	assert_eq!(conflicted, state_set![
-		StateEventType::RoomMember => "@a:hs1" => vec![0, 1, 2],
+		StateEventType::RoomMember => "@a:hs1" => [0, 1, 2].into_iter().collect(),
 	],);
 }
 
@@ -833,7 +836,7 @@ async fn split_conflicted_state_set_mixed() {
 		StateEventType::RoomMember => "@a:hs1" => 0,
 	],);
 	assert_eq!(conflicted, state_set![
-		StateEventType::RoomMember => "@b:hs1" => vec![1],
-		StateEventType::RoomMember => "@c:hs1" => vec![2],
+		StateEventType::RoomMember => "@b:hs1" => once(1).collect(),
+		StateEventType::RoomMember => "@c:hs1" => once(2).collect(),
 	],);
 }

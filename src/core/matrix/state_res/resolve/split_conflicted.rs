@@ -2,7 +2,7 @@ use std::{collections::HashMap, hash::Hash};
 
 use futures::{Stream, StreamExt};
 
-use super::StateMap;
+use super::{ConflictMap, StateMap};
 use crate::validated;
 
 /// Split the unconflicted state map and the conflicted state set.
@@ -28,7 +28,7 @@ use crate::validated;
 #[tracing::instrument(name = "split", level = "debug", skip_all)]
 pub(super) async fn split_conflicted_state<'a, Maps, Id>(
 	state_maps: Maps,
-) -> (StateMap<Id>, StateMap<Vec<Id>>)
+) -> (StateMap<Id>, ConflictMap<Id>)
 where
 	Maps: Stream<Item = StateMap<Id>>,
 	Id: Clone + Eq + Hash + Ord + Send + Sync + 'a,
@@ -52,7 +52,7 @@ where
 	}
 
 	let mut unconflicted_state_map = StateMap::new();
-	let mut conflicted_state_set = StateMap::<Vec<Id>>::new();
+	let mut conflicted_state_set = ConflictMap::new();
 
 	for (k, v) in occurrences {
 		for (id, occurrence_count) in v {
