@@ -14,7 +14,7 @@ use ruma::{
 	},
 };
 use tuwunel_core::{
-	Err, Result, at,
+	Err, Result, at, is_equal_to, is_not_equal_to,
 	matrix::Event,
 	utils::{
 		future::{BoolExt, TryExtExt},
@@ -53,7 +53,15 @@ pub(crate) async fn get_member_events_route(
 			.ready_filter_map(Result::ok)
 			.ready_filter(|((ty, _), _)| *ty == StateEventType::RoomMember)
 			.map(at!(1))
-			.ready_filter_map(|pdu| membership_filter(pdu, membership, not_membership))
+			.ready_filter(|pdu| {
+				pdu.get_content::<RoomMemberEventContent>()
+					.is_ok_and(|content| {
+						let event_membership = content.membership;
+
+						membership.is_none_or(is_equal_to!(&event_membership))
+							&& not_membership.is_none_or(is_not_equal_to!(&event_membership))
+					})
+			})
 			.map(Event::into_format)
 			.collect()
 			.boxed()
@@ -94,70 +102,23 @@ pub(crate) async fn joined_members_route(
 			.ready_filter_map(Result::ok)
 			.ready_filter(|((ty, _), _)| *ty == StateEventType::RoomMember)
 			.map(at!(1))
-			.ready_filter_map(|pdu| membership_filter(pdu, Some(&MembershipState::Join), None))
 			.ready_filter_map(|pdu| {
 				let content = pdu.get_content::<RoomMemberEventContent>().ok()?;
-				let sender = pdu.sender().to_owned();
-				let member = RoomMember {
-					display_name: content.displayname,
-					avatar_url: content.avatar_url,
-				};
 
-				Some((sender, member))
+				let matches = content.membership == MembershipState::Join;
+
+				matches.then(|| {
+					let sender = pdu.sender().to_owned();
+					let member = RoomMember {
+						display_name: content.displayname,
+						avatar_url: content.avatar_url,
+					};
+
+					(sender, member)
+				})
 			})
 			.collect()
 			.boxed()
 			.await,
 	})
-}
-
-fn membership_filter<Pdu: Event>(
-	pdu: Pdu,
-	for_membership: Option<&MembershipState>,
-	not_membership: Option<&MembershipState>,
-) -> Option<impl Event> {
-	let membership_state_filter = match for_membership {
-		| Some(MembershipState::Ban) => MembershipState::Ban,
-		| Some(MembershipState::Invite) => MembershipState::Invite,
-		| Some(MembershipState::Knock) => MembershipState::Knock,
-		| Some(MembershipState::Leave) => MembershipState::Leave,
-		| Some(_) | None => MembershipState::Join,
-	};
-
-	let not_membership_state_filter = match not_membership {
-		| Some(MembershipState::Ban) => MembershipState::Ban,
-		| Some(MembershipState::Invite) => MembershipState::Invite,
-		| Some(MembershipState::Join) => MembershipState::Join,
-		| Some(MembershipState::Knock) => MembershipState::Knock,
-		| Some(_) | None => MembershipState::Leave,
-	};
-
-	let evt_membership = pdu
-		.get_content::<RoomMemberEventContent>()
-		.ok()?
-		.membership;
-
-	if for_membership.is_some() && not_membership.is_some() {
-		if membership_state_filter != evt_membership
-			|| not_membership_state_filter == evt_membership
-		{
-			None
-		} else {
-			Some(pdu)
-		}
-	} else if for_membership.is_some() && not_membership.is_none() {
-		if membership_state_filter != evt_membership {
-			None
-		} else {
-			Some(pdu)
-		}
-	} else if not_membership.is_some() && for_membership.is_none() {
-		if not_membership_state_filter == evt_membership {
-			None
-		} else {
-			Some(pdu)
-		}
-	} else {
-		Some(pdu)
-	}
 }
