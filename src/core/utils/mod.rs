@@ -147,7 +147,7 @@ macro_rules! is_zero {
 	};
 }
 
-/// Functor for equality i.e. .is_some_and(is_equal!(2))
+/// Functor for equality i.e. .is_some_and(is_equal_to!(2))
 #[macro_export]
 macro_rules! is_equal_to {
 	($val:ident) => {
@@ -156,6 +156,18 @@ macro_rules! is_equal_to {
 
 	($val:expr_2021) => {
 		|x| x == $val
+	};
+}
+
+/// Functor for inequality i.e. .is_some_and(is_not_equal_to!(2))
+#[macro_export]
+macro_rules! is_not_equal_to {
+	($val:ident) => {
+		|x| x != $val
+	};
+
+	($val:expr_2021) => {
+		|x| x != $val
 	};
 }
 
