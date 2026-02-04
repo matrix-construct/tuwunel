@@ -59,7 +59,7 @@ pub(crate) async fn banned_room_check(
 	orig_room_id: Option<&RoomOrAliasId>,
 	client_ip: IpAddr,
 ) -> Result {
-	if services.users.is_admin(user_id).await {
+	if services.admin.user_is_admin(user_id).await {
 		return Ok(());
 	}
 

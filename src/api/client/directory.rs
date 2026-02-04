@@ -134,7 +134,7 @@ pub(crate) async fn set_room_visibility_route(
 				.server
 				.config
 				.lockdown_public_room_directory
-				&& !services.users.is_admin(sender_user).await
+				&& !services.admin.user_is_admin(sender_user).await
 				&& body.appservice_info.is_none()
 			{
 				info!(

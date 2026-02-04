@@ -167,7 +167,7 @@ pub(super) async fn deactivate_all(&self, no_leave_rooms: bool, force: bool) -> 
 				continue;
 			},
 			| Ok(user_id) => {
-				if self.services.users.is_admin(&user_id).await && !force {
+				if self.services.admin.user_is_admin(&user_id).await && !force {
 					self.services
 						.admin
 						.send_text(&format!(
