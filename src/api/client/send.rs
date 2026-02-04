@@ -1,9 +1,12 @@
 use std::collections::BTreeMap;
 
 use axum::extract::State;
-use ruma::{api::client::message::send_message_event, events::MessageLikeEventType};
+use ruma::{
+	api::client::message::send_message_event,
+	events::{MessageLikeEventType, room::redaction::RoomRedactionEventContent},
+};
 use serde_json::from_str;
-use tuwunel_core::{Err, Result, err, matrix::pdu::PduBuilder, utils};
+use tuwunel_core::{Err, Result, err, matrix::pdu::PduBuilder, utils, warn};
 
 use crate::Ruma;
 
@@ -23,6 +26,34 @@ pub(crate) async fn send_message_event_route(
 	let sender_user = body.sender_user();
 	let sender_device = body.sender_device.as_deref();
 	let appservice_info = body.appservice_info.as_ref();
+
+	if body.event_type == MessageLikeEventType::RoomRedaction
+		&& services.config.disable_local_redactions
+		&& !services.admin.user_is_admin(sender_user).await
+	{
+		if let Some(event_id) = body
+			.body
+			.body
+			.deserialize_as_unchecked::<RoomRedactionEventContent>()
+			.ok()
+			.and_then(|content| content.redacts)
+		{
+			warn!(
+				%sender_user,
+				%event_id,
+				"Local redactions are disabled, non-admin user attempted to redact an event"
+			);
+		} else {
+			warn!(
+				%sender_user,
+				event = %body.body.body.json(),
+				"Local redactions are disabled, non-admin user attempted to redact an event \
+				 with an invalid redaction event"
+			);
+		}
+
+		return Err!(Request(Forbidden("Redactions are disabled on this server.")));
+	}
 
 	// Forbid m.room.encrypted if encryption is disabled
 	if MessageLikeEventType::RoomEncrypted == body.event_type && !services.config.allow_encryption

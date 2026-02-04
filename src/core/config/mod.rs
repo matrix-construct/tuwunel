@@ -2020,6 +2020,12 @@ pub struct Config {
 	#[serde(default = "true_fn")]
 	pub allow_room_admins_to_request_unredacted_events: bool,
 
+	/// Prevents local users from sending redactions.
+	///
+	/// This check does not apply to server admins.
+	#[serde(default)]
+	pub disable_local_redactions: bool,
+
 	/// Enable database pool affinity support. On supporting systems, block
 	/// device queue topologies are detected and the request pool is optimized
 	/// for the hardware; db_pool_workers is determined automatically.
