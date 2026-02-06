@@ -42,13 +42,12 @@ macro_rules! expected {
 #[collapse_debuginfo(yes)]
 macro_rules! validated {
 	($($input:tt)+) => {
-		//#[expect(clippy::arithmetic_side_effects)] {
-		//Some($($input)*)
-		//	.ok_or_else(|| $crate::err!(Arithmetic("this error should never been seen")))
-		//}
-
-		//NOTE: remove me when stmt_expr_attributes is stable
-		$crate::expected!("validated arithmetic expression failed", $($input)+)
+		{
+			// TODO rewrite when stmt_expr_attributes is stable
+			#[expect(clippy::arithmetic_side_effects)]
+			let __res = ($($input)+);
+			__res
+		}
 	};
 }
 
@@ -58,7 +57,9 @@ macro_rules! validated {
 #[macro_export]
 #[collapse_debuginfo(yes)]
 macro_rules! validated {
-	($($input:tt)+) => { $crate::expected!($($input)+) }
+	($($input:tt)+) => {
+		$crate::expected!("validated arithmetic expression failed", $($input)+)
+	}
 }
 
 #[inline]
