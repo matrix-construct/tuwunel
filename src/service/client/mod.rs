@@ -1,121 +1,50 @@
 use std::{
+	ops::Deref,
 	sync::{Arc, LazyLock},
 	time::Duration,
 };
 
 use ipaddress::IPAddress;
-use reqwest::{Certificate, dns::Resolve, redirect};
+use reqwest::{Certificate, Client, ClientBuilder, dns::Resolve, redirect};
 use tuwunel_core::{Config, Result, either::Either, err, implement, trace};
 
-use crate::{service, services::OnceServices};
+use crate::{Services, service};
 
-type ClientLazylock = LazyLock<reqwest::Client, Box<dyn FnOnce() -> reqwest::Client + Send>>;
+pub struct Clients {
+	pub default: Client,
+	pub url_preview: Client,
+	pub extern_media: Client,
+	pub well_known: Client,
+	pub federation: Client,
+	pub synapse: Client,
+	pub sender: Client,
+	pub appservice: Client,
+	pub pusher: Client,
+	pub oauth: Client,
+}
+
 pub struct Service {
-	pub default: ClientLazylock,
-	pub url_preview: ClientLazylock,
-	pub extern_media: ClientLazylock,
-	pub well_known: ClientLazylock,
-	pub federation: ClientLazylock,
-	pub synapse: ClientLazylock,
-	pub sender: ClientLazylock,
-	pub appservice: ClientLazylock,
-	pub pusher: ClientLazylock,
-	pub oauth: ClientLazylock,
+	pub clients: LazyLock<Clients, Box<dyn FnOnce() -> Clients + Send>>,
 
 	pub cidr_range_denylist: Vec<IPAddress>,
+}
+
+impl Deref for Service {
+	type Target = Clients;
+
+	fn deref(&self) -> &Self::Target { &self.clients }
 }
 
 impl crate::Service for Service {
 	fn build(args: &crate::Args<'_>) -> Result<Arc<Self>> {
 		let config = &args.server.config;
 
-		macro_rules! create_client {
-			($config:ident, $services:ident; $expr:expr) => {{
-				fn make($services: Arc<OnceServices>) -> Result<reqwest::Client> {
-					let $config = &$services.server.config;
-					Ok($expr.build()?)
-				}
-				let services = Arc::clone(args.services);
-				LazyLock::new(Box::new(|| make(services).unwrap()))
-			}};
-		}
-
 		Ok(Arc::new(Self {
-			default: create_client!(config, services; base(config)?
-				.dns_resolver(Arc::clone(&services.resolver.resolver))),
+			clients: LazyLock::new(Box::new({
+				let services = args.services.clone();
 
-			url_preview: create_client!(config, services; {
-				let url_preview_bind_addr = config
-					.url_preview_bound_interface
-					.clone()
-					.and_then(Either::left);
-
-				let url_preview_bind_iface = config
-					.url_preview_bound_interface
-					.clone()
-					.and_then(Either::right);
-
-				base(config)
-				.and_then(|builder| {
-					builder_interface(builder, url_preview_bind_iface.as_deref())
-				})?
-				.local_address(url_preview_bind_addr)
-				.dns_resolver(Arc::clone(&services.resolver.resolver))
-				.redirect(redirect::Policy::limited(3))
-			}),
-
-			extern_media: create_client!(config, services; base(config)?
-				.dns_resolver(Arc::clone(&services.resolver.resolver))
-				.redirect(redirect::Policy::limited(3))),
-
-			well_known: create_client!(config, services; base(config)?
-				.dns_resolver(Arc::clone(&services.resolver.resolver))
-				.connect_timeout(Duration::from_secs(config.well_known_conn_timeout))
-				.read_timeout(Duration::from_secs(config.well_known_timeout))
-				.timeout(Duration::from_secs(config.well_known_timeout))
-				.pool_max_idle_per_host(0)
-				.redirect(redirect::Policy::limited(4))),
-
-			federation: create_client!(config, services; base(config)?
-				.dns_resolver(Arc::clone(&services.resolver.resolver.hooked))
-				.read_timeout(Duration::from_secs(config.federation_timeout))
-				.pool_max_idle_per_host(config.federation_idle_per_host.into())
-				.pool_idle_timeout(Duration::from_secs(config.federation_idle_timeout))
-				.redirect(redirect::Policy::limited(3))),
-
-			synapse: create_client!(config, services; base(config)?
-				.dns_resolver(Arc::clone(&services.resolver.resolver.hooked))
-				.read_timeout(Duration::from_secs(305))
-				.pool_max_idle_per_host(0)
-				.redirect(redirect::Policy::limited(3))),
-
-			sender: create_client!(config, services; base(config)?
-				.dns_resolver(Arc::clone(&services.resolver.resolver.hooked))
-				.read_timeout(Duration::from_secs(config.sender_timeout))
-				.timeout(Duration::from_secs(config.sender_timeout))
-				.pool_max_idle_per_host(1)
-				.pool_idle_timeout(Duration::from_secs(config.sender_idle_timeout))
-				.redirect(redirect::Policy::limited(2))),
-
-			appservice: create_client!(config, services; base(config)?
-				.dns_resolver(appservice_resolver(&services))
-				.connect_timeout(Duration::from_secs(5))
-				.read_timeout(Duration::from_secs(config.appservice_timeout))
-				.timeout(Duration::from_secs(config.appservice_timeout))
-				.pool_max_idle_per_host(1)
-				.pool_idle_timeout(Duration::from_secs(config.appservice_idle_timeout))
-				.redirect(redirect::Policy::limited(2))),
-
-			pusher: create_client!(config, services; base(config)?
-				.dns_resolver(Arc::clone(&services.resolver.resolver))
-				.pool_max_idle_per_host(1)
-				.pool_idle_timeout(Duration::from_secs(config.pusher_idle_timeout))
-				.redirect(redirect::Policy::limited(2))),
-
-			oauth: create_client!(config, services; base(config)?
-				.dns_resolver(Arc::clone(&services.resolver.resolver))
-				.redirect(redirect::Policy::limited(0))
-				.pool_max_idle_per_host(1)),
+				move || make_clients(&services).expect("failed to construct clients")
+			})),
 
 			cidr_range_denylist: config
 				.ip_range_denylist
@@ -130,8 +59,98 @@ impl crate::Service for Service {
 	fn name(&self) -> &str { service::make_name(std::module_path!()) }
 }
 
-fn base(config: &Config) -> Result<reqwest::ClientBuilder> {
-	let mut builder = reqwest::Client::builder()
+fn make_clients(services: &Services) -> Result<Clients> {
+	macro_rules! with {
+		($builder:ident => $make:expr) => {{
+			let $builder = base(&services.config)?;
+			$make.build()?
+		}};
+	}
+
+	Ok(Clients {
+		default: with!(cb => cb.dns_resolver(Arc::clone(&services.resolver.resolver))),
+
+		url_preview: with!(cb => {
+			let interface = &services
+				.config
+				.url_preview_bound_interface;
+
+			let bind_addr = interface.clone().and_then(Either::left);
+			let bind_iface = interface.clone().and_then(Either::right);
+
+			builder_interface(cb, bind_iface.as_deref())?
+				.local_address(bind_addr)
+				.dns_resolver(Arc::clone(&services.resolver.resolver))
+				.redirect(redirect::Policy::limited(3))
+		}),
+
+		extern_media: with!(cb => cb
+			.dns_resolver(Arc::clone(&services.resolver.resolver))
+			.redirect(redirect::Policy::limited(3))),
+
+		well_known: with!(cb => cb
+			.dns_resolver(Arc::clone(&services.resolver.resolver))
+			.connect_timeout(Duration::from_secs(
+				services.config.well_known_conn_timeout,
+			))
+			.read_timeout(Duration::from_secs(services.config.well_known_timeout))
+			.timeout(Duration::from_secs(services.config.well_known_timeout))
+			.pool_max_idle_per_host(0)
+			.redirect(redirect::Policy::limited(4))),
+
+		federation: with!(cb => cb
+			.dns_resolver(Arc::clone(&services.resolver.resolver.hooked))
+			.read_timeout(Duration::from_secs(services.config.federation_timeout))
+			.pool_max_idle_per_host(services.config.federation_idle_per_host.into())
+			.pool_idle_timeout(Duration::from_secs(
+				services.config.federation_idle_timeout,
+			))
+			.redirect(redirect::Policy::limited(3))),
+
+		synapse: with!(cb => cb
+			.dns_resolver(Arc::clone(&services.resolver.resolver.hooked))
+			.read_timeout(Duration::from_secs(305))
+			.pool_max_idle_per_host(0)
+			.redirect(redirect::Policy::limited(3))),
+
+		sender: with!(cb => cb
+			.dns_resolver(Arc::clone(&services.resolver.resolver.hooked))
+			.read_timeout(Duration::from_secs(services.config.sender_timeout))
+			.timeout(Duration::from_secs(services.config.sender_timeout))
+			.pool_max_idle_per_host(1)
+			.pool_idle_timeout(Duration::from_secs(
+				services.config.sender_idle_timeout,
+			))
+			.redirect(redirect::Policy::limited(2))),
+
+		appservice: with!(cb => cb
+			.dns_resolver(appservice_resolver(services))
+			.connect_timeout(Duration::from_secs(5))
+			.read_timeout(Duration::from_secs(services.config.appservice_timeout))
+			.timeout(Duration::from_secs(services.config.appservice_timeout))
+			.pool_max_idle_per_host(1)
+			.pool_idle_timeout(Duration::from_secs(
+				services.config.appservice_idle_timeout,
+			))
+			.redirect(redirect::Policy::limited(2))),
+
+		pusher: with!(cb => cb
+			.dns_resolver(Arc::clone(&services.resolver.resolver))
+			.pool_max_idle_per_host(1)
+			.pool_idle_timeout(Duration::from_secs(
+				services.config.pusher_idle_timeout,
+			))
+			.redirect(redirect::Policy::limited(2))),
+
+		oauth: with!(cb => cb
+			.dns_resolver(Arc::clone(&services.resolver.resolver))
+			.redirect(redirect::Policy::limited(0))
+			.pool_max_idle_per_host(1)),
+	})
+}
+
+fn base(config: &Config) -> Result<ClientBuilder> {
+	let mut builder = Client::builder()
 		.hickory_dns(true)
 		.connect_timeout(Duration::from_secs(config.request_conn_timeout))
 		.read_timeout(Duration::from_secs(config.request_timeout))
@@ -203,10 +222,7 @@ fn base(config: &Config) -> Result<reqwest::ClientBuilder> {
 	target_os = "fuchsia",
 	target_os = "linux"
 ))]
-fn builder_interface(
-	builder: reqwest::ClientBuilder,
-	config: Option<&str>,
-) -> Result<reqwest::ClientBuilder> {
+fn builder_interface(builder: ClientBuilder, config: Option<&str>) -> Result<ClientBuilder> {
 	if let Some(iface) = config {
 		Ok(builder.interface(iface))
 	} else {
@@ -219,10 +235,7 @@ fn builder_interface(
 	target_os = "fuchsia",
 	target_os = "linux"
 )))]
-fn builder_interface(
-	builder: reqwest::ClientBuilder,
-	config: Option<&str>,
-) -> Result<reqwest::ClientBuilder> {
+fn builder_interface(builder: ClientBuilder, config: Option<&str>) -> Result<ClientBuilder> {
 	use tuwunel_core::Err;
 
 	if let Some(iface) = config {
@@ -232,7 +245,7 @@ fn builder_interface(
 	}
 }
 
-fn appservice_resolver(services: &Arc<OnceServices>) -> Arc<dyn Resolve> {
+fn appservice_resolver(services: &Services) -> Arc<dyn Resolve> {
 	if services.server.config.dns_passthru_appservices {
 		services.resolver.resolver.passthru.clone()
 	} else {
