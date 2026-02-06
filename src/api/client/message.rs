@@ -54,7 +54,7 @@ const IGNORED_MESSAGE_TYPES: &[TimelineEventType] = &[
 	CallNotify,
 ];
 
-const LIMIT_MAX: usize = 100;
+const LIMIT_MAX: usize = 1000;
 const LIMIT_DEFAULT: usize = 10;
 
 /// # `GET /_matrix/client/r0/rooms/{roomId}/messages`
