@@ -602,6 +602,11 @@ async fn decide_user_id(
 			.map(str::to_lowercase)
 			.filter(|_| allowed("preferred_username")),
 		userinfo
+			.username
+			.as_deref()
+			.map(str::to_lowercase)
+			.filter(|_| allowed("username")),
+		userinfo
 			.nickname
 			.as_deref()
 			.map(str::to_lowercase)
