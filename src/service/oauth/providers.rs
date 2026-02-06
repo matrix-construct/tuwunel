@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use serde_json::{Map as JsonObject, Value as JsonValue};
 use tokio::sync::RwLock;
 pub use tuwunel_core::config::IdentityProvider as Provider;
-use tuwunel_core::{Err, Result, debug, debug::INFO_SPAN_LEVEL, err, implement};
+use tuwunel_core::{Err, Result, debug, debug::INFO_SPAN_LEVEL, implement};
 use url::Url;
 
 use crate::SelfServices;
@@ -123,103 +123,178 @@ async fn configure(&self, mut provider: Provider) -> Result<Provider> {
 		.name
 		.get_or_insert_with(|| provider.brand.clone());
 
+	if provider.callback_url.is_none() {
+		let server_url = self
+			.services
+			.config
+			.well_known
+			.client
+			.as_ref()
+			.expect("should be set");
+
+		let callback_path =
+			format!("_matrix/client/unstable/login/sso/callback/{}", provider.client_id);
+
+		provider.callback_url = Some(
+			server_url
+				.join(&callback_path)
+				.expect("valid callback url"),
+		);
+	}
+
+	if provider.brand == "github" {
+		configure_github(&mut provider);
+		return Ok(provider);
+	}
+
 	if provider.issuer_url.is_none() {
-		_ = provider
-			.issuer_url
-			.replace(match provider.brand.as_str() {
-				| "github" => "https://github.com".try_into()?,
-				| "gitlab" => "https://gitlab.com".try_into()?,
-				| "google" => "https://accounts.google.com".try_into()?,
-				| _ => return Err!(Config("issuer_url", "Required for this provider.")),
-			});
+		provider.issuer_url = Some(match provider.brand.as_str() {
+			| "gitlab" => "https://gitlab.com".try_into()?,
+			| "google" => "https://accounts.google.com".try_into()?,
+			| _ => return Err!(Config("issuer_url", "Required for this provider.")),
+		});
 	}
 
-	if provider.base_path.is_none() {
-		provider.base_path = match provider.brand.as_str() {
-			| "github" => Some("/login/oauth".to_owned()),
-			| _ => None,
+	if !provider.discovery {
+		assert_manual_urls(&provider)?;
+		return Ok(provider);
+	}
+
+	let discovery_response = {
+		let response = self.discover(&provider).await?;
+		let Some(response_map) = response.as_object() else {
+			return Err!(Request(NotJson("Expecting JSON object for discovery response")));
 		};
-	}
 
-	let response = self
-		.discover(&provider)
-		.await
-		.and_then(|response| {
-			response.as_object().cloned().ok_or_else(|| {
-				err!(Request(NotJson("Expecting JSON object for discovery response")))
-			})
-		})
-		.and_then(|response| check_issuer(response, &provider))?;
+		check_issuer(response_map, &provider)?;
+
+		response_map.to_owned()
+	};
 
 	if provider.authorization_url.is_none() {
-		response
-			.get("authorization_endpoint")
-			.and_then(JsonValue::as_str)
-			.map(Url::parse)
-			.transpose()?
-			.or_else(|| make_url(&provider, "/authorize").ok())
-			.map(|url| provider.authorization_url.replace(url));
+		provider.authorization_url = Some(assert_and_parse_url(
+			provider.id(),
+			&discovery_response,
+			"authorization_endpoint",
+		)?);
 	}
 
 	if provider.revocation_url.is_none() {
-		response
-			.get("revocation_endpoint")
-			.and_then(JsonValue::as_str)
-			.map(Url::parse)
-			.transpose()?
-			.or_else(|| make_url(&provider, "/revocation").ok())
-			.map(|url| provider.revocation_url.replace(url));
+		provider.revocation_url = Some(assert_and_parse_url(
+			provider.id(),
+			&discovery_response,
+			"revocation_endpoint",
+		)?);
 	}
 
 	if provider.introspection_url.is_none() {
-		response
-			.get("introspection_endpoint")
-			.and_then(JsonValue::as_str)
-			.map(Url::parse)
-			.transpose()?
-			.or_else(|| make_url(&provider, "/introspection").ok())
-			.map(|url| provider.introspection_url.replace(url));
+		provider.introspection_url = Some(assert_and_parse_url(
+			provider.id(),
+			&discovery_response,
+			"introspection_endpoint",
+		)?);
 	}
 
 	if provider.userinfo_url.is_none() {
-		response
-			.get("userinfo_endpoint")
-			.and_then(JsonValue::as_str)
-			.map(Url::parse)
-			.transpose()?
-			.or_else(|| match provider.brand.as_str() {
-				| "github" => "https://api.github.com/user".try_into().ok(),
-				| _ => make_url(&provider, "/userinfo").ok(),
-			})
-			.map(|url| provider.userinfo_url.replace(url));
+		provider.userinfo_url =
+			Some(assert_and_parse_url(provider.id(), &discovery_response, "userinfo_endpoint")?);
 	}
 
 	if provider.token_url.is_none() {
-		response
-			.get("token_endpoint")
-			.and_then(JsonValue::as_str)
-			.map(Url::parse)
-			.transpose()?
-			.or_else(|| {
-				let path = if provider.brand == "github" {
-					"/access_token"
-				} else {
-					"/token"
-				};
-
-				make_url(&provider, path).ok()
-			})
-			.map(|url| provider.token_url.replace(url));
+		provider.token_url =
+			Some(assert_and_parse_url(provider.id(), &discovery_response, "token_endpoint")?);
 	}
 
 	Ok(provider)
+}
+
+fn configure_github(provider: &mut Provider) {
+	let issuer = "https://github.com"
+		.parse::<Url>()
+		.expect("valid url");
+
+	let oauth_base = "https://api.github.com/login/oauth/"
+		.parse::<Url>()
+		.expect("valid url");
+
+	provider.discovery_url = Some(
+		issuer
+			.join("login/oauth/.well-known/openid-configuration")
+			.expect("valid url"),
+	);
+
+	provider.issuer_url = Some(issuer);
+
+	provider.authorization_url = Some(oauth_base.join("authorize").expect("valid url"));
+	provider.revocation_url = Some(oauth_base.join("revocation").expect("valid url"));
+	provider.introspection_url = Some(
+		oauth_base
+			.join("introspection")
+			.expect("valid url"),
+	);
+	provider.token_url = Some(
+		oauth_base
+			.join("access_token")
+			.expect("valid url"),
+	);
+
+	// NOTE: this one doesn't have the '/login/oauth' base
+	provider.userinfo_url = Some(
+		"https://api.github.com/user"
+			.parse::<Url>()
+			.expect("valid url"),
+	);
+}
+
+fn assert_manual_urls(provider: &Provider) -> Result<()> {
+	if provider.authorization_url.is_none() {
+		return Err!(Config(
+			"authorization_url",
+			"Required for provider {}, since discovery is disabled",
+			provider.client_id
+		));
+	}
+
+	if provider.revocation_url.is_none() {
+		return Err!(Config(
+			"revocation_url",
+			"Required for provider {}, since discovery is disabled",
+			provider.client_id
+		));
+	}
+
+	if provider.introspection_url.is_none() {
+		return Err!(Config(
+			"introspection_url",
+			"Required for provider {}, since discovery is disabled",
+			provider.client_id
+		));
+	}
+
+	if provider.userinfo_url.is_none() {
+		return Err!(Config(
+			"userinfo_url",
+			"Required for provider {}, since discovery is disabled",
+			provider.client_id
+		));
+	}
+
+	if provider.token_url.is_none() {
+		return Err!(Config(
+			"token_url",
+			"Required for provider {}, since discovery is disabled",
+			provider.client_id
+		));
+	}
+
+	Ok(())
 }
 
 /// Send a network request to a provider at the computed location of the
 /// `.well-known/openid-configuration`, returning the configuration.
 #[implement(Providers)]
 #[tracing::instrument(level = "debug", ret(level = "trace"), skip(self))]
-pub async fn discover(&self, provider: &Provider) -> Result<JsonValue> {
+async fn discover(&self, provider: &Provider) -> Result<JsonValue> {
 	self.services
 		.client
 		.oauth
@@ -232,36 +307,34 @@ pub async fn discover(&self, provider: &Provider) -> Result<JsonValue> {
 		.map_err(Into::into)
 }
 
-/// Compute the location of the `/.well-known/openid-configuration` based on the
+/// Get the location of the `/.well-known/openid-configuration` based on the
 /// local provider config.
 fn discovery_url(provider: &Provider) -> Result<Url> {
-	let default_url = provider
-		.discovery
-		.then(|| make_url(provider, "/.well-known/openid-configuration"))
-		.transpose()?;
+	if let Some(url) = &provider.discovery_url {
+		return Ok(url.to_owned());
+	}
 
-	let Some(url) = provider
-		.discovery_url
-		.clone()
-		.filter(|_| provider.discovery)
-		.or(default_url)
-	else {
-		return Err!(Config(
-			"discovery_url",
-			"Failed to determine URL for discovery of provider {}",
-			provider.id()
-		));
+	let issuer = provider
+		.issuer_url
+		.as_ref()
+		.expect("issuer to be asserted before calling discover");
+
+	let issuer_path = issuer.path();
+
+	let base_url = if issuer_path.ends_with('/') {
+		issuer.to_owned()
+	} else {
+		let mut url = issuer.to_owned();
+		url.set_path((issuer_path.to_owned() + "/").as_str());
+		url
 	};
 
-	Ok(url)
+	Ok(base_url.join(".well-known/openid-configuration")?)
 }
 
 /// Validate that the locally configured `issuer_url` matches the issuer claimed
 /// in any response. todo: cryptographic validation is not yet implemented here.
-fn check_issuer(
-	response: JsonObject<String, JsonValue>,
-	provider: &Provider,
-) -> Result<JsonObject<String, JsonValue>> {
+fn check_issuer(response: &JsonObject<String, JsonValue>, provider: &Provider) -> Result<()> {
 	let expected = provider
 		.issuer_url
 		.as_ref()
@@ -279,23 +352,21 @@ fn check_issuer(
 		)));
 	}
 
-	Ok(response)
+	Ok(())
 }
 
-/// Generate a full URL for a request to the idp based on the idp's derived
-/// configuration.
-fn make_url(provider: &Provider, path: &str) -> Result<Url> {
-	let mut suffix = provider.base_path.clone().unwrap_or_default();
+/// Assert that a url exists in the response and parse it
+fn assert_and_parse_url(
+	provider_id: &str,
+	response_map: &serde_json::Map<String, serde_json::Value>,
+	url_name: &str,
+) -> Result<Url> {
+	let Some(url_value) = response_map.get(url_name) else {
+		return Err!(
+			"Error building oidc provider '{provider_id}': {url_name} is missing from openid \
+			 discovery response",
+		);
+	};
 
-	suffix.push_str(path);
-	let url = provider
-		.issuer_url
-		.as_ref()
-		.ok_or_else(|| {
-			let id = &provider.client_id;
-			err!(Config("issuer_url", "Provider {id:?} required field"))
-		})?
-		.join(&suffix)?;
-
-	Ok(url)
+	Ok(url_value.as_str().unwrap_or_default().parse()?)
 }
