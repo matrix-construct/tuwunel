@@ -15,6 +15,7 @@
   - [Debian](deploying/debian.md)
   - [Red Hat](deploying/redhat.md)
   - [FreeBSD](deploying/freebsd.md)
+  - [Authentication](deploying/authentication.md)
 - [TURN](turn.md)
 - [Matrix RTC (Element Call)](matrix_rtc.md)
 - [Appservices](appservices.md)

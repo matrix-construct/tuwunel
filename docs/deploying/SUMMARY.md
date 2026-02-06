@@ -9,3 +9,4 @@
 - [Red Hat](redhat.md)
 - [FreeBSD](freebsd.md)
 - [Podman systemd](podman-systemd.md)
+- [Authentication](authentication.md)
