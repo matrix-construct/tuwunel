@@ -2698,9 +2698,11 @@ pub struct IdentityProvider {
 	pub userid_claims: BTreeSet<String>,
 
 	/// Optional extra path components after the issuer_url leading to the
-	/// location of the `.well-known` directory used for discovery. This will be
-	/// empty for specification-compliant providers. We have supplied any known
-	/// values based on `brand` (e.g. `/login/oauth` for GitHub).
+	/// location of the `.well-known` directory used for discovery. If the path
+	/// starts with a slash it will be treated as absolute, meaning overwriting
+	/// any path in the issuer_url. The path needs to end with a slash. This
+	/// will be empty for specification-compliant providers. We have supplied
+	/// any known values based on `brand` (e.g. `login/oauth/` for GitHub).
 	pub base_path: Option<String>,
 
 	/// Overrides the `.well-known` location where the provider's openid
