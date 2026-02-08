@@ -2,7 +2,6 @@
 //! etc information which can be queried by admins or used by developers.
 
 pub mod cargo;
-pub mod room_version;
 pub mod rustc;
 pub mod version;
 

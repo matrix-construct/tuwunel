@@ -288,7 +288,7 @@ async fn remote_leave(
 
 	if !self
 		.services
-		.server
+		.config
 		.supported_room_version(&room_version_id)
 	{
 		return Err!(BadServerResponse(warn!(

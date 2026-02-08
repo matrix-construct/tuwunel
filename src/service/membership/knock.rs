@@ -12,8 +12,8 @@ use ruma::{
 	},
 };
 use tuwunel_core::{
-	Err, Event, PduCount, Result, debug, debug_info, debug_warn, err, extract_variant, implement,
-	info,
+	Err, Event, PduCount, Result, at, debug, debug_info, debug_warn, err, extract_variant,
+	implement, info,
 	matrix::event::gen_event_id,
 	pdu::{PduBuilder, PduEvent},
 	trace, utils, warn,
@@ -195,7 +195,7 @@ async fn knock_room_helper_local(
 
 	if !self
 		.services
-		.server
+		.config
 		.supported_room_version(&room_version_id)
 	{
 		return Err!(BadServerResponse(
@@ -370,7 +370,7 @@ async fn knock_room_helper_remote(
 
 	if !self
 		.services
-		.server
+		.config
 		.supported_room_version(&room_version_id)
 	{
 		return Err!(BadServerResponse(
@@ -644,8 +644,9 @@ async fn make_knock_request(
 				user_id: sender_user.to_owned(),
 				ver: self
 					.services
-					.server
+					.config
 					.supported_room_versions()
+					.map(at!(0))
 					.collect(),
 			})
 			.await;

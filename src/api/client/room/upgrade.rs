@@ -78,7 +78,7 @@ pub(crate) async fn upgrade_room_route(
 	let version_rules = room_version::rules(new_version)?;
 
 	if !services
-		.server
+		.config
 		.supported_room_version(new_version)
 	{
 		return Err!(Request(UnsupportedRoomVersion(

@@ -1,6 +1,7 @@
 pub mod check;
 pub mod manager;
 pub mod proxy;
+pub mod room_version;
 
 use std::{
 	collections::{BTreeMap, BTreeSet},

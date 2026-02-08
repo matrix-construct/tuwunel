@@ -4,7 +4,7 @@ use either::Either;
 use itertools::Itertools;
 
 use super::{DEPRECATED_KEYS, IdentityProvider};
-use crate::{Config, Err, Result, Server, debug, debug_info, error, warn};
+use crate::{Config, Err, Result, debug, debug_info, error, warn};
 
 /// Performs check() with additional checks specific to reloading old config
 /// with new config.
@@ -294,9 +294,7 @@ pub fn check(config: &Config) -> Result {
 		));
 	}
 
-	if !Server::available_room_versions()
-		.any(|(version, _)| version == config.default_room_version)
-	{
+	if !config.supported_room_version(&config.default_room_version) {
 		return Err!(Config(
 			"default_room_version",
 			"Room version {:?} is not available",

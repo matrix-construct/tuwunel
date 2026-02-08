@@ -12,7 +12,7 @@ use ruma::{
 	},
 };
 use serde_json::json;
-use tuwunel_core::{Result, Server};
+use tuwunel_core::Result;
 
 use crate::Ruma;
 
@@ -24,8 +24,10 @@ pub(crate) async fn get_capabilities_route(
 	State(services): State<crate::State>,
 	_body: Ruma<get_capabilities::v3::Request>,
 ) -> Result<get_capabilities::v3::Response> {
-	let available: BTreeMap<RoomVersionId, RoomVersionStability> =
-		Server::available_room_versions().collect();
+	let available: BTreeMap<RoomVersionId, RoomVersionStability> = services
+		.config
+		.supported_room_versions()
+		.collect();
 
 	let mut capabilities = Capabilities::default();
 	capabilities.room_versions = RoomVersionsCapability {

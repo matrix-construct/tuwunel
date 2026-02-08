@@ -82,7 +82,7 @@ pub(crate) async fn create_room_route(
 		.as_ref()
 		.map_or(Ok(&services.server.config.default_room_version), |version| {
 			services
-				.server
+				.config
 				.supported_room_version(version)
 				.then_ok_or_else(version, || {
 					err!(Request(UnsupportedRoomVersion(

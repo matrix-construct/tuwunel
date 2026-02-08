@@ -41,7 +41,7 @@ pub(crate) async fn create_invite_route(
 		.await?;
 
 	if !services
-		.server
+		.config
 		.supported_room_version(&body.room_version)
 	{
 		return Err(Error::BadRequest(
