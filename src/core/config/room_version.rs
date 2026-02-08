@@ -4,7 +4,7 @@ use crate::Config;
 
 /// Partially supported non-compliant room versions
 pub const UNSTABLE_ROOM_VERSIONS: &[RoomVersionId] =
-	&[RoomVersionId::V2, RoomVersionId::V3, RoomVersionId::V4, RoomVersionId::V5];
+	&[RoomVersionId::V3, RoomVersionId::V4, RoomVersionId::V5];
 
 /// Supported and stable room versions
 pub const STABLE_ROOM_VERSIONS: &[RoomVersionId] = &[
