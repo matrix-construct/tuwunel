@@ -26,7 +26,7 @@ OCI images for tuwunel are available in the registries listed below.
 When you have the image you can simply run it with
 
 ```bash
-docker run -d -p 8448:6167 \
+docker run -d -p 8448:8008 \
     -v db:/var/lib/tuwunel/ \
     -e TUWUNEL_SERVER_NAME="your.server.name" \
     -e TUWUNEL_ALLOW_REGISTRATION=false \
