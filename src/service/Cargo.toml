@@ -120,6 +120,7 @@ tracing.workspace = true
 url.workspace = true
 webpage.workspace = true
 webpage.optional = true
+webpki-root-certs.workspace = true
 blurhash.workspace = true
 blurhash.optional = true
 tuwunel-core.workspace = true

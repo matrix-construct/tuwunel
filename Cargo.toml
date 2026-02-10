@@ -566,6 +566,9 @@ features = ["serde"]
 version = "2.0"
 default-features = false
 
+[workspace.dependencies.webpki-root-certs]
+version = "1.0"
+
 #
 # Patches
 #

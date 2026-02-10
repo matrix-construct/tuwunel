@@ -233,6 +233,7 @@ tracing-opentelemetry.optional = true
 tracing-opentelemetry.workspace = true
 tracing-subscriber.workspace = true
 tracing.workspace = true
+webpki-root-certs.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true

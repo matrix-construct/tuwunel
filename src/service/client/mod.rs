@@ -4,7 +4,7 @@ use std::{
 };
 
 use ipaddress::IPAddress;
-use reqwest::{dns::Resolve, redirect};
+use reqwest::{Certificate, dns::Resolve, redirect};
 use tuwunel_core::{Config, Result, either::Either, err, implement, trace};
 
 use crate::{service, services::OnceServices};
@@ -141,6 +141,13 @@ fn base(config: &Config) -> Result<reqwest::ClientBuilder> {
 		.user_agent(tuwunel_core::version::user_agent())
 		.redirect(redirect::Policy::limited(6))
 		.danger_accept_invalid_certs(config.allow_invalid_tls_certificates)
+		.tls_certs_merge(
+			webpki_root_certs::TLS_SERVER_ROOT_CERTS
+				.iter()
+				.map(|der| {
+					Certificate::from_der(der).expect("certificate must be valid der encoding")
+				}),
+		)
 		.connection_verbose(cfg!(debug_assertions));
 
 	#[cfg(feature = "gzip_compression")]
