@@ -118,7 +118,7 @@ pub async fn get_url_preview(&self, url: &Url) -> Result<UrlPreviewData> {
 }
 
 #[implement(Service)]
-async fn request_url_preview(&self, url: &Url) -> Result<UrlPreviewData> {
+pub async fn request_url_preview(&self, url: &Url) -> Result<UrlPreviewData> {
 	if let Ok(ip) = IPAddress::parse(url.host_str().expect("URL previously validated"))
 		&& !self.services.client.valid_cidr_range(&ip)
 	{
