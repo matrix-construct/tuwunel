@@ -7,6 +7,7 @@ use tuwunel_core::{
 	warn,
 };
 use tuwunel_service::media::Dim;
+use url::Url;
 
 use crate::{admin_command, utils::parse_local_user_id};
 
@@ -316,5 +317,22 @@ pub(super) async fn get_remote_thumbnail(
 	result.content.as_mut().expect("content").clear();
 
 	self.write_str(&format!("```\n{result:#?}\nreceived {len} bytes for file content.\n```"))
+		.await
+}
+
+#[admin_command]
+pub(super) async fn preview(&self, url: Url, no_cache: bool) -> Result {
+	let url_preview = if no_cache {
+		self.services
+			.media
+			.request_url_preview(&url)
+			.await?
+	} else {
+		self.services.media.get_url_preview(&url).await?
+	};
+
+	let preview_str = serde_json::to_string_pretty(&url_preview)?;
+
+	self.write_str(&format!("Result:\n```\n{preview_str}\n```"))
 		.await
 }
