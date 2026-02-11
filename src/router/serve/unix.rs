@@ -10,6 +10,7 @@ use std::{
 
 use axum::{Extension, Router, extract::ConnectInfo};
 use axum_server::Handle;
+use futures::FutureExt;
 use tokio::task::JoinSet;
 use tuwunel_core::{Result, Server, info, warn};
 
@@ -39,7 +40,11 @@ pub(super) async fn serve(
 		.into_make_service();
 	let acceptor = axum_server::from_unix(unix_listener)?
 		.handle(handle.clone())
-		.serve(router);
+		.serve(router)
+		.map({
+			let path = path.to_owned();
+			|_| fs::remove_file(path)
+		});
 	join_set.spawn_on(acceptor, server.runtime());
 
 	info!("Listening at {path:?}");
