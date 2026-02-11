@@ -78,7 +78,7 @@ pub async fn get_url_preview(&self, url: &Url) -> Result<UrlPreviewData> {
 }
 
 #[implement(Service)]
-async fn request_url_preview(&self, url: &Url) -> Result<UrlPreviewData> {
+pub async fn request_url_preview(&self, url: &Url) -> Result<UrlPreviewData> {
 	if let Ok(ip) = IPAddress::parse(url.host_str().expect("URL previously validated"))
 		&& !self.services.client.valid_cidr_range(&ip)
 	{
@@ -192,12 +192,20 @@ async fn download_html(&self, url: &str) -> Result<UrlPreviewData> {
 		}
 	}
 	let body = String::from_utf8_lossy(&bytes);
+
+	debug!("response: {body}");
+
 	let Ok(html) = HTML::from_string(body.to_string(), Some(url.to_owned())) else {
 		return Err!(Request(Unknown("Failed to parse HTML")));
 	};
 
+	debug!("HTML: {html:?}");
+
 	let mut data = match html.opengraph.images.first() {
-		| None => UrlPreviewData::default(),
+		| None => {
+			debug!("No image found.");
+			UrlPreviewData::default()
+		},
 		| Some(obj) => self.download_image(&obj.url).await?,
 	};
 

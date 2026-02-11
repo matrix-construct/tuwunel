@@ -4,6 +4,7 @@ mod commands;
 use clap::Subcommand;
 use ruma::{OwnedEventId, OwnedMxcUri, OwnedServerName};
 use tuwunel_core::Result;
+use url::Url;
 
 use crate::admin_command_dispatch;
 
@@ -96,5 +97,13 @@ pub(super) enum MediaCommand {
 
 		#[arg(long, default_value("800"))]
 		height: u32,
+	},
+
+	Preview {
+		url: Url,
+
+		/// Bypass cache
+		#[arg(short, long)]
+		no_cache: bool,
 	},
 }
