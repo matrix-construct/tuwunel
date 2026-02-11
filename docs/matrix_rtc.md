@@ -69,6 +69,7 @@ keys:
 type = "livekit"
 livekit_service_url = "https://matrix-rtc.yourdomain.com"
 ```
+3. Ensure that you have `[global.well_known]` uncommented, above this line. .well-known will not be served correctly if this is not the case. 
 
 #### 3.2. .well-known served independently
 ***Follow this step if you serve your .well-known/matrix files directly. Otherwise follow Step 3.1***
@@ -100,6 +101,8 @@ The final file should look something like this:
 
 ### 4. Configure Firewall
 You will need to allow ports `7881/tcp` and `50100:50200/udp` through your firewall. If you use UFW, the commands are: `ufw allow 7881/tcp` and `ufw allow 50100:50200/udp`.
+
+If you are behind NAT, you will also need to forward `7880/tcp`, `7881/tcp`, and `50100:50200/udp` to livekit. 
 
 ### 5. Configure Reverse Proxy
 As reverse proxies can be installed in different ways, step by step instructions are not given for this section.
