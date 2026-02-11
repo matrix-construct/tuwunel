@@ -32,7 +32,6 @@ use crate::{
 };
 
 /// All the config options for tuwunel.
-#[expect(clippy::struct_excessive_bools)]
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 #[derive(Clone, Debug, Deserialize)]
 #[config_example_generator(
