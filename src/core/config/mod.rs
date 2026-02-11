@@ -28,7 +28,7 @@ use self::proxy::ProxyConfig;
 pub use self::{check::check, manager::Manager};
 use crate::{
 	Err, Result, err,
-	utils::{self, option::OptionExt, string::EMPTY, sys},
+	utils::{self, string::EMPTY, sys},
 };
 
 /// All the config options for tuwunel.
@@ -2751,12 +2751,13 @@ impl IdentityProvider {
 			return Ok(client_secret.clone());
 		}
 
-		self.client_secret_file
-			.as_ref()
-			.map_async(tokio::fs::read_to_string)
-			.await
-			.transpose()?
-			.ok_or_else(|| err!("No client secret or client secret file configured"))
+		let Some(client_secret_file) = &self.client_secret_file else {
+			return Err!("No client secret or client secret file configured");
+		};
+
+		let client_secret = tokio::fs::read_to_string(client_secret_file).await?;
+
+		Ok(client_secret.trim().to_owned())
 	}
 }
 
