@@ -78,7 +78,7 @@ pub enum Error {
 	Poison(Cow<'static, str>),
 	#[error("Regex error: {0}")]
 	Regex(#[from] regex::Error),
-	#[error("Request error: {0}")]
+	#[error("Request error: {0:?}")]
 	Reqwest(#[from] reqwest::Error),
 	#[error("{0}")]
 	SerdeDe(Cow<'static, str>),
