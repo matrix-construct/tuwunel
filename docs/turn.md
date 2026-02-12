@@ -51,7 +51,6 @@ called `docker-compose.yml` and run `docker compose up -d` in the same
 directory.
 
 ```yml
-version: 3
 services:
     turn:
       container_name: coturn-server
