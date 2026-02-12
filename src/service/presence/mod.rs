@@ -64,7 +64,7 @@ impl crate::Service for Service {
 
 		let mut presence_timers: FuturesUnordered<_> = FuturesUnordered::new();
 		let mut timer_handles: HashMap<OwnedUserId, (u64, AbortHandle)> = HashMap::new();
-		while !receiver.is_closed() {
+		while !receiver.is_closed() && self.services.server.running() {
 			tokio::select! {
 				Some(result) = presence_timers.next() => {
 					let Ok((user_id, count)) = result else {
@@ -102,10 +102,6 @@ impl crate::Service for Service {
 			}
 		}
 
-		Ok(())
-	}
-
-	async fn interrupt(&self) {
 		// set the server user as offline
 		_ = self
 			.maybe_ping_presence(
@@ -115,6 +111,10 @@ impl crate::Service for Service {
 			)
 			.await;
 
+		Ok(())
+	}
+
+	async fn interrupt(&self) {
 		let (timer_sender, _) = &self.timer_channel;
 		if !timer_sender.is_closed() {
 			timer_sender.close();
