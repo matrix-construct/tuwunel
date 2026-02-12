@@ -62,7 +62,11 @@ impl crate::Service for Service {
 fn make_clients(services: &Services) -> Result<Clients> {
 	macro_rules! with {
 		($builder:ident => $make:expr) => {{
-			let $builder = base(&services.config)?;
+			let $builder = base(&services.config, None)?;
+			$make.build()?
+		}};
+		($name:literal, $builder:ident => $make:expr) => {{
+			let $builder = base(&services.config, Some($name))?;
 			$make.build()?
 		}};
 	}
@@ -70,7 +74,7 @@ fn make_clients(services: &Services) -> Result<Clients> {
 	Ok(Clients {
 		default: with!(cb => cb.dns_resolver(Arc::clone(&services.resolver.resolver))),
 
-		url_preview: with!(cb => {
+		url_preview: with!("preview", cb => {
 			let interface = &services
 				.config
 				.url_preview_bound_interface;
@@ -149,7 +153,14 @@ fn make_clients(services: &Services) -> Result<Clients> {
 	})
 }
 
-fn base(config: &Config) -> Result<ClientBuilder> {
+fn base(config: &Config, name: Option<&str>) -> Result<ClientBuilder> {
+	let mut user_agent = tuwunel_core::version::user_agent();
+	let user_agent_with_name;
+	if let Some(name) = name {
+		user_agent_with_name = format!("{user_agent} {name}");
+		user_agent = &user_agent_with_name;
+	}
+
 	let mut builder = Client::builder()
 		.hickory_dns(true)
 		.connect_timeout(Duration::from_secs(config.request_conn_timeout))
@@ -157,7 +168,7 @@ fn base(config: &Config) -> Result<ClientBuilder> {
 		.timeout(Duration::from_secs(config.request_total_timeout))
 		.pool_idle_timeout(Duration::from_secs(config.request_idle_timeout))
 		.pool_max_idle_per_host(config.request_idle_per_host.into())
-		.user_agent(tuwunel_core::version::user_agent())
+		.user_agent(user_agent)
 		.redirect(redirect::Policy::limited(6))
 		.danger_accept_invalid_certs(config.allow_invalid_tls_certificates)
 		.tls_certs_merge(
