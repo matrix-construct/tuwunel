@@ -224,7 +224,7 @@ async fn download_html(&self, _url: &str) -> Result<UrlPreviewData> {
 pub fn url_preview_allowed(&self, url: &Url) -> bool {
 	if ["http", "https"]
 		.iter()
-		.all(|&scheme| scheme != url.scheme().to_lowercase())
+		.all(|&scheme| !scheme.eq_ignore_ascii_case(url.scheme()))
 	{
 		debug!("Ignoring non-HTTP/HTTPS URL to preview: {}", url);
 		return false;

@@ -133,8 +133,8 @@ pub(crate) async fn get_state_events_for_key_route(
 
 	let event_format = body
 		.format
-		.as_ref()
-		.is_some_and(|f| f.to_lowercase().eq("event"));
+		.as_deref()
+		.is_some_and(|f| f.eq_ignore_ascii_case("event"));
 
 	Ok(get_state_event_for_key::v3::Response {
 		content: event_format.or(|| event.get_content_as_value()),

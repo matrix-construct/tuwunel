@@ -104,7 +104,7 @@ pub async fn set_pusher(
 
 				if ["http", "https"]
 					.iter()
-					.all(|&scheme| scheme != url.scheme().to_lowercase())
+					.all(|&scheme| !scheme.eq_ignore_ascii_case(url.scheme()))
 				{
 					return Err!(Request(InvalidParam(
 						warn!(%url, "HTTP pusher URL is not a valid HTTP/HTTPS URL")

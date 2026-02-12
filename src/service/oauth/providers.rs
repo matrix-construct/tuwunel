@@ -69,11 +69,11 @@ pub fn get_config(&self, id: &str) -> Result<Provider> {
 
 	if let Some(provider) = providers
 		.values()
-		.find(|config| config.brand == id.to_lowercase())
+		.find(|config| config.brand.eq_ignore_ascii_case(id))
 		.filter(|_| {
 			providers
 				.values()
-				.filter(|config| config.brand == id.to_lowercase())
+				.filter(|config| config.brand.eq_ignore_ascii_case(id))
 				.count()
 				.eq(&1)
 		})
@@ -97,11 +97,11 @@ async fn get_cached(&self, id: &str) -> Option<Provider> {
 
 	providers
 		.values()
-		.find(|provider| provider.brand == id.to_lowercase())
+		.find(|provider| provider.brand.eq_ignore_ascii_case(id))
 		.filter(|_| {
 			providers
 				.values()
-				.filter(|provider| provider.brand == id.to_lowercase())
+				.filter(|provider| provider.brand.eq_ignore_ascii_case(id))
 				.count()
 				.eq(&1)
 		})
