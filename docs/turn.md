@@ -67,3 +67,6 @@ documentation](https://github.com/coturn/coturn/blob/master/docker/coturn/README
 
 For security recommendations see Synapse's [Coturn
 documentation](https://element-hq.github.io/synapse/latest/turn-howto.html).
+
+The TURN server requires the appropriate ports to be forwarded, where your installation is behind NAT. 
+These are currently `3478/tcp`, `3478/udp`, `5349/tcp`, and `5349/udp`. 
