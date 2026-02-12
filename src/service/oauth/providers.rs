@@ -212,6 +212,15 @@ async fn configure(&self, mut provider: Provider) -> Result<Provider> {
 			.map(|url| provider.token_url.replace(url));
 	}
 
+	if provider.callback_url.is_none()
+		&& let Some(server_url) = self.services.config.well_known.client.as_ref()
+	{
+		let callback_path =
+			format!("_matrix/client/unstable/login/sso/callback/{}", provider.client_id);
+
+		provider.callback_url = Some(server_url.join(&callback_path)?);
+	}
+
 	Ok(provider)
 }
 
