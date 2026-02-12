@@ -2,7 +2,7 @@ use std::borrow::Borrow;
 
 use ruma::{
 	CanonicalJsonObject, ServerName, ServerSigningKeyId, api::federation::discovery::VerifyKey,
-	room_version_rules::RoomVersionRules,
+	room_version_rules::RoomVersionRules, serde::Base64,
 };
 use tuwunel_core::{Err, Result, implement};
 
@@ -52,7 +52,9 @@ where
 {
 	let mut keys = PubKeys::new();
 	for key_id in key_ids {
-		if let Ok(verify_key) = self.get_verify_key(origin, key_id).await {
+		if let Ok(verify_key) = self.get_verify_key(origin, key_id).await
+			&& !self.is_revoked_key(&verify_key.key)
+		{
 			keys.insert(key_id.as_str().into(), verify_key.key);
 		}
 	}
@@ -150,4 +152,27 @@ async fn get_verify_key_from_origin(
 	}
 
 	Err!(Request(NotFound("Failed to fetch signing-key from origin")))
+}
+
+#[implement(super::Service)]
+fn is_revoked_key(&self, key: &Base64) -> bool {
+	if self
+		.services
+		.config
+		.vendor_revoked_server_keys
+		.contains(key)
+	{
+		return true;
+	}
+
+	if self
+		.services
+		.config
+		.revoked_remote_server_keys
+		.contains(key)
+	{
+		return true;
+	}
+
+	false
 }

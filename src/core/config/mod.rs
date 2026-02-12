@@ -19,7 +19,7 @@ use itertools::Itertools;
 use regex::RegexSet;
 use ruma::{
 	OwnedMxcUri, OwnedRoomOrAliasId, OwnedServerName, OwnedUserId, RoomVersionId,
-	api::client::discovery::discover_support::ContactRole,
+	api::client::discovery::discover_support::ContactRole, serde::Base64,
 };
 use serde::{Deserialize, de::IgnoredAny};
 use tuwunel_macros::config_example_generator;
@@ -1650,6 +1650,31 @@ pub struct Config {
 	/// "2001:db8::/32", "ff00::/8", "fec0::/10"]
 	#[serde(default = "default_ip_range_denylist")]
 	pub ip_range_denylist: Vec<String>,
+
+	/// List of federation server public keys which will not be used for
+	/// authentication. This list can be populated by keys believed to be
+	/// compromised. Please be aware of important caveats:
+	/// - Blocking one or all keys from a server is not effective for blocking a
+	///   server. See `forbidden_remote_server_names` instead.
+	/// - Existing rooms and events which critically depend on these keys may
+	///   break.
+	/// - Other servers may not block these keys, increasing fragmentation.
+	/// - Trust the source advising you to add anything to this list; otherwise
+	///   you may be assisting an attacker.
+	///
+	/// Each entry is a base64 string of the full public key.
+	///
+	/// default: []
+	#[serde(default)]
+	pub revoked_remote_server_keys: Vec<Base64>,
+
+	/// Similar to `revoked_remote_server_keys`, but this list is populated by
+	/// default from the software authors and/or your package distributor. This
+	/// option can be overridden with an empty set in case you do not fully
+	/// trust those parties. Use `revoked_remote_server_keys` for additional
+	/// entries.
+	#[serde(default = "default_vendor_revoked_server_keys")]
+	pub vendor_revoked_server_keys: BTreeSet<Base64>,
 
 	/// Optional IP address or network interface-name to bind as the source of
 	/// URL preview requests. If not set, it will not bind to a specific
@@ -3396,3 +3421,11 @@ fn default_max_join_attempts_per_join_request() -> usize { 3 }
 fn default_sso_grant_session_duration() -> Option<u64> { Some(300) }
 
 fn default_redaction_retention_seconds() -> u64 { 5_184_000 }
+
+fn default_vendor_revoked_server_keys() -> BTreeSet<Base64> {
+	[
+		// https://github.com/element-hq/ess-helm/security/advisories/GHSA-qwcj-h6m8-vp6q
+		Base64::parse("l/O9hxMVKB6Lg+3Hqf0FQQZhVESQcMzbPN1Cz2nM3og").expect("valid base64"),
+	]
+	.into()
+}
