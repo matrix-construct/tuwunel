@@ -54,6 +54,9 @@ variable "install_prefix" {
 variable "rust_msrv" {
     default = "stable"
 }
+variable "rust_nightly" {
+    default = "nightly"
+}
 variable "rust_toolchains" {
     default = "[\"nightly\", \"stable\"]"
 }
@@ -1762,8 +1765,12 @@ target "rust" {
         input = elem("target:rustup", [rust_target, sys_name, sys_version, sys_target])
     }
     args = {
-        rust_toolchain = (rust_toolchain == "stable"?
-            rust_msrv: rust_toolchain
+        rust_toolchain = (
+            rust_toolchain == "stable"?
+                rust_msrv:
+            rust_toolchain == "nightly"?
+                rust_nightly:
+                rust_toolchain
         )
 
         rustup_components = join(" ", rustup_components)

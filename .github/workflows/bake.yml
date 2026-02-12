@@ -42,6 +42,10 @@ on:
         type: string
         default: '[]'
         description: Matrix inclusions
+      rust_nightly:
+        type: string
+        default: ${{vars.RUST_NIGHTLY || 'nightly'}}
+        description: Override nightly toolchain with more specific nightly.
       checkout:
         type: string
         default: 'HEAD'
@@ -135,6 +139,7 @@ jobs:
         CI_VERBOSE_ENV: ${{inputs.verbose_env}}
         CI_SILENT_BAKE: ${{inputs.silent_bake}}
         CI_PRINT_BAKE: ${{inputs.print_bake}}
+        rust_nightly: ${{inputs.rust_nightly}}
         git_checkout: ${{inputs.checkout}}
 
       run: |

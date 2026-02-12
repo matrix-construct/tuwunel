@@ -57,11 +57,24 @@ sys_versions="${env_sys_versions:-$default_sys_versions}"
 
 docker_dir="$PWD/$BASEDIR"
 builder_name="${GITHUB_ACTOR:-owo}"
+
+# Translates 'nightly' in `rust_toolchains` to some other value. Needed for
+# github actions to pass some specific nightly. Local users can add the specific
+# nightly to the `rust_toolchains` array as intended. see bake.hcl
+rust_nightly="${rust_nightly:-nightly}"
+
+# Translates 'stable' in `rust_toolchains` to some specific toolchain. Used
+# by default for all callers to ensure the msrv is used instead of latest
+# stable. see bake.hcl
 toolchain_toml="$docker_dir/../rust-toolchain.toml"
 rust_msrv=$(grep "channel = " "$toolchain_toml" | cut -d'=' -f2 | sed 's/\s"\|"$//g')
+
+# override the source position with another ref
+git_checkout="${git_checkout:-HEAD}"
+
+# other options
 rocksdb_opt_level=3
 rocksdb_portable=1
-git_checkout="${git_checkout:-HEAD}"
 use_chef="true"
 set +a
 
