@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::iter::once;
 
 use ruma::api::client::discovery::get_supported_versions;
 use tuwunel_core::Result;
@@ -20,46 +20,69 @@ use crate::Ruma;
 pub(crate) async fn get_supported_versions_route(
 	_body: Ruma<get_supported_versions::Request>,
 ) -> Result<get_supported_versions::Response> {
-	let resp = get_supported_versions::Response {
-		versions: vec![
-			"r0.0.1".to_owned(),
-			"r0.1.0".to_owned(),
-			"r0.2.0".to_owned(),
-			"r0.3.0".to_owned(),
-			"r0.4.0".to_owned(),
-			"r0.5.0".to_owned(),
-			"r0.6.0".to_owned(),
-			"r0.6.1".to_owned(),
-			"v1.1".to_owned(),
-			"v1.2".to_owned(),
-			"v1.3".to_owned(),
-			"v1.4".to_owned(),
-			"v1.5".to_owned(),
-			"v1.10".to_owned(), // relations recursion
-			"v1.11".to_owned(), // authenticated media
-			"v1.12".to_owned(), // m.tz
-			"v1.15".to_owned(), // custom profile fields
-		],
-		unstable_features: BTreeMap::from_iter([
-			("org.matrix.e2e_cross_signing".to_owned(), true),
-			("org.matrix.msc2285.stable".to_owned(), true), /* private read receipts (https://github.com/matrix-org/matrix-spec-proposals/pull/2285) */
-			("fi.mau.msc2659.stable".to_owned(), true), /* appservice ping https://github.com/matrix-org/matrix-spec-proposals/pull/2659) */
-			("uk.half-shot.msc2666.query_mutual_rooms".to_owned(), true), /* query mutual rooms (https://github.com/matrix-org/matrix-spec-proposals/pull/2666) */
-			("org.matrix.msc2836".to_owned(), true), /* threading/threads (https://github.com/matrix-org/matrix-spec-proposals/pull/2836) */
-			("org.matrix.msc2946".to_owned(), true), /* spaces/hierarchy summaries (https://github.com/matrix-org/matrix-spec-proposals/pull/2946) */
-			("org.matrix.msc3026.busy_presence".to_owned(), true), /* busy presence status (https://github.com/matrix-org/matrix-spec-proposals/pull/3026) */
-			("org.matrix.msc3575".to_owned(), true), /* sliding sync (https://github.com/matrix-org/matrix-spec-proposals/pull/3575/files#r1588877046) */
-			("org.matrix.msc3814".to_owned(), true), /* dehydrated devices */
-			("org.matrix.msc3827".to_owned(), true), /* filtering of /publicRooms by room type (https://github.com/matrix-org/matrix-spec-proposals/pull/3827) */
-			("org.matrix.msc3916.stable".to_owned(), true), /* authenticated media (https://github.com/matrix-org/matrix-spec-proposals/pull/3916) */
-			("org.matrix.msc3952_intentional_mentions".to_owned(), true), /* intentional mentions (https://github.com/matrix-org/matrix-spec-proposals/pull/3952) */
-			("uk.tcpip.msc4133".to_owned(), true), /* Extending User Profile API with Key:Value Pairs (https://github.com/matrix-org/matrix-spec-proposals/pull/4133) */
-			("us.cloke.msc4175".to_owned(), true), /* Profile field for user time zone (https://github.com/matrix-org/matrix-spec-proposals/pull/4175) */
-			("org.matrix.msc4180".to_owned(), true), /* stable flag for 3916 (https://github.com/matrix-org/matrix-spec-proposals/pull/4180) */
-			("org.matrix.simplified_msc3575".to_owned(), true), /* Simplified Sliding sync (https://github.com/matrix-org/matrix-spec-proposals/pull/4186) */
-			("fi.mau.msc2815".to_owned(), true), /* Allow room moderators to view redacted event content (https://github.com/matrix-org/matrix-spec-proposals/pull/2815) */
-		]),
-	};
+	Ok(get_supported_versions::Response {
+		versions: VERSIONS.into_iter().map(Into::into).collect(),
 
-	Ok(resp)
+		unstable_features: UNSTABLE_FEATURES
+			.into_iter()
+			.map(Into::into)
+			.zip(once(true).cycle())
+			.collect(),
+	})
 }
+
+static VERSIONS: [&str; 17] = [
+	"r0.0.1", /* Historical */
+	"r0.1.0", /* Historical */
+	"r0.2.0", /* Historical */
+	"r0.3.0", /* Historical */
+	"r0.4.0", /* Historical */
+	"r0.5.0", /* Historical */
+	"r0.6.0", /* Historical */
+	"r0.6.1", /* Historical */
+	"v1.1",   /* Stable; Tested */
+	"v1.2",   /* Stable; Tested */
+	"v1.3",   /* Stable; Tested */
+	"v1.4",   /* Stable; Tested */
+	"v1.5",   /* Stable; Tested */
+	"v1.10",  /* Tested; relations recursion */
+	"v1.11",  /* Tested; authenticated media */
+	"v1.12",  /* m.tz */
+	"v1.15",  /* custom profile fields */
+];
+
+static UNSTABLE_FEATURES: [&str; 17] = [
+	"org.matrix.e2e_cross_signing",
+	// private read receipts (https://github.com/matrix-org/matrix-spec-proposals/pull/2285)
+	"org.matrix.msc2285.stable",
+	// appservice ping https://github.com/matrix-org/matrix-spec-proposals/pull/2659)
+	"fi.mau.msc2659.stable",
+	// query mutual rooms (https://github.com/matrix-org/matrix-spec-proposals/pull/2666)
+	"uk.half-shot.msc2666.query_mutual_rooms",
+	// threading/threads (https://github.com/matrix-org/matrix-spec-proposals/pull/2836)
+	"org.matrix.msc2836",
+	// spaces/hierarchy summaries (https://github.com/matrix-org/matrix-spec-proposals/pull/2946)
+	"org.matrix.msc2946",
+	// busy presence status (https://github.com/matrix-org/matrix-spec-proposals/pull/3026)
+	"org.matrix.msc3026.busy_presence",
+	// sliding sync (https://github.com/matrix-org/matrix-spec-proposals/pull/3575/files#r1588877046)
+	"org.matrix.msc3575",
+	// dehydrated devices
+	"org.matrix.msc3814",
+	// filtering of /publicRooms by room type (https://github.com/matrix-org/matrix-spec-proposals/pull/3827)
+	"org.matrix.msc3827",
+	// authenticated media (https://github.com/matrix-org/matrix-spec-proposals/pull/3916)
+	"org.matrix.msc3916.stable",
+	// intentional mentions (https://github.com/matrix-org/matrix-spec-proposals/pull/3952)
+	"org.matrix.msc3952_intentional_mentions",
+	// Extending User Profile API with Key:Value Pairs (https://github.com/matrix-org/matrix-spec-proposals/pull/4133)
+	"uk.tcpip.msc4133",
+	// Profile field for user time zone (https://github.com/matrix-org/matrix-spec-proposals/pull/4175)
+	"us.cloke.msc4175",
+	// stable flag for 3916 (https://github.com/matrix-org/matrix-spec-proposals/pull/4180)
+	"org.matrix.msc4180",
+	// Simplified Sliding sync (https://github.com/matrix-org/matrix-spec-proposals/pull/4186)
+	"org.matrix.simplified_msc3575",
+	// Allow room moderators to view redacted event content (https://github.com/matrix-org/matrix-spec-proposals/pull/2815)
+	"fi.mau.msc2815",
+];
