@@ -20,7 +20,7 @@ services:
       TUWUNEL_ADDRESS: 0.0.0.0
       TUWUNEL_PORT: 6167 # you need to match this with the traefik load balancer label if you're want to change it
       TUWUNEL_DATABASE_PATH: /var/lib/tuwunel
-      #TUWUNEL_CONFIG: '/etc/conduit.toml' # Uncomment if you mapped config toml above
+      #TUWUNEL_CONFIG: '/etc/tuwunel.toml' # Uncomment if you mapped config toml above
       ### Uncomment and change values as desired, note that tuwunel has plenty of config options, so you should check out the example example config too
       # Available levels are: error, warn, info, debug, trace - more info at: https://docs.rs/env_logger/*/env_logger/#enabling-logging
       # TUWUNEL_LOG: info  # default is: "warn,state_res=warn"
