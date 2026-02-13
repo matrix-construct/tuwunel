@@ -35,10 +35,11 @@ pub(super) mod tag;
 pub(super) mod thirdparty;
 pub(super) mod threads;
 pub(super) mod to_device;
+pub(super) mod tuwunel;
 pub(super) mod typing;
 pub(super) mod unstable;
-pub(super) mod unversioned;
 pub(super) mod user_directory;
+pub(super) mod versions;
 pub(super) mod voip;
 pub(super) mod well_known;
 
@@ -81,10 +82,11 @@ pub(super) use tag::*;
 pub(super) use thirdparty::*;
 pub(super) use threads::*;
 pub(super) use to_device::*;
+pub(super) use tuwunel::*;
 pub(super) use typing::*;
 pub(super) use unstable::*;
-pub(super) use unversioned::*;
 pub(super) use user_directory::*;
+pub(super) use versions::*;
 pub(super) use voip::*;
 pub(super) use well_known::*;
 
