@@ -30,6 +30,7 @@ use ruma::{
 use tuwunel_core::{
 	Result, err, is_true,
 	matrix::{Pdu, room_version, state_res::events::RoomCreateEvent},
+	utils::BoolExt,
 };
 
 pub struct Service {
@@ -74,7 +75,13 @@ impl Service {
 	pub async fn get_name(&self, room_id: &RoomId) -> Result<String> {
 		self.room_state_get_content(room_id, &StateEventType::RoomName, "")
 			.await
-			.map(|c: RoomNameEventContent| c.name)
+			.and_then(|c: RoomNameEventContent| {
+				c.name
+					.is_empty()
+					.is_false()
+					.then_some(c.name)
+					.ok_or_else(|| err!(Request(NotFound("Empty name found in event content."))))
+			})
 	}
 
 	pub async fn get_avatar(&self, room_id: &RoomId) -> Result<RoomAvatarEventContent> {
