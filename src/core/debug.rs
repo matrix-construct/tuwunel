@@ -99,6 +99,27 @@ pub fn panic_str(p: &Box<dyn Any + Send + 'static>) -> &'static str {
 		.unwrap_or_default()
 }
 
+#[must_use]
+#[inline(always)]
+pub fn cycles() -> u64 {
+	#[cfg(target_arch = "x86_64")]
+	//SAFETY: reads the clock cycle counter without serializing the pipeline.
+	unsafe {
+		return std::arch::x86_64::_rdtsc();
+	};
+
+	#[cfg(target_arch = "aarch64")]
+	//SAFETY: reads the clock cycle counter on arm64.
+	unsafe {
+		let mut ret: u64;
+		std::arch::asm!("mrs %0, cntvct_el0", &mut ret);
+		return ret;
+	};
+
+	#[expect(unreachable_code)]
+	0
+}
+
 #[inline(always)]
 #[must_use]
 pub fn rttype_name<T: ?Sized>(_: &T) -> &'static str { type_name::<T>() }
