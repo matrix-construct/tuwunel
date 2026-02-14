@@ -499,7 +499,7 @@ async fn test_reverse_topological_power_sort() {
 		event_id("p") => hashset![event_id("o")],
 	};
 
-	let res = super::topological_sort(&graph, &async |_id| {
+	let res = super::super::topological_sort(&graph, &async |_id| {
 		Ok((int!(0).into(), MilliSecondsSinceUnixEpoch(uint!(0))))
 	})
 	.await

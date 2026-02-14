@@ -10,8 +10,8 @@ use ruma::{
 	room_version_rules::RoomVersionRules,
 };
 
-use super::{
-	super::events::{
+use super::super::{
+	events::{
 		RoomCreateEvent, RoomPowerLevelsEvent, RoomPowerLevelsIntField, is_power_event,
 		power_levels::RoomPowerLevelsEventOptionExt,
 	},

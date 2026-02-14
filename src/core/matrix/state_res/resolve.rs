@@ -7,7 +7,6 @@ mod iterative_auth_check;
 mod mainline_sort;
 mod power_sort;
 mod split_conflicted;
-mod topological_sort;
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
@@ -15,7 +14,6 @@ use futures::{FutureExt, Stream, StreamExt, TryFutureExt};
 use itertools::Itertools;
 use ruma::{OwnedEventId, events::StateEventType, room_version_rules::RoomVersionRules};
 
-pub use self::topological_sort::topological_sort;
 use self::{
 	auth_difference::auth_difference, conflicted_subgraph::conflicted_subgraph_dfs,
 	iterative_auth_check::iterative_auth_check, mainline_sort::mainline_sort,

@@ -65,11 +65,13 @@ mod fetch_state;
 mod resolve;
 #[cfg(test)]
 mod test_utils;
+mod topological_sort;
 
 use self::{event_auth::check_state_dependent_auth_rules, fetch_state::FetchStateExt};
 pub use self::{
 	event_auth::{AuthTypes, auth_check, auth_types_for_event},
 	event_format::check_pdu_format,
-	resolve::{AuthSet, ConflictMap, StateMap, resolve, topological_sort},
+	resolve::{AuthSet, ConflictMap, StateMap, resolve},
+	topological_sort::topological_sort,
 };
 use crate::matrix::TypeStateKey;
