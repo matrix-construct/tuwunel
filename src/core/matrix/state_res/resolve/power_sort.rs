@@ -16,6 +16,7 @@ use super::super::{
 		power_levels::RoomPowerLevelsEventOptionExt,
 	},
 	topological_sort,
+	topological_sort::ReferencedIds,
 };
 use crate::{
 	Result, err,
@@ -107,11 +108,11 @@ where
 	)
 )]
 async fn add_event_auth_chain<Fetch, Fut, Pdu>(
-	mut graph: HashMap<OwnedEventId, HashSet<OwnedEventId>>,
+	mut graph: HashMap<OwnedEventId, ReferencedIds>,
 	full_conflicted_set: &HashSet<OwnedEventId>,
 	event_id: &EventId,
 	fetch: &Fetch,
-) -> HashMap<OwnedEventId, HashSet<OwnedEventId>>
+) -> HashMap<OwnedEventId, ReferencedIds>
 where
 	Fetch: Fn(OwnedEventId) -> Fut + Sync,
 	Fut: Future<Output = Result<Pdu>> + Send,
@@ -127,35 +128,33 @@ where
 		// Add the current event to the graph.
 		graph.entry(event_id).or_default();
 
-		let auth_events = event
+		event
 			.as_ref()
 			.map(Event::auth_events)
 			.into_iter()
-			.flatten();
+			.flatten()
+			.map(ToOwned::to_owned)
+			.filter(|auth_event_id| full_conflicted_set.contains(auth_event_id))
+			.for_each(|auth_event_id| {
+				// If the auth event ID is not in the graph, check its auth events later.
+				if !graph.contains_key(&auth_event_id) {
+					state.push(auth_event_id.clone());
+				}
 
-		for auth_event_id in auth_events {
-			// If the auth event ID is in the full conflicted set…
-			if !full_conflicted_set.contains(auth_event_id) {
-				continue;
-			}
+				let event_id = event
+					.as_ref()
+					.expect("event is Some if there are auth_events")
+					.event_id();
 
-			// If the auth event ID is not in the graph, we need to check its auth events
-			// later.
-			if !graph.contains_key(auth_event_id) {
-				state.push(auth_event_id.to_owned());
-			}
+				// Add the auth event ID to the list of incoming edges.
+				let references = graph
+					.get_mut(event_id)
+					.expect("event_id must be added to graph");
 
-			let event_id = event
-				.as_ref()
-				.expect("event is Some if there are auth_events")
-				.event_id();
-
-			// Add the auth event ID to the list of incoming edges.
-			graph
-				.get_mut(event_id)
-				.expect("event_id must be added to graph")
-				.insert(auth_event_id.to_owned());
-		}
+				if !references.contains(&auth_event_id) {
+					references.push(auth_event_id);
+				}
+			});
 	}
 
 	graph

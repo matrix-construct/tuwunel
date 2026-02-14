@@ -110,11 +110,24 @@ fn is_backed_off(&self, event_id: &EventId, range: Range<Duration>) -> bool {
 }
 
 #[implement(Service)]
+#[tracing::instrument(
+	name = "exists",
+	level = "trace",
+	ret(level = "trace"),
+	skip_all,
+	fields(%event_id)
+)]
 async fn event_exists(&self, event_id: &EventId) -> bool {
 	self.services.timeline.pdu_exists(event_id).await
 }
 
 #[implement(Service)]
+#[tracing::instrument(
+	name = "fetch",
+	level = "trace",
+	skip_all,
+	fields(%event_id)
+)]
 async fn event_fetch(&self, event_id: &EventId) -> Result<PduEvent> {
 	self.services.timeline.get_pdu(event_id).await
 }

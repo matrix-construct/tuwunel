@@ -53,9 +53,9 @@ type Pdu = (OwnedRoomId, OwnedEventId, CanonicalJsonObject);
 	level = INFO_SPAN_LEVEL,
 	skip_all,
 	fields(
-		%client,
-		origin = body.origin().as_str(),
 		txn = str_truncated(body.transaction_id.as_str(), 20),
+		origin = body.origin().as_str(),
+		%client,
 	),
 )]
 pub(crate) async fn send_transaction_message_route(
@@ -189,7 +189,7 @@ async fn handle_pdus(
 
 #[tracing::instrument(
 	name = "room",
-	level = "debug",
+	level = INFO_SPAN_LEVEL,
 	skip_all,
 	fields(%room_id)
 )]

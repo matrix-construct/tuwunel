@@ -35,32 +35,28 @@ const PATH_INLINE: usize = 48;
 const STACK_INLINE: usize = 48;
 
 #[tracing::instrument(name = "subgraph_dfs", level = "debug", skip_all)]
-pub(super) fn conflicted_subgraph_dfs<ConflictedEventIds, Fetch, Fut, Pdu>(
-	conflicted_event_ids: ConflictedEventIds,
+pub(super) fn conflicted_subgraph_dfs<Fetch, Fut, Pdu>(
+	conflicted_event_ids: &Set<&OwnedEventId>,
 	fetch: &Fetch,
 ) -> impl Stream<Item = OwnedEventId> + Send
 where
-	ConflictedEventIds: Stream<Item = OwnedEventId> + Send,
 	Fetch: Fn(OwnedEventId) -> Fut + Sync,
 	Fut: Future<Output = Result<Pdu>> + Send,
 	Pdu: Event,
 {
+	let state = Arc::new(Global::default());
+	let state_ = state.clone();
 	conflicted_event_ids
-		.collect::<Set<_>>()
-		.map(|ids| (Arc::new(Global::default()), ids))
-		.then(async |(state, conflicted_event_ids)| {
-			conflicted_event_ids
-				.iter()
-				.stream()
-				.map(ToOwned::to_owned)
-				.map(|event_id| (state.clone(), event_id))
-				.for_each_concurrent(automatic_width(), async |(state, event_id)| {
-					subgraph_descent(state, event_id, &conflicted_event_ids, fetch)
-						.await
-						.expect("only mutex errors expected");
-				})
-				.await;
-
+		.iter()
+		.stream()
+		.enumerate()
+		.map(move |(i, event_id)| (state_.clone(), event_id, i))
+		.for_each_concurrent(automatic_width(), async |(state, event_id, i)| {
+			subgraph_descent(conflicted_event_ids, fetch, &state, event_id, i)
+				.await
+				.expect("only mutex errors expected");
+		})
+		.map(move |()| {
 			let seen = state.seen.lock().expect("locked");
 			let mut state = state.subgraph.lock().expect("locked");
 			debug!(
@@ -70,10 +66,8 @@ where
 				"conflicted subgraph state"
 			);
 
-			take(&mut *state)
+			take(&mut *state).into_iter().stream()
 		})
-		.map(Set::into_iter)
-		.map(IterStream::stream)
 		.flatten_stream()
 }
 
@@ -84,24 +78,26 @@ where
 	fields(
 		event_ids = conflicted_event_ids.len(),
 		event_id = %conflicted_event_id,
+		%i,
 	)
 )]
 async fn subgraph_descent<Fetch, Fut, Pdu>(
-	state: Arc<Global>,
-	conflicted_event_id: OwnedEventId,
-	conflicted_event_ids: &Set<OwnedEventId>,
+	conflicted_event_ids: &Set<&OwnedEventId>,
 	fetch: &Fetch,
-) -> Result<Arc<Global>>
+	state: &Arc<Global>,
+	conflicted_event_id: &OwnedEventId,
+	i: usize,
+) -> Result
 where
 	Fetch: Fn(OwnedEventId) -> Fut + Sync,
 	Fut: Future<Output = Result<Pdu>> + Send,
 	Pdu: Event,
 {
-	let Global { subgraph, seen } = &*state;
+	let Global { subgraph, seen } = &**state;
 
 	let mut local = Local {
 		path: once(conflicted_event_id.clone()).collect(),
-		stack: once(once(conflicted_event_id).collect()).collect(),
+		stack: once(once(conflicted_event_id.clone()).collect()).collect(),
 	};
 
 	while let Some(event_id) = pop(&mut local) {
@@ -133,7 +129,7 @@ where
 		}
 	}
 
-	Ok(state)
+	Ok(())
 }
 
 fn pop(local: &mut Local) -> Option<OwnedEventId> {

@@ -193,7 +193,12 @@ where
 	// Add authentic event to the partially resolved state.
 	if check_state_dependent_auth_rules(rules, &event, &fetch_state)
 		.await
-		.inspect_err(|e| debug_warn!("event failed auth check: {e}"))
+		.inspect_err(|e| {
+			debug_warn!(
+				event_type = ?event.event_type(), ?state_key, %event_id,
+				"event failed auth check: {e}"
+			);
+		})
 		.is_ok()
 	{
 		let key = event.event_type().with_state_key(state_key);

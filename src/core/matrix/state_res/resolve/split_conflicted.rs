@@ -1,4 +1,4 @@
-use std::{collections::HashMap, hash::Hash};
+use std::{collections::HashMap, hash::Hash, iter::IntoIterator};
 
 use futures::{Stream, StreamExt};
 
@@ -35,13 +35,18 @@ where
 {
 	let state_maps: Vec<_> = state_maps.collect().await;
 
-	let mut state_set_count = 0_usize;
-	let mut occurrences = HashMap::<_, HashMap<_, usize>>::new();
-	let state_maps = state_maps.iter().inspect(|_state| {
-		state_set_count = validated!(state_set_count + 1);
-	});
+	let state_ids_est = state_maps.iter().flatten().count();
 
-	for (k, v) in state_maps.into_iter().flat_map(|s| s.iter()) {
+	let state_set_count = state_maps
+		.iter()
+		.fold(0_usize, |acc, _| validated!(acc + 1));
+
+	let mut occurrences = HashMap::<_, HashMap<_, usize>>::with_capacity(state_ids_est);
+
+	for (k, v) in state_maps
+		.into_iter()
+		.flat_map(IntoIterator::into_iter)
+	{
 		let acc = occurrences
 			.entry(k.clone())
 			.or_default()
@@ -59,10 +64,16 @@ where
 			if occurrence_count == state_set_count {
 				unconflicted_state_map.insert((k.0.clone(), k.1.clone()), id.clone());
 			} else {
-				conflicted_state_set
+				let conflicts = conflicted_state_set
 					.entry((k.0.clone(), k.1.clone()))
-					.or_default()
-					.push(id.clone());
+					.or_default();
+
+				debug_assert!(
+					!conflicts.contains(&id),
+					"Unexpected duplicate conflicted state event"
+				);
+
+				conflicts.push(id.clone());
 			}
 		}
 	}

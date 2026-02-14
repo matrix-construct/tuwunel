@@ -8,7 +8,10 @@ mod mainline_sort;
 mod power_sort;
 mod split_conflicted;
 
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::{
+	collections::{BTreeMap, BTreeSet, HashSet},
+	ops::Deref,
+};
 
 use futures::{FutureExt, Stream, StreamExt, TryFutureExt};
 use itertools::Itertools;
@@ -28,7 +31,6 @@ use crate::{
 	trace,
 	utils::{
 		BoolExt,
-		option::OptionExt,
 		stream::{BroadbandExt, IterStream},
 	},
 };
@@ -242,20 +244,25 @@ where
 		.is_some_and(|rules| rules.consider_conflicted_state_subgraph)
 		|| backport_css;
 
-	let conflicted_states = conflicted_states.values().flatten().cloned();
+	let conflicted_state_set: HashSet<_> = conflicted_states.values().flatten().collect();
 
 	// Since `org.matrix.hydra.11`, fetch the conflicted state subgraph.
 	let conflicted_subgraph = consider_conflicted_subgraph
-		.then(|| conflicted_states.clone().stream())
-		.map_async(async |ids| conflicted_subgraph_dfs(ids, fetch))
+		.then_async(async || conflicted_subgraph_dfs(&conflicted_state_set, fetch))
 		.map(Option::into_iter)
 		.map(IterStream::stream)
 		.flatten_stream()
 		.flatten()
 		.boxed();
 
+	let conflicted_state_ids = conflicted_state_set
+		.iter()
+		.map(Deref::deref)
+		.cloned()
+		.stream();
+
 	auth_difference(auth_sets)
-		.chain(conflicted_states.stream())
+		.chain(conflicted_state_ids)
 		.broad_filter_map(async |id| exists(id.clone()).await.then_some(id))
 		.chain(conflicted_subgraph)
 		.collect::<HashSet<_>>()

@@ -22,8 +22,8 @@ use crate::rooms::{
 #[tracing::instrument(
 	name = "upgrade",
 	level = "debug",
-	skip_all,
-	ret(level = "debug")
+	ret(level = "debug"),
+	skip_all
 )]
 pub(super) async fn upgrade_outlier_to_timeline_pdu(
 	&self,

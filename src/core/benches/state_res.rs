@@ -41,16 +41,20 @@ criterion_main!(benches);
 
 static SERVER_TIMESTAMP: AtomicU64 = AtomicU64::new(0);
 
+#[expect(
+	clippy::iter_on_single_items,
+	clippy::iter_on_empty_collections
+)]
 fn lexico_topo_sort(c: &mut Criterion) {
 	c.bench_function("lexico_topo_sort", |c| {
-		use maplit::{hashmap, hashset};
+		use maplit::hashmap;
 
 		let graph = hashmap! {
-			event_id("l") => hashset![event_id("o")],
-			event_id("m") => hashset![event_id("n"), event_id("o")],
-			event_id("n") => hashset![event_id("o")],
-			event_id("o") => hashset![], // "o" has zero outgoing edges but 4 incoming edges
-			event_id("p") => hashset![event_id("o")],
+			event_id("l") => [event_id("o")].into_iter().collect(),
+			event_id("m") => [event_id("n"), event_id("o")].into_iter().collect(),
+			event_id("n") => [event_id("o")].into_iter().collect(),
+			event_id("o") => [].into_iter().collect(), // "o" has zero outgoing edges but 4 incoming edges
+			event_id("p") => [event_id("o")].into_iter().collect(),
 		};
 
 		c.to_async(FuturesExecutor).iter(async || {

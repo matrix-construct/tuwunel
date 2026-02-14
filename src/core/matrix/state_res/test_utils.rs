@@ -1,6 +1,6 @@
 use std::{
 	borrow::Borrow,
-	collections::{HashMap, HashSet},
+	collections::HashMap,
 	pin::Pin,
 	slice,
 	sync::{
@@ -30,7 +30,10 @@ use serde_json::{
 use super::{AuthSet, StateMap, auth_types_for_event, events::RoomCreateEvent};
 use crate::{
 	Error, Result, err, info,
-	matrix::{Event, EventHash, EventTypeExt, PduEvent, StateKey},
+	matrix::{
+		Event, EventHash, EventTypeExt, PduEvent, StateKey,
+		state_res::topological_sort::ReferencedIds,
+	},
 	utils::stream::IterStream,
 };
 
@@ -64,14 +67,14 @@ pub(super) async fn do_check(
 	);
 
 	// This will be lexi_topo_sorted for resolution
-	let mut graph = HashMap::new();
+	let mut graph = HashMap::<OwnedEventId, ReferencedIds>::new();
 	// This is the same as in `resolve` event_id -> OriginalStateEvent
 	let mut fake_event_map = HashMap::new();
 
 	// Create the DB of events that led up to this point
 	// TODO maybe clean up some of these clones it is just tests but...
 	for ev in init_events.values().chain(events) {
-		graph.insert(ev.event_id().to_owned(), HashSet::new());
+		graph.insert(ev.event_id().to_owned(), Default::default());
 		fake_event_map.insert(ev.event_id().to_owned(), ev.clone());
 	}
 
@@ -79,8 +82,8 @@ pub(super) async fn do_check(
 		if let [a, b] = &pair {
 			graph
 				.entry(a.to_owned())
-				.or_insert_with(HashSet::new)
-				.insert(b.clone());
+				.or_default()
+				.push(b.clone());
 		}
 	}
 
@@ -89,8 +92,8 @@ pub(super) async fn do_check(
 			if let [a, b] = &pair {
 				graph
 					.entry(a.to_owned())
-					.or_insert_with(HashSet::new)
-					.insert(b.clone());
+					.or_default()
+					.push(b.clone());
 			}
 		}
 	}

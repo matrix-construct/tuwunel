@@ -65,7 +65,7 @@ mod fetch_state;
 mod resolve;
 #[cfg(test)]
 mod test_utils;
-mod topological_sort;
+pub mod topological_sort;
 
 use self::{event_auth::check_state_dependent_auth_rules, fetch_state::FetchStateExt};
 pub use self::{
