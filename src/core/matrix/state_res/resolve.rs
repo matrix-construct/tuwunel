@@ -96,50 +96,30 @@ where
 
 	debug!(
 		unconflicted = unconflicted_state.len(),
-		conflicted = conflicted_states.len(),
-		"unresolved states",
+		conflicted_states = conflicted_states.len(),
+		conflicted_events = conflicted_states
+			.values()
+			.fold(0_usize, |a, s| a.saturating_add(s.len())),
+		"unresolved states"
 	);
 
 	trace!(
 		?unconflicted_state,
 		?conflicted_states,
 		unconflicted = unconflicted_state.len(),
-		conflicted = conflicted_states.len(),
-		"unresolved states",
+		conflicted_states = conflicted_states.len(),
+		"unresolved states"
 	);
 
 	if conflicted_states.is_empty() {
 		return Ok(unconflicted_state.into_iter().collect());
 	}
 
-	let consider_conflicted_subgraph = rules
-		.state_res
-		.v2_rules()
-		.is_some_and(|rules| rules.consider_conflicted_state_subgraph)
-		|| backport_css;
-
-	let conflicted_states = conflicted_states.values().flatten().cloned();
-
-	// Since `org.matrix.hydra.11`, fetch the conflicted state subgraph.
-	let conflicted_subgraph = consider_conflicted_subgraph
-		.then(|| conflicted_states.clone().stream())
-		.map_async(async |ids| conflicted_subgraph_dfs(ids, fetch))
-		.map(Option::into_iter)
-		.map(IterStream::stream)
-		.flatten_stream()
-		.flatten()
-		.boxed();
-
 	// 0. The full conflicted set is the union of the conflicted state set and the
 	//    auth difference. Don't honor events that don't exist.
-	let full_conflicted_set = auth_difference(auth_sets)
-		.chain(conflicted_states.stream())
-		.broad_filter_map(async |id| exists(id.clone()).await.then_some(id))
-		.chain(conflicted_subgraph)
-		.collect::<HashSet<_>>()
-		.inspect(|set| debug!(count = set.len(), "full conflicted set"))
-		.inspect(|set| trace!(?set, "full conflicted set"))
-		.await;
+	let full_conflicted_set =
+		full_conflicted_set(rules, conflicted_states, auth_sets, fetch, exists, backport_css)
+			.await;
 
 	// 1. Select the set X of all power events that appear in the full conflicted
 	//    set. For each such power event P, enlarge X by adding the events in the
@@ -231,4 +211,57 @@ where
 	trace!(?resolved_state, "resolved state");
 
 	Ok(resolved_state)
+}
+
+#[tracing::instrument(
+	name = "conflicted",
+	level = "debug",
+	skip_all,
+	fields(
+		states = conflicted_states.len(),
+		events = conflicted_states.values().flatten().count()
+	),
+)]
+async fn full_conflicted_set<AuthSets, FetchExists, ExistsFut, FetchEvent, EventFut, Pdu>(
+	rules: &RoomVersionRules,
+	conflicted_states: ConflictMap<OwnedEventId>,
+	auth_sets: AuthSets,
+	fetch: &FetchEvent,
+	exists: &FetchExists,
+	backport_css: bool,
+) -> HashSet<OwnedEventId>
+where
+	AuthSets: Stream<Item = AuthSet<OwnedEventId>> + Send,
+	FetchExists: Fn(OwnedEventId) -> ExistsFut + Sync,
+	ExistsFut: Future<Output = bool> + Send,
+	FetchEvent: Fn(OwnedEventId) -> EventFut + Sync,
+	EventFut: Future<Output = Result<Pdu>> + Send,
+	Pdu: Event + Clone,
+{
+	let consider_conflicted_subgraph = rules
+		.state_res
+		.v2_rules()
+		.is_some_and(|rules| rules.consider_conflicted_state_subgraph)
+		|| backport_css;
+
+	let conflicted_states = conflicted_states.values().flatten().cloned();
+
+	// Since `org.matrix.hydra.11`, fetch the conflicted state subgraph.
+	let conflicted_subgraph = consider_conflicted_subgraph
+		.then(|| conflicted_states.clone().stream())
+		.map_async(async |ids| conflicted_subgraph_dfs(ids, fetch))
+		.map(Option::into_iter)
+		.map(IterStream::stream)
+		.flatten_stream()
+		.flatten()
+		.boxed();
+
+	auth_difference(auth_sets)
+		.chain(conflicted_states.stream())
+		.broad_filter_map(async |id| exists(id.clone()).await.then_some(id))
+		.chain(conflicted_subgraph)
+		.collect::<HashSet<_>>()
+		.inspect(|set| debug!(count = set.len(), "full conflicted set"))
+		.inspect(|set| trace!(?set, "full conflicted set"))
+		.await
 }

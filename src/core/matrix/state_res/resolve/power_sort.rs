@@ -45,7 +45,7 @@ use crate::{
 	level = "debug",
 	skip_all,
 	fields(
-		full_conflicted = full_conflicted_set.len(),
+		conflicted = full_conflicted_set.len(),
 	)
 )]
 pub(super) async fn power_sort<Fetch, Fut, Pdu>(

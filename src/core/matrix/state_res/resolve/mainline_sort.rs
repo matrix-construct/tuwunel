@@ -39,7 +39,7 @@ use crate::{
 	level = "debug",
 	skip_all,
 	fields(
-		event_id = power_level_event_id
+		power_levels = power_level_event_id
 			.as_deref()
 			.map(EventId::as_str)
 			.unwrap_or_default(),

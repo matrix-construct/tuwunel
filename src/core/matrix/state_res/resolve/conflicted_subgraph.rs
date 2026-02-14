@@ -34,7 +34,7 @@ type Frame = AuthEvents;
 const PATH_INLINE: usize = 48;
 const STACK_INLINE: usize = 48;
 
-#[tracing::instrument(name = "conflicted_subgraph", level = "debug", skip_all)]
+#[tracing::instrument(name = "subgraph_dfs", level = "debug", skip_all)]
 pub(super) fn conflicted_subgraph_dfs<ConflictedEventIds, Fetch, Fut, Pdu>(
 	conflicted_event_ids: ConflictedEventIds,
 	fetch: &Fetch,
