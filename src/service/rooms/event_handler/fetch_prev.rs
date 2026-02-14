@@ -1,7 +1,4 @@
-use std::{
-	collections::{HashMap, HashSet},
-	iter::once,
-};
+use std::{collections::HashMap, iter::once};
 
 use futures::{FutureExt, StreamExt, stream::FuturesOrdered};
 use ruma::{
@@ -50,7 +47,7 @@ where
 	while let Some((prev_event_id, mut outlier)) = todo_outlier_stack.next().await {
 		let Some((pdu, mut json_opt)) = outlier.pop() else {
 			// Fetch and handle failed
-			graph.insert(prev_event_id.clone(), HashSet::new());
+			graph.insert(prev_event_id.clone(), Default::default());
 			continue;
 		};
 
@@ -59,7 +56,7 @@ where
 		let limit = self.services.server.config.max_fetch_prev_events;
 		if amount > limit {
 			debug_warn!(?limit, "Max prev event limit reached!");
-			graph.insert(prev_event_id.clone(), HashSet::new());
+			graph.insert(prev_event_id.clone(), Default::default());
 			continue;
 		}
 
@@ -74,7 +71,7 @@ where
 
 		let Some(json) = json_opt else {
 			// Get json failed, so this was not fetched over federation
-			graph.insert(prev_event_id.clone(), HashSet::new());
+			graph.insert(prev_event_id.clone(), Default::default());
 			continue;
 		};
 
@@ -104,7 +101,7 @@ where
 			);
 		} else {
 			// Time based check failed
-			graph.insert(prev_event_id.clone(), HashSet::new());
+			graph.insert(prev_event_id.clone(), Default::default());
 		}
 
 		eventid_info.insert(prev_event_id.clone(), (pdu, json));

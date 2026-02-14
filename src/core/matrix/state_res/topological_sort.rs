@@ -24,37 +24,40 @@
 
 use std::{
 	cmp::{Ordering, Reverse},
-	collections::{BinaryHeap, HashMap, HashSet},
+	collections::{BinaryHeap, HashMap},
 };
 
 use futures::TryStreamExt;
 use ruma::{
-	EventId, MilliSecondsSinceUnixEpoch, OwnedEventId, events::room::power_levels::UserPowerLevel,
+	MilliSecondsSinceUnixEpoch, OwnedEventId, events::room::power_levels::UserPowerLevel,
 };
 
-use crate::{Result, utils::stream::IterStream};
+use crate::{
+	Error, Result, is_not_equal_to, smallvec::SmallVec, utils::stream::IterStream, validated,
+};
 
-#[derive(PartialEq, Eq)]
-struct TieBreaker<'a> {
-	power_level: UserPowerLevel,
-	origin_server_ts: MilliSecondsSinceUnixEpoch,
-	event_id: &'a EventId,
-}
-
+pub type ReferencedIds = SmallVec<[OwnedEventId; 3]>;
 type PduInfo = (UserPowerLevel, MilliSecondsSinceUnixEpoch);
 
+#[derive(PartialEq, Eq)]
+struct TieBreaker {
+	power_level: UserPowerLevel,
+	origin_server_ts: MilliSecondsSinceUnixEpoch,
+	event_id: OwnedEventId,
+}
+
 // NOTE: the power level comparison is "backwards" intentionally.
-impl Ord for TieBreaker<'_> {
+impl Ord for TieBreaker {
 	fn cmp(&self, other: &Self) -> Ordering {
 		other
 			.power_level
 			.cmp(&self.power_level)
 			.then(self.origin_server_ts.cmp(&other.origin_server_ts))
-			.then(self.event_id.cmp(other.event_id))
+			.then(self.event_id.cmp(&other.event_id))
 	}
 }
 
-impl PartialOrd for TieBreaker<'_> {
+impl PartialOrd for TieBreaker {
 	fn partial_cmp(&self, other: &Self) -> Option<Ordering> { Some(self.cmp(other)) }
 }
 
@@ -78,21 +81,34 @@ impl PartialOrd for TieBreaker<'_> {
 		graph = graph.len(),
 	)
 )]
-#[expect(clippy::implicit_hasher)]
+#[expect(clippy::implicit_hasher, clippy::or_fun_call)]
 pub async fn topological_sort<Query, Fut>(
-	graph: &HashMap<OwnedEventId, HashSet<OwnedEventId>>,
+	graph: &HashMap<OwnedEventId, ReferencedIds>,
 	query: &Query,
 ) -> Result<Vec<OwnedEventId>>
 where
 	Query: Fn(OwnedEventId) -> Fut + Sync,
 	Fut: Future<Output = Result<PduInfo>> + Send,
 {
+	let query = async |event_id: OwnedEventId| {
+		let (power_level, origin_server_ts) = query(event_id.clone()).await?;
+		Ok::<_, Error>(TieBreaker { power_level, origin_server_ts, event_id })
+	};
+
+	let max_edges = graph
+		.values()
+		.map(ReferencedIds::len)
+		.fold(graph.len(), |a, c| validated!(a + c));
+
 	// We consider that the DAG is directed from most recent events to oldest
 	// events, so an event is an incoming edge to its referenced events.
 	// zero_outdegs: Vec of events that have an outdegree of zero (no outgoing
 	// edges), i.e. the oldest events. incoming_edges_map: Map of event to the list
 	// of events that reference it in its referenced events.
-	let init = (Vec::new(), HashMap::<OwnedEventId, HashSet<OwnedEventId>>::new());
+	let init = (
+		Vec::with_capacity(max_edges),
+		HashMap::<OwnedEventId, ReferencedIds>::with_capacity(max_edges),
+	);
 
 	// Populate the list of events with an outdegree of zero, and the map of
 	// incoming edges.
@@ -103,24 +119,19 @@ where
 			init,
 			async |(mut zero_outdeg, mut incoming_edges), (event_id, outgoing_edges)| {
 				if outgoing_edges.is_empty() {
-					let (power_level, origin_server_ts) = query(event_id.clone()).await?;
-
 					// `Reverse` because `BinaryHeap` sorts largest -> smallest and we need
 					// smallest -> largest.
-					zero_outdeg.push(Reverse(TieBreaker {
-						power_level,
-						origin_server_ts,
-						event_id,
-					}));
+					zero_outdeg.push(Reverse(query(event_id.clone()).await?));
 				}
 
-				incoming_edges.entry(event_id.into()).or_default();
-
 				for referenced_event_id in outgoing_edges {
-					incoming_edges
+					let references = incoming_edges
 						.entry(referenced_event_id.into())
-						.or_default()
-						.insert(event_id.into());
+						.or_default();
+
+					if !references.contains(event_id) {
+						references.push(event_id.into());
+					}
 				}
 
 				Ok((zero_outdeg, incoming_edges))
@@ -133,34 +144,29 @@ where
 
 	// Use a BinaryHeap to keep the events with an outdegree of zero sorted.
 	let mut heap = BinaryHeap::from(zero_outdeg);
-	let mut sorted = vec![];
+	let mut sorted = Vec::with_capacity(max_edges);
 
 	// Apply Kahn's algorithm.
 	// https://en.wikipedia.org/wiki/Topological_sorting#Kahn's_algorithm
 	while let Some(Reverse(item)) = heap.pop() {
 		for parent_id in incoming_edges
-			.get(item.event_id)
-			.expect("event_id in heap should also be in incoming_edges")
+			.get(&item.event_id)
+			.unwrap_or(&ReferencedIds::new())
 		{
 			let outgoing_edges = outgoing_edges_map
 				.get_mut(parent_id)
 				.expect("outgoing_edges should contain all event_ids");
 
-			outgoing_edges.remove(item.event_id);
+			outgoing_edges.retain(is_not_equal_to!(&item.event_id));
 			if !outgoing_edges.is_empty() {
 				continue;
 			}
 
 			// Push on the heap once all the outgoing edges have been removed.
-			let (power_level, origin_server_ts) = query(parent_id.clone()).await?;
-			heap.push(Reverse(TieBreaker {
-				power_level,
-				origin_server_ts,
-				event_id: parent_id.as_ref(),
-			}));
+			heap.push(Reverse(query(parent_id.clone()).await?));
 		}
 
-		sorted.push(item.event_id.into());
+		sorted.push(item.event_id);
 	}
 
 	Ok(sorted)

@@ -1,10 +1,7 @@
-use std::{
-	collections::{HashMap, HashSet},
-	iter::once,
-};
+use std::{collections::HashMap, iter::once};
 
 use futures::StreamExt;
-use maplit::{hashmap, hashset};
+use maplit::hashmap;
 use rand::seq::SliceRandom;
 use ruma::{
 	MilliSecondsSinceUnixEpoch, OwnedEventId,
@@ -42,7 +39,7 @@ async fn test_event_sort() {
 	let rules = RoomVersionRules::V6;
 	let events = INITIAL_EVENTS();
 
-	let auth_chain: HashSet<OwnedEventId> = HashSet::new();
+	let auth_chain = Default::default();
 
 	let sorted_power_events = super::power_sort(&rules, &auth_chain, &async |id| {
 		events.get(&id).cloned().ok_or_else(not_found)
@@ -484,6 +481,10 @@ async fn test_event_map_none() {
 }
 
 #[tokio::test]
+#[expect(
+	clippy::iter_on_single_items,
+	clippy::iter_on_empty_collections
+)]
 async fn test_reverse_topological_power_sort() {
 	_ = tracing::subscriber::set_default(
 		tracing_subscriber::fmt()
@@ -492,11 +493,11 @@ async fn test_reverse_topological_power_sort() {
 	);
 
 	let graph = hashmap! {
-		event_id("l") => hashset![event_id("o")],
-		event_id("m") => hashset![event_id("n"), event_id("o")],
-		event_id("n") => hashset![event_id("o")],
-		event_id("o") => hashset![], // "o" has zero outgoing edges but 4 incoming edges
-		event_id("p") => hashset![event_id("o")],
+		event_id("l") => [event_id("o")].into_iter().collect(),
+		event_id("m") => [event_id("n"), event_id("o")].into_iter().collect(),
+		event_id("n") => [event_id("o")].into_iter().collect(),
+		event_id("o") => [].into_iter().collect(), // "o" has zero outgoing edges but 4 incoming edges
+		event_id("p") => [event_id("o")].into_iter().collect(),
 	};
 
 	let res = super::super::topological_sort(&graph, &async |_id| {
