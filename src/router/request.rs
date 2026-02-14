@@ -12,7 +12,7 @@ use futures::FutureExt;
 use http::{Method, StatusCode, Uri};
 use tokio::{task, time::sleep};
 use tracing::Span;
-use tuwunel_core::{Result, debug, debug_error, debug_warn, err, error, trace};
+use tuwunel_core::{Result, debug, debug_error, debug_warn, defer, err, error, trace};
 use tuwunel_service::Services;
 
 #[tracing::instrument(
@@ -62,6 +62,13 @@ pub(crate) async fn handle(
 		}
 	});
 
+	let abort = task.abort_handle();
+	defer! {{
+		if !abort.is_finished() {
+			debug_warn!(task = ?abort.id(), "Client disconnected; detached request.");
+		}
+	}}
+
 	task.await
 		.map_err(unhandled)
 		.and_then(move |result| handle_result(&method, &uri, result))
@@ -95,7 +102,7 @@ async fn execute(
 		.fetch_add(1, Ordering::Relaxed);
 
 	#[cfg(debug_assertions)]
-	tuwunel_core::defer! {{
+	defer! {{
 		_ = services.server
 			.metrics
 			.requests_handle_finished
