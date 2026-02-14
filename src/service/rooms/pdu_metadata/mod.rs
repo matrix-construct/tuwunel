@@ -127,7 +127,7 @@ where
 }
 
 #[implement(Service)]
-#[tracing::instrument(skip(self), level = "debug")]
+#[tracing::instrument(skip(self), level = "debug", ret)]
 pub async fn is_event_referenced(&self, room_id: &RoomId, event_id: &EventId) -> bool {
 	let key = (room_id, event_id);
 	self.db.referencedevents.qry(&key).await.is_ok()
@@ -140,7 +140,7 @@ pub fn mark_event_soft_failed(&self, event_id: &EventId) {
 }
 
 #[implement(Service)]
-#[tracing::instrument(skip(self), level = "debug")]
+#[tracing::instrument(skip(self), level = "debug", ret)]
 pub async fn is_event_soft_failed(&self, event_id: &EventId) -> bool {
 	self.db
 		.softfailedeventids
