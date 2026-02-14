@@ -130,7 +130,7 @@ ENTRYPOINT valgrind \
 FROM input AS complement-base
 ARG var_cache
 ARG var_lib_apt
-ARG complement_ref="4d3130f06d0dc3f794b5d48fbdba0b466792b52b"
+ARG complement_ref="5ca17e228083b44a38aeed3398ecc94529ae696e"
 ARG complement_tags="conduwuit_blacklist"
 ARG complement_tests="./tests/..."
 ARG complement_run=".*"
