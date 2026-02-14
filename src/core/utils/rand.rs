@@ -5,6 +5,7 @@ use std::{
 
 use arrayvec::ArrayString;
 use rand::{Rng, seq::SliceRandom, thread_rng};
+use ruma::OwnedEventId;
 
 pub fn shuffle<T>(vec: &mut [T]) {
 	let mut rng = thread_rng();
@@ -29,6 +30,29 @@ pub fn string_array<const LENGTH: usize>() -> ArrayString<LENGTH> {
 		.for_each(|c| ret.push(c));
 
 	ret
+}
+
+#[must_use]
+pub fn event_id() -> OwnedEventId {
+	use base64::{
+		Engine,
+		alphabet::URL_SAFE,
+		engine::{GeneralPurpose, general_purpose::NO_PAD},
+	};
+
+	let mut binary: [u8; 32] = [0; _];
+	thread_rng().fill(&mut binary);
+
+	let mut encoded: [u8; 43] = [0; _];
+	GeneralPurpose::new(&URL_SAFE, NO_PAD)
+		.encode_slice(binary, &mut encoded)
+		.expect("Failed to encode binary to base64");
+
+	let event_id: &str = str::from_utf8(&encoded)
+		.expect("Failed to convert array of base64 bytes to valid utf8 str");
+
+	OwnedEventId::from_parts('$', event_id, None)
+		.expect("Failed to generate valid random event_id")
 }
 
 #[must_use]
