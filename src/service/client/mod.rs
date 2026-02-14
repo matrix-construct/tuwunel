@@ -5,7 +5,7 @@ use std::{
 };
 
 use ipaddress::IPAddress;
-use reqwest::{Certificate, Client, ClientBuilder, dns::Resolve, redirect};
+use reqwest::{Certificate, Client, ClientBuilder, dns::Resolve, header::HeaderValue, redirect};
 use tuwunel_core::{Config, Result, either::Either, err, implement, trace};
 
 use crate::{Services, service};
@@ -154,12 +154,10 @@ fn make_clients(services: &Services) -> Result<Clients> {
 }
 
 fn base(config: &Config, name: Option<&str>) -> Result<ClientBuilder> {
-	let mut user_agent = tuwunel_core::version::user_agent();
-	let user_agent_with_name;
-	if let Some(name) = name {
-		user_agent_with_name = format!("{user_agent} {name}");
-		user_agent = &user_agent_with_name;
-	}
+	let user_agent = tuwunel_core::version::user_agent();
+	let user_agent: HeaderValue = name
+		.map(|name| format!("{user_agent} {name}").try_into())
+		.unwrap_or_else(|| user_agent.try_into())?;
 
 	let mut builder = Client::builder()
 		.hickory_dns(true)
