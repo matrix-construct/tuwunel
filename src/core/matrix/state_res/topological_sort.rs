@@ -1,3 +1,27 @@
+//! Sorts the given event graph using reverse topological power ordering.
+//!
+//! Definition in the specification:
+//!
+//! The reverse topological power ordering of a set of events is the
+//! lexicographically smallest topological ordering based on the DAG formed by
+//! referenced events (prev or auth, determined by caller). The reverse
+//! topological power ordering is ordered from earliest event to latest. For
+//! comparing two equal topological orderings to determine which is the
+//! lexicographically smallest, the following comparison relation on events is
+//! used: for events x and y, x < y if
+//!
+//! 1. x’s sender has greater power level than y’s sender, when looking at their
+//!    respective referenced events; or
+//! 2. the senders have the same power level, but x’s origin_server_ts is less
+//!    than y’s origin_server_ts; or
+//! 3. the senders have the same power level and the events have the same
+//!    origin_server_ts, but x’s event_id is less than y’s event_id.
+//!
+//! The reverse topological power ordering can be found by sorting the events
+//! using Kahn’s algorithm for topological sorting, and at each step selecting,
+//! among all the candidate vertices, the smallest vertex using the above
+//! comparison relation.
+
 use std::{
 	cmp::{Ordering, Reverse},
 	collections::{BinaryHeap, HashMap, HashSet},
@@ -36,31 +60,10 @@ impl PartialOrd for TieBreaker<'_> {
 
 /// Sorts the given event graph using reverse topological power ordering.
 ///
-/// Definition in the specification:
-///
-/// The reverse topological power ordering of a set of events is the
-/// lexicographically smallest topological ordering based on the DAG formed by
-/// auth events. The reverse topological power ordering is ordered from earliest
-/// event to latest. For comparing two topological orderings to determine which
-/// is the lexicographically smallest, the following comparison relation on
-/// events is used: for events x and y, x < y if
-///
-/// 1. x’s sender has greater power level than y’s sender, when looking at their
-///    respective auth_events; or
-/// 2. the senders have the same power level, but x’s origin_server_ts is less
-///    than y’s origin_server_ts; or
-/// 3. the senders have the same power level and the events have the same
-///    origin_server_ts, but x’s event_id is less than y’s event_id.
-///
-/// The reverse topological power ordering can be found by sorting the events
-/// using Kahn’s algorithm for topological sorting, and at each step selecting,
-/// among all the candidate vertices, the smallest vertex using the above
-/// comparison relation.
-///
 /// ## Arguments
 ///
-/// * `graph` - The graph to sort. A map of event ID to its auth events that are
-///   in the full conflicted set.
+/// * `graph` - The graph to sort. A map of event ID to its referenced events
+///   that are in the full conflicted set.
 ///
 /// * `query` - Function to obtain a (power level, origin_server_ts) of an event
 ///   for breaking ties.
@@ -85,10 +88,10 @@ where
 	Fut: Future<Output = Result<PduInfo>> + Send,
 {
 	// We consider that the DAG is directed from most recent events to oldest
-	// events, so an event is an incoming edge to its auth events. zero_outdegs:
-	// Vec of events that have an outdegree of zero (no outgoing edges), i.e. the
-	// oldest events. incoming_edges_map: Map of event to the list of events that
-	// reference it in its auth events.
+	// events, so an event is an incoming edge to its referenced events.
+	// zero_outdegs: Vec of events that have an outdegree of zero (no outgoing
+	// edges), i.e. the oldest events. incoming_edges_map: Map of event to the list
+	// of events that reference it in its referenced events.
 	let init = (Vec::new(), HashMap::<OwnedEventId, HashSet<OwnedEventId>>::new());
 
 	// Populate the list of events with an outdegree of zero, and the map of
@@ -113,9 +116,9 @@ where
 
 				incoming_edges.entry(event_id.into()).or_default();
 
-				for auth_event_id in outgoing_edges {
+				for referenced_event_id in outgoing_edges {
 					incoming_edges
-						.entry(auth_event_id.into())
+						.entry(referenced_event_id.into())
 						.or_default()
 						.insert(event_id.into());
 				}
@@ -125,7 +128,7 @@ where
 		)
 		.await?;
 
-	// Map of event to the list of events in its auth events.
+	// Map of event to the list of events in its referenced events.
 	let mut outgoing_edges_map = graph.clone();
 
 	// Use a BinaryHeap to keep the events with an outdegree of zero sorted.
