@@ -2,7 +2,7 @@
 
 use std::{
 	fs,
-	net::SocketAddr,
+	net::{IpAddr, Ipv4Addr, SocketAddr},
 	os::unix::{fs::PermissionsExt, net::UnixListener},
 	path::Path,
 	sync::Arc,
@@ -36,7 +36,7 @@ pub(super) async fn serve(
 
 	let router = router
 		.clone()
-		.layer(Extension(ConnectInfo("0.0.0.0".parse::<SocketAddr>())))
+		.layer(Extension(ConnectInfo(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0))))
 		.into_make_service();
 	let acceptor = axum_server::from_unix(unix_listener)?
 		.handle(handle.clone())
