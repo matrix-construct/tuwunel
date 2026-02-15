@@ -51,7 +51,7 @@ static VERSIONS: [&str; 17] = [
 	"v1.15",  /* custom profile fields */
 ];
 
-static UNSTABLE_FEATURES: [&str; 17] = [
+static UNSTABLE_FEATURES: [&str; 18] = [
 	"org.matrix.e2e_cross_signing",
 	// private read receipts (https://github.com/matrix-org/matrix-spec-proposals/pull/2285)
 	"org.matrix.msc2285.stable",
@@ -71,6 +71,7 @@ static UNSTABLE_FEATURES: [&str; 17] = [
 	"org.matrix.msc3814",
 	// filtering of /publicRooms by room type (https://github.com/matrix-org/matrix-spec-proposals/pull/3827)
 	"org.matrix.msc3827",
+	"org.matrix.msc3827.stable",
 	// authenticated media (https://github.com/matrix-org/matrix-spec-proposals/pull/3916)
 	"org.matrix.msc3916.stable",
 	// intentional mentions (https://github.com/matrix-org/matrix-spec-proposals/pull/3952)
