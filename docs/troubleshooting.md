@@ -13,7 +13,7 @@
 
 You can reinvite yourself to the admin room through the following methods:
 - Use the `--execute "users make_user_admin <username>"` Tuwunel binary
-argument once to invite yourslf to the admin room on startup
+argument once to invite yourself to the admin room on startup
 - Use the Tuwunel console/CLI to run the `users make_user_admin` command
 - Or specify the `emergency_password` config option to allow you to temporarily
 log into the server account (`@conduit`) from a web client
