@@ -9,13 +9,13 @@ pub(super) fn semantic(_args: TokenStream) -> TokenStream {
 	let output = git(ARGS);
 	let output = output
 		.strip_prefix('v')
-		.map(str::to_string)
+		.map(ToOwned::to_owned)
 		.unwrap_or(output);
 
 	let output = output
 		.rsplit_once('-')
 		.map(|(s, _)| s)
-		.map(str::to_string)
+		.map(ToOwned::to_owned)
 		.unwrap_or(output);
 
 	let ret = quote! {
