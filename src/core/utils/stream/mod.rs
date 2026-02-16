@@ -4,6 +4,7 @@ mod cloned;
 mod expect;
 mod ignore;
 mod iter_stream;
+mod parallel;
 mod ready;
 mod tools;
 mod try_broadband;
@@ -23,6 +24,7 @@ pub use self::{
 	expect::TryExpect,
 	ignore::TryIgnore,
 	iter_stream::IterStream,
+	parallel::ParallelExt,
 	ready::ReadyExt,
 	tools::Tools,
 	try_broadband::TryBroadbandExt,
