@@ -479,6 +479,7 @@ async fn register_user(
 			password: Some("*"),
 			origin: Some("sso"),
 			displayname: userinfo.name.as_deref(),
+			grant_first_user_admin: true,
 			..Default::default()
 		})
 		.await?;
