@@ -10,7 +10,7 @@ use tuwunel_core::{
 	utils::{
 		TryReadyExt,
 		math::Expected,
-		stream::{IterStream, ReadyExt, TryIgnore, TryParallelExt},
+		stream::{IterStream, ReadyExt, TryIgnore, TryOutOfBandExt},
 		string::EMPTY,
 	},
 };
@@ -211,7 +211,7 @@ pub(super) async fn raw_compact(
 	let results = maps
 		.into_iter()
 		.try_stream()
-		.paralleln_and_then(runtime, parallelism, move |map| {
+		.out_of_bandn_and_then(runtime, parallelism, move |map| {
 			map.compact_blocking(options.clone())?;
 			Ok(map.name().to_owned())
 		})
