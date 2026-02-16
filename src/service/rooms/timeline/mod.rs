@@ -423,7 +423,6 @@ fn pdu_count_to_id(shortroomid: ShortRoomId, count: PduCount, dir: Direction) ->
 }
 
 /// Returns the pdu from shorteventid
-///
 /// Checks the `eventid_outlierpdu` Tree if not found in the timeline.
 #[implement(Service)]
 pub async fn get_pdu_from_shorteventid(&self, shorteventid: ShortEventId) -> Result<PduEvent> {
@@ -437,54 +436,69 @@ pub async fn get_pdu_from_shorteventid(&self, shorteventid: ShortEventId) -> Res
 }
 
 /// Returns the pdu.
-///
 /// Checks the `eventid_outlierpdu` Tree if not found in the timeline.
 #[implement(Service)]
-pub async fn get_pdu(&self, event_id: &EventId) -> Result<PduEvent> {
-	let accepted = self.get_non_outlier_pdu(event_id);
-	let outlier = self.get_outlier_pdu(event_id);
-
-	pin_mut!(accepted, outlier);
-	select_ok([Left(accepted), Right(outlier)])
-		.await
-		.map(at!(0))
-}
+pub async fn get_pdu(&self, event_id: &EventId) -> Result<PduEvent> { self.get(event_id).await }
 
 /// Returns the pdu.
-///
 /// Checks the `eventid_outlierpdu` Tree if not found in the timeline.
 #[implement(Service)]
 pub async fn get_outlier_pdu(&self, event_id: &EventId) -> Result<PduEvent> {
-	self.db
-		.eventid_outlierpdu
-		.get(event_id)
-		.await
-		.deserialized()
+	self.get_outlier(event_id).await
 }
 
 /// Returns the pdu.
-///
 /// Checks the `eventid_outlierpdu` Tree if not found in the timeline.
 #[implement(Service)]
 pub async fn get_non_outlier_pdu(&self, event_id: &EventId) -> Result<PduEvent> {
-	let pdu_id = self.get_pdu_id(event_id).await?;
-
-	self.get_pdu_from_id(&pdu_id).await
+	self.get_non_outlier(event_id).await
 }
 
 /// Returns the pdu.
-///
 /// This does __NOT__ check the outliers `Tree`.
 #[implement(Service)]
 pub async fn get_pdu_from_id(&self, pdu_id: &RawPduId) -> Result<PduEvent> {
-	self.db.pduid_pdu.get(pdu_id).await.deserialized()
+	self.get_from_id(pdu_id).await
 }
 
 /// Returns the json of a pdu.
+/// Checks the `eventid_outlierpdu` Tree if not found in the timeline.
 #[implement(Service)]
 pub async fn get_pdu_json(&self, event_id: &EventId) -> Result<CanonicalJsonObject> {
-	let accepted = self.get_non_outlier_pdu_json(event_id);
-	let outlier = self.get_outlier_pdu_json(event_id);
+	self.get(event_id).await
+}
+
+/// Returns the json of a pdu.
+/// Checks the `eventid_outlierpdu` Tree if not found in the timeline.
+#[implement(Service)]
+pub async fn get_outlier_pdu_json(&self, event_id: &EventId) -> Result<CanonicalJsonObject> {
+	self.get_outlier(event_id).await
+}
+
+/// Returns the json of a pdu.
+/// Checks the `eventid_outlierpdu` Tree if not found in the timeline.
+#[implement(Service)]
+pub async fn get_non_outlier_pdu_json(&self, event_id: &EventId) -> Result<CanonicalJsonObject> {
+	self.get_non_outlier(event_id).await
+}
+
+/// Returns the pdu as a `BTreeMap<String, CanonicalJsonValue>`.
+/// This does __NOT__ check the outliers `Tree`.
+#[implement(Service)]
+pub async fn get_pdu_json_from_id(&self, pdu_id: &RawPduId) -> Result<CanonicalJsonObject> {
+	self.get_from_id(pdu_id).await
+}
+
+/// Returns the pdu into T.
+/// Checks the `eventid_outlierpdu` Tree if not found in the timeline.
+#[implement(Service)]
+#[inline]
+pub async fn get<T>(&self, event_id: &EventId) -> Result<T>
+where
+	T: for<'de> Deserialize<'de>,
+{
+	let accepted = self.get_non_outlier(event_id);
+	let outlier = self.get_outlier(event_id);
 
 	pin_mut!(accepted, outlier);
 	select_ok([Left(accepted), Right(outlier)])
@@ -492,9 +506,14 @@ pub async fn get_pdu_json(&self, event_id: &EventId) -> Result<CanonicalJsonObje
 		.map(at!(0))
 }
 
-/// Returns the json of a pdu.
+/// Returns the pdu into T.
+/// Checks the `eventid_outlierpdu` Tree if not found in the timeline.
 #[implement(Service)]
-pub async fn get_outlier_pdu_json(&self, event_id: &EventId) -> Result<CanonicalJsonObject> {
+#[inline]
+pub async fn get_outlier<T>(&self, event_id: &EventId) -> Result<T>
+where
+	T: for<'de> Deserialize<'de>,
+{
 	self.db
 		.eventid_outlierpdu
 		.get(event_id)
@@ -502,22 +521,31 @@ pub async fn get_outlier_pdu_json(&self, event_id: &EventId) -> Result<Canonical
 		.deserialized()
 }
 
-/// Returns the json of a pdu.
+/// Returns the pdu into T.
+/// Checks the `eventid_outlierpdu` Tree if not found in the timeline.
 #[implement(Service)]
-pub async fn get_non_outlier_pdu_json(&self, event_id: &EventId) -> Result<CanonicalJsonObject> {
+#[inline]
+pub async fn get_non_outlier<T>(&self, event_id: &EventId) -> Result<T>
+where
+	T: for<'de> Deserialize<'de>,
+{
 	let pdu_id = self.get_pdu_id(event_id).await?;
 
-	self.get_pdu_json_from_id(&pdu_id).await
+	self.get_from_id(&pdu_id).await
 }
 
-/// Returns the pdu as a `BTreeMap<String, CanonicalJsonValue>`.
+/// Returns the pdu into T.
+/// This does __NOT__ check the outliers `Tree`.
 #[implement(Service)]
-pub async fn get_pdu_json_from_id(&self, pdu_id: &RawPduId) -> Result<CanonicalJsonObject> {
+#[inline]
+pub async fn get_from_id<T>(&self, pdu_id: &RawPduId) -> Result<T>
+where
+	T: for<'de> Deserialize<'de>,
+{
 	self.db.pduid_pdu.get(pdu_id).await.deserialized()
 }
 
 /// Checks if pdu exists
-///
 /// Checks the `eventid_outlierpdu` Tree if not found in the timeline.
 #[implement(Service)]
 pub async fn pdu_exists<'a>(&'a self, event_id: &'a EventId) -> bool {
