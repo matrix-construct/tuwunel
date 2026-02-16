@@ -4,7 +4,7 @@ This page is for about contributing to Tuwunel. The
 [development](./development.md) page may be of interest for you as well.
 
 If you would like to work on an [issue][issues] that is not assigned, preferably
-ask in the Matrix room first at [#tuwunel:tuwunel.chat][tuwunel-chat],
+ask in the Matrix room first at [#tuwunel:grin.hu][tuwunel-chat],
 and comment on it.
 
 ### Linting and Formatting
@@ -89,7 +89,7 @@ If you open a pull request on one of the mirrors, it is your responsibility to
 inform me about its existence. In the future I may try to solve this with more
 repo bots in the Tuwunel Matrix room. There is no mailing list or email-patch
 support on the sr.ht mirror, but if you'd like to email me a git patch you can
-do so at `maintainer@tuwunel.chat`.
+do so at `jasonzemos@gmail.com`.
 
 Direct all PRs/MRs to the `main` branch.
 
@@ -113,7 +113,7 @@ maintainers. Stale branches will be deleted to reduce the effort for this
 policy.
 
 [issues]: https://github.com/matrix-construct/tuwunel/issues
-[tuwunel-chat]: https://matrix.to/#/#tuwunel:tuwunel.chat
+[tuwunel-chat]: https://matrix.to/#/#tuwunel:grin.hu
 [complement]: https://github.com/matrix-org/complement/
 [sytest]: https://github.com/matrix-org/sytest/
 [cargo-deb]: https://github.com/kornelski/cargo-deb

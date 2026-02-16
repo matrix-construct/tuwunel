@@ -3,7 +3,7 @@
 ## Getting help
 
 If you run into any problems while setting up an Appservice: ask us in
-[#tuwunel:tuwunel.chat](https://matrix.to/#/#tuwunel:tuwunel.chat) or
+[#tuwunel:grin.hu](https://matrix.to/#/#tuwunel:grin.hu) or
 [open an issue on GitHub](https://github.com/matrix-construct/tuwunel/issues/new).
 
 ## Set up the appservice - general instructions
