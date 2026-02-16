@@ -29,9 +29,11 @@ use ruma::{
 };
 use tuwunel_core::{
 	Result, err, is_true,
-	matrix::{Pdu, room_version, state_res::events::RoomCreateEvent},
+	matrix::{Pdu, room_version},
 	utils::BoolExt,
 };
+
+use crate::rooms::state_res::events::RoomCreateEvent;
 
 pub struct Service {
 	services: Arc<crate::services::OnceServices>,

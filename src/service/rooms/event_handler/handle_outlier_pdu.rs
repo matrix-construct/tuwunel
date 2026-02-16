@@ -5,13 +5,14 @@ use ruma::{
 use tuwunel_core::{
 	Err, Result, debug, debug_info, err, implement,
 	matrix::{Event, PduEvent, event::TypeExt, room_version},
-	pdu::format::from_incoming_federation,
-	ref_at, state_res, trace,
+	pdu::{check_pdu_format, format::from_incoming_federation},
+	ref_at, trace,
 	utils::{future::TryExtExt, stream::IterStream},
 	warn,
 };
 
 use super::check_room_id;
+use crate::rooms::state_res;
 
 #[implement(super::Service)]
 pub(super) async fn handle_outlier_pdu(
@@ -70,7 +71,7 @@ pub(super) async fn handle_outlier_pdu(
 
 	let room_rules = room_version::rules(room_version)?;
 
-	state_res::check_pdu_format(&pdu_json, &room_rules.event_format)?;
+	check_pdu_format(&pdu_json, &room_rules.event_format)?;
 
 	// Now that we have checked the signature and hashes we can make mutations and
 	// convert to our PduEvent type.
