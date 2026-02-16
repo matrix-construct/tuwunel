@@ -7,7 +7,7 @@ mod iter_stream;
 mod ready;
 mod tools;
 mod try_broadband;
-mod try_parallel;
+mod try_outofband;
 mod try_ready;
 mod try_tools;
 mod try_wideband;
@@ -26,7 +26,7 @@ pub use self::{
 	ready::ReadyExt,
 	tools::Tools,
 	try_broadband::TryBroadbandExt,
-	try_parallel::TryParallelExt,
+	try_outofband::TryOutOfBandExt,
 	try_ready::TryReadyExt,
 	try_tools::TryTools,
 	try_wideband::TryWidebandExt,
