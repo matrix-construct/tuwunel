@@ -4,7 +4,7 @@ use futures::{FutureExt, StreamExt, TryFutureExt, TryStreamExt, future::try_join
 use ruma::{OwnedEventId, RoomId, RoomVersionId};
 use tuwunel_core::{
 	Result, apply, debug, debug_warn, err, implement,
-	matrix::{Event, StateMap, state_res::AuthSet},
+	matrix::Event,
 	ref_at, trace,
 	utils::{
 		option::OptionExt,
@@ -12,7 +12,10 @@ use tuwunel_core::{
 	},
 };
 
-use crate::rooms::short::ShortStateHash;
+use crate::rooms::{
+	short::ShortStateHash,
+	state_res::{AuthSet, StateMap},
+};
 
 // TODO: if we know the prev_events of the incoming event we can avoid the
 #[implement(super::Service)]

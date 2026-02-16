@@ -126,5 +126,16 @@ blurhash.optional = true
 tuwunel-core.workspace = true
 tuwunel-database.workspace = true
 
+[dev-dependencies]
+criterion.workspace = true
+insta.workspace = true
+maplit.workspace = true
+similar.workspace = true
+tracing-subscriber.workspace = true
+
 [lints]
 workspace = true
+
+[[bench]]
+name = "state_res"
+harness = false

@@ -8,10 +8,10 @@ use ruma::{
 use tuwunel_core::{
 	Result, debug_warn, err, implement,
 	matrix::{Event, PduEvent},
-	state_res::{self},
 };
 
 use super::check_room_id;
+use crate::rooms::state_res;
 
 #[implement(super::Service)]
 #[tracing::instrument(

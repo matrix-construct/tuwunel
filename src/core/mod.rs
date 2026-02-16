@@ -25,9 +25,7 @@ pub use ::tracing;
 pub use config::Config;
 pub use error::Error;
 pub use info::{rustc_flags_capture, version, version::version};
-pub use matrix::{
-	Event, EventTypeExt, Pdu, PduCount, PduEvent, PduId, RoomVersion, pdu, state_res,
-};
+pub use matrix::{Event, EventTypeExt, Pdu, PduCount, PduEvent, PduId, RoomVersion, pdu};
 pub use server::Server;
 pub use utils::{ctor, dtor, implement, result, result::Result};
 

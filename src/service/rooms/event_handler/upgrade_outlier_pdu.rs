@@ -7,7 +7,7 @@ use ruma::{
 };
 use tuwunel_core::{
 	Err, Result, debug, debug_info, err, implement, is_equal_to,
-	matrix::{Event, EventTypeExt, PduEvent, StateKey, room_version, state_res},
+	matrix::{Event, EventTypeExt, PduEvent, StateKey, pdu::check_pdu_format, room_version},
 	trace,
 	utils::stream::{BroadbandExt, ReadyExt},
 	warn,
@@ -15,6 +15,7 @@ use tuwunel_core::{
 
 use crate::rooms::{
 	state_compressor::{CompressedState, HashSetCompressStateEvent},
+	state_res,
 	timeline::RawPduId,
 };
 
@@ -60,7 +61,7 @@ pub(super) async fn upgrade_outlier_to_timeline_pdu(
 	let room_rules = room_version::rules(room_version)?;
 
 	trace!(format = ?room_rules.event_format, "Checking format");
-	state_res::check_pdu_format(&val, &room_rules.event_format)?;
+	check_pdu_format(&val, &room_rules.event_format)?;
 
 	// 10. Fetch missing state and auth chain events by calling /state_ids at
 	//     backwards extremities doing all the checks in this list starting at 1.

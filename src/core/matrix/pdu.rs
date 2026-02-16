@@ -22,6 +22,7 @@ pub use self::{
 	Count as PduCount, Id as PduId, Pdu as PduEvent, RawId as RawPduId,
 	builder::{Builder, Builder as PduBuilder},
 	count::Count,
+	format::check::check_pdu_format,
 	hashes::EventHashes as EventHash,
 	id::Id,
 	raw_id::*,

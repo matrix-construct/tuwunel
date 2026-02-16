@@ -116,7 +116,3 @@ similar.workspace = true
 
 [lints]
 workspace = true
-
-[[bench]]
-name = "state_res"
-harness = false

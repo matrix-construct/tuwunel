@@ -13,9 +13,8 @@ use tuwunel_core::{
 	Error, Result, err, implement,
 	matrix::{
 		event::{Event, StateKey, TypeExt},
-		pdu::{EventHash, PduBuilder, PduEvent, PrevEvents},
+		pdu::{EventHash, PduBuilder, PduEvent, PrevEvents, check_pdu_format},
 		room_version,
-		state_res::{self},
 	},
 	utils::{
 		IterStream, ReadyExt, TryReadyExt, millis_since_unix_epoch, stream::TryIgnore,
@@ -24,6 +23,7 @@ use tuwunel_core::{
 };
 
 use super::RoomMutexGuard;
+use crate::rooms::state_res;
 
 #[implement(super::Service)]
 pub async fn create_hash_and_sign_event(
@@ -195,7 +195,7 @@ pub async fn create_hash_and_sign_event(
 		pdu_json.insert("room_id".into(), CanonicalJsonValue::String(pdu.room_id.clone().into()));
 	}
 
-	state_res::check_pdu_format(&pdu_json, &version_rules.event_format)?;
+	check_pdu_format(&pdu_json, &version_rules.event_format)?;
 
 	// Generate short event id
 	let _shorteventid = self

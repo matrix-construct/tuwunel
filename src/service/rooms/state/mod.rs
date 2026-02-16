@@ -14,7 +14,6 @@ use tuwunel_core::{
 	implement,
 	matrix::{PduCount, RoomVersionRules, StateKey, TypeStateKey, room_version},
 	result::{AndThenRef, FlatOk},
-	state_res::{StateMap, auth_types_for_event},
 	trace,
 	utils::{
 		IterStream, MutexMap, MutexMapGuard, ReadyExt, calculate_hash,
@@ -29,6 +28,7 @@ use crate::{
 	rooms::{
 		short::{ShortEventId, ShortStateHash, ShortStateKey},
 		state_compressor::{CompressedState, parse_compressed_state_event},
+		state_res::{StateMap, auth_types_for_event},
 	},
 	services::OnceServices,
 };
