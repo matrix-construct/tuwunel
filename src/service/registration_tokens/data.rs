@@ -33,7 +33,7 @@ impl DatabaseTokenInfo {
 	#[must_use]
 	pub fn is_valid(&self) -> bool {
 		if let Some(max_uses) = self.expires.max_uses
-			&& max_uses >= self.uses
+			&& self.uses >= max_uses
 		{
 			return false;
 		}
