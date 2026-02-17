@@ -28,7 +28,7 @@ use ruma::{
 use tuwunel_core::{
 	Err, Error, Result, debug,
 	debug::INFO_SPAN_LEVEL,
-	debug_warn, defer, err, error,
+	debug_info, debug_warn, defer, err, error,
 	itertools::Itertools,
 	result::LogErr,
 	smallvec::SmallVec,
@@ -135,7 +135,7 @@ pub(crate) async fn send_transaction_message_route(
 	)
 	.await?;
 
-	debug!(
+	debug_info!(
 		pdus = body.pdus.len(),
 		edus = body.edus.len(),
 		elapsed = ?txn_start_time.elapsed(),
