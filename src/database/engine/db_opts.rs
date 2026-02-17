@@ -4,6 +4,7 @@ use rocksdb::{Cache, DBRecoveryMode, Env, LogLevel, Options, statistics::StatsLe
 use tuwunel_core::{Config, Result, utils};
 
 use super::{cf_opts::cache_size_f64, logger::handle as handle_log};
+use crate::util::map_err;
 
 /// Create database-wide options suitable for opening the database. This also
 /// sets our default column options in case of opening a column with the same
@@ -57,6 +58,10 @@ pub(crate) fn db_options(config: &Config, env: &Env, row_cache: &Cache) -> Resul
 	opts.set_wal_size_limit_mb(1024);
 	opts.set_max_total_wal_size(1024 * 1024 * 512);
 	opts.set_writable_file_max_buffer_size(1024 * 1024 * 2);
+	if !config.rocksdb_allow_fallocate {
+		opts.set_options_from_string("allow_fallocate=false")
+			.map_err(map_err)?;
+	}
 
 	// Misc
 	opts.set_disable_auto_compactions(!config.rocksdb_compaction);

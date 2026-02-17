@@ -1350,6 +1350,20 @@ pub struct Config {
 	#[serde(default)]
 	pub rocksdb_never_drop_columns: bool,
 
+	/// Configures RocksDB to not preallocate WAL logs.
+	///
+	/// Normally, RocksDB allocates certain types of files by calling
+	/// fallocate, writing the file contents, then truncating the logs to the
+	/// proper size. This causes pathological disk space usage on btrfs due
+	/// how it interacts with its Copy-on-Write implementation.
+	///
+	/// It is recommended to set this to false if you run the server on btrfs,
+	/// and not touch it otherwise.
+	///
+	/// default: true
+	#[serde(default = "true_fn")]
+	pub rocksdb_allow_fallocate: bool,
+
 	/// This is a password that can be configured that will let you login to the
 	/// server bot account (currently `@conduit`) for emergency troubleshooting
 	/// purposes such as recovering/recreating your admin room, or inviting
