@@ -870,9 +870,16 @@ pub struct Config {
 
 	/// Maximum number of keys to request in each trusted server batch query.
 	///
-	/// default: 1024
+	/// default: 192
 	#[serde(default = "default_trusted_server_batch_size")]
 	pub trusted_server_batch_size: usize,
+
+	/// Maximum number of request batches in flight simultaneously when querying
+	/// a trusted server.
+	///
+	/// default: 2
+	#[serde(default = "default_trusted_server_batch_concurrency")]
+	pub trusted_server_batch_concurrency: usize,
 
 	/// Max log level for tuwunel. Allows debug, info, warn, or error.
 	///
@@ -3339,7 +3346,9 @@ fn parallelism_scaled_u32(val: u32) -> u32 {
 
 fn parallelism_scaled(val: usize) -> usize { val.saturating_mul(sys::available_parallelism()) }
 
-fn default_trusted_server_batch_size() -> usize { 256 }
+fn default_trusted_server_batch_size() -> usize { 192 }
+
+fn default_trusted_server_batch_concurrency() -> usize { 2 }
 
 fn default_db_pool_workers() -> usize {
 	sys::available_parallelism()

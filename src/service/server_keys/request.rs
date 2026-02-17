@@ -1,5 +1,6 @@
-use std::{collections::BTreeMap, fmt::Debug};
+use std::{collections::BTreeMap, convert::identity, fmt::Debug};
 
+use futures::{FutureExt, StreamExt, TryFutureExt};
 use ruma::{
 	OwnedServerName, OwnedServerSigningKeyId, ServerName, ServerSigningKeyId,
 	api::federation::discovery::{
@@ -8,7 +9,10 @@ use ruma::{
 		get_server_keys,
 	},
 };
-use tuwunel_core::{Err, Result, debug, implement, info};
+use tuwunel_core::{
+	Err, Result, error, implement, info, trace,
+	utils::stream::{IterStream, ReadyExt, TryBroadbandExt, TryReadyExt},
+};
 
 #[implement(super::Service)]
 pub(super) async fn batch_notary_request<'a, S, K>(
@@ -36,7 +40,11 @@ where
 		batch
 	});
 
-	let total_keys = server_keys.len();
+	let total_keys = server_keys
+		.iter()
+		.flat_map(|(_, ids)| ids.iter())
+		.count();
+
 	debug_assert!(total_keys > 0, "empty batch request to notary");
 
 	let batch_max = self
@@ -45,47 +53,86 @@ where
 		.config
 		.trusted_server_batch_size;
 
-	let mut results = Vec::new();
-	while let Some(batch) = server_keys
+	let batch_concurrency = self
+		.services
+		.server
+		.config
+		.trusted_server_batch_concurrency;
+
+	let batches: Vec<_> = server_keys
 		.keys()
 		.rev()
-		.take(batch_max)
-		.next_back()
+		.step_by(batch_max.saturating_sub(1))
+		.skip(1)
+		.chain(server_keys.keys().next().into_iter())
 		.cloned()
-	{
-		let request = Request {
-			server_keys: server_keys.split_off(&batch),
-		};
+		.collect();
 
-		debug!(
-			?notary,
-			?batch,
-			remaining = %server_keys.len(),
-			requesting = ?request.server_keys.keys(),
-			"notary request"
-		);
+	batches
+		.iter()
+		.stream()
+		.enumerate()
+		.map(|(i, batch)| {
+			let request = Request {
+				server_keys: server_keys.split_off(batch),
+			};
 
-		let response = self
-			.services
-			.federation
-			.execute_synapse(notary, request)
-			.await?
-			.server_keys
-			.into_iter()
-			.map(|key| key.deserialize())
-			.filter_map(Result::ok);
+			if request.server_keys.is_empty() {
+				return None;
+			}
 
-		results.extend(response);
+			trace!(
+				%i, %notary, ?batch,
+				remaining = ?server_keys,
+				requesting = ?request.server_keys.keys(),
+				"Request to notary server."
+			);
 
-		info!(
-			"obtained {0} of {1} results with {2} more to request",
-			results.len(),
-			total_keys,
-			server_keys.len(),
-		);
-	}
+			info!(
+				%notary,
+				remaining = %server_keys.len(),
+				requesting = %request.server_keys.len(),
+				"Sending request to notary server..."
+			);
 
-	Ok(results)
+			Some(Ok(request))
+		})
+		.ready_filter_map(identity)
+		.broadn_and_then(batch_concurrency, |request| {
+			self.services
+				.federation
+				.execute_synapse(notary, request)
+		})
+		.ready_try_fold(Vec::new(), |mut results, response| {
+			let response = response
+				.server_keys
+				.into_iter()
+				.map(|key| key.deserialize())
+				.filter_map(Result::ok);
+
+			trace!(
+				%notary, ?response,
+				"Response from notary server."
+			);
+
+			results.extend(response);
+
+			info!(
+				"Received {0} keys out of {1} from notary server so far...",
+				results.len(),
+				total_keys,
+			);
+
+			Ok(results)
+		})
+		.inspect_err(|e| {
+			error!(
+				?notary, %batch_max, %batch_concurrency, %total_keys,
+				"Requesting keys from notary server failed: {e}",
+			);
+		})
+		.boxed()
+		.await
 }
 
 #[implement(super::Service)]

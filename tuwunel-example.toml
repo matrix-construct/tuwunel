@@ -720,7 +720,12 @@
 
 # Maximum number of keys to request in each trusted server batch query.
 #
-#trusted_server_batch_size = 1024
+#trusted_server_batch_size = 192
+
+# Maximum number of request batches in flight simultaneously when querying
+# a trusted server.
+#
+#trusted_server_batch_concurrency = 2
 
 # Max log level for tuwunel. Allows debug, info, warn, or error.
 #
