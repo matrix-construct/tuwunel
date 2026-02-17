@@ -1,29 +1,6 @@
 use rocksdb::{Direction, ErrorKind, IteratorMode};
 use tuwunel_core::Result;
 
-//#[cfg(debug_assertions)]
-macro_rules! unhandled {
-	($msg:literal) => {
-		unimplemented!($msg)
-	};
-}
-
-// activate when stable; we're not ready for this yet
-#[cfg(disable)] // #[cfg(not(debug_assertions))]
-macro_rules! unhandled {
-	($msg:literal) => {
-		// SAFETY: Eliminates branches for serializing and deserializing types never
-		// encountered in the codebase. This can promote optimization and reduce
-		// codegen. The developer must verify for every invoking callsite that the
-		// unhandled type is in no way involved and could not possibly be encountered.
-		unsafe {
-			std::hint::unreachable_unchecked();
-		}
-	};
-}
-
-pub(crate) use unhandled;
-
 #[inline]
 pub(crate) fn _into_direction(mode: &IteratorMode<'_>) -> Direction {
 	use Direction::{Forward, Reverse};

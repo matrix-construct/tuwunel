@@ -3,10 +3,9 @@ use serde::{
 	de::{DeserializeSeed, Visitor},
 };
 use tuwunel_core::{
-	Error, Result, arrayvec::ArrayVec, checked, debug::DebugInspect, err, utils::string,
+	Error, Result, arrayvec::ArrayVec, checked, debug::DebugInspect, err, unhandled,
+	utils::string,
 };
-
-use crate::util::unhandled;
 
 /// Deserialize into T from buffer.
 #[cfg_attr(
