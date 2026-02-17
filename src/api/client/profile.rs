@@ -292,7 +292,7 @@ pub(crate) async fn get_profile_route(
 		return Err!(Request(NotFound("Profile was not found.")));
 	}
 
-	let mut custom_profile_fields: BTreeMap<String, serde_json::Value> = services
+	let mut custom_profile_fields: BTreeMap<String, _> = services
 		.users
 		.all_profile_keys(&body.user_id)
 		.collect()
@@ -317,11 +317,24 @@ pub(crate) async fn get_profile_route(
 		("m.tz", tz),
 	];
 
-	let response = canonical_fields
+	Ok(canonical_fields
 		.into_iter()
-		.filter_map(|(key, val)| val.map(|val| (key, val)))
-		.map(|(key, val)| (key.to_owned(), val.into()))
-		.chain(custom_profile_fields.into_iter());
-
-	Ok(response.collect::<get_profile::v3::Response>())
+		.map(|(key, val)| (key.to_owned(), val))
+		.filter_map(|(key, val)| {
+			val.map(serde_json::to_value)
+				.transpose()
+				.ok()
+				.flatten()
+				.map(|val| (key, val))
+		})
+		.chain(
+			custom_profile_fields
+				.into_iter()
+				.filter_map(|(key, val)| {
+					serde_json::to_value(val.json())
+						.map(|val| (key, val))
+						.ok()
+				}),
+		)
+		.collect())
 }

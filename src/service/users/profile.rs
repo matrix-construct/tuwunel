@@ -1,7 +1,9 @@
 use futures::{FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt, future::join3};
 use ruma::{
 	MxcUri, OwnedMxcUri, OwnedRoomId, UserId,
+	api::client::profile::ProfileFieldValue,
 	events::room::member::{MembershipState, RoomMemberEventContent},
+	serde::Raw,
 };
 use tuwunel_core::{
 	Result, implement,
@@ -216,8 +218,8 @@ pub async fn timezone(&self, user_id: &UserId) -> Result<String> {
 pub fn all_profile_keys<'a>(
 	&'a self,
 	user_id: &'a UserId,
-) -> impl Stream<Item = (String, serde_json::Value)> + 'a + Send {
-	type KeyVal = ((Ignore, String), serde_json::Value);
+) -> impl Stream<Item = (String, Raw<ProfileFieldValue>)> + 'a + Send {
+	type KeyVal = ((Ignore, String), Raw<ProfileFieldValue>);
 
 	let prefix = (user_id, Interfix);
 	self.db
@@ -253,7 +255,7 @@ pub async fn profile_key(
 	&self,
 	user_id: &UserId,
 	profile_key: &str,
-) -> Result<serde_json::Value> {
+) -> Result<Raw<ProfileFieldValue>> {
 	let key = (user_id, profile_key);
 	self.db
 		.useridprofilekey_value

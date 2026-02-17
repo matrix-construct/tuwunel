@@ -366,6 +366,7 @@ pub(crate) async fn get_profile_field_route(
 		.users
 		.profile_key(&body.user_id, body.field.as_str())
 		.await
+		.and_then(|val| serde_json::to_value(val.json()).map_err(Into::into))
 		.map_err(|_| err!(Request(NotFound("The requested profile key does not exist."))))?;
 
 	let profile_key_value = ProfileFieldValue::new(body.field.as_str(), value)?;

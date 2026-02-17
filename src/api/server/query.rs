@@ -98,7 +98,11 @@ pub(crate) async fn get_profile_information_route(
 				.await
 			{
 				Ok(Response {
-					custom_profile_fields: [(custom_field.to_string(), value)].into(),
+					custom_profile_fields: [(
+						custom_field.to_string(),
+						serde_json::to_value(value.json())?,
+					)]
+					.into(),
 					..Response::default()
 				})
 			} else {
@@ -117,10 +121,16 @@ pub(crate) async fn get_profile_information_route(
 			let custom_profile_fields = services
 				.users
 				.all_profile_keys(&body.user_id)
-				.collect();
+				.collect::<Vec<_>>();
 
 			let (avatar_url, blurhash, custom_profile_fields, displayname, tz) =
 				join5(avatar_url, blurhash, custom_profile_fields, displayname, tz).await;
+
+			let custom_profile_fields = custom_profile_fields
+				.into_iter()
+				.map(|(k, v)| (k, serde_json::to_value(v)))
+				.filter_map(|(k, v)| v.ok().map(|v| (k, v)))
+				.collect();
 
 			Ok(Response {
 				avatar_url,
