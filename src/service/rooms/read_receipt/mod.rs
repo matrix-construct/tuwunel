@@ -51,11 +51,13 @@ impl Service {
 			.readreceipt_update(user_id, room_id, event)
 			.await;
 
-		self.services
-			.sending
-			.flush_room(room_id)
-			.await
-			.expect("room flush failed");
+		if self.services.globals.user_is_local(user_id) {
+			self.services
+				.sending
+				.flush_room(room_id)
+				.await
+				.expect("room flush failed");
+		}
 	}
 
 	/// Gets the latest private read receipt from the user in the room
