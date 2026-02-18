@@ -530,7 +530,7 @@ pub struct Config {
 
 	/// Maximum time to process a request received from a client (seconds).
 	///
-	/// default: 180
+	/// default: 240
 	#[serde(default = "default_client_request_timeout")]
 	pub client_request_timeout: u64,
 
@@ -3361,7 +3361,7 @@ fn default_stream_amplification() -> usize { 1024 }
 
 fn default_client_receive_timeout() -> u64 { 75 }
 
-fn default_client_request_timeout() -> u64 { 180 }
+fn default_client_request_timeout() -> u64 { 240 }
 
 fn default_client_response_timeout() -> u64 { 120 }
 

@@ -408,7 +408,7 @@
 
 # Maximum time to process a request received from a client (seconds).
 #
-#client_request_timeout = 180
+#client_request_timeout = 240
 
 # Maximum time to transmit a response to a client (seconds)
 #
