@@ -242,7 +242,7 @@ async fn acquire_notary_result(&self, missing: &mut Batch, server_keys: ServerSi
 	self.add_signing_keys(server_keys.clone()).await;
 
 	if let Some(key_ids) = missing.get_mut(server) {
-		key_ids.retain(|key_id| key_exists(&server_keys, key_id));
+		key_ids.retain(|key_id| !key_exists(&server_keys, key_id));
 		if key_ids.is_empty() {
 			missing.remove(server);
 		}
