@@ -236,13 +236,17 @@ impl Service {
 			}
 		}
 
+		let is_sentinel = password.is_some_and(|p| p == "*");
+
 		match password.map(utils::hash::password) {
 			| None => {
 				self.db.userid_password.insert(user_id, b"");
 			},
 			| Some(Ok(hash)) => {
 				self.db.userid_password.insert(user_id, hash);
-				self.db.userid_origin.insert(user_id, "password");
+				if !is_sentinel {
+					self.db.userid_origin.insert(user_id, "password");
+				}
 			},
 			| Some(Err(e)) => {
 				return Err!(Request(InvalidParam(
