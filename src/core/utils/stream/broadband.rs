@@ -55,6 +55,16 @@ where
 		Fut: Stream<Item = U> + Send + Unpin,
 		U: Send;
 
+	#[inline]
+	fn broadn_for_each<F, Fut, N>(self, n: N, f: F) -> impl Future<Output = ()> + Send
+	where
+		N: Into<Option<usize>>,
+		F: Fn(Item) -> Fut + Send,
+		Fut: Future<Output = ()> + Send,
+	{
+		self.broadn_then(n, f).collect()
+	}
+
 	fn broadn_then<F, Fut, U, N>(self, n: N, f: F) -> impl Stream<Item = U> + Send
 	where
 		N: Into<Option<usize>>,
@@ -109,6 +119,15 @@ where
 		U: Send,
 	{
 		self.broadn_flat_map(None, f)
+	}
+
+	#[inline]
+	fn broad_for_each<F, Fut>(self, f: F) -> impl Future<Output = ()> + Send
+	where
+		F: Fn(Item) -> Fut + Send,
+		Fut: Future<Output = ()> + Send,
+	{
+		self.broadn_for_each(None, f)
 	}
 
 	#[inline]
