@@ -16,6 +16,7 @@ authors = [
 ]
 categories = ["network-programming"]
 description = "High Performance Matrix Homeserver in Rust!"
+# also update edition in rustfmt.toml
 edition = "2024"
 homepage = "https://tuwunel.chat"
 keywords = [

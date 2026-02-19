@@ -1,9 +1,11 @@
+edition = "2024"
+style_edition = "2024"
+
 array_width = 80
 attr_fn_like_width = 60
 chain_width = 50
 comment_width = 80
 condense_wildcard_suffixes = true
-style_edition = "2024"
 fn_call_width = 80
 fn_single_line = true
 format_code_in_doc_comments = true
