@@ -25,7 +25,7 @@ const WORKER_KEEPALIVE: u64 = 36;
 const MAX_BLOCKING_THREADS: usize = 1024;
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_millis(10000);
 #[cfg(all(not(target_env = "msvc"), feature = "jemalloc"))]
-const DISABLE_MUZZY_THRESHOLD: usize = 4;
+const DISABLE_MUZZY_THRESHOLD: usize = 16;
 
 static WORKER_AFFINITY: OnceLock<bool> = OnceLock::new();
 static GC_ON_PARK: OnceLock<Option<bool>> = OnceLock::new();
