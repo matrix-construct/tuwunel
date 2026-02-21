@@ -2349,6 +2349,12 @@ pub struct WellKnownConfig {
 	/// example "@admin:example.com"
 	pub support_mxid: Option<OwnedUserId>,
 
+	/// Livekit URL
+	/// 
+	/// default: ""
+	#[serde(default)]
+	pub livekit_url: Option<String>,
+
 	/// Element Call / MatrixRTC configuration (MSC4143).
 	/// Configures the LiveKit SFU server for voice/video calls.
 	///

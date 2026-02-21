@@ -2007,6 +2007,10 @@
 #
 #support_mxid =
 
+# Livekit URL
+#
+#livekit_url = ""
+
 # Element Call / MatrixRTC configuration (MSC4143).
 # Configures the LiveKit SFU server for voice/video calls.
 #

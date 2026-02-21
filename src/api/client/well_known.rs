@@ -26,7 +26,7 @@ pub(crate) async fn well_known_client(
 	// Add RTC transport configuration if available (MSC4143 / Element Call)
 	// Element Call has evolved through several versions with different field
 	// expectations
-	let rtc_foci = services
+	let mut rtc_foci: Vec<_> = services
 		.server
 		.config
 		.well_known
@@ -50,6 +50,10 @@ pub(crate) async fn well_known_client(
 			err!(Config("global.well_known.rtc_transports", "Malformed value(s): {e:?}"))
 		})
 		.inspect_err(inspect_log)?;
+
+	if let Some(livekit_url) = &services.config.well_known.livekit_url {
+		rtc_foci.push(RtcFocusInfo::livekit(livekit_url.clone()));
+	}
 
 	Ok(discover_homeserver::Response {
 		rtc_foci,
