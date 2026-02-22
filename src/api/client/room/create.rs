@@ -310,12 +310,15 @@ pub(crate) async fn create_room_route(
 		let config = services
 			.config
 			.encryption_enabled_by_default_for_room_type
-			.as_deref()
-			.unwrap_or("off");
+			.as_deref();
 
-		let invite = matches!(config, "invite");
-		let always = matches!(config, "all" | "invite");
-		if always || (invite && matches!(preset, PrivateChat | TrustedPrivateChat)) {
+		let should_encrypt = match config {
+			| Some("all") => true,
+			| Some("invite") => matches!(preset, PrivateChat | TrustedPrivateChat),
+			| _ => false,
+		};
+
+		if should_encrypt {
 			let algorithm = EventEncryptionAlgorithm::MegolmV1AesSha2;
 			let content = RoomEncryptionEventContent::new(algorithm);
 			services
