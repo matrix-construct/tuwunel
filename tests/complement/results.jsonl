@@ -664,11 +664,11 @@
 {"Action":"pass","Test":"TestRoomSpecificUsernameChange/Eve_can_find_Alice_by_mxid"}
 {"Action":"pass","Test":"TestRoomSpecificUsernameChange/Eve_can_find_Alice_by_profile_display_name"}
 {"Action":"pass","Test":"TestRoomSpecificUsernameChange/Eve_cannot_find_Alice_by_room-specific_name_that_Eve_is_not_privy_to"}
-{"Action":"fail","Test":"TestRoomState"}
-{"Action":"fail","Test":"TestRoomState/Parallel"}
+{"Action":"pass","Test":"TestRoomState"}
+{"Action":"pass","Test":"TestRoomState/Parallel"}
 {"Action":"pass","Test":"TestRoomState/Parallel/GET_/directory/room/:room_alias_yields_room_ID"}
 {"Action":"pass","Test":"TestRoomState/Parallel/GET_/joined_rooms_lists_newly-created_room"}
-{"Action":"fail","Test":"TestRoomState/Parallel/GET_/rooms/:room_id/joined_members_fetches_my_membership"}
+{"Action":"pass","Test":"TestRoomState/Parallel/GET_/rooms/:room_id/joined_members_fetches_my_membership"}
 {"Action":"pass","Test":"TestRoomState/Parallel/GET_/rooms/:room_id/joined_members_is_forbidden_after_leaving_room"}
 {"Action":"pass","Test":"TestRoomState/Parallel/GET_/rooms/:room_id/state/m.room.member/:user_id?format=event_fetches_my_membership_event"}
 {"Action":"pass","Test":"TestRoomState/Parallel/GET_/rooms/:room_id/state/m.room.member/:user_id_fetches_my_membership"}
