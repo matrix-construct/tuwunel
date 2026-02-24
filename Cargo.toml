@@ -327,7 +327,7 @@ default-features = false
 
 [workspace.dependencies.ruma]
 git = "https://github.com/matrix-construct/ruma"
-rev = "3cb939f5c8a67197433cbb3dc7e256f0ddaee978"
+rev = "30d063c4503c3b630cdd55eda71a0bc3504518a2"
 features = [
     "__compat",
     "appservice-api-c",
