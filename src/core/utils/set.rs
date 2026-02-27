@@ -4,7 +4,8 @@ use std::{
 	sync::Arc,
 };
 
-use futures::{Stream, StreamExt};
+use futures::{Stream, StreamExt, stream::Peekable};
+use tokio::sync::Mutex;
 
 use crate::{is_equal_to, is_less_than};
 
@@ -57,30 +58,31 @@ where
 /// Intersection of sets
 ///
 /// Outputs the set of elements common to both streams. Streams must be sorted.
-pub fn intersection_sorted_stream2<Item, A, B>(a: A, b: B) -> impl Stream<Item = Item> + Send
+pub fn intersection_sorted_stream2<A, B, Item>(
+	a: A,
+	b: &Mutex<Peekable<B>>,
+) -> impl Stream<Item = Item> + Send + use<'_, A, B, Item>
 where
 	A: Stream<Item = Item> + Send,
 	B: Stream<Item = Item> + Send + Unpin,
 	Item: Eq + PartialOrd + Send + Sync,
 {
-	use tokio::sync::Mutex;
+	a.filter_map(move |ai: Item| async move {
+		let mut lock = b.try_lock().expect("impossible contention");
 
-	let b = Arc::new(Mutex::new(b.peekable()));
-	a.map(move |ai| (ai, b.clone()))
-		.filter_map(async move |(ai, b)| {
-			let mut lock = b.lock().await;
-			while let Some(bi) = Pin::new(&mut *lock)
-				.next_if(|bi| *bi <= ai)
-				.await
-				.as_ref()
-			{
-				if ai == *bi {
-					return Some(ai);
-				}
+		while let Some(bi) = Pin::new(&mut *lock)
+			.as_mut()
+			.next_if(|bi: &Item| *bi <= ai)
+			.await
+			.as_ref()
+		{
+			if ai == *bi {
+				return Some(ai);
 			}
+		}
 
-			None
-		})
+		None
+	})
 }
 
 /// Difference of sets
@@ -93,8 +95,6 @@ where
 	B: Stream<Item = Item> + Send + Unpin,
 	Item: Eq + PartialOrd + Send + Sync,
 {
-	use tokio::sync::Mutex;
-
 	let b = Arc::new(Mutex::new(b.peekable()));
 	a.map(move |ai| (ai, b.clone()))
 		.filter_map(async move |(ai, b)| {

@@ -6,7 +6,12 @@ use std::{
 	sync::{Arc, RwLock},
 };
 
-use futures::{Stream, StreamExt, future::join5, pin_mut};
+use futures::{
+	FutureExt, Stream, StreamExt,
+	future::{join5, poll_fn},
+	pin_mut,
+	task::Poll,
+};
 use ruma::{
 	OwnedRoomId, RoomId, ServerName, UserId,
 	events::{AnyStrippedStateEvent, AnySyncStateEvent, room::member::MembershipState},
@@ -17,9 +22,9 @@ use tuwunel_core::{
 	result::LogErr,
 	trace,
 	utils::{
-		BoolExt,
+		self, BoolExt,
 		future::OptionStream,
-		stream::{BroadbandExt, ReadyExt, TryIgnore},
+		stream::{BroadbandExt, IterStream, ReadyExt, TryIgnore},
 	},
 	warn,
 };
@@ -207,12 +212,24 @@ pub fn get_shared_rooms<'a>(
 	user_a: &'a UserId,
 	user_b: &'a UserId,
 ) -> impl Stream<Item = &RoomId> + Send + 'a {
-	use tuwunel_core::utils::set;
+	use tokio::sync::Mutex;
+	use utils::set::intersection_sorted_stream2;
 
-	let a = self.rooms_joined(user_a);
-	let b = self.rooms_joined(user_b).boxed();
+	async move {
+		let a = self.rooms_joined(user_a);
+		let b = self.rooms_joined(user_b);
+		pin_mut!(b);
 
-	set::intersection_sorted_stream2(a, b)
+		let p = Mutex::new(b.peekable());
+		let s = intersection_sorted_stream2(a, &p);
+		pin_mut!(s);
+
+		poll_fn(move |cx| -> Poll<Option<&RoomId>> { s.as_mut().poll_next(cx) })
+			.map(IntoIterator::into_iter)
+			.map(IterStream::stream)
+			.await
+	}
+	.flatten_stream()
 }
 
 /// Returns an iterator of all joined members of a room.
