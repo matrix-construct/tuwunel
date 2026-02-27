@@ -103,7 +103,7 @@ pub(super) async fn handle_outlier_pdu(
 
 	let auth_events: Vec<_> = event
 		.auth_events()
-		.chain(hydra_create_id.as_deref().into_iter())
+		.chain(hydra_create_id.as_deref())
 		.stream()
 		.filter_map(|auth_event_id| {
 			self.event_fetch(auth_event_id)

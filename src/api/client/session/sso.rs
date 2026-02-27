@@ -506,7 +506,7 @@ async fn register_user(
 
 	// log in conduit admin channel if a non-guest user registered
 	let notice =
-		format!("New user \"{user_id}\" registered on this server via {idp_name} ({idp_id})",);
+		format!("New user \"{user_id}\" registered on this server via {idp_name} ({idp_id})");
 
 	info!("{notice}");
 	if services.server.config.admin_room_notices {

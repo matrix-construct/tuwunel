@@ -280,7 +280,7 @@ pub(crate) async fn get_profile_route(
 				.into_iter()
 				.filter_map(|(key, val)| val.map(|val| (key, val)))
 				.map(|(key, val)| (key.to_owned(), val.into()))
-				.chain(response.custom_profile_fields.into_iter());
+				.chain(response.custom_profile_fields);
 
 			return Ok(response.collect::<get_profile::v3::Response>());
 		}

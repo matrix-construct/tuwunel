@@ -41,8 +41,8 @@ where
 	});
 
 	let total_keys = server_keys
-		.iter()
-		.flat_map(|(_, ids)| ids.iter())
+		.values()
+		.flat_map(|ids| ids.iter())
 		.count();
 
 	debug_assert!(total_keys > 0, "empty batch request to notary");
@@ -64,7 +64,7 @@ where
 		.rev()
 		.step_by(batch_max.saturating_sub(1))
 		.skip(1)
-		.chain(server_keys.keys().next().into_iter())
+		.chain(server_keys.keys().next())
 		.cloned()
 		.collect();
 

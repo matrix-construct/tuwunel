@@ -70,7 +70,7 @@ pub(super) async fn process(command: RoomDirectoryCommand, context: &Context<'_>
 				.join("\n");
 
 			context
-				.write_str(&format!("Rooms (page {page}):\n```\n{body}\n```",))
+				.write_str(&format!("Rooms (page {page}):\n```\n{body}\n```"))
 				.await
 		},
 	}

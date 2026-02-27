@@ -165,7 +165,7 @@ pub async fn verify_keys_for(&self, origin: &ServerName) -> VerifyKeys {
 		.unwrap_or(BTreeMap::new());
 
 	if self.services.globals.server_is_ours(origin) {
-		keys.extend(self.verify_keys.clone().into_iter());
+		keys.extend(self.verify_keys.clone());
 	}
 
 	keys

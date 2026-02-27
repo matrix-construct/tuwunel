@@ -96,6 +96,6 @@ pub(super) async fn remote_user_in_rooms(&self, user_id: OwnedUserId) -> Result 
 		.collect::<Vec<_>>()
 		.join("\n");
 
-	self.write_str(&format!("Rooms {user_id} shares with us ({num}):\n```\n{body}\n```",))
+	self.write_str(&format!("Rooms {user_id} shares with us ({num}):\n```\n{body}\n```"))
 		.await
 }

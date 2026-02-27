@@ -159,8 +159,8 @@ pub async fn get_device_pushkeys(&self, sender: &UserId, device_id: &DeviceId) -
 			self.get_pusher_device(&pushkey)
 				.await
 				.ok()
-				.filter(|pusher_device| pusher_device == device_id)
-				.is_some()
+				.as_ref()
+				.is_some_and(|pusher_device| pusher_device == device_id)
 				.then_some(pushkey)
 		})
 		.collect()

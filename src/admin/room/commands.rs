@@ -55,7 +55,7 @@ pub(super) async fn room_list(
 		.collect::<Vec<_>>()
 		.join("\n");
 
-	self.write_str(&format!("Rooms ({}):\n```\n{body}\n```", rooms.len(),))
+	self.write_str(&format!("Rooms ({}):\n```\n{body}\n```", rooms.len()))
 		.await
 }
 
