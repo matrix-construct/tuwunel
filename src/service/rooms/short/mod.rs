@@ -1,4 +1,4 @@
-use std::{borrow::Borrow, fmt::Debug, mem::size_of_val, sync::Arc};
+use std::{borrow::Borrow, mem::size_of_val, sync::Arc};
 
 use futures::{FutureExt, Stream, StreamExt, pin_mut};
 use ruma::{EventId, OwnedRoomId, RoomId, events::StateEventType};
@@ -61,7 +61,7 @@ pub fn multi_get_or_create_shorteventid<'a, I>(
 	event_ids: I,
 ) -> impl Stream<Item = ShortEventId> + Send + '_
 where
-	I: Iterator<Item = &'a EventId> + Clone + Debug + Send + 'a,
+	I: Iterator<Item = &'a EventId> + Clone + Send + 'a,
 {
 	event_ids
 		.clone()
