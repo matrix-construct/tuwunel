@@ -139,7 +139,7 @@ impl<F: Fn(u64) -> Result + Sync> State<F> {
 
 	/// Retire the sequence number `id`.
 	fn retire(&mut self, id: u64) {
-		debug_assert!(self.check_pending(id), "sequence number must be currently pending",);
+		debug_assert!(self.check_pending(id), "sequence number must be currently pending");
 
 		let index = self
 			.pending_index(id)
