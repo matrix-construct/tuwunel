@@ -76,6 +76,9 @@ pub fn new(args: Option<&Args>) -> Result<Runtime> {
 		.on_thread_unpark(thread_unpark)
 		.on_thread_park(thread_park);
 
+	#[cfg(all(tokio_unstable, feature = "tokio/io-uring"))]
+	builder.enable_io_uring();
+
 	#[cfg(tokio_unstable)]
 	builder
 		.on_task_spawn(task_spawn)

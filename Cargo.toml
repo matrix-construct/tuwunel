@@ -500,6 +500,7 @@ features = [
 	"signal",
 	"time",
 	"rt-multi-thread",
+	"io-uring",
 	"io-util",
 	"tracing",
 ]
