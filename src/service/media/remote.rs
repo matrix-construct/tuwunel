@@ -14,7 +14,7 @@ use ruma::{
 	},
 };
 use tuwunel_core::{
-	Err, Error, Result, debug_warn, err, implement,
+	Err, Error, Result, config::FederationMediaPolicy, debug_warn, err, implement,
 	utils::content_disposition::make_content_disposition,
 };
 
@@ -208,6 +208,37 @@ async fn handle_thumbnail_file(
 		None,
 	);
 
+	let max_size = self.services.server.config.max_request_size;
+	if content.file.len() > max_size {
+		match self
+			.services
+			.server
+			.config
+			.federation_media_policy
+		{
+			// drop the media
+			| FederationMediaPolicy::Drop => {
+				return Err!(Request(TooLarge(
+					"Remote media exceeds this server's max_request_size"
+				)));
+			},
+			// Return the file to the client without saving it locally
+			| FederationMediaPolicy::Proxy => {
+				debug_warn!(
+					%mxc, size = content.file.len(), %max_size,
+					"Remote media exceeds max_request_size, proxying without saving"
+				);
+				return Ok(FileMeta {
+					content: Some(content.file),
+					content_type: content.content_type.map(Into::into),
+					content_disposition: Some(content_disposition),
+				});
+			},
+			// Download and store the file locally
+			| FederationMediaPolicy::Download => {},
+		}
+	}
+
 	self.upload_thumbnail(
 		mxc,
 		user,
@@ -236,6 +267,37 @@ async fn handle_content_file(
 		content.content_type.as_deref(),
 		None,
 	);
+
+	let max_size = self.services.server.config.max_request_size;
+	if content.file.len() > max_size {
+		match self
+			.services
+			.server
+			.config
+			.federation_media_policy
+		{
+			// drop the media
+			| FederationMediaPolicy::Drop => {
+				return Err!(Request(TooLarge(
+					"Remote media exceeds this server's max_request_size"
+				)));
+			},
+			// Return the file to the client without saving it locally
+			| FederationMediaPolicy::Proxy => {
+				debug_warn!(
+					%mxc, size = content.file.len(), %max_size,
+					"Remote media exceeds max_request_size, proxying without saving"
+				);
+				return Ok(FileMeta {
+					content: Some(content.file),
+					content_type: content.content_type.map(Into::into),
+					content_disposition: Some(content_disposition),
+				});
+			},
+			// Download and store the file locally
+			| FederationMediaPolicy::Download => {},
+		}
+	}
 
 	self.create(
 		mxc,
@@ -389,6 +451,34 @@ pub async fn fetch_remote_thumbnail_legacy(
 		.await?;
 
 	let dim = Dim::from_ruma(body.width, body.height, body.method.clone())?;
+
+	let max_size = self.services.server.config.max_request_size;
+	if response.file.len() > max_size {
+		match self
+			.services
+			.server
+			.config
+			.federation_media_policy
+		{
+			// Drop the media
+			| FederationMediaPolicy::Drop => {
+				return Err!(Request(TooLarge(
+					"Remote media exceeds this server's max_request_size"
+				)));
+			},
+			// Return the file to the client without saving it locally
+			| FederationMediaPolicy::Proxy => {
+				debug_warn!(
+					%mxc, size = response.file.len(), %max_size,
+					"Remote media exceeds max_request_size, proxying without saving"
+				);
+				return Ok(response);
+			},
+			// Download and store the file locally
+			| FederationMediaPolicy::Download => {},
+		}
+	}
+
 	self.upload_thumbnail(
 		&mxc,
 		None,
@@ -429,6 +519,33 @@ pub async fn fetch_remote_content_legacy(
 		response.content_type.as_deref(),
 		None,
 	);
+
+	let max_size = self.services.server.config.max_request_size;
+	if response.file.len() > max_size {
+		match self
+			.services
+			.server
+			.config
+			.federation_media_policy
+		{
+			// Drop the media
+			| FederationMediaPolicy::Drop => {
+				return Err!(Request(TooLarge(
+					"Remote media exceeds this server's max_request_size"
+				)));
+			},
+			// Return the file to the client without saving it locally
+			| FederationMediaPolicy::Proxy => {
+				debug_warn!(
+					%mxc, size = response.file.len(), %max_size,
+					"Remote media exceeds max_request_size, proxying without saving"
+				);
+				return Ok(response);
+			},
+			// Download and store the file locally
+			| FederationMediaPolicy::Download => {},
+		}
+	}
 
 	self.create(
 		mxc,
