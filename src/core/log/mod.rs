@@ -38,6 +38,15 @@ pub struct Logging {
 // necessary but discouraged. Remember debug_ log macros are also exported to
 // the crate namespace like these.
 
+/// Convenience wrapper to update span fields within an instrumented function
+#[macro_export]
+macro_rules! record {
+	( $($fields:tt)* ) => {{
+		let current = ::tracing::Span::current();
+		if !current.is_disabled() { ::tracing::record_all!(current, $($fields)*); }
+	}}
+}
+
 #[macro_export]
 #[collapse_debuginfo(yes)]
 macro_rules! event {
