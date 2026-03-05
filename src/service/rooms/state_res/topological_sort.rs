@@ -29,14 +29,17 @@ use std::{
 
 use futures::{Stream, TryFutureExt, TryStreamExt, stream::try_unfold};
 use ruma::{
-	MilliSecondsSinceUnixEpoch, OwnedEventId, events::room::power_levels::UserPowerLevel,
+	CanonicalJsonObject, CanonicalJsonValue as JsonValue, MilliSecondsSinceUnixEpoch,
+	OwnedEventId, OwnedRoomId, events::room::power_levels::UserPowerLevel, int, uint,
 };
 use tuwunel_core::{
-	Error, Result, is_not_equal_to, smallvec::SmallVec, utils::stream::IterStream, validated,
+	Error, Result, err, is_equal_to, is_not_equal_to, matrix::Event, ref_at, smallvec::SmallVec,
+	utils::stream::IterStream, validated,
 };
 
 pub type ReferencedIds = SmallVec<[OwnedEventId; 3]>;
 type PduInfo = (UserPowerLevel, MilliSecondsSinceUnixEpoch);
+type RawPdu = (usize, (OwnedRoomId, OwnedEventId, CanonicalJsonObject));
 
 #[derive(PartialEq, Eq)]
 struct TieBreaker {
@@ -58,6 +61,109 @@ impl Ord for TieBreaker {
 
 impl PartialOrd for TieBreaker {
 	fn partial_cmp(&self, other: &Self) -> Option<Ordering> { Some(self.cmp(other)) }
+}
+
+/// Reverse topological sort of raw wire PDU json's. Note that PL's are not
+/// considered for tiebreaking here; this should never be used for an
+/// authoritative order.
+#[tracing::instrument(level = "debug", skip_all)]
+pub async fn topological_sort_pdus(mut pdus: Vec<RawPdu>) -> Result<Vec<RawPdu>> {
+	let origin_server_ts = |json: &CanonicalJsonObject| {
+		json.get("origin_server_ts")
+			.and_then(JsonValue::as_integer)
+			.map(usize::try_from)
+			.and_then(Result::ok)
+			.map(TryInto::<ruma::UInt>::try_into)
+			.and_then(Result::ok)
+			.map(MilliSecondsSinceUnixEpoch)
+	};
+
+	let prev_events = |json: &CanonicalJsonObject| {
+		json.get("prev_events")
+			.and_then(JsonValue::as_array)
+			.into_iter()
+			.flat_map(|array| array.iter())
+			.filter_map(JsonValue::as_str)
+			.map(TryInto::try_into)
+			.map(|res| res.map_err(Into::into))
+			.collect::<Result<ReferencedIds>>()
+	};
+
+	let ord_by = async |event_id: OwnedEventId| {
+		let origin_server_ts = pdus
+			.iter()
+			.map(ref_at!(1))
+			.find(|(_, other, _)| event_id.eq(other))
+			.and_then(|(_, _, json)| origin_server_ts(json))
+			.ok_or_else(|| err!(Request(NotFound("Error sorting PDU's"))))?;
+
+		Ok((int!(0).into(), origin_server_ts))
+	};
+
+	let prev_ids = pdus
+		.iter()
+		.map(ref_at!(1))
+		.map(ref_at!(2))
+		.map(prev_events);
+
+	let graph = pdus
+		.iter()
+		.map(ref_at!(1))
+		.map(ref_at!(1))
+		.cloned()
+		.zip(prev_ids)
+		.map(|(id, prev)| prev.map(|prev| (id, prev)))
+		.collect::<Result<HashMap<OwnedEventId, ReferencedIds>>>()?;
+
+	let sorted = topological_sort(&graph, &ord_by).await?;
+
+	pdus.sort_by_key(|(_, (_, event_id, _))| {
+		sorted
+			.iter()
+			.position(is_equal_to!(event_id))
+			.expect("all pdu event_id's present in sorted output")
+	});
+
+	Ok(pdus)
+}
+
+/// Reverse topological sort of impl Event's. Note that PL's are not considered
+/// for tiebreaking here; this should never be used for an authoritative order.
+#[tracing::instrument(level = "debug", skip_all)]
+pub async fn topological_sort_events<Pdu: Event>(mut pdus: Vec<Pdu>) -> Vec<Pdu> {
+	let ord_by = async |event_id: OwnedEventId| {
+		let origin_server_ts = pdus
+			.iter()
+			.find(|&pdu| event_id.eq(pdu.event_id()))
+			.map(Event::origin_server_ts)
+			.unwrap_or_else(|| MilliSecondsSinceUnixEpoch(uint!(0)));
+
+		Ok((int!(0).into(), origin_server_ts))
+	};
+
+	let event_ids = pdus
+		.iter()
+		.map(Event::event_id)
+		.map(ToOwned::to_owned);
+
+	let prev_ids = pdus
+		.iter()
+		.map(Event::prev_events)
+		.map(|prev_events| prev_events.map(ToOwned::to_owned).collect());
+
+	let graph = event_ids.zip(prev_ids).collect();
+	let sorted = topological_sort(&graph, &ord_by)
+		.await
+		.expect("query callback never errors; errors never propagate");
+
+	pdus.sort_by_key(|pdu| {
+		sorted
+			.iter()
+			.position(is_equal_to!(pdu.event_id()))
+			.expect("all pdu event_id's present in sorted output")
+	});
+
+	pdus
 }
 
 /// Sorts the given event graph using reverse topological power ordering.
