@@ -1,0 +1,21 @@
+# tuwenel.container
+
+[Unit]
+Description=Tuwunel Matrix Homeserver
+
+[Container]
+ContainerName=tuwunel-homeserver
+Image=ghcr.io/matrix-construct/tuwunel:latest
+PublishPort=8008:8008
+Volume=tuwunel-db:/var/lib/tuwunel/
+
+#Example location in ~/tuwunel/confing/
+Volume=%h/tuwunel/config/tuwunel.toml:/etc/tuwunel.toml
+EnvironmentFile=tuwunel.env
+
+[Service]
+# Uncomment when your system is properly configured, restart=always can mask start up errors. 
+#Restart=always
+
+[Install]
+WantedBy=default.target

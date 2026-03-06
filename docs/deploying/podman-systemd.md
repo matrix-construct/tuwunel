@@ -1,16 +1,81 @@
-# tuwunel in Podman systemd
+# Podman, Quadlets, and systemd
 
-Copy [tuwunel.container](tuwunel.container) to ~/.config/containers/systemd/tuwunel.container.
-Reload daemon:
+For a rootless setup, we can use quadlets and systemd to manage the container lifecycle.
+
+> If this is the first container managed with quadlets for your user, ensure that linger is enabled so your containers are not killed after logging out.
+>
+> `sudo loginctl enable-linger <username>`  
+ 
+## Installation
+1. Copy quadlet files to `~/.config/containers/systemd/tuwunel`
+
+### tuwunel.container
+
+<details>
+<summary>tuwunel container quadlet</summary>
+
+```
+{{#include ../../quadlet/tuwunel.container}}
+```
+
+</details>
+
+### tuwunel-db.volume
+
+<details>
+<summary>tuwunel database volume quadlet</summary>
+
+```
+{{#include ../../quadlet/tuwunel-db.volume}}
+```
+
+</details>
+
+### tuwunel.env
+
+<details>
+<summary>tuwunel environment variable quadlet</summary>
+
+```env
+{{#include ../../quadlet/tuwunel.env}}
+```
+
+</details>
+
+
+
+
+```
+mkdir -p ~/.config/containers/systemd/tuwunel
+cp docs/deploying/qualet/* ~/.config/containers/systemd/tuwunel
+```
+
+2a. Modify tuwunel.env to desired values.  
+2b. Modify [tuwenel.toml](generic.md#creating-the-tuwunel-configuration-file) to desired values. 
+This can be saved in your user home directory if desired. 
+
+3. Reload daemon to generate our systemd unit files: 
 ```
 systemctl --user daemon-reload
 ```
-Start the service:
+4. Start tuwunel:
 ```
-systemctl --user start tuwunel
+systemctl --user start tuwunel-pod
 ```
-
+## Logging 
 To check the logs, run:
 ```
-journalctl -eu tuwunel.container --user
+systemctl --user status tuwunel
 ```
+or
+
+```
+podman logs tuwunel-homeserver
+```
+#### Troubleshooting systemd unit file generation
+
+Look for errors in the output:
+
+
+`/usr/lib/systemd/system-generators/podman-system-generator --user --dryrun`
+
