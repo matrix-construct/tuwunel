@@ -47,12 +47,11 @@ For a rootless setup, we can use quadlets and systemd to manage the container li
 
 ```
 mkdir -p ~/.config/containers/systemd/tuwunel
-cp docs/deploying/qualet/* ~/.config/containers/systemd/tuwunel
 ```
 
-2a. Modify tuwunel.env to desired values.  
-2b. Modify [tuwenel.toml](generic.md#creating-the-tuwunel-configuration-file) to desired values. 
-This can be saved in your user home directory if desired. 
+2. 
+	- Modify tuwunel.env to desired values.  
+	- Modify [tuwenel.toml](generic.md#creating-the-tuwunel-configuration-file) to desired values. This can be saved in your user home directory if desired. 
 
 3. Reload daemon to generate our systemd unit files: 
 ```
@@ -60,7 +59,7 @@ systemctl --user daemon-reload
 ```
 4. Start tuwunel:
 ```
-systemctl --user start tuwunel-pod
+systemctl --user start tuwunel
 ```
 ## Logging 
 To check the logs, run:
