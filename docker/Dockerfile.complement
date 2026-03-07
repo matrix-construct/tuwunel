@@ -110,6 +110,17 @@ ENV TUWUNEL_CONFIG="/complement/complement.toml"
 ENTRYPOINT tuwunel -Oserver_name=\""$SERVER_NAME\""
 
 
+FROM input AS complement-testee-local
+ARG cargo_target_profile
+
+EXPOSE 8008 8448
+RUN mkdir /database
+COPY --from=complement-config * /complement/
+COPY ./target/${cargo_target_profile}/tuwunel tuwunel
+ENV TUWUNEL_CONFIG="/complement/complement.toml"
+ENTRYPOINT tuwunel -Oserver_name=\""$SERVER_NAME\""
+
+
 FROM input AS complement-testee-valgrind
 ARG db_pool_max_workers=128
 
