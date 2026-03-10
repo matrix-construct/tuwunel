@@ -57,6 +57,7 @@ pub(crate) fn db_options(config: &Config, env: &Env, row_cache: &Cache) -> Resul
 	// Files
 	opts.set_table_cache_num_shard_bits(7);
 	opts.set_wal_size_limit_mb(1024);
+	opts.set_wal_ttl_seconds(config.rocksdb_wal_ttl_seconds);
 	opts.set_max_total_wal_size(1024 * 1024 * 512);
 	opts.set_writable_file_max_buffer_size(1024 * 1024 * 2);
 	if !config.rocksdb_allow_fallocate {

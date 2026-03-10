@@ -95,9 +95,11 @@ serde_html_form.workspace = true
 serde_json.workspace = true
 serde.workspace = true
 sha1.workspace = true
+tar.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tuwunel-core.workspace = true
+tuwunel-database.workspace = true
 tuwunel-service.workspace = true
 url.workspace = true
 
