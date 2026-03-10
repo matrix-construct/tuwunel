@@ -26,6 +26,10 @@ use std::{ops::Index, sync::Arc};
 use log as _;
 use tuwunel_core::{Result, Server, err};
 
+pub use self::engine::{
+	WalFrame, is_wal_gap_error, FRAME_HEADER_LEN, FRAME_TYPE_DATA, FRAME_TYPE_HEARTBEAT,
+};
+
 pub use self::{
 	de::{Ignore, IgnoreAll},
 	deserialized::Deserialized,
@@ -80,6 +84,72 @@ impl Database {
 	#[inline]
 	#[must_use]
 	pub fn is_secondary(&self) -> bool { self.engine.is_secondary() }
+
+	/// Returns the primary's current latest WAL sequence number.
+	///
+	/// Used by replication status endpoints and heartbeat frames.
+	#[inline]
+	#[must_use]
+	pub fn latest_wal_sequence(&self) -> u64 { self.engine.latest_wal_sequence() }
+
+	/// Return a WAL frame iterator starting at `since`.
+	///
+	/// See `Engine::wal_frame_iter` for semantics. Returns `Err` if `since`
+	/// is older than the oldest retained WAL segment.
+	pub fn wal_frame_iter(
+		&self,
+		since: u64,
+	) -> Result<Box<dyn Iterator<Item = Result<WalFrame>> + Send>> {
+		self.engine.wal_frame_iter(since)
+	}
+
+	/// Create a RocksDB checkpoint at `dest`.
+	///
+	/// Returns the WAL sequence number at checkpoint creation time.
+	pub fn create_checkpoint(&self, dest: &std::path::Path) -> Result<u64> {
+		self.engine.create_checkpoint(dest)
+	}
+
+	/// Apply a raw WriteBatch (from the primary's WAL stream) to this database.
+	///
+	/// Used by the secondary replication worker to replay incoming batches.
+	pub fn write_raw_batch(&self, data: &[u8]) -> Result {
+		use rocksdb::{WriteBatch, WriteOptions};
+		let batch = WriteBatch::from_data(data);
+		let opts = WriteOptions::default();
+		self.engine
+			.db
+			.write_opt(&batch, &opts)
+			.map_err(crate::util::map_err)
+	}
+
+	/// Read the secondary's persisted WAL resume cursor from the
+	/// `replication_meta` column family.
+	///
+	/// Returns `Ok(0)` when no cursor has been written yet (fresh secondary).
+	pub fn get_replication_resume_seq(&self) -> Result<u64> {
+		use tuwunel_core::utils::result::NotFound;
+
+		let map = &self["replication_meta"];
+		let result = map.get_blocking(b"primary_resume_seq");
+		if result.is_not_found() {
+			return Ok(0);
+		}
+		let handle = result?;
+		if handle.len() >= 8 {
+			Ok(u64::from_le_bytes(handle[..8].try_into().expect("8 bytes")))
+		} else {
+			Ok(0)
+		}
+	}
+
+	/// Persist the secondary's WAL resume cursor to the `replication_meta`
+	/// column family so it survives restarts.
+	pub fn set_replication_resume_seq(&self, seq: u64) -> Result {
+		let map = &self["replication_meta"];
+		map.insert(b"primary_resume_seq", seq.to_le_bytes());
+		Ok(())
+	}
 }
 
 impl Index<&str> for Database {

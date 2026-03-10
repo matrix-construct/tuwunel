@@ -1,6 +1,7 @@
 mod args;
 mod auth;
 mod handler;
+mod replication_auth;
 mod request;
 mod response;
 pub mod state;
@@ -9,6 +10,7 @@ use std::str::FromStr;
 
 use axum::{
 	Router,
+	middleware,
 	response::{IntoResponse, Redirect},
 	routing::{any, get, post},
 };
@@ -17,7 +19,11 @@ use tuwunel_core::{Server, err};
 
 use self::handler::RouterExt;
 pub(super) use self::{
-	args::Args as Ruma, auth::auth_uiaa, response::RumaResponse, state::State,
+	args::Args as Ruma,
+	auth::auth_uiaa,
+	replication_auth::check_replication_token,
+	response::RumaResponse,
+	state::State,
 };
 use crate::{client, server};
 
@@ -246,6 +252,19 @@ pub fn build(router: Router<State>, server: &Server) -> Router<State> {
 			.route("/_matrix/key/{*path}", any(federation_disabled))
 			.route("/_tuwunel/local_user_count", any(federation_disabled));
 	}
+
+	// Replication endpoints — protected by shared-secret token auth middleware.
+	// The middleware extracts `State` from request extensions (set by with_state).
+	router = router.merge(
+		Router::<State>::new()
+			.route("/_tuwunel/replication/status", get(client::replication_status))
+			.route("/_tuwunel/replication/wal", get(client::replication_wal))
+			.route(
+				"/_tuwunel/replication/checkpoint",
+				get(client::replication_checkpoint),
+			)
+			.layer(middleware::from_fn(check_replication_token)),
+	);
 
 	if config.allow_legacy_media {
 		router = router

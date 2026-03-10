@@ -108,6 +108,7 @@ ruma.workspace = true
 rustls.workspace = true
 rustyline-async.workspace = true
 rustyline-async.optional = true
+tar.workspace = true
 serde_html_form.workspace = true
 serde_json.workspace = true
 serde.workspace = true

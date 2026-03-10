@@ -9,6 +9,11 @@ mod logger;
 mod memory_usage;
 mod open;
 mod repair;
+pub mod replication;
+pub use replication::{
+	WalFrame, batch_count_from_bytes, is_wal_gap_error, FRAME_HEADER_LEN, FRAME_TYPE_DATA,
+	FRAME_TYPE_HEARTBEAT,
+};
 
 use std::{
 	ffi::CStr,

@@ -1344,6 +1344,35 @@ pub struct Config {
 	#[serde(default)]
 	pub rocksdb_secondary: bool,
 
+	/// Path for the secondary instance's own RocksDB log files. Required when
+	/// `rocksdb_secondary` is true and the primary DB is not on a shared
+	/// filesystem. Must be a writable directory local to this host.
+	#[serde(default)]
+	pub rocksdb_secondary_path: Option<std::path::PathBuf>,
+
+	/// URL of the primary instance for WAL-streaming replication.
+	/// Example: `https://primary.example.com`
+	/// Required on secondary instances that use WAL streaming.
+	#[serde(default)]
+	pub rocksdb_primary_url: Option<String>,
+
+	/// Shared secret token for replication endpoint authentication.
+	/// Both primary and secondary must have the same value.
+	/// Leave unset to disable the replication HTTP endpoints entirely.
+	#[serde(default)]
+	pub rocksdb_replication_token: Option<String>,
+
+	/// How long (in seconds) the primary retains WAL segments beyond what
+	/// local recovery requires. Gives the secondary a window to reconnect
+	/// after downtime without needing a full re-sync. Default: 86400 (24h).
+	#[serde(default = "default_rocksdb_wal_ttl_seconds")]
+	pub rocksdb_wal_ttl_seconds: u64,
+
+	/// Interval in milliseconds at which the secondary polls for new WAL
+	/// frames when caught up with the primary. Default: 250ms.
+	#[serde(default = "default_rocksdb_replication_interval_ms")]
+	pub rocksdb_replication_interval_ms: u64,
+
 	/// Enables idle CPU priority for compaction thread. This is not enabled by
 	/// default to prevent compaction from falling too far behind on busy
 	/// systems.
@@ -3396,6 +3425,10 @@ fn default_rocksdb_compression_level() -> i32 { 32767 }
 fn default_rocksdb_bottommost_compression_level() -> i32 { 32767 }
 
 fn default_rocksdb_stats_level() -> u8 { 1 }
+
+fn default_rocksdb_wal_ttl_seconds() -> u64 { 86400 }
+
+fn default_rocksdb_replication_interval_ms() -> u64 { 250 }
 
 // I know, it's a great name
 #[must_use]

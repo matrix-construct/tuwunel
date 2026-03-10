@@ -1126,6 +1126,35 @@
 #
 #rocksdb_secondary = false
 
+# Path for the secondary instance's own RocksDB log files. Required when
+# `rocksdb_secondary` is true and the primary DB is not on a shared
+# filesystem. Must be a writable directory local to this host.
+#
+#rocksdb_secondary_path = false
+
+# URL of the primary instance for WAL-streaming replication.
+# Example: `https://primary.example.com`
+# Required on secondary instances that use WAL streaming.
+#
+#rocksdb_primary_url = false
+
+# Shared secret token for replication endpoint authentication.
+# Both primary and secondary must have the same value.
+# Leave unset to disable the replication HTTP endpoints entirely.
+#
+#rocksdb_replication_token = false
+
+# How long (in seconds) the primary retains WAL segments beyond what
+# local recovery requires. Gives the secondary a window to reconnect
+# after downtime without needing a full re-sync. Default: 86400 (24h).
+#
+#rocksdb_wal_ttl_seconds =
+
+# Interval in milliseconds at which the secondary polls for new WAL
+# frames when caught up with the primary. Default: 250ms.
+#
+#rocksdb_replication_interval_ms =
+
 # Enables idle CPU priority for compaction thread. This is not enabled by
 # default to prevent compaction from falling too far behind on busy
 # systems.
