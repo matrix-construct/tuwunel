@@ -408,6 +408,33 @@ pub struct Config {
 	#[serde(default = "default_max_request_size")]
 	pub max_request_size: usize,
 
+	/// Maximum number of concurrently pending (asynchronous) media uploads a
+	/// user can have.
+	///
+	/// default: 5
+	#[serde(default = "default_max_pending_media_uploads")]
+	pub max_pending_media_uploads: usize,
+
+	/// The time in seconds before an unused pending MXC URI expires and is
+	/// removed.
+	///
+	/// default: 86400 (24 hours)
+	#[serde(default = "default_media_create_unused_expiration_time")]
+	pub media_create_unused_expiration_time: u64,
+
+	/// The maximum number of media create requests per second allowed from a
+	/// single user.
+	///
+	/// default: 10
+	#[serde(default = "default_media_rc_create_per_second")]
+	pub media_rc_create_per_second: u32,
+
+	/// The maximum burst count for media create requests from a single user.
+	///
+	/// default: 50
+	#[serde(default = "default_media_rc_create_burst_count")]
+	pub media_rc_create_burst_count: u32,
+
 	/// default: 192
 	#[serde(default = "default_max_fetch_prev_events")]
 	pub max_fetch_prev_events: u16,
@@ -3245,6 +3272,10 @@ fn default_dns_timeout() -> u64 { 10 }
 fn default_ip_lookup_strategy() -> u8 { 5 }
 
 fn default_max_request_size() -> usize { 24 * 1024 * 1024 }
+fn default_max_pending_media_uploads() -> usize { 5 }
+fn default_media_create_unused_expiration_time() -> u64 { 86400 }
+fn default_media_rc_create_per_second() -> u32 { 10 }
+fn default_media_rc_create_burst_count() -> u32 { 50 }
 
 fn default_request_conn_timeout() -> u64 { 10 }
 

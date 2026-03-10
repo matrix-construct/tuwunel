@@ -4,18 +4,21 @@ use axum::extract::State;
 use axum_client_ip::InsecureClientIp;
 use reqwest::Url;
 use ruma::{
-	Mxc, UserId,
+	MilliSecondsSinceUnixEpoch, Mxc, UserId,
 	api::client::{
 		authenticated_media::{
 			get_content, get_content_as_filename, get_content_thumbnail, get_media_config,
 			get_media_preview,
 		},
-		media::create_content,
+		media::{create_content, create_content_async, create_mxc_uri},
 	},
 };
 use tuwunel_core::{
 	Err, Result, err,
-	utils::{self, content_disposition::make_content_disposition, math::ruma_from_usize},
+	utils::{
+		self, content_disposition::make_content_disposition, math::ruma_from_usize,
+		time::now_millis,
+	},
 };
 use tuwunel_service::{
 	Services,
@@ -78,6 +81,78 @@ pub(crate) async fn create_content_route(
 		content_uri: mxc.to_string().into(),
 		blurhash: blurhash.flatten(),
 	})
+}
+
+/// # `POST /_matrix/media/v1/create`
+///
+/// Create a new MXC URI without content.
+#[tracing::instrument(
+	name = "media_create_mxc",
+	level = "debug",
+	skip_all,
+	fields(%client),
+)]
+pub(crate) async fn create_mxc_uri_route(
+	State(services): State<crate::State>,
+	InsecureClientIp(client): InsecureClientIp,
+	body: Ruma<create_mxc_uri::v1::Request>,
+) -> Result<create_mxc_uri::v1::Response> {
+	let user = body.sender_user();
+	let mxc = Mxc {
+		server_name: services.globals.server_name(),
+		media_id: &utils::random_string(MXC_LENGTH),
+	};
+
+	// safe because even if it overflows, it will be greater than the current time
+	// and the unused media will be deleted anyway
+	let unused_expires_at = now_millis().saturating_add(
+		services
+			.server
+			.config
+			.media_create_unused_expiration_time
+			.saturating_mul(1000),
+	);
+	services
+		.media
+		.create_pending(&mxc, user, unused_expires_at)
+		.await?;
+
+	Ok(create_mxc_uri::v1::Response {
+		content_uri: mxc.to_string().into(),
+		unused_expires_at: ruma::UInt::new(unused_expires_at).map(MilliSecondsSinceUnixEpoch),
+	})
+}
+
+/// # `PUT /_matrix/media/v3/upload/{serverName}/{mediaId}`
+///
+/// Upload content to a MXC URI that was created earlier.
+#[tracing::instrument(
+	name = "media_upload_async",
+	level = "debug",
+	skip_all,
+	fields(%client),
+)]
+pub(crate) async fn create_content_async_route(
+	State(services): State<crate::State>,
+	InsecureClientIp(client): InsecureClientIp,
+	body: Ruma<create_content_async::v3::Request>,
+) -> Result<create_content_async::v3::Response> {
+	let user = body.sender_user();
+	let mxc = Mxc {
+		server_name: &body.server_name,
+		media_id: &body.media_id,
+	};
+
+	let filename = body.filename.as_deref();
+	let content_type = body.content_type.as_deref();
+	let content_disposition = make_content_disposition(None, content_type, filename);
+
+	services
+		.media
+		.upload_pending(&mxc, user, Some(&content_disposition), content_type, &body.file)
+		.await?;
+
+	Ok(create_content_async::v3::Response {})
 }
 
 /// # `GET /_matrix/client/v1/media/thumbnail/{serverName}/{mediaId}`
@@ -296,7 +371,11 @@ async fn fetch_thumbnail_meta(
 	timeout_ms: Duration,
 	dim: &Dim,
 ) -> Result<FileMeta> {
-	if let Some(filemeta) = services.media.get_thumbnail(mxc, dim).await? {
+	if let Some(filemeta) = services
+		.media
+		.get_thumbnail_with_timeout(mxc, dim, timeout_ms)
+		.await?
+	{
 		return Ok(filemeta);
 	}
 
@@ -316,7 +395,11 @@ async fn fetch_file_meta(
 	user: &UserId,
 	timeout_ms: Duration,
 ) -> Result<FileMeta> {
-	if let Some(filemeta) = services.media.get(mxc).await? {
+	if let Some(filemeta) = services
+		.media
+		.get_with_timeout(mxc, timeout_ms)
+		.await?
+	{
 		return Ok(filemeta);
 	}
 

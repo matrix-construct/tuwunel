@@ -1,17 +1,22 @@
 use std::{sync::Arc, time::Duration};
 
 use futures::{StreamExt, pin_mut};
-use ruma::{Mxc, OwnedMxcUri, UserId, http_headers::ContentDisposition};
+use ruma::{Mxc, OwnedMxcUri, OwnedUserId, UserId, http_headers::ContentDisposition};
 use tuwunel_core::{
 	Err, Result, debug, debug_info, err,
-	utils::{ReadyExt, str_from_bytes, stream::TryIgnore, string_from_bytes},
+	utils::{
+		ReadyExt, str_from_bytes,
+		stream::{TryExpect, TryIgnore},
+		string_from_bytes,
+	},
 };
-use tuwunel_database::{Database, Interfix, Map, serialize_key};
+use tuwunel_database::{Database, Deserialized, Ignore, Interfix, Map, serialize_key};
 
 use super::{preview::UrlPreviewData, thumbnail::Dim};
 
 pub(crate) struct Data {
 	mediaid_file: Arc<Map>,
+	mediaid_pending: Arc<Map>,
 	mediaid_user: Arc<Map>,
 	url_previews: Arc<Map>,
 }
@@ -27,6 +32,7 @@ impl Data {
 	pub(super) fn new(db: &Arc<Database>) -> Self {
 		Self {
 			mediaid_file: db["mediaid_file"].clone(),
+			mediaid_pending: db["mediaid_pending"].clone(),
 			mediaid_user: db["mediaid_user"].clone(),
 			url_previews: db["url_previews"].clone(),
 		}
@@ -50,6 +56,52 @@ impl Data {
 		}
 
 		Ok(key.to_vec())
+	}
+
+	/// Insert a pending MXC URI into the database
+	pub(super) fn insert_pending_mxc(
+		&self,
+		mxc: &Mxc<'_>,
+		user: &UserId,
+		unused_expires_at: u64,
+	) {
+		let value = (unused_expires_at, user);
+		debug!(?mxc, ?user, ?unused_expires_at, "Inserting pending");
+
+		self.mediaid_pending.put(mxc, value);
+	}
+
+	/// Remove a pending MXC URI from the database
+	pub(super) fn remove_pending_mxc(&self, mxc: &Mxc<'_>) { self.mediaid_pending.del(mxc); }
+
+	/// Count the number of pending MXC URIs for a specific user
+	pub(super) async fn count_pending_mxc_for_user(&self, user_id: &UserId) -> (usize, u64) {
+		type KeyVal<'a> = (Ignore, (u64, &'a UserId));
+
+		self.mediaid_pending
+			.stream()
+			.expect_ok()
+			.ready_filter(|(_, (_, pending_user_id)): &KeyVal<'_>| user_id == *pending_user_id)
+			.ready_fold(
+				(0_usize, u64::MAX),
+				|(count, earliest_expiration), (_, (expires_at, _))| {
+					(count.saturating_add(1), earliest_expiration.min(expires_at))
+				},
+			)
+			.await
+	}
+
+	/// Search for a pending MXC URI in the database
+	pub(super) async fn search_pending_mxc(&self, mxc: &Mxc<'_>) -> Result<(OwnedUserId, u64)> {
+		type Value<'a> = (u64, OwnedUserId);
+
+		self.mediaid_pending
+			.qry(mxc)
+			.await
+			.deserialized()
+			.map(|(expires_at, user_id): Value<'_>| (user_id, expires_at))
+			.inspect(|(user_id, expires_at)| debug!(?mxc, ?user_id, ?expires_at, "Found pending"))
+			.map_err(|e| err!(Request(NotFound("Pending not found or error: {e}"))))
 	}
 
 	pub(super) async fn delete_file_mxc(&self, mxc: &Mxc<'_>) {

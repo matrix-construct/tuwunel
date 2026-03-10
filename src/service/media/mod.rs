@@ -5,18 +5,29 @@ mod preview;
 mod remote;
 mod tests;
 mod thumbnail;
-use std::{path::PathBuf, sync::Arc, time::SystemTime};
+use std::{
+	collections::HashMap,
+	path::PathBuf,
+	sync::{Arc, Mutex},
+	time::{Duration, Instant, SystemTime},
+};
 
 use async_trait::async_trait;
 use base64::{Engine as _, engine::general_purpose};
-use ruma::{Mxc, OwnedMxcUri, UserId, http_headers::ContentDisposition};
+use http::StatusCode;
+use ruma::{
+	Mxc, OwnedMxcUri, OwnedUserId, UserId,
+	api::client::error::{ErrorKind, RetryAfter},
+	http_headers::ContentDisposition,
+};
 use tokio::{
 	fs,
 	io::{AsyncReadExt, AsyncWriteExt, BufReader},
+	sync::Notify,
 };
 use tuwunel_core::{
-	Err, Result, debug, debug_error, debug_info, debug_warn, err, error, trace,
-	utils::{self, MutexMap},
+	Err, Error, Result, debug, debug_error, debug_info, debug_warn, err, error, trace,
+	utils::{self, MutexMap, time::now_millis},
 	warn,
 };
 
@@ -30,10 +41,19 @@ pub struct FileMeta {
 	pub content_disposition: Option<ContentDisposition>,
 }
 
+/// For MSC2246
+struct MXCState {
+	/// Save the notifier for each pending media upload
+	notifiers: Mutex<HashMap<OwnedMxcUri, Arc<Notify>>>,
+	/// Save the ratelimiter for each user
+	ratelimiter: Mutex<HashMap<OwnedUserId, (Instant, f64)>>,
+}
+
 pub struct Service {
-	url_preview_mutex: MutexMap<String, ()>,
 	pub(super) db: Data,
 	services: Arc<crate::services::OnceServices>,
+	url_preview_mutex: MutexMap<String, ()>,
+	mxc_state: MXCState,
 }
 
 /// generated MXC ID (`media-id`) length
@@ -49,9 +69,13 @@ pub const CORP_CROSS_ORIGIN: &str = "cross-origin";
 impl crate::Service for Service {
 	fn build(args: &crate::Args<'_>) -> Result<Arc<Self>> {
 		Ok(Arc::new(Self {
-			url_preview_mutex: MutexMap::new(),
 			db: Data::new(args.db),
 			services: args.services.clone(),
+			url_preview_mutex: MutexMap::new(),
+			mxc_state: MXCState {
+				notifiers: Mutex::new(HashMap::new()),
+				ratelimiter: Mutex::new(HashMap::new()),
+			},
 		}))
 	}
 
@@ -65,6 +89,113 @@ impl crate::Service for Service {
 }
 
 impl Service {
+	/// Create a pending media upload ID.
+	#[tracing::instrument(level = "debug", skip(self))]
+	pub async fn create_pending(
+		&self,
+		mxc: &Mxc<'_>,
+		user: &UserId,
+		unused_expires_at: u64,
+	) -> Result {
+		let config = &self.services.server.config;
+
+		// Rate limiting (rc_media_create)
+		let rate = f64::from(config.media_rc_create_per_second);
+		let burst = f64::from(config.media_rc_create_burst_count);
+
+		// Check rate limiting
+		if rate > 0.0 && burst > 0.0 {
+			let now = Instant::now();
+			let mut ratelimiter = self.mxc_state.ratelimiter.lock()?;
+
+			let (last_time, tokens) = ratelimiter
+				.entry(user.to_owned())
+				.or_insert_with(|| (now, burst));
+
+			let elapsed = now.duration_since(*last_time).as_secs_f64();
+			let new_tokens = elapsed.mul_add(rate, *tokens).min(burst);
+
+			if new_tokens >= 1.0 {
+				*last_time = now;
+				*tokens = new_tokens - 1.0;
+			} else {
+				return Err(Error::Request(
+					ErrorKind::LimitExceeded { retry_after: None },
+					"Too many pending media creation requests.".into(),
+					StatusCode::TOO_MANY_REQUESTS,
+				));
+			}
+		}
+
+		let max_uploads = config.max_pending_media_uploads;
+		let (current_uploads, earliest_expiration) =
+			self.db.count_pending_mxc_for_user(user).await;
+
+		// Check if the user has reached the maximum number of pending media uploads
+		if current_uploads >= max_uploads {
+			let retry_after = earliest_expiration.saturating_sub(now_millis());
+			return Err(Error::Request(
+				ErrorKind::LimitExceeded {
+					retry_after: Some(RetryAfter::Delay(Duration::from_millis(retry_after))),
+				},
+				"Maximum number of pending media uploads reached.".into(),
+				StatusCode::TOO_MANY_REQUESTS,
+			));
+		}
+
+		self.db
+			.insert_pending_mxc(mxc, user, unused_expires_at);
+
+		Ok(())
+	}
+
+	/// Uploads content to a pending media ID.
+	#[tracing::instrument(level = "debug", skip(self))]
+	pub async fn upload_pending(
+		&self,
+		mxc: &Mxc<'_>,
+		user: &UserId,
+		content_disposition: Option<&ContentDisposition>,
+		content_type: Option<&str>,
+		file: &[u8],
+	) -> Result {
+		let Ok((owner_id, expires_at)) = self.db.search_pending_mxc(mxc).await else {
+			if self.get_metadata(mxc).await.is_some() {
+				return Err!(Request(CannotOverwriteMedia("Media ID already has content")));
+			}
+
+			return Err!(Request(NotFound("Media not found")));
+		};
+
+		if owner_id != user {
+			return Err!(Request(Forbidden("You did not create this media ID")));
+		}
+
+		let current_time = now_millis();
+		if expires_at < current_time {
+			return Err!(Request(NotFound("Pending media ID expired")));
+		}
+
+		self.create(mxc, Some(user), content_disposition, content_type, file)
+			.await?;
+
+		self.db.remove_pending_mxc(mxc);
+
+		let mxc_uri: OwnedMxcUri = mxc.to_string().into();
+		if let Some(notifier) = self
+			.mxc_state
+			.notifiers
+			.lock()?
+			.get(&mxc_uri)
+			.cloned()
+		{
+			notifier.notify_waiters();
+			self.mxc_state.notifiers.lock()?.remove(&mxc_uri);
+		}
+
+		Ok(())
+	}
+
 	/// Uploads a file.
 	pub async fn create(
 		&self,
@@ -166,6 +297,71 @@ impl Service {
 			},
 			| _ => Ok(None),
 		}
+	}
+
+	/// Download a file and wait up to a timeout_ms if it is pending.
+	pub async fn get_with_timeout(
+		&self,
+		mxc: &Mxc<'_>,
+		timeout_duration: Duration,
+	) -> Result<Option<FileMeta>> {
+		if let Some(meta) = self.get(mxc).await? {
+			return Ok(Some(meta));
+		}
+
+		let Ok(_pending) = self.db.search_pending_mxc(mxc).await else {
+			return Ok(None);
+		};
+
+		let notifier = self
+			.mxc_state
+			.notifiers
+			.lock()?
+			.entry(mxc.to_string().into())
+			.or_insert_with(|| Arc::new(Notify::new()))
+			.clone();
+
+		if tokio::time::timeout(timeout_duration, notifier.notified())
+			.await
+			.is_err()
+		{
+			return Err!(Request(NotYetUploaded("Media has not been uploaded yet")));
+		}
+
+		self.get(mxc).await
+	}
+
+	/// Download a thumbnail and wait up to a timeout_ms if it is pending.
+	pub async fn get_thumbnail_with_timeout(
+		&self,
+		mxc: &Mxc<'_>,
+		dim: &Dim,
+		timeout_duration: Duration,
+	) -> Result<Option<FileMeta>> {
+		if let Some(meta) = self.get_thumbnail(mxc, dim).await? {
+			return Ok(Some(meta));
+		}
+
+		let Ok(_pending) = self.db.search_pending_mxc(mxc).await else {
+			return Ok(None);
+		};
+
+		let notifier = self
+			.mxc_state
+			.notifiers
+			.lock()?
+			.entry(mxc.to_string().into())
+			.or_insert_with(|| Arc::new(Notify::new()))
+			.clone();
+
+		if tokio::time::timeout(timeout_duration, notifier.notified())
+			.await
+			.is_err()
+		{
+			return Err!(Request(NotYetUploaded("Media has not been uploaded yet")));
+		}
+
+		self.get_thumbnail(mxc, dim).await
 	}
 
 	/// Gets all the MXC URIs in our media database

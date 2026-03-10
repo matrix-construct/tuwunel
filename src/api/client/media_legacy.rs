@@ -145,7 +145,11 @@ pub(crate) async fn get_content_legacy_route(
 		media_id: &body.media_id,
 	};
 
-	match services.media.get(&mxc).await? {
+	match services
+		.media
+		.get_with_timeout(&mxc, body.timeout_ms)
+		.await?
+	{
 		| Some(FileMeta {
 			content,
 			content_type,
@@ -236,7 +240,11 @@ pub(crate) async fn get_content_as_filename_legacy_route(
 		media_id: &body.media_id,
 	};
 
-	match services.media.get(&mxc).await? {
+	match services
+		.media
+		.get_with_timeout(&mxc, body.timeout_ms)
+		.await?
+	{
 		| Some(FileMeta {
 			content,
 			content_type,
@@ -327,7 +335,11 @@ pub(crate) async fn get_content_thumbnail_legacy_route(
 	};
 
 	let dim = Dim::from_ruma(body.width, body.height, body.method.clone())?;
-	match services.media.get_thumbnail(&mxc, &dim).await? {
+	match services
+		.media
+		.get_thumbnail_with_timeout(&mxc, &dim, body.timeout_ms)
+		.await?
+	{
 		| Some(FileMeta {
 			content,
 			content_type,
