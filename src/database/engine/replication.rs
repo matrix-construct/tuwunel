@@ -8,7 +8,7 @@ use std::{
 	time::{SystemTime, UNIX_EPOCH},
 };
 
-use rocksdb::Checkpoint;
+use rocksdb::checkpoint::Checkpoint;
 use tuwunel_core::{Err, Result, implement};
 
 use super::Engine;
@@ -219,6 +219,35 @@ pub fn wal_updates_since(&self, since: u64) -> Result<rocksdb::DBWALIterator> {
 	self.db.get_updates_since(since).map_err(map_err)
 }
 
+/// Newtype wrapper making `DBWALIterator` safe to send across threads.
+///
+/// `DBWALIterator` holds a `*mut rocksdb_wal_iterator_t` raw pointer which
+/// is not auto-`Send`. RocksDB WAL iterators are not concurrently shared;
+/// this iterator is consumed by exactly one thread at a time, so sending
+/// ownership across a thread boundary is safe.
+struct SendWalIter(rocksdb::DBWALIterator);
+
+// SAFETY: DBWALIterator is not auto-Send due to its raw pointer, but the
+// underlying RocksDB iterator is safe to use from whichever single thread
+// owns it at any given time. We never share it across threads simultaneously.
+unsafe impl Send for SendWalIter {}
+
+impl Iterator for SendWalIter {
+	type Item = Result<WalFrame>;
+
+	fn next(&mut self) -> Option<Self::Item> {
+		self.0.next().map(|result| {
+			result
+				.map(|(seq, batch)| {
+					let data = batch.data().to_vec();
+					let count = batch_count_from_bytes(&data);
+					WalFrame::data(seq, count, data)
+				})
+				.map_err(map_err)
+		})
+	}
+}
+
 /// Return a higher-level iterator of [`WalFrame`]s starting at `since`.
 ///
 /// Wraps `wal_updates_since` and maps each rocksdb batch into a `WalFrame`,
@@ -233,15 +262,7 @@ pub fn wal_frame_iter(
 	since: u64,
 ) -> Result<Box<dyn Iterator<Item = Result<WalFrame>> + Send>> {
 	let iter = self.db.get_updates_since(since).map_err(map_err)?;
-	Ok(Box::new(iter.map(|result| {
-		result
-			.map(|(seq, batch)| {
-				let data = batch.data().to_vec();
-				let count = batch_count_from_bytes(&data);
-				WalFrame::data(seq, count, data)
-			})
-			.map_err(map_err)
-	})))
+	Ok(Box::new(SendWalIter(iter)))
 }
 
 /// Returns `true` if `err` indicates the requested WAL sequence is older

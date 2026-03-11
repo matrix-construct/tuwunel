@@ -44,7 +44,7 @@ pub(crate) async fn open(ctx: Arc<Context>, desc: &[Descriptor]) -> Result<Arc<S
 	} else if config.rocksdb_secondary {
 		let secondary_path = config
 			.rocksdb_secondary_path
-			.as_deref()
+			.as_ref()
 			.unwrap_or(path);
 		Db::open_cf_descriptors_as_secondary(&db_opts, path, secondary_path, cfds)
 	} else {

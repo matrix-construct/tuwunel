@@ -66,6 +66,7 @@ features = [
 	"http2",
 	"json",
 	"matched-path",
+	"query",
 	"tokio",
 	"tracing",
 ]
@@ -322,6 +323,7 @@ features = [
 	"rustls",
 	"rustls-native-certs",
 	"socks",
+	"stream",
 ]
 
 [workspace.dependencies.ring]

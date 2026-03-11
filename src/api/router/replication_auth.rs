@@ -1,6 +1,6 @@
 use axum::{
 	body::Body,
-	extract::Request,
+	extract::{Request, State},
 	http::StatusCode,
 	middleware::Next,
 	response::{IntoResponse, Response},
@@ -16,10 +16,11 @@ pub(super) const TOKEN_HEADER: &str = "x-tuwunel-replication-token";
 /// - `401 Unauthorized` if the token is missing or incorrect.
 /// - Passes through to the handler if the token matches.
 pub(crate) async fn check_replication_token(
-	axum::extract::State(services): axum::extract::State<super::State>,
+	State(services): State<super::State>,
 	request: Request<Body>,
 	next: Next,
 ) -> Response {
+
 	let Some(ref expected) = services.server.config.rocksdb_replication_token else {
 		return (
 			StatusCode::NOT_IMPLEMENTED,

@@ -27,7 +27,7 @@ pub(super) use self::{
 };
 use crate::{client, server};
 
-pub fn build(router: Router<State>, server: &Server) -> Router<State> {
+pub fn build(router: Router<State>, server: &Server, state: State) -> Router<State> {
 	let config = &server.config;
 	let mut router = router
         .ruma_route(&client::get_timezone_key_route)
@@ -263,7 +263,15 @@ pub fn build(router: Router<State>, server: &Server) -> Router<State> {
 				"/_tuwunel/replication/checkpoint",
 				get(client::replication_checkpoint),
 			)
-			.layer(middleware::from_fn(check_replication_token)),
+			.route(
+				"/_tuwunel/replication/promote",
+				post(client::replication_promote),
+			)
+			.route(
+				"/_tuwunel/replication/demote",
+				post(client::replication_demote),
+			)
+			.layer(middleware::from_fn_with_state(state, check_replication_token)),
 	);
 
 	if config.allow_legacy_media {

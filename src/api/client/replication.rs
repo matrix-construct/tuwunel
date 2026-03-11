@@ -4,18 +4,21 @@
 //! - `GET  /_tuwunel/replication/status`        — current sequence number + role
 //! - `GET  /_tuwunel/replication/wal?since=N`   — streaming WAL frame feed
 //! - `GET  /_tuwunel/replication/checkpoint`    — full database checkpoint as tar
+//! - `POST /_tuwunel/replication/promote`       — promote secondary to primary
+//! - `POST /_tuwunel/replication/demote`        — demote primary back to secondary
 
 use std::time::Duration;
 
 use axum::{
+	Json,
 	body::Body,
 	extract::{Query, State},
 	http::{StatusCode, header},
 	response::{IntoResponse, Response},
 };
 use bytes::Bytes;
-use futures::StreamExt;
-use serde::Deserialize;
+use futures::{SinkExt, StreamExt};
+use serde::{Deserialize, Serialize};
 use tuwunel_core::Result;
 use tuwunel_database::{WalFrame, is_wal_gap_error};
 
@@ -38,8 +41,16 @@ pub(crate) async fn replication_status(
 		.await
 		.unwrap_or(0);
 
+	let role = if services.server.config.rocksdb_primary_url.is_some()
+		&& !services.replication.is_promoted()
+	{
+		"secondary"
+	} else {
+		"primary"
+	};
+
 	axum::Json(serde_json::json!({
-		"role": "primary",
+		"role": role,
 		"latest_sequence": seq,
 	}))
 }
@@ -209,6 +220,90 @@ pub(crate) async fn replication_checkpoint(
 		| Err(e) => (
 			StatusCode::INTERNAL_SERVER_ERROR,
 			format!("Spawn_blocking panicked: {e}"),
+		)
+			.into_response(),
+	}
+}
+
+/// `POST /_tuwunel/replication/promote`
+///
+/// Promotes this secondary to a standalone primary by stopping the replication
+/// worker. After this call returns the instance accepts writes and no longer
+/// tails the primary's WAL. The caller is responsible for updating the VIP or
+/// load balancer to route client traffic to this node.
+///
+/// Returns:
+/// - `200 OK` with `{"status":"promoted"}` on success.
+/// - `409 Conflict` if this instance is already a primary (no `rocksdb_primary_url`
+///   was configured, or it was already promoted).
+pub(crate) async fn replication_promote(
+	State(services): State<crate::State>,
+) -> impl IntoResponse {
+	if services.replication.is_promoted() {
+		return (
+			StatusCode::CONFLICT,
+			axum::Json(serde_json::json!({"error": "already promoted"})),
+		)
+			.into_response();
+	}
+
+	if services.server.config.rocksdb_primary_url.is_none() {
+		return (
+			StatusCode::CONFLICT,
+			axum::Json(serde_json::json!({"error": "not a secondary; no rocksdb_primary_url configured"})),
+		)
+			.into_response();
+	}
+
+	services.replication.promote();
+
+	axum::Json(serde_json::json!({"status": "promoted"})).into_response()
+}
+
+/// Request body for `POST /_tuwunel/replication/demote`.
+#[derive(Debug, Deserialize, Serialize)]
+pub(crate) struct DemoteBody {
+	/// URL of the new primary to replicate from (e.g. `http://host:8008`).
+	pub primary_url: String,
+}
+
+/// `POST /_tuwunel/replication/demote`
+///
+/// Demotes this promoted primary back to a secondary that replicates from
+/// `primary_url`. Resets the resume cursor and triggers a fresh checkpoint
+/// bootstrap from the new primary — the worker restarts replication without
+/// requiring a process restart.
+///
+/// Typical use case: the original primary comes back online after a failover
+/// and needs to re-join the cluster as a secondary under the newly promoted
+/// node.
+///
+/// Returns:
+/// - `200 OK` with `{"status":"demoted","primary_url":"..."}` on success.
+/// - `400 Bad Request` if `primary_url` is missing or empty.
+/// - `409 Conflict` if this instance is not currently promoted (i.e. it is
+///   already actively replicating or was never a secondary).
+pub(crate) async fn replication_demote(
+	State(services): State<crate::State>,
+	Json(body): Json<DemoteBody>,
+) -> impl IntoResponse {
+	if body.primary_url.is_empty() {
+		return (
+			StatusCode::BAD_REQUEST,
+			axum::Json(serde_json::json!({"error": "primary_url is required"})),
+		)
+			.into_response();
+	}
+
+	match services.replication.demote(body.primary_url.clone()).await {
+		| Ok(()) => axum::Json(serde_json::json!({
+			"status": "demoted",
+			"primary_url": body.primary_url,
+		}))
+		.into_response(),
+		| Err(e) => (
+			StatusCode::CONFLICT,
+			axum::Json(serde_json::json!({"error": e.to_string()})),
 		)
 			.into_response(),
 	}
