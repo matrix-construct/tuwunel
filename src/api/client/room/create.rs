@@ -244,22 +244,23 @@ pub(crate) async fn create_room_route(
 		.await?;
 
 	// 5.3 Guest Access
-	services
-		.timeline
-		.build_and_append_pdu(
-			PduBuilder::state(
-				String::new(),
-				&RoomGuestAccessEventContent::new(match preset {
-					| RoomPreset::PublicChat => GuestAccess::Forbidden,
-					| _ => GuestAccess::CanJoin,
-				}),
-			),
-			sender_user,
-			&room_id,
-			&state_lock,
-		)
-		.boxed()
-		.await?;
+	// Only send for non-public presets (matching Synapse's behavior where
+	// guest_can_join is true for private_chat and trusted_private_chat only)
+	if preset != RoomPreset::PublicChat {
+		services
+			.timeline
+			.build_and_append_pdu(
+				PduBuilder::state(
+					String::new(),
+					&RoomGuestAccessEventContent::new(GuestAccess::CanJoin),
+				),
+				sender_user,
+				&room_id,
+				&state_lock,
+			)
+			.boxed()
+			.await?;
+	}
 
 	// 6. Events listed in initial_state
 	let mut is_encrypted = false;
