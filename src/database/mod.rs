@@ -26,13 +26,12 @@ use std::{ops::Index, sync::Arc};
 use log as _;
 use tuwunel_core::{Result, Server, err};
 
-pub use self::engine::{
-	WalFrame, is_wal_gap_error, FRAME_HEADER_LEN, FRAME_TYPE_DATA, FRAME_TYPE_HEARTBEAT,
-};
-
 pub use self::{
 	de::{Ignore, IgnoreAll},
 	deserialized::Deserialized,
+	engine::{
+		FRAME_HEADER_LEN, FRAME_TYPE_DATA, FRAME_TYPE_HEARTBEAT, WalFrame, is_wal_gap_error,
+	},
 	handle::Handle,
 	keyval::{KeyVal, Slice, serialize_key, serialize_val},
 	map::{Get, Map, Qry, compact},
@@ -120,7 +119,7 @@ impl Database {
 		self.engine
 			.db
 			.write_opt(&batch, &opts)
-			.map_err(crate::util::map_err)
+			.map_err(util::map_err)
 	}
 
 	/// Read the secondary's persisted WAL resume cursor from the

@@ -51,7 +51,8 @@ pub struct Service {
 	client: reqwest::Client,
 	/// Set to true when `promote()` is called; worker enters standby mode.
 	promoted: AtomicBool,
-	/// Wakes any blocking select in the streaming loop immediately on promotion.
+	/// Wakes any blocking select in the streaming loop immediately on
+	/// promotion.
 	promote_notify: Notify,
 	/// Runtime-overridden primary URL set by `demote()`. Takes precedence over
 	/// `config.rocksdb_primary_url` when set.
@@ -90,8 +91,8 @@ impl crate::Service for Service {
 			// replication requires a writable database. Operator should use either
 			// rocksdb_secondary OR rocksdb_primary_url, not both.
 			warn!(
-				"rocksdb_primary_url is set but database is in RocksDB native secondary \
-				 mode (read-only); WAL streaming replication requires a writable database. \
+				"rocksdb_primary_url is set but database is in RocksDB native secondary mode \
+				 (read-only); WAL streaming replication requires a writable database. \
 				 Replication worker will not run."
 			);
 			return Ok(());
@@ -161,7 +162,9 @@ impl crate::Service for Service {
 							 restore a fresh checkpoint over the database directory, then \
 							 restart. Stopping replication worker."
 						);
-						return Err(err!(Database("WAL gap; manual checkpoint restore required")));
+						return Err(err!(Database(
+							"WAL gap; manual checkpoint restore required"
+						)));
 					},
 					| Err(ref e) => {
 						if self.promoted.load(Ordering::Acquire) {
@@ -173,11 +176,14 @@ impl crate::Service for Service {
 
 				// Exponential backoff with cap — also wakes on promotion or shutdown.
 				tokio::select! {
-					_ = tokio::time::sleep(Duration::from_millis(backoff_ms)) => {},
+					() = tokio::time::sleep(Duration::from_millis(backoff_ms)) => {},
 					() = self.server.until_shutdown() => return Ok(()),
 					() = self.promote_notify.notified() => break,
 				}
-				backoff_ms = (backoff_ms * 2).min(BACKOFF_MAX_MS);
+				#[allow(clippy::arithmetic_side_effects)]
+				{
+					backoff_ms = (backoff_ms * 2).min(BACKOFF_MAX_MS);
+				}
 			}
 		}
 	}
@@ -210,9 +216,9 @@ impl Service {
 	/// Returns `Err` if the instance is not currently promoted.
 	pub async fn demote(&self, new_primary_url: String) -> Result<()> {
 		if !self.promoted.load(Ordering::Acquire) {
-			return Err(err!(Request(Conflict(
+			return Err(err!(Database(
 				"This instance is not currently promoted; cannot demote."
-			))));
+			)));
 		}
 
 		// Reset cursor so the worker bootstraps a fresh checkpoint from the new
@@ -229,7 +235,8 @@ impl Service {
 		Ok(())
 	}
 
-	/// Stream WAL frames from the primary until disconnect, promotion, or error.
+	/// Stream WAL frames from the primary until disconnect, promotion, or
+	/// error.
 	async fn run_stream(&self, primary_url: &str) -> Result {
 		let resume_seq = self.db.get_replication_resume_seq()?;
 		let url = format!("{primary_url}/_tuwunel/replication/wal?since={resume_seq}");
@@ -244,10 +251,7 @@ impl Service {
 		}
 
 		if !resp.status().is_success() {
-			return Err(err!(Database(
-				"Primary returned {} for WAL stream",
-				resp.status()
-			)));
+			return Err(err!(Database("Primary returned {} for WAL stream", resp.status())));
 		}
 
 		info!("WAL stream connected; starting from seq {resume_seq}");
@@ -276,13 +280,11 @@ impl Service {
 	/// Parse and apply as many complete frames as possible from `buf`.
 	fn drain_frames(&self, buf: &mut Vec<u8>) -> Result {
 		let mut offset = 0;
-		loop {
-			match WalFrame::decode(&buf[offset..]) {
-				| Ok((frame, consumed)) => {
-					self.apply_frame(&frame)?;
-					offset += consumed;
-				},
-				| Err(_) => break,
+		while let Ok((frame, consumed)) = WalFrame::decode(&buf[offset..]) {
+			self.apply_frame(&frame)?;
+			#[allow(clippy::arithmetic_side_effects)]
+			{
+				offset += consumed;
 			}
 		}
 		buf.drain(..offset);
@@ -315,10 +317,7 @@ impl Service {
 			.map_err(|e| err!(Database("GET {url}: {e}")))?;
 
 		if !resp.status().is_success() {
-			return Err(err!(Database(
-				"Primary returned {} for checkpoint",
-				resp.status()
-			)));
+			return Err(err!(Database("Primary returned {} for checkpoint", resp.status())));
 		}
 
 		let seq: u64 = resp
@@ -345,7 +344,7 @@ impl Service {
 		std::fs::create_dir_all(&staging)
 			.map_err(|e| err!(Database("Creating staging dir: {e}")))?;
 
-		let cursor = std::io::Cursor::new(&tar_bytes[..]);
+		let cursor = std::io::Cursor::new(&*tar_bytes);
 		let mut archive = tar::Archive::new(cursor);
 		archive
 			.unpack(&staging)
@@ -364,7 +363,7 @@ impl Service {
 		std::fs::rename(&checkpoint_src, &db_path)
 			.map_err(|e| err!(Database("Moving checkpoint to db_path: {e}")))?;
 
-		let _ = std::fs::remove_dir_all(&staging);
+		let _: std::io::Result<()> = std::fs::remove_dir_all(&staging);
 
 		self.db.set_replication_resume_seq(seq)?;
 

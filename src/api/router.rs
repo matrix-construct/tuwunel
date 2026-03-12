@@ -9,8 +9,7 @@ pub mod state;
 use std::str::FromStr;
 
 use axum::{
-	Router,
-	middleware,
+	Router, middleware,
 	response::{IntoResponse, Redirect},
 	routing::{any, get, post},
 };
@@ -19,11 +18,8 @@ use tuwunel_core::{Server, err};
 
 use self::handler::RouterExt;
 pub(super) use self::{
-	args::Args as Ruma,
-	auth::auth_uiaa,
-	replication_auth::check_replication_token,
-	response::RumaResponse,
-	state::State,
+	args::Args as Ruma, auth::auth_uiaa, replication_auth::check_replication_token,
+	response::RumaResponse, state::State,
 };
 use crate::{client, server};
 
@@ -259,18 +255,9 @@ pub fn build(router: Router<State>, server: &Server, state: State) -> Router<Sta
 		Router::<State>::new()
 			.route("/_tuwunel/replication/status", get(client::replication_status))
 			.route("/_tuwunel/replication/wal", get(client::replication_wal))
-			.route(
-				"/_tuwunel/replication/checkpoint",
-				get(client::replication_checkpoint),
-			)
-			.route(
-				"/_tuwunel/replication/promote",
-				post(client::replication_promote),
-			)
-			.route(
-				"/_tuwunel/replication/demote",
-				post(client::replication_demote),
-			)
+			.route("/_tuwunel/replication/checkpoint", get(client::replication_checkpoint))
+			.route("/_tuwunel/replication/promote", post(client::replication_promote))
+			.route("/_tuwunel/replication/demote", post(client::replication_demote))
 			.layer(middleware::from_fn_with_state(state, check_replication_token)),
 	);
 

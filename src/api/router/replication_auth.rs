@@ -20,12 +20,8 @@ pub(crate) async fn check_replication_token(
 	request: Request<Body>,
 	next: Next,
 ) -> Response {
-
 	let Some(ref expected) = services.server.config.rocksdb_replication_token else {
-		return (
-			StatusCode::NOT_IMPLEMENTED,
-			"Replication is not configured on this instance",
-		)
+		return (StatusCode::NOT_IMPLEMENTED, "Replication is not configured on this instance")
 			.into_response();
 	};
 
@@ -49,8 +45,11 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
 		// Still consume O(min(a,b)) time to avoid leaking which was shorter.
 		a.iter()
 			.zip(b.iter())
-			.fold(0u8, |acc, (x, y)| acc | (x ^ y));
+			.fold(0_u8, |acc, (x, y)| acc | (x ^ y));
 		return false;
 	}
-	a.iter().zip(b.iter()).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+	a.iter()
+		.zip(b.iter())
+		.fold(0_u8, |acc, (x, y)| acc | (x ^ y))
+		== 0
 }

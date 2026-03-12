@@ -9,12 +9,7 @@ mod logger;
 mod memory_usage;
 mod open;
 mod repair;
-pub mod replication;
-pub use replication::{
-	WalFrame, batch_count_from_bytes, is_wal_gap_error, FRAME_HEADER_LEN, FRAME_TYPE_DATA,
-	FRAME_TYPE_HEARTBEAT,
-};
-
+pub(crate) mod replication;
 use std::{
 	ffi::CStr,
 	sync::{
@@ -23,6 +18,9 @@ use std::{
 	},
 };
 
+pub use replication::{
+	FRAME_HEADER_LEN, FRAME_TYPE_DATA, FRAME_TYPE_HEARTBEAT, WalFrame, is_wal_gap_error,
+};
 use rocksdb::{
 	AsColumnFamilyRef, BoundColumnFamily, DBCommon, DBWithThreadMode, MultiThreaded,
 	WaitForCompactOptions,

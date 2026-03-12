@@ -1,11 +1,14 @@
 //! Primary-side HTTP handlers for WAL-based RocksDB replication.
 //!
 //! Endpoints (all protected by `check_replication_token` middleware):
-//! - `GET  /_tuwunel/replication/status`        — current sequence number + role
+//! - `GET  /_tuwunel/replication/status`        — current sequence number +
+//!   role
 //! - `GET  /_tuwunel/replication/wal?since=N`   — streaming WAL frame feed
-//! - `GET  /_tuwunel/replication/checkpoint`    — full database checkpoint as tar
+//! - `GET  /_tuwunel/replication/checkpoint`    — full database checkpoint as
+//!   tar
 //! - `POST /_tuwunel/replication/promote`       — promote secondary to primary
-//! - `POST /_tuwunel/replication/demote`        — demote primary back to secondary
+//! - `POST /_tuwunel/replication/demote`        — demote primary back to
+//!   secondary
 
 use std::time::Duration;
 
@@ -41,7 +44,11 @@ pub(crate) async fn replication_status(
 		.await
 		.unwrap_or(0);
 
-	let role = if services.server.config.rocksdb_primary_url.is_some()
+	let role = if services
+		.server
+		.config
+		.rocksdb_primary_url
+		.is_some()
 		&& !services.replication.is_promoted()
 	{
 		"secondary"
@@ -49,7 +56,7 @@ pub(crate) async fn replication_status(
 		"primary"
 	};
 
-	axum::Json(serde_json::json!({
+	Json(serde_json::json!({
 		"role": role,
 		"latest_sequence": seq,
 	}))
@@ -70,7 +77,10 @@ pub(crate) async fn replication_wal(
 ) -> Response {
 	let since = params.since.unwrap_or(0);
 	let db = services.db.clone();
-	let interval_ms = services.server.config.rocksdb_replication_interval_ms;
+	let interval_ms = services
+		.server
+		.config
+		.rocksdb_replication_interval_ms;
 
 	// Eagerly check for a WAL gap before opening the streaming response.
 	let gap_check: Result<()> = tokio::task::spawn_blocking({
@@ -82,16 +92,10 @@ pub(crate) async fn replication_wal(
 
 	if let Err(ref e) = gap_check {
 		if is_wal_gap_error(e) {
-			return (
-				StatusCode::GONE,
-				"WAL gap: secondary must re-sync from a fresh checkpoint",
-			)
+			return (StatusCode::GONE, "WAL gap: secondary must re-sync from a fresh checkpoint")
 				.into_response();
 		}
-		return (
-			StatusCode::INTERNAL_SERVER_ERROR,
-			format!("WAL iterator error: {e}"),
-		)
+		return (StatusCode::INTERNAL_SERVER_ERROR, format!("WAL iterator error: {e}"))
 			.into_response();
 	}
 
@@ -108,25 +112,19 @@ pub(crate) async fn replication_wal(
 				move || -> (Vec<Bytes>, u64) {
 					let mut frames: Vec<Bytes> = Vec::new();
 					let mut next_seq = seq;
-					match db.wal_frame_iter(seq) {
-						| Ok(iter) => {
-							for item in iter {
-								if let Ok(frame) = item {
-									next_seq = frame.next_resume_seq();
-									frames.push(Bytes::from(frame.encode()));
-								}
-							}
-						},
-						| Err(_) => {},
+					if let Ok(iter) = db.wal_frame_iter(seq) {
+						for frame in iter.flatten() {
+							next_seq = frame.next_resume_seq();
+							frames.push(Bytes::from(frame.encode()));
+						}
 					}
 					(frames, next_seq)
 				}
 			})
 			.await;
 
-			let (frames, next_seq) = match result {
-				| Ok(pair) => pair,
-				| Err(_) => break, // spawn_blocking panicked
+			let Ok((frames, next_seq)) = result else {
+				break; // spawn_blocking panicked
 			};
 
 			let advanced = next_seq != seq;
@@ -175,9 +173,7 @@ pub(crate) async fn replication_wal(
 ///
 /// The caller is responsible for pausing WAL consumption while restoring the
 /// checkpoint and then resuming from `X-Tuwunel-Checkpoint-Sequence`.
-pub(crate) async fn replication_checkpoint(
-	State(services): State<crate::State>,
-) -> Response {
+pub(crate) async fn replication_checkpoint(State(services): State<crate::State>) -> Response {
 	let db = services.db.clone();
 
 	// Build the checkpoint and tar it in a blocking thread.
@@ -189,6 +185,7 @@ pub(crate) async fn replication_checkpoint(
 
 		// Build tar archive in memory.
 		let mut archive_bytes: Vec<u8> = Vec::new();
+		#[allow(clippy::semicolon_outside_block)]
 		{
 			let mut builder = tar::Builder::new(&mut archive_bytes);
 			builder
@@ -211,16 +208,11 @@ pub(crate) async fn replication_checkpoint(
 			.body(Body::from(bytes))
 			.expect("Failed to build checkpoint response"),
 
-		| Ok(Err(e)) => (
-			StatusCode::INTERNAL_SERVER_ERROR,
-			format!("Checkpoint creation failed: {e}"),
-		)
-			.into_response(),
+		| Ok(Err(e)) =>
+			(StatusCode::INTERNAL_SERVER_ERROR, format!("Checkpoint creation failed: {e}"))
+				.into_response(),
 
-		| Err(e) => (
-			StatusCode::INTERNAL_SERVER_ERROR,
-			format!("Spawn_blocking panicked: {e}"),
-		)
+		| Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("Spawn_blocking panicked: {e}"))
 			.into_response(),
 	}
 }
@@ -234,30 +226,34 @@ pub(crate) async fn replication_checkpoint(
 ///
 /// Returns:
 /// - `200 OK` with `{"status":"promoted"}` on success.
-/// - `409 Conflict` if this instance is already a primary (no `rocksdb_primary_url`
-///   was configured, or it was already promoted).
+/// - `409 Conflict` if this instance is already a primary (no
+///   `rocksdb_primary_url` was configured, or it was already promoted).
 pub(crate) async fn replication_promote(
 	State(services): State<crate::State>,
 ) -> impl IntoResponse {
 	if services.replication.is_promoted() {
-		return (
-			StatusCode::CONFLICT,
-			axum::Json(serde_json::json!({"error": "already promoted"})),
-		)
+		return (StatusCode::CONFLICT, Json(serde_json::json!({"error": "already promoted"})))
 			.into_response();
 	}
 
-	if services.server.config.rocksdb_primary_url.is_none() {
+	if services
+		.server
+		.config
+		.rocksdb_primary_url
+		.is_none()
+	{
 		return (
 			StatusCode::CONFLICT,
-			axum::Json(serde_json::json!({"error": "not a secondary; no rocksdb_primary_url configured"})),
+			Json(
+				serde_json::json!({"error": "not a secondary; no rocksdb_primary_url configured"}),
+			),
 		)
 			.into_response();
 	}
 
 	services.replication.promote();
 
-	axum::Json(serde_json::json!({"status": "promoted"})).into_response()
+	Json(serde_json::json!({"status": "promoted"})).into_response()
 }
 
 /// Request body for `POST /_tuwunel/replication/demote`.
@@ -290,21 +286,22 @@ pub(crate) async fn replication_demote(
 	if body.primary_url.is_empty() {
 		return (
 			StatusCode::BAD_REQUEST,
-			axum::Json(serde_json::json!({"error": "primary_url is required"})),
+			Json(serde_json::json!({"error": "primary_url is required"})),
 		)
 			.into_response();
 	}
 
-	match services.replication.demote(body.primary_url.clone()).await {
-		| Ok(()) => axum::Json(serde_json::json!({
+	match services
+		.replication
+		.demote(body.primary_url.clone())
+		.await
+	{
+		| Ok(()) => Json(serde_json::json!({
 			"status": "demoted",
 			"primary_url": body.primary_url,
 		}))
 		.into_response(),
-		| Err(e) => (
-			StatusCode::CONFLICT,
-			axum::Json(serde_json::json!({"error": e.to_string()})),
-		)
+		| Err(e) => (StatusCode::CONFLICT, Json(serde_json::json!({"error": e.to_string()})))
 			.into_response(),
 	}
 }
@@ -335,7 +332,5 @@ impl TempDir {
 }
 
 impl Drop for TempDir {
-	fn drop(&mut self) {
-		let _ = std::fs::remove_dir_all(&self.0);
-	}
+	fn drop(&mut self) { let _: std::io::Result<()> = std::fs::remove_dir_all(&self.0); }
 }

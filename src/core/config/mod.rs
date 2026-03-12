@@ -1348,7 +1348,7 @@ pub struct Config {
 	/// `rocksdb_secondary` is true and the primary DB is not on a shared
 	/// filesystem. Must be a writable directory local to this host.
 	#[serde(default)]
-	pub rocksdb_secondary_path: Option<std::path::PathBuf>,
+	pub rocksdb_secondary_path: Option<PathBuf>,
 
 	/// URL of the primary instance for WAL-streaming replication.
 	/// Example: `https://primary.example.com`

@@ -14,7 +14,8 @@ use tuwunel_core::{Err, Result, implement};
 use super::Engine;
 use crate::util::map_err;
 
-// ── Wire frame ─────────────────────────────────────────────────────────────────
+// ── Wire frame
+// ─────────────────────────────────────────────────────────────────
 
 pub const FRAME_TYPE_DATA: u8 = 0x01;
 pub const FRAME_TYPE_HEARTBEAT: u8 = 0x02;
@@ -53,6 +54,7 @@ pub struct WalFrame {
 
 impl WalFrame {
 	/// Create a heartbeat frame carrying the primary's current sequence.
+	#[must_use]
 	pub fn heartbeat(primary_sequence: u64) -> Self {
 		Self {
 			frame_type: FRAME_TYPE_HEARTBEAT,
@@ -65,6 +67,7 @@ impl WalFrame {
 	}
 
 	/// Create a data frame from a WAL batch. CRC is computed automatically.
+	#[must_use]
 	pub fn data(sequence: u64, count: u64, batch_data: Vec<u8>) -> Self {
 		let crc32 = crc32fast::hash(&batch_data);
 		Self {
@@ -81,6 +84,7 @@ impl WalFrame {
 	/// `?since=` argument after successfully applying this frame.
 	/// For heartbeats, returns `sequence` unchanged (cursor must not advance
 	/// based on heartbeats alone).
+	#[must_use]
 	#[inline]
 	pub fn next_resume_seq(&self) -> u64 {
 		if self.frame_type == FRAME_TYPE_DATA {
@@ -91,8 +95,11 @@ impl WalFrame {
 	}
 
 	/// Encode the frame to bytes for writing to the HTTP stream.
+	#[must_use]
 	pub fn encode(&self) -> Vec<u8> {
+		#[allow(clippy::cast_possible_truncation, clippy::as_conversions)]
 		let batch_len = self.batch_data.len() as u32;
+		#[allow(clippy::arithmetic_side_effects)]
 		let mut buf = Vec::with_capacity(FRAME_HEADER_LEN + self.batch_data.len());
 		buf.push(self.frame_type);
 		buf.extend_from_slice(&self.sequence.to_le_bytes());
@@ -117,19 +124,18 @@ impl WalFrame {
 			);
 		}
 
-		let frame_type  = buf[0];
-		let sequence    = u64::from_le_bytes(buf[1..9].try_into().expect("8 bytes"));
-		let count       = u64::from_le_bytes(buf[9..17].try_into().expect("8 bytes"));
+		let frame_type = buf[0];
+		let sequence = u64::from_le_bytes(buf[1..9].try_into().expect("8 bytes"));
+		let count = u64::from_le_bytes(buf[9..17].try_into().expect("8 bytes"));
 		let timestamp_ms = u64::from_le_bytes(buf[17..25].try_into().expect("8 bytes"));
-		let crc32       = u32::from_le_bytes(buf[25..29].try_into().expect("4 bytes"));
-		let batch_len   = u32::from_le_bytes(buf[29..33].try_into().expect("4 bytes")) as usize;
+		let crc32 = u32::from_le_bytes(buf[25..29].try_into().expect("4 bytes"));
+		#[allow(clippy::as_conversions)]
+		let batch_len = u32::from_le_bytes(buf[29..33].try_into().expect("4 bytes")) as usize;
 
+		#[allow(clippy::arithmetic_side_effects)]
 		let total = FRAME_HEADER_LEN + batch_len;
 		if buf.len() < total {
-			return Err!(
-				"WAL frame body truncated: need {total} bytes, have {}",
-				buf.len()
-			);
+			return Err!("WAL frame body truncated: need {total} bytes, have {}", buf.len());
 		}
 
 		let batch_data = buf[FRAME_HEADER_LEN..total].to_vec();
@@ -144,7 +150,14 @@ impl WalFrame {
 		}
 
 		Ok((
-			Self { frame_type, sequence, count, timestamp_ms, crc32, batch_data },
+			Self {
+				frame_type,
+				sequence,
+				count,
+				timestamp_ms,
+				crc32,
+				batch_data,
+			},
 			total,
 		))
 	}
@@ -157,21 +170,24 @@ impl WalFrame {
 /// equals how many sequence numbers the batch consumes. Returns 0 if the
 /// slice is too short to contain the count.
 #[inline]
-pub fn batch_count_from_bytes(data: &[u8]) -> u64 {
+pub(crate) fn batch_count_from_bytes(data: &[u8]) -> u64 {
 	if data.len() < 12 {
 		return 0;
 	}
-	u32::from_le_bytes(data[8..12].try_into().expect("4 bytes")) as u64
+	u64::from(u32::from_le_bytes(data[8..12].try_into().expect("4 bytes")))
 }
 
 fn now_ms() -> u64 {
-	SystemTime::now()
+	#[allow(clippy::cast_possible_truncation, clippy::as_conversions)]
+	let ms = SystemTime::now()
 		.duration_since(UNIX_EPOCH)
 		.unwrap_or_default()
-		.as_millis() as u64
+		.as_millis() as u64;
+	ms
 }
 
-// ── Engine methods ─────────────────────────────────────────────────────────────
+// ── Engine methods
+// ─────────────────────────────────────────────────────────────
 
 /// Create a RocksDB checkpoint at `dest`.
 ///
@@ -181,7 +197,9 @@ fn now_ms() -> u64 {
 #[implement(Engine)]
 pub fn create_checkpoint(&self, dest: &Path) -> Result<u64> {
 	let checkpoint = Checkpoint::new(&self.db).map_err(map_err)?;
-	checkpoint.create_checkpoint(dest).map_err(map_err)?;
+	checkpoint
+		.create_checkpoint(dest)
+		.map_err(map_err)?;
 	Ok(self.db.latest_sequence_number())
 }
 
@@ -197,9 +215,7 @@ pub fn disable_file_deletions(&self) -> Result {
 
 /// Re-enable file deletion after a `disable_file_deletions` call.
 #[implement(Engine)]
-pub fn enable_file_deletions(&self) -> Result {
-	self.db.enable_file_deletions().map_err(map_err)
-}
+pub fn enable_file_deletions(&self) -> Result { self.db.enable_file_deletions().map_err(map_err) }
 
 /// Returns the current latest WAL sequence number of this instance.
 ///
@@ -230,6 +246,7 @@ struct SendWalIter(rocksdb::DBWALIterator);
 // SAFETY: DBWALIterator is not auto-Send due to its raw pointer, but the
 // underlying RocksDB iterator is safe to use from whichever single thread
 // owns it at any given time. We never share it across threads simultaneously.
+#[allow(clippy::non_send_fields_in_send_ty)]
 unsafe impl Send for SendWalIter {}
 
 impl Iterator for SendWalIter {
@@ -261,7 +278,10 @@ pub fn wal_frame_iter(
 	&self,
 	since: u64,
 ) -> Result<Box<dyn Iterator<Item = Result<WalFrame>> + Send>> {
-	let iter = self.db.get_updates_since(since).map_err(map_err)?;
+	let iter = self
+		.db
+		.get_updates_since(since)
+		.map_err(map_err)?;
 	Ok(Box::new(SendWalIter(iter)))
 }
 
