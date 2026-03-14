@@ -81,6 +81,7 @@ pub(super) fn bad_request_code(kind: &ErrorKind) -> StatusCode {
 		| UserDeactivated
 		| ThreepidDenied
 		| WrongRoomKeysVersion { .. }
+		| InviteBlocked
 		| Forbidden { .. } => StatusCode::FORBIDDEN,
 
 		// 401

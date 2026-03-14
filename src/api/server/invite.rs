@@ -5,7 +5,7 @@ use futures::StreamExt;
 use ruma::{
 	CanonicalJsonValue, OwnedRoomId, OwnedUserId, RoomId, UserId,
 	api::{
-		client::error::ErrorKind,
+		client::error::{ErrorKind, ErrorKind::InviteBlocked},
 		federation::membership::{RawStrippedState, create_invite},
 	},
 	events::{
@@ -23,7 +23,7 @@ use tuwunel_core::{
 	utils::hash::sha256,
 };
 
-use crate::Ruma;
+use crate::{Ruma, client::utils::is_invite_blocked};
 
 /// # `PUT /_matrix/federation/v2/invite/{roomId}/{eventId}`
 ///
@@ -156,6 +156,14 @@ pub(crate) async fn create_invite_route(
 		&& !services.admin.user_is_admin(&invited_user).await
 	{
 		return Err!(Request(Forbidden("This server does not allow room invites.")));
+	}
+
+	if is_invite_blocked(&services, &invited_user).await {
+		warn!(
+			"{invited_user} has blocked invites and {sender} attempted to send a federation \
+			 invite for {room_id}"
+		);
+		return Err!(Request(InviteBlocked));
 	}
 
 	let mut invite_state: Vec<_> = body

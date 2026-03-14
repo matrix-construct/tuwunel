@@ -86,4 +86,6 @@ static UNSTABLE_FEATURES: [&str; 18] = [
 	"org.matrix.simplified_msc3575",
 	// Allow room moderators to view redacted event content (https://github.com/matrix-org/matrix-spec-proposals/pull/2815)
 	"fi.mau.msc2815",
+	// invite blocking (https://github.com/matrix-org/matrix-spec-proposals/pull/4380)
+	"org.matrix.msc4380",
 ];

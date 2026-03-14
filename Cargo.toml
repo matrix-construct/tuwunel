@@ -363,6 +363,7 @@ features = [
     "unstable-msc4310",
     "unstable-msc4311",
     "unstable-extensible-events",
+	"unstable-msc4380",
 ]
 
 [workspace.dependencies.rustls]
