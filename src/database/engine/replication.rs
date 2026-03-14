@@ -346,14 +346,14 @@ mod tests {
 		// Corrupt one byte in the batch_data region (after the 33-byte header).
 		let last = encoded.len() - 1;
 		encoded[last] ^= 0xFF;
-		assert!(WalFrame::decode(&encoded).is_err());
+		WalFrame::decode(&encoded).unwrap_err();
 	}
 
 	#[test]
 	fn truncated_header_rejected() {
 		let frame = WalFrame::heartbeat(1);
 		let encoded = frame.encode();
-		assert!(WalFrame::decode(&encoded[..FRAME_HEADER_LEN - 1]).is_err());
+		WalFrame::decode(&encoded[..FRAME_HEADER_LEN - 1]).unwrap_err();
 	}
 
 	#[test]
@@ -361,7 +361,7 @@ mod tests {
 		let frame = WalFrame::data(1, 1, b"hello world test".to_vec());
 		let mut encoded = frame.encode();
 		encoded.truncate(encoded.len() - 3);
-		assert!(WalFrame::decode(&encoded).is_err());
+		WalFrame::decode(&encoded).unwrap_err();
 	}
 
 	#[test]
@@ -385,14 +385,14 @@ mod tests {
 
 	#[test]
 	fn batch_count_from_bytes_valid() {
-		let mut fake = vec![0u8; 16];
-		fake[8..12].copy_from_slice(&7u32.to_le_bytes());
+		let mut fake = vec![0_u8; 16];
+		fake[8..12].copy_from_slice(&7_u32.to_le_bytes());
 		assert_eq!(batch_count_from_bytes(&fake), 7);
 	}
 
 	#[test]
 	fn batch_count_from_bytes_too_short() {
-		assert_eq!(batch_count_from_bytes(&[0u8; 5]), 0);
+		assert_eq!(batch_count_from_bytes(&[0_u8; 5]), 0);
 		assert_eq!(batch_count_from_bytes(&[]), 0);
 	}
 }

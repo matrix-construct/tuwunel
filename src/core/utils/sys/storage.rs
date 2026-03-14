@@ -179,10 +179,7 @@ pub fn name_from_path(path: &Path) -> Result<String> {
 }
 
 /// Get the (major, minor) of the block device on which Path is mounted.
-#[expect(
-	clippy::useless_conversion,
-	clippy::unnecessary_fallible_conversions
-)]
+#[expect(clippy::useless_conversion)]
 fn dev_from_path(path: &Path) -> Result<(dev_t, dev_t)> {
 	#[cfg(target_family = "unix")]
 	use std::os::unix::fs::MetadataExt;
