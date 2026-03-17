@@ -43,7 +43,6 @@ pub(super) async fn collect(
 		.collect::<HashSet<_>>()
 		.map(|changed| (changed, HashSet::new()));
 
-	let (changed, left) = (HashSet::new(), HashSet::new());
 	let (changed, left) = services
 		.state_cache
 		.rooms_joined(sender_user)
