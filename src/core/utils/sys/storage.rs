@@ -188,7 +188,7 @@ fn dev_from_path(path: &Path) -> Result<(dev_t, dev_t)> {
 	let dev_id = stat.dev().try_into()?;
 	let (major, minor) = (libc::major(dev_id), libc::minor(dev_id));
 
-	Ok((major.into()?, minor.into()?))
+	Ok((u64::from(major).try_into()?, u64::from(minor).try_into()?))
 }
 
 fn block_path((major, minor): (dev_t, dev_t)) -> PathBuf {
