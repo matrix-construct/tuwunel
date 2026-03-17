@@ -32,7 +32,7 @@ where
 				.unwrap_or(false)
 		})
 		.unwrap_or(false)
-		.await;
+		.await || (cfg!(feature = "ldap") && services.config.ldap.enable);
 
 	//TODO: UIAA for SSO.
 	let sso_flow = [AuthType::Sso];
