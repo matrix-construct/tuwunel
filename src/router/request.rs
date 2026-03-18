@@ -11,7 +11,7 @@ use axum::{
 use futures::FutureExt;
 use http::{Method, StatusCode, Uri};
 use ruma::api::client::error::ErrorKind;
-use tokio::{sync::Notify, task, time::sleep};
+use tokio::{sync::Notify, time::sleep};
 use tracing::Span;
 use tuwunel_core::{Error, Result, debug, debug_error, debug_warn, defer, error, trace};
 use tuwunel_service::Services;
@@ -22,7 +22,6 @@ use tuwunel_service::Services;
 	skip_all,
 	err(Debug, level = "debug")
 	fields(
-		task = %task::id(),
 		id = %services
 			.server
 			.metrics
@@ -104,9 +103,6 @@ async fn spawn_execute(
 	parent = parent,
 	skip_all,
 	ret(level = "trace"),
-	fields(
-		task = %task::id(),
-	)
 )]
 #[cfg_attr(not(debug_assertions), expect(unused_variables))]
 async fn execute(
