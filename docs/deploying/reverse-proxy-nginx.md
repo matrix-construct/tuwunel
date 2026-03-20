@@ -25,7 +25,7 @@ Create a new configuration file at `/etc/nginx/sites-available/tuwunel` (or `/et
 
 ```nginx
 upstream tuwunel {
-  127.0.0.1:8008; # IP and port where tuwunel is listening
+  server 127.0.0.1:8008; # IP and port where tuwunel is listening
 }
 
 # Client-Server API over HTTPS (port 443)
