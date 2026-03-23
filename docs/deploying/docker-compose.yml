@@ -7,7 +7,7 @@ services:
         image: jevolk/tuwunel:latest
         restart: unless-stopped
         ports:
-            - 8448:6167
+            - 8008:6167
         volumes:
             - db:/var/lib/tuwunel
             #- ./tuwunel.toml:/etc/tuwunel.toml
