@@ -3269,7 +3269,7 @@ fn default_dns_attempts() -> u16 { 10 }
 
 fn default_dns_timeout() -> u64 { 10 }
 
-fn default_ip_lookup_strategy() -> u8 { 5 }
+fn default_ip_lookup_strategy() -> u8 { 4 }
 
 fn default_max_request_size() -> usize { 24 * 1024 * 1024 }
 fn default_max_pending_media_uploads() -> usize { 5 }
