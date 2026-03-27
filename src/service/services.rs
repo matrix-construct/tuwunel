@@ -229,8 +229,11 @@ pub async fn stop(&self) {
 pub(crate) async fn interrupt(&self) {
 	debug!("Interrupting services...");
 	for service in self.services() {
-		let name = service.name();
-		trace!("Interrupting {name}");
+		trace!(
+			name = ?service.name(),
+			"Interrupting Service"
+		);
+
 		service.interrupt().await;
 	}
 }
@@ -238,6 +241,7 @@ pub(crate) async fn interrupt(&self) {
 #[implement(Services)]
 pub async fn poll(&self) -> Result {
 	if let Some(manager) = self.manager.lock().await.as_ref() {
+		trace!("Polling service manager...");
 		return manager.poll().await;
 	}
 

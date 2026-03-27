@@ -1,4 +1,12 @@
-use std::{panic::AssertUnwindSafe, sync::Arc, time::Duration};
+use std::{
+	ops::DerefMut,
+	panic::AssertUnwindSafe,
+	sync::{
+		Arc,
+		atomic::{AtomicUsize, Ordering},
+	},
+	time::Duration,
+};
 
 use futures::{FutureExt, TryFutureExt};
 use tokio::{
@@ -7,7 +15,8 @@ use tokio::{
 	time::sleep,
 };
 use tuwunel_core::{
-	Err, Error, Result, Server, debug, debug_warn, error, trace, utils::time, warn,
+	Err, Error, Result, Server, debug, debug::INFO_SPAN_LEVEL, debug_warn, defer, error,
+	utils::time, warn,
 };
 
 use crate::{Services, service::Service};
@@ -15,6 +24,7 @@ use crate::{Services, service::Service};
 pub(crate) struct Manager {
 	manager: Mutex<Option<JoinHandle<Result>>>,
 	workers: Mutex<Workers>,
+	active: AtomicUsize,
 	server: Arc<Server>,
 	services: Arc<Services>,
 }
@@ -30,6 +40,7 @@ impl Manager {
 		Arc::new(Self {
 			manager: Mutex::new(None),
 			workers: Mutex::new(JoinSet::new()),
+			active: 0.into(),
 			server: services.server.clone(),
 			services: services.clone(),
 		})
@@ -37,34 +48,21 @@ impl Manager {
 
 	pub(super) async fn poll(&self) -> Result {
 		if let Some(manager) = &mut *self.manager.lock().await {
-			trace!("Polling service manager...");
+			debug!("Polling service manager...");
 			return manager.await?;
 		}
 
 		Ok(())
 	}
 
-	pub(super) async fn start(self: Arc<Self>) -> Result {
-		let mut workers = self.workers.lock().await;
-
-		debug!("Starting service manager...");
-		let self_ = self.clone();
-		_ = self.manager.lock().await.insert(
-			self.server
-				.runtime()
-				.spawn(async move { self_.worker().await }),
-		);
-
-		debug!("Starting service workers...");
-		for service in self.services.services() {
-			self.start_worker(&mut workers, &service)?;
-		}
-
-		yield_now().await;
-
-		Ok(())
-	}
-
+	#[tracing::instrument(
+		name = "manager",
+		level = INFO_SPAN_LEVEL,
+		skip_all,
+		fields(
+			active = self.active.load(Ordering::Relaxed),
+		),
+	)]
 	pub(super) async fn stop(&self) {
 		if let Some(manager) = self.manager.lock().await.take() {
 			debug!("Waiting for service manager...");
@@ -74,6 +72,41 @@ impl Manager {
 		}
 	}
 
+	#[tracing::instrument(name = "manager", level = "trace", skip_all)]
+	pub(super) async fn start(self: Arc<Self>) -> Result {
+		let mut workers = self.workers.lock().await;
+
+		debug!("Starting service manager...");
+		let self_ = self.clone();
+		_ = self.manager.lock().await.deref_mut().insert(
+			self.server
+				.runtime()
+				.spawn(async move { self_.worker().await }),
+		);
+
+		yield_now().await;
+		debug!("Starting service workers...");
+		for service in self.services.services() {
+			self.start_worker(&mut workers, &service)?;
+		}
+
+		yield_now().await;
+		debug!(
+			workers = workers.len(),
+			active = self.active.load(Ordering::Relaxed),
+			"Spawned service workers...",
+		);
+
+		debug_assert!(self.manager.lock().await.is_some(), "Manager task must be installed",);
+
+		Ok(())
+	}
+
+	#[tracing::instrument(
+		name = "manager",
+		level = INFO_SPAN_LEVEL,
+		skip_all,
+	)]
 	async fn worker(self: &Arc<Self>) -> Result {
 		loop {
 			let mut workers = self.workers.lock().await;
@@ -108,16 +141,35 @@ impl Manager {
 		}
 	}
 
+	#[tracing::instrument(
+		name = "finished",
+		level = "trace",
+		skip_all,
+		fields(
+			service = ?service.name(),
+			active = self.active.load(Ordering::Relaxed),
+		),
+	)]
 	#[expect(clippy::unused_self)]
 	fn handle_finished(
 		self: &Arc<Self>,
 		_workers: &mut WorkersLocked<'_>,
 		service: &Arc<dyn Service>,
 	) -> Result {
-		debug!("service {:?} worker finished", service.name());
+		debug!(name = service.name(), "Service worker finished...");
+
 		Ok(())
 	}
 
+	#[tracing::instrument(
+		name = "error",
+		level = "error",
+		skip_all,
+		fields(
+			service = ?service.name(),
+			active = self.active.load(Ordering::Relaxed),
+		),
+	)]
 	async fn handle_error(
 		self: &Arc<Self>,
 		workers: &mut WorkersLocked<'_>,
@@ -137,9 +189,12 @@ impl Manager {
 		}
 
 		let delay = Duration::from_millis(RESTART_DELAY_MS);
-		warn!("service {name:?} worker restarting after {} delay", time::pretty(delay));
-		sleep(delay).await;
+		warn!(
+			delay = ?time::pretty(delay),
+			"service {name:?} worker restarting after delay..."
+		);
 
+		sleep(delay).await;
 		self.start_worker(workers, service)
 	}
 
@@ -156,7 +211,7 @@ impl Manager {
 			);
 		}
 
-		debug!("Service {:?} worker starting...", service.name());
+		debug!(name = service.name(), "Service worker starting...");
 		workers.spawn_on(worker(service.clone(), self.clone()), self.server.runtime());
 
 		Ok(())
@@ -172,9 +227,17 @@ impl Manager {
 	parent = None,
 	level = "trace",
 	skip_all,
-	fields(service = %service.name()),
+	fields(
+		service = ?service.name(),
+		active = mgr.active.load(Ordering::Relaxed),
+	),
 )]
-async fn worker(service: Arc<dyn Service>, _mgr: Arc<Manager>) -> WorkerResult {
+async fn worker(service: Arc<dyn Service>, mgr: Arc<Manager>) -> WorkerResult {
+	mgr.active.fetch_add(1, Ordering::Relaxed);
+	defer! {{
+		mgr.active.fetch_sub(1, Ordering::Release);
+	}};
+
 	let service_ = Arc::clone(&service);
 	let result = AssertUnwindSafe(service_.worker())
 		.catch_unwind()

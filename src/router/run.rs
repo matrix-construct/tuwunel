@@ -1,6 +1,6 @@
 use std::{
 	sync::{Arc, Weak, atomic::Ordering},
-	time::Duration,
+	time::{Duration, SystemTime},
 };
 
 use futures::{FutureExt, pin_mut};
@@ -29,22 +29,29 @@ pub(crate) async fn run(services: Arc<Services>) -> Result {
 		.runtime()
 		.spawn(signal(server.clone(), handle.clone()));
 
-	let listener = services.config.listening.then_async(|| {
-		server
-			.runtime()
-			.spawn(serve::serve(services.clone(), handle))
-			.map(|res| res.map_err(Error::from).unwrap_or_else(Err))
-	});
+	let finished = services.poll().fuse();
+	let listener = services
+		.config
+		.listening
+		.then_async(|| {
+			server
+				.runtime()
+				.spawn(serve::serve(services.clone(), handle))
+				.map(|res| res.map_err(Error::from).unwrap_or_else(Err))
+		})
+		.fuse();
 
 	// Focal point
 	debug!("Running");
-	pin_mut!(listener);
-	let res = tokio::select! {
-		res = &mut listener => res.unwrap_or(Ok(())),
-		res = services.poll() => {
-			server.until_shutdown().await;
-			handle_services_finish(server, res, listener.await)
-		},
+	server
+		.running
+		.set(SystemTime::now())
+		.expect("server.running was previously set");
+
+	pin_mut!(listener, finished);
+	let result = futures::select! {
+		result = finished  => handle_services_finish(server, result, listener).await,
+		result = listener => handle_listener_finish(&services, result, finished).await,
 	};
 
 	// Join the signal handler before we leave.
@@ -55,7 +62,7 @@ pub(crate) async fn run(services: Arc<Services>) -> Result {
 	tuwunel_admin::fini(&services.admin).await;
 
 	debug_info!("Finish");
-	res
+	result
 }
 
 /// Async initializations
@@ -127,10 +134,42 @@ fn handle_shutdown(server: &Arc<Server>, handle: &ServerHandle) {
 	handle.graceful_shutdown(Some(timeout));
 }
 
-fn handle_services_finish(
+async fn handle_listener_finish(
+	services: &Arc<Services>,
+	result: Option<Result>,
+	manager: impl Future<Output = Result>,
+) -> Result {
+	debug!("Listeners finished: {result:?}");
+
+	let Some(result) = result else {
+		return match manager
+			.await
+			.inspect_err(|e| error!("Services manager task finished with error: {e}"))
+		{
+			| Ok(()) => services.server.until_shutdown().map(Ok).await,
+			| Err(e) => Err(e),
+		};
+	};
+
+	if services.server.is_running()
+		&& let Err(e) = services.server.shutdown()
+	{
+		error!("Failed to send shutdown signal: {e}");
+	}
+
+	if let Err(e) = manager.await {
+		error!("Services manager task finished with error: {e}");
+	}
+
+	result.inspect_err(|e| {
+		error!("Client listener task finished with error: {e}");
+	})
+}
+
+async fn handle_services_finish(
 	server: &Arc<Server>,
 	result: Result,
-	listener: Option<Result>,
+	listener: impl Future<Output = Option<Result>>,
 ) -> Result {
 	debug!("Service manager finished: {result:?}");
 
@@ -140,7 +179,7 @@ fn handle_services_finish(
 		error!("Failed to send shutdown signal: {e}");
 	}
 
-	if let Some(Err(e)) = listener {
+	if let Some(Err(e)) = listener.await {
 		error!("Client listener task finished with error: {e}");
 	}
 

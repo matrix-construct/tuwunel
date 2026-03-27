@@ -7,7 +7,10 @@ use std::{
 };
 
 use ruma::OwnedServerName;
-use tokio::{runtime, sync::broadcast};
+use tokio::{
+	runtime,
+	sync::{SetOnce, broadcast},
+};
 
 use crate::{Err, Result, config, config::Config, log::Logging, metrics::Metrics};
 
@@ -22,6 +25,11 @@ pub struct Server {
 
 	/// Timestamp server was started; used for uptime.
 	pub started: SystemTime,
+
+	/// Timestamp at the conclusion of startup when entering service. The main
+	/// task is the only writer. Tasks can also leverage `wait()` to be notified
+	/// for service (see: until_started()).
+	pub running: SetOnce<SystemTime>,
 
 	/// Reload/shutdown pending indicator; server is shutting down. This is an
 	/// observable used on shutdown and should not be modified.
@@ -59,6 +67,7 @@ impl Server {
 			name: config.server_name.clone(),
 			config: config::Manager::new(config),
 			started: SystemTime::now(),
+			running: SetOnce::new(),
 			stopping: AtomicBool::new(false),
 			reloading: AtomicBool::new(false),
 			restarting: AtomicBool::new(false),
@@ -114,6 +123,9 @@ impl Server {
 	}
 
 	#[inline]
+	pub async fn until_started(self: &Arc<Self>) { self.running.wait().await; }
+
+	#[inline]
 	pub async fn until_shutdown(self: &Arc<Self>) {
 		while self.is_running() {
 			self.signal.subscribe().recv().await.ok();
@@ -139,6 +151,9 @@ impl Server {
 
 	#[inline]
 	pub fn is_running(&self) -> bool { !self.is_stopping() }
+
+	#[inline]
+	pub fn is_starting(&self) -> bool { !self.running.initialized() }
 
 	#[inline]
 	pub fn is_stopping(&self) -> bool { self.stopping.load(Ordering::Relaxed) }
