@@ -218,13 +218,6 @@ impl Service {
 		const REFRESH_TIMEOUT: u64 = 30 * 1000;
 
 		if !self.services.server.config.allow_local_presence || self.services.db.is_read_only() {
-			debug!(
-				?user_id,
-				?new_state,
-				allow_local_presence = self.services.server.config.allow_local_presence,
-				read_only = self.services.db.is_read_only(),
-				"Skipping presence ping"
-			);
 			return Ok(());
 		}
 
