@@ -1427,6 +1427,15 @@
 #
 #prevent_media_downloads_from = []
 
+# Policy for handling media from federated servers that exceeds this
+# server's `max_request_size`.
+#
+# - "download": download and store locally (current behavior, default)
+# - "proxy": forward the content to the requesting client without saving
+# - "drop": reject the content with an error
+#
+#federation_media_policy = "download"
+
 # List of forbidden server names via regex patterns that we will block
 # incoming AND outgoing federation with, and block client room joins /
 # remote user invites.

@@ -1663,6 +1663,16 @@ pub struct Config {
 	#[serde(default, with = "serde_regex")]
 	pub prevent_media_downloads_from: RegexSet,
 
+	/// Policy for handling media from federated servers.
+	///
+	/// - "download": download and store locally (current behavior, default)
+	/// - "proxy": forward the content to the requesting client without saving
+	/// - "drop": reject the content with an error
+	///
+	/// default: "download"
+	#[serde(default)]
+	pub federation_media_policy: FederationMediaPolicy,
+
 	/// List of forbidden server names via regex patterns that we will block
 	/// incoming AND outgoing federation with, and block client room joins /
 	/// remote user invites.
@@ -3555,3 +3565,18 @@ fn default_max_join_attempts_per_join_request() -> usize { 3 }
 fn default_sso_grant_session_duration() -> Option<u64> { Some(300) }
 
 fn default_redaction_retention_seconds() -> u64 { 5_184_000 }
+
+/// Policy for handling media from federated servers.
+#[derive(Clone, Copy, Debug, Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FederationMediaPolicy {
+	/// Current behavior: download and store the file locally.
+	#[default]
+	Download,
+
+	/// Return the file to the client without saving it locally.
+	Proxy,
+
+	/// Reject the file entirely if it exceeds max_request_size.
+	Drop,
+}
