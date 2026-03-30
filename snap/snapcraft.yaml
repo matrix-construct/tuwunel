@@ -12,7 +12,7 @@ grade: stable
 confinement: strict
 
 apps:
-  tuwuneld:
+  daemon:
     command: tuwunel
     command-chain: [bin/check-config.sh]
     daemon: simple # This creates the background service
