@@ -1,0 +1,68 @@
+name: tuwunel
+base: core24 # Using core24 as the base for a modern Rust toolchain (1.94.0+)
+version: 'git'
+summary: High Performance Matrix Homeserver in Rust!
+description: |
+  Tuwunel is a featureful Matrix homeserver you can use instead of Synapse
+  with your favorite client, bridge or bot. It is written entirely in Rust to be
+  a scalable, low-cost, enterprise-ready, community-driven alternative, fully 
+  implementing the Matrix Specification.
+
+grade: stable
+confinement: strict
+
+apps:
+  tuwunel:
+    command: tuwunel
+    command-chain: [bin/check-config.sh]
+    daemon: simple # This creates the background service
+    install-mode: enable # Automatically start the service when the snap is installed
+    plugs:
+      - network
+      - network-bind
+    environment:
+      # By default, Snap services are heavily sandboxed.
+      # You can point Tuwunel to look for its configuration inside the snap's data directory.
+      TUWUNEL_CONFIG: $SNAP_COMMON/tuwunel.toml
+
+  tuwunel-cli:
+    command: tuwunel
+    plugs:
+      - network
+      - network-bind
+    environment:
+      # By default, Snap services are heavily sandboxed.
+      # You can point Tuwunel to look for its configuration inside the snap's data directory.
+      TUWUNEL_CONFIG: $SNAP_COMMON/tuwunel.toml
+
+  init:
+    command: tuwunel-init
+    plugs:
+      - network
+      - network-bind
+    environment:
+      TUWUNEL_CONFIG: $SNAP_COMMON/tuwunel.toml
+
+parts:
+  wrapper:
+    plugin: dump
+    source: snap/local
+
+  tuwunel:
+    after: [wrapper]
+    plugin: rust
+    source: https://github.com/matrix-construct/tuwunel.git
+    source-type: git
+    build-packages:
+      - build-essential
+      - pkg-config
+      - libssl-dev
+      - liburing-dev
+      - clang
+      - libclang-dev
+      - cmake
+      - make
+    stage-packages:
+      - liburing2
+    # The rust plugin automatically runs `cargo build --release`
+    # and installs the resulting binaries into the snap.
