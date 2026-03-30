@@ -12,7 +12,7 @@ grade: stable
 confinement: strict
 
 apps:
-  tuwunel:
+  tuwuneld:
     command: tuwunel
     command-chain: [bin/check-config.sh]
     daemon: simple # This creates the background service
@@ -25,7 +25,7 @@ apps:
       # You can point Tuwunel to look for its configuration inside the snap's data directory.
       TUWUNEL_CONFIG: $SNAP_COMMON/tuwunel.toml
 
-  tuwunel-cli:
+  tuwunel:
     command: tuwunel
     plugs:
       - network
