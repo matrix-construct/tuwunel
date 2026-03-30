@@ -47,12 +47,13 @@ parts:
   wrapper:
     plugin: dump
     source: snap/local
+    organize:
+      check-config.sh: bin/check-config.sh
 
   tuwunel:
     after: [wrapper]
     plugin: rust
-    source: https://github.com/matrix-construct/tuwunel.git
-    source-type: git
+    source: .
     build-packages:
       - build-essential
       - pkg-config

@@ -80,7 +80,6 @@ fn main() -> Result<()> {
                 return Ok(Validation::Invalid("Registration token cannot be empty.".into()));
             }
             let ent = estimate_entropy(input.trim());
-            let class = classify_entropy(ent);
             if ent < 40.0 {
                 Ok(Validation::Invalid("Registration token entropy is Poor. Please choose a stronger secure token.".into()))
             } else {
@@ -128,8 +127,8 @@ fn main() -> Result<()> {
     let admin_password = admin_password.trim();
     println!("Admin password entropy: {}", classify_entropy(estimate_entropy(admin_password)));
 
-    // Read the build-time generated config example
-    let mut config_text = include_str!("../../tuwunel-example.toml").to_string();
+    // Read the build-time generated config example (this embeds the file directly into the binary at compile time!)
+    let mut config_text = include_str!("../../../tuwunel-example.toml").to_string();
     
     config_text = config_text.replace(
         "#server_name =\n",
