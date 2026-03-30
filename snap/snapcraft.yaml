@@ -21,7 +21,7 @@ apps:
       - network
       - network-bind
     environment:
-      # By default, Snap services are heavily sandboxed.
+      # By default, snap services are heavily sandboxed.
       # You can point Tuwunel to look for its configuration inside the snap's data directory.
       TUWUNEL_CONFIG: $SNAP_COMMON/tuwunel.toml
 
@@ -31,7 +31,7 @@ apps:
       - network
       - network-bind
     environment:
-      # By default, Snap services are heavily sandboxed.
+      # By default, snap services are heavily sandboxed.
       # You can point Tuwunel to look for its configuration inside the snap's data directory.
       TUWUNEL_CONFIG: $SNAP_COMMON/tuwunel.toml
 

@@ -139,6 +139,14 @@ fn main() -> Result<()> {
         &format!("registration_token = \"{}\"\n", registration_token)
     );
 
+    // If running inside a Snap, we must change the default database path to the writable SNAP_COMMON directory
+    if let Ok(snap_common) = env::var("SNAP_COMMON") {
+        config_text = config_text.replace(
+            "#database_path = \"/var/lib/tuwunel\"",
+            &format!("database_path = \"{snap_common}\"")
+        );
+    }
+
     fs::write(&config_path, config_text).context("Failed to write tuwunel config file")?;
     println!("\nConfiguration file successfully written to {}", config_path.display());
     
