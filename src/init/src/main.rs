@@ -51,8 +51,8 @@ fn main() -> Result<()> {
         }
     }
 
-    println!("Welcome to Tuwunel initialization.");
-    println!("We will now set up the minimum required configuration items and create an initial admin user.\n");
+    println!("Tuwunel initialization.");
+    println!("We will create a minimal configuration file for your matrix server.\n");
     
     let domain_regex = Regex::new(r"^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z]{2,})+$").unwrap();
 
@@ -62,7 +62,7 @@ fn main() -> Result<()> {
             if input.trim().is_empty() {
                 Ok(Validation::Invalid("Server name cannot be empty.".into()))
             } else if !domain_regex.is_match(input.trim()) {
-                Ok(Validation::Invalid("This does not look like a proper domain name. Please enter a valid fully qualified domain name.".into()))
+                Ok(Validation::Invalid("Please enter a valid fully qualified domain name.".into()))
             } else {
                 Ok(Validation::Valid)
             }
@@ -81,9 +81,9 @@ fn main() -> Result<()> {
             }
             let ent = estimate_entropy(input.trim());
             if ent < 40.0 {
-                Ok(Validation::Invalid("Registration token entropy is Poor. Please choose a stronger secure token.".into()))
+                Ok(Validation::Invalid("Registration is insecure. Please choose a more secure token.".into()))
             } else {
-                Ok(Validation::Valid) // Only valid if Ok, Good or Excellent
+                Ok(Validation::Valid)
             }
         })
         .prompt()
@@ -92,40 +92,66 @@ fn main() -> Result<()> {
     let registration_token = registration_token.trim();
     println!("Registration token entropy: {}", classify_entropy(estimate_entropy(registration_token)));
 
-    println!("\nNow we will create the initial server administrator.");
-    let admin_username = Text::new("Admin username (without domain portion):")
+    let create_user_decision = Text::new("Would you like to create an initial admin user? [Yes/No/Quit]:")
         .with_validator(|input: &str| {
-            if input.trim().is_empty() {
-                Ok(Validation::Invalid("Admin username cannot be empty.".into()))
-            } else if input.contains(':') || input.contains('@') {
-                Ok(Validation::Invalid("Just the local username, no @ or domain.".into()))
-            } else {
-                Ok(Validation::Valid)
+            let s = input.trim().to_lowercase();
+            match s.as_str() {
+                "y" | "yes" | "n" | "no" | "q" | "quit" | "" => Ok(Validation::Valid),
+                _ => Ok(Validation::Invalid("Please enter yes, no, or quit.".into()))
             }
         })
         .prompt()
-        .context("Failed to read admin username")?;
+        .context("Failed to read user creation decision")?;
         
-    let admin_username = admin_username.trim();
+    let decision = create_user_decision.trim().to_lowercase();
+    if decision == "q" || decision == "quit" {
+        println!("Exiting without writing configuration.");
+        return Ok(());
+    }
 
-    let admin_password = Password::new("Admin password:")
-        .with_display_mode(PasswordDisplayMode::Masked)
-        .with_validator(move |input: &str| {
-            if input.trim().is_empty() {
-                return Ok(Validation::Invalid("Admin password cannot be empty.".into()));
-            }
-            let ent = estimate_entropy(input.trim());
-            if ent < 40.0 {
-                Ok(Validation::Invalid(format!("Admin password entropy is {}. Please choose a stronger password.", classify_entropy(ent)).into()))
-            } else {
-                Ok(Validation::Valid)
-            }
-        })
-        .prompt()
-        .context("Failed to read admin password")?;
-        
-    let admin_password = admin_password.trim();
-    println!("Admin password entropy: {}", classify_entropy(estimate_entropy(admin_password)));
+    let create_user = decision == "y" || decision == "yes" || decision == "";
+
+    let mut admin_username_opt = None;
+    let mut admin_password_opt = None;
+
+    if create_user {
+        let admin_username = Text::new("Admin username (without domain portion, eg. 'tom'):")
+            .with_validator(|input: &str| {
+                if input.trim().is_empty() {
+                    Ok(Validation::Invalid("Admin username cannot be empty.".into()))
+                } else if input.contains(':') || input.contains('@') {
+                    Ok(Validation::Invalid("Just the local username, no @ or domain.".into()))
+                } else {
+                    Ok(Validation::Valid)
+                }
+            })
+            .prompt()
+            .context("Failed to read admin username")?;
+            
+        let admin_username = admin_username.trim().to_string();
+
+        let admin_password = Password::new("Admin password:")
+            .with_display_mode(PasswordDisplayMode::Masked)
+            .with_validator(move |input: &str| {
+                if input.trim().is_empty() {
+                    return Ok(Validation::Invalid("Admin password cannot be empty.".into()));
+                }
+                let ent = estimate_entropy(input.trim());
+                if ent < 40.0 {
+                    Ok(Validation::Invalid(format!("Admin password entropy is {}. Please choose a stronger password.", classify_entropy(ent)).into()))
+                } else {
+                    Ok(Validation::Valid)
+                }
+            })
+            .prompt()
+            .context("Failed to read admin password")?;
+            
+        let admin_password = admin_password.trim().to_string();
+        println!("Admin password security: {}", classify_entropy(estimate_entropy(&admin_password)));
+
+        admin_username_opt = Some(admin_username);
+        admin_password_opt = Some(admin_password);
+    }
 
     // Read the build-time generated config example (this embeds the file directly into the binary at compile time!)
     let mut config_text = include_str!("../../../tuwunel-example.toml").to_string();
@@ -149,6 +175,12 @@ fn main() -> Result<()> {
 
     fs::write(&config_path, config_text).context("Failed to write tuwunel config file")?;
     println!("\nConfiguration file successfully written to {}", config_path.display());
+
+    if !create_user {
+        println!("\nInitialization Complete! \u{1F389}");
+        println!("The daemon can now be started. If using snap, the service will pick up the config momentarily.");
+        return Ok(());
+    }
     
     // Attempt to invoke the Daemon binary to create the admin user
     // We expect `tuwunel` binary to be situated in the exact same directory as this tool.
@@ -163,15 +195,15 @@ fn main() -> Result<()> {
     }
 
     // Pass the config path directly to tuwunel as --config
-    println!("Initializing database and creating the first administrator...");
+    println!("Initializing database and to create the first administrator...");
+    let admin_username = admin_username_opt.unwrap();
+    let admin_password = admin_password_opt.unwrap();
     let status = Command::new(&tuwunel_bin)
         .arg("--config")
         .arg(&config_path)
         .arg("--maintenance")
         .arg("--execute")
         .arg(format!("users create_user @{}:{} {}", admin_username, server_name, admin_password))
-        //.arg("--execute")
-        //.arg(format!("users make_user_admin {}", admin_username))
         .arg("--execute")
         .arg("server shutdown")
         .status()
@@ -179,8 +211,12 @@ fn main() -> Result<()> {
 
     if status.success() {
         println!("\nInitialization Complete! \u{1F389}");
-        println!("The daemon can now be started. If using snap, the service will pick up the config momentarily.");
-        println!("You can sign into the server using:");
+        println!("The daemon can now be started, or will start automatically if you installed the Tuwunel snap.");
+        println!("It will by default listen only on 127.0.0.1:8008, you will probably want to direct traffic");
+        println!("there by reverse proxy. See the docs for more information.");
+        println!("");
+        println!("You can sign into the server at:");
+        println!("");
         println!("  Homeserver URL: https://{server_name}");
         println!("  Username: @{admin_username}:{server_name}");
         println!("  Password: <the password you provided>");
