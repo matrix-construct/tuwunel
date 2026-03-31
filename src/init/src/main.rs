@@ -169,7 +169,7 @@ fn main() -> Result<()> {
     if let Ok(snap_common) = env::var("SNAP_COMMON") {
         config_text = config_text.replace(
             "#database_path = \"/var/lib/tuwunel\"",
-            &format!("database_path = \"{snap_common}\"")
+            &format!("database_path = \"{snap_common}/db\"")
         );
     }
 
