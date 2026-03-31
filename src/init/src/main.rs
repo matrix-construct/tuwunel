@@ -47,7 +47,22 @@ fn main() -> Result<()> {
     
     if let Some(parent) = config_path.parent() {
         if !parent.as_os_str().is_empty() && !parent.exists() {
-            fs::create_dir_all(parent).context("Failed to create parent directories")?;
+            fs::create_dir_all(parent).map_err(|e| {
+                anyhow::anyhow!("Unable to write to {}, perhaps try sudo. ({})", config_path.display(), e)
+            })?;
+        }
+    }
+
+    match std::fs::OpenOptions::new().write(true).create_new(true).open(&config_path) {
+        Ok(_) => {
+            let _ = std::fs::remove_file(&config_path);
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            println!("Configuration file already exists at {}. Exiting gracefully.", config_path.display());
+            return Ok(());
+        }
+        Err(e) => {
+            return Err(anyhow::anyhow!("Unable to write to {}, perhaps try sudo. ({})", config_path.display(), e));
         }
     }
 
