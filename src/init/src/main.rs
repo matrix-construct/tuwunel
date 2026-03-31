@@ -189,9 +189,14 @@ fn main() -> Result<()> {
     }
 
     if let Ok(snap_data) = env::var("SNAP_DATA") {
+        let backup_path = std::path::Path::new(&snap_data)
+            .parent()
+            .map(|p| p.join("current").join("db.bak").display().to_string())
+            .unwrap_or_else(|| format!("{snap_data}/db.bak"));
+
         config_text = config_text.replace(
             "#database_backup_path =\n",
-            &format!("database_backup_path = \"{snap_data}/db.bak\"\n")
+            &format!("database_backup_path = \"{backup_path}\"\n")
         );
     }
 
