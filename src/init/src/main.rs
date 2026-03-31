@@ -188,6 +188,13 @@ fn main() -> Result<()> {
         );
     }
 
+    if let Ok(snap_data) = env::var("SNAP_DATA") {
+        config_text = config_text.replace(
+            "#database_backup_path =\n",
+            &format!("database_backup_path = \"{snap_data}/db.bak\"\n")
+        );
+    }
+
     fs::write(&config_path, config_text).context("Failed to write tuwunel config file")?;
     println!("\nConfiguration file successfully written to {}", config_path.display());
 
