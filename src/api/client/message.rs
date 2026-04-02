@@ -274,15 +274,10 @@ where
 		return false;
 	}
 
-	let ignored_server = services
-		.config
-		.is_forbidden_remote_server_name(event.sender().server_name());
-
-	ignored_server
-		|| services
-			.users
-			.user_is_ignored(event.sender(), user_id)
-			.await
+	services
+		.users
+		.user_is_ignored(event.sender(), user_id)
+		.await
 }
 
 #[inline]

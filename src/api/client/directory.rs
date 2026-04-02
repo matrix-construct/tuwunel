@@ -473,9 +473,6 @@ fn check_server_banned(services: &Services, server: Option<&ServerName>) -> Resu
 		.config
 		.forbidden_remote_room_directory_server_names
 		.is_match(server.host())
-		|| services
-			.config
-			.is_forbidden_remote_server_name(server)
 	{
 		return Err!(Request(Forbidden("Server is banned on this homeserver.")));
 	}
