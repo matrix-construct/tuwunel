@@ -63,25 +63,10 @@ pub(crate) async fn banned_room_check(
 		return Ok(());
 	}
 
-	// room id is banned ...
-	if services.metadata.is_banned(room_id).await
-		// ... or legacy room id server is banned ...
-		|| room_id.server_name().is_some_and(|server_name| {
-			services
-				.config
-				.is_forbidden_remote_server_name(server_name)
-		})
-		// ... or alias server is banned
-		|| orig_room_id.is_some_and(|orig_room_id| {
-			orig_room_id.server_name().is_some_and(|orig_server_name| {
-			services
-				.config
-				.is_forbidden_remote_server_name(orig_server_name)
-		})
-	}) {
+	if services.metadata.is_banned(room_id).await {
 		warn!(
 			"User {user_id} who is not an admin attempted to send an invite for or attempted to \
-			 join a banned room or banned room server name: {room_id}"
+			 join a banned room: {room_id}"
 		);
 
 		maybe_deactivate(services, user_id, client_ip)
