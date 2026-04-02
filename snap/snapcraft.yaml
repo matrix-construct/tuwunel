@@ -74,5 +74,7 @@ parts:
       - make
     stage-packages:
       - liburing2
+    prime:
+      - "-usr/lib/*/liburing-ffi.so*"
     # The rust plugin automatically runs `cargo build --release`
     # and installs the resulting binaries into the snap.
