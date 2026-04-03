@@ -22,7 +22,7 @@ use tuwunel_core::{
 };
 use tuwunel_service::{
 	Services,
-	media::{CACHE_CONTROL_IMMUTABLE, CORP_CROSS_ORIGIN, Dim, FileMeta, MXC_LENGTH},
+	media::{CACHE_CONTROL_IMMUTABLE, CORP_CROSS_ORIGIN, Dim, MXC_LENGTH, Media},
 };
 
 use crate::Ruma;
@@ -177,14 +177,14 @@ pub(crate) async fn get_content_thumbnail_route(
 		media_id: &body.media_id,
 	};
 
-	let FileMeta {
+	let Media {
 		content,
 		content_type,
 		content_disposition,
 	} = fetch_thumbnail(&services, &mxc, user, body.timeout_ms, &dim).await?;
 
 	Ok(get_content_thumbnail::v1::Response {
-		file: content.expect("entire file contents"),
+		file: content,
 		content_type: content_type.map(Into::into),
 		cross_origin_resource_policy: Some(CORP_CROSS_ORIGIN.into()),
 		cache_control: Some(CACHE_CONTROL_IMMUTABLE.into()),
@@ -213,14 +213,14 @@ pub(crate) async fn get_content_route(
 		media_id: &body.media_id,
 	};
 
-	let FileMeta {
+	let Media {
 		content,
 		content_type,
 		content_disposition,
 	} = fetch_file(&services, &mxc, user, body.timeout_ms, None).await?;
 
 	Ok(get_content::v1::Response {
-		file: content.expect("entire file contents"),
+		file: content,
 		content_type: content_type.map(Into::into),
 		cross_origin_resource_policy: Some(CORP_CROSS_ORIGIN.into()),
 		cache_control: Some(CACHE_CONTROL_IMMUTABLE.into()),
@@ -249,14 +249,14 @@ pub(crate) async fn get_content_as_filename_route(
 		media_id: &body.media_id,
 	};
 
-	let FileMeta {
+	let Media {
 		content,
 		content_type,
 		content_disposition,
 	} = fetch_file(&services, &mxc, user, body.timeout_ms, Some(&body.filename)).await?;
 
 	Ok(get_content_as_filename::v1::Response {
-		file: content.expect("entire file contents"),
+		file: content,
 		content_type: content_type.map(Into::into),
 		cross_origin_resource_policy: Some(CORP_CROSS_ORIGIN.into()),
 		cache_control: Some(CACHE_CONTROL_IMMUTABLE.into()),
@@ -318,8 +318,8 @@ async fn fetch_thumbnail(
 	user: &UserId,
 	timeout_ms: Duration,
 	dim: &Dim,
-) -> Result<FileMeta> {
-	let FileMeta {
+) -> Result<Media> {
+	let Media {
 		content,
 		content_type,
 		content_disposition,
@@ -331,7 +331,7 @@ async fn fetch_thumbnail(
 		None,
 	));
 
-	Ok(FileMeta {
+	Ok(Media {
 		content,
 		content_type,
 		content_disposition,
@@ -344,12 +344,12 @@ async fn fetch_file(
 	user: &UserId,
 	timeout_ms: Duration,
 	filename: Option<&str>,
-) -> Result<FileMeta> {
-	let FileMeta {
+) -> Result<Media> {
+	let Media {
 		content,
 		content_type,
 		content_disposition,
-	} = fetch_file_meta(services, mxc, user, timeout_ms).await?;
+	} = fetch_media(services, mxc, user, timeout_ms).await?;
 
 	let content_disposition = Some(make_content_disposition(
 		content_disposition.as_ref(),
@@ -357,7 +357,7 @@ async fn fetch_file(
 		filename,
 	));
 
-	Ok(FileMeta {
+	Ok(Media {
 		content,
 		content_type,
 		content_disposition,
@@ -370,13 +370,13 @@ async fn fetch_thumbnail_meta(
 	user: &UserId,
 	timeout_ms: Duration,
 	dim: &Dim,
-) -> Result<FileMeta> {
-	if let Some(filemeta) = services
+) -> Result<Media> {
+	if let Some(media) = services
 		.media
 		.get_thumbnail_with_timeout(mxc, dim, timeout_ms)
 		.await?
 	{
-		return Ok(filemeta);
+		return Ok(media);
 	}
 
 	if services.globals.server_is_ours(mxc.server_name) {
@@ -389,18 +389,18 @@ async fn fetch_thumbnail_meta(
 		.await
 }
 
-async fn fetch_file_meta(
+async fn fetch_media(
 	services: &Services,
 	mxc: &Mxc<'_>,
 	user: &UserId,
 	timeout_ms: Duration,
-) -> Result<FileMeta> {
-	if let Some(filemeta) = services
+) -> Result<Media> {
+	if let Some(media) = services
 		.media
 		.get_with_timeout(mxc, timeout_ms)
 		.await?
 	{
-		return Ok(filemeta);
+		return Ok(media);
 	}
 
 	if services.globals.server_is_ours(mxc.server_name) {

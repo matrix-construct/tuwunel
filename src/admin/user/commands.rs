@@ -289,10 +289,6 @@ pub(super) async fn force_join_list_of_local_users(
 		);
 	}
 
-	let Ok(admin_room) = self.services.admin.get_admin_room().await else {
-		return Err!("There is not an admin room to check for server admins.",);
-	};
-
 	let (room_id, servers) = self
 		.services
 		.alias
@@ -306,24 +302,6 @@ pub(super) async fn force_join_list_of_local_users(
 		.await
 	{
 		return Err!("We are not joined in this room.");
-	}
-
-	let server_admins: Vec<_> = self
-		.services
-		.state_cache
-		.active_local_users_in_room(&admin_room)
-		.map(ToOwned::to_owned)
-		.collect()
-		.await;
-
-	if !self
-		.services
-		.state_cache
-		.room_members(&room_id)
-		.ready_any(|user_id| server_admins.contains(&user_id.to_owned()))
-		.await
-	{
-		return Err!("There is not a single server admin in the room.",);
 	}
 
 	let usernames = self
@@ -414,10 +392,6 @@ pub(super) async fn force_join_all_local_users(
 		);
 	}
 
-	let Ok(admin_room) = self.services.admin.get_admin_room().await else {
-		return Err!("There is not an admin room to check for server admins.",);
-	};
-
 	let (room_id, servers) = self
 		.services
 		.alias
@@ -431,24 +405,6 @@ pub(super) async fn force_join_all_local_users(
 		.await
 	{
 		return Err!("We are not joined in this room.");
-	}
-
-	let server_admins: Vec<_> = self
-		.services
-		.state_cache
-		.active_local_users_in_room(&admin_room)
-		.map(ToOwned::to_owned)
-		.collect()
-		.await;
-
-	if !self
-		.services
-		.state_cache
-		.room_members(&room_id)
-		.ready_any(|user_id| server_admins.contains(&user_id.to_owned()))
-		.await
-	{
-		return Err!("There is not a single server admin in the room.",);
 	}
 
 	let mut failed_joins: usize = 0;

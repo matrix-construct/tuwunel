@@ -23,6 +23,7 @@ use ruma::{
 };
 use tuwunel_core::{
 	Result, at, err, error, is_equal_to,
+	itertools::Itertools,
 	matrix::{Event, StateKey, pdu::PduCount},
 	ref_at,
 	utils::{
@@ -194,18 +195,29 @@ async fn handle_room(
 		.iter()
 		.any(is_equal_to!(&(StateEventType::RoomMember, "$LAZY".into())));
 
-	let mut timeline_senders: Vec<_> = timeline_pdus
+	let timeline_senders = timeline_pdus
 		.iter()
 		.filter(|_| lazy)
 		.map(ref_at!(1))
 		.map(Event::sender)
+		.map(UserId::as_str);
+
+	let timeline_member_targets = timeline_pdus
+		.iter()
+		.filter(|_| lazy)
+		.map(ref_at!(1))
+		.filter(|event| *event.event_type() == TimelineEventType::RoomMember)
+		.filter_map(Event::state_key);
+
+	let timeline_senders: Vec<_> = timeline_senders
+		.chain(timeline_member_targets)
+		.sorted_unstable()
+		.dedup()
 		.collect();
 
-	timeline_senders.sort();
-	timeline_senders.dedup();
 	let timeline_senders = timeline_senders
 		.iter()
-		.map(|sender| (StateEventType::RoomMember, StateKey::from_str(sender.as_str())))
+		.map(|sender| (StateEventType::RoomMember, StateKey::from_str(sender)))
 		.stream();
 
 	let wildcard_state = required_state

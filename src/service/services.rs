@@ -16,7 +16,7 @@ use crate::{
 	rooms::{self, retention},
 	sending, server_keys,
 	service::{Args, Service},
-	sync, transaction_ids, uiaa, users,
+	storage, sync, transaction_ids, uiaa, users,
 };
 
 pub struct Services {
@@ -48,6 +48,7 @@ pub struct Services {
 	pub state_accessor: Arc<rooms::state_accessor::Service>,
 	pub state_cache: Arc<rooms::state_cache::Service>,
 	pub state_compressor: Arc<rooms::state_compressor::Service>,
+	pub storage: Arc<storage::Service>,
 	pub threads: Arc<rooms::threads::Service>,
 	pub timeline: Arc<rooms::timeline::Service>,
 	pub typing: Arc<rooms::typing::Service>,
@@ -108,6 +109,7 @@ pub async fn build(server: Arc<Server>) -> Result<Arc<Self>> {
 		state_accessor: rooms::state_accessor::Service::build(&args)?,
 		state_cache: rooms::state_cache::Service::build(&args)?,
 		state_compressor: rooms::state_compressor::Service::build(&args)?,
+		storage: storage::Service::build(&args)?,
 		threads: rooms::threads::Service::build(&args)?,
 		timeline: rooms::timeline::Service::build(&args)?,
 		typing: rooms::typing::Service::build(&args)?,
@@ -169,6 +171,7 @@ pub(crate) fn services(&self) -> impl Iterator<Item = Arc<dyn Service>> + Send {
 		cast!(self.state_accessor),
 		cast!(self.state_cache),
 		cast!(self.state_compressor),
+		cast!(self.storage),
 		cast!(self.threads),
 		cast!(self.timeline),
 		cast!(self.typing),

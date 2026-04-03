@@ -1,18 +1,17 @@
 pub mod check;
+mod identity_provider_serde;
 pub mod manager;
+mod net;
 pub mod proxy;
 pub mod room_version;
 
 use std::{
 	collections::{BTreeMap, BTreeSet},
-	net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+	net::IpAddr,
 	path::{Path, PathBuf},
 };
 
-use either::{
-	Either,
-	Either::{Left, Right},
-};
+use either::{Either, Either::Left};
 use figment::providers::{Data, Env, Format, Toml};
 pub use figment::{Figment, value::Value as FigmentValue};
 use itertools::Itertools;
@@ -25,8 +24,11 @@ use serde::{Deserialize, de::IgnoredAny};
 use tuwunel_macros::config_example_generator;
 use url::Url;
 
-use self::proxy::ProxyConfig;
 pub use self::{check::check, manager::Manager};
+use self::{
+	net::{ListeningAddr, ListeningPort},
+	proxy::ProxyConfig,
+};
 use crate::{
 	Err, Result, err,
 	utils::{self, sys},
@@ -57,7 +59,7 @@ use crate::{
 ### https://tuwunel.chat/configuration.html
 "#,
 	ignore = "catchall well_known tls blurhashing allow_invalid_tls_certificates ldap jwt \
-	          appservice identity_provider"
+	          appservice identity_provider storage_provider"
 )]
 pub struct Config {
 	/// The server_name is the pretty name of this server. It is used as a
@@ -1654,6 +1656,46 @@ pub struct Config {
 	#[serde(default)]
 	pub prune_missing_media: bool,
 
+	/// List of storage providers to use for media. Providers can be configured
+	/// below in respective sections designated by
+	/// `global.storage_provider.<NAME>.<brand>` where `NAME` can be listed
+	/// here.
+	///
+	/// For advanced features and future extensions involving multiple providers
+	/// the list may contain multiple entries. You MUST take note of other
+	/// configuration options when listing multiple providers or resource
+	/// duplication costs and poor performance can result.
+	///
+	/// The list defaults to `["media"]` which is an implicit storage provider
+	/// representing the media directory on the local filesystem. It can be
+	/// altered by configuring `global.storage_provider.media.local` explicitly
+	/// or disabled by omitting it from this list entirely. Users with existing
+	/// deployments are advised to continue listing "media" as a fallback along
+	/// with their new provider.
+	///
+	/// default: ["media"]
+	#[serde(default = "default_media_storage_providers")]
+	pub media_storage_providers: BTreeSet<String>,
+
+	/// List of configured storage providers where new media will be sent. When
+	/// this list is not explicitly configured all entries in
+	/// `media_storage_providers` are used as default.
+	///
+	/// This list is important for users passively migrating to a new media
+	/// storage provider by only writing to one while querying the other as a
+	/// fallback.
+	///
+	/// For example:
+	///
+	/// `media_storage_providers = ["media", "media_on_s3"]`
+	/// `store_media_on_providers = ["media_on_s3"]`
+	///
+	/// Entries in this list must also be listed in `media_storage_providers`.
+	///
+	/// default: []
+	#[serde(default)]
+	pub store_media_on_providers: BTreeSet<String>,
+
 	/// Vector list of regex patterns of server names that tuwunel will refuse
 	/// to download remote media from.
 	///
@@ -1678,6 +1720,23 @@ pub struct Config {
 	/// default: []
 	#[serde(default, with = "serde_regex")]
 	pub forbidden_remote_server_names: RegexSet,
+
+	/// List of allowed server names via regex patterns. This is an allow-list
+	/// rather than a deny-list with all the same details as its counterpart in
+	/// `forbidden_remote_server_names`.
+	///
+	/// This feature becomes active when this list has one or more entries;
+	/// everything not matching is denied. By default it is empty and inactive.
+	///
+	/// Entries in `forbidden_remote_server_names` are still applied after
+	/// this is applied. This allows you to match e.g. "*\.example\.com" here
+	/// while still singling out "bad\.example\.com" for exclusion.
+	///
+	/// example: ["badserver\.tld$", "badphrase", "19dollarfortnitecards"]
+	///
+	/// default: []
+	#[serde(default, with = "serde_regex")]
+	pub allowed_remote_server_names: RegexSet,
 
 	/// List of forbidden server names via regex patterns that we will block all
 	/// outgoing federated room directory requests for. Useful for preventing
@@ -2044,9 +2103,22 @@ pub struct Config {
 	/// - "smoke" performs a shutdown after startup admin commands rather than
 	///   hanging on client handling.
 	///
-	/// default: []
+	/// display: hidden
 	#[serde(default)]
 	pub test: BTreeSet<String>,
+
+	/// Indicates the server has started in maintenance mode. Historically
+	/// maintenance mode has been enabled by the command line argument
+	/// `--maintenance` which then sets various configuration items such as
+	/// `listening=false` among others. That is still the case. This option was
+	/// only added as a single source of truth that `--maintenance` mode is
+	/// active.
+	///
+	/// This option must never be set manually.
+	///
+	/// display: hidden
+	#[serde(default)]
+	pub maintenance: bool,
 
 	/// Controls whether admin room notices like account registrations, password
 	/// changes, account deactivations, room directory publications, etc will be
@@ -2314,6 +2386,10 @@ pub struct Config {
 	// external structure; separate section
 	#[serde(default)]
 	pub blurhashing: BlurhashConfig,
+
+	// external structure; separate section
+	#[serde(default)]
+	pub storage_provider: BTreeMap<String, StorageProvider>,
 
 	// external structure; separate section
 	#[serde(default)]
@@ -2906,50 +2982,136 @@ impl IdentityProvider {
 	}
 }
 
-mod identity_provider_serde {
-	use std::{collections::BTreeMap, fmt, marker::PhantomData};
+#[derive(Clone, Debug, Default, Deserialize)]
+pub enum StorageProvider {
+	#[expect(non_camel_case_types)]
+	local(StorageProviderLocal),
+	S3(StorageProviderS3),
+	#[default]
+	None,
+}
 
-	use serde::{
-		Deserializer, de,
-		de::{MapAccess, SeqAccess},
-	};
+#[derive(Clone, Debug, Default, Deserialize)]
+#[config_example_generator(
+	filename = "tuwunel-example.toml",
+	section = "global.storage_provider.<ID>.local"
+)]
+pub struct StorageProviderLocal {
+	/// Absolute path to this local filesystem storage provider. Technically the
+	/// provider exists at the filesystem root, and the base_path is prefixed to
+	/// all objects.
+	#[serde(alias = "path")]
+	pub base_path: String,
 
-	struct Visitor(PhantomData<IdentityProviders>);
+	/// Creates the directory on the local filesystem if missing. This is not
+	/// recommended to prevent misconfigured environments and missing mounts
+	/// from silently succeeding.
+	#[serde(default)]
+	pub create_if_missing: bool,
 
-	type IdentityProviders = BTreeMap<String, super::IdentityProvider>;
+	/// Toggles the preservation of a directory after its last file contents are
+	/// removed.
+	#[serde(default = "true_fn")]
+	pub delete_empty_directories: bool,
 
-	pub(super) fn deserialize<'de, D>(de: D) -> Result<IdentityProviders, D::Error>
-	where
-		D: Deserializer<'de>,
-	{
-		de.deserialize_any(Visitor(PhantomData))
-	}
+	/// Enables checks performed at startup determining the usability of the
+	/// local directory. Failures will abort the server's startup.
+	///
+	/// default: true
+	#[serde(default = "true_fn")]
+	pub startup_check: bool,
+}
 
-	impl<'de> de::Visitor<'de> for Visitor {
-		type Value = IdentityProviders;
+#[derive(Clone, Debug, Default, Deserialize)]
+#[config_example_generator(
+	filename = "tuwunel-example.toml",
+	section = "global.storage_provider.<ID>.S3"
+)]
+pub struct StorageProviderS3 {
+	/// Supply an s3 URL e.g. "s3://<bucket>/<path>". These URLs may contain one
+	/// or all of `bucket`, `region`, and `path` . When not supplied, such
+	/// additional items can be supplied below individually.
+	pub url: Option<String>,
 
-		fn expecting(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
-			fmt.write_str("Mapping or Sequence")
-		}
+	/// The name of the S3 bucket. e.g. "bucketname-123456789-us-west-2-an".
+	pub bucket: Option<String>,
 
-		fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
-			let mut ret = Self::Value::new();
-			while let Some((k, v)) = map.next_entry()? {
-				ret.insert(k, v);
-			}
+	/// The region of the S3 bucket. e.g. "us-west-2".
+	///
+	/// default: "us-east-1"
+	pub region: Option<String>,
 
-			Ok(ret)
-		}
+	/// Your amazon IAM Key ID with access granted to this bucket.
+	/// e.g. "ABCDEFG1X1ZZYYXXWWVV"
+	pub key: Option<String>,
 
-		fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
-			let mut ret = Self::Value::new();
-			while let Some(v) = seq.next_element()? {
-				ret.insert(ret.len().to_string(), v);
-			}
+	/// The secret key component which is approx 40 characters of base64.
+	///
+	/// default:
+	/// display: sensitive
+	#[serde(skip_serializing)]
+	pub secret: Option<String>,
 
-			Ok(ret)
-		}
-	}
+	/// Optional path prefix within the bucket where all our operations will
+	/// take place.
+	#[serde(alias = "path")]
+	pub base_path: Option<String>,
+
+	/// (expert use) Override the location of s3 applied after components of the
+	/// parsed `url` (or when none set).
+	pub endpoint: Option<String>,
+
+	/// (expert use) Override this property useful for some self-hosted
+	/// environments. By default it is derived when parsing the primary `url`.
+	#[serde(default)]
+	pub use_vhost_request: Option<bool>,
+
+	/// (expert use) Alternative session-token authentication method.
+	///
+	/// display: sensitive
+	/// default:
+	#[serde(skip_serializing)]
+	pub token: Option<String>,
+
+	/// (expert use) Associated SSE-KMS key material.
+	///
+	/// display: sensitive
+	pub kms: Option<String>,
+
+	/// (expert use) When configured for the bucket it should be reflected here.
+	pub use_bucket_key: Option<bool>,
+
+	/// (developer use) Allows relaxing default requirement forcing HTTPS.
+	///
+	/// default: true
+	#[serde(default = "some_true_fn")]
+	pub use_https: Option<bool>,
+
+	/// (developer_use) Allows skipping request header signatures (will be
+	/// reejected by AWS).
+	///
+	/// default: true
+	#[serde(default = "some_true_fn")]
+	pub use_signatures: Option<bool>,
+
+	/// (developer_use) Allows disabling request payload signatures.
+	///
+	/// default: true
+	#[serde(default = "some_true_fn")]
+	pub use_payload_signatures: Option<bool>,
+
+	/// (developer use) Enables checks performed at startup such as pinging the
+	/// provider. Failures are considered critical startup errors which abort
+	/// startup. When set to false, faulty providers are only discovered with
+	/// first use and will not be fatal errors.
+	///
+	/// Only set this to false if you expect a provider to be down at startup or
+	/// for development/testing purposes; checks are disabled when the server
+	/// is started in '--maintenance' mode.
+	///
+	/// default: true
+	#[serde(default = "true_fn")]
+	pub startup_check: bool,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -3074,20 +3236,6 @@ impl From<AppServiceNamespace> for ruma::api::appservice::Namespace {
 	}
 }
 
-#[derive(Deserialize, Clone, Debug)]
-#[serde(transparent)]
-struct ListeningPort {
-	#[serde(with = "either::serde_untagged")]
-	ports: Either<u16, Vec<u16>>,
-}
-
-#[derive(Deserialize, Clone, Debug)]
-#[serde(transparent)]
-struct ListeningAddr {
-	#[serde(with = "either::serde_untagged")]
-	addrs: Either<IpAddr, Vec<IpAddr>>,
-}
-
 const DEPRECATED_KEYS: &[&str; 9] = &[
 	"cache_capacity",
 	"conduit_cache_capacity_modifier",
@@ -3158,51 +3306,6 @@ impl Config {
 		Ok(config)
 	}
 
-	pub fn get_unix_socket_perms(&self) -> Result<u32> {
-		let octal_perms = self.unix_socket_perms.to_string();
-		let socket_perms = u32::from_str_radix(&octal_perms, 8).map_err(|_| {
-			err!(Config("unix_socket_perms", "failed to convert octal permissions"))
-		})?;
-
-		Ok(socket_perms)
-	}
-
-	#[must_use]
-	pub fn get_bind_addrs(&self) -> Vec<SocketAddr> {
-		let mut addrs = Vec::with_capacity(
-			self.get_bind_hosts()
-				.len()
-				.saturating_mul(self.get_bind_ports().len()),
-		);
-		for host in &self.get_bind_hosts() {
-			for port in &self.get_bind_ports() {
-				addrs.push(SocketAddr::new(*host, *port));
-			}
-		}
-
-		addrs
-	}
-
-	fn get_bind_hosts(&self) -> Vec<IpAddr> {
-		if let Some(address) = &self.address {
-			match &address.addrs {
-				| Left(addr) => vec![*addr],
-				| Right(addrs) => addrs.clone(),
-			}
-		} else if self.unix_socket_path.is_some() {
-			vec![]
-		} else {
-			vec![Ipv4Addr::LOCALHOST.into(), Ipv6Addr::LOCALHOST.into()]
-		}
-	}
-
-	fn get_bind_ports(&self) -> Vec<u16> {
-		match &self.port.ports {
-			| Left(port) => vec![*port],
-			| Right(ports) => ports.clone(),
-		}
-	}
-
 	pub fn check(&self) -> Result { check(self) }
 }
 
@@ -3222,6 +3325,8 @@ impl TlsConfig {
 }
 
 fn true_fn() -> bool { true }
+
+fn some_true_fn() -> Option<bool> { Some(true) }
 
 #[cfg(test)]
 fn default_server_name() -> OwnedServerName { ruma::owned_server_name!("localhost") }
@@ -3287,9 +3392,13 @@ fn default_dns_timeout() -> u64 { 10 }
 fn default_ip_lookup_strategy() -> u8 { 5 }
 
 fn default_max_request_size() -> usize { 24 * 1024 * 1024 }
+
 fn default_max_pending_media_uploads() -> usize { 5 }
+
 fn default_media_create_unused_expiration_time() -> u64 { 86400 }
+
 fn default_media_rc_create_per_second() -> u32 { 10 }
+
 fn default_media_rc_create_burst_count() -> u32 { 50 }
 
 fn default_request_conn_timeout() -> u64 { 10 }
@@ -3555,3 +3664,5 @@ fn default_max_join_attempts_per_join_request() -> usize { 3 }
 fn default_sso_grant_session_duration() -> Option<u64> { Some(300) }
 
 fn default_redaction_retention_seconds() -> u64 { 5_184_000 }
+
+fn default_media_storage_providers() -> BTreeSet<String> { ["media".to_owned()].into() }

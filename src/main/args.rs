@@ -6,7 +6,7 @@ use clap::{ArgAction, Parser};
 use tuwunel_core::{
 	Err, Result,
 	config::{Figment, FigmentValue},
-	err, toml,
+	err, is_true, toml,
 	utils::available_parallelism,
 };
 
@@ -189,13 +189,24 @@ pub fn parse() -> Args { Args::parse() }
 
 /// Synthesize any command line options with configuration file options.
 pub fn update(mut config: Figment, args: &Args) -> Result<Figment> {
+	if config
+		.find_value("maintenance")
+		.ok()
+		.as_ref()
+		.and_then(FigmentValue::to_bool)
+		.is_some_and(is_true!())
+	{
+		return Err!(Config("maintenance", "Not permitted to set this option."));
+	}
+
 	if args.read_only {
 		config = config.join(("rocksdb_read_only", true));
 	}
 
 	if args.maintenance || args.read_only {
-		config = config.join(("startup_netburst", false));
+		config = config.join(("maintenance", true));
 		config = config.join(("listening", false));
+		config = config.join(("startup_netburst", false));
 	}
 
 	#[cfg(feature = "console")]

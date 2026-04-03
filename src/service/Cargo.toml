@@ -101,6 +101,7 @@ ldap3.optional = true
 log.workspace = true
 loole.workspace = true
 lru-cache.workspace = true
+object_store.workspace = true
 rand.workspace = true
 regex.workspace = true
 reqwest.workspace = true

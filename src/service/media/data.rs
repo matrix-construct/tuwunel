@@ -22,9 +22,9 @@ pub(crate) struct Data {
 }
 
 #[derive(Debug)]
-pub(super) struct Metadata {
-	pub(super) content_disposition: Option<ContentDisposition>,
-	pub(super) content_type: Option<String>,
+pub struct Metadata {
+	pub content_disposition: Option<ContentDisposition>,
+	pub content_type: Option<String>,
 	pub(super) key: Vec<u8>,
 }
 

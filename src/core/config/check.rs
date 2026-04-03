@@ -361,6 +361,24 @@ pub fn check(config: &Config) -> Result {
 		);
 	}
 
+	for provider in &config.store_media_on_providers {
+		if !config.media_storage_providers.contains(provider) {
+			return Err!(Config(
+				"store_media_on_providers",
+				"Providers must be listed in 'media_storage_providers'"
+			));
+		}
+	}
+
+	if config.media_storage_providers.len() > 1 && config.store_media_on_providers.is_empty() {
+		warn!(
+			"Media will be duplicated to multiple providers {:?} until \
+			 `store_media_on_providers` is configured. This warning can be suppressed by \
+			 explicitly configuring `store_media_on_providers`",
+			config.media_storage_providers
+		);
+	}
+
 	Ok(())
 }
 

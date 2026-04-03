@@ -275,8 +275,7 @@ where
 
 	let ignored_server = services
 		.config
-		.forbidden_remote_server_names
-		.is_match(event.sender().server_name().host());
+		.is_forbidden_remote_server_name(event.sender().server_name());
 
 	ignored_server
 		|| services

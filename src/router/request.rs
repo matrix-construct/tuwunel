@@ -46,32 +46,40 @@ pub(crate) async fn handle(
 
 	let uri = req.uri().clone();
 	let method = req.method().clone();
-	let services_ = services.clone();
-	let parent = Span::current();
-	let task = services.server.runtime().spawn(async move {
+	let requestor = async |services: Arc<Services>, parent: Span| {
 		tokio::select! {
-			response = execute(&services_, req, next, &parent) => response,
-			response = services_.server.until_shutdown()
+			response = execute(&services, req, next, &parent) => response,
+			response = services.server.until_shutdown()
 				.then(|()| {
-					let timeout = services_.server.config.client_shutdown_timeout;
+					let timeout = services.server.config.client_shutdown_timeout;
 					let timeout = Duration::from_secs(timeout);
 					sleep(timeout)
 				})
 				.map(|()| StatusCode::SERVICE_UNAVAILABLE)
 				.map(IntoResponse::into_response) => response,
 		}
-	});
+	};
 
-	let abort = task.abort_handle();
-	defer! {{
-		if !abort.is_finished() {
-			debug_warn!(task = ?abort.id(), "Client disconnected; detached request.");
-		}
-	}}
+	let response = match method {
+		| Method::PUT | Method::POST | Method::DELETE | Method::PATCH => {
+			let task = services
+				.server
+				.runtime()
+				.spawn(requestor(services.clone(), Span::current()));
 
-	task.await
-		.map_err(unhandled)
-		.and_then(move |result| handle_result(&method, &uri, result))
+			let abort = task.abort_handle();
+			defer! {{
+				if !abort.is_finished() {
+					debug_warn!(task = ?abort.id(), "Client disconnected; detached request.");
+				}
+			}};
+
+			task.await.map_err(unhandled)?
+		},
+		| _ => requestor(services.clone(), Span::current()).await,
+	};
+
+	handle_result(&method, &uri, response)
 }
 
 #[tracing::instrument(

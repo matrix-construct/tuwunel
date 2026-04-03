@@ -11,6 +11,7 @@ mod room_state_cache;
 mod room_timeline;
 mod sending;
 mod short;
+mod storage;
 mod sync;
 mod users;
 
@@ -22,7 +23,8 @@ use self::{
 	oauth::OauthCommand, presence::PresenceCommand, pusher::PusherCommand, raw::RawCommand,
 	resolver::ResolverCommand, room_alias::RoomAliasCommand,
 	room_state_cache::RoomStateCacheCommand, room_timeline::RoomTimelineCommand,
-	sending::SendingCommand, short::ShortCommand, sync::SyncCommand, users::UsersCommand,
+	sending::SendingCommand, short::ShortCommand, storage::StorageCommand, sync::SyncCommand,
+	users::UsersCommand,
 };
 use crate::admin_command_dispatch;
 
@@ -77,6 +79,10 @@ pub(super) enum QueryCommand {
 	/// - short service
 	#[command(subcommand)]
 	Short(ShortCommand),
+
+	/// - storage service
+	#[command(subcommand)]
+	Storage(StorageCommand),
 
 	/// - sync service
 	#[command(subcommand)]

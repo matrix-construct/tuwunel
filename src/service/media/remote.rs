@@ -18,7 +18,7 @@ use tuwunel_core::{
 	utils::content_disposition::make_content_disposition,
 };
 
-use super::{Dim, FileMeta};
+use super::{Dim, Media};
 
 #[implement(super::Service)]
 pub async fn fetch_remote_thumbnail(
@@ -28,7 +28,7 @@ pub async fn fetch_remote_thumbnail(
 	server: Option<&ServerName>,
 	timeout_ms: Duration,
 	dim: &Dim,
-) -> Result<FileMeta> {
+) -> Result<Media> {
 	self.check_fetch_authorized(mxc)?;
 
 	let result = self
@@ -53,7 +53,7 @@ pub async fn fetch_remote_content(
 	user: Option<&UserId>,
 	server: Option<&ServerName>,
 	timeout_ms: Duration,
-) -> Result<FileMeta> {
+) -> Result<Media> {
 	self.check_fetch_authorized(mxc)?;
 
 	let result = self
@@ -79,7 +79,7 @@ async fn fetch_thumbnail_authenticated(
 	server: Option<&ServerName>,
 	timeout_ms: Duration,
 	dim: &Dim,
-) -> Result<FileMeta> {
+) -> Result<Media> {
 	use federation::authenticated_media::get_content_thumbnail::v1::{Request, Response};
 
 	let request = Request {
@@ -110,7 +110,7 @@ async fn fetch_content_authenticated(
 	user: Option<&UserId>,
 	server: Option<&ServerName>,
 	timeout_ms: Duration,
-) -> Result<FileMeta> {
+) -> Result<Media> {
 	use federation::authenticated_media::get_content::v1::{Request, Response};
 
 	let request = Request {
@@ -137,7 +137,7 @@ async fn fetch_thumbnail_unauthenticated(
 	server: Option<&ServerName>,
 	timeout_ms: Duration,
 	dim: &Dim,
-) -> Result<FileMeta> {
+) -> Result<Media> {
 	use media::get_content_thumbnail::v3::{Request, Response};
 
 	let request = Request {
@@ -172,7 +172,7 @@ async fn fetch_content_unauthenticated(
 	user: Option<&UserId>,
 	server: Option<&ServerName>,
 	timeout_ms: Duration,
-) -> Result<FileMeta> {
+) -> Result<Media> {
 	use media::get_content::v3::{Request, Response};
 
 	let request = Request {
@@ -201,7 +201,7 @@ async fn handle_thumbnail_file(
 	user: Option<&UserId>,
 	dim: &Dim,
 	content: Content,
-) -> Result<FileMeta> {
+) -> Result<Media> {
 	let content_disposition = make_content_disposition(
 		content.content_disposition.as_ref(),
 		content.content_type.as_deref(),
@@ -217,8 +217,8 @@ async fn handle_thumbnail_file(
 		&content.file,
 	)
 	.await
-	.map(|()| FileMeta {
-		content: Some(content.file),
+	.map(|()| Media {
+		content: content.file,
 		content_type: content.content_type.map(Into::into),
 		content_disposition: Some(content_disposition),
 	})
@@ -230,7 +230,7 @@ async fn handle_content_file(
 	mxc: &Mxc<'_>,
 	user: Option<&UserId>,
 	content: Content,
-) -> Result<FileMeta> {
+) -> Result<Media> {
 	let content_disposition = make_content_disposition(
 		content.content_disposition.as_ref(),
 		content.content_type.as_deref(),
@@ -245,8 +245,8 @@ async fn handle_content_file(
 		&content.file,
 	)
 	.await
-	.map(|()| FileMeta {
-		content: Some(content.file),
+	.map(|()| Media {
+		content: content.file,
 		content_type: content.content_type.map(Into::into),
 		content_disposition: Some(content_disposition),
 	})
@@ -258,7 +258,7 @@ async fn handle_location(
 	mxc: &Mxc<'_>,
 	user: Option<&UserId>,
 	location: &str,
-) -> Result<FileMeta> {
+) -> Result<Media> {
 	self.location_request(location)
 		.await
 		.map_err(|error| {
@@ -269,7 +269,7 @@ async fn handle_location(
 }
 
 #[implement(super::Service)]
-async fn location_request(&self, location: &str) -> Result<FileMeta> {
+async fn location_request(&self, location: &str) -> Result<Media> {
 	let response = self
 		.services
 		.client
@@ -297,8 +297,8 @@ async fn location_request(&self, location: &str) -> Result<FileMeta> {
 		.await
 		.map(Vec::from)
 		.map_err(Into::into)
-		.map(|content| FileMeta {
-			content: Some(content),
+		.map(|content| Media {
+			content,
 			content_type: content_type.clone(),
 			content_disposition: Some(make_content_disposition(
 				content_disposition.as_ref(),
@@ -454,8 +454,7 @@ fn check_fetch_authorized(&self, mxc: &Mxc<'_>) -> Result {
 			.services
 			.server
 			.config
-			.forbidden_remote_server_names
-			.is_match(mxc.server_name.host())
+			.is_forbidden_remote_server_name(mxc.server_name)
 	{
 		// we'll lie to the client and say the blocked server's media was not found and
 		// log. the client has no way of telling anyways so this is a security bonus.

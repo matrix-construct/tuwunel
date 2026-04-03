@@ -7,14 +7,14 @@
 
 use std::{cmp, num::Saturating as Sat};
 
+use futures::{StreamExt, pin_mut};
 use ruma::{Mxc, UInt, UserId, http_headers::ContentDisposition, media::Method};
-use tokio::{
-	fs,
-	io::{AsyncReadExt, AsyncWriteExt},
+use tuwunel_core::{
+	Err, Result, checked, err, implement,
+	utils::{result::LogDebugErr, stream::IterStream},
 };
-use tuwunel_core::{Result, checked, err, implement};
 
-use super::{FileMeta, data::Metadata};
+use super::{Media, data::Metadata};
 
 /// Dimension specification for a thumbnail.
 #[derive(Debug)]
@@ -40,9 +40,7 @@ impl super::Service {
 				.create_file_metadata(mxc, user, dim, content_disposition, content_type)?;
 
 		//TODO: Dangling metadata in database if creation fails
-		let mut f = self.create_media_file(&key).await?;
-		f.write_all(file).await?;
-
+		self.create_media_file(&key, file).await?;
 		Ok(())
 	}
 
@@ -60,7 +58,7 @@ impl super::Service {
 	/// For width,height <= 96 the server uses another thumbnailing algorithm
 	/// which crops the image afterwards.
 	#[tracing::instrument(skip(self), name = "thumbnail", level = "debug")]
-	pub async fn get_thumbnail(&self, mxc: &Mxc<'_>, dim: &Dim) -> Result<Option<FileMeta>> {
+	pub async fn get_thumbnail(&self, mxc: &Mxc<'_>, dim: &Dim) -> Result<Option<Media>> {
 		// 0, 0 because that's the original file
 		let dim = dim.normalized();
 
@@ -82,16 +80,26 @@ impl super::Service {
 
 /// Using saved thumbnail
 #[implement(super::Service)]
-#[tracing::instrument(name = "saved", level = "debug", skip(self, data))]
-async fn get_thumbnail_saved(&self, data: Metadata) -> Result<Option<FileMeta>> {
-	let mut content = Vec::new();
-	let path = self.get_media_file(&data.key);
-	fs::File::open(path)
-		.await?
-		.read_to_end(&mut content)
-		.await?;
+#[tracing::instrument(name = "saved", level = "debug", skip_all)]
+async fn get_thumbnail_saved(&self, data: Metadata) -> Result<Option<Media>> {
+	let path = self.get_media_name_sha256(&data.key);
+	let fetch = self
+		.storage_providers()
+		.stream()
+		.filter_map(async |provider| {
+			provider
+				.get(path.as_str())
+				.await
+				.log_debug_err()
+				.ok()
+		});
 
-	Ok(Some(into_filemeta(data, content)))
+	pin_mut!(fetch);
+	let Some(bytes) = fetch.next().await else {
+		return Err!(Request(NotFound("Media thumbnail not found.")));
+	};
+
+	Ok(Some(into_media(data, bytes.to_vec())))
 }
 
 /// Generate a thumbnail
@@ -103,21 +111,18 @@ async fn get_thumbnail_generate(
 	mxc: &Mxc<'_>,
 	dim: &Dim,
 	data: Metadata,
-) -> Result<Option<FileMeta>> {
-	let mut content = Vec::new();
-	let path = self.get_media_file(&data.key);
-	fs::File::open(path)
-		.await?
-		.read_to_end(&mut content)
-		.await?;
+) -> Result<Option<Media>> {
+	let Some(media) = self.get(mxc).await? else {
+		return tuwunel_core::Err!("Could not find original media.");
+	};
 
-	let Ok(image) = image::load_from_memory(&content) else {
+	let Ok(image) = image::load_from_memory(&media.content) else {
 		// Couldn't parse file to generate thumbnail, send original
-		return Ok(Some(into_filemeta(data, content)));
+		return Ok(Some(into_media(data, media.content)));
 	};
 
 	if dim.width > image.width() || dim.height > image.height() {
-		return Ok(Some(into_filemeta(data, content)));
+		return Ok(Some(into_media(data, media.content)));
 	}
 
 	let mut thumbnail_bytes = Vec::new();
@@ -136,10 +141,9 @@ async fn get_thumbnail_generate(
 		data.content_type.as_deref(),
 	)?;
 
-	let mut f = self.create_media_file(&thumbnail_key).await?;
-	f.write_all(&thumbnail_bytes).await?;
-
-	Ok(Some(into_filemeta(data, thumbnail_bytes)))
+	self.create_media_file(&thumbnail_key, &thumbnail_bytes)
+		.await?;
+	Ok(Some(into_media(data, thumbnail_bytes)))
 }
 
 #[cfg(not(feature = "media_thumbnail"))]
@@ -150,7 +154,7 @@ async fn get_thumbnail_generate(
 	_mxc: &Mxc<'_>,
 	_dim: &Dim,
 	data: Metadata,
-) -> Result<Option<FileMeta>> {
+) -> Result<Option<Media>> {
 	self.get_thumbnail_saved(data).await
 }
 
@@ -175,9 +179,9 @@ fn thumbnail_generate(
 	Ok(thumbnail)
 }
 
-fn into_filemeta(data: Metadata, content: Vec<u8>) -> FileMeta {
-	FileMeta {
-		content: Some(content),
+fn into_media(data: Metadata, content: Vec<u8>) -> Media {
+	Media {
+		content,
 		content_type: data.content_type,
 		content_disposition: data.content_disposition,
 	}

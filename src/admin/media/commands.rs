@@ -281,8 +281,8 @@ pub(super) async fn get_remote_file(
 		.await?;
 
 	// Grab the length of the content before clearing it to not flood the output
-	let len = result.content.as_ref().expect("content").len();
-	result.content.as_mut().expect("content").clear();
+	let len = result.content.len();
+	result.content.clear();
 
 	self.write_str(&format!("```\n{result:#?}\nreceived {len} bytes for file content.\n```"))
 		.await
@@ -307,8 +307,8 @@ pub(super) async fn get_remote_thumbnail(
 		.await?;
 
 	// Grab the length of the content before clearing it to not flood the output
-	let len = result.content.as_ref().expect("content").len();
-	result.content.as_mut().expect("content").clear();
+	let len = result.content.len();
+	result.content.clear();
 
 	self.write_str(&format!("```\n{result:#?}\nreceived {len} bytes for file content.\n```"))
 		.await

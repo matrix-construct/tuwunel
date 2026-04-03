@@ -69,8 +69,7 @@ where
 		.services
 		.server
 		.config
-		.forbidden_remote_server_names
-		.is_match(dest.host())
+		.is_forbidden_remote_server_name(dest)
 	{
 		return Err!(Request(Forbidden(debug_warn!("Federation with {dest} is not allowed."))));
 	}

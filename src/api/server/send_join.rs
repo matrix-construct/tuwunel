@@ -41,8 +41,7 @@ pub(crate) async fn create_join_event_v2_route(
 	if let Some(server) = room_id.server_name()
 		&& services
 			.config
-			.forbidden_remote_server_names
-			.is_match(server.host())
+			.is_forbidden_remote_server_name(server)
 	{
 		warn!(
 			"Server {origin} tried joining {room_id} through us which has a server name that is \

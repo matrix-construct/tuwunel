@@ -1420,6 +1420,42 @@
 #
 #prune_missing_media = false
 
+# List of storage providers to use for media. Providers can be configured
+# below in respective sections designated by
+# `global.storage_provider.<NAME>.<brand>` where `NAME` can be listed
+# here.
+#
+# For advanced features and future extensions involving multiple providers
+# the list may contain multiple entries. You MUST take note of other
+# configuration options when listing multiple providers or resource
+# duplication costs and poor performance can result.
+#
+# The list defaults to `["media"]` which is an implicit storage provider
+# representing the media directory on the local filesystem. It can be
+# altered by configuring `global.storage_provider.media.local` explicitly
+# or disabled by omitting it from this list entirely. Users with existing
+# deployments are advised to continue listing "media" as a fallback along
+# with their new provider.
+#
+#media_storage_providers = ["media"]
+
+# List of configured storage providers where new media will be sent. When
+# this list is not explicitly configured all entries in
+# `media_storage_providers` are used as default.
+#
+# This list is important for users passively migrating to a new media
+# storage provider by only writing to one while querying the other as a
+# fallback.
+#
+# For example:
+#
+# `media_storage_providers = ["media", "media_on_s3"]`
+# `store_media_on_providers = ["media_on_s3"]`
+#
+# Entries in this list must also be listed in `media_storage_providers`.
+#
+#store_media_on_providers = []
+
 # Vector list of regex patterns of server names that tuwunel will refuse
 # to download remote media from.
 #
@@ -1440,6 +1476,21 @@
 # example: ["badserver\.tld$", "badphrase", "19dollarfortnitecards"]
 #
 #forbidden_remote_server_names = []
+
+# List of allowed server names via regex patterns. This is an allow-list
+# rather than a deny-list with all the same details as its counterpart in
+# `forbidden_remote_server_names`.
+#
+# This feature becomes active when this list has one or more entries;
+# everything not matching is denied. By default it is empty and inactive.
+#
+# Entries in `forbidden_remote_server_names` are still applied after
+# this is applied. This allows you to match e.g. "*\.example\.com" here
+# while still singling out "bad\.example\.com" for exclusion.
+#
+# example: ["badserver\.tld$", "badphrase", "19dollarfortnitecards"]
+#
+#allowed_remote_server_names = []
 
 # List of forbidden server names via regex patterns that we will block all
 # outgoing federated room directory requests for. Useful for preventing
@@ -1754,7 +1805,18 @@
 # - "smoke" performs a shutdown after startup admin commands rather than
 #   hanging on client handling.
 #
-#test = []
+#test = false
+
+# Indicates the server has started in maintenance mode. Historically
+# maintenance mode has been enabled by the command line argument
+# `--maintenance` which then sets various configuration items such as
+# `listening=false` among others. That is still the case. This option was
+# only added as a single source of truth that `--maintenance` mode is
+# active.
+#
+# This option must never be set manually.
+#
+#maintenance = false
 
 # Controls whether admin room notices like account registrations, password
 # changes, account deactivations, room directory publications, etc will be
@@ -2472,6 +2534,110 @@
 # to tolerate the risks.
 #
 #check_cookie = true
+
+
+
+#[global.storage_provider.<ID>.local]
+
+# Absolute path to this local filesystem storage provider. Technically the
+# provider exists at the filesystem root, and the base_path is prefixed to
+# all objects.
+#
+#base_path =
+
+# Creates the directory on the local filesystem if missing. This is not
+# recommended to prevent misconfigured environments and missing mounts
+# from silently succeeding.
+#
+#create_if_missing = false
+
+# Toggles the preservation of a directory after its last file contents are
+# removed.
+#
+#delete_empty_directories = true
+
+# Enables checks performed at startup determining the usability of the
+# local directory. Failures will abort the server's startup.
+#
+#startup_check = true
+
+
+
+#[global.storage_provider.<ID>.S3]
+
+# Supply an s3 URL e.g. "s3://<bucket>/<path>". These URLs may contain one
+# or all of `bucket`, `region`, and `path` . When not supplied, such
+# additional items can be supplied below individually.
+#
+#url =
+
+# The name of the S3 bucket. e.g. "bucketname-123456789-us-west-2-an".
+#
+#bucket =
+
+# The region of the S3 bucket. e.g. "us-west-2".
+#
+#region = "us-east-1"
+
+# Your amazon IAM Key ID with access granted to this bucket.
+# e.g. "ABCDEFG1X1ZZYYXXWWVV"
+#
+#key =
+
+# The secret key component which is approx 40 characters of base64.
+#
+#secret =
+
+# Optional path prefix within the bucket where all our operations will
+# take place.
+#
+#base_path =
+
+# (expert use) Override the location of s3 applied after components of the
+# parsed `url` (or when none set).
+#
+#endpoint =
+
+# (expert use) Override this property useful for some self-hosted
+# environments. By default it is derived when parsing the primary `url`.
+#
+#use_vhost_request = false
+
+# (expert use) Alternative session-token authentication method.
+#
+#token =
+
+# (expert use) Associated SSE-KMS key material.
+#
+#kms =
+
+# (expert use) When configured for the bucket it should be reflected here.
+#
+#use_bucket_key =
+
+# (developer use) Allows relaxing default requirement forcing HTTPS.
+#
+#use_https = true
+
+# (developer_use) Allows skipping request header signatures (will be
+# reejected by AWS).
+#
+#use_signatures = true
+
+# (developer_use) Allows disabling request payload signatures.
+#
+#use_payload_signatures = true
+
+# (developer use) Enables checks performed at startup such as pinging the
+# provider. Failures are considered critical startup errors which abort
+# startup. When set to false, faulty providers are only discovered with
+# first use and will not be fatal errors.
+#
+# Only set this to false if you expect a provider to be down at startup or
+# for development/testing purposes; checks are disabled when the server
+# is started in '--maintenance' mode.
+#
+#startup_check = true
 
 
 

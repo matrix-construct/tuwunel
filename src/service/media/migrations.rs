@@ -33,8 +33,8 @@ pub(crate) async fn migrate_sha256_media(services: &Services) -> Result {
 		.raw_keys()
 		.ignore_err()
 		.ready_for_each(|key| {
-			let old = services.media.get_media_file_b64(key);
-			let new = services.media.get_media_file_sha256(key);
+			let old = services.media.get_media_path_b64(key);
+			let new = services.media.get_media_path_sha256(key);
 			debug!(?key, ?old, ?new, num = changes.len(), "change");
 			changes.push((old, new));
 		})
@@ -80,8 +80,8 @@ pub(crate) async fn checkup_sha256_media(services: &Services) -> Result {
 		.collect();
 
 	for key in media.db.get_all_media_keys().await {
-		let new_path = media.get_media_file_sha256(&key).into_os_string();
-		let old_path = media.get_media_file_b64(&key).into_os_string();
+		let new_path = media.get_media_path_sha256(&key).into_os_string();
+		let old_path = media.get_media_path_b64(&key).into_os_string();
 		if let Err(e) = handle_media_check(&dbs, config, &files, &key, &new_path, &old_path).await
 		{
 			error!(

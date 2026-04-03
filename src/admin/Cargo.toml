@@ -75,6 +75,7 @@ zstd_compression = [
 
 [dependencies]
 base64.workspace = true
+bytes.workspace = true
 clap.workspace = true
 tuwunel-core.workspace = true
 tuwunel-database.workspace = true

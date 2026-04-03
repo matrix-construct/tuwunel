@@ -34,8 +34,7 @@ pub(crate) async fn create_knock_event_template_route(
 	if let Some(server) = body.room_id.server_name()
 		&& services
 			.config
-			.forbidden_remote_server_names
-			.is_match(server.host())
+			.is_forbidden_remote_server_name(server)
 	{
 		return Err!(Request(Forbidden("Server is banned on this homeserver.")));
 	}

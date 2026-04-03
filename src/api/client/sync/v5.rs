@@ -93,11 +93,7 @@ pub(crate) async fn sync_events_v5_route(
 		.map(Duration::as_millis)
 		.map(TryInto::try_into)
 		.flat_ok()
-		.map(|timeout: u64| {
-			timeout
-				.max(services.config.client_sync_timeout_min)
-				.min(services.config.client_sync_timeout_max)
-		})
+		.map(|timeout: u64| timeout.min(services.config.client_sync_timeout_max))
 		.unwrap_or(0);
 
 	let conn_key = into_connection_key(sender_user, sender_device, request.conn_id.as_deref());

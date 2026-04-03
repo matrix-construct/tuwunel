@@ -14,29 +14,33 @@ use std::{
 
 use async_trait::async_trait;
 use base64::{Engine as _, engine::general_purpose};
+use futures::{FutureExt, StreamExt, TryFutureExt, TryStreamExt, pin_mut};
 use http::StatusCode;
+use object_store::PutPayload;
 use ruma::{
 	Mxc, OwnedMxcUri, OwnedUserId, UserId,
 	api::client::error::{ErrorKind, RetryAfter},
 	http_headers::ContentDisposition,
 };
-use tokio::{
-	fs,
-	io::{AsyncReadExt, AsyncWriteExt, BufReader},
-	sync::Notify,
-};
+use tokio::{fs, sync::Notify};
 use tuwunel_core::{
-	Err, Error, Result, debug, debug_error, debug_info, debug_warn, err, error, trace,
-	utils::{self, MutexMap, time::now_millis},
+	Err, Error, Result, debug, debug_error, debug_info, debug_warn, err, trace,
+	utils::{
+		self, BoolExt, MutexMap,
+		result::{LogDebugErr, LogErr},
+		stream::{IterStream, TryReadyExt},
+		time::now_millis,
+	},
 	warn,
 };
 
 use self::data::{Data, Metadata};
 pub use self::thumbnail::Dim;
+use crate::storage::Provider;
 
 #[derive(Debug)]
-pub struct FileMeta {
-	pub content: Option<Vec<u8>>,
+pub struct Media {
+	pub content: Vec<u8>,
 	pub content_type: Option<String>,
 	pub content_disposition: Option<ContentDisposition>,
 }
@@ -77,12 +81,6 @@ impl crate::Service for Service {
 				ratelimiter: Mutex::new(HashMap::new()),
 			},
 		}))
-	}
-
-	async fn worker(self: Arc<Self>) -> Result {
-		self.create_media_dir().await?;
-
-		Ok(())
 	}
 
 	fn name(&self) -> &str { crate::service::make_name(std::module_path!()) }
@@ -215,10 +213,7 @@ impl Service {
 		)?;
 
 		//TODO: Dangling metadata in database if creation fails
-		let mut f = self.create_media_file(&key).await?;
-		f.write_all(file).await?;
-
-		Ok(())
+		self.create_media_file(&key, file).await
 	}
 
 	/// Deletes a file in the database and from the media directory via an MXC
@@ -227,7 +222,7 @@ impl Service {
 			| Ok(keys) => {
 				for key in keys {
 					trace!(?mxc, "MXC Key: {key:?}");
-					debug_info!(?mxc, "Deleting from filesystem");
+					debug_info!(?mxc, "Deleting from storage provider");
 
 					if let Err(e) = self.remove_media_file(&key).await {
 						debug_error!(?mxc, "Failed to remove media file: {e}");
@@ -275,28 +270,40 @@ impl Service {
 		Ok(deletion_count)
 	}
 
-	/// Downloads a file.
-	pub async fn get(&self, mxc: &Mxc<'_>) -> Result<Option<FileMeta>> {
-		match self
+	/// Downloads a media file.
+	pub async fn get(&self, mxc: &Mxc<'_>) -> Result<Option<Media>> {
+		let meta = self
 			.db
 			.search_file_metadata(mxc, &Dim::default())
 			.await
-		{
-			| Ok(Metadata { content_disposition, content_type, key }) => {
-				let mut content = Vec::with_capacity(8192);
-				let path = self.get_media_file(&key);
-				BufReader::new(fs::File::open(path).await?)
-					.read_to_end(&mut content)
-					.await?;
+			.ok();
 
-				Ok(Some(FileMeta {
-					content: Some(content),
-					content_type,
-					content_disposition,
-				}))
-			},
-			| _ => Ok(None),
-		}
+		let Some(Metadata { content_type, content_disposition, key }) = meta else {
+			return Ok(None);
+		};
+
+		let path = self.get_media_name_sha256(&key);
+		let fetch = self
+			.storage_providers()
+			.stream()
+			.filter_map(async |provider| {
+				provider
+					.get(path.as_str())
+					.await
+					.log_debug_err()
+					.ok()
+			});
+
+		pin_mut!(fetch);
+		let Some(bytes) = fetch.next().await else {
+			return Err!(Request(NotFound("Media not found.")));
+		};
+
+		Ok(Some(Media {
+			content: bytes.to_vec(),
+			content_type,
+			content_disposition,
+		}))
 	}
 
 	/// Download a file and wait up to a timeout_ms if it is pending.
@@ -304,7 +311,7 @@ impl Service {
 		&self,
 		mxc: &Mxc<'_>,
 		timeout_duration: Duration,
-	) -> Result<Option<FileMeta>> {
+	) -> Result<Option<Media>> {
 		if let Some(meta) = self.get(mxc).await? {
 			return Ok(Some(meta));
 		}
@@ -337,7 +344,7 @@ impl Service {
 		mxc: &Mxc<'_>,
 		dim: &Dim,
 		timeout_duration: Duration,
-	) -> Result<Option<FileMeta>> {
+	) -> Result<Option<Media>> {
 		if let Some(meta) = self.get_thumbnail(mxc, dim).await? {
 			return Ok(Some(meta));
 		}
@@ -450,38 +457,44 @@ impl Service {
 				continue;
 			}
 
-			let path = self.get_media_file(&key);
-
-			let file_metadata = match fs::metadata(path.clone()).await {
-				| Ok(file_metadata) => file_metadata,
-				| Err(e) => {
-					error!(
-						"Failed to obtain file metadata for MXC {mxc} at file path \
-						 \"{path:?}\", skipping: {e}"
-					);
-					continue;
-				},
+			let file_created_at = if let Some(file_metadata) = self
+				.storage_providers()
+				.stream()
+				.filter_map(async |provider| {
+					let path = self.get_media_name_sha256(&key);
+					match provider.head(&path).await {
+						| Ok(file_metadata) => {
+							trace!(%mxc, ?path, "Provider file metadata: {file_metadata:?}");
+							Some(file_metadata)
+						},
+						| Err(e) => {
+							debug_warn!(
+								"Failed to obtain {:?} file metadata for MXC {mxc} at file path \
+								 {path:?}\", skipping: {e}",
+								provider.name,
+							);
+							None
+						},
+					}
+				})
+				.boxed()
+				.next()
+				.await
+			{
+				SystemTime::from(file_metadata.last_modified)
+			} else {
+				continue;
 			};
 
-			trace!(%mxc, ?path, "File metadata: {file_metadata:?}");
+			debug!("File created at: {file_created_at:?}");
 
-			let file_modified_at = match file_metadata.modified() {
-				| Ok(value) => value,
-				| Err(err) => {
-					error!("Could not delete MXC {mxc} at path {path:?}: {err:?}. Skipping...");
-					continue;
-				},
-			};
-
-			debug!("File modified at: {file_modified_at:?}");
-
-			if file_modified_at <= time && older_than {
+			if file_created_at <= time && older_than {
 				debug!(
 					"File is older than user duration, pushing to list of file paths and keys \
 					 to delete."
 				);
 				remote_mxcs.push(mxc.to_string());
-			} else if file_modified_at >= time && newer_than {
+			} else if file_created_at >= time && newer_than {
 				debug!(
 					"File is newer than user duration, pushing to list of file paths and keys \
 					 to delete."
@@ -526,76 +539,100 @@ impl Service {
 	}
 
 	async fn remove_media_file(&self, key: &[u8]) -> Result {
-		let path = self.get_media_file(key);
-		let legacy = self.get_media_file_b64(key);
-		debug!(?key, ?path, ?legacy, "Removing media file");
+		let path = self.get_media_name_sha256(key);
+		self.storage_providers()
+			.stream()
+			.filter_map(async |provider| {
+				debug!(
+					?key, ?path, provider = ?provider.name,
+					"Deleting media file from provider",
+				);
 
-		let file_rm = fs::remove_file(&path);
-		let legacy_rm = fs::remove_file(&legacy);
-		let (file_rm, legacy_rm) = tokio::join!(file_rm, legacy_rm);
-		if let Err(e) = legacy_rm
-			&& self.services.server.config.media_compat_file_link
-		{
-			debug_error!(?key, ?legacy, "Failed to remove legacy media symlink: {e}");
-		}
-
-		Ok(file_rm?)
+				provider
+					.delete_one(&path)
+					.await
+					.log_debug_err()
+					.ok()
+			})
+			.count()
+			.map(|count| {
+				count
+					.ge(&0)
+					.ok_or_else(|| err!(Request(NotFound("Failed to remove on any provider."))))
+			})
+			.await
 	}
 
-	async fn create_media_file(&self, key: &[u8]) -> Result<fs::File> {
-		let path = self.get_media_file(key);
-		debug!(?key, ?path, "Creating media file");
+	async fn create_media_file(&self, key: &[u8], file: &[u8]) -> Result {
+		self.storage_providers()
+			.try_stream()
+			.ready_try_filter(|provider| {
+				let store_media_on_providers = &self.services.config.store_media_on_providers;
 
-		let file = fs::File::create(&path).await?;
-		if self.services.server.config.media_compat_file_link {
-			let legacy = self.get_media_file_b64(key);
-			if let Err(e) = fs::symlink(&path, &legacy).await {
-				debug_error!(
-					key = ?encode_key(key), ?path, ?legacy,
-					"Failed to create legacy media symlink: {e}"
+				store_media_on_providers.is_empty()
+					|| store_media_on_providers.contains(&provider.name)
+			})
+			.and_then(async |provider| {
+				let path = self.get_media_name_sha256(key);
+				debug!(
+					?key, ?path, provider = ?provider.name,
+					"Creating media file on storage provider."
 				);
-			}
-		}
 
-		Ok(file)
+				provider
+					.put(path.as_str(), PutPayload::from(file.to_vec()))
+					.await
+					.log_err()?;
+
+				Ok(1)
+			})
+			.ready_try_fold(0_usize, |a, c| Ok(a.saturating_add(c)))
+			.inspect_ok(|&uploads| assert!(uploads > 0, "Successfully saved to nowhere."))
+			.map_ok(|_| ())
+			.await
+	}
+
+	fn storage_providers(&self) -> impl Iterator<Item = &Arc<Provider>> + Send + '_ {
+		self.services
+			.config
+			.media_storage_providers
+			.iter()
+			.filter_map(|id| self.services.storage.provider(id).ok())
 	}
 
 	#[inline]
-	pub async fn get_metadata(&self, mxc: &Mxc<'_>) -> Option<FileMeta> {
+	pub async fn get_metadata(&self, mxc: &Mxc<'_>) -> Option<Metadata> {
 		self.db
 			.search_file_metadata(mxc, &Dim::default())
 			.await
-			.map(|metadata| FileMeta {
-				content_disposition: metadata.content_disposition,
-				content_type: metadata.content_type,
-				content: None,
-			})
 			.ok()
 	}
 
 	#[inline]
 	#[must_use]
-	pub fn get_media_file(&self, key: &[u8]) -> PathBuf { self.get_media_file_sha256(key) }
-
-	/// new SHA256 file name media function. requires database migrated. uses
-	/// SHA256 hash of the base64 key as the file name
-	#[must_use]
-	pub fn get_media_file_sha256(&self, key: &[u8]) -> PathBuf {
+	pub fn get_media_path_sha256(&self, key: &[u8]) -> PathBuf {
 		let mut r = self.get_media_dir();
-		// Using the hash of the base64 key as the filename
-		// This is to prevent the total length of the path from exceeding the maximum
-		// length in most filesystems
-		let digest = <sha2::Sha256 as sha2::Digest>::digest(key);
-		let encoded = encode_key(&digest);
-		r.push(encoded);
+		r.push(self.get_media_name_sha256(key));
 		r
 	}
 
-	/// old base64 file name media function
-	/// This is the old version of `get_media_file` that uses the full base64
-	/// key as the filename.
+	/// new SHA256 file name media function. requires database migrated. uses
+	/// SHA256 hash of the base64 key as the file name
+	#[inline]
 	#[must_use]
-	pub fn get_media_file_b64(&self, key: &[u8]) -> PathBuf {
+	pub fn get_media_name_sha256(&self, key: &[u8]) -> String {
+		// Using the hash of the base64 key as the filename prevents the total
+		// length of the path from exceeding the maximum length in most
+		// filesystems
+		let digest = <sha2::Sha256 as sha2::Digest>::digest(key);
+		encode_key(&digest)
+	}
+
+	/// old base64 file name media function
+	/// This is the old version of `get_media_path_sha256` that uses the full
+	/// base64 key as the filename.
+	#[must_use]
+	pub fn get_media_path_b64(&self, key: &[u8]) -> PathBuf {
 		let mut r = self.get_media_dir();
 		let encoded = encode_key(key);
 		r.push(encoded);
