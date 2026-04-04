@@ -45,7 +45,10 @@ use tuwunel_core::{
 };
 use tuwunel_service::{Services, appservice::RegistrationInfo, rooms::state::RoomMutexGuard};
 
-use crate::{Ruma, client::utils::invite_check};
+use crate::{
+	Ruma,
+	client::utils::{invite_check, is_invite_blocked},
+};
 
 /// # `POST /_matrix/client/v3/createRoom`
 ///
@@ -393,6 +396,14 @@ pub(crate) async fn create_room_route(
 			{
 				// silently drop the invite to the recipient if they've been ignored by the
 				// sender, pretend it worked
+				continue;
+			}
+
+			if is_invite_blocked(&services, user_id).await {
+				warn!(
+					"{user_id} has blocked invites and {sender_user} attempted to send an \
+					 invite in createRoom for {room_id}"
+				);
 				continue;
 			}
 

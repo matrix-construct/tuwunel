@@ -1,11 +1,17 @@
 use axum::extract::State;
 use axum_client_ip::InsecureClientIp;
 use futures::{FutureExt, join};
-use ruma::{api::client::membership::invite_user, events::room::member::MembershipState};
+use ruma::{
+	api::client::{error::ErrorKind::InviteBlocked, membership::invite_user},
+	events::room::member::MembershipState,
+};
 use tuwunel_core::{Err, Result};
 
 use super::banned_room_check;
-use crate::{Ruma, client::utils::invite_check};
+use crate::{
+	Ruma,
+	client::utils::{invite_check, is_invite_blocked},
+};
 
 /// # `POST /_matrix/client/r0/rooms/{roomId}/invite`
 ///
@@ -27,6 +33,14 @@ pub(crate) async fn invite_user_route(
 	let invite_user::v3::InvitationRecipient::UserId { user_id } = &body.recipient else {
 		return Err!(Request(ThreepidDenied("Third party identifiers are not implemented")));
 	};
+
+	if is_invite_blocked(&services, user_id).await {
+		warn!(
+			"{user_id} has blocked invites and {sender_user} attempted to send an invite to \
+			 {room_id}"
+		);
+		return Err!(Request(InviteBlocked));
+	}
 
 	let sender_ignored_recipient = services
 		.users
