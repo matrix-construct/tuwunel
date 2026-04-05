@@ -1,7 +1,7 @@
 use axum::{
 	body::Body,
 	extract::{Request, State},
-	http::StatusCode,
+	http::{HeaderValue, StatusCode},
 	middleware::Next,
 	response::{IntoResponse, Response},
 };
@@ -28,7 +28,8 @@ pub(crate) async fn check_replication_token(
 	let provided = request
 		.headers()
 		.get(TOKEN_HEADER)
-		.and_then(|v| v.to_str().ok());
+		.map(HeaderValue::to_str)
+		.and_then(Result::ok);
 
 	if provided != Some(expected) {
 		return (StatusCode::UNAUTHORIZED, "Invalid replication token").into_response();

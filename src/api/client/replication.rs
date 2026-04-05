@@ -10,7 +10,11 @@
 //! - `POST /_tuwunel/replication/demote`        — demote primary back to
 //!   secondary
 
-use std::time::Duration;
+use std::{
+	convert::Infallible,
+	path::{Path, PathBuf},
+	time::Duration,
+};
 
 use axum::{
 	Json,
@@ -20,9 +24,11 @@ use axum::{
 	response::{IntoResponse, Response},
 };
 use bytes::Bytes;
-use futures::{SinkExt, StreamExt};
+use futures::{SinkExt, StreamExt, channel::mpsc};
 use serde::{Deserialize, Serialize};
-use tuwunel_core::Result;
+use serde_json::json;
+use tokio::time::sleep;
+use tuwunel_core::{Result, err, utils::time::now};
 use tuwunel_database::{WalFrame, is_wal_gap_error};
 
 /// Query parameters for `GET /_tuwunel/replication/wal`.
@@ -40,23 +46,23 @@ pub(crate) async fn replication_status(
 	State(services): State<crate::State>,
 ) -> impl IntoResponse {
 	let db = services.db.clone();
-	let seq = tokio::task::spawn_blocking(move || db.latest_wal_sequence())
+	let seq = services
+		.server
+		.runtime()
+		.spawn_blocking(move || db.latest_wal_sequence())
 		.await
 		.unwrap_or(0);
 
-	let role = if services
+	let role = services
 		.server
 		.config
 		.rocksdb_primary_url
-		.is_some()
-		&& !services.replication.is_promoted()
-	{
-		"secondary"
-	} else {
-		"primary"
-	};
+		.as_deref()
+		.filter(|_| !services.replication.is_promoted())
+		.and(Some("secondary"))
+		.unwrap_or("primary");
 
-	Json(serde_json::json!({
+	Json(json!({
 		"role": role,
 		"latest_sequence": seq,
 	}))
@@ -83,45 +89,49 @@ pub(crate) async fn replication_wal(
 		.rocksdb_replication_interval_ms;
 
 	// Eagerly check for a WAL gap before opening the streaming response.
-	let gap_check: Result<()> = tokio::task::spawn_blocking({
-		let db = db.clone();
-		move || db.wal_frame_iter(since).map(drop)
-	})
-	.await
-	.expect("spawn_blocking panicked in gap check");
+	let gap_check: Result = services
+		.server
+		.runtime()
+		.spawn_blocking({
+			let db = db.clone();
+			move || db.wal_frame_iter(since).map(drop)
+		})
+		.await
+		.expect("spawn_blocking panicked in gap check");
 
 	if let Err(ref e) = gap_check {
 		if is_wal_gap_error(e) {
 			return (StatusCode::GONE, "WAL gap: secondary must re-sync from a fresh checkpoint")
 				.into_response();
 		}
+
 		return (StatusCode::INTERNAL_SERVER_ERROR, format!("WAL iterator error: {e}"))
 			.into_response();
 	}
 
 	// Channel that bridges the blocking WAL reader with the async HTTP body.
-	let (mut tx, rx) = futures::channel::mpsc::channel::<Bytes>(256);
-
-	tokio::spawn(async move {
+	let (mut tx, rx) = mpsc::channel::<Bytes>(256);
+	services.server.runtime().spawn(async move {
 		let mut seq = since;
-
 		loop {
 			// Drain all available WAL frames in a blocking thread.
-			let result = tokio::task::spawn_blocking({
-				let db = db.clone();
-				move || -> (Vec<Bytes>, u64) {
+			let db_ = db.clone();
+			let result = services
+				.server
+				.runtime()
+				.spawn_blocking(move || -> (Vec<Bytes>, u64) {
 					let mut frames: Vec<Bytes> = Vec::new();
 					let mut next_seq = seq;
-					if let Ok(iter) = db.wal_frame_iter(seq) {
+					if let Ok(iter) = db_.wal_frame_iter(seq) {
 						for frame in iter.flatten() {
 							next_seq = frame.next_resume_seq();
 							frames.push(Bytes::from(frame.encode()));
 						}
 					}
+
 					(frames, next_seq)
-				}
-			})
-			.await;
+				})
+				.await;
 
 			let Ok((frames, next_seq)) = result else {
 				break; // spawn_blocking panicked
@@ -139,15 +149,17 @@ pub(crate) async fn replication_wal(
 			// Always emit a heartbeat so the secondary can tell the primary is alive.
 			// When no data was produced, sleep first to avoid a busy-loop.
 			if !advanced {
-				tokio::time::sleep(Duration::from_millis(interval_ms)).await;
+				sleep(Duration::from_millis(interval_ms)).await;
 			}
 
-			let hb_seq = {
-				let db = db.clone();
-				tokio::task::spawn_blocking(move || db.latest_wal_sequence())
-					.await
-					.unwrap_or(seq)
-			};
+			let db = db.clone();
+			let hb_seq = services
+				.server
+				.runtime()
+				.spawn_blocking(move || db.latest_wal_sequence())
+				.await
+				.unwrap_or(seq);
+
 			let hb = WalFrame::heartbeat(hb_seq);
 			if tx.send(Bytes::from(hb.encode())).await.is_err() {
 				return; // client disconnected
@@ -155,7 +167,7 @@ pub(crate) async fn replication_wal(
 		}
 	});
 
-	let stream = rx.map(Ok::<_, std::convert::Infallible>);
+	let stream = rx.map(Ok::<_, Infallible>);
 	Response::builder()
 		.status(StatusCode::OK)
 		.header(header::CONTENT_TYPE, "application/octet-stream")
@@ -177,28 +189,29 @@ pub(crate) async fn replication_checkpoint(State(services): State<crate::State>)
 	let db = services.db.clone();
 
 	// Build the checkpoint and tar it in a blocking thread.
-	let result = tokio::task::spawn_blocking(move || -> Result<(Bytes, u64)> {
-		let tmp = tempfile_checkpoint_dir()?;
-		let checkpoint_path = tmp.path().join("checkpoint");
+	let result = services
+		.server
+		.runtime()
+		.spawn_blocking(move || -> Result<(Bytes, u64)> {
+			let tmp = tempfile_checkpoint_dir()?;
+			let checkpoint_path = tmp.path().join("checkpoint");
+			let seq = db.create_checkpoint(&checkpoint_path)?;
 
-		let seq = db.create_checkpoint(&checkpoint_path)?;
+			// Build tar archive in memory.
+			let mut archive_bytes: Vec<u8> = Vec::new();
+			{
+				let mut builder = tar::Builder::new(&mut archive_bytes);
 
-		// Build tar archive in memory.
-		let mut archive_bytes: Vec<u8> = Vec::new();
-		#[allow(clippy::semicolon_outside_block)]
-		{
-			let mut builder = tar::Builder::new(&mut archive_bytes);
-			builder
-				.append_dir_all("checkpoint", &checkpoint_path)
-				.map_err(|e| tuwunel_core::err!(Database("{e}")))?;
-			builder
-				.finish()
-				.map_err(|e| tuwunel_core::err!(Database("{e}")))?;
-		}
+				builder
+					.append_dir_all("checkpoint", &checkpoint_path)
+					.map_err(|e| err!("{e}"))?;
 
-		Ok((Bytes::from(archive_bytes), seq))
-	})
-	.await;
+				builder.finish().map_err(|e| err!("{e}"))?;
+			};
+
+			Ok((Bytes::from(archive_bytes), seq))
+		})
+		.await;
 
 	match result {
 		| Ok(Ok((bytes, seq))) => Response::builder()
@@ -232,7 +245,7 @@ pub(crate) async fn replication_promote(
 	State(services): State<crate::State>,
 ) -> impl IntoResponse {
 	if services.replication.is_promoted() {
-		return (StatusCode::CONFLICT, Json(serde_json::json!({"error": "already promoted"})))
+		return (StatusCode::CONFLICT, Json(json!({"error": "already promoted"})))
 			.into_response();
 	}
 
@@ -244,16 +257,14 @@ pub(crate) async fn replication_promote(
 	{
 		return (
 			StatusCode::CONFLICT,
-			Json(
-				serde_json::json!({"error": "not a secondary; no rocksdb_primary_url configured"}),
-			),
+			Json(json!({"error": "not a secondary; no rocksdb_primary_url configured"})),
 		)
 			.into_response();
 	}
 
 	services.replication.promote();
 
-	Json(serde_json::json!({"status": "promoted"})).into_response()
+	Json(json!({"status": "promoted"})).into_response()
 }
 
 /// Request body for `POST /_tuwunel/replication/demote`.
@@ -284,26 +295,23 @@ pub(crate) async fn replication_demote(
 	Json(body): Json<DemoteBody>,
 ) -> impl IntoResponse {
 	if body.primary_url.is_empty() {
-		return (
-			StatusCode::BAD_REQUEST,
-			Json(serde_json::json!({"error": "primary_url is required"})),
-		)
+		return (StatusCode::BAD_REQUEST, Json(json!({"error": "primary_url is required"})))
 			.into_response();
 	}
 
-	match services
+	if let Err(e) = services
 		.replication
 		.demote(body.primary_url.clone())
 		.await
 	{
-		| Ok(()) => Json(serde_json::json!({
-			"status": "demoted",
-			"primary_url": body.primary_url,
-		}))
-		.into_response(),
-		| Err(e) => (StatusCode::CONFLICT, Json(serde_json::json!({"error": e.to_string()})))
-			.into_response(),
+		return (StatusCode::CONFLICT, Json(json!({"error": e.to_string()}))).into_response();
 	}
+
+	Json(json!({
+		"status": "demoted",
+		"primary_url": body.primary_url,
+	}))
+	.into_response()
 }
 
 /// Creates a temporary directory that is automatically removed on drop.
@@ -313,24 +321,22 @@ pub(crate) async fn replication_demote(
 /// Instead, we create a uniquely-named subdirectory in the OS temp dir and
 /// delete it ourselves.
 fn tempfile_checkpoint_dir() -> Result<TempDir> {
-	use std::time::{SystemTime, UNIX_EPOCH};
+	use std::{env::temp_dir, process};
 
-	let ts = SystemTime::now()
-		.duration_since(UNIX_EPOCH)
-		.unwrap_or_default()
-		.as_nanos();
-	let dir =
-		std::env::temp_dir().join(format!("tuwunel-checkpoint-{ts}-{}", std::process::id()));
-	std::fs::create_dir_all(&dir).map_err(|e| tuwunel_core::err!(Database("{e}")))?;
+	let ts = now().as_nanos();
+	let dir = temp_dir().join(format!("tuwunel-checkpoint-{ts}-{}", process::id()));
+
+	std::fs::create_dir_all(&dir).map_err(|e| err!(Database("{e}")))?;
+
 	Ok(TempDir(dir))
 }
 
-struct TempDir(std::path::PathBuf);
+struct TempDir(PathBuf);
 
 impl TempDir {
-	fn path(&self) -> &std::path::Path { &self.0 }
+	fn path(&self) -> &Path { &self.0 }
 }
 
 impl Drop for TempDir {
-	fn drop(&mut self) { let _: std::io::Result<()> = std::fs::remove_dir_all(&self.0); }
+	fn drop(&mut self) { std::fs::remove_dir_all(&self.0).ok(); }
 }

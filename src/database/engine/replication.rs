@@ -3,25 +3,16 @@
 //! Provides the WAL wire frame format, RocksDB checkpoint creation,
 //! file-deletion guards, and WAL iterator access for the replication system.
 
-use std::{
-	path::Path,
-	time::{SystemTime, UNIX_EPOCH},
-};
+use std::path::Path;
 
 use rocksdb::checkpoint::Checkpoint;
-use tuwunel_core::{Err, Result, implement};
+use tuwunel_core::{
+	Err, Result, expected, implement,
+	utils::{math::Expected, time::now_millis},
+};
 
 use super::Engine;
 use crate::util::map_err;
-
-// ── Wire frame
-// ─────────────────────────────────────────────────────────────────
-
-pub const FRAME_TYPE_DATA: u8 = 0x01;
-pub const FRAME_TYPE_HEARTBEAT: u8 = 0x02;
-
-/// Length of a frame header in bytes (everything before `batch_data`).
-pub const FRAME_HEADER_LEN: usize = 33;
 
 /// A single replication frame transmitted over the HTTP WAL stream.
 ///
@@ -39,28 +30,40 @@ pub const FRAME_HEADER_LEN: usize = 33;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WalFrame {
 	pub frame_type: u8,
+
 	/// Primary's sequence number for the first record in this batch.
 	pub sequence: u64,
+
 	/// How many WAL sequence numbers this batch consumes.
 	/// Secondary's next resume point = `sequence + count`.
 	pub count: u64,
+
 	/// Unix milliseconds when the primary wrote this batch.
 	pub timestamp_ms: u64,
+
 	/// CRC32 of `batch_data`. Zero for heartbeats.
 	pub crc32: u32,
+
 	/// Raw WriteBatch bytes. Empty for heartbeats.
 	pub batch_data: Vec<u8>,
 }
 
+/// Length of a frame header in bytes (everything before `batch_data`).
+pub const FRAME_HEADER_LEN: usize = 33;
+
+pub const FRAME_TYPE_DATA: u8 = 0x01;
+pub const FRAME_TYPE_HEARTBEAT: u8 = 0x02;
+
 impl WalFrame {
 	/// Create a heartbeat frame carrying the primary's current sequence.
 	#[must_use]
+	#[inline]
 	pub fn heartbeat(primary_sequence: u64) -> Self {
 		Self {
 			frame_type: FRAME_TYPE_HEARTBEAT,
 			sequence: primary_sequence,
 			count: 0,
-			timestamp_ms: now_ms(),
+			timestamp_ms: now_millis(),
 			crc32: 0,
 			batch_data: Vec::new(),
 		}
@@ -68,13 +71,14 @@ impl WalFrame {
 
 	/// Create a data frame from a WAL batch. CRC is computed automatically.
 	#[must_use]
+	#[inline]
 	pub fn data(sequence: u64, count: u64, batch_data: Vec<u8>) -> Self {
 		let crc32 = crc32fast::hash(&batch_data);
 		Self {
 			frame_type: FRAME_TYPE_DATA,
 			sequence,
 			count,
-			timestamp_ms: now_ms(),
+			timestamp_ms: now_millis(),
 			crc32,
 			batch_data,
 		}
@@ -97,10 +101,13 @@ impl WalFrame {
 	/// Encode the frame to bytes for writing to the HTTP stream.
 	#[must_use]
 	pub fn encode(&self) -> Vec<u8> {
-		#[allow(clippy::cast_possible_truncation, clippy::as_conversions)]
-		let batch_len = self.batch_data.len() as u32;
-		#[allow(clippy::arithmetic_side_effects)]
-		let mut buf = Vec::with_capacity(FRAME_HEADER_LEN + self.batch_data.len());
+		let batch_data_len = self.batch_data.len();
+		let batch_len: u32 = batch_data_len
+			.try_into()
+			.expect("batch_data length overflowed u32");
+
+		let mut buf = Vec::with_capacity(expected!(FRAME_HEADER_LEN + batch_data_len));
+
 		buf.push(self.frame_type);
 		buf.extend_from_slice(&self.sequence.to_le_bytes());
 		buf.extend_from_slice(&self.count.to_le_bytes());
@@ -117,10 +124,10 @@ impl WalFrame {
 	/// buffer is too short to contain a complete frame, or if the CRC does
 	/// not match.
 	pub fn decode(buf: &[u8]) -> Result<(Self, usize)> {
-		if buf.len() < FRAME_HEADER_LEN {
+		let buf_len = buf.len();
+		if buf_len < FRAME_HEADER_LEN {
 			return Err!(
-				"WAL frame header truncated: {} bytes < {FRAME_HEADER_LEN} required",
-				buf.len()
+				"WAL frame header truncated: {buf_len} bytes < {FRAME_HEADER_LEN} required"
 			);
 		}
 
@@ -129,17 +136,14 @@ impl WalFrame {
 		let count = u64::from_le_bytes(buf[9..17].try_into().expect("8 bytes"));
 		let timestamp_ms = u64::from_le_bytes(buf[17..25].try_into().expect("8 bytes"));
 		let crc32 = u32::from_le_bytes(buf[25..29].try_into().expect("4 bytes"));
-		#[allow(clippy::as_conversions)]
-		let batch_len = u32::from_le_bytes(buf[29..33].try_into().expect("4 bytes")) as usize;
+		let batch_len = u32::from_le_bytes(buf[29..33].try_into().expect("4 bytes"));
 
-		#[allow(clippy::arithmetic_side_effects)]
-		let total = FRAME_HEADER_LEN + batch_len;
-		if buf.len() < total {
-			return Err!("WAL frame body truncated: need {total} bytes, have {}", buf.len());
+		let total = FRAME_HEADER_LEN.expected_add(batch_len.try_into().expect("u32 to usize"));
+		if buf_len < total {
+			return Err!("WAL frame body truncated: need {total} bytes, have {buf_len}");
 		}
 
 		let batch_data = buf[FRAME_HEADER_LEN..total].to_vec();
-
 		if frame_type == FRAME_TYPE_DATA && !batch_data.is_empty() {
 			let actual = crc32fast::hash(&batch_data);
 			if actual != crc32 {
@@ -149,17 +153,16 @@ impl WalFrame {
 			}
 		}
 
-		Ok((
-			Self {
-				frame_type,
-				sequence,
-				count,
-				timestamp_ms,
-				crc32,
-				batch_data,
-			},
-			total,
-		))
+		let frame = Self {
+			frame_type,
+			sequence,
+			count,
+			timestamp_ms,
+			crc32,
+			batch_data,
+		};
+
+		Ok((frame, total))
 	}
 }
 
@@ -177,18 +180,6 @@ pub(crate) fn batch_count_from_bytes(data: &[u8]) -> u64 {
 	u64::from(u32::from_le_bytes(data[8..12].try_into().expect("4 bytes")))
 }
 
-fn now_ms() -> u64 {
-	#[allow(clippy::cast_possible_truncation, clippy::as_conversions)]
-	let ms = SystemTime::now()
-		.duration_since(UNIX_EPOCH)
-		.unwrap_or_default()
-		.as_millis() as u64;
-	ms
-}
-
-// ── Engine methods
-// ─────────────────────────────────────────────────────────────
-
 /// Create a RocksDB checkpoint at `dest`.
 ///
 /// A checkpoint is a consistent point-in-time snapshot consisting of
@@ -200,6 +191,7 @@ pub fn create_checkpoint(&self, dest: &Path) -> Result<u64> {
 	checkpoint
 		.create_checkpoint(dest)
 		.map_err(map_err)?;
+
 	Ok(self.db.latest_sequence_number())
 }
 
@@ -209,12 +201,14 @@ pub fn create_checkpoint(&self, dest: &Path) -> Result<u64> {
 /// to ensure files are not removed while they are being transferred. Must
 /// be paired with a subsequent `enable_file_deletions` call.
 #[implement(Engine)]
+#[inline]
 pub fn disable_file_deletions(&self) -> Result {
 	self.db.disable_file_deletions().map_err(map_err)
 }
 
 /// Re-enable file deletion after a `disable_file_deletions` call.
 #[implement(Engine)]
+#[inline]
 pub fn enable_file_deletions(&self) -> Result { self.db.enable_file_deletions().map_err(map_err) }
 
 /// Returns the current latest WAL sequence number of this instance.
@@ -222,6 +216,7 @@ pub fn enable_file_deletions(&self) -> Result { self.db.enable_file_deletions().
 /// Used by the primary to populate heartbeat frames so the secondary knows
 /// the primary is alive and can gauge replication lag.
 #[implement(Engine)]
+#[inline]
 pub fn latest_wal_sequence(&self) -> u64 { self.db.latest_sequence_number() }
 
 /// Return a WAL iterator starting at `since`.
@@ -231,6 +226,7 @@ pub fn latest_wal_sequence(&self) -> u64 { self.db.latest_sequence_number() }
 /// `is_wal_gap_error` on the result to distinguish this case from other
 /// errors.
 #[implement(Engine)]
+#[inline]
 pub fn wal_updates_since(&self, since: u64) -> Result<rocksdb::DBWALIterator> {
 	self.db.get_updates_since(since).map_err(map_err)
 }
@@ -254,13 +250,11 @@ impl Iterator for SendWalIter {
 
 	fn next(&mut self) -> Option<Self::Item> {
 		self.0.next().map(|result| {
-			result
-				.map(|(seq, batch)| {
-					let data = batch.data().to_vec();
-					let count = batch_count_from_bytes(&data);
-					WalFrame::data(seq, count, data)
-				})
-				.map_err(map_err)
+			result.map_err(map_err).map(|(seq, batch)| {
+				let data = batch.data().to_vec();
+				let count = batch_count_from_bytes(&data);
+				WalFrame::data(seq, count, data)
+			})
 		})
 	}
 }
@@ -277,12 +271,13 @@ impl Iterator for SendWalIter {
 pub fn wal_frame_iter(
 	&self,
 	since: u64,
-) -> Result<Box<dyn Iterator<Item = Result<WalFrame>> + Send>> {
+) -> Result<impl Iterator<Item = Result<WalFrame>> + Send> {
 	let iter = self
 		.db
 		.get_updates_since(since)
 		.map_err(map_err)?;
-	Ok(Box::new(SendWalIter(iter)))
+
+	Ok(SendWalIter(iter))
 }
 
 /// Returns `true` if `err` indicates the requested WAL sequence is older
@@ -297,8 +292,6 @@ pub fn is_wal_gap_error(err: &tuwunel_core::Error) -> bool {
 		|| msg.contains("data loss")
 		|| msg.contains("not available")
 }
-
-// ── Tests ──────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {

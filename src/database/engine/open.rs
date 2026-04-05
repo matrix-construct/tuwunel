@@ -21,6 +21,10 @@ pub(crate) async fn open(ctx: Arc<Context>, desc: &[Descriptor]) -> Result<Arc<S
 	let server = &ctx.server;
 	let config = &server.config;
 	let path = &config.database_path;
+	let secondary_path = config
+		.rocksdb_secondary_path
+		.as_ref()
+		.unwrap_or(path);
 
 	context::before_open(&ctx, path)?;
 	let db_opts = db_options(
@@ -42,10 +46,6 @@ pub(crate) async fn open(ctx: Arc<Context>, desc: &[Descriptor]) -> Result<Arc<S
 	let db = if config.rocksdb_read_only {
 		Db::open_cf_descriptors_read_only(&db_opts, path, cfds, false)
 	} else if config.rocksdb_secondary {
-		let secondary_path = config
-			.rocksdb_secondary_path
-			.as_ref()
-			.unwrap_or(path);
 		Db::open_cf_descriptors_as_secondary(&db_opts, path, secondary_path, cfds)
 	} else {
 		Db::open_cf_descriptors(&db_opts, path, cfds)

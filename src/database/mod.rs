@@ -98,7 +98,7 @@ impl Database {
 	pub fn wal_frame_iter(
 		&self,
 		since: u64,
-	) -> Result<Box<dyn Iterator<Item = Result<WalFrame>> + Send>> {
+	) -> Result<impl Iterator<Item = Result<WalFrame>> + Send> {
 		self.engine.wal_frame_iter(since)
 	}
 
@@ -134,12 +134,9 @@ impl Database {
 		if result.is_not_found() {
 			return Ok(0);
 		}
-		let handle = result?;
-		if handle.len() >= 8 {
-			Ok(u64::from_le_bytes(handle[..8].try_into().expect("8 bytes")))
-		} else {
-			Ok(0)
-		}
+
+		let handle: &[u8] = &result?;
+		Ok(u64::from_le_bytes(handle.try_into()?))
 	}
 
 	/// Persist the secondary's WAL resume cursor to the `replication_meta`
@@ -147,6 +144,7 @@ impl Database {
 	pub fn set_replication_resume_seq(&self, seq: u64) -> Result {
 		let map = &self["replication_meta"];
 		map.insert(b"primary_resume_seq", seq.to_le_bytes());
+
 		Ok(())
 	}
 }
