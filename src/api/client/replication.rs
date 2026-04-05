@@ -28,7 +28,7 @@ use futures::{SinkExt, StreamExt, channel::mpsc};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::time::sleep;
-use tuwunel_core::{Result, err, utils::time::now};
+use tuwunel_core::{Err, Result, err, utils::time::now};
 use tuwunel_database::{WalFrame, is_wal_gap_error};
 
 /// Query parameters for `GET /_tuwunel/replication/wal`.
@@ -80,7 +80,7 @@ pub(crate) async fn replication_status(
 pub(crate) async fn replication_wal(
 	State(services): State<crate::State>,
 	Query(params): Query<WalParams>,
-) -> Response {
+) -> impl IntoResponse {
 	let since = params.since.unwrap_or(0);
 	let db = services.db.clone();
 	let interval_ms = services
@@ -101,12 +101,14 @@ pub(crate) async fn replication_wal(
 
 	if let Err(ref e) = gap_check {
 		if is_wal_gap_error(e) {
-			return (StatusCode::GONE, "WAL gap: secondary must re-sync from a fresh checkpoint")
-				.into_response();
+			return Err!(HttpJson(GONE, {
+				"error": "WAL gap: secondary must re-sync from a fresh checkpoint"
+			}));
 		}
 
-		return (StatusCode::INTERNAL_SERVER_ERROR, format!("WAL iterator error: {e}"))
-			.into_response();
+		return Err!(HttpJson(INTERNAL_SERVER_ERROR, {
+			"error": format!("WAL iterator error: {e}")
+		}))
 	}
 
 	// Channel that bridges the blocking WAL reader with the async HTTP body.
@@ -167,13 +169,12 @@ pub(crate) async fn replication_wal(
 		}
 	});
 
-	let stream = rx.map(Ok::<_, Infallible>);
-	Response::builder()
+	Ok(Response::builder()
 		.status(StatusCode::OK)
 		.header(header::CONTENT_TYPE, "application/octet-stream")
 		.header("x-tuwunel-role", "primary")
-		.body(Body::from_stream(stream))
-		.expect("Failed to build WAL streaming response")
+		.body(Body::from_stream(rx.map(Ok::<_, Infallible>)))
+		.expect("Failed to build WAL streaming response"))
 }
 
 /// `GET /_tuwunel/replication/checkpoint`
@@ -185,7 +186,9 @@ pub(crate) async fn replication_wal(
 ///
 /// The caller is responsible for pausing WAL consumption while restoring the
 /// checkpoint and then resuming from `X-Tuwunel-Checkpoint-Sequence`.
-pub(crate) async fn replication_checkpoint(State(services): State<crate::State>) -> Response {
+pub(crate) async fn replication_checkpoint(
+	State(services): State<crate::State>,
+) -> impl IntoResponse {
 	let db = services.db.clone();
 
 	// Build the checkpoint and tar it in a blocking thread.
@@ -214,19 +217,20 @@ pub(crate) async fn replication_checkpoint(State(services): State<crate::State>)
 		.await;
 
 	match result {
-		| Ok(Ok((bytes, seq))) => Response::builder()
+		| Ok(Ok((bytes, seq))) => Ok(Response::builder()
 			.status(StatusCode::OK)
 			.header(header::CONTENT_TYPE, "application/x-tar")
 			.header("x-tuwunel-checkpoint-sequence", seq.to_string())
 			.body(Body::from(bytes))
-			.expect("Failed to build checkpoint response"),
+			.expect("Failed to build checkpoint response")),
 
-		| Ok(Err(e)) =>
-			(StatusCode::INTERNAL_SERVER_ERROR, format!("Checkpoint creation failed: {e}"))
-				.into_response(),
+		| Ok(Err(e)) => Err!(HttpJson(INTERNAL_SERVER_ERROR, {
+			"error": format!("Checkpoint creation failed: {e}")
+		})),
 
-		| Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("Spawn_blocking panicked: {e}"))
-			.into_response(),
+		| Err(e) => Err!(HttpJson(INTERNAL_SERVER_ERROR, {
+			"error": format!("Spawn_blocking panicked: {e}")
+		})),
 	}
 }
 
@@ -245,8 +249,7 @@ pub(crate) async fn replication_promote(
 	State(services): State<crate::State>,
 ) -> impl IntoResponse {
 	if services.replication.is_promoted() {
-		return (StatusCode::CONFLICT, Json(json!({"error": "already promoted"})))
-			.into_response();
+		return Err!(HttpJson(CONFLICT, {"error": "already promoted"}));
 	}
 
 	if services
@@ -255,16 +258,14 @@ pub(crate) async fn replication_promote(
 		.rocksdb_primary_url
 		.is_none()
 	{
-		return (
-			StatusCode::CONFLICT,
-			Json(json!({"error": "not a secondary; no rocksdb_primary_url configured"})),
-		)
-			.into_response();
+		return Err!(HttpJson(CONFLICT, {
+			"error": "not a secondary; no rocksdb_primary_url configured"
+		}));
 	}
 
 	services.replication.promote();
 
-	Json(json!({"status": "promoted"})).into_response()
+	Ok(Json(json!({"status": "promoted"})))
 }
 
 /// Request body for `POST /_tuwunel/replication/demote`.
@@ -295,8 +296,7 @@ pub(crate) async fn replication_demote(
 	Json(body): Json<DemoteBody>,
 ) -> impl IntoResponse {
 	if body.primary_url.is_empty() {
-		return (StatusCode::BAD_REQUEST, Json(json!({"error": "primary_url is required"})))
-			.into_response();
+		return Err!(HttpJson(BAD_REQUEST, {"error": "primary_url is required"}));
 	}
 
 	if let Err(e) = services
@@ -304,14 +304,13 @@ pub(crate) async fn replication_demote(
 		.demote(body.primary_url.clone())
 		.await
 	{
-		return (StatusCode::CONFLICT, Json(json!({"error": e.to_string()}))).into_response();
+		return Err!(HttpJson(CONFLICT, {"error": e.to_string()}));
 	}
 
-	Json(json!({
+	Ok(Json(json!({
 		"status": "demoted",
 		"primary_url": body.primary_url,
-	}))
-	.into_response()
+	})))
 }
 
 /// Creates a temporary directory that is automatically removed on drop.
@@ -326,7 +325,7 @@ fn tempfile_checkpoint_dir() -> Result<TempDir> {
 	let ts = now().as_nanos();
 	let dir = temp_dir().join(format!("tuwunel-checkpoint-{ts}-{}", process::id()));
 
-	std::fs::create_dir_all(&dir).map_err(|e| err!(Database("{e}")))?;
+	std::fs::create_dir_all(&dir).map_err(|e| err!("{e}"))?;
 
 	Ok(TempDir(dir))
 }
