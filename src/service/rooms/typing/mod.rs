@@ -3,7 +3,11 @@ use std::{collections::BTreeMap, sync::Arc};
 use futures::StreamExt;
 use ruma::{
 	OwnedRoomId, OwnedUserId, RoomId, UserId,
-	api::federation::transactions::edu::{Edu, TypingContent},
+	api::{
+		appservice::event::push_events::v1::EphemeralData,
+		federation::transactions::edu::{Edu, TypingContent},
+	},
+	events::{EphemeralRoomEvent, typing::TypingEventContent},
 };
 use tokio::sync::{RwLock, broadcast};
 use tuwunel_core::{
@@ -65,6 +69,9 @@ impl Service {
 			trace!("receiver found what it was looking for and is no longer interested");
 		}
 
+		// update appservices
+		self.appservice_send(room_id).await?;
+
 		// update federation
 		if self.services.globals.user_is_local(user_id) {
 			self.federation_send(room_id, user_id, true)
@@ -99,6 +106,9 @@ impl Service {
 		{
 			trace!("receiver found what it was looking for and is no longer interested");
 		}
+
+		// update appservices
+		self.appservice_send(room_id).await?;
 
 		// update federation
 		if self.services.globals.user_is_local(user_id) {
@@ -160,6 +170,9 @@ impl Service {
 				trace!("receiver found what it was looking for and is no longer interested");
 			}
 
+			// update appservices
+			self.appservice_send(room_id).await?;
+
 			// update federation
 			for user in &removable {
 				if self.services.globals.user_is_local(user) {
@@ -181,6 +194,36 @@ impl Service {
 			.get(room_id)
 			.copied()
 			.unwrap_or(0))
+	}
+
+	/// Returns the typing content with all typing users in the room.
+	async fn typings_content(&self, room_id: &RoomId) -> TypingEventContent {
+		let room_typing_indicators = self.typing.read().await.get(room_id).cloned();
+
+		let Some(typing_indicators) = room_typing_indicators else {
+			return TypingEventContent { user_ids: Vec::new() };
+		};
+
+		TypingEventContent {
+			user_ids: typing_indicators.into_keys().collect(),
+		}
+	}
+
+	/// Sends a typing EDU to all appservices interested in the room.
+	async fn appservice_send(&self, room_id: &RoomId) -> Result {
+		let content = self.typings_content(room_id).await;
+		let edu =
+			EphemeralData::Typing(EphemeralRoomEvent { content, room_id: room_id.to_owned() });
+
+		let mut buf = EduBuf::new();
+		serde_json::to_writer(&mut buf, &edu).expect("Serialized EphemeralData::Typing");
+
+		self.services
+			.sending
+			.send_edu_appservice_room(room_id, buf)
+			.await?;
+
+		Ok(())
 	}
 
 	/// Returns a new typing EDU.

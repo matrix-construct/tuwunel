@@ -210,6 +210,55 @@ impl Service {
 		self.send_edu_servers(servers, serialized).await
 	}
 
+	/// Queue an EDU for delivery to a specific appservice.
+	#[tracing::instrument(skip(self, serialized), level = "debug")]
+	pub fn send_edu_appservice(&self, appservice_id: String, serialized: EduBuf) -> Result {
+		let dest = Destination::Appservice(appservice_id);
+		let event = SendingEvent::Edu(serialized);
+		let _cork = self.db.db.cork();
+		let keys = self.db.queue_requests(once((&event, &dest)));
+		self.dispatch(Msg {
+			dest,
+			event,
+			queue_id: keys
+				.into_iter()
+				.next()
+				.expect("request queue key"),
+		})
+	}
+
+	/// Sends an EDU to all appservices interested in a room.
+	/// The `serialized` data must be in `EphemeralData` format, not federation
+	/// `Edu`.
+	#[tracing::instrument(skip(self, room_id, serialized), level = "debug")]
+	pub async fn send_edu_appservice_room(&self, room_id: &RoomId, serialized: EduBuf) -> Result {
+		for appservice in self.services.appservice.read().await.values() {
+			if !appservice.registration.receive_ephemeral {
+				continue;
+			}
+
+			let matching_aliases = self
+				.services
+				.alias
+				.local_aliases_for_room(room_id)
+				.ready_any(|room_alias| appservice.aliases.is_match(room_alias.as_str()))
+				.await;
+
+			if appservice.rooms.is_match(room_id.as_str())
+				|| matching_aliases
+				|| self
+					.services
+					.state_cache
+					.appservice_in_room(room_id, appservice)
+					.await
+			{
+				self.send_edu_appservice(appservice.registration.id.clone(), serialized.clone())?;
+			}
+		}
+
+		Ok(())
+	}
+
 	#[tracing::instrument(skip(self, servers, serialized), level = "debug")]
 	pub async fn send_edu_servers<'a, S>(&self, servers: S, serialized: EduBuf) -> Result
 	where

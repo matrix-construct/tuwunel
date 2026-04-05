@@ -5,6 +5,7 @@ use std::{collections::BTreeMap, sync::Arc};
 use futures::{Stream, TryFutureExt, try_join};
 use ruma::{
 	OwnedEventId, OwnedUserId, RoomId, UserId,
+	api::appservice::event::push_events::v1::EphemeralData,
 	events::{
 		AnySyncEphemeralRoomEvent, SyncEphemeralRoomEvent,
 		receipt::{ReceiptEvent, ReceiptEventContent, Receipts},
@@ -21,6 +22,7 @@ use tuwunel_core::{
 };
 
 use self::data::{Data, ReceiptItem};
+use crate::sending::EduBuf;
 
 pub struct Service {
 	services: Arc<crate::services::OnceServices>,
@@ -49,6 +51,19 @@ impl Service {
 	) {
 		self.db
 			.readreceipt_update(user_id, room_id, event)
+			.await;
+
+		// update appservices
+		let edu = EphemeralData::Receipt(ReceiptEvent {
+			content: event.content.clone(),
+			room_id: room_id.to_owned(),
+		});
+		let mut buf = EduBuf::new();
+		serde_json::to_writer(&mut buf, &edu).expect("Serialized EphemeralData::Receipt");
+		let _: Result = self
+			.services
+			.sending
+			.send_edu_appservice_room(room_id, buf)
 			.await;
 
 		if self.services.globals.user_is_local(user_id) {
