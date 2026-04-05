@@ -9,21 +9,20 @@ mod logger;
 mod memory_usage;
 mod open;
 mod repair;
-pub(crate) mod replication;
+pub(crate) mod wal;
+
 use std::{
 	ffi::CStr,
+	path::Path,
 	sync::{
 		Arc,
 		atomic::{AtomicU32, Ordering},
 	},
 };
 
-pub use replication::{
-	FRAME_HEADER_LEN, FRAME_TYPE_DATA, FRAME_TYPE_HEARTBEAT, WalFrame, is_wal_gap_error,
-};
 use rocksdb::{
 	AsColumnFamilyRef, BoundColumnFamily, DBCommon, DBWithThreadMode, MultiThreaded,
-	WaitForCompactOptions,
+	WaitForCompactOptions, checkpoint::Checkpoint,
 };
 use tuwunel_core::{Err, Result, debug, info, warn};
 
@@ -46,6 +45,20 @@ pub struct Engine {
 pub(crate) type Db = DBWithThreadMode<MultiThreaded>;
 
 impl Engine {
+	/// Create a RocksDB checkpoint at `dest`.
+	///
+	/// A checkpoint is a consistent point-in-time snapshot consisting of
+	/// hard-links to existing SST files. It is created atomically and returns
+	/// the sequence number at checkpoint creation time.
+	pub fn create_checkpoint(&self, dest: &Path) -> Result<u64> {
+		let checkpoint = Checkpoint::new(&self.db).map_err(map_err)?;
+		checkpoint
+			.create_checkpoint(dest)
+			.map_err(map_err)?;
+
+		Ok(self.db.latest_sequence_number())
+	}
+
 	#[tracing::instrument(
 		level = "info",
 		skip_all,
@@ -87,15 +100,35 @@ impl Engine {
 			.map_err(map_err)
 	}
 
+	/// Prevent RocksDB from deleting obsolete files.
+	///
+	/// Call this before initiating a checkpoint transfer or live-file listing
+	/// to ensure files are not removed while they are being transferred. Must
+	/// be paired with a subsequent `enable_file_deletions` call.
+	#[tracing::instrument(level = "debug", skip_all)]
+	#[inline]
+	pub fn disable_file_deletions(&self) -> Result {
+		self.db.disable_file_deletions().map_err(map_err)
+	}
+
+	/// Re-enable file deletion after a `disable_file_deletions` call.
+	#[tracing::instrument(level = "debug", skip_all)]
+	#[inline]
+	pub fn enable_file_deletions(&self) -> Result {
+		self.db.enable_file_deletions().map_err(map_err)
+	}
+
 	#[tracing::instrument(level = "info", skip_all)]
 	pub fn sync(&self) -> Result { result(DBCommon::flush_wal(&self.db, true)) }
 
 	#[tracing::instrument(level = "debug", skip_all)]
 	pub fn flush(&self) -> Result { result(DBCommon::flush_wal(&self.db, false)) }
 
+	#[tracing::instrument(level = "trace", skip_all)]
 	#[inline]
 	pub(crate) fn cork(&self) { self.corks.fetch_add(1, Ordering::Relaxed); }
 
+	#[tracing::instrument(level = "trace", skip_all)]
 	#[inline]
 	pub(crate) fn uncork(&self) { self.corks.fetch_sub(1, Ordering::Relaxed); }
 

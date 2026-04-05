@@ -7,7 +7,7 @@ use futures::{FutureExt, future::join, pin_mut};
 use tuwunel_core::{
 	Error, Result, Server, debug, debug_error, debug_info, error, info, utils::BoolExt,
 };
-use tuwunel_service::Services;
+use tuwunel_service::{Services, cluster::maybe_bootstrap_checkpoint};
 
 use crate::{handle::ServerHandle, serve};
 
@@ -79,6 +79,7 @@ pub(crate) async fn run(services: Arc<Services>) -> Result {
 pub(crate) async fn start(server: Arc<Server>) -> Result<Arc<Services>> {
 	debug!("Starting...");
 
+	maybe_bootstrap_checkpoint(&server).await?;
 	let services = Services::build(server).await?.start().await?;
 
 	#[cfg(all(feature = "systemd", target_os = "linux"))]

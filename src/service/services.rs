@@ -9,10 +9,10 @@ use tuwunel_database::Database;
 
 pub(crate) use crate::OnceServices;
 use crate::{
-	account_data, admin, appservice, client, config, deactivate, emergency, federation, globals,
-	key_backups,
+	account_data, admin, appservice, client, cluster, config, deactivate, emergency, federation,
+	globals, key_backups,
 	manager::Manager,
-	media, membership, oauth, presence, pusher, registration_tokens, replication, resolver,
+	media, membership, oauth, presence, pusher, registration_tokens, resolver,
 	rooms::{self, retention},
 	sending, server_keys,
 	service::{Args, Service},
@@ -25,6 +25,7 @@ pub struct Services {
 	pub appservice: Arc<appservice::Service>,
 	pub config: Arc<config::Service>,
 	pub client: Arc<client::Service>,
+	pub cluster: Arc<cluster::Service>,
 	pub emergency: Arc<emergency::Service>,
 	pub globals: Arc<globals::Service>,
 	pub key_backups: Arc<key_backups::Service>,
@@ -64,7 +65,6 @@ pub struct Services {
 	pub oauth: Arc<oauth::Service>,
 	pub retention: Arc<retention::Service>,
 	pub registration_tokens: Arc<registration_tokens::Service>,
-	pub replication: Arc<replication::Service>,
 
 	manager: Mutex<Option<Arc<Manager>>>,
 	pub server: Arc<Server>,
@@ -73,7 +73,6 @@ pub struct Services {
 
 #[implement(Services)]
 pub async fn build(server: Arc<Server>) -> Result<Arc<Self>> {
-	Self::maybe_bootstrap_checkpoint(&server).await?;
 	let db = Database::open(&server).await?;
 	let services = Arc::new(OnceServices::default());
 	let args = Args {
@@ -127,7 +126,7 @@ pub async fn build(server: Arc<Server>) -> Result<Arc<Self>> {
 		oauth: oauth::Service::build(&args)?,
 		retention: retention::Service::build(&args)?,
 		registration_tokens: registration_tokens::Service::build(&args)?,
-		replication: replication::Service::build(&args)?,
+		cluster: cluster::Service::build(&args)?,
 
 		manager: Mutex::new(None),
 		server,
@@ -190,7 +189,7 @@ pub(crate) fn services(&self) -> impl Iterator<Item = Arc<dyn Service>> + Send {
 		cast!(self.oauth),
 		cast!(self.retention),
 		cast!(self.registration_tokens),
-		cast!(self.replication),
+		cast!(self.cluster),
 	]
 	.into_iter()
 }
@@ -274,107 +273,4 @@ pub async fn memory_usage(&self) -> Result<String> {
 			Ok(out)
 		})
 		.await
-}
-
-#[implement(Services)]
-async fn maybe_bootstrap_checkpoint(server: &Arc<Server>) -> Result {
-	use bytes::Bytes;
-
-	let primary_url = match server.config.rocksdb_primary_url.as_ref() {
-		| Some(url) => url.clone(),
-		| None => return Ok(()),
-	};
-
-	let db_path = server.config.database_path.clone();
-	let sidecar = db_path
-		.parent()
-		.unwrap_or(&db_path)
-		.join("_replication_needs_bootstrap");
-
-	let current_file = db_path.join("CURRENT");
-	let needs_bootstrap = sidecar.exists() || !current_file.exists() || {
-		std::fs::metadata(&current_file)
-			.map(|m| m.len() == 0)
-			.unwrap_or(true)
-	};
-
-	if !needs_bootstrap {
-		return Ok(());
-	}
-
-	let token = server
-		.config
-		.rocksdb_replication_token
-		.as_deref()
-		.unwrap_or("");
-
-	info!("Pre-open bootstrap: downloading checkpoint from {primary_url}");
-
-	let client = reqwest::Client::builder()
-		.connect_timeout(std::time::Duration::from_secs(10))
-		.build()
-		.map_err(|e| tuwunel_core::err!(Database("Failed to build HTTP client: {e}")))?;
-
-	let resp = client
-		.get(format!("{primary_url}/_tuwunel/replication/checkpoint"))
-		.header("x-tuwunel-replication-token", token)
-		.send()
-		.await
-		.map_err(|e| tuwunel_core::err!(Database("Checkpoint request failed: {e}")))?;
-
-	if !resp.status().is_success() {
-		return Err(tuwunel_core::err!(Database(
-			"Primary returned {} for checkpoint",
-			resp.status()
-		)));
-	}
-
-	let seq: u64 = resp
-		.headers()
-		.get("x-tuwunel-checkpoint-sequence")
-		.and_then(|v| v.to_str().ok())
-		.and_then(|s| s.parse().ok())
-		.unwrap_or(0);
-
-	let tar_bytes: Bytes = resp
-		.bytes()
-		.await
-		.map_err(|e| tuwunel_core::err!(Database("Reading checkpoint body: {e}")))?;
-
-	let parent = db_path.parent().unwrap_or(&db_path);
-	let staging = parent.join("_replication_staging");
-	let backup = parent.join("_replication_backup");
-
-	if staging.exists() {
-		std::fs::remove_dir_all(&staging)
-			.map_err(|e| tuwunel_core::err!(Database("Removing staging dir: {e}")))?;
-	}
-	std::fs::create_dir_all(&staging)
-		.map_err(|e| tuwunel_core::err!(Database("Creating staging dir: {e}")))?;
-
-	let cursor = std::io::Cursor::new(&*tar_bytes);
-	let mut archive = tar::Archive::new(cursor);
-	archive
-		.unpack(&staging)
-		.map_err(|e| tuwunel_core::err!(Database("Unpacking checkpoint: {e}")))?;
-
-	let checkpoint_src = staging.join("checkpoint");
-
-	if backup.exists() {
-		std::fs::remove_dir_all(&backup)
-			.map_err(|e| tuwunel_core::err!(Database("Removing backup: {e}")))?;
-	}
-	if db_path.exists() {
-		std::fs::rename(&db_path, &backup)
-			.map_err(|e| tuwunel_core::err!(Database("Moving db to backup: {e}")))?;
-	}
-	std::fs::rename(&checkpoint_src, &db_path)
-		.map_err(|e| tuwunel_core::err!(Database("Moving checkpoint to db_path: {e}")))?;
-
-	let _: std::io::Result<()> = std::fs::remove_dir_all(&staging);
-	std::fs::write(&sidecar, seq.to_string())
-		.map_err(|e| tuwunel_core::err!(Database("Writing bootstrap sidecar: {e}")))?;
-
-	info!("Pre-open bootstrap complete; resume_seq = {seq}. RocksDB will open clean checkpoint.");
-	Ok(())
 }

@@ -1,4 +1,5 @@
 mod appservice;
+mod cluster;
 mod server;
 mod uiaa;
 
@@ -36,8 +37,8 @@ use ruma::{
 use tuwunel_core::{Err, Error, Result, is_less_than, utils::result::LogDebugErr};
 use tuwunel_service::{Services, appservice::RegistrationInfo};
 
-pub(crate) use self::uiaa::auth_uiaa;
 use self::{appservice::auth_appservice, server::auth_server};
+pub(crate) use self::{cluster::check_replication_token, uiaa::auth_uiaa};
 use super::request::Request;
 
 enum Token {

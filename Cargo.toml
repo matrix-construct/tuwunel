@@ -112,9 +112,6 @@ version = "2.3"
 default-features = false
 features = ["serde", "std"]
 
-[workspace.dependencies.crc32fast]
-version = "1"
-
 [workspace.dependencies.cargo_toml]
 version = "0.22"
 default-features = false
@@ -279,11 +276,11 @@ version = "1.0"
 
 [workspace.dependencies.minicbor]
 version = "2.2"
-features = ["std"]
+features = ["alloc", "derive", "std"]
 
 [workspace.dependencies.minicbor-serde]
 version = "0.6"
-features = ["std"]
+features = ["alloc", "std"]
 
 [workspace.dependencies.nix]
 version = "0"
@@ -509,6 +506,7 @@ features = [
 
 [workspace.dependencies.tar]
 version = "0.4"
+default-features = false
 
 [workspace.dependencies.termimad]
 version = "0.34"

@@ -1,7 +1,6 @@
 mod args;
 mod auth;
 mod handler;
-mod replication_auth;
 mod request;
 mod response;
 pub mod state;
@@ -18,10 +17,12 @@ use tuwunel_core::{Server, err};
 
 use self::handler::RouterExt;
 pub(super) use self::{
-	args::Args as Ruma, auth::auth_uiaa, replication_auth::check_replication_token,
-	response::RumaResponse, state::State,
+	args::Args as Ruma,
+	auth::{auth_uiaa, check_replication_token},
+	response::RumaResponse,
+	state::State,
 };
-use crate::{client, oidc, server};
+use crate::{client, cluster, oidc, server};
 
 pub fn build(router: Router<State>, server: &Server, state: State) -> Router<State> {
 	let config = &server.config;
@@ -264,17 +265,19 @@ pub fn build(router: Router<State>, server: &Server, state: State) -> Router<Sta
 			.route("/_tuwunel/local_user_count", any(federation_disabled));
 	}
 
-	// Replication endpoints — protected by shared-secret token auth middleware.
+	// cluster endpoints — protected by shared-secret token auth middleware.
 	// The middleware extracts `State` from request extensions (set by with_state).
-	router = router.merge(
-		Router::<State>::new()
-			.route("/_tuwunel/replication/status", get(client::replication_status))
-			.route("/_tuwunel/replication/wal", get(client::replication_wal))
-			.route("/_tuwunel/replication/checkpoint", get(client::replication_checkpoint))
-			.route("/_tuwunel/replication/promote", post(client::replication_promote))
-			.route("/_tuwunel/replication/demote", post(client::replication_demote))
-			.layer(middleware::from_fn_with_state(state, check_replication_token)),
-	);
+	if config.rocksdb_replication_token.is_some() {
+		router = router.merge(
+			Router::<State>::new()
+				.route("/_tuwunel/cluster/status", get(cluster::get_status))
+				.route("/_tuwunel/cluster/sync", get(cluster::get_sync))
+				.route("/_tuwunel/cluster/checkpoint", get(cluster::get_checkpoint))
+				.route("/_tuwunel/cluster/promote", post(cluster::promote_route))
+				.route("/_tuwunel/cluster/demote", post(cluster::demote_route))
+				.layer(middleware::from_fn_with_state(state, check_replication_token)),
+		);
+	}
 
 	if config.allow_legacy_media {
 		router = router

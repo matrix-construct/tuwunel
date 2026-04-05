@@ -55,7 +55,6 @@ zstd_compression = [
 [dependencies]
 async-channel.workspace = true
 const-str.workspace = true
-crc32fast.workspace = true
 ctor.workspace = true
 futures.workspace = true
 log.workspace = true
