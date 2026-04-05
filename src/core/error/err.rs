@@ -43,6 +43,13 @@ macro_rules! Err {
 #[macro_export]
 #[collapse_debuginfo(yes)]
 macro_rules! err {
+	(HttpJson($statuscode:ident, $($args:tt)+)) => {
+		$crate::error::Error::HttpJson(
+			$crate::http::StatusCode::$statuscode,
+			::axum::Json(::serde_json::json!($($args)+))
+		)
+	};
+
 	(Request(Forbidden($level:ident!($($args:tt)+)))) => {{
 		let mut buf = String::new();
 		$crate::error::Error::Request(
@@ -133,7 +140,13 @@ macro_rules! err_log {
 			fields: $($fields)+,
 		};
 
-		($crate::error::visit)(&mut $out, LEVEL, &__CALLSITE, &mut valueset!(__CALLSITE.metadata().fields(), $($fields)+));
+		($crate::error::visit)(
+			&mut $out,
+			LEVEL,
+			&__CALLSITE,
+			&mut valueset!(__CALLSITE.metadata().fields(), $($fields)+)
+		);
+
 		($out).into()
 	}}
 }

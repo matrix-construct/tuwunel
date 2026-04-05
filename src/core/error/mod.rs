@@ -125,6 +125,8 @@ pub enum Error {
 	FeatureDisabled(Cow<'static, str>),
 	#[error("Remote server {0} responded with: {1}")]
 	Federation(ruma::OwnedServerName, ruma::api::client::error::Error),
+	#[error("{0}: {1:#?}")]
+	HttpJson(http::StatusCode, axum::Json<serde_json::Value>),
 	#[error("{0} in {1}")]
 	InconsistentRoomState(&'static str, ruma::OwnedRoomId),
 	#[error(transparent)]
@@ -217,6 +219,7 @@ impl Error {
 			| Self::BadRequest(kind, ..) => response::bad_request_code(kind),
 			| Self::Request(kind, _, code) => response::status_code(kind, *code),
 			| Self::Io(error) => response::io_error_code(error.kind()),
+			| Self::HttpJson(code, ..) => *code,
 			| Self::Reqwest(error) => error
 				.status()
 				.unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
