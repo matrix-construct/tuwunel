@@ -31,7 +31,6 @@ use std::{
 };
 
 use async_trait::async_trait;
-use bytes::Bytes;
 use futures::StreamExt;
 use tokio::sync::{Notify, RwLock};
 use tuwunel_core::{Result, err, error, info, warn};
@@ -135,11 +134,37 @@ impl crate::Service for Service {
 				}
 			}
 
-			// Bootstrap if no cursor is saved (first run or after demote reset).
+			// Bootstrap if no cursor is saved (first run or after WAL gap reset).
 			let resume_seq = self.db.get_replication_resume_seq()?;
 			if resume_seq == 0 {
-				info!("No resume cursor found; bootstrapping from primary checkpoint");
-				self.bootstrap(&primary_url).await?;
+				let db_path = self.server.config.database_path.clone();
+				let parent = db_path.parent().unwrap_or(&db_path);
+				let sidecar = parent.join("_replication_needs_bootstrap");
+
+				if sidecar.exists() {
+					let seq_str = std::fs::read_to_string(&sidecar)
+						.map_err(|e| err!(Database("Reading bootstrap sidecar: {e}")))?;
+					let seq: u64 = seq_str.trim().parse()
+						.map_err(|e| err!(Database("Parsing bootstrap sidecar: {e}")))?;
+					self.db.set_replication_resume_seq(seq)?;
+					std::fs::remove_file(&sidecar)
+						.map_err(|e| err!(Database("Removing bootstrap sidecar: {e}")))?;
+					info!("Bootstrap complete via pre-open path; resume_seq = {seq}");
+				} else {
+					let db_seq = self.db.latest_wal_sequence();
+					if db_seq > 0 {
+						info!(
+							"resume_seq == 0 but database has sequence {db_seq} (was primary). \
+							 Attempting WAL resume from {db_seq}."
+						);
+						self.db.set_replication_resume_seq(db_seq)?;
+					} else {
+						std::fs::write(&sidecar, "0")
+							.map_err(|e| err!(Database("Writing bootstrap trigger: {e}")))?;
+						info!("Empty database, bootstrap required. Triggering restart.");
+						return Err(err!(Database("Restarting for pre-open checkpoint bootstrap")));
+					}
+				}
 			}
 
 			info!("Replication worker starting; primary = {primary_url}");
@@ -156,15 +181,22 @@ impl crate::Service for Service {
 						return Ok(()); // server is stopping
 					},
 					| Err(ref e) if is_wal_gap_error(e) => {
-						error!(
-							"WAL gap: primary no longer has WAL history for our resume \
-							 position. Manual intervention required: stop this secondary, \
-							 restore a fresh checkpoint over the database directory, then \
-							 restart. Stopping replication worker."
+						warn!(
+							"WAL gap detected — resume_seq is too old for new primary. \
+							 Resetting cursor and restarting for clean checkpoint bootstrap."
 						);
-						return Err(err!(Database(
-							"WAL gap; manual checkpoint restore required"
-						)));
+						if let Err(reset_err) = self.db.set_replication_resume_seq(0) {
+							error!("Failed to reset resume_seq: {reset_err}. Stopping worker.");
+							return Err(err!(Database(
+								"WAL gap; failed to reset cursor for bootstrap"
+							)));
+						}
+						// Shut down cleanly — systemd will restart tuwunel via Restart=on-failure.
+						if let Err(e) = self.server.shutdown() {
+							error!("Failed to trigger shutdown after WAL gap: {e}");
+							return Err(err!(Database("WAL gap; failed to trigger restart")));
+						}
+						return Ok(());
 					},
 					| Err(ref e) => {
 						if self.promoted.load(Ordering::Acquire) {
@@ -208,10 +240,13 @@ impl Service {
 	/// Demote this promoted primary back to a secondary replicating from
 	/// `new_primary_url`.
 	///
-	/// Resets the resume cursor so the worker performs a clean checkpoint
-	/// bootstrap from the new primary (whose WAL history will differ from
-	/// ours). The caller is responsible for ensuring the VIP / load balancer
-	/// has been updated to route writes to the new primary before calling this.
+	/// Does NOT reset the resume cursor — the worker will attempt WAL resume
+	/// from the new primary first. If the new primary returns 410 (WAL gap),
+	/// the worker resets to 0 and bootstraps automatically. This avoids a full
+	/// snapshot in the common case where the node was only down briefly.
+	///
+	/// The caller is responsible for ensuring the VIP / load balancer has been
+	/// updated to route writes to the new primary before calling this.
 	///
 	/// Returns `Err` if the instance is not currently promoted.
 	pub async fn demote(&self, new_primary_url: String) -> Result<()> {
@@ -221,17 +256,13 @@ impl Service {
 			)));
 		}
 
-		// Reset cursor so the worker bootstraps a fresh checkpoint from the new
-		// primary rather than trying to resume from our own WAL position.
-		self.db.set_replication_resume_seq(0)?;
-
 		// Store the new primary URL and clear the promoted flag before notifying
 		// the worker so it sees a consistent state on wake-up.
 		*self.dynamic_primary_url.write().await = Some(new_primary_url.clone());
 		self.promoted.store(false, Ordering::Release);
 		self.demote_notify.notify_waiters();
 
-		info!("Demotion requested; will replicate from {new_primary_url}");
+		info!("Demotion requested; will attempt WAL resume from {new_primary_url}");
 		Ok(())
 	}
 
@@ -303,71 +334,6 @@ impl Service {
 		if next > 0 {
 			self.db.set_replication_resume_seq(next)?;
 		}
-		Ok(())
-	}
-
-	/// Full sync: download a checkpoint tar from the primary and restore it.
-	async fn bootstrap(&self, primary_url: &str) -> Result {
-		let url = format!("{primary_url}/_tuwunel/replication/checkpoint");
-		info!("Downloading checkpoint from {url}");
-
-		let resp = self
-			.authed_get(&url)
-			.await
-			.map_err(|e| err!(Database("GET {url}: {e}")))?;
-
-		if !resp.status().is_success() {
-			return Err(err!(Database("Primary returned {} for checkpoint", resp.status())));
-		}
-
-		let seq: u64 = resp
-			.headers()
-			.get("x-tuwunel-checkpoint-sequence")
-			.and_then(|v| v.to_str().ok())
-			.and_then(|s| s.parse().ok())
-			.unwrap_or(0);
-
-		let tar_bytes: Bytes = resp
-			.bytes()
-			.await
-			.map_err(|e| err!(Database("Reading checkpoint body: {e}")))?;
-
-		let db_path = self.server.config.database_path.clone();
-		let parent = db_path.parent().unwrap_or(&db_path).to_owned();
-		let staging = parent.join("_replication_staging");
-		let backup = parent.join("_replication_backup");
-
-		if staging.exists() {
-			std::fs::remove_dir_all(&staging)
-				.map_err(|e| err!(Database("Removing old staging dir: {e}")))?;
-		}
-		std::fs::create_dir_all(&staging)
-			.map_err(|e| err!(Database("Creating staging dir: {e}")))?;
-
-		let cursor = std::io::Cursor::new(&*tar_bytes);
-		let mut archive = tar::Archive::new(cursor);
-		archive
-			.unpack(&staging)
-			.map_err(|e| err!(Database("Unpacking checkpoint tar: {e}")))?;
-
-		let checkpoint_src = staging.join("checkpoint");
-
-		if backup.exists() {
-			std::fs::remove_dir_all(&backup)
-				.map_err(|e| err!(Database("Removing old backup: {e}")))?;
-		}
-		if db_path.exists() {
-			std::fs::rename(&db_path, &backup)
-				.map_err(|e| err!(Database("Moving db to backup: {e}")))?;
-		}
-		std::fs::rename(&checkpoint_src, &db_path)
-			.map_err(|e| err!(Database("Moving checkpoint to db_path: {e}")))?;
-
-		let _: std::io::Result<()> = std::fs::remove_dir_all(&staging);
-
-		self.db.set_replication_resume_seq(seq)?;
-
-		info!("Checkpoint bootstrap complete; resume_seq = {seq}");
 		Ok(())
 	}
 
