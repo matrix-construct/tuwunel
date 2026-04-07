@@ -5,7 +5,6 @@ use ruma::{
 	OwnedRoomId,
 	api::{
 		client::{
-			error::ErrorKind,
 			membership::mutual_rooms,
 			profile::{
 				ProfileFieldName, ProfileFieldValue, delete_profile_field, delete_timezone_key,
@@ -16,7 +15,7 @@ use ruma::{
 	},
 	presence::PresenceState,
 };
-use tuwunel_core::{Err, Error, Result, err};
+use tuwunel_core::{Err, Result, err};
 
 use crate::Ruma;
 
@@ -285,7 +284,7 @@ pub(crate) async fn get_timezone_key_route(
 	if !services.users.exists(&body.user_id).await {
 		// Return 404 if this user doesn't exist and we couldn't fetch it over
 		// federation
-		return Err(Error::BadRequest(ErrorKind::NotFound, "Profile was not found."));
+		return Err!(Request(NotFound("Profile was not found.")));
 	}
 
 	Ok(get_timezone_key::unstable::Response {

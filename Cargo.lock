@@ -2915,6 +2915,7 @@ dependencies = [
  "cfg-if",
  "cfg_aliases",
  "libc",
+ "memoffset",
 ]
 
 [[package]]
@@ -2927,7 +2928,6 @@ dependencies = [
  "cfg-if",
  "cfg_aliases",
  "libc",
- "memoffset",
 ]
 
 [[package]]
@@ -3346,7 +3346,7 @@ checksum = "e4022a17595a00d6a369236fdae483f0de7f0a339960a53118b818238e132224"
 dependencies = [
  "android_system_properties",
  "log",
- "nix 0.30.1",
+ "nix",
  "objc2",
  "objc2-foundation",
  "objc2-ui-kit",
@@ -4068,7 +4068,7 @@ dependencies = [
 [[package]]
 name = "ruma"
 version = "0.13.0"
-source = "git+https://github.com/matrix-construct/ruma?rev=2ca9d46bdf2765d382332da2bbd645be9518c374#2ca9d46bdf2765d382332da2bbd645be9518c374"
+source = "git+https://github.com/matrix-construct/ruma?rev=3ddc41e64b35ff0d16d412108e2e28790bad1fd2#3ddc41e64b35ff0d16d412108e2e28790bad1fd2"
 dependencies = [
  "assign",
  "js_int",
@@ -4087,7 +4087,7 @@ dependencies = [
 [[package]]
 name = "ruma-appservice-api"
 version = "0.13.0"
-source = "git+https://github.com/matrix-construct/ruma?rev=2ca9d46bdf2765d382332da2bbd645be9518c374#2ca9d46bdf2765d382332da2bbd645be9518c374"
+source = "git+https://github.com/matrix-construct/ruma?rev=3ddc41e64b35ff0d16d412108e2e28790bad1fd2#3ddc41e64b35ff0d16d412108e2e28790bad1fd2"
 dependencies = [
  "js_int",
  "ruma-common",
@@ -4099,7 +4099,7 @@ dependencies = [
 [[package]]
 name = "ruma-client-api"
 version = "0.21.0"
-source = "git+https://github.com/matrix-construct/ruma?rev=2ca9d46bdf2765d382332da2bbd645be9518c374#2ca9d46bdf2765d382332da2bbd645be9518c374"
+source = "git+https://github.com/matrix-construct/ruma?rev=3ddc41e64b35ff0d16d412108e2e28790bad1fd2#3ddc41e64b35ff0d16d412108e2e28790bad1fd2"
 dependencies = [
  "as_variant",
  "assign",
@@ -4124,7 +4124,7 @@ dependencies = [
 [[package]]
 name = "ruma-common"
 version = "0.16.0"
-source = "git+https://github.com/matrix-construct/ruma?rev=2ca9d46bdf2765d382332da2bbd645be9518c374#2ca9d46bdf2765d382332da2bbd645be9518c374"
+source = "git+https://github.com/matrix-construct/ruma?rev=3ddc41e64b35ff0d16d412108e2e28790bad1fd2#3ddc41e64b35ff0d16d412108e2e28790bad1fd2"
 dependencies = [
  "as_variant",
  "base64",
@@ -4158,7 +4158,7 @@ dependencies = [
 [[package]]
 name = "ruma-events"
 version = "0.31.0"
-source = "git+https://github.com/matrix-construct/ruma?rev=2ca9d46bdf2765d382332da2bbd645be9518c374#2ca9d46bdf2765d382332da2bbd645be9518c374"
+source = "git+https://github.com/matrix-construct/ruma?rev=3ddc41e64b35ff0d16d412108e2e28790bad1fd2#3ddc41e64b35ff0d16d412108e2e28790bad1fd2"
 dependencies = [
  "as_variant",
  "indexmap",
@@ -4185,7 +4185,7 @@ dependencies = [
 [[package]]
 name = "ruma-federation-api"
 version = "0.12.0"
-source = "git+https://github.com/matrix-construct/ruma?rev=2ca9d46bdf2765d382332da2bbd645be9518c374#2ca9d46bdf2765d382332da2bbd645be9518c374"
+source = "git+https://github.com/matrix-construct/ruma?rev=3ddc41e64b35ff0d16d412108e2e28790bad1fd2#3ddc41e64b35ff0d16d412108e2e28790bad1fd2"
 dependencies = [
  "bytes",
  "headers",
@@ -4208,7 +4208,7 @@ dependencies = [
 [[package]]
 name = "ruma-identifiers-validation"
 version = "0.11.0"
-source = "git+https://github.com/matrix-construct/ruma?rev=2ca9d46bdf2765d382332da2bbd645be9518c374#2ca9d46bdf2765d382332da2bbd645be9518c374"
+source = "git+https://github.com/matrix-construct/ruma?rev=3ddc41e64b35ff0d16d412108e2e28790bad1fd2#3ddc41e64b35ff0d16d412108e2e28790bad1fd2"
 dependencies = [
  "js_int",
  "thiserror 2.0.18",
@@ -4217,7 +4217,7 @@ dependencies = [
 [[package]]
 name = "ruma-macros"
 version = "0.16.0"
-source = "git+https://github.com/matrix-construct/ruma?rev=2ca9d46bdf2765d382332da2bbd645be9518c374#2ca9d46bdf2765d382332da2bbd645be9518c374"
+source = "git+https://github.com/matrix-construct/ruma?rev=3ddc41e64b35ff0d16d412108e2e28790bad1fd2#3ddc41e64b35ff0d16d412108e2e28790bad1fd2"
 dependencies = [
  "cfg-if",
  "proc-macro-crate",
@@ -4232,7 +4232,7 @@ dependencies = [
 [[package]]
 name = "ruma-push-gateway-api"
 version = "0.12.0"
-source = "git+https://github.com/matrix-construct/ruma?rev=2ca9d46bdf2765d382332da2bbd645be9518c374#2ca9d46bdf2765d382332da2bbd645be9518c374"
+source = "git+https://github.com/matrix-construct/ruma?rev=3ddc41e64b35ff0d16d412108e2e28790bad1fd2#3ddc41e64b35ff0d16d412108e2e28790bad1fd2"
 dependencies = [
  "js_int",
  "ruma-common",
@@ -4244,7 +4244,7 @@ dependencies = [
 [[package]]
 name = "ruma-signatures"
 version = "0.18.0"
-source = "git+https://github.com/matrix-construct/ruma?rev=2ca9d46bdf2765d382332da2bbd645be9518c374#2ca9d46bdf2765d382332da2bbd645be9518c374"
+source = "git+https://github.com/matrix-construct/ruma?rev=3ddc41e64b35ff0d16d412108e2e28790bad1fd2#3ddc41e64b35ff0d16d412108e2e28790bad1fd2"
 dependencies = [
  "base64",
  "ed25519-dalek",
@@ -5540,7 +5540,7 @@ checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
 name = "tuwunel"
-version = "1.5.1"
+version = "1.6.0"
 dependencies = [
  "clap",
  "const-str",
@@ -5584,7 +5584,7 @@ dependencies = [
 
 [[package]]
 name = "tuwunel_admin"
-version = "1.5.1"
+version = "1.6.0"
 dependencies = [
  "base64",
  "bytes",
@@ -5608,7 +5608,7 @@ dependencies = [
 
 [[package]]
 name = "tuwunel_api"
-version = "1.5.1"
+version = "1.6.0"
 dependencies = [
  "axum",
  "axum-client-ip",
@@ -5640,7 +5640,7 @@ dependencies = [
 
 [[package]]
 name = "tuwunel_core"
-version = "1.5.1"
+version = "1.6.0"
 dependencies = [
  "argon2",
  "arrayvec",
@@ -5673,7 +5673,7 @@ dependencies = [
  "libloading",
  "log",
  "maplit",
- "nix 0.31.2",
+ "nix",
  "num-traits",
  "object_store",
  "rand 0.8.5",
@@ -5704,7 +5704,7 @@ dependencies = [
 
 [[package]]
 name = "tuwunel_database"
-version = "1.5.1"
+version = "1.6.0"
 dependencies = [
  "async-channel",
  "const-str",
@@ -5724,7 +5724,7 @@ dependencies = [
 
 [[package]]
 name = "tuwunel_macros"
-version = "1.5.1"
+version = "1.6.0"
 dependencies = [
  "itertools 0.14.0",
  "proc-macro2",
@@ -5734,7 +5734,7 @@ dependencies = [
 
 [[package]]
 name = "tuwunel_router"
-version = "1.5.1"
+version = "1.6.0"
 dependencies = [
  "axum",
  "axum-client-ip",
@@ -5767,7 +5767,7 @@ dependencies = [
 
 [[package]]
 name = "tuwunel_service"
-version = "1.5.1"
+version = "1.6.0"
 dependencies = [
  "async-trait",
  "base64",
@@ -5791,6 +5791,7 @@ dependencies = [
  "rand 0.8.5",
  "regex",
  "reqwest 0.13.1",
+ "ring",
  "ruma",
  "rustls",
  "rustyline-async",

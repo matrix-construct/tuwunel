@@ -36,7 +36,7 @@ use crate::{
 
 /// All the config options for tuwunel.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Deserialize)]
 #[config_example_generator(
 	filename = "tuwunel-example.toml",
 	section = "global",

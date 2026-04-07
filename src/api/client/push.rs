@@ -2,13 +2,10 @@ use axum::extract::State;
 use futures::StreamExt;
 use ruma::{
 	CanonicalJsonObject, CanonicalJsonValue, MilliSecondsSinceUnixEpoch,
-	api::client::{
-		error::ErrorKind,
-		push::{
-			delete_pushrule, get_notifications, get_pushers, get_pushrule, get_pushrule_actions,
-			get_pushrule_enabled, get_pushrules_all, get_pushrules_global_scope, set_pusher,
-			set_pushrule, set_pushrule_actions, set_pushrule_enabled,
-		},
+	api::client::push::{
+		delete_pushrule, get_notifications, get_pushers, get_pushrule, get_pushrule_actions,
+		get_pushrule_enabled, get_pushrules_all, get_pushrules_global_scope, set_pusher,
+		set_pushrule, set_pushrule_actions, set_pushrule_enabled,
 	},
 	events::{
 		GlobalAccountDataEventType,
@@ -20,7 +17,7 @@ use ruma::{
 	},
 };
 use tuwunel_core::{
-	Err, Error, Result, at, err,
+	Err, Result, at, err,
 	matrix::{Event, PduId},
 	utils::{
 		stream::{ReadyExt, WidebandExt},
@@ -350,31 +347,26 @@ pub(crate) async fn set_pushrule_route(
 		body.after.as_deref(),
 		body.before.as_deref(),
 	) {
-		let err = match error {
-			| InsertPushRuleError::ServerDefaultRuleId => Error::BadRequest(
-				ErrorKind::InvalidParam,
-				"Rule IDs starting with a dot are reserved for server-default rules.",
-			),
-			| InsertPushRuleError::InvalidRuleId => Error::BadRequest(
-				ErrorKind::InvalidParam,
-				"Rule ID containing invalid characters.",
-			),
-			| InsertPushRuleError::RelativeToServerDefaultRule => Error::BadRequest(
-				ErrorKind::InvalidParam,
-				"Can't place a push rule relatively to a server-default rule.",
-			),
-			| InsertPushRuleError::UnknownRuleId => Error::BadRequest(
-				ErrorKind::NotFound,
-				"The before or after rule could not be found.",
-			),
-			| InsertPushRuleError::BeforeHigherThanAfter => Error::BadRequest(
-				ErrorKind::InvalidParam,
-				"The before rule has a higher priority than the after rule.",
-			),
-			| _ => Error::BadRequest(ErrorKind::InvalidParam, "Invalid data."),
-		};
+		use InsertPushRuleError::*;
 
-		return Err(err);
+		return match error {
+			| ServerDefaultRuleId => Err!(Request(InvalidParam(
+				"Rule IDs starting with a dot are reserved for server-default rules."
+			))),
+			| RelativeToServerDefaultRule => Err!(Request(InvalidParam(
+				"Can't place a push rule relatively to a server-default rule."
+			))),
+			| BeforeHigherThanAfter => Err!(Request(InvalidParam(
+				"The before rule has a higher priority than the after rule."
+			))),
+			| InvalidRuleId =>
+				Err!(Request(InvalidParam("Rule ID containing invalid characters."))),
+
+			| UnknownRuleId =>
+				Err!(Request(NotFound("The before or after rule could not be found."))),
+
+			| _ => Err!(Request(InvalidParam("Invalid data."))),
+		};
 	}
 
 	let ty = GlobalAccountDataEventType::PushRules;
@@ -540,17 +532,14 @@ pub(crate) async fn delete_pushrule_route(
 		.global
 		.remove(body.kind.clone(), &body.rule_id)
 	{
-		let err = match error {
-			| RemovePushRuleError::ServerDefault => Error::BadRequest(
-				ErrorKind::InvalidParam,
-				"Cannot delete a server-default pushrule.",
-			),
-			| RemovePushRuleError::NotFound =>
-				Error::BadRequest(ErrorKind::NotFound, "Push rule not found."),
-			| _ => Error::BadRequest(ErrorKind::InvalidParam, "Invalid data."),
-		};
+		return match error {
+			| RemovePushRuleError::ServerDefault =>
+				Err!(Request(InvalidParam("Cannot delete a server-default pushrule."))),
 
-		return Err(err);
+			| RemovePushRuleError::NotFound => Err!(Request(NotFound("Push rule not found."))),
+
+			| _ => Err!(Request(InvalidParam("Invalid data."))),
+		};
 	}
 
 	let ty = GlobalAccountDataEventType::PushRules;

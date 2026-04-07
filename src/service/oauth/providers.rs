@@ -85,6 +85,26 @@ pub fn get_config(&self, id: &str) -> Result<Provider> {
 	Err!(Request(NotFound("Unrecognized Identity Provider")))
 }
 
+/// Get the ID of the provider considered "default" as selected by the admin or
+/// by fallback.
+#[implement(Providers)]
+pub fn get_default_id(&self) -> Option<String> {
+	self.services
+		.config
+		.identity_provider
+		.values()
+		.find(|idp| idp.default)
+		.or_else(|| {
+			self.services
+				.config
+				.identity_provider
+				.values()
+				.next()
+		})
+		.map(Provider::id)
+		.map(ToOwned::to_owned)
+}
+
 /// Get the discovered provider from the runtime cache. ID may be client_id or
 /// brand if brand is unique among provider configurations.
 #[implement(Providers)]

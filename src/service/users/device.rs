@@ -10,14 +10,16 @@ use ruma::{
 };
 use serde_json::json;
 use tuwunel_core::{
-	Err, Result, implement,
+	Err, Result, at, implement,
 	utils::{
 		self, ReadyExt,
 		stream::{IterStream, TryIgnore},
-		time::{duration_since_epoch, timepoint_from_epoch, timepoint_from_now},
+		time::{
+			duration_since_epoch, timepoint_from_epoch, timepoint_from_now, timepoint_has_passed,
+		},
 	},
 };
-use tuwunel_database::{Deserialized, Ignore, Interfix, Json, Map};
+use tuwunel_database::{Cbor, Deserialized, Ignore, Interfix, Json, Map};
 
 /// generated device ID length
 const DEVICE_ID_LENGTH: usize = 10;
@@ -103,6 +105,7 @@ pub async fn remove_device(&self, user_id: &UserId, device_id: &DeviceId) {
 
 	let userdeviceid = (user_id, device_id);
 	self.db.userdeviceid_metadata.del(userdeviceid);
+	self.db.oidcdevice_userdeviceid.del(userdeviceid);
 
 	self.mark_device_key_update(user_id).await;
 	increment(&self.db.userid_devicelistversion, user_id.as_bytes());
@@ -424,6 +427,58 @@ pub async fn device_exists(&self, user_id: &UserId, device_id: &DeviceId) -> boo
 		.userdeviceid_metadata
 		.contains(&(user_id, device_id))
 		.await
+}
+
+#[implement(super::Service)]
+pub async fn is_oidc_device(&self, user_id: &UserId, device_id: &DeviceId) -> bool {
+	self.db
+		.oidcdevice_userdeviceid
+		.contains(&(user_id, device_id))
+		.await
+}
+
+#[implement(super::Service)]
+pub fn mark_oidc_device(&self, user_id: &UserId, device_id: &DeviceId) {
+	self.db
+		.oidcdevice_userdeviceid
+		.put((user_id, device_id), Json(&()));
+}
+
+/// Allow cross-signing key replacement without UIAA for the next 10 minutes.
+/// Returns the expiry timestamp in milliseconds.
+#[allow(clippy::must_use_candidate)]
+#[implement(super::Service)]
+pub fn allow_cross_signing_replacement(&self, user_id: &UserId) -> SystemTime {
+	let duration = Duration::from_mins(10);
+	let expires = timepoint_from_now(duration).expect("failed to create timepoint from now");
+
+	self.db
+		.oidccskeybypass_userid
+		.raw_put(user_id, Cbor(expires));
+
+	expires
+}
+
+/// Check if the user is allowed to replace cross-signing keys without UIAA.
+#[implement(super::Service)]
+pub async fn can_replace_cross_signing_keys(&self, user_id: &UserId) -> bool {
+	let Ok(expires): Result<SystemTime, _> = self
+		.db
+		.oidccskeybypass_userid
+		.get(user_id)
+		.await
+		.deserialized::<Cbor<_>>()
+		.map(at!(0))
+	else {
+		return false;
+	};
+
+	if !timepoint_has_passed(expires) {
+		return true;
+	}
+
+	self.db.oidccskeybypass_userid.remove(user_id);
+	false
 }
 
 #[implement(super::Service)]

@@ -34,6 +34,16 @@ const TUWUNEL_CSP: &[&str; 5] = &[
 	"sandbox",
 ];
 
+const TUWUNEL_HTML_CSP: &[&str; 7] = &[
+	"default-src 'none'",
+	"script-src 'unsafe-inline'",
+	"style-src 'unsafe-inline'",
+	"frame-ancestors 'none'",
+	"form-action 'none'",
+	"base-uri 'none'",
+	"sandbox",
+];
+
 const TUWUNEL_PERMISSIONS_POLICY: &[&str; 2] = &["interest-cohort=()", "browsing-topics=()"];
 
 pub(crate) fn build(services: &Arc<Services>) -> Result<(Router, Guard)> {
@@ -95,7 +105,18 @@ pub(crate) fn build(services: &Arc<Services>) -> Result<(Router, Guard)> {
 		))
 		.layer(SetResponseHeaderLayer::if_not_present(
 			header::CONTENT_SECURITY_POLICY,
-			HeaderValue::from_str(&TUWUNEL_CSP.join(";"))?,
+			|res: &http::Response<_>| {
+				let csp = res
+					.headers()
+					.get(header::CONTENT_TYPE)
+					.map(HeaderValue::to_str)
+					.and_then(Result::ok)
+					.is_some_and(|val| val.contains("text/html"))
+					.then(|| TUWUNEL_HTML_CSP.join(";"))
+					.unwrap_or_else(|| TUWUNEL_CSP.join(";"));
+
+				HeaderValue::from_str(&csp).ok()
+			},
 		))
 		.layer(cors_layer(server))
 		.layer(body_limit_layer(server))

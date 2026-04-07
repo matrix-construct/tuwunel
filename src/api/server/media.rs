@@ -6,7 +6,7 @@ use ruma::{
 		Content, ContentMetadata, FileOrLocation, get_content, get_content_thumbnail,
 	},
 };
-use tuwunel_core::{Err, Result, utils::content_disposition::make_content_disposition};
+use tuwunel_core::{Result, utils::content_disposition::make_content_disposition};
 use tuwunel_service::media::{Dim, Media};
 
 use crate::Ruma;
@@ -30,17 +30,15 @@ pub(crate) async fn get_content_route(
 		media_id: &body.media_id,
 	};
 
-	let Some(Media {
+	let Media {
 		content,
 		content_type,
 		content_disposition,
-	}) = services.media.get(&mxc).await?
-	else {
-		return Err!(Request(NotFound("Media not found.")));
-	};
+	} = services.media.get(&mxc, None).await?;
 
 	let content_disposition =
 		make_content_disposition(content_disposition.as_ref(), content_type.as_deref(), None);
+
 	let content = Content {
 		file: content,
 		content_type: content_type.map(Into::into),
@@ -73,17 +71,18 @@ pub(crate) async fn get_content_thumbnail_route(
 		media_id: &body.media_id,
 	};
 
-	let Some(Media {
+	let Media {
 		content,
 		content_type,
 		content_disposition,
-	}) = services.media.get_thumbnail(&mxc, &dim).await?
-	else {
-		return Err!(Request(NotFound("Media not found.")));
-	};
+	} = services
+		.media
+		.get_thumbnail(&mxc, &dim, None)
+		.await?;
 
 	let content_disposition =
 		make_content_disposition(content_disposition.as_ref(), content_type.as_deref(), None);
+
 	let content = Content {
 		file: content,
 		content_type: content_type.map(Into::into),

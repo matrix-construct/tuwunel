@@ -33,10 +33,9 @@ where
 		.unwrap_or(false)
 		.await || (cfg!(feature = "ldap") && services.config.ldap.enable);
 
-	//TODO: UIAA for SSO.
+	// Check if user has SSO authentication available
 	let sso_flow = [AuthType::Sso];
-	let has_sso = false;
-	let _has_sso = sender_user
+	let has_sso = sender_user
 		.map_async(|sender_user| {
 			services
 				.oauth

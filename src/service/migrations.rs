@@ -169,61 +169,60 @@ async fn migrate(services: &Services) -> Result {
 		DATABASE_VERSION,
 	);
 
-	{
-		let patterns = &services.config.forbidden_usernames;
-		if !patterns.is_empty() {
-			services
-				.users
-				.stream()
-				.filter(|user_id| services.users.is_active_local(user_id))
-				.ready_for_each(|user_id| {
-					let matches = patterns.matches(user_id.localpart());
-					if matches.matched_any() {
-						warn!(
-							"User {} matches the following forbidden username patterns: {}",
-							user_id.to_string(),
-							matches
-								.into_iter()
-								.map(|x| &patterns.patterns()[x])
-								.join(", ")
-						);
-					}
-				})
-				.await;
-		}
+	if !services.config.forbidden_usernames.is_empty() {
+		services
+			.users
+			.stream()
+			.filter(|user_id| services.users.is_active_local(user_id))
+			.ready_filter_map(|user_id| {
+				let patterns = &services.config.forbidden_usernames;
+				let matches = patterns.matches(user_id.localpart());
+				let matched = matches
+					.iter()
+					.map(|x| &patterns.patterns()[x])
+					.join(", ");
+
+				matches
+					.matched_any()
+					.then_some((user_id, matched))
+			})
+			.ready_for_each(|(user_id, matched)| {
+				warn!("User {user_id} matches forbidden username patterns: {matched:#?}");
+			})
+			.await;
 	}
 
-	{
-		let patterns = &services.config.forbidden_alias_names;
-		if !patterns.is_empty() {
-			for room_id in services
-				.metadata
-				.iter_ids()
-				.map(ToOwned::to_owned)
-				.collect::<Vec<_>>()
-				.await
-			{
+	if !services.config.forbidden_alias_names.is_empty() {
+		services
+			.metadata
+			.iter_ids()
+			.map(|room_id| {
 				services
 					.alias
-					.local_aliases_for_room(&room_id)
-					.ready_for_each(|room_alias| {
-						let matches = patterns.matches(room_alias.alias());
-						if matches.matched_any() {
-							warn!(
-								"Room with alias {} ({}) matches the following forbidden room \
-								 name patterns: {}",
-								room_alias,
-								&room_id,
-								matches
-									.into_iter()
-									.map(|x| &patterns.patterns()[x])
-									.join(", ")
-							);
-						}
-					})
-					.await;
-			}
-		}
+					.local_aliases_for_room(room_id)
+					.map(move |alias| (room_id, alias))
+			})
+			.flatten()
+			.ready_filter_map(|(room_id, room_alias)| {
+				let patterns = &services.config.forbidden_alias_names;
+				let matches = patterns.matches(room_alias.alias());
+				let matched = matches
+					.iter()
+					.map(|x| &patterns.patterns()[x])
+					.join(", ");
+
+				matches
+					.matched_any()
+					.then_some((room_id, room_alias, matched))
+			})
+			.ready_for_each(|(room_id, room_alias, matched)| {
+				warn!(
+					"Room {room_id} with alias {room_alias} matches the following forbidden \
+					 room name patterns: {matched}"
+				);
+			})
+			.boxed()
+			.await;
 	}
 
 	info!("Loaded RocksDB database with schema version {DATABASE_VERSION}");

@@ -1,4 +1,5 @@
 pub mod providers;
+pub mod server;
 pub mod sessions;
 pub mod user_info;
 
@@ -16,12 +17,14 @@ use serde_json::Value as JsonValue;
 use tuwunel_core::{
 	Err, Result, err, implement,
 	utils::{hash::sha256, result::LogErr, stream::ReadyExt},
+	warn,
 };
 use url::Url;
 
 use self::{providers::Providers, sessions::Sessions};
 pub use self::{
 	providers::{Provider, ProviderId},
+	server::Server,
 	sessions::{CODE_VERIFIER_LENGTH, SESSION_ID_LENGTH, Session, SessionId},
 	user_info::UserInfo,
 };
@@ -31,20 +34,32 @@ pub struct Service {
 	services: SelfServices,
 	pub providers: Arc<Providers>,
 	pub sessions: Arc<Sessions>,
+	pub server: Option<Arc<Server>>,
 }
 
 impl crate::Service for Service {
 	fn build(args: &crate::Args<'_>) -> Result<Arc<Self>> {
 		let providers = Arc::new(Providers::build(args));
 		let sessions = Arc::new(Sessions::build(args, providers.clone()));
+		let server = Server::build(args)?.map(Arc::new);
+
 		Ok(Arc::new(Self {
 			services: args.services.clone(),
 			sessions,
 			providers,
+			server,
 		}))
 	}
 
 	fn name(&self) -> &str { crate::service::make_name(std::module_path!()) }
+}
+
+#[implement(Service)]
+#[inline]
+pub fn get_server(&self) -> Result<&Server> {
+	self.server
+		.as_deref()
+		.ok_or_else(|| err!(Request(NotFound("OIDC server not configured"))))
 }
 
 /// Remove all session state for a user. For debug and developer use only;

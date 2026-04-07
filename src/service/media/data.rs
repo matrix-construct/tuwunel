@@ -156,6 +156,18 @@ impl Data {
 		Ok(keys)
 	}
 
+	pub(super) async fn file_metadata_exists(&self, mxc: &Mxc<'_>, dim: &Dim) -> bool {
+		let dim: &[u32] = &[dim.width, dim.height];
+		let prefix = (mxc, dim, Interfix);
+		let keys = self
+			.mediaid_file
+			.keys_prefix_raw(&prefix)
+			.ignore_err();
+
+		pin_mut!(keys);
+		keys.next().await.is_some()
+	}
+
 	pub(super) async fn search_file_metadata(
 		&self,
 		mxc: &Mxc<'_>,
@@ -191,10 +203,11 @@ impl Data {
 			.filter(|bytes| !bytes.is_empty())
 			.map(string_from_bytes)
 			.transpose()
-			.map_err(|e| err!(Database(error!(?mxc, "Content-type is invalid: {e}"))))?
+			.map_err(|e| err!(Database(error!(?mxc, "Content-disposition is invalid: {e}"))))?
 			.as_deref()
 			.map(str::parse)
-			.transpose()?;
+			.transpose()
+			.map_err(|e| err!(Database(error!(?mxc, "Content-disposition is invalid: {e}"))))?;
 
 		Ok(Metadata { content_disposition, content_type, key })
 	}

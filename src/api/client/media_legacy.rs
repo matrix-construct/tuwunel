@@ -147,10 +147,10 @@ pub(crate) async fn get_content_legacy_route(
 
 	match services
 		.media
-		.get_with_timeout(&mxc, body.timeout_ms)
-		.await?
+		.get(&mxc, Some(body.timeout_ms))
+		.await
 	{
-		| Some(Media {
+		| Ok(Media {
 			content,
 			content_type,
 			content_disposition,
@@ -169,7 +169,7 @@ pub(crate) async fn get_content_legacy_route(
 				cache_control: Some(CACHE_CONTROL_IMMUTABLE.into()),
 			})
 		},
-		| _ =>
+		| Err(e) =>
 			if !services.globals.server_is_ours(&body.server_name) && body.allow_remote {
 				let response = services
 					.media
@@ -193,7 +193,7 @@ pub(crate) async fn get_content_legacy_route(
 					cache_control: Some(CACHE_CONTROL_IMMUTABLE.into()),
 				})
 			} else {
-				Err!(Request(NotFound("Media not found.")))
+				Err(e)
 			},
 	}
 }
@@ -242,10 +242,10 @@ pub(crate) async fn get_content_as_filename_legacy_route(
 
 	match services
 		.media
-		.get_with_timeout(&mxc, body.timeout_ms)
-		.await?
+		.get(&mxc, Some(body.timeout_ms))
+		.await
 	{
-		| Some(Media {
+		| Ok(Media {
 			content,
 			content_type,
 			content_disposition,
@@ -264,7 +264,7 @@ pub(crate) async fn get_content_as_filename_legacy_route(
 				cache_control: Some(CACHE_CONTROL_IMMUTABLE.into()),
 			})
 		},
-		| _ =>
+		| Err(e) =>
 			if !services.globals.server_is_ours(&body.server_name) && body.allow_remote {
 				let response = services
 					.media
@@ -288,7 +288,7 @@ pub(crate) async fn get_content_as_filename_legacy_route(
 					cache_control: Some(CACHE_CONTROL_IMMUTABLE.into()),
 				})
 			} else {
-				Err!(Request(NotFound("Media not found.")))
+				Err(e)
 			},
 	}
 }
@@ -337,10 +337,10 @@ pub(crate) async fn get_content_thumbnail_legacy_route(
 	let dim = Dim::from_ruma(body.width, body.height, body.method.clone())?;
 	match services
 		.media
-		.get_thumbnail_with_timeout(&mxc, &dim, body.timeout_ms)
-		.await?
+		.get_thumbnail(&mxc, &dim, Some(body.timeout_ms))
+		.await
 	{
-		| Some(Media {
+		| Ok(Media {
 			content,
 			content_type,
 			content_disposition,
@@ -359,7 +359,7 @@ pub(crate) async fn get_content_thumbnail_legacy_route(
 				content_disposition: Some(content_disposition),
 			})
 		},
-		| _ =>
+		| Err(e) =>
 			if !services.globals.server_is_ours(&body.server_name) && body.allow_remote {
 				let response = services
 					.media
@@ -383,7 +383,7 @@ pub(crate) async fn get_content_thumbnail_legacy_route(
 					content_disposition: Some(content_disposition),
 				})
 			} else {
-				Err!(Request(NotFound("Media not found.")))
+				Err(e)
 			},
 	}
 }

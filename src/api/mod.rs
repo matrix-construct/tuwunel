@@ -2,6 +2,7 @@
 #![allow(unused_features)] // 1.96.0-nightly 2026-03-07 bug
 
 pub mod client;
+pub mod oidc;
 pub mod router;
 pub mod server;
 

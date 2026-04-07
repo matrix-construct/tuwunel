@@ -4,12 +4,11 @@ use futures::{Stream, StreamExt, TryFutureExt, pin_mut};
 use ruma::{
 	DeviceId, KeyId, OneTimeKeyAlgorithm, OneTimeKeyId, OneTimeKeyName, OwnedKeyId, RoomId, UInt,
 	UserId,
-	api::client::error::ErrorKind,
 	encryption::{CrossSigningKey, DeviceKeys, OneTimeKey},
 	serde::Raw,
 };
 use tuwunel_core::{
-	Err, Error, Result, debug_error, err, implement,
+	Err, Result, debug_error, err, implement,
 	utils::{
 		ReadyExt,
 		stream::{TryExpect, TryIgnore, TryReadyExt},
@@ -252,16 +251,10 @@ pub async fn add_cross_signing_keys(
 
 		let self_signing_key_id = self_signing_key_ids
 			.next()
-			.ok_or(Error::BadRequest(
-				ErrorKind::InvalidParam,
-				"Self signing key contained no key.",
-			))?;
+			.ok_or_else(|| err!(Request(InvalidParam("Self signing key contained no key."))))?;
 
 		if self_signing_key_ids.next().is_some() {
-			return Err(Error::BadRequest(
-				ErrorKind::InvalidParam,
-				"Self signing key contained more than one key.",
-			));
+			return Err!(Request(InvalidParam("Self signing key contained more than one key.")));
 		}
 
 		let mut self_signing_key_key = prefix.clone();
@@ -440,6 +433,7 @@ where
 
 	let cleaned = clean_signatures(key, sender_user, user_id, allowed_signatures)?;
 	let raw_value = serde_json::value::to_raw_value(&cleaned)?;
+
 	Ok(Raw::from_json(raw_value))
 }
 
@@ -554,7 +548,7 @@ where
 			mem::replace(signatures, serde_json::Map::with_capacity(new_capacity))
 		{
 			let sid = <&UserId>::try_from(user.as_str())
-				.map_err(|_| Error::bad_database("Invalid user ID in database."))?;
+				.map_err(|e| err!(Database("Invalid user ID in database: {e}")))?;
 
 			if sender_user == Some(user_id) || sid == user_id || allowed_signatures(sid) {
 				signatures.insert(user, signature);

@@ -323,7 +323,10 @@ async fn fetch_thumbnail(
 		content,
 		content_type,
 		content_disposition,
-	} = fetch_thumbnail_meta(services, mxc, user, timeout_ms, dim).await?;
+	} = services
+		.media
+		.get_or_fetch_thumbnail(mxc, dim, timeout_ms, user)
+		.await?;
 
 	let content_disposition = Some(make_content_disposition(
 		content_disposition.as_ref(),
@@ -349,7 +352,10 @@ async fn fetch_file(
 		content,
 		content_type,
 		content_disposition,
-	} = fetch_media(services, mxc, user, timeout_ms).await?;
+	} = services
+		.media
+		.get_or_fetch(mxc, timeout_ms, user)
+		.await?;
 
 	let content_disposition = Some(make_content_disposition(
 		content_disposition.as_ref(),
@@ -362,53 +368,4 @@ async fn fetch_file(
 		content_type,
 		content_disposition,
 	})
-}
-
-async fn fetch_thumbnail_meta(
-	services: &Services,
-	mxc: &Mxc<'_>,
-	user: &UserId,
-	timeout_ms: Duration,
-	dim: &Dim,
-) -> Result<Media> {
-	if let Some(media) = services
-		.media
-		.get_thumbnail_with_timeout(mxc, dim, timeout_ms)
-		.await?
-	{
-		return Ok(media);
-	}
-
-	if services.globals.server_is_ours(mxc.server_name) {
-		return Err!(Request(NotFound("Local thumbnail not found.")));
-	}
-
-	services
-		.media
-		.fetch_remote_thumbnail(mxc, Some(user), None, timeout_ms, dim)
-		.await
-}
-
-async fn fetch_media(
-	services: &Services,
-	mxc: &Mxc<'_>,
-	user: &UserId,
-	timeout_ms: Duration,
-) -> Result<Media> {
-	if let Some(media) = services
-		.media
-		.get_with_timeout(mxc, timeout_ms)
-		.await?
-	{
-		return Ok(media);
-	}
-
-	if services.globals.server_is_ours(mxc.server_name) {
-		return Err!(Request(NotFound("Local media not found.")));
-	}
-
-	services
-		.media
-		.fetch_remote_content(mxc, Some(user), None, timeout_ms)
-		.await
 }

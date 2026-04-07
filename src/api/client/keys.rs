@@ -6,19 +6,25 @@ use ruma::{
 	CanonicalJsonObject, CanonicalJsonValue, OneTimeKeyAlgorithm, OwnedDeviceId, OwnedUserId,
 	UserId,
 	api::{
-		client::keys::{
-			claim_keys, get_key_changes, get_keys, upload_keys,
-			upload_signatures::{self},
-			upload_signing_keys,
+		client::{
+			keys::{
+				claim_keys, get_key_changes, get_keys, upload_keys,
+				upload_signatures::{self},
+				upload_signing_keys,
+			},
+			uiaa::{AuthFlow, AuthType, UiaaInfo},
 		},
 		federation,
 	},
 	encryption::CrossSigningKey,
 	serde::Raw,
 };
-use serde_json::json;
+use serde_json::{json, value::to_raw_value};
 use tuwunel_core::{
-	Err, Result, debug, debug_error, debug_warn, err, result::NotFound, utils::json,
+	Err, Error, Result, debug, debug_error, debug_warn, err,
+	result::NotFound,
+	utils,
+	utils::{OptionExt, json},
 };
 use tuwunel_service::{Services, users::parse_master_key};
 
@@ -145,15 +151,34 @@ pub(crate) async fn claim_keys_route(
 /// Uploads end-to-end key information for the sender user.
 ///
 /// - Requires UIAA to verify password
+/// - For OIDC devices, requires OAuth re-authentication via SSO (MSC4312)
 pub(crate) async fn upload_signing_keys_route(
 	State(services): State<crate::State>,
 	body: Ruma<upload_signing_keys::v3::Request>,
 ) -> Result<upload_signing_keys::v3::Response> {
+	use upload_signing_keys::v3::Request;
+
+	let sender_user = body.sender_user();
+
+	// Called iff the requestor is eventually permitted to upload.
+	let add_cross_signing_keys = async |services: &Services, body: Ruma<Request>| {
+		services
+			.users
+			.add_cross_signing_keys(
+				body.sender_user(),
+				&body.master_key,
+				&body.self_signing_key,
+				&body.user_signing_key,
+				true, // notify so that other users see the new keys
+			)
+			.await
+	};
+
 	// Access token is required for this endpoint regardless of conditional UIAA so
 	// we'll always have a sender_user.
-	match check_for_new_keys(
+	if let Ok(exists) = check_for_new_keys(
 		services,
-		body.sender_user(),
+		sender_user,
 		body.self_signing_key.as_ref(),
 		body.user_signing_key.as_ref(),
 		body.master_key.as_ref(),
@@ -161,38 +186,85 @@ pub(crate) async fn upload_signing_keys_route(
 	.await
 	.inspect_err(|e| debug_error!(?e))
 	{
-		| Ok(exists) => {
-			if let Some(result) = exists {
-				// No-op, they tried to reupload the same set of keys
-				// (lost connection for example)
-				return Ok(result);
-			}
+		if let Some(result) = exists {
+			// No-op, they tried to reupload the same set of keys
+			// (lost connection for example)
+			return Ok(result);
+		}
 
-			// Some of the keys weren't found, so we let them upload
-			debug!("Skipping UIA in accordance with MSC3967, user had no existing keys");
-		},
-		| _ => {
-			let authed_user = auth_uiaa(&services, &body).await?;
-			assert_eq!(
-				body.sender_user(),
-				authed_user,
-				"Expected UIAA of {0} and not {authed_user}",
-				body.sender_user(),
-			);
-		},
+		// Some of the keys weren't found, so we let them upload
+		debug!("Skipping UIA as per MSC3967: user had no existing keys");
+
+		add_cross_signing_keys(&services, body).await?;
+		return Ok(upload_signing_keys::v3::Response {});
 	}
 
-	services
-		.users
-		.add_cross_signing_keys(
-			body.sender_user(),
-			&body.master_key,
-			&body.self_signing_key,
-			&body.user_signing_key,
-			true, // notify so that other users see the new keys
-		)
-		.await?;
+	// MSC4312: OIDC devices require OAuth re-authentication for cross-signing
+	// reset.
+	let is_oidc = body
+		.sender_device()
+		.ok()
+		.map_async(|sender_device| {
+			services
+				.users
+				.is_oidc_device(sender_user, sender_device)
+		})
+		.await
+		.unwrap_or(false);
 
+	//If a bypass was granted via SSO re-auth, skip UIAA entirely.
+	if is_oidc
+		&& services
+			.users
+			.can_replace_cross_signing_keys(sender_user)
+			.await
+	{
+		add_cross_signing_keys(&services, body).await?;
+		return Ok(upload_signing_keys::v3::Response {});
+	}
+
+	// First attempt from OIDC device — issue m.oauth flow.
+	if is_oidc && body.auth.is_none() {
+		let session = utils::random_string(tuwunel_service::uiaa::SESSION_ID_LENGTH);
+		let base = services
+			.config
+			.well_known
+			.client
+			.as_ref()
+			.map(|url| url.to_string().trim_end_matches('/').to_owned())
+			.ok_or_else(|| {
+				err!(Config(
+					"well_known.client",
+					"well_known.client must be set for cross-signing reset"
+				))
+			})?;
+
+		let fallback_url =
+			format!("{base}/_matrix/client/v3/auth/m.login.sso/fallback/web?session={session}");
+
+		let uiaainfo = UiaaInfo {
+			flows: vec![AuthFlow { stages: vec![AuthType::OAuth] }],
+			params: Some(to_raw_value(&json!({"m.oauth": { "url": fallback_url }}))?),
+			session: Some(session),
+			..Default::default()
+		};
+
+		services.uiaa.create(
+			sender_user,
+			body.sender_device()?,
+			&uiaainfo,
+			body.json_body
+				.as_ref()
+				.ok_or_else(|| err!(Request(NotJson("JSON body is not valid"))))?,
+		);
+
+		return Err(Error::Uiaa(uiaainfo));
+	}
+
+	let authed_user = auth_uiaa(&services, &body).await?;
+	assert_eq!(sender_user, authed_user, "Expected UIAA of {sender_user} and not {authed_user}");
+
+	add_cross_signing_keys(&services, body).await?;
 	Ok(upload_signing_keys::v3::Response {})
 }
 
@@ -580,7 +652,7 @@ fn add_unsigned_device_display_name(
 			unsigned.insert("device_display_name".into(), display_name);
 		}
 
-		*keys = Raw::from_json(serde_json::value::to_raw_value(&object)?);
+		*keys = Raw::from_json(to_raw_value(&object)?);
 	}
 
 	Ok(())

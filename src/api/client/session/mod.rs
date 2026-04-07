@@ -29,7 +29,9 @@ use self::{ldap::ldap_login, password::password_login};
 pub(crate) use self::{
 	logout::{logout_all_route, logout_route},
 	refresh::refresh_token_route,
-	sso::{sso_callback_route, sso_login_route, sso_login_with_provider_route},
+	sso::{
+		sso_callback_route, sso_fallback_route, sso_login_route, sso_login_with_provider_route,
+	},
 	token::login_token_route,
 };
 use super::TOKEN_LENGTH;

@@ -657,33 +657,33 @@ fn default_power_levels_content(
 
 	// secure proper defaults of sensitive/dangerous permissions that moderators
 	// (power level 50) should not have easy access to
-	power_levels_content["events"]["m.room.power_levels"] = to_value(100)?;
-	power_levels_content["events"]["m.room.server_acl"] = to_value(100)?;
-	power_levels_content["events"]["m.room.encryption"] = to_value(100)?;
-	power_levels_content["events"]["m.room.history_visibility"] = to_value(100)?;
+	power_levels_content["events"]["m.room.power_levels"] = json!(100);
+	power_levels_content["events"]["m.room.server_acl"] = json!(100);
+	power_levels_content["events"]["m.room.encryption"] = json!(100);
+	power_levels_content["events"]["m.room.history_visibility"] = json!(100);
 
 	if version_rules
 		.authorization
 		.explicitly_privilege_room_creators
 	{
-		power_levels_content["events"]["m.room.tombstone"] = to_value(150)?;
+		power_levels_content["events"]["m.room.tombstone"] = json!(150);
 	} else {
-		power_levels_content["events"]["m.room.tombstone"] = to_value(100)?;
+		power_levels_content["events"]["m.room.tombstone"] = json!(100);
 	}
 
 	// always allow users to respond (not post new) to polls. this is primarily
 	// useful in read-only announcement rooms that post a public poll.
-	power_levels_content["events"]["org.matrix.msc3381.poll.response"] = to_value(0)?;
-	power_levels_content["events"]["m.poll.response"] = to_value(0)?;
+	power_levels_content["events"]["org.matrix.msc3381.poll.response"] = json!(0);
+	power_levels_content["events"]["m.poll.response"] = json!(0);
 
 	// synapse does this too. clients do not expose these permissions. it prevents
 	// default users from calling public rooms, for obvious reasons.
 	if *visibility == room::Visibility::Public {
-		power_levels_content["events"]["m.call.invite"] = to_value(50)?;
-		power_levels_content["events"]["m.call"] = to_value(50)?;
-		power_levels_content["events"]["m.call.member"] = to_value(50)?;
-		power_levels_content["events"]["org.matrix.msc3401.call"] = to_value(50)?;
-		power_levels_content["events"]["org.matrix.msc3401.call.member"] = to_value(50)?;
+		power_levels_content["events"]["m.call.invite"] = json!(50);
+		power_levels_content["events"]["m.call"] = json!(50);
+		power_levels_content["events"]["m.call.member"] = json!(50);
+		power_levels_content["events"]["org.matrix.msc3401.call"] = json!(50);
+		power_levels_content["events"]["org.matrix.msc3401.call.member"] = json!(50);
 	}
 
 	if let Some(power_level_content_override) = power_level_content_override {

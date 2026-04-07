@@ -3,8 +3,8 @@ use std::{
 	str::FromStr,
 };
 
-use ruma::{UInt, api::client::error::ErrorKind};
-use tuwunel_core::{Error, Result};
+use ruma::UInt;
+use tuwunel_core::{Err, Error, Result};
 
 use crate::rooms::short::ShortRoomId;
 
@@ -54,11 +54,7 @@ impl FromStr for PaginationToken {
 			})
 		};
 
-		if let Some(token) = pag_tok() {
-			Ok(token)
-		} else {
-			Err(Error::BadRequest(ErrorKind::InvalidParam, "invalid token"))
-		}
+		pag_tok().map_or(Err!(Request(InvalidParam("invalid token"))), Ok)
 	}
 }
 

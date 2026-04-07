@@ -30,7 +30,7 @@ license = "Apache-2.0"
 readme = "README.md"
 repository = "https://github.com/matrix-construct/tuwunel"
 rust-version = "1.94.0"
-version = "1.5.1"
+version = "1.6.0"
 
 [workspace.metadata.crane]
 name = "tuwunel"
@@ -342,7 +342,7 @@ default-features = false
 
 [workspace.dependencies.ruma]
 git = "https://github.com/matrix-construct/ruma"
-rev = "2ca9d46bdf2765d382332da2bbd645be9518c374"
+rev = "3ddc41e64b35ff0d16d412108e2e28790bad1fd2"
 features = [
     "__compat",
     "appservice-api-c",
@@ -375,7 +375,7 @@ features = [
     "unstable-msc4143",
     "unstable-msc4186",
     "unstable-msc4195",
-    "unstable-msc4203", # sending to-device events to appservices 
+    "unstable-msc4203", # sending to-device events to appservices
     "unstable-msc4310",
     "unstable-msc4311",
     "unstable-extensible-events",

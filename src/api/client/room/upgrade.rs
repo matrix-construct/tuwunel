@@ -1,4 +1,4 @@
-use std::cmp::max;
+use std::{cmp::max, iter::once};
 
 use axum::extract::State;
 use futures::{FutureExt, StreamExt, TryFutureExt, TryStreamExt};
@@ -17,16 +17,14 @@ use ruma::{
 	int,
 	room_version_rules::{RoomIdFormatVersion, RoomVersionRules},
 };
-use serde_json::{
-	Value as JsonValue, json,
-	value::{to_raw_value, to_value},
-};
+use serde_json::{Value as JsonValue, json, value::to_raw_value};
 use tuwunel_core::{
 	Err, Result, debug_info, err, error, implement, info, is_equal_to, is_less_than,
 	matrix::{Event, StateKey, pdu::PduBuilder, room_version},
 	utils::{
+		ReadyExt,
 		future::TryExtExt,
-		stream::{IterStream, ReadyExt, WidebandExt},
+		stream::{IterStream, WidebandExt},
 	},
 };
 use tuwunel_service::{Services, rooms::timeline::RoomMutexGuard};
@@ -50,8 +48,10 @@ const RECOMMENDED_TRANSFERABLE_STATE_EVENT_TYPES: &[StateEventType; 9] = &[
 struct RoomUpgradeContext<'a> {
 	services: &'a Services,
 	sender_user: &'a UserId,
+	creator: &'a UserId,
 	old_room_id: &'a RoomId,
 	old_state_lock: &'a RoomMutexGuard,
+	old_version_rules: &'a RoomVersionRules,
 	new_room_id: &'a RoomId,
 	new_state_lock: &'a RoomMutexGuard,
 	new_version_rules: &'a RoomVersionRules,
@@ -119,12 +119,17 @@ pub(crate) async fn upgrade_room_route(
 		"Attempting upgrade of room..."
 	);
 
-	let id_format = version_rules.room_id_format;
-	let (replacement_room, state_lock) = match id_format {
+	let creator = if services.admin.is_admin_room(&body.room_id).await {
+		&services.globals.server_user
+	} else {
+		sender_user
+	};
+
+	let (replacement_room, state_lock) = match version_rules.room_id_format {
 		| RoomIdFormatVersion::V2 =>
 			upgrade_room_create(
 				&services,
-				sender_user,
+				creator,
 				old_room_id,
 				new_version,
 				&version_rules,
@@ -136,7 +141,7 @@ pub(crate) async fn upgrade_room_route(
 		| RoomIdFormatVersion::V1 =>
 			upgrade_room_create_legacy(
 				&services,
-				sender_user,
+				creator,
 				old_room_id,
 				new_version,
 				&version_rules,
@@ -146,11 +151,20 @@ pub(crate) async fn upgrade_room_route(
 	}
 	.inspect_err(|e| error!(?body, "Upgrade m.room.create event failed: {e}"))?;
 
+	let old_room_id = &body.room_id;
+	let old_version = services
+		.state
+		.get_room_version(old_room_id)
+		.await?;
+	let old_version_rules = room_version::rules(&old_version)?;
+
 	let context = RoomUpgradeContext {
 		services: &services,
 		sender_user,
-		old_room_id: &body.room_id,
+		creator,
+		old_room_id,
 		old_state_lock: &old_state_lock,
+		old_version_rules: &old_version_rules,
 		new_room_id: &replacement_room,
 		new_state_lock: &state_lock,
 		new_version_rules: &version_rules,
@@ -312,9 +326,11 @@ async fn upgrade_room_create_legacy(
 #[implement(RoomUpgradeContext, params = "<'_>")]
 #[tracing::instrument(level = "debug")]
 async fn transfer_room(&self) -> Result {
-	self.move_joined_member().await?;
+	self.move_creator().await?;
 
 	self.move_state_events().await?;
+
+	self.move_sender_user().await?;
 
 	self.move_local_aliases().await?;
 
@@ -332,30 +348,60 @@ async fn transfer_room(&self) -> Result {
 // Join the new room
 #[implement(RoomUpgradeContext, params = "<'_>")]
 #[tracing::instrument(level = "debug")]
-async fn move_joined_member(&self) -> Result<OwnedEventId> {
+async fn move_creator(&self) -> Result {
+	self.move_member(self.creator).await?;
+
+	Ok(())
+}
+
+#[implement(RoomUpgradeContext, params = "<'_>")]
+#[tracing::instrument(level = "debug")]
+async fn move_sender_user(&self) -> Result {
+	if self.sender_user != self.creator {
+		self.services
+			.timeline
+			.build_and_append_pdu(
+				PduBuilder::state(
+					self.sender_user.as_str(),
+					&RoomMemberEventContent::new(MembershipState::Invite),
+				),
+				self.creator,
+				self.new_room_id,
+				self.new_state_lock,
+			)
+			.await?;
+
+		self.move_member(self.sender_user).await?;
+	}
+
+	Ok(())
+}
+
+#[implement(RoomUpgradeContext, params = "<'_>")]
+#[tracing::instrument(level = "debug")]
+async fn move_member(&self, user_id: &UserId) -> Result {
 	let old_content: RoomMemberEventContent = self
 		.services
 		.state_accessor
-		.room_state_get_content(
-			self.old_room_id,
-			&StateEventType::RoomMember,
-			self.sender_user.as_str(),
-		)
+		.room_state_get_content(self.old_room_id, &StateEventType::RoomMember, user_id.as_str())
 		.inspect_err(|e| error!(?self, "Missing room member event: {e}"))
 		.await?;
 
 	self.services
 		.timeline
 		.build_and_append_pdu(
-			PduBuilder::state(self.sender_user.as_str(), &RoomMemberEventContent {
+			PduBuilder::state(user_id.as_str(), &RoomMemberEventContent {
 				membership: MembershipState::Join,
+				join_authorized_via_users_server: None,
 				..old_content
 			}),
-			self.sender_user,
+			user_id,
 			self.new_room_id,
 			self.new_state_lock,
 		)
-		.await
+		.await?;
+
+	Ok(())
 }
 
 // Replicate transferable state events to the new room
@@ -377,8 +423,8 @@ async fn move_state_events(&self) -> Result {
 			self.services
 				.timeline
 				.build_and_append_pdu(
-					self.rebuild_state_event(&event)?,
-					self.sender_user,
+					self.rebuild_state_event(&event).await?,
+					self.creator,
 					self.new_room_id,
 					self.new_state_lock,
 				)
@@ -393,36 +439,62 @@ async fn move_state_events(&self) -> Result {
 
 #[implement(RoomUpgradeContext, params = "<'_>")]
 #[tracing::instrument(level = "debug")]
-fn rebuild_state_event<Pdu: Event>(&self, event: &Pdu) -> Result<PduBuilder> {
+async fn rebuild_state_event<Pdu: Event>(&self, event: &Pdu) -> Result<PduBuilder> {
 	let content = match event.kind() {
-		| TimelineEventType::RoomPowerLevels
+		| TimelineEventType::RoomPowerLevels => {
+			let mut content = event.get_content_as_value();
+
 			if self
 				.new_version_rules
 				.authorization
-				.explicitly_privilege_room_creators =>
-		{
-			let mut content = event.get_content_as_value();
-
-			if let Some(users) = content
-				.get_mut("users")
-				.and_then(JsonValue::as_object_mut)
+				.explicitly_privilege_room_creators
 			{
-				users.retain(|user_id, _pl| {
-					!self
-						.additional_creators
-						.iter()
-						.map(AsRef::as_ref)
-						.map(UserId::as_str)
-						.any(is_equal_to!(user_id.as_str()))
-						&& self.sender_user.as_str() != user_id.as_str()
-				});
-			}
+				if let Some(users) = content
+					.get_mut("users")
+					.and_then(JsonValue::as_object_mut)
+				{
+					users.retain(|user_id, _pl| {
+						!self
+							.additional_creators
+							.iter()
+							.map(AsRef::as_ref)
+							.chain(once(self.creator))
+							.map(UserId::as_str)
+							.any(is_equal_to!(user_id.as_str()))
+					});
+				}
 
-			if content["events"]["m.room.tombstone"]
-				.as_i64()
-				.is_none_or(is_less_than!(150))
+				if self.creator == self.sender_user
+					&& content["events"]["m.room.tombstone"]
+						.as_i64()
+						.is_none_or(is_less_than!(150))
+				{
+					content["events"]["m.room.tombstone"] = json!(150);
+				}
+			} else if self
+				.old_version_rules
+				.authorization
+				.explicitly_privilege_room_creators
 			{
-				content["events"]["m.room.tombstone"] = to_value(150)?;
+				#[expect(clippy::collapsible_if)]
+				if let Some(users) = content
+					.as_object_mut()
+					.expect("power levels event content must be an object")
+					.entry("users")
+					.or_insert(json!({}))
+					.as_object_mut()
+				{
+					let level = json!(1000);
+
+					self.services
+						.state_accessor
+						.get_create(self.old_room_id)
+						.await?
+						.creators(&self.old_version_rules.authorization)?
+						.for_each(|user_id| {
+							users.insert(user_id.to_string(), level.clone());
+						});
+				}
 			}
 
 			to_raw_value(&content)?
@@ -445,18 +517,10 @@ async fn move_local_aliases(&self) -> Result {
 	self.services
 		.alias
 		.local_aliases_for_room(self.old_room_id)
-		.filter_map(|alias| {
-			self.services
-				.alias
-				.remove_alias_by(alias, self.sender_user)
-				.inspect_err(move |e| error!(?alias, ?self, "Failed to remove alias: {e}"))
-				.map_ok(move |()| alias)
-				.ok()
-		})
 		.ready_for_each(|alias| {
 			self.services
 				.alias
-				.set_alias_by(alias, self.new_room_id, self.sender_user)
+				.set_alias_by(alias, self.new_room_id, self.creator)
 				.inspect_err(|e| error!(?self, "Failed to add alias: {e}"))
 				.ok();
 		})

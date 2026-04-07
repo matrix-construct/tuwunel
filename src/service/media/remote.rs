@@ -21,6 +21,7 @@ use tuwunel_core::{
 use super::{Dim, Media};
 
 #[implement(super::Service)]
+#[tracing::instrument(level = "debug", skip(self))]
 pub async fn fetch_remote_thumbnail(
 	&self,
 	mxc: &Mxc<'_>,
@@ -47,6 +48,7 @@ pub async fn fetch_remote_thumbnail(
 }
 
 #[implement(super::Service)]
+#[tracing::instrument(level = "debug", skip(self))]
 pub async fn fetch_remote_content(
 	&self,
 	mxc: &Mxc<'_>,
