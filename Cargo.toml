@@ -66,6 +66,7 @@ features = [
 	"http2",
 	"json",
 	"matched-path",
+	"query",
 	"tokio",
 	"tracing",
 ]
@@ -108,6 +109,9 @@ version = "1.11"
 
 [workspace.dependencies.bytesize]
 version = "2.3"
+
+[workspace.dependencies.crc32fast]
+version = "1"
 
 [workspace.dependencies.cargo_toml]
 version = "0.22"
@@ -334,6 +338,7 @@ features = [
 	"rustls",
 	"rustls-native-certs",
 	"socks",
+	"stream",
 ]
 
 [workspace.dependencies.ring]
@@ -496,6 +501,9 @@ features = [
 	"proc-macro",
 	"printing",
 ]
+
+[workspace.dependencies.tar]
+version = "0.4"
 
 [workspace.dependencies.termimad]
 version = "0.34"

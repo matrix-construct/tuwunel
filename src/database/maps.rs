@@ -211,6 +211,10 @@ pub(super) static MAPS: &[Descriptor] = &[
 		..descriptor::RANDOM_SMALL
 	},
 	Descriptor {
+		name: "replication_meta",
+		..descriptor::RANDOM_SMALL
+	},
+	Descriptor {
 		name: "roomid_knockedcount",
 		..descriptor::RANDOM_SMALL
 	},

@@ -23,6 +23,7 @@ pub mod oauth;
 pub mod presence;
 pub mod pusher;
 pub mod registration_tokens;
+pub mod replication;
 pub mod resolver;
 pub mod rooms;
 pub mod sending;

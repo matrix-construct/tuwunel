@@ -9,7 +9,7 @@ mod logger;
 mod memory_usage;
 mod open;
 mod repair;
-
+pub(crate) mod replication;
 use std::{
 	ffi::CStr,
 	sync::{
@@ -18,6 +18,9 @@ use std::{
 	},
 };
 
+pub use replication::{
+	FRAME_HEADER_LEN, FRAME_TYPE_DATA, FRAME_TYPE_HEARTBEAT, WalFrame, is_wal_gap_error,
+};
 use rocksdb::{
 	AsColumnFamilyRef, BoundColumnFamily, DBCommon, DBWithThreadMode, MultiThreaded,
 	WaitForCompactOptions,
