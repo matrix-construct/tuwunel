@@ -266,36 +266,13 @@ pub fn build(router: Router<State>, server: &Server) -> Router<State> {
 			.ruma_route(&client::get_media_preview_legacy_route)
 			.ruma_route(&client::get_content_legacy_route)
 			.ruma_route(&client::get_content_as_filename_legacy_route)
-			.ruma_route(&client::get_content_thumbnail_legacy_route)
-			.route("/_matrix/media/v1/config", get(client::get_media_config_legacy_legacy_route))
-			.route("/_matrix/media/v1/upload", post(client::create_content_legacy_route))
-			.route(
-				"/_matrix/media/v1/preview_url",
-				get(client::get_media_preview_legacy_legacy_route),
-			)
-			.route(
-				"/_matrix/media/v1/download/{server_name}/{media_id}",
-				get(client::get_content_legacy_legacy_route),
-			)
-			.route(
-				"/_matrix/media/v1/download/{server_name}/{media_id}/{file_name}",
-				get(client::get_content_as_filename_legacy_legacy_route),
-			)
-			.route(
-				"/_matrix/media/v1/thumbnail/{server_name}/{media_id}",
-				get(client::get_content_thumbnail_legacy_legacy_route),
-			);
+			.ruma_route(&client::get_content_thumbnail_legacy_route);
 	} else {
 		router = router
-			.route("/_matrix/media/v1/{*path}", any(legacy_media_disabled))
 			.route("/_matrix/media/v3/config", any(legacy_media_disabled))
 			.route("/_matrix/media/v3/download/{*path}", any(legacy_media_disabled))
 			.route("/_matrix/media/v3/thumbnail/{*path}", any(legacy_media_disabled))
-			.route("/_matrix/media/v3/preview_url", any(redirect_legacy_preview))
-			.route("/_matrix/media/r0/config", any(legacy_media_disabled))
-			.route("/_matrix/media/r0/download/{*path}", any(legacy_media_disabled))
-			.route("/_matrix/media/r0/thumbnail/{*path}", any(legacy_media_disabled))
-			.route("/_matrix/media/r0/preview_url", any(redirect_legacy_preview));
+			.route("/_matrix/media/v3/preview_url", any(redirect_legacy_preview));
 	}
 
 	router
