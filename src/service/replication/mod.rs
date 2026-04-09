@@ -98,7 +98,7 @@ impl crate::Service for Service {
 		}
 
 		loop {
-			if !self.server.running() {
+			if !self.server.is_running() {
 				return Ok(());
 			}
 
@@ -171,7 +171,7 @@ impl crate::Service for Service {
 
 			let mut backoff_ms = BACKOFF_MIN_MS;
 
-			while self.server.running() && !self.promoted.load(Ordering::Acquire) {
+			while self.server.is_running() && !self.promoted.load(Ordering::Acquire) {
 				match self.run_stream(&primary_url).await {
 					| Ok(()) => {
 						// run_stream returns Ok on clean shutdown or promotion.
@@ -290,7 +290,7 @@ impl Service {
 		let mut byte_stream = resp.bytes_stream();
 		let mut buf: Vec<u8> = Vec::new();
 
-		while self.server.running() && !self.promoted.load(Ordering::Acquire) {
+		while self.server.is_running() && !self.promoted.load(Ordering::Acquire) {
 			tokio::select! {
 				chunk = byte_stream.next() => {
 					let Some(chunk) = chunk else {
