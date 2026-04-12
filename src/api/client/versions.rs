@@ -51,7 +51,7 @@ static VERSIONS: [&str; 17] = [
 	"v1.15",  /* custom profile fields */
 ];
 
-static UNSTABLE_FEATURES: [&str; 22] = [
+static UNSTABLE_FEATURES: [&str; 23] = [
 	"org.matrix.e2e_cross_signing",
 	// private read receipts (https://github.com/matrix-org/matrix-spec-proposals/pull/2285)
 	"org.matrix.msc2285.stable",
@@ -61,6 +61,8 @@ static UNSTABLE_FEATURES: [&str; 22] = [
 	"uk.half-shot.msc2666.query_mutual_rooms",
 	// threading/threads (https://github.com/matrix-org/matrix-spec-proposals/pull/2836)
 	"org.matrix.msc2836",
+	// jump to date (https://github.com/matrix-org/matrix-spec-proposals/pull/3030)
+	"org.matrix.msc3030",
 	// spaces/hierarchy summaries (https://github.com/matrix-org/matrix-spec-proposals/pull/2946)
 	"org.matrix.msc2946",
 	// busy presence status (https://github.com/matrix-org/matrix-spec-proposals/pull/3026)

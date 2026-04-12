@@ -232,7 +232,13 @@ pub async fn backfill_pdu(
 	.into();
 
 	// Insert pdu
-	self.prepend_backfill_pdu(&pdu_id, &event_id, &value);
+	self.prepend_backfill_pdu(
+		&pdu_id,
+		room_id,
+		&event_id,
+		u64::from(pdu.origin_server_ts),
+		&value,
+	);
 	drop(insert_lock);
 
 	if pdu.kind == TimelineEventType::RoomMessage {
@@ -253,10 +259,18 @@ pub async fn backfill_pdu(
 fn prepend_backfill_pdu(
 	&self,
 	pdu_id: &RawPduId,
+	room_id: &RoomId,
 	event_id: &EventId,
+	origin_server_ts: u64,
 	json: &CanonicalJsonObject,
 ) {
 	self.db.pduid_pdu.raw_put(pdu_id, Json(json));
+
 	self.db.eventid_pduid.insert(event_id, pdu_id);
+
 	self.db.eventid_outlierpdu.remove(event_id);
+
+	self.db
+		.roomid_ts_pducount
+		.put_raw((room_id, origin_server_ts), pdu_id.count());
 }

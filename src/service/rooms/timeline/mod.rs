@@ -16,8 +16,8 @@ use futures::{
 	pin_mut,
 };
 use ruma::{
-	CanonicalJsonObject, EventId, OwnedEventId, OwnedRoomId, RoomId, UserId, api::Direction,
-	events::room::encrypted::Relation,
+	CanonicalJsonObject, EventId, MilliSecondsSinceUnixEpoch, OwnedEventId, OwnedRoomId, RoomId,
+	UInt, UserId, api::Direction, events::room::encrypted::Relation,
 };
 use serde::Deserialize;
 pub use tuwunel_core::matrix::pdu::{PduId, RawPduId};
@@ -31,7 +31,7 @@ use tuwunel_core::{
 	utils::{
 		MutexMap, MutexMapGuard,
 		result::{LogErr, NotFound},
-		stream::{TryIgnore, TryReadyExt},
+		stream::{TryIgnore, TryReadyExt, TryWidebandExt},
 	},
 	warn,
 };
@@ -49,6 +49,7 @@ struct Data {
 	eventid_outlierpdu: Arc<Map>,
 	eventid_pduid: Arc<Map>,
 	pduid_pdu: Arc<Map>,
+	roomid_ts_pducount: Arc<Map>,
 	db: Arc<Database>,
 }
 
@@ -87,6 +88,7 @@ impl crate::Service for Service {
 				eventid_outlierpdu: args.db["eventid_outlierpdu"].clone(),
 				eventid_pduid: args.db["eventid_pduid"].clone(),
 				pduid_pdu: args.db["pduid_pdu"].clone(),
+				roomid_ts_pducount: args.db["roomid_ts_pducount"].clone(),
 				db: args.db.clone(),
 			},
 			mutex_insert: RoomMutexMap::new(),
@@ -321,6 +323,111 @@ pub async fn last_timeline_count(
 	Ok(last_count)
 }
 
+#[implement(Service)]
+pub async fn get_event_id_near_ts(
+	&self,
+	room_id: &RoomId,
+	ts: MilliSecondsSinceUnixEpoch,
+	dir: Direction,
+) -> Result<(MilliSecondsSinceUnixEpoch, OwnedEventId)> {
+	self.get_pdu_id_near_ts(room_id, ts, dir)
+		.and_then(async |(ts, pdu_id)| {
+			self.get_event_id_from_pdu_id(&pdu_id)
+				.map_ok(|event_id| (ts, event_id))
+				.await
+		})
+		.await
+}
+
+#[implement(Service)]
+pub async fn get_pdu_id_near_ts(
+	&self,
+	room_id: &RoomId,
+	ts: MilliSecondsSinceUnixEpoch,
+	dir: Direction,
+) -> Result<(MilliSecondsSinceUnixEpoch, PduId)> {
+	let pdu_ids = self.pdu_ids_near_ts(room_id, ts, dir);
+
+	pin_mut!(pdu_ids);
+	pdu_ids
+		.try_next()
+		.await?
+		.ok_or_else(|| err!(Request(NotFound("No event found near this timestamp."))))
+}
+
+#[implement(Service)]
+pub async fn get_pdu_near_ts(
+	&self,
+	user_id: Option<&UserId>,
+	room_id: &RoomId,
+	ts: MilliSecondsSinceUnixEpoch,
+	dir: Direction,
+) -> Result<PdusIterItem> {
+	let pdus = self
+		.pdu_ids_near_ts(room_id, ts, dir)
+		.map_ok(|(ts, pdu_id)| (ts, pdu_id.into()))
+		.and_then(async |(_, pdu_id): (_, RawPduId)| {
+			self.get_pdu_from_id(&pdu_id)
+				.map_ok(|pdu| (pdu_id, pdu))
+				.await
+		})
+		.ready_and_then(move |item| Self::each_pdu(item, user_id));
+
+	pin_mut!(pdus);
+	pdus.try_next()
+		.await?
+		.ok_or_else(|| err!(Request(NotFound("No event found near this timestamp."))))
+}
+
+#[implement(Service)]
+pub fn pdus_near_ts(
+	&self,
+	user_id: Option<&UserId>,
+	room_id: &RoomId,
+	ts: MilliSecondsSinceUnixEpoch,
+	dir: Direction,
+) -> impl Stream<Item = Result<PdusIterItem>> + Send {
+	self.pdu_ids_near_ts(room_id, ts, dir)
+		.map_ok(|(ts, pdu_id)| (ts, pdu_id.into()))
+		.wide_and_then(async |(_, pdu_id): (_, RawPduId)| {
+			self.get_pdu_from_id(&pdu_id)
+				.map_ok(|pdu| (pdu_id, pdu))
+				.await
+		})
+		.ready_and_then(move |item| Self::each_pdu(item, user_id))
+}
+
+#[implement(Service)]
+pub fn pdu_ids_near_ts(
+	&self,
+	room_id: &RoomId,
+	ts: MilliSecondsSinceUnixEpoch,
+	dir: Direction,
+) -> impl Stream<Item = Result<(MilliSecondsSinceUnixEpoch, PduId)>> + Send {
+	use Direction::{Backward, Forward};
+
+	type KeyVal<'a> = ((&'a RoomId, UInt), i64);
+
+	let ts: u64 = ts.get().into();
+	let key = (room_id, ts);
+
+	self.services
+		.short
+		.get_shortroomid(room_id)
+		.map_err(|e| err!(Request(NotFound("Room not found: {e:?}"))))
+		.map_ok(move |shortroomid| {
+			match dir {
+				| Forward => Left(self.db.roomid_ts_pducount.stream_from(&key)),
+				| Backward => Right(self.db.roomid_ts_pducount.rev_stream_from(&key)),
+			}
+			.ready_try_take_while(move |((room_id_, _), _): &KeyVal<'_>| Ok(room_id == *room_id_))
+			.map_ok(move |((_, ts), count)| {
+				(MilliSecondsSinceUnixEpoch(ts), PduId { shortroomid, count: count.into() })
+			})
+		})
+		.try_flatten_stream()
+}
+
 /// Returns an iterator over all PDUs in a room. Unknown rooms produce no
 /// items.
 #[implement(Service)]
@@ -352,7 +459,7 @@ pub fn pdus<'a>(
 				.pduid_pdu
 				.raw_stream_from(&current)
 				.ready_try_take_while(move |(key, _)| Ok(key.starts_with(&prefix)))
-				.ready_and_then(move |item| Self::each_pdu(item, user_id))
+				.ready_and_then(move |item| Self::each_slice(item, user_id))
 		})
 		.try_flatten_stream()
 }
@@ -375,16 +482,24 @@ pub fn pdus_rev<'a>(
 				.pduid_pdu
 				.rev_raw_stream_from(&current)
 				.ready_try_take_while(move |(key, _)| Ok(key.starts_with(&prefix)))
-				.ready_and_then(move |item| Self::each_pdu(item, user_id))
+				.ready_and_then(move |item| Self::each_slice(item, user_id))
 		})
 		.try_flatten_stream()
 }
 
 #[implement(Service)]
-fn each_pdu((pdu_id, pdu): KeyVal<'_>, user_id: Option<&UserId>) -> Result<PdusIterItem> {
+fn each_slice((pdu_id, pdu): KeyVal<'_>, user_id: Option<&UserId>) -> Result<PdusIterItem> {
 	let pdu_id: RawPduId = pdu_id.into();
-	let mut pdu = serde_json::from_slice::<PduEvent>(pdu)?;
+	let pdu = serde_json::from_slice::<PduEvent>(pdu)?;
 
+	Self::each_pdu((pdu_id, pdu), user_id)
+}
+
+#[implement(Service)]
+fn each_pdu(
+	(pdu_id, mut pdu): (RawPduId, PduEvent),
+	user_id: Option<&UserId>,
+) -> Result<PdusIterItem> {
 	if Some(pdu.sender.borrow()) != user_id {
 		pdu.remove_transaction_id().log_err().ok();
 	}
@@ -636,20 +751,21 @@ pub async fn delete_pdus(&self, room_id: &RoomId) -> Result {
 				.pduid_pdu
 				.raw_stream_from(&current)
 				.ready_try_take_while(move |(key, _)| Ok(key.starts_with(&prefix)))
-				.ready_try_for_each(|(key, value)| {
-					trace!("Removing PDU {key:?}");
-					self.db.pduid_pdu.remove(key);
+				.ready_try_for_each(move |(key, value)| {
 					let pdu = serde_json::from_slice::<PduEvent>(value)?;
-
+					let ts: u64 = pdu.origin_server_ts.into();
 					let event_id = &pdu.event_id;
-					let room_id2 = &pdu.room_id;
-					trace!("Removed {event_id} {room_id2}");
+
+					self.db.pduid_pdu.remove(key);
 					self.db.eventid_pduid.remove(event_id);
 					self.db.eventid_outlierpdu.remove(event_id);
+					self.db.roomid_ts_pducount.del((room_id, ts));
+
+					trace!(?event_id, ?room_id, ?ts, ?key, "Removed");
+
 					Ok(())
 				})
 		})
 		.try_flatten()
-		.await?;
-	Ok(())
+		.await
 }

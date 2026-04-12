@@ -173,7 +173,7 @@ where
 	let pdu_id: RawPduId = PduId { shortroomid, count }.into();
 
 	// Insert pdu
-	self.append_pdu_json(&pdu_id, pdu, &pdu_json, count);
+	self.append_pdu_json(&pdu_id, pdu, &pdu_json);
 
 	drop(insert_lock);
 
@@ -334,14 +334,8 @@ async fn append_pdu_effects(
 }
 
 #[implement(super::Service)]
-fn append_pdu_json(
-	&self,
-	pdu_id: &RawPduId,
-	pdu: &PduEvent,
-	json: &CanonicalJsonObject,
-	count: PduCount,
-) {
-	debug_assert!(matches!(count, PduCount::Normal(_)), "PduCount not Normal");
+fn append_pdu_json(&self, pdu_id: &RawPduId, pdu: &PduEvent, json: &CanonicalJsonObject) {
+	debug_assert!(matches!(pdu_id.pdu_count(), PduCount::Normal(_)), "PduCount not Normal");
 
 	self.db.pduid_pdu.raw_put(pdu_id, Json(json));
 
@@ -352,4 +346,9 @@ fn append_pdu_json(
 	self.db
 		.eventid_outlierpdu
 		.remove(pdu.event_id.as_bytes());
+
+	let ts = u64::from(pdu.origin_server_ts);
+	self.db
+		.roomid_ts_pducount
+		.put_raw((pdu.room_id(), ts), pdu_id.count());
 }
