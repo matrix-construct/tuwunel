@@ -102,3 +102,6 @@ tests/complement/logs.jsonl
 # Editor crashfiles
 *.save
 *.swp
+
+# Snaps packed
+tuwunel_*_*.snap

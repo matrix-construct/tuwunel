@@ -1,0 +1,12 @@
+[package]
+name = "tuwunel-init"
+version = "1.5.1"
+edition = "2024"
+authors.workspace = true
+
+[dependencies]
+tuwunel_core = { path = "../core" }
+clap = { workspace = true }
+inquire = "0.7"
+anyhow = "1.0"
+regex = { workspace = true }

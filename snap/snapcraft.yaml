@@ -1,0 +1,80 @@
+name: tuwunel
+title: Tuwunel Matrix Server
+base: core24 # Using core24 as the base for a modern Rust toolchain (1.94.0+)
+version: 'git'
+summary: High performance Matrix homeserver in Rust
+description: |
+  Tuwunel is a featureful Matrix homeserver you can use with your favorite
+  client, bridge or bot. It is written entirely in Rust to be scalable,
+  low-cost, enterprise-ready, and community-driven.
+
+  Install the snap and run `sudo tuwunel.init`, then direct traffic to the
+  server which is usually listening on 127.0.0.1:8008
+website: https://tuwunel.chat/
+source-code: https://github.com/matrix-construct/tuwunel
+issues: https://github.com/matrix-construct/tuwunel/issues
+contact: https://github.com/matrix-construct/tuwunel/discussions
+license: Apache-2.0
+donation: https://github.com/matrix-construct/tuwunel/discussions
+
+grade: stable
+confinement: strict
+
+apps:
+  daemon:
+    command: tuwunel
+    command-chain: [bin/check-config.sh]
+    daemon: simple # This creates the background service
+    install-mode: enable # Automatically start the service when the snap is installed
+    plugs:
+      - network
+      - network-bind
+    environment:
+      # By default, snap services are heavily sandboxed.
+      # You can point Tuwunel to look for its configuration inside the snap's data directory.
+      TUWUNEL_CONFIG: $SNAP_COMMON/tuwunel.toml
+
+  tuwunel:
+    command: tuwunel
+    plugs:
+      - network
+      - network-bind
+    environment:
+      # By default, snap services are heavily sandboxed.
+      # You can point Tuwunel to look for its configuration inside the snap's data directory.
+      TUWUNEL_CONFIG: $SNAP_COMMON/tuwunel.toml
+
+  init:
+    command: tuwunel-init
+    plugs:
+      - network
+      - network-bind
+    environment:
+      TUWUNEL_CONFIG: $SNAP_COMMON/tuwunel.toml
+
+parts:
+  wrapper:
+    plugin: dump
+    source: snap/local
+    organize:
+      check-config.sh: bin/check-config.sh
+
+  tuwunel:
+    after: [wrapper]
+    plugin: rust
+    source: .
+    build-packages:
+      - build-essential
+      - pkg-config
+      - libssl-dev
+      - liburing-dev
+      - clang
+      - libclang-dev
+      - cmake
+      - make
+    stage-packages:
+      - liburing2
+    prime:
+      - "-usr/lib/*/liburing-ffi.so*"
+    # The rust plugin automatically runs `cargo build --release`
+    # and installs the resulting binaries into the snap.
