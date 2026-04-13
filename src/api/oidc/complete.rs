@@ -3,7 +3,7 @@ use axum::{
 	response::{IntoResponse, Redirect},
 };
 use serde::Deserialize;
-use tuwunel_core::{Err, Result, err};
+use tuwunel_core::{Result, err};
 use url::Url;
 
 #[derive(Debug, Deserialize)]
@@ -20,9 +20,7 @@ pub(crate) async fn complete_route(
 	let query = request.uri().query().unwrap_or_default();
 	let params: CompleteParams = serde_html_form::from_str(query)?;
 
-	let Ok(oidc) = services.oauth.get_server() else {
-		return Err!(Request(NotFound("OIDC server not configured")));
-	};
+	let oidc = services.oauth.get_server()?;
 
 	let user_id = services
 		.users

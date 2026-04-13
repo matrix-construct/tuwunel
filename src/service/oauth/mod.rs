@@ -59,7 +59,7 @@ impl crate::Service for Service {
 pub fn get_server(&self) -> Result<&Server> {
 	self.server
 		.as_deref()
-		.ok_or_else(|| err!(Request(NotFound("OIDC server not configured"))))
+		.ok_or_else(|| err!(Request(Unrecognized("OIDC server not configured"))))
 }
 
 /// Remove all session state for a user. For debug and developer use only;

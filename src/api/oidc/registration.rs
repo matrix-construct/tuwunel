@@ -8,9 +8,7 @@ pub(crate) async fn registration_route(
 	State(services): State<crate::State>,
 	Json(body): Json<DcrRequest>,
 ) -> Result<impl IntoResponse> {
-	let Ok(oidc) = services.oauth.get_server() else {
-		return Err!(Request(NotFound("OIDC server not configured")));
-	};
+	let oidc = services.oauth.get_server()?;
 
 	if body.redirect_uris.is_empty() {
 		return Err!(Request(InvalidParam("redirect_uris must not be empty")));

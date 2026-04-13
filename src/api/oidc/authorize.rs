@@ -35,9 +35,7 @@ pub(crate) async fn authorize_route(
 	State(services): State<crate::State>,
 	request: axum::extract::Request,
 ) -> Result<impl IntoResponse> {
-	let Ok(oidc) = services.oauth.get_server() else {
-		return Err!(Request(NotFound("OIDC server not configured")));
-	};
+	let oidc = services.oauth.get_server()?;
 
 	let query = request.uri().query().unwrap_or_default();
 	let params: AuthorizeParams = serde_html_form::from_str(query)?;
