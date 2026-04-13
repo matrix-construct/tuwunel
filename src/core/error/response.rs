@@ -69,11 +69,8 @@ pub(super) fn bad_request_code(kind: &ErrorKind) -> StatusCode {
 		// 409
 		| CannotOverwriteMedia => StatusCode::CONFLICT,
 
-		// 405
-		| Unrecognized => StatusCode::METHOD_NOT_ALLOWED,
-
 		// 404
-		| NotFound | NotImplemented | FeatureDisabled => StatusCode::NOT_FOUND,
+		| NotFound | NotImplemented | FeatureDisabled | Unrecognized => StatusCode::NOT_FOUND,
 
 		// 403
 		| GuestAccessForbidden
