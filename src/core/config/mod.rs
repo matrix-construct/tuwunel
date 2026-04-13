@@ -3025,7 +3025,9 @@ impl IdentityProvider {
 pub enum StorageProvider {
 	#[expect(non_camel_case_types)]
 	local(StorageProviderLocal),
-	S3(StorageProviderS3),
+	#[expect(non_camel_case_types)]
+	#[serde(rename = "s3", alias = "S3")]
+	s3(StorageProviderS3),
 	#[default]
 	None,
 }
@@ -3064,7 +3066,7 @@ pub struct StorageProviderLocal {
 #[derive(Clone, Debug, Default, Deserialize)]
 #[config_example_generator(
 	filename = "tuwunel-example.toml",
-	section = "global.storage_provider.<ID>.S3"
+	section = "global.storage_provider.<ID>.s3"
 )]
 pub struct StorageProviderS3 {
 	/// Supply an s3 URL e.g. "s3://<bucket>/<path>". These URLs may contain one

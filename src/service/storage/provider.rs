@@ -460,7 +460,7 @@ fn to_abs_path(&self, location: &str) -> Result<Path> {
 
 #[implement(Provider)]
 fn multipart_threshold(&self) -> usize {
-	extract_variant!(&self.config, StorageProvider::S3)
+	extract_variant!(&self.config, StorageProvider::s3)
 		.map(|config| config.multipart_threshold.as_u64())
 		.map(TryInto::try_into)
 		.flat_ok()

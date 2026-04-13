@@ -2601,7 +2601,7 @@
 
 
 
-#[global.storage_provider.<ID>.S3]
+#[global.storage_provider.<ID>.s3]
 
 # Supply an s3 URL e.g. "s3://<bucket>/<path>". These URLs may contain one
 # or all of `bucket`, `region`, and `path` . When not supplied, such
