@@ -10,9 +10,10 @@ use axum::{
 };
 use futures::FutureExt;
 use http::{Method, StatusCode, Uri};
+use ruma::api::client::error::ErrorKind;
 use tokio::{task, time::sleep};
 use tracing::Span;
-use tuwunel_core::{Result, debug, debug_error, debug_warn, defer, err, error, trace};
+use tuwunel_core::{Error, Result, debug, debug_error, debug_warn, defer, error, trace};
 use tuwunel_service::Services;
 
 #[tracing::instrument(
@@ -142,7 +143,12 @@ fn handle_result(method: &Method, uri: &Uri, result: Response) -> Result<Respons
 	}
 
 	if status == StatusCode::METHOD_NOT_ALLOWED {
-		return Ok(err!(Request(Unrecognized("Method Not Allowed"))).into_response());
+		return Ok(Error::Request(
+			ErrorKind::Unrecognized,
+			"Method Not Allowed".into(),
+			StatusCode::METHOD_NOT_ALLOWED,
+		)
+		.into_response());
 	}
 
 	Ok(result)
