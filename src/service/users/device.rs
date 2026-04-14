@@ -437,11 +437,28 @@ pub async fn is_oidc_device(&self, user_id: &UserId, device_id: &DeviceId) -> bo
 		.await
 }
 
+/// Returns the IdP that originally authenticated this device, if known.
+/// Returns `None` for devices predating the idp_id field or non-OIDC devices.
 #[implement(super::Service)]
-pub fn mark_oidc_device(&self, user_id: &UserId, device_id: &DeviceId) {
+pub async fn get_oidc_device_idp(
+	&self,
+	user_id: &UserId,
+	device_id: &DeviceId,
+) -> Option<String> {
 	self.db
 		.oidcdevice_userdeviceid
-		.put((user_id, device_id), Json(&()));
+		.qry(&(user_id, device_id))
+		.await
+		.deserialized::<Json<String>>()
+		.ok()
+		.map(|Json(idp)| idp)
+}
+
+#[implement(super::Service)]
+pub fn mark_oidc_device(&self, user_id: &UserId, device_id: &DeviceId, idp_id: &str) {
+	self.db
+		.oidcdevice_userdeviceid
+		.put((user_id, device_id), Json(idp_id));
 }
 
 /// Allow cross-signing key replacement without UIAA for the next 10 minutes.

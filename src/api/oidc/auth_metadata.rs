@@ -2,6 +2,13 @@ use axum::{Json, extract::State, response::IntoResponse};
 use serde::{Deserialize, Serialize};
 use tuwunel_core::Result;
 
+const ACCOUNT_MANAGEMENT_ACTIONS_SUPPORTED: &[&str] = &[
+	"org.matrix.profile",
+	"org.matrix.sessions_list",
+	"org.matrix.session_view",
+	"org.matrix.session_end",
+];
+
 #[derive(Debug, Serialize, Deserialize)]
 struct ProviderMetadata {
 	issuer: String,
@@ -31,6 +38,7 @@ pub(crate) async fn openid_configuration_route(
 ) -> Result<impl IntoResponse> {
 	let issuer = services.oauth.get_server()?.issuer_url()?;
 	let base = issuer.trim_end_matches('/').to_owned();
+	let account_management_available = services.config.identity_provider.len() == 1;
 
 	Ok(Json(ProviderMetadata {
 		issuer,
@@ -45,11 +53,12 @@ pub(crate) async fn openid_configuration_route(
 
 		jwks_uri: format!("{base}/_tuwunel/oidc/jwks"),
 
-		account_management_uri: Some(format!("{base}/_tuwunel/oidc/account")),
+		account_management_uri: account_management_available
+			.then_some(format!("{base}/_tuwunel/oidc/account")),
 
 		revocation_endpoint: Some(format!("{base}/_tuwunel/oidc/revoke")),
 
-		response_modes_supported: Some(vec!["query".to_owned(), "fragment".to_owned()]),
+		response_modes_supported: Some(vec!["query".to_owned()]),
 
 		response_types_supported: vec!["code".to_owned()],
 
@@ -57,7 +66,8 @@ pub(crate) async fn openid_configuration_route(
 
 		id_token_signing_alg_values_supported: Some(vec!["ES256".to_owned()]),
 
-		prompt_values_supported: Some(vec!["create".to_owned()]),
+		// "create" prompt is not implemented; omit to avoid misleading clients.
+		prompt_values_supported: None,
 
 		subject_types_supported: Some(vec!["public".to_owned()]),
 
@@ -80,13 +90,12 @@ pub(crate) async fn openid_configuration_route(
 			"urn:matrix:org.matrix.msc2967.client:device:*".to_owned(),
 		]),
 
-		account_management_actions_supported: Some(vec![
-			"org.matrix.profile".to_owned(),
-			"org.matrix.sessions_list".to_owned(),
-			"org.matrix.session_view".to_owned(),
-			"org.matrix.session_end".to_owned(),
-			"org.matrix.cross_signing_reset".to_owned(),
-		]),
+		account_management_actions_supported: account_management_available.then(|| {
+			ACCOUNT_MANAGEMENT_ACTIONS_SUPPORTED
+				.iter()
+				.map(ToString::to_string)
+				.collect()
+		}),
 
 		claims_supported: Some(vec![
 			"iss".to_owned(),

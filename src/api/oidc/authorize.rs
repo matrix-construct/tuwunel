@@ -15,13 +15,14 @@ use tuwunel_service::{
 };
 use url::Url;
 
-use super::OIDC_REQ_ID_LENGTH;
+use super::{OIDC_REQ_ID_LENGTH, url_encode};
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct AuthorizeParams {
 	client_id: String,
 	redirect_uri: String,
 	response_type: String,
+	response_mode: Option<String>,
 	scope: String,
 	state: Option<String>,
 	nonce: Option<String>,
@@ -44,6 +45,12 @@ pub(crate) async fn authorize_route(
 		return Err!(Request(InvalidParam("Only response_type=code is supported")));
 	}
 
+	// Only the "query" response mode is implemented. Reject anything else
+	// so discovery (response_modes_supported: ["query"]) matches behavior.
+	if params.response_mode.as_deref().unwrap_or("query") != "query" {
+		return Err!(Request(InvalidParam("Only response_mode=query is supported")));
+	}
+
 	validate_redirect_uri(&services, &params).await?;
 
 	let now = SystemTime::now();
@@ -62,6 +69,9 @@ pub(crate) async fn authorize_route(
 		nonce: params.nonce,
 		code_challenge: params.code_challenge,
 		code_challenge_method: params.code_challenge_method,
+		// Record which IdP authenticated the user so it can be tagged on the
+		// device at token exchange time and used for UIAA SSO provider binding.
+		idp_id: Some(idp_id.clone()),
 		created_at: now,
 		expires_at: now
 			.checked_add(AUTH_REQUEST_LIFETIME)
@@ -79,7 +89,8 @@ pub(crate) async fn authorize_route(
 			url
 		})?;
 
-	let sso_url = Url::parse(&format!("{base}/_matrix/client/v3/login/sso/redirect/{idp_id}"))
+	let idp_id_enc = url_encode(&idp_id);
+	let sso_url = Url::parse(&format!("{base}/_matrix/client/v3/login/sso/redirect/{idp_id_enc}"))
 		.map_err(|_| err!(error!("Failed to build SSO URL")))
 		.map(|mut url| {
 			url.query_pairs_mut()

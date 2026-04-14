@@ -5,6 +5,7 @@ use ruma::{
 		client::uiaa::{AuthData, AuthFlow, AuthType, Jwt, UiaaInfo},
 	},
 };
+use serde_json::{json, value::to_raw_value};
 use tuwunel_core::{
 	Err, Error, Result, err, utils,
 	utils::{
@@ -23,6 +24,10 @@ where
 	let sender_user = body.sender_user.as_deref();
 
 	let password_flow = [AuthType::Password];
+	let user_origin = sender_user
+		.map_async(|sender_user| services.users.origin(sender_user).ok())
+		.unwrap_or(None)
+		.await;
 	let has_password = sender_user
 		.map_async(|sender_user| {
 			services
@@ -33,17 +38,42 @@ where
 		.unwrap_or(false)
 		.await || (cfg!(feature = "ldap") && services.config.ldap.enable);
 
-	// Check if user has SSO authentication available
+	// Determine the exact IdP to bind to the UIAA session.
+	//
+	// The correct binding comes from the device that made this request, not
+	// from a heuristic scan of all user sessions.  Rules:
+	//
+	//  1. Preferred: the device is tagged with an idp_id from when it was
+	//     created via the OIDC token endpoint → use that idp_id directly.
+	//     This is exact and correct even on multi-provider servers.
+	//  2. Fallback: the device has no idp tag (pre-dates the idp_id field or
+	//     was created through a legacy path) but origin=="sso" and only one
+	//     provider is configured → routing is still unambiguous.
+	//  3. Otherwise: cannot determine provider → do NOT advertise m.login.sso.
 	let sso_flow = [AuthType::Sso];
-	let has_sso = sender_user
-		.map_async(|sender_user| {
+	let bound_idp: Option<String> = if let Some(u) = sender_user {
+		let device_idp = if let Some(device_id) = body.sender_device.as_deref() {
 			services
-				.oauth
-				.sessions
-				.exists_for_user(sender_user)
-		})
-		.unwrap_or(false)
-		.await;
+				.users
+				.get_oidc_device_idp(u, device_id)
+				.await
+				.filter(|s| !s.is_empty())
+		} else {
+			None
+		};
+		if device_idp.is_some() {
+			device_idp
+		} else if user_origin.as_deref() == Some("sso")
+			&& services.config.identity_provider.len() == 1
+		{
+			services.oauth.providers.get_default_id()
+		} else {
+			None
+		}
+	} else {
+		None
+	};
+	let has_sso = bound_idp.is_some();
 
 	let jwt_flow = [AuthType::Jwt];
 	let has_jwt = services.config.jwt.enable;
@@ -108,6 +138,20 @@ where
 
 				let sender_device = body.sender_device()?;
 				uiaainfo.session = Some(utils::random_string(SESSION_ID_LENGTH));
+
+				// Bind the exact IdP determined above into the UIAA session so
+				// the SSO fallback page can route re-authentication to the
+				// correct provider without any further heuristic lookups.
+				if let Some(ref idp) = bound_idp {
+					uiaainfo.params = to_raw_value(&json!({
+						"m.login.sso": {
+							"identity_providers": [{"id": idp}]
+						}
+					}))
+					.ok()
+					.map(Into::into);
+				}
+
 				services
 					.uiaa
 					.create(sender_user, sender_device, &uiaainfo, json);

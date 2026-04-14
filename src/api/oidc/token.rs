@@ -4,7 +4,7 @@ use axum::{
 	extract::{Form, State},
 	response::IntoResponse,
 };
-use http::{Response, StatusCode};
+use http::{Response, StatusCode, header::{CACHE_CONTROL, PRAGMA}};
 use ruma::OwnedDeviceId;
 use serde::Deserialize;
 use serde_json::json;
@@ -15,7 +15,20 @@ use tuwunel_service::{
 	users::device::generate_refresh_token,
 };
 
+use tuwunel_core::Error;
+
 use super::oauth_error;
+
+/// RFC 6749 §5.2: map error to correct HTTP status and OAuth2 error code.
+/// Client-side errors (invalid grant, bad params) → 400 invalid_grant.
+/// Server-side errors → 500 server_error with sanitized message.
+fn token_error_response(e: Error) -> Response<Body> {
+	if e.status_code().is_client_error() {
+		oauth_error(StatusCode::BAD_REQUEST, "invalid_grant", &e.sanitized_message())
+	} else {
+		oauth_error(StatusCode::INTERNAL_SERVER_ERROR, "server_error", "An internal error occurred")
+	}
+}
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct TokenRequest {
@@ -33,25 +46,28 @@ pub(crate) async fn token_route(
 	State(services): State<crate::State>,
 	Form(body): Form<TokenRequest>,
 ) -> impl IntoResponse {
-	match body.grant_type.as_str() {
+	// RFC 6749 §5.1 and §5.2 require Cache-Control: no-store and Pragma: no-cache
+	// on all token endpoint responses (success and error).
+	let inner = match body.grant_type.as_str() {
 		| "authorization_code" => token_authorization_code(&services, &body)
 			.await
-			.unwrap_or_else(|e| {
-				oauth_error(StatusCode::INTERNAL_SERVER_ERROR, "server_error", &e.to_string())
-			}),
+			.unwrap_or_else(token_error_response),
 
 		| "refresh_token" => token_refresh(&services, &body)
 			.await
-			.unwrap_or_else(|e| {
-				oauth_error(StatusCode::INTERNAL_SERVER_ERROR, "server_error", &e.to_string())
-			}),
+			.unwrap_or_else(token_error_response),
 
 		| _ => oauth_error(
 			StatusCode::BAD_REQUEST,
 			"unsupported_grant_type",
 			"Unsupported grant_type",
 		),
-	}
+	};
+	let mut response = inner.into_response();
+	let headers = response.headers_mut();
+	headers.insert(CACHE_CONTROL, http::HeaderValue::from_static("no-store"));
+	headers.insert(PRAGMA, http::HeaderValue::from_static("no-cache"));
+	response
 }
 
 async fn token_authorization_code(
@@ -129,9 +145,10 @@ async fn token_authorization_code(
 		)
 		.await?;
 
+	let idp_id = session.idp_id.as_deref().unwrap_or("");
 	services
 		.users
-		.mark_oidc_device(user_id, &device_id);
+		.mark_oidc_device(user_id, &device_id, idp_id);
 
 	info!("{user_id} logged in via OIDC on {device_id} ({device_display_name})");
 

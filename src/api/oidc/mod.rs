@@ -33,3 +33,14 @@ fn oauth_error(
 	)
 		.into_response()
 }
+
+pub(crate) fn url_encode(s: &str) -> String {
+	s.bytes().fold(String::with_capacity(s.len()), |mut out, b| {
+		if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~') {
+			out.push(b as char);
+		} else {
+			out.push_str(&format!("%{b:02X}"));
+		}
+		out
+	})
+}
