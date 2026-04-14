@@ -9,6 +9,7 @@ RequiresMountsFor=/var/lib/private/tuwunel
 DynamicUser=yes
 Type=notify-reload
 ReloadSignal=SIGUSR1
+WatchdogSec=30
 
 TTYPath=/dev/tty25
 DeviceAllow=char-tty

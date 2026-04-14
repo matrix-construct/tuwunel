@@ -8,6 +8,7 @@ Documentation=https://tuwunel.chat/
 User=tuwunel
 Group=tuwunel
 Type=notify
+WatchdogSec=30
 
 Environment="TUWUNEL_CONFIG=/etc/tuwunel/tuwunel.toml"
 
