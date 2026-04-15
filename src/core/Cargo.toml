@@ -110,6 +110,9 @@ url.workspace = true
 [target.'cfg(unix)'.dependencies]
 nix.workspace = true
 
+[target.'cfg(target_os = "openbsd")'.dependencies]
+num_cpus.workspace = true
+
 [dev-dependencies]
 criterion.workspace = true
 insta.workspace = true

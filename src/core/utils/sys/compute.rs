@@ -120,9 +120,15 @@ pub fn node_affinity(id: Id) -> impl Iterator<Item = Id> {
 
 /// Get the number of threads which could execute in parallel based on hardware
 /// constraints of this system.
+#[cfg(not(target_os = "openbsd"))]
 #[inline]
 #[must_use]
 pub fn available_parallelism() -> usize { cores_available().count() }
+
+#[cfg(target_os = "openbsd")]
+#[inline]
+#[must_use]
+pub fn available_parallelism() -> usize { num_cpus::get() }
 
 /// Gets the ID of the nth core available. This bijects our sequence of cores to
 /// actual ID's which may have gaps for cores which are not available.
@@ -168,12 +174,16 @@ pub fn getcpu() -> Result<usize> {
 #[inline]
 pub fn getcpu() -> Result<usize> { Err(crate::Error::Io(std::io::ErrorKind::Unsupported.into())) }
 
+#[cfg(not(target_os = "openbsd"))]
 fn query_cores_available() -> impl Iterator<Item = Id> {
 	core_affinity::get_core_ids()
 		.unwrap_or_default()
 		.into_iter()
 		.map(|core_id| core_id.id)
 }
+
+#[cfg(target_os = "openbsd")]
+fn query_cores_available() -> impl Iterator<Item = Id> { 0..num_cpus::get() }
 
 fn init_smt_topology() -> [Mask; MASK_BITS] { [Mask::default(); MASK_BITS] }
 

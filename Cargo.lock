@@ -5583,6 +5583,7 @@ dependencies = [
  "maplit",
  "nix 0.31.2",
  "num-traits",
+ "num_cpus",
  "object_store",
  "rand 0.8.5",
  "regex",
