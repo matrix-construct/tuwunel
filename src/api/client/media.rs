@@ -205,8 +205,6 @@ pub(crate) async fn get_content_route(
 	ClientIp(client): ClientIp,
 	body: Ruma<get_content::v1::Request>,
 ) -> Result<get_content::v1::Response> {
-	let user = body.sender_user();
-
 	let mxc = Mxc {
 		server_name: &body.server_name,
 		media_id: &body.media_id,
@@ -216,7 +214,7 @@ pub(crate) async fn get_content_route(
 		content,
 		content_type,
 		content_disposition,
-	} = fetch_file(&services, &mxc, user, body.timeout_ms, None).await?;
+	} = fetch_file(&services, &mxc, body.timeout_ms, None).await?;
 
 	Ok(get_content::v1::Response {
 		file: content,
@@ -241,8 +239,6 @@ pub(crate) async fn get_content_as_filename_route(
 	ClientIp(client): ClientIp,
 	body: Ruma<get_content_as_filename::v1::Request>,
 ) -> Result<get_content_as_filename::v1::Response> {
-	let user = body.sender_user();
-
 	let mxc = Mxc {
 		server_name: &body.server_name,
 		media_id: &body.media_id,
@@ -252,7 +248,7 @@ pub(crate) async fn get_content_as_filename_route(
 		content,
 		content_type,
 		content_disposition,
-	} = fetch_file(&services, &mxc, user, body.timeout_ms, Some(&body.filename)).await?;
+	} = fetch_file(&services, &mxc, body.timeout_ms, Some(&body.filename)).await?;
 
 	Ok(get_content_as_filename::v1::Response {
 		file: content,
@@ -343,7 +339,6 @@ async fn fetch_thumbnail(
 async fn fetch_file(
 	services: &Services,
 	mxc: &Mxc<'_>,
-	user: &UserId,
 	timeout_ms: Duration,
 	filename: Option<&str>,
 ) -> Result<Media> {
@@ -353,7 +348,7 @@ async fn fetch_file(
 		content_disposition,
 	} = services
 		.media
-		.get_or_fetch(mxc, timeout_ms, user)
+		.get_or_fetch(mxc, timeout_ms)
 		.await?;
 
 	let content_disposition = Some(make_content_disposition(

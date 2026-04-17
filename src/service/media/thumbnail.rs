@@ -8,7 +8,7 @@
 use std::{cmp, num::Saturating as Sat, sync::Arc, time::Duration};
 
 use futures::{StreamExt, pin_mut};
-use ruma::{Mxc, UInt, UserId, http_headers::ContentDisposition, media::Method};
+use ruma::{Mxc, UInt, UserId, media::Method};
 use tokio::sync::Notify;
 use tuwunel_core::{
 	Err, Result, checked, err, implement,
@@ -26,30 +26,6 @@ pub struct Dim {
 }
 
 impl super::Service {
-	/// Uploads or replaces a file thumbnail.
-	#[tracing::instrument(
-		level = "debug",
-		ret(level = "debug")
-		skip(self),
-	)]
-	pub async fn upload_thumbnail(
-		&self,
-		mxc: &Mxc<'_>,
-		user: Option<&UserId>,
-		content_disposition: Option<&ContentDisposition>,
-		content_type: Option<&str>,
-		dim: &Dim,
-		file: &[u8],
-	) -> Result {
-		let key =
-			self.db
-				.create_file_metadata(mxc, user, dim, content_disposition, content_type)?;
-
-		//TODO: Dangling metadata in database if creation fails
-		self.create_media_file(&key, file).await?;
-		Ok(())
-	}
-
 	#[tracing::instrument(
 		level = "debug",
 		err(level = "debug")
@@ -88,7 +64,7 @@ impl super::Service {
 			return self.get_thumbnail(mxc, dim, None).await;
 		}
 
-		self.fetch_remote_thumbnail(mxc, Some(user), None, timeout_ms, dim)
+		self.fetch_remote_thumbnail(mxc, None, timeout_ms, dim)
 			.await
 	}
 

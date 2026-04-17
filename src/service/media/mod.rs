@@ -286,12 +286,7 @@ impl Service {
 		err(level = "debug")
 		skip(self),
 	)]
-	pub async fn get_or_fetch(
-		&self,
-		mxc: &Mxc<'_>,
-		timeout_ms: Duration,
-		user: &UserId,
-	) -> Result<Media> {
+	pub async fn get_or_fetch(&self, mxc: &Mxc<'_>, timeout_ms: Duration) -> Result<Media> {
 		if let Ok(media) = self.get(mxc, Some(timeout_ms)).await {
 			return Ok(media);
 		}
@@ -315,7 +310,7 @@ impl Service {
 			return self.get(mxc, None).await;
 		}
 
-		self.fetch_remote_content(mxc, Some(user), None, timeout_ms)
+		self.fetch_remote_content(mxc, None, timeout_ms)
 			.await
 	}
 

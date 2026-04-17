@@ -278,7 +278,7 @@ pub(super) async fn get_remote_file(
 	let mut result = self
 		.services
 		.media
-		.fetch_remote_content(&mxc, None, server.as_deref(), timeout)
+		.fetch_remote_content(&mxc, server.as_deref(), timeout)
 		.await?;
 
 	// Grab the length of the content before clearing it to not flood the output
@@ -304,7 +304,7 @@ pub(super) async fn get_remote_thumbnail(
 	let mut result = self
 		.services
 		.media
-		.fetch_remote_thumbnail(&mxc, None, server.as_deref(), timeout, &dim)
+		.fetch_remote_thumbnail(&mxc, server.as_deref(), timeout, &dim)
 		.await?;
 
 	// Grab the length of the content before clearing it to not flood the output
