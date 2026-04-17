@@ -11,6 +11,7 @@ use std::{
 	path::{Path, PathBuf},
 };
 
+use bytesize::ByteSize;
 use either::{Either, Either::Left};
 use figment::providers::{Data, Env, Format, Toml};
 pub use figment::{Figment, value::Value as FigmentValue};
@@ -3085,6 +3086,16 @@ pub struct StorageProviderS3 {
 	/// (expert use) When configured for the bucket it should be reflected here.
 	pub use_bucket_key: Option<bool>,
 
+	/// (expert use) Threshold size for switching to Multi-part uploads. This is
+	/// a quirk of the S3 protocol which requires us to use a different approach
+	/// for "large" uploads. This value determines what a "large" upload is. The
+	/// default value should be sufficient for most providers. The value is a
+	/// parsed string allowing SI or IEC units for convenience.
+	///
+	/// default: 100 MiB
+	#[serde(default = "default_multipart_threshold")]
+	pub multipart_threshold: ByteSize,
+
 	/// (developer use) Allows relaxing default requirement forcing HTTPS.
 	///
 	/// default: true
@@ -3670,3 +3681,5 @@ fn default_sso_grant_session_duration() -> Option<u64> { Some(300) }
 fn default_redaction_retention_seconds() -> u64 { 5_184_000 }
 
 fn default_media_storage_providers() -> BTreeSet<String> { ["media".to_owned()].into() }
+
+fn default_multipart_threshold() -> ByteSize { ByteSize::mib(100) }

@@ -2619,6 +2619,14 @@
 #
 #use_bucket_key =
 
+# (expert use) Threshold size for switching to Multi-part uploads. This is
+# a quirk of the S3 protocol which requires us to use a different approach
+# for "large" uploads. This value determines what a "large" upload is. The
+# default value should be sufficient for most providers. The value is a
+# parsed string allowing SI or IEC units for convenience.
+#
+#multipart_threshold = 100 MiB
+
 # (developer use) Allows relaxing default requirement forcing HTTPS.
 #
 #use_https = true

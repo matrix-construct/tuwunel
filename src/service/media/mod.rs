@@ -16,7 +16,6 @@ use async_trait::async_trait;
 use base64::{Engine as _, engine::general_purpose};
 use futures::{FutureExt, StreamExt, TryFutureExt, TryStreamExt, pin_mut};
 use http::StatusCode;
-use object_store::PutPayload;
 use ruma::{
 	Mxc, OwnedMxcUri, OwnedUserId, UserId,
 	api::client::error::{ErrorKind, RetryAfter},
@@ -598,12 +597,14 @@ impl Service {
 			.and_then(async |provider| {
 				let path = self.get_media_name_sha256(key);
 				debug!(
-					?key, ?path, provider = ?provider.name,
+					?key, ?path,
+					len = ?file.len(),
+					provider = ?provider.name,
 					"Creating media file on storage provider."
 				);
 
 				provider
-					.put(path.as_str(), PutPayload::from(file.to_vec()))
+					.put_one(path.as_str(), file.to_vec())
 					.await
 					.log_err()?;
 

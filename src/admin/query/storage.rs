@@ -314,7 +314,7 @@ async fn query_storage_sync(&self, src: String, dst: String) -> Result {
 		.try_stream()
 		.broadn_and_then(2, async |item| {
 			let data = src_p.get(item.as_ref()).await?;
-			let put = dst_p.put(item.as_ref(), data).await?;
+			let put = dst_p.put_one(item.as_ref(), data).await?;
 
 			Ok((item, put))
 		})
