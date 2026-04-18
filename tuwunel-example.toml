@@ -502,6 +502,10 @@
 #
 #media_upload_min_free_space = "1 GiB"
 
+# Auto download media from messages
+#
+#auto_download_media = false
+
 # reloadable: yes
 #
 # This limits how many prior events one recovery traversal visits. Raising

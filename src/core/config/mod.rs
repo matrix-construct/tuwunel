@@ -697,6 +697,10 @@ pub struct Config {
 	)]
 	pub media_upload_min_free_space: u64,
 
+	/// Auto download media from messages
+	#[serde(default)]
+	pub auto_download_media: bool,
+
 	/// reloadable: yes
 	/// default: 1024
 	///
