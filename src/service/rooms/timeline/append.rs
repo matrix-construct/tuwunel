@@ -7,7 +7,7 @@
 use std::{collections::btree_map::Entry, sync::Arc};
 
 use ruma::{
-	CanonicalJsonObject, CanonicalJsonValue, EventId, UserId,
+	CanonicalJsonObject, CanonicalJsonValue, EventId, MxcUri, UserId,
 	events::{
 		TimelineEventType,
 		receipt::ReceiptThread,
@@ -19,12 +19,13 @@ use ruma::{
 	},
 };
 use tuwunel_core::{
-	Result, debug_warn, err, error, implement,
+	Result, debug, debug_warn, err, error, implement,
 	smallvec::SmallVec,
 	utils::{
 		OptionExt,
 		result::{LogErr, NotFound},
 	},
+	warn,
 };
 use tuwunel_database::Json;
 use tuwunel_matrix::{
@@ -35,10 +36,11 @@ use tuwunel_matrix::{
 
 use super::{ExtractBody, ExtractRelatesTo, ExtractRelatesToEventId, RoomMutexGuard, bias_count};
 use crate::{
+	Services,
 	admin::CommandInput,
 	rooms::{
 		read_receipt::PrivateRead, short::ShortRoomId, state_accessor::plain_text_topic,
-		state_cache::MembershipUpdate, state_compressor::CompressedState,
+		state_cache::MembershipUpdate, state_compressor::CompressedState, timeline::ExtractUrl,
 	},
 };
 
@@ -381,9 +383,6 @@ async fn append_pdu_effects(
 		| TimelineEventType::RoomMember =>
 			self.append_member_effects(pdu, replaced_join, count)
 				.await?,
-		| TimelineEventType::RoomMessage =>
-			self.append_message_effects(&pdu_id, pdu, shortroomid)
-				.await?,
 		| TimelineEventType::RoomTopic =>
 			if let Some(topic) = pdu.get_content().ok().and_then(plain_text_topic) {
 				self.services
@@ -410,6 +409,26 @@ async fn append_pdu_effects(
 			{
 				self.redact_pdu(redacts_id, pdu, shortroomid, state_lock)
 					.await?;
+			}
+		},
+		| TimelineEventType::RoomMessage => {
+			self.append_message_effects(&pdu_id, pdu, shortroomid)
+				.await?;
+
+			if self.services.config.media.auto_download_media {
+				let content: ExtractUrl = pdu.get_content()?;
+				if let Some(url) = content.url {
+					self.services.server.runtime().spawn({
+						let services = self.services.clone();
+						async move {
+							debug!(%url, "Auto downloading media");
+
+							if let Err(err) = auto_download_media(&services, &url).await {
+								warn!(%url, "Error auto downloading media: {err}");
+							}
+						}
+					});
+				}
 			}
 		},
 		| _ => {},
@@ -474,6 +493,17 @@ async fn append_pdu_effects(
 			| _ => {}, // TODO: Aggregate other types
 		}
 	}
+
+	Ok(())
+}
+
+async fn auto_download_media(services: &Services, mxc_uri: &MxcUri) -> Result {
+	let mxc = mxc_uri.parts()?;
+
+	services
+		.media
+		.get_or_fetch(&mxc, ruma::media::default_download_timeout())
+		.await?;
 
 	Ok(())
 }

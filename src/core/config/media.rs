@@ -119,6 +119,17 @@ pub struct Media {
 	)]
 	pub upload_min_free_space: u64,
 
+	/// Automatically downloads media from message events.
+	///
+	/// When enabled, each `m.room.message` carrying an `mxc://` URL is fetched
+	/// through the media service after the event is appended, pulling remote
+	/// media into local storage without waiting for a client request.
+	///
+	/// reloadable: yes
+	/// legacy: auto_download_media
+	#[serde(default)]
+	pub auto_download_media: bool,
+
 	/// Prevents media from being embedded in frames, including same-origin
 	/// frames.
 	///
@@ -812,6 +823,7 @@ impl Default for Media {
 			rc_create_per_second: default_rc_create_per_second(),
 			rc_create_burst_count: default_rc_create_burst_count(),
 			upload_min_free_space: default_upload_min_free_space(),
+			auto_download_media: Default::default(),
 			deny_framing: Default::default(),
 			deny_inline_styles: Default::default(),
 			allow_legacy: Default::default(),

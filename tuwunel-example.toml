@@ -2842,6 +2842,16 @@
 #
 #upload_min_free_space = "1 GiB"
 
+# Automatically downloads media from message events.
+#
+# When enabled, each `m.room.message` carrying an `mxc://` URL is fetched
+# through the media service after the event is appended, pulling remote
+# media into local storage without waiting for a client request.
+#
+# reloadable: yes
+#
+#auto_download_media = false
+
 # Prevents media from being embedded in frames, including same-origin
 # frames.
 #
