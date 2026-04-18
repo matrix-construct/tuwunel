@@ -28,6 +28,8 @@ pub(crate) async fn run(services: Arc<Services>) -> Result {
 	let sigs = server
 		.runtime()
 		.spawn(signal(server.clone(), handle.clone()));
+	#[cfg(all(feature = "systemd", target_os = "linux"))]
+	let watchdog = server.runtime().spawn(start_systemd_watchdog());
 
 	let non_listener = services
 		.config
@@ -55,7 +57,13 @@ pub(crate) async fn run(services: Arc<Services>) -> Result {
 		},
 	};
 
-	// Join the signal handler before we leave.
+	// Join watchdog and the signal handler before we leave.
+	#[cfg(all(feature = "systemd", target_os = "linux"))]
+	{
+		watchdog.abort();
+		_ = watchdog.await;
+	};
+
 	sigs.abort();
 	_ = sigs.await;
 
@@ -153,4 +161,27 @@ fn handle_services_finish(
 	}
 
 	result
+}
+
+#[cfg(all(feature = "systemd", target_os = "linux"))]
+async fn start_systemd_watchdog() {
+	use tokio::time::MissedTickBehavior;
+
+	let mut watchdog_usec = 0;
+	if !sd_notify::watchdog_enabled(false, &mut watchdog_usec) || watchdog_usec == 0 {
+		return;
+	}
+
+	let interval_usec = (watchdog_usec / 2).max(1);
+	let interval = Duration::from_micros(interval_usec);
+
+	let mut ticker = tokio::time::interval(interval);
+	ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
+	loop {
+		ticker.tick().await;
+
+		if let Err(e) = sd_notify::notify(false, &[sd_notify::NotifyState::Watchdog]) {
+			error!("failed to notify systemd watchdog state: {e}");
+		}
+	}
 }
