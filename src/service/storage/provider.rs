@@ -71,11 +71,9 @@ async fn startup_check(self: &Arc<Self>) -> Result {
 
 /// Put object into store from streaming input.
 ///
-/// Highly recommended to know the total size of the object. If size is `None`,
-/// the stream may be collected in memory to find the size. If you are certain
-/// the size exceeds the multipart-threshold but truly cannot know the size
-/// (e.g. huge dataset, chunked encoding, etc) then pass `Some(usize::max)` to
-/// prevent collecting in memory; incorrect assumption will result in error.
+/// Recommended to know the total size of the object. If size is `None`,
+/// multi-part upload may be selected even for small uploads below the
+/// configured threshold.
 #[implement(Provider)]
 #[tracing::instrument(
 	level = "debug",
@@ -84,6 +82,7 @@ async fn startup_check(self: &Arc<Self>) -> Result {
 	fields(
 		provider = %self.name,
 		?path,
+		?size,
 	)
 )]
 pub async fn put<S, T>(&self, path: &str, size: Option<usize>, input: S) -> Result<PutResult>
@@ -91,27 +90,23 @@ where
 	S: Stream<Item = Result<T>> + Send,
 	PutPayload: From<T> + From<PutPayload>,
 {
-	if size >= Some(self.multipart_threshold()) {
+	if size.is_none_or(|size| size >= self.multipart_threshold()) {
 		return self.put_multi(path, input).await;
 	}
 
-	let payloads: Vec<PutPayload> = input
+	debug!(
+		?size,
+		threshold = ?self.multipart_threshold(),
+		"Selecting single-part upload..."
+	);
+
+	let payload: PutPayload = input
 		.map_ok(PutPayload::from)
 		.try_collect::<Vec<_>>()
-		.await?;
-
-	let len = payloads
-		.iter()
-		.map(PutPayload::content_length)
-		.fold(0_usize, usize::saturating_add);
-
-	if len >= self.multipart_threshold() {
-		return self
-			.put_multi(path, payloads.into_iter().try_stream())
-			.await;
-	}
-
-	let payload: PutPayload = payloads.into_iter().map(Bytes::from).collect();
+		.await?
+		.into_iter()
+		.map(Bytes::from)
+		.collect();
 
 	self.put_single(path, payload).await
 }
@@ -136,13 +131,18 @@ where
 {
 	let payload: PutPayload = input.into();
 
-	if payload.content_length() >= self.multipart_threshold() {
-		return self
-			.put_multi(path, once(payload).try_stream())
-			.await;
+	if payload.content_length() < self.multipart_threshold() {
+		return self.put_single(path, payload).await;
 	}
 
-	self.put_single(path, payload).await
+	debug!(
+		len = ?payload.content_length(),
+		threshold = ?self.multipart_threshold(),
+		"Selecting multi-part upload..."
+	);
+
+	self.put_multi(path, once(payload).try_stream())
+		.await
 }
 
 /// Put object into the store from streaming input using multipart upload.
@@ -215,7 +215,14 @@ async fn put_single(&self, path: &str, input: PutPayload) -> Result<PutResult> {
 }
 
 #[implement(Provider)]
-#[tracing::instrument(level = "debug", skip_all)]
+#[tracing::instrument(
+	level = "debug",
+	skip_all,
+	fields(
+		provider = %self.name,
+		?path,
+	)
+)]
 pub fn fetch_with_metadata(
 	&self,
 	path: &str,
@@ -235,7 +242,14 @@ pub fn fetch_with_metadata(
 }
 
 #[implement(Provider)]
-#[tracing::instrument(level = "debug", skip_all)]
+#[tracing::instrument(
+	level = "debug",
+	skip_all,
+	fields(
+		provider = %self.name,
+		?path,
+	)
+)]
 pub fn fetch(&self, path: &str) -> impl Stream<Item = Result<FetchItem>> + Send {
 	self.load(path)
 		.map_ok(|result| {
@@ -252,7 +266,15 @@ pub fn fetch(&self, path: &str) -> impl Stream<Item = Result<FetchItem>> + Send 
 }
 
 #[implement(Provider)]
-#[tracing::instrument(level = "debug", err(level = "debug"), skip_all)]
+#[tracing::instrument(
+	level = "debug",
+	err(level = "debug"),
+	skip_all,
+	fields(
+		provider = %self.name,
+		?path,
+	)
+)]
 pub async fn get(&self, path: &str) -> Result<Bytes> {
 	self.load(path)
 		.map_ok(GetResult::bytes)
@@ -416,7 +438,7 @@ pub async fn head(&self, path: &str) -> Result<ObjectMeta> {
 #[implement(Provider)]
 #[tracing::instrument(
 	level = "debug",
-	err(level = "debug"),
+	err(level = "error"),
 	skip_all,
 	fields(
 		provider = %self.name,
@@ -464,5 +486,5 @@ fn multipart_threshold(&self) -> usize {
 		.map(|config| config.multipart_threshold.as_u64())
 		.map(TryInto::try_into)
 		.flat_ok()
-		.unwrap_or(usize::MAX)
+		.unwrap_or_default()
 }
