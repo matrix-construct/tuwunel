@@ -31,6 +31,14 @@ pub struct Context<'a> {
 	pub room_id: &'a RoomId,
 	pub token: Option<u64>,
 	pub options: Option<&'a LazyLoadOptions>,
+	pub mode: Mode,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Mode {
+	Read,
+	Update,
+	Prefetch,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -88,6 +96,10 @@ pub async fn witness_retain(&self, senders: Witness, ctx: &Context<'_>) -> Witne
 	let _cork = self.db.db.cork();
 	let mut senders = Witness::with_capacity(senders.len());
 	while let Some((status, sender)) = witness.next().await {
+		if ctx.mode == Mode::Prefetch {
+			continue;
+		}
+
 		if include_redundant || status == Status::Unseen {
 			senders.insert(sender.into());
 			continue;
@@ -113,29 +125,33 @@ fn witness<'a, I>(
 where
 	I: Iterator<Item = &'a UserId> + Send + Clone + 'a,
 {
-	let make_key =
-		|sender: &'a UserId| -> Key<'a> { (ctx.user_id, ctx.device_id, ctx.room_id, sender) };
-
 	senders
 		.clone()
 		.stream()
-		.map(make_key)
+		.map(|sender| make_key(ctx, sender))
 		.qry(&self.db.lazyloadedids)
 		.map(into_status)
 		.zip(senders.stream())
 		.map(move |(status, sender)| {
-			if matches!(status, Status::Unseen) {
-				self.db
-					.lazyloadedids
-					.put_aput::<8, _, _>(make_key(sender), 0_u64);
-			} else if matches!(status, Status::Seen(0)) {
-				self.db
-					.lazyloadedids
-					.put_aput::<8, _, _>(make_key(sender), ctx.token.unwrap_or(0_u64));
+			if matches!(ctx.mode, Mode::Update) {
+				self.update(ctx, &status, sender);
 			}
 
 			status
 		})
+}
+
+#[implement(Service)]
+fn update(&self, ctx: &Context<'_>, status: &Status, sender: &UserId) {
+	if matches!(status, Status::Unseen) {
+		self.db
+			.lazyloadedids
+			.put_aput::<8, _, _>(make_key(ctx, sender), 0_u64);
+	} else if matches!(status, Status::Seen(0)) {
+		self.db
+			.lazyloadedids
+			.put_aput::<8, _, _>(make_key(ctx, sender), ctx.token.unwrap_or(0_u64));
+	}
 }
 
 fn into_status(result: Result<Handle<'_>>) -> Status {
@@ -143,6 +159,10 @@ fn into_status(result: Result<Handle<'_>>) -> Status {
 		| Ok(seen) => Status::Seen(seen),
 		| Err(_) => Status::Unseen,
 	}
+}
+
+fn make_key<'a>(ctx: &'a Context<'a>, sender: &'a UserId) -> Key<'a> {
+	(ctx.user_id, ctx.device_id, ctx.room_id, sender)
 }
 
 impl Options for LazyLoadOptions {

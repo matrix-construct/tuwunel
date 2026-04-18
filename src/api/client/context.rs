@@ -115,6 +115,7 @@ pub(crate) async fn get_context_route(
 		room_id,
 		token: Some(base_count.into_unsigned()),
 		options: Some(&filter.lazy_load_options),
+		mode: lazy_loading::Mode::Update,
 	};
 
 	let lazy_loading_witnessed = filter

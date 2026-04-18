@@ -132,6 +132,7 @@ pub(crate) async fn get_message_events_route(
 		room_id,
 		token: Some(from.into_unsigned()),
 		options: Some(&filter.lazy_load_options),
+		mode: lazy_loading::Mode::Update,
 	};
 
 	let witness = filter

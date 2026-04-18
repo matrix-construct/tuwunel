@@ -858,6 +858,7 @@ async fn load_joined_room(
 		room_id,
 		token: Some(since),
 		options: Some(&filter.room.state.lazy_load_options),
+		mode: lazy_loading::Mode::Update,
 	};
 
 	// Reset lazy loading because this is an initial sync
