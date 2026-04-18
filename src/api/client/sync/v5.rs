@@ -97,7 +97,7 @@ pub(crate) async fn sync_events_v5_route(
 		.unwrap_or(0);
 
 	let conn_key = into_connection_key(sender_user, sender_device, request.conn_id.as_deref());
-	let conn_val = services
+	let (conn_val, superseded) = services
 		.sync
 		.load_or_init_connection(&conn_key)
 		.await;
@@ -192,11 +192,10 @@ pub(crate) async fn sync_events_v5_route(
 
 		if timeout == 0
 			|| services.server.is_stopping()
-			|| timeout_at(stop_at, watchers)
-				.boxed()
-				.await
-				.is_err()
-		{
+			|| tokio::select! {
+				() = superseded.notified() => true,
+				result = timeout_at(stop_at, watchers).boxed() => result.is_err(),
+			} {
 			response.pos = conn.next_batch.to_string().into();
 			trace!(conn.globalsince, conn.next_batch, "timeout; empty response {response:?}");
 			conn.store(&services.sync, &conn_key);
