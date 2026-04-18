@@ -487,6 +487,10 @@
 #
 #media_rc_create_burst_count = 50
 
+# Auto download media from messages
+#
+#auto_download_media = false
+
 # reloadable: yes
 #
 # This limits how many prior events one recovery traversal visits. Raising
