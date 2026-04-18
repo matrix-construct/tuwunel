@@ -37,14 +37,13 @@ struct Data {
 
 impl Server {
 	pub(super) fn build(args: &crate::Args<'_>) -> Result<Option<Self>> {
-		if args.server.config.identity_provider.is_empty()
-			|| args.server.config.well_known.client.is_none()
+		if !args.server.config.identity_provider.is_empty()
+			&& args.server.config.well_known.client.is_none()
 		{
 			warn!(
-				"OIDC server (next-gen auth) requires `well_known.client` and one or more \
-				 `identity_provider` to be configured"
+				"OIDC server (Next-gen auth) requires `well_known.client` to be configured to \
+				 serve your `identity_provider`."
 			);
-
 			return Ok(None);
 		}
 
