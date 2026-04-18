@@ -47,26 +47,25 @@ pub(crate) async fn handle(
 
 	let uri = req.uri().clone();
 	let method = req.method().clone();
-	let requestor = async |services: Arc<Services>, parent: Span| {
-		tokio::select! {
-			response = execute(&services, req, next, &parent) => response,
-			response = services.server.until_shutdown()
-				.then(|()| {
-					let timeout = services.server.config.client_shutdown_timeout;
-					let timeout = Duration::from_secs(timeout);
-					sleep(timeout)
-				})
-				.map(|()| StatusCode::SERVICE_UNAVAILABLE)
-				.map(IntoResponse::into_response) => response,
-		}
-	};
-
+	let parent = Span::current();
 	let response = match method {
 		| Method::PUT | Method::POST | Method::DELETE | Method::PATCH => {
 			let task = services
+				.clone()
 				.server
 				.runtime()
-				.spawn(requestor(services.clone(), Span::current()));
+				.spawn(async move {
+					tokio::select! {
+						response = execute(&services, req, next, &parent) => response,
+						response = services.server.until_shutdown()
+							.then(|()| {
+								let timeout = services.config.client_shutdown_timeout;
+								sleep(Duration::from_secs(timeout))
+							})
+							.map(|()| StatusCode::SERVICE_UNAVAILABLE)
+							.map(IntoResponse::into_response) => response,
+					}
+				});
 
 			let abort = task.abort_handle();
 			defer! {{
@@ -77,7 +76,7 @@ pub(crate) async fn handle(
 
 			task.await.map_err(unhandled)?
 		},
-		| _ => requestor(services.clone(), Span::current()).await,
+		| _ => execute(&services, req, next, &parent).await,
 	};
 
 	handle_result(&method, &uri, response)
