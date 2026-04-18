@@ -194,14 +194,16 @@ pub(crate) async fn sync_events_v5_route(
 			}
 		}
 
-		if timeout == 0
-			|| services.server.is_stopping()
-			|| tokio::select! {
-				() = interrupted.notified() => return Ok(response),
-				watch = timeout_at(stop_at, watchers).boxed() => watch.is_err(),
-			} {
+		let waiter = async || {
+			tokio::select! {
+				() = interrupted.notified() => true,
+				watch = timeout_at(stop_at, watchers) => watch.is_err(),
+			}
+		};
+
+		if timeout == 0 || services.server.is_stopping() || waiter().boxed().await {
 			response.pos = conn.next_batch.to_string().into();
-			trace!(conn.globalsince, conn.next_batch, "timeout; empty response {response:?}");
+			trace!(conn.globalsince, conn.next_batch, "empty response {response:?}");
 			conn.store(&services.sync, &conn_key);
 			return Ok(response);
 		}
