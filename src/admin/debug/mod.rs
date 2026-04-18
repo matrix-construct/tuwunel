@@ -75,6 +75,12 @@ pub(super) enum DebugCommand {
 	GetRoomState {
 		/// Room ID
 		room_id: OwnedRoomOrAliasId,
+
+		/// Event Type
+		kind: Option<String>,
+
+		/// State Key
+		state_key: Option<String>,
 	},
 
 	/// - Get and display signing keys from local cache or remote server.

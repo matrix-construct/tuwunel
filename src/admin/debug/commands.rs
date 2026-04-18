@@ -17,7 +17,7 @@ use ruma::{
 use serde::Serialize;
 use tracing_subscriber::EnvFilter;
 use tuwunel_core::{
-	Err, Result, debug_error, err, info, jwt,
+	Err, Error, Result, debug_error, err, info, jwt,
 	matrix::{
 		Event,
 		pdu::{PduEvent, PduId, RawPduId},
@@ -26,7 +26,7 @@ use tuwunel_core::{
 	trace, utils,
 	utils::{
 		math::Expected,
-		stream::{IterStream, ReadyExt},
+		stream::{IterStream, ReadyExt, TryReadyExt},
 		string::EMPTY,
 		time::now_secs,
 	},
@@ -277,28 +277,56 @@ pub(super) async fn get_remote_pdu(
 }
 
 #[admin_command]
-pub(super) async fn get_room_state(&self, room: OwnedRoomOrAliasId) -> Result {
+pub(super) async fn get_room_state(
+	&self,
+	room: OwnedRoomOrAliasId,
+	kind: Option<String>,
+	state_key: Option<String>,
+) -> Result {
 	let room_id = self.services.alias.maybe_resolve(&room).await?;
-	let room_state: Vec<Raw<AnyStateEvent>> = self
-		.services
+
+	if state_key.is_none()
+		&& let Some(kind) = kind.clone().map(Into::into)
+	{
+		return self
+			.services
+			.state_accessor
+			.room_state_type_pdus(&room_id, &kind)
+			.map_ok(Event::into_format)
+			.ready_and_then(|event: Raw<AnyStateEvent>| {
+				serde_json::to_value(&event).map_err(Error::from)
+			})
+			.ready_and_then(|event| serde_json::to_string_pretty(&event).map_err(Error::from))
+			.try_for_each(|json| self.write_string(format!("```json\n{json}\n```\n")))
+			.await;
+	}
+
+	if let Some(state_key) = state_key
+		&& let Some(kind) = kind.map(Into::into)
+	{
+		let event: Raw<AnyStateEvent> = self
+			.services
+			.state_accessor
+			.room_state_get(&room_id, &kind, &state_key)
+			.await?
+			.into_format();
+
+		let value = serde_json::to_value(&event)?;
+		let json = serde_json::to_string_pretty(&value)?;
+		return self
+			.write_string(format!("```json\n{json}\n```\n"))
+			.await;
+	}
+
+	self.services
 		.state_accessor
 		.room_state_full_pdus(&room_id)
 		.map_ok(Event::into_format)
-		.try_collect()
-		.await?;
-
-	if room_state.is_empty() {
-		return Err!("Unable to find room state in our database (vector is empty)",);
-	}
-
-	let json = serde_json::to_string_pretty(&room_state).map_err(|e| {
-		err!(Database(
-			"Failed to convert room state events to pretty JSON, possible invalid room state \
-			 events in our database {e}",
-		))
-	})?;
-
-	self.write_str(&format!("```json\n{json}\n```"))
+		.ready_and_then(|event: Raw<AnyStateEvent>| {
+			serde_json::to_value(&event).map_err(Error::from)
+		})
+		.ready_and_then(|event| serde_json::to_string_pretty(&event).map_err(Error::from))
+		.try_for_each(|json| self.write_string(format!("```json\n{json}\n```\n")))
 		.await
 }
 
