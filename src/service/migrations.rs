@@ -1,13 +1,7 @@
 use std::cmp;
 
 use futures::{FutureExt, StreamExt};
-use ruma::{
-	OwnedUserId, RoomId, UserId,
-	events::{
-		GlobalAccountDataEventType, push_rules::PushRulesEvent, room::member::MembershipState,
-	},
-	push::Ruleset,
-};
+use ruma::{OwnedUserId, RoomId, UserId, events::room::member::MembershipState};
 use tuwunel_core::{
 	Err, Result, debug, debug_info, debug_warn, err, error, info,
 	itertools::Itertools,
@@ -94,21 +88,11 @@ async fn migrate(services: &Services) -> Result {
 	let target_version = DATABASE_VERSION;
 	let discovered_version = async || services.globals.db.database_version().await;
 
-	if discovered_version().await < 11 {
+	if discovered_version().await < 13 {
 		return Err!(Database(
 			"Database schema version {} is no longer supported",
 			discovered_version().await,
 		));
-	}
-
-	if discovered_version().await < 12 {
-		db_lt_12(services).await?;
-	}
-
-	// This migration can be reused as-is anytime the server-default rules are
-	// updated.
-	if discovered_version().await < 13 {
-		db_lt_13(services).await?;
 	}
 
 	if db["global"]
@@ -249,143 +233,6 @@ async fn migrate(services: &Services) -> Result {
 
 	info!("Loaded RocksDB database with schema version {DATABASE_VERSION}");
 
-	Ok(())
-}
-
-async fn db_lt_12(services: &Services) -> Result {
-	for username in &services
-		.users
-		.list_local_users()
-		.map(UserId::to_owned)
-		.collect::<Vec<_>>()
-		.await
-	{
-		let user = match UserId::parse_with_server_name(username.as_str(), &services.server.name)
-		{
-			| Ok(u) => u,
-			| Err(e) => {
-				warn!("Invalid username {username}: {e}");
-				continue;
-			},
-		};
-
-		let mut account_data: PushRulesEvent = services
-			.account_data
-			.get_global(&user, GlobalAccountDataEventType::PushRules)
-			.await
-			.expect("Username is invalid");
-
-		let rules_list = &mut account_data.content.global;
-
-		//content rule
-		{
-			let content_rule_transformation =
-				[".m.rules.contains_user_name", ".m.rule.contains_user_name"];
-
-			let rule = rules_list
-				.content
-				.get(content_rule_transformation[0]);
-
-			if let Some(rule) = rule {
-				let mut rule = rule.clone();
-				let mut rule_id = String::new();
-				content_rule_transformation[1].clone_into(&mut rule_id);
-				rule.rule_id = rule_id.into();
-				rules_list
-					.content
-					.shift_remove(content_rule_transformation[0]);
-
-				rules_list.content.insert(rule);
-			}
-		}
-
-		//underride rules
-		{
-			let underride_rule_transformation = [
-				[".m.rules.call", ".m.rule.call"],
-				[".m.rules.room_one_to_one", ".m.rule.room_one_to_one"],
-				[".m.rules.encrypted_room_one_to_one", ".m.rule.encrypted_room_one_to_one"],
-				[".m.rules.message", ".m.rule.message"],
-				[".m.rules.encrypted", ".m.rule.encrypted"],
-			];
-
-			for transformation in underride_rule_transformation {
-				let rule = rules_list.underride.get(transformation[0]);
-				if let Some(rule) = rule {
-					let mut rule = rule.clone();
-					let mut rule_id = String::new();
-					transformation[1].clone_into(&mut rule_id);
-					rule.rule_id = rule_id.into();
-					rules_list
-						.underride
-						.shift_remove(transformation[0]);
-					rules_list.underride.insert(rule);
-				}
-			}
-		}
-
-		services
-			.account_data
-			.update(
-				None,
-				&user,
-				GlobalAccountDataEventType::PushRules
-					.to_string()
-					.into(),
-				&serde_json::to_value(account_data).expect("to json value always works"),
-			)
-			.await?;
-	}
-
-	services.globals.db.bump_database_version(12);
-	info!("Migration: 11 -> 12 finished");
-	Ok(())
-}
-
-async fn db_lt_13(services: &Services) -> Result {
-	for username in &services
-		.users
-		.list_local_users()
-		.map(UserId::to_owned)
-		.collect::<Vec<_>>()
-		.await
-	{
-		let user = match UserId::parse_with_server_name(username.as_str(), &services.server.name)
-		{
-			| Ok(u) => u,
-			| Err(e) => {
-				warn!("Invalid username {username}: {e}");
-				continue;
-			},
-		};
-
-		let mut account_data: PushRulesEvent = services
-			.account_data
-			.get_global(&user, GlobalAccountDataEventType::PushRules)
-			.await
-			.expect("Username is invalid");
-
-		let user_default_rules = Ruleset::server_default(&user);
-		account_data
-			.content
-			.global
-			.update_with_server_default(user_default_rules);
-
-		services
-			.account_data
-			.update(
-				None,
-				&user,
-				GlobalAccountDataEventType::PushRules
-					.to_string()
-					.into(),
-				&serde_json::to_value(account_data).expect("to json value always works"),
-			)
-			.await?;
-	}
-
-	services.globals.db.bump_database_version(13);
-	info!("Migration: 12 -> 13 finished");
 	Ok(())
 }
 
