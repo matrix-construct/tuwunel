@@ -2404,6 +2404,24 @@ pub struct Config {
 	#[serde(default = "true_fn")]
 	pub database_migrations: bool,
 
+	/// Force the database to set its version to the current version known to
+	/// the executable.
+	///
+	/// - When the discovered version is less than the current version any
+	///   migrations are applied normally.
+	/// - When the discovered version is equal to the current version,
+	///   unversioned migrations are applied normally.
+	/// - When the discovered database version is greater than the current
+	///   version, one-time migrations are applied normally and the discoverable
+	///   version is regressed back to the current version.
+	///
+	/// This option extremely dangerous and intended for developer debugging and
+	/// testing only. Never set this option unless you have been instructed to
+	/// do so. Setting this option may cause permanent damage and permanent loss
+	/// of data.
+	#[serde(default)]
+	pub force_migration: bool,
+
 	// external structure; separate section
 	#[serde(default)]
 	pub blurhashing: BlurhashConfig,

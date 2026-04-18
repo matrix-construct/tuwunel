@@ -91,20 +91,23 @@ async fn migrate(services: &Services) -> Result {
 	let db = &services.db;
 	let config = &services.server.config;
 
-	if services.globals.db.database_version().await < 11 {
+	let target_version = DATABASE_VERSION;
+	let discovered_version = async || services.globals.db.database_version().await;
+
+	if discovered_version().await < 11 {
 		return Err!(Database(
 			"Database schema version {} is no longer supported",
-			services.globals.db.database_version().await
+			discovered_version().await,
 		));
 	}
 
-	if services.globals.db.database_version().await < 12 {
+	if discovered_version().await < 12 {
 		db_lt_12(services).await?;
 	}
 
 	// This migration can be reused as-is anytime the server-default rules are
 	// updated.
-	if services.globals.db.database_version().await < 13 {
+	if discovered_version().await < 13 {
 		db_lt_13(services).await?;
 	}
 
@@ -138,7 +141,6 @@ async fn migrate(services: &Services) -> Result {
 		.get(b"fix_referencedevents_missing_sep")
 		.await
 		.is_not_found()
-		|| services.globals.db.database_version().await < 17
 	{
 		fix_referencedevents_missing_sep(services).await?;
 	}
@@ -147,7 +149,6 @@ async fn migrate(services: &Services) -> Result {
 		.get(b"fix_readreceiptid_readreceipt_duplicates")
 		.await
 		.is_not_found()
-		|| services.globals.db.database_version().await < 17
 	{
 		fix_readreceiptid_readreceipt_duplicates(services).await?;
 	}
@@ -160,18 +161,34 @@ async fn migrate(services: &Services) -> Result {
 		fix_hashed_sentinel_passwords(services).await?;
 	}
 
-	if services.globals.db.database_version().await < 17 {
-		services.globals.db.bump_database_version(17);
-		info!("Migration: Bumped database version to 17");
+	if discovered_version().await < target_version {
+		services
+			.globals
+			.db
+			.bump_database_version(target_version);
+
+		info!(
+			"Database: Migrated schema version from {} to {target_version}",
+			discovered_version().await
+		);
+	} else if discovered_version().await != target_version && config.force_migration {
+		services
+			.globals
+			.db
+			.bump_database_version(target_version);
+
+		warn!(
+			"Database: Forced migration from schema version {} to {target_version}",
+			discovered_version().await,
+		);
 	}
 
 	assert_eq!(
-		services.globals.db.database_version().await,
-		DATABASE_VERSION,
+		target_version,
+		discovered_version().await,
 		"Failed asserting local database version {} is equal to known latest tuwunel database \
-		 version {}",
-		services.globals.db.database_version().await,
-		DATABASE_VERSION,
+		 version {target_version}",
+		discovered_version().await,
 	);
 
 	if !services.config.forbidden_usernames.is_empty() {
