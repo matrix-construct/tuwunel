@@ -459,6 +459,10 @@ pub struct Config {
 	#[serde(default = "default_media_rc_create_burst_count")]
 	pub media_rc_create_burst_count: u32,
 
+	/// Auto download media from messages
+	#[serde(default)]
+	pub auto_download_media: bool,
+
 	/// default: 192
 	#[serde(default = "default_max_fetch_prev_events")]
 	pub max_fetch_prev_events: u16,

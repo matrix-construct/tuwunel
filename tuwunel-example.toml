@@ -346,6 +346,10 @@
 #
 #media_rc_create_burst_count = 50
 
+# Auto download media from messages
+#
+#auto_download_media = false
+
 # This item is undocumented. Please contribute documentation for it.
 #
 #max_fetch_prev_events = 192
