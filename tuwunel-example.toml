@@ -2042,6 +2042,22 @@
 #
 #appservice_dir = ""
 
+# Skip database migration on startup. This option is intended for
+# developer debugging and testing only. Never set this option to false
+# unless you have been instructed to do so. Setting this option to false
+# may cause permanent damage and permanent loss of data.
+#
+# Any new database migrations will not be applied on startup, and the
+# database schema version will not be adjusted. These migrations and
+# schema changes may be expected by the current codebase but may not be
+# available when this option is set to false.
+#
+# Setting this option to false will have no effect if no new migrations
+# are to be applied. New migrations are applied once during any execution
+# where this option is set to true (which is the default).
+#
+#database_migrations = true
+
 
 
 #[global.tls]

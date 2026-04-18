@@ -32,6 +32,11 @@ use crate::{Services, media};
 pub(crate) const DATABASE_VERSION: u64 = 17;
 
 pub(crate) async fn migrations(services: &Services) -> Result {
+	if !services.config.database_migrations {
+		warn!("Skipping database migrations due to configuration...");
+		return Ok(());
+	}
+
 	let users_count = services.users.count().await;
 
 	// Matrix resource ownership is based on the server name; changing it
