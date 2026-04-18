@@ -14,7 +14,7 @@ use ruma::{
 	},
 };
 use serde::{Deserialize, Serialize};
-use tokio::sync::{Mutex as TokioMutex, Notify};
+use tokio::sync::Mutex as TokioMutex;
 use tuwunel_core::{Result, at, debug, err, implement, is_equal_to, utils::stream::TryIgnore};
 use tuwunel_database::{Cbor, Deserialized, Map};
 
@@ -57,10 +57,9 @@ pub struct Room {
 	pub roomsince: u64,
 }
 
+type Connections = TokioMutex<BTreeMap<ConnectionKey, ConnectionVal>>;
 pub type ConnectionVal = Arc<TokioMutex<Connection>>;
-pub type ConnectionEntry = (ConnectionVal, Arc<Notify>);
 pub type ConnectionKey = (OwnedUserId, Option<OwnedDeviceId>, Option<ConnectionId>);
-type Connections = TokioMutex<BTreeMap<ConnectionKey, ConnectionEntry>>;
 
 pub type Subscriptions = BTreeMap<OwnedRoomId, request::ListConfig>;
 pub type Lists = BTreeMap<ListId, request::List>;
@@ -103,22 +102,22 @@ pub async fn clear_connections(
 	device_id: Option<&DeviceId>,
 	conn_id: Option<&ConnectionId>,
 ) {
-	self.connections.lock().await.retain(
-		|(conn_user_id, conn_device_id, conn_conn_id), (_, notify)| {
+	self.connections
+		.lock()
+		.await
+		.retain(|(conn_user_id, conn_device_id, conn_conn_id), _| {
 			let retain = user_id.is_none_or(is_equal_to!(conn_user_id))
 				&& (device_id.is_none() || device_id == conn_device_id.as_deref())
 				&& (conn_id.is_none() || conn_id == conn_conn_id.as_ref());
 
 			if !retain {
-				notify.notify_waiters();
 				self.db
 					.userdeviceconnid_conn
 					.del((conn_user_id, conn_device_id, conn_conn_id));
 			}
 
 			retain
-		},
-	);
+		});
 }
 
 #[implement(Service)]
@@ -127,24 +126,16 @@ pub async fn drop_connection(&self, key: &ConnectionKey) {
 	let mut cache = self.connections.lock().await;
 
 	self.db.userdeviceconnid_conn.del(key);
-	if let Some((_, notify)) = cache.remove(key) {
-		notify.notify_waiters();
-	}
+	cache.remove(key);
 }
 
 #[implement(Service)]
 #[tracing::instrument(level = "debug", skip(self))]
-pub async fn load_or_init_connection(&self, key: &ConnectionKey) -> ConnectionEntry {
+pub async fn load_or_init_connection(&self, key: &ConnectionKey) -> ConnectionVal {
 	let mut cache = self.connections.lock().await;
 
 	match cache.entry(key.clone()) {
-		| Entry::Occupied(mut entry) => {
-			entry.get().1.notify_waiters();
-			let conn = entry.get().0.clone();
-			let notify = Arc::new(Notify::new());
-			entry.insert((conn.clone(), notify.clone()));
-			(conn, notify)
-		},
+		| Entry::Occupied(val) => val.get().clone(),
 		| Entry::Vacant(val) => {
 			let conn = self
 				.db
@@ -158,9 +149,7 @@ pub async fn load_or_init_connection(&self, key: &ConnectionKey) -> ConnectionEn
 				.map(Arc::new)
 				.unwrap_or_default();
 
-			let notify = Arc::new(Notify::new());
-			let (conn, _) = val.insert((conn, notify.clone()));
-			(conn.clone(), notify)
+			val.insert(conn).clone()
 		},
 	}
 }
@@ -171,7 +160,7 @@ pub async fn load_connection(&self, key: &ConnectionKey) -> Result<ConnectionVal
 	let mut cache = self.connections.lock().await;
 
 	match cache.entry(key.clone()) {
-		| Entry::Occupied(val) => Ok(val.get().0.clone()),
+		| Entry::Occupied(val) => Ok(val.get().clone()),
 		| Entry::Vacant(val) => self
 			.db
 			.userdeviceconnid_conn
@@ -181,10 +170,7 @@ pub async fn load_connection(&self, key: &ConnectionKey) -> Result<ConnectionVal
 			.map(at!(0))
 			.map(TokioMutex::new)
 			.map(Arc::new)
-			.map(|conn| {
-				let notify = Arc::new(Notify::new());
-				val.insert((conn, notify)).0.clone()
-			}),
+			.map(|conn| val.insert(conn).clone()),
 	}
 }
 
@@ -195,7 +181,7 @@ pub async fn get_loaded_connection(&self, key: &ConnectionKey) -> Result<Connect
 		.lock()
 		.await
 		.get(key)
-		.map(|(conn, _)| conn.clone())
+		.cloned()
 		.ok_or_else(|| err!(Request(NotFound("Connection not found."))))
 }
 

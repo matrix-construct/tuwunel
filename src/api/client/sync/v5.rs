@@ -3,9 +3,9 @@ mod filter;
 mod rooms;
 mod selector;
 
-use std::{collections::BTreeMap, fmt::Debug, time::Duration};
+use std::{collections::BTreeMap, fmt::Debug, sync::Arc, time::Duration};
 
-use axum::extract::State;
+use axum::extract::{Extension, State};
 use futures::{
 	FutureExt, TryFutureExt,
 	future::{join, try_join},
@@ -15,7 +15,10 @@ use ruma::{
 	api::client::sync::sync_events::v5::{ListId, Request, Response, response},
 	events::room::member::MembershipState,
 };
-use tokio::time::{Instant, timeout_at};
+use tokio::{
+	sync::Notify,
+	time::{Instant, timeout_at},
+};
 use tuwunel_core::{
 	Err, Result, debug,
 	debug::INFO_SPAN_LEVEL,
@@ -75,6 +78,7 @@ type ListIds = SmallVec<[ListId; 1]>;
 	)
 )]
 pub(crate) async fn sync_events_v5_route(
+	Extension(interrupted): Extension<Arc<Notify>>,
 	State(ref services): State<crate::State>,
 	body: Ruma<Request>,
 ) -> Result<Response> {
@@ -97,7 +101,7 @@ pub(crate) async fn sync_events_v5_route(
 		.unwrap_or(0);
 
 	let conn_key = into_connection_key(sender_user, sender_device, request.conn_id.as_deref());
-	let (conn_val, superseded) = services
+	let conn_val = services
 		.sync
 		.load_or_init_connection(&conn_key)
 		.await;
@@ -193,8 +197,8 @@ pub(crate) async fn sync_events_v5_route(
 		if timeout == 0
 			|| services.server.is_stopping()
 			|| tokio::select! {
-				() = superseded.notified() => true,
-				result = timeout_at(stop_at, watchers).boxed() => result.is_err(),
+				() = interrupted.notified() => return Ok(response),
+				watch = timeout_at(stop_at, watchers).boxed() => watch.is_err(),
 			} {
 			response.pos = conn.next_batch.to_string().into();
 			trace!(conn.globalsince, conn.next_batch, "timeout; empty response {response:?}");
