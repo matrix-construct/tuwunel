@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, sync::Arc};
 
 use ruma::{
-	CanonicalJsonObject, CanonicalJsonValue, EventId, UserId,
+	CanonicalJsonObject, CanonicalJsonValue, EventId, MxcUri, UserId,
 	events::{
 		TimelineEventType,
 		receipt::ReceiptThread,
@@ -13,7 +13,7 @@ use ruma::{
 	},
 };
 use tuwunel_core::{
-	Result, err, error, implement,
+	Result, debug, err, error, implement,
 	matrix::{
 		event::Event,
 		pdu::{PduCount, PduEvent, PduId, RawPduId},
@@ -21,12 +21,17 @@ use tuwunel_core::{
 	},
 	smallvec::SmallVec,
 	utils::{self, result::LogErr},
+	warn,
 };
 use tuwunel_database::Json;
 
 use super::{ExtractBody, ExtractRelatesTo, ExtractRelatesToEventId, RoomMutexGuard, bias_count};
-use crate::rooms::{
-	short::ShortRoomId, state_accessor::plain_text_topic, state_compressor::CompressedState,
+use crate::{
+	Services,
+	rooms::{
+		short::ShortRoomId, state_accessor::plain_text_topic, state_compressor::CompressedState,
+		timeline::ExtractUrl,
+	},
 };
 
 type Band<'a> = SmallVec<[&'a EventId; 1]>;
@@ -319,6 +324,22 @@ async fn append_pdu_effects(
 						.await?;
 				}
 			}
+
+			if self.services.config.auto_download_media {
+				let content: ExtractUrl = pdu.get_content()?;
+				if let Some(url) = content.url {
+					self.services.server.runtime().spawn({
+						let services = self.services.clone();
+						async move {
+							debug!(%url, "Auto downloading media");
+
+							if let Err(err) = auto_download_media(&services, &url).await {
+								warn!(%url, "Error auto downloading media: {err}");
+							}
+						}
+					});
+				}
+			}
 		},
 		| TimelineEventType::RoomTopic =>
 			if let Some(topic) = pdu.get_content().ok().and_then(plain_text_topic) {
@@ -388,6 +409,17 @@ async fn append_pdu_effects(
 			| _ => {}, // TODO: Aggregate other types
 		}
 	}
+
+	Ok(())
+}
+
+async fn auto_download_media(services: &Services, mxc_uri: &MxcUri) -> Result {
+	let mxc = mxc_uri.parts()?;
+
+	services
+		.media
+		.get_or_fetch(&mxc, ruma::media::default_download_timeout())
+		.await?;
 
 	Ok(())
 }

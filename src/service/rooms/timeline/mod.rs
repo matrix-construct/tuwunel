@@ -18,8 +18,8 @@ use futures::{
 	pin_mut,
 };
 use ruma::{
-	CanonicalJsonObject, EventId, MilliSecondsSinceUnixEpoch, OwnedEventId, OwnedRoomId, RoomId,
-	UserId, api::Direction, events::room::encrypted::Relation,
+	CanonicalJsonObject, EventId, MilliSecondsSinceUnixEpoch, OwnedEventId, OwnedMxcUri,
+	OwnedRoomId, RoomId, UserId, api::Direction, events::room::encrypted::Relation,
 };
 use serde::Deserialize;
 pub use tuwunel_core::matrix::pdu::{PduId, RawPduId};
@@ -75,6 +75,11 @@ struct ExtractRelatesToEventId {
 #[derive(Deserialize)]
 struct ExtractBody {
 	body: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ExtractUrl {
+	url: Option<OwnedMxcUri>,
 }
 
 type RoomMutexMap = MutexMap<OwnedRoomId, ()>;
