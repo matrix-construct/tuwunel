@@ -7,7 +7,7 @@ mod token;
 use std::sync::Arc;
 
 use serde_json::Value as JsonValue;
-use tuwunel_core::{Result, debug_info, err, implement, warn};
+use tuwunel_core::{Result, debug_info, debug_warn, err, implement, warn};
 use tuwunel_database::Map;
 
 pub use self::{
@@ -37,17 +37,9 @@ struct Data {
 
 impl Server {
 	pub(super) fn build(args: &crate::Args<'_>) -> Result<Option<Self>> {
-		if !args.server.config.identity_provider.is_empty()
-			&& args.server.config.well_known.client.is_none()
-		{
-			warn!(
-				"OIDC server (Next-gen auth) requires `well_known.client` to be configured to \
-				 serve your `identity_provider`."
-			);
+		if !Self::can_build(args) {
 			return Ok(None);
 		}
-
-		debug_info!("Initializing OIDC server for next-gen auth (MSC2965)");
 
 		let db = Data {
 			oidc_signingkey: args.db["oidc_signingkey"].clone(),
@@ -57,6 +49,10 @@ impl Server {
 		};
 
 		let key = init_signing_key(&db)?;
+		debug_info!(
+			key = ?key.key_id,
+			"Initializing OIDC server for next-gen auth (MSC2965)"
+		);
 
 		Ok(Some(Self {
 			services: args.services.clone(),
@@ -65,6 +61,30 @@ impl Server {
 			key,
 		}))
 	}
+}
+
+#[implement(Server)]
+fn can_build(args: &crate::Args<'_>) -> bool {
+	let has_idp = !args.server.config.identity_provider.is_empty();
+	let has_cwk = args.server.config.well_known.client.is_some();
+
+	if has_idp && !has_cwk {
+		warn!(
+			"OIDC server (Next-gen auth) requires `well_known.client` to be configured to serve \
+			 your `identity_provider`."
+		);
+	}
+
+	if !has_idp || !has_cwk {
+		debug_warn!(
+			"OIDC server (Next-gen auth) requires at least one `identity_provider` to be \
+			 configured."
+		);
+
+		return false;
+	}
+
+	true
 }
 
 #[implement(Server)]
