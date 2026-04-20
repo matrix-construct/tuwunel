@@ -125,7 +125,7 @@ features = ["alloc", "std"]
 default-features = false
 
 [workspace.dependencies.clap]
-version = "4.5"
+version = "4.6"
 default-features = false
 features = [
 	"derive",
@@ -148,7 +148,7 @@ version = "0.8.3"
 version = "1.1"
 
 [workspace.dependencies.criterion]
-version = "0.7"
+version = "0.8"
 default-features = false
 features = [
 	"cargo_bench_support",
@@ -157,7 +157,7 @@ features = [
 ]
 
 [workspace.dependencies.ctor]
-version = "0.5"
+version = "0.10"
 
 [workspace.dependencies.cyborgtime]
 version = "2.1"
@@ -222,7 +222,7 @@ features = [
 ]
 
 [workspace.dependencies.insta]
-version = "1.43"
+version = "1.47"
 features = [
 	"json",
 ]
@@ -258,7 +258,7 @@ features = ["sync", "tls-rustls"]
 version = "0.2"
 
 [workspace.dependencies.libloading]
-version = "0.8"
+version = "0.9"
 
 [workspace.dependencies.log]
 version = "0.4"
@@ -417,7 +417,7 @@ version = "0.4"
 default-features = false
 
 [workspace.dependencies.sentry]
-version = "0.46"
+version = "0.47"
 default-features = false
 features = [
     "backtrace",
@@ -433,10 +433,10 @@ features = [
 ]
 
 [workspace.dependencies.sentry-tower]
-version = "0.46"
+version = "0.47"
 
 [workspace.dependencies.sentry-tracing]
-version = "0.46"
+version = "0.47"
 
 [workspace.dependencies.serde]
 version = "1.0"
@@ -470,7 +470,7 @@ version = "0.10"
 default-features = false
 
 [workspace.dependencies.similar]
-version = "2.7"
+version = "3.1"
 
 [workspace.dependencies.smallstr]
 version = "0.3"
@@ -511,7 +511,7 @@ version = "2.0"
 default-features = false
 
 [workspace.dependencies.tokio]
-version = "1.50"
+version = "1.52"
 default-features = false
 features = [
 	"fs",
@@ -526,7 +526,7 @@ features = [
 ]
 
 [workspace.dependencies.tokio-metrics]
-version = "0.4"
+version = "0.5"
 
 [workspace.dependencies.toml]
 version = "1.0"
