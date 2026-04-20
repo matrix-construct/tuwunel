@@ -206,18 +206,28 @@ pub fn build(router: Router<State>, server: &Server) -> Router<State> {
 		.route("/_tuwunel/oidc/token", post(oidc::token_route))
 		.route("/_tuwunel/oidc/revoke", post(oidc::revoke_route))
 		.route("/_tuwunel/oidc/jwks", get(oidc::jwks_route))
-		.route("/_tuwunel/oidc/userinfo", get(oidc::userinfo_route).post(oidc::userinfo_route))
+		.route("/_tuwunel/oidc/userinfo",
+			get(oidc::userinfo_route)
+			.post(oidc::userinfo_route)
+		)
+		.route(
+			"/_tuwunel/oidc/account_callback",
+			get(oidc::account_callback_route)
+			.post(oidc::account_callback_post_route),
+		)
 		.route("/_tuwunel/oidc/account", get(oidc::account_route))
 		.route("/_tuwunel/oidc/account.js", get(oidc::account_js_route))
 		.route("/_tuwunel/oidc/account.css", get(oidc::account_css_route))
-		.route(
-			"/_tuwunel/oidc/account_callback",
-			get(oidc::account_callback_route).post(oidc::account_callback_post_route),
-		)
 		.route("/_matrix/client/v1/auth_issuer", get(oidc::auth_issuer_route))
 		.route("/_matrix/client/v1/auth_metadata", get(oidc::openid_configuration_route))
-		.route("/_matrix/client/unstable/org.matrix.msc2965/auth_issuer", get(oidc::auth_issuer_route))
-		.route("/_matrix/client/unstable/org.matrix.msc2965/auth_metadata", get(oidc::openid_configuration_route))
+		.route(
+			"/_matrix/client/unstable/org.matrix.msc2965/auth_issuer",
+			get(oidc::auth_issuer_route)
+		)
+		.route(
+			"/_matrix/client/unstable/org.matrix.msc2965/auth_metadata",
+			get(oidc::openid_configuration_route)
+		)
 		.route("/.well-known/openid-configuration", get(oidc::openid_configuration_route))
 		.ruma_route(&client::well_known_support)
 		.ruma_route(&client::well_known_client);

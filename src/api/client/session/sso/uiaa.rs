@@ -1,5 +1,6 @@
 use axum::extract::State;
 use ruma::api::client::uiaa::{AuthType, UiaaInfo, get_uiaa_fallback_page};
+use serde_json::Value as JsonValue;
 use tuwunel_core::{Err, Result};
 
 use crate::{Ruma, oidc::url_encode};
@@ -30,9 +31,15 @@ pub(crate) async fn sso_fallback_route(
 	// Single DB lookup — get_uiaa_session_by_session_id does a full table scan,
 	// so we call it once and reuse the result for both the completion check and
 	// the IdP extraction that follows.
-	let session_data = services.uiaa.get_uiaa_session_by_session_id(session).await;
+	let session_data = services
+		.uiaa
+		.get_uiaa_session_by_session_id(session)
+		.await;
 
-	if session_data.as_ref().is_some_and(|(_, _, uiaainfo)| completed(uiaainfo)) {
+	if session_data
+		.as_ref()
+		.is_some_and(|(_, _, uiaainfo)| completed(uiaainfo))
+	{
 		let html = include_str!("complete.html");
 
 		return Ok(Response::html(html.as_bytes().to_vec()));
@@ -44,7 +51,8 @@ pub(crate) async fn sso_fallback_route(
 	// determine exactly one provider, so a missing IdP here is a logic error.
 	let idp_id: Option<String> = session_data.and_then(|(_, _, uiaainfo)| {
 		let raw = uiaainfo.params?;
-		let params: serde_json::Value = serde_json::from_str(raw.get()).ok()?;
+		let params: JsonValue = serde_json::from_str(raw.get()).ok()?;
+
 		params["m.login.sso"]["identity_providers"]
 			.as_array()?
 			.first()?["id"]

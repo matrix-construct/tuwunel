@@ -366,10 +366,15 @@ impl Service {
 	}
 
 	/// Verify a login token is valid and return its owner without consuming it.
-	/// Unlike [`find_from_login_token`], the token remains in the database after this call
-	/// and can still be consumed later.
+	/// Unlike [`find_from_login_token`], the token remains in the database
+	/// after this call and can still be consumed later.
 	pub async fn peek_login_token(&self, token: &str) -> Result<OwnedUserId> {
-		let Ok(value) = self.db.logintoken_expiresatuserid.get(token).await else {
+		let Ok(value) = self
+			.db
+			.logintoken_expiresatuserid
+			.get(token)
+			.await
+		else {
 			return Err!(Request(Forbidden("Login token is unrecognised")));
 		};
 		let (expires_at, user_id): (u64, OwnedUserId) = value.deserialized()?;

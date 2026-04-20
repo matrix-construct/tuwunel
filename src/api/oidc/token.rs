@@ -4,31 +4,21 @@ use axum::{
 	extract::{Form, State},
 	response::IntoResponse,
 };
-use http::{Response, StatusCode, header::{CACHE_CONTROL, PRAGMA}};
+use http::{
+	Response, StatusCode,
+	header::{CACHE_CONTROL, PRAGMA},
+};
 use ruma::OwnedDeviceId;
 use serde::Deserialize;
 use serde_json::json;
-use tuwunel_core::{Result, err, info, utils::time::now};
+use tuwunel_core::{Error, Result, err, info, utils::time::now};
 use tuwunel_service::{
 	Services,
 	oauth::server::{IdTokenClaims, Server, extract_device_id},
 	users::device::generate_refresh_token,
 };
 
-use tuwunel_core::Error;
-
 use super::oauth_error;
-
-/// RFC 6749 §5.2: map error to correct HTTP status and OAuth2 error code.
-/// Client-side errors (invalid grant, bad params) → 400 invalid_grant.
-/// Server-side errors → 500 server_error with sanitized message.
-fn token_error_response(e: Error) -> Response<Body> {
-	if e.status_code().is_client_error() {
-		oauth_error(StatusCode::BAD_REQUEST, "invalid_grant", &e.sanitized_message())
-	} else {
-		oauth_error(StatusCode::INTERNAL_SERVER_ERROR, "server_error", "An internal error occurred")
-	}
-}
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct TokenRequest {
@@ -207,4 +197,20 @@ async fn token_refresh(services: &Services, body: &TokenRequest) -> Result<Respo
 	}
 
 	Ok(Json(response).into_response())
+}
+
+/// RFC 6749 §5.2: map error to correct HTTP status and OAuth2 error code.
+/// Client-side errors (invalid grant, bad params) → 400 invalid_grant.
+/// Server-side errors → 500 server_error with sanitized message.
+#[expect(clippy::needless_pass_by_value)]
+fn token_error_response(e: Error) -> Response<Body> {
+	if !e.status_code().is_client_error() {
+		return oauth_error(
+			StatusCode::INTERNAL_SERVER_ERROR,
+			"server_error",
+			"An internal error occurred",
+		);
+	}
+
+	oauth_error(StatusCode::BAD_REQUEST, "invalid_grant", &e.sanitized_message())
 }

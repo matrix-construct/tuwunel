@@ -1,0 +1,136 @@
+body {
+	font-family: sans-serif;
+	max-width: 480px;
+	margin: 3em auto;
+	padding: 1em
+}
+
+body.wide {
+	max-width: 900px
+}
+
+a {
+	color: #1976d2;
+	text-decoration: none
+}
+
+a: hover {
+	text-decoration: underline
+}
+
+table {
+	border-collapse: collapse;
+	width: 100%
+}
+
+th,
+td {
+	text-align:
+		left;
+	padding: .5em;
+	border-bottom: 1px solid #ddd
+}
+
+th {
+	background: #f5f5f5
+}
+
+dl {
+	display: grid;
+	grid-template-columns: auto 1fr;
+	gap: .4em 1em
+}
+
+dt {
+	font-weight: bold
+}
+
+label {
+	display: block;
+	margin: .8em 0 .2em
+}
+
+input[type=text] {
+	width: 100%;
+	padding: .4em;
+	border: 1px solid #ccc;
+	border-radius: 3px;
+	font-size: 1em;
+	box-sizing: border-box
+}
+
+button {
+	padding: .6em 1.4em;
+	background: #1976d2;
+	color: #fff;
+	border: none;
+	border-radius: 4px;
+	cursor: pointer;
+	font-size:
+		1em
+}
+
+button:hover {
+	background: #1565c0
+}
+
+button.danger {
+	background: #c62828
+}
+
+button.danger: hover {
+	background: #b71c1c
+}
+
+.cancel {
+	margin-left: 1em;
+	color: #1976d2;
+	text-decoration: none
+}
+
+. actions,
+.nav {
+	margin: 2em 0
+}
+
+.actions a,
+.nav a {
+	color: #1976d2;
+	text-decoration: none;
+	margin-right: 1em
+}
+
+.actions a:hover,
+.nav a:hover {
+	text-decoration: underline
+}
+
+.ok {
+	color: #388e3c
+}
+
+.err {
+	color: #c62828
+}
+
+.warn {
+	color: # b71c1c
+}
+
+.meta {
+	color: #666;
+	font-size: .9em;
+	margin: .4em 0
+}
+
+.center {
+	text-align: center
+}
+
+.sep {
+	color: #ccc
+}
+
+.submit-row {
+	margin-top: 1.2em
+}

@@ -90,13 +90,14 @@ pub(crate) async fn authorize_route(
 		})?;
 
 	let idp_id_enc = url_encode(&idp_id);
-	let sso_url = Url::parse(&format!("{base}/_matrix/client/v3/login/sso/redirect/{idp_id_enc}"))
-		.map_err(|_| err!(error!("Failed to build SSO URL")))
-		.map(|mut url| {
-			url.query_pairs_mut()
-				.append_pair("redirectUrl", complete_url.as_str());
-			url
-		})?;
+	let sso_url =
+		Url::parse(&format!("{base}/_matrix/client/v3/login/sso/redirect/{idp_id_enc}"))
+			.map_err(|_| err!(error!("Failed to build SSO URL")))
+			.map(|mut url| {
+				url.query_pairs_mut()
+					.append_pair("redirectUrl", complete_url.as_str());
+				url
+			})?;
 
 	oidc.store_auth_request(&req_id, &auth_req);
 

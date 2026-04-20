@@ -7,7 +7,7 @@ use ruma::{
 };
 use serde_json::{json, value::to_raw_value};
 use tuwunel_core::{
-	Err, Error, Result, err, utils,
+	Err, Error, Result, err, is_equal_to, utils,
 	utils::{
 		OptionExt,
 		future::{OptionFutureExt, TryExtExt},
@@ -43,36 +43,41 @@ where
 	// The correct binding comes from the device that made this request, not
 	// from a heuristic scan of all user sessions.  Rules:
 	//
-	//  1. Preferred: the device is tagged with an idp_id from when it was
-	//     created via the OIDC token endpoint → use that idp_id directly.
-	//     This is exact and correct even on multi-provider servers.
-	//  2. Fallback: the device has no idp tag (pre-dates the idp_id field or
-	//     was created through a legacy path) but origin=="sso" and only one
-	//     provider is configured → routing is still unambiguous.
+	//  1. Preferred: the device is tagged with an idp_id from when it was created
+	//     via the OIDC token endpoint → use that idp_id directly. This is exact and
+	//     correct even on multi-provider servers.
+	//  2. Fallback: the device has no idp tag (pre-dates the idp_id field or was
+	//     created through a legacy path) but origin=="sso" and only one provider is
+	//     configured → routing is still unambiguous.
 	//  3. Otherwise: cannot determine provider → do NOT advertise m.login.sso.
 	let sso_flow = [AuthType::Sso];
-	let bound_idp: Option<String> = if let Some(u) = sender_user {
-		let device_idp = if let Some(device_id) = body.sender_device.as_deref() {
-			services
-				.users
-				.get_oidc_device_idp(u, device_id)
+	let bound_idp: Option<String> = sender_user
+		.map_async(async |sender_user| {
+			body.sender_device
+				.as_deref()
+				.map_async(async |device_id| {
+					services
+						.users
+						.get_oidc_device_idp(sender_user, device_id)
+						.await
+						.filter(|s| !s.is_empty())
+				})
 				.await
-				.filter(|s| !s.is_empty())
-		} else {
-			None
-		};
-		if device_idp.is_some() {
-			device_idp
-		} else if user_origin.as_deref() == Some("sso")
-			&& services.config.identity_provider.len() == 1
-		{
-			services.oauth.providers.get_default_id()
-		} else {
-			None
-		}
-	} else {
-		None
-	};
+				.flatten()
+				.or_else(|| {
+					let use_sso = user_origin
+						.as_deref()
+						.is_some_and(is_equal_to!("sso"))
+						&& services.config.identity_provider.len() == 1;
+
+					use_sso
+						.then(|| services.oauth.providers.get_default_id())
+						.flatten()
+				})
+		})
+		.await
+		.flatten();
+
 	let has_sso = bound_idp.is_some();
 
 	let jwt_flow = [AuthType::Jwt];
@@ -148,8 +153,7 @@ where
 							"identity_providers": [{"id": idp}]
 						}
 					}))
-					.ok()
-					.map(Into::into);
+					.ok();
 				}
 
 				services

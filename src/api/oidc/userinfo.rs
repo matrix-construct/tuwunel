@@ -1,7 +1,7 @@
 use axum::{
-	Json, RequestPartsExt,
+	Json, RequestPartsExt, body,
 	body::Body,
-	extract::State,
+	extract::{Request, State},
 	http::Method,
 	response::IntoResponse,
 };
@@ -10,10 +10,11 @@ use axum_extra::{
 	headers::{Authorization, authorization::Bearer},
 };
 use futures::future::join;
-use http::{Response, StatusCode};
+use http::{HeaderValue, Response, StatusCode, header};
 use serde::Deserialize;
 use serde_json::json;
-use tuwunel_core::{Err, Result, utils::TryFutureExtExt};
+use tuwunel_core::{Err, Result, err, utils::TryFutureExtExt};
+use tuwunel_service::Services;
 
 use super::oauth_error;
 
@@ -24,30 +25,28 @@ struct AccessTokenForm {
 
 pub(crate) async fn userinfo_route(
 	State(services): State<crate::State>,
-	request: axum::extract::Request,
+	request: Request,
 ) -> Response<Body> {
 	userinfo_inner(&services, request)
 		.await
 		.unwrap_or_else(|e| {
 			let status = e.status_code();
-			let mut resp = oauth_error(status, "invalid_token", &e.sanitized_message());
+			let msg = e.sanitized_message();
+			let mut resp = oauth_error(status, "invalid_token", &msg);
+
 			// RFC 6750 §3: include WWW-Authenticate on 401 responses.
 			if status == StatusCode::UNAUTHORIZED {
 				resp.headers_mut().insert(
-					http::header::WWW_AUTHENTICATE,
-					http::HeaderValue::from_static(
-						r#"Bearer realm="Matrix", error="invalid_token""#,
-					),
+					header::WWW_AUTHENTICATE,
+					HeaderValue::from_static(r#"Bearer realm="Matrix", error="invalid_token""#),
 				);
 			}
+
 			resp
 		})
 }
 
-async fn userinfo_inner(
-	services: &tuwunel_service::Services,
-	request: axum::extract::Request,
-) -> Result<Response<Body>> {
+async fn userinfo_inner(services: &Services, request: Request) -> Result<Response<Body>> {
 	let (mut parts, body) = request.into_parts();
 
 	// Authorization header takes priority (required for GET, preferred for POST).
@@ -58,13 +57,16 @@ async fn userinfo_inner(
 		b.token().to_owned()
 	} else if parts.method == Method::POST {
 		// RFC 6750 §2.2: POST body may carry access_token as form parameter.
-		let bytes = axum::body::to_bytes(body, 8192)
+		let bytes = body::to_bytes(body, 8192)
 			.await
-			.map_err(|_| tuwunel_core::err!(Request(BadJson("Failed to read request body"))))?;
+			.map_err(|_| err!(Request(BadJson("Failed to read request body"))))?;
+
 		serde_html_form::from_bytes::<AccessTokenForm>(&bytes)
 			.ok()
 			.and_then(|f| f.access_token)
-			.ok_or_else(|| tuwunel_core::err!(Request(MissingToken("No access token provided"))))?
+			.ok_or_else(|| {
+				tuwunel_core::err!(Request(MissingToken("No access token provided")))
+			})?
 	} else {
 		return Err!(Request(MissingToken("No access token provided")));
 	};
@@ -76,7 +78,11 @@ async fn userinfo_inner(
 	// RFC OIDC Core §5.3: the userinfo endpoint MUST only respond to tokens
 	// that were issued through an OIDC flow (i.e. with the openid scope).
 	// Reject plain Matrix access tokens that were not issued via OIDC.
-	if !services.users.is_oidc_device(&user_id, &device_id).await {
+	if !services
+		.users
+		.is_oidc_device(&user_id, &device_id)
+		.await
+	{
 		return Err!(Request(Unauthorized("Token was not issued through OIDC")));
 	}
 
@@ -86,10 +92,11 @@ async fn userinfo_inner(
 
 	let (avatar_url, displayname) = join(avatar_url, displayname).await;
 
-	Ok(Json(json!({
+	let response = json!({
 		"sub": user_id.to_string(),
 		"name": displayname,
 		"picture": avatar_url,
-	}))
-	.into_response())
+	});
+
+	Ok(Json(response).into_response())
 }

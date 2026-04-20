@@ -3,41 +3,61 @@ use std::time::{Duration, SystemTime};
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD as b64};
 use ruma::OwnedUserId;
 use serde::{Deserialize, Serialize};
-use tuwunel_core::{Err, Result, err, implement, utils};
+use tuwunel_core::{Err, Result, err, implement, utils, utils::hash::sha256};
 use tuwunel_database::{Cbor, Deserialized};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct AuthRequest {
 	pub client_id: String,
+
 	pub redirect_uri: String,
+
 	pub scope: String,
+
 	pub state: Option<String>,
+
 	pub nonce: Option<String>,
+
 	pub code_challenge: Option<String>,
+
 	pub code_challenge_method: Option<String>,
+
 	/// The identity provider ID used to authenticate the user for this
 	/// authorization request. Stored so it can be propagated to the device
 	/// at token exchange time and used for UIAA SSO provider binding.
 	pub idp_id: Option<String>,
+
 	pub created_at: SystemTime,
+
 	pub expires_at: SystemTime,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct AuthCodeSession {
 	pub code: String,
+
 	pub client_id: String,
+
 	pub redirect_uri: String,
+
 	pub scope: String,
+
 	pub state: Option<String>,
+
 	pub nonce: Option<String>,
+
 	pub code_challenge: Option<String>,
+
 	pub code_challenge_method: Option<String>,
+
 	pub user_id: OwnedUserId,
+
 	/// Propagated from the originating AuthRequest; identifies which IdP
 	/// authenticated the user so the device can be tagged at token exchange.
 	pub idp_id: Option<String>,
+
 	pub created_at: SystemTime,
+
 	pub expires_at: SystemTime,
 }
 
@@ -146,10 +166,7 @@ pub async fn exchange_auth_code(
 	// Only S256 is advertised in discovery metadata; reject plain to avoid
 	// downgrade attacks (plain challenge == verifier, trivially intercepted).
 	let computed = match method {
-		| "S256" => {
-			let hash = utils::hash::sha256::hash(verifier.as_bytes());
-			b64.encode(hash)
-		},
+		| "S256" => b64.encode(sha256::hash(verifier.as_bytes())),
 		| _ => return Err!(Request(InvalidParam("Unsupported code_challenge_method"))),
 	};
 
