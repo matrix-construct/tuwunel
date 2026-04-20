@@ -26,6 +26,9 @@ pub(crate) enum RawCommand {
 	/// - List database maps
 	Maps,
 
+	/// - Current rocksdb sequence number.
+	Sequence,
+
 	/// - Raw database query
 	Get {
 		/// Map name
@@ -475,6 +478,13 @@ pub(super) async fn raw_get(&self, map: String, key: String, base64: bool) -> Re
 
 	self.write_str(&format!("Query completed in {query_time:?}:\n\n```rs\n{result:?}\n```"))
 		.await
+}
+
+#[admin_command]
+pub(super) async fn raw_sequence(&self) -> Result {
+	let sequence = self.services.db.engine.current_sequence();
+
+	self.write_str(&format!("{sequence:#?}")).await
 }
 
 #[admin_command]
