@@ -8,7 +8,7 @@ use http::{
 };
 use futures::StreamExt;
 use ruma::{OwnedDeviceId, OwnedRoomId, UserId};
-use tuwunel_core::{Error, Result, err, info};
+use tuwunel_core::{Error, Result, err, info, utils::html::escape as html_escape};
 
 use super::url_encode;
 
@@ -586,19 +586,4 @@ fn ts_cell(ts_secs: u64) -> String {
 	} else {
 		format!(r#"<time data-ts="{ts_secs}">—</time>"#)
 	}
-}
-
-fn html_escape(s: &str) -> String {
-	s.chars().fold(String::with_capacity(s.len()), |mut out, c| {
-		match c {
-			| '&' => out.push_str("&amp;"),
-			| '<' => out.push_str("&lt;"),
-			| '>' => out.push_str("&gt;"),
-			| '"' => out.push_str("&quot;"),
-			| '\'' => out.push_str("&#x27;"),
-			| '`' => out.push_str("&#x60;"),
-			| c => out.push(c),
-		}
-		out
-	})
 }
