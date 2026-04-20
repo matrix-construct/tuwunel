@@ -1,104 +1,91 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Authentication Required</title>
-  <style>
-body {
-	font-family: system-ui, -apple-system, sans-serif;
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	min-height: 100vh;
-	margin: 0;
-	background: #f4f6f8;
-	color: #2e3648
-}
-@media(prefers-color-scheme:dark) {
-	body {
-		background: #151924;
-		color: #f4f6f8;
-	}
-	.card {
-		text-align: center;
-		background: #fff;
-		padding: 2.5rem 2rem;
-		border-radius: 12px;
-		box -shadow: 0 4px 20px rgba(0, 0, 0, .08);
-		max-width: 360px;
-		width: 90%;
-	}
-}
-@media(prefers-color-scheme:dark) {
-	.card {
-		background: #222632;
-		box-shadow: 0 4px 20px rgba(0, 0, 0, .3);
-	}
-	.icon {
-		font-size: 48px;
-		margin-bottom: 1rem;
-	}
-	h1 {
-		font-size: 1 .25rem;
-		margin: 0 0 1rem;
-	}
-	p {
-		color: #6b7280;
-		margin: 0 0 1.5rem;
-		font-size: .95rem;
-		line-height: 1.5;
-	}
-}
-@media(prefers-color-scheme:dark) {
-	p {
-		color: #9ca3af
-	}
-	.btn {
-		display: inline-block;
-		background: #00A36C;
-		color: #fff;
-		text-decoration: none;
-		padding: 12px 24px;
-		border-radius: 8px;
-		box-shadow: 2px 2px 2px 2px black;
-		font-weight: 900;
-		font-size: 1rem;
-		transition: opacity .2s;
-		width: calc(100 % - 48px);
-	}
-	.btn:hover {
-		opacity: .9;
-	}
-	.warning {
-		margin-top: 1.5rem;
-		font-size: .85rem;
-		color: #d97706;
-		background: #960019;
-		padding: 12px;
-		border-radius: 8px;
-	}
-}
-@media(prefers-color-scheme:dark) {
-	.warning {
-		background: #811311;
-		color: #fcd34d;
-	}
-}
-  </style>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width,initial-scale=1">
+	<title>Authentication Required</title>
+	<style>
+		body {
+			font-family: system-ui, -apple-system, sans-serif;
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			min-height: 100vh;
+			margin: 0;
+			background: #151924;
+			color: #f4f6f8;
+		}
+
+		.card {
+			text-align: center;
+			padding: 2.5rem 2rem;
+			border-radius: 12px;
+			max-width: 360px;
+			width: 90%;
+			background: #222632;
+			box-shadow: 0 4px 20px rgba(0, 0, 0, .3);
+		}
+
+		.icon {
+			font-size: 48px;
+			margin-bottom: 1rem;
+		}
+
+		h1 {
+			font-size: 1 .25rem;
+			margin: 0 0 1rem;
+		}
+
+		p {
+			margin: 0 0 1.5rem;
+			font-size: .95rem;
+			line-height: 1.5;
+			color: #9ca3af
+		}
+
+		.btn {
+			display: inline-block;
+			background: #00A36C;
+			color: #fff;
+			text-decoration: none;
+			padding: 12px 24px;
+			border-radius: 8px;
+			box-shadow: 2px 2px 2px 2px black;
+			font-weight: 900;
+			font-size: 1rem;
+			transition: opacity .2s;
+			width: calc(100% - 48px);
+		}
+
+		.btn:hover {
+			opacity: .9;
+		}
+
+		.warning {
+			margin-top: 1.5rem;
+			font-size: .85rem;
+			padding: 12px;
+			border-radius: 8px;
+			background: #811311;
+			color: #fcd34d;
+		}
+	</style>
 </head>
+
 <body>
-  <div class="card">
-    <div class="icon">
-      💕
-    </div>
-    <h1>Single Sign-On Required</h1>
-    <p>To confirm this action, please re-authenticate with your Single Sign-On provider.</p>
-    <a href="{{url_str}}" class="btn">Continue with SSO</a>
-    <div class="warning">
-		<strong>Security Notice:</strong>
-		If you did not trigger this action, your account may be compromised.
+	<div class="card">
+		<div class="icon">
+			💕
+		</div>
+		<h1>Single Sign-On Required</h1>
+		<p>To confirm this action, please re-authenticate with your Single Sign-On provider.</p>
+		<a href="{{url_str}}" class="btn">Continue with SSO</a>
+		<div class="warning">
+			<strong>Security Notice:</strong>
+			If you did not trigger this action, your account may be compromised.
+		</div>
 	</div>
-    </div>
 </body>
+
 </html>

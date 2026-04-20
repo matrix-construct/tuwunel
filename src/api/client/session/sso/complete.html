@@ -1,83 +1,73 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Authentication Complete</title>
-  <style>
-body {
-	font-family: system-ui, -apple-system, sans-serif;
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	height: 100vh;
-	margin: 0;
-	background: #f4f6f8;
-	color: #2e3648;
-}
-@media(prefers-color-scheme:dark) {
-	body {
-		background: #151924;
-		color: #f4f6f8;
-	}
-	.card {
-		text-align: center;
-		background: #fff;
-		padding: 2.5rem;
-		border-radius: 12px;
-		box-shadow: 0 4px 20px rgba(0, 0, 0, .08);
-		max-width: 320px;
-		width: 90%;
-	}
-}
-@media(prefers-color-scheme:dark) {
-	.card {
-		background: #222632;
-		box-shadow: 0 4px 20px rgba(0, 0, 0, .3);
-	}
-	.icon {
-		background: #0dbd8b;
-		color: #fff;
-		width: 64px;
-		height: 64px;
-		border-radius: 50%;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		font-size: 32px;
-		margin: 0 auto 1.5rem;
-	}
-	h1 {
-		font-size: 1.25rem;
-		margin: 0 0 .5rem;
-	}
-	p {
-		color: #6b7280;
-		margin: 0;
-		font-size: .95rem;
-	}
-}
-@media(prefers-color-scheme:dark) {
-	p {
-		color: #9ca3af;
-	}
-}
-  </style>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width,initial-scale=1">
+	<title>Authentication Complete</title>
+	<style>
+		body {
+			font-family: system-ui, -apple-system, sans-serif;
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			height: 100vh;
+			margin: 0;
+			background: #151924;
+			color: #f4f6f8;
+		}
+
+		.card {
+			text-align: center;
+			padding: 2.5rem;
+			border-radius: 12px;
+			max-width: 320px;
+			width: 90%;
+			background: #222632;
+			box-shadow: 0 4px 20px rgba(0, 0, 0, .3);
+		}
+
+		.icon {
+			background: #0dbd8b;
+			color: #fff;
+			width: 64px;
+			height: 64px;
+			border-radius: 50%;
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			font-size: 32px;
+			margin: 0 auto 1.5rem;
+		}
+
+		h1 {
+			font-size: 1.25rem;
+			margin: 0 0 .5rem;
+		}
+
+		p {
+			margin: 0;
+			font-size: .95rem;
+			color: #9ca3af;
+		}
+	</style>
 </head>
+
 <body>
-  <div class="card">
-    <div class="icon">
-	💕
-    </div>
-    <h1>Authentication Successful</h1>
-    <p>You can safely close this window.</p>
-  </div>
-  <script>
-  if(window.onAuthDone) {
-    window.onAuthDone()
-  } else if(window.opener && window.opener.postMessage) {
-    window.opener.postMessage("authDone","*")
-  }
-  </script>
+	<div class="card">
+		<div class="icon">
+			💕
+		</div>
+		<h1>Authentication Successful</h1>
+		<p>You can safely close this window.</p>
+	</div>
+	<script>
+		if (window.onAuthDone) {
+			window.onAuthDone()
+		} else if (window.opener && window.opener.postMessage) {
+			window.opener.postMessage("authDone", "*")
+		}
+	</script>
 </body>
+
 </html>
