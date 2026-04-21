@@ -1,5 +1,4 @@
 use axum::extract::State;
-use axum_client_ip::InsecureClientIp;
 use ruma::{
 	EventId, RoomId, UserId,
 	api::client::room::{report_content, report_room},
@@ -8,7 +7,7 @@ use ruma::{
 use tuwunel_core::{Err, Result, debug_info, info, matrix::pdu::PduEvent, utils::ReadyExt};
 use tuwunel_service::Services;
 
-use crate::Ruma;
+use crate::{Ruma, client_ip::ClientIp};
 
 const REASON_MAX_LEN: usize = 750;
 
@@ -18,7 +17,7 @@ const REASON_MAX_LEN: usize = 750;
 #[tracing::instrument(skip_all, fields(%client), name = "report_room")]
 pub(crate) async fn report_room_route(
 	State(services): State<crate::State>,
-	InsecureClientIp(client): InsecureClientIp,
+	ClientIp(client): ClientIp,
 	body: Ruma<report_room::v3::Request>,
 ) -> Result<report_room::v3::Response> {
 	let sender_user = body.sender_user();
@@ -64,7 +63,7 @@ pub(crate) async fn report_room_route(
 #[tracing::instrument(skip_all, fields(%client), name = "report_event")]
 pub(crate) async fn report_event_route(
 	State(services): State<crate::State>,
-	InsecureClientIp(client): InsecureClientIp,
+	ClientIp(client): ClientIp,
 	body: Ruma<report_content::v3::Request>,
 ) -> Result<report_content::v3::Response> {
 	let sender_user = body.sender_user();

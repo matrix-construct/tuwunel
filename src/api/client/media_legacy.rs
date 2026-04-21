@@ -1,7 +1,6 @@
 #![expect(deprecated)]
 
 use axum::extract::State;
-use axum_client_ip::InsecureClientIp;
 use reqwest::Url;
 use ruma::{
 	Mxc,
@@ -16,7 +15,7 @@ use tuwunel_core::{
 };
 use tuwunel_service::media::{CACHE_CONTROL_IMMUTABLE, CORP_CROSS_ORIGIN, Dim, Media};
 
-use crate::Ruma;
+use crate::{Ruma, client_ip::ClientIp};
 
 /// # `GET /_matrix/media/v3/config`
 ///
@@ -36,7 +35,7 @@ pub(crate) async fn get_media_config_legacy_route(
 #[tracing::instrument(skip_all, fields(%client), name = "url_preview_legacy", level = "debug")]
 pub(crate) async fn get_media_preview_legacy_route(
 	State(services): State<crate::State>,
-	InsecureClientIp(client): InsecureClientIp,
+	ClientIp(client): ClientIp,
 	body: Ruma<get_media_preview::v3::Request>,
 ) -> Result<get_media_preview::v3::Response> {
 	let sender_user = body.sender_user();
@@ -84,7 +83,7 @@ pub(crate) async fn get_media_preview_legacy_route(
 #[tracing::instrument(skip_all, fields(%client), name = "media_get_legacy", level = "debug")]
 pub(crate) async fn get_content_legacy_route(
 	State(services): State<crate::State>,
-	InsecureClientIp(client): InsecureClientIp,
+	ClientIp(client): ClientIp,
 	body: Ruma<get_content::v3::Request>,
 ) -> Result<get_content::v3::Response> {
 	let mxc = Mxc {
@@ -156,7 +155,7 @@ pub(crate) async fn get_content_legacy_route(
 #[tracing::instrument(skip_all, fields(%client), name = "media_get_legacy", level = "debug")]
 pub(crate) async fn get_content_as_filename_legacy_route(
 	State(services): State<crate::State>,
-	InsecureClientIp(client): InsecureClientIp,
+	ClientIp(client): ClientIp,
 	body: Ruma<get_content_as_filename::v3::Request>,
 ) -> Result<get_content_as_filename::v3::Response> {
 	let mxc = Mxc {
@@ -228,7 +227,7 @@ pub(crate) async fn get_content_as_filename_legacy_route(
 #[tracing::instrument(skip_all, fields(%client), name = "media_thumbnail_get_legacy", level = "debug")]
 pub(crate) async fn get_content_thumbnail_legacy_route(
 	State(services): State<crate::State>,
-	InsecureClientIp(client): InsecureClientIp,
+	ClientIp(client): ClientIp,
 	body: Ruma<get_content_thumbnail::v3::Request>,
 ) -> Result<get_content_thumbnail::v3::Response> {
 	let mxc = Mxc {

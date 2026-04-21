@@ -1,5 +1,4 @@
 use axum::extract::State;
-use axum_client_ip::InsecureClientIp;
 use ruma::{
 	Mxc,
 	api::federation::authenticated_media::{
@@ -9,7 +8,7 @@ use ruma::{
 use tuwunel_core::{Result, utils::content_disposition::make_content_disposition};
 use tuwunel_service::media::{Dim, Media};
 
-use crate::Ruma;
+use crate::{Ruma, client_ip::ClientIp};
 
 /// # `GET /_matrix/federation/v1/media/download/{mediaId}`
 ///
@@ -22,7 +21,7 @@ use crate::Ruma;
 )]
 pub(crate) async fn get_content_route(
 	State(services): State<crate::State>,
-	InsecureClientIp(client): InsecureClientIp,
+	ClientIp(client): ClientIp,
 	body: Ruma<get_content::v1::Request>,
 ) -> Result<get_content::v1::Response> {
 	let mxc = Mxc {
@@ -62,7 +61,7 @@ pub(crate) async fn get_content_route(
 )]
 pub(crate) async fn get_content_thumbnail_route(
 	State(services): State<crate::State>,
-	InsecureClientIp(client): InsecureClientIp,
+	ClientIp(client): ClientIp,
 	body: Ruma<get_content_thumbnail::v1::Request>,
 ) -> Result<get_content_thumbnail::v1::Response> {
 	let dim = Dim::from_ruma(body.width, body.height, body.method.clone())?;

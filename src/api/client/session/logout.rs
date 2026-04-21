@@ -1,10 +1,9 @@
 use axum::extract::State;
-use axum_client_ip::InsecureClientIp;
 use futures::StreamExt;
 use ruma::api::client::session::{logout, logout_all};
 use tuwunel_core::Result;
 
-use crate::Ruma;
+use crate::{Ruma, client_ip::ClientIp};
 
 /// # `POST /_matrix/client/v3/logout`
 ///
@@ -18,7 +17,7 @@ use crate::Ruma;
 #[tracing::instrument(skip_all, fields(%client), name = "logout")]
 pub(crate) async fn logout_route(
 	State(services): State<crate::State>,
-	InsecureClientIp(client): InsecureClientIp,
+	ClientIp(client): ClientIp,
 	body: Ruma<logout::v3::Request>,
 ) -> Result<logout::v3::Response> {
 	services
@@ -45,7 +44,7 @@ pub(crate) async fn logout_route(
 #[tracing::instrument(skip_all, fields(%client), name = "logout")]
 pub(crate) async fn logout_all_route(
 	State(services): State<crate::State>,
-	InsecureClientIp(client): InsecureClientIp,
+	ClientIp(client): ClientIp,
 	body: Ruma<logout_all::v3::Request>,
 ) -> Result<logout_all::v3::Response> {
 	services

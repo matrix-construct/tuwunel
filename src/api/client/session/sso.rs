@@ -3,7 +3,6 @@ mod uiaa;
 use std::{borrow::Cow, net::IpAddr, time::Duration};
 
 use axum::extract::State;
-use axum_client_ip::InsecureClientIp;
 use axum_extra::extract::cookie::{Cookie, SameSite};
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD as b64};
 use futures::{FutureExt, StreamExt, TryFutureExt, future::try_join};
@@ -45,7 +44,7 @@ use url::Url;
 
 pub(crate) use self::uiaa::sso_fallback_route;
 use super::TOKEN_LENGTH;
-use crate::Ruma;
+use crate::{Ruma, client_ip::ClientIp};
 
 /// Grant phase query string.
 #[derive(Debug, Serialize)]
@@ -83,7 +82,7 @@ static GRANT_SESSION_COOKIE: &str = "tuwunel_grant_session";
 )]
 pub(crate) async fn sso_login_route(
 	State(services): State<crate::State>,
-	InsecureClientIp(client): InsecureClientIp,
+	ClientIp(client): ClientIp,
 	body: Ruma<sso_login::v3::Request>,
 ) -> Result<sso_login::v3::Response> {
 	if services.config.sso_custom_providers_page {
@@ -125,7 +124,7 @@ pub(crate) async fn sso_login_route(
 )]
 pub(crate) async fn sso_login_with_provider_route(
 	State(services): State<crate::State>,
-	InsecureClientIp(client): InsecureClientIp,
+	ClientIp(client): ClientIp,
 	body: Ruma<sso_login_with_provider::v3::Request>,
 ) -> Result<sso_login_with_provider::v3::Response> {
 	let idp_id = body.body.idp_id;
@@ -254,7 +253,7 @@ async fn handle_sso_login(
 )]
 pub(crate) async fn sso_callback_route(
 	State(services): State<crate::State>,
-	InsecureClientIp(client): InsecureClientIp,
+	ClientIp(client): ClientIp,
 	body: Ruma<sso_callback::unstable::Request>,
 ) -> Result<sso_callback::unstable::Response> {
 	let sess_id = body

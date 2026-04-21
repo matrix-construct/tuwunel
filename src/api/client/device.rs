@@ -1,5 +1,4 @@
 use axum::extract::State;
-use axum_client_ip::InsecureClientIp;
 use futures::StreamExt;
 use ruma::{
 	MilliSecondsSinceUnixEpoch,
@@ -9,7 +8,7 @@ use ruma::{
 };
 use tuwunel_core::{Err, Result, debug, err, utils::string::to_small_string};
 
-use crate::{Ruma, router::auth_uiaa};
+use crate::{Ruma, client_ip::ClientIp, router::auth_uiaa};
 
 /// # `GET /_matrix/client/r0/devices`
 ///
@@ -49,7 +48,7 @@ pub(crate) async fn get_device_route(
 #[tracing::instrument(skip_all, fields(%client), name = "update_device")]
 pub(crate) async fn update_device_route(
 	State(services): State<crate::State>,
-	InsecureClientIp(client): InsecureClientIp,
+	ClientIp(client): ClientIp,
 	body: Ruma<update_device::v3::Request>,
 ) -> Result<update_device::v3::Response> {
 	let sender_user = body.sender_user();

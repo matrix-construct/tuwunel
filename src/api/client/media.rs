@@ -1,7 +1,6 @@
 use std::time::Duration;
 
 use axum::extract::State;
-use axum_client_ip::InsecureClientIp;
 use reqwest::Url;
 use ruma::{
 	MilliSecondsSinceUnixEpoch, Mxc, UserId,
@@ -25,7 +24,7 @@ use tuwunel_service::{
 	media::{CACHE_CONTROL_IMMUTABLE, CORP_CROSS_ORIGIN, Dim, MXC_LENGTH, Media},
 };
 
-use crate::Ruma;
+use crate::{Ruma, client_ip::ClientIp};
 
 /// # `GET /_matrix/client/v1/media/config`
 pub(crate) async fn get_media_config_route(
@@ -51,7 +50,7 @@ pub(crate) async fn get_media_config_route(
 )]
 pub(crate) async fn create_content_route(
 	State(services): State<crate::State>,
-	InsecureClientIp(client): InsecureClientIp,
+	ClientIp(client): ClientIp,
 	body: Ruma<create_content::v3::Request>,
 ) -> Result<create_content::v3::Response> {
 	let user = body.sender_user();
@@ -94,7 +93,7 @@ pub(crate) async fn create_content_route(
 )]
 pub(crate) async fn create_mxc_uri_route(
 	State(services): State<crate::State>,
-	InsecureClientIp(client): InsecureClientIp,
+	ClientIp(client): ClientIp,
 	body: Ruma<create_mxc_uri::v1::Request>,
 ) -> Result<create_mxc_uri::v1::Response> {
 	let user = body.sender_user();
@@ -134,7 +133,7 @@ pub(crate) async fn create_mxc_uri_route(
 )]
 pub(crate) async fn create_content_async_route(
 	State(services): State<crate::State>,
-	InsecureClientIp(client): InsecureClientIp,
+	ClientIp(client): ClientIp,
 	body: Ruma<create_content_async::v3::Request>,
 ) -> Result<create_content_async::v3::Response> {
 	let user = body.sender_user();
@@ -166,7 +165,7 @@ pub(crate) async fn create_content_async_route(
 )]
 pub(crate) async fn get_content_thumbnail_route(
 	State(services): State<crate::State>,
-	InsecureClientIp(client): InsecureClientIp,
+	ClientIp(client): ClientIp,
 	body: Ruma<get_content_thumbnail::v1::Request>,
 ) -> Result<get_content_thumbnail::v1::Response> {
 	let user = body.sender_user();
@@ -203,7 +202,7 @@ pub(crate) async fn get_content_thumbnail_route(
 )]
 pub(crate) async fn get_content_route(
 	State(services): State<crate::State>,
-	InsecureClientIp(client): InsecureClientIp,
+	ClientIp(client): ClientIp,
 	body: Ruma<get_content::v1::Request>,
 ) -> Result<get_content::v1::Response> {
 	let user = body.sender_user();
@@ -239,7 +238,7 @@ pub(crate) async fn get_content_route(
 )]
 pub(crate) async fn get_content_as_filename_route(
 	State(services): State<crate::State>,
-	InsecureClientIp(client): InsecureClientIp,
+	ClientIp(client): ClientIp,
 	body: Ruma<get_content_as_filename::v1::Request>,
 ) -> Result<get_content_as_filename::v1::Response> {
 	let user = body.sender_user();
@@ -275,7 +274,7 @@ pub(crate) async fn get_content_as_filename_route(
 )]
 pub(crate) async fn get_media_preview_route(
 	State(services): State<crate::State>,
-	InsecureClientIp(client): InsecureClientIp,
+	ClientIp(client): ClientIp,
 	body: Ruma<get_media_preview::v1::Request>,
 ) -> Result<get_media_preview::v1::Response> {
 	let sender_user = body.sender_user();

@@ -1,12 +1,11 @@
 use axum::extract::State;
-use axum_client_ip::InsecureClientIp;
 use ruma::{
 	api::federation::directory::{get_public_rooms, get_public_rooms_filtered},
 	directory::Filter,
 };
 use tuwunel_core::{Err, Result, err};
 
-use crate::Ruma;
+use crate::{Ruma, client_ip::ClientIp};
 
 /// # `POST /_matrix/federation/v1/publicRooms`
 ///
@@ -14,7 +13,7 @@ use crate::Ruma;
 #[tracing::instrument(name = "publicrooms", level = "debug", skip_all, fields(%client))]
 pub(crate) async fn get_public_rooms_filtered_route(
 	State(services): State<crate::State>,
-	InsecureClientIp(client): InsecureClientIp,
+	ClientIp(client): ClientIp,
 	body: Ruma<get_public_rooms_filtered::v1::Request>,
 ) -> Result<get_public_rooms_filtered::v1::Response> {
 	if !services
@@ -50,7 +49,7 @@ pub(crate) async fn get_public_rooms_filtered_route(
 #[tracing::instrument(name = "publicrooms", level = "debug", skip_all, fields(%client))]
 pub(crate) async fn get_public_rooms_route(
 	State(services): State<crate::State>,
-	InsecureClientIp(client): InsecureClientIp,
+	ClientIp(client): ClientIp,
 	body: Ruma<get_public_rooms::v1::Request>,
 ) -> Result<get_public_rooms::v1::Response> {
 	if !services
