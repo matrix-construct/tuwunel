@@ -29,6 +29,13 @@ use self::{
 };
 use super::url_encode;
 
+pub(crate) static ACCOUNT_MANAGEMENT_ACTIONS_SUPPORTED: &[&str] = &[
+	"org.matrix.profile",
+	"org.matrix.sessions_list",
+	"org.matrix.session_view",
+	"org.matrix.session_end",
+];
+
 /// Raw JS served at `/_tuwunel/oidc/account.js`.
 /// Referenced via `<script src>` for CSP compatibility.
 static ACCOUNT_JS: &str = include_str!("account/account.js");
