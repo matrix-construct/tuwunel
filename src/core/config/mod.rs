@@ -576,6 +576,28 @@ pub struct Config {
 	#[serde(default = "default_client_shutdown_timeout")]
 	pub client_shutdown_timeout: u64,
 
+	/// Source of the client IP address for logging and security purposes.
+	///
+	/// Use `connect_info` (the default) when tuwunel receives connections
+	/// directly from clients. When tuwunel sits behind a trusted reverse
+	/// proxy, set this to the header the proxy populates:
+	///
+	/// - `rightmost_x_forwarded_for` — last value in `X-Forwarded-For`
+	/// - `rightmost_forwarded` — last value in RFC 7239 `Forwarded`
+	/// - `x_real_ip` — Nginx-style `X-Real-IP`
+	/// - `cf_connecting_ip` — Cloudflare `CF-Connecting-IP`
+	/// - `true_client_ip` — Akamai / Cloudflare Enterprise `True-Client-IP`
+	/// - `fly_client_ip` — Fly.io `Fly-Client-IP`
+	/// - `cloudfront_viewer_address` — AWS CloudFront
+	///   `CloudFront-Viewer-Address`
+	///
+	/// WARNING: setting a header-based source without a trusted reverse proxy
+	/// in front of tuwunel allows clients to spoof their IP address.
+	///
+	/// default: "connect_info"
+	#[serde(default)]
+	pub ip_source: IpSource,
+
 	/// Grace period for clean shutdown of federation requests (seconds).
 	///
 	/// default: 5
@@ -3285,6 +3307,33 @@ impl From<AppServiceNamespace> for ruma::api::appservice::Namespace {
 			regex: conf.regex,
 		}
 	}
+}
+
+/// Selects the source used to determine the connecting client's IP address.
+///
+/// Matches the variants of `axum_client_ip::SecureClientIpSource`.
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum IpSource {
+	/// Use the peer address of the TCP connection. Safe default; no
+	/// proxy required.
+	#[default]
+	ConnectInfo,
+	/// Last address in the `X-Forwarded-For` header.
+	RightmostXForwardedFor,
+	/// Last address in the RFC 7239 `Forwarded` header.
+	RightmostForwarded,
+	/// Value of the `X-Real-IP` header (Nginx convention).
+	XRealIp,
+	/// Value of the `CF-Connecting-IP` header (Cloudflare).
+	CfConnectingIp,
+	/// Value of the `True-Client-IP` header (Akamai / Cloudflare
+	/// Enterprise).
+	TrueClientIp,
+	/// Value of the `Fly-Client-IP` header (Fly.io).
+	FlyClientIp,
+	/// Value of the `CloudFront-Viewer-Address` header (AWS CloudFront).
+	CloudFrontViewerAddress,
 }
 
 const DEPRECATED_KEYS: &[&str; 9] = &[

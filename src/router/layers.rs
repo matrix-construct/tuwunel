@@ -21,7 +21,7 @@ use tower_http::{
 };
 use tracing::Level;
 use tuwunel_api::router::state::Guard;
-use tuwunel_core::{Result, Server, debug, error};
+use tuwunel_core::{Result, Server, config::IpSource, debug, error};
 use tuwunel_service::Services;
 
 use crate::{request, router};
@@ -71,7 +71,7 @@ pub(crate) fn build(services: &Arc<Services>) -> Result<(Router, Guard)> {
 				.on_response(DefaultOnResponse::new().level(Level::DEBUG)),
 		)
 		.layer(axum::middleware::from_fn_with_state(Arc::clone(services), request::handle))
-		.layer(SecureClientIpSource::ConnectInfo.into_extension())
+		.layer(ip_source_layer(&server.config.ip_source))
 		.layer(ResponseBodyTimeoutLayer::new(Duration::from_secs(
 			server.config.client_response_timeout,
 		)))
@@ -211,6 +211,21 @@ fn cors_layer(server: &Server) -> CorsLayer {
 
 fn body_limit_layer(server: &Server) -> DefaultBodyLimit {
 	DefaultBodyLimit::max(server.config.max_request_size)
+}
+
+fn ip_source_layer(source: &IpSource) -> axum::Extension<SecureClientIpSource> {
+	let secure_source = match source {
+		| IpSource::ConnectInfo => SecureClientIpSource::ConnectInfo,
+		| IpSource::RightmostXForwardedFor => SecureClientIpSource::RightmostXForwardedFor,
+		| IpSource::RightmostForwarded => SecureClientIpSource::RightmostForwarded,
+		| IpSource::XRealIp => SecureClientIpSource::XRealIp,
+		| IpSource::CfConnectingIp => SecureClientIpSource::CfConnectingIp,
+		| IpSource::TrueClientIp => SecureClientIpSource::TrueClientIp,
+		| IpSource::FlyClientIp => SecureClientIpSource::FlyClientIp,
+		| IpSource::CloudFrontViewerAddress => SecureClientIpSource::CloudFrontViewerAddress,
+	};
+
+	secure_source.into_extension()
 }
 
 #[tracing::instrument(name = "panic", level = "error", skip_all)]

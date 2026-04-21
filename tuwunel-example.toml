@@ -437,6 +437,25 @@
 #
 #client_shutdown_timeout = 10
 
+# Source of the client IP address for logging and security purposes.
+#
+# Use "connect_info" (the default) when tuwunel receives connections directly
+# from clients. When tuwunel sits behind a trusted reverse proxy, set this to
+# the header the proxy populates:
+#
+#   "rightmost_x_forwarded_for" — last value in X-Forwarded-For
+#   "rightmost_forwarded"       — last value in RFC 7239 Forwarded
+#   "x_real_ip"                 — Nginx-style X-Real-IP
+#   "cf_connecting_ip"          — Cloudflare CF-Connecting-IP
+#   "true_client_ip"            — Akamai / Cloudflare Enterprise True-Client-IP
+#   "fly_client_ip"             — Fly.io Fly-Client-IP
+#   "cloudfront_viewer_address" — AWS CloudFront CloudFront-Viewer-Address
+#
+# WARNING: setting a header-based source without a trusted reverse proxy in
+# front of tuwunel allows clients to spoof their IP address.
+#
+#ip_source = "connect_info"
+
 # Grace period for clean shutdown of federation requests (seconds).
 #
 #sender_shutdown_timeout = 5
