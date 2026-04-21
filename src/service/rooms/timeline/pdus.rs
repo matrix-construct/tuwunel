@@ -6,7 +6,7 @@ use futures::{
 };
 use ruma::{MilliSecondsSinceUnixEpoch, RoomId, UInt, UserId, api::Direction};
 use tuwunel_core::{
-	Result, err, implement,
+	Result, at, err, implement,
 	matrix::pdu::{PduCount, PduEvent},
 	trace,
 	utils::{
@@ -15,7 +15,7 @@ use tuwunel_core::{
 	},
 	warn,
 };
-use tuwunel_database::KeyVal;
+use tuwunel_database::{KeyVal, keyval::Val};
 
 use super::{PduId, RawPduId};
 
@@ -155,6 +155,19 @@ pub fn pdus_rev<'a>(
 				.ready_and_then(move |item| Self::each_slice(item, user_id))
 		})
 		.try_flatten_stream()
+}
+
+#[implement(super::Service)]
+pub fn pdus_raw(&self) -> impl Stream<Item = Result<Val<'_>>> + Send {
+	self.db.pduid_pdu.raw_stream().map_ok(at!(1))
+}
+
+#[implement(super::Service)]
+pub fn outlier_pdus_raw(&self) -> impl Stream<Item = Result<Val<'_>>> + Send {
+	self.db
+		.eventid_outlierpdu
+		.raw_stream()
+		.map_ok(at!(1))
 }
 
 #[implement(super::Service)]

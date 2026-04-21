@@ -268,6 +268,11 @@ pub(super) enum DebugCommand {
 		event_id: OwnedEventId,
 	},
 
+	/// - Dump all stored PDUs
+	DumpPdus {
+		dir: String,
+	},
+
 	/// - Developer test stubs
 	#[command(subcommand)]
 	#[clap(hide(true))]

@@ -1,6 +1,7 @@
 use std::{sync::Arc, time::Duration};
 
 use async_trait::async_trait;
+use futures::{Stream, TryStreamExt};
 use ruma::{CanonicalJsonObject, EventId};
 use tuwunel_core::{
 	Result, debug_info, expected, implement,
@@ -106,4 +107,11 @@ pub async fn save_original_pdu(
 
 	self.timeredacted_eventid
 		.put_raw((now, event_id), []);
+}
+
+#[implement(Service)]
+pub fn retained_pdus_raw(&self) -> impl Stream<Item = Result<&[u8]>> + Send {
+	self.eventid_originalpdu
+		.raw_stream()
+		.map_ok(|x| x.1)
 }
