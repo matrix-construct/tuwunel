@@ -1,17 +1,17 @@
 use const_str::format as const_format;
 use ruma::UserId;
-use tuwunel_core::utils::html::escape as html_escape;
+use tuwunel_core::{Result, utils::html::escape as html_escape};
 
 use super::{ACCOUNT_HEAD, url_encode};
 
 /// Shows a POST confirmation form. The `login_token` is the original SSO-issued
 /// token, peeked (not consumed) by the GET handler and embedded here as the
 /// CSRF/auth token. It is consumed when the user submits this form.
-pub(super) fn session_end_confirm_html(
+pub(super) async fn session_end_confirm_html(
 	user_id: &UserId,
 	device_id: &str,
 	login_token: &str,
-) -> String {
+) -> Result<String> {
 	let uid = html_escape(user_id.as_str());
 	let did = html_escape(device_id);
 	let tok = html_escape(login_token);
@@ -20,12 +20,12 @@ pub(super) fn session_end_confirm_html(
 	let did_enc = url_encode(device_id);
 	let tok_enc = url_encode(login_token);
 
-	PAGE_HTML
-		.replace("{{uid}}", &uid)
-		.replace("{{did}}", &did)
-		.replace("{{tok}}", &tok)
-		.replace("{{did_enc}}", &did_enc)
-		.replace("{{tok_enc}}", &tok_enc)
+	Ok(PAGE_HTML
+		.replace("{uid}", &uid)
+		.replace("{did}", &did)
+		.replace("{tok}", &tok)
+		.replace("{did_enc}", &did_enc)
+		.replace("{tok_enc}", &tok_enc))
 }
 
 static PAGE_HTML: &str = const_format!(

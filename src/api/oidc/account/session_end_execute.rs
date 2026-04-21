@@ -32,8 +32,8 @@ pub(super) async fn session_end_execute_html(
 	info!(?user_id, ?device_id_owned, "Session signed out via account management page");
 
 	Ok(PAGE_HTML
-		.replace("{{did}}", &html_escape(device_id_owned.as_str()))
-		.replace("{{uid}}", &html_escape(user_id.as_str())))
+		.replace("{did}", &html_escape(device_id_owned.as_str()))
+		.replace("{uid}", &html_escape(user_id.as_str())))
 }
 
 static PAGE_HTML: &str = const_format!(

@@ -1,16 +1,19 @@
 use const_str::format as const_format;
 use ruma::UserId;
-use tuwunel_core::utils::html::escape as html_escape;
+use tuwunel_core::{Result, utils::html::escape as html_escape};
 
 use super::ACCOUNT_HEAD;
 
-pub(super) fn profile_saved_html(user_id: &UserId, displayname: Option<&str>) -> String {
+pub(super) async fn profile_saved_html(
+	user_id: &UserId,
+	displayname: Option<&str>,
+) -> Result<String> {
 	let uid = html_escape(user_id.as_str());
 	let dn = html_escape(displayname.unwrap_or("(none)"));
 
-	PAGE_HTML
-		.replace("{{uid}}", &uid)
-		.replace("{{dn}}", &dn)
+	Ok(PAGE_HTML
+		.replace("{uid}", &uid)
+		.replace("{dn}", &dn))
 }
 
 static PAGE_HTML: &str = const_format!(

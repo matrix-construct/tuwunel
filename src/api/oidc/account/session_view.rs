@@ -1,3 +1,4 @@
+use const_str::format as const_format;
 use ruma::{OwnedDeviceId, UserId};
 use tuwunel_core::{Err, Result, err, utils::html::escape as html_escape};
 use tuwunel_service::Services;
@@ -41,28 +42,27 @@ pub(super) async fn session_view_html(
 	// Link directly to account_callback (skips SSO) using the peeked login_token
 	// so the user doesn't have to re-authenticate just to sign out a session.
 	Ok(PAGE_HTML
-		.replace("{{ACCOUNT_JS_INCLUDE}}", ACCOUNT_JS_INCLUDE)
-		.replace("{{ACCOUNT_HEAD}}", ACCOUNT_HEAD)
-		.replace("{{name}}", &name)
-		.replace("{{tok}}", &tok)
-		.replace("{{ip}}", &ip)
-		.replace("{{id}}", &id)
-		.replace("{{id_enc}}", &id_enc)
-		.replace("{{ts_cell}}", &ts_cell)
-		.replace("{{uid}}", &html_escape(user_id.as_str())))
+		.replace("{name}", &name)
+		.replace("{tok}", &tok)
+		.replace("{ip}", &ip)
+		.replace("{id}", &id)
+		.replace("{id_enc}", &id_enc)
+		.replace("{ts_cell}", &ts_cell)
+		.replace("{uid}", &html_escape(user_id.as_str())))
 }
 
-static PAGE_HTML: &str = r#"
+static PAGE_HTML: &str = const_format!(
+	r#"
 <!DOCTYPE html>
 <html lang="en">
 	<head>
-		{{ACCOUNT_HEAD}}
+		{ACCOUNT_HEAD}
 		<title>Session: {{name}}</title>
 	</head>
 	<body>
 		<h1>Session Details</h1>
 		<p>
-			Signed in as <strong>{{uid}}}</strong>.
+			Signed in as <strong>{{uid}}</strong>.
 		</p>
 		<dl>
 			<dt>Name</dt><dd>{{name}}</dd>
@@ -81,7 +81,8 @@ static PAGE_HTML: &str = r#"
 				Sign out this session
 			</a>
 		</div>
-		{{ACCOUNT_JS_INCLUDE}}
+		{ACCOUNT_JS_INCLUDE}
 	</body>
 </html>
-"#;
+"#
+);

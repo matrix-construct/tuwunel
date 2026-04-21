@@ -40,11 +40,11 @@ pub(super) async fn profile_html(
 		.unwrap_or_default();
 
 	Ok(PAGE_HTML
-		.replace("{{server}}", &html_escape(server))
-		.replace("{{uid}}", &html_escape(user_id.as_str()))
-		.replace("{{tok}}", &html_escape(login_token))
-		.replace("{{dn}}", &html_escape(&displayname))
-		.replace("{{avatar_field}}", &avatar_field))
+		.replace("{server}", &html_escape(server))
+		.replace("{uid}", &html_escape(user_id.as_str()))
+		.replace("{tok}", &html_escape(login_token))
+		.replace("{dn}", &html_escape(&displayname))
+		.replace("{avatar_field}", &avatar_field))
 }
 
 static PAGE_HTML: &str = const_format!(

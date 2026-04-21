@@ -219,7 +219,7 @@ async fn handle_account_callback(
 				.update_displayname(&user_id, displayname, &all_joined_rooms)
 				.await;
 
-			Ok(profile_saved_html(&user_id, displayname))
+			profile_saved_html(&user_id, displayname).await
 		},
 		| "org.matrix.session_view" if method == Method::GET =>
 			session_view_html(
@@ -255,11 +255,12 @@ async fn handle_account_callback(
 				return Err!(Request(NotFound("Session not found")));
 			}
 
-			Ok(session_end_confirm_html(
+			session_end_confirm_html(
 				&user_id,
 				device_id_owned.as_str(),
 				login_token.unwrap_or_default(),
-			))
+			)
+			.await
 		},
 		| _ => Err!(Request(InvalidParam("Unsupported account management action"))),
 	}

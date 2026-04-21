@@ -61,9 +61,9 @@ pub(super) async fn sessions_list_html(services: &Services, user_id: &UserId) ->
 	}
 
 	Ok(PAGE_HTML
-		.replace("{{uid}}", &html_escape(user_id.as_str()))
-		.replace("{{dlen}}", &devices.len().to_string())
-		.replace("{{rows}}", &rows.join("")))
+		.replace("{uid}", &html_escape(user_id.as_str()))
+		.replace("{dlen}", &devices.len().to_string())
+		.replace("{rows}", &rows.join("")))
 }
 
 static PAGE_HTML: &str = const_format!(
