@@ -2034,9 +2034,12 @@
 #
 #sso_custom_providers_page = false
 
-# Under development; do not enable.
+# From MSC3824:
+# > If the client finds oauth_aware_preferred to be true then, assuming it
+# > supports that auth type, it should present this as the only
+# > login/registration method available to the user.
 #
-#sso_aware_preferred = false
+#oidc_aware_preferred = false
 
 # Directory containing appservice yaml registration files.
 #

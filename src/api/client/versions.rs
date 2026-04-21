@@ -51,7 +51,7 @@ static VERSIONS: [&str; 17] = [
 	"v1.15",  /* custom profile fields */
 ];
 
-static UNSTABLE_FEATURES: [&str; 23] = [
+static UNSTABLE_FEATURES: [&str; 24] = [
 	"org.matrix.e2e_cross_signing",
 	// private read receipts (https://github.com/matrix-org/matrix-spec-proposals/pull/2285)
 	"org.matrix.msc2285.stable",
@@ -96,4 +96,6 @@ static UNSTABLE_FEATURES: [&str; 23] = [
 	"org.matrix.msc2966",
 	// OIDC-native auth: API scopes (https://github.com/matrix-org/matrix-spec-proposals/pull/2967)
 	"org.matrix.msc2967",
+	// OIDC delegation aware
+	"org.matrix.msc3824",
 ];

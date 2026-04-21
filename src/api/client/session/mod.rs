@@ -70,14 +70,17 @@ pub(crate) async fn get_login_types_route(
 		LoginType::Jwt(JwtLoginType::default()),
 		LoginType::Password(PasswordLoginType::default()),
 		LoginType::Token(TokenLoginType { get_login_token }),
-		LoginType::Sso(SsoLoginType { identity_providers }),
+		LoginType::Sso(SsoLoginType {
+			identity_providers,
+			delegated_oidc_compatibility: services.config.oidc_aware_preferred,
+		}),
 	];
 
 	Ok(get_login_types::v3::Response {
 		flows: flows
 			.into_iter()
 			.filter(|login_type| match login_type {
-				| LoginType::Sso(SsoLoginType { identity_providers })
+				| LoginType::Sso(SsoLoginType { identity_providers, .. })
 					if list_idps && identity_providers.is_empty() =>
 					false,
 				| LoginType::Password(_) => services.config.login_with_password,

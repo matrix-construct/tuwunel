@@ -2378,9 +2378,12 @@ pub struct Config {
 	#[serde(default)]
 	pub sso_custom_providers_page: bool,
 
-	/// Under development; do not enable.
-	#[serde(default)]
-	pub sso_aware_preferred: bool,
+	/// From MSC3824:
+	/// > If the client finds oauth_aware_preferred to be true then, assuming it
+	/// > supports that auth type, it should present this as the only
+	/// > login/registration method available to the user.
+	#[serde(default, alias = "sso_aware_preferred")]
+	pub oidc_aware_preferred: bool,
 
 	/// Directory containing appservice yaml registration files.
 	///
