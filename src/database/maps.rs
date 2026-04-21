@@ -438,7 +438,7 @@ pub(super) static MAPS: &[Descriptor] = &[
 	},
 	Descriptor {
 		name: "userdevicesessionid_uiaainfo",
-		..descriptor::RANDOM_SMALL
+		..descriptor::RANDOM_SMALL_CACHE
 	},
 	Descriptor {
 		name: "userdevicetxnid_response",
