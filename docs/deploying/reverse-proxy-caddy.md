@@ -28,6 +28,12 @@ your.server.name, your.server.name:8448 {
 - Sets all necessary reverse proxy headers correctly
 - Routes all traffic to Tuwunel listening on `localhost:8008`
 
+### Client IP source
+
+If Caddy is the only way clients can reach Tuwunel, set
+`ip_source = "rightmost_x_forwarded_for"` in `tuwunel.toml`. If you use the
+Unix-socket `reverse_proxy` target, leave `ip_source` unset instead.
+
 That's it! Just start and enable the service and you're set.
 
 ```bash

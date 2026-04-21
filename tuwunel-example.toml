@@ -437,6 +437,37 @@
 #
 #client_shutdown_timeout = 10
 
+# Source of the client IP address for rate limiting, logging, and
+# security tooling.
+#
+# When unset (the default), the `ClientIp` extractor falls back to
+# `axum-client-ip`'s `InsecureClientIp` for backward compatibility;
+# clients can spoof their address via request headers in that mode.
+#
+# When set, tuwunel installs `SecureClientIpSource` with the selected
+# variant and `ClientIp` resolves exclusively from that source. The
+# rightmost value is used for multi-valued headers; only the proxy can
+# append to the right, so this is resistant to client spoofing.
+#
+# Supported values:
+# - "connect_info" - TCP peer address only (direct connections)
+# - "rightmost_x_forwarded_for" - nginx, Caddy
+# - "rightmost_forwarded" - RFC 7239 proxies
+# - "x_real_ip" - nginx `X-Real-IP`
+# - "cf_connecting_ip" - Cloudflare / cloudflared
+# - "true_client_ip" - Akamai, Cloudflare Enterprise
+# - "fly_client_ip" - Fly.io
+# - "cloudfront_viewer_address" - AWS CloudFront
+#
+# On Unix-socket deployments, leave this unset rather than setting
+# "connect_info"; that source requires a TCP peer address.
+#
+# WARNING: a header-based value without a trusted reverse proxy in
+# front of tuwunel allows clients to forge their IP. Changing this
+# value requires a server restart.
+#
+#ip_source = "connect_info"
+
 # Grace period for clean shutdown of federation requests (seconds).
 #
 #sender_shutdown_timeout = 5

@@ -15,7 +15,7 @@ use crate::{
 
 const UNDOCUMENTED: &str = "# This item is undocumented. Please contribute documentation for it.";
 
-const HIDDEN: &[&str] = &["default", "display"];
+const HIDDEN: &[&str] = &["default", "display", "config-example"];
 
 #[expect(clippy::needless_pass_by_value)]
 pub(super) fn example_generator(input: ItemStruct, args: &[Meta]) -> Result<TokenStream> {
@@ -103,9 +103,9 @@ fn generate_example(input: &ItemStruct, args: &[Meta], write: bool) -> Result<To
 				format!("{doc}\n#\n")
 			};
 
-			let default = get_doc_comment_line(field, "default")
-				.or_else(|| get_default(field))
-				.unwrap_or_default();
+			// `config-example` overrides the emitted example value while `default`
+			// continues to document the runtime default separately.
+			let default = example_value(field);
 
 			let default = if !default.is_empty() {
 				format!(" {default}")
@@ -185,9 +185,8 @@ fn get_default(field: &Field) -> Option<String> {
 		let Some(arg) = Punctuated::<Meta, syn::Token![,]>::parse_terminated
 			.parse(tokens.clone().into())
 			.ok()?
-			.iter()
+			.into_iter()
 			.next()
-			.cloned()
 		else {
 			continue;
 		};
@@ -209,6 +208,13 @@ fn get_default(field: &Field) -> Option<String> {
 	}
 
 	None
+}
+
+fn example_value(field: &Field) -> String {
+	get_doc_comment_line(field, "config-example")
+		.or_else(|| get_doc_comment_line(field, "default"))
+		.or_else(|| get_default(field))
+		.unwrap_or_default()
 }
 
 fn get_doc_comment(field: &Field) -> Option<String> {
@@ -284,4 +290,35 @@ fn get_type_name(field: &Field) -> Option<String> {
 		.iter()
 		.next()
 		.map(|segment| segment.ident.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+	use syn::parse_quote;
+
+	use super::{example_value, get_doc_comment};
+
+	#[test]
+	fn config_example_overrides_default_for_generated_example_value() {
+		let field: syn::Field = parse_quote! {
+			#[doc = "config-example: from example"]
+			#[doc = "default: from default"]
+			name: String
+		};
+
+		assert_eq!(example_value(&field), "from example");
+	}
+
+	#[test]
+	fn config_example_is_hidden_from_emitted_comments() {
+		let field: syn::Field = parse_quote! {
+			#[doc = "visible setting docs"]
+			#[doc = "config-example: hidden value"]
+			name: String
+		};
+
+		let comment = get_doc_comment(&field).expect("visible comment to be emitted");
+		assert!(comment.contains("#visible setting docs"));
+		assert!(!comment.contains("config-example:"));
+	}
 }
