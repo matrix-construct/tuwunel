@@ -210,14 +210,14 @@ pub fn build(router: Router<State>, server: &Server) -> Router<State> {
 			get(oidc::userinfo_route)
 			.post(oidc::userinfo_route)
 		)
-		.route(
-			"/_tuwunel/oidc/account_callback",
-			get(oidc::account_callback_route)
-			.post(oidc::account_callback_post_route),
-		)
-		.route("/_tuwunel/oidc/account", get(oidc::account_route))
 		.route("/_tuwunel/oidc/account.js", get(oidc::account_js_route))
 		.route("/_tuwunel/oidc/account.css", get(oidc::account_css_route))
+		.route(
+			"/_tuwunel/oidc/account_callback",
+			get(oidc::get_account_callback_route)
+			.post(oidc::post_account_callback_route),
+		)
+		.route("/_tuwunel/oidc/account", get(oidc::get_account_route))
 		.route("/_matrix/client/v1/auth_issuer", get(oidc::auth_issuer_route))
 		.route("/_matrix/client/v1/auth_metadata", get(oidc::openid_configuration_route))
 		.route(
