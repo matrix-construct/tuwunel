@@ -229,7 +229,7 @@ jobs:
         !failure() && !cancelled()
         && fromJSON(inputs.artifact)[matrix.bake_target].dst
 
-      uses: actions/upload-artifact@v6
+      uses: actions/upload-artifact@v7
       with:
         path: _artifact/*
         name: ${{matrix.cargo_profile}}-${{matrix.feat_set}}-${{matrix.sys_target}}-${{fromJSON(inputs.artifact)[matrix.bake_target].dst}}
@@ -241,7 +241,7 @@ jobs:
         && fromJSON(inputs.artifact)[matrix.bake_target].dst
         && fromJSON(inputs.artifact)[matrix.bake_target].pages == true
 
-      uses: actions/upload-pages-artifact@v3
+      uses: actions/upload-pages-artifact@v5
       with:
         path: _artifact/${{fromJSON(inputs.artifact)[matrix.bake_target].dst}}
         name: github-pages

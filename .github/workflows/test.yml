@@ -423,7 +423,7 @@ jobs:
     - if: success() || failure() && steps.execute.outcome == 'failure'
       name: Upload New Results
       id: upload-result
-      uses: actions/upload-artifact@v6
+      uses: actions/upload-artifact@v7
       with:
         name: complement_results-${{matrix.feat_set}}-${{matrix.sys_name}}-${{matrix.sys_target}}.jsonl
         path: ./tests/complement/results.jsonl
@@ -431,7 +431,7 @@ jobs:
     - if: success() || (failure() && steps.execute.outcome == 'failure')
       name: Upload Log Output
       id: upload-output
-      uses: actions/upload-artifact@v6
+      uses: actions/upload-artifact@v7
       with:
         name: complement_output-${{matrix.feat_set}}-${{matrix.sys_name}}-${{matrix.sys_target}}.jsonl
         path: ./tests/complement/logs.jsonl
