@@ -156,6 +156,10 @@ variable "git_checkout" {
     default = "HEAD"
 }
 
+variable "rustdoc_base_path" {
+	default = ""
+}
+
 #
 # Rustflags
 #
@@ -722,6 +726,7 @@ target "doc" {
     args = {
         cargo_cmd = "test"
         cargo_args = "--doc --no-fail-fast"
+        RUSTDOCFLAGS = "-D warnings"
     }
 }
 
@@ -1065,11 +1070,12 @@ target "book" {
 EOF
 }
 
-target "build-docs" {
-    name = elem("build-docs", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target])
+target "docs" {
+    name = elem("docs", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target])
     tags = [
-        elem_tag("build-docs", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target], "latest"),
+        elem_tag("docs", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target], "latest"),
     ]
+    output = ["type=docker,compression=zstd,mode=min,compression-level=${zstd_image_compress_level}"]
     matrix = cargo_rust_feat_sys
     inherits = [
         elem("deps-build", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target]),
@@ -1084,7 +1090,9 @@ target "build-docs" {
     args = {
         cargo_cmd = "doc"
         cargo_args = "--no-deps --document-private-items"
-        RUSTDOCFLAGS = "-D warnings"
+        RUSTDOCFLAGS = (substr(rust_toolchain, 0, 7) == "nightly"?
+            "-Z unstable-options --static-root-path=${rustdoc_base_path}/static.files/": ""
+        )
     }
 }
 

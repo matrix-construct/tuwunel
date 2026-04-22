@@ -77,7 +77,7 @@ jobs:
     if: >
       fromJSON(inputs.enable_docs)
       && !contains(inputs.pipeline, '[ci only it]')
-      && contains(fromJSON(inputs.cargo_profiles), fromJSON('["test"]')[0])
+      && contains(fromJSON(inputs.cargo_profiles), fromJSON('["release"]')[0])
       && contains(fromJSON(inputs.feat_sets), fromJSON('["all"]')[0])
       && contains(fromJSON(inputs.rust_toolchains), fromJSON('["nightly"]')[0])
       && contains(fromJSON(inputs.sys_targets), fromJSON('["x86_64-v1-linux-gnu"]')[0])
@@ -86,7 +86,7 @@ jobs:
     uses: ./.github/workflows/bake.yml
     with:
       bake_targets: '["doc"]'
-      cargo_profiles: '["test"]'
+      cargo_profiles: '["release"]'
       feat_sets: '["all"]'
       rust_toolchains: '["nightly"]'
       sys_names: ${{inputs.sys_names}}

@@ -73,6 +73,9 @@ on:
       release_url:
         type: string
         description: Upload url for created release.
+      rustdoc_base_path:
+        type: string
+        description: Path where rustdoc will be deployed for finding static assets
       artifact:
         type: string
         default: '{}'
@@ -142,6 +145,7 @@ jobs:
         CI_PRINT_BAKE: ${{inputs.print_bake}}
         rust_nightly: ${{inputs.rust_nightly}}
         git_checkout: ${{inputs.checkout}}
+        rustdoc_base_path: ${{inputs.rustdoc_base_path}}
 
       run: |
         docker/bake.sh "${{matrix.bake_target}}"
@@ -244,7 +248,7 @@ jobs:
       uses: actions/upload-pages-artifact@v5
       with:
         path: _artifact/${{fromJSON(inputs.artifact)[matrix.bake_target].dst}}
-        name: github-pages
+        name: github-pages-${{fromJSON(inputs.artifact)[matrix.bake_target].dst}}
 
     # Optionally upload artifact as release-artifact
     - name: Upload Release Artifact

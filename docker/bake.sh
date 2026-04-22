@@ -73,6 +73,7 @@ rust_msrv=$(grep "channel = " "$toolchain_toml" | cut -d'=' -f2 | sed 's/\s"\|"$
 git_checkout="${git_checkout:-HEAD}"
 
 # other options
+rustdoc_base_path="${rustdoc_base_path:-}"
 rocksdb_opt_level=3
 rocksdb_portable=1
 use_chef="true"

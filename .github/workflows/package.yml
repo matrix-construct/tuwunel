@@ -44,6 +44,9 @@ on:
       enable_book:
         type: string
         default: 'true'
+      enable_docs:
+        type: string
+        default: 'true'
       enable_binary:
         type: string
         default: 'true'
@@ -64,12 +67,47 @@ on:
         default: '["deb", "rpm", "nix"]'
 
 jobs:
+  docs:
+    if: >
+      !failure() && !cancelled()
+      && fromJSON(inputs.enable_docs)
+      && contains(fromJSON(inputs.cargo_profiles), fromJSON('["release"]')[0])
+      && contains(fromJSON(inputs.feat_sets), fromJSON('["all"]')[0])
+      && contains(fromJSON(inputs.rust_toolchains), fromJSON('["nightly"]')[0])
+      && contains(fromJSON(inputs.sys_targets), fromJSON('["x86_64-v1-linux-gnu"]')[0])
+
+    name: Docs
+    uses: ./.github/workflows/bake.yml
+    with:
+      bake_targets: '["docs"]'
+      cargo_profiles: '["release"]'
+      feat_sets: '["all"]'
+      rust_toolchains: '["nightly"]'
+      rust_targets: '["x86_64-unknown-linux-gnu"]'
+      sys_names: '["debian"]'
+      sys_versions: ${{inputs.sys_versions}}
+      sys_targets: '["x86_64-v1-linux-gnu"]'
+      machines: '["X64"]'
+      runner: 'het'
+      #excludes: ${{inputs.excludes}}
+      includes: ${{inputs.includes}}
+      release_url: ${{inputs.release_url}}
+      checkout: ${{inputs.checkout}}
+      rustdoc_base_path: '/tuwunel/docs'
+      artifact: >
+        {
+          "docs": {
+            "dst": "docs",
+            "src": "/usr/src/tuwunel/target/x86_64-unknown-linux-gnu/doc",
+          }
+        }
+
   book:
     if: >
       !failure() && !cancelled()
       && fromJSON(inputs.enable_book)
       && contains(fromJSON(inputs.cargo_profiles), fromJSON('["release"]')[0])
-      && contains(fromJSON(inputs.feat_sets), fromJSON('["default"]')[0])
+      && contains(fromJSON(inputs.feat_sets), fromJSON('["all"]')[0])
       && contains(fromJSON(inputs.rust_toolchains), fromJSON('["stable"]')[0])
       && contains(fromJSON(inputs.sys_targets), fromJSON('["x86_64-v1-linux-gnu"]')[0])
 
@@ -78,7 +116,7 @@ jobs:
     with:
       bake_targets: '["book"]'
       cargo_profiles: '["release"]'
-      feat_sets: '["default"]'
+      feat_sets: '["all"]'
       rust_toolchains: '["stable"]'
       rust_targets: ${{inputs.rust_targets}}
       sys_names: ${{inputs.sys_names}}
@@ -95,7 +133,6 @@ jobs:
           "book": {
             "dst": "book",
             "src": "/book",
-            "pages": true
           }
         }
 

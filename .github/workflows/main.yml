@@ -131,6 +131,7 @@ jobs:
       complement_runner: 'het'
       enable_package: ${{fromJSON(inputs.enable_package || 'true')}}
       enable_package_book: ${{fromJSON(inputs.enable_package_book || 'true')}}
+      enable_package_docs: ${{fromJSON(inputs.enable_package_docs || 'true')}}
       enable_package_binary: ${{fromJSON(inputs.enable_package_binary || 'true')}}
       enable_package_container: ${{fromJSON(inputs.enable_package_container || env.is_fat || 'true')}}
       package_containers: ${{inputs.package_containers || env.default_package_containers}}
@@ -144,7 +145,7 @@ jobs:
       is_pull: ${{fromJSON(env.is_pull || 'false')}}
       is_fat: ${{fromJSON(env.is_fat || 'false')}}
       is_dev: ${{fromJSON(env.is_dev || 'true')}}
-      pages_url: 'https://matrix-construct.github.io/tuwunel/'
+      pages_url: 'https://matrix-construct.github.io/tuwunel'
       release_url: ${{steps.release.outputs.upload_url}}
       docker_repo: ${{vars.DOCKER_REPO}}
       docker_acct: ${{vars.DOCKER_ACCT}}
@@ -347,6 +348,7 @@ jobs:
     uses: ./.github/workflows/package.yml
     with:
       enable_book: ${{needs.init.outputs.enable_package_book}}
+      enable_docs: ${{needs.init.outputs.enable_package_docs}}
       enable_binary: ${{needs.init.outputs.enable_package_binary}}
       enable_container: ${{needs.init.outputs.enable_package_container}}
       enable_distro: ${{needs.init.outputs.enable_package_distro}}

@@ -74,8 +74,29 @@ jobs:
 
     steps:
       - id: book
-        name: Book
-        uses: actions/deploy-pages@v4
+        name: Fetch Book
+        uses: actions/download-artifact@v8
+        with:
+          name: release-all-x86_64-v1-linux-gnu-book
+          path: pages
+
+      - id: docs
+        name: Fetch Docs
+        uses: actions/download-artifact@v8
+        with:
+          name: release-all-x86_64-v1-linux-gnu-docs
+          path: pages/book
+
+      - id: store
+        name: Store Pages
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: pages/book
+          name: github-pages
+
+      - id: deploy
+        name: Deploy Pages
+        uses: actions/deploy-pages@v5
 
   containers:
     if: >
