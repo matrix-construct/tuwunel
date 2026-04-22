@@ -1,6 +1,6 @@
 # Setting up TURN/STURN
 
-In order to make or receive calls, a TURN server is required. Tuwunel suggests
+In order to make or receive calls legacy calls in Matrix, a TURN server is required. Tuwunel suggests
 using [Coturn](https://github.com/coturn/coturn) for this purpose, which is also
 available as a Docker image.
 
