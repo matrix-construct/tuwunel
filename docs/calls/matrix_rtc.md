@@ -1,7 +1,8 @@
-# Matrix RTC/Element Call Setup
+# MatrixRTC/Element Call Setup
+
+This guide shows you how to deploy MatrixRTC/Element Call using Docker and Docker Compose, as Livekit only provides prebuilt Docker images. It is possible to run Livekit using their installation script, however this method is not supported or recommended.
 
 ## Notes
-- This guide assumes that you are using Docker Compose for deployment. 
 - `yourdomain.com` is whatever you have set as `server_name` in your tuwunel.toml. This needs to be replaced with the actual domain. It is assumed that you will be hosting MatrixRTC at `matrix-rtc.yourdomain.com`. If you wish to host this service at a different subdomain, this needs to be replaced as well.
 - This guide provides example configuration for Caddy, Nginx and Traefik reverse proxies. Others can be used, but the configuration will need to be adapted.
 
@@ -9,11 +10,15 @@
 ### 1. Set Up DNS
 Create a DNS record for `matrix-rtc.yourdomain.com` pointing to your server.
 
-### 2. Create Docker Containers
+### 2. Initial Setup
 1. Create a directory for your MatrixRTC setup e.g. `mkdir /opt/matrix-rtc`.
 2. Change directory to your new directory. e.g. `cd /opt/matrix-rtc`.
-3. Create and open a compose.yaml file for MatrixRTC. e.g. `nano compose.yaml`.
-4. Add the following. `MRTCKEY` and `MRTCSECRET` should be random strings. It is suggested that `MRTCKEY` is 20 characters and `MRTCSECRET` is 64 characters. If you have `pwgen` installed, an easy way of generating these is to use `pwgen -s -1 20` to generate `MRTCKEY` and `pwgen -s -1 64` to generate `MRTCSECRET`.
+3. The following steps will require a key and a secret, referred to as `MRTCKEY` and `MRTCSECRET` hereafter. It is suggested that `MRTCKEY` is 20 characters and `MRTCSECRET` is 64 characters. If you have `pwgen` installed, an easy way of generating these is to use `pwgen -s -1 20` to generate `MRTCKEY` and `pwgen -s -1 64` to generate `MRTCSECRET`. Make a note of these values for use in later steps.
+
+#### 2.1 Create Docker Compose Containers
+Note: If you are using plain Docker rather than Docker Compose, skip to step 2.2.
+1. Create and open a compose.yaml file for MatrixRTC in your MatrixRTC directory. e.g. `nano compose.yaml`.
+2. Add the following. `MRTCKEY` and `MRTCSECRET` should be replaced by the values generated above.
 ```yaml
 services:
   matrix-rtc-jwt:
@@ -43,8 +48,10 @@ services:
 #      - "7881:7881/tcp"
 #      - "50100-50200:50100-50200/udp"
 ```
-5. Create and open a livekit.yaml file. e.g. `nano livekit.yaml`.
-6. Add the following. `MRTCKEY` and `MRTCSECRET` should be replaced with the values used in your compose.yaml.
+
+#### 2.2 Create Livekit Configuration
+1. Create and open a livekit.yaml file in your MatrixRTC directory. e.g. `nano livekit.yaml`.
+2. Add the following. `MRTCKEY` and `MRTCSECRET` should be replaced with the values generated above. 
 ```yaml
 port: 7880
 bind_addresses:
@@ -255,8 +262,39 @@ http:
                 passHostHeader: true
 ```
 ### 6. Start Docker Containers
+Note: If you are using Docker Compose, follow 6.1. If you are using plain Docker, follow 6.2.
+
+#### 6.1 Using Docker Compose
 1. Ensure you are in your matrix-rtc directory. e.g. `cd /opt/matrix-rtc`.
 2. Start containers: `docker compose up -d`.
+
+#### 6.2 Using Docker Run
+1. Start matrix-rtc-jwt.
+`MRTCKEY` and `MRTCSECRET` should be replaced with the values generated in Step 2.
+`matrix-rtc.yourdomain.com` should be replaced with your MatrixRTC subdomain.
+`yourdomain.com` should be replaced with what you have set as `server_name` in `tuwunel.toml`.
+```
+docker run -d \
+  --restart unless-stopped \
+  --name matrix-rtc-jwt \
+  -p 8081:8081 \
+  -e LIVEKIT_JWT_BIND=":8081" \
+  -e LIVEKIT_URL="wss://matrix-rtc.yourdomain.com" \
+  -e LIVEKIT_KEY="MRTCKEY" \
+  -e LIVEKIT_SECRET="MRTCSECRET" \
+  -e LIVEKIT_FULL_ACCESS_HOMESERVERS="yourdomain.com" \
+  ghcr.io/element-hq/lk-jwt-service:latest
+```
+2. Start matrix-rtc-livekit:
+```
+docker run -d \
+  --restart unless-stopped \
+  --name matrix-rtc-livekit \
+  --network host \
+  -v /opt/matrix-rtc/livekit.yaml:/etc/livekit.yaml:ro \
+  livekit/livekit-server:latest \
+  --config /etc/livekit.yaml
+```
 
 Element Call should now be working.
 
