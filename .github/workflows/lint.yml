@@ -38,6 +38,9 @@ on:
       checkout:
         type: string
         default: 'HEAD'
+      enable_audit:
+        type: string
+        default: 'true'
 
 jobs:
   fmt:
@@ -91,6 +94,7 @@ jobs:
   audit:
     if: >
       !failure() && !cancelled()
+      && fromJSON(inputs.enable_audit)
       && contains(fromJSON(inputs.cargo_profiles), fromJSON('["test"]')[0])
       && contains(fromJSON(inputs.feat_sets), fromJSON('["all"]')[0])
       && contains(fromJSON(inputs.rust_toolchains), fromJSON('["nightly"]')[0])

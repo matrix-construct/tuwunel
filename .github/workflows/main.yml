@@ -117,6 +117,7 @@ jobs:
       pipeline: ${{inputs.pipeline || github.event.head_commit.message || github.event.workflow_run.head_commit.message}}
       checkout: ${{inputs.checkout || github.sha}}
       enable_lint: ${{fromJSON(inputs.enable_lint || 'true')}}
+      enable_audit: ${{fromJSON(inputs.enable_audit || env.is_branch || env.is_fat || 'false')}}
       enable_test: ${{fromJSON(inputs.enable_test || 'true')}}
       enable_test_doc: ${{fromJSON(inputs.enable_test_doc || 'true')}}
       enable_test_unit: ${{fromJSON(inputs.enable_test_unit || 'true')}}
@@ -230,6 +231,7 @@ jobs:
     needs: [init] #needs: [init, deps]
     uses: ./.github/workflows/lint.yml
     with:
+      enable_audit: ${{needs.init.outputs.enable_audit}}
       checkout: ${{needs.init.outputs.checkout}}
       cargo_profiles: ${{needs.init.outputs.cargo_profiles}}
       feat_sets: ${{needs.init.outputs.feat_sets}}
