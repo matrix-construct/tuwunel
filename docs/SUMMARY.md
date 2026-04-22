@@ -17,7 +17,7 @@
   - [Red Hat](deploying/redhat.md)
   - [FreeBSD](deploying/freebsd.md)
   - [Podman systemd](deploying/podman-systemd.md)
-- [Voice Calls](calls.md)
+- [Voice and Video Calls](calls.md)
   - [TURN](calls/turn.md)
   - [Matrix RTC (Element Call)](calls/matrix_rtc.md)
 - [Appservices](appservices.md)
