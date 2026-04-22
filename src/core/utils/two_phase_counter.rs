@@ -23,7 +23,7 @@ use crate::{Result, checked, is_equal_to};
 /// completed with global visibility. Client-sync will then move on to the next
 /// counter value having missed the data from the current one.
 pub struct Counter<F: Fn(u64) -> Result + Sync> {
-	/// Self is intended to be Arc<Counter> with inner state mutable via Lock.
+	/// Self is intended to be `Arc<Counter>` with inner state mutable via Lock.
 	inner: RwLock<State<F>>,
 }
 

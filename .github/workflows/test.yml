@@ -75,7 +75,7 @@ on:
 jobs:
   doc:
     if: >
-      fromJSON(inputs.enable_docs)
+      fromJSON(inputs.enable_doc)
       && !contains(inputs.pipeline, '[ci only it]')
       && contains(fromJSON(inputs.cargo_profiles), fromJSON('["release"]')[0])
       && contains(fromJSON(inputs.feat_sets), fromJSON('["all"]')[0])

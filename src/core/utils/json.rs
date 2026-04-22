@@ -7,7 +7,7 @@ use ruma::{
 use crate::Result;
 
 /// Perform a round-trip through serde_json starting with a native type T and
-/// ending with a Ruma Raw<U> which is usually just T.
+/// ending with a Ruma `Raw<U>` which is usually just T.
 pub fn to_raw<T: serde::Serialize, U>(input: T) -> Result<Raw<U>> {
 	Ok(serde_json::from_value(serde_json::to_value(input)?)?)
 }

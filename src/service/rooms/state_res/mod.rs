@@ -12,13 +12,13 @@
 //! To respect the Matrix specification, the following functions should be
 //! called for a PDU:
 //!
-//! 1. [`check_pdu_format()`] - The event should be dropped on error.
-//! 2. [`ruma_signatures::verify_event()`] - The event should be dropped on
-//!    error. The PDU should be redacted before checking the authorization rules
-//!    if the result is `Verified::Signatures`.
-//! 3. [`check_state_independent_auth_rules()`] - The event should be rejected
-//!    on error.
-//! 4. [`check_state_dependent_auth_rules()`] - This function must be called 3
+//! 1. `check_pdu_format()` - The event should be dropped on error.
+//! 2. `ruma_signatures::verify_event()` - The event should be dropped on error.
+//!    The PDU should be redacted before checking the authorization rules if the
+//!    result is `Verified::Signatures`.
+//! 3. `check_state_independent_auth_rules()` - The event should be rejected on
+//!    error.
+//! 4. `check_state_dependent_auth_rules()` - This function must be called 3
 //!    times:
 //!     1. With the `auth_events` for the state, the event should be rejected on
 //!        error.
@@ -35,7 +35,7 @@
 //! make sure that all homeservers arrive at the same room state given the same
 //! events.
 //!
-//! The [`resolve()`] function allows to do that. It takes an iterator of state
+//! The `resolve()` function allows to do that. It takes an iterator of state
 //! maps and applies the proper state resolution algorithm for the current room
 //! version to output the map of events in the current room state.
 //!
@@ -46,7 +46,7 @@
 //! fields that are not checked when receiving a PDU. Since it is not
 //! appropriate for servers to reject an event that passes those checks, this
 //! crate provides helper types in the [`events`] module, built around the
-//! [`Event`] trait, to deserialize lazily a handful of fields from the most
+//! `Event` trait, to deserialize lazily a handful of fields from the most
 //! common state events. Since these are the same types used for checking the
 //! authorization rules, they are guaranteed to not perform extra validation on
 //! unvalidated fields.

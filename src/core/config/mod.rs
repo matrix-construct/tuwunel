@@ -2473,7 +2473,7 @@ pub struct TlsConfig {
 	pub dual_protocol: bool,
 }
 
-#[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
+#[expect(rustdoc::bare_urls)]
 #[derive(Clone, Debug, Deserialize, Default)]
 #[config_example_generator(
 	filename = "tuwunel-example.toml",
@@ -2550,7 +2550,7 @@ pub struct WellKnownConfig {
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Default)]
-#[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
+#[expect(rustdoc::bare_urls)]
 #[config_example_generator(
 	filename = "tuwunel-example.toml",
 	section = "global.blurhashing"
@@ -3072,7 +3072,7 @@ pub struct StorageProviderLocal {
 	section = "global.storage_provider.<ID>.s3"
 )]
 pub struct StorageProviderS3 {
-	/// Supply an s3 URL e.g. "s3://<bucket>/<path>". These URLs may contain one
+	/// Supply an s3 URL e.g. "s3://bucket/path". These URLs may contain one
 	/// or all of `bucket`, `region`, and `path` . When not supplied, such
 	/// additional items can be supplied below individually.
 	pub url: Option<String>,

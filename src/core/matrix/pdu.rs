@@ -96,15 +96,15 @@ pub type AuthEvents = SmallVec<[OwnedEventId; 3]>;
 pub type Content = Raw<CanonicalJsonObject, 112>;
 
 /// The [maximum size allowed] for a PDU.
-/// [maximum size allowed]: https://spec.matrix.org/latest/client-server-api/#size-limits
+/// [maximum size allowed]: <https://spec.matrix.org/latest/client-server-api/#size-limits>
 pub const MAX_PDU_BYTES: usize = 65_535;
 
 /// The [maximum length allowed] for the `prev_events` array of a PDU.
-/// [maximum length allowed]: https://spec.matrix.org/latest/rooms/v1/#event-format
+/// [maximum length allowed]: <https://spec.matrix.org/latest/rooms/v1/#event-format>
 pub const MAX_PREV_EVENTS: usize = 20;
 
 /// The [maximum length allowed] for the `auth_events` array of a PDU.
-/// [maximum length allowed]: https://spec.matrix.org/latest/rooms/v1/#event-format
+/// [maximum length allowed]: <https://spec.matrix.org/latest/rooms/v1/#event-format>
 pub const MAX_AUTH_EVENTS: usize = 10;
 
 impl Pdu {
