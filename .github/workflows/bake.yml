@@ -118,9 +118,10 @@ jobs:
     steps:
     - uses: actions/checkout@v6
       with:
-        persist-credentials: false
-        fetch-depth: 0
+        ref: ${{inputs.checkout}}
+        fetch-depth: 1
         fetch-tags: true
+        persist-credentials: false
 
     # Call docker
     - name: Bake ${{matrix.bake_target}}

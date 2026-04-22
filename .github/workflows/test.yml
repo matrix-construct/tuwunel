@@ -390,6 +390,9 @@ jobs:
 
     steps:
     - uses: actions/checkout@v6
+      with:
+        ref: ${{inputs.checkout}}
+
     - name: Execute
       id: execute
       env:
