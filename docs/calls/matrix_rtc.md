@@ -3,7 +3,7 @@
 This guide shows you how to deploy MatrixRTC/Element Call using Docker and Docker Compose, as Livekit only provides prebuilt Docker images. It is possible to run Livekit using their installation script, however this method is not supported or recommended.
 
 ## Notes
-- `yourdomain.com` is whatever you have set as `server_name` in your tuwunel.toml. This needs to be replaced with the actual domain. It is assumed that you will be hosting MatrixRTC at `matrix-rtc.yourdomain.com`. If you wish to host this service at a different subdomain, this needs to be replaced as well.
+- In the following documentation, `yourdomain.com` is whatever you have set as `server_name` in your tuwunel.toml. This needs to be replaced with the actual domain. It is assumed that you will be hosting MatrixRTC at `matrix-rtc.yourdomain.com`. If you wish to host this service at a different subdomain, this needs to be replaced as well.
 - This guide provides example configuration for Caddy, Nginx and Traefik reverse proxies. Others can be used, but the configuration will need to be adapted.
 
 ## Instructions
@@ -78,7 +78,7 @@ livekit_url = "https://matrix-rtc.yourdomain.com"
 
 #### 3.2. .well-known served independently
 ***Follow this step if you serve your .well-known/matrix files directly. Otherwise follow Step 3.1***
-1. Open your `.well-known/matrix/client` file. e.g. `nano /var//www/.well-known/matrix/client`.
+1. Open your `.well-known/matrix/client` file. e.g. `nano /var/www/.well-known/matrix/client`.
 2. Add the following to the end of this file:
 ```json
   "org.matrix.msc4143.rtc_foci": [
@@ -300,7 +300,7 @@ Element Call should now be working.
 
 ## Additional Configuration
 ### External TURN Integration
-If you follow this guide, and also set up Coturn as per the Tuwunel documentation, there will be a port clash between the two services. To avoid this, the following must be added to your `turnserver.conf`:
+If you follow this guide, and also set up Coturn as per the [TURN](turn.md) documentation, there will be a port clash between the two services. To avoid this, the following must be added to your `coturn.conf`:
 ```
 min-port=50201
 max-port=65535
@@ -309,7 +309,7 @@ max-port=65535
 If you have Coturn configured, you can use it as a TURN server for Livekit to improve call reliability. As Coturn allows multiple instances of `static-auth-secret`, it is suggested that the secret used for Livekit is different to that used for Tuwunel.
 
 1. Create a secret for Coturn. It is suggested that this should be a random 64 character alphanumeric string.
-2. Add the following line to the end of your `turnserver.conf`. `AUTH_SECRET` is the secret created in Step 1.
+2. Add the following line to the end of your `coturn.conf`. `AUTH_SECRET` is the secret created in Step 1.
 ```
 static-auth-secret=AUTH_SECRET
 ```
