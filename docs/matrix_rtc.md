@@ -72,7 +72,7 @@ livekit_url = "https://matrix-rtc.yourdomain.com"
 #### 3.2. .well-known served independently
 ***Follow this step if you serve your .well-known/matrix files directly. Otherwise follow Step 3.1***
 1. Open your `.well-known/matrix/client` file. e.g. `nano /var//www/.well-known/matrix/client`.
-2. Add the following:
+2. Add the following to the end of this file:
 ```json
   "org.matrix.msc4143.rtc_foci": [
     {
@@ -262,7 +262,7 @@ Element Call should now be working.
 
 ## Additional Configuration
 ### External TURN Integration
-If you follow this guide, and also set up Coturn as per the Tuwunel documentation, there will be a port clash between the two services. To avoid this, the following must be added to your `coturn.conf`:
+If you follow this guide, and also set up Coturn as per the Tuwunel documentation, there will be a port clash between the two services. To avoid this, the following must be added to your `turnserver.conf`:
 ```
 min-port=50201
 max-port=65535
@@ -342,3 +342,20 @@ ports:
 ```
 5. You will need to allow ports `3478`, `5349` and `50300:65535/udp` through your firewall. If you use UFW, the commands are: `ufw allow 3478`, `ufw allow 5349` and `ufw allow 50300:65535/udp`.
 6. Restart the containers.
+
+## Troubleshooting
+The easiest way to test your configuration is using the `testmatrix` utility [provided by spaetz](https://codeberg.org/spaetz/testmatrix). This can be installed using `pip install testmatrix` if you have Python and pip installed on your system.
+
+To use this utility to test your call setup, you will need an access token for your account. This can be most easily found at the bottom of the "Help & About" section of the Element Web settings, or in the "Developer Tools" section of the Cinny settings.
+
+Once you have `testmatrix` installed, run the following (`YOUR_TOKEN` must be replaced with the access token from your client described above):
+
+```
+testmatrix -u @your-user:yourdomain.com -t YOUR_TOKEN yourdomain.com
+```
+
+The output of this command will give you information on whether calls are properly set up.
+
+If all tests are successful, you will get credentials that can be used with the [Livekit Connection Tester](https://livekit.com/webrtc/connection-test). This can be used to test the ability of your Livekit service to route calls.
+
+If any of these tests fail, further information can be found in the container logs. These can be accessed by running `docker compose logs --follow` in the directory where your compose.yaml is located.
