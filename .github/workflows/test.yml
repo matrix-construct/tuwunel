@@ -41,7 +41,7 @@ on:
       checkout:
         type: string
         default: 'HEAD'
-      enable_docs:
+      enable_doc:
         type: string
         default: 'true'
       enable_unit:
@@ -73,7 +73,7 @@ on:
         default: 'false'
 
 jobs:
-  docs:
+  doc:
     if: >
       fromJSON(inputs.enable_docs)
       && !contains(inputs.pipeline, '[ci only it]')
@@ -82,10 +82,10 @@ jobs:
       && contains(fromJSON(inputs.rust_toolchains), fromJSON('["nightly"]')[0])
       && contains(fromJSON(inputs.sys_targets), fromJSON('["x86_64-v1-linux-gnu"]')[0])
 
-    name: Docs
+    name: Doc
     uses: ./.github/workflows/bake.yml
     with:
-      bake_targets: '["docs"]'
+      bake_targets: '["doc"]'
       cargo_profiles: '["test"]'
       feat_sets: '["all"]'
       rust_toolchains: '["nightly"]'

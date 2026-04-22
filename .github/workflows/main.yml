@@ -118,8 +118,8 @@ jobs:
       checkout: ${{inputs.checkout || github.sha}}
       enable_lint: ${{fromJSON(inputs.enable_lint || 'true')}}
       enable_test: ${{fromJSON(inputs.enable_test || 'true')}}
+      enable_test_doc: ${{fromJSON(inputs.enable_test_doc || 'true')}}
       enable_test_unit: ${{fromJSON(inputs.enable_test_unit || 'true')}}
-      enable_test_docs: ${{fromJSON(inputs.enable_test_docs || 'true')}}
       enable_test_bench: ${{fromJSON(inputs.enable_test_bench || 'true')}}
       enable_test_memcheck: ${{fromJSON(inputs.enable_test_memcheck || 'true')}}
       enable_test_smoke: ${{fromJSON(inputs.enable_test_smoke || env.is_fat || 'false')}}
@@ -283,7 +283,7 @@ jobs:
     with:
       pipeline: ${{needs.init.outputs.pipeline}}
       checkout: ${{needs.init.outputs.checkout}}
-      enable_docs: ${{needs.init.outputs.enable_test_docs}}
+      enable_doc: ${{needs.init.outputs.enable_test_doc}}
       enable_unit: ${{needs.init.outputs.enable_test_unit}}
       enable_bench: ${{needs.init.outputs.enable_test_bench}}
       enable_memcheck: ${{needs.init.outputs.enable_test_memcheck}}

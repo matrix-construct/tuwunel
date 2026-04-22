@@ -242,7 +242,7 @@ group "lints" {
 
 group "tests" {
     targets = [
-        "docs",
+        "doc",
         "unit",
         "smoke",
         "integration",
@@ -706,10 +706,10 @@ target "unit" {
     }
 }
 
-target "docs" {
-    name = elem("docs", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target])
+target "doc" {
+    name = elem("doc", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target])
     tags = [
-        elem_tag("docs", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target], "latest"),
+        elem_tag("doc", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target], "latest"),
     ]
     target = "cargo"
     matrix = cargo_rust_feat_sys
