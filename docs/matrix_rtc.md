@@ -1,7 +1,7 @@
 # Matrix RTC/Element Call Setup
 
 ## Notes
-- This guide assumes that you are using docker compose for deployment. 
+- This guide assumes that you are using Docker Compose for deployment. 
 - `yourdomain.com` is whatever you have set as `server_name` in your tuwunel.toml. This needs to be replaced with the actual domain. It is assumed that you will be hosting MatrixRTC at `matrix-rtc.yourdomain.com`. If you wish to host this service at a different subdomain, this needs to be replaced as well.
 - This guide provides example configuration for Caddy, Nginx and Traefik reverse proxies. Others can be used, but the configuration will need to be adapted.
 
@@ -13,7 +13,7 @@ Create a DNS record for `matrix-rtc.yourdomain.com` pointing to your server.
 1. Create a directory for your MatrixRTC setup e.g. `mkdir /opt/matrix-rtc`.
 2. Change directory to your new directory. e.g. `cd /opt/matrix-rtc`.
 3. Create and open a compose.yaml file for MatrixRTC. e.g. `nano compose.yaml`.
-4. Add the following. `MRTCKEY` and `MRTCSECRET` should be random strings. It is suggested that `MRTCKEY` is 20 characters and `MRTCSECRET` is 64 characters.
+4. Add the following. `MRTCKEY` and `MRTCSECRET` should be random strings. It is suggested that `MRTCKEY` is 20 characters and `MRTCSECRET` is 64 characters. If you have `pwgen` installed, an easy way of generating these is to use `pwgen -s -1 20` to generate `MRTCKEY` and `pwgen -s -1 64` to generate `MRTCSECRET`.
 ```yaml
 services:
   matrix-rtc-jwt:
@@ -22,9 +22,9 @@ services:
     environment:
       - LIVEKIT_JWT_BIND=:8081
       - LIVEKIT_URL=wss://matrix-rtc.yourdomain.com
-      - LIVEKIT_KEY=MRTCKEY
-      - LIVEKIT_SECRET=MRTCSECRET
-      - LIVEKIT_FULL_ACCESS_HOMESERVERS=yourdomain.com
+      - LIVEKIT_KEY=MRTCKEY # Random 20 character string
+      - LIVEKIT_SECRET=MRTCSECRET # Random 64 character string
+      - LIVEKIT_FULL_ACCESS_HOMESERVERS=yourdomain.com # Your server_name from tuwunel.toml
     restart: unless-stopped
     ports:
       - "8081:8081"
@@ -44,7 +44,7 @@ services:
 #      - "50100-50200:50100-50200/udp"
 ```
 5. Create and open a livekit.yaml file. e.g. `nano livekit.yaml`.
-6. Add the following. `MRTCKEY` and `MRTCSECRET` should be the same as those from compose.yaml. 
+6. Add the following. `MRTCKEY` and `MRTCSECRET` should be replaced with the values used in your compose.yaml.
 ```yaml
 port: 7880
 bind_addresses:
