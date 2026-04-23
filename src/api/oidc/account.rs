@@ -400,13 +400,9 @@ fn account_management_idp_id(services: &Services) -> Result<String> {
 }
 
 fn validate_account_action(action: &str) -> Result {
-	match action {
-		| "org.matrix.profile"
-		| "org.matrix.sessions_list"
-		| "org.matrix.session_view"
-		| "org.matrix.session_end" => Ok(()),
-		| _ => Err!(Request(InvalidParam("Unsupported account management action"))),
-	}
+	ACCOUNT_MANAGEMENT_ACTIONS_SUPPORTED
+		.contains(&action)
+		.ok_or_else(|| err!(Request(InvalidParam("Unsupported account management action"))))
 }
 
 fn ts_cell(ts_secs: u64) -> String {
