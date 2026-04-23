@@ -1,3 +1,5 @@
+#![allow(unused)]
+
 use rocksdb::{
 	DBCompactionPri as CompactionPri, DBCompactionStyle as CompactionStyle,
 	DBCompressionType as CompressionType,
@@ -160,8 +162,18 @@ pub(crate) static RANDOM_CACHE: Descriptor = Descriptor {
 	cache_disp: CacheDisp::Unique,
 	limit_size: 1024 * 1024 * 1024 * 2,
 	ttl: 60 * 60 * 24 * 180,
-	file_shape: 2,
 	..RANDOM
+};
+
+/// Descriptor for large persistent ring/circular queue. Writes occur at the end
+/// of the keyspace; the lowest values are then evicted off the front when size
+/// limit reached.
+pub(crate) static SEQUENTIAL_CACHE: Descriptor = Descriptor {
+	compaction: CompactionStyle::Fifo,
+	cache_disp: CacheDisp::Unique,
+	limit_size: 1024 * 1024 * 1024 * 2,
+	ttl: 60 * 60 * 24 * 180,
+	..SEQUENTIAL
 };
 
 /// Descriptor for small persistent caches with random updates. Oldest entries
@@ -171,7 +183,20 @@ pub(crate) static RANDOM_SMALL_CACHE: Descriptor = Descriptor {
 	cache_disp: CacheDisp::Unique,
 	compression: CompressionType::None,
 	limit_size: 1024 * 1024 * 64,
-	ttl: 60 * 60 * 24 * 14,
+	ttl: 60 * 60 * 24 * 180,
 	file_shape: 2,
 	..RANDOM_SMALL
+};
+
+/// Descriptor for small persistent ring/circular queue. Writes occur at the end
+/// of the keyspace; the lowest values are then evicted off the front when size
+/// limit reached.
+pub(crate) static SEQUENTIAL_SMALL_CACHE: Descriptor = Descriptor {
+	compaction: CompactionStyle::Fifo,
+	cache_disp: CacheDisp::Unique,
+	compression: CompressionType::None,
+	limit_size: 1024 * 1024 * 64,
+	ttl: 60 * 60 * 24 * 180,
+	file_shape: 2,
+	..SEQUENTIAL_SMALL
 };
