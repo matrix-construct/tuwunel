@@ -133,7 +133,7 @@ fn handle_services_finish(
 ) -> Result {
 	debug!("Service manager finished: {result:?}");
 
-	if server.running()
+	if server.is_running()
 		&& let Err(e) = server.shutdown()
 	{
 		error!("Failed to send shutdown signal: {e}");

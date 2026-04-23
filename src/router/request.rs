@@ -34,7 +34,7 @@ pub(crate) async fn handle(
 	req: http::Request<axum::body::Body>,
 	next: axum::middleware::Next,
 ) -> Result<Response, StatusCode> {
-	if !services.server.running() {
+	if !services.server.is_running() {
 		debug_warn!(
 			method = %req.method(),
 			uri = %req.uri(),

@@ -110,7 +110,7 @@ impl Server {
 
 	#[inline]
 	pub async fn until_shutdown(self: &Arc<Self>) {
-		while self.running() {
+		while self.is_running() {
 			self.signal.subscribe().recv().await.ok();
 		}
 	}
@@ -126,14 +126,14 @@ impl Server {
 	pub fn check_running(&self) -> Result {
 		use std::{io, io::ErrorKind::Interrupted};
 
-		self.running()
+		self.is_running()
 			.then_some(())
 			.ok_or_else(|| io::Error::new(Interrupted, "Server shutting down"))
 			.map_err(Into::into)
 	}
 
 	#[inline]
-	pub fn running(&self) -> bool { !self.is_stopping() }
+	pub fn is_running(&self) -> bool { !self.is_stopping() }
 
 	#[inline]
 	pub fn is_stopping(&self) -> bool { self.stopping.load(Ordering::Relaxed) }

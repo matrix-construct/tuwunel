@@ -39,7 +39,7 @@ impl Console {
 	}
 
 	pub(super) fn handle_signal(self: &Arc<Self>, sig: &'static str) {
-		if !self.server.running() {
+		if !self.server.is_running() {
 			self.interrupt();
 		} else if sig == "SIGINT" {
 			self.interrupt_command();
@@ -98,7 +98,7 @@ impl Console {
 		self.output
 			.print_text("\"help\" for help, ^D to exit the console, ^\\ to stop the server\n");
 
-		while self.server.running() {
+		while self.server.is_running() {
 			match self.readline().await {
 				| Ok(event) => match event {
 					| ReadlineEvent::Line(string) => self.clone().handle(string).await,

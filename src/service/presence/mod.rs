@@ -64,7 +64,7 @@ impl crate::Service for Service {
 
 		let mut presence_timers: FuturesUnordered<_> = FuturesUnordered::new();
 		let mut timer_handles: HashMap<OwnedUserId, (u64, AbortHandle)> = HashMap::new();
-		while !receiver.is_closed() && self.services.server.running() {
+		while !receiver.is_closed() && self.services.server.is_running() {
 			tokio::select! {
 				Some(result) = presence_timers.next() => {
 					let Ok((user_id, count)) = result else {

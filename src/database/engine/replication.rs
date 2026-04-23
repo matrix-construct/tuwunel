@@ -296,6 +296,7 @@ pub fn is_wal_gap_error(err: &tuwunel_core::Error) -> bool {
 		|| msg.contains("sequence not")
 		|| msg.contains("data loss")
 		|| msg.contains("not available")
+        || msg.contains("wal gap")
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────────────

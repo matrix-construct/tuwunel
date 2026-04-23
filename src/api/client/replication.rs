@@ -83,9 +83,27 @@ pub(crate) async fn replication_wal(
 		.rocksdb_replication_interval_ms;
 
 	// Eagerly check for a WAL gap before opening the streaming response.
+	//
+	// Beyond verifying the iterator can be created, we also peek at the first
+	// frame when since < current_seq. RocksDB may return Ok from GetUpdatesSince
+	// with an empty iterator when frames at `since` have been flushed to SST and
+	// are no longer in WAL files. Without this peek the stream connects (200 OK)
+	// but delivers no data frames — heartbeats still flow and set the secondary's
+	// resume_seq to the primary's current position without the missing batches
+	// ever being applied, causing silent data loss.
 	let gap_check: Result<()> = tokio::task::spawn_blocking({
 		let db = db.clone();
-		move || db.wal_frame_iter(since).map(drop)
+		move || {
+			let current_seq = db.latest_wal_sequence();
+			let mut iter = db.wal_frame_iter(since)?;
+			if since > 0 && since < current_seq && iter.next().is_none() {
+				return Err(tuwunel_core::err!(Database(
+					"WAL gap: frames at seq {since} are not available \
+					 (primary at seq {current_seq}); WAL has been compacted"
+				)));
+			}
+			Ok(())
+		}
 	})
 	.await
 	.expect("spawn_blocking panicked in gap check");

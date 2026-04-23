@@ -131,7 +131,7 @@ where
 	// Server shutdown
 	futures.push(self.services.server.until_shutdown().boxed());
 
-	if !self.services.server.running() {
+	if !self.services.server.is_running() {
 		return Ok(());
 	}
 

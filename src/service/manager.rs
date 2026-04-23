@@ -125,7 +125,7 @@ impl Manager {
 		let name = service.name();
 		error!("service {name:?} aborted: {error}");
 
-		if !self.server.running() {
+		if !self.server.is_running() {
 			debug_warn!("service {name:?} error ignored on shutdown.");
 			return Ok(());
 		}
@@ -147,7 +147,7 @@ impl Manager {
 		workers: &mut WorkersLocked<'_>,
 		service: &Arc<dyn Service>,
 	) -> Result {
-		if !self.server.running() {
+		if !self.server.is_running() {
 			return Err!(
 				"Service {:?} worker not starting during server shutdown.",
 				service.name()

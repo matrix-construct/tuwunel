@@ -182,14 +182,18 @@ impl crate::Service for Service {
 					},
 					| Err(ref e) if is_wal_gap_error(e) => {
 						warn!(
-							"WAL gap detected — resume_seq is too old for new primary. \
-							 Resetting cursor and restarting for clean checkpoint bootstrap."
+							"WAL gap detected — resume_seq is too old for primary. \
+							 Writing bootstrap sidecar and restarting for clean checkpoint restore."
 						);
-						if let Err(reset_err) = self.db.set_replication_resume_seq(0) {
-							error!("Failed to reset resume_seq: {reset_err}. Stopping worker.");
-							return Err(err!(Database(
-								"WAL gap; failed to reset cursor for bootstrap"
-							)));
+						let sidecar = self.server.config.database_path
+							.parent()
+							.unwrap_or(&self.server.config.database_path)
+							.join("_replication_needs_bootstrap");
+						if let Err(e) = std::fs::write(&sidecar, "0") {
+							error!("Failed to write bootstrap sidecar after WAL gap: {e}");
+						}
+						if let Err(e) = self.db.set_replication_resume_seq(0) {
+							error!("Failed to reset resume_seq after WAL gap: {e}");
 						}
 						// Shut down cleanly — systemd will restart tuwunel via Restart=on-failure.
 						if let Err(e) = self.server.shutdown() {

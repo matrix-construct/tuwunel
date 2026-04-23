@@ -21,7 +21,7 @@ impl crate::Service for Service {
 
 	async fn worker(self: Arc<Self>) -> Result {
 		let mut signaled = self.server.signal.subscribe();
-		while self.server.running() {
+		while self.server.is_running() {
 			tokio::select! {
 				() = self.server.until_shutdown() => break,
 				signal = signaled.recv() => if signal !=  Ok(SIGNAL) { continue; },
