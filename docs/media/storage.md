@@ -1,4 +1,4 @@
-# Storage Providers
+# Storage providers
 
 Tuwunel stores media through a configurable provider layer that abstracts over
 local filesystem and S3-compatible object storage. Multiple providers can be

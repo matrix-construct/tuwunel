@@ -1,13 +1,14 @@
-# Media
+# Multimedia and storage provision
 
 Tuwunel handles media uploads, remote media fetching, thumbnail generation,
 URL previews, and blurhash generation. This chapter covers configuration for
 all of these features, as well as the storage backends that back them.
 
-- [Storage Providers](media/storage.md) — local filesystem and S3-compatible
-  object storage backends
-- [Management](media/management.md) — admin commands for inspecting, deleting,
-  and bulk-removing media, including spam response workflows
+- [Storage providers](media/storage.md) — Local filesystem and S3-compatible
+  object storage backends.
+
+- [Media management](media/management.md) — Commands for inspecting, deleting,
+  and bulk-removing media, including spam response.
 
 ## Upload limits
 

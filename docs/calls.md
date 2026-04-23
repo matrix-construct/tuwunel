@@ -1,4 +1,4 @@
-# Voice and Videotelephony Systems
+# Voice and videotelephony systems
 
 There are two ways of setting up voice and video calling for use with Matrix:
 

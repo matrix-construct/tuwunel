@@ -51,6 +51,22 @@ latest setting takes precedence and defines the configuration.
 7. Set within the options (again, the latest option in the list overrides).
 
 
+## Environment variables
+
+All of the settings that are found in the config file can be specified by using
+environment variables. The environment variable names should be all caps and
+prefixed with `TUWUNEL_`.
+
+For example, if the setting you are changing is `max_request_size`, then the
+environment variable to set is `TUWUNEL_MAX_REQUEST_SIZE`.
+
+To modify config options not in the `[global]` context such as
+`[global.well_known]`, use the `__` suffix split: `TUWUNEL_WELL_KNOWN__SERVER`
+
+Conduit and conduwuit's environment variables are supported for backwards
+compatibility (e.g. `CONDUIT_SERVER_NAME` or `CONDUWUIT_SERVER_NAME`).
+
+
 ## Execute commandline flag
 
 Tuwunel supports running admin commands on startup using the commandline
@@ -67,18 +83,3 @@ Created user with user_id: @june:girlboss.ceo and password: `<redacted>`
 ```
 
 This commandline argument can be paired with the `--option` flag.
-
-## Environment variables
-
-All of the settings that are found in the config file can be specified by using
-environment variables. The environment variable names should be all caps and
-prefixed with `TUWUNEL_`.
-
-For example, if the setting you are changing is `max_request_size`, then the
-environment variable to set is `TUWUNEL_MAX_REQUEST_SIZE`.
-
-To modify config options not in the `[global]` context such as
-`[global.well_known]`, use the `__` suffix split: `TUWUNEL_WELL_KNOWN__SERVER`
-
-Conduit and conduwuit's environment variables are supported for backwards
-compatibility (e.g. `CONDUIT_SERVER_NAME` or `CONDUWUIT_SERVER_NAME`).

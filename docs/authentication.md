@@ -1,4 +1,4 @@
-# Authentication System
+# Authentication systems
 
 Tuwunel gives you fine-grained control over who can register and how users
 authenticate. This chapter covers everything from basic password login and
