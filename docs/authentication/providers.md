@@ -136,6 +136,101 @@ issuer_url = "https://auth.example.com"
 callback_url = "https://matrix.example.com/_matrix/client/unstable/login/sso/callback/your_mas_client_id"
 ```
 
+## Common setup patterns
+
+### Linking existing users to an identity provider
+
+When SSO is added to a server that already has password-based accounts, the
+central question is: how does Tuwunel know which provider identity belongs to
+which existing Matrix account?
+
+The most direct approach is to set `trusted = true` and list `"sub"` in
+`userid_claims`. The `sub` claim is the stable, globally unique user
+identifier that every OIDC provider is required to maintain. Listing it in
+`userid_claims` tells Tuwunel to use it as the authoritative match key.
+Marking the provider as trusted then inverts Tuwunel's normal logic: instead
+of registering a new account when it finds no existing match, it looks for an
+existing Matrix account whose localpart equals the `sub` value and grants
+access to it. The result is that logging in through the provider seamlessly
+picks up the user's existing account:
+
+```toml
+[[global.identity_provider]]
+brand = "Keycloak"
+client_id = "tuwunel"
+# ...
+trusted = true
+userid_claims = ["sub"]
+```
+
+For this to work, the `sub` value the provider returns for each user must
+match that user's Matrix localpart exactly. If your provider allows you to
+set `sub` to an arbitrary value, aligning it with the Matrix localpart is
+the cleanest path. If it does not — for example, if `sub` is an opaque UUID
+— you can either use a different claim (such as `preferred_username`) as the
+match key, or link accounts individually using the admin command:
+
+```
+!admin query oauth associate <provider_id> @alice:example.com \
+  --claim sub=550e8400-e29b-41d4-a716-446655440000
+```
+
+This records a permanent association between that provider identity and the
+given Matrix account without requiring the claim values to match.
+
+**Only ever set `trusted = true` for identity providers you self-host and
+fully control.** In trusted mode, anyone who can present a matching provider
+identity gains access to the corresponding Matrix account. Public providers
+such as GitHub and Google must never be trusted.
+
+### How Tuwunel derives Matrix user IDs from claims
+
+When a user authenticates through a provider for the first time and no
+existing account is linked, Tuwunel must compute a Matrix localpart from the
+claims in the provider's userinfo response. It tries each of the following in
+order, using the first claim that is present and yields a valid, available
+username:
+
+1. `preferred_username`
+2. `username`
+3. `nickname`
+4. `login`
+5. `email` — only the portion before the `@` is used
+
+The `sub` claim is deliberately excluded from this default sequence because
+it is typically an opaque identifier rather than a human-readable name. It is
+only consulted when explicitly listed in `userid_claims`, where it always
+takes precedence over every other claim regardless of list order.
+
+If none of these five claims appear in the userinfo response, or if every
+derived candidate is already taken by another account, Tuwunel falls back to
+a randomly generated localpart. This fallback is controlled by
+`unique_id_fallbacks`, which defaults to `true`. On private servers where
+silent random assignment is unacceptable, set it to `false` — Tuwunel will
+return an error instead.
+
+**Make sure user profiles on your identity provider contain at least one of
+the five claims above.** If a profile has none of them, Tuwunel has nothing
+to work with and will resort to the random fallback. The safest choice is to
+ensure `preferred_username` is populated on every account, as it is the
+first claim Tuwunel checks and tends to hold a recognisable, human-readable
+name that also makes a reasonable Matrix localpart.
+
+The `userid_claims` field lets you restrict which claims Tuwunel considers
+and in what order. For example, to use only `preferred_username` and fall
+back to the local part of the email address, and never silently generate a
+random ID:
+
+```toml
+userid_claims = ["preferred_username", "email"]
+unique_id_fallbacks = false
+```
+
+Listing `"sub"` anywhere in `userid_claims` elevates it to the highest
+priority, overriding all other entries. The special value `"unique"` used
+alone instructs Tuwunel to always generate a unique random localpart and
+never attempt to derive one from claims at all.
+
 ## Multiple providers
 
 When multiple providers are configured, each appears separately on the
