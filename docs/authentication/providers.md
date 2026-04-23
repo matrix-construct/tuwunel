@@ -14,7 +14,8 @@ maps their identity to a Matrix account.
 ## Configuring Tuwunel
 
 Each provider is a `[[global.identity_provider]]` table in your configuration
-file. Multiple providers can be configured by repeating the table header.
+file. Multiple providers can be configured by repeating the table header. Container users
+please refer to the section on [environment variables](#configuring-via-environment-variables) instead.
 
 ### Required fields
 
@@ -83,6 +84,47 @@ them for non-standard or undiscoverable providers.
 | `grant_session_duration` | `300` | Seconds the authorization session stays valid before expiring (default: 5 minutes). |
 | `check_cookie` | `true` | Verify the redirect cookie during the callback for CSRF protection. Disable only if a reverse proxy strips cookies. |
 
+
+## Configuring via environment variables
+
+For container deployments (Docker Compose, Podman, Kubernetes) where mounting a
+configuration file is inconvenient, every provider field can be set via
+environment variables instead.
+
+The variable name is built from three parts joined by `__` (double underscore):
+
+```
+TUWUNEL_IDENTITY_PROVIDER__<index>__<FIELD>
+```
+
+- **`TUWUNEL_IDENTITY_PROVIDER`** — fixed prefix that maps to the
+  `[[global.identity_provider]]` table array.
+- **`<index>`** — an arbitrary string (typically `0`, `1`, `2`, …) that groups
+  variables belonging to the same provider. All variables sharing the same
+  index are treated as a single `[[global.identity_provider]]` entry. Indexes
+  are sorted lexicographically, so numeric indexes give a predictable order.
+- **`<FIELD>`** — the field name from the tables below, uppercased.
+
+Multiple providers are expressed by using different indexes:
+
+```env
+# First provider — GitHub
+TUWUNEL_IDENTITY_PROVIDER__0__BRAND="github"
+TUWUNEL_IDENTITY_PROVIDER__0__CLIENT_ID="Ov23liYourGitHubClientId"
+TUWUNEL_IDENTITY_PROVIDER__0__CLIENT_SECRET="your_github_secret"
+TUWUNEL_IDENTITY_PROVIDER__0__CALLBACK_URL="https://matrix.example.com/_matrix/client/unstable/login/sso/callback/Ov23liYourGitHubClientId"
+
+# Second provider — Google (marked as default)
+TUWUNEL_IDENTITY_PROVIDER__1__BRAND="google"
+TUWUNEL_IDENTITY_PROVIDER__1__CLIENT_ID="123456789-abc.apps.googleusercontent.com"
+TUWUNEL_IDENTITY_PROVIDER__1__CLIENT_SECRET="GOCSPX-your_secret"
+TUWUNEL_IDENTITY_PROVIDER__1__CALLBACK_URL="https://matrix.example.com/_matrix/client/unstable/login/sso/callback/123456789-abc.apps.googleusercontent.com"
+TUWUNEL_IDENTITY_PROVIDER__1__DEFAULT="true"
+```
+
+Every field listed in the tables below has a matching environment variable. For
+example, `trusted = true` in TOML becomes
+`TUWUNEL_IDENTITY_PROVIDER__0__TRUSTED="true"`.
 
 ## Example configurartions
 
