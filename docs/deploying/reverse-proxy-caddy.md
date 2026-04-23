@@ -2,15 +2,18 @@
 
 [<= Back to Generic Deployment Guide](generic.md#setting-up-the-reverse-proxy)
 
-We recommend Caddy as a reverse proxy, as it is trivial to use, handling TLS certificates, reverse proxy headers, etc. transparently with proper defaults.
+We recommend Caddy as a reverse proxy, as it is trivial to use, handling TLS
+certificates, reverse proxy headers, etc. transparently with proper defaults.
 
 ## Installation
 
-Install Caddy via your preferred method. Refer to the [official Caddy installation guide](https://caddyserver.com/docs/install) for your distribution.
+Install Caddy via your preferred method. Refer to the
+[official Caddy installation guide](https://caddyserver.com/docs/install) for your distribution.
 
 ## Configuration
 
-After installing Caddy, create `/etc/caddy/conf.d/tuwunel_caddyfile` and enter this (substitute `your.server.name` with your actual server name):
+After installing Caddy, create `/etc/caddy/conf.d/tuwunel_caddyfile` and enter this (substitute
+`your.server.name` with your actual server name):
 
 ```caddyfile
 your.server.name, your.server.name:8448 {
@@ -44,11 +47,14 @@ curl https://your.server.name:8448/_tuwunel/server_version
 ```
 ## Caddy and .well-known
 
-Caddy can serve `.well-known/matrix/client` and `.well-known/matrix/server` instead of `tuwunel`. This can be done by using the `respond` directive in your caddyfile. 
+Caddy can serve `.well-known/matrix/client` and `.well-known/matrix/server` instead
+of `tuwunel`. This can be done by using the `respond` directive in your caddyfile. 
 
 Useful if you want to delegate a domain such as `example.com` -> `matrix.example.com`. 
 
-> [!info] Note the use of \` (backtic) in the respond directive to escape JSON that contains \" (double quotes). 
+> [!info]
+> Note the use of \` (backtick) in the respond directive to escape JSON that
+> contains \" (double quotes).
 
 ```caddyfile
 your.server.name, your.server.name:8848 {

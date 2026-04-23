@@ -8,6 +8,7 @@ maps their identity to a Matrix account.
 ### Provider guides
 
 - [Authelia](providers/authelia.md)
+- [Keycloak](providers/keycloak.md)
 - _Please contribute documentation for yours here!_
 
 ## Configuring Tuwunel

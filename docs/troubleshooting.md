@@ -245,31 +245,9 @@ and is not easy for non-developers to understand.
 [unbound-tuning]: https://unbound.docs.nlnetlabs.nl/en/latest/topics/core/performance.html
 [unbound-arch]: https://wiki.archlinux.org/title/Unbound
 
-#### MatrixRTC testing tools
-[testmatrix](https://pypi.org/project/testmatrix/) is a command line tool for testing various aspects of a matrix server and guiding debugging. 
+#### Matrix RTC test tool
 
-```
-$ ./test_matrix.py -u <my-user> -t <token that can be extracted from element-web: all settings: help and about: advanced> example.com
-Testing server example.com
-  Federation url: https://matrix.example.com:443
-✔ Server well-known exists
-✔ Client well-known has proper CORS header
-  Client url: https://matrix.example.com
-  Adding livekit service URL: https://matrixrtc.example.com/livekit/jwt
-✔ Server version: Tuwunel (1.5.0)
-✔ Federation API endpoints seem to work fine
-✔ Client API endpoints seem to work fine
-  Server oauth metadata endpoint failed (spec 1.15)
-  QR code login is disabled (MSC 4108)
-  Public room directory is disabled
-✔ MatrixRTC SFU configured
-  Adding livekit service URL: https://matrixrtc.example.com/livekit/jwt
-✔ JWTauth healthz responds
-✔ jwt /get_token without auth returns 405, good.
-✔ /get_token succeeded. Use the below information to test your livekit SFU on https://livekit.io/connection-test
-[...]
-𐄂 MatrixRTC configured but delayed events turned off (MSC4140). BAD!
-✔ Room summaries (MSC3266) support in matrix compat v1.15
-✔ Room summaries stable support works
-𐄂 Direct open registration might not be forbidden (returned 401)!
-```
+[testmatrix](https://pypi.org/project/testmatrix/) is a command line tool for testing
+various aspects of a matrix server and guiding debugging. Details for troubleshooting
+Matrix RTC can be found in the Matrix RTC
+[chapter on troubleshooting](./calls/matrix_rtc.md#troubleshooting).
