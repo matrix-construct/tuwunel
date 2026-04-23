@@ -135,7 +135,7 @@ those two files.
 
 ## Voice communication
 
-See the [TURN](../turn.md) page.
+See the [TURN](../calls/turn.md) page.
 
 [nix-buildlayeredimage]: https://ryantm.github.io/nixpkgs/builders/images/dockertools/#ssec-pkgs-dockerTools-buildLayeredImage
 [oci-image-def]: https://github.com/jevolk/tuwunel/blob/main/nix/pkgs/oci-image/default.nix

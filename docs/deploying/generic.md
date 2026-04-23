@@ -224,7 +224,7 @@ if the port 8448 is open and forwarded correctly.
 
 ## Audio/Video calls
 
-For Audio/Video call functionality see the [TURN Guide](../turn.md).
+For Audio/Video call functionality see the [TURN Guide](../calls/turn.md).
 
 ## Appservices
 

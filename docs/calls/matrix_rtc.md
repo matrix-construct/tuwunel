@@ -1,24 +1,48 @@
 # MatrixRTC/Element Call Setup
 
-This guide shows you how to deploy MatrixRTC/Element Call using Docker and Docker Compose, as Livekit only provides prebuilt Docker images. It is possible to run Livekit using their installation script, however this method is not supported or recommended.
+This guide shows you how to deploy MatrixRTC/Element Call using Docker and
+Docker Compose, as Livekit only provides prebuilt Docker images. It is
+possible to run Livekit using their installation script, however this method
+is not supported or recommended.
 
-## Notes
-- In the following documentation, `yourdomain.com` is whatever you have set as `server_name` in your tuwunel.toml. This needs to be replaced with the actual domain. It is assumed that you will be hosting MatrixRTC at `matrix-rtc.yourdomain.com`. If you wish to host this service at a different subdomain, this needs to be replaced as well.
-- This guide provides example configuration for Caddy, Nginx and Traefik reverse proxies. Others can be used, but the configuration will need to be adapted.
+> [!NOTE]
+> In the following documentation, `yourdomain.com` is whatever you have set
+> as `server_name` in your `tuwunel.toml`. This needs to be replaced with the
+> actual domain. It is assumed that you will be hosting MatrixRTC at
+> `matrix-rtc.yourdomain.com`. If you wish to host this service at a
+> different subdomain, this needs to be replaced as well.
 
-## Instructions
-### 1. Set Up DNS
+> [!NOTE]
+> This guide provides example configuration for Caddy, Nginx, and Traefik
+> reverse proxies. Others can be used, but the configuration will need to be
+> adapted.
+
+## 1. Set Up DNS
+
 Create a DNS record for `matrix-rtc.yourdomain.com` pointing to your server.
 
-### 2. Initial Setup
-1. Create a directory for your MatrixRTC setup e.g. `mkdir /opt/matrix-rtc`.
-2. Change directory to your new directory. e.g. `cd /opt/matrix-rtc`.
-3. The following steps will require a key and a secret, referred to as `MRTCKEY` and `MRTCSECRET` hereafter. It is suggested that `MRTCKEY` is 20 characters and `MRTCSECRET` is 64 characters. If you have `pwgen` installed, an easy way of generating these is to use `pwgen -s -1 20` to generate `MRTCKEY` and `pwgen -s -1 64` to generate `MRTCSECRET`. Make a note of these values for use in later steps.
+## 2. Initial Setup
 
-#### 2.1 Create Docker Compose Containers
-Note: If you are using plain Docker rather than Docker Compose, skip to step 2.2.
-1. Create and open a compose.yaml file for MatrixRTC in your MatrixRTC directory. e.g. `nano compose.yaml`.
-2. Add the following. `MRTCKEY` and `MRTCSECRET` should be replaced by the values generated above.
+1. Create a directory for your MatrixRTC setup,
+   e.g. `mkdir /opt/matrix-rtc`.
+2. Change into that directory, e.g. `cd /opt/matrix-rtc`.
+3. The following steps will require a key and a secret, referred to as
+   `MRTCKEY` and `MRTCSECRET` hereafter. It is suggested that `MRTCKEY` is
+   20 characters and `MRTCSECRET` is 64 characters. If you have `pwgen`
+   installed, you can generate these with `pwgen -s -1 20` for `MRTCKEY`
+   and `pwgen -s -1 64` for `MRTCSECRET`. Make a note of these values for
+   use in later steps.
+
+### 2.1 Create Docker Compose Containers
+
+Note: If you are using plain Docker rather than Docker Compose, skip to
+step 2.2.
+
+1. Create and open a `compose.yaml` file in your MatrixRTC directory,
+   e.g. `nano compose.yaml`.
+2. Add the following. `MRTCKEY` and `MRTCSECRET` should be replaced with
+   the values generated above.
+
 ```yaml
 services:
   matrix-rtc-jwt:
@@ -49,9 +73,13 @@ services:
 #      - "50100-50200:50100-50200/udp"
 ```
 
-#### 2.2 Create Livekit Configuration
-1. Create and open a livekit.yaml file in your MatrixRTC directory. e.g. `nano livekit.yaml`.
-2. Add the following. `MRTCKEY` and `MRTCSECRET` should be replaced with the values generated above.
+### 2.2 Create Livekit Configuration
+
+1. Create and open a `livekit.yaml` file in your MatrixRTC directory,
+   e.g. `nano livekit.yaml`.
+2. Add the following. `MRTCKEY` and `MRTCSECRET` should be replaced with
+   the values generated above.
+
 ```yaml
 port: 7880
 bind_addresses:
@@ -66,20 +94,32 @@ keys:
   MRTCKEY: MRTCSECRET
 ```
 
-### 3. Configure .well-known
-#### 3.1. .well-known served by Tuwunel
-***Follow this step if your .well-known configuration is served by Tuwunel. Otherwise follow Step 3.2***
-1. Open your tuwunel.toml file. e.g. `nano /etc/tuwunel/tuwunel.toml`.
+## 3. Configure .well-known
+
+### 3.1. .well-known served by Tuwunel
+
+*Follow this step if your `.well-known` configuration is served by Tuwunel.
+Otherwise follow Step 3.2.*
+
+1. Open your `tuwunel.toml` file, e.g. `nano /etc/tuwunel/tuwunel.toml`.
 2. Find the line reading `#livekit_url = ""` and replace it with:
+
 ```toml
 livekit_url = "https://matrix-rtc.yourdomain.com"
 ```
-3. Ensure that you have `[global.well_known]` uncommented, above this line. .well-known will not be served correctly if this is not the case. 
 
-#### 3.2. .well-known served independently
-***Follow this step if you serve your .well-known/matrix files directly. Otherwise follow Step 3.1***
-1. Open your `.well-known/matrix/client` file. e.g. `nano /var/www/.well-known/matrix/client`.
+3. Ensure that you have `[global.well_known]` uncommented above this line.
+   `.well-known` will not be served correctly otherwise.
+
+### 3.2. .well-known served independently
+
+*Follow this step if you serve your `.well-known/matrix` files directly.
+Otherwise follow Step 3.1.*
+
+1. Open your `.well-known/matrix/client` file,
+   e.g. `nano /var/www/.well-known/matrix/client`.
 2. Add the following to the end of this file:
+
 ```json
   "org.matrix.msc4143.rtc_foci": [
     {
@@ -88,7 +128,9 @@ livekit_url = "https://matrix-rtc.yourdomain.com"
     }
   ]
 ```
+
 The final file should look something like this:
+
 ```json
 {
   "m.homeserver": {
@@ -101,20 +143,29 @@ The final file should look something like this:
     }
   ]
 }
-
 ```
 
-### 4. Configure Firewall
-You will need to allow ports `7881/tcp` and `50100:50200/udp` through your firewall. If you use UFW, the commands are: `ufw allow 7881/tcp` and `ufw allow 50100:50200/udp`.
+## 4. Configure Firewall
 
-If you are behind NAT, you will also need to forward `7880/tcp`, `7881/tcp`, and `50100:50200/udp` to livekit. 
+You will need to allow ports `7881/tcp` and `50100:50200/udp` through your
+firewall. If you use UFW: `ufw allow 7881/tcp` and
+`ufw allow 50100:50200/udp`.
 
-### 5. Configure Reverse Proxy
-As reverse proxies can be installed in different ways, step by step instructions are not given for this section.
-If you use Caddy as your reverse proxy, follow step 5.1. If you use Nginx, follow step 5.2. If you use Traefik, follow step 5.3.
+If you are behind NAT, you will also need to forward `7880/tcp`, `7881/tcp`,
+and `50100:50200/udp` to livekit.
 
-#### 5.1. Caddy
-1. Add the following to your Caddyfile. If you are running Caddy in Docker, replace `localhost` with `matrix-rtc-jwt` in the first instance, and `matrix-rtc-livekit` in the second.
+## 5. Configure Reverse Proxy
+
+As reverse proxies can be installed in different ways, step-by-step
+instructions are not given for this section. If you use Caddy, follow
+step 5.1; Nginx, follow step 5.2; Traefik, follow step 5.3.
+
+### 5.1. Caddy
+
+1. Add the following to your Caddyfile. If you are running Caddy in Docker,
+   replace `localhost` with `matrix-rtc-jwt` in the first instance, and
+   `matrix-rtc-livekit` in the second.
+
 ```
 matrix-rtc.yourdomain.com {
     # This is matrix-rtc-jwt
@@ -133,10 +184,15 @@ matrix-rtc.yourdomain.com {
     }
 }
 ```
+
 2. Restart Caddy.
 
-#### 5.2. Nginx
-1. Add the following to your Nginx configuration. If you are running Nginx in Docker, replace `localhost` with `matrix-rtc-jwt` in the first instance, and `matrix-rtc-livekit` in the second.
+### 5.2. Nginx
+
+1. Add the following to your Nginx configuration. If you are running Nginx
+   in Docker, replace `localhost` with `matrix-rtc-jwt` in the first
+   instance, and `matrix-rtc-livekit` in the second.
+
 ```
 server {
     listen 443 ssl;
@@ -182,10 +238,13 @@ server {
     }
 }
 ```
+
 2. Restart Nginx.
 
-#### 5.3. Traefik
-1. Add your `matrix-rtc-jwt` `matrix-rtc-livekit` to your traefik's network
+### 5.3. Traefik
+
+1. Add `matrix-rtc-jwt` and `matrix-rtc-livekit` to your Traefik network:
+
 ```yaml
 services:
   matrix-rtc-jwt:
@@ -202,9 +261,11 @@ networks:
     proxy: # your traefik network name
         external: true
 ```
-2. Configure with either one of the methods below
 
-2.1 Labels
+2. Configure routing with either of the methods below.
+
+**2.1 Labels**
+
 ```yaml
 services:
   matrix-rtc-jwt:
@@ -231,7 +292,9 @@ services:
         - "traefik.http.routers.livekit.tls.certresolver=yourcertresolver" # change to your cert resolver's name
         - "traefik.docker.network=proxy" # your traefik network name
 ```
-2.2 Config file
+
+**2.2 Config file**
+
 ```yaml
 http:
     routers:
@@ -261,18 +324,24 @@ http:
                     - url: "http://matrix-rtc-livekit:7880"
                 passHostHeader: true
 ```
-### 6. Start Docker Containers
-Note: If you are using Docker Compose, follow 6.1. If you are using plain Docker, follow 6.2.
 
-#### 6.1 Using Docker Compose
-1. Ensure you are in your matrix-rtc directory. e.g. `cd /opt/matrix-rtc`.
+## 6. Start Docker Containers
+
+Note: If you are using Docker Compose, follow 6.1. If you are using plain
+Docker, follow 6.2.
+
+### 6.1 Using Docker Compose
+
+1. Ensure you are in your matrix-rtc directory, e.g. `cd /opt/matrix-rtc`.
 2. Start containers: `docker compose up -d`.
 
-#### 6.2 Using Docker Run
-1. Start matrix-rtc-jwt.
-`MRTCKEY` and `MRTCSECRET` should be replaced with the values generated in Step 2.
-`matrix-rtc.yourdomain.com` should be replaced with your MatrixRTC subdomain.
-`yourdomain.com` should be replaced with what you have set as `server_name` in `tuwunel.toml`.
+### 6.2 Using Docker Run
+
+1. Start `matrix-rtc-jwt`. `MRTCKEY` and `MRTCSECRET` should be replaced
+   with the values generated in Step 2. `matrix-rtc.yourdomain.com` should
+   be replaced with your MatrixRTC subdomain. `yourdomain.com` should be
+   replaced with what you have set as `server_name` in `tuwunel.toml`.
+
 ```
 docker run -d \
   --restart unless-stopped \
@@ -285,7 +354,9 @@ docker run -d \
   -e LIVEKIT_FULL_ACCESS_HOMESERVERS="yourdomain.com" \
   ghcr.io/element-hq/lk-jwt-service:latest
 ```
-2. Start matrix-rtc-livekit:
+
+2. Start `matrix-rtc-livekit`:
+
 ```
 docker run -d \
   --restart unless-stopped \
@@ -299,21 +370,36 @@ docker run -d \
 Element Call should now be working.
 
 ## Additional Configuration
+
 ### External TURN Integration
-If you follow this guide, and also set up Coturn as per the [TURN](turn.md) documentation, there will be a port clash between the two services. To avoid this, the following must be added to your `coturn.conf`:
+
+If you follow this guide and also set up Coturn as per the
+[TURN](turn.md) documentation, there will be a port clash between the two
+services. To avoid this, the following must be added to your `coturn.conf`:
+
 ```
 min-port=50201
 max-port=65535
 ```
 
-If you have Coturn configured, you can use it as a TURN server for Livekit to improve call reliability. As Coturn allows multiple instances of `static-auth-secret`, it is suggested that the secret used for Livekit is different to that used for Tuwunel.
+If you have Coturn configured, you can use it as a TURN server for Livekit
+to improve call reliability. As Coturn allows multiple instances of
+`static-auth-secret`, it is suggested that the secret used for Livekit is
+different to that used for Tuwunel.
 
-1. Create a secret for Coturn. It is suggested that this should be a random 64 character alphanumeric string.
-2. Add the following line to the end of your `coturn.conf`. `AUTH_SECRET` is the secret created in Step 1.
+1. Create a secret for Coturn — a random 64-character alphanumeric string is
+   suggested.
+2. Add the following line to the end of your `coturn.conf`, where
+   `AUTH_SECRET` is the secret created in Step 1:
+
 ```
 static-auth-secret=AUTH_SECRET
 ```
-3. Add the following to the end of the `rtc` block in your `livekit.yaml`. `AUTH_SECRET` is the same as above. `turn.yourdomain.com` should be replaced with your actual TURN domain.
+
+3. Add the following to the end of the `rtc` block in your `livekit.yaml`.
+   `AUTH_SECRET` is the same as above. `turn.yourdomain.com` should be
+   replaced with your actual TURN domain.
+
 ```
   turn_servers:
     - host: turn.yourdomain.com
@@ -322,12 +408,17 @@ static-auth-secret=AUTH_SECRET
       secret: "AUTH_SECRET"
 ```
 
-### Using the Livekit Built In TURN Server
-Livekit includes a built in TURN server which can be used in place of an external option.
-It should be noted that this TURN server will only work with Livekit, and is not compatible with traditional Matrix calling. For that, see the section on [TURN](turn.md).
+### Using the Livekit Built-In TURN Server
+
+Livekit includes a built-in TURN server which can be used in place of an
+external option. This TURN server will only work with Livekit and is not
+compatible with traditional Matrix calling. For that, see the
+[TURN documentation](turn.md).
 
 #### Basic Setup
+
 The simplest way to enable this is to add the following to your `livekit.yaml`:
+
 ```
 turn:
   enabled: true
@@ -336,29 +427,43 @@ turn:
   relay_range_end: 65535
   domain: matrix-rtc.yourdomain.com
 ```
-It is strongly recommended that you use `network_mode: "host"`; however if it is necessary to specify port mappings, the following ports should be added to `matrix-rtc-livekit` in your `compose.yaml`:
+
+It is strongly recommended that you use `network_mode: "host"`; however if
+port mappings are necessary, add the following ports to `matrix-rtc-livekit`
+in your `compose.yaml`:
+
 ```
 ports:
       - 3478:3478/udp
       - 50300-65535:50300-65535/udp
 ```
 
-You will need to allow ports `3478` and `50300:65535/udp` through your firewall. If you use UFW, the commands are: `ufw allow 3478` and `ufw allow 50300:65535/udp`.
+You will need to allow ports `3478` and `50300:65535/udp` through your
+firewall. If you use UFW: `ufw allow 3478` and `ufw allow 50300:65535/udp`.
 
 #### Setup With TLS
-To enable TLS for the TURN server, the process is slightly more complicated.
-Some WebRTC software will not accept certificates provided by Let's Encrypt. It is therefore suggested that you use [ZeroSSL](https://zerossl.com/) as an alternative.
 
-1. Create a DNS record for e.g. `matrix-turn.yourdomain.com` pointing to your server.
+To enable TLS for the TURN server, the process is slightly more complicated.
+Some WebRTC software will not accept certificates provided by Let's Encrypt;
+it is therefore suggested that you use [ZeroSSL](https://zerossl.com/) as an
+alternative.
+
+1. Create a DNS record for e.g. `matrix-turn.yourdomain.com` pointing to
+   your server.
 2. Get a certificate for this subdomain.
-3. Add the certificates as volumes for `matrix-rtc-livekit` in your `compose.yaml`.
-For example:
+3. Add the certificates as volumes for `matrix-rtc-livekit` in your
+   `compose.yaml`. For example:
+
 ```
 volumes:
       - ./certs/privkey.pem:/certs/privkey.pem:ro
       - ./certs/fullchain.pem:/certs/fullchain.pem:ro
 ```
-4. Add the following to the bottom of your `livekit.yaml`. The values for `cert_file` and `key_file` should match where these files are mounted in the container.
+
+4. Add the following to the bottom of your `livekit.yaml`. The values for
+   `cert_file` and `key_file` should match where these files are mounted in
+   the container.
+
 ```
 turn:
   enabled: true
@@ -371,29 +476,48 @@ turn:
   cert_file: /certs/fullchain.pem
   key_file: /certs/privkey.pem
 ```
-5. It is strongly recommended that you use `network_mode: "host"`; however if it is necessary to specify port mappings, the following ports should be added to `matrix-rtc-livekit` in your `compose.yaml`:
+
+5. It is strongly recommended that you use `network_mode: "host"`; however
+   if port mappings are necessary, add the following ports to
+   `matrix-rtc-livekit` in your `compose.yaml`:
+
 ```
 ports:
       - 3478:3478/udp
       - 5349:5349/tcp
       - 50300-65535:50300-65535/udp
 ```
-5. You will need to allow ports `3478`, `5349` and `50300:65535/udp` through your firewall. If you use UFW, the commands are: `ufw allow 3478`, `ufw allow 5349` and `ufw allow 50300:65535/udp`.
-6. Restart the containers.
+
+6. You will need to allow ports `3478`, `5349`, and `50300:65535/udp`
+   through your firewall. If you use UFW: `ufw allow 3478`,
+   `ufw allow 5349`, and `ufw allow 50300:65535/udp`.
+7. Restart the containers.
 
 ## Troubleshooting
-The easiest way to test your configuration is using the `testmatrix` utility [provided by spaetz](https://codeberg.org/spaetz/testmatrix). This can be installed using `pip install testmatrix` if you have Python and pip installed on your system.
 
-To use this utility to test your call setup, you will need an access token for your account. This can be most easily found at the bottom of the "Help & About" section of the Element Web settings, or in the "Developer Tools" section of the Cinny settings.
+The easiest way to test your configuration is using the `testmatrix` utility
+[provided by spaetz](https://codeberg.org/spaetz/testmatrix). This can be
+installed using `pip install testmatrix` if you have Python and pip installed.
 
-Once you have `testmatrix` installed, run the following (`YOUR_TOKEN` must be replaced with the access token from your client described above):
+To use this utility to test your call setup, you will need an access token
+for your account. This can be most easily found at the bottom of the
+"Help & About" section of the Element Web settings, or in the "Developer
+Tools" section of the Cinny settings.
+
+Once you have `testmatrix` installed, run the following (`YOUR_TOKEN` must
+be replaced with the access token from your client described above):
 
 ```
 testmatrix -u @your-user:yourdomain.com -t YOUR_TOKEN yourdomain.com
 ```
 
-The output of this command will give you information on whether calls are properly set up.
+The output of this command will give you information on whether calls are
+properly set up.
 
-If all tests are successful, you will get credentials that can be used with the [Livekit Connection Tester](https://livekit.com/webrtc/connection-test). This can be used to test the ability of your Livekit service to route calls.
+If all tests are successful, you will get credentials that can be used with
+the [Livekit Connection Tester](https://livekit.com/webrtc/connection-test).
+This can be used to test the ability of your Livekit service to route calls.
 
-If any of these tests fail, further information can be found in the container logs. These can be accessed by running `docker compose logs --follow` in the directory where your compose.yaml is located.
+If any of these tests fail, further information can be found in the container
+logs. Run `docker compose logs --follow` in the directory where your
+`compose.yaml` is located.
