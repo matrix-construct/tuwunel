@@ -164,5 +164,5 @@ These options control what Tuwunel verifies about stored media at startup.
 | Option | Default | Description |
 |---|---|---|
 | `media_startup_check` | `true` | Scan the media directory at startup. Removes database entries for files that no longer exist on disk (when `prune_missing_media` is enabled), and upgrades Conduit-era symlinks (when `media_compat_file_link` is enabled). Disable if startup is slow due to a large media directory and neither check applies to you. |
-| `prune_missing_media` | `false` | During the startup scan, delete database metadata for any media file that is missing from disk. **Caution:** if the storage directory is temporarily inaccessible or mis-mounted, this will permanently destroy metadata for all affected files. |
+| `prune_missing_media` | `false` | During the startup scan, delete database metadata for any media file that is missing from disk. **Caution:** if the storage directory is temporarily inaccessible or miss-mounted, this will permanently destroy metadata for all affected files. |
 | `media_compat_file_link` | `false` | Create Conduit-compatible symlinks alongside Tuwunel's media files. Only needed if you intend to switch back to Conduit. Requires `media_startup_check = true` to take effect. |
