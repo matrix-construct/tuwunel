@@ -1,13 +1,26 @@
-use std::{collections::BTreeSet, iter::once, str::FromStr};
+use std::{
+	collections::{BTreeSet, VecDeque},
+	convert::identity,
+	str::FromStr,
+};
 
 use axum::extract::State;
-use futures::{FutureExt, StreamExt, TryFutureExt, stream::FuturesOrdered};
+use futures::{
+	StreamExt,
+	future::ready,
+	stream::{once, unfold},
+};
 use ruma::{
 	OwnedRoomId, OwnedServerName, RoomId, UInt, UserId, api::client::space::get_hierarchy,
 };
 use tuwunel_core::{
-	Err, Result, debug, debug_error, error, trace,
-	utils::{future::TryExtExt, option::OptionExt, stream::IterStream},
+	Err, Result, debug_error, error,
+	smallvec::SmallVec,
+	trace,
+	utils::{
+		BoolExt,
+		stream::{IterStream, ReadyExt, WidebandExt},
+	},
 };
 use tuwunel_service::{
 	Services,
@@ -62,162 +75,170 @@ pub(crate) async fn get_hierarchy_route(
 		max_depth.try_into().unwrap_or(usize::MAX),
 		body.suggested_only,
 		key.as_ref()
-			.into_iter()
-			.flat_map(|t| t.short_room_ids.iter()),
+			.map(|t| t.short_room_ids.as_slice())
+			.unwrap_or_default(),
 	)
 	.await
 }
 
-async fn get_client_hierarchy<'a, ShortRoomIds>(
+async fn get_client_hierarchy(
 	services: &Services,
 	sender_user: &UserId,
 	room_id: &RoomId,
 	limit: usize,
 	max_depth: usize,
 	suggested_only: bool,
-	short_room_ids: ShortRoomIds,
-) -> Result<get_hierarchy::v1::Response>
-where
-	ShortRoomIds: Iterator<Item = &'a ShortRoomId> + Clone + Send + Sync + 'a,
-{
-	type Entry = (OwnedRoomId, Via);
-	type Via = Vec<OwnedServerName>;
+	skip_room_ids: &[ShortRoomId],
+) -> Result<get_hierarchy::v1::Response> {
+	type Via = SmallVec<[OwnedServerName; 1]>;
+	type QueueItem = (OwnedRoomId, Via, usize);
 
-	let initial = async move {
-		let via = room_id
-			.server_name()
-			.map(ToOwned::to_owned)
-			.into_iter()
-			.collect::<Vec<_>>();
+	// Fetch the root room up front so we can return precise errors for
+	// inaccessibility rather than silently dropping it.
+	let root_via: Via = room_id
+		.server_name()
+		.map(ToOwned::to_owned)
+		.into_iter()
+		.collect();
 
-		let summary = services
-			.spaces
-			.get_summary_and_children(room_id, &Identifier::UserId(sender_user), &via)
-			.await;
-
-		(room_id.to_owned(), via, summary)
+	let root_summary = match services
+		.spaces
+		.get_summary_and_children(room_id, &Identifier::UserId(sender_user), &root_via)
+		.await
+	{
+		| Err(e) => {
+			debug_error!(?room_id, "space hierarchy root: {e}");
+			return Err(e);
+		},
+		| Ok(Accessibility::Inaccessible) => {
+			return Err!(Request(Forbidden(debug_error!("The requested room is inaccessible."))));
+		},
+		| Ok(Accessibility::Accessible(s)) => s,
 	};
 
-	let mut parents = BTreeSet::new();
-	let mut rooms = Vec::with_capacity(limit);
-	let mut queue: FuturesOrdered<_> = once(initial.boxed()).collect();
-	while let Some((current_room, via, summary)) = queue.next().await {
-		match (summary, current_room == room_id) {
-			| (Err(e), true) if !e.is_not_found() => {
-				error!(?current_room, ?via, "Failed to gather space hierarchy: {e}");
-				return Err(e);
-			},
-			| (Err(e), true) => {
-				debug_error!(?current_room, ?via, "Space hierarchy error: {e}");
-				return Err(e);
-			},
-			| (Err(e), _) if !e.is_not_found() => {
-				error!(?current_room, ?room_id, ?via, "Error gathering spaces: {e}");
-				continue;
-			},
-			| (Err(_) | Ok(Accessibility::Inaccessible), false) => {
-				trace!(?current_room, ?room_id, "Child room missing or inaccessible.");
-				continue;
-			},
-			| (Ok(Accessibility::Inaccessible), true) => {
-				return Err!(Request(Forbidden(debug_error!(
-					"The requested room is inaccessible."
-				))));
-			},
-			| (Ok(Accessibility::Accessible(summary)), _) => {
-				let populate = parents.len() >= short_room_ids.clone().count();
+	// Seed the depth-first traversal: root is already visited; its children
+	// form the initial queue at depth 1.
+	let initial_queue: VecDeque<QueueItem> = max_depth
+		.gt(&0)
+		.then(|| {
+			get_parent_children_via(&root_summary, suggested_only)
+				.filter(|(room_id_, _)| room_id.ne(room_id_))
+				.map(|(room_id, via)| (room_id, via.collect(), 1_usize))
+		})
+		.into_iter()
+		.flatten()
+		.collect();
 
-				let mut children: Vec<Entry> = get_parent_children_via(&summary, suggested_only)
-					.filter(|(room, _)| !parents.contains(room))
-					.rev()
-					.map(|(key, val)| (key, val.collect()))
-					.collect();
+	// Short IDs of rooms already returned on previous pages; skip them in output
+	// but still traverse their children to preserve depth-first order.
+	let skip_ids: BTreeSet<ShortRoomId> = skip_room_ids.iter().copied().collect();
 
-				if populate {
-					if is_summary_serializable(&summary) {
-						rooms.push(summary_to_chunk(summary.clone()));
+	let initial_state = (initial_queue, BTreeSet::from([room_id.to_owned()]));
+
+	// Stream all accessible rooms in depth-first order: root first, then
+	// descendants discovered by unfolding the queue.
+	let rooms = once(ready(Some(root_summary)))
+		.chain(unfold(initial_state, async |(mut queue, mut visited)| {
+			let (current_room, via, depth) = queue.pop_front()?;
+
+			// Cycle guard: a room reachable via multiple parents is only
+			// visited (and queued for children) once.
+			if visited.contains(&current_room) {
+				return Some((None, (queue, visited)));
+			}
+
+			match services
+				.spaces
+				.get_summary_and_children(&current_room, &Identifier::UserId(sender_user), &via)
+				.await
+			{
+				| Err(e) if !e.is_not_found() => {
+					error!(?current_room, ?depth, "space child error: {e}");
+
+					Some((None, (queue, visited)))
+				},
+				| Err(_) | Ok(Accessibility::Inaccessible) => {
+					trace!(?current_room, ?depth, "child inaccessible or not found");
+
+					Some((None, (queue, visited)))
+				},
+				| Ok(Accessibility::Accessible(s)) => {
+					visited.insert(current_room);
+
+					// Enqueue children only while within the depth budget.
+					if depth < max_depth {
+						get_parent_children_via(&s, suggested_only)
+							.filter(|(child, _)| !visited.contains(child))
+							.for_each(|(child, via)| {
+								queue.push_back((child, via.collect(), depth.saturating_add(1)));
+							});
 					}
-				} else {
-					children = children
-						.iter()
-						.rev()
-						.stream()
-						.skip_while(|(room, _)| {
-							services
-								.short
-								.get_shortroomid(room)
-								.map_ok(|short| {
-									Some(&short) != short_room_ids.clone().nth(parents.len())
-								})
-								.unwrap_or(false)
-						})
-						.map(Clone::clone)
-						.collect::<Vec<Entry>>()
+
+					Some((Some(s), (queue, visited)))
+				},
+			}
+		}))
+		.ready_filter_map(identity)
+		.wide_filter_map(async |summary| {
+			skip_ids
+				.is_empty()
+				.is_false()
+				.then_async(async || {
+					services
+						.short
+						.get_shortroomid(&summary.summary.room_id)
 						.await
-						.into_iter()
-						.rev()
-						.collect();
-				}
+						.ok()
+						.filter(|shortid| skip_ids.contains(shortid))
+				})
+				.await
+				.flatten()
+				.is_none()
+				.then_some(summary)
+				.filter(is_summary_serializable)
+				.map(summary_to_chunk)
+		})
+		.take(limit)
+		.collect::<Vec<_>>()
+		.await;
 
-				parents.insert(current_room.clone());
-				if queue.is_empty() && children.is_empty() {
-					debug!(?current_room, rooms = rooms.len(), "finished");
-					break;
-				}
+	// If we filled the page, produce a continuation token encoding every room
+	// emitted so far (previous pages + this page). The next request skips all
+	// of them and resumes from the next position in the traversal order.
+	let next_batch = (limit > 0 && rooms.len() >= limit)
+		.then_async(async || {
+			let next_skip = skip_room_ids
+				.iter()
+				.copied()
+				.stream()
+				.chain(rooms.iter().stream().then(async |chunk| {
+					// `get_or_create_shortroomid` is used (not `get_shortroomid`) because rooms
+					// in a remote hierarchy our server has never touched have no shortroomid
+					// allocated yet; `get_shortroomid` would return `Err` and the room would
+					// silently fall out of the skip set, causing the next page to re-emit the
+					// same rooms with the same token — an infinite loop.
+					services
+						.short
+						.get_or_create_shortroomid(&chunk.summary.room_id)
+						.await
+				}))
+				.collect::<Vec<_>>()
+				.await;
 
-				if rooms.len() >= limit {
-					debug!(?current_room, rooms = rooms.len(), "limit exceeded");
-					break;
-				}
-
-				if parents.len() >= max_depth {
-					trace!(?current_room, ?max_depth, parents = parents.len(), "depth exceeded");
-					continue;
-				}
-
-				children
-					.into_iter()
-					.map(async |(room_id, via)| {
-						let summary = services
-							.spaces
-							.get_summary_and_children(
-								&room_id,
-								&Identifier::UserId(sender_user),
-								&via,
-							)
-							.await;
-
-						(room_id, via, summary)
-					})
-					.map(FutureExt::boxed)
-					.for_each(|entry| queue.push_back(entry));
-			},
-		}
-	}
-
-	let next_batch = queue.next().await.map_async(async |(room, ..)| {
-		parents.insert(room);
-
-		let next_short_room_ids: Vec<_> = parents
-			.iter()
-			.stream()
-			.filter_map(|room_id| services.short.get_shortroomid(room_id).ok())
-			.collect()
-			.await;
-
-		(next_short_room_ids.iter().ne(short_room_ids) && !next_short_room_ids.is_empty())
-			.then_some(PaginationToken {
-				short_room_ids: next_short_room_ids,
-				limit: limit.try_into().ok()?,
-				max_depth: max_depth.try_into().ok()?,
+			// Backstop against pagination loops: only return a token if the skip
+			// set strictly grew. With `get_or_create_shortroomid` above this should
+			// always hold when `rooms.len() >= limit`, but checking is cheap.
+			(next_skip.len() > skip_room_ids.len()).then_some(PaginationToken {
 				suggested_only,
+				short_room_ids: next_skip,
+				limit: limit.try_into().unwrap_or_default(),
+				max_depth: max_depth.try_into().unwrap_or_default(),
 			})
-			.as_ref()
-			.map(PaginationToken::to_string)
-	});
+		})
+		.await
+		.flatten()
+		.as_ref()
+		.map(ToString::to_string);
 
-	Ok(get_hierarchy::v1::Response {
-		next_batch: next_batch.await.flatten(),
-		rooms,
-	})
+	Ok(get_hierarchy::v1::Response { rooms, next_batch })
 }

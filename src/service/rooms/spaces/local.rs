@@ -10,7 +10,7 @@ use tuwunel_core::{
 
 use super::{Accessibility, Cached, Identifier};
 
-/// Gets the summary of a space using solely local information
+/// Gets the summary of a space using solely local information.
 #[implement(super::Service)]
 #[tracing::instrument(name = "local", level = "debug", skip_all)]
 pub(super) async fn get_summary_and_children_local(
@@ -25,30 +25,32 @@ pub(super) async fn get_summary_and_children_local(
 			error!(?current_room, "cache error: {e}");
 			return Err(e);
 		},
-		| Err(_) => {
-			debug!(?current_room, "cache miss");
-			return Err!(Request(NotFound("Space room not found.")));
-		},
-		| Ok(Cached { expires, .. }) if timepoint_has_passed(expires) => {
-			debug!(?current_room, ?expires, "cache expired");
-			return Err!(Request(NotFound("Space room not found. (cached; expired)")));
-		},
-		| Ok(Cached { expires, summary: Some(cached) }) => {
+		| Ok(Cached { expires, summary: Some(cached) }) if !timepoint_has_passed(expires) => {
 			debug!(?current_room, ?expires, "cache hit");
 			return self
-				.is_accessible_child(
-					current_room,
-					&cached.summary.join_rule,
-					sender,
-					cached.summary.join_rule.allowed_room_ids(),
-				)
+				.is_accessible_child(current_room, &cached.summary.join_rule, sender)
 				.await
 				.then(|| Ok(Accessible(cached)))
 				.unwrap_or(Ok(Inaccessible));
 		},
-		| Ok(Cached { expires, summary: None, .. }) => {
-			debug!(?current_room, ?expires, "cache negative");
+		| Ok(Cached { expires, summary: None }) if !timepoint_has_passed(expires) => {
+			// Cache negative: try local computation below.
+			debug!(?current_room, ?expires, "negative cache hit");
 		},
+		| _ => {
+			// Cache miss, expired, or negative: try local computation below.
+			debug!(?current_room, "no usable cache entry");
+		},
+	}
+
+	if !self
+		.services
+		.state_cache
+		.server_in_room(self.services.server.name.as_ref(), current_room)
+		.await
+	{
+		debug!(?current_room, "no local membership; defer to federation");
+		return Err!(Request(NotFound("Space room not found locally.")));
 	}
 
 	let children_state: Vec<_> = self
@@ -60,13 +62,15 @@ pub(super) async fn get_summary_and_children_local(
 	let summary = self
 		.get_room_summary(current_room, children_state, sender)
 		.boxed()
-		.await?;
+		.await;
 
-	if let Accessible(summary) = &summary {
-		self.cache_put(current_room, Some(summary.clone()));
+	match summary {
+		| Ok(Inaccessible) => self.cache_put(current_room, None),
+		| Ok(Accessible(ref summary)) => self.cache_put(current_room, Some(summary)),
+		| _ => (),
 	}
 
-	Ok(summary)
+	summary
 }
 
 #[implement(super::Service)]
@@ -83,12 +87,7 @@ pub(super) async fn get_room_summary(
 		.await;
 
 	let is_accessible_child = self
-		.is_accessible_child(
-			room_id,
-			&join_rule.clone().into(),
-			sender,
-			join_rule.allowed_room_ids(),
-		)
+		.is_accessible_child(room_id, &join_rule.clone().into(), sender)
 		.await;
 
 	if !is_accessible_child {

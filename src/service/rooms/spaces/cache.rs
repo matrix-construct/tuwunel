@@ -31,13 +31,13 @@ pub fn cache_evict(&self, room_id: &RoomId) { self.db.roomid_spacehierarchy.remo
 	skip(self, summary),
 	fields(summary = summary.is_some())
 )]
-pub(super) fn cache_put(&self, room_id: &RoomId, summary: Option<ParentSummary>) {
+pub(super) fn cache_put(&self, room_id: &RoomId, summary: Option<&ParentSummary>) {
 	debug!(?room_id, "cache put");
 	self.db.roomid_spacehierarchy.raw_put(
 		room_id,
 		Json(Cached {
 			expires: self.generate_ttl(),
-			summary: summary.filter(is_summary_serializable),
+			summary: summary.cloned().filter(is_summary_serializable),
 		}),
 	);
 }

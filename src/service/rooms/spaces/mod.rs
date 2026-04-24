@@ -5,7 +5,7 @@ mod pagination_token;
 #[cfg(test)]
 mod tests;
 
-use std::sync::Arc;
+use std::{fmt::Debug, sync::Arc};
 
 use async_trait::async_trait;
 use futures::{FutureExt, Stream, StreamExt, TryFutureExt, pin_mut};
@@ -19,7 +19,7 @@ use ruma::{
 		StateEventType,
 		space::child::{HierarchySpaceChildEvent as ChildEvent, SpaceChildEventContent},
 	},
-	room::JoinRuleSummary,
+	room::{JoinRuleSummary, RestrictedSummary},
 	serde::Raw,
 };
 use tuwunel_core::{
@@ -164,16 +164,22 @@ fn get_space_child_events<'a>(
 
 /// With the given identifier, checks if a room is accessible
 #[implement(Service)]
-async fn is_accessible_child<'a, I>(
+#[tracing::instrument(
+	level = "debug",
+	ret,
+	skip_all,
+	fields(
+		%current_room,
+		?join_rule,
+		?sender,
+	),
+)]
+async fn is_accessible_child(
 	&self,
 	current_room: &RoomId,
 	join_rule: &JoinRuleSummary,
 	sender: &Identifier<'_>,
-	allowed_rooms: I,
-) -> bool
-where
-	I: Iterator<Item = &'a RoomId> + Send,
-{
+) -> bool {
 	if let Identifier::ServerName(server_name) = sender {
 		// Checks if ACLs allow for the server to participate
 		if self
@@ -204,12 +210,18 @@ where
 		}
 	}
 
-	match *join_rule {
+	match join_rule {
 		| JoinRuleSummary::Public
 		| JoinRuleSummary::Knock
 		| JoinRuleSummary::KnockRestricted(_) => true,
-		| JoinRuleSummary::Restricted(_) =>
-			allowed_rooms
+
+		| JoinRuleSummary::Restricted(RestrictedSummary { allowed_room_ids })
+			if allowed_room_ids.is_empty() =>
+			true,
+
+		| JoinRuleSummary::Restricted(RestrictedSummary { allowed_room_ids }) =>
+			allowed_room_ids
+				.iter()
 				.stream()
 				.any(async |room| match sender {
 					| Identifier::UserId(user) =>

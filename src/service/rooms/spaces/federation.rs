@@ -5,14 +5,9 @@ use ruma::{
 		SpaceHierarchyParentSummary as ParentSummary,
 		get_hierarchy::v1::{Request, Response},
 	},
+	room::RoomType,
 };
-use tuwunel_core::{
-	Err, Event, Result, debug, implement,
-	utils::{
-		stream::{BroadbandExt, IterStream, ReadyExt},
-		timepoint_has_passed,
-	},
-};
+use tuwunel_core::{Err, Result, debug, implement, trace};
 
 use super::{
 	Accessibility,
@@ -20,7 +15,7 @@ use super::{
 	Identifier,
 };
 
-/// Gets the summary of a space using solely federation
+/// Gets the summary of a space using solely federation.
 #[implement(super::Service)]
 #[tracing::instrument(
 	name = "federation",
@@ -50,46 +45,50 @@ pub(super) async fn get_summary_and_children_federation(
 		.collect();
 
 	pin_mut!(requests);
-	debug!(?current_room, ?sender, requests = requests.len(), "requesting...");
-	let Some(Ok(Response { room, children, .. })) = requests.next().await else {
+	debug!(
+		?current_room,
+		?sender,
+		?via,
+		requests = requests.len(),
+		"waiting for federation response"
+	);
+
+	let Some(Ok(Response { room, children, inaccessible_children })) = requests.next().await
+	else {
 		self.cache_put(current_room, None);
 		return Err!(Request(NotFound("Space room not found over federation.")));
 	};
 
-	self.cache_put(current_room, Some(room.clone()));
+	trace!(
+		?current_room,
+		?sender,
+		?room,
+		?children,
+		?inaccessible_children,
+		"federation response"
+	);
 
-	children
+	for room_id in &inaccessible_children {
+		self.cache_put(room_id, None);
+	}
+
+	for summary in children
 		.into_iter()
-		.stream()
-		.broad_filter_map(async |summary| {
-			self.cache_get(&summary.room_id)
-				.await
-				.ok()
-				.map(|cached| cached.expires)
-				.is_none_or(timepoint_has_passed)
-				.then_some(ParentSummary {
-					children_state: self
-						.get_space_child_events(&summary.room_id)
-						.map(Event::into_format)
-						.collect()
-						.await,
+		.filter(|child| child.room_type.ne(&Some(RoomType::Space)))
+	{
+		let room_id = summary.room_id.clone();
+		let summary = ParentSummary {
+			summary,
+			children_state: Default::default(),
+		};
 
-					summary,
-				})
-		})
-		.map(|summary| (summary.summary.room_id.clone(), summary))
-		.ready_for_each(|(room_id, summary)| {
-			self.cache_put(&room_id, Some(summary));
-		})
-		.await;
+		self.cache_put(&room_id, Some(&summary));
+	}
 
-	self.is_accessible_child(
-		current_room,
-		&room.summary.join_rule,
-		sender,
-		room.summary.join_rule.allowed_room_ids(),
-	)
-	.await
-	.then(|| Ok(Accessible(room)))
-	.unwrap_or(Ok(Inaccessible))
+	self.cache_put(current_room, Some(&room));
+
+	self.is_accessible_child(current_room, &room.summary.join_rule.clone(), sender)
+		.await
+		.then(|| Ok(Accessible(room)))
+		.unwrap_or(Ok(Inaccessible))
 }

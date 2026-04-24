@@ -64,7 +64,7 @@
 {"Action":"fail","Test":"TestClientSpacesSummary/query_whole_graph"}
 {"Action":"fail","Test":"TestClientSpacesSummary/redact_link"}
 {"Action":"fail","Test":"TestClientSpacesSummary/suggested_only"}
-{"Action":"fail","Test":"TestClientSpacesSummaryJoinRules"}
+{"Action":"pass","Test":"TestClientSpacesSummaryJoinRules"}
 {"Action":"pass","Test":"TestComplementCanCreateValidV12Rooms"}
 {"Action":"pass","Test":"TestContent"}
 {"Action":"pass","Test":"TestContentCSAPIMediaV1"}
@@ -131,7 +131,7 @@
 {"Action":"pass","Test":"TestEventAuth/returns_auth_events_for_the_requested_event"}
 {"Action":"pass","Test":"TestEventAuth/returns_the_auth_chain_for_the_requested_event"}
 {"Action":"fail","Test":"TestEventRelationships"}
-{"Action":"fail","Test":"TestFederatedClientSpaces"}
+{"Action":"pass","Test":"TestFederatedClientSpaces"}
 {"Action":"fail","Test":"TestFederatedEventRelationships"}
 {"Action":"fail","Test":"TestFederationKeyUploadQuery"}
 {"Action":"fail","Test":"TestFederationKeyUploadQuery/Can_claim_remote_one_time_key_using_POST"}
@@ -563,7 +563,7 @@
 {"Action":"fail","Test":"TestRestrictedRoomsRemoteJoinLocalUser"}
 {"Action":"fail","Test":"TestRestrictedRoomsRemoteJoinLocalUserInMSC3787Room"}
 {"Action":"pass","Test":"TestRestrictedRoomsSpacesSummaryFederation"}
-{"Action":"fail","Test":"TestRestrictedRoomsSpacesSummaryLocal"}
+{"Action":"pass","Test":"TestRestrictedRoomsSpacesSummaryLocal"}
 {"Action":"pass","Test":"TestRoomAlias"}
 {"Action":"pass","Test":"TestRoomAlias/Parallel"}
 {"Action":"pass","Test":"TestRoomAlias/Parallel/GET_/rooms/:room_id/aliases_lists_aliases"}
