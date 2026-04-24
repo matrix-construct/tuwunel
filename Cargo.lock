@@ -4059,7 +4059,7 @@ dependencies = [
 [[package]]
 name = "ruma"
 version = "0.13.0"
-source = "git+https://github.com/matrix-construct/ruma?rev=3ddc41e64b35ff0d16d412108e2e28790bad1fd2#3ddc41e64b35ff0d16d412108e2e28790bad1fd2"
+source = "git+https://github.com/matrix-construct/ruma?rev=3e70a4854db9808e17aa16304898e12d0e81d914#3e70a4854db9808e17aa16304898e12d0e81d914"
 dependencies = [
  "assign",
  "js_int",
@@ -4078,7 +4078,7 @@ dependencies = [
 [[package]]
 name = "ruma-appservice-api"
 version = "0.13.0"
-source = "git+https://github.com/matrix-construct/ruma?rev=3ddc41e64b35ff0d16d412108e2e28790bad1fd2#3ddc41e64b35ff0d16d412108e2e28790bad1fd2"
+source = "git+https://github.com/matrix-construct/ruma?rev=3e70a4854db9808e17aa16304898e12d0e81d914#3e70a4854db9808e17aa16304898e12d0e81d914"
 dependencies = [
  "js_int",
  "ruma-common",
@@ -4090,7 +4090,7 @@ dependencies = [
 [[package]]
 name = "ruma-client-api"
 version = "0.21.0"
-source = "git+https://github.com/matrix-construct/ruma?rev=3ddc41e64b35ff0d16d412108e2e28790bad1fd2#3ddc41e64b35ff0d16d412108e2e28790bad1fd2"
+source = "git+https://github.com/matrix-construct/ruma?rev=3e70a4854db9808e17aa16304898e12d0e81d914#3e70a4854db9808e17aa16304898e12d0e81d914"
 dependencies = [
  "as_variant",
  "assign",
@@ -4115,7 +4115,7 @@ dependencies = [
 [[package]]
 name = "ruma-common"
 version = "0.16.0"
-source = "git+https://github.com/matrix-construct/ruma?rev=3ddc41e64b35ff0d16d412108e2e28790bad1fd2#3ddc41e64b35ff0d16d412108e2e28790bad1fd2"
+source = "git+https://github.com/matrix-construct/ruma?rev=3e70a4854db9808e17aa16304898e12d0e81d914#3e70a4854db9808e17aa16304898e12d0e81d914"
 dependencies = [
  "as_variant",
  "base64",
@@ -4149,7 +4149,7 @@ dependencies = [
 [[package]]
 name = "ruma-events"
 version = "0.31.0"
-source = "git+https://github.com/matrix-construct/ruma?rev=3ddc41e64b35ff0d16d412108e2e28790bad1fd2#3ddc41e64b35ff0d16d412108e2e28790bad1fd2"
+source = "git+https://github.com/matrix-construct/ruma?rev=3e70a4854db9808e17aa16304898e12d0e81d914#3e70a4854db9808e17aa16304898e12d0e81d914"
 dependencies = [
  "as_variant",
  "indexmap",
@@ -4176,7 +4176,7 @@ dependencies = [
 [[package]]
 name = "ruma-federation-api"
 version = "0.12.0"
-source = "git+https://github.com/matrix-construct/ruma?rev=3ddc41e64b35ff0d16d412108e2e28790bad1fd2#3ddc41e64b35ff0d16d412108e2e28790bad1fd2"
+source = "git+https://github.com/matrix-construct/ruma?rev=3e70a4854db9808e17aa16304898e12d0e81d914#3e70a4854db9808e17aa16304898e12d0e81d914"
 dependencies = [
  "bytes",
  "headers",
@@ -4199,7 +4199,7 @@ dependencies = [
 [[package]]
 name = "ruma-identifiers-validation"
 version = "0.11.0"
-source = "git+https://github.com/matrix-construct/ruma?rev=3ddc41e64b35ff0d16d412108e2e28790bad1fd2#3ddc41e64b35ff0d16d412108e2e28790bad1fd2"
+source = "git+https://github.com/matrix-construct/ruma?rev=3e70a4854db9808e17aa16304898e12d0e81d914#3e70a4854db9808e17aa16304898e12d0e81d914"
 dependencies = [
  "js_int",
  "thiserror 2.0.18",
@@ -4208,7 +4208,7 @@ dependencies = [
 [[package]]
 name = "ruma-macros"
 version = "0.16.0"
-source = "git+https://github.com/matrix-construct/ruma?rev=3ddc41e64b35ff0d16d412108e2e28790bad1fd2#3ddc41e64b35ff0d16d412108e2e28790bad1fd2"
+source = "git+https://github.com/matrix-construct/ruma?rev=3e70a4854db9808e17aa16304898e12d0e81d914#3e70a4854db9808e17aa16304898e12d0e81d914"
 dependencies = [
  "cfg-if",
  "proc-macro-crate",
@@ -4223,7 +4223,7 @@ dependencies = [
 [[package]]
 name = "ruma-push-gateway-api"
 version = "0.12.0"
-source = "git+https://github.com/matrix-construct/ruma?rev=3ddc41e64b35ff0d16d412108e2e28790bad1fd2#3ddc41e64b35ff0d16d412108e2e28790bad1fd2"
+source = "git+https://github.com/matrix-construct/ruma?rev=3e70a4854db9808e17aa16304898e12d0e81d914#3e70a4854db9808e17aa16304898e12d0e81d914"
 dependencies = [
  "js_int",
  "ruma-common",
@@ -4235,7 +4235,7 @@ dependencies = [
 [[package]]
 name = "ruma-signatures"
 version = "0.18.0"
-source = "git+https://github.com/matrix-construct/ruma?rev=3ddc41e64b35ff0d16d412108e2e28790bad1fd2#3ddc41e64b35ff0d16d412108e2e28790bad1fd2"
+source = "git+https://github.com/matrix-construct/ruma?rev=3e70a4854db9808e17aa16304898e12d0e81d914#3e70a4854db9808e17aa16304898e12d0e81d914"
 dependencies = [
  "base64",
  "ed25519-dalek",
