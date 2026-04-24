@@ -370,6 +370,26 @@ pub fn check(config: &Config) -> Result {
 		}
 	}
 
+	if config
+		.media_storage_providers
+		.iter()
+		.filter(|&provider| {
+			if config.storage_provider.contains_key(provider) || provider == "media" {
+				return false;
+			}
+
+			error!("`media_storage_providers` references non-existent provider {provider:?}");
+			true
+		})
+		.count()
+		.gt(&0)
+	{
+		return Err!(Config(
+			"media_storage_providers",
+			"Contains missing or unconfigured storage providers."
+		));
+	}
+
 	if config.media_storage_providers.len() > 1 && config.store_media_on_providers.is_empty() {
 		warn!(
 			"Media will be duplicated to multiple providers {:?} until \
