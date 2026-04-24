@@ -5725,7 +5725,6 @@ dependencies = [
  "futures",
  "http",
  "http-body-util",
- "hyper",
  "log",
  "ruma",
  "rustls",

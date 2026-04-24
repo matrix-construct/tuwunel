@@ -30,7 +30,7 @@ pub(super) type PathParam = SmallString<[u8; 32]>;
 
 pub(super) async fn from(
 	services: &Services,
-	request: hyper::Request<axum::body::Body>,
+	request: http::Request<axum::body::Body>,
 ) -> Result<Request> {
 	let limited = request.with_limited_body();
 	let (mut parts, body) = limited.into_parts();
