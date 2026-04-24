@@ -201,6 +201,7 @@ pub fn build(router: Router<State>, server: &Server) -> Router<State> {
 			get(client::get_room_summary_legacy)
 		)
 		.ruma_route(&client::room_initial_sync_route)
+		.ruma_route(&client::tuwunel_remote_version)
 		.route("/_tuwunel/server_version", get(client::tuwunel_server_version))
 		// OIDC server endpoints (next-gen auth, MSC2965/2964/2966/2967)
 		.route("/_tuwunel/oidc/registration", post(oidc::registration_route))
