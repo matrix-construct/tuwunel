@@ -257,20 +257,11 @@ pub(super) async fn raw_keys(
 
 	let map = self.services.db.get(map.as_str())?;
 	let timer = Instant::now();
-
 	let stream = match from.as_ref().or(prefix.as_ref()) {
-		| Some(from) =>
-			if !backwards {
-				map.raw_keys_from(from).boxed()
-			} else {
-				map.rev_raw_keys_from(from).boxed()
-			},
-		| None =>
-			if !backwards {
-				map.raw_keys().boxed()
-			} else {
-				map.rev_raw_keys().boxed()
-			},
+		| Some(from) if !backwards => map.raw_keys_from(from).boxed(),
+		| Some(from) => map.rev_raw_keys_from(from).boxed(),
+		| None if !backwards => map.raw_keys().boxed(),
+		| None => map.rev_raw_keys().boxed(),
 	};
 
 	let prefix = prefix.as_ref().map(String::as_bytes);
@@ -396,18 +387,10 @@ pub(super) async fn raw_iter(
 	let map = self.services.db.get(&map)?;
 	let timer = Instant::now();
 	let stream = match from.as_ref().or(prefix.as_ref()) {
-		| Some(from) =>
-			if !backwards {
-				map.raw_stream_from(from).boxed()
-			} else {
-				map.rev_raw_stream_from(from).boxed()
-			},
-		| None =>
-			if !backwards {
-				map.raw_stream().boxed()
-			} else {
-				map.rev_raw_stream().boxed()
-			},
+		| Some(from) if !backwards => map.raw_stream_from(from).boxed(),
+		| Some(from) => map.rev_raw_stream_from(from).boxed(),
+		| None if !backwards => map.raw_stream().boxed(),
+		| None => map.rev_raw_stream().boxed(),
 	};
 
 	let prefix = prefix.as_ref().map(String::as_bytes);
