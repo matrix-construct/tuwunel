@@ -26,7 +26,7 @@ use tuwunel_core::{
 	Err, Error, Result, debug, debug_error, debug_info, debug_warn, err, trace,
 	utils::{
 		self, BoolExt, MutexMap,
-		result::{LogDebugErr, LogErr},
+		result::LogDebugErr,
 		stream::{IterStream, TryReadyExt},
 		time::now_millis,
 	},
@@ -603,10 +603,16 @@ impl Service {
 					"Creating media file on storage provider."
 				);
 
-				provider
+				if let Err(e) = provider
 					.put_one(path.as_str(), file.to_vec())
 					.await
-					.log_err()?;
+				{
+					return Err!(Database(error!(
+						?path,
+						?provider,
+						"Failed to store media on provider: {e:?}"
+					)));
+				}
 
 				Ok(1)
 			})

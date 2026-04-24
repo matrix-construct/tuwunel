@@ -101,13 +101,12 @@ async fn start_providers(&self) -> Result {
 		.await
 }
 
-/// Get the specific storage provider's instance by ID or the default provider
-/// when an empty string supplied.
+/// Get the specific storage provider's instance by ID.
 #[implement(Service)]
 pub fn provider<'a>(&'a self, id: &'a str) -> Result<&'a Arc<Provider>> {
 	self.providers
 		.get(id)
-		.ok_or_else(|| err!(Request(NotFound("No instance of provider"))))
+		.ok_or_else(|| err!(Request(NotFound(error!("No instance of provider")))))
 }
 
 /// Get the specific storage provider's configuration by ID.
