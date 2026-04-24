@@ -146,10 +146,12 @@ fn get_space_child_events<'a>(
 				.await
 		})
 		.ready_filter_map(|(state_key, pdu)| {
-			if let Ok(content) = pdu.get_content::<SpaceChildEventContent>()
-				&& content.via.is_empty()
-			{
-				//return None;
+			let Ok(content) = pdu.get_content::<SpaceChildEventContent>() else {
+				return None;
+			};
+
+			if content.via.is_empty() {
+				return None;
 			}
 
 			if RoomId::parse(&state_key).is_err() {
