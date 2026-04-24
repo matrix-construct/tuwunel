@@ -623,11 +623,18 @@ impl Service {
 	}
 
 	fn storage_providers(&self) -> impl Iterator<Item = &Arc<Provider>> + Send + '_ {
-		self.services
-			.config
-			.media_storage_providers
+		let explicit_providers = &self.services.config.media_storage_providers;
+
+		let or_all_providers = explicit_providers
+			.is_empty()
+			.then(|| self.services.storage.providers())
+			.into_iter()
+			.flatten();
+
+		explicit_providers
 			.iter()
 			.filter_map(|id| self.services.storage.provider(id).ok())
+			.chain(or_all_providers)
 	}
 
 	#[inline]
