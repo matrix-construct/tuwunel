@@ -25,7 +25,10 @@ When `store_media_on_providers` is empty, all providers in
 Providers are declared as TOML sections named
 `[global.storage_provider.<NAME>.<brand>]`, where `<NAME>` is the identifier
 you reference in `media_storage_providers`, and `<brand>` is either `local`
-or `s3`.
+or `s3`. For container deployments (Docker Compose, Podman, Kubernetes) where
+mounting a configuration file is inconvenient, please refer to the section on
+[environment variables](#environment-variables) instead.
+
 
 ### Local filesystem
 
@@ -95,6 +98,57 @@ region           = "us-east-1"
 key              = "minioadmin"
 secret           = "minioadmin"
 use_vhost_request = false
+```
+
+### Environment variables
+
+The variable name is built from four parts joined by `__` (double underscore):
+
+```
+TUWUNEL_STORAGE_PROVIDER__<NAME>__<brand>__<FIELD>
+```
+
+- **`TUWUNEL_STORAGE_PROVIDER`** — fixed prefix that maps to
+  `[global.storage_provider]`.
+- **`<NAME>`** — the provider name you reference in `media_storage_providers`
+  (e.g., `MEDIA`, `MEDIA_ON_S3`).
+- **`<brand>`** — the provider type: `LOCAL` or `S3`.
+- **`<FIELD>`** — the field name from the tables below, uppercased.
+
+#### Local filesystem example
+
+```env
+TUWUNEL_STORAGE_PROVIDER__MEDIA__LOCAL__BASE_PATH="/var/lib/tuwunel/media"
+TUWUNEL_STORAGE_PROVIDER__MEDIA__LOCAL__CREATE_IF_MISSING="false"
+```
+
+#### S3 example
+
+```env
+TUWUNEL_STORAGE_PROVIDER__MEDIA_ON_S3__S3__BUCKET="my-matrix-media"
+TUWUNEL_STORAGE_PROVIDER__MEDIA_ON_S3__S3__REGION="us-east-1"
+TUWUNEL_STORAGE_PROVIDER__MEDIA_ON_S3__S3__KEY="AKIAIOSFODNN7EXAMPLE"
+TUWUNEL_STORAGE_PROVIDER__MEDIA_ON_S3__S3__SECRET="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+```
+
+#### Self-hosted S3-compatible example
+
+```env
+TUWUNEL_STORAGE_PROVIDER__MEDIA_ON_S3__S3__ENDPOINT="https://minio.example.com:9000"
+TUWUNEL_STORAGE_PROVIDER__MEDIA_ON_S3__S3__BUCKET="matrix-media"
+TUWUNEL_STORAGE_PROVIDER__MEDIA_ON_S3__S3__REGION="us-east-1"
+TUWUNEL_STORAGE_PROVIDER__MEDIA_ON_S3__S3__KEY="minioadmin"
+TUWUNEL_STORAGE_PROVIDER__MEDIA_ON_S3__S3__SECRET="minioadmin"
+TUWUNEL_STORAGE_PROVIDER__MEDIA_ON_S3__S3__USE_VHOST_REQUEST="false"
+```
+
+The `media_storage_providers` and `store_media_on_providers` lists are
+top-level settings and follow the standard env var pattern using TOML array
+syntax:
+
+```env
+TUWUNEL_MEDIA_STORAGE_PROVIDERS='["media", "media_on_s3"]'
+TUWUNEL_STORE_MEDIA_ON_PROVIDERS='["media_on_s3"]'
 ```
 
 ## Migrating to a new storage provider
