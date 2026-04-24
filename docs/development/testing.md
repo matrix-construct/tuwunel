@@ -1,31 +1,37 @@
-# Testing
+# Testing and Delivery
 
-## Complement
+Tuwunel's CI is built on [Docker Buildx Bake](https://docs.docker.com/build/bake/),
+a recipe tree for multi-stage builds that produces cache-friendly multi-layer
+images. Each layer accomplishes a specific task and its outputs are automatically
+reused by any subsequent layer that depends on it. The result is a large
+combinatorial matrix of build configurations where only the final layer — the
+one that actually differs — must be rebuilt.
 
-Have a look at [Complement's repository][complement] for an explanation of what
-it is.
+The `.github/workflows/` directory contains the pipeline *description* actually
+used for CI. It is a thin client: switches and patch panels that dispatch to the
+docker builder, not the mainframe itself. Every job is a path to an invocation of
+`docker buildx bake`. The same builder, with the same targets, is available to
+any developer locally — no service lockin required.
 
-To test against Complement, with Nix and
-[direnv installed and set up][direnv] (run `direnv allow` after setting up the hook), you can:
+All scripts, Dockerfiles, and the bake configuration live in `docker/` at the
+project root.
 
-* Run `./bin/complement "$COMPLEMENT_SRC"` to build a Complement image, run
-the tests, and output the logs and results to the specified paths. This will also output the OCI image
-at `result`
-* Run `nix build .#complement` from the root of the repository to just build a
-Complement OCI image outputted to `result` (it's a `.tar.gz` file)
-* Or download the latest Complement OCI image from the CI workflow artifacts
-output from the commit/revision you want to test (e.g. from main)
-[here][ci-workflows]
+## Delivery Pipeline
 
-If you want to use your own prebuilt OCI image (such as from our CI) without needing
-Nix installed, put the image at `complement_oci_image.tar.gz` in the root of the repo
-and run the script.
+The pipeline is organized into four sequential phases that gate on each other.
+A failure in any phase blocks all later ones, preventing partially-built
+deliverables from reaching users.
 
-If you're on macOS and need to build an image, run `nix build .#linux-complement`.
+| Phase | Access | Description |
+|---|---|---|
+| **[Lint](testing/pipeline.md#linting-phase)** | everything (unless masked) | format, spelling, security audit, dead links, clippy |
+| **[Test](testing/pipeline.md#testing-phase)** | everything (unless masked) | unit, integration, smoke, Complement, Matrix SDK |
+| **[Package](testing/pipeline.md#package-phase)** | main, test, releases, PRs (limited) | binaries, containers, distro packages, docs |
+| **[Publish](testing/pipeline.md#publish-phase)** | main and tagged releases only  | container registries, GitHub Pages |
 
-We have a Complement fork as some tests have needed to be fixed. This can be found
-at: <https://github.com/matrix-construct/complement>
+## Chapters
 
-[ci-workflows]: https://github.com/matrix-construct/tuwunel/actions/workflows/ci.yml?query=event%3Apush+is%3Asuccess+actor%3Ajevolk
-[complement]: https://github.com/matrix-org/complement
-[direnv]: https://direnv.net/docs/hook.html
+- [Docker Builder](testing/bake.md) — `bake.hcl`, target hierarchy, layer caching, `bake.sh`
+- [Matrix Selectors](testing/matrix.md) — cargo profiles, feature sets, toolchains, CPU targets
+- [Pipeline Phases](testing/pipeline.md) — stages of the pipeline required for delivery
+- [Complement Testing](testing/complement.md) — protocol compliance testing, local usage

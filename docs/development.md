@@ -1,7 +1,7 @@
 # Development
 
 Information about developing the project. If you plan on contributing, see the
-[contributor's guide](./contributing.md). _If you are only interested in using
+[contributor's guide](contributing.md). _If you are only interested in using
 it, you can safely ignore this page._
 
 ### Rust Documentation
