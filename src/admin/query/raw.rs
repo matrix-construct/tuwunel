@@ -433,15 +433,17 @@ pub(super) async fn raw_clear(&self, map: String, confirm: bool) -> Result {
 
 	let timer = Instant::now();
 	let cork = self.services.db.cork();
-	map.raw_keys()
+	let count = map
+		.raw_keys()
 		.ignore_err()
-		.ready_for_each(|key| map.remove(&key))
+		.map(|key| map.remove(&key))
+		.count()
 		.boxed()
 		.await;
 
 	drop(cork);
 	let query_time = timer.elapsed();
-	self.write_str(&format!("Operation completed in {query_time:?}"))
+	self.write_string(format!("Operation completed in {query_time:?}\n\nremoved {count} keys\n"))
 		.await
 }
 
