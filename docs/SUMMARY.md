@@ -20,6 +20,7 @@
     - [Kubernetes](deploying/kubernetes.md)
 - [Authentication](authentication.md)
   - [Legacy Registration](authentication/legacy.md)
+  - [LDAP Delegation](authentication/ldap.md)
   - [Identity Providers](authentication/providers.md)
     - [Authelia](authentication/providers/authelia.md)
     - [Keycloak](authentication/providers/keycloak.md)
