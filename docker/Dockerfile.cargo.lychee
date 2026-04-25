@@ -30,7 +30,7 @@ RUN \
             --cache \
             --max-cache-age "${lychee_cache_age}" \
             --mode "${lychee_mode}" \
-            --exclude /usr/src/tuwunel/contributing.md \
-            --exclude /usr/src/tuwunel/development/testing.md \
+            --exclude-path '/usr/src/tuwunel/CONTRIBUTING\.md' \
+            --exclude-path '/usr/src/tuwunel/development\.md' \
             ${lychee_args}
 EOF
