@@ -413,9 +413,18 @@ pub async fn copy(&self, src: &str, dst: &str, overwrite: CopyMode) -> Result {
 	)
 )]
 pub fn list(&self, prefix: Option<&str>) -> impl Stream<Item = Result<ObjectMeta>> + Send {
+	let abs_prefix = prefix
+		.map(Path::from)
+		.map(|p| self.prepend_base_path(p))
+		.or_else(|| self.base_path.clone());
+
 	self.provider
-		.list(prefix.map(Into::into).as_ref())
+		.list(abs_prefix.as_ref())
 		.map_err(Error::from)
+		.map_ok(|meta| ObjectMeta {
+			location: self.strip_base_path(meta.location),
+			..meta
+		})
 }
 
 #[implement(Provider)]
@@ -455,29 +464,40 @@ pub async fn ping(&self) -> Result {
 
 #[implement(Provider)]
 fn to_abs_path(&self, location: &str) -> Result<Path> {
-	let path_root = Path::ROOT;
-
-	let base_path = self.base_path.as_ref().unwrap_or(&path_root);
-
 	let location = Path::parse(location)
 		.map_err(|e| err!("Failed to parse location into canonical PathPart: {e}"))?;
 
-	let remaining = location.prefix_match(base_path);
-
-	let path = base_path
-		.into_iter()
-		.chain(remaining.into_iter().flatten())
-		.collect();
+	let path = self.prepend_base_path(location);
 
 	trace!(
 		provider = ?self.name,
-		?base_path,
-		?location,
+		base_path = ?self.base_path,
 		?path,
 		"Computed absolute path for object on provider.",
 	);
 
 	Ok(path)
+}
+
+#[implement(Provider)]
+fn prepend_base_path(&self, location: Path) -> Path {
+	match self.base_path.as_ref() {
+		| Some(base_path) if !location.prefix_matches(base_path) => base_path
+			.parts()
+			.chain(location.parts())
+			.collect(),
+
+		| _ => location,
+	}
+}
+
+#[implement(Provider)]
+fn strip_base_path(&self, location: Path) -> Path {
+	self.base_path
+		.as_ref()
+		.and_then(|base_path| location.prefix_match(base_path))
+		.map(Iterator::collect)
+		.unwrap_or(location)
 }
 
 #[implement(Provider)]
