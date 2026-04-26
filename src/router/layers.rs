@@ -1,7 +1,10 @@
+#[cfg(test)]
+mod tests;
+
 use std::{any::Any, sync::Arc, time::Duration};
 
 use axum::{
-	Router,
+	Extension, Router,
 	extract::{DefaultBodyLimit, MatchedPath},
 };
 use axum_client_ip::SecureClientIpSource;
@@ -10,7 +13,11 @@ use http::{
 	header::{self, HeaderName},
 	uri::PathAndQuery,
 };
-use tower::ServiceBuilder;
+use tower::{
+	ServiceBuilder,
+	layer::util::Identity,
+	util::{Either, option_layer},
+};
 use tower_http::{
 	catch_panic::CatchPanicLayer,
 	cors::{AllowOrigin, CorsLayer},
@@ -20,7 +27,7 @@ use tower_http::{
 	trace::{DefaultOnFailure, DefaultOnRequest, DefaultOnResponse, TraceLayer},
 };
 use tracing::Level;
-use tuwunel_api::{client_ip::ConfiguredIpSource, router::state::Guard};
+use tuwunel_api::router::{ConfiguredIpSource, state::Guard};
 use tuwunel_core::{Result, Server, config::IpSource, debug, error};
 use tuwunel_service::Services;
 
@@ -226,12 +233,8 @@ fn configured_ip_source(source: IpSource) -> SecureClientIpSource {
 	}
 }
 
-fn ip_source_layer(
-	source: Option<IpSource>,
-) -> tower::util::Either<axum::Extension<ConfiguredIpSource>, tower::layer::util::Identity> {
-	tower::util::option_layer(
-		source.map(|source| axum::Extension(ConfiguredIpSource(configured_ip_source(source)))),
-	)
+fn ip_source_layer(source: Option<IpSource>) -> Either<Extension<ConfiguredIpSource>, Identity> {
+	option_layer(source.map(|source| Extension(ConfiguredIpSource(configured_ip_source(source)))))
 }
 
 #[tracing::instrument(name = "panic", level = "error", skip_all)]
@@ -295,48 +298,4 @@ fn truncated_matched_path(path: &MatchedPath) -> &str {
 	path.as_str()
 		.rsplit_once('{')
 		.map_or(path.as_str(), |path| path.0.strip_suffix('/').unwrap_or(path.0))
-}
-
-#[cfg(test)]
-mod tests {
-	use tuwunel_api::client_ip::ConfiguredIpSource;
-	use tuwunel_core::config::IpSource;
-
-	use super::{configured_ip_source, ip_source_layer};
-
-	#[test]
-	fn configured_ip_source_maps_all_variants() {
-		let cases = [
-			(IpSource::ConnectInfo, "ConnectInfo"),
-			(IpSource::RightmostXForwardedFor, "RightmostXForwardedFor"),
-			(IpSource::RightmostForwarded, "RightmostForwarded"),
-			(IpSource::XRealIp, "XRealIp"),
-			(IpSource::CfConnectingIp, "CfConnectingIp"),
-			(IpSource::TrueClientIp, "TrueClientIp"),
-			(IpSource::FlyClientIp, "FlyClientIp"),
-			(IpSource::CloudFrontViewerAddress, "CloudFrontViewerAddress"),
-		];
-
-		for (source, expected) in cases {
-			let ConfiguredIpSource(actual) = ConfiguredIpSource(configured_ip_source(source));
-			assert_eq!(format!("{actual:?}"), expected);
-		}
-	}
-
-	#[test]
-	fn ip_source_layer_none_returns_identity_branch() {
-		let layer = ip_source_layer(None);
-
-		assert!(matches!(layer, tower::util::Either::Right(_)));
-	}
-
-	#[test]
-	fn ip_source_layer_connect_info_returns_extension_branch() {
-		let layer = ip_source_layer(Some(IpSource::ConnectInfo));
-
-		assert!(matches!(
-			layer,
-			tower::util::Either::Left(axum::Extension(ConfiguredIpSource(_)))
-		));
-	}
 }

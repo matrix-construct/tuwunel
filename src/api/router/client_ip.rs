@@ -30,7 +30,7 @@ pub(crate) struct ClientIp(pub(crate) IpAddr);
 /// extensions only when an operator has explicitly configured
 /// `ip_source`.
 #[derive(Clone, Debug)]
-struct ConfiguredIpSource(SecureClientIpSource);
+pub struct ConfiguredIpSource(pub SecureClientIpSource);
 
 impl<S> FromRequestParts<S> for ClientIp
 where
