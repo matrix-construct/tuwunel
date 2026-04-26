@@ -586,6 +586,40 @@ pub struct Config {
 	#[serde(default = "default_client_shutdown_timeout")]
 	pub client_shutdown_timeout: u64,
 
+	/// Source of the client IP address for rate limiting, logging, and
+	/// security tooling.
+	///
+	/// When unset (the default), the `ClientIp` extractor falls back to
+	/// `axum-client-ip`'s `InsecureClientIp` for backward compatibility;
+	/// clients can spoof their address via request headers in that mode.
+	///
+	/// When set, tuwunel installs `SecureClientIpSource` with the selected
+	/// variant and `ClientIp` resolves exclusively from that source. The
+	/// rightmost value is used for multi-valued headers; only the proxy can
+	/// append to the right, so this is resistant to client spoofing.
+	///
+	/// Supported values:
+	/// - "connect_info" - TCP peer address only (direct connections)
+	/// - "rightmost_x_forwarded_for" - nginx, Caddy
+	/// - "rightmost_forwarded" - RFC 7239 proxies
+	/// - "x_real_ip" - nginx `X-Real-IP`
+	/// - "cf_connecting_ip" - Cloudflare / cloudflared
+	/// - "true_client_ip" - Akamai, Cloudflare Enterprise
+	/// - "fly_client_ip" - Fly.io
+	/// - "cloudfront_viewer_address" - AWS CloudFront
+	///
+	/// On Unix-socket deployments, leave this unset rather than setting
+	/// "connect_info"; that source requires a TCP peer address.
+	///
+	/// WARNING: a header-based value without a trusted reverse proxy in
+	/// front of tuwunel allows clients to forge their IP. Changing this
+	/// value requires a server restart.
+	///
+	/// default: unset
+	/// config-example: "connect_info"
+	#[serde(default)]
+	pub ip_source: Option<IpSource>,
+
 	/// Grace period for clean shutdown of federation requests (seconds).
 	///
 	/// default: 5
@@ -3300,6 +3334,31 @@ impl From<AppServiceNamespace> for ruma::api::appservice::Namespace {
 	}
 }
 
+/// Selects the source used to determine the connecting client's IP
+/// address. Variants correspond 1:1 to `axum_client_ip::SecureClientIpSource`.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum IpSource {
+	/// TCP peer address. Safe default; no proxy required.
+	#[default]
+	ConnectInfo,
+	/// Rightmost value of `X-Forwarded-For`.
+	RightmostXForwardedFor,
+	/// Rightmost value of RFC 7239 `Forwarded`.
+	RightmostForwarded,
+	/// `X-Real-IP` header (nginx).
+	XRealIp,
+	/// `CF-Connecting-IP` (Cloudflare / cloudflared).
+	CfConnectingIp,
+	/// `True-Client-IP` (Akamai, Cloudflare Enterprise).
+	TrueClientIp,
+	/// `Fly-Client-IP` (Fly.io).
+	FlyClientIp,
+	/// `CloudFront-Viewer-Address` (AWS CloudFront).
+	#[serde(rename = "cloudfront_viewer_address")]
+	CloudFrontViewerAddress,
+}
+
 const DEPRECATED_KEYS: &[&str; 9] = &[
 	"cache_capacity",
 	"conduit_cache_capacity_modifier",
@@ -3734,3 +3793,234 @@ fn default_redaction_retention_seconds() -> u64 { 5_184_000 }
 fn default_media_storage_providers() -> BTreeSet<String> { ["media".to_owned()].into() }
 
 fn default_multipart_threshold() -> ByteSize { ByteSize::mib(100) }
+
+#[cfg(test)]
+mod tests {
+	use std::{
+		io::{Result as IoResult, Write},
+		sync::{Arc, Mutex},
+	};
+
+	use tracing_subscriber::fmt::MakeWriter;
+
+	use super::*;
+
+	#[derive(Clone)]
+	struct SharedBufferWriter(Arc<Mutex<Vec<u8>>>);
+
+	impl Write for SharedBufferWriter {
+		fn write(&mut self, buf: &[u8]) -> IoResult<usize> {
+			self.0
+				.lock()
+				.expect("buffer lock poisoned")
+				.write(buf)
+		}
+
+		fn flush(&mut self) -> IoResult<()> { Ok(()) }
+	}
+
+	impl<'a> MakeWriter<'a> for SharedBufferWriter {
+		type Writer = Self;
+
+		fn make_writer(&'a self) -> Self::Writer { self.clone() }
+	}
+
+	fn config_from_toml(toml: &str) -> Result<Config> {
+		Config::new(&Figment::new().merge(Data::nested(Toml::string(toml))))
+	}
+
+	fn check_with_captured_logs(config: &Config) -> (Result, String) {
+		let captured = Arc::new(Mutex::new(Vec::new()));
+		let subscriber = tracing_subscriber::fmt()
+			.with_ansi(false)
+			.with_writer(SharedBufferWriter(Arc::clone(&captured)))
+			.finish();
+
+		let result = {
+			let _guard = tracing::subscriber::set_default(subscriber);
+			check(config)
+		};
+
+		let logs = String::from_utf8(
+			captured
+				.lock()
+				.expect("buffer lock poisoned")
+				.clone(),
+		)
+		.expect("captured tracing output should be valid UTF-8");
+
+		(result, logs)
+	}
+
+	#[test]
+	fn ip_source_absent_parses_as_none() {
+		let config = config_from_toml("[global]\n").unwrap();
+
+		assert_eq!(config.ip_source, None);
+	}
+
+	#[test]
+	fn ip_source_connect_info_parses() {
+		let config = config_from_toml(
+			r#"[global]
+ip_source = "connect_info"
+"#,
+		)
+		.unwrap();
+
+		assert_eq!(config.ip_source, Some(IpSource::ConnectInfo));
+	}
+
+	#[test]
+	fn ip_source_rightmost_x_forwarded_for_parses() {
+		let config = config_from_toml(
+			r#"[global]
+ip_source = "rightmost_x_forwarded_for"
+"#,
+		)
+		.unwrap();
+
+		assert_eq!(config.ip_source, Some(IpSource::RightmostXForwardedFor));
+	}
+
+	#[test]
+	fn ip_source_cf_connecting_ip_parses() {
+		let config = config_from_toml(
+			r#"[global]
+ip_source = "cf_connecting_ip"
+"#,
+		)
+		.unwrap();
+
+		assert_eq!(config.ip_source, Some(IpSource::CfConnectingIp));
+	}
+
+	#[test]
+	fn ip_source_issue_427_values_parse() {
+		for (value, expected) in [
+			("connect_info", IpSource::ConnectInfo),
+			("rightmost_x_forwarded_for", IpSource::RightmostXForwardedFor),
+			("rightmost_forwarded", IpSource::RightmostForwarded),
+			("x_real_ip", IpSource::XRealIp),
+			("cf_connecting_ip", IpSource::CfConnectingIp),
+			("true_client_ip", IpSource::TrueClientIp),
+			("fly_client_ip", IpSource::FlyClientIp),
+			("cloudfront_viewer_address", IpSource::CloudFrontViewerAddress),
+		] {
+			let config = config_from_toml(&format!(
+				r#"[global]
+ip_source = "{value}"
+"#,
+			))
+			.unwrap();
+
+			assert_eq!(config.ip_source, Some(expected), "{value}");
+		}
+	}
+
+	#[test]
+	fn ip_source_camel_case_and_bogus_fail_to_parse() {
+		for value in ["CamelCase", "bogus"] {
+			let result = config_from_toml(&format!(
+				r#"[global]
+ip_source = "{value}"
+"#,
+			));
+
+			let Err(err) = result else {
+				panic!("ip_source value {value:?} should fail to parse");
+			};
+
+			let err = err.to_string();
+			assert!(err.contains("ip_source"), "{err}");
+			assert!(err.contains(value), "{err}");
+		}
+	}
+
+	#[test]
+	fn check_accepts_absent_connect_info_and_cf_connecting_ip() {
+		let absent = config_from_toml("[global]\n").unwrap();
+		let connect_info = config_from_toml(
+			r#"[global]
+ip_source = "connect_info"
+"#,
+		)
+		.unwrap();
+		let cf_connecting_ip = config_from_toml(
+			r#"[global]
+ip_source = "cf_connecting_ip"
+"#,
+		)
+		.unwrap();
+
+		let (result, logs) = check_with_captured_logs(&absent);
+		result.expect("absent ip_source should pass config check");
+		assert!(!logs.contains("ip_source is set to"));
+
+		let (result, logs) = check_with_captured_logs(&connect_info);
+		result.expect("connect_info should pass config check");
+		assert!(!logs.contains("ip_source is set to"));
+
+		let (result, logs) = check_with_captured_logs(&cf_connecting_ip);
+		result.expect("cf_connecting_ip should pass config check");
+		assert!(logs.contains("ip_source is set to CfConnectingIp"));
+	}
+
+	#[test]
+	fn reload_rejects_none_to_some_and_some_to_none() {
+		let none = config_from_toml("[global]\n").unwrap();
+		let some = config_from_toml(
+			r#"[global]
+ip_source = "connect_info"
+"#,
+		)
+		.unwrap();
+		let other_some = config_from_toml(
+			r#"[global]
+ip_source = "rightmost_x_forwarded_for"
+"#,
+		)
+		.unwrap();
+
+		let err = check::reload(&none, &some).unwrap_err();
+		assert!(
+			err.to_string().contains("'ip_source'")
+				&& err
+					.to_string()
+					.contains("cannot be changed at runtime"),
+			"{err}"
+		);
+
+		let err = check::reload(&some, &none).unwrap_err();
+		assert!(
+			err.to_string().contains("'ip_source'")
+				&& err
+					.to_string()
+					.contains("cannot be changed at runtime"),
+			"{err}"
+		);
+
+		let err = check::reload(&some, &other_some).unwrap_err();
+		assert!(
+			err.to_string().contains("'ip_source'")
+				&& err
+					.to_string()
+					.contains("cannot be changed at runtime"),
+			"{err}"
+		);
+	}
+
+	#[test]
+	fn reload_accepts_unchanged_none_and_unchanged_some() {
+		let none = config_from_toml("[global]\n").unwrap();
+		let some = config_from_toml(
+			r#"[global]
+ip_source = "rightmost_x_forwarded_for"
+"#,
+		)
+		.unwrap();
+
+		check::reload(&none, &none).expect("unchanged none config should reload");
+		check::reload(&some, &some).expect("unchanged some config should reload");
+	}
+}

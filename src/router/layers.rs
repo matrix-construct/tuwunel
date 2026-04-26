@@ -20,8 +20,8 @@ use tower_http::{
 	trace::{DefaultOnFailure, DefaultOnRequest, DefaultOnResponse, TraceLayer},
 };
 use tracing::Level;
-use tuwunel_api::router::state::Guard;
-use tuwunel_core::{Result, Server, debug, error};
+use tuwunel_api::{client_ip::ConfiguredIpSource, router::state::Guard};
+use tuwunel_core::{Result, Server, config::IpSource, debug, error};
 use tuwunel_service::Services;
 
 use crate::{request, router};
@@ -71,7 +71,7 @@ pub(crate) fn build(services: &Arc<Services>) -> Result<(Router, Guard)> {
 				.on_response(DefaultOnResponse::new().level(Level::DEBUG)),
 		)
 		.layer(axum::middleware::from_fn_with_state(Arc::clone(services), request::handle))
-		.layer(SecureClientIpSource::ConnectInfo.into_extension())
+		.layer(ip_source_layer(server.config.ip_source))
 		.layer(ResponseBodyTimeoutLayer::new(Duration::from_secs(
 			server.config.client_response_timeout,
 		)))
@@ -213,6 +213,27 @@ fn body_limit_layer(server: &Server) -> DefaultBodyLimit {
 	DefaultBodyLimit::max(server.config.max_request_size)
 }
 
+fn configured_ip_source(source: IpSource) -> SecureClientIpSource {
+	match source {
+		| IpSource::ConnectInfo => SecureClientIpSource::ConnectInfo,
+		| IpSource::RightmostXForwardedFor => SecureClientIpSource::RightmostXForwardedFor,
+		| IpSource::RightmostForwarded => SecureClientIpSource::RightmostForwarded,
+		| IpSource::XRealIp => SecureClientIpSource::XRealIp,
+		| IpSource::CfConnectingIp => SecureClientIpSource::CfConnectingIp,
+		| IpSource::TrueClientIp => SecureClientIpSource::TrueClientIp,
+		| IpSource::FlyClientIp => SecureClientIpSource::FlyClientIp,
+		| IpSource::CloudFrontViewerAddress => SecureClientIpSource::CloudFrontViewerAddress,
+	}
+}
+
+fn ip_source_layer(
+	source: Option<IpSource>,
+) -> tower::util::Either<axum::Extension<ConfiguredIpSource>, tower::layer::util::Identity> {
+	tower::util::option_layer(
+		source.map(|source| axum::Extension(ConfiguredIpSource(configured_ip_source(source)))),
+	)
+}
+
 #[tracing::instrument(name = "panic", level = "error", skip_all)]
 #[expect(clippy::needless_pass_by_value)]
 fn catch_panic(
@@ -274,4 +295,48 @@ fn truncated_matched_path(path: &MatchedPath) -> &str {
 	path.as_str()
 		.rsplit_once('{')
 		.map_or(path.as_str(), |path| path.0.strip_suffix('/').unwrap_or(path.0))
+}
+
+#[cfg(test)]
+mod tests {
+	use tuwunel_api::client_ip::ConfiguredIpSource;
+	use tuwunel_core::config::IpSource;
+
+	use super::{configured_ip_source, ip_source_layer};
+
+	#[test]
+	fn configured_ip_source_maps_all_variants() {
+		let cases = [
+			(IpSource::ConnectInfo, "ConnectInfo"),
+			(IpSource::RightmostXForwardedFor, "RightmostXForwardedFor"),
+			(IpSource::RightmostForwarded, "RightmostForwarded"),
+			(IpSource::XRealIp, "XRealIp"),
+			(IpSource::CfConnectingIp, "CfConnectingIp"),
+			(IpSource::TrueClientIp, "TrueClientIp"),
+			(IpSource::FlyClientIp, "FlyClientIp"),
+			(IpSource::CloudFrontViewerAddress, "CloudFrontViewerAddress"),
+		];
+
+		for (source, expected) in cases {
+			let ConfiguredIpSource(actual) = ConfiguredIpSource(configured_ip_source(source));
+			assert_eq!(format!("{actual:?}"), expected);
+		}
+	}
+
+	#[test]
+	fn ip_source_layer_none_returns_identity_branch() {
+		let layer = ip_source_layer(None);
+
+		assert!(matches!(layer, tower::util::Either::Right(_)));
+	}
+
+	#[test]
+	fn ip_source_layer_connect_info_returns_extension_branch() {
+		let layer = ip_source_layer(Some(IpSource::ConnectInfo));
+
+		assert!(matches!(
+			layer,
+			tower::util::Either::Left(axum::Extension(ConfiguredIpSource(_)))
+		));
+	}
 }

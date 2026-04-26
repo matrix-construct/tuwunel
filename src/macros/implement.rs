@@ -19,8 +19,8 @@ pub(super) fn implement(item: ItemFn, args: &[Meta]) -> Result<TokenStream> {
 	Ok(out.into())
 }
 
-fn get_receiver(args: &[Meta]) -> Result<Path> {
-	let receiver = &args.first().ok_or_else(|| {
+fn get_receiver(args: &[Meta]) -> Result<&Path> {
+	let receiver = args.first().ok_or_else(|| {
 		Error::new(Span::call_site().into(), "Missing required argument to receiver")
 	})?;
 
@@ -31,5 +31,5 @@ fn get_receiver(args: &[Meta]) -> Result<Path> {
 		));
 	};
 
-	Ok(receiver.clone())
+	Ok(receiver)
 }

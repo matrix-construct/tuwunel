@@ -76,7 +76,15 @@ http:
                     - url: "http://tuwunel:6167"
                 passHostHeader: true
 ```
+
+### Client IP source
+
+If Traefik is the only way clients can reach Tuwunel, set
+`ip_source = "rightmost_x_forwarded_for"` in `tuwunel.toml` so Tuwunel uses the
+trusted `X-Forwarded-For` value.
+
 ### Federation
+
 If you will use a .well-known file you can use traefik to redirect .well-known/matrix to tuwunel built-in .well-known file.
 
 replace the rule in either of the methods from

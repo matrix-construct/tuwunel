@@ -3,7 +3,7 @@ use std::env::consts::OS;
 use either::Either;
 use itertools::Itertools;
 
-use super::{DEPRECATED_KEYS, IdentityProvider};
+use super::{DEPRECATED_KEYS, IdentityProvider, IpSource};
 use crate::{Config, Err, Result, debug, debug_info, error, warn};
 
 /// Performs check() with additional checks specific to reloading old config
@@ -16,6 +16,13 @@ pub fn reload(old: &Config, new: &Config) -> Result {
 			"server_name",
 			"You can't change the server's name from {:?}.",
 			old.server_name
+		));
+	}
+
+	if new.ip_source != old.ip_source {
+		return Err!(Config(
+			"ip_source",
+			"ip_source cannot be changed at runtime; restart the server to apply this change."
 		));
 	}
 
@@ -59,6 +66,16 @@ pub fn check(config: &Config) -> Result {
 	let key_set = config.tls.key.is_some();
 	if certs_set ^ key_set {
 		return Err!(Config("tls", "tls.certs and tls.key must either both be set or unset"));
+	}
+
+	if let Some(source) = config.ip_source
+		&& !matches!(source, IpSource::ConnectInfo)
+	{
+		warn!(
+			"ip_source is set to {source:?}, a header-based source. Ensure a trusted reverse \
+			 proxy populates this header for every request; otherwise clients can spoof their \
+			 IP address."
+		);
 	}
 
 	if !config.listening {

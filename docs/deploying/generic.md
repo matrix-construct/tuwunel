@@ -166,6 +166,26 @@ Regardless of which reverse proxy you choose, you will need to:
    - Port 443 (HTTPS) for client-server API
    - Port 8448 for federation (if federating with other homeservers)
 
+### Client IP source
+
+Set `ip_source` when you want Tuwunel to use a spoofing-resistant client IP
+source for rate limiting, logging, and security tooling. Leave it unset to keep
+the legacy fallback behavior.
+
+Use `ip_source = "connect_info"` only when Tuwunel accepts direct TCP
+connections and should use the TCP peer address. Do not use `connect_info` for
+Unix-socket deployments; leave `ip_source` unset there.
+
+If Tuwunel is behind a trusted reverse proxy, set `ip_source` to match the
+header that proxy controls. Caddy, Nginx, and Traefik usually use
+`ip_source = "rightmost_x_forwarded_for"`. Cloudflare and cloudflared
+deployments can use `ip_source = "cf_connecting_ip"` when Cloudflare supplies
+that header.
+
+Only use header-based values when clients cannot connect to Tuwunel directly.
+If clients can reach Tuwunel without going through the trusted proxy, they can
+send forged forwarding headers and choose the IP address Tuwunel sees.
+
 See the following spec pages for more details on well-known files:
 - [`/.well-known/matrix/server`](https://spec.matrix.org/latest/client-server-api/#getwell-knownmatrixserver)
 - [`/.well-known/matrix/client`](https://spec.matrix.org/latest/client-server-api/#getwell-knownmatrixclient)
