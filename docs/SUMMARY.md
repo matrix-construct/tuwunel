@@ -25,6 +25,7 @@
   - [Enterprise JWT](authentication/jwt.md)
   - [Identity Providers](authentication/providers.md)
     - [Authelia](authentication/providers/authelia.md)
+    - [Authentik](authentication/providers/authentik.md)
     - [Keycloak](authentication/providers/keycloak.md)
 - [Multimedia and Storage](media.md)
   - [Storage Providers](media/storage.md)
