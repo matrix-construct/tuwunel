@@ -6,7 +6,6 @@ use std::{
 };
 
 use axum::extract::State;
-use axum_client_ip::InsecureClientIp;
 use futures::{FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt};
 use ruma::{
 	CanonicalJsonObject, OwnedEventId, OwnedRoomId, OwnedUserId, RoomId, ServerName,
@@ -47,7 +46,7 @@ use tuwunel_service::{
 	sending::{EDU_LIMIT, PDU_LIMIT},
 };
 
-use crate::Ruma;
+use crate::{Ruma, client_ip::ClientIp};
 
 type ResolvedMap = BTreeMap<OwnedEventId, Result>;
 type RoomsPdus = SmallVec<[RoomPdus; 1]>;
@@ -70,7 +69,7 @@ type Pdu = (OwnedRoomId, OwnedEventId, CanonicalJsonObject);
 )]
 pub(crate) async fn send_transaction_message_route(
 	State(services): State<crate::State>,
-	InsecureClientIp(client): InsecureClientIp,
+	ClientIp(client): ClientIp,
 	body: Ruma<send_transaction_message::v1::Request>,
 ) -> Result<send_transaction_message::v1::Response> {
 	if body.origin() != body.body.origin {

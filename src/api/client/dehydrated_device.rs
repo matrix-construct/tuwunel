@@ -1,5 +1,4 @@
 use axum::extract::State;
-use axum_client_ip::InsecureClientIp;
 use futures::StreamExt;
 use ruma::api::client::dehydrated_device::{
 	delete_dehydrated_device::unstable as delete_dehydrated_device,
@@ -8,7 +7,7 @@ use ruma::api::client::dehydrated_device::{
 };
 use tuwunel_core::{Err, Result, at, utils::result::IsErrOr};
 
-use crate::Ruma;
+use crate::{Ruma, client_ip::ClientIp};
 
 const MAX_BATCH_EVENTS: usize = 50;
 
@@ -18,7 +17,7 @@ const MAX_BATCH_EVENTS: usize = 50;
 #[tracing::instrument(skip_all, fields(%client))]
 pub(crate) async fn put_dehydrated_device_route(
 	State(services): State<crate::State>,
-	InsecureClientIp(client): InsecureClientIp,
+	ClientIp(client): ClientIp,
 	body: Ruma<put_dehydrated_device::Request>,
 ) -> Result<put_dehydrated_device::Response> {
 	let sender_user = body
@@ -42,7 +41,7 @@ pub(crate) async fn put_dehydrated_device_route(
 #[tracing::instrument(skip_all, fields(%client))]
 pub(crate) async fn delete_dehydrated_device_route(
 	State(services): State<crate::State>,
-	InsecureClientIp(client): InsecureClientIp,
+	ClientIp(client): ClientIp,
 	body: Ruma<delete_dehydrated_device::Request>,
 ) -> Result<delete_dehydrated_device::Response> {
 	let sender_user = body.sender_user();
@@ -66,7 +65,7 @@ pub(crate) async fn delete_dehydrated_device_route(
 #[tracing::instrument(skip_all, fields(%client))]
 pub(crate) async fn get_dehydrated_device_route(
 	State(services): State<crate::State>,
-	InsecureClientIp(client): InsecureClientIp,
+	ClientIp(client): ClientIp,
 	body: Ruma<get_dehydrated_device::Request>,
 ) -> Result<get_dehydrated_device::Response> {
 	let sender_user = body.sender_user();
@@ -88,7 +87,7 @@ pub(crate) async fn get_dehydrated_device_route(
 #[tracing::instrument(skip_all, fields(%client))]
 pub(crate) async fn get_dehydrated_events_route(
 	State(services): State<crate::State>,
-	InsecureClientIp(client): InsecureClientIp,
+	ClientIp(client): ClientIp,
 	body: Ruma<get_events::Request>,
 ) -> Result<get_events::Response> {
 	let sender_user = body.sender_user();

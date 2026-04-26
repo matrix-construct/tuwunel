@@ -1,7 +1,6 @@
 use std::fmt::Write;
 
 use axum::extract::State;
-use axum_client_ip::InsecureClientIp;
 use ruma::{
 	UserId,
 	api::client::{
@@ -16,7 +15,7 @@ use tuwunel_core::{Err, Error, Result, debug_info, debug_warn, info, utils};
 use tuwunel_service::users::{Register, device::generate_refresh_token};
 
 use super::SESSION_ID_LENGTH;
-use crate::Ruma;
+use crate::{Ruma, client_ip::ClientIp};
 
 const RANDOM_USER_ID_LENGTH: usize = 10;
 
@@ -34,7 +33,7 @@ const RANDOM_USER_ID_LENGTH: usize = 10;
 #[tracing::instrument(skip_all, fields(%client), name = "register_available")]
 pub(crate) async fn get_register_available_route(
 	State(services): State<crate::State>,
-	InsecureClientIp(client): InsecureClientIp,
+	ClientIp(client): ClientIp,
 	body: Ruma<get_username_availability::v3::Request>,
 ) -> Result<get_username_availability::v3::Response> {
 	// workaround for https://github.com/matrix-org/matrix-appservice-irc/issues/1780 due to inactivity of fixing the issue
@@ -131,7 +130,7 @@ pub(crate) async fn get_register_available_route(
 #[tracing::instrument(skip_all, fields(%client), name = "register")]
 pub(crate) async fn register_route(
 	State(services): State<crate::State>,
-	InsecureClientIp(client): InsecureClientIp,
+	ClientIp(client): ClientIp,
 	body: Ruma<register::v3::Request>,
 ) -> Result<register::v3::Response> {
 	let is_guest = body.kind == RegistrationKind::Guest;
