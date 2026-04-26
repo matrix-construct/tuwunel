@@ -9,7 +9,5 @@ before asking for support.
 
 - [tuwunel](https://aur.archlinux.org/packages/tuwunel) - latest tagged
 tuwunel
-- [tuwunel-git](https://aur.archlinux.org/packages/tuwunel-git) - latest git
-tuwunel from `main` branch
 - [tuwunel-bin](https://aur.archlinux.org/packages/tuwunel-bin) - latest
 tagged tuwunel static binary
