@@ -34,7 +34,7 @@ pub(crate) use self::{
 	token::login_token_route,
 };
 use super::TOKEN_LENGTH;
-use crate::{Ruma, client_ip::ClientIp};
+use crate::{ClientIp, Ruma};
 
 /// # `GET /_matrix/client/v3/login`
 ///

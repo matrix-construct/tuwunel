@@ -8,7 +8,7 @@ use ruma::{
 };
 use tuwunel_core::{Err, Result, debug, err, utils::string::to_small_string};
 
-use crate::{Ruma, client_ip::ClientIp, router::auth_uiaa};
+use crate::{ClientIp, Ruma, router::auth_uiaa};
 
 /// # `GET /_matrix/client/r0/devices`
 ///

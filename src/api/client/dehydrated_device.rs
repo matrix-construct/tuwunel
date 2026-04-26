@@ -7,7 +7,7 @@ use ruma::api::client::dehydrated_device::{
 };
 use tuwunel_core::{Err, Result, at, utils::result::IsErrOr};
 
-use crate::{Ruma, client_ip::ClientIp};
+use crate::{ClientIp, Ruma};
 
 const MAX_BATCH_EVENTS: usize = 50;
 

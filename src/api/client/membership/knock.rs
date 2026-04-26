@@ -3,7 +3,7 @@ use ruma::api::client::knock::knock_room;
 use tuwunel_core::Result;
 
 use super::banned_room_check;
-use crate::{Ruma, client_ip::ClientIp};
+use crate::{ClientIp, Ruma};
 
 /// # `POST /_matrix/client/*/knock/{roomIdOrAlias}`
 ///

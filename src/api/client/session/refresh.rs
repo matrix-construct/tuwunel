@@ -3,7 +3,7 @@ use ruma::api::client::session::refresh_token::v3::{Request, Response};
 use tuwunel_core::{Err, Result, debug_info, err};
 use tuwunel_service::users::device::generate_refresh_token;
 
-use crate::{Ruma, client_ip::ClientIp};
+use crate::{ClientIp, Ruma};
 
 /// # `POST /_matrix/client/v3/refresh`
 ///

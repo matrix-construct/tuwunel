@@ -1,5 +1,6 @@
 mod args;
 mod auth;
+mod client_ip;
 mod handler;
 mod request;
 mod response;
@@ -17,7 +18,8 @@ use tuwunel_core::{Server, err};
 
 use self::handler::RouterExt;
 pub(super) use self::{
-	args::Args as Ruma, auth::auth_uiaa, response::RumaResponse, state::State,
+	args::Args as Ruma, auth::auth_uiaa, client_ip::ClientIp, response::RumaResponse,
+	state::State,
 };
 use crate::{client, oidc, server};
 

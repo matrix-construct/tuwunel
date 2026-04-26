@@ -44,7 +44,7 @@ use url::Url;
 
 pub(crate) use self::uiaa::sso_fallback_route;
 use super::TOKEN_LENGTH;
-use crate::{Ruma, client_ip::ClientIp};
+use crate::{ClientIp, Ruma};
 
 /// Grant phase query string.
 #[derive(Debug, Serialize)]

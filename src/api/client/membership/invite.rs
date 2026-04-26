@@ -4,7 +4,7 @@ use ruma::{api::client::membership::invite_user, events::room::member::Membershi
 use tuwunel_core::{Err, Result};
 
 use super::banned_room_check;
-use crate::{Ruma, client::utils::invite_check, client_ip::ClientIp};
+use crate::{ClientIp, Ruma, client::utils::invite_check};
 
 /// # `POST /_matrix/client/r0/rooms/{roomId}/invite`
 ///

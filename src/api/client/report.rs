@@ -7,7 +7,7 @@ use ruma::{
 use tuwunel_core::{Err, Result, debug_info, info, matrix::pdu::PduEvent, utils::ReadyExt};
 use tuwunel_service::Services;
 
-use crate::{Ruma, client_ip::ClientIp};
+use crate::{ClientIp, Ruma};
 
 const REASON_MAX_LEN: usize = 750;
 

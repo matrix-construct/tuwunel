@@ -5,7 +5,7 @@ use ruma::{
 };
 use tuwunel_core::{Err, Result, err};
 
-use crate::{Ruma, client_ip::ClientIp};
+use crate::{ClientIp, Ruma};
 
 /// # `POST /_matrix/federation/v1/publicRooms`
 ///

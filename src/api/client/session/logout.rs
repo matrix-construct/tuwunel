@@ -3,7 +3,7 @@ use futures::StreamExt;
 use ruma::api::client::session::{logout, logout_all};
 use tuwunel_core::Result;
 
-use crate::{Ruma, client_ip::ClientIp};
+use crate::{ClientIp, Ruma};
 
 /// # `POST /_matrix/client/v3/logout`
 ///

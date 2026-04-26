@@ -18,25 +18,19 @@
 
 use std::{fmt, marker::Sync, net::IpAddr};
 
-use axum::{
-	extract::FromRequestParts,
-	http::{StatusCode, request::Parts},
-};
+use axum::extract::FromRequestParts;
 use axum_client_ip::{InsecureClientIp, SecureClientIp, SecureClientIpSource};
+use http::{StatusCode, request::Parts};
+
+/// Tuwunel client-IP extractor. See module docs.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ClientIp(pub(crate) IpAddr);
 
 /// Marker wrapper around [`SecureClientIpSource`] placed into request
 /// extensions only when an operator has explicitly configured
 /// `ip_source`.
 #[derive(Clone, Debug)]
-pub struct ConfiguredIpSource(pub SecureClientIpSource);
-
-/// Tuwunel client-IP extractor. See module docs.
-#[derive(Clone, Copy, Debug)]
-pub struct ClientIp(pub IpAddr);
-
-impl fmt::Display for ClientIp {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { fmt::Display::fmt(&self.0, f) }
-}
+struct ConfiguredIpSource(SecureClientIpSource);
 
 impl<S> FromRequestParts<S> for ClientIp
 where
@@ -45,20 +39,21 @@ where
 	type Rejection = (StatusCode, &'static str);
 
 	async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+		const ERROR: StatusCode = StatusCode::INTERNAL_SERVER_ERROR;
+
 		if let Some(ConfiguredIpSource(source)) = parts.extensions.get::<ConfiguredIpSource>() {
 			SecureClientIp::from(source, &parts.headers, &parts.extensions)
 				.map(|SecureClientIp(ip)| Self(ip))
-				.map_err(|_| {
-					(
-						StatusCode::INTERNAL_SERVER_ERROR,
-						"Can't extract client IP from configured ip_source",
-					)
-				})
+				.map_err(|_| (ERROR, "Can't extract client IP from configured ip_source"))
 		} else {
 			InsecureClientIp::from(&parts.headers, &parts.extensions)
 				.map(|InsecureClientIp(ip)| Self(ip))
 		}
 	}
+}
+
+impl fmt::Display for ClientIp {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { fmt::Display::fmt(&self.0, f) }
 }
 
 #[cfg(test)]

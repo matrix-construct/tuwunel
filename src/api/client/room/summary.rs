@@ -15,7 +15,7 @@ use tuwunel_core::{
 };
 use tuwunel_service::Services;
 
-use crate::{Ruma, RumaResponse, client_ip::ClientIp};
+use crate::{ClientIp, Ruma, RumaResponse};
 
 /// # `GET /_matrix/client/unstable/im.nheko.summary/rooms/{roomIdOrAlias}/summary`
 ///

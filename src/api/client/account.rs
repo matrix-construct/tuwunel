@@ -6,7 +6,7 @@ use ruma::api::client::account::{
 };
 use tuwunel_core::{Err, Result, err, info, utils::ReadyExt};
 
-use crate::{Ruma, client_ip::ClientIp, router::auth_uiaa};
+use crate::{ClientIp, Ruma, router::auth_uiaa};
 
 /// # `POST /_matrix/client/r0/account/password`
 ///

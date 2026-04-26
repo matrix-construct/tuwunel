@@ -22,7 +22,7 @@ use tuwunel_core::{
 	utils::hash::sha256,
 };
 
-use crate::{Ruma, client_ip::ClientIp};
+use crate::{ClientIp, Ruma};
 
 /// # `PUT /_matrix/federation/v2/invite/{roomId}/{eventId}`
 ///

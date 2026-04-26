@@ -8,7 +8,7 @@ use ruma::{
 use tuwunel_core::{Result, utils::content_disposition::make_content_disposition};
 use tuwunel_service::media::{Dim, Media};
 
-use crate::{Ruma, client_ip::ClientIp};
+use crate::{ClientIp, Ruma};
 
 /// # `GET /_matrix/federation/v1/media/download/{mediaId}`
 ///

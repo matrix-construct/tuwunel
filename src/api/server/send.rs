@@ -46,7 +46,7 @@ use tuwunel_service::{
 	sending::{EDU_LIMIT, PDU_LIMIT},
 };
 
-use crate::{Ruma, client_ip::ClientIp};
+use crate::{ClientIp, Ruma};
 
 type ResolvedMap = BTreeMap<OwnedEventId, Result>;
 type RoomsPdus = SmallVec<[RoomPdus; 1]>;

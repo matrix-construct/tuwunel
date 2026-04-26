@@ -24,7 +24,7 @@ use tuwunel_service::{
 	media::{CACHE_CONTROL_IMMUTABLE, CORP_CROSS_ORIGIN, Dim, MXC_LENGTH, Media},
 };
 
-use crate::{Ruma, client_ip::ClientIp};
+use crate::{ClientIp, Ruma};
 
 /// # `GET /_matrix/client/v1/media/config`
 pub(crate) async fn get_media_config_route(

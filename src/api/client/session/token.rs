@@ -12,7 +12,7 @@ use tuwunel_core::{Err, Result, utils::random_string};
 use tuwunel_service::Services;
 
 use super::TOKEN_LENGTH;
-use crate::{Ruma, client_ip::ClientIp, router::auth_uiaa};
+use crate::{ClientIp, Ruma, router::auth_uiaa};
 
 pub(super) async fn handle_login(
 	services: &Services,

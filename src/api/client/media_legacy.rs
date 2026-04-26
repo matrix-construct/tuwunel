@@ -15,7 +15,7 @@ use tuwunel_core::{
 };
 use tuwunel_service::media::{CACHE_CONTROL_IMMUTABLE, CORP_CROSS_ORIGIN, Dim, Media};
 
-use crate::{Ruma, client_ip::ClientIp};
+use crate::{ClientIp, Ruma};
 
 /// # `GET /_matrix/media/v3/config`
 ///

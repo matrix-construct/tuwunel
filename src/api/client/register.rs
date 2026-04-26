@@ -15,7 +15,7 @@ use tuwunel_core::{Err, Error, Result, debug_info, debug_warn, info, utils};
 use tuwunel_service::users::{Register, device::generate_refresh_token};
 
 use super::SESSION_ID_LENGTH;
-use crate::{Ruma, client_ip::ClientIp};
+use crate::{ClientIp, Ruma};
 
 const RANDOM_USER_ID_LENGTH: usize = 10;
 
