@@ -36,10 +36,10 @@ The `init` job runs before everything else. It has two responsibilities:
    | Runner | Reserved space | Max space |
    |---|---|---|
    | `het` | 192 GB | 384 GB |
-   | `aws` | 48 GB | 64 GB |
+   | `aws` | 48 GB  | 64 GB  |
    | `gcp` | 160 GB | 192 GB |
 
-2. **Emit 40+ output variables** that all downstream jobs consume as inputs.
+2. **Emit output variables** that all downstream jobs consume as inputs.
    These control which matrix dimensions to test, which phases to enable, and
    metadata like the pages URL and release upload URL.
 

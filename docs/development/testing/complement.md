@@ -74,12 +74,6 @@ docker/bake.sh complement-tester complement-testee && \
 The argument to `complement.sh` becomes the `complement_run` regex, passed to
 Go's test runner via `-run`.
 
-##### Keep a failed run's containers for inspection
-
-```bash
-complement_dirty=1 docker/complement.sh
-```
-
 ##### View logs from the last run
 
 ```bash
