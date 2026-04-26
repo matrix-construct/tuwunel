@@ -1,6 +1,10 @@
 # syntax = docker/dockerfile:1.11-labs
 
-FROM input AS cargo
+# cook: dependency build via cargo-chef, against recipe.json only.
+#
+# Cache invalidation key: recipe.json content. Source-only changes do not
+# invalidate this stage.
+FROM input AS cook
 ARG sys_triple
 ARG rust_target
 ARG rust_toolchain
@@ -9,16 +13,10 @@ ARG RUSTUP_HOME
 ARG CARGO_HOME
 ARG CARGO_TARGET
 ARG CARGO_TARGET_DIR
-ARG cargo_target_profile
-ARG cargo_target_artifact
-ARG cargo_target_share
-ARG cargo_share
 ARG CARGO_TERM_VERBOSE=0
 ARG RUST_BACKTRACE
 ARG JEMALLOC_OVERRIDE
 ARG ROCKSDB_LIB_DIR
-ARG VALGRINDFLAGS=""
-ARG VALGRIND_MAX_WORKERS=128
 ARG RUSTDOCFLAGS
 ARG CARGO_BUILD_RUSTFLAGS
 ARG CARGO_PROFILE_TEST_DEBUG
@@ -31,17 +29,12 @@ ARG CARGO_PROFILE_RELEASE_DEBUGINFO_LTO
 ARG cargo_profile
 ARG cargo_features
 ARG cargo_spec_features
-ARG cargo_cmd
+ARG cargo_cmd="chef cook --all-targets --no-build"
 ARG color_args="--color always"
-ARG recipe_args=""
-ARG cargo_args=""
-ARG git_checkout
-ARG targ_dir="${CARGO_TARGET_DIR}/${cargo_target_profile}"
-ARG targ_targ_dir="${CARGO_TARGET_DIR}/${rust_target}/${cargo_target_profile}"
 
 WORKDIR /
 COPY --link --from=rust ${RUST_HOME} ${RUST_HOME}
-COPY --link --from=deps /usr/src/tuwunel /usr/src/tuwunel
+COPY --link --from=recipe recipe.json /usr/src/tuwunel/recipe.json
 
 WORKDIR /usr/lib/${sys_triple}
 COPY --link --from=rocksdb . .
@@ -53,8 +46,6 @@ ENV CARGO_TERM_VERBOSE="${CARGO_TERM_VERBOSE}"
 ENV RUST_BACKTRACE="${RUST_BACKTRACE}"
 ENV JEMALLOC_OVERRIDE="${JEMALLOC_OVERRIDE}"
 ENV ROCKSDB_LIB_DIR="${ROCKSDB_LIB_DIR}"
-ENV VALGRINDFLAGS="${VALGRINDFLAGS}"
-ENV TUWUNEL_DB_POOL_MAX_WORKERS="${VALGRIND_MAX_WORKERS}"
 ENV RUSTDOCFLAGS="${RUSTDOCFLAGS}"
 ENV CARGO_PROFILE_TEST_DEBUG="${CARGO_PROFILE_TEST_DEBUG}"
 ENV CARGO_PROFILE_TEST_INCREMENTAL="${CARGO_PROFILE_TEST_INCREMENTAL}"
@@ -69,16 +60,56 @@ RUN \
 --mount=type=cache,dst=${RUSTUP_HOME}/downloads,sharing=shared \
 --mount=type=cache,dst=${CARGO_HOME}/registry,sharing=shared \
 --mount=type=cache,dst=${CARGO_HOME}/git,sharing=shared \
---mount=type=cache,dst=${targ_dir}/deps,id=${cargo_share}/deps,sharing=locked \
---mount=type=cache,dst=${targ_dir}/build,id=${cargo_share}/build,sharing=locked \
---mount=type=cache,dst=${targ_dir}/examples,id=${cargo_share}/examples,sharing=locked \
---mount=type=cache,dst=${targ_dir}/incremental,id=${cargo_share}/incremental,sharing=locked \
---mount=type=cache,dst=${targ_dir}/.fingerprint,id=${cargo_share}/fingerprint,sharing=locked \
---mount=type=cache,dst=${targ_targ_dir}/deps,id=${cargo_target_share}/deps,sharing=locked \
---mount=type=cache,dst=${targ_targ_dir}/build,id=${cargo_target_share}/build,sharing=locked \
---mount=type=cache,dst=${targ_targ_dir}/examples,id=${cargo_target_share}/examples,sharing=locked \
---mount=type=cache,dst=${targ_targ_dir}/incremental,id=${cargo_target_share}/incremental,sharing=locked \
---mount=type=cache,dst=${targ_targ_dir}/.fingerprint,id=${cargo_target_share}/fingerprint,sharing=locked \
+<<EOF
+    set -eux
+    ulimit -n 65535
+
+    rustup run "${rust_toolchain}" \
+        cargo ${cargo_cmd} \
+            --verbose \
+            --locked \
+            --workspace \
+            "${cargo_spec_features}" \
+            "--features=${cargo_features}" \
+            "--profile=${cargo_profile}" \
+            "--target=${CARGO_TARGET}" \
+            "--target-dir=${CARGO_TARGET_DIR}" \
+            --recipe-path=recipe.json \
+            ${color_args}
+EOF
+
+
+# cargo: workspace build, reusing cook's compiled dependencies.
+#
+# COPY --from=source merges into /usr/src/tuwunel: real Cargo.toml and
+# src/<member>/src/* overwrite the chef stubs; target/ from cook is
+# preserved (source has no target/ enforced by .dockerignore).
+FROM input AS cargo
+ARG rust_toolchain
+ARG RUSTUP_HOME
+ARG CARGO_HOME
+ARG CARGO_TARGET
+ARG CARGO_TARGET_DIR
+ARG cargo_profile
+ARG cargo_features
+ARG cargo_spec_features
+ARG cargo_cmd="build"
+ARG cargo_args=""
+ARG color_args="--color always"
+ARG VALGRINDFLAGS=""
+ARG VALGRIND_MAX_WORKERS=128
+
+WORKDIR /
+COPY --link --from=source /usr/src/tuwunel /usr/src/tuwunel
+
+WORKDIR /usr/src/tuwunel
+SHELL ["/bin/bash", "-c"]
+ENV VALGRINDFLAGS="${VALGRINDFLAGS}"
+ENV TUWUNEL_DB_POOL_MAX_WORKERS="${VALGRIND_MAX_WORKERS}"
+RUN \
+--mount=type=cache,dst=${RUSTUP_HOME}/downloads,sharing=shared \
+--mount=type=cache,dst=${CARGO_HOME}/registry,sharing=shared \
+--mount=type=cache,dst=${CARGO_HOME}/git,sharing=shared \
 <<EOF
     set -eux
     ulimit -n 65535
@@ -94,15 +125,6 @@ RUN \
             "--target=${CARGO_TARGET}" \
             "--target-dir=${CARGO_TARGET_DIR}" \
             "--manifest-path=Cargo.toml" \
-            ${recipe_args} \
             ${color_args} \
             ${cargo_args}
-
-    # If this image is further reused with other cargo commands, all
-    # modifications made by cargo chef cook outside of target-dir have to be
-    # cleared. If not, resulting build artifacts will link incorrectly, even
-    # without error. For example, a target executable may be produced which
-    # does nothing except exit(0). If you have observed a smoketest failing in
-    # such a manner, investigate this as a cause of the issue.
-    git restore -W -S --source=${git_checkout} .
 EOF

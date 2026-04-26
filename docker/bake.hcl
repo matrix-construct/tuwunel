@@ -133,14 +133,6 @@ variable "cache_compress_level" {
     default = 7
 }
 
-# Use the cargo-chef layering strategy to separate and pre-build dependencies
-# in a lower-layer image; only workspace crates will rebuild unless
-# dependencies themselves change (default). This option can be set to false for
-# bypassing chef, building within a single layer.
-variable "use_chef" {
-    default = "true"
-}
-
 # Options for output verbosity
 variable "BUILDKIT_PROGRESS" {}
 variable "CARGO_TERM_VERBOSE" {
@@ -654,6 +646,7 @@ target "tests-smoke" {
     tags = [
         elem_tag("tests-smoke", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target], "latest"),
     ]
+    target = "smoke-startup"
     output = ["type=cacheonly,compression=zstd,mode=min,compression-level=${cache_compress_level}"]
     dockerfile = "${docker_dir}/Dockerfile.smoketest"
     matrix = cargo_rust_feat_sys
@@ -1081,12 +1074,6 @@ target "docs" {
         elem("deps-build", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target]),
         elem("build", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target]),
     ]
-    contexts = {
-        deps = (use_chef == "true"?
-            elem("target:deps-build", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target]):
-            elem("target:ingredients", [rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target])
-        )
-    }
     args = {
         cargo_cmd = "doc"
         cargo_args = "--no-deps --document-private-items"
@@ -1104,13 +1091,11 @@ target "build-bins" {
     matrix = cargo_rust_feat_sys
     inherits = [
         elem("deps-build-bins", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target]),
-        elem("build", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target]),
+        elem("cargo", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target]),
     ]
     contexts = {
-        deps = (use_chef == "true"?
-            elem("target:deps-build-bins", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target]):
-            elem("target:build", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target])
-        )
+        input = elem("target:deps-build-bins", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target])
+        source = elem("target:source", [sys_name, sys_version, sys_target])
     }
     args = {
         cargo_cmd = "build"
@@ -1126,13 +1111,11 @@ target "build-tests" {
     matrix = cargo_rust_feat_sys
     inherits = [
         elem("deps-build-tests", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target]),
-        elem("build", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target]),
+        elem("cargo", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target]),
     ]
     contexts = {
-        deps = (use_chef == "true"?
-            elem("target:deps-build-tests", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target]):
-            elem("target:build", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target])
-        )
+        input = elem("target:deps-build-tests", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target])
+        source = elem("target:source", [sys_name, sys_version, sys_target])
     }
     args = {
         cargo_cmd = (cargo_profile == "bench"? "bench": "test")
@@ -1151,10 +1134,8 @@ target "build" {
         elem("cargo", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target]),
     ]
     contexts = {
-        deps = (use_chef == "true"?
-            elem("target:deps-build", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target]):
-            elem("target:ingredients", [rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target])
-        )
+        input = elem("target:deps-build", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target])
+        source = elem("target:source", [sys_name, sys_version, sys_target])
     }
     args = {
         cargo_cmd = "build"
@@ -1173,10 +1154,8 @@ target "clippy" {
         elem("cargo", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target]),
     ]
     contexts = {
-        deps = (use_chef == "true"?
-            elem("target:deps-clippy", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target]):
-            elem("target:ingredients", [rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target])
-        )
+        input = elem("target:deps-clippy", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target])
+        source = elem("target:source", [sys_name, sys_version, sys_target])
     }
     args = {
         cargo_cmd = "clippy"
@@ -1195,10 +1174,8 @@ target "check" {
         elem("cargo", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target]),
     ]
     contexts = {
-        deps = (use_chef == "true"?
-            elem("target:deps-check", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target]):
-            elem("target:ingredients", [rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target])
-        )
+        input = elem("target:deps-check", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target])
+        source = elem("target:source", [sys_name, sys_version, sys_target])
     }
     args = {
         cargo_cmd = "check"
@@ -1279,17 +1256,18 @@ target "fmt" {
 
 target "cargo" {
     name = elem("cargo", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target])
+    target = "cargo"
     output = ["type=cacheonly,compression=zstd,mode=min,compression-level=${cache_compress_level}"]
     cache_to = ["type=local,compression=zstd,mode=max,compression-level=${cache_compress_level}"]
     matrix = cargo_rust_feat_sys
     inherits = [
         elem("deps-base", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target])
     ]
-	contexts = {
-        deps = elem("target:deps-base", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target])
-	}
+    contexts = {
+        input = elem("target:deps-base", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target])
+        source = elem("target:source", [sys_name, sys_version, sys_target])
+    }
     args = {
-        recipe_args = ""
         cargo_args = ""
         color_args = "--color=always"
     }
@@ -1388,7 +1366,7 @@ target "deps-base" {
     tags = [
         elem_tag("deps-base", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target], "latest")
     ]
-    target = "cargo"
+    target = "cook"
     output = ["type=cacheonly,compression=zstd,mode=min,compression-level=${cache_compress_level}"]
     cache_to = ["type=local,compression=zstd,mode=max,compression-level=${cache_compress_level}"]
     dockerfile = "${docker_dir}/Dockerfile.cargo"
@@ -1400,23 +1378,16 @@ target "deps-base" {
     ]
     contexts = {
         input = elem("target:kitchen", [feat_set, sys_name, sys_version, sys_target])
-        deps = elem("target:preparing", [rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target])
+        recipe = elem("target:recipe", [rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target])
         rocksdb = elem("target:rocksdb", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target])
     }
     args = {
         cargo_profile = cargo_profile
         cargo_cmd = "chef cook --all-targets --no-build"
-        recipe_args = "--recipe-path=recipe.json"
         color_args = ""
 
         # Base path
         CARGO_TARGET_DIR = "${cargo_tgt_dir_base}"
-        # cache key for unique artifact area
-        cargo_target_artifact = "${cargo_tgt_dir_base}/${sys_name}/${sys_version}/${rust_target}/${rust_toolchain}/${cargo_profile}/${feat_set}/${git_ref_sha}"
-        # cache key for hashed subdirs
-        cargo_share = "${cargo_tgt_dir_base}/${sys_name}/${sys_version}/${rust_toolchain}/${cargo_profile}/_shared_cache"
-        # cache key for hashed subdirs
-        cargo_target_share = "${cargo_tgt_dir_base}/${sys_name}/${sys_version}/${rust_target}/${rust_toolchain}/${cargo_profile}/_shared_cache"
         # cased name of profile subdir within target complex
         cargo_target_profile = (
             (cargo_profile == "dev" || cargo_profile == "test")? "debug":
