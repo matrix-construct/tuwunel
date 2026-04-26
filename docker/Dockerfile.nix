@@ -2,9 +2,6 @@
 
 FROM input AS nix-base
 
-WORKDIR /
-COPY --link --from=input . .
-
 RUN \
 --mount=type=cache,dst=/nix,sharing=shared \
 --mount=type=cache,dst=/root/.cache/nix,sharing=shared \
@@ -39,10 +36,7 @@ RUN \
 EOF
 
 
-FROM input AS smoke-nix
-
-WORKDIR /
-COPY --link --from=nix-base . .
+FROM nix-base AS smoke-nix
 
 WORKDIR /usr/src/tuwunel
 COPY --link --from=source /usr/src/tuwunel .
@@ -69,10 +63,7 @@ RUN \
 EOF
 
 
-FROM input AS nix-pkg
-
-WORKDIR /
-COPY --link --from=nix-base . .
+FROM nix-base AS nix-pkg
 
 WORKDIR /usr/src/tuwunel
 COPY --link --from=source /usr/src/tuwunel .

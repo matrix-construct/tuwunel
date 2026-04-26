@@ -6,9 +6,6 @@ ARG RUSTUP_HOME
 ARG CARGO_HOME
 ARG typos_args=""
 
-WORKDIR /
-COPY --link --from=input . .
-
 WORKDIR /usr/src/tuwunel
 RUN \
 --mount=type=cache,dst=${RUSTUP_HOME}/downloads,sharing=shared \

@@ -10,9 +10,6 @@ ARG lychee_mode="color"
 # in cache directory itself. all paths here should be absolute paths
 ARG lychee_args="/usr/src/tuwunel/docs /usr/src/tuwunel/*.md"
 
-WORKDIR /
-COPY --link --from=input . .
-
 WORKDIR /usr/src/
 RUN \
 --mount=type=cache,dst=${RUSTUP_HOME}/downloads,sharing=shared \

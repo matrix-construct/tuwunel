@@ -1556,9 +1556,6 @@ target "rocksdb" {
     inherits = [
         elem("rocksdb-build", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target])
     ]
-    contexts = {
-        input = elem("target:rocksdb-build", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target])
-    }
 }
 
 target "rocksdb-build" {

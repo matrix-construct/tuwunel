@@ -40,7 +40,6 @@ ARG targ_dir="${CARGO_TARGET_DIR}/${cargo_target_profile}"
 ARG targ_targ_dir="${CARGO_TARGET_DIR}/${rust_target}/${cargo_target_profile}"
 
 WORKDIR /
-COPY --link --from=input . .
 COPY --link --from=rust ${RUST_HOME} ${RUST_HOME}
 COPY --link --from=deps /usr/src/tuwunel /usr/src/tuwunel
 

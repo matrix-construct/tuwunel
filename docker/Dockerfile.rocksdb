@@ -5,9 +5,6 @@ ARG rocksdb_branch="tuwunel-changes"
 ARG rust_rocksdb_branch="conduwuit-changes"
 ARG librocksdb_submodule="librocksdb-sys/rocksdb"
 
-WORKDIR /
-COPY --link --from=input . .
-
 WORKDIR /usr/src
 COPY --link --from=recipe rocksdb.url .
 
@@ -44,7 +41,6 @@ ARG rocksdb_snappy=0
 ARG nprocs
 
 WORKDIR /
-COPY --link --from=input . .
 COPY --link --from=rocksdb-fetch /usr/src/rocksdb /usr/src/rocksdb
 
 WORKDIR /usr/src/rocksdb/librocksdb-sys/rocksdb
@@ -93,4 +89,4 @@ EOF
 
 
 FROM scratch AS rocksdb
-COPY --from=input /usr/src/rocksdb/librocksdb-sys/rocksdb/build/librocksdb.* .
+COPY --from=rocksdb-build /usr/src/rocksdb/librocksdb-sys/rocksdb/build/librocksdb.* .

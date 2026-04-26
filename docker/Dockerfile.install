@@ -7,9 +7,6 @@ ARG cargo_target_profile
 ARG install_prefix
 ARG assert_linkage=""
 
-WORKDIR /
-COPY --link --from=input . .
-
 WORKDIR ${install_prefix}
 ENV src_path="${CARGO_TARGET_DIR}/${rust_target}/${cargo_target_profile}/tuwunel"
 ENV dst_path="${install_prefix}/bin/tuwunel"

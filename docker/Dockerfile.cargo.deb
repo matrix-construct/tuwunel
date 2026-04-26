@@ -19,9 +19,6 @@ ARG targ_targ_dir="${CARGO_TARGET_DIR}/${rust_target}/${cargo_target_profile}"
 ARG pkg_dir
 ARG deb_args=""
 
-WORKDIR /
-COPY --link --from=input . .
-
 WORKDIR /usr/src/tuwunel
 RUN \
 --mount=type=cache,dst=${RUSTUP_HOME}/downloads,sharing=shared \
@@ -69,9 +66,6 @@ COPY --from=input ${pkg_dir}/tuwunel.deb .
 
 FROM input AS deb-install
 ARG pkg_dir
-
-WORKDIR /
-COPY --link --from=input . .
 
 WORKDIR ${pkg_dir}
 COPY --from=deb . .
