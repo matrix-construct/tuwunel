@@ -69,4 +69,21 @@ pub(super) enum RoomCommand {
 		#[arg(short, long)]
 		force: bool,
 	},
+
+	/// - Delete rooms
+	DeleteRooms {
+		#[arg(long)]
+		page: Option<usize>,
+
+		room_index: Vec<usize>,
+
+		#[arg(short, long)]
+		force: bool,
+
+		#[arg(long)]
+		exclude_disabled: bool,
+
+		#[arg(long)]
+		exclude_banned: bool,
+	},
 }

@@ -132,3 +132,52 @@ pub(super) async fn room_prune_empty(&self, force: bool) -> Result {
 
 	Ok(())
 }
+
+#[admin_command]
+pub(super) async fn room_delete_rooms(
+	&self,
+	page: Option<usize>,
+	room_index: Vec<usize>,
+	force: bool,
+	exclude_disabled: bool,
+	exclude_banned: bool,
+) -> Result {
+	let page = page.unwrap_or(1);
+	let mut rooms = self
+		.services
+		.metadata
+		.iter_ids()
+		.filter_map(async |room_id| {
+			(!exclude_disabled || !self.services.metadata.is_disabled(room_id).await)
+				.then_some(room_id)
+		})
+		.filter_map(async |room_id| {
+			(!exclude_banned || !self.services.metadata.is_banned(room_id).await)
+				.then_some(room_id)
+		})
+		.then(|room_id| get_room_info(self.services, room_id))
+		.collect::<Vec<_>>()
+		.await;
+
+	rooms.sort_by_key(|r| r.1);
+	rooms.reverse();
+	let rooms = rooms
+		.into_iter()
+		.skip(page.saturating_sub(1).saturating_mul(PAGE_SIZE))
+		.take(PAGE_SIZE)
+		.collect::<Vec<_>>();
+	// get room_id from room_index
+	let rooms = room_index
+		.iter()
+		.filter_map(|i| {
+			i.checked_sub(1)
+				.and_then(|idx| rooms.get(idx).cloned())
+		})
+		.collect::<Vec<_>>();
+	// call the delete_room function for each room
+	for room in rooms {
+		self.room_delete(room.0, force).await?;
+	}
+
+	Ok(())
+}
