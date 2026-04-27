@@ -1,0 +1,25 @@
+[package]
+name = "tuwunel_snap"
+authors.workspace = true
+categories.workspace = true
+description.workspace = true
+edition.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+license.workspace = true
+readme.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+version.workspace = true
+metadata.crane.workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+clap = { workspace = true }
+inquire = { workspace = true }
+regex = { workspace = true }
+
+[[bin]]
+name = "main"
+path = "main.rs"
+bench = false

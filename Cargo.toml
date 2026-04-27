@@ -2,7 +2,7 @@
 
 [workspace]
 resolver = "2"
-members = ["src/*"]
+members = ["src/*", "snap"]
 default-members = ["src/*"]
 
 [workspace.package]
@@ -38,6 +38,9 @@ name = "tuwunel"
 #
 # Dependencies
 #
+
+[workspace.dependencies.anyhow]
+version = "1.0"
 
 [workspace.dependencies.argon2]
 version = "0.5"
@@ -227,6 +230,9 @@ version = "1.47"
 features = [
 	"json",
 ]
+
+[workspace.dependencies.inquire]
+version = "0.9"
 
 [workspace.dependencies.ipaddress]
 version = "0.1"
@@ -631,6 +637,11 @@ rev = "200e958941d522a70c5877e3d846f55b5586c68d"
 #
 # Our crates
 #
+
+[workspace.dependencies.tuwunel-snap]
+package = "tuwunel_snap"
+path = "src/snap"
+default-features = false
 
 [workspace.dependencies.tuwunel-router]
 package = "tuwunel_router"

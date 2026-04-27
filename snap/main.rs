@@ -226,7 +226,7 @@ fn main() -> Result<()> {
 
 	// Read the build-time generated config example (this embeds the file directly
 	// into the binary at compile time!)
-	let mut config_text = include_str!("../../../tuwunel-example.toml").to_string();
+	let mut config_text = include_str!("../tuwunel-example.toml").to_string();
 
 	config_text =
 		config_text.replace("#server_name =\n", &format!("server_name = \"{}\"\n", server_name));
