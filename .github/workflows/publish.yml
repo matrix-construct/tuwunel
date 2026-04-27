@@ -266,6 +266,7 @@ jobs:
           !failure() && !cancelled()
           && contains(github.ref, 'refs/tags/v')
           && !contains(github.ref, '-draft')
+          && !contains(github.ref, '-pre')
           && !contains(github.ref, '-rc')
 
         env:
@@ -348,6 +349,7 @@ jobs:
           !failure() && !cancelled()
           && contains(github.ref, 'refs/tags/v')
           && !contains(github.ref, '-draft')
+          && !contains(github.ref, '-pre')
           && !contains(github.ref, '-rc')
 
         env:

@@ -218,7 +218,7 @@ jobs:
         tag_name: ${{github.ref}}
         body_path: RELEASE.md
         draft: ${{ contains(github.ref, '-draft') }}
-        prerelease: ${{ contains(github.ref, '-rc') }}
+        prerelease: ${{ contains(github.ref, '-rc') || contains(github.ref, '-pre') }}
 
   lint:
     if: >

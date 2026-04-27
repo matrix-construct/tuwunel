@@ -124,11 +124,11 @@ tagged releases are true releases.
 > [!IMPORTANT]
 > **We strongly advise tracking the `:latest` tag when automatically updating.**
 
-Tracking `:latest` gives us the necessary discretion to keep you on the appropriate stable version.
-We discourage tracking the main branch unless frequent restarts are acceptable. Alternatively,
-tracking the `:preview` tag provides the latest release-candidate becoming equivalent to `:latest`
-after a release. Tracking the `:preview` tag is a worthy alternative to the main branch, with
-turbulence limited to release-time.
+Tracking `:latest` gives us the necessary discretion to keep you on the appropriate stable release
+version. Tracking the `:preview` tag provides select updates of higher confidence between releases.
+Tracking the `:main` branch provides the most frequent updates which have been reviewed and tested
+with confidence for release, the only remaining risk being the unknown. The publication frequency
+for these tags are on average monthly, weekly and daily, respectively.
 
 ### Getting Help & Support
 
