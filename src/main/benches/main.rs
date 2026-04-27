@@ -1,5 +1,4 @@
 #![cfg(test)]
-#![allow(unused_features)] // 1.96.0-nightly 2026-03-07 bug
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use tracing::Level;

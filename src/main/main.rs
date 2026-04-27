@@ -1,5 +1,3 @@
-#![allow(unused_features)] // 1.96.0-nightly 2026-03-07 bug
-
 use std::sync::atomic::Ordering;
 
 use tuwunel::{Server, args, restart, runtime::Runtime};

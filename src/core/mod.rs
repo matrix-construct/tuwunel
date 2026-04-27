@@ -1,5 +1,3 @@
-#![allow(unused_features)] // 1.96.0-nightly 2026-03-07 bug
-
 pub mod alloc;
 pub mod config;
 pub mod debug;
