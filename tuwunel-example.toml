@@ -322,7 +322,8 @@
 #
 #dns_case_randomization = false
 
-# Max request size for file uploads in bytes.
+# Max request size for file uploads. Accepts an integer byte count or a
+# string with SI/IEC suffix such as "24 MiB".
 #
 #max_request_size = 24 MiB
 
@@ -974,8 +975,8 @@
 #
 #rocksdb_log_stderr = false
 
-# Max RocksDB `LOG` file size before rotating in bytes. Defaults to 4MB in
-# bytes.
+# Max RocksDB `LOG` file size before rotating. Accepts an integer byte
+# count or a string with SI/IEC suffix such as "4 MiB".
 #
 #rocksdb_max_log_file_size = 4194304
 
@@ -1620,8 +1621,8 @@
 #
 #url_preview_url_contains_allowlist = []
 
-# Maximum amount of bytes allowed in a URL preview body size when
-# spidering. Defaults to 256KB in bytes.
+# Maximum body size allowed when spidering a URL for previews. Accepts an
+# integer byte count or a string with SI/IEC suffix such as "256 KB".
 #
 #url_preview_max_spider_size = 256000
 
@@ -2225,8 +2226,9 @@
 # Max raw size that the server will blurhash, this is the size of the
 # image after converting it to raw data, it should be higher than the
 # upload limit but not too high. The higher it is the higher the
-# potential load will be for clients requesting blurhashes. The default
-# is 33.55MB. Setting it to 0 disables blurhashing.
+# potential load will be for clients requesting blurhashes. Accepts an
+# integer byte count or a string with SI/IEC suffix such as "32 MiB".
+# Setting it to 0 disables blurhashing.
 #
 #blurhash_max_raw_size = 33554432
 

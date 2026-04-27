@@ -1,6 +1,28 @@
 use bytesize::ByteSize;
+use serde::{Deserialize, Deserializer, de};
 
-use crate::{Result, err};
+use crate::{Result, at, err};
+
+/// Accepts an integer byte count or a string with SI/IEC suffix (e.g. "24 MiB")
+/// and returns a `usize`.
+pub fn deserialize_bytesize_usize<'de, D>(de: D) -> Result<usize, D::Error>
+where
+	D: Deserializer<'de>,
+{
+	ByteSize::deserialize(de)
+		.map(at!(0))
+		.map(usize::try_from)?
+		.map_err(de::Error::custom)
+}
+
+/// Accepts an integer byte count or a string with SI/IEC suffix (e.g. "32 MiB")
+/// and returns a `u64`.
+pub fn deserialize_bytesize_u64<'de, D>(de: D) -> Result<u64, D::Error>
+where
+	D: Deserializer<'de>,
+{
+	ByteSize::deserialize(de).map(at!(0))
+}
 
 /// Parse a human-writable size string w/ si-unit suffix into integer
 #[inline]

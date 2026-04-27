@@ -35,7 +35,11 @@ use self::{
 };
 use crate::{
 	Err, Result, err,
-	utils::{self, sys},
+	utils::{
+		self,
+		bytes::{deserialize_bytesize_u64, deserialize_bytesize_usize},
+		sys,
+	},
 };
 
 /// All the config options for tuwunel.
@@ -418,10 +422,14 @@ pub struct Config {
 	#[serde(default)]
 	pub dns_case_randomization: bool,
 
-	/// Max request size for file uploads in bytes.
+	/// Max request size for file uploads. Accepts an integer byte count or a
+	/// string with SI/IEC suffix such as "24 MiB".
 	///
 	/// default: 24 MiB
-	#[serde(default = "default_max_request_size")]
+	#[serde(
+		default = "default_max_request_size",
+		deserialize_with = "deserialize_bytesize_usize"
+	)]
 	pub max_request_size: usize,
 
 	/// Maximum number of concurrently pending (asynchronous) media uploads a
@@ -1189,11 +1197,14 @@ pub struct Config {
 	#[serde(default)]
 	pub rocksdb_log_stderr: bool,
 
-	/// Max RocksDB `LOG` file size before rotating in bytes. Defaults to 4MB in
-	/// bytes.
+	/// Max RocksDB `LOG` file size before rotating. Accepts an integer byte
+	/// count or a string with SI/IEC suffix such as "4 MiB".
 	///
 	/// default: 4194304
-	#[serde(default = "default_rocksdb_max_log_file_size")]
+	#[serde(
+		default = "default_rocksdb_max_log_file_size",
+		deserialize_with = "deserialize_bytesize_usize"
+	)]
 	pub rocksdb_max_log_file_size: usize,
 
 	/// Time in seconds before RocksDB will forcibly rotate logs.
@@ -1890,11 +1901,14 @@ pub struct Config {
 	#[serde(default)]
 	pub url_preview_url_contains_allowlist: Vec<String>,
 
-	/// Maximum amount of bytes allowed in a URL preview body size when
-	/// spidering. Defaults to 256KB in bytes.
+	/// Maximum body size allowed when spidering a URL for previews. Accepts an
+	/// integer byte count or a string with SI/IEC suffix such as "256 KB".
 	///
 	/// default: 256000
-	#[serde(default = "default_url_preview_max_spider_size")]
+	#[serde(
+		default = "default_url_preview_max_spider_size",
+		deserialize_with = "deserialize_bytesize_usize"
+	)]
 	pub url_preview_max_spider_size: usize,
 
 	/// Option to decide whether you would like to run the domain allowlist
@@ -2616,11 +2630,15 @@ pub struct BlurhashConfig {
 	/// Max raw size that the server will blurhash, this is the size of the
 	/// image after converting it to raw data, it should be higher than the
 	/// upload limit but not too high. The higher it is the higher the
-	/// potential load will be for clients requesting blurhashes. The default
-	/// is 33.55MB. Setting it to 0 disables blurhashing.
+	/// potential load will be for clients requesting blurhashes. Accepts an
+	/// integer byte count or a string with SI/IEC suffix such as "32 MiB".
+	/// Setting it to 0 disables blurhashing.
 	///
 	/// default: 33554432
-	#[serde(default = "default_blurhash_max_raw_size")]
+	#[serde(
+		default = "default_blurhash_max_raw_size",
+		deserialize_with = "deserialize_bytesize_u64"
+	)]
 	pub blurhash_max_raw_size: u64,
 }
 
