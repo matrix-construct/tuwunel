@@ -5,7 +5,9 @@ mod sender;
 use std::{
 	fmt::Debug,
 	hash::{DefaultHasher, Hash, Hasher},
+	io::Write,
 	iter::once,
+	pin::pin,
 	sync::Arc,
 };
 
@@ -16,7 +18,10 @@ use tokio::{task, task::JoinSet};
 use tuwunel_core::{
 	Result, Server, debug, debug_warn, err, error,
 	smallvec::SmallVec,
-	utils::{ReadyExt, TryReadyExt, available_parallelism, math::usize_from_u64_truncated},
+	utils::{
+		IterStream, ReadyExt, TryReadyExt, available_parallelism, future::BoolExt,
+		math::usize_from_u64_truncated, result::LogErr,
+	},
 	warn,
 };
 
@@ -122,6 +127,7 @@ impl Service {
 		let event = SendingEvent::Pdu(*pdu_id);
 		let _cork = self.db.db.cork();
 		let keys = self.db.queue_requests(once((&event, &dest)));
+
 		self.dispatch(Msg {
 			dest,
 			event,
@@ -138,6 +144,7 @@ impl Service {
 		let event = SendingEvent::Pdu(pdu_id);
 		let _cork = self.db.db.cork();
 		let keys = self.db.queue_requests(once((&event, &dest)));
+
 		self.dispatch(Msg {
 			dest,
 			event,
@@ -189,6 +196,7 @@ impl Service {
 		let event = SendingEvent::Edu(serialized);
 		let _cork = self.db.db.cork();
 		let keys = self.db.queue_requests(once((&event, &dest)));
+
 		self.dispatch(Msg {
 			dest,
 			event,
@@ -217,6 +225,7 @@ impl Service {
 		let event = SendingEvent::Edu(serialized);
 		let _cork = self.db.db.cork();
 		let keys = self.db.queue_requests(once((&event, &dest)));
+
 		self.dispatch(Msg {
 			dest,
 			event,
@@ -230,33 +239,58 @@ impl Service {
 	/// Sends an EDU to all appservices interested in a room.
 	/// The `serialized` data must be in `EphemeralData` format, not federation
 	/// `Edu`.
-	#[tracing::instrument(skip(self, room_id, serialized), level = "debug")]
-	pub async fn send_edu_appservice_room(&self, room_id: &RoomId, serialized: EduBuf) -> Result {
-		for appservice in self.services.appservice.read().await.values() {
-			if !appservice.registration.receive_ephemeral {
-				continue;
-			}
+	#[tracing::instrument(skip(self, serializer), level = "debug")]
+	pub async fn send_edu_room_appservices<'a, F>(
+		&self,
+		room_id: &RoomId,
+		serializer: F,
+	) -> Result
+	where
+		F: Fn(&mut dyn Write) -> Result + Send + 'a,
+		&'a F: Send + Sync,
+	{
+		self.services
+			.appservice
+			.read()
+			.await
+			.values()
+			.stream()
+			.filter(|&appservice| async {
+				if !appservice.registration.receive_ephemeral {
+					return false;
+				}
 
-			let matching_aliases = self
-				.services
-				.alias
-				.local_aliases_for_room(room_id)
-				.ready_any(|room_alias| appservice.aliases.is_match(room_alias.as_str()))
-				.await;
+				if appservice.rooms.is_match(room_id.as_str()) {
+					return true;
+				}
 
-			if appservice.rooms.is_match(room_id.as_str())
-				|| matching_aliases
-				|| self
+				let appservice_in_room = self
 					.services
 					.state_cache
-					.appservice_in_room(room_id, appservice)
-					.await
-			{
-				self.send_edu_appservice(appservice.registration.id.clone(), serialized.clone())?;
-			}
-		}
+					.appservice_in_room(room_id, appservice);
 
-		Ok(())
+				let matching_aliases = self
+					.services
+					.alias
+					.local_aliases_for_room(room_id)
+					.ready_any(|room_alias| appservice.aliases.is_match(room_alias.as_str()));
+
+				pin!(appservice_in_room)
+					.or(pin!(matching_aliases))
+					.await
+			})
+			.map(Ok)
+			.ready_try_for_each(|appservice| {
+				let mut buf = EduBuf::new();
+
+				serializer(&mut buf)?;
+				self.send_edu_appservice(appservice.registration.id.clone(), buf)
+					.log_err()
+					.ok();
+
+				Ok(())
+			})
+			.await
 	}
 
 	#[tracing::instrument(skip(self, servers, serialized), level = "debug")]

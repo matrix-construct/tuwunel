@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, sync::Arc};
 
-use futures::StreamExt;
+use futures::{FutureExt, StreamExt, TryStreamExt, future::try_join};
 use ruma::{
 	OwnedRoomId, OwnedUserId, RoomId, UserId,
 	api::{
@@ -12,7 +12,7 @@ use ruma::{
 use tokio::sync::{RwLock, broadcast};
 use tuwunel_core::{
 	Result, Server, debug_info, trace,
-	utils::{self, IterStream},
+	utils::{self, BoolExt, IterStream},
 };
 
 use crate::sending::EduBuf;
@@ -56,10 +56,13 @@ impl Service {
 			.insert(user_id.to_owned(), timeout);
 
 		let count = self.services.globals.next_count();
+
 		self.last_typing_update
 			.write()
 			.await
 			.insert(room_id.to_owned(), *count);
+
+		drop(count);
 
 		if self
 			.typing_update_sender
@@ -70,15 +73,19 @@ impl Service {
 		}
 
 		// update appservices
-		self.appservice_send(room_id).await?;
+		let appservice_send = self.appservice_send(room_id);
 
 		// update federation
-		if self.services.globals.user_is_local(user_id) {
-			self.federation_send(room_id, user_id, true)
-				.await?;
-		}
+		let federation_send = self
+			.services
+			.globals
+			.user_is_local(user_id)
+			.then_async(|| self.federation_send(room_id, user_id, true))
+			.map(Option::transpose);
 
-		Ok(())
+		try_join(appservice_send, federation_send)
+			.await
+			.map(|_| ())
 	}
 
 	/// Removes a user from typing before the timeout is reached.
@@ -94,10 +101,13 @@ impl Service {
 			.remove(user_id);
 
 		let count = self.services.globals.next_count();
+
 		self.last_typing_update
 			.write()
 			.await
 			.insert(room_id.to_owned(), *count);
+
+		drop(count);
 
 		if self
 			.typing_update_sender
@@ -108,15 +118,19 @@ impl Service {
 		}
 
 		// update appservices
-		self.appservice_send(room_id).await?;
+		let appservice_send = self.appservice_send(room_id);
 
 		// update federation
-		if self.services.globals.user_is_local(user_id) {
-			self.federation_send(room_id, user_id, false)
-				.await?;
-		}
+		let federation_send = self
+			.services
+			.globals
+			.user_is_local(user_id)
+			.then_async(|| self.federation_send(room_id, user_id, false))
+			.map(Option::transpose);
 
-		Ok(())
+		try_join(appservice_send, federation_send)
+			.await
+			.map(|_| ())
 	}
 
 	pub async fn wait_for_update(&self, room_id: &RoomId) {
@@ -133,67 +147,76 @@ impl Service {
 		let current_timestamp = utils::millis_since_unix_epoch();
 		let mut removable = Vec::new();
 
-		{
-			let typing = self.typing.read().await;
-			let Some(room) = typing.get(room_id) else {
-				return Ok(());
-			};
-
-			for (user, timeout) in room {
-				if *timeout < current_timestamp {
-					removable.push(user.clone());
-				}
-			}
+		let typing = self.typing.read().await;
+		let Some(room) = typing.get(room_id) else {
+			return Ok(());
 		};
 
-		if !removable.is_empty() {
-			let typing = &mut self.typing.write().await;
-			let room = typing.entry(room_id.to_owned()).or_default();
-
-			for user in &removable {
-				debug_info!("typing timeout {user:?} in {room_id:?}");
-				room.remove(user);
-			}
-
-			// update clients
-			let count = self.services.globals.next_count();
-			self.last_typing_update
-				.write()
-				.await
-				.insert(room_id.to_owned(), *count);
-
-			if self
-				.typing_update_sender
-				.send(room_id.to_owned())
-				.is_err()
-			{
-				trace!("receiver found what it was looking for and is no longer interested");
-			}
-
-			// update appservices
-			self.appservice_send(room_id).await?;
-
-			// update federation
-			for user in &removable {
-				if self.services.globals.user_is_local(user) {
-					self.federation_send(room_id, user, false).await?;
-				}
+		for (user, timeout) in room {
+			if *timeout < current_timestamp {
+				removable.push(user.clone());
 			}
 		}
 
-		Ok(())
+		drop(typing);
+
+		if removable.is_empty() {
+			return Ok(());
+		}
+
+		let mut typing = self.typing.write().await;
+		let room = typing.entry(room_id.to_owned()).or_default();
+		for user in &removable {
+			debug_info!("typing timeout {user:?} in {room_id:?}");
+			room.remove(user);
+		}
+
+		drop(typing);
+
+		// update clients
+		let count = self.services.globals.next_count();
+		self.last_typing_update
+			.write()
+			.await
+			.insert(room_id.to_owned(), *count);
+
+		drop(count);
+
+		if self
+			.typing_update_sender
+			.send(room_id.to_owned())
+			.is_err()
+		{
+			trace!("receiver found what it was looking for and is no longer interested");
+		}
+
+		// update appservices
+		let appservice_send = self.appservice_send(room_id);
+
+		// update federation
+		let federation_sends = removable
+			.iter()
+			.filter(|user_id| self.services.globals.user_is_local(user_id))
+			.try_stream()
+			.try_for_each(|user_id| self.federation_send(room_id, user_id, false));
+
+		try_join(appservice_send, federation_sends)
+			.boxed()
+			.await
+			.map(|_| ())
 	}
 
 	/// Returns the count of the last typing update in this room.
 	pub async fn last_typing_update(&self, room_id: &RoomId) -> Result<u64> {
 		self.typings_maintain(room_id).await?;
-		Ok(self
-			.last_typing_update
+
+		self.last_typing_update
 			.read()
 			.await
 			.get(room_id)
 			.copied()
-			.unwrap_or(0))
+			.map(Ok)
+			.unwrap_or(Ok(0))
 	}
 
 	/// Returns the typing content with all typing users in the room.
@@ -212,18 +235,18 @@ impl Service {
 	/// Sends a typing EDU to all appservices interested in the room.
 	async fn appservice_send(&self, room_id: &RoomId) -> Result {
 		let content = self.typings_content(room_id).await;
-		let edu =
-			EphemeralData::Typing(EphemeralRoomEvent { content, room_id: room_id.to_owned() });
-
-		let mut buf = EduBuf::new();
-		serde_json::to_writer(&mut buf, &edu).expect("Serialized EphemeralData::Typing");
 
 		self.services
 			.sending
-			.send_edu_appservice_room(room_id, buf)
-			.await?;
+			.send_edu_room_appservices(room_id, |buf| {
+				let edu = EphemeralData::Typing(EphemeralRoomEvent {
+					room_id: room_id.to_owned(),
+					content: content.clone(),
+				});
 
-		Ok(())
+				Ok(serde_json::to_writer(buf, &edu)?)
+			})
+			.await
 	}
 
 	/// Returns a new typing EDU.

@@ -18,11 +18,10 @@ use tuwunel_core::{
 		Event,
 		pdu::{PduCount, PduId, RawPduId},
 	},
-	warn,
+	trace, warn,
 };
 
 use self::data::{Data, ReceiptItem};
-use crate::sending::EduBuf;
 
 pub struct Service {
 	services: Arc<crate::services::OnceServices>,
@@ -49,23 +48,26 @@ impl Service {
 		room_id: &RoomId,
 		event: &ReceiptEvent,
 	) {
+		// update local
 		self.db
 			.readreceipt_update(user_id, room_id, event)
 			.await;
 
 		// update appservices
-		let edu = EphemeralData::Receipt(ReceiptEvent {
-			content: event.content.clone(),
-			room_id: room_id.to_owned(),
-		});
-		let mut buf = EduBuf::new();
-		serde_json::to_writer(&mut buf, &edu).expect("Serialized EphemeralData::Receipt");
-		let _: Result = self
-			.services
+		self.services
 			.sending
-			.send_edu_appservice_room(room_id, buf)
-			.await;
+			.send_edu_room_appservices(room_id, |buf| {
+				let edu = EphemeralData::Receipt(ReceiptEvent {
+					content: event.content.clone(),
+					room_id: room_id.to_owned(),
+				});
 
+				Ok(serde_json::to_writer(buf, &edu)?)
+			})
+			.await
+			.expect("edu serialization or flush failed");
+
+		// update federation
 		if self.services.globals.user_is_local(user_id) {
 			self.services
 				.sending
@@ -220,7 +222,8 @@ where
 	}
 
 	let content = ReceiptEventContent::from_iter(json);
-	tuwunel_core::trace!(?content);
+
+	trace!(?content);
 	Raw::from_json(
 		serde_json::value::to_raw_value(&SyncEphemeralRoomEvent { content })
 			.expect("received valid json"),
