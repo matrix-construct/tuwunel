@@ -1,5 +1,6 @@
 pub mod check;
 mod identity_provider_serde;
+pub mod ip_source;
 pub mod manager;
 mod net;
 pub mod proxy;
@@ -27,7 +28,7 @@ use serde::{Deserialize, de::IgnoredAny};
 use tuwunel_macros::config_example_generator;
 use url::Url;
 
-pub use self::{check::check, manager::Manager};
+pub use self::{check::check, ip_source::IpSource, manager::Manager};
 use self::{
 	net::{ListeningAddr, ListeningPort},
 	proxy::ProxyConfig,
@@ -3334,31 +3335,6 @@ impl From<AppServiceNamespace> for ruma::api::appservice::Namespace {
 			regex: conf.regex,
 		}
 	}
-}
-
-/// Selects the source used to determine the connecting client's IP
-/// address. Variants correspond 1:1 to `axum_client_ip::SecureClientIpSource`.
-#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub enum IpSource {
-	/// TCP peer address. Safe default; no proxy required.
-	#[default]
-	ConnectInfo,
-	/// Rightmost value of `X-Forwarded-For`.
-	RightmostXForwardedFor,
-	/// Rightmost value of RFC 7239 `Forwarded`.
-	RightmostForwarded,
-	/// `X-Real-IP` header (nginx).
-	XRealIp,
-	/// `CF-Connecting-IP` (Cloudflare / cloudflared).
-	CfConnectingIp,
-	/// `True-Client-IP` (Akamai, Cloudflare Enterprise).
-	TrueClientIp,
-	/// `Fly-Client-IP` (Fly.io).
-	FlyClientIp,
-	/// `CloudFront-Viewer-Address` (AWS CloudFront).
-	#[serde(rename = "cloudfront_viewer_address")]
-	CloudFrontViewerAddress,
 }
 
 const DEPRECATED_KEYS: &[&str; 9] = &[
