@@ -6,7 +6,8 @@ use ruma::{
 	api::client::{read_marker::set_read_marker, receipt::create_receipt},
 	events::{
 		RoomAccountDataEventType,
-		receipt::{ReceiptThread, ReceiptType},
+		fully_read::{FullyReadEvent, FullyReadEventContent},
+		receipt::{Receipt, ReceiptEvent, ReceiptEventContent, ReceiptThread, ReceiptType},
 	},
 	presence::PresenceState,
 };
@@ -35,8 +36,8 @@ pub(crate) async fn set_read_marker_route(
 	}
 
 	if let Some(event) = &body.fully_read {
-		let fully_read_event = ruma::events::fully_read::FullyReadEvent {
-			content: ruma::events::fully_read::FullyReadEventContent { event_id: event.clone() },
+		let fully_read_event = FullyReadEvent {
+			content: FullyReadEventContent { event_id: event.clone() },
 		};
 
 		services
@@ -74,7 +75,7 @@ pub(crate) async fn set_read_marker_route(
 			event.to_owned(),
 			BTreeMap::from_iter([(
 				ReceiptType::Read,
-				BTreeMap::from_iter([(sender_user.to_owned(), ruma::events::receipt::Receipt {
+				BTreeMap::from_iter([(sender_user.to_owned(), Receipt {
 					ts: Some(MilliSecondsSinceUnixEpoch::now()),
 					thread: ReceiptThread::Unthreaded,
 				})]),
@@ -83,14 +84,10 @@ pub(crate) async fn set_read_marker_route(
 
 		services
 			.read_receipt
-			.readreceipt_update(
-				sender_user,
-				&body.room_id,
-				&ruma::events::receipt::ReceiptEvent {
-					content: ruma::events::receipt::ReceiptEventContent(receipt_content),
-					room_id: body.room_id.clone(),
-				},
-			)
+			.readreceipt_update(sender_user, &body.room_id, &ReceiptEvent {
+				content: ReceiptEventContent(receipt_content),
+				room_id: body.room_id.clone(),
+			})
 			.await;
 
 		services
@@ -129,10 +126,8 @@ pub(crate) async fn create_receipt_route(
 
 	match body.receipt_type {
 		| create_receipt::v3::ReceiptType::FullyRead => {
-			let fully_read_event = ruma::events::fully_read::FullyReadEvent {
-				content: ruma::events::fully_read::FullyReadEventContent {
-					event_id: body.event_id.clone(),
-				},
+			let fully_read_event = FullyReadEvent {
+				content: FullyReadEventContent { event_id: body.event_id.clone() },
 			};
 			services
 				.account_data
@@ -149,26 +144,19 @@ pub(crate) async fn create_receipt_route(
 				body.event_id.clone(),
 				BTreeMap::from_iter([(
 					ReceiptType::Read,
-					BTreeMap::from_iter([(
-						sender_user.to_owned(),
-						ruma::events::receipt::Receipt {
-							ts: Some(MilliSecondsSinceUnixEpoch::now()),
-							thread: ReceiptThread::Unthreaded,
-						},
-					)]),
+					BTreeMap::from_iter([(sender_user.to_owned(), Receipt {
+						ts: Some(MilliSecondsSinceUnixEpoch::now()),
+						thread: ReceiptThread::Unthreaded,
+					})]),
 				)]),
 			)]);
 
 			services
 				.read_receipt
-				.readreceipt_update(
-					sender_user,
-					&body.room_id,
-					&ruma::events::receipt::ReceiptEvent {
-						content: ruma::events::receipt::ReceiptEventContent(receipt_content),
-						room_id: body.room_id.clone(),
-					},
-				)
+				.readreceipt_update(sender_user, &body.room_id, &ReceiptEvent {
+					content: ReceiptEventContent(receipt_content),
+					room_id: body.room_id.clone(),
+				})
 				.await;
 
 			services
