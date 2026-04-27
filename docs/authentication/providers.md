@@ -313,14 +313,14 @@ These admin room commands help manage OAuth state:
 
 | Command | Description |
 |---|---|
-| `!admin query oauth list-providers` | List all configured providers and their IDs. |
+| `!admin query oauth list-providers` | List all configured providers and their `provider_id`. |
 | `!admin query oauth list-users` | List all users with an active OAuth session. |
 | `!admin query oauth list-sessions [--user @user:example.com]` | List session IDs, optionally filtered by user. |
 | `!admin query oauth show-provider <id>` | Show the active configuration for a provider. |
 | `!admin query oauth show-user @user:example.com` | Show OAuth sessions for a user. |
 | `!admin query oauth associate <provider_id> @user:example.com --claim key=value` | Associate an existing Matrix account with future OAuth claims from a provider. Useful for onboarding existing users to SSO. |
-| `!admin query oauth revoke <session_id\|@user>` | Revoke tokens for a session or all sessions of a user. |
-| `!admin query oauth delete <session_id\|@user>` | Remove OAuth state entirely (destructive). |
+| `!admin query oauth revoke <session_id\|@user:example.com>` | Revoke tokens for a session or all sessions of a user. |
+| `!admin query oauth delete <session_id\|@user:example.com>` | Remove OAuth state entirely (destructive). |
 
 ## Protocol flow reference
 
