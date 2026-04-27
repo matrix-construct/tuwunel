@@ -4,7 +4,7 @@
 //! aggregation and timer logic in one place so the public `Service` surface
 //! remains small and the update flow is easy to review.
 
-use std::time::Duration;
+use std::{net::IpAddr, time::Duration};
 
 use futures::TryFutureExt;
 use ruma::{
@@ -213,6 +213,7 @@ impl Service {
 		&self,
 		user_id: &UserId,
 		device_id: Option<&DeviceId>,
+		client_ip: Option<IpAddr>,
 		new_state: &PresenceState,
 	) -> Result {
 		const REFRESH_TIMEOUT: u64 = 30 * 1000;
@@ -224,7 +225,7 @@ impl Service {
 		let update_device_seen = device_id.map_async(|device_id| {
 			self.services
 				.users
-				.update_device_last_seen(user_id, device_id, None)
+				.update_device_last_seen(user_id, device_id, client_ip, None)
 		});
 
 		let currently_active = *new_state == PresenceState::Online;

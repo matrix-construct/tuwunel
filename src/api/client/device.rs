@@ -101,7 +101,7 @@ pub(crate) async fn update_device_route(
 					(Some(&appservice.registration.as_token), None),
 					None,
 					None,
-					Some(client.to_string()),
+					Some(client),
 				)
 				.await?;
 

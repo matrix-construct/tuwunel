@@ -8,10 +8,11 @@ use ruma::{
 		RoomAccountDataEventType,
 		receipt::{ReceiptThread, ReceiptType},
 	},
+	presence::PresenceState,
 };
 use tuwunel_core::{Err, PduCount, Result, err};
 
-use crate::Ruma;
+use crate::{ClientIp, Ruma};
 
 /// # `POST /_matrix/client/r0/rooms/{roomId}/read_markers`
 ///
@@ -22,6 +23,7 @@ use crate::Ruma;
 ///   EDU
 pub(crate) async fn set_read_marker_route(
 	State(services): State<crate::State>,
+	ClientIp(client): ClientIp,
 	body: Ruma<set_read_marker::v3::Request>,
 ) -> Result<set_read_marker::v3::Response> {
 	let sender_user = body.sender_user();
@@ -96,7 +98,8 @@ pub(crate) async fn set_read_marker_route(
 			.maybe_ping_presence(
 				sender_user,
 				body.sender_device.as_deref(),
-				&ruma::presence::PresenceState::Online,
+				Some(client),
+				&PresenceState::Online,
 			)
 			.await
 			.ok();
@@ -110,6 +113,7 @@ pub(crate) async fn set_read_marker_route(
 /// Sets private read marker and public read receipt EDU.
 pub(crate) async fn create_receipt_route(
 	State(services): State<crate::State>,
+	ClientIp(client): ClientIp,
 	body: Ruma<create_receipt::v3::Request>,
 ) -> Result<create_receipt::v3::Response> {
 	let sender_user = body.sender_user();
@@ -172,7 +176,8 @@ pub(crate) async fn create_receipt_route(
 				.maybe_ping_presence(
 					sender_user,
 					body.sender_device.as_deref(),
-					&ruma::presence::PresenceState::Online,
+					Some(client),
+					&PresenceState::Online,
 				)
 				.await
 				.ok();

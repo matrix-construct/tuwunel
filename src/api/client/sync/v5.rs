@@ -34,7 +34,7 @@ use tuwunel_service::{
 };
 
 use super::share_encrypted_room;
-use crate::Ruma;
+use crate::{ClientIp, Ruma};
 
 #[derive(Copy, Clone)]
 struct SyncInfo<'a> {
@@ -79,6 +79,7 @@ type ListIds = SmallVec<[ListId; 1]>;
 )]
 pub(crate) async fn sync_events_v5_route(
 	Extension(interrupted): Extension<Arc<Notify>>,
+	ClientIp(client): ClientIp,
 	State(ref services): State<crate::State>,
 	body: Ruma<Request>,
 ) -> Result<Response> {
@@ -109,7 +110,7 @@ pub(crate) async fn sync_events_v5_route(
 	let conn = conn_val.lock();
 	let ping_presence = services
 		.presence
-		.maybe_ping_presence(sender_user, sender_device, &request.set_presence)
+		.maybe_ping_presence(sender_user, sender_device, Some(client), &request.set_presence)
 		.inspect_err(inspect_log)
 		.ok();
 

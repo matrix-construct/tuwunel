@@ -68,7 +68,7 @@ use tuwunel_service::{
 };
 
 use super::{load_timeline, share_encrypted_room};
-use crate::{Ruma, client::ignored_filter};
+use crate::{ClientIp, Ruma, client::ignored_filter};
 
 #[derive(Default)]
 struct StateChanges {
@@ -126,6 +126,7 @@ type PresenceUpdates = HashMap<OwnedUserId, PresenceEventContent>;
 )]
 pub(crate) async fn sync_events_route(
 	State(services): State<crate::State>,
+	ClientIp(client): ClientIp,
 	body: Ruma<sync_events::v3::Request>,
 ) -> Result<sync_events::v3::Response> {
 	let sender_user = body.sender_user();
@@ -149,7 +150,12 @@ pub(crate) async fn sync_events_route(
 	let set_presence = &body.body.set_presence;
 	let ping_presence = services
 		.presence
-		.maybe_ping_presence(sender_user, body.sender_device.as_deref(), set_presence)
+		.maybe_ping_presence(
+			sender_user,
+			body.sender_device.as_deref(),
+			Some(client),
+			set_presence,
+		)
 		.inspect_err(inspect_log)
 		.ok();
 

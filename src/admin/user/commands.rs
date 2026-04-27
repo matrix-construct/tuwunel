@@ -857,12 +857,16 @@ pub(super) async fn last_active(&self, limit: Option<usize>) -> Result {
 			self.services
 				.users
 				.all_devices_metadata(&user_id)
-				.ready_filter_map(|device| device.last_seen_ts)
+				.ready_filter_map(|device| {
+					device
+						.last_seen_ts
+						.map(|ts| (ts, device.last_seen_ip))
+				})
 				.ready_fold_default(cmp::max)
-				.map(|last_seen_ts| (last_seen_ts, user_id.clone()))
+				.map(|(last_seen_ts, last_seen_ip)| (last_seen_ts, last_seen_ip, user_id.clone()))
 				.await
 		})
-		.ready_filter(|(ts, _)| ts.get() > uint!(0))
+		.ready_filter(|(ts, ..)| ts.get() > uint!(0))
 		.collect::<Vec<_>>()
 		.map(|mut vec| {
 			vec.sort_by_key(|k| cmp::Reverse(k.0));
@@ -872,12 +876,13 @@ pub(super) async fn last_active(&self, limit: Option<usize>) -> Result {
 		.map(IterStream::try_stream)
 		.flatten_stream()
 		.take(limit.unwrap_or(48))
-		.try_for_each(async |(last_seen_ts, user_id)| {
+		.try_for_each(async |(last_seen_ts, last_seen_ip, user_id)| {
 			let ago = last_seen_ts;
 			let user_id = user_id.localpart();
-			let line = format!("{ago:?} {user_id}\n");
+			let ip = last_seen_ip.as_deref().unwrap_or_default();
 
-			self.write_str(&line).await
+			self.write_string(format!("{ago:?} {ip:<40} {user_id}\n"))
+				.await
 		})
 		.boxed()
 		.await

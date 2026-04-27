@@ -17,7 +17,7 @@ use ruma::{
 };
 use tuwunel_core::{Err, Result, utils::future::TryExtExt};
 
-use crate::Ruma;
+use crate::{ClientIp, Ruma};
 
 /// # `PUT /_matrix/client/r0/profile/{userId}/displayname`
 ///
@@ -26,6 +26,7 @@ use crate::Ruma;
 /// - Also makes sure other users receive the update using presence EDUs
 pub(crate) async fn set_displayname_route(
 	State(services): State<crate::State>,
+	ClientIp(client): ClientIp,
 	body: Ruma<set_display_name::v3::Request>,
 ) -> Result<set_display_name::v3::Response> {
 	let sender_user = body.sender_user();
@@ -49,7 +50,12 @@ pub(crate) async fn set_displayname_route(
 	// Presence update
 	services
 		.presence
-		.maybe_ping_presence(&body.user_id, body.sender_device.as_deref(), &PresenceState::Online)
+		.maybe_ping_presence(
+			&body.user_id,
+			body.sender_device.as_deref(),
+			Some(client),
+			&PresenceState::Online,
+		)
 		.await?;
 
 	Ok(set_display_name::v3::Response {})
@@ -121,6 +127,7 @@ pub(crate) async fn get_displayname_route(
 /// - Also makes sure other users receive the update using presence EDUs
 pub(crate) async fn set_avatar_url_route(
 	State(services): State<crate::State>,
+	ClientIp(client): ClientIp,
 	body: Ruma<set_avatar_url::v3::Request>,
 ) -> Result<set_avatar_url::v3::Response> {
 	let sender_user = body.sender_user();
@@ -149,7 +156,12 @@ pub(crate) async fn set_avatar_url_route(
 	// Presence update
 	services
 		.presence
-		.maybe_ping_presence(&body.user_id, body.sender_device.as_deref(), &PresenceState::Online)
+		.maybe_ping_presence(
+			&body.user_id,
+			body.sender_device.as_deref(),
+			Some(client),
+			&PresenceState::Online,
+		)
 		.await
 		.ok();
 

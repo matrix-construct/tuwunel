@@ -57,7 +57,12 @@ impl crate::Service for Service {
 		self.unset_all_presence().await;
 		self.device_presence.clear().await;
 		_ = self
-			.maybe_ping_presence(&self.services.globals.server_user, None, &PresenceState::Online)
+			.maybe_ping_presence(
+				&self.services.globals.server_user,
+				None,
+				None,
+				&PresenceState::Online,
+			)
 			.await;
 
 		let receiver = self.timer_channel.1.clone();
@@ -106,6 +111,7 @@ impl crate::Service for Service {
 		_ = self
 			.maybe_ping_presence(
 				&self.services.globals.server_user,
+				None,
 				None,
 				&PresenceState::Offline,
 			)

@@ -371,7 +371,7 @@ pub(crate) async fn register_route(
 			(Some(&access_token), expires_in),
 			refresh_token.as_deref(),
 			body.initial_device_display_name.as_deref(),
-			Some(client.to_string()),
+			Some(client),
 		)
 		.await?;
 

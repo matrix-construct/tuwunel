@@ -1,4 +1,5 @@
 use std::{
+	net::IpAddr,
 	sync::Arc,
 	time::{Duration, SystemTime},
 };
@@ -14,6 +15,7 @@ use tuwunel_core::{
 	utils::{
 		self, ReadyExt,
 		stream::{IterStream, TryIgnore},
+		string::to_small_string,
 		time::{
 			duration_since_epoch, timepoint_from_epoch, timepoint_from_now, timepoint_has_passed,
 		},
@@ -37,7 +39,7 @@ pub async fn create_device(
 	(access_token, expires_in): (Option<&str>, Option<Duration>),
 	refresh_token: Option<&str>,
 	initial_device_display_name: Option<&str>,
-	client_ip: Option<String>,
+	client_ip: Option<IpAddr>,
 ) -> Result<OwnedDeviceId> {
 	let device_id = device_id
 		.map(ToOwned::to_owned)
@@ -53,8 +55,8 @@ pub async fn create_device(
 	self.put_device_metadata(user_id, notify, &Device {
 		device_id: device_id.clone(),
 		display_name: initial_device_display_name.map(Into::into),
-		last_seen_ip: client_ip.map(Into::into),
 		last_seen_ts: Some(MilliSecondsSinceUnixEpoch::now()),
+		last_seen_ip: client_ip.map(to_small_string),
 	});
 
 	if let Some(access_token) = access_token {
@@ -377,15 +379,20 @@ pub async fn update_device_last_seen(
 	&self,
 	user_id: &UserId,
 	device_id: &DeviceId,
-	last_seen: Option<MilliSecondsSinceUnixEpoch>,
+	last_seen_ip: Option<IpAddr>,
+	last_seen_ts: Option<MilliSecondsSinceUnixEpoch>,
 ) -> Result {
 	let mut device = self
 		.get_device_metadata(user_id, device_id)
 		.await?;
 
+	if let Some(last_seen_ip) = last_seen_ip.map(to_small_string) {
+		device.last_seen_ip.replace(last_seen_ip);
+	}
+
 	device
 		.last_seen_ts
-		.replace(last_seen.unwrap_or_else(MilliSecondsSinceUnixEpoch::now));
+		.replace(last_seen_ts.unwrap_or_else(MilliSecondsSinceUnixEpoch::now));
 
 	self.put_device_metadata(user_id, false, &device);
 
