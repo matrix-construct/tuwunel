@@ -177,15 +177,18 @@ async fn fetch_auth_chain(
 			continue;
 		};
 
-		self.cancel_back_off(&next_id);
 		if calculated_event_id != next_id {
 			warn!(
-				"Server didn't return event id we requested: requested: {next_id}, we got \
+				"Server returned wrong event id: requested {next_id}, got \
 				 {calculated_event_id}. Event: {:?}",
 				&res.pdu
 			);
+
+			self.back_off(&next_id);
+			continue;
 		}
 
+		self.cancel_back_off(&next_id);
 		value
 			.get("auth_events")
 			.and_then(CanonicalJsonValue::as_array)
