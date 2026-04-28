@@ -11,11 +11,30 @@ use ruma::{
 		get_backup_keys_for_room, get_backup_keys_for_session, get_latest_backup_info,
 		update_backup_version,
 	},
+	serde::Raw,
 };
+use serde::Deserialize;
+use serde_json::value::RawValue as RawJsonValue;
 use tuwunel_core::{Err, Result, err};
 use tuwunel_service::Services;
 
 use crate::Ruma;
+
+/// Overrides ruma's internal `AlgorithmWithData` shape required by the GET
+/// `/room_keys/version[/{version}]` response serializer. Validating against
+/// this will not raise a serialization error (HTTP 500) when responding.
+#[derive(Deserialize)]
+#[expect(unused)]
+struct AlgorithmShape {
+	algorithm: Box<RawJsonValue>,
+	auth_data: Box<RawJsonValue>,
+}
+
+fn validate_algorithm_shape<T>(raw: &Raw<T>) -> Result {
+	raw.deserialize_as_unchecked::<AlgorithmShape>()
+		.map_err(Into::into)
+		.map(drop)
+}
 
 /// # `POST /_matrix/client/r0/room_keys/version`
 ///
@@ -24,6 +43,9 @@ pub(crate) async fn create_backup_version_route(
 	State(services): State<crate::State>,
 	body: Ruma<create_backup_version::v3::Request>,
 ) -> Result<create_backup_version::v3::Response> {
+	validate_algorithm_shape(&body.algorithm)
+		.map_err(|e| err!(Request(BadJson("Invalid backup metadata: {e}"))))?;
+
 	let version = services
 		.key_backups
 		.create_backup(body.sender_user(), &body.algorithm)?;
@@ -39,6 +61,9 @@ pub(crate) async fn update_backup_version_route(
 	State(services): State<crate::State>,
 	body: Ruma<update_backup_version::v3::Request>,
 ) -> Result<update_backup_version::v3::Response> {
+	validate_algorithm_shape(&body.algorithm)
+		.map_err(|e| err!(Request(BadJson("Invalid backup metadata: {e}"))))?;
+
 	services
 		.key_backups
 		.update_backup(body.sender_user(), &body.version, &body.algorithm)
@@ -60,6 +85,9 @@ pub(crate) async fn get_latest_backup_info_route(
 		.await
 		.map_err(|_| err!(Request(NotFound("Key backup does not exist."))))?;
 
+	validate_algorithm_shape(&algorithm)
+		.map_err(|e| err!(Request(NotFound("Key backup does not exist: {e}"))))?;
+
 	let (count, etag) = get_count_etag(&services, body.sender_user(), &version).await?;
 
 	Ok(get_latest_backup_info::v3::Response { algorithm, count, etag, version })
@@ -79,6 +107,13 @@ pub(crate) async fn get_backup_info_route(
 		.map_err(|_| {
 			err!(Request(NotFound("Key backup does not exist at version {:?}", body.version)))
 		})?;
+
+	validate_algorithm_shape(&algorithm).map_err(|e| {
+		err!(Request(NotFound(
+			"Key backup does not exist at version {:?}: {e}",
+			body.version
+		)))
+	})?;
 
 	let (count, etag) = get_count_etag(&services, body.sender_user(), &body.version).await?;
 
