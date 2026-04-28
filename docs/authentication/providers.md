@@ -210,21 +210,39 @@ For this to work, the `sub` value the provider returns for each user must
 match that user's Matrix localpart exactly. If your provider allows you to
 set `sub` to an arbitrary value, aligning it with the Matrix localpart is
 the cleanest path. If it does not — for example, if `sub` is an opaque UUID
-— you can either use a different claim (such as `preferred_username`) as the
-match key, or link accounts individually using the admin command:
+— you can use a different claim (such as `preferred_username`) as the match
+key, or pre-register the link with the admin command described below.
+
+**Only ever set `trusted = true` for identity providers you self-host and
+fully control.** In trusted mode, anyone who can present a matching provider
+identity gains access to the corresponding Matrix account. Public providers
+such as GitHub and Google must never be trusted.
+
+#### Admin-approved association for untrusted providers
+
+When the provider is not trusted — a public service such as GitHub or Google
+where `trusted = true` would be unsafe — you can still link an existing
+Matrix account to a specific provider identity by having an admin pre-approve
+the connection before the user's next login.
+
+The admin command registers a set of claims to watch for from that provider.
+When the user next authenticates, Tuwunel checks the claims returned by the
+provider against any pending approvals. If every claim in the approval matches
+what the provider returns, the accounts are linked and the approval is
+consumed.
 
 ```
 !admin query oauth associate <provider_id> @alice:example.com \
   --claim sub=550e8400-e29b-41d4-a716-446655440000
 ```
 
-This records a permanent association between that provider identity and the
-given Matrix account without requiring the claim values to match.
+Specify whichever claims uniquely identify the user on that provider. `sub`
+is the most reliable because every OIDC provider guarantees it is stable and
+unique per user.
 
-**Only ever set `trusted = true` for identity providers you self-host and
-fully control.** In trusted mode, anyone who can present a matching provider
-identity gains access to the corresponding Matrix account. Public providers
-such as GitHub and Google must never be trusted.
+**Pending approvals are held in memory, not the database.** The affected user
+must complete their login before the server is restarted, or the command must
+be run again.
 
 ### How Tuwunel derives Matrix user IDs from claims
 
