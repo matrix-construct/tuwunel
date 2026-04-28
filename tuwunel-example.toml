@@ -2117,6 +2117,14 @@
 #
 #force_migration = false
 
+# Set this to true for excluding unencrypted rooms from the common-rooms
+# calculation deciding the receivers of device list updates.
+#
+# Setting this to true can help performance on very large homeservers,
+# but it may not be spec compliant and risky for client expectations.
+#
+#device_key_update_encrypted_rooms_only = false
+
 
 
 #[global.tls]

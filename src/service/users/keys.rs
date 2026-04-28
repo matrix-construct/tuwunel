@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, mem};
 
-use futures::{Stream, StreamExt, TryFutureExt, pin_mut};
+use futures::{FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt, pin_mut};
 use ruma::{
 	DeviceId, KeyId, OneTimeKeyAlgorithm, OneTimeKeyId, OneTimeKeyName, OwnedKeyId, RoomId, UInt,
 	UserId,
@@ -382,21 +382,32 @@ fn keys_changed_user_or_room<'a>(
 
 #[implement(super::Service)]
 pub async fn mark_device_key_update(&self, user_id: &UserId) {
-	let count = self.services.globals.next_count();
+	let update_all_rooms = !self
+		.services
+		.config
+		.device_key_update_encrypted_rooms_only;
 
+	let all_or_is_encrypted = async |room_id: &RoomId| {
+		update_all_rooms
+			|| self
+				.services
+				.state_accessor
+				.is_encrypted_room(room_id)
+				.await
+	};
+
+	let count = self.services.globals.next_count();
+	let key = (user_id, *count);
+
+	self.db.keychangeid_userid.put_raw(key, user_id);
 	self.services
 		.state_cache
 		.rooms_joined(user_id)
-		// Don't send key updates to unencrypted rooms
-		.filter(|room_id| self.services.state_accessor.is_encrypted_room(room_id))
+		.filter(|room_id| all_or_is_encrypted(*room_id))
 		.ready_for_each(|room_id| {
-			let key = (room_id, *count);
 			self.db.keychangeid_userid.put_raw(key, user_id);
 		})
 		.await;
-
-	let key = (user_id, *count);
-	self.db.keychangeid_userid.put_raw(key, user_id);
 }
 
 #[implement(super::Service)]

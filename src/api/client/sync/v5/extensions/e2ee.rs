@@ -155,7 +155,11 @@ async fn collect_room(
 	let (encrypted_room, since_encryption, sender_joined_count) =
 		join3(encrypted_room, since_encryption, sender_joined_count).await;
 
-	if !encrypted_room {
+	if !encrypted_room
+		&& services
+			.config
+			.device_key_update_encrypted_rooms_only
+	{
 		return Ok(lists);
 	}
 

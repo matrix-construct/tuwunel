@@ -2486,6 +2486,14 @@ pub struct Config {
 	#[serde(default)]
 	pub force_migration: bool,
 
+	/// Set this to true for excluding unencrypted rooms from the common-rooms
+	/// calculation deciding the receivers of device list updates.
+	///
+	/// Setting this to true can help performance on very large homeservers,
+	/// but it may not be spec compliant and risky for client expectations.
+	#[serde(default)]
+	pub device_key_update_encrypted_rooms_only: bool,
+
 	// external structure; separate section
 	#[serde(default)]
 	pub blurhashing: BlurhashConfig,
