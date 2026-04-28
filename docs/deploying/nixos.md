@@ -1,5 +1,3 @@
-_This file may be out of date. Please help us update it_
-
 # Tuwunel for NixOS
 
 Tuwunel can be acquired by Nix from various places:
@@ -10,100 +8,65 @@ Tuwunel can be acquired by Nix from various places:
 
 A community maintained NixOS package is available at [`tuwunel`](https://search.nixos.org/packages?channel=unstable&show=tuwunel&from=0&size=50&sort=relevance&type=packages&query=tuwunel)
 
-### Binary cache
-
-A binary cache for Tuwunel that the CI/CD publishes to is available at the
-following places (both are the same just different names):
-
-```
-https://attic.kennel.juneis.dog/conduit
-conduit:eEKoUwlQGDdYmAI/Q/0slVlegqh/QmAvQd7HBSm21Wk=
-
-https://attic.kennel.juneis.dog/conduwuit
-conduwuit:BbycGUgTISsltcmH0qNjFR9dbrQNYgdIAcmViSGoVTE=
-```
-
-The binary caches were recreated some months ago due to attic issues. The old public
-keys were:
-
-```
-conduit:Isq8FGyEC6FOXH6nD+BOeAA+bKp6X6UIbupSlGEPuOg=
-conduwuit:lYPVh7o1hLu1idH4Xt2QHaRa49WRGSAqzcfFd94aOTw=
-```
-
-If needed, we have a binary cache on Cachix but it is only limited to 5GB:
-
-```
-https://conduwuit.cachix.org
-conduwuit.cachix.org-1:MFRm6jcnfTf0jSAbmvLfhO3KBMt4px+1xaereWXp8Xg=
-```
-
-If specifying a Git remote URL in your flake, you can use any remotes that
-are specified on the README (the mirrors), such as the GitHub: `github:matrix-construct/tuwunel`
-
 ### NixOS module
 
-The `flake.nix` and `default.nix` do not currently provide a NixOS module (contributions
-welcome!), so [`services.matrix-conduit`][module] from Nixpkgs can be used to configure
-Tuwunel.
+A NixOS module ships with Nixpkgs as [`services.matrix-tuwunel`][tuwunel-module],
+available in 25.11 and unstable. It generates `tuwunel.toml` from a `settings` attrset
+and runs the server under a hardened systemd unit (`DynamicUser`, `ProtectSystem=strict`,
+strict `SystemCallFilter`).
 
-### Conduit NixOS Config Module and SQLite
-
-Beware! The [`services.matrix-conduit`][module] module defaults to SQLite as a database backend.
-Conduwuit dropped SQLite support in favor of exclusively supporting the much faster RocksDB.
-Make sure that you are using the RocksDB backend before migrating!
-
-There is a [tool to  migrate a Conduit SQLite database to
-RocksDB](https://github.com/ShadowJonathan/conduit_toolbox/).
-
-If you want to run the latest code, you should get Tuwunel from the `flake.nix`
-or `default.nix` and set [`services.matrix-conduit.package`][package]
-appropriately to use Tuwunel instead of Conduit.
-
-### UNIX sockets
-
-Due to the lack of a Tuwunel NixOS module, when using the `services.matrix-conduit` module
-a workaround like the one below is necessary to use UNIX sockets. This is because the UNIX
-socket option does not exist in Conduit, and the module forcibly sets the `address` and 
-`port` config options.
+Minimal configuration:
 
 ```nix
-options.services.matrix-conduit.settings = lib.mkOption {
-  apply = old: old // (
-    if (old.global ? "unix_socket_path")
-    then { global = builtins.removeAttrs old.global [ "address" "port" ]; }
-    else {  }
-  );
-};
-
-```
-
-Additionally, the [`matrix-conduit` systemd unit][systemd-unit] in the module does not allow
-the `AF_UNIX` socket address family in their systemd unit's `RestrictAddressFamilies=` which
-disallows the namespace from accessing or creating UNIX sockets and has to be enabled like so:
-
-```nix
-systemd.services.conduit.serviceConfig.RestrictAddressFamilies = [ "AF_UNIX" ];
-```
-
-Even though those workarounds are feasible a Tuwunel NixOS configuration module, developed and
-published by the community, would be appreciated.
-
-### jemalloc and hardened profile
-
-Tuwunel uses jemalloc by default. This may interfere with the [`hardened.nix` profile][hardened.nix]
-due to them using `scudo` by default. You must either disable/hide `scudo` from Tuwunel, or
-disable jemalloc like so:
-
-```nix
-let
-    tuwunel = pkgs.unstable.tuwunel.override {
-      enableJemalloc = false;
+{
+  services.matrix-tuwunel = {
+    enable = true;
+    settings.global = {
+      server_name = "example.com";
+      address = [ "127.0.0.1" "::1" ];
+      port = [ 6167 ];
+      allow_federation = true;
     };
-in
+  };
+}
 ```
 
-[module]: https://search.nixos.org/options?channel=unstable&query=services.matrix-conduit
-[package]: https://search.nixos.org/options?channel=unstable&query=services.matrix-conduit.package
-[hardened.nix]: https://github.com/NixOS/nixpkgs/blob/master/nixos/modules/profiles/hardened.nix#L22
-[systemd-unit]: https://github.com/NixOS/nixpkgs/blob/master/nixos/modules/services/matrix/conduit.nix#L132
+Notable defaults:
+
+* User and group `tuwunel` (override via `services.matrix-tuwunel.user` / `.group`).
+* Database under `/var/lib/tuwunel/` (override via `services.matrix-tuwunel.stateDirectory`).
+* Listens on `127.0.0.1` and `::1` port `6167`.
+
+Anything placed under `settings.global` is written verbatim into the `[global]` table of
+`tuwunel.toml`, so the [configuration reference](../configuration.md) applies directly.
+
+#### UNIX sockets
+
+The module exposes `unix_socket_path` and `unix_socket_perms` directly:
+
+```nix
+services.matrix-tuwunel.settings.global = {
+  unix_socket_path = "/run/tuwunel/tuwunel.sock";
+  unix_socket_perms = 660;
+};
+```
+
+Leave `address` unset (or `null`) when using a socket. The systemd unit already permits
+`AF_UNIX`, so no further overrides are needed.
+
+#### Migrating from `services.matrix-conduit`
+
+`services.matrix-tuwunel` replaces the legacy [`services.matrix-conduit`][conduit-module]
+module that older guides reference. Most settings carry over because both render the
+same TOML schema. When migrating:
+
+* Disable `services.matrix-conduit` and enable `services.matrix-tuwunel`.
+* Confirm the database is RocksDB. Tuwunel dropped SQLite in favor of RocksDB; if you
+  ran a SQLite Conduit, migrate first with
+  [conduit_toolbox](https://github.com/ShadowJonathan/conduit_toolbox/).
+* Either set `services.matrix-tuwunel.stateDirectory` to match your existing
+  `database_path`, or move the database under `/var/lib/tuwunel/`.
+
+
+[tuwunel-module]: https://search.nixos.org/options?channel=unstable&query=services.matrix-tuwunel
+[conduit-module]: https://search.nixos.org/options?channel=unstable&query=services.matrix-conduit
