@@ -187,7 +187,6 @@ dynamic_libs = [
 nightly_rustflags = [
     "--cfg tokio_unstable",
     "--allow=unstable-features",
-    "-Z crate-attr=feature(test)",
     "-Z enforce-type-length-limit",
     #"-Z time-passes",
     #"-Z time-llvm-passes",
