@@ -22,13 +22,13 @@ use crate::{Result, checked, is_equal_to};
 /// value, but that value has no Pdu found because its write has not been
 /// completed with global visibility. Client-sync will then move on to the next
 /// counter value having missed the data from the current one.
-pub struct Counter<F: Fn(u64) -> Result + Sync> {
+pub struct Counter<F: Fn(u64) -> Result + Send + Sync> {
 	/// Self is intended to be `Arc<Counter>` with inner state mutable via Lock.
 	inner: RwLock<State<F>>,
 }
 
 /// Inner protected state for Two-Phase Counter.
-pub struct State<F: Fn(u64) -> Result + Sync> {
+pub struct State<F: Fn(u64) -> Result + Send + Sync> {
 	/// Monotonic counter. The next sequence number is drawn by adding one to
 	/// this value. That number will be persisted and added to `pending`.
 	dispatched: u64,
@@ -48,7 +48,7 @@ pub struct State<F: Fn(u64) -> Result + Sync> {
 }
 
 #[clippy::has_significant_drop]
-pub struct Permit<F: Fn(u64) -> Result + Sync> {
+pub struct Permit<F: Fn(u64) -> Result + Send + Sync> {
 	/// Link back to the shared-state.
 	state: Arc<Counter<F>>,
 
@@ -60,7 +60,7 @@ pub struct Permit<F: Fn(u64) -> Result + Sync> {
 	id: u64,
 }
 
-impl<F: Fn(u64) -> Result + Sync> Counter<F> {
+impl<F: Fn(u64) -> Result + Send + Sync> Counter<F> {
 	/// Construct a new Two-Phase counter state. The value of `init` is
 	/// considered retired, and the next sequence number dispatched will be one
 	/// greater.
@@ -109,7 +109,7 @@ impl<F: Fn(u64) -> Result + Sync> Counter<F> {
 	}
 }
 
-impl<F: Fn(u64) -> Result + Sync> State<F> {
+impl<F: Fn(u64) -> Result + Send + Sync> State<F> {
 	/// Create new state, starting from `init`. The next sequence number
 	/// dispatched will be one greater than `init`.
 	fn new(dispatched: u64, commit: F, release: F) -> Self {
@@ -196,7 +196,7 @@ impl<F: Fn(u64) -> Result + Sync> State<F> {
 	fn check_pending(&self, id: u64) -> bool { self.pending.iter().any(is_equal_to!(&id)) }
 }
 
-impl<F: Fn(u64) -> Result + Sync> Permit<F> {
+impl<F: Fn(u64) -> Result + Send + Sync> Permit<F> {
 	/// Access the retired sequence number sampled at this permit's creation.
 	/// This may be outdated prior to access. Obtained as a courtesy under lock.
 	#[inline]
@@ -209,14 +209,14 @@ impl<F: Fn(u64) -> Result + Sync> Permit<F> {
 	pub fn id(&self) -> &u64 { &self.id }
 }
 
-impl<F: Fn(u64) -> Result + Sync> Deref for Permit<F> {
+impl<F: Fn(u64) -> Result + Send + Sync> Deref for Permit<F> {
 	type Target = u64;
 
 	#[inline]
 	fn deref(&self) -> &Self::Target { self.id() }
 }
 
-impl<F: Fn(u64) -> Result + Sync> Drop for Permit<F> {
+impl<F: Fn(u64) -> Result + Send + Sync> Drop for Permit<F> {
 	fn drop(&mut self) {
 		self.state
 			.inner
