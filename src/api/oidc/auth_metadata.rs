@@ -1,6 +1,8 @@
 use axum::{Json, extract::State, response::IntoResponse};
+use http::StatusCode;
+use ruma::api::client::error::ErrorKind;
 use serde::{Deserialize, Serialize};
-use tuwunel_core::Result;
+use tuwunel_core::{Error, Result};
 
 use super::ACCOUNT_MANAGEMENT_ACTIONS_SUPPORTED;
 
@@ -31,7 +33,18 @@ struct ProviderMetadata {
 pub(crate) async fn openid_configuration_route(
 	State(services): State<crate::State>,
 ) -> Result<impl IntoResponse> {
-	let issuer = services.oauth.get_server()?.issuer_url()?;
+	// When no OAuth server is configured, return 404 + M_UNRECOGNIZED so that
+	// clients (Element-web in particular) recognize this homeserver as not
+	// supporting MSC2965 instead of treating the response as a fatal config
+	// error. See <https://spec.matrix.org/latest/client-server-api/#common-error-codes>.
+	let Ok(server) = services.oauth.get_server() else {
+		return Err(Error::Request(
+			ErrorKind::Unrecognized,
+			"OIDC server not configured".into(),
+			StatusCode::NOT_FOUND,
+		));
+	};
+	let issuer = server.issuer_url()?;
 	let base = issuer.trim_end_matches('/').to_owned();
 
 	Ok(Json(ProviderMetadata {
