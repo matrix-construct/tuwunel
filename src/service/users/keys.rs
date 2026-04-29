@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, mem};
 
-use futures::{FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt, pin_mut};
+use futures::{Stream, StreamExt, TryFutureExt, pin_mut};
 use ruma::{
 	DeviceId, KeyId, OneTimeKeyAlgorithm, OneTimeKeyId, OneTimeKeyName, OwnedKeyId, RoomId, UInt,
 	UserId,
@@ -404,7 +404,7 @@ pub async fn mark_device_key_update(&self, user_id: &UserId) {
 		.state_cache
 		.rooms_joined(user_id)
 		.filter(|room_id| all_or_is_encrypted(*room_id))
-		.ready_for_each(|room_id| {
+		.ready_for_each(|_| {
 			self.db.keychangeid_userid.put_raw(key, user_id);
 		})
 		.await;

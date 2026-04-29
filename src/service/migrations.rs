@@ -3,7 +3,7 @@ use std::cmp;
 use futures::{FutureExt, StreamExt};
 use ruma::{OwnedUserId, RoomId, UserId, events::room::member::MembershipState};
 use tuwunel_core::{
-	Err, Result, debug, debug_info, debug_warn, err, error, info,
+	Err, Result, debug, debug_info, debug_warn, err, info,
 	itertools::Itertools,
 	matrix::PduCount,
 	result::NotFound,
@@ -14,6 +14,7 @@ use tuwunel_core::{
 	},
 	warn,
 };
+use tuwunel_database::Deserialized;
 
 use crate::{Services, media};
 
@@ -25,6 +26,8 @@ use crate::{Services, media};
 ///   equal or lesser version. These are expected to be backward-compatible.
 pub(crate) const DATABASE_VERSION: u64 = 17;
 
+const SERVER_NAME_KEY: &[u8] = b"server_name";
+
 pub(crate) async fn migrations(services: &Services) -> Result {
 	if !services.config.database_migrations {
 		warn!("Skipping database migrations due to configuration...");
@@ -32,24 +35,40 @@ pub(crate) async fn migrations(services: &Services) -> Result {
 	}
 
 	let users_count = services.users.count().await;
-
-	// Matrix resource ownership is based on the server name; changing it
-	// requires recreating the database from scratch.
-	if users_count > 0 {
-		let server_user = &services.globals.server_user;
-		if !services.users.exists(server_user).await {
-			error!("The {server_user} server user does not exist, and the database is not new.");
-			return Err!(Database(
-				"Cannot reuse an existing database after changing the server name, please \
-				 delete the old one first.",
-			));
-		}
+	if users_count == 0 {
+		return fresh(services).await;
 	}
 
-	if users_count > 0 {
-		migrate(services).await
-	} else {
-		fresh(services).await
+	check_server_name(services).await?;
+	migrate(services).await
+}
+
+/// Matrix resource ownership is based on the server name; changing it
+/// requires recreating the database from scratch. The marker is stamped
+/// once in fresh(); legacy databases without it fall back to the original
+/// server-user heuristic only when admin-room creation is enabled.
+async fn check_server_name(services: &Services) -> Result {
+	let server_name = &services.server.name;
+	let server_user = &services.globals.server_user;
+	let create_admin_room = &services.config.create_admin_room;
+
+	let existing = services.db["global"]
+		.get(SERVER_NAME_KEY)
+		.await
+		.deserialized::<String>();
+
+	match existing {
+		| Ok(existing) if existing.ne(server_name) => Err!(Database(
+			"Database belongs to {existing}; configured server name is {server_name}. Cannot \
+			 reuse."
+		)),
+		| Err(_) if *create_admin_room && !services.users.exists(server_user).await => {
+			Err!(
+				"The {server_user} server user does not exist, and the database is not new. \
+				 Cannot reuse."
+			)
+		},
+		| _ => Ok(()),
 	}
 }
 
@@ -61,6 +80,7 @@ async fn fresh(services: &Services) -> Result {
 		.db
 		.bump_database_version(DATABASE_VERSION);
 
+	db["global"].insert(SERVER_NAME_KEY, services.server.name.as_str());
 	db["global"].insert(b"feat_sha256_media", []);
 	db["global"].insert(b"fix_bad_double_separator_in_state_cache", []);
 	db["global"].insert(b"retroactively_fix_bad_data_from_roomuserid_joined", []);
