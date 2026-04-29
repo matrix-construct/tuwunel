@@ -303,6 +303,7 @@ default-features = false
 features = [
 	"aws",
 	"fs",
+	"tls-webpki-roots",
 ]
 
 [workspace.dependencies.opentelemetry]
