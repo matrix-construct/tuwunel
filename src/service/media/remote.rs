@@ -439,22 +439,17 @@ pub async fn fetch_remote_content_legacy(
 
 #[implement(super::Service)]
 fn check_fetch_authorized(&self, mxc: &Mxc<'_>) -> Result {
+	let host = mxc.server_name.host();
+
 	if self
 		.services
 		.server
 		.config
 		.prevent_media_downloads_from
-		.is_match(mxc.server_name.host())
-		|| self
-			.services
-			.server
-			.config
-			.is_forbidden_remote_server_name(mxc.server_name)
+		.is_match(host)
 	{
-		// we'll lie to the client and say the blocked server's media was not found and
-		// log. the client has no way of telling anyways so this is a security bonus.
 		debug_warn!(%mxc, "Received request for media on blocklisted server");
-		return Err!(Request(NotFound("Media not found.")));
+		return Err!(Request(NotFound("Media download blocked from {host}")));
 	}
 
 	Ok(())
