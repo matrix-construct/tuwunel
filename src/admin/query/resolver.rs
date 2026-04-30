@@ -24,8 +24,8 @@ pub(crate) enum ResolverCommand {
 async fn destinations_cache(&self, server_name: Option<OwnedServerName>) -> Result {
 	use tuwunel_service::resolver::cache::CachedDest;
 
-	writeln!(self, "| Server Name | Destination | Hostname | Expires |").await?;
-	writeln!(self, "| ----------- | ----------- | -------- | ------- |").await?;
+	writeln!(self, "| Server Name | Destination | Hostname | Expires | Confidence |").await?;
+	writeln!(self, "| ----------- | ----------- | -------- | ------- | ---------- |").await?;
 
 	let mut destinations = self
 		.services
@@ -34,7 +34,9 @@ async fn destinations_cache(&self, server_name: Option<OwnedServerName>) -> Resu
 		.destinations()
 		.boxed();
 
-	while let Some((name, CachedDest { dest, host, expire })) = destinations.next().await {
+	while let Some((name, CachedDest { dest, host, expire, confidence })) =
+		destinations.next().await
+	{
 		if let Some(server_name) = server_name.as_ref()
 			&& name != server_name
 		{
@@ -42,7 +44,7 @@ async fn destinations_cache(&self, server_name: Option<OwnedServerName>) -> Resu
 		}
 
 		let expire = time::format(expire, "%+");
-		self.write_str(&format!("| {name} | {dest} | {host} | {expire} |\n"))
+		self.write_string(format!("| {name} | {dest} | {host} | {expire} | {confidence:?} |\n"))
 			.await?;
 	}
 
@@ -68,7 +70,7 @@ async fn overrides_cache(&self, server_name: Option<String>) -> Result {
 		}
 
 		let expire = time::format(expire, "%+");
-		self.write_str(&format!("| {name} | {ips:?} | {port} | {expire} | {overriding:?} |\n"))
+		self.write_string(format!("| {name} | {ips:?} | {port} | {expire} | {overriding:?} |\n"))
 			.await?;
 	}
 

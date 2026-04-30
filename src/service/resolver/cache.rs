@@ -23,6 +23,19 @@ pub struct CachedDest {
 	pub dest: FedDest,
 	pub host: DestString,
 	pub expire: SystemTime,
+	#[serde(default)]
+	pub confidence: Confidence,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize)]
+pub enum Confidence {
+	/// Inferred under uncertainty (transient or adversarial well-known); short
+	/// TTL so the next request re-resolves and can promote it.
+	#[default]
+	Tentative,
+
+	/// Categorical answer from authoritative resolution; long TTL.
+	Stable,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -127,11 +140,6 @@ impl CachedDest {
 	#[must_use]
 	pub fn valid(&self) -> bool { self.expire > SystemTime::now() }
 
-	#[must_use]
-	pub(crate) fn default_expire() -> SystemTime {
-		rand::time_from_now_secs(60 * 60 * 18..60 * 60 * 36)
-	}
-
 	#[inline]
 	#[must_use]
 	pub fn size(&self) -> usize {
@@ -139,6 +147,17 @@ impl CachedDest {
 			.size()
 			.expected_add(self.host.len())
 			.expected_add(size_of_val(&self.expire))
+			.expected_add(size_of_val(&self.confidence))
+	}
+}
+
+impl Confidence {
+	#[must_use]
+	pub(crate) fn expire(self) -> SystemTime {
+		match self {
+			| Self::Tentative => rand::time_from_now_secs(60 * 5..60 * 15),
+			| Self::Stable => rand::time_from_now_secs(60 * 60 * 18..60 * 60 * 36),
+		}
 	}
 }
 

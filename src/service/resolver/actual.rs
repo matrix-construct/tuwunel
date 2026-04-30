@@ -11,7 +11,7 @@ use tuwunel_core::{Err, Result, debug, debug_info, err, error, trace};
 
 use super::{
 	DestString, FedDest,
-	cache::{CachedDest, CachedOverride, MAX_IPS},
+	cache::{CachedDest, CachedOverride, Confidence, MAX_IPS},
 	fed::{PortString, add_port_to_hostname, get_ip_with_port},
 	well_known::WellKnown,
 };
@@ -68,28 +68,34 @@ impl super::Service {
 	) -> Result<CachedDest> {
 		self.validate_dest(dest)?;
 		let mut host: DestString = dest.as_str().into();
-		let actual_dest = match get_ip_with_port(dest.as_str()) {
-			| Some(host_port) => Self::actual_dest_1(host_port)?,
+		let (actual_dest, confidence) = match get_ip_with_port(dest.as_str()) {
+			| Some(host_port) => (Self::actual_dest_1(host_port)?, Confidence::Stable),
 			| None =>
 				if let Some(pos) = dest.as_str().find(':') {
-					self.actual_dest_2(dest, cache, pos).await?
+					(self.actual_dest_2(dest, cache, pos).await?, Confidence::Stable)
 				} else {
 					self.conditional_query_and_cache(dest.as_str(), 8448, true)
 						.await?;
 					self.services.server.check_running()?;
-					match self.request_well_known(dest.as_str()).await? {
+					let outcome = self.request_well_known(dest.as_str()).await?;
+					let confidence = match &outcome {
+						| WellKnown::Delegated(_) | WellKnown::NoDelegation => Confidence::Stable,
+						| WellKnown::Transient | WellKnown::Adversarial => Confidence::Tentative,
+					};
+
+					let actual_dest = match outcome {
 						| WellKnown::Delegated(delegated) =>
 							self.actual_dest_3(&mut host, cache, &delegated)
 								.await?,
-						| WellKnown::NoDelegation
-						| WellKnown::Transient
-						| WellKnown::Adversarial => match self.query_srv_record(dest.as_str()).await? {
+						| _ => match self.query_srv_record(dest.as_str()).await? {
 							| Some(overrider) =>
 								self.actual_dest_4(&host, cache, overrider)
 									.await?,
 							| _ => self.actual_dest_5(dest, cache).await?,
 						},
-					}
+					};
+
+					(actual_dest, confidence)
 				},
 		};
 
@@ -110,11 +116,12 @@ impl super::Service {
 			FedDest::Named(host.as_str().into(), FedDest::default_port())
 		};
 
-		debug!("Actual destination: {actual_dest:?} hostname: {host:?}");
+		debug!(?actual_dest, ?host, ?confidence, "resolved");
 		Ok(CachedDest {
 			dest: actual_dest,
 			host: host.uri_string(),
-			expire: CachedDest::default_expire(),
+			expire: confidence.expire(),
+			confidence,
 		})
 	}
 
