@@ -268,8 +268,6 @@ pub(crate) fn mark_as_joined(&self, user_id: &UserId, room_id: &RoomId, count: P
 	self.db
 		.roomuserid_knockedcount
 		.remove(&roomuser_id);
-
-	self.db.roomid_inviteviaservers.remove(room_id);
 }
 
 /// Direct DB function to directly mark a user as left. It is not
@@ -314,8 +312,6 @@ pub(crate) fn mark_as_left(&self, user_id: &UserId, room_id: &RoomId, count: Pdu
 	self.db
 		.roomuserid_knockedcount
 		.remove(&roomuser_id);
-
-	self.db.roomid_inviteviaservers.remove(room_id);
 }
 
 /// Direct DB function to directly mark a user as knocked. It is not
@@ -359,8 +355,6 @@ pub(crate) fn _mark_as_knocked(
 
 	self.db.userroomid_leftstate.remove(&userroom_id);
 	self.db.roomuserid_leftcount.remove(&roomuser_id);
-
-	self.db.roomid_inviteviaservers.remove(room_id);
 }
 
 /// Makes a user forget a room.
