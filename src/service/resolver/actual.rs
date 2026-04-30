@@ -13,6 +13,7 @@ use super::{
 	DestString, FedDest,
 	cache::{CachedDest, CachedOverride, MAX_IPS},
 	fed::{PortString, add_port_to_hostname, get_ip_with_port},
+	well_known::WellKnown,
 };
 
 #[derive(Clone, Debug)]
@@ -77,10 +78,12 @@ impl super::Service {
 						.await?;
 					self.services.server.check_running()?;
 					match self.request_well_known(dest.as_str()).await? {
-						| Some(delegated) =>
+						| WellKnown::Delegated(delegated) =>
 							self.actual_dest_3(&mut host, cache, &delegated)
 								.await?,
-						| _ => match self.query_srv_record(dest.as_str()).await? {
+						| WellKnown::NoDelegation
+						| WellKnown::Transient
+						| WellKnown::Adversarial => match self.query_srv_record(dest.as_str()).await? {
 							| Some(overrider) =>
 								self.actual_dest_4(&host, cache, overrider)
 									.await?,

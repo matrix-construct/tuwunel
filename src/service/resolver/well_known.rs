@@ -1,6 +1,21 @@
-use tuwunel_core::{Result, debug, debug_error, debug_info, debug_warn, implement, trace};
+use tuwunel_core::{Result, debug, debug_info, debug_warn, implement, trace};
 
 use super::DestString;
+
+#[derive(Clone, Debug)]
+pub(super) enum WellKnown {
+	/// `m.server` delegation found.
+	Delegated(DestString),
+
+	/// Server affirms no delegation (4xx, or 2xx without `m.server`).
+	NoDelegation,
+
+	/// Transport, timeout, or 5xx; safe to retry soon.
+	Transient,
+
+	/// 2xx with non-JSON / oversized body, or unusual status; suspect peer.
+	Adversarial,
+}
 
 #[implement(super::Service)]
 #[tracing::instrument(
@@ -9,8 +24,8 @@ use super::DestString;
 	ret(level = "debug"),
 	skip(self)
 )]
-pub(super) async fn request_well_known(&self, dest: &str) -> Result<Option<DestString>> {
-	trace!("Requesting well known for {dest}");
+pub(super) async fn request_well_known(&self, dest: &str) -> Result<WellKnown> {
+	trace!(%dest, "Requesting well known");
 	let response = self
 		.services
 		.client
@@ -19,38 +34,59 @@ pub(super) async fn request_well_known(&self, dest: &str) -> Result<Option<DestS
 		.send()
 		.await;
 
-	trace!("response: {response:?}");
-	if let Err(e) = &response {
-		debug!("error: {e:?}");
-		return Ok(None);
+	trace!(?response, "response");
+	let response = match response {
+		| Ok(r) => r,
+		| Err(e) => {
+			debug!("transient fetch error: {e:?}");
+			return Ok(WellKnown::Transient);
+		},
+	};
+
+	let status = response.status();
+	if !status.is_success() {
+		let outcome = match status {
+			| _ if status.is_server_error() => WellKnown::Transient,
+			| _ if status.is_client_error() => WellKnown::NoDelegation,
+			| _ => WellKnown::Adversarial,
+		};
+
+		debug!(%status, ?outcome, "non-2xx response");
+		return Ok(outcome);
 	}
 
-	let response = response?;
-	if !response.status().is_success() {
-		debug!("response not 2XX");
-		return Ok(None);
-	}
+	let text = match response.text().await {
+		| Ok(t) => t,
+		| Err(e) => {
+			debug!("transient body read error: {e:?}");
+			return Ok(WellKnown::Transient);
+		},
+	};
 
-	let text = response.text().await?;
-	trace!("response text: {text:?}");
+	trace!(?text, "response text");
 	if text.len() >= 12288 {
-		debug_warn!("response contains junk");
-		return Ok(None);
+		debug_warn!("oversized body");
+		return Ok(WellKnown::Adversarial);
 	}
 
-	let body: serde_json::Value = serde_json::from_str(&text).unwrap_or_default();
+	let body: serde_json::Value = match serde_json::from_str(&text) {
+		| Ok(v) => v,
+		| Err(e) => {
+			debug_warn!("non-JSON body in 2xx response: {e}");
+			return Ok(WellKnown::Adversarial);
+		},
+	};
 
 	let m_server = body
 		.get("m.server")
-		.unwrap_or(&serde_json::Value::Null)
-		.as_str()
+		.and_then(serde_json::Value::as_str)
 		.unwrap_or_default();
 
 	if ruma::identifiers_validation::server_name::validate(m_server).is_err() {
-		debug_error!("response content missing or invalid");
-		return Ok(None);
+		debug!("no usable m.server in body");
+		return Ok(WellKnown::NoDelegation);
 	}
 
 	debug_info!("{dest:?} found at {m_server:?}");
-	Ok(Some(m_server.into()))
+	Ok(WellKnown::Delegated(m_server.into()))
 }
