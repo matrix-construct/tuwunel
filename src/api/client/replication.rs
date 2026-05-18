@@ -82,27 +82,34 @@ pub(crate) async fn replication_wal(
 		.config
 		.rocksdb_replication_interval_ms;
 
-	// Eagerly check for a WAL gap before opening the streaming response.
-	//
-	// Beyond verifying the iterator can be created, we also peek at the first
-	// frame when since < current_seq. RocksDB may return Ok from GetUpdatesSince
-	// with an empty iterator when frames at `since` have been flushed to SST and
-	// are no longer in WAL files. Without this peek the stream connects (200 OK)
-	// but delivers no data frames — heartbeats still flow and set the secondary's
-	// resume_seq to the primary's current position without the missing batches
-	// ever being applied, causing silent data loss.
+	// Detect a WAL gap before streaming. RocksDB's `GetUpdatesSince(N)` returns
+	// frames with seq > N, so a healthy first frame is at `since + 1`. A real
+	// gap shows up as an empty iterator (WAL evicted) or a first frame further
+	// past `since`. With `manual_wal_flush=true` we flush first so the iterator
+	// sees writes still buffered in memory.
 	let gap_check: Result<()> = tokio::task::spawn_blocking({
 		let db = db.clone();
 		move || {
+			let _: Result<()> = db.flush_wal();
 			let current_seq = db.latest_wal_sequence();
+			if since == 0 || since >= current_seq {
+				return Ok(());
+			}
 			let mut iter = db.wal_frame_iter(since)?;
-			if since > 0 && since < current_seq && iter.next().is_none() {
-				return Err(tuwunel_core::err!(Database(
+			match iter.next() {
+				| None => Err(tuwunel_core::err!(Database(
 					"WAL gap: frames at seq {since} are not available \
 					 (primary at seq {current_seq}); WAL has been compacted"
-				)));
+				))),
+				| Some(Err(e)) => Err(e),
+				| Some(Ok(frame)) if frame.sequence > since.saturating_add(1) =>
+					Err(tuwunel_core::err!(Database(
+						"WAL gap: frames in [{since}, {first}) are not available \
+						 (primary at seq {current_seq}); WAL has been compacted",
+						first = frame.sequence
+					))),
+				| Some(Ok(_)) => Ok(()),
 			}
-			Ok(())
 		}
 	})
 	.await
@@ -269,7 +276,13 @@ pub(crate) async fn replication_promote(
 			.into_response();
 	}
 
-	services.replication.promote();
+	if let Err(e) = services.replication.promote() {
+		return (
+			StatusCode::INTERNAL_SERVER_ERROR,
+			Json(serde_json::json!({"error": format!("promote failed: {e}")})),
+		)
+			.into_response();
+	}
 
 	Json(serde_json::json!({"status": "promoted"})).into_response()
 }

@@ -16,6 +16,7 @@ mod qry;
 mod qry_batch;
 mod remove;
 mod rev_keys;
+mod rev_keys_blocking;
 mod rev_keys_from;
 mod rev_keys_prefix;
 mod rev_stream;

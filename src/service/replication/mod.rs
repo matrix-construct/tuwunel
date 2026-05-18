@@ -134,23 +134,28 @@ impl crate::Service for Service {
 				}
 			}
 
-			// Bootstrap if no cursor is saved (first run or after WAL gap reset).
-			let resume_seq = self.db.get_replication_resume_seq()?;
-			if resume_seq == 0 {
-				let db_path = self.server.config.database_path.clone();
-				let parent = db_path.parent().unwrap_or(&db_path);
-				let sidecar = parent.join("_replication_needs_bootstrap");
+			let db_path = self.server.config.database_path.clone();
+			let parent = db_path.parent().unwrap_or(&db_path);
+			let sidecar = parent.join("_replication_needs_bootstrap");
 
-				if sidecar.exists() {
-					let seq_str = std::fs::read_to_string(&sidecar)
-						.map_err(|e| err!(Database("Reading bootstrap sidecar: {e}")))?;
-					let seq: u64 = seq_str.trim().parse()
-						.map_err(|e| err!(Database("Parsing bootstrap sidecar: {e}")))?;
-					self.db.set_replication_resume_seq(seq)?;
-					std::fs::remove_file(&sidecar)
-						.map_err(|e| err!(Database("Removing bootstrap sidecar: {e}")))?;
-					info!("Bootstrap complete via pre-open path; resume_seq = {seq}");
-				} else {
+			// Sidecar wins when present: the just-completed bootstrap wrote
+			// it with the checkpoint's actual seq. The checkpoint may carry
+			// a stale `resume_seq` in `replication_meta` from when the
+			// primary was previously a secondary; honoring it would loop us
+			// back into a gap on every bootstrap.
+			if sidecar.exists() {
+				let seq_str = std::fs::read_to_string(&sidecar)
+					.map_err(|e| err!(Database("Reading bootstrap sidecar: {e}")))?;
+				let seq: u64 = seq_str.trim().parse()
+					.map_err(|e| err!(Database("Parsing bootstrap sidecar: {e}")))?;
+				self.db.set_replication_resume_seq(seq)?;
+				std::fs::remove_file(&sidecar)
+					.map_err(|e| err!(Database("Removing bootstrap sidecar: {e}")))?;
+				info!("Bootstrap complete via pre-open path; resume_seq = {seq}");
+			} else {
+				// No sidecar — steady-state re-open, or first start of an ex-primary.
+				let resume_seq = self.db.get_replication_resume_seq()?;
+				if resume_seq == 0 {
 					let db_seq = self.db.latest_wal_sequence();
 					if db_seq > 0 {
 						info!(
@@ -230,12 +235,16 @@ impl crate::Service for Service {
 impl Service {
 	/// Promote this secondary to a standalone primary.
 	///
-	/// Stops the replication worker immediately. The caller is responsible for
+	/// Stops the replication worker immediately and clears `resume_seq` so a
+	/// future demote (or checkpoint served to a future secondary) doesn't
+	/// carry stale secondary-era state. The caller is responsible for
 	/// updating the VIP / load balancer to route client traffic to this node.
-	pub fn promote(&self) {
+	pub fn promote(&self) -> Result<()> {
+		self.db.set_replication_resume_seq(0)?;
 		self.promoted.store(true, Ordering::Release);
 		self.promote_notify.notify_waiters();
 		info!("Promotion requested; stopping replication worker.");
+		Ok(())
 	}
 
 	/// Returns true if this instance has been promoted to primary.

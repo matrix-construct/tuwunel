@@ -91,6 +91,12 @@ impl Database {
 	#[must_use]
 	pub fn latest_wal_sequence(&self) -> u64 { self.engine.latest_wal_sequence() }
 
+	/// Flush in-memory WAL buffers to the on-disk WAL file (no fsync). With
+	/// `manual_wal_flush=true` `wal_frame_iter` would otherwise miss writes
+	/// still buffered in memory; the replication WAL endpoint calls this
+	/// before its gap check so the iterator and `latest_wal_sequence` agree.
+	pub fn flush_wal(&self) -> Result { self.engine.flush() }
+
 	/// Return a WAL frame iterator starting at `since`.
 	///
 	/// See `Engine::wal_frame_iter` for semantics. Returns `Err` if `since`
