@@ -16,9 +16,8 @@ use axum_extra::{
 	TypedHeader,
 	headers::{Authorization, authorization::Bearer},
 };
-use futures::StreamExt;
 use http::request::Parts;
-use ruma::{OwnedRoomId, OwnedUserId, UserId};
+use ruma::{OwnedUserId, UserId};
 use tuwunel_core::{Err, Error, Result, err};
 
 pub(crate) use self::{
@@ -87,14 +86,4 @@ pub(super) async fn existing_user(
 		.await
 		.then_some(user_id)
 		.ok_or_else(|| err!(Request(NotFound("User does not exist"))))
-}
-
-/// The user's joined rooms, owned to outlive the database cursor.
-pub(super) async fn joined_rooms(services: crate::State, user_id: &UserId) -> Vec<OwnedRoomId> {
-	services
-		.state_cache
-		.rooms_joined(user_id)
-		.map(ToOwned::to_owned)
-		.collect()
-		.await
 }

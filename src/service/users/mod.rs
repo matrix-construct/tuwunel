@@ -2,14 +2,13 @@ mod dehydrated_device;
 pub mod device;
 mod keys;
 mod ldap;
-mod profile;
 mod register;
 
 use std::sync::Arc;
 
 use futures::{Stream, StreamExt, TryFutureExt};
 use ruma::{
-	MilliSecondsSinceUnixEpoch, OwnedRoomId, OwnedUserId, UserId,
+	MilliSecondsSinceUnixEpoch, OwnedUserId, UserId,
 	api::client::filter::FilterDefinition,
 	events::{
 		GlobalAccountDataEventType,
@@ -19,22 +18,12 @@ use ruma::{
 };
 use serde::{Deserialize, Serialize};
 use tuwunel_core::{
-	Err, Result, debug_warn, err, is_equal_to,
-	pdu::PduBuilder,
-	trace,
-	utils::{
-		self, ReadyExt,
-		stream::{TryIgnore, automatic_width},
-	},
-	warn,
+	Err, Result, debug_warn, err, is_equal_to, trace,
+	utils::{self, ReadyExt, stream::TryIgnore},
 };
 use tuwunel_database::{Deserialized, Json, Map};
 
-pub use self::{
-	keys::parse_master_key,
-	profile::{Propagation, propagation_default},
-	register::Register,
-};
+pub use self::{keys::parse_master_key, register::Register};
 
 pub const PASSWORD_SENTINEL: &str = "*";
 pub const PASSWORD_DISABLED: &str = "";
@@ -71,11 +60,8 @@ struct Data {
 	oidcdevice_userdeviceid: Arc<Map>,
 	oidccskeybypass_userid: Arc<Map>,
 	userfilterid_filter: Arc<Map>,
-	userid_avatarurl: Arc<Map>,
-	userid_blurhash: Arc<Map>,
 	userid_dehydrateddevice: Arc<Map>,
 	userid_devicelistversion: Arc<Map>,
-	userid_displayname: Arc<Map>,
 	userid_lastonetimekeyupdate: Arc<Map>,
 	userid_locked: Arc<Map>,
 	userid_masterkeyid: Arc<Map>,
@@ -84,7 +70,6 @@ struct Data {
 	userid_selfsigningkeyid: Arc<Map>,
 	userid_suspended: Arc<Map>,
 	userid_usersigningkeyid: Arc<Map>,
-	useridprofilekey_value: Arc<Map>,
 }
 
 impl crate::Service for Service {
@@ -109,11 +94,8 @@ impl crate::Service for Service {
 				userdeviceid_spentrefresh: args.db["userdeviceid_spentrefresh"].clone(),
 				userdeviceidalgorithm_fallback: args.db["userdeviceidalgorithm_fallback"].clone(),
 				userfilterid_filter: args.db["userfilterid_filter"].clone(),
-				userid_avatarurl: args.db["userid_avatarurl"].clone(),
-				userid_blurhash: args.db["userid_blurhash"].clone(),
 				userid_dehydrateddevice: args.db["userid_dehydrateddevice"].clone(),
 				userid_devicelistversion: args.db["userid_devicelistversion"].clone(),
-				userid_displayname: args.db["userid_displayname"].clone(),
 				userid_lastonetimekeyupdate: args.db["userid_lastonetimekeyupdate"].clone(),
 				userid_locked: args.db["userid_locked"].clone(),
 				userid_masterkeyid: args.db["userid_masterkeyid"].clone(),
@@ -122,7 +104,6 @@ impl crate::Service for Service {
 				userid_selfsigningkeyid: args.db["userid_selfsigningkeyid"].clone(),
 				userid_suspended: args.db["userid_suspended"].clone(),
 				userid_usersigningkeyid: args.db["userid_usersigningkeyid"].clone(),
-				useridprofilekey_value: args.db["useridprofilekey_value"].clone(),
 			},
 		}))
 	}
@@ -530,29 +511,5 @@ impl Service {
 	#[expect(clippy::unused_async)]
 	pub async fn auth_ldap(&self, _user_dn: &str, _password: &str) -> Result {
 		Err!(FeatureDisabled("ldap"))
-	}
-
-	async fn update_all_rooms<'a, S>(&self, user_id: &UserId, rooms: S)
-	where
-		S: Stream<Item = (PduBuilder, &'a OwnedRoomId)> + Send,
-	{
-		rooms
-			.for_each_concurrent(automatic_width(), async |(pdu_builder, room_id)| {
-				let state_lock = self.services.state.mutex.lock(room_id).await;
-				if let Err(e) = self
-					.services
-					.timeline
-					.build_and_append_pdu(pdu_builder, user_id, room_id, &state_lock)
-					.await
-				{
-					warn!(
-						%user_id,
-						%room_id,
-						%e,
-						"Failed to update/send new profile join membership update in room",
-					);
-				}
-			})
-			.await;
 	}
 }

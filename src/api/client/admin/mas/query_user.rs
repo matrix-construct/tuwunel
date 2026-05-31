@@ -13,9 +13,9 @@ pub(crate) async fn query_user_route(
 ) -> Result<Response> {
 	let user_id = existing_user(services, &body.localpart).await?;
 
-	let display_name = services.users.displayname(&user_id).await.ok();
+	let display_name = services.profile.displayname(&user_id).await.ok();
 	let avatar_url = services
-		.users
+		.profile
 		.avatar_url(&user_id)
 		.await
 		.ok()

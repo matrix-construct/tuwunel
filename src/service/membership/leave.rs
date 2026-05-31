@@ -1,10 +1,6 @@
 use std::collections::HashSet;
 
-use futures::{
-	FutureExt, StreamExt, TryFutureExt,
-	future::{join3, ready},
-	pin_mut,
-};
+use futures::{FutureExt, StreamExt, TryFutureExt, future::ready, pin_mut};
 use ruma::{
 	CanonicalJsonObject, CanonicalJsonValue, OwnedServerName, RoomId, UserId,
 	api::federation,
@@ -19,10 +15,7 @@ use tuwunel_core::{
 	Err, Error, Result, debug_info, debug_warn, err, implement,
 	matrix::{PduCount, pdu::check_rules, room_version},
 	pdu::PduBuilder,
-	utils::{
-		self, FutureBoolExt,
-		future::{ReadyBoolExt, TryExtExt},
-	},
+	utils::{self, FutureBoolExt, future::ReadyBoolExt},
 	warn,
 };
 
@@ -369,24 +362,17 @@ async fn remote_leave(
 			)))
 		})?;
 
-	let displayname = self.services.users.displayname(user_id).ok();
+	let mut content = RoomMemberEventContent {
+		reason,
+		..RoomMemberEventContent::new(MembershipState::Leave)
+	};
 
-	let avatar_url = self.services.users.avatar_url(user_id).ok();
+	self.services
+		.profile
+		.fill_profile_data(user_id, &mut content)
+		.await;
 
-	let blurhash = self.services.users.blurhash(user_id).ok();
-
-	let (displayname, avatar_url, blurhash) = join3(displayname, avatar_url, blurhash).await;
-
-	event.insert(
-		"content".into(),
-		to_canonical_value(RoomMemberEventContent {
-			displayname,
-			avatar_url,
-			blurhash,
-			reason,
-			..RoomMemberEventContent::new(MembershipState::Leave)
-		})?,
-	);
+	event.insert("content".into(), to_canonical_value(content)?);
 
 	event.insert(
 		"origin".into(),

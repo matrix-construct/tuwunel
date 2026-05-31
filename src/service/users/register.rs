@@ -2,6 +2,8 @@ use futures::FutureExt;
 use ruma::{UserId, events::GlobalAccountDataEventType, push};
 use tuwunel_core::{Err, Result, error, implement, info, is_equal_to, warn};
 
+use crate::profile::Propagation;
+
 #[derive(Debug, Default)]
 pub struct Register<'a> {
 	pub user_id: Option<&'a UserId>,
@@ -74,8 +76,9 @@ pub async fn full_register(
 	}
 
 	self.services
-		.users
-		.set_displayname(user_id, Some(displayname));
+		.profile
+		.set_displayname(user_id, Some(displayname), Some(Propagation::None))
+		.await?;
 
 	// Initial account data
 	self.services

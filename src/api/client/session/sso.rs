@@ -5,10 +5,10 @@ use std::{borrow::Cow, collections::BTreeMap, net::IpAddr, time::Duration};
 use axum::extract::State;
 use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD as b64};
-use futures::{FutureExt, StreamExt, TryFutureExt, future::try_join};
+use futures::{FutureExt, TryFutureExt, future::try_join};
 use reqwest::header::{CONTENT_TYPE, HeaderValue};
 use ruma::{
-	Mxc, OwnedMxcUri, OwnedRoomId, OwnedUserId, ServerName, UserId,
+	Mxc, OwnedMxcUri, OwnedUserId, ServerName, UserId,
 	api::client::{
 		session::{SsoRedirectAction, sso_callback, sso_login, sso_login_with_provider},
 		uiaa::AuthType,
@@ -40,7 +40,7 @@ use tuwunel_service::{
 		CODE_VERIFIER_LENGTH, Provider, SESSION_ID_LENGTH, Session, TokenResponse, UserInfo,
 		unique_id_sub,
 	},
-	users::{PASSWORD_SENTINEL, Register, propagation_default},
+	users::{PASSWORD_SENTINEL, Register},
 };
 use url::Url;
 
@@ -677,29 +677,11 @@ async fn set_avatar(
 		.create(&mxc, Some(user_id), Some(&content_disposition), content_type.as_deref(), &bytes)
 		.await?;
 
-	let all_joined_rooms: Vec<OwnedRoomId> = services
-		.state_cache
-		.rooms_joined(user_id)
-		.map(ToOwned::to_owned)
-		.collect()
-		.await;
-
 	let mxc_uri: OwnedMxcUri = mxc.to_string().into();
 	services
-		.users
-		.update_avatar_url(
-			user_id,
-			Some(&mxc_uri),
-			None,
-			&all_joined_rooms,
-			propagation_default(
-				services
-					.server
-					.config
-					.preserve_room_profile_overrides,
-			),
-		)
-		.await;
+		.profile
+		.set_avatar_url(user_id, Some(&mxc_uri), None)
+		.await?;
 
 	Ok(())
 }

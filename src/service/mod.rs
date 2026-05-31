@@ -21,6 +21,7 @@ pub mod media;
 pub mod membership;
 pub mod oauth;
 pub mod presence;
+pub mod profile;
 pub mod pusher;
 pub mod registration_tokens;
 pub mod resolver;

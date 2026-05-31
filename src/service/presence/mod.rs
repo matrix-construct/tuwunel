@@ -275,8 +275,8 @@ impl Service {
 		let now = utils::millis_since_unix_epoch();
 		let last_active_ago = now.saturating_sub(presence.last_active_ts);
 
-		let avatar_url = self.services.users.avatar_url(user_id).ok();
-		let displayname = self.services.users.displayname(user_id).ok();
+		let avatar_url = self.services.profile.avatar_url(user_id).ok();
+		let displayname = self.services.profile.displayname(user_id).ok();
 		let (avatar_url, displayname) = join(avatar_url, displayname).await;
 
 		PresenceEvent {

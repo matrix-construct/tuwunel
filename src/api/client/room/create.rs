@@ -183,16 +183,20 @@ async fn apply_creator_join_pdu(
 	room_id: &RoomId,
 	state_lock: &RoomMutexGuard,
 ) -> Result {
+	let mut content = RoomMemberEventContent {
+		is_direct: Some(body.is_direct),
+		..RoomMemberEventContent::new(MembershipState::Join)
+	};
+
+	services
+		.profile
+		.fill_profile_data(sender_user, &mut content)
+		.await;
+
 	services
 		.timeline
 		.build_and_append_pdu(
-			PduBuilder::state(sender_user.to_string(), &RoomMemberEventContent {
-				displayname: services.users.displayname(sender_user).await.ok(),
-				avatar_url: services.users.avatar_url(sender_user).await.ok(),
-				blurhash: services.users.blurhash(sender_user).await.ok(),
-				is_direct: Some(body.is_direct),
-				..RoomMemberEventContent::new(MembershipState::Join)
-			}),
+			PduBuilder::state(sender_user.to_string(), &content),
 			sender_user,
 			room_id,
 			state_lock,

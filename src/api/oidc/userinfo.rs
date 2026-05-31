@@ -86,9 +86,9 @@ async fn userinfo_inner(services: &Services, request: Request) -> Result<Respons
 		return Err!(Request(Unauthorized("Token was not issued through OIDC")));
 	}
 
-	let avatar_url = services.users.avatar_url(&user_id).ok();
+	let avatar_url = services.profile.avatar_url(&user_id).ok();
 
-	let displayname = services.users.displayname(&user_id).ok();
+	let displayname = services.profile.displayname(&user_id).ok();
 
 	let (avatar_url, displayname) = join(avatar_url, displayname).await;
 

@@ -14,17 +14,16 @@ use axum::{
 	extract::{Form, Request, State},
 	response::{Html, IntoResponse, Redirect, Response},
 };
-use futures::StreamExt;
 use http::{
 	HeaderValue, Method, StatusCode,
 	header::{CACHE_CONTROL, CONTENT_SECURITY_POLICY, CONTENT_TYPE, REFERRER_POLICY},
 };
-use ruma::{OwnedDeviceId, OwnedRoomId};
+use ruma::OwnedDeviceId;
 use tuwunel_core::{
 	Err, Error, Result, err,
 	utils::{BoolExt, html::escape as html_escape},
 };
-use tuwunel_service::{Services, users::propagation_default};
+use tuwunel_service::Services;
 use url::Url;
 
 use self::{
@@ -232,27 +231,10 @@ async fn handle_account_callback(
 				.is_false()
 				.then_some(cleaned_dn.as_str());
 
-			let all_joined_rooms: Vec<OwnedRoomId> = services
-				.state_cache
-				.rooms_joined(&user_id)
-				.map(ToOwned::to_owned)
-				.collect()
-				.await;
-
 			services
-				.users
-				.update_displayname(
-					&user_id,
-					displayname,
-					&all_joined_rooms,
-					propagation_default(
-						services
-							.server
-							.config
-							.preserve_room_profile_overrides,
-					),
-				)
-				.await;
+				.profile
+				.set_displayname(&user_id, displayname, None)
+				.await?;
 
 			profile_saved_html(&user_id, displayname).await
 		},

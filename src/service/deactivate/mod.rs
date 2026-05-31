@@ -4,10 +4,11 @@ use futures::{FutureExt, StreamExt};
 use ruma::{
 	OwnedRoomId, UserId,
 	events::{StateEventType, room::power_levels::RoomPowerLevelsEventContent},
+	profile::ProfileFieldName,
 };
-use tuwunel_core::{Event, Result, info, pdu::PduBuilder, utils::ReadyExt, warn};
+use tuwunel_core::{Event, Result, info, pdu::PduBuilder, warn};
 
-use crate::users::Propagation;
+use crate::profile::Propagation;
 
 pub struct Service {
 	services: Arc<crate::services::OnceServices>,
@@ -38,31 +39,26 @@ impl Service {
 			.deactivate_account(user_id)
 			.await?;
 
+		self.services
+			.profile
+			.clear_profile_keys(user_id)
+			.await;
+
+		self.services
+			.profile
+			.update_all_rooms(
+				user_id,
+				&[(ProfileFieldName::DisplayName, None), (ProfileFieldName::AvatarUrl, None)],
+				Propagation::All,
+			)
+			.await;
+
 		let all_joined_rooms: Vec<OwnedRoomId> = self
 			.services
 			.state_cache
 			.rooms_joined(user_id)
 			.map(Into::into)
 			.collect()
-			.await;
-
-		self.services
-			.users
-			.update_displayname(user_id, None, &all_joined_rooms, Propagation::All)
-			.await;
-		self.services
-			.users
-			.update_avatar_url(user_id, None, None, &all_joined_rooms, Propagation::All)
-			.await;
-
-		self.services
-			.users
-			.all_profile_keys(user_id)
-			.ready_for_each(|(profile_key, _)| {
-				self.services
-					.users
-					.set_profile_key(user_id, &profile_key, None);
-			})
 			.await;
 
 		for room_id in all_joined_rooms {

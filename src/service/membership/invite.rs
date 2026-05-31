@@ -53,18 +53,16 @@ async fn remote_invite(
 	let (pdu, pdu_json, invite_room_state, room_version_id) = {
 		let state_lock = self.services.state.mutex.lock(room_id).await;
 
-		let content = RoomMemberEventContent {
-			displayname: self
-				.services
-				.users
-				.displayname(user_id)
-				.await
-				.ok(),
-			avatar_url: self.services.users.avatar_url(user_id).await.ok(),
+		let mut content = RoomMemberEventContent {
 			is_direct: Some(is_direct),
 			reason: reason.cloned(),
 			..RoomMemberEventContent::new(MembershipState::Invite)
 		};
+
+		self.services
+			.profile
+			.fill_profile_data(user_id, &mut content)
+			.await;
 
 		let (pdu, pdu_json) = self
 			.services
@@ -201,19 +199,16 @@ async fn local_invite(
 
 	let state_lock = self.services.state.mutex.lock(room_id).await;
 
-	let content = RoomMemberEventContent {
-		displayname: self
-			.services
-			.users
-			.displayname(user_id)
-			.await
-			.ok(),
-		avatar_url: self.services.users.avatar_url(user_id).await.ok(),
-		blurhash: self.services.users.blurhash(user_id).await.ok(),
+	let mut content = RoomMemberEventContent {
 		is_direct: Some(is_direct),
 		reason: reason.cloned(),
 		..RoomMemberEventContent::new(MembershipState::Invite)
 	};
+
+	self.services
+		.profile
+		.fill_profile_data(user_id, &mut content)
+		.await;
 
 	self.services
 		.timeline

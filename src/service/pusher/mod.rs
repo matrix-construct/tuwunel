@@ -242,7 +242,7 @@ pub async fn get_actions<'a>(
 ) -> &'a [Action] {
 	let user_display_name = self
 		.services
-		.users
+		.profile
 		.displayname(user)
 		.unwrap_or_else(|_| user.localpart().to_owned());
 

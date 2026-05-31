@@ -34,12 +34,12 @@ pub(super) async fn calculate_heroes(
 			let name = content
 				.displayname
 				.is_none()
-				.then_async(|| services.users.displayname(&user_id).ok());
+				.then_async(|| services.profile.displayname(&user_id).ok());
 
 			let avatar = content
 				.avatar_url
 				.is_none()
-				.then_async(|| services.users.avatar_url(&user_id).ok());
+				.then_async(|| services.profile.avatar_url(&user_id).ok());
 
 			let (name, avatar) = join(name, avatar).await;
 			let hero = response::Hero {

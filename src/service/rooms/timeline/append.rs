@@ -24,9 +24,13 @@ use tuwunel_core::{
 use tuwunel_database::Json;
 
 use super::{ExtractBody, ExtractRelatesTo, ExtractRelatesToEventId, RoomMutexGuard, bias_count};
-use crate::{Services, rooms::{
-	short::ShortRoomId, state_accessor::plain_text_topic, state_compressor::CompressedState, timeline::ExtractUrl,
-}};
+use crate::{
+	Services,
+	rooms::{
+		short::ShortRoomId, state_accessor::plain_text_topic, state_compressor::CompressedState,
+		timeline::ExtractUrl,
+	},
+};
 
 /// Append the incoming event setting the state snapshot to the state from
 /// the server that sent the event.

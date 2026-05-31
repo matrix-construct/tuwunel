@@ -12,12 +12,9 @@ use tuwunel_core::{
 	},
 	warn,
 };
-use tuwunel_service::{
-	threepid::canonicalize_email,
-	users::{PASSWORD_SENTINEL, propagation_default},
-};
+use tuwunel_service::{threepid::canonicalize_email, users::PASSWORD_SENTINEL};
 
-use super::{Mas, joined_rooms, local_user};
+use super::{Mas, local_user};
 use crate::Ruma;
 
 /// # `POST /_synapse/mas/provision_user`
@@ -50,24 +47,11 @@ pub(crate) async fn provision_user_route(
 	let touch_displayname = body.set_displayname.is_some() || body.unset_displayname;
 	let touch_avatar = body.set_avatar_url.is_some() || body.unset_avatar_url;
 	if touch_displayname || touch_avatar {
-		let rooms = joined_rooms(services, &user_id).await;
-		let propagation = propagation_default(
-			services
-				.server
-				.config
-				.preserve_room_profile_overrides,
-		);
-
 		if touch_displayname {
 			services
-				.users
-				.update_displayname(
-					&user_id,
-					body.set_displayname.as_deref(),
-					&rooms,
-					propagation,
-				)
-				.await;
+				.profile
+				.set_displayname(&user_id, body.set_displayname.as_deref(), None)
+				.await?;
 		}
 
 		if touch_avatar {
@@ -77,9 +61,9 @@ pub(crate) async fn provision_user_route(
 				.map(<&MxcUri>::from);
 
 			services
-				.users
-				.update_avatar_url(&user_id, avatar, None, &rooms, propagation)
-				.await;
+				.profile
+				.set_avatar_url(&user_id, avatar, None)
+				.await?;
 		}
 	}
 

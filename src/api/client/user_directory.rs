@@ -42,7 +42,7 @@ pub(crate) async fn search_users_route(
 		.ready_filter(|&user_id| user_id != sender_user)
 		.map(ToOwned::to_owned)
 		.broad_filter_map(async |user_id| {
-			let display_name = services.users.displayname(&user_id).await.ok();
+			let display_name = services.profile.displayname(&user_id).await.ok();
 
 			should_show_user(
 				&services,
@@ -55,7 +55,7 @@ pub(crate) async fn search_users_route(
 			.then_async(async || search_users::v3::User {
 				user_id: user_id.clone(),
 				display_name,
-				avatar_url: services.users.avatar_url(&user_id).await.ok(),
+				avatar_url: services.profile.avatar_url(&user_id).await.ok(),
 			})
 			.await
 		});

@@ -1,19 +1,12 @@
 use axum::extract::State;
-use futures::{
-	StreamExt,
-	future::{join, join5},
-};
+use futures::StreamExt;
 use rand::seq::SliceRandom;
 use ruma::{
 	OwnedServerName,
-	api::federation::query::{
-		get_profile_information::{self, v1::Response as ProfileResponse},
-		get_room_information,
-	},
-	profile::{ProfileFieldName, ProfileFieldValue},
+	api::federation::query::{get_profile_information, get_room_information},
+	profile::ProfileFieldValue,
 };
-use serde_json::Value as JsonValue;
-use tuwunel_core::{Err, Result, err, utils::future::TryExtExt};
+use tuwunel_core::{Err, Result, err};
 
 use crate::Ruma;
 
@@ -61,7 +54,7 @@ pub(crate) async fn get_room_information_route(
 pub(crate) async fn get_profile_information_route(
 	State(services): State<crate::State>,
 	body: Ruma<get_profile_information::v1::Request>,
-) -> Result<ProfileResponse> {
+) -> Result<get_profile_information::v1::Response> {
 	if !services
 		.server
 		.config
@@ -77,65 +70,32 @@ pub(crate) async fn get_profile_information_route(
 	}
 
 	match &body.field {
-		| Some(ProfileFieldName::AvatarUrl | ProfileFieldName::DisplayName) => {
-			let avatar_url = services.users.avatar_url(&body.user_id).ok();
-			let displayname = services.users.displayname(&body.user_id).ok();
-			let (avatar_url, displayname) = join(avatar_url, displayname).await;
-
-			Ok([
-				avatar_url.map(ProfileFieldValue::AvatarUrl),
-				displayname.map(ProfileFieldValue::DisplayName),
-			]
-			.into_iter()
-			.flatten()
-			.collect())
-		},
-		| Some(custom_field) => {
+		| Some(field) => {
 			let value = services
-				.users
-				.profile_key(&body.user_id, custom_field.as_str())
+				.profile
+				.profile_key(&body.user_id, field)
 				.await
 				.ok();
 
-			let entry = value
-				.as_ref()
-				.map(|raw| serde_json::to_value(raw.json()))
-				.transpose()?
-				.map(|json| (custom_field.as_str().to_owned(), json));
+			let response = value
+				.map(|value| ProfileFieldValue::new(field.as_str(), value))
+				.transpose()
+				.map_err(|_| {
+					err!(Database(
+						error!(user_id = %body.user_id, key = %field, "Invalid json in database profile value")
+					))
+				})?
+				.into_iter()
+				.collect();
 
-			Ok(entry.into_iter().collect())
+			Ok(response)
 		},
 		| None => {
-			let avatar_url = services.users.avatar_url(&body.user_id).ok();
-			let blurhash = services.users.blurhash(&body.user_id).ok();
-			let displayname = services.users.displayname(&body.user_id).ok();
-			let tz = services.users.timezone(&body.user_id).ok();
-			let custom = services
-				.users
+			let response = services
+				.profile
 				.all_profile_keys(&body.user_id)
-				.collect::<Vec<_>>();
-
-			let (avatar_url, blurhash, custom, displayname, tz) =
-				join5(avatar_url, blurhash, custom, displayname, tz).await;
-
-			let mut response: ProfileResponse = [
-				avatar_url.map(ProfileFieldValue::AvatarUrl),
-				displayname.map(ProfileFieldValue::DisplayName),
-				tz.map(ProfileFieldValue::TimeZone),
-			]
-			.into_iter()
-			.flatten()
-			.collect();
-
-			if let Some(blurhash) = blurhash {
-				response.set("blurhash".to_owned(), JsonValue::String(blurhash));
-			}
-
-			response.extend(
-				custom
-					.into_iter()
-					.filter_map(|(k, v)| serde_json::to_value(v).ok().map(|v| (k, v))),
-			);
+				.collect::<_>()
+				.await;
 
 			Ok(response)
 		},

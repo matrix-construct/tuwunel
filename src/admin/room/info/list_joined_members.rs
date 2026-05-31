@@ -26,7 +26,7 @@ pub(super) async fn list_joined_members(&self, room_id: OwnedRoomId, local_only:
 		.filter_map(async |user_id| {
 			Some((
 				self.services
-					.users
+					.profile
 					.displayname(&user_id)
 					.await
 					.unwrap_or_else(|_| user_id.to_string()),

@@ -888,22 +888,6 @@
 #
 #allow_inbound_profile_lookup_federation_requests = true
 
-# Config option to allow or disallow this homeserver from fetching
-# remote users' profiles over federation
-# (`GET /_matrix/federation/v1/query/profile`) when answering the
-# client-server full-profile endpoint
-# `GET /_matrix/client/v3/profile/{userId}`.
-#
-# When disabled, that endpoint does not query other servers: it serves a
-# locally cached copy if one exists, and otherwise returns
-# `403 M_FORBIDDEN` (MSC3550) rather than `404`, so clients can tell a
-# withheld profile apart from a missing user. The per-field profile
-# endpoints (displayname, avatar_url) are not affected.
-#
-# reloadable: yes
-#
-#allow_outbound_profile_lookup_federation_requests = true
-
 # Allow standard users to create rooms. Appservices and admins are always
 # allowed to create rooms
 # reloadable: yes

@@ -13,13 +13,13 @@ pub(super) async fn profile_html(
 	let server = services.config.server_name.as_str();
 
 	let displayname = services
-		.users
+		.profile
 		.displayname(user_id)
 		.await
 		.unwrap_or_default();
 
 	let avatar_url = services
-		.users
+		.profile
 		.avatar_url(user_id)
 		.await
 		.ok()

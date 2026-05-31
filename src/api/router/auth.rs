@@ -23,8 +23,8 @@ use ruma::{
 	api::client::{
 		directory::get_public_rooms,
 		profile::{
-			get_avatar_url, get_display_name, get_profile, get_profile_field, set_avatar_url,
-			set_display_name,
+			delete_profile_field, get_avatar_url, get_display_name, get_profile,
+			get_profile_field, set_avatar_url, set_display_name, set_profile_field,
 		},
 		session::{logout, logout_all},
 	},
@@ -127,7 +127,9 @@ async fn suspended_account_check(services: &Services, auth: &Auth, route: TypeId
 	};
 
 	let blocked = route == TypeId::of::<set_display_name::v3::Request>()
-		|| route == TypeId::of::<set_avatar_url::v3::Request>();
+		|| route == TypeId::of::<set_avatar_url::v3::Request>()
+		|| route == TypeId::of::<set_profile_field::v3::Request>()
+		|| route == TypeId::of::<delete_profile_field::v3::Request>();
 
 	if !blocked || !services.users.is_suspended(user_id).await {
 		return Ok(());

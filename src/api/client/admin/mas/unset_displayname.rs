@@ -1,9 +1,8 @@
 use axum::extract::State;
 use synapse_admin_api::mas::unset_displayname::{Request, Response};
 use tuwunel_core::Result;
-use tuwunel_service::users::propagation_default;
 
-use super::{Mas, existing_user, joined_rooms};
+use super::{Mas, existing_user};
 use crate::Ruma;
 
 /// # `POST /_synapse/mas/unset_displayname`
@@ -13,18 +12,11 @@ pub(crate) async fn unset_displayname_route(
 	body: Ruma<Request>,
 ) -> Result<Response> {
 	let user_id = existing_user(services, &body.localpart).await?;
-	let rooms = joined_rooms(services, &user_id).await;
-	let propagation = propagation_default(
-		services
-			.server
-			.config
-			.preserve_room_profile_overrides,
-	);
 
 	services
-		.users
-		.update_displayname(&user_id, None, &rooms, propagation)
-		.await;
+		.profile
+		.set_displayname(&user_id, None, None)
+		.await?;
 
 	Ok(Response::new())
 }

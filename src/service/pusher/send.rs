@@ -178,7 +178,7 @@ async fn send_notice<Pdu: Event>(
 
 				notify.sender_display_name = self
 					.services
-					.users
+					.profile
 					.displayname(event.sender())
 					.await
 					.ok();
