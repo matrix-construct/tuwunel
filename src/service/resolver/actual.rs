@@ -15,7 +15,7 @@ use tuwunel_core::{Err, Result, debug, debug_info, debug_warn, err, error, trace
 use super::{
 	DestString, FedDest,
 	cache::{CachedDest, CachedOverride, MAX_IPS},
-	fed::{PortString, add_port_to_hostname, get_ip_with_port},
+	fed::{add_port_to_hostname, get_ip_with_port, srv_url_dest},
 };
 
 #[derive(Clone, Debug)]
@@ -27,6 +27,28 @@ pub(crate) struct ActualDest {
 impl ActualDest {
 	#[inline]
 	pub(crate) fn to_string(&self) -> DestString { self.dest.https_string() }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) struct SrvOverridePlan {
+	pub(super) base_hostname: DestString,
+	pub(super) srv_hostname: DestString,
+	pub(super) srv_port: u16,
+	pub(super) url_dest: FedDest,
+}
+
+/// SRV records are looked up for the base hostname, but the request URL host
+/// must be the SRV target so TLS SNI matches the peer certificate.
+#[inline]
+pub(super) fn srv_override_plan(base_hostname: &str, overrider: &FedDest) -> SrvOverridePlan {
+	let srv_hostname = overrider.hostname();
+
+	SrvOverridePlan {
+		base_hostname: base_hostname.into(),
+		srv_hostname: srv_hostname.as_str().into(),
+		srv_port: overrider.port().unwrap_or(8448),
+		url_dest: srv_url_dest(overrider),
+	}
 }
 
 impl super::Service {
@@ -196,26 +218,16 @@ impl super::Service {
 		overrider: FedDest,
 	) -> Result<FedDest> {
 		debug!("3.3: SRV lookup successful");
-		let force_port = overrider.port();
+		let srv = srv_override_plan(delegated, &overrider);
 		self.conditional_query_and_cache_override(
-			delegated,
-			&overrider.hostname(),
-			force_port.unwrap_or(8448),
+			srv.base_hostname.as_str(),
+			srv.srv_hostname.as_str(),
+			srv.srv_port,
 			cache,
 		)
 		.await?;
 
-		if let Some(port) = force_port {
-			return Ok(FedDest::Named(
-				delegated.into(),
-				format!(":{port}")
-					.as_str()
-					.try_into()
-					.unwrap_or_else(|_| FedDest::default_port()),
-			));
-		}
-
-		Ok(add_port_to_hostname(delegated))
+		Ok(srv.url_dest)
 	}
 
 	async fn actual_dest_3_4(&self, cache: bool, delegated: &str) -> Result<FedDest> {
@@ -233,24 +245,16 @@ impl super::Service {
 		overrider: FedDest,
 	) -> Result<FedDest> {
 		debug!("4: No .well-known; SRV record found");
-		let force_port = overrider.port();
+		let srv = srv_override_plan(host, &overrider);
 		self.conditional_query_and_cache_override(
-			host,
-			&overrider.hostname(),
-			force_port.unwrap_or(8448),
+			srv.base_hostname.as_str(),
+			srv.srv_hostname.as_str(),
+			srv.srv_port,
 			cache,
 		)
 		.await?;
 
-		if let Some(port) = force_port {
-			let port = format!(":{port}");
-			return Ok(FedDest::Named(
-				host.into(),
-				PortString::from(port.as_str()).unwrap_or_else(|_| FedDest::default_port()),
-			));
-		}
-
-		Ok(add_port_to_hostname(host))
+		Ok(srv.url_dest)
 	}
 
 	async fn actual_dest_5(&self, dest: &ServerName, cache: bool) -> Result<FedDest> {
