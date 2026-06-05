@@ -357,6 +357,9 @@ features = [
 version = "0.17"
 default-features = false
 
+[workspace.dependencies.roaring]
+version = "0.11.4"
+
 [workspace.dependencies.ruma]
 git = "https://github.com/matrix-construct/ruma"
 rev = "439210cf2b07f8c5aa6de98f3ae1575abe8762b8"
