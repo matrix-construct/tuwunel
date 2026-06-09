@@ -86,7 +86,7 @@ where
 			if state.first {
 				Vec::new().into_iter().stream()
 			} else {
-				let diff = state.union - state.intersection;
+				let diff = std::ops::Sub::sub(state.union, state.intersection);
 				let result_ids: Vec<Id> = diff
 					.into_iter()
 					.map(move |idx| {
