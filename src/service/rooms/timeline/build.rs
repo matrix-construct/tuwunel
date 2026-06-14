@@ -160,9 +160,9 @@ pub async fn build_and_append_pdu(
 		servers.insert(state_key_uid.server_name().to_owned());
 	}
 
-	// Remove our server from the server list since it will be added to it by
-	// room_servers() and/or the if statement above
-	servers.remove(self.services.globals.server_name());
+	// Remove all servers we are authoritative for from the federation list,
+	// since they will be added to it by room_servers() and/or the if statement above.
+	servers.retain(|s| !self.services.globals.server_is_ours(s));
 
 	self.services
 		.sending

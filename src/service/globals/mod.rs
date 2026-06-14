@@ -100,6 +100,12 @@ impl Service {
 	#[must_use]
 	pub fn server_is_ours(&self, server_name: &ServerName) -> bool {
 		server_name == self.server_name()
+			|| self
+				.server
+				.config
+				.alternate_server_names
+				.iter()
+				.any(|s| s == server_name)
 	}
 
 	#[inline]
