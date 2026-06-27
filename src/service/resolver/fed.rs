@@ -44,6 +44,21 @@ pub(crate) fn add_port_to_hostname(dest: &str) -> FedDest {
 	)
 }
 
+/// URL hostname is the SRV target so TLS SNI matches the SRV peer's cert.
+pub(crate) fn srv_url_dest(overrider: &FedDest) -> FedDest {
+	let target = overrider.hostname();
+	match overrider.port() {
+		| Some(port) => FedDest::Named(
+			target.as_str().into(),
+			format!(":{port}")
+				.as_str()
+				.try_into()
+				.unwrap_or_else(|_| FedDest::default_port()),
+		),
+		| None => add_port_to_hostname(target.as_str()),
+	}
+}
+
 impl FedDest {
 	pub(crate) fn https_string(&self) -> DestString {
 		match self {
