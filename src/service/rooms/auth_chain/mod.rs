@@ -10,6 +10,7 @@ use futures::{
 	FutureExt, Stream, StreamExt, TryFutureExt, pin_mut,
 	stream::{FuturesUnordered, unfold},
 };
+use roaring::RoaringTreemap;
 use ruma::{
 	EventId, OwnedEventId, OwnedRoomId, RoomId, RoomVersionId,
 	room_version_rules::RoomVersionRules,
@@ -335,9 +336,15 @@ where
 
 	debug_assert!(!key.is_empty(), "auth_chain key must not be empty");
 
-	self.db
-		.authchainkey_authchain
-		.put(key.as_slice(), auth_chain);
+	let mut treemap = RoaringTreemap::new();
+	treemap.extend(auth_chain.iter().copied());
+
+	let mut buffer = Vec::with_capacity(treemap.serialized_size());
+	if treemap.serialize_into(&mut buffer).is_ok() {
+		self.db
+			.authchainkey_authchain
+			.put(key.as_slice(), &buffer);
+	}
 }
 
 #[implement(Service)]
@@ -361,7 +368,7 @@ where
 	}
 
 	// On miss, fall back to the single-event legacy table for older entries.
-	let chain = self
+	let bytes = self
 		.db
 		.authchainkey_authchain
 		.qry(key.as_slice())
@@ -377,7 +384,15 @@ where
 				.map_err(|_| err!(Request(NotFound("auth_chain not found"))))
 				.await
 		})
-		.await?
+		.await?;
+
+	// Try reading as highly-compressed RoaringTreemap blob
+	if let Ok(treemap) = RoaringTreemap::deserialize_from(&*bytes) {
+		return Ok(treemap.into_iter().collect());
+	}
+
+	// If header is invalid, fall back to standard array parsing.
+	let chain = bytes
 		.chunks_exact(size_of::<u64>())
 		.map(utils::u64_from_u8)
 		.collect();

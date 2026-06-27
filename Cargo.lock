@@ -3837,6 +3837,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "roaring"
+version = "0.11.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1dedc5658c6ecb3bdb5ef5f3295bb9253f42dcf3fd1402c03f6b1f7659c3c4a9"
+dependencies = [
+ "bytemuck",
+ "byteorder",
+]
+
+[[package]]
 name = "ruma"
 version = "0.15.1"
 source = "git+https://github.com/matrix-construct/ruma?rev=55d532152ec3b6ebab8ac141cc4bcc78452aa049#55d532152ec3b6ebab8ac141cc4bcc78452aa049"
@@ -4846,7 +4856,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.2",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
@@ -5653,6 +5663,7 @@ dependencies = [
  "regex",
  "reqwest 0.13.4",
  "ring",
+ "roaring",
  "ruma",
  "rustls",
  "rustyline-async",
