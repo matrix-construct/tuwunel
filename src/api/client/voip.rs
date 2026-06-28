@@ -3,13 +3,11 @@ use std::time::{Duration, SystemTime};
 use axum::extract::State;
 use base64::{Engine as _, engine::general_purpose};
 use hmac::{Hmac, Mac};
-use ruma::{SecondsSinceUnixEpoch, UserId, api::client::voip::get_turn_server_info};
+use ruma::{SecondsSinceUnixEpoch, api::client::voip::get_turn_server_info};
 use sha1::Sha1;
-use tuwunel_core::{Err, Result, utils};
+use tuwunel_core::{Err, Result};
 
 use crate::Ruma;
-
-const RANDOM_USER_ID_LENGTH: usize = 10;
 
 type HmacSha1 = Hmac<Sha1>;
 
@@ -25,6 +23,18 @@ pub(crate) async fn turn_server_route(
 		return Err!(Request(NotFound("Not Found")));
 	}
 
+	let user = body.sender_user();
+
+	let user_is_guest = services
+		.users
+		.is_deactivated(user)
+		.await
+		.unwrap_or(false);
+
+	if user_is_guest && !services.config.turn_allow_guests {
+		return Err!(Request(Forbidden("Guest users are not allowed to get TURN credentials")));
+	}
+
 	let turn_secret = &services.globals.turn_secret;
 
 	let (username, password) = if let Some(turn_secret) = turn_secret {
@@ -35,14 +45,6 @@ pub(crate) async fn turn_server_route(
 		)
 		.expect("time is valid");
 
-		let random_user_id = || {
-			UserId::parse_with_server_name(
-				utils::random_string(RANDOM_USER_ID_LENGTH).to_lowercase(),
-				&services.server.name,
-			)
-		};
-
-		let user = body.sender_user.map_or_else(random_user_id, Ok)?;
 		let username: String = format!("{}:{}", expiry.get(), user);
 		let mut mac = HmacSha1::new_from_slice(turn_secret.as_bytes())
 			.expect("HMAC can take key of any size");

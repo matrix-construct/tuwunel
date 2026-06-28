@@ -1019,15 +1019,11 @@ pub struct Config {
 	#[serde(default)]
 	pub show_all_local_users_in_user_directory: bool,
 
-	/// Allow guests/unauthenticated users to access TURN credentials.
+	/// Allow guest users to access TURN credentials.
 	///
 	/// This is the equivalent of Synapse's `turn_allow_guests` config option.
-	/// This allows any unauthenticated user to call the endpoint
+	/// Setting this to true allows guest users to call the endpoint
 	/// `/_matrix/client/v3/voip/turnServer`.
-	///
-	/// It is unlikely you need to enable this as all major clients support
-	/// authentication for this endpoint and prevents misuse of your TURN server
-	/// from potential bots.
 	/// reloadable: yes
 	#[serde(default)]
 	pub turn_allow_guests: bool,

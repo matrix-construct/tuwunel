@@ -7,7 +7,6 @@ use ruma::{
 			AccessToken, AccessTokenOptional, AppserviceToken, AppserviceTokenOptional,
 			AuthScheme, NoAccessToken, NoAuthentication,
 		},
-		client::voip::get_turn_server_info,
 		error::{ErrorKind, UnknownTokenErrorData},
 		federation::authentication::ServerSignatures,
 	},
@@ -103,7 +102,7 @@ impl AuthDispatch for AccessToken {
 		request: &mut Request,
 		_json_body: Option<&CanonicalJsonValue>,
 		token: Token,
-		route: TypeId,
+		_route: TypeId,
 	) -> Result<Auth> {
 		match token {
 			| Token::Invalid => unknown_token(),
@@ -115,10 +114,6 @@ impl AuthDispatch for AccessToken {
 				_expires_at: user.2,
 				..Auth::default()
 			}),
-			| Token::None
-				if route == TypeId::of::<get_turn_server_info::v3::Request>()
-					&& services.server.config.turn_allow_guests =>
-				Ok(Auth::default()),
 
 			| Token::None => Err!(Request(MissingToken("Missing access token."))),
 		}
