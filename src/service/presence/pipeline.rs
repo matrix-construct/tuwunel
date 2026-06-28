@@ -344,7 +344,7 @@ impl Service {
 			return Ok(());
 		}
 
-		let presence_state = presence.state().clone();
+		let presence_state = presence.state.clone();
 		let now = tuwunel_core::utils::millis_since_unix_epoch();
 		let aggregated = self
 			.device_presence
@@ -353,8 +353,8 @@ impl Service {
 
 		if aggregated.device_count == 0 {
 			let last_active_ago =
-				Some(UInt::new_saturating(now.saturating_sub(presence.last_active_ts())));
-			let status_msg = presence.status_msg();
+				Some(UInt::new_saturating(now.saturating_sub(presence.last_active_ts)));
+			let status_msg = presence.status_msg;
 
 			let new_state = match (&presence_state, last_active_ago.map(u64::from)) {
 				| (PresenceState::Online, Some(ago)) if ago >= self.idle_timeout =>
@@ -398,9 +398,7 @@ impl Service {
 				.schedule_flush_suppressed_for_user(user_id.to_owned(), "presence->inactive");
 		}
 
-		let status_msg = aggregated
-			.status_msg
-			.or_else(|| presence.status_msg());
+		let status_msg = aggregated.status_msg.or(presence.status_msg);
 		let last_active_ago =
 			Some(UInt::new_saturating(now.saturating_sub(aggregated.last_active_ts)));
 

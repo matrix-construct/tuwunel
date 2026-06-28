@@ -8,7 +8,7 @@ use tuwunel_core::{
 };
 use tuwunel_database::{Deserialized, Json, Map};
 
-use super::Presence;
+use crate::presence::Presence;
 
 pub(crate) struct Data {
 	presenceid_presence: Arc<Map>,
@@ -36,9 +36,11 @@ impl Data {
 
 		let key = presenceid_key(count, user_id);
 		let bytes = self.presenceid_presence.get(&key).await?;
-		let event = Presence::from_json_bytes(&bytes)?
-			.to_presence_event(user_id, &self.services.users)
-			.await;
+		let event = self
+			.services
+			.presence
+			.from_json_bytes_to_event(&bytes, user_id)
+			.await?;
 
 		Ok((count, event))
 	}
@@ -119,12 +121,12 @@ impl Data {
 			status_msg
 		};
 
-		let presence = Presence::new(
-			presence_state.to_owned(),
-			currently_active.unwrap_or(false),
+		let presence = Presence {
+			state: presence_state.to_owned(),
+			currently_active: currently_active.unwrap_or(false),
 			last_active_ts,
 			status_msg,
-		);
+		};
 
 		let count = self.services.globals.next_count();
 		let key = presenceid_key(*count, user_id);

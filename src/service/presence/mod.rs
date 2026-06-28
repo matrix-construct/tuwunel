@@ -2,22 +2,48 @@ mod aggregate;
 mod data;
 // Write/update pipeline lives in pipeline.rs.
 mod pipeline;
-mod presence;
 
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
 use futures::{
 	Stream, StreamExt, TryFutureExt,
-	future::{AbortHandle, Abortable},
+	future::{AbortHandle, Abortable, join},
 	stream::FuturesUnordered,
 };
 use loole::{Receiver, Sender};
-use ruma::{OwnedUserId, UserId, events::presence::PresenceEvent, presence::PresenceState};
+use ruma::{
+	OwnedUserId, UInt, UserId,
+	events::presence::{PresenceEvent, PresenceEventContent},
+	presence::PresenceState,
+};
+use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
-use tuwunel_core::{Result, checked, debug, debug_warn, result::LogErr, trace};
+use tuwunel_core::{
+	Result, checked, debug, debug_warn, err,
+	result::LogErr,
+	trace,
+	utils::{self, TryFutureExtExt},
+};
 
-use self::{aggregate::PresenceAggregator, data::Data, presence::Presence};
+use self::{aggregate::PresenceAggregator, data::Data};
+
+/// Represents data required to be kept in order to implement the presence
+/// specification.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub(super) struct Presence {
+	pub(super) state: PresenceState,
+	pub(super) currently_active: bool,
+	pub(super) last_active_ts: u64,
+	pub(super) status_msg: Option<String>,
+}
+
+impl Presence {
+	pub(super) fn from_json_bytes(bytes: &[u8]) -> Result<Self> {
+		serde_json::from_slice(bytes)
+			.map_err(|_| err!(Database("Invalid presence data in database")))
+	}
+}
 
 pub struct Service {
 	timer_channel: (Sender<TimerType>, Receiver<TimerType>),
@@ -138,7 +164,7 @@ impl Service {
 			return;
 		}
 
-		let now = tuwunel_core::utils::millis_since_unix_epoch();
+		let now = utils::millis_since_unix_epoch();
 		self.last_sync_seen
 			.write()
 			.await
@@ -147,7 +173,7 @@ impl Service {
 
 	/// Returns milliseconds since last observed sync for user (if any)
 	pub async fn last_sync_gap_ms(&self, user_id: &UserId) -> Option<u64> {
-		let now = tuwunel_core::utils::millis_since_unix_epoch();
+		let now = utils::millis_since_unix_epoch();
 		self.last_sync_seen
 			.read()
 			.await
@@ -239,12 +265,30 @@ impl Service {
 		user_id: &UserId,
 	) -> Result<PresenceEvent> {
 		let presence = Presence::from_json_bytes(bytes)?;
-		let event = presence
-			.to_presence_event(user_id, &self.services.users)
-			.await;
+		let event = self.to_presence_event(presence, user_id).await;
 
 		Ok(event)
 	}
-}
 
-// presence_timer lives in pipeline.rs alongside the timer handling logic.
+	/// Creates a PresenceEvent from available data.
+	async fn to_presence_event(&self, presence: Presence, user_id: &UserId) -> PresenceEvent {
+		let now = utils::millis_since_unix_epoch();
+		let last_active_ago = now.saturating_sub(presence.last_active_ts);
+
+		let avatar_url = self.services.users.avatar_url(user_id).ok();
+		let displayname = self.services.users.displayname(user_id).ok();
+		let (avatar_url, displayname) = join(avatar_url, displayname).await;
+
+		PresenceEvent {
+			sender: user_id.to_owned(),
+			content: PresenceEventContent {
+				presence: presence.state,
+				status_msg: presence.status_msg,
+				currently_active: Some(presence.currently_active),
+				last_active_ago: Some(UInt::new_saturating(last_active_ago)),
+				avatar_url,
+				displayname,
+			},
+		}
+	}
+}
