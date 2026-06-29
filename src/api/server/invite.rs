@@ -252,10 +252,6 @@ fn validate_origins<'a>(
 		return Err!(Request(Forbidden("Can only send invites on behalf of your users.")));
 	}
 
-	if origin.is_some_and(|origin| origin != sender.server_name()) {
-		return Err!(Request(Forbidden("Your users can only be from your origin.")));
-	}
-
 	if origin.is_some_and(|origin| origin != body_origin) {
 		return Err!(Request(Forbidden("Can only send events from your origin.")));
 	}
