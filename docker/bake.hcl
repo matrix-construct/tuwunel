@@ -388,7 +388,7 @@ target "complement-testee" {
         elem_tag("complement-testee", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target], "latest"),
     ]
     target = "complement-testee"
-    output = ["type=docker,compression=zstd,mode=min"]
+    output = ["type=docker,compression=zstd,mode=max,compression-level=${cache_compress_level}"]
     entitlements = ["network.host"]
     dockerfile = "${docker_dir}/Dockerfile.complement"
     matrix = cargo_rust_feat_sys
@@ -426,7 +426,7 @@ target "complement-tester" {
         elem_tag("complement-tester", [sys_name, sys_version, sys_target], "latest"),
     ]
     target = "complement-tester"
-    output = ["type=docker,compression=zstd,mode=min,compression-level=${zstd_image_compress_level}"]
+    output = ["type=docker,compression=zstd,mode=max,compression-level=${cache_compress_level}"]
     entitlements = ["network.host"]
     matrix = sys
     inherits = [
@@ -491,7 +491,7 @@ target "mas-testee" {
         "tuwunel-mas-testee:latest",
     ]
     target = "mas-testee"
-    output = ["type=docker,compression=zstd,mode=min"]
+    output = ["type=docker,compression=zstd,mode=max,compression-level=${cache_compress_level}"]
     dockerfile = "${docker_dir}/Dockerfile.mas"
     matrix = cargo_rust_feat_sys
     inherits = [
@@ -534,7 +534,7 @@ target "complement-crypto-tester" {
         elem_tag("complement-crypto-tester", [sys_name, sys_version, sys_target], "latest"),
     ]
     target = "complement-crypto-tester"
-    output = ["type=docker,compression=zstd,mode=min,compression-level=${zstd_image_compress_level}"]
+    output = ["type=docker,compression=zstd,mode=max,compression-level=${cache_compress_level}"]
     entitlements = ["network.host"]
     dockerfile = "${docker_dir}/Dockerfile.complement-crypto"
     matrix = sys
@@ -639,7 +639,7 @@ target "playwright-testee" {
         "tuwunel-playwright-testee:latest",
     ]
     target = "playwright-testee"
-    output = ["type=docker,compression=zstd,mode=min"]
+    output = ["type=docker,compression=zstd,mode=max,compression-level=${cache_compress_level}"]
     dockerfile = "${docker_dir}/Dockerfile.playwright"
     matrix = cargo_rust_feat_sys
     inherits = [
@@ -676,7 +676,7 @@ target "playwright-tester" {
         "tuwunel-playwright-tester:latest",
     ]
     target = "playwright-tester"
-    output = ["type=docker,compression=zstd,mode=min,compression-level=${zstd_image_compress_level}"]
+    output = ["type=docker,compression=zstd,mode=max,compression-level=${cache_compress_level}"]
     dockerfile = "${docker_dir}/Dockerfile.playwright"
     matrix = sys
     inherits = [
@@ -747,7 +747,7 @@ target "rust-sdk-integ" {
     tags = [
         elem_tag("rust-sdk-integ", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target], "latest"),
     ]
-    output = ["type=docker,compression=zstd,mode=max,compression-level=${zstd_image_compress_level}"]
+    output = ["type=docker,compression=zstd,mode=max,compression-level=${cache_compress_level}"]
     target = "rust-sdk-integration"
     dockerfile = "${docker_dir}/Dockerfile.matrix-rust-sdk"
     matrix = cargo_rust_feat_sys
@@ -841,7 +841,7 @@ target "smoke-nix" {
     tags = [
         elem_tag("smoke-nix", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target], "latest"),
     ]
-    output = ["type=cacheonly,compression=zstd,mode=min,compression-level=${cache_compress_level}"]
+    output = ["type=cacheonly,compression=zstd,mode=max,compression-level=${cache_compress_level}"]
     dockerfile = "${docker_dir}/Dockerfile.nix"
     target = "smoke-nix"
     matrix = cargo_rust_feat_sys
@@ -912,7 +912,7 @@ target "tests-smoke" {
         elem_tag("tests-smoke", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target], "latest"),
     ]
     target = "smoke-startup"
-    output = ["type=cacheonly,compression=zstd,mode=min,compression-level=${cache_compress_level}"]
+    output = ["type=cacheonly,compression=zstd,mode=max,compression-level=${cache_compress_level}"]
     dockerfile = "${docker_dir}/Dockerfile.smoketest"
     matrix = cargo_rust_feat_sys
     inherits = [
@@ -1078,7 +1078,7 @@ target "static" {
     tags = [
         elem_tag("static", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target], "latest"),
     ]
-    output = ["type=docker,compression=uncompressed,mode=min"]
+    output = ["type=docker,compression=zstd,mode=min,compression-level=${zstd_image_compress_level}"]
     matrix = cargo_rust_feat_sys
     inherits = [
         elem("install", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target]),
@@ -1130,7 +1130,7 @@ target "install" {
     ]
     labels = install_labels
     annotations = install_annotations
-    output = ["type=docker,compression=zstd,mode=max,compression-level=${zstd_image_compress_level}"]
+    output = ["type=docker,compression=zstd,mode=max,compression-level=${cache_compress_level}"]
     dockerfile = "${docker_dir}/Dockerfile.install"
     target = "install"
     matrix = cargo_rust_feat_sys
@@ -1277,7 +1277,7 @@ target "nix" {
     tags = [
         elem_tag("nix", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target], "latest"),
     ]
-    output = ["type=docker,compression=zstd,mode=min,compression-level=${zstd_image_compress_level}"]
+    output = ["type=docker,compression=zstd,mode=max,compression-level=${cache_compress_level}"]
     target = "nix-pkg"
     matrix = cargo_rust_feat_sys
     inherits = [
@@ -1290,7 +1290,7 @@ target "build-nix" {
     tags = [
         elem_tag("build-nix", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target], "latest"),
     ]
-    output = ["type=cacheonly,compression=zstd,mode=min,compression-level=${cache_compress_level}"]
+    output = ["type=cacheonly,compression=zstd,mode=max,compression-level=${cache_compress_level}"]
     dockerfile = "${docker_dir}/Dockerfile.nix"
     target = "build-nix"
     matrix = cargo_rust_feat_sys
@@ -1314,7 +1314,7 @@ target "book" {
         elem_tag("book", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target], "latest"),
     ]
     target = "book"
-    output = ["type=docker,compression=zstd,mode=min,compression-level=${zstd_image_compress_level}"]
+    output = ["type=docker,compression=zstd,mode=max,compression-level=${cache_compress_level}"]
     matrix = cargo_rust_feat_sys
     inherits = [
         elem("deps-base", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target]),
@@ -1334,7 +1334,7 @@ target "docs" {
     tags = [
         elem_tag("docs", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target], "latest"),
     ]
-    output = ["type=docker,compression=zstd,mode=min,compression-level=${zstd_image_compress_level}"]
+    output = ["type=docker,compression=zstd,mode=max,compression-level=${cache_compress_level}"]
     matrix = cargo_rust_feat_sys
     inherits = [
         elem("deps-build", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target]),
@@ -1523,7 +1523,7 @@ target "fmt" {
 target "cargo" {
     name = elem("cargo", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target])
     target = "cargo"
-    output = ["type=cacheonly,compression=zstd,mode=min,compression-level=${cache_compress_level}"]
+    output = ["type=cacheonly,compression=zstd,mode=max,compression-level=${cache_compress_level}"]
     matrix = cargo_rust_feat_sys
     inherits = [
         elem("deps-base", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target])
@@ -1632,7 +1632,7 @@ target "deps-base" {
         elem_tag("deps-base", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target], "latest")
     ]
     target = "cook"
-    output = ["type=cacheonly,compression=zstd,mode=min,compression-level=${cache_compress_level}"]
+    output = ["type=cacheonly,compression=zstd,mode=max,compression-level=${cache_compress_level}"]
     dockerfile = "${docker_dir}/Dockerfile.cargo"
     matrix = cargo_rust_feat_sys
     inherits = [
@@ -1787,7 +1787,7 @@ target "rocksdb" {
         elem_tag("rocksdb", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target], "latest"),
     ]
     target = "rocksdb"
-    output = ["type=cacheonly,compression=zstd,mode=min"]
+    output = ["type=cacheonly,compression=zstd,mode=min,compression-level=${cache_compress_level}"]
     matrix = cargo_rust_feat_sys
     inherits = [
         elem("rocksdb-build", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target])
@@ -2248,7 +2248,7 @@ target "system" {
         elem_tag("system", [sys_name, sys_version, sys_target], "latest"),
     ]
     target = "system"
-    output = ["type=cacheonly,compression=zstd,mode=min,compression-level=${cache_compress_level}"]
+    output = ["type=cacheonly,compression=zstd,mode=max,compression-level=${cache_compress_level}"]
     dockerfile = "${docker_dir}/Dockerfile.system"
     context = "."
     matrix = sys
