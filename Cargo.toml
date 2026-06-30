@@ -29,7 +29,7 @@ keywords = [
 license = "Apache-2.0"
 readme = "README.md"
 repository = "https://github.com/matrix-construct/tuwunel"
-rust-version = "1.94.0"
+rust-version = "1.95.0"
 version = "1.8.0"
 
 [workspace.metadata.crane]

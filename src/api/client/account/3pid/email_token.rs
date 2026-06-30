@@ -6,7 +6,7 @@ use tuwunel_service::Services;
 use url::form_urlencoded;
 
 /// Lifetime of a pending email verification before it self-reaps.
-const PENDING_TTL: Duration = Duration::from_secs(3600);
+const PENDING_TTL: Duration = Duration::from_hours(1);
 
 /// Shared requestToken spine for the email medium: throttle both axes, open or
 /// reuse a pending verification, and send the magic-link message when a token
