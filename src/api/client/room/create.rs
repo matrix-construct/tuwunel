@@ -650,7 +650,7 @@ async fn create_create_event_legacy(
 	services: &Services,
 	body: &Ruma<create_room::v3::Request>,
 	room_version: &RoomVersionId,
-	_version_rules: &RoomVersionRules,
+	version_rules: &RoomVersionRules,
 ) -> Result<(OwnedRoomId, RoomMutexGuard)> {
 	let room_id: OwnedRoomId = match &body.room_id {
 		| None => RoomId::new_v1(&services.server.name),
@@ -666,8 +666,6 @@ async fn create_create_event_legacy(
 
 	let create_content = match &body.creation_content {
 		| Some(content) => {
-			use RoomVersionId::*;
-
 			let mut content = content
 				.deserialize_as_unchecked::<CanonicalJsonObject>()
 				.map_err(|e| {
@@ -676,22 +674,15 @@ async fn create_create_event_legacy(
 					))))
 				})?;
 
-			match room_version {
-				| V1 | V2 | V3 | V4 | V5 | V6 | V7 | V8 | V9 | V10 => {
-					content.insert(
-						"creator".into(),
-						json!(body.sender_user())
-							.try_into()
-							.map_err(|e| {
-								err!(Request(BadJson(debug_error!(
-									"Invalid creation content: {e}"
-								))))
-							})?,
-					);
-				},
-				| _ => {
-					// V11+ removed the "creator" key
-				},
+			if !version_rules.authorization.use_room_create_sender {
+				content.insert(
+					"creator".into(),
+					json!(body.sender_user())
+						.try_into()
+						.map_err(|e| {
+							err!(Request(BadJson(debug_error!("Invalid creation content: {e}"))))
+						})?,
+				);
 			}
 
 			if !services.config.federate_created_rooms
@@ -710,12 +701,10 @@ async fn create_create_event_legacy(
 			content
 		},
 		| None => {
-			use RoomVersionId::*;
-
-			let content = match room_version {
-				| V1 | V2 | V3 | V4 | V5 | V6 | V7 | V8 | V9 | V10 =>
-					RoomCreateEventContent::new_v1(body.sender_user().to_owned()),
-				| _ => RoomCreateEventContent::new_v11(),
+			let content = if !version_rules.authorization.use_room_create_sender {
+				RoomCreateEventContent::new_v1(body.sender_user().to_owned())
+			} else {
+				RoomCreateEventContent::new_v11()
 			};
 
 			let mut content =

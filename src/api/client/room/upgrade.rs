@@ -291,14 +291,11 @@ async fn upgrade_room_create_legacy(
 
 	// Send a m.room.create event containing a predecessor field and the applicable
 	// room_version. "creator" key no longer exists in V11+ rooms.
-	{
-		use RoomVersionId::*;
-		match new_version {
-			| V1 | V2 | V3 | V4 | V5 | V6 | V7 | V8 | V9 | V10 =>
-				content.insert("creator".into(), json!(&sender_user).try_into()?),
-			| _ => content.remove("creator"),
-		}
-	};
+	if !version_rules.authorization.use_room_create_sender {
+		content.insert("creator".into(), json!(&sender_user).try_into()?);
+	} else {
+		content.remove("creator");
+	}
 
 	content.insert("predecessor".into(), json!(predecessor).try_into()?);
 	content.insert("room_version".into(), json!(new_version).try_into()?);

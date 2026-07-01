@@ -16,7 +16,7 @@ use ruma::{
 		topic::{RoomTopicEventContent, TopicContentBlock},
 	},
 };
-use tuwunel_core::{Result, pdu::PduBuilder};
+use tuwunel_core::{Result, matrix::room_version, pdu::PduBuilder};
 
 use crate::Services;
 
@@ -44,6 +44,8 @@ pub async fn create_admin_room(services: &Services) -> Result {
 	let room_id = RoomId::new_v1(services.globals.server_name());
 	let room_version = RoomVersionId::V11;
 
+	let room_version_rules = room_version::rules(&room_version)?;
+
 	let _short_id = services
 		.short
 		.get_or_create_shortroomid(&room_id)
@@ -57,13 +59,13 @@ pub async fn create_admin_room(services: &Services) -> Result {
 		create_server_user(services).await?;
 	}
 
-	let create_content = {
-		use RoomVersionId::*;
-		match room_version {
-			| V1 | V2 | V3 | V4 | V5 | V6 | V7 | V8 | V9 | V10 =>
-				RoomCreateEventContent::new_v1(server_user.into()),
-			| _ => RoomCreateEventContent::new_v11(),
-		}
+	let create_content = if !room_version_rules
+		.authorization
+		.use_room_create_sender
+	{
+		RoomCreateEventContent::new_v1(server_user.into())
+	} else {
+		RoomCreateEventContent::new_v11()
 	};
 
 	// 1. The room create event
