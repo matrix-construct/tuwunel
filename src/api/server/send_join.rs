@@ -4,7 +4,7 @@ use axum::extract::State;
 use futures::{FutureExt, StreamExt, TryFutureExt, TryStreamExt, future::try_join4};
 use ruma::{
 	CanonicalJsonObject, OwnedEventId, OwnedRoomId, OwnedServerName, OwnedUserId, RoomId,
-	RoomVersionId, ServerName, UserId,
+	ServerName, UserId,
 	api::federation::membership::create_join_event,
 	events::{
 		StateEventType,
@@ -15,7 +15,7 @@ use serde_json::value::RawValue as RawJsonValue;
 use tuwunel_core::{
 	Err, Result, at, debug_error, err,
 	itertools::Itertools,
-	matrix::event::gen_event_id_canonical_json,
+	matrix::{RoomVersionRules, event::gen_event_id_canonical_json, room_version},
 	utils::{
 		BoolExt,
 		future::{BoolExt as _, ReadyBoolExt},
@@ -113,13 +113,15 @@ async fn create_join_event(
 	let (content, joining_user) =
 		validate_join_event_shape(services, &value, origin, room_id).await?;
 
+	let room_version_rules = room_version::rules(&room_version)?;
+
 	if let Some(authorising_user) = content.join_authorized_via_users_server {
 		validate_restricted_join(
 			services,
 			&authorising_user,
 			&joining_user,
 			room_id,
-			&room_version,
+			&room_version_rules,
 		)
 		.await?;
 	}
@@ -359,13 +361,14 @@ async fn validate_restricted_join(
 	authorising_user: &UserId,
 	joining_user: &UserId,
 	room_id: &RoomId,
-	room_version: &RoomVersionId,
+	room_version_rules: &RoomVersionRules,
 ) -> Result {
-	use RoomVersionId::*;
-
-	if matches!(room_version, V1 | V2 | V3 | V4 | V5 | V6 | V7) {
+	if !room_version_rules
+		.authorization
+		.restricted_join_rule
+	{
 		return Err!(Request(InvalidParam(
-			"Room version {room_version} does not support restricted rooms but \
+			"Room version does not support restricted rooms but \
 			 join_authorised_via_users_server ({authorising_user}) was found in the event."
 		)));
 	}
@@ -388,8 +391,13 @@ async fn validate_restricted_join(
 		)));
 	}
 
-	if !super::user_can_perform_restricted_join(services, joining_user, room_id, room_version)
-		.await?
+	if !super::user_can_perform_restricted_join(
+		services,
+		joining_user,
+		room_id,
+		room_version_rules,
+	)
+	.await?
 	{
 		return Err!(Request(UnableToAuthorizeJoin(
 			"Joining user did not pass restricted room's rules."

@@ -1,15 +1,16 @@
-use RoomVersionId::*;
 use axum::extract::State;
 use futures::TryFutureExt;
 use ruma::{
-	RoomVersionId,
 	api::{
 		error::{ErrorKind, IncompatibleRoomVersionErrorData},
 		federation::membership::prepare_knock_event,
 	},
 	events::room::member::{MembershipState, RoomMemberEventContent},
 };
-use tuwunel_core::{Err, Error, Result, at, debug_warn, matrix::pdu::PduBuilder};
+use tuwunel_core::{
+	Err, Error, Result, at, debug_warn,
+	matrix::{pdu::PduBuilder, room_version},
+};
 
 use crate::Ruma;
 
@@ -47,21 +48,23 @@ pub(crate) async fn create_knock_event_template_route(
 		.get_room_version(&body.room_id)
 		.await?;
 
-	if matches!(room_version, V1 | V2 | V3 | V4 | V5 | V6) {
-		return Err(Error::BadRequest(
-			ErrorKind::IncompatibleRoomVersion(IncompatibleRoomVersionErrorData::new(
-				room_version.clone(),
-			)),
-			"Room version does not support knocking.",
-		));
-	}
-
 	if !body.ver.contains(&room_version) {
 		return Err(Error::BadRequest(
 			ErrorKind::IncompatibleRoomVersion(IncompatibleRoomVersionErrorData::new(
-				room_version.clone(),
+				room_version,
 			)),
 			"Your homeserver does not support the features required to knock on this room.",
+		));
+	}
+
+	let room_version_rules = room_version::rules(&room_version)?;
+
+	if !room_version_rules.authorization.knocking {
+		return Err(Error::BadRequest(
+			ErrorKind::IncompatibleRoomVersion(IncompatibleRoomVersionErrorData::new(
+				room_version,
+			)),
+			"Room version does not support knocking.",
 		));
 	}
 

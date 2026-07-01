@@ -2,7 +2,6 @@ use axum::extract::State;
 use futures::{FutureExt, future::try_join};
 use ruma::{
 	OwnedServerName, OwnedUserId,
-	RoomVersionId::*,
 	api::federation::membership::{RawStrippedState, create_knock_event},
 	events::{
 		StateEventType,
@@ -12,7 +11,7 @@ use ruma::{
 };
 use tuwunel_core::{
 	Err, Result, at, err,
-	matrix::{event::gen_event_id_canonical_json, pdu::PduEvent},
+	matrix::{event::gen_event_id_canonical_json, pdu::PduEvent, room_version},
 	warn,
 };
 
@@ -54,7 +53,9 @@ pub(crate) async fn create_knock_event_v1_route(
 		.get_room_version(&body.room_id)
 		.await?;
 
-	if matches!(room_version_id, V1 | V2 | V3 | V4 | V5 | V6) {
+	let room_version_rules = room_version::rules(&room_version_id)?;
+
+	if !room_version_rules.authorization.knocking {
 		return Err!(Request(Forbidden("Room version does not support knocking.")));
 	}
 
