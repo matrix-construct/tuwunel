@@ -113,9 +113,11 @@ pub(crate) async fn login_route(
 ) -> Result<login::v3::Response> {
 	// Validate login method
 	let user_id = match &body.login_info {
-		| LoginInfo::Password(info) => password::handle_login(&services, &body, info).await?,
+		| LoginInfo::Password(info) if services.config.login_with_password =>
+			password::handle_login(&services, &body, info).await?,
 		| LoginInfo::Token(info) => token::handle_login(&services, &body, info).await?,
-		| LoginInfo::Jwt(info) => jwt::handle_login(&services, &body, info).await?,
+		| LoginInfo::Jwt(info) if services.config.jwt.enable =>
+			jwt::handle_login(&services, &body, info).await?,
 		| LoginInfo::ApplicationService(info) =>
 			appservice::handle_login(&services, &body, info)?,
 		| _ => {
