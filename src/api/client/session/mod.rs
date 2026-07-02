@@ -50,44 +50,45 @@ pub(crate) async fn get_login_types_route(
 
 	let list_idps = !services.config.sso_custom_providers_page && !services.config.single_sso;
 
-	let identity_providers: Vec<_> = services
-		.config
-		.identity_provider
-		.values()
-		.filter(|_| list_idps)
-		.cloned()
-		.map(|config| IdentityProvider {
-			id: config.id().to_owned(),
-			brand: Some(config.brand.clone().into()),
-			icon: config.icon,
-			name: config.name.unwrap_or(config.brand),
-		})
-		.collect();
+	let identity_providers: Option<Vec<_>> = list_idps.then(|| {
+		services
+			.config
+			.identity_provider
+			.values()
+			.cloned()
+			.map(|config| IdentityProvider {
+				id: config.id().to_owned(),
+				brand: Some(config.brand.clone().into()),
+				icon: config.icon,
+				name: config.name.unwrap_or(config.brand),
+			})
+			.collect()
+	});
 
-	let flows = [
+	let mut flows = vec![
 		LoginType::ApplicationService(ApplicationServiceLoginType::default()),
-		LoginType::Jwt(JwtLoginType::default()),
-		LoginType::Password(PasswordLoginType::default()),
 		LoginType::Token(TokenLoginType { get_login_token }),
-		LoginType::Sso(SsoLoginType {
-			identity_providers,
-			oauth_aware_preferred: services.config.oidc_aware_preferred,
-		}),
 	];
 
-	Ok(get_login_types::v3::Response {
-		flows: flows
-			.into_iter()
-			.filter(|login_type| match login_type {
-				| LoginType::Sso(SsoLoginType { identity_providers, .. })
-					if list_idps && identity_providers.is_empty() =>
-					false,
-				| LoginType::Password(_) => services.config.login_with_password,
-				| LoginType::Jwt(_) => services.config.jwt.enable,
-				| _ => true,
-			})
-			.collect(),
-	})
+	if services.config.login_with_password {
+		flows.push(LoginType::Password(PasswordLoginType::default()));
+	}
+
+	if identity_providers
+		.as_ref()
+		.is_none_or(|x| !x.is_empty())
+	{
+		flows.push(LoginType::Sso(SsoLoginType {
+			identity_providers: identity_providers.unwrap_or_default(),
+			oauth_aware_preferred: services.config.oidc_aware_preferred,
+		}));
+	}
+
+	if services.config.jwt.enable {
+		flows.push(LoginType::Jwt(JwtLoginType::default()));
+	}
+
+	Ok(get_login_types::v3::Response { flows })
 }
 
 /// # `POST /_matrix/client/v3/login`
