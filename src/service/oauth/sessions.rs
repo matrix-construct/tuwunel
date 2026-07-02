@@ -52,6 +52,9 @@ pub struct Session {
 	/// Access token to the provider.
 	pub access_token: Option<String>,
 
+	/// OIDC ID token returned by the provider.
+	pub id_token: Option<String>,
+
 	/// Duration in seconds the access_token is valid for.
 	pub expires_in: Option<u64>,
 
