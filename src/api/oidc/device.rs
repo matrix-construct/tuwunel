@@ -12,7 +12,6 @@ use http::{
 	StatusCode,
 	header::{CACHE_CONTROL, CONTENT_SECURITY_POLICY, PRAGMA, REFERRER_POLICY},
 };
-use ruma::OwnedUserId;
 use serde::Deserialize;
 use serde_json::json;
 use tuwunel_core::{Err, Error, Result, err};
@@ -23,7 +22,7 @@ use tuwunel_service::{
 use url::Url;
 
 use self::{consent::consent_html, entry::entry_html, error::error_html, result::result_html};
-use super::{oauth_error, url_encode};
+use super::{consume_login_token, oauth_error, peek_login_token, sso_redirect_url, url_encode};
 use crate::ClientIp;
 
 // Per-response CSP: the consent form needs form-action 'self', which the global
@@ -183,14 +182,7 @@ fn device_sso_redirect(services: &Services, user_code: &str) -> Result<Response>
 		.query_pairs_mut()
 		.append_pair("user_code", user_code);
 
-	let idp_id_enc = url_encode(&idp_id);
-	let mut sso_url =
-		Url::parse(&format!("{base}/_matrix/client/v3/login/sso/redirect/{idp_id_enc}"))
-			.map_err(|_| err!(Request(InvalidParam("Failed to build SSO URL"))))?;
-
-	sso_url
-		.query_pairs_mut()
-		.append_pair("redirectUrl", callback_url.as_str());
+	let sso_url = sso_redirect_url(base, &idp_id, &callback_url)?;
 
 	Ok(device_redirect_response(Redirect::temporary(sso_url.as_str())))
 }
@@ -317,26 +309,6 @@ async fn handle_device_callback_post(
 
 		| _ => Err!(Request(InvalidParam("Unknown action"))),
 	}
-}
-
-async fn peek_login_token(services: &Services, token: Option<&str>) -> Result<OwnedUserId> {
-	let token = token.ok_or_else(|| err!(Request(Forbidden("Missing login token"))))?;
-
-	services
-		.users
-		.peek_login_token(token)
-		.await
-		.map_err(|_| err!(Request(Forbidden("Invalid or expired login token"))))
-}
-
-async fn consume_login_token(services: &Services, token: Option<&str>) -> Result<OwnedUserId> {
-	let token = token.ok_or_else(|| err!(Request(Forbidden("Missing login token"))))?;
-
-	services
-		.users
-		.find_from_login_token(token)
-		.await
-		.map_err(|_| err!(Request(Forbidden("Invalid or expired login token"))))
 }
 
 fn device_redirect_response(redirect: Redirect) -> Response {

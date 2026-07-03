@@ -15,7 +15,7 @@ use tuwunel_service::{
 };
 use url::Url;
 
-use super::{OIDC_REQ_ID_LENGTH, url_encode};
+use super::{OIDC_REQ_ID_LENGTH, sso_redirect_url};
 use crate::ClientIp;
 
 #[derive(Debug, Deserialize)]
@@ -151,16 +151,7 @@ pub(crate) async fn authorize_route(
 			url
 		})?;
 
-	let idp_id_enc = url_encode(&idp_id);
-	let sso_url =
-		Url::parse(&format!("{base}/_matrix/client/v3/login/sso/redirect/{idp_id_enc}"))
-			.map_err(|_| err!(error!("Failed to build SSO URL")))
-			.map(|mut url| {
-				url.query_pairs_mut()
-					.append_pair("redirectUrl", complete_url.as_str());
-
-				url
-			})?;
+	let sso_url = sso_redirect_url(base, &idp_id, &complete_url)?;
 
 	Ok(Redirect::temporary(sso_url.as_str()))
 }
