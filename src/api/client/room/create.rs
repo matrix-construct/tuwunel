@@ -532,12 +532,11 @@ async fn finalize_alias_and_directory(
 	if body.visibility == room::Visibility::Public {
 		services.directory.set_public(room_id);
 
-		if services.server.config.admin_room_notices {
-			services
-				.admin
-				.send_text(&format!("{sender_user} made {room_id} public to the room directory"))
-				.await;
-		}
+		services
+			.admin
+			.notify_loud(&format!("{sender_user} made {room_id} public to the room directory"))
+			.await;
+
 		info!("{sender_user} made {0} public to the room directory", room_id);
 	}
 
@@ -941,9 +940,7 @@ async fn can_publish_directory_check(
 	);
 
 	warn!("{msg}");
-	if services.server.config.admin_room_notices {
-		services.admin.notice(&msg).await;
-	}
+	services.admin.notify(&msg).await;
 
 	Err!(Request(Forbidden("Publishing rooms to the room directory is not allowed")))
 }

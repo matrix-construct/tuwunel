@@ -465,9 +465,7 @@ async fn announce_new_user(
 		info!("{notice}");
 	}
 
-	if services.server.config.admin_room_notices {
-		services.admin.notice(&notice).await;
-	}
+	services.admin.notify(&notice).await;
 
 	Ok(())
 }

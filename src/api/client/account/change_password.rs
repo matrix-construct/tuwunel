@@ -47,12 +47,10 @@ pub(crate) async fn change_password_route(
 
 	info!("User {sender_user} changed their password.");
 
-	if services.server.config.admin_room_notices {
-		services
-			.admin
-			.notice(&format!("User {sender_user} changed their password."))
-			.await;
-	}
+	services
+		.admin
+		.notify(&format!("User {sender_user} changed their password."))
+		.await;
 
 	Ok(change_password::v3::Response {})
 }

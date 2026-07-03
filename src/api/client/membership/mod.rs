@@ -108,9 +108,7 @@ async fn maybe_deactivate(services: &Services, user_id: &UserId, client_ip: IpAd
 
 		warn!("{notice}");
 
-		if services.server.config.admin_room_notices {
-			services.admin.send_text(&notice).await;
-		}
+		services.admin.notify_loud(&notice).await;
 
 		services
 			.deactivate

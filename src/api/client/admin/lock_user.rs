@@ -30,12 +30,10 @@ pub(crate) async fn lock_user_route(
 		},
 	};
 
-	if services.server.config.admin_room_notices {
-		services
-			.admin
-			.send_text(&format!("{user_id} has been {action} by {sender_user}."))
-			.await;
-	}
+	services
+		.admin
+		.notify_loud(&format!("{user_id} has been {action} by {sender_user}."))
+		.await;
 
 	Ok(lock_user::v1::Response::new(body.locked))
 }

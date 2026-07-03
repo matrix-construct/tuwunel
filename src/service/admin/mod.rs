@@ -147,6 +147,22 @@ impl Service {
 			.ok();
 	}
 
+	/// Sends a notice gated on the admin_room_notices config; admin command
+	/// responses use the unconditional notice().
+	pub async fn notify(&self, body: &str) {
+		if self.services.server.config.admin_room_notices {
+			self.notice(body).await;
+		}
+	}
+
+	/// Sends a message gated on the admin_room_notices config; admin command
+	/// responses use the unconditional send_text().
+	pub async fn notify_loud(&self, body: &str) {
+		if self.services.server.config.admin_room_notices {
+			self.send_text(body).await;
+		}
+	}
+
 	/// Sends a message to the admin room as the admin user (see send_text() for
 	/// convenience).
 	pub async fn send_message(&self, message_content: RoomMessageEventContent) -> Result {

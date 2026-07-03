@@ -711,9 +711,7 @@ async fn register_user(
 		format!("New user \"{user_id}\" registered on this server via {idp_name} ({idp_id})");
 
 	info!("{notice}");
-	if services.server.config.admin_room_notices {
-		services.admin.notice(&notice).await;
-	}
+	services.admin.notify(&notice).await;
 
 	Ok(())
 }
