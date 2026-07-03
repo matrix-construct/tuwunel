@@ -24,7 +24,7 @@ use tuwunel_service::{
 	rooms::{
 		lazy_loading,
 		lazy_loading::{Options, Witness},
-		short::ShortStateKey,
+		short::{ShortRoomId, ShortStateKey},
 		timeline::PdusIterItem,
 	},
 };
@@ -35,7 +35,7 @@ use crate::{
 		is_ignored_pdu,
 		message::{
 			add_membership_unsigned, event_filter, ignored_filter, lazy_loading_witness,
-			visibility_filter, with_membership,
+			related_by_filter, visibility_filter, with_membership,
 		},
 	},
 };
@@ -78,6 +78,8 @@ pub(crate) async fn get_context_route(
 		.is_encrypted_room(room_id)
 		.await;
 
+	let shortroomid = services.short.get_shortroomid(room_id).await?;
+
 	let base_event = async {
 		let item = ignored_filter(&services, (base_count, base_pdu), sender_user).await?;
 		Some(add_membership_unsigned(&services, item, sender_user, encrypted).await)
@@ -89,6 +91,7 @@ pub(crate) async fn get_context_route(
 			.timeline
 			.pdus_rev(Some(sender_user), room_id, Some(base_count)),
 		filter,
+		shortroomid,
 		sender_user,
 		encrypted,
 		limit / 2,
@@ -100,6 +103,7 @@ pub(crate) async fn get_context_route(
 			.timeline
 			.pdus(Some(sender_user), room_id, Some(base_count)),
 		filter,
+		shortroomid,
 		sender_user,
 		encrypted,
 		limit.div_ceil(2),
@@ -264,6 +268,7 @@ async fn collect_timeline_half<'a, S>(
 	services: &'a Services,
 	pdus: S,
 	filter: &'a RoomEventFilter,
+	shortroomid: ShortRoomId,
 	sender_user: &'a UserId,
 	encrypted: bool,
 	take: usize,
@@ -273,6 +278,7 @@ where
 {
 	pdus.ignore_err()
 		.ready_filter_map(|item| event_filter(item, filter))
+		.wide_filter_map(|item| related_by_filter(services, shortroomid, filter, item))
 		.wide_filter_map(|item| ignored_filter(services, item, sender_user))
 		.wide_filter_map(|item| visibility_filter(services, item, sender_user))
 		.take(take)

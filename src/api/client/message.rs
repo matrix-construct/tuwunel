@@ -6,16 +6,20 @@ use ruma::{
 		Direction,
 		client::{filter::RoomEventFilter, message::get_message_events},
 	},
-	events::{AnyStateEvent, StateEventType, TimelineEventType, TimelineEventType::*},
+	events::{
+		AnyStateEvent, StateEventType, TimelineEventType, TimelineEventType::*,
+		relation::RelationType,
+	},
 	serde::Raw,
 };
 use tuwunel_core::{
-	Err, Result, at,
+	Err, PduId, Result, at,
 	matrix::{
 		event::{Event, Matches},
 		pdu::{PduCount, PduEvent},
 	},
 	ref_at,
+	smallvec::SmallVec,
 	utils::{
 		BoolExt, IterStream, ReadyExt,
 		result::{FlatOk, LogErr},
@@ -27,6 +31,7 @@ use tuwunel_service::{
 	rooms::{
 		lazy_loading,
 		lazy_loading::{Options, Witness},
+		short::ShortRoomId,
 		timeline::PdusIterItem,
 	},
 };
@@ -54,6 +59,9 @@ const IGNORED_MESSAGE_TYPES: &[TimelineEventType] = &[
 	Beacon,               // org.matrix.msc3672.beacon
 	CallNotify,           // org.matrix.msc4075.call.notify
 ];
+
+/// MSC3440 `related_by_rel_types` entries, typed at the compare boundary.
+type RelTypes = SmallVec<[RelationType; 1]>;
 
 const LIMIT_MAX: usize = 1000;
 const LIMIT_DEFAULT: usize = 10;
@@ -132,9 +140,12 @@ pub(crate) async fn get_message_events_route(
 		.is_encrypted_room(room_id)
 		.await;
 
+	let shortroomid = services.short.get_shortroomid(room_id).await?;
+
 	let events: Vec<_> = it
 		.ready_take_while(|(count, _)| Some(*count) != to)
 		.ready_filter_map(|item| event_filter(item, filter))
+		.wide_filter_map(|item| related_by_filter(&services, shortroomid, filter, item))
 		.wide_filter_map(|item| event_filters(&services, sender_user, item))
 		.take(limit)
 		.wide_then(|item| add_membership_unsigned(&services, item, sender_user, encrypted))
@@ -259,6 +270,36 @@ async fn event_filters(
 	let item = visibility_filter(services, item, user_id).await?;
 
 	Some(item)
+}
+
+/// MSC3440 `related_by_*`: include an event only when another event relates
+/// to it matching the filter's reverse-relation criteria. A no-op stage when
+/// the filter carries neither field.
+pub(crate) async fn related_by_filter(
+	services: &Services,
+	shortroomid: ShortRoomId,
+	filter: &RoomEventFilter,
+	item: PdusIterItem,
+) -> Option<PdusIterItem> {
+	if filter.related_by_senders.is_empty() && filter.related_by_rel_types.is_empty() {
+		return Some(item);
+	}
+
+	let rel_types: RelTypes = filter
+		.related_by_rel_types
+		.iter()
+		.map(String::as_str)
+		.map(RelationType::from)
+		.collect();
+
+	let (count, _) = &item;
+	let target = PduId { shortroomid, count: *count };
+
+	services
+		.pdu_metadata
+		.has_incoming_relation(target, &filter.related_by_senders, &rel_types)
+		.await
+		.then_some(item)
 }
 
 #[inline]

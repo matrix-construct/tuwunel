@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use futures::{Stream, StreamExt, TryFutureExt, future::Either, pin_mut};
 use ruma::{
-	CanonicalJsonObject, CanonicalJsonValue, EventId, OwnedEventId, RoomId, UserId,
+	CanonicalJsonObject, CanonicalJsonValue, EventId, OwnedEventId, OwnedUserId, RoomId, UserId,
 	api::Direction,
 	events::{reaction::ReactionEventContent, relation::RelationType, room::encrypted::Relation},
 };
@@ -198,6 +198,30 @@ pub async fn has_relation(
 			})
 		})
 		.ready_any(|_| true) // first match or false
+		.await
+}
+
+/// MSC3440 `related_by_*`: whether any event relates to `target` with a
+/// `rel_type` in `rel_types` and a `sender` in `senders`. An empty list is
+/// unconstrained on that axis; a single relating event must satisfy both.
+#[implement(Service)]
+pub async fn has_incoming_relation(
+	&self,
+	target: PduId,
+	senders: &[OwnedUserId],
+	rel_types: &[RelationType],
+) -> bool {
+	self.get_relations(target.shortroomid, target.count, None, Direction::Forward, None)
+		.ready_any(|(_, pdu)| {
+			let sender = senders.is_empty() || senders.iter().any(is_equal_to!(pdu.sender()));
+
+			let rel_type = rel_types.is_empty()
+				|| rel_types
+					.iter()
+					.any(|rel_type| rel_type.relation_type_equal(&pdu));
+
+			sender && rel_type
+		})
 		.await
 }
 
