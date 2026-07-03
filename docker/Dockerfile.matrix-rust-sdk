@@ -1,6 +1,45 @@
 # syntax = docker/dockerfile:1.11-labs
 
-FROM input AS rust-sdk-integration
+# Builds the SDK integration tests into the shared target-dir cache mount.
+FROM input AS rust-sdk-build
+ARG rust_target
+ARG rust_toolchain
+ARG RUSTUP_HOME
+ARG CARGO_HOME
+ARG MRSDK_TARGET_DIR="/usr/src/matrix-rust-sdk/target"
+ARG mrsdk_target_share
+ARG mrsdk_ref="1c44fb66214667c6d00acaf72ab592493653708b"
+
+WORKDIR /usr/src
+ADD --link https://github.com/matrix-construct/matrix-rust-sdk.git#${mrsdk_ref} matrix-rust-sdk
+
+WORKDIR /usr/src/matrix-rust-sdk
+SHELL ["/bin/bash", "-c"]
+ENV RUST_BACKTRACE="full"
+RUN \
+--mount=type=cache,dst=${RUSTUP_HOME}/downloads,sharing=shared \
+--mount=type=cache,dst=${CARGO_HOME}/registry,sharing=shared \
+--mount=type=cache,dst=${CARGO_HOME}/git,sharing=shared \
+--mount=type=cache,dst=${MRSDK_TARGET_DIR},id=${mrsdk_target_share},sharing=locked \
+<<EOF
+    set -eux
+
+    rustup run ${rust_toolchain} \
+        cargo test \
+            --no-run \
+            --locked \
+            --release \
+            "--color=always" \
+            "--features=default" \
+            "--target=${rust_target}" \
+            "--target-dir=${MRSDK_TARGET_DIR}" \
+            "--package=matrix-sdk-integration-testing" \
+            ;
+EOF
+
+# Runs the tests against the testee; the cargo invocation finds the build
+# warm in the target-dir cache mount left by rust-sdk-build.
+FROM rust-sdk-build AS rust-sdk-integration
 ARG sys_name
 ARG sys_version
 ARG feat_set
@@ -12,7 +51,6 @@ ARG CARGO_HOME
 ARG CARGO_TARGET
 ARG MRSDK_TARGET_DIR="/usr/src/matrix-rust-sdk/target"
 ARG mrsdk_target_share
-ARG mrsdk_ref="1c44fb66214667c6d00acaf72ab592493653708b"
 ARG mrsdk_test_args=""
 ARG mrsdk_test_opts=""
 ARG mrsdk_skip_list=""
@@ -20,9 +58,6 @@ ARG mrsdk_parallel=1
 ARG mrsdk_startup_delay="10s"
 ARG mrsdk_test_timeout="30m"
 ARG mrsdk_testee="/usr/bin/tuwunel"
-
-WORKDIR /usr/src
-ADD --link https://github.com/matrix-construct/matrix-rust-sdk.git#${mrsdk_ref} matrix-rust-sdk
 
 WORKDIR /etc
 COPY <<EOF tuwunel.toml
@@ -65,8 +100,6 @@ WORKDIR /usr/bin
 COPY --link --from=install /usr/bin/tuwunel .
 
 WORKDIR /usr/src/matrix-rust-sdk
-SHELL ["/bin/bash", "-c"]
-ENV RUST_BACKTRACE="full"
 ENV TUWUNEL_CONFIG="/etc/tuwunel.toml"
 ENV TUWUNEL_DATABASE_PATH="/var/db/tuwunel"
 ENV TUWUNEL_SERVER_NAME="localhost"

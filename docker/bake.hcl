@@ -130,7 +130,7 @@ variable "gz_image_compress_level" {
     default = 7
 }
 variable "cache_compress_level" {
-    default = 7
+    default = 3
 }
 
 # Options for output verbosity
@@ -270,10 +270,12 @@ group "lints" {
 group "tests" {
     targets = [
         "doc",
-        "unit",
-        "smoke",
         "integration",
         "matrix-compliance",
+        "mas",
+        "playwright",
+        "smoke",
+        "unit",
     ]
 }
 
@@ -281,7 +283,6 @@ group "matrix-compliance" {
     targets = [
         "complement",
         "complement-crypto",
-        "rust-sdk-integ",
     ]
 }
 
@@ -388,7 +389,7 @@ target "complement-testee" {
         elem_tag("complement-testee", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target], "latest"),
     ]
     target = "complement-testee"
-    output = ["type=docker,compression=zstd,mode=max,compression-level=${cache_compress_level}"]
+    output = ["type=docker,compression=zstd,mode=min,compression-level=${cache_compress_level}"]
     entitlements = ["network.host"]
     dockerfile = "${docker_dir}/Dockerfile.complement"
     matrix = cargo_rust_feat_sys
@@ -491,7 +492,7 @@ target "mas-testee" {
         "tuwunel-mas-testee:latest",
     ]
     target = "mas-testee"
-    output = ["type=docker,compression=zstd,mode=max,compression-level=${cache_compress_level}"]
+    output = ["type=docker,compression=zstd,mode=min,compression-level=${cache_compress_level}"]
     dockerfile = "${docker_dir}/Dockerfile.mas"
     matrix = cargo_rust_feat_sys
     inherits = [
@@ -639,7 +640,7 @@ target "playwright-testee" {
         "tuwunel-playwright-testee:latest",
     ]
     target = "playwright-testee"
-    output = ["type=docker,compression=zstd,mode=max,compression-level=${cache_compress_level}"]
+    output = ["type=docker,compression=zstd,mode=min,compression-level=${cache_compress_level}"]
     dockerfile = "${docker_dir}/Dockerfile.playwright"
     matrix = cargo_rust_feat_sys
     inherits = [
@@ -747,7 +748,7 @@ target "rust-sdk-integ" {
     tags = [
         elem_tag("rust-sdk-integ", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target], "latest"),
     ]
-    output = ["type=docker,compression=zstd,mode=max,compression-level=${cache_compress_level}"]
+    output = ["type=docker,compression=zstd,mode=min,compression-level=${cache_compress_level}"]
     target = "rust-sdk-integration"
     dockerfile = "${docker_dir}/Dockerfile.matrix-rust-sdk"
     matrix = cargo_rust_feat_sys
@@ -1907,6 +1908,7 @@ target "ingredients" {
     tags = [
         elem_tag("ingredients", [rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target], "latest"),
     ]
+    output = ["type=cacheonly,compression=zstd,mode=max,compression-level=${cache_compress_level}"]
     target =  "ingredients"
     dockerfile = "${docker_dir}/Dockerfile.source"
     matrix = rust_feat_sys
