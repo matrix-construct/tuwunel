@@ -18,7 +18,9 @@ use ruma::{
 };
 use serde::{Deserialize, Serialize};
 use tuwunel_core::{
-	Err, Result, debug_warn, err, is_equal_to, trace,
+	Err, Result, debug_warn, err, is_equal_to,
+	matrix::pdu::PduCount,
+	trace,
 	utils::{self, ReadyExt, stream::TryIgnore},
 };
 use tuwunel_database::{Deserialized, Json, Map};
@@ -62,6 +64,7 @@ struct Data {
 	userfilterid_filter: Arc<Map>,
 	userid_dehydrateddevice: Arc<Map>,
 	userid_devicelistversion: Arc<Map>,
+	userid_erased: Arc<Map>,
 	userid_lastonetimekeyupdate: Arc<Map>,
 	userid_locked: Arc<Map>,
 	userid_masterkeyid: Arc<Map>,
@@ -96,6 +99,7 @@ impl crate::Service for Service {
 				userfilterid_filter: args.db["userfilterid_filter"].clone(),
 				userid_dehydrateddevice: args.db["userid_dehydrateddevice"].clone(),
 				userid_devicelistversion: args.db["userid_devicelistversion"].clone(),
+				userid_erased: args.db["userid_erased"].clone(),
 				userid_lastonetimekeyupdate: args.db["userid_lastonetimekeyupdate"].clone(),
 				userid_locked: args.db["userid_locked"].clone(),
 				userid_masterkeyid: args.db["userid_masterkeyid"].clone(),
@@ -219,6 +223,24 @@ impl Service {
 		self.db.userid_locked.get(user_id).await.is_ok()
 	}
 
+	/// MSC4025: the user's events serve as pruned copies to recipients not
+	/// joined at the event. Presence-only for the serving gate.
+	pub async fn is_erased(&self, user_id: &UserId) -> bool {
+		self.db.userid_erased.get(user_id).await.is_ok()
+	}
+
+	/// MSC4025: the global count recorded at erasure, for admin surfacing;
+	/// the serving gate never reads it.
+	pub async fn erasure_count(&self, user_id: &UserId) -> Option<PduCount> {
+		self.db
+			.userid_erased
+			.get(user_id)
+			.await
+			.deserialized()
+			.map(PduCount::from_unsigned)
+			.ok()
+	}
+
 	/// MSC3823: forensic record for the active suspension, if any.
 	pub async fn get_suspension(&self, user_id: &UserId) -> Option<Moderation> {
 		self.db
@@ -253,6 +275,17 @@ impl Service {
 	}
 
 	pub fn clear_suspended(&self, user_id: &UserId) { self.db.userid_suspended.remove(user_id); }
+
+	/// MSC4025: mark the user erased, recording the current global count.
+	pub fn set_erased(&self, user_id: &UserId) {
+		let count = self.services.globals.current_count();
+
+		self.db.userid_erased.raw_put(user_id, count);
+	}
+
+	/// MSC4025: erasure is reversible; clearing the marker restores the
+	/// unredacted view.
+	pub fn clear_erased(&self, user_id: &UserId) { self.db.userid_erased.remove(user_id); }
 
 	pub fn set_locked(&self, user_id: &UserId, by: &UserId) {
 		let entry = Moderation {

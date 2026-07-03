@@ -139,8 +139,11 @@ impl Service {
 			.collect()
 			.await;
 
-		// MSC4025: erase non-event data when the user requested it.
+		// MSC4025: erase non-event data when the user requested it, and mark
+		// the user so their events serve as pruned copies (phase B).
 		if erase {
+			self.services.users.set_erased(user_id);
+
 			self.services
 				.account_data
 				.erase_user(user_id, None)

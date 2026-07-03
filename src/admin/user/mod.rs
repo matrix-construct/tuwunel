@@ -5,6 +5,7 @@ mod deactivate_all;
 mod del_email;
 mod delete_device;
 mod delete_room_tag;
+mod erasure;
 mod force_demote;
 mod force_join_all_local_users;
 mod force_join_list_of_local_users;
@@ -20,6 +21,7 @@ mod put_room_tag;
 mod redact_event;
 mod reject_invites;
 mod reset_password;
+mod unerase;
 
 use clap::Subcommand;
 use futures::FutureExt;
@@ -99,6 +101,17 @@ pub(super) enum UserCommand {
 		#[arg(short, long)]
 		/// Also deactivate admin accounts and will assume leave all rooms too
 		force: bool,
+	},
+
+	/// - Show the MSC4025 erasure state of a local user
+	Erasure {
+		user_id: String,
+	},
+
+	/// - Clear the MSC4025 erasure marker of a local user, restoring the
+	///   unredacted view of their events
+	Unerase {
+		user_id: String,
 	},
 
 	/// - Deletes a user's device.
