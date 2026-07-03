@@ -40,7 +40,7 @@ pub async fn leave(
 		membership: MembershipState::Leave,
 		reason: reason.clone(),
 		join_authorized_via_users_server: None,
-		is_direct: None,
+		is_direct: false,
 		avatar_url: None,
 		displayname: None,
 		third_party_invite: None,
@@ -174,7 +174,7 @@ async fn leave_locally(
 				membership: MembershipState::Leave,
 				reason,
 				join_authorized_via_users_server: None,
-				is_direct: None,
+				is_direct: false,
 				..event
 			}),
 			user_id,

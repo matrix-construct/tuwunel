@@ -224,7 +224,7 @@ pub async fn revoke_admin(&self, user_id: &UserId) -> Result {
 			PduBuilder::state(user_id.to_string(), &RoomMemberEventContent {
 				membership: Leave,
 				reason: Some("Admin Revoked".into()),
-				is_direct: None,
+				is_direct: false,
 				join_authorized_via_users_server: None,
 				third_party_invite: None,
 				..event

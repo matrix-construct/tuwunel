@@ -28,7 +28,7 @@ use ruma::{
 	room::RoomType,
 };
 use tuwunel_core::{
-	Result, err, is_true,
+	Result, err,
 	matrix::{Pdu, room_version},
 	utils::BoolExt,
 };
@@ -94,9 +94,7 @@ impl Service {
 	pub async fn is_direct(&self, room_id: &RoomId, user_id: &UserId) -> bool {
 		self.get_member(room_id, user_id)
 			.await
-			.ok()
-			.and_then(|content| content.is_direct)
-			.is_some_and(is_true!())
+			.is_ok_and(|content| content.is_direct)
 	}
 
 	pub async fn get_member(

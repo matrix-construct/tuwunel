@@ -47,7 +47,7 @@ pub async fn kick(
 			PduBuilder::state(user_id.to_string(), &RoomMemberEventContent {
 				membership: MembershipState::Leave,
 				reason: reason.cloned(),
-				is_direct: None,
+				is_direct: false,
 				join_authorized_via_users_server: None,
 				third_party_invite: None,
 				..event

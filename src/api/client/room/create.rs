@@ -184,7 +184,7 @@ async fn apply_creator_join_pdu(
 	state_lock: &RoomMutexGuard,
 ) -> Result {
 	let mut content = RoomMemberEventContent {
-		is_direct: Some(body.is_direct),
+		is_direct: body.is_direct,
 		..RoomMemberEventContent::new(MembershipState::Join)
 	};
 

@@ -44,7 +44,7 @@ pub async fn unban(
 				reason: reason.cloned(),
 				join_authorized_via_users_server: None,
 				third_party_invite: None,
-				is_direct: None,
+				is_direct: false,
 				..current_member_content
 			}),
 			sender_user,

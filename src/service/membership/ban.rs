@@ -30,7 +30,7 @@ pub async fn ban(
 				displayname: None,
 				avatar_url: None,
 				blurhash: None,
-				is_direct: None,
+				is_direct: false,
 				join_authorized_via_users_server: None,
 				third_party_invite: None,
 			}),

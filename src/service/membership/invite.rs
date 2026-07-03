@@ -54,7 +54,7 @@ async fn remote_invite(
 		let state_lock = self.services.state.mutex.lock(room_id).await;
 
 		let mut content = RoomMemberEventContent {
-			is_direct: Some(is_direct),
+			is_direct,
 			reason: reason.cloned(),
 			..RoomMemberEventContent::new(MembershipState::Invite)
 		};
@@ -200,7 +200,7 @@ async fn local_invite(
 	let state_lock = self.services.state.mutex.lock(room_id).await;
 
 	let mut content = RoomMemberEventContent {
-		is_direct: Some(is_direct),
+		is_direct,
 		reason: reason.cloned(),
 		..RoomMemberEventContent::new(MembershipState::Invite)
 	};
