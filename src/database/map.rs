@@ -22,6 +22,7 @@ mod rev_keys_prefix;
 mod rev_stream;
 mod rev_stream_from;
 mod rev_stream_prefix;
+mod seek;
 mod stream;
 mod stream_from;
 mod stream_prefix;

@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
-use futures::{FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt, future::Either};
+use futures::{Stream, StreamExt};
 use rocksdb::Direction;
 use serde::Deserialize;
-use tokio::task;
 use tuwunel_core::{Result, implement};
 
+use super::seek::seek_stream;
 use crate::{keyval, keyval::KeyVal, stream};
 
 /// Iterate key-value entries in the map from the beginning.
@@ -29,47 +29,5 @@ where
 #[implement(super::Map)]
 #[tracing::instrument(skip(self), fields(%self), level = "trace")]
 pub fn raw_stream(self: &Arc<Self>) -> impl Stream<Item = Result<KeyVal<'_>>> + Send {
-	use crate::pool::Seek;
-
-	let opts = super::iter_options_default(&self.engine);
-	let state = stream::State::new(self, opts);
-	if is_cached(self) {
-		let state = state.init_fwd(None);
-		return Either::Left(
-			task::consume_budget()
-				.map(move |()| stream::Items::<'_>::from(state))
-				.into_stream()
-				.flatten(),
-		);
-	}
-
-	let seek = Seek {
-		map: self.clone(),
-		dir: Direction::Forward,
-		state: crate::pool::into_send_seek(state),
-		key: None,
-		res: None,
-	};
-
-	Either::Right(
-		self.engine
-			.pool
-			.execute_iter(seek)
-			.ok_into::<stream::Items<'_>>()
-			.into_stream()
-			.try_flatten(),
-	)
-}
-
-#[tracing::instrument(
-    name = "cached",
-    level = "trace",
-    skip_all,
-    fields(%map),
-)]
-pub(super) fn is_cached(map: &Arc<super::Map>) -> bool {
-	let opts = super::cache_iter_options_default(&map.engine);
-	let state = stream::State::new(map, opts).init_fwd(None);
-
-	!state.is_incomplete()
+	seek_stream::<stream::Items<'_>, _>(self, Direction::Forward, None)
 }
