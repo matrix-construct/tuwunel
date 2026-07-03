@@ -234,8 +234,7 @@ where
 					let count = self
 						.services
 						.state_cache
-						.room_members(pdu.room_id())
-						.ready_filter(|user| self.services.globals.user_is_local(user))
+						.local_users_in_room(pdu.room_id())
 						.ready_filter(|user| *user != target)
 						.count()
 						.boxed()
@@ -258,8 +257,7 @@ where
 					let count = self
 						.services
 						.state_cache
-						.room_members(pdu.room_id())
-						.ready_filter(|user| self.services.globals.user_is_local(user))
+						.local_users_in_room(pdu.room_id())
 						.ready_filter(|user| *user != target)
 						.count()
 						.boxed()

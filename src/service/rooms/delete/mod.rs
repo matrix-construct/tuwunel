@@ -2,13 +2,7 @@ use std::sync::Arc;
 
 use futures::{FutureExt, StreamExt};
 use ruma::RoomId;
-use tuwunel_core::{
-	Result, debug,
-	result::LogErr,
-	trace,
-	utils::{ReadyExt, future::BoolExt},
-	warn,
-};
+use tuwunel_core::{Result, debug, result::LogErr, trace, utils::future::BoolExt, warn};
 
 use crate::rooms::timeline::RoomMutexGuard;
 
@@ -72,8 +66,7 @@ impl Service {
 		let mut users = self
 			.services
 			.state_cache
-			.room_members(room_id)
-			.ready_filter(|user| self.services.globals.user_is_local(user))
+			.local_users_in_room(room_id)
 			.boxed();
 
 		while let Some(user_id) = users.next().await {
