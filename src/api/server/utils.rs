@@ -59,3 +59,18 @@ pub(super) async fn check(&self) -> Result {
 
 	Ok(())
 }
+
+pub(super) async fn require_known_room(
+	services: &Services,
+	room_id: &RoomId,
+	origin: &ServerName,
+) -> Result {
+	if !services.metadata.exists(room_id).await {
+		return Err!(Request(NotFound("Room is unknown to this server.")));
+	}
+
+	services
+		.event_handler
+		.acl_check(origin, room_id)
+		.await
+}

@@ -11,6 +11,7 @@ use ruma::{
 };
 use tuwunel_core::{Err, Error, Result, at, debug_warn, matrix::pdu::PduBuilder};
 
+use super::utils::require_known_room;
 use crate::Ruma;
 
 /// # `GET /_matrix/federation/v1/make_knock/{roomId}/{userId}`
@@ -20,19 +21,11 @@ pub(crate) async fn create_knock_event_template_route(
 	State(services): State<crate::State>,
 	body: Ruma<prepare_knock_event::v1::Request>,
 ) -> Result<prepare_knock_event::v1::Response> {
-	if !services.metadata.exists(&body.room_id).await {
-		return Err!(Request(NotFound("Room is unknown to this server.")));
-	}
+	require_known_room(&services, &body.room_id, body.origin()).await?;
 
 	if body.user_id.server_name() != body.origin() {
 		return Err!(Request(BadJson("Not allowed to knock on behalf of another server/user.")));
 	}
-
-	// ACL check origin server
-	services
-		.event_handler
-		.acl_check(body.origin(), &body.room_id)
-		.await?;
 
 	if let Some(server) = body.room_id.server_name()
 		&& services

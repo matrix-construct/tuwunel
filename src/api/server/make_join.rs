@@ -19,6 +19,7 @@ use tuwunel_core::{
 };
 use tuwunel_service::Services;
 
+use super::utils::require_known_room;
 use crate::Ruma;
 
 /// # `GET /_matrix/federation/v1/make_join/{roomId}/{userId}`
@@ -28,19 +29,11 @@ pub(crate) async fn create_join_event_template_route(
 	State(services): State<crate::State>,
 	body: Ruma<prepare_join_event::v1::Request>,
 ) -> Result<prepare_join_event::v1::Response> {
-	if !services.metadata.exists(&body.room_id).await {
-		return Err!(Request(NotFound("Room is unknown to this server.")));
-	}
+	require_known_room(&services, &body.room_id, body.origin()).await?;
 
 	if body.user_id.server_name() != body.origin() {
 		return Err!(Request(BadJson("Not allowed to join on behalf of another server/user.")));
 	}
-
-	// ACL check origin server
-	services
-		.event_handler
-		.acl_check(body.origin(), &body.room_id)
-		.await?;
 
 	if let Some(server) = body.room_id.server_name()
 		&& services

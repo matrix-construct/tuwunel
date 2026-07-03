@@ -25,6 +25,7 @@ use tuwunel_core::{
 };
 use tuwunel_service::Services;
 
+use super::utils::require_known_room;
 use crate::{Ruma, client::sync::calculate_heroes};
 
 /// # `PUT /_matrix/federation/v2/send_join/{roomId}/{eventId}`
@@ -83,15 +84,7 @@ async fn create_join_event(
 	pdu: &RawJsonValue,
 	omit_members: bool,
 ) -> Result<create_join_event::v2::RoomState> {
-	if !services.metadata.exists(room_id).await {
-		return Err!(Request(NotFound("Room is unknown to this server.")));
-	}
-
-	// ACL check origin server
-	services
-		.event_handler
-		.acl_check(origin, room_id)
-		.await?;
+	require_known_room(services, room_id, origin).await?;
 
 	// We need to return the state prior to joining, let's keep a reference to that
 	// here

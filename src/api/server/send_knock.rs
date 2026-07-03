@@ -16,6 +16,7 @@ use tuwunel_core::{
 	warn,
 };
 
+use super::utils::require_known_room;
 use crate::Ruma;
 
 /// # `PUT /_matrix/federation/v1/send_knock/{roomId}/{eventId}`
@@ -39,15 +40,7 @@ pub(crate) async fn create_knock_event_v1_route(
 		return Err!(Request(Forbidden("Server is banned on this homeserver.")));
 	}
 
-	if !services.metadata.exists(&body.room_id).await {
-		return Err!(Request(NotFound("Room is unknown to this server.")));
-	}
-
-	// ACL check origin server
-	services
-		.event_handler
-		.acl_check(body.origin(), &body.room_id)
-		.await?;
+	require_known_room(&services, &body.room_id, body.origin()).await?;
 
 	let room_version_id = services
 		.state

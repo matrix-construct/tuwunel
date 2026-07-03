@@ -6,6 +6,7 @@ use ruma::{
 };
 use tuwunel_core::{Err, Result, at, matrix::pdu::PduBuilder};
 
+use super::utils::require_known_room;
 use crate::Ruma;
 
 /// # `GET /_matrix/federation/v1/make_leave/{roomId}/{eventId}`
@@ -15,21 +16,13 @@ pub(crate) async fn create_leave_event_template_route(
 	State(services): State<crate::State>,
 	body: Ruma<prepare_leave_event::v1::Request>,
 ) -> Result<prepare_leave_event::v1::Response> {
-	if !services.metadata.exists(&body.room_id).await {
-		return Err!(Request(NotFound("Room is unknown to this server.")));
-	}
+	require_known_room(&services, &body.room_id, body.origin()).await?;
 
 	if body.user_id.server_name() != body.origin() {
 		return Err!(Request(Forbidden(
 			"Not allowed to leave on behalf of another server/user."
 		)));
 	}
-
-	// ACL check origin
-	services
-		.event_handler
-		.acl_check(body.origin(), &body.room_id)
-		.await?;
 
 	let room_version = services
 		.state
