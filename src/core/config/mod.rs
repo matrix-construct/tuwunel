@@ -2815,6 +2815,16 @@ pub struct Config {
 	#[serde(default)]
 	pub disable_local_redactions: bool,
 
+	/// Serve erased senders' events as pruned copies over federation
+	/// (MSC4025). A requesting server retains the unredacted view only when
+	/// one of its users was joined in the room state at the event; join
+	/// handshakes are not gated.
+	///
+	/// reloadable: yes
+	/// default: true
+	#[serde(default = "true_fn")]
+	pub enforce_erasure_over_federation: bool,
+
 	/// Enable database pool affinity support. On supporting systems, block
 	/// device queue topologies are detected and the request pool is optimized
 	/// for the hardware; db_pool_workers is determined automatically.

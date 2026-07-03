@@ -84,11 +84,18 @@ pub(crate) async fn get_backfill_route(
 			.take(limit)
 			.and_then(|pdu| {
 				services
+					.state_accessor
+					.erased_for_server(body.origin(), pdu)
+					.map(Ok)
+			})
+			.and_then(|pdu| {
+				services
 					.federation
 					.format_pdu_into(pdu, room_version.as_ref())
 					.map(Ok)
 			})
 			.try_collect()
+			.boxed()
 			.await?,
 	})
 }

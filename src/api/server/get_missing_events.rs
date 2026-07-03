@@ -89,6 +89,11 @@ pub(crate) async fn get_missing_events_route(
 		queued_events.extend(prev_events);
 
 		let event = services
+			.state_accessor
+			.erased_for_server(body.origin(), event)
+			.await;
+
+		let event = services
 			.federation
 			.format_pdu_into(event, room_version.as_ref())
 			.await;

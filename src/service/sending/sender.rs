@@ -1275,6 +1275,11 @@ impl Service {
 			})
 			.wide_then(|pdu| {
 				self.services
+					.state_accessor
+					.erased_for_server(&server, pdu)
+			})
+			.wide_then(|pdu| {
+				self.services
 					.federation
 					.format_pdu_into(pdu, None)
 			})

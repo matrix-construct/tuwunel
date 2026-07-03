@@ -1,6 +1,6 @@
 use futures::StreamExt;
 use ruma::{
-	EventId, RoomId, ServerName,
+	EventId, RoomId, ServerName, UserId,
 	events::{
 		StateEventType,
 		room::history_visibility::{HistoryVisibility, RoomHistoryVisibilityEventContent},
@@ -55,4 +55,29 @@ pub async fn server_can_see_event(
 		},
 		| HistoryVisibility::WorldReadable | HistoryVisibility::Shared | _ => true,
 	}
+}
+
+/// MSC4025: whether any of `origin`'s users were joined in the room state at
+/// the given event. Unresolvable state denies, matching the reference
+/// implementation's erasure rule.
+#[implement(super::Service)]
+#[tracing::instrument(skip_all, level = "trace")]
+pub async fn server_joined_at_pdu(&self, origin: &ServerName, event_id: &EventId) -> bool {
+	let Ok(shortstatehash) = self
+		.services
+		.state
+		.pdu_shortstatehash(event_id)
+		.await
+	else {
+		return false;
+	};
+
+	self.state_keys(shortstatehash, &StateEventType::RoomMember)
+		.ready_filter_map(|state_key| UserId::parse(state_key.as_str()).ok())
+		.ready_filter(|user_id| user_id.server_name() == origin)
+		.any(async |user_id| {
+			self.user_was_joined(shortstatehash, &user_id)
+				.await
+		})
+		.await
 }

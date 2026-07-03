@@ -1,5 +1,5 @@
 use axum::extract::State;
-use futures::{FutureExt, future::try_join};
+use futures::future::try_join;
 use ruma::{MilliSecondsSinceUnixEpoch, OwnedRoomId, api::federation::event::get_event};
 use tuwunel_core::{Result, err};
 
@@ -36,10 +36,19 @@ pub(crate) async fn get_event_route(
 		event_id: Some(&body.event_id),
 	};
 
-	let pdu = services
-		.federation
-		.format_pdu_into(event, None)
-		.map(Ok);
+	let pdu = async {
+		let event = services
+			.state_accessor
+			.erased_for_server(body.origin(), event)
+			.await;
+
+		let pdu = services
+			.federation
+			.format_pdu_into(event, None)
+			.await;
+
+		Ok(pdu)
+	};
 
 	let ((), pdu) = try_join(access_check.check(), pdu).await?;
 
