@@ -233,8 +233,16 @@ impl Service {
 		user_id: &'a UserId,
 		room_id: &'a RoomId,
 		count: PduCount,
-		_inc: &'a IncludeThreads,
+		include: &'a IncludeThreads,
 	) -> impl Stream<Item = Result<(PduCount, PduEvent)>> + Send {
+		let participated = matches!(include, IncludeThreads::Participated);
+
+		let is_participant = move |participants: &[u8]| {
+			participants
+				.split(|&byte| byte == 0xFF)
+				.any(|user| user == user_id.as_bytes())
+		};
+
 		self.services
 			.short
 			.get_shortroomid(room_id)
@@ -246,12 +254,15 @@ impl Service {
 			.map_ok(move |current: RawPduId| {
 				self.db
 					.threadid_userids
-					.rev_raw_keys_from(&current)
+					.rev_raw_stream_from(&current)
 					.ignore_err()
-					.map(RawPduId::from)
-					.map(move |pdu_id| (pdu_id, user_id))
+					.map(|(key, participants)| (RawPduId::from(key), participants))
 					.ready_take_while(move |(pdu_id, _)| {
 						pdu_id.shortroomid() == current.shortroomid()
+					})
+					.ready_filter_map(move |(pdu_id, participants)| {
+						(!participated || is_participant(participants))
+							.then_some((pdu_id, user_id))
 					})
 					.wide_filter_map(async |(raw_pdu_id, user_id)| {
 						let pdu_id: PduId = raw_pdu_id.into();
