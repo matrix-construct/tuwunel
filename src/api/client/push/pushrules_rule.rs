@@ -1,13 +1,9 @@
 use axum::extract::State;
 use ruma::{
 	api::client::push::{delete_pushrule, get_pushrule, set_pushrule},
-	events::{GlobalAccountDataEventType, push_rules::PushRulesEvent},
-	push::{
-		InsertPushRuleError, PredefinedContentRuleId, PredefinedOverrideRuleId,
-		RemovePushRuleError,
-	},
+	push::{InsertPushRuleError, RemovePushRuleError},
 };
-use tuwunel_core::{Err, Result, err};
+use tuwunel_core::{Err, Result};
 
 use crate::Ruma;
 
@@ -23,20 +19,11 @@ pub(crate) async fn get_pushrule_route(
 		.as_ref()
 		.expect("user is authenticated");
 
-	// remove old deprecated mentions push rules as per MSC4210
-	#[expect(deprecated)]
-	if body.rule_id.as_str() == PredefinedContentRuleId::ContainsUserName.as_str()
-		|| body.rule_id.as_str() == PredefinedOverrideRuleId::ContainsDisplayName.as_str()
-		|| body.rule_id.as_str() == PredefinedOverrideRuleId::RoomNotif.as_str()
-	{
+	if super::is_deprecated_mention_rule(body.rule_id.as_str()) {
 		return Err!(Request(NotFound("Push rule not found.")));
 	}
 
-	let event: PushRulesEvent = services
-		.account_data
-		.get_global(sender_user, GlobalAccountDataEventType::PushRules)
-		.await
-		.map_err(|_| err!(Request(NotFound("PushRules event not found."))))?;
+	let event = super::load_push_rules(&services, sender_user).await?;
 
 	let rule = event
 		.content
@@ -59,11 +46,7 @@ pub(crate) async fn set_pushrule_route(
 	body: Ruma<set_pushrule::v3::Request>,
 ) -> Result<set_pushrule::v3::Response> {
 	let sender_user = body.sender_user();
-	let mut account_data: PushRulesEvent = services
-		.account_data
-		.get_global(sender_user, GlobalAccountDataEventType::PushRules)
-		.await
-		.map_err(|_| err!(Request(NotFound("PushRules event not found."))))?;
+	let mut account_data = super::load_push_rules(&services, sender_user).await?;
 
 	if let Err(error) = account_data.content.global.insert(
 		body.rule.clone(),
@@ -92,11 +75,7 @@ pub(crate) async fn set_pushrule_route(
 		};
 	}
 
-	let ty = GlobalAccountDataEventType::PushRules;
-	services
-		.account_data
-		.update(None, sender_user, ty.to_string().into(), &serde_json::to_value(account_data)?)
-		.await?;
+	super::save_push_rules(&services, sender_user, &account_data).await?;
 
 	Ok(set_pushrule::v3::Response {})
 }
@@ -109,12 +88,7 @@ pub(crate) async fn delete_pushrule_route(
 	body: Ruma<delete_pushrule::v3::Request>,
 ) -> Result<delete_pushrule::v3::Response> {
 	let sender_user = body.sender_user();
-
-	let mut account_data: PushRulesEvent = services
-		.account_data
-		.get_global(sender_user, GlobalAccountDataEventType::PushRules)
-		.await
-		.map_err(|_| err!(Request(NotFound("PushRules event not found."))))?;
+	let mut account_data = super::load_push_rules(&services, sender_user).await?;
 
 	if let Err(error) = account_data
 		.content
@@ -131,11 +105,7 @@ pub(crate) async fn delete_pushrule_route(
 		};
 	}
 
-	let ty = GlobalAccountDataEventType::PushRules;
-	services
-		.account_data
-		.update(None, sender_user, ty.to_string().into(), &serde_json::to_value(account_data)?)
-		.await?;
+	super::save_push_rules(&services, sender_user, &account_data).await?;
 
 	Ok(delete_pushrule::v3::Response {})
 }
