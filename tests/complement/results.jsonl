@@ -692,6 +692,9 @@
 {"Action":"pass","Test":"TestRoomState/Parallel/PUT_/createRoom_with_creation_content"}
 {"Action":"pass","Test":"TestRoomState/Parallel/PUT_/rooms/:room_id/state/m.room.topic_sets_topic"}
 {"Action":"pass","Test":"TestRoomSummary"}
+{"Action":"pass","Test":"TestRoomSummaryAllowedRoomIDs"}
+{"Action":"pass","Test":"TestRoomSummaryAllowedRoomIDs/non-restricted_room_omits_allowed_room_ids"}
+{"Action":"pass","Test":"TestRoomSummaryAllowedRoomIDs/restricted_room_includes_allowed_room_ids"}
 {"Action":"pass","Test":"TestRoomsInvite"}
 {"Action":"pass","Test":"TestRoomsInvite/Parallel"}
 {"Action":"pass","Test":"TestRoomsInvite/Parallel/Can_invite_users_to_invite-only_rooms"}

@@ -4,14 +4,14 @@ Tuwunel runs the [Complement](https://github.com/matrix-org/complement) Matrix h
 
 ## Counts
 
-- Test groups: 204. Passing: **80.4%**
-  - ✅ `pass`: 164
+- Test groups: 205. Passing: **80.5%**
+  - ✅ `pass`: 165
   - 🟨 `some`: 18
   - ❌ `fail`: 20
   - ⬛ `skip`: 2
 
-- Subtests: 594. Passing: **77.9%**
-  - ✅ `pass`: 463
+- Subtests: 596. Passing: **78.0%**
+  - ✅ `pass`: 465
   - ❌ `fail`: 118
   - ⬛ `skip`: 13
 
@@ -188,6 +188,7 @@ Tuwunel runs the [Complement](https://github.com/matrix-org/complement) Matrix h
 | `TestRoomSpecificUsernameChange` | ✅ | 5/0/0 |
 | `TestRoomState` | ✅ | 15/0/0 |
 | `TestRoomSummary` | ✅ | – |
+| `TestRoomSummaryAllowedRoomIDs` | ✅ | 2/0/0 |
 | `TestRoomsInvite` | ✅ | 9/0/0 |
 | `TestSearch` | ✅ | 7/0/0 |
 | `TestSendAndFetchMessage` | ✅ | – |
