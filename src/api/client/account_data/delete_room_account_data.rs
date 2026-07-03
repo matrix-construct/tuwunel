@@ -1,7 +1,8 @@
 use axum::extract::State;
 use ruma::api::client::config::delete_room_account_data;
-use tuwunel_core::{Err, Result};
+use tuwunel_core::Result;
 
+use super::assert_account_data_owner;
 use crate::Ruma;
 
 /// # `DELETE /_matrix/client/unstable/org.matrix.msc3391/user/{userId}/rooms/{roomId}/account_data/{type}`
@@ -13,9 +14,12 @@ pub(crate) async fn delete_room_account_data_route(
 ) -> Result<delete_room_account_data::unstable::Response> {
 	let sender_user = body.sender_user();
 
-	if sender_user != body.user_id && body.appservice_info.is_none() {
-		return Err!(Request(Forbidden("You cannot delete account data for other users.")));
-	}
+	assert_account_data_owner(
+		sender_user,
+		&body.user_id,
+		body.appservice_info.as_ref(),
+		"You cannot delete account data for other users.",
+	)?;
 
 	services
 		.account_data

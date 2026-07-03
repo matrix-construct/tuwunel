@@ -13,7 +13,7 @@ use ruma::{
 use serde::Deserialize;
 use serde_json::{Value as JsonValue, json, value::RawValue as RawJsonValue};
 use tuwunel_core::{Err, Result, err};
-use tuwunel_service::Services;
+use tuwunel_service::{Services, appservice::RegistrationInfo};
 
 pub(crate) use self::{
 	delete_global_account_data::delete_global_account_data_route,
@@ -23,6 +23,19 @@ pub(crate) use self::{
 	set_global_account_data::set_global_account_data_route,
 	set_room_account_data::set_room_account_data_route,
 };
+
+fn assert_account_data_owner(
+	sender_user: &UserId,
+	user_id: &UserId,
+	appservice_info: Option<&RegistrationInfo>,
+	message: &str,
+) -> Result {
+	if sender_user != user_id && appservice_info.is_none() {
+		return Err!(Request(Forbidden("{message}")));
+	}
+
+	Ok(())
+}
 
 async fn set_account_data(
 	services: &Services,
