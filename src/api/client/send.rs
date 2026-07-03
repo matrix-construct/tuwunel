@@ -1,26 +1,34 @@
 use std::collections::BTreeMap;
 
 use axum::extract::State;
-use futures::{FutureExt, future::try_join3};
+use futures::{FutureExt, future::try_join4};
 use ruma::{
 	DeviceId, RoomId, TransactionId, UserId,
 	api::client::message::send_message_event,
 	events::{
-		AnyMessageLikeEventContent, MessageLikeEventType, reaction::ReactionEventContent,
-		room::redaction::RoomRedactionEventContent,
+		AnyMessageLikeEventContent, MessageLikeEventType,
+		reaction::ReactionEventContent,
+		room::{encrypted::Relation, redaction::RoomRedactionEventContent},
 	},
 	serde::Raw,
 };
+use serde::Deserialize;
 use serde_json::from_str;
 use tuwunel_core::{
 	Err, Result, err,
-	matrix::pdu::PduBuilder,
+	matrix::{Event, pdu::PduBuilder},
 	utils::{self},
 	warn,
 };
 use tuwunel_service::Services;
 
 use crate::Ruma;
+
+#[derive(Deserialize)]
+struct ExtractRelatesTo {
+	#[serde(rename = "m.relates_to")]
+	relates_to: Relation,
+}
 
 /// # `PUT /_matrix/client/v3/rooms/{roomId}/send/{eventType}/{txnId}`
 ///
@@ -75,10 +83,11 @@ pub(crate) async fn send_message_event_route(
 
 	let state_lock = services.state.mutex.lock(&body.room_id).await;
 
-	let (existing_txnid, ..) = try_join3(
+	let (existing_txnid, ..) = try_join4(
 		check_existing_txnid(&services, sender_user, sender_device, &body.txn_id).map(Ok),
 		check_duplicate_reaction(&services, &body.event_type, sender_user, &body.body.body),
 		check_public_call_invite(&services, &body.event_type, &body.room_id),
+		check_nested_thread(&services, &body.body.body),
 	)
 	.await?;
 
@@ -182,6 +191,33 @@ async fn check_duplicate_reaction(
 	}
 
 	Err!(Request(DuplicateAnnotation("Duplicate reactions are not allowed.")))
+}
+
+// MSC3440/Matrix 1.4: a thread may only target an event which itself carries
+// no rel_type; the spec assigns this rejection 400 M_UNKNOWN.
+async fn check_nested_thread(
+	services: &Services,
+	body: &Raw<AnyMessageLikeEventContent>,
+) -> Result {
+	let Ok(ExtractRelatesTo { relates_to: Relation::Thread(thread) }) =
+		body.deserialize_as_unchecked()
+	else {
+		return Ok(());
+	};
+
+	let Ok(root) = services.timeline.get_pdu(&thread.event_id).await else {
+		return Ok(());
+	};
+
+	let nested = root
+		.get_content()
+		.is_ok_and(|content: ExtractRelatesTo| content.relates_to.rel_type().is_some());
+
+	if !nested {
+		return Ok(());
+	}
+
+	Err!(Request(Unknown("Cannot start threads from an event with a relation.")))
 }
 
 /// Check if this is a new transaction id. Returns Some when the transaction id
