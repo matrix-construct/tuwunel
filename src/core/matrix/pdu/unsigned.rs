@@ -1,11 +1,11 @@
 use std::collections::BTreeMap;
 
 use ruma::{
-	MilliSecondsSinceUnixEpoch, OwnedEventId,
+	MilliSecondsSinceUnixEpoch, OwnedEventId, OwnedUserId,
 	events::{AnySyncMessageLikeEvent, room::member::MembershipState},
 	serde::Raw,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::value::{RawValue as RawJsonValue, Value as JsonValue, to_raw_value};
 
 use super::{Pdu, Unsigned};
@@ -122,6 +122,74 @@ pub fn set_thread_participated(&mut self, participated: bool) -> Result {
 		.and_then(JsonValue::as_object_mut)
 		.map(|thread| {
 			thread.insert("current_user_participated".to_owned(), participated.into());
+		})
+		.is_some();
+
+	if updated {
+		self.unsigned = Some(to_raw_value(&unsigned)?.into());
+	}
+
+	Ok(())
+}
+
+/// MSC4025: identify the bundled `m.thread` `latest_event` without parsing
+/// the whole bundle: the `sender` keys the erasure gate, the `event_id` loads
+/// the event on a hit.
+#[implement(Pdu)]
+#[must_use]
+pub fn thread_latest_event(&self) -> Option<(OwnedEventId, OwnedUserId)> {
+	#[derive(Deserialize)]
+	struct Relations {
+		#[serde(rename = "m.thread")]
+		thread: Option<Thread>,
+	}
+
+	#[derive(Deserialize)]
+	struct Thread {
+		latest_event: Option<Identity>,
+	}
+
+	#[derive(Deserialize)]
+	struct Identity {
+		event_id: OwnedEventId,
+		sender: OwnedUserId,
+	}
+
+	let relations: Relations = self
+		.unsigned
+		.as_ref()?
+		.get_field("m.relations")
+		.ok()
+		.flatten()?;
+
+	let identity = relations.thread?.latest_event?;
+
+	Some((identity.event_id, identity.sender))
+}
+
+/// MSC4025: overwrite `unsigned.m.relations.m.thread.latest_event`, serving
+/// the pruned form of an erased sender's thread activity. No-op when the
+/// event carries no thread bundle.
+#[implement(Pdu)]
+pub fn set_thread_latest_event(&mut self, latest: &Raw<AnySyncMessageLikeEvent>) -> Result {
+	use serde_json::Map;
+
+	let Some(unsigned) = self.unsigned.as_ref() else {
+		return Ok(());
+	};
+
+	let latest = serde_json::to_value(latest)?;
+
+	let mut unsigned: Map<String, JsonValue> = serde_json::from_str(unsigned.json().get())
+		.map_err(|e| err!(Database("Invalid unsigned in pdu event: {e}")))?;
+
+	let updated = unsigned
+		.get_mut("m.relations")
+		.and_then(JsonValue::as_object_mut)
+		.and_then(|relations| relations.get_mut("m.thread"))
+		.and_then(JsonValue::as_object_mut)
+		.map(|thread| {
+			thread.insert("latest_event".to_owned(), latest);
 		})
 		.is_some();
 

@@ -12,8 +12,11 @@ use std::cmp::Ordering;
 
 use ruma::{
 	CanonicalJsonObject, CanonicalJsonValue, EventId, MilliSecondsSinceUnixEpoch, OwnedEventId,
-	OwnedRoomId, OwnedServerName, OwnedUserId, RoomId, UInt, UserId, events::TimelineEventType,
-	room_version_rules::RoomVersionRules, serde::Raw,
+	OwnedRoomId, OwnedServerName, OwnedUserId, RoomId, UInt, UserId,
+	canonical_json::redact_in_place,
+	events::TimelineEventType,
+	room_version_rules::{RedactionRules, RoomVersionRules},
+	serde::Raw,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue as RawJsonValue;
@@ -32,7 +35,7 @@ pub use self::{
 	raw_id::*,
 };
 use super::{Event, ShortRoomId, StateKey};
-use crate::Result;
+use crate::{Result, err};
 
 /// Persistent Data Unit (Event)
 #[derive(Clone, Deserialize, Serialize, Debug)]
@@ -165,6 +168,18 @@ impl Pdu {
 
 	pub fn from_raw_json(json: &RawJsonValue) -> Result<Self> {
 		Self::deserialize(json).map_err(Into::into)
+	}
+
+	/// MSC4025: a pruned clone per the redaction rules, carrying no
+	/// `redacted_because`; no redaction event exists for a serve-time
+	/// erasure.
+	pub fn redacted(&self, rules: &RedactionRules) -> Result<Self> {
+		let mut object = self.to_canonical_object();
+
+		redact_in_place(&mut object, rules, None)
+			.map_err(|e| err!("Failed to redact event: {e}"))?;
+
+		Self::from_object(object)
 	}
 }
 

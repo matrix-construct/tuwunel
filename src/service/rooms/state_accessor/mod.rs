@@ -1,3 +1,4 @@
+mod erased;
 mod room_state;
 mod server_can;
 mod state;

@@ -290,6 +290,17 @@ pub fn get_relations<'a>(
 /// folds are skipped unless enabled.
 #[implement(Service)]
 pub async fn bundle_aggregations(&self, sender_user: &UserId, mut pdu: Pdu) -> Pdu {
+	// MSC4025: an erased sender's event serves as the pruned clone, and a
+	// pruned event carries no aggregations.
+	if let Some(pruned) = self
+		.services
+		.state_accessor
+		.erased_view(sender_user, &pdu)
+		.await
+	{
+		return pruned;
+	}
+
 	let has_thread = pdu
 		.unsigned()
 		.is_some_and(|unsigned| unsigned.get().contains("m.thread"));
@@ -304,6 +315,9 @@ pub async fn bundle_aggregations(&self, sender_user: &UserId, mut pdu: Pdu) -> P
 		pdu.set_thread_participated(participated)
 			.log_err()
 			.ok();
+
+		self.erase_thread_latest(sender_user, &mut pdu)
+			.await;
 	}
 
 	let replacement = self
@@ -315,7 +329,13 @@ pub async fn bundle_aggregations(&self, sender_user: &UserId, mut pdu: Pdu) -> P
 		.await
 		.flatten();
 
-	if let Some(replacement) = replacement {
+	if let Some(replacement) = replacement
+		&& !self
+			.services
+			.state_accessor
+			.erased_for(sender_user, &replacement)
+			.await
+	{
 		pdu.set_replacement_bundle(&replacement.to_format())
 			.log_err()
 			.ok();
@@ -337,6 +357,35 @@ pub async fn bundle_aggregations(&self, sender_user: &UserId, mut pdu: Pdu) -> P
 	}
 
 	pdu
+}
+
+/// MSC4025: the stored thread bundle carries a full `latest_event` of any
+/// sender; an erased hit swaps in the pruned form for this recipient. The
+/// event load and membership check run only on the erased hit.
+#[implement(Service)]
+async fn erase_thread_latest(&self, sender_user: &UserId, pdu: &mut Pdu) {
+	let Some((event_id, sender)) = pdu.thread_latest_event() else {
+		return;
+	};
+
+	if !self.services.users.is_erased(&sender).await {
+		return;
+	}
+
+	let Ok(latest) = self.services.timeline.get_pdu(&event_id).await else {
+		return;
+	};
+
+	if let Some(pruned) = self
+		.services
+		.state_accessor
+		.erased_view(sender_user, &latest)
+		.await
+	{
+		pdu.set_thread_latest_event(&pruned.to_format())
+			.log_err()
+			.ok();
+	}
 }
 
 /// MSC3925: the newest `m.replace` edit of `parent` as a full event, or `None`
