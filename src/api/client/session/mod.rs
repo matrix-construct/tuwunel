@@ -65,28 +65,36 @@ pub(crate) async fn get_login_types_route(
 			.collect()
 	});
 
-	let mut flows = vec![
-		LoginType::ApplicationService(ApplicationServiceLoginType::default()),
-		LoginType::Token(TokenLoginType { get_login_token }),
-	];
-
-	if services.config.login_with_password {
-		flows.push(LoginType::Password(PasswordLoginType::default()));
-	}
-
-	if identity_providers
+	let show_sso = identity_providers
 		.as_ref()
-		.is_none_or(|x| !x.is_empty())
-	{
-		flows.push(LoginType::Sso(SsoLoginType {
+		.is_none_or(|providers| !providers.is_empty());
+
+	let appservice = Some(LoginType::ApplicationService(ApplicationServiceLoginType::default()));
+
+	let token = Some(LoginType::Token(TokenLoginType { get_login_token }));
+
+	let password = services
+		.config
+		.login_with_password
+		.then(|| LoginType::Password(PasswordLoginType::default()));
+
+	let sso = show_sso.then(|| {
+		LoginType::Sso(SsoLoginType {
 			identity_providers: identity_providers.unwrap_or_default(),
 			oauth_aware_preferred: services.config.oidc_aware_preferred,
-		}));
-	}
+		})
+	});
 
-	if services.config.jwt.enable {
-		flows.push(LoginType::Jwt(JwtLoginType::default()));
-	}
+	let jwt = services
+		.config
+		.jwt
+		.enable
+		.then(|| LoginType::Jwt(JwtLoginType::default()));
+
+	let flows = [appservice, token, password, sso, jwt]
+		.into_iter()
+		.flatten()
+		.collect();
 
 	Ok(get_login_types::v3::Response { flows })
 }

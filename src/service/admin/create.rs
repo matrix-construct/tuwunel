@@ -42,9 +42,9 @@ pub async fn create_server_user(services: &Services) -> Result {
 /// used to issue admin commands by talking to the server user inside it.
 pub async fn create_admin_room(services: &Services) -> Result {
 	let room_id = RoomId::new_v1(services.globals.server_name());
-	let room_version = RoomVersionId::V11;
+	let room_version_id = RoomVersionId::V11;
 
-	let room_version_rules = room_version::rules(&room_version)?;
+	let room_version_rules = room_version::rules(&room_version_id)?;
 
 	let _short_id = services
 		.short
@@ -75,7 +75,7 @@ pub async fn create_admin_room(services: &Services) -> Result {
 			PduBuilder::state(String::new(), &RoomCreateEventContent {
 				federate: services.config.federate_admin_room,
 				predecessor: None,
-				room_version: room_version.clone(),
+				room_version: room_version_id.clone(),
 				..create_content
 			}),
 			server_user,

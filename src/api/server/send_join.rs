@@ -96,9 +96,9 @@ async fn create_join_event(
 
 	// We do not add the event_id field to the pdu here because of signature and
 	// hashes checks
-	let room_version = services.state.get_room_version(room_id).await?;
+	let room_version_id = services.state.get_room_version(room_id).await?;
 
-	let Ok((event_id, mut value)) = gen_event_id_canonical_json(pdu, &room_version) else {
+	let Ok((event_id, mut value)) = gen_event_id_canonical_json(pdu, &room_version_id) else {
 		// Event could not be converted to canonical json
 		return Err!(Request(BadJson("Could not convert event to canonical json.")));
 	};
@@ -106,7 +106,7 @@ async fn create_join_event(
 	let (content, joining_user) =
 		validate_join_event_shape(services, &value, origin, room_id).await?;
 
-	let room_version_rules = room_version::rules(&room_version)?;
+	let room_version_rules = room_version::rules(&room_version_id)?;
 
 	if let Some(authorising_user) = content.join_authorized_via_users_server {
 		validate_restricted_join(
@@ -121,7 +121,7 @@ async fn create_join_event(
 
 	services
 		.server_keys
-		.hash_and_sign_event(&mut value, &room_version)
+		.hash_and_sign_event(&mut value, &room_version_id)
 		.map_err(|e| err!(Request(InvalidParam(warn!("Failed to sign send_join event: {e}")))))?;
 
 	let origin: OwnedServerName = serde_json::from_value(
@@ -205,7 +205,7 @@ async fn create_join_event(
 	let into_federation_format = |pdu: CanonicalJsonObject| {
 		services
 			.federation
-			.format_pdu_into(pdu, Some(&room_version))
+			.format_pdu_into(pdu, Some(&room_version_id))
 			.map(Ok)
 	};
 
@@ -217,7 +217,7 @@ async fn create_join_event(
 
 	let auth_chain = services
 		.auth_chain
-		.event_ids_iter(room_id, &room_version, auth_heads)
+		.event_ids_iter(room_id, &room_version_id, auth_heads)
 		.ready_try_filter(include_auth_event)
 		.broad_and_then(async |event_id| {
 			services
@@ -245,7 +245,7 @@ async fn create_join_event(
 	// Join event for new server.
 	let event = services
 		.federation
-		.format_pdu_into(value, Some(&room_version))
+		.format_pdu_into(value, Some(&room_version_id))
 		.map(Some)
 		.map(Ok);
 
