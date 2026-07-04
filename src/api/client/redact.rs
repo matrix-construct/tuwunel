@@ -4,7 +4,7 @@ use ruma::{
 };
 use tuwunel_core::{Err, Result, matrix::pdu::PduBuilder, warn};
 
-use crate::Ruma;
+use crate::{Ruma, client::utils::is_self_redaction};
 
 /// # `PUT /_matrix/client/r0/rooms/{roomId}/redact/{eventId}/{txnId}`
 ///
@@ -26,6 +26,12 @@ pub(crate) async fn redact_event_route(
 			"Local redactions are disabled, non-admin user attempted to redact an event"
 		);
 		return Err!(Request(Forbidden("Redactions are disabled on this server.")));
+	}
+
+	if services.users.is_suspended(sender_user).await
+		&& !is_self_redaction(&services, sender_user, &body.event_id).await
+	{
+		return Err!(Request(UserSuspended("Account is suspended.")));
 	}
 
 	let state_lock = services.state.mutex.lock(&body.room_id).await;

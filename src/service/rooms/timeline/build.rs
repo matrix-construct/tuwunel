@@ -44,10 +44,6 @@ pub async fn build_and_append_pdu(
 		.create_hash_and_sign_event(pdu_builder, sender, room_id, state_lock)
 		.await?;
 
-	self.check_pdu_for_suspended_sender(&pdu)
-		.boxed()
-		.await?;
-
 	//TODO: Use proper room version here
 	if *pdu.kind() == TimelineEventType::RoomCreate && pdu.room_id().server_name().is_none() {
 		let _short_id = self
@@ -276,67 +272,4 @@ where
 	}
 
 	Ok(())
-}
-
-/// MSC3823: reject PDUs from a suspended sender, except self-redaction of
-/// their own event or self-leave. Synapse only checks `membership == leave`
-/// and so lets suspended moderators kick others via /kick or a state PUT.
-#[implement(super::Service)]
-#[tracing::instrument(skip_all, level = "debug")]
-async fn check_pdu_for_suspended_sender<Pdu>(&self, pdu: &Pdu) -> Result
-where
-	Pdu: Event,
-{
-	if !self
-		.services
-		.users
-		.is_suspended(pdu.sender())
-		.await
-	{
-		return Ok(());
-	}
-
-	let allowed = match pdu.kind() {
-		| TimelineEventType::RoomRedaction => self.is_self_redaction(pdu).await?,
-
-		| TimelineEventType::RoomMember =>
-			pdu.get_content()
-				.map(|content: RoomMemberEventContent| {
-					content.membership == MembershipState::Leave
-						&& pdu.state_key() == Some(pdu.sender().as_str())
-				})?,
-
-		| _ => false,
-	};
-
-	if allowed {
-		return Ok(());
-	}
-
-	Err!(Request(UserSuspended("Account is suspended.")))
-}
-
-#[implement(super::Service)]
-async fn is_self_redaction<Pdu>(&self, pdu: &Pdu) -> Result<bool>
-where
-	Pdu: Event,
-{
-	let room_version = self
-		.services
-		.state
-		.get_room_version(pdu.room_id())
-		.await?;
-
-	let room_rules = room_version::rules(&room_version)?;
-
-	let Some(target_id) = pdu.redacts_id(&room_rules) else {
-		return Ok(false);
-	};
-
-	let is_self = self
-		.get_pdu(&target_id)
-		.await
-		.is_ok_and(|target| target.sender() == pdu.sender());
-
-	Ok(is_self)
 }

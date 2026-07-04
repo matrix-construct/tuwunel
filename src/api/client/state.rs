@@ -190,7 +190,7 @@ async fn send_state_event_for_key_helper(
 	state_key: &str,
 	timestamp: Option<ruma::MilliSecondsSinceUnixEpoch>,
 ) -> Result<OwnedEventId> {
-	allowed_to_send_state_event(services, room_id, event_type, state_key, json).await?;
+	allowed_to_send_state_event(services, sender, room_id, event_type, state_key, json).await?;
 	let state_lock = services.state.mutex.lock(room_id).await;
 	let event_id = services
 		.timeline
@@ -214,11 +214,18 @@ async fn send_state_event_for_key_helper(
 
 async fn allowed_to_send_state_event(
 	services: &Services,
+	sender: &UserId,
 	room_id: &RoomId,
 	event_type: &StateEventType,
 	state_key: &str,
 	json: &Raw<AnyStateEventContent>,
 ) -> Result {
+	let suspended = services.users.is_suspended(sender).await;
+
+	if suspended && !matches!(event_type, StateEventType::RoomMember) {
+		return Err!(Request(UserSuspended("Account is suspended.")));
+	}
+
 	match event_type {
 		| StateEventType::RoomCreate => Err!(Request(BadJson(debug_warn!(
 			?room_id,
@@ -231,7 +238,8 @@ async fn allowed_to_send_state_event(
 			validate_history_visibility(services, room_id, json).await,
 		| StateEventType::RoomCanonicalAlias =>
 			validate_canonical_alias(services, room_id, json).await,
-		| StateEventType::RoomMember => validate_member(services, room_id, state_key, json).await,
+		| StateEventType::RoomMember =>
+			validate_member(services, sender, room_id, state_key, json, suspended).await,
 		| _ => Ok(()),
 	}
 }
@@ -397,9 +405,11 @@ async fn validate_canonical_alias(
 
 async fn validate_member(
 	services: &Services,
+	sender: &UserId,
 	room_id: &RoomId,
 	state_key: &str,
 	json: &Raw<AnyStateEventContent>,
+	suspended: bool,
 ) -> Result {
 	let membership_content = json
 		.deserialize_as_unchecked::<RoomMemberEventContent>()
@@ -413,6 +423,12 @@ async fn validate_member(
 	let Ok(target_user) = UserId::parse(state_key) else {
 		return Err!(Request(BadJson("Membership event has invalid or non-existent state key")));
 	};
+
+	if suspended
+		&& (membership_content.membership != MembershipState::Leave || target_user != sender)
+	{
+		return Err!(Request(UserSuspended("Account is suspended.")));
+	}
 
 	if membership_content.membership == MembershipState::Invite
 		&& services.globals.user_is_local(&target_user)

@@ -71,6 +71,12 @@ pub async fn update_all_rooms(
 		return;
 	}
 
+	// Suspended senders may not emit member events; OIDC, SSO, and MAS profile
+	// updates reach here without passing any suspension-blocked route.
+	if self.services.users.is_suspended(user_id).await {
+		return;
+	}
+
 	let (current_displayname, current_avatar_url) =
 		if matches!(propagation, Propagation::Unchanged) {
 			join(self.displayname(user_id).ok(), self.avatar_url(user_id).ok()).await

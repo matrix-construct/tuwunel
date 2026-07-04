@@ -22,10 +22,13 @@ use ruma::{
 	CanonicalJsonValue, OwnedDeviceId, OwnedServerName, OwnedUserId,
 	api::client::{
 		directory::get_public_rooms,
-		profile::{
-			delete_profile_field, get_avatar_url, get_display_name, get_profile,
-			get_profile_field, set_avatar_url, set_display_name, set_profile_field,
+		knock::knock_room,
+		membership::{
+			ban_user, invite_user, join_room_by_id, join_room_by_id_or_alias, kick_user,
+			unban_user,
 		},
+		profile::{delete_profile_field, get_profile, get_profile_field, set_profile_field},
+		room::{create_room, upgrade_room},
 		session::{logout, logout_all},
 	},
 };
@@ -117,17 +120,25 @@ async fn locked_account_check(services: &Services, auth: &Auth, route: TypeId) -
 	Err!(Request(UserLocked("This account has been locked.")))
 }
 
-/// MSC3823: 403 `M_USER_SUSPENDED` on `set_display_name` / `set_avatar_url`
-/// for suspended callers. Companion checks: per-field in the profile
-/// handlers, per-PDU in `timeline::build_and_append_pdu`.
+/// MSC3823: 403 `M_USER_SUSPENDED` on membership, room create/upgrade, and
+/// profile routes. Companion checks: self-redaction and self-leave carve-outs
+/// in the /send, /redact, and /state handlers; propagation in the profile
+/// service.
 #[inline(never)]
 async fn suspended_account_check(services: &Services, auth: &Auth, route: TypeId) -> Result {
 	let Some(user_id) = auth.sender_user.as_deref() else {
 		return Ok(());
 	};
 
-	let blocked = route == TypeId::of::<set_display_name::v3::Request>()
-		|| route == TypeId::of::<set_avatar_url::v3::Request>()
+	let blocked = route == TypeId::of::<join_room_by_id::v3::Request>()
+		|| route == TypeId::of::<join_room_by_id_or_alias::v3::Request>()
+		|| route == TypeId::of::<invite_user::v3::Request>()
+		|| route == TypeId::of::<knock_room::v3::Request>()
+		|| route == TypeId::of::<kick_user::v3::Request>()
+		|| route == TypeId::of::<ban_user::v3::Request>()
+		|| route == TypeId::of::<unban_user::v3::Request>()
+		|| route == TypeId::of::<create_room::v3::Request>()
+		|| route == TypeId::of::<upgrade_room::v3::Request>()
 		|| route == TypeId::of::<set_profile_field::v3::Request>()
 		|| route == TypeId::of::<delete_profile_field::v3::Request>();
 
@@ -141,9 +152,7 @@ async fn suspended_account_check(services: &Services, auth: &Auth, route: TypeId
 #[inline(never)]
 fn check_auth_still_required(services: &Services, token: &Token, route: TypeId) -> Result {
 	let is_profile = route == TypeId::of::<get_profile::v3::Request>()
-		|| route == TypeId::of::<get_profile_field::v3::Request>()
-		|| route == TypeId::of::<get_display_name::v3::Request>()
-		|| route == TypeId::of::<get_avatar_url::v3::Request>();
+		|| route == TypeId::of::<get_profile_field::v3::Request>();
 
 	let is_public_rooms = route == TypeId::of::<get_public_rooms::v3::Request>();
 

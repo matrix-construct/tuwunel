@@ -1,5 +1,5 @@
-use ruma::{RoomId, UserId};
-use tuwunel_core::{Err, Result, warn};
+use ruma::{EventId, RoomId, UserId};
+use tuwunel_core::{Err, Event, Result, warn};
 use tuwunel_service::Services;
 
 pub(crate) async fn invite_check(
@@ -14,4 +14,16 @@ pub(crate) async fn invite_check(
 	}
 
 	Ok(())
+}
+
+pub(crate) async fn is_self_redaction(
+	services: &Services,
+	user_id: &UserId,
+	event_id: &EventId,
+) -> bool {
+	services
+		.timeline
+		.get_pdu(event_id)
+		.await
+		.is_ok_and(|target| target.sender() == user_id)
 }

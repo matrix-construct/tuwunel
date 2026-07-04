@@ -15,14 +15,14 @@ use ruma::{
 use serde::Deserialize;
 use serde_json::from_str;
 use tuwunel_core::{
-	Err, Result, err,
+	Err, Result, debug_warn, err,
 	matrix::{Event, pdu::PduBuilder},
 	utils::{self},
 	warn,
 };
 use tuwunel_service::Services;
 
-use crate::Ruma;
+use crate::{Ruma, client::utils::is_self_redaction};
 
 #[derive(Deserialize)]
 struct ExtractRelatesTo {
@@ -47,38 +47,65 @@ pub(crate) async fn send_message_event_route(
 	let sender_device = body.sender_device.as_deref();
 	let appservice_info = body.appservice_info.as_ref();
 
-	if body.event_type == MessageLikeEventType::RoomRedaction
-		&& services.config.disable_local_redactions
-		&& !services.admin.user_is_admin(sender_user).await
-	{
-		if let Some(event_id) = body
-			.body
-			.body
-			.deserialize_as_unchecked::<RoomRedactionEventContent>()
-			.ok()
-			.and_then(|content| content.redacts)
-		{
-			warn!(
-				%sender_user,
-				%event_id,
-				"Local redactions are disabled, non-admin user attempted to redact an event"
-			);
-		} else {
-			warn!(
-				%sender_user,
-				event = %body.body.body.json(),
-				"Local redactions are disabled, non-admin user attempted to redact an event \
-				 with an invalid redaction event"
-			);
-		}
-
-		return Err!(Request(Forbidden("Redactions are disabled on this server.")));
-	}
-
 	// Forbid m.room.encrypted if encryption is disabled
 	if body.event_type == MessageLikeEventType::RoomEncrypted && !services.config.allow_encryption
 	{
 		return Err!(Request(Forbidden("Encryption has been disabled")));
+	}
+
+	// MSC4169: clients sending m.room.redaction via /send put `redacts` in
+	// `content`. Pre-v11 auth rules read it from the top level; lift it so
+	// `redacts_id(...)` resolves regardless of room version. Mirrors the
+	// /redact handler.
+	let redaction_content = || {
+		body.body
+			.body
+			.deserialize_as_unchecked::<RoomRedactionEventContent>()
+			.inspect_err(|_| {
+				debug_warn!(
+					%sender_user,
+					event = %body.body.body.json(),
+					"Client sent invalid redaction event"
+				);
+			})
+			.ok()
+	};
+
+	let redacts_id = body
+		.event_type
+		.eq(&MessageLikeEventType::RoomRedaction)
+		.then(redaction_content)
+		.flatten()
+		.and_then(|content| content.redacts);
+
+	if body.event_type == MessageLikeEventType::RoomRedaction
+		&& services.config.disable_local_redactions
+		&& !services.admin.user_is_admin(sender_user).await
+	{
+		warn!(
+			%sender_user,
+			?redacts_id,
+			"Local redactions are disabled, non-admin user attempted to redact an event"
+		);
+
+		return Err!(Request(Forbidden("Redactions are disabled on this server.")));
+	}
+
+	if services.users.is_suspended(sender_user).await {
+		if body.event_type != MessageLikeEventType::RoomRedaction {
+			return Err!(Request(UserSuspended(
+				"Cannot send non-redaction events while suspended."
+			)));
+		}
+
+		let is_self = match &redacts_id {
+			| None => false,
+			| Some(redacts_id) => is_self_redaction(&services, sender_user, redacts_id).await,
+		};
+
+		if !is_self {
+			return Err!(Request(UserSuspended("Can only redact own events while suspended.")));
+		}
 	}
 
 	let state_lock = services.state.mutex.lock(&body.room_id).await;
@@ -101,22 +128,6 @@ pub(crate) async fn send_message_event_route(
 	let content = from_str(body.body.body.json().get())
 		.map_err(|e| err!(Request(BadJson("Invalid JSON body: {e}"))))?;
 
-	// MSC4169: clients sending m.room.redaction via /send put `redacts` in
-	// `content`. Pre-v11 auth rules read it from the top level; lift it so
-	// `redacts_id(...)` resolves regardless of room version. Mirrors the
-	// /redact handler.
-	let redacts = body
-		.event_type
-		.eq(&MessageLikeEventType::RoomRedaction)
-		.then(|| {
-			body.body
-				.body
-				.deserialize_as_unchecked::<RoomRedactionEventContent>()
-				.ok()
-		})
-		.flatten()
-		.and_then(|content| content.redacts);
-
 	let event_id = services
 		.timeline
 		.build_and_append_pdu(
@@ -125,7 +136,7 @@ pub(crate) async fn send_message_event_route(
 				content,
 				unsigned: Some(unsigned),
 				timestamp: appservice_info.and(body.timestamp),
-				redacts,
+				redacts: redacts_id,
 				..Default::default()
 			},
 			sender_user,
