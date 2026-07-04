@@ -79,3 +79,88 @@ fn normal_parse() {
 
 	assert!(!backfilled, "backfilled variant");
 }
+
+fn member_pdu(unsigned: &serde_json::Value) -> Pdu {
+	serde_json::from_value(json!({
+		"type": "m.room.member",
+		"content": { "membership": "join" },
+		"event_id": "$member:example.com",
+		"room_id": "!room:example.com",
+		"sender": "@alice:example.com",
+		"state_key": "@alice:example.com",
+		"prev_events": ["$prev:example.com"],
+		"auth_events": ["$auth:example.com"],
+		"origin_server_ts": 1_838_188_000,
+		"depth": 12,
+		"hashes": { "sha256": "thishashcoversallfieldsincasethisisredacted" },
+		"unsigned": unsigned,
+	}))
+	.expect("valid pdu")
+}
+
+#[test]
+fn remove_prev_state_strips_pair() {
+	let mut pdu = member_pdu(&json!({
+		"age": 4612,
+		"prev_content": { "membership": "invite" },
+		"prev_sender": "@bob:example.com",
+		"replaces_state": "$invite:example.com",
+	}));
+
+	pdu.remove_prev_state().expect("strip failed");
+
+	let unsigned: serde_json::Value = serde_json::from_str(
+		pdu.unsigned
+			.as_ref()
+			.expect("unsigned kept")
+			.json()
+			.get(),
+	)
+	.expect("valid unsigned");
+
+	assert!(unsigned.get("prev_content").is_none());
+	assert!(unsigned.get("prev_sender").is_none());
+	assert_eq!(unsigned["replaces_state"], "$invite:example.com");
+	assert_eq!(unsigned["age"], 4612);
+}
+
+#[test]
+fn remove_prev_state_omits_emptied_unsigned() {
+	let mut pdu = member_pdu(&json!({
+		"prev_content": { "membership": "invite" },
+		"prev_sender": "@bob:example.com",
+	}));
+
+	pdu.remove_prev_state().expect("strip failed");
+
+	assert!(pdu.unsigned.is_none());
+}
+
+#[test]
+fn remove_prev_state_omits_stored_empty_unsigned() {
+	let mut pdu = member_pdu(&json!({}));
+
+	pdu.remove_prev_state().expect("strip failed");
+
+	assert!(pdu.unsigned.is_none());
+}
+
+#[test]
+fn remove_prev_state_keeps_unrelated_unsigned() {
+	let mut pdu = member_pdu(&json!({ "age": 4612 }));
+
+	pdu.remove_prev_state().expect("strip failed");
+
+	let unsigned = pdu.unsigned.as_ref().expect("unsigned kept");
+
+	assert_eq!(unsigned.json().get(), r#"{"age":4612}"#);
+}
+
+#[test]
+fn remove_prev_state_absent_unsigned_noop() {
+	let mut pdu = member_pdu(&json!(null));
+
+	pdu.remove_prev_state().expect("strip failed");
+
+	assert!(pdu.unsigned.is_none());
+}

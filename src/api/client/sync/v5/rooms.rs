@@ -36,7 +36,10 @@ use tuwunel_core::{
 use tuwunel_service::{Services, sync::Room};
 
 use self::{bump_stamp::room_bump_stamp, heroes::calculate_heroes};
-use super::{super::load_timeline, Connection, ListIds, SyncInfo, Window, WindowRoom};
+use super::{
+	super::{load_timeline, strip_prev_state},
+	Connection, ListIds, SyncInfo, Window, WindowRoom,
+};
 use crate::client::{annotate_membership, ignored_filter, with_membership};
 
 type ThreadCounts = BTreeMap<OwnedEventId, (u64, u64)>;
@@ -434,6 +437,14 @@ async fn collect_required_state(
 		.concat()
 		.await;
 
+	let in_timeline = |event: &PduEvent| {
+		timeline_pdus
+			.iter()
+			.map(ref_at!(1))
+			.map(Event::event_id)
+			.any(is_equal_to!(event.event_id()))
+	};
+
 	required_state
 		.iter()
 		.cloned()
@@ -455,6 +466,8 @@ async fn collect_required_state(
 				.await?;
 
 			annotate_membership(services, &mut pdu, sender_user, encrypted).await;
+
+			let pdu = strip_prev_state(pdu, sender_user, in_timeline);
 
 			Some(Event::into_format(pdu))
 		})

@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::value::{RawValue as RawJsonValue, Value as JsonValue, to_raw_value};
 
 use super::{Pdu, Unsigned};
-use crate::{Result, err, implement};
+use crate::{Result, err, implement, utils::BoolExt};
 
 #[implement(Pdu)]
 pub fn remove_transaction_id(&mut self) -> Result {
@@ -27,6 +27,38 @@ pub fn remove_transaction_id(&mut self) -> Result {
 		.map(Into::into)
 		.map(Some)
 		.expect("unsigned is valid");
+
+	Ok(())
+}
+
+/// State-section serving strips the stored `prev_content`/`prev_sender`
+/// pair, dropping `unsigned` entirely when emptied; timeline serving keeps
+/// the trio.
+#[implement(Pdu)]
+pub fn remove_prev_state(&mut self) -> Result {
+	use BTreeMap as Map;
+
+	let Some(unsigned) = &self.unsigned else {
+		return Ok(());
+	};
+
+	let raw = unsigned.json().get();
+	let prev_keys = raw.contains("\"prev_content\"") || raw.contains("\"prev_sender\"");
+	if !prev_keys && raw != "{}" {
+		return Ok(());
+	}
+
+	let mut unsigned: Map<&str, Raw<JsonValue>> = serde_json::from_str(raw)
+		.map_err(|e| err!(Database("Invalid unsigned in pdu event: {e}")))?;
+
+	unsigned.remove("prev_content");
+	unsigned.remove("prev_sender");
+	self.unsigned = unsigned
+		.is_empty()
+		.is_false()
+		.then(|| to_raw_value(&unsigned))
+		.transpose()?
+		.map(Into::into);
 
 	Ok(())
 }

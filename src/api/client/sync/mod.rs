@@ -2,11 +2,14 @@ mod v3;
 mod v5;
 
 use futures::{FutureExt, StreamExt, pin_mut};
-use ruma::{RoomId, UserId};
+use ruma::{RoomId, UserId, events::TimelineEventType::RoomMember};
 use tuwunel_core::{
 	Error, PduCount, Result,
-	matrix::pdu::PduEvent,
-	utils::stream::{BroadbandExt, ReadyExt},
+	matrix::{Event, pdu::PduEvent},
+	utils::{
+		result::LogErr,
+		stream::{BroadbandExt, ReadyExt},
+	},
 };
 use tuwunel_service::Services;
 
@@ -76,4 +79,24 @@ async fn share_encrypted_room(
 				.await
 		})
 		.await
+}
+
+/// State sections strip the stored `prev_content`/`prev_sender` pair
+/// (Synapse injects the pair on timeline fetches only). The requester's own
+/// membership and events duplicated from the returned timeline (MSC4222,
+/// full_state) keep it: clients read membership transitions from those
+/// copies.
+fn strip_prev_state(
+	mut pdu: PduEvent,
+	sender_user: &UserId,
+	in_timeline: impl Fn(&PduEvent) -> bool,
+) -> PduEvent {
+	let own_membership =
+		*pdu.kind() == RoomMember && pdu.state_key() == Some(sender_user.as_str());
+
+	if !own_membership && !in_timeline(&pdu) {
+		pdu.remove_prev_state().log_err().ok();
+	}
+
+	pdu
 }

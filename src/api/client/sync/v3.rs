@@ -47,6 +47,7 @@ use tuwunel_core::{
 	},
 	pair_of, ref_at,
 	result::FlatOk,
+	smallvec::SmallVec,
 	trace,
 	utils::{
 		self, BoolExt, FutureBoolExt, IterStream, ReadyExt, TryFutureExtExt,
@@ -67,11 +68,13 @@ use tuwunel_service::{
 	},
 };
 
-use super::{load_timeline, share_encrypted_room};
+use super::{load_timeline, share_encrypted_room, strip_prev_state};
 use crate::{
 	ClientIp, Ruma,
 	client::{ignored_filter, is_empty_account_data_event, with_membership},
 };
+
+type TimelineEventIds = SmallVec<[OwnedEventId; 1]>;
 
 /// MSC4222 `state_after` opt-in: which room-state field the response carries.
 #[derive(Clone, Copy, Debug)]
@@ -932,6 +935,8 @@ async fn load_left_room(
 
 	let event_fields = filter.event_fields.as_deref();
 
+	let in_timeline = in_timeline(&timeline_pdus);
+
 	let state_events = state_events
 		.into_iter()
 		.filter(|pdu| filter.room.state.matches(pdu))
@@ -939,6 +944,7 @@ async fn load_left_room(
 		.chain(timeline_sender_member)
 		.stream()
 		.wide_then(|pdu| with_membership(services, pdu, sender_user, encrypted))
+		.map(|pdu| strip_prev_state(pdu, sender_user, &in_timeline))
 		.map(|pdu| trim_event_fields(pdu.into_format(), event_fields))
 		.collect();
 
@@ -996,6 +1002,21 @@ async fn load_left_room(
 				.collect(),
 		},
 	}))
+}
+
+fn in_timeline(timeline_pdus: &[(PduCount, PduEvent)]) -> impl Fn(&PduEvent) -> bool + use<> {
+	let timeline_ids: TimelineEventIds = timeline_pdus
+		.iter()
+		.map(ref_at!(1))
+		.map(Event::event_id)
+		.map(ToOwned::to_owned)
+		.collect();
+
+	move |event: &PduEvent| {
+		timeline_ids
+			.iter()
+			.any(is_equal_to!(event.event_id()))
+	}
 }
 
 #[tracing::instrument(
@@ -1242,6 +1263,7 @@ async fn assemble_join_state_events(
 		sender_user,
 		encrypted,
 		include_in_state,
+		&is_in_timeline,
 		filter.event_fields.as_deref(),
 	)
 	.await
@@ -1945,6 +1967,7 @@ async fn assemble_state_events(
 	sender_user: &UserId,
 	encrypted: bool,
 	include_in_state: impl Fn(&PduEvent) -> bool + Send + Sync,
+	in_timeline: impl Fn(&PduEvent) -> bool + Send + Sync,
 	event_fields: Option<&[String]>,
 ) -> Vec<Raw<AnySyncStateEvent>> {
 	state_events
@@ -1952,6 +1975,7 @@ async fn assemble_state_events(
 		.filter(include_in_state)
 		.stream()
 		.wide_then(|pdu| with_membership(services, pdu, sender_user, encrypted))
+		.map(|pdu| strip_prev_state(pdu, sender_user, &in_timeline))
 		.map(|pdu| trim_event_fields(pdu.into_format(), event_fields))
 		.collect()
 		.await
