@@ -301,7 +301,8 @@ pub fn get_relations<'a>(
 /// per-requester. MSC3816: the stored `m.thread` bundle carries a shared
 /// `current_user_participated`, recomputed here for `sender_user`. MSC3925:
 /// when `bundle_edit_relations` is enabled, the newest `m.replace` edit is
-/// folded in as the full replacement event. MSC3267: when
+/// folded in as the full replacement event, and the bundled thread
+/// `latest_event` carries its own newest edit (MSC3856). MSC3267: when
 /// `bundle_reference_relations` is enabled, the `m.reference` children are
 /// folded in as a `{ chunk: [{ event_id }] }` summary. The thread presence gate
 /// keeps the common no-bundle case to a substring scan; the edit and reference
@@ -336,6 +337,11 @@ pub async fn bundle_aggregations(&self, sender_user: &UserId, mut pdu: Pdu) -> P
 
 		self.erase_thread_latest(sender_user, &mut pdu)
 			.await;
+
+		if self.services.server.config.bundle_edit_relations {
+			self.bundle_thread_latest_edit(sender_user, &mut pdu)
+				.await;
+		}
 	}
 
 	let replacement = self
@@ -404,6 +410,55 @@ async fn erase_thread_latest(&self, sender_user: &UserId, pdu: &mut Pdu) {
 			.log_err()
 			.ok();
 	}
+}
+
+/// The thread module's aggregated `latest_event` (MSC3856): when the edit
+/// fold is enabled, the bundled latest reply carries its own newest
+/// `m.replace` edit, so thread previews track edits. Erased-sender bundles
+/// stay in their pruned form.
+#[implement(Service)]
+async fn bundle_thread_latest_edit(&self, sender_user: &UserId, pdu: &mut Pdu) {
+	let Some((event_id, _)) = pdu.thread_latest_event() else {
+		return;
+	};
+
+	let Ok(mut latest) = self.services.timeline.get_pdu(&event_id).await else {
+		return;
+	};
+
+	if self
+		.services
+		.state_accessor
+		.erased_for(sender_user, &latest)
+		.await
+	{
+		return;
+	}
+
+	let Some(replacement) = self.newest_replacement(&latest).await else {
+		return;
+	};
+
+	if self
+		.services
+		.state_accessor
+		.erased_for(sender_user, &replacement)
+		.await
+	{
+		return;
+	}
+
+	if latest
+		.set_replacement_bundle(&replacement.to_format())
+		.log_err()
+		.is_err()
+	{
+		return;
+	}
+
+	pdu.set_thread_latest_event(&latest.to_format())
+		.log_err()
+		.ok();
 }
 
 /// MSC3925: the newest `m.replace` edit of `parent` as a full event, or `None`

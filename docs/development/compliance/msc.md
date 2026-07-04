@@ -18,8 +18,8 @@
 
 ## Counts
 
-- ✅ `yes`: 251
-- 🟨 `partial`: 37
+- ✅ `yes`: 252
+- 🟨 `partial`: 36
 - ❌ `no`: 450
 - ⬛ `n/a`: 286
 
@@ -27,7 +27,7 @@
 
 | Inv | yes | partial | no | n/a | total |
 |---|---|---|---|---|---|
-| merged | 183 | 8 | 7 | 58 | 256 |
+| merged | 184 | 7 | 7 | 58 | 256 |
 | open | 60 | 28 | 404 | 176 | 668 |
 | closed | 8 | 1 | 39 | 52 | 100 |
 
@@ -103,7 +103,7 @@ in the [Out of scope](#out-of-scope) section.
 | MSC3873 | ✅ ● | 100/100 | event_match dotted keys | dotted-key escape semantics handled in ruma flattened JSON |
 | MSC3861 | ✅ ● | 90/95 | Next-generation auth for Matrix, based on OAuth 2.0/OIDC | Advertised as org.matrix.msc3861; cores 2964-2967 + merged periphery all yes |
 | MSC3860 | 🟨 ◐ | 70/70 | Media Download Redirects | Emits 307 to presigned object-store URL on allow_redirect; default-off gate |
-| MSC3856 | 🟨 ◐ | 55/70 | Threads List API | include=participated filter lands; latest-event order, ignored users, 403 open |
+| MSC3856 | ✅ ● | 95/100 | Threads List API | Latest-activity order, participated, ignored views, 403, next_batch all served |
 | MSC3844 | ✅ ● | 100/100 | Remove "Mjolnir" (policy room) sharing mechanism | removal of unused Mjolnir share endpoint; Tuwunel never implemented it |
 | MSC3828 | ✅ ● | 100/100 | Content Repository Cross Origin Resource Policy (CORP) Headers | media endpoints return Cross-Origin-Resource-Policy: cross-origin |
 | MSC3827 | ✅ ● | 100/100 | Filtering of `/publicRooms` by room type | /publicRooms supports room_types filter and returns room_type |
@@ -251,7 +251,6 @@ for spec compliance.
 | MSC2409 | 🟨 ● | 70/70 | Proposal to send typing, presence and receipts to appservices | typing+receipt EDUs sent to AS; presence not forwarded |
 | MSC2675 | 🟨 ◐ | 70/80 | Serverside aggregations of message relationships | thread+edit+reference bundled (edit/ref gated); reactions unbundled |
 | MSC3860 | 🟨 ◐ | 70/70 | Media Download Redirects | Emits 307 to presigned object-store URL on allow_redirect; default-off gate |
-| MSC3856 | 🟨 ◐ | 55/70 | Threads List API | include=participated filter lands; latest-event order, ignored users, 403 open |
 | MSC2676 | 🟨 ● | 50/60 | Message editing | edits accepted/relayed; no m.replace bundle or new_content apply |
 | MSC1759 | ❌ ◐ | 10/20 | MSC 1759 - Rooms V2 | v2 algorithm in use for v3+; v2 itself not in supported_room_versions |
 | MSC1767 | ❌ ◐ | 0/0 | Extensible events in Matrix | no extensible-events handling; relies on generic event relay |
