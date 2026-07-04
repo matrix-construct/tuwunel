@@ -1,10 +1,14 @@
-use std::sync::Arc;
+use std::{collections::BTreeSet, sync::Arc};
 
 use futures::{Stream, StreamExt, TryFutureExt, future::Either, pin_mut};
 use ruma::{
 	CanonicalJsonObject, CanonicalJsonValue, EventId, OwnedEventId, OwnedUserId, RoomId, UserId,
 	api::Direction,
-	events::{reaction::ReactionEventContent, relation::RelationType, room::encrypted::Relation},
+	events::{
+		AnySyncMessageLikeEvent, reaction::ReactionEventContent, relation::RelationType,
+		room::encrypted::Relation,
+	},
+	serde::Raw,
 };
 use serde::Deserialize;
 use tuwunel_core::{
@@ -74,6 +78,20 @@ const REFERENCE_BUNDLE_MAX: usize = 100;
 struct ExtractRelatesTo {
 	#[serde(rename = "m.relates_to")]
 	relates_to: Relation,
+}
+
+/// MSC3856: a served thread root's per-requester ignored-user adjustments for
+/// the /threads list. Each `Adjusted` facet is `None` when it needs no change;
+/// the redacted `root` replaces content only, the caller keeps the served
+/// `unsigned`.
+pub enum IgnoredThreadView {
+	Unchanged,
+	Omitted,
+	Adjusted {
+		root: Option<Box<Pdu>>,
+		count: Option<usize>,
+		latest: Option<Raw<AnySyncMessageLikeEvent>>,
+	},
 }
 
 impl crate::Service for Service {
@@ -410,6 +428,130 @@ async fn newest_replacement(&self, parent: &Pdu) -> Option<Pdu> {
 
 	pin_mut!(replacements);
 	replacements.next().await
+}
+
+/// MSC3856: evaluate one served thread root against the requester's ignore
+/// list. A cheap participant intersection gates the reply walk; one walk then
+/// yields the replacement `latest_event`, the ignored-aware `count`, and the
+/// omit-when-every-reply-is-ignored verdict. A root whose replies are not
+/// indexed (backfilled history) adjusts nothing beyond its own redacted form.
+#[implement(Service)]
+pub async fn ignored_thread_view(
+	&self,
+	sender_user: &UserId,
+	ignored: &BTreeSet<OwnedUserId>,
+	root: &Pdu,
+) -> IgnoredThreadView {
+	use IgnoredThreadView::{Adjusted, Omitted, Unchanged};
+
+	let Ok(root_id) = self
+		.services
+		.timeline
+		.get_pdu_id(root.event_id())
+		.await
+	else {
+		return Unchanged;
+	};
+
+	let participants = self
+		.services
+		.threads
+		.get_participants(&root_id)
+		.await
+		.unwrap_or_default();
+
+	if !participants
+		.iter()
+		.any(|user| ignored.contains(user))
+	{
+		return Unchanged;
+	}
+
+	let root_pid: PduId = root_id.into();
+	let replies = self
+		.get_relations(
+			root_pid.shortroomid,
+			root_pid.count,
+			None,
+			Direction::Backward,
+			Some(sender_user),
+		)
+		.ready_filter_map(|(_, pdu)| {
+			pdu.get_content()
+				.is_ok_and(|content: ExtractRelatesTo| {
+					matches!(content.relates_to, Relation::Thread(_))
+				})
+				.then_some(pdu)
+		});
+
+	let fold = |(total, unignored, latest): (usize, usize, Option<Pdu>), pdu: Pdu| match ignored
+		.contains(pdu.sender())
+	{
+		| true => (total.saturating_add(1), unignored, latest),
+		| false => (total.saturating_add(1), unignored.saturating_add(1), latest.or(Some(pdu))),
+	};
+
+	let (total, unignored, latest) = replies.ready_fold((0, 0, None), fold).await;
+
+	if total == 0 {
+		return match self.redacted_root(ignored, root).await {
+			| None => Unchanged,
+			| root => Adjusted { root, count: None, latest: None },
+		};
+	}
+
+	if unignored == 0 {
+		return Omitted;
+	}
+
+	let swap = root
+		.thread_latest_event()
+		.is_some_and(|(_, sender)| ignored.contains(&sender));
+
+	let latest = match swap.then_some(latest).flatten() {
+		| None => None,
+		| Some(reply) => {
+			// MSC4025: the swapped-in reply must not reopen the erased-sender
+			// seam the bundle pass gates on the stored latest.
+			let reply = self
+				.services
+				.state_accessor
+				.erased_view(sender_user, &reply)
+				.await
+				.unwrap_or(reply);
+
+			Some(reply.into_format())
+		},
+	};
+
+	let count = unignored.ne(&total).then_some(unignored);
+
+	let root = self.redacted_root(ignored, root).await;
+
+	if root.is_none() && count.is_none() && latest.is_none() {
+		return Unchanged;
+	}
+
+	Adjusted { root, count, latest }
+}
+
+/// The spec'd redacted form of an ignored sender's thread root, content side
+/// only; `None` when the sender is not ignored, or on a redaction failure
+/// (serving unredacted then matches the reference implementation).
+#[implement(Service)]
+async fn redacted_root(&self, ignored: &BTreeSet<OwnedUserId>, root: &Pdu) -> Option<Box<Pdu>> {
+	if !ignored.contains(root.sender()) {
+		return None;
+	}
+
+	self.services
+		.state
+		.get_room_version_rules(root.room_id())
+		.await
+		.log_err()
+		.ok()
+		.and_then(|rules| root.redacted(&rules.redaction).log_err().ok())
+		.map(Box::new)
 }
 
 /// Stream `parent`'s valid `m.replace` children, newest `origin_server_ts`

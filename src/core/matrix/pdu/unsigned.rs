@@ -200,6 +200,37 @@ pub fn set_thread_latest_event(&mut self, latest: &Raw<AnySyncMessageLikeEvent>)
 	Ok(())
 }
 
+/// MSC3856: overwrite `unsigned.m.relations.m.thread.count` with a
+/// per-requester value excluding ignored senders' replies. No-op when the
+/// event carries no thread bundle.
+#[implement(Pdu)]
+pub fn set_thread_count(&mut self, count: usize) -> Result {
+	use serde_json::Map;
+
+	let Some(unsigned) = self.unsigned.as_ref() else {
+		return Ok(());
+	};
+
+	let mut unsigned: Map<String, JsonValue> = serde_json::from_str(unsigned.json().get())
+		.map_err(|e| err!(Database("Invalid unsigned in pdu event: {e}")))?;
+
+	let updated = unsigned
+		.get_mut("m.relations")
+		.and_then(JsonValue::as_object_mut)
+		.and_then(|relations| relations.get_mut("m.thread"))
+		.and_then(JsonValue::as_object_mut)
+		.map(|thread| {
+			thread.insert("count".to_owned(), count.into());
+		})
+		.is_some();
+
+	if updated {
+		self.unsigned = Some(to_raw_value(&unsigned)?.into());
+	}
+
+	Ok(())
+}
+
 /// MSC3925: fold the newest `m.replace` edit into
 /// `unsigned.m.relations.m.replace` as the full replacement event, preserving
 /// an existing bundle such as `m.thread` and creating `unsigned` when absent.
