@@ -165,6 +165,7 @@ async fn fresh(services: &Services) -> Result {
 	db["global"].insert(b"rebuild_roomid_tscount_pducount", []);
 	db["global"].insert(b"rebuild_relatesto_typed", []);
 	db["global"].insert(b"migrate_profile_keys_to_useridprofilekey", []);
+	db["global"].insert(b"rebuild_thread_activity", []);
 
 	// Create the admin room and server user on first run
 	if services.config.create_admin_room {
@@ -296,6 +297,16 @@ async fn migrate(services: &Services, foreign_lineage: bool) -> Result {
 		.is_not_found()
 	{
 		migrate_profile_keys(services).await?;
+	}
+
+	if db["global"]
+		.get(b"rebuild_thread_activity")
+		.await
+		.is_not_found()
+	{
+		services.threads.rebuild_thread_activity().await?;
+
+		db["global"].insert(b"rebuild_thread_activity", []);
 	}
 
 	// Non-destructive and idempotent, so it runs every boot rather than once: a

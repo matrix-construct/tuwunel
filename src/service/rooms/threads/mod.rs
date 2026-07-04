@@ -1,9 +1,9 @@
-use std::{collections::BTreeMap, sync::Arc};
+use std::{collections::BTreeMap, pin::pin, sync::Arc};
 
-use futures::{Stream, StreamExt, TryFutureExt};
+use futures::{Stream, StreamExt, TryFutureExt, future::join3};
 use ruma::{
 	CanonicalJsonValue, EventId, OwnedEventId, OwnedUserId, RoomId, UserId,
-	api::client::threads::get_threads::v1::IncludeThreads,
+	api::{Direction, client::threads::get_threads::v1::IncludeThreads},
 	events::{
 		TimelineEventType,
 		relation::{BundledThread, RelationType},
@@ -15,13 +15,15 @@ use serde_json::json;
 use tuwunel_core::{
 	Event, Result, err,
 	matrix::pdu::{PduCount, PduEvent, PduId, RawPduId},
-	trace,
 	utils::{
 		ReadyExt,
-		stream::{TryIgnore, WidebandExt},
+		stream::{TryIgnore, WidebandExt, automatic_width},
 	},
 };
-use tuwunel_database::{Deserialized, Interfix, Map};
+use tuwunel_database::{Deserialized, Map};
+
+#[cfg(test)]
+mod tests;
 
 /// Maximum relation hops walked when resolving thread membership, per
 /// the Matrix v1.4 spec recommendation (also MSC3771/MSC3773).
@@ -46,6 +48,8 @@ pub struct Service {
 
 pub(super) struct Data {
 	threadid_userids: Arc<Map>,
+	threadactivityid_rootid: Arc<Map>,
+	threadrootid_latestcount: Arc<Map>,
 }
 
 impl crate::Service for Service {
@@ -53,6 +57,8 @@ impl crate::Service for Service {
 		Ok(Arc::new(Self {
 			db: Data {
 				threadid_userids: args.db["threadid_userids"].clone(),
+				threadactivityid_rootid: args.db["threadactivityid_rootid"].clone(),
+				threadrootid_latestcount: args.db["threadrootid_latestcount"].clone(),
 			},
 			services: args.services.clone(),
 		}))
@@ -140,7 +146,12 @@ impl Service {
 		self.get_thread_id(&pdu).await
 	}
 
-	pub async fn add_to_thread<E>(&self, root_event_id: &EventId, event: &E) -> Result
+	pub async fn add_to_thread<E>(
+		&self,
+		root_event_id: &EventId,
+		pdu_id: RawPduId,
+		event: &E,
+	) -> Result
 	where
 		E: Event,
 	{
@@ -177,6 +188,19 @@ impl Service {
 		// Record participants before the bundle so a concurrent read never sees the
 		// bundle with a stale participant set (MSC3816 current_user_participated).
 		self.update_participants(&root_id, &users)?;
+
+		let count = pdu_id.pdu_count();
+
+		// The activity row lands before the pointer write that marks it live.
+		if matches!(count, PduCount::Normal(_)) {
+			self.db
+				.threadactivityid_rootid
+				.insert(&pdu_id, root_id);
+
+			self.db
+				.threadrootid_latestcount
+				.insert(&root_id, count.to_be_bytes());
+		}
 
 		if let CanonicalJsonValue::Object(unsigned) = root_pdu_json
 			.entry("unsigned".into())
@@ -237,12 +261,6 @@ impl Service {
 	) -> impl Stream<Item = Result<(PduCount, PduEvent)>> + Send {
 		let participated = matches!(include, IncludeThreads::Participated);
 
-		let is_participant = move |participants: &[u8]| {
-			participants
-				.split(|&byte| byte == 0xFF)
-				.any(|user| user == user_id.as_bytes())
-		};
-
 		self.services
 			.short
 			.get_shortroomid(room_id)
@@ -253,35 +271,85 @@ impl Service {
 			.map_ok(Into::into)
 			.map_ok(move |current: RawPduId| {
 				self.db
-					.threadid_userids
+					.threadactivityid_rootid
 					.rev_raw_stream_from(&current)
 					.ignore_err()
-					.map(|(key, participants)| (RawPduId::from(key), participants))
-					.ready_take_while(move |(pdu_id, _)| {
-						pdu_id.shortroomid() == current.shortroomid()
+					.map(|(key, root_id)| (RawPduId::from(key), RawPduId::from(root_id)))
+					.ready_take_while(move |(activity_id, _)| {
+						activity_id.shortroomid() == current.shortroomid()
 					})
-					.ready_filter_map(move |(pdu_id, participants)| {
-						(!participated || is_participant(participants))
-							.then_some((pdu_id, user_id))
+					.map(move |(activity_id, root_id)| {
+						(activity_id, root_id, user_id, participated)
 					})
-					.wide_filter_map(async |(raw_pdu_id, user_id)| {
-						let pdu_id: PduId = raw_pdu_id.into();
-						let mut pdu = self
-							.services
-							.timeline
-							.get_pdu_from_id(&raw_pdu_id)
+					.wide_filter_map(async |(activity_id, root_id, user_id, participated)| {
+						self.live_thread(user_id, participated, activity_id, root_id)
 							.await
-							.ok()?;
-
-						if pdu.sender() != user_id {
-							pdu.as_mut_pdu().remove_transaction_id().ok();
-						}
-
-						Some((pdu_id.count, pdu))
 					})
 					.map(Ok)
 			})
 			.try_flatten_stream()
+	}
+
+	/// Resolve one activity row to its thread root, skipping and reaping rows
+	/// the validity pointer has left behind.
+	async fn live_thread(
+		&self,
+		user_id: &UserId,
+		participated: bool,
+		activity_id: RawPduId,
+		root_id: RawPduId,
+	) -> Option<(PduCount, PduEvent)> {
+		let count = activity_id.pdu_count();
+
+		let pointer = self
+			.db
+			.threadrootid_latestcount
+			.get(&root_id)
+			.await
+			.deserialized()
+			.map(PduCount::from_unsigned)
+			.ok()?;
+
+		if count != pointer {
+			// A row ahead of the pointer is a write in flight; only rows behind
+			// the pointer are dead and safe to reap.
+			if count < pointer {
+				self.db
+					.threadactivityid_rootid
+					.remove(&activity_id);
+			}
+
+			return None;
+		}
+
+		if participated && !self.is_participant(&root_id, user_id).await {
+			return None;
+		}
+
+		let mut pdu = self
+			.services
+			.timeline
+			.get_pdu_from_id(&root_id)
+			.await
+			.ok()?;
+
+		if pdu.sender() != user_id {
+			pdu.as_mut_pdu().remove_transaction_id().ok();
+		}
+
+		Some((count, pdu))
+	}
+
+	async fn is_participant(&self, root_id: &RawPduId, user_id: &UserId) -> bool {
+		self.db
+			.threadid_userids
+			.get(root_id)
+			.await
+			.is_ok_and(|participants| {
+				participants
+					.split(|&byte| byte == 0xFF)
+					.any(|user| user == user_id.as_bytes())
+			})
 	}
 
 	pub(super) fn update_participants(
@@ -320,24 +388,80 @@ impl Service {
 			return false;
 		};
 
-		self.get_participants(&root_id)
-			.await
-			.is_ok_and(|users| users.iter().any(|user| user == user_id))
+		self.is_participant(&root_id, user_id).await
 	}
 
+	#[tracing::instrument(skip(self), level = "debug")]
 	pub(super) async fn delete_all_rooms_threads(&self, room_id: &RoomId) -> Result {
-		let prefix = (room_id, Interfix);
+		let Ok(shortroomid) = self.services.short.get_shortroomid(room_id).await else {
+			return Ok(());
+		};
+
+		join3(
+			self.db.threadid_userids.del_prefix(&shortroomid),
+			self.db
+				.threadactivityid_rootid
+				.del_prefix(&shortroomid),
+			self.db
+				.threadrootid_latestcount
+				.del_prefix(&shortroomid),
+		)
+		.await;
+
+		Ok(())
+	}
+
+	/// Rebuild the thread activity index from every thread root. Run once at
+	/// startup behind a `global` marker, and on demand from the admin command.
+	/// Clears first so a partial or stale index is replaced wholesale.
+	pub async fn rebuild_thread_activity(&self) -> Result {
+		self.db.threadactivityid_rootid.clear().await;
+		self.db.threadrootid_latestcount.clear().await;
 
 		self.db
 			.threadid_userids
-			.keys_prefix_raw(&prefix)
+			.raw_keys()
 			.ignore_err()
-			.ready_for_each(|key| {
-				trace!("Removing key: {key:?}");
-				self.db.threadid_userids.remove(key);
+			.map(RawPduId::from)
+			.for_each_concurrent(automatic_width(), async |root_id| {
+				self.index_thread_activity(root_id).await;
 			})
 			.await;
 
 		Ok(())
+	}
+
+	async fn index_thread_activity(&self, root_id: RawPduId) {
+		let root: PduId = root_id.into();
+
+		let replies = self
+			.services
+			.pdu_metadata
+			.get_relations(root.shortroomid, root.count, None, Direction::Backward, None)
+			.ready_filter_map(|(count, pdu)| {
+				pdu.get_content()
+					.is_ok_and(|content: ExtractThreadRelation| {
+						content.relates_to.rel_type == RelationType::Thread
+					})
+					.then_some(count)
+			});
+
+		let mut replies = pin!(replies);
+
+		let latest = replies.next().await.unwrap_or(root.count);
+
+		let activity_id: RawPduId = PduId {
+			shortroomid: root.shortroomid,
+			count: latest,
+		}
+		.into();
+
+		self.db
+			.threadactivityid_rootid
+			.insert(&activity_id, root_id);
+
+		self.db
+			.threadrootid_latestcount
+			.insert(&root_id, latest.to_be_bytes());
 	}
 }

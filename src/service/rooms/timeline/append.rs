@@ -335,7 +335,7 @@ async fn append_pdu_effects(
 			| Relation::Thread(thread) => {
 				self.services
 					.threads
-					.add_to_thread(&thread.event_id, pdu)
+					.add_to_thread(&thread.event_id, pdu_id, pdu)
 					.await?;
 			},
 			| Relation::Replacement(replacement) => {

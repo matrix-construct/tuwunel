@@ -755,7 +755,7 @@
 {"Action":"fail","Test":"TestThreadSubscriptions/Server-side_automatic_subscription_ordering_conflict"}
 {"Action":"fail","Test":"TestThreadSubscriptions/Unsubscribe_succeeds_even_with_no_subscription"}
 {"Action":"fail","Test":"TestThreadedReceipts"}
-{"Action":"fail","Test":"TestThreadsEndpoint"}
+{"Action":"pass","Test":"TestThreadsEndpoint"}
 {"Action":"pass","Test":"TestToDeviceMessages"}
 {"Action":"pass","Test":"TestToDeviceMessagesOverFederation"}
 {"Action":"pass","Test":"TestToDeviceMessagesOverFederation/good_connectivity"}

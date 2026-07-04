@@ -439,8 +439,19 @@ pub(super) static MAPS: &[Descriptor] = &[
 		..descriptor::RANDOM
 	},
 	Descriptor {
+		name: "threadactivityid_rootid",
+		key_size_hint: Some(16),
+		..descriptor::SEQUENTIAL_SMALL
+	},
+	Descriptor {
 		name: "threadid_userids",
 		..descriptor::SEQUENTIAL_SMALL
+	},
+	Descriptor {
+		name: "threadrootid_latestcount",
+		key_size_hint: Some(16),
+		val_size_hint: Some(8),
+		..descriptor::RANDOM_SMALL
 	},
 	Descriptor {
 		name: "threepidsid_pending",

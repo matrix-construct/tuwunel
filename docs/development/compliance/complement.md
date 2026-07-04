@@ -4,10 +4,10 @@ Tuwunel runs the [Complement](https://github.com/matrix-org/complement) Matrix h
 
 ## Counts
 
-- Test groups: 205. Passing: **80.5%**
-  - ✅ `pass`: 165
+- Test groups: 205. Passing: **81.0%**
+  - ✅ `pass`: 166
   - 🟨 `some`: 18
-  - ❌ `fail`: 20
+  - ❌ `fail`: 19
   - ⬛ `skip`: 2
 
 - Subtests: 596. Passing: **78.0%**
@@ -204,7 +204,7 @@ Tuwunel runs the [Complement](https://github.com/matrix-org/complement) Matrix h
 | `TestTentativeEventualJoiningAfterRejecting` | ✅ | – |
 | `TestThreadSubscriptions` | 🟨 | 1/7/0 |
 | `TestThreadedReceipts` | ❌ | – |
-| `TestThreadsEndpoint` | ❌ | – |
+| `TestThreadsEndpoint` | ✅ | – |
 | `TestToDeviceMessages` | ✅ | – |
 | `TestToDeviceMessagesOverFederation` | ✅ | 1/0/0 |
 | `TestTxnIdWithRefreshToken` | ✅ | – |
