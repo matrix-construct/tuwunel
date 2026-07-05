@@ -25,7 +25,7 @@ adv_cell="❎"
 # correctly. The failure is the peer's deprecation, not a tuwunel regression.
 interop_fp_regress="TestMediaFilenames|TestRemotePngThumbnail"
 
-# shellcheck source=./summarise_complement.sh
-. "$(dirname "$0")/summarise_complement.sh"
+# shellcheck source=./complement.sh
+. "$(dirname "$0")/complement.sh"
 
 summarise_main "$@"

@@ -19,7 +19,7 @@
 # of 10. With the early-abort active, the suite stopped at the 10th unique
 # failure and marked the rest skipped, which made the failing-spec set
 # non-deterministic across runs. The regression gate in
-# .github/workflows/summarise_playwright.sh needs a stable input set.
+# .github/workflows/summarise/playwright.sh needs a stable input set.
 set -euxo pipefail
 
 cd /usr/src/element-web/apps/web

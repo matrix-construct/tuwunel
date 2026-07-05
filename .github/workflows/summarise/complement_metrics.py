@@ -5,7 +5,7 @@ import argparse, json, re, subprocess, sys, tarfile
 from collections import defaultdict
 from pathlib import Path
 
-from summarise_engine import (
+from engine import (
 	buffer_runs, load_buffer, render_table, rotate, short_label, this_entry,
 	usable, write_buffer, write_out,
 )

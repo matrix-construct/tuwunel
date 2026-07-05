@@ -43,7 +43,7 @@ jobs:
         TIMINGS_HISTORY_OUT: ${{github.workspace}}/_ci_digest/timings-${{github.ref_name}}.json
         TIMINGS_KEEP: '3'
       run: |
-        python3 .github/workflows/summarise_ci_timings.py
+        python3 .github/workflows/summarise/ci_timings.py
 
     - name: Store Timings History
       continue-on-error: true

@@ -15,7 +15,7 @@ short sha."""
 
 import calendar, json, os, sys, time, urllib.request
 
-from summarise_engine import (
+from engine import (
 	buffer_runs, hms, load_buffer, render_table, rotate, short_label,
 	this_entry, write_buffer, write_out,
 )

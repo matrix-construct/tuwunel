@@ -13,7 +13,7 @@ fi
 
 results="tests/complement/results.jsonl"
 
-# shellcheck source=./summarise_complement.sh
-. "$(dirname "$0")/summarise_complement.sh"
+# shellcheck source=./complement.sh
+. "$(dirname "$0")/complement.sh"
 
 summarise_main "$@"

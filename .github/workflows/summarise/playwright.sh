@@ -4,8 +4,8 @@
 # `gate` runs the per-shard gate alone.
 set -eo pipefail
 
-# shellcheck source=./summarise_grid.sh
-. "$(dirname "${BASH_SOURCE[0]}")/summarise_grid.sh"
+# shellcheck source=./grid.sh
+. "$(dirname "${BASH_SOURCE[0]}")/grid.sh"
 
 track_name="Playwright"
 results="tests/playwright/results.json"

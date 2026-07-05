@@ -18,8 +18,8 @@
 
 set -eo pipefail
 
-# shellcheck source=./summarise_grid.sh
-. "$(dirname "${BASH_SOURCE[0]}")/summarise_grid.sh"
+# shellcheck source=./grid.sh
+. "$(dirname "${BASH_SOURCE[0]}")/grid.sh"
 
 # Some tests emit both pass and fail rows (subtests). Fold by Test, fail wins, and
 # emit the shared classified format (status<TAB>id, sorted by id).
@@ -76,7 +76,7 @@ emit_runtime_metrics() {
 	test -s "$metrics_tar" || return 0
 	command -v python3 >/dev/null 2>&1 || return 0
 
-	local script="$(dirname "$BASH_SOURCE")/summarise_complement_metrics.py"
+	local script="$(dirname "$BASH_SOURCE")/complement_metrics.py"
 	test -x "$script" || return 0
 
 	local args=(--tar "$metrics_tar" --out "$out")
