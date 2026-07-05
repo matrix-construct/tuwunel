@@ -64,6 +64,16 @@ envs="$envs -e playwright_retries=${playwright_retries:-$default_playwright_retr
 envs="$envs -e BASE_URL=http://localhost:${base_port}"
 envs="$envs -e SERVE_PORT=${base_port}"
 
+# The known-failures acceptlist steers run.sh's two-pass split (each known
+# failure runs once, dealt round-robin across shards); mounted from the
+# checkout so a baseline edit needs no tester rebuild. Without the file the
+# tester falls back to a single pass.
+vols=""
+acceptlist="$(cd "$BASEDIR/.." && pwd)/tests/playwright/known-failures.txt"
+if test -f "$acceptlist"; then
+	vols="-v $acceptlist:/playwright/known-failures.txt:ro"
+fi
+
 set -x
 tester_image="playwright-tester--${sys_name}--${sys_version}--${sys_target}"
 testee_image="playwright-testee--${cargo_profile}--${rust_toolchain}--${rust_target}--${feat_set}--${sys_name}--${sys_version}--${sys_target}"
@@ -77,7 +87,7 @@ name="playwright_tester__${sys_name}__${sys_version}__${sys_target}__${shard_slu
 net="playwright_net__${sys_name}__${sys_version}__${sys_target}__${shard_slug}"
 envs="$envs -e PLAYWRIGHT_NETWORK=$net"
 sock="/var/run/docker.sock"
-arg="--name $name -v $sock:$sock --network $net $envs $tester_image"
+arg="--name $name -v $sock:$sock $vols --network $net $envs $tester_image"
 set +x
 
 if test "$CI_VERBOSE_ENV" = "true"; then

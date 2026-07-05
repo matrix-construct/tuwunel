@@ -151,13 +151,21 @@ RUN chmod +x /playwright/patch.sh && /playwright/patch.sh
 #   - packages/playwright-common/lib/ via nx build:playwright on the
 #     playwright-common workspace. Required by element-web-test.ts at
 #     runtime.
+# CI_PACKAGE=true mirrors the Build step of element-web's own e2e workflow
+# (.github/workflows/build-and-test.yaml): it turns off minification, and
+# with it the babel-plugin-jsx-remove-data-test-id pass that strips every
+# JSX data-testid from the bundle. Without it each getByTestId locator in
+# the suite waits out its full test timeout against an attribute that no
+# longer exists. The nx cache mount id is salted with the flag: nx does not
+# hash CI_PACKAGE into its inputs, so the old mount would keep serving the
+# stripped webapp from cache.
 # Skip the eager `playwright test --list` validation: it fires the
 # webServer config (nx start → webpack-dev-server) which we do not want
 # at build time. Real validation happens when the tester runs.
 WORKDIR /usr/src/element-web/apps/web
 RUN --mount=type=cache,target=/root/.local/share/pnpm,sharing=locked \
-    --mount=type=cache,target=/usr/src/element-web/.nx,sharing=locked \
-    pnpm build && \
+    --mount=type=cache,id=element-web-nx-ci-package,target=/usr/src/element-web/.nx,sharing=locked \
+    CI_PACKAGE=true pnpm build && \
     pnpm exec nx build:playwright @element-hq/element-web-playwright-common
 
 # `npx serve -L ./webapp` (the CI webServer command in playwright.config.ts)
@@ -191,27 +199,10 @@ ENV playwright_retries=$playwright_retries
 WORKDIR /usr/src/element-web/apps/web
 RUN mkdir -p /playwright/out
 
-COPY <<EOF /playwright/run.sh
-#!/bin/bash
-set -euxo pipefail
-cd /usr/src/element-web/apps/web
-# --max-failures=0 overrides element-web's playwright.config.ts CI default
-# of 10. With the early-abort active, the suite stopped at the 10th unique
-# failure and marked the rest skipped, which made the failing-spec set
-# non-deterministic across runs. The regression gate in
-# .github/workflows/summarise_playwright.sh needs a stable input set.
-PLAYWRIGHT_JSON_OUTPUT_NAME=/playwright/out/results.json \\
-npx playwright test \\
-    --project=Tuwunel \\
-    --grep="\${playwright_run}" \\
-    --grep-invert="\${playwright_skip}" \\
-    --shard="\${playwright_shard}" \\
-    --repeat-each="\${playwright_count}" \\
-    --workers="\${playwright_workers}" \\
-    --retries="\${playwright_retries}" \\
-    --max-failures=0 \\
-    --reporter="list,json" \\
-    2>&1 | tee /playwright/out/output.log
-EOF
-RUN chmod +x /playwright/run.sh
+# Two-pass entrypoint. Out-of-lined to docker/lib/playwright-run.sh in the
+# workspace (the playwright.tuwunel.ts pattern above) and pulled in from the
+# source stage; the runtime caller bind-mounts the known-failures acceptlist
+# it splits on (docker/playwright.sh).
+COPY --link --chmod=755 --from=source /usr/src/tuwunel/docker/lib/playwright-run.sh \
+     /playwright/run.sh
 ENTRYPOINT ["/playwright/run.sh"]

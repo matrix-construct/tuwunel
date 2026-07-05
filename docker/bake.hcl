@@ -685,6 +685,7 @@ target "playwright-tester" {
     ]
     contexts = {
         input = elem("target:playwright-base", [sys_name, sys_version, sys_target])
+        source = elem("target:source", [sys_name, sys_version, sys_target])
     }
     args = playwright_args
 }

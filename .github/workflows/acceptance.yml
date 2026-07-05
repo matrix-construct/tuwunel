@@ -20,7 +20,7 @@ on:
         description: Playwright workers per shard
       retries:
         type: string
-        default: '1'
+        default: '2'
         description: Playwright retries
       shards:
         type: string
