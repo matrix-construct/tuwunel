@@ -480,6 +480,7 @@ pub async fn summary_pdus<Pdu: Event>(
 		.services
 		.federation
 		.format_pdu_into(event_json.clone(), Some(room_version))
+		.boxed() // query-depth firewall
 		.await;
 
 	cells
