@@ -9,12 +9,12 @@ use tuwunel_core::{
 	},
 };
 
-use super::with_map_or;
+use super::{decode, with_map_or};
 use crate::admin_command;
 
 #[admin_command]
 pub(super) async fn raw_keys_sizes(&self, map: Option<String>, prefix: Option<String>) -> Result {
-	let prefix = prefix.as_deref().unwrap_or(EMPTY);
+	let prefix = decode(prefix.as_deref().unwrap_or(EMPTY));
 
 	let maps = with_map_or(map.as_deref(), self.services)?;
 

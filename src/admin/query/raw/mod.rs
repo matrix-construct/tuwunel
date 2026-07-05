@@ -15,7 +15,7 @@ mod vals_total;
 use std::{fmt::Write, sync::Arc};
 
 use clap::Subcommand;
-use tuwunel_core::{Result, err, itertools::Itertools, utils::math::Expected};
+use tuwunel_core::{Result, err, expected, itertools::Itertools, utils::math::Expected};
 use tuwunel_database::Map;
 use tuwunel_service::Services;
 
@@ -131,7 +131,7 @@ pub(crate) enum RawCommand {
 		prefix: Option<String>,
 	},
 
-	/// - Raw database delete (for string keys) DANGER!!!
+	/// - Raw database delete DANGER!!!
 	Del {
 		/// Map name
 		map: String,
@@ -203,6 +203,39 @@ fn with_maps_or<S: AsRef<str>>(maps: Option<&[S]>, services: &Services) -> Resul
 	} else {
 		services.db.iter().map(|x| x.1.clone()).collect()
 	})
+}
+
+fn from_hex(byte: u8) -> Option<u8> {
+	match byte {
+		| 0x30..=0x39 => Some(expected!(byte - 0x30)),
+		| 0x41..=0x46 => Some(expected!((byte - 0x41) + 10)),
+		| 0x61..=0x66 => Some(expected!((byte - 0x61) + 10)),
+		| _ => None,
+	}
+}
+
+fn decode(data: &str) -> Vec<u8> {
+	let mut res = Vec::with_capacity(data.len());
+
+	for byte in data.bytes() {
+		res.push(byte);
+
+		let length = res.len();
+
+		if length >= 4
+			&& let Some(slice) = res.get(expected!(length - 4)..length)
+			&& slice.starts_with(b"\\x")
+			&& let Some(a) = from_hex(slice[2])
+			&& let Some(b) = from_hex(slice[3])
+		{
+			res.truncate(expected!(length - 4));
+
+			let byte = (a << 4) | b;
+			res.push(byte);
+		}
+	}
+
+	res
 }
 
 #[expect(clippy::as_conversions)]

@@ -3,7 +3,7 @@ use tokio::time::Instant;
 use tuwunel_core::{Result, apply, utils::TryReadyExt};
 use tuwunel_database::KeyVal;
 
-use super::encode;
+use super::{decode, encode};
 use crate::admin_command;
 
 #[admin_command]
@@ -19,6 +19,10 @@ pub(super) async fn raw_iter(
 
 	let map = self.services.db.get(&map)?;
 	let timer = Instant::now();
+
+	let prefix = prefix.as_deref().map(decode);
+	let from = from.as_deref().map(decode);
+
 	let stream = match from.as_ref().or(prefix.as_ref()) {
 		| Some(from) if !backwards => map.raw_stream_from(from).boxed(),
 		| Some(from) => map.rev_raw_stream_from(from).boxed(),
@@ -26,11 +30,10 @@ pub(super) async fn raw_iter(
 		| None => map.rev_raw_stream().boxed(),
 	};
 
-	let prefix = prefix.as_ref().map(String::as_bytes);
-
 	stream
 		.ready_try_take_while(|(k, _): &KeyVal<'_>| {
 			Ok(prefix
+				.as_ref()
 				.map(|prefix| k.starts_with(prefix))
 				.unwrap_or(true))
 		})
