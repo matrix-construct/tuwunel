@@ -38,7 +38,6 @@ ARG sched_prio=0
 WORKDIR /
 COPY --link --from=rust ${RUST_HOME} ${RUST_HOME}
 COPY --link --from=recipe recipe.json /usr/src/tuwunel/recipe.json
-COPY --link --chmod=0755 docker/lib/sched_wrap.sh /usr/local/bin/sched_wrap.sh
 
 WORKDIR /usr/lib/${sys_triple}
 COPY --link --from=rocksdb . .
@@ -125,7 +124,6 @@ ARG sched_prio=0
 
 WORKDIR /
 COPY --link --from=source /usr/src/tuwunel /usr/src/tuwunel
-COPY --link --chmod=0755 docker/lib/sched_wrap.sh /usr/local/bin/sched_wrap.sh
 
 WORKDIR /usr/src/tuwunel
 SHELL ["/bin/bash", "-c"]

@@ -9,6 +9,11 @@ ARG CARGO_HOME
 ARG MRSDK_TARGET_DIR="/usr/src/matrix-rust-sdk/target"
 ARG mrsdk_target_share
 ARG mrsdk_ref="1c44fb66214667c6d00acaf72ab592493653708b"
+# This stage compiles the tests; the rust-sdk-integration stage below runs them.
+# The two carry separate scheduling knobs so the compile lands on --batch while
+# the test run inherits the realtime policy passed to that stage.
+ARG sched_policy_build="--batch"
+ARG sched_prio_build=0
 
 WORKDIR /usr/src
 ADD --link https://github.com/matrix-construct/matrix-rust-sdk.git#${mrsdk_ref} matrix-rust-sdk
@@ -16,6 +21,8 @@ ADD --link https://github.com/matrix-construct/matrix-rust-sdk.git#${mrsdk_ref} 
 WORKDIR /usr/src/matrix-rust-sdk
 SHELL ["/bin/bash", "-c"]
 ENV RUST_BACKTRACE="full"
+ENV sched_policy=${sched_policy_build}
+ENV sched_prio=${sched_prio_build}
 RUN \
 --mount=type=cache,dst=${RUSTUP_HOME}/downloads,sharing=shared \
 --mount=type=cache,dst=${CARGO_HOME}/registry,sharing=shared \
@@ -24,7 +31,7 @@ RUN \
 <<EOF
     set -eux
 
-    rustup run ${rust_toolchain} \
+    rustup run ${rust_toolchain} sched_wrap.sh \
         cargo test \
             --no-run \
             --locked \
@@ -58,6 +65,9 @@ ARG mrsdk_parallel=1
 ARG mrsdk_startup_delay="10s"
 ARG mrsdk_test_timeout="30m"
 ARG mrsdk_testee="/usr/bin/tuwunel"
+# Running the tests is a test job, so override the build stage's --batch policy.
+ARG sched_policy="--rr"
+ARG sched_prio=1
 
 WORKDIR /etc
 COPY <<EOF tuwunel.toml
@@ -105,6 +115,8 @@ ENV TUWUNEL_DATABASE_PATH="/var/db/tuwunel"
 ENV TUWUNEL_SERVER_NAME="localhost"
 ENV TUWUNEL_PORT="[8448]"
 ENV HOMESERVER_URL="http://localhost:8448"
+ENV sched_policy=${sched_policy}
+ENV sched_prio=${sched_prio}
 RUN \
 --mount=type=cache,dst=${RUSTUP_HOME}/downloads,sharing=shared \
 --mount=type=cache,dst=${CARGO_HOME}/registry,sharing=shared \
@@ -118,7 +130,7 @@ RUN \
     sleep "${mrsdk_startup_delay}"
 
     timeout --signal=TERM --kill-after=30s "${mrsdk_test_timeout}" \
-    rustup run ${rust_toolchain} \
+    rustup run ${rust_toolchain} sched_wrap.sh \
         cargo test \
             --locked \
             --release \

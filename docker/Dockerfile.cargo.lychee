@@ -9,14 +9,18 @@ ARG lychee_mode="color"
 # .lycheecache is hardcoded as path to reg file in the cwd so we execute lychee
 # in cache directory itself. all paths here should be absolute paths
 ARG lychee_args="/usr/src/tuwunel/docs /usr/src/tuwunel/*.md"
+ARG sched_policy="--rr"
+ARG sched_prio=1
 
 WORKDIR /usr/src/
+ENV sched_policy=${sched_policy}
+ENV sched_prio=${sched_prio}
 RUN \
 --mount=type=cache,dst=lychee,sharing=locked \
 <<EOF
     set -eux
     cd lychee
-    rustup run ${rust_toolchain} \
+    rustup run ${rust_toolchain} sched_wrap.sh \
         lychee \
             --verbose \
             --no-progress \

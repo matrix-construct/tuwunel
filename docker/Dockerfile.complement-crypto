@@ -10,8 +10,13 @@ ARG rust_toolchain
 ARG mrsdk_ref="1c44fb66214667c6d00acaf72ab592493653708b"
 ARG complement_crypto_ref="dade5fb8d63070e8ebde3096d671a89c47ba90d6"
 ARG MRSDK_TARGET_DIR="/usr/src/matrix-rust-sdk/target"
+# Building the FFI crate and the bindgen tool are compile jobs.
+ARG sched_policy="--batch"
+ARG sched_prio=0
 
 ENV PATH="${CARGO_HOME}/bin:${PATH}"
+ENV sched_policy=${sched_policy}
+ENV sched_prio=${sched_prio}
 
 # uniffi-bindgen-go's generated bindings use `import "C"`; with CGO_ENABLED=0
 # the Go toolchain silently excludes those files, which presents as
@@ -33,7 +38,7 @@ RUN \
 --mount=type=cache,dst=${CARGO_HOME}/git,sharing=shared \
 <<EOF
     set -eux
-    rustup run ${rust_toolchain} \
+    rustup run ${rust_toolchain} sched_wrap.sh \
         cargo install uniffi-bindgen-go \
             --git https://github.com/NordSecurity/uniffi-bindgen-go \
             --tag v0.7.0+v0.31.0 \
@@ -50,7 +55,7 @@ RUN \
 --mount=type=cache,dst=${MRSDK_TARGET_DIR},sharing=locked \
 <<EOF
     set -eux
-    rustup run ${rust_toolchain} ./rebuild_rust_sdk.sh /usr/src/matrix-rust-sdk
+    rustup run ${rust_toolchain} sched_wrap.sh ./rebuild_rust_sdk.sh /usr/src/matrix-rust-sdk
     # MRSDK_TARGET_DIR is a cache mount and disappears at the end of this RUN.
     # Persist the FFI shared+static libs into the image so downstream stages
     # (complement-crypto-base's `go test`, complement-crypto-tester's runtime)
@@ -84,7 +89,7 @@ RUN \
 --mount=type=cache,dst=/go/pkg/mod/cache,sharing=locked \
 <<EOF
     set -eux
-    go test -tags="$complement_crypto_tags" -list="$complement_crypto_run" ./tests
+    sched_wrap.sh go test -tags="$complement_crypto_tags" -list="$complement_crypto_run" ./tests
 EOF
 
 

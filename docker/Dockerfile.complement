@@ -110,7 +110,6 @@ RUN mkdir -p /database /var/log/tuwunel/metrics /complement/appservice
 COPY --from=complement-config * /complement/
 COPY docker/lib/provision_complement.sh /complement/provision_complement.sh
 RUN chmod a+x /complement/provision_complement.sh
-COPY --chmod=0755 docker/lib/sched_wrap.sh /usr/local/bin/sched_wrap.sh
 ENV TUWUNEL_CONFIG="/complement/complement.toml"
 ENV TUWUNEL_RUNTIME_METRICS_DIR="/var/log/tuwunel/metrics"
 ENV TUWUNEL_RUNTIME_USAGE_DIR="/var/log/tuwunel/metrics"
@@ -127,9 +126,9 @@ RUN <<EOF
     apt-get install -y --no-install-recommends linux-perf
     rm -rf /var/lib/apt/lists/*
 EOF
-COPY docker/lib/perf_wrap.sh /complement/perf_wrap.sh
-RUN chmod a+x /complement/perf_wrap.sh
-ENTRYPOINT exec /complement/provision_complement.sh /complement/perf_wrap.sh \
+# sched_wrap.sh leads the chain so its scheduling policy is inherited by
+# perf_wrap.sh and the server it runs; both wrappers ship in the base image.
+ENTRYPOINT exec /complement/provision_complement.sh sched_wrap.sh perf_wrap.sh \
     tuwunel -Oserver_name=\""$SERVER_NAME\""
 
 
@@ -140,7 +139,7 @@ ARG sched_prio=1
 ENV sched_policy=${sched_policy}
 ENV sched_prio=${sched_prio}
 ENV db_pool_max_workers=${db_pool_max_workers}
-ENTRYPOINT exec /complement/provision_complement.sh valgrind \
+ENTRYPOINT exec /complement/provision_complement.sh sched_wrap.sh valgrind \
     --leak-check=no \
     --undef-value-errors=no \
     --exit-on-first-error=yes \
@@ -157,18 +156,22 @@ ARG complement_ref="b2d92cd54d4c5e9191355e301c7f404326b1277f"
 ARG complement_tags="conduwuit_blacklist"
 ARG complement_tests="./tests/..."
 ARG complement_run=".*"
+ARG sched_policy="--batch"
+ARG sched_prio=0
 
 WORKDIR /usr/src
 ADD https://github.com/matrix-construct/complement.git#${complement_ref} complement
 
 WORKDIR /usr/src/complement
 ENV COMPLEMENT_BASE_IMAGE="complement-testee"
+ENV sched_policy=${sched_policy}
+ENV sched_prio=${sched_prio}
 RUN \
 --mount=type=cache,dst=/go/pkg/mod/cache,sharing=locked \
 <<EOF
     env
     set -eux
-    go test -tags="$complement_tags" -list="$complement_run" $complement_tests
+    sched_wrap.sh go test -tags="$complement_tags" -list="$complement_run" $complement_tests
 EOF
 
 

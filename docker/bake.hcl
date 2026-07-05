@@ -381,6 +381,11 @@ target "complement-testee-valgrind" {
         input = elem("target:smoke-valgrind", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target])
         complement-tester = elem("target:complement-tester-valgrind", [sys_name, sys_version, sys_target])
     }
+    args = {
+        # Leave the valgrind testee on the default policy: it is already
+        # serialized by valgrind, and a realtime class would only interfere.
+        sched_policy = ""
+    }
 }
 
 target "complement-testee" {
@@ -403,6 +408,13 @@ target "complement-testee" {
     }
     args = {
         RUST_BACKTRACE = "full"
+
+        # An optimized testee (any non-debug profile) runs the suite as a
+        # timing-sensitive job under --fifo; the debug testee is an ordinary
+        # test under --rr. Realtime needs CAP_SYS_NICE, which the Complement
+        # runner grants the testee container; sched_wrap.sh degrades otherwise.
+        sched_policy = (cargo_profile == "test"? "--rr": "--fifo")
+        sched_prio = 1
     }
 }
 
@@ -990,6 +1002,9 @@ target "doc" {
         cargo_cmd = "test"
         cargo_args = "--doc --no-fail-fast"
         RUSTDOCFLAGS = "-D warnings"
+
+        sched_policy = "--rr"
+        sched_prio = 1
     }
 }
 

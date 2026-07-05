@@ -13,8 +13,12 @@ ARG cargo_features
 ARG cargo_spec_features
 ARG pkg_dir
 ARG deb_args=""
+ARG sched_policy="--rr"
+ARG sched_prio=1
 
 WORKDIR /usr/src/tuwunel
+ENV sched_policy=${sched_policy}
+ENV sched_prio=${sched_prio}
 # The packaging inputs (maintainer scripts, docs) live outside the compile
 # subset carried by the input layer, so mount them from the full source.
 RUN \
@@ -27,7 +31,7 @@ RUN \
 <<EOF
     set -eux
     mkdir -p "${pkg_dir}"
-    rustup run ${rust_toolchain} \
+    rustup run ${rust_toolchain} sched_wrap.sh \
         cargo deb \
             --verbose \
             --locked \

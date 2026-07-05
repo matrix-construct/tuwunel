@@ -26,3 +26,12 @@ RUN \
 
     apt-get -y -U install --no-install-recommends ${packages}
 EOF
+
+# Scheduling and perf wrappers live in the root of every layer so no downstream
+# stage has to copy them. Both build stages (cargo, rocksdb, nix) and runtime
+# testees (complement) reach this stage, so a single placement here serves the
+# whole tree; each is a transparent exec until its environment knobs are set.
+COPY --link --chmod=0755 \
+    docker/lib/sched_wrap.sh \
+    docker/lib/perf_wrap.sh \
+    /usr/local/bin/

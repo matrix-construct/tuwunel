@@ -15,9 +15,13 @@ EOF
 
 
 FROM nix-base AS build-nix
+ARG sched_policy="--batch"
+ARG sched_prio=0
 
 WORKDIR /usr/src/tuwunel
 COPY --link --from=source /usr/src/tuwunel .
+ENV sched_policy=${sched_policy}
+ENV sched_prio=${sched_prio}
 RUN \
 --mount=type=cache,dst=/nix,sharing=shared \
 --mount=type=cache,dst=/root/.cache/nix,sharing=shared \
@@ -25,7 +29,7 @@ RUN \
 <<EOF
 	set -eux
 
-	nix-build \
+	sched_wrap.sh nix-build \
 		--verbose \
 		--cores 0 \
 		--max-jobs $(nproc) \
@@ -37,20 +41,26 @@ EOF
 
 
 FROM nix-base AS smoke-nix
+ARG sched_policy="--rr"
+ARG sched_prio=1
 
 WORKDIR /usr/src/tuwunel
 COPY --link --from=source /usr/src/tuwunel .
 ENV TUWUNEL_DATABASE_PATH="/tmp/tuwunel/smoketest.db"
 ENV TUWUNEL_LOG="info"
+ENV sched_policy=${sched_policy}
+ENV sched_prio=${sched_prio}
 RUN \
 --mount=type=cache,dst=/nix,sharing=shared \
 --mount=type=cache,dst=/root/.cache/nix,sharing=shared \
 --mount=type=cache,dst=/root/.local/state/nix,sharing=shared \
 <<EOF
     set -eux
-    alias nix="nix --extra-experimental-features nix-command --extra-experimental-features flakes"
 
-    nix run \
+    sched_wrap.sh nix \
+        --extra-experimental-features nix-command \
+        --extra-experimental-features flakes \
+        run \
         --verbose \
         --cores 0 \
         --max-jobs $(nproc) \
@@ -64,9 +74,13 @@ EOF
 
 
 FROM nix-base AS nix-pkg
+ARG sched_policy="--rr"
+ARG sched_prio=1
 
 WORKDIR /usr/src/tuwunel
 COPY --link --from=source /usr/src/tuwunel .
+ENV sched_policy=${sched_policy}
+ENV sched_prio=${sched_prio}
 RUN \
 --mount=type=cache,dst=/nix,sharing=shared \
 --mount=type=cache,dst=/root/.cache/nix,sharing=shared \
@@ -75,7 +89,7 @@ RUN \
     set -eux
     alias nix="nix --extra-experimental-features nix-command --extra-experimental-features flakes"
 
-    ID=$(nix-store --realise $(nix path-info --derivation))
+    ID=$(sched_wrap.sh nix-store --realise $(nix path-info --derivation))
 
     mkdir -p tuwunel
     nix-store --export $ID > tuwunel/tuwunel.drv

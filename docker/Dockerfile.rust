@@ -28,12 +28,16 @@ ARG rustup_profile="minimal"
 ARG CARGO_TERM_VERBOSE
 ARG rustup_components
 ARG cargo_installs
+ARG sched_policy="--batch"
+ARG sched_prio=0
 
 WORKDIR ${RUST_HOME}
 ENV CARGO_TARGET="${rust_target}"
 ENV RUSTUP_HOME="${RUSTUP_HOME}"
 ENV CARGO_HOME="${CARGO_HOME}"
 ENV PATH="${CARGO_HOME}/bin:$PATH"
+ENV sched_policy=${sched_policy}
+ENV sched_prio=${sched_prio}
 RUN \
 --mount=type=cache,dst=${RUSTUP_HOME}/downloads,sharing=locked \
 --mount=type=cache,dst=${CARGO_HOME}/registry,sharing=locked \
@@ -57,7 +61,7 @@ RUN \
         ${rustup_components} \
         ;
 
-    rustup run --install ${rust_toolchain} \
+    rustup run --install ${rust_toolchain} sched_wrap.sh \
         cargo install \
             --locked \
             --target ${rust_target} \
