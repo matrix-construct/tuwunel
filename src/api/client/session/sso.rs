@@ -75,6 +75,14 @@ struct GrantCookie<'a> {
 
 static GRANT_SESSION_COOKIE: &str = "tuwunel_grant_session";
 
+/// Path attribute for the grant-session cookie. The set and removal cookies
+/// must use the same value: a cookie is only replaced (and thus removed) when
+/// its name, domain and path all match (RFC 6265 5.3), and a Set-Cookie
+/// without an explicit path defaults to the request-URI's directory.
+fn grant_session_cookie_path(callback_url: Option<&Url>) -> &str {
+	callback_url.map(Url::path).unwrap_or("/")
+}
+
 fn decode_apple_userinfo_from_id_token(session: &Session) -> Result<UserInfo> {
 	let id_token = session.id_token.as_deref().ok_or_else(|| {
 		err!(Request(Unauthorized("Missing Apple id_token in token response.")))
@@ -278,11 +286,7 @@ async fn handle_sso_login(
 		redirect_uri: redirect_url.as_str().into(),
 	};
 
-	let cookie_path = provider
-		.callback_url
-		.as_ref()
-		.map(Url::path)
-		.unwrap_or("/");
+	let cookie_path = grant_session_cookie_path(provider.callback_url.as_ref());
 
 	let cookie_max_age = provider
 		.grant_session_duration
@@ -466,6 +470,7 @@ pub(crate) async fn sso_callback_route(
 	}
 
 	let cookie = Cookie::build((GRANT_SESSION_COOKIE, EMPTY))
+		.path(grant_session_cookie_path(provider.callback_url.as_ref()))
 		.removal()
 		.build()
 		.to_string()
@@ -993,5 +998,44 @@ mod tests {
 
 		let message = format!("{error}");
 		assert!(message.contains("invalid base64"), "unexpected error: {message}");
+	}
+
+	#[test]
+	fn grant_session_cookie_path_uses_the_callback_path() {
+		let callback = Url::parse(
+			"https://matrix.example/_matrix/client/unstable/login/sso/callback/tuwunel_abc",
+		)
+		.expect("valid URL");
+
+		assert_eq!(
+			grant_session_cookie_path(Some(&callback)),
+			"/_matrix/client/unstable/login/sso/callback/tuwunel_abc"
+		);
+		assert_eq!(grant_session_cookie_path(None), "/");
+	}
+
+	#[test]
+	fn grant_session_removal_cookie_path_matches_the_set_cookie_path() {
+		let callback = Url::parse(
+			"https://matrix.example/_matrix/client/unstable/login/sso/callback/tuwunel_abc",
+		)
+		.expect("valid URL");
+
+		let set = Cookie::build((GRANT_SESSION_COOKIE, "grant"))
+			.path(grant_session_cookie_path(Some(&callback)))
+			.build();
+
+		let removal = Cookie::build((GRANT_SESSION_COOKIE, EMPTY))
+			.path(grant_session_cookie_path(Some(&callback)))
+			.removal()
+			.build();
+
+		assert_eq!(set.path(), removal.path());
+		assert!(
+			removal
+				.to_string()
+				.contains("Path=/_matrix/client/unstable/login/sso/callback/tuwunel_abc"),
+			"unexpected removal cookie: {removal}"
+		);
 	}
 }
