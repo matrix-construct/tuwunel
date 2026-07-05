@@ -151,6 +151,7 @@ fn set_compression(desc: &mut Descriptor, config: &Config) {
 fn fifo_options(desc: &Descriptor) -> FifoCompactOptions {
 	let mut opts = FifoCompactOptions::default();
 	opts.set_max_table_files_size(desc.limit_size);
+	opts.set_allow_compaction(true);
 
 	opts
 }
