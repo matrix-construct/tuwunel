@@ -15,10 +15,15 @@ ARG pkg_dir
 ARG deb_args=""
 
 WORKDIR /usr/src/tuwunel
+# The packaging inputs (maintainer scripts, docs) live outside the compile
+# subset carried by the input layer, so mount them from the full source.
 RUN \
 --mount=type=cache,dst=${RUSTUP_HOME}/downloads,sharing=shared \
 --mount=type=cache,dst=${CARGO_HOME}/registry,sharing=shared \
 --mount=type=cache,dst=${CARGO_HOME}/git,sharing=shared \
+--mount=type=bind,from=source,source=/usr/src/tuwunel/debian,target=/usr/src/tuwunel/debian \
+--mount=type=bind,from=source,source=/usr/src/tuwunel/README.md,target=/usr/src/tuwunel/README.md \
+--mount=type=bind,from=source,source=/usr/src/tuwunel/LICENSE,target=/usr/src/tuwunel/LICENSE \
 <<EOF
     set -eux
     mkdir -p "${pkg_dir}"

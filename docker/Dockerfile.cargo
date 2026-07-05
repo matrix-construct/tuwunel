@@ -98,7 +98,11 @@ EOF
 #
 # COPY --from=source merges into /usr/src/tuwunel: real Cargo.toml and
 # src/<member>/src/* overwrite the chef stubs; target/ from cook is
-# preserved (source has no target/ enforced by .dockerignore).
+# preserved (the source-rust allowlist carries no target/).
+#
+# cargo_target_prune trims the target complex from the result layer when
+# nothing downstream consumes it: "all" removes it outright (check, clippy);
+# "bins" keeps only the built binaries for the install and packaging stages.
 FROM input AS cargo
 ARG rust_toolchain
 ARG RUSTUP_HOME
@@ -106,6 +110,8 @@ ARG CARGO_HOME
 ARG CARGO_TARGET
 ARG CARGO_TARGET_DIR
 ARG cargo_profile
+ARG cargo_target_profile
+ARG cargo_target_prune=""
 ARG cargo_features
 ARG cargo_spec_features
 ARG cargo_cmd="build"
@@ -160,4 +166,20 @@ RUN \
         echo "tuwunel-example.toml drift: run cargo check yourself and commit the result." >&2
         exit 1
     fi
+
+    case "${cargo_target_prune}" in
+    all)
+        rm -rf "${CARGO_TARGET_DIR}"
+        ;;
+    bins)
+        dir="${CARGO_TARGET_DIR}/${CARGO_TARGET}/${cargo_target_profile}"
+        rm -rf \
+            "${dir}/deps" \
+            "${dir}/build" \
+            "${dir}/.fingerprint" \
+            "${dir}/incremental" \
+            "${dir}/examples" \
+            "${CARGO_TARGET_DIR}/${cargo_target_profile}"
+        ;;
+    esac
 EOF

@@ -1216,6 +1216,7 @@ target "build-rpm" {
     ]
     contexts = {
         input = elem("target:build-bins", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target]),
+        source = elem("target:source", [sys_name, sys_version, sys_target]),
     }
     args = {
         pkg_dir = "/opt/tuwunel/rpm"
@@ -1268,6 +1269,7 @@ target "build-deb" {
     ]
     contexts = {
         input = elem("target:build-bins", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target]),
+        source = elem("target:source", [sys_name, sys_version, sys_target]),
     }
     args = {
         pkg_dir = "/opt/tuwunel/deb"
@@ -1363,11 +1365,12 @@ target "build-bins" {
     ]
     contexts = {
         input = elem("target:deps-build-bins", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target])
-        source = elem("target:source", [sys_name, sys_version, sys_target])
+        source = elem("target:source-rust", [sys_name, sys_version, sys_target])
     }
     args = {
         cargo_cmd = "build"
         cargo_args = "--bins"
+        cargo_target_prune = "bins"
     }
 }
 
@@ -1383,7 +1386,7 @@ target "build-tests" {
     ]
     contexts = {
         input = elem("target:deps-build-tests", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target])
-        source = elem("target:source", [sys_name, sys_version, sys_target])
+        source = elem("target:source-rust", [sys_name, sys_version, sys_target])
     }
     args = {
         cargo_cmd = (cargo_profile == "bench"? "bench": "test")
@@ -1403,7 +1406,7 @@ target "build" {
     ]
     contexts = {
         input = elem("target:deps-build", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target])
-        source = elem("target:source", [sys_name, sys_version, sys_target])
+        source = elem("target:source-rust", [sys_name, sys_version, sys_target])
     }
     args = {
         cargo_cmd = "build"
@@ -1423,11 +1426,12 @@ target "clippy" {
     ]
     contexts = {
         input = elem("target:deps-clippy", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target])
-        source = elem("target:source", [sys_name, sys_version, sys_target])
+        source = elem("target:source-rust", [sys_name, sys_version, sys_target])
     }
     args = {
         cargo_cmd = "clippy"
         cargo_args = "--all-targets --no-deps -- -D warnings -A unstable-features"
+        cargo_target_prune = "all"
     }
 }
 
@@ -1443,11 +1447,12 @@ target "check" {
     ]
     contexts = {
         input = elem("target:deps-check", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target])
-        source = elem("target:source", [sys_name, sys_version, sys_target])
+        source = elem("target:source-rust", [sys_name, sys_version, sys_target])
     }
     args = {
         cargo_cmd = "check"
         cargo_args = "--all-targets"
+        cargo_target_prune = "all"
     }
 }
 
@@ -1532,7 +1537,7 @@ target "cargo" {
     ]
     contexts = {
         input = elem("target:deps-base", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target])
-        source = elem("target:source", [sys_name, sys_version, sys_target])
+        source = elem("target:source-rust", [sys_name, sys_version, sys_target])
     }
     args = {
         cargo_args = ""
@@ -1939,6 +1944,20 @@ target "ingredients" {
         ZSTD_SYS_USE_PKG_CONFIG = (
             contains(split(",", cargo_feat_sets[feat_set]), "zstd_compression")? 1: 0
         )
+    }
+}
+
+# Compile-relevant subset of source.
+target "source-rust" {
+    name = elem("source-rust", [sys_name, sys_version, sys_target])
+    tags = [
+        elem_tag("source-rust", [sys_name, sys_version, sys_target], "latest")
+    ]
+    target =  "source-rust"
+    dockerfile = "${docker_dir}/Dockerfile.source"
+    matrix = sys
+    contexts = {
+        source = elem("target:source", [sys_name, sys_version, sys_target])
     }
 }
 

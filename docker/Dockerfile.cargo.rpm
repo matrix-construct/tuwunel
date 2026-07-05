@@ -15,10 +15,14 @@ ARG pkg_dir
 ARG gen_rpm_args=""
 
 WORKDIR /usr/src/tuwunel
+# The packaging inputs (unit files, docs) live outside the compile subset
+# carried by the input layer, so mount them from the full source.
 RUN \
 --mount=type=cache,dst=${RUSTUP_HOME}/downloads,sharing=shared \
 --mount=type=cache,dst=${CARGO_HOME}/registry,sharing=shared \
 --mount=type=cache,dst=${CARGO_HOME}/git,sharing=shared \
+--mount=type=bind,from=source,source=/usr/src/tuwunel/rpm,target=/usr/src/tuwunel/rpm \
+--mount=type=bind,from=source,source=/usr/src/tuwunel/README.md,target=/usr/src/tuwunel/README.md \
 <<EOF
 	set -eux
 	mkdir -p "${pkg_dir}"

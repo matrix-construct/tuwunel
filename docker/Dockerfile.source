@@ -5,6 +5,21 @@ FROM input AS source
 ADD --link . /usr/src/tuwunel
 
 
+# source-rust: the compile-relevant subset of source. The cargo build stages
+# copy from this allowlist so commits touching only docs, workflows, or other
+# non-build files keep their cache keys and do not rebuild the workspace.
+FROM scratch AS source-rust
+
+WORKDIR /usr/src/tuwunel
+COPY --link --from=source /usr/src/tuwunel/.cargo .cargo
+COPY --link --from=source /usr/src/tuwunel/Cargo.toml Cargo.toml
+COPY --link --from=source /usr/src/tuwunel/Cargo.lock Cargo.lock
+COPY --link --from=source /usr/src/tuwunel/clippy.toml clippy.toml
+COPY --link --from=source /usr/src/tuwunel/rust-toolchain.toml rust-toolchain.toml
+COPY --link --from=source /usr/src/tuwunel/tuwunel-example.toml tuwunel-example.toml
+COPY --link --from=source /usr/src/tuwunel/src src
+
+
 FROM input AS ingredients
 ARG rust_target
 ARG rust_toolchain
