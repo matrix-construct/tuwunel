@@ -94,15 +94,17 @@ if test -z "$nocache" \
 	&& docker volume inspect "$seed_state" >/dev/null 2>&1
 then
 	docker volume create "$this_state"
-	if docker run --rm \
+
+	# The seed source is a live builder whose GC unlinks snapshots while the copy
+	# runs, so cp reports vanished-file errors and exits non-zero even when the
+	# result is a usable warm cache. Keep whatever copied and let the bootstrap
+	# below arbitrate: a cache too torn to open is discarded and rebuilt cold by
+	# the fallback, while a few missing snapshots are just cache misses.
+	docker run --rm \
 		-v "${seed_state}:/seed:ro" \
 		-v "${this_state}:/state" \
-		busybox sh -c 'cp -a /seed/. /state/'
-	then
-		seeded=1
-	else
-		docker volume rm -f "$this_state"
-	fi
+		busybox sh -c 'cp -a /seed/. /state/' || true
+	seeded=1
 fi
 
 create_builder() {
