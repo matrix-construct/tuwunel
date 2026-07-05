@@ -12,6 +12,7 @@ pub mod appservice;
 pub mod client;
 pub mod config;
 pub mod deactivate;
+pub mod edit_purge;
 pub mod emergency;
 pub mod federation;
 pub mod fetcher;

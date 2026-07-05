@@ -203,6 +203,27 @@ fn check_storage(config: &Config) -> Result {
 		));
 	}
 
+	if config.mindroom_edit_purge_interval_secs == 0 {
+		return Err!(Config(
+			"mindroom_edit_purge_interval_secs",
+			"mindroom_edit_purge_interval_secs must be at least 1 second."
+		));
+	}
+
+	if config.mindroom_edit_purge_batch_size == 0 {
+		return Err!(Config(
+			"mindroom_edit_purge_batch_size",
+			"mindroom_edit_purge_batch_size must be at least 1."
+		));
+	}
+
+	if config.mindroom_edit_purge_scan_limit == 0 {
+		return Err!(Config(
+			"mindroom_edit_purge_scan_limit",
+			"mindroom_edit_purge_scan_limit must be at least 1."
+		));
+	}
+
 	// yeah, unless the user built a debug build hopefully for local testing only
 	#[cfg(not(debug_assertions))]
 	if config.server_name == "your.server.name" {

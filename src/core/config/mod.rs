@@ -1204,13 +1204,19 @@ pub struct Config {
 
 	/// MSC3925: fold the most recent message edit (an `m.replace` relation)
 	/// into `unsigned.m.relations` on a served event as the full replacement
-	/// event, on the client read endpoints. Off by default: it adds a typed
-	/// index seek per served event and a server-authoritative edit summary that
-	/// most clients reconstruct locally anyway, so it is opt-in.
+	/// event, on the client read endpoints.
+	///
+	/// MindRoom fork: on by default. The fork purges superseded edits
+	/// (`mindroom_edit_purge_enabled`), so without this bundle a history
+	/// endpoint (`/messages`, `/context`, `/event`, ...) would serve an
+	/// original carrying its stale pre-edit body with no way for the client
+	/// to discover the surviving edit; bundling the kept edit onto the
+	/// original keeps history correct. Upstream defaults this off (opt-in)
+	/// because it adds a typed-index seek per served event.
 	///
 	/// reloadable: yes
-	/// default: false
-	#[serde(default)]
+	/// default: true
+	#[serde(default = "true_fn")]
 	pub bundle_edit_relations: bool,
 
 	/// MSC2675/MSC3267: fold reference relations (`m.reference`) into
@@ -3122,6 +3128,69 @@ pub struct Config {
 	#[serde(default)]
 	pub allow_invalid_tls_certificates: bool,
 
+	/// MindRoom: Collapse multiple m.replace (edit) events per target into
+	/// only the latest one in `/sync` timeline responses.
+	///
+	/// When enabled, if a `/sync` timeline batch contains multiple replacement
+	/// events targeting the same event, only the most recent replacement is
+	/// kept. This dramatically reduces bandwidth for streaming AI responses
+	/// that produce many intermediate edits.
+	///
+	/// default: false
+	#[serde(default)]
+	pub mindroom_compact_edits_enabled: bool,
+
+	/// MindRoom: Enable background purging of superseded m.replace events
+	/// from the database.
+	///
+	/// When enabled, a periodic background job will find m.replace events
+	/// that have been superseded by newer replacements and remove them from
+	/// storage. Only events older than `mindroom_edit_purge_min_age_secs`
+	/// are eligible.
+	///
+	/// default: false
+	#[serde(default)]
+	pub mindroom_edit_purge_enabled: bool,
+
+	/// MindRoom: Minimum age in seconds before a superseded edit becomes
+	/// eligible for purging. This prevents purging edits that clients may
+	/// still be paginating through.
+	///
+	/// default: 86400
+	#[serde(default = "default_mindroom_edit_purge_min_age_secs")]
+	pub mindroom_edit_purge_min_age_secs: u64,
+
+	/// MindRoom: How often (in seconds) to run the edit purge background job.
+	///
+	/// default: 3600
+	#[serde(default = "default_mindroom_edit_purge_interval_secs")]
+	pub mindroom_edit_purge_interval_secs: u64,
+
+	/// MindRoom: Maximum number of events to purge per cycle. Keeps
+	/// individual purge runs bounded so they don't block other work.
+	///
+	/// default: 1000
+	#[serde(default = "default_mindroom_edit_purge_batch_size")]
+	pub mindroom_edit_purge_batch_size: usize,
+
+	/// MindRoom: Floor for PDUs scanned per purge cycle.
+	///
+	/// This value competes with `mindroom_edit_purge_batch_size * 10`; the
+	/// effective per-cycle scan budget is:
+	/// `max(mindroom_edit_purge_batch_size * 10,
+	/// mindroom_edit_purge_scan_limit)`.
+	///
+	/// default: 100000
+	#[serde(default = "default_mindroom_edit_purge_scan_limit")]
+	pub mindroom_edit_purge_scan_limit: usize,
+
+	/// MindRoom: When true, log what would be purged without actually
+	/// deleting anything. Useful for testing the purge logic.
+	///
+	/// default: false
+	#[serde(default)]
+	pub mindroom_edit_purge_dry_run: bool,
+
 	/// Sets the `Access-Control-Allow-Origin` header included by this server in
 	/// all responses. A list of multiple values can be specified. The default
 	/// is an empty list. The actual header defaults to `*` upon an empty list.
@@ -4913,3 +4982,11 @@ fn default_media_storage_providers() -> BTreeSet<String> { ["media".to_owned()].
 fn default_multipart_threshold() -> ByteSize { ByteSize::mib(100) }
 
 fn default_multipart_part_size() -> ByteSize { ByteSize::mib(10) }
+
+fn default_mindroom_edit_purge_min_age_secs() -> u64 { 86_400 }
+
+fn default_mindroom_edit_purge_interval_secs() -> u64 { 3_600 }
+
+fn default_mindroom_edit_purge_batch_size() -> usize { 1_000 }
+
+fn default_mindroom_edit_purge_scan_limit() -> usize { 100_000 }

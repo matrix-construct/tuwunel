@@ -275,6 +275,18 @@ impl Service {
 		}
 	}
 
+	pub async fn mxc_is_owned_by_user(&self, mxc: &Mxc<'_>, user: &UserId) -> bool {
+		self.db.mxc_is_owned_by_user(mxc, user).await
+	}
+
+	pub async fn delete_owned_by(&self, mxc: &Mxc<'_>, user: &UserId) -> Result<bool> {
+		if !self.mxc_is_owned_by_user(mxc, user).await {
+			return Ok(false);
+		}
+
+		self.delete(mxc).await.map(|()| true)
+	}
+
 	/// Deletes all media by the specified user
 	///
 	/// currently, this is only practical for local users

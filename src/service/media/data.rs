@@ -333,6 +333,18 @@ impl Data {
 			.await
 	}
 
+	pub(super) async fn mxc_is_owned_by_user(&self, mxc: &Mxc<'_>, user_id: &UserId) -> bool {
+		let Ok(key) = serialize_key((mxc, user_id)) else {
+			return false;
+		};
+
+		let Ok(owner) = self.mediaid_user.get(&key).await else {
+			return false;
+		};
+
+		owner.as_ref() == user_id.as_str().as_bytes()
+	}
+
 	/// Gets all the media keys in our database (this includes all the metadata
 	/// associated with it such as width, height, content-type, etc)
 	pub(crate) async fn get_all_media_keys(&self) -> Vec<Vec<u8>> {
