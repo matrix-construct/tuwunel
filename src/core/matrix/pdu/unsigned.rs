@@ -297,6 +297,55 @@ pub fn set_replacement_bundle(&mut self, replacement: &Raw<AnySyncMessageLikeEve
 	Ok(())
 }
 
+/// Inverse of `set_replacement_bundle`: excise `m.replace` from
+/// `unsigned.m.relations`, dropping `m.relations` when the excision empties
+/// it and `unsigned` when that leaves nothing.
+#[implement(Pdu)]
+pub fn remove_replacement_bundle(&mut self) -> Result {
+	use BTreeMap as Map;
+
+	type Object = Map<String, Raw<JsonValue>>;
+
+	let Some(unsigned) = &self.unsigned else {
+		return Ok(());
+	};
+
+	if !unsigned.json().get().contains("\"m.replace\"") {
+		return Ok(());
+	}
+
+	let parse = |raw: &RawJsonValue| -> Result<Object> {
+		serde_json::from_str(raw.get())
+			.map_err(|e| err!(SerdeDe("Invalid object in pdu unsigned: {e}")))
+	};
+
+	let mut unsigned: Object = parse(unsigned.json())?;
+
+	let Some(relations) = unsigned.get("m.relations") else {
+		return Ok(());
+	};
+
+	let mut relations: Object = parse(relations.json())?;
+
+	if relations.remove("m.replace").is_none() {
+		return Ok(());
+	}
+
+	match relations.is_empty() {
+		| true => unsigned.remove("m.relations"),
+		| false => unsigned.insert("m.relations".to_owned(), to_raw_value(&relations)?.into()),
+	};
+
+	self.unsigned = unsigned
+		.is_empty()
+		.is_false()
+		.then(|| to_raw_value(&unsigned))
+		.transpose()?
+		.map(Into::into);
+
+	Ok(())
+}
+
 /// MSC2675/MSC3267: fold reference relations into
 /// `unsigned.m.relations.m.reference` as `{ chunk: [{ event_id }, ...] }`,
 /// preserving an existing bundle such as `m.thread` or `m.replace` and creating

@@ -1,5 +1,5 @@
-use ruma::RoomVersionId;
-use serde_json::json;
+use ruma::{RoomVersionId, events::AnySyncMessageLikeEvent, serde::Raw};
+use serde_json::{json, value::to_raw_value};
 
 use super::{Count, Pdu};
 
@@ -161,6 +161,128 @@ fn remove_prev_state_absent_unsigned_noop() {
 	let mut pdu = member_pdu(&json!(null));
 
 	pdu.remove_prev_state().expect("strip failed");
+
+	assert!(pdu.unsigned.is_none());
+}
+
+fn replacement_raw() -> Raw<AnySyncMessageLikeEvent> {
+	to_raw_value(&json!({
+		"type": "m.room.message",
+		"content": {
+			"msgtype": "m.text",
+			"body": "* edited",
+			"m.new_content": { "msgtype": "m.text", "body": "edited" },
+			"m.relates_to": { "rel_type": "m.replace", "event_id": "$event:example.com" },
+		},
+		"event_id": "$edit:example.com",
+		"sender": "@erased:example.com",
+		"origin_server_ts": 1_838_188_001,
+	}))
+	.expect("valid replacement")
+	.into()
+}
+
+#[test]
+fn remove_replacement_bundle_round_trips_set() {
+	let mut pdu = message_pdu();
+
+	pdu.set_replacement_bundle(&replacement_raw())
+		.expect("set failed");
+
+	assert!(
+		pdu.unsigned
+			.as_ref()
+			.expect("unsigned kept")
+			.json()
+			.get()
+			.contains("\"m.replace\""),
+		"set must fold the bundle"
+	);
+
+	pdu.remove_replacement_bundle()
+		.expect("remove failed");
+
+	let unsigned: serde_json::Value = serde_json::from_str(
+		pdu.unsigned
+			.as_ref()
+			.expect("unsigned kept")
+			.json()
+			.get(),
+	)
+	.expect("valid unsigned");
+
+	assert!(unsigned["m.relations"].get("m.replace").is_none());
+	assert_eq!(unsigned["m.relations"]["m.thread"], json!({}));
+	assert_eq!(unsigned["age"], 4);
+}
+
+#[test]
+fn remove_replacement_bundle_drops_emptied_relations() {
+	let mut pdu = member_pdu(&json!({
+		"age": 4612,
+		"m.relations": { "m.replace": { "event_id": "$edit:example.com" } },
+	}));
+
+	pdu.remove_replacement_bundle()
+		.expect("remove failed");
+
+	let unsigned = pdu.unsigned.as_ref().expect("unsigned kept");
+
+	assert_eq!(unsigned.json().get(), r#"{"age":4612}"#);
+}
+
+#[test]
+fn remove_replacement_bundle_omits_emptied_unsigned() {
+	let mut pdu = member_pdu(&json!({
+		"m.relations": { "m.replace": { "event_id": "$edit:example.com" } },
+	}));
+
+	pdu.remove_replacement_bundle()
+		.expect("remove failed");
+
+	assert!(pdu.unsigned.is_none());
+}
+
+#[test]
+fn remove_replacement_bundle_ignores_nested_replace() {
+	let mut pdu = member_pdu(&json!({
+		"m.relations": {
+			"m.thread": {
+				"latest_event": {
+					"unsigned": { "m.relations": { "m.replace": {} } },
+				},
+			},
+		},
+	}));
+
+	let before = pdu
+		.unsigned
+		.as_ref()
+		.expect("unsigned present")
+		.json()
+		.get()
+		.to_owned();
+
+	pdu.remove_replacement_bundle()
+		.expect("remove failed");
+
+	assert_eq!(
+		pdu.unsigned
+			.as_ref()
+			.expect("unsigned kept")
+			.json()
+			.get(),
+		before,
+		"a nested bundle is not the top-level one"
+	);
+}
+
+#[test]
+fn remove_replacement_bundle_absent_unsigned_noop() {
+	let mut pdu = member_pdu(&json!(null));
+
+	pdu.remove_replacement_bundle()
+		.expect("remove failed");
 
 	assert!(pdu.unsigned.is_none());
 }

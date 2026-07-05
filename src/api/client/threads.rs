@@ -123,7 +123,8 @@ pub(crate) async fn get_threads_route(
 
 /// MSC3856 ignored-user adjustments, applied after the bundle pass corrects
 /// the served `unsigned`: the redacted root replaces content only and keeps
-/// that `unsigned`.
+/// that `unsigned`, minus any `m.replace` bundle (a folded edit shares the
+/// root's sender, so it would re-serve the ignored content).
 fn apply_ignored_view(mut pdu: PduEvent, view: IgnoredThreadView) -> PduEvent {
 	let IgnoredThreadView::Adjusted { root, count, latest } = view else {
 		return pdu;
@@ -143,6 +144,7 @@ fn apply_ignored_view(mut pdu: PduEvent, view: IgnoredThreadView) -> PduEvent {
 		| None => pdu,
 		| Some(mut root) => {
 			root.unsigned = pdu.unsigned;
+			root.remove_replacement_bundle().log_err().ok();
 
 			*root
 		},
