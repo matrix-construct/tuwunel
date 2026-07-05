@@ -1,3 +1,5 @@
+mod power_level_defaults;
+
 use std::collections::BTreeMap;
 
 use axum::extract::State;
@@ -33,7 +35,7 @@ use ruma::{
 	serde::{JsonObject, Raw},
 };
 use serde::Deserialize;
-use serde_json::{json, value::to_raw_value};
+use serde_json::{Value as JsonValue, json, value::to_raw_value};
 use tuwunel_core::{
 	Err, Result, debug_info, debug_warn, err, info,
 	matrix::{
@@ -46,6 +48,7 @@ use tuwunel_core::{
 };
 use tuwunel_service::{Services, appservice::RegistrationInfo, rooms::state::RoomMutexGuard};
 
+use self::power_level_defaults::merge_power_level_content_override;
 use crate::{Ruma, client::utils::invite_check};
 
 pub(crate) async fn create_room_route(
@@ -219,6 +222,10 @@ async fn apply_power_levels_pdu(
 
 	let power_levels_content = default_power_levels_content(
 		version_rules,
+		services
+			.config
+			.default_power_level_content_override
+			.as_ref(),
 		body.power_level_content_override.as_ref(),
 		preset,
 		users,
@@ -754,10 +761,11 @@ async fn create_create_event_legacy(
 /// creates the power_levels_content for the PDU builder
 fn default_power_levels_content(
 	version_rules: &RoomVersionRules,
+	default_power_level_content_override: Option<&JsonValue>,
 	power_level_content_override: Option<&Raw<RoomPowerLevelsContentOverride>>,
 	preset: &RoomPreset,
 	users: BTreeMap<OwnedUserId, Int>,
-) -> Result<serde_json::Value> {
+) -> Result<JsonValue> {
 	use serde_json::to_value;
 
 	let mut power_levels_content = RoomPowerLevelsEventContent::new(&version_rules.authorization);
@@ -797,13 +805,18 @@ fn default_power_levels_content(
 		power_levels_content["events"]["org.matrix.msc3401.call.member"] = json!(50);
 	}
 
+	if let Some(default_power_level_content_override) = default_power_level_content_override {
+		let json = default_power_level_content_override
+			.as_object()
+			.expect("default_power_level_content_override is validated at startup");
+		merge_power_level_content_override(&mut power_levels_content, json);
+	}
+
 	if let Some(power_level_content_override) = power_level_content_override {
 		let json: JsonObject = serde_json::from_str(power_level_content_override.json().get())
 			.map_err(|e| err!(Request(BadJson("Invalid power_level_content_override: {e:?}"))))?;
 
-		for (key, value) in json {
-			power_levels_content[key] = value;
-		}
+		merge_power_level_content_override(&mut power_levels_content, &json);
 	}
 
 	Ok(power_levels_content)
