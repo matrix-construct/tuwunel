@@ -73,6 +73,7 @@ pub(super) static MAPS: &[Descriptor] = &[
 	},
 	Descriptor {
 		name: "eventid_backoff",
+		ttl: 60 * 60 * 24 * 3, // dead after the max fetch-backoff window (24h)
 		..descriptor::RANDOM_SMALL_CACHE
 	},
 	Descriptor {
@@ -103,10 +104,12 @@ pub(super) static MAPS: &[Descriptor] = &[
 	},
 	Descriptor {
 		name: "eventid_policysigstate",
+		ttl: 60 * 60 * 24 * 7, // backoff/refusal hint; re-ask fails open
 		..descriptor::RANDOM_SMALL_CACHE
 	},
 	Descriptor {
 		name: "eventid_resolvedstate",
+		ttl: 60 * 60 * 24 * 7, // refetch-avoidance only; safe to evict
 		..descriptor::RANDOM_SMALL_CACHE
 	},
 	Descriptor {
@@ -285,6 +288,7 @@ pub(super) static MAPS: &[Descriptor] = &[
 	Descriptor {
 		name: "roomid_spacehierarchy",
 		limit_size: 1024 * 1024 * 64,
+		ttl: 60 * 60 * 24 * 7, // above spacehierarchy_cache_ttl_max (18h default)
 		..descriptor::RANDOM_SMALL_CACHE
 	},
 	Descriptor {
@@ -361,6 +365,7 @@ pub(super) static MAPS: &[Descriptor] = &[
 	},
 	Descriptor {
 		name: "servername_destination",
+		ttl: 60 * 60 * 24 * 7, // dead after CachedDest::default_expire (<=36h)
 		..descriptor::RANDOM_SMALL_CACHE
 	},
 	Descriptor {
@@ -369,10 +374,12 @@ pub(super) static MAPS: &[Descriptor] = &[
 	},
 	Descriptor {
 		name: "servername_override",
+		ttl: 60 * 60 * 24 * 7, // dead after CachedOverride::default_expire (<=12h)
 		..descriptor::RANDOM_SMALL_CACHE
 	},
 	Descriptor {
 		name: "servername_status",
+		ttl: 60 * 60 * 24 * 3, // dead after peer MAX_BACKOFF (24h)
 		..descriptor::RANDOM_SMALL_CACHE
 	},
 	Descriptor {
@@ -520,6 +527,7 @@ pub(super) static MAPS: &[Descriptor] = &[
 	},
 	Descriptor {
 		name: "userdevicesessionid_uiaainfo",
+		ttl: 60 * 60 * 24, // interactive-auth session; minutes to complete
 		..descriptor::RANDOM_SMALL_CACHE
 	},
 	Descriptor {
