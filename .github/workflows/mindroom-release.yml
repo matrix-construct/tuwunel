@@ -1,0 +1,112 @@
+name: MindRoom Release Binaries
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to build and upload assets for
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            arch: x86_64
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            arch: aarch64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', inputs.tag) || github.ref }}
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            cmake \
+            clang \
+            libclang-dev \
+            libssl-dev \
+            liburing-dev \
+            pkg-config
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.91.1
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Build tuwunel
+        env:
+          CARGO_TERM_COLOR: always
+        run: |
+          cargo build --locked --release -p tuwunel --target "${{ matrix.target }}"
+
+      - name: Package release artifact
+        env:
+          TAG: ${{ env.RELEASE_TAG }}
+          TARGET: ${{ matrix.target }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          mkdir -p dist
+          cp "target/${TARGET}/release/tuwunel" dist/tuwunel
+          strip dist/tuwunel || true
+
+          tarball="tuwunel-${TAG}-linux-${ARCH}.tar.gz"
+          tar -C dist -czf "${tarball}" tuwunel
+          sha256sum "${tarball}" > "${tarball}.sha256"
+
+      - name: Upload intermediate artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.arch }}
+          path: |
+            tuwunel-${{ env.RELEASE_TAG }}-linux-${{ matrix.arch }}.tar.gz
+            tuwunel-${{ env.RELEASE_TAG }}-linux-${{ matrix.arch }}.tar.gz.sha256
+
+  release:
+    name: Publish GitHub Release Assets
+    needs: build
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: release-*
+          merge-multiple: true
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          files: dist/*
+          fail_on_unmatched_files: true
+          generate_release_notes: true
+          make_latest: true

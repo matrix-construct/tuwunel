@@ -1,0 +1,43 @@
+# syntax = docker/dockerfile:1.11-labs
+
+FROM debian:testing-slim
+
+ARG DEBIAN_FRONTEND=noninteractive
+ARG PACKAGE_VERSION=""
+ARG PACKAGE_REVISION=""
+ARG PACKAGE_CREATED=""
+
+LABEL org.opencontainers.image.title="tuwunel" \
+      org.opencontainers.image.description="MindRoom release container for tuwunel" \
+      org.opencontainers.image.version="${PACKAGE_VERSION}" \
+      org.opencontainers.image.revision="${PACKAGE_REVISION}" \
+      org.opencontainers.image.created="${PACKAGE_CREATED}" \
+      org.opencontainers.image.source="https://github.com/mindroom-ai/mindroom-tuwunel" \
+      org.opencontainers.image.documentation="https://github.com/mindroom-ai/mindroom-tuwunel/tree/main/docs/" \
+      org.opencontainers.image.url="https://github.com/mindroom-ai/mindroom-tuwunel" \
+      org.opencontainers.image.licenses="Apache-2.0" \
+      org.opencontainers.image.vendor="mindroom-ai"
+
+RUN <<EOF
+    set -eux
+    apt-get update
+    apt-get install -y --no-install-recommends \
+        adduser \
+        ca-certificates \
+        libstdc++6 \
+        liburing2
+    rm -rf /var/lib/apt/lists/*
+EOF
+
+COPY --chmod=755 tuwunel /usr/bin/tuwunel
+
+RUN <<EOF
+    set -eux
+    ldd /usr/bin/tuwunel
+    sha256sum /usr/bin/tuwunel
+    du -h /usr/bin/tuwunel
+EOF
+
+EXPOSE 8008 8448
+
+ENTRYPOINT ["tuwunel"]

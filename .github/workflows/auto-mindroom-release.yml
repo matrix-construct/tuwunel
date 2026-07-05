@@ -1,0 +1,92 @@
+name: Auto MindRoom Release
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  actions: write
+  contents: write
+
+concurrency:
+  group: auto-mindroom-release-main
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Compute and create MindRoom release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4.2.0
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Refresh remote tags
+        run: git fetch --force --tags origin
+
+      - name: Compute MindRoom release tag
+        id: version
+        env:
+          RELEASE_TAG_PREFIX: v
+          RELEASE_TAG_SUFFIX: mindroom
+        run: python3 scripts/fork_release_tag.py
+
+      - name: Create release (or skip if it already exists)
+        id: create_release
+        env:
+          GH_TOKEN: ${{ secrets.PAT || secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ steps.version.outputs.release_tag }}
+          BASE_VERSION: ${{ steps.version.outputs.base_version }}
+          RELEASE_ITERATION: ${{ steps.version.outputs.release_iteration }}
+          REUSED_TAG_AT_HEAD: ${{ steps.version.outputs.reused_tag_at_head }}
+        run: |
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "Release $RELEASE_TAG already exists; skipping."
+            echo "release_created=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ "$REUSED_TAG_AT_HEAD" = "true" ]; then
+            echo "HEAD already tagged as $RELEASE_TAG; creating release for existing tag."
+          fi
+
+          gh release create "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "$RELEASE_TAG" \
+            --generate-notes \
+            --notes "Automated release based on Tuwunel ${BASE_VERSION} (MindRoom iteration ${RELEASE_ITERATION})."
+          echo "release_created=true" >> "$GITHUB_OUTPUT"
+
+      - name: Trigger binary build workflow
+        env:
+          GH_TOKEN: ${{ secrets.PAT || secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ steps.version.outputs.release_tag }}
+        run: |
+          asset_count="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets | length')"
+
+          if [ "$asset_count" -gt 0 ]; then
+            echo "Release $RELEASE_TAG already has $asset_count assets; skipping binary workflow trigger."
+            exit 0
+          fi
+
+          echo "Dispatching MindRoom Release Binaries for tag $RELEASE_TAG"
+          gh workflow run mindroom-release.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main \
+            -f tag="$RELEASE_TAG"
+
+      - name: Trigger container publish workflow
+        env:
+          GH_TOKEN: ${{ secrets.PAT || secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ steps.version.outputs.release_tag }}
+        run: |
+          echo "Dispatching MindRoom Release Containers for tag $RELEASE_TAG"
+          gh workflow run mindroom-container-release.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main \
+            -f tag="$RELEASE_TAG" \
+            -f publish_latest=true
