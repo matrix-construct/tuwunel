@@ -647,6 +647,17 @@ pub struct Config {
 	#[serde(default = "default_sender_retry_backoff_limit")]
 	pub sender_retry_backoff_limit: u64,
 
+	/// Grace period (seconds) before the first retry of a federation
+	/// destination that has failed exactly once, applied in place of the
+	/// quadratic backoff curve so a single transient failure does not hold
+	/// delivery until the next backoff window. A second consecutive failure
+	/// returns to the backoff curve. Set to 0 to disable the grace and back off
+	/// from the first failure.
+	///
+	/// default: 15
+	#[serde(default = "default_sender_retry_grace")]
+	pub sender_retry_grace: u64,
+
 	/// Appservice URL request connection timeout. Defaults to 35 seconds as
 	/// generally appservices are hosted within the same network.
 	///
@@ -4476,6 +4487,8 @@ fn default_sender_timeout() -> u64 { 180 }
 fn default_sender_idle_timeout() -> u64 { 180 }
 
 fn default_sender_retry_backoff_limit() -> u64 { 86400 }
+
+fn default_sender_retry_grace() -> u64 { 15 }
 
 fn default_appservice_timeout() -> u64 { 35 }
 

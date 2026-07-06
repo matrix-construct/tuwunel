@@ -32,18 +32,25 @@ pub struct Service {
 	/// streak length the quadratic curve `window * n²` saturates at
 	/// [`MAX_BACKOFF`] and further steps cannot change the verdict.
 	n_max: u32,
+
+	/// Grace before the first retry of a once-failed peer, snapshot from
+	/// `sender_retry_grace`. Zero disables the grace tier so the plain bucket
+	/// curve governs from the first failure.
+	grace: Duration,
 }
 
 impl crate::Service for Service {
 	fn build(args: &crate::Args<'_>) -> Result<Arc<Self>> {
 		let window_secs = args.server.config.sender_timeout.max(1);
 		let n_max = exponential_backoff_streak_cap(Duration::from_secs(window_secs), MAX_BACKOFF);
+		let grace = Duration::from_secs(args.server.config.sender_retry_grace);
 
 		Ok(Arc::new(Self {
 			services: args.services.clone(),
 			statuses: args.db["servername_status"].clone(),
 			window_secs,
 			n_max,
+			grace,
 		}))
 	}
 

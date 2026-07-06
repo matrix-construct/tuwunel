@@ -1,9 +1,10 @@
 //! Per-server reachability store backed by the `servername_status` CF.
 //!
 //! Bucket key layout: `servername || u64_be(now.as_secs() / window_secs)`. The
-//! one-byte value is the [`Classification`]. Bursts within the same window
-//! collide on the same key, which is a correct collision (the window is the
-//! coalescing quantum). The storage layout is the batch.
+//! value is the [`Classification`] byte, optionally trailed by the failure
+//! instant as `u64_be` seconds. Bursts within the same window collide on the
+//! same key, which is a correct collision (the window is the coalescing
+//! quantum). The storage layout is the batch.
 //!
 //! `window_secs` is sourced from `sender_timeout` at service build time so the
 //! peer-status curve does not drift from the sender's existing quadratic
@@ -74,8 +75,13 @@ pub fn record_success(&self, server: &ServerName) {
 
 #[implement(super::Service)]
 pub fn record_failure(&self, server: &ServerName, classification: Classification) {
+	// Raw-value additive extension; old one-byte rows stay readable.
+	let mut value = [0_u8; 9];
+	value[0] = u8::from(classification);
+	value[1..].copy_from_slice(&now_secs().to_be_bytes());
+
 	self.statuses
-		.put_raw((server, self.current_bucket()), [u8::from(classification)]);
+		.put_raw((server, self.current_bucket()), value);
 }
 
 #[implement(super::Service)]
@@ -96,6 +102,8 @@ pub async fn should_attempt(&self, server: &ServerName) -> ShouldAttempt {
 		};
 	}
 
+	let failure_at = failure_secs(handle.as_ref());
+
 	// streak walks back until the first gap; async `contains` predicate
 	// forces an imperative loop rather than `take_while`.
 	let mut streak: u32 = 1;
@@ -105,6 +113,15 @@ pub async fn should_attempt(&self, server: &ServerName) -> ShouldAttempt {
 			break;
 		}
 		streak = streak.saturating_add(1);
+	}
+
+	// A single failure earns a fixed grace before the quadratic curve engages;
+	// repeat failures and pre-grace rows without a timestamp keep the curve.
+	if streak == 1
+		&& !self.grace.is_zero()
+		&& let Some(failure_at) = failure_at
+	{
+		return self.grace_verdict(failure_at);
 	}
 
 	ShouldAttempt::No {
@@ -162,13 +179,41 @@ fn earliest_retry(&self, current_bucket: u64, streak: u32) -> SystemTime {
 		.unwrap_or_else(SystemTime::now)
 }
 
+/// Grace-tier verdict for a destination that has failed exactly once: it is
+/// attemptable once `grace` has elapsed since the recorded failure instant.
+#[implement(super::Service)]
+#[must_use]
+fn grace_verdict(&self, failure_at: u64) -> ShouldAttempt {
+	let retry_secs = failure_at.saturating_add(self.grace.as_secs());
+
+	if now_secs() >= retry_secs {
+		return ShouldAttempt::Yes;
+	}
+
+	ShouldAttempt::No {
+		earliest_retry: UNIX_EPOCH
+			.checked_add(Duration::from_secs(retry_secs))
+			.unwrap_or_else(SystemTime::now),
+	}
+}
+
 #[inline]
 #[must_use]
-fn classify(bytes: &[u8]) -> Classification {
+pub(super) fn classify(bytes: &[u8]) -> Classification {
 	bytes
 		.first()
 		.copied()
 		.map_or(Classification::Transient, Classification::from_byte)
+}
+
+/// Failure instant (seconds since the epoch) recorded after the classification
+/// byte; old single-byte rows carry no timestamp and yield `None`.
+#[must_use]
+pub(super) fn failure_secs(bytes: &[u8]) -> Option<u64> {
+	bytes
+		.get(1..9)
+		.and_then(|tail| tail.try_into().ok())
+		.map(u64::from_be_bytes)
 }
 
 /// Classifies a failed federation attempt for the peer-reachability store, or

@@ -507,6 +507,15 @@
 #
 #sender_retry_backoff_limit = 86400
 
+# Grace period (seconds) before the first retry of a federation
+# destination that has failed exactly once, applied in place of the
+# quadratic backoff curve so a single transient failure does not hold
+# delivery until the next backoff window. A second consecutive failure
+# returns to the backoff curve. Set to 0 to disable the grace and back off
+# from the first failure.
+#
+#sender_retry_grace = 15
+
 # Appservice URL request connection timeout. Defaults to 35 seconds as
 # generally appservices are hosted within the same network.
 #
