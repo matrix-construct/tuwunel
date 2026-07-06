@@ -8,7 +8,7 @@ use tuwunel_core::{
 };
 use tuwunel_database::{Database, Deserialized, Map};
 
-use super::{Destination, SendingEvent};
+use super::{Destination, EduBuf, SendingEvent};
 
 pub(super) type OutgoingItem = (Key, SendingEvent, Destination);
 pub(super) type SendingItem = (Key, SendingEvent);
@@ -76,6 +76,21 @@ impl Data {
 				self.servercurrentevent_data.insert(key, val);
 				self.servernameevent_data.remove(key);
 			});
+	}
+
+	/// Write composed EDUs straight into the active set, keyed by fresh counts;
+	/// unlike `mark_as_active` there is no queue row to delete.
+	pub(super) fn persist_active_edus(&self, server: &ServerName, edus: &[EduBuf]) {
+		let prefix = Destination::Federation(server.to_owned()).get_prefix();
+		self.servercurrentevent_data
+			.insert_batch(edus.iter().map(|edu| {
+				let mut key = prefix.clone();
+				let count = self.services.globals.next_count();
+				let count = count.to_be_bytes();
+				key.extend(&count);
+
+				(key, edu.as_slice())
+			}));
 	}
 
 	#[inline]

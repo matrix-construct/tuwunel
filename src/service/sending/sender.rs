@@ -478,8 +478,13 @@ impl Service {
 		let receipts = receipts.unwrap_or_default();
 		let mut events = device_changes.shipped;
 
-		events.extend(presence.flatten());
 		events.extend(receipts.shipped);
+
+		// Presence rides last and is excluded from the durable prefix because
+		// its content is compose-time-relative and regenerates fresh.
+		let durable_len = events.len();
+
+		events.extend(presence.flatten());
 		debug_assert!(
 			budget_used.saturating_add(events.len()) <= EDU_LIMIT,
 			"exceeded edus limit"
@@ -497,6 +502,13 @@ impl Service {
 			let dest = Destination::Federation(server_name.to_owned());
 			self.db
 				.queue_requests(overflow.iter().map(|event| (event, &dest)));
+		}
+
+		// Persist the durable prefix so a failed or restarted transaction
+		// replays it; the ACK deletes these active rows.
+		if durable_len > 0 {
+			self.db
+				.persist_active_edus(server_name, &events[..durable_len]);
 		}
 
 		let last_count = max_edu_count.load(Ordering::Acquire);
