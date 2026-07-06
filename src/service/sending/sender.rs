@@ -200,18 +200,35 @@ impl Service {
 			.collect::<Vec<_>>()
 			.await;
 
-		// Insert any pdus we found
 		if !new_events.is_empty() {
 			self.db.mark_as_active(new_events.iter());
+		}
 
-			let new_events_vec = new_events
-				.into_iter()
-				.map(|(_, event)| event)
-				.collect();
+		let mut events: Vec<SendingEvent> = new_events
+			.into_iter()
+			.map(|(_, event)| event)
+			.collect();
 
-			futures.push(self.send_events(dest.clone(), new_events_vec));
-		} else {
+		// Top up with EDUs that accrued while the transaction was in flight.
+		if let Destination::Federation(server_name) = dest {
+			let budget_used = events
+				.iter()
+				.filter(|event| matches!(event, SendingEvent::Edu(_)))
+				.count();
+
+			if let Ok((select_edus, last_count)) =
+				self.select_edus(server_name, budget_used).await
+			{
+				events.extend(select_edus.into_iter().map(SendingEvent::Edu));
+				self.db
+					.set_latest_educount(server_name, last_count);
+			}
+		}
+
+		if events.is_empty() {
 			statuses.remove(dest);
+		} else {
+			futures.push(self.send_events(dest.clone(), events));
 		}
 	}
 
@@ -342,21 +359,30 @@ impl Service {
 		let _cork = self.db.db.cork();
 		if !new_events.is_empty() {
 			self.db.mark_as_active(new_events.iter());
-			for (_, e) in new_events {
-				events.push(e);
-			}
+			events.extend(
+				new_events
+					.into_iter()
+					.map(|(_, event)| event)
+					.filter(|event| !matches!(event, SendingEvent::Flush)),
+			);
 		}
 
 		// Add EDU's into the transaction
-		if let Destination::Federation(server_name) = dest
-			&& let Ok((select_edus, last_count)) = self.select_edus(server_name).await
-		{
-			debug_assert!(select_edus.len() <= EDU_LIMIT, "exceeded edus limit");
-			let select_edus = select_edus.into_iter().map(SendingEvent::Edu);
+		if let Destination::Federation(server_name) = dest {
+			let budget_used = events
+				.iter()
+				.filter(|event| matches!(event, SendingEvent::Edu(_)))
+				.count();
 
-			events.extend(select_edus);
-			self.db
-				.set_latest_educount(server_name, last_count);
+			if let Ok((select_edus, last_count)) =
+				self.select_edus(server_name, budget_used).await
+			{
+				let select_edus = select_edus.into_iter().map(SendingEvent::Edu);
+
+				events.extend(select_edus);
+				self.db
+					.set_latest_educount(server_name, last_count);
+			}
 		}
 
 		Ok(Some(events))
@@ -413,14 +439,18 @@ impl Service {
 	}
 
 	#[tracing::instrument(name = "edus", level = "debug", skip_all)]
-	async fn select_edus(&self, server_name: &ServerName) -> Result<(EduVec, u64)> {
+	async fn select_edus(
+		&self,
+		server_name: &ServerName,
+		budget_used: usize,
+	) -> Result<(EduVec, u64)> {
 		// selection window
 		let since = self.db.get_latest_educount(server_name).await;
 		let since_upper = self.services.globals.current_count();
 		let batch = (since, since_upper);
 		debug_assert!(batch.0 <= batch.1, "since range must not be negative");
 
-		let events_len = AtomicUsize::default();
+		let events_len = AtomicUsize::new(budget_used);
 		let max_edu_count = AtomicU64::new(since);
 		let device_changes =
 			self.select_edus_device_changes(server_name, batch, &max_edu_count, &events_len);
@@ -448,6 +478,10 @@ impl Service {
 
 		events.extend(presence.into_iter().flatten());
 		events.extend(receipts.into_iter().flatten());
+		debug_assert!(
+			budget_used.saturating_add(events.len()) <= EDU_LIMIT,
+			"exceeded edus limit"
+		);
 
 		Ok((events, max_edu_count.load(Ordering::Acquire)))
 	}
