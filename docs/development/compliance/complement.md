@@ -4,15 +4,15 @@ Tuwunel runs the [Complement](https://github.com/matrix-org/complement) Matrix h
 
 ## Counts
 
-- Test groups: 205. Passing: **81.0%**
-  - ✅ `pass`: 166
-  - 🟨 `some`: 18
+- Test groups: 205. Passing: **81.5%**
+  - ✅ `pass`: 167
+  - 🟨 `some`: 17
   - ❌ `fail`: 19
   - ⬛ `skip`: 2
 
-- Subtests: 596. Passing: **78.0%**
-  - ✅ `pass`: 465
-  - ❌ `fail`: 118
+- Subtests: 596. Passing: **78.2%**
+  - ✅ `pass`: 466
+  - ❌ `fail`: 117
   - ⬛ `skip`: 13
 
 ## All Top-Level Tests
@@ -48,7 +48,7 @@ Tuwunel runs the [Complement](https://github.com/matrix-org/complement) Matrix h
 | `TestDeletingDeviceRemovesDeviceLocalNotificationSettings` | ✅ | 1/0/0 |
 | `TestDemotingUsersViaUsersDefault` | ✅ | – |
 | `TestDeviceListUpdates` | 🟨 | 8/2/0 |
-| `TestDeviceListsUpdateOverFederation` | 🟨 | 2/1/0 |
+| `TestDeviceListsUpdateOverFederation` | ✅ | 3/0/0 |
 | `TestDeviceListsUpdateOverFederationOnRoomJoin` | ❌ | – |
 | `TestDeviceManagement` | ✅ | 7/0/0 |
 | `TestDisplayNameUpdate` | ✅ | – |
