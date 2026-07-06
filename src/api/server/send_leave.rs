@@ -23,6 +23,8 @@ pub(crate) async fn create_leave_event_v2_route(
 	let room_id = &body.room_id;
 	let origin = body.origin();
 
+	services.sending.notify_peer_alive(origin).await;
+
 	require_known_room(&services, room_id, origin).await?;
 
 	// We do not add the event_id field to the pdu here because of signature and

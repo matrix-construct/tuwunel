@@ -350,6 +350,32 @@ impl Service {
 			.await
 	}
 
+	/// Flushes the sender for a federation peer that has proven reachable via
+	/// inbound activity, but only when it was actually in its failure bucket.
+	#[tracing::instrument(
+		level = "debug",
+		skip(self),
+		fields(
+			%server,
+		),
+	)]
+	pub async fn notify_peer_alive(&self, server: &ServerName) {
+		if self
+			.services
+			.federation
+			.note_peer_alive(server)
+			.await
+		{
+			self.dispatch(Msg {
+				dest: Destination::Federation(server.to_owned()),
+				event: SendingEvent::Flush,
+				queue_id: Vec::<u8>::new(),
+			})
+			.log_err()
+			.ok();
+		}
+	}
+
 	/// Clean up queued sending event data
 	///
 	/// Used after we remove an appservice registration or a user deletes a push

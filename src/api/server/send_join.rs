@@ -54,6 +54,8 @@ pub(crate) async fn create_join_event_v2_route(
 		))));
 	}
 
+	services.sending.notify_peer_alive(origin).await;
+
 	// Get the servers in the room BEFORE the join
 	let servers_in_room = members_omitted
 		.then_async(|| {

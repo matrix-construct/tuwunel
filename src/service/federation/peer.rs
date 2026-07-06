@@ -73,6 +73,30 @@ pub fn record_success(&self, server: &ServerName) {
 	self.statuses.del((server, self.current_bucket()));
 }
 
+/// Clears the current failure bucket for a peer that has just contacted us,
+/// reporting whether one was present so the caller can flush only when it was.
+/// Unlike `record_success`'s blind delete, the miss (the common healthy-peer
+/// case) writes no tombstone; only the current bucket is cleared, leaving older
+/// buckets to carry the streak history for the walk-back.
+#[implement(super::Service)]
+#[tracing::instrument(
+	level = "trace",
+	skip(self),
+	fields(
+		%server,
+	),
+)]
+pub async fn note_peer_alive(&self, server: &ServerName) -> bool {
+	let bucket = (server, self.current_bucket());
+	let alive = self.statuses.contains(&bucket).await;
+
+	if alive {
+		self.statuses.del(bucket);
+	}
+
+	alive
+}
+
 #[implement(super::Service)]
 pub fn record_failure(&self, server: &ServerName, classification: Classification) {
 	// Raw-value additive extension; old one-byte rows stay readable.

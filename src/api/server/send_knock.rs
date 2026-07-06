@@ -39,6 +39,11 @@ pub(crate) async fn create_knock_event_v1_route(
 		return Err!(Request(Forbidden("Server is banned on this homeserver.")));
 	}
 
+	services
+		.sending
+		.notify_peer_alive(body.origin())
+		.await;
+
 	require_known_room(&services, &body.room_id, body.origin()).await?;
 
 	let room_version_id = services

@@ -93,6 +93,12 @@ pub(crate) async fn send_transaction_message_route(
 		)));
 	}
 
+	// Clear any failure bucket before processing consults the peer gate.
+	services
+		.sending
+		.notify_peer_alive(body.origin())
+		.await;
+
 	let txn_start_time = Instant::now();
 	trace!(
 		pdus = body.pdus.len(),

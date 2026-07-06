@@ -41,6 +41,11 @@ pub(crate) async fn create_invite_route(
 	ClientIp(client): ClientIp,
 	body: Ruma<create_invite::v2::Request>,
 ) -> Result<create_invite::v2::Response> {
+	services
+		.sending
+		.notify_peer_alive(body.origin())
+		.await;
+
 	validate_request(&services, &body).await?;
 
 	enforce_stripped_state(&services, &body).await?;
