@@ -86,6 +86,15 @@ type RankedReceipts = SmallVec<[ReceiptMap; 1]>;
 /// common case is a single room, so inline-1 avoids a heap touch.
 type RoomReceipts = SmallVec<[(OwnedRoomId, RankedReceipts); 1]>;
 
+/// Output of one EDU selector. `shipped` rides the current transaction up to
+/// the shared budget; `overflow` past the budget is written as queued rows for
+/// later transactions to drain.
+#[derive(Default)]
+struct Selected {
+	shipped: EduVec,
+	overflow: Vec<EduBuf>,
+}
+
 const SELECT_PRESENCE_LIMIT: usize = 256;
 const SELECT_RECEIPT_LIMIT: usize = 256;
 const DEQUEUE_LIMIT: usize = 48;
@@ -216,12 +225,8 @@ impl Service {
 				.filter(|event| matches!(event, SendingEvent::Edu(_)))
 				.count();
 
-			if let Ok((select_edus, last_count)) =
-				self.select_edus(server_name, budget_used).await
-			{
+			if let Ok(select_edus) = self.select_edus(server_name, budget_used).await {
 				events.extend(select_edus.into_iter().map(SendingEvent::Edu));
-				self.db
-					.set_latest_educount(server_name, last_count);
 			}
 		}
 
@@ -374,14 +379,8 @@ impl Service {
 				.filter(|event| matches!(event, SendingEvent::Edu(_)))
 				.count();
 
-			if let Ok((select_edus, last_count)) =
-				self.select_edus(server_name, budget_used).await
-			{
-				let select_edus = select_edus.into_iter().map(SendingEvent::Edu);
-
-				events.extend(select_edus);
-				self.db
-					.set_latest_educount(server_name, last_count);
+			if let Ok(select_edus) = self.select_edus(server_name, budget_used).await {
+				events.extend(select_edus.into_iter().map(SendingEvent::Edu));
 			}
 		}
 
@@ -439,14 +438,16 @@ impl Service {
 	}
 
 	#[tracing::instrument(name = "edus", level = "debug", skip_all)]
-	async fn select_edus(
-		&self,
-		server_name: &ServerName,
-		budget_used: usize,
-	) -> Result<(EduVec, u64)> {
+	async fn select_edus(&self, server_name: &ServerName, budget_used: usize) -> Result<EduVec> {
 		// selection window
 		let since = self.db.get_latest_educount(server_name).await;
 		let since_upper = self.services.globals.current_count();
+
+		// Nothing new since the last window: skip the scan and the watermark.
+		if since == since_upper {
+			return Ok(EduVec::new());
+		}
+
 		let batch = (since, since_upper);
 		debug_assert!(batch.0 <= batch.1, "since range must not be negative");
 
@@ -474,16 +475,37 @@ impl Service {
 		let (device_changes, receipts, presence) =
 			join3(device_changes, receipts, presence).await;
 
-		let mut events = device_changes;
+		let receipts = receipts.unwrap_or_default();
+		let mut events = device_changes.shipped;
 
-		events.extend(presence.into_iter().flatten());
-		events.extend(receipts.into_iter().flatten());
+		events.extend(presence.flatten());
+		events.extend(receipts.shipped);
 		debug_assert!(
 			budget_used.saturating_add(events.len()) <= EDU_LIMIT,
 			"exceeded edus limit"
 		);
 
-		Ok((events, max_edu_count.load(Ordering::Acquire)))
+		// EDUs past the budget become queued rows drained by later transactions.
+		let overflow: Vec<SendingEvent> = device_changes
+			.overflow
+			.into_iter()
+			.chain(receipts.overflow)
+			.map(SendingEvent::Edu)
+			.collect();
+
+		if !overflow.is_empty() {
+			let dest = Destination::Federation(server_name.to_owned());
+			self.db
+				.queue_requests(overflow.iter().map(|event| (event, &dest)));
+		}
+
+		let last_count = max_edu_count.load(Ordering::Acquire);
+		if last_count > since {
+			self.db
+				.set_latest_educount(server_name, last_count);
+		}
+
+		Ok(events)
 	}
 
 	/// Look for device changes
@@ -498,8 +520,8 @@ impl Service {
 		since: (u64, u64),
 		max_edu_count: &AtomicU64,
 		events_len: &AtomicUsize,
-	) -> EduVec {
-		let mut events = EduVec::new();
+	) -> Selected {
+		let mut selected = Selected::default();
 		let server_rooms = self
 			.services
 			.state_cache
@@ -539,16 +561,19 @@ impl Service {
 				serde_json::to_writer(&mut buf, &edu)
 					.expect("failed to serialize device list update to JSON");
 
-				// Reserve before push so concurrent producers see the count first.
-				if events_len.fetch_add(1, Ordering::Relaxed) >= EDU_LIMIT {
-					return events;
+				// Past the budget these rows overflow to the queue; replay is
+				// benign because the placeholder content is user-id-only.
+				if !selected.overflow.is_empty()
+					|| events_len.fetch_add(1, Ordering::Relaxed) >= EDU_LIMIT
+				{
+					selected.overflow.push(buf);
+				} else {
+					selected.shipped.push(buf);
 				}
-
-				events.push(buf);
 			}
 		}
 
-		events
+		selected
 	}
 
 	/// Look for read receipts in this room
@@ -571,7 +596,7 @@ impl Service {
 		since: (u64, u64),
 		max_edu_count: &AtomicU64,
 		events_len: &AtomicUsize,
-	) -> EduVec {
+	) -> Selected {
 		let num = AtomicUsize::new(0);
 		let by_room: RoomReceipts = self
 			.services
@@ -619,14 +644,20 @@ impl Service {
 			buf
 		};
 
-		// Reserve a slot per rank from the shared EDU budget.
-		let reserve = |_: &_| events_len.fetch_add(1, Ordering::Relaxed) < EDU_LIMIT;
+		// Ranks reserve from the shared budget in order; those past the cap
+		// overflow to the queue instead of truncating the tail.
+		let mut selected = Selected::default();
+		for receipts in (0..max_rank).filter_map(pivot_rank) {
+			if !selected.overflow.is_empty()
+				|| events_len.fetch_add(1, Ordering::Relaxed) >= EDU_LIMIT
+			{
+				selected.overflow.push(serialize_edu(receipts));
+			} else {
+				selected.shipped.push(serialize_edu(receipts));
+			}
+		}
 
-		(0..max_rank)
-			.filter_map(pivot_rank)
-			.take_while(reserve)
-			.map(serialize_edu)
-			.collect()
+		selected
 	}
 
 	/// Look for read receipts in this room.
@@ -794,7 +825,7 @@ impl Service {
 			return None;
 		}
 
-		// Reserve our slot in the shared transaction budget before serializing.
+		// A budget trip drops presence, which self-heals on the next transition.
 		if events_len.fetch_add(1, Ordering::Relaxed) >= EDU_LIMIT {
 			return None;
 		}
