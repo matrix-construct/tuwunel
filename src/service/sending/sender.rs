@@ -1,11 +1,12 @@
 use std::{
-	collections::{BTreeMap, HashMap, HashSet, btree_map::Entry},
+	cmp::Reverse,
+	collections::{BTreeMap, BinaryHeap, HashMap, HashSet, btree_map::Entry},
 	fmt::Debug,
 	sync::{
 		Arc,
 		atomic::{AtomicU64, AtomicUsize, Ordering},
 	},
-	time::{Duration, Instant},
+	time::{Duration, Instant, SystemTime},
 };
 
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
@@ -47,6 +48,7 @@ use tuwunel_core::{
 	utils::{
 		BoolExt, ReadyExt, calculate_hash, continue_exponential_backoff_secs,
 		future::TryExtExt,
+		rand::secs as rand_secs,
 		stream::{BroadbandExt, IterStream, WidebandExt},
 	},
 	warn,
@@ -70,6 +72,11 @@ type SendingResult = Result<Destination, SendingError>;
 type SendingFuture<'a> = BoxFuture<'a, SendingResult>;
 type SendingFutures<'a> = FuturesUnordered<SendingFuture<'a>>;
 type CurTransactionStatus = HashMap<Destination, TransactionStatus>;
+
+/// Per-worker retry timer keyed by earliest-retry deadline (tokio time). Every
+/// recorded federation failure arms one entry; heap size is bounded by the
+/// concurrently-sad destinations plus transient re-arms.
+type WakeQueue = BinaryHeap<Reverse<(tokio::time::Instant, OwnedServerName)>>;
 
 /// Per-(room, user) bucket of `ReceiptData`. MSC3771 allows one receipt
 /// per thread context per user per EDU window; the dominant case is
@@ -107,12 +114,13 @@ impl Service {
 	pub(super) async fn sender(self: Arc<Self>, id: usize) -> Result {
 		let mut statuses: CurTransactionStatus = CurTransactionStatus::new();
 		let mut futures: SendingFutures<'_> = FuturesUnordered::new();
+		let mut wakes: WakeQueue = WakeQueue::new();
 
 		self.startup_netburst(id, &mut futures, &mut statuses)
 			.boxed()
 			.await;
 
-		self.work_loop(id, &mut futures, &mut statuses)
+		self.work_loop(id, &mut futures, &mut statuses, &mut wakes)
 			.await;
 
 		if !futures.is_empty() {
@@ -136,7 +144,10 @@ impl Service {
 		id: usize,
 		futures: &mut SendingFutures<'a>,
 		statuses: &mut CurTransactionStatus,
+		wakes: &mut WakeQueue,
 	) {
+		use tokio::time::{Instant, sleep_until};
+
 		let receiver = self
 			.channels
 			.get(id)
@@ -144,13 +155,20 @@ impl Service {
 			.expect("Missing channel for sender worker");
 
 		while !receiver.is_closed() {
+			let next_due = wakes
+				.peek()
+				.map_or_else(Instant::now, |Reverse((instant, _))| *instant);
+
 			tokio::select! {
 				Some(response) = futures.next() => {
-					self.handle_response(response, futures, statuses).await;
+					self.handle_response(response, futures, statuses, wakes).await;
 				},
 				request = receiver.recv_async() => match request {
 					Ok(request) => self.handle_request(request, futures, statuses).await,
 					Err(_) => return,
+				},
+				() = sleep_until(next_due), if !wakes.is_empty() => {
+					self.drain_due_wakes(futures, statuses, wakes).await;
 				},
 			}
 		}
@@ -162,33 +180,47 @@ impl Service {
 		response: SendingResult,
 		futures: &mut SendingFutures<'a>,
 		statuses: &mut CurTransactionStatus,
+		wakes: &mut WakeQueue,
 	) {
 		match response {
-			| Err((dest, e)) => Self::handle_response_err(dest, statuses, &e),
 			| Ok(dest) =>
 				self.handle_response_ok(&dest, futures, statuses)
 					.await,
+			| Err((dest, e)) => {
+				Self::handle_response_err(&dest, statuses, &e);
+
+				// Arm a one-shot retry at the destination's earliest-retry time.
+				if let Destination::Federation(server) = dest
+					&& let ShouldAttempt::No { earliest_retry } = self
+						.services
+						.federation
+						.should_attempt(&server)
+						.await
+				{
+					arm_wake(wakes, server, earliest_retry);
+				}
+			},
 		}
 	}
 
-	fn handle_response_err(dest: Destination, statuses: &mut CurTransactionStatus, e: &Error) {
+	fn handle_response_err(dest: &Destination, statuses: &mut CurTransactionStatus, e: &Error) {
 		debug!(?dest, "{e:?}");
 		// Push backs off locally; federation defers to peer_status, appservice retries.
 		let push = matches!(dest, Destination::Push(..));
 
-		statuses.entry(dest).and_modify(|e| {
-			let tries = match e {
+		if let Some(status) = statuses.get_mut(dest) {
+			let tries = match status {
 				| TransactionStatus::Running => 1,
 				| TransactionStatus::Failed(n, _) | TransactionStatus::Retrying(n) =>
 					n.saturating_add(1),
 			};
 
-			*e = if push {
+			*status = if push {
 				TransactionStatus::Failed(tries, Instant::now())
 			} else {
 				TransactionStatus::Retrying(tries)
 			};
-		});
+		}
 	}
 
 	#[expect(clippy::needless_pass_by_ref_mut)]
@@ -252,6 +284,56 @@ impl Service {
 			} else {
 				statuses.remove(&msg.dest);
 			}
+		}
+	}
+
+	async fn drain_due_wakes<'a>(
+		&'a self,
+		futures: &mut SendingFutures<'a>,
+		statuses: &mut CurTransactionStatus,
+		wakes: &mut WakeQueue,
+	) {
+		use tokio::time::Instant;
+
+		let now = Instant::now();
+		while wakes
+			.peek()
+			.is_some_and(|Reverse((due, _))| *due <= now)
+		{
+			let Reverse((_, server)) = wakes.pop().expect("peeked entry");
+			self.handle_wake(server, futures, statuses, wakes)
+				.await;
+		}
+	}
+
+	async fn handle_wake<'a>(
+		&'a self,
+		server: OwnedServerName,
+		futures: &mut SendingFutures<'a>,
+		statuses: &mut CurTransactionStatus,
+		wakes: &mut WakeQueue,
+	) {
+		let dest = Destination::Federation(server.clone());
+		if matches!(statuses.get(&dest), Some(TransactionStatus::Running)) {
+			return;
+		}
+
+		match self
+			.services
+			.federation
+			.should_attempt(&server)
+			.await
+		{
+			| ShouldAttempt::No { earliest_retry } => arm_wake(wakes, server, earliest_retry),
+			| _ => {
+				let msg = Msg {
+					dest,
+					event: SendingEvent::Flush,
+					queue_id: Vec::new(),
+				};
+
+				self.handle_request(msg, futures, statuses).await;
+			},
 		}
 	}
 
@@ -1412,4 +1494,22 @@ impl Service {
 			| Err(error) => Err((Destination::Federation(server), error)),
 		}
 	}
+}
+
+fn arm_wake(wakes: &mut WakeQueue, server: OwnedServerName, earliest_retry: SystemTime) {
+	use tokio::time::Instant;
+
+	// Floor the delay at 1s so clock steps and past deadlines wake promptly,
+	// and jitter to spread a mass-failure wake storm.
+	let delay = earliest_retry
+		.duration_since(SystemTime::now())
+		.unwrap_or_default()
+		.max(Duration::from_secs(1))
+		.saturating_add(rand_secs(0..3));
+
+	let deadline = Instant::now()
+		.checked_add(delay)
+		.unwrap_or_else(Instant::now);
+
+	wakes.push(Reverse((deadline, server)));
 }
