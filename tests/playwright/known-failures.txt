@@ -23,6 +23,8 @@ crypto/crypto.spec.ts :: should allow verification when there is no existing DM
 crypto/decryption-failure-messages.spec.ts :: should display undecryptable non-joined historical messages with a different message
 crypto/decryption-failure-messages.spec.ts :: should handle device-relative historical messages
 crypto/device-verification.spec.ts :: No toast after verification, even if the secrets take a while to arrive
+crypto/device-verification.spec.ts :: Verify device with Recovery Key during login
+crypto/device-verification.spec.ts :: Verify device with Recovery Key from settings
 crypto/event-shields.spec.ts :: Should show a grey padlock for a key restored from backup
 crypto/event-shields.spec.ts :: should show correct shields on events sent by users with changed identity
 crypto/event-shields.spec.ts :: should show the correct shield on e2e events
