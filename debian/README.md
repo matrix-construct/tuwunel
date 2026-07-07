@@ -5,7 +5,7 @@ referenced for other `apt`-based distros such as Ubuntu.
 
 ### Installation
 
-It is recommended to see the [generic deployment guide](../deploying/generic.md)
+It is recommended to see the [generic deployment guide](../docs/deploying/generic.md)
 for further information if needed as usage of the Debian package is generally
 related.
 
@@ -22,7 +22,7 @@ options in `/etc/tuwunel/tuwunel.toml`.
 
 ### Running
 
-The package uses the [`tuwunel.service`](../configuration/examples.md#example-systemd-unit-file)
+The package uses the [`tuwunel.service`](../docs/configuration/examples.md#debian-systemd-unit-file)
 systemd unit file to start and stop Tuwunel. The binary is installed at `/usr/sbin/tuwunel`.
 
 This package assumes by default that Tuwunel will be placed behind a reverse
@@ -32,5 +32,5 @@ need to set up TLS certificates and renewal for it to work properly if you
 intend to federate.
 
 Consult various online documentation and guides on setting up a reverse proxy
-and TLS. Caddy is documented at the [generic deployment guide](../deploying/generic.md#setting-up-the-reverse-proxy)
+and TLS. Caddy is documented at the [generic deployment guide](../docs/deploying/generic.md#setting-up-the-reverse-proxy)
 as it's the easiest and most user friendly.

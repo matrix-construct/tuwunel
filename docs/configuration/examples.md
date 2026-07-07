@@ -30,3 +30,14 @@
 ```
 
 </details>
+
+## Red Hat systemd unit file
+
+<details>
+<summary>Red Hat systemd unit file</summary>
+
+```
+{{#include ../../rpm/tuwunel.service}}
+```
+
+</details>

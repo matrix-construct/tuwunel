@@ -56,7 +56,7 @@ against Tuwunel. The results are compared against a stored baseline via
 affect compliance, note it in your pull request and review the result diff
 uploaded as an artifact.
 
-See [Complement Testing](development/testing/complement.md) for details on how
+See [Complement Testing][complement-testing] for details on how
 the test harness works and how to run Complement locally against a debug or
 release build.
 
@@ -128,6 +128,7 @@ for avoiding any such complications.
 [issues]: https://github.com/matrix-construct/tuwunel/issues
 [tuwunel-chat]: https://matrix.to/#/#tuwunel:grin.hu
 [complement]: https://github.com/matrix-org/complement/
+[complement-testing]: https://github.com/matrix-construct/tuwunel/blob/main/docs/development/testing/complement.md
 [sytest]: https://github.com/matrix-org/sytest/
 [cargo-deb]: https://github.com/kornelski/cargo-deb
 [lychee]: https://github.com/lycheeverse/lychee
