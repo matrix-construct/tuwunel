@@ -243,10 +243,6 @@ async fn append_pdu_effects(
 					.await?;
 			}
 		},
-		| TimelineEventType::SpaceChild =>
-			if let Some(_state_key) = pdu.state_key() {
-				self.services.spaces.cache_evict(pdu.room_id());
-			},
 		| TimelineEventType::RoomMember => {
 			if let Some(state_key) = pdu.state_key() {
 				// if the state_key fails
@@ -309,6 +305,11 @@ async fn append_pdu_effects(
 					.index_pdu(shortroomid, &pdu_id, &topic);
 			},
 		| _ => {},
+	}
+
+	// The cached hierarchy summary projects room state; evict on any state change.
+	if pdu.state_key().is_some() {
+		self.services.spaces.cache_evict(pdu.room_id());
 	}
 
 	if let Ok(content) = pdu.get_content::<ExtractRelatesToEventId>()

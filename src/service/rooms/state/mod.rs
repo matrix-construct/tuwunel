@@ -142,11 +142,6 @@ pub async fn force_state(
 					)
 					.await
 			},
-			| TimelineEventType::SpaceChild => {
-				self.services.spaces.cache_evict(pdu.room_id());
-
-				Ok(())
-			},
 			| _ => Ok(()),
 		})
 		.boxed()
@@ -158,6 +153,9 @@ pub async fn force_state(
 		.await;
 
 	self.set_room_state(room_id, shortstatehash, state_lock);
+
+	// Forced state may change this room's cached hierarchy summary.
+	self.services.spaces.cache_evict(room_id);
 
 	Ok(())
 }
