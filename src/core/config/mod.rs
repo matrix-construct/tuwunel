@@ -3887,6 +3887,10 @@ pub struct IdentityProvider {
 	/// providers) or an available username is found (in the case of untrusted
 	/// providers).
 	///
+	/// When LDAP is enabled, a user found in the LDAP directory counts as an
+	/// existing user and is still provisioned on first login, since the
+	/// directory is the authoritative account store.
+	///
 	/// Setting this option to false is generally not useful unless there is
 	/// an explicit reason to do so.
 	///

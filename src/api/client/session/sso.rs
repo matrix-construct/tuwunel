@@ -445,11 +445,15 @@ pub(crate) async fn sso_callback_route(
 	};
 
 	if !services.users.exists(&user_id).await {
-		if !provider.registration {
-			return Err!(Request(Forbidden("Registration from this provider is disabled")));
-		}
+		let origin = match provider.registration {
+			| true => "sso",
+			// Present in LDAP is an existing user to provision, not a new registration.
+			| false if ldap_user_exists(&services, &user_id).await => "ldap",
+			| false =>
+				return Err!(Request(Forbidden("Registration from this provider is disabled"))),
+		};
 
-		register_user(&services, &provider, &session, &userinfo, &user_id).await?;
+		register_user(&services, &provider, &session, &userinfo, &user_id, origin).await?;
 	}
 
 	services.oauth.sessions.put(&session).await;
@@ -663,6 +667,17 @@ async fn handle_uiaa(
 	Ok(sso_callback::unstable::Response { location, cookie: Some(cookie) })
 }
 
+async fn ldap_user_exists(services: &Services, user_id: &UserId) -> bool {
+	cfg!(feature = "ldap")
+		&& services.config.ldap.enable
+		&& services
+			.users
+			.search_ldap(user_id)
+			.await
+			.log_err()
+			.is_ok_and(|dns| !dns.is_empty())
+}
+
 #[tracing::instrument(
 	name = "register",
 	level = INFO_SPAN_LEVEL,
@@ -675,6 +690,7 @@ async fn register_user(
 	session: &Session,
 	userinfo: &UserInfo,
 	user_id: &UserId,
+	origin: &str,
 ) -> Result {
 	debug_info!(%user_id, "Creating new user account...");
 
@@ -683,7 +699,7 @@ async fn register_user(
 		.full_register(Register {
 			user_id: Some(user_id),
 			password: Some(PASSWORD_SENTINEL),
-			origin: Some("sso"),
+			origin: Some(origin),
 			displayname: userinfo.name.as_deref(),
 			grant_first_user_admin: true,
 			..Default::default()
