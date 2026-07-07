@@ -1,5 +1,3 @@
-mod power_level_defaults;
-
 use std::collections::BTreeMap;
 
 use axum::extract::State;
@@ -48,7 +46,6 @@ use tuwunel_core::{
 };
 use tuwunel_service::{Services, appservice::RegistrationInfo, rooms::state::RoomMutexGuard};
 
-use self::power_level_defaults::merge_power_level_content_override;
 use crate::{Ruma, client::utils::invite_check};
 
 pub(crate) async fn create_room_route(
@@ -220,12 +217,14 @@ async fn apply_power_levels_pdu(
 	let users =
 		build_power_levels_users(services, body, preset, version_rules, sender_user).await;
 
+	let default_override = services
+		.config
+		.default_power_level_content_override
+		.as_ref();
+
 	let power_levels_content = default_power_levels_content(
 		version_rules,
-		services
-			.config
-			.default_power_level_content_override
-			.as_ref(),
+		default_override,
 		body.power_level_content_override.as_ref(),
 		preset,
 		users,
@@ -794,20 +793,36 @@ fn default_power_levels_content(
 	}
 
 	if let Some(default_power_level_content_override) = default_power_level_content_override {
-		let json = default_power_level_content_override
+		let overrides = default_power_level_content_override
 			.as_object()
-			.expect("default_power_level_content_override is validated at startup");
-		merge_power_level_content_override(&mut power_levels_content, json);
+			.expect("default_power_level_content_override is validated at startup")
+			.iter()
+			.map(|(key, value)| (key.clone(), value.clone()));
+
+		merge_power_level_content_override(&mut power_levels_content, overrides);
 	}
 
 	if let Some(power_level_content_override) = power_level_content_override {
-		let json: JsonObject = serde_json::from_str(power_level_content_override.json().get())
-			.map_err(|e| err!(Request(BadJson("Invalid power_level_content_override: {e:?}"))))?;
+		let overrides: JsonObject =
+			serde_json::from_str(power_level_content_override.json().get()).map_err(|e| {
+				err!(Request(BadJson("Invalid power_level_content_override: {e:?}")))
+			})?;
 
-		merge_power_level_content_override(&mut power_levels_content, &json);
+		merge_power_level_content_override(&mut power_levels_content, overrides);
 	}
 
 	Ok(power_levels_content)
+}
+
+/// Replace each top-level power-levels key wholesale; no deep merge.
+fn merge_power_level_content_override(
+	power_levels_content: &mut JsonValue,
+	overrides: impl IntoIterator<Item = (String, JsonValue)>,
+) {
+	power_levels_content
+		.as_object_mut()
+		.expect("power levels content must serialize to an object")
+		.extend(overrides);
 }
 
 /// if a room is being created with a room alias, run our checks
@@ -996,4 +1011,64 @@ fn take_initial(
 	initial_state
 		.extract_if(.., |event| &event.event_type == event_type && event.state_key == state_key)
 		.next()
+}
+
+#[cfg(test)]
+mod tests {
+	use tuwunel_core::matrix::room_version::rules;
+
+	use super::*;
+
+	#[test]
+	fn default_power_levels_content_applies_server_default_override() {
+		let version_rules = rules(&RoomVersionId::V11).expect("supported room version");
+
+		let content = default_power_levels_content(
+			&version_rules,
+			Some(&json!({ "users_default": 50 })),
+			None,
+			&RoomPreset::PrivateChat,
+			BTreeMap::new(),
+		)
+		.expect("power levels content");
+
+		assert_eq!(content["users_default"], json!(50));
+	}
+
+	#[test]
+	fn request_override_wins_over_server_default_override() {
+		let version_rules = rules(&RoomVersionId::V11).expect("supported room version");
+		let request_override =
+			Raw::from_json(to_raw_value(&json!({ "users_default": 75 })).expect("raw json"));
+
+		let content = default_power_levels_content(
+			&version_rules,
+			Some(&json!({ "users_default": 50 })),
+			Some(&request_override),
+			&RoomPreset::PrivateChat,
+			BTreeMap::new(),
+		)
+		.expect("power levels content");
+
+		assert_eq!(content["users_default"], json!(75));
+	}
+
+	#[test]
+	fn default_override_preserves_explicit_user_power_levels() {
+		let version_rules = rules(&RoomVersionId::V11).expect("supported room version");
+		let creator = OwnedUserId::try_from("@alice:example.com").expect("valid user id");
+		let users = BTreeMap::from([(creator.clone(), int!(100))]);
+
+		let content = default_power_levels_content(
+			&version_rules,
+			Some(&json!({ "users_default": 50 })),
+			None,
+			&RoomPreset::PrivateChat,
+			users,
+		)
+		.expect("power levels content");
+
+		assert_eq!(content["users_default"], json!(50));
+		assert_eq!(content["users"][creator.as_str()], json!(100));
+	}
 }
