@@ -107,15 +107,15 @@ on:
       playwright_runner:
         type: string
         default: 'het'
-      playwright_workers:
+      playwright_retries:
         type: string
         default: '3'
-      playwright_retries:
+      playwright_workers:
         type: string
         default: '1'
       playwright_shards:
         type: string
-        default: '6'
+        default: '1'
 
 jobs:
   doc:
