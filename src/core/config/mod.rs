@@ -1150,6 +1150,22 @@ pub struct Config {
 	#[serde(default = "default_default_room_version")]
 	pub default_room_version: RoomVersionId,
 
+	/// Default power-level overrides applied when this homeserver creates a new
+	/// room.
+	///
+	/// Uses the same top-level shape as the client `/createRoom`
+	/// `power_level_content_override` parameter and is merged before any
+	/// per-request override, so a client can still override it per room. Only
+	/// affects newly created rooms. Top-level keys replace wholesale rather
+	/// than deep-merging (matching the client parameter): setting `users` or
+	/// `events` replaces the entire computed default submap for that key.
+	///
+	/// reloadable: yes
+	/// default: unset
+	/// config-example: { users_default = 50 }
+	#[serde(default)]
+	pub default_power_level_content_override: Option<serde_json::Value>,
+
 	// external structure; separate section
 	#[serde(default)]
 	pub well_known: WellKnownConfig,

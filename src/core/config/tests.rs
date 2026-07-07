@@ -304,3 +304,32 @@ fn pgp_key_rejects_raw_material_and_bare_fingerprints() {
 	let err = check_support_pgp_key("openpgp4fpr:nothex").unwrap_err();
 	assert!(err.to_string().contains("hex fingerprint"), "{err}");
 }
+
+#[test]
+fn default_power_level_content_override_accepts_a_table() {
+	let config = config_from_toml(
+		r"[global]
+[global.default_power_level_content_override]
+users_default = 50
+",
+	)
+	.expect("a table value parses");
+
+	check(&config)
+		.expect("a table default_power_level_content_override should pass config check");
+}
+
+#[test]
+fn default_power_level_content_override_rejects_a_non_table() {
+	let config = config_from_toml(
+		r"[global]
+default_power_level_content_override = false
+",
+	)
+	.expect("a scalar value parses into config");
+
+	let err = check(&config)
+		.expect_err("a non-table default_power_level_content_override must be rejected")
+		.to_string();
+	assert!(err.contains("default_power_level_content_override"), "{err}");
+}
