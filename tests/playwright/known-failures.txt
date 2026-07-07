@@ -129,12 +129,13 @@ settings/preferences-user-settings-tab.spec.ts :: should be rendered properly
 settings/quick-settings-menu.spec.ts :: should be rendered properly
 settings/room-settings/room-security-tab.spec.ts :: should disallow changing from public to private if the user cannot alter history
 settings/security-user-settings-tab.spec.ts :: should be able to set an ID server
-sliding-sync/sliding-sync.spec.ts :: should show a favourite DM only in the favourite sublist
+sliding-sync/sliding-sync.spec.ts :: should show a favourite DM only in the favourite section
 sliding-sync/sliding-sync.spec.ts :: should show and be able to accept/reject/rescind invites
 sliding-sync/sliding-sync.spec.ts :: should show the right unread notifications
 spaces/threads-activity-centre/threadsActivityCentre.spec.ts :: should order by recency after notification level
 spaces/threads-activity-centre/threadsActivityCentre.spec.ts :: should show a highlight indicator when there is a mention in a thread
 spaces/threads-activity-centre/threadsActivityCentre.spec.ts :: should show a notification indicator when there is a message in a thread
+spaces/threads-activity-centre/threadsActivityCentre.spec.ts :: should show the rooms with unread threads
 spaces/threads-activity-centre/threadsActivityCentre.spec.ts :: should update with a thread is read
 spotlight/spotlight.spec.ts :: should be able to navigate results via keyboard
 spotlight/spotlight.spec.ts :: should find known public rooms
