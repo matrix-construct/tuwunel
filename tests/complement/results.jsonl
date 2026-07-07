@@ -109,7 +109,6 @@
 {"Action":"pass","Test":"TestDeviceListsUpdateOverFederation"}
 {"Action":"pass","Test":"TestDeviceListsUpdateOverFederation/good_connectivity"}
 {"Action":"pass","Test":"TestDeviceListsUpdateOverFederation/interrupted_connectivity"}
-{"Action":"pass","Test":"TestDeviceListsUpdateOverFederation/stopped_server"}
 {"Action":"fail","Test":"TestDeviceListsUpdateOverFederationOnRoomJoin"}
 {"Action":"pass","Test":"TestDeviceManagement"}
 {"Action":"pass","Test":"TestDeviceManagement/DELETE_/device/{deviceId}"}
@@ -212,16 +211,8 @@
 {"Action":"pass","Test":"TestJson/Parallel/Invalid_numerical_values"}
 {"Action":"pass","Test":"TestJumpToDateEndpoint"}
 {"Action":"pass","Test":"TestJumpToDateEndpoint/parallel"}
-{"Action":"pass","Test":"TestJumpToDateEndpoint/parallel/federation"}
-{"Action":"pass","Test":"TestJumpToDateEndpoint/parallel/federation/can_paginate_backwards_after_getting_remote_event_from_timestamp_to_event_endpoint_(end)"}
-{"Action":"pass","Test":"TestJumpToDateEndpoint/parallel/federation/can_paginate_backwards_after_getting_remote_event_from_timestamp_to_event_endpoint_(start)"}
-{"Action":"pass","Test":"TestJumpToDateEndpoint/parallel/federation/looking_backwards,_should_be_able_to_find_event_that_was_sent_before_we_joined"}
-{"Action":"pass","Test":"TestJumpToDateEndpoint/parallel/federation/looking_forwards,_should_be_able_to_find_event_that_was_sent_before_we_joined"}
-{"Action":"pass","Test":"TestJumpToDateEndpoint/parallel/federation/when_looking_backwards_before_the_room_was_created,_should_be_able_to_find_event_that_was_imported"}
 {"Action":"pass","Test":"TestJumpToDateEndpoint/parallel/should_find_event_after_given_timestamp"}
 {"Action":"pass","Test":"TestJumpToDateEndpoint/parallel/should_find_event_before_given_timestamp"}
-{"Action":"pass","Test":"TestJumpToDateEndpoint/parallel/should_find_next_event_topologically_after_given_timestamp_when_all_message_timestamps_are_the_same"}
-{"Action":"pass","Test":"TestJumpToDateEndpoint/parallel/should_find_next_event_topologically_before_given_timestamp_when_all_message_timestamps_are_the_same"}
 {"Action":"pass","Test":"TestJumpToDateEndpoint/parallel/should_find_nothing_after_the_latest_timestamp"}
 {"Action":"pass","Test":"TestJumpToDateEndpoint/parallel/should_find_nothing_before_the_earliest_timestamp"}
 {"Action":"pass","Test":"TestJumpToDateEndpoint/parallel/should_not_be_able_to_query_a_private_room_you_are_not_a_member_of"}

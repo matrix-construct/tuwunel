@@ -10,8 +10,8 @@ Tuwunel runs the [Complement](https://github.com/matrix-org/complement) Matrix h
   - ❌ `fail`: 19
   - ⬛ `skip`: 2
 
-- Subtests: 596. Passing: **78.2%**
-  - ✅ `pass`: 466
+- Subtests: 587. Passing: **77.9%**
+  - ✅ `pass`: 457
   - ❌ `fail`: 117
   - ⬛ `skip`: 13
 
@@ -48,7 +48,7 @@ Tuwunel runs the [Complement](https://github.com/matrix-org/complement) Matrix h
 | `TestDeletingDeviceRemovesDeviceLocalNotificationSettings` | ✅ | 1/0/0 |
 | `TestDemotingUsersViaUsersDefault` | ✅ | – |
 | `TestDeviceListUpdates` | 🟨 | 8/2/0 |
-| `TestDeviceListsUpdateOverFederation` | ✅ | 3/0/0 |
+| `TestDeviceListsUpdateOverFederation` | ✅ | 2/0/0 |
 | `TestDeviceListsUpdateOverFederationOnRoomJoin` | ❌ | – |
 | `TestDeviceManagement` | ✅ | 7/0/0 |
 | `TestDisplayNameUpdate` | ✅ | – |
@@ -92,7 +92,7 @@ Tuwunel runs the [Complement](https://github.com/matrix-org/complement) Matrix h
 | `TestJoinFederatedRoomWithUnverifiableEvents` | ✅ | 4/0/0 |
 | `TestJoinViaRoomIDAndServerName` | ✅ | – |
 | `TestJson` | ✅ | 3/0/0 |
-| `TestJumpToDateEndpoint` | ✅ | 15/0/0 |
+| `TestJumpToDateEndpoint` | ✅ | 7/0/0 |
 | `TestKeyChangesLocal` | ✅ | 1/0/0 |
 | `TestKeyClaimOrdering` | ✅ | – |
 | `TestKeysQueryWithDeviceIDAsObjectFails` | ✅ | – |

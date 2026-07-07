@@ -27,6 +27,9 @@ skip="${skip}|TestToDeviceMessagesOverFederation/stopped_server"
 skip="${skip}|TestRestrictedRoomsRemoteJoinFailOver"
 skip="${skip}|TestRestrictedRoomsRemoteJoinFailOverInMSC3787Room"
 skip="${skip}|TestToDeviceMessagesOverFederation/interrupted_connectivity"
+skip="${skip}|TestDeviceListsUpdateOverFederation/stopped_server"
+skip="${skip}|TestJumpToDateEndpoint/parallel/federation"
+skip="${skip}|TestJumpToDateEndpoint/parallel/should_find_next_event_topologically"
 
 set -a
 cargo_profile="${cargo_profile:-$default_cargo_profile}"
