@@ -8,7 +8,7 @@ ARG lychee_cache_age="7d"
 ARG lychee_mode="color"
 # .lycheecache is hardcoded as path to reg file in the cwd so we execute lychee
 # in cache directory itself. all paths here should be absolute paths
-ARG lychee_args="/usr/src/tuwunel/docs /usr/src/tuwunel/*.md"
+ARG lychee_args="/usr/src/tuwunel/docs /usr/src/tuwunel/*.md /usr/src/tuwunel/*/README.md"
 ARG sched_policy="--rr"
 ARG sched_prio=1
 
@@ -28,7 +28,6 @@ RUN \
             --cache \
             --max-cache-age "${lychee_cache_age}" \
             --mode "${lychee_mode}" \
-            --exclude-path '/usr/src/tuwunel/CONTRIBUTING\.md' \
             --exclude-path '/usr/src/tuwunel/development\.md' \
             ${lychee_args}
 EOF
