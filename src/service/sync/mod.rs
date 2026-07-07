@@ -297,19 +297,9 @@ fn update_cache_list(request: &request::List, cached: &mut request::List) {
 	cached.ranges.clone_from(&request.ranges);
 	list_or_sticky(&request.room_details.required_state, &mut cached.room_details.required_state);
 
-	match (&request.filters, &mut cached.filters) {
-		| (None, None) => {},
-		| (None, Some(_cached)) => {},
-		| (Some(request), None) => cached.filters = Some(request.clone()),
-		| (Some(request), Some(cached)) => {
-			some_or_sticky(request.is_dm.as_ref(), &mut cached.is_dm);
-			some_or_sticky(request.is_encrypted.as_ref(), &mut cached.is_encrypted);
-			some_or_sticky(request.is_invite.as_ref(), &mut cached.is_invite);
-			list_or_sticky(&request.room_types, &mut cached.room_types);
-			list_or_sticky(&request.not_room_types, &mut cached.not_room_types);
-			list_or_sticky(&request.tags, &mut cached.not_tags);
-			list_or_sticky(&request.spaces, &mut cached.spaces);
-		},
+	// Clients re-send filters each request; replace so a dropped one clears.
+	if request.filters.is_some() {
+		cached.filters.clone_from(&request.filters);
 	}
 }
 

@@ -1,6 +1,10 @@
 use ruma::{
 	UInt,
-	api::client::sync::sync_events::v5::{ListId, Ranges, Request, request},
+	api::client::sync::sync_events::v5::{
+		ListId, Ranges, Request,
+		request::{List, ListConfig, ListFilters},
+	},
+	directory::RoomTypeFilter,
 	events::StateEventType,
 };
 
@@ -58,7 +62,42 @@ fn update_cache_preserves_sticky_list_metadata() {
 	assert_cached_ranges(&conn, &[(20, 39)]);
 }
 
-fn request_with_list(list: request::List) -> Request {
+#[test]
+fn update_cache_clears_dropped_list_filters() {
+	let mut conn = Connection::default();
+	let dropped = ListFilters {
+		not_room_types: vec![RoomTypeFilter::Space],
+		..Default::default()
+	};
+
+	conn.update_cache(&request_with_list(list_with_filters(dropped)));
+	conn.update_cache(&request_with_list(list_with_filters(ListFilters::default())));
+
+	let filters = cached_filters(&conn);
+
+	assert!(
+		filters.not_room_types.is_empty(),
+		"a filter the client dropped must clear, not persist stickily"
+	);
+}
+
+#[test]
+fn update_cache_keeps_filters_when_omitted() {
+	let mut conn = Connection::default();
+	let kept = ListFilters {
+		not_room_types: vec![RoomTypeFilter::Space],
+		..Default::default()
+	};
+
+	conn.update_cache(&request_with_list(list_with_filters(kept)));
+	conn.update_cache(&request_with_list(list_with_ranges(&[(0, 19)])));
+
+	let filters = cached_filters(&conn);
+
+	assert_eq!(filters.not_room_types, vec![RoomTypeFilter::Space]);
+}
+
+fn request_with_list(list: List) -> Request {
 	let mut request = Request::new();
 
 	request.lists.insert(list_id(), list);
@@ -66,19 +105,35 @@ fn request_with_list(list: request::List) -> Request {
 	request
 }
 
-fn list_with_ranges(ranges: &[(u64, u64)]) -> request::List {
+fn list_with_ranges(ranges: &[(u64, u64)]) -> List {
 	list_with_required_state(ranges, Vec::new())
 }
 
 fn list_with_required_state(
 	ranges: &[(u64, u64)],
 	required_state: Vec<(StateEventType, ruma::events::StateKey)>,
-) -> request::List {
-	request::List {
+) -> List {
+	List {
 		ranges: ranges_from_u64(ranges),
-		room_details: request::ListConfig { required_state, ..Default::default() },
+		room_details: ListConfig { required_state, ..Default::default() },
 		..Default::default()
 	}
+}
+
+fn list_with_filters(filters: ListFilters) -> List {
+	List {
+		filters: Some(filters),
+		..Default::default()
+	}
+}
+
+fn cached_filters(conn: &Connection) -> ListFilters {
+	conn.lists
+		.get(&list_id())
+		.expect("list must be cached")
+		.filters
+		.clone()
+		.expect("filters must be cached")
 }
 
 fn assert_cached_ranges(conn: &Connection, expected: &[(u64, u64)]) {
