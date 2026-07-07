@@ -43,7 +43,7 @@ ENTRYPOINT tuwunel -Oserver_name=\""$SERVER_NAME\""
 # Playwright runtime image with element-web pre-built. The official Microsoft
 # Playwright image already ships pinned Chromium / Firefox / WebKit and their
 # system deps. Pin its version via ARG.
-FROM mcr.microsoft.com/playwright:v1.60.0-noble AS playwright-base
+FROM mcr.microsoft.com/playwright:v1.61.0-noble AS playwright-base
 ARG element_web_ref="develop"
 
 # corepack's bundled signing keys in this image are stale relative to current
