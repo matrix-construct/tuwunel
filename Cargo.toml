@@ -414,7 +414,7 @@ features = [
 
 [workspace.dependencies.synapse-admin-api]
 git = "https://github.com/matrix-construct/synapse-admin-api"
-rev = "3191d18865d63c7f052b1fd7d1c17da87fde0253"
+rev = "f5f5e13e9817cf6d9077860142d58066d1dd9b4e"
 features = ["server"]
 
 [workspace.dependencies.rustls]
