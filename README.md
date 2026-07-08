@@ -1,5 +1,47 @@
 # Tuwunel<sup>💕</sup>
 
+> This is the MindRoom fork of
+> [`matrix-construct/tuwunel`](https://github.com/matrix-construct/tuwunel).
+> It tracks upstream and carries a focused set of fork-specific changes for
+> high-frequency edit streaming workloads.
+
+## MindRoom Fork Additions
+
+- Compact edit timeline mode in `/sync` to collapse superseded `m.replace`
+  events in response timelines.
+- Background purge service for superseded `m.replace` events with configurable
+  age/interval/batch/scan/dry-run controls.
+- Native Sign in with Apple login endpoint that verifies iOS identity tokens
+  against Apple's JWKS, issuer, audience, expiry, and nonce.
+- Hardened UIAA flow advertising for SSO-origin (passwordless) accounts, on
+  top of upstream's SSO UIAA fallback (MSC2454).
+- Reactivation of self-deactivated SSO accounts when the same identity returns.
+- Tagged-release binary publishing workflow for Linux `x86_64` and `aarch64`.
+- Release container publishing workflow for MindRoom release tags.
+- Automated fork release tagging on `main` in
+  `v<base_version>-mindroom.<n>` format.
+- Fork runbook and commit-by-commit changelog in
+  [`FORK_CHANGES.md`](./FORK_CHANGES.md).
+
+## MindRoom Release Tags
+
+- Every push to `main` computes a release tag in the format
+  `v<base_version>-mindroom.<n>`.
+- The workflow creates (or reuses) the corresponding GitHub Release for that tag.
+- `base_version` is auto-detected from `BASE_VERSION`, then `Cargo.toml`
+  (`workspace.package.version`), then standard semver tags.
+- Reused tags are detected when `HEAD` is already tagged for that base version.
+- Tagged pushes publish Linux release tarballs for `x86_64` and `aarch64` via
+  [`mindroom-release.yml`](./.github/workflows/mindroom-release.yml).
+- Tagging is performed by
+  [`auto-mindroom-release.yml`](./.github/workflows/auto-mindroom-release.yml)
+  using [`scripts/fork_release_tag.py`](./scripts/fork_release_tag.py).
+- Local preview of the next tag:
+
+```bash
+python3 scripts/fork_release_tag.py
+```
+
 ![GitHub License](https://img.shields.io/github/license/matrix-construct/tuwunel?style=flat%2Dsquare&color=%238A2BE2)
 ![GitHub Created At](https://img.shields.io/github/created-at/matrix-construct/tuwunel?style=flat%2Dsquare&color=%238A2BE2)
 ![GitHub Commit Activity](https://img.shields.io/github/commit-activity/m/matrix-construct/tuwunel?style=flat%2Dsquare&link=https%3A%2F%2Fgithub.com%2Fmatrix-construct%2Ftuwunel%2Fpulse%2Fmonthly&color=%238A2BE2)
