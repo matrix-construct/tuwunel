@@ -35,6 +35,21 @@ use tuwunel_service::{
 
 use crate::Ruma;
 
+/// Inputs for [`get_client_hierarchy`], shared by the client-server
+/// `/hierarchy` route and the admin room-hierarchy endpoint.
+pub(crate) struct HierarchyArgs<'a> {
+	pub sender_user: &'a UserId,
+	pub room_id: &'a RoomId,
+	pub limit: usize,
+	pub max_depth: usize,
+	pub suggested_only: bool,
+	pub skip_room_ids: &'a [ShortRoomId],
+
+	/// Traverse from the server's perspective without federating and skip the
+	/// per-user visibility gate, for admin callers.
+	pub bypass_visibility: bool,
+}
+
 /// # `GET /_matrix/client/v1/rooms/{room_id}/hierarchy`
 ///
 /// Paginates over the space tree in a depth-first manner to locate child rooms
@@ -67,43 +82,59 @@ pub(crate) async fn get_hierarchy_route(
 		)));
 	}
 
-	get_client_hierarchy(
-		&services,
-		body.sender_user(),
-		&body.room_id,
-		limit.try_into().unwrap_or(10),
-		max_depth.try_into().unwrap_or(usize::MAX),
-		body.suggested_only,
-		key.as_ref()
+	get_client_hierarchy(&services, HierarchyArgs {
+		sender_user: body.sender_user(),
+		room_id: &body.room_id,
+		limit: limit.try_into().unwrap_or(10),
+		max_depth: max_depth.try_into().unwrap_or(usize::MAX),
+		suggested_only: body.suggested_only,
+		skip_room_ids: key
+			.as_ref()
 			.map(|t| t.short_room_ids.as_slice())
 			.unwrap_or_default(),
-	)
+		bypass_visibility: false,
+	})
 	.await
 }
 
-async fn get_client_hierarchy(
+pub(crate) async fn get_client_hierarchy(
 	services: &Services,
-	sender_user: &UserId,
-	room_id: &RoomId,
-	limit: usize,
-	max_depth: usize,
-	suggested_only: bool,
-	skip_room_ids: &[ShortRoomId],
+	args: HierarchyArgs<'_>,
 ) -> Result<get_hierarchy::v1::Response> {
 	type Via = SmallVec<[OwnedServerName; 1]>;
 	type QueueItem = (OwnedRoomId, Via, usize);
 
+	let HierarchyArgs {
+		sender_user,
+		room_id,
+		limit,
+		max_depth,
+		suggested_only,
+		skip_room_ids,
+		bypass_visibility,
+	} = args;
+
+	// Admin callers traverse from the server's perspective and never federate,
+	// so remote children surface as holes and the visibility gate is skipped.
+	let sender = match bypass_visibility {
+		| true => Identifier::ServerName(services.globals.server_name()),
+		| false => Identifier::UserId(sender_user),
+	};
+
 	// Fetch the root room up front so we can return precise errors for
 	// inaccessibility rather than silently dropping it.
-	let root_via: Via = room_id
-		.server_name()
-		.map(ToOwned::to_owned)
-		.into_iter()
-		.collect();
+	let root_via: Via = match bypass_visibility {
+		| true => Via::new(),
+		| false => room_id
+			.server_name()
+			.map(ToOwned::to_owned)
+			.into_iter()
+			.collect(),
+	};
 
 	let root_summary = match services
 		.spaces
-		.get_summary_and_children(room_id, &Identifier::UserId(sender_user), &root_via)
+		.get_summary_and_children(room_id, &sender, &root_via)
 		.await
 	{
 		| Err(e) => {
@@ -123,7 +154,14 @@ async fn get_client_hierarchy(
 		.then(|| {
 			get_parent_children_via(&root_summary, suggested_only)
 				.filter(|(room_id_, _)| room_id.ne(room_id_))
-				.map(|(room_id, via)| (room_id, via.collect(), 1_usize))
+				.map(|(room_id, via)| {
+					let via = match bypass_visibility {
+						| true => Via::new(),
+						| false => via.collect(),
+					};
+
+					(room_id, via, 1_usize)
+				})
 		})
 		.into_iter()
 		.flatten()
@@ -149,7 +187,7 @@ async fn get_client_hierarchy(
 
 			match services
 				.spaces
-				.get_summary_and_children(&current_room, &Identifier::UserId(sender_user), &via)
+				.get_summary_and_children(&current_room, &sender, &via)
 				.await
 			{
 				| Err(e) if !e.is_not_found() => {
@@ -170,7 +208,12 @@ async fn get_client_hierarchy(
 						get_parent_children_via(&s, suggested_only)
 							.filter(|(child, _)| !visited.contains(child))
 							.for_each(|(child, via)| {
-								queue.push_back((child, via.collect(), depth.saturating_add(1)));
+								let via = match bypass_visibility {
+									| true => Via::new(),
+									| false => via.collect(),
+								};
+
+								queue.push_back((child, via, depth.saturating_add(1)));
 							});
 					}
 

@@ -181,6 +181,11 @@ fn register_synapse_admin_rooms_routes(router: Router<State>) -> Router<State> {
 		.ruma_route(&client::rooms::admin_purge_history_route)
 		.ruma_route(&client::rooms::admin_purge_history_by_event_route)
 		.ruma_route(&client::rooms::admin_purge_history_status_route)
+		.ruma_route(&client::rooms::admin_room_state_route)
+		.ruma_route(&client::rooms::admin_room_messages_route)
+		.ruma_route(&client::rooms::admin_room_context_route)
+		.ruma_route(&client::rooms::admin_room_timestamp_to_event_route)
+		.ruma_route(&client::rooms::admin_room_hierarchy_route)
 }
 
 fn register_synapse_admin_media_routes(router: Router<State>) -> Router<State> {

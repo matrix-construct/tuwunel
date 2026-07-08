@@ -1,7 +1,7 @@
 use axum::extract::State;
 use futures::{FutureExt, StreamExt, TryFutureExt, future::Either, pin_mut};
 use ruma::{
-	RoomId, UserId,
+	DeviceId, RoomId, UInt, UserId,
 	api::{
 		Direction,
 		client::{filter::RoomEventFilter, message::get_message_events},
@@ -37,6 +37,23 @@ use tuwunel_service::{
 };
 
 use crate::Ruma;
+
+/// Shared inputs for [`get_messages`], the pagination core behind both the
+/// client-server `/messages` route and the admin room-messages endpoint.
+pub(crate) struct MessagesArgs<'a> {
+	pub room_id: &'a RoomId,
+	pub sender_user: &'a UserId,
+	pub sender_device: Option<&'a DeviceId>,
+	pub from: Option<&'a str>,
+	pub to: Option<&'a str>,
+	pub dir: Direction,
+	pub limit: Option<UInt>,
+	pub filter: &'a RoomEventFilter,
+
+	/// Skip the room-visibility gate and the per-event visibility and ignore
+	/// filters, for admin callers that see all history.
+	pub bypass_visibility: bool,
+}
 
 /// list of safe and common non-state events to ignore if the user is ignored.
 /// MUST be sorted by `TimelineEventType::event_type_str()` for `binary_search`.
@@ -76,42 +93,68 @@ pub(crate) async fn get_message_events_route(
 	State(services): State<crate::State>,
 	body: Ruma<get_message_events::v3::Request>,
 ) -> Result<get_message_events::v3::Response> {
-	let sender_user = body.sender_user();
-	let sender_device = body.sender_device.as_deref();
-	let room_id = &body.room_id;
-	let filter = &body.filter;
+	get_messages(&services, MessagesArgs {
+		room_id: &body.room_id,
+		sender_user: body.sender_user(),
+		sender_device: body.sender_device.as_deref(),
+		from: body.from.as_deref(),
+		to: body.to.as_deref(),
+		dir: body.dir,
+		limit: Some(body.limit),
+		filter: &body.filter,
+		bypass_visibility: false,
+	})
+	.await
+}
+
+/// Paginates a room's timeline, applying the request filter and (unless
+/// `bypass_visibility`) the per-user visibility and ignore filters. Powers the
+/// client-server `/messages` route and its admin bypass twin.
+pub(crate) async fn get_messages(
+	services: &Services,
+	args: MessagesArgs<'_>,
+) -> Result<get_message_events::v3::Response> {
+	let MessagesArgs {
+		room_id,
+		sender_user,
+		sender_device,
+		from,
+		to,
+		dir,
+		limit,
+		filter,
+		bypass_visibility,
+	} = args;
 
 	if !services.metadata.exists(room_id).await {
 		return Err!(Request(Forbidden("Room does not exist to this server")));
 	}
 
-	if !services
-		.state_accessor
-		.user_can_see_room(sender_user, room_id)
-		.await
+	if !bypass_visibility
+		&& !services
+			.state_accessor
+			.user_can_see_room(sender_user, room_id)
+			.await
 	{
 		return Err!(Request(Forbidden("You don't have permission to view this room.")));
 	}
 
-	let from: PduCount = body
-		.from
-		.as_deref()
+	let from: PduCount = from
 		.map(str::parse)
 		.transpose()?
-		.unwrap_or_else(|| match body.dir {
+		.unwrap_or_else(|| match dir {
 			| Direction::Forward => PduCount::min(),
 			| Direction::Backward => PduCount::max(),
 		});
 
-	let to: Option<PduCount> = body.to.as_deref().map(str::parse).flat_ok();
+	let to: Option<PduCount> = to.map(str::parse).flat_ok();
 
-	let limit: usize = body
-		.limit
-		.try_into()
+	let limit: usize = limit
+		.and_then(|limit| limit.try_into().ok())
 		.unwrap_or(LIMIT_DEFAULT)
 		.min(LIMIT_MAX);
 
-	if matches!(body.dir, Direction::Backward) {
+	if matches!(dir, Direction::Backward) {
 		services
 			.timeline
 			.backfill_if_required(room_id, from)
@@ -120,7 +163,7 @@ pub(crate) async fn get_message_events_route(
 			.ok();
 	}
 
-	let it = match body.dir {
+	let it = match dir {
 		| Direction::Forward => Either::Left(
 			services
 				.timeline
@@ -145,10 +188,10 @@ pub(crate) async fn get_message_events_route(
 	let events: Vec<_> = it
 		.ready_take_while(|(count, _)| Some(*count) != to)
 		.ready_filter_map(|item| event_filter(item, filter))
-		.wide_filter_map(|item| related_by_filter(&services, shortroomid, filter, item))
-		.wide_filter_map(|item| event_filters(&services, sender_user, item))
+		.wide_filter_map(|item| related_by_filter(services, shortroomid, filter, item))
+		.wide_filter_map(|item| event_filters(services, sender_user, item, bypass_visibility))
 		.take(limit)
-		.wide_then(|item| add_membership_unsigned(&services, item, sender_user, encrypted))
+		.wide_then(|item| add_membership_unsigned(services, item, sender_user, encrypted))
 		.wide_then(async |(count, pdu)| {
 			let pdu = services
 				.pdu_metadata
@@ -172,7 +215,7 @@ pub(crate) async fn get_message_events_route(
 	let witness = filter
 		.lazy_load_options
 		.is_enabled()
-		.then_async(|| lazy_loading_witness(&services, &lazy_loading_context, events.iter()));
+		.then_async(|| lazy_loading_witness(services, &lazy_loading_context, events.iter()));
 
 	let state = witness
 		.map(Option::into_iter)
@@ -180,7 +223,7 @@ pub(crate) async fn get_message_events_route(
 		.map(IterStream::stream)
 		.into_stream()
 		.flatten()
-		.broad_filter_map(async |user_id| get_member_event(&services, room_id, &user_id).await)
+		.broad_filter_map(async |user_id| get_member_event(services, room_id, &user_id).await)
 		.collect()
 		.await;
 
@@ -261,11 +304,16 @@ async fn get_member_event(
 		.ok()
 }
 
-async fn event_filters(
+pub(crate) async fn event_filters(
 	services: &Services,
 	user_id: &UserId,
 	item: PdusIterItem,
+	bypass_visibility: bool,
 ) -> Option<PdusIterItem> {
+	if bypass_visibility {
+		return Some(item);
+	}
+
 	let item = ignored_filter(services, item, user_id).await?;
 	let item = visibility_filter(services, item, user_id).await?;
 

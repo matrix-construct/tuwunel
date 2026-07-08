@@ -4,7 +4,7 @@ use futures::{
 	future::{OptionFuture, join, join3, try_join3},
 };
 use ruma::{
-	EventId, OwnedEventId, RoomId, UserId,
+	DeviceId, EventId, OwnedEventId, RoomId, UInt, UserId,
 	api::client::{context::get_context, filter::RoomEventFilter},
 	events::{AnyStateEvent, StateEventType},
 	serde::Raw,
@@ -34,8 +34,8 @@ use crate::{
 	client::{
 		is_ignored_pdu,
 		message::{
-			add_membership_unsigned, event_filter, ignored_filter, lazy_loading_witness,
-			related_by_filter, visibility_filter, with_membership,
+			add_membership_unsigned, event_filter, event_filters, ignored_filter,
+			lazy_loading_witness, related_by_filter, with_membership,
 		},
 	},
 };
@@ -53,24 +53,62 @@ pub(crate) async fn get_context_route(
 	State(services): State<crate::State>,
 	body: Ruma<get_context::v3::Request>,
 ) -> Result<get_context::v3::Response> {
-	let sender_user = body.sender_user();
-	let sender_device = body.sender_device.as_deref();
-	let room_id = &body.room_id;
-	let event_id = &body.event_id;
-	let filter = &body.filter;
+	event_context(&services, ContextArgs {
+		room_id: &body.room_id,
+		event_id: &body.event_id,
+		sender_user: body.sender_user(),
+		sender_device: body.sender_device.as_deref(),
+		filter: &body.filter,
+		limit: Some(body.limit),
+		bypass_visibility: false,
+	})
+	.await
+}
+
+/// Shared inputs for [`event_context`], the core behind both the client-server
+/// `/context` route and the admin room-context endpoint.
+pub(crate) struct ContextArgs<'a> {
+	pub room_id: &'a RoomId,
+	pub event_id: &'a EventId,
+	pub sender_user: &'a UserId,
+	pub sender_device: Option<&'a DeviceId>,
+	pub filter: &'a RoomEventFilter,
+	pub limit: Option<UInt>,
+
+	/// Skip the base-event visibility and ignore checks and the surrounding
+	/// halves' visibility and ignore filters, for admin callers.
+	pub bypass_visibility: bool,
+}
+
+/// Loads the timeline window around an event with its state and aggregations,
+/// applying (unless `bypass_visibility`) the per-user visibility and ignore
+/// checks. Powers the client-server `/context` route and its admin bypass twin.
+pub(crate) async fn event_context(
+	services: &Services,
+	args: ContextArgs<'_>,
+) -> Result<get_context::v3::Response> {
+	let ContextArgs {
+		room_id,
+		event_id,
+		sender_user,
+		sender_device,
+		filter,
+		limit,
+		bypass_visibility,
+	} = args;
 
 	if !services.metadata.exists(room_id).await {
 		return Err!(Request(Forbidden("Room does not exist to this server")));
 	}
 
-	let limit: usize = body
-		.limit
-		.try_into()
+	let limit: usize = limit
+		.and_then(|limit| limit.try_into().ok())
 		.unwrap_or(LIMIT_DEFAULT)
 		.min(LIMIT_MAX);
 
 	let (base_id, base_pdu) =
-		resolve_base_event(&services, room_id, event_id, sender_user).await?;
+		resolve_base_event(services, room_id, event_id, sender_user, bypass_visibility).await?;
+
 	let base_count = base_id.pdu_count();
 
 	let encrypted = services
@@ -81,31 +119,37 @@ pub(crate) async fn get_context_route(
 	let shortroomid = services.short.get_shortroomid(room_id).await?;
 
 	let base_event = async {
-		let item = ignored_filter(&services, (base_count, base_pdu), sender_user).await?;
-		Some(add_membership_unsigned(&services, item, sender_user, encrypted).await)
+		let item = if bypass_visibility {
+			(base_count, base_pdu)
+		} else {
+			ignored_filter(services, (base_count, base_pdu), sender_user).await?
+		};
+
+		Some(add_membership_unsigned(services, item, sender_user, encrypted).await)
 	};
 
-	let events_before = collect_timeline_half(
-		&services,
-		services
-			.timeline
-			.pdus_rev(Some(sender_user), room_id, Some(base_count)),
+	let half = TimelineHalf {
+		services,
 		filter,
 		shortroomid,
 		sender_user,
 		encrypted,
+		bypass_visibility,
+	};
+
+	let events_before = collect_timeline_half(
+		half,
+		services
+			.timeline
+			.pdus_rev(Some(sender_user), room_id, Some(base_count)),
 		limit / 2,
 	);
 
 	let events_after = collect_timeline_half(
-		&services,
+		half,
 		services
 			.timeline
 			.pdus(Some(sender_user), room_id, Some(base_count)),
-		filter,
-		shortroomid,
-		sender_user,
-		encrypted,
 		limit.div_ceil(2),
 	);
 
@@ -132,19 +176,19 @@ pub(crate) async fn get_context_route(
 				.chain(events_before.iter())
 				.chain(events_after.iter());
 
-			lazy_loading_witness(&services, &lazy_loading_context, witnessed)
+			lazy_loading_witness(services, &lazy_loading_context, witnessed)
 		});
 
 	let state_at = events_after
 		.last()
 		.map(ref_at!(1))
-		.map_or_else(|| body.event_id.as_ref(), |pdu| pdu.event_id.as_ref());
+		.map_or_else(|| event_id, |pdu| pdu.event_id.as_ref());
 
 	let (lazy_loading_witnessed, state_ids) =
-		join(lazy_loading_witnessed, load_state_ids(&services, room_id, state_at)).await;
+		join(lazy_loading_witnessed, load_state_ids(services, room_id, state_at)).await;
 
 	let state = build_state_response(
-		&services,
+		services,
 		state_ids?,
 		lazy_loading_witnessed.unwrap_or_default(),
 		filter,
@@ -201,6 +245,7 @@ async fn resolve_base_event(
 	room_id: &RoomId,
 	event_id: &EventId,
 	sender_user: &UserId,
+	bypass_visibility: bool,
 ) -> Result<(RawPduId, PduEvent)> {
 	let lookup = || {
 		let base_id = services
@@ -244,7 +289,7 @@ async fn resolve_base_event(
 		return Err!(Request(NotFound("Base event not found.")));
 	}
 
-	if !visible {
+	if !bypass_visibility && !visible {
 		debug_warn!(
 			req_evt = ?event_id, ?base_id, ?room_id,
 			"Event requested by {sender_user} but is not allowed to see it."
@@ -253,7 +298,7 @@ async fn resolve_base_event(
 		return Err!(Request(NotFound("Event not found.")));
 	}
 
-	if is_ignored_pdu(services, &base_pdu, sender_user).await {
+	if !bypass_visibility && is_ignored_pdu(services, &base_pdu, sender_user).await {
 		return Err!(HttpJson(NOT_FOUND, {
 			"errcode": "M_SENDER_IGNORED",
 			"error": "You have ignored the user that sent this event",
@@ -264,23 +309,39 @@ async fn resolve_base_event(
 	Ok((base_id, base_pdu))
 }
 
-async fn collect_timeline_half<'a, S>(
+/// Shared inputs for the two [`collect_timeline_half`] calls assembling the
+/// before and after windows; only the stream and take count differ per call.
+#[derive(Clone, Copy)]
+struct TimelineHalf<'a> {
 	services: &'a Services,
-	pdus: S,
 	filter: &'a RoomEventFilter,
 	shortroomid: ShortRoomId,
 	sender_user: &'a UserId,
 	encrypted: bool,
+	bypass_visibility: bool,
+}
+
+async fn collect_timeline_half<'a, S>(
+	half: TimelineHalf<'a>,
+	pdus: S,
 	take: usize,
 ) -> Vec<PdusIterItem>
 where
 	S: Stream<Item = Result<PdusIterItem>> + Send + 'a,
 {
+	let TimelineHalf {
+		services,
+		filter,
+		shortroomid,
+		sender_user,
+		encrypted,
+		bypass_visibility,
+	} = half;
+
 	pdus.ignore_err()
 		.ready_filter_map(|item| event_filter(item, filter))
 		.wide_filter_map(|item| related_by_filter(services, shortroomid, filter, item))
-		.wide_filter_map(|item| ignored_filter(services, item, sender_user))
-		.wide_filter_map(|item| visibility_filter(services, item, sender_user))
+		.wide_filter_map(|item| event_filters(services, sender_user, item, bypass_visibility))
 		.take(take)
 		.wide_then(|item| add_membership_unsigned(services, item, sender_user, encrypted))
 		.wide_then(async |(count, pdu)| {
