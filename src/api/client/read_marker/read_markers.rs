@@ -74,7 +74,13 @@ pub(crate) async fn set_read_marker_route(
 
 		services
 			.read_receipt
-			.private_read_set(&body.room_id, sender_user, count, &ReceiptThread::Unthreaded)
+			.private_read_set(
+				&body.room_id,
+				sender_user,
+				count,
+				MilliSecondsSinceUnixEpoch::now(),
+				&ReceiptThread::Unthreaded,
+			)
 			.await;
 	}
 

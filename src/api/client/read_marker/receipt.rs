@@ -140,7 +140,13 @@ pub(crate) async fn create_receipt_route(
 
 			services
 				.read_receipt
-				.private_read_set(&body.room_id, sender_user, count, &body.thread)
+				.private_read_set(
+					&body.room_id,
+					sender_user,
+					count,
+					MilliSecondsSinceUnixEpoch::now(),
+					&body.thread,
+				)
 				.await;
 		},
 		| _ => {

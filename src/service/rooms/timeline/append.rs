@@ -168,7 +168,13 @@ where
 	// also cleared; the sender's own send subsumes any thread receipt.
 	self.services
 		.read_receipt
-		.private_read_set(pdu.room_id(), pdu.sender(), *next_count2, &ReceiptThread::Unthreaded)
+		.private_read_set(
+			pdu.room_id(),
+			pdu.sender(),
+			*next_count2,
+			pdu.origin_server_ts(),
+			&ReceiptThread::Unthreaded,
+		)
 		.await;
 
 	self.services

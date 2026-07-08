@@ -145,6 +145,7 @@ impl Data {
 		room_id: &RoomId,
 		user_id: &UserId,
 		pdu_count: u64,
+		ts: u64,
 		thread: &ReceiptThread,
 	) {
 		let next_count = self.services.globals.next_count();
@@ -153,28 +154,32 @@ impl Data {
 		self.roomuserid_lastprivatereadupdate
 			.put(lastupdate_key, *next_count);
 
+		// Additive value tail: ts (millis); old bare-count rows read back None.
 		match thread.as_str() {
 			| Some(thread_kind) if !thread_kind.is_empty() => {
 				let key = (room_id, user_id, thread_kind);
-				self.roomuserid_privateread.put(key, pdu_count);
+				self.roomuserid_privateread
+					.put(key, (pdu_count, ts));
 			},
 			| _ => {
 				self.clear_thread_private_reads(room_id, user_id)
 					.await;
 
 				let key = (room_id, user_id);
-				self.roomuserid_privateread.put(key, pdu_count);
+				self.roomuserid_privateread
+					.put(key, (pdu_count, ts));
 			},
 		}
 	}
 
-	/// Latest unthreaded (legacy 2-tuple) private read PDU count.
+	/// Latest unthreaded (legacy 2-tuple) private read: `(pdu count, receipt ts
+	/// millis)`. `ts` is `None` for rows written before the ts tail was added.
 	#[inline]
 	pub(super) async fn private_read_get_count(
 		&self,
 		room_id: &RoomId,
 		user_id: &UserId,
-	) -> Result<u64> {
+	) -> Result<(u64, Option<u64>)> {
 		let key = (room_id, user_id);
 		self.roomuserid_privateread
 			.qry(&key)
@@ -191,14 +196,14 @@ impl Data {
 		&'a self,
 		room_id: &'a RoomId,
 		user_id: &'a UserId,
-	) -> impl Stream<Item = (ThreadKind, u64)> + Send + 'a {
-		type ThreadKv<'a> = ((&'a RoomId, &'a UserId, &'a str), u64);
+	) -> impl Stream<Item = (ThreadKind, u64, Option<u64>)> + Send + 'a {
+		type ThreadKv<'a> = ((&'a RoomId, &'a UserId, &'a str), (u64, Option<u64>));
 
 		let prefix = (room_id, user_id, Interfix);
 		self.roomuserid_privateread
 			.stream_prefix(&prefix)
 			.ignore_err()
-			.map(|((_, _, kind), count): ThreadKv<'_>| (ThreadKind::from(kind), count))
+			.map(|((_, _, kind), (count, ts)): ThreadKv<'_>| (ThreadKind::from(kind), count, ts))
 	}
 
 	#[inline]

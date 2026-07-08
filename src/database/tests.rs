@@ -463,6 +463,36 @@ fn serde_tuple_additive_evolution_option() {
 }
 
 #[test]
+fn serde_tuple_additive_evolution_u64_option() {
+	let count: u64 = 42;
+	let ts: u64 = 1_700_000_000_000;
+
+	// Old rows wrote a bare u64 count; reading as the evolved
+	// (count, Option<ts>) tuple lands the tail at None.
+	let old_bytes = serialize_to_vec(&count).expect("failed to serialize old value");
+
+	let (c, tail): (u64, Option<u64>) =
+		from_slice(&old_bytes).expect("failed to deserialize old value as new type");
+
+	assert_eq!(c, count);
+	assert_eq!(tail, None, "ts tail must default to None for old rows");
+
+	// New rows write (count, ts); the fixed-width tail round-trips as Some
+	// even though its leading big-endian byte is 0x00 (never the 0xFF separator).
+	let new_bytes = serialize_to_vec(&(count, ts)).expect("failed to serialize new value");
+
+	assert_eq!(&new_bytes[..old_bytes.len()], &*old_bytes);
+	assert_eq!(new_bytes[old_bytes.len()], 0xFF, "separator precedes the ts tail");
+	assert_eq!(new_bytes.len(), old_bytes.len() + 1 + size_of::<u64>());
+
+	let (c, tail): (u64, Option<u64>) =
+		from_slice(&new_bytes).expect("failed to deserialize new value");
+
+	assert_eq!(c, count);
+	assert_eq!(tail, Some(ts));
+}
+
+#[test]
 fn ser_de_eventid_backoff_record() {
 	let event_id: &EventId = "$evt:example.com".try_into().unwrap();
 	let ctx: u8 = 2;

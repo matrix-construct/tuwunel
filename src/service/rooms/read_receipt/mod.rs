@@ -6,7 +6,7 @@ use std::{collections::BTreeMap, sync::Arc};
 
 use futures::{Stream, StreamExt};
 use ruma::{
-	OwnedEventId, OwnedUserId, RoomId, UserId,
+	MilliSecondsSinceUnixEpoch, OwnedEventId, OwnedUserId, RoomId, UInt, UserId,
 	api::appservice::event::push_events::v1::EphemeralData,
 	events::{
 		AnySyncEphemeralRoomEvent, SyncEphemeralRoomEvent,
@@ -120,20 +120,17 @@ impl Service {
 			.private_read_get_count(room_id, user_id)
 			.await
 			.ok()
-			.map(|count| (ThreadKind::new(), count));
-
-		let threaded: SmallVec<[(ThreadKind, u64); 1]> = self
-			.db
-			.private_read_threaded_stream(room_id, user_id)
-			.collect()
-			.await;
+			.map(|(count, ts)| (ThreadKind::new(), count, ts));
 
 		let events = legacy
 			.into_iter()
-			.chain(threaded)
 			.stream()
-			.filter_map(|(kind, count)| async move {
-				self.build_private_read_event(shortroomid, count, user_id, &kind)
+			.chain(
+				self.db
+					.private_read_threaded_stream(room_id, user_id),
+			)
+			.filter_map(|(kind, count, ts)| async move {
+				self.build_private_read_event(shortroomid, count, ts, user_id, &kind)
 					.await
 			})
 			.collect()
@@ -146,6 +143,7 @@ impl Service {
 		&self,
 		shortroomid: u64,
 		count: u64,
+		ts: Option<u64>,
 		user_id: &UserId,
 		thread_kind: &str,
 	) -> Option<Raw<AnySyncEphemeralRoomEvent>> {
@@ -162,13 +160,17 @@ impl Service {
 			.ok()?;
 
 		let thread = thread_kind_to_receipt(thread_kind);
+		let ts = ts
+			.and_then(UInt::new)
+			.map(MilliSecondsSinceUnixEpoch);
+
 		let event_id: OwnedEventId = pdu.event_id().to_owned();
 		let user_id: OwnedUserId = user_id.to_owned();
 		let content: BTreeMap<OwnedEventId, Receipts> = BTreeMap::from_iter([(
 			event_id,
 			BTreeMap::from_iter([(
 				ReceiptType::ReadPrivate,
-				BTreeMap::from_iter([(user_id, Receipt { ts: None, thread })]),
+				BTreeMap::from_iter([(user_id, Receipt { ts, thread })]),
 			)]),
 		)]);
 
@@ -201,10 +203,11 @@ impl Service {
 		room_id: &RoomId,
 		user_id: &UserId,
 		count: u64,
+		ts: MilliSecondsSinceUnixEpoch,
 		thread: &ReceiptThread,
 	) {
 		self.db
-			.private_read_set(room_id, user_id, count, thread)
+			.private_read_set(room_id, user_id, count, u64::from(ts.get()), thread)
 			.await;
 	}
 
@@ -219,7 +222,7 @@ impl Service {
 		&self,
 		room_id: &RoomId,
 		user_id: &UserId,
-	) -> Result<u64> {
+	) -> Result<(u64, Option<u64>)> {
 		self.db
 			.private_read_get_count(room_id, user_id)
 			.await
