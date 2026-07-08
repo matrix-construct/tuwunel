@@ -176,6 +176,34 @@ impl Data {
 		.unwrap_or(false)
 	}
 
+	/// Look up a token's stored metadata, returning `None` when it is absent.
+	pub(super) async fn get_token_info(&self, token: &str) -> Result<Option<DatabaseTokenInfo>> {
+		self.registrationtoken_info
+			.get(token)
+			.await
+			.deserialized()
+			.map(Some)
+			.or_else(|e| e.is_not_found().then_some(None).ok_or(e))
+	}
+
+	/// Replace a token's expiry while preserving its use counter.
+	pub(super) async fn update_token(
+		&self,
+		token: &str,
+		expires: TokenExpires,
+	) -> Result<DatabaseTokenInfo> {
+		let Some(current) = self.get_token_info(token).await? else {
+			return Err!(Request(NotFound("Registration token not found")));
+		};
+
+		let info = DatabaseTokenInfo { uses: current.uses, expires };
+
+		self.registrationtoken_info
+			.raw_put(token, Json(&info));
+
+		Ok(info)
+	}
+
 	/// Iterate over all valid tokens and delete expired ones.
 	pub(super) fn iterate_and_clean_tokens(
 		&self,
