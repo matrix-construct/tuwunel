@@ -5,7 +5,7 @@ mod remote;
 mod tests;
 mod thumbnail;
 use std::{
-	collections::HashMap,
+	collections::{HashMap, HashSet},
 	path::PathBuf,
 	sync::{Arc, Mutex},
 	time::{Duration, Instant, SystemTime},
@@ -15,6 +15,7 @@ use async_trait::async_trait;
 use base64::{Engine as _, engine::general_purpose};
 use futures::{FutureExt, StreamExt, TryFutureExt, TryStreamExt, pin_mut};
 use http::StatusCode;
+use object_store::ObjectMeta;
 use ruma::{
 	Mxc, OwnedMxcUri, OwnedUserId, UserId,
 	api::error::{ErrorKind, RetryAfter},
@@ -26,7 +27,7 @@ use tuwunel_core::{
 	utils::{
 		self, BoolExt, MutexMap,
 		result::LogDebugErr,
-		stream::{IterStream, TryReadyExt},
+		stream::{BroadbandExt, IterStream, ReadyExt, TryReadyExt},
 		time::now_millis,
 	},
 	warn,
@@ -42,6 +43,18 @@ pub struct Media {
 	pub content: Vec<u8>,
 	pub content_type: Option<String>,
 	pub content_disposition: Option<ContentDisposition>,
+}
+
+/// One row of a user's uploaded media, holding only the fields tuwunel can
+/// derive from the uploader index and storage-provider object metadata.
+#[derive(Clone, Debug)]
+pub struct UserMediaEntry {
+	pub mxc: OwnedMxcUri,
+	pub media_type: Option<String>,
+	pub upload_name: Option<String>,
+	pub media_length: Option<u64>,
+	pub created_ts: u64,
+	pub user_id: OwnedUserId,
 }
 
 /// For MSC2246
@@ -461,6 +474,132 @@ impl Service {
 		Ok(mxcs)
 	}
 
+	/// Every media item uploaded by a local user, carrying the fields tuwunel
+	/// can derive: content type, upload name, byte length and modification time
+	/// from storage-provider object metadata. Untracked columns (last-access,
+	/// quarantine, url-cache) are not represented.
+	#[tracing::instrument(level = "debug", skip(self))]
+	pub async fn user_media(&self, user: &UserId) -> Result<Vec<UserMediaEntry>> {
+		let entries = self
+			.db
+			.get_all_user_mxcs(user)
+			.await
+			.into_iter()
+			.stream()
+			.broad_filter_map(async |mxc| self.user_media_entry(user, mxc).await)
+			.collect()
+			.await;
+
+		Ok(entries)
+	}
+
+	async fn user_media_entry(&self, user: &UserId, mxc: OwnedMxcUri) -> Option<UserMediaEntry> {
+		let parts = mxc.parts().ok()?;
+		let Metadata { content_type, content_disposition, key } =
+			self.get_metadata(&parts).await?;
+
+		let object = self.head_meta(&key).await;
+		let upload_name = content_disposition.and_then(|disposition| disposition.filename);
+
+		Some(UserMediaEntry {
+			media_type: content_type,
+			upload_name,
+			media_length: object.as_ref().map(|object| object.size),
+			created_ts: object.as_ref().map(mtime_millis).unwrap_or(0),
+			user_id: user.to_owned(),
+			mxc,
+		})
+	}
+
+	/// Deletes local media older than `before_ts` (by storage-provider mtime)
+	/// and strictly larger than `size_gt` bytes, sparing profile and
+	/// room-avatar media when `keep_profiles`. Returns the deleted MXCs, empty
+	/// when none match. Quarantine and protection flags are not tracked, so no
+	/// media is spared on those grounds.
+	#[tracing::instrument(level = "debug", skip(self))]
+	pub async fn delete_by_date_size(
+		&self,
+		before_ts: u64,
+		size_gt: u64,
+		keep_profiles: bool,
+	) -> Result<Vec<OwnedMxcUri>> {
+		let spared = keep_profiles
+			.then_async(|| self.avatar_mxcs())
+			.await
+			.unwrap_or_default();
+
+		let candidates = self.get_all_mxcs().await?;
+
+		let deleted: Vec<OwnedMxcUri> = candidates
+			.into_iter()
+			.stream()
+			.ready_filter(|mxc| self.is_local(mxc) && !spared.contains(mxc))
+			.broad_filter_map(async |mxc| {
+				let parts = mxc.parts().ok()?;
+				let Metadata { key, .. } = self.get_metadata(&parts).await?;
+				let object = self.head_meta(&key).await?;
+
+				let eligible = mtime_millis(&object) < before_ts && object.size > size_gt;
+
+				eligible
+					.then_async(|| self.delete(&parts))
+					.await
+					.and_then(Result::ok)
+					.map(|()| mxc)
+			})
+			.collect()
+			.await;
+
+		Ok(deleted)
+	}
+
+	/// The MXCs of every local user's profile avatar and every room's avatar,
+	/// the spare-set honoured by `keep_profiles`.
+	async fn avatar_mxcs(&self) -> HashSet<OwnedMxcUri> {
+		let user_avatars = self
+			.services
+			.users
+			.list_local_users()
+			.map(ToOwned::to_owned)
+			.broad_filter_map(async |user| self.services.profile.avatar_url(&user).await.ok());
+
+		let room_avatars = self
+			.services
+			.metadata
+			.iter_ids()
+			.map(ToOwned::to_owned)
+			.broad_filter_map(async |room_id| {
+				self.services
+					.state_accessor
+					.get_avatar(&room_id)
+					.await
+					.ok()
+					.and_then(|avatar| avatar.url)
+			});
+
+		user_avatars.chain(room_avatars).collect().await
+	}
+
+	fn is_local(&self, mxc: &OwnedMxcUri) -> bool {
+		mxc.server_name()
+			.is_ok_and(|server| self.services.globals.server_is_ours(server))
+	}
+
+	/// First storage provider's object metadata for the media stored under
+	/// `key` (byte length and modification time), or `None` when no provider
+	/// holds it.
+	async fn head_meta(&self, key: &[u8]) -> Option<ObjectMeta> {
+		let path = self.get_media_name_sha256(key);
+
+		let stream = self
+			.storage_providers()
+			.stream()
+			.filter_map(async |provider| provider.head(&path).await.log_debug_err().ok());
+
+		pin_mut!(stream);
+		stream.next().await
+	}
+
 	/// Deletes all media files before or after the given time. Returns a usize
 	/// with the number of media files deleted.
 	pub async fn delete_range(
@@ -715,3 +854,7 @@ impl Service {
 #[inline]
 #[must_use]
 pub fn encode_key(key: &[u8]) -> String { general_purpose::URL_SAFE_NO_PAD.encode(key) }
+
+fn mtime_millis(object: &ObjectMeta) -> u64 {
+	u64::try_from(object.last_modified.timestamp_millis()).unwrap_or(0)
+}
