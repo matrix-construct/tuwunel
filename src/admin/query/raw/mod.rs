@@ -8,6 +8,7 @@ mod keys;
 mod keys_sizes;
 mod keys_total;
 mod maps;
+mod put;
 mod sequence;
 mod vals_sizes;
 mod vals_total;
@@ -131,7 +132,19 @@ pub(crate) enum RawCommand {
 		prefix: Option<String>,
 	},
 
-	/// - Raw database delete DANGER!!!
+	/// - Raw database put
+	Put {
+		/// Map name
+		map: String,
+
+		/// Key
+		key: String,
+
+		/// Value
+		value: String,
+	},
+
+	/// - Raw database delete (for string keys) DANGER!!!
 	Del {
 		/// Map name
 		map: String,
