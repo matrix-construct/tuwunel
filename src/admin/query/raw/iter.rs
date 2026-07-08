@@ -36,7 +36,7 @@ pub(super) async fn raw_iter(
 		})
 		.take(limit.unwrap_or(usize::MAX))
 		.map_ok(apply!(2, encode))
-		.try_for_each(|(key, val)| writeln!(self, "{{{key} => {val}}}"))
+		.try_for_each(|(key, val)| writeln!(self, "{key} => {val}"))
 		.boxed()
 		.await?;
 
