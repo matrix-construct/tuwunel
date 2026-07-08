@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use futures::{FutureExt, Stream, StreamExt, pin_mut};
-use ruma::{OwnedRoomId, RoomId, events::room::join_rules::JoinRule};
+use ruma::{OwnedRoomId, OwnedUserId, RoomId, UserId, events::room::join_rules::JoinRule};
 use tuwunel_core::{
 	Result, implement,
 	utils::{
@@ -108,6 +108,28 @@ pub fn ban_room(&self, room_id: &RoomId) { self.db.bannedroomids.insert(room_id,
 #[implement(Service)]
 #[inline]
 pub fn unban_room(&self, room_id: &RoomId) { self.db.bannedroomids.remove(room_id); }
+
+#[implement(Service)]
+#[inline]
+pub fn block_room(&self, room_id: &RoomId, blocker: &UserId) {
+	self.db
+		.bannedroomids
+		.insert(room_id, blocker.as_bytes());
+}
+
+#[implement(Service)]
+pub async fn banned_room_blocker(&self, room_id: &RoomId) -> Option<OwnedUserId> {
+	self.db
+		.bannedroomids
+		.get(room_id)
+		.await
+		.ok()
+		.and_then(|blocker| {
+			str::from_utf8(&blocker)
+				.ok()
+				.and_then(|mxid| UserId::parse(mxid).ok())
+		})
+}
 
 #[implement(Service)]
 pub fn list_banned_rooms(&self) -> impl Stream<Item = &RoomId> + Send + '_ {
