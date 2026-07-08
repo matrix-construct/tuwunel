@@ -1,6 +1,9 @@
 //! Integration with `clap`
 
-use std::path::PathBuf;
+use std::{
+	path::PathBuf,
+	sync::atomic::{AtomicU64, Ordering},
+};
 
 use clap::{ArgAction, Parser};
 use tuwunel_core::{
@@ -212,6 +215,8 @@ pub struct Args {
 	pub gc_muzzy: Option<bool>,
 }
 
+static TEST_DATABASE_PATH_ID: AtomicU64 = AtomicU64::new(0);
+
 impl Args {
 	#[must_use]
 	pub fn default_test(name: &[&str]) -> Self {
@@ -220,8 +225,15 @@ impl Args {
 			.extend(name.iter().copied().map(ToOwned::to_owned));
 		args.option
 			.push("server_name=\"localhost\"".into());
+		args.option
+			.push(format!("database_path={:?}", default_test_database_path().to_string_lossy()));
 		args
 	}
+}
+
+fn default_test_database_path() -> PathBuf {
+	let id = TEST_DATABASE_PATH_ID.fetch_add(1, Ordering::Relaxed);
+	std::env::temp_dir().join(format!("tuwunel-test-{}-{id}", std::process::id()))
 }
 
 impl Default for Args {

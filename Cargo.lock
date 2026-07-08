@@ -2633,6 +2633,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6877bb514081ee2a7ff5ef9de3281f14a4dd4bceac4c09388074a6b5df8a139a"
 
 [[package]]
+name = "mindroom_rebase_tests"
+version = "0.0.0"
+dependencies = [
+ "axum",
+ "base64 0.22.1",
+ "serde_json",
+ "tokio",
+ "tower",
+ "tuwunel",
+ "tuwunel_api",
+ "tuwunel_core",
+ "tuwunel_service",
+ "url",
+]
+
+[[package]]
 name = "minicbor"
 version = "2.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -952,4 +952,48 @@ mod tests {
 			"unexpected removal cookie: {removal}"
 		);
 	}
+
+	/// The Apple id_token userinfo fallback decodes claims from
+	/// `Session::id_token`, so the token response's id_token must be persisted
+	/// on the session before `request_userinfo` runs.
+	#[test]
+	fn apply_token_response_persists_id_token_for_userinfo_fallback() {
+		let token = TokenResponse {
+			token_type: Some("Bearer".to_owned()),
+			access_token: Some("access-token".to_owned()),
+			expires_in: Some(3600),
+			refresh_token: Some("refresh-token".to_owned()),
+			refresh_token_expires_in: Some(86400),
+			scope: Some("openid email".to_owned()),
+			id_token: Some("header.payload.signature".to_owned()),
+		};
+
+		let session =
+			apply_token_response(Session::default(), token).expect("token response applies");
+
+		assert_eq!(
+			session.id_token.as_deref(),
+			Some("header.payload.signature"),
+			"id_token must be persisted for the Apple userinfo fallback",
+		);
+		assert_eq!(session.access_token.as_deref(), Some("access-token"));
+		assert_eq!(session.refresh_token.as_deref(), Some("refresh-token"));
+		assert!(session.expires_at.is_some());
+		assert!(session.refresh_token_expires_at.is_some());
+	}
+
+	/// A token response without an id_token (plain OAuth2 provider) must not
+	/// invent one.
+	#[test]
+	fn apply_token_response_leaves_id_token_empty_when_absent() {
+		let token: TokenResponse = serde_json::from_value(serde_json::json!({
+			"access_token": "access-123",
+		}))
+		.expect("valid token response");
+
+		let session =
+			apply_token_response(Session::default(), token).expect("session updates apply");
+
+		assert_eq!(session.id_token, None);
+	}
 }
