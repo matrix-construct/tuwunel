@@ -3967,6 +3967,15 @@ pub struct IdentityProvider {
 	/// this provider will simply not be found when querying by `brand`.
 	pub client_id: String,
 
+	/// Additional client IDs whose signed ID tokens should be accepted by
+	/// native app login endpoints for this provider. For Sign in with Apple on
+	/// iOS this is usually the app bundle identifier, while `client_id`
+	/// remains the web Services ID used by the browser SSO flow.
+	///
+	/// default: []
+	#[serde(default)]
+	pub native_client_ids: BTreeSet<String>,
+
 	/// Secret key the provider generated for you along with the `client_id`
 	/// above. Unlike the `client_id`, the `client_secret` can be changed here
 	/// whenever the provider regenerates one for you.

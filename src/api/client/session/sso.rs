@@ -1,3 +1,4 @@
+mod native_apple;
 mod uiaa;
 
 use std::{borrow::Cow, collections::BTreeMap, net::IpAddr, time::Duration};
@@ -15,7 +16,6 @@ use ruma::{
 	},
 };
 use serde::{Deserialize, Serialize};
-use serde_json::Value as JsonValue;
 use tuwunel_core::{
 	Err, Result, at,
 	config::IdentityProvider,
@@ -45,7 +45,7 @@ use tuwunel_service::{
 };
 use url::Url;
 
-pub(crate) use self::uiaa::sso_fallback_route;
+pub(crate) use self::{native_apple::native_apple_login_route, uiaa::sso_fallback_route};
 use super::TOKEN_LENGTH;
 use crate::{ClientIp, Ruma};
 
@@ -81,64 +81,6 @@ static GRANT_SESSION_COOKIE: &str = "tuwunel_grant_session";
 /// without an explicit path defaults to the request-URI's directory.
 fn grant_session_cookie_path(callback_url: Option<&Url>) -> &str {
 	callback_url.map(Url::path).unwrap_or("/")
-}
-
-fn decode_apple_userinfo_from_id_token(session: &Session) -> Result<UserInfo> {
-	let id_token = session.id_token.as_deref().ok_or_else(|| {
-		err!(Request(Unauthorized("Missing Apple id_token in token response.")))
-	})?;
-
-	let payload_b64 = id_token
-		.split('.')
-		.nth(1)
-		.ok_or_else(|| err!(Request(Unauthorized("Apple id_token is malformed."))))?;
-
-	let payload = b64
-		.decode(payload_b64)
-		.map_err(|_| err!(Request(Unauthorized("Apple id_token payload is invalid base64."))))?;
-
-	let payload: JsonValue = serde_json::from_slice(&payload)
-		.map_err(|_| err!(Request(Unauthorized("Apple id_token payload is not valid JSON."))))?;
-
-	let sub = payload
-		.get("sub")
-		.and_then(JsonValue::as_str)
-		.ok_or_else(|| {
-			err!(Request(Unauthorized("Apple id_token missing required sub claim.")))
-		})?;
-
-	let email = payload
-		.get("email")
-		.and_then(JsonValue::as_str)
-		.map(ToOwned::to_owned);
-
-	let preferred_username = email
-		.as_deref()
-		.and_then(|value| value.split_once('@'))
-		.map(at!(0))
-		.map(ToOwned::to_owned);
-
-	Ok(UserInfo {
-		sub: sub.to_owned(),
-		preferred_username: preferred_username.clone(),
-		username: preferred_username,
-		nickname: None,
-		name: payload
-			.get("name")
-			.and_then(JsonValue::as_str)
-			.map(ToOwned::to_owned),
-		given_name: payload
-			.get("given_name")
-			.and_then(JsonValue::as_str)
-			.map(ToOwned::to_owned),
-		family_name: payload
-			.get("family_name")
-			.and_then(JsonValue::as_str)
-			.map(ToOwned::to_owned),
-		email,
-		avatar_url: None,
-		picture: None,
-	})
 }
 
 /// # `GET /_matrix/client/v3/login/sso/redirect`
@@ -419,7 +361,7 @@ pub(crate) async fn sso_callback_route(
 				"Failed to fetch Apple userinfo endpoint; falling back to id_token claims.",
 			);
 
-			decode_apple_userinfo_from_id_token(&session).map_err(|decode_error| {
+			native_apple::decode_userinfo_from_id_token(&session).map_err(|decode_error| {
 				debug_warn!(
 					?decode_error,
 					idp_id = provider.id(),
@@ -429,54 +371,8 @@ pub(crate) async fn sso_callback_route(
 			})
 		})?;
 
-	let unique_id = unique_id_sub((&provider, &userinfo.sub))?;
-
-	let (old_user_id, old_sess_id) = existing_identity_session(&services, &unique_id).await?;
-
-	let session = Session {
-		user_info: Some(userinfo.clone()),
-		..session
-	};
-
-	let user_id = match (session.user_id, old_user_id) {
-		| (Some(user_id), ..) | (None, Some(user_id)) => user_id,
-		| (None, None) => decide_user_id(&services, &provider, &userinfo, &unique_id).await?,
-	};
-
-	let session = Session {
-		user_id: Some(user_id.clone()),
-		..session
-	};
-
-	if !services.users.exists(&user_id).await {
-		let origin = match provider.registration {
-			| true => "sso",
-			// Present in LDAP is an existing user to provision, not a new registration.
-			| false if ldap_user_exists(&services, &user_id).await => "ldap",
-			| false =>
-				return Err!(Request(Forbidden("Registration from this provider is disabled"))),
-		};
-
-		register_user(&services, &provider, &session, &userinfo, &user_id, origin).await?;
-	}
-
-	services.oauth.sessions.put(&session).await;
-	if services
-		.users
-		.maybe_repair_legacy_sso_origin(&user_id)
-		.await
-	{
-		info!("Repaired legacy SSO-origin metadata for {user_id}");
-	}
-
-	if let Some(old_sess_id) = old_sess_id
-		.as_deref()
-		.filter(is_not_equal_to!(&sess_id))
-	{
-		services.oauth.sessions.delete(old_sess_id).await;
-	}
-
-	ensure_sso_account_active(&services, &user_id).await?;
+	let (user_id, session) =
+		complete_sso_session(&services, &provider, session, userinfo).await?;
 
 	let cookie = Cookie::build((GRANT_SESSION_COOKIE, EMPTY))
 		.path(grant_session_cookie_path(provider.callback_url.as_ref()))
@@ -623,20 +519,74 @@ fn finalize_login_redirect(
 	Ok(location)
 }
 
-async fn ensure_sso_account_active(services: &Services, user_id: &UserId) -> Result {
+/// Map an authenticated SSO/OIDC identity onto a local account and return the
+/// resulting user together with the committed session. Shared by the browser
+/// SSO callback and the native Apple login endpoint.
+async fn complete_sso_session(
+	services: &Services,
+	provider: &Provider,
+	mut session: Session,
+	userinfo: UserInfo,
+) -> Result<(OwnedUserId, Session)> {
+	let sess_id = session
+		.sess_id
+		.clone()
+		.ok_or_else(|| err!(Request(InvalidParam("Missing SSO session id."))))?;
+
+	let unique_id = unique_id_sub((provider, &userinfo.sub))?;
+
+	let (old_user_id, old_sess_id) = existing_identity_session(services, &unique_id).await?;
+
+	session.user_info = Some(userinfo.clone());
+
+	let user_id = match (session.user_id.take(), old_user_id) {
+		| (Some(user_id), ..) | (None, Some(user_id)) => user_id,
+		| (None, None) => decide_user_id(services, provider, &userinfo, &unique_id).await?,
+	};
+
+	session.user_id = Some(user_id.clone());
+
+	if !services.users.exists(&user_id).await {
+		let origin = match provider.registration {
+			| true => "sso",
+			// Present in LDAP is an existing user to provision, not a new registration.
+			| false if ldap_user_exists(services, &user_id).await => "ldap",
+			| false =>
+				return Err!(Request(Forbidden("Registration from this provider is disabled"))),
+		};
+
+		register_user(services, provider, &session, &userinfo, &user_id, origin).await?;
+	}
+
+	services.oauth.sessions.put(&session).await;
 	if services
 		.users
-		.maybe_reactivate_deactivated_sso(user_id)
+		.maybe_repair_legacy_sso_origin(&user_id)
+		.await
+	{
+		info!("Repaired legacy SSO-origin metadata for {user_id}");
+	}
+
+	if let Some(old_sess_id) = old_sess_id
+		.as_deref()
+		.filter(is_not_equal_to!(&sess_id))
+	{
+		services.oauth.sessions.delete(old_sess_id).await;
+	}
+
+	if services
+		.users
+		.maybe_reactivate_deactivated_sso(&user_id)
 		.await?
 	{
 		info!("Reactivated deactivated SSO account {user_id}");
 	}
 
-	if !services.users.is_active_local(user_id).await {
+	if !services.users.is_active_local(&user_id).await {
 		return Err!(Request(UserDeactivated("This user has been deactivated.")));
 	}
 
-	Ok(())
+	Ok((user_id, session))
 }
 
 async fn handle_uiaa(
@@ -962,78 +912,7 @@ fn parse_user_id(server_name: &ServerName, username: &str) -> Result<OwnedUserId
 
 #[cfg(test)]
 mod tests {
-	use serde_json::json;
-
 	use super::*;
-
-	fn apple_session_with_claims(claims: &serde_json::Value) -> Session {
-		let payload = b64.encode(serde_json::to_vec(claims).expect("serialize claims"));
-
-		Session {
-			id_token: Some(format!("header.{payload}.signature")),
-			..Default::default()
-		}
-	}
-
-	#[test]
-	fn decode_apple_userinfo_from_id_token_extracts_expected_claims() {
-		let session = apple_session_with_claims(&json!({
-			"sub": "apple-user-123",
-			"email": "alice@example.com",
-			"name": "Alice Example",
-			"given_name": "Alice",
-			"family_name": "Example"
-		}));
-
-		let userinfo =
-			decode_apple_userinfo_from_id_token(&session).expect("decode Apple id_token claims");
-
-		assert_eq!(userinfo.sub, "apple-user-123");
-		assert_eq!(userinfo.email.as_deref(), Some("alice@example.com"));
-		assert_eq!(userinfo.preferred_username.as_deref(), Some("alice"));
-		assert_eq!(userinfo.username.as_deref(), Some("alice"));
-		assert_eq!(userinfo.name.as_deref(), Some("Alice Example"));
-		assert_eq!(userinfo.given_name.as_deref(), Some("Alice"));
-		assert_eq!(userinfo.family_name.as_deref(), Some("Example"));
-	}
-
-	#[test]
-	fn decode_apple_userinfo_from_id_token_requires_sub_claim() {
-		let session = apple_session_with_claims(&json!({
-			"email": "alice@example.com"
-		}));
-
-		let error = decode_apple_userinfo_from_id_token(&session)
-			.expect_err("missing sub claim should fail");
-
-		let message = format!("{error}");
-		assert!(message.contains("sub claim"), "unexpected error: {message}");
-	}
-
-	#[test]
-	fn decode_apple_userinfo_from_id_token_requires_id_token() {
-		let session = Session::default();
-
-		let error = decode_apple_userinfo_from_id_token(&session)
-			.expect_err("missing id_token should fail");
-
-		let message = format!("{error}");
-		assert!(message.contains("Missing Apple id_token"), "unexpected error: {message}");
-	}
-
-	#[test]
-	fn decode_apple_userinfo_from_id_token_rejects_invalid_payload() {
-		let session = Session {
-			id_token: Some("header.!.signature".to_owned()),
-			..Default::default()
-		};
-
-		let error = decode_apple_userinfo_from_id_token(&session)
-			.expect_err("invalid id_token payload should fail");
-
-		let message = format!("{error}");
-		assert!(message.contains("invalid base64"), "unexpected error: {message}");
-	}
 
 	#[test]
 	fn grant_session_cookie_path_uses_the_callback_path() {

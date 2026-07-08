@@ -3402,6 +3402,13 @@
 #
 #client_id =
 
+# Additional client IDs whose signed ID tokens should be accepted by
+# native app login endpoints for this provider. For Sign in with Apple on
+# iOS this is usually the app bundle identifier, while `client_id`
+# remains the web Services ID used by the browser SSO flow.
+#
+#native_client_ids = []
+
 # Secret key the provider generated for you along with the `client_id`
 # above. Unlike the `client_id`, the `client_secret` can be changed here
 # whenever the provider regenerates one for you.

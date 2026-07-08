@@ -57,6 +57,10 @@ fn register_client_auth_routes(router: Router<State>) -> Router<State> {
 		.ruma_route(&client::get_login_types_route)
 		.ruma_route(&client::login_route)
 		.ruma_route(&client::login_token_route)
+		.route(
+			"/_matrix/client/unstable/org.mindroom.login/apple",
+			post(client::native_apple_login_route),
+		)
 		.ruma_route(&client::refresh_token_route)
 		.ruma_route(&client::sso_login_route)
 		.ruma_route(&client::sso_login_with_provider_route)
