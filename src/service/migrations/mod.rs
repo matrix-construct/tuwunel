@@ -2,7 +2,7 @@ use std::cmp::{self, Ordering};
 
 use futures::{FutureExt, StreamExt};
 use ruma::{
-	MilliSecondsSinceUnixEpoch, MxcUri, OwnedRoomId, OwnedUserId, RoomId, UserId,
+	MilliSecondsSinceUnixEpoch, MxcUri, OwnedRoomId, RoomId, UserId,
 	events::room::member::MembershipState,
 };
 use serde::{Deserialize, de::IgnoredAny};
@@ -13,8 +13,8 @@ use tuwunel_core::{
 	result::NotFound,
 	utils,
 	utils::{
-		BoolExt, IterStream, ReadyExt,
-		stream::{TryExpect, TryIgnore},
+		BoolExt, ReadyExt,
+		stream::{BroadbandExt, TryExpect, TryIgnore},
 	},
 	warn,
 };
@@ -516,79 +516,50 @@ async fn retroactively_fix_bad_data_from_roomuserid_joined(services: &Services) 
 	let db = &services.db;
 	let _cork = db.cork_and_sync();
 
-	let room_ids = services
+	services
 		.metadata
 		.iter_ids()
-		.map(ToOwned::to_owned)
-		.collect::<Vec<_>>()
+		.for_each(async |room_id| {
+			debug_info!(%room_id, "Fixing room");
+
+			services
+				.state_cache
+				.room_members(room_id)
+				.map(ToOwned::to_owned)
+				.broad_filter_map(async |user_id| {
+					// A member with no resolved member event is left untouched.
+					let member = services
+						.state_accessor
+						.get_member(room_id, &user_id)
+						.await
+						.ok()?;
+
+					Some((user_id, member.membership))
+				})
+				.ready_for_each(|(user_id, membership)| {
+					let count = services.globals.next_count();
+
+					match membership {
+						| MembershipState::Join => services.state_cache.mark_as_joined(
+							&user_id,
+							room_id,
+							PduCount::Normal(*count),
+						),
+						| _ => services.state_cache.mark_as_left(
+							&user_id,
+							room_id,
+							PduCount::Normal(*count),
+						),
+					}
+				})
+				.await;
+
+			services
+				.state_cache
+				.update_joined_count(room_id)
+				.await;
+		})
 		.await;
-
-	for room_id in &room_ids {
-		debug_info!("Fixing room {room_id}");
-
-		let users_in_room: Vec<OwnedUserId> = services
-			.state_cache
-			.room_members(room_id)
-			.map(ToOwned::to_owned)
-			.collect()
-			.await;
-
-		let joined_members = users_in_room
-			.iter()
-			.stream()
-			.filter(|user_id| {
-				services
-					.state_accessor
-					.get_member(room_id, user_id)
-					.map(|member| {
-						member.is_ok_and(|member| member.membership == MembershipState::Join)
-					})
-			})
-			.collect::<Vec<_>>()
-			.await;
-
-		let non_joined_members = users_in_room
-			.iter()
-			.stream()
-			.filter(|user_id| {
-				services
-					.state_accessor
-					.get_member(room_id, user_id)
-					.map(|member| {
-						member.is_ok_and(|member| member.membership != MembershipState::Join)
-					})
-			})
-			.collect::<Vec<_>>()
-			.await;
-
-		for user_id in &joined_members {
-			debug_info!("User is joined, marking as joined");
-			let count = services.globals.next_count();
-			services
-				.state_cache
-				.mark_as_joined(user_id, room_id, PduCount::Normal(*count));
-		}
-
-		for user_id in &non_joined_members {
-			debug_info!("User is left or banned, marking as left");
-			let count = services.globals.next_count();
-			services
-				.state_cache
-				.mark_as_left(user_id, room_id, PduCount::Normal(*count));
-		}
-	}
-
-	for room_id in &room_ids {
-		debug_info!(
-			"Updating joined count for room {room_id} to fix servers in room after correcting \
-			 membership states"
-		);
-
-		services
-			.state_cache
-			.update_joined_count(room_id)
-			.await;
-	}
 
 	db.engine.sort()?;
 	db["global"].insert(b"retroactively_fix_bad_data_from_roomuserid_joined", []);
