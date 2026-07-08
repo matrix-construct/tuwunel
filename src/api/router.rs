@@ -20,13 +20,14 @@ pub(super) use self::{
 	state::State,
 };
 use crate::{
-	client,
+	client::{self, mas_active},
 	oidc::{self, native_get_route, native_submit_route},
 	server,
 };
 
 pub fn build(router: Router<State>, server: &Server) -> Router<State> {
 	let config = &server.config;
+	let mas_active = mas_active(config);
 	let router = register_client_auth_routes(router);
 	let router = register_mas_routes(router);
 	let router = register_client_profile_and_data_routes(router);
@@ -35,6 +36,12 @@ pub fn build(router: Router<State>, server: &Server) -> Router<State> {
 	let router = register_client_state_and_sync_routes(router);
 	let router = register_client_media_and_device_routes(router);
 	let router = register_client_misc_routes(router);
+	let router = register_synapse_admin_users_routes(router, mas_active);
+	let router = register_synapse_admin_devices_routes(router);
+	let router = register_synapse_admin_rooms_routes(router);
+	let router = register_synapse_admin_media_routes(router);
+	let router = register_synapse_admin_federation_routes(router);
+	let router = register_synapse_admin_misc_routes(router);
 	let router = register_oidc_routes(router);
 	let router = register_server_misc_routes(router);
 	let router = register_federation_routes(router, config.allow_federation);
@@ -73,8 +80,6 @@ fn register_client_auth_routes(router: Router<State>) -> Router<State> {
 		.ruma_route(&client::suspend_user_route)
 		.ruma_route(&client::is_user_locked_route)
 		.ruma_route(&client::lock_user_route)
-		.ruma_route(&client::admin_register_nonce_route)
-		.ruma_route(&client::admin_register_route)
 }
 
 fn register_mas_routes(router: Router<State>) -> Router<State> {
@@ -92,6 +97,28 @@ fn register_mas_routes(router: Router<State>) -> Router<State> {
 		.ruma_route(&client::mas::update_device_display_name_route)
 		.ruma_route(&client::mas::sync_devices_route)
 }
+
+fn register_synapse_admin_users_routes(router: Router<State>, mas_active: bool) -> Router<State> {
+	// The Synapse register pair is de-registered under MAS, which owns user
+	// provisioning.
+	if mas_active {
+		router
+	} else {
+		router
+			.ruma_route(&client::admin_register_nonce_route)
+			.ruma_route(&client::admin_register_route)
+	}
+}
+
+fn register_synapse_admin_devices_routes(router: Router<State>) -> Router<State> { router }
+
+fn register_synapse_admin_rooms_routes(router: Router<State>) -> Router<State> { router }
+
+fn register_synapse_admin_media_routes(router: Router<State>) -> Router<State> { router }
+
+fn register_synapse_admin_federation_routes(router: Router<State>) -> Router<State> { router }
+
+fn register_synapse_admin_misc_routes(router: Router<State>) -> Router<State> { router }
 
 fn register_client_profile_and_data_routes(router: Router<State>) -> Router<State> {
 	router
