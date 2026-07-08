@@ -8,7 +8,10 @@ use tuwunel_core::{
 	Err, Result,
 	utils::{IterStream, ReadyExt, stream::automatic_width},
 };
-use tuwunel_service::{threepid::canonicalize_email, users::PASSWORD_SENTINEL};
+use tuwunel_service::{
+	threepid::canonicalize_email,
+	users::{DeactivationReason, PASSWORD_SENTINEL},
+};
 
 use super::user_details;
 use crate::{Ruma, client::admin::require_admin};
@@ -92,7 +95,11 @@ pub(crate) async fn admin_create_or_modify_route(
 	}
 
 	match body.deactivated {
-		| Some(true) => services.users.deactivate_account(user_id).await?,
+		| Some(true) =>
+			services
+				.users
+				.deactivate_account(user_id, DeactivationReason::Admin)
+				.await?,
 		| Some(false)
 			if services
 				.users

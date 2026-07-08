@@ -7,7 +7,7 @@ use ruma::{
 };
 use serde_json::{json, value::to_raw_value};
 use tuwunel_core::{
-	Err, Error, Result, err, is_equal_to, utils,
+	Err, Error, Result, err, utils,
 	utils::{
 		OptionExt,
 		future::{OptionFutureExt, TryExtExt},
@@ -23,20 +23,34 @@ where
 {
 	let sender_user = body.sender_user.as_deref();
 
+	if let Some(sender_user) = sender_user {
+		services
+			.users
+			.maybe_repair_legacy_sso_origin(sender_user)
+			.await;
+	}
+
+	let sender_uses_sso = if let Some(sender_user) = sender_user {
+		services
+			.users
+			.origin(sender_user)
+			.await
+			.is_ok_and(|origin| origin == "sso")
+	} else {
+		false
+	};
+
 	let password_flow = [AuthType::Password];
-	let user_origin = sender_user
-		.map_async(|sender_user| services.users.origin(sender_user).ok())
-		.unwrap_or(None)
-		.await;
-	let has_password = sender_user
-		.map_async(|sender_user| {
-			services
-				.users
-				.has_password(sender_user)
-				.unwrap_or(false)
-		})
-		.unwrap_or(false)
-		.await || (cfg!(feature = "ldap") && services.config.ldap.enable);
+	let has_password = !sender_uses_sso
+		&& (sender_user
+			.map_async(|sender_user| {
+				services
+					.users
+					.has_password(sender_user)
+					.unwrap_or(false)
+			})
+			.unwrap_or(false)
+			.await || (cfg!(feature = "ldap") && services.config.ldap.enable));
 
 	// Determine the exact IdP to bind to the UIAA session.
 	//
@@ -51,37 +65,38 @@ where
 	//     configured → routing is still unambiguous.
 	//  3. Otherwise: cannot determine provider → do NOT advertise m.login.sso.
 	let sso_flow = [AuthType::Sso];
-	let bound_idp: Option<String> = sender_user
-		.map_async(async |sender_user| {
-			body.sender_device
-				.as_deref()
-				.map_async(async |device_id| {
-					services
-						.users
-						.get_oidc_device_idp(sender_user, device_id)
-						.await
-						.filter(|s| !s.is_empty())
-				})
-				.await
-				.flatten()
-				.or_else(|| {
-					let use_sso = user_origin
-						.as_deref()
-						.is_some_and(is_equal_to!("sso"))
-						&& services.config.identity_provider.len() == 1;
-
-					use_sso
-						.then(|| services.oauth.providers.get_default_id())
-						.flatten()
-				})
-		})
-		.await
-		.flatten();
+	let device_bound_idp: Option<String> = if sender_uses_sso {
+		sender_user
+			.map_async(async |sender_user| {
+				body.sender_device
+					.as_deref()
+					.map_async(async |device_id| {
+						services
+							.users
+							.get_oidc_device_idp(sender_user, device_id)
+							.await
+							.filter(|s| !s.is_empty())
+					})
+					.await
+					.flatten()
+			})
+			.await
+			.flatten()
+	} else {
+		None
+	};
+	let bound_idp = select_bound_sso_idp(
+		sender_uses_sso,
+		device_bound_idp,
+		services.config.identity_provider.len(),
+		services.oauth.providers.get_default_id(),
+	);
 
 	let has_sso = bound_idp.is_some();
 
+	// NOTE: JWT fallback/web is not implemented for UIAA.
+	let has_jwt = false;
 	let jwt_flow = [AuthType::Jwt];
-	let has_jwt = services.config.jwt.enable;
 
 	let mut uiaainfo = UiaaInfo {
 		flows: has_password
@@ -108,6 +123,12 @@ where
 		.transpose()?
 	{
 		| Some(AuthData::Jwt(Jwt { ref token, .. })) => {
+			if sender_uses_sso {
+				return Err!(Request(
+					Forbidden("JWT UIAA is not allowed for SSO-origin users.",)
+				));
+			}
+
 			let sender_user = jwt::validate_user(services, token)?;
 			if !services.users.exists(&sender_user).await {
 				return Err!(Request(NotFound("User {sender_user} is not registered.")));
@@ -149,12 +170,7 @@ where
 				// the SSO fallback page can route re-authentication to the
 				// correct provider without any further heuristic lookups.
 				if let Some(ref idp) = bound_idp {
-					uiaainfo.params = to_raw_value(&json!({
-						"m.login.sso": {
-							"identity_providers": [{"id": idp}]
-						}
-					}))
-					.ok();
+					bind_sso_identity_provider(&mut uiaainfo, idp);
 				}
 
 				services
@@ -165,5 +181,90 @@ where
 			},
 			| _ => Err!(Request(NotJson("JSON body is not valid"))),
 		},
+	}
+}
+
+fn select_bound_sso_idp(
+	sender_uses_sso: bool,
+	device_idp: Option<String>,
+	identity_provider_count: usize,
+	default_idp: Option<String>,
+) -> Option<String> {
+	if !sender_uses_sso {
+		return None;
+	}
+
+	device_idp
+		.filter(|idp| !idp.is_empty())
+		.or_else(|| {
+			(identity_provider_count == 1)
+				.then_some(default_idp)
+				.flatten()
+		})
+}
+
+fn bind_sso_identity_provider(uiaainfo: &mut UiaaInfo, idp: &str) {
+	uiaainfo.params = to_raw_value(&json!({
+		"m.login.sso": {
+			"identity_providers": [{"id": idp}]
+		}
+	}))
+	.ok();
+}
+
+#[cfg(test)]
+mod tests {
+	use serde_json::Value as JsonValue;
+
+	use super::*;
+
+	#[test]
+	fn sso_idp_binding_prefers_request_device_idp() {
+		let selected =
+			select_bound_sso_idp(true, Some("apple".to_owned()), 1, Some("google".to_owned()));
+
+		assert_eq!(selected.as_deref(), Some("apple"));
+	}
+
+	#[test]
+	fn sso_idp_binding_falls_back_to_single_default_provider() {
+		let selected = select_bound_sso_idp(true, None, 1, Some("default".to_owned()));
+
+		assert_eq!(selected.as_deref(), Some("default"));
+	}
+
+	#[test]
+	fn sso_idp_binding_rejects_ambiguous_multi_provider_fallback() {
+		let selected = select_bound_sso_idp(true, None, 2, Some("default".to_owned()));
+
+		assert_eq!(selected, None);
+	}
+
+	#[test]
+	fn sso_idp_binding_is_not_available_for_password_origin_users() {
+		let selected =
+			select_bound_sso_idp(false, Some("apple".to_owned()), 1, Some("default".to_owned()));
+
+		assert_eq!(selected, None);
+	}
+
+	#[test]
+	fn bound_sso_idp_is_serialized_into_uiaa_params() {
+		let mut uiaainfo = UiaaInfo::default();
+
+		bind_sso_identity_provider(&mut uiaainfo, "apple");
+
+		let params: JsonValue = serde_json::from_str(
+			uiaainfo
+				.params
+				.as_ref()
+				.expect("params should be populated")
+				.get(),
+		)
+		.expect("valid params JSON");
+		assert_eq!(
+			params["m.login.sso"]["identity_providers"][0]["id"],
+			JsonValue::String("apple".to_owned()),
+		);
 	}
 }

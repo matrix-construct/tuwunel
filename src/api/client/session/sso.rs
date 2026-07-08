@@ -461,6 +461,13 @@ pub(crate) async fn sso_callback_route(
 	}
 
 	services.oauth.sessions.put(&session).await;
+	if services
+		.users
+		.maybe_repair_legacy_sso_origin(&user_id)
+		.await
+	{
+		info!("Repaired legacy SSO-origin metadata for {user_id}");
+	}
 
 	if let Some(old_sess_id) = old_sess_id
 		.as_deref()
@@ -469,9 +476,7 @@ pub(crate) async fn sso_callback_route(
 		services.oauth.sessions.delete(old_sess_id).await;
 	}
 
-	if !services.users.is_active_local(&user_id).await {
-		return Err!(Request(UserDeactivated("This user has been deactivated.")));
-	}
+	ensure_sso_account_active(&services, &user_id).await?;
 
 	let cookie = Cookie::build((GRANT_SESSION_COOKIE, EMPTY))
 		.path(grant_session_cookie_path(provider.callback_url.as_ref()))
@@ -616,6 +621,22 @@ fn finalize_login_redirect(
 		.to_string();
 
 	Ok(location)
+}
+
+async fn ensure_sso_account_active(services: &Services, user_id: &UserId) -> Result {
+	if services
+		.users
+		.maybe_reactivate_deactivated_sso(user_id)
+		.await?
+	{
+		info!("Reactivated deactivated SSO account {user_id}");
+	}
+
+	if !services.users.is_active_local(user_id).await {
+		return Err!(Request(UserDeactivated("This user has been deactivated.")));
+	}
+
+	Ok(())
 }
 
 async fn handle_uiaa(

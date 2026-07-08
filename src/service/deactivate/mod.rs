@@ -8,7 +8,7 @@ use ruma::{
 };
 use tuwunel_core::{Event, Result, info, pdu::PduBuilder, warn};
 
-use crate::profile::Propagation;
+use crate::{profile::Propagation, users::DeactivationReason};
 
 pub struct Service {
 	services: Arc<crate::services::OnceServices>,
@@ -33,10 +33,15 @@ impl Service {
 	///
 	/// When `erase` is `true`, additionally erase non-event data per
 	/// MSC4025: all global and per-room account data for the user.
-	pub async fn full_deactivate(&self, user_id: &UserId, erase: bool) -> Result {
+	pub async fn full_deactivate(
+		&self,
+		user_id: &UserId,
+		erase: bool,
+		reason: DeactivationReason,
+	) -> Result {
 		self.services
 			.users
-			.deactivate_account(user_id)
+			.deactivate_account(user_id, reason)
 			.await?;
 
 		self.services

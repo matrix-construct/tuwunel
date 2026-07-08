@@ -3,6 +3,7 @@ pub mod device;
 mod keys;
 mod ldap;
 mod register;
+mod sso;
 
 use std::sync::Arc;
 
@@ -25,7 +26,7 @@ use tuwunel_core::{
 };
 use tuwunel_database::{Deserialized, Json, Map};
 
-pub use self::{keys::parse_master_key, register::Register};
+pub use self::{keys::parse_master_key, register::Register, sso::DeactivationReason};
 
 pub const PASSWORD_SENTINEL: &str = "*";
 pub const PASSWORD_DISABLED: &str = "";
@@ -65,6 +66,7 @@ struct Data {
 	userid_dehydrateddevice: Arc<Map>,
 	userid_devicelistversion: Arc<Map>,
 	userid_erased: Arc<Map>,
+	userid_deactivation_reason: Arc<Map>,
 	userid_lastonetimekeyupdate: Arc<Map>,
 	userid_locked: Arc<Map>,
 	userid_masterkeyid: Arc<Map>,
@@ -100,6 +102,7 @@ impl crate::Service for Service {
 				userid_dehydrateddevice: args.db["userid_dehydrateddevice"].clone(),
 				userid_devicelistversion: args.db["userid_devicelistversion"].clone(),
 				userid_erased: args.db["userid_erased"].clone(),
+				userid_deactivation_reason: args.db["userid_deactivation_reason"].clone(),
 				userid_lastonetimekeyupdate: args.db["userid_lastonetimekeyupdate"].clone(),
 				userid_locked: args.db["userid_locked"].clone(),
 				userid_masterkeyid: args.db["userid_masterkeyid"].clone(),
@@ -161,7 +164,11 @@ impl Service {
 	}
 
 	/// Deactivate account
-	pub async fn deactivate_account(&self, user_id: &UserId) -> Result {
+	pub async fn deactivate_account(
+		&self,
+		user_id: &UserId,
+		reason: DeactivationReason,
+	) -> Result {
 		// Revoke any SSO authorizations
 		self.services
 			.oauth
@@ -178,6 +185,7 @@ impl Service {
 		// Systems like changing the password without logging in should check if the
 		// account is deactivated.
 		self.set_password(user_id, None).await?;
+		self.set_deactivation_reason(user_id, reason);
 
 		// TODO: Unhook 3PID
 		Ok(())
@@ -330,6 +338,12 @@ impl Service {
 			.deserialized()
 	}
 
+	/// Sets the origin of the user (password/sso/ldap/...).
+	#[inline]
+	pub fn set_origin(&self, user_id: &UserId, origin: &str) {
+		self.db.userid_origin.insert(user_id, origin);
+	}
+
 	/// Returns whether the user has a password. Disabled accounts and
 	/// registrations setting a sentinel password will return false here.
 	pub async fn has_password(&self, user_id: &UserId) -> Result<bool> {
@@ -349,6 +363,8 @@ impl Service {
 
 	/// Hash and set the user's password to the Argon2 hash
 	pub async fn set_password(&self, user_id: &UserId, password: Option<&str>) -> Result {
+		let keep_existing_origin = matches!(password, Some(PASSWORD_SENTINEL));
+
 		// Cannot change the password of a LDAP user. There are two special cases :
 		// - a `None` password can be used to deactivate a LDAP user
 		// - a "*" password is used as the default password of an active LDAP user
@@ -381,7 +397,10 @@ impl Service {
 			},
 			| Some(Ok(hash)) => {
 				self.db.userid_password.insert(user_id, hash);
-				self.db.userid_origin.insert(user_id, "password");
+				self.db.userid_deactivation_reason.remove(user_id);
+				if !keep_existing_origin {
+					self.db.userid_origin.insert(user_id, "password");
+				}
 			},
 			| Some(Err(e)) => {
 				return Err!(Request(InvalidParam(

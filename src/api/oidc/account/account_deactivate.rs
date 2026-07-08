@@ -1,7 +1,7 @@
 use const_str::format as const_format;
 use ruma::UserId;
 use tuwunel_core::{Result, info, utils::html::escape as html_escape};
-use tuwunel_service::Services;
+use tuwunel_service::{Services, users::DeactivationReason};
 
 use super::{ACCOUNT_HEAD, url_encode};
 
@@ -28,7 +28,10 @@ pub(super) async fn account_deactivate_execute_html(
 	services: &Services,
 	user_id: &UserId,
 ) -> Result<String> {
-	services.users.deactivate_account(user_id).await?;
+	services
+		.users
+		.deactivate_account(user_id, DeactivationReason::SelfService)
+		.await?;
 
 	info!(?user_id, "Account deactivated via account management page");
 

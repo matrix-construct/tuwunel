@@ -1,6 +1,7 @@
 use axum::extract::State;
 use synapse_admin_api::mas::delete_user::{Request, Response};
 use tuwunel_core::Result;
+use tuwunel_service::users::DeactivationReason;
 
 use super::{Mas, existing_user};
 use crate::Ruma;
@@ -15,7 +16,7 @@ pub(crate) async fn delete_user_route(
 
 	services
 		.deactivate
-		.full_deactivate(&user_id, body.erase)
+		.full_deactivate(&user_id, body.erase, DeactivationReason::Admin)
 		.await?;
 
 	Ok(Response::new())

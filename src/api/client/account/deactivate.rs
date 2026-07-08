@@ -2,6 +2,7 @@ use axum::extract::State;
 use futures::FutureExt;
 use ruma::api::client::account::{ThirdPartyIdRemovalStatus, deactivate};
 use tuwunel_core::{Result, info};
+use tuwunel_service::users::DeactivationReason;
 
 use crate::{ClientIp, Ruma, router::auth_uiaa};
 
@@ -15,7 +16,8 @@ use crate::{ClientIp, Ruma, router::auth_uiaa};
 ///   last seen ts)
 /// - Forgets all to-device events
 /// - Triggers device list updates
-/// - Removes ability to log in again
+/// - Removes ability to log in again, unless local policy permits SSO
+///   self-reactivation
 #[tracing::instrument(skip_all, fields(%client), name = "deactivate")]
 pub(crate) async fn deactivate_route(
 	State(services): State<crate::State>,
@@ -26,7 +28,7 @@ pub(crate) async fn deactivate_route(
 
 	services
 		.deactivate
-		.full_deactivate(sender_user, body.erase)
+		.full_deactivate(sender_user, body.erase, DeactivationReason::SelfService)
 		.boxed()
 		.await?;
 
