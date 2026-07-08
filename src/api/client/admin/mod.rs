@@ -63,7 +63,6 @@ async fn authorize(services: &crate::State, caller: &UserId, target: &UserId) ->
 /// endpoints use this plain check, not the MSC4323 anti-enumeration
 /// `authorize()` guard whose self-target and admin-target ordering does not
 /// fit them.
-#[expect(dead_code)]
 pub(crate) async fn require_admin(services: &crate::State, sender: &UserId) -> Result {
 	services
 		.admin
