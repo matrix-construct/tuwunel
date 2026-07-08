@@ -16,7 +16,7 @@ use crate::{
 	rooms::{self, retention},
 	sending, sendmail, server_keys,
 	service::{Args, Service},
-	storage, sync, threepid, transaction_ids, uiaa, users,
+	storage, sync, tasks, threepid, transaction_ids, uiaa, users,
 };
 
 pub struct Services {
@@ -57,6 +57,7 @@ pub struct Services {
 	pub sending: Arc<sending::Service>,
 	pub server_keys: Arc<server_keys::Service>,
 	pub sync: Arc<sync::Service>,
+	pub tasks: Arc<tasks::Service>,
 	pub transaction_ids: Arc<transaction_ids::Service>,
 	pub uiaa: Arc<uiaa::Service>,
 	pub users: Arc<users::Service>,
@@ -122,6 +123,7 @@ pub async fn build(server: Arc<Server>) -> Result<Arc<Self>> {
 		sending: sending::Service::build(&args)?,
 		server_keys: server_keys::Service::build(&args)?,
 		sync: sync::Service::build(&args)?,
+		tasks: tasks::Service::build(&args)?,
 		transaction_ids: transaction_ids::Service::build(&args)?,
 		uiaa: uiaa::Service::build(&args)?,
 		users: users::Service::build(&args)?,
@@ -188,6 +190,7 @@ pub(crate) fn services(&self) -> impl Iterator<Item = Arc<dyn Service>> + Send {
 		cast!(self.sending),
 		cast!(self.server_keys),
 		cast!(self.sync),
+		cast!(self.tasks),
 		cast!(self.transaction_ids),
 		cast!(self.uiaa),
 		cast!(self.users),
