@@ -79,7 +79,18 @@ pub(crate) async fn run(services: Arc<Services>) -> Result {
 pub(crate) async fn start(server: Arc<Server>) -> Result<Arc<Services>> {
 	debug!("Starting...");
 
-	let services = Services::build(server).await?.start().await?;
+	#[cfg(all(feature = "systemd", target_os = "linux"))]
+	let keepalive = server.runtime().spawn(extend_systemd_startup());
+
+	let services = async move { Services::build(server).await?.start().await }.await;
+
+	#[cfg(all(feature = "systemd", target_os = "linux"))]
+	{
+		keepalive.abort();
+		_ = keepalive.await;
+	};
+
+	let services = services?;
 
 	#[cfg(all(feature = "systemd", target_os = "linux"))]
 	sd_notify::notify(&[sd_notify::NotifyState::Ready])
@@ -184,7 +195,38 @@ async fn start_systemd_watchdog() {
 		ticker.tick().await;
 
 		if let Err(e) = sd_notify::notify(&[sd_notify::NotifyState::Watchdog]) {
-			error!("failed to notify systemd watchdog state: {e}");
+			error!(%e, "failed to notify systemd watchdog state");
+		}
+	}
+}
+
+#[cfg(all(feature = "systemd", target_os = "linux"))]
+async fn extend_systemd_startup() {
+	use std::env;
+
+	use tokio::time::MissedTickBehavior;
+
+	const INTERVAL: Duration = Duration::from_secs(15);
+
+	// Keep systemd's start timeout extended while a slow boot such as a database
+	// migration runs, so a healthy service is not killed before it signals ready.
+	if env::var_os("NOTIFY_SOCKET").is_none() {
+		return;
+	}
+
+	let extend_usec = u32::try_from(INTERVAL.as_micros())
+		.unwrap_or(u32::MAX)
+		.saturating_mul(2);
+
+	let mut ticker = tokio::time::interval(INTERVAL);
+	ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
+	loop {
+		ticker.tick().await;
+
+		if let Err(e) =
+			sd_notify::notify(&[sd_notify::NotifyState::ExtendTimeoutUsec(extend_usec)])
+		{
+			error!(%e, "failed to extend systemd startup timeout");
 		}
 	}
 }
