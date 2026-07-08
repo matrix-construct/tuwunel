@@ -214,6 +214,16 @@ async fn migrate(services: &Services, foreign_lineage: bool) -> Result {
 	import_conduit_knocks(services).await?;
 	split_conduit_highlight_counts(services).await?;
 
+	// The next two repairs fix a conduwuit-era roomuserid_joined bug Conduit
+	// never had; record them done for a Conduit database instead of running.
+	if db
+		.open_cf("servernamemediaid_metadata")?
+		.is_some()
+	{
+		db["global"].insert(b"fix_bad_double_separator_in_state_cache", []);
+		db["global"].insert(b"retroactively_fix_bad_data_from_roomuserid_joined", []);
+	}
+
 	if db["global"]
 		.get(b"fix_bad_double_separator_in_state_cache")
 		.await
