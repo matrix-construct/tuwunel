@@ -3,6 +3,7 @@ mod backfill;
 mod build;
 mod create;
 mod pdus;
+mod purge;
 mod redact;
 
 use std::{fmt::Write, future::Future, sync::Arc};

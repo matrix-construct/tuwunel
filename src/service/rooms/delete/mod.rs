@@ -1,13 +1,25 @@
 use std::sync::Arc;
 
 use futures::{FutureExt, StreamExt};
-use ruma::RoomId;
+use ruma::{OwnedRoomAliasId, OwnedRoomId, OwnedUserId, RoomId};
+use serde::{Deserialize, Serialize};
 use tuwunel_core::{Result, debug, result::LogErr, trace, utils::future::BoolExt, warn};
 
 use crate::rooms::timeline::RoomMutexGuard;
 
 pub struct Service {
 	services: Arc<crate::services::OnceServices>,
+}
+
+/// Outcome of a room shutdown: evicted users, stripped local aliases, and the
+/// redirect room (always `None`; replacement rooms are not created). Serializes
+/// to Synapse's `ShutdownRoom` shape for the async delete task to round-trip.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct ShutdownRoom {
+	pub kicked_users: Vec<OwnedUserId>,
+	pub failed_to_kick_users: Vec<OwnedUserId>,
+	pub local_aliases: Vec<OwnedRoomAliasId>,
+	pub new_room_id: Option<OwnedRoomId>,
 }
 
 impl crate::Service for Service {
@@ -61,48 +73,81 @@ impl Service {
 		room_id: &RoomId,
 		force: bool,
 		state_lock: RoomMutexGuard,
-	) -> Result {
-		debug!("Making all users leave the room {room_id} and forgetting it");
-		let mut users = self
+	) -> Result<ShutdownRoom> {
+		let summary = self.shutdown_room(room_id, &state_lock).await;
+
+		self.purge_room(room_id, force, &state_lock).await;
+
+		debug!(?room_id, "Successfully deleted room from our database");
+
+		Ok(summary)
+	}
+
+	/// Evicts every local user, strips the room's local aliases, and
+	/// unpublishes it from the directory, returning the shutdown summary. The
+	/// admin delete runs this phase alone when `purge` is false.
+	pub async fn shutdown_room(
+		&self,
+		room_id: &RoomId,
+		state_lock: &RoomMutexGuard,
+	) -> ShutdownRoom {
+		debug!(?room_id, "Making all local users leave the room and forgetting it");
+		let (kicked_users, failed_to_kick_users) = self
 			.services
 			.state_cache
 			.local_users_in_room(room_id)
-			.boxed();
-
-		while let Some(user_id) = users.next().await {
-			debug!(
-				"Attempting leave for user {user_id} in room {room_id} (ignoring all errors, \
-				 evicting admins too)",
-			);
-
-			if let Err(e) = self
-				.services
-				.membership
-				.leave(user_id, room_id, Some("Room Deleted".into()), true, &state_lock)
-				.boxed()
-				.await
-			{
-				warn!("Failed to leave room: {e}");
-			}
-		}
-
-		debug!("Deleting all our room aliases for the room");
-		self.services
-			.alias
-			.local_aliases_for_room(room_id)
-			.for_each(async |local_alias| {
-				self.services
-					.alias
-					.remove_alias(local_alias)
+			.map(ToOwned::to_owned)
+			.fold((Vec::new(), Vec::new()), async |(mut kicked, mut failed), user_id| {
+				match self
+					.services
+					.membership
+					.leave(&user_id, room_id, Some("Room Deleted".into()), true, state_lock)
+					.boxed()
 					.await
-					.log_err()
-					.ok();
+				{
+					| Ok(()) => kicked.push(user_id),
+					| Err(e) => {
+						warn!(%e, "Failed to leave room");
+						failed.push(user_id);
+					},
+				}
+
+				(kicked, failed)
 			})
 			.await;
+
+		debug!("Deleting all our room aliases for the room");
+		let local_aliases = self
+			.services
+			.alias
+			.local_aliases_for_room(room_id)
+			.map(ToOwned::to_owned)
+			.collect::<Vec<_>>()
+			.await;
+
+		for alias in &local_aliases {
+			self.services
+				.alias
+				.remove_alias(alias)
+				.await
+				.log_err()
+				.ok();
+		}
 
 		debug!("Removing/unpublishing room from our room directory");
 		self.services.directory.set_not_public(room_id);
 
+		ShutdownRoom {
+			kicked_users,
+			failed_to_kick_users,
+			local_aliases,
+			new_room_id: None,
+		}
+	}
+
+	/// Wipes the room's storage. `force` widens the erasure of local users'
+	/// left-state (it is not Synapse's `force_purge`).
+	async fn purge_room(&self, room_id: &RoomId, force: bool, state_lock: &RoomMutexGuard) {
 		debug!("Deleting room's threads from database");
 		self.services
 			.threads
@@ -167,12 +212,10 @@ impl Service {
 			.log_err()
 			.ok();
 
-		debug!("Final stages of deleting the room");
-
 		debug!("Deleting room state hash from our database");
 		self.services
 			.state
-			.delete_room_shortstatehash(room_id, &state_lock)
+			.delete_room_shortstatehash(room_id, state_lock)
 			.log_err()
 			.ok();
 
@@ -191,8 +234,5 @@ impl Service {
 			.await
 			.log_err()
 			.ok();
-
-		debug!("Successfully deleted room {room_id} from our database");
-		Ok(())
 	}
 }

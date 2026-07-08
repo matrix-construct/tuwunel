@@ -172,6 +172,15 @@ fn register_synapse_admin_rooms_routes(router: Router<State>) -> Router<State> {
 		.ruma_route(&client::rooms::admin_get_room_block_route)
 		.ruma_route(&client::rooms::admin_set_room_block_route)
 		.ruma_route(&client::rooms::admin_make_room_admin_route)
+		.ruma_route(&client::rooms::admin_delete_room_v1_route)
+		.ruma_route(&client::rooms::admin_delete_room_v2_route)
+		.ruma_route(&client::rooms::admin_delete_status_by_id_route)
+		.ruma_route(&client::rooms::admin_delete_status_by_room_route)
+		.ruma_route(&client::rooms::admin_get_forward_extremities_route)
+		.ruma_route(&client::rooms::admin_delete_forward_extremities_route)
+		.ruma_route(&client::rooms::admin_purge_history_route)
+		.ruma_route(&client::rooms::admin_purge_history_by_event_route)
+		.ruma_route(&client::rooms::admin_purge_history_status_route)
 }
 
 fn register_synapse_admin_media_routes(router: Router<State>) -> Router<State> {
@@ -196,6 +205,7 @@ fn register_synapse_admin_misc_routes(router: Router<State>) -> Router<State> {
 	router
 		.ruma_route(&client::misc::admin_server_version_route)
 		.ruma_route(&client::misc::admin_fetch_event_route)
+		.ruma_route(&client::misc::admin_scheduled_tasks_route)
 }
 
 fn register_client_profile_and_data_routes(router: Router<State>) -> Router<State> {

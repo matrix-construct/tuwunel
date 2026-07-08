@@ -115,3 +115,9 @@ pub fn retained_pdus_raw(&self) -> impl Stream<Item = Result<&[u8]>> + Send {
 		.raw_stream()
 		.map_ok(|x| x.1)
 }
+
+/// Drops the retained unredacted original of a purged event. The paired
+/// `timeredacted_eventid` index entry is left for the retention worker to reap
+/// at its scheduled time.
+#[implement(Service)]
+pub fn purge_original(&self, event_id: &EventId) { self.eventid_originalpdu.remove(event_id); }

@@ -837,6 +837,45 @@ pub async fn delete_all_relatesto_typed_for_room(&self, room_id: &RoomId) -> Res
 	Ok(())
 }
 
+/// Purges one event's relation-index rows during a history purge. Rows keyed by
+/// this event as parent/target are removed; rows keyed by it as a surviving
+/// event's child are left dangling (harmless: relation reads discard ids that
+/// no longer resolve).
+#[implement(Service)]
+pub async fn purge_event_relations(
+	&self,
+	shortroomid: ShortRoomId,
+	parent: PduCount,
+	room_id: &RoomId,
+	event_id: &EventId,
+) {
+	let target = parent.to_be_bytes();
+
+	self.db
+		.tofrom_relation
+		.raw_keys_from(target.as_slice())
+		.ignore_err()
+		.ready_take_while(move |key| key.starts_with(&target))
+		.ready_for_each(|key| self.db.tofrom_relation.remove(key))
+		.await;
+
+	let mut prefix = ArrayVec::<u8, 16>::new();
+	prefix.extend(shortroomid.to_be_bytes());
+	prefix.extend(parent.to_be_bytes());
+
+	self.db
+		.relatesto_typed
+		.raw_keys_from(prefix.as_slice())
+		.ignore_err()
+		.ready_take_while(move |key| key.starts_with(&prefix))
+		.ready_for_each(|key| self.db.relatesto_typed.remove(key))
+		.await;
+
+	self.db.referencedevents.del((room_id, event_id));
+
+	self.db.softfailedeventids.remove(event_id);
+}
+
 /// Rebuild `relatesto_typed` from every stored PDU. Run once at startup behind
 /// a `global` marker, and on demand from the admin command. Clears first so a
 /// partial or stale index is replaced wholesale.
