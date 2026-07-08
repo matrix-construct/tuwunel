@@ -42,6 +42,7 @@
   - [Protocol Compliance](development/compliance.md)
     - [MSC Implementation](development/compliance/msc.md)
     - [Complement Results](development/compliance/complement.md)
+    - [Synapse Admin API](development/compliance/synapse-admin.md)
   - [Testing and Delivery](development/testing.md)
     - [Docker Builder](development/testing/bake.md)
     - [Matrix Selectors](development/testing/matrix.md)
