@@ -6,9 +6,17 @@ pub(crate) mod mas;
 mod register;
 mod suspend_user;
 
+pub(crate) mod devices;
+pub(crate) mod federation;
+pub(crate) mod media;
+pub(crate) mod misc;
+pub(crate) mod rooms;
+pub(crate) mod tokens;
+pub(crate) mod users;
+
 use futures::future::join3;
 use ruma::UserId;
-use tuwunel_core::{Err, Result};
+use tuwunel_core::{Config, Err, Result, err};
 
 pub(crate) use self::{
 	get_nonce::admin_register_nonce_route, is_user_locked::is_user_locked_route,
@@ -49,4 +57,31 @@ async fn authorize(services: &crate::State, caller: &UserId, target: &UserId) ->
 	}
 
 	Ok(())
+}
+
+/// Assert the caller is a server administrator. Generic Synapse admin
+/// endpoints use this plain check, not the MSC4323 anti-enumeration
+/// `authorize()` guard whose self-target and admin-target ordering does not
+/// fit them.
+#[expect(dead_code)]
+pub(crate) async fn require_admin(services: &crate::State, sender: &UserId) -> Result {
+	services
+		.admin
+		.user_is_admin(sender)
+		.await
+		.then_some(())
+		.ok_or_else(|| {
+			err!(Request(Forbidden("Only server administrators can use this endpoint")))
+		})
+}
+
+/// True when Matrix Authentication Service delegation is active, in which case
+/// the Synapse-mirrored admin routes MAS owns (user admin, login-as,
+/// reset_password, registration tokens) are left unregistered and answer 404,
+/// mirroring Synapse's de-registration of those servlets.
+pub(crate) fn mas_active(config: &Config) -> bool {
+	config
+		.mas_secret
+		.as_deref()
+		.is_some_and(|secret| !secret.is_empty())
 }
