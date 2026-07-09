@@ -144,8 +144,9 @@ for these tags are on average monthly, weekly and daily, respectively.
 
 ### Getting Help & Support
 
-If you are opposed to using github, or if private discussion is required such as for security
-disclosures, or for any other reason, I would be happy to receive your DM at
+Security vulnerabilities have their own reporting process; please see
+[SECURITY.md](./SECURITY.md). If you are opposed to using github, or if private discussion is
+required for any other reason, I would be happy to receive your DM at
 [@jason:tuwunel.me](https://matrix.to/#/@jason:tuwunel.me). This will not be bothering me as it would
 be my pleasure to help you when possible. As an emergency contact you can send an email to
 jasonzemos@gmail.com.
