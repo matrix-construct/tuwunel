@@ -44,15 +44,25 @@ pub(crate) async fn tuwunel_remote_version(
 ) -> Result<get_remote_version::unstable::Response> {
 	let timer = Instant::now();
 
-	let response = services
-		.federation
-		.execute(&body.server_name, get_server_version::v1::Request {})
-		.await?;
+	let server = if services.globals.server_is_ours(&body.server_name) {
+		Some(get_server_version::v1::Server {
+			name: Some(tuwunel_core::version::name().into()),
+			version: Some(tuwunel_core::version::version().into()),
+			compiler: tuwunel_core::info::rustc::version().map(Into::into),
+			..Default::default()
+		})
+	} else {
+		services
+			.federation
+			.execute(&body.server_name, get_server_version::v1::Request {})
+			.await?
+			.server
+	};
 
 	let elapsed = timer.elapsed();
 
 	Ok(get_remote_version::unstable::Response {
-		data: serde_json::value::to_raw_value(&response.server)?,
+		data: serde_json::value::to_raw_value(&server)?,
 		rtt_ms: elapsed,
 	})
 }
