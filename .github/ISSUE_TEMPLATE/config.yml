@@ -1,0 +1,12 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Support and questions
+    url: https://matrix.to/#/#tuwunel:grin.hu
+    about: >-
+      Ask in the Tuwunel Matrix room; a question is often answered faster
+      there than in an issue.
+  - name: Report a security vulnerability
+    url: https://github.com/matrix-construct/tuwunel/security/advisories/new
+    about: >-
+      Privately report a vulnerability. See SECURITY.md for all reporting
+      channels.

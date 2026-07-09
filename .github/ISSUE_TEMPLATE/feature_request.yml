@@ -1,0 +1,38 @@
+name: Feature Request
+description: Suggest new functionality for Tuwunel.
+labels: ["feature"]
+type: Feature
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the suggestion! Please search
+        [existing issues](https://github.com/matrix-construct/tuwunel/issues)
+        first to avoid duplicates.
+  - type: textarea
+    id: motivation
+    attributes:
+      label: What problem would this solve?
+      description: >-
+        Describe the use case or pain point, not just the feature itself.
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: What would you like to happen?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives or workarounds
+      description: >-
+        What do you do today instead? Do other homeservers implement this?
+  - type: input
+    id: msc
+    attributes:
+      label: Related MSC or spec section
+      description: >-
+        If this concerns the Matrix protocol, link the MSC or spec section.
+      placeholder: "https://github.com/matrix-org/matrix-spec-proposals/pull/..."

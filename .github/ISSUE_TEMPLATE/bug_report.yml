@@ -1,0 +1,83 @@
+name: Bug Report
+description: Something in Tuwunel isn't right.
+labels: ["bug"]
+type: Bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. Please search
+        [existing issues](https://github.com/matrix-construct/tuwunel/issues)
+        first to avoid duplicates.
+
+        **Do not report security vulnerabilities here.** Use one of the
+        private channels in our
+        [security policy](https://github.com/matrix-construct/tuwunel/blob/main/SECURITY.md)
+        instead.
+  - type: input
+    id: version
+    attributes:
+      label: Tuwunel version
+      description: >-
+        From `tuwunel --version`, the `!admin server version` command, or
+        the image tag you are running.
+      placeholder: "1.8.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: installation
+    attributes:
+      label: Installation method
+      options:
+        - Docker / OCI image
+        - Debian package
+        - Static binary from a release
+        - Built from source
+        - Distribution or third-party package
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Platform and OS
+      placeholder: "Debian 13 on x86_64"
+  - type: dropdown
+    id: database-origin
+    attributes:
+      label: Database origin
+      description: >-
+        Was this database created by Tuwunel, or migrated from another
+        server implementation?
+      options:
+        - Created by Tuwunel
+        - Migrated from Conduit / conduwuit / conduwuit-lineage fork
+        - Unsure
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: >-
+        Describe the bug and its impact. If a client or another homeserver
+        is involved, name it; some issues are client or federation specific.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. ...
+        2. ...
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log output or configuration
+      description: >-
+        Paste relevant log lines and any non-default config options.
+        Redact secrets, tokens, and anything private.
+      render: shell
