@@ -27,8 +27,8 @@
 
 | Inv | yes | partial | no | n/a | total |
 |---|---|---|---|---|---|
-| merged | 184 | 7 | 7 | 58 | 256 |
-| open | 60 | 28 | 404 | 176 | 668 |
+| merged | 186 | 7 | 7 | 59 | 259 |
+| open | 58 | 28 | 404 | 175 | 665 |
 | closed | 8 | 1 | 39 | 52 | 100 |
 
 ## Merged
@@ -38,6 +38,8 @@ in the [Out of scope](#out-of-scope) section.
 
 | MSC | Status | Correct/Impl | Title | Note |
 |---|---|---:|---|---|
+| MSC4436 | ✅ ● | 100/100 | Make server ACLs case insensitive | Ruma is_allowed uses WildMatch::new_case_insensitive |
+| MSC4423 | ✅ ● | 100/100 | Undefine order of room directory | undefines /publicRooms ordering; Tuwunel's existing order is now compatible. |
 | MSC4380 | ✅ ● | 100/100 | Invite blocking | src/api/client/sync/{v3.rs,v5/selector.rs} suppress stored invites; createRoo... |
 | MSC4376 | ✅ ● | 100/100 | Remove /v1/send_join and /v1/send_leave | v1 send_join and v1 send_leave routes are not registered |
 | MSC4341 | ✅ ● | 100/100 | Support for RFC 8628 Device Authorization Grant | src/api/oidc/device.rs:62; RFC 8628 device grant advertised, minted, polled |
@@ -295,7 +297,6 @@ in the [Out of scope](#out-of-scope) section.
 | MSC4439 | ✅ ● | 95/95 | Encryption key URIs in `/.well-known/matrix/support` | src/core/config/check.rs:516; validate_pgp_key requires URI, rejects raw key |
 | MSC4438 | ✅ ● | 100/100 | Message bookmarks via account data | Pure account-data convention; existing endpoints store arbitrary types |
 | MSC4437 | ❌ ● | 0/0 | Endpoint to replace entire profile | No PUT /_matrix/client/v3/profile/{userId} replace-all endpoint |
-| MSC4436 | ✅ ● | 100/100 | Make server ACLs case insensitive | Ruma is_allowed uses WildMatch::new_case_insensitive |
 | MSC4435 | ❌ ● | 0/0 | Room slowmode | No m.room.slowmode handling |
 | MSC4433 | ❌ ● | 0/0 | Image Packs and Room Upgrades | Room upgrade does not transfer m.room.image_pack or update m.image_pack.rooms |
 | MSC4432 | ❌ ● | 0/0 | Server-wide room name overrides | No m.room.name.server_wide propagation; no capability |
@@ -306,7 +307,6 @@ in the [Out of scope](#out-of-scope) section.
 | MSC4427 | ❌ ● | 0/0 | Custom banners for user profiles | No m.banner_url or chat.commet.profile_banner support |
 | MSC4426 | ❌ ◐ | 20/20 | User Status Profile Fields | Profile keys passthrough via MSC4133 endpoints; no specific m.status/m.call v... |
 | MSC4425 | ❌ ● | 0/0 | Ephemeral media | no ephemeral query param; no DELETE on /_matrix/client/v1/media/.../.... |
-| MSC4423 | ✅ ● | 100/100 | Undefine order of room directory | undefines /publicRooms ordering; Tuwunel's existing order is now compatible. |
 | MSC4420 | ❌ ● | 0/0 | Duplicate one-time key error response for /keys/upload | add_one_time_key silently overwrites; no M_DUPLICATE_ONE_TIME_KEY emitted. |
 | MSC4418 | ✅ ● | 100/100 | Make `destination` a required server authentication field | destination required on inbound and outbound; cited verbatim in MSC. |
 | MSC4417 | ❌ ● | 0/0 | URL Previews via Appservices | client preview_url exists; no appservice fan-out or namespace check. |
@@ -1032,7 +1032,7 @@ place of the (uniformly empty) `Correct/Impl` cell.
 | MSC2582 | ⬛ ◐ | merged | Remove `mimetype` from `EncryptedFile` object | Removes mimetype example from spec; pure spec/client cleanup |
 | MSC2579 | ⬛ ○ | closed | Improved tagging support | Client tag-ordering account_data; server stores opaquely |
 | MSC2557 | ⬛ ◐ | merged | Clarifications on spoilers | Client-only spoiler rendering clarification |
-| MSC2545 | ⬛ ◐ | open | Image Packs (Emoticons &amp; Stickers) | Client emote/sticker pack rendering; server stores account_data and state events |
+| MSC2545 | ⬛ ◐ | merged | Image Packs (Emoticons &amp; Stickers) | Client emote/sticker pack rendering; server stores account_data and state events |
 | MSC2530 | ⬛ ◐ | merged | Body field as media caption | Client rendering of body+filename for media msgtypes |
 | MSC2529 | ⬛ ◐ | open | Use existing m.room.message/m.text events as captions for images | [→ MSC2530] Client-only relation/caption rendering; superseded by MSC2530 |
 | MSC2516 | ⬛ ◐ | closed | Add a new message type for voice messages | Client-only msgtype; server does no msgtype-specific handling |

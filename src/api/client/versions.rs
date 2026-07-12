@@ -43,7 +43,7 @@ pub(crate) async fn get_supported_versions_route(
 	})
 }
 
-static VERSIONS: [&str; 25] = [
+static VERSIONS: [&str; 27] = [
 	"r0.0.1", /* Historical */
 	"r0.1.0", /* Historical */
 	"r0.2.0", /* Historical */
@@ -69,6 +69,8 @@ static VERSIONS: [&str; 25] = [
 	"v1.15",  /* OIDC auth metadata */
 	"v1.16",  /* extended profiles (MSC4133) */
 	"v1.17",  /* no action */
+	"v1.18",  /* policy servers (MSC4284) */
+	"v1.19",  /* mutual rooms (MSC2666) */
 ];
 
 static UNSTABLE_FEATURES: [&str; 37] = [
