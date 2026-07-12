@@ -27,6 +27,7 @@ mod resync_database;
 mod runtime_interval;
 mod runtime_metrics;
 mod sign_json;
+mod state_at_incoming;
 mod task_interval;
 mod task_metrics;
 pub(crate) mod tester;
@@ -305,6 +306,13 @@ pub(super) enum DebugCommand {
 	/// - Dump all stored PDUs
 	DumpPdus {
 		dir: String,
+	},
+
+	/// - Run a read-only local state derivation for one stored event and report
+	///   the outcome
+	StateAtIncoming {
+		/// An event ID (a $ followed by the base64 reference hash)
+		event_id: OwnedEventId,
 	},
 
 	/// - Drive the federation event-fetcher service directly (diagnostic)
