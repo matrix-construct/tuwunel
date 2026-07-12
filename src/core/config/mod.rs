@@ -4281,6 +4281,16 @@ pub struct AppService {
 	/// default: false
 	#[serde(default)]
 	pub device_management: bool,
+
+	/// Whether the application service wants MSC3202 transaction extensions
+	/// (device lists, one-time-key counts, and unused fallback key types).
+	///
+	/// The registration-file key is `org.matrix.msc3202`; this inline-config
+	/// key is `msc3202_transaction_extensions`.
+	///
+	/// default: false
+	#[serde(default)]
+	pub msc3202_transaction_extensions: bool,
 }
 
 impl From<AppService> for ruma::api::appservice::Registration {
@@ -4298,6 +4308,7 @@ impl From<AppService> for ruma::api::appservice::Registration {
 			hs_token: conf.hs_token,
 			receive_ephemeral: conf.receive_ephemeral,
 			device_management: conf.device_management,
+			msc3202_transaction_extensions: conf.msc3202_transaction_extensions,
 			protocols: conf.protocols.into(),
 			rate_limited: conf.rate_limited.into(),
 			sender_localpart,

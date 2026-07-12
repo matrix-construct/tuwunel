@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use axum::extract::State;
 use base64::{Engine as _, engine::general_purpose};
 use futures::StreamExt;
@@ -5,7 +7,7 @@ use ruma::{
 	CanonicalJsonObject, CanonicalJsonValue, OwnedRoomId, OwnedUserId, RoomId, RoomVersionId,
 	ServerName, UserId,
 	api::{
-		appservice::event::push_events,
+		appservice::event::push_events::{self, v1::DeviceLists},
 		error::{ErrorKind, IncompatibleRoomVersionErrorData},
 		federation::membership::create_invite,
 	},
@@ -354,6 +356,9 @@ async fn record_local_invite(
 						.into(),
 					ephemeral: Vec::new(),
 					to_device: Vec::new(),
+					device_lists: DeviceLists::new(),
+					device_one_time_keys_count: BTreeMap::new(),
+					device_unused_fallback_key_types: BTreeMap::new(),
 				})
 				.await?;
 		}

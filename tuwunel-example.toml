@@ -3662,6 +3662,14 @@
 #
 #device_management = false
 
+# Whether the application service wants MSC3202 transaction extensions
+# (device lists, one-time-key counts, and unused fallback key types).
+#
+# The registration-file key is `org.matrix.msc3202`; this inline-config
+# key is `msc3202_transaction_extensions`.
+#
+#msc3202_transaction_extensions = false
+
 
 
 #[[global.appservice.<ID>.<users|rooms|aliases>]]

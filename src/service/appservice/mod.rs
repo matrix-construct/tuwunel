@@ -193,6 +193,16 @@ impl Service {
 			.map(|info| info.registration)
 	}
 
+	/// Retrieve a registration with its compiled namespaces (`sender`,
+	/// `is_user_match`), which a bare `Registration` lacks.
+	pub async fn get_registration_info(&self, id: &str) -> Option<RegistrationInfo> {
+		self.registration_info
+			.read()
+			.await
+			.get(id)
+			.cloned()
+	}
+
 	pub async fn find_from_access_token(&self, token: &str) -> Result<RegistrationInfo> {
 		self.read()
 			.await

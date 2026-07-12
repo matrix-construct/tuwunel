@@ -87,6 +87,7 @@ Fields under `[global.appservice.<ID>]`:
 | `protocols` | `[]` | Protocols bridged (e.g. `["irc"]`). Reported via the `/thirdparty/protocols` endpoint. |
 | `receive_ephemeral` | `false` | Include ephemeral events (typing notifications, read receipts) in pushes to the appservice. |
 | `device_management` | `false` | Allow the appservice to manage devices on behalf of virtual users ([MSC4190](https://github.com/matrix-org/matrix-spec-proposals/pull/4190)). |
+| `msc3202_transaction_extensions` | `false` | Include end-to-bridge encryption bookkeeping (device-list changes, one-time-key counts, unused fallback key types) in pushes, so encrypting bridges work without a `/sync` loop ([MSC3202](https://github.com/matrix-org/matrix-spec-proposals/pull/3202), paired with to-device delivery from [MSC4203](https://github.com/matrix-org/matrix-spec-proposals/pull/4203)). The registration-file key is `org.matrix.msc3202`. |
 
 Namespace entries under `[[global.appservice.<ID>.users]]`, `aliases`, and `rooms`:
 

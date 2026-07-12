@@ -25,10 +25,14 @@ use tuwunel_core::{
 use tuwunel_service::Services;
 
 const TO_DEVICE: &str = "de.sorunome.msc2409.to_device";
+const DEVICE_LISTS: &str = "org.matrix.msc3202.device_lists";
+const OTK_COUNT: &str = "org.matrix.msc3202.device_one_time_keys_count";
+const FALLBACK: &str = "org.matrix.msc3202.device_unused_fallback_key_types";
 
 /// Boots a server with a stub appservice listener and asserts the transactions
-/// it receives: to-device delivery (MSC4203) routed by user namespace, and
-/// stable-yet-distinct transaction IDs.
+/// it receives: to-device delivery (MSC4203), the MSC3202 transaction
+/// extensions gated on the registration opt-in, and stable-yet-distinct
+/// transaction IDs.
 #[test]
 fn appservice_e2ee_transactions() -> Result {
 	let db_path = format!("/tmp/tuwunel-test-appservice-txn-{}", process_id());
@@ -69,8 +73,8 @@ async fn run_cases(services: &Arc<Services>) -> Result {
 	let stub = spawn(stub_appservice(listener, tx));
 
 	let server_name = services.globals.server_name();
-	register(services, "voicebridge_on", &url, "_von", "@_von_.*").await?;
-	register(services, "voicebridge_off", &url, "_voff", "@_voff_.*").await?;
+	register(services, "voicebridge_on", &url, "_von", "@_von_.*", true).await?;
+	register(services, "voicebridge_off", &url, "_voff", "@_voff_.*", false).await?;
 
 	let on_ghost = UserId::parse_with_server_name("_von_ghost", server_name)?;
 	let off_ghost = UserId::parse_with_server_name("_voff_ghost", server_name)?;
@@ -78,17 +82,21 @@ async fn run_cases(services: &Arc<Services>) -> Result {
 	let device = device_id!("GHOSTDEV");
 	let content = json!({ "algorithm": "m.olm.v1.curve25519-aes-sha2", "ciphertext": {} });
 
-	// Each bridge receives exactly the to-device events addressed into its own
-	// user namespace.
+	// The opted-in bridge gets the to-device event plus an MSC3202 one-time-key
+	// count for the device (empty here: the drained-pool signal).
 	send_to_device(services, &sender, &on_ghost, device, &content).await?;
 	let (first_txn_id, body) = recv_txn(&mut rx).await?;
 	let txn = parse(&body)?;
 	assert_to_device(&txn, &on_ghost, device, &sender)?;
+	assert_otk_entry(&txn, &on_ghost, device)?;
 
+	// Gate isolation: an opted-out bridge receives the to-device event but none
+	// of the three MSC3202 fields.
 	send_to_device(services, &sender, &off_ghost, device, &content).await?;
 	let (_, body) = recv_txn(&mut rx).await?;
 	let txn = parse(&body)?;
 	assert_to_device(&txn, &off_ghost, device, &sender)?;
+	assert_no_msc3202(&txn)?;
 
 	// A byte-identical repeat still ships under a distinct transaction ID so the
 	// bridge's txn-id dedup does not drop it.
@@ -133,11 +141,12 @@ async fn register(
 	url: &str,
 	sender_localpart: &str,
 	user_regex: &str,
+	msc3202: bool,
 ) -> Result {
 	let mut namespaces = Namespaces::new();
 	namespaces.users = vec![Namespace::new(true, user_regex.to_owned())];
 
-	let registration: Registration = RegistrationInit {
+	let mut registration: Registration = RegistrationInit {
 		id: id.to_owned(),
 		url: Some(url.to_owned()),
 		as_token: format!("{id}_as_token"),
@@ -148,6 +157,8 @@ async fn register(
 		protocols: None,
 	}
 	.into();
+
+	registration.msc3202_transaction_extensions = msc3202;
 
 	services
 		.appservice
@@ -189,6 +200,27 @@ fn assert_to_device(txn: &Value, target: &UserId, device: &DeviceId, sender: &Us
 		|| event.get("content").is_none()
 	{
 		return Err!("unexpected to-device entry: {event}");
+	}
+
+	Ok(())
+}
+
+fn assert_otk_entry(txn: &Value, target: &UserId, device: &DeviceId) -> Result {
+	txn.get(OTK_COUNT)
+		.and_then(|counts| counts.get(target.as_str()))
+		.and_then(|devices| devices.get(device.as_str()))
+		.ok_or_else(|| {
+			err!("transaction lacked an {OTK_COUNT} entry for the addressed device")
+		})?;
+
+	Ok(())
+}
+
+fn assert_no_msc3202(txn: &Value) -> Result {
+	for field in [DEVICE_LISTS, OTK_COUNT, FALLBACK] {
+		if txn.get(field).is_some() {
+			return Err!("opted-out bridge received the gated field {field}");
+		}
 	}
 
 	Ok(())
