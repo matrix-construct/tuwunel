@@ -8,7 +8,9 @@ use tuwunel_core::{
 	ref_at, trace,
 	utils::{
 		option::OptionExt,
-		stream::{BroadbandExt, IterStream, ReadyExt, TryBroadbandExt, TryWidebandExt},
+		stream::{
+			BroadbandExt, IterStream, ReadyExt, TryBroadbandExt, TryWidebandExt, WidebandExt,
+		},
 	},
 };
 
@@ -225,10 +227,20 @@ where
 		"leaf state after event"
 	);
 
-	let starting_events = leaf_state_after_event
-		.iter()
-		.map(ref_at!(1))
-		.map(AsRef::as_ref);
+	self.fork_state_and_chain(room_id, room_version, &leaf_state_after_event)
+		.await
+}
+
+/// Typed fork input and full auth chain for one fork branch whose state is
+/// the given (shortstatekey, event_id) pairs. A later duplicate key wins.
+#[implement(super::Service)]
+pub(super) async fn fork_state_and_chain(
+	&self,
+	room_id: &RoomId,
+	room_version: &RoomVersionId,
+	state: &[(u64, OwnedEventId)],
+) -> Result<(StateMap<OwnedEventId>, AuthSet<OwnedEventId>)> {
+	let starting_events = state.iter().map(ref_at!(1)).map(AsRef::as_ref);
 
 	let auth_chain = self
 		.services
@@ -236,10 +248,10 @@ where
 		.event_ids_iter(room_id, room_version, starting_events)
 		.try_collect();
 
-	let fork_state = leaf_state_after_event
+	let fork_state = state
 		.iter()
 		.stream()
-		.broad_then(|(k, id)| {
+		.wide_then(|(k, id)| {
 			self.services
 				.short
 				.get_statekey_from_short(*k)
