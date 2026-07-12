@@ -89,8 +89,18 @@ pub struct UrlPreviewData {
 }
 
 #[implement(Service)]
-pub fn remove_url_preview(&self, url: &str) -> Result {
-	// TODO: also remove the downloaded image
+pub async fn remove_url_preview(&self, url: &str) -> Result {
+	// unregister the preview's lazy media references; media stored by
+	// previews generated before relaying was introduced is not removed
+	if let Ok(preview) = self.db.get_url_preview(url).await {
+		for mxc in [&preview.image, &preview.video, &preview.audio]
+			.into_iter()
+			.flatten()
+		{
+			self.db.remove_lazy_media(mxc);
+		}
+	}
+
 	self.db.remove_url_preview(url)
 }
 
@@ -136,6 +146,15 @@ pub async fn request_url_preview(&self, url: &Url) -> Result<UrlPreviewData> {
 		}
 	}
 
+	// an upstream error response must not be turned into a cached preview
+	if !response.status().is_success() {
+		return Err!(Request(NotFound(debug_warn!(
+			status = ?response.status(),
+			%url,
+			"URL preview request failed"
+		))));
+	}
+
 	let content_type = response
 		.headers()
 		.get(reqwest::header::CONTENT_TYPE)
@@ -147,6 +166,8 @@ pub async fn request_url_preview(&self, url: &Url) -> Result<UrlPreviewData> {
 	let data = match content_type.as_str() {
 		| html if html.starts_with("text/html") => self.download_html(url, response).await?,
 		| img if img.starts_with("image/") => self.download_image(response).await?,
+		| video if video.starts_with("video/") => self.download_video(response).await?,
+		| audio if audio.starts_with("audio/") => self.download_audio(response).await?,
 		| _ => return Err!(Request(Unknown("Unsupported Content-Type"))),
 	};
 
@@ -159,18 +180,13 @@ pub async fn request_url_preview(&self, url: &Url) -> Result<UrlPreviewData> {
 #[implement(Service)]
 pub async fn download_image(&self, response: reqwest::Response) -> Result<UrlPreviewData> {
 	use image::ImageReader;
-	use ruma::Mxc;
-	use tuwunel_core::utils::random_string;
 
+	// the image is downloaded here only to be measured: clients expect the
+	// preview to carry its size and dimensions. the bytes are not stored;
+	// requests for the mxc are relayed from the source like video/audio.
+	let url = response.url().clone();
 	let limit = self.services.config.max_response_size;
 	let image = crate::client::read_response_capped(response, limit).await?;
-	let mxc = Mxc {
-		server_name: self.services.globals.server_name(),
-		media_id: &random_string(super::MXC_LENGTH),
-	};
-
-	self.create(&mxc, None, None, None, &image)
-		.await?;
 
 	let cursor = std::io::Cursor::new(&image);
 	let (width, height) = match ImageReader::new(cursor).with_guessed_format() {
@@ -182,7 +198,7 @@ pub async fn download_image(&self, response: reqwest::Response) -> Result<UrlPre
 	};
 
 	Ok(UrlPreviewData {
-		image: Some(mxc.to_string()),
+		image: Some(self.register_lazy_media(url.as_str())),
 		image_size: Some(image.len()),
 		image_width: width,
 		image_height: height,
@@ -194,6 +210,68 @@ pub async fn download_image(&self, response: reqwest::Response) -> Result<UrlPre
 #[implement(Service)]
 #[expect(clippy::unused_async)]
 pub async fn download_image(&self, _response: reqwest::Response) -> Result<UrlPreviewData> {
+	Err!(FeatureDisabled("url_preview"))
+}
+
+/// Mint a local mxc:// URI that lazily resolves to `url`: no bytes are
+/// fetched now, and requests for the mxc are relayed from the source without
+/// storing anything (see `Service::fetch_lazy_media` in the media service).
+/// Keeps preview generation cheap regardless of how large the underlying
+/// file is, while still routing clients through this server rather than
+/// handing out the third-party URL directly.
+#[cfg(feature = "url_preview")]
+#[implement(Service)]
+fn register_lazy_media(&self, url: &str) -> String {
+	use ruma::Mxc;
+	use tuwunel_core::utils::random_string;
+
+	let mxc = Mxc {
+		server_name: self.services.globals.server_name(),
+		media_id: &random_string(super::MXC_LENGTH),
+	};
+
+	self.db.insert_lazy_media(&mxc, url);
+
+	mxc.to_string()
+}
+
+#[cfg(feature = "url_preview")]
+#[implement(Service)]
+#[expect(clippy::unused_async)]
+pub async fn download_video(&self, response: reqwest::Response) -> Result<UrlPreviewData> {
+	Ok(UrlPreviewData {
+		video: Some(self.register_lazy_media(response.url().as_str())),
+		video_size: response
+			.content_length()
+			.and_then(|len| usize::try_from(len).ok()),
+		..Default::default()
+	})
+}
+
+#[cfg(not(feature = "url_preview"))]
+#[implement(Service)]
+#[expect(clippy::unused_async)]
+pub async fn download_video(&self, _response: reqwest::Response) -> Result<UrlPreviewData> {
+	Err!(FeatureDisabled("url_preview"))
+}
+
+#[cfg(feature = "url_preview")]
+#[implement(Service)]
+#[expect(clippy::unused_async)]
+pub async fn download_audio(&self, response: reqwest::Response) -> Result<UrlPreviewData> {
+	Ok(UrlPreviewData {
+		audio: Some(self.register_lazy_media(response.url().as_str())),
+		audio_size: response
+			.content_length()
+			.and_then(|len| usize::try_from(len).ok()),
+		..Default::default()
+	})
+}
+
+#[cfg(not(feature = "url_preview"))]
+#[implement(Service)]
+#[expect(clippy::unused_async)]
+pub async fn download_audio(&self, _response: reqwest::Response) -> Result<UrlPreviewData> {
 	Err!(FeatureDisabled("url_preview"))
 }
 
@@ -247,9 +325,52 @@ async fn download_html(
 				}
 			}
 
-			self.download_image(image_response).await?
+			// a failing og:image must not become a preview mxc the relay is
+			// guaranteed to reject; skip it and keep the textual preview
+			if image_response.status().is_success() {
+				self.download_image(image_response).await?
+			} else {
+				debug!(
+					?image_url,
+					status = ?image_response.status(),
+					"Skipping og:image with unsuccessful response"
+				);
+
+				UrlPreviewData::default()
+			}
 		},
 	};
+
+	// og:video/og:audio are registered as lazy media (see register_lazy_media)
+	// rather than fetched here, so a page with a large og:video never costs a
+	// preview request any bandwidth; the URL is only fetched, SSRF-checked,
+	// and relayed when a client asks for the resulting mxc:// URI.
+	// check_url_host screens IP-literal URLs here only so a preview never
+	// hands out an mxc that the same check at relay time is guaranteed to
+	// reject.
+	if let Some(obj) = html.opengraph.videos.first()
+		&& let Ok(video_url) = url.join(&obj.url)
+		&& ["http", "https"].contains(&video_url.scheme())
+		&& self.check_url_host(&video_url).is_ok()
+	{
+		data.video = Some(self.register_lazy_media(video_url.as_str()));
+		data.video_width = obj
+			.properties
+			.get("width")
+			.and_then(|w| w.parse().ok());
+		data.video_height = obj
+			.properties
+			.get("height")
+			.and_then(|h| h.parse().ok());
+	}
+
+	if let Some(obj) = html.opengraph.audios.first()
+		&& let Ok(audio_url) = url.join(&obj.url)
+		&& ["http", "https"].contains(&audio_url.scheme())
+		&& self.check_url_host(&audio_url).is_ok()
+	{
+		data.audio = Some(self.register_lazy_media(audio_url.as_str()));
+	}
 
 	let props = html.opengraph.properties;
 

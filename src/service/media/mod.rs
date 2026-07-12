@@ -248,6 +248,14 @@ impl Service {
 				Ok(())
 			},
 			| _ => {
+				// lazy URL-preview media has no file keys; deleting the
+				// reference unregisters the mxc
+				if self.db.search_lazy_media(mxc).await.is_ok() {
+					self.db
+						.remove_lazy_media(mxc.to_string().as_str());
+					return Ok(());
+				}
+
 				Err!(Database(error!(
 					"Failed to find any media keys for MXC {mxc} in our database."
 				)))
@@ -372,7 +380,7 @@ impl Service {
 			.await;
 
 		let Ok(Metadata { content_type, content_disposition, key }) = meta else {
-			return Err!(Request(NotFound("Media not found.")));
+			return self.fetch_lazy_media(mxc).await;
 		};
 
 		let path = self.get_media_name_sha256(&key);
@@ -397,6 +405,26 @@ impl Service {
 			content_type,
 			content_disposition,
 		})
+	}
+
+	/// Relay media that a URL preview registered as a lazy reference to an
+	/// external URL. The content is fetched on the client's behalf for every
+	/// request and never persisted locally: the server acts only as a proxy
+	/// so the client's address is not revealed to the third party.
+	#[tracing::instrument(level = "debug", skip(self))]
+	async fn fetch_lazy_media(&self, mxc: &Mxc<'_>) -> Result<Media> {
+		let Ok(url) = self.db.search_lazy_media(mxc).await else {
+			return Err!(Request(NotFound("Media not found.")));
+		};
+
+		// bound outbound amplification and buffering to one in-flight fetch
+		// per mxc; requests for the same mxc queue rather than fan out
+		let _lock = self.federation_mutex.lock(&mxc.to_string()).await;
+
+		// lazy media is URL-preview traffic: use the preview client so
+		// url_preview_bound_interface and related policy still apply
+		self.location_request(&self.services.client.url_preview, &url)
+			.await
 	}
 
 	/// Presigned redirect URL for locally-stored media (MSC3860).

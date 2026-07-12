@@ -68,6 +68,22 @@ All allowlist checks are evaluated before the denylist check.
 > malicious client could cause the server to make requests to arbitrary URLs
 > on the local network. Use explicit allowlists wherever possible.
 
+`og:image`, `og:video`, and `og:audio` (and direct links to image, video,
+and audio files) resolve to an `mxc://` URI on this server rather than the
+third-party URL, and none of the content is stored: requests for that
+`mxc://` URI are relayed — the server fetches the source URL on the client's
+behalf (subject to the same SSRF/CIDR checks as everything else on this
+page, and capped at `max_response_size`) and passes the content through, so
+the third party sees the server's address rather than the client's, and the
+server hosts nothing. Images are additionally downloaded once while
+generating the preview to measure `og:image:width`/`og:image:height` and
+`matrix:image:size`, then discarded. `og:video:width`/`og:video:height` are
+populated when the page declares them. Clients cache the results themselves
+per the immutable cache headers on media downloads. Because nothing is
+stored, a preview's `mxc://` URI is only as durable as its source URL: if
+the source expires or changes, later fetches reflect that, unlike uploaded
+media. Upstream error responses are never relayed as media.
+
 ## Blurhash
 
 Tuwunel can generate [blurhashes](https://blurha.sh/) for uploaded images,

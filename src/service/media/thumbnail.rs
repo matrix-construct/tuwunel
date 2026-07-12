@@ -160,10 +160,16 @@ impl super::Service {
 			return self.get_thumbnail_saved(metadata).await;
 		}
 
-		let metadata = self
+		// the original may be lazy URL-preview media, which is relayed rather
+		// than stored, leaving nothing to thumbnail; serve the original like
+		// the unparsable-media fallback does
+		let Ok(metadata) = self
 			.db
 			.search_file_metadata(mxc, &Dim::default())
-			.await?;
+			.await
+		else {
+			return self.get_stored(mxc).await;
+		};
 
 		self.get_thumbnail_generate(mxc, &dim, metadata)
 			.await
