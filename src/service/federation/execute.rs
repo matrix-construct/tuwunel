@@ -102,7 +102,7 @@ where
 		.await;
 
 	match &result {
-		| Ok(_) => self.record_success(dest),
+		| Ok(_) => self.record_success(dest).await,
 		| Err(error) =>
 			if let Some(class) = classify_error(error) {
 				self.record_failure(dest, class);

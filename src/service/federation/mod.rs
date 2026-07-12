@@ -22,15 +22,15 @@ pub struct Service {
 	services: Arc<OnceServices>,
 	statuses: Arc<Map>,
 
-	/// Width of one peer-status bucket in seconds. Aligned with
-	/// `sender_timeout` so the streak count walking back across adjacent
-	/// buckets matches the sender's `consecutive_failures` notion at the
-	/// cutover.
+	/// Width of one peer-status bucket in seconds, aligned with
+	/// `sender_timeout` so the streak (the window span between a peer's oldest
+	/// and newest recorded failure) tracks the sender's `consecutive_failures`
+	/// notion at the cutover.
 	window_secs: u64,
 
-	/// Walk-back cap = `ceil(sqrt(MAX_BACKOFF / window_secs))`. Beyond this
-	/// streak length the quadratic curve `window * n²` saturates at
-	/// [`MAX_BACKOFF`] and further steps cannot change the verdict.
+	/// Streak cap = `ceil(sqrt(MAX_BACKOFF / window_secs))`. Past this span the
+	/// quadratic curve `window * n²` saturates at [`MAX_BACKOFF`], so a longer
+	/// streak cannot change the verdict.
 	n_max: u32,
 
 	/// Grace before the first retry of a once-failed peer, snapshot from
