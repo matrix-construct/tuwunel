@@ -88,10 +88,10 @@ def fmt_delta(curr, prev, direction, floor):
 	pct_d = (d / prev * 100.0) if prev else float("inf")
 	regress = is_regression(direction, d)
 	marker = ""
-	if regress is True and abs(pct_d) >= 5: marker = " ⚠️"
-	if regress is False and abs(pct_d) >= 5: marker = " ✅"
+	if regress is True and abs(pct_d) >= 5: marker = "⚠️ "
+	if regress is False and abs(pct_d) >= 5: marker = "✅ "
 	sign = "+" if d >= 0 else ""
-	return f"{sign}{pct_d:.1f}%{marker}" if prev else f"{sign}{d:.0f}{marker}"
+	return f"{marker}{sign}{pct_d:.1f}%" if prev else f"{marker}{sign}{d:.0f}"
 
 def table_cell(curr, col, key, fmt, direction, floor):
 	kind, data = col[1], col[2]
