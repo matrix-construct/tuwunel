@@ -921,6 +921,37 @@ pub struct Config {
 	#[serde(default)]
 	pub fetch_fanout_rounds: usize,
 
+	/// Derive the state at an incoming federation event from locally held
+	/// events when its previous events are stored but not yet resolved,
+	/// instead of requesting /state_ids from the origin server. Only an event
+	/// whose entire unresolved local ancestry is present participates; any
+	/// other case still falls back to the federation state fetch. Disabling
+	/// this restores the previous behavior of always fetching.
+	///
+	/// reloadable: yes
+	#[serde(default = "true_fn")]
+	pub resolve_state_locally: bool,
+
+	/// Ceiling on how many unresolved local events one local state derivation
+	/// may visit before falling back to the federation state fetch. Bounds
+	/// worst-case memory and latency in rooms with a large unresolved
+	/// backlog. 0 disables local derivation entirely.
+	///
+	/// reloadable: yes
+	/// default: 256
+	#[serde(default = "default_resolve_state_locally_max")]
+	pub resolve_state_locally_max: usize,
+
+	/// Validation mode for local state derivation: compute the local result,
+	/// then fetch /state_ids anyway, compare the two, and log any divergence
+	/// while the fetched state remains authoritative. Federation load is
+	/// unchanged. For operators soaking resolve_state_locally before trusting
+	/// it. No effect unless resolve_state_locally is enabled.
+	///
+	/// reloadable: yes
+	#[serde(default)]
+	pub resolve_state_locally_shadow: bool,
+
 	/// Sets the default `m.federate` property for newly created rooms when the
 	/// client does not request one. If `allow_federation` is set to false at
 	/// the same this value is set to false it then always overrides the client
@@ -4519,6 +4550,8 @@ fn default_pusher_idle_timeout() -> u64 { 15 }
 fn default_max_fetch_prev_events() -> u16 { 192_u16 }
 
 fn default_fetch_prev_wait_ms() -> u64 { 750 }
+
+fn default_resolve_state_locally_max() -> usize { 256 }
 
 fn default_tracing_flame_filter() -> String {
 	cfg!(debug_assertions)

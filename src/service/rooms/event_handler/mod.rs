@@ -11,6 +11,7 @@ mod parse_incoming_pdu;
 mod policy_server;
 mod resolve_state;
 mod state_at_incoming;
+mod state_local_build;
 mod upgrade_outlier_pdu;
 
 use std::{fmt::Write, num::NonZeroUsize, sync::Arc};
@@ -19,6 +20,8 @@ use async_trait::async_trait;
 use ruma::{EventId, OwnedRoomId, RoomVersionId, events::AnyStrippedStateEvent, serde::Raw};
 use tuwunel_core::{Result, implement, matrix::PduEvent, utils::MutexMap};
 use tuwunel_database::Map;
+
+pub use self::state_local_build::LocalBuildReport;
 
 pub struct Service {
 	pub mutex_federation: RoomMutexMap,

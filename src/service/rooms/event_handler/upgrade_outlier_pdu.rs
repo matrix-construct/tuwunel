@@ -9,17 +9,33 @@ use tuwunel_core::{
 	Err, Result, debug, debug_info, err, implement, is_equal_to,
 	matrix::{Event, EventTypeExt, PduEvent, StateKey, pdu::check_rules, room_version},
 	trace,
-	utils::stream::{BroadbandExt, ReadyExt},
+	utils::{
+		BoolExt,
+		stream::{BroadbandExt, ReadyExt},
+	},
 	warn,
 };
 
-use super::policy_server::PolicyCheck;
+use super::{
+	policy_server::PolicyCheck,
+	state_local_build::{WalkMode, compare_shadow},
+};
 use crate::rooms::{
 	state::RoomMutexGuard,
 	state_compressor::{CompressedState, HashSetCompressStateEvent},
 	state_res,
 	timeline::RawPduId,
 };
+
+/// How the state at the incoming event was obtained, deciding the memo write
+/// at the upgrade site.
+#[derive(Clone, Copy)]
+enum ResolvedVia {
+	Derived,
+	Memo,
+	Local,
+	Fetch,
+}
 
 #[implement(super::Service)]
 #[tracing::instrument(
@@ -68,7 +84,7 @@ pub(super) async fn upgrade_outlier_to_timeline_pdu(
 	trace!(format = ?room_rules.event_format, "Checking format");
 	check_rules(&pdu_json, &room_rules.event_format)?;
 
-	let (state_at_incoming_event, via_fetch) = self
+	let (state_at_incoming_event, resolved_via) = self
 		.resolve_state_at_incoming_event(
 			origin,
 			room_id,
@@ -108,7 +124,7 @@ pub(super) async fn upgrade_outlier_to_timeline_pdu(
 		.map(Arc::new)
 		.await;
 
-	if via_fetch && !soft_fail {
+	if matches!(resolved_via, ResolvedVia::Local | ResolvedVia::Fetch) && !soft_fail {
 		self.cache_resolved_state(room_id, incoming_pdu.event_id(), state_ids_compressed.clone())
 			.await;
 	}
@@ -192,13 +208,13 @@ async fn resolve_state_at_incoming_event(
 	room_version: &RoomVersionId,
 	recursion_level: usize,
 	create_event_id: &EventId,
-) -> Result<(HashMap<u64, OwnedEventId>, bool)> {
+) -> Result<(HashMap<u64, OwnedEventId>, ResolvedVia)> {
 	// 10. Fetch missing state and auth chain events by calling /state_ids at
 	//     backwards extremities doing all the checks in this list starting at 1.
 	//     These are not timeline events.
 	trace!("Resolving state at event");
 
-	let mut state_at_incoming_event = if incoming_pdu.prev_events().count() == 1 {
+	let state_at_incoming_event = if incoming_pdu.prev_events().count() == 1 {
 		self.state_at_incoming_degree_one(incoming_pdu)
 			.await?
 	} else {
@@ -207,33 +223,65 @@ async fn resolve_state_at_incoming_event(
 			.await?
 	};
 
-	if state_at_incoming_event.is_none() {
-		state_at_incoming_event = self
-			.cached_resolved_state(incoming_pdu.event_id())
-			.await;
+	if let Some(state) = state_at_incoming_event {
+		return Ok((state, ResolvedVia::Derived));
 	}
 
-	let (state_at_incoming_event, via_fetch) = match state_at_incoming_event {
-		| Some(state) => (state, false),
-		| None => {
-			let state = self
-				.fetch_state(
-					origin,
-					room_id,
-					incoming_pdu.event_id(),
-					room_version,
-					recursion_level,
-					create_event_id,
-				)
-				.boxed()
-				.await?
-				.expect("fetch_state always resolves state to some");
+	if let Some(state) = self
+		.cached_resolved_state(incoming_pdu.event_id())
+		.await
+	{
+		return Ok((state, ResolvedVia::Memo));
+	}
 
-			(state, true)
-		},
+	let config = &self.services.server.config;
+	let mode = if config.resolve_state_locally_shadow {
+		WalkMode::Shadow
+	} else {
+		WalkMode::Active
 	};
 
-	Ok((state_at_incoming_event, via_fetch))
+	let enabled = config.resolve_state_locally && config.resolve_state_locally_max > 0;
+
+	let local = enabled
+		.then_async(|| {
+			self.state_at_incoming_local(
+				room_id,
+				incoming_pdu,
+				room_version,
+				create_event_id,
+				mode,
+			)
+			.boxed()
+		})
+		.await
+		.transpose()?
+		.flatten();
+
+	let shadow = match (mode, local) {
+		| (WalkMode::Active, Some(state)) => return Ok((state, ResolvedVia::Local)),
+		| (WalkMode::Shadow, local) => local,
+		| (WalkMode::Active, None) => None,
+	};
+
+	let state = self
+		.fetch_state(
+			origin,
+			room_id,
+			incoming_pdu.event_id(),
+			room_version,
+			recursion_level,
+			create_event_id,
+		)
+		.boxed()
+		.await?
+		.expect("fetch_state always resolves state to some");
+
+	if let Some(local) = shadow {
+		compare_shadow(room_id, incoming_pdu.event_id(), &local, &state);
+	}
+
+	Ok((state, ResolvedVia::Fetch))
 }
 
 #[implement(super::Service)]

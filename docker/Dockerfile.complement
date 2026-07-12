@@ -80,6 +80,7 @@ COPY <<EOF complement.toml
     query_trusted_key_servers_first_on_join = false
     request_conn_timeout = 60
     request_timeout = 120
+    resolve_state_locally_shadow = true
     rocksdb_log_level = "debug"
     rocksdb_max_log_files = 1
     rocksdb_parallelism_threads = 2
