@@ -98,6 +98,15 @@ async fn run_cases(services: &Arc<Services>) -> Result {
 	assert_to_device(&txn, &off_ghost, device, &sender)?;
 	assert_no_msc3202(&txn)?;
 
+	// A device-key change fans out a `device_lists.changed` marker.
+	services
+		.users
+		.mark_device_key_update(&on_ghost)
+		.await;
+	let (_, body) = recv_txn(&mut rx).await?;
+	let txn = parse(&body)?;
+	assert_device_lists_changed(&txn, &on_ghost)?;
+
 	// A byte-identical repeat still ships under a distinct transaction ID so the
 	// bridge's txn-id dedup does not drop it.
 	send_to_device(services, &sender, &on_ghost, device, &content).await?;
@@ -224,6 +233,20 @@ fn assert_no_msc3202(txn: &Value) -> Result {
 	}
 
 	Ok(())
+}
+
+fn assert_device_lists_changed(txn: &Value, target: &UserId) -> Result {
+	let changed = txn
+		.get(DEVICE_LISTS)
+		.and_then(|lists| lists.get("changed"))
+		.and_then(Value::as_array)
+		.ok_or_else(|| err!("transaction had no {DEVICE_LISTS}.changed array"))?;
+
+	changed
+		.iter()
+		.any(|user| user.as_str() == Some(target.as_str()))
+		.then_some(())
+		.ok_or_else(|| err!("{DEVICE_LISTS}.changed did not contain the re-keyed user"))
 }
 
 /// Minimal appservice transaction endpoint: captures the `{txnId}` path segment

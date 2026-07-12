@@ -15,7 +15,7 @@ use std::{
 
 use async_trait::async_trait;
 use futures::{FutureExt, Stream, StreamExt};
-use ruma::{DeviceId, RoomId, ServerName, UserId};
+use ruma::{DeviceId, OwnedRoomId, RoomId, ServerName, UserId};
 use serde::Serialize;
 use tokio::{task, task::JoinSet};
 use tuwunel_core::{
@@ -33,7 +33,7 @@ pub use self::{
 	dest::Destination,
 	sender::{EDU_LIMIT, PDU_LIMIT},
 };
-use crate::rooms::timeline::RawPduId;
+use crate::{appservice::RegistrationInfo, rooms::timeline::RawPduId};
 
 pub struct Service {
 	pub db: Data,
@@ -361,6 +361,80 @@ impl Service {
 		Ok(())
 	}
 
+	/// Queue a `device_lists.changed` marker (MSC3202) for delivery to
+	/// appservices that opted into transaction extensions and are interested
+	/// in `user_id`. Called from `mark_device_key_update`, reusing the count it
+	/// already allocated so the marker uniquifies the transaction hash.
+	#[tracing::instrument(
+		skip(self),
+		level = "debug",
+		fields(
+			%user_id,
+		),
+	)]
+	pub async fn send_device_list_appservices(&self, user_id: &UserId, count: u64) -> Result {
+		let registrations = self.services.appservice.read().await;
+
+		// Hot path: no bridge opted into transaction extensions.
+		if !registrations
+			.values()
+			.any(|info| info.registration.msc3202_transaction_extensions)
+		{
+			return Ok(());
+		}
+
+		let _cork = self.db.db.cork();
+
+		let mut payload = None;
+		for info in registrations.values() {
+			if !info.registration.msc3202_transaction_extensions {
+				continue;
+			}
+
+			if !info.is_user_match(user_id) && !self.shares_device_list_room(user_id, info).await
+			{
+				continue;
+			}
+
+			let payload = payload.get_or_insert_with(|| device_list_payload(user_id, count));
+
+			let dest = Destination::Appservice(info.registration.id.clone());
+			let event = SendingEvent::DeviceListChanged(payload.clone());
+
+			self.queue_and_dispatch(dest, event)?;
+		}
+
+		Ok(())
+	}
+
+	/// Whether `user_id` shares a device-list-interesting room with `info`: a
+	/// joined room the appservice participates in that is encrypted, or any
+	/// such room when `device_key_update_encrypted_rooms_only` is off.
+	async fn shares_device_list_room(&self, user_id: &UserId, info: &RegistrationInfo) -> bool {
+		let update_all_rooms = !self
+			.services
+			.config
+			.device_key_update_encrypted_rooms_only;
+
+		self.services
+			.state_cache
+			.rooms_joined(user_id)
+			.map(ToOwned::to_owned)
+			.any(async |room_id: OwnedRoomId| {
+				(update_all_rooms
+					|| self
+						.services
+						.state_accessor
+						.is_encrypted_room(&room_id)
+						.await) && self
+					.services
+					.state_cache
+					.appservice_in_room(&room_id, info)
+					.await
+			})
+			.await
+	}
+
 	#[tracing::instrument(skip(self, servers, serialized), level = "debug")]
 	pub async fn send_edu_servers<'a, S>(&self, servers: S, serialized: EduBuf) -> Result
 	where
@@ -539,6 +613,15 @@ where
 			buf
 		})
 		.collect()
+}
+
+fn device_list_payload(user_id: &UserId, count: u64) -> EduBuf {
+	let mut buf = EduBuf::new();
+	buf.push(TAG_DEVICE_LIST_CHANGED);
+	buf.extend_from_slice(&count.to_be_bytes());
+	buf.extend_from_slice(user_id.as_bytes());
+
+	buf
 }
 
 fn num_senders(args: &crate::Args<'_>) -> usize {

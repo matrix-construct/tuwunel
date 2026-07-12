@@ -18,8 +18,8 @@
 
 ## Counts
 
-- ✅ `yes`: 253
-- 🟨 `partial`: 35
+- ✅ `yes`: 254
+- 🟨 `partial`: 34
 - ❌ `no`: 450
 - ⬛ `n/a`: 286
 
@@ -28,7 +28,7 @@
 | Inv | yes | partial | no | n/a | total |
 |---|---|---|---|---|---|
 | merged | 186 | 7 | 7 | 59 | 259 |
-| open | 59 | 27 | 404 | 175 | 665 |
+| open | 60 | 26 | 404 | 175 | 665 |
 | closed | 8 | 1 | 39 | 52 | 100 |
 
 ## Merged
@@ -640,7 +640,7 @@ in the [Out of scope](#out-of-scope) section.
 | MSC3216 | ❌ ● | 0/0 | Synchronized access control for Spaces | space-level synchronized PL replication absent |
 | MSC3215 | ❌ ● | 0/0 | Aristotle - Moderation in all things | decentralized moderation room scheme not implemented |
 | MSC3214 | ✅ ◐ | 90/100 | Allow overriding `m.room.power_levels` using `initial_state` | initial_state PL effectively replaces default via later append |
-| MSC3202 | 🟨 ● | 20/20 | Encrypted Appservices | device_id masquerading present; AS txn extensions missing |
+| MSC3202 | ✅ ● | 88/95 | Encrypted Appservices | device_lists.changed, OTK counts, fallback types under org.matrix.msc3202 |
 | MSC3192 | ❌ ● | 0/0 | Batch state endpoint | batch_state endpoint not implemented |
 | MSC3189 | ❌ ● | 0/0 | Per-room/per-space profiles | per-room/space scoped profile API not implemented |
 | MSC3174 | ❌ ● | 0/0 | An error code for spam rejections | M_ANTISPAM_REJECTION error code not used |

@@ -13,6 +13,7 @@ use tuwunel_core::{
 	smallvec::SmallVec,
 	utils::{
 		BoolExt, IterStream, ReadyExt,
+		result::LogErr,
 		stream::{BroadbandExt, TryIgnore},
 	},
 };
@@ -534,6 +535,13 @@ pub async fn mark_device_key_update(&self, user_id: &UserId) {
 				.put_raw(room_key, user_id);
 		})
 		.await;
+
+	self.services
+		.sending
+		.send_device_list_appservices(user_id, *count)
+		.await
+		.log_err()
+		.ok();
 
 	if !self.services.globals.user_is_local(user_id) {
 		return;
