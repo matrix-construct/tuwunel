@@ -1,7 +1,9 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, iter::once};
 
 use axum::extract::State;
+use futures::StreamExt;
 use ruma::{
+	OwnedDeviceId,
 	api::{
 		client::to_device::send_event_to_device,
 		error::ErrorKind,
@@ -9,10 +11,18 @@ use ruma::{
 	},
 	to_device::DeviceIdOrAllDevices,
 };
-use tuwunel_core::{Error, Result, utils::ReadyExt};
+use tuwunel_core::{
+	Error, Result,
+	smallvec::SmallVec,
+	utils::{ReadyExt, result::LogErr},
+};
 use tuwunel_service::sending::EduBuf;
 
 use crate::Ruma;
+
+/// Recipient devices of one `AllDevices` to-device send paired with their
+/// inbox counts.
+type Deliveries = SmallVec<[(OwnedDeviceId, u64); 1]>;
 
 /// # `PUT /_matrix/client/r0/sendToDevice/{eventType}/{txnId}`
 ///
@@ -69,29 +79,70 @@ pub(crate) async fn send_event_to_device_route(
 
 			match target_device_id_maybe {
 				| DeviceIdOrAllDevices::DeviceId(target_device_id) => {
-					services.users.add_to_device_event(
+					let count = services.users.add_to_device_event(
 						sender_user,
 						target_user_id,
 						target_device_id,
 						event_type,
 						&event,
 					);
+
+					services
+						.sending
+						.send_to_device_appservices(
+							sender_user,
+							target_user_id,
+							once((&**target_device_id, count)),
+							event_type,
+							&event,
+						)
+						.await
+						.log_err()
+						.ok();
 				},
 
 				| DeviceIdOrAllDevices::AllDevices => {
-					services
+					let interested = services
+						.appservice
+						.is_interested_in_user(target_user_id)
+						.await;
+
+					let deliveries: Deliveries = services
 						.users
 						.all_device_ids(target_user_id)
-						.ready_for_each(|target_device_id| {
-							services.users.add_to_device_event(
+						.map(|target_device_id| {
+							let count = services.users.add_to_device_event(
 								sender_user,
 								target_user_id,
 								target_device_id,
 								event_type,
 								&event,
 							);
+
+							(target_device_id, count)
 						})
+						.ready_filter_map(|(target_device_id, count)| {
+							interested.then(|| (target_device_id.to_owned(), count))
+						})
+						.collect()
 						.await;
+
+					if !deliveries.is_empty() {
+						services
+							.sending
+							.send_to_device_appservices(
+								sender_user,
+								target_user_id,
+								deliveries
+									.iter()
+									.map(|(device_id, count)| (&**device_id, *count)),
+								event_type,
+								&event,
+							)
+							.await
+							.log_err()
+							.ok();
+					}
 				},
 			}
 		}

@@ -15,7 +15,8 @@ use std::{
 
 use async_trait::async_trait;
 use futures::{FutureExt, Stream, StreamExt};
-use ruma::{RoomId, ServerName, UserId};
+use ruma::{DeviceId, RoomId, ServerName, UserId};
+use serde::Serialize;
 use tokio::{task, task::JoinSet};
 use tuwunel_core::{
 	Result, Server, debug, debug_warn, err, error,
@@ -71,6 +72,7 @@ const EDU_VEC_CAP: usize = 1;
 /// into the owned buffer at construction, so the codec writes it verbatim.
 const TAG_TO_DEVICE: u8 = 0x01;
 const TAG_DEVICE_LIST_CHANGED: u8 = 0x02;
+const TAG_PREFIX_LEN: usize = 1 + size_of::<u64>();
 
 impl SendingEvent {
 	/// Bytes written verbatim as the queue row value. `Pdu` keeps its id in
@@ -82,6 +84,20 @@ impl SendingEvent {
 			| Self::Pdu(_) | Self::Flush => &[],
 		}
 	}
+}
+
+/// Wire shape of one `de.sorunome.msc2409.to_device` entry (MSC4203): the
+/// stored to-device event flattened with the recipient's identifiers. The
+/// ruma `AnyAppserviceToDeviceEvent` deliberately has no `Serialize`, so the
+/// send side writes this local struct.
+#[derive(Serialize)]
+struct AsToDeviceEvent<'a> {
+	#[serde(rename = "type")]
+	kind: &'a str,
+	sender: &'a UserId,
+	content: &'a serde_json::Value,
+	to_user_id: &'a UserId,
+	to_device_id: &'a DeviceId,
 }
 
 #[async_trait]
@@ -299,6 +315,52 @@ impl Service {
 			.await
 	}
 
+	/// Queue stored to-device events for delivery to interested appservices
+	/// (MSC4203). `deliveries` are the concrete recipient devices already
+	/// written to the inbox (post-`AllDevices` expansion) paired with their
+	/// inbox counts, which uniquify the transaction hash.
+	#[tracing::instrument(
+		skip(self, deliveries, content),
+		level = "debug",
+		fields(
+			%target_user,
+		),
+	)]
+	pub async fn send_to_device_appservices<'a, I>(
+		&self,
+		sender: &UserId,
+		target_user: &UserId,
+		deliveries: I,
+		event_type: &str,
+		content: &serde_json::Value,
+	) -> Result
+	where
+		I: Iterator<Item = (&'a DeviceId, u64)> + Clone + Send,
+	{
+		let registrations = self.services.appservice.read().await;
+		let _cork = self.db.db.cork();
+
+		let mut payloads: Option<EduVec> = None;
+		for info in registrations.values() {
+			if !info.is_user_match(target_user) {
+				continue;
+			}
+
+			let payloads = payloads.get_or_insert_with(|| {
+				to_device_payloads(sender, target_user, deliveries.clone(), event_type, content)
+			});
+
+			for buf in &*payloads {
+				let dest = Destination::Appservice(info.registration.id.clone());
+				let event = SendingEvent::ToDevice(buf.clone());
+
+				self.queue_and_dispatch(dest, event)?;
+			}
+		}
+
+		Ok(())
+	}
+
 	#[tracing::instrument(skip(self, servers, serialized), level = "debug")]
 	pub async fn send_edu_servers<'a, S>(&self, servers: S, serialized: EduBuf) -> Result
 	where
@@ -445,6 +507,38 @@ impl Service {
 		let chans = self.channels.len().max(1);
 		hash.overflowing_rem(chans).0
 	}
+}
+
+fn to_device_payloads<'a, I>(
+	sender: &UserId,
+	target_user: &UserId,
+	deliveries: I,
+	event_type: &str,
+	content: &serde_json::Value,
+) -> EduVec
+where
+	I: Iterator<Item = (&'a DeviceId, u64)>,
+{
+	deliveries
+		.map(|(to_device_id, count)| {
+			let mut buf = EduBuf::new();
+			buf.push(TAG_TO_DEVICE);
+			buf.extend_from_slice(&count.to_be_bytes());
+
+			let event = AsToDeviceEvent {
+				kind: event_type,
+				sender,
+				content,
+				to_user_id: target_user,
+				to_device_id,
+			};
+
+			serde_json::to_writer(&mut buf, &event)
+				.expect("to-device appservice event serializes");
+
+			buf
+		})
+		.collect()
 }
 
 fn num_senders(args: &crate::Args<'_>) -> usize {

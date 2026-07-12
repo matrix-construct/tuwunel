@@ -5378,6 +5378,7 @@ dependencies = [
  "sentry",
  "sentry-tower",
  "sentry-tracing",
+ "serde_json",
  "similar 3.1.1",
  "tokio",
  "tokio-metrics",

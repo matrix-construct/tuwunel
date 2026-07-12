@@ -41,7 +41,7 @@ use ruma::{
 	uint,
 };
 use tuwunel_core::{
-	Error, Event, Result, debug, err, error, extract_variant,
+	Error, Event, Result, debug, debug_warn, err, error, extract_variant,
 	result::LogErr,
 	smallvec::SmallVec,
 	trace,
@@ -54,7 +54,9 @@ use tuwunel_core::{
 	warn,
 };
 
-use super::{Destination, EduBuf, EduVec, Msg, SendingEvent, Service, data::QueueItem};
+use super::{
+	Destination, EduBuf, EduVec, Msg, SendingEvent, Service, TAG_PREFIX_LEN, data::QueueItem,
+};
 use crate::{federation::ShouldAttempt, rooms::timeline::RawPduId};
 
 /// In-flight bookkeeping for one `Destination`. Cross-attempt backoff lives
@@ -976,18 +978,23 @@ impl Service {
 			));
 		};
 
-		let mut pdu_jsons = Vec::with_capacity(
+		let (pdu_count, edu_count, to_device_count) =
 			events
 				.iter()
-				.filter(|event| matches!(event, SendingEvent::Pdu(_)))
-				.count(),
-		);
-		let mut edu_jsons: Vec<Raw<EphemeralData>> = Vec::with_capacity(
-			events
-				.iter()
-				.filter(|event| matches!(event, SendingEvent::Edu(_)))
-				.count(),
-		);
+				.fold(
+					(0_usize, 0_usize, 0_usize),
+					|(pdus, edus, to_device), event| match event {
+						| SendingEvent::Pdu(_) => (pdus.saturating_add(1), edus, to_device),
+						| SendingEvent::Edu(_) => (pdus, edus.saturating_add(1), to_device),
+						| SendingEvent::ToDevice(_) => (pdus, edus, to_device.saturating_add(1)),
+						| SendingEvent::DeviceListChanged(_) | SendingEvent::Flush =>
+							(pdus, edus, to_device),
+					},
+				);
+
+		let mut pdu_jsons = Vec::with_capacity(pdu_count);
+		let mut edu_jsons: Vec<Raw<EphemeralData>> = Vec::with_capacity(edu_count);
+		let mut to_device = Vec::with_capacity(to_device_count);
 		for event in &events {
 			match event {
 				| SendingEvent::Pdu(pdu_id) => {
@@ -1008,9 +1015,19 @@ impl Service {
 						edu_jsons.push(edu);
 					}
 				},
-				| SendingEvent::ToDevice(_)
-				| SendingEvent::DeviceListChanged(_)
-				| SendingEvent::Flush => {},
+				| SendingEvent::ToDevice(buf) => {
+					let Some(bytes) = buf.get(TAG_PREFIX_LEN..) else {
+						debug_warn!("skipping malformed queued to-device event");
+						continue;
+					};
+
+					if let Ok(raw) = serde_json::from_slice(bytes) {
+						to_device.push(raw);
+					} else {
+						debug_warn!("skipping malformed queued to-device event");
+					}
+				},
+				| SendingEvent::DeviceListChanged(_) | SendingEvent::Flush => {},
 			}
 		}
 
@@ -1024,8 +1041,10 @@ impl Service {
 
 		let txn_id = &*URL_SAFE_NO_PAD.encode(txn_hash);
 
-		//debug_assert!(pdu_jsons.len() + edu_jsons.len() > 0, "sending empty
-		// transaction");
+		if pdu_jsons.is_empty() && edu_jsons.is_empty() && to_device.is_empty() {
+			return Ok(Destination::Appservice(id));
+		}
+
 		match self
 			.services
 			.appservice
@@ -1033,7 +1052,7 @@ impl Service {
 				txn_id: txn_id.into(),
 				events: pdu_jsons,
 				ephemeral: edu_jsons,
-				to_device: Vec::new(), // TODO
+				to_device,
 			})
 			.await
 		{

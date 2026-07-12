@@ -546,7 +546,7 @@ pub fn add_to_device_event(
 	target_device_id: &DeviceId,
 	event_type: &str,
 	content: &serde_json::Value,
-) {
+) -> u64 {
 	let count = self.services.globals.next_count();
 
 	let key = (target_user_id, target_device_id, *count);
@@ -567,6 +567,8 @@ pub fn add_to_device_event(
 		%sender,
 		"to_device write",
 	);
+
+	*count
 }
 
 #[implement(super::Service)]

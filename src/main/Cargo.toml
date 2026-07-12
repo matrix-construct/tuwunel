@@ -241,6 +241,7 @@ webpki-root-certs.workspace = true
 criterion.workspace = true
 insta.workspace = true
 maplit.workspace = true
+serde_json.workspace = true
 similar.workspace = true
 
 [lints]
