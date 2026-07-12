@@ -284,6 +284,8 @@ async fn record_accepted_terms(services: &Services, user_id: &UserId) -> Result 
 		.await
 }
 
+/// Redirects to the GET-only `_complete` with 303 (not 307): a 307 would make
+/// the browser re-POST the native form and hit 405 on the GET-only route.
 fn complete_redirect(services: &Services, req_id: &str, login_token: &str) -> Result<Redirect> {
 	let issuer = services.oauth.get_server()?.issuer_url()?;
 	let base = issuer.trim_end_matches('/');
@@ -298,7 +300,7 @@ fn complete_redirect(services: &Services, req_id: &str, login_token: &str) -> Re
 			url
 		})?;
 
-	Ok(Redirect::temporary(url.as_str()))
+	Ok(Redirect::to(url.as_str()))
 }
 
 fn require_native(services: &Services) -> Result {
