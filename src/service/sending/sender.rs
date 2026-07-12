@@ -1008,12 +1008,16 @@ impl Service {
 						edu_jsons.push(edu);
 					}
 				},
-				| SendingEvent::Flush => {}, // flush only; no new content
+				| SendingEvent::ToDevice(_)
+				| SendingEvent::DeviceListChanged(_)
+				| SendingEvent::Flush => {},
 			}
 		}
 
 		let txn_hash = calculate_hash(events.iter().filter_map(|e| match e {
-			| SendingEvent::Edu(b) => Some(b.as_ref()),
+			| SendingEvent::Edu(b)
+			| SendingEvent::ToDevice(b)
+			| SendingEvent::DeviceListChanged(b) => Some(b.as_ref()),
 			| SendingEvent::Pdu(b) => Some(b.as_ref()),
 			| SendingEvent::Flush => None,
 		}));

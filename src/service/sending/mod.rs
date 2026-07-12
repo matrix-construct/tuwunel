@@ -1,6 +1,8 @@
 mod data;
 mod dest;
 mod sender;
+#[cfg(test)]
+mod tests;
 
 use std::{
 	fmt::Debug,
@@ -49,9 +51,11 @@ struct Msg {
 #[expect(clippy::module_name_repetitions)]
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum SendingEvent {
-	Pdu(RawPduId), // pduid
-	Edu(EduBuf),   // edu json
-	Flush,         // none
+	Pdu(RawPduId),             // pduid
+	Edu(EduBuf),               // edu json
+	ToDevice(EduBuf),          // msc4203 to-device
+	DeviceListChanged(EduBuf), // msc3202 device list
+	Flush,                     // none
 }
 
 pub type EduBuf = SmallVec<[u8; EDU_BUF_CAP]>;
@@ -59,6 +63,26 @@ pub type EduVec = SmallVec<[EduBuf; EDU_VEC_CAP]>;
 
 const EDU_BUF_CAP: usize = 128 - 16;
 const EDU_VEC_CAP: usize = 1;
+
+/// Leading byte on a queued appservice value selecting a tagged
+/// `SendingEvent` variant. Legacy rows self-identify without a tag: `Pdu`
+/// values are empty and `Edu` values are `{`-leading json, neither of which
+/// can collide with these bytes. The tag and the following count are baked
+/// into the owned buffer at construction, so the codec writes it verbatim.
+const TAG_TO_DEVICE: u8 = 0x01;
+const TAG_DEVICE_LIST_CHANGED: u8 = 0x02;
+
+impl SendingEvent {
+	/// Bytes written verbatim as the queue row value. `Pdu` keeps its id in
+	/// the row key and `Flush` is never persisted, so both are valueless; the
+	/// tagged variants own their whole `[tag][count][body]` buffer.
+	pub(super) fn value_bytes(&self) -> &[u8] {
+		match self {
+			| Self::Edu(bytes) | Self::ToDevice(bytes) | Self::DeviceListChanged(bytes) => bytes,
+			| Self::Pdu(_) | Self::Flush => &[],
+		}
+	}
+}
 
 #[async_trait]
 impl crate::Service for Service {
@@ -126,6 +150,12 @@ impl Service {
 		let dest = Destination::Push(user.to_owned(), pushkey);
 		let event = SendingEvent::Pdu(*pdu_id);
 		let _cork = self.db.db.cork();
+
+		self.queue_and_dispatch(dest, event)
+	}
+
+	/// Queue one event for delivery to `dest` and wake a sender.
+	fn queue_and_dispatch(&self, dest: Destination, event: SendingEvent) -> Result {
 		let keys = self.db.queue_requests(once((&event, &dest)));
 
 		self.dispatch(Msg {
@@ -143,16 +173,8 @@ impl Service {
 		let dest = Destination::Appservice(appservice_id);
 		let event = SendingEvent::Pdu(pdu_id);
 		let _cork = self.db.db.cork();
-		let keys = self.db.queue_requests(once((&event, &dest)));
 
-		self.dispatch(Msg {
-			dest,
-			event,
-			queue_id: keys
-				.into_iter()
-				.next()
-				.expect("request queue key"),
-		})
+		self.queue_and_dispatch(dest, event)
 	}
 
 	#[tracing::instrument(skip(self, room_id, pdu_id), level = "debug")]
@@ -195,16 +217,8 @@ impl Service {
 		let dest = Destination::Federation(server.to_owned());
 		let event = SendingEvent::Edu(serialized);
 		let _cork = self.db.db.cork();
-		let keys = self.db.queue_requests(once((&event, &dest)));
 
-		self.dispatch(Msg {
-			dest,
-			event,
-			queue_id: keys
-				.into_iter()
-				.next()
-				.expect("request queue key"),
-		})
+		self.queue_and_dispatch(dest, event)
 	}
 
 	#[tracing::instrument(skip(self, room_id, serialized), level = "debug")]
@@ -224,16 +238,8 @@ impl Service {
 		let dest = Destination::Appservice(appservice_id);
 		let event = SendingEvent::Edu(serialized);
 		let _cork = self.db.db.cork();
-		let keys = self.db.queue_requests(once((&event, &dest)));
 
-		self.dispatch(Msg {
-			dest,
-			event,
-			queue_id: keys
-				.into_iter()
-				.next()
-				.expect("request queue key"),
-		})
+		self.queue_and_dispatch(dest, event)
 	}
 
 	/// Sends an EDU to all appservices interested in a room.
