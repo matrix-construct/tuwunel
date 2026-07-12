@@ -92,6 +92,11 @@ fn make_clients(services: &Services) -> Result<Clients> {
 				Arc::clone(&services.client.cidr_range_denylist),
 			);
 
+			let cb = match &services.config.url_preview_user_agent {
+				| Some(user_agent) => cb.user_agent(user_agent.as_str()),
+				| None => cb,
+			};
+
 			builder_interface(cb, bind_iface.as_deref())?
 				.local_address(bind_addr)
 				.dns_resolver(resolver)

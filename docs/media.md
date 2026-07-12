@@ -62,6 +62,7 @@ All allowlist checks are evaluated before the denylist check.
 | `url_preview_check_root_domain` | `false` | When enabled, domain allowlist checks are applied to the root domain. Allows all subdomains of any allowed domain — e.g. allowing `wikipedia.org` also allows `en.m.wikipedia.org`. |
 | `url_preview_max_spider_size` | `256000` | Maximum bytes fetched from a URL when generating a preview (default: 256 KB). |
 | `url_preview_bound_interface` | — | Network interface name or IP address to bind when making URL preview requests. Example: `"eth0"` or `"1.2.3.4"`. |
+| `url_preview_user_agent` | — | User-Agent header sent when fetching pages and media for previews. Defaults to the versioned server User-Agent, e.g. `"Tuwunel/1.8.1 preview"`. |
 
 > [!NOTE]
 > Setting any allowlist to `["*"]` opens significant attack surface — a
