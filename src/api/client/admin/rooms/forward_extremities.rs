@@ -1,5 +1,3 @@
-use std::iter::once;
-
 use axum::extract::State;
 use futures::{
 	StreamExt,
@@ -69,43 +67,12 @@ pub(crate) async fn admin_delete_forward_extremities_route(
 
 	let state_lock = services.state.mutex.lock(&room_id).await;
 
-	let extremities = services
+	let deleted = services
 		.state
-		.get_forward_extremities(&room_id)
-		.map(ToOwned::to_owned)
-		.collect::<Extremities>()
+		.prune_forward_extremities(&room_id, &state_lock)
 		.await;
 
-	if extremities.len() <= 1 {
-		return Ok(DeleteResponse { deleted: UInt::default() });
-	}
-
-	let survivor = join_all(extremities.iter().map(|event_id| async move {
-		services
-			.timeline
-			.get_pdu_count(event_id)
-			.await
-			.ok()
-			.map(|count| (count, event_id))
-	}))
-	.await
-	.into_iter()
-	.flatten()
-	.max_by_key(|(count, _)| *count)
-	.map(|(_, event_id)| event_id);
-
-	let Some(survivor) = survivor else {
-		return Ok(DeleteResponse { deleted: UInt::default() });
-	};
-
-	services
-		.state
-		.set_forward_extremities(&room_id, once(&**survivor), &state_lock)
-		.await;
-
-	Ok(DeleteResponse {
-		deleted: super::usize_to_uint(extremities.len().saturating_sub(1)),
-	})
+	Ok(DeleteResponse { deleted: super::usize_to_uint(deleted) })
 }
 
 async fn forward_extremity(services: &crate::State, event_id: &EventId) -> ForwardExtremity {

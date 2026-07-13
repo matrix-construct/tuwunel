@@ -15,6 +15,7 @@ use tuwunel_core::{
 	implement,
 	matrix::{PduCount, RoomVersionRules, StateKey, TypeStateKey, room_version},
 	result::{AndThenRef, FlatOk},
+	smallvec::SmallVec,
 	trace,
 	utils::{
 		IterStream, MutexMap, MutexMapGuard, ReadyExt, calculate_hash,
@@ -48,6 +49,7 @@ struct Data {
 
 type RoomMutexMap = MutexMap<OwnedRoomId, ()>;
 pub type RoomMutexGuard = MutexMapGuard<OwnedRoomId, ()>;
+type ForwardExtremities = SmallVec<[OwnedEventId; 1]>;
 
 #[async_trait]
 impl crate::Service for Service {
@@ -588,6 +590,53 @@ pub(super) fn delete_room_shortstatehash(
 	self.db.roomid_shortstatehash.remove(room_id);
 
 	Ok(())
+}
+
+/// Collapses the room to a single forward extremity, keeping the one furthest
+/// along in stream order, and returns the number removed.
+#[implement(Service)]
+#[tracing::instrument(
+	level = "debug"
+	skip_all,
+	fields(%room_id),
+)]
+pub async fn prune_forward_extremities(
+	&self,
+	room_id: &RoomId,
+	state_lock: &RoomMutexGuard,
+) -> usize {
+	let extremities: ForwardExtremities = self
+		.get_forward_extremities(room_id)
+		.map(ToOwned::to_owned)
+		.collect()
+		.await;
+
+	if extremities.len() <= 1 {
+		return 0;
+	}
+
+	let survivor = join_all(extremities.iter().map(|event_id| async move {
+		self.services
+			.timeline
+			.get_pdu_count(event_id)
+			.await
+			.ok()
+			.map(|count| (count, event_id))
+	}))
+	.await
+	.into_iter()
+	.flatten()
+	.max_by_key(|(count, _)| *count)
+	.map(|(_, event_id)| event_id);
+
+	let Some(survivor) = survivor else {
+		return 0;
+	};
+
+	self.set_forward_extremities(room_id, once(&**survivor), state_lock)
+		.await;
+
+	extremities.len().saturating_sub(1)
 }
 
 #[implement(Service)]
