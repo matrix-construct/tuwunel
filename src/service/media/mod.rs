@@ -421,9 +421,9 @@ impl Service {
 		// per mxc; requests for the same mxc queue rather than fan out
 		let _lock = self.federation_mutex.lock(&mxc.to_string()).await;
 
-		// lazy media is URL-preview traffic: use the preview client so
-		// url_preview_bound_interface and related policy still apply
-		self.location_request(&self.services.client.url_preview, &url)
+		// lazy media is URL-preview traffic: use the preview media client so
+		// url_preview_bound_interface and url_preview_media_user_agent apply
+		self.location_request(&self.services.client.url_preview_media, &url)
 			.await
 	}
 

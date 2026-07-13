@@ -146,14 +146,30 @@ pub async fn request_url_preview(&self, url: &Url) -> Result<UrlPreviewData> {
 		}
 	}
 
-	// an upstream error response must not be turned into a cached preview
-	if !response.status().is_success() {
+	// an upstream error response must not be turned into a cached preview.
+	// origins commonly gate pages and media differently by agent, so when a
+	// distinct media agent is configured, a page-agent rejection is not
+	// final: the URL may be a direct media link acceptable to the media
+	// client (see media_refetch for the successful counterpart).
+	let status = response.status();
+	let mut via_media_client = false;
+	let response = if status.is_success() {
+		response
+	} else if self
+		.services
+		.config
+		.url_preview_media_user_agent
+		.is_some()
+	{
+		via_media_client = true;
+		self.media_response(url).await?
+	} else {
 		return Err!(Request(NotFound(debug_warn!(
-			status = ?response.status(),
+			?status,
 			%url,
 			"URL preview request failed"
 		))));
-	}
+	};
 
 	let content_type = response
 		.headers()
@@ -164,10 +180,40 @@ pub async fn request_url_preview(&self, url: &Url) -> Result<UrlPreviewData> {
 		.to_owned();
 
 	let data = match content_type.as_str() {
-		| html if html.starts_with("text/html") => self.download_html(url, response).await?,
-		| img if img.starts_with("image/") => self.download_image(response).await?,
-		| video if video.starts_with("video/") => self.download_video(response).await?,
-		| audio if audio.starts_with("audio/") => self.download_audio(response).await?,
+		| html if html.starts_with("text/html") => {
+			// pages are only crawled with the page client; its rejection
+			// stands even when the media client was served a page
+			if via_media_client {
+				return Err!(Request(NotFound(debug_warn!(
+					?status,
+					%url,
+					"URL preview request failed"
+				))));
+			}
+
+			self.download_html(url, response).await?
+		},
+		| img if img.starts_with("image/") => {
+			let response = self
+				.media_refetch(url, response, via_media_client)
+				.await?;
+
+			self.download_image(response).await?
+		},
+		| video if video.starts_with("video/") => {
+			let response = self
+				.media_refetch(url, response, via_media_client)
+				.await?;
+
+			self.download_video(response).await?
+		},
+		| audio if audio.starts_with("audio/") => {
+			let response = self
+				.media_refetch(url, response, via_media_client)
+				.await?;
+
+			self.download_audio(response).await?
+		},
 		| _ => return Err!(Request(Unknown("Unsupported Content-Type"))),
 	};
 
@@ -211,6 +257,65 @@ pub async fn download_image(&self, response: reqwest::Response) -> Result<UrlPre
 #[expect(clippy::unused_async)]
 pub async fn download_image(&self, _response: reqwest::Response) -> Result<UrlPreviewData> {
 	Err!(FeatureDisabled("url_preview"))
+}
+
+/// Fetch a URL with the media client, applying the same address and status
+/// screening as the page fetch. Direct preview media is measured and
+/// registered from the media client's response so it matches what the relay
+/// will serve.
+#[cfg(feature = "url_preview")]
+#[implement(Service)]
+async fn media_response(&self, url: &Url) -> Result<reqwest::Response> {
+	let client = &self.services.client.url_preview_media;
+	let response = client.get(url.as_str()).send().await?;
+
+	if let Some(remote_addr) = response.remote_addr()
+		&& let Ok(ip) = IPAddress::parse(remote_addr.ip().to_string())
+		&& !self.services.client.valid_cidr_range(&ip)
+	{
+		return Err!(Request(Forbidden("Requesting from this address is forbidden")));
+	}
+
+	if !response.status().is_success() {
+		return Err!(Request(NotFound(debug_warn!(
+			status = ?response.status(),
+			%url,
+			"URL preview media request failed"
+		))));
+	}
+
+	Ok(response)
+}
+
+#[cfg(not(feature = "url_preview"))]
+#[implement(Service)]
+#[expect(clippy::unused_async)]
+async fn media_response(&self, _url: &Url) -> Result<reqwest::Response> {
+	Err!(FeatureDisabled("url_preview"))
+}
+
+/// Replace a page-client response with the media client's for a direct media
+/// URL. When no distinct media agent is configured the two clients are
+/// identical and the original response is used as-is, avoiding a second
+/// request.
+#[implement(Service)]
+async fn media_refetch(
+	&self,
+	url: &Url,
+	response: reqwest::Response,
+	via_media_client: bool,
+) -> Result<reqwest::Response> {
+	if via_media_client
+		|| self
+			.services
+			.config
+			.url_preview_media_user_agent
+			.is_none()
+	{
+		return Ok(response);
+	}
+
+	self.media_response(url).await
 }
 
 /// Mint a local mxc:// URI that lazily resolves to `url`: no bytes are
@@ -304,7 +409,11 @@ async fn download_html(
 
 	// `webpage` does not resolve relative URLs in `og:` meta tags; resolve
 	// against the page URL so e.g. `og:image=test.png` becomes absolute.
-	let client = &self.services.client.url_preview;
+	//
+	// the measurement fetch is a media fetch: it must use the same client
+	// as the relay, or the origin could serve the measurement different
+	// content than the relayed mxc.
+	let client = &self.services.client.url_preview_media;
 	let mut data = match html.opengraph.images.first() {
 		| None => UrlPreviewData::default(),
 		| Some(obj) => {

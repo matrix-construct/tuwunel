@@ -2500,12 +2500,22 @@ pub struct Config {
 	pub url_preview_check_root_domain: bool,
 
 	/// User-Agent header the URL preview client sends when fetching pages
-	/// and media for previews. When unset, the versioned server User-Agent
-	/// is used followed by "preview", e.g. "Tuwunel/1.8.1 preview".
+	/// to extract their OpenGraph tags. When unset, the versioned server
+	/// User-Agent is used followed by "preview", e.g. "Tuwunel/1.8.1
+	/// preview".
 	///
 	/// default:
 	#[serde(default)]
 	pub url_preview_user_agent: Option<String>,
+
+	/// User-Agent header sent when fetching and relaying URL preview media
+	/// files themselves (og:image, og:video, og:audio, and direct links),
+	/// as opposed to the pages they appear on. When unset, falls back to
+	/// `url_preview_user_agent`, then to the versioned server User-Agent.
+	///
+	/// default:
+	#[serde(default)]
+	pub url_preview_media_user_agent: Option<String>,
 
 	/// List of forbidden room aliases and room IDs as strings of regex
 	/// patterns.

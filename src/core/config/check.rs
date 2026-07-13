@@ -400,6 +400,12 @@ fn check_url_previews(config: &Config) -> Result {
 		return Err!(Config("url_preview_user_agent", "Not a valid HTTP header value."));
 	}
 
+	if let Some(user_agent) = config.url_preview_media_user_agent.as_deref()
+		&& HeaderValue::from_str(user_agent).is_err()
+	{
+		return Err!(Config("url_preview_media_user_agent", "Not a valid HTTP header value."));
+	}
+
 	Ok(())
 }
 
