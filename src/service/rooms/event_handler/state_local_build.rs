@@ -11,7 +11,7 @@ use ruma::{
 };
 use tracing::Span;
 use tuwunel_core::{
-	Result, apply, debug, debug_warn, err, implement,
+	Result, apply, debug, debug_warn, defer, err, implement,
 	matrix::{
 		Event, PduEvent, StateKey,
 		pdu::PrevEvents,
@@ -142,24 +142,25 @@ where
 	let create_event_id = create_event_id.to_owned();
 	let parent = Span::current();
 
-	self.services
-		.server
-		.runtime()
-		.spawn(async move {
-			services
-				.event_handler
-				.walk_task(room_id, room_version, create_event_id, mode, top_prevs, parent)
-				.await
-		})
-		.await
-		.unwrap_or_else(|error| {
-			debug_warn!(
-				%error,
-				"Local state build task failed; falling back to federation fetch.",
-			);
+	let task = self.services.server.runtime().spawn(async move {
+		services
+			.event_handler
+			.walk_task(room_id, room_version, create_event_id, mode, top_prevs, parent)
+			.await
+	});
 
-			Ok(None)
-		})
+	// Abort on caller cancellation; a dropped JoinHandle only detaches.
+	let abort = task.abort_handle();
+	defer! {{ abort.abort(); }};
+
+	task.await.unwrap_or_else(|error| {
+		debug_warn!(
+			%error,
+			"Local state build task failed; falling back to federation fetch.",
+		);
+
+		Ok(None)
+	})
 }
 
 /// Walk body on its own task: a poll descends every combinator layer from the
