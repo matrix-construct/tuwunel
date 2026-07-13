@@ -53,8 +53,8 @@ pub async fn enable(server: Arc<Server>) {
 			() = server.server.until_shutdown() => break,
 			_ = signal::ctrl_c() => {
 				warn!("Received Ctrl+C");
-				if let Err(e) = server.server.signal.send("SIGINT") {
-					debug_error!("signal channel: {e}");
+				if let Err(e) = server.server.shutdown() {
+					debug_error!("shutdown: {e}");
 				}
 			},
 		}
