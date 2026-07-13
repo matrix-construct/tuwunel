@@ -4,6 +4,7 @@ use super::{
 	cf_opts::register_pool,
 	context::{ColCache, ColCaches, SHARED_POOL},
 	descriptor::{self, CacheDisp, Descriptor},
+	open::is_remnant,
 };
 
 fn fresh_caches() -> ColCaches {
@@ -101,4 +102,20 @@ fn shared_disposition_joins_global_pool() {
 		.expect("shared pool present");
 
 	assert_eq!(pool.participants, vec!["shared_one", "shared_two"]);
+}
+
+#[test]
+fn remnants_classified_by_name() {
+	assert!(is_remnant("CURRENT"));
+	assert!(is_remnant("MANIFEST-000005"));
+	assert!(is_remnant("000004.log"));
+	assert!(is_remnant("000123.sst"));
+
+	assert!(!is_remnant("LOCK"));
+	assert!(!is_remnant("IDENTITY"));
+	assert!(!is_remnant("OPTIONS-000007"));
+	assert!(!is_remnant("media"));
+	assert!(!is_remnant("conduit.db"));
+	assert!(!is_remnant(".sst"));
+	assert!(!is_remnant("backup.log"));
 }

@@ -1,12 +1,13 @@
 use std::{
 	collections::BTreeSet,
+	fs::read_dir,
 	path::Path,
 	sync::{Arc, atomic::AtomicU32},
 };
 
 use rocksdb::{ColumnFamilyDescriptor, Options};
 use tuwunel_core::{
-	Result, debug, debug_warn, implement, info, itertools::Itertools, trace, warn,
+	Result, debug, debug_warn, err, implement, info, itertools::Itertools, trace, warn,
 };
 
 use super::{
@@ -83,7 +84,7 @@ fn configure_cfds(
 	let server = &ctx.server;
 	let config = &server.config;
 	let path = &config.database_path;
-	let existing = Self::discover_cfs(path, db_opts);
+	let existing = Self::discover_cfs(path, db_opts)?;
 
 	// Found columns which are not described.
 	let missing = existing
@@ -197,9 +198,41 @@ fn configure_cfds(
 
 #[implement(Engine)]
 #[tracing::instrument(name = "discover", skip_all)]
-fn discover_cfs(path: &Path, opts: &Options) -> BTreeSet<String> {
+fn discover_cfs(path: &Path, opts: &Options) -> Result<BTreeSet<String>> {
 	Db::list_cf(opts, path)
-		.unwrap_or_default()
+		.map(|cfs| cfs.into_iter().collect())
+		.or_else(|e| {
+			let remnants = count_remnants(path);
+
+			remnants
+				.eq(&0)
+				.then(BTreeSet::new)
+				.ok_or_else(|| {
+					err!(Database(
+						"Found {remnants} database files in {path:?} but no readable manifest: \
+						 {e}. Refusing to initialize a new database over existing data; restore \
+						 a complete database copy including CURRENT and MANIFEST, or remove the \
+						 remnants to start fresh."
+					))
+				})
+		})
+}
+
+fn count_remnants(path: &Path) -> usize {
+	read_dir(path)
 		.into_iter()
-		.collect::<BTreeSet<_>>()
+		.flatten()
+		.filter_map(Result::ok)
+		.filter(|entry| entry.file_name().to_str().is_some_and(is_remnant))
+		.count()
+}
+
+/// Database files a fresh initialization would silently destroy.
+pub(super) fn is_remnant(name: &str) -> bool {
+	let numbered = |suffix| {
+		name.strip_suffix(suffix)
+			.is_some_and(|stem| !stem.is_empty() && stem.bytes().all(|b| b.is_ascii_digit()))
+	};
+
+	name == "CURRENT" || name.starts_with("MANIFEST-") || numbered(".sst") || numbered(".log")
 }
