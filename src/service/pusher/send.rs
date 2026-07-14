@@ -4,16 +4,15 @@ use ruma::{
 	UInt, UserId,
 	api::{
 		client::push::{Pusher, PusherKind},
-		push_gateway::send_event_notification::{
-			self,
-			v1::{Device, Notification, NotificationCounts, NotificationPriority},
+		push_gateway::send_event_notification::v1::{
+			Device, Notification, NotificationCounts, NotificationPriority, Request,
 		},
 	},
 	events::TimelineEventType,
 	push::{Action, PushFormat, Ruleset, Tweak},
 	uint,
 };
-use tuwunel_core::{Err, Result, err, implement, matrix::Event};
+use tuwunel_core::{Err, Result, err, implement, matrix::Event, warn};
 
 #[implement(super::Service)]
 #[tracing::instrument(level = "debug", skip_all)]
@@ -83,7 +82,7 @@ where
 			.try_into()
 			.unwrap_or_else(|_| uint!(1));
 
-		self.send_notice(unread, pusher, tweaks, event)
+		self.send_notice(user_id, unread, pusher, tweaks, event)
 			.await?;
 	}
 
@@ -94,6 +93,7 @@ where
 #[tracing::instrument(level = "debug", skip_all)]
 async fn send_notice<Pdu: Event>(
 	&self,
+	user_id: &UserId,
 	unread: UInt,
 	pusher: &Pusher,
 	tweaks: Vec<Tweak>,
@@ -198,8 +198,16 @@ async fn send_notice<Pdu: Event>(
 					.ok();
 			}
 
-			self.send_request(&http.url, send_event_notification::v1::Request::new(notify))
+			let response = self
+				.send_request(&http.url, Request::new(notify))
 				.await?;
+
+			if response.rejected.contains(&pusher.ids.pushkey) {
+				let pushkey = &pusher.ids.pushkey;
+
+				warn!(%url, %pushkey, "Push gateway rejected the pushkey; removing pusher");
+				self.delete_pusher(user_id, pushkey).await;
+			}
 
 			Ok(())
 		},
