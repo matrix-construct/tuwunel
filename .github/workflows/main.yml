@@ -201,10 +201,14 @@ jobs:
         runner: ${{matrix.runner}}
         pipeline: ${{inputs.pipeline || github.event.head_commit.message || github.event.workflow_run.head_commit.message}}
         seed_builder: ${{vars.SEED_BUILDER || 'jevolk'}}
-        reserved_space:    '{"het": "200GB", "aws": "24GB"}'
-        max_used_space:    '{"het": "350GB", "aws": "48GB"}'
+        reserved_space:    '{"het": "40GB",  "aws": "12GB"}'
+        max_used_space:    '{"het": "120GB", "aws": "32GB"}'
+        cachemount_max:    '{"het": "80GB",  "aws": "12GB"}'
         min_free_space:    '{"het": "32GB",  "aws": "16GB"}'
         safety_free_space: '{"het": "16GB",  "aws": "8GB"}'
+        reap_idle_hours:   '{"het": "24",    "aws": "24"}'
+        reap_min_free:     '{"het": "500GB", "aws": "40GB"}'
+        seed_budget:       '{"het": "250GB", "aws": "0GB"}'
       run: |
         .github/workflows/init.sh
 
