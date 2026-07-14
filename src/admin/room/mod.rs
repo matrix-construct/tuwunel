@@ -6,10 +6,11 @@ mod info;
 mod list;
 mod moderation;
 mod prune_empty;
+mod prune_extremities;
 mod purge_user;
 
 use clap::Subcommand;
-use ruma::OwnedRoomId;
+use ruma::{OwnedRoomId, OwnedRoomOrAliasId};
 use tuwunel_core::Result;
 
 use self::{
@@ -72,6 +73,18 @@ pub(super) enum RoomCommand {
 	PruneEmpty {
 		#[arg(short, long)]
 		force: bool,
+	},
+
+	/// - Scored prune of a room's forward extremities down to a target
+	PruneExtremities {
+		room_id: OwnedRoomOrAliasId,
+
+		/// Target frontier size (default: forward_extremities_max, min 1)
+		target: Option<usize>,
+
+		/// Show the plan without writing
+		#[arg(long)]
+		dry_run: bool,
 	},
 
 	/// - Delete every room a user is joined to
