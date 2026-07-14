@@ -18,10 +18,7 @@ use async_trait::async_trait;
 pub use context::Context;
 pub use create::create_admin_room;
 use futures::TryFutureExt;
-use ruma::{
-	OwnedEventId, OwnedRoomAliasId, OwnedRoomId, RoomId, RoomOrAliasId, UserId,
-	events::room::message::RoomMessageEventContent,
-};
+use ruma::{OwnedEventId, OwnedRoomAliasId, OwnedRoomId, RoomId, RoomOrAliasId, UserId};
 use tokio::sync::mpsc;
 use tuwunel_core::{Err, Event, Result, debug, err, error::default_log, warn};
 
@@ -56,14 +53,27 @@ pub trait Command: Send + Sync + 'static {
 	async fn dispatch(&self, matches: clap::ArgMatches, context: &Context<'_>) -> Result;
 }
 
-/// Result wrapping of a command's handling. Both variants are complete message
-/// events which have digested any prior errors. The wrapping preserves whether
-/// the command failed without interpreting the text. Ok(None) outputs are
-/// dropped to produce no response.
-pub type ProcessorResult = Result<Option<CommandOutput>, Box<CommandOutput>>;
+/// Result wrapping of a command's handling. The text has already digested any
+/// prior errors; the wrapping preserves whether the command failed without
+/// interpreting the text. Ok(None) outputs are dropped to produce no response.
+pub type ProcessorResult = Result<Option<CommandOutput>, CommandOutput>;
 
-/// Alias for the output structure.
-pub type CommandOutput = RoomMessageEventContent;
+/// Textual output of a completed command. Markdown is the norm; Plain carries
+/// clap usage and error text, which must never be markdown-rendered.
+pub enum CommandOutput {
+	Markdown(String),
+	Plain(String),
+}
+
+impl CommandOutput {
+	#[inline]
+	#[must_use]
+	pub fn as_str(&self) -> &str {
+		match self {
+			| Self::Markdown(text) | Self::Plain(text) => text,
+		}
+	}
+}
 
 /// Maximum number of commands which can be queued for dispatch.
 const COMMAND_QUEUE_LIMIT: usize = 512;
@@ -156,7 +166,7 @@ impl Service {
 		command: String,
 		reply_id: Option<OwnedEventId>,
 	) -> ProcessorResult {
-		self.process_command(CommandInput { command, reply_id })
+		self.process_command(&CommandInput { command, reply_id })
 			.await
 	}
 
@@ -180,20 +190,16 @@ impl Service {
 	}
 
 	async fn handle_command(&self, command: CommandInput) {
-		match self.process_command(command).await {
-			| Err(output) => self.handle_command_output(*output).await,
-			| Ok(Some(output)) => self.handle_command_output(output).await,
+		match self.process_command(&command).await {
 			| Ok(None) => debug!("Command successful with no response"),
+			| Err(output) | Ok(Some(output)) => self
+				.handle_response(output, command.reply_id.as_deref())
+				.await
+				.unwrap_or_else(default_log),
 		}
 	}
 
-	async fn handle_command_output(&self, content: RoomMessageEventContent) {
-		self.handle_response(content)
-			.await
-			.unwrap_or_else(default_log);
-	}
-
-	async fn process_command(&self, command: CommandInput) -> ProcessorResult {
+	async fn process_command(&self, command: &CommandInput) -> ProcessorResult {
 		let root = self
 			.command
 			.read()

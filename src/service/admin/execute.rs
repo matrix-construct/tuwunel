@@ -1,6 +1,7 @@
-use ruma::events::room::message::RoomMessageEventContent;
 use tokio::task::yield_now;
 use tuwunel_core::{Err, Result, debug, debug_info, error, implement, info};
+
+use super::CommandOutput;
 
 pub(super) const SIGNAL: &str = "SIGUSR2";
 
@@ -118,28 +119,28 @@ async fn execute_command(&self, i: usize, command: String) -> Result {
 
 #[cfg(feature = "console")]
 #[implement(super::Service)]
-fn execute_command_output(i: usize, content: &RoomMessageEventContent) -> Result {
+fn execute_command_output(i: usize, content: &CommandOutput) -> Result {
 	debug_info!("Execute command #{i} completed:");
-	super::console::print(content.body());
+	super::console::print(content.as_str());
 	Ok(())
 }
 
 #[cfg(feature = "console")]
 #[implement(super::Service)]
-fn execute_command_error(i: usize, content: &RoomMessageEventContent) -> Result {
-	super::console::print_err(content.body());
+fn execute_command_error(i: usize, content: &CommandOutput) -> Result {
+	super::console::print_err(content.as_str());
 	Err!(debug_error!("Execute command #{i} failed."))
 }
 
 #[cfg(not(feature = "console"))]
 #[implement(super::Service)]
-fn execute_command_output(i: usize, content: &RoomMessageEventContent) -> Result {
-	info!("Execute command #{i} completed:\n{:#}", content.body());
+fn execute_command_output(i: usize, content: &CommandOutput) -> Result {
+	info!("Execute command #{i} completed:\n{:#}", content.as_str());
 	Ok(())
 }
 
 #[cfg(not(feature = "console"))]
 #[implement(super::Service)]
-fn execute_command_error(i: usize, content: &RoomMessageEventContent) -> Result {
-	Err!(error!("Execute command #{i} failed:\n{:#}", content.body()))
+fn execute_command_error(i: usize, content: &CommandOutput) -> Result {
+	Err!(error!("Execute command #{i} failed:\n{:#}", content.as_str()))
 }

@@ -7,13 +7,6 @@ use std::{
 };
 
 use futures::{AsyncWriteExt, future::FutureExt, io::BufWriter};
-use ruma::{
-	EventId,
-	events::{
-		relation::{InReplyTo, Reply as ReplyRelation},
-		room::message::{Relation::Reply, RoomMessageEventContent},
-	},
-};
 use tracing::Level;
 use tracing_subscriber::{EnvFilter, filter::LevelFilter};
 use tuwunel_core::{
@@ -35,13 +28,13 @@ use crate::Services;
 pub(super) async fn handle_command(
 	command: Arc<dyn Command>,
 	services: Arc<Services>,
-	input: CommandInput,
+	input: &CommandInput,
 ) -> ProcessorResult {
-	AssertUnwindSafe(Box::pin(process_command(&*command, services, &input)))
+	AssertUnwindSafe(Box::pin(process_command(&*command, services, input)))
 		.catch_unwind()
 		.await
 		.map_err(Error::from_panic)
-		.unwrap_or_else(|error| handle_panic(&error, &input))
+		.unwrap_or_else(|error| handle_panic(&error))
 }
 
 #[must_use]
@@ -93,16 +86,12 @@ async fn process_command(
 	services: Arc<Services>,
 	input: &CommandInput,
 ) -> ProcessorResult {
-	let (matches, args, body) = match parse(&services, command.clap(), input) {
-		| Err(error) => return Err(Box::new(error)),
-		| Ok(parsed) => parsed,
-	};
+	let (matches, args, body) = parse(&services, command.clap(), input)?;
 
 	let context = Context {
 		services: &services,
 		body: &body,
 		timer: SystemTime::now(),
-		reply_id: input.reply_id.as_deref(),
 		output: BufWriter::new(Vec::new()).into(),
 	};
 
@@ -118,36 +107,32 @@ async fn process_command(
 		String::from_utf8(take(output.get_mut())).expect("invalid utf8 in command output stream");
 
 	match result {
-		| Ok(()) if logs.is_empty() =>
-			Ok(Some(reply(RoomMessageEventContent::notice_markdown(output), context.reply_id))),
+		| Ok(()) if logs.is_empty() => Ok(Some(CommandOutput::Markdown(output))),
 
 		| Ok(()) => {
 			logs.write_str(output.as_str())
 				.expect("output buffer");
-			Ok(Some(reply(RoomMessageEventContent::notice_markdown(logs), context.reply_id)))
+
+			Ok(Some(CommandOutput::Markdown(logs)))
 		},
 		| Err(error) => {
 			write!(&mut logs, "Command failed with error:\n```\n{error:#?}\n```")
 				.expect("output buffer");
 
-			Err(Box::new(reply(
-				RoomMessageEventContent::notice_markdown(logs),
-				context.reply_id,
-			)))
+			Err(CommandOutput::Markdown(logs))
 		},
 	}
 }
 
-fn handle_panic(error: &Error, input: &CommandInput) -> ProcessorResult {
+fn handle_panic(error: &Error) -> ProcessorResult {
 	let link =
 		"Please submit a [bug report](https://github.com/matrix-construct/tuwunel/issues/new). \
 		 🥺";
 
 	let msg = format!("Panic occurred while processing command:\n```\n{error:#?}\n```\n{link}");
-	let content = RoomMessageEventContent::notice_markdown(msg);
 
 	error!("Panic while processing command: {error:?}");
-	Err(Box::new(reply(content, input.reply_id.as_deref())))
+	Err(CommandOutput::Markdown(msg))
 }
 
 async fn process(
@@ -213,7 +198,6 @@ fn capture_create(context: &Context<'_>) -> (Arc<Capture>, Arc<Mutex<String>>) {
 	(capture, logs)
 }
 
-#[expect(clippy::result_large_err)]
 fn parse<'a>(
 	services: &Arc<Services>,
 	cmd: clap::Command,
@@ -238,7 +222,7 @@ fn parse<'a>(
 				.to_string()
 				.replace("server.name", services.globals.server_name().as_str());
 
-			Err(reply(RoomMessageEventContent::notice_plain(message), input.reply_id.as_deref()))
+			Err(CommandOutput::Plain(message))
 		},
 	}
 }
@@ -294,17 +278,4 @@ fn parse_line(command_line: &str) -> Vec<String> {
 
 	trace!(?command_line, ?argv, "parse");
 	argv
-}
-
-fn reply(
-	mut content: RoomMessageEventContent,
-	reply_id: Option<&EventId>,
-) -> RoomMessageEventContent {
-	content.relates_to = reply_id.map(|event_id| {
-		Reply(ReplyRelation {
-			in_reply_to: InReplyTo { event_id: event_id.to_owned() },
-		})
-	});
-
-	content
 }

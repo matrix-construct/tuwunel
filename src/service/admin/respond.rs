@@ -1,31 +1,28 @@
 use futures::FutureExt;
 use ruma::{
-	RoomId, UserId,
+	EventId, RoomId, UserId,
 	events::{
-		relation::Reply as ReplyRelation,
+		relation::{InReplyTo, Reply as ReplyRelation},
 		room::message::{Relation, RoomMessageEventContent},
 	},
 };
 use tuwunel_core::{Error, Event, Result, error, error::default_log, implement, pdu::PduBuilder};
 
+use super::CommandOutput;
 use crate::rooms::state::RoomMutexGuard;
 
 #[implement(super::Service)]
-pub(super) async fn handle_response(&self, content: RoomMessageEventContent) -> Result {
-	let Some(Relation::Reply(ReplyRelation { in_reply_to })) = content.relates_to.as_ref() else {
+pub(super) async fn handle_response(
+	&self,
+	output: CommandOutput,
+	reply_id: Option<&EventId>,
+) -> Result {
+	let Some(reply_id) = reply_id else {
 		return Ok(());
 	};
 
-	let Ok(pdu) = self
-		.services
-		.timeline
-		.get_pdu(&in_reply_to.event_id)
-		.await
-	else {
-		error!(
-			event_id = ?in_reply_to.event_id,
-			"Missing admin command in_reply_to event"
-		);
+	let Ok(pdu) = self.services.timeline.get_pdu(reply_id).await else {
+		error!(?reply_id, "Missing admin command in_reply_to event");
 		return Ok(());
 	};
 
@@ -35,9 +32,24 @@ pub(super) async fn handle_response(&self, content: RoomMessageEventContent) -> 
 		pdu.sender()
 	};
 
+	let content = render(output, reply_id);
+
 	self.respond_to_room(content, pdu.room_id(), response_sender)
 		.boxed()
 		.await
+}
+
+fn render(output: CommandOutput, reply_id: &EventId) -> RoomMessageEventContent {
+	let mut content = match output {
+		| CommandOutput::Markdown(text) => RoomMessageEventContent::notice_markdown(text),
+		| CommandOutput::Plain(text) => RoomMessageEventContent::notice_plain(text),
+	};
+
+	content.relates_to = Some(Relation::Reply(ReplyRelation {
+		in_reply_to: InReplyTo { event_id: reply_id.to_owned() },
+	}));
+
+	content
 }
 
 #[implement(super::Service)]

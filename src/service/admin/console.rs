@@ -6,11 +6,12 @@ use std::{
 };
 
 use futures::future::{AbortHandle, Abortable};
-use ruma::events::room::message::RoomMessageEventContent;
 use rustyline_async::{Readline, ReadlineError, ReadlineEvent};
 use termimad::MadSkin;
 use tokio::task::JoinHandle;
 use tuwunel_core::{Server, debug, defer, error, log, log::is_systemd_mode};
+
+use super::CommandOutput;
 
 pub struct Console {
 	server: Arc<Server>,
@@ -187,13 +188,13 @@ impl Console {
 		}
 	}
 
-	fn output_err(self: Arc<Self>, output_content: &RoomMessageEventContent) {
+	fn output_err(self: Arc<Self>, output_content: &CommandOutput) {
 		let output = configure_output_err(self.output.clone());
-		output.print_text(output_content.body());
+		output.print_text(output_content.as_str());
 	}
 
-	fn output(self: Arc<Self>, output_content: &RoomMessageEventContent) {
-		self.output.print_text(output_content.body());
+	fn output(self: Arc<Self>, output_content: &CommandOutput) {
+		self.output.print_text(output_content.as_str());
 	}
 
 	fn set_history(&self, readline: &mut Readline) {

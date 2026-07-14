@@ -5,7 +5,6 @@ use futures::{
 	io::{AsyncWriteExt, BufWriter},
 	lock::Mutex,
 };
-use ruma::EventId;
 use tokio::time::Instant;
 use tuwunel_core::Result;
 
@@ -15,7 +14,6 @@ pub struct Context<'a> {
 	pub services: &'a Services,
 	pub body: &'a [&'a str],
 	pub timer: SystemTime,
-	pub reply_id: Option<&'a EventId>,
 	pub output: Mutex<BufWriter<Vec<u8>>>,
 }
 
