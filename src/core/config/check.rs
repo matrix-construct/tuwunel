@@ -1,4 +1,8 @@
-use std::{env::consts::OS, fs::read_to_string, net::SocketAddr};
+use std::{
+	env::consts::OS,
+	fs::read_to_string,
+	net::{IpAddr, SocketAddr},
+};
 
 use either::Either;
 use http::HeaderValue;
@@ -129,6 +133,15 @@ fn check_network(config: &Config) -> Result {
 			.get_bind_addrs()
 			.iter()
 			.for_each(warn_loopback_in_container);
+	}
+
+	for server in &config.dns_servers {
+		if server.parse::<SocketAddr>().is_err() && server.parse::<IpAddr>().is_err() {
+			return Err!(Config(
+				"dns_servers",
+				"{server:?} is not an IP address or socket address."
+			));
+		}
 	}
 
 	// check if user specified valid IP CIDR ranges on startup

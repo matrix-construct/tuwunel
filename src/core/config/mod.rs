@@ -306,6 +306,18 @@ pub struct Config {
 	#[serde(default = "default_client_sync_timeout_max")]
 	pub client_sync_timeout_max: u64,
 
+	/// Custom DNS servers to query instead of the operating system's default
+	/// resolvers; when this list is non-empty, `/etc/resolv.conf` is never
+	/// read. Each entry is an IP address with an optional port, defaulting to
+	/// port 53. The servers are assumed to support both UDP and TCP on that
+	/// port; enable `query_over_tcp_only` if any of them is TCP-only.
+	///
+	/// example: ["127.0.0.53", "1.1.1.1:5353", "[fd00::1]:53"]
+	///
+	/// default: []
+	#[serde(default)]
+	pub dns_servers: Vec<String>,
+
 	/// Maximum entries stored in DNS memory-cache. The size of an entry may
 	/// vary so please take care if raising this value excessively. Only
 	/// decrease this when using an external DNS cache. Please note that

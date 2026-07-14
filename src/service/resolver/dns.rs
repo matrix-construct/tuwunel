@@ -1,11 +1,18 @@
-use std::{io, io::ErrorKind::PermissionDenied, net::SocketAddr, sync::Arc, time::Duration};
+use std::{
+	io,
+	io::ErrorKind::PermissionDenied,
+	net::{IpAddr, SocketAddr},
+	sync::Arc,
+	time::Duration,
+};
 
 use futures::FutureExt;
 use hickory_resolver::{
 	TokioResolver,
-	config::{ConnectionConfig, LookupIpStrategy, ResolverConfig, ResolverOpts},
+	config::{LookupIpStrategy, NameServerConfig, ProtocolConfig, ResolverConfig, ResolverOpts},
 	lookup_ip::LookupIp,
 	net::runtime::TokioRuntimeProvider,
+	system_conf::read_system_conf,
 };
 use ipaddress::IPAddress;
 use reqwest::dns::{Addrs, Name, Resolve, Resolving};
@@ -93,31 +100,67 @@ impl Resolver {
 
 	fn configure(server: &Arc<Server>) -> Result<(ResolverConfig, ResolverOpts)> {
 		let config = &server.config;
-		let (sys_conf, opts) =
-			hickory_resolver::system_conf::read_system_conf().map_err(|e| {
-				err!(error!("Failed to configure DNS resolver from `/etc/resolv.conf': {e}"))
-			})?;
 
-		let name_servers = sys_conf
+		let (base_conf, opts) = if config.dns_servers.is_empty() {
+			read_system_conf().map_err(|e| {
+				err!(error!("Failed to configure DNS resolver from `/etc/resolv.conf': {e}"))
+			})?
+		} else {
+			(Self::configure_custom(&config.dns_servers)?, ResolverOpts::default())
+		};
+
+		let name_servers = base_conf
 			.name_servers()
 			.iter()
 			.cloned()
 			.map(|mut ns| {
 				ns.trust_negative_responses = !config.query_all_nameservers;
 				if config.query_over_tcp_only {
-					ns.connections = vec![ConnectionConfig::tcp()];
+					ns.connections
+						.retain(|conn| matches!(conn.protocol, ProtocolConfig::Tcp));
 				}
+
 				ns
 			})
 			.collect();
 
 		let conf = ResolverConfig::from_parts(
-			sys_conf.domain().cloned(),
-			sys_conf.search().to_vec(),
+			base_conf.domain().cloned(),
+			base_conf.search().to_vec(),
 			name_servers,
 		);
 
 		Ok((conf, opts))
+	}
+
+	fn configure_custom(servers: &[String]) -> Result<ResolverConfig> {
+		let name_servers = servers
+			.iter()
+			.map(String::as_str)
+			.map(Self::parse_nameserver)
+			.collect::<Result<_>>()?;
+
+		Ok(ResolverConfig::from_parts(None, vec![], name_servers))
+	}
+
+	pub(super) fn parse_nameserver(server: &str) -> Result<NameServerConfig> {
+		let (ip, port) = server
+			.parse::<SocketAddr>()
+			.map(|addr| (addr.ip(), addr.port()))
+			.or_else(|_| server.parse::<IpAddr>().map(|ip| (ip, 53)))
+			.map_err(|e| {
+				err!(Config(
+					"dns_servers",
+					"{server:?} is not an IP address or socket address: {e}"
+				))
+			})?;
+
+		let mut conf = NameServerConfig::udp_and_tcp(ip);
+		for connection in &mut conf.connections {
+			connection.port = port;
+		}
+
+		Ok(conf)
 	}
 
 	#[expect(clippy::as_conversions)]
