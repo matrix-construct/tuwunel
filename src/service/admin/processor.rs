@@ -6,7 +6,7 @@ use std::{
 	time::SystemTime,
 };
 
-use futures::{AsyncWriteExt, future::FutureExt, io::BufWriter};
+use futures::future::FutureExt;
 use tracing::Level;
 use tracing_subscriber::{EnvFilter, filter::LevelFilter};
 use tuwunel_core::{
@@ -92,19 +92,12 @@ async fn process_command(
 		services: &services,
 		body: &body,
 		timer: SystemTime::now(),
-		output: BufWriter::new(Vec::new()).into(),
+		output: String::new().into(),
 	};
 
 	let (result, mut logs) = process(&context, command, matches, &args).await;
 
-	let output = &mut context.output.lock().await;
-	output
-		.flush()
-		.await
-		.expect("final flush of output stream");
-
-	let output =
-		String::from_utf8(take(output.get_mut())).expect("invalid utf8 in command output stream");
+	let output = take(&mut *context.output.lock().await);
 
 	match result {
 		| Ok(()) if logs.is_empty() => Ok(Some(CommandOutput::Markdown(output))),

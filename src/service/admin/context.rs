@@ -1,20 +1,20 @@
 use std::{fmt, fmt::Debug, time::SystemTime};
 
-use futures::{
-	Future, FutureExt, TryFutureExt,
-	io::{AsyncWriteExt, BufWriter},
-	lock::Mutex,
-};
+use futures::{Future, FutureExt, lock::Mutex};
 use tokio::time::Instant;
-use tuwunel_core::Result;
+use tuwunel_core::{Err, Result};
 
 use crate::Services;
+
+/// Ceiling on a single command's accumulated output; a handler that writes past
+/// it aborts rather than letting the buffer grow without bound.
+const OUTPUT_MAX_BYTES: usize = 64 * 1024 * 1024;
 
 pub struct Context<'a> {
 	pub services: &'a Services,
 	pub body: &'a [&'a str],
 	pub timer: SystemTime,
-	pub output: Mutex<BufWriter<Vec<u8>>>,
+	pub output: Mutex<String>,
 }
 
 impl Context<'_> {
@@ -60,11 +60,13 @@ impl Context<'_> {
 	pub async fn write_string(&self, s: String) -> Result { self.write_str(&s).await }
 
 	pub fn write_str<'a>(&'a self, s: &'a str) -> impl Future<Output = Result> + Send + 'a {
-		self.output.lock().then(async move |mut output| {
-			output
-				.write_all(s.as_bytes())
-				.map_err(Into::into)
-				.await
+		self.output.lock().map(move |mut output| {
+			if output.len().saturating_add(s.len()) > OUTPUT_MAX_BYTES {
+				return Err!("Command output exceeded the maximum size and was aborted.");
+			}
+
+			output.push_str(s);
+			Ok(())
 		})
 	}
 }
