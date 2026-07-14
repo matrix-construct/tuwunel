@@ -1,8 +1,18 @@
-pub use nix::sys::resource::Usage;
 #[cfg(unix)]
-use nix::sys::resource::{UsageWho, getrusage};
+use nix::sys::resource::{Usage as NixUsage, UsageWho, getrusage};
 
 use crate::{Result, expected};
+
+/// Resource usage wrapper. On Unix this is the nix `Usage` struct populated
+/// by `getrusage()`. On Windows (and any platform where `getrusage` is
+/// unavailable) this is a zero-field Debug stub so that tracing macros like
+/// `?resource_usage` still work.
+#[cfg(unix)]
+pub type Usage = NixUsage;
+
+#[cfg(not(unix))]
+#[derive(Debug, Default, Clone, Copy)]
+pub struct Usage;
 
 pub fn virt() -> Result<usize> {
 	Ok(statm_bytes()?
@@ -74,8 +84,13 @@ pub fn statm() -> Result<impl Iterator<Item = usize>> { Ok([0, 0, 0, 0, 0, 0].in
 pub fn usage() -> Result<Usage> { getrusage(UsageWho::RUSAGE_SELF).map_err(Into::into) }
 
 #[cfg(not(unix))]
-pub fn usage() -> Result<Usage> { Ok(Usage::default()) }
+pub fn usage() -> Result<Usage> { Ok(Usage) }
 
+/// Per-thread resource usage. On Linux/FreeBSD/OpenBSD, `RUSAGE_THREAD` is
+/// available. On other Unix platforms (macOS, etc.) the thread variant does
+/// not exist, so we fall back to the process-wide `getrusage(RUSAGE_SELF)`
+/// which returns a non-zero, well-defined `Usage` value — better than
+/// relying on `Usage::default()` (which nix does not implement).
 #[cfg(any(
 	target_os = "linux",
 	target_os = "freebsd",
@@ -83,11 +98,15 @@ pub fn usage() -> Result<Usage> { Ok(Usage::default()) }
 ))]
 pub fn thread_usage() -> Result<Usage> { getrusage(UsageWho::RUSAGE_THREAD).map_err(Into::into) }
 
-#[cfg(not(any(
-	target_os = "linux",
-	target_os = "freebsd",
-	target_os = "openbsd"
-)))]
-pub fn thread_usage() -> Result<Usage> {
-	unimplemented!("RUSAGE_THREAD available on this platform")
-}
+#[cfg(all(
+	unix,
+	not(any(
+		target_os = "linux",
+		target_os = "freebsd",
+		target_os = "openbsd"
+	))
+))]
+pub fn thread_usage() -> Result<Usage> { getrusage(UsageWho::RUSAGE_SELF).map_err(Into::into) }
+
+#[cfg(not(unix))]
+pub fn thread_usage() -> Result<Usage> { Ok(Usage) }
