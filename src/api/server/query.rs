@@ -69,6 +69,10 @@ pub(crate) async fn get_profile_information_route(
 		return Err!(Request(InvalidParam("User does not belong to this server.",)));
 	}
 
+	if !services.users.exists(&body.user_id).await {
+		return Err!(Request(NotFound("Profile was not found.")));
+	}
+
 	match &body.field {
 		| Some(field) => {
 			let value = services
