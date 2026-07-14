@@ -1,6 +1,6 @@
 use axum::extract::State;
 use futures::StreamExt;
-use ruma::{UInt, UserId, api::Direction};
+use ruma::{MilliSecondsSinceUnixEpoch, UInt, UserId, api::Direction};
 use synapse_admin_api::users::list_users::{
 	v2::{self, UserMinorDetails},
 	v3,
@@ -225,6 +225,8 @@ async fn user_minor_details(
 		locked,
 		erased,
 		last_seen_ts,
+		// tuwunel has no creation timestamp; emit a 0 sentinel (strict clients reject null).
+		creation_ts: Some(MilliSecondsSinceUnixEpoch(UInt::from(0_u32))),
 		..UserMinorDetails::new(name.to_owned())
 	})
 }

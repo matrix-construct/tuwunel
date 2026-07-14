@@ -17,7 +17,7 @@ mod username_available;
 mod whois;
 
 use futures::StreamExt;
-use ruma::UserId;
+use ruma::{SecondsSinceUnixEpoch, UInt, UserId};
 use synapse_admin_api::users::UserDetails;
 use tuwunel_core::utils::stream::ReadyExt;
 
@@ -85,6 +85,8 @@ async fn user_details(services: crate::State, user_id: &UserId) -> UserDetails {
 		erased,
 		threepids,
 		last_seen_ts,
+		// tuwunel has no creation timestamp; emit a 0 sentinel (strict clients reject null).
+		creation_ts: Some(SecondsSinceUnixEpoch(UInt::from(0_u32))),
 		..UserDetails::new(user_id.to_string())
 	}
 }
