@@ -952,6 +952,39 @@ pub struct Config {
 	#[serde(default)]
 	pub resolve_state_locally_shadow: bool,
 
+	/// Soft cap on the number of forward extremities tracked per room. When
+	/// applying an incoming federation event would leave the room's frontier
+	/// larger than this, the least useful leaves are pruned from the tracked
+	/// set until it is back at the cap. Pruned events are not deleted and can
+	/// still be referenced by other servers; this server merely stops citing
+	/// them as frontier tips. Events created by this server are never pruned.
+	/// 0 disables automatic pruning.
+	///
+	/// reloadable: yes
+	/// default: 60
+	#[serde(default = "default_forward_extremities_max")]
+	pub forward_extremities_max: usize,
+
+	/// Emergency bound on the per-room frontier. A frontier larger than this
+	/// is cut down to it in a single step, ignoring the per-event pruning
+	/// batch limit. Values at or below forward_extremities_max remove the
+	/// pacing entirely, pruning straight to the cap in one step.
+	///
+	/// reloadable: yes
+	/// default: 256
+	#[serde(default = "default_forward_extremities_emergency_max")]
+	pub forward_extremities_emergency_max: usize,
+
+	/// Upper bound on how many forward extremities one incoming event may
+	/// prune while the frontier is between the cap and the emergency bound.
+	/// Spreads convergence across events to bound the work done by any single
+	/// one. 0 stops paced pruning, leaving only the emergency bound.
+	///
+	/// reloadable: yes
+	/// default: 32
+	#[serde(default = "default_forward_extremities_prune_batch")]
+	pub forward_extremities_prune_batch: usize,
+
 	/// Sets the default `m.federate` property for newly created rooms when the
 	/// client does not request one. If `allow_federation` is set to false at
 	/// the same this value is set to false it then always overrides the client
@@ -4563,6 +4596,12 @@ fn default_max_fetch_prev_events() -> u16 { 192_u16 }
 fn default_fetch_prev_wait_ms() -> u64 { 750 }
 
 fn default_resolve_state_locally_max() -> usize { 256 }
+
+fn default_forward_extremities_max() -> usize { 60 }
+
+fn default_forward_extremities_emergency_max() -> usize { 256 }
+
+fn default_forward_extremities_prune_batch() -> usize { 32 }
 
 fn default_tracing_flame_filter() -> String {
 	cfg!(debug_assertions)

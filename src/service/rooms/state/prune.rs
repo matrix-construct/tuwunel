@@ -271,6 +271,17 @@ fn drop_order(a: &Live, b: &Live) -> Ordering {
 		.then(a.count.cmp(&b.count))
 }
 
+/// Per-round drop goal for the paced receive-path prune: an uncapped cut down
+/// to the emergency bound, but never slower than the per-event batch down to
+/// the cap. All saturating.
+pub(crate) fn prune_goal(len: usize, max: usize, emergency: usize, batch: usize) -> usize {
+	// Clamp emergency up to the cap so a value below it cannot invert the arms.
+	let emergency = emergency.max(max);
+
+	len.saturating_sub(emergency)
+		.max(len.saturating_sub(max).min(batch))
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -428,5 +439,45 @@ mod tests {
 		assert_eq!(survivors, vec![2]);
 		assert_eq!(summary.referenced, 0);
 		assert_eq!(summary.dangling, 1);
+	}
+
+	#[test]
+	fn pace_emergency_cut_above_bound() {
+		assert_eq!(prune_goal(1060, 60, 256, 32), 804);
+	}
+
+	#[test]
+	fn pace_batch_between_cap_and_bound() {
+		assert_eq!(prune_goal(257, 60, 256, 32), 32);
+	}
+
+	#[test]
+	fn pace_one_over_cap_drops_one() {
+		assert_eq!(prune_goal(61, 60, 256, 32), 1);
+	}
+
+	#[test]
+	fn pace_at_cap_drops_none() {
+		assert_eq!(prune_goal(60, 60, 256, 32), 0);
+	}
+
+	#[test]
+	fn pace_emergency_at_or_below_cap_is_unpaced() {
+		// emergency <= max removes pacing: the goal is always len - max.
+		assert_eq!(prune_goal(100, 60, 0, 32), 40);
+		assert_eq!(prune_goal(100, 60, 60, 32), 40);
+	}
+
+	#[test]
+	fn pace_zero_batch_parks_at_emergency() {
+		assert_eq!(prune_goal(300, 60, 256, 0), 44);
+		assert_eq!(prune_goal(256, 60, 256, 0), 0);
+	}
+
+	#[test]
+	fn pace_monotone_across_emergency_bound() {
+		// Just under the bound still takes the batch, so there is no discontinuous
+		// jump to a one-leaf trickle at the boundary.
+		assert_eq!(prune_goal(256, 60, 256, 32), 32);
 	}
 }

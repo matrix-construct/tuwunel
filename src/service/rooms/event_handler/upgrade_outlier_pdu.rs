@@ -21,7 +21,7 @@ use super::{
 	state_local_build::{WalkMode, compare_shadow},
 };
 use crate::rooms::{
-	state::RoomMutexGuard,
+	state::{RoomMutexGuard, Trigger, prune_goal},
 	state_compressor::{CompressedState, HashSetCompressStateEvent},
 	state_res,
 	timeline::RawPduId,
@@ -107,9 +107,32 @@ pub(super) async fn upgrade_outlier_to_timeline_pdu(
 	trace!("Locking the room");
 	let state_lock = self.services.state.mutex.lock(room_id).await;
 
-	let extremities = self
+	let mut extremities = self
 		.compute_remaining_extremities(room_id, &incoming_pdu)
 		.await;
+
+	let config = &self.services.server.config;
+	let max = config.forward_extremities_max;
+	let len = extremities
+		.len()
+		.saturating_add(usize::from(!soft_fail));
+
+	if max > 0 && len > max {
+		let goal = prune_goal(
+			len,
+			max,
+			config.forward_extremities_emergency_max,
+			config.forward_extremities_prune_batch,
+		);
+
+		let summary = self
+			.services
+			.state
+			.prune_forward_extremities(room_id, &mut extremities, goal, Trigger::Receive)
+			.await;
+
+		debug!(?summary, "Pruned forward extremities over the cap.");
+	}
 
 	trace!("Compressing state...");
 	let state_ids_compressed: Arc<CompressedState> = self

@@ -780,6 +780,36 @@
 #
 #resolve_state_locally_shadow = false
 
+# Soft cap on the number of forward extremities tracked per room. When
+# applying an incoming federation event would leave the room's frontier
+# larger than this, the least useful leaves are pruned from the tracked
+# set until it is back at the cap. Pruned events are not deleted and can
+# still be referenced by other servers; this server merely stops citing
+# them as frontier tips. Events created by this server are never pruned.
+# 0 disables automatic pruning.
+#
+# reloadable: yes
+#
+#forward_extremities_max = 60
+
+# Emergency bound on the per-room frontier. A frontier larger than this
+# is cut down to it in a single step, ignoring the per-event pruning
+# batch limit. Values at or below forward_extremities_max remove the
+# pacing entirely, pruning straight to the cap in one step.
+#
+# reloadable: yes
+#
+#forward_extremities_emergency_max = 256
+
+# Upper bound on how many forward extremities one incoming event may
+# prune while the frontier is between the cap and the emergency bound.
+# Spreads convergence across events to bound the work done by any single
+# one. 0 stops paced pruning, leaving only the emergency bound.
+#
+# reloadable: yes
+#
+#forward_extremities_prune_batch = 32
+
 # Sets the default `m.federate` property for newly created rooms when the
 # client does not request one. If `allow_federation` is set to false at
 # the same this value is set to false it then always overrides the client
