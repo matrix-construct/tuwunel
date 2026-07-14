@@ -414,7 +414,7 @@ target "complement-testee" {
         # test under --rr. Realtime needs CAP_SYS_NICE, which the Complement
         # runner grants the testee container; sched_wrap.sh degrades otherwise.
         sched_policy = (cargo_profile == "test"? "--rr": "--fifo")
-        sched_prio = 1
+        sched_prio = (cargo_profile == "test"? 1: 2)
     }
 }
 
@@ -809,11 +809,16 @@ target "integ-valgrind" {
         VALGRINDFLAGS = "${valgrind_flags}"
         cargo_cmd = "valgrind test"
         cargo_args = "--test=*"
+
+        # valgrind already serializes; keep it off the realtime class integ now grants
+        sched_policy = ""
     }
 }
 
 target "integ" {
     name = elem("integ", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target])
+    # raise RLIMIT_RTPRIO so the realtime sched_policy in args is grantable (build RUN lacks CAP_SYS_NICE)
+    ulimits = ["rtprio=49"]
     tags = [
         elem_tag("integ", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target], "latest"),
     ]
@@ -832,7 +837,7 @@ target "integ" {
         )
 
         sched_policy = (cargo_profile == "bench"? "--fifo": "--rr")
-        sched_prio = 1
+        sched_prio = (cargo_profile == "bench"? 3: 1)
     }
 }
 
@@ -958,11 +963,16 @@ target "unit-valgrind" {
         VALGRINDFLAGS = "${valgrind_flags}"
         cargo_cmd = "valgrind test"
         cargo_args = "--lib --bins"
+
+        # valgrind already serializes; keep it off the realtime class unit now grants
+        sched_policy = ""
     }
 }
 
 target "unit" {
     name = elem("unit", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target])
+    # raise RLIMIT_RTPRIO so the realtime sched_policy in args is grantable (build RUN lacks CAP_SYS_NICE)
+    ulimits = ["rtprio=49"]
     tags = [
         elem_tag("unit", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target], "latest"),
     ]
@@ -981,12 +991,14 @@ target "unit" {
         )
 
         sched_policy = (cargo_profile == "bench"? "--fifo": "--rr")
-        sched_prio = 1
+        sched_prio = (cargo_profile == "bench"? 3: 1)
     }
 }
 
 target "doc" {
     name = elem("doc", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target])
+    # raise RLIMIT_RTPRIO so the realtime sched_policy in args is grantable (build RUN lacks CAP_SYS_NICE)
+    ulimits = ["rtprio=49"]
     tags = [
         elem_tag("doc", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target], "latest"),
     ]
