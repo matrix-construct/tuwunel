@@ -15,7 +15,7 @@ pub(super) async fn delete_forward_extremities(&self, room: OwnedRoomOrAliasId) 
 	let deleted = self
 		.services
 		.state
-		.prune_forward_extremities(&room_id, &state_lock)
+		.collapse_forward_extremities(&room_id, &state_lock)
 		.await;
 
 	let out: Cow<'_, str> = match deleted {

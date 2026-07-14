@@ -1,7 +1,10 @@
+mod prune;
+
 use std::{collections::HashMap, fmt::Write, iter::once, sync::Arc};
 
 use async_trait::async_trait;
 use futures::{FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt, future::join_all};
+pub use prune::{PruneSummary, Trigger};
 use ruma::{
 	CanonicalJsonObject, EventId, OwnedEventId, OwnedRoomId, RoomId, RoomVersionId, UserId,
 	events::{AnyStrippedStateEvent, StateEventType, TimelineEventType},
@@ -600,7 +603,7 @@ pub(super) fn delete_room_shortstatehash(
 	skip_all,
 	fields(%room_id),
 )]
-pub async fn prune_forward_extremities(
+pub async fn collapse_forward_extremities(
 	&self,
 	room_id: &RoomId,
 	state_lock: &RoomMutexGuard,

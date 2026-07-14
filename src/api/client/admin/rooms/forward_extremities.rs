@@ -69,7 +69,7 @@ pub(crate) async fn admin_delete_forward_extremities_route(
 
 	let deleted = services
 		.state
-		.prune_forward_extremities(&room_id, &state_lock)
+		.collapse_forward_extremities(&room_id, &state_lock)
 		.await;
 
 	Ok(DeleteResponse { deleted: super::usize_to_uint(deleted) })
