@@ -1,4 +1,5 @@
 mod between;
+mod chunk;
 pub mod de;
 mod split;
 mod tests;
@@ -7,7 +8,9 @@ mod unquoted;
 
 use std::{mem::replace, ops::Range};
 
-pub use self::{between::Between, split::SplitInfallible, unquote::Unquote, unquoted::Unquoted};
+pub use self::{
+	between::Between, chunk::chunk, split::SplitInfallible, unquote::Unquote, unquoted::Unquoted,
+};
 use crate::{Result, smallstr::SmallString};
 
 pub const EMPTY: &str = "";
