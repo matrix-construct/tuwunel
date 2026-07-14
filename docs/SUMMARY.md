@@ -1,6 +1,7 @@
 # Summary
 
 - [Introduction](introduction.md)
+- [Funding and Enterprise](funding.md)
 - [Deployment](deploying.md)
   - [Configuration](configuration.md)
     - [Examples](configuration/examples.md)
