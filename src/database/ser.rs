@@ -191,13 +191,13 @@ impl<W: Write> ser::Serializer for &mut Serializer<'_, W> {
 		);
 
 		match name {
-			| "Json" => serde_json::to_writer(&mut self.out, value).map_err(Into::into),
+			| "Json" => serde_json::to_writer(&mut *self.out, value).map_err(Into::into),
 			| "Cbor" => {
 				use minicbor::encode::write::Writer;
 				use minicbor_serde::Serializer;
 
 				value
-					.serialize(&mut Serializer::new(&mut Writer::new(&mut self.out)))
+					.serialize(&mut Serializer::new(&mut Writer::new(&mut *self.out)))
 					.map_err(|e| Self::Error::SerdeSer(e.to_string().into()))
 			},
 			| _ => unhandled!("Unrecognized serialization Newtype {name:?}"),
