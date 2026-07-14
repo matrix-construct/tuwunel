@@ -2870,6 +2870,28 @@ pub struct Config {
 	#[serde(default = "true_fn")]
 	pub admin_room_notices: bool,
 
+	/// Maximum number of message events an admin command's output may be split
+	/// across as replies in the admin room. Output needing more events than
+	/// this is uploaded to the media repository instead and returned as a text
+	/// file attachment replying to the command. When 1, output which fits in a
+	/// single event is posted as a single reply and anything larger becomes an
+	/// attachment. When 0, output is always posted as an attachment regardless
+	/// of size.
+	///
+	/// reloadable: yes
+	/// default: 1
+	#[serde(default = "default_admin_output_max_events")]
+	pub admin_output_max_events: usize,
+
+	/// Post admin command output into a thread on the command event rather than
+	/// as replies. Output split across multiple events per
+	/// `admin_output_max_events` is contained in a single thread; attachment
+	/// outputs are posted into the thread as well.
+	///
+	/// reloadable: yes
+	#[serde(default)]
+	pub admin_output_threads: bool,
+
 	/// Save original events before applying redaction to them.
 	///
 	/// They can be retrieved with `admin debug get-retained-pdu` or MSC2815.
@@ -4746,6 +4768,8 @@ fn default_admin_log_capture() -> String {
 }
 
 fn default_admin_room_tag() -> String { "m.server_notice".to_owned() }
+
+fn default_admin_output_max_events() -> usize { 1 }
 
 #[expect(clippy::as_conversions, clippy::cast_precision_loss)]
 fn parallelism_scaled_f64(val: f64) -> f64 { val * (sys::available_parallelism() as f64) }

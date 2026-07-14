@@ -2537,6 +2537,27 @@
 #
 #admin_room_notices = true
 
+# Maximum number of message events an admin command's output may be split
+# across as replies in the admin room. Output needing more events than
+# this is uploaded to the media repository instead and returned as a text
+# file attachment replying to the command. When 1, output which fits in a
+# single event is posted as a single reply and anything larger becomes an
+# attachment. When 0, output is always posted as an attachment regardless
+# of size.
+#
+# reloadable: yes
+#
+#admin_output_max_events = 1
+
+# Post admin command output into a thread on the command event rather than
+# as replies. Output split across multiple events per
+# `admin_output_max_events` is contained in a single thread; attachment
+# outputs are posted into the thread as well.
+#
+# reloadable: yes
+#
+#admin_output_threads = false
+
 # Save original events before applying redaction to them.
 #
 # They can be retrieved with `admin debug get-retained-pdu` or MSC2815.
