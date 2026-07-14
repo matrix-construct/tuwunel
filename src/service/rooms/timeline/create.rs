@@ -10,7 +10,7 @@ use ruma::{
 };
 use serde_json::value::to_raw_value;
 use tuwunel_core::{
-	Error, Result, err, implement,
+	Err, Error, Result, err, implement,
 	matrix::{
 		event::{Event, StateKey, TypeExt},
 		pdu::{EventHash, PduBuilder, PduEvent, PrevEvents, check_rules},
@@ -43,14 +43,9 @@ pub async fn create_hash_and_sign_event(
 		timestamp,
 	} = pdu_builder;
 
-	let prev_events: PrevEvents = self
-		.services
-		.state
-		.get_forward_extremities(room_id)
-		.take(20)
-		.map(Into::into)
-		.collect()
-		.await;
+	let prev_events = self
+		.compute_prev_events(room_id, &event_type)
+		.await?;
 
 	// If there was no create event yet, assume we are creating a room
 	let (room_version, version_rules) = self
@@ -204,4 +199,31 @@ pub async fn create_hash_and_sign_event(
 		.await;
 
 	Ok((pdu, pdu_json))
+}
+
+#[implement(super::Service)]
+async fn compute_prev_events(
+	&self,
+	room_id: &RoomId,
+	event_type: &TimelineEventType,
+) -> Result<PrevEvents> {
+	let prev_events: PrevEvents = self
+		.services
+		.state
+		.get_forward_extremities(room_id)
+		.take(20)
+		.map(Into::into)
+		.collect()
+		.await;
+
+	// An empty frontier would sign a detached event, which is valid only for a
+	// room's create event; anything else would silently fork the room.
+	if prev_events.is_empty() && *event_type != TimelineEventType::RoomCreate {
+		let message = "cannot create a non-create event in a room with no forward extremities";
+		let room_id = room_id.to_owned();
+
+		return Err!(InconsistentRoomState(message, room_id));
+	}
+
+	Ok(prev_events)
 }
