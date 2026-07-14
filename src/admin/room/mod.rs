@@ -4,6 +4,7 @@ mod directory;
 mod exists;
 mod info;
 mod list;
+mod list_extremities;
 mod moderation;
 mod prune_empty;
 mod prune_extremities;
@@ -73,6 +74,11 @@ pub(super) enum RoomCommand {
 	PruneEmpty {
 		#[arg(short, long)]
 		force: bool,
+	},
+
+	/// - List a room's forward extremities with a total
+	ListExtremities {
+		room_id: OwnedRoomOrAliasId,
 	},
 
 	/// - Scored prune of a room's forward extremities down to a target
