@@ -3,13 +3,31 @@ use ruma::{
 	EventId, RoomId, UserId,
 	events::{
 		relation::{InReplyTo, Reply as ReplyRelation},
-		room::message::{Relation, RoomMessageEventContent},
+		room::message::{
+			Relation, RoomMessageEventContent, RoomMessageEventContentWithoutRelation,
+		},
 	},
 };
-use tuwunel_core::{Error, Event, Result, error, error::default_log, implement, pdu::PduBuilder};
+use tuwunel_core::{
+	Error, Event, Result, error,
+	error::default_log,
+	implement,
+	pdu::{MAX_PDU_BYTES, PduBuilder},
+};
 
 use super::CommandOutput;
 use crate::rooms::state::RoomMutexGuard;
+
+/// Room event relation carried by an admin response.
+type MessageRelation = Relation<RoomMessageEventContentWithoutRelation>;
+
+/// Envelope overhead reserved above the message content: prev and auth event
+/// ids at their maximum, 255-byte sender and room ids, and the signatures
+/// block, just under 10 KiB in the worst legal case.
+const EVENT_RESERVE: usize = 10_240;
+
+/// Largest serialized message content that still fits a single event.
+const CONTENT_BUDGET: usize = MAX_PDU_BYTES - EVENT_RESERVE;
 
 #[implement(super::Service)]
 pub(super) async fn handle_response(
@@ -32,24 +50,64 @@ pub(super) async fn handle_response(
 		pdu.sender()
 	};
 
-	let content = render(output, reply_id);
+	let content = self.render_content(&output, reply_id).await?;
 
 	self.respond_to_room(content, pdu.room_id(), response_sender)
 		.boxed()
 		.await
 }
 
-fn render(output: CommandOutput, reply_id: &EventId) -> RoomMessageEventContent {
+/// Renders the output as a single reply event when it fits and replies are
+/// permitted, otherwise uploads it as a file attachment.
+#[implement(super::Service)]
+async fn render_content(
+	&self,
+	output: &CommandOutput,
+	reply_id: &EventId,
+) -> Result<RoomMessageEventContent> {
+	let max_events = self
+		.services
+		.server
+		.config
+		.admin_output_max_events;
+
+	// The raw text is a cheap lower bound: rendering only grows it, so output
+	// already over budget skips straight to an attachment.
+	let single = (max_events != 0 && output.as_str().len() <= CONTENT_BUDGET)
+		.then(|| render(output, reply_id))
+		.filter(fits_one_event);
+
+	match single {
+		| Some(content) => Ok(content),
+		| None => {
+			let mut content = self.attach(output).await?;
+			content.relates_to = Some(reply_relation(reply_id));
+
+			Ok(content)
+		},
+	}
+}
+
+fn render(output: &CommandOutput, reply_id: &EventId) -> RoomMessageEventContent {
 	let mut content = match output {
-		| CommandOutput::Markdown(text) => RoomMessageEventContent::notice_markdown(text),
-		| CommandOutput::Plain(text) => RoomMessageEventContent::notice_plain(text),
+		| CommandOutput::Markdown(text) =>
+			RoomMessageEventContent::notice_markdown(text.as_str()),
+		| CommandOutput::Plain(text) => RoomMessageEventContent::notice_plain(text.as_str()),
 	};
 
-	content.relates_to = Some(Relation::Reply(ReplyRelation {
-		in_reply_to: InReplyTo { event_id: reply_id.to_owned() },
-	}));
+	content.relates_to = Some(reply_relation(reply_id));
 
 	content
+}
+
+fn reply_relation(reply_id: &EventId) -> MessageRelation {
+	Relation::Reply(ReplyRelation {
+		in_reply_to: InReplyTo { event_id: reply_id.to_owned() },
+	})
+}
+
+fn fits_one_event(content: &RoomMessageEventContent) -> bool {
+	serde_json::to_string(content).is_ok_and(|json| json.len() <= CONTENT_BUDGET)
 }
 
 #[implement(super::Service)]

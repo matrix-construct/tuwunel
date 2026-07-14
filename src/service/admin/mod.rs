@@ -1,3 +1,4 @@
+mod attach;
 pub mod console;
 pub mod context;
 pub mod create;
