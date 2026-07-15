@@ -9,7 +9,21 @@ It is recommended to see the [generic deployment guide](../docs/deploying/generi
 for further information if needed as usage of the RPM package is generally
 related.
 
-No `rpm` repository is currently offered yet, it is in the works/development.
+A [COPR repository](https://copr.fedorainfracloud.org/coprs/trapacid/tuwunel/)
+serves the stable releases for `x86_64` and `aarch64`. Builds are provided for
+Fedora, RHEL, CentOS Stream, AlmaLinux, Amazon Linux, Azure Linux, and
+openEuler; the full list of targets is on the project page.
+
+```sh
+sudo dnf install 'dnf-command(copr)'
+sudo dnf copr enable trapacid/tuwunel
+sudo dnf install tuwunel
+```
+
+On distributions where the `copr` plugin is unavailable, download the `.repo`
+file for your release from the
+[COPR project page](https://copr.fedorainfracloud.org/coprs/trapacid/tuwunel/)
+into `/etc/yum.repos.d/` instead.
 
 ### Configuration
 
