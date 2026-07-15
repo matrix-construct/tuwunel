@@ -123,16 +123,62 @@ database online without any downtime, see the `!admin server` command for the
 backup commands and the `database_backup_path` config options in the example
 config.
 
-Please note that the format of the database backup is not the exact same. This is
-unfortunately a bad design choice by Facebook as we are using the database backup
-engine API from RocksDB, however the data is still there and can still be joined
-together.
+Please note that the format of the database backup is not the exact same as the
+database itself. This is unfortunately a design choice by Facebook, as we are
+using the database backup engine API from RocksDB; the data is all still there,
+and Tuwunel restores it for you (see below).
+
+A backup can be checked at any time with `!admin server verify-backup [id]`,
+which confirms all of the backup's files are still present with their expected
+sizes. File checksums are additionally verified while a backup is restored.
 
 #### Restoring online backup
 
-To restore a backup from an online RocksDB backup:
+To restore a backup, shut down Tuwunel, then start it once with the
+`--restore-backup` command line argument:
 
-- shutdown Tuwunel
+```bash
+tuwunel --restore-backup
+```
+
+This restores the most recent backup found in `database_backup_path` into
+`database_path`, verifying the checksum of every file along the way, then
+continues starting up normally on the restored database. To restore a specific
+backup instead, pass its ID as listed by `!admin server list-backups`:
+
+```bash
+tuwunel --restore-backup=3
+```
+
+The restore replaces the database files in `database_path`. The `media/`
+directory inside it is not part of an online backup and is left in place by
+RocksDB's restore; since media has no backup to restore from, copying it
+aside beforehand is cheap insurance. The option is only accepted on the
+command line and is refused from configuration files, so a forgotten setting
+cannot roll the database back again on a later restart.
+
+With systemd, run the restore as the service user while the service is
+stopped, then start the service again:
+
+```bash
+systemctl stop tuwunel
+sudo -u tuwunel tuwunel --config /etc/tuwunel/tuwunel.toml --restore-backup \
+	--maintenance --execute "server shutdown"
+systemctl start tuwunel
+```
+
+`--maintenance` keeps the restore run from serving clients, and `--execute
+"server shutdown"` exits it cleanly once startup, and therefore the restore,
+has completed. Both can be omitted to simply continue running on the restored
+database. With Docker or Podman, the image's entrypoint is the `tuwunel`
+binary, so append `--restore-backup` to a one-off `docker run` with your usual
+volumes and environment, then recreate your normal container.
+
+##### Restoring by hand
+
+If the server binary cannot be run for some reason, a backup can also be
+reassembled manually:
+
 - create a new directory for merging together the data
 - in the online backup created, copy all `.sst` files in
 `$DATABASE_BACKUP_PATH/shared_checksum` to your new directory

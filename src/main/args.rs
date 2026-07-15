@@ -40,6 +40,18 @@ pub struct Args {
 	#[arg(long)]
 	pub health_check: bool,
 
+	/// Restore an online database backup on startup, before the database is
+	/// opened, then continue starting up normally. The optional value is a
+	/// backup ID as listed by '!admin server list-backups'; the most recent
+	/// backup is restored when no ID is given.
+	#[arg(
+		long,
+		num_args = 0..=1,
+		require_equals(false),
+		default_missing_value = "0",
+	)]
+	pub restore_backup: Option<u32>,
+
 	#[cfg(feature = "console")]
 	/// Activate admin command console automatically after startup.
 	#[arg(long, num_args(0))]
@@ -230,6 +242,20 @@ pub fn update(mut config: Figment, args: &Args) -> Result<Figment> {
 		.is_some_and(is_true!())
 	{
 		return Err!(Config("maintenance", "Not permitted to set this option."));
+	}
+
+	if config
+		.find_value("database_restore_backup")
+		.is_ok()
+	{
+		return Err!(Config(
+			"database_restore_backup",
+			"Only the --restore-backup command line argument may set this option."
+		));
+	}
+
+	if let Some(backup_id) = args.restore_backup {
+		config = config.join(("database_restore_backup", backup_id));
 	}
 
 	if args.read_only {

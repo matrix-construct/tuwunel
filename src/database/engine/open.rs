@@ -11,7 +11,7 @@ use tuwunel_core::{
 };
 
 use super::{
-	Db, Engine, cf_opts::cf_options, context, db_opts::db_options, descriptor,
+	Db, Engine, backup::restore, cf_opts::cf_options, context, db_opts::db_options, descriptor,
 	descriptor::Descriptor, repair::repair,
 };
 use crate::{Context, or_else};
@@ -24,6 +24,11 @@ pub(crate) async fn open(ctx: Arc<Context>, desc: &[Descriptor]) -> Result<Arc<S
 	let path = &config.database_path;
 
 	context::before_open(&ctx, path)?;
+
+	if let Some(backup_id) = config.database_restore_backup {
+		restore(&ctx, backup_id)?;
+	}
+
 	let db_opts = db_options(
 		config,
 		&ctx.env.lock().expect("environment locked"),

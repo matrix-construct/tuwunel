@@ -66,7 +66,7 @@ use crate::{
 ### https://tuwunel.chat/configuration.html
 "#,
 	ignore = "catchall well_known tls allow_invalid_tls_certificates ldap jwt appservice \
-	          identity_provider storage_provider registration_terms smtp"
+	          identity_provider storage_provider registration_terms smtp database_restore_backup"
 )]
 pub struct Config {
 	/// The server_name is the pretty name of this server. It is used as a
@@ -179,6 +179,14 @@ pub struct Config {
 	/// default: 1
 	#[serde(default = "default_database_backups_to_keep")]
 	pub database_backups_to_keep: i16,
+
+	/// Restore this online database backup on startup, before the database is
+	/// opened. The value is a backup ID as listed by `!admin server
+	/// list-backups`, or 0 for the most recent backup. Set by the
+	/// `--restore-backup` command line argument, and refused from a
+	/// configuration file, where it would repeat the restore on every
+	/// startup.
+	pub database_restore_backup: Option<u32>,
 
 	/// Set this to any float value to multiply tuwunel's in-memory LRU caches
 	/// with such as "auth_chain_cache_capacity".

@@ -13,6 +13,7 @@ mod restart;
 mod show_config;
 mod shutdown;
 mod uptime;
+mod verify_backup;
 
 use std::path::PathBuf;
 
@@ -66,6 +67,14 @@ pub(super) enum ServerCommand {
 
 	/// - List database backups
 	ListBackups,
+
+	/// - Verify the files of a database backup are present with their expected
+	///   sizes
+	VerifyBackup {
+		/// Backup ID as listed by list-backups; the most recent backup when
+		/// omitted.
+		backup_id: Option<u32>,
+	},
 
 	/// - Send a message to the admin room.
 	AdminNotice {
