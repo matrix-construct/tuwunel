@@ -19,17 +19,44 @@ case "$1" in
         tuwunel
     fi
 
+    # Adopt the database of a previous conduwuit or conduit installation so
+    # an existing server continues transparently and migrates on the next
+    # start. The old directory is moved into place, never copied or deleted.
+    for legacy in /var/lib/conduwuit /var/lib/matrix-conduit; do
+      if [ -d "$legacy" ] && ! [ -L "$legacy" ]; then
+        if [ -d "$TUWUNEL_DATABASE_PATH" ] && ! [ -L "$TUWUNEL_DATABASE_PATH" ] \
+          && ! [ "$(ls -A "$TUWUNEL_DATABASE_PATH")" ]; then
+          rmdir -v "$TUWUNEL_DATABASE_PATH"
+        fi
+        if [ -e "$TUWUNEL_DATABASE_PATH" ]; then
+          echo "NOTE: leaving $legacy in place, $TUWUNEL_DATABASE_PATH already exists" 1>&2
+        else
+          echo "Adopting the existing database at $legacy" 1>&2
+          mv -v "$legacy" "$TUWUNEL_DATABASE_PATH"
+          # clean up the stray symlink a previous package version may have
+          # left inside the old database directory
+          if [ -L "$TUWUNEL_DATABASE_PATH/tuwunel" ] \
+            && [ "$(readlink "$TUWUNEL_DATABASE_PATH/tuwunel")" = "$TUWUNEL_DATABASE_PATH" ]; then
+            rm -v "$TUWUNEL_DATABASE_PATH/tuwunel"
+          fi
+        fi
+      fi
+    done
+
     # Create the database path if it does not exist yet and fix up ownership
     # and permissions for the config.
     mkdir -v -p "$TUWUNEL_DATABASE_PATH"
 
-    # symlink the previous location for compatibility if it does not exist yet.
-    if ! test -L "/var/lib/matrix-conduit" ; then
-        ln -s -v "$TUWUNEL_DATABASE_PATH" "/var/lib/matrix-conduit"
-    fi
-    if ! test -L "/var/lib/conduwuit" ; then
-        ln -s -v "$TUWUNEL_DATABASE_PATH" "/var/lib/conduwuit"
-    fi
+    # symlink the previous locations for compatibility if nothing occupies
+    # them, replacing any dangling symlink left from an uninstalled server.
+    for legacy in /var/lib/matrix-conduit /var/lib/conduwuit; do
+      if [ -L "$legacy" ] && ! [ -e "$legacy" ]; then
+        rm -v "$legacy"
+      fi
+      if ! [ -e "$legacy" ] && ! [ -L "$legacy" ]; then
+        ln -s -v "$TUWUNEL_DATABASE_PATH" "$legacy"
+      fi
+    done
 
     chown -v tuwunel:tuwunel -R "$TUWUNEL_DATABASE_PATH"
     chown -v tuwunel:tuwunel -R "$TUWUNEL_CONFIG_PATH"
@@ -38,6 +65,7 @@ case "$1" in
 
     echo ''
     echo 'Make sure you edit the example config at /etc/tuwunel/tuwunel.toml before starting!'
+    echo 'If migrating from another homeserver, port its settings (especially server_name) into that config.'
     echo 'To start the server, run: systemctl start tuwunel.service'
     echo ''
 

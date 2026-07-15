@@ -3,48 +3,21 @@ set -e
 
 #. /usr/share/debconf/confmodule
 
-TUWUNEL_CONFIG_PATH=/etc/tuwunel
 TUWUNEL_DATABASE_PATH=/var/lib/tuwunel
-CONDUIT_DATABASE_PATH_SYMLINK=/var/lib/matrix-conduit
-CONDUWUIT_DATABASE_PATH_SYMLINK=/var/lib/conduwuit
 
 case $1 in
   purge)
-    # Remove debconf changes from the db
-    #db_purge
-
-    # Per https://www.debian.org/doc/debian-policy/ch-files.html#behavior
-    # "configuration files must be preserved when the package is removed, and
-    #  only deleted when the package is purged."
-
-    #
-
-    if [ -d "$TUWUNEL_CONFIG_PATH" ]; then
-      if test -L "$TUWUNEL_CONFIG_PATH"; then
-        echo "Deleting tuwunel configuration files"
-        rm -v -r "$TUWUNEL_CONFIG_PATH"
+    # The database and anything else under /var/lib/tuwunel are never
+    # deleted, even on purge; remove that directory manually if that is
+    # really intended. Only the compatibility symlinks are cleaned up.
+    for link in /var/lib/matrix-conduit /var/lib/conduwuit; do
+      if [ -L "$link" ] && [ "$(readlink -f "$link")" = "$TUWUNEL_DATABASE_PATH" ]; then
+        rm -v "$link"
       fi
-    fi
+    done
 
-    if [ -d "$TUWUNEL_DATABASE_PATH" ]; then
-      if test -L "$TUWUNEL_DATABASE_PATH"; then
-        echo "Deleting tuwunel database directory"
-        rm -r "$TUWUNEL_DATABASE_PATH"
-      fi
-    fi
-
-    if [ -d "$CONDUIT_DATABASE_PATH_SYMLINK" ]; then
-      if test -L "$CONDUIT_DATABASE_SYMLINK"; then
-        echo "Removing matrix-conduit symlink"
-        rm -r "$CONDUIT_DATABASE_PATH_SYMLINK"
-      fi
-    fi
-
-    if [ -d "$CONDUWUIT_DATABASE_PATH_SYMLINK" ]; then
-      if test -L "$CONDUWUIT_DATABASE_SYMLINK"; then
-        echo "Removing conduwuit symlink"
-        rm -r "$CONDUWUIT_DATABASE_PATH_SYMLINK"
-      fi
+    if [ -e "$TUWUNEL_DATABASE_PATH" ]; then
+      echo "Preserving the database at $TUWUNEL_DATABASE_PATH" 1>&2
     fi
     ;;
 esac
