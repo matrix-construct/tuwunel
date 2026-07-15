@@ -1,5 +1,6 @@
 use ruma::OwnedRoomOrAliasId;
 use tuwunel_core::Result;
+use tuwunel_service::membership::Join;
 
 use crate::{admin_command, utils::parse_local_user_id};
 
@@ -19,7 +20,15 @@ pub(super) async fn force_join_room(&self, user_id: String, room: OwnedRoomOrAli
 
 	self.services
 		.membership
-		.join(&user_id, &room_id, Some(&room), None, &servers, false, None)
+		.join(Join {
+			sender_user: &user_id,
+			room_id: &room_id,
+			orig_room_id: Some(&room),
+			reason: None,
+			servers: &servers,
+			is_appservice: false,
+			extra_content: None,
+		})
 		.await?;
 
 	write!(self, "{user_id} has been joined to {room_id}.").await

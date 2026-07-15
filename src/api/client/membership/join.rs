@@ -1,10 +1,10 @@
 use axum::extract::State;
-use futures::FutureExt;
 use ruma::{
 	CanonicalJsonObject, CanonicalJsonValue, RoomId,
 	api::client::membership::{join_room_by_id, join_room_by_id_or_alias},
 };
 use tuwunel_core::{Result, warn};
+use tuwunel_service::membership::Join;
 
 use super::banned_room_check;
 use crate::{ClientIp, Ruma};
@@ -34,16 +34,15 @@ pub(crate) async fn join_room_by_id_route(
 	let mut errors = 0_usize;
 	while let Err(e) = services
 		.membership
-		.join(
+		.join(Join {
 			sender_user,
 			room_id,
-			None,
-			body.reason.clone(),
-			&[],
-			body.appservice_info.is_some(),
-			extra_content.clone(),
-		)
-		.boxed()
+			orig_room_id: None,
+			reason: body.reason.clone(),
+			servers: &[],
+			is_appservice: body.appservice_info.is_some(),
+			extra_content: extra_content.clone(),
+		})
 		.await
 	{
 		errors = errors.saturating_add(1);
@@ -90,16 +89,15 @@ pub(crate) async fn join_room_by_id_or_alias_route(
 	let mut errors = 0_usize;
 	while let Err(e) = services
 		.membership
-		.join(
+		.join(Join {
 			sender_user,
-			&room_id,
-			Some(&body.room_id_or_alias),
-			body.reason.clone(),
-			&servers,
-			appservice_info.is_some(),
-			extra_content.clone(),
-		)
-		.boxed()
+			room_id: &room_id,
+			orig_room_id: Some(&body.room_id_or_alias),
+			reason: body.reason.clone(),
+			servers: &servers,
+			is_appservice: appservice_info.is_some(),
+			extra_content: extra_content.clone(),
+		})
 		.await
 	{
 		errors = errors.saturating_add(1);

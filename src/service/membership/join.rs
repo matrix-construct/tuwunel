@@ -6,7 +6,7 @@ use std::{
 	sync::Arc,
 };
 
-use futures::{FutureExt, StreamExt, TryFutureExt, TryStreamExt};
+use futures::{FutureExt, StreamExt, TryFutureExt, TryStreamExt, future::BoxFuture};
 use ruma::{
 	CanonicalJsonObject, CanonicalJsonValue, OwnedEventId, OwnedServerName, OwnedUserId, RoomId,
 	RoomOrAliasId, RoomVersionId, UserId,
@@ -44,35 +44,55 @@ use crate::{
 	},
 };
 
+#[derive(Debug)]
+pub struct Join<'a> {
+	pub sender_user: &'a UserId,
+	pub room_id: &'a RoomId,
+	pub orig_room_id: Option<&'a RoomOrAliasId>,
+	pub reason: Option<String>,
+	pub servers: &'a [OwnedServerName],
+	pub is_appservice: bool,
+	pub extra_content: Option<CanonicalJsonObject>,
+}
+
 #[implement(Service)]
-#[expect(clippy::too_many_arguments)]
+#[inline(never)]
+#[must_use]
+pub fn join<'a>(&'a self, args: Join<'a>) -> BoxFuture<'a, Result> {
+	self.join_room(args).boxed()
+}
+
+#[implement(Service)]
 #[tracing::instrument(
+	name = "join",
 	level = "debug",
 	skip_all,
 	fields(%sender_user, %room_id)
 )]
-pub async fn join(
+async fn join_room(
 	&self,
-	sender_user: &UserId,
-	room_id: &RoomId,
-	orig_room_id: Option<&RoomOrAliasId>,
-	reason: Option<String>,
-	servers: &[OwnedServerName],
-	is_appservice: bool,
-	extra_content: Option<CanonicalJsonObject>,
+	Join {
+		sender_user,
+		room_id,
+		orig_room_id,
+		reason,
+		servers,
+		is_appservice,
+		extra_content,
+	}: Join<'_>,
 ) -> Result {
 	let state_lock = self.services.state.mutex.lock(room_id).await;
 
 	let servers =
 		get_servers_for_room(&self.services, sender_user, room_id, orig_room_id, servers).await?;
 
-	let user_is_guest = self
-		.services
-		.users
-		.is_deactivated(sender_user)
-		.await
-		.unwrap_or(false)
-		&& !is_appservice;
+	let user_is_guest = !is_appservice
+		&& self
+			.services
+			.users
+			.is_deactivated(sender_user)
+			.await
+			.unwrap_or(false);
 
 	if user_is_guest
 		&& !self
@@ -166,7 +186,7 @@ async fn copy_predecessor_push_rules(&self, user_id: &UserId, room_id: &RoomId) 
 	skip_all,
 	fields(?servers)
 )]
-pub async fn join_remote(
+async fn join_remote(
 	&self,
 	sender_user: &UserId,
 	room_id: &RoomId,
@@ -681,7 +701,7 @@ async fn apply_send_join_state(
 
 #[implement(Service)]
 #[tracing::instrument(name = "local", level = "debug", skip_all)]
-pub async fn join_local(
+async fn join_local(
 	&self,
 	sender_user: &UserId,
 	room_id: &RoomId,

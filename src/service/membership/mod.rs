@@ -11,8 +11,11 @@ use std::sync::Arc;
 
 use tuwunel_core::Result;
 
-pub use self::stripped_state::{
-	StrippedCreateVerdict, enforce_stripped_create, into_client_stripped, v12_room_ids,
+pub use self::{
+	join::Join,
+	stripped_state::{
+		StrippedCreateVerdict, enforce_stripped_create, into_client_stripped, v12_room_ids,
+	},
 };
 
 pub struct Service {

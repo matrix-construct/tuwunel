@@ -1,6 +1,7 @@
 use futures::StreamExt;
 use ruma::{OwnedRoomOrAliasId, UserId};
 use tuwunel_core::{Err, Result, debug_warn};
+use tuwunel_service::membership::Join;
 
 use super::BULK_JOIN_REASON;
 use crate::admin_command;
@@ -51,15 +52,15 @@ pub(super) async fn force_join_all_local_users(
 		match self
 			.services
 			.membership
-			.join(
-				user_id,
-				&room_id,
-				Some(&room),
-				Some(String::from(BULK_JOIN_REASON)),
-				&servers,
-				false,
-				None,
-			)
+			.join(Join {
+				sender_user: user_id,
+				room_id: &room_id,
+				orig_room_id: Some(&room),
+				reason: Some(String::from(BULK_JOIN_REASON)),
+				servers: &servers,
+				is_appservice: false,
+				extra_content: None,
+			})
 			.await
 		{
 			| Ok(_res) => {

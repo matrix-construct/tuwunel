@@ -1,7 +1,7 @@
 use axum::extract::State;
-use futures::FutureExt;
 use synapse_admin_api::room_membership::join_room::v1::{Request, Response};
 use tuwunel_core::{Err, Result};
+use tuwunel_service::membership::Join;
 
 use crate::{Ruma, client::admin::require_admin};
 
@@ -32,8 +32,15 @@ pub(crate) async fn admin_join_room_route(
 
 	services
 		.membership
-		.join(user_id, &room_id, Some(&body.room_id_or_alias), None, &servers, false, None)
-		.boxed()
+		.join(Join {
+			sender_user: user_id,
+			room_id: &room_id,
+			orig_room_id: Some(&body.room_id_or_alias),
+			reason: None,
+			servers: &servers,
+			is_appservice: false,
+			extra_content: None,
+		})
 		.await?;
 
 	Ok(Response { room_id })

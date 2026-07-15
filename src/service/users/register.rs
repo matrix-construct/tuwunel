@@ -2,7 +2,7 @@ use futures::FutureExt;
 use ruma::{UserId, events::GlobalAccountDataEventType, push};
 use tuwunel_core::{Err, Result, error, implement, info, is_equal_to, warn};
 
-use crate::profile::Propagation;
+use crate::{membership::Join, profile::Propagation};
 
 #[derive(Debug, Default)]
 pub struct Register<'a> {
@@ -145,16 +145,15 @@ pub async fn full_register(
 			match self
 				.services
 				.membership
-				.join(
-					user_id,
-					&room_id,
-					Some(room),
-					Some("Automatically joining this room upon registration".to_owned()),
-					&[],
-					false,
-					None,
-				)
-				.boxed()
+				.join(Join {
+					sender_user: user_id,
+					room_id: &room_id,
+					orig_room_id: Some(room),
+					reason: Some("Automatically joining this room upon registration".to_owned()),
+					servers: &[],
+					is_appservice: false,
+					extra_content: None,
+				})
 				.await
 			{
 				| Err(e) => {
