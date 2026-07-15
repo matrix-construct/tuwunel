@@ -2,6 +2,10 @@
 # stripped by the release profile, so no usable debuginfo is produced.
 %global debug_package %{nil}
 
+# Pass --without selinux for chroots lacking selinux-policy-devel.
+%bcond_without selinux
+%global selinuxtype targeted
+
 Name:           tuwunel
 Version:        1.8.1
 Release:        1%{?dist}
@@ -22,18 +26,43 @@ BuildRequires:  liburing-devel
 BuildRequires:  make
 BuildRequires:  pkgconf
 BuildRequires:  (systemd-rpm-macros or systemd)
+%if %{with selinux}
+BuildRequires:  selinux-policy-devel
+# The policy devel Makefile assembles interfaces with find; without it
+# every interface call fails to expand.
+BuildRequires:  findutils
+%endif
 
 Requires:       ca-certificates
 Requires(pre):  shadow-utils
+%if %{with selinux}
+Requires:       (%{name}-selinux if selinux-policy-%{selinuxtype})
+%endif
 
 %description
 Tuwunel is a high performance, community driven Matrix homeserver
 implemented in Rust.
 
+%if %{with selinux}
+%package selinux
+Summary:        SELinux policy module for tuwunel
+BuildArch:      noarch
+%{?selinux_requires}
+
+%description selinux
+SELinux policy module providing the tuwunel_t confined domain and file
+contexts for the tuwunel Matrix homeserver.
+%endif
+
 %prep
 %autosetup -n tuwunel-%{version}
 
 %build
+%if %{with selinux}
+# Built first so a policy error fails fast, ahead of the long cargo build.
+(cd rpm/selinux && make -f %{_datadir}/selinux/devel/Makefile tuwunel.pp)
+bzip2 -9 rpm/selinux/tuwunel.pp
+%endif
 # rpmbuild exports distribution build flags which break the build scripts
 # of vendored C dependencies; the cargo release profile governs instead.
 unset CFLAGS CXXFLAGS CPPFLAGS LDFLAGS RUSTFLAGS
@@ -58,6 +87,12 @@ install -Dpm 0640 tuwunel-example.toml %{buildroot}%{_sysconfdir}/tuwunel/tuwune
 install -Dpm 0644 rpm/tuwunel.service %{buildroot}%{_unitdir}/tuwunel.service
 install -Dpm 0644 rpm/sysusers %{buildroot}%{_sysusersdir}/tuwunel.conf
 install -dm 0740 %{buildroot}%{_sharedstatedir}/tuwunel
+%if %{with selinux}
+install -Dpm 0644 rpm/selinux/tuwunel.pp.bz2 \
+    %{buildroot}%{_datadir}/selinux/packages/%{selinuxtype}/tuwunel.pp.bz2
+install -Dpm 0644 rpm/selinux/tuwunel.if \
+    %{buildroot}%{_datadir}/selinux/devel/include/distributed/tuwunel.if
+%endif
 
 %pre
 getent group tuwunel >/dev/null || groupadd --system tuwunel
@@ -78,6 +113,22 @@ test -e /var/lib/conduwuit || ln -s %{_sharedstatedir}/tuwunel /var/lib/conduwui
 %postun
 %systemd_postun_with_restart tuwunel.service
 
+%if %{with selinux}
+%pre selinux
+%selinux_relabel_pre -s %{selinuxtype}
+
+%post selinux
+%selinux_modules_install -s %{selinuxtype} %{_datadir}/selinux/packages/%{selinuxtype}/tuwunel.pp.bz2
+
+%postun selinux
+if [ $1 -eq 0 ]; then
+    %selinux_modules_uninstall -s %{selinuxtype} tuwunel
+fi
+
+%posttrans selinux
+%selinux_relabel_post -s %{selinuxtype}
+%endif
+
 %files
 %license LICENSE
 %doc README.md
@@ -87,6 +138,13 @@ test -e /var/lib/conduwuit || ln -s %{_sharedstatedir}/tuwunel /var/lib/conduwui
 %{_unitdir}/tuwunel.service
 %{_sysusersdir}/tuwunel.conf
 %dir %attr(0740, tuwunel, tuwunel) %{_sharedstatedir}/tuwunel
+
+%if %{with selinux}
+%files selinux
+%{_datadir}/selinux/packages/%{selinuxtype}/tuwunel.pp.bz2
+%{_datadir}/selinux/devel/include/distributed/tuwunel.if
+%ghost %verify(not md5 size mode mtime) %{_sharedstatedir}/selinux/%{selinuxtype}/active/modules/200/tuwunel
+%endif
 
 %changelog
 * Wed Jul 15 2026 June Strawberry <june@girlboss.ceo> - 1.8.1-1

@@ -1,0 +1,117 @@
+policy_module(tuwunel, 1.0.0)
+
+########################################
+#
+# Declarations
+#
+
+type tuwunel_t;
+type tuwunel_exec_t;
+init_daemon_domain(tuwunel_t, tuwunel_exec_t)
+
+# The unit file sets NoNewPrivileges (also implied by its seccomp
+# filters), which blocks the domain transition unless nnp_transition is
+# allowed. Fedora-family policies grant it through this interface;
+# refpolicy-based ones (Azure Linux) grant it in init_daemon_domain.
+ifdef(`init_nnp_daemon_domain',`
+	init_nnp_daemon_domain(tuwunel_t)
+')
+
+type tuwunel_conf_t;
+files_config_file(tuwunel_conf_t)
+
+type tuwunel_var_lib_t;
+files_type(tuwunel_var_lib_t)
+
+type tuwunel_var_run_t;
+# refpolicy renamed the pid interfaces to runtime; Fedora-family
+# policies keep the old names.
+ifdef(`files_runtime_file',`
+	files_runtime_file(tuwunel_var_run_t)
+',`
+	files_pid_file(tuwunel_var_run_t)
+')
+
+########################################
+#
+# Local policy
+#
+
+allow tuwunel_t self:process { fork getsched setsched signal_perms };
+allow tuwunel_t self:fifo_file rw_fifo_file_perms;
+allow tuwunel_t self:unix_stream_socket create_stream_socket_perms;
+allow tuwunel_t self:unix_dgram_socket create_socket_perms;
+allow tuwunel_t self:tcp_socket create_stream_socket_perms;
+allow tuwunel_t self:udp_socket create_socket_perms;
+allow tuwunel_t self:netlink_route_socket r_netlink_socket_perms;
+
+# The database engine submits I/O through io_uring by default.
+allow tuwunel_t self:anon_inode { create map read write };
+allow tuwunel_t self:io_uring sqpoll;
+
+read_files_pattern(tuwunel_t, tuwunel_conf_t, tuwunel_conf_t)
+list_dirs_pattern(tuwunel_t, tuwunel_conf_t, tuwunel_conf_t)
+
+manage_dirs_pattern(tuwunel_t, tuwunel_var_lib_t, tuwunel_var_lib_t)
+manage_files_pattern(tuwunel_t, tuwunel_var_lib_t, tuwunel_var_lib_t)
+allow tuwunel_t tuwunel_var_lib_t:file map;
+files_var_lib_filetrans(tuwunel_t, tuwunel_var_lib_t, dir)
+
+manage_dirs_pattern(tuwunel_t, tuwunel_var_run_t, tuwunel_var_run_t)
+manage_files_pattern(tuwunel_t, tuwunel_var_run_t, tuwunel_var_run_t)
+manage_sock_files_pattern(tuwunel_t, tuwunel_var_run_t, tuwunel_var_run_t)
+ifdef(`files_runtime_filetrans',`
+	files_runtime_filetrans(tuwunel_t, tuwunel_var_run_t, { dir file sock_file })
+',`
+	files_pid_filetrans(tuwunel_t, tuwunel_var_run_t, { dir file sock_file })
+')
+
+kernel_read_system_state(tuwunel_t)
+
+# Client and federation listeners: 8008 is http_port_t, 8448 and any
+# other configured port are unreserved.
+corenet_tcp_bind_generic_node(tuwunel_t)
+corenet_udp_bind_generic_node(tuwunel_t)
+corenet_tcp_bind_http_port(tuwunel_t)
+corenet_tcp_bind_all_unreserved_ports(tuwunel_t)
+
+# The DNS resolver randomizes UDP source ports against cache poisoning,
+# binding explicit random high ports rather than letting the kernel pick.
+corenet_udp_bind_all_unreserved_ports(tuwunel_t)
+# refpolicy has no separate ephemeral port type; unreserved covers it.
+ifdef(`corenet_udp_bind_all_ephemeral_ports',`
+	corenet_udp_bind_all_ephemeral_ports(tuwunel_t)
+')
+
+# Federation connects outbound to ports named by SRV and .well-known
+# delegation, which may be arbitrary.
+corenet_tcp_connect_all_ports(tuwunel_t)
+
+auth_use_nsswitch(tuwunel_t)
+sysnet_dns_name_resolve(tuwunel_t)
+
+dev_read_rand(tuwunel_t)
+dev_read_urand(tuwunel_t)
+dev_read_sysfs(tuwunel_t)
+
+fs_getattr_xattr_fs(tuwunel_t)
+
+files_read_etc_files(tuwunel_t)
+miscfiles_read_localization(tuwunel_t)
+miscfiles_read_generic_certs(tuwunel_t)
+
+# sd_notify readiness, reload, and watchdog messages.
+init_dgram_send(tuwunel_t)
+
+logging_send_syslog_msg(tuwunel_t)
+
+optional_policy(`
+	gen_require(`
+		type httpd_t;
+	')
+
+	# Reverse proxies serving as httpd_t may connect to the listener
+	# on a unix socket; TCP proxying is governed by the distribution
+	# booleans httpd_can_network_connect / httpd_can_network_relay.
+	tuwunel_stream_connect(httpd_t)
+')

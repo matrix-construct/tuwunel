@@ -1,0 +1,40 @@
+## <summary>Tuwunel Matrix homeserver.</summary>
+
+########################################
+## <summary>
+##	Connect to tuwunel over a unix stream socket.
+## </summary>
+## <param name="domain">
+##	<summary>
+##	Domain allowed access.
+##	</summary>
+## </param>
+#
+interface(`tuwunel_stream_connect',`
+	gen_require(`
+		type tuwunel_t, tuwunel_var_run_t;
+		type var_run_t;
+	')
+
+	allow $1 var_run_t:dir search_dir_perms;
+	stream_connect_pattern($1, tuwunel_var_run_t, tuwunel_var_run_t, tuwunel_t)
+')
+
+########################################
+## <summary>
+##	Read the tuwunel configuration.
+## </summary>
+## <param name="domain">
+##	<summary>
+##	Domain allowed access.
+##	</summary>
+## </param>
+#
+interface(`tuwunel_read_config',`
+	gen_require(`
+		type tuwunel_conf_t;
+	')
+
+	files_search_etc($1)
+	read_files_pattern($1, tuwunel_conf_t, tuwunel_conf_t)
+')

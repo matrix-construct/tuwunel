@@ -1,0 +1,10 @@
+# /usr/sbin is the historical install location; newer Fedora releases
+# alias it to /usr/bin through a filesystem equivalency.
+/usr/bin/tuwunel	--	gen_context(system_u:object_r:tuwunel_exec_t,s0)
+/usr/sbin/tuwunel	--	gen_context(system_u:object_r:tuwunel_exec_t,s0)
+
+/etc/tuwunel(/.*)?		gen_context(system_u:object_r:tuwunel_conf_t,s0)
+
+/var/lib/tuwunel(/.*)?		gen_context(system_u:object_r:tuwunel_var_lib_t,s0)
+
+/run/tuwunel(/.*)?		gen_context(system_u:object_r:tuwunel_var_run_t,s0)
