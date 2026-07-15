@@ -48,3 +48,34 @@ intend to federate.
 Consult various online documentation and guides on setting up a reverse proxy
 and TLS. Caddy is documented at the [generic deployment guide](../docs/deploying/generic.md#setting-up-the-reverse-proxy)
 as it's the easiest and most user friendly.
+
+### SELinux
+
+On systems with SELinux enabled, the `tuwunel-selinux` subpackage is installed
+automatically. It provides the `tuwunel_t` domain together with file contexts
+for the binary, `/etc/tuwunel`, `/var/lib/tuwunel`, and `/run/tuwunel`, so no
+manual labeling is required. The policy covers the client and federation
+listeners and outbound federation.
+
+The domain runs enforcing. If a denial does occur on your setup, inspect it
+with `ausearch -m avc -ts recent | grep tuwunel`, report it to the
+[issue tracker](https://github.com/matrix-construct/tuwunel/issues), and as a
+temporary measure the domain can be switched to permissive with
+`semanage permissive -a tuwunel_t` (revert with `semanage permissive -d
+tuwunel_t` once resolved).
+
+A reverse proxy running as `httpd_t` (nginx, Apache) may connect to a listener
+on a unix socket under `/run/tuwunel` without further configuration. Proxying
+to the TCP listener instead is governed by the distribution booleans:
+
+```sh
+setsebool -P httpd_can_network_connect 1
+```
+
+Paths configured outside the packaged locations, such as a database backup
+directory, need a file context of their own:
+
+```sh
+semanage fcontext -a -t tuwunel_var_lib_t '/opt/tuwunel-db-backups(/.*)?'
+restorecon -R /opt/tuwunel-db-backups
+```
