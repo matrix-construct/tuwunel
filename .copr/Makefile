@@ -8,7 +8,7 @@ TOP := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/..)
 SPEC := $(TOP)/rpm/tuwunel.spec
 
 srpm:
-	dnf -y install git-core rpm-build
+	-dnf -y install git-core rpm-build
 	set -eux; \
 	version="$$(git -C '$(TOP)' describe --tags --always | sed 's/^v//; s/-/^/; s/-/./g')"; \
 	mkdir -p '$(TOP)/rpmbuild/SOURCES'; \
