@@ -1,4 +1,5 @@
 mod admin;
+mod async_noinline;
 mod cargo;
 mod config;
 mod debug;
@@ -41,6 +42,11 @@ pub fn rustc_flags_capture(args: TokenStream) -> TokenStream { rustc::flags_capt
 
 #[proc_macro]
 pub fn rustc_version(args: TokenStream) -> TokenStream { rustc::version(args) }
+
+#[proc_macro_attribute]
+pub fn async_noinline(args: TokenStream, input: TokenStream) -> TokenStream {
+	attribute_macro::<ItemFn, _>(args, input, async_noinline::async_noinline)
+}
 
 #[proc_macro_attribute]
 pub fn implement(args: TokenStream, input: TokenStream) -> TokenStream {

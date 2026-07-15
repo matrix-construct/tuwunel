@@ -25,7 +25,7 @@ pub mod unhandled;
 
 pub use ::ctor::ctor;
 pub use ::dtor::dtor;
-pub use ::tuwunel_macros::implement;
+pub use ::tuwunel_macros::{async_noinline, implement};
 
 pub use self::{
 	arrayvec::ArrayVecExt,
