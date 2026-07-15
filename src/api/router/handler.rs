@@ -1,13 +1,15 @@
-use std::fmt::Debug;
+use std::{any::Any, fmt::Debug};
 
 use axum::{
 	Router,
-	extract::FromRequestParts,
-	response::IntoResponse,
+	body::Body,
+	extract::{FromRequest, FromRequestParts},
+	handler::Handler,
+	response::{IntoResponse, Response},
 	routing::{MethodFilter, on},
 };
-use futures::{Future, TryFutureExt};
-use http::Method;
+use futures::{Future, future::BoxFuture};
+use http::{Method, Request};
 use ruma::api::{IncomingRequest, path_builder::PathBuilder};
 use tuwunel_core::{Result, trace};
 
@@ -16,6 +18,7 @@ use super::{Ruma, RumaResponse, State, auth::AuthDispatch};
 pub(in super::super) trait RumaHandler<T> {
 	fn add_route(&'static self, router: Router<State>, path: &str) -> Router<State>;
 	fn add_routes(&'static self, router: Router<State>) -> Router<State>;
+	fn call_route(handler: RouteHandler, state: State, request: Request<Body>) -> RouteResponse;
 }
 
 pub(in super::super) trait RouterExt {
@@ -23,6 +26,18 @@ pub(in super::super) trait RouterExt {
 	where
 		H: RumaHandler<T>;
 }
+
+/// A route handler reduced to one fn-pointer shape: axum's generic routing
+/// stack instantiates once for this type instead of once per endpoint.
+#[derive(Clone, Copy)]
+struct Route {
+	call: RouteCall,
+	handler: RouteHandler,
+}
+
+type RouteCall = fn(RouteHandler, State, Request<Body>) -> RouteResponse;
+type RouteHandler = &'static (dyn Any + Send + Sync);
+type RouteResponse = BoxFuture<'static, Response>;
 
 impl RouterExt for Router<State> {
 	fn ruma_route<H, T>(self, handler: &'static H) -> Self
@@ -33,10 +48,17 @@ impl RouterExt for Router<State> {
 	}
 }
 
+impl Handler<(), State> for Route {
+	type Future = RouteResponse;
+
+	fn call(self, request: Request<Body>, state: State) -> Self::Future {
+		(self.call)(self.handler, state, request)
+	}
+}
+
 macro_rules! ruma_handler {
 	( $($tx:ident),* $(,)? ) => {
-		#[allow(clippy::allow_attributes)]
-		#[allow(non_snake_case)]
+		#[allow(clippy::allow_attributes, non_snake_case)]
 		impl<Err, Req, Fut, Fun, $($tx,)*> RumaHandler<($($tx,)* Ruma<Req>,)> for Fun
 		where
 			Fun: Fn($($tx,)* Ruma<Req>,) -> Fut + Send + Sync + 'static,
@@ -54,14 +76,43 @@ macro_rules! ruma_handler {
 			}
 
 			fn add_route(&'static self, router: Router<State>, path: &str) -> Router<State> {
-				let method = method_to_filter(&Req::METHOD);
-				let action = |$($tx,)* req| {
-					self($($tx,)* req)
-						.inspect_ok(|result| trace!(?result))
-						.map_ok(RumaResponse)
+				let route = Route { handler: self, call: Self::call_route };
+
+				router.route(path, on(method_to_filter(&Req::METHOD), route))
+			}
+
+			fn call_route(
+				handler: RouteHandler,
+				state: State,
+				request: Request<Body>,
+			) -> RouteResponse {
+				let handler: &'static Fun = handler
+					.downcast_ref()
+					.expect("route handler matches the type it registered with");
+
+				let response = async move {
+					#[allow(unused_mut)]
+					let (mut parts, body) = request.into_parts();
+					$(
+						let $tx = match $tx::from_request_parts(&mut parts, &state).await {
+							| Err(error) => return error.into_response(),
+							| Ok(value) => value,
+						};
+					)*
+
+					let request = Request::from_parts(parts, body);
+					let args = match Ruma::<Req>::from_request(request, &state).await {
+						| Err(error) => return error.into_response(),
+						| Ok(args) => args,
+					};
+
+					match handler($($tx,)* args).await.inspect(|response| trace!(?response)) {
+						| Err(error) => error.into_response(),
+						| Ok(response) => RumaResponse(response).into_response(),
+					}
 				};
 
-				router.route(path, on(method, action))
+				Box::pin(response)
 			}
 		}
 	}
