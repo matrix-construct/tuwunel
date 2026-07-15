@@ -4613,7 +4613,7 @@ fn default_appservice_idle_timeout() -> u64 { 300 }
 
 fn default_pusher_idle_timeout() -> u64 { 15 }
 
-fn default_max_fetch_prev_events() -> u16 { 192_u16 }
+fn default_max_fetch_prev_events() -> u16 { 1024_u16 }
 
 fn default_fetch_prev_wait_ms() -> u64 { 750 }
 

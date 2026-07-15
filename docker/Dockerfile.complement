@@ -72,6 +72,7 @@ COPY <<EOF complement.toml
     log_guest_registrations = false
     log_span_events = "NONE"
     log_thread_ids = true
+    max_fetch_prev_events = 224
     media_compat_file_link = false
     media_startup_check = true
     port = [8008, 8448]
