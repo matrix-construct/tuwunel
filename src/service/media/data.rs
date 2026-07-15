@@ -16,6 +16,7 @@ use super::{preview::UrlPreviewData, thumbnail::Dim};
 
 pub(crate) struct Data {
 	mediaid_file: Arc<Map>,
+	mediaid_lazy: Arc<Map>,
 	mediaid_pending: Arc<Map>,
 	mediaid_user: Arc<Map>,
 	url_previews: Arc<Map>,
@@ -32,6 +33,7 @@ impl Data {
 	pub(super) fn new(db: &Arc<Database>) -> Self {
 		Self {
 			mediaid_file: db["mediaid_file"].clone(),
+			mediaid_lazy: db["mediaid_lazy"].clone(),
 			mediaid_pending: db["mediaid_pending"].clone(),
 			mediaid_user: db["mediaid_user"].clone(),
 			url_previews: db["url_previews"].clone(),
@@ -105,6 +107,31 @@ impl Data {
 			.map(|(expires_at, user_id): Value<'_>| (user_id, expires_at))
 			.inspect(|(user_id, expires_at)| debug!(?mxc, ?user_id, ?expires_at, "Found pending"))
 			.map_err(|e| err!(Request(NotFound("Pending not found or error: {e}"))))
+	}
+
+	/// Register an MXC URI as a lazy reference to an external URL: the
+	/// content is never stored, only relayed to requesting clients (see
+	/// `Service::fetch_lazy_media`). Used for URL preview media, so a preview
+	/// can hand out an mxc:// URI without the server downloading or hosting
+	/// potentially large third-party files.
+	#[cfg(feature = "url_preview")]
+	pub(super) fn insert_lazy_media(&self, mxc: &Mxc<'_>, url: &str) {
+		debug!(?mxc, ?url, "Registering lazy media");
+
+		self.mediaid_lazy
+			.insert(&mxc.to_string(), url.as_bytes());
+	}
+
+	/// Remove a lazy media reference by its mxc:// URI string, unregistering
+	/// the mxc.
+	pub(super) fn remove_lazy_media(&self, mxc: &str) { self.mediaid_lazy.remove(mxc); }
+
+	/// Look up the external URL a lazy media MXC URI refers to.
+	pub(super) async fn search_lazy_media(&self, mxc: &Mxc<'_>) -> Result<String> {
+		let handle = self.mediaid_lazy.get(&mxc.to_string()).await?;
+
+		string_from_bytes(&handle)
+			.map_err(|e| err!(Database(error!(?mxc, "Lazy media URL is invalid: {e}"))))
 	}
 
 	pub(super) async fn delete_file_mxc(&self, mxc: &Mxc<'_>) {

@@ -150,6 +150,10 @@ pub(super) static MAPS: &[Descriptor] = &[
 		..descriptor::RANDOM_SMALL
 	},
 	Descriptor {
+		name: "mediaid_lazy",
+		..descriptor::RANDOM_SMALL
+	},
+	Descriptor {
 		name: "mediaid_pending",
 		ttl: 60 * 60 * 24 * 7,
 		..descriptor::RANDOM_SMALL_CACHE

@@ -246,7 +246,7 @@ async fn handle_content_file(&self, mxc: &Mxc<'_>, content: Content) -> Result<M
 
 #[implement(super::Service)]
 async fn handle_location(&self, mxc: &Mxc<'_>, location: &str) -> Result<Media> {
-	self.location_request(location)
+	self.location_request(&self.services.client.extern_media, location)
 		.await
 		.map_err(|error| {
 			err!(Request(NotFound(
@@ -256,19 +256,17 @@ async fn handle_location(&self, mxc: &Mxc<'_>, location: &str) -> Result<Media> 
 }
 
 #[implement(super::Service)]
-async fn location_request(&self, location: &str) -> Result<Media> {
+pub(super) async fn location_request(
+	&self,
+	client: &reqwest::Client,
+	location: &str,
+) -> Result<Media> {
 	let url = Url::parse(location)
 		.map_err(|e| err!(Request(Unknown("Invalid media location URL: {e}"))))?;
 
 	self.check_url_host(&url)?;
 
-	let response = self
-		.services
-		.client
-		.extern_media
-		.get(url.as_str())
-		.send()
-		.await?;
+	let response = client.get(url.as_str()).send().await?;
 
 	if let Some(remote_addr) = response.remote_addr()
 		&& !self
@@ -277,6 +275,15 @@ async fn location_request(&self, location: &str) -> Result<Media> {
 			.valid_cidr_range_ip(remote_addr.ip())
 	{
 		return Err!(Request(Forbidden("Requesting from this address is forbidden")));
+	}
+
+	// an upstream error document must not be relayed as media
+	if !response.status().is_success() {
+		return Err!(Request(NotFound(debug_warn!(
+			status = ?response.status(),
+			%url,
+			"Fetching media from location failed"
+		))));
 	}
 
 	let content_type = response

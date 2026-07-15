@@ -62,11 +62,29 @@ All allowlist checks are evaluated before the denylist check.
 | `url_preview_check_root_domain` | `false` | When enabled, domain allowlist checks are applied to the root domain. Allows all subdomains of any allowed domain — e.g. allowing `wikipedia.org` also allows `en.m.wikipedia.org`. |
 | `url_preview_max_spider_size` | `256000` | Maximum bytes fetched from a URL when generating a preview (default: 256 KB). |
 | `url_preview_bound_interface` | — | Network interface name or IP address to bind when making URL preview requests. Example: `"eth0"` or `"1.2.3.4"`. |
+| `url_preview_user_agent` | — | User-Agent header sent when fetching pages to extract their OpenGraph tags. Defaults to the versioned server User-Agent, e.g. `"Tuwunel/1.8.1 preview"`. |
+| `url_preview_media_user_agent` | — | User-Agent header sent when fetching and relaying preview media files themselves. Falls back to `url_preview_user_agent`. |
 
 > [!NOTE]
 > Setting any allowlist to `["*"]` opens significant attack surface — a
 > malicious client could cause the server to make requests to arbitrary URLs
 > on the local network. Use explicit allowlists wherever possible.
+
+`og:image`, `og:video`, and `og:audio` (and direct links to image, video,
+and audio files) resolve to an `mxc://` URI on this server rather than the
+third-party URL, and none of the content is stored: requests for that
+`mxc://` URI are relayed — the server fetches the source URL on the client's
+behalf (subject to the same SSRF/CIDR checks as everything else on this
+page, and capped at `max_response_size`) and passes the content through, so
+the third party sees the server's address rather than the client's, and the
+server hosts nothing. Images are additionally downloaded once while
+generating the preview to measure `og:image:width`/`og:image:height` and
+`matrix:image:size`, then discarded. `og:video:width`/`og:video:height` are
+populated when the page declares them. Clients cache the results themselves
+per the immutable cache headers on media downloads. Because nothing is
+stored, a preview's `mxc://` URI is only as durable as its source URL: if
+the source expires or changes, later fetches reflect that, unlike uploaded
+media. Upstream error responses are never relayed as media.
 
 ## Blurhash
 

@@ -17,6 +17,7 @@ type DisableEncoding = fn(ClientBuilder) -> ClientBuilder;
 pub struct Clients {
 	pub default: Client,
 	pub url_preview: Client,
+	pub url_preview_media: Client,
 	pub extern_media: Client,
 	pub well_known: Client,
 	pub federation: Client,
@@ -79,24 +80,27 @@ fn make_clients(services: &Services) -> Result<Clients> {
 	Ok(Clients {
 		default: with!(cb => cb.dns_resolver(Arc::clone(&services.resolver.resolver))),
 
-		url_preview: with!("preview", cb => {
-			let interface = &services
+		url_preview: with!("preview", cb => preview_builder(
+			services,
+			cb,
+			services
 				.config
-				.url_preview_bound_interface;
+				.url_preview_user_agent
+				.as_deref(),
+		)?),
 
-			let bind_addr = interface.clone().and_then(Either::left);
-			let bind_iface = interface.clone().and_then(Either::right);
-
-			let resolver = Validating::new(
-				Arc::clone(&services.resolver.resolver),
-				Arc::clone(&services.client.cidr_range_denylist),
-			);
-
-			builder_interface(cb, bind_iface.as_deref())?
-				.local_address(bind_addr)
-				.dns_resolver(resolver)
-				.redirect(redirect::Policy::limited(3))
-		}),
+		url_preview_media: with!("preview", cb => preview_builder(
+			services,
+			cb,
+			services
+				.config
+				.url_preview_media_user_agent
+				.as_deref()
+				.or(services
+					.config
+					.url_preview_user_agent
+					.as_deref()),
+		)?),
 
 		extern_media: with!(cb => cb
 			.dns_resolver(Validating::new(
@@ -167,6 +171,35 @@ fn make_clients(services: &Services) -> Result<Clients> {
 			.redirect(redirect::Policy::limited(0))
 			.pool_max_idle_per_host(1)),
 	})
+}
+
+/// Shared construction for the URL preview clients: bound to the configured
+/// interface, resolving through the CIDR-validating resolver, with an
+/// optional User-Agent override.
+fn preview_builder(
+	services: &Services,
+	builder: ClientBuilder,
+	user_agent: Option<&str>,
+) -> Result<ClientBuilder> {
+	let interface = &services.config.url_preview_bound_interface;
+
+	let bind_addr = interface.clone().and_then(Either::left);
+	let bind_iface = interface.clone().and_then(Either::right);
+
+	let resolver = Validating::new(
+		Arc::clone(&services.resolver.resolver),
+		Arc::clone(&services.client.cidr_range_denylist),
+	);
+
+	let builder = match user_agent {
+		| Some(user_agent) => builder.user_agent(user_agent),
+		| None => builder,
+	};
+
+	Ok(builder_interface(builder, bind_iface.as_deref())?
+		.local_address(bind_addr)
+		.dns_resolver(resolver)
+		.redirect(redirect::Policy::limited(3)))
 }
 
 fn base(config: &Config, name: Option<&str>) -> Result<ClientBuilder> {

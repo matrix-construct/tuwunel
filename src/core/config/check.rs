@@ -1,6 +1,7 @@
 use std::{env::consts::OS, fs::read_to_string, net::SocketAddr};
 
 use either::Either;
+use http::HeaderValue;
 use itertools::Itertools;
 use regex::RegexSet;
 use url::Url;
@@ -391,6 +392,18 @@ fn check_url_previews(config: &Config) -> Result {
 			"url_preview_bound_interface",
 			"Not a valid IP address. Interface names not supported on {OS}."
 		));
+	}
+
+	if let Some(user_agent) = config.url_preview_user_agent.as_deref()
+		&& HeaderValue::from_str(user_agent).is_err()
+	{
+		return Err!(Config("url_preview_user_agent", "Not a valid HTTP header value."));
+	}
+
+	if let Some(user_agent) = config.url_preview_media_user_agent.as_deref()
+		&& HeaderValue::from_str(user_agent).is_err()
+	{
+		return Err!(Config("url_preview_media_user_agent", "Not a valid HTTP header value."));
 	}
 
 	Ok(())
