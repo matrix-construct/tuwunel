@@ -1,6 +1,7 @@
 mod admin_notice;
 mod backup_database;
 mod clear_caches;
+mod delete_backups;
 mod list_backups;
 mod list_features;
 mod memory_usage;
@@ -75,6 +76,12 @@ pub(super) enum ServerCommand {
 		/// Backup ID as listed by list-backups; the most recent backup when
 		/// omitted.
 		backup_id: Option<u32>,
+	},
+
+	/// - Delete database backups, retaining the most recent `keep`
+	DeleteBackups {
+		/// Number of most-recent backups to retain; zero deletes every backup.
+		keep: usize,
 	},
 
 	/// - Send a message to the admin room.

@@ -48,6 +48,15 @@ pub fn backup(&self) -> Result {
 	Ok(())
 }
 
+/// Delete backups, retaining the `keep` most recent; zero deletes every backup.
+#[implement(Engine)]
+#[tracing::instrument(level = "debug", skip(self))]
+pub fn backup_purge(&self, keep: usize) -> Result {
+	let mut engine = backup_engine(&self.ctx)?;
+
+	engine.purge_old_backups(keep).map_err(map_err)
+}
+
 #[implement(Engine)]
 pub fn backup_list(&self) -> Result<impl Iterator<Item = String> + Send> {
 	let info = backup_engine(&self.ctx)?.get_backup_info();
