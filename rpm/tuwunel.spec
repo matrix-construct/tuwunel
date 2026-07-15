@@ -10,6 +10,7 @@ License:        Apache-2.0
 URL:            https://github.com/matrix-construct/tuwunel
 Source0:        tuwunel-%{version}.tar.gz
 
+BuildRequires:  ca-certificates
 BuildRequires:  clang-devel
 BuildRequires:  cmake
 BuildRequires:  curl
