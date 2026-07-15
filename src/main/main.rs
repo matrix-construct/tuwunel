@@ -1,10 +1,14 @@
 use std::sync::atomic::Ordering;
 
-use tuwunel::{Server, args, restart, runtime::Runtime};
+use tuwunel::{Server, args, health::check, restart, runtime::Runtime};
 use tuwunel_core::{Result, debug_info};
 
 fn main() -> Result {
 	let args = args::parse();
+	if args.health_check {
+		return check(&args);
+	}
+
 	let runtime = Runtime::new(Some(&args))?;
 	let server = Server::new(Some(&args), Some(&runtime))?;
 

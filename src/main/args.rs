@@ -35,6 +35,11 @@ pub struct Args {
 	#[arg(long)]
 	pub maintenance: bool,
 
+	/// Probe a running server for liveness and exit; the running server must
+	/// share this configuration.
+	#[arg(long)]
+	pub health_check: bool,
+
 	#[cfg(feature = "console")]
 	/// Activate admin command console automatically after startup.
 	#[arg(long, num_args(0))]

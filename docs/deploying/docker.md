@@ -49,6 +49,19 @@ If you just want to test tuwunel for a short time, you can use the `--rm`
 flag, which will clean up everything related to your container after you stop
 it.
 
+### Health check
+
+The image ships a `HEALTHCHECK` which runs `tuwunel --health-check`: it reads
+the same configuration as the server, connects to each configured listener,
+and requests `/_tuwunel/server_version`. Container platforms report the result
+as the container's health status. The probe reads the configuration from the
+environment and any config file named by `TUWUNEL_CONFIG`; arguments passed on
+the container command line are not visible to it, so when configuring via
+command-line arguments override the health check accordingly. The probe
+targets the configured listeners, so sockets passed in by a process manager
+(systemd socket activation) are not covered. The same flag also works outside
+containers, e.g. as a Kubernetes exec probe.
+
 ### Docker-compose
 
 If the `docker run` command is not for you or your setup, you can also use one
