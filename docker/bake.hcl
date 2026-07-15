@@ -1198,6 +1198,26 @@ group "pkg" {
     ]
 }
 
+target "apt-repo-install" {
+    description = "Install tuwunel from the public apt repository as documented."
+    name = elem("apt-repo-install", [sys_name, sys_version, sys_target])
+    tags = [
+        elem_tag("apt-repo-install", [sys_name, sys_version, sys_target], "latest"),
+    ]
+    target = "apt-repo-install"
+    output = ["type=cacheonly,compression=zstd,mode=min,compression-level=${cache_compress_level}"]
+    dockerfile = "${docker_dir}/Dockerfile.apt"
+    context = "."
+    matrix = sys
+    no-cache-filter = ["apt-repo-install"]
+    inherits = [
+        elem("system", [sys_name, sys_version, sys_target]),
+    ]
+    contexts = {
+        input = elem("target:system", [sys_name, sys_version, sys_target])
+    }
+}
+
 target "rpm-install" {
     name = elem("rpm-install", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target])
     tags = [

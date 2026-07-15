@@ -259,7 +259,7 @@ jobs:
     needs: [distro]
     uses: ./.github/workflows/bake.yml
     with:
-      bake_targets: '["deb-install", "rpm-install"]'
+      bake_targets: '["deb-install", "rpm-install", "apt-repo-install"]'
       cargo_profiles: '["release"]'
       feat_sets: '["all"]'
       rust_toolchains: '["stable"]'

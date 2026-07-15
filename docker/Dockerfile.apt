@@ -1,0 +1,30 @@
+# syntax = docker/dockerfile:1.11-labs
+
+# Installs tuwunel from the public apt repository onto a pristine system,
+# exercising the documented installation instructions (docs/deploying/debian.md)
+# and the published packages end to end.
+FROM input AS apt-repo-install
+ARG DEBIAN_FRONTEND=noninteractive
+ARG apt_repo_url="https://apt.f.dog"
+
+ENV DEBIAN_FRONTEND="${DEBIAN_FRONTEND}"
+RUN <<EOF
+    set -eux
+
+    apt-get -y update
+    apt-get -y install --no-install-recommends ca-certificates curl
+
+    curl -fsSL -o /usr/share/keyrings/tuwunel-archive-keyring.gpg \
+        "${apt_repo_url}/tuwunel-archive-keyring.gpg"
+    printf 'Types: deb\nURIs: %s\nSuites: stable\nComponents: main\nSigned-By: /usr/share/keyrings/tuwunel-archive-keyring.gpg\n' \
+        "${apt_repo_url}" > /etc/apt/sources.list.d/tuwunel.sources
+
+    apt-get -y update
+    apt-get -y install tuwunel
+
+    dpkg --status tuwunel
+    getent passwd tuwunel
+    test -L /var/lib/conduwuit
+    test -f /etc/tuwunel/tuwunel.toml
+    /usr/sbin/tuwunel --version
+EOF
