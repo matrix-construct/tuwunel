@@ -1,0 +1,43 @@
+name: COPR
+
+on:
+  push:
+    tags:
+      - "v*"
+
+  workflow_dispatch:
+    inputs:
+      committish:
+        type: string
+        description: "Branch, tag, or commit to build (defaults to the triggering ref)"
+
+permissions: {}
+
+jobs:
+  submit:
+    name: submit
+    runs-on: ubuntu-latest
+    if: github.repository == 'matrix-construct/tuwunel'
+
+    steps:
+      - name: Configure copr-cli
+        run: |
+          mkdir -p ~/.config
+          cat > ~/.config/copr <<EOF
+          [copr-cli]
+          copr_url = https://copr.fedorainfracloud.org
+          username = ${{ secrets.COPR_USERNAME }}
+          login = ${{ secrets.COPR_LOGIN }}
+          token = ${{ secrets.COPR_TOKEN }}
+          EOF
+
+      - name: Submit build
+        env:
+          COMMITTISH: ${{ inputs.committish || github.ref_name }}
+        run: |
+          pipx install copr-cli
+          copr-cli buildscm trapacid/tuwunel \
+            --clone-url "https://github.com/${{ github.repository }}" \
+            --commit "$COMMITTISH" \
+            --method make_srpm \
+            --nowait
