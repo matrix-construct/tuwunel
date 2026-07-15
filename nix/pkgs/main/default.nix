@@ -186,6 +186,11 @@ let
 
     doCheck = true;
 
+    # Cargo applies the selected profile to every target, so checking under
+    # release links each test binary with thin LTO. Tests build under the test
+    # profile instead, matching the profile the unit and integ jobs use.
+    cargoTestCommand = "cargo test";
+
     cargoExtraArgs =
       "--no-default-features --locked "
       + lib.optionalString (features'' != [ ]) "--features "
