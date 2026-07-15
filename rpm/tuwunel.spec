@@ -20,7 +20,7 @@ BuildRequires:  git-core
 BuildRequires:  liburing-devel
 BuildRequires:  make
 BuildRequires:  pkgconf
-BuildRequires:  systemd-rpm-macros
+BuildRequires:  (systemd-rpm-macros or systemd)
 
 Requires:       ca-certificates
 Requires(pre):  shadow-utils
