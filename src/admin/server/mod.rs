@@ -15,10 +15,11 @@ mod shutdown;
 mod uptime;
 mod verify_backup;
 
-use std::path::PathBuf;
+use std::{path::PathBuf, sync::Arc};
 
 use clap::Subcommand;
-use tuwunel_core::Result;
+use tuwunel_core::{Result, implement};
+use tuwunel_database::Database;
 
 use crate::admin_command_dispatch;
 
@@ -94,4 +95,20 @@ pub(super) enum ServerCommand {
 
 	/// - Shutdown the server
 	Shutdown,
+}
+
+/// Run blocking database work off the async runtime.
+#[implement(crate::Context, params = "<'_>")]
+async fn blocking_db<F, T>(&self, f: F) -> Result<T>
+where
+	F: FnOnce(Arc<Database>) -> Result<T> + Send + 'static,
+	T: Send + 'static,
+{
+	let db = Arc::clone(&self.services.db);
+
+	self.services
+		.server
+		.runtime()
+		.spawn_blocking(move || f(db))
+		.await?
 }
