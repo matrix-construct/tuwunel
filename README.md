@@ -6,6 +6,7 @@
 ![Docker Pulls](https://img.shields.io/docker/pulls/jevolk/tuwunel?style=flat%2Dsquare&color=8A2BE2)
 ![GitHub Repo Stars](https://img.shields.io/github/stars/matrix-construct/tuwunel?style=flat%2Dsquare&link=https%3A%2F%2Fgithub.com%2Fmatrix-construct%2Ftuwunel&color=%238A2BE2)
 [![CI/CD](https://github.com/matrix-construct/tuwunel/actions/workflows/main.yml/badge.svg?branch=main&style=flat%2Dsquare)](https://github.com/matrix-construct/tuwunel/actions/workflows/main.yml)
+[![Copr build status](https://copr.fedorainfracloud.org/coprs/trapacid/tuwunel/package/tuwunel/status_image/last_build.png)](https://copr.fedorainfracloud.org/coprs/trapacid/tuwunel/package/tuwunel/)
 
 <!-- ANCHOR: catchphrase -->
 
