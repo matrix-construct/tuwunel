@@ -13,7 +13,7 @@ use serde_json::json;
 use tuwunel_core::{
 	Err, Result, at, implement, trace,
 	utils::{
-		self, BoolExt, ReadyExt,
+		self, BoolExt, ReadyExt, random_string,
 		stream::{IterStream, TryIgnore},
 		string::to_small_string,
 		time::{
@@ -41,9 +41,7 @@ pub async fn create_device(
 	initial_device_display_name: Option<&str>,
 	client_ip: Option<IpAddr>,
 ) -> Result<OwnedDeviceId> {
-	let device_id = device_id
-		.map(ToOwned::to_owned)
-		.unwrap_or_else(|| OwnedDeviceId::from(utils::random_string(DEVICE_ID_LENGTH)));
+	let device_id = resolve_device_id(device_id);
 
 	if !self.exists(user_id).await {
 		return Err!(Request(InvalidParam(error!(
@@ -65,6 +63,14 @@ pub async fn create_device(
 	}
 
 	Ok(device_id)
+}
+
+fn resolve_device_id(device_id: Option<&DeviceId>) -> OwnedDeviceId {
+	// Treat an empty device_id ("") as unspecified.
+	device_id
+		.filter(|device_id| !device_id.as_str().is_empty())
+		.map(ToOwned::to_owned)
+		.unwrap_or_else(|| OwnedDeviceId::from(random_string(DEVICE_ID_LENGTH)))
 }
 
 /// Removes a device from a user.
@@ -293,7 +299,7 @@ pub async fn remove_access_token_value(&self, access_token: &str) {
 
 #[implement(super::Service)]
 pub fn generate_access_token(&self, expires: bool) -> (String, Option<Duration>) {
-	let access_token = utils::random_string(TOKEN_LENGTH);
+	let access_token = random_string(TOKEN_LENGTH);
 	let expires_in = expires
 		.then_some(self.services.server.config.access_token_ttl)
 		.map(Duration::from_secs);
@@ -534,9 +540,7 @@ pub async fn classify_refresh_token(&self, presented: &str) -> RefreshToken {
 }
 
 #[must_use]
-pub fn generate_refresh_token() -> String {
-	format!("refresh_{}", utils::random_string(TOKEN_LENGTH))
-}
+pub fn generate_refresh_token() -> String { format!("refresh_{}", random_string(TOKEN_LENGTH)) }
 
 #[implement(super::Service)]
 pub fn add_to_device_event(
@@ -778,4 +782,30 @@ fn increment(db: &Arc<Map>, key: &[u8]) {
 	let old = db.get_blocking(key);
 	let new = utils::increment(old.ok().as_deref());
 	db.insert(key, new);
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn absent_device_id_is_generated() {
+		let device_id = resolve_device_id(None);
+
+		assert_eq!(device_id.as_str().len(), DEVICE_ID_LENGTH);
+	}
+
+	#[test]
+	fn empty_device_id_is_generated() {
+		let device_id = resolve_device_id(Some("".into()));
+
+		assert_eq!(device_id.as_str().len(), DEVICE_ID_LENGTH);
+	}
+
+	#[test]
+	fn provided_device_id_is_preserved() {
+		let device_id = resolve_device_id(Some("HELLOWORLD".into()));
+
+		assert_eq!(device_id.as_str(), "HELLOWORLD");
+	}
 }

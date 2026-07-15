@@ -49,33 +49,34 @@ pub async fn set_dehydrated_device(&self, user_id: &UserId, request: Request) ->
 		self.remove_device(user_id, &existing_id).await;
 	}
 
-	self.create_device(
-		user_id,
-		Some(&request.device_id),
-		(None, None),
-		None,
-		request.initial_device_display_name.as_deref(),
-		None,
-	)
-	.await?;
+	let device_id = self
+		.create_device(
+			user_id,
+			Some(&request.device_id),
+			(None, None),
+			None,
+			request.initial_device_display_name.as_deref(),
+			None,
+		)
+		.await?;
 
 	trace!(device_data = ?request.device_data);
 	self.db.userid_dehydrateddevice.raw_put(
 		user_id,
 		Json(&DehydratedDevice {
-			device_id: request.device_id.clone(),
+			device_id: device_id.clone(),
 			device_data: request.device_data,
 		}),
 	);
 
 	trace!(device_keys = ?request.device_keys);
-	self.add_device_keys(user_id, &request.device_id, &request.device_keys)
+	self.add_device_keys(user_id, &device_id, &request.device_keys)
 		.await;
 
 	trace!(one_time_keys = ?request.one_time_keys);
 	self.add_one_time_keys(
 		user_id,
-		&request.device_id,
+		&device_id,
 		request
 			.one_time_keys
 			.iter()
@@ -87,7 +88,7 @@ pub async fn set_dehydrated_device(&self, user_id: &UserId, request: Request) ->
 	trace!(fallback_keys = ?request.fallback_keys);
 	self.add_fallback_keys(
 		user_id,
-		&request.device_id,
+		&device_id,
 		request
 			.fallback_keys
 			.iter()
