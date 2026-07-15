@@ -6,7 +6,7 @@ use std::{
 	sync::Arc,
 };
 
-use futures::{FutureExt, StreamExt, TryFutureExt, TryStreamExt, future::BoxFuture};
+use futures::{FutureExt, StreamExt, TryFutureExt, TryStreamExt};
 use ruma::{
 	CanonicalJsonObject, CanonicalJsonValue, OwnedEventId, OwnedServerName, OwnedUserId, RoomId,
 	RoomOrAliasId, RoomVersionId, UserId,
@@ -25,7 +25,8 @@ use ruma::{
 };
 use serde_json::value::{RawValue as RawJsonValue, to_raw_value};
 use tuwunel_core::{
-	Err, Result, at, debug, debug_error, debug_info, debug_warn, err, error, implement, info,
+	Err, Result, async_noinline, at, debug, debug_error, debug_info, debug_warn, err, error,
+	implement, info,
 	matrix::{event::gen_event_id_canonical_json, room_version},
 	pdu::{Pdu, PduBuilder, check_rules},
 	trace,
@@ -56,21 +57,15 @@ pub struct Join<'a> {
 }
 
 #[implement(Service)]
-#[inline(never)]
-#[must_use]
-pub fn join<'a>(&'a self, args: Join<'a>) -> BoxFuture<'a, Result> {
-	self.join_room(args).boxed()
-}
-
-#[implement(Service)]
+#[async_noinline]
 #[tracing::instrument(
 	name = "join",
 	level = "debug",
 	skip_all,
 	fields(%sender_user, %room_id)
 )]
-async fn join_room(
-	&self,
+pub async fn join<'a>(
+	&'a self,
 	Join {
 		sender_user,
 		room_id,
@@ -79,7 +74,7 @@ async fn join_room(
 		servers,
 		is_appservice,
 		extra_content,
-	}: Join<'_>,
+	}: Join<'a>,
 ) -> Result {
 	let state_lock = self.services.state.mutex.lock(room_id).await;
 
