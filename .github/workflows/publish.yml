@@ -5,6 +5,7 @@ on:
     secrets:
       ghcr_token:
       dockerhub_token:
+      apt_ssh_key:
     inputs:
       cargo_profiles:
         type: string
@@ -361,3 +362,32 @@ jobs:
         run: |
           docker manifest push -p "ghcr.io/${ghcr_repo}:latest"
           docker manifest push -p "docker.io/${docker_repo}:latest"
+
+  apt:
+    if: >
+      !failure() && !cancelled()
+      && contains(github.ref, 'refs/tags/v')
+      && !contains(github.ref, '-draft')
+      && !contains(github.ref, '-pre')
+      && !contains(github.ref, '-rc')
+
+    name: Apt Repository
+    runs-on: 'het'
+    steps:
+      - name: Publish Release
+        env:
+          ref_name: ${{github.ref_name}}
+          deploy_key: ${{secrets.apt_ssh_key}}
+
+        run: |
+          if [ -z "$deploy_key" ]; then
+            echo "apt_ssh_key secret is not set; skipping"
+            exit 0
+          fi
+          key="$(mktemp)"
+          hosts="$(mktemp)"
+          trap 'shred -u "$key"; rm -f "$hosts"' EXIT
+          printf '%s\n' "$deploy_key" > "$key"
+          printf '%s\n' 'f.dog ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILs2LVCRlATVU9+YBCU4nWb2Zfm+hkzxycFxMVclG4J/' > "$hosts"
+          ssh -i "$key" -o UserKnownHostsFile="$hosts" -o IdentitiesOnly=yes -o BatchMode=yes \
+            "aptrepo@f.dog" "$ref_name"

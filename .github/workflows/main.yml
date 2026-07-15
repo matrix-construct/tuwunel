@@ -477,6 +477,7 @@ jobs:
     secrets:
       ghcr_token: ${{ secrets.GHCR_TOKEN }}
       dockerhub_token: ${{ secrets.DOCKERHUB_TOKEN }}
+      apt_ssh_key: ${{ secrets.APT_DEPLOY_SSH_KEY }}
 
 #  stats:
 #    if: >
