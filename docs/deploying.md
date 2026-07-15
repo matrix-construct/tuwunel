@@ -52,6 +52,11 @@ and `-v3-` CPU-optimized variants. Running the wrong one produces an
 variant your CPU supports; `-v2-` or better is recommended for RocksDB's CRC32
 performance.
 
+**Debian and Ubuntu have an apt repository.** Instead of downloading packages by
+hand, add the repository from the [Debian guide](deploying/debian.md) and install
+with `apt install tuwunel`; upgrades then arrive through `apt upgrade`. Installing
+the package also adopts an existing conduwuit or Conduit database automatically.
+
 **RocksDB is the only supported database.** SQLite support has been removed. A
 RocksDB database from Conduit or a fork of conduwuit migrates in place on first
 boot: stop the source server, back up its data directory and media, then start

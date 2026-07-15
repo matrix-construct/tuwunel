@@ -17,6 +17,9 @@ release [here](https://github.com/matrix-construct/tuwunel/releases/latest) or
 `main` CI branch workflow artifact output. These also include `.deb` packages
 for Debian or Ubuntu and `.rpm` packages for Red Hat or Fedora.
 
+Debian and Ubuntu users can instead install and update Tuwunel through the
+apt repository; see the [Debian guide](debian.md) for setup.
+
 For the **best** performance; if using an `x86_64` CPU made in the last ~10 years,
 we recommend using the `-v3-` optimised packages. See below for a command to check
 what your system supports. If the server refuses to start or exits with an "Illegal
