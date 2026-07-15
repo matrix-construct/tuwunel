@@ -131,7 +131,7 @@ jobs:
     uses: ./.github/workflows/bake.yml
     with:
       bake_targets: '["doc"]'
-      cargo_profiles: '["release"]'
+      cargo_profiles: '["test"]'
       feat_sets: '["all"]'
       rust_toolchains: '["nightly"]'
       sys_names: ${{inputs.sys_names}}
