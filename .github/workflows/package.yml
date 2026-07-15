@@ -259,7 +259,7 @@ jobs:
     needs: [distro]
     uses: ./.github/workflows/bake.yml
     with:
-      bake_targets: '["deb-install", "rpm-install", "apt-repo-install"]'
+      bake_targets: '["deb-install", "rpm-install"]'
       cargo_profiles: '["release"]'
       feat_sets: '["all"]'
       rust_toolchains: '["stable"]'
@@ -270,4 +270,33 @@ jobs:
       machines: ${{inputs.machines}}
       excludes: ${{inputs.excludes}}
       includes: ${{inputs.includes}}
+      checkout: ${{inputs.checkout}}
+
+  apt:
+    if: >
+      !failure() && !cancelled()
+      && fromJSON(inputs.enable_checks)
+      && contains(fromJSON(inputs.feat_sets), fromJSON('["all"]')[0])
+      && contains(fromJSON(inputs.cargo_profiles), fromJSON('["release"]')[0])
+      && contains(fromJSON(inputs.rust_toolchains), fromJSON('["stable"]')[0])
+
+    name: Check Apt Repository
+    uses: ./.github/workflows/bake.yml
+    with:
+      bake_targets: '["apt-repo-install"]'
+      cargo_profiles: '["release"]'
+      feat_sets: '["all"]'
+      rust_toolchains: '["stable"]'
+      sys_names: '["debian", "ubuntu"]'
+      sys_versions: '["stable-slim", "noble"]'
+      rust_targets: ${{inputs.rust_targets}}
+      sys_targets: '["x86_64-v1-linux-gnu", "aarch64-v8-linux-gnu"]'
+      machines: ${{inputs.machines}}
+      excludes: >
+        [
+          {"sys_name": "debian", "sys_version": "noble"},
+          {"sys_name": "ubuntu", "sys_version": "stable-slim"},
+          {"sys_target": "x86_64-v1-linux-gnu", "machine": "ARM64"},
+          {"sys_target": "aarch64-v8-linux-gnu", "machine": "X64"}
+        ]
       checkout: ${{inputs.checkout}}
