@@ -19,7 +19,8 @@ name = "tuwunel"
 maintainer = "Jason Volk <jason@zemos.net>"
 copyright = "2025, Tuwunel Contributors"
 license-file = ["../../LICENSE", "3"]
-depends = "$auto, ca-certificates"
+depends = "$auto, ca-certificates, adduser"
+conflicts = "conduwuit"
 extended-description = """\
 High performance Matrix homeserver written in Rust"""
 section = "net"
