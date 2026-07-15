@@ -173,7 +173,8 @@ pub struct Config {
 	pub database_backup_path: Option<PathBuf>,
 
 	/// The amount of online RocksDB database backups to keep/retain, if using
-	/// "database_backup_path", before deleting the oldest one.
+	/// "database_backup_path", before deleting the oldest one. This must be at
+	/// least 1; "backup-database" is an error at 0 or below.
 	///
 	/// reloadable: yes
 	/// default: 1

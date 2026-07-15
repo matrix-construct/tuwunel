@@ -12,34 +12,38 @@ use crate::{Context, util::map_err};
 #[implement(Engine)]
 #[tracing::instrument(skip(self))]
 pub fn backup(&self) -> Result {
+	let to_keep = self.ctx.server.config.database_backups_to_keep;
+
+	if to_keep <= 0 {
+		return Err!(Config(
+			"database_backups_to_keep",
+			"Set above zero to enable backups; no backup was created."
+		));
+	}
+
 	let mut engine = backup_engine(&self.ctx)?;
-	let config = &self.ctx.server.config;
-	if config.database_backups_to_keep > 0 {
-		let flush = !self.is_read_only();
-		engine
-			.create_new_backup_flush(&self.db, flush)
-			.map_err(map_err)?;
+	let flush = !self.is_read_only();
 
-		let engine_info = engine.get_backup_info();
-		let info = &engine_info
-			.last()
-			.expect("backup engine info is not empty");
-		info!(
-			"Created database backup #{} using {} bytes in {} files",
-			info.backup_id, info.size, info.num_files,
-		);
-	}
+	engine
+		.create_new_backup_flush(&self.db, flush)
+		.map_err(map_err)?;
 
-	if config.database_backups_to_keep >= 0 {
-		let keep = u32::try_from(config.database_backups_to_keep)?;
-		if let Err(e) = engine.purge_old_backups(keep.try_into()?) {
-			error!("Failed to purge old backup: {e:?}");
-		}
-	}
+	let backups = engine.get_backup_info();
+	let backup = backups
+		.last()
+		.expect("backup engine info is not empty");
 
-	if config.database_backups_to_keep == 0 {
-		warn!("Configuration item `database_backups_to_keep` is set to 0.");
-	}
+	info!(
+		backup_id = backup.backup_id,
+		size = backup.size,
+		num_files = backup.num_files,
+		"Created database backup"
+	);
+
+	engine
+		.purge_old_backups(usize::try_from(to_keep)?)
+		.inspect_err(|e| error!(?e, "Failed to purge old backup"))
+		.ok();
 
 	Ok(())
 }
