@@ -32,6 +32,9 @@ implemented in Rust.
 %autosetup -n tuwunel-%{version}
 
 %build
+# rpmbuild exports distribution build flags which break the build scripts
+# of vendored C dependencies; the cargo release profile governs instead.
+unset CFLAGS CXXFLAGS CPPFLAGS LDFLAGS RUSTFLAGS
 # The distribution toolchain is generally older than the pin in
 # rust-toolchain.toml, so the pinned toolchain is installed with rustup.
 # This requires the COPR project setting "Enable internet access during
