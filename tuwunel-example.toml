@@ -2251,6 +2251,16 @@
 #
 #url_preview_max_spider_size = 256000
 
+# Maximum size of a single media item fetched or relayed for a URL
+# preview: the og:image measurement fetch and the lazy-media relay.
+# Media whose advertised length exceeds this is not registered, and a
+# relay that would exceed it is refused. Accepts an integer byte count
+# or a string with SI/IEC suffix such as "50 MiB".
+#
+# reloadable: yes
+#
+#url_preview_max_media_size = 50 MiB
+
 # Option to decide whether you would like to run the domain allowlist
 # checks (contains and explicit) on the root domain or not. Does not apply
 # to URL contains allowlist. Defaults to false.

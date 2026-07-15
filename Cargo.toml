@@ -475,6 +475,9 @@ version = "1.0"
 default-features = false
 features = ["rc"]
 
+[workspace.dependencies.serde_bytes]
+version = "0.11"
+
 [workspace.dependencies.serde_core]
 version = "1.0"
 default-features = false

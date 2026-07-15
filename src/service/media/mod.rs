@@ -248,11 +248,13 @@ impl Service {
 				Ok(())
 			},
 			| _ => {
-				// lazy URL-preview media has no file keys; deleting the
-				// reference unregisters the mxc
+				// lazy URL-preview media has no file keys; drop the reference
+				// and any staged bytes so a delete cannot resurrect the media
 				if self.db.search_lazy_media(mxc).await.is_ok() {
-					self.db
-						.remove_lazy_media(mxc.to_string().as_str());
+					let key = mxc.to_string();
+					self.db.remove_lazy_media(&key);
+					self.db.remove_lazy_content(&key);
+
 					return Ok(());
 				}
 
@@ -407,24 +409,56 @@ impl Service {
 		})
 	}
 
-	/// Relay media that a URL preview registered as a lazy reference to an
-	/// external URL. The content is fetched on the client's behalf for every
-	/// request and never persisted locally: the server acts only as a proxy
-	/// so the client's address is not revealed to the third party.
+	/// Resolve lazy URL-preview media on first download, promoting the staged
+	/// or freshly-fetched bytes into the media store so the origin is fetched
+	/// at most once per item.
 	#[tracing::instrument(level = "debug", skip(self))]
 	async fn fetch_lazy_media(&self, mxc: &Mxc<'_>) -> Result<Media> {
-		let Ok(url) = self.db.search_lazy_media(mxc).await else {
-			return Err!(Request(NotFound("Media not found.")));
+		let key = mxc.to_string();
+
+		// bound outbound amplification to one in-flight fetch per mxc; requests
+		// for the same mxc queue rather than fan out
+		let _lock = self.federation_mutex.lock(&key).await;
+
+		// a queued waiter for the same mxc may have promoted it already
+		if self
+			.db
+			.search_file_metadata(mxc, &Dim::default())
+			.await
+			.is_ok()
+		{
+			// box the cold re-entry to break the get_stored/fetch_lazy_media cycle
+			return Box::pin(self.get_stored(mxc)).await;
+		}
+
+		let media = match self.db.get_lazy_content(&key).await {
+			| Ok(media) => media,
+			| Err(_) => {
+				let Ok(url) = self.db.search_lazy_media(mxc).await else {
+					return Err!(Request(NotFound("Media not found.")));
+				};
+
+				let limit = self.services.config.url_preview_max_media_size;
+				self.location_request(&self.services.client.url_preview_media, &url, limit)
+					.await?
+			},
 		};
 
-		// bound outbound amplification and buffering to one in-flight fetch
-		// per mxc; requests for the same mxc queue rather than fan out
-		let _lock = self.federation_mutex.lock(&mxc.to_string()).await;
+		// promote through the ordinary upload path so real file metadata makes
+		// every later download and thumbnail a normal-media hit
+		self.create(
+			mxc,
+			None,
+			media.content_disposition.as_ref(),
+			media.content_type.as_deref(),
+			&media.content,
+		)
+		.await?;
 
-		// lazy media is URL-preview traffic: use the preview media client so
-		// url_preview_bound_interface and url_preview_media_user_agent apply
-		self.location_request(&self.services.client.url_preview_media, &url)
-			.await
+		self.db.remove_lazy_media(&key);
+		self.db.remove_lazy_content(&key);
+
+		Ok(media)
 	}
 
 	/// Presigned redirect URL for locally-stored media (MSC3860).

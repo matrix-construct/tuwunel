@@ -151,7 +151,18 @@ pub(super) static MAPS: &[Descriptor] = &[
 	},
 	Descriptor {
 		name: "mediaid_lazy",
-		..descriptor::RANDOM_SMALL
+		ttl: 60 * 60 * 24 * 30, // must outlive url_preview so live previews resolve
+		..descriptor::RANDOM_SMALL_CACHE
+	},
+	Descriptor {
+		name: "mediaid_lazycontent",
+		key_size_hint: Some(64),
+		val_size_hint: Some(1024 * 256),
+		file_size: 1024 * 1024 * 64,
+		write_size: 1024 * 1024 * 64,
+		compression: CompressionType::None, // media bytes are pre-compressed
+		ttl: 60 * 60 * 24 * 14,             // staging only: rows die at promotion or here
+		..descriptor::RANDOM_CACHE
 	},
 	Descriptor {
 		name: "mediaid_pending",
@@ -497,8 +508,13 @@ pub(super) static MAPS: &[Descriptor] = &[
 		..descriptor::RANDOM
 	},
 	Descriptor {
+		name: "url_preview",
+		ttl: 60 * 60 * 24 * 7, // dead after CachedPreview::EXPIRE (24h)
+		..descriptor::RANDOM_SMALL_CACHE
+	},
+	Descriptor {
 		name: "url_previews",
-		..descriptor::RANDOM
+		..descriptor::DROPPED
 	},
 	Descriptor {
 		name: "userdeviceid_metadata",

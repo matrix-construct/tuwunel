@@ -160,15 +160,21 @@ impl super::Service {
 			return self.get_thumbnail_saved(metadata).await;
 		}
 
-		// the original may be lazy URL-preview media, which is relayed rather
-		// than stored, leaving nothing to thumbnail; serve the original like
-		// the unparsable-media fallback does
+		// the original may be lazy preview media promoted on this very request;
+		// only an image is worth serving in a thumbnail's place
 		let Ok(metadata) = self
 			.db
 			.search_file_metadata(mxc, &Dim::default())
 			.await
 		else {
-			return self.get_stored(mxc).await;
+			let media = self.get_stored(mxc).await?;
+
+			return media
+				.content_type
+				.as_deref()
+				.is_some_and(|content_type| content_type.starts_with("image/"))
+				.then_some(media)
+				.ok_or_else(|| err!(Request(NotFound("Media not found."))));
 		};
 
 		self.get_thumbnail_generate(mxc, &dim, metadata)

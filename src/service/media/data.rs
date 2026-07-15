@@ -1,25 +1,29 @@
-use std::{sync::Arc, time::Duration};
+use std::sync::Arc;
 
 use futures::{StreamExt, pin_mut};
 use ruma::{Mxc, OwnedMxcUri, OwnedUserId, UserId, http_headers::ContentDisposition};
+use serde::Deserialize;
+#[cfg(feature = "url_preview")]
+use serde::Serialize;
 use tuwunel_core::{
-	Err, Result, debug, debug_info, err,
+	Err, Result, at, debug, debug_info, err,
 	utils::{
 		ReadyExt, str_from_bytes,
 		stream::{TryExpect, TryIgnore},
 		string_from_bytes,
 	},
 };
-use tuwunel_database::{Database, Deserialized, Ignore, Interfix, Map, serialize_key};
+use tuwunel_database::{Cbor, Database, Deserialized, Ignore, Interfix, Map, serialize_key};
 
-use super::{preview::UrlPreviewData, thumbnail::Dim};
+use super::{Media, preview::CachedPreview, thumbnail::Dim};
 
 pub(crate) struct Data {
 	mediaid_file: Arc<Map>,
 	mediaid_lazy: Arc<Map>,
+	mediaid_lazycontent: Arc<Map>,
 	mediaid_pending: Arc<Map>,
 	mediaid_user: Arc<Map>,
-	url_previews: Arc<Map>,
+	url_preview: Arc<Map>,
 }
 
 #[derive(Debug)]
@@ -29,14 +33,49 @@ pub struct Metadata {
 	pub(super) key: Vec<u8>,
 }
 
+/// Borrowed staging-cache value: written zero-copy from the measured bytes.
+#[cfg(feature = "url_preview")]
+#[derive(Serialize)]
+struct LazyContentRef<'a> {
+	content_type: Option<&'a str>,
+	content_disposition: Option<&'a str>,
+	#[serde(with = "serde_bytes")]
+	content: &'a [u8],
+}
+
+/// Owned staging-cache value read back at promotion. `ContentDisposition` is
+/// Serialize-only, so the disposition rides as its header string.
+#[derive(Deserialize)]
+struct LazyContent {
+	content_type: Option<String>,
+	content_disposition: Option<String>,
+	#[serde(with = "serde_bytes")]
+	content: Vec<u8>,
+}
+
+impl From<LazyContent> for Media {
+	fn from(lazy: LazyContent) -> Self {
+		let content_disposition = lazy
+			.content_disposition
+			.and_then(|disposition| disposition.parse().ok());
+
+		Self {
+			content: lazy.content,
+			content_type: lazy.content_type,
+			content_disposition,
+		}
+	}
+}
+
 impl Data {
 	pub(super) fn new(db: &Arc<Database>) -> Self {
 		Self {
 			mediaid_file: db["mediaid_file"].clone(),
 			mediaid_lazy: db["mediaid_lazy"].clone(),
+			mediaid_lazycontent: db["mediaid_lazycontent"].clone(),
 			mediaid_pending: db["mediaid_pending"].clone(),
 			mediaid_user: db["mediaid_user"].clone(),
-			url_previews: db["url_previews"].clone(),
+			url_preview: db["url_preview"].clone(),
 		}
 	}
 
@@ -109,11 +148,8 @@ impl Data {
 			.map_err(|e| err!(Request(NotFound("Pending not found or error: {e}"))))
 	}
 
-	/// Register an MXC URI as a lazy reference to an external URL: the
-	/// content is never stored, only relayed to requesting clients (see
-	/// `Service::fetch_lazy_media`). Used for URL preview media, so a preview
-	/// can hand out an mxc:// URI without the server downloading or hosting
-	/// potentially large third-party files.
+	/// Map a minted mxc:// URI to the external URL it resolves to on first
+	/// download (see `Service::fetch_lazy_media`).
 	#[cfg(feature = "url_preview")]
 	pub(super) fn insert_lazy_media(&self, mxc: &Mxc<'_>, url: &str) {
 		debug!(?mxc, ?url, "Registering lazy media");
@@ -133,6 +169,38 @@ impl Data {
 		string_from_bytes(&handle)
 			.map_err(|e| err!(Database(error!(?mxc, "Lazy media URL is invalid: {e}"))))
 	}
+
+	/// Stage the measured preview media bytes under its minted mxc so the
+	/// first client download can promote without touching the origin.
+	#[cfg(feature = "url_preview")]
+	pub(super) fn set_lazy_content(
+		&self,
+		mxc: &str,
+		content_type: Option<&str>,
+		content_disposition: Option<&str>,
+		content: &[u8],
+	) {
+		let value = LazyContentRef {
+			content_type,
+			content_disposition,
+			content,
+		};
+
+		self.mediaid_lazycontent
+			.raw_put(mxc, Cbor(&value));
+	}
+
+	/// Take the staged bytes a preview seeded for a lazy media mxc, if any.
+	pub(super) async fn get_lazy_content(&self, mxc: &str) -> Result<Media> {
+		self.mediaid_lazycontent
+			.get(mxc)
+			.await
+			.deserialized::<Cbor<LazyContent>>()
+			.map(at!(0))
+			.map(Into::into)
+	}
+
+	pub(super) fn remove_lazy_content(&self, mxc: &str) { self.mediaid_lazycontent.remove(mxc); }
 
 	pub(super) async fn delete_file_mxc(&self, mxc: &Mxc<'_>) {
 		debug!("MXC URI: {mxc}");
@@ -262,215 +330,64 @@ impl Data {
 			.await
 	}
 
-	#[inline]
-	pub(super) fn remove_url_preview(&self, url: &str) -> Result {
-		self.url_previews.remove(url.as_bytes());
-		Ok(())
-	}
-
-	pub(super) fn set_url_preview(
-		&self,
-		url: &str,
-		data: &UrlPreviewData,
-		timestamp: Duration,
-	) -> Result {
-		let mut value = Vec::<u8>::new();
-		value.extend_from_slice(&timestamp.as_secs().to_be_bytes());
-		value.push(0xFF);
-		value.extend_from_slice(
-			data.title
-				.as_ref()
-				.map(String::as_bytes)
-				.unwrap_or_default(),
-		);
-		value.push(0xFF);
-		value.extend_from_slice(
-			data.description
-				.as_ref()
-				.map(String::as_bytes)
-				.unwrap_or_default(),
-		);
-		value.push(0xFF);
-		value.extend_from_slice(
-			data.image
-				.as_ref()
-				.map(String::as_bytes)
-				.unwrap_or_default(),
-		);
-		value.push(0xFF);
-		value.extend_from_slice(&data.image_size.unwrap_or(0).to_be_bytes());
-		value.push(0xFF);
-		value.extend_from_slice(&data.image_width.unwrap_or(0).to_be_bytes());
-		value.push(0xFF);
-		value.extend_from_slice(&data.image_height.unwrap_or(0).to_be_bytes());
-		value.push(0xFF);
-		value.extend_from_slice(
-			data.video
-				.as_ref()
-				.map(String::as_bytes)
-				.unwrap_or_default(),
-		);
-		value.push(0xFF);
-		value.extend_from_slice(&data.video_size.unwrap_or(0).to_be_bytes());
-		value.push(0xFF);
-		value.extend_from_slice(&data.video_width.unwrap_or(0).to_be_bytes());
-		value.push(0xFF);
-		value.extend_from_slice(&data.video_height.unwrap_or(0).to_be_bytes());
-		value.push(0xFF);
-		value.extend_from_slice(
-			data.audio
-				.as_ref()
-				.map(String::as_bytes)
-				.unwrap_or_default(),
-		);
-		value.push(0xFF);
-		value.extend_from_slice(&data.audio_size.unwrap_or(0).to_be_bytes());
-		value.push(0xFF);
-		value.extend_from_slice(
-			data.og_type
-				.as_ref()
-				.map(String::as_bytes)
-				.unwrap_or_default(),
-		);
-		value.push(0xFF);
-		value.extend_from_slice(
-			data.og_url
-				.as_ref()
-				.map(String::as_bytes)
-				.unwrap_or_default(),
-		);
-
-		self.url_previews.insert(url.as_bytes(), &value);
+	pub(super) fn set_url_preview(&self, url: &str, cached: &CachedPreview) -> Result {
+		self.url_preview.raw_put(url, Cbor(cached));
 
 		Ok(())
 	}
 
-	pub(super) async fn get_url_preview(&self, url: &str) -> Result<UrlPreviewData> {
-		let values = self.url_previews.get(url).await?;
+	pub(super) async fn get_url_preview(&self, url: &str) -> Result<CachedPreview> {
+		self.url_preview
+			.get(url)
+			.await
+			.deserialized::<Cbor<_>>()
+			.map(at!(0))
+			.ok()
+			.filter(CachedPreview::valid)
+			.ok_or(err!(Request(NotFound("Expired from cache"))))
+	}
+}
 
-		let mut values = values.split(|&b| b == 0xFF);
+#[cfg(feature = "url_preview")]
+#[cfg(test)]
+mod tests {
+	use minicbor_serde::{from_slice, to_vec};
 
-		let _ts = values.next();
-		/* if we ever decide to use timestamp, this is here.
-		match values.next().map(|b| u64::from_be_bytes(b.try_into().expect("valid BE array"))) {
-			Some(0) => None,
-			x => x,
-		};*/
+	use super::{LazyContent, LazyContentRef, Media};
 
-		let title = match values
-			.next()
-			.and_then(|b| String::from_utf8(b.to_vec()).ok())
-		{
-			| Some(s) if s.is_empty() => None,
-			| x => x,
-		};
-		let description = match values
-			.next()
-			.and_then(|b| String::from_utf8(b.to_vec()).ok())
-		{
-			| Some(s) if s.is_empty() => None,
-			| x => x,
-		};
-		let image = match values
-			.next()
-			.and_then(|b| String::from_utf8(b.to_vec()).ok())
-		{
-			| Some(s) if s.is_empty() => None,
-			| x => x,
-		};
-		let image_size = match values
-			.next()
-			.map(|b| usize::from_be_bytes(b.try_into().unwrap_or_default()))
-		{
-			| Some(0) => None,
-			| x => x,
-		};
-		let image_width = match values
-			.next()
-			.map(|b| u32::from_be_bytes(b.try_into().unwrap_or_default()))
-		{
-			| Some(0) => None,
-			| x => x,
-		};
-		let image_height = match values
-			.next()
-			.map(|b| u32::from_be_bytes(b.try_into().unwrap_or_default()))
-		{
-			| Some(0) => None,
-			| x => x,
-		};
-		let video = match values
-			.next()
-			.and_then(|b| String::from_utf8(b.to_vec()).ok())
-		{
-			| Some(s) if s.is_empty() => None,
-			| x => x,
-		};
-		let video_size = match values
-			.next()
-			.map(|b| usize::from_be_bytes(b.try_into().unwrap_or_default()))
-		{
-			| Some(0) => None,
-			| x => x,
-		};
-		let video_width = match values
-			.next()
-			.map(|b| u32::from_be_bytes(b.try_into().unwrap_or_default()))
-		{
-			| Some(0) => None,
-			| x => x,
-		};
-		let video_height = match values
-			.next()
-			.map(|b| u32::from_be_bytes(b.try_into().unwrap_or_default()))
-		{
-			| Some(0) => None,
-			| x => x,
-		};
-		let audio = match values
-			.next()
-			.and_then(|b| String::from_utf8(b.to_vec()).ok())
-		{
-			| Some(s) if s.is_empty() => None,
-			| x => x,
-		};
-		let audio_size = match values
-			.next()
-			.map(|b| usize::from_be_bytes(b.try_into().unwrap_or_default()))
-		{
-			| Some(0) => None,
-			| x => x,
-		};
-		let og_type = match values
-			.next()
-			.and_then(|b| String::from_utf8(b.to_vec()).ok())
-		{
-			| Some(s) if s.is_empty() => None,
-			| x => x,
-		};
-		let og_url = match values
-			.next()
-			.and_then(|b| String::from_utf8(b.to_vec()).ok())
-		{
-			| Some(s) if s.is_empty() => None,
-			| x => x,
+	#[test]
+	fn lazy_content_roundtrip() {
+		let content: &[u8] = b"\x00\x01\xFF\xFE arbitrary staged bytes";
+		let value = LazyContentRef {
+			content_type: Some("image/png"),
+			content_disposition: Some("inline; filename=\"cat.png\""),
+			content,
 		};
 
-		Ok(UrlPreviewData {
-			title,
-			description,
-			image,
-			image_size,
-			image_width,
-			image_height,
-			video,
-			video_size,
-			video_width,
-			video_height,
-			audio,
-			audio_size,
-			og_type,
-			og_url,
-		})
+		let bytes = to_vec(&value).expect("encodes");
+		let decoded: LazyContent = from_slice(&bytes).expect("decodes");
+
+		assert_eq!(decoded.content_type.as_deref(), Some("image/png"));
+		assert_eq!(decoded.content.as_slice(), content);
+
+		let media = Media::from(decoded);
+		assert_eq!(media.content.as_slice(), content);
+		assert!(media.content_disposition.is_some(), "disposition re-parses to the ruma type");
+	}
+
+	#[test]
+	fn lazy_content_bytes_compact() {
+		let content = vec![0xAB_u8; 4096];
+		let value = LazyContentRef {
+			content_type: None,
+			content_disposition: None,
+			content: content.as_slice(),
+		};
+
+		let bytes = to_vec(&value).expect("encodes");
+
+		// serde_bytes must encode a CBOR byte string, not an array-of-uints
+		// (~1.9x); only a small fixed header of overhead is permitted
+		assert!(bytes.len() <= content.len() + 64);
 	}
 }

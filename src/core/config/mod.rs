@@ -2549,6 +2549,20 @@ pub struct Config {
 	)]
 	pub url_preview_max_spider_size: usize,
 
+	/// Maximum size of a single media item fetched or relayed for a URL
+	/// preview: the og:image measurement fetch and the lazy-media relay.
+	/// Media whose advertised length exceeds this is not registered, and a
+	/// relay that would exceed it is refused. Accepts an integer byte count
+	/// or a string with SI/IEC suffix such as "50 MiB".
+	///
+	/// reloadable: yes
+	/// default: 50 MiB
+	#[serde(
+		default = "default_url_preview_max_media_size",
+		deserialize_with = "deserialize_bytesize_usize"
+	)]
+	pub url_preview_max_media_size: usize,
+
 	/// Option to decide whether you would like to run the domain allowlist
 	/// checks (contains and explicit) on the root domain or not. Does not apply
 	/// to URL contains allowlist. Defaults to false.
@@ -4760,6 +4774,10 @@ fn default_ip_range_denylist() -> Vec<String> {
 
 fn default_url_preview_max_spider_size() -> usize {
 	256_000 // 256KB
+}
+
+fn default_url_preview_max_media_size() -> usize {
+	50 * 1024 * 1024 // 50 MiB
 }
 
 fn default_new_user_displayname_suffix() -> String { "💕".to_owned() }

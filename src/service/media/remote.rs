@@ -246,7 +246,9 @@ async fn handle_content_file(&self, mxc: &Mxc<'_>, content: Content) -> Result<M
 
 #[implement(super::Service)]
 async fn handle_location(&self, mxc: &Mxc<'_>, location: &str) -> Result<Media> {
-	self.location_request(&self.services.client.extern_media, location)
+	let limit = self.services.server.config.max_response_size;
+
+	self.location_request(&self.services.client.extern_media, location, limit)
 		.await
 		.map_err(|error| {
 			err!(Request(NotFound(
@@ -260,6 +262,7 @@ pub(super) async fn location_request(
 	&self,
 	client: &reqwest::Client,
 	location: &str,
+	limit: usize,
 ) -> Result<Media> {
 	let url = Url::parse(location)
 		.map_err(|e| err!(Request(Unknown("Invalid media location URL: {e}"))))?;
@@ -268,11 +271,16 @@ pub(super) async fn location_request(
 
 	let response = client.get(url.as_str()).send().await?;
 
-	if let Some(remote_addr) = response.remote_addr()
-		&& !self
-			.services
-			.client
-			.valid_cidr_range_ip(remote_addr.ip())
+	// a completed response without a peer address is not a real reqwest
+	// outcome; fail closed rather than skip the screen
+	let Some(remote_addr) = response.remote_addr() else {
+		return Err!(Request(Forbidden("Media response has no peer address")));
+	};
+
+	if !self
+		.services
+		.client
+		.valid_cidr_range_ip(remote_addr.ip())
 	{
 		return Err!(Request(Forbidden("Requesting from this address is forbidden")));
 	}
@@ -300,7 +308,6 @@ pub(super) async fn location_request(
 		.map(TryFrom::try_from)
 		.and_then(Result::ok);
 
-	let limit = self.services.server.config.max_response_size;
 	let content = read_response_capped(response, limit).await?;
 
 	Ok(Media {
