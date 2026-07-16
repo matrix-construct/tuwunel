@@ -95,7 +95,7 @@ async fn test_event_sort() {
 }
 
 #[tokio::test]
-async fn test_sort() {
+async fn sort() {
 	for _ in 0..20 {
 		// since we shuffle the eventIds before we sort them introducing randomness
 		// seems like we should test this a few times
@@ -439,7 +439,7 @@ async fn topic_setting() {
 }
 
 #[tokio::test]
-async fn test_event_map_none() {
+async fn event_map_none() {
 	_ = tracing::subscriber::set_default(
 		tracing_subscriber::fmt()
 			.with_test_writer()
@@ -485,7 +485,7 @@ async fn test_event_map_none() {
 	clippy::iter_on_single_items,
 	clippy::iter_on_empty_collections
 )]
-async fn test_reverse_topological_power_sort() {
+async fn reverse_topological_power_sort() {
 	_ = tracing::subscriber::set_default(
 		tracing_subscriber::fmt()
 			.with_test_writer()

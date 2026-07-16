@@ -21,7 +21,7 @@ macro_rules! unhandled {
 #[macro_export]
 macro_rules! unhandled {
 	($msg:literal) => {
-		$crate::maybe_unhandled!($msg);
+		$crate::maybe_unhandled!($msg)
 	};
 }
 

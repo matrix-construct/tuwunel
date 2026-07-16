@@ -63,7 +63,7 @@ async fn roundtrip(services: &Arc<Services>) -> Result {
 	provider.put_one(&path, payload.clone()).await?;
 
 	let got = provider.get(&path).await?;
-	let _: Result = provider.delete_one(&path).await;
+	provider.delete_one(&path).await.ok();
 
 	if got.as_ref() != payload.as_slice() {
 		return Err!("downloaded bytes did not match uploaded");

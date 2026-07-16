@@ -295,11 +295,8 @@ async fn remote_leave(
 							.filter_map(|event| event.get_field("sender").ok().flatten())
 							.filter_map(|sender: &str| UserId::parse(sender).ok())
 							.filter_map(|sender| {
-								if !self.services.globals.user_is_local(&sender) {
-									Some(sender.server_name().to_owned())
-								} else {
-									None
-								}
+								(!self.services.globals.user_is_local(&sender))
+									.then(|| sender.server_name().to_owned())
 							}),
 					);
 				},

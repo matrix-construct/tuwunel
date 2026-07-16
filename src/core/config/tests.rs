@@ -309,7 +309,7 @@ fn pgp_key_rejects_raw_material_and_bare_fingerprints() {
 #[test]
 fn default_power_level_content_override_accepts_a_table() {
 	let config = config_from_toml(
-		r"[global]
+		"[global]
 [global.default_power_level_content_override]
 users_default = 50
 ",
@@ -323,7 +323,7 @@ users_default = 50
 #[test]
 fn default_power_level_content_override_rejects_a_non_table() {
 	let config = config_from_toml(
-		r"[global]
+		"[global]
 default_power_level_content_override = false
 ",
 	)
