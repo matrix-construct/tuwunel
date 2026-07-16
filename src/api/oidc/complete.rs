@@ -62,7 +62,13 @@ pub(crate) async fn complete_route(
 			url
 		})?;
 
-	Ok(if needs_interstitial(&redirect_url) {
+	let native = redirect_url.scheme() == "https"
+		&& oidc
+			.get_client(&auth_req.client_id)
+			.await
+			.is_ok_and(|client| client.application_type.as_deref() == Some("native"));
+
+	Ok(if needs_interstitial(&redirect_url, native) {
 		account_html_response(StatusCode::OK, complete_continue_html(redirect_url.as_str()))
 	} else {
 		Redirect::temporary(redirect_url.as_str()).into_response()
@@ -70,12 +76,16 @@ pub(crate) async fn complete_route(
 }
 
 /// Whether the auth code is handed back via a "Continue" interstitial (a user
-/// gesture) rather than a direct redirect. True only for private-use
-/// reverse-DNS app schemes (RFC 8252, e.g. `io.element.android`), which Chrome
-/// will not auto-follow. http(s) and any bare scheme redirect directly, so a
-/// dangerous `javascript:`/`data:` target stays an inert `Location`, never a
-/// clickable link.
-fn needs_interstitial(redirect_url: &Url) -> bool { redirect_url.scheme().contains('.') }
+/// gesture) rather than a direct redirect. True for private-use reverse-DNS app
+/// schemes (RFC 8252, e.g. `io.element.android`), which Chrome will not
+/// auto-follow, and for a native client's `https` universal link, which iOS
+/// opens into the app only on a user navigation, not a silent 3xx. Web `https`
+/// and native `http` loopback redirect directly; a `javascript:` or `data:`
+/// target is neither dotted nor `https`, so it stays an inert `Location`, never
+/// a clickable link.
+fn needs_interstitial(redirect_url: &Url, native: bool) -> bool {
+	redirect_url.scheme().contains('.') || (native && redirect_url.scheme() == "https")
+}
 
 fn complete_continue_html(redirect_url: &str) -> String {
 	let href = html_escape(redirect_url);
@@ -105,17 +115,21 @@ mod tests {
 	use super::{complete_continue_html, needs_interstitial};
 
 	#[test]
-	fn interstitial_only_for_reverse_dns_schemes() {
-		let needs = |u: &str| needs_interstitial(&Url::parse(u).unwrap());
+	fn interstitial_for_native_or_reverse_dns() {
+		let needs = |u: &str, native: bool| needs_interstitial(&Url::parse(u).unwrap(), native);
 
-		// Private-use reverse-DNS app scheme (RFC 8252): interstitial.
-		assert!(needs("io.element.android:/?code=a&state=b"));
-		// Web and loopback: direct redirect, unchanged.
-		assert!(!needs("https://app.example.com/cb?code=a"));
-		assert!(!needs("http://127.0.0.1/cb?code=a"));
-		// Dangerous bare schemes must not become a clickable link.
-		assert!(!needs("javascript:alert(1)"));
-		assert!(!needs("data:text/html,x"));
+		// Reverse-DNS app scheme (Android): interstitial regardless of client type.
+		assert!(needs("io.element.android:/?code=a&state=b", true));
+		assert!(needs("io.element.android:/?code=a&state=b", false));
+		// Native https universal link (Element X iOS): now interstitial.
+		assert!(needs("https://element.io/oauth/ios/io.element.elementx?code=a", true));
+		// Web https client (Element Web): direct redirect, no friction.
+		assert!(!needs("https://app.example.com/cb?code=a", false));
+		// Native http loopback (desktop local server): direct redirect.
+		assert!(!needs("http://127.0.0.1/cb?code=a", true));
+		// Dangerous bare schemes never become a clickable link, even when native.
+		assert!(!needs("javascript:alert(1)", true));
+		assert!(!needs("data:text/html,x", true));
 	}
 
 	#[test]
