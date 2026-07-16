@@ -199,14 +199,14 @@
 #
 # reloadable: yes
 #
-#spacehierarchy_cache_ttl_min = 21600
+#spacehierarchy_cache_ttl_min = 10800
 
 # Maximum time-to-live in seconds for room summary entries in the spaces
 # cache.
 #
 # reloadable: yes
 #
-#spacehierarchy_cache_ttl_max = 129600
+#spacehierarchy_cache_ttl_max = 64800
 
 # Minimum timeout a client can request for long-polling sync. Requests
 # will be clamped up to this value if smaller.
@@ -395,7 +395,7 @@
 # This item is undocumented. Please contribute documentation for it.
 # reloadable: yes
 #
-#max_fetch_prev_events = 192
+#max_fetch_prev_events = 1024
 
 # Maximum time, in milliseconds, to wait for the missing prev_events of an
 # incoming timeline event to arrive on their own before fetching them over
@@ -478,11 +478,11 @@
 #
 #well_known_timeout = 10
 
-# Federation client request timeout (seconds). You most definitely want
-# this to be high to account for extremely large room joins, slow
-# homeservers, your own resources etc.
+# Federation client request timeout (seconds). This applies to each read
+# from the remote server rather than to the request as a whole, which
+# remains bounded by `request_total_timeout`.
 #
-#federation_timeout = 300
+#federation_timeout = 25
 
 # Timeout (seconds) for client-initiated federation key lookups, namely
 # /keys/query and /keys/claim against remote servers. Should be well
@@ -556,7 +556,7 @@
 #
 # reloadable: yes
 #
-#client_shutdown_timeout = 10
+#client_shutdown_timeout = 15
 
 # Source of the client IP address for rate limiting, logging, and
 # security tooling.

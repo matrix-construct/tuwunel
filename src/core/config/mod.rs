@@ -279,7 +279,7 @@ pub struct Config {
 	/// cache.
 	///
 	/// reloadable: yes
-	/// default: 21600
+	/// default: 10800
 	#[serde(default = "default_spacehierarchy_cache_ttl_min")]
 	pub spacehierarchy_cache_ttl_min: u64,
 
@@ -287,7 +287,7 @@ pub struct Config {
 	/// cache.
 	///
 	/// reloadable: yes
-	/// default: 129600
+	/// default: 64800
 	#[serde(default = "default_spacehierarchy_cache_ttl_max")]
 	pub spacehierarchy_cache_ttl_max: u64,
 
@@ -509,7 +509,7 @@ pub struct Config {
 	pub media_rc_create_burst_count: u32,
 
 	/// reloadable: yes
-	/// default: 192
+	/// default: 1024
 	#[serde(default = "default_max_fetch_prev_events")]
 	pub max_fetch_prev_events: u16,
 
@@ -615,11 +615,11 @@ pub struct Config {
 	#[serde(default = "default_well_known_timeout")]
 	pub well_known_timeout: u64,
 
-	/// Federation client request timeout (seconds). You most definitely want
-	/// this to be high to account for extremely large room joins, slow
-	/// homeservers, your own resources etc.
+	/// Federation client request timeout (seconds). This applies to each read
+	/// from the remote server rather than to the request as a whole, which
+	/// remains bounded by `request_total_timeout`.
 	///
-	/// default: 300
+	/// default: 25
 	#[serde(default = "default_federation_timeout")]
 	pub federation_timeout: u64,
 
@@ -719,7 +719,7 @@ pub struct Config {
 	/// Grace period for clean shutdown of client requests (seconds).
 	///
 	/// reloadable: yes
-	/// default: 10
+	/// default: 15
 	#[serde(default = "default_client_shutdown_timeout")]
 	pub client_shutdown_timeout: u64,
 
