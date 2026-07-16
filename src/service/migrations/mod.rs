@@ -166,6 +166,7 @@ async fn fresh(services: &Services) -> Result {
 	db["global"].insert(b"rebuild_relatesto_typed", []);
 	db["global"].insert(b"migrate_profile_keys_to_useridprofilekey", []);
 	db["global"].insert(b"rebuild_thread_activity", []);
+	db["global"].insert(b"clear_servername_status", []);
 
 	// Create the admin room and server user on first run
 	if services.config.create_admin_room {
@@ -317,6 +318,14 @@ async fn migrate(services: &Services, foreign_lineage: bool) -> Result {
 		services.threads.rebuild_thread_activity().await?;
 
 		db["global"].insert(b"rebuild_thread_activity", []);
+	}
+
+	if db["global"]
+		.get(b"clear_servername_status")
+		.await
+		.is_not_found()
+	{
+		clear_servername_status(services).await?;
 	}
 
 	// Non-destructive and idempotent, so it runs every boot rather than once: a
@@ -958,5 +967,17 @@ async fn migrate_profile_keys(services: &Services) -> Result {
 	info!(%displaynames, %avatar_urls, %blurhashes, %fixed_strings, "Relocated profile keys into useridprofilekey_value");
 
 	db["global"].insert(b"migrate_profile_keys_to_useridprofilekey", []);
+	db.engine.sort()
+}
+
+/// One-time clear of the ephemeral peer-status reachability rows, so the new
+/// span-based backoff fold does not misread v1.8.1's per-bucket failure rows.
+async fn clear_servername_status(services: &Services) -> Result {
+	let db = &services.db;
+
+	warn!("Clearing federation peer-status reachability rows");
+	db["servername_status"].clear().await;
+
+	db["global"].insert(b"clear_servername_status", []);
 	db.engine.sort()
 }
