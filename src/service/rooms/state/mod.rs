@@ -619,7 +619,7 @@ pub async fn collapse_forward_extremities(
 		return 0;
 	}
 
-	let survivor = join_all(extremities.iter().map(|event_id| async move {
+	let survivor = join_all(extremities.iter().map(async |event_id| {
 		self.services
 			.timeline
 			.get_pdu_count(event_id)

@@ -261,6 +261,9 @@ impl Service {
 	/// Sends an EDU to all appservices interested in a room.
 	/// The `serialized` data must be in `EphemeralData` format, not federation
 	/// `Edu`.
+	// Stream::filter requires FnMut returning a nameable future; an async
+	// closure capturing self does not satisfy it.
+	#[expect(closure_returning_async_block)]
 	#[tracing::instrument(skip(self, serializer), level = "debug")]
 	pub async fn send_edu_room_appservices<'a, F>(
 		&self,
@@ -277,7 +280,7 @@ impl Service {
 			.await
 			.values()
 			.stream()
-			.filter(|&appservice| async {
+			.filter(|&appservice| async move {
 				if !appservice.registration.receive_ephemeral {
 					return false;
 				}

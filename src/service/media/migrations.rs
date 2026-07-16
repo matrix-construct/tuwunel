@@ -113,7 +113,7 @@ async fn handle_media_check(
 
 	let new_exists = files.contains(new_path);
 	let old_exists = files.contains(old_path);
-	let old_is_symlink = || async {
+	let old_is_symlink = async || {
 		tokio::fs::symlink_metadata(old_path)
 			.await
 			.is_ok_and(|md| md.is_symlink())

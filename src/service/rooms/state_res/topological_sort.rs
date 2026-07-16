@@ -162,7 +162,7 @@ where
 	Query: Fn(OwnedEventId) -> Fut + Sync,
 	Fut: Future<Output = Result<TieBreaker>> + Send,
 {
-	try_unfold((heap, graph), move |(mut heap, graph)| async move {
+	try_unfold((heap, graph), async move |(mut heap, graph)| {
 		let Some(Reverse(item)) = heap.pop() else {
 			return Ok(None);
 		};
@@ -173,7 +173,7 @@ where
 			.into_iter()
 			.flatten()
 			.try_stream()
-			.try_fold(state, |(event_id, (mut heap, mut graph)), parent_id| async move {
+			.try_fold(state, async |(event_id, (mut heap, mut graph)), parent_id| {
 				graph
 					.get_mut(&parent_id)
 					.expect("contains all parent_ids")

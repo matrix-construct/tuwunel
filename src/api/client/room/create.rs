@@ -497,7 +497,7 @@ async fn process_invites(
 		.iter()
 		.stream()
 		.filter(|&user_id| invite_allowed(services, sender_user, user_id))
-		.for_each(|user_id| async {
+		.for_each(async |user_id| {
 			if let Err(e) = services
 				.membership
 				.invite(sender_user, user_id, room_id, None, body.is_direct)

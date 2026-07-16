@@ -129,7 +129,7 @@ impl Service {
 				self.db
 					.private_read_threaded_stream(room_id, user_id),
 			)
-			.filter_map(|(kind, count, ts)| async move {
+			.filter_map(async |(kind, count, ts)| {
 				self.build_private_read_event(shortroomid, count, ts, user_id, &kind)
 					.await
 			})

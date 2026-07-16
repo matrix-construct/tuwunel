@@ -454,6 +454,9 @@ async fn move_state_events(&self) -> Result {
 // MSC4168: copy m.space.parent for any room, plus m.space.child when the
 // old room is itself a space, into the upgraded room.
 #[implement(RoomUpgradeContext, params = "<'_>")]
+// try_for_each requires FnMut returning a nameable future; an async closure
+// capturing self does not satisfy it.
+#[expect(closure_returning_async_block)]
 #[tracing::instrument(level = "debug")]
 async fn move_space_state(&self) -> Result {
 	let old_room_is_space = self

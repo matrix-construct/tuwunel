@@ -18,7 +18,7 @@ pub async fn format_pdu_into(
 
 	let query_room_version: OptionFuture<_> = room_id
 		.filter(|_| room_version.is_none())
-		.map(|room_id| async move {
+		.map(async |room_id| {
 			self.services
 				.state
 				.get_room_version(&room_id)
