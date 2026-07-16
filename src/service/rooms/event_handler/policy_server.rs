@@ -32,7 +32,7 @@ use tuwunel_database::{Cbor, Deserialized};
 const UNSTABLE_POLICY_TYPE: &str = "org.matrix.msc4284.policy";
 
 /// Outcome of an inbound policy-server signature check.
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 pub enum PolicyCheck {
 	/// No policy server is configured for this room (or feature is off, or
 	/// the event is the policy state event itself). The caller should not

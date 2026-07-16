@@ -59,12 +59,12 @@ pub struct Cbor<T>(pub T);
 
 /// Directive to force separator serialization specifically for prefix keying
 /// use. This is a quirk of the database schema and prefix iterations.
-#[derive(Debug, Serialize)]
+#[derive(Clone, Copy, Debug, Serialize)]
 pub struct Interfix;
 
 /// Directive to force separator serialization. Separators are usually
 /// serialized automatically.
-#[derive(Debug, Serialize)]
+#[derive(Clone, Copy, Debug, Serialize)]
 pub struct Separator;
 
 /// Record separator; an intentionally invalid-utf8 byte.

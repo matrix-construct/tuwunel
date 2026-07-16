@@ -16,7 +16,7 @@ pub(super) struct Data {
 }
 
 /// Metadata of a registration token.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct DatabaseTokenInfo {
 	/// The number of times this token has been used to create an account.
 	pub uses: u64,
@@ -59,7 +59,7 @@ impl std::fmt::Display for DatabaseTokenInfo {
 	}
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct TokenExpires {
 	pub max_uses: Option<u64>,
 	pub max_age: Option<SystemTime>,

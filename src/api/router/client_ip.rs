@@ -31,7 +31,7 @@ pub(crate) struct ClientIp(pub(crate) IpAddr);
 
 /// Marker wrapper around [`IpSource`] placed into request extensions
 /// only when an operator has explicitly configured `ip_source`.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct ConfiguredIpSource(pub IpSource);
 
 /// Operator-configured subnets whose TCP peers bypass the secure
@@ -438,7 +438,7 @@ mod tests {
 		listed
 			.extensions
 			.insert(ConnectInfo(SocketAddr::from(([10, 0, 0, 5], 38000))));
-		listed.extensions.insert(configured.clone());
+		listed.extensions.insert(configured);
 		listed
 			.extensions
 			.insert(trusted(&["10.0.0.5/32"]));

@@ -49,6 +49,7 @@ pub fn uevent_find<'a>(uevent: &'a str, key: &'a str) -> Option<&'a str> {
 }
 
 #[cfg(unix)]
+#[derive(Clone, Copy, Debug)]
 pub enum SocketFamily {
 	Inet,
 	Unix,

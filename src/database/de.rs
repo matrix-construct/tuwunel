@@ -40,12 +40,12 @@ pub(crate) struct Deserializer<'de> {
 
 /// Directive to ignore a record. This type can be used to skip deserialization
 /// until the next separator is found.
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Copy, Debug, Deserialize)]
 pub struct Ignore;
 
 /// Directive to ignore all remaining records. This can be used in a sequence to
 /// ignore the rest of the sequence.
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Copy, Debug, Deserialize)]
 pub struct IgnoreAll;
 
 impl<'de> Deserializer<'de> {

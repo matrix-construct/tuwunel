@@ -35,7 +35,7 @@ impl PartialEq<str> for ValidToken {
 }
 
 /// The source of a valid database token.
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 pub enum ValidTokenSource {
 	/// The static token set in the homeserver's config file, which is
 	/// always valid.
