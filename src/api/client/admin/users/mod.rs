@@ -8,9 +8,12 @@ mod get_details;
 mod is_user_admin;
 mod list_joined_rooms;
 mod list_users;
+mod login_as;
 mod lookup_threepid;
 mod memberships;
 mod pushers;
+mod redact;
+mod redact_status;
 mod reset_password;
 mod suspend;
 mod username_available;
@@ -30,14 +33,21 @@ pub(crate) use self::{
 	is_user_admin::admin_is_user_admin_route,
 	list_joined_rooms::admin_list_joined_rooms_route,
 	list_users::{admin_list_users_v2_route, admin_list_users_v3_route},
+	login_as::admin_login_as_route,
 	lookup_threepid::admin_lookup_threepid_route,
 	memberships::admin_memberships_route,
 	pushers::admin_pushers_route,
+	redact::admin_redact_user_route,
+	redact_status::admin_redact_status_route,
 	reset_password::admin_reset_password_route,
 	suspend::admin_suspend_route,
 	username_available::admin_username_available_route,
 	whois::admin_whois_route,
 };
+
+/// Action name recorded for the user-redaction task, mirroring Synapse's
+/// `REDACT_ALL_EVENTS_ACTION_NAME`. The redact-status endpoint filters on it.
+const REDACT_USER_ACTION: &str = "redact_all_events";
 
 /// Assembles the Synapse `UserDetails` for a local user from the fields tuwunel
 /// persists. Fields tuwunel never stores (guest, shadow-banned, external IDs,

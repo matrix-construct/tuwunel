@@ -113,6 +113,8 @@ fn register_synapse_admin_users_routes(router: Router<State>, mas_active: bool) 
 		.ruma_route(&client::users::admin_username_available_route)
 		.ruma_route(&client::users::admin_lookup_threepid_route)
 		.ruma_route(&client::users::admin_allow_cross_signing_replacement_route)
+		.ruma_route(&client::users::admin_redact_user_route)
+		.ruma_route(&client::users::admin_redact_status_route)
 		// whois is served at the /_synapse admin path and the client-server admin
 		// aliases where Synapse also mounts it.
 		.route("/_synapse/admin/v1/whois/{user_id}", get(client::users::admin_whois_route))
@@ -134,6 +136,7 @@ fn register_synapse_admin_users_routes(router: Router<State>, mas_active: bool) 
 			.ruma_route(&client::admin_register_route)
 			.ruma_route(&client::users::admin_reset_password_route)
 			.ruma_route(&client::users::admin_is_user_admin_route)
+			.ruma_route(&client::users::admin_login_as_route)
 	}
 }
 

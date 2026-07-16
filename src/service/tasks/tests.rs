@@ -1,13 +1,15 @@
 use std::collections::BTreeMap;
 
-use super::{CAPACITY, RETENTION_MS, Status, Task, TaskId, prune_tasks};
+use super::{CAPACITY, RETENTION_MS, Status, Task, TaskId, matches_nonterminal, prune_tasks};
 
 fn key(s: &str) -> TaskId { TaskId::from(s).expect("id fits") }
 
-fn task(status: Status, timestamp_ms: u64) -> Task {
+fn task(status: Status, timestamp_ms: u64) -> Task { task_for("test", "", status, timestamp_ms) }
+
+fn task_for(action: &'static str, resource_id: &str, status: Status, timestamp_ms: u64) -> Task {
 	Task {
-		action: "test",
-		resource_id: String::new(),
+		action,
+		resource_id: resource_id.to_owned(),
 		status,
 		timestamp_ms,
 		result: None,
@@ -16,12 +18,28 @@ fn task(status: Status, timestamp_ms: u64) -> Task {
 	}
 }
 
+fn matches(action: &'static str, resource_id: &str, status: Status) -> bool {
+	let task = task_for(action, resource_id, status, 0);
+
+	matches_nonterminal(&task, "redact", "@user:example.com")
+}
+
 #[test]
 fn terminal_classification() {
 	assert!(!Status::Scheduled.is_terminal());
 	assert!(!Status::Active.is_terminal());
 	assert!(Status::Complete.is_terminal());
 	assert!(Status::Failed.is_terminal());
+}
+
+#[test]
+fn nonterminal_match_requires_action_resource_and_nonterminal_status() {
+	assert!(!matches("other", "@user:example.com", Status::Scheduled));
+	assert!(!matches("redact", "@other:example.com", Status::Scheduled));
+	assert!(matches("redact", "@user:example.com", Status::Scheduled));
+	assert!(matches("redact", "@user:example.com", Status::Active));
+	assert!(!matches("redact", "@user:example.com", Status::Complete));
+	assert!(!matches("redact", "@user:example.com", Status::Failed));
 }
 
 #[test]
