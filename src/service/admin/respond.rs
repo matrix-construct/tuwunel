@@ -128,7 +128,17 @@ async fn respond(
 				.boxed()
 				.await,
 		| None => {
-			let mut content = self.attach(output).await?;
+			let mut content = self.attach(output).await.unwrap_or_else(|e| {
+				error!(%e, "Failed to attach oversized admin command output");
+				notice(
+					&format!(
+						"Failed to attach command output: \"{e}\"\n\nThe original admin command \
+						 may have finished successfully, but we could not return the output."
+					),
+					markdown,
+				)
+			});
+
 			content.relates_to = Some(mode.relation(None));
 
 			self.respond_to_room(content, room_id, sender)
