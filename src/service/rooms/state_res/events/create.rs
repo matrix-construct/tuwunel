@@ -85,7 +85,7 @@ impl<E: Event> RoomCreateEvent<E> {
 	pub fn creators<'a>(
 		&'a self,
 		rules: &'a AuthorizationRules,
-	) -> Result<impl Iterator<Item = OwnedUserId> + Clone + use<'a, E>> {
+	) -> Result<impl Iterator<Item = OwnedUserId> + Clone> {
 		let initial = self.creator(rules)?.into_owned();
 		let additional = self.additional_creators(rules)?;
 

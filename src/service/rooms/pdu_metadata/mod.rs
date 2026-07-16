@@ -681,10 +681,7 @@ async fn references(&self, parent: &Pdu) -> Vec<OwnedEventId> {
 /// from the typed index, resolving each row value (the child shorteventid) to
 /// an event id with no PDU load.
 #[implement(Service)]
-fn referenced_children<'a>(
-	&'a self,
-	parent_id: PduId,
-) -> impl Stream<Item = OwnedEventId> + Send + 'a {
+fn referenced_children(&self, parent_id: PduId) -> impl Stream<Item = OwnedEventId> + Send + '_ {
 	let prefix = typed_relation_prefix(parent_id.shortroomid, parent_id.count, RelTag::Reference);
 	let seek = prefix.clone();
 

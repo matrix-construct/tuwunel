@@ -24,11 +24,11 @@ use ruma::{
 };
 
 pub trait FedAuth: AuthScheme {
-	fn input<'a>(
+	fn input(
 		origin: OwnedServerName,
 		dest: OwnedServerName,
-		keypair: &'a Ed25519KeyPair,
-	) -> <Self as AuthScheme>::Input<'a>;
+		keypair: &Ed25519KeyPair,
+	) -> <Self as AuthScheme>::Input<'_>;
 }
 
 impl FedAuth for NoAuthentication {
@@ -36,27 +36,23 @@ impl FedAuth for NoAuthentication {
 }
 
 impl FedAuth for NoAccessToken {
-	fn input<'a>(
-		_: OwnedServerName,
-		_: OwnedServerName,
-		_: &'a Ed25519KeyPair,
-	) -> SendAccessToken<'a> {
+	fn input(_: OwnedServerName, _: OwnedServerName, _: &Ed25519KeyPair) -> SendAccessToken<'_> {
 		SendAccessToken::None
 	}
 }
 
 impl FedAuth for ServerSignatures {
-	fn input<'a>(
+	fn input(
 		origin: OwnedServerName,
 		dest: OwnedServerName,
-		keypair: &'a Ed25519KeyPair,
-	) -> ServerSignaturesInput<'a> {
+		keypair: &Ed25519KeyPair,
+	) -> ServerSignaturesInput<'_> {
 		ServerSignaturesInput::new(origin, dest, keypair)
 	}
 }
 
 pub trait FedPath: PathBuilder {
-	fn input<'a>(supported: &'a SupportedVersions) -> <Self as PathBuilder>::Input<'a>;
+	fn input(supported: &SupportedVersions) -> <Self as PathBuilder>::Input<'_>;
 }
 
 impl FedPath for SinglePath {
@@ -64,7 +60,7 @@ impl FedPath for SinglePath {
 }
 
 impl FedPath for VersionHistory {
-	fn input<'a>(supported: &'a SupportedVersions) -> Cow<'a, SupportedVersions> {
+	fn input(supported: &SupportedVersions) -> Cow<'_, SupportedVersions> {
 		Cow::Borrowed(supported)
 	}
 }
