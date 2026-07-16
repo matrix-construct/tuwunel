@@ -192,6 +192,16 @@ async fn redact_one(
 	event_id: &EventId,
 	args: &RedactArgs,
 ) -> Result<()> {
+	if !services
+		.state_accessor
+		.user_can_redact(event_id, &args.redact_as, room_id, false)
+		.await?
+	{
+		return Err!(Request(Forbidden(
+			"The redactor lacks the redaction power level in this room."
+		)));
+	}
+
 	let state_lock = services.state.mutex.lock(room_id).await;
 
 	services
