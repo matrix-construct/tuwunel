@@ -243,6 +243,15 @@ impl Service {
 	/// Deletes a file in the database and from the media directory via an MXC
 	#[tracing::instrument(level = "trace", skip(self))]
 	pub async fn delete(&self, mxc: &Mxc<'_>) -> Result {
+		// lazy URL-preview media has no file keys of its own; drop its reference
+		// and staged bytes whenever present so a delete can't re-mint the media
+		let had_lazy = self.db.search_lazy_media(mxc).await.is_ok();
+		if had_lazy {
+			let key = mxc.to_string();
+			self.db.remove_lazy_media(&key);
+			self.db.remove_lazy_content(&key);
+		}
+
 		match self.db.search_mxc_metadata_prefix(mxc).await {
 			| Ok(keys) => {
 				for key in keys {
@@ -259,21 +268,10 @@ impl Service {
 
 				Ok(())
 			},
-			| _ => {
-				// lazy URL-preview media has no file keys; drop the reference
-				// and any staged bytes so a delete cannot resurrect the media
-				if self.db.search_lazy_media(mxc).await.is_ok() {
-					let key = mxc.to_string();
-					self.db.remove_lazy_media(&key);
-					self.db.remove_lazy_content(&key);
-
-					return Ok(());
-				}
-
-				Err!(Database(error!(
-					"Failed to find any media keys for MXC {mxc} in our database."
-				)))
-			},
+			| _ if had_lazy => Ok(()),
+			| _ => Err!(Database(error!(
+				"Failed to find any media keys for MXC {mxc} in our database."
+			))),
 		}
 	}
 
@@ -458,14 +456,22 @@ impl Service {
 
 		// promote through the ordinary upload path so real file metadata makes
 		// every later download and thumbnail a normal-media hit
-		self.create(
-			mxc,
-			None,
-			media.content_disposition.as_ref(),
-			media.content_type.as_deref(),
-			&media.content,
-		)
-		.await?;
+		if let Err(e) = self
+			.create(
+				mxc,
+				None,
+				media.content_disposition.as_ref(),
+				media.content_type.as_deref(),
+				&media.content,
+			)
+			.await
+		{
+			// a failed promotion leaves metadata without bytes, masking the lazy
+			// fallback on every later read; drop it so the next read retries
+			self.db.delete_file_mxc(mxc).await;
+
+			return Err(e);
+		}
 
 		self.db.remove_lazy_media(&key);
 		self.db.remove_lazy_content(&key);
