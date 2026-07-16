@@ -14,7 +14,10 @@ use std::{
 };
 
 use jevmalloc as jemalloc;
-use jevmalloc::{ctl as mallctl, ffi};
+use jevmalloc::{
+	ctl as mallctl, ffi,
+	hook::{ALLOC, ALLOC_ZEROED},
+};
 
 use crate::{
 	Result,
@@ -71,10 +74,10 @@ static TRACE_GLOBAL_ALLOCS: AtomicBool = AtomicBool::new(false);
 fn _static_initialization() {
 	// SAFETY: Mutable static globals in jemalloc crate; must be initialized
 	// properly and uniquely.
-	unsafe {
-		jemalloc::hook::ALLOC = Some(global_alloc_hook);
-		jemalloc::hook::ALLOC_ZEROED = Some(global_alloc_zeroed_hook);
-	};
+	unsafe { ALLOC = Some(global_alloc_hook) };
+
+	// SAFETY: As above.
+	unsafe { ALLOC_ZEROED = Some(global_alloc_zeroed_hook) };
 }
 
 #[must_use]
