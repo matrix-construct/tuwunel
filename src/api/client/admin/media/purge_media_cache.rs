@@ -30,8 +30,7 @@ pub(crate) async fn admin_purge_media_cache_route(
 	let deleted = services
 		.media
 		.delete_range(cutoff, true, false, false)
-		.await
-		.unwrap_or(0);
+		.await?;
 
 	let deleted = UInt::try_from(deleted).unwrap_or(UInt::MAX);
 
