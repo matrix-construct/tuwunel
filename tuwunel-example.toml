@@ -789,7 +789,7 @@
 #
 # reloadable: yes
 #
-#resolve_state_locally_shadow = false
+#resolve_state_locally_shadow = true
 
 # Soft cap on the number of forward extremities tracked per room. When
 # applying an incoming federation event would leave the room's frontier

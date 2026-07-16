@@ -970,7 +970,7 @@ pub struct Config {
 	/// it. No effect unless resolve_state_locally is enabled.
 	///
 	/// reloadable: yes
-	#[serde(default)]
+	#[serde(default = "true_fn")]
 	pub resolve_state_locally_shadow: bool,
 
 	/// Soft cap on the number of forward extremities tracked per room. When
