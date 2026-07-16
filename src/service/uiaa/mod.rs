@@ -220,7 +220,6 @@ pub async fn try_auth(
 }
 
 #[implement(Service)]
-#[allow(clippy::useless_let_if_seq)]
 async fn verify_password(
 	&self,
 	user_id: &UserId,

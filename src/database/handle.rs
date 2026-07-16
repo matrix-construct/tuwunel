@@ -15,6 +15,8 @@ impl<'a> From<DBPinnableSlice<'a>> for Handle<'a> {
 }
 
 impl Debug for Handle<'_> {
+	// The pinned slice's address is the informative content here.
+	#[expect(clippy::pointer_format)]
 	fn fmt(&self, out: &mut fmt::Formatter<'_>) -> fmt::Result {
 		let val: &Slice = self;
 		let ptr = val.as_ptr();

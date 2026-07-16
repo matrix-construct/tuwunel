@@ -720,7 +720,7 @@ pub fn mark_oidc_device(&self, user_id: &UserId, device_id: &DeviceId, idp_id: &
 
 /// Allow cross-signing key replacement without UIAA for the next 10 minutes.
 /// Returns the expiry timestamp in milliseconds.
-#[allow(clippy::must_use_candidate)]
+#[expect(clippy::must_use_candidate)]
 #[implement(super::Service)]
 pub fn allow_cross_signing_replacement(&self, user_id: &UserId) -> SystemTime {
 	let duration = Duration::from_mins(10);

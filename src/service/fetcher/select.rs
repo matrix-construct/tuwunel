@@ -178,7 +178,7 @@ async fn route_by_popularity<'a>(
 /// aggregation. Retained (unused) as the distinctness-favoring alternative
 /// to `route_by_popularity` for a future per-round re-sampling escalation.
 #[implement(RoomCandidates)]
-#[allow(dead_code)]
+#[expect(dead_code)]
 async fn route_uniformly<'a>(
 	&'a self,
 	room_id: &'a RoomId,

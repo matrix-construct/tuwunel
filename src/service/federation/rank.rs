@@ -29,7 +29,6 @@ pub enum WhenAllBackedOff {
 	Attempt,
 
 	/// Drop them; the pool collapses to empty.
-	#[allow(unused)]
 	Fail,
 }
 

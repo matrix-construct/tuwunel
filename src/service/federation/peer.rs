@@ -81,7 +81,6 @@ pub enum ShouldAttempt {
 
 	/// Eligible but should be sorted to the back of any candidate list
 	/// rather than skipped outright.
-	#[allow(dead_code)]
 	Deprioritize,
 }
 

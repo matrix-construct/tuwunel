@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use axum::extract::State;
-#[allow(deprecated)]
+#[expect(deprecated)]
 use ruma::api::client::discovery::get_capabilities::v3::{
 	SetAvatarUrlCapability, SetDisplayNameCapability,
 };
@@ -25,7 +25,7 @@ use crate::Ruma;
 ///
 /// Get information on the supported feature set and other relevant capabilities
 /// of this server.
-#[allow(deprecated)]
+#[expect(deprecated)]
 pub(crate) async fn get_capabilities_route(
 	State(services): State<crate::State>,
 	body: Ruma<get_capabilities::v3::Request>,

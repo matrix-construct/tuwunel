@@ -248,7 +248,6 @@ fn pop(mut self) -> Option<(Self, OwnedEventId)> {
 }
 
 #[implement(Local)]
-#[allow(clippy::redundant_clone)] // buggy, nursery
 fn new((id, conflicted_event_id): (usize, OwnedEventId)) -> Self {
 	Self {
 		id,

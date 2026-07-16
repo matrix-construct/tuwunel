@@ -47,7 +47,6 @@ pub(super) fn example_generator(input: ItemStruct, args: &[Meta]) -> Result<Toke
 		.into())
 }
 
-#[allow(clippy::needless_pass_by_value)]
 fn generate_example(input: &ItemStruct, args: &[Meta], emit: bool) -> Result<TokenStream2> {
 	let settings = get_simple_settings(args);
 
