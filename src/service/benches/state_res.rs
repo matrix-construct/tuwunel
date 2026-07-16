@@ -251,32 +251,27 @@ impl<E: Event> TestStore<E> {
 		room_id: &RoomId,
 		event_ids: Vec<Vec<OwnedEventId>>,
 	) -> Result<Vec<OwnedEventId>> {
-		let mut auth_chain_sets = vec![];
-		for ids in event_ids {
-			// TODO state store `auth_event_ids` returns self in the event ids list
-			// when an event returns `auth_event_ids` self is not contained
-			let chain = self
-				.auth_event_ids(room_id, ids)?
-				.into_iter()
-				.collect::<AuthSet<_>>();
+		let auth_chain_sets: Vec<_> = event_ids
+			.into_iter()
+			.map(|ids| self.auth_event_ids(room_id, ids))
+			.collect::<Result<_>>()?;
 
-			auth_chain_sets.push(chain);
-		}
+		let Some(first) = auth_chain_sets.first().cloned() else {
+			return Ok(Vec::new());
+		};
 
-		if let Some(first) = auth_chain_sets.first().cloned() {
-			let common = auth_chain_sets
-				.iter()
-				.skip(1)
-				.fold(first, |a, b| a.intersection(b).cloned().collect::<AuthSet<_>>());
+		let common = auth_chain_sets
+			.iter()
+			.skip(1)
+			.fold(first, |a, b| a.intersection(b).cloned().collect::<AuthSet<_>>());
 
-			Ok(auth_chain_sets
-				.into_iter()
-				.flatten()
-				.filter(|id| !common.contains(id))
-				.collect())
-		} else {
-			Ok(vec![])
-		}
+		let difference = auth_chain_sets
+			.into_iter()
+			.flatten()
+			.filter(|id| !common.contains(id))
+			.collect();
+
+		Ok(difference)
 	}
 }
 

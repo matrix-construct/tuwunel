@@ -144,17 +144,15 @@ impl<E: Event> RoomPowerLevelsEvent<E> {
 		user_id: &UserId,
 		rules: &AuthorizationRules,
 	) -> Result<UserPowerLevel> {
-		let power_level = if let Some(power_level) = self
-			.users(rules)?
+		self.users(rules)?
 			.as_ref()
 			.and_then(|users| get_value(users, user_id))
-		{
-			Ok(*power_level)
-		} else {
-			self.get_as_int_or_default(RoomPowerLevelsIntField::UsersDefault, rules)
-		};
-
-		power_level.map(Into::into)
+			.copied()
+			.map_or_else(
+				|| self.get_as_int_or_default(RoomPowerLevelsIntField::UsersDefault, rules),
+				Ok,
+			)
+			.map(Into::into)
 	}
 
 	/// Get the power level required to send an event of the given type.
@@ -263,11 +261,10 @@ where
 		field: RoomPowerLevelsIntField,
 		rules: &AuthorizationRules,
 	) -> Result<Int> {
-		if let Some(room_power_levels_event) = self {
-			room_power_levels_event.get_as_int_or_default(field, rules)
-		} else {
-			Ok(field.default_value())
-		}
+		self.as_ref().map_or_else(
+			|| Ok(field.default_value()),
+			|room_power_levels_event| room_power_levels_event.get_as_int_or_default(field, rules),
+		)
 	}
 
 	fn event_power_level(
@@ -276,17 +273,19 @@ where
 		state_key: Option<&str>,
 		rules: &AuthorizationRules,
 	) -> Result<Int> {
-		if let Some(room_power_levels_event) = self {
-			room_power_levels_event.event_power_level(event_type, state_key, rules)
-		} else {
-			let default_field = if state_key.is_some() {
-				RoomPowerLevelsIntField::StateDefault
-			} else {
-				RoomPowerLevelsIntField::EventsDefault
-			};
+		self.as_ref().map_or_else(
+			|| {
+				let default_field = state_key
+					.is_some()
+					.then_some(RoomPowerLevelsIntField::StateDefault)
+					.unwrap_or(RoomPowerLevelsIntField::EventsDefault);
 
-			Ok(default_field.default_value())
-		}
+				Ok(default_field.default_value())
+			},
+			|room_power_levels_event| {
+				room_power_levels_event.event_power_level(event_type, state_key, rules)
+			},
+		)
 	}
 }
 

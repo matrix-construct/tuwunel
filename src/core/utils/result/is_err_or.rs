@@ -12,6 +12,6 @@ impl<T, E> IsErrOr<T> for Result<T, E> {
 	where
 		F: FnOnce(T) -> bool,
 	{
-		if let Ok(t) = self { f(t) } else { true }
+		self.map_or(true, f)
 	}
 }

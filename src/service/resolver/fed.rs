@@ -23,13 +23,15 @@ pub(super) type PortString = ArrayString<16>;
 const DEFAULT_PORT: &str = ":8448";
 
 pub(crate) fn get_ip_with_port(dest_str: &str) -> Option<FedDest> {
-	if let Ok(dest) = dest_str.parse::<SocketAddr>() {
-		Some(FedDest::Literal(dest))
-	} else if let Ok(ip_addr) = dest_str.parse::<IpAddr>() {
-		Some(FedDest::Literal(SocketAddr::new(ip_addr, 8448)))
-	} else {
-		None
-	}
+	dest_str
+		.parse()
+		.map(FedDest::Literal)
+		.or_else(|_| {
+			dest_str
+				.parse()
+				.map(|ip_addr: IpAddr| FedDest::Literal(SocketAddr::new(ip_addr, 8448)))
+		})
+		.ok()
 }
 
 pub(crate) fn add_port_to_hostname(dest: &str) -> FedDest {

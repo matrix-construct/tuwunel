@@ -1,7 +1,4 @@
-use std::{
-	fmt::Debug,
-	net::{IpAddr, SocketAddr},
-};
+use std::{fmt::Debug, net::IpAddr};
 
 use futures::{FutureExt, TryFutureExt};
 use hickory_resolver::{
@@ -93,22 +90,29 @@ impl super::Service {
 				},
 		};
 
-		// Can't use get_ip_with_port here because we don't want to add a port
-		// to an IP address if it wasn't specified
-		let host = if let Ok(addr) = host.parse::<SocketAddr>() {
-			FedDest::Literal(addr)
-		} else if let Ok(addr) = host.parse::<IpAddr>() {
-			FedDest::Named(addr.to_string().into(), FedDest::default_port())
-		} else if let Some(pos) = host.find(':') {
-			let (host, port) = host.split_at(pos);
-			FedDest::Named(
-				host.into(),
-				port.try_into()
-					.unwrap_or_else(|_| FedDest::default_port()),
-			)
-		} else {
-			FedDest::Named(host.as_str().into(), FedDest::default_port())
-		};
+		// Preserve an unspecified port on an IP address.
+		let host = host
+			.parse()
+			.map(FedDest::Literal)
+			.or_else(|_| {
+				host.parse().map(|addr: IpAddr| {
+					FedDest::Named(addr.to_string().into(), FedDest::default_port())
+				})
+			})
+			.unwrap_or_else(|_| {
+				host.find(':').map_or_else(
+					|| FedDest::Named(host.as_str().into(), FedDest::default_port()),
+					|pos| {
+						let (host, port) = host.split_at(pos);
+
+						FedDest::Named(
+							host.into(),
+							port.try_into()
+								.unwrap_or_else(|_| FedDest::default_port()),
+						)
+					},
+				)
+			});
 
 		debug!("Actual destination: {actual_dest:?} hostname: {host:?}");
 		Ok(CachedDest {

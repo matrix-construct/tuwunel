@@ -75,20 +75,18 @@ pub(super) async fn filter_room(
 
 	let fetch_tags = !filter.tags.is_empty() || !filter.not_tags.is_empty();
 	let match_room_tag = fetch_tags.then_async(async || {
-		if let Some(tags) = services
+		services
 			.account_data
 			.get_room_tags(sender_user, room_id)
 			.await
 			.ok()
 			.filter(|tags| !tags.is_empty())
-		{
-			tags.keys().any(|tag| {
-				(filter.not_tags.is_empty() || !filter.not_tags.contains(tag))
-					|| (!filter.tags.is_empty() && filter.tags.contains(tag))
+			.map_or(filter.tags.is_empty(), |tags| {
+				tags.keys().any(|tag| {
+					(filter.not_tags.is_empty() || !filter.not_tags.contains(tag))
+						|| (!filter.tags.is_empty() && filter.tags.contains(tag))
+				})
 			})
-		} else {
-			filter.tags.is_empty()
-		}
 	});
 
 	let fetch_room_type = !filter.room_types.is_empty() || !filter.not_room_types.is_empty();

@@ -1,6 +1,10 @@
 use axum::extract::State;
 use ruma::{
-	api::client::push::{delete_pushrule, get_pushrule, set_pushrule},
+	api::client::push::{
+		delete_pushrule,
+		get_pushrule::{self, v3::Response},
+		set_pushrule,
+	},
 	push::{InsertPushRuleError, RemovePushRuleError},
 };
 use tuwunel_core::{Err, Result};
@@ -13,7 +17,7 @@ use crate::Ruma;
 pub(crate) async fn get_pushrule_route(
 	State(services): State<crate::State>,
 	body: Ruma<get_pushrule::v3::Request>,
-) -> Result<get_pushrule::v3::Response> {
+) -> Result<Response> {
 	let sender_user = body
 		.sender_user
 		.as_ref()
@@ -25,17 +29,15 @@ pub(crate) async fn get_pushrule_route(
 
 	let event = super::load_push_rules(&services, sender_user).await?;
 
-	let rule = event
+	event
 		.content
 		.global
 		.get(body.kind.clone(), &body.rule_id)
-		.map(Into::into);
-
-	if let Some(rule) = rule {
-		Ok(get_pushrule::v3::Response { rule })
-	} else {
-		Err!(Request(NotFound("Push rule not found.")))
-	}
+		.map(Into::into)
+		.map_or_else(
+			|| Err!(Request(NotFound("Push rule not found."))),
+			|rule| Ok(Response { rule }),
+		)
 }
 
 /// # `PUT /_matrix/client/r0/pushrules/global/{kind}/{ruleId}`

@@ -4,6 +4,7 @@ mod tls;
 mod unix;
 
 use std::{
+	borrow::Cow,
 	net::{SocketAddr, TcpListener},
 	os::unix::net::UnixListener,
 	path::Path,
@@ -137,22 +138,22 @@ fn make_log_addrs(
 
 	let unix_log_addr = unix_path.as_ref().map(|socket_path| {
 		let path = socket_path.to_string_lossy();
+
 		format!("unix:{path}")
 	});
 
 	let passed_tcp_log_addrs = tcp_listeners.iter().map(|listener| {
 		let addr = listener.local_addr()?;
+
 		Ok(format!("passed:tcp:{addr}"))
 	});
 
 	let passed_unix_log_addrs = unix_listeners.iter().map(|listener| {
 		let addr = listener.local_addr()?;
-		let path = addr.as_pathname();
-		let log_path = if let Some(path) = path {
-			&path.to_string_lossy()
-		} else {
-			"?"
-		};
+		let log_path = addr
+			.as_pathname()
+			.map_or(Cow::Borrowed("?"), Path::to_string_lossy);
+
 		Ok(format!("passed:unix:{log_path}"))
 	});
 

@@ -51,16 +51,18 @@ pub fn get_bind_addrs(&self) -> Vec<SocketAddr> {
 
 #[implement(super::Config)]
 fn get_bind_hosts(&self) -> Vec<IpAddr> {
-	if let Some(address) = &self.address {
-		match &address.addrs {
+	self.address.as_ref().map_or_else(
+		|| {
+			self.unix_socket_path
+				.is_none()
+				.then(|| vec![Ipv4Addr::LOCALHOST.into(), Ipv6Addr::LOCALHOST.into()])
+				.unwrap_or_default()
+		},
+		|address| match &address.addrs {
 			| Left(addr) => vec![*addr],
 			| Right(addrs) => addrs.clone(),
-		}
-	} else if self.unix_socket_path.is_some() {
-		vec![]
-	} else {
-		vec![Ipv4Addr::LOCALHOST.into(), Ipv6Addr::LOCALHOST.into()]
-	}
+		},
+	)
 }
 
 #[implement(super::Config)]
