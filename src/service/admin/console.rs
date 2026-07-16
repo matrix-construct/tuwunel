@@ -77,17 +77,21 @@ impl Console {
 	}
 
 	pub fn interrupt_readline(self: &Arc<Self>) {
-		if let Some(input_abort) = self.input_abort.lock().expect("locked").take() {
-			debug!("Interrupting console readline...");
-			input_abort.abort();
-		}
+		let Some(input_abort) = self.input_abort.lock().expect("locked").take() else {
+			return;
+		};
+
+		debug!("Interrupting console readline...");
+		input_abort.abort();
 	}
 
 	pub fn interrupt_command(self: &Arc<Self>) {
-		if let Some(command_abort) = self.command_abort.lock().expect("locked").take() {
-			debug!("Interrupting console command...");
-			command_abort.abort();
-		}
+		let Some(command_abort) = self.command_abort.lock().expect("locked").take() else {
+			return;
+		};
+
+		debug!("Interrupting console command...");
+		command_abort.abort();
 	}
 
 	#[tracing::instrument(skip_all, name = "console", level = "trace")]

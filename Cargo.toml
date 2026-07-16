@@ -968,7 +968,6 @@ nursery = { level = "warn", priority = -1 }
 ## some sadness
 missing_const_for_fn = { level = "allow", priority = 1 }             # TODO
 redundant_pub_crate = { level = "allow", priority = 1 }              # TODO
-significant_drop_in_scrutinee = { level = "allow", priority = 1 }    # TODO
 significant_drop_tightening = { level = "allow", priority = 1 }      # TODO
 tuple_array_conversions = { level = "allow", priority = 1 }
 unused_async_trait_impl = { level = "allow", priority = 1 }          # trait-mandated async (FromRequestParts, #[admin_command])

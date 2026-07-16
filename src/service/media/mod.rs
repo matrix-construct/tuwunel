@@ -209,7 +209,9 @@ impl Service {
 		self.db.remove_pending_mxc(mxc);
 
 		let mxc_uri: OwnedMxcUri = mxc.to_string().into();
-		if let Some(notifier) = self.mxc_state.notifiers.lock()?.remove(&mxc_uri) {
+		let notifier = self.mxc_state.notifiers.lock()?.remove(&mxc_uri);
+
+		if let Some(notifier) = notifier {
 			notifier.notify_waiters();
 		}
 

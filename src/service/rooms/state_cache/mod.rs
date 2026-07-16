@@ -85,14 +85,15 @@ impl crate::Service for Service {
 #[implement(Service)]
 #[tracing::instrument(level = "trace", skip_all)]
 pub async fn appservice_in_room(&self, room_id: &RoomId, appservice: &RegistrationInfo) -> bool {
-	if let Some(cached) = self
+	let cached = self
 		.appservice_in_room_cache
 		.read()
 		.expect("locked")
 		.get(room_id)
 		.and_then(|map| map.get(&appservice.registration.id))
-		.copied()
-	{
+		.copied();
+
+	if let Some(cached) = cached {
 		return cached;
 	}
 

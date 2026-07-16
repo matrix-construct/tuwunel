@@ -63,11 +63,13 @@ impl Manager {
 		),
 	)]
 	pub(super) async fn stop(&self) {
-		if let Some(manager) = self.manager.lock().await.take() {
-			debug!("Waiting for service manager...");
-			if let Err(e) = manager.await {
-				error!("Manager shutdown error: {e:?}");
-			}
+		let Some(manager) = self.manager.lock().await.take() else {
+			return;
+		};
+
+		debug!("Waiting for service manager...");
+		if let Err(e) = manager.await {
+			error!("Manager shutdown error: {e:?}");
 		}
 	}
 
