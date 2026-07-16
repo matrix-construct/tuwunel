@@ -296,11 +296,15 @@ fn builder_interface(builder: ClientBuilder, config: Option<&str>) -> Result<Cli
 fn builder_interface(builder: ClientBuilder, config: Option<&str>) -> Result<ClientBuilder> {
 	use tuwunel_core::Err;
 
-	if let Some(iface) = config {
-		Err!("Binding to network-interface {iface:?} by name is not supported on this platform.")
-	} else {
-		Ok(builder)
-	}
+	config.map_or_else(
+		|| Ok(builder),
+		|iface| {
+			Err!(
+				"Binding to network-interface {iface:?} by name is not supported on this \
+				 platform."
+			)
+		},
+	)
 }
 
 fn appservice_resolver(services: &Services) -> Arc<dyn Resolve> {
