@@ -1,6 +1,7 @@
 stack-size-threshold = 393216
 future-size-threshold = 24576
 array-size-threshold = 4096
+enum-variant-size-threshold = 128           # TODO reduce me ALARA
 large-error-threshold = 256                 # TODO reduce me ALARA
 too-many-lines-threshold = 150              # TODO reduce me to <= 100
 excessive-nesting-threshold = 8

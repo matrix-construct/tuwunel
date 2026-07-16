@@ -921,6 +921,8 @@ unexpected_cfgs = "allow"
 # buggy, but worth checking on occasionally
 unused_crate_dependencies = "allow"
 unsafe_code = "allow"
+# skips niche-encoded enums (nearly all of ours) and compares a ratio rather
+# than a magnitude; clippy::large_enum_variant covers this by size instead.
 variant_size_differences = "allow"
 
 # we check nightly clippy lints
