@@ -879,17 +879,23 @@ opt-level = 'z'
 
 [workspace.lints.rust]
 absolute-paths-not-starting-with-crate = "warn"
+ambiguous-negative-literals = "warn"
+closure-returning-async-block = "warn"
 deprecated-in-future = "warn"
+deref-into-dyn-supertrait = "warn"
 elided-lifetimes-in-paths = "warn"
 explicit-outlives-requirements = "warn"
 ffi-unwind-calls = "warn"
+impl-trait-redundant-captures = "warn"
 keyword-idents = "warn"
 macro-use-extern-crate = "warn"
 meta-variable-misuse = "warn"
 missing-abi = "warn"
-#missing-copy-implementations = "warn"                               # TODO
+missing-copy-implementations = "warn"
 #missing-debug-implementations = "warn"                              # TODO
 non-ascii-idents = "warn"
+redundant-imports = "warn"
+redundant-lifetimes = "warn"
 rust-2021-incompatible-closure-captures = "warn"
 rust-2021-incompatible-or-patterns = "warn"
 rust-2021-prefixes-incompatible-syntax = "warn"
@@ -899,7 +905,7 @@ single-use-lifetimes = "warn"
 trivial-casts = "warn"
 trivial-numeric-casts = "warn"
 unit-bindings = "warn"
-#unnameable-types = "warn"                                           # TODO
+unnameable-types = "warn"
 unreachable-pub = "warn"
 unsafe-op-in-unsafe-fn = "warn"
 unstable-features = "warn"
@@ -913,6 +919,8 @@ unused-qualifications = "warn"
 
 ## some sadness
 mismatched_lifetime_syntaxes = "allow"
+# counts every pub item of test and bench executables as dead code
+dead_code_pub_in_binary = "allow"
 let_underscore_drop = "allow"
 missing_docs = "allow"
 # cfgs cannot be limited to expected cfgs or their de facto non-transitive/opt-in use-case e.g.
@@ -972,10 +980,8 @@ pedantic = { level = "warn", priority = -1 }
 too_long_first_doc_paragraph = { level = "allow", priority = 1 }
 default_trait_access = { level = "allow", priority = 1 }
 doc_markdown = { level = "allow", priority = 1 }
-elidable_lifetime_names = { level = "allow", priority = 1 }
 enum_glob_use = { level = "allow", priority = 1 }
 if_not_else = { level = "allow", priority = 1 }
-if_then_some_else_none = { level = "allow", priority = 1 }
 inline_always = { level = "allow", priority = 1 }
 map_unwrap_or = { level = "allow", priority = 1 }
 match_bool = { level = "allow", priority = 1 }
@@ -983,10 +989,7 @@ missing_docs_in_private_items = { level = "allow", priority = 1 }
 missing_errors_doc = { level = "allow", priority = 1 }
 missing_panics_doc = { level = "allow", priority = 1 }
 module_name_repetitions = { level = "allow", priority = 1 }
-needless_continue = { level = "allow", priority = 1 }
-no_effect_underscore_binding = { level = "allow", priority = 1 }
 similar_names = { level = "allow", priority = 1 }
-single_match_else = { level = "allow", priority = 1 }
 struct_excessive_bools = { level = "allow", priority = 1 }
 struct_field_names = { level = "allow", priority = 1 }
 unnecessary_wraps = { level = "allow", priority = 1 }
@@ -997,16 +1000,21 @@ perf = { level = "warn", priority = -1 }
 ###################
 #restriction = "warn"
 
+allow_attributes = "warn"
 arithmetic_side_effects = "warn"
 as_conversions = "warn"
+as_pointer_underscore = "warn"
 as_underscore = "warn"
 assertions_on_result_states = "warn"
 # moved from nursery to restriction in 1.91, silently dropping out of coverage
 cognitive_complexity = "warn"
+create_dir = "warn"
 dbg_macro = "warn"
 default_union_representation = "warn"
 deref_by_slicing = "warn"
+doc_include_without_cfg = "warn"
 empty_drop = "warn"
+empty_enum_variants_with_brackets = "warn"
 empty_structs_with_brackets = "warn"
 exit = "warn"
 filetype_is_file = "warn"
@@ -1014,18 +1022,37 @@ float_cmp_const = "warn"
 fn_to_numeric_cast_any = "warn"
 format_push_string = "warn"
 get_unwrap = "warn"
+# on-disk record keys are big-endian; a native or little-endian byte
+# projection near the schema is a bug
+host_endian_bytes = "warn"
+if_then_some_else_none = "warn"
 impl_trait_in_params = "warn"
+infinite_loop = "warn"
+large_include_file = "warn"
+let_underscore_must_use = "warn"
 let_underscore_untyped = "warn"
+little_endian_bytes = "warn"
 lossy_float_literal = "warn"
+map_with_unused_argument_over_ranges = "warn"
 mem_forget = "warn"
 missing_assert_message = "warn"
+mixed_read_write_in_expression = "warn"
+multiple_unsafe_ops_per_block = "warn"
 mutex_atomic = "warn"
+mutex_integer = "warn"
+needless_raw_strings = "warn"
+non_zero_suggestions = "warn"
+pathbuf_init_then_push = "warn"
+pointer_format = "warn"
+precedence_bits = "warn"
 pub_without_shorthand = "warn"
 rc_buffer = "warn"
 rc_mutex = "warn"
+redundant_test_prefix = "warn"
 redundant_type_annotations = "warn"
 semicolon_outside_block = "warn"
 str_to_string = "warn"
+string_add = "warn"
 string_lit_chars_any = "warn"
 string_slice = "warn"
 implicit_clone = "warn"
