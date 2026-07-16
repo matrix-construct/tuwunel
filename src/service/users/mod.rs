@@ -25,7 +25,7 @@ use tuwunel_core::{
 };
 use tuwunel_database::{Deserialized, Json, Map};
 
-pub use self::{keys::parse_master_key, register::Register};
+pub use self::{dehydrated_device::DehydratedDevice, keys::parse_master_key, register::Register};
 
 pub const PASSWORD_SENTINEL: &str = "*";
 pub const PASSWORD_DISABLED: &str = "";

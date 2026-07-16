@@ -19,6 +19,7 @@ use serde_json::{Value as JsonValue, value::RawValue as RawJsonValue};
 
 pub use self::{
 	filter::{Matches, trim_event_fields},
+	format::{Owned, Ref},
 	id::*,
 	relation::RelationTypeEqual,
 	state_key::{StateKey, TypeStateKey},
@@ -38,20 +39,20 @@ pub trait Event: Clone + Debug + Send + Sync {
 	#[inline]
 	fn into_format<T>(self) -> T
 	where
-		T: From<format::Owned<Self>>,
+		T: From<Owned<Self>>,
 		Self: Sized,
 	{
-		format::Owned(self).into()
+		Owned(self).into()
 	}
 
 	/// Serialize into a Ruma JSON format
 	#[inline]
 	fn to_format<'a, T>(&'a self) -> T
 	where
-		T: From<format::Ref<'a, Self>>,
+		T: From<Ref<'a, Self>>,
 		Self: Sized + 'a,
 	{
-		format::Ref(self).into()
+		Ref(self).into()
 	}
 
 	#[inline]

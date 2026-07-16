@@ -34,8 +34,8 @@ use tuwunel_core::{
 };
 use url::Url;
 
-use self::data::{Data, Metadata};
-pub use self::thumbnail::Dim;
+use self::data::Data;
+pub use self::{data::Metadata, preview::UrlPreviewData, thumbnail::Dim};
 use crate::storage::Provider;
 
 #[derive(Debug)]

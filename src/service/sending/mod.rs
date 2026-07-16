@@ -28,8 +28,8 @@ use tuwunel_core::{
 	warn,
 };
 
-use self::data::Data;
 pub use self::{
+	data::Data,
 	dest::Destination,
 	sender::{EDU_LIMIT, PDU_LIMIT},
 };

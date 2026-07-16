@@ -7,7 +7,7 @@ pub mod util;
 use std::sync::{Arc, Mutex};
 
 pub use data::Data;
-use guard::Guard;
+pub use guard::Guard;
 pub use layer::{Layer, Value};
 pub use state::State;
 pub use util::*;

@@ -21,7 +21,7 @@ use ruma::{EventId, OwnedRoomId, RoomVersionId, events::AnyStrippedStateEvent, s
 use tuwunel_core::{Result, implement, matrix::PduEvent, utils::MutexMap};
 use tuwunel_database::Map;
 
-pub use self::state_local_build::LocalBuildReport;
+pub use self::{policy_server::PolicyCheck, state_local_build::LocalBuildReport};
 
 pub struct Service {
 	pub mutex_federation: RoomMutexMap,

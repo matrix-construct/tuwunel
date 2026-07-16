@@ -2,7 +2,7 @@ mod data;
 
 use std::{ops::Range, sync::Arc};
 
-use data::Data;
+pub use data::Data;
 use ruma::{OwnedUserId, RoomAliasId, ServerName, UserId};
 use tuwunel_core::{Result, Server, err, error};
 
