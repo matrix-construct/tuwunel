@@ -14,8 +14,8 @@ This page lists every `/_synapse/admin` endpoint Tuwunel is aware of and whether
 ## Counts
 
 - Endpoints (method and path): 100
-  - ✅ supported: 56
-  - 🟨 planned: 14
+  - ✅ supported: 69
+  - 🟨 planned: 1
   - 🟥 not-implemented: 22
   - ⬛ not-applicable: 8
 
@@ -23,12 +23,12 @@ This page lists every `/_synapse/admin` endpoint Tuwunel is aware of and whether
 
 | Domain | ✅ | 🟨 | 🟥 | ⬛ | total |
 |---|---:|---:|---:|---:|---:|
-| Users | 17 | 4 | 8 | 1 | 30 |
+| Users | 20 | 1 | 8 | 1 | 30 |
 | Devices and registration tokens | 12 | 0 | 1 | 6 | 19 |
 | Rooms | 20 | 0 | 0 | 0 | 20 |
-| Media and statistics | 4 | 4 | 10 | 1 | 19 |
-| Federation and miscellaneous | 3 | 6 | 3 | 0 | 12 |
-| **total** | **56** | **14** | **22** | **8** | **100** |
+| Media and statistics | 8 | 0 | 10 | 1 | 19 |
+| Federation and miscellaneous | 9 | 0 | 3 | 0 | 12 |
+| **total** | **69** | **1** | **22** | **8** | **100** |
 
 ## Users
 
@@ -50,11 +50,11 @@ This page lists every `/_synapse/admin` endpoint Tuwunel is aware of and whether
 | GET | `/_synapse/admin/v1/users/{user_id}/accountdata` | ✅ | Return a user's global and per-room account data. |
 | GET | `/_synapse/admin/v1/whois/{user_id}` | ✅ | Return connection and device information for a user. Also served on the client-server admin path. |
 | PUT | `/_synapse/admin/v1/suspend/{user_id}` | ✅ | Suspend or release a user account (MSC4323). |
-| POST | `/_synapse/admin/v1/users/{user_id}/login` | 🟨 | Mint an access token to act as a user (impersonation). |
+| POST | `/_synapse/admin/v1/users/{user_id}/login` | ✅ | Mint an access token to act as a user (impersonation). |
 | POST, DELETE | `/_synapse/admin/v1/users/{user_id}/shadow_ban` | 🟥 | Not implemented; requires new per-user storage (deferred). |
 | GET, POST, DELETE | `/_synapse/admin/v1/users/{user_id}/override_ratelimit` | 🟥 | Not implemented; Tuwunel has no per-user request limiter to override (deferred). |
-| POST | `/_synapse/admin/v1/user/{user_id}/redact` | 🟨 | Redact a user's events across their rooms as a background task. |
-| GET | `/_synapse/admin/v1/user/redact_status/{redact_id}` | 🟨 | Poll the status of a user-redaction task. |
+| POST | `/_synapse/admin/v1/user/{user_id}/redact` | ✅ | Redact a user's events across their rooms as a background task. |
+| GET | `/_synapse/admin/v1/user/redact_status/{redact_id}` | ✅ | Poll the status of a user-redaction task. |
 | GET | `/_synapse/admin/v1/users/{user_id}/sent_invite_count` | 🟥 | Not implemented; no timestamp-indexed invite log to count from (deferred). |
 | GET | `/_synapse/admin/v1/users/{user_id}/cumulative_joined_room_count` | 🟥 | Not implemented; no timestamp-indexed membership log (deferred). |
 | POST | `/_synapse/admin/v1/users/{user_id}/_allow_cross_signing_replacement_without_uia` | ✅ | Allow cross-signing key replacement without interactive auth for a bounded window. |
@@ -109,19 +109,19 @@ This page lists every `/_synapse/admin` endpoint Tuwunel is aware of and whether
 
 | Method | URL | Status | Description |
 |---|---|---|---|
-| GET | `/_synapse/admin/v1/media/{server_name}/{media_id}` | 🟨 | Return metadata for a media item, including quarantine fields. |
+| GET | `/_synapse/admin/v1/media/{server_name}/{media_id}` | ✅ | Return metadata for a media item, including quarantine fields. |
 | DELETE | `/_synapse/admin/v1/media/{server_name}/{media_id}` | ✅ | Delete a local media item. |
 | POST | `/_synapse/admin/v1/media/delete` | ✅ | Delete media by age and size. A legacy per-server alias path is also served. |
-| POST | `/_synapse/admin/v1/purge_media_cache` | 🟨 | Purge cached remote media older than a timestamp. |
+| POST | `/_synapse/admin/v1/purge_media_cache` | ✅ | Purge cached remote media older than a timestamp. |
 | GET | `/_synapse/admin/v1/users/{user_id}/media` | ✅ | List media uploaded by a user. |
 | DELETE | `/_synapse/admin/v1/users/{user_id}/media` | ✅ | Delete media uploaded by a user, one page per call. |
-| GET | `/_synapse/admin/v1/room/{room_id}/media` | 🟨 | List media referenced by a room's unencrypted events. |
+| GET | `/_synapse/admin/v1/room/{room_id}/media` | ✅ | List media referenced by a room's unencrypted events. |
 | POST | `/_synapse/admin/v1/media/quarantine/{server_name}/{media_id}` | 🟥 | Not implemented; requires a media quarantine subsystem. The paired unquarantine path is also unserved (deferred). |
 | POST | `/_synapse/admin/v1/user/{user_id}/media/quarantine` | 🟥 | Not implemented; requires a media quarantine subsystem (deferred). |
 | POST | `/_synapse/admin/v1/room/{room_id}/media/quarantine` | 🟥 | Not implemented; requires a media quarantine subsystem (deferred). |
 | GET | `/_synapse/admin/v1/media/quarantine_changes` | 🟥 | Not implemented; requires a media quarantine subsystem (deferred). |
 | POST | `/_synapse/admin/v1/media/protect/{media_id}` | 🟥 | Not implemented; requires quarantine-protection storage. The paired unprotect path is also unserved (deferred). |
-| GET | `/_synapse/admin/v1/statistics/users/media` | 🟨 | Aggregate per-user media counts and total sizes. |
+| GET | `/_synapse/admin/v1/statistics/users/media` | ✅ | Aggregate per-user media counts and total sizes. |
 | GET | `/_synapse/admin/v1/statistics/database/rooms` | ⬛ | Not applicable; a PostgreSQL-only size estimate even in Synapse. |
 | GET | `/_synapse/admin/v1/event_reports` | 🟥 | Not implemented; requires an event-reports store (deferred). |
 | GET, DELETE | `/_synapse/admin/v1/event_reports/{report_id}` | 🟥 | Not implemented; requires an event-reports store (deferred). |
@@ -131,11 +131,11 @@ This page lists every `/_synapse/admin` endpoint Tuwunel is aware of and whether
 | Method | URL | Status | Description |
 |---|---|---|---|
 | GET | `/_synapse/admin/v1/server_version` | ✅ | Return the server name and version. Unauthenticated. |
-| GET | `/_synapse/admin/v1/federation/destinations` | 🟨 | List federation destinations and their retry state. |
-| GET | `/_synapse/admin/v1/federation/destinations/{destination}` | 🟨 | Return one destination's retry state. |
-| GET | `/_synapse/admin/v1/federation/destinations/{destination}/rooms` | 🟨 | List the rooms shared with a destination. |
-| POST | `/_synapse/admin/v1/federation/destinations/{destination}/reset_connection` | 🟨 | Clear a destination's backoff so delivery retries immediately. |
-| POST, PUT | `/_synapse/admin/v1/send_server_notice` | 🟨 | Send a server notice to a user. The idempotent form with a transaction id is also served. |
+| GET | `/_synapse/admin/v1/federation/destinations` | ✅ | List federation destinations and their retry state. |
+| GET | `/_synapse/admin/v1/federation/destinations/{destination}` | ✅ | Return one destination's retry state. |
+| GET | `/_synapse/admin/v1/federation/destinations/{destination}/rooms` | ✅ | List the rooms shared with a destination. |
+| POST | `/_synapse/admin/v1/federation/destinations/{destination}/reset_connection` | ✅ | Clear a destination's backoff so delivery retries immediately. |
+| POST, PUT | `/_synapse/admin/v1/send_server_notice` | ✅ | Send a server notice to a user. The idempotent form with a transaction id is also served. |
 | GET | `/_synapse/admin/v1/scheduled_tasks` | ✅ | List background administrative tasks. |
 | GET | `/_synapse/admin/v1/fetch_event/{event_id}` | ✅ | Return a raw event by id, without redaction. |
 | GET | `/_synapse/admin/v1/user_reports` | 🟥 | Not implemented; requires a reports store (deferred). |
