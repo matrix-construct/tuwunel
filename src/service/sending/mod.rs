@@ -493,7 +493,8 @@ impl Service {
 	}
 
 	/// Flushes the sender for a federation peer that has proven reachable via
-	/// inbound activity, but only when it was actually in its failure bucket.
+	/// inbound activity or an operator reset, but only when it was actually in
+	/// its failure bucket; reports whether it was.
 	#[tracing::instrument(
 		level = "debug",
 		skip(self),
@@ -501,13 +502,14 @@ impl Service {
 			%server,
 		),
 	)]
-	pub async fn notify_peer_alive(&self, server: &ServerName) {
-		if self
+	pub async fn notify_peer_alive(&self, server: &ServerName) -> bool {
+		let sad = self
 			.services
 			.federation
 			.note_peer_alive(server)
-			.await
-		{
+			.await;
+
+		if sad {
 			self.dispatch(Msg {
 				dest: Destination::Federation(server.to_owned()),
 				event: SendingEvent::Flush,
@@ -516,6 +518,8 @@ impl Service {
 			.log_err()
 			.ok();
 		}
+
+		sad
 	}
 
 	/// Clean up queued sending event data

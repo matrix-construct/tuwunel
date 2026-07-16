@@ -13,7 +13,7 @@ use tuwunel_database::Map;
 
 use self::peer::MAX_BACKOFF;
 pub use self::{
-	peer::{Classification, ShouldAttempt},
+	peer::{Classification, PeerBackoff, ShouldAttempt},
 	rank::{Candidates, WhenAllBackedOff},
 };
 use crate::services::OnceServices;

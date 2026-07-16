@@ -9,7 +9,7 @@ use tuwunel_core::{Error, err};
 
 use super::peer::{
 	Backoff, Classification, MAX_BACKOFF, ShouldAttempt, attempt_verdict, classify,
-	classify_error, failure_secs,
+	classify_error, failure_secs, fold_streak,
 };
 
 fn federation_error(status: StatusCode) -> Error {
@@ -163,4 +163,53 @@ fn disabled_grace_uses_the_curve_from_the_first_failure() {
 
 	// streak 1 with grace disabled uses window * 1 = 180s, not the grace tier.
 	assert_eq!(verdict, no_before(1180));
+}
+
+#[test]
+fn delay_secs_selects_the_tier() {
+	let delay = |class, streak, grace_secs| {
+		Backoff {
+			class,
+			anchor_secs: 0,
+			streak,
+			now: 0,
+			window_secs: 180,
+			grace_secs,
+		}
+		.delay_secs()
+	};
+
+	assert_eq!(delay(Classification::Permanent, 1, 15), MAX_BACKOFF.as_secs());
+	assert_eq!(delay(Classification::Transient, 1, 15), 15);
+	assert_eq!(delay(Classification::Transient, 3, 15), 1_620);
+	assert_eq!(delay(Classification::Transient, u32::MAX, 15), MAX_BACKOFF.as_secs());
+}
+
+#[test]
+fn fold_streak_tracks_anchor_and_oldest() {
+	let window_secs = 180;
+
+	// A legacy one-byte row carries no instant; the anchor falls back to the
+	// bucket start.
+	let legacy = [u8::from(Classification::Transient)];
+	let first = fold_streak(window_secs, None, 10, &legacy);
+
+	assert_eq!(first.anchor_secs, 10 * window_secs);
+	assert_eq!(first.oldest_bucket, 10);
+	assert_eq!(first.latest_bucket, 10);
+	assert!(matches!(first.class, Classification::Transient));
+
+	// A newer nine-byte row overrides the class and anchor, but the oldest
+	// bucket sticks.
+	let secs: u64 = 1_700_000_000;
+	let mut newer = [0_u8; 9];
+	newer[0] = u8::from(Classification::Permanent);
+	newer[1..].copy_from_slice(&secs.to_be_bytes());
+
+	let second = fold_streak(window_secs, Some(first), 12, &newer);
+
+	assert_eq!(second.anchor_secs, secs);
+	assert_eq!(second.oldest_bucket, 10);
+	assert_eq!(second.latest_bucket, 12);
+	assert!(matches!(second.class, Classification::Permanent));
 }

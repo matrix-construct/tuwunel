@@ -20,11 +20,14 @@
 //! peer-status curve does not drift from the sender's existing quadratic
 //! backoff when both observe the same peer.
 
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::{
+	collections::BTreeMap,
+	time::{Duration, SystemTime, UNIX_EPOCH},
+};
 
 use futures::{Stream, StreamExt};
 use http::StatusCode;
-use ruma::ServerName;
+use ruma::{OwnedServerName, ServerName};
 use tuwunel_core::{
 	Error, implement,
 	utils::{
@@ -98,6 +101,29 @@ pub(super) struct Backoff {
 	pub(super) grace_secs: u64,
 }
 
+/// Fold state accumulated over one server's failure rows.
+#[derive(Clone, Copy)]
+pub(super) struct Streak {
+	pub(super) class: Classification,
+	pub(super) anchor_secs: u64,
+	pub(super) oldest_bucket: u64,
+	pub(super) latest_bucket: u64,
+}
+
+/// Admin-facing summary of a peer's current failure streak, seconds since the
+/// epoch.
+#[derive(Clone, Copy, Debug)]
+pub struct PeerBackoff {
+	/// Newest failure instant, the backoff anchor.
+	pub anchor_secs: u64,
+
+	/// Start of the oldest surviving failure bucket.
+	pub oldest_secs: u64,
+
+	/// Backoff delay measured from the anchor.
+	pub delay_secs: u64,
+}
+
 #[implement(super::Service)]
 pub async fn record_success(&self, server: &ServerName) {
 	self.statuses
@@ -117,19 +143,32 @@ pub async fn record_success(&self, server: &ServerName) {
 	),
 )]
 pub async fn note_peer_alive(&self, server: &ServerName) -> bool {
-	let prefix = (server, Interfix);
-	let sad = self
-		.statuses
-		.stream_prefix_raw(&prefix)
-		.ignore_err()
-		.ready_any(|_| true)
-		.await;
+	let sad = self.peer_has_failures(server).await;
 
 	if sad {
-		self.statuses.del_prefix(&prefix).await;
+		self.statuses
+			.del_prefix(&(server, Interfix))
+			.await;
 	}
 
 	sad
+}
+
+/// Whether the reachability store holds any failure rows for this peer.
+#[implement(super::Service)]
+#[tracing::instrument(
+	level = "trace",
+	skip(self),
+	fields(
+		%server,
+	),
+)]
+pub async fn peer_has_failures(&self, server: &ServerName) -> bool {
+	self.statuses
+		.stream_prefix_raw(&(server, Interfix))
+		.ignore_err()
+		.ready_any(|_| true)
+		.await
 }
 
 #[implement(super::Service)]
@@ -146,33 +185,49 @@ pub fn record_failure(&self, server: &ServerName, classification: Classification
 #[implement(super::Service)]
 #[tracing::instrument(skip(self), fields(%server), level = "trace")]
 pub async fn should_attempt(&self, server: &ServerName) -> ShouldAttempt {
-	let window_secs = self.window_secs;
-	let latest = self
-		.statuses
-		.stream_prefix(&(server, Interfix))
-		.ignore_err()
-		.ready_fold(None, |state, ((_, bucket), value): ((&ServerName, u64), &[u8])| {
-			let anchor_secs =
-				failure_secs(value).unwrap_or_else(|| bucket.saturating_mul(window_secs));
-
-			let oldest_bucket = state.map_or(bucket, |(_, _, oldest, _)| oldest);
-
-			Some((classify(value), anchor_secs, oldest_bucket, bucket))
-		})
-		.await;
-
-	let Some((class, anchor_secs, oldest_bucket, latest_bucket)) = latest else {
+	let Some(streak) = self.peer_streak(server).await else {
 		return ShouldAttempt::Yes;
 	};
 
-	attempt_verdict(&Backoff {
-		class,
-		anchor_secs,
-		streak: self.streak(latest_bucket, oldest_bucket),
-		now: now_secs(),
-		window_secs,
-		grace_secs: self.grace.as_secs(),
-	})
+	attempt_verdict(&self.backoff(streak))
+}
+
+/// Admin-facing backoff summary for one server, `None` when it has no failure
+/// rows.
+#[implement(super::Service)]
+pub async fn peer_backoff(&self, server: &ServerName) -> Option<PeerBackoff> {
+	self.peer_streak(server)
+		.await
+		.map(|streak| self.peer_backoff_from(streak))
+}
+
+/// Admin-facing backoff summary for every server with failure rows, in one
+/// pass over the reachability store. Rows group by server on disk, so a run of
+/// one server's buckets folds in place.
+#[implement(super::Service)]
+pub async fn peer_backoffs(&self) -> BTreeMap<OwnedServerName, PeerBackoff> {
+	let window_secs = self.window_secs;
+
+	self.statuses
+		.stream()
+		.ignore_err()
+		.ready_fold(
+			Vec::<(OwnedServerName, Streak)>::new(),
+			|mut runs, ((server, bucket), value): ((&ServerName, u64), &[u8])| {
+				match runs.last_mut() {
+					| Some((last, streak)) if *last == *server =>
+						*streak = fold_streak(window_secs, Some(*streak), bucket, value),
+					| _ => runs
+						.push((server.to_owned(), fold_streak(window_secs, None, bucket, value))),
+				}
+
+				runs
+			},
+		)
+		.await
+		.into_iter()
+		.map(|(server, streak)| (server, self.peer_backoff_from(streak)))
+		.collect()
 }
 
 /// Yields one tuple per populated bucket, ordered by `(server, bucket_start)`,
@@ -222,34 +277,54 @@ fn streak(&self, latest_bucket: u64, oldest_bucket: u64) -> u32 {
 		.min(self.n_max)
 }
 
-/// Pure backoff verdict from a peer's latest failure state. `Permanent` and a
-/// saturating `window * streak^2` curve both cap at [`MAX_BACKOFF`]; a lone
-/// `Transient` failure gets the `grace` tier when it is enabled.
+/// Folds a server's failure rows into its streak, `None` when it has none.
+#[implement(super::Service)]
+async fn peer_streak(&self, server: &ServerName) -> Option<Streak> {
+	let window_secs = self.window_secs;
+
+	self.statuses
+		.stream_prefix(&(server, Interfix))
+		.ignore_err()
+		.ready_fold(None, |state, ((_, bucket), value): ((&ServerName, u64), &[u8])| {
+			Some(fold_streak(window_secs, state, bucket, value))
+		})
+		.await
+}
+
+/// Builds the pure backoff state from a server's failure streak.
+#[implement(super::Service)]
+fn backoff(&self, run: Streak) -> Backoff {
+	Backoff {
+		class: run.class,
+		anchor_secs: run.anchor_secs,
+		streak: self.streak(run.latest_bucket, run.oldest_bucket),
+		now: now_secs(),
+		window_secs: self.window_secs,
+		grace_secs: self.grace.as_secs(),
+	}
+}
+
+/// Projects a failure streak onto the admin-facing summary.
+#[implement(super::Service)]
+fn peer_backoff_from(&self, streak: Streak) -> PeerBackoff {
+	PeerBackoff {
+		anchor_secs: streak.anchor_secs,
+		oldest_secs: streak
+			.oldest_bucket
+			.saturating_mul(self.window_secs),
+		delay_secs: self.backoff(streak).delay_secs(),
+	}
+}
+
+/// Pure backoff verdict from a peer's latest failure state: attemptable once
+/// the delay past the anchor has elapsed.
 #[must_use]
 pub(super) fn attempt_verdict(backoff: &Backoff) -> ShouldAttempt {
-	let &Backoff {
-		class,
-		anchor_secs,
-		streak,
-		now,
-		window_secs,
-		grace_secs,
-	} = backoff;
+	let earliest_secs = backoff
+		.anchor_secs
+		.saturating_add(backoff.delay_secs());
 
-	let max_backoff = MAX_BACKOFF.as_secs();
-	let delay = match class {
-		| Classification::Permanent => max_backoff,
-		| Classification::Transient if streak <= 1 && grace_secs != 0 =>
-			grace_secs.min(max_backoff),
-		| Classification::Transient => window_secs
-			.saturating_mul(u64::from(streak))
-			.saturating_mul(u64::from(streak))
-			.min(max_backoff),
-	};
-
-	let earliest_secs = anchor_secs.saturating_add(delay);
-
-	if now >= earliest_secs {
+	if backoff.now >= earliest_secs {
 		return ShouldAttempt::Yes;
 	}
 
@@ -257,6 +332,48 @@ pub(super) fn attempt_verdict(backoff: &Backoff) -> ShouldAttempt {
 		earliest_retry: UNIX_EPOCH
 			.checked_add(Duration::from_secs(earliest_secs))
 			.unwrap_or_else(SystemTime::now),
+	}
+}
+
+impl Backoff {
+	/// Backoff delay in seconds. `Permanent` and the saturating
+	/// `window * streak^2` curve both cap at [`MAX_BACKOFF`]; a lone
+	/// `Transient` failure gets the `grace` tier when it is enabled.
+	#[must_use]
+	pub(super) fn delay_secs(&self) -> u64 {
+		let max_backoff = MAX_BACKOFF.as_secs();
+
+		match self.class {
+			| Classification::Permanent => max_backoff,
+			| Classification::Transient if self.streak <= 1 && self.grace_secs != 0 =>
+				self.grace_secs.min(max_backoff),
+			| Classification::Transient => self
+				.window_secs
+				.saturating_mul(u64::from(self.streak))
+				.saturating_mul(u64::from(self.streak))
+				.min(max_backoff),
+		}
+	}
+}
+
+/// Folds one failure row into a server's running streak: the newest row sets
+/// the class and anchor, the oldest bucket is retained.
+#[must_use]
+pub(super) fn fold_streak(
+	window_secs: u64,
+	state: Option<Streak>,
+	bucket: u64,
+	value: &[u8],
+) -> Streak {
+	let anchor_secs = failure_secs(value).unwrap_or_else(|| bucket.saturating_mul(window_secs));
+
+	let oldest_bucket = state.map_or(bucket, |streak| streak.oldest_bucket);
+
+	Streak {
+		class: classify(value),
+		anchor_secs,
+		oldest_bucket,
+		latest_bucket: bucket,
 	}
 }
 

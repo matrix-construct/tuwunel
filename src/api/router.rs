@@ -208,7 +208,13 @@ fn register_synapse_admin_media_routes(router: Router<State>) -> Router<State> {
 		)
 }
 
-fn register_synapse_admin_federation_routes(router: Router<State>) -> Router<State> { router }
+fn register_synapse_admin_federation_routes(router: Router<State>) -> Router<State> {
+	router
+		.ruma_route(&client::admin::federation::admin_list_destinations_route)
+		.ruma_route(&client::admin::federation::admin_destination_details_route)
+		.ruma_route(&client::admin::federation::admin_destination_rooms_route)
+		.ruma_route(&client::admin::federation::admin_reset_connection_route)
+}
 
 fn register_synapse_admin_misc_routes(router: Router<State>) -> Router<State> {
 	router

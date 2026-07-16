@@ -3,12 +3,13 @@ mod via;
 
 use std::{
 	collections::HashMap,
+	convert::identity,
 	sync::{Arc, RwLock},
 };
 
 use futures::{Stream, StreamExt, future::join5, pin_mut};
 use ruma::{
-	OwnedRoomId, RoomId, ServerName, UserId,
+	OwnedRoomId, OwnedServerName, RoomId, ServerName, UserId,
 	events::{AnyStrippedStateEvent, AnySyncStateEvent, room::member::MembershipState},
 	serde::Raw,
 };
@@ -166,6 +167,39 @@ pub fn server_rooms<'a>(
 		.keys_prefix(&prefix)
 		.ignore_err()
 		.map(|(_, room_id): (Ignore, &RoomId)| room_id)
+}
+
+/// Yields every server participating in at least one known room, each name
+/// once, in ascending order.
+#[implement(Service)]
+#[tracing::instrument(skip(self), level = "debug")]
+pub fn servers(&self) -> impl Stream<Item = &ServerName> + Send + '_ {
+	self.db
+		.serverroomids
+		.keys()
+		.ignore_err()
+		.ready_scan(
+			None,
+			|last: &mut Option<OwnedServerName>, (server, _): (&ServerName, Ignore)| {
+				let fresh = last.as_deref() != Some(server);
+
+				if fresh {
+					*last = Some(server.to_owned());
+				}
+
+				Some(fresh.then_some(server))
+			},
+		)
+		.ready_filter_map(identity)
+}
+
+/// Returns true if the server participates in at least one room we know of.
+#[implement(Service)]
+#[tracing::instrument(skip(self), level = "trace")]
+pub async fn server_shares_room(&self, server: &ServerName) -> bool {
+	self.server_rooms(server)
+		.ready_any(|_| true)
+		.await
 }
 
 /// Returns true if server can see user by sharing at least one room.
