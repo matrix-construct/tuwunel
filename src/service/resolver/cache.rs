@@ -58,7 +58,7 @@ pub async fn clear_overrides(&self) { self.overrides.clear().await; }
 pub fn del_destination(&self, name: &ServerName) { self.destinations.remove(name); }
 
 #[implement(Cache)]
-pub fn del_override(&self, name: &ServerName) { self.overrides.remove(name); }
+pub fn del_override(&self, name: &str) { self.overrides.remove(name); }
 
 #[implement(Cache)]
 pub fn set_destination(&self, name: &ServerName, dest: &CachedDest) {

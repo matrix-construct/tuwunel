@@ -1,7 +1,11 @@
 #![allow(clippy::arithmetic_side_effects)]
 
-use std::time::{Duration, UNIX_EPOCH};
+use std::{
+	sync::Arc,
+	time::{Duration, UNIX_EPOCH},
+};
 
+use bytes::Bytes;
 use http::StatusCode;
 use ruma::{OwnedServerName, api::error::ErrorBody};
 use serde_json::Value;
@@ -19,6 +23,19 @@ fn federation_error(status: StatusCode) -> Error {
 	Error::Federation(server, body.into_error(status))
 }
 
+fn federation_error_notjson(status: StatusCode) -> Error {
+	let server = OwnedServerName::try_from("remote.example").expect("valid server name");
+	let deserialization_error =
+		serde_json::from_slice::<Value>(b"<html>bad gateway</html>").expect_err("not valid json");
+
+	let body = ErrorBody::NotJson {
+		bytes: Bytes::from_static(b"<html>bad gateway</html>"),
+		deserialization_error: Arc::new(deserialization_error),
+	};
+
+	Error::Federation(server, body.into_error(status))
+}
+
 #[test]
 fn content_4xx_is_not_a_peer_failure() {
 	for status in [
@@ -28,6 +45,22 @@ fn content_4xx_is_not_a_peer_failure() {
 		StatusCode::NOT_FOUND,
 	] {
 		assert!(classify_error(&federation_error(status)).is_none(), "{status} recorded");
+	}
+}
+
+#[test]
+fn content_4xx_notjson_is_transient() {
+	// A non-JSON 4xx body means a proxy or CDN answered, not the homeserver,
+	// so it records a transient failure, unlike a content-level 4xx with JSON.
+	for status in [
+		StatusCode::BAD_REQUEST,
+		StatusCode::UNAUTHORIZED,
+		StatusCode::FORBIDDEN,
+		StatusCode::NOT_FOUND,
+	] {
+		let verdict = classify_error(&federation_error_notjson(status));
+
+		assert!(matches!(verdict, Some(Classification::Transient)), "{status} not transient");
 	}
 }
 

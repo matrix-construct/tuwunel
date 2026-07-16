@@ -27,7 +27,7 @@ use std::{
 
 use futures::{Stream, StreamExt};
 use http::StatusCode;
-use ruma::{OwnedServerName, ServerName};
+use ruma::{OwnedServerName, ServerName, api::error::ErrorBody};
 use tuwunel_core::{
 	Error, implement,
 	utils::{
@@ -402,8 +402,11 @@ pub(super) fn failure_secs(bytes: &[u8]) -> Option<u64> {
 /// must not count against it; only 5xx or an explicit rate-limit (429) records
 /// `Transient`. A 410 is the exception: a Matrix server never returns it for
 /// one endpoint and not another, so a received 410 is a proxy operator
-/// deliberately signaling the peer is gone, and records `Permanent`. Transport
-/// failures carry no response and are always transient.
+/// deliberately signaling the peer is gone, and records `Permanent`. A non-JSON
+/// body is the other exception: it means a proxy or CDN answered rather than
+/// the homeserver, so it signals a stale route, not peer content, and records
+/// `Transient` to place the eviction that follows behind the backoff gate.
+/// Transport failures carry no response and are always transient.
 #[must_use]
 pub(super) fn classify_error(error: &Error) -> Option<Classification> {
 	let Error::Federation(_, response) = error else {
@@ -415,6 +418,8 @@ pub(super) fn classify_error(error: &Error) -> Option<Classification> {
 	match status {
 		| _ if status == StatusCode::GONE => Some(Classification::Permanent),
 		| _ if status.is_server_error() || status == StatusCode::TOO_MANY_REQUESTS =>
+			Some(Classification::Transient),
+		| _ if matches!(response.body, ErrorBody::NotJson { .. }) =>
 			Some(Classification::Transient),
 		| _ => None,
 	}

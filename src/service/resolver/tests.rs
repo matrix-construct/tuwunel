@@ -46,6 +46,18 @@ fn hostnames_keep_custom_ports() {
 }
 
 #[test]
+fn eviction_key_matches_delegated_override_key() {
+	// Overrides are keyed by the delegated host without a port; eviction derives
+	// the same key from the resolved destination via `hostname()`, not origin.
+	let delegated = add_port_to_hostname("delegated.example");
+	let with_port = FedDest::Named("delegated.example".into(), ":8449".try_into().unwrap());
+
+	assert_eq!(delegated.hostname().as_str(), "delegated.example");
+	assert_eq!(with_port.hostname().as_str(), "delegated.example");
+	assert_ne!(delegated.hostname().as_str(), "origin.example");
+}
+
+#[test]
 fn nameservers_get_default_ports() {
 	let conf = Resolver::parse_nameserver("1.1.1.1").unwrap();
 
