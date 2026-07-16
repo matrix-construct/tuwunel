@@ -1,7 +1,10 @@
 # Summary
 
+[👋 Help Us Help You](funding.md)
+
+# Installation
+
 - [Introduction](introduction.md)
-- [Funding and Enterprise](funding.md)
 - [Deployment](deploying.md)
   - [Configuration](configuration.md)
     - [Examples](configuration/examples.md)
@@ -19,6 +22,9 @@
     - [Docker](deploying/docker.md)
     - [Podman](deploying/podman-systemd.md)
     - [Kubernetes](deploying/kubernetes.md)
+
+# Operation
+
 - [Authentication](authentication.md)
   - [Legacy Registration](authentication/legacy.md)
   - [OIDC Authorization](authentication/oidc-server.md)
@@ -37,8 +43,14 @@
 - [Bridge and Application Services](appservices.md)
 - [Push Notifications](pushers.md)
 - [Policy and Moderation](moderation.md)
+
+# Servicing
+
 - [Maintenance](maintenance.md)
 - [Troubleshooting](troubleshooting.md)
+
+# Engineering
+
 - [Development](development.md)
   - [Contributing](contributing.md)
   - [Protocol Compliance](development/compliance.md)
@@ -51,4 +63,7 @@
     - [Pipeline Phases](development/testing/pipeline.md)
     - [Complement Testing](development/testing/complement.md)
   - [Hot Reloading ("Live" Development)](development/hot_reload.md)
-- [Community Code of Conduct](CODE_OF_CONDUCT.md)
+
+---
+
+[💕 Community Code of Conduct](CODE_OF_CONDUCT.md)

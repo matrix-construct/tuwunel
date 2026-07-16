@@ -1,134 +1,159 @@
-# Funding and Enterprise
+# Enterprise Development Partnership
 
-Tuwunel is a high-performance Matrix homeserver written in Rust. In independent
-benchmarks, a single Tuwunel process with its embedded database outperformed a
-fully tuned Synapse worker cluster on the busiest endpoint in the Matrix
-protocol, at roughly a third of the CPU. We are seeking sponsors to fund the
-next stage of the project: true horizontal scaling and clustering, making
-Tuwunel the first Matrix homeserver that scales out across machines.
+[Tuwunel](https://github.com/matrix-construct/tuwunel)'s development is
+directly driven by the needs of its corporate sponsors. For these businesses
+and governments, communication systems are often critical infrastructure, and
+Tuwunel forms part of that infrastructure. They create value through features
+tailored to their needs, control costs through efficient performance that
+scales with demand, and expect quality of service that never buckles under
+continued growth.
 
-## Independent benchmark results
+We exist because companies want to maximize profit. Although Tuwunel is
+available at no cost and may already meet the needs of many individuals and
+companies, our partners remain steadfast in their commitment to *maximizing*
+profit.
 
-Researchers at the Federal University of Ceará (UFC), the Federal University of
-Piauí (UFPI), and Brazil's Research and Development Center for Communication
-Security (CEPESC) published a controlled study of the Matrix `/sync` endpoint
-at SBRC 2026, issuing nearly 17,000 sync requests against Synapse and Tuwunel
-under increasing load:
-[A Comparative Performance Study of the Matrix /sync Endpoint on Synapse and Tuwunel](https://www.researchgate.net/publication/407165702_A_Comparative_Performance_Study_of_the_Matrix_sync_Endpoint_on_Synapse_and_Tuwunel).
-The study is part of the Brazilian government's msg gov project and reflects
-real operational requirements.
+Tuwunel is developing into a **highly available, horizontally scalable**,
+specification-compliant Matrix cluster capable of handling **high message
+volumes** with **low latency** through **hardware acceleration** and robust
+**quality-of-service** guarantees. We can do this better together. Partner with
+Tuwunel and finally get this right.
 
-The setup was not tilted in our favor. Synapse ran a production-grade,
-high-scalability deployment: a main process, 18 specialized workers, Redis, and
-PostgreSQL. Tuwunel ran as a single monolithic process with embedded RocksDB,
-following the default installation instructions.
+### Proven results
 
-Tuwunel delivered lower response times in three of the four sync
-configurations tested. Average initial-sync response times under the heaviest
-load, 200 concurrent users in 300 rooms of 300 members each:
+An independent 2026 study compared a single Tuwunel process with an 18-worker
+Synapse deployment in a 200-user test. **Tuwunel completed three of the four
+benchmark scenarios faster than Synapse.**
 
-| Sync configuration | Synapse (18 workers) | Tuwunel (single process) | Result |
-|---|---:|---:|---|
-| `1T`: timeline 1, lazy members | 80.1 s | 8.6 s | **9.3x faster** |
-| `5T`: timeline 5, lazy members | 74.3 s | 14.0 s | **5.3x faster** |
-| `10F`: timeline 10, full member state | 465.3 s | 725.9 s | Synapse ahead |
-| `20T`: timeline 20, lazy members (Element Web profile) | 117.5 s | 33.8 s | **3.5x faster** |
+Researchers at the Federal University of Ceará (UFC), the Federal University
+of Piauí (UFPI), and Brazil's Research and Development Center for Communication
+Security (CEPESC) published
+[A Comparative Performance Study of the Matrix /sync Endpoint on Synapse and Tuwunel](https://doi.org/10.5753/sbrc.2026.19722)
+at SBRC 2026. The controlled study issued nearly 17,000 `/sync` requests under
+increasing load. It was conducted as part of the Brazilian government's
+[msg gov secure communications project](https://www.gov.br/abin/pt-br/centrais-de-conteudo/noticias/abin-e-universidade-federal-do-ceara-debatem-avancos-do-aplicativo-de-comunicacao-segura-msg-gov)
+and reflects operational requirements from that project.
 
-With a single user the gap widens to 11x on the lightest configurations. The
-cost side tells the same story: in the 200-user scenario Synapse consumed
-approximately three times the CPU of Tuwunel in every lazy-loading
-configuration (about 30% versus 8 to 9%), and roughly 1% of Synapse's requests
-in the heaviest configuration failed with timeouts while Tuwunel completed
-them all.
+Tuwunel delivered lower response times in three of the four version 3
+`/sync`<sup>⋆</sup> configurations. The following results are average initial
+sync response times under the heaviest load tested: 200 concurrent users, each
+in 300 rooms with 300 members per room.
 
-The study also identified our gaps, and we want to be equally upfront about
-those. Tuwunel returned larger payloads and fell behind Synapse when clients
-request the full member state (`10F`), and our Simplified Sliding Sync (SSS)
-implementation stalls after the first window, so the paper's SSS measurements
-ran on Synapse alone. Even there the authors note Synapse's SSS lead required
-a specialized worker configuration whose optimal application "current
-documentation does not clearly describe"; the default setup timed out under
-load. Their conclusion about us:
+<table>
+  <thead>
+    <tr>
+      <th>Sync configuration</th>
+      <th>Synapse, 18 workers</th>
+      <th>Tuwunel, one process</th>
+      <th>Result</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>1T</code>: timeline 1, lazy members</td>
+      <td>80.1 s</td>
+      <td>8.6 s</td>
+      <td><strong>9.3x faster</strong></td>
+    </tr>
+    <tr>
+      <td><code>5T</code>: timeline 5, lazy members</td>
+      <td>74.3 s</td>
+      <td>14.0 s</td>
+      <td><strong>5.3x faster</strong></td>
+    </tr>
+    <tr>
+      <td><code>10F</code>: timeline 10, full member state</td>
+      <td>465.3 s</td>
+      <td>725.9 s</td>
+      <td>Synapse <strong>1.6x faster</strong></td>
+    </tr>
+    <tr>
+      <td><code>20T</code>: timeline 20, lazy members, the Element Web profile</td>
+      <td>117.5 s</td>
+      <td>33.8 s</td>
+      <td><strong>3.5x faster</strong></td>
+    </tr>
+  </tbody>
+</table>
 
-> Once a correct and well-documented implementation becomes available in
-> Tuwunel, the expectation is that its performance will further improve,
-> potentially surpassing Synapse by following the performance trends observed
-> in other synchronization strategies.
+<div style="clear: both"></div>
 
-That work is already underway: our team is implementing Simplified Sliding
-Sync correctly ourselves, on our own resources. This funding initiative aims
-at the step beyond it, the one no homeserver has taken: horizontal scaling and
-clustering.
+<sup>⋆ Tuwunel has since implemented Simplified Sliding Sync, as recorded in our
+[MSC implementation audit](development/compliance/msc.md). That implementation
+postdates the study and has not yet been measured by the same independent
+benchmark.</sup>
 
-## Where Tuwunel already leads
+### Production foundation
 
-Performance is not the only dimension where Tuwunel is already a strong
-alternative to Synapse, and we publish the evidence rather than asking anyone
-to take our word for it:
+Tuwunel is the official successor to
+[conduwuit](https://github.com/girlbossceo/conduwuit) and is developed by
+full-time staff. It has an active public codebase,
+[regular releases](https://github.com/matrix-construct/tuwunel/releases),
+institutional users, and existing
+[sponsorship from the Swiss government](https://matrix.org/blog/2025/11/07/this-week-in-matrix-2025-11-07/).
+Tuwunel is deployed for use by citizens in Switzerland. New sponsors join a
+working, publicly auditable project with production use, institutional backing,
+and independent benchmark results, rather than a speculative prototype.
 
-- **[MSC implementation status](development/compliance/msc.md)**: a full audit
-  of every Matrix Spec Change proposal, with per-proposal correctness
-  percentages. 186 of the 200 in-scope merged MSCs (93%) are implemented, and
-  254 MSCs are implemented outright across merged and proposed features.
-- **[Complement results](development/compliance/complement.md)**: Tuwunel runs
-  the Matrix homeserver acceptance suite continuously, currently passing 81.5%
-  of test groups, with raw results and logs committed to the repository.
-- **[Synapse Admin API coverage](development/compliance/synapse-admin.md)**:
-  existing administration dashboards and moderation bots work against Tuwunel.
-- **Modern authentication out of the box**: [OIDC](authentication/oidc-server.md),
-  [LDAP delegation](authentication/ldap.md), and
-  [enterprise JWT](authentication/jwt.md).
-- **[Matrix RTC](calls/matrix_rtc.md)** for Element Call video and voice
-  conferencing.
-- **Radically simpler operations**: one static binary with an embedded
-  database. No PostgreSQL, no Redis, no worker topology to configure, monitor,
-  and upgrade. The operating cost advantage measured in the paper compounds
-  with the administration time an operator never has to spend.
+### Current status
 
-## What the funding delivers
+The clustering initiative starts from a working, independently tested
+homeserver. We publish the evidence needed for technical due diligence:
 
-1. **The first true horizontal scaling in a Matrix homeserver.** No maintained
-   homeserver scales horizontally today. Synapse distributes load across
-   specialized workers, but they orbit a single coordinating main process and
-   a single PostgreSQL primary. Dendrite set out to be multi-process, but its
-   development has stalled. This funding lets Tuwunel deliver proper scale-out
-   deployment before anyone else, from a codebase that already wins benchmarks
-   on one machine. Combined with the CPU numbers above, the goal is simple:
-   the largest Matrix deployments at the lowest operating cost available.
+- **[MSC implementations](development/compliance/msc.md):** Our audit covers
+  Matrix Spec Change proposals, including correctness scores and supporting
+  evidence. Of 200 in-scope merged MSCs, 186 are implemented, for 93% coverage.
+  Across merged and proposed features, 254 MSCs are implemented outright.
 
-2. **Clustered deployment and high availability.** Scaling out is about more
-   than throughput. A clustered Tuwunel means redundancy, failover, and
-   rolling upgrades without downtime: the deployment properties enterprise
-   and government operators are required to provide, and that no Matrix
-   homeserver offers today.
+- **[Complement progress](development/compliance/complement.md):** We run the
+  Matrix homeserver acceptance suite continuously. Tuwunel currently passes
+  over 80% of top-level test groups, with raw results and logs committed to the
+  repository.
 
-3. **A funder-directed feature roadmap.** Tuwunel implements the Matrix
-   specification in full along with hundreds of MSC proposals, audited in our
-   [status table](development/compliance/msc.md). Synapse's decade of
-   development still carries a longer tail of proposals and niche features,
-   many of which we have simply had no reason to support. Sponsors decide
-   which of those gaps actually matter: funders choose the features we adopt
-   and their deployments set our priorities.
+- **[Synapse Admin API](development/compliance/synapse-admin.md):** Tuwunel
+  supports most known endpoints today, including the core user, room, device,
+  registration, and moderation surfaces used by existing tools.
 
-4. **Enterprise support and in-house customization.** Sponsors get direct
-   access to full-time staff, priority on the features their deployment
-   depends on, and custom development where an organization needs behavior the
-   public project does not carry.
+- **Enterprise authentication:** Tuwunel has built-in
+  [OAuth 2.0 and OIDC](authentication/oidc-server.md),
+  [LDAP support](authentication/ldap.md), and
+  [JWT authentication](authentication/jwt.md).
 
-## A de-risked investment
+- **[Matrix RTC](calls/matrix_rtc.md):** Tuwunel supports Element Call video
+  and voice conferencing.
 
-Tuwunel is the official successor to conduwuit and is developed by full-time
-staff. It is already used by companies with a vested interest in its continued
-development, and it is primarily sponsored by the government of Switzerland,
-where it is deployed for citizens today. New sponsors join an established,
-publicly auditable operation with existing institutional backing, not a
-speculative effort.
+### Future plans
 
-## Get in touch
+1. **Tuwunel-native multi-node scale-out.** Synapse can distribute work across
+   [worker processes that share PostgreSQL and Redis](https://element-hq.github.io/synapse/latest/workers.html).
+   Our objective is to design scale-out around Tuwunel's own architecture while
+   retaining its operational simplicity wherever possible. Sponsors fund the
+   architecture, implementation, migration path, and production validation
+   needed to turn that objective into a supported deployment model.
+
+2. **High availability and business continuity.** The program targets
+   redundancy, failure recovery, and rolling maintenance across nodes. Concrete
+   availability targets, recovery objectives, and acceptance tests can be
+   agreed with sponsors so that the result maps to real operational and
+   compliance requirements.
+
+3. **Roadmap alignment with sponsor requirements.** Funders help select the
+   feature gaps and deployment constraints that matter to their organizations.
+   Each engagement can be organized around documented requirements,
+   milestones, acceptance criteria, and release targets, giving technical and
+   procurement teams a clear delivery path.
+
+4. **Direct enterprise engineering and support.** Sponsors receive access to
+   full-time project staff, priority for deployment-critical defects and
+   features, and custom integration work where identity, administration,
+   policy, migration, or infrastructure requirements go beyond the public
+   project's defaults.
+
+### Get in touch
 
 For sponsorship and enterprise inquiries, contact
-[@jason:tuwunel.me](https://matrix.to/#/@jason:tuwunel.me) or email
-<jasonzemos@gmail.com>, or contact
-[@june:woof.gay](https://matrix.to/#/@june:woof.gay) or email
+[@jason:tuwunel.me](https://matrix.to/#/@jason:tuwunel.me) on Matrix or at
+<jasonzemos@gmail.com>. You can also contact
+[@june:woof.gay](https://matrix.to/#/@june:woof.gay) on Matrix or at
 <june@girlboss.ceo>. General project channels are listed on the
 [introduction page](introduction.md).
