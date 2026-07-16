@@ -10,7 +10,7 @@ use super::Engine;
 use crate::{Context, util::map_err};
 
 #[implement(Engine)]
-#[tracing::instrument(skip(self))]
+#[tracing::instrument(level = "debug", skip(self))]
 pub fn backup(&self) -> Result {
 	let to_keep = self.ctx.server.config.database_backups_to_keep;
 
