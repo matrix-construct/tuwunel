@@ -8,13 +8,14 @@ use std::{
 	fmt::Debug,
 	hash::{DefaultHasher, Hash, Hasher},
 	io::Write,
-	iter::once,
+	iter::{once, repeat_with},
 	pin::pin,
 	sync::Arc,
 };
 
 use async_trait::async_trait;
 use futures::{FutureExt, Stream, StreamExt};
+use loole::unbounded;
 use ruma::{DeviceId, OwnedRoomId, RoomId, ServerName, UserId};
 use serde::Serialize;
 use tokio::{task, task::JoinSet};
@@ -108,9 +109,7 @@ impl crate::Service for Service {
 			db: Data::new(args),
 			server: args.server.clone(),
 			services: args.services.clone(),
-			channels: (0..num_senders)
-				.map(|_| loole::unbounded())
-				.collect(),
+			channels: repeat_with(unbounded).take(num_senders).collect(),
 		}))
 	}
 

@@ -922,9 +922,8 @@ impl Service {
 	#[inline]
 	#[must_use]
 	pub fn get_media_path_sha256(&self, key: &[u8]) -> PathBuf {
-		let mut r = self.get_media_dir();
-		r.push(self.get_media_name_sha256(key));
-		r
+		self.get_media_dir()
+			.join(self.get_media_name_sha256(key))
 	}
 
 	/// new SHA256 file name media function. requires database migrated. uses
@@ -944,18 +943,16 @@ impl Service {
 	/// base64 key as the filename.
 	#[must_use]
 	pub fn get_media_path_b64(&self, key: &[u8]) -> PathBuf {
-		let mut r = self.get_media_dir();
-		let encoded = encode_key(key);
-		r.push(encoded);
-		r
+		self.get_media_dir().join(encode_key(key))
 	}
 
 	#[must_use]
 	pub fn get_media_dir(&self) -> PathBuf {
-		let mut r = PathBuf::new();
-		r.push(self.services.server.config.database_path.clone());
-		r.push("media");
-		r
+		self.services
+			.server
+			.config
+			.database_path
+			.join("media")
 	}
 }
 

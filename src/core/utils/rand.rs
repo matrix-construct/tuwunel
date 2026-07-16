@@ -1,4 +1,5 @@
 use std::{
+	iter::repeat_with,
 	ops::Range,
 	time::{Duration, SystemTime},
 };
@@ -33,8 +34,9 @@ pub fn string(length: usize) -> String {
 #[must_use]
 pub fn string_from(charset: &[u8], length: usize) -> String {
 	let mut rng = rng();
-	(0..length)
-		.map(|_| char::from(charset[rng.random_range(0..charset.len())]))
+
+	repeat_with(|| char::from(charset[rng.random_range(0..charset.len())]))
+		.take(length)
 		.collect()
 }
 

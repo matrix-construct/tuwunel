@@ -117,7 +117,7 @@ pub(super) fn add_access_token_query(request: &mut http::Request<Bytes>, hs_toke
 	let symbol = if old_path_and_query.contains('?') { "&" } else { "?" };
 
 	parts.path_and_query = Some(
-		(old_path_and_query + symbol + "access_token=" + hs_token)
+		format!("{old_path_and_query}{symbol}access_token={hs_token}")
 			.parse()
 			.expect("valid path and query"),
 	);

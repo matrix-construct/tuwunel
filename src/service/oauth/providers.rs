@@ -323,7 +323,7 @@ fn make_url(provider: &Provider, path: &str) -> Result<Url> {
 		Ok(issuer.join(suffix.as_str())?)
 	} else {
 		let mut url = issuer.to_owned();
-		url.set_path((issuer_path.to_owned() + "/").as_str());
+		url.set_path(&format!("{issuer_path}/"));
 		Ok(url.join(&suffix)?)
 	}
 }

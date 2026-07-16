@@ -110,7 +110,8 @@ pub fn issuer_url(&self) -> Result<String> {
 		.as_ref()
 		.map(|url| {
 			let s = url.to_string();
-			if s.ends_with('/') { s } else { s + "/" }
+
+			if s.ends_with('/') { s } else { format!("{s}/") }
 		})
 		.ok_or_else(|| {
 			err!(Config("well_known.client", "well_known.client must be set for OIDC server"))
