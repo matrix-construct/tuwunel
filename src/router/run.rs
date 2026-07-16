@@ -5,7 +5,7 @@ use std::{
 
 use futures::{FutureExt, future::join, pin_mut};
 #[cfg(all(feature = "systemd", target_os = "linux"))]
-use sd_notify::{NotifyState, notify, notify_and_unset_env};
+use sd_notify::{NotifyState, notify, notify_and_unset_env, watchdog_enabled};
 use tuwunel_core::{
 	Error, Result, Server, debug, debug_error, debug_info, error, info, utils::BoolExt,
 };
@@ -95,8 +95,7 @@ pub(crate) async fn start(server: Arc<Server>) -> Result<Arc<Services>> {
 	let services = services?;
 
 	#[cfg(all(feature = "systemd", target_os = "linux"))]
-	sd_notify::notify(&[sd_notify::NotifyState::Ready])
-		.expect("failed to notify systemd of ready state");
+	notify(&[NotifyState::Ready]).expect("failed to notify systemd of ready state");
 
 	debug!("Started");
 	Ok(services)
@@ -201,7 +200,7 @@ fn handle_services_finish(
 async fn start_systemd_watchdog() {
 	use tokio::time::MissedTickBehavior;
 
-	let Some(watchdog) = sd_notify::watchdog_enabled() else {
+	let Some(watchdog) = watchdog_enabled() else {
 		return;
 	};
 
@@ -214,7 +213,7 @@ async fn start_systemd_watchdog() {
 	loop {
 		ticker.tick().await;
 
-		if let Err(e) = sd_notify::notify(&[sd_notify::NotifyState::Watchdog]) {
+		if let Err(e) = notify(&[NotifyState::Watchdog]) {
 			error!(%e, "failed to notify systemd watchdog state");
 		}
 	}
@@ -243,9 +242,7 @@ async fn extend_systemd_startup() {
 	loop {
 		ticker.tick().await;
 
-		if let Err(e) =
-			sd_notify::notify(&[sd_notify::NotifyState::ExtendTimeoutUsec(extend_usec)])
-		{
+		if let Err(e) = notify(&[NotifyState::ExtendTimeoutUsec(extend_usec)]) {
 			error!(%e, "failed to extend systemd startup timeout");
 		}
 	}
