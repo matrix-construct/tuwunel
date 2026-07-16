@@ -224,6 +224,8 @@ fn register_synapse_admin_misc_routes(router: Router<State>) -> Router<State> {
 		.ruma_route(&client::misc::admin_server_version_route)
 		.ruma_route(&client::misc::admin_fetch_event_route)
 		.ruma_route(&client::misc::admin_scheduled_tasks_route)
+		.ruma_route(&client::misc::admin_send_server_notice_route)
+		.ruma_route(&client::misc::admin_send_server_notice_txn_route)
 }
 
 fn register_client_profile_and_data_routes(router: Router<State>) -> Router<State> {
