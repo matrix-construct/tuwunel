@@ -918,8 +918,6 @@ missing_docs = "allow"
 # cfgs cannot be limited to expected cfgs or their de facto non-transitive/opt-in use-case e.g.
 # tokio_unstable will warn.
 unexpected_cfgs = "allow"
-# this seems to suggest broken code and is not working correctly
-unused_braces = "allow"
 # buggy, but worth checking on occasionally
 unused_crate_dependencies = "allow"
 unsafe_code = "allow"
@@ -1001,6 +999,8 @@ arithmetic_side_effects = "warn"
 as_conversions = "warn"
 as_underscore = "warn"
 assertions_on_result_states = "warn"
+# moved from nursery to restriction in 1.91, silently dropping out of coverage
+cognitive_complexity = "warn"
 dbg_macro = "warn"
 default_union_representation = "warn"
 deref_by_slicing = "warn"
