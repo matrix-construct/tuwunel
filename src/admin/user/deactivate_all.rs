@@ -29,8 +29,6 @@ pub(super) async fn deactivate_all(&self, no_leave_rooms: bool, force: bool) -> 
 					.admin
 					.send_text(&format!("{username} is not a valid username, skipping over: {e}"))
 					.await;
-
-				continue;
 			},
 			| Ok(user_id) => {
 				if self.services.admin.user_is_admin(&user_id).await && !force {

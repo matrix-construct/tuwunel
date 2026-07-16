@@ -107,7 +107,7 @@ impl Console {
 			match self.readline().await {
 				| Ok(event) => match event {
 					| ReadlineEvent::Line(string) => self.clone().handle(string).await,
-					| ReadlineEvent::Interrupted => continue,
+					| ReadlineEvent::Interrupted => {},
 					| ReadlineEvent::Eof => break,
 					| ReadlineEvent::Quit => self
 						.server

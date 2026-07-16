@@ -50,6 +50,12 @@ pub(super) async fn force_join_list_of_local_users(
 
 	for username in usernames {
 		match parse_active_local_user_id(self.services, username).await {
+			| Err(e) => {
+				self.services
+					.admin
+					.send_text(&format!("{username} is not a valid username, skipping over: {e}"))
+					.await;
+			},
 			| Ok(user_id) => {
 				// don't make the server service account join
 				if user_id == self.services.globals.server_user {
@@ -64,14 +70,6 @@ pub(super) async fn force_join_list_of_local_users(
 				}
 
 				user_ids.push(user_id);
-			},
-			| Err(e) => {
-				self.services
-					.admin
-					.send_text(&format!("{username} is not a valid username, skipping over: {e}"))
-					.await;
-
-				continue;
 			},
 		}
 	}

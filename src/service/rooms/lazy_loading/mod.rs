@@ -109,7 +109,6 @@ pub async fn witness_retain(&self, senders: Witness, ctx: &Context<'_>) -> Witne
 			&& (seen == 0 || ctx.token == Some(seen))
 		{
 			senders.insert(sender.into());
-			continue;
 		}
 	}
 

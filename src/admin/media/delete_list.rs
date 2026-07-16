@@ -40,7 +40,6 @@ pub(super) async fn delete_list(&self) -> Result {
 			},
 			| Err(e) => {
 				warn!("Failed to delete {mxc}, ignoring error and skipping: {e}");
-				continue;
 			},
 		}
 	}

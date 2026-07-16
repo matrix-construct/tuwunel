@@ -821,7 +821,6 @@ impl Service {
 				},
 				| Err(e) => {
 					warn!("Failed to delete {mxc}, ignoring error and skipping: {e}");
-					continue;
 				},
 			}
 		}

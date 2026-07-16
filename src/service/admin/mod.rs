@@ -112,9 +112,8 @@ impl crate::Service for Service {
 					Some(command) => self.handle_command(command).await,
 					None => break,
 				},
-				sig = signals.recv() => match sig {
-					Ok(sig) => self.handle_signal(sig).await,
-					Err(_) => continue,
+				sig = signals.recv() => if let Ok(sig) = sig {
+					self.handle_signal(sig).await;
 				},
 			}
 		}

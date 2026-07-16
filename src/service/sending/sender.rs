@@ -387,7 +387,7 @@ impl Service {
 				() = sleep_until(deadline) => return,
 				response = futures.next() => match response {
 					Some(Ok(dest)) => self.db.delete_all_active_requests_for(&dest).await,
-					Some(_) => continue,
+					Some(_) => {},
 					None => return,
 				},
 			}
