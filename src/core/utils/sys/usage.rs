@@ -89,7 +89,7 @@ pub fn usage() -> Result<Usage> { Ok(Usage) }
 /// Per-thread resource usage. On Linux/FreeBSD/OpenBSD, `RUSAGE_THREAD` is
 /// available. On other Unix platforms (macOS, etc.) the thread variant does
 /// not exist, so we fall back to the process-wide `getrusage(RUSAGE_SELF)`
-/// which returns a non-zero, well-defined `Usage` value — better than
+/// which returns a non-zero, well-defined `Usage` value rather than
 /// relying on `Usage::default()` (which nix does not implement).
 #[cfg(any(
 	target_os = "linux",

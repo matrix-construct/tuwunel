@@ -24,5 +24,9 @@ A self-hosted gateway on a LAN address, for example an ntfy server on
 is a forbidden remote address". Narrow `ip_range_denylist` to admit your
 gateway's range. Plain `http://` gateway URLs are accepted.
 
-A gateway serving the notify endpoint under a nonstandard path prefix
-can be accommodated with the `notification_push_path` option.
+Every push notification is sent to the gateway's Matrix spec path
+`/_matrix/push/v1/notify`; this path is not configurable. The
+`notification_push_path` option only controls a substring stripped from
+the stored pusher URL before that spec path is rebuilt onto the
+remainder, so leave it at its default unless your pushers register URLs
+that embed a different path needing to be removed first.
