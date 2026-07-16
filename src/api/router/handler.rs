@@ -8,7 +8,7 @@ use axum::{
 	response::{IntoResponse, Response},
 	routing::{MethodFilter, on},
 };
-use futures::{Future, future::BoxFuture};
+use futures::future::BoxFuture;
 use http::{Method, Request};
 use ruma::api::{IncomingRequest, path_builder::PathBuilder};
 use tuwunel_core::{Result, trace};

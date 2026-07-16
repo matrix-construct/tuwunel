@@ -1,4 +1,4 @@
-use std::{convert::AsRef, fmt::Debug, sync::Arc};
+use std::{fmt::Debug, sync::Arc};
 
 use futures::{Stream, StreamExt};
 use rocksdb::Direction;

@@ -1,12 +1,7 @@
-use std::{
-	collections::HashMap,
-	num::NonZeroUsize,
-	sync::{Arc, Mutex},
-};
+use std::{collections::HashMap, num::NonZeroUsize, sync::Mutex};
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use loole::unbounded;
 use ruma::{
 	OwnedEventId, OwnedRoomId, OwnedServerName, RoomVersionId, ServerName, event_id, room_id,
 	server_name,
@@ -16,10 +11,10 @@ use tokio::{
 	sync::Notify,
 	task::{spawn, yield_now},
 };
-use tuwunel_core::{Result, err};
+use tuwunel_core::err;
 
 use super::{worker::effective_cap, *};
-use crate::{federation::Candidates, services::OnceServices};
+use crate::federation::Candidates;
 
 impl Service {
 	fn test(

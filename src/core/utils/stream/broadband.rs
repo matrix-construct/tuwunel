@@ -2,10 +2,7 @@
 
 use std::convert::identity;
 
-use futures::{
-	Future,
-	stream::{Stream, StreamExt},
-};
+use futures::stream::{Stream, StreamExt};
 
 use super::{ReadyExt, automatic_width};
 

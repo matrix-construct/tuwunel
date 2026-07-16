@@ -1,10 +1,8 @@
 //! Extended external extensions to futures::FutureExt
 #![expect(clippy::many_single_char_names, clippy::impl_trait_in_params)]
 
-use std::marker::Unpin;
-
 use futures::{
-	Future, FutureExt,
+	FutureExt,
 	future::{
 		Either::{Left, Right},
 		select_ok, try_join, try_join_all, try_join3, try_join4,

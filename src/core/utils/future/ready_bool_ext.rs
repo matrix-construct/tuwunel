@@ -1,7 +1,5 @@
 #![expect(clippy::wrong_self_convention)]
 
-use futures::Future;
-
 use super::ReadyEqExt;
 
 pub trait ReadyBoolExt

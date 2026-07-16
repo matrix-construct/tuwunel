@@ -1,4 +1,4 @@
-use std::{convert::AsRef, sync::Arc};
+use std::sync::Arc;
 
 use futures::{Stream, StreamExt, TryStreamExt};
 use rocksdb::{DBPinnableSlice, ReadOptions};

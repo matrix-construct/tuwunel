@@ -4,7 +4,6 @@ use std::{
 	ffi::OsStr,
 	fs,
 	fs::{FileType, read_to_string},
-	iter::IntoIterator,
 	path::{Path, PathBuf},
 };
 

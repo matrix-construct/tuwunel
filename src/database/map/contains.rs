@@ -1,4 +1,4 @@
-use std::{convert::AsRef, fmt::Debug, future::Future, io::Write, sync::Arc};
+use std::{fmt::Debug, io::Write, sync::Arc};
 
 use futures::FutureExt;
 use serde::Serialize;

@@ -6,7 +6,7 @@ mod pdus;
 mod purge;
 mod redact;
 
-use std::{fmt::Write, future::Future, sync::Arc};
+use std::{fmt::Write, sync::Arc};
 
 use async_trait::async_trait;
 use futures::{

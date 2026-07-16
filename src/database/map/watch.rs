@@ -1,6 +1,5 @@
 use std::{
 	collections::{BTreeMap, btree_map::Entry},
-	future::Future,
 	ops::RangeToInclusive,
 	sync::Mutex,
 };

@@ -4,7 +4,7 @@
 //! serialization. When no serialization is required for both key and
 //! value simply use insert() (see insert.rs).
 
-use std::{convert::AsRef, fmt::Debug, io::Write};
+use std::{fmt::Debug, io::Write};
 
 use serde::Serialize;
 use tuwunel_core::{arrayvec::ArrayVec, implement};

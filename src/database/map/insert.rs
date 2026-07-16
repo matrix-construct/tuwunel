@@ -3,7 +3,7 @@
 //! Overloads are provided for the user to choose the most efficient
 //! serialization or bypass for pre=serialized (raw) inputs.
 
-use std::{convert::AsRef, fmt::Debug};
+use std::fmt::Debug;
 
 use rocksdb::WriteBatchWithTransaction;
 use tuwunel_core::implement;

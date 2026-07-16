@@ -1,4 +1,4 @@
-use std::{convert::AsRef, fmt::Debug, io::Write};
+use std::{fmt::Debug, io::Write};
 
 use serde::Serialize;
 use tuwunel_core::{arrayvec::ArrayVec, implement};

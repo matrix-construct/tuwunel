@@ -1,7 +1,7 @@
-use std::{convert::AsRef, fmt::Debug, sync::Arc};
+use std::{fmt::Debug, sync::Arc};
 
 use futures::{
-	Future, FutureExt, TryFutureExt,
+	FutureExt, TryFutureExt,
 	future::{Either, ready},
 };
 use rocksdb::{DBPinnableSlice, ReadOptions};

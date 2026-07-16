@@ -427,7 +427,7 @@ pub(super) async fn presence_timer(
 
 #[cfg(test)]
 mod tests {
-	use ruma::{presence::PresenceState, uint, user_id};
+	use ruma::{uint, user_id};
 
 	use super::*;
 

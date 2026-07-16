@@ -1,8 +1,6 @@
 //! Extended external extensions to futures::FutureExt
 
-use std::marker::Unpin;
-
-use futures::{Future, future, future::Select};
+use futures::{future, future::Select};
 
 /// This interface is not necessarily complete; feel free to add as-needed.
 pub trait ExtExt<T>

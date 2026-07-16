@@ -1,4 +1,4 @@
-use std::{collections::HashMap, hash::Hash, iter::IntoIterator};
+use std::{collections::HashMap, hash::Hash};
 
 use futures::{Stream, StreamExt};
 use tuwunel_core::validated;

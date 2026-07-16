@@ -1,6 +1,6 @@
 #![expect(clippy::wrong_self_convention)]
 
-use futures::{Future, FutureExt, future::OptionFuture};
+use futures::{FutureExt, future::OptionFuture};
 
 use super::super::BoolExt;
 

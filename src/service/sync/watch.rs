@@ -1,5 +1,5 @@
 use futures::{
-	Future, FutureExt, Stream, StreamExt, future::BoxFuture, pin_mut, stream::FuturesUnordered,
+	FutureExt, Stream, StreamExt, future::BoxFuture, pin_mut, stream::FuturesUnordered,
 };
 use ruma::{DeviceId, RoomId, UserId};
 use tuwunel_core::{implement, trace};

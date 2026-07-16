@@ -2,8 +2,6 @@ mod expect_into;
 mod expected;
 mod tried;
 
-use std::convert::TryFrom;
-
 pub use checked_ops::checked_ops;
 
 pub use self::{expect_into::ExpectInto, expected::Expected, tried::Tried};

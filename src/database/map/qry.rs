@@ -1,6 +1,5 @@
-use std::{convert::AsRef, fmt::Debug, io::Write, sync::Arc};
+use std::{fmt::Debug, io::Write, sync::Arc};
 
-use futures::Future;
 use serde::Serialize;
 use tuwunel_core::{Result, arrayvec::ArrayVec, implement};
 

@@ -1,4 +1,4 @@
-use std::{borrow::Borrow, mem::size_of_val, sync::Arc};
+use std::{borrow::Borrow, sync::Arc};
 
 use futures::{FutureExt, Stream, StreamExt, pin_mut};
 use ruma::{EventId, OwnedRoomId, RoomId, events::StateEventType};

@@ -1,4 +1,4 @@
-use std::{cmp, convert::TryFrom};
+use std::cmp;
 
 use rocksdb::{Cache, DBRecoveryMode, Env, LogLevel, Options, statistics::StatsLevel};
 use tuwunel_core::{Config, Result, utils};

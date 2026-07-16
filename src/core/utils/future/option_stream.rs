@@ -1,4 +1,4 @@
-use futures::{Future, FutureExt, Stream, StreamExt, future::OptionFuture};
+use futures::{FutureExt, Stream, StreamExt, future::OptionFuture};
 
 use super::super::IterStream;
 

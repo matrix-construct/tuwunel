@@ -4,8 +4,6 @@
 // caller only ever caring about result status while discarding all contents.
 #![expect(clippy::wrong_self_convention)]
 
-use std::marker::Unpin;
-
 use futures::{
 	TryFuture, TryFutureExt, future,
 	future::{MapOkOrElse, TrySelect, UnwrapOrElse},

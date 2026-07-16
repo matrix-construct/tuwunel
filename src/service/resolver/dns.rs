@@ -311,7 +311,7 @@ async fn resolve_to_reqwest(
 	resolver: Arc<TokioResolver>,
 	name: Name,
 ) -> ResolvingResult {
-	use std::{io, io::ErrorKind::Interrupted};
+	use std::io::ErrorKind::Interrupted;
 
 	let handle_shutdown = || Box::new(io::Error::new(Interrupted, "Server shutting down"));
 

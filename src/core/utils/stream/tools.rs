@@ -3,7 +3,7 @@
 use std::{collections::HashMap, hash::Hash};
 
 use arrayvec::ArrayVec;
-use futures::{Future, Stream, StreamExt};
+use futures::{Stream, StreamExt};
 
 use super::ReadyExt;
 use crate::{expected, utils::rand::index};

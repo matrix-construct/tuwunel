@@ -8,12 +8,11 @@ use std::{
 	collections::BTreeMap,
 	ffi::OsStr,
 	fs::{self, read_dir},
-	iter::IntoIterator,
 	sync::Arc,
 };
 
 use async_trait::async_trait;
-use futures::{Future, FutureExt, Stream, TryStreamExt};
+use futures::{FutureExt, Stream, TryStreamExt};
 use ruma::{RoomAliasId, RoomId, UserId, api::appservice::Registration};
 use tokio::sync::{RwLock, RwLockReadGuard};
 use tuwunel_core::{Err, Result, err, utils::stream::IterStream};

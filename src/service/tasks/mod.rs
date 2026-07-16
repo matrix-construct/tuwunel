@@ -8,7 +8,6 @@
 
 use std::{
 	collections::BTreeMap,
-	future::Future,
 	sync::{Arc, Mutex as StdMutex},
 	time::Duration,
 };

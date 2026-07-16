@@ -16,7 +16,6 @@
 
 use std::{
 	fmt,
-	marker::Sync,
 	net::{IpAddr, SocketAddr},
 	sync::Arc,
 };

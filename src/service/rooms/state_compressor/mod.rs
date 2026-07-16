@@ -1,7 +1,6 @@
 use std::{
 	collections::{BTreeSet, HashMap},
 	fmt::{Debug, Write},
-	mem::size_of,
 	sync::{Arc, Mutex},
 };
 

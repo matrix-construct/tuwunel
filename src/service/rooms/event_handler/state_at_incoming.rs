@@ -1,4 +1,4 @@
-use std::{collections::HashMap, iter::Iterator};
+use std::collections::HashMap;
 
 use futures::{FutureExt, StreamExt, TryFutureExt, TryStreamExt, future::try_join};
 use ruma::{OwnedEventId, RoomId, RoomVersionId};

@@ -5,7 +5,7 @@ use std::{
 };
 
 use futures::{
-	Future, Stream, StreamExt,
+	Stream, StreamExt,
 	stream::{FuturesUnordered, unfold},
 };
 use ruma::OwnedEventId;

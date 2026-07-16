@@ -1,6 +1,6 @@
 //! Future extension for Partial Equality against present value
 
-use futures::{Future, FutureExt};
+use futures::FutureExt;
 
 pub trait ReadyEqExt<T>
 where

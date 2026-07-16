@@ -1,6 +1,6 @@
 use std::{fmt, fmt::Debug, time::SystemTime};
 
-use futures::{Future, FutureExt, lock::Mutex};
+use futures::{FutureExt, lock::Mutex};
 use tokio::time::Instant;
 use tuwunel_core::{Err, Result};
 
