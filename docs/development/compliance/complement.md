@@ -4,10 +4,10 @@ Tuwunel runs the [Complement](https://github.com/matrix-org/complement) Matrix h
 
 ## Counts
 
-- Test groups: 205. Passing: **81.5%**
-  - ✅ `pass`: 167
+- Test groups: 205. Passing: **82.0%**
+  - ✅ `pass`: 168
   - 🟨 `some`: 17
-  - ❌ `fail`: 19
+  - ❌ `fail`: 18
   - ⬛ `skip`: 2
 
 - Subtests: 587. Passing: **77.9%**
@@ -20,7 +20,7 @@ Tuwunel runs the [Complement](https://github.com/matrix-org/complement) Matrix h
 | Test | Status | Subtests |
 |---|---|---|
 | `TestACLs` | ✅ | – |
-| `TestACLsForEDUs` | ❌ | – |
+| `TestACLsForEDUs` | ✅ | – |
 | `TestAddAccountData` | ✅ | 2/0/0 |
 | `TestArchivedRoomsHistory` | 🟨 | 3/2/1 |
 | `TestAsyncUpload` | ✅ | 6/0/0 |

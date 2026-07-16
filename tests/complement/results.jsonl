@@ -1,5 +1,5 @@
 {"Action":"pass","Test":"TestACLs"}
-{"Action":"fail","Test":"TestACLsForEDUs"}
+{"Action":"pass","Test":"TestACLsForEDUs"}
 {"Action":"pass","Test":"TestAddAccountData"}
 {"Action":"pass","Test":"TestAddAccountData/Can_add_global_account_data"}
 {"Action":"pass","Test":"TestAddAccountData/Can_add_room_account_data"}
