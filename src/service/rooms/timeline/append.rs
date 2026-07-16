@@ -19,6 +19,7 @@ use tuwunel_core::{
 		pdu::{PduCount, PduEvent, PduId, RawPduId},
 		room_version,
 	},
+	smallvec::SmallVec,
 	utils::{self, result::LogErr},
 };
 use tuwunel_database::Json;
@@ -27,6 +28,8 @@ use super::{ExtractBody, ExtractRelatesTo, ExtractRelatesToEventId, RoomMutexGua
 use crate::rooms::{
 	short::ShortRoomId, state_accessor::plain_text_topic, state_compressor::CompressedState,
 };
+
+type Band<'a> = SmallVec<[&'a EventId; 1]>;
 
 /// Append the incoming event setting the state snapshot to the state from
 /// the server that sent the event.
@@ -62,10 +65,14 @@ where
 			.pdu_metadata
 			.mark_as_referenced(&pdu.room_id, pdu.prev_events.iter().map(AsRef::as_ref));
 
-		self.services
-			.state
-			.set_forward_extremities(&pdu.room_id, new_room_leafs, state_lock)
-			.await;
+		// Keep the previous band rather than let a soft-failed event empty it; a
+		// later accepted event self-chains and heals it.
+		if let Some(new_room_leafs) = nonempty_band(new_room_leafs) {
+			self.services
+				.state
+				.set_forward_extremities(&pdu.room_id, new_room_leafs.into_iter(), state_lock)
+				.await;
+		}
 
 		return Ok(None);
 	}
@@ -75,6 +82,15 @@ where
 		.await?;
 
 	Ok(Some(pdu_id))
+}
+
+fn nonempty_band<'a, Leafs>(leafs: Leafs) -> Option<Band<'a>>
+where
+	Leafs: Iterator<Item = &'a EventId>,
+{
+	let leafs: Band<'_> = leafs.collect();
+
+	(!leafs.is_empty()).then_some(leafs)
 }
 
 /// Creates a new persisted data unit and adds it to a room.
@@ -396,4 +412,30 @@ fn append_pdu_json(&self, pdu_id: &RawPduId, pdu: &PduEvent, json: &CanonicalJso
 	self.db
 		.roomid_tscount_pducount
 		.put_raw((pdu.room_id(), ts, count_key), pdu_id.count());
+}
+
+#[cfg(test)]
+mod tests {
+	use std::iter::empty;
+
+	use ruma::event_id;
+
+	use super::*;
+
+	#[test]
+	fn empty_band_is_skipped() {
+		assert!(nonempty_band(empty::<&EventId>()).is_none());
+	}
+
+	#[test]
+	fn nonempty_band_preserves_all_leaves() {
+		let leaves = [event_id!("$a:test.local"), event_id!("$b:test.local")];
+
+		let kept: Vec<&EventId> = nonempty_band(leaves.iter().copied())
+			.expect("non-empty band retained")
+			.into_iter()
+			.collect();
+
+		assert_eq!(kept, leaves);
+	}
 }
