@@ -3,11 +3,8 @@ use ruma::UInt;
 use synapse_admin_api::media::delete_media_by_date_size::v1 as delete_media_by_date_size;
 use tuwunel_core::{Err, Result};
 
+use super::MIN_BEFORE_TS;
 use crate::{Ruma, RumaResponse, client::admin::require_admin};
-
-/// Rejects a `before_ts` earlier than this, mirroring Synapse's "year 1970"
-/// lower bound on the millisecond cutoff.
-const MIN_BEFORE_TS: u64 = 30_000_000_000;
 
 /// # `POST /_synapse/admin/v1/media/delete`
 pub(crate) async fn admin_delete_media_by_date_size_route(

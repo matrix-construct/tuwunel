@@ -59,7 +59,7 @@ fn into_user_media(entry: UserMediaEntry) -> UserMedia {
 		last_access_ts: UInt::from(0_u32),
 		quarantined_by: None,
 		safe_from_quarantine: false,
-		user_id: Some(entry.user_id),
+		user_id: entry.user_id,
 		authenticated: None,
 		sha256: None,
 	}

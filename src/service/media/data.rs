@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use futures::{StreamExt, pin_mut};
+use futures::{Stream, StreamExt, pin_mut};
 use ruma::{Mxc, OwnedMxcUri, OwnedUserId, UserId, http_headers::ContentDisposition};
 use serde::Deserialize;
 #[cfg(feature = "url_preview")]
@@ -307,6 +307,20 @@ impl Data {
 		Ok(Metadata { content_disposition, content_type, key })
 	}
 
+	/// Uploading local user of the media at the given MXC, from the uploader
+	/// index.
+	pub(super) async fn mxc_user(&self, mxc: &Mxc<'_>) -> Option<OwnedUserId> {
+		let prefix = (mxc, Interfix);
+		let users = self
+			.mediaid_user
+			.stream_prefix(&prefix)
+			.ignore_err()
+			.map(|(_, user): (Ignore, &UserId)| user.to_owned());
+
+		pin_mut!(users);
+		users.next().await
+	}
+
 	/// Gets all the MXCs associated with a user
 	pub(super) async fn get_all_user_mxcs(&self, user_id: &UserId) -> Vec<OwnedMxcUri> {
 		self.mediaid_user
@@ -345,6 +359,16 @@ impl Data {
 			.ok()
 			.filter(CachedPreview::valid)
 			.ok_or(err!(Request(NotFound("Expired from cache"))))
+	}
+
+	/// Streams every (mxc, uploader) pair in the user-media index.
+	pub(super) fn all_uploads(
+		&self,
+	) -> impl Stream<Item = (OwnedMxcUri, OwnedUserId)> + Send + '_ {
+		self.mediaid_user
+			.keys()
+			.ignore_err()
+			.map(|(mxc, user): (&str, &UserId)| (mxc.into(), user.to_owned()))
 	}
 }
 

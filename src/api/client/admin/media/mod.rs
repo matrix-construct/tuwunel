@@ -3,7 +3,11 @@
 mod delete_media;
 mod delete_media_by_date_size;
 mod delete_user_media;
+mod list_room_media;
 mod list_user_media;
+mod purge_media_cache;
+mod query_media;
+mod user_media_statistics;
 
 use ruma::{
 	UInt,
@@ -16,8 +20,14 @@ pub(crate) use self::{
 	delete_media::admin_delete_media_route,
 	delete_media_by_date_size::admin_delete_media_by_date_size_route,
 	delete_user_media::admin_delete_user_media_route,
-	list_user_media::admin_list_user_media_route,
+	list_room_media::admin_list_room_media_route, list_user_media::admin_list_user_media_route,
+	purge_media_cache::admin_purge_media_cache_route, query_media::admin_query_media_route,
+	user_media_statistics::admin_user_media_statistics_route,
 };
+
+/// Rejects a `before_ts` earlier than this, mirroring Synapse's "year 1970"
+/// lower bound on the millisecond cutoff.
+pub(super) const MIN_BEFORE_TS: u64 = 30_000_000_000;
 
 /// Sort field selector, mapping the wire `order_by` onto the derivable columns.
 #[derive(Clone, Copy)]
@@ -123,7 +133,7 @@ mod tests {
 			upload_name: Some(format!("{media_id}.png")),
 			media_length,
 			created_ts,
-			user_id: user_id!("@alice:example.org").to_owned(),
+			user_id: Some(user_id!("@alice:example.org").to_owned()),
 		}
 	}
 

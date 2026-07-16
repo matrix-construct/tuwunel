@@ -190,9 +190,13 @@ fn register_synapse_admin_rooms_routes(router: Router<State>) -> Router<State> {
 
 fn register_synapse_admin_media_routes(router: Router<State>) -> Router<State> {
 	router
+		.ruma_route(&client::admin::media::admin_query_media_route)
 		.ruma_route(&client::admin::media::admin_delete_media_route)
 		.ruma_route(&client::admin::media::admin_list_user_media_route)
+		.ruma_route(&client::admin::media::admin_list_room_media_route)
 		.ruma_route(&client::admin::media::admin_delete_user_media_route)
+		.ruma_route(&client::admin::media::admin_purge_media_cache_route)
+		.ruma_route(&client::admin::media::admin_user_media_statistics_route)
 		.route(
 			"/_synapse/admin/v1/media/delete",
 			post(client::admin::media::admin_delete_media_by_date_size_route),

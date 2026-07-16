@@ -13,7 +13,7 @@ use std::{
 
 use async_trait::async_trait;
 use base64::{Engine as _, engine::general_purpose};
-use futures::{FutureExt, StreamExt, TryFutureExt, TryStreamExt, pin_mut};
+use futures::{FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt, pin_mut};
 use http::StatusCode;
 use object_store::ObjectMeta;
 use ruma::{
@@ -46,7 +46,8 @@ pub struct Media {
 }
 
 /// One row of a user's uploaded media, holding only the fields tuwunel can
-/// derive from the uploader index and storage-provider object metadata.
+/// derive from the uploader index and storage-provider object metadata. The
+/// uploader is carried when the index holds a row for it.
 #[derive(Clone, Debug)]
 pub struct UserMediaEntry {
 	pub mxc: OwnedMxcUri,
@@ -54,7 +55,16 @@ pub struct UserMediaEntry {
 	pub upload_name: Option<String>,
 	pub media_length: Option<u64>,
 	pub created_ts: u64,
+	pub user_id: Option<OwnedUserId>,
+}
+
+/// One locally-uploaded media item's uploader and storage-object byte length
+/// and modification time, the row shape of the media-statistics scan.
+#[derive(Clone, Debug)]
+pub struct UploadStat {
 	pub user_id: OwnedUserId,
+	pub media_length: u64,
+	pub created_ts: u64,
 }
 
 /// For MSC2246
@@ -548,14 +558,28 @@ impl Service {
 			.await
 			.into_iter()
 			.stream()
-			.broad_filter_map(async |mxc| self.user_media_entry(user, mxc).await)
+			.broad_filter_map(async |mxc| self.user_media_entry(Some(user), mxc).await)
 			.collect()
 			.await;
 
 		Ok(entries)
 	}
 
-	async fn user_media_entry(&self, user: &UserId, mxc: OwnedMxcUri) -> Option<UserMediaEntry> {
+	/// Derivable metadata for the single media item at the given MXC, with the
+	/// uploading local user resolved from the uploader index when present.
+	#[tracing::instrument(level = "debug", skip(self))]
+	pub async fn media_entry(&self, mxc: &Mxc<'_>) -> Option<UserMediaEntry> {
+		let user = self.db.mxc_user(mxc).await;
+
+		self.user_media_entry(user.as_deref(), mxc.to_string().into())
+			.await
+	}
+
+	async fn user_media_entry(
+		&self,
+		user: Option<&UserId>,
+		mxc: OwnedMxcUri,
+	) -> Option<UserMediaEntry> {
 		let parts = mxc.parts().ok()?;
 		let Metadata { content_type, content_disposition, key } =
 			self.get_metadata(&parts).await?;
@@ -568,9 +592,28 @@ impl Service {
 			upload_name,
 			media_length: object.as_ref().map(|object| object.size),
 			created_ts: object.as_ref().map(mtime_millis).unwrap_or(0),
-			user_id: user.to_owned(),
+			user_id: user.map(ToOwned::to_owned),
 			mxc,
 		})
+	}
+
+	/// Uploader, byte length and storage modification time of every media item
+	/// uploaded by a local user, one row per upload; media missing from every
+	/// storage provider are skipped.
+	pub fn upload_stats(&self) -> impl Stream<Item = UploadStat> + Send + '_ {
+		self.db
+			.all_uploads()
+			.broad_filter_map(async |(mxc, user_id)| {
+				let parts = mxc.parts().ok()?;
+				let Metadata { key, .. } = self.get_metadata(&parts).await?;
+				let object = self.head_meta(&key).await?;
+
+				Some(UploadStat {
+					user_id,
+					media_length: object.size,
+					created_ts: mtime_millis(&object),
+				})
+			})
 	}
 
 	/// Deletes local media older than `before_ts` (by storage-provider mtime)
