@@ -128,10 +128,7 @@ async fn handle_room(
 		.flat_ok()
 		.unwrap_or_else(|| (Vec::new(), true, PduCount::default()));
 
-	let required_state = required_state
-		.into_iter()
-		.filter(|_| !timeline_pdus.is_empty())
-		.collect::<Vec<_>>();
+	let required_state = required_state.into_iter().collect::<Vec<_>>();
 
 	let prev_batch = timeline_pdus
 		.first()
