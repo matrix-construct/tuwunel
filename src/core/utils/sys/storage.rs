@@ -197,6 +197,9 @@ fn dev_from_path(path: &Path) -> Result<(dev_t, dev_t)> {
 	#[cfg(target_os = "linux")]
 	let (major, minor) = (major.into(), minor.into());
 
+	#[cfg(target_os = "android")]
+	let (major, minor) = (major.try_into()?, minor.try_into()?);
+
 	Ok((major, minor))
 }
 
