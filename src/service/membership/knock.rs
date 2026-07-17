@@ -12,7 +12,8 @@ use ruma::{
 	},
 };
 use tuwunel_core::{
-	Err, Event, PduCount, Result, at, debug, debug_info, debug_warn, err, implement, info,
+	Err, Event, PduCount, Result, async_noinline, at, debug, debug_info, debug_warn, err,
+	implement, info,
 	matrix::event::gen_event_id,
 	pdu::{PduBuilder, PduEvent},
 	trace, utils, warn,
@@ -30,19 +31,21 @@ use crate::{
 };
 
 #[implement(Service)]
+#[async_noinline]
 #[tracing::instrument(
+	name = "knock",
 	level = "debug",
 	skip_all,
 	fields(%sender_user, %room_id)
 )]
-pub async fn knock(
-	&self,
-	sender_user: &UserId,
-	room_id: &RoomId,
-	orig_server_name: Option<&RoomOrAliasId>,
+pub async fn knock<'a>(
+	&'a self,
+	sender_user: &'a UserId,
+	room_id: &'a RoomId,
+	orig_server_name: Option<&'a RoomOrAliasId>,
 	reason: Option<String>,
-	servers: &[OwnedServerName],
-	state_lock: &RoomMutexGuard,
+	servers: &'a [OwnedServerName],
+	state_lock: &'a RoomMutexGuard,
 ) -> Result {
 	let servers =
 		get_servers_for_room(&self.services, sender_user, room_id, orig_server_name, servers)

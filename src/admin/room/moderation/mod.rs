@@ -4,7 +4,7 @@ mod list_banned_rooms;
 mod unban_room;
 
 use clap::Subcommand;
-use futures::{FutureExt, StreamExt};
+use futures::StreamExt;
 use ruma::{OwnedRoomOrAliasId, RoomId};
 use tuwunel_core::{Result, debug, utils::ReadyExt, warn};
 use tuwunel_service::Services;
@@ -70,7 +70,6 @@ async fn do_ban_room(services: &Services, room_id: &RoomId) {
 		if let Err(e) = services
 			.membership
 			.leave(user_id, room_id, None, false, &state_lock)
-			.boxed()
 			.await
 		{
 			warn!("Failed to leave room: {e}");

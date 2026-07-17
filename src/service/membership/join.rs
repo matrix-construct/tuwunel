@@ -851,7 +851,6 @@ async fn join_local(
 	self.services
 		.event_handler
 		.handle_incoming_pdu(&remote_server, room_id, &signed_event_id, signed_value, true)
-		.boxed()
 		.await?;
 
 	Ok(())

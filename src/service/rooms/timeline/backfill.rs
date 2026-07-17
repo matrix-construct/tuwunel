@@ -349,7 +349,6 @@ pub async fn backfill_pdu(
 		.services
 		.event_handler
 		.handle_incoming_pdu(origin, room_id, &event_id, value, false)
-		.boxed()
 		.await?
 		.map(at!(1))
 		.is_some_and(is_false!());

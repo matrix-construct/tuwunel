@@ -102,7 +102,6 @@ impl Service {
 					.services
 					.membership
 					.leave(&user_id, room_id, Some("Room Deleted".into()), true, state_lock)
-					.boxed()
 					.await
 				{
 					| Ok(()) => kicked.push(user_id),

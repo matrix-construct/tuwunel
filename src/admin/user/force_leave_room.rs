@@ -1,4 +1,3 @@
-use futures::FutureExt;
 use ruma::OwnedRoomOrAliasId;
 use tuwunel_core::{Err, Result};
 
@@ -36,7 +35,6 @@ pub(super) async fn force_leave_room(
 	self.services
 		.membership
 		.leave(&user_id, &room_id, None, false, &state_lock)
-		.boxed()
 		.await?;
 
 	drop(state_lock);

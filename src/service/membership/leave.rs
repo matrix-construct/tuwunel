@@ -12,7 +12,7 @@ use ruma::{
 	serde::Raw,
 };
 use tuwunel_core::{
-	Err, Error, Result, debug_info, debug_warn, err, implement,
+	Err, Error, Result, async_noinline, debug_info, debug_warn, err, implement,
 	matrix::{PduCount, pdu::check_rules, room_version},
 	pdu::PduBuilder,
 	utils::{self, FutureBoolExt, future::ReadyBoolExt},
@@ -23,18 +23,20 @@ use super::Service;
 use crate::rooms::timeline::RoomMutexGuard;
 
 #[implement(Service)]
+#[async_noinline]
 #[tracing::instrument(
+    name = "leave",
     level = "debug",
     skip_all,
     fields(%room_id, %user_id)
 )]
-pub async fn leave(
-	&self,
-	user_id: &UserId,
-	room_id: &RoomId,
+pub async fn leave<'a>(
+	&'a self,
+	user_id: &'a UserId,
+	room_id: &'a RoomId,
 	reason: Option<String>,
 	remote_leave_now: bool,
-	state_lock: &RoomMutexGuard,
+	state_lock: &'a RoomMutexGuard,
 ) -> Result {
 	let leave_content = RoomMemberEventContent {
 		membership: MembershipState::Leave,

@@ -363,7 +363,6 @@ async fn handle_pdu(
 		.event_handler
 		.handle_incoming_pdu(origin, room_id, &event_id, value, true)
 		.map_ok(|_| ())
-		.boxed()
 		.await;
 
 	completed.store(true, Ordering::Release);

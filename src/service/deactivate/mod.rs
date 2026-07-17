@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use futures::{FutureExt, StreamExt};
+use futures::StreamExt;
 use ruma::{
 	OwnedRoomId, UserId,
 	events::{StateEventType, room::power_levels::RoomPowerLevelsEventContent},
@@ -173,7 +173,6 @@ impl Service {
 				.services
 				.membership
 				.leave(user_id, &room_id, None, false, &state_lock)
-				.boxed()
 				.await
 			{
 				warn!(%user_id, "Failed to leave {room_id} remotely: {e}");

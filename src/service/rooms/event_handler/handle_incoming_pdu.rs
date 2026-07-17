@@ -10,7 +10,7 @@ use ruma::{
 	},
 };
 use tuwunel_core::{
-	Err, Result, debug,
+	Err, Result, async_noinline, debug,
 	debug::INFO_SPAN_LEVEL,
 	debug_warn, err, implement,
 	matrix::{Event, PduCount, PduEvent, pdu::MAX_PREV_EVENTS, room_version::from_create_event},
@@ -60,6 +60,7 @@ type Handled = Option<(RawPduId, bool)>;
 /// 14. Check if the event passes auth based on the "current state" of the room,
 ///     if not soft fail it
 #[implement(super::Service)]
+#[async_noinline]
 #[tracing::instrument(
 	name = "pdu",
 	level = INFO_SPAN_LEVEL,

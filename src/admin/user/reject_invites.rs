@@ -1,4 +1,4 @@
-use futures::{FutureExt, StreamExt};
+use futures::StreamExt;
 use ruma::OwnedRoomId;
 use tuwunel_core::{
 	Err, Result, debug_warn,
@@ -33,7 +33,6 @@ pub(super) async fn reject_invites(&self, user_id: String, reason: Option<String
 			.services
 			.membership
 			.leave(&user_id, &room_id, reason.map(str::to_owned), false, &state_lock)
-			.boxed()
 			.await
 		{
 			| Ok(()) => RejectInvitesAcc { rejected: 1, ..Default::default() },
