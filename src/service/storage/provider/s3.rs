@@ -93,6 +93,7 @@ pub(in super::super) fn new(
 		"Started S3 storage client."
 	);
 
+	#[allow(clippy::allow_attributes, clippy::redundant_clone)] // buggy, nursery
 	let signer: Arc<dyn Signer> = Arc::new(client.clone());
 
 	let provider = Provider {
