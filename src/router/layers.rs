@@ -1,12 +1,21 @@
 #[cfg(test)]
 mod tests;
 
-use std::{any::Any, sync::Arc, time::Duration};
+use std::{
+	any::Any,
+	convert::Infallible,
+	mem::replace,
+	sync::Arc,
+	task::{Context, Poll},
+	time::Duration,
+};
 
 use axum::{
 	Extension, Router,
-	extract::{DefaultBodyLimit, MatchedPath},
+	extract::{DefaultBodyLimit, MatchedPath, Request},
+	response::{IntoResponse, Response},
 };
+use futures::{FutureExt, future::Map};
 use http::{
 	HeaderValue, Method, StatusCode,
 	header::{self, ETAG, HeaderName, IF_MATCH, IF_NONE_MATCH},
@@ -14,7 +23,7 @@ use http::{
 };
 use ipnet::IpNet;
 use tower::{
-	ServiceBuilder,
+	Layer, Service, ServiceBuilder,
 	layer::util::Identity,
 	util::{Either, option_layer},
 };
@@ -32,6 +41,23 @@ use tuwunel_core::{Result, Server, config::IpSource, debug, error};
 use tuwunel_service::Services;
 
 use crate::{request, router};
+
+type Convert = fn(Result<Response, StatusCode>) -> Result<Response, Infallible>;
+
+/// Bespoke `axum::middleware::from_fn`: threading the handler's future type
+/// through `F` spares the boxes the generic middleware allocates per request.
+#[derive(Clone)]
+pub(crate) struct HandleLayer<F> {
+	pub(crate) services: Arc<Services>,
+	pub(crate) handler: F,
+}
+
+#[derive(Clone)]
+pub(crate) struct Handle<S, F> {
+	services: Arc<Services>,
+	handler: F,
+	inner: S,
+}
 
 const TUWUNEL_CSP: &[&str; 5] = &[
 	"default-src 'none'",
@@ -77,7 +103,10 @@ pub(crate) fn build(services: &Arc<Services>) -> Result<(Router, Guard)> {
 				.on_request(DefaultOnRequest::new().level(Level::TRACE))
 				.on_response(DefaultOnResponse::new().level(Level::DEBUG)),
 		)
-		.layer(axum::middleware::from_fn_with_state(Arc::clone(services), request::handle))
+		.layer(HandleLayer {
+			services: Arc::clone(services),
+			handler: request::handle,
+		})
 		.layer(trusted_peer_subnets_layer(&server.config.ip_source_trusted_subnets))
 		.layer(ip_source_layer(server.config.ip_source))
 		.layer(ResponseBodyTimeoutLayer::new(Duration::from_secs(
@@ -132,6 +161,41 @@ pub(crate) fn build(services: &Arc<Services>) -> Result<(Router, Guard)> {
 
 	let (router, guard) = router::build(services);
 	Ok((router.layer(layers), guard))
+}
+
+impl<S, F: Clone> Layer<S> for HandleLayer<F> {
+	type Service = Handle<S, F>;
+
+	fn layer(&self, inner: S) -> Self::Service {
+		Handle {
+			services: self.services.clone(),
+			handler: self.handler.clone(),
+			inner,
+		}
+	}
+}
+
+impl<S, F, Fut> Service<Request> for Handle<S, F>
+where
+	S: Service<Request, Error = Infallible> + Clone,
+	F: FnMut(Arc<Services>, Request, S) -> Fut,
+	Fut: Future<Output = Result<Response, StatusCode>>,
+{
+	type Error = Infallible;
+	type Future = Map<Fut, Convert>;
+	type Response = Response;
+
+	fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+		self.inner.poll_ready(cx)
+	}
+
+	fn call(&mut self, req: Request) -> Self::Future {
+		let convert: Convert = |result| Ok(result.into_response());
+		let unready = self.inner.clone();
+		let inner = replace(&mut self.inner, unready);
+
+		(self.handler)(self.services.clone(), req, inner).map(convert)
+	}
 }
 
 #[cfg(any(

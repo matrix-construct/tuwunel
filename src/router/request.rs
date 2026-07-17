@@ -1,17 +1,19 @@
 use std::{
+	convert::Infallible,
 	fmt::Debug,
 	sync::{Arc, atomic::Ordering},
 	time::Duration,
 };
 
 use axum::{
-	extract::State,
+	extract::Request,
 	response::{IntoResponse, Response},
 };
 use futures::FutureExt;
 use http::{Method, StatusCode, Uri};
 use ruma::api::error::ErrorKind;
 use tokio::{sync::Notify, task, time::sleep};
+use tower::{Service, ServiceExt};
 use tracing::Span;
 use tuwunel_core::{Error, Result, debug, debug_error, debug_warn, defer, error, trace};
 use tuwunel_service::Services;
@@ -30,11 +32,16 @@ use tuwunel_service::Services;
 			.fetch_add(1, Ordering::Relaxed)
 	)
 )]
-pub(crate) async fn handle(
-	State(services): State<Arc<Services>>,
-	req: http::Request<axum::body::Body>,
-	next: axum::middleware::Next,
-) -> Result<Response, StatusCode> {
+pub(crate) async fn handle<S>(
+	services: Arc<Services>,
+	req: Request,
+	inner: S,
+) -> Result<Response, StatusCode>
+where
+	S: Service<Request, Error = Infallible> + Send + 'static,
+	S::Response: IntoResponse,
+	S::Future: Send + 'static,
+{
 	if !services.server.is_running() {
 		debug_warn!(
 			method = %req.method(),
@@ -50,19 +57,24 @@ pub(crate) async fn handle(
 	let parent = Span::current();
 	let response = match method {
 		| Method::PUT | Method::POST | Method::DELETE | Method::PATCH =>
-			spawn_execute(services, req, next, parent).await?,
-		| _ => execute(&services, req, next, &parent).await,
+			spawn_execute(services, req, inner, parent).await?,
+		| _ => execute(&services, req, inner, &parent).await,
 	};
 
 	handle_result(&method, &uri, response)
 }
 
-async fn spawn_execute(
+async fn spawn_execute<S>(
 	services: Arc<Services>,
-	mut req: http::Request<axum::body::Body>,
-	next: axum::middleware::Next,
+	mut req: Request,
+	inner: S,
 	parent: Span,
-) -> Result<Response, StatusCode> {
+) -> Result<Response, StatusCode>
+where
+	S: Service<Request, Error = Infallible> + Send + 'static,
+	S::Response: IntoResponse,
+	S::Future: Send + 'static,
+{
 	let detached = Arc::new(Notify::new());
 	req.extensions_mut().insert(detached.clone());
 
@@ -72,7 +84,7 @@ async fn spawn_execute(
 		.runtime()
 		.spawn(async move {
 			tokio::select! {
-				response = execute(&services, req, next, &parent) => response,
+				response = execute(&services, req, inner, &parent) => response,
 				response = services.server.until_shutdown()
 					.then(|()| {
 						let timeout = services.config.client_shutdown_timeout;
@@ -109,15 +121,19 @@ async fn spawn_execute(
 	)
 )]
 #[cfg_attr(not(debug_assertions), expect(unused_variables))]
-async fn execute(
+async fn execute<S>(
 	// we made a safety contract that Services will not go out of scope
 	// during the request; this ensures a reference is accounted for at
 	// the base frame of the task regardless of its detachment.
 	services: &Arc<Services>,
-	req: http::Request<axum::body::Body>,
-	next: axum::middleware::Next,
+	req: Request,
+	inner: S,
 	parent: &Span,
-) -> Response {
+) -> Response
+where
+	S: Service<Request, Error = Infallible>,
+	S::Response: IntoResponse,
+{
 	#[cfg(debug_assertions)]
 	services
 		.server
@@ -137,7 +153,10 @@ async fn execute(
 			.fetch_sub(1, Ordering::Relaxed);
 	}};
 
-	next.run(req).await
+	inner
+		.oneshot(req)
+		.map(IntoResponse::into_response)
+		.await
 }
 
 fn handle_result(method: &Method, uri: &Uri, result: Response) -> Result<Response, StatusCode> {
