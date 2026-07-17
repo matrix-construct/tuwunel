@@ -10,6 +10,6 @@ pub(super) async fn list_backups(&self) -> Result {
 		.engine
 		.backup_list()?
 		.try_stream()
-		.try_for_each(|result| write!(self, "{result}"))
+		.try_for_each(|result| writeln!(self, "{result}"))
 		.await
 }
