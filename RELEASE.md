@@ -1,69 +1,61 @@
-# Tuwunel 1.8.1
+# Tuwunel 1.8.2
 
-July 9, 2026
+July 17, 2026
 
 ### New Features & Enhancements
 
-- **Synapse-compatible admin API**. The Synapse admin surface is served: user, room, media, device and access-token endpoints, the version and event-fetch endpoints, and room deletion, purge, and background-task tracking, backed by an in-memory task tracker and documented on a coverage status page. Opened by @iwalkalone69 in (#38). The user endpoints include listing a user's joined rooms, opened by @ngophuocloi-miracle-aavn in (#494).
+- **URL preview media proxying** relays link-preview media through the server, now covering `og:video` and `og:audio` alongside images, so the third party sees Tuwunel rather than the requesting client. Nothing is stored permanently: preview media becomes a lazy `mxc://` reference fetched from source on demand. A `url_preview_user_agent` option, with a separate `url_preview_media_user_agent`, lets previews work for sites that block the default agent. Shipped by @az4521 in (#508), closing their own request for video previews (#394). The preview store is rebuilt on CBOR at the same time, replacing a byte-separated format that could shear fields.
 
-- **Threads list** (MSC3856). The `/threads` endpoint now orders threads by latest activity, honors an `include=participated` filter, serves per-requester views that respect ignored users, guards its inputs upfront, and carries the newest edit on each thread's `latest_event`.
+- **Distribution packaging** expands to RPM with a COPR build pipeline (fixes #251) and a SELinux policy module shipped as a `selinux` subpackage (#412), plus an apt repository published from CI and Debian packaging that adopts an existing conduwuit or Conduit database in place. Courtesy of @x86pup.
 
-- **Stable threading** (MSC3440). Threading is advertised in `/versions`, the `related_by_senders` and `related_by_rel_types` event filters are implemented, and nested thread relations are rejected at the send endpoint.
+- Online backups can now be restored and verified, joined by a `delete-backups` admin command, graciously contributed by @x86pup.
 
-- **Sender erasure** (MSC4025). An erasure marker lands with admin surfacing, erased senders' events are served as pruned copies, and federation serving of those events is gated accordingly.
+- MatrixRTC transport discovery (MSC4143) is served without an access token, so Element Call can find a server's transports; contributed by @basnijholt in (#512).
 
-- **Native OIDC account registration and login**, so Tuwunel can act as its own identity provider. Requested by @temp1403-oss (#479).
+- A container `HEALTHCHECK`, backed by a new liveness-probe mode, lets orchestrators track readiness, with appreciation to @x86pup.
 
-- **Configurable default power-level override** for newly created rooms, courtesy of @basnijholt in (#496).
+- A `dns_servers` config option makes the `/etc/resolv.conf` dependency optional, tip of the hat to @x86pup.
 
-- User suspension is now enforced at the API boundary, contributed by @dasha-uwu.
+- **The Synapse-compatible admin API** grows again (#38): server-notice endpoints, user redaction and login-as, federation destination management, and media info, purge, and statistics.
 
-- OAuth falls back to Apple `id_token` claims when the userinfo endpoint fails, shipped by @basnijholt in (#495).
+- **Appservice transaction extensions** deliver richer data to appservices: device-list changes and one-time-key counts with unused fallback key types (MSC3202), and to-device events (MSC4203). Opened by @dark-collective in (#502) and (#501).
 
-- The `admin query raw` commands gain a `put` command and hex key decoding, from @dasha-uwu.
+- **Forward-extremity capping and pruning** guards against extremity blowup with a scored prune engine that always leaves a survivor and protects the local server's own leaves, a cap applied on the federation receive path, and admin `room` commands to list and prune a room's extremities.
 
-- A `SECURITY.md` with a detached PGP signature, along with issue and pull-request templates and contact links, graciously added by @x86pup.
+- **Local state derivation** for incoming federation events lands in observation mode (#419). The server derives an event's state from local ancestry and calls `/state_ids` only for physically absent events, running alongside the existing fetch and comparing while the fetched result stays authoritative.
 
-- Event bundling advances across three proposals: aggregations bundled on search context events (MSC3666), `m.reference` children bundled as an event-id chunk (MSC3267), and the latest `m.replace` edit bundled as a full event (MSC3925).
+- Long admin command output is split across chained reply or thread events, and oversized output is attached as an uploaded file, raised by @grinapo in (#471).
 
-- Private read receipts now carry a timestamp.
+- Pushers rejected by the push gateway are now removed, backed by push-gateway conformance tests and UnifiedPush documentation, raised by @NinekoTheCat in (#20).
 
-- Rust is bumped to 1.95.0.
+- Support for Matrix v1.18 and v1.19 is declared in `/versions`.
+
+- The `max_fetch_prev_events` default is raised to 1024.
 
 ### Bug Fixes
 
-- Sliding sync silently dropped `m.space` rooms, so spaces were absent from the room list where Synapse showed them; the list filters a client omits are now cleared before applying (MSC4186, fixes #503). Reported by @sdenike.
+- Federation delivery no longer runs hot against a peer that has come back. The per-server backoff gate consulted only the current time bucket, so it re-authorized attempts at every timeout boundary and never honored the computed earliest retry, and a stale set of reachability rows could keep muting a recovered server. The verdict now derives from a server's full failure history, a returning peer clears the whole streak, and the old rows are cleared once on upgrade (da0c3f600, ec049f61c). Sincere apologies to anyone whose outbound federation lagged to a server that had recovered.
 
-- Rooms made space-visible did not appear in the space overview for new users. The room hierarchy cache is now evicted on any state change (fixes #498). Reported by @Lazalatin.
+- A proxy or CDN answering a federation request with non-JSON is treated as transient rather than evicting the route outright, and route override eviction is fixed for well-known and SRV-delegated topologies where it was a no-op (b33415d50).
 
-- Registration with OIDC and LDAP configured together was broken: LDAP users are now provisioned even when provider registration is disabled (fixes #499). Reported by @balintbarna.
+- Tuwunel refuses to initialize over the remnants of a database that lacks a readable manifest, instead of treating them as obsolete files and deleting them on open (fixes #510). Reported and diagnosed by @ItsLiyua, whose detail on the two parallel database directories localized the cause.
 
-- Tuwunel builds on FreeBSD again, with rust-rocksdb vendoring RocksDB there (fixes #492). Reported by @syobocat.
+- Native OIDC login completes again: the redirect-completion path returned 405 and produced a redirect Chrome refused (fixes #504, #505). Reported by @isniz and @achetronic.
 
-- The MatrixRTC/Livekit setup docs were missing the Docker address-advertisement configuration, now explained (fixes #493). Reported by @Wanja-L.
+- One-time-key counts match Synapse's shape, and an explicit zero count is preserved, so a client whose key pool is drained still sees `signed_curve25519` and replenishes instead of starving (007033cd5, 164b8da61). Contributed by @basnijholt in (#511).
 
-- Conduit database import gains several repairs: the `roomuserid_joined` repair runs in a single pass, the conduwuit-era membership repairs are skipped for Conduit imports, and systemd's start timeout is extended so long startup migrations are not killed (#41). Thanks to @x86pup.
+- A soft-failed inbound event could compute an empty forward-extremity set and, once persisted, remove every leaf and wedge local sends until a remote event arrived; the previous band is now preserved, and a detached non-create local event on an empty frontier is refused rather than silently forking the room (e0f10343e, 1f1dea699).
 
-- The remote-server version endpoint returns our own version for a self-query instead of failing, with appreciation to @x86pup.
+- The inbound federation profile query returns 404 `M_NOT_FOUND` for an unknown user instead of an empty 200 (76ea07fc9).
 
-- Unauthenticated TURN access was possible with `turn_allow_guests` enabled; guest access is now gated and appservice users are excluded from the guest TURN credentials check, credit to @dasha-uwu.
+- The room ephemeral section is always present in `/sync` responses now, thanks to @x86pup (79bb4af09).
 
-- Federation delivery is steadier: a stale resolver route is evicted on a non-JSON response (9bac54488), the sender flushes when an unhealthy peer shows inbound activity (2d9c6848d), a first-failure retry grace precedes the backoff curve (e7f5769dd), and the sender wakes to retry a failed destination (93a772e47).
+- An empty `device_id` is treated as unspecified and a device id is generated (cfe73cbb2).
 
-- EDU delivery is more reliable: selected device-list and receipt EDUs persist until acknowledged (ffdfc1b41), EDU selections queue past the transaction budget (7091f84fc), and fresh EDUs are selected on the post-response path (356931737).
+- A systemd unit no longer sticks in the deactivating state after an in-place admin restart, fixed by @x86pup (68e034d84).
 
-- `/messages` is forbidden on a room the requester cannot see (a791d7ed5).
+- Non-Linux builds get several repairs, courtesy of @obodnikov: resource-usage reporting compiles on non-unix and no longer panics in macOS thread usage (#509), Ctrl+C actually shuts the server down on non-unix targets (#507), and platform-gated admin commands compile on every target (#506).
 
-- An unsupported method on a known path returns 405 instead of 404 (cd0513a0c).
+- Backup requests that cannot create a backup error instead of reporting success, and backup engine errors propagate rather than being swallowed (f6de800b5, 9b54209d0). Credit to @x86pup.
 
-- The request extractor separates an empty body from a malformed one (80727f81a).
-
-- `is_direct` is omitted from member events unless it is true (adb78b98c).
-
-- The registration email binds regardless of UIA stage order (9b58caede).
-
-- The error log on undecodable presence data is restored (d81f34092).
-
-- FIFO cache column TTLs are bounded to each column's validity window, with intra-L0 compaction enabled for those columns (9b3011aa5, e9004c909).
-
-- Release builds could fail to compile the room-summary layout after a 1.8.0 change; boxing the membership format at the invite edge cuts the recursion (regression d2c473fd4).
+- @x86pup corrected documented config defaults that disagreed with the code (bb9dfb25c), and the `notification_push_path` description is set right (e16a3aea5).

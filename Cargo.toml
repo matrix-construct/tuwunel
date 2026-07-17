@@ -30,7 +30,7 @@ license = "Apache-2.0"
 readme = "README.md"
 repository = "https://github.com/matrix-construct/tuwunel"
 rust-version = "1.95.0"
-version = "1.8.1"
+version = "1.8.2"
 
 [workspace.metadata.crane]
 name = "tuwunel"
