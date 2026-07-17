@@ -37,6 +37,8 @@ jobs:
           COMMITTISH: ${{ inputs.committish || github.ref_name }}
         run: |
           pipx install copr-cli
+          # copr-cli 2.5 imports rich without declaring it as a dependency
+          pipx inject copr-cli rich
           copr-cli buildscm trapacid/tuwunel \
             --clone-url "https://github.com/${{ github.repository }}" \
             --commit "$COMMITTISH" \
