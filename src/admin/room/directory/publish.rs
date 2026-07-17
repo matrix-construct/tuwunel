@@ -1,13 +1,19 @@
 use std::borrow::Cow;
 
 use ruma::{OwnedRoomOrAliasId, RoomAliasId};
-use tuwunel_core::Result;
+use tuwunel_core::{Err, Result};
 
 use crate::admin_command;
 
 #[admin_command]
 pub(super) async fn directory_publish(&self, room: OwnedRoomOrAliasId, force: bool) -> Result {
 	let room_id = self.services.alias.maybe_resolve(&room).await?;
+
+	if !force && !self.services.metadata.exists(&room_id).await {
+		return Err!(
+			"Room {room_id} is not known to this server; use the force flag to publish anyway"
+		);
+	}
 
 	let alias = <&RoomAliasId>::try_from(&*room)
 		.ok()

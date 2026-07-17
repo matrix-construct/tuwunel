@@ -17,7 +17,8 @@ pub(crate) enum RoomDirectoryCommand {
 		/// published as the directory entry's alias
 		room: OwnedRoomOrAliasId,
 
-		/// Publish the room id only, without recording an alias
+		/// Publish even if the room is unknown to the server, without
+		/// recording an alias
 		#[arg(long)]
 		force: bool,
 	},
