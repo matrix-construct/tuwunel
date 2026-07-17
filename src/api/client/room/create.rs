@@ -536,7 +536,7 @@ async fn finalize_alias_and_directory(
 	}
 
 	if body.visibility == room::Visibility::Public {
-		services.directory.set_public(room_id);
+		services.directory.set_public(room_id, alias);
 
 		services
 			.admin

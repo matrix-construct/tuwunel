@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
 use futures::Stream;
-use ruma::{RoomId, api::client::room::Visibility};
+use ruma::{OwnedRoomAliasId, RoomAliasId, RoomId, api::client::room::Visibility};
 use tuwunel_core::{Result, implement, utils::stream::TryIgnore};
-use tuwunel_database::Map;
+use tuwunel_database::{Deserialized, Map};
 
 pub struct Service {
 	db: Data,
@@ -26,10 +26,25 @@ impl crate::Service for Service {
 }
 
 #[implement(Service)]
-pub fn set_public(&self, room_id: &RoomId) { self.db.publicroomids.insert(room_id, []); }
+pub fn set_public(&self, room_id: &RoomId, alias: Option<&RoomAliasId>) {
+	self.db
+		.publicroomids
+		.insert(room_id, alias.map_or("", RoomAliasId::as_str));
+}
 
 #[implement(Service)]
 pub fn set_not_public(&self, room_id: &RoomId) { self.db.publicroomids.remove(room_id); }
+
+/// Alias the room was published under; empty values from rooms published
+/// without one fail the alias parse and land as Err.
+#[implement(Service)]
+pub async fn published_alias(&self, room_id: &RoomId) -> Result<OwnedRoomAliasId> {
+	self.db
+		.publicroomids
+		.get(room_id)
+		.await
+		.deserialized()
+}
 
 #[implement(Service)]
 pub fn public_rooms(&self) -> impl Stream<Item = &RoomId> + Send {
