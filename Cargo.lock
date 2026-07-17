@@ -2423,6 +2423,7 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "url",
+ "webpki-roots",
 ]
 
 [[package]]

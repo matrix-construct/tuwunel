@@ -262,7 +262,6 @@ features = [
 	"hostname",
 	"pool",
 	"ring",
-	"rustls-platform-verifier",
 	"smtp-transport",
 	"tokio1",
 	"tokio1-rustls",
