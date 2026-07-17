@@ -57,7 +57,7 @@ pub static DEBUGGER: LazyLock<bool> =
 	LazyLock::new(|| env::var("_").unwrap_or_default().ends_with("gdb"));
 
 #[cfg_attr(debug_assertions, crate::ctor(unsafe))]
-#[cfg_attr(not(debug_assertions), allow(dead_code))]
+#[cfg_attr(not(debug_assertions), expect(dead_code))]
 fn set_panic_trap() {
 	if !*DEBUGGER {
 		return;

@@ -197,6 +197,7 @@ fn handle_services_finish(
 }
 
 #[cfg(all(feature = "systemd", target_os = "linux"))]
+#[expect(clippy::infinite_loop)]
 async fn start_systemd_watchdog() {
 	use tokio::time::MissedTickBehavior;
 
@@ -220,6 +221,7 @@ async fn start_systemd_watchdog() {
 }
 
 #[cfg(all(feature = "systemd", target_os = "linux"))]
+#[expect(clippy::infinite_loop)]
 async fn extend_systemd_startup() {
 	use std::env;
 
