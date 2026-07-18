@@ -23,11 +23,14 @@ use super::{
 	filter::{filter_room, filter_room_meta},
 };
 
+#[cfg(test)]
+mod tests;
+
 #[tracing::instrument(level = "debug", skip_all)]
 pub(super) async fn selector(
 	conn: &mut Connection,
 	sync_info: SyncInfo<'_>,
-) -> (Window, ResponseLists) {
+) -> (Window, Option<Window>, ResponseLists) {
 	use MembershipState::*;
 
 	let SyncInfo { services, sender_user, .. } = sync_info;
@@ -77,10 +80,18 @@ pub(super) async fn selector(
 	let lists = response_lists(rooms.iter());
 
 	trace!(?lists);
-	let window = window(sync_info, conn, rooms.iter(), &lists, invites_blocked).await;
+	let gated_window = window(sync_info, conn, rooms.iter(), &lists, true, invites_blocked).await;
 
-	trace!(?window);
-	(window, lists)
+	let typing_window = conn
+		.extensions
+		.typing
+		.enabled
+		.unwrap_or(false)
+		.then_async(|| window(sync_info, conn, rooms.iter(), &lists, false, invites_blocked))
+		.await;
+
+	trace!(?gated_window);
+	(gated_window, typing_window, lists)
 }
 
 #[tracing::instrument(
@@ -206,56 +217,22 @@ async fn matcher(
 #[tracing::instrument(
 	level = "debug",
 	skip_all,
-	fields(rooms = rooms.clone().count())
+	fields(rooms = rooms.clone().count(), gated)
 )]
 async fn window<'a, Rooms>(
 	sync_info: SyncInfo<'_>,
-	conn: &Connection,
+	conn: &'a Connection,
 	rooms: Rooms,
-	lists: &ResponseLists,
+	lists: &'a ResponseLists,
+	gated: bool,
 	invites_blocked: bool,
 ) -> Window
 where
-	Rooms: Iterator<Item = &'a WindowRoom> + Clone + Send + Sync,
+	Rooms: Iterator<Item = &'a WindowRoom> + Clone + Send + Sync + 'a,
 {
-	static FULL_RANGE: (UInt, UInt) = (UInt::MIN, UInt::MAX);
-
 	let SyncInfo { services, sender_user, .. } = sync_info;
 
-	let selections = lists
-		.keys()
-		.cloned()
-		.filter_map(|id| conn.lists.get(&id).map(|list| (id, list)))
-		.flat_map(|(id, list)| {
-			let full_range = list
-				.ranges
-				.is_empty()
-				.then_some(&FULL_RANGE)
-				.into_iter();
-
-			list.ranges
-				.iter()
-				.chain(full_range)
-				.map(apply!(2, usize_from_ruma))
-				.map(move |range| (id.clone(), range))
-		})
-		.flat_map(|(id, (start, end))| {
-			rooms
-				.clone()
-				.filter(move |&room| room.lists.contains(&id))
-				.filter(|&room| {
-					conn.rooms
-						.get(&room.room_id)
-						.is_some_and(|conn_room| {
-							conn_room.roomsince == 0 || room.last_count > conn_room.roomsince
-						})
-				})
-				.enumerate()
-				.skip_while(move |&(i, _)| i < start)
-				.take(end.saturating_add(1).saturating_sub(start))
-				.map(|(_, room)| (room.room_id.clone(), room.clone()))
-		})
-		.stream();
+	let selections = list_selections(conn, rooms, lists, gated).stream();
 
 	let subscriptions = conn
 		.subscriptions
@@ -284,6 +261,54 @@ where
 		.map(|room| (room.room_id.clone(), room));
 
 	subscriptions.chain(selections).collect().await
+}
+
+fn list_selections<'a, Rooms>(
+	conn: &'a Connection,
+	rooms: Rooms,
+	lists: &'a ResponseLists,
+	gated: bool,
+) -> impl Iterator<Item = (OwnedRoomId, WindowRoom)> + 'a
+where
+	Rooms: Iterator<Item = &'a WindowRoom> + Clone + Send + Sync + 'a,
+{
+	static FULL_RANGE: (UInt, UInt) = (UInt::MIN, UInt::MAX);
+
+	lists
+		.keys()
+		.cloned()
+		.filter_map(|id| conn.lists.get(&id).map(|list| (id, list)))
+		.flat_map(|(id, list)| {
+			let full_range = list
+				.ranges
+				.is_empty()
+				.then_some(&FULL_RANGE)
+				.into_iter();
+
+			list.ranges
+				.iter()
+				.chain(full_range)
+				.map(apply!(2, usize_from_ruma))
+				.map(move |range| (id.clone(), range))
+		})
+		.flat_map(move |(id, (start, end))| {
+			rooms
+				.clone()
+				.filter(move |&room| room.lists.contains(&id))
+				.filter(move |&room| {
+					!gated
+						|| conn
+							.rooms
+							.get(&room.room_id)
+							.is_some_and(|conn_room| {
+								conn_room.roomsince == 0 || room.last_count > conn_room.roomsince
+							})
+				})
+				.enumerate()
+				.skip_while(move |&(i, _)| i < start)
+				.take(end.saturating_add(1).saturating_sub(start))
+				.map(|(_, room)| (room.room_id.clone(), room.clone()))
+		})
 }
 
 fn response_lists<'a, Rooms>(rooms: Rooms) -> ResponseLists

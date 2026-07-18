@@ -165,13 +165,14 @@ pub(crate) async fn sync_events_v5_route(
 		);
 
 		let window;
+		let typing_window;
 		let watchers = services
 			.sync
 			.watch(sender_user, sender_device, services.state_cache.rooms_joined(sender_user))
 			.await;
 
 		conn.next_batch = services.globals.wait_pending().await?;
-		(window, response.lists) = selector::selector(&mut conn, sync_info)
+		(window, typing_window, response.lists) = selector::selector(&mut conn, sync_info)
 			.boxed()
 			.await;
 
@@ -179,8 +180,9 @@ pub(crate) async fn sync_events_v5_route(
 			let rooms = rooms::handle(sync_info, &conn, &window)
 				.map_ok(|response_rooms| response.rooms = response_rooms);
 
-			let extensions = extensions::handle(sync_info, &conn, &window)
-				.map_ok(|response_extensions| response.extensions = response_extensions);
+			let extensions =
+				extensions::handle(sync_info, &conn, &window, typing_window.as_ref())
+					.map_ok(|response_extensions| response.extensions = response_extensions);
 
 			try_join(rooms, extensions).boxed().await?;
 

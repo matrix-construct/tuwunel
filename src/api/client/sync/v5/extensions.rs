@@ -23,6 +23,7 @@ use super::{SyncInfo, Window, share_encrypted_room};
 	fields(
 		next_batch = conn.next_batch,
 		window = window.len(),
+		typing_window = typing_window.map(Window::len),
 		rooms = conn.rooms.len(),
 		subs = conn.subscriptions.len(),
 	)
@@ -31,6 +32,7 @@ pub(super) async fn handle(
 	sync_info: SyncInfo<'_>,
 	conn: &Connection,
 	window: &Window,
+	typing_window: Option<&Window>,
 ) -> Result<response::Extensions> {
 	let SyncInfo { .. } = sync_info;
 
@@ -53,7 +55,7 @@ pub(super) async fn handle(
 		.typing
 		.enabled
 		.unwrap_or(false)
-		.then_async(|| typing::collect(sync_info, conn, window));
+		.then_async(|| typing::collect(sync_info, conn, typing_window.unwrap_or(window)));
 
 	let to_device = conn
 		.extensions

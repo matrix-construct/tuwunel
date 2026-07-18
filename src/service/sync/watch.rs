@@ -135,11 +135,7 @@ where
 		);
 		// Typing: subscribe synchronously so the receiver is registered before
 		// this fn returns; `wait_for_update` would defer until poll.
-		let mut typing_rx = self
-			.services
-			.typing
-			.typing_update_sender
-			.subscribe();
+		let mut typing_rx = self.services.typing.subscribe();
 
 		let typing_room_id = room_id.to_owned();
 		futures.push(
