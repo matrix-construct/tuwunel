@@ -69,16 +69,6 @@ pub(crate) async fn create_receipt_route(
 		}
 	}
 
-	if matches!(
-		&body.receipt_type,
-		create_receipt::v3::ReceiptType::Read | create_receipt::v3::ReceiptType::ReadPrivate
-	) {
-		services
-			.pusher
-			.reset_notification_counts_for_thread(sender_user, &body.room_id, &body.thread)
-			.await;
-	}
-
 	match body.receipt_type {
 		| create_receipt::v3::ReceiptType::FullyRead => {
 			let fully_read_event = FullyReadEvent {
@@ -108,10 +98,15 @@ pub(crate) async fn create_receipt_route(
 
 			services
 				.read_receipt
-				.readreceipt_update(sender_user, &body.room_id, &ReceiptEvent {
-					content: ReceiptEventContent(receipt_content),
-					room_id: body.room_id.clone(),
-				})
+				.client_readreceipt_update(
+					sender_user,
+					&body.room_id,
+					&ReceiptEvent {
+						content: ReceiptEventContent(receipt_content),
+						room_id: body.room_id.clone(),
+					},
+					false,
+				)
 				.await;
 
 			services
@@ -137,6 +132,11 @@ pub(crate) async fn create_receipt_route(
 					"Event is a backfilled PDU and cannot be marked as read."
 				)));
 			};
+
+			services
+				.pusher
+				.reset_notification_counts_for_thread(sender_user, &body.room_id, &body.thread)
+				.await;
 
 			services
 				.read_receipt

@@ -1,6 +1,7 @@
 #![cfg(test)]
 
-use ruma::{RoomId, UserId};
+use ruma::{EventId, RoomId, UserId};
+use tuwunel_core::PduCount;
 use tuwunel_database::{Interfix, SEP, serialize_to_vec};
 
 const ROOM: &str = "!room:example.com";
@@ -10,6 +11,71 @@ const COUNT: u64 = 42;
 
 fn room() -> &'static RoomId { ROOM.try_into().unwrap() }
 fn user() -> &'static UserId { USER.try_into().unwrap() }
+fn event(id: &'static str) -> &'static EventId { id.try_into().unwrap() }
+
+mod public_receipt_ordering {
+	use super::*;
+	use crate::rooms::read_receipt::receipt_advances;
+
+	const CURRENT: &str = "$current";
+	const TARGET: &str = "$target";
+
+	#[test]
+	fn no_existing_receipt_accepts_target_without_ordering() {
+		assert!(receipt_advances(None, event(TARGET), None, None));
+	}
+
+	#[test]
+	fn identical_event_is_ignored_even_without_ordering() {
+		assert!(!receipt_advances(Some(event(CURRENT)), event(CURRENT), None, None));
+	}
+
+	#[test]
+	fn strictly_newer_timeline_position_advances() {
+		assert!(receipt_advances(
+			Some(event(CURRENT)),
+			event(TARGET),
+			Some(PduCount::Normal(41)),
+			Some(PduCount::Normal(42)),
+		));
+	}
+
+	#[test]
+	fn identical_timeline_position_is_ignored() {
+		assert!(!receipt_advances(
+			Some(event(CURRENT)),
+			event(TARGET),
+			Some(PduCount::Normal(42)),
+			Some(PduCount::Normal(42)),
+		));
+	}
+
+	#[test]
+	fn older_timeline_position_is_ignored() {
+		assert!(!receipt_advances(
+			Some(event(CURRENT)),
+			event(TARGET),
+			Some(PduCount::Normal(43)),
+			Some(PduCount::Normal(42)),
+		));
+	}
+
+	#[test]
+	fn unknown_ordering_accepts_distinct_target() {
+		assert!(receipt_advances(
+			Some(event(CURRENT)),
+			event(TARGET),
+			Some(PduCount::Normal(42)),
+			None,
+		));
+		assert!(receipt_advances(
+			Some(event(CURRENT)),
+			event(TARGET),
+			None,
+			Some(PduCount::Normal(42)),
+		));
+	}
+}
 
 fn legacy_key() -> Vec<u8> {
 	serialize_to_vec((room(), COUNT, user())).expect("serialize legacy key")

@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use futures::{Stream, StreamExt};
 use ruma::{
-	CanonicalJsonObject, RoomId, UserId,
+	CanonicalJsonObject, OwnedEventId, RoomId, UserId,
 	events::{
 		AnySyncEphemeralRoomEvent,
 		receipt::{ReceiptEvent, ReceiptThread},
@@ -35,6 +35,38 @@ impl Data {
 			readreceiptid_readreceipt: db["readreceiptid_readreceipt"].clone(),
 			services: args.services.clone(),
 		}
+	}
+
+	#[inline]
+	pub(super) async fn current_receipt_event_id(
+		&self,
+		user_id: &UserId,
+		room_id: &RoomId,
+		thread_kind: &str,
+	) -> Option<OwnedEventId> {
+		type Key<'a> = (&'a RoomId, u64, &'a UserId, &'a str);
+		type KeyVal<'a> = (Key<'a>, Json<ReceiptEvent>);
+
+		let last_possible_key = (room_id, u64::MAX);
+
+		self.readreceiptid_readreceipt
+			.rev_stream_from(&last_possible_key)
+			.ignore_err()
+			.ready_take_while(|((stored_room_id, ..), _): &KeyVal<'_>| *stored_room_id == room_id)
+			.ready_filter_map(|((_, _, stored_user, stored_kind), Json(event)): KeyVal<'_>| {
+				(stored_user == user_id && stored_kind == thread_kind)
+					.then(|| {
+						event
+							.content
+							.into_iter()
+							.next()
+							.map(|(event_id, _)| event_id)
+					})
+					.flatten()
+			})
+			.boxed()
+			.next()
+			.await
 	}
 
 	#[inline]
@@ -280,7 +312,7 @@ impl Data {
 ///
 /// Appended to the receipt-row key as a tolerant trailing field. Pre-
 /// MSC3771 rows have no trailing kind; they round-trip as `""`.
-fn event_thread_kind(event: &ReceiptEvent) -> &str {
+pub(super) fn event_thread_kind(event: &ReceiptEvent) -> &str {
 	debug_assert!(
 		event
 			.content

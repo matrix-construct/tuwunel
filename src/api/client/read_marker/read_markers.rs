@@ -29,19 +29,6 @@ pub(crate) async fn set_read_marker_route(
 ) -> Result<set_read_marker::v3::Response> {
 	let sender_user = body.sender_user();
 
-	if body.private_read_receipt.is_some() || body.read_receipt.is_some() {
-		// Route through the dispatcher so per-thread counts are also cleared;
-		// `/read_markers` predates MSC3771 and carries no thread field.
-		services
-			.pusher
-			.reset_notification_counts_for_thread(
-				sender_user,
-				&body.room_id,
-				&ReceiptThread::Unthreaded,
-			)
-			.await;
-	}
-
 	if let Some(event) = &body.fully_read {
 		let fully_read_event = FullyReadEvent {
 			content: FullyReadEventContent { event_id: event.clone() },
@@ -72,6 +59,17 @@ pub(crate) async fn set_read_marker_route(
 			)));
 		};
 
+		// A private receipt is always a real update. Reset before exposing its
+		// stream position so sync cannot observe stale notification counts.
+		services
+			.pusher
+			.reset_notification_counts_for_thread(
+				sender_user,
+				&body.room_id,
+				&ReceiptThread::Unthreaded,
+			)
+			.await;
+
 		services
 			.read_receipt
 			.private_read_set(
@@ -98,10 +96,15 @@ pub(crate) async fn set_read_marker_route(
 
 		services
 			.read_receipt
-			.readreceipt_update(sender_user, &body.room_id, &ReceiptEvent {
-				content: ReceiptEventContent(receipt_content),
-				room_id: body.room_id.clone(),
-			})
+			.client_readreceipt_update(
+				sender_user,
+				&body.room_id,
+				&ReceiptEvent {
+					content: ReceiptEventContent(receipt_content),
+					room_id: body.room_id.clone(),
+				},
+				body.private_read_receipt.is_some(),
+			)
 			.await;
 
 		services
