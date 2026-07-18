@@ -60,7 +60,7 @@ fn options(config: &Config) -> ClientOptions {
 
 // Sentry's default reqwest transport builds a Client with no extra roots,
 // which fails on minimal images where `rustls-platform-verifier` finds an
-// empty system store. Mirror `service::client::base()` and merge webpki
+// empty system store. Mirror `service::client::base()` and supply webpki
 // roots so the verifier has at least one source of trust.
 fn build_transport(options: &ClientOptions) -> Arc<dyn Transport> {
 	let webpki = webpki_root_certs::TLS_SERVER_ROOT_CERTS
@@ -78,9 +78,13 @@ fn build_transport(options: &ClientOptions) -> Arc<dyn Transport> {
 			.and_then(|url| Proxy::https(url.as_ref()).ok()),
 	];
 
-	let builder = Client::builder()
-		.tls_certs_merge(webpki)
-		.danger_accept_invalid_certs(options.accept_invalid_certs);
+	let builder = Client::builder().danger_accept_invalid_certs(options.accept_invalid_certs);
+
+	#[cfg(target_os = "android")]
+	let builder = builder.tls_certs_only(webpki);
+
+	#[cfg(not(target_os = "android"))]
+	let builder = builder.tls_certs_merge(webpki);
 
 	let client = proxies
 		.into_iter()

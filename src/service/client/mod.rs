@@ -9,6 +9,7 @@ use bytes::{Bytes, BytesMut};
 use ipaddress::{IPAddress, ipv4::from_u32 as ipv4_from_u32};
 use reqwest::{Certificate, Client, ClientBuilder, dns::Resolve, header::HeaderValue, redirect};
 use tuwunel_core::{Config, Err, Result, debug, either::Either, err, implement, trace};
+use webpki_root_certs::TLS_SERVER_ROOT_CERTS;
 
 use crate::{Services, resolver::Validating, service};
 
@@ -208,6 +209,10 @@ fn base(config: &Config, name: Option<&str>) -> Result<ClientBuilder> {
 		.map(|name| format!("{user_agent} {name}").try_into())
 		.unwrap_or_else(|| user_agent.try_into())?;
 
+	let certs = TLS_SERVER_ROOT_CERTS
+		.iter()
+		.map(|der| Certificate::from_der(der).expect("certificate must be valid der encoding"));
+
 	let builder = Client::builder()
 		.connect_timeout(Duration::from_secs(config.request_conn_timeout))
 		.read_timeout(Duration::from_secs(config.request_timeout))
@@ -217,16 +222,17 @@ fn base(config: &Config, name: Option<&str>) -> Result<ClientBuilder> {
 		.user_agent(user_agent)
 		.redirect(redirect::Policy::limited(6))
 		.danger_accept_invalid_certs(config.allow_invalid_tls_certificates)
-		.tls_certs_merge(
-			webpki_root_certs::TLS_SERVER_ROOT_CERTS
-				.iter()
-				.map(|der| {
-					Certificate::from_der(der).expect("certificate must be valid der encoding")
-				}),
-		)
 		.connection_verbose(cfg!(debug_assertions))
 		// Check if env var is set to avoid locking the keyfile mutex on every connection open
 		.tls_sslkeylogfile(std::env::var_os("SSLKEYLOGFILE").is_some());
+
+	// Android's trust-store verifier requires a JVM; certs-only keeps rustls
+	// on the bundled roots.
+	#[cfg(target_os = "android")]
+	let builder = builder.tls_certs_only(certs);
+
+	#[cfg(not(target_os = "android"))]
+	let builder = builder.tls_certs_merge(certs);
 
 	let encodings: [(bool, DisableEncoding); 3] = [
 		(config.request_gzip, ClientBuilder::no_gzip),
