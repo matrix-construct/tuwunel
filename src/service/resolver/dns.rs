@@ -101,6 +101,16 @@ impl Resolver {
 	fn configure(server: &Arc<Server>) -> Result<(ResolverConfig, ResolverOpts)> {
 		let config = &server.config;
 
+		// hickory's android system_conf panics in ndk-context without a JVM.
+		#[cfg(target_os = "android")]
+		if config.dns_servers.is_empty() {
+			return Err(err!(Config(
+				"dns_servers",
+				"The system resolver requires a JVM on Android; set dns_servers to your \
+				 upstream nameservers instead."
+			)));
+		}
+
 		let (base_conf, opts) = if config.dns_servers.is_empty() {
 			read_system_conf().map_err(|e| {
 				err!(error!("Failed to configure DNS resolver from `/etc/resolv.conf': {e}"))
