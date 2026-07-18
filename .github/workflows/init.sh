@@ -174,14 +174,16 @@ cat <<EOF > ./buildkitd.toml
   maxUsedSpace = "${cachemount_max}"
 
 # Everything else: build layers, sources, frontend. reservedSpace is the warm
-# floor GC never prunes below, so the most-recently-used reservedSpace of
-# layers (the foundation and cooked deps, touched at the start of every run)
-# survives across days. maxUsedSpace is the ceiling GC trims the total back to;
-# kept low so per-run leaf output does not accumulate and the seed copy of this
-# builder stays cheap. keepDuration shields anything used in the last two days.
+# floor GC never prunes below, so the most-recently-used reservedSpace of layers
+# (the foundation and cooked deps, touched at the start of every run) survives
+# regardless of age. maxUsedSpace is the ceiling GC trims the total back to, but
+# only records older than keepDuration are eligible: on a builder rebuilt many
+# times a day a long keepDuration shields nearly the whole cache, the ceiling
+# never binds, and it grows until the disk-pressure valve below dumps everything.
+# 12h keeps the shielded set under maxUsedSpace so GC can trim the older tail.
 [[worker.oci.gcpolicy]]
   filters = ["type!=exec.cachemount"]
-  keepDuration = "48h"
+  keepDuration = "12h"
   reservedSpace = "${reserved_space}"
   maxUsedSpace = "${max_used_space}"
   all = true
