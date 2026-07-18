@@ -161,6 +161,8 @@ Regardless of which reverse proxy you choose, you will need to:
    - `/_tuwunel/` - ad-hoc Tuwunel routes such as `/local_user_count` and `/server_version`
 
 2. **Optionally reverse proxy (recommended):**
+   - `/_synapse/admin/` if you use administration dashboards such as synapse-admin or moderation bots; see the [Synapse Admin API](../development/compliance/synapse-admin.md) page for the served endpoints. They require an administrator access token, but you may still prefer to restrict this path to trusted networks
+   - `/_synapse/mas/` if the Matrix Authentication Service reaches Tuwunel through the reverse proxy rather than directly; these endpoints reject every request not bearing the configured `mas_secret`
    - `/.well-known/matrix/client` and `/.well-known/matrix/server` if using Tuwunel to perform delegation (see the `[global.well_known]` config section and the [delegation example](root-domain-delegation.md))
    - `/.well-known/matrix/support` if using Tuwunel to send the homeserver admin contact and support page (formerly known as MSC1929)
    - `/` if you would like to see `hewwo from tuwunel woof!` at the root
