@@ -135,6 +135,7 @@ pub(crate) async fn set_profile_field_route(
 			body.sender_device.as_deref(),
 			Some(client),
 			&PresenceState::Online,
+			body.appservice_info.as_ref().into(),
 		)
 		.await?;
 
@@ -177,6 +178,7 @@ pub(crate) async fn delete_profile_field_route(
 			body.sender_device.as_deref(),
 			Some(client),
 			&PresenceState::Online,
+			body.appservice_info.as_ref().into(),
 		)
 		.await?;
 

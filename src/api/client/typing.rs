@@ -72,6 +72,7 @@ pub(crate) async fn create_typing_event_route(
 			body.sender_device.as_deref(),
 			Some(client),
 			&PresenceState::Online,
+			body.appservice_info.as_ref().into(),
 		)
 		.await?;
 

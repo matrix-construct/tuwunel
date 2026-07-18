@@ -27,6 +27,30 @@ use tuwunel_core::{
 };
 
 use self::{aggregate::PresenceAggregator, data::Data};
+use crate::appservice::RegistrationInfo;
+
+/// Authentication origin for activity inferred from a request.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum InferredActivityOrigin {
+	User,
+	Appservice,
+	Server,
+}
+
+impl InferredActivityOrigin {
+	#[must_use]
+	const fn is_allowed(self) -> bool { !matches!(self, Self::Appservice) }
+}
+
+impl From<Option<&RegistrationInfo>> for InferredActivityOrigin {
+	fn from(appservice: Option<&RegistrationInfo>) -> Self {
+		if appservice.is_some() {
+			Self::Appservice
+		} else {
+			Self::User
+		}
+	}
+}
 
 /// Represents data required to be kept in order to implement the presence
 /// specification.
@@ -88,6 +112,7 @@ impl crate::Service for Service {
 				None,
 				None,
 				&PresenceState::Online,
+				InferredActivityOrigin::Server,
 			)
 			.await;
 
@@ -140,6 +165,7 @@ impl crate::Service for Service {
 				None,
 				None,
 				&PresenceState::Offline,
+				InferredActivityOrigin::Server,
 			)
 			.await;
 
@@ -159,8 +185,8 @@ impl crate::Service for Service {
 impl Service {
 	/// record that a user has just successfully completed a /sync (or
 	/// equivalent activity)
-	pub async fn note_sync(&self, user_id: &UserId) {
-		if !self.services.config.suppress_push_when_active {
+	pub async fn note_sync(&self, user_id: &UserId, origin: InferredActivityOrigin) {
+		if !origin.is_allowed() || !self.services.config.suppress_push_when_active {
 			return;
 		}
 
@@ -290,5 +316,17 @@ impl Service {
 				displayname,
 			},
 		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::InferredActivityOrigin;
+
+	#[test]
+	fn appservices_do_not_imply_user_activity() {
+		assert!(InferredActivityOrigin::User.is_allowed());
+		assert!(InferredActivityOrigin::Server.is_allowed());
+		assert!(!InferredActivityOrigin::Appservice.is_allowed());
 	}
 }

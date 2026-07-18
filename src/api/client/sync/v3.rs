@@ -236,12 +236,15 @@ pub(crate) async fn sync_events_route(
 			body.sender_device.as_deref(),
 			Some(client),
 			set_presence,
+			body.appservice_info.as_ref().into(),
 		)
 		.inspect_err(inspect_log)
 		.ok();
 
 	// Record user as actively syncing for push suppression heuristic.
-	let note_sync = services.presence.note_sync(sender_user);
+	let note_sync = services
+		.presence
+		.note_sync(sender_user, body.appservice_info.as_ref().into());
 
 	let (filter, ..) = join3(filter, ping_presence, note_sync).await;
 
