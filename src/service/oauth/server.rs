@@ -130,7 +130,7 @@ const API_SCOPE_PREFIXES: [&str; 2] =
 /// tokens this server recognises and return them alongside the MSC2967 device
 /// id, when one was requested. Unrecognised tokens are dropped, or rejected
 /// when `strict` is set. A request carrying more than one device scope, or a
-/// device id outside the RFC 3986 unreserved set, is always rejected.
+/// device id outside the RFC 6749 scope-token charset, is always rejected.
 pub fn narrow_scope(requested: &str, strict: bool) -> Result<(String, Option<String>)> {
 	let mut granted = String::new();
 	let mut device_id: Option<&str> = None;
@@ -143,8 +143,8 @@ pub fn narrow_scope(requested: &str, strict: bool) -> Result<(String, Option<Str
 			if device_id.is_some() {
 				return Err!(Request(InvalidParam("more than one device scope requested")));
 			}
-			if id.is_empty() || !id.bytes().all(is_unreserved) {
-				return Err!(Request(InvalidParam("device id contains a reserved character")));
+			if id.is_empty() || !id.bytes().all(is_scope_char) {
+				return Err!(Request(InvalidParam("device id contains an invalid character")));
 			}
 
 			device_id = Some(id);
@@ -170,10 +170,10 @@ pub fn narrow_scope(requested: &str, strict: bool) -> Result<(String, Option<Str
 	Ok((granted, device_id.map(ToOwned::to_owned)))
 }
 
+/// RFC 6749 appendix A NQCHAR: printable ASCII except space, double quote
+/// and backslash. MSC4108 clients use unpadded base64 device ids.
 #[inline]
-fn is_unreserved(b: u8) -> bool {
-	b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~')
-}
+fn is_scope_char(b: u8) -> bool { b.is_ascii_graphic() && !matches!(b, b'"' | b'\\') }
 
 #[cfg(test)]
 mod tests {
@@ -212,7 +212,16 @@ mod tests {
 	}
 
 	#[test]
-	fn narrow_scope_rejects_reserved_device_id() {
-		narrow_scope("urn:matrix:client:device:bad/id", false).unwrap_err();
+	fn narrow_scope_accepts_base64_device_id() {
+		let scope = "urn:matrix:client:device:wjLpTLRqbqBzLs63aYaEv2Boi6cFEbbM/V+afGmU5+0";
+		let (_granted, device) = narrow_scope(scope, false).expect("narrows");
+
+		assert_eq!(device.as_deref(), Some("wjLpTLRqbqBzLs63aYaEv2Boi6cFEbbM/V+afGmU5+0"));
+	}
+
+	#[test]
+	fn narrow_scope_rejects_invalid_device_id() {
+		narrow_scope("urn:matrix:client:device:bad\"id", false).unwrap_err();
+		narrow_scope("urn:matrix:client:device:bad\\id", false).unwrap_err();
 	}
 }
