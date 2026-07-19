@@ -12,7 +12,8 @@ use crate::{
 	account_data, admin, appservice, client, config, deactivate, emergency, federation, fetcher,
 	globals, key_backups,
 	manager::Manager,
-	media, membership, oauth, presence, profile, pusher, registration_tokens, resolver,
+	media, membership, oauth, presence, profile, pusher, registration_tokens, rendezvous,
+	resolver,
 	rooms::{self, retention},
 	sending, sendmail, server_keys,
 	service::{Args, Service},
@@ -66,6 +67,7 @@ pub struct Services {
 	pub oauth: Arc<oauth::Service>,
 	pub retention: Arc<retention::Service>,
 	pub registration_tokens: Arc<registration_tokens::Service>,
+	pub rendezvous: Arc<rendezvous::Service>,
 	pub sendmail: Arc<sendmail::Service>,
 	pub threepid: Arc<threepid::Service>,
 	pub profile: Arc<profile::Service>,
@@ -132,6 +134,7 @@ pub async fn build(server: Arc<Server>) -> Result<Arc<Self>> {
 		oauth: oauth::Service::build(&args)?,
 		retention: retention::Service::build(&args)?,
 		registration_tokens: registration_tokens::Service::build(&args)?,
+		rendezvous: rendezvous::Service::build(&args)?,
 		sendmail: sendmail::Service::build(&args)?,
 		threepid: threepid::Service::build(&args)?,
 		profile: profile::Service::build(&args)?,
@@ -199,6 +202,7 @@ pub(crate) fn services(&self) -> impl Iterator<Item = Arc<dyn Service>> + Send {
 		cast!(self.oauth),
 		cast!(self.retention),
 		cast!(self.registration_tokens),
+		cast!(self.rendezvous),
 		cast!(self.profile),
 	]
 	.into_iter()

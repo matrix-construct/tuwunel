@@ -20,7 +20,13 @@ pub(super) use self::{
 	state::State,
 };
 use crate::{
-	client::{self, mas_active},
+	client::{
+		self, mas_active,
+		rendezvous::{
+			create_route as create_rendezvous_route, delete_route as delete_rendezvous_route,
+			get_route as get_rendezvous_route, put_route as put_rendezvous_route,
+		},
+	},
 	oidc::{self, native_get_route, native_submit_route},
 	server,
 };
@@ -43,6 +49,7 @@ pub fn build(router: Router<State>, server: &Server) -> Router<State> {
 	let router = register_synapse_admin_federation_routes(router);
 	let router = register_synapse_admin_misc_routes(router);
 	let router = register_oidc_routes(router);
+	let router = register_rendezvous_routes(router);
 	let router = register_server_misc_routes(router);
 	let router = register_federation_routes(router, config.allow_federation);
 
@@ -445,6 +452,19 @@ fn register_oidc_routes(router: Router<State>) -> Router<State> {
 			get(oidc::openid_configuration_route),
 		)
 		.route("/.well-known/openid-configuration", get(oidc::openid_configuration_route))
+}
+
+fn register_rendezvous_routes(router: Router<State>) -> Router<State> {
+	let session_routes = get(get_rendezvous_route)
+		.put(put_rendezvous_route)
+		.delete(delete_rendezvous_route);
+
+	router
+		.route(
+			"/_matrix/client/unstable/org.matrix.msc4108/rendezvous",
+			post(create_rendezvous_route),
+		)
+		.route("/_matrix/client/unstable/org.matrix.msc4108/rendezvous/{id}", session_routes)
 }
 
 fn register_server_misc_routes(router: Router<State>) -> Router<State> {

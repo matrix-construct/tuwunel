@@ -24,6 +24,7 @@ pub(super) mod read_marker;
 pub(super) mod redact;
 pub(super) mod register;
 pub(super) mod relations;
+pub(super) mod rendezvous;
 pub(super) mod report;
 pub(super) mod room;
 pub(super) mod rtc;

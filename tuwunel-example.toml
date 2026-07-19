@@ -1472,6 +1472,48 @@
 #
 #oidc_rc_burst_count = 0
 
+# Enable the rendezvous session API used to sign in with a QR code
+# (MSC4108).
+#
+# The rendezvous session relays the handshake between two devices before
+# the OAuth device authorization grant completes the sign-in. This
+# requires the built-in OIDC server. When disabled, clients hide the
+# feature and the endpoints return an unrecognized response.
+#
+# reloadable: yes
+#
+#rendezvous_enabled = true
+
+# Maximum size in bytes of a rendezvous session payload.
+#
+# QR sign-in handshake messages are normally much smaller than the
+# default.
+#
+# reloadable: yes
+#
+#rendezvous_session_max_bytes = 4096
+
+# Seconds a rendezvous session lives after its last write.
+#
+# Each update restarts the window, but the device displaying the QR
+# times the whole sign-in against the expiry advertised at creation.
+# The default leaves time for an interactive account login on the
+# approval page.
+#
+# reloadable: yes
+#
+#rendezvous_session_ttl = 600
+
+# Maximum number of concurrent rendezvous sessions.
+#
+# Creating a session beyond this limit evicts the oldest session instead
+# of failing. A value of zero retains one session so creation remains
+# available.
+#
+# reloadable: yes
+#
+#rendezvous_max_sessions = 100
+
 # Static TURN username to provide the client if not using a shared secret
 # ("turn_secret"), It is recommended to use a shared secret over static
 # credentials.

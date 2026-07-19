@@ -1716,6 +1716,52 @@ pub struct Config {
 	#[serde(default)]
 	pub oidc_rc_burst_count: u32,
 
+	/// Enable the rendezvous session API used to sign in with a QR code
+	/// (MSC4108).
+	///
+	/// The rendezvous session relays the handshake between two devices before
+	/// the OAuth device authorization grant completes the sign-in. This
+	/// requires the built-in OIDC server. When disabled, clients hide the
+	/// feature and the endpoints return an unrecognized response.
+	///
+	/// reloadable: yes
+	/// default: true
+	#[serde(default = "true_fn")]
+	pub rendezvous_enabled: bool,
+
+	/// Maximum size in bytes of a rendezvous session payload.
+	///
+	/// QR sign-in handshake messages are normally much smaller than the
+	/// default.
+	///
+	/// reloadable: yes
+	/// default: 4096
+	#[serde(default = "default_rendezvous_session_max_bytes")]
+	pub rendezvous_session_max_bytes: usize,
+
+	/// Seconds a rendezvous session lives after its last write.
+	///
+	/// Each update restarts the window, but the device displaying the QR
+	/// times the whole sign-in against the expiry advertised at creation.
+	/// The default leaves time for an interactive account login on the
+	/// approval page.
+	///
+	/// reloadable: yes
+	/// default: 600
+	#[serde(default = "default_rendezvous_session_ttl")]
+	pub rendezvous_session_ttl: u64,
+
+	/// Maximum number of concurrent rendezvous sessions.
+	///
+	/// Creating a session beyond this limit evicts the oldest session instead
+	/// of failing. A value of zero retains one session so creation remains
+	/// available.
+	///
+	/// reloadable: yes
+	/// default: 100
+	#[serde(default = "default_rendezvous_max_sessions")]
+	pub rendezvous_max_sessions: usize,
+
 	/// Static TURN username to provide the client if not using a shared secret
 	/// ("turn_secret"), It is recommended to use a shared secret over static
 	/// credentials.
@@ -4546,6 +4592,12 @@ impl TlsConfig {
 fn true_fn() -> bool { true }
 
 fn default_policy_server_request_timeout() -> u64 { 5 }
+
+fn default_rendezvous_session_max_bytes() -> usize { 4096 }
+
+fn default_rendezvous_session_ttl() -> u64 { 600 }
+
+fn default_rendezvous_max_sessions() -> usize { 100 }
 
 fn some_true_fn() -> Option<bool> { Some(true) }
 
