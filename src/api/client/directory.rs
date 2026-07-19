@@ -159,7 +159,16 @@ pub(crate) async fn set_room_visibility_route(
 				)));
 			}
 
-			services.directory.set_public(&body.room_id, None);
+			// Preserve the alias the room was published under.
+			let published_alias = services
+				.directory
+				.published_alias(&body.room_id)
+				.await
+				.ok();
+
+			services
+				.directory
+				.set_public(&body.room_id, published_alias.as_deref());
 
 			services
 				.admin
