@@ -225,7 +225,8 @@ async fn get_thumbnail_generate(
 		return Ok(into_media(data, media.content));
 	};
 
-	if dim.width > image.width() || dim.height > image.height() {
+	let source = Dim::new(image.width(), image.height(), None);
+	if dim.is_passthrough(&source)? {
 		return Ok(into_media(data, media.content));
 	}
 
@@ -344,6 +345,24 @@ impl Dim {
 			height: y,
 			method: Method::Scale,
 		})
+	}
+
+	/// Returns true when generation cannot improve on the source and the
+	/// original should be served instead: either the request would upscale, or
+	/// the generated thumbnail would carry the source's own dimensions.
+	pub fn is_passthrough(&self, source: &Self) -> Result<bool> {
+		if self.width > source.width || self.height > source.height {
+			return Ok(true);
+		}
+
+		let (width, height) = if self.crop() {
+			(self.width, self.height)
+		} else {
+			let scaled = self.scaled(source)?;
+			(scaled.width, scaled.height)
+		};
+
+		Ok(width == source.width && height == source.height)
 	}
 
 	/// Returns width, height of the thumbnail and whether it should be cropped.
