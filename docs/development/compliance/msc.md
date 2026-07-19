@@ -18,8 +18,8 @@
 
 ## Counts
 
-- ✅ `yes`: 255
-- 🟨 `partial`: 35
+- ✅ `yes`: 256
+- 🟨 `partial`: 34
 - ❌ `no`: 448
 - ⬛ `n/a`: 286
 
@@ -28,7 +28,7 @@
 | Inv | yes | partial | no | n/a | total |
 |---|---|---|---|---|---|
 | merged | 186 | 7 | 7 | 59 | 259 |
-| open | 61 | 27 | 402 | 175 | 665 |
+| open | 62 | 26 | 402 | 175 | 665 |
 | closed | 8 | 1 | 39 | 52 | 100 |
 
 ## Merged
@@ -454,7 +454,7 @@ in the [Out of scope](#out-of-scope) section.
 | MSC4117 | ❌ ● | 0/0 | Reinstating Events (Reversible Redactions) | m.room.reinstate (reversible redactions) not implemented |
 | MSC4110 | ❌ ● | 0/0 | Fewer Features | m.room.event_features state event has no special server handling |
 | MSC4109 | ❌ ● | 0/0 | Appservices &amp; soft-failed events | appservice v2/transactions endpoint with soft-failed events absent |
-| MSC4108 | 🟨 ● | 60/70 | Mechanism to allow OAuth 2.0 API sign in and E2EE set up via QR code | rendezvous transport and device grant present; native no-IdP approval pending |
+| MSC4108 | ✅ ● | 100/100 | Mechanism to allow OAuth 2.0 API sign in and E2EE set up via QR code | src/api/oidc/device.rs:169 serves native or IdP approval; transports complete |
 | MSC4107 | ❌ ● | 0/0 | Feature-focused versioning | features key on /versions not added |
 | MSC4106 | ❌ ● | 0/0 | Join as Muted | join-as-muted default_membership not implemented |
 | MSC4104 | ❌ ● | 0/0 | Auth Lock: Soft-failure-be-gone! | m.auth_lock event and auth-rule not implemented |

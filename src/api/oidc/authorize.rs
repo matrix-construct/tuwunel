@@ -156,11 +156,15 @@ pub(crate) async fn authorize_route(
 	Ok(Redirect::temporary(sso_url.as_str()))
 }
 
-/// Decide whether an authorization request with no explicitly-selected provider
-/// is served the native login/register page rather than an upstream-IdP SSO
-/// redirect. Native applies when enabled and either no default IdP is
-/// configured or the client asked to create an account.
-fn should_serve_native(native_enabled: bool, has_default_idp: bool, wants_create: bool) -> bool {
+/// Decide whether a request with no explicitly-selected provider is served the
+/// native login/register page rather than an upstream-IdP SSO redirect. Native
+/// applies when enabled and either no default IdP is configured or the client
+/// asked to create an account.
+pub(super) fn should_serve_native(
+	native_enabled: bool,
+	has_default_idp: bool,
+	wants_create: bool,
+) -> bool {
 	native_enabled && (!has_default_idp || wants_create)
 }
 

@@ -8,8 +8,9 @@ grant completes the sign-in.
 ## Requirements
 
 QR code login requires the built-in OIDC authorization server and a configured
-`well_known.client` URL. The approving step currently also requires an
-`identity_provider`; approval with native accounts is not available yet.
+`well_known.client` URL. The approving step can use a configured
+`identity_provider`. Without one, enable `oidc_native_auth` to authenticate the
+approving user against this server's own accounts.
 
 ## Configuration
 

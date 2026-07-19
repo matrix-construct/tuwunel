@@ -22,7 +22,10 @@ use tuwunel_service::{
 use url::Url;
 
 use self::{consent::consent_html, entry::entry_html, error::error_html, result::result_html};
-use super::{consume_login_token, oauth_error, peek_login_token, sso_redirect_url, url_encode};
+use super::{
+	authorize::should_serve_native, consume_login_token, oauth_error, peek_login_token,
+	sso_redirect_url, url_encode,
+};
 use crate::ClientIp;
 
 // Per-response CSP: the consent form needs form-action 'self', which the global
@@ -125,7 +128,7 @@ fn device_authorization_error(e: Error) -> Response {
 }
 
 /// RFC 8628 §3.3: the `verification_uri`. Shows a user-code entry form, or
-/// (with a valid code) sends the user through SSO to authenticate and consent.
+/// sends the user through native or SSO authentication before consent.
 pub(crate) async fn get_device_route(
 	State(services): State<crate::State>,
 	ClientIp(client): ClientIp,
@@ -159,17 +162,39 @@ fn handle_device_verify(services: &Services, user_code: Option<&str>) -> Result<
 		return Ok(device_html_response(StatusCode::OK, entry_html(None)));
 	};
 
-	// Authenticate before validating the code. Revealing whether a code is live
-	// to an unauthenticated caller is the RFC 8628 §5.1 brute-force oracle, so
-	// the code is checked only in the post-SSO callback.
-	device_sso_redirect(services, user_code)
+	// Validating the code before authentication exposes the RFC 8628 §5.1
+	// brute-force oracle, so defer it to the authenticated callback.
+	let idp_id = services.oauth.providers.get_default_id();
+	let serve_native =
+		should_serve_native(services.config.oidc_native_auth, idp_id.is_some(), false);
+
+	match serve_native {
+		| true => device_native_redirect(services, user_code),
+		| false => device_sso_redirect(services, user_code, idp_id.as_deref()),
+	}
 }
 
-fn device_sso_redirect(services: &Services, user_code: &str) -> Result<Response> {
-	let idp_id = services
-		.oauth
-		.providers
-		.get_default_id()
+fn device_native_redirect(services: &Services, user_code: &str) -> Result<Response> {
+	let issuer = services.oauth.get_server()?.issuer_url()?;
+	let base = issuer.trim_end_matches('/');
+
+	let native_url = Url::parse(&format!("{base}/_tuwunel/oidc/native"))
+		.map(|mut url| {
+			url.query_pairs_mut()
+				.append_pair("user_code", user_code);
+			url
+		})
+		.map_err(|_| err!(Request(InvalidParam("Failed to build native login URL"))))?;
+
+	Ok(device_redirect_response(Redirect::temporary(native_url.as_str())))
+}
+
+fn device_sso_redirect(
+	services: &Services,
+	user_code: &str,
+	idp_id: Option<&str>,
+) -> Result<Response> {
+	let idp_id = idp_id
 		.ok_or_else(|| err!(Config("identity_provider", "No identity provider configured")))?;
 
 	let issuer = services.oauth.get_server()?.issuer_url()?;
@@ -182,12 +207,13 @@ fn device_sso_redirect(services: &Services, user_code: &str) -> Result<Response>
 		.query_pairs_mut()
 		.append_pair("user_code", user_code);
 
-	let sso_url = sso_redirect_url(base, &idp_id, &callback_url)?;
+	let sso_url = sso_redirect_url(base, idp_id, &callback_url)?;
 
 	Ok(device_redirect_response(Redirect::temporary(sso_url.as_str())))
 }
 
-/// The SSO return target: renders the consent form for the authenticated user.
+/// The authentication return target: renders consent for the authenticated
+/// user.
 pub(crate) async fn get_device_callback_route(
 	State(services): State<crate::State>,
 	ClientIp(client): ClientIp,
