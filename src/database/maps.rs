@@ -367,6 +367,11 @@ pub(super) static MAPS: &[Descriptor] = &[
 		..descriptor::RANDOM_SMALL
 	},
 	Descriptor {
+		name: "senderkey_lastbadge",
+		val_size_hint: Some(8),
+		..descriptor::RANDOM_SMALL
+	},
+	Descriptor {
 		name: "senderkey_pusher",
 		..descriptor::RANDOM_SMALL
 	},

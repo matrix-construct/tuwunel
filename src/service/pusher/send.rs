@@ -1,7 +1,6 @@
-use futures::future::join;
 use ipaddress::IPAddress;
 use ruma::{
-	UInt, UserId,
+	UserId,
 	api::{
 		client::push::{Pusher, PusherKind},
 		push_gateway::send_event_notification::v1::{
@@ -13,6 +12,8 @@ use ruma::{
 	uint,
 };
 use tuwunel_core::{Err, Result, err, implement, matrix::Event, warn};
+
+use super::badge::badge_count_disabled;
 
 #[implement(super::Service)]
 #[tracing::instrument(level = "debug", skip_all)]
@@ -61,28 +62,7 @@ where
 	}
 
 	if notify == Some(true) || self.services.config.push_everything {
-		// MSC3771/MSC3773: badge count merges main and per-thread notifications.
-		let (main, threads) = join(
-			self.services
-				.pusher
-				.notification_count(user_id, event.room_id()),
-			self.services
-				.pusher
-				.thread_notification_counts(user_id, event.room_id()),
-		)
-		.await;
-
-		let thread_total: u64 = threads
-			.values()
-			.map(|(notifications, _)| *notifications)
-			.sum();
-
-		let unread: UInt = main
-			.saturating_add(thread_total)
-			.try_into()
-			.unwrap_or_else(|_| uint!(1));
-
-		self.send_notice(user_id, unread, pusher, tweaks, event)
+		self.send_notice(user_id, pusher, tweaks, event)
 			.await?;
 	}
 
@@ -94,14 +74,25 @@ where
 async fn send_notice<Pdu: Event>(
 	&self,
 	user_id: &UserId,
-	unread: UInt,
 	pusher: &Pusher,
 	tweaks: Vec<Tweak>,
 	event: &Pdu,
 ) -> Result {
 	// TODO: email
 	match &pusher.kind {
-		| PusherKind::Http(http) => {
+		| PusherKind::Http(_) => {
+			let mutex_key = (user_id.to_owned(), pusher.ids.pushkey.clone());
+			let _lock = self.badge_send_mutex.lock(&mutex_key).await;
+			let Ok(pusher) = self
+				.get_pusher(user_id, &pusher.ids.pushkey)
+				.await
+			else {
+				return Ok(());
+			};
+			let PusherKind::Http(http) = &pusher.kind else {
+				return Ok(());
+			};
+			let unread = self.badge_count(user_id).await;
 			let url = &http.url;
 			let url = url::Url::parse(&http.url).map_err(|e| {
 				err!(Request(InvalidParam(
@@ -143,11 +134,8 @@ async fn send_notice<Pdu: Event>(
 
 			notify.event_id = Some(event.event_id().to_owned());
 			notify.room_id = Some(event.room_id().to_owned());
-			if http
-				.data
-				.get("org.matrix.msc4076.disable_badge_count")
-				.is_none() && http.data.get("disable_badge_count").is_none()
-			{
+			let sends_badge = !badge_count_disabled(http);
+			if sends_badge {
 				notify.counts = NotificationCounts::new(unread, uint!(0));
 			} else {
 				// counts will not be serialised if it's the default (0, 0)
@@ -206,7 +194,10 @@ async fn send_notice<Pdu: Event>(
 				let pushkey = &pusher.ids.pushkey;
 
 				warn!(%url, %pushkey, "Push gateway rejected the pushkey; removing pusher");
-				self.delete_pusher(user_id, pushkey).await;
+				self.delete_pusher_unlocked(user_id, pushkey)
+					.await;
+			} else if sends_badge {
+				self.store_last_badge(user_id, &pusher.ids.pushkey, unread.into());
 			}
 
 			Ok(())

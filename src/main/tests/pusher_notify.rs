@@ -31,6 +31,7 @@ const APP_ID: &str = "app.tuwunel.test";
 const EVENT_ID: &str = "$push:remote.example";
 const SENDER: &str = "@alice:remote.example";
 const NOTIFY_PATH: &str = "/_matrix/push/v1/notify";
+const REGISTERED_NOTIFY_PATH: &str = "/custom/push/notify";
 
 /// Inputs shared by the delivery cases; the event is driven straight through
 /// the pusher service rather than through a real room and timeline.
@@ -57,6 +58,8 @@ fn pusher_notify() -> Result {
 		.push(format!("database_path=\"{db_path}\""));
 	args.option
 		.push("ip_range_denylist=[]".to_owned());
+	args.option
+		.push(format!("notification_push_path=\"{REGISTERED_NOTIFY_PATH}\""));
 
 	let runtime = Runtime::new(Some(&args))?;
 	let server = Server::new(Some(&args), Some(&runtime))?;
@@ -104,10 +107,124 @@ async fn run_cases(services: &Services) -> Result {
 	};
 
 	reject_bad_url(&fixture).await?;
+	badge_only_delivery_and_dedupe(&fixture).await?;
+	badge_opt_out_requires_true(&fixture).await?;
 	full_format_delivery(&fixture).await?;
 	event_id_only_delivery(&fixture).await?;
 	rejected_pushkey_removed(&fixture).await?;
 	foreign_rejected_key_noop(&fixture).await
+}
+
+/// A counts-only update carries an explicit zero with no event fields, then
+/// dedupes the same successful badge value for this pusher.
+async fn badge_only_delivery_and_dedupe(fixture: &Fixture<'_>) -> Result {
+	let pushkey = "pk-badge";
+	let listener = TcpListener::bind("127.0.0.1:0").await?;
+	let url = format!("http://{}{REGISTERED_NOTIFY_PATH}", listener.local_addr()?);
+	let action = pusher_action_with_badge_setting(
+		pushkey,
+		url,
+		false,
+		Some(("org.matrix.msc4076.disable_badge_count", false)),
+	);
+	fixture
+		.services
+		.pusher
+		.set_pusher(fixture.user, fixture.device, &action)
+		.await?;
+
+	let (tx, mut rx) = unbounded_channel();
+	let stub = spawn(stub_gateway(listener, tx, r#"{"rejected":[]}"#.to_owned()));
+
+	fixture
+		.services
+		.pusher
+		.schedule_badge_update(fixture.user.to_owned());
+	let (path, body) = recv(&mut rx).await?;
+	if path != NOTIFY_PATH {
+		return Err!("badge-only notification hit unexpected path {path}");
+	}
+
+	let body: Value = serde_json::from_slice(&body)?;
+	let notification = notification(&body)?;
+	if notification
+		.pointer("/counts/unread")
+		.and_then(Value::as_u64)
+		!= Some(0)
+	{
+		return Err!("badge-only notification did not serialize unread=0: {notification}");
+	}
+	for field in ["event_id", "room_id", "type", "sender", "content"] {
+		expect_absent(notification, field)?;
+	}
+
+	fixture
+		.services
+		.pusher
+		.schedule_badge_update(fixture.user.to_owned());
+	expect_no_delivery(&mut rx).await?;
+
+	fixture
+		.services
+		.pusher
+		.delete_pusher(fixture.user, pushkey)
+		.await;
+	stub.abort();
+
+	Ok(())
+}
+
+/// Only boolean true disables badges. Replacing the same pusher with false
+/// clears its dedupe state and allows a fresh counts-only update.
+async fn badge_opt_out_requires_true(fixture: &Fixture<'_>) -> Result {
+	let pushkey = "pk-badge-optout";
+	let listener = TcpListener::bind("127.0.0.1:0").await?;
+	let url = format!("http://{}{REGISTERED_NOTIFY_PATH}", listener.local_addr()?);
+	let (tx, mut rx) = unbounded_channel();
+	let stub = spawn(stub_gateway(listener, tx, r#"{"rejected":[]}"#.to_owned()));
+
+	let disabled = pusher_action_with_badge_setting(
+		pushkey,
+		url.clone(),
+		false,
+		Some(("disable_badge_count", true)),
+	);
+	fixture
+		.services
+		.pusher
+		.set_pusher(fixture.user, fixture.device, &disabled)
+		.await?;
+	fixture
+		.services
+		.pusher
+		.schedule_badge_update(fixture.user.to_owned());
+	expect_no_delivery(&mut rx).await?;
+
+	let enabled = pusher_action_with_badge_setting(
+		pushkey,
+		url,
+		false,
+		Some(("disable_badge_count", false)),
+	);
+	fixture
+		.services
+		.pusher
+		.set_pusher(fixture.user, fixture.device, &enabled)
+		.await?;
+	fixture
+		.services
+		.pusher
+		.schedule_badge_update(fixture.user.to_owned());
+	recv(&mut rx).await?;
+
+	fixture
+		.services
+		.pusher
+		.delete_pusher(fixture.user, pushkey)
+		.await;
+	stub.abort();
+
+	Ok(())
 }
 
 fn message_event(room_id: &str) -> Result<Pdu> {
@@ -251,7 +368,7 @@ async fn deliver(
 	response_body: &str,
 ) -> Result<(String, Value)> {
 	let listener = TcpListener::bind("127.0.0.1:0").await?;
-	let url = format!("http://{}{NOTIFY_PATH}", listener.local_addr()?);
+	let url = format!("http://{}{REGISTERED_NOTIFY_PATH}", listener.local_addr()?);
 
 	let action = pusher_action(pushkey, url, event_id_only);
 
@@ -287,8 +404,20 @@ async fn deliver(
 }
 
 fn pusher_action(pushkey: &str, url: String, event_id_only: bool) -> PusherAction {
+	pusher_action_with_badge_setting(pushkey, url, event_id_only, None)
+}
+
+fn pusher_action_with_badge_setting(
+	pushkey: &str,
+	url: String,
+	event_id_only: bool,
+	badge_setting: Option<(&str, bool)>,
+) -> PusherAction {
 	let mut data = HttpPusherData::new(url);
 	data.format = event_id_only.then_some(PushFormat::EventIdOnly);
+	if let Some((key, value)) = badge_setting {
+		data.data.insert(key.to_owned(), value.into());
+	}
 
 	let pusher: Pusher = PusherInit {
 		ids: PusherIds::new(pushkey.to_owned(), APP_ID.to_owned()),
@@ -301,6 +430,15 @@ fn pusher_action(pushkey: &str, url: String, event_id_only: bool) -> PusherActio
 	.into();
 
 	SetPusherRequest::post(pusher).action
+}
+
+async fn expect_no_delivery(rx: &mut UnboundedReceiver<(String, Vec<u8>)>) -> Result {
+	match timeout(Duration::from_millis(300), rx.recv()).await {
+		| Err(_) => Ok(()),
+		| Ok(Some((path, body))) =>
+			Err!("unexpected push delivery to {path}: {}", String::from_utf8_lossy(&body)),
+		| Ok(None) => Err!("stub gateway channel closed while checking for no delivery"),
+	}
 }
 
 async fn recv(rx: &mut UnboundedReceiver<(String, Vec<u8>)>) -> Result<(String, Vec<u8>)> {

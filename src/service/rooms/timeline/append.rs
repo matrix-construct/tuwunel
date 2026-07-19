@@ -209,6 +209,9 @@ where
 	self.append_pdu_json(&pdu_id, pdu, &pdu_json);
 
 	drop(insert_lock);
+	self.services
+		.pusher
+		.schedule_badge_update(pdu.sender().to_owned());
 
 	self.services
 		.pusher

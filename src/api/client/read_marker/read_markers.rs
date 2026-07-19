@@ -40,6 +40,9 @@ pub(crate) async fn set_read_marker_route(
 				&ReceiptThread::Unthreaded,
 			)
 			.await;
+		services
+			.pusher
+			.schedule_badge_update(sender_user.to_owned());
 	}
 
 	if let Some(event) = &body.fully_read {

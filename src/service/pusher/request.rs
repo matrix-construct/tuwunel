@@ -1,9 +1,12 @@
 use std::{fmt::Debug, mem};
 
-use bytes::BytesMut;
+use bytes::{Bytes, BytesMut};
 use ipaddress::IPAddress;
 use ruma::api::{
-	IncomingResponse, OutgoingRequest, auth_scheme::AuthScheme, path_builder::PathBuilder,
+	IncomingResponse, OutgoingRequest,
+	auth_scheme::AuthScheme,
+	path_builder::PathBuilder,
+	push_gateway::send_event_notification::v1::{Notification, Request, Response},
 };
 use tuwunel_core::{
 	Err, Result, debug_warn, err, implement, trace, utils::string_from_bytes, warn,
@@ -19,10 +22,42 @@ where
 	for<'a> T::Authentication: AuthScheme<Input<'a> = ()>,
 	for<'a> T::PathBuilder: PathBuilder<Input<'a> = ()>,
 {
-	let dest = dest.replace(&self.services.config.notification_push_path, "");
+	let (dest, http_request) = self.build_request(dest, request)?;
+	let reqwest_request = reqwest::Request::try_from(http_request)?;
+	let response = self
+		.execute_request(reqwest_request, &dest)
+		.await?;
+	T::IncomingResponse::try_from_http_response(response).map_err(|e| {
+		err!(BadServerResponse(warn!("Push gateway {dest} returned invalid response: {e}")))
+	})
+}
+
+#[implement(super::Service)]
+pub(super) async fn send_raw_request(&self, dest: &str, body: Vec<u8>) -> Result<Response> {
+	// Build from the Ruma endpoint request so custom notification_push_path
+	// stripping, the spec path, method, and headers cannot drift from events.
+	let template = Request::new(Notification::new(Vec::new()));
+	let (dest, mut request) = self.build_request(dest, template)?;
+	*request.body_mut() = body.into();
+
+	let request = reqwest::Request::try_from(request)?;
+	let response = self.execute_request(request, &dest).await?;
+	Response::try_from_http_response(response).map_err(|e| {
+		err!(BadServerResponse(warn!("Push gateway {dest} returned invalid response: {e}")))
+	})
+}
+
+#[implement(super::Service)]
+fn build_request<T>(&self, dest: &str, request: T) -> Result<(String, http::Request<Bytes>)>
+where
+	T: OutgoingRequest + Debug + Send,
+	for<'a> T::Authentication: AuthScheme<Input<'a> = ()>,
+	for<'a> T::PathBuilder: PathBuilder<Input<'a> = ()>,
+{
+	let dest = configured_destination(dest, &self.services.config.notification_push_path);
 	trace!("Push gateway destination: {dest}");
 
-	let http_request = request
+	let request = request
 		.try_into_http_request::<BytesMut>(&dest, (), ())
 		.map_err(|e| {
 			err!(BadServerResponse(warn!(
@@ -31,7 +66,19 @@ where
 		})?
 		.map(BytesMut::freeze);
 
-	let reqwest_request = reqwest::Request::try_from(http_request)?;
+	Ok((dest, request))
+}
+
+fn configured_destination(dest: &str, notification_push_path: &str) -> String {
+	dest.replace(notification_push_path, "")
+}
+
+#[implement(super::Service)]
+async fn execute_request(
+	&self,
+	reqwest_request: reqwest::Request,
+	dest: &str,
+) -> Result<http::Response<Bytes>> {
 	if let Some(url_host) = reqwest_request.url().host_str() {
 		trace!("Checking request URL for IP");
 		if let Ok(ip) = IPAddress::parse(url_host)
@@ -82,21 +129,29 @@ where
 				)));
 			}
 
-			let response = T::IncomingResponse::try_from_http_response(
-				http_response_builder
-					.body(body)
-					.expect("reqwest body is valid http body"),
-			);
-
-			response.map_err(|e| {
-				err!(BadServerResponse(warn!(
-					"Push gateway {dest} returned invalid response: {e}"
-				)))
-			})
+			Ok(http_response_builder
+				.body(body)
+				.expect("reqwest body is valid http body"))
 		},
 		| Err(e) => {
 			warn!("Could not send request to pusher {dest}: {e}");
 			Err(e.into())
 		},
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::configured_destination;
+
+	#[test]
+	fn custom_notification_path_is_stripped_before_endpoint_rebuild() {
+		assert_eq!(
+			configured_destination(
+				"https://push.example/custom/push/notify",
+				"/custom/push/notify",
+			),
+			"https://push.example"
+		);
 	}
 }

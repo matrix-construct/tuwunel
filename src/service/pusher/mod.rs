@@ -1,4 +1,5 @@
 mod append;
+mod badge;
 mod notification;
 mod request;
 mod send;
@@ -32,6 +33,7 @@ pub use self::append::Notified;
 
 pub struct Service {
 	services: Arc<crate::services::OnceServices>,
+	badge_send_mutex: MutexMap<(OwnedUserId, String), ()>,
 	notification_increment_mutex: MutexMap<(OwnedRoomId, OwnedUserId), ()>,
 	highlight_increment_mutex: MutexMap<(OwnedRoomId, OwnedUserId), ()>,
 	db: Data,
@@ -41,6 +43,7 @@ pub struct Service {
 struct Data {
 	db: Arc<Database>,
 	senderkey_pusher: Arc<Map>,
+	senderkey_lastbadge: Arc<Map>,
 	pushkey_deviceid: Arc<Map>,
 	useridcount_notification: Arc<Map>,
 	userroomid_highlightcount: Arc<Map>,
@@ -52,11 +55,13 @@ impl crate::Service for Service {
 	fn build(args: &crate::Args<'_>) -> Result<Arc<Self>> {
 		Ok(Arc::new(Self {
 			services: args.services.clone(),
+			badge_send_mutex: MutexMap::new(),
 			notification_increment_mutex: MutexMap::new(),
 			highlight_increment_mutex: MutexMap::new(),
 			db: Data {
 				db: args.db.clone(),
 				senderkey_pusher: args.db["senderkey_pusher"].clone(),
+				senderkey_lastbadge: args.db["senderkey_lastbadge"].clone(),
 				pushkey_deviceid: args.db["pushkey_deviceid"].clone(),
 				useridcount_notification: args.db["useridcount_notification"].clone(),
 				userroomid_highlightcount: args.db["userroomid_highlightcount"].clone(),
@@ -125,7 +130,10 @@ pub async fn set_pusher(
 
 			let pushkey = data.pusher.ids.pushkey.as_str();
 			let key = (sender, pushkey);
+			let mutex_key = (sender.to_owned(), pushkey.to_owned());
+			let _lock = self.badge_send_mutex.lock(&mutex_key).await;
 			self.db.senderkey_pusher.put(key, Json(pusher));
+			self.db.senderkey_lastbadge.del(key);
 			self.db
 				.pushkey_deviceid
 				.insert(pushkey, sender_device);
@@ -141,8 +149,16 @@ pub async fn set_pusher(
 
 #[implement(Service)]
 pub async fn delete_pusher(&self, sender: &UserId, pushkey: &str) {
+	let mutex_key = (sender.to_owned(), pushkey.to_owned());
+	let _lock = self.badge_send_mutex.lock(&mutex_key).await;
+	self.delete_pusher_unlocked(sender, pushkey).await;
+}
+
+#[implement(Service)]
+async fn delete_pusher_unlocked(&self, sender: &UserId, pushkey: &str) {
 	let key = (sender, pushkey);
 	self.db.senderkey_pusher.del(key);
+	self.db.senderkey_lastbadge.del(key);
 	self.db.pushkey_deviceid.remove(pushkey);
 	self.clear_suppressed_pushkey(sender, pushkey);
 

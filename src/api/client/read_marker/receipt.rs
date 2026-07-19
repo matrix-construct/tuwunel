@@ -77,6 +77,9 @@ pub(crate) async fn create_receipt_route(
 			.pusher
 			.reset_notification_counts_for_thread(sender_user, &body.room_id, &body.thread)
 			.await;
+		services
+			.pusher
+			.schedule_badge_update(sender_user.to_owned());
 	}
 
 	match body.receipt_type {

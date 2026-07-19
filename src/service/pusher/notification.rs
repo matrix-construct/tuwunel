@@ -146,6 +146,22 @@ pub async fn notification_count(&self, user_id: &UserId, room_id: &RoomId) -> u6
 		.unwrap_or(0)
 }
 
+/// Total unread notifications for a user across all room-main and thread rows.
+///
+/// Push Gateway `counts.unread` is a global value, so event and counts-only
+/// pushes must both use this single aggregation path.
+#[implement(super::Service)]
+#[tracing::instrument(level = "debug", skip(self), ret(level = "trace"))]
+pub async fn global_notification_count(&self, user_id: &UserId) -> u64 {
+	self.db
+		.userroomid_notificationcount
+		.stream_prefix(&(user_id, Interfix))
+		.ignore_err()
+		.map(|(_, count): (Ignore, u64)| count)
+		.ready_fold(0_u64, u64::saturating_add)
+		.await
+}
+
 #[implement(super::Service)]
 #[tracing::instrument(level = "debug", skip(self), ret(level = "trace"))]
 pub async fn highlight_count(&self, user_id: &UserId, room_id: &RoomId) -> u64 {
