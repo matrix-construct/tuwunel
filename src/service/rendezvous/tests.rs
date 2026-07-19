@@ -1,11 +1,14 @@
 use std::{
-	sync::{Arc, RwLock},
-	time::{Duration, SystemTime, UNIX_EPOCH},
+	net::{IpAddr, Ipv4Addr},
+	sync::{Arc, Mutex, RwLock},
+	time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use bytes::Bytes;
 
-use super::{Get, MAX_HTTP_DATE_SECONDS, Put, Service};
+use super::{
+	Get, MAX_HTTP_DATE_SECONDS, Put, RATELIMIT_MAP_CAP, Ratelimiter, Service, check_bucket_at,
+};
 
 const TTL: Duration = Duration::from_mins(3);
 
@@ -24,6 +27,9 @@ fn create_and_conditional_get() {
 	assert_eq!(service.get_at(&id, None, now), Get::Data { data: Bytes::new(), meta },);
 	assert_eq!(service.get_at(&id, Some(meta.etag.as_str()), now), Get::NotModified(meta),);
 	assert_eq!(service.get_at(&id, Some("*"), now), Get::NotModified(meta));
+
+	let (_, other) = service.create_at(Bytes::new(), now, TTL, 100);
+	assert_ne!(meta.sequence_token(), other.sequence_token());
 }
 
 #[test]
@@ -89,6 +95,85 @@ fn stale_put_distinguishes_retries_from_conflicts() {
 }
 
 #[test]
+fn sequence_token_put_uses_unquoted_validator() {
+	let service = service();
+	let now = time(35);
+	let (id, created) = service.create_at(Bytes::from_static(b"first"), now, TTL, 100);
+
+	assert_eq!(created.sequence_token().len(), 43);
+	assert!(!created.sequence_token().contains('"'));
+
+	let Put::Accepted(current) = service.put_token_at(
+		&id,
+		created.sequence_token(),
+		Bytes::from_static(b"current"),
+		now + Duration::from_secs(1),
+		TTL,
+	) else {
+		panic!("matching sequence token should be accepted");
+	};
+
+	assert_ne!(current.sequence_token(), created.sequence_token());
+	assert_eq!(
+		service.put_token_at(
+			&id,
+			created.sequence_token(),
+			Bytes::from_static(b"different"),
+			now + Duration::from_secs(2),
+			TTL,
+		),
+		Put::PreconditionFailed(current),
+	);
+
+	let Put::Accepted(retry) = service.put_token_at(
+		&id,
+		created.sequence_token(),
+		Bytes::from_static(b"current"),
+		now + Duration::from_secs(3),
+		TTL,
+	) else {
+		panic!("idempotent token retry should be accepted");
+	};
+
+	assert_eq!(retry.sequence_token(), current.sequence_token());
+	assert_eq!(retry.last_modified, current.last_modified);
+}
+
+#[test]
+fn relative_expiry_clamps_at_zero() {
+	let service = service();
+	let now = time(37);
+	let (_, meta) = service.create_at(Bytes::new(), now, TTL, 100);
+
+	assert_eq!(meta.expires_in_at(now + Duration::from_mins(1)), Duration::from_mins(2));
+	assert_eq!(meta.expires_in_at(now + TTL + Duration::from_secs(1)), Duration::ZERO);
+}
+
+#[test]
+fn rate_limiter_refills_and_stays_bounded() {
+	let table = Ratelimiter::default();
+	let now = Instant::now();
+	let client = IpAddr::V4(Ipv4Addr::LOCALHOST);
+
+	check_bucket_at(&table, client, 2.0, 2.0, now).expect("first request should be accepted");
+	check_bucket_at(&table, client, 2.0, 2.0, now).expect("burst request should be accepted");
+	assert!(check_bucket_at(&table, client, 2.0, 2.0, now).is_err());
+	check_bucket_at(&table, client, 2.0, 2.0, now + Duration::from_millis(500))
+		.expect("refilled request should be accepted");
+
+	let end = u32::try_from(RATELIMIT_MAP_CAP).expect("rate-limit map cap fits in u32");
+
+	for address in 0_u32..=end {
+		let client = IpAddr::V4(Ipv4Addr::from(address));
+
+		check_bucket_at(&table, client, 1.0, 1.0, now)
+			.expect("new client request should be accepted");
+	}
+
+	assert_eq!(table.lock().expect("locked for reading").len(), RATELIMIT_MAP_CAP);
+}
+
+#[test]
 fn expiry_is_lazy_and_put_refreshes_it() {
 	let service = service();
 	let now = time(40);
@@ -151,6 +236,18 @@ fn delete_does_not_check_expiry() {
 }
 
 #[test]
+fn active_delete_rejects_expired_sessions() {
+	let service = service();
+	let now = time(60);
+	let (expired, _) = service.create_at(Bytes::new(), now, Duration::ZERO, 100);
+	let (active, _) = service.create_at(Bytes::new(), now, TTL, 100);
+
+	assert!(!service.delete_if_active_at(&expired, now));
+	assert!(service.delete_if_active_at(&active, now));
+	assert!(!service.delete_if_active_at(&active, now));
+}
+
+#[test]
 fn zero_capacity_retains_one_session() {
 	let service = service();
 	let now = time(70);
@@ -172,6 +269,7 @@ fn huge_ttl_caps_at_latest_http_date() {
 fn service() -> Service {
 	Service {
 		sessions: RwLock::default(),
+		ratelimiter: Mutex::default(),
 		services: Arc::new(crate::services::OnceServices::default()),
 	}
 }

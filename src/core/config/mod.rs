@@ -1716,8 +1716,8 @@ pub struct Config {
 	#[serde(default)]
 	pub oidc_rc_burst_count: u32,
 
-	/// Enable the rendezvous session API used to sign in with a QR code
-	/// (MSC4108).
+	/// Enable the rendezvous session APIs used to sign in with a QR code
+	/// (MSC4108 and MSC4388).
 	///
 	/// The rendezvous session relays the handshake between two devices before
 	/// the OAuth device authorization grant completes the sign-in. This
@@ -1761,6 +1761,35 @@ pub struct Config {
 	/// default: 100
 	#[serde(default = "default_rendezvous_max_sessions")]
 	pub rendezvous_max_sessions: usize,
+
+	/// Require an access token for MSC4388 discovery and session creation.
+	///
+	/// When disabled, clients without an access token may discover and create
+	/// MSC4388 sessions. The MSC4108 endpoint remains open in either mode.
+	///
+	/// reloadable: yes
+	/// default: true
+	#[serde(default = "true_fn")]
+	pub rendezvous_authenticated_only: bool,
+
+	/// Per-client-IP request refill rate for the MSC4388 rendezvous endpoints.
+	///
+	/// A value of zero is treated as one request per second.
+	///
+	/// reloadable: yes
+	/// default: 10
+	#[serde(default = "default_rendezvous_rc_per_second")]
+	pub rendezvous_rc_per_second: u32,
+
+	/// Token-bucket depth for the MSC4388 rendezvous request throttle.
+	///
+	/// This is the number of requests one client IP may make in a burst before
+	/// `rendezvous_rc_per_second` governs. A value of zero is treated as one.
+	///
+	/// reloadable: yes
+	/// default: 20
+	#[serde(default = "default_rendezvous_rc_burst_count")]
+	pub rendezvous_rc_burst_count: u32,
 
 	/// Static TURN username to provide the client if not using a shared secret
 	/// ("turn_secret"), It is recommended to use a shared secret over static
@@ -4598,6 +4627,10 @@ fn default_rendezvous_session_max_bytes() -> usize { 4096 }
 fn default_rendezvous_session_ttl() -> u64 { 600 }
 
 fn default_rendezvous_max_sessions() -> usize { 100 }
+
+fn default_rendezvous_rc_per_second() -> u32 { 10 }
+
+fn default_rendezvous_rc_burst_count() -> u32 { 20 }
 
 fn some_true_fn() -> Option<bool> { Some(true) }
 

@@ -23,8 +23,10 @@ use crate::{
 	client::{
 		self, mas_active,
 		rendezvous::{
-			create_route as create_rendezvous_route, delete_route as delete_rendezvous_route,
-			get_route as get_rendezvous_route, put_route as put_rendezvous_route,
+			create_msc4388_route, create_route as create_rendezvous_route, delete_msc4388_route,
+			delete_route as delete_rendezvous_route, discover_msc4388_route, get_msc4388_route,
+			get_route as get_rendezvous_route, put_msc4388_route,
+			put_route as put_rendezvous_route,
 		},
 	},
 	oidc::{self, native_get_route, native_submit_route},
@@ -455,6 +457,13 @@ fn register_oidc_routes(router: Router<State>) -> Router<State> {
 }
 
 fn register_rendezvous_routes(router: Router<State>) -> Router<State> {
+	let router = router
+		.ruma_route(&discover_msc4388_route)
+		.ruma_route(&create_msc4388_route)
+		.ruma_route(&get_msc4388_route)
+		.ruma_route(&put_msc4388_route)
+		.ruma_route(&delete_msc4388_route);
+
 	let session_routes = get(get_rendezvous_route)
 		.put(put_rendezvous_route)
 		.delete(delete_rendezvous_route);

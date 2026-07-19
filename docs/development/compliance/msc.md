@@ -18,9 +18,9 @@
 
 ## Counts
 
-- ✅ `yes`: 254
+- ✅ `yes`: 255
 - 🟨 `partial`: 35
-- ❌ `no`: 449
+- ❌ `no`: 448
 - ⬛ `n/a`: 286
 
 ### Status by inventory bucket
@@ -28,7 +28,7 @@
 | Inv | yes | partial | no | n/a | total |
 |---|---|---|---|---|---|
 | merged | 186 | 7 | 7 | 59 | 259 |
-| open | 60 | 27 | 403 | 175 | 665 |
+| open | 61 | 27 | 402 | 175 | 665 |
 | closed | 8 | 1 | 39 | 52 | 100 |
 
 ## Merged
@@ -318,7 +318,7 @@ in the [Out of scope](#out-of-scope) section.
 | MSC4400 | ❌ ● | 0/0 | Remove the depth field from PDUs | new room version removing depth field; com.nhjkl.msc4400.opt1 absent. |
 | MSC4396 | ❌ ● | 0/0 | Inline linked media | no multipart/mixed event-with-media; no m.media mixin or M_GONE wired. |
 | MSC4390 | ❌ ● | 0/0 | Room Blocking API | [→ MSC4375?] no client admin endpoints for room block/delete; only federation... |
-| MSC4388 | ❌ ● | 0/0 | Secure out-of-band channel for sign in with QR | deferred; no MSC4388 discovery or JSON rendezvous endpoints |
+| MSC4388 | ✅ ● | 100/100 | Secure out-of-band channel for sign in with QR | src/api/router.rs:461 all JSON routes and safeguards; QR/HPKE client scope |
 | MSC4387 | ❌ ● | 0/0 | `M_SAFETY` error code | M_SAFETY errcode not used anywhere in src/; no harms field handling. |
 | MSC4384 | 🟨 ◐ | ?/50 | Supporting alternative room directory sorting | Largest-first sort is hardcoded; no alt-sort hook |
 | MSC4383 | ✅ ● | 100/100 | Client-Server Discovery of Server Version | src/api/client/versions.rs:33; populates Server { name, version, compiler } o... |
