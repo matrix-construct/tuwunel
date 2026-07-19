@@ -1,5 +1,6 @@
 use std::iter::once;
 
+use axum::extract::State;
 use ruma::api::client::discovery::get_supported_versions::{self, Server};
 use tuwunel_core::{
 	Result,
@@ -22,6 +23,7 @@ use crate::Ruma;
 /// Note: Unstable features are used while developing new features. Clients
 /// should avoid using unstable features in their stable releases
 pub(crate) async fn get_supported_versions_route(
+	State(services): State<crate::State>,
 	_body: Ruma<get_supported_versions::Request>,
 ) -> Result<get_supported_versions::Response> {
 	// MSC4383: client-side parity with /_matrix/federation/v1/version.
@@ -35,6 +37,12 @@ pub(crate) async fn get_supported_versions_route(
 
 		unstable_features: UNSTABLE_FEATURES
 			.into_iter()
+			.chain(
+				services
+					.config
+					.rendezvous_enabled
+					.then_some("org.matrix.msc4108"),
+			)
 			.map(Into::into)
 			.zip(once(true).cycle())
 			.collect(),

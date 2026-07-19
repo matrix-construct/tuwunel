@@ -9,7 +9,7 @@ use axum::{
 };
 use http::{
 	HeaderValue, Method, StatusCode,
-	header::{self, HeaderName},
+	header::{self, ETAG, HeaderName, IF_MATCH, IF_NONE_MATCH},
 	uri::PathAndQuery,
 };
 use ipnet::IpNet;
@@ -183,10 +183,12 @@ fn cors_layer(server: &Server) -> CorsLayer {
 		Method::PUT,
 	];
 
-	let headers: [HeaderName; 5] = [
+	let headers: [HeaderName; 7] = [
 		header::ACCEPT,
 		header::AUTHORIZATION,
 		header::CONTENT_TYPE,
+		IF_MATCH,
+		IF_NONE_MATCH,
 		header::ORIGIN,
 		HeaderName::from_lowercase(b"x-requested-with")
 			.expect("valid HTTP HeaderName from lowercase."),
@@ -214,6 +216,7 @@ fn cors_layer(server: &Server) -> CorsLayer {
 		.max_age(Duration::from_hours(24))
 		.allow_methods(METHODS)
 		.allow_headers(headers)
+		.expose_headers([ETAG])
 		.allow_origin(allow_origin)
 }
 

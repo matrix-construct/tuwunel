@@ -19,8 +19,8 @@
 ## Counts
 
 - ✅ `yes`: 254
-- 🟨 `partial`: 34
-- ❌ `no`: 450
+- 🟨 `partial`: 35
+- ❌ `no`: 449
 - ⬛ `n/a`: 286
 
 ### Status by inventory bucket
@@ -28,7 +28,7 @@
 | Inv | yes | partial | no | n/a | total |
 |---|---|---|---|---|---|
 | merged | 186 | 7 | 7 | 59 | 259 |
-| open | 60 | 26 | 404 | 175 | 665 |
+| open | 60 | 27 | 403 | 175 | 665 |
 | closed | 8 | 1 | 39 | 52 | 100 |
 
 ## Merged
@@ -318,7 +318,7 @@ in the [Out of scope](#out-of-scope) section.
 | MSC4400 | ❌ ● | 0/0 | Remove the depth field from PDUs | new room version removing depth field; com.nhjkl.msc4400.opt1 absent. |
 | MSC4396 | ❌ ● | 0/0 | Inline linked media | no multipart/mixed event-with-media; no m.media mixin or M_GONE wired. |
 | MSC4390 | ❌ ● | 0/0 | Room Blocking API | [→ MSC4375?] no client admin endpoints for room block/delete; only federation... |
-| MSC4388 | ❌ ● | 0/0 | Secure out-of-band channel for sign in with QR | no /_matrix/client/v1/rendezvous endpoints; rendezvous API absent. |
+| MSC4388 | ❌ ● | 0/0 | Secure out-of-band channel for sign in with QR | deferred; no MSC4388 discovery or JSON rendezvous endpoints |
 | MSC4387 | ❌ ● | 0/0 | `M_SAFETY` error code | M_SAFETY errcode not used anywhere in src/; no harms field handling. |
 | MSC4384 | 🟨 ◐ | ?/50 | Supporting alternative room directory sorting | Largest-first sort is hardcoded; no alt-sort hook |
 | MSC4383 | ✅ ● | 100/100 | Client-Server Discovery of Server Version | src/api/client/versions.rs:33; populates Server { name, version, compiler } o... |
@@ -454,7 +454,7 @@ in the [Out of scope](#out-of-scope) section.
 | MSC4117 | ❌ ● | 0/0 | Reinstating Events (Reversible Redactions) | m.room.reinstate (reversible redactions) not implemented |
 | MSC4110 | ❌ ● | 0/0 | Fewer Features | m.room.event_features state event has no special server handling |
 | MSC4109 | ❌ ● | 0/0 | Appservices &amp; soft-failed events | appservice v2/transactions endpoint with soft-failed events absent |
-| MSC4108 | ❌ ◐ | 0/0 | Mechanism to allow OAuth 2.0 API sign in and E2EE set up via QR code | auth_metadata route present; rendezvous and device grant absent |
+| MSC4108 | 🟨 ● | 60/70 | Mechanism to allow OAuth 2.0 API sign in and E2EE set up via QR code | rendezvous transport and device grant present; native no-IdP approval pending |
 | MSC4107 | ❌ ● | 0/0 | Feature-focused versioning | features key on /versions not added |
 | MSC4106 | ❌ ● | 0/0 | Join as Muted | join-as-muted default_membership not implemented |
 | MSC4104 | ❌ ● | 0/0 | Auth Lock: Soft-failure-be-gone! | m.auth_lock event and auth-rule not implemented |
