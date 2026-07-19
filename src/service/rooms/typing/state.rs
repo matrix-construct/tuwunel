@@ -107,9 +107,8 @@ impl TypingState {
 			.get(room_id)
 			.into_iter()
 			.flat_map(BTreeMap::iter)
-			.filter_map(|(user_id, entry)| {
-				(entry.expires_at_ms <= now_ms).then(|| user_id.clone())
-			})
+			.filter(|(_, entry)| entry.expires_at_ms <= now_ms)
+			.map(|(user_id, _)| user_id.clone())
 			.collect::<Vec<_>>();
 		let timers = expired
 			.iter()

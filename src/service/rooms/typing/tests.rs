@@ -41,9 +41,13 @@ fn timer_queue_stop_then_restart_keeps_restart() {
 	let restarted = entry(2000, 2);
 	let mut queue = TimerQueue::default();
 
-	let _ = queue.update(add(&key, first));
-	let _ = queue.update(remove(&key, first.generation));
-	let _ = queue.update(add(&key, restarted));
+	assert!(queue.update(add(&key, first)).is_some());
+	assert!(
+		queue
+			.update(remove(&key, first.generation))
+			.is_none()
+	);
+	assert!(queue.update(add(&key, restarted)).is_some());
 
 	assert_eq!(queue.current(&key), Some(restarted));
 }
@@ -55,10 +59,14 @@ fn timer_queue_refresh_replaces_previous_generation() {
 	let refreshed = entry(2000, 2);
 	let mut queue = TimerQueue::default();
 
-	let _ = queue.update(add(&key, first));
-	let _ = queue.update(add(&key, refreshed));
+	assert!(queue.update(add(&key, first)).is_some());
+	assert!(queue.update(add(&key, refreshed)).is_some());
 	// A late cancellation for the old generation must not cancel the refresh.
-	let _ = queue.update(remove(&key, first.generation));
+	assert!(
+		queue
+			.update(remove(&key, first.generation))
+			.is_none()
+	);
 
 	assert_eq!(queue.current(&key), Some(refreshed));
 }
@@ -70,8 +78,8 @@ fn stale_fired_timer_does_not_consume_current_timer() {
 	let current = entry(2000, 2);
 	let mut queue = TimerQueue::default();
 
-	let _ = queue.update(add(&key, stale));
-	let _ = queue.update(add(&key, current));
+	assert!(queue.update(add(&key, stale)).is_some());
+	assert!(queue.update(add(&key, current)).is_some());
 
 	assert!(matches!(queue.fired(&key, stale, 1000), FiredTimer::Stale));
 	assert_eq!(queue.current(&key), Some(current));
@@ -83,7 +91,7 @@ fn matching_timer_is_rescheduled_until_wall_deadline() {
 	let current = entry(1000, 1);
 	let mut queue = TimerQueue::default();
 
-	let _ = queue.update(add(&key, current));
+	assert!(queue.update(add(&key, current)).is_some());
 	assert!(matches!(queue.fired(&key, current, 999), FiredTimer::Reschedule(_)));
 	assert_eq!(queue.current(&key), Some(current));
 
@@ -99,9 +107,9 @@ fn expired_typing_users_include_deadline_boundary_and_prune_room() {
 	let active = user_id!("@active:example.com");
 	let mut state = TypingState::default();
 
-	let _ = state.start(room_id, expired, 999);
-	let _ = state.start(room_id, boundary, 1000);
-	let _ = state.start(room_id, active, 1001);
+	assert!(state.start(room_id, expired, 999).output);
+	assert!(state.start(room_id, boundary, 1000).output);
+	assert!(state.start(room_id, active, 1001).output);
 
 	let transition = state.expire_room(room_id, 1000);
 	let expired_users = transition.output;

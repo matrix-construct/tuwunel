@@ -28,7 +28,7 @@ fn gated_list_window_excludes_room_without_persistent_delta() {
 
 	let mut conn = Connection::default();
 	conn.lists.insert(list_id.clone(), request::List {
-		ranges: [(uint!(0), uint!(0))].into_iter().collect(),
+		ranges: std::iter::once((uint!(0), uint!(0))).collect(),
 		..Default::default()
 	});
 	conn.rooms
@@ -38,8 +38,11 @@ fn gated_list_window_excludes_room_without_persistent_delta() {
 	response_lists.insert(list_id, Default::default());
 	let rooms = [room];
 
-	let gated = list_selections(&conn, rooms.iter(), &response_lists, true).collect::<Vec<_>>();
-	assert!(gated.is_empty());
+	assert!(
+		list_selections(&conn, rooms.iter(), &response_lists, true)
+			.next()
+			.is_none()
+	);
 
 	let ungated = list_selections(&conn, rooms.iter(), &response_lists, false)
 		.map(|(room_id, _)| room_id)
@@ -61,7 +64,7 @@ fn gated_list_window_includes_room_with_persistent_delta() {
 
 	let mut conn = Connection::default();
 	conn.lists.insert(list_id.clone(), request::List {
-		ranges: [(uint!(0), uint!(0))].into_iter().collect(),
+		ranges: std::iter::once((uint!(0), uint!(0))).collect(),
 		..Default::default()
 	});
 	conn.rooms
