@@ -36,7 +36,10 @@ use self::{
 	session_list::sessions_list_html,
 	session_view::session_view_html,
 };
-use super::{consume_login_token, peek_login_token, sso_redirect_url, url_encode};
+use super::{
+	authorize::should_serve_native, consume_login_token, peek_login_token, sso_redirect_url,
+	url_encode,
+};
 
 pub(crate) static ACCOUNT_MANAGEMENT_ACTIONS_SUPPORTED: &[&str] = &[
 	"org.matrix.profile",
@@ -115,10 +118,65 @@ pub(crate) async fn get_account_route(
 
 	let device_id = params.device_id.as_deref().unwrap_or_default();
 
-	match account_sso_redirect(&services, action, device_id) {
-		| Ok(redirect) => account_redirect_response(redirect),
+	match account_auth_redirect(&services, action, device_id) {
+		| Ok(response) => response,
 		| Err(e) => account_error_response(&e),
 	}
+}
+
+fn account_auth_redirect(services: &Services, action: &str, device_id: &str) -> Result<Response> {
+	validate_account_action(action)?;
+
+	let idp_id = services.oauth.providers.get_default_id();
+	let wants_create = false;
+	let serve_native =
+		should_serve_native(services.config.oidc_native_auth, idp_id.is_some(), wants_create);
+
+	match serve_native {
+		| true => account_native_redirect(services, action, device_id),
+		| false => account_sso_redirect(services, action, device_id, idp_id.as_deref()),
+	}
+}
+
+fn account_native_redirect(
+	services: &Services,
+	action: &str,
+	device_id: &str,
+) -> Result<Response> {
+	let issuer = services.oauth.get_server()?.issuer_url()?;
+	let base = issuer.trim_end_matches('/');
+
+	let native_url = Url::parse_with_params(&format!("{base}/_tuwunel/oidc/native"), [
+		("action", action),
+		("device_id", device_id),
+	])
+	.map_err(|_| err!(Request(InvalidParam("Failed to build native login URL"))))?;
+
+	Ok(account_redirect_response(Redirect::temporary(native_url.as_str())))
+}
+
+fn account_sso_redirect(
+	services: &Services,
+	action: &str,
+	device_id: &str,
+	idp_id: Option<&str>,
+) -> Result<Response> {
+	let idp_id = idp_id
+		.ok_or_else(|| err!(Config("identity_provider", "No identity provider configured")))?;
+
+	let issuer = services.oauth.get_server()?.issuer_url()?;
+	let base = issuer.trim_end_matches('/');
+
+	let callback_url =
+		Url::parse_with_params(&format!("{base}/_tuwunel/oidc/account_callback"), [
+			("action", action),
+			("device_id", device_id),
+		])
+		.map_err(|_| err!(error!("Failed to build account callback URL")))?;
+
+	let sso_url = sso_redirect_url(base, idp_id, &callback_url)?;
+
+	Ok(account_redirect_response(Redirect::temporary(sso_url.as_str())))
 }
 
 pub(crate) async fn get_account_callback_route(
@@ -182,7 +240,22 @@ async fn handle_account_callback(
 
 	// Validations before consuming the token so that an invalid action does not
 	// burn the user's single-use login_token needlessly.
-	account_management_idp_id(services)?;
+	services.oauth.get_server()?;
+
+	(services.config.oidc_native_auth
+		|| services
+			.oauth
+			.providers
+			.get_default_id()
+			.is_some())
+	.then_some(())
+	.ok_or_else(|| {
+		err!(Config(
+			"identity_provider",
+			"No identity provider or native authentication configured"
+		))
+	})?;
+
 	validate_account_action(action)?;
 
 	// MSC4191 stable action names dispatch through the prototype aliases.
@@ -295,26 +368,6 @@ async fn handle_account_callback(
 	}
 }
 
-fn account_sso_redirect(services: &Services, action: &str, device_id: &str) -> Result<Redirect> {
-	validate_account_action(action)?;
-
-	let default_idp = account_management_idp_id(services)?;
-	let issuer = services.oauth.get_server()?.issuer_url()?;
-	let base = issuer.trim_end_matches('/');
-
-	let mut callback_url = Url::parse(&format!("{base}/_tuwunel/oidc/account_callback"))
-		.map_err(|_| err!(error!("Failed to build account callback URL")))?;
-
-	callback_url
-		.query_pairs_mut()
-		.append_pair("action", action)
-		.append_pair("device_id", device_id);
-
-	let sso_url = sso_redirect_url(base, &default_idp, &callback_url)?;
-
-	Ok(Redirect::temporary(sso_url.as_str()))
-}
-
 pub(super) fn account_redirect_response(redirect: Redirect) -> Response {
 	let mut response = redirect.into_response();
 
@@ -370,14 +423,6 @@ fn account_error_page(message: &str) -> String {
 			</body>
 		</html>"#
 	)
-}
-
-fn account_management_idp_id(services: &Services) -> Result<String> {
-	services
-		.oauth
-		.providers
-		.get_default_id()
-		.ok_or_else(|| err!(Config("identity_provider", "No identity provider configured")))
 }
 
 fn validate_account_action(action: &str) -> Result {

@@ -11,6 +11,7 @@ use serde::Deserialize;
 use serde_json::json;
 use tuwunel_core::{
 	Err, Result, err,
+	smallstr::SmallString,
 	utils::{self, hash, html::escape as html_escape},
 };
 use tuwunel_service::{Services, users::Register};
@@ -24,12 +25,17 @@ use super::{
 };
 use crate::ClientIp;
 
+type AccountAction = SmallString<[u8; 32]>;
+type DeviceId = SmallString<[u8; 24]>;
+
 const LOGIN_TOKEN_LENGTH: usize = 32;
 
 #[derive(Debug, Default, Deserialize)]
 struct NativeQuery {
 	oidc_req_id: Option<String>,
 	user_code: Option<String>,
+	action: Option<AccountAction>,
+	device_id: Option<DeviceId>,
 	view: Option<String>,
 }
 
@@ -39,6 +45,10 @@ pub(crate) struct NativeSubmit {
 	oidc_req_id: Option<String>,
 	#[serde(default)]
 	user_code: Option<String>,
+	#[serde(default)]
+	action: Option<AccountAction>,
+	#[serde(default)]
+	device_id: Option<DeviceId>,
 	#[serde(default)]
 	mode: Option<String>,
 	username: String,
@@ -51,6 +61,10 @@ pub(crate) struct NativeSubmit {
 
 #[derive(Clone, Copy)]
 enum Flow<'a> {
+	Account {
+		action: &'a str,
+		device_id: &'a str,
+	},
 	Authorization(&'a str),
 	Device(&'a str),
 }
@@ -71,7 +85,12 @@ pub(crate) async fn native_get_route(
 			| Err(e) => return account_error_response(&e.into()),
 		};
 
-	let context = match parse_flow(params.oidc_req_id.as_deref(), params.user_code.as_deref()) {
+	let context = match parse_flow(
+		params.oidc_req_id.as_deref(),
+		params.user_code.as_deref(),
+		params.action.as_deref(),
+		params.device_id.as_deref(),
+	) {
 		| Ok(context) => context,
 		| Err(e) => return account_error_response(&e),
 	};
@@ -81,20 +100,31 @@ pub(crate) async fn native_get_route(
 	account_html_response(StatusCode::OK, render_page(&services, view, context, None).await)
 }
 
-fn parse_flow<'a>(oidc_req_id: Option<&'a str>, user_code: Option<&'a str>) -> Result<Flow<'a>> {
+fn parse_flow<'a>(
+	oidc_req_id: Option<&'a str>,
+	user_code: Option<&'a str>,
+	action: Option<&'a str>,
+	device_id: Option<&'a str>,
+) -> Result<Flow<'a>> {
 	match (
 		oidc_req_id.filter(|value| !value.is_empty()),
 		user_code.filter(|value| !value.is_empty()),
+		action.filter(|value| !value.is_empty()),
 	) {
-		| (Some(req_id), None) => Ok(Flow::Authorization(req_id)),
-		| (None, Some(user_code)) => Ok(Flow::Device(user_code)),
-		| _ =>
-			Err!(Request(InvalidParam("Exactly one OIDC request ID or user code is required."))),
+		| (Some(req_id), None, None) => Ok(Flow::Authorization(req_id)),
+		| (None, Some(user_code), None) => Ok(Flow::Device(user_code)),
+		| (None, None, Some(action)) => Ok(Flow::Account {
+			action,
+			device_id: device_id.unwrap_or_default(),
+		}),
+		| _ => Err!(Request(InvalidParam(
+			"Exactly one OIDC request ID, user code, or account action is required."
+		))),
 	}
 }
 
-/// Authenticates submitted credentials and hands the resulting login token to
-/// the authorization-code completion or device-consent callback.
+/// Authenticates submitted credentials and sends the login token to the
+/// authorization completion, device-consent, or account-management callback.
 pub(crate) async fn native_submit_route(
 	State(services): State<crate::State>,
 	ClientIp(client): ClientIp,
@@ -103,8 +133,12 @@ pub(crate) async fn native_submit_route(
 	match native_submit(&services, client, &body).await {
 		| Ok(response) => response,
 		| Err(e) => {
-			let context = match parse_flow(body.oidc_req_id.as_deref(), body.user_code.as_deref())
-			{
+			let context = match parse_flow(
+				body.oidc_req_id.as_deref(),
+				body.user_code.as_deref(),
+				body.action.as_deref(),
+				body.device_id.as_deref(),
+			) {
 				| Ok(context) => context,
 				| Err(context_error) => return account_error_response(&context_error),
 			};
@@ -132,7 +166,13 @@ async fn native_submit(
 	services.oauth.check_device_rate_limit(client)?;
 	services.oauth.check_rate_limit(client)?;
 
-	let context = parse_flow(body.oidc_req_id.as_deref(), body.user_code.as_deref())?;
+	let context = parse_flow(
+		body.oidc_req_id.as_deref(),
+		body.user_code.as_deref(),
+		body.action.as_deref(),
+		body.device_id.as_deref(),
+	)?;
+
 	let user_id = match (context, body.mode.as_deref()) {
 		| (Flow::Authorization(_), Some("register")) => do_register(services, body).await?,
 		| _ => verify_credentials(services, &body.username, &body.password).await?,
@@ -321,20 +361,26 @@ async fn record_accepted_terms(services: &Services, user_id: &UserId) -> Result 
 fn complete_redirect(services: &Services, flow: Flow<'_>, login_token: &str) -> Result<Redirect> {
 	let issuer = services.oauth.get_server()?.issuer_url()?;
 	let base = issuer.trim_end_matches('/');
-	let (path, context_name, context_value) = match flow {
-		| Flow::Device(user_code) => ("/_tuwunel/oidc/device_callback", "user_code", user_code),
-		| Flow::Authorization(req_id) => ("/_tuwunel/oidc/_complete", "oidc_req_id", req_id),
-	};
 
-	let url = Url::parse(&format!("{base}{path}"))
-		.map_err(|_| err!(error!("Failed to build completion URL")))
-		.map(|mut url| {
-			url.query_pairs_mut()
-				.append_pair(context_name, context_value)
-				.append_pair("loginToken", login_token);
-
-			url
-		})?;
+	let url = match flow {
+		| Flow::Device(user_code) =>
+			Url::parse_with_params(&format!("{base}/_tuwunel/oidc/device_callback"), [
+				("user_code", user_code),
+				("loginToken", login_token),
+			]),
+		| Flow::Authorization(req_id) =>
+			Url::parse_with_params(&format!("{base}/_tuwunel/oidc/_complete"), [
+				("oidc_req_id", req_id),
+				("loginToken", login_token),
+			]),
+		| Flow::Account { action, device_id } =>
+			Url::parse_with_params(&format!("{base}/_tuwunel/oidc/account_callback"), [
+				("action", action),
+				("device_id", device_id),
+				("loginToken", login_token),
+			]),
+	}
+	.map_err(|_| err!(error!("Failed to build completion URL")))?;
 
 	Ok(Redirect::to(url.as_str()))
 }
@@ -365,9 +411,34 @@ async fn render_page(
 }
 
 fn render_login(context: Flow<'_>, error: Option<&str>, show_register: bool) -> String {
-	let (context_name, context_value, register_link) = match context {
-		| Flow::Device(user_code) => ("user_code", user_code, String::new()),
+	let (context_fields, register_link) = match context {
+		| Flow::Device(user_code) => {
+			let context_fields = format!(
+				r#"<input type="hidden" name="user_code" value="{}">"#,
+				html_escape(user_code),
+			);
+
+			(context_fields, String::new())
+		},
+		| Flow::Account { action, device_id } => {
+			let context_fields = format!(
+				concat!(
+					r#"<input type="hidden" name="action" value="{}">"#,
+					"\n\t\t\t",
+					r#"<input type="hidden" name="device_id" value="{}">"#,
+				),
+				html_escape(action),
+				html_escape(device_id),
+			);
+
+			(context_fields, String::new())
+		},
 		| Flow::Authorization(req_id) => {
+			let context_fields = format!(
+				r#"<input type="hidden" name="oidc_req_id" value="{}">"#,
+				html_escape(req_id),
+			);
+
 			let register_link = show_register
 				.then(|| {
 					format!(
@@ -377,16 +448,15 @@ fn render_login(context: Flow<'_>, error: Option<&str>, show_register: bool) -> 
 				})
 				.unwrap_or_default();
 
-			("oidc_req_id", req_id, register_link)
+			(context_fields, register_link)
 		},
 	};
 
 	LOGIN_HTML
 		.replace("{register_link}", &register_link)
 		.replace("{error}", &error_block(error))
-		.replace("{context_name}", context_name)
-		// Fill the caller-supplied context last so it cannot smuggle a placeholder.
-		.replace("{context_value}", &html_escape(context_value))
+		// Fill caller-supplied fields last so they cannot smuggle a placeholder.
+		.replace("{context_fields}", &context_fields)
 }
 
 async fn render_register(services: &Services, req_id: &str, error: Option<&str>) -> String {
@@ -455,7 +525,7 @@ static LOGIN_HTML: &str = const_format!(
 		<h1>Sign In</h1>
 		{{error}}
 		<form method="POST" action="/_tuwunel/oidc/native">
-			<input type="hidden" name="{{context_name}}" value="{{context_value}}">
+			{{context_fields}}
 			<input type="hidden" name="mode" value="login">
 			<label>
 				Username
@@ -569,15 +639,97 @@ mod tests {
 	}
 
 	#[test]
+	fn account_login_page_has_hidden_action_and_device_id() {
+		let context = Flow::Account {
+			action: "org.matrix.sessions_list",
+			device_id: "",
+		};
+
+		let html = render_login(context, None, true);
+
+		assert!(html.contains(r#"name="action" value="org.matrix.sessions_list""#));
+		assert!(html.contains(r#"name="device_id" value="""#));
+		assert!(!html.contains(r#"name="oidc_req_id""#));
+		assert!(!html.contains(r#"name="user_code""#));
+		assert!(!html.contains("view=register"));
+	}
+
+	#[test]
+	fn account_login_page_escapes_and_does_not_expand_context() {
+		let context = Flow::Account {
+			action: "a<{error}>",
+			device_id: "b<{error}>",
+		};
+
+		let html = render_login(context, Some("BOOM"), true);
+
+		assert_eq!(html.matches("BOOM").count(), 1);
+		assert!(!html.contains("a<{error}>"));
+		assert!(!html.contains("b<{error}>"));
+		assert!(html.contains(r#"name="action" value="a&lt;{error}&gt;""#));
+		assert!(html.contains(r#"name="device_id" value="b&lt;{error}&gt;""#));
+	}
+
+	#[test]
 	fn flow_requires_exactly_one_nonempty_value() {
-		assert!(matches!(parse_flow(Some("REQ123"), None), Ok(Flow::Authorization("REQ123"))));
+		assert!(matches!(
+			parse_flow(Some("REQ123"), None, None, None),
+			Ok(Flow::Authorization("REQ123"))
+		));
 
-		assert!(matches!(parse_flow(None, Some("BCDF-GHJK")), Ok(Flow::Device("BCDF-GHJK"))));
+		assert!(matches!(
+			parse_flow(None, Some("BCDF-GHJK"), None, None),
+			Ok(Flow::Device("BCDF-GHJK"))
+		));
 
-		assert!(parse_flow(None, None).is_err());
-		assert!(parse_flow(Some(""), None).is_err());
-		assert!(parse_flow(None, Some("")).is_err());
-		assert!(parse_flow(Some("REQ123"), Some("BCDF-GHJK")).is_err());
+		assert!(matches!(
+			parse_flow(None, None, Some("org.matrix.sessions_list"), None),
+			Ok(Flow::Account {
+				action: "org.matrix.sessions_list",
+				device_id: "",
+			})
+		));
+
+		assert!(matches!(
+			parse_flow(None, None, Some("org.matrix.session_view"), Some("DEVICE")),
+			Ok(Flow::Account {
+				action: "org.matrix.session_view",
+				device_id: "DEVICE",
+			})
+		));
+
+		assert!(matches!(
+			parse_flow(None, None, Some("org.matrix.sessions_list"), Some("")),
+			Ok(Flow::Account {
+				action: "org.matrix.sessions_list",
+				device_id: "",
+			})
+		));
+
+		assert!(parse_flow(None, None, None, None).is_err());
+		assert!(parse_flow(None, None, None, Some("DEVICE")).is_err());
+		assert!(parse_flow(Some(""), None, None, None).is_err());
+		assert!(parse_flow(None, Some(""), None, None).is_err());
+		assert!(parse_flow(None, None, Some(""), None).is_err());
+		assert!(parse_flow(None, None, Some(""), Some("DEVICE")).is_err());
+		assert!(parse_flow(Some("REQ123"), Some("BCDF-GHJK"), None, None).is_err());
+		assert!(
+			parse_flow(Some("REQ123"), None, Some("org.matrix.sessions_list"), None).is_err()
+		);
+
+		assert!(
+			parse_flow(None, Some("BCDF-GHJK"), Some("org.matrix.sessions_list"), None).is_err()
+		);
+
+		assert!(
+			parse_flow(
+				Some("REQ123"),
+				Some("BCDF-GHJK"),
+				Some("org.matrix.sessions_list"),
+				None,
+			)
+			.is_err()
+		);
 	}
 
 	#[test]
