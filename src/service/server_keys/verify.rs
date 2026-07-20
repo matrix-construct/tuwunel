@@ -1,5 +1,6 @@
 use ruma::{
-	CanonicalJsonObject, CanonicalJsonValue, OwnedEventId, RoomVersionId, signatures::Verified,
+	CanonicalJsonObject, CanonicalJsonValue, OwnedEventId, RoomVersionId,
+	signatures::{Verified, verify_event},
 };
 use serde_json::value::RawValue as RawJsonValue;
 use tuwunel_core::{
@@ -83,12 +84,7 @@ pub async fn verify_event(
 		.get_event_keys(event, &room_version_rules)
 		.await?;
 
-	ruma::signatures::verify_event(
-		ruma::signatures::VerifyEventPublicSigningKeys::new(&event_keys),
-		event,
-		&room_version_rules,
-	)
-	.map_err(Into::into)
+	verify_event(&event_keys, event, &room_version_rules).map_err(Into::into)
 }
 
 #[implement(super::Service)]

@@ -3,7 +3,7 @@ use std::{fmt::Debug, mem};
 use bytes::{Bytes, BytesMut};
 use reqwest::Request;
 use ruma::api::{
-	IncomingResponse, OutgoingRequest,
+	IncomingResponse, OutgoingRequest, OutgoingRequestExt,
 	appservice::Registration,
 	auth_scheme::{AuthScheme, SendAccessToken},
 	path_builder::PathBuilder,

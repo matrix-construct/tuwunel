@@ -1,7 +1,7 @@
 use bytes::BytesMut;
 use reqwest::Request;
 use ruma::api::{
-	OutgoingRequest,
+	OutgoingRequestExt,
 	appservice::{Registration, ping::send_ping},
 	auth_scheme::SendAccessToken,
 	error::{BadStatusErrorData, ErrorKind},

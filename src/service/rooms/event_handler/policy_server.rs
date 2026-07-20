@@ -10,7 +10,10 @@ use ruma::{
 		error::{ErrorKind, RetryAfter},
 		federation::policy::sign_event::v1 as sign_event,
 	},
-	events::{StateEventType, room::policy::RoomPolicyEventContent},
+	events::{
+		StateEventType,
+		room::policy::{POLICY_SERVER_ED25519_SIGNING_KEY_ID, RoomPolicyEventContent},
+	},
 	serde::Base64,
 	signatures::{to_canonical_json_string_for_signing, verify_canonical_json_bytes},
 };
@@ -517,7 +520,7 @@ fn extract_policy_signature<'a>(
 	};
 
 	let CanonicalJsonValue::String(signature) =
-		key_map.get(RoomPolicyEventContent::POLICY_SERVER_ED25519_SIGNING_KEY_ID)?
+		key_map.get(POLICY_SERVER_ED25519_SIGNING_KEY_ID)?
 	else {
 		return None;
 	};
@@ -544,7 +547,7 @@ fn insert_policy_signature(
 
 	if let CanonicalJsonValue::Object(key_map) = entry {
 		key_map.insert(
-			RoomPolicyEventContent::POLICY_SERVER_ED25519_SIGNING_KEY_ID.into(),
+			POLICY_SERVER_ED25519_SIGNING_KEY_ID.into(),
 			CanonicalJsonValue::String(signature.to_owned()),
 		);
 	}

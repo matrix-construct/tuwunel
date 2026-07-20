@@ -3,7 +3,8 @@ use std::{fmt::Debug, mem};
 use bytes::BytesMut;
 use ipaddress::IPAddress;
 use ruma::api::{
-	IncomingResponse, OutgoingRequest, auth_scheme::AuthScheme, path_builder::PathBuilder,
+	IncomingResponse, OutgoingRequest, OutgoingRequestExt, auth_scheme::AuthScheme,
+	path_builder::PathBuilder,
 };
 use tuwunel_core::{
 	Err, Result, debug_warn, err, implement, trace, utils::string_from_bytes, warn,

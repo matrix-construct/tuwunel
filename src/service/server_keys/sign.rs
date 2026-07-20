@@ -62,7 +62,7 @@ pub fn hash_and_sign_event(
 	object: &mut CanonicalJsonObject,
 	room_version_id: &RoomVersionId,
 ) -> Result {
-	use ruma::signatures::{hash_event, sign_event};
+	use ruma::signatures::{add_content_hash_to_event, sign_event};
 
 	let server_name = &self.services.server.name;
 	let room_version_rules = room_version::rules(room_version_id)?;
@@ -77,7 +77,7 @@ pub fn hash_and_sign_event(
 		}
 	};
 
-	hash_event(object).map_err(map_err)?;
+	add_content_hash_to_event(object).map_err(map_err)?;
 	sign_event(server_name.as_str(), self.keypair(), object, &room_version_rules.redaction)
 		.map_err(map_err)
 }

@@ -6,7 +6,8 @@ use reqwest::{Client, Method, Request, Response, Url};
 use ruma::{
 	ServerName,
 	api::{
-		EndpointError, IncomingResponse, MatrixVersion, OutgoingRequest, SupportedVersions,
+		EndpointError, IncomingResponse, MatrixVersion, OutgoingRequest, OutgoingRequestExt,
+		SupportedVersions,
 		error::{Error as RumaError, ErrorBody},
 	},
 };
