@@ -93,10 +93,11 @@ impl Engine {
 		self.db.wait_for_compact(&opts).map_err(map_err)
 	}
 
-	/// Flush the memtables to SST files.
+	/// Flush the memtables to SST files (a RocksDB LSM-tree flush).
 	///
-	/// Forces buffered writes out of memory into the on-disk LSM tree; distinct
-	/// from `flush` and `sync`, which act on the write-ahead log.
+	/// Forces buffered writes out of memory into the on-disk LSM tree. An LSM
+	/// flush, not a libc `fflush(3)` or `fsync(2)`, and distinct from the
+	/// `flush` and `sync` methods here, which act on the write-ahead log.
 	#[tracing::instrument(
 		level = "info",
 		skip_all,

@@ -105,8 +105,11 @@ pub(super) enum ServerCommand {
 }
 
 /// Run blocking database work off the async runtime.
+///
+/// Shared by the admin command groups (`server`, `query raw`); the closure
+/// receives the `Database` handle on a `spawn_blocking` worker.
 #[implement(crate::Context, params = "<'_>")]
-async fn blocking_db<F, T>(&self, f: F) -> Result<T>
+pub(crate) async fn blocking_db<F, T>(&self, f: F) -> Result<T>
 where
 	F: FnOnce(Arc<Database>) -> Result<T> + Send + 'static,
 	T: Send + 'static,

@@ -2,6 +2,7 @@ mod clear;
 mod compact;
 mod count;
 mod del;
+mod flush;
 mod get;
 mod iter;
 mod keys;
@@ -190,6 +191,9 @@ pub(crate) enum RawCommand {
 		#[arg(long, default_value("false"))]
 		exhaustive: bool,
 	},
+
+	/// - Flush RocksDB memtables to SST files (LSM flush, not fsync/fflush)
+	Flush,
 }
 
 fn with_map_or(map: Option<&str>, services: &Services) -> Result<Vec<Arc<Map>>> {
