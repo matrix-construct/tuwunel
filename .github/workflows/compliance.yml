@@ -13,6 +13,10 @@ on:
         type: string
         default: 'het'
         description: Runner mask
+      max_parallel:
+        type: number
+        default: 256
+        description: Maximum concurrent matrix cells
       script:
         type: string
         description: Driver script
@@ -89,6 +93,7 @@ jobs:
     runs-on: ["${{matrix.machine}}", "${{inputs.runner}}"]
     strategy:
       fail-fast: false
+      max-parallel: ${{inputs.max_parallel}}
       matrix:
         cargo_profile: ${{fromJSON(inputs.cargo_profiles)}}
         feat_set: ${{fromJSON(inputs.feat_sets)}}

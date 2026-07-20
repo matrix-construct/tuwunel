@@ -154,8 +154,8 @@ ENTRYPOINT exec /complement/provision_complement.sh sched_wrap.sh valgrind \
 FROM input AS complement-base
 ARG var_cache
 ARG var_lib_apt
-ARG complement_ref="b2d92cd54d4c5e9191355e301c7f404326b1277f"
-ARG complement_tags="conduwuit_blacklist"
+ARG complement_ref="1f4b6b69a3e14bd2b290f37c39576c81079689f9"
+ARG complement_tags="conduwuit_blacklist,complemau"
 ARG complement_tests="./tests/..."
 ARG complement_run=".*"
 ARG sched_policy="--batch"

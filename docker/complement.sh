@@ -30,6 +30,9 @@ skip="${skip}|TestToDeviceMessagesOverFederation/interrupted_connectivity"
 skip="${skip}|TestDeviceListsUpdateOverFederation/stopped_server"
 skip="${skip}|TestJumpToDateEndpoint/parallel/federation"
 skip="${skip}|TestJumpToDateEndpoint/parallel/should_find_next_event_topologically"
+if [[ -v complement_skip ]]; then
+	skip="$complement_skip"
+fi
 
 set -a
 cargo_profile="${cargo_profile:-$default_cargo_profile}"
@@ -64,6 +67,12 @@ envs="$envs -e complement_skip=${complement_skip:-$skip}"
 envs="$envs -e complement_run=${1:-$default_complement_run}"
 envs="$envs -e COMPLEMENT_ALWAYS_PRINT_SERVER_LOGS=1"
 envs="$envs -e COMPLEMENT_DESTROY_HS_TIMEOUT_SECS=10"
+if test -n "${complement_tags:-}"; then
+	envs="$envs -e complement_tags=$complement_tags"
+fi
+if test -n "${complement_tests:-}"; then
+	envs="$envs -e complement_tests=$complement_tests"
+fi
 
 # Interop runs assign a different homeserver image to one or more homeservers
 # so federation is exercised between heterogeneous implementations (Synapse vs
@@ -118,16 +127,16 @@ flavor="complement"
 tester_image_prefix="complement-tester"
 container_name_prefix="complement_tester"
 src_root="/usr/src/complement"
-results_dir="tests/complement"
+results_dir="${complement_results_dir:-tests/complement}"
 
 if test -n "$interop_images"; then
 	results_dir="tests/complement/interop"
 	baseline_gate=0
 	envs="$envs -e COMPLEMENT_SPAWN_HS_TIMEOUT_SECS=${complement_spawn_timeout:-60}"
 else
-	# Both the optimized and debug runs gate the same homogeneous baseline in
+	# The standard optimized and debug runs gate the same homogeneous baseline in
 	# tests/complement/results.jsonl; the two produce identical results.
-	baseline_gate=1
+	baseline_gate="${complement_baseline_gate:-1}"
 fi
 
 export flavor tester_image_prefix container_name_prefix src_root results_dir
