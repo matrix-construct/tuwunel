@@ -1,5 +1,83 @@
 #![cfg(test)]
 
+use ruma::media::Method;
+
+use super::Dim;
+
+fn scale(width: u32, height: u32) -> Dim { Dim::new(width, height, Some(Method::Scale)) }
+fn crop(width: u32, height: u32) -> Dim { Dim::new(width, height, Some(Method::Crop)) }
+fn source(width: u32, height: u32) -> Dim { Dim::new(width, height, None) }
+
+/// The source already carries the requested dimensions, so scaling is a no-op
+/// and re-encoding would only discard the original's format and metadata.
+#[test]
+fn passthrough_when_scale_request_matches_source() {
+	assert!(
+		scale(800, 600)
+			.is_passthrough(&source(800, 600))
+			.unwrap()
+	);
+}
+
+/// `scaled` covers the requested box rather than fitting inside it, so a source
+/// already meeting the requested height cannot shrink: the generated thumbnail
+/// would be the source itself.
+#[test]
+fn passthrough_when_one_side_already_meets_request() {
+	assert!(
+		scale(800, 600)
+			.is_passthrough(&source(1000, 600))
+			.unwrap()
+	);
+}
+
+/// A genuinely larger source must still be thumbnailed.
+#[test]
+fn generates_when_source_is_larger_in_both_dimensions() {
+	assert!(
+		!scale(800, 600)
+			.is_passthrough(&source(4000, 3000))
+			.unwrap()
+	);
+}
+
+/// Crop reaches the requested size by cropping, so a source that is larger in
+/// only one dimension must still be generated. Widening the upscale guard to
+/// `>=` would wrongly pass this through.
+#[test]
+fn generates_when_crop_source_is_larger_in_one_dimension() {
+	assert!(
+		!crop(96, 96)
+			.is_passthrough(&source(500, 96))
+			.unwrap()
+	);
+}
+
+/// Servers must not upscale; a source smaller than the request is served as-is.
+#[test]
+fn passthrough_when_request_exceeds_source() {
+	assert!(
+		crop(96, 96)
+			.is_passthrough(&source(50, 50))
+			.unwrap()
+	);
+	assert!(
+		scale(800, 600)
+			.is_passthrough(&source(1000, 400))
+			.unwrap()
+	);
+}
+
+/// Crop at exactly the source size reproduces the source.
+#[test]
+fn passthrough_when_crop_request_matches_source() {
+	assert!(
+		crop(96, 96)
+			.is_passthrough(&source(96, 96))
+			.unwrap()
+	);
+}
+
 #[tokio::test]
 #[cfg(disable)] //TODO: fixme
 async fn long_file_names_works() {
