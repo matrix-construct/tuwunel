@@ -1,4 +1,5 @@
-use axum::extract::State;
+use axum::{extract::State, response::IntoResponse};
+use http::header::{CACHE_CONTROL, CONTENT_TYPE};
 use ruma::api::client::uiaa::{AuthType, UiaaInfo, get_uiaa_fallback_page};
 use serde_json::Value as JsonValue;
 use tuwunel_core::{Err, Result, trace, utils::BoolExt};
@@ -107,4 +108,22 @@ pub(crate) async fn sso_fallback_route(
 	let output = html.replace("{{url_str}}", &url_str);
 
 	Ok(Response::html(output.into_bytes()))
+}
+
+const COMPLETE_JS: &str = include_str!("complete.js");
+
+pub(crate) async fn sso_complete_js_route() -> impl IntoResponse {
+	let content_type = (CONTENT_TYPE, "application/javascript; charset=utf-8");
+	let cache_control = (CACHE_CONTROL, "no-cache");
+
+	([content_type, cache_control], COMPLETE_JS)
+}
+
+const SSO_CSS: &str = include_str!("sso.css");
+
+pub(crate) async fn sso_css_route() -> impl IntoResponse {
+	let content_type = (CONTENT_TYPE, "text/css; charset=utf-8");
+	let cache_control = (CACHE_CONTROL, "no-cache");
+
+	([content_type, cache_control], SSO_CSS)
 }

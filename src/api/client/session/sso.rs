@@ -45,7 +45,7 @@ use tuwunel_service::{
 };
 use url::Url;
 
-pub(crate) use self::uiaa::sso_fallback_route;
+pub(crate) use self::uiaa::{sso_complete_js_route, sso_css_route, sso_fallback_route};
 use super::TOKEN_LENGTH;
 use crate::{ClientIp, Ruma};
 

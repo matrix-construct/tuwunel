@@ -5463,6 +5463,8 @@ dependencies = [
  "sha1",
  "synapse-admin-api",
  "tokio",
+ "tower",
+ "tower-http",
  "tracing",
  "tuwunel_core",
  "tuwunel_service",

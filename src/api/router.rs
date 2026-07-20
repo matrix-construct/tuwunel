@@ -12,6 +12,8 @@ use axum::{
 	routing::{any, get, post},
 };
 pub use client_ip::{ConfiguredIpSource, TrustedPeerSubnets};
+use http::{HeaderValue, header};
+use tower_http::set_header::SetResponseHeaderLayer;
 use tuwunel_core::{Server, err};
 
 use self::handler::RouterExt;
@@ -89,6 +91,8 @@ fn register_client_auth_routes(router: Router<State>) -> Router<State> {
 		.ruma_route(&client::suspend_user_route)
 		.ruma_route(&client::is_user_locked_route)
 		.ruma_route(&client::lock_user_route)
+		.route("/_tuwunel/sso/complete.js", get(client::sso_complete_js_route))
+		.route("/_tuwunel/sso/sso.css", get(client::sso_css_route))
 }
 
 fn register_mas_routes(router: Router<State>) -> Router<State> {
@@ -389,13 +393,17 @@ fn register_client_state_and_sync_routes(router: Router<State>) -> Router<State>
 }
 
 fn register_client_media_and_device_routes(router: Router<State>) -> Router<State> {
+	let media_content_router = Router::new()
+		.ruma_route(&client::get_content_thumbnail_route)
+		.ruma_route(&client::get_content_route)
+		.ruma_route(&client::get_content_as_filename_route);
+
+	let media_content_router = media_content_headers(media_content_router);
+
 	router
 		.ruma_route(&client::create_content_route)
 		.ruma_route(&client::create_mxc_uri_route)
 		.ruma_route(&client::create_content_async_route)
-		.ruma_route(&client::get_content_thumbnail_route)
-		.ruma_route(&client::get_content_route)
-		.ruma_route(&client::get_content_as_filename_route)
 		.ruma_route(&client::get_media_preview_route)
 		.ruma_route(&client::get_media_config_route)
 		.ruma_route(&client::get_devices_route)
@@ -408,6 +416,7 @@ fn register_client_media_and_device_routes(router: Router<State>) -> Router<Stat
 		.ruma_route(&client::get_dehydrated_device_route)
 		.ruma_route(&client::get_dehydrated_events_route)
 		.ruma_route(&client::send_event_to_device_route)
+		.merge(media_content_router)
 }
 
 fn register_client_misc_routes(router: Router<State>) -> Router<State> {
@@ -533,9 +542,7 @@ fn register_legacy_media_routes(
 	allow_legacy_media: bool,
 ) -> Router<State> {
 	if allow_legacy_media {
-		router
-			.ruma_route(&client::get_media_config_legacy_route)
-			.ruma_route(&client::get_media_preview_legacy_route)
+		let media_content_router = Router::new()
 			.route(
 				"/_matrix/media/r0/download/{server_name}/{media_id}",
 				get(client::get_content_legacy_route),
@@ -559,7 +566,14 @@ fn register_legacy_media_routes(
 			.route(
 				"/_matrix/media/v3/thumbnail/{server_name}/{media_id}",
 				get(client::get_content_thumbnail_legacy_route),
-			)
+			);
+
+		let media_content_router = media_content_headers(media_content_router);
+
+		router
+			.ruma_route(&client::get_media_config_legacy_route)
+			.ruma_route(&client::get_media_preview_legacy_route)
+			.merge(media_content_router)
 	} else {
 		router
 			.route("/_matrix/media/v3/config", any(legacy_media_disabled))
@@ -567,6 +581,22 @@ fn register_legacy_media_routes(
 			.route("/_matrix/media/v3/thumbnail/{*path}", any(legacy_media_disabled))
 			.route("/_matrix/media/v3/preview_url", any(legacy_media_disabled))
 	}
+}
+
+fn media_content_headers(router: Router<State>) -> Router<State> {
+	const MEDIA_CSP: &[&str] = &[
+		"sandbox",
+		"default-src 'none'",
+		"script-src 'none'",
+		"plugin-types application/pdf",
+		"style-src 'unsafe-inline'",
+		"object-src 'self'",
+	];
+
+	router.route_layer(SetResponseHeaderLayer::overriding(
+		header::CONTENT_SECURITY_POLICY,
+		HeaderValue::from_static(const_str::join!(MEDIA_CSP, ";")),
+	))
 }
 
 async fn legacy_media_disabled() -> impl IntoResponse {

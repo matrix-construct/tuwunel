@@ -25,7 +25,7 @@ use ipnet::IpNet;
 use tower::{
 	Layer, Service, ServiceBuilder,
 	layer::util::Identity,
-	util::{Either, option_layer},
+	util::{Either, MapResponseLayer, option_layer},
 };
 use tower_http::{
 	catch_panic::CatchPanicLayer,
@@ -59,25 +59,14 @@ pub(crate) struct Handle<S, F> {
 	inner: S,
 }
 
-const TUWUNEL_CSP: &[&str; 5] = &[
+const TUWUNEL_CSP: &[&str] = &[
 	"default-src 'none'",
+	"script-src 'self'",
+	"style-src 'self'",
 	"frame-ancestors 'none'",
-	"form-action 'none'",
+	"form-action 'self'",
 	"base-uri 'none'",
-	"sandbox",
 ];
-
-const TUWUNEL_HTML_CSP: &[&str; 7] = &[
-	"default-src 'none'",
-	"script-src 'unsafe-inline'",
-	"style-src 'unsafe-inline'",
-	"frame-ancestors 'none'",
-	"form-action 'none'",
-	"base-uri 'none'",
-	"sandbox",
-];
-
-const TUWUNEL_PERMISSIONS_POLICY: &[&str; 2] = &["interest-cohort=()", "browsing-topics=()"];
 
 pub(crate) fn build(services: &Arc<Services>) -> Result<(Router, Guard)> {
 	let server = &services.server;
@@ -120,41 +109,10 @@ pub(crate) fn build(services: &Arc<Services>) -> Result<(Router, Guard)> {
 			Duration::from_secs(server.config.client_request_timeout),
 		))
 		.layer(SetResponseHeaderLayer::if_not_present(
-			// https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Origin-Agent-Cluster
-			HeaderName::from_static("origin-agent-cluster"),
-			HeaderValue::from_static("?1"),
-		))
-		.layer(SetResponseHeaderLayer::if_not_present(
 			header::X_CONTENT_TYPE_OPTIONS,
 			HeaderValue::from_static("nosniff"),
 		))
-		.layer(SetResponseHeaderLayer::if_not_present(
-			header::X_XSS_PROTECTION,
-			HeaderValue::from_static("0"),
-		))
-		.layer(SetResponseHeaderLayer::if_not_present(
-			header::X_FRAME_OPTIONS,
-			HeaderValue::from_static("DENY"),
-		))
-		.layer(SetResponseHeaderLayer::if_not_present(
-			HeaderName::from_static("permissions-policy"),
-			HeaderValue::from_str(&TUWUNEL_PERMISSIONS_POLICY.join(","))?,
-		))
-		.layer(SetResponseHeaderLayer::if_not_present(
-			header::CONTENT_SECURITY_POLICY,
-			|res: &http::Response<_>| {
-				let csp = res
-					.headers()
-					.get(header::CONTENT_TYPE)
-					.map(HeaderValue::to_str)
-					.and_then(Result::ok)
-					.is_some_and(|val| val.contains("text/html"))
-					.then(|| TUWUNEL_HTML_CSP.join(";"))
-					.unwrap_or_else(|| TUWUNEL_CSP.join(";"));
-
-				HeaderValue::from_str(&csp).ok()
-			},
-		))
+		.layer(html_layer())
 		.layer(cors_layer(server))
 		.layer(body_limit_layer(server))
 		.layer(CatchPanicLayer::custom(move |panic| catch_panic(panic, services_.clone())));
@@ -254,8 +212,7 @@ fn cors_layer(server: &Server) -> CorsLayer {
 		IF_MATCH,
 		IF_NONE_MATCH,
 		header::ORIGIN,
-		HeaderName::from_lowercase(b"x-requested-with")
-			.expect("valid HTTP HeaderName from lowercase."),
+		HeaderName::from_static("x-requested-with"),
 	];
 
 	let allow_origin_list = server
@@ -296,6 +253,29 @@ fn trusted_peer_subnets_layer(
 
 fn ip_source_layer(source: Option<IpSource>) -> Either<Extension<ConfiguredIpSource>, Identity> {
 	option_layer(source.map(|source| Extension(ConfiguredIpSource(source))))
+}
+
+fn html_layer<T>() -> MapResponseLayer<impl Fn(http::Response<T>) -> http::Response<T> + Clone> {
+	MapResponseLayer::new(|mut response: http::Response<T>| {
+		let headers = response.headers_mut();
+
+		if headers
+			.get(header::CONTENT_TYPE)
+			.map(HeaderValue::to_str)
+			.and_then(Result::ok)
+			.is_some_and(|val| val.contains("text/html"))
+		{
+			headers
+				.entry(header::CONTENT_SECURITY_POLICY)
+				.or_insert(HeaderValue::from_static(const_str::join!(TUWUNEL_CSP, ";")));
+
+			headers
+				.entry(header::X_FRAME_OPTIONS)
+				.or_insert(HeaderValue::from_static("DENY"));
+		}
+
+		response
+	})
 }
 
 #[tracing::instrument(name = "panic", level = "error", skip_all)]

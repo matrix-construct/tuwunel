@@ -16,7 +16,7 @@ use axum::{
 };
 use http::{
 	HeaderValue, Method, StatusCode,
-	header::{CACHE_CONTROL, CONTENT_SECURITY_POLICY, CONTENT_TYPE, REFERRER_POLICY},
+	header::{CACHE_CONTROL, CONTENT_TYPE, REFERRER_POLICY},
 };
 use ruma::OwnedDeviceId;
 use tuwunel_core::{
@@ -71,20 +71,6 @@ static ACCOUNT_JS_INCLUDE: &str = r#"
 
 /// Cache-control header value.
 static ACCOUNT_CACHE_CONTROL: &str = "no-store";
-
-/// CSP for account-management HTML pages. The global CSP has `form-action
-/// 'none'` and `sandbox` (which both block form submission).
-/// `SetResponseHeaderLayer::if_not_present` means our header takes precedence.
-/// Styles are served from `/_tuwunel/oidc/account.css` so `style-src 'self'`
-/// suffices.
-static ACCOUNT_CSP: &[&str] = &[
-	"default-src 'none';",
-	"script-src 'self';",
-	"style-src 'self';",
-	"form-action 'self';",
-	"frame-ancestors 'none';",
-	"base-uri 'none';",
-];
 
 #[derive(Debug, Default, serde::Deserialize)]
 struct AccountQueryParams {
@@ -385,12 +371,7 @@ pub(super) fn account_redirect_response(redirect: Redirect) -> Response {
 // Prevent the login token in the callback URL from leaking via the Referer
 // header to any embedded resources.
 pub(super) fn account_html_response(status: StatusCode, html: String) -> Response {
-	let csp = ACCOUNT_CSP.join("");
-	let headers = [
-		(CACHE_CONTROL, ACCOUNT_CACHE_CONTROL),
-		(CONTENT_SECURITY_POLICY, csp.as_str()),
-		(REFERRER_POLICY, "no-referrer"),
-	];
+	let headers = [(CACHE_CONTROL, ACCOUNT_CACHE_CONTROL), (REFERRER_POLICY, "no-referrer")];
 
 	(status, headers, Html(html)).into_response()
 }

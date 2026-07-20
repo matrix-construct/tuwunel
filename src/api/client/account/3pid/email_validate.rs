@@ -7,17 +7,12 @@ use axum::{
 use const_str::format as const_format;
 use http::{
 	StatusCode,
-	header::{CACHE_CONTROL, CONTENT_SECURITY_POLICY, REFERRER_POLICY},
+	header::{CACHE_CONTROL, REFERRER_POLICY},
 };
 use serde::Deserialize;
 use tuwunel_core::utils::html::escape as html_escape;
 
 use crate::ClientIp;
-
-// Per-response CSP: the form posts back and the page pulls the shared
-// stylesheet, both same-origin, which the global policy forbids.
-static VALIDATE_CSP: &str = "default-src 'none'; style-src 'self'; form-action 'self'; \
-                             frame-ancestors 'none'; base-uri 'none';";
 
 static VALIDATE_HEAD: &str = r#"
 	<meta charset="UTF-8">
@@ -173,11 +168,7 @@ static ERROR_HTML: &str = const_format!(
 );
 
 fn validate_html(status: StatusCode, html: String) -> Response {
-	let headers = [
-		(CACHE_CONTROL, "no-store"),
-		(CONTENT_SECURITY_POLICY, VALIDATE_CSP),
-		(REFERRER_POLICY, "no-referrer"),
-	];
+	let headers = [(CACHE_CONTROL, "no-store"), (REFERRER_POLICY, "no-referrer")];
 
 	(status, headers, Html(html)).into_response()
 }

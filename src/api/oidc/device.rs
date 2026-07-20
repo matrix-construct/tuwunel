@@ -10,7 +10,7 @@ use axum::{
 };
 use http::{
 	StatusCode,
-	header::{CACHE_CONTROL, CONTENT_SECURITY_POLICY, PRAGMA, REFERRER_POLICY},
+	header::{CACHE_CONTROL, PRAGMA, REFERRER_POLICY},
 };
 use serde::Deserialize;
 use serde_json::json;
@@ -27,11 +27,6 @@ use super::{
 	sso_redirect_url, url_encode,
 };
 use crate::ClientIp;
-
-// Per-response CSP: the consent form needs form-action 'self', which the global
-// policy forbids.
-static DEVICE_CSP: &str = "default-src 'none'; style-src 'self'; form-action 'self'; \
-                           frame-ancestors 'none'; base-uri 'none';";
 
 static DEVICE_HEAD: &str = r#"
 	<meta charset="UTF-8">
@@ -342,11 +337,7 @@ fn device_redirect_response(redirect: Redirect) -> Response {
 }
 
 fn device_html_response(status: StatusCode, html: String) -> Response {
-	let headers = [
-		(CACHE_CONTROL, "no-store"),
-		(CONTENT_SECURITY_POLICY, DEVICE_CSP),
-		(REFERRER_POLICY, "no-referrer"),
-	];
+	let headers = [(CACHE_CONTROL, "no-store"), (REFERRER_POLICY, "no-referrer")];
 
 	(status, headers, Html(html)).into_response()
 }
