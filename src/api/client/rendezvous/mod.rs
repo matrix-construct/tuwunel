@@ -18,15 +18,14 @@ use tuwunel_core::{Err, Result, err};
 use tuwunel_service::{Services, rendezvous::Meta};
 
 pub(crate) use self::{
-	create::create_route,
-	delete::delete_route,
-	get::get_route,
+	create::create_rendezvous_route,
+	delete::delete_rendezvous_route,
+	get::get_rendezvous_route,
 	msc4388::{
-		create_route as create_msc4388_route, delete_route as delete_msc4388_route,
-		discover_route as discover_msc4388_route, get_route as get_msc4388_route,
-		put_route as put_msc4388_route,
+		create_msc4388_route, delete_msc4388_route, discover_msc4388_route, get_msc4388_route,
+		put_msc4388_route,
 	},
-	put::put_route,
+	put::put_rendezvous_route,
 };
 
 pub(super) const TEXT_PLAIN: &str = "text/plain";

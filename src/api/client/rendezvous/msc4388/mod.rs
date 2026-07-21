@@ -19,8 +19,8 @@ use tuwunel_core::{Error as CoreError, Result as CoreResult, err};
 use tuwunel_service::Services;
 
 pub(crate) use self::{
-	create::create_route, delete::delete_route, discover::discover_route, get::get_route,
-	put::put_route,
+	create::create_msc4388_route, delete::delete_msc4388_route, discover::discover_msc4388_route,
+	get::get_msc4388_route, put::put_msc4388_route,
 };
 use crate::Ruma;
 

@@ -6,7 +6,7 @@ use super::{Result, ensure_available};
 use crate::{ClientIp, Ruma};
 
 #[tracing::instrument(level = "debug", skip_all)]
-pub(crate) async fn delete_route(
+pub(crate) async fn delete_msc4388_route(
 	State(services): State<crate::State>,
 	ClientIp(client): ClientIp,
 	body: Ruma<Request>,

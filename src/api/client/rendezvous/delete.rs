@@ -8,7 +8,7 @@ use tuwunel_core::{Result, err};
 use super::ensure_enabled;
 
 #[tracing::instrument(level = "debug", skip_all)]
-pub(crate) async fn delete_route(
+pub(crate) async fn delete_rendezvous_route(
 	State(services): State<crate::State>,
 	Path(id): Path<String>,
 ) -> Result<Response> {

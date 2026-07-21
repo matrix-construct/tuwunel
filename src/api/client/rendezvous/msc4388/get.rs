@@ -8,7 +8,7 @@ use super::{Result, data_to_string, ensure_available, ensure_safe_get};
 use crate::{ClientIp, Ruma};
 
 #[tracing::instrument(level = "debug", skip_all)]
-pub(crate) async fn get_route(
+pub(crate) async fn get_msc4388_route(
 	State(services): State<crate::State>,
 	ClientIp(client): ClientIp,
 	headers: HeaderMap,

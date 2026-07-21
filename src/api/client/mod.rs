@@ -74,6 +74,7 @@ pub(super) use read_marker::*;
 pub(super) use redact::*;
 pub(super) use register::*;
 pub(super) use relations::*;
+pub(super) use rendezvous::*;
 pub(super) use report::*;
 pub(super) use room::*;
 pub(super) use rtc::*;

@@ -10,7 +10,7 @@ use tuwunel_service::rendezvous::Get;
 use super::{TEXT_PLAIN, ensure_enabled, session_response};
 
 #[tracing::instrument(level = "debug", skip_all)]
-pub(crate) async fn get_route(
+pub(crate) async fn get_rendezvous_route(
 	State(services): State<crate::State>,
 	Path(id): Path<String>,
 	headers: HeaderMap,

@@ -21,7 +21,7 @@ struct ConcurrentWriteResponse {
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
-pub(crate) async fn put_route(
+pub(crate) async fn put_rendezvous_route(
 	State(services): State<crate::State>,
 	Path(id): Path<String>,
 	request: Request,

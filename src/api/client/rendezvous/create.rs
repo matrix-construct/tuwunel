@@ -15,7 +15,7 @@ struct CreateResponse {
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
-pub(crate) async fn create_route(
+pub(crate) async fn create_rendezvous_route(
 	State(services): State<crate::State>,
 	request: Request,
 ) -> Result<Response> {

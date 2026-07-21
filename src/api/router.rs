@@ -21,23 +21,11 @@ pub(super) use self::{
 	args::Args as Ruma, auth::auth_uiaa, client_ip::ClientIp, response::RumaResponse,
 	state::State,
 };
-use crate::{
-	client::{
-		self, mas_active,
-		rendezvous::{
-			create_msc4388_route, create_route as create_rendezvous_route, delete_msc4388_route,
-			delete_route as delete_rendezvous_route, discover_msc4388_route, get_msc4388_route,
-			get_route as get_rendezvous_route, put_msc4388_route,
-			put_route as put_rendezvous_route,
-		},
-	},
-	oidc::{self, native_get_route, native_submit_route},
-	server,
-};
+use crate::{client, oidc, server};
 
 pub fn build(router: Router<State>, server: &Server) -> Router<State> {
 	let config = &server.config;
-	let mas_active = mas_active(config);
+	let mas_active = client::mas_active(config);
 	let router = register_client_auth_routes(router);
 	let router = register_mas_routes(router);
 	let router = register_client_profile_and_data_routes(router);
@@ -439,7 +427,10 @@ fn register_oidc_routes(router: Router<State>) -> Router<State> {
 		.route("/_tuwunel/oidc/registration", post(oidc::registration_route))
 		.route("/_tuwunel/oidc/authorize", get(oidc::authorize_route))
 		.route("/_tuwunel/oidc/_complete", get(oidc::complete_route))
-		.route("/_tuwunel/oidc/native", get(native_get_route).post(native_submit_route))
+		.route(
+			"/_tuwunel/oidc/native",
+			get(oidc::native_get_route).post(oidc::native_submit_route),
+		)
 		.route("/_tuwunel/oidc/token", post(oidc::token_route))
 		.route("/_tuwunel/oidc/device_authorization", post(oidc::device_authorization_route))
 		.route("/_tuwunel/oidc/device", get(oidc::get_device_route))
@@ -472,20 +463,20 @@ fn register_oidc_routes(router: Router<State>) -> Router<State> {
 
 fn register_rendezvous_routes(router: Router<State>) -> Router<State> {
 	let router = router
-		.ruma_route(&discover_msc4388_route)
-		.ruma_route(&create_msc4388_route)
-		.ruma_route(&get_msc4388_route)
-		.ruma_route(&put_msc4388_route)
-		.ruma_route(&delete_msc4388_route);
+		.ruma_route(&client::discover_msc4388_route)
+		.ruma_route(&client::create_msc4388_route)
+		.ruma_route(&client::get_msc4388_route)
+		.ruma_route(&client::put_msc4388_route)
+		.ruma_route(&client::delete_msc4388_route);
 
-	let session_routes = get(get_rendezvous_route)
-		.put(put_rendezvous_route)
-		.delete(delete_rendezvous_route);
+	let session_routes = get(client::get_rendezvous_route)
+		.put(client::put_rendezvous_route)
+		.delete(client::delete_rendezvous_route);
 
 	router
 		.route(
 			"/_matrix/client/unstable/org.matrix.msc4108/rendezvous",
-			post(create_rendezvous_route),
+			post(client::create_rendezvous_route),
 		)
 		.route("/_matrix/client/unstable/org.matrix.msc4108/rendezvous/{id}", session_routes)
 }

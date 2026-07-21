@@ -8,7 +8,7 @@ use super::{Result, ensure_available, ensure_create_available, ensure_data_size}
 use crate::{ClientIp, Ruma};
 
 #[tracing::instrument(level = "debug", skip_all)]
-pub(crate) async fn create_route(
+pub(crate) async fn create_msc4388_route(
 	State(services): State<crate::State>,
 	ClientIp(client): ClientIp,
 	body: Ruma<Request>,
