@@ -2728,7 +2728,7 @@
 # The value is multiplied by the number of cores which share a device
 # queue, since group workers can be scheduled on any of those cores.
 #
-#db_pool_workers_limit = 64
+#db_pool_workers_limit = 32
 
 # Limits the total number of workers across all worker groups. When the
 # sum of all groups exceeds this value the worker counts are reduced until

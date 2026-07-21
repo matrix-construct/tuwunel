@@ -3095,7 +3095,7 @@ pub struct Config {
 	/// The value is multiplied by the number of cores which share a device
 	/// queue, since group workers can be scheduled on any of those cores.
 	///
-	/// default: 64
+	/// default: 32
 	#[serde(default = "default_db_pool_workers_limit")]
 	pub db_pool_workers_limit: usize,
 
@@ -4658,7 +4658,7 @@ fn default_pdu_cache_capacity() -> u32 { parallelism_scaled_u32(10_000).saturati
 fn default_cache_capacity_modifier() -> f64 { 1.0 }
 
 fn default_auth_chain_cache_capacity() -> u32 {
-	parallelism_scaled_u32(400_000).saturating_add(1_500_000)
+	parallelism_scaled_u32(375_000).saturating_add(1_250_000)
 }
 
 fn default_shorteventid_cache_capacity() -> u32 {
@@ -4937,7 +4937,7 @@ fn default_db_pool_workers() -> usize {
 		.clamp(32, 1024)
 }
 
-fn default_db_pool_workers_limit() -> usize { 64 }
+fn default_db_pool_workers_limit() -> usize { 32 }
 
 fn default_db_pool_max_workers() -> usize { 2048 }
 
