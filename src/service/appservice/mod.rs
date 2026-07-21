@@ -3,6 +3,7 @@ mod namespace_regex;
 mod ping;
 mod registration_info;
 pub(crate) mod request;
+mod thirdparty;
 
 use std::{
 	collections::BTreeMap,
