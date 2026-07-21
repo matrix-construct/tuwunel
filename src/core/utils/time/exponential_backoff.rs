@@ -31,12 +31,11 @@ pub fn continue_exponential_backoff(
 	elapsed < min
 }
 
-/// Smallest streak length `n` at which the quadratic curve `min * n²`
-/// saturates `max`. Bounds walk-back / retry-streak loops that consult
-/// [`continue_exponential_backoff`]: further iterations cannot change the
-/// verdict once `n` is reached. Operates at second precision; sub-second
-/// components of `min` and `max` are discarded, and `min < 1s` is clamped to
-/// 1s. Returns at least 1.
+/// Derives a retry-streak cap from the whole-second ratio of `max` to `min`.
+///
+/// Let `r = max.as_secs() / min.as_secs().max(1)` using integer division. The
+/// result is `ceil(sqrt(r))`, clamped to the range `1..=u32::MAX`. Subsecond
+/// components and the division remainder are discarded.
 #[inline]
 #[must_use]
 pub fn exponential_backoff_streak_cap(min: Duration, max: Duration) -> u32 {

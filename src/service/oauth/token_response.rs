@@ -1,9 +1,10 @@
 use serde::Deserialize;
 
-/// Deserialization target for the upstream provider's `/token` JSON response.
-/// Kept distinct from `Session` because some providers emit `expires_at` as a
-/// Unix-timestamp integer, which would not deserialize into the
-/// `SystemTime`-typed `Session::expires_at`.
+/// Fields deserialized from an upstream provider's `/token` response.
+///
+/// This separate shape omits `expires_at`: some providers encode it as a Unix
+/// timestamp, while the persisted `Session` stores a `SystemTime` derived from
+/// `expires_in`.
 #[derive(Debug, Deserialize)]
 pub struct TokenResponse {
 	/// Token type (bearer, mac, etc).

@@ -251,10 +251,11 @@ fn base(config: &Config, name: Option<&str>) -> Result<ClientBuilder> {
 	}
 }
 
-/// Buffer a remote response body, rejecting any response larger than `limit`
-/// bytes. reqwest enforces no response-size limit, so an unbounded `bytes()`
-/// lets a peer drive an allocator abort; refuse an oversized advertised length
-/// and hold the same bound while streaming for when that length is absent.
+/// Prevents a remote peer from forcing unbounded response-body allocation.
+///
+/// An advertised `Content-Length` above `limit` is rejected before the body
+/// buffer is allocated. The streaming loop enforces the same bound when the
+/// length is absent or inaccurate.
 pub async fn read_response_capped(
 	mut response: reqwest::Response,
 	limit: usize,

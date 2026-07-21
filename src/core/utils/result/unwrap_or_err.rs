@@ -2,9 +2,10 @@ use std::convert::identity;
 
 use super::Result;
 
-/// Returns the Ok value or the Err value. Available when the Ok and Err types
-/// are the same. This is a way to default the result using the specific Err
-/// value rather than unwrap_or_default() using Ok's default.
+/// Returns the contained value from either variant of a `Result<T, T>`.
+///
+/// Unlike `unwrap_or_default`, the `Err` branch retains its value instead of
+/// constructing `T::default()`.
 pub trait UnwrapOrErr<T> {
 	fn unwrap_or_err(self) -> T;
 }

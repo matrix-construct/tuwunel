@@ -28,9 +28,10 @@ pub fn set_amplification(width: usize) -> (usize, usize) {
 	(AMPLIFICATION.swap(width, Ordering::Relaxed), width)
 }
 
-/// Used by stream operations where the concurrency factor hasn't been manually
-/// supplied by the caller (most uses). Instead we provide a default value which
-/// is adjusted at startup for the specific system and also dynamically.
+/// Returns the live default concurrency width for stream operations.
+///
+/// Startup tuning selects a value for the host, and later updates take effect
+/// immediately. Operations with an explicit width bypass this default.
 #[inline]
 pub fn automatic_width() -> usize {
 	let width = WIDTH.load(Ordering::Relaxed);

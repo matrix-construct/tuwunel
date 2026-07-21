@@ -7,20 +7,11 @@ use tracing_subscriber::{EnvFilter, reload};
 
 use crate::{Result, error};
 
-/// We need to store a reload::Handle value, but can't name it's type explicitly
-/// because the S type parameter depends on the subscriber's previous layers. In
-/// our case, this includes unnameable 'impl Trait' types.
+/// Type-erased interface to a tracing subscriber reload handle.
 ///
-/// This is fixed[1] in the unreleased tracing-subscriber from the master
-/// branch, which removes the S parameter. Unfortunately can't use it without
-/// pulling in a version of tracing that's incompatible with the rest of our
-/// deps.
-///
-/// To work around this, we define an trait without the S parameter that
-/// forwards to the reload::Handle::reload method, and then store the handle as
-/// a trait object.
-///
-/// [1]: <https://github.com/tokio-rs/tracing/pull/1035/commits/8a87ea52425098d3ef8f56d92358c2f6c144a28f>
+/// The subscriber type in `reload::Handle<L, S>` depends on preceding layers
+/// and can include unnameable `impl Trait` types. This interface hides `S` so
+/// handles can be stored as trait objects.
 pub trait ReloadHandle<L> {
 	fn current(&self) -> Option<L>;
 

@@ -5,10 +5,11 @@ use nix::unistd::{SysconfVar, sysconf};
 use crate::{Result, apply, debug, utils::math::ExpectInto};
 
 #[cfg(unix)]
-/// This is needed for opening lots of file descriptors, which tends to
-/// happen more often when using RocksDB and making lots of federation
-/// connections at startup. The soft limit is usually 1024, and the hard
-/// limit is usually 512000; I've personally seen it hit >2000.
+/// Raises the soft file descriptor limit to the current hard limit.
+///
+/// RocksDB and concurrent federation connections can exceed the common soft
+/// limit of 1,024 during startup. Systemd commonly provides a hard limit of
+/// 524,288.
 ///
 /// * <https://www.freedesktop.org/software/systemd/man/systemd.exec.html#id-1.12.2.1.17.6>
 /// * <https://github.com/systemd/systemd/commit/0abf94923b4a95a7d89bc526efc84e7ca2b71741>
@@ -30,10 +31,11 @@ pub fn maximize_fd_limit() -> Result {
 pub fn maximize_fd_limit() -> Result { Ok(()) }
 
 #[cfg(all(unix, not(target_os = "macos")))]
-/// Some distributions ship with very low defaults for thread counts; similar to
-/// low default file descriptor limits. But unlike fd's, thread limit is rarely
-/// reached, though on large systems (32+ cores) shipping with defaults of
-/// ~1024 as have been observed are problematic.
+/// Raises the soft thread limit to the current hard limit.
+///
+/// Some distributions default to about 1,024 threads, which can constrain hosts
+/// with 32 or more cores. Thread limits are otherwise reached less often than
+/// file descriptor limits.
 pub fn maximize_thread_limit() -> Result {
 	use nix::sys::resource::setrlimit;
 

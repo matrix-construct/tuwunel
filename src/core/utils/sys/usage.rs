@@ -3,10 +3,11 @@ use nix::sys::resource::{Usage as NixUsage, UsageWho, getrusage};
 
 use crate::{Result, expected};
 
-/// Resource usage wrapper. On Unix this is the nix `Usage` struct populated
-/// by `getrusage()`. On Windows (and any platform where `getrusage` is
-/// unavailable) this is a zero-field Debug stub so that tracing macros like
-/// `?resource_usage` still work.
+/// Platform representation of process resource usage.
+///
+/// On Unix this aliases nix's `Usage`, populated by `getrusage()`. Platforms
+/// without `getrusage()` use a zero-field `Debug` stub so tracing fields such
+/// as `?resource_usage` remain portable.
 #[cfg(unix)]
 pub type Usage = NixUsage;
 
@@ -86,11 +87,11 @@ pub fn usage() -> Result<Usage> { getrusage(UsageWho::RUSAGE_SELF).map_err(Into:
 #[cfg(not(unix))]
 pub fn usage() -> Result<Usage> { Ok(Usage) }
 
-/// Per-thread resource usage. On Linux/FreeBSD/OpenBSD, `RUSAGE_THREAD` is
-/// available. On other Unix platforms (macOS, etc.) the thread variant does
-/// not exist, so we fall back to the process-wide `getrusage(RUSAGE_SELF)`
-/// which returns a non-zero, well-defined `Usage` value rather than
-/// relying on `Usage::default()` (which nix does not implement).
+/// Returns resource usage for the current thread when the platform supports it.
+///
+/// Linux, FreeBSD, and OpenBSD report thread-specific usage. Other Unix
+/// platforms fall back to process-wide usage. Platforms without `getrusage()`
+/// return the zero-field [`Usage`] stub.
 #[cfg(any(
 	target_os = "linux",
 	target_os = "freebsd",

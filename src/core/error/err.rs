@@ -112,11 +112,11 @@ macro_rules! err {
 	};
 }
 
-/// A trinity of integration between tracing, logging, and Error. This is a
-/// customization of tracing::event! with the primary purpose of sharing the
-/// error string, fieldset parsing and formatting. An added benefit is that we
-/// can share the same callsite metadata for the source of our Error and the
-/// associated logging and tracing event dispatches.
+/// Renders an error message and sends its fields to tracing and the log bridge.
+///
+/// `visit` passes one `ValueSet` to both dispatch paths, then records its
+/// fields into the caller's output buffer. The surrounding `err!` expansion
+/// uses that buffer to construct the error.
 #[macro_export]
 #[collapse_debuginfo(yes)]
 macro_rules! err_log {

@@ -4,13 +4,13 @@ use tuwunel_core::{Err, Result, err};
 /// a pathological input cannot drive unbounded work.
 const MAX_EMAIL_LEN: usize = 500;
 
-/// Canonicalize an email address for storage and matching: case-fold the
-/// whole address and lower-case the domain. This is stronger than
-/// `str::to_lowercase`, which leaves `ß` intact; case-folding maps it to `ss`
-/// so `Strauß@Example.com` and `strauss@example.com` collide on one key.
+/// Canonicalizes an email address for storage and matching.
 ///
-/// Errors when the address exceeds [`MAX_EMAIL_LEN`] or has no `@` separating
-/// a non-empty local part from a non-empty domain.
+/// Both components are lowercased, and `ß` is expanded to `ss`, so
+/// `Strauß@Example.com` and `strauss@example.com` share one key.
+///
+/// Returns an error when the address exceeds [`MAX_EMAIL_LEN`] bytes or its
+/// final `@` does not separate nonempty local and domain parts.
 pub fn canonicalize_email(address: &str) -> Result<String> {
 	if address.len() > MAX_EMAIL_LEN {
 		return Err!(Request(InvalidParam("Email address is too long")));

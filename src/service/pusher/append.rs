@@ -23,9 +23,10 @@ use tuwunel_database::{Deserialized, Json, Map};
 
 use crate::rooms::short::ShortRoomId;
 
-/// Succinct version of Ruma's Notification. Appended to the database when the
-/// user is notified. The PduCount is part of the database key so only the
-/// shortroomid is included. Together they  make the PduId.
+/// Compact metadata stored for each notified event.
+///
+/// The database key supplies the user and PDU count. The stored `ShortRoomId`
+/// combines with that count to reconstruct the event's `PduId`.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Notified {
 	/// Milliseconds time at which the event notification was sent.

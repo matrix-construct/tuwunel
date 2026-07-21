@@ -107,10 +107,10 @@ pub fn rttype_name<T: ?Sized>(_: &T) -> &'static str { type_name::<T>() }
 #[must_use]
 pub fn type_name<T: ?Sized>() -> &'static str { std::any::type_name::<T>() }
 
-/// Returns true if debug logging is enabled. In this mode extra logging calls
-/// are made at all log levels, not just DEBUG and TRACE. These logs are demoted
-/// to DEBUG level when this function returns false; as a consequence they will
-/// be elided by `release_max_log_level` when featured.
+/// Returns whether extra logging calls retain their requested levels.
+///
+/// When disabled, callers demote these events to `DEBUG`, allowing
+/// `release_max_log_level` to remove them at compile time.
 #[must_use]
 #[inline]
 pub const fn logging() -> bool {

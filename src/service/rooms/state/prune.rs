@@ -13,10 +13,12 @@ use crate::federation::ShouldAttempt;
 
 type Servers = SmallVec<[OwnedServerName; 1]>;
 
-/// Per-round summary of a scored prune, for the receive-path `debug!` and the
-/// admin command's report. `after` counts engine survivors; the receive path
-/// chains the incoming event afterwards, so the written band is `after + 1`
-/// when the event is not soft-failed.
+/// Counts the outcome of one forward-extremity pruning pass.
+///
+/// `before` is the candidate count and `after` is the selected survivor count.
+/// The remaining fields count removals by classification. On the receive path,
+/// a non-soft-failed incoming event is appended afterward, so the written band
+/// contains `after + 1` entries.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct PruneSummary {
 	pub before: usize,

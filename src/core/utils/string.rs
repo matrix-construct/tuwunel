@@ -15,10 +15,11 @@ use crate::{Result, smallstr::SmallString};
 
 pub const EMPTY: &str = "";
 
-/// Constant expression to bypass format! if the argument is a string literal
-/// but not a format string. If the literal is a format string then String is
-/// returned otherwise the input (i.e. &'static str) is returned. If multiple
-/// arguments are provided the first is assumed to be a format string.
+/// Bypasses `format!` when a literal has no apparent placeholders.
+///
+/// With one argument, a literal containing both `{` and `}` is formatted; any
+/// other literal is converted directly through `Into`. With additional
+/// arguments, the first literal is always treated as a format string.
 #[macro_export]
 #[collapse_debuginfo(yes)]
 macro_rules! format_maybe {

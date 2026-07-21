@@ -22,10 +22,11 @@ macro_rules! checked {
 	};
 }
 
-/// Checked arithmetic expression which panics on failure. This is for
-/// expressions which do not meet the threshold for validated! but the caller
-/// has no realistic expectation for error and no interest in cluttering the
-/// callsite with result handling from checked!.
+/// Evaluates a checked arithmetic expression and panics on failure.
+///
+/// Use this when failure is not realistically expected but the expression does
+/// not meet the safety bar for `validated!`. The first form accepts a custom
+/// panic message; the second uses a default.
 #[macro_export]
 #[collapse_debuginfo(yes)]
 macro_rules! expected {

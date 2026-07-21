@@ -54,9 +54,10 @@ pub trait Command: Send + Sync + 'static {
 	async fn dispatch(&self, matches: clap::ArgMatches, context: &Context<'_>) -> Result;
 }
 
-/// Result wrapping of a command's handling. The text has already digested any
-/// prior errors; the wrapping preserves whether the command failed without
-/// interpreting the text. Ok(None) outputs are dropped to produce no response.
+/// Carries a rendered command outcome while preserving its status.
+///
+/// `Ok(Some(output))` reports success, `Err(output)` reports failure, and
+/// `Ok(None)` suppresses the response. Callers do not infer status from text.
 pub type ProcessorResult = Result<Option<CommandOutput>, CommandOutput>;
 
 /// Textual output of a completed command. Markdown is the norm; Plain carries

@@ -6,11 +6,11 @@ use tokio::{runtime, task::JoinError};
 use super::TryBroadbandExt;
 use crate::{Error, Result, utils::sys::available_parallelism};
 
-/// Parallelism extensions to augment futures::StreamExt. These combinators are
-/// for computation-oriented workloads, unlike -band combinators for I/O
-/// workloads; these default to the available compute parallelism for the
-/// system. Threads are currently drawn from the tokio-spawn pool. Results are
-/// unordered.
+/// Adds unordered parallel transformations for fallible streams.
+///
+/// Each closure runs on Tokio's blocking pool, making these combinators
+/// suitable for CPU-bound work rather than asynchronous I/O. Concurrency
+/// defaults to the host's available parallelism.
 pub trait TryParallelExt<T, E>
 where
 	Self: TryStream<Ok = T, Error = E, Item = Result<T, E>> + Send + Sized,

@@ -1,6 +1,8 @@
-//! Indicate a branch which will never be taken. Currently expands to
-//! `unimplemented!()` in every build; the `unreachable_unchecked()` arm below
-//! is parked behind `#[cfg(disable)]` until callsites are vetted.
+//! Macros for branches expected never to execute.
+//!
+//! Active builds expand to `unimplemented!()`. The `unreachable_unchecked()`
+//! alternative remains behind `#[cfg(disable)]` until every call site is
+//! vetted.
 
 #[cfg(disable)] // activate when more stable and callsites are vetted.
 // #[cfg(not(debug_assertions))]

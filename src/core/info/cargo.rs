@@ -1,7 +1,8 @@
-//! Information about the build related to Cargo. This is a frontend interface
-//! informed by proc-macros that capture raw information at build time which is
-//! further processed at runtime either during static initialization or as
-//! necessary.
+//! Cargo metadata captured for the running build.
+//!
+//! Build-time macros embed the workspace manifest and selected crate manifests.
+//! This module processes that data lazily for runtime queries about project
+//! features and dependencies.
 
 use std::sync::OnceLock;
 

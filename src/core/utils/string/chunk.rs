@@ -36,13 +36,22 @@ enum Cut<'a> {
 	Line,
 }
 
-/// Splits `text` into segments that each satisfy `fits`, packing whole lines
-/// greedily. In markdown mode a code fence spanning a segment boundary is
-/// closed at the tail of one segment and reopened with the same info string at
-/// the head of the next, so each segment renders on its own; a single line
-/// larger than the budget is split at a character boundary. Empty input yields
-/// one empty segment. The iterator is lazy: a bounded `take` stops it before
-/// the whole (possibly large) input is scanned.
+/// Lazily splits `text` using a monotonic `fits` predicate.
+///
+/// For candidates with the same starting position, `fits` must remain false as
+/// their length increases. The iterator chooses fitting prefixes when possible;
+/// if even the first character fails, it emits that character to guarantee
+/// progress. Empty input yields one empty segment without consulting `fits`.
+///
+/// Whole lines are packed greedily. When no complete line fits, the first line
+/// is split at a character boundary.
+///
+/// In markdown mode, a whole-line cut that leaves a triple-backtick fence open
+/// appends a closing fence and reopens it with the same info string in the next
+/// segment. Partial-line cuts do not append a closing fence, so an oversized
+/// fenced line can produce segments that do not render independently.
+///
+/// A bounded `take` can stop the iterator before it scans the entire input.
 pub fn chunk<F>(text: &str, markdown: bool, fits: F) -> impl Iterator<Item = String>
 where
 	F: Fn(&str) -> bool,

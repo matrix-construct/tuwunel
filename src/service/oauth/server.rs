@@ -126,11 +126,12 @@ const DEVICE_SCOPE_PREFIXES: [&str; 2] =
 const API_SCOPE_PREFIXES: [&str; 2] =
 	["urn:matrix:client:api:", "urn:matrix:org.matrix.msc2967.client:api:"];
 
-/// Narrow a requested scope to the granted scope (RFC 6749 §3.3): keep the
-/// tokens this server recognises and return them alongside the MSC2967 device
-/// id, when one was requested. Unrecognised tokens are dropped, or rejected
-/// when `strict` is set. A request carrying more than one device scope, or a
-/// device id outside the RFC 6749 scope-token charset, is always rejected.
+/// Restricts a requested OAuth scope to supported tokens per RFC 6749 §3.3.
+///
+/// Recognized tokens retain their request order, with an MSC2967 device ID
+/// returned separately when present. Unknown tokens are dropped unless `strict`
+/// is set. Multiple device scopes, empty device IDs, and IDs outside the RFC
+/// 6749 scope-token character set return an error.
 pub fn narrow_scope(requested: &str, strict: bool) -> Result<(String, Option<String>)> {
 	let mut granted = String::new();
 	let mut device_id: Option<&str> = None;

@@ -8,12 +8,10 @@ use futures::{
 	},
 };
 
-/// Synchronous combinators to augment futures::StreamExt. Most Stream
-/// combinators take asynchronous arguments, but often only simple predicates
-/// are required to steer a Stream like an Iterator. This suite provides a
-/// convenience to reduce boilerplate by de-cluttering non-async predicates.
+/// Adds synchronous counterparts to selected [`StreamExt`] combinators.
 ///
-/// This interface is not necessarily complete; feel free to add as-needed.
+/// These methods accept ordinary closures for operations that do not need to
+/// await, avoiding an async block around iterator-like predicates and folds.
 pub trait ReadyExt<Item>
 where
 	Self: Stream<Item = Item> + Sized,

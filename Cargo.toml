@@ -977,7 +977,6 @@ unused_async_trait_impl = { level = "allow", priority = 1 }          # trait-man
 pedantic = { level = "warn", priority = -1 }
 
 ## some sadness
-too_long_first_doc_paragraph = { level = "allow", priority = 1 }
 default_trait_access = { level = "allow", priority = 1 }
 doc_markdown = { level = "allow", priority = 1 }
 enum_glob_use = { level = "allow", priority = 1 }

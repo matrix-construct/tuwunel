@@ -25,10 +25,11 @@ type Ratelimiter<K> = Mutex<HashMap<K, (Instant, f64)>>;
 /// canonical address fits inline.
 type EmailKey = SmallString<[u8; 48]>;
 
-/// Third-party identifier (email) storage and the requestToken throttle. Holds
-/// the forward `(user, email)` bindings, the reverse `email -> user` lookup,
-/// the pending email verification sessions, and the per-IP and per-address
-/// token buckets.
+/// Manages email threepid bindings, verification sessions, and request limits.
+///
+/// Persistent maps provide lookups from user to email and email to user.
+/// In-memory token buckets limit `requestToken` calls by caller IP and
+/// canonical address.
 pub struct Service {
 	db: Data,
 	ip_ratelimiter: Ratelimiter<IpAddr>,

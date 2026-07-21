@@ -46,10 +46,11 @@ pub enum Op {
 	TimestampToEvent,
 }
 
-/// Per-round width schedule for staged fan-out: how many candidate servers a
-/// fetch races concurrently in each escalation round, before the worker's
-/// per-round ceiling and remaining-budget clamps. `Fixed(1)` (the `Opts::new`
-/// default) reproduces strictly-sequential attempts.
+/// Schedules the concurrent candidate width for each staged fan-out round.
+///
+/// The worker clamps each computed width to its per-round ceiling and remaining
+/// attempt budget. `Fixed(1)`, the `Opts::new` default, makes attempts strictly
+/// sequential.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum FanoutGrowth {
 	/// Every round races the same width.

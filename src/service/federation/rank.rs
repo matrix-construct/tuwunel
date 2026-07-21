@@ -10,10 +10,11 @@ use tuwunel_core::{debug_warn, implement, smallvec::SmallVec, utils::IterStream}
 
 use super::ShouldAttempt;
 
-/// A candidate server pool for one fetch: the hint, room servers, and mxid
-/// hosts. Inline budget 3 holds the common single-event case (event origin,
-/// room origin, optional hint) on the stack; larger room-derived pools spill
-/// to the heap.
+/// Candidate servers for one fetch, with three entries stored inline.
+///
+/// A pool combines the optional hint, room servers, and MXID hosts. The budget
+/// covers the common event origin, room origin, and hint; larger room-derived
+/// pools spill to the heap.
 pub type Candidates = SmallVec<[OwnedServerName; 3]>;
 
 /// A candidate pool paired with each server's verdict, sorted and filtered in

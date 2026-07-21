@@ -1,7 +1,8 @@
-//! Information about the build related to rustc. This is a frontend interface
-//! informed by proc-macros at build time. Since the project is split into
-//! several crates, lower-level information is supplied from each crate during
-//! static initialization.
+//! Rust compiler metadata captured for the running build.
+//!
+//! Participating project crates contribute their compiler flags through
+//! build-time macros and static initialization, allowing project-wide compiler
+//! information to be queried here.
 
 use std::{
 	collections::BTreeMap,
@@ -12,14 +13,15 @@ use std::{
 // Capture rustc version during compilation.
 tuwunel_macros::rustc_version! {}
 
-/// Raw capture of rustc flags used to build each crate in the project. Informed
-/// by rustc_flags_capture macro (one in each crate's mod.rs). This is
-/// done during static initialization which is why it's mutex-protected and pub.
-/// Should not be written to by anything other than our macro.
+/// Compiler flags captured for participating project crates.
+///
+/// Crate-local `rustc_flags_capture` macros populate this map during static
+/// initialization. It is public only for that registration path and must not be
+/// modified elsewhere.
 pub static FLAGS: Mutex<BTreeMap<&str, &[&str]>> = Mutex::new(BTreeMap::new());
 
-/// Processed list of enabled features across all project crates. This is
-/// generated from the data in FLAGS.
+/// Processed list of enabled features across participating project crates. This
+/// is generated from the data in FLAGS.
 static FEATURES: OnceLock<Vec<&'static str>> = OnceLock::new();
 
 /// List of features enabled for the project.

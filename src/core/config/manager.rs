@@ -12,10 +12,10 @@ use std::{
 use super::Config;
 use crate::{Result, implement};
 
-/// The configuration manager is an indirection to reload the configuration for
-/// the server while it is running. In order to not burden or clutter the many
-/// callsites which query for configuration items, this object implements Deref
-/// for the actively loaded configuration.
+/// Provides transparent access to the server's reloadable configuration.
+///
+/// `Deref` exposes the active [`Config`], so callers can read configuration
+/// values without handling the indirection required for reloads.
 pub struct Manager {
 	active: AtomicPtr<Config>,
 }
