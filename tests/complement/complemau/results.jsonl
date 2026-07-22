@@ -47,11 +47,11 @@
 {"Action":"fail","Test":"TestComplemauAppserviceUserQueries/unknown_namespace_user"}
 {"Action":"pass","Test":"TestComplemauDeviceListsRegistrationGateAndDeviceChanges"}
 {"Action":"pass","Test":"TestComplemauDeviceListsRemoteRoomSharer"}
-{"Action":"fail","Test":"TestComplemauDirectoryExcludesAppserviceUsers"}
-{"Action":"fail","Test":"TestComplemauDirectoryExcludesAppserviceUsers/ghost_membership"}
-{"Action":"fail","Test":"TestComplemauDirectoryExcludesAppserviceUsers/ghost_profile_change"}
-{"Action":"fail","Test":"TestComplemauDirectoryExcludesAppserviceUsers/sender_membership"}
-{"Action":"fail","Test":"TestComplemauDirectoryExcludesAppserviceUsers/sender_profile_change"}
+{"Action":"pass","Test":"TestComplemauDirectoryExcludesAppserviceUsers"}
+{"Action":"pass","Test":"TestComplemauDirectoryExcludesAppserviceUsers/ghost_membership"}
+{"Action":"pass","Test":"TestComplemauDirectoryExcludesAppserviceUsers/ghost_profile_change"}
+{"Action":"pass","Test":"TestComplemauDirectoryExcludesAppserviceUsers/sender_membership"}
+{"Action":"pass","Test":"TestComplemauDirectoryExcludesAppserviceUsers/sender_profile_change"}
 {"Action":"pass","Test":"TestComplemauExclusiveNamespaces"}
 {"Action":"pass","Test":"TestComplemauExclusiveNamespaces/appservice_cannot_claim_an_alias_outside_its_namespaces"}
 {"Action":"pass","Test":"TestComplemauExclusiveNamespaces/appservice_creates_and_deletes_an_exclusive_alias"}
