@@ -193,6 +193,7 @@ fn eval<Fut: Future + Send>(
 
 	if let Entry::Occupied(state) = &mut entry {
 		state.get_mut().seen = true;
+		self.path.pop();
 		return (self, None, Path::new());
 	}
 
@@ -213,6 +214,10 @@ fn eval<Fut: Future + Send>(
 		.is_false()
 		.then_some(event_id);
 
+	if next_id.is_none() {
+		self.path.pop();
+	}
+
 	(self, next_id, path)
 }
 
@@ -223,11 +228,15 @@ where
 	Fut: Future<Output = Result<Pdu>> + Send,
 	Pdu: Event,
 {
-	if let Some(event_id) = event_id
-		&& let Ok(event) = fetch(event_id).await
-	{
-		self.stack
-			.push(event.auth_events_into().into_iter().collect());
+	if let Some(event_id) = event_id {
+		match fetch(event_id).await {
+			| Ok(event) => self
+				.stack
+				.push(event.auth_events_into().into_iter().collect()),
+			| Err(_) => {
+				self.path.pop();
+			},
+		}
 	}
 
 	self

@@ -929,6 +929,68 @@ async fn auth_difference_single_set() {
 	assert!(result.is_empty());
 }
 
+// The subgraph is only events on `auth_events` paths between conflicted events
+// (MSC4297); a visited side branch must not leak in via a later sibling's path.
+
+#[tokio::test]
+async fn conflicted_subgraph_excludes_visited_side_branch() {
+	let topic = || to_raw_json_value(&json!({})).unwrap();
+
+	let events: HashMap<OwnedEventId, PduEvent> = vec![
+		to_init_pdu_event("CONF_X", alice(), TimelineEventType::RoomTopic, Some(""), topic()),
+		to_init_pdu_event("GHOST", alice(), TimelineEventType::RoomTopic, Some(""), topic()),
+		to_pdu_event(
+			"MID_B",
+			alice(),
+			TimelineEventType::RoomTopic,
+			Some(""),
+			topic(),
+			&["CONF_X"],
+			&[],
+		),
+		to_pdu_event(
+			"MID_A",
+			alice(),
+			TimelineEventType::RoomTopic,
+			Some(""),
+			topic(),
+			&["MID_B", "GHOST"],
+			&[],
+		),
+		to_pdu_event(
+			"CONF_S",
+			alice(),
+			TimelineEventType::RoomTopic,
+			Some(""),
+			topic(),
+			&["MID_A", "GHOST"],
+			&[],
+		),
+	]
+	.into_iter()
+	.map(|event| (event.event_id().to_owned(), event))
+	.collect();
+
+	let conflicted = [event_id("CONF_S"), event_id("CONF_X")];
+	let conflicted: Vec<_> = conflicted.iter().collect();
+
+	let mut subgraph: Vec<OwnedEventId> =
+		super::conflicted_subgraph_dfs(&conflicted, &async |id| {
+			events.get(&id).cloned().ok_or_else(not_found)
+		})
+		.collect()
+		.await;
+
+	subgraph.sort_unstable();
+
+	assert_eq!(subgraph, vec![
+		event_id("CONF_S"),
+		event_id("CONF_X"),
+		event_id("MID_A"),
+		event_id("MID_B"),
+	]);
+}
+
 // `mainline_sort`: events with no power-levels ancestor in their auth chain
 // must sort before events whose deepest power-levels ancestor is the oldest
 // in the mainline. Pre-fix the two classes shared sort key 0 and tiebroke on
