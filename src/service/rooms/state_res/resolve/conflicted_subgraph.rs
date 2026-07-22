@@ -1,18 +1,13 @@
-use std::{
-	collections::{HashMap as Map, hash_map::Entry},
-	iter::once,
-	ops::Deref,
-};
+use std::{collections::HashMap, iter::once, ops::Deref};
 
 use futures::{
 	Stream, StreamExt,
 	stream::{FuturesUnordered, unfold},
 };
-use ruma::OwnedEventId;
+use ruma::{EventId, OwnedEventId};
 use tuwunel_core::{
 	Result, implement, is_equal_to,
-	itertools::Itertools,
-	matrix::{Event, pdu::AuthEvents},
+	matrix::{Event, event_id::RandomState, pdu::AuthEvents},
 	smallvec::SmallVec,
 	utils::{
 		BoolExt,
@@ -20,34 +15,34 @@ use tuwunel_core::{
 	},
 };
 
-#[derive(Default, Debug)]
 struct Global<Fut: Future + Send> {
 	subgraph: Subgraph,
 	todo: Todo<Fut>,
-	iter: usize,
+	locals: Locals,
 }
 
-#[derive(Default, Debug)]
+#[derive(Debug, Default)]
 struct Local {
-	id: usize,
 	path: Path,
 	stack: Stack,
+	marked: usize,
 }
 
-#[derive(Default, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 struct Substate {
 	subgraph: bool,
 	seen: bool,
 }
 
 type Todo<Fut> = FuturesUnordered<Fut>;
-type Subgraph = Map<OwnedEventId, Substate>;
+type Subgraph = HashMap<OwnedEventId, Substate, RandomState>;
+type Locals = Vec<Local>;
 type Path = SmallVec<[OwnedEventId; PATH_INLINE]>;
 type Stack = SmallVec<[Frame; STACK_INLINE]>;
 type Frame = AuthEvents;
 
-const PATH_INLINE: usize = 32;
-const STACK_INLINE: usize = 32;
+const PATH_INLINE: usize = 4;
+const STACK_INLINE: usize = 4;
 const CAPACITY_MULTIPLIER: usize = 4;
 
 #[tracing::instrument(
@@ -71,54 +66,86 @@ where
 		.len()
 		.saturating_mul(CAPACITY_MULTIPLIER);
 
+	let seeds = || conflicted_set.iter().map(Deref::deref).cloned();
+
+	// Seeding the conflicted set makes membership a free by-product of the
+	// entry each descent step already reads.
+	let mut subgraph = Subgraph::with_capacity_and_hasher(initial_capacity, RandomState);
+	subgraph.extend(seeds().map(|event_id| (event_id, Substate::default())));
+
 	let state = Global {
-		subgraph: Map::with_capacity(initial_capacity),
-		todo: Todo::<_>::new(),
-		iter: 0,
+		subgraph,
+		todo: Todo::new(),
+		locals: Locals::with_capacity(conflicted_set.len()),
 	};
 
-	let inputs = conflicted_set
-		.iter()
-		.map(Deref::deref)
-		.cloned()
-		.enumerate()
-		.map(Local::new)
-		.filter_map(Local::pop)
-		.map(|(local, event_id)| local.push(fetch, Some(event_id)));
-
-	unfold((inputs, state), async |(mut inputs, mut state)| {
+	unfold((seeds(), state), async |(mut inputs, mut state)| {
 		debug_assert!(
 			state.todo.len() <= automatic_width(),
 			"Excessive items todo in FuturesUnordered"
 		);
 
 		while state.todo.len() < automatic_width()
-			&& let Some(input) = inputs.next()
+			&& let Some(seed) = inputs.next()
 		{
-			state.todo.push(input);
+			let id = state.locals.len();
+
+			state.locals.push(Local::default());
+			state.todo.push(fetch_auth(id, seed, fetch));
 		}
 
-		let outputs = state
-			.todo
-			.next()
-			.await?
-			.pop()
-			.map(|(local, event_id)| local.eval(&mut state, conflicted_set, event_id))
-			.map(|(local, next_id, outputs)| {
-				if !local.stack.is_empty() {
-					state.todo.push(local.push(fetch, next_id));
-				}
+		let (id, event_id, event) = state.todo.next().await?;
 
-				outputs
-			})
-			.into_iter()
-			.flatten()
-			.stream();
+		let Global { subgraph, todo, locals } = &mut state;
+		let local = &mut locals[id];
 
-		state.iter = state.iter.saturating_add(1);
-		Some((outputs, (inputs, state)))
+		if let Ok(event) = event {
+			local.path.push(event_id);
+			local
+				.stack
+				.push(event.auth_events_into().into_iter().collect());
+		}
+
+		let mut outputs = Path::new();
+		while let Some(event_id) = local.pop() {
+			if let Some(next_id) = local.eval(subgraph, event_id, &mut outputs) {
+				todo.push(fetch_auth(id, next_id, fetch));
+				break;
+			}
+		}
+
+		if local.stack.is_empty() {
+			*local = Local::default();
+		}
+
+		Some((outputs.into_iter().stream(), (inputs, state)))
 	})
 	.flatten()
+}
+
+fn fetch_auth<Fetch, Fut, Pdu>(
+	id: usize,
+	event_id: OwnedEventId,
+	fetch: &Fetch,
+) -> impl Future<Output = (usize, OwnedEventId, Result<Pdu>)> + Send
+where
+	Fetch: Fn(OwnedEventId) -> Fut,
+	Fut: Future<Output = Result<Pdu>> + Send,
+{
+	let fut = fetch(event_id.clone());
+
+	async move { (id, event_id, fut.await) }
+}
+
+#[implement(Local)]
+fn pop(&mut self) -> Option<OwnedEventId> {
+	while self.stack.last().is_some_and(Frame::is_empty) {
+		self.stack.pop();
+		self.path.pop();
+	}
+
+	self.marked = self.marked.min(self.path.len());
+	self.stack.last_mut().and_then(Frame::pop)
 }
 
 #[implement(Local)]
@@ -127,142 +154,66 @@ where
 	level = "trace",
 	skip_all,
 	fields(
-		i = state.iter,
-		s = ?state
-			.subgraph
+		s = ?subgraph
 			.values()
 			.fold((0_u64, 0_u64), |(a, b), v| {
 				(a.saturating_add(u64::from(v.subgraph)), b.saturating_add(u64::from(v.seen)))
 			}),
 
 		%event_id,
-		id = self.id,
 		path = self.path.len(),
 		stack = self.stack.iter().flatten().count(),
 	)
 )]
-fn eval<Fut: Future + Send>(
-	mut self,
-	state: &mut Global<Fut>,
-	conflicted_event_ids: &Vec<&OwnedEventId>,
+fn eval(
+	&mut self,
+	subgraph: &mut Subgraph,
 	event_id: OwnedEventId,
-) -> (Self, Option<OwnedEventId>, Path) {
-	let Global { subgraph, .. } = state;
-
-	let insert_path_filter = |subgraph: &mut Subgraph, event_id: &OwnedEventId| match subgraph
-		.entry(event_id.clone())
-	{
-		| Entry::Occupied(state) if state.get().subgraph => false,
-		| Entry::Occupied(mut state) => {
-			state.get_mut().subgraph = true;
-			state.get().subgraph
+	outputs: &mut Path,
+) -> Option<OwnedEventId> {
+	match subgraph.get(&event_id).copied() {
+		| Some(Substate { subgraph: true, .. }) => {
+			self.insert_path(subgraph, &event_id, outputs);
+			None
 		},
-		| Entry::Vacant(state) =>
-			state
-				.insert(Substate { subgraph: true, seen: false })
-				.subgraph,
-	};
+		| Some(Substate { seen: true, .. }) => None,
+		| substate => {
+			if substate.is_some() {
+				self.insert_path(subgraph, &event_id, outputs);
+			} else {
+				subgraph.insert(event_id.clone(), Substate { subgraph: false, seen: true });
+			}
 
-	let insert_path = |subgraph: &mut Subgraph, local: &Local| {
-		local
-			.path
-			.iter()
-			.filter(|&event_id| insert_path_filter(subgraph, event_id))
-			.cloned()
-			.collect()
-	};
-
-	let is_conflicted = |event_id: &OwnedEventId| {
-		conflicted_event_ids
-			.binary_search(&event_id)
-			.is_ok()
-	};
-
-	let mut entry = subgraph.entry(event_id.clone());
-
-	if let Entry::Occupied(state) = &entry
-		&& state.get().subgraph
-	{
-		let path = (self.path.len() > 1)
-			.then(|| insert_path(subgraph, &self))
-			.unwrap_or_default();
-
-		self.path.pop();
-		return (self, None, path);
+			self.path
+				.first()
+				.is_some_and(is_equal_to!(&event_id))
+				.is_false()
+				.then_some(event_id)
+		},
 	}
+}
 
-	if let Entry::Occupied(state) = &mut entry {
-		state.get_mut().seen = true;
-		self.path.pop();
-		return (self, None, Path::new());
-	}
-
-	if let Entry::Vacant(state) = entry {
-		state.insert(Substate { subgraph: false, seen: true });
-	}
-
-	let path = (self.path.len() > 1)
-		.and_if(|| is_conflicted(&event_id))
-		.then(|| insert_path(subgraph, &self))
-		.unwrap_or_default();
-
-	let next_id = self
-		.path
+#[implement(Local)]
+fn insert_path(&mut self, subgraph: &mut Subgraph, event_id: &EventId, outputs: &mut Path) {
+	let inserted = self.path[self.marked..]
 		.iter()
-		.dropping_back(1)
-		.any(is_equal_to!(&event_id))
-		.is_false()
-		.then_some(event_id);
+		.map(AsRef::as_ref)
+		.chain(once(event_id))
+		.filter(|event_id| insert_path_filter(subgraph, event_id))
+		.map(ToOwned::to_owned);
 
-	if next_id.is_none() {
-		self.path.pop();
-	}
-
-	(self, next_id, path)
+	outputs.extend(inserted);
+	self.marked = self.path.len();
 }
 
-#[implement(Local)]
-async fn push<Fetch, Fut, Pdu>(mut self, fetch: &Fetch, event_id: Option<OwnedEventId>) -> Self
-where
-	Fetch: Fn(OwnedEventId) -> Fut + Sync,
-	Fut: Future<Output = Result<Pdu>> + Send,
-	Pdu: Event,
-{
-	if let Some(event_id) = event_id {
-		match fetch(event_id).await {
-			| Ok(event) => self
-				.stack
-				.push(event.auth_events_into().into_iter().collect()),
-			| Err(_) => {
-				self.path.pop();
-			},
-		}
-	}
+fn insert_path_filter(subgraph: &mut Subgraph, event_id: &EventId) -> bool {
+	if let Some(state) = subgraph.get_mut(event_id) {
+		let inserted = !state.subgraph;
 
-	self
-}
-
-#[implement(Local)]
-fn pop(mut self) -> Option<(Self, OwnedEventId)> {
-	while self.stack.last().is_some_and(Frame::is_empty) {
-		self.stack.pop();
-		self.path.pop();
-	}
-
-	self.stack
-		.last_mut()
-		.and_then(Frame::pop)
-		.inspect(|event_id| self.path.push(event_id.clone()))
-		.map(move |event_id| (self, event_id))
-}
-
-#[implement(Local)]
-#[allow(clippy::allow_attributes, clippy::redundant_clone)] // buggy, nursery
-fn new((id, conflicted_event_id): (usize, OwnedEventId)) -> Self {
-	Self {
-		id,
-		path: once(conflicted_event_id.clone()).collect(),
-		stack: once(once(conflicted_event_id).collect()).collect(),
-		..Default::default()
+		state.subgraph = true;
+		inserted
+	} else {
+		subgraph.insert(event_id.to_owned(), Substate { subgraph: true, seen: false });
+		true
 	}
 }
