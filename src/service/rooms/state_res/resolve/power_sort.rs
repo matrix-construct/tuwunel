@@ -1,7 +1,4 @@
-use std::{
-	collections::{HashMap, HashSet},
-	iter::once,
-};
+use std::{collections::HashMap, iter::once};
 
 use futures::{StreamExt, TryFutureExt, TryStreamExt, stream::FuturesUnordered};
 use ruma::{
@@ -15,13 +12,16 @@ use tuwunel_core::{
 	utils::stream::{BroadbandExt, IterStream, TryBroadbandExt},
 };
 
-use super::super::{
-	events::{
-		RoomCreateEvent, RoomPowerLevelsEvent, RoomPowerLevelsIntField, is_power_event,
-		power_levels::RoomPowerLevelsEventOptionExt,
+use super::{
+	super::{
+		events::{
+			RoomCreateEvent, RoomPowerLevelsEvent, RoomPowerLevelsIntField, is_power_event,
+			power_levels::RoomPowerLevelsEventOptionExt,
+		},
+		topological_sort,
+		topological_sort::ReferencedIds,
 	},
-	topological_sort,
-	topological_sort::ReferencedIds,
+	ConflictedSet,
 };
 
 /// Enlarge the given list of conflicted power events by adding the events in
@@ -51,7 +51,7 @@ use super::super::{
 )]
 pub(super) async fn power_sort<Fetch, Fut, Pdu>(
 	rules: &RoomVersionRules,
-	full_conflicted_set: &HashSet<OwnedEventId>,
+	full_conflicted_set: &ConflictedSet,
 	fetch: &Fetch,
 ) -> Result<Vec<OwnedEventId>>
 where
@@ -114,7 +114,7 @@ where
 	)
 )]
 async fn add_event_auth_chain<Fetch, Fut, Pdu>(
-	full_conflicted_set: &HashSet<OwnedEventId>,
+	full_conflicted_set: &ConflictedSet,
 	mut graph: HashMap<OwnedEventId, ReferencedIds>,
 	event_id: OwnedEventId,
 	fetch: &Fetch,

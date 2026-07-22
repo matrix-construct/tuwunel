@@ -1,21 +1,24 @@
-use std::{borrow::Borrow, collections::BTreeMap};
+use std::{borrow::Borrow, collections::HashMap, hash::Hash};
 
 use futures::{FutureExt, Stream};
 use ruma::EventId;
-use tuwunel_core::utils::stream::{IterStream, ReadyExt};
+use tuwunel_core::{
+	matrix::event_id::RandomState,
+	utils::stream::{IterStream, ReadyExt},
+};
 
 use super::AuthSet;
 
-struct Counts<Id: Ord> {
-	by_id: BTreeMap<Id, usize>,
+struct Counts<Id> {
+	by_id: HashMap<Id, usize, RandomState>,
 	total: usize,
 }
 
-impl<Id: Ord> Default for Counts<Id> {
-	fn default() -> Self { Self { by_id: BTreeMap::new(), total: 0 } }
+impl<Id> Default for Counts<Id> {
+	fn default() -> Self { Self { by_id: HashMap::default(), total: 0 } }
 }
 
-impl<Id: Ord> Counts<Id> {
+impl<Id: Eq + Hash> Counts<Id> {
 	fn merge(mut self, set: AuthSet<Id>) -> Self {
 		self.total = self.total.saturating_add(1);
 		for id in set {
@@ -45,12 +48,13 @@ impl<Id: Ord> Counts<Id> {
 ///
 /// ## Returns
 ///
-/// Outputs the event IDs that are not present in all the auth chains.
+/// Outputs the event IDs that are not present in all the auth chains, in no
+/// particular order.
 #[tracing::instrument(level = "debug", skip_all)]
 pub(super) fn auth_difference<'a, AuthSets, Id>(auth_sets: AuthSets) -> impl Stream<Item = Id>
 where
 	AuthSets: Stream<Item = AuthSet<Id>>,
-	Id: Borrow<EventId> + Clone + Eq + Ord + Send + 'a,
+	Id: Borrow<EventId> + Clone + Eq + Hash + Send + 'a,
 {
 	auth_sets
 		.ready_fold_default(Counts::<Id>::merge)

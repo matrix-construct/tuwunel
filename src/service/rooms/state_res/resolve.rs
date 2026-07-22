@@ -18,7 +18,7 @@ use ruma::{OwnedEventId, events::StateEventType, room_version_rules::RoomVersion
 use tuwunel_core::{
 	Result, debug,
 	itertools::Itertools,
-	matrix::{Event, TypeStateKey},
+	matrix::{Event, TypeStateKey, event_id::RandomState},
 	smallvec::SmallVec,
 	trace,
 	utils::{
@@ -47,6 +47,9 @@ pub type ConflictMap<Id> = StateMap<ConflictVec<Id>>;
 
 /// List of conflicting event_ids
 type ConflictVec<Id> = SmallVec<[Id; 2]>;
+
+/// The full conflicted set (arbitrary order).
+type ConflictedSet = HashSet<OwnedEventId, RandomState>;
 
 /// Apply the [state resolution] algorithm introduced in room version 2 to
 /// resolve the state of a room.
@@ -234,7 +237,7 @@ async fn full_conflicted_set<AuthSets, FetchExists, ExistsFut, FetchEvent, Event
 	fetch: &FetchEvent,
 	exists: &FetchExists,
 	hydra_backports: bool,
-) -> HashSet<OwnedEventId>
+) -> ConflictedSet
 where
 	AuthSets: Stream<Item = AuthSet<OwnedEventId>> + Send,
 	FetchExists: Fn(OwnedEventId) -> ExistsFut + Sync,
@@ -275,7 +278,7 @@ where
 		.chain(conflicted_state_ids)
 		.broad_filter_map(async |id| exists(id.clone()).await.then_some(id))
 		.chain(conflicted_subgraph)
-		.collect::<HashSet<_>>()
+		.collect::<ConflictedSet>()
 		.inspect(|set| debug!(count = set.len(), "full conflicted set"))
 		.inspect(|set| trace!(?set, "full conflicted set"))
 		.await
