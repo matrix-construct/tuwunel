@@ -1,13 +1,18 @@
+use std::collections::HashMap;
+
 use futures::{
 	FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt, pin_mut, stream::try_unfold,
 };
 use ruma::{EventId, OwnedEventId, events::TimelineEventType};
 use tuwunel_core::{
-	Error, Result, at, is_equal_to,
-	matrix::Event,
+	Error, Result, at,
+	matrix::{Event, event_id::RandomState},
 	trace,
 	utils::stream::{BroadbandExt, IterStream, TryReadyExt},
 };
+
+/// Mainline position of each power-levels event, oldest first.
+type Positions<'a> = HashMap<&'a EventId, usize, RandomState>;
 
 /// Perform mainline ordering of the given events.
 ///
@@ -79,14 +84,20 @@ where
 	.try_collect()
 	.await?;
 
-	let mainline = mainline.iter().rev().map(AsRef::as_ref);
+	let positions: Positions<'_> = mainline
+		.iter()
+		.rev()
+		.map(AsRef::as_ref)
+		.enumerate()
+		.map(|(position, event_id)| (event_id, position))
+		.collect();
 
 	events
 		.map(ToOwned::to_owned)
 		.broad_filter_map(async |event_id| {
 			let event = fetch(event_id.clone()).await.ok()?;
 			let origin_server_ts = event.origin_server_ts();
-			let position = mainline_position(Some(event), &mainline, fetch)
+			let position = mainline_position(Some(event), &positions, fetch)
 				.await
 				.ok()?;
 
@@ -117,7 +128,7 @@ where
 /// ## Arguments
 ///
 /// * `event` - The event to compute the mainline position of.
-/// * `mainline_map` - The mainline map of the m.room.power_levels event.
+/// * `positions` - The mainline positions of the m.room.power_levels events.
 /// * `fetch` - Function to fetch an event in the room given its event ID.
 ///
 /// ## Returns
@@ -130,17 +141,16 @@ where
 	ret(level = "trace"),
 	skip_all,
 	fields(
-		mainline = mainline.clone().count(),
+		mainline = positions.len(),
 		event = ?current_event.as_ref().map(Event::event_id).map(ToOwned::to_owned),
 	)
 )]
-async fn mainline_position<'a, Mainline, Fetch, Fut, Pdu>(
+async fn mainline_position<Fetch, Fut, Pdu>(
 	mut current_event: Option<Pdu>,
-	mainline: &Mainline,
+	positions: &Positions<'_>,
 	fetch: &Fetch,
 ) -> Result<usize>
 where
-	Mainline: Iterator<Item = &'a EventId> + Clone + Send + Sync,
 	Fetch: Fn(OwnedEventId) -> Fut + Sync,
 	Fut: Future<Output = Result<Pdu>> + Send,
 	Pdu: Event,
@@ -154,10 +164,7 @@ where
 		// Real positions are 1..N (i + 1) so that 0 is free to mark
 		// "no power-levels in the auth chain". Without that, no-PL events
 		// would tie with events rooted at the oldest mainline PL.
-		if let Some(position) = mainline
-			.clone()
-			.position(is_equal_to!(event.event_id()))
-		{
+		if let Some(position) = positions.get(event.event_id()) {
 			return Ok(position.saturating_add(1));
 		}
 
