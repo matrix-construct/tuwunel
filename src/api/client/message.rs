@@ -22,7 +22,7 @@ use tuwunel_core::{
 	smallvec::SmallVec,
 	utils::{
 		BoolExt, IterStream, ReadyExt,
-		result::{FlatOk, LogErr},
+		result::LogErr,
 		stream::{BroadbandExt, TryIgnore, WidebandExt},
 	},
 };
@@ -147,7 +147,7 @@ pub(crate) async fn get_messages(
 			| Direction::Backward => PduCount::max(),
 		});
 
-	let to: Option<PduCount> = to.map(str::parse).flat_ok();
+	let to: Option<PduCount> = to.map(str::parse).transpose()?;
 
 	let limit: usize = limit
 		.and_then(|limit| limit.try_into().ok())
@@ -185,8 +185,17 @@ pub(crate) async fn get_messages(
 
 	let shortroomid = services.short.get_shortroomid(room_id).await?;
 
+	// `to` is a position, not necessarily the count of an event in this room
+	// (sync tokens are global stream positions), so the walk must stop once
+	// the bound is passed rather than only on an exact count match.
 	let events: Vec<_> = it
-		.ready_take_while(|(count, _)| Some(*count) != to)
+		.ready_take_while(|(count, _)| match to {
+			| Some(to) => match dir {
+				| Direction::Forward => *count < to,
+				| Direction::Backward => *count > to,
+			},
+			| None => true,
+		})
 		.ready_filter_map(|item| event_filter(item, filter))
 		.wide_filter_map(|item| related_by_filter(services, shortroomid, filter, item))
 		.wide_filter_map(|item| event_filters(services, sender_user, item, bypass_visibility))

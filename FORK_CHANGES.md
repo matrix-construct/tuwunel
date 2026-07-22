@@ -161,9 +161,31 @@ Behavior:
   drop this section when it merges, as happened with the one-time-key and
   MatrixRTC fixes at v1.8.2.
 
+### 6) `fix(api): clamp /messages pagination at the to position`
+Files:
+- `src/api/client/message.rs`
+- `src/mindroom-tests/tests/messages_to_clamp.rs`
+
+Behavior:
+- `/messages` stopped pagination only when an event's count exactly equalled
+  the `to` token and silently swallowed unparseable `to` values. A sync
+  `next_batch` token is a global stream position that almost never equals an
+  event count in the requested room, so a `to` bound taken from `/sync` —
+  which the spec explicitly permits — was ignored and the walk ran unbounded
+  (live probes: `to=<sync token>` and `to=garbage!!` both returned HTTP 200
+  with unclamped chunks). Pagination now stops once the walk passes the `to`
+  position in either direction, and an unparseable `to` fails the request the
+  same way an unparseable `from` does.
+- Found by mindroom-nio's limited-timeline backfill (mindroom-nio#13), which
+  pages `/messages` with sync tokens to recover events dropped by limited
+  sync timelines. The nio client does not depend on this fix (it treats `to`
+  as best-effort), but with it servers clamp the walk at the sync position,
+  which also closes a federation topological-ordering edge case client code
+  cannot detect. Candidate for upstreaming.
+
 ## Operational Changes
 
-### 6) `ci: fork release automation, container publishing, and GitHub checks`
+### 7) `ci: fork release automation, container publishing, and GitHub checks`
 Files:
 - `.github/workflows/mindroom-release.yml`, `.github/workflows/auto-mindroom-release.yml`
 - `.github/workflows/mindroom-container-release.yml`, `.github/workflows/mindroom-ci.yml`
@@ -180,8 +202,9 @@ Fork integration tests live in the `mindroom-tests` crate
 (`src/mindroom-tests/`), plus `default_test` database-path isolation in
 `src/main/args.rs`. They pin the rebase-sensitive behaviors (SSO/UIAA, native
 Apple, deactivation/erase, Synapse-admin deactivation reason, edit-purge ↔
-bundling composition) so future rebases catch regressions. The stream-push
-classification (#9) is pinned by unit tests in `src/service/pusher/tests.rs`.
+bundling composition, `/messages` `to`-position clamping) so future rebases
+catch regressions. The stream-push classification (#9) is pinned by unit tests
+in `src/service/pusher/tests.rs`.
 
 ## Runtime Configuration
 
