@@ -1,6 +1,7 @@
 //! Core Matrix Library
 
 pub mod event;
+pub mod event_id;
 pub mod pdu;
 pub mod room_version;
 
