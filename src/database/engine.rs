@@ -22,24 +22,27 @@ mod repair;
 mod tests;
 
 use std::{
+	collections::BTreeMap,
 	ffi::CStr,
 	sync::{
-		Arc,
+		Arc, OnceLock, Weak,
 		atomic::{AtomicU32, Ordering},
 	},
 };
 
 use rocksdb::{
 	AsColumnFamilyRef, BoundColumnFamily, DBCommon, DBWithThreadMode, MultiThreaded,
-	WaitForCompactOptions,
+	WaitForCompactOptions, WriteOptions,
 };
-use tuwunel_core::{Err, Result, debug, info, warn};
+use tuwunel_core::{Err, Result, debug, implement, info, warn};
 
 use crate::{
-	Context,
+	Context, Map,
 	pool::Pool,
 	util::{map_err, result},
 };
+
+pub(crate) type CfIndex = BTreeMap<u32, Weak<Map>>;
 
 /// Handle to the opened RocksDB database and its shared resources.
 ///
@@ -64,6 +67,13 @@ pub struct Engine {
 
 	/// Verify block checksums on read.
 	pub(crate) checksums: bool,
+
+	/// Shared write options for atomic batch commits.
+	pub(crate) write_options: WriteOptions,
+
+	/// Resolves catalog column ids for post-commit watcher notification.
+	/// Runtime migration column families are intentionally absent.
+	cf_index: OnceLock<CfIndex>,
 
 	/// Live cork count; nonzero suppresses the per-write WAL flush.
 	corks: AtomicU32,
@@ -219,6 +229,23 @@ impl Engine {
 	#[inline]
 	#[must_use]
 	pub fn is_secondary(&self) -> bool { self.secondary }
+}
+
+#[implement(Engine)]
+pub(crate) fn set_cf_index(&self, index: CfIndex) {
+	self.cf_index
+		.set(index)
+		.expect("cf_index initialized twice");
+}
+
+#[implement(Engine)]
+#[inline]
+pub(crate) fn map_by_cf_id(&self, cf_id: u32) -> Option<Arc<Map>> {
+	self.cf_index
+		.get()
+		.expect("cf_index initialized before writes")
+		.get(&cf_id)
+		.and_then(Weak::upgrade)
 }
 
 impl Drop for Engine {

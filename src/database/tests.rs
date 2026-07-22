@@ -3,6 +3,7 @@
 
 use std::fmt::Debug;
 
+use rocksdb::WriteBatch;
 use serde::{Deserialize, Serialize};
 use tuwunel_core::{
 	arrayvec::ArrayVec,
@@ -14,6 +15,7 @@ use crate::{
 	de::from_slice,
 	ser,
 	ser::{Json, serialize_to_vec},
+	txn::next_record,
 };
 
 #[test]
@@ -1072,4 +1074,64 @@ fn lazy_media_outlives_url_preview() {
 		ttl("mediaid_lazy") >= ttl("url_preview"),
 		"a served preview's mxc must still resolve while the preview is cached"
 	);
+}
+
+#[test]
+fn txn_record_golden() {
+	let mut batch = WriteBatch::default();
+	batch.put(b"key", b"value");
+	batch.delete(b"deleted");
+	batch.put(b"empty", b"");
+
+	let data = batch.data();
+	let mut records = data
+		.get(12..)
+		.expect("batch shorter than its header");
+
+	assert_eq!(next_record(&mut records), Some((0, b"key".as_slice())));
+	assert_eq!(next_record(&mut records), Some((0, b"deleted".as_slice())));
+	assert_eq!(next_record(&mut records), Some((0, b"empty".as_slice())));
+	assert!(records.is_empty());
+}
+
+#[test]
+fn txn_record_golden_long_key() {
+	let long = [0xAA_u8; 300];
+
+	let mut batch = WriteBatch::default();
+	batch.put(long.as_slice(), b"");
+
+	let data = batch.data();
+	let mut records = data
+		.get(12..)
+		.expect("batch shorter than its header");
+
+	assert_eq!(next_record(&mut records), Some((0, long.as_slice())));
+	assert!(records.is_empty());
+}
+
+#[test]
+fn txn_record_cf() {
+	// kTypeColumnFamilyValue cf=200 "k"="v", then kTypeColumnFamilyDeletion cf=9
+	// "del"
+	let mut records: &[u8] =
+		&[0x5, 0xC8, 0x1, 0x1, b'k', 0x1, b'v', 0x4, 0x9, 0x3, b'd', b'e', b'l'];
+
+	assert_eq!(next_record(&mut records), Some((200, b"k".as_slice())));
+	assert_eq!(next_record(&mut records), Some((9, b"del".as_slice())));
+	assert!(records.is_empty());
+}
+
+#[test]
+fn txn_record_unrecognized() {
+	let mut records: &[u8] = &[0x2, 0x1, b'k', 0x1, b'v'];
+
+	assert_eq!(next_record(&mut records), None);
+}
+
+#[test]
+fn txn_record_truncated() {
+	let mut records: &[u8] = &[0x1, 0x5, b'k'];
+
+	assert_eq!(next_record(&mut records), None);
 }

@@ -17,6 +17,7 @@ mod ser;
 mod stream;
 #[cfg(test)]
 mod tests;
+mod txn;
 pub(crate) mod util;
 
 use std::{ops::Index, sync::Arc};
@@ -33,9 +34,10 @@ pub use self::{
 	keyval::{KeyVal, Slice, serialize_key, serialize_val},
 	map::{Get, Map, Qry, compact},
 	ser::{Cbor, Interfix, Json, SEP, Separator, serialize, serialize_to, serialize_to_vec},
+	txn::Txn,
 };
 pub(crate) use self::{engine::context::Context, util::or_else};
-use crate::maps::{Maps, MapsKey, MapsVal};
+use crate::maps::{Maps, MapsKey, MapsVal, open as open_maps};
 
 pub struct Database {
 	maps: Maps,
@@ -48,12 +50,19 @@ impl Database {
 	pub async fn open(server: &Arc<Server>) -> Result<Arc<Self>> {
 		let ctx = Context::new(server)?;
 		let engine = Engine::open(ctx.clone(), maps::MAPS).await?;
-		Ok(Arc::new(Self {
-			maps: maps::open(&engine)?,
-			engine: engine.clone(),
-			_ctx: ctx,
-		}))
+		let maps = open_maps(&engine)?;
+		let cf_index = maps
+			.values()
+			.map(|map| (map.cf_id(), Arc::downgrade(map)))
+			.collect();
+
+		engine.set_cf_index(cf_index);
+
+		Ok(Arc::new(Self { maps, engine, _ctx: ctx }))
 	}
+
+	#[inline]
+	pub fn txn(&self) -> Txn { Txn::new(&self.engine) }
 
 	#[inline]
 	pub fn get(&self, name: &str) -> Result<&Arc<Map>> {

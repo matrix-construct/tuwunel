@@ -2,10 +2,10 @@ use std::{
 	collections::BTreeSet,
 	fs::read_dir,
 	path::Path,
-	sync::{Arc, atomic::AtomicU32},
+	sync::{Arc, OnceLock, atomic::AtomicU32},
 };
 
-use rocksdb::{ColumnFamilyDescriptor, Options};
+use rocksdb::{ColumnFamilyDescriptor, Options, WriteOptions};
 use tuwunel_core::{
 	Result, debug, debug_warn, err, implement, info, itertools::Itertools, trace, warn,
 };
@@ -75,6 +75,8 @@ pub(crate) async fn open(ctx: Arc<Context>, desc: &[Descriptor]) -> Result<Arc<S
 		read_only: config.rocksdb_read_only,
 		secondary: config.rocksdb_secondary,
 		checksums: config.rocksdb_checksums,
+		write_options: WriteOptions::default(),
+		cf_index: OnceLock::new(),
 		corks: AtomicU32::new(0),
 	}))
 }

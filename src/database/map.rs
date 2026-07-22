@@ -87,6 +87,9 @@ impl Map {
 
 	#[inline]
 	pub(crate) fn cf(&self) -> impl AsColumnFamilyRef + '_ { &*self.cf }
+
+	#[inline]
+	pub(crate) fn cf_id(&self) -> u32 { self.cf().id() }
 }
 
 impl Debug for Map {
