@@ -5,7 +5,7 @@ use futures::{
 	FutureExt, StreamExt,
 	future::{
 		Either::{Left, Right},
-		join, join4,
+		join, join5,
 	},
 };
 use ruma::{
@@ -168,8 +168,14 @@ where
 		.then_async(|| services.users.get_user_signing_key(user_id).ok())
 		.map(Option::flatten);
 
-	let (device_keys, master_key, self_signing_key, user_signing_key) =
-		join4(device_keys, master_key, self_signing_key, user_signing_key).await;
+	let appservice_keys = services
+		.appservice
+		.query_keys(user_id, device_ids);
+
+	let (mut device_keys, master_key, self_signing_key, user_signing_key, appservice_keys) =
+		join5(device_keys, master_key, self_signing_key, user_signing_key, appservice_keys).await;
+
+	device_keys.extend(appservice_keys);
 
 	let owned = || user_id.to_owned();
 	Keys {

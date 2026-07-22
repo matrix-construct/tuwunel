@@ -1,5 +1,5 @@
 use axum::extract::State;
-use futures::{FutureExt, StreamExt, TryFutureExt, future::join4};
+use futures::{FutureExt, StreamExt, TryFutureExt, future::join5};
 use ruma::{
 	UserId,
 	api::{
@@ -73,10 +73,25 @@ pub(crate) async fn get_devices_route(
 		})
 		.collect::<Vec<_>>();
 
-	let (stream_id, master_key, self_signing_key, devices) =
-		join4(stream_id, master_key, self_signing_key, devices)
+	let appservice_keys = services.appservice.query_keys(user_id, &[]);
+
+	let (stream_id, master_key, self_signing_key, mut devices, appservice_keys) =
+		join5(stream_id, master_key, self_signing_key, devices, appservice_keys)
 			.boxed()
 			.await;
+
+	if !appservice_keys.is_empty() {
+		devices.retain(|device| !appservice_keys.contains_key(&device.device_id));
+		devices.extend(
+			appservice_keys
+				.into_iter()
+				.map(|(device_id, keys)| UserDevice {
+					device_id,
+					keys,
+					device_display_name: None,
+				}),
+		);
+	}
 
 	Ok(get_devices::v1::Response {
 		user_id: body.body.user_id,

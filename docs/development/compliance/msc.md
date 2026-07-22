@@ -18,9 +18,9 @@
 
 ## Counts
 
-- ✅ `yes`: 256
+- ✅ `yes`: 258
 - 🟨 `partial`: 34
-- ❌ `no`: 448
+- ❌ `no`: 446
 - ⬛ `n/a`: 286
 
 ### Status by inventory bucket
@@ -28,7 +28,7 @@
 | Inv | yes | partial | no | n/a | total |
 |---|---|---|---|---|---|
 | merged | 186 | 7 | 7 | 59 | 259 |
-| open | 62 | 26 | 402 | 175 | 665 |
+| open | 64 | 26 | 400 | 175 | 665 |
 | closed | 8 | 1 | 39 | 52 | 100 |
 
 ## Merged
@@ -520,8 +520,8 @@ in the [Out of scope](#out-of-scope) section.
 | MSC3993 | ❌ ● | 0/0 | Room takeover | room takeover variants not implemented |
 | MSC3991 | ❌ ● | 0/0 | Power level up! Taking the room to new heights | raise own power level above max not allowed |
 | MSC3985 | ❌ ● | 0/0 | Break-out rooms | m.breakout state event not handled |
-| MSC3984 | ❌ ● | 0/0 | Sending key queries to appservices | key query proxy to appservice not implemented |
-| MSC3983 | ❌ ● | 0/0 | Sending One-Time Key (OTK) claims to appservices | OTK claim proxy to appservice not implemented |
+| MSC3984 | ✅ ● | 80/90 | Sending key queries to appservices | src/api/client/keys/get_keys.rs:178 appservice device overlay; no cross-signi... |
+| MSC3983 | ✅ ● | 90/100 | Sending One-Time Key (OTK) claims to appservices | src/api/client/keys/claim_keys.rs:92 local OTK, appservice, fallback; interes... |
 | MSC3982 | ❌ ● | 0/0 | Limit maximum number of events sent to an AS | no 100-event cap on appservice transactions |
 | MSC3971 | ❌ ● | 0/0 | Sharing image packs | image pack sharing/links not implemented |
 | MSC3964 | ❌ ● | 0/0 | Notifications for room tags | room_tag push condition not implemented |

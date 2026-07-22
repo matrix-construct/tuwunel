@@ -1,4 +1,5 @@
 mod append;
+mod keys;
 mod namespace_regex;
 mod ping;
 mod registration_info;

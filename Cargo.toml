@@ -364,7 +364,7 @@ default-features = false
 
 [workspace.dependencies.ruma]
 git = "https://github.com/matrix-construct/ruma"
-rev = "dda0490ef715efd74566dde2d9ced2004616d09a"
+rev = "b61b2f8e104f3078dd39de5506f7e447a28b31df"
 features = [
     "__compat",
     "appservice-api-c",
@@ -393,6 +393,8 @@ features = [
     "unstable-msc3381", # polls
     "unstable-msc3489", # beacon / live location
     "unstable-msc3930", # polls push rules
+    "unstable-msc3983", # appservice one-time key claims
+    "unstable-msc3984", # appservice device key queries
     "unstable-msc4075",
     "unstable-msc4095",
     "unstable-msc4121",
@@ -415,7 +417,7 @@ features = [
 
 [workspace.dependencies.synapse-admin-api]
 git = "https://github.com/matrix-construct/synapse-admin-api"
-rev = "d1834cddc1f4cb5cf811bd9387bd83ce53f54d68"
+rev = "65e70904129fb17d355600d8c0d0343fbd609ec8"
 features = ["server"]
 
 [workspace.dependencies.rustls]

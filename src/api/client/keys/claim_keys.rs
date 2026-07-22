@@ -12,7 +12,7 @@ use serde_json::json;
 use tuwunel_core::{
 	Result, debug_warn,
 	utils::{
-		IterStream,
+		BoolExt, IterStream,
 		stream::{BroadbandExt, ReadyExt},
 	},
 };
@@ -76,37 +76,62 @@ pub(crate) async fn claim_keys_helper(
 }
 
 async fn collect_local_one_time_keys(services: &Services, users: &[LocalClaim<'_>]) -> Claims {
-	let take_one_time_key = async |(user_id, device_id, algorithm)| {
-		let key = services
-			.users
-			.take_one_time_key(user_id, device_id, algorithm)
-			.await
-			.ok();
-
-		// MSC2732: serve the fallback key when the one-time pool is empty.
-		let key = match key {
-			| Some(key) => Some(key),
-			| None => services
-				.users
-				.take_fallback_key(user_id, device_id, algorithm)
-				.await
-				.ok(),
-		};
-
-		key.map(|key| (device_id.to_owned(), [key].into()))
-	};
-
 	let one_time_keys = users
 		.iter()
 		.copied()
 		.stream()
 		.broad_filter_map(async |(user_id, requested)| {
-			let device_keys: BTreeMap<_, _> = requested
+			let (mut device_keys, mut needed) = requested
 				.iter()
 				.stream()
-				.map(|(device_id, algorithm)| (user_id, device_id.as_ref(), algorithm))
-				.filter_map(take_one_time_key)
-				.collect()
+				.fold(
+					(BTreeMap::new(), BTreeMap::new()),
+					async |(mut device_keys, mut needed), (device_id, algorithm)| {
+						match services
+							.users
+							.take_one_time_key(user_id, device_id, algorithm)
+							.await
+						{
+							| Ok(key) => {
+								device_keys.insert(device_id.clone(), [key].into());
+							},
+							| Err(_) => {
+								needed.insert(device_id.clone(), algorithm.clone());
+							},
+						}
+
+						(device_keys, needed)
+					},
+				)
+				.await;
+
+			// MSC3983: claim from appservices before marking local fallback keys used.
+			let claimed = needed
+				.is_empty()
+				.is_false()
+				.then_async(|| services.appservice.claim_keys(user_id, &needed))
+				.await
+				.unwrap_or_default();
+
+			for (device_id, keys) in claimed {
+				needed.remove(&device_id);
+				device_keys.insert(device_id, keys);
+			}
+
+			let device_keys = needed
+				.into_iter()
+				.stream()
+				.fold(device_keys, async |mut device_keys, (device_id, algorithm)| {
+					if let Ok(key) = services
+						.users
+						.take_fallback_key(user_id, &device_id, &algorithm)
+						.await
+					{
+						device_keys.insert(device_id, [key].into());
+					}
+
+					device_keys
+				})
 				.await;
 
 			// Omit a depleted user entirely; Synapse returns no entry, not an empty map.

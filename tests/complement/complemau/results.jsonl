@@ -29,9 +29,9 @@
 {"Action":"pass","Test":"TestComplemauAppserviceRegistrationLoginAndMSC4190Devices/registration_rejects_an_unknown_appservice_token"}
 {"Action":"pass","Test":"TestComplemauAppserviceRoomAliasQuery"}
 {"Action":"pass","Test":"TestComplemauAppserviceScopesTypingByInterest"}
-{"Action":"fail","Test":"TestComplemauAppserviceServesDeviceKeys"}
-{"Action":"fail","Test":"TestComplemauAppserviceServesDeviceKeysOverFederation"}
-{"Action":"fail","Test":"TestComplemauAppserviceServesOneTimeKeys"}
+{"Action":"pass","Test":"TestComplemauAppserviceServesDeviceKeys"}
+{"Action":"pass","Test":"TestComplemauAppserviceServesDeviceKeysOverFederation"}
+{"Action":"pass","Test":"TestComplemauAppserviceServesOneTimeKeys"}
 {"Action":"pass","Test":"TestComplemauAppserviceThirdPartyEdges"}
 {"Action":"pass","Test":"TestComplemauAppserviceThirdPartyEdges/appservice_declares_no_protocols"}
 {"Action":"pass","Test":"TestComplemauAppserviceThirdPartyEdges/missing_appservice_answer_is_dropped"}
