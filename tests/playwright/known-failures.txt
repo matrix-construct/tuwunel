@@ -42,15 +42,12 @@ file-upload/image-upload.spec.ts :: should show image preview when uploading an 
 invite/invite-dialog.spec.ts :: should support inviting a user to Direct Messages
 invite/invite-dialog.spec.ts :: should support inviting a user to a room
 lazy-loading/lazy-loading.spec.ts :: should handle lazy loading properly even when offline
-links/messages.spec.ts :: should linkify text inside a URL preview
 links/topic.spec.ts :: should linkify plaintext '#aroom:example.org'
 links/topic.spec.ts :: should linkify plaintext '_@alice:example.org'
 links/topic.spec.ts :: should linkify plaintext 'ftp://example.org'
 links/topic.spec.ts :: should linkify plaintext 'https://example.org'
 location/location.spec.ts :: sends and displays pin drop location message successfully
 login/login.spec.ts :: Can reload after login
-messages/messages.spec.ts :: should render a basic preview
-messages/messages.spec.ts :: should render a preview with a thumbnail
 pinned-messages/pinned-messages.spec.ts :: banner should listen to pinned message list
 pinned-messages/pinned-messages.spec.ts :: should display 2 messages in the banner
 pinned-messages/pinned-messages.spec.ts :: should display 4 messages in the banner

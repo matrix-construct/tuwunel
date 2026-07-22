@@ -35,6 +35,7 @@ COPY <<EOF /playwright/playwright.toml
     create_admin_room = false
     trusted_servers = []
     ip_range_denylist = []
+    url_preview_domain_explicit_allowlist = ["example.org", "fallback.example.org"]
 EOF
 ENV TUWUNEL_CONFIG="/playwright/playwright.toml"
 ENTRYPOINT tuwunel -Oserver_name=\""$SERVER_NAME\""
