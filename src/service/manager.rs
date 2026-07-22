@@ -73,7 +73,7 @@ impl Manager {
 		}
 	}
 
-	#[tracing::instrument(name = "manager", level = "trace", skip_all)]
+	#[tracing::instrument(name = "manager", level = "trace", skip_all, err)]
 	pub(super) async fn start(self: Arc<Self>) -> Result {
 		let mut workers = self.workers.lock().await;
 
@@ -109,7 +109,6 @@ impl Manager {
 		name = "manager",
 		level = INFO_SPAN_LEVEL,
 		skip_all,
-		ret,
 		err,
 	)]
 	async fn worker(self: &Arc<Self>) -> Result {
