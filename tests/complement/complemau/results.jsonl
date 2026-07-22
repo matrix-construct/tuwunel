@@ -83,7 +83,7 @@
 {"Action":"pass","Test":"TestComplemauPingErrorSurfacing/receiver_error_status"}
 {"Action":"pass","Test":"TestComplemauPingErrorSurfacing/receiver_timeout"}
 {"Action":"pass","Test":"TestComplemauPingErrorSurfacing/registration_without_URL"}
-{"Action":"fail","Test":"TestComplemauPingForcesTransactionRetry"}
+{"Action":"pass","Test":"TestComplemauPingForcesTransactionRetry"}
 {"Action":"pass","Test":"TestComplemauPingRoundTripAndAuthorization"}
 {"Action":"pass","Test":"TestComplemauPingRoundTripAndAuthorization/appservice_cannot_ping_another_appservice"}
 {"Action":"pass","Test":"TestComplemauPingRoundTripAndAuthorization/normal_user_is_forbidden"}

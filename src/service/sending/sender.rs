@@ -69,8 +69,14 @@ use crate::{federation::ShouldAttempt, rooms::timeline::RawPduId};
 #[derive(Debug)]
 enum TransactionStatus {
 	Running,
+	RunningForceRetry,
 	Failed(u32, Instant), // push backoff: tries, last failure
 	Retrying(u32),        // number of times failed
+}
+
+enum RetryAction {
+	None,
+	Force,
 }
 
 type SendingError = (Destination, Error);
@@ -215,40 +221,72 @@ impl Service {
 				self.handle_response_ok(&dest, futures, statuses)
 					.await,
 			| Err((dest, e)) => {
-				Self::handle_response_err(&dest, statuses, &e);
+				let retry_action = Self::handle_response_err(&dest, statuses, &e);
 
-				// Arm a one-shot retry at the destination's earliest-retry time.
-				if let Destination::Federation(server) = dest
-					&& let ShouldAttempt::No { earliest_retry } = self
-						.services
-						.federation
-						.should_attempt(&server)
-						.await
-				{
-					arm_wake(wakes, server, earliest_retry);
+				match dest {
+					| Destination::Federation(server) => {
+						// Arm a one-shot retry at the destination's earliest-retry time.
+						if let ShouldAttempt::No { earliest_retry } = self
+							.services
+							.federation
+							.should_attempt(&server)
+							.await
+						{
+							arm_wake(wakes, server, earliest_retry);
+						}
+					},
+					| dest if matches!(retry_action, RetryAction::Force) =>
+						self.handle_force_retry(dest, futures, statuses)
+							.await,
+					| _ => {},
 				}
 			},
 		}
 	}
 
-	fn handle_response_err(dest: &Destination, statuses: &mut CurTransactionStatus, e: &Error) {
+	async fn handle_force_retry<'a>(
+		&'a self,
+		dest: Destination,
+		futures: &mut SendingFutures<'a>,
+		statuses: &mut CurTransactionStatus,
+	) {
+		let Ok(Some(events)) = self
+			.select_events(&dest, Vec::new(), statuses)
+			.await
+		else {
+			return;
+		};
+
+		self.schedule_events(dest, events, futures, statuses);
+	}
+
+	fn handle_response_err(
+		dest: &Destination,
+		statuses: &mut CurTransactionStatus,
+		e: &Error,
+	) -> RetryAction {
 		debug!(?dest, "{e:?}");
 		// Push backs off locally; federation defers to peer_status, appservice retries.
 		let push = matches!(dest, Destination::Push(..));
 
-		if let Some(status) = statuses.get_mut(dest) {
-			let tries = match status {
-				| TransactionStatus::Running => 1,
-				| TransactionStatus::Failed(n, _) | TransactionStatus::Retrying(n) =>
-					n.saturating_add(1),
-			};
+		let Some(status) = statuses.get_mut(dest) else {
+			return RetryAction::None;
+		};
 
-			*status = if push {
-				TransactionStatus::Failed(tries, Instant::now())
-			} else {
-				TransactionStatus::Retrying(tries)
-			};
-		}
+		let (tries, retry_action) = match status {
+			| TransactionStatus::Running => (1, RetryAction::None),
+			| TransactionStatus::RunningForceRetry => (1, RetryAction::Force),
+			| TransactionStatus::Failed(n, _) | TransactionStatus::Retrying(n) =>
+				(n.saturating_add(1), RetryAction::None),
+		};
+
+		*status = if push {
+			TransactionStatus::Failed(tries, Instant::now())
+		} else {
+			TransactionStatus::Retrying(tries)
+		};
+
+		retry_action
 	}
 
 	#[expect(clippy::needless_pass_by_ref_mut)]
@@ -293,11 +331,32 @@ impl Service {
 		if events.is_empty() {
 			statuses.remove(dest);
 		} else {
+			if let Some(status) = statuses.get_mut(dest) {
+				*status = TransactionStatus::Running;
+			}
+
 			futures.push(self.send_events(dest.clone(), events));
 		}
 	}
 
-	#[expect(clippy::needless_pass_by_ref_mut)]
+	#[expect(
+		clippy::needless_pass_by_ref_mut,
+		reason = "mutable reference avoids requiring SendingFutures to be Sync"
+	)]
+	fn schedule_events<'a>(
+		&'a self,
+		dest: Destination,
+		events: Vec<SendingEvent>,
+		futures: &mut SendingFutures<'a>,
+		statuses: &mut CurTransactionStatus,
+	) {
+		if events.is_empty() {
+			statuses.remove(&dest);
+		} else {
+			futures.push(self.send_events(dest, events));
+		}
+	}
+
 	#[tracing::instrument(name = "request", level = "debug", skip_all)]
 	async fn handle_request<'a>(
 		&'a self,
@@ -307,11 +366,7 @@ impl Service {
 	) {
 		let iv = vec![(msg.queue_id, msg.event)];
 		if let Ok(Some(events)) = self.select_events(&msg.dest, iv, statuses).await {
-			if !events.is_empty() {
-				futures.push(self.send_events(msg.dest, events));
-			} else {
-				statuses.remove(&msg.dest);
-			}
+			self.schedule_events(msg.dest, events, futures, statuses);
 		}
 	}
 
@@ -451,7 +506,19 @@ impl Service {
 		new_events: Vec<QueueItem>, // Events we want to send: event and full key
 		statuses: &mut CurTransactionStatus,
 	) -> Result<Option<Vec<SendingEvent>>> {
-		let (allow, retry) = self.select_events_current(dest, statuses).await?;
+		let retry_action = if matches!(dest, Destination::Appservice(_))
+			&& new_events
+				.iter()
+				.any(|(_, event)| matches!(event, SendingEvent::Flush))
+		{
+			RetryAction::Force
+		} else {
+			RetryAction::None
+		};
+
+		let (allow, retry) = self
+			.select_events_current(dest, statuses, retry_action)
+			.await?;
 
 		// Nothing can be done for this remote, bail out.
 		if !allow {
@@ -501,6 +568,7 @@ impl Service {
 		&self,
 		dest: &Destination,
 		statuses: &mut CurTransactionStatus,
+		retry_action: RetryAction,
 	) -> Result<(bool, bool)> {
 		// peer_status gates federation only; appservice and push fall through.
 		if let Destination::Federation(server) = dest {
@@ -519,8 +587,11 @@ impl Service {
 		statuses
 			.entry(dest.clone())
 			.and_modify(|e| match e {
-				| TransactionStatus::Running => {
+				| TransactionStatus::Running | TransactionStatus::RunningForceRetry => {
 					allow = false; // already running
+					if matches!(retry_action, RetryAction::Force) {
+						*e = TransactionStatus::RunningForceRetry;
+					}
 				},
 				| TransactionStatus::Failed(tries, time) => {
 					// Push backoff: hold off until the exponential window elapses.

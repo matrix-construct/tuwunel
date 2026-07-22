@@ -494,6 +494,15 @@ impl Service {
 			.await
 	}
 
+	#[tracing::instrument(skip(self), level = "debug")]
+	pub fn flush_appservice(&self, appservice_id: String) -> Result {
+		self.dispatch(Msg {
+			dest: Destination::Appservice(appservice_id),
+			event: SendingEvent::Flush,
+			queue_id: Vec::<u8>::new(),
+		})
+	}
+
 	/// Flushes the sender for a federation peer that has proven reachable via
 	/// inbound activity or an operator reset, but only when it was actually in
 	/// its failure bucket; reports whether it was.
