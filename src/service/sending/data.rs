@@ -6,7 +6,7 @@ use tuwunel_core::{
 	Error, Result, at, utils,
 	utils::{ReadyExt, stream::TryIgnore},
 };
-use tuwunel_database::{Database, Deserialized, Map};
+use tuwunel_database::{Database, Deserialized, Map, Txn};
 
 use super::{Destination, EduBuf, SendingEvent, TAG_DEVICE_LIST_CHANGED, TAG_TO_DEVICE};
 
@@ -81,15 +81,17 @@ impl Data {
 	/// unlike `mark_as_active` there is no queue row to delete.
 	pub(super) fn persist_active_edus(&self, server: &ServerName, edus: &[EduBuf]) {
 		let prefix = Destination::Federation(server.to_owned()).get_prefix();
-		self.servercurrentevent_data
-			.insert_batch(edus.iter().map(|edu| {
-				let mut key = prefix.clone();
-				let count = self.services.globals.next_count();
-				let count = count.to_be_bytes();
-				key.extend(&count);
 
-				(key, edu.as_slice())
-			}));
+		let items = edus.iter().map(|edu| {
+			let mut key = prefix.clone();
+			let count = self.services.globals.next_count();
+			let count = count.to_be_bytes();
+			key.extend(&count);
+
+			(key, edu.as_slice())
+		});
+
+		Txn::insert(&self.servercurrentevent_data, items).execute();
 	}
 
 	#[inline]
@@ -143,12 +145,13 @@ impl Data {
 			})
 			.collect();
 
-		self.servernameevent_data.insert_batch(
-			keys.iter()
-				.map(Vec::as_slice)
-				.zip(requests.map(at!(0)))
-				.map(|(key, event)| (key, event.value_bytes())),
-		);
+		let items = keys
+			.iter()
+			.map(Vec::as_slice)
+			.zip(requests.map(at!(0)))
+			.map(|(key, event)| (key, event.value_bytes()));
+
+		Txn::insert(&self.servernameevent_data, items).execute();
 
 		keys
 	}

@@ -13,7 +13,7 @@ use tuwunel_core::{
 		stream::{TryIgnore, WidebandExt},
 	},
 };
-use tuwunel_database::{Interfix, Map, keyval::Val};
+use tuwunel_database::{Interfix, Map, Txn, keyval::Val};
 
 use crate::rooms::{
 	short::ShortRoomId,
@@ -57,19 +57,16 @@ impl crate::Service for Service {
 
 #[implement(Service)]
 pub fn index_pdu(&self, shortroomid: ShortRoomId, pdu_id: &RawPduId, message_body: &str) {
-	let batch = tokenize(message_body)
-		.map(|word| {
-			let mut key = shortroomid.to_be_bytes().to_vec();
-			key.extend_from_slice(word.as_bytes());
-			key.push(0xFF);
-			key.extend_from_slice(pdu_id.as_ref()); // TODO: currently we save the room id a second time here
-			key
-		})
-		.collect::<Vec<_>>();
+	let items = tokenize(message_body).map(|word| {
+		let mut key = shortroomid.to_be_bytes().to_vec();
+		key.extend_from_slice(word.as_bytes());
+		key.push(0xFF);
+		key.extend_from_slice(pdu_id.as_ref()); // TODO: currently we save the room id a second time here
 
-	self.db
-		.tokenids
-		.insert_batch(batch.iter().map(|k| (k.as_slice(), &[])));
+		(key, [])
+	});
+
+	Txn::insert(&self.db.tokenids, items).execute();
 }
 
 #[implement(Service)]
