@@ -13,7 +13,7 @@ use tuwunel_core::{
 		stream::{TryIgnore, WidebandExt},
 	},
 };
-use tuwunel_database::{Interfix, Map, Txn, keyval::Val};
+use tuwunel_database::{Map, Txn, keyval::Val};
 
 use crate::rooms::{
 	short::ShortRoomId,
@@ -193,11 +193,13 @@ fn search_pdu_ids_query_word(
 
 #[implement(Service)]
 pub async fn delete_all_search_tokenids_for_room(&self, room_id: &RoomId) -> Result {
-	let prefix = (room_id, Interfix);
+	let Ok(shortroomid) = self.services.short.get_shortroomid(room_id).await else {
+		return Ok(());
+	};
 
 	self.db
 		.tokenids
-		.keys_prefix_raw(&prefix)
+		.keys_prefix_raw(&shortroomid)
 		.ignore_err()
 		.ready_for_each(|key| {
 			trace!("Removing key: {key:?}");
