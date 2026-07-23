@@ -111,6 +111,7 @@ pub(crate) async fn set_read_marker_route(
 				body.sender_device.as_deref(),
 				Some(client),
 				&PresenceState::Online,
+				body.appservice_info.as_ref().into(),
 			)
 			.await
 			.ok();

@@ -19,7 +19,7 @@ use tuwunel_core::{
 };
 
 use super::{
-	Service, TimerFired,
+	InferredActivityOrigin, Service, TimerFired,
 	aggregate::{self, StatusMsg},
 };
 
@@ -217,18 +217,26 @@ impl Service {
 		.await
 	}
 
-	/// Pings the presence of the given user, setting the specified state. When
-	/// device_id is supplied.
+	/// Pings the presence of the given user, setting the specified state.
+	///
+	/// Requests authenticated with an appservice token do not imply user
+	/// activity. In particular, they must not update presence or device
+	/// last-seen data. Explicit appservice presence updates use
+	/// [`Self::set_presence_for_device`] instead.
 	pub async fn maybe_ping_presence(
 		&self,
 		user_id: &UserId,
 		device_id: Option<&DeviceId>,
 		client_ip: Option<IpAddr>,
 		new_state: &PresenceState,
+		origin: InferredActivityOrigin,
 	) -> Result {
 		const REFRESH_TIMEOUT: u64 = 30 * 1000;
 
-		if !self.services.server.config.allow_local_presence || self.services.db.is_read_only() {
+		if !origin.is_allowed()
+			|| !self.services.server.config.allow_local_presence
+			|| self.services.db.is_read_only()
+		{
 			return Ok(());
 		}
 
