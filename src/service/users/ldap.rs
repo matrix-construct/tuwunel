@@ -122,6 +122,13 @@ pub async fn search_ldap(&self, user_id: &UserId) -> Result<Vec<(String, bool)>>
 
 #[implement(super::Service)]
 pub async fn auth_ldap(&self, user_dn: &str, password: &str) -> Result {
+	// An empty password performs an unauthenticated bind (RFC 4513 5.1.2).
+	if password.trim().is_empty() {
+		return Err(err!(Request(Forbidden(debug_error!(
+			"LDAP authentication error: empty password"
+		)))));
+	}
+
 	let config = &self.services.server.config.ldap;
 	let uri = config
 		.uri
