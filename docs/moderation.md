@@ -78,6 +78,9 @@ commands. Run any command with `--help` for argument detail.
   local sender even when the user is offline or unwilling.
 - `!admin users force-demote <user> <room>`: drops a user's power level to
   the room default when permissions allow.
+- `!admin users set-profile-key <user> <key> <value>`: sets a single profile
+  key (e.g. `displayname`, `avatar_url`, `m.tz`, or a custom key) on a local
+  user, for example to remove an abusive display name.
 - `!admin users delete-room-tag` / `put-room-tag`: room-tag housekeeping;
   the `m.server_notice` tag pinned to the admin room is the typical use.
 

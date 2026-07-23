@@ -21,18 +21,42 @@ mod put_room_tag;
 mod redact_event;
 mod reject_invites;
 mod reset_password;
+mod set_profile_key;
 mod unerase;
 
-use clap::Subcommand;
+use clap::{ArgGroup, Subcommand, ValueEnum};
 use futures::FutureExt;
 use ruma::{OwnedDeviceId, OwnedEventId, OwnedRoomId, OwnedRoomOrAliasId, OwnedUserId, UserId};
 use tuwunel_core::Result;
-use tuwunel_service::Services;
+use tuwunel_service::{Services, profile::Propagation};
 
 use crate::admin_command_dispatch;
 
 const AUTO_GEN_PASSWORD_LENGTH: usize = 25;
 const BULK_JOIN_REASON: &str = "Bulk force joining this room as initiated by the server admin.";
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
+pub(super) enum PropagateTo {
+	/// Send a member event to every joined room.
+	All,
+
+	/// Send a member event only to rooms whose current per-room value matches
+	/// the user's prior global value.
+	Unchanged,
+
+	/// Send no member events; update the global profile only.
+	None,
+}
+
+impl From<PropagateTo> for Propagation {
+	fn from(propagate_to: PropagateTo) -> Self {
+		match propagate_to {
+			| PropagateTo::All => Self::All,
+			| PropagateTo::Unchanged => Self::Unchanged,
+			| PropagateTo::None => Self::None,
+		}
+	}
+}
 
 #[admin_command_dispatch]
 #[derive(Debug, Subcommand)]
@@ -173,6 +197,32 @@ pub(super) enum UserCommand {
 	/// - Grant server-admin privileges to a user.
 	MakeUserAdmin {
 		user_id: String,
+	},
+
+	/// - Set a user profile key (display name, avatar url, etc) to a value
+	#[command(group(
+		ArgGroup::new("value_or_clear")
+			.required(true)
+			.args(["value", "clear"]),
+	))]
+	SetProfileKey {
+		/// User for whom the profile key should be set
+		user_id: String,
+
+		/// Profile key name (e.g. displayname, avatar_url, m.tz, or a custom
+		/// key)
+		key: String,
+
+		/// Value to set (used as string if not parseable as JSON)
+		value: Vec<String>,
+
+		/// Remove the profile key instead of setting a value
+		#[arg(short, long)]
+		clear: bool,
+
+		/// How to propagate the change to the user's joined rooms
+		#[arg(short, long)]
+		propagate_to: Option<PropagateTo>,
 	},
 
 	/// - Puts a room tag for the specified user and room ID.
