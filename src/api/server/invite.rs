@@ -360,7 +360,10 @@ async fn record_local_invite(
 					device_one_time_keys_count: BTreeMap::new(),
 					device_unused_fallback_key_types: BTreeMap::new(),
 				})
-				.await?;
+				.await
+				.map_err(|_| {
+					err!(BadServerResponse("Failed to notify appservice about incoming invite."))
+				})?;
 		}
 	}
 
