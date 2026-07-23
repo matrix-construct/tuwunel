@@ -6,7 +6,8 @@ use std::{collections::BTreeMap, sync::Arc};
 
 use futures::{Stream, StreamExt};
 use ruma::{
-	MilliSecondsSinceUnixEpoch, OwnedEventId, OwnedUserId, RoomId, UInt, UserId,
+	EventId, MilliSecondsSinceUnixEpoch, OwnedEventId, OwnedRoomId, OwnedUserId, RoomId, UInt,
+	UserId,
 	api::appservice::event::push_events::v1::EphemeralData,
 	events::{
 		AnySyncEphemeralRoomEvent, SyncEphemeralRoomEvent,
@@ -25,11 +26,11 @@ use tuwunel_core::{
 	smallstr::SmallString,
 	smallvec::SmallVec,
 	trace,
-	utils::IterStream,
+	utils::{IterStream, MutexMap},
 	warn,
 };
 
-use self::data::{Data, ReceiptItem};
+use self::data::{Data, ReceiptItem, event_thread_kind};
 
 /// Private read receipts surfaced by `private_read_get`. One legacy
 /// unthreaded row plus zero or more per-thread rows; inline-1 catches the
@@ -41,10 +42,18 @@ pub type PrivateReadEvents = SmallVec<[Raw<AnySyncEphemeralRoomEvent>; 1]>;
 /// including the leading `$`; 48 bytes inline matches the project's
 /// `StateKey` budget and stays inline for every realistic thread root.
 type ThreadKind = SmallString<[u8; 48]>;
+type ReceiptMutexKey = (OwnedRoomId, OwnedUserId, ThreadKind);
+
+#[derive(Clone, Copy)]
+enum NotificationReset {
+	None,
+	OnAdvance,
+}
 
 pub struct Service {
 	services: Arc<crate::services::OnceServices>,
 	db: Data,
+	update_mutex: MutexMap<ReceiptMutexKey, ()>,
 }
 
 impl crate::Service for Service {
@@ -52,6 +61,7 @@ impl crate::Service for Service {
 		Ok(Arc::new(Self {
 			services: args.services.clone(),
 			db: Data::new(args),
+			update_mutex: MutexMap::new(),
 		}))
 	}
 
@@ -59,7 +69,13 @@ impl crate::Service for Service {
 }
 
 impl Service {
-	/// Replaces the previous read receipt.
+	/// Advances a public read receipt within its room/user/thread context.
+	///
+	/// A receipt for the same or an older known timeline position is ignored.
+	/// Distinct event IDs with unavailable ordering information are accepted
+	/// for compatibility with receipts whose events are not locally known.
+	/// This method does not alter local notification counts; client API
+	/// receipts must use [`Self::client_readreceipt_update`].
 	#[tracing::instrument(skip(self), level = "debug", name = "set_receipt")]
 	pub async fn readreceipt_update(
 		&self,
@@ -67,6 +83,89 @@ impl Service {
 		room_id: &RoomId,
 		event: &ReceiptEvent,
 	) {
+		self.readreceipt_update_inner(user_id, room_id, event, NotificationReset::None)
+			.await
+	}
+
+	/// Advances a receipt submitted through the client API.
+	///
+	/// Notification counts are reset after the advancement decision but before
+	/// the accepted receipt becomes visible. Set `notifications_already_reset`
+	/// when a private receipt in the same client request performed the reset
+	/// before publishing its own stream position.
+	#[tracing::instrument(skip(self), level = "debug", name = "set_client_receipt")]
+	pub async fn client_readreceipt_update(
+		&self,
+		user_id: &UserId,
+		room_id: &RoomId,
+		event: &ReceiptEvent,
+		notifications_already_reset: bool,
+	) {
+		let notification_reset = if notifications_already_reset {
+			NotificationReset::None
+		} else {
+			NotificationReset::OnAdvance
+		};
+
+		self.readreceipt_update_inner(user_id, room_id, event, notification_reset)
+			.await;
+	}
+
+	async fn readreceipt_update_inner(
+		&self,
+		user_id: &UserId,
+		room_id: &RoomId,
+		event: &ReceiptEvent,
+		notification_reset: NotificationReset,
+	) {
+		let thread_kind = event_thread_kind(event);
+		let mutex_key = (room_id.to_owned(), user_id.to_owned(), ThreadKind::from(thread_kind));
+		let _guard = self.update_mutex.lock(&mutex_key).await;
+		let event_id = event
+			.content
+			.keys()
+			.next()
+			.expect("receipt event must carry an event id");
+		let current_event_id = self
+			.db
+			.current_receipt_event_id(user_id, room_id, thread_kind)
+			.await;
+
+		let advances = match current_event_id.as_deref() {
+			| Some(current_event_id) if current_event_id != event_id => {
+				let (current_count, target_count) = futures::future::join(
+					self.services
+						.timeline
+						.get_pdu_count(current_event_id),
+					self.services.timeline.get_pdu_count(event_id),
+				)
+				.await;
+
+				receipt_advances(
+					Some(current_event_id),
+					event_id,
+					current_count.ok(),
+					target_count.ok(),
+				)
+			},
+			| current_event_id => receipt_advances(current_event_id, event_id, None, None),
+		};
+
+		if !advances {
+			return;
+		}
+
+		if matches!(notification_reset, NotificationReset::OnAdvance) {
+			self.services
+				.pusher
+				.reset_notification_counts_for_thread(
+					user_id,
+					room_id,
+					&thread_kind_to_receipt(thread_kind),
+				)
+				.await;
+		}
+
 		// update local
 		self.db
 			.readreceipt_update(user_id, room_id, event)
@@ -260,6 +359,22 @@ impl Service {
 
 	pub async fn delete_all_read_receipts(&self, room_id: &RoomId) -> Result {
 		self.db.delete_all_read_receipts(room_id).await
+	}
+}
+
+fn receipt_advances(
+	current_event_id: Option<&EventId>,
+	target_event_id: &EventId,
+	current_count: Option<PduCount>,
+	target_count: Option<PduCount>,
+) -> bool {
+	if current_event_id.is_some_and(|current| current == target_event_id) {
+		return false;
+	}
+
+	match (current_count, target_count) {
+		| (Some(current), Some(target)) => target > current,
+		| _ => true,
 	}
 }
 
