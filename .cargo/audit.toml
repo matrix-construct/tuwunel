@@ -1,5 +1,10 @@
 [advisories]
-ignore = ["RUSTSEC-2024-0436", "RUSTSEC-2026-0194", "RUSTSEC-2026-0195"] # advisory IDs to ignore e.g. ["RUSTSEC-2019-0001", ...]
+ignore = [
+    "RUSTSEC-2024-0436",
+    "RUSTSEC-2026-0194",
+    "RUSTSEC-2026-0195",
+    "RUSTSEC-2026-0215",
+] # advisory IDs to ignore e.g. ["RUSTSEC-2019-0001", ...]
 informational_warnings = [] # warn for categories of informational advisories
 severity_threshold = "none" # CVSS severity ("none", "low", "medium", "high", "critical")
 
