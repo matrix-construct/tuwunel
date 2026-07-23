@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use ldap3::{LdapConnAsync, Scope, SearchEntry};
+use ldap3::{LdapConnAsync, Scope, SearchEntry, ldap_escape};
 use ruma::UserId;
 use tuwunel_core::{Result, debug, err, error, implement, result::LogErr, trace};
 
@@ -50,9 +50,11 @@ pub async fn search_ldap(&self, user_id: &UserId) -> Result<Vec<(String, bool)>>
 
 	let attr = [&config.uid_attribute, &config.name_attribute];
 
+	let escaped_localpart = ldap_escape(&lowercased_localpart);
+
 	let user_filter = &config
 		.filter
-		.replace("{username}", &lowercased_localpart);
+		.replace("{username}", &escaped_localpart);
 
 	let (entries, _result) = ldap
 		.search(&config.base_dn, Scope::Subtree, user_filter, &attr)
@@ -85,7 +87,7 @@ pub async fn search_ldap(&self, user_id: &UserId) -> Result<Vec<(String, bool)>>
 
 		let admin_filter = &config
 			.admin_filter
-			.replace("{username}", &lowercased_localpart);
+			.replace("{username}", &escaped_localpart);
 
 		let (admin_entries, _result) = ldap
 			.search(admin_base_dn, Scope::Subtree, admin_filter, &attr)
