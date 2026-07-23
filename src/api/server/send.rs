@@ -683,11 +683,16 @@ async fn handle_edu_direct_to_device(
 		return;
 	}
 
-	// process messages concurrently for different users
 	let ev_type = ev_type.to_string();
+
 	messages
 		.into_iter()
 		.stream()
+		.broad_filter_map(async |(target_user_id, map)| {
+			to_device_deliverable(services, &target_user_id)
+				.await
+				.then_some((target_user_id, map))
+		})
 		.for_each_concurrent(automatic_width(), |(target_user_id, map)| {
 			handle_edu_direct_to_device_user(services, target_user_id, sender, &ev_type, map)
 		})
@@ -697,6 +702,18 @@ async fn handle_edu_direct_to_device(
 	services
 		.transaction_ids
 		.add_txnid(sender, None, message_id, &[]);
+}
+
+/// A local account we store or forward to-device events for: one that is
+/// active, or claimed by an appservice namespace so its puppet events reach the
+/// bridge.
+async fn to_device_deliverable(services: &Services, user_id: &UserId) -> bool {
+	services.globals.user_is_local(user_id)
+		&& (services.users.is_active(user_id).await
+			|| services
+				.appservice
+				.is_interested_in_user(user_id)
+				.await)
 }
 
 async fn handle_edu_direct_to_device_user<Event: Send + Sync>(
