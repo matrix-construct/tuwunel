@@ -3,7 +3,7 @@ mod data;
 // Write/update pipeline lives in pipeline.rs.
 mod pipeline;
 
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{collections::HashMap, net::IpAddr, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
 use futures::{
@@ -13,7 +13,7 @@ use futures::{
 };
 use loole::{Receiver, Sender};
 use ruma::{
-	OwnedUserId, UInt, UserId,
+	DeviceId, OwnedUserId, UInt, UserId,
 	events::presence::{PresenceEvent, PresenceEventContent},
 	presence::PresenceState,
 };
@@ -29,27 +29,12 @@ use tuwunel_core::{
 use self::{aggregate::PresenceAggregator, data::Data};
 use crate::appservice::RegistrationInfo;
 
-/// Authentication origin for activity inferred from a request.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum InferredActivityOrigin {
-	User,
-	Appservice,
-	Server,
-}
-
-impl InferredActivityOrigin {
-	#[must_use]
-	const fn is_allowed(self) -> bool { !matches!(self, Self::Appservice) }
-}
-
-impl From<Option<&RegistrationInfo>> for InferredActivityOrigin {
-	fn from(appservice: Option<&RegistrationInfo>) -> Self {
-		if appservice.is_some() {
-			Self::Appservice
-		} else {
-			Self::User
-		}
-	}
+#[derive(Default)]
+pub struct Ping<'a> {
+	pub device_id: Option<&'a DeviceId>,
+	pub client_ip: Option<IpAddr>,
+	pub new_state: Option<&'a PresenceState>,
+	pub appservice: Option<&'a RegistrationInfo>,
 }
 
 /// Represents data required to be kept in order to implement the presence
@@ -107,13 +92,7 @@ impl crate::Service for Service {
 		self.unset_all_presence().await;
 		self.device_presence.clear().await;
 		_ = self
-			.maybe_ping_presence(
-				&self.services.globals.server_user,
-				None,
-				None,
-				&PresenceState::Online,
-				InferredActivityOrigin::Server,
-			)
+			.maybe_ping_presence(&self.services.globals.server_user, Ping::default())
 			.await;
 
 		let receiver = self.timer_channel.1.clone();
@@ -159,14 +138,13 @@ impl crate::Service for Service {
 		}
 
 		// set the server user as offline
+		let ping = Ping {
+			new_state: Some(&PresenceState::Offline),
+			..Default::default()
+		};
+
 		_ = self
-			.maybe_ping_presence(
-				&self.services.globals.server_user,
-				None,
-				None,
-				&PresenceState::Offline,
-				InferredActivityOrigin::Server,
-			)
+			.maybe_ping_presence(&self.services.globals.server_user, ping)
 			.await;
 
 		Ok(())
@@ -185,8 +163,8 @@ impl crate::Service for Service {
 impl Service {
 	/// record that a user has just successfully completed a /sync (or
 	/// equivalent activity)
-	pub async fn note_sync(&self, user_id: &UserId, origin: InferredActivityOrigin) {
-		if !origin.is_allowed() || !self.services.config.suppress_push_when_active {
+	pub async fn note_sync(&self, user_id: &UserId, appservice: Option<&RegistrationInfo>) {
+		if appservice.is_some() || !self.services.config.suppress_push_when_active {
 			return;
 		}
 
@@ -316,17 +294,5 @@ impl Service {
 				displayname,
 			},
 		}
-	}
-}
-
-#[cfg(test)]
-mod tests {
-	use super::InferredActivityOrigin;
-
-	#[test]
-	fn appservices_do_not_imply_user_activity() {
-		assert!(InferredActivityOrigin::User.is_allowed());
-		assert!(InferredActivityOrigin::Server.is_allowed());
-		assert!(!InferredActivityOrigin::Appservice.is_allowed());
 	}
 }

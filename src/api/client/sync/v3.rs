@@ -60,6 +60,7 @@ use tuwunel_core::{
 };
 use tuwunel_service::{
 	Services,
+	presence::Ping,
 	rooms::{
 		lazy_loading,
 		lazy_loading::{Options, Witness},
@@ -229,22 +230,23 @@ pub(crate) async fn sync_events_route(
 	let state_after =
 		StateAfter::from((body.body.use_state_after, body.body.use_state_after_unstable));
 
+	let ping = Ping {
+		device_id: body.sender_device.as_deref(),
+		client_ip: Some(client),
+		new_state: Some(set_presence),
+		appservice: body.appservice_info.as_ref(),
+	};
+
 	let ping_presence = services
 		.presence
-		.maybe_ping_presence(
-			sender_user,
-			body.sender_device.as_deref(),
-			Some(client),
-			set_presence,
-			body.appservice_info.as_ref().into(),
-		)
+		.maybe_ping_presence(sender_user, ping)
 		.inspect_err(inspect_log)
 		.ok();
 
 	// Record user as actively syncing for push suppression heuristic.
 	let note_sync = services
 		.presence
-		.note_sync(sender_user, body.appservice_info.as_ref().into());
+		.note_sync(sender_user, body.appservice_info.as_ref());
 
 	let (filter, ..) = join3(filter, ping_presence, note_sync).await;
 

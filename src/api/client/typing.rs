@@ -1,6 +1,7 @@
 use axum::extract::State;
-use ruma::{api::client::typing::create_typing_event, presence::PresenceState};
+use ruma::api::client::typing::create_typing_event;
 use tuwunel_core::{Err, Result, utils, utils::math::Tried};
+use tuwunel_service::presence::Ping;
 
 use crate::{ClientIp, Ruma};
 
@@ -65,15 +66,16 @@ pub(crate) async fn create_typing_event_route(
 	}
 
 	// ping presence
+	let ping = Ping {
+		device_id: body.sender_device.as_deref(),
+		client_ip: Some(client),
+		appservice: body.appservice_info.as_ref(),
+		..Default::default()
+	};
+
 	services
 		.presence
-		.maybe_ping_presence(
-			&body.user_id,
-			body.sender_device.as_deref(),
-			Some(client),
-			&PresenceState::Online,
-			body.appservice_info.as_ref().into(),
-		)
+		.maybe_ping_presence(&body.user_id, ping)
 		.await?;
 
 	Ok(create_typing_event::v3::Response {})

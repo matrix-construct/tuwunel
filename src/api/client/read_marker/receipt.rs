@@ -9,9 +9,9 @@ use ruma::{
 		fully_read::{FullyReadEvent, FullyReadEventContent},
 		receipt::{Receipt, ReceiptEvent, ReceiptEventContent, ReceiptThread, ReceiptType},
 	},
-	presence::PresenceState,
 };
 use tuwunel_core::{Err, PduCount, Result, err};
+use tuwunel_service::presence::Ping;
 
 use crate::{ClientIp, Ruma};
 
@@ -114,15 +114,16 @@ pub(crate) async fn create_receipt_route(
 				})
 				.await;
 
+			let ping = Ping {
+				device_id: body.sender_device.as_deref(),
+				client_ip: Some(client),
+				appservice: body.appservice_info.as_ref(),
+				..Default::default()
+			};
+
 			services
 				.presence
-				.maybe_ping_presence(
-					sender_user,
-					body.sender_device.as_deref(),
-					Some(client),
-					&PresenceState::Online,
-					body.appservice_info.as_ref().into(),
-				)
+				.maybe_ping_presence(sender_user, ping)
 				.await
 				.ok();
 		},

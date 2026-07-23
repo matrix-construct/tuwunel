@@ -72,12 +72,12 @@
 {"Action":"pass","Test":"TestComplemauMasqueradeAuthentication/timestamp_massaging_state_event"}
 {"Action":"pass","Test":"TestComplemauMasqueradeAuthentication/unknown_token_is_rejected"}
 {"Action":"pass","Test":"TestComplemauMasqueradeAuthentication/unregistered_in_namespace_user_is_accepted"}
-{"Action":"fail","Test":"TestComplemauMasqueradeDoesNotInferPresence"}
-{"Action":"fail","Test":"TestComplemauMasqueradeDoesNotInferPresence/profile_update"}
+{"Action":"pass","Test":"TestComplemauMasqueradeDoesNotInferPresence"}
+{"Action":"pass","Test":"TestComplemauMasqueradeDoesNotInferPresence/profile_update"}
 {"Action":"pass","Test":"TestComplemauMasqueradeDoesNotInferPresence/read_marker"}
-{"Action":"fail","Test":"TestComplemauMasqueradeDoesNotInferPresence/receipt"}
-{"Action":"fail","Test":"TestComplemauMasqueradeDoesNotInferPresence/sync"}
-{"Action":"fail","Test":"TestComplemauMasqueradeDoesNotInferPresence/typing"}
+{"Action":"pass","Test":"TestComplemauMasqueradeDoesNotInferPresence/receipt"}
+{"Action":"pass","Test":"TestComplemauMasqueradeDoesNotInferPresence/sync"}
+{"Action":"pass","Test":"TestComplemauMasqueradeDoesNotInferPresence/typing"}
 {"Action":"pass","Test":"TestComplemauPingErrorSurfacing"}
 {"Action":"pass","Test":"TestComplemauPingErrorSurfacing/connection_failure"}
 {"Action":"pass","Test":"TestComplemauPingErrorSurfacing/receiver_error_status"}

@@ -30,6 +30,7 @@ use tuwunel_core::{
 };
 use tuwunel_service::{
 	Services,
+	presence::Ping,
 	sync::{Connection, into_connection_key},
 };
 
@@ -108,15 +109,16 @@ pub(crate) async fn sync_events_v5_route(
 		.await;
 
 	let conn = conn_val.lock();
+	let ping = Ping {
+		device_id: sender_device,
+		client_ip: Some(client),
+		new_state: Some(&request.set_presence),
+		appservice: body.appservice_info.as_ref(),
+	};
+
 	let ping_presence = services
 		.presence
-		.maybe_ping_presence(
-			sender_user,
-			sender_device,
-			Some(client),
-			&request.set_presence,
-			body.appservice_info.as_ref().into(),
-		)
+		.maybe_ping_presence(sender_user, ping)
 		.inspect_err(inspect_log)
 		.ok();
 

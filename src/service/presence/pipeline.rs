@@ -4,7 +4,7 @@
 //! aggregation and timer logic in one place so the public `Service` surface
 //! remains small and the update flow is easy to review.
 
-use std::{net::IpAddr, time::Duration};
+use std::time::Duration;
 
 use futures::TryFutureExt;
 use ruma::{
@@ -19,7 +19,7 @@ use tuwunel_core::{
 };
 
 use super::{
-	InferredActivityOrigin, Service, TimerFired,
+	Ping, Service, TimerFired,
 	aggregate::{self, StatusMsg},
 };
 
@@ -217,39 +217,33 @@ impl Service {
 		.await
 	}
 
-	/// Pings the presence of the given user, setting the specified state.
+	/// Pings the presence of the given user, defaulting the state to online.
 	///
 	/// Requests authenticated with an appservice token do not imply user
 	/// activity. In particular, they must not update presence or device
 	/// last-seen data. Explicit appservice presence updates use
 	/// [`Self::set_presence_for_device`] instead.
-	pub async fn maybe_ping_presence(
-		&self,
-		user_id: &UserId,
-		device_id: Option<&DeviceId>,
-		client_ip: Option<IpAddr>,
-		new_state: &PresenceState,
-		origin: InferredActivityOrigin,
-	) -> Result {
+	pub async fn maybe_ping_presence(&self, user_id: &UserId, args: Ping<'_>) -> Result {
 		const REFRESH_TIMEOUT: u64 = 30 * 1000;
 
-		if !origin.is_allowed()
+		if args.appservice.is_some()
 			|| !self.services.server.config.allow_local_presence
 			|| self.services.db.is_read_only()
 		{
 			return Ok(());
 		}
 
-		let update_device_seen = device_id.map_async(|device_id| {
+		let update_device_seen = args.device_id.map_async(|device_id| {
 			self.services
 				.users
-				.update_device_last_seen(user_id, device_id, client_ip, None)
+				.update_device_last_seen(user_id, device_id, args.client_ip, None)
 		});
 
+		let new_state = args.new_state.unwrap_or(&PresenceState::Online);
 		let currently_active = *new_state == PresenceState::Online;
 		let set_presence = self.apply_device_presence_update(
 			user_id,
-			Self::device_key(device_id, false),
+			Self::device_key(args.device_id, false),
 			new_state,
 			Some(currently_active),
 			UInt::new(0),
