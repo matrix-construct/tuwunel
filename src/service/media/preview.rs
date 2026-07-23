@@ -487,14 +487,28 @@ async fn download_html(
 	// as the relay, or the origin could serve the measurement different
 	// content than the relayed mxc.
 	let client = &self.services.client.url_preview_media;
-	// only http(s) og:image URLs are fetchable; others keep the textual preview
+
+	// twitter:* card tags mirror og:; some pages emit only the twitter set,
+	// or (fixvx) an empty og: value beside the real twitter: one
+	let twitter = |key| {
+		html.meta
+			.get(key)
+			.map(String::as_str)
+			.filter(|content| !content.is_empty())
+	};
+
+	// only http(s) image URLs are fetchable; others keep the textual preview
 	let image_url = html
 		.opengraph
 		.images
 		.first()
-		.map(|obj| url.join(&obj.url))
+		.map(|obj| obj.url.as_str())
+		.filter(|image| !image.is_empty())
+		.or_else(|| twitter("twitter:image"))
+		.or_else(|| twitter("twitter:image:src"))
+		.map(|image| url.join(image))
 		.transpose()
-		.map_err(|e| err!(Request(Unknown("Invalid og:image URL: {e}"))))?
+		.map_err(|e| err!(Request(Unknown("Invalid preview image URL: {e}"))))?
 		.filter(|image_url| ["http", "https"].contains(&image_url.scheme()));
 
 	let mut data = match image_url {
@@ -504,10 +518,10 @@ async fn download_html(
 			let image_response = client.get(image_url.as_str()).send().await?;
 
 			let Some(remote_addr) = image_response.remote_addr() else {
-				return Err!(Request(Forbidden("og:image response has no peer address")));
+				return Err!(Request(Forbidden("preview image response has no peer address")));
 			};
 
-			debug!(?image_url, ?remote_addr, "og:image remote address");
+			debug!(?image_url, ?remote_addr, "preview image remote address");
 
 			if !self
 				.services
@@ -517,7 +531,7 @@ async fn download_html(
 				return Err!(Request(Forbidden("Requesting from this address is forbidden")));
 			}
 
-			// a failing og:image must not become a preview mxc the relay is
+			// a failing preview image must not become a preview mxc the relay is
 			// guaranteed to reject; skip it and keep the textual preview
 			if image_response.status().is_success() {
 				self.download_image(image_response).await?
@@ -525,7 +539,7 @@ async fn download_html(
 				debug!(
 					?image_url,
 					status = ?image_response.status(),
-					"Skipping og:image with unsuccessful response"
+					"Skipping preview image with unsuccessful response"
 				);
 
 				UrlPreviewData::default()
@@ -541,6 +555,7 @@ async fn download_html(
 	// hands out an mxc that the same check at relay time is guaranteed to
 	// reject.
 	if let Some(obj) = html.opengraph.videos.first()
+		&& !obj.url.is_empty()
 		&& let Ok(video_url) = url.join(&obj.url)
 		&& ["http", "https"].contains(&video_url.scheme())
 		&& self.check_url_host(&video_url).is_ok()
@@ -557,6 +572,7 @@ async fn download_html(
 	}
 
 	if let Some(obj) = html.opengraph.audios.first()
+		&& !obj.url.is_empty()
 		&& let Ok(audio_url) = url.join(&obj.url)
 		&& ["http", "https"].contains(&audio_url.scheme())
 		&& self.check_url_host(&audio_url).is_ok()
@@ -566,12 +582,20 @@ async fn download_html(
 
 	let props = html.opengraph.properties;
 
-	/* use OpenGraph title/description, but fall back to HTML if not available */
-	data.title = props.get("title").cloned().or(html.title);
+	data.title = props
+		.get("title")
+		.cloned()
+		.filter(|title| !title.is_empty())
+		.or_else(|| twitter("twitter:title").map(ToOwned::to_owned))
+		.or(html.title);
+
 	data.description = props
 		.get("description")
 		.cloned()
+		.filter(|description| !description.is_empty())
+		.or_else(|| twitter("twitter:description").map(ToOwned::to_owned))
 		.or(html.description);
+
 	data.og_type = Some(html.opengraph.og_type);
 	data.og_url = props.get("url").cloned();
 
