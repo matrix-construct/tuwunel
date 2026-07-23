@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use ldap3::{LdapConnAsync, Scope, SearchEntry, ldap_escape};
+use ldap3::{LdapConnAsync, Scope, SearchEntry, dn_escape, ldap_escape};
 use ruma::UserId;
 use tuwunel_core::{Result, debug, err, error, implement, result::LogErr, trace};
 
@@ -163,4 +163,20 @@ pub async fn auth_ldap(&self, user_dn: &str, password: &str) -> Result {
 	driver.await.log_err().ok();
 
 	Ok(())
+}
+
+/// Builds the user bind DN by substituting the escaped localpart into the
+/// configured `bind_dn` template, or `None` when no `{username}` template is
+/// set.
+#[implement(super::Service)]
+#[must_use]
+pub fn ldap_bind_dn(&self, localpart: &str) -> Option<String> {
+	self.services
+		.server
+		.config
+		.ldap
+		.bind_dn
+		.as_ref()
+		.filter(|template| template.contains("{username}"))
+		.map(|template| template.replace("{username}", &dn_escape(localpart)))
 }

@@ -545,4 +545,8 @@ impl Service {
 	pub async fn auth_ldap(&self, _user_dn: &str, _password: &str) -> Result {
 		Err!(FeatureDisabled("ldap"))
 	}
+
+	#[cfg(not(feature = "ldap"))]
+	#[must_use]
+	pub fn ldap_bind_dn(&self, _localpart: &str) -> Option<String> { None }
 }
