@@ -209,6 +209,29 @@ impl Service {
 		self.services.globals.user_is_local(user_id) && self.is_active(user_id).await
 	}
 
+	/// Gate an LDAP-authenticated login into an existing local account: it must
+	/// be an LDAP-origin account (not a same-named password or SSO account) and
+	/// active. A localpart with no local account yet passes.
+	pub async fn check_ldap_login(&self, user_id: &UserId) -> Result {
+		if !self.exists(user_id).await {
+			return Ok(());
+		}
+
+		if self
+			.origin(user_id)
+			.await
+			.is_ok_and(|origin| origin != "ldap")
+		{
+			return Err!(Request(Forbidden("Account does not permit LDAP login.")));
+		}
+
+		if !self.is_active_local(user_id).await {
+			return Err!(Request(UserDeactivated("This user has been deactivated.")));
+		}
+
+		Ok(())
+	}
+
 	/// MSC3823: account is suspended (read-mostly mode, sessions retained).
 	pub async fn is_suspended(&self, user_id: &UserId) -> bool {
 		self.db

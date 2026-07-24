@@ -44,6 +44,11 @@ pub(super) async fn ldap_login(
 		.await
 		.map(|()| lowercased_user_id.to_owned())?;
 
+	services
+		.users
+		.check_ldap_login(lowercased_user_id)
+		.await?;
+
 	// LDAP users are automatically created on first login attempt. This is a very
 	// common feature that can be seen on many services using a LDAP provider for
 	// their users (synapse, Nextcloud, Jellyfin, ...).
