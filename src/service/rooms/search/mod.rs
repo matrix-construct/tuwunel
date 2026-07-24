@@ -197,15 +197,19 @@ pub async fn delete_all_search_tokenids_for_room(&self, room_id: &RoomId) -> Res
 		return Ok(());
 	};
 
-	self.db
+	let txn = self
+		.db
 		.tokenids
 		.keys_prefix_raw(&shortroomid)
 		.ignore_err()
-		.ready_for_each(|key| {
+		.ready_fold(self.services.db.txn(), |mut txn, key| {
 			trace!("Removing key: {key:?}");
-			self.db.tokenids.remove(key);
+			txn.del_raw(&self.db.tokenids, key);
+			txn
 		})
 		.await;
+
+	txn.execute();
 
 	Ok(())
 }
