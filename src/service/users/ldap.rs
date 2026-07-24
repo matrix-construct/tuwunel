@@ -1,10 +1,20 @@
 #![cfg(feature = "ldap")]
 
-use std::collections::HashMap;
+use std::{collections::HashMap, time::Duration};
 
-use ldap3::{LdapConnAsync, Scope, SearchEntry, dn_escape, ldap_escape};
+use ldap3::{
+	LdapConnAsync, LdapConnSettings, Scope, SearchEntry, SearchOptions, dn_escape, ldap_escape,
+};
 use ruma::UserId;
+use tokio::fs::read as read_file;
 use tuwunel_core::{Result, debug, err, error, implement, result::LogErr, trace};
+
+/// Cap LDAP connection setup so a hung directory cannot pin a login attempt.
+const CONN_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Cap a directory search (in seconds) so a broad filter cannot make one login
+/// scan the whole subtree unbounded.
+const SEARCH_TIMELIMIT: i32 = 10;
 
 /// Performs a LDAP search for the given user.
 ///
@@ -26,9 +36,15 @@ pub async fn search_ldap(&self, user_id: &UserId) -> Result<Vec<(String, bool)>>
 	}
 
 	debug!(?uri, "LDAP creating connection...");
-	let (conn, mut ldap) = LdapConnAsync::new(uri.as_str())
-		.await
-		.map_err(|e| err!(Ldap(error!(?user_id, "LDAP connection setup error: {e}"))))?;
+	let (conn, mut ldap) = LdapConnAsync::with_settings(
+		LdapConnSettings::new().set_conn_timeout(CONN_TIMEOUT),
+		uri.as_str(),
+	)
+	.await
+	.map_err(|e| {
+		error!(?user_id, %e, "LDAP connection setup error");
+		err!(Ldap("LDAP connection failed"))
+	})?;
 
 	let driver = self.services.server.runtime().spawn(async move {
 		match conn.drive().await {
@@ -39,11 +55,15 @@ pub async fn search_ldap(&self, user_id: &UserId) -> Result<Vec<(String, bool)>>
 
 	match (&config.bind_dn, &config.bind_password_file) {
 		| (Some(bind_dn), Some(bind_password_file)) => {
-			let bind_pw = String::from_utf8(std::fs::read(bind_password_file)?)?;
+			let bind_pw = String::from_utf8(read_file(bind_password_file).await?)?;
+
 			ldap.simple_bind(bind_dn, bind_pw.trim())
 				.await
 				.and_then(ldap3::LdapResult::success)
-				.map_err(|e| err!(Ldap(error!("LDAP bind error: {e}"))))?;
+				.map_err(|e| {
+					error!(%e, "LDAP bind error");
+					err!(Ldap("LDAP bind failed"))
+				})?;
 		},
 		| (..) => {},
 	}
@@ -56,12 +76,17 @@ pub async fn search_ldap(&self, user_id: &UserId) -> Result<Vec<(String, bool)>>
 		.filter
 		.replace("{username}", &escaped_localpart);
 
+	ldap.with_search_options(SearchOptions::new().timelimit(SEARCH_TIMELIMIT));
+
 	let (entries, _result) = ldap
 		.search(&config.base_dn, Scope::Subtree, user_filter, &attr)
 		.await
 		.and_then(ldap3::SearchResult::success)
 		.inspect(|(entries, result)| trace!(?entries, ?result, "LDAP Search"))
-		.map_err(|e| err!(Ldap(error!(?attr, ?user_filter, "LDAP search error: {e}"))))?;
+		.map_err(|e| {
+			error!(?attr, ?user_filter, %e, "LDAP search error");
+			err!(Ldap("LDAP search failed"))
+		})?;
 
 	let mut dns: HashMap<String, bool> = entries
 		.into_iter()
@@ -89,13 +114,16 @@ pub async fn search_ldap(&self, user_id: &UserId) -> Result<Vec<(String, bool)>>
 			.admin_filter
 			.replace("{username}", &escaped_localpart);
 
+		ldap.with_search_options(SearchOptions::new().timelimit(SEARCH_TIMELIMIT));
+
 		let (admin_entries, _result) = ldap
 			.search(admin_base_dn, Scope::Subtree, admin_filter, &attr)
 			.await
 			.and_then(ldap3::SearchResult::success)
 			.inspect(|(entries, result)| trace!(?entries, ?result, "LDAP Admin Search"))
 			.map_err(|e| {
-				err!(Ldap(error!(?attr, ?admin_filter, "Ldap admin search error: {e}")))
+				error!(?attr, ?admin_filter, %e, "LDAP admin search error");
+				err!(Ldap("LDAP admin search failed"))
 			})?;
 
 		dns.extend(admin_entries.into_iter().filter_map(|entry| {
@@ -111,9 +139,10 @@ pub async fn search_ldap(&self, user_id: &UserId) -> Result<Vec<(String, bool)>>
 		}));
 	}
 
-	ldap.unbind()
-		.await
-		.map_err(|e| err!(Ldap(error!("LDAP unbind error: {e}"))))?;
+	ldap.unbind().await.map_err(|e| {
+		error!(%e, "LDAP unbind error");
+		err!(Ldap("LDAP unbind failed"))
+	})?;
 
 	driver.await.log_err().ok();
 
@@ -140,9 +169,15 @@ pub async fn auth_ldap(&self, user_dn: &str, password: &str) -> Result {
 	}
 
 	debug!(?uri, "LDAP creating connection...");
-	let (conn, mut ldap) = LdapConnAsync::new(uri.as_str())
-		.await
-		.map_err(|e| err!(Ldap(error!(?user_dn, "LDAP connection setup error: {e}"))))?;
+	let (conn, mut ldap) = LdapConnAsync::with_settings(
+		LdapConnSettings::new().set_conn_timeout(CONN_TIMEOUT),
+		uri.as_str(),
+	)
+	.await
+	.map_err(|e| {
+		error!(?user_dn, %e, "LDAP connection setup error");
+		err!(Ldap("LDAP connection failed"))
+	})?;
 
 	let driver = self.services.server.runtime().spawn(async move {
 		match conn.drive().await {
@@ -154,11 +189,15 @@ pub async fn auth_ldap(&self, user_dn: &str, password: &str) -> Result {
 	ldap.simple_bind(user_dn, password)
 		.await
 		.and_then(ldap3::LdapResult::success)
-		.map_err(|e| err!(Request(Forbidden(debug_error!("LDAP authentication error: {e}")))))?;
+		.map_err(|e| {
+			debug!(%e, "LDAP authentication error");
+			err!(Request(Forbidden("Invalid username or password.")))
+		})?;
 
-	ldap.unbind()
-		.await
-		.map_err(|e| err!(Ldap(error!("LDAP unbind error: {e}"))))?;
+	ldap.unbind().await.map_err(|e| {
+		error!(%e, "LDAP unbind error");
+		err!(Ldap("LDAP unbind failed"))
+	})?;
 
 	driver.await.log_err().ok();
 
