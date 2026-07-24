@@ -197,6 +197,16 @@ where
 	self.batch.delete_cf(&map.cf(), key);
 }
 
+/// Queue one deletion for an already serialized key.
+#[implement(Txn)]
+pub fn del_raw<K>(&mut self, map: &Map, key: K)
+where
+	K: AsRef<[u8]>,
+{
+	self.assert_map(map);
+	self.batch.delete_cf(&map.cf(), key);
+}
+
 /// Commit atomically, flush unless corked, and notify matching watchers.
 #[implement(Txn)]
 #[tracing::instrument(
