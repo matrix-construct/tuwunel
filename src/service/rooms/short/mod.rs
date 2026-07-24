@@ -10,7 +10,7 @@ use tuwunel_core::{
 	utils,
 	utils::{IterStream, stream::ReadyExt},
 };
-use tuwunel_database::{Deserialized, Get, Map, Qry};
+use tuwunel_database::{Deserialized, Get, Map, Qry, Txn};
 
 pub struct Service {
 	db: Data,
@@ -211,27 +211,39 @@ where
 
 /// Returns (shortstatehash, already_existed)
 #[implement(Service)]
-pub async fn get_or_create_shortstatehash(&self, state_hash: &[u8]) -> (ShortStateHash, bool) {
-	const BUFSIZE: usize = size_of::<ShortStateHash>();
+pub async fn get_or_create_shortstatehash<F>(
+	&self,
+	state_hash: &[u8],
+	write_statediff: F,
+) -> Result<(ShortStateHash, bool)>
+where
+	F: FnOnce(&mut Txn, ShortStateHash) -> Result,
+{
+	if let Ok(shortstatehash) = self.get_shortstatehash(state_hash).await {
+		return Ok((shortstatehash, true));
+	}
 
-	if let Ok(shortstatehash) = self
-		.db
+	let shortstatehash = self.services.globals.next_count();
+	let mut txn = self.services.db.txn();
+
+	txn.insert_raw(
+		&self.db.statehash_shortstatehash,
+		state_hash,
+		(*shortstatehash).to_be_bytes(),
+	);
+	write_statediff(&mut txn, *shortstatehash)?;
+	txn.execute();
+
+	Ok((*shortstatehash, false))
+}
+
+#[implement(Service)]
+pub async fn get_shortstatehash(&self, state_hash: &[u8]) -> Result<ShortStateHash> {
+	self.db
 		.statehash_shortstatehash
 		.get(state_hash)
 		.await
 		.deserialized()
-	{
-		return (shortstatehash, true);
-	}
-
-	let shortstatehash = self.services.globals.next_count();
-	debug_assert!(size_of_val(&*shortstatehash) == BUFSIZE, "buffer requirement changed");
-
-	self.db
-		.statehash_shortstatehash
-		.raw_aput::<BUFSIZE, _, _>(state_hash, *shortstatehash);
-
-	(*shortstatehash, false)
 }
 
 #[implement(Service)]

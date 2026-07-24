@@ -274,8 +274,9 @@ pub fn size_in_bytes(&self) -> usize { self.batch.size_in_bytes() }
 #[inline]
 pub fn clear(&mut self) { self.batch.clear(); }
 
+/// Queue one unencoded key and value after enforcing map ownership.
 #[implement(Txn)]
-fn insert_raw<K, V>(&mut self, map: &Map, key: K, val: V)
+pub fn insert_raw<K, V>(&mut self, map: &Map, key: K, val: V)
 where
 	K: AsRef<[u8]>,
 	V: AsRef<[u8]>,
