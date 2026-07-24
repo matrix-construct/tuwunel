@@ -88,6 +88,31 @@ pub struct Config {
 	#[cfg_attr(test, serde(default = "default_server_name"))]
 	pub server_name: OwnedServerName,
 
+	/// Alternate server names this homeserver is authoritative for. Users
+	/// with a Matrix ID on any of these domains can authenticate and use this
+	/// server, in addition to users on the primary `server_name`.
+	///
+	/// Each name must be a valid Matrix server name.
+	///
+	/// Alternate server names can be added after initialization, but should not
+	/// be removed while there exist accounts or appservice registrations using
+	/// that domain.
+	///
+	/// Each alternate domain must independently satisfy the Matrix
+	/// well-known/delegation requirements so that federation peers and clients
+	/// can resolve it to this server.
+	/// 
+	/// Note that servers providing the legacy registration endpoint can block
+	/// registration of users on alternate server names by including the full
+	/// User ID (e.g. "@user:example.com") or just the domain (e.g. ":example.com") in
+	/// `forbidden_usernames`.
+	///
+	/// example: ["legacy.example.com", "alias.example.org"]
+	/// 
+	/// default: []
+	#[serde(default)]
+	pub alternate_server_names: Vec<OwnedServerName>,
+
 	/// This is the only directory where tuwunel will save its data, including
 	/// media. Note: this was previously "/var/lib/matrix-conduit".
 	///
