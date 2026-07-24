@@ -5,7 +5,11 @@ use tuwunel_core::{Result, utils::ReadyExt};
 use crate::admin_command;
 
 #[admin_command]
-pub(super) async fn list_joined_members(&self, room_id: OwnedRoomId, local_only: bool) -> Result {
+pub(super) async fn room_list_joined_members(
+	&self,
+	room_id: OwnedRoomId,
+	local_only: bool,
+) -> Result {
 	let room_name = self
 		.services
 		.state_accessor

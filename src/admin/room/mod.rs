@@ -5,6 +5,7 @@ mod exists;
 mod info;
 mod list;
 mod list_extremities;
+mod list_joined_members;
 mod moderation;
 mod prune_empty;
 mod prune_extremities;
@@ -15,8 +16,7 @@ use ruma::{OwnedRoomId, OwnedRoomOrAliasId};
 use tuwunel_core::Result;
 
 use self::{
-	alias::RoomAliasCommand, directory::RoomDirectoryCommand, info::RoomInfoCommand,
-	moderation::RoomModerationCommand,
+	alias::RoomAliasCommand, directory::RoomDirectoryCommand, moderation::RoomModerationCommand,
 };
 use crate::admin_command_dispatch;
 
@@ -41,9 +41,24 @@ pub(super) enum RoomCommand {
 		no_details: bool,
 	},
 
-	#[command(subcommand)]
-	/// - View information about a room we know about
-	Info(RoomInfoCommand),
+	/// - Get general information about a room
+	///
+	/// Shows the room's name, topic, canonical alias, local aliases, and
+	/// admins (users with a power level greater than or equal to
+	/// state_default).
+	Info {
+		/// Room ID or alias
+		room: OwnedRoomOrAliasId,
+	},
+
+	/// - List joined members in a room
+	ListJoinedMembers {
+		room_id: OwnedRoomId,
+
+		/// Lists only our local users in the specified room
+		#[arg(long)]
+		local_only: bool,
+	},
 
 	#[command(subcommand)]
 	/// - Manage moderation of remote or local rooms
