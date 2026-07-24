@@ -1,7 +1,6 @@
 use ruma::profile::ProfileFieldValue;
 use serde_json::Value;
 use tuwunel_core::{Result, err};
-use tuwunel_service::profile::Propagation;
 
 use super::PropagateTo;
 use crate::{admin_command, utils::parse_active_local_user_id};
@@ -17,9 +16,7 @@ pub(super) async fn set_profile_key(
 ) -> Result {
 	let user_id = parse_active_local_user_id(self.services, &user_id).await?;
 
-	let propagation = propagate_to
-		.map(Into::into)
-		.unwrap_or(Propagation::All);
+	let propagation = propagate_to.map(Into::into);
 
 	let profile_value = if clear {
 		(key.as_str().into(), None)
@@ -36,7 +33,7 @@ pub(super) async fn set_profile_key(
 
 	self.services
 		.profile
-		.set_profile_keys(&user_id, &[profile_value], Some(propagation))
+		.set_profile_keys(&user_id, &[profile_value], propagation)
 		.await?;
 
 	if clear {
