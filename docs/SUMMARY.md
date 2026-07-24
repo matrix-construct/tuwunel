@@ -61,6 +61,7 @@
   - [Testing and Delivery](development/testing.md)
     - [Docker Builder](development/testing/bake.md)
     - [Matrix Selectors](development/testing/matrix.md)
+    - [Benchmarks and Performance](development/testing/performance.md)
     - [Pipeline Phases](development/testing/pipeline.md)
     - [Complement Testing](development/testing/complement.md)
   - [Hot Reloading ("Live" Development)](development/hot_reload.md)

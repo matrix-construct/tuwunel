@@ -1,0 +1,33 @@
+#!/bin/sh
+
+# Profile a compiled Criterion benchmark with Linux perf.
+
+set -eu
+
+if [ "$#" -ne 3 ]; then
+	echo "usage: $0 BENCHMARK_BINARY BENCHMARK_FILTER OUTPUT_PREFIX" >&2
+	exit 2
+fi
+
+benchmark_binary=$1
+benchmark_filter=$2
+output_prefix=$3
+perf_command=${PERF_COMMAND:-perf}
+perf_event=${PERF_EVENT:-cpu-clock}
+perf_frequency=${PERF_FREQUENCY:-999}
+profile_seconds=${PROFILE_SECONDS:-10}
+bench_mode=$(printf '\055\055bench')
+profile_mode=$(printf '\055\055profile-time')
+perf_stats="task-clock,context-switches,cpu-migrations,page-faults,cycles,instructions,branches,branch-misses,cache-references,cache-misses"
+
+"$perf_command" stat \
+	-o "${output_prefix}.stat" \
+	-e "${perf_stats}" \
+	"$benchmark_binary" "$benchmark_filter" "$bench_mode" "$profile_mode" "$profile_seconds"
+
+"$perf_command" record \
+	-o "${output_prefix}.data" \
+	-e "$perf_event" \
+	-F "$perf_frequency" \
+	-g \
+	"$benchmark_binary" "$benchmark_filter" "$bench_mode" "$profile_mode" "$profile_seconds"

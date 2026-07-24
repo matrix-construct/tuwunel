@@ -33,5 +33,6 @@ deliverables from reaching users.
 
 - [Docker Builder](testing/bake.md) — `bake.hcl`, target hierarchy, layer caching, `bake.sh`
 - [Matrix Selectors](testing/matrix.md) — cargo profiles, feature sets, toolchains, CPU targets
+- [Benchmarks and Performance](testing/performance.md): Criterion, local profiling, CI counters
 - [Pipeline Phases](testing/pipeline.md) — stages of the pipeline required for delivery
 - [Complement Testing](testing/complement.md) — protocol compliance testing, local usage

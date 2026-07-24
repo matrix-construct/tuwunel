@@ -22,5 +22,6 @@ RUN <<EOF
             --exclude 'tests/complement/*.jsonl' \
             --exclude 'tests/playwright/known-failures.txt' \
             --exclude 'docs/development/compliance/msc.md' \
+            --exclude 'docs/development/testing/performance.md' \
             ${typos_args}
 EOF

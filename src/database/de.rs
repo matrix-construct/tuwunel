@@ -17,7 +17,7 @@ use tuwunel_core::{
 		fields(len = %buf.len()),
 	)
 )]
-pub(crate) fn from_slice<'a, T>(buf: &'a [u8]) -> Result<T>
+pub fn from_slice<'a, T>(buf: &'a [u8]) -> Result<T>
 where
 	T: Deserialize<'a>,
 {

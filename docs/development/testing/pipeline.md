@@ -109,12 +109,14 @@ and `nightly` toolchain.
 - Bake target: `unit`
 - Valgrind variant: `unit-valgrind`
 
-#### Cargo Benchmark Tests (`bench`)
+#### Cargo Benchmarks (`bench`)
 
-Benchmarks are compiled (but not executed at full duration) to verify they build
-without error. Runs on `bench` profile with `all` features and `nightly`.
+The workspace benchmark targets are compiled and run with the `bench` profile,
+`all` features, `nightly`, and the `x86_64-v3` system target. Criterion results
+remain in the job log; CI does not retain a timing baseline or gate on changes.
 
-- Bake target: `doc` (bench profile)
+- Bake targets: `unit`, `integ`
+- Guide: [Benchmarks and Performance](performance.md)
 
 #### Valgrind Memory Checking (`memcheck`)
 

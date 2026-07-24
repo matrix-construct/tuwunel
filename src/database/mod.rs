@@ -27,7 +27,7 @@ use tuwunel_core::{Result, Server, err};
 
 pub use self::{
 	cork::Cork,
-	de::{Ignore, IgnoreAll},
+	de::{Ignore, IgnoreAll, from_slice as deserialize_from_slice},
 	deserialized::Deserialized,
 	engine::Engine,
 	handle::Handle,
