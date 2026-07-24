@@ -364,7 +364,7 @@ default-features = false
 
 [workspace.dependencies.ruma]
 git = "https://github.com/matrix-construct/ruma"
-rev = "b61b2f8e104f3078dd39de5506f7e447a28b31df"
+rev = "7cf3483a30fa331843531da2c99451d25771176a"
 features = [
     "__compat",
     "appservice-api-c",
@@ -381,14 +381,10 @@ features = [
     "unstable-msc2448",
     "unstable-msc2666",
     "unstable-msc2815",
-    "unstable-msc2867",
-    "unstable-msc2870",
     "unstable-msc3026",
-    "unstable-msc3061",
     "unstable-msc3202", # encrypted appservice transaction extensions
     "unstable-msc3391",
     "unstable-msc3814",
-    "unstable-msc3824",
     "unstable-msc3245",
     "unstable-msc3381", # polls
     "unstable-msc3489", # beacon / live location
@@ -396,10 +392,8 @@ features = [
     "unstable-msc3983", # appservice one-time key claims
     "unstable-msc3984", # appservice device key queries
     "unstable-msc4075",
-    "unstable-msc4095",
     "unstable-msc4121",
     "unstable-msc4125",
-    "unstable-msc4133",
     "unstable-msc4143",
     "unstable-msc4186",
     "unstable-msc4195",
@@ -407,7 +401,6 @@ features = [
     "unstable-msc4265",
     "unstable-msc4266",
     "unstable-msc4310",
-    "unstable-msc4311",
     "unstable-msc4383",
     "unstable-msc4388",
     "unstable-msc4439",
@@ -417,7 +410,7 @@ features = [
 
 [workspace.dependencies.synapse-admin-api]
 git = "https://github.com/matrix-construct/synapse-admin-api"
-rev = "65e70904129fb17d355600d8c0d0343fbd609ec8"
+rev = "5cb409a3fc10b2dc9d8ed4f0f2ed7a68ca910a6d"
 features = ["server"]
 
 [workspace.dependencies.rustls]
