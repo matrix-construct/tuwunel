@@ -18,9 +18,9 @@
 
 ## Counts
 
-- ✅ `yes`: 258
+- ✅ `yes`: 257
 - 🟨 `partial`: 34
-- ❌ `no`: 446
+- ❌ `no`: 447
 - ⬛ `n/a`: 286
 
 ### Status by inventory bucket
@@ -28,8 +28,8 @@
 | Inv | yes | partial | no | n/a | total |
 |---|---|---|---|---|---|
 | merged | 186 | 7 | 7 | 59 | 259 |
-| open | 64 | 26 | 400 | 175 | 665 |
-| closed | 8 | 1 | 39 | 52 | 100 |
+| open | 63 | 26 | 400 | 175 | 664 |
+| closed | 8 | 1 | 40 | 52 | 101 |
 
 ## Merged
 
@@ -324,7 +324,6 @@ in the [Out of scope](#out-of-scope) section.
 | MSC4383 | ✅ ● | 100/100 | Client-Server Discovery of Server Version | src/api/client/versions.rs:33; populates Server { name, version, compiler } o... |
 | MSC4382 | ❌ ● | 0/0 | Peppered hash verification for E2EE content moderation | No verification_hash check on report endpoint |
 | MSC4375 | ❌ ● | 0/0 | Admin Room Management | No /_matrix/client/v1/admin/rooms/* endpoints |
-| MSC4373 | ✅ ● | 80/80 | Server opt-out of specific EDU types | src/api/server/edu_types.rs:9; advertises types tied to allow_incoming_* conf... |
 | MSC4371 | ❌ ● | 0/0 | On the elimination of federation transactions. | No PUT /_matrix/federation/v2/send/{eventId\|eduId} endpoint |
 | MSC4370 | ❌ ● | 0/0 | Federation endpoint for retrieving current extremities | No /_matrix/federation/v1/extremities endpoint |
 | MSC4369 | ❌ ● | 0/10 | M_CAPABILITY_NOT_ENABLED error code for when capability is not enabled on an ... | Endpoints exist but return M_FORBIDDEN/Unknown not M_CAPABILITY_NOT_ENABLED |
@@ -769,6 +768,7 @@ in the [Out of scope](#out-of-scope) section.
 |---|---|---:|---|---|
 | MSC4465 | ❌ ● | 0/0 | On-Demand Fetch for Missing Events | GET /event/{eventId} returns M_NOT_FOUND; no federation fallback. |
 | MSC4463 | ❌ ◐ | 0/0 | Backfilling Pinned Events | No pinned-events backfill on join or on pinned_events update. |
+| MSC4373 | ❌ ● | 0/0 | Server opt-out of specific EDU types | No federation EDU-type preference endpoint is registered |
 | MSC4317 | ❌ ● | 0/0 | Signed profile data | signed profile data; no `m.signed` profile field handling |
 | MSC4316 | ❌ ● | 0/0 | External cross-signing signatures with X.509 certificates and (semi-)automate... | X.509 cross-signing; no `external` signature support |
 | MSC4294 | ❌ ● | 0/0 | Ignore and mass ignore invites | no ignored_inviters list, no auto invite cleanup |
