@@ -29,6 +29,9 @@ use tuwunel_core::config::IpSource;
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct ClientIp(pub(crate) IpAddr);
 
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct RateLimitIp(pub(crate) IpAddr);
+
 /// Marker wrapper around [`IpSource`] placed into request extensions
 /// only when an operator has explicitly configured `ip_source`.
 #[derive(Clone, Copy, Debug)]
@@ -60,6 +63,29 @@ where
 		insecure_fallback(&parts.headers, &parts.extensions)
 			.map(Self)
 			.ok_or((ERROR, "Can't extract `ClientIp`, provide `axum::extract::ConnectInfo`"))
+	}
+}
+
+impl<S> FromRequestParts<S> for RateLimitIp
+where
+	S: Sync,
+{
+	type Rejection = (StatusCode, &'static str);
+
+	async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+		const ERROR: StatusCode = StatusCode::INTERNAL_SERVER_ERROR;
+
+		if let Some(&ConfiguredIpSource(source)) = parts.extensions.get::<ConfiguredIpSource>() {
+			return secure_extract(source, &parts.headers, &parts.extensions)
+				.map(Self)
+				.ok_or((ERROR, "Can't extract rate-limit IP from configured ip_source"));
+		}
+
+		parts
+			.extensions
+			.get::<ConnectInfo<SocketAddr>>()
+			.map(|ConnectInfo(addr)| Self(addr.ip()))
+			.ok_or((ERROR, "Can't extract `RateLimitIp`, provide `axum::extract::ConnectInfo`"))
 	}
 }
 
@@ -195,7 +221,11 @@ fn cloudfront_viewer_address(headers: &HeaderMap) -> Option<IpAddr> {
 
 #[cfg(test)]
 mod tests {
-	use std::{iter, net::SocketAddr, sync::Arc};
+	use std::{
+		iter,
+		net::{IpAddr, SocketAddr},
+		sync::Arc,
+	};
 
 	use axum::{
 		extract::{ConnectInfo, FromRequestParts},
@@ -204,7 +234,7 @@ mod tests {
 	use ipnet::IpNet;
 	use tuwunel_core::config::IpSource;
 
-	use super::{ClientIp, ConfiguredIpSource, TrustedPeerSubnets};
+	use super::{ClientIp, ConfiguredIpSource, RateLimitIp, TrustedPeerSubnets};
 
 	fn trusted(nets: &[&str]) -> TrustedPeerSubnets {
 		let nets: Arc<[IpNet]> = nets
@@ -228,6 +258,12 @@ mod tests {
 		parts: &mut Parts,
 	) -> Result<ClientIp, (StatusCode, &'static str)> {
 		ClientIp::from_request_parts(parts, &()).await
+	}
+
+	async fn extract_rate_limit_ip(
+		parts: &mut Parts,
+	) -> Result<RateLimitIp, (StatusCode, &'static str)> {
+		RateLimitIp::from_request_parts(parts, &()).await
 	}
 
 	#[tokio::test]
@@ -287,6 +323,37 @@ mod tests {
 			.insert(ConfiguredIpSource(IpSource::RightmostXForwardedFor));
 		let ClientIp(ip) = extract_client_ip(&mut parts).await.unwrap();
 		assert_eq!(ip.to_string(), "2.2.2.2");
+	}
+
+	#[tokio::test]
+	async fn rate_limit_ip_ignores_unconfigured_headers_and_trusted_peers() {
+		let socket_addr = SocketAddr::from(([203, 0, 113, 9], 4567));
+
+		for forwarded in ["1.1.1.1", "2.2.2.2"] {
+			let mut parts = parts([("X-Forwarded-For", forwarded)]);
+
+			parts.extensions.insert(ConnectInfo(socket_addr));
+
+			let RateLimitIp(ip) = extract_rate_limit_ip(&mut parts).await.unwrap();
+
+			assert_eq!(ip, socket_addr.ip());
+		}
+
+		let socket_addr = SocketAddr::from(([172, 18, 0, 5], 38000));
+		let mut parts = parts([("X-Forwarded-For", "1.1.1.1, 2.2.2.2")]);
+
+		parts.extensions.insert(ConnectInfo(socket_addr));
+		parts
+			.extensions
+			.insert(ConfiguredIpSource(IpSource::RightmostXForwardedFor));
+
+		parts
+			.extensions
+			.insert(trusted(&["172.18.0.0/16"]));
+
+		let RateLimitIp(ip) = extract_rate_limit_ip(&mut parts).await.unwrap();
+
+		assert_eq!(ip, IpAddr::from([2, 2, 2, 2]));
 	}
 
 	#[tokio::test]

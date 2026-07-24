@@ -5,12 +5,12 @@ use ruma::api::client::rendezvous::create_rendezvous_session::unstable_msc4388::
 };
 
 use super::{Result, ensure_available, ensure_create_available, ensure_data_size};
-use crate::{ClientIp, Ruma};
+use crate::{RateLimitIp, Ruma};
 
 #[tracing::instrument(level = "debug", skip_all)]
 pub(crate) async fn create_msc4388_route(
 	State(services): State<crate::State>,
-	ClientIp(client): ClientIp,
+	RateLimitIp(client): RateLimitIp,
 	body: Ruma<Request>,
 ) -> Result<Response> {
 	ensure_available(&services, client)?;
@@ -19,7 +19,7 @@ pub(crate) async fn create_msc4388_route(
 
 	let (id, meta) = services
 		.rendezvous
-		.create(Bytes::from(body.body.data));
+		.create_msc4388(Bytes::from(body.body.data));
 
 	Ok(Response {
 		id: id.as_str().to_owned(),

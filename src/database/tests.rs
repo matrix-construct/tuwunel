@@ -1,7 +1,7 @@
 #![allow(unused_features)] // 1.96.0-nightly 2026-03-07 bug
 #![expect(clippy::needless_borrows_for_generic_args)]
 
-use std::{fmt::Debug, process::id as process_id, sync::Arc};
+use std::{env, fmt::Debug, process::id as process_id, sync::Arc};
 
 use rocksdb::WriteBatch;
 use serde::{Deserialize, Serialize};
@@ -1144,7 +1144,10 @@ fn txn_record_truncated() {
 
 #[tokio::test]
 async fn txn_insert_raw_preserves_bytes() -> Result {
-	let path = format!("/nvme/target/tmp/tuwunel-database-txn-{}", process_id());
+	let root =
+		env::var("TUWUNEL_TEST_DATABASE_ROOT").unwrap_or_else(|_| "/nvme/target/tmp".into());
+
+	let path = format!("{root}/tuwunel-database-txn-{}", process_id());
 	let raw_config = Figment::new()
 		.merge(("server_name", "localhost"))
 		.merge(("database_path", &path))
@@ -1191,6 +1194,31 @@ async fn txn_insert_raw_preserves_bytes() -> Result {
 
 	assert_eq!(first.get(&first_key).await?.as_ref(), first_value);
 	assert_eq!(second.get(&second_key).await?.as_ref(), second_value);
+
+	let watch = first.watch_raw_prefix(first_key);
+	let mut txn = database.txn();
+
+	txn.del_raw(first, first_key);
+	txn.del_raw(second, second_key);
+	txn.execute();
+
+	watch.await;
+
+	assert!(
+		first
+			.get(&first_key)
+			.await
+			.unwrap_err()
+			.is_not_found()
+	);
+
+	assert!(
+		second
+			.get(&second_key)
+			.await
+			.unwrap_err()
+			.is_not_found()
+	);
 
 	drop(database);
 	drop(server);

@@ -1,4 +1,8 @@
-use std::{collections::HashMap, iter::once};
+use std::{
+	collections::HashMap,
+	iter::once,
+	sync::atomic::{AtomicUsize, Ordering},
+};
 
 use futures::StreamExt;
 use maplit::hashmap;
@@ -14,6 +18,7 @@ use ruma::{
 	uint,
 };
 use serde_json::{json, value::to_raw_value as to_raw_json_value};
+use tokio::sync::{Notify, watch::channel as watch_channel};
 use tuwunel_core::{
 	debug,
 	matrix::{Event, EventTypeExt, PduEvent},
@@ -989,6 +994,64 @@ async fn conflicted_subgraph_excludes_visited_side_branch() {
 		event_id("MID_A"),
 		event_id("MID_B"),
 	]);
+}
+
+#[tokio::test]
+async fn conflicted_subgraph_waits_for_inflight_convergence() {
+	let topic = || to_raw_json_value(&json!({})).unwrap();
+	let s1 = event_id("S1");
+	let s2 = event_id("S2");
+	let t = event_id("T");
+	let x = event_id("X");
+	let y = event_id("Y");
+
+	let events: HashMap<OwnedEventId, PduEvent> = vec![
+		to_pdu_event("S1", alice(), TimelineEventType::RoomTopic, Some(""), topic(), &["X"], &[]),
+		to_pdu_event("S2", alice(), TimelineEventType::RoomTopic, Some(""), topic(), &["Y"], &[]),
+		to_init_pdu_event("T", alice(), TimelineEventType::RoomTopic, Some(""), topic()),
+		to_pdu_event("X", alice(), TimelineEventType::RoomTopic, Some(""), topic(), &["T"], &[]),
+		to_pdu_event("Y", alice(), TimelineEventType::RoomTopic, Some(""), topic(), &["X"], &[]),
+	]
+	.into_iter()
+	.map(|event| (event.event_id().to_owned(), event))
+	.collect();
+
+	let x_started = Notify::new();
+	let (y_returned, y_gate) = watch_channel(false);
+	let x_fetches = AtomicUsize::new(0);
+	let conflicted = vec![&s1, &s2, &t];
+
+	let mut subgraph: Vec<OwnedEventId> =
+		super::conflicted_subgraph_dfs(&conflicted, &async |id| {
+			if id == s2 {
+				x_started.notified().await;
+			}
+
+			if id == x {
+				x_fetches.fetch_add(1, Ordering::Relaxed);
+				x_started.notify_one();
+				y_gate
+					.clone()
+					.wait_for(|returned| *returned)
+					.await
+					.expect("the Y fetch gate should remain open");
+			}
+
+			if id == y {
+				y_returned
+					.send(true)
+					.expect("the X fetch should still be waiting");
+			}
+
+			events.get(&id).cloned().ok_or_else(not_found)
+		})
+		.collect()
+		.await;
+
+	subgraph.sort_unstable();
+
+	assert_eq!(subgraph, vec![s1, s2, t, x, y]);
+	assert_eq!(x_fetches.load(Ordering::Relaxed), 1);
 }
 
 // `mainline_sort`: events with no power-levels ancestor in their auth chain

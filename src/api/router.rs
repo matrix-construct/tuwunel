@@ -18,7 +18,10 @@ use tuwunel_core::{Server, err};
 
 use self::handler::RouterExt;
 pub(super) use self::{
-	args::Args as Ruma, auth::auth_uiaa, client_ip::ClientIp, response::RumaResponse,
+	args::Args as Ruma,
+	auth::auth_uiaa,
+	client_ip::{ClientIp, RateLimitIp},
+	response::RumaResponse,
 	state::State,
 };
 use crate::{client, oidc, server};
