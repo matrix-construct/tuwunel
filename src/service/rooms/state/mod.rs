@@ -28,7 +28,7 @@ use tuwunel_core::{
 	},
 	warn,
 };
-use tuwunel_database::{Deserialized, Ignore, Interfix, Map};
+use tuwunel_database::{Deserialized, Ignore, Interfix, Map, Txn};
 
 use crate::{
 	rooms::{
@@ -194,54 +194,66 @@ pub async fn set_event_state(
 		.get_or_create_shorteventid(event_id)
 		.await;
 
-	let previous_shortstatehash = self.get_room_shortstatehash(room_id).await;
-
 	let state_hash = calculate_hash(state_ids_compressed.iter().map(|s| &s[..]));
 
-	let (shortstatehash, already_existed) = self
+	if let Ok(shortstatehash) = self
 		.services
 		.short
-		.get_or_create_shortstatehash(&state_hash)
-		.await;
+		.get_shortstatehash(&state_hash)
+		.await
+	{
+		self.db
+			.shorteventid_shortstatehash
+			.aput::<KEY_LEN, VAL_LEN, _, _>(shorteventid, shortstatehash);
 
-	if !already_existed {
-		let states_parents = match previous_shortstatehash {
-			| Ok(p) =>
-				self.services
-					.state_compressor
-					.load_shortstatehash_info(p)
-					.await?,
-			| _ => Vec::new(),
-		};
+		return Ok(shortstatehash);
+	}
 
-		let (statediffnew, statediffremoved) =
-			if let Some(parent_stateinfo) = states_parents.last() {
-				let statediffnew: CompressedState = state_ids_compressed
-					.difference(&parent_stateinfo.full_state)
-					.copied()
-					.collect();
+	let previous_shortstatehash = self.get_room_shortstatehash(room_id).await;
+	let states_parents = match previous_shortstatehash {
+		| Ok(p) =>
+			self.services
+				.state_compressor
+				.load_shortstatehash_info(p)
+				.await?,
+		| _ => Vec::new(),
+	};
 
-				let statediffremoved: CompressedState = parent_stateinfo
-					.full_state
-					.difference(&state_ids_compressed)
-					.copied()
-					.collect();
+	let (statediffnew, statediffremoved) = if let Some(parent_stateinfo) = states_parents.last() {
+		let statediffnew: CompressedState = state_ids_compressed
+			.difference(&parent_stateinfo.full_state)
+			.copied()
+			.collect();
 
-				(Arc::new(statediffnew), Arc::new(statediffremoved))
-			} else {
-				(state_ids_compressed, Arc::new(CompressedState::new()))
-			};
+		let statediffremoved: CompressedState = parent_stateinfo
+			.full_state
+			.difference(&state_ids_compressed)
+			.copied()
+			.collect();
 
+		(Arc::new(statediffnew), Arc::new(statediffremoved))
+	} else {
+		(state_ids_compressed, Arc::new(CompressedState::new()))
+	};
+
+	let save_statediff = |txn: &mut Txn, shortstatehash| {
 		self.services
 			.state_compressor
 			.save_state_from_diff(
+				txn,
 				shortstatehash,
 				statediffnew,
 				statediffremoved,
 				1_000_000, // high number because no state will be based on this one
 				states_parents,
-			)?;
-	}
+			)
+	};
+
+	let (shortstatehash, _) = self
+		.services
+		.short
+		.get_or_create_shortstatehash(&state_hash, save_statediff)
+		.await?;
 
 	self.db
 		.shorteventid_shortstatehash
@@ -321,6 +333,7 @@ pub async fn append_to_state(&self, new_pdu: &PduEvent) -> Result<u64> {
 
 			// TODO: statehash with deterministic inputs
 			let shortstatehash = self.services.globals.next_count();
+			let mut txn = self.services.db.txn();
 
 			let mut statediffnew = CompressedState::new();
 			statediffnew.insert(new);
@@ -333,12 +346,15 @@ pub async fn append_to_state(&self, new_pdu: &PduEvent) -> Result<u64> {
 			self.services
 				.state_compressor
 				.save_state_from_diff(
+					&mut txn,
 					*shortstatehash,
 					Arc::new(statediffnew),
 					Arc::new(statediffremoved),
 					2,
 					states_parents,
 				)?;
+
+			txn.execute();
 
 			Ok(*shortstatehash)
 		},

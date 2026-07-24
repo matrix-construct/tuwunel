@@ -1,17 +1,23 @@
 #![allow(unused_features)] // 1.96.0-nightly 2026-03-07 bug
 #![expect(clippy::needless_borrows_for_generic_args)]
 
-use std::fmt::Debug;
+use std::{fmt::Debug, process::id as process_id, sync::Arc};
 
 use rocksdb::WriteBatch;
 use serde::{Deserialize, Serialize};
+use tokio::runtime::Handle;
+use tracing::subscriber::NoSubscriber;
 use tuwunel_core::{
+	Result, Server,
 	arrayvec::ArrayVec,
+	config::{Config, Figment},
+	log::{LogLevelReloadHandles, Logging, capture::State},
+	metrics::Metrics,
 	ruma::{EventId, RoomId, UserId, serde::Raw},
 };
 
 use crate::{
-	Cbor, Ignore, Interfix,
+	Cbor, Database, Ignore, Interfix,
 	de::from_slice,
 	ser,
 	ser::{Json, serialize_to_vec},
@@ -1134,4 +1140,60 @@ fn txn_record_truncated() {
 	let mut records: &[u8] = &[0x1, 0x5, b'k'];
 
 	assert_eq!(next_record(&mut records), None);
+}
+
+#[tokio::test]
+async fn txn_insert_raw_preserves_bytes() -> Result {
+	let path = format!("/nvme/target/tmp/tuwunel-database-txn-{}", process_id());
+	let raw_config = Figment::new()
+		.merge(("server_name", "localhost"))
+		.merge(("database_path", &path))
+		.merge(("test", ["fresh", "cleanup"]));
+
+	let config = Config::new(&raw_config)?;
+	let runtime = Handle::current();
+	let logging = Logging {
+		subscriber: Arc::new(NoSubscriber::new()),
+		reload: LogLevelReloadHandles::default(),
+		capture: Arc::new(State::new()),
+	};
+
+	let metrics = Metrics::new(Some(&runtime));
+	let server = Arc::new(Server::new(config, Some(&runtime), logging, metrics));
+	let database = Database::open(&server).await?;
+
+	let first = database.get("alias_roomid")?;
+	let second = database.get("alias_userid")?;
+	let first_key: &[u8] = b"\0raw\xFF:key";
+	let first_value: &[u8] = b"\xFE\0value";
+	let second_key: &[u8] = b"\xFFother\0key";
+	let second_value: &[u8] = b"value\0\xFD";
+
+	let mut txn = database.txn();
+
+	txn.insert_raw(first, first_key, first_value);
+	txn.insert_raw(second, second_key, second_value);
+
+	let mut keys = txn.keys();
+	let (map, key) = keys.next().expect("first queued key");
+
+	assert!(Arc::ptr_eq(&map, first));
+	assert_eq!(key, first_key);
+
+	let (map, key) = keys.next().expect("second queued key");
+
+	assert!(Arc::ptr_eq(&map, second));
+	assert_eq!(key, second_key);
+	assert!(keys.next().is_none());
+	drop(keys);
+
+	txn.execute();
+
+	assert_eq!(first.get(&first_key).await?.as_ref(), first_value);
+	assert_eq!(second.get(&second_key).await?.as_ref(), second_value);
+
+	drop(database);
+	drop(server);
+
+	Ok(())
 }

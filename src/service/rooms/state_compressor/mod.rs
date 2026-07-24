@@ -14,7 +14,7 @@ use tuwunel_core::{
 	at, checked, err, expected, implement, utils,
 	utils::{bytes, math::usize_from_f64, stream::IterStream},
 };
-use tuwunel_database::Map;
+use tuwunel_database::{Map, Txn};
 
 use crate::rooms::short::{ShortEventId, ShortId, ShortStateHash, ShortStateKey};
 
@@ -246,6 +246,8 @@ pub async fn compress_state_event(
 /// based on layer n-2. If that layer is also too big, it will recursively
 /// fix above layers too.
 ///
+/// * `txn` - Caller-owned transaction that receives the StateDiff without
+///   executing it
 /// * `shortstatehash` - Shortstatehash of this state
 /// * `statediffnew` - Added to base. Each vec is shortstatekey+shorteventid
 /// * `statediffremoved` - Removed from base. Each vec is
@@ -257,6 +259,7 @@ pub async fn compress_state_event(
 #[implement(Service)]
 pub fn save_state_from_diff(
 	&self,
+	txn: &mut Txn,
 	shortstatehash: ShortStateHash,
 	statediffnew: Arc<CompressedState>,
 	statediffremoved: Arc<CompressedState>,
@@ -296,6 +299,7 @@ pub fn save_state_from_diff(
 		}
 
 		self.save_state_from_diff(
+			txn,
 			shortstatehash,
 			Arc::new(parent_new),
 			Arc::new(parent_removed),
@@ -308,7 +312,7 @@ pub fn save_state_from_diff(
 
 	if parent_states.is_empty() {
 		// There is no parent layer, create a new state
-		self.save_statediff(shortstatehash, &StateDiff {
+		self.save_statediff(txn, shortstatehash, &StateDiff {
 			parent: None,
 			added: statediffnew,
 			removed: statediffremoved,
@@ -324,6 +328,7 @@ pub fn save_state_from_diff(
 	let parent = parent_states
 		.pop()
 		.expect("parent must have a state");
+
 	let parent_added_len = parent.added.len();
 	let parent_removed_len = parent.removed.len();
 	let parent_diff = checked!(parent_added_len + parent_removed_len)?;
@@ -352,6 +357,7 @@ pub fn save_state_from_diff(
 		}
 
 		self.save_state_from_diff(
+			txn,
 			shortstatehash,
 			Arc::new(parent_new),
 			Arc::new(parent_removed),
@@ -360,7 +366,7 @@ pub fn save_state_from_diff(
 		)?;
 	} else {
 		// Diff small enough, we add diff as layer on top of parent
-		self.save_statediff(shortstatehash, &StateDiff {
+		self.save_statediff(txn, shortstatehash, &StateDiff {
 			parent: Some(parent.shortstatehash),
 			added: statediffnew,
 			removed: statediffremoved,
@@ -392,13 +398,16 @@ pub async fn save_state(
 			.map(|bytes| &bytes[..]),
 	);
 
-	let (new_shortstatehash, already_existed) = self
+	let existing_shortstatehash = self
 		.services
 		.short
-		.get_or_create_shortstatehash(&state_hash)
-		.await;
+		.get_shortstatehash(&state_hash)
+		.await
+		.ok();
 
-	if Some(new_shortstatehash) == previous_shortstatehash {
+	if let Some(new_shortstatehash) = existing_shortstatehash
+		.filter(|&new_shortstatehash| previous_shortstatehash.eq(&Some(new_shortstatehash)))
+	{
 		return Ok(HashSetCompressStateEvent {
 			shortstatehash: new_shortstatehash,
 			..Default::default()
@@ -430,15 +439,24 @@ pub async fn save_state(
 		(new_state_ids_compressed, Arc::new(CompressedState::new()))
 	};
 
-	if !already_existed {
-		self.save_state_from_diff(
-			new_shortstatehash,
-			statediffnew.clone(),
-			statediffremoved.clone(),
-			2, // every state change is 2 event changes on average
-			states_parents,
-		)?;
-	}
+	let new_shortstatehash = if let Some(new_shortstatehash) = existing_shortstatehash {
+		new_shortstatehash
+	} else {
+		self.services
+			.short
+			.get_or_create_shortstatehash(&state_hash, |txn, shortstatehash| {
+				self.save_state_from_diff(
+					txn,
+					shortstatehash,
+					statediffnew.clone(),
+					statediffremoved.clone(),
+					2, // every state change is 2 event changes on average
+					states_parents,
+				)
+			})
+			.await?
+			.0
+	};
 
 	Ok(HashSetCompressStateEvent {
 		shortstatehash: new_shortstatehash,
@@ -496,14 +514,22 @@ async fn get_statediff(&self, shortstatehash: ShortStateHash) -> Result<StateDif
 }
 
 #[implement(Service)]
-fn save_statediff(&self, shortstatehash: ShortStateHash, diff: &StateDiff) {
-	let mut value = Vec::<u8>::with_capacity(
-		2_usize
-			.saturating_add(diff.added.len())
-			.saturating_add(diff.removed.len()),
-	);
+fn save_statediff(&self, txn: &mut Txn, shortstatehash: ShortStateHash, diff: &StateDiff) {
+	let event_count = diff
+		.added
+		.len()
+		.saturating_add(diff.removed.len());
+
+	let event_bytes = event_count.saturating_mul(size_of::<CompressedStateEvent>());
+	let separator_bytes =
+		usize::from(!diff.removed.is_empty()).saturating_mul(size_of::<ShortStateHash>());
+
+	let capacity = size_of::<ShortStateHash>()
+		.saturating_add(event_bytes)
+		.saturating_add(separator_bytes);
 
 	let parent = diff.parent.unwrap_or(0_u64);
+	let mut value = Vec::<u8>::with_capacity(capacity);
 	value.extend_from_slice(&parent.to_be_bytes());
 
 	for new in diff.added.iter() {
@@ -517,9 +543,7 @@ fn save_statediff(&self, shortstatehash: ShortStateHash, diff: &StateDiff) {
 		}
 	}
 
-	self.db
-		.shortstatehash_statediff
-		.insert(&shortstatehash.to_be_bytes(), &value);
+	txn.insert_raw(&self.db.shortstatehash_statediff, shortstatehash.to_be_bytes(), value);
 }
 
 #[inline]

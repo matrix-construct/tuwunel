@@ -76,39 +76,6 @@ use crate::{
 	client::{ignored_filter, is_empty_account_data_event, with_membership},
 };
 
-type TimelineEventIds = SmallVec<[OwnedEventId; 1]>;
-
-/// MSC4222 `state_after` opt-in: which room-state field the response carries.
-#[derive(Clone, Copy, Debug)]
-enum StateAfter {
-	Off,
-	Stable,
-	Unstable,
-}
-
-impl StateAfter {
-	fn requested(self) -> bool { !matches!(self, Self::Off) }
-
-	fn wrap(self, events: StateEvents) -> RoomState {
-		match self {
-			| Self::Off => RoomState::Before(events),
-			| Self::Stable => RoomState::After(events),
-			| Self::Unstable => RoomState::AfterUnstable(events),
-		}
-	}
-}
-
-impl From<(bool, bool)> for StateAfter {
-	fn from((stable, unstable): (bool, bool)) -> Self {
-		// Unstable opt-in wins: such a client reads the unstable field name.
-		match (stable, unstable) {
-			| (_, true) => Self::Unstable,
-			| (true, _) => Self::Stable,
-			| _ => Self::Off,
-		}
-	}
-}
-
 #[derive(Default)]
 struct StateChanges {
 	heroes: Option<Vec<OwnedUserId>>,
@@ -128,8 +95,6 @@ struct StateChangeParams<'a> {
 	witness: Option<&'a Witness>,
 	include_heroes: bool,
 }
-
-type PresenceUpdates = HashMap<OwnedUserId, PresenceEventContent>;
 
 struct RoomMetadata {
 	since_shortstatehash: Option<ShortStateHash>,
@@ -170,6 +135,40 @@ struct BuildJoinedRoom {
 	limited: bool,
 	joined_since_last_sync: bool,
 	prev_batch: Option<PduCount>,
+}
+
+/// MSC4222 `state_after` opt-in: which room-state field the response carries.
+#[derive(Clone, Copy, Debug)]
+enum StateAfter {
+	Off,
+	Stable,
+	Unstable,
+}
+
+type PresenceUpdates = HashMap<OwnedUserId, PresenceEventContent>;
+type TimelineEventIds = SmallVec<[OwnedEventId; 1]>;
+
+impl StateAfter {
+	fn requested(self) -> bool { !matches!(self, Self::Off) }
+
+	fn wrap(self, events: StateEvents) -> RoomState {
+		match self {
+			| Self::Off => RoomState::Before(events),
+			| Self::Stable => RoomState::After(events),
+			| Self::Unstable => RoomState::AfterUnstable(events),
+		}
+	}
+}
+
+impl From<(bool, bool)> for StateAfter {
+	fn from((stable, unstable): (bool, bool)) -> Self {
+		// Unstable opt-in wins: such a client reads the unstable field name.
+		match (stable, unstable) {
+			| (_, true) => Self::Unstable,
+			| (true, _) => Self::Stable,
+			| _ => Self::Off,
+		}
+	}
 }
 
 /// # `GET /_matrix/client/r0/sync`
@@ -1111,13 +1110,13 @@ async fn load_joined_room(
 	.await;
 
 	let (
+		state_after,
 		StateChanges {
 			heroes,
 			joined_member_count,
 			invited_member_count,
 			mut state_events,
 		},
-		state_after,
 	) = compute_join_state_changes(
 		services,
 		sender_user,
@@ -1143,6 +1142,7 @@ async fn load_joined_room(
 
 	let prev_batch =
 		compute_join_prev_batch(&timeline_pdus, joined_sender_member.as_ref(), since);
+
 	let in_window = |count: u64| count > since && count <= next_batch;
 
 	let NotificationGates {
@@ -1216,9 +1216,9 @@ async fn compute_join_state_changes(
 	current_shortstatehash: Option<ShortStateHash>,
 	joined_since_last_sync: bool,
 	witness: Option<&Witness>,
-) -> Result<(StateChanges, StateAfter)> {
+) -> Result<(StateAfter, StateChanges)> {
 	let Some(current_shortstatehash) = current_shortstatehash else {
-		return Ok((StateChanges::default(), state_after));
+		return Ok((state_after, StateChanges::default()));
 	};
 
 	let state_changes =
@@ -1238,11 +1238,11 @@ async fn compute_join_state_changes(
 	let incremental = !full_state && !joined_since_last_sync && since_shortstatehash.is_some();
 
 	if !state_after.requested() || incremental {
-		return state_changes.map(|state_changes| (state_changes, state_after));
+		return state_changes.map(|state_changes| (state_after, state_changes));
 	}
 
 	match state_changes {
-		| Ok(state_changes) => Ok((state_changes, state_after)),
+		| Ok(state_changes) => Ok((state_after, state_changes)),
 		| Err(after_error) => {
 			let after_boundary = after_shortstatehash.unwrap_or(current_shortstatehash);
 			let legacy_boundary = horizon_shortstatehash.unwrap_or(current_shortstatehash);
@@ -1276,7 +1276,7 @@ async fn compute_join_state_changes(
 					"Failed to load state-after and legacy state boundaries."
 				);
 			})
-			.map(|state_changes| (state_changes, StateAfter::Off))
+			.map(|state_changes| (StateAfter::Off, state_changes))
 		},
 	}
 }
