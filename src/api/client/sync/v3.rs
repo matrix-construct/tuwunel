@@ -5,7 +5,7 @@ use std::{
 
 use axum::extract::State;
 use futures::{
-	FutureExt, StreamExt, TryFutureExt,
+	FutureExt, StreamExt, TryFutureExt, TryStreamExt,
 	future::{join, join3, join4, join5},
 	pin_mut,
 };
@@ -55,8 +55,9 @@ use tuwunel_core::{
 		math::ruma_from_u64,
 		option::OptionExt,
 		result::MapExpect,
-		stream::{BroadbandExt, Tools, TryExpect, WidebandExt},
+		stream::{BroadbandExt, Tools, TryBroadbandExt, TryReadyExt, WidebandExt},
 	},
+	warn,
 };
 use tuwunel_service::{
 	Services,
@@ -114,6 +115,18 @@ struct StateChanges {
 	joined_member_count: Option<u64>,
 	invited_member_count: Option<u64>,
 	state_events: Vec<PduEvent>,
+}
+
+struct StateChangeParams<'a> {
+	full_state: bool,
+	state_after: StateAfter,
+	since_shortstatehash: Option<ShortStateHash>,
+	horizon_shortstatehash: Option<ShortStateHash>,
+	after_shortstatehash: Option<ShortStateHash>,
+	current_shortstatehash: ShortStateHash,
+	joined_since_last_sync: bool,
+	witness: Option<&'a Witness>,
+	include_heroes: bool,
 }
 
 type PresenceUpdates = HashMap<OwnedUserId, PresenceEventContent>;
@@ -907,21 +920,20 @@ async fn load_left_room(
 		.boxed()
 		.await;
 
-	let StateChanges { state_events, .. } = calculate_state_changes(
-		services,
-		sender_user,
-		room_id,
-		full_state || initial,
-		state_after,
-		since_shortstatehash,
-		horizon_shortstatehash.flatten(),
-		after_shortstatehash.flat_ok(),
-		left_shortstatehash?,
-		false,
-		None,
-	)
-	.boxed()
-	.await?;
+	let StateChanges { state_events, .. } =
+		calculate_state_changes(services, sender_user, room_id, StateChangeParams {
+			full_state: full_state || initial,
+			state_after,
+			since_shortstatehash,
+			horizon_shortstatehash: horizon_shortstatehash.flatten(),
+			after_shortstatehash: after_shortstatehash.flat_ok(),
+			current_shortstatehash: left_shortstatehash?,
+			joined_since_last_sync: false,
+			witness: None,
+			include_heroes: true,
+		})
+		.boxed()
+		.await?;
 
 	let is_sender_membership = |event: &PduEvent| {
 		*event.kind() == RoomMember && event.state_key() == Some(sender_user.as_str())
@@ -1098,12 +1110,15 @@ async fn load_joined_room(
 	.boxed()
 	.await;
 
-	let StateChanges {
-		heroes,
-		joined_member_count,
-		invited_member_count,
-		mut state_events,
-	} = compute_join_state_changes(
+	let (
+		StateChanges {
+			heroes,
+			joined_member_count,
+			invited_member_count,
+			mut state_events,
+		},
+		state_after,
+	) = compute_join_state_changes(
 		services,
 		sender_user,
 		room_id,
@@ -1201,26 +1216,69 @@ async fn compute_join_state_changes(
 	current_shortstatehash: Option<ShortStateHash>,
 	joined_since_last_sync: bool,
 	witness: Option<&Witness>,
-) -> Result<StateChanges> {
-	current_shortstatehash
-		.map_async(|current_shortstatehash| {
-			calculate_state_changes(
-				services,
-				sender_user,
-				room_id,
+) -> Result<(StateChanges, StateAfter)> {
+	let Some(current_shortstatehash) = current_shortstatehash else {
+		return Ok((StateChanges::default(), state_after));
+	};
+
+	let state_changes =
+		calculate_state_changes(services, sender_user, room_id, StateChangeParams {
+			full_state,
+			state_after,
+			since_shortstatehash,
+			horizon_shortstatehash,
+			after_shortstatehash,
+			current_shortstatehash,
+			joined_since_last_sync,
+			witness,
+			include_heroes: true,
+		})
+		.await;
+
+	let incremental = !full_state && !joined_since_last_sync && since_shortstatehash.is_some();
+
+	if !state_after.requested() || incremental {
+		return state_changes.map(|state_changes| (state_changes, state_after));
+	}
+
+	match state_changes {
+		| Ok(state_changes) => Ok((state_changes, state_after)),
+		| Err(after_error) => {
+			let after_boundary = after_shortstatehash.unwrap_or(current_shortstatehash);
+			let legacy_boundary = horizon_shortstatehash.unwrap_or(current_shortstatehash);
+
+			warn!(
+				%room_id,
+				%after_boundary,
+				?after_error,
+				"Failed to load requested state-after boundary; retrying legacy state."
+			);
+
+			calculate_state_changes(services, sender_user, room_id, StateChangeParams {
 				full_state,
-				state_after,
+				state_after: StateAfter::Off,
 				since_shortstatehash,
 				horizon_shortstatehash,
 				after_shortstatehash,
 				current_shortstatehash,
 				joined_since_last_sync,
 				witness,
-			)
-		})
-		.await
-		.transpose()
-		.map(Option::unwrap_or_default)
+				include_heroes: false,
+			})
+			.await
+			.inspect_err(|legacy_error| {
+				warn!(
+					%room_id,
+					%after_boundary,
+					%legacy_boundary,
+					?after_error,
+					?legacy_error,
+					"Failed to load state-after and legacy state boundaries."
+				);
+			})
+			.map(|state_changes| (state_changes, StateAfter::Off))
+		},
+	}
 }
 
 fn compute_join_prev_batch(
@@ -2066,19 +2124,21 @@ fn assemble_unread_notifications(
 	    cs = %current_shortstatehash,
     )
 )]
-#[expect(clippy::too_many_arguments)]
 async fn calculate_state_changes<'a>(
 	services: &Services,
 	sender_user: &UserId,
 	room_id: &RoomId,
-	full_state: bool,
-	state_after: StateAfter,
-	since_shortstatehash: Option<ShortStateHash>,
-	horizon_shortstatehash: Option<ShortStateHash>,
-	after_shortstatehash: Option<ShortStateHash>,
-	current_shortstatehash: ShortStateHash,
-	joined_since_last_sync: bool,
-	witness: Option<&'a Witness>,
+	StateChangeParams {
+		full_state,
+		state_after,
+		since_shortstatehash,
+		horizon_shortstatehash,
+		after_shortstatehash,
+		current_shortstatehash,
+		joined_since_last_sync,
+		witness,
+		include_heroes,
+	}: StateChangeParams<'a>,
 ) -> Result<StateChanges> {
 	let incremental = !full_state && !joined_since_last_sync && since_shortstatehash.is_some();
 
@@ -2126,7 +2186,6 @@ async fn calculate_state_changes<'a>(
 		services
 			.state_accessor
 			.state_full_shortids(horizon_shortstatehash)
-			.expect_ok()
 			.boxed()
 			.into_future()
 	});
@@ -2135,31 +2194,40 @@ async fn calculate_state_changes<'a>(
 	let after = state_after.requested();
 	let state_events = current_state_ids
 		.stream()
-		.map(|ids| (false, ids))
+		.map_ok(|ids| (false, ids))
 		.chain(
 			state_diff_ids
 				.stream()
-				.map(move |ids| (after, ids)),
+				.map(move |ids| Ok((after, ids))),
 		)
-		.broad_filter_map(async |(after, (shortstatekey, shorteventid))| {
-			lazy_filter(services, sender_user, witness, shortstatekey, shorteventid, after).await
+		.broad_and_then(async |(after, (shortstatekey, shorteventid))| {
+			let event_id =
+				lazy_filter(services, sender_user, witness, shortstatekey, shorteventid, after)
+					.await;
+
+			Ok(event_id)
 		})
-		.chain(lazy_state_ids.stream())
-		.broad_filter_map(|shorteventid| {
-			services
+		.ready_try_filter_map(Result::Ok)
+		.chain(lazy_state_ids.stream().map(Result::Ok))
+		.broad_and_then(async |shorteventid| {
+			let pdu = services
 				.timeline
 				.get_pdu_from_shorteventid(shorteventid)
 				.ok()
+				.await;
+
+			Ok(pdu)
 		})
-		.collect::<Vec<_>>()
-		.await;
+		.ready_try_filter_map(Result::Ok)
+		.try_collect::<Vec<_>>()
+		.await?;
 
 	let send_member_counts = state_events
 		.iter()
 		.any(|event| *event.kind() == RoomMember);
 
-	let member_counts =
-		send_member_counts.then_async(|| calculate_counts(services, room_id, sender_user));
+	let member_counts = send_member_counts
+		.then_async(|| calculate_counts(services, room_id, sender_user, include_heroes));
 
 	let (joined_member_count, invited_member_count, heroes) =
 		member_counts.await.unwrap_or((None, None, None));
@@ -2203,6 +2271,7 @@ async fn calculate_counts(
 	services: &Services,
 	room_id: &RoomId,
 	sender_user: &UserId,
+	include_heroes: bool,
 ) -> (Option<u64>, Option<u64>, Option<Vec<OwnedUserId>>) {
 	let joined_member_count = services
 		.state_cache
@@ -2222,6 +2291,7 @@ async fn calculate_counts(
 	let heroes = services
 		.config
 		.calculate_heroes
+		.and_is(include_heroes)
 		.and_is(small_room)
 		.then_async(|| calculate_heroes(services, room_id, sender_user));
 
