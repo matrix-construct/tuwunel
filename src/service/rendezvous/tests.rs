@@ -98,7 +98,7 @@ fn stale_put_distinguishes_retries_from_conflicts() {
 fn sequence_token_put_uses_unquoted_validator() {
 	let service = service();
 	let now = time(35);
-	let (id, created) = service.create_at(Bytes::from_static(b"first"), now, TTL, 100);
+	let (id, created) = service.create_msc4388_at(Bytes::from_static(b"first"), now, TTL, 100);
 
 	assert_eq!(created.sequence_token().len(), 43);
 	assert!(!created.sequence_token().contains('"'));
@@ -227,6 +227,47 @@ fn create_prunes_expired_then_evicts_oldest() {
 }
 
 #[test]
+fn transports_isolate_capacity_and_ids() {
+	let service = service();
+	let now = time(55);
+	let msc4388_data = Bytes::from_static(b"msc4388");
+	let msc4108_data = Bytes::from_static(b"msc4108");
+	let (msc4388_id, msc4388_meta) = service.create_msc4388_at(msc4388_data.clone(), now, TTL, 1);
+	let (evicted_msc4108_id, _) =
+		service.create_at(Bytes::new(), now + Duration::from_millis(1), TTL, 1);
+
+	let (msc4108_id, msc4108_meta) =
+		service.create_at(msc4108_data.clone(), now + Duration::from_millis(2), TTL, 1);
+
+	let checked_at = now + Duration::from_millis(2);
+
+	assert_eq!(service.get_at(&evicted_msc4108_id, None, checked_at), Get::NotFound);
+	assert_eq!(service.get_at(&msc4388_id, None, checked_at), Get::NotFound);
+	assert_eq!(service.get_msc4388_at(&msc4108_id, checked_at), Get::NotFound);
+	assert_eq!(service.put_at(&msc4388_id, "*", Bytes::new(), checked_at, TTL), Put::NotFound,);
+	assert!(!service.delete(&msc4388_id));
+	assert_eq!(
+		service.put_token_at(
+			&msc4108_id,
+			msc4108_meta.sequence_token(),
+			Bytes::new(),
+			checked_at,
+			TTL,
+		),
+		Put::NotFound,
+	);
+
+	assert!(!service.delete_if_active_at(&msc4108_id, checked_at));
+
+	let expected_msc4388 = Get::Data { data: msc4388_data, meta: msc4388_meta };
+
+	let expected_msc4108 = Get::Data { data: msc4108_data, meta: msc4108_meta };
+
+	assert_eq!(service.get_msc4388_at(&msc4388_id, checked_at), expected_msc4388);
+	assert_eq!(service.get_at(&msc4108_id, None, checked_at), expected_msc4108);
+}
+
+#[test]
 fn delete_does_not_check_expiry() {
 	let service = service();
 	let (id, _) = service.create_at(Bytes::new(), time(60), Duration::ZERO, 100);
@@ -239,8 +280,8 @@ fn delete_does_not_check_expiry() {
 fn active_delete_rejects_expired_sessions() {
 	let service = service();
 	let now = time(60);
-	let (expired, _) = service.create_at(Bytes::new(), now, Duration::ZERO, 100);
-	let (active, _) = service.create_at(Bytes::new(), now, TTL, 100);
+	let (expired, _) = service.create_msc4388_at(Bytes::new(), now, Duration::ZERO, 100);
+	let (active, _) = service.create_msc4388_at(Bytes::new(), now, TTL, 100);
 
 	assert!(!service.delete_if_active_at(&expired, now));
 	assert!(service.delete_if_active_at(&active, now));
@@ -268,7 +309,8 @@ fn huge_ttl_caps_at_latest_http_date() {
 
 fn service() -> Service {
 	Service {
-		sessions: RwLock::default(),
+		msc4108_sessions: RwLock::default(),
+		msc4388_sessions: RwLock::default(),
 		ratelimiter: Mutex::default(),
 		services: Arc::new(crate::services::OnceServices::default()),
 	}

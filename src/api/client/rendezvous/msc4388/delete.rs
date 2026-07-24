@@ -3,12 +3,12 @@ use ruma::api::client::rendezvous::delete_rendezvous_session::unstable::{Request
 use tuwunel_core::err;
 
 use super::{Result, ensure_available};
-use crate::{ClientIp, Ruma};
+use crate::{RateLimitIp, Ruma};
 
 #[tracing::instrument(level = "debug", skip_all)]
 pub(crate) async fn delete_msc4388_route(
 	State(services): State<crate::State>,
-	ClientIp(client): ClientIp,
+	RateLimitIp(client): RateLimitIp,
 	body: Ruma<Request>,
 ) -> Result<Response> {
 	ensure_available(&services, client)?;

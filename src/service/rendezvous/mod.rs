@@ -26,7 +26,8 @@ type Sessions = BTreeMap<SessionId, Session>;
 type Ratelimiter = Mutex<HashMap<IpAddr, (Instant, f64)>>;
 
 pub struct Service {
-	sessions: RwLock<Sessions>,
+	msc4108_sessions: RwLock<Sessions>,
+	msc4388_sessions: RwLock<Sessions>,
 	// At most 4096 short-lived per-IP buckets.
 	ratelimiter: Ratelimiter,
 	services: Arc<crate::services::OnceServices>,
@@ -84,7 +85,8 @@ mod tests;
 impl crate::Service for Service {
 	fn build(args: &crate::Args<'_>) -> Result<Arc<Self>> {
 		Ok(Arc::new(Self {
-			sessions: RwLock::new(Sessions::new()),
+			msc4108_sessions: RwLock::new(Sessions::new()),
+			msc4388_sessions: RwLock::new(Sessions::new()),
 			ratelimiter: Mutex::new(HashMap::new()),
 			services: args.services.clone(),
 		}))
@@ -172,11 +174,40 @@ fn create_at(
 	ttl: Duration,
 	max_sessions: usize,
 ) -> (SessionId, Meta) {
+	create_in_at(&self.msc4108_sessions, data, now, ttl, max_sessions)
+}
+
+#[implement(Service)]
+pub fn create_msc4388(&self, data: Bytes) -> (SessionId, Meta) {
+	let config = &self.services.server.config;
+	let ttl = Duration::from_secs(config.rendezvous_session_ttl);
+
+	self.create_msc4388_at(data, SystemTime::now(), ttl, config.rendezvous_max_sessions)
+}
+
+#[implement(Service)]
+fn create_msc4388_at(
+	&self,
+	data: Bytes,
+	now: SystemTime,
+	ttl: Duration,
+	max_sessions: usize,
+) -> (SessionId, Meta) {
+	create_in_at(&self.msc4388_sessions, data, now, ttl, max_sessions)
+}
+
+fn create_in_at(
+	sessions: &RwLock<Sessions>,
+	data: Bytes,
+	now: SystemTime,
+	ttl: Duration,
+	max_sessions: usize,
+) -> (SessionId, Meta) {
 	let capacity = max_sessions.max(1);
 	let mut id = string_array::<SESSION_ID_LENGTH>();
 	let expires_at = expires_at(now, ttl);
 
-	let mut sessions = self.sessions.write().expect("locked for writing");
+	let mut sessions = sessions.write().expect("locked for writing");
 
 	sessions.retain(|_, session| session.expires_at > now);
 	while sessions.contains_key(id.as_str()) {
@@ -217,8 +248,25 @@ pub fn get(&self, id: &str, if_none_match: Option<&str>) -> Get {
 
 #[implement(Service)]
 fn get_at(&self, id: &str, if_none_match: Option<&str>, now: SystemTime) -> Get {
+	get_in_at(&self.msc4108_sessions, id, if_none_match, now)
+}
+
+#[implement(Service)]
+pub fn get_msc4388(&self, id: &str) -> Get { self.get_msc4388_at(id, SystemTime::now()) }
+
+#[implement(Service)]
+fn get_msc4388_at(&self, id: &str, now: SystemTime) -> Get {
+	get_in_at(&self.msc4388_sessions, id, None, now)
+}
+
+fn get_in_at(
+	sessions: &RwLock<Sessions>,
+	id: &str,
+	if_none_match: Option<&str>,
+	now: SystemTime,
+) -> Get {
 	{
-		let sessions = self.sessions.read().expect("locked for reading");
+		let sessions = sessions.read().expect("locked for reading");
 
 		match sessions.get(id) {
 			| Some(session) if session.expires_at > now => {
@@ -229,7 +277,8 @@ fn get_at(&self, id: &str, if_none_match: Option<&str>, now: SystemTime) -> Get 
 		}
 	}
 
-	let mut sessions = self.sessions.write().expect("locked for writing");
+	let mut sessions = sessions.write().expect("locked for writing");
+
 	if sessions
 		.get(id)
 		.is_some_and(|session| session.expires_at <= now)
@@ -253,7 +302,7 @@ pub fn put(&self, id: &str, if_match: &str, data: Bytes) -> Put {
 
 #[implement(Service)]
 fn put_at(&self, id: &str, if_match: &str, data: Bytes, now: SystemTime, ttl: Duration) -> Put {
-	self.put_with_at(id, Validator::Etag(if_match), data, now, ttl)
+	put_with_at(&self.msc4108_sessions, id, Validator::Etag(if_match), data, now, ttl)
 }
 
 #[implement(Service)]
@@ -272,19 +321,25 @@ fn put_token_at(
 	now: SystemTime,
 	ttl: Duration,
 ) -> Put {
-	self.put_with_at(id, Validator::SequenceToken(sequence_token), data, now, ttl)
+	put_with_at(
+		&self.msc4388_sessions,
+		id,
+		Validator::SequenceToken(sequence_token),
+		data,
+		now,
+		ttl,
+	)
 }
 
-#[implement(Service)]
 fn put_with_at(
-	&self,
+	sessions: &RwLock<Sessions>,
 	id: &str,
 	validator: Validator<'_>,
 	data: Bytes,
 	now: SystemTime,
 	ttl: Duration,
 ) -> Put {
-	let mut sessions = self.sessions.write().expect("locked for writing");
+	let mut sessions = sessions.write().expect("locked for writing");
 
 	if sessions
 		.get(id)
@@ -326,7 +381,7 @@ fn put_with_at(
 
 #[implement(Service)]
 pub fn delete(&self, id: &str) -> bool {
-	self.sessions
+	self.msc4108_sessions
 		.write()
 		.expect("locked for writing")
 		.remove(id)
@@ -340,7 +395,7 @@ pub fn delete_if_active(&self, id: &str) -> bool {
 
 #[implement(Service)]
 fn delete_if_active_at(&self, id: &str, now: SystemTime) -> bool {
-	self.sessions
+	self.msc4388_sessions
 		.write()
 		.expect("locked for writing")
 		.remove(id)
