@@ -42,6 +42,7 @@ struct SyncInfo<'a> {
 	services: &'a Services,
 	sender_user: &'a UserId,
 	sender_device: Option<&'a DeviceId>,
+	previous_connection_pos: Option<u64>,
 }
 
 #[derive(Clone, Debug)]
@@ -165,7 +166,12 @@ pub(crate) async fn sync_events_v5_route(
 		.checked_add(Duration::from_millis(timeout))
 		.expect("configuration must limit maximum timeout");
 
-	let sync_info = SyncInfo { services, sender_user, sender_device };
+	let sync_info = SyncInfo {
+		services,
+		sender_user,
+		sender_device,
+		previous_connection_pos: since.ne(&0).then_some(since),
+	};
 	loop {
 		debug_assert!(
 			conn.globalsince <= conn.next_batch,

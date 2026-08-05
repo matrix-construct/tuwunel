@@ -84,7 +84,12 @@ async fn handle_room(
 	conn: &Connection,
 	window_room: &WindowRoom,
 ) -> Result<response::Room> {
-	let SyncInfo { services, sender_user, .. } = sync_info;
+	let SyncInfo {
+		services,
+		sender_user,
+		previous_connection_pos,
+		..
+	} = sync_info;
 	let WindowRoom {
 		lists, membership, room_id, last_count, ..
 	} = window_room;
@@ -150,18 +155,6 @@ async fn handle_room(
 	)
 	.await;
 
-	let num_live = roomsince
-		.ne(&0)
-		.and_is(limited || timeline_pdus.len() >= timeline_limit)
-		.then_async(|| {
-			services
-				.timeline
-				.pdus(None, room_id, Some(roomsince.into()))
-				.count()
-				.map(TryInto::try_into)
-				.map(Result::ok)
-		});
-
 	let required_state = collect_required_state(
 		services,
 		sender_user,
@@ -183,23 +176,25 @@ async fn handle_room(
 		.iter()
 		.stream()
 		.filter_map(|item| ignored_filter(services, item.clone(), sender_user))
-		.map(at!(1))
-		.wide_then(|pdu| with_membership(services, pdu, sender_user, encrypted))
-		.wide_then(|pdu| {
+		.wide_then(|(position, pdu)| {
+			with_membership(services, pdu, sender_user, encrypted).map(move |pdu| (position, pdu))
+		})
+		.wide_then(|(position, pdu)| {
 			services
 				.pdu_metadata
 				.bundle_aggregations(sender_user, pdu)
+				.map(move |pdu| (position, pdu))
 		})
-		.map(Event::into_format)
-		.collect();
+		.map(|(position, pdu)| (position, Event::into_format(pdu)))
+		.collect::<Vec<_>>();
 
 	let meta = room_meta_future(services, sender_user, room_id);
-	let events = join4(timeline, num_live, required_state, invite_state);
+	let events = join3(timeline, required_state, invite_state);
 	let member_counts = member_counts_future(services, room_id);
 	let notification_counts = notification_counts_future(services, sender_user, room_id);
 	let (
 		(room_name, room_avatar, is_dm),
-		(timeline, num_live, required_state, invite_state),
+		(timeline, required_state, invite_state),
 		(joined_count, invited_count),
 		(highlight_count, notification_count, _last_notification_read, thread_counts),
 	) = join4(meta, events, member_counts, notification_counts)
@@ -215,8 +210,13 @@ async fn handle_room(
 	)
 	.await;
 
+	let previous_connection_pos = previous_connection_pos.filter(|_| !is_invite);
+	let (initial, num_live) =
+		room_timeline_metadata(roomsince, previous_connection_pos, &timeline);
+	let timeline = timeline.into_iter().map(at!(1)).collect();
+
 	Ok(response::Room {
-		initial: roomsince.eq(&0).then_some(true),
+		initial,
 		lists: lists.clone(),
 		membership: membership.clone(),
 		name: room_name.or(heroes_name),
@@ -226,7 +226,7 @@ async fn handle_room(
 		required_state,
 		invite_state: invite_state.flatten(),
 		prev_batch: prev_batch.as_deref().map(Into::into),
-		num_live: num_live.flatten(),
+		num_live,
 		limited,
 		timeline,
 		bump_stamp,
@@ -277,6 +277,28 @@ fn merged_room_details(
 			required_state.extend(config.required_state.clone());
 			(timeline_limit.max(usize_from_ruma(config.timeline_limit)), required_state)
 		})
+}
+
+fn room_timeline_metadata<Event>(
+	roomsince: u64,
+	previous_connection_pos: Option<u64>,
+	timeline_pdus: &[(PduCount, Event)],
+) -> (Option<bool>, Option<UInt>) {
+	let initial = roomsince.eq(&0).then_some(true);
+	let num_live = previous_connection_pos
+		.map(PduCount::from)
+		.and_then(|previous_connection_pos| {
+			timeline_pdus
+				.iter()
+				.rev()
+				.map(|(position, _)| *position)
+				.take_while(|position| *position > previous_connection_pos)
+				.count()
+				.try_into()
+				.ok()
+		});
+
+	(initial, num_live)
 }
 
 async fn resolve_heroes(
@@ -487,4 +509,64 @@ async fn wildcard_state_keys(
 		.map(|state_key| (event_type.clone(), state_key))
 		.collect()
 		.await
+}
+
+#[cfg(test)]
+mod tests {
+	use ruma::{UInt, uint};
+	use tuwunel_core::matrix::pdu::PduCount;
+
+	use super::room_timeline_metadata;
+
+	fn timeline(positions: &[u64]) -> Vec<(PduCount, ())> {
+		positions
+			.iter()
+			.copied()
+			.map(|position| (PduCount::Normal(position), ()))
+			.collect()
+	}
+
+	#[test]
+	fn first_connection_timeline_is_initial_and_historical() {
+		let (initial, num_live) = room_timeline_metadata(0, None, &timeline(&[8, 9, 10]));
+
+		assert_eq!(initial, Some(true));
+		assert_eq!(num_live, None);
+	}
+
+	#[test]
+	fn incremental_new_room_has_one_live_event() {
+		let (initial, num_live) = room_timeline_metadata(0, Some(10), &timeline(&[8, 9, 11]));
+
+		assert_eq!(initial, Some(true));
+		assert_eq!(num_live, Some(uint!(1)));
+	}
+
+	#[test]
+	fn incremental_range_expansion_has_no_live_events() {
+		let (initial, num_live) = room_timeline_metadata(0, Some(10), &timeline(&[7, 8, 9]));
+
+		assert_eq!(initial, Some(true));
+		assert_eq!(num_live, Some(uint!(0)));
+	}
+
+	#[test]
+	fn incremental_timeline_counts_only_live_suffix() {
+		let (initial, num_live) = room_timeline_metadata(5, Some(10), &timeline(&[8, 9, 11, 12]));
+
+		assert_eq!(initial, None);
+		assert_eq!(num_live, Some(uint!(2)));
+	}
+
+	#[test]
+	fn limited_timeline_counts_only_returned_live_events() {
+		// Earlier live events at positions 11 through 13 were truncated.
+		let returned_timeline = timeline(&[14, 15]);
+		let (_, num_live) = room_timeline_metadata(5, Some(10), &returned_timeline);
+
+		assert_eq!(num_live, Some(uint!(2)));
+		let timeline_len =
+			UInt::try_from(returned_timeline.len()).expect("timeline length fits UInt");
+		assert!(num_live.expect("incremental response") <= timeline_len);
+	}
 }
