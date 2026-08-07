@@ -279,38 +279,109 @@ pub struct Config {
 	#[serde(default = "default_db_write_buffer_capacity_mb")]
 	pub db_write_buffer_capacity_mb: f64,
 
+	/// Maximum number of entries in the RocksDB block cache shared by the
+	/// `pduid_pdu` and `eventid_outlierpdu` column families: a PDU's full
+	/// body, keyed by its PDU ID, and the same body keyed by event ID when
+	/// the PDU is an outlier.
+	///
+	/// This is an entry count, not a byte size. The cache's actual capacity
+	/// in bytes is this value multiplied by an internal per-column-family
+	/// key+value size estimate, then multiplied by `cache_capacity_modifier`.
+	///
+	/// Scaled by your CPU core count by default; see
+	/// `cache_capacity_modifier` to scale this along with the other
+	/// individual LRU caches at once.
+	///
 	/// default: varies by system
 	#[serde(default = "default_pdu_cache_capacity")]
 	pub pdu_cache_capacity: u32,
 
+	/// Maximum number of entries in the RocksDB block cache shared by the
+	/// `shorteventid_authchain` and `authchainkey_authchain` column
+	/// families: a room event's full auth chain, keyed by its short event ID
+	/// or by the auth chain's own key.
+	///
+	/// Same entry-count semantics as `pdu_cache_capacity` above; see there
+	/// for how this becomes a byte capacity and how
+	/// `cache_capacity_modifier` applies.
+	///
 	/// default: varies by system
 	#[serde(default = "default_auth_chain_cache_capacity")]
 	pub auth_chain_cache_capacity: u32,
 
+	/// Maximum number of entries in the RocksDB block cache for the
+	/// `shorteventid_eventid` column family: an event's full event ID,
+	/// looked up from its short event ID.
+	///
+	/// Same entry-count semantics as `pdu_cache_capacity`.
+	///
 	/// default: varies by system
 	#[serde(default = "default_shorteventid_cache_capacity")]
 	pub shorteventid_cache_capacity: u32,
 
+	/// Maximum number of entries in the RocksDB block cache for the
+	/// `eventid_shorteventid` column family: an event's short event ID,
+	/// looked up from its full event ID. The reverse lookup of
+	/// `shorteventid_cache_capacity`.
+	///
+	/// Same entry-count semantics as `pdu_cache_capacity`.
+	///
 	/// default: varies by system
 	#[serde(default = "default_eventidshort_cache_capacity")]
 	pub eventidshort_cache_capacity: u32,
 
+	/// Maximum number of entries in the RocksDB block cache for the
+	/// `eventid_pduid` column family: an event's PDU ID, looked up from its
+	/// full event ID.
+	///
+	/// Same entry-count semantics as `pdu_cache_capacity`.
+	///
 	/// default: varies by system
 	#[serde(default = "default_eventid_pdu_cache_capacity")]
 	pub eventid_pdu_cache_capacity: u32,
 
+	/// Maximum number of entries in the RocksDB block cache for the
+	/// `shortstatekey_statekey` column family: a state event's full state
+	/// key, looked up from its short state key.
+	///
+	/// Same entry-count semantics as `pdu_cache_capacity`.
+	///
 	/// default: varies by system
 	#[serde(default = "default_shortstatekey_cache_capacity")]
 	pub shortstatekey_cache_capacity: u32,
 
+	/// Maximum number of entries in the RocksDB block cache for the
+	/// `statekey_shortstatekey` column family: a state event's short state
+	/// key, looked up from its full state key. The reverse lookup of
+	/// `shortstatekey_cache_capacity`.
+	///
+	/// Same entry-count semantics as `pdu_cache_capacity`.
+	///
 	/// default: varies by system
 	#[serde(default = "default_statekeyshort_cache_capacity")]
 	pub statekeyshort_cache_capacity: u32,
 
+	/// Maximum number of entries in the RocksDB block cache for the
+	/// `servernameevent_data` column family: outbound federation events
+	/// (PDUs and EDUs) queued for delivery, keyed by destination server
+	/// name.
+	///
+	/// Same entry-count semantics as `pdu_cache_capacity`.
+	///
 	/// default: varies by system
 	#[serde(default = "default_servernameevent_data_cache_capacity")]
 	pub servernameevent_data_cache_capacity: u32,
 
+	/// Maximum number of entries in the in-memory LRU cache of decompressed
+	/// room state (a list of short state-info entries per state hash), used
+	/// by the state compressor to avoid re-walking
+	/// `shortstatehash_statediff` on every lookup.
+	///
+	/// Unlike the other caches on this page, this one is not backed by
+	/// RocksDB: it is a plain in-process cache sized directly in entries,
+	/// with no per-entry byte-size conversion. `cache_capacity_modifier`
+	/// still applies to it.
+	///
 	/// default: varies by system
 	#[serde(default = "default_stateinfo_cache_capacity")]
 	pub stateinfo_cache_capacity: u32,
