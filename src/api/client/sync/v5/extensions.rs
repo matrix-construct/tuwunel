@@ -14,7 +14,11 @@ use ruma::{
 use tuwunel_core::{Result, apply, at, extract_variant, utils::BoolExt};
 use tuwunel_service::sync::Connection;
 
-use super::{SyncInfo, Window, share_encrypted_room};
+use self::{
+	account_data::collect_ranges as collect_account_data_ranges,
+	receipts::collect_ranges as collect_receipt_ranges,
+};
+use super::{SyncInfo, Window, range::Results, share_encrypted_room};
 
 #[tracing::instrument(
 	name = "extensions",
@@ -83,6 +87,34 @@ pub(super) async fn handle(
 	})
 }
 
+pub(super) fn apply_ranges(
+	conn: &Connection,
+	window: &Window,
+	ranges: &mut Results,
+	extensions: &mut response::Extensions,
+) {
+	ranges.retain_complete(&mut extensions.typing.rooms, |room_id| window.contains_key(room_id));
+
+	if conn.extensions.receipts.enabled.unwrap_or(false) {
+		extensions
+			.receipts
+			.rooms
+			.extend(collect_receipt_ranges(conn, window, ranges).rooms);
+	}
+
+	if conn
+		.extensions
+		.account_data
+		.enabled
+		.unwrap_or(false)
+	{
+		extensions
+			.account_data
+			.rooms
+			.extend(collect_account_data_ranges(conn, window, ranges));
+	}
+}
+
 #[tracing::instrument(
 	name = "selector",
 	level = "trace",
@@ -90,7 +122,6 @@ pub(super) async fn handle(
 	fields(?implicit, ?explicit),
 )]
 fn selector<'a, ListIter, SubsIter>(
-	SyncInfo { .. }: SyncInfo<'a>,
 	conn: &'a Connection,
 	window: &'a Window,
 	implicit: Option<ListIter>,

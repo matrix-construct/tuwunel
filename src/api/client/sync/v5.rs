@@ -1,15 +1,13 @@
 mod extensions;
 mod filter;
+mod range;
 mod rooms;
 mod selector;
 
 use std::{collections::BTreeMap, fmt::Debug, sync::Arc, time::Duration};
 
 use axum::extract::{Extension, State};
-use futures::{
-	FutureExt, TryFutureExt,
-	future::{join, try_join},
-};
+use futures::{FutureExt, TryFutureExt, future::join};
 use ruma::{
 	DeviceId, OwnedRoomId, UserId,
 	api::client::sync::sync_events::v5::{ListId, Request, Response, response},
@@ -34,6 +32,10 @@ use tuwunel_service::{
 	sync::{Connection, into_connection_key},
 };
 
+use self::{
+	extensions::{apply_ranges, handle as handle_extensions},
+	range::collect as collect_ranges,
+};
 use super::share_encrypted_room;
 use crate::{ClientIp, Ruma};
 
@@ -190,15 +192,14 @@ pub(crate) async fn sync_events_v5_route(
 			.await;
 
 		if conn.globalsince < conn.next_batch {
-			let rooms = rooms::handle(sync_info, &conn, &window)
-				.map_ok(|response_rooms| response.rooms = response_rooms);
+			let ranges = collect_ranges(sync_info, &conn, &window);
+			let extensions = handle_extensions(sync_info, &conn, &window);
+			let (mut ranges, extensions) = join(ranges, extensions).boxed().await;
 
-			let extensions = extensions::handle(sync_info, &conn, &window)
-				.map_ok(|response_extensions| response.extensions = response_extensions);
-
-			try_join(rooms, extensions).boxed().await?;
-
-			conn.update_rooms_epilogue(response.rooms.keys().map(AsRef::as_ref));
+			response.extensions = extensions?;
+			apply_ranges(&conn, &window, &mut ranges, &mut response.extensions);
+			conn.update_rooms_epilogue(ranges.keys());
+			response.rooms = ranges.into_payloads();
 
 			if !is_empty_response(&response) {
 				response.pos = conn.next_batch.to_string().into();

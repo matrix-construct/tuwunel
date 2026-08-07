@@ -101,33 +101,33 @@ fn update_cache_keeps_filters_when_omitted() {
 }
 
 #[test]
-fn epilogue_advances_only_delivered_rooms() {
-	let delivered = room_id!("!a:example.com");
-	let undelivered = room_id!("!b:example.com");
+fn epilogue_advances_only_complete_ranges() {
+	let complete = room_id!("!a:example.com");
+	let incomplete = room_id!("!b:example.com");
 	let mut conn = Connection {
 		next_batch: 5,
 		rooms: [
-			(delivered.to_owned(), Room { roomsince: 3 }),
-			(undelivered.to_owned(), Room { roomsince: 3 }),
+			(complete.to_owned(), Room { roomsince: 3 }),
+			(incomplete.to_owned(), Room { roomsince: 3 }),
 		]
 		.into(),
 		..Default::default()
 	};
 
-	conn.update_rooms_epilogue(once(delivered));
+	conn.update_rooms_epilogue(once(complete));
 
-	assert_eq!(conn.rooms[delivered].roomsince, 5);
-	assert_eq!(conn.rooms[undelivered].roomsince, 3);
+	assert_eq!(conn.rooms[complete].roomsince, 5);
+	assert_eq!(conn.rooms[incomplete].roomsince, 3);
 }
 
 #[test]
-fn epilogue_tracks_a_first_delivered_room() {
-	let delivered = room_id!("!new:example.com");
+fn epilogue_tracks_a_first_complete_range() {
+	let complete = room_id!("!new:example.com");
 	let mut conn = Connection { next_batch: 7, ..Default::default() };
 
-	conn.update_rooms_epilogue(once(delivered));
+	conn.update_rooms_epilogue(once(complete));
 
-	assert_eq!(conn.rooms[delivered].roomsince, 7);
+	assert_eq!(conn.rooms[complete].roomsince, 7);
 }
 
 fn request_with_list(list: List) -> Request {

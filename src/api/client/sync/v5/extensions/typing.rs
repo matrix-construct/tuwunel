@@ -8,7 +8,7 @@ use ruma::{
 };
 use tuwunel_core::{
 	Result, debug_error,
-	utils::{IterStream, ReadyExt},
+	utils::{IterStream, stream::BroadbandExt},
 };
 
 use super::{Connection, SyncInfo, Window, selector};
@@ -37,24 +37,24 @@ pub(super) async fn collect(
 		.as_deref()
 		.map(<[_]>::iter);
 
-	selector(sync_info, conn, window, implicit, explicit)
+	selector(conn, window, implicit, explicit)
 		.stream()
-		.filter_map(async |room_id| {
-			services
+		.broad_filter_map(async |room_id| {
+			let users = services
 				.typing
 				.typing_users_for_user(room_id, sender_user)
 				.inspect_err(|e| debug_error!(%room_id, "Failed to get typing events: {e}"))
 				.await
 				.ok()
-				.filter(|users| !users.is_empty())
-				.map(|users| (room_id, users))
-		})
-		.ready_filter_map(|(room_id, users)| {
+				.filter(|users| !users.is_empty())?;
+
 			let content = TypingEventContent::new(users);
 			let event = SyncTypingEvent { content };
 			let event = Raw::new(&event);
 
-			Some((room_id.to_owned(), event.ok()?))
+			event
+				.ok()
+				.map(|event| (room_id.to_owned(), event))
 		})
 		.collect::<BTreeMap<_, _>>()
 		.map(|rooms| Typing { rooms })

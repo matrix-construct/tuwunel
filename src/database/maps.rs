@@ -5,7 +5,9 @@ use tuwunel_core::Result;
 
 use crate::{
 	Engine, Map,
-	engine::descriptor::{self, CacheDisp, Descriptor},
+	engine::descriptor::{
+		self, CacheDisp, Descriptor, RANDOM_SMALL as PRIVATE_READ_SYNC_DESCRIPTOR,
+	},
 };
 
 pub(super) type Maps = BTreeMap<MapsKey, MapsVal>;
@@ -357,6 +359,12 @@ pub(super) static MAPS: &[Descriptor] = &[
 	Descriptor {
 		name: "roomuserid_privateread",
 		..descriptor::RANDOM_SMALL
+	},
+	// Aliased: importing RANDOM_SMALL unaliased makes every qualified sibling
+	// an unused_qualifications error.
+	Descriptor {
+		name: "roomuserid_privatereadsync",
+		..PRIVATE_READ_SYNC_DESCRIPTOR
 	},
 	Descriptor {
 		name: "roomuseroncejoinedids",

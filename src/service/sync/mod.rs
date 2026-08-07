@@ -258,21 +258,27 @@ pub fn update_rooms_prologue(&mut self, retard_since: Option<u64>) {
 	});
 }
 
-/// Advance the per-room cursor for each room delivered in a response.
+/// Advance the per-room cursor for each complete bounded room range.
 ///
-/// `roomsince` is the lower bound of every content query for its room, so
-/// only rooms whose payload was returned may advance. A failed or dropped
-/// room keeps its cursor and replays the same range in a later response.
+/// `roomsince` is the lower bound of every content query for its room. Only
+/// rooms whose complete range was safely assembled may advance. A failed room
+/// keeps its cursor and retries the same range after a later wake.
 #[implement(Connection)]
 #[tracing::instrument(level = "debug", skip_all)]
-pub fn update_rooms_epilogue<'a, Delivered>(&mut self, delivered: Delivered)
+pub fn update_rooms_epilogue<'a, Complete>(&mut self, complete: Complete)
 where
-	Delivered: Iterator<Item = &'a RoomId> + Send + 'a,
+	Complete: Iterator<Item = &'a RoomId> + Send + 'a,
 {
-	delivered.for_each(|room_id| {
-		let room = self.rooms.entry(room_id.into()).or_default();
-
-		room.roomsince = self.next_batch;
+	let next_batch = self.next_batch;
+	complete.for_each(|room_id| {
+		if let Some(room) = self.rooms.get_mut(room_id) {
+			room.roomsince = next_batch;
+		} else {
+			self.rooms
+				.entry(room_id.into())
+				.or_default()
+				.roomsince = next_batch;
+		}
 	});
 }
 

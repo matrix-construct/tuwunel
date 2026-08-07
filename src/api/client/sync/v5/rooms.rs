@@ -8,7 +8,7 @@ use futures::{
 	future::{join, join3, join4},
 };
 use ruma::{
-	JsOption, MxcUri, OwnedEventId, OwnedMxcUri, OwnedRoomId, RoomId, UInt, UserId,
+	JsOption, MxcUri, OwnedEventId, OwnedMxcUri, RoomId, UInt, UserId,
 	api::client::sync::sync_events::{
 		UnreadNotificationsCount,
 		v5::{DisplayName, response, response::Heroes},
@@ -19,7 +19,7 @@ use ruma::{
 	serde::Raw,
 };
 use tuwunel_core::{
-	Result, at, error, is_equal_to,
+	Error, Result, at, is_equal_to,
 	itertools::Itertools,
 	matrix::{
 		Event, StateKey,
@@ -37,41 +37,18 @@ use tuwunel_service::Services;
 
 use self::{bump_stamp::room_bump_stamp, heroes::calculate_heroes};
 use super::{
-	super::{load_timeline, strip_prev_state},
-	Connection, ListIds, SyncInfo, Window, WindowRoom,
+	super::{load_timeline_fallible, strip_prev_state},
+	Connection, ListIds, SyncInfo, WindowRoom,
 };
 use crate::client::{annotate_membership, ignored_filter, with_membership};
 
-type ThreadCounts = BTreeMap<OwnedEventId, (u64, u64)>;
-
-#[tracing::instrument(
-    name = "rooms",
-    level = "debug",
-    skip_all,
-    fields(
-        next_batch = conn.next_batch,
-        window = window.len(),
-    )
-)]
-pub(super) async fn handle(
-	sync_info: SyncInfo<'_>,
-	conn: &Connection,
-	window: &Window,
-) -> Result<BTreeMap<OwnedRoomId, response::Room>> {
-	window
-		.iter()
-		.stream()
-		.broad_filter_map(async |(room_id, room)| {
-			handle_room(sync_info, conn, room)
-				.map_ok(move |room| (room_id.clone(), room))
-				.inspect_err(|e| error!(?room_id, %e, "sync handler failed"))
-				.await
-				.ok()
-		})
-		.collect()
-		.map(Ok)
-		.await
+#[derive(Debug)]
+pub(super) enum Failure {
+	Timeline(Error),
+	Payload(Error),
 }
+
+type ThreadCounts = BTreeMap<OwnedEventId, (u64, u64)>;
 
 #[tracing::instrument(
 	name = "room",
@@ -79,11 +56,12 @@ pub(super) async fn handle(
 	skip_all,
 	fields(room_id, roomsince)
 )]
-async fn handle_room(
+pub(super) async fn handle_room(
 	sync_info: SyncInfo<'_>,
 	conn: &Connection,
 	window_room: &WindowRoom,
-) -> Result<response::Room> {
+	roomsince: u64,
+) -> Result<response::Room, Failure> {
 	let SyncInfo {
 		services,
 		sender_user,
@@ -94,33 +72,25 @@ async fn handle_room(
 		lists, membership, room_id, last_count, ..
 	} = window_room;
 
-	// Absent connection state is first contact, e.g. a new subscription.
-	let roomsince = conn
-		.rooms
-		.get(room_id)
-		.map(|room| room.roomsince)
-		.unwrap_or_default();
-
 	debug_assert!(
 		*last_count > roomsince || *last_count == 0 || roomsince == 0,
 		"Stale room shouldn't be in the window"
 	);
 
 	if matches!(*membership, Some(MembershipState::Leave | MembershipState::Ban)) {
-		return leave_or_ban_response(sync_info, conn, window_room, roomsince).await;
+		return leave_or_ban_response(sync_info, conn, window_room, roomsince)
+			.map_err(Failure::Payload)
+			.await;
 	}
 
 	let is_invite = *membership == Some(MembershipState::Invite);
 
-	let encrypted = services
-		.state_accessor
-		.is_encrypted_room(room_id)
-		.await;
+	let encrypted = services.state_accessor.is_encrypted_room(room_id);
 
 	let (timeline_limit, required_state) = merged_room_details(conn, lists, room_id);
 
 	let timeline = is_invite.is_false().then_async(|| {
-		load_timeline(
+		load_timeline_fallible(
 			services,
 			sender_user,
 			room_id,
@@ -130,11 +100,15 @@ async fn handle_room(
 		)
 	});
 
-	// A failed load must fail the room, else roomsince advances past unsent events.
-	let (timeline_pdus, limited, last_timeline_count) = timeline
+	let timeline = timeline
 		.map(Option::transpose)
-		.await?
-		.unwrap_or_else(|| (Vec::new(), true, PduCount::default()));
+		.map_err(Failure::Timeline);
+
+	let (encrypted, timeline) = join(encrypted, timeline).await;
+
+	// A failed load must fail the room, else roomsince advances past unsent events.
+	let (timeline_pdus, limited, last_timeline_count) =
+		timeline?.unwrap_or_else(|| (Vec::new(), true, PduCount::default()));
 
 	let required_state = required_state
 		.into_iter()
@@ -156,7 +130,8 @@ async fn handle_room(
 		PduCount::from(conn.next_batch),
 		last_timeline_count,
 	)
-	.await;
+	.map_err(Failure::Timeline)
+	.await?;
 
 	let required_state = collect_required_state(
 		services,

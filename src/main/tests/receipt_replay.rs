@@ -214,6 +214,10 @@ async fn private_read_unannounced(services: &Services, room: &RoomId, user: &Use
 		.read_receipt
 		.last_privateread_update(user, room)
 		.await;
+	let (published_before, _) = services
+		.read_receipt
+		.private_read_sync_get_count(room, user)
+		.await?;
 
 	let stored = set_private_read(services, room, user, 7, false).await;
 	let after = services
@@ -225,6 +229,10 @@ async fn private_read_unannounced(services: &Services, room: &RoomId, user: &Use
 		.read_receipt
 		.private_read_get_count(room, user)
 		.await?;
+	let (published_after, _) = services
+		.read_receipt
+		.private_read_sync_get_count(room, user)
+		.await?;
 
 	if !stored || position != 7 {
 		return Err!("unannounced private marker did not store its position");
@@ -232,6 +240,83 @@ async fn private_read_unannounced(services: &Services, room: &RoomId, user: &Use
 
 	if after != before {
 		return Err!("unannounced private marker moved the update token");
+	}
+
+	if published_after != published_before {
+		return Err!("unannounced private marker changed the announced snapshot");
+	}
+
+	let announced = set_private_read(services, room, user, 8, true).await;
+	let (published, _) = services
+		.read_receipt
+		.private_read_sync_get_count(room, user)
+		.await?;
+
+	if !announced || published != 8 {
+		return Err!("announced private marker did not advance the sync snapshot");
+	}
+
+	private_read_premirror(services, room, user).await
+}
+
+/// A database predating the announced mirror holds gate rows with no mirror
+/// rows.
+///
+/// The bounded reader must fall back to the active state rather than fail the
+/// room range until the next announced write. A marker naming a resolvable
+/// event is served; one naming an unknown event is skipped, not an error.
+async fn private_read_premirror(services: &Services, room: &RoomId, user: &UserId) -> Result {
+	// Prime the short room id so the fallible reader can resolve the room.
+	services
+		.short
+		.get_or_create_shortroomid(room)
+		.await;
+
+	let gate = services
+		.read_receipt
+		.last_privateread_update(user, room)
+		.await;
+
+	let mirror = &services.db["roomuserid_privatereadsync"];
+
+	mirror.del((room, user));
+	mirror.del((room, user, ""));
+
+	let events = services
+		.read_receipt
+		.private_read_get_fallible(room, user, gate)
+		.await?;
+
+	if !events.is_empty() {
+		return Err!("pre-mirror fallback should skip markers without a resolvable event");
+	}
+
+	let admin_room = services.admin.get_admin_room().await?;
+	let position = services
+		.timeline
+		.last_timeline_count(None, &admin_room, None)
+		.await?
+		.into_unsigned();
+
+	if !set_private_read(services, &admin_room, user, position, true).await {
+		return Err!("admin-room private marker did not store");
+	}
+
+	let gate = services
+		.read_receipt
+		.last_privateread_update(user, &admin_room)
+		.await;
+
+	mirror.del((&admin_room, user));
+	mirror.del((&admin_room, user, ""));
+
+	let served = services
+		.read_receipt
+		.private_read_get_fallible(&admin_room, user, gate)
+		.await?;
+
+	if served.len() != 1 {
+		return Err!("pre-mirror fallback did not serve the active marker");
 	}
 
 	Ok(())
