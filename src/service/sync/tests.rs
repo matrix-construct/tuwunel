@@ -130,6 +130,19 @@ fn epilogue_tracks_a_first_complete_range() {
 	assert_eq!(conn.rooms[complete].roomsince, 7);
 }
 
+#[test]
+fn prologue_rewinds_a_complete_range_for_replay() {
+	let room_id = room_id!("!replay:example.com");
+	let mut conn = Connection {
+		rooms: [(room_id.to_owned(), Room { roomsince: 9 })].into(),
+		..Default::default()
+	};
+
+	conn.update_rooms_prologue(Some(5));
+
+	assert_eq!(conn.rooms[room_id].roomsince, 5);
+}
+
 fn request_with_list(list: List) -> Request {
 	let mut request = Request::new();
 

@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, sync::Arc};
 
 use futures::{
-	Stream, StreamExt, TryStreamExt,
+	Stream, TryStreamExt,
 	future::{join, try_join},
 };
 use ruma::{
@@ -11,7 +11,7 @@ use ruma::{
 };
 use serde::{Deserialize, de::IgnoredAny};
 use tuwunel_core::{
-	Result, err, error, is_equal_to,
+	Result, error,
 	matrix::pdu::PduCount,
 	smallvec::SmallVec,
 	trace,
@@ -206,32 +206,6 @@ impl Data {
 
 				Ok((user_id, count, Raw::from_json(event)))
 			})
-	}
-
-	#[inline]
-	pub(super) async fn last_receipt_count<'a>(
-		&'a self,
-		room_id: &'a RoomId,
-		upper: Option<u64>,
-		user_id: Option<&'a UserId>,
-	) -> Result<u64> {
-		// 4-tuple key: pre-MSC3771 rows deserialize with `&str` tail empty.
-		type Key<'a> = (&'a RoomId, u64, &'a UserId, &'a str);
-
-		let key = (room_id, upper.unwrap_or(u64::MAX));
-
-		self.readreceiptid_readreceipt
-			.rev_keys_from(&key)
-			.ignore_err()
-			.ready_take_while(|(room_id_, ..): &Key<'_>| *room_id_ == room_id)
-			.ready_filter(|(_, _, user_id_, _): &Key<'_>| {
-				user_id.is_none_or(is_equal_to!(*user_id_))
-			})
-			.map(|(_, count, ..): Key<'_>| count)
-			.boxed()
-			.next()
-			.await
-			.ok_or_else(|| err!(Request(NotFound("No receipts found in room"))))
 	}
 
 	/// Sets the private read marker for `(room, user, thread)`, reporting

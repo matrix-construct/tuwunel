@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, mem::take};
 
-use futures::{StreamExt, TryFutureExt, TryStreamExt, future::try_join4};
+use futures::{FutureExt, StreamExt, TryFutureExt, TryStreamExt, future::try_join4};
 use ruma::{
 	OwnedRoomId, OwnedUserId, RoomId,
 	api::client::sync::sync_events::v5::response,
@@ -14,7 +14,7 @@ use ruma::{
 use tokio::sync::OnceCell;
 use tuwunel_core::{
 	Error, Result, at, err, error, extract_variant, implement,
-	utils::{IterStream, TryReadyExt, stream::BroadbandExt},
+	utils::{BoolExt, IterStream, TryReadyExt, stream::BroadbandExt},
 };
 use tuwunel_service::{
 	rooms::read_receipt::{PrivateReadEvents, pack_receipts_fallible},
@@ -70,19 +70,6 @@ struct CompleteRange {
 #[derive(Default)]
 pub(super) struct Results {
 	ranges: BTreeMap<OwnedRoomId, CompleteRange>,
-}
-
-#[implement(Results)]
-#[inline]
-pub(super) fn contains(&self, room_id: &RoomId) -> bool { self.ranges.contains_key(room_id) }
-
-#[implement(Results)]
-pub(super) fn retain_complete<T>(
-	&self,
-	rooms: &mut BTreeMap<OwnedRoomId, T>,
-	attempted: impl Fn(&RoomId) -> bool,
-) {
-	rooms.retain(|room_id, _| !attempted(room_id) || self.contains(room_id));
 }
 
 #[implement(Results)]
@@ -171,19 +158,27 @@ async fn collect_room(
 ) -> Result<CompleteRange, Failure> {
 	let room_id = &window_room.room_id;
 
-	let payload = handle_room(sync_info, conn, window_room, roomsince).map_err(Failure::from);
+	let payload = window_room
+		.payload_is_fresh(roomsince)
+		.then_async(|| handle_room(sync_info, conn, window_room, roomsince))
+		.map(Option::transpose)
+		.map_err(Failure::from);
+
 	let public_receipts = public_receipts(sync_info, conn, room_id, roomsince, ignored)
 		.map_err(|error| Failure::new(Domain::PublicReceipt, error));
+
 	let private_receipts = private_receipts(sync_info, conn, room_id, roomsince)
 		.map_err(|error| Failure::new(Domain::PrivateRead, error));
+
 	let account_data = room_account_data(sync_info, conn, room_id, roomsince)
 		.map_err(|error| Failure::new(Domain::RoomAccountData, error));
 
 	let (payload, public_receipts, private_receipts, account_data) =
 		try_join4(payload, public_receipts, private_receipts, account_data).await?;
 
-	assemble(Ok(payload), Ok(public_receipts), Ok(private_receipts), Ok(account_data))
+	assemble(payload, public_receipts, private_receipts, account_data)
 }
+
 async fn public_receipts(
 	SyncInfo { services, sender_user, .. }: SyncInfo<'_>,
 	conn: &Connection,
@@ -234,31 +229,16 @@ async fn private_receipts(
 		.last_privateread_update_fallible(sender_user, room_id)
 		.await?;
 
-	if update <= roomsince {
-		return Ok(PrivateReadEvents::new());
+	match update {
+		| _ if update <= roomsince => Ok(PrivateReadEvents::new()),
+		| _ if update > conn.next_batch =>
+			Err(err!(Database("Private read advanced beyond the bounded sync range."))),
+		| _ =>
+			services
+				.read_receipt
+				.private_read_get_fallible(room_id, sender_user, update)
+				.await,
 	}
-
-	if update > conn.next_batch {
-		return Err(err!(Database("Private read advanced beyond the bounded sync range.")));
-	}
-
-	let receipts = services
-		.read_receipt
-		.private_read_get_fallible(room_id, sender_user, update)
-		.await?;
-
-	let confirmed = services
-		.read_receipt
-		.last_privateread_update_fallible(sender_user, room_id)
-		.await?;
-
-	if confirmed != update {
-		return Err(err!(Database(
-			"Private read changed while assembling a bounded sync range."
-		)));
-	}
-
-	Ok(receipts)
 }
 
 async fn room_account_data(
@@ -277,21 +257,15 @@ async fn room_account_data(
 }
 
 fn assemble<PublicReceipts>(
-	payload: Result<response::Room, Failure>,
-	public_receipts: Result<PublicReceipts, Failure>,
-	private_receipts: Result<PrivateReadEvents, Failure>,
-	account_data: Result<Vec<Raw<AnyRoomAccountDataEvent>>, Failure>,
+	payload: Option<response::Room>,
+	public_receipts: PublicReceipts,
+	private_receipts: PrivateReadEvents,
+	account_data: Vec<Raw<AnyRoomAccountDataEvent>>,
 ) -> Result<CompleteRange, Failure>
 where
 	PublicReceipts: Iterator<Item = Raw<AnySyncEphemeralRoomEvent>>,
 {
-	let payload = payload?;
-	let public_receipts = public_receipts?;
-	let private_receipts = private_receipts?;
-	let account_data = account_data?;
-
 	let mut receipts = public_receipts.chain(private_receipts).peekable();
-
 	let receipts = receipts
 		.peek()
 		.is_some()
@@ -299,65 +273,15 @@ where
 		.transpose()
 		.map_err(|error| Failure::new(Domain::ReceiptSerialization, error))?;
 
-	Ok(CompleteRange {
-		payload: Some(payload),
-		receipts,
-		account_data,
-	})
+	Ok(CompleteRange { payload, receipts, account_data })
 }
 
 #[cfg(test)]
 mod tests {
-	use std::vec::IntoIter;
-
 	use ruma::{api::client::sync::sync_events::v5::response::Room as ResponseRoom, room_id};
 	use serde_json::{json, value::to_raw_value};
 
 	use super::*;
-
-	#[test]
-	fn failures_withhold_all_range_output_until_retry_succeeds() {
-		let room_id = room_id!("!range:example.com");
-
-		for domain in [
-			Domain::Timeline,
-			Domain::Payload,
-			Domain::PublicReceipt,
-			Domain::PrivateRead,
-			Domain::RoomAccountData,
-		] {
-			let mut failed = publish(room_id, assemble_with_failure(domain));
-			let mut typing = [(room_id.to_owned(), ())].into();
-			failed.retain_complete(&mut typing, |_| true);
-
-			assert!(!failed.contains(room_id));
-			assert!(typing.is_empty());
-			assert!(failed.take_receipts(room_id).is_none());
-			assert!(failed.take_account_data(room_id).is_none());
-			assert!(failed.into_payloads().is_empty());
-
-			let retried = publish(room_id, successful_range());
-			let mut typing = [(room_id.to_owned(), ())].into();
-			retried.retain_complete(&mut typing, |_| true);
-
-			assert!(retried.contains(room_id));
-			assert_eq!(typing.len(), 1);
-			assert_eq!(retried.into_payloads().len(), 1);
-		}
-	}
-
-	#[test]
-	fn unattempted_extension_rooms_are_preserved() {
-		let attempted = room_id!("!attempted:example.com");
-		let unattempted = room_id!("!unattempted:example.com");
-		let failed = publish(attempted, assemble_with_failure(Domain::Timeline));
-		let mut typing = [(attempted.to_owned(), ()), (unattempted.to_owned(), ())].into();
-
-		failed.retain_complete(&mut typing, |room_id| room_id == attempted);
-
-		assert!(!typing.contains_key(attempted));
-		assert!(typing.contains_key(unattempted));
-	}
 
 	#[test]
 	fn malformed_receipt_withholds_the_complete_range() {
@@ -367,15 +291,64 @@ mod tests {
 		);
 
 		let range = assemble(
-			Ok(ResponseRoom::default()),
-			Ok(vec![malformed].into_iter()),
-			Ok(PrivateReadEvents::new()),
-			Ok(Vec::new()),
+			Some(ResponseRoom::default()),
+			vec![malformed].into_iter(),
+			PrivateReadEvents::new(),
+			Vec::new(),
 		);
+
 		let error = range.expect_err("malformed receipt must fail the complete range");
 
 		assert_eq!(error.domain, Domain::ReceiptSerialization);
-		assert!(!publish(room_id, Err(error)).contains(room_id));
+		assert!(
+			!publish(room_id, Err(error))
+				.ranges
+				.contains_key(room_id)
+		);
+	}
+
+	#[test]
+	fn extension_only_range_commits_without_a_room_payload() {
+		let room_id = room_id!("!extension-only:example.com");
+		let range = assemble(None, Vec::new().into_iter(), PrivateReadEvents::new(), Vec::new());
+
+		let range = publish(room_id, range);
+
+		assert_eq!(range.keys().collect::<Vec<_>>(), [room_id]);
+		assert!(range.into_payloads().is_empty());
+	}
+
+	#[test]
+	fn extension_outputs_are_taken_once_without_removing_the_complete_range() {
+		let room_id = room_id!("!extension-output:example.com");
+		let receipt = Raw::from_json(
+			to_raw_value(&json!({"content": {}})).expect("test receipt should serialize"),
+		);
+
+		let account_data = Raw::from_json(
+			to_raw_value(&json!({"type": "m.tag", "content": {"tags": {}}}))
+				.expect("test account data should serialize"),
+		);
+
+		let range = CompleteRange {
+			payload: None,
+			receipts: Some(receipt),
+			account_data: vec![account_data],
+		};
+
+		let ranges = [(room_id.to_owned(), range)].into();
+		let mut results = Results { ranges };
+
+		assert!(results.take_receipts(room_id).is_some());
+		assert!(results.take_receipts(room_id).is_none());
+
+		let count = results
+			.take_account_data(room_id)
+			.map(|events| events.len());
+
+		assert_eq!(Some(1), count);
+		assert!(results.take_account_data(room_id).is_none());
+		assert!(results.ranges.contains_key(room_id));
 	}
 
 	fn publish(room_id: &RoomId, range: Result<CompleteRange, Failure>) -> Results {
@@ -386,46 +359,5 @@ mod tests {
 			.collect();
 
 		Results { ranges }
-	}
-
-	fn assemble_with_failure(domain: Domain) -> Result<CompleteRange, Failure> {
-		let failure = || Failure::new(domain, Error::Err("injected failure".into()));
-
-		match domain {
-			| Domain::Timeline | Domain::Payload => assemble(
-				Err(failure()),
-				Ok(Vec::new().into_iter()),
-				Ok(PrivateReadEvents::new()),
-				Ok(Vec::new()),
-			),
-			| Domain::PublicReceipt => assemble(
-				Ok(ResponseRoom::default()),
-				Err::<IntoIter<Raw<AnySyncEphemeralRoomEvent>>, _>(failure()),
-				Ok(PrivateReadEvents::new()),
-				Ok(Vec::new()),
-			),
-			| Domain::PrivateRead => assemble(
-				Ok(ResponseRoom::default()),
-				Ok(Vec::new().into_iter()),
-				Err(failure()),
-				Ok(Vec::new()),
-			),
-			| Domain::RoomAccountData => assemble(
-				Ok(ResponseRoom::default()),
-				Ok(Vec::new().into_iter()),
-				Ok(PrivateReadEvents::new()),
-				Err(failure()),
-			),
-			| Domain::ReceiptSerialization => unreachable!("injected through malformed input"),
-		}
-	}
-
-	fn successful_range() -> Result<CompleteRange, Failure> {
-		assemble(
-			Ok(ResponseRoom::default()),
-			Ok(Vec::new().into_iter()),
-			Ok(PrivateReadEvents::new()),
-			Ok(Vec::new()),
-		)
 	}
 }

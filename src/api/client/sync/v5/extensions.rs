@@ -4,21 +4,42 @@ mod receipts;
 mod to_device;
 mod typing;
 
-use std::fmt::Debug;
+use std::{collections::BTreeMap, fmt::Debug};
 
-use futures::{FutureExt, future::join5};
+use futures::{FutureExt, future::join4};
 use ruma::{
-	RoomId,
-	api::client::sync::sync_events::v5::{ListId, request::ExtensionRoomConfig, response},
+	OwnedRoomId, RoomId,
+	api::client::sync::sync_events::v5::{
+		ListId,
+		request::ExtensionRoomConfig,
+		response::{Extensions, Room as ResponseRoom},
+	},
 };
 use tuwunel_core::{Result, apply, at, extract_variant, utils::BoolExt};
 use tuwunel_service::sync::Connection;
 
 use self::{
-	account_data::collect_ranges as collect_account_data_ranges,
+	account_data::{
+		collect as collect_account_data, collect_ranges as collect_account_data_ranges,
+	},
 	receipts::collect_ranges as collect_receipt_ranges,
 };
-use super::{SyncInfo, Window, range::Results, share_encrypted_room};
+use super::{SyncInfo, Window, WindowRoom, range::Results, share_encrypted_room};
+
+pub(super) struct Collected {
+	response: Extensions,
+	typing: typing::Collected,
+}
+
+impl Collected {
+	pub(super) fn into_response(
+		mut self,
+		payloads: &BTreeMap<OwnedRoomId, ResponseRoom>,
+	) -> Extensions {
+		self.response.typing = self.typing.into_response(payloads);
+		self.response
+	}
+}
 
 #[tracing::instrument(
 	name = "extensions",
@@ -35,22 +56,13 @@ pub(super) async fn handle(
 	sync_info: SyncInfo<'_>,
 	conn: &Connection,
 	window: &Window,
-) -> Result<response::Extensions> {
-	let SyncInfo { .. } = sync_info;
-
+) -> Result<Collected> {
 	let account_data = conn
 		.extensions
 		.account_data
 		.enabled
 		.unwrap_or(false)
-		.then_async(|| account_data::collect(sync_info, conn, window));
-
-	let receipts = conn
-		.extensions
-		.receipts
-		.enabled
-		.unwrap_or(false)
-		.then_async(|| receipts::collect(sync_info, conn, window));
+		.then_async(|| collect_account_data(sync_info, conn));
 
 	let typing = conn
 		.extensions
@@ -73,33 +85,31 @@ pub(super) async fn handle(
 		.unwrap_or(false)
 		.then_async(|| e2ee::collect(sync_info, conn));
 
-	let (account_data, receipts, typing, to_device, e2ee) =
-		join5(account_data, receipts, typing, to_device, e2ee)
-			.map(apply!(5, |t: Option<_>| t.unwrap_or(Ok(Default::default()))))
-			.await;
+	let (account_data, typing, to_device, e2ee) = join4(account_data, typing, to_device, e2ee)
+		.map(apply!(4, |t: Option<_>| t.unwrap_or(Ok(Default::default()))))
+		.await;
 
-	Ok(response::Extensions {
+	// Receipt and room account-data payloads only exist as bounded room-range
+	// outputs, applied by `apply_ranges` after the ranges resolve.
+	let response = Extensions {
 		account_data: account_data?,
-		receipts: receipts?,
-		typing: typing?,
+		receipts: Default::default(),
+		typing: Default::default(),
 		to_device: to_device?,
 		e2ee: e2ee?,
-	})
+	};
+
+	Ok(Collected { response, typing: typing? })
 }
 
 pub(super) fn apply_ranges(
 	conn: &Connection,
 	window: &Window,
 	ranges: &mut Results,
-	extensions: &mut response::Extensions,
+	extensions: &mut Collected,
 ) {
-	ranges.retain_complete(&mut extensions.typing.rooms, |room_id| window.contains_key(room_id));
-
 	if conn.extensions.receipts.enabled.unwrap_or(false) {
-		extensions
-			.receipts
-			.rooms
-			.extend(collect_receipt_ranges(conn, window, ranges).rooms);
+		extensions.response.receipts = collect_receipt_ranges(conn, window, ranges);
 	}
 
 	if conn
@@ -108,10 +118,8 @@ pub(super) fn apply_ranges(
 		.enabled
 		.unwrap_or(false)
 	{
-		extensions
-			.account_data
-			.rooms
-			.extend(collect_account_data_ranges(conn, window, ranges));
+		extensions.response.account_data.rooms =
+			collect_account_data_ranges(conn, window, ranges);
 	}
 }
 
@@ -136,9 +144,20 @@ where
 		.into_iter()
 		.flatten()
 		.any(|erc| matches!(erc, ExtensionRoomConfig::AllSubscribed));
+	let implicit_subscribed = implicit.clone();
+	let implicit_explicit = implicit.clone();
 
 	let all_subscribed = has_all_subscribed
-		.then(|| conn.subscriptions.keys())
+		.then(|| {
+			window
+				.keys()
+				.filter(|room_id| conn.subscriptions.contains_key(*room_id))
+				.filter(move |room_id| {
+					window
+						.get(*room_id)
+						.is_some_and(|room| !implicit_match(room, implicit_subscribed.as_ref()))
+				})
+		})
 		.into_iter()
 		.flatten()
 		.map(AsRef::as_ref);
@@ -150,6 +169,11 @@ where
 				.into_iter()
 				.flatten()
 				.filter_map(|erc| extract_variant!(erc, ExtensionRoomConfig::Room))
+				.filter(move |room_id| {
+					window
+						.get::<RoomId>(room_id.as_ref())
+						.is_some_and(|room| !implicit_match(room, implicit_explicit.as_ref()))
+				})
 				.map(AsRef::as_ref)
 		})
 		.into_iter()
@@ -157,17 +181,143 @@ where
 
 	let rooms_selected = window
 		.iter()
-		.filter(move |(_, room)| {
-			implicit.as_ref().is_none_or(|lists| {
-				lists
-					.clone()
-					.any(|list| room.lists.contains(list))
-			})
-		})
+		.filter(move |(_, room)| implicit_match(room, implicit.as_ref()))
 		.map(at!(0))
 		.map(AsRef::as_ref);
 
 	all_subscribed
 		.chain(rooms_explicit)
 		.chain(rooms_selected)
+}
+
+fn implicit_match<'a, ListIter>(room: &WindowRoom, implicit: Option<&ListIter>) -> bool
+where
+	ListIter: Iterator<Item = &'a ListId> + Clone,
+{
+	implicit.is_none_or(|lists| {
+		lists
+			.clone()
+			.any(|list| room.lists.contains(list))
+	})
+}
+
+#[cfg(test)]
+mod tests {
+	use std::slice::Iter;
+
+	use ruma::room_id;
+
+	use super::*;
+	use crate::client::sync::v5::ListIds;
+
+	#[test]
+	fn explicit_room_outside_the_window_is_rejected() {
+		let selected = room_id!("!selected:example.com");
+		let foreign = room_id!("!foreign:example.com");
+		let window = window(selected, 0);
+		let conn = Connection::default();
+		let list = ListId::from("unmatched");
+		let lists = [list];
+		let rooms = [ExtensionRoomConfig::Room(foreign.to_owned())];
+
+		assert!(
+			selector(&conn, &window, Some(lists.iter()), Some(rooms.iter()))
+				.next()
+				.is_none()
+		);
+	}
+
+	#[test]
+	fn all_subscribed_room_outside_the_window_is_rejected() {
+		let selected = room_id!("!selected:example.com");
+		let foreign = room_id!("!foreign:example.com");
+		let window = window(selected, 0);
+		let mut conn = Connection::default();
+		conn.subscriptions
+			.insert(foreign.to_owned(), Default::default());
+		let list = ListId::from("unmatched");
+		let lists = [list];
+		let rooms = [ExtensionRoomConfig::AllSubscribed];
+
+		assert!(
+			selector(&conn, &window, Some(lists.iter()), Some(rooms.iter()))
+				.next()
+				.is_none()
+		);
+	}
+
+	#[test]
+	fn stale_payload_room_in_the_window_remains_extension_eligible() {
+		let room_id = room_id!("!stale:example.com");
+		let window = window(room_id, 1);
+		let mut conn = Connection::default();
+		conn.rooms
+			.entry(room_id.to_owned())
+			.or_default()
+			.roomsince = 9;
+
+		let lists: Option<Iter<'_, ListId>> = None;
+		let rooms: Option<Iter<'_, ExtensionRoomConfig>> = None;
+
+		let selected = selector(&conn, &window, lists, rooms).collect::<Vec<_>>();
+
+		assert_eq!(selected, [room_id]);
+	}
+
+	#[test]
+	fn explicit_room_already_selected_by_list_is_not_duplicated() {
+		let room_id = room_id!("!explicit-overlap:example.com");
+		let list = ListId::from("main");
+		let mut window = window(room_id, 0);
+
+		window
+			.get_mut(room_id)
+			.expect("test room should be present")
+			.lists
+			.push(list.clone());
+
+		let conn = Connection::default();
+		let lists = [list];
+		let rooms = [ExtensionRoomConfig::Room(room_id.to_owned())];
+		let selected =
+			selector(&conn, &window, Some(lists.iter()), Some(rooms.iter())).collect::<Vec<_>>();
+
+		assert_eq!(selected, [room_id]);
+	}
+
+	#[test]
+	fn subscribed_room_already_selected_by_list_is_not_duplicated() {
+		let room_id = room_id!("!subscribed-overlap:example.com");
+		let list = ListId::from("main");
+		let mut window = window(room_id, 0);
+
+		window
+			.get_mut(room_id)
+			.expect("test room should be present")
+			.lists
+			.push(list.clone());
+
+		let mut conn = Connection::default();
+		conn.subscriptions
+			.insert(room_id.to_owned(), Default::default());
+
+		let lists = [list];
+		let rooms = [ExtensionRoomConfig::AllSubscribed];
+		let selected =
+			selector(&conn, &window, Some(lists.iter()), Some(rooms.iter())).collect::<Vec<_>>();
+
+		assert_eq!(selected, [room_id]);
+	}
+
+	fn window(room_id: &RoomId, payload_count: u64) -> Window {
+		let room = WindowRoom {
+			room_id: room_id.to_owned(),
+			membership: None,
+			lists: ListIds::new(),
+			event_count: 0,
+			payload_count,
+		};
+
+		[(room_id.to_owned(), room)].into()
+	}
 }

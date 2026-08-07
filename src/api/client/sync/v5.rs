@@ -52,8 +52,15 @@ struct WindowRoom {
 	room_id: OwnedRoomId,
 	membership: Option<MembershipState>,
 	lists: ListIds,
-	ranked: usize,
-	last_count: u64,
+	event_count: u64,
+	payload_count: u64,
+}
+
+impl WindowRoom {
+	#[inline]
+	fn payload_is_fresh(&self, roomsince: u64) -> bool {
+		roomsince == 0 || self.payload_count > roomsince
+	}
 }
 
 type Window = BTreeMap<OwnedRoomId, WindowRoom>;
@@ -196,10 +203,12 @@ pub(crate) async fn sync_events_v5_route(
 			let extensions = handle_extensions(sync_info, &conn, &window);
 			let (mut ranges, extensions) = join(ranges, extensions).boxed().await;
 
-			response.extensions = extensions?;
-			apply_ranges(&conn, &window, &mut ranges, &mut response.extensions);
+			let mut extensions = extensions?;
+
+			apply_ranges(&conn, &window, &mut ranges, &mut extensions);
 			conn.update_rooms_epilogue(ranges.keys());
 			response.rooms = ranges.into_payloads();
+			response.extensions = extensions.into_response(&response.rooms);
 
 			if !is_empty_response(&response) {
 				response.pos = conn.next_batch.to_string().into();

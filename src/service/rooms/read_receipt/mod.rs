@@ -27,7 +27,6 @@ use tuwunel_core::{
 	},
 	smallstr::SmallString,
 	smallvec::SmallVec,
-	trace,
 	utils::{BoolExt, IterStream, stream::TryBroadbandExt},
 	warn,
 };
@@ -428,23 +427,6 @@ impl Service {
 			.await
 	}
 
-	#[tracing::instrument(
-		name = "get_receipt_last",
-		level = "debug",
-		skip(self),
-		ret(level = "trace")
-	)]
-	pub async fn last_receipt_count(
-		&self,
-		room_id: &RoomId,
-		user_id: Option<&UserId>,
-		upper: Option<u64>,
-	) -> Result<u64> {
-		self.db
-			.last_receipt_count(room_id, upper, user_id)
-			.await
-	}
-
 	pub async fn delete_all_read_receipts(&self, room_id: &RoomId) -> Result {
 		self.db.delete_all_read_receipts(room_id).await
 	}
@@ -490,33 +472,4 @@ where
 	let event = to_raw_value(&SyncEphemeralRoomEvent { content })?;
 
 	Ok(Raw::from_json(event))
-}
-
-#[must_use]
-pub fn pack_receipts<I>(receipts: I) -> Raw<SyncEphemeralRoomEvent<ReceiptEventContent>>
-where
-	I: Iterator<Item = Raw<AnySyncEphemeralRoomEvent>>,
-{
-	let mut json = BTreeMap::new();
-	for value in receipts {
-		let receipt = serde_json::from_str::<SyncEphemeralRoomEvent<ReceiptEventContent>>(
-			value.json().get(),
-		);
-		match receipt {
-			| Ok(value) =>
-				for (event, receipt) in value.content {
-					json.insert(event, receipt);
-				},
-			| _ => {
-				debug!("failed to parse receipt: {:?}", receipt);
-			},
-		}
-	}
-
-	let content = ReceiptEventContent::from_iter(json);
-
-	trace!(?content);
-	Raw::from_json(
-		to_raw_value(&SyncEphemeralRoomEvent { content }).expect("received valid json"),
-	)
 }

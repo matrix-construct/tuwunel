@@ -68,14 +68,9 @@ pub(super) async fn handle_room(
 		previous_connection_pos,
 		..
 	} = sync_info;
-	let WindowRoom {
-		lists, membership, room_id, last_count, ..
-	} = window_room;
+	let WindowRoom { lists, membership, room_id, .. } = window_room;
 
-	debug_assert!(
-		*last_count > roomsince || *last_count == 0 || roomsince == 0,
-		"Stale room shouldn't be in the window"
-	);
+	debug_assert!(window_room.payload_is_fresh(roomsince), "Room payload should be fresh");
 
 	if matches!(*membership, Some(MembershipState::Leave | MembershipState::Ban)) {
 		return leave_or_ban_response(sync_info, conn, window_room, roomsince)

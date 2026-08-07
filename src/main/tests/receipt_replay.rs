@@ -62,22 +62,12 @@ async fn exercise(services: &Services) -> Result {
 	let receipts = &services.read_receipt;
 	let first = receipt_event(room, user, event_id!("$receipt-replay-first:localhost"));
 	let second = receipt_event(room, user, event_id!("$receipt-replay-second:localhost"));
-	let missing = receipts
-		.last_receipt_count(room, None, None)
-		.await;
-
-	if !matches!(missing, Err(error) if error.is_not_found()) {
-		return Err!("empty room did not report a missing receipt count");
-	}
 
 	let stored = receipts
 		.readreceipt_update(user, room, &first)
 		.await;
 
 	let after_store = receipt_counts(services, room).await;
-	let first_count = receipts
-		.last_receipt_count(room, Some(user), None)
-		.await?;
 
 	let replayed = receipts
 		.readreceipt_update(user, room, &first)
@@ -94,10 +84,6 @@ async fn exercise(services: &Services) -> Result {
 		return Err!("first receipt did not store exactly one row");
 	}
 
-	if first_count != after_store[0] {
-		return Err!("latest receipt query did not return the stored row");
-	}
-
 	if replayed || after_replay != after_store {
 		return Err!("replayed receipt moved the receipt stream");
 	}
@@ -106,49 +92,7 @@ async fn exercise(services: &Services) -> Result {
 		return Err!("receipt naming another event did not take a new position");
 	}
 
-	last_receipt_queries(services, room, user, after_advance[0]).await?;
-
 	private_read_replay(services, room, user).await
-}
-
-async fn last_receipt_queries(
-	services: &Services,
-	room: &RoomId,
-	user: &UserId,
-	user_count: u64,
-) -> Result {
-	let other = user_id!("@receipt-replay-other:localhost");
-	let event = receipt_event(room, other, event_id!("$receipt-replay-other:localhost"));
-	let receipts = &services.read_receipt;
-	let stored = receipts
-		.readreceipt_update(other, room, &event)
-		.await;
-
-	let other_count = receipts
-		.last_receipt_count(room, Some(other), None)
-		.await?;
-
-	let filtered = receipts
-		.last_receipt_count(room, Some(user), None)
-		.await?;
-
-	let bounded = receipts
-		.last_receipt_count(room, None, Some(other_count))
-		.await?;
-
-	if !stored || other_count <= user_count {
-		return Err!("second user's receipt did not advance the receipt stream");
-	}
-
-	if filtered != user_count {
-		return Err!("newer receipt hid the requested user's receipt");
-	}
-
-	if bounded != user_count {
-		return Err!("exclusive receipt bound did not return the prior row");
-	}
-
-	Ok(())
 }
 
 fn receipt_event(room: &RoomId, user: &UserId, event: &EventId) -> ReceiptEvent {
@@ -214,6 +158,7 @@ async fn private_read_unannounced(services: &Services, room: &RoomId, user: &Use
 		.read_receipt
 		.last_privateread_update(user, room)
 		.await;
+
 	let (published_before, _) = services
 		.read_receipt
 		.private_read_sync_get_count(room, user)
@@ -229,6 +174,7 @@ async fn private_read_unannounced(services: &Services, room: &RoomId, user: &Use
 		.read_receipt
 		.private_read_get_count(room, user)
 		.await?;
+
 	let (published_after, _) = services
 		.read_receipt
 		.private_read_sync_get_count(room, user)
