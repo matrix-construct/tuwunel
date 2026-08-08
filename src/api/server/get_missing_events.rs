@@ -113,10 +113,6 @@ pub(crate) async fn get_missing_events_route(
 			.await;
 
 		results.push((event_id, pdu.prev_events.into_vec(), pdu.depth, event));
-
-		if results.len() >= limit {
-			break;
-		}
 	}
 
 	let sorted_ids = topo_sort_events(
@@ -135,6 +131,7 @@ pub(crate) async fn get_missing_events_route(
 	let events = sorted_ids
 		.into_iter()
 		.filter_map(|event_id| event_map.remove(&event_id))
+		.take(limit)
 		.collect();
 
 	Ok(get_missing_events::v1::Response { events })
