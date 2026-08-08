@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use axum::extract::State;
 use ruma::{OwnedEventId, UInt, api::federation::event::get_missing_events};
@@ -121,9 +121,10 @@ fn topo_sort_events(
 	events: impl IntoIterator<Item = (OwnedEventId, Vec<OwnedEventId>, UInt)>,
 ) -> Vec<OwnedEventId> {
 	let events: Vec<_> = events.into_iter().collect();
-	let mut in_degree: BTreeMap<OwnedEventId, usize> = BTreeMap::new();
-	let mut graph: BTreeMap<OwnedEventId, Vec<OwnedEventId>> = BTreeMap::new();
-	let mut depth_map: BTreeMap<OwnedEventId, UInt> = BTreeMap::new();
+	let mut in_degree: HashMap<OwnedEventId, usize> = HashMap::with_capacity(events.len());
+	let mut graph: HashMap<OwnedEventId, Vec<OwnedEventId>> =
+		HashMap::with_capacity(events.len());
+	let mut depth_map: HashMap<OwnedEventId, UInt> = HashMap::with_capacity(events.len());
 
 	for (event_id, _, depth) in &events {
 		in_degree.entry(event_id.clone()).or_insert(0);
@@ -131,8 +132,6 @@ fn topo_sort_events(
 	}
 
 	for (event_id, prev_events, _) in events {
-		in_degree.entry(event_id.clone()).or_insert(0);
-
 		for prev_event in prev_events {
 			if in_degree.contains_key(&prev_event) {
 				graph
@@ -176,7 +175,7 @@ fn topo_sort_events(
 
 fn sort_topological_frontier(
 	frontier: &mut [OwnedEventId],
-	depth_map: &BTreeMap<OwnedEventId, UInt>,
+	depth_map: &HashMap<OwnedEventId, UInt>,
 ) {
 	frontier.sort_by(|left, right| {
 		let left_depth = depth_map
