@@ -139,7 +139,8 @@ fn topo_sort_events(
 					.entry(prev_event)
 					.or_default()
 					.push(event_id.clone());
-				*in_degree.entry(event_id.clone()).or_insert(0) += 1;
+				let degree = in_degree.entry(event_id.clone()).or_insert(0);
+				*degree = degree.checked_add(1).expect("in-degree overflow");
 			}
 		}
 	}
