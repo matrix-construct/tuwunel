@@ -169,6 +169,9 @@ fn topo_sort_events(
 		}
 	}
 
+	// NOTE: A Vec + explicit sort is intentional here. `/get_missing_events`
+	// responses are capped at LIMIT_MAX, so the frontier stays tiny and this is
+	// simpler than maintaining a BinaryHeap with reversed ordering semantics.
 	let mut zero_in_degree: Vec<OwnedEventId> = in_degree
 		.iter()
 		.filter(|(_, degree)| **degree == 0)
@@ -270,9 +273,6 @@ mod tests {
 			(d.clone(), vec![b.clone(), c.clone()], depth(3)),
 		]);
 
-		assert_eq!(sorted.first(), Some(&a));
-		assert_eq!(sorted.last(), Some(&d));
-		assert!(sorted[1..3].contains(&b));
-		assert!(sorted[1..3].contains(&c));
+		assert_eq!(sorted, vec![a, b, c, d]);
 	}
 }
