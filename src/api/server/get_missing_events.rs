@@ -71,9 +71,15 @@ pub(crate) async fn get_missing_events_route(
 			continue;
 		};
 
-		queue.extend(pdu.prev_events.iter().cloned());
+		if pdu.depth > body.min_depth {
+			queue.extend(pdu.prev_events.iter().cloned());
+		}
 
 		if body.latest_events.contains(&event_id) {
+			continue;
+		}
+
+		if pdu.depth < body.min_depth {
 			continue;
 		}
 
