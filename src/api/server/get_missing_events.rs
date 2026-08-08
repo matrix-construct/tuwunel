@@ -40,8 +40,8 @@ pub(crate) async fn get_missing_events_route(
 		.await
 		.ok();
 
-	let mut queue: VecDeque<OwnedEventId> = VecDeque::from(body.latest_events.clone());
-	let mut seen: HashSet<OwnedEventId> = HashSet::from_iter(body.earliest_events.clone());
+	let mut queue: VecDeque<OwnedEventId> = body.latest_events.iter().cloned().collect();
+	let mut seen: HashSet<OwnedEventId> = body.earliest_events.iter().cloned().collect();
 	let mut results: Vec<(OwnedEventId, Vec<OwnedEventId>, UInt, _)> = Vec::with_capacity(limit);
 
 	while let Some(event_id) = queue.pop_front() {
@@ -177,7 +177,7 @@ fn topo_sort_events(
 		let mut remaining: Vec<OwnedEventId> = in_degree
 			.keys()
 			.filter(|event_id| !placed.contains(event_id))
-			cloned()
+			.cloned()
 			.collect();
 
 		sort_topological_frontier(&mut remaining, &depth_map);
