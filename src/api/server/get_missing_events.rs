@@ -104,7 +104,7 @@ pub(crate) async fn get_missing_events_route(
 			}),
 	);
 
-	let mut event_map: BTreeMap<OwnedEventId, _> = results
+	let mut event_map: HashMap<OwnedEventId, _> = results
 		.into_iter()
 		.map(|(event_id, _, _, event)| (event_id, event))
 		.collect();
@@ -138,7 +138,9 @@ fn topo_sort_events(
 					.entry(prev_event)
 					.or_default()
 					.push(event_id.clone());
-				let degree = in_degree.entry(event_id.clone()).or_insert(0);
+				let degree = in_degree
+					.get_mut(&event_id)
+					.expect("event must be present in in_degree");
 				*degree = degree.checked_add(1).expect("in-degree overflow");
 			}
 		}
