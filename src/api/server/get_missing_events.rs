@@ -1,5 +1,7 @@
+use std::collections::{BTreeMap, HashSet, VecDeque};
+
 use axum::extract::State;
-use ruma::{CanonicalJsonValue, EventId, api::federation::event::get_missing_events};
+use ruma::{OwnedEventId, UInt, api::federation::event::get_missing_events};
 use tuwunel_core::{Result, debug};
 
 use super::AccessCheck;
@@ -38,55 +40,44 @@ pub(crate) async fn get_missing_events_route(
 		.await
 		.ok();
 
-	let mut queued_events = body.latest_events.clone();
-	// the vec will never have more entries the limit
-	let mut events = Vec::with_capacity(limit);
+	let mut queue: VecDeque<OwnedEventId> = VecDeque::from(body.latest_events.clone());
+	let mut seen: HashSet<OwnedEventId> = HashSet::from_iter(body.earliest_events.clone());
+	let mut results: Vec<(OwnedEventId, Vec<OwnedEventId>, UInt, _)> = Vec::with_capacity(limit);
 
-	let mut i: usize = 0;
-	while i < queued_events.len() && events.len() < limit {
-		let Ok(event) = services
-			.timeline
-			.get_pdu_json(&queued_events[i])
-			.await
-		else {
-			debug!(
-				?body.origin,
-				event_id = %queued_events[i],
-				"Event does not exist locally, skipping"
-			);
-			i = i.saturating_add(1);
+	while let Some(event_id) = queue.pop_front() {
+		if !seen.insert(event_id.clone()) {
+			continue;
+		}
+
+		let Ok(pdu) = services.timeline.get_pdu(&event_id).await else {
+			debug!(?body.origin, %event_id, "Event does not exist locally, skipping");
 			continue;
 		};
 
-		if body.earliest_events.contains(&queued_events[i]) {
-			i = i.saturating_add(1);
+		queue.extend(pdu.prev_events.iter().cloned());
+
+		if body.latest_events.contains(&event_id) {
 			continue;
 		}
 
 		if !services
 			.state_accessor
-			.server_can_see_event(body.origin(), &body.room_id, &queued_events[i])
+			.server_can_see_event(body.origin(), &body.room_id, &event_id)
 			.await
 		{
 			debug!(
 				?body.origin,
-				event_id = %queued_events[i],
+				%event_id,
 				room_id = %body.room_id,
-				"Server cannot see event, skipping"
+				"Server cannot see event, traversing through it but omitting it from the response"
 			);
-			i = i.saturating_add(1);
 			continue;
 		}
 
-		let prev_events = event
-			.get("prev_events")
-			.and_then(CanonicalJsonValue::as_array)
-			.into_iter()
-			.flatten()
-			.filter_map(CanonicalJsonValue::as_str)
-			.filter_map(|id| EventId::parse(id).ok());
-
-		queued_events.extend(prev_events);
+		let Ok(event) = services.timeline.get_pdu_json(&event_id).await else {
+			debug!(?body.origin, %event_id, "Event JSON does not exist locally, skipping");
+			continue;
+		};
 
 		let event = services
 			.state_accessor
@@ -98,8 +89,152 @@ pub(crate) async fn get_missing_events_route(
 			.format_pdu_into(event, room_version.as_ref())
 			.await;
 
-		events.push(event);
+		results.push((event_id, pdu.prev_events.into_vec(), pdu.depth, event));
+
+		if results.len() >= limit {
+			break;
+		}
 	}
 
+	let sorted_ids = topo_sort_events(
+		results
+			.iter()
+			.map(|(event_id, prev_events, depth, _)| {
+				(event_id.clone(), prev_events.clone(), *depth)
+			}),
+	);
+
+	let mut event_map: BTreeMap<OwnedEventId, _> = results
+		.into_iter()
+		.map(|(event_id, _, _, event)| (event_id, event))
+		.collect();
+
+	let events = sorted_ids
+		.into_iter()
+		.filter_map(|event_id| event_map.remove(&event_id))
+		.collect();
+
 	Ok(get_missing_events::v1::Response { events })
+}
+
+fn topo_sort_events(
+	events: impl IntoIterator<Item = (OwnedEventId, Vec<OwnedEventId>, UInt)>,
+) -> Vec<OwnedEventId> {
+	let events: Vec<_> = events.into_iter().collect();
+	let mut in_degree: BTreeMap<OwnedEventId, usize> = BTreeMap::new();
+	let mut graph: BTreeMap<OwnedEventId, Vec<OwnedEventId>> = BTreeMap::new();
+	let mut depth_map: BTreeMap<OwnedEventId, UInt> = BTreeMap::new();
+
+	for (event_id, _, depth) in &events {
+		in_degree.entry(event_id.clone()).or_insert(0);
+		depth_map.insert(event_id.clone(), *depth);
+	}
+
+	for (event_id, prev_events, _) in events {
+		in_degree.entry(event_id.clone()).or_insert(0);
+
+		for prev_event in prev_events {
+			if in_degree.contains_key(&prev_event) {
+				graph
+					.entry(prev_event)
+					.or_default()
+					.push(event_id.clone());
+				*in_degree.entry(event_id.clone()).or_insert(0) += 1;
+			}
+		}
+	}
+
+	let mut zero_in_degree: Vec<OwnedEventId> = in_degree
+		.iter()
+		.filter(|(_, degree)| **degree == 0)
+		.map(|(event_id, _)| event_id.clone())
+		.collect();
+
+	sort_topological_frontier(&mut zero_in_degree, &depth_map);
+
+	let mut ordered = Vec::with_capacity(in_degree.len());
+	while let Some(event_id) = zero_in_degree.pop() {
+		ordered.push(event_id.clone());
+
+		if let Some(children) = graph.get(&event_id) {
+			for child in children {
+				if let Some(degree) = in_degree.get_mut(child) {
+					*degree = degree.saturating_sub(1);
+					if *degree == 0 {
+						zero_in_degree.push(child.clone());
+					}
+				}
+			}
+
+			sort_topological_frontier(&mut zero_in_degree, &depth_map);
+		}
+	}
+
+	ordered
+}
+
+fn sort_topological_frontier(
+	frontier: &mut [OwnedEventId],
+	depth_map: &BTreeMap<OwnedEventId, UInt>,
+) {
+	frontier.sort_by(|left, right| {
+		let left_depth = depth_map
+			.get(left)
+			.copied()
+			.unwrap_or_else(UInt::default);
+		let right_depth = depth_map
+			.get(right)
+			.copied()
+			.unwrap_or_else(UInt::default);
+
+		right_depth
+			.cmp(&left_depth)
+			.then_with(|| right.cmp(left))
+	});
+}
+
+#[cfg(test)]
+mod tests {
+	use ruma::OwnedEventId;
+
+	use super::topo_sort_events;
+
+	fn event_id(id: &str) -> OwnedEventId { format!("${id}:example.com").try_into().unwrap() }
+
+	fn depth(depth: u64) -> ruma::UInt { ruma::UInt::new(depth).unwrap() }
+
+	#[test]
+	fn topo_sort_orders_linear_chain_oldest_first() {
+		let a = event_id("a");
+		let b = event_id("b");
+		let c = event_id("c");
+
+		let sorted = topo_sort_events(vec![
+			(c.clone(), vec![b.clone()], depth(3)),
+			(b.clone(), vec![a.clone()], depth(2)),
+			(a.clone(), vec![event_id("root")], depth(1)),
+		]);
+
+		assert_eq!(sorted, vec![a, b, c]);
+	}
+
+	#[test]
+	fn topo_sort_orders_fork_merge_oldest_first() {
+		let a = event_id("a");
+		let b = event_id("b");
+		let c = event_id("c");
+		let d = event_id("d");
+
+		let sorted = topo_sort_events(vec![
+			(a.clone(), vec![event_id("root")], depth(1)),
+			(b.clone(), vec![a.clone()], depth(2)),
+			(c.clone(), vec![a.clone()], depth(2)),
+			(d.clone(), vec![b.clone(), c.clone()], depth(3)),
+		]);
+
+		assert_eq!(sorted.first(), Some(&a));
+		assert_eq!(sorted.last(), Some(&d));
+		assert!(sorted[1..3].contains(&b));
+		assert!(sorted[1..3].contains(&c));
+	}
 }
