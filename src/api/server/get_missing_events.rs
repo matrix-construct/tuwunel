@@ -172,6 +172,19 @@ fn topo_sort_events(
 		}
 	}
 
+	if ordered.len() < in_degree.len() {
+		let placed: HashSet<&OwnedEventId> = ordered.iter().collect();
+		let mut remaining: Vec<OwnedEventId> = in_degree
+			.keys()
+			.filter(|event_id| !placed.contains(event_id))
+			cloned()
+			.collect();
+
+		sort_topological_frontier(&mut remaining, &depth_map);
+		remaining.reverse();
+		ordered.extend(remaining);
+	}
+
 	ordered
 }
 
