@@ -11,6 +11,9 @@ use crate::Ruma;
 const LIMIT_MAX: usize = 50;
 /// spec says default is 10
 const LIMIT_DEFAULT: usize = 10;
+/// Bound predecessor traversal independently from the response size so omitted
+/// events cannot force a single request to scan arbitrarily deep room history.
+const WALK_LIMIT_MAX: usize = 250;
 
 /// # `POST /_matrix/federation/v1/get_missing_events/{roomId}`
 ///
@@ -43,11 +46,25 @@ pub(crate) async fn get_missing_events_route(
 	let mut queue: VecDeque<OwnedEventId> = body.latest_events.iter().cloned().collect();
 	let mut seen: HashSet<OwnedEventId> = body.earliest_events.iter().cloned().collect();
 	let mut results: Vec<(OwnedEventId, Vec<OwnedEventId>, UInt, _)> = Vec::with_capacity(limit);
+	let mut traversed = 0_usize;
 
 	while let Some(event_id) = queue.pop_front() {
 		if !seen.insert(event_id.clone()) {
 			continue;
 		}
+
+		if traversed >= WALK_LIMIT_MAX {
+			debug!(
+				?body.origin,
+				room_id = %body.room_id,
+				traversed,
+				limit = WALK_LIMIT_MAX,
+				"Stopping get_missing_events traversal after reaching predecessor walk limit"
+			);
+			break;
+		}
+
+		traversed = traversed.saturating_add(1);
 
 		let Ok(pdu) = services.timeline.get_pdu(&event_id).await else {
 			debug!(?body.origin, %event_id, "Event does not exist locally, skipping");
