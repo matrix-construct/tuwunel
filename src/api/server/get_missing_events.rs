@@ -126,6 +126,7 @@ pub(crate) async fn get_missing_events_route(
 				(event_id.clone(), prev_events.clone(), *depth)
 			}),
 		&seen,
+		body.min_depth,
 	);
 
 	let mut event_map: HashMap<OwnedEventId, _> = results
@@ -145,6 +146,7 @@ pub(crate) async fn get_missing_events_route(
 fn topo_sort_events(
 	events: impl IntoIterator<Item = (OwnedEventId, Vec<OwnedEventId>, UInt)>,
 	reached_events: &HashSet<OwnedEventId>,
+	min_depth: UInt,
 ) -> Vec<OwnedEventId> {
 	let events: Vec<_> = events.into_iter().collect();
 	let mut in_degree: HashMap<OwnedEventId, usize> = HashMap::with_capacity(events.len());
@@ -159,7 +161,7 @@ fn topo_sort_events(
 
 	let mut invalid = HashSet::new();
 
-	for (event_id, prev_events, _) in &events {
+	for (event_id, prev_events, depth) in &events {
 		for prev_event in prev_events {
 			if in_degree.contains_key(prev_event) {
 				graph
@@ -170,7 +172,7 @@ fn topo_sort_events(
 					.get_mut(event_id)
 					.expect("event must be present in in_degree");
 				*degree = degree.checked_add(1).expect("in-degree overflow");
-			} else if !reached_events.contains(prev_event) {
+			} else if !reached_events.contains(prev_event) && *depth > min_depth {
 				invalid.insert(event_id.clone());
 			}
 		}
@@ -258,13 +260,13 @@ fn sort_topological_frontier(
 
 #[cfg(test)]
 mod tests {
-	use ruma::OwnedEventId;
+	use ruma::{OwnedEventId, UInt};
 
 	use super::topo_sort_events;
 
 	fn event_id(id: &str) -> OwnedEventId { format!("${id}:example.com").try_into().unwrap() }
 
-	fn depth(depth: u64) -> ruma::UInt { ruma::UInt::new(depth).unwrap() }
+	fn depth(depth: u64) -> UInt { UInt::new(depth).unwrap() }
 
 	#[test]
 	fn topo_sort_orders_linear_chain_oldest_first() {
@@ -282,6 +284,7 @@ mod tests {
 				(a.clone(), vec![event_id("root")], depth(1)),
 			],
 			&reached_events,
+			UInt::new(0).unwrap(),
 		);
 
 		assert_eq!(sorted, vec![a, b, c]);
@@ -305,6 +308,7 @@ mod tests {
 				(d.clone(), vec![b.clone(), c.clone()], depth(3)),
 			],
 			&reached_events,
+			UInt::new(0).unwrap(),
 		);
 
 		assert_eq!(sorted, vec![a, b, c, d]);
@@ -320,6 +324,7 @@ mod tests {
 		let sorted = topo_sort_events(
 			vec![(a.clone(), vec![b.clone()], depth(1)), (b.clone(), vec![a.clone()], depth(2))],
 			&reached_events,
+			UInt::new(0).unwrap(),
 		);
 
 		assert_eq!(sorted.len(), 2);
