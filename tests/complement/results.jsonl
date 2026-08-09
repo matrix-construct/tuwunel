@@ -171,11 +171,11 @@
 {"Action":"pass","Test":"TestGetMissingEventsGapFilling"}
 {"Action":"pass","Test":"TestGetRoomMembers"}
 {"Action":"fail","Test":"TestGetRoomMembersAtPoint"}
-{"Action":"fail","Test":"TestInboundCanReturnMissingEvents"}
-{"Action":"fail","Test":"TestInboundCanReturnMissingEvents/Inbound_federation_can_return_missing_events_for_invited_visibility"}
-{"Action":"fail","Test":"TestInboundCanReturnMissingEvents/Inbound_federation_can_return_missing_events_for_joined_visibility"}
-{"Action":"fail","Test":"TestInboundCanReturnMissingEvents/Inbound_federation_can_return_missing_events_for_shared_visibility"}
-{"Action":"fail","Test":"TestInboundCanReturnMissingEvents/Inbound_federation_can_return_missing_events_for_world_readable_visibility"}
+{"Action":"pass","Test":"TestInboundCanReturnMissingEvents"}
+{"Action":"pass","Test":"TestInboundCanReturnMissingEvents/Inbound_federation_can_return_missing_events_for_invited_visibility"}
+{"Action":"pass","Test":"TestInboundCanReturnMissingEvents/Inbound_federation_can_return_missing_events_for_joined_visibility"}
+{"Action":"pass","Test":"TestInboundCanReturnMissingEvents/Inbound_federation_can_return_missing_events_for_shared_visibility"}
+{"Action":"pass","Test":"TestInboundCanReturnMissingEvents/Inbound_federation_can_return_missing_events_for_world_readable_visibility"}
 {"Action":"pass","Test":"TestInboundFederationKeys"}
 {"Action":"pass","Test":"TestInboundFederationProfile"}
 {"Action":"pass","Test":"TestInboundFederationProfile/Inbound_federation_can_query_profile_data"}
