@@ -197,6 +197,13 @@ where
 	{
 		// Since v8, if membership state is join or invite, allow.
 		if matches!(current_membership, MembershipState::Join | MembershipState::Invite) {
+			// Guard against stale retries: reject if the target user actually left the room
+			// in the current state, despite what the auth events say.
+			if let Ok(actual) = crate::services().rooms.state_accessor.get_member(room_member_event.room_id(), target_user).await {
+				if actual.membership == MembershipState::Leave {
+					return Err!("join shortcut rejected: target user has a leave in the current room state");
+				}
+			}
 			return Ok(());
 		}
 
