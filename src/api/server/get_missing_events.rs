@@ -40,13 +40,11 @@ pub(crate) async fn get_missing_events_route(
 	let room_version = services
 		.state
 		.get_room_version(&body.room_id)
-		.await
-		.ok();
+		.await?;
 	let room_version_rules = services
 		.state
 		.get_room_version_rules(&body.room_id)
-		.await
-		.ok();
+		.await?;
 
 	let mut queue: VecDeque<OwnedEventId> = body.latest_events.iter().cloned().collect();
 	let mut seen: HashSet<OwnedEventId> = body.earliest_events.iter().cloned().collect();
@@ -71,7 +69,7 @@ pub(crate) async fn get_missing_events_route(
 
 		traversed = traversed.saturating_add(1);
 
-		let Ok(pdu) = services.timeline.get_pdu(&event_id).await else {
+		let Ok(mut pdu) = services.timeline.get_pdu(&event_id).await else {
 			debug!(?body.origin, %event_id, "Event does not exist locally, skipping");
 			continue;
 		};
@@ -93,43 +91,17 @@ pub(crate) async fn get_missing_events_route(
 			.server_can_see_event(body.origin(), &body.room_id, &event_id)
 			.await;
 
-		let event = if visible {
-			let Ok(event) = services.timeline.get_pdu_json(&event_id).await else {
-				debug!(?body.origin, %event_id, "Event JSON does not exist locally, skipping");
-				continue;
-			};
-
-			event
-		} else {
-			let Some(room_version_rules) = room_version_rules.as_ref() else {
-				debug!(
-					?body.origin,
-					%event_id,
-					room_id = %body.room_id,
-					"Server cannot see event and room version rules are unavailable, skipping"
-				);
-				continue;
-			};
-
+		if !visible {
 			debug!(
 				?body.origin,
 				%event_id,
 				room_id = %body.room_id,
-				"Server cannot see event, traversing through it and returning a redacted copy"
+				"Server cannot see event, redacting before returning and continuing traversal"
 			);
+			pdu = pdu.redacted(&room_version_rules.redaction)?;
+		}
 
-			let Ok(event) = pdu.redacted(&room_version_rules.redaction) else {
-				debug!(
-					?body.origin,
-					%event_id,
-					room_id = %body.room_id,
-					"Failed to redact invisible event, skipping"
-				);
-				continue;
-			};
-
-			event.to_canonical_object()
-		};
+		let event = pdu.to_canonical_object();
 
 		let event = services
 			.state_accessor
@@ -138,7 +110,7 @@ pub(crate) async fn get_missing_events_route(
 
 		let event = services
 			.federation
-			.format_pdu_into(event, room_version.as_ref())
+			.format_pdu_into(event, Some(&room_version))
 			.await;
 
 		results.push((event_id, pdu.prev_events.into_vec(), pdu.depth, event));

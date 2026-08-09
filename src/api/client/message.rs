@@ -103,6 +103,26 @@ struct MessagePagination {
 	limit: usize,
 }
 
+struct MessageCollectionContext<'a> {
+	services: &'a Services,
+	room_id: &'a RoomId,
+	sender_user: &'a UserId,
+	filter: &'a RoomEventFilter,
+	dir: Direction,
+	bypass_visibility: bool,
+	shortroomid: ShortRoomId,
+	encrypted: bool,
+}
+
+struct MessageFilterContext<'a> {
+	services: &'a Services,
+	sender_user: &'a UserId,
+	filter: &'a RoomEventFilter,
+	bypass_visibility: bool,
+	shortroomid: ShortRoomId,
+	to: Option<PduCount>,
+}
+
 /// # `GET /_matrix/client/r0/rooms/{roomId}/messages`
 ///
 /// Allows paginating through room history.
@@ -157,7 +177,7 @@ pub(crate) async fn get_messages(
 
 	let shortroomid = services.short.get_shortroomid(room_id).await?;
 	let stats = Arc::new(MessageFilterStats::default());
-	let events = collect_message_events(
+	let context = MessageCollectionContext {
 		services,
 		room_id,
 		sender_user,
@@ -166,10 +186,8 @@ pub(crate) async fn get_messages(
 		bypass_visibility,
 		shortroomid,
 		encrypted,
-		&pagination,
-		Arc::clone(&stats),
-	)
-	.await;
+	};
+	let events = collect_message_events(&context, &pagination, &stats).await;
 
 	let state = collect_lazy_loaded_state(
 		services,
@@ -182,7 +200,7 @@ pub(crate) async fn get_messages(
 	)
 	.await;
 
-	build_messages_response(room_id, dir, pagination, events, state, stats)
+	build_messages_response(room_id, dir, &pagination, events, state, &stats)
 }
 
 async fn validate_messages_request(
@@ -247,35 +265,42 @@ async fn maybe_backfill_messages(
 }
 
 async fn collect_message_events(
-	services: &Services,
-	room_id: &RoomId,
-	sender_user: &UserId,
-	filter: &RoomEventFilter,
-	dir: Direction,
-	bypass_visibility: bool,
-	shortroomid: ShortRoomId,
-	encrypted: bool,
+	context: &MessageCollectionContext<'_>,
 	pagination: &MessagePagination,
-	stats: Arc<MessageFilterStats>,
+	stats: &Arc<MessageFilterStats>,
 ) -> Vec<PdusIterItem> {
 	let MessagePagination { from, to, limit } = *pagination;
-	let it = message_timeline_iter(services, room_id, sender_user, dir, from);
-
-	apply_message_filters(
-		it,
-		services,
-		sender_user,
-		filter,
-		bypass_visibility,
-		shortroomid,
+	let it = message_timeline_iter(
+		context.services,
+		context.room_id,
+		context.sender_user,
+		context.dir,
+		from,
+	);
+	let filter_context = MessageFilterContext {
+		services: context.services,
+		sender_user: context.sender_user,
+		filter: context.filter,
+		bypass_visibility: context.bypass_visibility,
+		shortroomid: context.shortroomid,
 		to,
-		stats,
-	)
-	.take(limit)
-	.wide_then(|item| add_membership_unsigned(services, item, sender_user, encrypted))
-	.wide_then(|item| bundle_message_aggregations(services, sender_user, item))
-	.collect()
-	.await
+	};
+
+	apply_message_filters(it, &filter_context, stats)
+		.take(limit)
+		.wide_then(|item| {
+			add_membership_unsigned(
+				context.services,
+				item,
+				context.sender_user,
+				context.encrypted,
+			)
+		})
+		.wide_then(|item| {
+			bundle_message_aggregations(context.services, context.sender_user, item)
+		})
+		.collect()
+		.await
 }
 
 fn message_timeline_iter<'a>(
@@ -306,17 +331,14 @@ fn message_timeline_iter<'a>(
 
 fn apply_message_filters<'a, S>(
 	it: S,
-	services: &'a Services,
-	sender_user: &'a UserId,
-	filter: &'a RoomEventFilter,
-	bypass_visibility: bool,
-	shortroomid: ShortRoomId,
-	to: Option<PduCount>,
-	stats: Arc<MessageFilterStats>,
+	context: &'a MessageFilterContext<'a>,
+	stats: &Arc<MessageFilterStats>,
 ) -> impl futures::Stream<Item = PdusIterItem> + Send + 'a
 where
 	S: futures::Stream<Item = PdusIterItem> + Send + 'a,
 {
+	let stats = Arc::clone(stats);
+	let to = context.to;
 	it.ready_take_while(move |(count, _)| Some(*count) != to)
 		.inspect({
 			let stats = Arc::clone(&stats);
@@ -326,15 +348,21 @@ where
 		})
 		.ready_filter_map({
 			let stats = Arc::clone(&stats);
-			move |item| event_filter_counted(item, filter, stats.as_ref())
+			move |item| event_filter_counted(item, context.filter, stats.as_ref())
 		})
 		.wide_filter_map({
 			let stats = Arc::clone(&stats);
 			move |item| {
 				let stats = Arc::clone(&stats);
 				async move {
-					related_by_filter_counted(services, shortroomid, filter, item, stats.as_ref())
-						.await
+					related_by_filter_counted(
+						context.services,
+						context.shortroomid,
+						context.filter,
+						item,
+						stats.as_ref(),
+					)
+					.await
 				}
 			}
 		})
@@ -344,10 +372,10 @@ where
 				let stats = Arc::clone(&stats);
 				async move {
 					event_filters_counted(
-						services,
-						sender_user,
+						context.services,
+						context.sender_user,
 						item,
-						bypass_visibility,
+						context.bypass_visibility,
 						stats.as_ref(),
 					)
 					.await
@@ -433,10 +461,10 @@ async fn bundle_message_aggregations(
 fn build_messages_response(
 	room_id: &RoomId,
 	dir: Direction,
-	pagination: MessagePagination,
+	pagination: &MessagePagination,
 	events: Vec<PdusIterItem>,
 	state: Vec<Raw<AnyStateEvent>>,
-	stats: Arc<MessageFilterStats>,
+	stats: &Arc<MessageFilterStats>,
 ) -> Result<get_message_events::v3::Response> {
 	let next_token = events.last().map(at!(0));
 
