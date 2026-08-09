@@ -11,10 +11,6 @@ use crate::Ruma;
 const LIMIT_MAX: usize = 50;
 /// spec says default is 10
 const LIMIT_DEFAULT: usize = 10;
-/// Bound predecessor traversal independently from the response size so omitted
-/// events cannot force a single request to scan arbitrarily deep room history.
-const WALK_LIMIT_MAX: usize = 250;
-
 /// # `POST /_matrix/federation/v1/get_missing_events/{roomId}`
 ///
 /// Retrieves events that the sender is missing.
@@ -49,25 +45,16 @@ pub(crate) async fn get_missing_events_route(
 	let mut queue: VecDeque<OwnedEventId> = body.latest_events.iter().cloned().collect();
 	let mut seen: HashSet<OwnedEventId> = body.earliest_events.iter().cloned().collect();
 	let mut results: Vec<(OwnedEventId, Vec<OwnedEventId>, UInt, _)> = Vec::with_capacity(limit);
-	let mut traversed = 0_usize;
 
 	while let Some(event_id) = queue.pop_front() {
 		if !seen.insert(event_id.clone()) {
 			continue;
 		}
 
-		if traversed >= WALK_LIMIT_MAX {
-			debug!(
-				?body.origin,
-				room_id = %body.room_id,
-				traversed,
-				limit = WALK_LIMIT_MAX,
-				"Stopping get_missing_events traversal after reaching predecessor walk limit"
-			);
+		if results.len() >= limit {
+			debug!(?body.origin, %event_id, limit, "Reached get_missing_events result limit");
 			break;
 		}
-
-		traversed = traversed.saturating_add(1);
 
 		let Ok(mut pdu) = services.timeline.get_pdu(&event_id).await else {
 			debug!(?body.origin, %event_id, "Event does not exist locally, skipping");
@@ -129,7 +116,7 @@ pub(crate) async fn get_missing_events_route(
 		.map(|(event_id, _, _, event)| (event_id, event))
 		.collect();
 
-	let events = newest_topological_slice(sorted_ids, limit)
+	let events = sorted_ids
 		.into_iter()
 		.filter_map(|event_id| event_map.remove(&event_id))
 		.collect();
@@ -211,11 +198,6 @@ fn topo_sort_events(
 	ordered
 }
 
-fn newest_topological_slice(sorted_ids: Vec<OwnedEventId>, limit: usize) -> Vec<OwnedEventId> {
-	let start = sorted_ids.len().saturating_sub(limit);
-	sorted_ids.into_iter().skip(start).collect()
-}
-
 fn sort_topological_frontier(
 	frontier: &mut [OwnedEventId],
 	depth_map: &HashMap<OwnedEventId, UInt>,
@@ -240,7 +222,7 @@ fn sort_topological_frontier(
 mod tests {
 	use ruma::OwnedEventId;
 
-	use super::{newest_topological_slice, topo_sort_events};
+	use super::topo_sort_events;
 
 	fn event_id(id: &str) -> OwnedEventId { format!("${id}:example.com").try_into().unwrap() }
 
@@ -276,18 +258,5 @@ mod tests {
 		]);
 
 		assert_eq!(sorted, vec![a, b, c, d]);
-	}
-
-	#[test]
-	fn newest_topological_slice_keeps_newest_segment_oldest_first() {
-		let a = event_id("a");
-		let b = event_id("b");
-		let c = event_id("c");
-		let d = event_id("d");
-		let e = event_id("e");
-
-		let sliced = newest_topological_slice(vec![a, b, c.clone(), d.clone(), e.clone()], 3);
-
-		assert_eq!(sliced, vec![c, d, e]);
 	}
 }

@@ -376,12 +376,10 @@ async fn apply_preset_state_pdus(
 
 	// 5.3 Guest Access
 	if let Some(guest_access_pdubuilder) = guest_access_pdubuilder.or_else(|| {
-		(*preset != RoomPreset::PublicChat).then(|| {
-			PduBuilder::state(
-				String::new(),
-				&RoomGuestAccessEventContent::new(GuestAccess::CanJoin),
-			)
-		})
+		Some(PduBuilder::state(
+			String::new(),
+			&RoomGuestAccessEventContent::new(GuestAccess::CanJoin),
+		))
 	}) {
 		services
 			.timeline
