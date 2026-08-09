@@ -4,7 +4,7 @@ use std::sync::{
 };
 
 use axum::extract::State;
-use futures::{FutureExt, StreamExt, TryFutureExt, future::Either, pin_mut};
+use futures::{StreamExt, TryFutureExt, future::Either, pin_mut};
 use ruma::{
 	DeviceId, RoomId, UInt, UserId,
 	api::{
@@ -97,6 +97,12 @@ struct MessageFilterStats {
 	visibility_dropped: AtomicUsize,
 }
 
+struct MessagePagination {
+	from: PduCount,
+	to: Option<PduCount>,
+	limit: usize,
+}
+
 /// # `GET /_matrix/client/r0/rooms/{roomId}/messages`
 ///
 /// Allows paginating through room history.
@@ -140,6 +146,51 @@ pub(crate) async fn get_messages(
 		bypass_visibility,
 	} = args;
 
+	validate_messages_request(services, room_id, sender_user, bypass_visibility).await?;
+	let pagination = parse_message_pagination(from, to, dir, limit)?;
+	maybe_backfill_messages(services, room_id, dir, pagination.from).await;
+
+	let encrypted = services
+		.state_accessor
+		.is_encrypted_room(room_id)
+		.await;
+
+	let shortroomid = services.short.get_shortroomid(room_id).await?;
+	let stats = Arc::new(MessageFilterStats::default());
+	let events = collect_message_events(
+		services,
+		room_id,
+		sender_user,
+		filter,
+		dir,
+		bypass_visibility,
+		shortroomid,
+		encrypted,
+		&pagination,
+		Arc::clone(&stats),
+	)
+	.await;
+
+	let state = collect_lazy_loaded_state(
+		services,
+		room_id,
+		sender_user,
+		sender_device,
+		filter,
+		pagination.from,
+		&events,
+	)
+	.await;
+
+	build_messages_response(room_id, dir, pagination, events, state, stats)
+}
+
+async fn validate_messages_request(
+	services: &Services,
+	room_id: &RoomId,
+	sender_user: &UserId,
+	bypass_visibility: bool,
+) -> Result {
 	if !services.metadata.exists(room_id).await {
 		return Err!(Request(Forbidden("Room does not exist to this server")));
 	}
@@ -153,7 +204,16 @@ pub(crate) async fn get_messages(
 		return Err!(Request(Forbidden("You don't have permission to view this room.")));
 	}
 
-	let from: PduCount = from
+	Ok(())
+}
+
+fn parse_message_pagination(
+	from: Option<&str>,
+	to: Option<&str>,
+	dir: Direction,
+	limit: Option<UInt>,
+) -> Result<MessagePagination> {
+	let from = from
 		.map(str::parse)
 		.transpose()?
 		.unwrap_or_else(|| match dir {
@@ -161,13 +221,21 @@ pub(crate) async fn get_messages(
 			| Direction::Backward => PduCount::max(),
 		});
 
-	let to: Option<PduCount> = to.map(str::parse).flat_ok();
-
-	let limit: usize = limit
+	let to = to.map(str::parse).flat_ok();
+	let limit = limit
 		.and_then(|limit| limit.try_into().ok())
 		.unwrap_or(LIMIT_DEFAULT)
 		.min(LIMIT_MAX);
 
+	Ok(MessagePagination { from, to, limit })
+}
+
+async fn maybe_backfill_messages(
+	services: &Services,
+	room_id: &RoomId,
+	dir: Direction,
+	from: PduCount,
+) {
 	if matches!(dir, Direction::Backward) {
 		services
 			.timeline
@@ -176,8 +244,51 @@ pub(crate) async fn get_messages(
 			.log_err()
 			.ok();
 	}
+}
 
-	let it = match dir {
+async fn collect_message_events(
+	services: &Services,
+	room_id: &RoomId,
+	sender_user: &UserId,
+	filter: &RoomEventFilter,
+	dir: Direction,
+	bypass_visibility: bool,
+	shortroomid: ShortRoomId,
+	encrypted: bool,
+	pagination: &MessagePagination,
+	stats: Arc<MessageFilterStats>,
+) -> Vec<PdusIterItem> {
+	let MessagePagination { from, to, limit } = *pagination;
+	let it = message_timeline_iter(services, room_id, sender_user, dir, from);
+
+	apply_message_filters(
+		it,
+		services,
+		sender_user,
+		filter,
+		bypass_visibility,
+		shortroomid,
+		to,
+		stats,
+	)
+	.take(limit)
+	.wide_then(|item| add_membership_unsigned(services, item, sender_user, encrypted))
+	.wide_then(|item| bundle_message_aggregations(services, sender_user, item))
+	.collect()
+	.await
+}
+
+fn message_timeline_iter<'a>(
+	services: &'a Services,
+	room_id: &'a RoomId,
+	sender_user: &'a UserId,
+	dir: Direction,
+	from: PduCount,
+) -> Either<
+	impl futures::Stream<Item = PdusIterItem> + 'a,
+	impl futures::Stream<Item = PdusIterItem> + 'a,
+> {
+	match dir {
 		| Direction::Forward => Either::Left(
 			services
 				.timeline
@@ -190,18 +301,23 @@ pub(crate) async fn get_messages(
 				.pdus_rev(Some(sender_user), room_id, Some(from))
 				.ignore_err(),
 		),
-	};
+	}
+}
 
-	let encrypted = services
-		.state_accessor
-		.is_encrypted_room(room_id)
-		.await;
-
-	let shortroomid = services.short.get_shortroomid(room_id).await?;
-	let stats = Arc::new(MessageFilterStats::default());
-
-	let events: Vec<_> = it
-		.ready_take_while(|(count, _)| Some(*count) != to)
+fn apply_message_filters<'a, S>(
+	it: S,
+	services: &'a Services,
+	sender_user: &'a UserId,
+	filter: &'a RoomEventFilter,
+	bypass_visibility: bool,
+	shortroomid: ShortRoomId,
+	to: Option<PduCount>,
+	stats: Arc<MessageFilterStats>,
+) -> impl futures::Stream<Item = PdusIterItem> + Send + 'a
+where
+	S: futures::Stream<Item = PdusIterItem> + Send + 'a,
+{
+	it.ready_take_while(move |(count, _)| Some(*count) != to)
 		.inspect({
 			let stats = Arc::clone(&stats);
 			move |_| {
@@ -238,43 +354,90 @@ pub(crate) async fn get_messages(
 				}
 			}
 		})
-		.take(limit)
-		.wide_then(|item| add_membership_unsigned(services, item, sender_user, encrypted))
-		.wide_then(async |(count, pdu)| {
-			let pdu = services
-				.pdu_metadata
-				.bundle_aggregations(sender_user, pdu)
-				.await;
+}
 
-			(count, pdu)
-		})
-		.collect()
-		.await;
+async fn collect_lazy_loaded_state(
+	services: &Services,
+	room_id: &RoomId,
+	sender_user: &UserId,
+	sender_device: Option<&DeviceId>,
+	filter: &RoomEventFilter,
+	from: PduCount,
+	events: &[PdusIterItem],
+) -> Vec<Raw<AnyStateEvent>> {
+	let lazy_loading_context =
+		lazy_loading_context(room_id, sender_user, sender_device, filter, from);
+	let witness =
+		collect_lazy_loading_witness(services, &lazy_loading_context, filter, events).await;
 
-	let lazy_loading_context = lazy_loading::Context {
+	collect_lazy_loading_state_events(services, room_id, witness).await
+}
+
+fn lazy_loading_context<'a>(
+	room_id: &'a RoomId,
+	sender_user: &'a UserId,
+	sender_device: Option<&'a DeviceId>,
+	filter: &'a RoomEventFilter,
+	from: PduCount,
+) -> lazy_loading::Context<'a> {
+	lazy_loading::Context {
 		user_id: sender_user,
 		device_id: sender_device,
 		room_id,
 		token: Some(from.into_unsigned()),
 		options: Some(&filter.lazy_load_options),
 		mode: lazy_loading::Mode::Update,
-	};
+	}
+}
 
-	let witness = filter
+async fn collect_lazy_loading_witness(
+	services: &Services,
+	lazy_loading_context: &lazy_loading::Context<'_>,
+	filter: &RoomEventFilter,
+	events: &[PdusIterItem],
+) -> Option<Witness> {
+	filter
 		.lazy_load_options
 		.is_enabled()
-		.then_async(|| lazy_loading_witness(services, &lazy_loading_context, events.iter()));
+		.then_async(|| lazy_loading_witness(services, lazy_loading_context, events.iter()))
+		.await
+}
 
-	let state = witness
-		.map(Option::into_iter)
-		.map(|option| option.flat_map(Witness::into_iter))
-		.map(IterStream::stream)
-		.into_stream()
-		.flatten()
+async fn collect_lazy_loading_state_events(
+	services: &Services,
+	room_id: &RoomId,
+	witness: Option<Witness>,
+) -> Vec<Raw<AnyStateEvent>> {
+	witness
+		.into_iter()
+		.flat_map(Witness::into_iter)
+		.stream()
 		.broad_filter_map(async |user_id| get_member_event(services, room_id, &user_id).await)
 		.collect()
+		.await
+}
+
+async fn bundle_message_aggregations(
+	services: &Services,
+	sender_user: &UserId,
+	(count, pdu): PdusIterItem,
+) -> PdusIterItem {
+	let pdu = services
+		.pdu_metadata
+		.bundle_aggregations(sender_user, pdu)
 		.await;
 
+	(count, pdu)
+}
+
+fn build_messages_response(
+	room_id: &RoomId,
+	dir: Direction,
+	pagination: MessagePagination,
+	events: Vec<PdusIterItem>,
+	state: Vec<Raw<AnyStateEvent>>,
+	stats: Arc<MessageFilterStats>,
+) -> Result<get_message_events::v3::Response> {
 	let next_token = events.last().map(at!(0));
 
 	let chunk: Vec<_> = events
@@ -286,7 +449,7 @@ pub(crate) async fn get_messages(
 	debug!(
 		room_id = %room_id,
 		?dir,
-		limit,
+		limit = pagination.limit,
 		iterated = stats.iterated.load(Ordering::Relaxed),
 		event_filter_dropped = stats.event_filter_dropped.load(Ordering::Relaxed),
 		related_by_filter_dropped = stats.related_by_filter_dropped.load(Ordering::Relaxed),
@@ -298,7 +461,7 @@ pub(crate) async fn get_messages(
 	);
 
 	Ok(get_message_events::v3::Response {
-		start: from.to_string(),
+		start: pagination.from.to_string(),
 		end: next_token.as_ref().map(ToString::to_string),
 		chunk,
 		state,
@@ -382,7 +545,7 @@ pub(crate) async fn event_filters(
 	Some(item)
 }
 
-pub(crate) async fn event_filters_counted(
+async fn event_filters_counted(
 	services: &Services,
 	user_id: &UserId,
 	item: PdusIterItem,
@@ -393,24 +556,18 @@ pub(crate) async fn event_filters_counted(
 		return Some(item);
 	}
 
-	let item = match ignored_filter(services, item, user_id).await {
-		| Some(item) => item,
-		| None => {
-			stats
-				.ignored_dropped
-				.fetch_add(1, Ordering::Relaxed);
-			return None;
-		},
+	let Some(item) = ignored_filter(services, item, user_id).await else {
+		stats
+			.ignored_dropped
+			.fetch_add(1, Ordering::Relaxed);
+		return None;
 	};
 
-	let item = match visibility_filter(services, item, user_id).await {
-		| Some(item) => item,
-		| None => {
-			stats
-				.visibility_dropped
-				.fetch_add(1, Ordering::Relaxed);
-			return None;
-		},
+	let Some(item) = visibility_filter(services, item, user_id).await else {
+		stats
+			.visibility_dropped
+			.fetch_add(1, Ordering::Relaxed);
+		return None;
 	};
 
 	Some(item)
@@ -446,7 +603,7 @@ pub(crate) async fn related_by_filter(
 		.then_some(item)
 }
 
-pub(crate) async fn related_by_filter_counted(
+async fn related_by_filter_counted(
 	services: &Services,
 	shortroomid: ShortRoomId,
 	filter: &RoomEventFilter,
@@ -532,7 +689,7 @@ pub(crate) fn event_filter(item: PdusIterItem, filter: &RoomEventFilter) -> Opti
 	filter.matches(pdu).then_some(item)
 }
 
-pub(crate) fn event_filter_counted(
+fn event_filter_counted(
 	item: PdusIterItem,
 	filter: &RoomEventFilter,
 	stats: &MessageFilterStats,
