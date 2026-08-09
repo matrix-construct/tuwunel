@@ -2,9 +2,10 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use axum::extract::State;
 use ruma::{
-	OwnedEventId, UInt, api::federation::event::get_missing_events, events::TimelineEventType,
+	OwnedEventId, UInt, api::federation::event::get_missing_events,
+	canonical_json::redact_in_place,
 };
-use tuwunel_core::{Result, debug, matrix::Event};
+use tuwunel_core::{Result, debug, err};
 
 use super::AccessCheck;
 use crate::Ruma;
@@ -69,7 +70,7 @@ pub(crate) async fn get_missing_events_route(
 			break;
 		}
 
-		let Ok(mut pdu) = services.timeline.get_pdu(&event_id).await else {
+		let Ok(pdu) = services.timeline.get_pdu(&event_id).await else {
 			debug!(?body.origin, %event_id, "Event does not exist locally, skipping");
 			continue;
 		};
@@ -86,22 +87,11 @@ pub(crate) async fn get_missing_events_route(
 			continue;
 		}
 
-		// NOTE: This is an endpoint-level compatibility shim, not a clean
-		// federation model rule. Partial `send_join` paths still need
-		// `m.room.guest_access` in room state, but Complement's inbound
-		// `/get_missing_events` expectations fail when it is returned in this
-		// gap-fill slice.
-		// TODO: Revisit this once partial-join behavior is aligned against a
-		// broader upstream reference, and verify it does not regress other
-		// federation consumers beyond Complement's current coverage.
-		if *pdu.kind() == TimelineEventType::RoomGuestAccess {
-			continue;
-		}
-
 		let visible = services
 			.state_accessor
 			.server_can_see_event(body.origin(), &body.room_id, &event_id)
 			.await;
+		let mut event = services.timeline.get_pdu_json(&event_id).await?;
 
 		if !visible {
 			debug!(
@@ -110,10 +100,10 @@ pub(crate) async fn get_missing_events_route(
 				room_id = %body.room_id,
 				"Server cannot see event, redacting before returning and continuing traversal"
 			);
-			pdu = pdu.redacted(&room_version_rules.redaction)?;
+			redact_in_place(&mut event, &room_version_rules.redaction, None).map_err(|e| {
+				err!(Request(BadJson("Failed to redact event for federation response: {e}")))
+			})?;
 		}
-
-		let event = pdu.to_canonical_object();
 
 		let event = services
 			.state_accessor
@@ -284,5 +274,20 @@ mod tests {
 		]);
 
 		assert_eq!(sorted, vec![a, b, c, d]);
+	}
+
+	#[test]
+	fn topo_sort_cycle_fallback_keeps_all_events() {
+		let a = event_id("a");
+		let b = event_id("b");
+
+		let sorted = topo_sort_events(vec![
+			(a.clone(), vec![b.clone()], depth(1)),
+			(b.clone(), vec![a.clone()], depth(2)),
+		]);
+
+		assert_eq!(sorted.len(), 2);
+		assert!(sorted.contains(&a));
+		assert!(sorted.contains(&b));
 	}
 }

@@ -358,7 +358,17 @@ async fn apply_preset_state_pdus(
 			});
 
 	let guest_access_pdubuilder =
-		take_initial(&mut initial_state, &StateEventType::RoomGuestAccess, "").map(Into::into);
+		take_initial(&mut initial_state, &StateEventType::RoomGuestAccess, "")
+			.map(Into::into)
+			.unwrap_or_else(|| {
+				PduBuilder::state(
+					String::new(),
+					&RoomGuestAccessEventContent::new(match *preset {
+						| RoomPreset::PublicChat => GuestAccess::Forbidden,
+						| _ => GuestAccess::CanJoin,
+					}),
+				)
+			});
 
 	// 5.1 Join Rules
 	services
@@ -375,18 +385,11 @@ async fn apply_preset_state_pdus(
 		.await?;
 
 	// 5.3 Guest Access
-	if let Some(guest_access_pdubuilder) = guest_access_pdubuilder.or_else(|| {
-		Some(PduBuilder::state(
-			String::new(),
-			&RoomGuestAccessEventContent::new(GuestAccess::CanJoin),
-		))
-	}) {
-		services
-			.timeline
-			.build_and_append_pdu(guest_access_pdubuilder, sender_user, room_id, state_lock)
-			.boxed()
-			.await?;
-	}
+	services
+		.timeline
+		.build_and_append_pdu(guest_access_pdubuilder, sender_user, room_id, state_lock)
+		.boxed()
+		.await?;
 
 	Ok(initial_state)
 }

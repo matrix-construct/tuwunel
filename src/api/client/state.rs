@@ -192,6 +192,7 @@ async fn send_state_event_for_key_helper(
 ) -> Result<OwnedEventId> {
 	allowed_to_send_state_event(services, sender, room_id, event_type, state_key, json).await?;
 	let state_lock = services.state.mutex.lock(room_id).await;
+	let mut content: Option<serde_json::Value> = None;
 
 	if timestamp.is_none()
 		&& let Ok(prev_state) = services
@@ -199,10 +200,11 @@ async fn send_state_event_for_key_helper(
 			.room_state_get(room_id, event_type, state_key)
 			.await
 		&& prev_state.sender() == sender
-		&& prev_state.get_content_as_value()
-			== serde_json::from_str::<serde_json::Value>(json.json().get())?
 	{
-		return Ok(prev_state.event_id().to_owned());
+		let content = content.insert(serde_json::from_str(json.json().get())?);
+		if prev_state.get_content_as_value() == *content {
+			return Ok(prev_state.event_id().to_owned());
+		}
 	}
 
 	let event_id = services
@@ -210,7 +212,10 @@ async fn send_state_event_for_key_helper(
 		.build_and_append_pdu(
 			PduBuilder {
 				event_type: event_type.to_string().into(),
-				content: serde_json::from_str(json.json().get())?,
+				content: match content {
+					| Some(content) => content.into(),
+					| None => serde_json::from_str(json.json().get())?,
+				},
 				state_key: Some(state_key.into()),
 				timestamp,
 				..Default::default()

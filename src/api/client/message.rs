@@ -563,14 +563,7 @@ pub(crate) async fn event_filters(
 	item: PdusIterItem,
 	bypass_visibility: bool,
 ) -> Option<PdusIterItem> {
-	if bypass_visibility {
-		return Some(item);
-	}
-
-	let item = ignored_filter(services, item, user_id).await?;
-	let item = visibility_filter(services, item, user_id).await?;
-
-	Some(item)
+	event_filters_inner(services, user_id, item, bypass_visibility, None).await
 }
 
 async fn event_filters_counted(
@@ -580,21 +573,35 @@ async fn event_filters_counted(
 	bypass_visibility: bool,
 	stats: &MessageFilterStats,
 ) -> Option<PdusIterItem> {
+	event_filters_inner(services, user_id, item, bypass_visibility, Some(stats)).await
+}
+
+async fn event_filters_inner(
+	services: &Services,
+	user_id: &UserId,
+	item: PdusIterItem,
+	bypass_visibility: bool,
+	stats: Option<&MessageFilterStats>,
+) -> Option<PdusIterItem> {
 	if bypass_visibility {
 		return Some(item);
 	}
 
 	let Some(item) = ignored_filter(services, item, user_id).await else {
-		stats
-			.ignored_dropped
-			.fetch_add(1, Ordering::Relaxed);
+		if let Some(stats) = stats {
+			stats
+				.ignored_dropped
+				.fetch_add(1, Ordering::Relaxed);
+		}
 		return None;
 	};
 
 	let Some(item) = visibility_filter(services, item, user_id).await else {
-		stats
-			.visibility_dropped
-			.fetch_add(1, Ordering::Relaxed);
+		if let Some(stats) = stats {
+			stats
+				.visibility_dropped
+				.fetch_add(1, Ordering::Relaxed);
+		}
 		return None;
 	};
 
