@@ -48,8 +48,9 @@ pub(crate) async fn get_missing_events_route(
 		.get_room_version_rules(&body.room_id)
 		.await?;
 
+	let earliest_events: HashSet<OwnedEventId> = body.earliest_events.iter().cloned().collect();
 	let mut queue: VecDeque<OwnedEventId> = body.latest_events.iter().cloned().collect();
-	let mut seen: HashSet<OwnedEventId> = body.earliest_events.iter().cloned().collect();
+	let mut seen: HashSet<OwnedEventId> = earliest_events.clone();
 	let mut results: Vec<(OwnedEventId, Vec<OwnedEventId>, UInt, _)> = Vec::new();
 	let mut walked = 0_usize;
 
@@ -124,6 +125,7 @@ pub(crate) async fn get_missing_events_route(
 			.map(|(event_id, prev_events, depth, _)| {
 				(event_id.clone(), prev_events.clone(), *depth)
 			}),
+		&earliest_events,
 	);
 
 	let mut event_map: HashMap<OwnedEventId, _> = results
@@ -142,6 +144,7 @@ pub(crate) async fn get_missing_events_route(
 
 fn topo_sort_events(
 	events: impl IntoIterator<Item = (OwnedEventId, Vec<OwnedEventId>, UInt)>,
+	earliest_events: &HashSet<OwnedEventId>,
 ) -> Vec<OwnedEventId> {
 	let events: Vec<_> = events.into_iter().collect();
 	let mut in_degree: HashMap<OwnedEventId, usize> = HashMap::with_capacity(events.len());
@@ -154,19 +157,38 @@ fn topo_sort_events(
 		depth_map.insert(event_id.clone(), *depth);
 	}
 
-	for (event_id, prev_events, _) in events {
+	let mut invalid = HashSet::new();
+
+	for (event_id, prev_events, _) in &events {
 		for prev_event in prev_events {
-			if in_degree.contains_key(&prev_event) {
+			if in_degree.contains_key(prev_event) {
 				graph
-					.entry(prev_event)
+					.entry(prev_event.clone())
 					.or_default()
 					.push(event_id.clone());
 				let degree = in_degree
-					.get_mut(&event_id)
+					.get_mut(event_id)
 					.expect("event must be present in in_degree");
 				*degree = degree.checked_add(1).expect("in-degree overflow");
+			} else if !earliest_events.contains(prev_event) {
+				invalid.insert(event_id.clone());
 			}
 		}
+	}
+
+	let mut queue: VecDeque<_> = invalid.iter().cloned().collect();
+	while let Some(inv) = queue.pop_front() {
+		if let Some(children) = graph.get(&inv) {
+			for child in children {
+				if invalid.insert(child.clone()) {
+					queue.push_back(child.clone());
+				}
+			}
+		}
+	}
+
+	for inv in &invalid {
+		in_degree.remove(inv);
 	}
 
 	// NOTE: A Vec + explicit sort is intentional here. `/get_missing_events`
@@ -250,11 +272,17 @@ mod tests {
 		let b = event_id("b");
 		let c = event_id("c");
 
-		let sorted = topo_sort_events(vec![
-			(c.clone(), vec![b.clone()], depth(3)),
-			(b.clone(), vec![a.clone()], depth(2)),
-			(a.clone(), vec![event_id("root")], depth(1)),
-		]);
+		let mut earliest_events = std::collections::HashSet::new();
+		earliest_events.insert(event_id("root"));
+
+		let sorted = topo_sort_events(
+			vec![
+				(c.clone(), vec![b.clone()], depth(3)),
+				(b.clone(), vec![a.clone()], depth(2)),
+				(a.clone(), vec![event_id("root")], depth(1)),
+			],
+			&earliest_events,
+		);
 
 		assert_eq!(sorted, vec![a, b, c]);
 	}
@@ -266,12 +294,18 @@ mod tests {
 		let c = event_id("c");
 		let d = event_id("d");
 
-		let sorted = topo_sort_events(vec![
-			(a.clone(), vec![event_id("root")], depth(1)),
-			(b.clone(), vec![a.clone()], depth(2)),
-			(c.clone(), vec![a.clone()], depth(2)),
-			(d.clone(), vec![b.clone(), c.clone()], depth(3)),
-		]);
+		let mut earliest_events = std::collections::HashSet::new();
+		earliest_events.insert(event_id("root"));
+
+		let sorted = topo_sort_events(
+			vec![
+				(a.clone(), vec![event_id("root")], depth(1)),
+				(b.clone(), vec![a.clone()], depth(2)),
+				(c.clone(), vec![a.clone()], depth(2)),
+				(d.clone(), vec![b.clone(), c.clone()], depth(3)),
+			],
+			&earliest_events,
+		);
 
 		assert_eq!(sorted, vec![a, b, c, d]);
 	}
@@ -281,10 +315,12 @@ mod tests {
 		let a = event_id("a");
 		let b = event_id("b");
 
-		let sorted = topo_sort_events(vec![
-			(a.clone(), vec![b.clone()], depth(1)),
-			(b.clone(), vec![a.clone()], depth(2)),
-		]);
+		let earliest_events = std::collections::HashSet::new();
+
+		let sorted = topo_sort_events(
+			vec![(a.clone(), vec![b.clone()], depth(1)), (b.clone(), vec![a.clone()], depth(2))],
+			&earliest_events,
+		);
 
 		assert_eq!(sorted.len(), 2);
 		assert!(sorted.contains(&a));
