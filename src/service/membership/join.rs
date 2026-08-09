@@ -192,6 +192,19 @@ async fn join_remote(
 ) -> Result {
 	info!("Joining {room_id} over federation.");
 
+	// Release the caller's room-state lock before the network round trip below.
+	// Holding it for the whole call creates a lock-order cycle with inbound
+	// federation `/send`: `send.rs`'s `handle_room` takes `mutex_federation`
+	// first and only then `state.mutex` (via `upgrade_outlier_to_timeline_pdu`),
+	// while this function used to hold `state.mutex` (acquired by our caller)
+	// across the entire call before taking `mutex_federation` below. If an
+	// inbound transaction for this room arrives while a remote join for it is
+	// in flight, each side ends up waiting on the lock the other already holds.
+	// We only actually need the room-state lock for the commit at the end,
+	// once `mutex_federation` is already held -- see the fresh acquisition
+	// further down, which keeps the same order the inbound path uses.
+	drop(state_lock);
+
 	let (make_join_response, remote_server) = self
 		.make_join_request(sender_user, room_id, servers)
 		.await?;
@@ -311,6 +324,13 @@ async fn join_remote(
 	.inspect_err(|e| error!("send_join auth check failed: {e:?}"))
 	.boxed()
 	.await?;
+
+	// Reacquire the room-state lock only now, for the commit below. We already
+	// hold `mutex_federation` (locked above before `execute_send_join`), so
+	// this preserves the same `mutex_federation` -> `state.mutex` order the
+	// inbound federation `/send` path uses (see the comment where we dropped
+	// the caller's lock at the top of this function).
+	let state_lock = self.services.state.mutex.lock(room_id).await;
 
 	self.apply_send_join_state(room_id, &state, &state_lock)
 		.await?;
