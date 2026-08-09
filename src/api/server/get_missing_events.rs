@@ -13,6 +13,9 @@ use crate::Ruma;
 const LIMIT_MAX: usize = 50;
 /// spec says default is 10
 const LIMIT_DEFAULT: usize = 10;
+/// bound the backward walk so a single request cannot fan out across
+/// arbitrarily deep or wide reachable history.
+const WALK_LIMIT_MAX: usize = 250;
 /// # `POST /_matrix/federation/v1/get_missing_events/{roomId}`
 ///
 /// Retrieves events that the sender is missing.
@@ -46,15 +49,23 @@ pub(crate) async fn get_missing_events_route(
 
 	let mut queue: VecDeque<OwnedEventId> = body.latest_events.iter().cloned().collect();
 	let mut seen: HashSet<OwnedEventId> = body.earliest_events.iter().cloned().collect();
-	let mut results: Vec<(OwnedEventId, Vec<OwnedEventId>, UInt, _)> = Vec::with_capacity(limit);
+	let mut results: Vec<(OwnedEventId, Vec<OwnedEventId>, UInt, _)> = Vec::new();
+	let mut walked = 0_usize;
 
 	while let Some(event_id) = queue.pop_front() {
 		if !seen.insert(event_id.clone()) {
 			continue;
 		}
 
-		if results.len() >= limit {
-			debug!(?body.origin, %event_id, limit, "Reached get_missing_events result limit");
+		walked = walked.saturating_add(1);
+		if walked > WALK_LIMIT_MAX {
+			debug!(
+				?body.origin,
+				%event_id,
+				walked,
+				limit = WALK_LIMIT_MAX,
+				"Reached get_missing_events walk limit"
+			);
 			break;
 		}
 
@@ -75,10 +86,14 @@ pub(crate) async fn get_missing_events_route(
 			continue;
 		}
 
-		// Synapse-compatible enough for Complement here: keep traversing through
-		// guest access, but do not include it in the returned gap-fill slice.
-		// The partial send_join tests still expect the room state itself to carry
-		// this event, so filtering at room creation is the wrong layer.
+		// NOTE: This is an endpoint-level compatibility shim, not a clean
+		// federation model rule. Partial `send_join` paths still need
+		// `m.room.guest_access` in room state, but Complement's inbound
+		// `/get_missing_events` expectations fail when it is returned in this
+		// gap-fill slice.
+		// TODO: Revisit this once partial-join behavior is aligned against a
+		// broader upstream reference, and verify it does not regress other
+		// federation consumers beyond Complement's current coverage.
 		if *pdu.kind() == TimelineEventType::RoomGuestAccess {
 			continue;
 		}
@@ -129,6 +144,7 @@ pub(crate) async fn get_missing_events_route(
 	let events = sorted_ids
 		.into_iter()
 		.filter_map(|event_id| event_map.remove(&event_id))
+		.take(limit)
 		.collect();
 
 	Ok(get_missing_events::v1::Response { events })
