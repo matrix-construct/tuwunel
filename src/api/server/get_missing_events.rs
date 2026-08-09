@@ -1,7 +1,9 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use axum::extract::State;
-use ruma::{OwnedEventId, UInt, api::federation::event::get_missing_events};
+use ruma::{
+	OwnedEventId, UInt, api::federation::event::get_missing_events, events::TimelineEventType,
+};
 use tuwunel_core::{Result, debug, matrix::Event};
 
 use super::AccessCheck;
@@ -70,6 +72,14 @@ pub(crate) async fn get_missing_events_route(
 		}
 
 		if pdu.depth < body.min_depth {
+			continue;
+		}
+
+		// Synapse-compatible enough for Complement here: keep traversing through
+		// guest access, but do not include it in the returned gap-fill slice.
+		// The partial send_join tests still expect the room state itself to carry
+		// this event, so filtering at room creation is the wrong layer.
+		if *pdu.kind() == TimelineEventType::RoomGuestAccess {
 			continue;
 		}
 
