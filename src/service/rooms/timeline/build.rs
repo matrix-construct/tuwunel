@@ -2,7 +2,7 @@ use std::{collections::HashSet, iter::once};
 
 use futures::{FutureExt, StreamExt};
 use ruma::{
-	OwnedEventId, OwnedServerName, RoomId, UserId,
+	CanonicalJsonObject, OwnedEventId, OwnedServerName, RoomId, UserId,
 	events::{
 		TimelineEventType,
 		room::member::{MembershipState, RoomMemberEventContent},
@@ -11,7 +11,11 @@ use ruma::{
 use serde_json::value::to_raw_value;
 use tuwunel_core::{
 	Err, Result, implement,
-	matrix::{event::Event, pdu::PduBuilder, room_version},
+	matrix::{
+		event::Event,
+		pdu::{PduBuilder, PduEvent},
+		room_version,
+	},
 	utils::{IterStream, ReadyExt},
 };
 
@@ -40,10 +44,35 @@ pub async fn build_and_append_pdu(
 			.await?;
 	}
 
-	let (pdu, mut pdu_json) = self
+	let (pdu, pdu_json, _prev_state) = self
 		.create_hash_and_sign_event(pdu_builder, sender, room_id, state_lock)
 		.await?;
 
+	self.append_created_pdu(pdu, pdu_json, sender, state_lock)
+		.boxed()
+		.await
+}
+
+/// Authorizes and persists a PDU already built by `create_hash_and_sign_event`
+/// as the newest event in the room. Split out from `build_and_append_pdu` so
+/// callers that need to inspect the built PDU before committing to persist it
+/// (e.g. `/state`'s identical-resend short-circuit, which still needs the
+/// auth_check inside `create_hash_and_sign_event` to have run) can reuse the
+/// standard persistence path once they decide to.
+#[implement(super::Service)]
+#[tracing::instrument(
+	name = "append"
+	level = "debug",
+	skip(self, pdu_json, state_lock),
+	ret,
+)]
+pub async fn append_created_pdu(
+	&self,
+	pdu: PduEvent,
+	mut pdu_json: CanonicalJsonObject,
+	sender: &UserId,
+	state_lock: &RoomMutexGuard,
+) -> Result<OwnedEventId> {
 	//TODO: Use proper room version here
 	if *pdu.kind() == TimelineEventType::RoomCreate && pdu.room_id().server_name().is_none() {
 		let _short_id = self

@@ -192,30 +192,22 @@ async fn send_state_event_for_key_helper(
 ) -> Result<OwnedEventId> {
 	allowed_to_send_state_event(services, sender, room_id, event_type, state_key, json).await?;
 	let state_lock = services.state.mutex.lock(room_id).await;
-	let mut content: Option<serde_json::Value> = None;
+	let content: serde_json::Value = serde_json::from_str(json.json().get())?;
 
-	if timestamp.is_none()
-		&& let Ok(prev_state) = services
-			.state_accessor
-			.room_state_get(room_id, event_type, state_key)
-			.await
-		&& prev_state.sender() == sender
-	{
-		let content = content.insert(serde_json::from_str(json.json().get())?);
-		if prev_state.get_content_as_value() == *content {
-			return Ok(prev_state.event_id().to_owned());
-		}
-	}
-
-	let event_id = services
+	// `state_res::auth_check` runs unconditionally inside
+	// `create_hash_and_sign_event`, so the identical-resend short-circuit below
+	// only ever fires after the sender's *current* permission to send this
+	// event has been verified for this exact content -- a sender whose power
+	// was revoked since the previous send can't get a stale success just by
+	// resending the same content. `prev_state` is already fetched internally
+	// to populate `unsigned.prev_content`, so checking it here costs no lookup
+	// beyond what every state send already pays.
+	let (pdu, pdu_json, prev_state) = services
 		.timeline
-		.build_and_append_pdu(
+		.create_hash_and_sign_event(
 			PduBuilder {
 				event_type: event_type.to_string().into(),
-				content: match content {
-					| Some(content) => content.into(),
-					| None => serde_json::from_str(json.json().get())?,
-				},
+				content: content.clone().into(),
 				state_key: Some(state_key.into()),
 				timestamp,
 				..Default::default()
@@ -224,6 +216,19 @@ async fn send_state_event_for_key_helper(
 			room_id,
 			&state_lock,
 		)
+		.await?;
+
+	if timestamp.is_none()
+		&& let Some(prev_state) = &prev_state
+		&& prev_state.sender() == sender
+		&& prev_state.get_content_as_value() == content
+	{
+		return Ok(prev_state.event_id().to_owned());
+	}
+
+	let event_id = services
+		.timeline
+		.append_created_pdu(pdu, pdu_json, sender, &state_lock)
 		.boxed()
 		.await?;
 

@@ -25,6 +25,13 @@ use tuwunel_core::{
 use super::RoomMutexGuard;
 use crate::rooms::state_res;
 
+/// Builds, authorizes (via `state_res::auth_check`), hashes, and signs a PDU
+/// without persisting it. The third return value is the state event this PDU
+/// would replace, if any -- already fetched here to populate `unsigned`, so
+/// callers that need it (e.g. an identical-resend short-circuit) can reuse it
+/// instead of issuing another lookup. Because auth_check has already run by
+/// the time this returns, a caller deciding to skip persistence never hands
+/// out a success the sender wasn't currently authorized for.
 #[implement(super::Service)]
 pub async fn create_hash_and_sign_event(
 	&self,
@@ -33,7 +40,7 @@ pub async fn create_hash_and_sign_event(
 	room_id: &RoomId,
 	// Take mutex guard to make sure users get the room state mutex
 	_mutex_lock: &RoomMutexGuard,
-) -> Result<(PduEvent, CanonicalJsonObject)> {
+) -> Result<(PduEvent, CanonicalJsonObject, Option<PduEvent>)> {
 	let PduBuilder {
 		event_type,
 		content,
@@ -95,6 +102,7 @@ pub async fn create_hash_and_sign_event(
 		.saturating_add(uint!(1));
 
 	let mut unsigned = unsigned.unwrap_or_default();
+	let mut prev_state = None;
 	if let Some(state_key) = &state_key
 		&& let Ok(prev_pdu) = self
 			.services
@@ -105,6 +113,7 @@ pub async fn create_hash_and_sign_event(
 		unsigned.insert("prev_content".to_owned(), prev_pdu.get_content_as_value());
 		unsigned.insert("prev_sender".to_owned(), serde_json::to_value(prev_pdu.sender())?);
 		unsigned.insert("replaces_state".to_owned(), serde_json::to_value(prev_pdu.event_id())?);
+		prev_state = Some(prev_pdu);
 	}
 
 	let unsigned = unsigned
@@ -198,7 +207,7 @@ pub async fn create_hash_and_sign_event(
 		.get_or_create_shorteventid(&pdu.event_id)
 		.await;
 
-	Ok((pdu, pdu_json))
+	Ok((pdu, pdu_json, prev_state))
 }
 
 #[implement(super::Service)]
