@@ -1,3 +1,8 @@
+use std::sync::{
+	Arc,
+	atomic::{AtomicUsize, Ordering},
+};
+
 use axum::extract::State;
 use futures::{FutureExt, StreamExt, TryFutureExt, future::Either, pin_mut};
 use ruma::{
@@ -13,7 +18,7 @@ use ruma::{
 	serde::Raw,
 };
 use tuwunel_core::{
-	Err, PduId, Result, at,
+	Err, PduId, Result, at, debug,
 	matrix::{
 		event::{Event, Matches},
 		pdu::{PduCount, PduEvent},
@@ -82,6 +87,15 @@ type RelTypes = SmallVec<[RelationType; 1]>;
 
 const LIMIT_MAX: usize = 1000;
 const LIMIT_DEFAULT: usize = 10;
+
+#[derive(Default)]
+struct MessageFilterStats {
+	iterated: AtomicUsize,
+	event_filter_dropped: AtomicUsize,
+	related_by_filter_dropped: AtomicUsize,
+	ignored_dropped: AtomicUsize,
+	visibility_dropped: AtomicUsize,
+}
 
 /// # `GET /_matrix/client/r0/rooms/{roomId}/messages`
 ///
@@ -184,12 +198,46 @@ pub(crate) async fn get_messages(
 		.await;
 
 	let shortroomid = services.short.get_shortroomid(room_id).await?;
+	let stats = Arc::new(MessageFilterStats::default());
 
 	let events: Vec<_> = it
 		.ready_take_while(|(count, _)| Some(*count) != to)
-		.ready_filter_map(|item| event_filter(item, filter))
-		.wide_filter_map(|item| related_by_filter(services, shortroomid, filter, item))
-		.wide_filter_map(|item| event_filters(services, sender_user, item, bypass_visibility))
+		.inspect({
+			let stats = Arc::clone(&stats);
+			move |_| {
+				stats.iterated.fetch_add(1, Ordering::Relaxed);
+			}
+		})
+		.ready_filter_map({
+			let stats = Arc::clone(&stats);
+			move |item| event_filter_counted(item, filter, stats.as_ref())
+		})
+		.wide_filter_map({
+			let stats = Arc::clone(&stats);
+			move |item| {
+				let stats = Arc::clone(&stats);
+				async move {
+					related_by_filter_counted(services, shortroomid, filter, item, stats.as_ref())
+						.await
+				}
+			}
+		})
+		.wide_filter_map({
+			let stats = Arc::clone(&stats);
+			move |item| {
+				let stats = Arc::clone(&stats);
+				async move {
+					event_filters_counted(
+						services,
+						sender_user,
+						item,
+						bypass_visibility,
+						stats.as_ref(),
+					)
+					.await
+				}
+			}
+		})
 		.take(limit)
 		.wide_then(|item| add_membership_unsigned(services, item, sender_user, encrypted))
 		.wide_then(async |(count, pdu)| {
@@ -229,11 +277,25 @@ pub(crate) async fn get_messages(
 
 	let next_token = events.last().map(at!(0));
 
-	let chunk = events
+	let chunk: Vec<_> = events
 		.into_iter()
 		.map(at!(1))
 		.map(Event::into_format)
 		.collect();
+
+	debug!(
+		room_id = %room_id,
+		?dir,
+		limit,
+		iterated = stats.iterated.load(Ordering::Relaxed),
+		event_filter_dropped = stats.event_filter_dropped.load(Ordering::Relaxed),
+		related_by_filter_dropped = stats.related_by_filter_dropped.load(Ordering::Relaxed),
+		ignored_dropped = stats.ignored_dropped.load(Ordering::Relaxed),
+		visibility_dropped = stats.visibility_dropped.load(Ordering::Relaxed),
+		returned = chunk.len(),
+		next_token = ?next_token,
+		"Returning messages page"
+	);
 
 	Ok(get_message_events::v3::Response {
 		start: from.to_string(),
@@ -320,6 +382,40 @@ pub(crate) async fn event_filters(
 	Some(item)
 }
 
+pub(crate) async fn event_filters_counted(
+	services: &Services,
+	user_id: &UserId,
+	item: PdusIterItem,
+	bypass_visibility: bool,
+	stats: &MessageFilterStats,
+) -> Option<PdusIterItem> {
+	if bypass_visibility {
+		return Some(item);
+	}
+
+	let item = match ignored_filter(services, item, user_id).await {
+		| Some(item) => item,
+		| None => {
+			stats
+				.ignored_dropped
+				.fetch_add(1, Ordering::Relaxed);
+			return None;
+		},
+	};
+
+	let item = match visibility_filter(services, item, user_id).await {
+		| Some(item) => item,
+		| None => {
+			stats
+				.visibility_dropped
+				.fetch_add(1, Ordering::Relaxed);
+			return None;
+		},
+	};
+
+	Some(item)
+}
+
 /// MSC3440 `related_by_*`: include an event only when another event relates
 /// to it matching the filter's reverse-relation criteria. A no-op stage when
 /// the filter carries neither field.
@@ -348,6 +444,24 @@ pub(crate) async fn related_by_filter(
 		.has_incoming_relation(target, &filter.related_by_senders, &rel_types)
 		.await
 		.then_some(item)
+}
+
+pub(crate) async fn related_by_filter_counted(
+	services: &Services,
+	shortroomid: ShortRoomId,
+	filter: &RoomEventFilter,
+	item: PdusIterItem,
+	stats: &MessageFilterStats,
+) -> Option<PdusIterItem> {
+	let result = related_by_filter(services, shortroomid, filter, item).await;
+
+	if result.is_none() {
+		stats
+			.related_by_filter_dropped
+			.fetch_add(1, Ordering::Relaxed);
+	}
+
+	result
 }
 
 #[inline]
@@ -416,6 +530,22 @@ pub(crate) async fn visibility_filter(
 pub(crate) fn event_filter(item: PdusIterItem, filter: &RoomEventFilter) -> Option<PdusIterItem> {
 	let (_, pdu) = &item;
 	filter.matches(pdu).then_some(item)
+}
+
+pub(crate) fn event_filter_counted(
+	item: PdusIterItem,
+	filter: &RoomEventFilter,
+	stats: &MessageFilterStats,
+) -> Option<PdusIterItem> {
+	let result = event_filter(item, filter);
+
+	if result.is_none() {
+		stats
+			.event_filter_dropped
+			.fetch_add(1, Ordering::Relaxed);
+	}
+
+	result
 }
 
 /// MSC4115: stamp `unsigned.membership` on a served PDU with the requesting

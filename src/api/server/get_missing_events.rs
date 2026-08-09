@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use axum::extract::State;
 use ruma::{OwnedEventId, UInt, api::federation::event::get_missing_events};
-use tuwunel_core::{Result, debug};
+use tuwunel_core::{Result, debug, matrix::Event};
 
 use super::AccessCheck;
 use crate::Ruma;
@@ -40,6 +40,11 @@ pub(crate) async fn get_missing_events_route(
 	let room_version = services
 		.state
 		.get_room_version(&body.room_id)
+		.await
+		.ok();
+	let room_version_rules = services
+		.state
+		.get_room_version_rules(&body.room_id)
 		.await
 		.ok();
 
@@ -83,23 +88,47 @@ pub(crate) async fn get_missing_events_route(
 			continue;
 		}
 
-		if !services
+		let visible = services
 			.state_accessor
 			.server_can_see_event(body.origin(), &body.room_id, &event_id)
-			.await
-		{
+			.await;
+
+		let event = if visible {
+			let Ok(event) = services.timeline.get_pdu_json(&event_id).await else {
+				debug!(?body.origin, %event_id, "Event JSON does not exist locally, skipping");
+				continue;
+			};
+
+			event
+		} else {
+			let Some(room_version_rules) = room_version_rules.as_ref() else {
+				debug!(
+					?body.origin,
+					%event_id,
+					room_id = %body.room_id,
+					"Server cannot see event and room version rules are unavailable, skipping"
+				);
+				continue;
+			};
+
 			debug!(
 				?body.origin,
 				%event_id,
 				room_id = %body.room_id,
-				"Server cannot see event, traversing through it but omitting it from the response"
+				"Server cannot see event, traversing through it and returning a redacted copy"
 			);
-			continue;
-		}
 
-		let Ok(event) = services.timeline.get_pdu_json(&event_id).await else {
-			debug!(?body.origin, %event_id, "Event JSON does not exist locally, skipping");
-			continue;
+			let Ok(event) = pdu.redacted(&room_version_rules.redaction) else {
+				debug!(
+					?body.origin,
+					%event_id,
+					room_id = %body.room_id,
+					"Failed to redact invisible event, skipping"
+				);
+				continue;
+			};
+
+			event.to_canonical_object()
 		};
 
 		let event = services
@@ -128,10 +157,9 @@ pub(crate) async fn get_missing_events_route(
 		.map(|(event_id, _, _, event)| (event_id, event))
 		.collect();
 
-	let events = sorted_ids
+	let events = newest_topological_slice(sorted_ids, limit)
 		.into_iter()
 		.filter_map(|event_id| event_map.remove(&event_id))
-		.take(limit)
 		.collect();
 
 	Ok(get_missing_events::v1::Response { events })
@@ -211,6 +239,11 @@ fn topo_sort_events(
 	ordered
 }
 
+fn newest_topological_slice(sorted_ids: Vec<OwnedEventId>, limit: usize) -> Vec<OwnedEventId> {
+	let start = sorted_ids.len().saturating_sub(limit);
+	sorted_ids.into_iter().skip(start).collect()
+}
+
 fn sort_topological_frontier(
 	frontier: &mut [OwnedEventId],
 	depth_map: &HashMap<OwnedEventId, UInt>,
@@ -235,7 +268,7 @@ fn sort_topological_frontier(
 mod tests {
 	use ruma::OwnedEventId;
 
-	use super::topo_sort_events;
+	use super::{newest_topological_slice, topo_sort_events};
 
 	fn event_id(id: &str) -> OwnedEventId { format!("${id}:example.com").try_into().unwrap() }
 
@@ -271,5 +304,18 @@ mod tests {
 		]);
 
 		assert_eq!(sorted, vec![a, b, c, d]);
+	}
+
+	#[test]
+	fn newest_topological_slice_keeps_newest_segment_oldest_first() {
+		let a = event_id("a");
+		let b = event_id("b");
+		let c = event_id("c");
+		let d = event_id("d");
+		let e = event_id("e");
+
+		let sliced = newest_topological_slice(vec![a, b, c.clone(), d.clone(), e.clone()], 3);
+
+		assert_eq!(sliced, vec![c, d, e]);
 	}
 }
