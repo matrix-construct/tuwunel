@@ -331,4 +331,120 @@ mod tests {
 		assert!(sorted.contains(&a));
 		assert!(sorted.contains(&b));
 	}
+
+	/// Regression test for 17ef683d4: a prev-event can be *walked* (and thus
+	/// known-reached) without appearing in the returned batch, e.g. it was
+	/// filtered out by `min_depth` or visibility. Such a prev must not
+	/// invalidate its child just because it isn't one of the events being
+	/// topo-sorted.
+	#[test]
+	fn topo_sort_reached_but_excluded_prev_is_not_invalidated() {
+		let x = event_id("x");
+		let y = event_id("y");
+
+		// `x` was walked (so it's in `reached_events`/`seen`) but got filtered
+		// out of the batch before reaching topo_sort_events, so it never
+		// appears as a key in `events`.
+		let mut reached_events = std::collections::HashSet::new();
+		reached_events.insert(x.clone());
+
+		let sorted = topo_sort_events(
+			vec![(y.clone(), vec![x], depth(2))],
+			&reached_events,
+			UInt::new(0).unwrap(),
+		);
+
+		assert_eq!(sorted, vec![y]);
+	}
+
+	/// Regression test for bbe1e7238: an event sitting exactly at
+	/// `min_depth` whose prev is missing must not be invalidated, since that
+	/// prev is expected to be below the requested boundary and simply won't
+	/// be sent. The check is `depth > min_depth`, not `>=`.
+	#[test]
+	fn topo_sort_event_at_min_depth_boundary_is_not_invalidated() {
+		let a = event_id("a");
+		let missing = event_id("missing");
+
+		let reached_events = std::collections::HashSet::new();
+		let min_depth = UInt::new(5).unwrap();
+
+		let sorted = topo_sort_events(
+			vec![(a.clone(), vec![missing], depth(5))],
+			&reached_events,
+			min_depth,
+		);
+
+		assert_eq!(sorted, vec![a]);
+	}
+
+	/// Companion to the boundary test above: one depth past the boundary,
+	/// with the same unreached/missing prev, must still be invalidated.
+	#[test]
+	fn topo_sort_event_past_min_depth_boundary_is_invalidated() {
+		let a = event_id("a");
+		let missing = event_id("missing");
+
+		let reached_events = std::collections::HashSet::new();
+		let min_depth = UInt::new(5).unwrap();
+
+		let sorted =
+			topo_sort_events(vec![(a, vec![missing], depth(6))], &reached_events, min_depth);
+
+		assert!(sorted.is_empty());
+	}
+
+	/// Invalidation must cascade to descendants: a child whose own direct
+	/// prev is present in the batch should still be dropped if that prev
+	/// was itself invalidated.
+	#[test]
+	fn topo_sort_invalidation_cascades_to_descendants() {
+		let a = event_id("a");
+		let b = event_id("b");
+		let missing = event_id("missing");
+
+		let reached_events = std::collections::HashSet::new();
+
+		let sorted = topo_sort_events(
+			vec![
+				// `a`'s prev is missing and unreached -> `a` is invalid.
+				(a.clone(), vec![missing], depth(1)),
+				// `b`'s only prev, `a`, is present in the batch, so `b`
+				// isn't directly invalid -- it must be caught by cascade.
+				(b.clone(), vec![a.clone()], depth(2)),
+			],
+			&reached_events,
+			UInt::new(0).unwrap(),
+		);
+
+		assert!(!sorted.contains(&a));
+		assert!(!sorted.contains(&b));
+	}
+
+	/// Defensive test for a malformed/duplicated `prev_events` list (the
+	/// same prev referenced twice by one event). This inflates in-degree by
+	/// two for a single real edge, which can leave the node permanently
+	/// non-zero and push it into the fallback path; it must still terminate
+	/// and return every event exactly once.
+	#[test]
+	fn topo_sort_duplicate_prev_event_entries_still_terminate() {
+		let a = event_id("a");
+		let b = event_id("b");
+
+		let mut reached_events = std::collections::HashSet::new();
+		reached_events.insert(event_id("root"));
+
+		let sorted = topo_sort_events(
+			vec![
+				(a.clone(), vec![event_id("root")], depth(1)),
+				(b.clone(), vec![a.clone(), a.clone()], depth(2)),
+			],
+			&reached_events,
+			UInt::new(0).unwrap(),
+		);
+
+		assert_eq!(sorted.len(), 2);
+		assert!(sorted.contains(&a));
+		assert!(sorted.contains(&b));
+	}
 }
