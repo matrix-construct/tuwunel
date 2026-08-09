@@ -192,6 +192,19 @@ async fn send_state_event_for_key_helper(
 ) -> Result<OwnedEventId> {
 	allowed_to_send_state_event(services, sender, room_id, event_type, state_key, json).await?;
 	let state_lock = services.state.mutex.lock(room_id).await;
+
+	if timestamp.is_none()
+		&& let Ok(prev_state) = services
+			.state_accessor
+			.room_state_get(room_id, event_type, state_key)
+			.await
+		&& prev_state.sender() == sender
+		&& prev_state.get_content_as_value()
+			== serde_json::from_str::<serde_json::Value>(json.json().get())?
+	{
+		return Ok(prev_state.event_id().to_owned());
+	}
+
 	let event_id = services
 		.timeline
 		.build_and_append_pdu(
