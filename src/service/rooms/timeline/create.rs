@@ -102,8 +102,7 @@ pub async fn create_hash_and_sign_event(
 		.saturating_add(uint!(1));
 
 	let mut unsigned = unsigned.unwrap_or_default();
-	let mut prev_state = None;
-	if let Some(state_key) = &state_key
+	let prev_state = if let Some(state_key) = &state_key
 		&& let Ok(prev_pdu) = self
 			.services
 			.state_accessor
@@ -113,8 +112,10 @@ pub async fn create_hash_and_sign_event(
 		unsigned.insert("prev_content".to_owned(), prev_pdu.get_content_as_value());
 		unsigned.insert("prev_sender".to_owned(), serde_json::to_value(prev_pdu.sender())?);
 		unsigned.insert("replaces_state".to_owned(), serde_json::to_value(prev_pdu.event_id())?);
-		prev_state = Some(prev_pdu);
-	}
+		Some(prev_pdu)
+	} else {
+		None
+	};
 
 	let unsigned = unsigned
 		.is_empty()
