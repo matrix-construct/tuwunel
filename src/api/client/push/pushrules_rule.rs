@@ -67,11 +67,13 @@ pub(crate) async fn set_pushrule_route(
 			| BeforeHigherThanAfter => Err!(Request(InvalidParam(
 				"The before rule has a higher priority than the after rule."
 			))),
-			| InvalidRuleId =>
-				Err!(Request(InvalidParam("Rule ID containing invalid characters."))),
+			| InvalidRuleId => {
+				Err!(Request(InvalidParam("Rule ID containing invalid characters.")))
+			},
 
-			| UnknownRuleId =>
-				Err!(Request(NotFound("The before or after rule could not be found."))),
+			| UnknownRuleId => {
+				Err!(Request(NotFound("The before or after rule could not be found.")))
+			},
 
 			| _ => Err!(Request(InvalidParam("Invalid data."))),
 		};
@@ -98,8 +100,9 @@ pub(crate) async fn delete_pushrule_route(
 		.remove(body.kind.clone(), &body.rule_id)
 	{
 		return match error {
-			| RemovePushRuleError::ServerDefault =>
-				Err!(Request(InvalidParam("Cannot delete a server-default pushrule."))),
+			| RemovePushRuleError::ServerDefault => {
+				Err!(Request(InvalidParam("Cannot delete a server-default pushrule.")))
+			},
 
 			| RemovePushRuleError::NotFound => Err!(Request(NotFound("Push rule not found."))),
 

@@ -170,8 +170,9 @@ impl AuthDispatch for AppserviceToken {
 		match token {
 			| Token::Invalid => unknown_token(),
 			| Token::Expired(access_token) => expired_token(services, &access_token).await,
-			| Token::User(_) =>
-				Err!(Request(Unauthorized("Appservice tokens must be used on this endpoint."))),
+			| Token::User(_) => {
+				Err!(Request(Unauthorized("Appservice tokens must be used on this endpoint.")))
+			},
 			| Token::Appservice(info) => Ok(Auth {
 				appservice_info: Some(*info),
 				..Auth::default()
@@ -222,8 +223,9 @@ impl AuthDispatch for ServerSignatures {
 		match token {
 			| Token::Invalid => unknown_token(),
 			| Token::Expired(access_token) => expired_token(services, &access_token).await,
-			| Token::Appservice(_) | Token::User(_) =>
-				Err!(Request(Unauthorized("Server signatures must be used on this endpoint."))),
+			| Token::Appservice(_) | Token::User(_) => {
+				Err!(Request(Unauthorized("Server signatures must be used on this endpoint.")))
+			},
 			| Token::None => Ok(auth_server(services, request, json_body).await?),
 		}
 	}

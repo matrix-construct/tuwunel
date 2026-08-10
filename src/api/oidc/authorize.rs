@@ -60,11 +60,13 @@ pub(crate) async fn authorize_route(
 	// RFC 7636 / MSC2964: require an explicit S256 challenge; bare `plain` is
 	// rejected.
 	match (&params.code_challenge, params.code_challenge_method.as_deref()) {
-		| (None, _) if services.config.oidc_require_pkce =>
-			return Err!(Request(InvalidParam("code_challenge is required (PKCE with S256)"))),
+		| (None, _) if services.config.oidc_require_pkce => {
+			return Err!(Request(InvalidParam("code_challenge is required (PKCE with S256)")));
+		},
 
-		| (Some(_), method) if method != Some("S256") =>
-			return Err!(Request(InvalidParam("Only code_challenge_method=S256 is supported"))),
+		| (Some(_), method) if method != Some("S256") => {
+			return Err!(Request(InvalidParam("Only code_challenge_method=S256 is supported")));
+		},
 
 		| _ => {},
 	}
@@ -99,8 +101,9 @@ pub(crate) async fn authorize_route(
 	let idp_id = match (serve_native, resolved_idp) {
 		| (true, _) => None,
 		| (false, Some(idp_id)) => Some(idp_id),
-		| (false, None) =>
-			return Err!(Config("identity_provider", "No identity provider configured")),
+		| (false, None) => {
+			return Err!(Config("identity_provider", "No identity provider configured"));
+		},
 	};
 
 	let auth_req = AuthRequest {

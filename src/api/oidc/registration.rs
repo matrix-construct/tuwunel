@@ -122,8 +122,9 @@ fn validate_client_metadata(body: &DcrRequest, require_client_uri: bool) -> Resu
 	{
 		match parse_https(uri).as_ref().and_then(Url::host_str) {
 			| Some(host) if shares_base(host, base) => {},
-			| Some(_) =>
-				return Err(DcrError::Metadata("a metadata URI must share the client_uri host")),
+			| Some(_) => {
+				return Err(DcrError::Metadata("a metadata URI must share the client_uri host"));
+			},
 			| None => return Err(DcrError::Metadata("a metadata URI must be an https URL")),
 		}
 	}

@@ -425,8 +425,9 @@ async fn apply_initial_state_pdus(
 
 	let should_encrypt = match config {
 		| Some("all") => true,
-		| Some("invite") =>
-			matches!(preset, RoomPreset::PrivateChat | RoomPreset::TrustedPrivateChat),
+		| Some("invite") => {
+			matches!(preset, RoomPreset::PrivateChat | RoomPreset::TrustedPrivateChat)
+		},
 		| _ => false,
 	};
 

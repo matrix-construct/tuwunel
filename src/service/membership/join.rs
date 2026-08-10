@@ -227,12 +227,14 @@ async fn join_remote(
 
 	let response = self
 		.fetch_and_prepare_send_join_response(
-			&remote_server,
-			room_id,
-			&event_id,
-			servers,
-			&room_version_id,
-			&join_authorized_via_users_server,
+			SendJoinRequest {
+				remote_server: &remote_server,
+				room_id,
+				event_id: &event_id,
+				servers,
+				room_version_id: &room_version_id,
+				join_authorized_via_users_server: join_authorized_via_users_server.as_ref(),
+			},
 			&mut join_event,
 		)
 		.await?;
@@ -255,6 +257,15 @@ async fn join_remote(
 		.await?;
 
 	Ok(())
+}
+
+struct SendJoinRequest<'a> {
+	remote_server: &'a OwnedServerName,
+	room_id: &'a RoomId,
+	event_id: &'a OwnedEventId,
+	servers: &'a [OwnedServerName],
+	room_version_id: &'a RoomVersionId,
+	join_authorized_via_users_server: Option<&'a OwnedUserId>,
 }
 
 #[implement(Service)]
@@ -306,28 +317,35 @@ async fn prepare_remote_join(
 #[implement(Service)]
 async fn fetch_and_prepare_send_join_response(
 	&self,
-	remote_server: &OwnedServerName,
-	room_id: &RoomId,
-	event_id: &OwnedEventId,
-	servers: &[OwnedServerName],
-	room_version_id: &RoomVersionId,
-	join_authorized_via_users_server: &Option<OwnedUserId>,
+	request: SendJoinRequest<'_>,
 	join_event: &mut CanonicalJsonObject,
 ) -> Result<federation::membership::create_join_event::v2::RoomState> {
 	let mut response = self
-		.execute_send_join(remote_server, room_id, event_id, join_event.clone(), room_version_id)
+		.execute_send_join(
+			request.remote_server,
+			request.room_id,
+			request.event_id,
+			join_event.clone(),
+			request.room_version_id,
+		)
 		.await?;
 
 	if response.members_omitted {
-		self.fetch_omitted_state(remote_server, room_id, event_id, servers, &mut response)
-			.await?;
+		self.fetch_omitted_state(
+			request.remote_server,
+			request.room_id,
+			request.event_id,
+			request.servers,
+			&mut response,
+		)
+		.await?;
 	}
 
-	if join_authorized_via_users_server.is_some() {
+	if request.join_authorized_via_users_server.is_some() {
 		merge_restricted_signature(
-			remote_server,
-			event_id,
-			room_version_id,
+			request.remote_server,
+			request.event_id,
+			request.room_version_id,
 			&response,
 			join_event,
 		)?;

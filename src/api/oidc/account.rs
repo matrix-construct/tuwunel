@@ -259,11 +259,12 @@ async fn handle_account_callback(
 		| "org.matrix.sessions_list" => consume_login_token(services, login_token).await?,
 		| _ if method == Method::POST => consume_login_token(services, login_token).await?,
 		| _ if method == Method::GET => peek_login_token(services, login_token).await?,
-		| _ =>
+		| _ => {
 			return Err!(HttpJson(METHOD_NOT_ALLOWED, {
 				"errcode": "M_UNRECOGNIZED",
 				"error": "Unsupported account management method",
-			})),
+			}));
+		},
 	};
 
 	match action {

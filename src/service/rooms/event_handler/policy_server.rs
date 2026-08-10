@@ -247,8 +247,9 @@ where
 
 	let event_id = pdu.event_id();
 	match self.cached_policy_state(event_id).await {
-		| Some(PolicySigState::Refused { .. }) =>
-			return Err!(Request(Forbidden("Event was rejected by the room's policy server."))),
+		| Some(PolicySigState::Refused { .. }) => {
+			return Err!(Request(Forbidden("Event was rejected by the room's policy server.")));
+		},
 
 		| Some(PolicySigState::BackoffUntil { until_secs }) if until_secs > now_secs() => {
 			debug!(via = %policy.via, until_secs, "skipping outbound /sign during policy backoff");
