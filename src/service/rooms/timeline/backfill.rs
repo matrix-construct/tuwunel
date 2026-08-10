@@ -51,11 +51,6 @@ pub async fn backfill_if_required(&self, room_id: &RoomId, from: PduCount) -> Re
 		.await
 		.expect("Room is not empty");
 
-	// No backfill required, there are still events between them
-	if first_pdu_count < from {
-		return Ok(());
-	}
-
 	// No backfill required, reached the end.
 	if *first_pdu.event_type() == TimelineEventType::RoomCreate {
 		return Ok(());
