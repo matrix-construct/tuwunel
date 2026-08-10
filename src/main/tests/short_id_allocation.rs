@@ -8,7 +8,8 @@ use tuwunel_core::{
 	Err, Result,
 	matrix::pdu::PduBuilder,
 	ruma::{
-		OwnedEventId, RoomVersionId, event_id, events::room::create::RoomCreateEventContent,
+		OwnedEventId, RoomVersionId, event_id,
+		events::room::{create::RoomCreateEventContent, name::RoomNameEventContent},
 		room_id,
 	},
 	utils::stream::ReadyExt,
@@ -57,6 +58,7 @@ fn batch_duplicates_share_one_shorteventid() -> Result {
 
 async fn exercise(services: &Services) -> Result {
 	create_hash_and_sign_does_not_allocate_short_id(services).await?;
+	repeated_identical_state_resend_does_not_allocate_short_id(services).await?;
 
 	let event_id = event_id!("$short-id-allocation-batch:localhost");
 	// a repeated event misses the batched lookup on every occurrence
@@ -83,6 +85,58 @@ async fn exercise(services: &Services) -> Result {
 
 	if resolved != event_id {
 		return Err!("short id did not resolve back to its event id");
+	}
+
+	Ok(())
+}
+
+async fn repeated_identical_state_resend_does_not_allocate_short_id(
+	services: &Services,
+) -> Result {
+	if services.admin.get_admin_room().await.is_err() {
+		tuwunel_service::admin::create_admin_room(services).await?;
+	}
+
+	let sender = services.globals.server_user.as_ref();
+	let room_id = services.admin.get_admin_room().await?;
+	let state_lock = services.state.mutex.lock(&room_id).await;
+	let content = RoomNameEventContent::new("Short ID resend regression".into());
+
+	let first_event_id = services
+		.timeline
+		.build_and_append_pdu(
+			PduBuilder::state(String::new(), &content),
+			sender,
+			&room_id,
+			&state_lock,
+		)
+		.await?;
+
+	let (duplicate_pdu, _duplicate_pdu_json, prev_state) = services
+		.timeline
+		.create_hash_and_sign_event(
+			PduBuilder::state(String::new(), &content),
+			sender,
+			&room_id,
+			&state_lock,
+		)
+		.await?;
+
+	let Some(prev_state) = prev_state else {
+		return Err!("duplicate state build did not expose the previous state event");
+	};
+
+	if prev_state.event_id != first_event_id {
+		return Err!("duplicate state build did not point at the first appended event");
+	}
+
+	if services
+		.short
+		.get_shorteventid(&duplicate_pdu.event_id)
+		.await
+		.is_ok()
+	{
+		return Err!("duplicate identical state resend allocated a short event id before append");
 	}
 
 	Ok(())
