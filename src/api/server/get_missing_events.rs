@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use axum::extract::State;
 use ruma::{
 	OwnedEventId, UInt, api::federation::event::get_missing_events,
-	canonical_json::redact_in_place, events::TimelineEventType,
+	canonical_json::redact_in_place,
 };
 use tuwunel_core::{Result, debug, err, matrix::Event};
 
@@ -98,20 +98,6 @@ pub(crate) async fn get_missing_events_route(
 		}
 
 		if pdu.depth < body.min_depth {
-			continue;
-		}
-
-		// Synapse-compatible enough for Complement here: keep traversing through
-		// guest access, but do not include it in the returned gap-fill slice. The
-		// partial send_join paths still need `m.room.guest_access` in room state,
-		// but Complement's inbound `/get_missing_events` expectations fail when it
-		// is returned in this gap-fill slice. It stays in `resolved` above, so a
-		// later event whose prev_events points at it is not invalidated by the
-		// topo-sort boundary check.
-		// TODO: Revisit this once partial-join behavior is aligned against a
-		// broader upstream reference, and verify it does not regress other
-		// federation consumers beyond Complement's current coverage.
-		if *pdu.kind() == TimelineEventType::RoomGuestAccess {
 			continue;
 		}
 
