@@ -101,7 +101,7 @@ pub(crate) async fn get_missing_events_route(
 			continue;
 		}
 
-		if *pdu.kind() == TimelineEventType::RoomGuestAccess {
+		if pdu.kind == TimelineEventType::RoomGuestAccess {
 			continue;
 		}
 
