@@ -332,6 +332,24 @@ async fn join_remote(
 	// the caller's lock at the top of this function).
 	let state_lock = self.services.state.mutex.lock(room_id).await;
 
+	match self
+		.services
+		.state_cache
+		.user_membership(sender_user, room_id)
+		.await
+	{
+		| Some(MembershipState::Leave | MembershipState::Ban) => {
+			debug_warn!(
+				%sender_user,
+				%room_id,
+				"Skipping stale remote join commit after a newer local membership change"
+			);
+
+			return Err!(Request(Conflict("Join was superseded by a newer membership change.")));
+		},
+		| _ => {},
+	}
+
 	self.apply_send_join_state(room_id, &state, &state_lock)
 		.await?;
 

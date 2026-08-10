@@ -4,7 +4,7 @@ use futures::{FutureExt, StreamExt};
 use ruma::{
 	CanonicalJsonObject, OwnedEventId, OwnedServerName, RoomId, UserId,
 	events::{
-		TimelineEventType,
+		StateEventType, TimelineEventType,
 		room::member::{MembershipState, RoomMemberEventContent},
 	},
 };
@@ -39,7 +39,7 @@ pub async fn build_and_append_pdu(
 	state_lock: &RoomMutexGuard,
 ) -> Result<OwnedEventId> {
 	if pdu_builder.event_type == TimelineEventType::RoomMember {
-		self.sanitize_member_authorisation(&mut pdu_builder, room_id)
+		self.normalize_member_authorisation(&mut pdu_builder, room_id)
 			.boxed()
 			.await?;
 	}
@@ -73,6 +73,12 @@ pub async fn append_created_pdu(
 	sender: &UserId,
 	state_lock: &RoomMutexGuard,
 ) -> Result<OwnedEventId> {
+	let _shorteventid = self
+		.services
+		.short
+		.get_or_create_shorteventid(&pdu.event_id)
+		.await;
+
 	//TODO: Use proper room version here
 	if *pdu.kind() == TimelineEventType::RoomCreate && pdu.room_id().server_name().is_none() {
 		let _short_id = self
@@ -180,7 +186,7 @@ pub async fn append_created_pdu(
 
 #[implement(super::Service)]
 #[tracing::instrument(skip_all, level = "debug")]
-async fn sanitize_member_authorisation(
+pub async fn normalize_member_authorisation(
 	&self,
 	pdu_builder: &mut PduBuilder,
 	room_id: &RoomId,

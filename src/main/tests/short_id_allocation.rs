@@ -3,13 +3,14 @@
 use std::{env::var, fs::remove_dir_all, path::PathBuf, process::id as process_id};
 
 use futures::{StreamExt, pin_mut};
+use ruma::events::room::create::RoomCreateEventContent;
 use tuwunel::{Args, Runtime, Server, async_run, async_start, async_stop};
 use tuwunel_core::{
 	Err, Result,
-	ruma::{OwnedEventId, event_id},
+	ruma::{OwnedEventId, RoomVersionId, event_id, room_id},
 	utils::stream::ReadyExt,
 };
-use tuwunel_service::Services;
+use tuwunel_service::{Services, pdu::PduBuilder};
 
 const OCCURRENCES: usize = 8;
 
@@ -52,6 +53,8 @@ fn batch_duplicates_share_one_shorteventid() -> Result {
 }
 
 async fn exercise(services: &Services) -> Result {
+	create_hash_and_sign_does_not_allocate_short_id(services).await?;
+
 	let event_id = event_id!("$short-id-allocation-batch:localhost");
 	// a repeated event misses the batched lookup on every occurrence
 	let batch = [event_id; OCCURRENCES];
@@ -77,6 +80,56 @@ async fn exercise(services: &Services) -> Result {
 
 	if resolved != event_id {
 		return Err!("short id did not resolve back to its event id");
+	}
+
+	Ok(())
+}
+
+async fn create_hash_and_sign_does_not_allocate_short_id(services: &Services) -> Result {
+	let sender = services.globals.server_user.as_ref();
+	if !services.users.exists(sender).await {
+		services.users.create(sender, None, None).await?;
+	}
+
+	let room_id = room_id!("!short-id-no-append:localhost");
+	let state_lock = services.state.mutex.lock(room_id).await;
+	let (pdu, pdu_json, _prev_state) = services
+		.timeline
+		.create_hash_and_sign_event(
+			PduBuilder::state(String::new(), &RoomCreateEventContent {
+				federate: true,
+				predecessor: None,
+				room_version: RoomVersionId::V11,
+				..RoomCreateEventContent::new_v11()
+			}),
+			sender,
+			room_id,
+			&state_lock,
+		)
+		.await?;
+	let event_id = pdu.event_id.clone();
+
+	if services
+		.short
+		.get_shorteventid(&event_id)
+		.await
+		.is_ok()
+	{
+		return Err!("create_hash_and_sign_event allocated a short event id before append");
+	}
+
+	services
+		.timeline
+		.append_created_pdu(pdu, pdu_json, sender, &state_lock)
+		.await?;
+
+	if services
+		.short
+		.get_shorteventid(&event_id)
+		.await
+		.is_err()
+	{
+		return Err!("append_created_pdu did not allocate a short event id");
 	}
 
 	Ok(())

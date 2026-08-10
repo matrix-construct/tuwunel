@@ -192,7 +192,22 @@ async fn send_state_event_for_key_helper(
 ) -> Result<OwnedEventId> {
 	allowed_to_send_state_event(services, sender, room_id, event_type, state_key, json).await?;
 	let state_lock = services.state.mutex.lock(room_id).await;
-	let content: serde_json::Value = serde_json::from_str(json.json().get())?;
+	let mut pdu_builder = PduBuilder {
+		event_type: event_type.to_string().into(),
+		content: serde_json::from_str::<serde_json::Value>(json.json().get())?.into(),
+		state_key: Some(state_key.into()),
+		timestamp,
+		..Default::default()
+	};
+
+	if pdu_builder.event_type == ruma::events::TimelineEventType::RoomMember {
+		services
+			.timeline
+			.normalize_member_authorisation(&mut pdu_builder, room_id)
+			.await?;
+	}
+
+	let content = pdu_builder.content.deserialize()?;
 
 	// `state_res::auth_check` runs unconditionally inside
 	// `create_hash_and_sign_event`, so the identical-resend short-circuit below
@@ -204,18 +219,7 @@ async fn send_state_event_for_key_helper(
 	// beyond what every state send already pays.
 	let (pdu, pdu_json, prev_state) = services
 		.timeline
-		.create_hash_and_sign_event(
-			PduBuilder {
-				event_type: event_type.to_string().into(),
-				content: content.clone().into(),
-				state_key: Some(state_key.into()),
-				timestamp,
-				..Default::default()
-			},
-			sender,
-			room_id,
-			&state_lock,
-		)
+		.create_hash_and_sign_event(pdu_builder, sender, room_id, &state_lock)
 		.await?;
 
 	if timestamp.is_none()

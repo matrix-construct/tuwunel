@@ -201,13 +201,6 @@ pub async fn create_hash_and_sign_event(
 
 	check_rules(&pdu_json, &version_rules.event_format)?;
 
-	// Generate short event id
-	let _shorteventid = self
-		.services
-		.short
-		.get_or_create_shorteventid(&pdu.event_id)
-		.await;
-
 	Ok((pdu, pdu_json, prev_state))
 }
 
