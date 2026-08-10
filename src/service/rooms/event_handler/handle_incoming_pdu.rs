@@ -149,23 +149,6 @@ pub async fn handle_incoming_pdu<'a>(
 		.handle_outlier_pdu(origin, room_id, event_id, pdu, &room_version, recursion_level, false)
 		.await?;
 
-	// Guard against stale join retries bypassing auth via shortcut
-	if is_timeline_event
-		&& incoming_pdu.kind() == &ruma::events::TimelineEventType::RoomMember
-		&& let Some(state_key) = incoming_pdu.state_key()
-		&& let Ok(target_user) = <&UserId>::try_from(state_key)
-	{
-		if let Ok(content) = incoming_pdu.get_content::<RoomMemberEventContent>() {
-			if matches!(content.membership, MembershipState::Join | MembershipState::Invite) {
-				if let Ok(actual_membership) = self.services.state_accessor.get_member(room_id, target_user).await {
-					if actual_membership.membership == MembershipState::Leave {
-						return Err!(Request(Forbidden("join shortcut rejected: target user has a leave in the current room state")));
-					}
-				}
-			}
-		}
-	}
-
 	// 8. if not timeline event: stop
 	if !is_timeline_event {
 		debug!(
