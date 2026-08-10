@@ -641,7 +641,6 @@ checksum = "0b023947811758c97c59bf9d1c188fd619ad4718dcaa767947df1cadb14f39f4"
 dependencies = [
  "glob",
  "libc",
- "libloading 0.8.9",
 ]
 
 [[package]]
@@ -2434,16 +2433,6 @@ checksum = "68ab91017fe16c622486840e4c83c9a37afeff978bd239b5293d61ece587de66"
 
 [[package]]
 name = "libloading"
-version = "0.8.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d7c4b02199fee7c5d21a5ae7d8cfa79a6ef5bb2fc834d6e9058e89c825efdc55"
-dependencies = [
- "cfg-if",
- "windows-link",
-]
-
-[[package]]
-name = "libloading"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "754ca22de805bb5744484a5b151a9e1a8e837d5dc232c2d7d8c2e3492edc8b60"
@@ -4010,8 +3999,8 @@ dependencies = [
 
 [[package]]
 name = "rust-librocksdb-sys"
-version = "0.46.0+11.1.1"
-source = "git+https://github.com/matrix-construct/rust-rocksdb?rev=842a4c25d5e8b86e4c858ba98bdfabe24adb2641#842a4c25d5e8b86e4c858ba98bdfabe24adb2641"
+version = "0.48.0+11.8.1"
+source = "git+https://github.com/matrix-construct/rust-rocksdb?rev=4585432466f3a3755749589a6f8611bba0ce165e#4585432466f3a3755749589a6f8611bba0ce165e"
 dependencies = [
  "bindgen",
  "bzip2-sys",
@@ -4022,13 +4011,14 @@ dependencies = [
  "libz-sys",
  "lz4-sys",
  "pkg-config",
+ "rustflags",
  "zstd-sys",
 ]
 
 [[package]]
 name = "rust-rocksdb"
-version = "0.50.0"
-source = "git+https://github.com/matrix-construct/rust-rocksdb?rev=842a4c25d5e8b86e4c858ba98bdfabe24adb2641#842a4c25d5e8b86e4c858ba98bdfabe24adb2641"
+version = "0.52.0"
+source = "git+https://github.com/matrix-construct/rust-rocksdb?rev=4585432466f3a3755749589a6f8611bba0ce165e#4585432466f3a3755749589a6f8611bba0ce165e"
 dependencies = [
  "libc",
  "parking_lot",
@@ -5506,7 +5496,7 @@ dependencies = [
  "jevmalloc",
  "jsonwebtoken",
  "libc",
- "libloading 0.9.0",
+ "libloading",
  "log",
  "maplit",
  "nix",
@@ -6390,7 +6380,6 @@ version = "2.0.16+zstd.1.5.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "91e19ebc2adc8f83e43039e79776e3fda8ca919132d68a1fed6a5faca2683748"
 dependencies = [
- "bindgen",
  "cc",
  "pkg-config",
 ]

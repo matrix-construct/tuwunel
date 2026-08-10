@@ -430,7 +430,7 @@ default-features = false
 
 [workspace.dependencies.rust-rocksdb]
 git = "https://github.com/matrix-construct/rust-rocksdb"
-rev = "842a4c25d5e8b86e4c858ba98bdfabe24adb2641"
+rev = "4585432466f3a3755749589a6f8611bba0ce165e"
 default-features = false
 features = [
 	"bzip2",
