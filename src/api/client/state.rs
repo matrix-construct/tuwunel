@@ -207,7 +207,7 @@ async fn send_state_event_for_key_helper(
 			.await?;
 	}
 
-	let content = pdu_builder.content.deserialize()?;
+	let content: serde_json::Value = pdu_builder.content.deserialize()?;
 
 	// `state_res::auth_check` runs unconditionally inside
 	// `create_hash_and_sign_event`, so the identical-resend short-circuit below

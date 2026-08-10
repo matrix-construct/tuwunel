@@ -5,7 +5,7 @@ use ruma::{
 	OwnedEventId, UInt, api::federation::event::get_missing_events,
 	canonical_json::redact_in_place,
 };
-use tuwunel_core::{Result, debug, err, matrix::Event};
+use tuwunel_core::{Result, debug, err};
 
 use super::AccessCheck;
 use crate::Ruma;
