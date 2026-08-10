@@ -3,14 +3,17 @@
 use std::{env::var, fs::remove_dir_all, path::PathBuf, process::id as process_id};
 
 use futures::{StreamExt, pin_mut};
-use ruma::events::room::create::RoomCreateEventContent;
 use tuwunel::{Args, Runtime, Server, async_run, async_start, async_stop};
 use tuwunel_core::{
 	Err, Result,
-	ruma::{OwnedEventId, RoomVersionId, event_id, room_id},
+	matrix::pdu::PduBuilder,
+	ruma::{
+		OwnedEventId, RoomVersionId, event_id, events::room::create::RoomCreateEventContent,
+		room_id,
+	},
 	utils::stream::ReadyExt,
 };
-use tuwunel_service::{Services, pdu::PduBuilder};
+use tuwunel_service::Services;
 
 const OCCURRENCES: usize = 8;
 
