@@ -122,7 +122,7 @@ pub async fn user_can_see_event(
 		| HistoryVisibility::Shared | _ =>
 			self.services
 				.state_cache
-				.is_joined(user_id, room_id)
+				.once_joined(user_id, room_id)
 				.await,
 	}
 }
