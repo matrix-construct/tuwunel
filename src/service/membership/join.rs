@@ -192,6 +192,12 @@ async fn join_remote(
 ) -> Result {
 	info!("Joining {room_id} over federation.");
 
+	let initial_membership = self
+		.services
+		.state_cache
+		.user_membership(sender_user, room_id)
+		.await;
+
 	// Release the caller's room-state lock before the network round trip below.
 	// Holding it for the whole call creates a lock-order cycle with inbound
 	// federation `/send`: `send.rs`'s `handle_room` takes `mutex_federation`
@@ -253,8 +259,15 @@ async fn join_remote(
 	self.auth_check_send_join_response(&room_version_rules, &parsed_join_pdu, &state)
 		.await?;
 
-	self.commit_remote_join(sender_user, room_id, state, parsed_join_pdu, join_event)
-		.await?;
+	self.commit_remote_join(
+		sender_user,
+		room_id,
+		initial_membership,
+		state,
+		parsed_join_pdu,
+		join_event,
+	)
+	.await?;
 
 	Ok(())
 }
@@ -446,6 +459,7 @@ async fn commit_remote_join(
 	&self,
 	sender_user: &UserId,
 	room_id: &RoomId,
+	initial_membership: Option<MembershipState>,
 	state: HashMap<u64, OwnedEventId>,
 	parsed_join_pdu: Pdu,
 	join_event: CanonicalJsonObject,
@@ -456,13 +470,16 @@ async fn commit_remote_join(
 	// path uses.
 	let state_lock = self.services.state.mutex.lock(room_id).await;
 
-	match self
+	let current_membership = self
 		.services
 		.state_cache
 		.user_membership(sender_user, room_id)
-		.await
-	{
-		| Some(MembershipState::Leave | MembershipState::Ban) => {
+		.await;
+
+	match current_membership {
+		| Some(MembershipState::Leave | MembershipState::Ban)
+			if current_membership != initial_membership =>
+		{
 			debug_warn!(
 				%sender_user,
 				%room_id,
