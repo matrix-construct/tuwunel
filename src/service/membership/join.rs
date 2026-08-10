@@ -345,7 +345,7 @@ async fn join_remote(
 				"Skipping stale remote join commit after a newer local membership change"
 			);
 
-			return Err!(Request(Conflict("Join was superseded by a newer membership change.")));
+			return Err!(Conflict("Join was superseded by a newer membership change."));
 		},
 		| _ => {},
 	}
