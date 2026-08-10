@@ -204,11 +204,16 @@ async fn sanitize_member_authorisation(
 		.and_then(|key| UserId::parse(key).ok())
 		&& self
 			.services
-			.state_cache
-			.user_membership(&target, room_id)
+			.state_accessor
+			.room_state_get_content::<RoomMemberEventContent>(
+				room_id,
+				&StateEventType::RoomMember,
+				target.as_str(),
+			)
 			.await
-			.is_some_and(|m| matches!(m, MembershipState::Join | MembershipState::Invite))
-	{
+			.is_ok_and(|event| {
+				matches!(event.membership, MembershipState::Join | MembershipState::Invite)
+			}) {
 		let mut object = pdu_builder.content.deserialize()?;
 		object.remove("join_authorised_via_users_server");
 		pdu_builder.content = to_raw_value(&object)?.into();

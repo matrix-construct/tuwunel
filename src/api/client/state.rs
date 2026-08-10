@@ -472,11 +472,16 @@ async fn validate_member(
 
 	// Already joined or invited: no restricted-join authorisation needed.
 	if services
-		.state_cache
-		.user_membership(&target_user, room_id)
+		.state_accessor
+		.room_state_get_content::<RoomMemberEventContent>(
+			room_id,
+			&StateEventType::RoomMember,
+			target_user.as_str(),
+		)
 		.await
-		.is_some_and(|m| matches!(m, MembershipState::Join | MembershipState::Invite))
-	{
+		.is_ok_and(|event| {
+			matches!(event.membership, MembershipState::Join | MembershipState::Invite)
+		}) {
 		return Ok(());
 	}
 
