@@ -7,7 +7,9 @@ use futures::{
 use rand::seq::SliceRandom;
 use ruma::{
 	CanonicalJsonObject, EventId, MilliSecondsSinceUnixEpoch, OwnedEventId, RoomId, ServerName,
-	api::Direction, events::TimelineEventType,
+	UserId,
+	api::Direction,
+	events::{StateEventType, TimelineEventType},
 };
 use serde::Deserialize;
 use serde_json::value::RawValue as RawJsonValue;
@@ -131,6 +133,25 @@ async fn backfill_candidates(&self, room_id: &RoomId) -> Candidates {
 
 	let (canonical_alias, power_levels) = join(canonical_alias, power_levels).await;
 
+	let state_member_servers = self
+		.services
+		.state_accessor
+		.room_state_keys(room_id, &StateEventType::RoomMember)
+		.filter_map(|state_key| async move {
+			let Ok(state_key) = state_key else {
+				return None;
+			};
+
+			let Ok(user_id) = UserId::parse(state_key.as_str()) else {
+				return None;
+			};
+
+			(!self.services.globals.user_is_local(&user_id))
+				.then_some(user_id.server_name().to_owned())
+		})
+		.collect::<HashSet<_>>()
+		.await;
+
 	let power_servers = power_levels
 		.iter()
 		.flat_map(|power| {
@@ -184,11 +205,12 @@ async fn backfill_candidates(&self, room_id: &RoomId) -> Candidates {
 		.chain(trusted_servers)
 		.ready_filter(|server_name| !self.services.globals.server_is_ours(server_name))
 		.filter_map(async |server_name| {
-			self.services
+			(self
+				.services
 				.state_cache
 				.server_in_room(&server_name, room_id)
-				.await
-				.then_some(server_name)
+				.await || state_member_servers.contains(&server_name))
+			.then_some(server_name)
 		})
 		.collect()
 		.await
