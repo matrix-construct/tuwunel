@@ -192,9 +192,10 @@ async fn send_state_event_for_key_helper(
 ) -> Result<OwnedEventId> {
 	allowed_to_send_state_event(services, sender, room_id, event_type, state_key, json).await?;
 	let state_lock = services.state.mutex.lock(room_id).await;
+	let content: serde_json::Value = serde_json::from_str(json.json().get())?;
 	let mut pdu_builder = PduBuilder {
 		event_type: event_type.to_string().into(),
-		content: serde_json::from_str::<serde_json::Value>(json.json().get())?.into(),
+		content: content.clone().into(),
 		state_key: Some(state_key.into()),
 		timestamp,
 		..Default::default()
@@ -206,8 +207,6 @@ async fn send_state_event_for_key_helper(
 			.normalize_member_authorisation(&mut pdu_builder, room_id)
 			.await?;
 	}
-
-	let content: serde_json::Value = serde_json::from_str(pdu_builder.content.json().get())?;
 
 	// `state_res::auth_check` runs unconditionally inside
 	// `create_hash_and_sign_event`, so the identical-resend short-circuit below

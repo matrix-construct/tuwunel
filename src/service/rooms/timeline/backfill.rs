@@ -48,7 +48,7 @@ struct TimestampHit {
 #[implement(super::Service)]
 #[tracing::instrument(name = "backfill", level = "debug", skip(self))]
 pub async fn backfill_if_required(&self, room_id: &RoomId, from: PduCount) -> Result {
-	let (first_pdu_count, first_pdu) = self
+	let (_first_pdu_count, first_pdu) = self
 		.first_item_in_room(room_id)
 		.await
 		.expect("Room is not empty");
@@ -137,7 +137,7 @@ async fn backfill_candidates(&self, room_id: &RoomId) -> Candidates {
 		.services
 		.state_accessor
 		.room_state_keys(room_id, &StateEventType::RoomMember)
-		.filter_map(|state_key| async move {
+		.filter_map(async |state_key| {
 			let Ok(state_key) = state_key else {
 				return None;
 			};
