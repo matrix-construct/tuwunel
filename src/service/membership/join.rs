@@ -629,13 +629,10 @@ async fn fetch_omitted_state(
 		let result = self
 			.services
 			.federation
-			.execute(
-				&server,
-				Request {
-					room_id: room_id.to_owned(),
-					event_id: event_id.clone(),
-				},
-			)
+			.execute(&server, Request {
+				room_id: room_id.to_owned(),
+				event_id: event_id.clone(),
+			})
 			.await;
 
 		match result {
@@ -1175,19 +1172,16 @@ async fn make_join_request(
 		let make_join_response = self
 			.services
 			.federation
-			.execute(
-				remote_server,
-				federation::membership::prepare_join_event::v1::Request {
-					room_id: room_id.to_owned(),
-					user_id: sender_user.to_owned(),
-					ver: self
-						.services
-						.config
-						.supported_room_versions()
-						.map(at!(0))
-						.collect(),
-				},
-			)
+			.execute(remote_server, federation::membership::prepare_join_event::v1::Request {
+				room_id: room_id.to_owned(),
+				user_id: sender_user.to_owned(),
+				ver: self
+					.services
+					.config
+					.supported_room_versions()
+					.map(at!(0))
+					.collect(),
+			})
 			.await;
 
 		trace!("make_join response: {make_join_response:?}");

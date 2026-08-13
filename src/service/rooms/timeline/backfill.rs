@@ -255,9 +255,8 @@ pub async fn get_event_id_near_ts_with_fallback(
 	// Federate on a local miss, or a forward hit at the start edge of our history.
 	let federate = match &local {
 		| Err(_) => true,
-		| Ok((_, event_id)) => {
-			dir == Direction::Forward && self.is_start_edge_hit(room_id, event_id).await
-		},
+		| Ok((_, event_id)) =>
+			dir == Direction::Forward && self.is_start_edge_hit(room_id, event_id).await,
 	};
 
 	if !federate {
