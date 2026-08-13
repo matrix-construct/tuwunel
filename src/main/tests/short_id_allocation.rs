@@ -292,10 +292,7 @@ async fn current_state_event_id(
 		.client
 		.clients
 		.default
-		.get(format!(
-			"{base}/_matrix/client/v3/rooms/{room_id}/state/m.room.topic/short-id-allocation?{}",
-			"format=event"
-		))
+		.get(current_state_event_id_url(base, room_id))
 		.bearer_auth(token)
 		.send()
 		.await?
@@ -308,4 +305,26 @@ async fn current_state_event_id(
 		.and_then(Value::as_str)
 		.map(str::to_owned)
 		.ok_or_else(|| err!("state GET response omitted event_id"))
+}
+
+fn current_state_event_id_url(base: &str, room_id: &tuwunel_core::ruma::RoomId) -> String {
+	format!(
+		"{base}/_matrix/client/v3/rooms/{room_id}/state/m.room.topic/short-id-allocation?\
+		 format=event"
+	)
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn current_state_event_id_url_keeps_exact_query() {
+		let room_id = room_id!("!short-id-allocation:example.org");
+
+		assert_eq!(
+			current_state_event_id_url("http://localhost:8008", room_id),
+			"http://localhost:8008/_matrix/client/v3/rooms/!short-id-allocation:example.org/state/m.room.topic/short-id-allocation?format=event",
+		);
+	}
 }
