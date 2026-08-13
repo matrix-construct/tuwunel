@@ -54,15 +54,19 @@ fn batch_duplicates_share_one_shorteventid() -> Result {
 		let base = format!("http://127.0.0.1:{port}");
 		drop(listener);
 
-		let outcome = exercise(&services, &base).await;
-		let shutdown = server.server.shutdown();
+		let exercise = async {
+			let outcome = exercise(&services, &base).await;
+			let shutdown = server.server.shutdown();
 
+			outcome.and(shutdown)
+		};
+		let run = async_run(&server);
+
+		let (outcome, run) = tokio::join!(exercise, run);
 		drop(services);
-
-		let run = async_run(&server).await;
 		let stop = async_stop(&server).await;
 
-		outcome.and(shutdown).and(run).and(stop)
+		outcome.and(run).and(stop)
 	});
 
 	drop(runtime);
@@ -111,7 +115,7 @@ async fn repeated_identical_state_resend_does_not_allocate_short_id(
 	wait_until_ready(services, base).await?;
 
 	let user_id = UserId::parse_with_server_name("shortidalice", services.globals.server_name())?;
-	let token = "short-id-allocation-token";
+	let token = "short-id-allocation-token-0000000000000000";
 
 	services
 		.users
@@ -154,6 +158,10 @@ async fn create_hash_and_sign_does_not_allocate_short_id(services: &Services) ->
 
 	let room_id = room_id!("!short-id-no-append:localhost");
 	let state_lock = services.state.mutex.lock(room_id).await;
+	services
+		.short
+		.get_or_create_shortroomid(room_id)
+		.await;
 	let (pdu, pdu_json, _prev_state) = services
 		.timeline
 		.create_hash_and_sign_event(
