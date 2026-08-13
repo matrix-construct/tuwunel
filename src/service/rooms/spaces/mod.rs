@@ -244,17 +244,42 @@ async fn is_accessible_child(
 
 /// Returns the children of a SpaceHierarchyParentSummary, making use of the
 /// children_state field
+#[implement(Service)]
 pub fn get_parent_children_via(
+	&self,
 	parent: &ParentSummary,
 	suggested_only: bool,
-) -> impl DoubleEndedIterator<Item = (OwnedRoomId, impl Iterator<Item = OwnedServerName>)> + '_ {
+) -> impl DoubleEndedIterator<Item = (OwnedRoomId, impl Iterator<Item = OwnedServerName>)> {
 	parent
 		.children_state
 		.iter()
 		.map(Raw::deserialize)
 		.filter_map(Result::ok)
-		.filter_map(move |ChildEvent { state_key, content, .. }: _| {
-			(content.suggested || !suggested_only).then_some((state_key, content.via.into_iter()))
+		.filter_map(move |ChildEvent { state_key, sender, content, .. }: _| {
+			(content.suggested || !suggested_only).then(|| {
+				let mut via = content.via;
+
+				if let Some(server_name) = state_key.server_name() {
+					via.push(server_name.to_owned());
+				}
+
+				if let Some(server_name) = parent.summary.room_id.server_name() {
+					via.push(server_name.to_owned());
+				}
+
+				if let Some(canonical_alias) = &parent.summary.canonical_alias {
+					via.push(canonical_alias.server_name().to_owned());
+				}
+
+				via.push(sender.server_name().to_owned());
+
+				via.retain(|server_name| !self.services.globals.server_is_ours(server_name));
+
+				via.sort_unstable();
+				via.dedup();
+
+				(state_key, via.into_iter())
+			})
 		})
 }
 

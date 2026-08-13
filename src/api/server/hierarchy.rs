@@ -8,7 +8,7 @@ use tuwunel_core::{
 	Err, Result,
 	utils::stream::{BroadbandExt, IterStream},
 };
-use tuwunel_service::rooms::spaces::{Accessibility, Identifier, get_parent_children_via};
+use tuwunel_service::rooms::spaces::{Accessibility, Identifier};
 
 use crate::Ruma;
 
@@ -31,36 +31,37 @@ pub(crate) async fn get_hierarchy_route(
 	{
 		| Inaccessible => Err!(Request(NotFound("The requested room is inaccessible"))),
 		| Accessible(room) => {
-			let (children, inaccessible_children) =
-				get_parent_children_via(&room, body.suggested_only)
-					.stream()
-					.broad_filter_map(async |(child, _via)| {
-						match services
-							.spaces
-							.get_summary_and_children(&child, &ServerName(body.origin()), &[])
-							.await
-							.ok()?
-						{
-							| Inaccessible => Some((None, Some(child))),
-							| Accessible(summary) => Some((Some(summary), None)),
-						}
-					})
-					.unzip()
-					.map(|(children, inaccessible_children): (Vec<_>, Vec<_>)| {
-						let children = children
-							.into_iter()
-							.flatten()
-							.map(|parent| parent.summary)
-							.collect();
+			let (children, inaccessible_children) = services
+				.spaces
+				.get_parent_children_via(&room, body.suggested_only)
+				.stream()
+				.broad_filter_map(async |(child, _via)| {
+					match services
+						.spaces
+						.get_summary_and_children(&child, &ServerName(body.origin()), &[])
+						.await
+						.ok()?
+					{
+						| Inaccessible => Some((None, Some(child))),
+						| Accessible(summary) => Some((Some(summary), None)),
+					}
+				})
+				.unzip()
+				.map(|(children, inaccessible_children): (Vec<_>, Vec<_>)| {
+					let children = children
+						.into_iter()
+						.flatten()
+						.map(|parent| parent.summary)
+						.collect();
 
-						let inaccessible_children = inaccessible_children
-							.into_iter()
-							.flatten()
-							.collect();
+					let inaccessible_children = inaccessible_children
+						.into_iter()
+						.flatten()
+						.collect();
 
-						(children, inaccessible_children)
-					})
-					.await;
+					(children, inaccessible_children)
+				})
+				.await;
 
 			Ok(Response { room, children, inaccessible_children })
 		},
