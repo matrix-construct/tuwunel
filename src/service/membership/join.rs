@@ -197,6 +197,12 @@ async fn join_remote(
 		.state_cache
 		.user_membership(sender_user, room_id)
 		.await;
+	let initial_membership_event_id = self
+		.services
+		.state_accessor
+		.room_state_get_id(room_id, &StateEventType::RoomMember, sender_user.as_str())
+		.await
+		.ok();
 
 	// Release the caller's room-state lock before the network round trip below.
 	// Holding it for the whole call creates a lock-order cycle with inbound
@@ -263,6 +269,7 @@ async fn join_remote(
 		sender_user,
 		room_id,
 		initial_membership,
+		initial_membership_event_id,
 		state,
 		parsed_join_pdu,
 		join_event,
@@ -460,6 +467,7 @@ async fn commit_remote_join(
 	sender_user: &UserId,
 	room_id: &RoomId,
 	initial_membership: Option<MembershipState>,
+	initial_membership_event_id: Option<OwnedEventId>,
 	state: HashMap<u64, OwnedEventId>,
 	parsed_join_pdu: Pdu,
 	join_event: CanonicalJsonObject,
@@ -475,6 +483,12 @@ async fn commit_remote_join(
 		.state_cache
 		.user_membership(sender_user, room_id)
 		.await;
+	let current_membership_event_id = self
+		.services
+		.state_accessor
+		.room_state_get_id(room_id, &StateEventType::RoomMember, sender_user.as_str())
+		.await
+		.ok();
 
 	if current_membership == Some(MembershipState::Join) {
 		debug!(
@@ -486,19 +500,16 @@ async fn commit_remote_join(
 		return Ok(());
 	}
 
-	match current_membership {
-		| Some(MembershipState::Leave | MembershipState::Ban)
-			if current_membership != initial_membership =>
-		{
-			debug_warn!(
-				%sender_user,
-				%room_id,
-				"Skipping stale remote join commit after a newer local membership change"
-			);
+	if current_membership_event_id != initial_membership_event_id {
+		debug_warn!(
+			%sender_user,
+			%room_id,
+			current_membership = ?current_membership,
+			initial_membership = ?initial_membership,
+			"Skipping stale remote join commit after a newer local membership change"
+		);
 
-			return Err!(Conflict("Join was superseded by a newer membership change."));
-		},
-		| _ => {},
+		return Err!(Conflict("Join was superseded by a newer membership change."));
 	}
 
 	self.apply_send_join_state(room_id, &state, &state_lock)
