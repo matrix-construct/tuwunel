@@ -4,15 +4,13 @@ use std::{
 	env::var,
 	fs::remove_dir_all,
 	net::TcpListener,
-	os::fd::{FromRawFd, OwnedFd},
+	os::fd::{AsRawFd, FromRawFd, OwnedFd},
 	path::PathBuf,
 	process::id as process_id,
 	time::Duration,
 };
 
 use futures::{StreamExt, pin_mut};
-#[cfg(unix)]
-use nix::unistd::dup2_raw;
 use serde_json::{Value, json};
 use tokio::time::{sleep, timeout};
 use tuwunel::{Args, Runtime, Server, async_run, async_start, async_stop};
@@ -33,7 +31,9 @@ struct DatabasePath(PathBuf);
 struct ListenFdEnv;
 
 impl Drop for DatabasePath {
-	fn drop(&mut self) { remove_dir_all(&self.0).ok(); }
+	fn drop(&mut self) {
+		remove_dir_all(&self.0).ok();
+	}
 }
 
 impl Drop for ListenFdEnv {
@@ -57,14 +57,16 @@ fn batch_duplicates_share_one_shorteventid() -> Result {
 	let _listen_fd_env = ListenFdEnv;
 
 	#[cfg(unix)]
-	{
-		// SAFETY: fd 3 is reserved exclusively for this test and is immediately
-		// replaced with the pre-bound listener before the server starts.
-		let listen_fd3 = unsafe { OwnedFd::from_raw_fd(3) };
-		// SAFETY: This duplicates the reserved listener onto fd 3 for the server
-		// startup path.
-		let _listen_fd3 = unsafe { dup2_raw(&listener, listen_fd3)? };
-	}
+	// SAFETY: This duplicates the pre-bound listener onto fd 3 for the server
+	// startup path. fd 3 is then owned by this test until drop.
+	let _listen_fd3 = {
+		if unsafe { nix::libc::dup2(listener.as_raw_fd(), 3) } == -1 {
+			return Err(std::io::Error::last_os_error().into());
+		}
+
+		// SAFETY: fd 3 was just opened by dup2 above, so taking ownership is valid.
+		unsafe { OwnedFd::from_raw_fd(3) }
+	};
 
 	set_listen_env("LISTEN_PID", &process_id().to_string());
 	set_listen_env("LISTEN_FDS", "1");
@@ -207,12 +209,15 @@ async fn create_hash_and_sign_does_not_allocate_short_id(services: &Services) ->
 	let (pdu, pdu_json, _prev_state) = services
 		.timeline
 		.create_hash_and_sign_event(
-			PduBuilder::state(String::new(), &RoomCreateEventContent {
-				federate: true,
-				predecessor: None,
-				room_version: RoomVersionId::V11,
-				..RoomCreateEventContent::new_v11()
-			}),
+			PduBuilder::state(
+				String::new(),
+				&RoomCreateEventContent {
+					federate: true,
+					predecessor: None,
+					room_version: RoomVersionId::V11,
+					..RoomCreateEventContent::new_v11()
+				},
+			),
 			sender,
 			room_id,
 			&state_lock,
