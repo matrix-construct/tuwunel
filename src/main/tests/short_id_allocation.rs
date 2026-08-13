@@ -293,8 +293,8 @@ async fn current_state_event_id(
 		.clients
 		.default
 		.get(format!(
-			"{base}/_matrix/client/v3/rooms/{room_id}/state/m.room.topic/short-id-allocation?\
-			 format=event"
+			"{base}/_matrix/client/v3/rooms/{room_id}/state/m.room.topic/short-id-allocation?{}",
+			"format=event"
 		))
 		.bearer_auth(token)
 		.send()

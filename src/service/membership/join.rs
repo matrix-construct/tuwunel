@@ -56,6 +56,14 @@ pub struct Join<'a> {
 	pub extra_content: Option<CanonicalJsonObject>,
 }
 
+fn membership_event_id_snapshot(event_id: Result<OwnedEventId>) -> Result<Option<OwnedEventId>> {
+	match event_id {
+		| Ok(event_id) => Ok(Some(event_id)),
+		| Err(e) if e.is_not_found() => Ok(None),
+		| Err(e) => Err(e),
+	}
+}
+
 #[implement(Service)]
 #[async_noinline]
 #[tracing::instrument(
@@ -197,12 +205,12 @@ async fn join_remote(
 		.state_cache
 		.user_membership(sender_user, room_id)
 		.await;
-	let initial_membership_event_id = self
-		.services
-		.state_accessor
-		.room_state_get_id(room_id, &StateEventType::RoomMember, sender_user.as_str())
-		.await
-		.ok();
+	let initial_membership_event_id = membership_event_id_snapshot(
+		self.services
+			.state_accessor
+			.room_state_get_id(room_id, &StateEventType::RoomMember, sender_user.as_str())
+			.await,
+	)?;
 
 	// Release the caller's room-state lock before the network round trip below.
 	// Holding it for the whole call creates a lock-order cycle with inbound
@@ -484,12 +492,12 @@ async fn commit_remote_join(
 		.state_cache
 		.user_membership(sender_user, room_id)
 		.await;
-	let current_membership_event_id = self
-		.services
-		.state_accessor
-		.room_state_get_id(room_id, &StateEventType::RoomMember, sender_user.as_str())
-		.await
-		.ok();
+	let current_membership_event_id = membership_event_id_snapshot(
+		self.services
+			.state_accessor
+			.room_state_get_id(room_id, &StateEventType::RoomMember, sender_user.as_str())
+			.await,
+	)?;
 
 	if current_membership == Some(MembershipState::Join) {
 		debug!(
@@ -1331,4 +1339,34 @@ pub(super) async fn get_servers_for_room(
 
 	debug_info!(?servers);
 	Ok(servers)
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn membership_event_id_snapshot_keeps_found_event() {
+		let event_id = ruma::event_id!("$test:example.org").to_owned();
+
+		let snapshot =
+			membership_event_id_snapshot(Ok(event_id.clone())).expect("snapshot should succeed");
+
+		assert_eq!(snapshot, Some(event_id));
+	}
+
+	#[test]
+	fn membership_event_id_snapshot_treats_missing_state_as_none() {
+		let snapshot = membership_event_id_snapshot(Err(err!(Request(NotFound("missing")))))
+			.expect("not found should be treated as absent");
+
+		assert_eq!(snapshot, None);
+	}
+
+	#[test]
+	fn membership_event_id_snapshot_preserves_other_errors() {
+		let snapshot = membership_event_id_snapshot(Err(err!(Database("boom"))));
+
+		assert!(snapshot.is_err(), "database failures must not be collapsed");
+	}
 }
