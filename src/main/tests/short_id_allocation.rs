@@ -1,11 +1,17 @@
 #![cfg(test)]
 
 use std::{
-	env::var, fs::remove_dir_all, net::TcpListener, os::fd::AsRawFd, path::PathBuf,
-	process::id as process_id, time::Duration,
+	env::var,
+	fs::remove_dir_all,
+	net::TcpListener,
+	os::fd::{FromRawFd, OwnedFd},
+	path::PathBuf,
+	process::id as process_id,
+	time::Duration,
 };
 
 use futures::{StreamExt, pin_mut};
+use nix::unistd::dup2_raw;
 use serde_json::{Value, json};
 use tokio::time::{sleep, timeout};
 use tuwunel::{Args, Runtime, Server, async_run, async_start, async_stop};
@@ -45,10 +51,9 @@ fn batch_duplicates_share_one_shorteventid() -> Result {
 	let port = listener.local_addr()?.port();
 	let _listen_fd_env = ListenFdEnv;
 
+	let _listen_fd3 = unsafe { dup2_raw(&listener, OwnedFd::from_raw_fd(3))? };
+
 	unsafe {
-		if libc::dup2(listener.as_raw_fd(), 3) == -1 {
-			return Err(std::io::Error::last_os_error().into());
-		}
 		std::env::set_var("LISTEN_PID", process_id().to_string());
 		std::env::set_var("LISTEN_FDS", "1");
 		std::env::set_var("LISTEN_FDNAMES", "short-id-allocation");
