@@ -53,7 +53,16 @@ pub async fn backfill_if_required(&self, room_id: &RoomId, from: PduCount) -> Re
 		// backfill from the newest local event rather than the oldest one.
 		self.latest_item_in_room(None, room_id).await?
 	} else {
-		self.first_item_in_room(room_id).await?.1
+		let (first_pdu_count, first_pdu) = self.first_item_in_room(room_id).await?;
+
+		// If the request cursor is newer than the oldest local event, the
+		// existing history already covers this segment and no federation backfill
+		// is needed.
+		if first_pdu_count < from {
+			return Ok(());
+		}
+
+		first_pdu
 	};
 
 	// No backfill required, reached the end.

@@ -54,6 +54,10 @@ pub(crate) async fn get_missing_events_route(
 	// locally-known boundary, so it must not be handed to `topo_sort_events` as
 	// such.
 	let mut seen: HashSet<OwnedEventId> = earliest_events.clone();
+	// Track locally loaded events separately from the walk-dedup set so topo
+	// sorting can preserve children of locally-present predecessors even when
+	// those predecessors are filtered out of the returned batch.
+	let mut loaded_local: HashSet<OwnedEventId> = HashSet::new();
 	let mut results: Vec<(OwnedEventId, Vec<OwnedEventId>, UInt, _)> = Vec::new();
 	let mut walked = 0_usize;
 
@@ -78,6 +82,7 @@ pub(crate) async fn get_missing_events_route(
 			debug!(?body.origin, %event_id, "Event does not exist locally, skipping");
 			continue;
 		};
+		loaded_local.insert(event_id.clone());
 
 		if pdu.depth > body.min_depth {
 			queue.extend(pdu.prev_events.iter().cloned());
@@ -132,7 +137,11 @@ pub(crate) async fn get_missing_events_route(
 			.map(|(event_id, prev_events, depth, _)| {
 				(event_id.clone(), prev_events.clone(), *depth)
 			}),
-		&earliest_events,
+		&{
+			let mut reached_events = earliest_events.clone();
+			reached_events.extend(loaded_local);
+			reached_events
+		},
 		body.min_depth,
 	);
 
