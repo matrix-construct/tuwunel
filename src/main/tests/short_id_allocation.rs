@@ -1,12 +1,7 @@
 #![cfg(test)]
 
 use std::{
-	env::var,
-	fs::remove_dir_all,
-	net::TcpListener,
-	os::fd::{AsRawFd, FromRawFd, OwnedFd},
-	path::PathBuf,
-	process::id as process_id,
+	env::var, fs::remove_dir_all, net::TcpListener, path::PathBuf, process::id as process_id,
 	time::Duration,
 };
 
@@ -28,49 +23,15 @@ use tuwunel_service::{Services, users::Register};
 const OCCURRENCES: usize = 8;
 
 struct DatabasePath(PathBuf);
-struct ListenFdEnv;
 
 impl Drop for DatabasePath {
-	fn drop(&mut self) {
-		remove_dir_all(&self.0).ok();
-	}
-}
-
-impl Drop for ListenFdEnv {
-	fn drop(&mut self) {
-		clear_listen_env("LISTEN_PID");
-		clear_listen_env("LISTEN_FDS");
-		clear_listen_env("LISTEN_FDNAMES");
-	}
-}
-
-fn clear_listen_env(key: &str) {
-	// SAFETY: This only clears the test-only listener handoff variables that we
-	// set in this module, so it does not race with any other code path here.
-	unsafe { std::env::remove_var(key) };
+	fn drop(&mut self) { remove_dir_all(&self.0).ok(); }
 }
 
 #[test]
 fn batch_duplicates_share_one_shorteventid() -> Result {
 	let listener = TcpListener::bind(("127.0.0.1", 0))?;
 	let port = listener.local_addr()?.port();
-	let _listen_fd_env = ListenFdEnv;
-
-	#[cfg(unix)]
-	// SAFETY: This duplicates the pre-bound listener onto fd 3 for the server
-	// startup path. fd 3 is then owned by this test until drop.
-	let _listen_fd3 = {
-		if unsafe { nix::libc::dup2(listener.as_raw_fd(), 3) } == -1 {
-			return Err(std::io::Error::last_os_error().into());
-		}
-
-		// SAFETY: fd 3 was just opened by dup2 above, so taking ownership is valid.
-		unsafe { OwnedFd::from_raw_fd(3) }
-	};
-
-	set_listen_env("LISTEN_PID", &process_id().to_string());
-	set_listen_env("LISTEN_FDS", "1");
-	set_listen_env("LISTEN_FDNAMES", "short-id-allocation");
 
 	let root = var("TMPDIR").unwrap_or_else(|_| "/nvme/target/tmp".into());
 	let db_path = DatabasePath(
@@ -92,6 +53,8 @@ fn batch_duplicates_share_one_shorteventid() -> Result {
 		let services = async_start(&server).await?;
 		let base = format!("http://127.0.0.1:{port}");
 
+		drop(listener);
+
 		let exercise = async {
 			let outcome = exercise(&services, &base).await;
 			let shutdown = server.server.shutdown();
@@ -110,12 +73,6 @@ fn batch_duplicates_share_one_shorteventid() -> Result {
 	drop(runtime);
 
 	result
-}
-
-fn set_listen_env(key: &str, value: &str) {
-	// SAFETY: These are test-only listener handoff variables local to this
-	// process, and the test controls both their lifetime and their values.
-	unsafe { std::env::set_var(key, value) };
 }
 
 async fn exercise(services: &Services, base: &str) -> Result {
@@ -209,15 +166,12 @@ async fn create_hash_and_sign_does_not_allocate_short_id(services: &Services) ->
 	let (pdu, pdu_json, _prev_state) = services
 		.timeline
 		.create_hash_and_sign_event(
-			PduBuilder::state(
-				String::new(),
-				&RoomCreateEventContent {
-					federate: true,
-					predecessor: None,
-					room_version: RoomVersionId::V11,
-					..RoomCreateEventContent::new_v11()
-				},
-			),
+			PduBuilder::state(String::new(), &RoomCreateEventContent {
+				federate: true,
+				predecessor: None,
+				room_version: RoomVersionId::V11,
+				..RoomCreateEventContent::new_v11()
+			}),
 			sender,
 			room_id,
 			&state_lock,
