@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 use tokio::time::{sleep, timeout};
 use tuwunel::{Args, Runtime, Server, async_run, async_start, async_stop};
 use tuwunel_core::{
-	Result,
+	Err, Result, err,
 	matrix::pdu::PduBuilder,
 	ruma::{
 		OwnedEventId, OwnedRoomId, RoomVersionId, UserId, event_id,
@@ -284,7 +284,8 @@ async fn current_state_event_id(
 		.clients
 		.default
 		.get(format!(
-			"{base}/_matrix/client/v3/rooms/{room_id}/state/m.room.topic/short-id-allocation?format=event"
+			"{base}/_matrix/client/v3/rooms/{room_id}/state/m.room.topic/short-id-allocation?\
+			 format=event"
 		))
 		.bearer_auth(token)
 		.send()
