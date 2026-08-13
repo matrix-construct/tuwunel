@@ -462,6 +462,7 @@ async fn auth_check_send_join_response(
 }
 
 #[implement(Service)]
+#[allow(clippy::too_many_arguments)]
 async fn commit_remote_join(
 	&self,
 	sender_user: &UserId,
