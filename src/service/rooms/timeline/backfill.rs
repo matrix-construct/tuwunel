@@ -48,10 +48,13 @@ struct TimestampHit {
 #[implement(super::Service)]
 #[tracing::instrument(name = "backfill", level = "debug", skip(self))]
 pub async fn backfill_if_required(&self, room_id: &RoomId, from: PduCount) -> Result {
-	let (_first_pdu_count, first_pdu) = self
-		.first_item_in_room(room_id)
-		.await
-		.expect("Room is not empty");
+	let first_pdu = if from == PduCount::max() {
+		// The first backward `/messages` page starts from the room head, so
+		// backfill from the newest local event rather than the oldest one.
+		self.latest_item_in_room(None, room_id).await?
+	} else {
+		self.first_item_in_room(room_id).await?.1
+	};
 
 	// No backfill required, reached the end.
 	if *first_pdu.event_type() == TimelineEventType::RoomCreate {

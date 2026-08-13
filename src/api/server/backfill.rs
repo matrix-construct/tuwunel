@@ -70,7 +70,7 @@ pub(crate) async fn get_backfill_route(
 			.try_filter_map(async |pdu| {
 				Ok(services
 					.timeline
-					.get_pdu_json(&pdu.event_id)
+					.get_pdu_json(&pdu.1.event_id)
 					.await
 					.ok())
 			})
