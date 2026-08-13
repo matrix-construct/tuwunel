@@ -11,6 +11,7 @@ use std::{
 };
 
 use futures::{StreamExt, pin_mut};
+#[cfg(unix)]
 use nix::unistd::dup2_raw;
 use serde_json::{Value, json};
 use tokio::time::{sleep, timeout};
@@ -51,6 +52,7 @@ fn batch_duplicates_share_one_shorteventid() -> Result {
 	let port = listener.local_addr()?.port();
 	let _listen_fd_env = ListenFdEnv;
 
+	#[cfg(unix)]
 	let _listen_fd3 = unsafe { dup2_raw(&listener, OwnedFd::from_raw_fd(3))? };
 
 	unsafe {
