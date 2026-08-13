@@ -63,7 +63,7 @@ pub async fn backfill_if_required(
 		// If the request range stays entirely newer than the oldest local event,
 		// the existing history already covers it and no federation backfill is
 		// needed.
-		if first_pdu_count < from && to.is_none_or(|to| first_pdu_count < to) {
+		if request_is_local_only(first_pdu_count, from, to) {
 			return Ok(());
 		}
 
@@ -134,6 +134,15 @@ pub async fn backfill_if_required(
 		.await;
 
 	Ok(())
+}
+
+#[inline]
+fn request_is_local_only(
+	first_pdu_count: PduCount,
+	from: PduCount,
+	to: Option<PduCount>,
+) -> bool {
+	first_pdu_count < from && to.is_none_or(|to| first_pdu_count <= to)
 }
 
 #[implement(super::Service)]
@@ -478,4 +487,20 @@ fn prepend_backfill_pdu(
 	self.db
 		.roomid_tscount_pducount
 		.put_raw((room_id, origin_server_ts, count_key), pdu_id.count());
+}
+
+#[cfg(test)]
+mod tests {
+	use tuwunel_core::matrix::PduCount;
+
+	use super::request_is_local_only;
+
+	#[test]
+	fn local_coverage_check_includes_the_oldest_requested_event() {
+		let oldest = PduCount::Normal(10);
+		let newer = PduCount::Normal(20);
+
+		assert!(request_is_local_only(oldest, newer, Some(oldest)));
+		assert!(!request_is_local_only(oldest, newer, Some(PduCount::Normal(9))));
+	}
 }
