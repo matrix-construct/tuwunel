@@ -61,6 +61,11 @@ pub struct Server {
 
 impl Server {
 	#[must_use]
+	/// Creates shared server lifecycle state.
+	///
+	/// The initial configuration, source list, logging state, and metrics
+	/// become available to all services. A supplied runtime handle enables
+	/// task spawning.
 	pub fn new(
 		config: Config,
 		config_sources: config::Sources,
@@ -84,6 +89,11 @@ impl Server {
 		}
 	}
 
+	/// Requests a dynamic module reload.
+	///
+	/// The request marks the server as reloading and stopping before
+	/// broadcasting `SIGINT`. Concurrent reload or shutdown requests are
+	/// rejected.
 	pub fn reload(&self) -> Result {
 		if cfg!(any(not(tuwunel_mods), not(feature = "tuwunel_mods"))) {
 			return Err!("Reloading not enabled");
@@ -103,6 +113,10 @@ impl Server {
 		})
 	}
 
+	/// Requests a process restart through the normal shutdown path.
+	///
+	/// The restarting flag is claimed once before shutdown begins. A rejected
+	/// shutdown clears that flag so a later request may retry.
 	pub fn restart(&self) -> Result {
 		if self.restarting.swap(true, Ordering::AcqRel) {
 			return Err!("Restart already in progress");
@@ -113,6 +127,10 @@ impl Server {
 		})
 	}
 
+	/// Requests an orderly server shutdown.
+	///
+	/// The stopping flag is claimed once before broadcasting `SIGTERM`. A
+	/// second request is rejected while shutdown remains in progress.
 	pub fn shutdown(&self) -> Result {
 		if self.stopping.swap(true, Ordering::AcqRel) {
 			return Err!("Shutdown already in progress");
@@ -130,12 +148,20 @@ impl Server {
 		!self.backup_restored.swap(true, Ordering::AcqRel)
 	}
 
+	/// Broadcasts a process-signal name to lifecycle subscribers.
+	///
+	/// Delivery is best effort because subscribers may not yet be listening.
+	/// The method therefore succeeds even when the channel has no receivers.
 	pub fn signal(&self, sig: &'static str) -> Result {
 		self.signal.send(sig).ok();
 		Ok(())
 	}
 
 	#[inline]
+	/// Waits until the server enters its stopping state.
+	///
+	/// Lifecycle notifications wake the loop so it can recheck the shared
+	/// state. Calling it after shutdown has begun returns immediately.
 	pub async fn until_shutdown(self: &Arc<Self>) {
 		let mut signal = self.signal.subscribe();
 		while self.is_running() {
@@ -144,6 +170,14 @@ impl Server {
 	}
 
 	#[inline]
+	/// Returns the runtime handle supplied during server construction.
+	///
+	/// Services use this handle to spawn work on the embedding runtime. The
+	/// handle is borrowed for the lifetime of the server.
+	///
+	/// # Panics
+	///
+	/// Panics when the server was constructed without a runtime handle.
 	pub fn runtime(&self) -> &runtime::Handle {
 		self.runtime
 			.as_ref()
@@ -151,6 +185,10 @@ impl Server {
 	}
 
 	#[inline]
+	/// Rejects new work after shutdown begins.
+	///
+	/// A running server returns success. A stopping server returns an
+	/// interrupted I/O error wrapped in the shared error type.
 	pub fn check_running(&self) -> Result {
 		use std::{io, io::ErrorKind::Interrupted};
 
@@ -161,17 +199,39 @@ impl Server {
 	}
 
 	#[inline]
+	/// Reports whether the server still accepts work.
+	///
+	/// Running is the inverse of the stopping state. Reload and restart
+	/// requests also transition the server through stopping.
 	pub fn is_running(&self) -> bool { !self.is_stopping() }
 
 	#[inline]
+	/// Reports whether shutdown has begun.
+	///
+	/// The flag is set by shutdown and reload transitions. Reads are relaxed
+	/// because callers use it as a lifecycle observation rather than a
+	/// synchronization edge.
 	pub fn is_stopping(&self) -> bool { self.stopping.load(Ordering::Relaxed) }
 
 	#[inline]
+	/// Reports whether a dynamic module reload is in progress.
+	///
+	/// Reload claims the flag before checking the stopping state.
+	/// Signal-delivery failure clears it, while rejection by an existing
+	/// shutdown can leave it set.
 	pub fn is_reloading(&self) -> bool { self.reloading.load(Ordering::Relaxed) }
 
 	#[inline]
+	/// Reports whether a process restart is in progress.
+	///
+	/// Restart claims the flag before requesting shutdown. Failed shutdown
+	/// initiation clears it for a later attempt.
 	pub fn is_restarting(&self) -> bool { self.restarting.load(Ordering::Relaxed) }
 
 	#[inline]
+	/// Reports whether a name matches the configured local server name.
+	///
+	/// The comparison uses the active configuration snapshot. It performs an
+	/// exact, case-sensitive string comparison.
 	pub fn is_ours(&self, name: &str) -> bool { name == self.config.server_name }
 }

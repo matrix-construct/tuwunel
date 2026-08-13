@@ -23,12 +23,21 @@ pub const EXPERIMENTAL_ROOM_VERSIONS: &[RoomVersionId] = &[];
 impl Config {
 	#[inline]
 	#[must_use]
+	/// Reports whether a room version is enabled by this configuration.
+	///
+	/// Stable versions are always enabled. Unstable and experimental versions
+	/// are included only when their respective configuration flags permit
+	/// them.
 	pub fn supported_room_version(&self, version: &RoomVersionId) -> bool {
 		self.supported_room_versions()
 			.any(|(supported_version, _)| &supported_version == version)
 	}
 
 	#[inline]
+	/// Iterates over the room versions enabled by this configuration.
+	///
+	/// Stable versions appear first, followed by permitted unstable and
+	/// experimental versions. Experimental entries are advertised as unstable.
 	pub fn supported_room_versions(
 		&self,
 	) -> impl Iterator<Item = (RoomVersionId, RoomVersionStability)> + '_ {

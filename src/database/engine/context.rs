@@ -25,10 +25,11 @@ pub(crate) struct ColCache {
 	pub(crate) participants: Vec<&'static str>,
 }
 
-/// Some components are constructed prior to opening the database and must
-/// outlive the database. These can also be shared between database instances
-/// though at the time of this comment we only open one database per process.
-/// These assets are housed in the shared Context.
+/// Holds shared resources that must outlive an opened database.
+///
+/// The worker pool, caches, server handle, and RocksDB environment are prepared
+/// before the database opens. Keeping them in one shared context gives every
+/// engine component a common owner for those resources.
 pub(crate) struct Context {
 	pub(crate) pool: Arc<Pool>,
 

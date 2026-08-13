@@ -21,15 +21,14 @@ pub(crate) async fn upload_keys_route(
 	let sender_user = body.sender_user();
 	let sender_device = body.sender_device()?;
 
-	let one_time_keys = body
-		.one_time_keys
-		.iter()
-		.take(services.config.one_time_key_limit)
-		.map(|(id, val)| (id.as_ref(), val));
-
 	services
 		.users
-		.add_one_time_keys(sender_user, sender_device, one_time_keys)
+		.add_one_time_keys(
+			sender_user,
+			sender_device,
+			&body.one_time_keys,
+			services.config.one_time_key_limit,
+		)
 		.await?;
 
 	let fallback_keys = body

@@ -32,14 +32,37 @@ use crate::Result;
 #[serde(rename_all = "snake_case")]
 pub enum ProxyConfig {
 	#[default]
+	/// Adds no application-configured proxy.
+	///
+	/// The HTTP client builder remains unchanged, so automatic system proxy
+	/// discovery may still apply. This is the default configuration.
 	None,
+
+	/// Routes every eligible request through one proxy.
+	///
+	/// The same proxy URL applies regardless of the request destination. The
+	/// URL is parsed while the configuration is loaded.
 	Global {
+		/// Identifies the proxy endpoint.
+		///
+		/// The URL may select any proxy scheme supported by the HTTP client. It
+		/// is converted into a request proxy during client construction.
 		#[serde(deserialize_with = "crate::utils::deserialize_from_str")]
 		url: Url,
 	},
+
+	/// Selects proxies using ordered domain rules.
+	///
+	/// Each rule may include or exclude wildcarded domains. The first rule that
+	/// accepts a request supplies its proxy URL.
 	ByDomain(Vec<PartialProxyConfig>),
 }
 impl ProxyConfig {
+	/// Builds the HTTP client's proxy configuration.
+	///
+	/// The default configuration returns no application proxy. Global and
+	/// domain-based configuration produce the corresponding `reqwest` proxy
+	/// selector.
 	pub fn to_proxy(&self) -> Result<Option<Proxy>> {
 		Ok(match self.clone() {
 			| Self::None => None,
@@ -55,6 +78,10 @@ impl ProxyConfig {
 	}
 }
 
+/// Associates one proxy URL with include and exclude patterns.
+///
+/// An empty include list matches every domain. When both lists match, the more
+/// specific wildcard pattern decides whether the proxy applies.
 #[derive(Clone, Debug, Deserialize)]
 pub struct PartialProxyConfig {
 	#[serde(deserialize_with = "crate::utils::deserialize_from_str")]
@@ -66,6 +93,11 @@ pub struct PartialProxyConfig {
 }
 impl PartialProxyConfig {
 	#[must_use]
+	/// Selects this rule's proxy URL for a request URL.
+	///
+	/// A URL without a domain does not match. Otherwise the most specific
+	/// include and exclude patterns compete, with inclusion required for a
+	/// result.
 	pub fn for_url(&self, url: &Url) -> Option<&Url> {
 		let domain = url.domain()?;
 		let mut included_because = None; // most specific reason it was included

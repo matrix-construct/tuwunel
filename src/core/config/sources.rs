@@ -10,11 +10,23 @@ use crate::{Result, implement};
 /// configuration.
 pub type Overrides = dyn Fn(Figment) -> Result<Figment> + Send + Sync;
 
-/// What a configuration is built from besides the environment, retained so a
-/// reload reproduces the sources the server started with.
+/// Retains the inputs used to assemble a server configuration.
+///
+/// Reloads reuse these paths and the optional override to reproduce startup
+/// behavior. Environment providers are added by the configuration loader
+/// itself.
 #[derive(Default)]
 pub struct Sources {
+	/// Lists configuration files in merge order.
+	///
+	/// Later paths overlay values from earlier paths. Reloads begin with this
+	/// same ordered sequence before adding any explicit extra paths.
 	pub paths: Vec<PathBuf>,
+
+	/// Applies an optional transform after the standard providers are merged.
+	///
+	/// The callback can add synthetic overrides after standard loading. Reloads
+	/// retain it so those values are not silently discarded.
 	pub overrides: Option<Box<Overrides>>,
 }
 

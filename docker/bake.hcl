@@ -1119,6 +1119,7 @@ target "static" {
     dockerfile-inline =<<EOF
         FROM scratch AS install
         COPY --from=input /usr/bin/tuwunel /usr/bin/tuwunel
+        COPY --from=input /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 EOF
 }
 
@@ -2283,6 +2284,7 @@ target "runtime" {
 base_pkgs = [
     "adduser",
     "ca-certificates",
+    "procps",
 ]
 
 target "base" {

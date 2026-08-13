@@ -20,7 +20,7 @@ use tuwunel_core::{
 		stream::{TryIgnore, WidebandExt, automatic_width},
 	},
 };
-use tuwunel_database::{Deserialized, Map};
+use tuwunel_database::{Deserialized, Map, Txn};
 
 #[cfg(test)]
 mod tests;
@@ -185,22 +185,20 @@ impl Service {
 
 		users.push(event.sender().to_owned());
 
-		// Record participants before the bundle so a concurrent read never sees the
-		// bundle with a stale participant set (MSC3816 current_user_participated).
-		self.update_participants(&root_id, &users)?;
+		// Commit participants and activity before the bundle so concurrent MSC3816
+		// readers never observe stale participation.
+		let mut txn = self.services.db.txn();
+
+		self.update_participants(&mut txn, &root_id, &users);
 
 		let count = pdu_id.pdu_count();
 
-		// The activity row lands before the pointer write that marks it live.
 		if matches!(count, PduCount::Normal(_)) {
-			self.db
-				.threadactivityid_rootid
-				.insert(&pdu_id, root_id);
-
-			self.db
-				.threadrootid_latestcount
-				.insert(&root_id, count.to_be_bytes());
+			txn.insert_raw(&self.db.threadactivityid_rootid, pdu_id, root_id);
+			txn.insert_raw(&self.db.threadrootid_latestcount, root_id, count.to_be_bytes());
 		}
+
+		txn.execute();
 
 		if let CanonicalJsonValue::Object(unsigned) = root_pdu_json
 			.entry("unsigned".into())
@@ -354,18 +352,17 @@ impl Service {
 
 	pub(super) fn update_participants(
 		&self,
+		txn: &mut Txn,
 		root_id: &RawPduId,
 		participants: &[OwnedUserId],
-	) -> Result {
+	) {
 		let users = participants
 			.iter()
 			.map(|user| user.as_bytes())
 			.collect::<Vec<_>>()
 			.join(&[0xFF][..]);
 
-		self.db.threadid_userids.insert(root_id, &users);
-
-		Ok(())
+		txn.insert_raw(&self.db.threadid_userids, root_id, &users);
 	}
 
 	pub(super) async fn get_participants(&self, root_id: &RawPduId) -> Result<Vec<OwnedUserId>> {
@@ -456,12 +453,10 @@ impl Service {
 		}
 		.into();
 
-		self.db
-			.threadactivityid_rootid
-			.insert(&activity_id, root_id);
+		let mut txn = self.services.db.txn();
 
-		self.db
-			.threadrootid_latestcount
-			.insert(&root_id, latest.to_be_bytes());
+		txn.insert_raw(&self.db.threadactivityid_rootid, activity_id, root_id);
+		txn.insert_raw(&self.db.threadrootid_latestcount, root_id, latest.to_be_bytes());
+		txn.execute();
 	}
 }

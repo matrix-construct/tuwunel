@@ -1,23 +1,25 @@
 # syntax = docker/dockerfile:1.11-labs
 
 FROM input AS rocksdb-fetch
-ARG rocksdb_branch="tuwunel-changes"
-ARG rust_rocksdb_branch="tuwunel-changes"
 ARG librocksdb_submodule="librocksdb-sys/rocksdb"
 
 WORKDIR /usr/src
 COPY --link --from=recipe rocksdb.url .
+COPY --link --from=recipe rocksdb.rev .
 
+# The revision comes from the lockfile rather than a branch tip: a branch name is
+# a stable cache key, so a moved tip is reused from cache and the prebuilt headers
+# silently disagree with the bindings Cargo compiles.
 RUN <<EOF
     set -eux
     rocksdb_url="$(cat rocksdb.url)"
-    git clone \
-        --depth 1 \
-        --single-branch \
-        --branch "${rust_rocksdb_branch}" \
-        "--recurse-submodules=${librocksdb_submodule}" \
-        "${rocksdb_url}" \
-        /usr/src/rocksdb
+    rocksdb_rev="$(cat rocksdb.rev)"
+    git init --quiet /usr/src/rocksdb
+    cd /usr/src/rocksdb
+    git remote add origin "${rocksdb_url}"
+    git fetch --depth 1 origin "${rocksdb_rev}"
+    git checkout --detach FETCH_HEAD
+    git submodule update --init "${librocksdb_submodule}"
 EOF
 
 

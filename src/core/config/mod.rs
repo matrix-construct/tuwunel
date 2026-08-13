@@ -1,13 +1,44 @@
+/// Validates configuration before startup and reload.
+///
+/// Checks reject invalid combinations while emitting warnings for deprecated or
+/// risky values. Reload validation also prevents runtime changes to fixed
+/// identity and network fields.
 pub mod check;
 mod identity_provider_serde;
+/// Defines sources for trusted client IP extraction.
+///
+/// [`IpSource`] enumerates the TCP peer address and supported forwarding
+/// headers. The default uses the TCP peer address without trusting a proxy.
 pub mod ip_source;
+/// Maintains the active reloadable configuration.
+///
+/// [`Manager`] exposes the current [`Config`] through `Deref` and atomically
+/// replaces it on reload. It also manages the lifetime of configurations still
+/// visible to readers.
 pub mod manager;
 mod net;
+/// Defines outbound proxy configuration and domain matching.
+///
+/// The module supports no proxy, one global proxy, or domain-specific include
+/// and exclude rules. URL matching selects the applicable proxy at request
+/// time.
 pub mod proxy;
+/// Defines supported Matrix room-version policy.
+///
+/// Stable, unstable, and experimental version lists are kept here. [`Config`]
+/// helpers apply the opt-in flags and report each enabled version's stability.
 pub mod room_version;
+/// Defines the inputs used to assemble configuration.
+///
+/// [`Sources`] retains file paths and optional overrides so reloads reproduce
+/// startup inputs. Loading layers extra paths before applying those overrides.
 pub mod sources;
 #[cfg(test)]
 mod tests;
+/// Converts discovery configuration into Matrix API values.
+///
+/// Helpers build support contacts, policies, registration terms, and MatrixRTC
+/// transports from config. Endpoint handlers share these conversions.
 pub mod well_known;
 
 use std::{
@@ -138,6 +169,10 @@ pub struct Config {
 	#[serde(default = "default_port")]
 	port: ListeningPort,
 
+	/// Configures direct TLS listeners.
+	///
+	/// Values are read from the separate `[global.tls]` section. Certificate
+	/// and key paths must be supplied together before TLS is enabled.
 	// external structure; separate section
 	#[serde(default)]
 	pub tls: TlsConfig,
@@ -244,38 +279,109 @@ pub struct Config {
 	#[serde(default = "default_db_write_buffer_capacity_mb")]
 	pub db_write_buffer_capacity_mb: f64,
 
+	/// Maximum number of entries in the RocksDB block cache shared by the
+	/// `pduid_pdu` and `eventid_outlierpdu` column families: a PDU's full
+	/// body, keyed by its PDU ID, and the same body keyed by event ID when
+	/// the PDU is an outlier.
+	///
+	/// This is an entry count, not a byte size. The cache's actual capacity
+	/// in bytes is this value multiplied by an internal per-column-family
+	/// key+value size estimate, then multiplied by `cache_capacity_modifier`.
+	///
+	/// Scaled by your CPU core count by default; see
+	/// `cache_capacity_modifier` to scale this along with the other
+	/// individual LRU caches at once.
+	///
 	/// default: varies by system
 	#[serde(default = "default_pdu_cache_capacity")]
 	pub pdu_cache_capacity: u32,
 
+	/// Maximum number of entries in the RocksDB block cache shared by the
+	/// `shorteventid_authchain` and `authchainkey_authchain` column
+	/// families: a room event's full auth chain, keyed by its short event ID
+	/// or by the auth chain's own key.
+	///
+	/// Same entry-count semantics as `pdu_cache_capacity` above; see there
+	/// for how this becomes a byte capacity and how
+	/// `cache_capacity_modifier` applies.
+	///
 	/// default: varies by system
 	#[serde(default = "default_auth_chain_cache_capacity")]
 	pub auth_chain_cache_capacity: u32,
 
+	/// Maximum number of entries in the RocksDB block cache for the
+	/// `shorteventid_eventid` column family: an event's full event ID,
+	/// looked up from its short event ID.
+	///
+	/// Same entry-count semantics as `pdu_cache_capacity`.
+	///
 	/// default: varies by system
 	#[serde(default = "default_shorteventid_cache_capacity")]
 	pub shorteventid_cache_capacity: u32,
 
+	/// Maximum number of entries in the RocksDB block cache for the
+	/// `eventid_shorteventid` column family: an event's short event ID,
+	/// looked up from its full event ID. The reverse lookup of
+	/// `shorteventid_cache_capacity`.
+	///
+	/// Same entry-count semantics as `pdu_cache_capacity`.
+	///
 	/// default: varies by system
 	#[serde(default = "default_eventidshort_cache_capacity")]
 	pub eventidshort_cache_capacity: u32,
 
+	/// Maximum number of entries in the RocksDB block cache for the
+	/// `eventid_pduid` column family: an event's PDU ID, looked up from its
+	/// full event ID.
+	///
+	/// Same entry-count semantics as `pdu_cache_capacity`.
+	///
 	/// default: varies by system
 	#[serde(default = "default_eventid_pdu_cache_capacity")]
 	pub eventid_pdu_cache_capacity: u32,
 
+	/// Maximum number of entries in the RocksDB block cache for the
+	/// `shortstatekey_statekey` column family: a state event's full state
+	/// key, looked up from its short state key.
+	///
+	/// Same entry-count semantics as `pdu_cache_capacity`.
+	///
 	/// default: varies by system
 	#[serde(default = "default_shortstatekey_cache_capacity")]
 	pub shortstatekey_cache_capacity: u32,
 
+	/// Maximum number of entries in the RocksDB block cache for the
+	/// `statekey_shortstatekey` column family: a state event's short state
+	/// key, looked up from its full state key. The reverse lookup of
+	/// `shortstatekey_cache_capacity`.
+	///
+	/// Same entry-count semantics as `pdu_cache_capacity`.
+	///
 	/// default: varies by system
 	#[serde(default = "default_statekeyshort_cache_capacity")]
 	pub statekeyshort_cache_capacity: u32,
 
+	/// Maximum number of entries in the RocksDB block cache for the
+	/// `servernameevent_data` column family: outbound federation events
+	/// (PDUs and EDUs) queued for delivery, keyed by destination server
+	/// name.
+	///
+	/// Same entry-count semantics as `pdu_cache_capacity`.
+	///
 	/// default: varies by system
 	#[serde(default = "default_servernameevent_data_cache_capacity")]
 	pub servernameevent_data_cache_capacity: u32,
 
+	/// Maximum number of entries in the in-memory LRU cache of decompressed
+	/// room state (a list of short state-info entries per state hash), used
+	/// by the state compressor to avoid re-walking
+	/// `shortstatehash_statediff` on every lookup.
+	///
+	/// Unlike the other caches on this page, this one is not backed by
+	/// RocksDB: it is a plain in-process cache sized directly in entries,
+	/// with no per-entry byte-size conversion. `cache_capacity_modifier`
+	/// still applies to it.
+	///
 	/// default: varies by system
 	#[serde(default = "default_stateinfo_cache_capacity")]
 	pub stateinfo_cache_capacity: u32,
@@ -1258,10 +1364,19 @@ pub struct Config {
 	#[serde(default)]
 	pub default_power_level_content_override: Option<serde_json::Value>,
 
+	/// Configures Matrix discovery documents and related endpoints.
+	///
+	/// Values are read from the separate `[global.well_known]` section. Client,
+	/// server, support, and MatrixRTC responses consume these settings.
 	// external structure; separate section
 	#[serde(default)]
 	pub well_known: WellKnownConfig,
 
+	/// Enables OTLP span export for Jaeger-compatible tracing.
+	///
+	/// A build with performance measurements installs an OpenTelemetry layer
+	/// when this is enabled. It defaults to false, and `jaeger_filter` selects
+	/// the exported spans.
 	#[serde(default)]
 	pub allow_jaeger: bool,
 
@@ -1920,6 +2035,10 @@ pub struct Config {
 	#[serde(default = "default_rocksdb_log_level")]
 	pub rocksdb_log_level: String,
 
+	/// Routes RocksDB log messages to standard error.
+	///
+	/// `rocksdb_log_level` still filters the emitted records. When disabled,
+	/// RocksDB uses the application's callback logger instead.
 	#[serde(default)]
 	pub rocksdb_log_stderr: bool,
 
@@ -2115,9 +2234,17 @@ pub struct Config {
 	#[serde(default)]
 	pub rocksdb_repair: bool,
 
+	/// Opens RocksDB in read-only mode.
+	///
+	/// Writes are rejected and missing column families cannot be created. This
+	/// mode is disabled by default.
 	#[serde(default)]
 	pub rocksdb_read_only: bool,
 
+	/// Opens RocksDB as a secondary follower of a primary instance.
+	///
+	/// Writes are rejected while the primary's latest WAL can be replayed into
+	/// this instance's view. Missing column families cannot be created.
 	#[serde(default)]
 	pub rocksdb_secondary: bool,
 
@@ -3503,30 +3630,60 @@ pub struct Config {
 	#[serde(default)]
 	pub device_key_update_encrypted_rooms_only: bool,
 
+	/// Defines named media storage providers.
+	///
+	/// Each map key names a provider, and each value selects a local or
+	/// S3-compatible backend or disables the entry. Provider-specific settings
+	/// live in separate sections.
 	// external structure; separate section
 	#[serde(default)]
 	pub storage_provider: BTreeMap<String, StorageProvider>,
 
+	/// Defines policy documents users must accept during registration.
+	///
+	/// Each map key is the policy identifier exposed in the `m.login.terms` UIA
+	/// stage. An empty map leaves the terms stage disabled.
 	// external structure; separate section
 	#[serde(default)]
 	pub registration_terms: BTreeMap<String, TermsPolicy>,
 
+	/// Configures LDAP login integration.
+	///
+	/// Connection, bind, search, and attribute settings live in the separate
+	/// `[global.ldap]` section. LDAP authentication is disabled by default.
 	// external structure; separate section
 	#[serde(default)]
 	pub ldap: LdapConfig,
 
+	/// Configures JSON Web Token login integration.
+	///
+	/// Key format, algorithm, claim validation, and user provisioning settings
+	/// live in `[global.jwt]`. Token login is disabled by default.
 	// external structure; separate section
 	#[serde(default)]
 	pub jwt: JwtConfig,
 
+	/// Configures outbound SMTP email delivery.
+	///
+	/// Providing a connection URI enables the email subsystem. Registration
+	/// flags determine when a verified address is required.
 	// external structure; separate section
 	#[serde(default)]
 	pub smtp: SmtpConfig,
 
+	/// Defines inline application service registrations.
+	///
+	/// Each map key names one registration and supplies its default identifier.
+	/// The contained settings are converted to Matrix application service data.
 	// external structure; separate section
 	#[serde(default)]
 	pub appservice: BTreeMap<String, AppService>,
 
+	/// Defines OpenID Connect identity provider registrations.
+	///
+	/// Each entry configures client credentials, discovery, and account
+	/// mapping. Its stable `client_id` identifies the provider while `brand`
+	/// selects provider-specific defaults and workarounds.
 	// external structure; separate sections
 	#[serde(default, with = "identity_provider_serde")]
 	pub identity_provider: BTreeMap<String, IdentityProvider>,
@@ -3537,6 +3694,10 @@ pub struct Config {
 	catchall: BTreeMap<String, IgnoredAny>,
 }
 
+/// Configures direct TLS listener behavior.
+///
+/// Certificate and key paths must be supplied together. Optional dual-protocol
+/// mode accepts encrypted and plain connections on the same listeners.
 #[derive(Clone, Debug, Deserialize, Default)]
 #[config_example_generator(filename = "tuwunel-example.toml", section = "global.tls")]
 pub struct TlsConfig {
@@ -3550,11 +3711,19 @@ pub struct TlsConfig {
 	/// example: "/path/to/my/certificate.key"
 	pub key: Option<String>,
 
-	/// Whether to listen and allow for HTTP and HTTPS connections (insecure!)
+	/// Controls whether listeners accept both HTTP and HTTPS.
+	///
+	/// Plain requests are served without redirecting them to HTTPS. This
+	/// weakens transport security and is disabled by default.
 	#[serde(default)]
 	pub dual_protocol: bool,
 }
 
+/// Configures Matrix discovery documents and related response data.
+///
+/// Client and server fields drive the standard well-known responses. Support
+/// contacts, policies, and MatrixRTC transports populate their corresponding
+/// discovery data.
 #[expect(rustdoc::bare_urls)]
 #[derive(Clone, Debug, Deserialize, Default)]
 #[config_example_generator(
@@ -3578,10 +3747,18 @@ pub struct WellKnownConfig {
 	/// example: "matrix.example.com:443"
 	pub server: Option<OwnedServerName>,
 
+	/// Defines contacts published by the support discovery endpoint.
+	///
+	/// Each map value becomes one contact while its key is only a config
+	/// identifier. Legacy scalar support fields are appended separately.
 	// external structure; separate section
 	#[serde(default)]
 	pub support_contact: BTreeMap<String, SupportContact>,
 
+	/// Defines policies published by the support discovery endpoint.
+	///
+	/// Each map key becomes a policy identifier. The value supplies its version
+	/// and localized documents.
 	// external structure; separate section
 	#[serde(default)]
 	pub support_policy: BTreeMap<String, SupportPolicy>,
@@ -3671,6 +3848,10 @@ pub struct WellKnownConfig {
 	pub rtc_transports: Vec<serde_json::Value>,
 }
 
+/// Defines one policy published by the support discovery endpoint.
+///
+/// The enclosing map key supplies the policy identifier. Its version and
+/// localized translations are emitted in the discovery response.
 #[derive(Clone, Debug, Deserialize)]
 #[config_example_generator(
 	filename = "tuwunel-example.toml",
@@ -3684,10 +3865,18 @@ pub struct SupportPolicy {
 	/// reloadable: yes
 	pub version: String,
 
+	/// Maps language identifiers to localized policy documents.
+	///
+	/// Each value supplies the display name and URL for its language. The map
+	/// is converted to the response's localized policy entries.
 	// external structure; separate section
 	pub policy_translation: BTreeMap<String, SupportPolicyTranslation>,
 }
 
+/// Defines one localized support policy document.
+///
+/// `name` is the user-facing title for this language. `url` points clients to
+/// the corresponding policy text.
 #[derive(Clone, Debug, Deserialize)]
 #[config_example_generator(
 	filename = "tuwunel-example.toml",
@@ -3707,6 +3896,10 @@ pub struct SupportPolicyTranslation {
 	pub url: Url,
 }
 
+/// Defines a policy document required during registration.
+///
+/// The enclosing map key becomes the policy identifier presented to clients.
+/// Its version and translations form the `m.login.terms` stage parameters.
 #[derive(Clone, Debug, Deserialize)]
 #[config_example_generator(
 	filename = "tuwunel-example.toml",
@@ -3723,10 +3916,18 @@ pub struct TermsPolicy {
 	/// reloadable: yes
 	pub version: String,
 
+	/// Maps language identifiers to localized registration policy documents.
+	///
+	/// Each value supplies the display name and HTTP or HTTPS URL for its
+	/// language. These translations are presented in the terms stage.
 	// external structure; separate section
 	pub translations: BTreeMap<String, TermsPolicyTranslation>,
 }
 
+/// Defines one localized registration policy document.
+///
+/// `name` is the user-facing title for this language. `url` points clients to
+/// the policy text whose acceptance is recorded.
 #[derive(Clone, Debug, Deserialize)]
 #[config_example_generator(
 	filename = "tuwunel-example.toml",
@@ -3757,6 +3958,10 @@ impl From<SupportPolicyTranslation>
 	}
 }
 
+/// Defines a contact published by the support discovery endpoint.
+///
+/// Every contact has a Matrix support role. Email, Matrix ID, and OpenPGP key
+/// fields provide optional communication channels.
 #[derive(Clone, Debug, Deserialize)]
 #[config_example_generator(
 	filename = "tuwunel-example.toml",
@@ -3803,6 +4008,11 @@ impl From<SupportContact> for ruma::api::client::discovery::discover_support::Co
 	}
 }
 
+/// Configures LDAP authentication and directory-backed administration.
+///
+/// Connection, bind, search, and attribute settings determine how users are
+/// located and authenticated. Optional admin search settings identify directory
+/// entries treated as server administrators.
 #[derive(Clone, Debug, Default, Deserialize)]
 #[config_example_generator(filename = "tuwunel-example.toml", section = "global.ldap")]
 pub struct LdapConfig {
@@ -3911,6 +4121,10 @@ pub struct LdapConfig {
 	pub admin_filter: String,
 }
 
+/// Configures authentication using JSON Web Tokens.
+///
+/// Key format, signature algorithm, and claim rules determine token validity.
+/// Optional provisioning creates a local account for an otherwise valid token.
 #[derive(Clone, Debug, Default, Deserialize)]
 #[config_example_generator(filename = "tuwunel-example.toml", section = "global.jwt")]
 pub struct JwtConfig {
@@ -4017,6 +4231,10 @@ pub struct JwtConfig {
 	pub validate_signature: bool,
 }
 
+/// Configures outbound email verification through SMTP.
+///
+/// The connection URI and sender identify the relay and source mailbox.
+/// Registration flags control which flows require a verified email address.
 #[derive(Clone, Debug, Default, Deserialize)]
 #[config_example_generator(filename = "tuwunel-example.toml", section = "global.smtp")]
 pub struct SmtpConfig {
@@ -4061,6 +4279,11 @@ pub struct SmtpConfig {
 	pub require_email_for_token_registration: bool,
 }
 
+/// Configures one OpenID Connect identity provider.
+///
+/// Client credentials and endpoint discovery establish the upstream
+/// authorization flow. Claim and trust settings control account mapping and
+/// optional registration.
 #[derive(Clone, Debug, Deserialize)]
 #[config_example_generator(
 	filename = "tuwunel-example.toml",
@@ -4340,9 +4563,17 @@ pub struct IdentityProvider {
 }
 
 impl IdentityProvider {
+	/// Returns the provider's stable identifier.
+	///
+	/// The identifier is the OAuth application's client ID. It is borrowed from
+	/// this configuration without allocation.
 	#[must_use]
 	pub fn id(&self) -> &str { self.client_id.as_str() }
 
+	/// Loads the effective client secret.
+	///
+	/// An inline secret takes precedence over a configured secret file. File
+	/// contents are read asynchronously and trimmed before being returned.
 	pub async fn get_client_secret(&self) -> Result<String> {
 		if let Some(client_secret) = &self.client_secret {
 			return Ok(client_secret.clone());
@@ -4358,17 +4589,39 @@ impl IdentityProvider {
 	}
 }
 
+/// Selects the backend for a named media storage provider.
+///
+/// Local providers store objects beneath a filesystem path, while S3 providers
+/// use a compatible object store. The default variant disables the entry.
 #[derive(Clone, Debug, Default, Deserialize)]
 pub enum StorageProvider {
+	/// Selects a local filesystem backend.
+	///
+	/// The contained settings root object paths beneath a configured directory.
+	/// Startup checks can require that directory to be usable.
 	#[expect(non_camel_case_types)]
 	local(StorageProviderLocal),
+
+	/// Selects an S3-compatible object storage backend.
+	///
+	/// The boxed settings configure endpoint, credentials, encryption, and
+	/// multipart uploads. Custom endpoints permit compatible non-AWS services.
 	#[expect(non_camel_case_types)]
 	#[serde(rename = "s3", alias = "S3")]
 	s3(Box<StorageProviderS3>),
+
+	/// Disables this storage provider entry.
+	///
+	/// This is the default when no backend variant is selected. It carries no
+	/// backend settings.
 	#[default]
 	None,
 }
 
+/// Configures local filesystem object storage.
+///
+/// `base_path` prefixes every object path belonging to this provider. Remaining
+/// options control directory creation, cleanup, and startup checks.
 #[derive(Clone, Debug, Default, Deserialize)]
 #[config_example_generator(
 	filename = "tuwunel-example.toml",
@@ -4400,6 +4653,11 @@ pub struct StorageProviderLocal {
 	pub startup_check: bool,
 }
 
+/// Configures an S3-compatible object storage provider.
+///
+/// Bucket, endpoint, and credential fields identify the remote store.
+/// Transport, encryption, multipart, and startup options tune how objects are
+/// accessed.
 #[derive(Clone, Debug, Default, Deserialize)]
 #[config_example_generator(
 	filename = "tuwunel-example.toml",
@@ -4518,6 +4776,11 @@ pub struct StorageProviderS3 {
 	pub startup_check: bool,
 }
 
+/// Defines one inline Matrix application service registration.
+///
+/// Tokens, namespaces, and protocol flags are converted to the Matrix
+/// registration model. The enclosing config map supplies the registration ID
+/// when `id` is empty.
 #[derive(Clone, Debug, Default, Deserialize)]
 #[config_example_generator(
 	filename = "tuwunel-example.toml",
@@ -4525,6 +4788,10 @@ pub struct StorageProviderS3 {
 	ignore = "id users aliases rooms"
 )]
 pub struct AppService {
+	/// Identifies the application service registration.
+	///
+	/// An empty value is replaced with the enclosing config map key. An
+	/// explicit value must match that key.
 	#[serde(default)]
 	pub id: String,
 
@@ -4627,6 +4894,11 @@ impl From<AppService> for ruma::api::appservice::Registration {
 	}
 }
 
+/// Defines one namespace claimed by an application service.
+///
+/// The regular expression selects users, aliases, or rooms according to the
+/// list containing this value. `exclusive` controls whether the service owns
+/// every matching identifier.
 #[derive(Clone, Debug, Default, Deserialize)]
 #[config_example_generator(
 	filename = "tuwunel-example.toml",
@@ -4723,10 +4995,20 @@ impl Config {
 		Ok(config)
 	}
 
+	/// Validates the complete configuration.
+	///
+	/// The startup checks emit warnings for deprecated or risky settings and
+	/// reject invalid combinations. Reload-specific comparisons are performed
+	/// by the configuration manager separately.
 	pub fn check(&self) -> Result { check(self) }
 }
 
 impl TlsConfig {
+	/// Returns the configured TLS certificate and key paths together.
+	///
+	/// A pair is returned only when both options are present. Startup
+	/// validation rejects a configuration containing only one of the two
+	/// paths.
 	#[must_use]
 	pub fn get_tls_cert_key(&self) -> Option<(&Path, &Path)> {
 		let cert = self.certs.as_ref()?;
@@ -4923,6 +5205,10 @@ pub fn default_log() -> String {
 		.to_owned()
 }
 
+/// Returns the default tracing span-event mode.
+///
+/// The value is `none`, which disables span lifecycle event emission. It is
+/// used when `log_span_events` is omitted.
 #[must_use]
 pub fn default_log_span_events() -> String { "none".into() }
 
@@ -4980,6 +5266,10 @@ fn default_rocksdb_bottommost_compression_level() -> i32 { 32767 }
 
 fn default_rocksdb_stats_level() -> u8 { 1 }
 
+/// Returns the default Matrix room version.
+///
+/// Room version 11 is selected when `default_room_version` is omitted. The
+/// value is returned without consulting runtime configuration.
 // I know, it's a great name
 #[must_use]
 #[inline]

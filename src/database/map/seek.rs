@@ -11,6 +11,12 @@ use crate::{
 	stream,
 };
 
+/// Builds a forward or reverse map stream from an optional raw seek key.
+///
+/// A block-cache probe selects inline iteration when the initial seek is
+/// cached; otherwise the seek runs on the engine's blocking pool. The
+/// projection type determines whether each item contains a key alone or a
+/// key-value pair.
 pub(super) fn seek_stream<'a, C, T>(
 	map: &'a Arc<Map>,
 	dir: Direction,
@@ -49,6 +55,10 @@ where
 	)
 }
 
+/// Tests whether an initial seek can complete from block cache.
+///
+/// The probe uses the same direction and starting key as the real iterator
+/// without filling cache.
 #[tracing::instrument(
     name = "cached",
     level = "trace",
@@ -62,6 +72,10 @@ fn is_cached(map: &Arc<Map>, dir: Direction, from: Option<&[u8]>) -> bool {
 	!state.is_incomplete()
 }
 
+/// Initializes iterator state for the requested seek direction.
+///
+/// The optional raw key is interpreted as a lower bound when moving forward and
+/// an upper bound when moving backward.
 fn init<'a>(state: stream::State<'a>, dir: Direction, from: Option<&[u8]>) -> stream::State<'a> {
 	match dir {
 		| Direction::Forward => state.init_fwd(from),

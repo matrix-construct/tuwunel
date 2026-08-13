@@ -1,7 +1,8 @@
 use axum::extract::State;
 use futures::{FutureExt, TryFutureExt, TryStreamExt};
 use ruma::{
-	OwnedEventId, OwnedRoomAliasId, RoomId, UserId,
+	CanonicalJsonObject, MilliSecondsSinceUnixEpoch, OwnedEventId, OwnedRoomAliasId, RoomId,
+	UserId,
 	api::client::state::{
 		get_state_event_for_key::{self, v3::StateEventFormat},
 		get_state_events, send_state_event,
@@ -18,10 +19,13 @@ use ruma::{
 	},
 	serde::Raw,
 };
-use serde_json::json;
+use serde_json::{json, value::to_raw_value};
 use tuwunel_core::{
 	Err, Result, err, is_false,
-	matrix::{Event, pdu::PduBuilder},
+	matrix::{
+		Event,
+		pdu::{PduBuilder, PduEvent},
+	},
 	utils::{BoolExt, stream::TryBroadbandExt},
 };
 use tuwunel_service::Services;
@@ -158,8 +162,7 @@ pub(crate) async fn get_state_events_for_key_route(
 		| _ => event.get_content_as_value(),
 	};
 
-	let event_or_content =
-		serde_json::value::to_raw_value(&event_or_content).expect("serializable JSON value");
+	let event_or_content = to_raw_value(&event_or_content).expect("serializable JSON value");
 
 	Ok(get_state_event_for_key::v3::Response::new(event_or_content))
 }
@@ -188,54 +191,71 @@ async fn send_state_event_for_key_helper(
 	event_type: &StateEventType,
 	json: &Raw<AnyStateEventContent>,
 	state_key: &str,
-	timestamp: Option<ruma::MilliSecondsSinceUnixEpoch>,
+	timestamp: Option<MilliSecondsSinceUnixEpoch>,
 ) -> Result<OwnedEventId> {
 	allowed_to_send_state_event(services, sender, room_id, event_type, state_key, json).await?;
 	let state_lock = services.state.mutex.lock(room_id).await;
-	let mut pdu_builder = PduBuilder {
-		event_type: event_type.to_string().into(),
-		content: serde_json::from_str::<serde_json::Value>(json.json().get())?.into(),
-		state_key: Some(state_key.into()),
-		timestamp,
-		..Default::default()
+
+	let current = match state_dedup_eligible(event_type, timestamp.as_ref()) {
+		| false => None,
+		| true => services
+			.state_accessor
+			.room_state_get(room_id, event_type, state_key)
+			.await
+			.map(Some)
+			.or_else(|error| error.is_not_found().then_some(None).ok_or(error))?,
 	};
 
-	if pdu_builder.event_type == ruma::events::TimelineEventType::RoomMember {
-		services
-			.timeline
-			.normalize_member_authorisation(&mut pdu_builder, room_id)
-			.await?;
-	}
-	let content: serde_json::Value = serde_json::from_str(pdu_builder.content.json().get())?;
-
-	// `state_res::auth_check` runs unconditionally inside
-	// `create_hash_and_sign_event`, so the identical-resend short-circuit below
-	// only ever fires after the sender's *current* permission to send this
-	// event has been verified for this exact content -- a sender whose power
-	// was revoked since the previous send can't get a stale success just by
-	// resending the same content. `prev_state` is already fetched internally
-	// to populate `unsigned.prev_content`, so checking it here costs no lookup
-	// beyond what every state send already pays.
-	let (pdu, pdu_json, prev_state) = services
-		.timeline
-		.create_hash_and_sign_event(pdu_builder, sender, room_id, &state_lock)
-		.await?;
-
-	if timestamp.is_none()
-		&& let Some(prev_state) = &prev_state
-		&& prev_state.sender() == sender
-		&& prev_state.get_content_as_value() == content
+	if let Some(current) = current
+		&& current.sender() == sender
 	{
-		return Ok(prev_state.event_id().to_owned());
+		let content = json.deserialize_as_unchecked::<CanonicalJsonObject>()?;
+
+		if is_duplicate_state(event_type, sender, &content, &current)? {
+			return Ok(current.event_id().to_owned());
+		}
 	}
 
 	let event_id = services
 		.timeline
-		.append_created_pdu(pdu, pdu_json, sender, &state_lock)
+		.build_and_append_pdu(
+			PduBuilder {
+				event_type: event_type.to_string().into(),
+				content: serde_json::from_str(json.json().get())?,
+				state_key: Some(state_key.into()),
+				timestamp,
+				..Default::default()
+			},
+			sender,
+			room_id,
+			&state_lock,
+		)
 		.boxed()
 		.await?;
 
 	Ok(event_id)
+}
+
+fn state_dedup_eligible(
+	event_type: &StateEventType,
+	timestamp: Option<&MilliSecondsSinceUnixEpoch>,
+) -> bool {
+	timestamp.is_none() && !matches!(event_type, StateEventType::RoomMember)
+}
+
+fn is_duplicate_state(
+	event_type: &StateEventType,
+	sender: &UserId,
+	content: &CanonicalJsonObject,
+	current: &PduEvent,
+) -> Result<bool> {
+	if matches!(event_type, StateEventType::RoomMember) || current.sender() != sender {
+		return Ok(false);
+	}
+
+	let current_content = current.content.deserialize()?;
+
+	Ok(current_content == *content)
 }
 
 async fn allowed_to_send_state_event(
@@ -475,16 +495,11 @@ async fn validate_member(
 
 	// Already joined or invited: no restricted-join authorisation needed.
 	if services
-		.state_accessor
-		.room_state_get_content::<RoomMemberEventContent>(
-			room_id,
-			&StateEventType::RoomMember,
-			target_user.as_str(),
-		)
+		.state_cache
+		.user_membership(&target_user, room_id)
 		.await
-		.is_ok_and(|event| {
-			matches!(event.membership, MembershipState::Join | MembershipState::Invite)
-		}) {
+		.is_some_and(|m| matches!(m, MembershipState::Join | MembershipState::Invite))
+	{
 		return Ok(());
 	}
 
@@ -506,4 +521,111 @@ async fn validate_member(
 			)))
 		})
 		.await
+}
+
+#[cfg(test)]
+mod tests {
+	use ruma::user_id;
+	use serde_json::{Value as JsonValue, from_str, from_value};
+
+	use super::*;
+
+	fn current_state(sender: &str, content: &JsonValue) -> PduEvent {
+		from_value(json!({
+			"type": "m.room.history_visibility",
+			"content": content,
+			"state_key": "",
+			"event_id": "$event:example.com",
+			"room_id": "!room:example.com",
+			"sender": sender,
+			"prev_events": [],
+			"auth_events": [],
+			"origin_server_ts": 1,
+			"depth": 1,
+			"hashes": { "sha256": "thishashcoversallfieldsincasethisisredacted" },
+		}))
+		.expect("valid pdu")
+	}
+
+	#[test]
+	fn identical_state_content_is_duplicate() {
+		let sender = user_id!("@alice:example.com");
+		let current = current_state(
+			sender.as_str(),
+			&json!({ "history_visibility": "shared", "extra": true }),
+		);
+
+		let content = from_str::<CanonicalJsonObject>(
+			r#"{ "extra": true, "history_visibility": "shared" }"#,
+		)
+		.expect("canonical content");
+
+		assert!(
+			is_duplicate_state(
+				&StateEventType::RoomHistoryVisibility,
+				sender,
+				&content,
+				&current,
+			)
+			.expect("comparison")
+		);
+	}
+
+	#[test]
+	fn changed_state_content_is_not_duplicate() {
+		let sender = user_id!("@alice:example.com");
+		let current = current_state(sender.as_str(), &json!({ "history_visibility": "shared" }));
+		let content =
+			from_str(r#"{ "history_visibility": "world_readable" }"#).expect("canonical content");
+
+		assert!(
+			!is_duplicate_state(
+				&StateEventType::RoomHistoryVisibility,
+				sender,
+				&content,
+				&current,
+			)
+			.expect("comparison")
+		);
+	}
+
+	#[test]
+	fn different_sender_is_not_duplicate() {
+		let current =
+			current_state("@alice:example.com", &json!({ "history_visibility": "shared" }));
+
+		let content =
+			from_str(r#"{ "history_visibility": "shared" }"#).expect("canonical content");
+
+		assert!(
+			!is_duplicate_state(
+				&StateEventType::RoomHistoryVisibility,
+				user_id!("@bob:example.com"),
+				&content,
+				&current,
+			)
+			.expect("comparison")
+		);
+	}
+
+	#[test]
+	fn member_state_is_not_duplicate() {
+		let sender = user_id!("@alice:example.com");
+		let current = current_state(sender.as_str(), &json!({ "membership": "join" }));
+		let content = from_str(r#"{ "membership": "join" }"#).expect("canonical content");
+
+		assert!(
+			!is_duplicate_state(&StateEventType::RoomMember, sender, &content, &current)
+				.expect("comparison")
+		);
+	}
+
+	#[test]
+	fn timestamped_state_is_not_eligible_for_dedup() {
+		let event_type = StateEventType::RoomHistoryVisibility;
+		let timestamp = MilliSecondsSinceUnixEpoch::now();
+
+		assert!(state_dedup_eligible(&event_type, None));
+		assert!(!state_dedup_eligible(&event_type, Some(&timestamp)));
+	}
 }

@@ -11,9 +11,7 @@ use std::time::Duration;
 use ruma::{MilliSecondsSinceUnixEpoch, UInt, uint};
 use synapse_admin_api::registration_tokens::RegistrationToken;
 use tuwunel_core::{Result, utils::time::timepoint_from_epoch};
-use tuwunel_service::registration_tokens::{
-	DatabaseTokenInfo, TokenExpires, ValidToken, ValidTokenSource,
-};
+use tuwunel_service::registration_tokens::{DatabaseTokenInfo, TokenExpires, TokenInfo};
 
 pub(crate) use self::{
 	create::admin_create_token_route, delete::admin_delete_token_route,
@@ -22,17 +20,17 @@ pub(crate) use self::{
 
 /// Map a validated token into the admin API wire shape. Config-file tokens
 /// carry no usage state, so they read as unlimited, never expiring, and unused.
-fn valid_token_response(valid: ValidToken) -> RegistrationToken {
-	match valid.source {
-		| ValidTokenSource::ConfigFile => RegistrationToken::new(valid.token),
-		| ValidTokenSource::Database(info) => token_response(valid.token, &info),
+fn token_response(token: String, info: TokenInfo) -> RegistrationToken {
+	match info {
+		| TokenInfo::Config => RegistrationToken::new(token),
+		| TokenInfo::Database(info) => database_token_response(token, &info),
 	}
 }
 
 /// Map a token and its stored metadata into the admin API wire shape.
 /// `pending` is always zero: tuwunel consumes uses in a single step with no
 /// two-phase registration model.
-fn token_response(token: String, info: &DatabaseTokenInfo) -> RegistrationToken {
+fn database_token_response(token: String, info: &DatabaseTokenInfo) -> RegistrationToken {
 	RegistrationToken {
 		token,
 		uses_allowed: info
@@ -67,7 +65,7 @@ mod tests {
 	use ruma::{MilliSecondsSinceUnixEpoch, uint};
 	use tuwunel_service::registration_tokens::{DatabaseTokenInfo, TokenExpires};
 
-	use super::token_response;
+	use super::database_token_response;
 
 	#[test]
 	fn unlimited_token_maps_to_null_cap_and_expiry() {
@@ -76,7 +74,7 @@ mod tests {
 			expires: TokenExpires { max_uses: None, max_age: None },
 		};
 
-		let token = token_response("abc".to_owned(), &info);
+		let token = database_token_response("abc".to_owned(), &info);
 
 		assert_eq!(token.token, "abc");
 		assert_eq!(token.completed, uint!(3));
@@ -103,7 +101,7 @@ mod tests {
 			},
 		};
 
-		let token = token_response("abc".to_owned(), &info);
+		let token = database_token_response("abc".to_owned(), &info);
 
 		assert_eq!(token.uses_allowed, Some(uint!(100)));
 		assert_eq!(token.completed, uint!(10));

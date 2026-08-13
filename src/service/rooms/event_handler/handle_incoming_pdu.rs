@@ -24,7 +24,7 @@ use tuwunel_core::{
 };
 
 use super::backoff::{Context, Disposition};
-use crate::rooms::timeline::RawPduId;
+use crate::rooms::{state_cache::MembershipUpdate, timeline::RawPduId};
 
 type PrevResultsHandled = SmallVec<[PrevHandled; MAX_PREV_EVENTS]>;
 type PrevHandled = (OwnedEventId, Handled);
@@ -319,16 +319,16 @@ async fn handle_rescinded_invite(
 	let count = self.services.globals.next_count();
 	self.services
 		.state_cache
-		.update_membership(
+		.update_membership(MembershipUpdate {
 			room_id,
-			&target,
-			RoomMemberEventContent::new(MembershipState::Leave),
-			&sender,
-			None,
-			None,
-			false,
-			PduCount::Normal(*count),
-		)
+			user_id: &target,
+			membership_event: RoomMemberEventContent::new(MembershipState::Leave),
+			sender: &sender,
+			last_state: None,
+			invite_via: None,
+			update_joined_count: false,
+			count: PduCount::Normal(*count),
+		})
 		.await?;
 
 	debug!(%room_id, %target, %sender, "Applied a federated invite rescission.");

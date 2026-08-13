@@ -1,4 +1,4 @@
-use tuwunel_core::{Err, Result, utils::time::parse_timepoint_ago};
+use tuwunel_core::{Result, utils::time::parse_timepoint_ago};
 
 use crate::admin_command;
 
@@ -10,10 +10,6 @@ pub(super) async fn delete_range(
 	newer_than: bool,
 	yes_i_want_to_delete_local_media: bool,
 ) -> Result {
-	if older_than == newer_than {
-		return Err!("Please pick only one of --older_than or --newer_than.",);
-	}
-
 	let duration = parse_timepoint_ago(&duration)?;
 	let deleted_count = self
 		.services

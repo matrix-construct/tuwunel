@@ -53,17 +53,21 @@ pub async fn purge_history(
 				return Ok(purged);
 			}
 
+			let mut txn = self.db.db.txn();
+
 			let raw_id = RawPduId::from(key);
 			let count = raw_id.pdu_count();
 			let event_id = pdu.event_id.clone();
 			let ts: u64 = pdu.origin_server_ts.into();
 
-			self.db.pduid_pdu.remove(key);
-			self.db.eventid_pduid.remove(&event_id);
-			self.db.eventid_outlierpdu.remove(&event_id);
-			self.db
-				.roomid_tscount_pducount
-				.del((room_id, ts, bias_count(raw_id.count())));
+			txn.del_raw(&self.db.pduid_pdu, key);
+			txn.del_raw(&self.db.eventid_pduid, &event_id);
+			txn.del_raw(&self.db.eventid_outlierpdu, &event_id);
+
+			let room_id_ts_id = (room_id, ts, bias_count(raw_id.count()));
+			txn.del(&self.db.roomid_tscount_pducount, room_id_ts_id);
+
+			txn.execute();
 
 			if pdu.kind == TimelineEventType::RoomMessage
 				&& let Ok(ExtractBody { body: Some(body) }) = pdu.get_content()

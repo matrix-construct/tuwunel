@@ -83,10 +83,13 @@ RUN \
         cargo chef prepare \
             --recipe-path recipe.json
 
-    #TODO: derive from `cargo tree -f {r} -p rust-librocksdb-sys`
-    echo "https://github.com/matrix-construct/rust-rocksdb" > rocksdb.url
+    rocksdb_pkgid="$(rustup run ${rust_toolchain} cargo pkgid --locked -p rust-librocksdb-sys)"
+    rocksdb_url="${rocksdb_pkgid#git+}"
+    rocksdb_rev="${rocksdb_pkgid##*rev=}"
+    echo "${rocksdb_url%%[?]*}" > rocksdb.url
+    echo "${rocksdb_rev%%#*}" > rocksdb.rev
 
-    sha1sum recipe.json rocksdb.url
+    sha1sum recipe.json rocksdb.url rocksdb.rev
 EOF
 
 
@@ -95,3 +98,4 @@ FROM scratch AS recipe
 WORKDIR /
 COPY --link --from=preparing /usr/src/tuwunel/recipe.json .
 COPY --link --from=preparing /usr/src/tuwunel/rocksdb.url .
+COPY --link --from=preparing /usr/src/tuwunel/rocksdb.rev .

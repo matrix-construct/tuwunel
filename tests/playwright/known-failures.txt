@@ -1,147 +1,28 @@
 accessibility/keyboard-navigation.spec.ts :: without an open room
-audio-player/audio-player.spec.ts :: should be correctly rendered - dark theme
-audio-player/audio-player.spec.ts :: should be correctly rendered - high contrast theme
-audio-player/audio-player.spec.ts :: should be correctly rendered - light theme
-audio-player/audio-player.spec.ts :: should be correctly rendered - light theme with monospace font
-audio-player/audio-player.spec.ts :: should be rendered, play, and support replying on a thread
-audio-player/audio-player.spec.ts :: should play an audio file
-audio-player/audio-player.spec.ts :: should support downloading an audio file
-audio-player/audio-player.spec.ts :: should support replying to audio file with another audio file
 composer/CIDER.spec.ts :: render emoji picker
-composer/CIDER.spec.ts :: should allow user to input emoji via graphical picker
-composer/CIDER.spec.ts :: should have focus lock in emoji picker
-composer/RTE.spec.ts :: autocomplete behaviour tests
-composer/RTE.spec.ts :: can paste a file
-composer/RTE.spec.ts :: create link with a forward selection
-composer/RTE.spec.ts :: draft in threads
-composer/RTE.spec.ts :: sends only one message when you press Enter multiple times
-crypto/crypto.spec.ts :: Can reset cross-signing keys
-crypto/crypto.spec.ts :: Key backup status updates after resetting identity
-crypto/crypto.spec.ts :: Setting up key backup by recovery key
 crypto/crypto.spec.ts :: creating a DM should work, being e2e-encrypted / user verification
 crypto/crypto.spec.ts :: should allow verification when there is no existing DM
 crypto/decryption-failure-messages.spec.ts :: should display undecryptable non-joined historical messages with a different message
 crypto/decryption-failure-messages.spec.ts :: should handle device-relative historical messages
-crypto/device-verification.spec.ts :: No toast after verification, even if the secrets take a while to arrive
 crypto/device-verification.spec.ts :: Verify device with Recovery Key during login
 crypto/device-verification.spec.ts :: Verify device with Recovery Key from settings
-crypto/event-shields.spec.ts :: Should show a grey padlock for a key restored from backup
 crypto/event-shields.spec.ts :: should show correct shields on events sent by users with changed identity
 crypto/event-shields.spec.ts :: should show the correct shield on e2e events
 crypto/event-shields.spec.ts :: should show the correct shield on edited e2e events
 crypto/history-sharing.spec.ts :: Messages sent when we believed the room history was unshared should not be visible
-crypto/history-sharing.spec.ts :: We should share history when sending invites
-crypto/logout.spec.ts :: Ask to set up recovery on logout even if not in encrypted room
-crypto/logout.spec.ts :: Ask to set up recovery on logout if not setup
-crypto/logout.spec.ts :: If backup is set up show standard confirm
-crypto/toasts.spec.ts :: should show toast if key storage is off but account data is missing
 crypto/user-verification.spec.ts :: can abort emoji verification when emoji mismatch
 crypto/user-verification.spec.ts :: can receive a verification request when there is no existing DM
-file-upload/image-upload.spec.ts :: should allow upload via drag and drop
-file-upload/image-upload.spec.ts :: should show image preview when uploading an image
-invite/invite-dialog.spec.ts :: should support inviting a user to Direct Messages
-invite/invite-dialog.spec.ts :: should support inviting a user to a room
 lazy-loading/lazy-loading.spec.ts :: should handle lazy loading properly even when offline
-links/topic.spec.ts :: should linkify plaintext '#aroom:example.org'
-links/topic.spec.ts :: should linkify plaintext '_@alice:example.org'
-links/topic.spec.ts :: should linkify plaintext 'ftp://example.org'
-links/topic.spec.ts :: should linkify plaintext 'https://example.org'
-location/location.spec.ts :: sends and displays pin drop location message successfully
-login/login.spec.ts :: Can reload after login
-pinned-messages/pinned-messages.spec.ts :: banner should listen to pinned message list
-pinned-messages/pinned-messages.spec.ts :: should display 2 messages in the banner
-pinned-messages/pinned-messages.spec.ts :: should display 4 messages in the banner
-pinned-messages/pinned-messages.spec.ts :: should display one message in the banner
-pinned-messages/pinned-messages.spec.ts :: should open the pinned messages list from the banner
-pinned-messages/pinned-messages.spec.ts :: should pin messages and show them in the pinned message panel
-pinned-messages/pinned-messages.spec.ts :: should pin messages and show them in the room info panel
-pinned-messages/pinned-messages.spec.ts :: should pin one message and to have the pinned message badge in the timeline
-pinned-messages/pinned-messages.spec.ts :: should unpin all messages
-pinned-messages/pinned-messages.spec.ts :: should unpin one message
-polls/pollHistory.spec.ts :: Should display active and past polls
-polls/polls.spec.ts :: should be displayed correctly in thread panel
-read-receipts/editing-messages-thread-roots.spec.ts :: An edit of a thread root leaves the room read
-read-receipts/high-level.spec.ts :: Looking in thread view to find old threads that were never read makes the room unread
-read-receipts/high-level.spec.ts :: Paging up to find old threads that were never read keeps the room unread
-read-receipts/new-messages-in-threads.spec.ts :: Reading only one thread's message makes that thread read but not others
-read-receipts/new-messages-thread-roots.spec.ts :: Reading a thread root within the thread view marks it as read in the main timeline
-read-receipts/read-receipts.spec.ts :: Recognises unread messages on main after receiving a unthreaded receipt for a thread message
-read-receipts/read-receipts.spec.ts :: Recognises unread messages on main thread after receiving a receipt for earlier ones
-read-receipts/read-receipts.spec.ts :: Should send the correct receipts
-read-receipts/redactions-in-threads.spec.ts :: A thread with a redacted unread is still read after restart
-read-receipts/redactions-in-threads.spec.ts :: Reacting to a redacted message leaves the thread read
-read-receipts/redactions-in-threads.spec.ts :: Reading an unread thread after a redaction of an older message makes it read
-read-receipts/redactions-in-threads.spec.ts :: Reading an unread thread after a redaction of the latest message makes it read
-read-receipts/redactions-in-threads.spec.ts :: Reading an unread thread after a redaction of the latest message makes it read after restart
-read-receipts/redactions-in-threads.spec.ts :: Redacting the threaded message pointed to by my receipt leaves the room read
-read-receipts/redactions-main-timeline.spec.ts :: Redacting all unread messages makes the room read
-read-receipts/redactions-main-timeline.spec.ts :: Redacting all unread messages makes the room read after restart
-read-receipts/redactions-main-timeline.spec.ts :: Sending and redacting a message after marking the room as read makes it read
-read-receipts/redactions-thread-roots.spec.ts :: Sending a threaded message onto a redacted thread root leaves the room unread
-right-panel/file-panel.spec.ts :: should download an image via the link on the panel
-right-panel/file-panel.spec.ts :: should list tiles on the panel
-right-panel/file-panel.spec.ts :: should render empty state
-right-panel/file-panel.spec.ts :: should render file size in kibibytes on a file tile
-right-panel/file-panel.spec.ts :: should render the audio player and play the audio file on the panel
-right-panel/right-panel.spec.ts :: should handle reporting a room
-right-panel/right-panel.spec.ts :: should handle viewing files
-right-panel/right-panel.spec.ts :: should handle viewing room member
-right-panel/right-panel.spec.ts :: should handle viewing space member
-room/create-room.spec.ts :: creates a room with encrypted state if we check the box
-room/create-room.spec.ts :: creates a room without encrypted state if we don't check the box
-room/create-room.spec.ts :: should allow us to start a chat and show encryption state
-room/create-room.spec.ts :: should create a public room with name, topic & address set
-room/create-room.spec.ts :: should create a video room
-room/room-status-bar.spec.ts :: should show an error when creating a local room fails
-settings/account-user-settings-tab.spec.ts :: should be rendered properly
 settings/account-user-settings-tab.spec.ts :: should display an error if the code is incorrect when adding a phone number
-settings/account-user-settings-tab.spec.ts :: should render the manage account button properly
-settings/account-user-settings-tab.spec.ts :: should set a country calling code based on default_country_code
-settings/appearance-user-settings-tab/appearance-user-settings-tab.spec.ts :: should keep same font and emoji when switching theme
-settings/appearance-user-settings-tab/appearance-user-settings-tab.spec.ts :: should support changing font size by using the font size dropdown
-settings/appearance-user-settings-tab/appearance-user-settings-tab.spec.ts :: should support enabling system font
 settings/appearance-user-settings-tab/message-layout-panel.spec.ts :: should change the message layout from modern to bubble
 settings/appearance-user-settings-tab/message-layout-panel.spec.ts :: should disable compact layout when the modern layout is not selected
 settings/appearance-user-settings-tab/message-layout-panel.spec.ts :: should enable compact layout when the modern layout is selected
-settings/appearance-user-settings-tab/theme-choice-panel.spec.ts :: should be able to add and remove a custom theme
-settings/appearance-user-settings-tab/theme-choice-panel.spec.ts :: should be rendered with the light theme selected
-settings/appearance-user-settings-tab/theme-choice-panel.spec.ts :: should change the theme to dark
-settings/appearance-user-settings-tab/theme-choice-panel.spec.ts :: should disable the themes when the system theme is clicked
-settings/appearance-user-settings-tab/theme-choice-panel.spec.ts :: should keep custom theme when reloading the page
-settings/encryption-user-tab/advanced.spec.ts :: should reset the cryptographic identity
-settings/encryption-user-tab/advanced.spec.ts :: should show the encryption details
-settings/encryption-user-tab/advanced.spec.ts :: should show the export room keys dialog
-settings/encryption-user-tab/advanced.spec.ts :: should show the import room keys dialog
-settings/encryption-user-tab/encryption-tab.spec.ts :: should display the reset identity panel when the user clicks on 'Forgot recovery key?'
-settings/encryption-user-tab/encryption-tab.spec.ts :: should prompt to enter the recovery key when the secrets are not cached locally
-settings/encryption-user-tab/other-devices.spec.ts :: setting per-room unverified blacklist toggle does not affect other rooms
-settings/encryption-user-tab/other-devices.spec.ts :: setting per-room unverified blacklist toggle overrides global toggle
-settings/encryption-user-tab/other-devices.spec.ts :: unverified devices should be able to decrypt while global blacklist is not toggled
-settings/encryption-user-tab/other-devices.spec.ts :: unverified devices should not be able to decrypt while global blacklist is toggled
 settings/encryption-user-tab/other-devices.spec.ts :: verified devices should be able to decrypt while global blacklist is toggled
-settings/encryption-user-tab/recovery.spec.ts :: should change the recovery key
 settings/encryption-user-tab/recovery.spec.ts :: should setup the recovery key
-settings/general-room-settings-tab.spec.ts :: long address should not cause dialog to overflow
-settings/preferences-user-settings-tab.spec.ts :: should be rendered properly
-settings/quick-settings-menu.spec.ts :: should be rendered properly
-settings/room-settings/room-security-tab.spec.ts :: should disallow changing from public to private if the user cannot alter history
-settings/security-user-settings-tab.spec.ts :: should be able to set an ID server
-sliding-sync/sliding-sync.spec.ts :: should show a favourite DM only in the favourite section
 sliding-sync/sliding-sync.spec.ts :: should show and be able to accept/reject/rescind invites
-sliding-sync/sliding-sync.spec.ts :: should show the right unread notifications
 spaces/threads-activity-centre/threadsActivityCentre.spec.ts :: should order by recency after notification level
 spaces/threads-activity-centre/threadsActivityCentre.spec.ts :: should show a highlight indicator when there is a mention in a thread
 spaces/threads-activity-centre/threadsActivityCentre.spec.ts :: should show a notification indicator when there is a message in a thread
 spaces/threads-activity-centre/threadsActivityCentre.spec.ts :: should show the rooms with unread threads
 spaces/threads-activity-centre/threadsActivityCentre.spec.ts :: should update with a thread is read
-spotlight/spotlight.spec.ts :: should be able to navigate results via keyboard
-spotlight/spotlight.spec.ts :: should find known public rooms
-spotlight/spotlight.spec.ts :: should find unknown public rooms
-spotlight/spotlight.spec.ts :: should find unknown public rooms on other homeservers
-spotlight/spotlight.spec.ts :: should find unknown public world readable rooms
-threads/threads.spec.ts :: can send files
-threads/threads.spec.ts :: navigate through right panel
-threads/threads.spec.ts :: right panel behaves correctly
-threads/threads.spec.ts :: should send location and reply to the location on ThreadView
-timeline/timeline.spec.ts :: should render file size in kibibytes on a file tile
 timeline/timeline.spec.ts :: should show historical profiles if disabled

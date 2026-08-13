@@ -10,7 +10,7 @@ mod get_remote_file;
 mod get_remote_thumbnail;
 mod preview;
 
-use clap::Subcommand;
+use clap::{ArgGroup, Subcommand};
 use ruma::{OwnedEventId, OwnedMxcUri, OwnedServerName};
 use tuwunel_core::Result;
 use url::Url;
@@ -42,6 +42,11 @@ pub(super) enum MediaCommand {
 	/// - Deletes all remote (and optionally local) media created before or
 	///   after [duration] time using filesystem metadata last modified at date.
 	//    This will always ignore errors by default.
+	#[command(group(
+		ArgGroup::new("direction")
+			.required(true)
+			.args(["older_than", "newer_than"]),
+	))]
 	DeleteRange {
 		/// - The relative time (e.g. 30s, 5m, 7d) within which to search
 		duration: String,

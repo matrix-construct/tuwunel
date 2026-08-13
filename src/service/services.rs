@@ -270,6 +270,10 @@ pub async fn poll(&self) -> Result {
 
 #[implement(Services)]
 pub async fn clear_cache(&self) {
+	// Uncorked, every per-key delete in a database-backed cache flushes the
+	// write-ahead log; the rows are reconstructible, so no fsync is owed.
+	let _cork = self.db.cork_and_flush();
+
 	self.services()
 		.stream()
 		.for_each(async |service| {

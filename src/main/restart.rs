@@ -101,9 +101,13 @@ mod tests {
 
 	#[test]
 	fn restore_backup_never_survives() {
-		assert!(stripped(&["--restore-backup"]).is_empty());
-		assert!(stripped(&["--restore-backup", "5"]).is_empty());
-		assert!(stripped(&["--restore-backup=5"]).is_empty());
+		let stripped_bare = stripped(&["--restore-backup"]);
+		let stripped_valued = stripped(&["--restore-backup", "5"]);
+		let stripped_inlined = stripped(&["--restore-backup=5"]);
+
+		assert!(stripped_bare.is_empty(), "{stripped_bare:?}");
+		assert!(stripped_valued.is_empty(), "{stripped_valued:?}");
+		assert!(stripped_inlined.is_empty(), "{stripped_inlined:?}");
 	}
 
 	#[test]

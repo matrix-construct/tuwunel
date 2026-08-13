@@ -20,6 +20,12 @@ for Debian or Ubuntu and `.rpm` packages for Red Hat or Fedora.
 Debian and Ubuntu users can instead install and update Tuwunel through the
 apt repository; see the [Debian guide](debian.md) for setup.
 
+The static binaries do not bundle CA certificates. Federation and every other
+outbound HTTPS request uses the system trust store, so the host needs a CA
+bundle installed (`ca-certificates` on Debian and Ubuntu). When running the
+binary in a minimal image or a chroot, mount the bundle in or set
+`SSL_CERT_FILE` to its path.
+
 For the **best** performance; if using an `x86_64` CPU made in the last ~10 years,
 we recommend using the `-v3-` optimised packages. See below for a command to check
 what your system supports. If the server refuses to start or exits with an "Illegal

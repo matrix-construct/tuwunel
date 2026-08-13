@@ -36,6 +36,11 @@ pub fn reload(old: &Config, new: &Config) -> Result {
 	Ok(())
 }
 
+/// Validates a complete server configuration.
+///
+/// The checks reject incompatible settings and emit warnings for risky or
+/// deprecated choices. Successful validation leaves the configuration
+/// unchanged.
 pub fn check(config: &Config) -> Result {
 	#[cfg(debug_assertions)]
 	warn!("Note: tuwunel was built without optimisations (i.e. debug build)");

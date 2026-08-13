@@ -17,12 +17,24 @@ static USER_AGENT: OnceLock<String> = OnceLock::new();
 
 #[inline]
 #[must_use]
+/// Returns the compiled product branding.
+///
+/// The value is fixed at build time and remains valid for the process lifetime.
+/// It is used wherever a human-readable server name is required.
 pub fn name() -> &'static str { BRANDING }
 
 #[inline]
+/// Returns the detailed compiled version string.
+///
+/// Initialization occurs once on first access. Development builds may include
+/// source-control revision detail in addition to the semantic version.
 pub fn version() -> &'static str { VERSION.get_or_init(init_version) }
 
 #[inline]
+/// Returns the HTTP user-agent value for this build.
+///
+/// Initialization occurs once on first access. The value combines product and
+/// version information into the process-wide client identifier.
 pub fn user_agent() -> &'static str { USER_AGENT.get_or_init(init_user_agent) }
 
 fn init_user_agent() -> String { format!("{}/{}", name(), semantic()) }

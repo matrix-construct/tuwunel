@@ -10,6 +10,11 @@ use tuwunel_core::Result;
 use super::{Cursor, State, slice_longevity};
 use crate::keyval::Key;
 
+/// Streams keys in ascending RocksDB order.
+///
+/// The first poll uses a prepared position or seeks to the first key, while
+/// later polls advance before fetching. The slice borrows cursor storage and
+/// remains valid only until the next cursor movement.
 pub(crate) struct Keys<'a> {
 	state: State<'a>,
 }

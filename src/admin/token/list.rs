@@ -9,6 +9,7 @@ pub(super) async fn list(&self) -> Result {
 		.services
 		.registration_tokens
 		.iterate_tokens()
+		.await
 		.collect()
 		.await;
 

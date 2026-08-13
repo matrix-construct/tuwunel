@@ -1,8 +1,5 @@
+use aws_lc_rs::signature::{self, EcdsaKeyPair, KeyPair};
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD as b64};
-use ring::{
-	rand::SystemRandom,
-	signature::{self, EcdsaKeyPair, KeyPair},
-};
 use serde_json::{Value as JsonValue, json};
 use tuwunel_core::{Result, err};
 
@@ -17,9 +14,8 @@ impl super::Server {
 }
 
 pub(super) fn init_jwk(key_der: &[u8], key_id: &str) -> Result<JsonValue> {
-	let rng = SystemRandom::new();
 	let alg = &signature::ECDSA_P256_SHA256_FIXED_SIGNING;
-	let key_pair = EcdsaKeyPair::from_pkcs8(alg, key_der, &rng)
+	let key_pair = EcdsaKeyPair::from_pkcs8(alg, key_der)
 		.map_err(|e| err!(error!("Failed to load ECDSA key: {e}")))?;
 
 	let public_bytes = key_pair.public_key().as_ref();

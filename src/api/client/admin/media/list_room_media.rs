@@ -110,8 +110,8 @@ mod tests {
 			"info": { "thumbnail_url": "mxc://example.org/xyz" },
 		}));
 
-		assert!(local.is_empty());
-		assert!(remote.is_empty());
+		assert!(local.is_empty(), "{local:?}");
+		assert!(remote.is_empty(), "{remote:?}");
 	}
 
 	#[test]
@@ -122,7 +122,7 @@ mod tests {
 		}));
 
 		assert_eq!(local, ["mxc://example.org/abc"]);
-		assert!(remote.is_empty());
+		assert!(remote.is_empty(), "{remote:?}");
 	}
 
 	#[test]
@@ -132,8 +132,8 @@ mod tests {
 			"info": { "thumbnail_url": "mxc://example.org/has/slash" },
 		}));
 
-		assert!(local.is_empty());
-		assert!(remote.is_empty());
+		assert!(local.is_empty(), "{local:?}");
+		assert!(remote.is_empty(), "{remote:?}");
 	}
 
 	#[test]
@@ -143,7 +143,7 @@ mod tests {
 			"info": { "thumbnail_url": "mxc://remote.example/def" },
 		}));
 
-		assert!(local.is_empty());
+		assert!(local.is_empty(), "{local:?}");
 		assert_eq!(remote, ["mxc://remote.example/def"]);
 	}
 
@@ -157,7 +157,7 @@ mod tests {
 		let (local, remote) = collect_urls(lists, server_name!("example.org"), &content);
 
 		assert_eq!(local, ["mxc://example.org/abc", "mxc://example.org/abc"]);
-		assert!(remote.is_empty());
+		assert!(remote.is_empty(), "{remote:?}");
 	}
 
 	#[test]

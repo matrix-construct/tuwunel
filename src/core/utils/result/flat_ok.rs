@@ -1,5 +1,10 @@
 use super::Result;
 
+/// Flattens optional and fallible values while discarding their original error.
+///
+/// Implementations cover both `Option<Result<T, E>>` and
+/// `Result<Option<T>, E>`. Missing values and errors both become absence before
+/// an optional replacement error is applied.
 pub trait FlatOk<T> {
 	/// Equivalent to .transpose().ok().flatten()
 	fn flat_ok(self) -> Option<T>;

@@ -734,7 +734,9 @@ mod tests {
 
 	#[test]
 	fn error_block_renders_only_when_present() {
-		assert!(error_block(None).is_empty());
+		let block = error_block(None);
+
+		assert!(block.is_empty(), "{block:?}");
 		assert!(error_block(Some("oops")).contains(r#"class="err""#));
 	}
 }

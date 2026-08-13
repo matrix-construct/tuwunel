@@ -5,9 +5,15 @@ use tuwunel_core::{Result, arrayvec::ArrayVec, implement};
 
 use crate::{Handle, keyval::KeyBuf, ser};
 
-/// Fetch a value from the database into cache, returning a reference-handle
-/// asynchronously. The key is serialized into an allocated buffer to perform
-/// the query.
+/// Fetches a serialized key asynchronously using an owned buffer.
+///
+/// The key is encoded with the database serializer before raw lookup. The
+/// returned handle keeps its RocksDB value storage pinned for the handle's
+/// lifetime.
+///
+/// # Panics
+///
+/// Panics if the key cannot be serialized.
 #[implement(super::Map)]
 #[inline]
 pub fn qry<K>(
@@ -21,9 +27,14 @@ where
 	self.bqry(key, &mut buf)
 }
 
-/// Fetch a value from the database into cache, returning a reference-handle
-/// asynchronously. The key is serialized into a fixed-sized buffer to perform
-/// the query. The maximum size is supplied as const generic parameter.
+/// Fetches a serialized key asynchronously using fixed-capacity storage.
+///
+/// `MAX` bounds the complete encoded key without a heap fallback. The returned
+/// handle keeps its RocksDB value storage pinned for the handle's lifetime.
+///
+/// # Panics
+///
+/// Panics if the encoded key exceeds `MAX` or serialization otherwise fails.
 #[implement(super::Map)]
 #[inline]
 pub fn aqry<const MAX: usize, K>(
@@ -37,8 +48,15 @@ where
 	self.bqry(key, &mut buf)
 }
 
-/// Fetch a value from the database into cache, returning a reference-handle
-/// asynchronously. The key is serialized into a user-supplied Writer.
+/// Fetches a serialized key asynchronously using a caller-supplied buffer.
+///
+/// Serialization appends to the supplied buffer, and lookup uses its full
+/// resulting contents. The returned handle keeps its RocksDB value storage
+/// pinned for the handle's lifetime.
+///
+/// # Panics
+///
+/// Panics if the key cannot be serialized.
 #[implement(super::Map)]
 #[tracing::instrument(skip(self, buf), level = "trace")]
 pub fn bqry<K, B>(

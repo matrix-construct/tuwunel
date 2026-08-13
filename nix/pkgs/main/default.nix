@@ -267,6 +267,7 @@ craneLib.buildPackage (
       ''
         export NIX_REDIRECTS="/etc/resolv.conf=${fakeResolvConf}"
         export TUWUNEL_DATABASE_PATH="$(mktemp -d)/smoketest.db"
+        export SSL_CERT_FILE="${pkgsBuildHost.cacert}/etc/ssl/certs/ca-bundle.crt"
       '';
     doCheck = true;
 

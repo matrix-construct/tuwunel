@@ -20,7 +20,7 @@ use tuwunel_core::{
 };
 
 use super::Service;
-use crate::rooms::timeline::RoomMutexGuard;
+use crate::rooms::{state_cache::MembershipUpdate, timeline::RoomMutexGuard};
 
 #[implement(Service)]
 #[async_noinline]
@@ -233,16 +233,16 @@ async fn clear_local_leave(
 	let count = self.services.globals.next_count();
 	self.services
 		.state_cache
-		.update_membership(
+		.update_membership(MembershipUpdate {
 			room_id,
 			user_id,
-			leave_content,
-			user_id,
+			membership_event: leave_content,
+			sender: user_id,
 			last_state,
-			None,
-			true,
-			PduCount::Normal(*count),
-		)
+			invite_via: None,
+			update_joined_count: true,
+			count: PduCount::Normal(*count),
+		})
 		.await
 }
 

@@ -11,14 +11,19 @@ use futures::{
 
 use crate::Result;
 
-/// Synchronous combinators to augment futures::TryStreamExt.
+/// Adds synchronous combinators to fallible streams.
 ///
-/// This interface is not necessarily complete; feel free to add as-needed.
+/// Closures run immediately when a successful item is polled, avoiding an async
+/// block around non-async work. Source errors retain the stream's error type.
 pub trait TryReadyExt<T, E, S>
 where
 	S: TryStream<Ok = T, Error = E, Item = Result<T, E>> + ?Sized,
 	Self: TryStream + Sized,
 {
+	/// Applies a synchronous fallible transform to successful items.
+	///
+	/// Existing source errors bypass `f`. Successful transformed values and
+	/// closure errors remain in source order.
 	fn ready_and_then<U, F>(
 		self,
 		f: F,
@@ -26,6 +31,10 @@ where
 	where
 		F: Fn(S::Ok) -> Result<U, E>;
 
+	/// Retains successful items accepted by a synchronous predicate.
+	///
+	/// The predicate borrows only successful values. Source errors pass through
+	/// without invoking it.
 	fn ready_try_filter<F>(
 		self,
 		f: F,
@@ -33,6 +42,10 @@ where
 	where
 		F: Fn(&S::Ok) -> bool;
 
+	/// Maps successful items through a synchronous fallible filter.
+	///
+	/// `Ok(Some(value))` yields a value and `Ok(None)` discards the item.
+	/// Source errors and closure errors remain in the result stream.
 	fn ready_try_filter_map<F, U>(
 		self,
 		f: F,
@@ -44,6 +57,10 @@ where
 	where
 		F: Fn(S::Ok) -> Result<Option<U>, E>;
 
+	/// Folds successful items with a synchronous fallible accumulator.
+	///
+	/// Folding begins from `init` and processes values in source order. A
+	/// source or closure error ends the returned future with that error.
 	fn ready_try_fold<U, F>(
 		self,
 		init: U,
@@ -52,6 +69,10 @@ where
 	where
 		F: Fn(U, S::Ok) -> Result<U, E>;
 
+	/// Folds successful items from `U::default()` with a fallible accumulator.
+	///
+	/// Values are processed in source order. An empty stream returns the
+	/// default, while a source or closure error ends the fold.
 	fn ready_try_fold_default<U, F>(
 		self,
 		f: F,
@@ -60,6 +81,10 @@ where
 		F: Fn(U, S::Ok) -> Result<U, E>,
 		U: Default;
 
+	/// Applies a synchronous fallible closure to each successful item.
+	///
+	/// Values are processed in source order. A source or closure error ends the
+	/// returned future before later items are visited.
 	fn ready_try_for_each<F>(
 		self,
 		f: F,
@@ -67,6 +92,11 @@ where
 	where
 		F: FnMut(S::Ok) -> Result<(), E>;
 
+	/// Skips leading successful items accepted by a fallible predicate.
+	///
+	/// The first false item and later items are yielded without further
+	/// predicate calls. Source and predicate errors remain in the result
+	/// stream.
 	fn ready_try_skip_while<F>(
 		self,
 		f: F,
@@ -74,6 +104,11 @@ where
 	where
 		F: Fn(&S::Ok) -> Result<bool, E>;
 
+	/// Yields leading successful items accepted by a fallible predicate.
+	///
+	/// The first false item ends the stream and is not yielded. Source and
+	/// predicate errors are yielded without terminating the adapter, and a
+	/// predicate error discards the tested item.
 	fn ready_try_take_while<F>(
 		self,
 		f: F,

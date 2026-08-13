@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use futures::{FutureExt, StreamExt, TryFutureExt, TryStreamExt, future::try_join};
-use ruma::{OwnedEventId, RoomId, RoomVersionId};
+use ruma::{EventId, OwnedEventId, RoomId, RoomVersionId};
 use tuwunel_core::{
 	Result, apply, debug, debug_warn, err, implement,
 	matrix::Event,
@@ -15,7 +15,7 @@ use tuwunel_core::{
 };
 
 use crate::rooms::{
-	short::ShortStateHash,
+	short::{ShortStateHash, ShortStateKey},
 	state_res::{AuthSet, StateMap},
 };
 
@@ -227,39 +227,63 @@ where
 		"leaf state after event"
 	);
 
-	self.fork_state_and_chain(room_id, room_version, &leaf_state_after_event)
-		.await
+	let state = leaf_state_after_event
+		.iter()
+		.map(|(shortstatekey, event_id)| (*shortstatekey, event_id));
+
+	let starting_events = leaf_state_after_event
+		.iter()
+		.map(ref_at!(1))
+		.map(AsRef::as_ref);
+
+	try_join(
+		self.fork_state(state).map(Ok),
+		self.fork_chain(room_id, room_version, starting_events),
+	)
+	.await
 }
 
-/// Typed fork input and full auth chain for one fork branch whose state is
-/// the given (shortstatekey, event_id) pairs. A later duplicate key wins.
+/// Converts one fork branch from short state keys to typed state keys.
+///
+/// A later duplicate state key replaces an earlier entry. Short state key
+/// lookup failures are omitted.
 #[implement(super::Service)]
-pub(super) async fn fork_state_and_chain(
-	&self,
-	room_id: &RoomId,
-	room_version: &RoomVersionId,
-	state: &[(u64, OwnedEventId)],
-) -> Result<(StateMap<OwnedEventId>, AuthSet<OwnedEventId>)> {
-	let starting_events = state.iter().map(ref_at!(1)).map(AsRef::as_ref);
-
-	let auth_chain = self
-		.services
-		.auth_chain
-		.event_ids_iter(room_id, room_version, starting_events)
-		.try_collect();
-
-	let fork_state = state
-		.iter()
+pub(super) async fn fork_state<'a, State>(&'a self, state: State) -> StateMap<OwnedEventId>
+where
+	State: Iterator<Item = (ShortStateKey, &'a OwnedEventId)> + Send + 'a,
+{
+	state
 		.stream()
 		.wide_then(|(k, id)| {
 			self.services
 				.short
-				.get_statekey_from_short(*k)
+				.get_statekey_from_short(k)
 				.map_ok(|(ty, sk)| ((ty, sk), id.clone()))
 		})
 		.ready_filter_map(Result::ok)
 		.collect()
-		.map(Ok);
+		.await
+}
 
-	try_join(fork_state, auth_chain).await
+/// Collects the full auth chain for one fork branch.
+///
+/// The ids are distinct as [`AuthSet::from_distinct`] requires: the chain
+/// walk dedups short ids and the short-to-event-id mapping is injective.
+/// Iteration order is arbitrary.
+#[implement(super::Service)]
+pub(super) async fn fork_chain<'a, Events>(
+	&'a self,
+	room_id: &'a RoomId,
+	room_version: &'a RoomVersionId,
+	starting_events: Events,
+) -> Result<AuthSet<OwnedEventId>>
+where
+	Events: Iterator<Item = &'a EventId> + Clone + ExactSizeIterator + Send + 'a,
+{
+	self.services
+		.auth_chain
+		.event_ids_iter(room_id, room_version, starting_events)
+		.try_collect()
+		.map_ok(AuthSet::from_distinct)
+		.await
 }

@@ -4,10 +4,10 @@ Tuwunel runs [Complemau](https://github.com/matrix-construct/complement/tree/tuw
 
 ## Counts
 
-- Test groups: 35. Passing: **88.6%**
-  - ✅ `pass`: 31
+- Test groups: 34. Passing: **94.1%**
+  - ✅ `pass`: 32
   - 🟨 `some`: 0
-  - ❌ `fail`: 4
+  - ❌ `fail`: 2
   - ⬛ `skip`: 0
 
 - Subtests: 63. Passing: **96.8%**
@@ -23,7 +23,7 @@ Tuwunel runs [Complemau](https://github.com/matrix-construct/complement/tree/tuw
 | ✅ | – | `ComplemauAppservicePDUInterestRemoteSender` |
 | ✅ | – | `ComplemauAppserviceReceivesOTKCountsAndFallbackKeys` |
 | ❌ | – | `ComplemauAppserviceReceivesPresence` |
-| ❌ | – | `ComplemauAppserviceReceivesReceiptOnce` |
+| ✅ | – | `ComplemauAppserviceReceivesReceiptOnce` |
 | ✅ | – | `ComplemauAppserviceReceivesToDevice` |
 | ✅ | – | `ComplemauAppserviceReceivesTyping` |
 | ✅ | 15/0/0 | `ComplemauAppserviceRegistrationLoginAndMSC4190Devices` |
@@ -47,7 +47,6 @@ Tuwunel runs [Complemau](https://github.com/matrix-construct/complement/tree/tuw
 | ✅ | 2/0/0 | `ComplemauPingRoundTripAndAuthorization` |
 | ✅ | – | `ComplemauReceiptBatchingHasNoLoss` |
 | ✅ | – | `ComplemauToDeviceBurstExcludesUninterestedAppservice` |
-| ❌ | – | `ComplemauToDeviceBurstFansOut` |
 | ✅ | – | `ComplemauToDeviceManyRecipients` |
 | ✅ | – | `ComplemauTransactionBatchCapAndOrdering` |
 | ✅ | – | `ComplemauTransactionDedupAndUniquifier` |

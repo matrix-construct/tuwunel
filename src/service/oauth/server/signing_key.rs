@@ -1,9 +1,6 @@
-use ring::{
-	rand::SystemRandom,
-	signature::{self, EcdsaKeyPair},
-};
+use aws_lc_rs::signature::{self, EcdsaKeyPair};
 use serde::{Deserialize, Serialize};
-use tuwunel_core::{Result, at, err, info, utils};
+use tuwunel_core::{Result, at, err, info, result::AndThenRef, utils};
 use tuwunel_database::{Cbor, Deserialized};
 
 use super::Data;
@@ -45,10 +42,10 @@ pub(super) fn init_signing_key(db: &Data) -> Result<SigningKey> {
 }
 
 fn generate_signing_key() -> Result<SigningKey> {
-	let rng = SystemRandom::new();
 	let alg = &signature::ECDSA_P256_SHA256_FIXED_SIGNING;
 	let key_id = utils::random_string(16);
-	let pkcs8 = EcdsaKeyPair::generate_pkcs8(alg, &rng)
+	let pkcs8 = EcdsaKeyPair::generate(alg)
+		.and_then_ref(EcdsaKeyPair::to_pkcs8v1)
 		.map_err(|e| err!(error!("Failed to generate ECDSA key: {e}")))?;
 
 	Ok(SigningKey { key_der: pkcs8.as_ref().to_vec(), key_id })

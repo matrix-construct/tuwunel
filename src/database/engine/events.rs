@@ -8,6 +8,10 @@ use rocksdb::{
 };
 use tuwunel_core::{Config, debug, debug::INFO_SPAN_LEVEL, debug_info, error, info, warn};
 
+/// Bridges RocksDB background events into structured tracing.
+///
+/// The listener records stalls, compactions, flushes, memtable seals, and
+/// external file ingestion without retaining per-event state.
 pub(super) struct Events;
 
 impl Events {

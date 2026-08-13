@@ -1,7 +1,9 @@
-use std::{fmt::Debug, mem};
+use std::{fmt::Debug, mem::swap};
 
 use bytes::BytesMut;
+use http::Response as HttpResponse;
 use ipaddress::IPAddress;
+use reqwest::{Error as ReqwestError, Response};
 use ruma::api::{
 	IncomingResponse, OutgoingRequest, OutgoingRequestExt, auth_scheme::AuthScheme,
 	path_builder::PathBuilder,
@@ -42,62 +44,65 @@ where
 		}
 	}
 
-	let response = self
+	match self
 		.services
 		.client
 		.pusher
 		.execute(reqwest_request)
-		.await;
-
-	match response {
-		| Ok(mut response) => {
-			// reqwest::Response -> http::Response conversion
-
-			trace!("Checking response destination's IP");
-			if let Some(remote_addr) = response.remote_addr()
-				&& let Ok(ip) = IPAddress::parse(remote_addr.ip().to_string())
-				&& !self.services.client.valid_cidr_range(&ip)
-			{
-				return Err!(BadServerResponse("Not allowed to send requests to this IP"));
-			}
-
-			let status = response.status();
-			let mut http_response_builder = http::Response::builder()
-				.status(status)
-				.version(response.version());
-
-			mem::swap(
-				response.headers_mut(),
-				http_response_builder
-					.headers_mut()
-					.expect("http::response::Builder is usable"),
-			);
-
-			let limit = self.services.config.max_response_size;
-			let body = read_response_capped(response, limit).await?;
-
-			if !status.is_success() {
-				debug_warn!("Push gateway response body: {:?}", string_from_bytes(&body));
-				return Err!(BadServerResponse(warn!(
-					"Push gateway {dest} returned unsuccessful HTTP response: {status}"
-				)));
-			}
-
-			let response = T::IncomingResponse::try_from_http_response(
-				http_response_builder
-					.body(body)
-					.expect("reqwest body is valid http body"),
-			);
-
-			response.map_err(|e| {
-				err!(BadServerResponse(warn!(
-					"Push gateway {dest} returned invalid response: {e}"
-				)))
-			})
-		},
-		| Err(e) => {
-			warn!("Could not send request to pusher {dest}: {e}");
-			Err(e.into())
-		},
+		.await
+	{
+		| Err(error) => handler_err(&dest, error),
+		| Ok(response) => self.handle_ok::<T>(&dest, response).await,
 	}
+}
+
+#[implement(super::Service)]
+async fn handle_ok<T>(&self, dest: &str, mut response: Response) -> Result<T::IncomingResponse>
+where
+	T: OutgoingRequest,
+{
+	trace!("Checking response destination's IP");
+	if let Some(remote_addr) = response.remote_addr()
+		&& let Ok(ip) = IPAddress::parse(remote_addr.ip().to_string())
+		&& !self.services.client.valid_cidr_range(&ip)
+	{
+		return Err!(BadServerResponse("Not allowed to send requests to this IP"));
+	}
+
+	let status = response.status();
+	let mut http_response_builder = HttpResponse::builder()
+		.status(status)
+		.version(response.version());
+
+	swap(
+		response.headers_mut(),
+		http_response_builder
+			.headers_mut()
+			.expect("http::response::Builder is usable"),
+	);
+
+	let limit = self.services.config.max_response_size;
+	let body = read_response_capped(response, limit).await?;
+
+	if !status.is_success() {
+		debug_warn!(body = ?string_from_bytes(&body), "Push gateway response");
+		return Err!(BadServerResponse(warn!(
+			"Push gateway {dest} returned unsuccessful HTTP response: {status}"
+		)));
+	}
+
+	let response = T::IncomingResponse::try_from_http_response(
+		http_response_builder
+			.body(body)
+			.expect("reqwest body is valid http body"),
+	);
+
+	response.map_err(|e| {
+		err!(BadServerResponse(warn!("Push gateway {dest} returned invalid response: {e}")))
+	})
+}
+
+fn handler_err<R>(dest: &str, error: ReqwestError) -> Result<R> {
+	warn!(%dest, %error, "Could not send request to pusher");
+	Err(error.into())
 }

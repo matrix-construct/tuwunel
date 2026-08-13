@@ -12,11 +12,16 @@ use tuwunel_core::{
 	utils::{StreamTools, stream::TryIgnore},
 	warn,
 };
-use tuwunel_database::Ignore;
+use tuwunel_database::{Ignore, Txn};
 
 #[implement(super::Service)]
-#[tracing::instrument(level = "debug", skip(self, servers))]
-pub async fn add_servers_invite_via(&self, room_id: &RoomId, servers: Vec<OwnedServerName>) {
+#[tracing::instrument(level = "debug", skip(self, txn, servers))]
+pub(crate) async fn add_servers_invite_via(
+	&self,
+	txn: &mut Txn,
+	room_id: &RoomId,
+	servers: Vec<OwnedServerName>,
+) {
 	let mut servers: Vec<_> = self
 		.servers_invite_via(room_id)
 		.map(ToOwned::to_owned)
@@ -33,9 +38,7 @@ pub async fn add_servers_invite_via(&self, room_id: &RoomId, servers: Vec<OwnedS
 		.collect_vec()
 		.join(&[0xFF][..]);
 
-	self.db
-		.roomid_inviteviaservers
-		.insert(room_id.as_bytes(), &servers);
+	txn.insert_raw(&self.db.roomid_inviteviaservers, room_id.as_bytes(), &servers);
 }
 
 /// Gets up to five servers that are likely to be in the room in the

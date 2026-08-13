@@ -3,7 +3,15 @@ use serde::Deserialize;
 
 use super::Event;
 
+/// Compares an event's relation type with a requested relation type.
+///
+/// Implementations inspect the `m.relates_to.rel_type` field in event content.
+/// Missing or malformed relation content does not match.
 pub trait RelationTypeEqual<E: Event> {
+	/// Returns whether the event declares this relation type.
+	///
+	/// The comparison deserializes only the relation fields needed for the
+	/// check. Content that cannot be deserialized returns false.
 	fn relation_type_equal(&self, event: &E) -> bool;
 }
 

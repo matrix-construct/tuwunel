@@ -1359,6 +1359,15 @@ impl Service {
 		let (pusher, rules_for_user, suppressed) =
 			try_join3(pusher, rules_for_user, suppressed).await?;
 
+		// Reconciliation, not an alert: a suppressed drop strands a stale badge.
+		if events.contains(&SendingEvent::BadgeRefresh) {
+			self.services
+				.pusher
+				.send_badge_notice(&user_id, &pusher)
+				.map_err(|e| (Destination::Push(user_id.clone(), pushkey.clone()), e))
+				.await?;
+		}
+
 		if suppressed {
 			let queued = self
 				.enqueue_suppressed_push_events(&user_id, &pushkey, &events)
@@ -1379,15 +1388,6 @@ impl Service {
 			pushkey.clone(),
 			"non-suppressed push",
 		);
-
-		if events.contains(&SendingEvent::BadgeRefresh) {
-			let pusher_service = &self.services.pusher;
-
-			pusher_service
-				.send_badge_notice(&user_id, &pusher)
-				.map_err(|e| (Destination::Push(user_id.clone(), pushkey.clone()), e))
-				.await?;
-		}
 
 		if let Some(rules_for_user) = rules_for_user {
 			let _sent = events

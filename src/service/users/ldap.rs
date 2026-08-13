@@ -3,10 +3,11 @@
 use std::{collections::HashMap, time::Duration};
 
 use ldap3::{
-	LdapConnAsync, LdapConnSettings, Scope, SearchEntry, SearchOptions, dn_escape, ldap_escape,
+	Ldap, LdapConnAsync, LdapConnSettings, Scope, SearchEntry, SearchOptions, dn_escape,
+	ldap_escape,
 };
 use ruma::UserId;
-use tokio::fs::read as read_file;
+use tokio::{fs::read as read_file, task::JoinHandle};
 use tuwunel_core::{Result, debug, err, error, implement, result::LogErr, trace};
 
 /// Cap LDAP connection setup so a hung directory cannot pin a login attempt.
@@ -25,33 +26,9 @@ pub async fn search_ldap(&self, user_id: &UserId) -> Result<Vec<(String, bool)>>
 	let localpart = user_id.localpart().to_owned();
 	let lowercased_localpart = localpart.to_lowercase();
 
-	let config = &self.services.server.config.ldap;
-	let uri = config
-		.uri
-		.as_ref()
-		.ok_or_else(|| err!(Ldap(error!("LDAP URI is not configured."))))?;
+	let config = &self.services.config.ldap;
 
-	if uri.scheme().starts_with("ldaps") {
-		self.services.globals.init_rustls_provider()?;
-	}
-
-	debug!(?uri, "LDAP creating connection...");
-	let (conn, mut ldap) = LdapConnAsync::with_settings(
-		LdapConnSettings::new().set_conn_timeout(CONN_TIMEOUT),
-		uri.as_str(),
-	)
-	.await
-	.map_err(|e| {
-		error!(?user_id, %e, "LDAP connection setup error");
-		err!(Ldap("LDAP connection failed"))
-	})?;
-
-	let driver = self.services.server.runtime().spawn(async move {
-		match conn.drive().await {
-			| Err(e) => error!("LDAP connection error: {e}"),
-			| Ok(()) => debug!("LDAP connection completed."),
-		}
-	});
+	let (driver, mut ldap) = self.ldap_connect().await?;
 
 	match (&config.bind_dn, &config.bind_password_file) {
 		| (Some(bind_dn), Some(bind_password_file)) => {
@@ -158,33 +135,7 @@ pub async fn auth_ldap(&self, user_dn: &str, password: &str) -> Result {
 		)))));
 	}
 
-	let config = &self.services.server.config.ldap;
-	let uri = config
-		.uri
-		.as_ref()
-		.ok_or_else(|| err!(Ldap(error!("LDAP URI is not configured."))))?;
-
-	if uri.scheme().starts_with("ldaps") {
-		self.services.globals.init_rustls_provider()?;
-	}
-
-	debug!(?uri, "LDAP creating connection...");
-	let (conn, mut ldap) = LdapConnAsync::with_settings(
-		LdapConnSettings::new().set_conn_timeout(CONN_TIMEOUT),
-		uri.as_str(),
-	)
-	.await
-	.map_err(|e| {
-		error!(?user_dn, %e, "LDAP connection setup error");
-		err!(Ldap("LDAP connection failed"))
-	})?;
-
-	let driver = self.services.server.runtime().spawn(async move {
-		match conn.drive().await {
-			| Err(e) => error!("LDAP connection error: {e}"),
-			| Ok(()) => debug!("LDAP connection completed."),
-		}
-	});
+	let (driver, mut ldap) = self.ldap_connect().await?;
 
 	ldap.simple_bind(user_dn, password)
 		.await
@@ -202,6 +153,46 @@ pub async fn auth_ldap(&self, user_dn: &str, password: &str) -> Result {
 	driver.await.log_err().ok();
 
 	Ok(())
+}
+
+#[implement(super::Service)]
+async fn ldap_connect(&self) -> Result<(JoinHandle<()>, Ldap)> {
+	let uri = self
+		.services
+		.config
+		.ldap
+		.uri
+		.as_ref()
+		.ok_or_else(|| err!(Ldap(error!("LDAP URI is not configured."))))?;
+
+	if uri.scheme().starts_with("ldaps") {
+		self.services.globals.init_rustls_provider()?;
+	}
+
+	let settings = LdapConnSettings::new()
+		.set_conn_timeout(CONN_TIMEOUT)
+		.set_no_tls_verify(
+			self.services
+				.config
+				.allow_invalid_tls_certificates,
+		);
+
+	debug!(?uri, "LDAP creating connection...");
+	let (conn, ldap) = LdapConnAsync::from_url_with_settings(settings, uri)
+		.await
+		.map_err(|e| {
+			error!(%e, "LDAP connection setup error");
+			err!(Ldap("LDAP connection failed"))
+		})?;
+
+	let driver = self.services.server.runtime().spawn(async move {
+		match conn.drive().await {
+			| Err(e) => error!("LDAP connection error: {e}"),
+			| Ok(()) => debug!("LDAP connection completed."),
+		}
+	});
+
+	Ok((driver, ldap))
 }
 
 /// Builds the user bind DN by substituting the escaped localpart into the

@@ -7,6 +7,10 @@ use serde_json::to_string as to_json_string;
 use super::super::{MAX_AUTH_EVENTS, MAX_PDU_BYTES, MAX_PREV_EVENTS, Pdu};
 use crate::{Err, Result, err};
 
+/// Verifies that a parsed PDU belongs to the expected room.
+///
+/// The comparison uses the room ID retained in the stored representation. A
+/// mismatch is reported as an invalid request parameter.
 pub fn check_room_id(pdu: &Pdu, room_id: &RoomId) -> Result {
 	if pdu.room_id != room_id {
 		return Err!(Request(InvalidParam(error!(

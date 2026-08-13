@@ -26,6 +26,7 @@ use tuwunel_core::{
 	warn,
 };
 use tuwunel_database::{Deserialized, Ignore, Interfix, Map};
+pub use update::{MembershipUpdate, StrippedRoomState};
 
 use crate::appservice::RegistrationInfo;
 
@@ -717,14 +718,15 @@ pub async fn is_left(&self, user_id: &UserId, room_id: &RoomId) -> bool {
 #[tracing::instrument(skip(self), level = "trace")]
 pub async fn delete_room_join_counts(&self, room_id: &RoomId, force: bool) -> Result {
 	let prefix = (room_id, Interfix);
+	let mut txn = self.services.db.txn();
 
-	self.db.roomid_knockedcount.remove(room_id);
+	txn.del_raw(&self.db.roomid_knockedcount, room_id);
 
-	self.db.roomid_invitedcount.remove(room_id);
+	txn.del_raw(&self.db.roomid_invitedcount, room_id);
 
-	self.db.roomid_inviteviaservers.remove(room_id);
+	txn.del_raw(&self.db.roomid_inviteviaservers, room_id);
 
-	self.db.roomid_joinedcount.remove(room_id);
+	txn.del_raw(&self.db.roomid_joinedcount, room_id);
 
 	self.db
 		.roomserverids
@@ -732,11 +734,12 @@ pub async fn delete_room_join_counts(&self, room_id: &RoomId, force: bool) -> Re
 		.ignore_err()
 		.ready_for_each(|key: (&RoomId, &ServerName)| {
 			trace!("Removing key: {key:?}");
-			self.db.roomserverids.del(key);
+			txn.del(&self.db.roomserverids, key);
 
 			let reverse_key = (key.1, key.0);
+
 			trace!("Removing reverse key: {reverse_key:?}");
-			self.db.serverroomids.del(reverse_key);
+			txn.del(&self.db.serverroomids, reverse_key);
 		})
 		.await;
 
@@ -746,11 +749,12 @@ pub async fn delete_room_join_counts(&self, room_id: &RoomId, force: bool) -> Re
 		.ignore_err()
 		.ready_for_each(|key: (&RoomId, &UserId)| {
 			trace!("Removing key: {key:?}");
-			self.db.roomuserid_invitecount.del(key);
+			txn.del(&self.db.roomuserid_invitecount, key);
 
 			let reverse_key = (key.1, key.0);
+
 			trace!("Removing reverse key: {reverse_key:?}");
-			self.db.userroomid_invitestate.del(reverse_key);
+			txn.del(&self.db.userroomid_invitestate, reverse_key);
 		})
 		.await;
 
@@ -760,11 +764,12 @@ pub async fn delete_room_join_counts(&self, room_id: &RoomId, force: bool) -> Re
 		.ignore_err()
 		.ready_for_each(|key: (&RoomId, &UserId)| {
 			trace!("Removing key: {key:?}");
-			self.db.roomuserid_joinedcount.del(key);
+			txn.del(&self.db.roomuserid_joinedcount, key);
 
 			let reverse_key = (key.1, key.0);
+
 			trace!("Removing reverse key: {reverse_key:?}");
-			self.db.userroomid_joinedcount.del(reverse_key);
+			txn.del(&self.db.userroomid_joinedcount, reverse_key);
 		})
 		.await;
 
@@ -774,11 +779,12 @@ pub async fn delete_room_join_counts(&self, room_id: &RoomId, force: bool) -> Re
 		.ignore_err()
 		.ready_for_each(|key: (&RoomId, &UserId)| {
 			trace!("Removing key: {key:?}");
-			self.db.roomuserid_knockedcount.del(key);
+			txn.del(&self.db.roomuserid_knockedcount, key);
 
 			let reverse_key = (key.1, key.0);
+
 			trace!("Removing reverse key: {reverse_key:?}");
-			self.db.userroomid_knockedstate.del(reverse_key);
+			txn.del(&self.db.userroomid_knockedstate, reverse_key);
 		})
 		.await;
 
@@ -791,13 +797,16 @@ pub async fn delete_room_join_counts(&self, room_id: &RoomId, force: bool) -> Re
 		})
 		.ready_for_each(|key: (&RoomId, &UserId)| {
 			trace!("Removing key: {key:?}");
-			self.db.roomuserid_leftcount.del(key);
+			txn.del(&self.db.roomuserid_leftcount, key);
 
 			let reverse_key = (key.1, key.0);
+
 			trace!("Removing reverse key: {reverse_key:?}");
-			self.db.userroomid_leftstate.del(reverse_key);
+			txn.del(&self.db.userroomid_leftstate, reverse_key);
 		})
 		.await;
+
+	txn.execute();
 
 	Ok(())
 }

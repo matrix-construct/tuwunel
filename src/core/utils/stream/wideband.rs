@@ -6,13 +6,19 @@ use futures::stream::{Stream, StreamExt};
 
 use super::{ReadyExt, automatic_width};
 
-/// Concurrency extensions to augment futures::StreamExt. wideband_ combinators
-/// produce in-order.
+/// Adds bounded concurrent transformations that preserve stream order.
+///
+/// Multiple item futures may run ahead of downstream demand. Completed outputs
+/// are held until every earlier input has produced its output.
 pub trait WidebandExt<Item>
 where
 	Self: Stream<Item = Item> + Send + Sized,
 {
-	/// Concurrent filter_map(); ordered results
+	/// Maps and filters items concurrently with an explicit width.
+	///
+	/// `n` limits in-flight item futures, while `None` selects the automatic
+	/// width; an explicit zero cannot make progress. Present outputs retain
+	/// source order and absent outputs are omitted.
 	fn widen_filter_map<F, Fut, U, N>(self, n: N, f: F) -> impl Stream<Item = U> + Send
 	where
 		N: Into<Option<usize>>,
@@ -20,6 +26,11 @@ where
 		Fut: Future<Output = Option<U>> + Send,
 		U: Send;
 
+	/// Maps items concurrently with an explicit width while preserving order.
+	///
+	/// `n` limits in-flight item futures, while `None` selects the automatic
+	/// width; an explicit zero cannot make progress. Item futures may run
+	/// ahead, but outputs retain source order.
 	fn widen_then<F, Fut, U, N>(self, n: N, f: F) -> impl Stream<Item = U> + Send
 	where
 		N: Into<Option<usize>>,
@@ -27,6 +38,10 @@ where
 		Fut: Future<Output = U> + Send,
 		U: Send;
 
+	/// Maps and filters items concurrently with the automatic width.
+	///
+	/// Present outputs retain source order even when their futures complete out
+	/// of order. Absent outputs are omitted.
 	#[inline]
 	fn wide_filter_map<F, Fut, U>(self, f: F) -> impl Stream<Item = U> + Send
 	where
@@ -37,6 +52,10 @@ where
 		self.widen_filter_map(None, f)
 	}
 
+	/// Maps items concurrently with the automatic width while preserving order.
+	///
+	/// Item futures may run ahead of downstream demand. Completed outputs wait
+	/// for every earlier input before being yielded.
 	#[inline]
 	fn wide_then<F, Fut, U>(self, f: F) -> impl Stream<Item = U> + Send
 	where

@@ -6,10 +6,16 @@ use tuwunel_core::{
 	utils::stream::{ReadyExt, TryIgnore},
 };
 
-/// Delete every key under `prefix`. !!! USE WITH CAUTION !!!
+/// Deletes every key visible under a serialized prefix.
 ///
-/// Operates on a snapshot taken when invoked; data written during or after the
-/// call may be missed. Mirrors the borrowed-cursor delete of `for_clear`.
+/// The operation scans a consistent iterator view, so later writes can remain.
+/// When debug assertions are disabled, scan errors are filtered after any
+/// preceding keys have been removed.
+///
+/// # Panics
+///
+/// Panics if the prefix cannot be serialized, a scan error occurs with debug
+/// assertions enabled, RocksDB rejects a deletion, or an uncorked flush fails.
 #[implement(super::Map)]
 #[tracing::instrument(level = "trace", skip(self))]
 pub async fn del_prefix<P>(self: &Arc<Self>, prefix: &P)

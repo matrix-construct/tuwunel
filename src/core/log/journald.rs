@@ -233,6 +233,11 @@ fn boundary(message: &[u8], len: usize) -> usize {
 }
 
 impl<L> Fields<L> {
+	/// Wraps a subscriber layer with optional native journal field recording.
+	///
+	/// Events always continue through the inner layer. Structured field
+	/// submission is enabled only when the supplied configuration selects the
+	/// journal.
 	pub fn new(inner: L, config: &Config) -> Self { Self { inner, submit: enabled(config) } }
 }
 

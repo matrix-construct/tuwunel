@@ -32,4 +32,8 @@ pub use self::{
 	unwrap_or_err::UnwrapOrErr,
 };
 
+/// Standard result type for core operations.
+///
+/// The success type defaults to `()`, while the error type defaults to the
+/// crate's [`crate::Error`]. Callers may override either type parameter.
 pub type Result<T = (), E = crate::Error> = std::result::Result<T, E>;

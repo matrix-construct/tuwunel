@@ -4,6 +4,10 @@ use serde::de::{Deserializer, Error, Visitor};
 
 struct ToLowercase;
 
+/// Deserializes a string and converts it to Unicode lowercase.
+///
+/// The adapter applies [`str::to_lowercase`] to the deserialized value. This is
+/// ordinary lowercasing rather than full Unicode case folding.
 #[inline]
 pub fn to_lowercase<'de, D>(deserializer: D) -> Result<String, D::Error>
 where

@@ -33,6 +33,7 @@ use tuwunel_database::{Deserialized, Ignore, Interfix, Map, Txn};
 use crate::{
 	rooms::{
 		short::{ShortEventId, ShortStateHash, ShortStateKey},
+		state_cache::MembershipUpdate,
 		state_compressor::{CompressedState, parse_compressed_state_event},
 		state_res::{StateMap, auth_types_for_event},
 	},
@@ -136,16 +137,16 @@ pub async fn force_state(
 				let count = self.services.globals.next_count();
 				self.services
 					.state_cache
-					.update_membership(
+					.update_membership(MembershipUpdate {
 						room_id,
-						&user_id,
+						user_id: &user_id,
 						membership_event,
-						&pdu.sender,
-						None,
-						None,
-						false,
-						PduCount::Normal(*count),
-					)
+						sender: &pdu.sender,
+						last_state: None,
+						invite_via: None,
+						update_joined_count: false,
+						count: PduCount::Normal(*count),
+					})
 					.await
 			},
 			| _ => Ok(()),

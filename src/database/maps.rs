@@ -5,15 +5,39 @@ use tuwunel_core::Result;
 
 use crate::{
 	Engine, Map,
-	engine::descriptor::{self, CacheDisp, Descriptor},
+	engine::descriptor::{
+		self, CacheDisp, Descriptor, RANDOM_SMALL as PRIVATE_READ_SYNC_DESCRIPTOR,
+	},
 };
 
+/// Indexes opened logical maps by column-family name.
+///
+/// Keys are static names from the descriptor catalog, and values share each
+/// opened [`Map`] through an `Arc`. Dropped or unavailable families are absent.
 pub(super) type Maps = BTreeMap<MapsKey, MapsVal>;
+
+/// Names a column family in the map catalog.
+///
+/// Catalog names have static lifetime because descriptors are process-wide
+/// constants.
 pub(super) type MapsKey = &'static str;
+
+/// Holds a shared logical map opened from a catalog descriptor.
+///
+/// The shared handle keeps the map and its database engine alive for every
+/// service that uses the catalog entry.
 pub(super) type MapsVal = Arc<Map>;
 
+/// Opens every configured map in the built-in catalog.
+///
+/// The returned index contains only descriptors that are live and present in
+/// the opened database. Individual map handles share the supplied engine.
 pub(super) fn open(engine: &Arc<Engine>) -> Result<Maps> { open_list(engine, MAPS) }
 
+/// Opens maps from an explicit descriptor list.
+///
+/// Dropped descriptors and column families missing from the engine are skipped.
+/// Any failure to open a retained map aborts construction of the index.
 #[tracing::instrument(name = "maps", level = "debug", skip_all)]
 pub(super) fn open_list(engine: &Arc<Engine>, maps: &[Descriptor]) -> Result<Maps> {
 	maps.iter()
@@ -23,6 +47,11 @@ pub(super) fn open_list(engine: &Arc<Engine>, maps: &[Descriptor]) -> Result<Map
 		.collect()
 }
 
+/// Defines the built-in column-family catalog and its RocksDB tuning.
+///
+/// Each descriptor names one logical map and inherits a workload preset with
+/// optional per-map overrides. Dropped descriptors remain as migration
+/// tombstones but are not opened for use.
 pub(super) static MAPS: &[Descriptor] = &[
 	Descriptor {
 		name: "alias_roomid",
@@ -357,6 +386,12 @@ pub(super) static MAPS: &[Descriptor] = &[
 	Descriptor {
 		name: "roomuserid_privateread",
 		..descriptor::RANDOM_SMALL
+	},
+	// Aliased: importing RANDOM_SMALL unaliased makes every qualified sibling
+	// an unused_qualifications error.
+	Descriptor {
+		name: "roomuserid_privatereadsync",
+		..PRIVATE_READ_SYNC_DESCRIPTOR
 	},
 	Descriptor {
 		name: "roomuseroncejoinedids",

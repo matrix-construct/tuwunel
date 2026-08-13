@@ -24,7 +24,11 @@ use tuwunel_core::utils::string::EMPTY;
 
 use super::cf_opts::SENTINEL_COMPRESSION_LEVEL;
 
-/// Column Descriptor
+/// Describes a column family and its RocksDB tuning.
+///
+/// Catalog entries inherit workload presets and override fields for their key,
+/// value, cache, compaction, and compression characteristics. Lifecycle flags
+/// identify families retained only for compatibility or removal.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Descriptor {
 	pub(crate) name: &'static str,
@@ -60,7 +64,10 @@ pub(crate) struct Descriptor {
 	pub(crate) auto_readahead_max: usize,
 }
 
-/// Cache Disposition
+/// Selects block-cache ownership for a column family.
+///
+/// A family can own a unique cache, join the global shared pool, or pair its
+/// cache with one named family.
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum CacheDisp {
 	Unique,

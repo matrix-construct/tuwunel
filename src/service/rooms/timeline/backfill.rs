@@ -476,17 +476,17 @@ fn prepend_backfill_pdu(
 	origin_server_ts: u64,
 	json: &CanonicalJsonObject,
 ) {
-	self.db.pduid_pdu.raw_put(pdu_id, Json(json));
+	let mut txn = self.db.db.txn();
 
-	self.db.eventid_pduid.insert(event_id, pdu_id);
-
-	self.db.eventid_outlierpdu.remove(event_id);
+	txn.raw_put(&self.db.pduid_pdu, pdu_id, Json(json));
+	txn.insert_raw(&self.db.eventid_pduid, event_id, pdu_id);
+	txn.del_raw(&self.db.eventid_outlierpdu, event_id);
 
 	let count_key = bias_count(pdu_id.count());
+	let key = (room_id, origin_server_ts, count_key);
+	txn.put_raw(&self.db.roomid_tscount_pducount, key, pdu_id.count());
 
-	self.db
-		.roomid_tscount_pducount
-		.put_raw((room_id, origin_server_ts, count_key), pdu_id.count());
+	txn.execute();
 }
 
 #[cfg(test)]

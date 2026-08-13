@@ -8,7 +8,7 @@ use tuwunel::{Args, Runtime, Server, async_run, async_start, async_stop};
 use tuwunel_core::{
 	Err, Result,
 	ruma::{
-		EventId, MilliSecondsSinceUnixEpoch, RoomId, UserId, event_id,
+		EventId, MilliSecondsSinceUnixEpoch, OwnedRoomId, RoomId, UserId, event_id,
 		events::receipt::{
 			Receipt, ReceiptEvent, ReceiptEventContent, ReceiptThread, ReceiptType,
 		},
@@ -17,6 +17,8 @@ use tuwunel_core::{
 	utils::ReadyExt,
 };
 use tuwunel_service::{Services, rooms::read_receipt::PrivateRead};
+
+const PRIVATE_READ_MIRROR: &str = "roomuserid_privatereadsync";
 
 struct DatabasePath(PathBuf);
 
@@ -68,6 +70,7 @@ async fn exercise(services: &Services) -> Result {
 		.await;
 
 	let after_store = receipt_counts(services, room).await;
+
 	let replayed = receipts
 		.readreceipt_update(user, room, &first)
 		.await;
@@ -158,6 +161,11 @@ async fn private_read_unannounced(services: &Services, room: &RoomId, user: &Use
 		.last_privateread_update(user, room)
 		.await;
 
+	let (published_before, _) = services
+		.read_receipt
+		.private_read_sync_get_count(room, user)
+		.await?;
+
 	let stored = set_private_read(services, room, user, 7, false).await;
 	let after = services
 		.read_receipt
@@ -169,12 +177,177 @@ async fn private_read_unannounced(services: &Services, room: &RoomId, user: &Use
 		.private_read_get_count(room, user)
 		.await?;
 
+	let (published_after, _) = services
+		.read_receipt
+		.private_read_sync_get_count(room, user)
+		.await?;
+
 	if !stored || position != 7 {
 		return Err!("unannounced private marker did not store its position");
 	}
 
 	if after != before {
 		return Err!("unannounced private marker moved the update token");
+	}
+
+	if published_after != published_before {
+		return Err!("unannounced private marker changed the announced snapshot");
+	}
+
+	let announced = set_private_read(services, room, user, 8, true).await;
+	let (published, _) = services
+		.read_receipt
+		.private_read_sync_get_count(room, user)
+		.await?;
+
+	if !announced || published != 8 {
+		return Err!("announced private marker did not advance the sync snapshot");
+	}
+
+	private_read_premirror(services, room, user).await
+}
+
+/// A database predating the announced mirror holds gate rows with no mirror
+/// rows.
+///
+/// The bounded reader must fall back to the active state rather than fail the
+/// room range until the next announced write. A marker naming a resolvable
+/// event is served; one naming an unknown event is skipped, not an error.
+async fn private_read_premirror(services: &Services, room: &RoomId, user: &UserId) -> Result {
+	// Prime the short room id so the fallible reader can resolve the room.
+	services
+		.short
+		.get_or_create_shortroomid(room)
+		.await;
+
+	let gate = services
+		.read_receipt
+		.last_privateread_update(user, room)
+		.await;
+
+	let mirror = &services.db[PRIVATE_READ_MIRROR];
+
+	mirror.del((room, user));
+	mirror.del((room, user, ""));
+
+	let events = services
+		.read_receipt
+		.private_read_get_fallible(room, user, gate)
+		.await?;
+
+	if !events.is_empty() {
+		return Err!("pre-mirror fallback should skip markers without a resolvable event");
+	}
+
+	let (admin_room, position) = admin_room_head(services).await?;
+
+	if !set_private_read(services, &admin_room, user, position, true).await {
+		return Err!("admin-room private marker did not store");
+	}
+
+	let gate = services
+		.read_receipt
+		.last_privateread_update(user, &admin_room)
+		.await;
+
+	mirror.del((&admin_room, user));
+	mirror.del((&admin_room, user, ""));
+
+	let served = services
+		.read_receipt
+		.private_read_get_fallible(&admin_room, user, gate)
+		.await?;
+
+	if served.len() != 1 {
+		return Err!("pre-mirror fallback did not serve the active marker");
+	}
+
+	private_read_dangling(services, room, user).await
+}
+
+async fn private_read_dangling(services: &Services, room: &RoomId, user: &UserId) -> Result {
+	if !set_private_read(services, room, user, 9, true).await {
+		return Err!("announced marker naming a fake event did not store");
+	}
+
+	let gate = services
+		.read_receipt
+		.last_privateread_update(user, room)
+		.await;
+
+	let empty = services
+		.read_receipt
+		.private_read_get_fallible(room, user, gate)
+		.await?;
+
+	if !empty.is_empty() {
+		return Err!("a fully dangling mirror did not serve an empty snapshot");
+	}
+
+	let dangler = user_id!("@receipt-dangling:localhost");
+	let (admin_room, position) = admin_room_head(services).await?;
+
+	if !set_private_read(services, &admin_room, dangler, position, true).await {
+		return Err!("private marker naming a real event did not store");
+	}
+
+	// A position no PDU occupies; the global counter is nowhere near it.
+	let stored = services
+		.read_receipt
+		.private_read_set(PrivateRead {
+			room_id: &admin_room,
+			user_id: dangler,
+			count: u64::MAX / 2,
+			ts: MilliSecondsSinceUnixEpoch::now(),
+			thread: &ReceiptThread::Main,
+			announce: true,
+		})
+		.await;
+
+	if !stored {
+		return Err!("private marker naming a missing event did not store");
+	}
+
+	let update = services
+		.read_receipt
+		.last_privateread_update(dangler, &admin_room)
+		.await;
+
+	let served = services
+		.read_receipt
+		.private_read_get_fallible(&admin_room, dangler, update)
+		.await?;
+
+	if served.len() != 1 {
+		return Err!("dangling marker was not skipped from the announced snapshot");
+	}
+
+	if !served[0].json().get().contains("m.read.private") {
+		return Err!("served snapshot is not a private read receipt");
+	}
+
+	let stale = services
+		.read_receipt
+		.private_read_get_fallible(&admin_room, dangler, update.saturating_sub(1))
+		.await;
+
+	if !stale.is_err_and(|error| !error.is_not_found()) {
+		return Err!("stale update token did not fail the range");
+	}
+
+	let mirror = &services.db[PRIVATE_READ_MIRROR];
+
+	mirror.put((&admin_room, dangler, "not-a-thread"), (1_u64, 1_u64));
+
+	let undecodable = services
+		.read_receipt
+		.private_read_get_fallible(&admin_room, dangler, update)
+		.await;
+
+	mirror.del((&admin_room, dangler, "not-a-thread"));
+
+	if !undecodable.is_err_and(|error| !error.is_not_found()) {
+		return Err!("undecodable mirror row did not fail the range");
 	}
 
 	Ok(())
@@ -198,4 +371,15 @@ async fn set_private_read(
 			announce,
 		})
 		.await
+}
+
+async fn admin_room_head(services: &Services) -> Result<(OwnedRoomId, u64)> {
+	let room = services.admin.get_admin_room().await?;
+	let position = services
+		.timeline
+		.last_timeline_count(None, &room, None)
+		.await?
+		.into_unsigned();
+
+	Ok((room, position))
 }

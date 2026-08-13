@@ -4,6 +4,15 @@ use rocksdb::ColumnFamily;
 
 use crate::Engine;
 
+/// Acquires a stable column-family handle for a map.
+///
+/// The returned handle erases the engine-borrow lifetime carried by RocksDB.
+/// Its caller must retain the engine until after the handle is dropped, which
+/// `Map` guarantees by field ownership.
+///
+/// # Panics
+///
+/// Panics if the column family was not described before the engine opened.
 pub(super) fn open(engine: &Arc<Engine>, name: &str) -> Arc<ColumnFamily> {
 	let bounded_arc = engine.cf(name);
 	let bounded_ptr = Arc::into_raw(bounded_arc);

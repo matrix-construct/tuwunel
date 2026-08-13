@@ -14,7 +14,7 @@ use tuwunel_core::{
 	Err, Result, at, implement,
 	utils::stream::{IterStream, ReadyExt, TryExpect},
 };
-use tuwunel_database::{Cbor, Deserialized, Ignore, Map};
+use tuwunel_database::{Cbor, Database, Deserialized, Ignore, Map};
 use url::Url;
 
 use super::{Provider, Providers, UserInfo, unique_id};
@@ -31,6 +31,7 @@ struct Data {
 	oauthid_session: Arc<Map>,
 	oauthuniqid_oauthid: Arc<Map>,
 	userid_oauthid: Arc<Map>,
+	database: Arc<Database>,
 }
 
 /// Persistent state for one upstream OAuth authorization.
@@ -116,11 +117,15 @@ pub(super) fn build(args: &crate::Args<'_>, providers: Arc<Providers>) -> Self {
 			oauthid_session: args.db["oauthid_session"].clone(),
 			oauthuniqid_oauthid: args.db["oauthuniqid_oauthid"].clone(),
 			userid_oauthid: args.db["userid_oauthid"].clone(),
+			database: args.db.clone(),
 		},
 	}
 }
 
 /// Delete database state for the session.
+///
+/// The canonical session and every association index that still refers to it
+/// commit together.
 #[implement(Sessions)]
 #[tracing::instrument(level = "debug", skip(self))]
 pub async fn delete(&self, sess_id: &str) {
@@ -128,7 +133,22 @@ pub async fn delete(&self, sess_id: &str) {
 		return;
 	};
 
-	if let Some(user_id) = session.user_id.as_deref() {
+	// Preserve a unique identity association updated to a newer session.
+	let unique_id = async {
+		let idp_id = session.idp_id.as_ref()?;
+		let provider = self.providers.get(idp_id).map(Result::ok).await?;
+		let unique_id = unique_id((&provider, &session)).ok()?;
+		let assoc_id = self
+			.get_sess_id_by_unique_id(&unique_id)
+			.map(Result::ok)
+			.await?;
+
+		(assoc_id == sess_id).then_some(unique_id)
+	}
+	.await;
+
+	let user_sessions = async {
+		let user_id = session.user_id.as_deref()?;
 		let sess_ids: Vec<_> = self
 			.get_sess_id_by_user(user_id)
 			.ready_filter_map(Result::ok)
@@ -136,28 +156,32 @@ pub async fn delete(&self, sess_id: &str) {
 			.collect()
 			.await;
 
+		Some((user_id, sess_ids))
+	}
+	.await;
+
+	let mut txn = self.db.database.txn();
+
+	if let Some((user_id, sess_ids)) = user_sessions {
 		if !sess_ids.is_empty() {
-			self.db.userid_oauthid.raw_put(user_id, sess_ids);
+			txn.raw_put(&self.db.userid_oauthid, user_id, sess_ids);
 		} else {
-			self.db.userid_oauthid.remove(user_id);
+			txn.del_raw(&self.db.userid_oauthid, user_id);
 		}
 	}
 
-	// Check the unique identity still points to this sess_id before deleting. If
-	// not, the association was updated to a newer session.
-	if let Some(idp_id) = session.idp_id.as_ref()
-		&& let Ok(provider) = self.providers.get(idp_id).await
-		&& let Ok(unique_id) = unique_id((&provider, &session))
-		&& let Ok(assoc_id) = self.get_sess_id_by_unique_id(&unique_id).await
-		&& assoc_id == sess_id
-	{
-		self.db.oauthuniqid_oauthid.remove(&unique_id);
+	if let Some(unique_id) = unique_id.as_deref() {
+		txn.del_raw(&self.db.oauthuniqid_oauthid, unique_id);
 	}
 
-	self.db.oauthid_session.remove(sess_id);
+	txn.del_raw(&self.db.oauthid_session, sess_id);
+	txn.execute();
 }
 
 /// Create or overwrite database state for the session.
+///
+/// The canonical session and its available identity and user indexes commit
+/// together.
 #[implement(Sessions)]
 #[tracing::instrument(level = "info", skip(self))]
 pub async fn put(&self, session: &Session) {
@@ -166,20 +190,16 @@ pub async fn put(&self, session: &Session) {
 		.as_deref()
 		.expect("Missing session.sess_id required for sessions.put()");
 
-	self.db
-		.oauthid_session
-		.raw_put(sess_id, Cbor(session));
+	let unique_id = async {
+		let idp_id = session.idp_id.as_ref()?;
+		let provider = self.providers.get(idp_id).map(Result::ok).await?;
 
-	if let Some(idp_id) = session.idp_id.as_ref()
-		&& let Ok(provider) = self.providers.get(idp_id).await
-		&& let Ok(unique_id) = unique_id((&provider, session))
-	{
-		self.db
-			.oauthuniqid_oauthid
-			.insert(&unique_id, sess_id);
+		unique_id((&provider, session)).ok()
 	}
+	.await;
 
-	if let Some(user_id) = session.user_id.as_deref() {
+	let user_sessions = async {
+		let user_id = session.user_id.as_deref()?;
 		let sess_ids = self
 			.get_sess_id_by_user(user_id)
 			.ready_filter_map(Result::ok)
@@ -192,8 +212,23 @@ pub async fn put(&self, session: &Session) {
 			})
 			.await;
 
-		self.db.userid_oauthid.raw_put(user_id, sess_ids);
+		Some((user_id, sess_ids))
 	}
+	.await;
+
+	let mut txn = self.db.database.txn();
+
+	txn.raw_put(&self.db.oauthid_session, sess_id, Cbor(session));
+
+	if let Some(unique_id) = unique_id.as_deref() {
+		txn.insert_raw(&self.db.oauthuniqid_oauthid, unique_id, sess_id);
+	}
+
+	if let Some((user_id, sess_ids)) = user_sessions {
+		txn.raw_put(&self.db.userid_oauthid, user_id, sess_ids);
+	}
+
+	txn.execute();
 }
 
 /// Check if database state exists for one or more sessions associated with

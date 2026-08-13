@@ -16,20 +16,36 @@ pub trait ReadyExt<Item>
 where
 	Self: Stream<Item = Item> + Sized,
 {
+	/// Tests whether every item satisfies a synchronous predicate.
+	///
+	/// Evaluation stops at the first false result. An empty stream resolves to
+	/// true.
 	fn ready_all<F>(self, f: F) -> All<Self, Ready<bool>, impl FnMut(Item) -> Ready<bool>>
 	where
 		F: Fn(Item) -> bool;
 
+	/// Tests whether any item satisfies a synchronous predicate.
+	///
+	/// Evaluation stops at the first true result. An empty stream resolves to
+	/// false.
 	fn ready_any<F>(self, f: F) -> Any<Self, Ready<bool>, impl FnMut(Item) -> Ready<bool>>
 	where
 		F: Fn(Item) -> bool;
 
+	/// Finds the first item satisfying a synchronous predicate.
+	///
+	/// Items are tested in source order and the first match is returned. The
+	/// future resolves to `None` when the stream ends without a match.
 	fn ready_find<'a, F>(self, f: F) -> impl Future<Output = Option<Item>> + Send
 	where
 		Self: Send + Unpin + 'a,
 		F: Fn(&Item) -> bool + Send + 'a,
 		Item: Send;
 
+	/// Finds the first value produced by a synchronous mapping predicate.
+	///
+	/// Items are mapped in source order until `f` returns `Some`. The future
+	/// resolves to `None` when every item maps to absence.
 	fn ready_find_map<'a, F, U>(self, f: F) -> impl Future<Output = Option<U>> + Send
 	where
 		Self: Send + Unpin + 'a,
@@ -37,6 +53,10 @@ where
 		Item: Send,
 		U: Send;
 
+	/// Retains items accepted by a synchronous predicate.
+	///
+	/// The predicate borrows each item as it is polled. Accepted items preserve
+	/// their source order and value.
 	fn ready_filter<'a, F>(
 		self,
 		f: F,
@@ -44,6 +64,10 @@ where
 	where
 		F: Fn(&Item) -> bool + 'a;
 
+	/// Maps items synchronously while filtering absent results.
+	///
+	/// Values returned in `Some` are yielded in source order. Items mapped to
+	/// `None` are discarded.
 	fn ready_filter_map<F, U>(
 		self,
 		f: F,
@@ -51,6 +75,10 @@ where
 	where
 		F: Fn(Item) -> Option<U>;
 
+	/// Folds items synchronously from an explicit initial accumulator.
+	///
+	/// `f` receives the accumulator and each item in source order. The future
+	/// resolves to the final accumulator after the stream ends.
 	fn ready_fold<T, F>(
 		self,
 		init: T,
@@ -59,6 +87,10 @@ where
 	where
 		F: Fn(T, Item) -> T;
 
+	/// Folds items synchronously from `T::default()`.
+	///
+	/// `f` receives the accumulator and each item in source order. An empty
+	/// stream resolves to the default accumulator unchanged.
 	fn ready_fold_default<T, F>(
 		self,
 		f: F,
@@ -67,10 +99,18 @@ where
 		F: Fn(T, Item) -> T,
 		T: Default;
 
+	/// Applies a synchronous closure to every stream item.
+	///
+	/// Items are consumed in source order. The returned future resolves after
+	/// the stream ends and carries no output value.
 	fn ready_for_each<F>(self, f: F) -> ForEach<Self, Ready<()>, impl FnMut(Item) -> Ready<()>>
 	where
 		F: FnMut(Item);
 
+	/// Yields the leading items accepted by a synchronous predicate.
+	///
+	/// Evaluation stops at the first false result, and that boundary item is
+	/// not yielded. Accepted items retain source order.
 	fn ready_take_while<'a, F>(
 		self,
 		f: F,
@@ -78,6 +118,10 @@ where
 	where
 		F: Fn(&Item) -> bool + 'a;
 
+	/// Transforms items with mutable state and a synchronous scan closure.
+	///
+	/// Each `Some` result is yielded while `None` terminates the stream. State
+	/// is initialized once and retained between items.
 	fn ready_scan<B, T, F>(
 		self,
 		init: T,
@@ -86,6 +130,10 @@ where
 	where
 		F: Fn(&mut T, Item) -> Option<B>;
 
+	/// Observes each item with mutable state and yields it unchanged.
+	///
+	/// The closure receives the persistent state and a shared reference to each
+	/// item. Every source item is then emitted in order.
 	fn ready_scan_each<T, F>(
 		self,
 		init: T,
@@ -94,6 +142,10 @@ where
 	where
 		F: Fn(&mut T, &Item);
 
+	/// Skips the leading items accepted by a synchronous predicate.
+	///
+	/// The first false item and every later item are yielded in source order.
+	/// The predicate is no longer called after the first false result.
 	fn ready_skip_while<'a, F>(
 		self,
 		f: F,

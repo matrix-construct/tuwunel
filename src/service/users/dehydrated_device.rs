@@ -77,10 +77,8 @@ pub async fn set_dehydrated_device(&self, user_id: &UserId, request: Request) ->
 	self.add_one_time_keys(
 		user_id,
 		&device_id,
-		request
-			.one_time_keys
-			.iter()
-			.map(|(id, key)| (id.as_ref(), key)),
+		&request.one_time_keys,
+		request.one_time_keys.len(),
 	)
 	.await?;
 

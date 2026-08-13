@@ -4,9 +4,9 @@ use axum::extract::State;
 use ruma::{JsOption, MilliSecondsSinceUnixEpoch, UInt};
 use synapse_admin_api::registration_tokens::update::v1 as update;
 use tuwunel_core::{Err, Result, utils::time::timepoint_from_epoch};
-use tuwunel_service::registration_tokens::TokenExpires;
+use tuwunel_service::registration_tokens::{TokenExpires, TokenInfo};
 
-use super::token_response;
+use super::database_token_response;
 use crate::{Ruma, client::admin::require_admin};
 
 /// # `PUT /_synapse/admin/v1/registration_tokens/{token}`
@@ -21,12 +21,15 @@ pub(crate) async fn admin_update_token_route(
 
 	let token = &body.token;
 
-	let Some(info) = services
+	let info = services
 		.registration_tokens
 		.get_token_info(token)
-		.await?
-	else {
-		return Err!(Request(NotFound("No such registration token")));
+		.await?;
+
+	let info = match info {
+		| TokenInfo::Database(info) => info,
+		| TokenInfo::Config =>
+			return Err!(Request(Forbidden("Tokens set in the config file can't be updated"))),
 	};
 
 	let max_uses = apply_uses(body.uses_allowed, info.expires.max_uses);
@@ -39,7 +42,7 @@ pub(crate) async fn admin_update_token_route(
 		.await?;
 
 	Ok(update::Response {
-		token: token_response(token.clone(), &info),
+		token: database_token_response(token.clone(), &info),
 	})
 }
 

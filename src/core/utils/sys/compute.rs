@@ -145,6 +145,10 @@ pub fn is_core_available(id: Id) -> bool { cores_available().any(is_equal_to!(id
 #[inline]
 pub fn cores_available() -> impl Iterator<Item = Id> { from_mask(*CORES_AVAILABLE) }
 
+/// Returns the logical CPU currently executing the calling thread.
+///
+/// The value is a point-in-time scheduler observation and may become stale on
+/// the next instruction boundary. Linux obtains it through `sched_getcpu()`.
 #[cfg(target_os = "linux")]
 #[inline]
 pub fn getcpu() -> Result<usize> {
@@ -170,6 +174,10 @@ pub fn getcpu() -> Result<usize> {
 	math::try_into(ret)
 }
 
+/// Reports that current-CPU queries are unsupported on this platform.
+///
+/// No scheduler observation is attempted. The result contains an I/O error with
+/// the unsupported error kind.
 #[cfg(not(target_os = "linux"))]
 #[inline]
 pub fn getcpu() -> Result<usize> { Err(crate::Error::Io(std::io::ErrorKind::Unsupported.into())) }

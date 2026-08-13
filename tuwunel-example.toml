@@ -162,39 +162,92 @@
 #
 #db_write_buffer_capacity_mb = varies by system
 
-# This item is undocumented. Please contribute documentation for it.
+# Maximum number of entries in the RocksDB block cache shared by the
+# `pduid_pdu` and `eventid_outlierpdu` column families: a PDU's full
+# body, keyed by its PDU ID, and the same body keyed by event ID when
+# the PDU is an outlier.
+#
+# This is an entry count, not a byte size. The cache's actual capacity
+# in bytes is this value multiplied by an internal per-column-family
+# key+value size estimate, then multiplied by `cache_capacity_modifier`.
+#
+# Scaled by your CPU core count by default; see
+# `cache_capacity_modifier` to scale this along with the other
+# individual LRU caches at once.
 #
 #pdu_cache_capacity = varies by system
 
-# This item is undocumented. Please contribute documentation for it.
+# Maximum number of entries in the RocksDB block cache shared by the
+# `shorteventid_authchain` and `authchainkey_authchain` column
+# families: a room event's full auth chain, keyed by its short event ID
+# or by the auth chain's own key.
+#
+# Same entry-count semantics as `pdu_cache_capacity` above; see there
+# for how this becomes a byte capacity and how
+# `cache_capacity_modifier` applies.
 #
 #auth_chain_cache_capacity = varies by system
 
-# This item is undocumented. Please contribute documentation for it.
+# Maximum number of entries in the RocksDB block cache for the
+# `shorteventid_eventid` column family: an event's full event ID,
+# looked up from its short event ID.
+#
+# Same entry-count semantics as `pdu_cache_capacity`.
 #
 #shorteventid_cache_capacity = varies by system
 
-# This item is undocumented. Please contribute documentation for it.
+# Maximum number of entries in the RocksDB block cache for the
+# `eventid_shorteventid` column family: an event's short event ID,
+# looked up from its full event ID. The reverse lookup of
+# `shorteventid_cache_capacity`.
+#
+# Same entry-count semantics as `pdu_cache_capacity`.
 #
 #eventidshort_cache_capacity = varies by system
 
-# This item is undocumented. Please contribute documentation for it.
+# Maximum number of entries in the RocksDB block cache for the
+# `eventid_pduid` column family: an event's PDU ID, looked up from its
+# full event ID.
+#
+# Same entry-count semantics as `pdu_cache_capacity`.
 #
 #eventid_pdu_cache_capacity = varies by system
 
-# This item is undocumented. Please contribute documentation for it.
+# Maximum number of entries in the RocksDB block cache for the
+# `shortstatekey_statekey` column family: a state event's full state
+# key, looked up from its short state key.
+#
+# Same entry-count semantics as `pdu_cache_capacity`.
 #
 #shortstatekey_cache_capacity = varies by system
 
-# This item is undocumented. Please contribute documentation for it.
+# Maximum number of entries in the RocksDB block cache for the
+# `statekey_shortstatekey` column family: a state event's short state
+# key, looked up from its full state key. The reverse lookup of
+# `shortstatekey_cache_capacity`.
+#
+# Same entry-count semantics as `pdu_cache_capacity`.
 #
 #statekeyshort_cache_capacity = varies by system
 
-# This item is undocumented. Please contribute documentation for it.
+# Maximum number of entries in the RocksDB block cache for the
+# `servernameevent_data` column family: outbound federation events
+# (PDUs and EDUs) queued for delivery, keyed by destination server
+# name.
+#
+# Same entry-count semantics as `pdu_cache_capacity`.
 #
 #servernameevent_data_cache_capacity = varies by system
 
-# This item is undocumented. Please contribute documentation for it.
+# Maximum number of entries in the in-memory LRU cache of decompressed
+# room state (a list of short state-info entries per state hash), used
+# by the state compressor to avoid re-walking
+# `shortstatehash_statediff` on every lookup.
+#
+# Unlike the other caches on this page, this one is not backed by
+# RocksDB: it is a plain in-process cache sized directly in entries,
+# with no per-entry byte-size conversion. `cache_capacity_modifier`
+# still applies to it.
 #
 #stateinfo_cache_capacity = varies by system
 
@@ -1058,7 +1111,11 @@
 #
 #default_power_level_content_override = { users_default = 50 }
 
-# This item is undocumented. Please contribute documentation for it.
+# Enables OTLP span export for Jaeger-compatible tracing.
+#
+# A build with performance measurements installs an OpenTelemetry layer
+# when this is enabled. It defaults to false, and `jaeger_filter` selects
+# the exported spans.
 #
 #allow_jaeger = false
 
@@ -1656,7 +1713,10 @@
 #
 #rocksdb_log_level = "error"
 
-# This item is undocumented. Please contribute documentation for it.
+# Routes RocksDB log messages to standard error.
+#
+# `rocksdb_log_level` still filters the emitted records. When disabled,
+# RocksDB uses the application's callback logger instead.
 #
 #rocksdb_log_stderr = false
 
@@ -1831,11 +1891,17 @@
 #
 #rocksdb_repair = false
 
-# This item is undocumented. Please contribute documentation for it.
+# Opens RocksDB in read-only mode.
+#
+# Writes are rejected and missing column families cannot be created. This
+# mode is disabled by default.
 #
 #rocksdb_read_only = false
 
-# This item is undocumented. Please contribute documentation for it.
+# Opens RocksDB as a secondary follower of a primary instance.
+#
+# Writes are rejected while the primary's latest WAL can be replayed into
+# this instance's view. Missing column families cannot be created.
 #
 #rocksdb_secondary = false
 
@@ -3109,7 +3175,10 @@
 #
 #key =
 
-# Whether to listen and allow for HTTP and HTTPS connections (insecure!)
+# Controls whether listeners accept both HTTP and HTTPS.
+#
+# Plain requests are served without redirecting them to HTTPS. This
+# weakens transport security and is disabled by default.
 #
 #dual_protocol = false
 

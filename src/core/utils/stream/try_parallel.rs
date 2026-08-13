@@ -17,6 +17,16 @@ where
 	E: From<JoinError> + From<Error> + Send + 'static,
 	T: Send + 'static,
 {
+	/// Runs a synchronous fallible transform on the blocking pool.
+	///
+	/// `n` controls concurrent jobs and defaults to available parallelism; an
+	/// explicit zero cannot make progress. Job results are completion ordered,
+	/// while source errors bypass `f` and may overtake queued jobs. Spawned
+	/// jobs can continue after the adapter is dropped.
+	///
+	/// # Panics
+	///
+	/// Panics when no handle is supplied outside a Tokio runtime context.
 	fn paralleln_and_then<U, F, N, H>(
 		self,
 		h: H,
@@ -29,6 +39,16 @@ where
 		F: Fn(Self::Ok) -> Result<U, E> + Clone + Send + 'static,
 		U: Send + 'static;
 
+	/// Runs a synchronous fallible transform at the default parallelism.
+	///
+	/// The optional handle defaults to the current Tokio runtime. Job results
+	/// are completion ordered, while source errors may overtake them; join
+	/// failures convert into `E`. Spawned jobs can continue after the adapter
+	/// is dropped.
+	///
+	/// # Panics
+	///
+	/// Panics when no handle is supplied outside a Tokio runtime context.
 	fn parallel_and_then<U, F, H>(
 		self,
 		h: H,

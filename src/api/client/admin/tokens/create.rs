@@ -2,7 +2,7 @@ use axum::extract::State;
 use synapse_admin_api::registration_tokens::create::v1 as create;
 use tuwunel_core::Result;
 
-use super::{token_expires, token_response};
+use super::{database_token_response, token_expires};
 use crate::{Ruma, client::admin::require_admin};
 
 /// # `POST /_synapse/admin/v1/registration_tokens/new`
@@ -26,5 +26,7 @@ pub(crate) async fn admin_create_token_route(
 		)
 		.await?;
 
-	Ok(create::Response { token: token_response(token, &info) })
+	Ok(create::Response {
+		token: database_token_response(token, &info),
+	})
 }

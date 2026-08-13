@@ -26,6 +26,10 @@ static SYSTEMD_MODE: LazyLock<bool> =
 
 static TERMINAL_MODE: LazyLock<bool> = LazyLock::new(|| stdin().is_terminal());
 
+/// Routes formatted tracing events to console streams or the native journal.
+///
+/// Construction detects systemd stream mode and configured output preferences.
+/// Each event can then select a destination through `MakeWriter`.
 pub struct ConsoleWriter {
 	stdout: io::Stdout,
 	stderr: io::Stderr,
@@ -34,12 +38,30 @@ pub struct ConsoleWriter {
 	journal: Option<Journal>,
 }
 
+/// Writable destination selected for one formatted tracing event.
+///
+/// Console output delegates to the shared writer while journal output owns an
+/// entry buffer that submits when dropped.
 pub enum Sink<'a> {
+	/// Standard output or standard error through the shared console writer.
+	///
+	/// The writer selects the actual file descriptor from process and
+	/// configuration state.
 	Console(&'a ConsoleWriter),
+
+	/// Native journal entry associated with the event metadata.
+	///
+	/// Formatted bytes accumulate in the entry and are submitted when it is
+	/// dropped.
 	Journal(Entry<'a>),
 }
 
 impl ConsoleWriter {
+	/// Creates an output router from logging configuration and process state.
+	///
+	/// A detected journal stream or explicit setting selects standard error for
+	/// console output. Native journal submission is opened when enabled and
+	/// available.
 	#[must_use]
 	pub fn new(config: &Config) -> Self {
 		let journal_stream = get_journal_stream();
@@ -100,6 +122,11 @@ impl io::Write for &'_ ConsoleWriter {
 	}
 }
 
+/// Selects the configured tracing formatter for each console event.
+///
+/// Compact mode applies globally. Otherwise non-debug errors use the pretty
+/// formatter and remaining events use the full formatter. ANSI follows
+/// `log_colors` and is disabled for native journal submission.
 pub struct ConsoleFormat {
 	pretty: Format<Pretty>,
 	full: Format<Full>,
@@ -108,6 +135,11 @@ pub struct ConsoleFormat {
 }
 
 impl ConsoleFormat {
+	/// Creates console formatters from logging configuration.
+	///
+	/// The method configures ANSI output, thread identifiers, source locations,
+	/// and compact-mode selection. All formatter variants share the same ANSI
+	/// decision.
 	#[must_use]
 	pub fn new(config: &Config) -> Self {
 		let ansi = ansi_enabled(config);

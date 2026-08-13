@@ -1,3 +1,9 @@
+//! Pinned database values returned by point queries.
+//!
+//! A handle keeps the RocksDB slice pin alive while exposing the stored bytes
+//! through standard reference traits. Callers can deserialize directly from the
+//! pinned bytes or copy them into owned storage.
+
 use std::{fmt, fmt::Debug, ops::Deref};
 
 use rocksdb::DBPinnableSlice;
@@ -6,6 +12,11 @@ use tuwunel_core::Result;
 
 use crate::{Deserialized, Slice, keyval::deserialize_val};
 
+/// Pinned view of a value returned by RocksDB.
+///
+/// The handle keeps its underlying [`DBPinnableSlice`] alive and dereferences
+/// to [`Slice`] without an additional copy. Convert it into `Vec<u8>` when the
+/// bytes must outlive the pin.
 pub struct Handle<'a> {
 	val: DBPinnableSlice<'a>,
 }

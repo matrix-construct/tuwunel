@@ -342,22 +342,22 @@ async fn test_contrived_states(pdus_paths: &[&str], state_sets_paths: &[&str]) -
 		})
 		.collect::<Vec<StateMap<OwnedEventId>>>();
 
-	let mut auth_chain_sets = Vec::new();
-	for state_map in &state_sets {
-		let mut auth_chain = AuthSet::new();
-
-		for event_id in state_map.values() {
-			let pdu = pdus_by_id
-				.get(event_id)
-				.expect("We already confirmed all state set event ids have pdus");
-
-			auth_chain.extend(
-				auth_events_dfs(&pdus_by_id, pdu).expect("Auth events DFS should not fail"),
-			);
-		}
-
-		auth_chain_sets.push(auth_chain);
-	}
+	let auth_chains: Vec<AuthSet<_>> = state_sets
+		.iter()
+		.map(|state_map| {
+			state_map
+				.values()
+				.map(|event_id| {
+					pdus_by_id
+						.get(event_id)
+						.expect("We already confirmed all state set event ids have pdus")
+				})
+				.flat_map(|pdu| {
+					auth_events_dfs(&pdus_by_id, pdu).expect("Auth events DFS should not fail")
+				})
+				.collect()
+		})
+		.collect();
 
 	let exists = async |x| pdus_by_id.contains_key(&x);
 	let fetch = async |x| {
@@ -370,7 +370,7 @@ async fn test_contrived_states(pdus_paths: &[&str], state_sets_paths: &[&str]) -
 	let resolved_state = resolve(
 		&rules,
 		state_sets.into_iter().stream(),
-		auth_chain_sets.into_iter().stream(),
+		auth_chains.into_iter().stream(),
 		&fetch,
 		&exists,
 		false,
@@ -448,7 +448,7 @@ where
 
 	let mut auth_chain_sets = Vec::new();
 	for pdu in pdus {
-		auth_chain_sets.push(auth_events_dfs(&*pdus_by_id, pdu)?);
+		auth_chain_sets.push(auth_events_dfs(&*pdus_by_id, pdu)?.collect());
 	}
 
 	let fetch = async |x| {
@@ -556,7 +556,7 @@ where
 					.get(event_id)
 					.expect("every pdu should be available")
 			}) {
-				auth_chain_sets.push(auth_events_dfs(&pdus_by_id, pdu)?);
+				auth_chain_sets.push(auth_events_dfs(&pdus_by_id, pdu)?.collect());
 			}
 
 			states_before_event.push(state_at_event.clone());
@@ -600,7 +600,7 @@ where
 				event_id.clone(),
 			);
 
-			auth_chain_sets.push(auth_events_dfs(&pdus_by_id, current_pdu)?);
+			auth_chain_sets.push(auth_events_dfs(&pdus_by_id, current_pdu)?.collect());
 
 			let state_at_event = resolve(
 				rules,
@@ -644,7 +644,7 @@ where
 				.get(event_id)
 				.expect("every pdu should be available")
 		}) {
-			auth_chain_sets.push(auth_events_dfs(&pdus_by_id, pdu)?);
+			auth_chain_sets.push(auth_events_dfs(&pdus_by_id, pdu)?.collect());
 		}
 
 		leaf_states.push(state_at_event.clone());
@@ -671,8 +671,8 @@ where
 fn auth_events_dfs(
 	pdus_by_id: &HashMap<OwnedEventId, Pdu>,
 	pdu: &Pdu,
-) -> Result<AuthSet<OwnedEventId>, Box<dyn Error>> {
-	let mut out = AuthSet::new();
+) -> Result<impl Iterator<Item = OwnedEventId>, Box<dyn Error>> {
+	let mut out = BTreeSet::new();
 	let mut stack = pdu
 		.auth_events()
 		.map(ToOwned::to_owned)
@@ -694,5 +694,5 @@ fn auth_events_dfs(
 		);
 	}
 
-	Ok(out)
+	Ok(out.into_iter())
 }

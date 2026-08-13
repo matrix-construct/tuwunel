@@ -9,8 +9,9 @@ mod power_sort;
 mod split_conflicted;
 
 use std::{
-	collections::{BTreeMap, BTreeSet, HashSet},
+	collections::{BTreeMap, HashSet},
 	ops::Deref,
+	vec::IntoIter,
 };
 
 use futures::{FutureExt, Stream, StreamExt, TryFutureExt};
@@ -39,17 +40,55 @@ use super::test_utils;
 /// `EventId`.
 pub type StateMap<Id> = BTreeMap<TypeStateKey, Id>;
 
-/// Full recursive set of `auth_events` for each event in a StateMap.
-pub type AuthSet<Id> = BTreeSet<Id>;
+/// Full recursive auth chain for one candidate [`StateMap`].
+///
+/// Values are distinct and immutable after construction. Their order is
+/// arbitrary, and consumers must not depend on it.
+#[derive(Clone)]
+pub struct AuthSet<Id>(Vec<Id>);
 
-/// ConflictMap of OwnedEventId specifically.
+/// Conflicting event ids for each contested state key.
 pub type ConflictMap<Id> = StateMap<ConflictVec<Id>>;
 
-/// List of conflicting event_ids
+/// Event ids contesting one state key.
+///
+/// Two forks disputing a key is the modal conflict, so two ids stay inline.
 type ConflictVec<Id> = SmallVec<[Id; 2]>;
 
 /// The full conflicted set (arbitrary order).
 type ConflictedSet = HashSet<OwnedEventId, RandomState>;
+
+impl<Id> AuthSet<Id> {
+	/// Creates an auth set from distinct identifiers.
+	///
+	/// The caller must ensure `ids` contains no duplicates. Duplicates are
+	/// not checked, so hot paths avoid redundant work.
+	#[inline]
+	#[must_use]
+	pub(crate) fn from_distinct(ids: Vec<Id>) -> Self { Self(ids) }
+}
+
+impl<Id> Default for AuthSet<Id> {
+	fn default() -> Self { Self(Vec::new()) }
+}
+
+impl<Id: Ord> FromIterator<Id> for AuthSet<Id> {
+	fn from_iter<I: IntoIterator<Item = Id>>(iter: I) -> Self {
+		Self::from_distinct(
+			iter.into_iter()
+				.sorted_unstable()
+				.dedup()
+				.collect(),
+		)
+	}
+}
+
+impl<Id> IntoIterator for AuthSet<Id> {
+	type IntoIter = IntoIter<Id>;
+	type Item = Id;
+
+	fn into_iter(self) -> Self::IntoIter { self.0.into_iter() }
+}
 
 /// Apply the [state resolution] algorithm introduced in room version 2 to
 /// resolve the state of a room.
@@ -61,8 +100,8 @@ type ConflictedSet = HashSet<OwnedEventId, RandomState>;
 /// * `state_maps` - The incoming states to resolve. Each `StateMap` represents
 ///   a possible fork in the state of a room.
 ///
-/// * `auth_chains` - The list of full recursive sets of `auth_events` for each
-///   event in the `state_maps`.
+/// * `auth_sets` - The list of full recursive sets of `auth_events` for each
+///   event in the `state_maps`. Inputs must not contain duplicates.
 ///
 /// * `fetch_event` - Function to fetch an event in the room given its event ID.
 ///

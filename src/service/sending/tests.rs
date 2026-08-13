@@ -65,8 +65,10 @@ fn appservice_empty_value_decodes_as_pdu() {
 
 	let (_, decoded) = parse_servercurrentevent(&key, &[]).expect("empty appservice row decodes");
 
+	let value = decoded.value_bytes();
+
 	assert!(matches!(decoded, SendingEvent::Pdu(_)));
-	assert!(decoded.value_bytes().is_empty());
+	assert!(value.is_empty(), "{value:?}");
 }
 
 #[test]

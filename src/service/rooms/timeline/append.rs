@@ -27,7 +27,7 @@ use tuwunel_database::Json;
 use super::{ExtractBody, ExtractRelatesTo, ExtractRelatesToEventId, RoomMutexGuard, bias_count};
 use crate::rooms::{
 	read_receipt::PrivateRead, short::ShortRoomId, state_accessor::plain_text_topic,
-	state_compressor::CompressedState,
+	state_cache::MembershipUpdate, state_compressor::CompressedState,
 };
 
 type Band<'a> = SmallVec<[&'a EventId; 1]>;
@@ -194,8 +194,7 @@ where
 		})
 		.await;
 
-	let notifications_cleared = self
-		.services
+	self.services
 		.pusher
 		.reset_notification_counts_for_thread(
 			pdu.sender(),
@@ -212,7 +211,8 @@ where
 
 	drop(insert_lock);
 
-	if notifications_cleared {
+	// Only local senders can own pushers.
+	if self.services.globals.user_is_local(pdu.sender()) {
 		self.services
 			.sending
 			.refresh_push_badge(pdu.sender())
@@ -297,16 +297,16 @@ async fn append_pdu_effects(
 				// knock event for auth
 				self.services
 					.state_cache
-					.update_membership(
-						pdu.room_id(),
-						&target_user_id,
-						content,
-						pdu.sender(),
-						stripped_state,
-						None,
-						true,
+					.update_membership(MembershipUpdate {
+						room_id: pdu.room_id(),
+						user_id: &target_user_id,
+						membership_event: content,
+						sender: pdu.sender(),
+						last_state: stripped_state,
+						invite_via: None,
+						update_joined_count: true,
 						count,
-					)
+					})
 					.await?;
 			}
 		},
@@ -407,22 +407,18 @@ async fn append_pdu_effects(
 fn append_pdu_json(&self, pdu_id: &RawPduId, pdu: &PduEvent, json: &CanonicalJsonObject) {
 	debug_assert!(matches!(pdu_id.pdu_count(), PduCount::Normal(_)), "PduCount not Normal");
 
-	self.db.pduid_pdu.raw_put(pdu_id, Json(json));
+	let mut txn = self.db.db.txn();
 
-	self.db
-		.eventid_pduid
-		.insert(pdu.event_id.as_bytes(), pdu_id);
+	txn.raw_put(&self.db.pduid_pdu, pdu_id, Json(json));
+	txn.insert_raw(&self.db.eventid_pduid, pdu.event_id.as_bytes(), pdu_id);
+	txn.del_raw(&self.db.eventid_outlierpdu, pdu.event_id.as_bytes());
 
-	self.db
-		.eventid_outlierpdu
-		.remove(pdu.event_id.as_bytes());
-
-	let ts = u64::from(pdu.origin_server_ts);
 	let count_key = bias_count(pdu_id.count());
+	let ts = u64::from(pdu.origin_server_ts);
+	let key = (pdu.room_id(), ts, count_key);
+	txn.put_raw(&self.db.roomid_tscount_pducount, key, pdu_id.count());
 
-	self.db
-		.roomid_tscount_pducount
-		.put_raw((pdu.room_id(), ts, count_key), pdu_id.count());
+	txn.execute();
 }
 
 #[cfg(test)]

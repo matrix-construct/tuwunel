@@ -272,8 +272,11 @@ impl Service {
 		let had_lazy = self.db.search_lazy_media(mxc).await.is_ok();
 		if had_lazy {
 			let key = mxc.to_string();
-			self.db.remove_lazy_media(&key);
-			self.db.remove_lazy_content(&key);
+			let mut txn = self.services.db.txn();
+
+			self.db.remove_lazy_media(&mut txn, &key);
+			self.db.remove_lazy_content(&mut txn, &key);
+			txn.execute();
 		}
 
 		match self.db.search_mxc_metadata_prefix(mxc).await {
@@ -497,8 +500,11 @@ impl Service {
 			return Err(e);
 		}
 
-		self.db.remove_lazy_media(&key);
-		self.db.remove_lazy_content(&key);
+		let mut txn = self.services.db.txn();
+
+		self.db.remove_lazy_media(&mut txn, &key);
+		self.db.remove_lazy_content(&mut txn, &key);
+		txn.execute();
 
 		Ok(media)
 	}

@@ -13,6 +13,10 @@ use crate::{Result, err};
 pub struct Unquoted(str);
 
 impl<'a> Unquoted {
+	/// Returns the underlying string view without surrounding quotes.
+	///
+	/// The returned slice borrows the transparent wrapper and performs no
+	/// allocation or copy. Its lifetime is tied to the wrapper reference.
 	#[inline]
 	#[must_use]
 	pub fn as_str(&'a self) -> &'a str { &self.0 }

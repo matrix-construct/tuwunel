@@ -243,7 +243,7 @@ fn configure_output_err(mut output: MadSkin) -> MadSkin {
 	use termimad::{Alignment, CompoundStyle, LineStyle, crossterm::style::Color};
 
 	let code_style = CompoundStyle::with_fgbg(Color::AnsiValue(196), Color::AnsiValue(234));
-	output.inline_code = code_style.clone();
+	output.inline_code = code_style;
 	output.code_block = LineStyle {
 		left_margin: 0,
 		right_margin: 0,
@@ -258,7 +258,7 @@ fn configure_output(mut output: MadSkin) -> MadSkin {
 	use termimad::{Alignment, CompoundStyle, LineStyle, crossterm::style::Color};
 
 	let code_style = CompoundStyle::with_fgbg(Color::AnsiValue(40), Color::AnsiValue(234));
-	output.inline_code = code_style.clone();
+	output.inline_code = code_style;
 	output.code_block = LineStyle {
 		left_margin: 0,
 		right_margin: 0,

@@ -13,12 +13,22 @@ use tuwunel_core::{
 use super::get::{cached_handle_from, handle_from};
 use crate::Handle;
 
+/// Extends a stream of raw keys with batched map lookup.
+///
+/// Input keys are grouped for the engine's blocking pool. The output stream
+/// yields pinned value handles or lookup errors.
 pub trait Get<'a, K, S>
 where
 	Self: Sized,
 	S: Stream<Item = K> + Send + 'a,
 	K: AsRef<[u8]> + Send + Sync + 'a,
 {
+	/// Fetches this stream's raw keys from a map.
+	///
+	/// Successful batches yield one lookup result for each input key. A
+	/// batch-level pool or channel failure appears as one stream error for that
+	/// batch. Work is split into batches sized from the server's automatic
+	/// amplification setting.
 	fn get(self, map: &'a Arc<super::Map>) -> impl Stream<Item = Result<Handle<'_>>> + Send + 'a;
 }
 
@@ -34,6 +44,10 @@ where
 	}
 }
 
+/// Fetches a stream of raw keys in asynchronous batches.
+///
+/// Each batch runs on the engine's blocking pool and is flattened back into
+/// individual lookup results.
 #[implement(super::Map)]
 #[tracing::instrument(skip(self, keys), level = "trace")]
 pub(crate) fn get_batch<'a, S, K>(
@@ -62,6 +76,10 @@ where
 		.try_flatten()
 }
 
+/// Fetches an exact-size raw-key iterator from block cache.
+///
+/// Cache misses remain `Ok(None)`, while cached values and failures retain
+/// their normal result forms.
 #[implement(super::Map)]
 #[tracing::instrument(name = "batch_cached", level = "trace", skip_all)]
 pub(crate) fn _get_batch_cached<'a, I, K>(
@@ -76,6 +94,10 @@ where
 		.map(cached_handle_from)
 }
 
+/// Fetches an exact-size raw-key iterator synchronously.
+///
+/// RocksDB performs a batched multi-get and the returned iterator classifies
+/// each point-read result.
 #[implement(super::Map)]
 #[tracing::instrument(name = "batch_blocking", level = "trace", skip_all)]
 pub(crate) fn get_batch_blocking<'a, I, K>(
@@ -90,6 +112,10 @@ where
 		.map(handle_from)
 }
 
+/// Performs a batched multi-get with explicit RocksDB read options.
+///
+/// Keys are treated as unsorted because callers do not promise
+/// column-comparator order.
 #[implement(super::Map)]
 fn get_batch_blocking_opts<'a, I, K>(
 	&self,

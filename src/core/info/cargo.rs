@@ -42,6 +42,15 @@ static FEATURES: OnceLock<Vec<String>> = OnceLock::new();
 static DEPENDENCIES: OnceLock<DepsSet> = OnceLock::new();
 
 #[must_use]
+/// Lists dependency names declared by the workspace manifest.
+///
+/// Names borrow from the lazily parsed dependency map. Their ordering follows
+/// the map's deterministic key order.
+///
+/// # Panics
+///
+/// Panics when the embedded workspace manifest is invalid or lacks its
+/// workspace section.
 pub fn dependencies_names() -> Vec<&'static str> {
 	dependencies()
 		.keys()
@@ -49,6 +58,15 @@ pub fn dependencies_names() -> Vec<&'static str> {
 		.collect()
 }
 
+/// Returns dependencies declared by the embedded workspace manifest.
+///
+/// The manifest is parsed once on first access and the ordered map is retained
+/// for the process lifetime. Package-specific dependency tables are not merged
+/// here.
+///
+/// # Panics
+///
+/// Panics when the manifest is invalid or lacks its workspace section.
 pub fn dependencies() -> &'static DepsSet {
 	DEPENDENCIES.get_or_init(|| {
 		init_dependencies().unwrap_or_else(|e| panic!("Failed to initialize dependencies: {e}"))

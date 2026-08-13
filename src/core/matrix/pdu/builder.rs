@@ -9,22 +9,45 @@ use serde_json::value::{RawValue as RawJsonValue, to_raw_value};
 
 use super::{Content, StateKey};
 
-/// Build the start of a PDU in order to add it to the Database.
+/// Collects the initial fields needed to build and append a PDU.
+///
+/// The timeline service supplies event graph fields, sender data, and hashes
+/// after this value is created. Constructors serialize typed Ruma event
+/// content.
 #[derive(Deserialize)]
 pub struct Builder {
+	/// Matrix event type for the new PDU.
+	///
+	/// Typed constructors derive this value from the supplied event content.
 	#[serde(rename = "type")]
 	pub event_type: TimelineEventType,
 
+	/// Raw canonical content for the new event.
+	///
+	/// The builder retains encoded content until the PDU is assembled and
+	/// signed.
 	pub content: Content,
 
+	/// Unsigned metadata to include with the new event.
+	///
+	/// Typical values include local transaction IDs and prior-state metadata.
 	pub unsigned: Option<BTreeMap<String, serde_json::Value>>,
 
+	/// State key for a state event.
+	///
+	/// A missing key identifies a message-like timeline event.
 	pub state_key: Option<StateKey>,
 
+	/// Event ID targeted by a redaction.
+	///
+	/// The value becomes the legacy top-level `redacts` field. Callers place a
+	/// content-based redaction target in the encoded content separately.
 	pub redacts: Option<OwnedEventId>,
 
-	/// For timestamped messaging, should only be used for appservices.
-	/// Will be set to current time if None
+	/// Overrides the event timestamp for appservice messaging.
+	///
+	/// An absent value uses the current time when the PDU is built. Ordinary
+	/// callers should leave this field unset.
 	pub timestamp: Option<MilliSecondsSinceUnixEpoch>,
 }
 
@@ -42,6 +65,15 @@ impl Default for Builder {
 }
 
 impl Builder {
+	/// Builds a state-event template from typed event content.
+	///
+	/// The content's event type and supplied state key populate the
+	/// corresponding builder fields. Remaining optional fields use their
+	/// defaults.
+	///
+	/// # Panics
+	///
+	/// Panics if the event content cannot be serialized as raw JSON.
 	pub fn state<S, T>(state_key: S, content: &T) -> Self
 	where
 		T: StateEventContent,
@@ -57,6 +89,14 @@ impl Builder {
 		}
 	}
 
+	/// Builds a message-like event template from typed event content.
+	///
+	/// The content's event type populates the builder and the state key remains
+	/// absent. Remaining optional fields use their defaults.
+	///
+	/// # Panics
+	///
+	/// Panics if the event content cannot be serialized as raw JSON.
 	pub fn timeline<T>(content: &T) -> Self
 	where
 		T: MessageLikeEventContent,

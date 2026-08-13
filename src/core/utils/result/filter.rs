@@ -1,7 +1,15 @@
 use super::Result;
 
+/// Adds fallible predicate filtering to successful results.
+///
+/// Existing errors bypass the predicate unchanged. Predicate failures are
+/// converted into the result's error type.
 pub trait Filter<T, E> {
-	/// Similar to Option::filter
+	/// Retains an `Ok` value when `predicate` succeeds.
+	///
+	/// The predicate receives a shared reference to the success value. Its
+	/// error is converted into `E`, while an existing `Err` bypasses the
+	/// predicate.
 	#[must_use]
 	fn filter<P, U>(self, predicate: P) -> Self
 	where

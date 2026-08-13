@@ -12,11 +12,23 @@ use tuwunel_core::{
 
 use crate::{Handle, keyval::KeyBuf, ser};
 
+/// Extends a stream of structured keys with serialized batched lookup.
+///
+/// Input keys are encoded and grouped for the engine's blocking pool. The
+/// output stream yields pinned value handles or lookup errors.
 pub trait Qry<'a, K, S>
 where
 	S: Stream<Item = K> + Send + 'a,
 	K: Serialize + Debug,
 {
+	/// Fetches this stream's serialized keys from a map.
+	///
+	/// The returned stream yields lookup results from automatically sized
+	/// batches. Serialization is deferred until the stream is polled.
+	///
+	/// # Panics
+	///
+	/// Panics if an input key cannot be serialized.
 	fn qry(self, map: &'a Arc<super::Map>) -> impl Stream<Item = Result<Handle<'_>>> + Send + 'a;
 }
 
@@ -32,6 +44,14 @@ where
 	}
 }
 
+/// Fetches a stream of structured keys in serialized asynchronous batches.
+///
+/// Each batch is encoded, run on the engine's blocking pool, and flattened back
+/// into individual lookup results.
+///
+/// # Panics
+///
+/// Panics if an input key cannot be serialized.
 #[implement(super::Map)]
 #[tracing::instrument(skip(self, keys), level = "trace")]
 pub(crate) fn qry_batch<'a, S, K>(

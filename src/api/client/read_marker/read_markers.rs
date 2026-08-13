@@ -10,10 +10,10 @@ use ruma::{
 		receipt::{Receipt, ReceiptEvent, ReceiptEventContent, ReceiptThread, ReceiptType},
 	},
 };
-use tuwunel_core::{Result, utils::result::LogErr};
+use tuwunel_core::Result;
 use tuwunel_service::presence::Ping;
 
-use super::set_private_marker;
+use super::{reset_and_refresh_badge, set_private_marker};
 use crate::{ClientIp, Ruma};
 
 /// # `POST /_matrix/client/r0/rooms/{roomId}/read_markers`
@@ -101,22 +101,14 @@ pub(crate) async fn set_read_marker_route(
 
 	// Route through the dispatcher so per-thread counts are also cleared;
 	// `/read_markers` predates MSC3771 and carries no thread field.
-	if (private_advanced || public_advanced)
-		&& services
-			.pusher
-			.reset_notification_counts_for_thread(
-				sender_user,
-				&body.room_id,
-				&ReceiptThread::Unthreaded,
-			)
-			.await
-	{
-		services
-			.sending
-			.refresh_push_badge(sender_user)
-			.await
-			.log_err()
-			.ok();
+	if private_advanced || public_advanced {
+		reset_and_refresh_badge(
+			&services,
+			sender_user,
+			&body.room_id,
+			&ReceiptThread::Unthreaded,
+		)
+		.await;
 	}
 
 	Ok(set_read_marker::v3::Response {})

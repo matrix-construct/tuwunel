@@ -13,6 +13,10 @@ pub(super) fn flags_capture(args: TokenStream) -> TokenStream {
 	let flag = std::env::args().collect::<Vec<_>>();
 	let flag_len = flag.len();
 	let ret = quote! {
+		/// Stores the compiler arguments captured while building this crate.
+		///
+		/// A load-time constructor registers the flags for build diagnostics. The
+		/// public static remains available for inspection while the crate is loaded.
 		pub static RUSTC_FLAGS: [&str; #flag_len] = [#( #flag ),*];
 
 		#[tuwunel_core::ctor(unsafe)]

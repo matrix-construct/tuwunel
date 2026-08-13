@@ -8,9 +8,16 @@ use tuwunel_core::{
 
 use crate::keyval::Key;
 
-/// Delete all data stored in this map. !!! USE WITH CAUTION !!!
+/// Deletes all entries that exist when the clear scan begins.
 ///
-/// See for_clear() with additional details.
+/// The operation scans a consistent iterator view, so later writes can remain.
+/// When debug assertions are disabled, scan errors are filtered after any
+/// preceding keys have been removed.
+///
+/// # Panics
+///
+/// Panics if a scan error occurs with debug assertions enabled, RocksDB rejects
+/// a deletion, or an uncorked flush fails.
 #[implement(super::Map)]
 #[tracing::instrument(level = "trace")]
 pub async fn clear(self: &Arc<Self>) {
@@ -20,12 +27,16 @@ pub async fn clear(self: &Arc<Self>) {
 		.await;
 }
 
-/// Delete all data stored in this map. !!! USE WITH CAUTION !!!
+/// Deletes each entry visible to a clear scan and yields its key.
 ///
-/// Provides stream of keys undergoing deletion along with any errors.
+/// The iterator view is fixed when the stream begins, so later writes can
+/// remain. Polling drives deletion and exposes scan errors to the caller. Each
+/// yielded key borrows cursor storage and must not be retained across another
+/// poll.
 ///
-/// Note this operation applies to a snapshot of the data when invoked.
-/// Additional data written during or after this call may be missed.
+/// # Panics
+///
+/// Panics if RocksDB rejects a deletion or an uncorked flush fails.
 #[implement(super::Map)]
 #[tracing::instrument(level = "trace")]
 pub fn for_clear(self: &Arc<Self>) -> impl Stream<Item = Result<Key<'_>>> + Send {

@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, fmt::Debug};
 
-use futures::{StreamExt, stream::select};
+use futures::{StreamExt, future::join3, stream::select};
 use ruma::{EventId, OwnedEventId, RoomId, UserId, events::receipt::ReceiptThread};
 use serde::Serialize;
 use tuwunel_core::{
@@ -24,15 +24,16 @@ type ThreadLastReads = BTreeMap<OwnedEventId, u64>;
 
 /// Reset the room's main-timeline notification counts.
 ///
-/// Returns `true` when the unread notification count was nonzero.
+/// The last-read stamp gates sync output; callers dispatch the badge refresh
+/// after every reset.
 #[implement(super::Service)]
 #[tracing::instrument(level = "debug", skip(self))]
-pub async fn reset_notification_counts(&self, user_id: &UserId, room_id: &RoomId) -> bool {
+pub async fn reset_notification_counts(&self, user_id: &UserId, room_id: &RoomId) {
 	let count = self.services.globals.next_count();
 
 	let userroom_id = (user_id, room_id);
-	let cleared = self
-		.reset_notification_count(room_id, user_id, userroom_id)
+
+	self.reset_notification_count(room_id, user_id, userroom_id)
 		.await;
 
 	self.db
@@ -48,32 +49,28 @@ pub async fn reset_notification_counts(&self, user_id: &UserId, room_id: &RoomId
 	if removed > 0 {
 		trace!(?user_id, ?room_id, removed, "Cleared suppressed push events after read");
 	}
-
-	cleared
 }
 
 #[implement(super::Service)]
-async fn reset_notification_count<K>(&self, room_id: &RoomId, user_id: &UserId, key: K) -> bool
+async fn reset_notification_count<K>(&self, room_id: &RoomId, user_id: &UserId, key: K)
 where
 	K: Serialize + Debug + Send + Sync,
 {
-	let db = &self.db.userroomid_notificationcount;
+	// The increment path is a read-modify-write under this lock; an unlocked
+	// zero could land inside it and be overwritten by the stale sum.
 	let _lock = self
 		.notification_increment_mutex
 		.lock(&(room_id.to_owned(), user_id.to_owned()))
 		.await;
 
-	let cleared = db.qry(&key).await.deserialized().unwrap_or(0_u64) > 0;
-
-	db.put(key, 0_u64);
-
-	cleared
+	self.db
+		.userroomid_notificationcount
+		.put(key, 0_u64);
 }
 
 /// Reset counts for a single thread within a room.
 ///
-/// The last-read stamp gates sync output. Returns `true` when the unread count
-/// was nonzero.
+/// The last-read stamp gates sync output.
 #[implement(super::Service)]
 #[tracing::instrument(level = "debug", skip(self))]
 pub async fn reset_thread_notification_counts(
@@ -81,12 +78,12 @@ pub async fn reset_thread_notification_counts(
 	user_id: &UserId,
 	room_id: &RoomId,
 	thread_root: &EventId,
-) -> bool {
+) {
 	let count = self.services.globals.next_count();
 
 	let userroom_thread = (user_id, room_id, thread_root);
-	let cleared = self
-		.reset_notification_count(room_id, user_id, userroom_thread)
+
+	self.reset_notification_count(room_id, user_id, userroom_thread)
 		.await;
 
 	self.db
@@ -97,76 +94,55 @@ pub async fn reset_thread_notification_counts(
 	self.db
 		.roomuserid_lastnotificationread
 		.put(roomuser_thread, *count);
-
-	cleared
 }
 
 /// Clear all per-thread notification state for this user and room.
 ///
-/// The `Interfix` prefix excludes the main row. Returns `true` when any
-/// unread notification count was nonzero.
+/// The `Interfix` prefix excludes the main row. The notification-count sweep
+/// runs under the increment mutex so a concurrent read-modify-write cannot
+/// resurrect a cleared row.
 #[implement(super::Service)]
 #[tracing::instrument(level = "debug", skip(self))]
-pub async fn clear_all_thread_notification_counts(
-	&self,
-	user_id: &UserId,
-	room_id: &RoomId,
-) -> bool {
+pub async fn clear_all_thread_notification_counts(&self, user_id: &UserId, room_id: &RoomId) {
 	let userroom_prefix = (user_id, room_id, Interfix);
 	let roomuser_prefix = (room_id, user_id, Interfix);
 
-	self.db
+	let highlights = self
+		.db
 		.userroomid_highlightcount
-		.keys_prefix_raw(&userroom_prefix)
-		.ignore_err()
-		.ready_for_each(|key| {
-			self.db.userroomid_highlightcount.remove(key);
-		})
-		.await;
+		.del_prefix(&userroom_prefix);
 
-	let db = &self.db.userroomid_notificationcount;
-	let lock = self
-		.notification_increment_mutex
-		.lock(&(room_id.to_owned(), user_id.to_owned()))
-		.await;
-	let cleared = db
-		.stream_prefix_raw(&userroom_prefix)
-		.ignore_err()
-		.ready_fold(false, |cleared, (key, count)| {
-			db.remove(key);
-
-			cleared || u64_from_u8(count) > 0
-		})
-		.await;
-
-	drop(lock);
-
-	self.db
+	let last_reads = self
+		.db
 		.roomuserid_lastnotificationread
-		.keys_prefix_raw(&roomuser_prefix)
-		.ignore_err()
-		.ready_for_each(|key| {
-			self.db
-				.roomuserid_lastnotificationread
-				.remove(key);
-		})
-		.await;
+		.del_prefix(&roomuser_prefix);
 
-	cleared
+	let notifications = async {
+		let _lock = self
+			.notification_increment_mutex
+			.lock(&(room_id.to_owned(), user_id.to_owned()))
+			.await;
+
+		self.db
+			.userroomid_notificationcount
+			.del_prefix(&userroom_prefix)
+			.await;
+	};
+
+	join3(notifications, highlights, last_reads).await;
 }
 
 /// Dispatcher: route a receipt's `ReceiptThread` to the matching reset path.
 ///
 /// `Unthreaded` clears all room and thread counts; `Main` clears only the
-/// main-timeline counts; `Thread(id)` clears just that thread. Returns `true`
-/// when any unread notification count was nonzero.
+/// main-timeline counts; `Thread(id)` clears just that thread.
 #[implement(super::Service)]
 pub async fn reset_notification_counts_for_thread(
 	&self,
 	user_id: &UserId,
 	room_id: &RoomId,
 	thread: &ReceiptThread,
-) -> bool {
+) {
 	match thread {
 		| ReceiptThread::Main =>
 			self.reset_notification_counts(user_id, room_id)
@@ -175,15 +151,11 @@ pub async fn reset_notification_counts_for_thread(
 			self.reset_thread_notification_counts(user_id, room_id, root)
 				.await,
 		| _ => {
-			let main_cleared = self
-				.reset_notification_counts(user_id, room_id)
+			self.reset_notification_counts(user_id, room_id)
 				.await;
 
-			let threads_cleared = self
-				.clear_all_thread_notification_counts(user_id, room_id)
+			self.clear_all_thread_notification_counts(user_id, room_id)
 				.await;
-
-			main_cleared || threads_cleared
 		},
 	}
 }

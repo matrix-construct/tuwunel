@@ -310,7 +310,7 @@ async fn set_intersection_sorted_stream2() {
 	let r = intersection_sorted_stream2(a.iter().stream(), b.iter().stream())
 		.collect::<Vec<&str>>()
 		.await;
-	assert!(r.is_empty());
+	assert!(r.is_empty(), "{r:?}");
 
 	let a = ["aaa", "ccc", "eee", "ggg"];
 	let b = ["aaa", "bbb", "ccc", "ddd", "eee"];
@@ -342,7 +342,7 @@ async fn set_difference_sorted_stream2() {
 	let r = difference_sorted_stream2(b.iter().stream(), a.iter().stream())
 		.collect::<Vec<&str>>()
 		.await;
-	assert!(r.is_empty());
+	assert!(r.is_empty(), "{r:?}");
 
 	let a = ["aaa", "ccc", "xxx", "yyy"];
 	let b = ["hhh", "iii", "jjj", "zzz"];

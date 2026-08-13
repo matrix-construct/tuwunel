@@ -2,30 +2,38 @@
 
 use std::{
 	alloc::Layout,
-	cell::OnceCell,
 	ffi::{CStr, c_char, c_void},
-	fmt::Debug,
+	io::Write,
 	panic::catch_unwind,
 	process::abort,
-	sync::{
-		Mutex,
-		atomic::{AtomicBool, AtomicU64, Ordering},
-	},
+	sync::atomic::{AtomicBool, AtomicU64, Ordering},
 };
 
-use jevmalloc as jemalloc;
+// A control that collides with the wrapper adapting its error type below is
+// aliased on import.
 use jevmalloc::{
-	ctl as mallctl, ffi,
-	hook::{ALLOC, ALLOC_ZEROED},
+	Jemalloc,
+	ctl::{
+		Error as CtlError, background_thread_enable as ctl_background_thread_enable,
+		refresh_epoch, trim as ctl_trim,
+	},
+	ffi,
+	global_alloc::hook::{ALLOC, ALLOC_ZEROED},
 };
+use libc::{STDOUT_FILENO, write};
 
-use crate::{
-	Result,
-	arrayvec::ArrayVec,
-	err, is_equal_to, is_nonzero,
-	utils::{BoolExt, math, math::Tried},
-};
+use crate::{Result, arrayvec::ArrayVec, err, utils::BoolExt};
 
+/// Line buffer for one allocation-trace record. A record of three integers at
+/// their maximum widths occupies 74 bytes.
+type TraceLine = ArrayVec<u8, 128>;
+
+/// Provides the process-wide jemalloc startup configuration.
+///
+/// Jemalloc reads this unmangled symbol during allocator initialization, which
+/// can occur before `main`. The NUL-terminated options enable CPU-affine
+/// arenas, background purging, metadata huge pages, and tuned cache and decay
+/// thresholds.
 #[cfg(feature = "jemalloc_conf")]
 #[used]
 #[unsafe(no_mangle)]
@@ -56,20 +64,18 @@ const _MALLOC_CONF_PROF: &str = ",prof_active:false";
 ))]
 const _MALLOC_CONF_PROF: &str = "";
 
-type Name = ArrayVec<u8, NAME_MAX>;
-type Key = ArrayVec<usize, KEY_SEGS>;
-
-const NAME_MAX: usize = 128;
-const KEY_SEGS: usize = 8;
-
 #[global_allocator]
-static JEMALLOC: jemalloc::Jemalloc = jemalloc::Jemalloc;
-static CONTROL: Mutex<()> = Mutex::new(());
+static JEMALLOC: Jemalloc = Jemalloc;
 
 static GLOBAL_ALLOCS: AtomicU64 = AtomicU64::new(0);
 static COUNT_GLOBAL_ALLOCS: AtomicBool = AtomicBool::new(false);
 static TRACE_GLOBAL_ALLOCS: AtomicBool = AtomicBool::new(false);
 
+/// Registers the allocation-observer callbacks during process startup.
+///
+/// Normal and zeroed allocations made after registration feed the same counting
+/// and tracing instrumentation. The allocator reads these slots only when
+/// `jevmalloc` is built with its `global_hooks` feature.
 #[crate::ctor(unsafe)]
 fn _static_initialization() {
 	// SAFETY: Mutable static globals in jemalloc crate; must be initialized
@@ -80,40 +86,62 @@ fn _static_initialization() {
 	unsafe { ALLOC_ZEROED = Some(global_alloc_zeroed_hook) };
 }
 
-#[must_use]
-#[cfg(disable)]
-//#[cfg(feature = "jemalloc_stats")]
-pub fn memory_usage() -> Option<String> {
-	use mallctl::stats;
-
-	let mibs = |input: Result<usize, mallctl::Error>| {
-		let input = input.unwrap_or_default();
-		let kibs = input / 1024;
-		let kibs = u32::try_from(kibs).unwrap_or_default();
-		let kibs = f64::from(kibs);
-		kibs / 1024.0
-	};
-
-	// Acquire the epoch; ensure latest stats are pulled in
-	acq_epoch().ok()?;
-
-	let allocated = mibs(stats::allocated::read());
-	let active = mibs(stats::active::read());
-	let mapped = mibs(stats::mapped::read());
-	let metadata = mibs(stats::metadata::read());
-	let resident = mibs(stats::resident::read());
-	let retained = mibs(stats::retained::read());
-	Some(format!(
-		"allocated: {allocated:.2} MiB\nactive: {active:.2} MiB\nmapped: {mapped:.2} \
-		 MiB\nmetadata: {metadata:.2} MiB\nresident: {resident:.2} MiB\nretained: {retained:.2} \
-		 MiB\n"
-	))
+fn global_alloc_hook(layout: Layout) {
+	catch_unwind(move || handle_global_alloc(layout))
+		.map_err(|_| abort())
+		.ok();
 }
 
+fn global_alloc_zeroed_hook(layout: Layout) {
+	catch_unwind(move || handle_global_alloc(layout))
+		.map_err(|_| abort())
+		.ok();
+}
+
+fn handle_global_alloc(layout: Layout) {
+	let do_count = COUNT_GLOBAL_ALLOCS.load(Ordering::Relaxed);
+	let count = GLOBAL_ALLOCS.fetch_add(do_count.into(), Ordering::Relaxed);
+
+	if TRACE_GLOBAL_ALLOCS.load(Ordering::Relaxed) {
+		let mut buf = TraceLine::new();
+
+		writeln!(&mut buf, "{count} align={} size={}", layout.align(), layout.size())
+			.expect("writeln! to buffer failed");
+
+		// SAFETY: Valid ptr and len from buf for writing to stdout.
+		unsafe { write(STDOUT_FILENO, buf.as_ptr().cast::<c_void>(), buf.len()) }
+			.ge(&0)
+			.into_result()
+			.expect("write(2) error");
+	}
+}
+
+/// Returns the process allocation count observed by the allocator hook.
+///
+/// The counter uses relaxed ordering and advances only when internal allocation
+/// counting is enabled. It is intended for allocation measurements rather than
+/// synchronized accounting.
+#[inline]
 #[must_use]
-//#[cfg(not(feature = "jemalloc_stats"))]
+pub fn global_alloc_count() -> u64 { GLOBAL_ALLOCS.load(Ordering::Relaxed) }
+
+/// Returns a human-readable snapshot of allocator memory usage when available.
+///
+/// Detailed summary reporting is currently disabled for this build, so this
+/// implementation returns `None`. Raw allocator output remains available
+/// through [`memory_stats`].
+#[must_use]
 pub fn memory_usage() -> Option<String> { None }
 
+/// Collects jemalloc's raw statistics report with the supplied print options.
+///
+/// The allocator statistics epoch is refreshed before invoking
+/// `malloc_stats_print`. Refresh failure returns `None`, and output is
+/// truncated to 1 MiB.
+///
+/// # Panics
+///
+/// Panics if `opts` contains an interior NUL byte.
 pub fn memory_stats(opts: &str) -> Option<String> {
 	const MAX_LENGTH: usize = 1_048_576;
 
@@ -125,7 +153,7 @@ pub fn memory_stats(opts: &str) -> Option<String> {
 		.cast_const();
 
 	// Acquire the epoch; ensure latest stats are pulled in
-	acq_epoch().ok()?;
+	refresh_epoch().ok()?;
 
 	// SAFETY: calls malloc_stats_print() with our string instance which must remain
 	// in this frame. https://docs.rs/tikv-jemalloc-sys/latest/tikv_jemalloc_sys/fn.malloc_stats_print.html
@@ -136,6 +164,16 @@ pub fn memory_stats(opts: &str) -> Option<String> {
 	Some(str)
 }
 
+/// Appends a jemalloc statistics fragment through the C callback boundary.
+///
+/// Panics are caught and converted into process aborts before control returns
+/// to jemalloc.
+///
+/// # Safety
+///
+/// `opaque` must point to the live `String` supplied by [`memory_stats`], and
+/// `msg` must point to a NUL-terminated string valid for the duration of the
+/// call.
 unsafe extern "C" fn malloc_stats_cb(opaque: *mut c_void, msg: *const c_char) {
 	catch_unwind(move || handle_malloc_stats(opaque, msg))
 		.map_err(|_| abort())
@@ -158,319 +196,44 @@ fn handle_malloc_stats(opaque: *mut c_void, msg: *const c_char) {
 	res.push_str(msg.as_ref());
 }
 
-fn global_alloc_hook(layout: Layout) {
-	catch_unwind(move || handle_global_alloc(layout))
-		.map_err(|_| abort())
-		.ok();
-}
+/// Reclaims unused pages from one arena or from all arenas.
+///
+/// The operation applies time-based decay before purging remaining unused dirty
+/// pages. Passing `None` selects every arena.
+pub fn trim<I: Into<Option<usize>>>(arena: I) -> Result { ctl_trim(arena).map_err(map_err) }
 
-fn global_alloc_zeroed_hook(layout: Layout) {
-	catch_unwind(move || handle_global_alloc(layout))
-		.map_err(|_| abort())
-		.ok();
-}
-
-fn handle_global_alloc(layout: Layout) {
-	use std::io::Write;
-
-	use libc::{STDOUT_FILENO, write};
-
-	let do_count = COUNT_GLOBAL_ALLOCS.load(Ordering::Relaxed);
-	let count = GLOBAL_ALLOCS.fetch_add(do_count.into(), Ordering::Relaxed);
-
-	if TRACE_GLOBAL_ALLOCS.load(Ordering::Relaxed) {
-		let mut buf = ArrayVec::<u8, 128>::new();
-		writeln!(&mut buf, "{count} align={} size={}", layout.align(), layout.size())
-			.expect("writeln! to buffer failed");
-
-		// SAFETY: Valid ptr and len from buf for writing to stdout.
-		unsafe { write(STDOUT_FILENO, buf.as_ptr().cast::<c_void>(), buf.len()) }
-			.ge(&0)
-			.into_result()
-			.expect("write(2) error");
-	}
-}
-
-#[inline]
-#[must_use]
-pub fn global_alloc_count() -> u64 { GLOBAL_ALLOCS.load(Ordering::Relaxed) }
-
-macro_rules! mallctl {
-	($name:expr_2021) => {{
-		thread_local! {
-			static KEY: OnceCell<Key> = OnceCell::default();
-		};
-
-		KEY.with(|once| {
-			once.get_or_init(move || key($name).expect("failed to translate name into mib key"))
-				.clone()
-		})
-	}};
-}
-
-pub mod this_thread {
-	use super::{Debug, Key, OnceCell, Result, is_nonzero, key, math};
-
-	thread_local! {
-		static ALLOCATED_BYTES: OnceCell<&'static u64> = const { OnceCell::new() };
-		static DEALLOCATED_BYTES: OnceCell<&'static u64> = const { OnceCell::new() };
-	}
-
-	pub fn trim() -> Result { decay().and_then(|()| purge()) }
-
-	pub fn purge() -> Result { notify(mallctl!("arena.0.purge")) }
-
-	pub fn decay() -> Result { notify(mallctl!("arena.0.decay")) }
-
-	pub fn idle() -> Result { super::notify(&mallctl!("thread.idle")) }
-
-	pub fn flush() -> Result { super::notify(&mallctl!("thread.tcache.flush")) }
-
-	pub fn set_muzzy_decay(decay_ms: isize) -> Result<isize> {
-		set(mallctl!("arena.0.muzzy_decay_ms"), decay_ms)
-	}
-
-	pub fn get_muzzy_decay() -> Result<isize> { get(mallctl!("arena.0.muzzy_decay_ms")) }
-
-	pub fn set_dirty_decay(decay_ms: isize) -> Result<isize> {
-		set(mallctl!("arena.0.dirty_decay_ms"), decay_ms)
-	}
-
-	pub fn get_dirty_decay() -> Result<isize> { get(mallctl!("arena.0.dirty_decay_ms")) }
-
-	pub fn cache_enable(enable: bool) -> Result<bool> {
-		super::set::<u8>(&mallctl!("thread.tcache.enabled"), enable.into()).map(is_nonzero!())
-	}
-
-	pub fn is_cache_enabled() -> Result<bool> {
-		super::get::<u8>(&mallctl!("thread.tcache.enabled")).map(is_nonzero!())
-	}
-
-	pub fn set_arena(id: usize) -> Result<usize> {
-		super::set::<u32>(&mallctl!("thread.arena"), id.try_into()?).and_then(math::try_into)
-	}
-
-	pub fn arena_id() -> Result<usize> {
-		super::get::<u32>(&mallctl!("thread.arena")).and_then(math::try_into)
-	}
-
-	pub fn prof_enable(enable: bool) -> Result<bool> {
-		super::set::<u8>(&mallctl!("thread.prof.active"), enable.into()).map(is_nonzero!())
-	}
-
-	pub fn is_prof_enabled() -> Result<bool> {
-		super::get::<u8>(&mallctl!("thread.prof.active")).map(is_nonzero!())
-	}
-
-	pub fn reset_peak() -> Result { super::notify(&mallctl!("thread.peak.reset")) }
-
-	pub fn peak() -> Result<u64> { super::get(&mallctl!("thread.peak.read")) }
-
-	#[inline]
-	#[must_use]
-	pub fn allocated() -> u64 {
-		*ALLOCATED_BYTES.with(|once| init_tls_cell(once, "thread.allocatedp"))
-	}
-
-	#[inline]
-	#[must_use]
-	pub fn deallocated() -> u64 {
-		*DEALLOCATED_BYTES.with(|once| init_tls_cell(once, "thread.deallocatedp"))
-	}
-
-	fn notify(key: Key) -> Result { super::notify_by_arena(Some(arena_id()?), key) }
-
-	fn set<T>(key: Key, val: T) -> Result<T>
-	where
-		T: Copy + Debug,
-	{
-		super::set_by_arena(Some(arena_id()?), key, val)
-	}
-
-	fn get<T>(key: Key) -> Result<T>
-	where
-		T: Copy + Debug,
-	{
-		super::get_by_arena(Some(arena_id()?), key)
-	}
-
-	fn init_tls_cell(cell: &OnceCell<&'static u64>, name: &str) -> &'static u64 {
-		cell.get_or_init(|| {
-			let ptr: *const u64 = super::get(&mallctl!(name)).expect("failed to obtain pointer");
-
-			// SAFETY: ptr points directly to the internal state of jemalloc for this thread
-			unsafe { ptr.as_ref() }.expect("pointer must not be null")
-		})
-	}
-}
-
-pub fn stats_reset() -> Result { notify(&mallctl!("stats.mutexes.reset")) }
-
-pub fn prof_reset() -> Result { notify(&mallctl!("prof.reset")) }
-
-pub fn prof_dump() -> Result { notify(&mallctl!("prof.dump")) }
-
-pub fn prof_gdump(enable: bool) -> Result<bool> {
-	set::<u8>(&mallctl!("prof.gdump"), enable.into()).map(is_nonzero!())
-}
-
-pub fn prof_enable(enable: bool) -> Result<bool> {
-	set::<u8>(&mallctl!("prof.active"), enable.into()).map(is_nonzero!())
-}
-
-pub fn is_prof_enabled() -> Result<bool> {
-	get::<u8>(&mallctl!("prof.active")).map(is_nonzero!())
-}
-
-pub fn prof_interval() -> Result<u64> {
-	get::<u64>(&mallctl!("prof.interval")).and_then(math::try_into)
-}
-
-pub fn trim<I: Into<Option<usize>> + Copy>(arena: I) -> Result {
-	decay(arena).and_then(|()| purge(arena))
-}
-
-pub fn purge<I: Into<Option<usize>>>(arena: I) -> Result {
-	notify_by_arena(arena.into(), mallctl!("arena.4096.purge"))
-}
-
-pub fn decay<I: Into<Option<usize>>>(arena: I) -> Result {
-	notify_by_arena(arena.into(), mallctl!("arena.4096.decay"))
-}
-
-pub fn set_muzzy_decay<I: Into<Option<usize>>>(arena: I, decay_ms: isize) -> Result<isize> {
-	match arena.into() {
-		| Some(arena) =>
-			set_by_arena(Some(arena), mallctl!("arena.4096.muzzy_decay_ms"), decay_ms),
-		| _ => set(&mallctl!("arenas.muzzy_decay_ms"), decay_ms),
-	}
-}
-
-pub fn set_dirty_decay<I: Into<Option<usize>>>(arena: I, decay_ms: isize) -> Result<isize> {
-	match arena.into() {
-		| Some(arena) =>
-			set_by_arena(Some(arena), mallctl!("arena.4096.dirty_decay_ms"), decay_ms),
-		| _ => set(&mallctl!("arenas.dirty_decay_ms"), decay_ms),
-	}
-}
-
+/// Enables or disables jemalloc background purge threads.
+///
+/// Disabling waits for the workers to terminate before returning. The previous
+/// setting is returned.
 pub fn background_thread_enable(enable: bool) -> Result<bool> {
-	set::<u8>(&mallctl!("background_thread"), enable.into()).map(is_nonzero!())
+	ctl_background_thread_enable(enable).map_err(map_err)
 }
 
-#[inline]
-#[must_use]
-pub fn is_affine_arena() -> bool { is_percpu_arena() || is_phycpu_arena() }
+/// Controls jemalloc state associated with the calling thread.
+///
+/// These wrappers resolve the thread's own arena before applying the operation.
+/// Control failures are returned through the crate's allocator error type.
+pub mod this_thread {
+	use jevmalloc::ctl::this_thread::{
+		decay as ctl_decay, set_muzzy_decay as ctl_set_muzzy_decay,
+	};
 
-#[inline]
-#[must_use]
-pub fn is_percpu_arena() -> bool { percpu_arenas().is_ok_and(is_equal_to!("percpu")) }
+	use super::{Result, map_err};
 
-#[inline]
-#[must_use]
-pub fn is_phycpu_arena() -> bool { percpu_arenas().is_ok_and(is_equal_to!("phycpu")) }
+	/// Applies decay-based purging to the calling thread's arena.
+	///
+	/// Jemalloc selects unused dirty and muzzy pages according to their
+	/// configured decay intervals.
+	pub fn decay() -> Result { ctl_decay().map_err(map_err) }
 
-pub fn percpu_arenas() -> Result<&'static str> {
-	let ptr = get::<*const c_char>(&mallctl!("opt.percpu_arena"))?;
-	//SAFETY: ptr points to a null-terminated string returned for opt.percpu_arena.
-	let cstr = unsafe { CStr::from_ptr(ptr) };
-	cstr.to_str().map_err(Into::into)
+	/// Sets the calling thread's arena muzzy-page decay interval.
+	///
+	/// A value of `0` requests immediate purging, while `-1` disables purging.
+	/// The previous interval is returned.
+	pub fn set_muzzy_decay(decay_ms: isize) -> Result<isize> {
+		ctl_set_muzzy_decay(decay_ms).map_err(map_err)
+	}
 }
 
-pub fn arenas() -> Result<usize> {
-	get::<u32>(&mallctl!("arenas.narenas")).and_then(math::try_into)
-}
-
-pub fn inc_epoch() -> Result<u64> { xchg(&mallctl!("epoch"), 1_u64) }
-
-pub fn acq_epoch() -> Result<u64> { xchg(&mallctl!("epoch"), 0_u64) }
-
-fn notify_by_arena(id: Option<usize>, mut key: Key) -> Result {
-	key[1] = id.unwrap_or(4096);
-	notify(&key)
-}
-
-fn set_by_arena<T>(id: Option<usize>, mut key: Key, val: T) -> Result<T>
-where
-	T: Copy + Debug,
-{
-	key[1] = id.unwrap_or(4096);
-	set(&key, val)
-}
-
-fn get_by_arena<T>(id: Option<usize>, mut key: Key) -> Result<T>
-where
-	T: Copy + Debug,
-{
-	key[1] = id.unwrap_or(4096);
-	get(&key)
-}
-
-fn notify(key: &Key) -> Result { xchg(key, ()) }
-
-fn set<T>(key: &Key, val: T) -> Result<T>
-where
-	T: Copy + Debug,
-{
-	let _lock = CONTROL.lock()?;
-	let res = xchg(key, val)?;
-	inc_epoch()?;
-
-	Ok(res)
-}
-
-#[tracing::instrument(
-	name = "get",
-	level = "trace"
-	skip_all,
-	fields(?key)
-)]
-fn get<T>(key: &Key) -> Result<T>
-where
-	T: Copy + Debug,
-{
-	acq_epoch()?;
-
-	// SAFETY: T must be perfectly valid to receive value.
-	unsafe { mallctl::raw::read_mib(key.as_slice()) }.map_err(map_err)
-}
-
-#[tracing::instrument(
-	name = "xchg",
-	level = "trace"
-	skip_all,
-	fields(?key, ?val)
-)]
-fn xchg<T>(key: &Key, val: T) -> Result<T>
-where
-	T: Copy + Debug,
-{
-	// SAFETY: T must be the exact expected type.
-	unsafe { mallctl::raw::update_mib(key.as_slice(), val) }.map_err(map_err)
-}
-
-fn key(name: &str) -> Result<Key> {
-	// tikv asserts the output buffer length is tight to the number of required mibs
-	// so we slice that down here.
-	let segs = name
-		.chars()
-		.filter(is_equal_to!(&'.'))
-		.count()
-		.try_add(1)?;
-
-	let name = self::name(name)?;
-	let mut buf = [0_usize; KEY_SEGS];
-	mallctl::raw::name_to_mib(name.as_slice(), &mut buf[0..segs])
-		.map_err(map_err)
-		.map(move |()| buf.into_iter().take(segs).collect())
-}
-
-fn name(name: &str) -> Result<Name> {
-	let mut buf = Name::new();
-	buf.try_extend_from_slice(name.as_bytes())?;
-	buf.try_extend_from_slice(b"\0")?;
-
-	Ok(buf)
-}
-
-fn map_err(error: jemalloc::ctl::Error) -> crate::Error { err!("mallctl: {}", error.to_string()) }
+fn map_err(error: CtlError) -> crate::Error { err!("mallctl: {error}") }

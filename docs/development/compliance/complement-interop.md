@@ -2,7 +2,7 @@
 
 Tuwunel runs Complement with Tuwunel and Synapse assigned to opposite homeserver positions. In the first direction Tuwunel is `hs1` and Synapse is `hs2`; the inverse direction swaps those positions.
 
-These report-only results are a snapshot from [July 24, 2026 CI run](https://github.com/matrix-construct/tuwunel/actions/runs/30074568131).
+These report-only results are a snapshot from [August 9, 2026 CI run](https://github.com/matrix-construct/tuwunel/actions/runs/31327677030).
 
 ## Counts
 
@@ -10,13 +10,13 @@ These report-only results are a snapshot from [July 24, 2026 CI run](https://git
 
 - Test groups: 205. Passing: **81.5%**
   - ✅ `pass`: 167
-  - 🟨 `some`: 18
-  - ❌ `fail`: 18
+  - 🟨 `some`: 19
+  - ❌ `fail`: 17
   - ⬛ `skip`: 2
 
-- Subtests: 587. Passing: **77.0%**
-  - ✅ `pass`: 452
-  - ❌ `fail`: 122
+- Subtests: 587. Passing: **77.2%**
+  - ✅ `pass`: 453
+  - ❌ `fail`: 121
   - ⬛ `skip`: 13
 
 ### Synapse as `hs1`
@@ -157,7 +157,7 @@ These report-only results are a snapshot from [July 24, 2026 CI run](https://git
 | ❌ | – | ✅ | – | `OutboundFederationIgnoresMissingEventWithBadJSONForRoomVersion6` |
 | ✅ | 1/0/0 | ✅ | 1/0/0 | `OutboundFederationProfile` |
 | ✅ | – | ✅ | – | `OutboundFederationSend` |
-| ❌ | 0/58/7 | 🟨 | 58/1/6 | `PartialStateJoin` |
+| 🟨 | 1/57/7 | 🟨 | 58/1/6 | `PartialStateJoin` |
 | ✅ | 1/0/0 | ✅ | 1/0/0 | `PollsLocalPushRules` |
 | ✅ | 3/0/0 | ✅ | 3/0/0 | `PowerLevels` |
 | 🟨 | 4/1/0 | ✅ | 5/0/0 | `Presence` |

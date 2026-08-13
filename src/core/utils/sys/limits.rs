@@ -56,6 +56,14 @@ pub fn maximize_thread_limit() -> Result {
 #[cfg(any(not(unix), target_os = "macos"))]
 pub fn maximize_thread_limit() -> Result { Ok(()) }
 
+/// Returns the soft and hard file-descriptor limits.
+///
+/// The tuple is ordered as the current soft limit followed by the maximum hard
+/// limit. Values come from `RLIMIT_NOFILE`.
+///
+/// # Panics
+///
+/// Panics when either platform limit cannot be represented as `usize`.
 #[cfg(unix)]
 #[inline]
 pub fn max_file_descriptors() -> Result<(usize, usize)> {
@@ -64,10 +72,22 @@ pub fn max_file_descriptors() -> Result<(usize, usize)> {
 		.map_err(Into::into)
 }
 
+/// Returns sentinel file-descriptor limits on unsupported platforms.
+///
+/// Both tuple elements are `usize::MAX`, representing no known finite limit.
+/// No operating-system query is performed.
 #[cfg(not(unix))]
 #[inline]
 pub fn max_file_descriptors() -> Result<(usize, usize)> { Ok((usize::MAX, usize::MAX)) }
 
+/// Returns the soft and hard process stack-size limits.
+///
+/// The tuple is ordered as the current soft limit followed by the maximum hard
+/// limit. Values come from `RLIMIT_STACK`.
+///
+/// # Panics
+///
+/// Panics when either platform limit cannot be represented as `usize`.
 #[cfg(unix)]
 #[inline]
 pub fn max_stack_size() -> Result<(usize, usize)> {
@@ -76,10 +96,22 @@ pub fn max_stack_size() -> Result<(usize, usize)> {
 		.map_err(Into::into)
 }
 
+/// Returns sentinel stack-size limits on unsupported platforms.
+///
+/// Both tuple elements are `usize::MAX`, representing no known finite limit.
+/// No operating-system query is performed.
 #[cfg(not(unix))]
 #[inline]
 pub fn max_stack_size() -> Result<(usize, usize)> { Ok((usize::MAX, usize::MAX)) }
 
+/// Returns the soft and hard locked-memory limits.
+///
+/// The tuple is ordered as the current soft limit followed by the maximum hard
+/// limit. Values come from `RLIMIT_MEMLOCK`.
+///
+/// # Panics
+///
+/// Panics when either platform limit cannot be represented as `usize`.
 #[cfg(all(unix, not(target_os = "macos")))]
 #[inline]
 pub fn max_memory_locked() -> Result<(usize, usize)> {
@@ -88,10 +120,23 @@ pub fn max_memory_locked() -> Result<(usize, usize)> {
 		.map_err(Into::into)
 }
 
+/// Returns sentinel locked-memory limits on unsupported platforms.
+///
+/// Both tuple elements are zero, the module's unsupported-platform sentinel.
+/// No operating-system query is performed.
 #[cfg(any(not(unix), target_os = "macos"))]
 #[inline]
 pub fn max_memory_locked() -> Result<(usize, usize)> { Ok((usize::MIN, usize::MIN)) }
 
+/// Returns the soft and hard per-user process-count limits.
+///
+/// The tuple is ordered as the current soft limit followed by the maximum hard
+/// limit. Values come from `RLIMIT_NPROC`; on Linux, it counts extant threads
+/// for the caller's real user ID.
+///
+/// # Panics
+///
+/// Panics when either platform limit cannot be represented as `usize`.
 #[cfg(all(unix, not(target_os = "macos")))]
 #[inline]
 pub fn max_threads() -> Result<(usize, usize)> {
@@ -100,6 +145,10 @@ pub fn max_threads() -> Result<(usize, usize)> {
 		.map_err(Into::into)
 }
 
+/// Returns sentinel thread limits on unsupported platforms.
+///
+/// Both tuple elements are `usize::MAX`, representing no known finite limit.
+/// No operating-system query is performed.
 #[cfg(any(not(unix), target_os = "macos"))]
 #[inline]
 pub fn max_threads() -> Result<(usize, usize)> { Ok((usize::MAX, usize::MAX)) }

@@ -7,6 +7,11 @@ use ruma::{
 
 use crate::{extract_variant, is_equal_to, matrix::room_version};
 
+/// Converts a stored PDU object to its federation wire representation.
+///
+/// Local transaction metadata is removed and room-version rules select the
+/// fields and event-reference shape sent to peers. When rules are unavailable,
+/// the event ID is removed without rewriting event references.
 #[must_use]
 pub fn into_outgoing_federation(
 	mut pdu_json: CanonicalJsonObject,
@@ -66,6 +71,11 @@ fn mutate_outgoing_reference_format(value: &mut CanonicalJsonValue) {
 		});
 }
 
+/// Normalizes a federation PDU object into the stored representation.
+///
+/// Legacy event-reference tuples are collapsed and omitted room or event IDs
+/// are restored from trusted request context. The supplied rules must match the
+/// event's room version.
 #[must_use]
 pub fn from_incoming_federation(
 	room_id: &RoomId,

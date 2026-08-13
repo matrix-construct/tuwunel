@@ -14,7 +14,17 @@ use crate::is_equal_to;
 /// Segments of one `event_fields` entry; most paths are one or two deep.
 type FieldPath = SmallVec<[String; 2]>;
 
+/// Tests values against a Matrix filter.
+///
+/// Implementations apply the allow and deny lists relevant to the value being
+/// tested. A value matches only when every applicable filter condition accepts
+/// it.
 pub trait Matches<T> {
+	/// Returns whether the supplied value satisfies this filter.
+	///
+	/// The value type selects which filter fields participate in the
+	/// comparison. Built-in implementations reject deny-list matches before
+	/// accepting allow-list matches.
 	fn matches(&self, t: T) -> bool;
 }
 

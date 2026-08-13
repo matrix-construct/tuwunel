@@ -11,8 +11,16 @@ use serde_json::value::to_raw_value;
 
 use super::{Event, redact};
 
+/// Owns an event for conversion into a Ruma event envelope.
+///
+/// `From` implementations select the fields required by each client event
+/// shape. Consuming the wrapper also consumes the source event.
 pub struct Owned<E: Event>(pub(super) E);
 
+/// Borrows an event for conversion into a Ruma event envelope.
+///
+/// `From` implementations select the fields required by each client event
+/// shape. The source event remains available after conversion.
 pub struct Ref<'a, E: Event>(pub(super) &'a E);
 
 impl<E: Event> From<Owned<E>> for Raw<AnySyncTimelineEvent> {

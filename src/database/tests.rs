@@ -17,8 +17,9 @@ use tuwunel_core::{
 };
 
 use crate::{
-	Cbor, Database, Ignore, Interfix,
+	Cbor, Database, Ignore, Interfix, Txn,
 	de::from_slice,
+	keyval::{serialize_key, serialize_val},
 	ser,
 	ser::{Json, serialize_to_vec},
 	txn::next_record,
@@ -1097,7 +1098,7 @@ fn txn_record_golden() {
 	assert_eq!(next_record(&mut records), Some((0, b"key".as_slice())));
 	assert_eq!(next_record(&mut records), Some((0, b"deleted".as_slice())));
 	assert_eq!(next_record(&mut records), Some((0, b"empty".as_slice())));
-	assert!(records.is_empty());
+	assert!(records.is_empty(), "{records:?}");
 }
 
 #[test]
@@ -1113,7 +1114,7 @@ fn txn_record_golden_long_key() {
 		.expect("batch shorter than its header");
 
 	assert_eq!(next_record(&mut records), Some((0, long.as_slice())));
-	assert!(records.is_empty());
+	assert!(records.is_empty(), "{records:?}");
 }
 
 #[test]
@@ -1125,7 +1126,7 @@ fn txn_record_cf() {
 
 	assert_eq!(next_record(&mut records), Some((200, b"k".as_slice())));
 	assert_eq!(next_record(&mut records), Some((9, b"del".as_slice())));
-	assert!(records.is_empty());
+	assert!(records.is_empty(), "{records:?}");
 }
 
 #[test]
@@ -1171,11 +1172,20 @@ async fn txn_insert_raw_preserves_bytes() -> Result {
 	let first_value: &[u8] = b"\xFE\0value";
 	let second_key: &[u8] = b"\xFFother\0key";
 	let second_value: &[u8] = b"value\0\xFD";
+	let put_raw_key = ("mixed", 1_u64);
+	let put_raw_value: &[u8] = b"raw\0value\xFC";
+	let raw_put_key: &[u8] = b"raw\0key\xFB";
+	let raw_put_value = 2_u64;
+	let encoded_put_raw_key = serialize_key(put_raw_key)?;
+	let encoded_raw_put_value = serialize_val(raw_put_value)?;
 
-	let mut txn = database.txn();
+	let mut txn = Txn::insert_each([
+		(first.as_ref(), first_key, first_value),
+		(second.as_ref(), second_key, second_value),
+	]);
 
-	txn.insert_raw(first, first_key, first_value);
-	txn.insert_raw(second, second_key, second_value);
+	txn.put_raw(first, put_raw_key, put_raw_value);
+	txn.raw_put(second, raw_put_key, raw_put_value);
 
 	let mut keys = txn.keys();
 	let (map, key) = keys.next().expect("first queued key");
@@ -1187,6 +1197,16 @@ async fn txn_insert_raw_preserves_bytes() -> Result {
 
 	assert!(Arc::ptr_eq(&map, second));
 	assert_eq!(key, second_key);
+
+	let (map, key) = keys.next().expect("serialized queued key");
+
+	assert!(Arc::ptr_eq(&map, first));
+	assert_eq!(key, encoded_put_raw_key.as_ref());
+
+	let (map, key) = keys.next().expect("raw queued key");
+
+	assert!(Arc::ptr_eq(&map, second));
+	assert_eq!(key, raw_put_key);
 	assert!(keys.next().is_none());
 	drop(keys);
 
@@ -1194,12 +1214,19 @@ async fn txn_insert_raw_preserves_bytes() -> Result {
 
 	assert_eq!(first.get(&first_key).await?.as_ref(), first_value);
 	assert_eq!(second.get(&second_key).await?.as_ref(), second_value);
+	assert_eq!(first.get(&encoded_put_raw_key).await?.as_ref(), put_raw_value);
+	assert_eq!(second.get(&raw_put_key).await?.as_ref(), encoded_raw_put_value.as_ref());
 
 	let watch = first.watch_raw_prefix(first_key);
 	let mut txn = database.txn();
 
-	txn.del_raw(first, first_key);
-	txn.del_raw(second, second_key);
+	txn.extend([
+		(first.as_ref(), first_key),
+		(second.as_ref(), second_key),
+		(first.as_ref(), encoded_put_raw_key.as_ref()),
+		(second.as_ref(), raw_put_key),
+	]);
+
 	txn.execute();
 
 	watch.await;
@@ -1215,6 +1242,22 @@ async fn txn_insert_raw_preserves_bytes() -> Result {
 	assert!(
 		second
 			.get(&second_key)
+			.await
+			.unwrap_err()
+			.is_not_found()
+	);
+
+	assert!(
+		first
+			.get(&encoded_put_raw_key)
+			.await
+			.unwrap_err()
+			.is_not_found()
+	);
+
+	assert!(
+		second
+			.get(&raw_put_key)
 			.await
 			.unwrap_err()
 			.is_not_found()

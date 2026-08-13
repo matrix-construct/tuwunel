@@ -7,10 +7,15 @@ use tuwunel_core::implement;
 
 use crate::util::or_else;
 
-/// Insert Key/Value
+/// Stores a raw key and raw value in this map.
 ///
-/// - Key is raw
-/// - Val is raw
+/// The write uses the map's configured options, flushes immediately when the
+/// engine is uncorked, and then notifies matching watchers. When the engine is
+/// corked, the surrounding cork controls flushing.
+///
+/// # Panics
+///
+/// Panics if RocksDB rejects the write or an uncorked flush fails.
 #[implement(super::Map)]
 #[tracing::instrument(skip_all, fields(%self), level = "trace")]
 pub fn insert<K, V>(&self, key: &K, val: V)

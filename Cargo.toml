@@ -57,6 +57,11 @@ version = "2.3.1"
 [workspace.dependencies.async-trait]
 version = "0.1"
 
+[workspace.dependencies.aws-lc-rs]
+version = "1.17"
+default-features = false
+features = ["aws-lc-sys"]
+
 [workspace.dependencies.axum]
 version = "0.8"
 default-features = false
@@ -231,20 +236,17 @@ features = [
 ]
 
 [workspace.dependencies.itertools]
-version = "0.14"
+version = "0.15"
 
 [workspace.dependencies.jevmalloc]
 git = "https://github.com/matrix-construct/jevmalloc"
-rev = "192b66e1a4d2c16bd6db7a84385ecb9c20889637"
+rev = "faa391081abf35f6ff084c40104d2645be132dd7"
 
 [workspace.dependencies.jsonwebtoken]
-version = "10.3"
+version = "11.0"
 default-features = false
 features = [
 	"aws_lc_rs",
-	"ed25519-dalek",
-	"hmac",
-	"sha2",
 	"use_pem",
 ]
 
@@ -258,10 +260,11 @@ features = ["sync", "tls-rustls"]
 version = "0.11"
 default-features = false
 features = [
+	"aws-lc-rs",
 	"builder",
 	"hostname",
 	"pool",
-	"ring",
+	"rustls-platform-verifier",
 	"smtp-transport",
 	"tokio1",
 	"tokio1-rustls",
@@ -291,7 +294,7 @@ version = "2.2"
 features = ["std"]
 
 [workspace.dependencies.minicbor-serde]
-version = "0.6"
+version = "0.7"
 features = ["std"]
 
 [workspace.dependencies.nix]
@@ -311,12 +314,11 @@ version = "1"
 version = "0.2"
 
 [workspace.dependencies.object_store]
-version = "0.13"
+version = "0.14"
 default-features = false
 features = [
 	"aws",
 	"fs",
-	"tls-webpki-roots",
 ]
 
 [workspace.dependencies.opentelemetry]
@@ -358,10 +360,6 @@ features = [
 	"rustls",
 	"socks",
 ]
-
-[workspace.dependencies.ring]
-version = "0.17"
-default-features = false
 
 [workspace.dependencies.ruma]
 git = "https://github.com/matrix-construct/ruma"
@@ -430,9 +428,10 @@ default-features = false
 
 [workspace.dependencies.rust-rocksdb]
 git = "https://github.com/matrix-construct/rust-rocksdb"
-rev = "4585432466f3a3755749589a6f8611bba0ce165e"
+rev = "22e4c7739a7f49af08c3c4c71abd294a9f881875"
 default-features = false
 features = [
+	"bindgen-runtime",
 	"bzip2",
 	"lto",
 	"lz4",
@@ -543,7 +542,7 @@ features = [
 ]
 
 [workspace.dependencies.termimad]
-version = "0.34"
+version = "0.35"
 default-features = false
 
 [workspace.dependencies.thiserror]
@@ -627,9 +626,6 @@ features = ["serde"]
 version = "2.0"
 default-features = false
 
-[workspace.dependencies.webpki-root-certs]
-version = "1.0"
-
 #
 # Patches
 #
@@ -666,6 +662,10 @@ rev = "0510e3a3cba7aedd504b4ee0d69fbf41e76a524f"
 [patch.crates-io.resolv-conf]
 git = "https://github.com/matrix-construct/resolv-conf"
 rev = "ab5c3e44016bc76b8798ec837a5a9cf9d88bf233"
+
+[patch.crates-io.rustls-platform-verifier]
+git = "https://github.com/matrix-construct/rustls-platform-verifier"
+rev = "c68093b6ac7d739e6b3aefb809c646a5e0210306"
 
 #
 # Our crates
@@ -880,44 +880,44 @@ opt-level = 'z'
 #
 
 [workspace.lints.rust]
-absolute-paths-not-starting-with-crate = "warn"
-ambiguous-negative-literals = "warn"
-closure-returning-async-block = "warn"
-deprecated-in-future = "warn"
-deref-into-dyn-supertrait = "warn"
-elided-lifetimes-in-paths = "warn"
-explicit-outlives-requirements = "warn"
-ffi-unwind-calls = "warn"
-impl-trait-redundant-captures = "warn"
-keyword-idents = "warn"
-macro-use-extern-crate = "warn"
-meta-variable-misuse = "warn"
-missing-abi = "warn"
-missing-copy-implementations = "warn"
-#missing-debug-implementations = "warn"                              # TODO
-non-ascii-idents = "warn"
-redundant-imports = "warn"
-redundant-lifetimes = "warn"
-rust-2021-incompatible-closure-captures = "warn"
-rust-2021-incompatible-or-patterns = "warn"
-rust-2021-prefixes-incompatible-syntax = "warn"
-rust-2021-prelude-collisions = "warn"
-semicolon-in-expressions-from-macros = "warn"
-single-use-lifetimes = "warn"
-trivial-casts = "warn"
-trivial-numeric-casts = "warn"
-unit-bindings = "warn"
-unnameable-types = "warn"
-unreachable-pub = "warn"
-unsafe-op-in-unsafe-fn = "warn"
-unstable-features = "warn"
-unused-extern-crates = "warn"
-unused-import-braces = "warn"
-unused-lifetimes = "warn"
-unused-macro-rules = "warn"
-unused-must-use = "warn"
-unused-qualifications = "warn"
-#unused-results = "warn"                                             # TODO
+absolute_paths_not_starting_with_crate = "warn"
+ambiguous_negative_literals = "warn"
+closure_returning_async_block = "warn"
+deprecated_in_future = "warn"
+deref_into_dyn_supertrait = "warn"
+elided_lifetimes_in_paths = "warn"
+explicit_outlives_requirements = "warn"
+ffi_unwind_calls = "warn"
+impl_trait_redundant_captures = "warn"
+keyword_idents = { level = "warn", priority = -1 }
+macro_use_extern_crate = "warn"
+meta_variable_misuse = "warn"
+missing_abi = "warn"
+missing_copy_implementations = "warn"
+#missing_debug_implementations = "warn"                              # TODO
+non_ascii_idents = "warn"
+redundant_imports = "warn"
+redundant_lifetimes = "warn"
+rust_2021_incompatible_closure_captures = "warn"
+rust_2021_incompatible_or_patterns = "warn"
+rust_2021_prefixes_incompatible_syntax = "warn"
+rust_2021_prelude_collisions = "warn"
+semicolon_in_expressions_from_macros = "warn"
+single_use_lifetimes = "warn"
+trivial_casts = "warn"
+trivial_numeric_casts = "warn"
+unit_bindings = "warn"
+unnameable_types = "warn"
+unreachable_pub = "warn"
+unsafe_op_in_unsafe_fn = "warn"
+unstable_features = "warn"
+unused_extern_crates = "warn"
+unused_import_braces = "warn"
+unused_lifetimes = "warn"
+unused_macro_rules = "warn"
+unused_must_use = "warn"
+unused_qualifications = "warn"
+#unused_results = "warn"                                             # TODO
 
 ## some sadness
 mismatched_lifetime_syntaxes = "allow"
@@ -1075,9 +1075,11 @@ style = { level = "warn", priority = -1 }
 ## some sadness
 # trivial assertions are quite alright
 assertions_on_constants = { level = "allow", priority = 1 }
+# async_trait marks its generated pinned-box futures must_use; not ours to remove
+double_must_use = { level = "allow", priority = 1 }
 module_inception = { level = "allow", priority = 1 }
 obfuscated_if_else = { level = "allow", priority = 1 }
-toplevel-ref-arg = { level = "allow", priority = 1 }
+toplevel_ref_arg = { level = "allow", priority = 1 }
 
 ###################
 suspicious = { level = "warn", priority = -1 }

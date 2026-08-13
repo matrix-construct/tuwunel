@@ -48,8 +48,8 @@ fn skips_a_defaulted_address_it_cannot_bind() {
 	let listeners =
 		bind_addrs(&[taken], &mut listening, defaulted).expect("the address is skipped");
 
-	assert!(listeners.is_empty());
-	assert!(listening.is_empty());
+	assert!(listeners.is_empty(), "{listeners:?}");
+	assert!(listening.is_empty(), "{listening:?}");
 }
 
 #[test]

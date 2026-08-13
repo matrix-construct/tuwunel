@@ -37,43 +37,102 @@ pub use self::{
 use super::{Event, ShortRoomId, StateKey};
 use crate::{Result, err};
 
-/// Persistent Data Unit (Event)
+/// Stores a Matrix persistent data unit in typed form.
+///
+/// The representation retains canonical event fields used by state resolution,
+/// storage, and client serialization. Federation adapters normalize
+/// version-specific wire shapes.
 #[derive(Clone, Deserialize, Serialize, Debug)]
 pub struct Pdu {
+	/// Matrix event type.
+	///
+	/// The value is serialized under the top-level `type` field.
 	#[serde(rename = "type")]
 	pub kind: TimelineEventType,
 
+	/// Raw canonical event content.
+	///
+	/// Content remains encoded until a caller requests a typed or JSON value.
 	pub content: Content,
 
+	/// Matrix identifier assigned to this event.
+	///
+	/// Stored PDUs always carry an owned event ID, including room versions that
+	/// derive it outside the federation wire object.
 	pub event_id: OwnedEventId,
 
+	/// Matrix room containing this event.
+	///
+	/// Stored PDUs carry the room ID even when a room version omits it from a
+	/// creation event's federation representation.
 	pub room_id: OwnedRoomId,
 
+	/// Matrix user who sent the event.
+	///
+	/// The sender participates in authorization and client-visible event
+	/// output.
 	pub sender: OwnedUserId,
 
+	/// State key when this is a state event.
+	///
+	/// Message-like events store `None` and omit the field during
+	/// serialization.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub state_key: Option<StateKey>,
 
+	/// Event targeted by a redaction when carried at the top level.
+	///
+	/// Newer room versions can place this value in event content instead. An
+	/// absent target is omitted during serialization.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub redacts: Option<OwnedEventId>,
 
+	/// Events declared as direct predecessors of this event.
+	///
+	/// The sequence is stored inline for the common single-predecessor case.
 	pub prev_events: PrevEvents,
 
+	/// Events used to authorize this event.
+	///
+	/// These identifiers form the event's explicit authorization dependency
+	/// set.
 	pub auth_events: AuthEvents,
 
+	/// Millisecond timestamp supplied by the originating server.
+	///
+	/// The value is preserved for ordering metadata and client serialization.
 	pub origin_server_ts: UInt,
 
+	/// Event depth in the room directed acyclic graph.
+	///
+	/// Depth is originating-server-provided graph metadata and is distinct from
+	/// the local timeline sequence.
 	pub depth: UInt,
 
+	/// Content hash declared by the event.
+	///
+	/// Federation validation compares the declaration with the computed content
+	/// hash to detect content changes.
 	pub hashes: EventHash,
 
+	/// Server that originated an event carrying a top-level `origin` field.
+	///
+	/// Legacy event formats retain this value for local and remote events. The
+	/// field is absent when it was not carried by the event format.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub origin: Option<OwnedServerName>,
 
+	/// Unsigned metadata excluded from event hashing and signing.
+	///
+	/// Stored values are local annotations such as transaction IDs, age, prior
+	/// state, and bundled relations. The field is omitted when absent.
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub unsigned: Option<Unsigned>,
 
 	//TODO: https://spec.matrix.org/v1.14/rooms/v11/#rejected-events
+	/// Whether state resolution rejected this event in test fixtures.
+	///
+	/// Production builds derive rejection state outside the serialized PDU.
 	#[cfg(test)]
 	#[serde(default, skip_serializing)]
 	pub rejected: bool,
@@ -118,6 +177,10 @@ pub const MAX_PREV_EVENTS: usize = 20;
 pub const MAX_AUTH_EVENTS: usize = 10;
 
 impl Pdu {
+	/// Inserts room and event IDs before deserializing a canonical PDU object.
+	///
+	/// Existing values under those keys are replaced. The resulting typed PDU
+	/// owns both supplied identifiers.
 	pub fn from_object_and_roomid_and_eventid(
 		room_id: &RoomId,
 		event_id: &EventId,
@@ -128,6 +191,10 @@ impl Pdu {
 		Self::from_object_and_eventid(event_id, json)
 	}
 
+	/// Inserts an event ID before deserializing a canonical PDU object.
+	///
+	/// Any existing `event_id` value is replaced. Other object fields pass
+	/// through to normal PDU deserialization.
 	pub fn from_object_and_eventid(
 		event_id: &EventId,
 		mut json: CanonicalJsonObject,
@@ -137,6 +204,16 @@ impl Pdu {
 		Self::from_object(json)
 	}
 
+	/// Normalizes federation wire fields and validates PDU format and room ID.
+	///
+	/// Version-specific wire fields are converted to the stored representation
+	/// before these checks. Signature, content-hash, and authorization
+	/// validation remain the caller's responsibility.
+	///
+	/// # Panics
+	///
+	/// Panics if the object lacks `type` while the selected rules do not
+	/// require a create-event room ID.
 	pub fn from_object_federation(
 		room_id: &RoomId,
 		event_id: &EventId,
@@ -149,6 +226,10 @@ impl Pdu {
 		Ok((pdu, json))
 	}
 
+	/// Validates a canonical PDU object before deserializing it.
+	///
+	/// Checks use the supplied room-version event-format rules. Successful
+	/// validation returns the typed stored representation.
 	pub fn from_object_checked(
 		json: CanonicalJsonObject,
 		rules: &RoomVersionRules,
@@ -157,20 +238,43 @@ impl Pdu {
 		Self::from_object(json)
 	}
 
+	/// Deserializes a canonical JSON object into a stored PDU.
+	///
+	/// The object is wrapped as a canonical JSON value before typed
+	/// deserialization. No room-version format checks are performed.
 	pub fn from_object(json: CanonicalJsonObject) -> Result<Self> {
 		let json = CanonicalJsonValue::Object(json);
 		Self::from_value(json)
 	}
 
+	/// Deserializes raw JSON through a canonical JSON value.
+	///
+	/// Canonical conversion normalizes integer and object representation before
+	/// the PDU fields are decoded. No room-version format checks are
+	/// performed.
+	///
+	/// # Panics
+	///
+	/// Panics if the raw JSON contains a value outside canonical JSON, such as
+	/// a floating-point value or an integer outside the canonical range.
 	pub fn from_raw_value(json: &RawJsonValue) -> Result<Self> {
 		let json: CanonicalJsonValue = json.into();
 		Self::from_value(json)
 	}
 
+	/// Deserializes a canonical JSON value into a stored PDU.
+	///
+	/// The input must contain the fields required by `Pdu`. No room-version
+	/// format checks are performed before deserialization.
 	pub fn from_value(json: CanonicalJsonValue) -> Result<Self> {
 		serde_json::from_value(json.into()).map_err(Into::into)
 	}
 
+	/// Deserializes raw JSON directly into a stored PDU.
+	///
+	/// This path uses `Pdu`'s Serde representation without first canonicalizing
+	/// the input. Callers that require canonical validation should use a
+	/// checked constructor.
 	pub fn from_raw_json(json: &RawJsonValue) -> Result<Self> {
 		Self::deserialize(json).map_err(Into::into)
 	}

@@ -7,9 +7,10 @@ use std::{
 
 use bytes::{Bytes, BytesMut};
 use ipaddress::{IPAddress, ipv4::from_u32 as ipv4_from_u32};
-use reqwest::{Certificate, Client, ClientBuilder, dns::Resolve, header::HeaderValue, redirect};
-use tuwunel_core::{Config, Err, Result, debug, either::Either, err, implement, trace};
-use webpki_root_certs::TLS_SERVER_ROOT_CERTS;
+use reqwest::{Client, ClientBuilder, dns::Resolve, header::HeaderValue, redirect};
+use tuwunel_core::{
+	Config, Err, Result, debug, either::Either, err, error::error_chain, implement, trace,
+};
 
 use crate::{Services, resolver::Validating, service};
 
@@ -45,6 +46,8 @@ impl crate::Service for Service {
 	fn build(args: &crate::Args<'_>) -> Result<Arc<Self>> {
 		let config = &args.server.config;
 
+		probe_tls(config)?;
+
 		Ok(Arc::new(Self {
 			clients: LazyLock::new(Box::new({
 				let services = args.services.clone();
@@ -64,6 +67,25 @@ impl crate::Service for Service {
 	}
 
 	fn name(&self) -> &str { service::make_name(std::module_path!()) }
+}
+
+/// Fails startup when an HTTPS client cannot be constructed.
+///
+/// The clients are built lazily on first use, so a platform trust store that
+/// yields no roots surfaces as a panic inside whichever worker reaches for a
+/// client first. Probing once at startup turns that into a legible boot error.
+fn probe_tls(config: &Config) -> Result {
+	base(config, None)?
+		.build()
+		.map(drop)
+		.map_err(|e| {
+			err!(error!(
+				chain = %error_chain(&e),
+				"Failed to construct an HTTPS client. If the system trust store is empty, \
+				 install a CA bundle (ca-certificates on Debian and Ubuntu) or point \
+				 SSL_CERT_FILE at one.",
+			))
+		})
 }
 
 fn make_clients(services: &Services) -> Result<Clients> {
@@ -209,10 +231,6 @@ fn base(config: &Config, name: Option<&str>) -> Result<ClientBuilder> {
 		.map(|name| format!("{user_agent} {name}").try_into())
 		.unwrap_or_else(|| user_agent.try_into())?;
 
-	let certs = TLS_SERVER_ROOT_CERTS
-		.iter()
-		.map(|der| Certificate::from_der(der).expect("certificate must be valid der encoding"));
-
 	let builder = Client::builder()
 		.connect_timeout(Duration::from_secs(config.request_conn_timeout))
 		.read_timeout(Duration::from_secs(config.request_timeout))
@@ -225,14 +243,6 @@ fn base(config: &Config, name: Option<&str>) -> Result<ClientBuilder> {
 		.connection_verbose(cfg!(debug_assertions))
 		// Check if env var is set to avoid locking the keyfile mutex on every connection open
 		.tls_sslkeylogfile(std::env::var_os("SSLKEYLOGFILE").is_some());
-
-	// Android's trust-store verifier requires a JVM; certs-only keeps rustls
-	// on the bundled roots.
-	#[cfg(target_os = "android")]
-	let builder = builder.tls_certs_only(certs);
-
-	#[cfg(not(target_os = "android"))]
-	let builder = builder.tls_certs_merge(certs);
 
 	let encodings: [(bool, DisableEncoding); 3] = [
 		(config.request_gzip, ClientBuilder::no_gzip),

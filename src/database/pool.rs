@@ -25,9 +25,11 @@ use tuwunel_core::{
 use self::configure::configure;
 use crate::{Handle, Map, keyval::KeyBuf, stream};
 
-/// Frontend thread-pool. Operating system threads are used to make database
-/// requests which are not cached. These thread-blocking requests are offloaded
-/// from the tokio async workers and executed on this threadpool.
+/// Runs blocking database reads away from asynchronous runtime workers.
+///
+/// Operating-system threads service uncached point queries and iterator seeks
+/// submitted through bounded queues. The pool keeps those blocking calls from
+/// occupying Tokio workers.
 pub(crate) struct Pool {
 	server: Arc<Server>,
 	queues: Vec<Sender<Cmd>>,
@@ -37,22 +39,30 @@ pub(crate) struct Pool {
 	queued_max: AtomicUsize,
 }
 
-/// Operations which can be submitted to the pool.
+/// Represents work accepted by the database thread pool.
+///
+/// Point queries use [`Get`], while iterator initialization uses [`Seek`]. Each
+/// command carries a response slot populated before it is enqueued.
 pub(crate) enum Cmd {
 	Get(Get),
 	Iter(Seek),
 }
 
-/// Multi-point-query
+/// Carries a batched point query to a pool worker.
+///
+/// The map and owned keys cross the thread boundary. The optional response
+/// sender is installed immediately before the command is enqueued.
 pub(crate) struct Get {
 	pub(crate) map: Arc<Map>,
 	pub(crate) key: BatchQuery<'static>,
 	pub(crate) res: Option<ResultSender<BatchResult<'static>>>,
 }
 
-/// Iterator-seek.
-/// Note: only initial seek is supported at this time on the assumption rocksdb
-/// prefetching prevents mid-iteration polls from blocking on I/O.
+/// Carries an initial iterator seek to a pool worker.
+///
+/// Only the initial seek is offloaded because RocksDB prefetching is expected
+/// to keep later cursor movements nonblocking. The worker returns the
+/// positioned iterator state through the response sender.
 pub(crate) struct Seek {
 	pub(crate) map: Arc<Map>,
 	pub(crate) state: stream::State<'static>,
@@ -61,8 +71,22 @@ pub(crate) struct Seek {
 	pub(crate) res: Option<ResultSender<stream::State<'static>>>,
 }
 
+/// Stores the owned keys in a batched point query.
+///
+/// Small batches remain inline up to the crate's configured batch budget.
+/// Larger batches spill to the heap without changing query order.
 pub(crate) type BatchQuery<'a> = SmallVec<[KeyBuf; BATCH_INLINE]>;
+
+/// Stores the handles returned by a batched point query.
+///
+/// Small result batches remain inline up to the same budget as their queries.
+/// Larger batches spill to the heap.
 pub(crate) type BatchResult<'a> = SmallVec<[ResultHandle<'a>; BATCH_INLINE]>;
+
+/// Represents one point-query result handle.
+///
+/// A successful handle pins the RocksDB value until it is dropped. Its
+/// lifetime remains tied to the database that produced it.
 pub(crate) type ResultHandle<'a> = Result<Handle<'a>>;
 
 const WORKER_LIMIT: (usize, usize) = (1, 4096);
@@ -72,6 +96,11 @@ const BATCH_INLINE: usize = 1;
 const WORKER_STACK_SIZE: usize = 1_048_576;
 const WORKER_NAME: &str = "tuwunel:db";
 
+/// Constructs the configured database worker pool.
+///
+/// Queue topology and worker counts derive from detected hardware together
+/// with server configuration. Worker groups are spawned before the shared pool
+/// handle is returned.
 #[implement(Pool)]
 pub(crate) fn new(server: &Arc<Server>) -> Result<Arc<Self>> {
 	const CHAN_SCHED: (QueueStrategy, QueueStrategy) = (QueueStrategy::Fifo, QueueStrategy::Lifo);
@@ -229,6 +258,14 @@ pub(crate) async fn execute_iter(self: &Arc<Self>, mut cmd: Seek) -> Result<stre
 		.await
 }
 
+/// Selects the queue assigned to the first CPU affinity entry.
+///
+/// The configured topology maps that affinity identifier to a worker group,
+/// falling back to the first queue when the mapped group is absent.
+///
+/// # Panics
+///
+/// Panics if the current thread has no available CPU affinity entry.
 #[implement(Pool)]
 fn select_queue(&self) -> &Sender<Cmd> {
 	let core_id = get_affinity()

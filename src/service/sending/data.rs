@@ -72,11 +72,12 @@ impl Data {
 	{
 		events
 			.filter(|(key, _)| !key.is_empty())
-			.for_each(|(key, val)| {
-				self.servercurrentevent_data
-					.insert(key, val.value_bytes());
-				self.servernameevent_data.remove(key);
-			});
+			.fold(self.db.txn(), |mut txn, (key, val)| {
+				txn.insert_raw(&self.servercurrentevent_data, key, val.value_bytes());
+				txn.del_raw(&self.servernameevent_data, key);
+				txn
+			})
+			.execute();
 	}
 
 	/// Write composed EDUs straight into the active set, keyed by fresh counts;

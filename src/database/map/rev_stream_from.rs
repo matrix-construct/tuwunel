@@ -11,10 +11,15 @@ use crate::{
 	stream,
 };
 
-/// Iterate key-value entries in the map starting from upper-bound.
+/// Streams deserialized entries backward from a serialized upper bound.
 ///
-/// - Query is serialized
-/// - Result is deserialized
+/// The scan begins at the greatest key not greater than the encoded bound. Any
+/// borrowed key or value must not be retained across another poll of the
+/// stream.
+///
+/// # Panics
+///
+/// Panics if the upper bound cannot be serialized.
 #[implement(super::Map)]
 pub fn rev_stream_from<'a, K, V, P>(
 	self: &'a Arc<Self>,
@@ -29,10 +34,15 @@ where
 		.map(result_deserialize::<K, V>)
 }
 
-/// Iterate key-value entries in the map starting from upper-bound.
+/// Streams raw entries backward from a serialized upper bound.
 ///
-/// - Query is serialized
-/// - Result is raw
+/// The scan begins at the greatest key not greater than the encoded bound.
+/// Yielded keys and values borrow cursor storage and must not be retained
+/// across another poll.
+///
+/// # Panics
+///
+/// Panics if the upper bound cannot be serialized.
 #[implement(super::Map)]
 #[tracing::instrument(skip(self), level = "trace")]
 pub fn rev_stream_from_raw<P>(
@@ -46,10 +56,11 @@ where
 	self.rev_raw_stream_from(&key)
 }
 
-/// Iterate key-value entries in the map starting from upper-bound.
+/// Streams deserialized entries backward from a raw upper bound.
 ///
-/// - Query is raw
-/// - Result is deserialized
+/// The supplied bytes are used directly as the reverse seek position. Any
+/// borrowed key or value must not be retained across another poll of the
+/// stream.
 #[implement(super::Map)]
 pub fn rev_stream_raw_from<'a, K, V, P>(
 	self: &'a Arc<Self>,
@@ -64,10 +75,11 @@ where
 		.map(result_deserialize::<K, V>)
 }
 
-/// Iterate key-value entries in the map starting from upper-bound.
+/// Streams raw entries backward from a raw upper bound.
 ///
-/// - Query is raw
-/// - Result is raw
+/// The supplied bytes are used directly as the reverse seek position. Yielded
+/// keys and values borrow cursor storage and must not be retained across
+/// another poll.
 #[implement(super::Map)]
 #[tracing::instrument(skip(self, from), fields(%self), level = "trace")]
 pub fn rev_raw_stream_from<P>(

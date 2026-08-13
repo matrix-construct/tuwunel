@@ -6,10 +6,16 @@ use tuwunel_core::{Result, implement};
 
 use crate::keyval::{KeyVal, result_deserialize, serialize_key};
 
-/// Iterate key-value entries in the map where the key matches a prefix.
+/// Streams deserialized entries matching a serialized prefix in ascending
+/// order.
 ///
-/// - Query is serialized
-/// - Result is deserialized
+/// The scan begins at the encoded prefix and stops at the first nonmatching
+/// key. Any borrowed key or value must not be retained across another poll of
+/// the stream.
+///
+/// # Panics
+///
+/// Panics if the prefix cannot be serialized.
 #[implement(super::Map)]
 pub fn stream_prefix<'a, K, V, P>(
 	self: &'a Arc<Self>,
@@ -24,10 +30,15 @@ where
 		.map(result_deserialize::<K, V>)
 }
 
-/// Iterate key-value entries in the map where the key matches a prefix.
+/// Streams raw entries matching a serialized prefix in ascending order.
 ///
-/// - Query is serialized
-/// - Result is raw
+/// The scan begins at the encoded prefix and stops at the first nonmatching
+/// key. Yielded keys and values borrow cursor storage and must not be retained
+/// across another poll.
+///
+/// # Panics
+///
+/// Panics if the prefix cannot be serialized.
 #[implement(super::Map)]
 #[tracing::instrument(skip(self), level = "trace")]
 pub fn stream_prefix_raw<P>(
@@ -42,10 +53,11 @@ where
 		.try_take_while(move |(k, _): &KeyVal<'_>| future::ok(k.starts_with(&key)))
 }
 
-/// Iterate key-value entries in the map where the key matches a prefix.
+/// Streams deserialized entries matching a raw prefix in ascending order.
 ///
-/// - Query is raw
-/// - Result is deserialized
+/// The supplied bytes are used directly for the seek and prefix test. Any
+/// borrowed key or value must not be retained across another poll of the
+/// stream.
 #[implement(super::Map)]
 pub fn stream_raw_prefix<'a, K, V, P>(
 	self: &'a Arc<Self>,
@@ -60,10 +72,11 @@ where
 		.map(result_deserialize::<K, V>)
 }
 
-/// Iterate key-value entries in the map where the key matches a prefix.
+/// Streams raw entries matching a raw prefix in ascending order.
 ///
-/// - Query is raw
-/// - Result is raw
+/// The supplied bytes are used directly for the seek and prefix test. Yielded
+/// keys and values borrow cursor storage and must not be retained across
+/// another poll.
 #[implement(super::Map)]
 pub fn raw_stream_prefix<'a, P>(
 	self: &'a Arc<Self>,

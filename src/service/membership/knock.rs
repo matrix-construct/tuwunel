@@ -26,6 +26,7 @@ use crate::{
 	membership::join::get_servers_for_room,
 	rooms::{
 		state::RoomMutexGuard,
+		state_cache::MembershipUpdate,
 		state_compressor::{CompressedState, HashSetCompressStateEvent},
 	},
 };
@@ -255,26 +256,28 @@ async fn finalize_knock_membership(
 
 	info!("Updating membership locally to knock state with provided stripped state events");
 	let count = self.services.globals.next_count();
+	let membership_event = parsed_knock_pdu
+		.get_content::<RoomMemberEventContent>()
+		.expect("we just created this");
+
+	let last_state = send_knock_response
+		.knock_room_state
+		.into_iter()
+		.filter_map(|state| into_client_stripped(room_id, state))
+		.collect();
+
 	self.services
 		.state_cache
-		.update_membership(
+		.update_membership(MembershipUpdate {
 			room_id,
-			sender_user,
-			parsed_knock_pdu
-				.get_content::<RoomMemberEventContent>()
-				.expect("we just created this"),
-			sender_user,
-			Some(
-				send_knock_response
-					.knock_room_state
-					.into_iter()
-					.filter_map(|state| into_client_stripped(room_id, state))
-					.collect(),
-			),
-			None,
-			false,
-			PduCount::Normal(*count),
-		)
+			user_id: sender_user,
+			membership_event,
+			sender: sender_user,
+			last_state: Some(last_state),
+			invite_via: None,
+			update_joined_count: false,
+			count: PduCount::Normal(*count),
+		})
 		.await?;
 
 	info!("Appending room knock event locally");
@@ -352,26 +355,28 @@ async fn knock_room_helper_remote(
 
 	info!("Updating membership locally to knock state with provided stripped state events");
 	let count = self.services.globals.next_count();
+	let membership_event = parsed_knock_pdu
+		.get_content::<RoomMemberEventContent>()
+		.expect("we just created this");
+
+	let last_state = send_knock_response
+		.knock_room_state
+		.into_iter()
+		.filter_map(|state| into_client_stripped(room_id, state))
+		.collect();
+
 	self.services
 		.state_cache
-		.update_membership(
+		.update_membership(MembershipUpdate {
 			room_id,
-			sender_user,
-			parsed_knock_pdu
-				.get_content::<RoomMemberEventContent>()
-				.expect("we just created this"),
-			sender_user,
-			Some(
-				send_knock_response
-					.knock_room_state
-					.into_iter()
-					.filter_map(|state| into_client_stripped(room_id, state))
-					.collect(),
-			),
-			None,
-			false,
-			PduCount::Normal(*count),
-		)
+			user_id: sender_user,
+			membership_event,
+			sender: sender_user,
+			last_state: Some(last_state),
+			invite_via: None,
+			update_joined_count: false,
+			count: PduCount::Normal(*count),
+		})
 		.await?;
 
 	info!("Appending room knock event locally");

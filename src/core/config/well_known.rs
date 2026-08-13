@@ -12,6 +12,10 @@ use tuwunel_macros::implement;
 
 use crate::{Result, err, error::inspect_log};
 
+/// Builds the support contacts advertised through well-known discovery.
+///
+/// Named contact entries are converted first. Legacy single-contact fields
+/// append one additional contact when a support role is configured.
 #[implement(super::WellKnownConfig)]
 pub fn get_contacts(&self) -> Vec<Contact> {
 	let single_contact = self.support_role.clone().map(|role| Contact {
@@ -30,6 +34,10 @@ pub fn get_contacts(&self) -> Vec<Contact> {
 	contacts.chain(single_contact).collect()
 }
 
+/// Builds the localized support policies advertised through discovery.
+///
+/// Outer map keys remain policy identifiers. Each configured language entry is
+/// converted into the corresponding Matrix policy representation.
 #[implement(super::WellKnownConfig)]
 #[must_use]
 pub fn get_policies(&self) -> BTreeMap<String, Policies> {
@@ -52,6 +60,10 @@ pub fn get_policies(&self) -> BTreeMap<String, Policies> {
 		.collect()
 }
 
+/// Builds registration terms parameters from configured policy documents.
+///
+/// Policy identifiers and language keys are preserved in the Matrix UIA shape.
+/// An empty policy map returns `None` and does not require a terms stage.
 #[implement(super::Config)]
 #[must_use]
 pub fn login_terms_params(&self) -> Option<LoginTermsParams> {

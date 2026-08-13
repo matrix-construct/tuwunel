@@ -12,7 +12,7 @@ mod bundling;
 mod purge;
 mod references;
 mod relations;
-mod typed_relations;
+pub(crate) mod typed_relations;
 
 #[cfg(test)]
 mod tests;

@@ -1,4 +1,5 @@
 mod append;
+mod badge;
 mod notification;
 mod request;
 mod send;
@@ -12,7 +13,7 @@ use futures::{Stream, StreamExt, TryFutureExt, future::join};
 use ipaddress::IPAddress;
 use ruma::{
 	DeviceId, OwnedDeviceId, OwnedRoomId, OwnedUserId, RoomId, UserId,
-	api::client::push::{Pusher, PusherKind, set_pusher},
+	api::client::push::{Pusher, PusherKind, set_pusher::v3::PusherAction},
 	events::{AnySyncTimelineEvent, room::power_levels::RoomPowerLevels},
 	push::{Action, PushConditionPowerLevelsCtx, PushConditionRoomCtx, Ruleset},
 	serde::Raw,
@@ -27,8 +28,10 @@ use tuwunel_core::{
 	},
 };
 use tuwunel_database::{Database, Deserialized, Ignore, Interfix, Json, Map};
+use url::Url;
 
 pub use self::append::Notified;
+use self::badge::SentBadges;
 
 pub struct Service {
 	services: Arc<crate::services::OnceServices>,
@@ -36,6 +39,7 @@ pub struct Service {
 	highlight_increment_mutex: MutexMap<(OwnedRoomId, OwnedUserId), ()>,
 	db: Data,
 	suppressed: suppressed::SuppressedQueue,
+	sent_badges: SentBadges,
 }
 
 struct Data {
@@ -65,6 +69,7 @@ impl crate::Service for Service {
 					.clone(),
 			},
 			suppressed: suppressed::SuppressedQueue::default(),
+			sent_badges: SentBadges::default(),
 		}))
 	}
 
@@ -76,65 +81,73 @@ pub async fn set_pusher(
 	&self,
 	sender: &UserId,
 	sender_device: &DeviceId,
-	pusher: &set_pusher::v3::PusherAction,
+	pusher: &PusherAction,
 ) -> Result {
 	match pusher {
-		| set_pusher::v3::PusherAction::Post(data) => {
-			let pushkey = data.pusher.ids.pushkey.as_str();
-
-			if pushkey.len() > 512 {
-				return Err!(Request(InvalidParam(
-					"Push key length cannot be greater than 512 bytes."
-				)));
-			}
-
-			if data.pusher.ids.app_id.as_str().len() > 64 {
-				return Err!(Request(InvalidParam(
-					"App ID length cannot be greater than 64 bytes."
-				)));
-			}
-
-			// add some validation to the pusher URL
-			let pusher_kind = &data.pusher.kind;
-			if let PusherKind::Http(http) = pusher_kind {
-				let url = &http.url;
-				let url = url::Url::parse(&http.url).map_err(|e| {
-					err!(Request(InvalidParam(
-						warn!(%url, "HTTP pusher URL is not a valid URL: {e}")
-					)))
-				})?;
-
-				if ["http", "https"]
-					.iter()
-					.all(|&scheme| !scheme.eq_ignore_ascii_case(url.scheme()))
-				{
-					return Err!(Request(InvalidParam(
-						warn!(%url, "HTTP pusher URL is not a valid HTTP/HTTPS URL")
-					)));
-				}
-
-				if let Ok(ip) =
-					IPAddress::parse(url.host_str().expect("URL previously validated"))
-					&& !self.services.client.valid_cidr_range(&ip)
-				{
-					return Err!(Request(InvalidParam(
-						warn!(%url, "HTTP pusher URL is a forbidden remote address")
-					)));
-				}
-			}
-
-			let pushkey = data.pusher.ids.pushkey.as_str();
-			let key = (sender, pushkey);
-			self.db.senderkey_pusher.put(key, Json(pusher));
-			self.db
-				.pushkey_deviceid
-				.insert(pushkey, sender_device);
-		},
-		| set_pusher::v3::PusherAction::Delete(ids) => {
-			self.delete_pusher(sender, ids.pushkey.as_str())
-				.await;
-		},
+		| PusherAction::Delete(ids) =>
+			self.set_pusher_delete(sender, ids.pushkey.as_str())
+				.await,
+		| PusherAction::Post(data) =>
+			self.set_pusher_post(sender, sender_device, pusher, &data.pusher)?,
 	}
+
+	Ok(())
+}
+
+#[implement(Service)]
+async fn set_pusher_delete(&self, sender: &UserId, pushkey: &str) {
+	self.delete_pusher(sender, pushkey).await;
+}
+
+#[implement(Service)]
+fn set_pusher_post(
+	&self,
+	sender: &UserId,
+	sender_device: &DeviceId,
+	action: &PusherAction,
+	pusher: &Pusher,
+) -> Result {
+	let pushkey = pusher.ids.pushkey.as_str();
+
+	if pushkey.len() > 512 {
+		return Err!(Request(InvalidParam("Push key length cannot be greater than 512 bytes.")));
+	}
+
+	if pusher.ids.app_id.as_str().len() > 64 {
+		return Err!(Request(InvalidParam("App ID length cannot be greater than 64 bytes.")));
+	}
+
+	if let PusherKind::Http(http) = &pusher.kind {
+		let url = &http.url;
+		let url = Url::parse(&http.url).map_err(|e| {
+			err!(Request(InvalidParam(warn!(%url, "HTTP pusher URL is not a valid URL: {e}"))))
+		})?;
+
+		if ["http", "https"]
+			.iter()
+			.all(|&scheme| !scheme.eq_ignore_ascii_case(url.scheme()))
+		{
+			return Err!(Request(InvalidParam(
+				warn!(%url, "HTTP pusher URL is not a valid HTTP/HTTPS URL")
+			)));
+		}
+
+		if let Ok(ip) = IPAddress::parse(url.host_str().expect("URL previously validated"))
+			&& !self.services.client.valid_cidr_range(&ip)
+		{
+			return Err!(Request(InvalidParam(
+				warn!(%url, "HTTP pusher URL is a forbidden remote address")
+			)));
+		}
+	}
+
+	let key = (sender, pushkey);
+	self.db.senderkey_pusher.put(key, Json(action));
+	self.db
+		.pushkey_deviceid
+		.insert(pushkey, sender_device);
+
+	self.forget_sent_badge(sender, pushkey);
 
 	Ok(())
 }
@@ -145,6 +158,7 @@ pub async fn delete_pusher(&self, sender: &UserId, pushkey: &str) {
 	self.db.senderkey_pusher.del(key);
 	self.db.pushkey_deviceid.remove(pushkey);
 	self.clear_suppressed_pushkey(sender, pushkey);
+	self.forget_sent_badge(sender, pushkey);
 
 	self.services
 		.sending

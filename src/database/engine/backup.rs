@@ -9,6 +9,17 @@ use tuwunel_core::{
 use super::Engine;
 use crate::{Context, util::map_err};
 
+/// Creates a RocksDB backup of the current database.
+///
+/// Writable engines flush before snapshotting, while read-only engines back up
+/// their current view without a flush. Old backups are then purged to the
+/// configured retention count; a purge failure is logged without failing the
+/// newly created backup.
+///
+/// # Panics
+///
+/// Panics if RocksDB reports successful creation without returning metadata for
+/// the new backup.
 #[implement(Engine)]
 #[tracing::instrument(level = "debug", skip(self))]
 pub fn backup(&self) -> Result {
@@ -48,7 +59,10 @@ pub fn backup(&self) -> Result {
 	Ok(())
 }
 
-/// Delete backups, retaining the `keep` most recent; zero deletes every backup.
+/// Deletes old backups while retaining the newest `keep` entries.
+///
+/// Passing zero removes every backup known to the backup engine. Retention and
+/// deletion are delegated to RocksDB's backup repository.
 #[implement(Engine)]
 #[tracing::instrument(level = "debug", skip(self))]
 pub fn backup_purge(&self, keep: usize) -> Result {
@@ -57,6 +71,11 @@ pub fn backup_purge(&self, keep: usize) -> Result {
 	engine.purge_old_backups(keep).map_err(map_err)
 }
 
+/// Lists available backups as human-readable summary lines.
+///
+/// Each line includes the backup identifier, timestamp, byte size, and file
+/// count. An empty backup repository returns an error instead of an empty
+/// iterator.
 #[implement(Engine)]
 pub fn backup_list(&self) -> Result<impl Iterator<Item = String> + Send> {
 	let info = backup_engine(&self.ctx)?.get_backup_info();
@@ -78,6 +97,10 @@ pub fn backup_list(&self) -> Result<impl Iterator<Item = String> + Send> {
 	Ok(list)
 }
 
+/// Returns the number of backups currently recorded.
+///
+/// The count comes from RocksDB's backup metadata. An empty repository produces
+/// zero.
 #[implement(Engine)]
 pub fn backup_count(&self) -> Result<usize> {
 	let info = backup_engine(&self.ctx)?.get_backup_info();
@@ -85,6 +108,10 @@ pub fn backup_count(&self) -> Result<usize> {
 	Ok(info.len())
 }
 
+/// Verifies the integrity of a RocksDB backup.
+///
+/// Identifier zero selects the most recent backup; any other identifier selects
+/// that exact entry. The verified backup identifier is returned on success.
 #[implement(Engine)]
 pub fn backup_verify(&self, backup_id: u32) -> Result<u32> {
 	let engine = backup_engine(&self.ctx)?;

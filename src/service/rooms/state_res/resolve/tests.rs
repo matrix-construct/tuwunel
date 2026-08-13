@@ -26,7 +26,7 @@ use tuwunel_core::{
 };
 
 use super::{
-	StateMap,
+	AuthSet, StateMap,
 	test_utils::{
 		INITIAL_EVENTS, TestStore, alice, bob, charlie, do_check, ella, event_id,
 		member_content_ban, member_content_join, not_found, room_id, to_init_pdu_event,
@@ -875,14 +875,27 @@ async fn split_conflicted_state_set_mixed() {
 	],);
 }
 
+#[test]
+fn auth_set_from_iter_deduplicates() {
+	let duplicate = event_id("duplicate");
+	let distinct = event_id("distinct");
+	let ids: Vec<_> = [duplicate.clone(), distinct.clone(), duplicate.clone()]
+		.into_iter()
+		.collect::<AuthSet<_>>()
+		.into_iter()
+		.collect();
+
+	assert_eq!(ids.len(), 2);
+	assert!(ids.contains(&duplicate));
+	assert!(ids.contains(&distinct));
+}
+
 // `auth_difference` returns events in fewer than every input chain
 // (∪Cᵢ - ∩Cᵢ), per the v2 state-res spec.
 
-fn auth_set(ids: &[&str]) -> super::AuthSet<OwnedEventId> {
-	ids.iter().copied().map(event_id).collect()
-}
+fn auth_set(ids: &[&str]) -> AuthSet<OwnedEventId> { ids.iter().copied().map(event_id).collect() }
 
-async fn auth_difference_result(sets: Vec<super::AuthSet<OwnedEventId>>) -> Vec<OwnedEventId> {
+async fn auth_difference_result(sets: Vec<AuthSet<OwnedEventId>>) -> Vec<OwnedEventId> {
 	let mut out: Vec<OwnedEventId> =
 		super::auth_difference::auth_difference(sets.into_iter().stream())
 			.collect()
@@ -910,7 +923,7 @@ async fn auth_difference_three_sets_full_overlap() {
 	let result =
 		auth_difference_result(vec![auth_set(&["a"]), auth_set(&["a"]), auth_set(&["a"])]).await;
 
-	assert!(result.is_empty());
+	assert!(result.is_empty(), "{result:?}");
 }
 
 #[tokio::test]
@@ -924,14 +937,14 @@ async fn auth_difference_two_sets() {
 async fn auth_difference_no_sets() {
 	let result = auth_difference_result(vec![]).await;
 
-	assert!(result.is_empty());
+	assert!(result.is_empty(), "{result:?}");
 }
 
 #[tokio::test]
 async fn auth_difference_single_set() {
 	let result = auth_difference_result(vec![auth_set(&["a", "b", "c"])]).await;
 
-	assert!(result.is_empty());
+	assert!(result.is_empty(), "{result:?}");
 }
 
 // The subgraph is only events on `auth_events` paths between conflicted events

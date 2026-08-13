@@ -32,6 +32,11 @@
 //!    callsite and then returns the error with the same string. Caller has the
 //!    option of replacing `error!` with `debug_error!`.
 
+/// Constructs an error result through `err!`.
+///
+/// The supplied tokens select or format an [`Error`](crate::Error), then wrap
+/// it in [`std::result::Result::Err`]. Every input form accepted by `err!` is
+/// supported.
 #[macro_export]
 #[collapse_debuginfo(yes)]
 macro_rules! Err {
@@ -40,6 +45,11 @@ macro_rules! Err {
 	};
 }
 
+/// Constructs a core error from structured or formatted input.
+///
+/// Variant forms preserve typed Matrix, HTTP, and configuration context.
+/// Forms containing a tracing level also emit the formatted fields before
+/// returning the error.
 #[macro_export]
 #[collapse_debuginfo(yes)]
 macro_rules! err {
@@ -151,6 +161,10 @@ macro_rules! err_log {
 	}}
 }
 
+/// Resolves an error macro level to a tracing level.
+///
+/// Debug-sensitive warning and error levels fall back to `DEBUG` outside debug
+/// logging mode. Fixed warning and error inputs retain their respective levels.
 #[macro_export]
 #[collapse_debuginfo(yes)]
 macro_rules! err_lev {
@@ -202,6 +216,11 @@ impl Visit for Visitor<'_> {
 	}
 }
 
+/// Dispatches structured error fields and records their formatted message.
+///
+/// Enabled tracing subscribers receive an event at the supplied call site, and
+/// the tracing-log bridge receives the same values. The visitor then appends
+/// those values to `out` for construction of the returned error.
 pub fn visit(
 	out: &mut String,
 	level: Level,

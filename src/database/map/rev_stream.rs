@@ -8,9 +8,10 @@ use tuwunel_core::{Result, implement};
 use super::seek::seek_stream;
 use crate::{keyval, keyval::KeyVal, stream};
 
-/// Iterate key-value entries in the map from the end.
+/// Streams deserialized key-value entries in descending database order.
 ///
-/// - Result is deserialized
+/// Each raw pair is decoded with the database deserializer. Any borrowed key or
+/// value must not be retained across another poll of the stream.
 #[implement(super::Map)]
 pub fn rev_stream<'a, K, V>(
 	self: &'a Arc<Self>,
@@ -23,9 +24,10 @@ where
 		.map(keyval::result_deserialize::<K, V>)
 }
 
-/// Iterate key-value entries in the map from the end.
+/// Streams raw key-value entries in descending database order.
 ///
-/// - Result is raw
+/// The scan begins at the last key in the column family. Yielded keys and
+/// values borrow cursor storage and must not be retained across another poll.
 #[implement(super::Map)]
 #[tracing::instrument(skip(self), fields(%self), level = "trace")]
 pub fn rev_raw_stream(self: &Arc<Self>) -> impl Stream<Item = Result<KeyVal<'_>>> + Send {

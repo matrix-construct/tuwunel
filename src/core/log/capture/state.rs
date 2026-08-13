@@ -12,6 +12,10 @@ impl Default for State {
 }
 
 impl State {
+	/// Creates empty capture registration state.
+	///
+	/// No events are captured until a `Capture` is started against the returned
+	/// state. The state can then be shared with a subscriber layer.
 	#[must_use]
 	pub fn new() -> Self { Self { active: RwLock::new(Vec::new()) } }
 

@@ -4,7 +4,7 @@ use ruma::{RoomId, UserId};
 use tuwunel_core::matrix::pdu::PduCount;
 use tuwunel_database::{Interfix, SEP, serialize_to_vec};
 
-use super::data::position_advances;
+use super::{data::position_advances, thread_kind_to_receipt};
 
 const ROOM: &str = "!room:example.com";
 const USER: &str = "@user:example.com";
@@ -122,6 +122,12 @@ fn position_advance_matrix() {
 	assert!(!position_advances(normal(1), backfilled(-1)), "backfilled sorts below normal");
 }
 
+#[test]
+fn invalid_thread_kind_is_rejected() {
+	thread_kind_to_receipt("not-an-event-id")
+		.expect_err("invalid private receipt thread must fail");
+}
+
 /// MSC3771 per-thread `m.read.private` storage. `roomuserid_privateread`
 /// stores the unthreaded marker as a 2-tuple `(room, user)` (legacy shape,
 /// unchanged) and per-thread markers as 3-tuple `(room, user, kind)` rows.
@@ -145,9 +151,11 @@ mod private_read {
 	#[test]
 	fn legacy_2tuple_and_3tuple_are_byte_distinct() {
 		let legacy = legacy_2tuple();
+		let unthreaded = thread_3tuple("");
 		let main = thread_3tuple("main");
 		let thread = thread_3tuple(THREAD_ROOT);
 
+		assert_ne!(legacy, unthreaded);
 		assert_ne!(legacy, main);
 		assert_ne!(legacy, thread);
 		assert_eq!(&main[..legacy.len()], &*legacy);
@@ -172,6 +180,7 @@ mod private_read {
 	fn interfix_prefix_includes_thread_rows() {
 		let prefix = thread_prefix();
 
+		assert!(thread_3tuple("").starts_with(&prefix));
 		assert!(thread_3tuple("main").starts_with(&prefix));
 		assert!(thread_3tuple(THREAD_ROOT).starts_with(&prefix));
 	}

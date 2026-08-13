@@ -1,7 +1,7 @@
 use std::{borrow::Borrow, collections::HashMap, mem::take, sync::Arc};
 
 use futures::{
-	FutureExt, StreamExt, TryFutureExt, TryStreamExt,
+	FutureExt, StreamExt, TryFutureExt,
 	future::{join, try_join},
 };
 use ruma::{
@@ -11,14 +11,14 @@ use ruma::{
 };
 use tracing::Span;
 use tuwunel_core::{
-	Result, apply, debug, debug_warn, defer, err, implement,
+	Result, debug, debug_warn, defer, err, implement,
 	matrix::{
 		Event, PduEvent, StateKey,
 		pdu::PrevEvents,
 		room_version::{self, from_create_event},
 	},
 	trace,
-	utils::stream::{BroadbandExt, IterStream, TryWidebandExt},
+	utils::stream::{BroadbandExt, IterStream, ReadyExt, WidebandExt},
 	warn,
 };
 
@@ -691,33 +691,28 @@ async fn fork_resolve(
 	}
 
 	let (room_id, room_version) = (walk.room_id, walk.room_version);
-	let branches = afters
+	let fork_states = afters.iter().stream().wide_then(|after| {
+		let state = after
+			.iter()
+			.map(|(shortstatekey, event_id)| (*shortstatekey, event_id));
+
+		self.fork_state(state)
+	});
+
+	let auth_chains = prevs
 		.iter()
-		.try_stream()
-		.wide_and_then(async |after| {
-			let state: Vec<_> = after
-				.iter()
-				.map(|(shortstatekey, event_id)| (*shortstatekey, event_id.clone()))
-				.collect();
-
-			self.fork_state_and_chain(room_id, room_version, &state)
-				.await
+		.zip(&afters)
+		.stream()
+		.wide_then(|(prev_event, after)| {
+			self.fork_chain(room_id, room_version, after.values().map(Borrow::borrow))
+				.inspect_err(move |e| {
+					debug_warn!(%prev_event, %e, "Skipping failed fork auth chain.");
+				})
 		})
-		.try_collect()
-		.map_ok(Vec::into_iter)
-		.map_ok(Iterator::unzip)
-		.map_ok(apply!(2, Vec::into_iter))
-		.map_ok(apply!(2, IterStream::stream))
-		.inspect_err(|e| debug_warn!(%e, "Fork branch failed."))
-		.await;
-
-	let Ok((fork_states, auth_chains)) = branches else {
-		walk.fallback = Some(Fallback::Error);
-		return None;
-	};
+		.ready_filter_map(Result::ok);
 
 	let Ok(resolved) = self
-		.state_resolution(walk.room_id, walk.room_version, fork_states, auth_chains)
+		.state_resolution(room_id, room_version, fork_states, auth_chains)
 		.await
 	else {
 		walk.fallback = Some(Fallback::Error);

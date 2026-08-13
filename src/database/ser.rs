@@ -1,13 +1,43 @@
+//! Serialization for the database's compact record codec.
+//!
+//! Tuples place [`SEP`] between every pair of adjacent elements, while
+//! sequences follow each element's separator state. Supported integer scalars
+//! use big-endian bytes, and [`Json`] and [`Cbor`] delegate their payloads to
+//! the corresponding self-describing format.
+
 use std::{io::Write, mem::replace};
 
 use serde::{Deserialize, Serialize, ser};
 use tuwunel_core::{Error, Result, debug::type_name, err, result::DebugInspect, unhandled};
 
+/// Serializes a value into an owned byte vector.
+///
+/// The database record codec determines the representation. Use [`Json`] or
+/// [`Cbor`] to delegate the wrapped payload to one of those formats.
+///
+/// # Panics
+///
+/// Panics if `T` requests a Serde data-model operation unsupported by this
+/// codec. Debug builds also panic when record-layout invariants are violated or
+/// when a directly wrapped `Json<Box<serde_json::value::RawValue>>` is
+/// serialized.
 #[inline]
 pub fn serialize_to_vec<T: Serialize>(val: T) -> Result<Vec<u8>> {
 	serialize_to::<Vec<u8>, T>(val)
 }
 
+/// Serializes a value into a default-constructed output buffer.
+///
+/// The buffer must support byte writes and expose its completed contents as a
+/// slice. The returned buffer retains any inline-storage behavior chosen by
+/// `B`.
+///
+/// # Panics
+///
+/// Panics if `T` requests a Serde data-model operation unsupported by this
+/// codec. Debug builds also panic when record-layout invariants are violated or
+/// when a directly wrapped `Json<Box<serde_json::value::RawValue>>` is
+/// serialized.
 #[inline]
 pub fn serialize_to<B, T>(val: T) -> Result<B>
 where
@@ -20,7 +50,18 @@ where
 	Ok(buf)
 }
 
-/// Serialize T into Writer W
+/// Serializes a value into a caller-provided output buffer.
+///
+/// Encoding is written through the writer without resetting it, and the
+/// returned slice covers the full buffer exposed through `AsRef<[u8]>`. The
+/// compact codec supports its database-oriented subset of the Serde data model.
+///
+/// # Panics
+///
+/// Panics if `T` requests a Serde data-model operation unsupported by this
+/// codec. Debug builds also panic when record-layout invariants are violated or
+/// when a directly wrapped `Json<Box<serde_json::value::RawValue>>` is
+/// serialized.
 #[inline]
 #[cfg_attr(unabridged, tracing::instrument(level = "trace", skip_all))]
 pub fn serialize<'a, W, T>(out: &'a mut W, val: T) -> Result<&'a [u8]>
@@ -42,6 +83,11 @@ where
 	Ok((*out).as_ref())
 }
 
+/// Stateful writer for the compact database record format.
+///
+/// Separator state controls record boundaries in the compact encoding. Debug
+/// builds track container depth and explicit prefix finalization to validate
+/// the layout.
 pub(crate) struct Serializer<'a, W: Write> {
 	out: &'a mut W,
 	depth: u32,
@@ -49,25 +95,54 @@ pub(crate) struct Serializer<'a, W: Write> {
 	fin: bool,
 }
 
-/// Newtype for JSON serialization.
+/// Wraps a value for JSON encoding within the database codec.
+///
+/// Encoding and decoding delegate the wrapped value to `serde_json` instead of
+/// the compact record rules. The wrapper changes the representation selected
+/// for its inner value.
 #[derive(Debug, Deserialize, Serialize)]
-pub struct Json<T>(pub T);
+pub struct Json<T>(
+	/// Wrapped value encoded as JSON.
+	///
+	/// The field remains public for direct construction and extraction.
+	pub T,
+);
 
-/// Newtype for CBOR serialization.
+/// Wraps a value for CBOR encoding within the database codec.
+///
+/// Encoding and decoding delegate the wrapped value to `minicbor_serde` instead
+/// of the compact record rules. The wrapper changes the representation selected
+/// for its inner value. Values containing Ruma `Raw<T>` fields do not
+/// round-trip through this format; use [`Json`] for those values.
 #[derive(Debug, Deserialize, Serialize)]
-pub struct Cbor<T>(pub T);
+pub struct Cbor<T>(
+	/// Wrapped value encoded as CBOR.
+	///
+	/// The field remains public for direct construction and extraction.
+	pub T,
+);
 
-/// Directive to force separator serialization specifically for prefix keying
-/// use. This is a quirk of the database schema and prefix iterations.
+/// Finalizes a tuple prefix immediately after its trailing separator.
+///
+/// Place this zero-width marker as the final tuple element to encode a raw
+/// prefix ending in [`SEP`]. It emits no payload of its own, and debug builds
+/// reject serialization after it.
 #[derive(Clone, Copy, Debug, Serialize)]
 pub struct Interfix;
 
-/// Directive to force separator serialization. Separators are usually
-/// serialized automatically.
+/// Emits one record separator explicitly.
+///
+/// Use this zero-width marker where a format requires [`SEP`] independently of
+/// automatic container boundaries. Unlike [`Interfix`], it does not finalize
+/// the surrounding value.
 #[derive(Clone, Copy, Debug, Serialize)]
 pub struct Separator;
 
-/// Record separator; an intentionally invalid-utf8 byte.
+/// Byte separating records in the compact database format.
+///
+/// The value is intentionally invalid UTF-8, so it cannot occur inside a valid
+/// encoded string. Container state emits it at automatic record boundaries,
+/// while [`Separator`] emits it explicitly.
 pub const SEP: u8 = b'\xFF';
 
 impl<W: Write> Serializer<'_, W> {

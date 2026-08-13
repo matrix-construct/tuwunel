@@ -11,6 +11,10 @@ use serde_json::value::{RawValue as RawJsonValue, Value as JsonValue, to_raw_val
 use super::{Pdu, Unsigned};
 use crate::{Result, err, implement, utils::BoolExt};
 
+/// Removes the local transaction ID from unsigned event metadata.
+///
+/// Other unsigned properties are retained and the object is re-encoded. An
+/// event without unsigned data is left unchanged.
 #[implement(Pdu)]
 pub fn remove_transaction_id(&mut self) -> Result {
 	use BTreeMap as Map;
@@ -63,6 +67,11 @@ pub fn remove_prev_state(&mut self) -> Result {
 	Ok(())
 }
 
+/// Adds the event's current age to unsigned metadata.
+///
+/// Age is the saturating millisecond difference between the current time and
+/// `origin_server_ts`. Future timestamps can therefore produce a negative
+/// value.
 #[implement(Pdu)]
 pub fn add_age(&mut self) -> Result {
 	use BTreeMap as Map;
@@ -106,6 +115,11 @@ pub fn add_membership(&mut self, membership: &MembershipState) -> Result {
 	Ok(())
 }
 
+/// Adds or replaces a named bundled relation in unsigned metadata.
+///
+/// The related PDU is serialized under `unsigned.m.relations`; `None` stores an
+/// empty object for the named relation. Existing unsigned properties are
+/// retained.
 #[implement(Pdu)]
 pub fn add_relation(&mut self, name: &str, pdu: Option<&Pdu>) -> Result {
 	use serde_json::Map;

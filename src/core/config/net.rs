@@ -23,6 +23,10 @@ pub(super) struct ListeningAddr {
 	pub(super) addrs: Either<IpAddr, Vec<IpAddr>>,
 }
 
+/// Interprets the configured Unix socket permission digits as an octal mode.
+///
+/// The returned value is suitable for applying to a newly created socket. An
+/// invalid octal digit produces a configuration error.
 #[implement(super::Config)]
 pub fn get_unix_socket_perms(&self) -> Result<u32> {
 	let octal_perms = self.unix_socket_perms.to_string();
@@ -32,6 +36,11 @@ pub fn get_unix_socket_perms(&self) -> Result<u32> {
 	Ok(socket_perms)
 }
 
+/// Builds every configured TCP listener address.
+///
+/// The result is the Cartesian product of the configured hosts and ports. When
+/// neither TCP addresses nor a Unix socket are configured, loopback hosts
+/// apply.
 #[must_use]
 #[implement(super::Config)]
 pub fn get_bind_addrs(&self) -> Vec<SocketAddr> {
@@ -83,6 +92,10 @@ fn get_bind_ports(&self) -> Vec<u16> {
 #[must_use]
 pub fn is_address_defaulted(&self) -> bool { self.address.is_none() }
 
+/// Determines whether a remote server name is forbidden.
+///
+/// The local server name is always permitted. Otherwise a deny-list match or an
+/// active allow-list miss forbids the destination.
 #[implement(super::Config)]
 #[must_use]
 pub fn is_forbidden_remote_server_name(&self, server_name: &ServerName) -> bool {

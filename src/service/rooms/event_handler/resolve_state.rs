@@ -46,14 +46,17 @@ pub async fn resolve_state(
 
 	trace!("Loading fork states");
 	let fork_states = [current_state_ids, incoming_state];
-	let auth_chain_sets = fork_states
+	let auth_chains = fork_states
 		.iter()
 		.try_stream()
 		.wide_and_then(|state| {
+			// The chain walk dedups short ids and maps them injectively, so
+			// the collected ids are distinct as `from_distinct` requires.
 			self.services
 				.auth_chain
 				.event_ids_iter(room_id, room_version, state.values().map(Borrow::borrow))
-				.try_collect::<AuthSet<OwnedEventId>>()
+				.try_collect()
+				.map_ok(AuthSet::from_distinct)
 		})
 		.ready_filter_map(Result::ok);
 
@@ -73,7 +76,7 @@ pub async fn resolve_state(
 
 	trace!("Resolving state");
 	let state = self
-		.state_resolution(room_id, room_version, fork_states, auth_chain_sets)
+		.state_resolution(room_id, room_version, fork_states, auth_chains)
 		.await?;
 
 	trace!("State resolution done.");

@@ -43,8 +43,8 @@ impl<Id: Eq + Hash> Counts<Id> {
 ///
 /// ## Arguments
 ///
-/// * `auth_chains` - The list of full recursive sets of `auth_events`. Inputs
-///   must be sorted.
+/// * `auth_sets` - The list of full recursive sets of `auth_events`. Inputs
+///   must not contain duplicates.
 ///
 /// ## Returns
 ///

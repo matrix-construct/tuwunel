@@ -11,14 +11,36 @@ use tuwunel_core::{debug, defer, implement, smallvec::SmallVec};
 
 use crate::keyval::{KeyBuf, serialize_key};
 
+/// Stores prefix subscriptions in raw-key order.
+///
+/// Ordered storage lets notification walk reverse prefix candidates for a
+/// changed key. The first nonmatching candidate terminates that walk.
 type Watchers = Mutex<BTreeMap<KeyBuf, Sender<()>>>;
+/// Buffers stale watcher keys discovered during notification.
+///
+/// The one-entry inline budget avoids allocation when notification reaps no
+/// more than one closed subscription. Larger reap batches spill to the heap.
 type KeyVec = SmallVec<[KeyBuf; 1]>;
 
+/// Owns the prefix subscriptions registered for a map.
+///
+/// A mutex protects subscription insertion, notification, and stale-entry
+/// removal.
 #[derive(Default)]
 pub(super) struct Watch {
 	watchers: Watchers,
 }
 
+/// Waits for the next map mutation under a serialized prefix.
+///
+/// The prefix is encoded once before subscription. The stored subscription is
+/// reaped after a later matching notification observes that its receiver has
+/// closed.
+///
+/// # Panics
+///
+/// Panics if prefix serialization fails, the watcher mutex is poisoned, or the
+/// sender disappears before notification.
 #[implement(super::Map)]
 pub fn watch_prefix<K>(&self, prefix: K) -> impl Future<Output = ()> + Send + '_
 where
@@ -28,6 +50,15 @@ where
 	self.watch_raw_prefix(&prefix)
 }
 
+/// Waits once for a map mutation under a raw prefix.
+///
+/// The prefix is copied into the subscription table. A drop guard removes the
+/// entry immediately when this future owns its last receiver.
+///
+/// # Panics
+///
+/// Panics if the watcher mutex is poisoned or the sender disappears before
+/// notification.
 #[implement(super::Map)]
 pub fn watch_raw_prefix_once<K>(&self, prefix: K) -> impl Future<Output = ()> + Send + '_
 where
@@ -53,6 +84,16 @@ where
 	}
 }
 
+/// Waits for the next map mutation under a borrowed raw prefix.
+///
+/// The prefix is copied into the subscription table. The stored subscription is
+/// reaped after a later matching notification observes that its receiver has
+/// closed.
+///
+/// # Panics
+///
+/// Panics if the watcher mutex is poisoned or the sender disappears before
+/// notification.
 #[implement(super::Map)]
 pub fn watch_raw_prefix<'a, K>(&self, prefix: &'a K) -> impl Future<Output = ()> + Send + use<K>
 where
@@ -68,6 +109,14 @@ where
 	}
 }
 
+/// Subscribes to mutations under an owned raw prefix.
+///
+/// Existing prefixes share one watch sender, while new prefixes create a fresh
+/// channel.
+///
+/// # Panics
+///
+/// Panics if the watcher mutex is poisoned.
 #[implement(super::Map)]
 fn subscribe(&self, key: KeyBuf) -> Receiver<()> {
 	match self
@@ -86,6 +135,15 @@ fn subscribe(&self, key: KeyBuf) -> Receiver<()> {
 	}
 }
 
+/// Notifies subscriptions whose prefixes match a mutated raw key.
+///
+/// Closed subscriptions discovered during the ordered prefix walk are removed
+/// in the same critical section. Live subscriptions remain available for later
+/// mutations.
+///
+/// # Panics
+///
+/// Panics if the watcher mutex is poisoned.
 #[implement(super::Map)]
 #[tracing::instrument(
 	level = "trace",

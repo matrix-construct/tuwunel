@@ -1,6 +1,6 @@
 use axum::extract::State;
-use synapse_admin_api::registration_tokens::{RegistrationToken, get::v1 as get};
-use tuwunel_core::{Err, Result};
+use synapse_admin_api::registration_tokens::get::v1 as get;
+use tuwunel_core::Result;
 
 use super::token_response;
 use crate::{Ruma, client::admin::require_admin};
@@ -14,25 +14,12 @@ pub(crate) async fn admin_get_token_route(
 
 	let token = &body.token;
 
-	if let Some(info) = services
+	let source = services
 		.registration_tokens
 		.get_token_info(token)
-		.await?
-	{
-		return Ok(get::Response {
-			token: token_response(token.clone(), &info),
-		});
-	}
+		.await?;
 
-	if services
-		.registration_tokens
-		.get_config_tokens()
-		.contains(token)
-	{
-		return Ok(get::Response {
-			token: RegistrationToken::new(token.clone()),
-		});
-	}
-
-	Err!(Request(NotFound("No such registration token")))
+	Ok(get::Response {
+		token: token_response(token.clone(), source),
+	})
 }

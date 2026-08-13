@@ -10,22 +10,52 @@ use ruma::api::Direction;
 
 use crate::{Error, Result, err};
 
+/// Sequence number locating a PDU in a room timeline.
+///
+/// Valid normal counts range from zero through `i64::MAX`, while valid
+/// backfilled counts range from `i64::MIN` through zero. Ordering compares
+/// their signed representations, with zero shared by both variants.
 #[derive(Hash, PartialEq, Eq, Clone, Copy, Debug)]
-// PDU's sequence number
 pub enum Count {
+	/// Sequence assigned to an event in the normal timeline.
+	///
+	/// Normal counts advance forward as new local or federated events are
+	/// appended. Valid values do not exceed `i64::MAX`.
 	Normal(u64),
+
+	/// Sequence assigned to an event in the backfilled timeline.
+	///
+	/// Valid backfilled counts occupy the nonpositive signed ordering range.
 	Backfilled(i64),
 }
 
 impl Count {
+	/// Encodes the count's integer bits in big-endian order.
+	///
+	/// Normal values retain their unsigned representation. Backfilled values
+	/// are reinterpreted as unsigned two's-complement bits before encoding.
+	///
+	/// # Panics
+	///
+	/// Panics in debug builds if a positive `Backfilled` value was constructed
+	/// directly.
 	#[inline]
 	#[must_use]
 	pub fn to_be_bytes(self) -> [u8; size_of::<u64>()] { self.into_unsigned().to_be_bytes() }
 
+	/// Interprets unsigned integer bits as a signed timeline count.
+	///
+	/// Values with the high bit set become negative backfilled counts. Other
+	/// positive values become normal counts, while zero becomes backfilled
+	/// zero.
 	#[inline]
 	#[must_use]
 	pub fn from_unsigned(unsigned: u64) -> Self { Self::from_signed(unsigned as i64) }
 
+	/// Classifies a signed integer as a normal or backfilled count.
+	///
+	/// Positive values become normal counts. Zero and negative values become
+	/// backfilled counts.
 	#[inline]
 	#[must_use]
 	pub fn from_signed(signed: i64) -> Self {
@@ -35,6 +65,15 @@ impl Count {
 		}
 	}
 
+	/// Converts the count to its unsigned integer bit representation.
+	///
+	/// Backfilled values are reinterpreted using two's-complement bits. The
+	/// variant information is not retained in the returned integer.
+	///
+	/// # Panics
+	///
+	/// Panics in debug builds if a positive `Backfilled` value was constructed
+	/// directly.
 	#[inline]
 	#[must_use]
 	pub fn into_unsigned(self) -> u64 {
@@ -45,6 +84,16 @@ impl Count {
 		}
 	}
 
+	/// Converts the count to the signed representation used for ordering.
+	///
+	/// Valid normal values cast into the nonnegative signed domain, while valid
+	/// backfilled values retain their signed count. Direct construction outside
+	/// the documented ranges violates the ordering invariant.
+	///
+	/// # Panics
+	///
+	/// Panics in debug builds if a positive `Backfilled` value was constructed
+	/// directly.
 	#[inline]
 	#[must_use]
 	pub fn into_signed(self) -> i64 {
@@ -55,6 +104,15 @@ impl Count {
 		}
 	}
 
+	/// Converts a count to a normal-timeline position.
+	///
+	/// Existing normal counts are preserved. Any backfilled count maps to the
+	/// beginning of the normal timeline at zero.
+	///
+	/// # Panics
+	///
+	/// Panics in debug builds if a positive `Backfilled` value was constructed
+	/// directly.
 	#[inline]
 	#[must_use]
 	pub fn into_normal(self) -> Self {
@@ -65,6 +123,11 @@ impl Count {
 		}
 	}
 
+	/// Advances or retreats the count by one without integer overflow.
+	///
+	/// Forward movement adds one and backward movement subtracts one. The
+	/// original variant is preserved, so callers must avoid crossing that
+	/// variant's valid timeline range.
 	#[inline]
 	pub fn checked_inc(self, dir: Direction) -> Result<Self, Error> {
 		match dir {
@@ -73,6 +136,11 @@ impl Count {
 		}
 	}
 
+	/// Adds an unsigned offset without integer overflow.
+	///
+	/// Backfilled offsets are cast to `i64` and must not exceed `i64::MAX`.
+	/// Callers must keep the resulting variant within its documented range;
+	/// integer overflow returns an arithmetic error.
 	#[inline]
 	pub fn checked_add(self, add: u64) -> Result<Self, Error> {
 		Ok(match self {
@@ -87,6 +155,11 @@ impl Count {
 		})
 	}
 
+	/// Subtracts an unsigned offset without integer underflow.
+	///
+	/// Backfilled offsets are cast to `i64` and must not exceed `i64::MAX`.
+	/// Callers must keep the resulting variant within its documented range;
+	/// integer underflow returns an arithmetic error.
 	#[inline]
 	pub fn checked_sub(self, sub: u64) -> Result<Self, Error> {
 		Ok(match self {
@@ -101,6 +174,11 @@ impl Count {
 		})
 	}
 
+	/// Advances or retreats the count by one with saturation.
+	///
+	/// Forward movement adds one and backward movement subtracts one.
+	/// Saturation uses the integer boundary of the existing variant and does
+	/// not prevent a backfilled value from crossing zero.
 	#[inline]
 	#[must_use]
 	pub fn saturating_inc(self, dir: Direction) -> Self {
@@ -110,6 +188,11 @@ impl Count {
 		}
 	}
 
+	/// Adds an unsigned offset with saturation at the integer boundary.
+	///
+	/// Backfilled offsets are cast to `i64` and must not exceed `i64::MAX`.
+	/// Saturation uses the underlying integer boundary and does not repair a
+	/// result outside the variant's documented range.
 	#[inline]
 	#[must_use]
 	pub fn saturating_add(self, add: u64) -> Self {
@@ -119,6 +202,11 @@ impl Count {
 		}
 	}
 
+	/// Subtracts an unsigned offset with saturation at the integer boundary.
+	///
+	/// Backfilled offsets are cast to `i64` and must not exceed `i64::MAX`.
+	/// Saturation uses the underlying integer boundary and does not repair a
+	/// result outside the variant's documented range.
 	#[inline]
 	#[must_use]
 	pub fn saturating_sub(self, sub: u64) -> Self {
@@ -128,10 +216,18 @@ impl Count {
 		}
 	}
 
+	/// Returns the earliest valid timeline count.
+	///
+	/// The minimum is a backfilled count at `i64::MIN`. It sorts before every
+	/// other valid count.
 	#[inline]
 	#[must_use]
 	pub const fn min() -> Self { Self::Backfilled(i64::MIN) }
 
+	/// Returns the latest valid timeline count.
+	///
+	/// The maximum is a normal count at `i64::MAX`. This keeps the value within
+	/// the signed domain used by ordering.
 	#[inline]
 	#[must_use]
 	pub const fn max() -> Self { Self::Normal(i64::MAX as u64) }

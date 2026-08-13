@@ -14,8 +14,15 @@ use tuwunel_core::{
 	utils::{ReadyExt, stream::TryIgnore},
 	warn,
 };
+use tuwunel_database::{Database, Map};
 
 use crate::Services;
+
+struct MediaStorage<'a> {
+	database: &'a Arc<Database>,
+	mediaid_file: &'a Arc<Map>,
+	mediaid_user: &'a Arc<Map>,
+}
 
 /// Migrates a media directory from legacy base64 file names to sha2 file names.
 /// All errors are fatal. Upon success the database is keyed to not perform this
@@ -68,7 +75,7 @@ pub(crate) async fn checkup_sha256_media(services: &Services) -> Result {
 	let config = &services.server.config;
 	let mediaid_file = &db["mediaid_file"];
 	let mediaid_user = &db["mediaid_user"];
-	let dbs = (mediaid_file, mediaid_user);
+	let storage = MediaStorage { database: db, mediaid_file, mediaid_user };
 	let timer = Instant::now();
 
 	let dir = media.get_media_dir();
@@ -82,7 +89,8 @@ pub(crate) async fn checkup_sha256_media(services: &Services) -> Result {
 	for key in media.db.get_all_media_keys().await {
 		let new_path = media.get_media_path_sha256(&key).into_os_string();
 		let old_path = media.get_media_path_b64(&key).into_os_string();
-		if let Err(e) = handle_media_check(&dbs, config, &files, &key, &new_path, &old_path).await
+		if let Err(e) =
+			handle_media_check(&storage, config, &files, &key, &new_path, &old_path).await
 		{
 			error!(
 				media_id = ?encode_key(&key), ?new_path, ?old_path,
@@ -100,7 +108,7 @@ pub(crate) async fn checkup_sha256_media(services: &Services) -> Result {
 }
 
 async fn handle_media_check(
-	dbs: &(&Arc<tuwunel_database::Map>, &Arc<tuwunel_database::Map>),
+	storage: &MediaStorage<'_>,
 	config: &Config,
 	files: &HashSet<OsString>,
 	key: &[u8],
@@ -108,8 +116,6 @@ async fn handle_media_check(
 	old_path: &OsStr,
 ) -> Result {
 	use crate::media::encode_key;
-
-	let (mediaid_file, mediaid_user) = dbs;
 
 	let new_exists = files.contains(new_path);
 	let old_exists = files.contains(old_path);
@@ -125,8 +131,11 @@ async fn handle_media_check(
 			"Media is missing at all paths. Removing from database..."
 		);
 
-		mediaid_file.remove(key);
-		mediaid_user.remove(key);
+		let mut txn = storage.database.txn();
+
+		txn.del_raw(storage.mediaid_file, key);
+		txn.del_raw(storage.mediaid_user, key);
+		txn.execute();
 	}
 
 	if config.media_compat_file_link && !old_exists && new_exists {

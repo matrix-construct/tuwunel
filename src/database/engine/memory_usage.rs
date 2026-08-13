@@ -15,6 +15,11 @@ const CACHE_CAPACITY_PROPERTY: &CStr = c"rocksdb.block-cache-capacity";
 
 fn mib(input: u64) -> f64 { f64::from(u32::try_from(input / 1024).unwrap_or(0)) / 1024.0 }
 
+/// Formats the database engine's current memory usage.
+///
+/// The report covers memtables, pending writes, table readers, and the row
+/// cache. When column-cache pools exist, it also includes their usage,
+/// capacity, pinned memory, and participating column-family counts.
 #[implement(Engine)]
 pub fn memory_usage(&self) -> Result<String> {
 	let mut res = String::new();

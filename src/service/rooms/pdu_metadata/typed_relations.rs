@@ -15,7 +15,12 @@ use tuwunel_core::{
 use super::Service;
 use crate::rooms::short::ShortRoomId;
 
-type Key = ArrayVec<u8, KEY_LEN>;
+/// `relatesto_typed` key buffer, sized to the writer's fixed length.
+///
+/// A key that fails the slice conversion cannot be a relation row, the
+/// writer emitting no other length.
+pub(crate) type Key = ArrayVec<u8, KEY_LEN>;
+
 type Prefix = ArrayVec<u8, PREFIX_LEN>;
 
 /// `relatesto_typed` rel_type discriminant, occupying one key byte between the

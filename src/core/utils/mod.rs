@@ -4,12 +4,28 @@
 //! common utilities shared across workspace crates. Frequently used helpers are
 //! re-exported through a single import path.
 
+/// Extensions for fixed-capacity `ArrayVec` values.
+///
+/// The module adds fluent slice extension while preserving the collection's
+/// fixed storage budget. Capacity exhaustion remains explicit through a panic.
 pub mod arrayvec;
 pub mod bool;
+/// Byte-size parsing, display, and integer encoding helpers.
+///
+/// The module handles human-readable sizes alongside fixed-width big-endian
+/// counters. Its size deserializers integrate human-readable values with Serde.
 pub mod bytes;
+/// HTTP content-disposition selection and filename sanitization.
+///
+/// Media types are checked against the safe-inline list before selecting a
+/// disposition. Optional filenames are sanitized before header construction.
 pub mod content_disposition;
 pub mod debug;
 pub mod defer;
+/// Additional combinators for futures and optional futures.
+///
+/// The extensions compose Boolean, optional, and fallible outputs without
+/// awaiting them early. Comparison and selection helpers are included.
 pub mod future;
 pub mod hash;
 pub mod html;
@@ -18,10 +34,26 @@ pub mod math;
 pub mod mutex_map;
 pub mod option;
 pub mod rand;
+/// Result aliases and composable result extensions.
+///
+/// The module covers filtering, inspection, logging, flattening, and
+/// expectation helpers. Most adapters preserve the original result type.
 pub mod result;
+/// Configuration-secret storage and resolution helpers.
+///
+/// Secrets may come from files or inline configuration. The storage type does
+/// not redact output or erase memory when dropped.
 pub mod secret;
 pub mod set;
+/// Stream adapters for synchronous, concurrent, and fallible transformations.
+///
+/// The module extends futures streams with ordered and completion-ordered
+/// concurrency, ready closures, aggregation, and result handling.
 pub mod stream;
+/// String conversion, serialization, and formatting helpers.
+///
+/// The module includes borrowed unquoted views, serde adapters, chunking, and
+/// UTF-8 conversion utilities. Specialized display wrappers avoid allocation.
 pub mod string;
 pub mod sys;
 #[cfg(test)]

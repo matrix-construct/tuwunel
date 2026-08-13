@@ -7,6 +7,10 @@ use super::Result;
 /// Unlike `unwrap_or_default`, the `Err` branch retains its value instead of
 /// constructing `T::default()`.
 pub trait UnwrapOrErr<T> {
+	/// Returns the value carried by either result variant.
+	///
+	/// Both variants contain the same type, so neither branch needs conversion.
+	/// The result is consumed without constructing a fallback value.
 	fn unwrap_or_err(self) -> T;
 }
 

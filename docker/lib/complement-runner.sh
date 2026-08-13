@@ -104,7 +104,30 @@ if test "$CI_VERBOSE_ENV" = "true"; then
 	env
 fi
 
+# The outer tester container is reclaimed by name, the inner Complement
+# containers and networks by label. Complement stamps `complement_run_id` on
+# everything it creates, and the run_id token above is deterministic per runner
+# and cell, so it recomputes identically across runs and across a re-run
+# attempt. Filtering on the current token therefore reclaims exactly the debris
+# a cancelled predecessor left behind, which otherwise collides at
+# ContainerCreate and fails every test in the suite with no test-level signal,
+# and it can never touch a concurrent sibling job, whose different cell or
+# container-name prefix hashes to a different token.
+#
+# Blueprint images carry the same label and are deliberately spared: they are
+# what lets a re-run deploy in seconds rather than minutes, so dropping them
+# would make every attempt pay for a cold build.
+sweep_run_resources() {
+	local filter="label=complement_run_id=${run_id}"
+
+	docker ps -aq --filter "$filter" | xargs -r docker rm -f >/dev/null 2>&1 || true
+	docker network ls -q --filter "$filter" | xargs -r docker network rm >/dev/null 2>&1 || true
+
+	return 0
+}
+
 docker rm -f "$name" 2>/dev/null
+sweep_run_resources
 
 arg="-d $arg"
 cid=$(docker run $arg)
@@ -134,7 +157,7 @@ extract_metrics() {
 }
 
 trap 'extract_output; extract_metrics; set +x; date; echo -e "\033[1;41;37mERROR\033[0m"' ERR
-trap 'docker container stop $cid; extract_output; extract_metrics' INT
+trap 'docker container stop $cid; extract_output; extract_metrics; sweep_run_resources' INT TERM
 docker logs -f "$cid"
 docker wait "$cid" 2>/dev/null
 

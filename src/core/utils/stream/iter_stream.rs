@@ -5,11 +5,21 @@ use futures::{
 
 use crate::{Error, Result};
 
+/// Converts synchronous iterables into immediately ready streams.
+///
+/// Source iteration order is preserved. The fallible form wraps each item in a
+/// successful result using the crate's error type.
 pub trait IterStream<I: IntoIterator + Send> {
-	/// Convert an Iterator into a Stream
+	/// Converts the iterable into a stream of its items.
+	///
+	/// Items are yielded in the source iterator's order. Polling requires no
+	/// asynchronous work beyond advancing that iterator.
 	fn stream(self) -> impl Stream<Item = <I as IntoIterator>::Item> + Send;
 
-	/// Convert an Iterator into a TryStream
+	/// Converts the iterable into a stream of successful results.
+	///
+	/// Every source item is wrapped in `Ok` with [`Error`] as the error type.
+	/// The adapter itself never produces an error.
 	fn try_stream(
 		self,
 	) -> impl TryStream<

@@ -5,12 +5,20 @@ use futures::{TryFuture, TryStream, TryStreamExt};
 use super::automatic_width;
 use crate::Result;
 
-/// Concurrency extensions to augment futures::TryStreamExt. wide_ combinators
-/// produce in-order results
+/// Adds bounded concurrent transformations with ordered transform results.
+///
+/// Successful item futures may run ahead of downstream demand, and their
+/// results retain queue order. Source errors are propagated immediately and may
+/// overtake queued transformation futures.
 pub trait TryWidebandExt<T, E>
 where
 	Self: TryStream<Ok = T, Error = E, Item = Result<T, E>> + Send + Sized,
 {
+	/// Transforms successful items concurrently with an explicit width.
+	///
+	/// `n` limits in-flight item futures, while `None` selects the automatic
+	/// width; an explicit zero cannot make progress. Transformation results
+	/// retain queue order, while source errors may overtake them.
 	fn widen_and_then<U, F, Fut, N>(
 		self,
 		n: N,
@@ -22,6 +30,11 @@ where
 		Fut: TryFuture<Ok = U, Error = E, Output = Result<U, E>> + Send,
 		U: Send;
 
+	/// Transforms successful items concurrently with the automatic width.
+	///
+	/// Item futures may run ahead, but transformation results retain queue
+	/// order. Existing source errors bypass `f` and may overtake queued
+	/// futures.
 	fn wide_and_then<U, F, Fut>(
 		self,
 		f: F,

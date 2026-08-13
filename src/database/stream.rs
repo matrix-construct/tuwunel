@@ -16,12 +16,22 @@ use crate::{
 	util::{is_incomplete, map_err},
 };
 
+/// Owns a RocksDB raw iterator and its initial positioning state.
+///
+/// The iterator borrows the map's engine for `'a`. The flags distinguish the
+/// first poll from later cursor movement and record whether an explicit seek
+/// position has already been chosen.
 pub(crate) struct State<'a> {
 	inner: Inner<'a>,
 	seek: bool,
 	init: bool,
 }
 
+/// Defines the polling operations shared by database cursor streams.
+///
+/// Implementations position a [`State`], fetch one borrowed item, and surface
+/// RocksDB cursor errors. Borrowed items remain valid only until the next
+/// cursor movement and must be owned before they are retained.
 pub(crate) trait Cursor<'a, T>: Send {
 	fn state(&self) -> &State<'a>;
 
@@ -145,10 +155,20 @@ impl<'a> State<'a> {
 	pub(super) fn valid(&self) -> bool { self.inner.valid() }
 }
 
+/// Extends both borrows in a cursor key-value pair to the stream lifetime.
+///
+/// The returned pair remains valid only until the next cursor movement. This
+/// helper delegates each component to [`slice_longevity`] and carries the same
+/// lifetime contract.
 fn keyval_longevity<'a, 'b: 'a>(item: KeyVal<'a>) -> KeyVal<'b> {
 	(slice_longevity::<'a, 'b>(item.0), slice_longevity::<'a, 'b>(item.1))
 }
 
+/// Extends a RocksDB cursor slice borrow to the stream lifetime.
+///
+/// The extension bridges `Stream`'s fixed item type and does not extend the
+/// underlying storage validity. The returned reference becomes invalid when the
+/// cursor next moves, so callers must not retain it across a poll.
 fn slice_longevity<'a, 'b: 'a>(item: &'a Slice) -> &'b Slice {
 	// SAFETY: The lifetime of the data returned by the rocksdb cursor is only valid
 	// between each movement of the cursor. It is hereby unsafely extended to match

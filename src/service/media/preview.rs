@@ -13,10 +13,18 @@ use std::{
 #[cfg(feature = "url_preview")]
 use reqwest::header::CONTENT_DISPOSITION;
 use reqwest::header::CONTENT_TYPE;
+#[cfg(feature = "url_preview")]
+use ruma::Mxc;
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "url_preview")]
+use tuwunel_core::utils::random_string;
 use tuwunel_core::{Err, Result, debug, err, implement, utils::time::timepoint_from_now};
+#[cfg(feature = "url_preview")]
+use tuwunel_database::Txn;
 use url::{Host, Url};
 
+#[cfg(feature = "url_preview")]
+use super::MXC_LENGTH;
 use super::Service;
 
 #[derive(Debug, Default, Deserialize, Serialize)]
@@ -244,6 +252,10 @@ pub async fn request_url_preview(&self, url: &Url) -> Result<UrlPreviewData> {
 	Ok(cached.preview)
 }
 
+/// Download an image for URL preview metadata.
+///
+/// When URL previews are enabled, the image is staged for lazy media retrieval;
+/// otherwise this returns the feature-disabled error.
 #[cfg(feature = "url_preview")]
 #[implement(Service)]
 pub async fn download_image(&self, response: reqwest::Response) -> Result<UrlPreviewData> {
@@ -276,13 +288,18 @@ pub async fn download_image(&self, response: reqwest::Response) -> Result<UrlPre
 		},
 	};
 
-	let mxc = self.register_lazy_media(url.as_str());
+	let mut txn = self.services.db.txn();
+	let mxc = self.queue_lazy_media(&mut txn, url.as_str());
+
 	self.db.set_lazy_content(
+		&mut txn,
 		&mxc,
 		content_type.as_deref(),
 		content_disposition.as_deref(),
 		&image,
 	);
+
+	txn.execute();
 
 	Ok(UrlPreviewData {
 		image: Some(mxc),
@@ -293,6 +310,10 @@ pub async fn download_image(&self, response: reqwest::Response) -> Result<UrlPre
 	})
 }
 
+/// Download an image for URL preview metadata.
+///
+/// When URL previews are enabled, the image is staged for lazy media retrieval;
+/// otherwise this returns the feature-disabled error.
 #[cfg(not(feature = "url_preview"))]
 #[implement(Service)]
 #[expect(clippy::unused_async)]
@@ -383,17 +404,31 @@ fn require_media_type(response: &reqwest::Response, class: &str) -> Result {
 #[cfg(feature = "url_preview")]
 #[implement(Service)]
 fn register_lazy_media(&self, url: &str) -> String {
-	use ruma::Mxc;
-	use tuwunel_core::utils::random_string;
-
-	let mxc = Mxc {
-		server_name: self.services.globals.server_name(),
-		media_id: &random_string(super::MXC_LENGTH),
-	};
+	let mxc = self.mint_lazy_media();
 
 	self.db.insert_lazy_media(&mxc, url);
 
-	mxc.to_string()
+	mxc
+}
+
+#[cfg(feature = "url_preview")]
+#[implement(Service)]
+fn queue_lazy_media(&self, txn: &mut Txn, url: &str) -> String {
+	let mxc = self.mint_lazy_media();
+
+	self.db.queue_lazy_media(txn, &mxc, url);
+
+	mxc
+}
+
+#[cfg(feature = "url_preview")]
+#[implement(Service)]
+fn mint_lazy_media(&self) -> String {
+	Mxc {
+		server_name: self.services.globals.server_name(),
+		media_id: &random_string(MXC_LENGTH),
+	}
+	.to_string()
 }
 
 #[cfg(feature = "url_preview")]

@@ -46,6 +46,11 @@ impl DumpMeta {
 }
 
 #[cfg(tokio_unstable)]
+/// Writes a runtime metrics snapshot into a process-specific JSON file.
+///
+/// The output filename includes the current process identifier. Serialization
+/// and file-system failures are reported through logging instead of being
+/// returned.
 pub fn write_runtime_metrics(dir: &Path, metrics: &RuntimeMetrics) {
 	let pid = process::id();
 	let path = dir.join(format!("{RUNTIME_METRICS_PREFIX}.{pid}.json"));
@@ -58,6 +63,11 @@ pub fn write_runtime_metrics(dir: &Path, metrics: &RuntimeMetrics) {
 	report(&path, "runtime_metrics", write_json(&path, &dump));
 }
 
+/// Writes a resource usage snapshot into a process-specific JSON file.
+///
+/// The output filename includes the current process identifier. Serialization
+/// and file-system failures are reported through logging instead of being
+/// returned.
 pub fn write_resource_usage(dir: &Path, usage: &Usage) {
 	let pid = process::id();
 	let path = dir.join(format!("{RUNTIME_USAGE_PREFIX}.{pid}.json"));

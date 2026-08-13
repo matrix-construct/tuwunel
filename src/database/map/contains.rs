@@ -11,9 +11,14 @@ use tuwunel_core::{
 
 use crate::{keyval::KeyBuf, ser};
 
-/// Returns true if the map contains the key.
-/// - key is serialized into allocated buffer
-/// - harder errors may not be reported
+/// Checks whether a serialized key exists.
+///
+/// The key is encoded into an owned buffer before asynchronous raw-key lookup.
+/// Missing keys and database errors are folded into `false`.
+///
+/// # Panics
+///
+/// Panics if the key cannot be serialized.
 #[inline]
 #[implement(super::Map)]
 pub fn contains<K>(
@@ -27,9 +32,14 @@ where
 	self.bcontains(key, &mut buf)
 }
 
-/// Returns true if the map contains the key.
-/// - key is serialized into stack-buffer
-/// - harder errors will panic
+/// Checks whether a serialized key exists using fixed-capacity storage.
+///
+/// `MAX` bounds the complete encoded key without a heap fallback. Missing keys
+/// and database errors are folded into `false`.
+///
+/// # Panics
+///
+/// Panics if the encoded key exceeds `MAX` or serialization otherwise fails.
 #[inline]
 #[implement(super::Map)]
 pub fn acontains<const MAX: usize, K>(
@@ -43,9 +53,15 @@ where
 	self.bcontains(key, &mut buf)
 }
 
-/// Returns true if the map contains the key.
-/// - key is serialized into provided buffer
-/// - harder errors will panic
+/// Checks whether a serialized key exists using a caller-supplied buffer.
+///
+/// Serialization appends to the supplied buffer, and lookup uses its full
+/// resulting contents. Missing keys and database errors are folded into
+/// `false`.
+///
+/// # Panics
+///
+/// Panics if the key cannot be serialized.
 #[implement(super::Map)]
 #[tracing::instrument(skip(self, buf), fields(%self), level = "trace")]
 pub fn bcontains<K, B>(
@@ -61,8 +77,10 @@ where
 	self.exists(key).is_ok()
 }
 
-/// Returns Ok if the map contains the key.
-/// - key is raw
+/// Checks whether a raw key exists asynchronously.
+///
+/// Success returns unit, while missing keys and database failures remain
+/// errors. The lookup uses the same cache-first path as `get`.
 #[inline]
 #[implement(super::Map)]
 pub fn exists<'a, K>(
@@ -75,8 +93,11 @@ where
 	self.get(key).map(|res| res.map(|_| ()))
 }
 
-/// Returns Ok if the map contains the key; NotFound otherwise. Harder errors
-/// may not always be reported properly.
+/// Checks synchronously whether a raw key exists.
+///
+/// A cache-tier existence hint can avoid a point read when absence is certain.
+/// Missing keys return the map's not-found error, while database failures
+/// remain errors.
 #[implement(super::Map)]
 #[tracing::instrument(skip(self, key), fields(%self), level = "trace")]
 pub fn exists_blocking<K>(&self, key: &K) -> Result
@@ -90,8 +111,10 @@ where
 		.ok_or_else(|| err!(Request(NotFound("Not found in database"))))
 }
 
-/// Rocksdb limits this to kBlockCacheTier internally so this is not actually a
-/// blocking call; in case that changes we set this as well in our read_options.
+/// Tests whether RocksDB can rule out a raw key without storage I/O.
+///
+/// A `false` result proves absence, while `true` still requires a point read.
+/// The configured read options restrict the probe to block cache.
 #[implement(super::Map)]
 pub(crate) fn maybe_exists<K>(&self, key: &K) -> bool
 where

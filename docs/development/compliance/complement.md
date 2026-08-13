@@ -4,16 +4,16 @@ Tuwunel runs the [Complement](https://github.com/matrix-org/complement) Matrix h
 
 ## Counts
 
-- Test groups: 205. Passing: **82.0%**
-  - ✅ `pass`: 168
-  - 🟨 `some`: 17
-  - ❌ `fail`: 18
-  - ⬛ `skip`: 2
+- Test groups: 205. Passing: **83.4%**
+  - ✅ `pass`: 171
+  - 🟨 `some`: 15
+  - ❌ `fail`: 19
+  - ⬛ `skip`: 0
 
-- Subtests: 587. Passing: **77.9%**
-  - ✅ `pass`: 457
-  - ❌ `fail`: 117
-  - ⬛ `skip`: 13
+- Subtests: 595. Passing: **78.8%**
+  - ✅ `pass`: 469
+  - ❌ `fail`: 118
+  - ⬛ `skip`: 8
 
 ## All Top-Level Tests
 
@@ -26,7 +26,7 @@ Tuwunel runs the [Complement](https://github.com/matrix-org/complement) Matrix h
 | ✅ | 6/0/0 | `AsyncUpload` |
 | ✅ | – | `AvatarUrlUpdate` |
 | ✅ | – | `BannedUserCannotSendJoin` |
-| ⬛ | – | `CanRegisterAdmin` |
+| ✅ | – | `CanRegisterAdmin` |
 | ✅ | – | `CannotKickLeftUser` |
 | ✅ | – | `CannotKickNonPresentUser` |
 | ✅ | 6/0/0 | `CannotSendKnockViaSendKnockInMSC3787Room` |
@@ -79,7 +79,7 @@ Tuwunel runs the [Complement](https://github.com/matrix-org/complement) Matrix h
 | ✅ | – | `GetMissingEventsGapFilling` |
 | ✅ | – | `GetRoomMembers` |
 | ❌ | – | `GetRoomMembersAtPoint` |
-| ❌ | 0/4/0 | `InboundCanReturnMissingEvents` |
+| ✅ | 4/0/0 | `InboundCanReturnMissingEvents` |
 | ✅ | – | `InboundFederationKeys` |
 | ✅ | 2/0/0 | `InboundFederationProfile` |
 | ❌ | – | `InboundFederationRejectsEventsWithRejectedAuthEvents` |
@@ -140,7 +140,7 @@ Tuwunel runs the [Complement](https://github.com/matrix-org/complement) Matrix h
 | ❌ | – | `OutboundFederationIgnoresMissingEventWithBadJSONForRoomVersion6` |
 | ✅ | 1/0/0 | `OutboundFederationProfile` |
 | ✅ | – | `OutboundFederationSend` |
-| ❌ | 0/58/7 | `PartialStateJoin` |
+| ❌ | 0/59/6 | `PartialStateJoin` |
 | ✅ | 1/0/0 | `PollsLocalPushRules` |
 | ✅ | 3/0/0 | `PowerLevels` |
 | 🟨 | 4/1/0 | `Presence` |
@@ -149,10 +149,10 @@ Tuwunel runs the [Complement](https://github.com/matrix-org/complement) Matrix h
 | ✅ | 2/0/0 | `ProfileDisplayName` |
 | ✅ | 9/0/0 | `PublicRooms` |
 | ✅ | – | `PushRuleCacheHealth` |
-| 🟨 | 3/2/0 | `PushRuleRoomUpgrade` |
+| ✅ | 5/0/0 | `PushRuleRoomUpgrade` |
 | ✅ | 5/0/0 | `PushSync` |
 | ✅ | 1/0/0 | `Redact` |
-| ✅ | 19/0/4 | `Registration` |
+| ✅ | 23/0/0 | `Registration` |
 | ✅ | – | `Relations` |
 | ✅ | – | `RelationsPagination` |
 | ✅ | – | `RelationsPaginationSync` |
@@ -175,7 +175,7 @@ Tuwunel runs the [Complement](https://github.com/matrix-org/complement) Matrix h
 | ✅ | 5/0/0 | `RoomAlias` |
 | ✅ | 10/0/0 | `RoomCanonicalAlias` |
 | ✅ | 15/0/0 | `RoomCreate` |
-| 🟨 | 4/2/0 | `RoomCreationReportsEventsToMyself` |
+| ✅ | 6/0/0 | `RoomCreationReportsEventsToMyself` |
 | 🟨 | 7/2/0 | `RoomDeleteAlias` |
 | 🟨 | 6/2/0 | `RoomForget` |
 | ✅ | – | `RoomImageRoundtrip` |
@@ -192,10 +192,10 @@ Tuwunel runs the [Complement](https://github.com/matrix-org/complement) Matrix h
 | ✅ | 9/0/0 | `RoomsInvite` |
 | ✅ | 7/0/0 | `Search` |
 | ✅ | – | `SendAndFetchMessage` |
-| ✅ | – | `SendJoinPartialStateResponse` |
+| ❌ | – | `SendJoinPartialStateResponse` |
 | ✅ | – | `SendMessageWithTxn` |
 | ✅ | – | `ServerCapabilities` |
-| ⬛ | – | `ServerNotices` |
+| ❌ | 0/8/0 | `ServerNotices` |
 | 🟨 | 10/3/0 | `Sync` |
 | ✅ | 2/0/0 | `SyncFilter` |
 | ✅ | 3/0/0 | `SyncLeaveSection` |

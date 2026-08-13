@@ -1,6 +1,6 @@
 use std::str::FromStr;
 
-use jwt::{Algorithm, DecodingKey, Validation, decode};
+use jwt::{Algorithm, DecodingKey, Validation, dangerous::insecure_decode, decode};
 use ruma::{
 	OwnedUserId, UserId,
 	api::client::session::login::v3::{Request, Token},
@@ -55,9 +55,16 @@ pub(crate) fn validate_user(services: &Services, token: &str) -> Result<OwnedUse
 }
 
 fn validate(config: &JwtConfig, token: &str) -> Result<Claim> {
-	let verifier = init_verifier(config)?;
-	let validator = init_validator(config)?;
-	decode::<Claim>(token, &verifier, &validator)
+	let token_data = if cfg!(debug_assertions) && !config.validate_signature {
+		warn!("JWT signature validation is disabled!");
+		insecure_decode::<Claim>(token)
+	} else {
+		let verifier = init_verifier(config)?;
+		let validator = init_validator(config)?;
+		decode::<Claim>(token, &verifier, &validator)
+	};
+
+	token_data
 		.map(|decoded| (decoded.header, decoded.claims))
 		.inspect(|(head, claim)| debug!(?head, ?claim, "JWT token decoded"))
 		.map_err(|e| err!(Request(Forbidden("Invalid JWT token: {e}"))))
@@ -111,12 +118,6 @@ fn init_validator(config: &JwtConfig) -> Result<Validation> {
 	if !config.issuer.is_empty() {
 		required_spec_claims.push("iss");
 		validator.set_issuer(&config.issuer);
-	}
-
-	#[expect(deprecated)]
-	if cfg!(debug_assertions) && !config.validate_signature {
-		warn!("JWT signature validation is disabled!");
-		validator.insecure_disable_signature_validation();
 	}
 
 	validator.set_required_spec_claims(&required_spec_claims);

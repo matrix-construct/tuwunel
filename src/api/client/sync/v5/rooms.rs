@@ -8,7 +8,7 @@ use futures::{
 	future::{join, join3, join4},
 };
 use ruma::{
-	JsOption, MxcUri, OwnedEventId, OwnedMxcUri, OwnedRoomId, RoomId, UInt, UserId,
+	JsOption, MxcUri, OwnedEventId, OwnedMxcUri, RoomId, UInt, UserId,
 	api::client::sync::sync_events::{
 		UnreadNotificationsCount,
 		v5::{DisplayName, response, response::Heroes},
@@ -19,7 +19,7 @@ use ruma::{
 	serde::Raw,
 };
 use tuwunel_core::{
-	Result, at, err, error, is_equal_to,
+	Error, Result, at, is_equal_to,
 	itertools::Itertools,
 	matrix::{
 		Event, StateKey,
@@ -33,45 +33,22 @@ use tuwunel_core::{
 		stream::{BroadbandExt, WidebandExt},
 	},
 };
-use tuwunel_service::{Services, sync::Room};
+use tuwunel_service::Services;
 
 use self::{bump_stamp::room_bump_stamp, heroes::calculate_heroes};
 use super::{
-	super::{load_timeline, strip_prev_state},
-	Connection, ListIds, SyncInfo, Window, WindowRoom,
+	super::{load_timeline_fallible, strip_prev_state},
+	Connection, ListIds, SyncInfo, WindowRoom,
 };
 use crate::client::{annotate_membership, ignored_filter, with_membership};
 
-type ThreadCounts = BTreeMap<OwnedEventId, (u64, u64)>;
-
-#[tracing::instrument(
-    name = "rooms",
-    level = "debug",
-    skip_all,
-    fields(
-        next_batch = conn.next_batch,
-        window = window.len(),
-    )
-)]
-pub(super) async fn handle(
-	sync_info: SyncInfo<'_>,
-	conn: &Connection,
-	window: &Window,
-) -> Result<BTreeMap<OwnedRoomId, response::Room>> {
-	window
-		.iter()
-		.stream()
-		.broad_filter_map(async |(room_id, room)| {
-			handle_room(sync_info, conn, room)
-				.map_ok(move |room| (room_id.clone(), room))
-				.inspect_err(|e| error!(?room_id, "sync handler: {e:?}"))
-				.await
-				.ok()
-		})
-		.collect()
-		.map(Ok)
-		.await
+#[derive(Debug)]
+pub(super) enum Failure {
+	Timeline(Error),
+	Payload(Error),
 }
+
+type ThreadCounts = BTreeMap<OwnedEventId, (u64, u64)>;
 
 #[tracing::instrument(
 	name = "room",
@@ -79,41 +56,36 @@ pub(super) async fn handle(
 	skip_all,
 	fields(room_id, roomsince)
 )]
-async fn handle_room(
+pub(super) async fn handle_room(
 	sync_info: SyncInfo<'_>,
 	conn: &Connection,
 	window_room: &WindowRoom,
-) -> Result<response::Room> {
-	let SyncInfo { services, sender_user, .. } = sync_info;
-	let WindowRoom {
-		lists, membership, room_id, last_count, ..
-	} = window_room;
+	roomsince: u64,
+) -> Result<response::Room, Failure> {
+	let SyncInfo {
+		services,
+		sender_user,
+		previous_connection_pos,
+		..
+	} = sync_info;
+	let WindowRoom { lists, membership, room_id, .. } = window_room;
 
-	let &Room { roomsince, .. } = conn
-		.rooms
-		.get(room_id)
-		.ok_or_else(|| err!("Missing connection state for {room_id}"))?;
-
-	debug_assert!(
-		*last_count > roomsince || *last_count == 0 || roomsince == 0,
-		"Stale room shouldn't be in the window"
-	);
+	debug_assert!(window_room.payload_is_fresh(roomsince), "Room payload should be fresh");
 
 	if matches!(*membership, Some(MembershipState::Leave | MembershipState::Ban)) {
-		return leave_or_ban_response(sync_info, conn, window_room, roomsince).await;
+		return leave_or_ban_response(sync_info, conn, window_room, roomsince)
+			.map_err(Failure::Payload)
+			.await;
 	}
 
 	let is_invite = *membership == Some(MembershipState::Invite);
 
-	let encrypted = services
-		.state_accessor
-		.is_encrypted_room(room_id)
-		.await;
+	let encrypted = services.state_accessor.is_encrypted_room(room_id);
 
 	let (timeline_limit, required_state) = merged_room_details(conn, lists, room_id);
 
 	let timeline = is_invite.is_false().then_async(|| {
-		load_timeline(
+		load_timeline_fallible(
 			services,
 			sender_user,
 			room_id,
@@ -123,10 +95,15 @@ async fn handle_room(
 		)
 	});
 
-	let (timeline_pdus, limited, last_timeline_count) = timeline
-		.await
-		.flat_ok()
-		.unwrap_or_else(|| (Vec::new(), true, PduCount::default()));
+	let timeline = timeline
+		.map(Option::transpose)
+		.map_err(Failure::Timeline);
+
+	let (encrypted, timeline) = join(encrypted, timeline).await;
+
+	// A failed load must fail the room, else roomsince advances past unsent events.
+	let (timeline_pdus, limited, last_timeline_count) =
+		timeline?.unwrap_or_else(|| (Vec::new(), true, PduCount::default()));
 
 	let required_state = required_state
 		.into_iter()
@@ -148,19 +125,8 @@ async fn handle_room(
 		PduCount::from(conn.next_batch),
 		last_timeline_count,
 	)
-	.await;
-
-	let num_live = roomsince
-		.ne(&0)
-		.and_is(limited || timeline_pdus.len() >= timeline_limit)
-		.then_async(|| {
-			services
-				.timeline
-				.pdus(None, room_id, Some(roomsince.into()))
-				.count()
-				.map(TryInto::try_into)
-				.map(Result::ok)
-		});
+	.map_err(Failure::Timeline)
+	.await?;
 
 	let required_state = collect_required_state(
 		services,
@@ -183,23 +149,25 @@ async fn handle_room(
 		.iter()
 		.stream()
 		.filter_map(|item| ignored_filter(services, item.clone(), sender_user))
-		.map(at!(1))
-		.wide_then(|pdu| with_membership(services, pdu, sender_user, encrypted))
-		.wide_then(|pdu| {
+		.wide_then(|(position, pdu)| {
+			with_membership(services, pdu, sender_user, encrypted).map(move |pdu| (position, pdu))
+		})
+		.wide_then(|(position, pdu)| {
 			services
 				.pdu_metadata
 				.bundle_aggregations(sender_user, pdu)
+				.map(move |pdu| (position, pdu))
 		})
-		.map(Event::into_format)
-		.collect();
+		.map(|(position, pdu)| (position, Event::into_format(pdu)))
+		.collect::<Vec<_>>();
 
 	let meta = room_meta_future(services, sender_user, room_id);
-	let events = join4(timeline, num_live, required_state, invite_state);
+	let events = join3(timeline, required_state, invite_state);
 	let member_counts = member_counts_future(services, room_id);
 	let notification_counts = notification_counts_future(services, sender_user, room_id);
 	let (
 		(room_name, room_avatar, is_dm),
-		(timeline, num_live, required_state, invite_state),
+		(timeline, required_state, invite_state),
 		(joined_count, invited_count),
 		(highlight_count, notification_count, _last_notification_read, thread_counts),
 	) = join4(meta, events, member_counts, notification_counts)
@@ -215,8 +183,14 @@ async fn handle_room(
 	)
 	.await;
 
+	let previous_connection_pos = previous_connection_pos.filter(|_| !is_invite);
+	let (initial, num_live) =
+		room_timeline_metadata(roomsince, previous_connection_pos, &timeline);
+
+	let timeline = timeline.into_iter().map(at!(1)).collect();
+
 	Ok(response::Room {
-		initial: roomsince.eq(&0).then_some(true),
+		initial,
 		lists: lists.clone(),
 		membership: membership.clone(),
 		name: room_name.or(heroes_name),
@@ -226,7 +200,7 @@ async fn handle_room(
 		required_state,
 		invite_state: invite_state.flatten(),
 		prev_batch: prev_batch.as_deref().map(Into::into),
-		num_live: num_live.flatten(),
+		num_live,
 		limited,
 		timeline,
 		bump_stamp,
@@ -246,11 +220,14 @@ async fn leave_or_ban_response(
 	WindowRoom { lists, membership, room_id, .. }: &WindowRoom,
 	roomsince: u64,
 ) -> Result<response::Room> {
+	// A rejected federated invite has no resolved state; the retraction still
+	// delivers on the membership alone.
 	let member_event = services
 		.state_accessor
 		.room_state_get(room_id, &StateEventType::RoomMember, sender_user.as_str())
 		.map_ok(Event::into_format)
-		.await?;
+		.await
+		.ok();
 
 	Ok(response::Room {
 		initial: roomsince.eq(&0).then_some(true),
@@ -258,7 +235,7 @@ async fn leave_or_ban_response(
 		membership: membership.clone(),
 		prev_batch: Some(conn.next_batch.to_string().into()),
 		limited: true,
-		required_state: vec![member_event],
+		required_state: member_event.into_iter().collect(),
 		..Default::default()
 	})
 }
@@ -277,6 +254,28 @@ fn merged_room_details(
 			required_state.extend(config.required_state.clone());
 			(timeline_limit.max(usize_from_ruma(config.timeline_limit)), required_state)
 		})
+}
+
+fn room_timeline_metadata<Event>(
+	roomsince: u64,
+	previous_connection_pos: Option<u64>,
+	timeline_pdus: &[(PduCount, Event)],
+) -> (Option<bool>, Option<UInt>) {
+	let initial = roomsince.eq(&0).then_some(true);
+	let num_live = previous_connection_pos
+		.map(PduCount::from)
+		.and_then(|previous_connection_pos| {
+			timeline_pdus
+				.iter()
+				.rev()
+				.map(|(position, _)| *position)
+				.take_while(|position| *position > previous_connection_pos)
+				.count()
+				.try_into()
+				.ok()
+		});
+
+	(initial, num_live)
 }
 
 async fn resolve_heroes(
@@ -487,4 +486,65 @@ async fn wildcard_state_keys(
 		.map(|state_key| (event_type.clone(), state_key))
 		.collect()
 		.await
+}
+
+#[cfg(test)]
+mod tests {
+	use ruma::{UInt, uint};
+	use tuwunel_core::matrix::pdu::PduCount;
+
+	use super::room_timeline_metadata;
+
+	fn timeline(positions: &[u64]) -> Vec<(PduCount, ())> {
+		positions
+			.iter()
+			.copied()
+			.map(|position| (PduCount::Normal(position), ()))
+			.collect()
+	}
+
+	#[test]
+	fn first_connection_timeline_is_initial_and_historical() {
+		let (initial, num_live) = room_timeline_metadata(0, None, &timeline(&[8, 9, 10]));
+
+		assert_eq!(initial, Some(true));
+		assert_eq!(num_live, None);
+	}
+
+	#[test]
+	fn incremental_new_room_has_one_live_event() {
+		let (initial, num_live) = room_timeline_metadata(0, Some(10), &timeline(&[8, 9, 11]));
+
+		assert_eq!(initial, Some(true));
+		assert_eq!(num_live, Some(uint!(1)));
+	}
+
+	#[test]
+	fn incremental_range_expansion_has_no_live_events() {
+		let (initial, num_live) = room_timeline_metadata(0, Some(10), &timeline(&[7, 8, 9]));
+
+		assert_eq!(initial, Some(true));
+		assert_eq!(num_live, Some(uint!(0)));
+	}
+
+	#[test]
+	fn incremental_timeline_counts_only_live_suffix() {
+		let (initial, num_live) = room_timeline_metadata(5, Some(10), &timeline(&[8, 9, 11, 12]));
+
+		assert_eq!(initial, None);
+		assert_eq!(num_live, Some(uint!(2)));
+	}
+
+	#[test]
+	fn limited_timeline_counts_only_returned_live_events() {
+		// Earlier live events at positions 11 through 13 were truncated.
+		let returned_timeline = timeline(&[14, 15]);
+		let (_, num_live) = room_timeline_metadata(5, Some(10), &returned_timeline);
+
+		assert_eq!(num_live, Some(uint!(2)));
+		let timeline_len =
+			UInt::try_from(returned_timeline.len()).expect("timeline length fits UInt");
+
+		assert!(num_live.expect("incremental response") <= timeline_len);
+	}
 }

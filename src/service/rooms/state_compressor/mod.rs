@@ -28,11 +28,16 @@ struct Data {
 	shortstatehash_statediff: Arc<Map>,
 }
 
+/// One state as a delta against a parent state.
+///
+/// `added` and `removed` are the compressed entries this state adds to and
+/// removes from its parent chain's accumulation; a `None` parent makes
+/// `added` the full state.
 #[derive(Clone)]
-struct StateDiff {
-	parent: Option<ShortStateHash>,
-	added: Arc<CompressedState>,
-	removed: Arc<CompressedState>,
+pub(crate) struct StateDiff {
+	pub(crate) parent: Option<ShortStateHash>,
+	pub(crate) added: Arc<CompressedState>,
+	pub(crate) removed: Arc<CompressedState>,
 }
 
 #[derive(Clone, Default)]
@@ -465,9 +470,13 @@ pub async fn save_state(
 	})
 }
 
+/// Reads one state's delta row into its typed form.
+///
+/// Rows round-trip through [`save_statediff`], the pair being the only
+/// codec for the statediff encoding.
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "debug", name = "get")]
-async fn get_statediff(&self, shortstatehash: ShortStateHash) -> Result<StateDiff> {
+pub(crate) async fn get_statediff(&self, shortstatehash: ShortStateHash) -> Result<StateDiff> {
 	const BUFSIZE: usize = size_of::<ShortStateHash>();
 	const STRIDE: usize = size_of::<ShortStateHash>();
 
@@ -513,8 +522,17 @@ async fn get_statediff(&self, shortstatehash: ShortStateHash) -> Result<StateDif
 	})
 }
 
+/// Serializes one state's delta into the caller's transaction.
+///
+/// The one writer of the statediff encoding: entries emit sorted, the
+/// removed run behind its sentinel only when nonempty.
 #[implement(Service)]
-fn save_statediff(&self, txn: &mut Txn, shortstatehash: ShortStateHash, diff: &StateDiff) {
+pub(crate) fn save_statediff(
+	&self,
+	txn: &mut Txn,
+	shortstatehash: ShortStateHash,
+	diff: &StateDiff,
+) {
 	let event_count = diff
 		.added
 		.len()

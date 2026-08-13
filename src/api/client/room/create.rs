@@ -17,7 +17,7 @@ use ruma::{
 		StateEventType, TimelineEventType,
 		room::{
 			canonical_alias::RoomCanonicalAliasEventContent,
-			create::RoomCreateEventContent,
+			create::{PreviousRoom, RoomCreateEventContent},
 			encryption::RoomEncryptionEventContent,
 			guest_access::{GuestAccess, RoomGuestAccessEventContent},
 			history_visibility::{HistoryVisibility, RoomHistoryVisibilityEventContent},
@@ -170,6 +170,14 @@ pub(crate) async fn create_room_route(
 
 	finalize_alias_and_directory(&services, &body, alias.as_deref(), sender_user, &room_id)
 		.await?;
+
+	copy_creator_predecessor_push_rule(
+		&services,
+		body.creation_content.as_ref(),
+		sender_user,
+		&room_id,
+	)
+	.await;
 
 	info!("{sender_user} created a room with room ID {room_id}");
 
@@ -357,18 +365,10 @@ async fn apply_preset_state_pdus(
 				)
 			});
 
-	let guest_access_pdubuilder =
-		take_initial(&mut initial_state, &StateEventType::RoomGuestAccess, "")
-			.map(Into::into)
-			.unwrap_or_else(|| {
-				PduBuilder::state(
-					String::new(),
-					&RoomGuestAccessEventContent::new(match *preset {
-						| RoomPreset::PublicChat => GuestAccess::Forbidden,
-						| _ => GuestAccess::CanJoin,
-					}),
-				)
-			});
+	let guest_access = guest_access_pdu(
+		take_initial(&mut initial_state, &StateEventType::RoomGuestAccess, "").map(Into::into),
+		preset,
+	);
 
 	// 5.1 Join Rules
 	services
@@ -385,13 +385,23 @@ async fn apply_preset_state_pdus(
 		.await?;
 
 	// 5.3 Guest Access
-	services
-		.timeline
-		.build_and_append_pdu(guest_access_pdubuilder, sender_user, room_id, state_lock)
-		.boxed()
-		.await?;
+	if let Some(guest_access) = guest_access {
+		services
+			.timeline
+			.build_and_append_pdu(guest_access, sender_user, room_id, state_lock)
+			.boxed()
+			.await?;
+	}
 
 	Ok(initial_state)
+}
+
+fn guest_access_pdu(initial: Option<PduBuilder>, preset: &RoomPreset) -> Option<PduBuilder> {
+	let can_join = || {
+		PduBuilder::state(String::new(), &RoomGuestAccessEventContent::new(GuestAccess::CanJoin))
+	};
+
+	initial.or_else(|| preset.ne(&RoomPreset::PublicChat).then(can_join))
 }
 
 async fn apply_initial_state_pdus(
@@ -425,9 +435,8 @@ async fn apply_initial_state_pdus(
 
 	let should_encrypt = match config {
 		| Some("all") => true,
-		| Some("invite") => {
-			matches!(preset, RoomPreset::PrivateChat | RoomPreset::TrustedPrivateChat)
-		},
+		| Some("invite") =>
+			matches!(preset, RoomPreset::PrivateChat | RoomPreset::TrustedPrivateChat),
 		| _ => false,
 	};
 
@@ -548,6 +557,32 @@ async fn finalize_alias_and_directory(
 	}
 
 	Ok(())
+}
+
+async fn copy_creator_predecessor_push_rule(
+	services: &Services,
+	creation_content: Option<&Raw<CreationContent>>,
+	sender_user: &UserId,
+	room_id: &RoomId,
+) {
+	let Some(from_room) = creation_content
+		.and_then(|content| {
+			content
+				.get_field::<PreviousRoom>("predecessor")
+				.ok()
+				.flatten()
+		})
+		.map(|predecessor| predecessor.room_id)
+	else {
+		return;
+	};
+
+	services
+		.account_data
+		.copy_room_push_rule(sender_user, &from_room, room_id)
+		.await
+		.inspect_err(|e| warn!(%e, "Failed to copy predecessor push rules"))
+		.ok();
 }
 
 async fn create_create_event(
@@ -1020,6 +1055,13 @@ mod tests {
 
 	use super::*;
 
+	fn guest_access(pdu: &PduBuilder) -> GuestAccess {
+		pdu.content
+			.deserialize_as_unchecked::<RoomGuestAccessEventContent>()
+			.expect("guest access content")
+			.guest_access
+	}
+
 	#[test]
 	fn default_power_levels_content_applies_server_default_override() {
 		let version_rules = rules(&RoomVersionId::V11).expect("supported room version");
@@ -1071,5 +1113,34 @@ mod tests {
 
 		assert_eq!(content["users_default"], json!(50));
 		assert_eq!(content["users"][creator.as_str()], json!(100));
+	}
+
+	#[test]
+	fn public_chat_omits_default_guest_access() {
+		assert!(guest_access_pdu(None, &RoomPreset::PublicChat).is_none());
+	}
+
+	#[test]
+	fn private_presets_default_to_guest_access() {
+		for preset in [RoomPreset::PrivateChat, RoomPreset::TrustedPrivateChat] {
+			let pdu = guest_access_pdu(None, &preset).expect("guest access pdu");
+
+			assert_eq!(pdu.event_type, TimelineEventType::RoomGuestAccess);
+			assert_eq!(pdu.state_key.as_deref(), Some(""));
+			assert_eq!(guest_access(&pdu), GuestAccess::CanJoin);
+		}
+	}
+
+	#[test]
+	fn explicit_guest_access_survives_public_preset() {
+		let explicit = PduBuilder::state(
+			String::new(),
+			&RoomGuestAccessEventContent::new(GuestAccess::Forbidden),
+		);
+
+		let pdu = guest_access_pdu(Some(explicit), &RoomPreset::PublicChat)
+			.expect("explicit guest access pdu");
+
+		assert_eq!(guest_access(&pdu), GuestAccess::Forbidden);
 	}
 }

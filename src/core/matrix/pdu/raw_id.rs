@@ -8,9 +8,22 @@ use super::{
 	Count, Id,
 };
 
+/// Packed database key for a room's normal or backfilled PDU.
+///
+/// Both layouts begin with the big-endian compact room identifier. Normal keys
+/// are 16 bytes and backfilled keys are 24 bytes.
 #[derive(Clone, Copy, Eq, Hash, PartialEq)]
 pub enum RawId {
+	/// Packed key for an event in the normal timeline.
+	///
+	/// The key concatenates the room surrogate and unsigned count as two
+	/// big-endian integers.
 	Normal(RawIdNormal),
+
+	/// Packed key for an event in the backfilled timeline.
+	///
+	/// The key inserts an eight-byte zero marker between the room surrogate and
+	/// signed count bits.
 	Backfilled(RawIdBackfilled),
 }
 
@@ -26,10 +39,18 @@ impl RawId {
 	const MAX_LEN: usize = Self::BACKFILLED_LEN;
 	const NORMAL_LEN: usize = size_of::<ShortRoomId>() + size_of::<u64>();
 
+	/// Checks whether two raw PDU keys belong to the same room.
+	///
+	/// Only the leading compact room identifier is compared. Timeline kind and
+	/// event count do not affect the result.
 	#[inline]
 	#[must_use]
 	pub fn is_room_eq(self, other: Self) -> bool { self.shortroomid() == other.shortroomid() }
 
+	/// Decodes the timeline count stored in this raw key.
+	///
+	/// Normal and backfilled layouts are converted to the corresponding `Count`
+	/// variant. The compact room identifier is ignored.
 	#[inline]
 	#[must_use]
 	pub fn pdu_count(self) -> Count {
@@ -37,6 +58,10 @@ impl RawId {
 		id.count
 	}
 
+	/// Returns the encoded compact room identifier.
+	///
+	/// The bytes remain in big-endian database order. Use `Id::from` when a
+	/// typed integer value is needed.
 	#[inline]
 	#[must_use]
 	pub fn shortroomid(self) -> [u8; INT_LEN] {
@@ -50,6 +75,10 @@ impl RawId {
 		}
 	}
 
+	/// Returns the encoded timeline count.
+	///
+	/// The bytes remain in big-endian database order. For backfilled keys the
+	/// intervening zero marker is omitted.
 	#[inline]
 	#[must_use]
 	pub fn count(self) -> [u8; INT_LEN] {
@@ -63,6 +92,10 @@ impl RawId {
 		}
 	}
 
+	/// Borrows the complete packed database key.
+	///
+	/// The returned slice is 16 bytes for a normal key and 24 bytes for a
+	/// backfilled key. Its lifetime is tied to this value.
 	#[inline]
 	#[must_use]
 	pub fn as_bytes(&self) -> &[u8] {

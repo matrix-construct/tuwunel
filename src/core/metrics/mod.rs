@@ -28,6 +28,11 @@ type Counts = SmallVec<[u64; 20]>;
 #[cfg(tokio_unstable)]
 type Bucket = (Range<Duration>, u64);
 
+/// Owns process-wide runtime, task, and request measurements.
+///
+/// Task monitoring is available in builds with Tokio's unstable metrics.
+/// Runtime monitoring additionally requires an embedding runtime handle, while
+/// request counters remain independent of either monitor.
 pub struct Metrics {
 	_runtime: Option<runtime::Handle>,
 
@@ -47,14 +52,38 @@ pub struct Metrics {
 	sched_histogram_last: Mutex<Counts>,
 
 	// TODO: move stats
+	/// Supplies identifiers for traced requests.
+	///
+	/// The tracing span consumes and increments the sequence when its fields
+	/// are evaluated. It is not an unconditional request-traffic counter.
 	pub requests_count: AtomicU64,
+
+	/// Counts request handlers that have finished in debug builds.
+	///
+	/// The counter is monotonic and remains separate from the gauge of handlers
+	/// still active. Release builds leave it at zero.
 	pub requests_handle_finished: AtomicU64,
+
+	/// Tracks request handlers currently executing in debug builds.
+	///
+	/// The value is a gauge rather than a lifetime total. Release builds leave
+	/// it at zero.
 	pub requests_handle_active: AtomicU32,
+
+	/// Counts request handlers that terminated through panic handling.
+	///
+	/// The counter is scoped to request handling rather than all process
+	/// panics. It is monotonic for the lifetime of the process.
 	pub requests_panic: AtomicU32,
 }
 
 impl Metrics {
 	#[must_use]
+	/// Creates shared metrics state for an optional runtime.
+	///
+	/// A runtime handle enables runtime snapshots. Builds exposing Tokio's
+	/// unstable metrics also install task monitoring independently of that
+	/// handle.
 	pub fn new(runtime: Option<&runtime::Handle>) -> Arc<Self> {
 		#[cfg(tokio_unstable)]
 		let runtime_monitor = runtime.map(RuntimeMonitor::new);
@@ -104,6 +133,10 @@ impl Metrics {
 	}
 
 	#[inline]
+	/// Awaits a future under task instrumentation when a monitor is available.
+	///
+	/// Instrumented futures contribute to task interval snapshots. Builds
+	/// without a task monitor await the future directly with no wrapper.
 	pub async fn instrument<F, Output>(&self, f: F) -> Output
 	where
 		F: Future<Output = Output>,
@@ -115,6 +148,14 @@ impl Metrics {
 		}
 	}
 
+	/// Advances the task monitor and returns its next interval sample.
+	///
+	/// A server without task monitoring returns `None`. Samples describe only
+	/// futures explicitly passed through [`Self::instrument`].
+	///
+	/// # Panics
+	///
+	/// Panics when the interval mutex is poisoned.
 	pub fn task_interval(&self) -> Option<TaskMetrics> {
 		self.task_intervals
 			.lock()
@@ -124,6 +165,15 @@ impl Metrics {
 	}
 
 	#[cfg(tokio_unstable)]
+	/// Advances the runtime monitor and returns its next interval sample.
+	///
+	/// The returned value is absent only if the monitor's interval iterator
+	/// ends. Calls require a runtime handle to have been supplied at
+	/// construction.
+	///
+	/// # Panics
+	///
+	/// Panics when the interval mutex is poisoned or no runtime monitor exists.
 	pub fn runtime_interval(&self) -> Option<tokio_metrics::RuntimeMetrics> {
 		self.runtime_intervals
 			.lock()
@@ -139,6 +189,10 @@ impl Metrics {
 	/// previous sample and replaces it, so the counts are the traffic of one
 	/// interval rather than the totals tokio exposes. Returns `None` when the
 	/// runtime was built without the histogram.
+	///
+	/// # Panics
+	///
+	/// Panics when the scheduler histogram state mutex is poisoned.
 	#[cfg(tokio_unstable)]
 	pub fn sched_histogram_interval(&self) -> Option<impl Iterator<Item = Bucket>> {
 		let metrics = self
@@ -171,15 +225,28 @@ impl Metrics {
 	}
 
 	#[inline]
+	/// Returns the number of workers in the monitored runtime.
+	///
+	/// A server constructed without a runtime handle reports zero. The value
+	/// comes directly from Tokio's runtime metrics snapshot.
 	pub fn num_workers(&self) -> usize {
 		self.runtime_metrics()
 			.map_or(0, runtime::RuntimeMetrics::num_workers)
 	}
 
 	#[inline]
+	/// Returns the optional task monitor.
+	///
+	/// The monitor exists only when task metrics were enabled at construction.
+	/// It may be used to instrument futures or inspect cumulative task
+	/// measurements.
 	pub fn task_metrics(&self) -> Option<&TaskMonitor> { self.task_monitor.as_ref() }
 
 	#[inline]
+	/// Returns the optional Tokio runtime metrics handle.
+	///
+	/// The handle exists when server construction received an embedding
+	/// runtime. Callers borrow it without advancing any interval monitor.
 	pub fn runtime_metrics(&self) -> Option<&runtime::RuntimeMetrics> {
 		self.runtime_metrics.as_ref()
 	}

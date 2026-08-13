@@ -49,11 +49,11 @@ pub fn create_backup(
 
 	let version_string = version.to_string();
 	let key = (user_id, &version_string);
-	self.db
-		.backupid_algorithm
-		.put(key, Json(backup_metadata));
+	let mut txn = self.services.db.txn();
 
-	self.db.backupid_etag.put(key, *count);
+	txn.put(&self.db.backupid_algorithm, key, Json(backup_metadata));
+	txn.put(&self.db.backupid_etag, key, *count);
+	txn.execute();
 
 	Ok(version_string)
 }
@@ -94,10 +94,11 @@ pub async fn update_backup<'a>(
 	}
 
 	let count = self.services.globals.next_count();
-	self.db.backupid_etag.put(key, *count);
-	self.db
-		.backupid_algorithm
-		.put_raw(key, backup_metadata.json().get());
+	let mut txn = self.services.db.txn();
+
+	txn.put(&self.db.backupid_etag, key, *count);
+	txn.put_raw(&self.db.backupid_algorithm, key, backup_metadata.json().get());
+	txn.execute();
 
 	Ok(version)
 }
@@ -186,12 +187,14 @@ pub async fn add_key(
 	}
 
 	let count = self.services.globals.next_count();
-	self.db.backupid_etag.put(key, *count);
+	let mut txn = self.services.db.txn();
+
+	txn.put(&self.db.backupid_etag, key, *count);
 
 	let key = (user_id, version, room_id, session_id);
-	self.db
-		.backupkeyid_backup
-		.put_raw(key, key_data.json().get());
+
+	txn.put_raw(&self.db.backupkeyid_backup, key, key_data.json().get());
+	txn.execute();
 
 	Ok(())
 }

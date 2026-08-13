@@ -13,11 +13,12 @@ use tuwunel_core::{
 		string_from_bytes,
 	},
 };
-use tuwunel_database::{Cbor, Database, Deserialized, Ignore, Interfix, Map, serialize_key};
+use tuwunel_database::{Cbor, Database, Deserialized, Ignore, Interfix, Map, Txn, serialize_key};
 
 use super::{Media, preview::CachedPreview, thumbnail::Dim};
 
 pub(crate) struct Data {
+	db: Arc<Database>,
 	mediaid_file: Arc<Map>,
 	mediaid_lazy: Arc<Map>,
 	mediaid_lazycontent: Arc<Map>,
@@ -70,6 +71,7 @@ impl From<LazyContent> for Media {
 impl Data {
 	pub(super) fn new(db: &Arc<Database>) -> Self {
 		Self {
+			db: db.clone(),
 			mediaid_file: db["mediaid_file"].clone(),
 			mediaid_lazy: db["mediaid_lazy"].clone(),
 			mediaid_lazycontent: db["mediaid_lazycontent"].clone(),
@@ -90,11 +92,16 @@ impl Data {
 		let dim: &[u32] = &[dim.width, dim.height];
 		let key = (mxc, dim, content_disposition, content_type);
 		let key = serialize_key(key)?;
-		self.mediaid_file.insert(&key, []);
+		let mut txn = self.db.txn();
+
+		txn.insert_raw(&self.mediaid_file, &key, []);
 		if let Some(user) = user {
 			let key = (mxc, user);
-			self.mediaid_user.put_raw(key, user);
+
+			txn.put_raw(&self.mediaid_user, key, user);
 		}
+
+		txn.execute();
 
 		Ok(key.to_vec())
 	}
@@ -151,16 +158,24 @@ impl Data {
 	/// Map a minted mxc:// URI to the external URL it resolves to on first
 	/// download (see `Service::fetch_lazy_media`).
 	#[cfg(feature = "url_preview")]
-	pub(super) fn insert_lazy_media(&self, mxc: &Mxc<'_>, url: &str) {
+	pub(super) fn insert_lazy_media(&self, mxc: &str, url: &str) {
 		debug!(?mxc, ?url, "Registering lazy media");
 
-		self.mediaid_lazy
-			.insert(&mxc.to_string(), url.as_bytes());
+		self.mediaid_lazy.insert(mxc, url.as_bytes());
+	}
+
+	#[cfg(feature = "url_preview")]
+	pub(super) fn queue_lazy_media(&self, txn: &mut Txn, mxc: &str, url: &str) {
+		debug!(?mxc, ?url, "Registering lazy media");
+
+		txn.insert_raw(&self.mediaid_lazy, mxc, url.as_bytes());
 	}
 
 	/// Remove a lazy media reference by its mxc:// URI string, unregistering
 	/// the mxc.
-	pub(super) fn remove_lazy_media(&self, mxc: &str) { self.mediaid_lazy.remove(mxc); }
+	pub(super) fn remove_lazy_media(&self, txn: &mut Txn, mxc: &str) {
+		txn.del_raw(&self.mediaid_lazy, mxc);
+	}
 
 	/// Look up the external URL a lazy media MXC URI refers to.
 	pub(super) async fn search_lazy_media(&self, mxc: &Mxc<'_>) -> Result<String> {
@@ -175,6 +190,7 @@ impl Data {
 	#[cfg(feature = "url_preview")]
 	pub(super) fn set_lazy_content(
 		&self,
+		txn: &mut Txn,
 		mxc: &str,
 		content_type: Option<&str>,
 		content_disposition: Option<&str>,
@@ -186,8 +202,7 @@ impl Data {
 			content,
 		};
 
-		self.mediaid_lazycontent
-			.raw_put(mxc, Cbor(&value));
+		txn.raw_put(&self.mediaid_lazycontent, mxc, Cbor(&value));
 	}
 
 	/// Take the staged bytes a preview seeded for a lazy media mxc, if any.
@@ -200,22 +215,30 @@ impl Data {
 			.map(Into::into)
 	}
 
-	pub(super) fn remove_lazy_content(&self, mxc: &str) { self.mediaid_lazycontent.remove(mxc); }
+	pub(super) fn remove_lazy_content(&self, txn: &mut Txn, mxc: &str) {
+		txn.del_raw(&self.mediaid_lazycontent, mxc);
+	}
 
 	pub(super) async fn delete_file_mxc(&self, mxc: &Mxc<'_>) {
 		debug!("MXC URI: {mxc}");
 
 		let prefix = (mxc, Interfix);
-		self.mediaid_file
+		let txn = self
+			.mediaid_file
 			.keys_prefix_raw(&prefix)
 			.ignore_err()
-			.ready_for_each(|key| self.mediaid_file.remove(key))
+			.ready_fold(self.db.txn(), |mut txn, key| {
+				txn.del_raw(&self.mediaid_file, key);
+
+				txn
+			})
 			.await;
 
-		self.mediaid_user
+		let txn = self
+			.mediaid_user
 			.stream_prefix_raw(&prefix)
 			.ignore_err()
-			.ready_for_each(|(key, val)| {
+			.ready_fold(txn, |mut txn, (key, val)| {
 				debug_assert!(
 					key.starts_with(mxc.to_string().as_bytes()),
 					"key should start with the mxc"
@@ -224,9 +247,13 @@ impl Data {
 				let user = str_from_bytes(val).unwrap_or_default();
 				debug_info!("Deleting key {key:?} which was uploaded by user {user}");
 
-				self.mediaid_user.remove(key);
+				txn.del_raw(&self.mediaid_user, key);
+
+				txn
 			})
 			.await;
+
+		txn.execute();
 	}
 
 	/// Searches for all files with the given MXC

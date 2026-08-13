@@ -48,6 +48,11 @@ pub struct State<F: Fn(u64) -> Result + Send + Sync> {
 }
 
 #[clippy::has_significant_drop]
+/// Holds a dispatched sequence number until its write operation retires.
+///
+/// The permit dereferences to its unique sequence number and records the
+/// retirement frontier sampled at dispatch. Dropping it retires the sequence
+/// through the shared counter so the retirement frontier advances in order.
 pub struct Permit<F: Fn(u64) -> Result + Send + Sync> {
 	/// Link back to the shared-state.
 	state: Arc<Counter<F>>,

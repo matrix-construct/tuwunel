@@ -1,3 +1,9 @@
+//! One-time database migrations.
+//!
+//! A fresh database is stamped current and a legacy database is walked
+//! through the named migrations, once the version and server name gates
+//! decide it is safe to touch.
+
 use std::cmp::{self, Ordering};
 
 use futures::{FutureExt, StreamExt};
@@ -20,9 +26,11 @@ use tuwunel_core::{
 };
 use tuwunel_database::{Deserialized, Json, SEP};
 
+use self::injectivity::{fix as fix_injectivity, mark_clean as mark_clean_injectivity};
 use crate::{Services, media, rooms::timeline::bias_count};
 
 mod conduit;
+mod injectivity;
 mod moderation;
 
 /// The current schema version.
@@ -58,6 +66,11 @@ pub(crate) async fn migrations(services: &Services) -> Result {
 
 	check_database_version(services, foreign_lineage).await?;
 	check_server_name(services).await?;
+
+	// Repairs residue rather than the schema, so it sits behind the gates
+	// that can still refuse this database.
+	fix_injectivity(services).await?;
+
 	migrate(services, foreign_lineage).await
 }
 
@@ -167,6 +180,7 @@ async fn fresh(services: &Services) -> Result {
 	db["global"].insert(b"migrate_profile_keys_to_useridprofilekey", []);
 	db["global"].insert(b"rebuild_thread_activity", []);
 	db["global"].insert(b"clear_servername_status", []);
+	mark_clean_injectivity(services);
 
 	// Create the admin room and server user on first run
 	if services.config.create_admin_room {

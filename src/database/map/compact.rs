@@ -3,26 +3,44 @@ use tuwunel_core::{Err, Result, implement};
 
 use crate::keyval::KeyBuf;
 
+/// Configures a manual compaction for a map.
+///
+/// A range can limit selected keys, while level selection controls compaction
+/// placement. Completion and exclusivity flags determine how aggressively
+/// RocksDB runs the operation.
 #[derive(Clone, Debug, Default)]
 pub struct Options {
-	/// Key range to start and stop compaction.
+	/// Bounds the key range selected for compaction.
+	///
+	/// A missing lower or upper bound leaves that side of the range unbounded.
 	pub range: (Option<KeyBuf>, Option<KeyBuf>),
 
-	/// (None, None) - all levels to all necessary levels
-	/// (None, Some(1)) - compact all levels into level 1
-	/// (Some(1), None) - compact level 1 into level 1
-	/// (Some(_), Some(_) - currently unsupported
+	/// Describes the supported manual-compaction level modes.
+	///
+	/// `(None, None)` lets RocksDB choose placement, and `(None, Some(target))`
+	/// compacts all levels into `target`. `(Some(level), None)` validates
+	/// `level` but leaves normal placement unchanged; two explicit levels are
+	/// unsupported.
 	pub level: (Option<usize>, Option<usize>),
 
-	/// run compaction until complete. if false only one pass is made, and the
-	/// results of that pass are not further recompacted.
+	/// Controls whether bottommost data is compacted fully.
+	///
+	/// When disabled, RocksDB avoids recompacting bottommost files created by
+	/// this compaction. Enabling this option forces bottommost compaction.
 	pub exhaustive: bool,
 
-	/// waits for other compactions to complete, then runs this compaction
-	/// exclusively before allowing automatic compactions to resume.
+	/// Controls whether manual compaction runs exclusively.
+	///
+	/// When enabled, RocksDB waits for ongoing compactions and pauses automatic
+	/// compaction until this operation finishes.
 	pub exclusive: bool,
 }
 
+/// Compacts this map synchronously with the supplied options.
+///
+/// The key range and supported target placement are forwarded to RocksDB
+/// manual compaction. Unsupported level combinations and invalid target levels
+/// are returned to the caller.
 #[implement(super::Map)]
 #[tracing::instrument(
 	name = "compact",

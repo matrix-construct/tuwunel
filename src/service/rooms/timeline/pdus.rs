@@ -46,14 +46,16 @@ pub async fn delete_pdus(&self, room_id: &RoomId) -> Result {
 			let ts: u64 = pdu.origin_server_ts.into();
 			let event_id = &pdu.event_id;
 
-			self.db.pduid_pdu.remove(key);
-			self.db.eventid_pduid.remove(event_id);
-			self.db.eventid_outlierpdu.remove(event_id);
-			self.db.roomid_tscount_pducount.del((
-				room_id,
-				ts,
-				bias_count(RawPduId::from(key).count()),
-			));
+			let mut txn = self.db.db.txn();
+
+			txn.del_raw(&self.db.pduid_pdu, key);
+			txn.del_raw(&self.db.eventid_pduid, event_id);
+			txn.del_raw(&self.db.eventid_outlierpdu, event_id);
+
+			let room_id_ts_key = (room_id, ts, bias_count(RawPduId::from(key).count()));
+			txn.del(&self.db.roomid_tscount_pducount, room_id_ts_key);
+
+			txn.execute();
 
 			trace!(?event_id, ?room_id, ?ts, ?key, "Removed");
 

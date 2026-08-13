@@ -191,6 +191,11 @@ impl Engine {
 
 	/// Look up a column-family handle by name.
 	///
+	/// The handle refers to a family opened with this database and remains tied
+	/// to the engine's lifetime.
+	///
+	/// # Panics
+	///
 	/// Panics if the family was not described before the database was opened.
 	pub(crate) fn cf(&self, name: &str) -> Arc<BoundColumnFamily<'_>> {
 		self.db
@@ -198,12 +203,19 @@ impl Engine {
 			.expect("column must be described prior to database open")
 	}
 
-	/// Whether a column family with this name exists.
+	/// Reports whether a column family with this name exists.
+	///
+	/// The lookup consults the handles currently opened by RocksDB. It does not
+	/// create a missing family.
 	#[inline]
 	#[must_use]
 	pub fn has_cf(&self, name: &str) -> bool { self.db.cf_handle(name).is_some() }
 
-	/// The latest RocksDB sequence number, a monotonic counter of writes.
+	/// Returns the latest RocksDB sequence number.
+	///
+	/// RocksDB assigns sequence numbers to committed writes, so this value
+	/// marks the engine's current write position. The number is local to this
+	/// database.
 	#[inline]
 	#[must_use]
 	#[tracing::instrument(
@@ -221,12 +233,18 @@ impl Engine {
 		sequence
 	}
 
-	/// Whether writes are rejected: true for a read-only or secondary open.
+	/// Reports whether this engine rejects writes.
+	///
+	/// Both read-only and secondary opens reject writes through their database
+	/// handle. A writable primary open returns false.
 	#[inline]
 	#[must_use]
 	pub fn is_read_only(&self) -> bool { self.secondary || self.read_only }
 
-	/// Whether the database was opened as a secondary follower of a primary.
+	/// Reports whether the database follows a primary as a secondary.
+	///
+	/// A secondary advances its view when [`Self::update`] catches up with the
+	/// primary. Writes through the secondary handle are rejected.
 	#[inline]
 	#[must_use]
 	pub fn is_secondary(&self) -> bool { self.secondary }

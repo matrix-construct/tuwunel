@@ -30,6 +30,7 @@ use tuwunel_service::{
 	membership::{
 		StrippedCreateVerdict, enforce_stripped_create, into_client_stripped, v12_room_ids,
 	},
+	rooms::state_cache::MembershipUpdate,
 };
 
 use crate::{ClientIp, Ruma};
@@ -330,16 +331,16 @@ async fn record_local_invite(
 	let count = services.globals.next_count();
 	services
 		.state_cache
-		.update_membership(
-			&body.room_id,
-			invited_user,
-			RoomMemberEventContent::new(MembershipState::Invite),
+		.update_membership(MembershipUpdate {
+			room_id: &body.room_id,
+			user_id: invited_user,
+			membership_event: RoomMemberEventContent::new(MembershipState::Invite),
 			sender,
-			Some(invite_state),
-			body.via.clone(),
-			true,
-			PduCount::Normal(*count),
-		)
+			last_state: Some(invite_state),
+			invite_via: body.via.clone(),
+			update_joined_count: true,
+			count: PduCount::Normal(*count),
+		})
 		.await?;
 	drop(count);
 

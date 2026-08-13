@@ -566,28 +566,21 @@ impl Service {
 		push_key: Option<&str>,
 	) -> Result {
 		match (appservice_id, user_id, push_key) {
-			| (None, Some(user_id), Some(push_key)) => {
+			| (None, Some(user_id), Some(push_key)) =>
 				self.db
 					.delete_all_requests_for(&Destination::Push(
 						user_id.to_owned(),
 						push_key.to_owned(),
 					))
-					.await;
-
-				Ok(())
-			},
-			| (Some(appservice_id), None, None) => {
+					.await,
+			| (Some(appservice_id), None, None) =>
 				self.db
 					.delete_all_requests_for(&Destination::Appservice(appservice_id.to_owned()))
-					.await;
-
-				Ok(())
-			},
-			| _ => {
-				debug_warn!("cleanup_events called with too many or too few arguments");
-				Ok(())
-			},
+					.await,
+			| _ => debug_warn!("cleanup_events called with too many or too few arguments"),
 		}
+
+		Ok(())
 	}
 
 	fn dispatch(&self, msg: Msg) -> Result {

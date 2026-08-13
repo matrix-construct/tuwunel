@@ -21,7 +21,7 @@ use tuwunel_core::{
 		},
 	},
 };
-use tuwunel_database::{Cbor, Deserialized, Ignore, Interfix, Json, Map};
+use tuwunel_database::{Cbor, Deserialized, Ignore, Interfix, Json, Map, Txn};
 
 /// generated device ID length
 const DEVICE_ID_LENGTH: usize = 10;
@@ -217,28 +217,30 @@ pub async fn set_access_token(
 	let userdeviceid = (user_id, device_id);
 
 	// Fold the prior pointer token into the index for pre-index upgrades.
-	if let Ok(prev) = self
+	let previous = self
 		.db
 		.userdeviceid_token
 		.qry(&userdeviceid)
 		.await
 		.deserialized::<String>()
-	{
-		self.db
-			.userdeviceidtoken_index
-			.put_raw((user_id, device_id, prev.as_str()), []);
+		.ok();
+
+	let mut txn = self.services.db.txn();
+
+	if let Some(previous) = previous.as_deref() {
+		let key = (user_id, device_id, previous);
+
+		txn.put_raw(&self.db.userdeviceidtoken_index, key, []);
 	}
 
+	let key = (user_id, device_id, access_token);
 	let value = (user_id, device_id, expires_at);
-	self.db
-		.token_userdeviceid
-		.raw_put(access_token, value);
-	self.db
-		.userdeviceidtoken_index
-		.put_raw((user_id, device_id, access_token), []);
-	self.db
-		.userdeviceid_token
-		.put_raw(userdeviceid, access_token);
+
+	txn.raw_put(&self.db.token_userdeviceid, access_token, value);
+	txn.put_raw(&self.db.userdeviceidtoken_index, key, []);
+	txn.put_raw(&self.db.userdeviceid_token, userdeviceid, access_token);
+
+	txn.execute();
 
 	Ok(())
 }
@@ -261,19 +263,23 @@ pub async fn remove_access_token(&self, user_id: &UserId, device_id: &DeviceId) 
 		.await;
 
 	// Cover any pre-index token still recorded only in the legacy pointer.
-	if let Ok(token) = self
+	let token = self
 		.db
 		.userdeviceid_token
 		.qry(&(user_id, device_id))
 		.await
 		.deserialized::<String>()
-	{
-		self.db.token_userdeviceid.remove(token.as_str());
+		.ok();
+
+	let mut txn = self.services.db.txn();
+
+	if let Some(token) = token.as_deref() {
+		txn.del_raw(&self.db.token_userdeviceid, token);
 	}
 
-	self.db
-		.userdeviceid_token
-		.del((user_id, device_id));
+	txn.del(&self.db.userdeviceid_token, (user_id, device_id));
+
+	txn.execute();
 
 	Ok(())
 }
@@ -282,19 +288,25 @@ pub async fn remove_access_token(&self, user_id: &UserId, device_id: &DeviceId) 
 /// tokens it holds intact.
 #[implement(super::Service)]
 pub async fn remove_access_token_value(&self, access_token: &str) {
-	if let Ok((user_id, device_id, _)) = self
+	let owner = self
 		.db
 		.token_userdeviceid
 		.get(access_token)
 		.await
 		.deserialized::<(OwnedUserId, OwnedDeviceId, Option<u64>)>()
-	{
-		self.db
-			.userdeviceidtoken_index
-			.del((&*user_id, &*device_id, access_token));
+		.ok();
+
+	let mut txn = self.services.db.txn();
+
+	if let Some((user_id, device_id, _)) = owner {
+		let user_device_token = (&*user_id, &*device_id, access_token);
+
+		txn.del(&self.db.userdeviceidtoken_index, user_device_token);
 	}
 
-	self.db.token_userdeviceid.remove(access_token);
+	txn.del_raw(&self.db.token_userdeviceid, access_token);
+
+	txn.execute();
 }
 
 #[implement(super::Service)]
@@ -356,25 +368,22 @@ pub async fn set_refresh_token(
 
 	let userdeviceid = (user_id, device_id);
 	let value = (user_id, device_id, expires_at_secs);
-	self.db
-		.token_userdeviceid
-		.raw_put(refresh_token, value);
-	self.db
-		.userdeviceid_refresh
-		.put_raw(userdeviceid, refresh_token);
+	let mut txn = self.services.db.txn();
+
+	txn.raw_put(&self.db.token_userdeviceid, refresh_token, value);
+	txn.put_raw(&self.db.userdeviceid_refresh, userdeviceid, refresh_token);
 
 	// Retain the outgoing token as the device's spent token, pointing at its
 	// successor so a double-submit can be distinguished from a replay.
 	if let Some(spent) = spent {
 		let spent_at = duration_since_epoch(SystemTime::now()).as_secs();
 		let value = (user_id, device_id, refresh_token, spent_at);
-		self.db
-			.spentrefresh_userdeviceid
-			.raw_put(&*spent, value);
-		self.db
-			.userdeviceid_spentrefresh
-			.put_raw(userdeviceid, &*spent);
+
+		txn.raw_put(&self.db.spentrefresh_userdeviceid, &*spent, value);
+		txn.put_raw(&self.db.userdeviceid_spentrefresh, userdeviceid, &*spent);
 	}
+
+	txn.execute();
 
 	Ok(())
 }
@@ -416,20 +425,24 @@ async fn find_refresh_token_expires_at(
 #[implement(super::Service)]
 pub async fn remove_refresh_token(&self, user_id: &UserId, device_id: &DeviceId) -> Result {
 	let userdeviceid = (user_id, device_id);
-
-	if let Ok(refresh_token) = self
+	let refresh_token = self
 		.db
 		.userdeviceid_refresh
 		.qry(&userdeviceid)
-		.await
-	{
-		self.db.token_userdeviceid.remove(&refresh_token);
+		.await;
+
+	let mut txn = self.services.db.txn();
+
+	if let Ok(refresh_token) = refresh_token {
+		txn.del_raw(&self.db.token_userdeviceid, &refresh_token);
 	}
 
-	self.db.userdeviceid_refresh.del(userdeviceid);
+	txn.del(&self.db.userdeviceid_refresh, userdeviceid);
 
-	self.forget_spent_refresh_token(user_id, device_id)
+	self.forget_spent_refresh_token(user_id, device_id, &mut txn)
 		.await;
+
+	txn.execute();
 
 	Ok(())
 }
@@ -437,7 +450,12 @@ pub async fn remove_refresh_token(&self, user_id: &UserId, device_id: &DeviceId)
 /// Drop the spent (previous-generation) refresh token retained for reuse
 /// detection, if any.
 #[implement(super::Service)]
-async fn forget_spent_refresh_token(&self, user_id: &UserId, device_id: &DeviceId) {
+async fn forget_spent_refresh_token(
+	&self,
+	user_id: &UserId,
+	device_id: &DeviceId,
+	txn: &mut Txn,
+) {
 	let userdeviceid = (user_id, device_id);
 
 	if let Ok(spent) = self
@@ -446,12 +464,10 @@ async fn forget_spent_refresh_token(&self, user_id: &UserId, device_id: &DeviceI
 		.qry(&userdeviceid)
 		.await
 	{
-		self.db.spentrefresh_userdeviceid.remove(&spent);
+		txn.del_raw(&self.db.spentrefresh_userdeviceid, &spent);
 	}
 
-	self.db
-		.userdeviceid_spentrefresh
-		.del(userdeviceid);
+	txn.del(&self.db.userdeviceid_spentrefresh, userdeviceid);
 }
 
 /// Classification of a refresh token presented for rotation at a token

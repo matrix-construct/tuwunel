@@ -7,6 +7,10 @@ use tracing_subscriber::{layer::Context, registry::LookupSpan};
 
 use super::{Capture, Data, State};
 
+/// Tracing subscriber layer that dispatches events to active captures.
+///
+/// The layer evaluates each capture's filter before recording fields and
+/// running its callback. Capture registration is shared through `State`.
 pub struct Layer {
 	state: Arc<State>,
 }
@@ -16,11 +20,19 @@ struct Visitor {
 }
 
 type Values = ArrayVec<Value, 32>;
+/// Recorded tracing field name and formatted value.
+///
+/// Field names come from static callsite metadata. Values own their formatted
+/// text for the duration of callback delivery.
 pub type Value = (&'static str, String);
 
 type ScopeNames = ArrayVec<&'static str, 32>;
 
 impl Layer {
+	/// Creates a capture layer backed by shared registration state.
+	///
+	/// The shared state handle is cloned so captures registered through either
+	/// handle are visible to this subscriber layer.
 	#[inline]
 	pub fn new(state: &Arc<State>) -> Self { Self { state: state.clone() } }
 }

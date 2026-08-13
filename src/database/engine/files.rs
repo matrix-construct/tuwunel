@@ -4,6 +4,10 @@ use tuwunel_core::{Result, implement};
 use super::Engine;
 use crate::util::map_err;
 
+/// Lists the live SST files belonging to this database.
+///
+/// RocksDB produces the inventory before the iterator is returned. Each yielded
+/// entry describes one table file from that in-memory inventory.
 #[implement(Engine)]
 pub fn file_list(&self) -> impl Iterator<Item = Result<SstFile>> + Send + use<> {
 	self.db

@@ -3,7 +3,7 @@ use futures::StreamExt;
 use synapse_admin_api::registration_tokens::list::v1 as list;
 use tuwunel_core::Result;
 
-use super::valid_token_response;
+use super::token_response;
 use crate::{Ruma, client::admin::require_admin};
 
 /// # `GET /_synapse/admin/v1/registration_tokens`
@@ -23,7 +23,8 @@ pub(crate) async fn admin_list_tokens_route(
 	let registration_tokens = services
 		.registration_tokens
 		.iterate_tokens()
-		.map(valid_token_response)
+		.await
+		.map(|token| token_response(token.token, token.info))
 		.collect()
 		.await;
 
