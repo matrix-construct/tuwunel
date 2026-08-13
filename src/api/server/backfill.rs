@@ -68,6 +68,14 @@ pub(crate) async fn get_backfill_route(
 			.timeline
 			.pdus_rev(None, &body.room_id, Some(from.saturating_add(1)))
 			.try_filter_map(async |pdu| {
+				if !services
+					.state_accessor
+					.server_can_see_event(body.origin(), &body.room_id, &pdu.1.event_id)
+					.await
+				{
+					return Ok(None);
+				}
+
 				Ok(services
 					.timeline
 					.get_pdu_json(&pdu.1.event_id)

@@ -25,7 +25,9 @@ const OCCURRENCES: usize = 8;
 struct DatabasePath(PathBuf);
 
 impl Drop for DatabasePath {
-	fn drop(&mut self) { remove_dir_all(&self.0).ok(); }
+	fn drop(&mut self) {
+		remove_dir_all(&self.0).ok();
+	}
 }
 
 #[test]
@@ -165,12 +167,15 @@ async fn create_hash_and_sign_does_not_allocate_short_id(services: &Services) ->
 	let (pdu, pdu_json, _prev_state) = services
 		.timeline
 		.create_hash_and_sign_event(
-			PduBuilder::state(String::new(), &RoomCreateEventContent {
-				federate: true,
-				predecessor: None,
-				room_version: RoomVersionId::V11,
-				..RoomCreateEventContent::new_v11()
-			}),
+			PduBuilder::state(
+				String::new(),
+				&RoomCreateEventContent {
+					federate: true,
+					predecessor: None,
+					room_version: RoomVersionId::V11,
+					..RoomCreateEventContent::new_v11()
+				},
+			),
 			sender,
 			room_id,
 			&state_lock,
@@ -209,15 +214,15 @@ async fn wait_until_ready(services: &Services, base: &str) -> Result {
 
 	timeout(Duration::from_secs(10), async {
 		loop {
-			if services
+			let response = services
 				.client
 				.clients
 				.default
 				.get(&url)
 				.send()
-				.await
-				.is_ok()
-			{
+				.await;
+
+			if matches!(response, Ok(response) if response.status().is_success()) {
 				break;
 			}
 

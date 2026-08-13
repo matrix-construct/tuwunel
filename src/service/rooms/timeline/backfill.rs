@@ -6,8 +6,8 @@ use futures::{
 };
 use rand::seq::SliceRandom;
 use ruma::{
-	CanonicalJsonObject, EventId, MilliSecondsSinceUnixEpoch, OwnedEventId, RoomId, ServerName,
-	UserId,
+	CanonicalJsonObject, EventId, MilliSecondsSinceUnixEpoch, OwnedEventId, OwnedServerName,
+	RoomId, ServerName, UserId,
 	api::Direction,
 	events::{StateEventType, TimelineEventType},
 };
@@ -168,6 +168,7 @@ async fn backfill_candidates(&self, room_id: &RoomId) -> Candidates {
 		})
 		.collect::<HashSet<_>>()
 		.await;
+	let state_member_server_candidates = state_member_servers.iter().cloned().stream();
 
 	let power_servers = power_levels
 		.iter()
@@ -217,7 +218,8 @@ async fn backfill_candidates(&self, room_id: &RoomId) -> Candidates {
 		.map(ToOwned::to_owned)
 		.stream();
 
-	power_servers
+	state_member_server_candidates
+		.chain(power_servers)
 		.chain(canonical_room_alias_server)
 		.chain(trusted_servers)
 		.ready_filter(|server_name| !self.services.globals.server_is_ours(server_name))
@@ -229,8 +231,16 @@ async fn backfill_candidates(&self, room_id: &RoomId) -> Candidates {
 				.await || state_member_servers.contains(&server_name))
 			.then_some(server_name)
 		})
-		.collect()
+		.ready_fold(Candidates::new(), push_unique)
 		.await
+}
+
+fn push_unique(mut candidates: Candidates, server: OwnedServerName) -> Candidates {
+	if !candidates.contains(&server) {
+		candidates.push(server);
+	}
+
+	candidates
 }
 
 #[implement(super::Service)]
@@ -245,8 +255,9 @@ pub async fn get_event_id_near_ts_with_fallback(
 	// Federate on a local miss, or a forward hit at the start edge of our history.
 	let federate = match &local {
 		| Err(_) => true,
-		| Ok((_, event_id)) =>
-			dir == Direction::Forward && self.is_start_edge_hit(room_id, event_id).await,
+		| Ok((_, event_id)) => {
+			dir == Direction::Forward && self.is_start_edge_hit(room_id, event_id).await
+		},
 	};
 
 	if !federate {
