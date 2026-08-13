@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use axum::extract::State;
 use ruma::{
 	OwnedEventId, UInt, api::federation::event::get_missing_events,
-	canonical_json::redact_in_place, events::TimelineEventType,
+	canonical_json::redact_in_place,
 };
 use tuwunel_core::{Result, debug, err};
 
@@ -52,17 +52,8 @@ pub(crate) async fn get_missing_events_route(
 	let mut queue: VecDeque<OwnedEventId> = body.latest_events.iter().cloned().collect();
 	// `seen` only dedups the walk; it is not a proof any given id is a real,
 	// locally-known boundary, so it must not be handed to `topo_sort_events` as
-	// such (see `resolved` below).
+	// such.
 	let mut seen: HashSet<OwnedEventId> = earliest_events.clone();
-	// The set of ids `topo_sort_events` may treat as legitimate, already-known
-	// boundaries: the request's own `earliest_events`, plus every event we
-	// actually confirmed exists locally (whether or not it ended up in
-	// `results`, e.g. it was below `min_depth` or was itself a latest_event).
-	// Crucially this excludes ids that only ever sat in `seen` because the walk
-	// limit cut the traversal short or because `get_pdu` failed -- those are
-	// unresolved, not boundaries, so a result referencing one of them as a prev
-	// must still be invalidated rather than silently accepted.
-	let mut resolved: HashSet<OwnedEventId> = earliest_events.clone();
 	let mut results: Vec<(OwnedEventId, Vec<OwnedEventId>, UInt, _)> = Vec::new();
 	let mut walked = 0_usize;
 
@@ -87,7 +78,6 @@ pub(crate) async fn get_missing_events_route(
 			debug!(?body.origin, %event_id, "Event does not exist locally, skipping");
 			continue;
 		};
-		resolved.insert(event_id.clone());
 
 		if pdu.depth > body.min_depth {
 			queue.extend(pdu.prev_events.iter().cloned());
@@ -98,10 +88,6 @@ pub(crate) async fn get_missing_events_route(
 		}
 
 		if pdu.depth < body.min_depth {
-			continue;
-		}
-
-		if pdu.kind == TimelineEventType::RoomGuestAccess {
 			continue;
 		}
 
@@ -142,7 +128,7 @@ pub(crate) async fn get_missing_events_route(
 			.map(|(event_id, prev_events, depth, _)| {
 				(event_id.clone(), prev_events.clone(), *depth)
 			}),
-		&resolved,
+		&earliest_events,
 		body.min_depth,
 	);
 

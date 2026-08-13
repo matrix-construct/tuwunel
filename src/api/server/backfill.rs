@@ -67,13 +67,6 @@ pub(crate) async fn get_backfill_route(
 		pdus: services
 			.timeline
 			.pdus_rev(None, &body.room_id, Some(from.saturating_add(1)))
-			.try_filter_map(async |(_, pdu)| {
-				Ok(services
-					.state_accessor
-					.server_can_see_event(body.origin(), &pdu.room_id, &pdu.event_id)
-					.await
-					.then_some(pdu))
-			})
 			.try_filter_map(async |pdu| {
 				Ok(services
 					.timeline
