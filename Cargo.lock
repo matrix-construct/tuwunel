@@ -5373,7 +5373,6 @@ dependencies = [
  "insta",
  "log",
  "maplit",
- "nix",
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry_sdk",

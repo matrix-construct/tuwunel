@@ -253,10 +253,6 @@ webpki-root-certs.workspace = true
 features = ["schedule-latency"]
 workspace = true
 
-[target.'cfg(unix)'.dependencies.nix]
-features = ["fs"]
-workspace = true
-
 [dev-dependencies]
 criterion.workspace = true
 futures.workspace = true
