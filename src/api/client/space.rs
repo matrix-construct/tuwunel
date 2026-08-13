@@ -27,8 +27,7 @@ use tuwunel_service::{
 	rooms::{
 		short::ShortRoomId,
 		spaces::{
-			Accessibility, Identifier, PaginationToken, get_parent_children_via,
-			is_summary_serializable, summary_to_chunk,
+			Accessibility, Identifier, PaginationToken, is_summary_serializable, summary_to_chunk,
 		},
 	},
 };
@@ -157,7 +156,9 @@ pub(crate) async fn get_client_hierarchy(
 	let initial_queue: VecDeque<QueueItem> = max_depth
 		.gt(&0)
 		.then(|| {
-			get_parent_children_via(&root_summary, suggested_only)
+			services
+				.spaces
+				.get_parent_children_via(&root_summary, suggested_only)
 				.filter(|(room_id_, _)| room_id.ne(room_id_))
 				.map(|(room_id, via)| {
 					let via = match bypass_visibility {
@@ -210,7 +211,9 @@ pub(crate) async fn get_client_hierarchy(
 
 					// Enqueue children only while within the depth budget.
 					if depth < max_depth {
-						get_parent_children_via(&s, suggested_only)
+						services
+							.spaces
+							.get_parent_children_via(&s, suggested_only)
 							.filter(|(child, _)| !visited.contains(child))
 							.for_each(|(child, via)| {
 								let via = match bypass_visibility {
