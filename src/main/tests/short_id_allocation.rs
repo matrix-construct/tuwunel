@@ -38,11 +38,12 @@ impl Drop for DatabasePath {
 
 impl Drop for ListenFdEnv {
 	fn drop(&mut self) {
-		unsafe {
-			std::env::remove_var("LISTEN_PID");
-			std::env::remove_var("LISTEN_FDS");
-			std::env::remove_var("LISTEN_FDNAMES");
-		}
+		// These environment variables are only used to hand the reserved listener
+		// to the test server; clearing them here keeps the rest of the process
+		// from inheriting that setup.
+		unsafe { std::env::remove_var("LISTEN_PID") };
+		unsafe { std::env::remove_var("LISTEN_FDS") };
+		unsafe { std::env::remove_var("LISTEN_FDNAMES") };
 	}
 }
 
@@ -53,13 +54,17 @@ fn batch_duplicates_share_one_shorteventid() -> Result {
 	let _listen_fd_env = ListenFdEnv;
 
 	#[cfg(unix)]
-	let _listen_fd3 = unsafe { dup2_raw(&listener, OwnedFd::from_raw_fd(3))? };
+	// Recreate fd 3 as an owned handle so the server can inherit the exact
+	// reserved port instead of racing a second bind.
+	let listen_fd3 = unsafe { OwnedFd::from_raw_fd(3) };
+	// Duplicate the pre-bound listener onto fd 3 for the server startup path.
+	let _listen_fd3 = unsafe { dup2_raw(&listener, listen_fd3)? };
 
-	unsafe {
-		std::env::set_var("LISTEN_PID", process_id().to_string());
-		std::env::set_var("LISTEN_FDS", "1");
-		std::env::set_var("LISTEN_FDNAMES", "short-id-allocation");
-	}
+	// These variables advertise the inherited listener to the server startup
+	// code for this test only.
+	unsafe { std::env::set_var("LISTEN_PID", process_id().to_string()) };
+	unsafe { std::env::set_var("LISTEN_FDS", "1") };
+	unsafe { std::env::set_var("LISTEN_FDNAMES", "short-id-allocation") };
 
 	let root = var("TMPDIR").unwrap_or_else(|_| "/nvme/target/tmp".into());
 	let db_path = DatabasePath(
