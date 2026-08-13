@@ -168,7 +168,7 @@ pub(crate) async fn get_messages(
 
 	validate_messages_request(services, room_id, sender_user, bypass_visibility).await?;
 	let pagination = parse_message_pagination(from, to, dir, limit)?;
-	maybe_backfill_messages(services, room_id, dir, pagination.from).await;
+	maybe_backfill_messages(services, room_id, dir, pagination.from, pagination.to).await;
 
 	let encrypted = services
 		.state_accessor
@@ -253,11 +253,12 @@ async fn maybe_backfill_messages(
 	room_id: &RoomId,
 	dir: Direction,
 	from: PduCount,
+	to: Option<PduCount>,
 ) {
 	if matches!(dir, Direction::Backward) {
 		services
 			.timeline
-			.backfill_if_required(room_id, from)
+			.backfill_if_required(room_id, from, to)
 			.await
 			.log_err()
 			.ok();

@@ -47,7 +47,12 @@ struct TimestampHit {
 
 #[implement(super::Service)]
 #[tracing::instrument(name = "backfill", level = "debug", skip(self))]
-pub async fn backfill_if_required(&self, room_id: &RoomId, from: PduCount) -> Result {
+pub async fn backfill_if_required(
+	&self,
+	room_id: &RoomId,
+	from: PduCount,
+	to: Option<PduCount>,
+) -> Result {
 	let first_pdu = if from == PduCount::max() {
 		// The first backward `/messages` page starts from the room head, so
 		// backfill from the newest local event rather than the oldest one.
@@ -55,10 +60,10 @@ pub async fn backfill_if_required(&self, room_id: &RoomId, from: PduCount) -> Re
 	} else {
 		let (first_pdu_count, first_pdu) = self.first_item_in_room(room_id).await?;
 
-		// If the request cursor is newer than the oldest local event, the
-		// existing history already covers this segment and no federation backfill
-		// is needed.
-		if first_pdu_count < from {
+		// If the request range stays entirely newer than the oldest local event,
+		// the existing history already covers it and no federation backfill is
+		// needed.
+		if first_pdu_count < from && to.is_none_or(|to| first_pdu_count < to) {
 			return Ok(());
 		}
 
