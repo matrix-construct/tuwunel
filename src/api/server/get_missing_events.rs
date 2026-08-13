@@ -3,9 +3,9 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use axum::extract::State;
 use ruma::{
 	OwnedEventId, UInt, api::federation::event::get_missing_events,
-	canonical_json::redact_in_place,
+	canonical_json::redact_in_place, events::TimelineEventType,
 };
-use tuwunel_core::{Result, debug, err};
+use tuwunel_core::{Event, Result, debug, err};
 
 use super::AccessCheck;
 use crate::Ruma;
@@ -88,6 +88,10 @@ pub(crate) async fn get_missing_events_route(
 		}
 
 		if pdu.depth < body.min_depth {
+			continue;
+		}
+
+		if *pdu.kind() == TimelineEventType::RoomGuestAccess {
 			continue;
 		}
 
