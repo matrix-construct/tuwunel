@@ -453,8 +453,9 @@ pub(crate) async fn sso_callback_route(
 			| true => "sso",
 			// Present in LDAP is an existing user to provision, not a new registration.
 			| false if ldap_user_exists(&services, &user_id).await => "ldap",
-			| false =>
-				return Err!(Request(Forbidden("Registration from this provider is disabled"))),
+			| false => {
+				return Err!(Request(Forbidden("Registration from this provider is disabled")));
+			},
 		};
 
 		register_user(&services, &provider, &session, &userinfo, &user_id, origin).await?;

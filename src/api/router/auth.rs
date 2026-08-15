@@ -169,8 +169,9 @@ fn check_auth_still_required(services: &Services, token: &Token, route: TypeId) 
 	{
 		match token {
 			| Token::Appservice(_) | Token::User(_) => Ok(()),
-			| Token::None | Token::Expired(_) | Token::Invalid =>
-				Err!(Request(MissingToken("Missing or invalid access token."))),
+			| Token::None | Token::Expired(_) | Token::Invalid => {
+				Err!(Request(MissingToken("Missing or invalid access token.")))
+			},
 		}
 	} else {
 		Ok(())

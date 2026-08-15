@@ -6,8 +6,10 @@ use futures::{
 };
 use rand::seq::SliceRandom;
 use ruma::{
-	CanonicalJsonObject, EventId, MilliSecondsSinceUnixEpoch, OwnedEventId, RoomId, ServerName,
-	api::Direction, events::TimelineEventType,
+	CanonicalJsonObject, EventId, MilliSecondsSinceUnixEpoch, OwnedEventId, OwnedServerName,
+	RoomId, ServerName, UserId,
+	api::Direction,
+	events::{StateEventType, TimelineEventType},
 };
 use serde::Deserialize;
 use serde_json::value::RawValue as RawJsonValue;
@@ -45,16 +47,28 @@ struct TimestampHit {
 
 #[implement(super::Service)]
 #[tracing::instrument(name = "backfill", level = "debug", skip(self))]
-pub async fn backfill_if_required(&self, room_id: &RoomId, from: PduCount) -> Result {
-	let (first_pdu_count, first_pdu) = self
-		.first_item_in_room(room_id)
-		.await
-		.expect("Room is not empty");
+pub async fn backfill_if_required(
+	&self,
+	room_id: &RoomId,
+	from: PduCount,
+	to: Option<PduCount>,
+) -> Result {
+	let first_pdu = if from == PduCount::max() {
+		// The first backward `/messages` page starts from the room head, so
+		// backfill from the newest local event rather than the oldest one.
+		self.latest_item_in_room(None, room_id).await?
+	} else {
+		let (first_pdu_count, first_pdu) = self.first_item_in_room(room_id).await?;
 
-	// No backfill required, there are still events between them
-	if first_pdu_count < from {
-		return Ok(());
-	}
+		// If the request range stays entirely newer than the oldest local event,
+		// the existing history already covers it and no federation backfill is
+		// needed.
+		if request_is_local_only(first_pdu_count, from, to) {
+			return Ok(());
+		}
+
+		first_pdu
+	};
 
 	// No backfill required, reached the end.
 	if *first_pdu.event_type() == TimelineEventType::RoomCreate {
@@ -122,6 +136,15 @@ pub async fn backfill_if_required(&self, room_id: &RoomId, from: PduCount) -> Re
 	Ok(())
 }
 
+#[inline]
+fn request_is_local_only(
+	first_pdu_count: PduCount,
+	from: PduCount,
+	to: Option<PduCount>,
+) -> bool {
+	first_pdu_count < from && to.is_none_or(|to| first_pdu_count <= to)
+}
+
 #[implement(super::Service)]
 async fn backfill_candidates(&self, room_id: &RoomId) -> Candidates {
 	let canonical_alias = self
@@ -135,6 +158,26 @@ async fn backfill_candidates(&self, room_id: &RoomId) -> Candidates {
 		.get_power_levels(room_id);
 
 	let (canonical_alias, power_levels) = join(canonical_alias, power_levels).await;
+
+	let state_member_servers = self
+		.services
+		.state_accessor
+		.room_state_keys(room_id, &StateEventType::RoomMember)
+		.filter_map(async |state_key| {
+			let Ok(state_key) = state_key else {
+				return None;
+			};
+
+			let Ok(user_id) = UserId::parse(state_key.as_str()) else {
+				return None;
+			};
+
+			(!self.services.globals.user_is_local(&user_id))
+				.then_some(user_id.server_name().to_owned())
+		})
+		.collect::<HashSet<_>>()
+		.await;
+	let state_member_server_candidates = state_member_servers.iter().cloned().stream();
 
 	let power_servers = power_levels
 		.iter()
@@ -184,19 +227,29 @@ async fn backfill_candidates(&self, room_id: &RoomId) -> Candidates {
 		.map(ToOwned::to_owned)
 		.stream();
 
-	power_servers
+	state_member_server_candidates
+		.chain(power_servers)
 		.chain(canonical_room_alias_server)
 		.chain(trusted_servers)
 		.ready_filter(|server_name| !self.services.globals.server_is_ours(server_name))
 		.filter_map(async |server_name| {
-			self.services
+			(self
+				.services
 				.state_cache
 				.server_in_room(&server_name, room_id)
-				.await
-				.then_some(server_name)
+				.await || state_member_servers.contains(&server_name))
+			.then_some(server_name)
 		})
-		.collect()
+		.ready_fold(Candidates::new(), push_unique)
 		.await
+}
+
+fn push_unique(mut candidates: Candidates, server: OwnedServerName) -> Candidates {
+	if !candidates.contains(&server) {
+		candidates.push(server);
+	}
+
+	candidates
 }
 
 #[implement(super::Service)]
@@ -398,12 +451,13 @@ pub async fn backfill_pdu(
 					.index_pdu(shortroomid, &pdu_id, &body);
 			}
 		},
-		| TimelineEventType::RoomTopic =>
+		| TimelineEventType::RoomTopic => {
 			if let Some(topic) = pdu.get_content().ok().and_then(plain_text_topic) {
 				self.services
 					.search
 					.index_pdu(shortroomid, &pdu_id, &topic);
-			},
+			}
+		},
 		| _ => {},
 	}
 
@@ -433,4 +487,20 @@ fn prepend_backfill_pdu(
 	txn.put_raw(&self.db.roomid_tscount_pducount, key, pdu_id.count());
 
 	txn.execute();
+}
+
+#[cfg(test)]
+mod tests {
+	use tuwunel_core::matrix::PduCount;
+
+	use super::request_is_local_only;
+
+	#[test]
+	fn local_coverage_check_includes_the_oldest_requested_event() {
+		let oldest = PduCount::Normal(10);
+		let newer = PduCount::Normal(20);
+
+		assert!(request_is_local_only(oldest, newer, Some(oldest)));
+		assert!(!request_is_local_only(oldest, newer, Some(PduCount::Normal(9))));
+	}
 }

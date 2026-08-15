@@ -103,8 +103,9 @@ pub async fn get_summary_and_children(
 		.or_else(async |e| match e {
 			| _ if !e.is_not_found() => Err(e),
 
-			| _ if via.is_empty() =>
-				Err!(Request(NotFound("Space room not found locally; not querying federation"))),
+			| _ if via.is_empty() => {
+				Err!(Request(NotFound("Space room not found locally; not querying federation")))
+			},
 
 			| _ =>
 				self.get_summary_and_children_federation(room_id, sender, via)

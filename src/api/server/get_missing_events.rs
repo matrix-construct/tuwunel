@@ -1,4 +1,6 @@
-use std::collections::{BTreeSet, VecDeque};
+use std::{
+	collections::{BTreeSet, VecDeque},
+};
 
 use axum::extract::State;
 use futures::{

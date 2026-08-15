@@ -202,8 +202,9 @@ async fn verify_badge_recovery(services: &Services, recovery: &mut BadgeRecovery
 
 	match recovery.rx.try_recv() {
 		| Err(TryRecvError::Empty) => Ok(()),
-		| Err(TryRecvError::Disconnected) =>
-			Err!("stub gateway channel closed after badge recovery"),
+		| Err(TryRecvError::Disconnected) => {
+			Err!("stub gateway channel closed after badge recovery")
+		},
 		| Ok(_) => Err!("stale badge wake produced a duplicate notification"),
 	}
 }
@@ -515,8 +516,9 @@ async fn badge_count_opt_out(fixture: &Fixture<'_>) -> Result {
 
 	match rx.try_recv() {
 		| Err(TryRecvError::Empty) => Ok(()),
-		| Err(TryRecvError::Disconnected) =>
-			Err!("stub gateway channel closed after badge opt-out"),
+		| Err(TryRecvError::Disconnected) => {
+			Err!("stub gateway channel closed after badge opt-out")
+		},
 		| Ok(_) => Err!("badge opt-out emitted a counts-only notification"),
 	}
 }

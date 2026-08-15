@@ -218,7 +218,7 @@ async fn patch_statediffs(services: &Services, scan: &Scan) -> Result {
 		.ready_fold(Digests::new(), |mut digests, (key, value)| {
 			let infected = short_of(value)
 				.filter(|state| scan.infected.contains(state))
-				.and_then(|state| key.try_into().ok().map(|digest| (state, digest)));
+				.zip(key.try_into().ok());
 
 			if let Some((state, digest)) = infected {
 				digests.entry(state).or_default().push(digest);

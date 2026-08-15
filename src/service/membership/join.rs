@@ -56,6 +56,14 @@ pub struct Join<'a> {
 	pub extra_content: Option<CanonicalJsonObject>,
 }
 
+fn membership_event_id_snapshot(event_id: Result<OwnedEventId>) -> Result<Option<OwnedEventId>> {
+	match event_id {
+		| Ok(event_id) => Ok(Some(event_id)),
+		| Err(e) if e.is_not_found() => Ok(None),
+		| Err(e) => Err(e),
+	}
+}
+
 #[implement(Service)]
 #[async_noinline]
 #[tracing::instrument(
@@ -192,24 +200,40 @@ async fn join_remote(
 ) -> Result {
 	info!("Joining {room_id} over federation.");
 
-	let (make_join_response, remote_server) = self
-		.make_join_request(sender_user, room_id, servers)
-		.await?;
+	let initial_membership = self
+		.services
+		.state_cache
+		.user_membership(sender_user, room_id)
+		.await;
+	let initial_membership_event_id = membership_event_id_snapshot(
+		self.services
+			.state_accessor
+			.room_state_get_id(room_id, &StateEventType::RoomMember, sender_user.as_str())
+			.await,
+	)?;
 
-	info!("make_join finished");
+	// Release the caller's room-state lock before the network round trip below.
+	// Holding it for the whole call creates a lock-order cycle with inbound
+	// federation `/send`: `send.rs`'s `handle_room` takes `mutex_federation`
+	// first and only then `state.mutex` (via `upgrade_outlier_to_timeline_pdu`),
+	// while this function used to hold `state.mutex` (acquired by our caller)
+	// across the entire call before taking `mutex_federation` below. If an
+	// inbound transaction for this room arrives while a remote join for it is
+	// in flight, each side ends up waiting on the lock the other already holds.
+	// We only actually need the room-state lock for the commit at the end,
+	// once `mutex_federation` is already held -- see the fresh acquisition
+	// further down, which keeps the same order the inbound path uses.
+	drop(state_lock);
 
-	let room_version_id = self.require_supported_remote_room_version(&make_join_response)?;
-	let room_version_rules = room_version::rules(&room_version_id)?;
-	let (mut join_event, event_id, join_authorized_via_users_server) = self
-		.create_join_event(
-			room_id,
-			sender_user,
-			&make_join_response.event,
-			&room_version_id,
-			&room_version_rules,
-			reason,
-			extra_content,
-		)
+	let (
+		room_version_id,
+		room_version_rules,
+		mut join_event,
+		event_id,
+		join_authorized_via_users_server,
+		remote_server,
+	) = self
+		.prepare_remote_join(sender_user, room_id, reason, servers, extra_content)
 		.await?;
 
 	// Once send_join hits the remote server it may start sending us events which
@@ -221,31 +245,153 @@ async fn join_remote(
 		.lock(room_id)
 		.await;
 
-	let mut response = self
-		.execute_send_join(
-			&remote_server,
+	let response = self
+		.fetch_and_prepare_send_join_response(
+			SendJoinRequest {
+				remote_server: &remote_server,
+				room_id,
+				event_id: &event_id,
+				servers,
+				room_version_id: &room_version_id,
+				join_authorized_via_users_server: join_authorized_via_users_server.as_ref(),
+			},
+			&mut join_event,
+		)
+		.await?;
+
+	let (parsed_join_pdu, join_event, state) = self
+		.ingest_remote_join_response(
 			room_id,
 			&event_id,
-			join_event.clone(),
+			join_event,
 			&room_version_id,
+			&room_version_rules,
+			&response,
+		)
+		.await?;
+
+	self.auth_check_send_join_response(&room_version_rules, &parsed_join_pdu, &state)
+		.await?;
+
+	self.commit_remote_join(
+		sender_user,
+		room_id,
+		initial_membership,
+		initial_membership_event_id,
+		state,
+		parsed_join_pdu,
+		join_event,
+	)
+	.await?;
+
+	Ok(())
+}
+
+struct SendJoinRequest<'a> {
+	remote_server: &'a OwnedServerName,
+	room_id: &'a RoomId,
+	event_id: &'a OwnedEventId,
+	servers: &'a [OwnedServerName],
+	room_version_id: &'a RoomVersionId,
+	join_authorized_via_users_server: Option<&'a OwnedUserId>,
+}
+
+#[implement(Service)]
+async fn prepare_remote_join(
+	&self,
+	sender_user: &UserId,
+	room_id: &RoomId,
+	reason: Option<String>,
+	servers: &[OwnedServerName],
+	extra_content: Option<CanonicalJsonObject>,
+) -> Result<(
+	RoomVersionId,
+	RoomVersionRules,
+	CanonicalJsonObject,
+	OwnedEventId,
+	Option<OwnedUserId>,
+	OwnedServerName,
+)> {
+	let (make_join_response, remote_server) = self
+		.make_join_request(sender_user, room_id, servers)
+		.await?;
+
+	info!("make_join finished");
+
+	let room_version_id = self.require_supported_remote_room_version(&make_join_response)?;
+	let room_version_rules = room_version::rules(&room_version_id)?;
+	let (join_event, event_id, join_authorized_via_users_server) = self
+		.create_join_event(
+			room_id,
+			sender_user,
+			&make_join_response.event,
+			&room_version_id,
+			&room_version_rules,
+			reason,
+			extra_content,
+		)
+		.await?;
+
+	Ok((
+		room_version_id,
+		room_version_rules,
+		join_event,
+		event_id,
+		join_authorized_via_users_server,
+		remote_server,
+	))
+}
+
+#[implement(Service)]
+async fn fetch_and_prepare_send_join_response(
+	&self,
+	request: SendJoinRequest<'_>,
+	join_event: &mut CanonicalJsonObject,
+) -> Result<federation::membership::create_join_event::v2::RoomState> {
+	let mut response = self
+		.execute_send_join(
+			request.remote_server,
+			request.room_id,
+			request.event_id,
+			join_event.clone(),
+			request.room_version_id,
 		)
 		.await?;
 
 	if response.members_omitted {
-		self.fetch_omitted_state(&remote_server, room_id, &event_id, servers, &mut response)
-			.await?;
+		self.fetch_omitted_state(
+			request.remote_server,
+			request.room_id,
+			request.event_id,
+			request.servers,
+			&mut response,
+		)
+		.await?;
 	}
 
-	if join_authorized_via_users_server.is_some() {
+	if request.join_authorized_via_users_server.is_some() {
 		merge_restricted_signature(
-			&remote_server,
-			&event_id,
-			&room_version_id,
+			request.remote_server,
+			request.event_id,
+			request.room_version_id,
 			&response,
-			&mut join_event,
+			join_event,
 		)?;
 	}
 
+	Ok(response)
+}
+
+#[implement(Service)]
+async fn ingest_remote_join_response(
+	&self,
+	room_id: &RoomId,
+	event_id: &OwnedEventId,
+	join_event: CanonicalJsonObject,
+	room_version_id: &RoomVersionId,
+	room_version_rules: &RoomVersionRules,
+	response: &federation::membership::create_join_event::v2::RoomState,
+) -> Result<(Pdu, CanonicalJsonObject, HashMap<u64, OwnedEventId>)> {
 	let shortroomid = self
 		.services
 		.short
@@ -258,7 +404,7 @@ async fn join_remote(
 		"Initialized room. Parsing join event..."
 	);
 	let (parsed_join_pdu, join_event) =
-		Pdu::from_object_federation(room_id, &event_id, join_event, &room_version_rules)?;
+		Pdu::from_object_federation(room_id, event_id, join_event, room_version_rules)?;
 
 	info!(
 		events = response
@@ -278,21 +424,31 @@ async fn join_remote(
 		.await;
 
 	let state = self
-		.ingest_send_join_state(room_id, &room_version_id, &room_version_rules, &response.state)
+		.ingest_send_join_state(room_id, room_version_id, room_version_rules, &response.state)
 		.await;
 
 	self.ingest_send_join_auth_chain(
 		room_id,
-		&room_version_id,
-		&room_version_rules,
+		room_version_id,
+		room_version_rules,
 		&response.auth_chain,
 	)
 	.await;
 
+	Ok((parsed_join_pdu, join_event, state))
+}
+
+#[implement(Service)]
+async fn auth_check_send_join_response(
+	&self,
+	room_version_rules: &RoomVersionRules,
+	parsed_join_pdu: &Pdu,
+	state: &HashMap<u64, OwnedEventId>,
+) -> Result {
 	debug!("Running send_join auth check...");
 	state_res::auth_check(
-		&room_version_rules,
-		&parsed_join_pdu,
+		room_version_rules,
+		parsed_join_pdu,
 		&async |event_id| self.services.timeline.get_pdu(&event_id).await,
 		&async |event_type, state_key| {
 			let shortstatekey = self
@@ -310,14 +466,64 @@ async fn join_remote(
 	)
 	.inspect_err(|e| error!("send_join auth check failed: {e:?}"))
 	.boxed()
-	.await?;
+	.await
+}
+
+#[implement(Service)]
+#[expect(clippy::too_many_arguments)]
+async fn commit_remote_join(
+	&self,
+	sender_user: &UserId,
+	room_id: &RoomId,
+	initial_membership: Option<MembershipState>,
+	initial_membership_event_id: Option<OwnedEventId>,
+	state: HashMap<u64, OwnedEventId>,
+	parsed_join_pdu: Pdu,
+	join_event: CanonicalJsonObject,
+) -> Result {
+	// Reacquire the room-state lock only now, for the commit below. We already
+	// hold `mutex_federation` in the caller, so this preserves the same
+	// `mutex_federation` -> `state.mutex` order the inbound federation `/send`
+	// path uses.
+	let state_lock = self.services.state.mutex.lock(room_id).await;
+
+	let current_membership = self
+		.services
+		.state_cache
+		.user_membership(sender_user, room_id)
+		.await;
+	let current_membership_event_id = membership_event_id_snapshot(
+		self.services
+			.state_accessor
+			.room_state_get_id(room_id, &StateEventType::RoomMember, sender_user.as_str())
+			.await,
+	)?;
+
+	if current_membership == Some(MembershipState::Join) {
+		debug!(
+			%sender_user,
+			%room_id,
+			"Skipping stale remote join commit because the user is already joined"
+		);
+
+		return Ok(());
+	}
+
+	if current_membership_event_id != initial_membership_event_id {
+		debug_warn!(
+			%sender_user,
+			%room_id,
+			current_membership = ?current_membership,
+			initial_membership = ?initial_membership,
+			"Skipping stale remote join commit after a newer local membership change"
+		);
+
+		return Err!(Conflict("Join was superseded by a newer membership change."));
+	}
 
 	self.apply_send_join_state(room_id, &state, &state_lock)
 		.await?;
 
-	// We append to state before appending the pdu, so we don't have a moment in
-	// time with the pdu without it's state. This is okay because append_pdu can't
-	// fail.
 	let statehash_after_join = self
 		.services
 		.state
@@ -339,8 +545,6 @@ async fn join_remote(
 		)
 		.await?;
 
-	// We set the room state after inserting the pdu, so that we never have a moment
-	// in time where events in the current room state do not exist
 	self.services
 		.state
 		.set_room_state(room_id, statehash_after_join, &state_lock);
@@ -1135,4 +1339,34 @@ pub(super) async fn get_servers_for_room(
 
 	debug_info!(?servers);
 	Ok(servers)
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn membership_event_id_snapshot_keeps_found_event() {
+		let event_id = ruma::event_id!("$test:example.org").to_owned();
+
+		let snapshot =
+			membership_event_id_snapshot(Ok(event_id.clone())).expect("snapshot should succeed");
+
+		assert_eq!(snapshot, Some(event_id));
+	}
+
+	#[test]
+	fn membership_event_id_snapshot_treats_missing_state_as_none() {
+		let snapshot = membership_event_id_snapshot(Err(err!(Request(NotFound("missing")))))
+			.expect("not found should be treated as absent");
+
+		assert_eq!(snapshot, None);
+	}
+
+	#[test]
+	fn membership_event_id_snapshot_preserves_other_errors() {
+		let snapshot = membership_event_id_snapshot(Err(err!(Database("boom"))));
+
+		assert!(snapshot.is_err(), "database failures must not be collapsed");
+	}
 }

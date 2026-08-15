@@ -64,7 +64,7 @@ async fn remote_invite(
 			.fill_profile_data(user_id, &mut content)
 			.await;
 
-		let (pdu, pdu_json) = self
+		let (pdu, pdu_json, _prev_state) = self
 			.services
 			.timeline
 			.create_hash_and_sign_event(

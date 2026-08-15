@@ -2,16 +2,20 @@ use std::{collections::HashSet, iter::once};
 
 use futures::{FutureExt, StreamExt};
 use ruma::{
-	OwnedEventId, OwnedServerName, RoomId, UserId,
+	CanonicalJsonObject, OwnedEventId, OwnedServerName, RoomId, UserId,
 	events::{
-		TimelineEventType,
+		StateEventType, TimelineEventType,
 		room::member::{MembershipState, RoomMemberEventContent},
 	},
 };
 use serde_json::value::to_raw_value;
 use tuwunel_core::{
 	Err, Result, implement,
-	matrix::{event::Event, pdu::PduBuilder, room_version},
+	matrix::{
+		event::Event,
+		pdu::{PduBuilder, PduEvent},
+		room_version,
+	},
 	utils::{IterStream, ReadyExt},
 };
 
@@ -35,14 +39,45 @@ pub async fn build_and_append_pdu(
 	state_lock: &RoomMutexGuard,
 ) -> Result<OwnedEventId> {
 	if pdu_builder.event_type == TimelineEventType::RoomMember {
-		self.sanitize_member_authorisation(&mut pdu_builder, room_id)
+		self.normalize_member_authorisation(&mut pdu_builder, room_id)
 			.boxed()
 			.await?;
 	}
 
-	let (pdu, mut pdu_json) = self
+	let (pdu, pdu_json, _prev_state) = self
 		.create_hash_and_sign_event(pdu_builder, sender, room_id, state_lock)
 		.await?;
+
+	self.append_created_pdu(pdu, pdu_json, sender, state_lock)
+		.boxed()
+		.await
+}
+
+/// Authorizes and persists a PDU already built by `create_hash_and_sign_event`
+/// as the newest event in the room. Split out from `build_and_append_pdu` so
+/// callers that need to inspect the built PDU before committing to persist it
+/// (e.g. `/state`'s identical-resend short-circuit, which still needs the
+/// auth_check inside `create_hash_and_sign_event` to have run) can reuse the
+/// standard persistence path once they decide to.
+#[implement(super::Service)]
+#[tracing::instrument(
+	name = "append"
+	level = "debug",
+	skip(self, pdu_json, state_lock),
+	ret,
+)]
+pub async fn append_created_pdu(
+	&self,
+	pdu: PduEvent,
+	mut pdu_json: CanonicalJsonObject,
+	sender: &UserId,
+	state_lock: &RoomMutexGuard,
+) -> Result<OwnedEventId> {
+	let _shorteventid = self
+		.services
+		.short
+		.get_or_create_shorteventid(&pdu.event_id)
+		.await;
 
 	//TODO: Use proper room version here
 	if *pdu.kind() == TimelineEventType::RoomCreate && pdu.room_id().server_name().is_none() {
@@ -151,7 +186,7 @@ pub async fn build_and_append_pdu(
 
 #[implement(super::Service)]
 #[tracing::instrument(skip_all, level = "debug")]
-async fn sanitize_member_authorisation(
+pub async fn normalize_member_authorisation(
 	&self,
 	pdu_builder: &mut PduBuilder,
 	room_id: &RoomId,
@@ -175,11 +210,16 @@ async fn sanitize_member_authorisation(
 		.and_then(|key| UserId::parse(key).ok())
 		&& self
 			.services
-			.state_cache
-			.user_membership(&target, room_id)
+			.state_accessor
+			.room_state_get_content::<RoomMemberEventContent>(
+				room_id,
+				&StateEventType::RoomMember,
+				target.as_str(),
+			)
 			.await
-			.is_some_and(|m| matches!(m, MembershipState::Join | MembershipState::Invite))
-	{
+			.is_ok_and(|event| {
+				matches!(event.membership, MembershipState::Join | MembershipState::Invite)
+			}) {
 		let mut object = pdu_builder.content.deserialize()?;
 		object.remove("join_authorised_via_users_server");
 		pdu_builder.content = to_raw_value(&object)?.into();

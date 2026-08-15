@@ -388,8 +388,9 @@ async fn migrate(services: &Services, foreign_lineage: bool) -> Result {
 		.bump_database_version(target_version);
 
 	match discovered.cmp(&target_version) {
-		| Ordering::Less =>
-			info!("Database: migrated schema version from {discovered} to {target_version}."),
+		| Ordering::Less => {
+			info!("Database: migrated schema version from {discovered} to {target_version}.");
+		},
 		| Ordering::Greater => warn!(
 			"Database: stamped schema version {target_version} over a higher discovered version \
 			 {discovered} (forced downgrade or foreign import)."
