@@ -3,6 +3,7 @@ use std::{
 	collections::{BTreeMap, btree_map::Entry},
 	fmt::{Formatter, Result as FmtResult},
 	iter::from_fn,
+	slice,
 };
 
 use ruma::{
@@ -19,6 +20,12 @@ use serde_json::value::{RawValue as RawJsonValue, Value as JsonValue, to_raw_val
 
 use super::{Pdu, Unsigned};
 use crate::{Result, err, implement, utils::BoolExt};
+
+/// Unsigned keys only the event's sender may see: the client's transaction ID
+/// and the MSC4140 delay ID, which is the handle for cancelling or sending a
+/// delayed event.
+pub(super) const SENDER_PRIVATE_KEYS: [&str; 2] =
+	["transaction_id", "org.matrix.msc4140.delay_id"];
 
 type BorrowedObject<'a> = BTreeMap<Cow<'a, str>, &'a RawJsonValue>;
 type JsonEntry<'a> = (JsonString<'a>, &'a RawJsonValue);
@@ -44,7 +51,7 @@ struct RawObjectPatch<'a, 'raw, T> {
 
 struct RawObjectRemove<'a, 'raw> {
 	object: &'a BorrowedObject<'raw>,
-	field: &'a str,
+	fields: &'a [&'a str],
 }
 
 struct BorrowedField<'a>(&'a str);
@@ -97,10 +104,10 @@ pub fn without_transaction_id_unless_sender(mut self, user_id: Option<&UserId>) 
 	Ok(self)
 }
 
-/// Removes the local transaction ID from unsigned event metadata.
+/// Removes sender-private IDs from unsigned event metadata.
 ///
 /// Other unsigned properties are retained and the object is re-encoded. An
-/// event without unsigned data, or without the key, is left unchanged.
+/// event without unsigned data, or without any of the keys, is left unchanged.
 #[implement(Pdu)]
 pub fn remove_transaction_id(&mut self) -> Result {
 	use BTreeMap as Map;
@@ -109,15 +116,24 @@ pub fn remove_transaction_id(&mut self) -> Result {
 		return Ok(());
 	};
 
+	// A delayed state event carries a delay ID without a transaction ID, so
+	// the fast path must look for every key. A substring match only ever
+	// sends an event down the slow path, never past the strip.
 	let raw = unsigned.json().get();
-	if !raw.contains("\"transaction_id\"") {
+	if !SENDER_PRIVATE_KEYS
+		.iter()
+		.any(|key| raw.contains(key))
+	{
 		return Ok(());
 	}
 
 	let mut unsigned: Map<&str, Raw<JsonValue>> = serde_json::from_str(raw)
 		.map_err(|e| err!(Database("Invalid unsigned in pdu event: {e}")))?;
 
-	unsigned.remove("transaction_id");
+	for key in SENDER_PRIVATE_KEYS {
+		unsigned.remove(key);
+	}
+
 	self.unsigned = to_raw_value(&unsigned)
 		.map(Into::into)
 		.map(Some)
@@ -381,15 +397,19 @@ fn thread_transaction_sender(raw: &RawJsonValue) -> Result<Option<&RawJsonValue>
 fn transaction_sender(latest_event: &RawJsonValue) -> Result<Option<&RawJsonValue>> {
 	let sender = || {
 		raw_field(latest_event, "sender", "thread latest event")?.ok_or_else(|| {
-			err!(Database("Thread latest event with transaction ID has no sender"))
+			err!(Database("Thread latest event with a sender-private ID has no sender"))
 		})
 	};
 
-	raw_field(latest_event, "unsigned", "thread latest event")?
-		.map(|unsigned| raw_field(unsigned, "transaction_id", "thread latest event unsigned"))
-		.transpose()?
-		.flatten()
-		.map(|_| sender())
+	let Some(unsigned) = raw_field(latest_event, "unsigned", "thread latest event")? else {
+		return Ok(None);
+	};
+
+	SENDER_PRIVATE_KEYS
+		.iter()
+		.map(|key| raw_field(unsigned, key, "thread latest event unsigned"))
+		.find_map(Result::transpose)
+		.map(|field| field.and_then(|_| sender()))
 		.transpose()
 }
 
@@ -497,10 +517,11 @@ fn without(&self, relation_type: &str) -> Result<Option<Unsigned>> {
 			.unsigned
 			.len()
 			.ne(&1)
-			.then(|| raw_as(&RawObjectRemove::new(&self.unsigned, "m.relations")))
+			.then(|| raw_as(&RawObjectRemove::new(&self.unsigned, &["m.relations"])))
 			.transpose(),
 		| _ => {
-			let relations = RawObjectRemove::new(&self.relations, relation_type);
+			let relations =
+				RawObjectRemove::new(&self.relations, slice::from_ref(&relation_type));
 			let unsigned = RawObjectPatch::new(&self.unsigned, "m.relations", relations);
 
 			raw_as(&unsigned).map(Some)
@@ -748,7 +769,7 @@ fn parse(raw: &'a RawJsonValue) -> Result<Self> {
 #[implement(ThreadBundleFields, generics = "<'a>", params = "<'a>")]
 fn without_transaction_id<U, const N: usize>(&self) -> Result<Raw<U, N>> {
 	let latest_event_unsigned =
-		RawObjectRemove::new(&self.latest_event_unsigned, "transaction_id");
+		RawObjectRemove::new(&self.latest_event_unsigned, &SENDER_PRIVATE_KEYS);
 
 	let latest_event = RawObjectPatch::new(&self.latest_event, "unsigned", latest_event_unsigned);
 	let thread = RawObjectPatch::new(&self.thread, "latest_event", latest_event);
@@ -801,7 +822,9 @@ impl<T: Serialize> Serialize for RawObjectPatch<'_, '_, T> {
 }
 
 impl<'a, 'raw> RawObjectRemove<'a, 'raw> {
-	fn new(object: &'a BorrowedObject<'raw>, field: &'a str) -> Self { Self { object, field } }
+	fn new(object: &'a BorrowedObject<'raw>, fields: &'a [&'a str]) -> Self {
+		Self { object, fields }
+	}
 }
 
 impl Serialize for RawObjectRemove<'_, '_> {
@@ -811,15 +834,12 @@ impl Serialize for RawObjectRemove<'_, '_> {
 	{
 		self.object
 			.iter()
-			.filter(|(field, _)| field.as_ref() != self.field)
-			.try_fold(
-				serializer.serialize_map(Some(self.object.len().saturating_sub(1)))?,
-				|mut map, (field, value)| {
-					map.serialize_entry(field, value)?;
+			.filter(|(field, _)| !self.fields.contains(&field.as_ref()))
+			.try_fold(serializer.serialize_map(None)?, |mut map, (field, value)| {
+				map.serialize_entry(field, value)?;
 
-					Ok(map)
-				},
-			)
+				Ok(map)
+			})
 			.and_then(SerializeMap::end)
 	}
 }
