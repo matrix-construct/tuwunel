@@ -48,6 +48,11 @@ pub async fn full_deactivate<'a>(&'a self, user_id: &'a UserId, erase: bool) -> 
 		.deactivate_account(user_id)
 		.await?;
 
+	self.services
+		.delayed_events
+		.remove_user(user_id)
+		.await?;
+
 	self.clear_profile(user_id).await;
 	self.demote_joined_rooms(user_id).await?;
 

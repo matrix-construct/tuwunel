@@ -14,6 +14,7 @@ pub mod appservice;
 pub mod client;
 pub mod config;
 pub mod deactivate;
+pub mod delayed_events;
 pub mod emergency;
 pub mod federation;
 pub mod fetcher;

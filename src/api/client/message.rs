@@ -449,6 +449,9 @@ pub(crate) async fn with_membership(
 	user_id: &UserId,
 	encrypted: bool,
 ) -> PduEvent {
+	if pdu.sender() != user_id {
+		pdu.remove_transaction_id().log_err().ok();
+	}
 	annotate_membership(services, &mut pdu, user_id, encrypted).await;
 	pdu
 }

@@ -195,6 +195,63 @@ fn remove_prev_state_absent_unsigned_noop() {
 	assert!(pdu.unsigned.is_none());
 }
 
+#[test]
+fn remove_transaction_id_strips_all_sender_private_ids() {
+	let mut pdu = member_pdu(&json!({
+		"age": 4612,
+		"transaction_id": "txn",
+		"org.matrix.msc4140.delay_id": "delay",
+	}));
+
+	pdu.remove_transaction_id().expect("strip failed");
+
+	let unsigned: serde_json::Value = serde_json::from_str(
+		pdu.unsigned
+			.as_ref()
+			.expect("unsigned kept")
+			.json()
+			.get(),
+	)
+	.expect("valid unsigned");
+
+	assert!(unsigned.get("transaction_id").is_none());
+	assert!(
+		unsigned
+			.get("org.matrix.msc4140.delay_id")
+			.is_none()
+	);
+	assert_eq!(unsigned["age"], 4612);
+}
+
+/// A delayed state event is sent without a transaction ID, so its delay ID is
+/// the only sender-private key present.
+#[test]
+fn remove_transaction_id_strips_lone_delay_id() {
+	let mut pdu = member_pdu(&json!({
+		"age": 4612,
+		"org.matrix.msc4140.delay_id": "delay",
+	}));
+
+	pdu.remove_transaction_id().expect("strip failed");
+
+	let unsigned: serde_json::Value = serde_json::from_str(
+		pdu.unsigned
+			.as_ref()
+			.expect("unsigned kept")
+			.json()
+			.get(),
+	)
+	.expect("valid unsigned");
+
+	assert!(
+		unsigned
+			.get("org.matrix.msc4140.delay_id")
+			.is_none(),
+		"lone delay ID survived"
+	);
+	assert_eq!(unsigned["age"], 4612);
+}
+
 fn replacement_raw() -> Raw<AnySyncMessageLikeEvent> {
 	to_raw_value(&json!({
 		"type": "m.room.message",
@@ -803,6 +860,45 @@ fn remove_thread_latest_transaction_id_decodes_escaped_key() {
 	let nested = &unsigned["m.relations"]["m.thread"]["latest_event"]["unsigned"];
 
 	assert!(nested.get("transaction_id").is_none(), "escaped transaction ID survived");
+}
+
+#[test]
+fn remove_thread_latest_delay_id_for_other_user() {
+	let mut pdu = member_pdu(&json!({
+		"m.relations": {
+			"m.thread": {
+				"latest_event": {
+					"sender": "@bob:example.com",
+					"unsigned": {
+						"age": 23,
+						"org.matrix.msc4140.delay_id": "secret",
+					},
+				},
+			},
+		},
+	}));
+
+	pdu.remove_thread_latest_transaction_id_unless_sender(user_id!("@alice:example.com"))
+		.expect("remove failed");
+
+	let unsigned: serde_json::Value = serde_json::from_str(
+		pdu.unsigned
+			.as_ref()
+			.expect("unsigned kept")
+			.json()
+			.get(),
+	)
+	.expect("valid unsigned");
+
+	let nested = &unsigned["m.relations"]["m.thread"]["latest_event"]["unsigned"];
+
+	assert!(
+		nested
+			.get("org.matrix.msc4140.delay_id")
+			.is_none(),
+		"delay ID survived"
+	);
+	assert_eq!(nested["age"], 23);
 }
 
 #[test]
