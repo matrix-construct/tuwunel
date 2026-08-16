@@ -411,6 +411,19 @@
 #
 #max_request_size = 24 MiB
 
+# Maximum delay for an MSC4140 delayed event, in seconds. The default is
+# 24 hours.
+#
+# Set to 0 to disable delayed events.
+#
+#max_event_delay_duration = 86400
+
+# Maximum number of MSC4140 delayed events a user may have scheduled.
+#
+# Set to 0 to disable delayed events.
+#
+#max_delayed_events_per_user = 100
+
 # Maximum size of a response body buffered from a remote server. Applies
 # to federation requests, push gateway and appservice transactions, and
 # remote media fetched for URL previews. A peer cannot be trusted to honor

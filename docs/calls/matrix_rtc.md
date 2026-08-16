@@ -8,6 +8,14 @@ supported here, paired with the
 [lk-jwt-service](https://github.com/element-hq/lk-jwt-service) which issues
 the access tokens clients use to join Livekit rooms.
 
+Tuwunel enables MSC4140 delayed events by default. MatrixRTC uses them as a
+heartbeat: if a client loses connectivity before it can leave a call cleanly,
+the homeserver sends its previously scheduled leave event. The defaults allow
+100 scheduled events per user and delays up to 24 hours. Operators can adjust
+these limits with `max_delayed_events_per_user` and
+`max_event_delay_duration`, or set either option to `0` to disable delayed
+events.
+
 This guide shows you how to deploy MatrixRTC/Element Call using Docker and
 Docker Compose, as Livekit only provides prebuilt Docker images. It is
 possible to run Livekit using their installation script, however this method

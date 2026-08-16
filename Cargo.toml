@@ -71,6 +71,7 @@ features = [
 	"http2",
 	"json",
 	"matched-path",
+	"original-uri",
 	"tokio",
 	"tracing",
 ]
@@ -397,6 +398,7 @@ features = [
     "unstable-msc4075",
     "unstable-msc4121",
     "unstable-msc4125",
+    "unstable-msc4140",
     "unstable-msc4143",
     "unstable-msc4186",
     "unstable-msc4195",

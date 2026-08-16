@@ -94,6 +94,19 @@ pub(crate) async fn get_capabilities_route(
 		capabilities.set("im.nheko.msc3664.related_event_match", json!({"enabled": true}))?;
 	}
 
+	// MSC4140: delayed events.
+	if services.config.max_event_delay_duration > 0
+		&& services.config.max_delayed_events_per_user > 0
+	{
+		capabilities.set(
+			"org.matrix.msc4140.delayed_events",
+			json!({
+				"max_delay_ms": services.config.max_event_delay_duration.saturating_mul(1000),
+				"max_scheduled": services.config.max_delayed_events_per_user,
+			}),
+		)?;
+	}
+
 	// MSC4323: advertise admin moderation only to admins; absence implies
 	// neither suspend nor lock is available to the caller.
 	if services

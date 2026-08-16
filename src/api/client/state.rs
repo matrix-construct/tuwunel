@@ -135,7 +135,7 @@ pub(crate) async fn get_state_events_for_key_route(
 		))));
 	}
 
-	let event = services
+	let mut event = services
 		.state_accessor
 		.room_state_get(&body.room_id, &body.event_type, &body.state_key)
 		.await
@@ -146,6 +146,9 @@ pub(crate) async fn get_state_events_for_key_route(
 				"Failed to get state event: {e}.",
 			))))
 		})?;
+	if event.sender() != sender_user {
+		event.remove_transaction_id().ok();
+	}
 
 	let event_or_content = match body.format {
 		| StateEventFormat::Event => json!({
