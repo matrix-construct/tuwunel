@@ -1304,3 +1304,100 @@ async fn a_restore_is_not_repeated_on_reopen() -> Result {
 
 	Ok(())
 }
+
+#[tokio::test]
+async fn recursive_multi_get_traversal() -> Result<()> {
+	let root = var("TMPDIR").unwrap_or_else(|_| "/tmp".into());
+	let path = format!("{root}/tuwunel-database-recursive-{}", process_id());
+	let raw_config = Figment::new()
+		.merge(("server_name", "localhost"))
+		.merge(("database_path", &path))
+		.merge(("test", ["fresh", "cleanup"]));
+
+	let config = Config::new(&raw_config)?;
+	let runtime = Handle::current();
+	let logging = Logging {
+		subscriber: Arc::new(NoSubscriber::new()),
+		reload: LogLevelReloadHandles::default(),
+		capture: Arc::new(State::new()),
+	};
+
+	let metrics = Metrics::new(Some(&runtime));
+	let server =
+		Arc::new(Server::new(config, Sources::default(), Some(&runtime), logging, metrics));
+
+	let db = Database::open(&server).await?;
+	let map = &db["global"];
+
+	// Insert DAG nodes:
+	// A -> B, C
+	// B -> A (cycle) & D (diamond convergence)
+	// C -> D (diamond convergence) & M (missing)
+	// D -> E
+	map.put(b"node_A", b"node_B,node_C");
+	map.put(b"node_B", b"node_A,node_D");
+	map.put(b"node_C", b"node_D,node_M"); // node_M will be missing
+	map.put(b"node_D", b"node_E");
+	map.put(b"node_E", b"");
+
+	let parse_val = |slice: &[u8]| -> Result<String> {
+		String::from_utf8(slice.to_vec()).map_err(|e| std::io::Error::other(e).into())
+	};
+
+	let extract_children = |val: &String, sink: &mut Vec<Vec<u8>>| {
+		if !val.is_empty() {
+			for part in val.split(',') {
+				sink.push(part.as_bytes().to_vec());
+			}
+		}
+	};
+
+	// Test 1: Full traversal with cycle, diamond, and missing key detection
+	let output = map
+		.recursive_multi_get(
+			vec![b"node_A".to_vec(), b"node_A".to_vec()],
+			None,
+			None,
+			parse_val,
+			extract_children,
+		)
+		.await?;
+
+	assert!(!output.truncated);
+	assert_eq!(output.missing, vec![b"node_M".to_vec()]);
+	assert!(
+		output
+			.values
+			.contains(&"node_B,node_C".to_string())
+	);
+	assert!(
+		output
+			.values
+			.contains(&"node_A,node_D".to_string())
+	);
+	assert!(
+		output
+			.values
+			.contains(&"node_D,node_M".to_string())
+	);
+	assert!(output.values.contains(&"node_E".to_string()));
+	assert!(output.values.contains(&"".to_string()));
+
+	// Test 2: Truncation via max_depth
+	let depth_output = map
+		.recursive_multi_get(vec![b"node_A".to_vec()], None, Some(1), parse_val, extract_children)
+		.await?;
+
+	assert!(depth_output.truncated);
+	assert_eq!(depth_output.values.len(), 1);
+
+	// Test 3: Truncation via max_nodes
+	let node_output = map
+		.recursive_multi_get(vec![b"node_A".to_vec()], Some(2), None, parse_val, extract_children)
+		.await?;
+
+	assert!(node_output.truncated);
+	assert!(node_output.values.len() <= 2);
+
+	Ok(())
+}
