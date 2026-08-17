@@ -1334,11 +1334,11 @@ async fn recursive_multi_get_traversal() -> Result<()> {
 	// B -> A (cycle) & D (diamond convergence)
 	// C -> D (diamond convergence) & M (missing)
 	// D -> E
-	map.put(b"node_A", b"node_B,node_C");
-	map.put(b"node_B", b"node_A,node_D");
-	map.put(b"node_C", b"node_D,node_M"); // node_M will be missing
-	map.put(b"node_D", b"node_E");
-	map.put(b"node_E", b"");
+	map.insert(b"node_A", b"node_B,node_C");
+	map.insert(b"node_B", b"node_A,node_D");
+	map.insert(b"node_C", b"node_D,node_M"); // node_M will be missing
+	map.insert(b"node_D", b"node_E");
+	map.insert(b"node_E", b"");
 
 	let parse_val = |slice: &[u8]| -> Result<String> {
 		String::from_utf8(slice.to_vec()).map_err(|e| std::io::Error::other(e).into())
