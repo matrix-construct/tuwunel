@@ -1,4 +1,4 @@
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 use std::fs::rename;
 #[cfg(unix)]
 use std::os::unix::fs::{PermissionsExt as _, symlink};
@@ -487,7 +487,7 @@ fn writer_does_not_clobber_a_target_created_before_install() {
 	assert_eq!(contents, "concurrent contents\n");
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 #[test]
 fn writer_rolls_back_when_a_forced_target_changes_before_commit() {
 	let temp = TempDir::new("writer-replace-race");

@@ -5,8 +5,6 @@ use std::os::unix::{
 	fs::{MetadataExt as _, OpenOptionsExt as _, PermissionsExt as _},
 	io::AsRawFd as _,
 };
-#[cfg(target_os = "linux")]
-use std::{ffi::CString, os::unix::ffi::OsStrExt as _};
 use std::{
 	ffi::OsString,
 	fmt::Display,
@@ -19,11 +17,20 @@ use std::{
 	process::id,
 	sync::atomic::{AtomicU64, Ordering},
 };
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+use std::{
+	ffi::{CStr, CString},
+	os::unix::ffi::OsStrExt as _,
+};
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+use libc::c_int;
 #[cfg(target_os = "linux")]
 use libc::{AT_FDCWD, RENAME_EXCHANGE, renameat2};
 #[cfg(unix)]
 use libc::{O_CLOEXEC, O_NOFOLLOW, O_NONBLOCK, fchown};
+#[cfg(target_os = "macos")]
+use libc::{RENAME_SWAP, renamex_np};
 
 use crate::{Err, Error, Result, debug_warn, err};
 
@@ -324,20 +331,12 @@ fn title(kind: &str) -> &str {
 	}
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn exchange(left: &Path, right: &Path) -> Result {
-	let left_name = CString::new(left.as_os_str().as_bytes())
-		.map_err(|error| err!("Invalid output path `{}`: {error}", left.display()))?;
+	let left_name = path_cstring(left)?;
+	let right_name = path_cstring(right)?;
 
-	let right_name = CString::new(right.as_os_str().as_bytes())
-		.map_err(|error| err!("Invalid output path `{}`: {error}", right.display()))?;
-
-	// SAFETY: Both pointers remain valid for the call and name existing paths.
-	let result = unsafe {
-		renameat2(AT_FDCWD, left_name.as_ptr(), AT_FDCWD, right_name.as_ptr(), RENAME_EXCHANGE)
-	};
-
-	if result == -1 {
+	if swap(&left_name, &right_name) == -1 {
 		let error = IoError::last_os_error();
 
 		return Err(fs_pair_error(&error, "exchange", left, right));
@@ -346,13 +345,33 @@ fn exchange(left: &Path, right: &Path) -> Result {
 	Ok(())
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
 fn exchange(left: &Path, right: &Path) -> Result {
 	Err!(
 		"Safe forced replacement of `{}` with `{}` is unsupported on this platform.",
 		right.display(),
 		left.display(),
 	)
+}
+
+#[cfg(target_os = "linux")]
+fn swap(left: &CStr, right: &CStr) -> c_int {
+	// SAFETY: Both paths stay borrowed for the call and are NUL-terminated. The
+	// kernel copies them and reports every path condition through errno.
+	unsafe { renameat2(AT_FDCWD, left.as_ptr(), AT_FDCWD, right.as_ptr(), RENAME_EXCHANGE) }
+}
+
+#[cfg(target_os = "macos")]
+fn swap(left: &CStr, right: &CStr) -> c_int {
+	// SAFETY: Both paths stay borrowed for the call and are NUL-terminated. The
+	// kernel copies them and reports every path condition through errno.
+	unsafe { renamex_np(left.as_ptr(), right.as_ptr(), RENAME_SWAP) }
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn path_cstring(path: &Path) -> Result<CString> {
+	CString::new(path.as_os_str().as_bytes())
+		.map_err(|error| err!("Invalid output path `{}`: {error}", path.display()))
 }
 
 #[cfg(unix)]

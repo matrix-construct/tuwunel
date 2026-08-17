@@ -75,8 +75,8 @@ Tuwunel applies the following safeguards:
   its previous contents to an adjacent `.bak` file. Replacement is refused if
   that backup already exists.
 - Nonregular destinations, including symbolic links, are refused.
-- Forced replacement is supported only on Linux. Other platforms can write a
-  new destination and replace it manually after review.
+- Forced replacement is supported on Linux and macOS. Other platforms can write
+  a new destination and replace it manually after review.
 - Writes use a temporary file in the destination directory and are installed
   atomically.
 - The output is parsed and compared with the selected input values before and
@@ -112,8 +112,8 @@ diff -u /etc/tuwunel/tuwunel.toml /etc/tuwunel/tuwunel.toml.new
 Keep the original file available while reviewing any operational notes it
 contains.
 
-On Linux, an explicit forced replacement can install the reviewed form while
-retaining the previous file:
+On Linux and macOS, an explicit forced replacement can install the reviewed form
+while retaining the previous file:
 
 ```console
 tuwunel -c /etc/tuwunel/tuwunel.toml \
