@@ -1365,23 +1365,13 @@ async fn recursive_multi_get_traversal() -> Result<()> {
 
 	assert!(!output.truncated);
 	assert_eq!(output.missing, vec![b"node_M".to_vec()]);
-	assert!(
-		output
-			.values
-			.contains(&"node_B,node_C".to_owned())
-	);
-	assert!(
-		output
-			.values
-			.contains(&"node_A,node_D".to_owned())
-	);
-	assert!(
-		output
-			.values
-			.contains(&"node_D,node_M".to_owned())
-	);
-	assert!(output.values.contains(&"node_E".to_owned()));
-	assert!(output.values.contains(&String::new()));
+	assert_eq!(output.values, vec![
+		"node_B,node_C",
+		"node_A,node_D",
+		"node_D,node_M",
+		"node_E",
+		"",
+	]);
 
 	// Test 2: Truncation via max_depth
 	let depth_output = map
@@ -1397,7 +1387,16 @@ async fn recursive_multi_get_traversal() -> Result<()> {
 		.await?;
 
 	assert!(node_output.truncated);
-	assert!(node_output.values.len() <= 2);
+	assert_eq!(node_output.values.len(), 2);
+	assert_eq!(node_output.values, vec!["node_B,node_C", "node_A,node_D"]);
+
+	// Test 4: Truncation via max_nodes = Some(0)
+	let zero_node_output = map
+		.recursive_multi_get(vec![b"node_A".to_vec()], Some(0), None, parse_val, extract_children)
+		.await?;
+
+	assert!(zero_node_output.truncated);
+	assert!(zero_node_output.values.is_empty());
 
 	Ok(())
 }

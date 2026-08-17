@@ -189,7 +189,7 @@ where
 	let map = self.clone();
 
 	tokio::task::spawn_blocking(move || {
-		const SORTED: bool = false;
+		const SORTED: bool = true;
 
 		map.engine.ctx.server.check_running()?;
 
@@ -219,7 +219,12 @@ where
 			}
 
 			// Sort keys for optimal sequential RocksDB multi-get access
-			current_batch.sort_unstable();
+			current_batch.sort_unstable_by(|a, b| a.as_ref().cmp(b.as_ref()));
+
+			if max_nodes.is_some_and(|max_n| values.len() >= max_n) {
+				truncated = true;
+				break;
+			}
 
 			let db_results = map.engine.db.batched_multi_get_cf_opt(
 				&map.cf(),
@@ -237,9 +242,7 @@ where
 						extract_children(&parsed_value, &mut next_batch);
 						values.push(parsed_value);
 
-						if let Some(max_n) = max_nodes
-							&& values.len() >= max_n
-						{
+						if max_nodes.is_some_and(|max_n| values.len() >= max_n) {
 							truncated = true;
 							break;
 						}
