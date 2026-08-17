@@ -26,7 +26,7 @@ use std::{
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 use libc::c_int;
 #[cfg(target_os = "linux")]
-use libc::{AT_FDCWD, RENAME_EXCHANGE, renameat2};
+use libc::{AT_FDCWD, RENAME_EXCHANGE, SYS_renameat2, syscall};
 #[cfg(unix)]
 use libc::{O_CLOEXEC, O_NOFOLLOW, O_NONBLOCK, fchown};
 #[cfg(target_os = "macos")]
@@ -354,11 +354,24 @@ fn exchange(left: &Path, right: &Path) -> Result {
 	)
 }
 
+// The raw syscall stands in for the renameat2 wrapper musl never provides,
+// though the libc crate declares it for every Linux target.
 #[cfg(target_os = "linux")]
 fn swap(left: &CStr, right: &CStr) -> c_int {
 	// SAFETY: Both paths stay borrowed for the call and are NUL-terminated. The
 	// kernel copies them and reports every path condition through errno.
-	unsafe { renameat2(AT_FDCWD, left.as_ptr(), AT_FDCWD, right.as_ptr(), RENAME_EXCHANGE) }
+	let result = unsafe {
+		syscall(
+			SYS_renameat2,
+			AT_FDCWD,
+			left.as_ptr(),
+			AT_FDCWD,
+			right.as_ptr(),
+			RENAME_EXCHANGE,
+		)
+	};
+
+	c_int::try_from(result).unwrap_or(-1)
 }
 
 #[cfg(target_os = "macos")]
