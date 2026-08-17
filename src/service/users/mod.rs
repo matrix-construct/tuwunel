@@ -21,7 +21,7 @@ use tuwunel_core::{
 	Err, Result, debug_warn, err, is_equal_to,
 	matrix::pdu::PduCount,
 	trace,
-	utils::{self, ReadyExt, stream::TryIgnore},
+	utils::{self, BoolExt, ReadyExt, stream::TryIgnore},
 };
 use tuwunel_database::{Deserialized, Json, Map};
 
@@ -207,6 +207,20 @@ impl Service {
 	/// Check if account is active, infallible
 	pub async fn is_active_local(&self, user_id: &UserId) -> bool {
 		self.services.globals.user_is_local(user_id) && self.is_active(user_id).await
+	}
+
+	/// Gate an LDAP-authenticated login into an existing local account.
+	///
+	/// Only a deactivated account is rejected. A password-origin account
+	/// passes, since a successful bind establishes the caller's identity
+	/// however their account was created, and a localpart with no local
+	/// account passes on its way to registration.
+	pub async fn check_ldap_login(&self, user_id: &UserId) -> Result {
+		self.is_deactivated(user_id)
+			.unwrap_or_else(|_| false)
+			.await
+			.is_false()
+			.ok_or_else(|| err!(Request(UserDeactivated("This user has been deactivated."))))
 	}
 
 	/// MSC3823: account is suspended (read-mostly mode, sessions retained).

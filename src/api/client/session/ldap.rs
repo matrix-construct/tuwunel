@@ -8,7 +8,7 @@ use super::password_login;
 /// Authenticates the given user through the configured LDAP server.
 ///
 /// Creates the user if the user is found in the LDAP and do not already have an
-/// account.
+/// account. A deactivated local account is refused after a successful bind.
 #[tracing::instrument(skip_all, fields(%user_id), name = "ldap")]
 pub(super) async fn ldap_login(
 	services: &Services,
@@ -43,6 +43,11 @@ pub(super) async fn ldap_login(
 		.auth_ldap(&user_dn, password)
 		.await
 		.map(|()| lowercased_user_id.to_owned())?;
+
+	services
+		.users
+		.check_ldap_login(lowercased_user_id)
+		.await?;
 
 	// LDAP users are automatically created on first login attempt. This is a very
 	// common feature that can be seen on many services using a LDAP provider for
