@@ -138,6 +138,8 @@ pub(crate) async fn login_route(
 		},
 	};
 
+	services.users.locked_check(&user_id).await?;
+
 	// Generate a new token for the device
 	let (access_token, expires_in) = services
 		.users

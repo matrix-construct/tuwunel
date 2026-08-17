@@ -113,11 +113,11 @@ async fn locked_account_check(services: &Services, auth: &Auth, route: TypeId) -
 	let is_logout = route == TypeId::of::<logout::v3::Request>()
 		|| route == TypeId::of::<logout_all::v3::Request>();
 
-	if is_logout || !services.users.is_locked(user_id).await {
+	if is_logout {
 		return Ok(());
 	}
 
-	Err!(Request(UserLocked("This account has been locked.")))
+	services.users.locked_check(user_id).await
 }
 
 /// MSC3823: 403 `M_USER_SUSPENDED` on membership, room create/upgrade, and

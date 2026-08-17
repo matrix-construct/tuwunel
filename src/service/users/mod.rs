@@ -237,6 +237,15 @@ impl Service {
 		self.db.userid_locked.get(user_id).await.is_ok()
 	}
 
+	/// MSC3939: reject a request from a locked account.
+	pub async fn locked_check(&self, user_id: &UserId) -> Result {
+		if self.is_locked(user_id).await {
+			return Err!(Request(UserLocked("This account has been locked.")));
+		}
+
+		Ok(())
+	}
+
 	/// MSC4025: the user's events serve as pruned copies to recipients not
 	/// joined at the event. Presence-only for the serving gate.
 	pub async fn is_erased(&self, user_id: &UserId) -> bool {
