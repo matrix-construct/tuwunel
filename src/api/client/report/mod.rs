@@ -7,4 +7,4 @@ pub(crate) use self::{
 	report_user::report_user_route,
 };
 
-pub(super) const REASON_MAX_LEN: usize = 750;
+pub(super) const REASON_MAX_LEN: usize = 2000;
