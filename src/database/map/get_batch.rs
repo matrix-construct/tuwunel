@@ -181,7 +181,7 @@ where
 				&map.read_options,
 			);
 
-			let mut next_batch = Vec::with_capacity(current_batch.len() * 2);
+			let mut next_batch = Vec::with_capacity(current_batch.len().saturating_mul(2));
 
 			for result in db_results {
 				match result {
@@ -211,5 +211,5 @@ where
 		Ok(results)
 	})
 	.await
-	.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?
+	.map_err(std::io::Error::other)?
 }
