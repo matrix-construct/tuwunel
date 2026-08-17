@@ -189,6 +189,8 @@ where
 	let map = self.clone();
 
 	tokio::task::spawn_blocking(move || {
+		const SORTED: bool = true;
+
 		map.engine.ctx.server.check_running()?;
 
 		let snapshot = map.engine.db.snapshot();
@@ -208,14 +210,12 @@ where
 		let mut depth: usize = 0;
 		let mut truncated = false;
 
-		const SORTED: bool = true;
-
 		while !current_batch.is_empty() {
-			if let Some(max_d) = max_depth {
-				if depth >= max_d {
-					truncated = true;
-					break;
-				}
+			if let Some(max_d) = max_depth
+				&& depth >= max_d
+			{
+				truncated = true;
+				break;
 			}
 
 			// Sort keys for optimal sequential RocksDB multi-get access
@@ -237,11 +237,11 @@ where
 						extract_children(&parsed_value, &mut next_batch);
 						values.push(parsed_value);
 
-						if let Some(max_n) = max_nodes {
-							if values.len() >= max_n {
-								truncated = true;
-								break;
-							}
+						if let Some(max_n) = max_nodes
+							&& values.len() >= max_n
+						{
+							truncated = true;
+							break;
 						}
 					},
 					| Ok(None) => {

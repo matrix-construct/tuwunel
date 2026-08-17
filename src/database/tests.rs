@@ -1368,20 +1368,20 @@ async fn recursive_multi_get_traversal() -> Result<()> {
 	assert!(
 		output
 			.values
-			.contains(&"node_B,node_C".to_string())
+			.contains(&"node_B,node_C".to_owned())
 	);
 	assert!(
 		output
 			.values
-			.contains(&"node_A,node_D".to_string())
+			.contains(&"node_A,node_D".to_owned())
 	);
 	assert!(
 		output
 			.values
-			.contains(&"node_D,node_M".to_string())
+			.contains(&"node_D,node_M".to_owned())
 	);
-	assert!(output.values.contains(&"node_E".to_string()));
-	assert!(output.values.contains(&"".to_string()));
+	assert!(output.values.contains(&"node_E".to_owned()));
+	assert!(output.values.contains(&String::new()));
 
 	// Test 2: Truncation via max_depth
 	let depth_output = map
