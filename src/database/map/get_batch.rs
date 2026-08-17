@@ -237,16 +237,18 @@ where
 
 			for (key, result) in current_batch.into_iter().zip(db_results) {
 				match result {
-					| Ok(Some(slice)) => {
-						let parsed_value = parse_value(slice.as_ref())?;
-						extract_children(&parsed_value, &mut next_batch);
-						values.push(parsed_value);
+					| Ok(Some(slice)) =>
+						if max_nodes.is_none_or(|max_n| values.len() < max_n) {
+							let parsed_value = parse_value(slice.as_ref())?;
+							extract_children(&parsed_value, &mut next_batch);
+							values.push(parsed_value);
 
-						if max_nodes.is_some_and(|max_n| values.len() >= max_n) {
+							if max_nodes.is_some_and(|max_n| values.len() >= max_n) {
+								truncated = true;
+							}
+						} else {
 							truncated = true;
-							break;
-						}
-					},
+						},
 					| Ok(None) => {
 						missing.push(key);
 					},

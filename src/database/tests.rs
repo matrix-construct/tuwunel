@@ -1380,6 +1380,7 @@ async fn recursive_multi_get_traversal() -> Result<()> {
 
 	assert!(depth_output.truncated);
 	assert_eq!(depth_output.values.len(), 1);
+	assert_eq!(depth_output.values, vec!["node_B,node_C"]);
 
 	// Test 3: Truncation via max_nodes
 	let node_output = map
@@ -1397,6 +1398,21 @@ async fn recursive_multi_get_traversal() -> Result<()> {
 
 	assert!(zero_node_output.truncated);
 	assert!(zero_node_output.values.is_empty());
+
+	// Test 5: Mid-batch truncation preserves missing key recording and error checks
+	let mid_batch_output = map
+		.recursive_multi_get(
+			vec![b"node_C".to_vec(), b"node_M".to_vec()],
+			Some(1),
+			None,
+			parse_val,
+			extract_children,
+		)
+		.await?;
+
+	assert!(mid_batch_output.truncated);
+	assert_eq!(mid_batch_output.values, vec!["node_D,node_M"]);
+	assert_eq!(mid_batch_output.missing, vec![b"node_M".to_vec()]);
 
 	Ok(())
 }
