@@ -277,6 +277,8 @@ impl Service {
 	where
 		Pdu: Event,
 	{
+		let body = body.trim_start();
+
 		// Server-side command-escape with public echo
 		let is_escape = body.starts_with('\\');
 		let is_public_escape = is_escape
