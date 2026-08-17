@@ -1,5 +1,5 @@
 use ruma::OwnedMxcUri;
-use tuwunel_core::{Err, Result};
+use tuwunel_core::Result;
 
 use crate::admin_command;
 
@@ -10,5 +10,6 @@ pub(super) async fn delete(&self, mxc: OwnedMxcUri) -> Result {
 		.delete(&mxc.as_str().try_into()?)
 		.await?;
 
-	Err!("Deleted the MXC from our database and on our filesystem.")
+	self.write_str("Deleted the MXC from our database and on our filesystem.")
+		.await
 }
