@@ -40,6 +40,21 @@ fn our_own_unknown_token_still_reaches_the_client() {
 }
 
 #[test]
+fn a_locked_account_error_carries_a_401() {
+	let ours = [
+		Error::BadRequest(ErrorKind::UserLocked, "This account has been locked."),
+		Error::Request(ErrorKind::UserLocked, Cow::Borrowed(""), StatusCode::BAD_REQUEST),
+	];
+
+	for error in ours {
+		let (status, kind) = client_response(error);
+
+		assert_eq!(status, StatusCode::UNAUTHORIZED, "MSC3939 requires 401 for a locked account");
+		assert_eq!(kind, ErrorKind::UserLocked);
+	}
+}
+
+#[test]
 fn a_remote_uri_bearing_error_is_withheld() {
 	let user_limit = ErrorKind::UserLimitExceeded(UserLimitExceededErrorData {
 		info_uri: "https://remote.example/pay".to_owned(),
