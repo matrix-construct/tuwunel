@@ -189,7 +189,7 @@ where
 	let map = self.clone();
 
 	tokio::task::spawn_blocking(move || {
-		const SORTED: bool = true;
+		const SORTED: bool = false;
 
 		map.engine.ctx.server.check_running()?;
 
