@@ -22,7 +22,7 @@ use ruma::{
 	uint,
 };
 use tuwunel_core::{
-	Err, Result, err, info,
+	Err, Error, Result, err, info,
 	matrix::Event,
 	utils::{
 		TryFutureExtExt,
@@ -48,7 +48,7 @@ pub(crate) async fn get_public_rooms_filtered_route(
 ) -> Result<get_public_rooms_filtered::v3::Response> {
 	check_server_banned(&services, body.server.as_deref())?;
 
-	let response = get_public_rooms_filtered_helper(
+	get_public_rooms_filtered_helper(
 		&services,
 		body.server.as_deref(),
 		body.limit,
@@ -56,13 +56,8 @@ pub(crate) async fn get_public_rooms_filtered_route(
 		&body.filter,
 		&body.room_network,
 	)
+	.map_err(|e| mask_remote_failure(&services, body.server.as_deref(), e))
 	.await
-	.map_err(|e| {
-		warn!(?body.server, %e, "Failed to query remote public rooms directory");
-		err!(Request(ConnectionFailed("Unable to query the remote public rooms directory.")))
-	})?;
-
-	Ok(response)
 }
 
 /// # `GET /_matrix/client/v3/publicRooms`
@@ -86,11 +81,8 @@ pub(crate) async fn get_public_rooms_route(
 		&Filter::default(),
 		&RoomNetwork::Matrix,
 	)
-	.await
-	.map_err(|e| {
-		warn!(?body.server, %e, "Failed to query remote public rooms directory");
-		err!(Request(ConnectionFailed("Unable to query the remote public rooms directory.")))
-	})?;
+	.map_err(|e| mask_remote_failure(&services, body.server.as_deref(), e))
+	.await?;
 
 	Ok(get_public_rooms::v3::Response {
 		chunk: response.chunk,
@@ -222,9 +214,7 @@ pub(crate) async fn get_public_rooms_filtered_helper(
 	filter: &Filter,
 	_network: &RoomNetwork,
 ) -> Result<get_public_rooms_filtered::v3::Response> {
-	if let Some(other_server) =
-		server.filter(|server_name| !services.globals.server_is_ours(server_name))
-	{
+	if let Some(other_server) = remote_server(services, server) {
 		let response = services
 			.federation
 			.execute(
@@ -505,4 +495,32 @@ fn check_server_banned(services: &Services, server: Option<&ServerName>) -> Resu
 	}
 
 	Ok(())
+}
+
+/// Masks a remote directory failure behind a generic gateway error.
+///
+/// The remote chooses its own error, so forwarding one verbatim lets a third
+/// party pick what our client sees. A query served locally contacts nobody, so
+/// its error is returned unchanged rather than relabelled as an upstream
+/// failure.
+fn mask_remote_failure(services: &Services, server: Option<&ServerName>, error: Error) -> Error {
+	let Some(server) = remote_server(services, server) else {
+		return error;
+	};
+
+	warn!(%server, %error, "Failed to query remote public rooms directory");
+
+	err!(Request(ConnectionFailed("Unable to query the remote public rooms directory.")))
+}
+
+/// The server a directory query is routed to, when that server is not us.
+///
+/// Routing the query and masking its failure both read this, so the set of
+/// requests that reach a third party cannot drift from the set whose errors are
+/// masked.
+fn remote_server<'a>(
+	services: &Services,
+	server: Option<&'a ServerName>,
+) -> Option<&'a ServerName> {
+	server.filter(|server| !services.globals.server_is_ours(server))
 }
