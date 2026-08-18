@@ -266,7 +266,8 @@ oidc_registration_access_token set`. Element X surfaces that as a failure to get
 an OAuth URL and never reaches the login page. Check the environment as well as
 the configuration file, since the same option is set by
 `TUWUNEL_OIDC_REGISTRATION_ACCESS_TOKEN` and by its `CONDUWUIT_` and `CONDUIT_`
-legacy equivalents.
+legacy equivalents. `!admin server show-config` masks the value, so the startup
+warning is what tells you the option is set.
 
 ## Account management
 

@@ -1841,6 +1841,7 @@ pub struct Config {
 	/// client, Element X included. Leave it empty unless every OAuth client on
 	/// this server is registered out of band.
 	///
+	/// display: sensitive
 	/// reloadable: yes
 	/// default:
 	#[serde(default)]
