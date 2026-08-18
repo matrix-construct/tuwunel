@@ -15,13 +15,16 @@ use ruma::{
 	serde::Raw,
 };
 use serde::{Deserialize, Serialize};
+use tracing::Level;
 use tuwunel_core::{
 	Result, implement,
 	matrix::{
 		event::Event,
 		pdu::{Count, Pdu, PduId, RawPduId},
 	},
-	utils::{BoolExt, ReadyExt, future::TryExtExt, option::OptionExt, time::now_millis},
+	utils::{
+		BoolExt, ReadyExt, future::TryExtExt, option::OptionExt, result::ErrLog, time::now_millis,
+	},
 };
 use tuwunel_database::{Deserialized, Json, Map};
 
@@ -206,7 +209,8 @@ async fn append_pdu_for_user(
 				self.services
 					.sending
 					.send_pdu_push(pdu_id, user, push_key)
-					.expect("TODO: replace with future");
+					.log_err(Level::TRACE)
+					.ok();
 			})
 			.await;
 	}
