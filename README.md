@@ -41,6 +41,7 @@ Switzerland 🇨🇭 where it is currently deployed for citizens.
 - Static binaries available as [releases](https://github.com/matrix-construct/tuwunel/releases) or [build artifacts](https://github.com/matrix-construct/tuwunel/actions?query=branch%3Amain).
 - Deb and RPM packages available as [releases](https://github.com/matrix-construct/tuwunel/releases) or [build artifacts](https://github.com/matrix-construct/tuwunel/actions?query=branch%3Amain).
 - Apt repository available for Debian and Ubuntu, see the [Debian guide](https://matrix-construct.github.io/tuwunel/deploying/debian.html) for setup.
+- [COPR repository](https://copr.fedorainfracloud.org/coprs/trapacid/tuwunel/) available for Fedora, RHEL and other rpm distros, see the [Red Hat guide](https://matrix-construct.github.io/tuwunel/deploying/redhat.html) for setup.
 - Arch package available as [tuwunel](https://aur.archlinux.org/packages/tuwunel).
 - Nix package available as [`matrix-tuwunel`](https://search.nixos.org/packages?query=matrix-tuwunel) and NixOS module available as [`services.matrix-tuwunel`](https://search.nixos.org/options?query=services.matrix-tuwunel).
 - Alpine package available as [tuwunel](https://pkgs.alpinelinux.org/package/edge/testing/x86_64/tuwunel).
