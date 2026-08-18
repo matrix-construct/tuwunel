@@ -1,3 +1,5 @@
+#[cfg(target_os = "macos")]
+use std::ffi::CString;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 use std::fs::rename;
 #[cfg(unix)]
@@ -17,8 +19,12 @@ use std::{
 };
 
 use figment::Figment;
+#[cfg(target_os = "macos")]
+use libc::{getxattr, setxattr};
 use toml::{Value, from_str, value::Table};
 
+#[cfg(target_os = "macos")]
+use super::write::path_cstring;
 use super::{
 	Overwrite, RegenerateOptions, adjacent_new_path, example_config, regenerate_config,
 	write::write_atomic_with_precommit, write_example_config,
@@ -469,6 +475,24 @@ fn writer_uses_private_mode_and_preserves_overwritten_file() {
 	write_example_config(&symlink_path, Overwrite::Allow).expect_err("symlink output refused");
 }
 
+#[cfg(target_os = "macos")]
+#[test]
+fn writer_preserves_extended_attributes_on_forced_replacement() {
+	let temp = TempDir::new("writer-xattrs");
+	let output = temp.join("config.toml");
+	let backup = temp.join("config.toml.bak");
+	let name = "tuwunel.test.note";
+	let value = b"kept".as_slice();
+
+	write(&output, "previous contents\n").expect("old output written");
+	set_xattr(&output, name, value);
+
+	write_example_config(&output, Overwrite::Allow).expect("example replaced");
+
+	assert_eq!(get_xattr(&output, name).as_deref(), Some(value));
+	assert_eq!(get_xattr(&backup, name).as_deref(), Some(value));
+}
+
 #[test]
 fn writer_does_not_clobber_a_target_created_before_install() {
 	let temp = TempDir::new("writer-new-race");
@@ -593,6 +617,37 @@ fn config_can_be_selected_solely_through_the_path_environment() {
 		String::from_utf8_lossy(&executed.stdout),
 		String::from_utf8_lossy(&executed.stderr),
 	);
+}
+
+#[cfg(target_os = "macos")]
+fn set_xattr(path: &Path, name: &str, value: &[u8]) {
+	let path = path_cstring(path).expect("xattr path encoded");
+	let name = CString::new(name).expect("xattr name encoded");
+
+	// SAFETY: Both strings are NUL-terminated and the value spans its length.
+	let result = unsafe {
+		setxattr(path.as_ptr(), name.as_ptr(), value.as_ptr().cast(), value.len(), 0, 0)
+	};
+
+	assert_eq!(result, 0, "extended attribute written");
+}
+
+#[cfg(target_os = "macos")]
+fn get_xattr(path: &Path, name: &str) -> Option<Vec<u8>> {
+	let path = path_cstring(path).expect("xattr path encoded");
+	let name = CString::new(name).expect("xattr name encoded");
+	let mut value = vec![0_u8; 256];
+
+	// SAFETY: The value buffer stays writable for the call, which bounds it by len.
+	let length = unsafe {
+		getxattr(path.as_ptr(), name.as_ptr(), value.as_mut_ptr().cast(), value.len(), 0, 0)
+	};
+
+	let length = usize::try_from(length).ok()?;
+
+	value.truncate(length);
+
+	Some(value)
 }
 
 // Matches figment's uncased prefix filter, which trims the key first.

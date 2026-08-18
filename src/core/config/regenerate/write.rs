@@ -5,6 +5,8 @@ use std::os::unix::{
 	fs::{MetadataExt as _, OpenOptionsExt as _, PermissionsExt as _},
 	io::AsRawFd as _,
 };
+#[cfg(target_os = "macos")]
+use std::ptr::null_mut;
 use std::{
 	ffi::OsString,
 	fmt::Display,
@@ -27,12 +29,16 @@ use std::{
 use libc::c_int;
 #[cfg(target_os = "linux")]
 use libc::{AT_FDCWD, RENAME_EXCHANGE, SYS_renameat2, syscall};
+#[cfg(target_os = "macos")]
+use libc::{COPYFILE_ACL, COPYFILE_XATTR, RENAME_SWAP, fcopyfile, renamex_np};
 #[cfg(unix)]
 use libc::{O_CLOEXEC, O_NOFOLLOW, O_NONBLOCK, fchown};
-#[cfg(target_os = "macos")]
-use libc::{RENAME_SWAP, renamex_np};
 
+#[cfg(target_os = "macos")]
+use crate::warn;
 use crate::{Err, Error, Result, debug_warn, err};
+
+type Origin<'a> = (&'a File, &'a Metadata);
 
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
@@ -107,7 +113,7 @@ fn write_replacement(
 	}
 
 	let (mut source, metadata) = open_target(path)?;
-	let mut output = create_synced_temp(parent, path, content, Some(&metadata))?;
+	let mut output = create_synced_temp(parent, path, content, Some((&source, &metadata)))?;
 	let (mut backup_guard, mut backup_file) =
 		copy_backup(parent, &backup, &mut source, &metadata)?;
 
@@ -131,6 +137,7 @@ fn write_replacement(
 		rollback_replacement(&mut output, &mut backup_guard, path, &backup, error)
 	})?;
 
+	preserve_backup_attributes(&source, &backup_file, &backup);
 	cleanup_after_commit(&mut output);
 	cleanup_after_commit(&mut backup_guard);
 	sync_after_commit(parent, path);
@@ -142,7 +149,7 @@ fn create_synced_temp(
 	parent: &Path,
 	target: &Path,
 	content: &[u8],
-	metadata: Option<&Metadata>,
+	origin: Option<Origin<'_>>,
 ) -> Result<TempGuard> {
 	let (path, mut file) = create_temp(parent, target)?;
 	let guard = TempGuard { path, armed: true };
@@ -150,7 +157,11 @@ fn create_synced_temp(
 	file.write_all(content)
 		.map_err(|error| fs_error(&error, "write temporary output", &guard.path))?;
 
-	set_output_metadata(&file, metadata, &guard.path)?;
+	set_output_metadata(&file, origin.map(|(_, metadata)| metadata), &guard.path)?;
+
+	if let Some((source, _)) = origin {
+		copy_security_attributes(source, &file, &guard.path)?;
+	}
 
 	file.sync_all()
 		.map_err(|error| fs_error(&error, "synchronize temporary output", &guard.path))?;
@@ -382,7 +393,7 @@ fn swap(left: &CStr, right: &CStr) -> c_int {
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
-fn path_cstring(path: &Path) -> Result<CString> {
+pub(super) fn path_cstring(path: &Path) -> Result<CString> {
 	CString::new(path.as_os_str().as_bytes())
 		.map_err(|error| err!("Invalid output path `{}`: {error}", path.display()))
 }
@@ -475,6 +486,58 @@ fn set_output_metadata(file: &File, metadata: Option<&Metadata>, path: &Path) ->
 
 	Ok(())
 }
+
+#[cfg(target_os = "macos")]
+fn copy_security_attributes(source: &File, output: &File, path: &Path) -> Result {
+	// SAFETY: Both descriptors are live for the call and the null state selects
+	// the default copy behavior.
+	let result = unsafe {
+		fcopyfile(
+			source.as_raw_fd(),
+			output.as_raw_fd(),
+			null_mut(),
+			COPYFILE_ACL | COPYFILE_XATTR,
+		)
+	};
+
+	if result < 0 {
+		let error = fs_error(
+			&IoError::last_os_error(),
+			"preserve output security attributes on temporary file",
+			path,
+		);
+
+		return Err(error);
+	}
+
+	Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn copy_security_attributes(_source: &File, _output: &File, _path: &Path) -> Result { Ok(()) }
+
+// Applied after commit so a failed replacement never installs a backup whose
+// copied entries could refuse deletion during cleanup.
+#[cfg(target_os = "macos")]
+fn preserve_backup_attributes(source: &File, backup: &File, path: &Path) {
+	copy_security_attributes(source, backup, path)
+		.and_then(|()| {
+			backup
+				.sync_all()
+				.map_err(|error| fs_error(&error, "synchronize backup attributes", path))
+		})
+		.inspect_err(|error| {
+			warn!(
+				?error,
+				path = %path.display(),
+				"Backup was installed, but its security attributes could not be preserved.",
+			);
+		})
+		.ok();
+}
+
+#[cfg(not(target_os = "macos"))]
+fn preserve_backup_attributes(_source: &File, _backup: &File, _path: &Path) {}
 
 #[cfg(unix)]
 fn sync_parent(parent: &Path) -> Result {
