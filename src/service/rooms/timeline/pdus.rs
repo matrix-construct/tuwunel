@@ -1,5 +1,3 @@
-use std::borrow::Borrow;
-
 use futures::{
 	Stream, TryFutureExt, TryStreamExt,
 	future::Either::{Left, Right},
@@ -207,10 +205,7 @@ fn each_pdu(
 	(pdu_id, mut pdu): (RawPduId, PduEvent),
 	user_id: Option<&UserId>,
 ) -> Result<PdusIterItem> {
-	if Some(pdu.sender.borrow()) != user_id {
-		pdu.remove_transaction_id().log_err().ok();
-	}
-
+	pdu.remove_transaction_id_unless_sender(user_id);
 	pdu.add_age().log_err().ok();
 
 	Ok((pdu_id.pdu_count(), pdu))

@@ -9,7 +9,6 @@ use tuwunel_core::{
 	arrayvec::ArrayVec,
 	implement, is_equal_to,
 	matrix::{Event, Pdu, PduCount, RawPduId, event::RelationTypeEqual},
-	result::LogErr,
 	utils::{
 		stream::{ReadyExt, TryIgnore, WidebandExt},
 		u64_from_u8,
@@ -157,12 +156,7 @@ pub fn get_relations<'a>(
 			.timeline
 			.get_pdu_from_id(&pdu_id)
 			.map_ok(move |mut pdu| {
-				if user_id.is_none_or(|user_id| pdu.sender() != user_id) {
-					pdu.as_mut_pdu()
-						.remove_transaction_id()
-						.log_err()
-						.ok();
-				}
+				pdu.remove_transaction_id_unless_sender(user_id);
 
 				(count, pdu)
 			})

@@ -81,13 +81,15 @@ pub async fn bundle_aggregations(&self, sender_user: &UserId, mut pdu: Pdu) -> P
 		.await
 		.flatten();
 
-	if let Some(replacement) = replacement
+	if let Some(mut replacement) = replacement
 		&& !self
 			.services
 			.state_accessor
 			.erased_for(sender_user, &replacement)
 			.await
 	{
+		replacement.remove_transaction_id_unless_sender(Some(sender_user));
+
 		pdu.set_replacement_bundle(&replacement.into_format())
 			.log_err()
 			.ok();
@@ -165,7 +167,7 @@ async fn bundle_thread_latest_edit(&self, sender_user: &UserId, pdu: &mut Pdu) {
 		return;
 	}
 
-	let Some(replacement) = self.newest_replacement(&latest).await else {
+	let Some(mut replacement) = self.newest_replacement(&latest).await else {
 		return;
 	};
 
@@ -177,6 +179,9 @@ async fn bundle_thread_latest_edit(&self, sender_user: &UserId, pdu: &mut Pdu) {
 	{
 		return;
 	}
+
+	replacement.remove_transaction_id_unless_sender(Some(sender_user));
+	latest.remove_transaction_id_unless_sender(Some(sender_user));
 
 	if latest
 		.set_replacement_bundle(&replacement.into_format())

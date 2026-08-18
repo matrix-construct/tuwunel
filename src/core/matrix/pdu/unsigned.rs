@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use ruma::{
-	MilliSecondsSinceUnixEpoch, OwnedEventId, OwnedUserId,
+	MilliSecondsSinceUnixEpoch, OwnedEventId, OwnedUserId, UserId,
 	events::{AnySyncMessageLikeEvent, room::member::MembershipState},
 	serde::Raw,
 };
@@ -9,12 +9,24 @@ use serde::{Deserialize, Serialize};
 use serde_json::value::{RawValue as RawJsonValue, Value as JsonValue, to_raw_value};
 
 use super::{Pdu, Unsigned};
-use crate::{Result, err, implement, utils::BoolExt};
+use crate::{Result, err, implement, result::LogErr, utils::BoolExt};
+
+/// Removes the transaction ID unless the event is served to its own sender.
+///
+/// The token is the sending client's own idempotency value, which it matches
+/// its echo against, so the sender keeps it and nobody else sees it. A `None`
+/// requester is nobody in particular and is treated as somebody else.
+#[implement(Pdu)]
+pub fn remove_transaction_id_unless_sender(&mut self, user_id: Option<&UserId>) {
+	if user_id.is_none_or(|user_id| self.sender != *user_id) {
+		self.remove_transaction_id().log_err().ok();
+	}
+}
 
 /// Removes the local transaction ID from unsigned event metadata.
 ///
 /// Other unsigned properties are retained and the object is re-encoded. An
-/// event without unsigned data is left unchanged.
+/// event without unsigned data, or without the key, is left unchanged.
 #[implement(Pdu)]
 pub fn remove_transaction_id(&mut self) -> Result {
 	use BTreeMap as Map;
@@ -23,7 +35,12 @@ pub fn remove_transaction_id(&mut self) -> Result {
 		return Ok(());
 	};
 
-	let mut unsigned: Map<&str, Raw<JsonValue>> = serde_json::from_str(unsigned.json().get())
+	let raw = unsigned.json().get();
+	if !raw.contains("\"transaction_id\"") {
+		return Ok(());
+	}
+
+	let mut unsigned: Map<&str, Raw<JsonValue>> = serde_json::from_str(raw)
 		.map_err(|e| err!(Database("Invalid unsigned in pdu event: {e}")))?;
 
 	unsigned.remove("transaction_id");

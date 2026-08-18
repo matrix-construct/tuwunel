@@ -331,9 +331,7 @@ impl Service {
 			.await
 			.ok()?;
 
-		if pdu.sender() != user_id {
-			pdu.as_mut_pdu().remove_transaction_id().ok();
-		}
+		pdu.remove_transaction_id_unless_sender(Some(user_id));
 
 		Some((count, pdu))
 	}
