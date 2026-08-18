@@ -247,7 +247,7 @@ async fn remote_room_summary_hierarchy_response(
 		};
 
 		trace!("{response:?}");
-		let room = response.room.clone();
+		let room = response.room;
 		let summary = &room.summary;
 		if summary.room_id != room_id {
 			debug_warn!(
