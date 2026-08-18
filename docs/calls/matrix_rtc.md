@@ -143,6 +143,15 @@ block to suppress the bridge addresses instead.
 
 ## 3. Configure .well-known
 
+Clients discover MatrixRTC through two surfaces, and Tuwunel serves
+both: the `org.matrix.msc4143.rtc_foci` key in
+`.well-known/matrix/client`, and the client API endpoint
+`GET /_matrix/client/unstable/org.matrix.msc4143/rtc/transports` that
+Element Call and Element X query. That endpoint is answered from
+`tuwunel.toml` alone, never from a `.well-known` file another server
+hosts, so `livekit_url` belongs in your Tuwunel configuration either
+way.
+
 ### 3.1. .well-known served by Tuwunel
 
 *Follow this step if your `.well-known` configuration is served by Tuwunel.
@@ -191,6 +200,14 @@ The final file should look something like this:
   ]
 }
 ```
+
+> [!NOTE]
+> Serving `.well-known` yourself covers only one of the two discovery
+> surfaces. Set `livekit_url` in your `tuwunel.toml` as well, exactly as
+> in Step 3.1, so the `rtc/transports` endpoint advertises the same
+> focus. Without it that endpoint answers with an empty list and clients
+> report that the server has no MatrixRTC transport, even though your
+> `.well-known` is correct.
 
 ## 4. Configure Firewall
 
@@ -598,6 +615,26 @@ rewrite", or "host override" setting. Alternatively, run a small local
 DNS resolver (dnsmasq, AdGuard Home, Pi-hole) on the network and point
 LAN clients at it. External clients continue to resolve the subdomain
 to the public IP via public DNS.
+
+### Clients report that the server has no MatrixRTC transport
+
+Element X and Element Call read the server's transports from
+`GET /_matrix/client/unstable/org.matrix.msc4143/rtc/transports`, which
+Tuwunel builds from `livekit_url` and
+`[[global.well_known.rtc_transports]]` in `tuwunel.toml`. With neither
+set, the endpoint answers with an empty list and those clients report
+that no transport is available, even when `.well-known/matrix/client`
+carries a correct `org.matrix.msc4143.rtc_foci` key. This is the usual
+cause when something other than Tuwunel serves your `.well-known`.
+
+Check it directly (no access token is needed as of v1.8.2):
+
+```bash
+curl -s https://matrix.yourdomain.com/_matrix/client/unstable/org.matrix.msc4143/rtc/transports
+```
+
+An empty `rtc_transports` array means `livekit_url` is unset. Add it per
+step 3.1 and restart Tuwunel.
 
 ### Docker bridge addresses advertised as candidates
 
