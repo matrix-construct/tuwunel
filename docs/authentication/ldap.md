@@ -149,10 +149,37 @@ against the directory.
 Subsequent logins reuse the existing account and only update admin status
 if `admin_filter` is configured.
 
-Deactivating a user in LDAP prevents future logins but does **not**
-automatically deactivate or delete the corresponding Matrix account. Use
+### Accounts that already existed locally
+
+A directory entry claims any local account sharing its localpart, whatever
+that account's origin. If `alice` registered with a local password before
+LDAP was enabled, and the directory also holds an entry for `alice`, her
+logins are verified by binding against the directory from then on and her
+local password is no longer consulted. An account created through SSO behaves
+the same way.
+
+This is deliberate. A directory configured here is treated as an authority on
+identity, so a successful bind for a localpart establishes that the caller is
+that user. It also means whoever administers the directory can authenticate
+as any Tuwunel user whose localpart they are able to add or control. Where
+directory administrators are not also homeserver administrators, or where
+`filter` is scoped more widely than your homeserver's own user base, narrow
+`filter` before enabling LDAP on a server that already has accounts.
+
+### Deactivation
+
+Deactivation does not propagate between the two systems in either direction,
+but it is enforced on both sides at login.
+
+Removing or disabling a user in LDAP prevents future logins and does **not**
+deactivate or delete the corresponding Matrix account. Use
 `!admin users deactivate` if you also want to remove access to existing
 sessions and devices.
+
+A Matrix account deactivated with `!admin users deactivate` is refused at
+login even when its directory entry is still present and its password still
+binds successfully. Deactivation also revokes every existing session, so a
+deactivated user cannot keep using tokens issued before it.
 
 ## Admin commands for testing
 
