@@ -5207,30 +5207,30 @@ fn default_eventid_pdu_cache_capacity() -> u32 {
 }
 
 fn default_eventid_backoff_cache_capacity() -> u32 {
-	parallelism_scaled_u32(4_000).saturating_add(256_000)
+	parallelism_scaled_u32(4_000).saturating_add(200_000)
 }
 
 fn default_shortstatekey_cache_capacity() -> u32 {
-	parallelism_scaled_u32(4_000).saturating_add(97_000)
+	parallelism_scaled_u32(4_000).saturating_add(40_000)
 }
 
 fn default_statekeyshort_cache_capacity() -> u32 {
-	parallelism_scaled_u32(4_000).saturating_add(97_000)
+	parallelism_scaled_u32(4_000).saturating_add(40_000)
 }
 
 fn default_servernameevent_data_cache_capacity() -> u32 {
-	parallelism_scaled_u32(60_000).saturating_add(470_000)
-}
-
-fn default_mediaid_lazycontent_cache_capacity() -> u32 { 128 }
-
-fn default_resolver_cache_capacity() -> u32 {
-	parallelism_scaled_u32(4_000).saturating_add(32_000)
+	parallelism_scaled_u32(50_000).saturating_add(200_000)
 }
 
 fn default_servername_status_cache_capacity() -> u32 {
-	parallelism_scaled_u32(4_000).saturating_add(64_000)
+	parallelism_scaled_u32(10_000).saturating_add(100_000)
 }
+
+fn default_resolver_cache_capacity() -> u32 {
+	parallelism_scaled_u32(10_000).saturating_add(100_000)
+}
+
+fn default_mediaid_lazycontent_cache_capacity() -> u32 { 128 }
 
 fn default_stateinfo_cache_capacity() -> u32 { parallelism_scaled_u32(100) }
 

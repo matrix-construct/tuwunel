@@ -39,7 +39,7 @@ pub static malloc_conf: &[u8] = const_str::concat_bytes!(
 	",max_background_threads:-1",
 	",lg_extent_max_active_fit:4",
 	",oversize_threshold:2097152",
-	",tcache_max:524288",
+	",tcache_max:8192",
 	",dirty_decay_ms:16000",
 	",muzzy_decay_ms:144000",
 	//MALLOC_CONF_PROF,

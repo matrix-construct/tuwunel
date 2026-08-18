@@ -117,6 +117,7 @@ pub(super) static MAPS: &[Descriptor] = &[
 		key_size_hint: Some(64),
 		val_size_hint: Some(16),
 		ttl: 60 * 60 * 24 * 3, // dead after the max fetch-backoff window (24h)
+		limit_size: 1024 * 1024 * 256,
 		..descriptor::RANDOM_SMALL_CACHE
 	},
 	Descriptor {
@@ -195,6 +196,7 @@ pub(super) static MAPS: &[Descriptor] = &[
 	Descriptor {
 		name: "mediaid_lazy",
 		ttl: 60 * 60 * 24 * 30, // must outlive url_preview so live previews resolve
+		limit_size: 1024 * 1024 * 512,
 		..descriptor::RANDOM_SMALL_CACHE
 	},
 	Descriptor {
@@ -302,7 +304,7 @@ pub(super) static MAPS: &[Descriptor] = &[
 	},
 	Descriptor {
 		name: "relatesto_typed",
-		key_size_hint: Some(33),
+		key_size_hint: Some(40),
 		val_size_hint: Some(8),
 		..descriptor::RANDOM_SMALL
 	},
@@ -434,6 +436,7 @@ pub(super) static MAPS: &[Descriptor] = &[
 		key_size_hint: Some(48),
 		val_size_hint: Some(128),
 		ttl: 60 * 60 * 24 * 7, // dead after CachedDest::default_expire (<=36h)
+		limit_size: 1024 * 1024 * 96,
 		..descriptor::RANDOM_SMALL_CACHE
 	},
 	Descriptor {
@@ -446,6 +449,7 @@ pub(super) static MAPS: &[Descriptor] = &[
 		key_size_hint: Some(48),
 		val_size_hint: Some(128),
 		ttl: 60 * 60 * 24 * 7, // dead after CachedOverride::default_expire (<=12h)
+		limit_size: 1024 * 1024 * 96,
 		..descriptor::RANDOM_SMALL_CACHE
 	},
 	Descriptor {
@@ -454,6 +458,7 @@ pub(super) static MAPS: &[Descriptor] = &[
 		key_size_hint: Some(48),
 		val_size_hint: Some(16),
 		ttl: 60 * 60 * 24 * 3, // dead after peer MAX_BACKOFF (24h)
+		limit_size: 1024 * 1024 * 128,
 		..descriptor::RANDOM_SMALL_CACHE
 	},
 	Descriptor {
@@ -494,7 +499,7 @@ pub(super) static MAPS: &[Descriptor] = &[
 		name: "shortstatekey_statekey",
 		cache_disp: CacheDisp::Unique,
 		key_size_hint: Some(8),
-		val_size_hint: Some(1016),
+		val_size_hint: Some(1024),
 		..descriptor::RANDOM_SMALL
 	},
 	Descriptor {
@@ -510,7 +515,7 @@ pub(super) static MAPS: &[Descriptor] = &[
 	Descriptor {
 		name: "statekey_shortstatekey",
 		cache_disp: CacheDisp::Unique,
-		key_size_hint: Some(1016),
+		key_size_hint: Some(1024),
 		val_size_hint: Some(8),
 		..descriptor::RANDOM
 	},
@@ -536,7 +541,7 @@ pub(super) static MAPS: &[Descriptor] = &[
 	},
 	Descriptor {
 		name: "timeredacted_eventid",
-		key_size_hint: Some(57),
+		key_size_hint: Some(64),
 		..descriptor::SEQUENTIAL_SMALL
 	},
 	Descriptor {
@@ -565,6 +570,7 @@ pub(super) static MAPS: &[Descriptor] = &[
 	Descriptor {
 		name: "url_preview",
 		ttl: 60 * 60 * 24 * 7, // dead after CachedPreview::EXPIRE (24h)
+		limit_size: 1024 * 1024 * 128,
 		..descriptor::RANDOM_SMALL_CACHE
 	},
 	Descriptor {
