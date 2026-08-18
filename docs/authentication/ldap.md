@@ -102,6 +102,13 @@ The localpart match is case-insensitive — Tuwunel sends a lowercased version
 of the localpart through `{username}` substitution and accepts an entry if
 either the original or lowercased form appears in `uid_attribute`.
 
+Certificate verification for `ldaps://` follows the server-wide
+`allow_invalid_tls_certificates` setting rather than any LDAP-specific option.
+That setting is meant for development and disables verification on every
+outbound TLS connection, the directory connection included, so an unvalidated
+certificate is accepted whenever it is on. Leave it off in production: an LDAP
+simple bind carries the user's password over that connection.
+
 ## Admin synchronization
 
 Setting `admin_filter` to a non-empty value turns the LDAP directory into the
