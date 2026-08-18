@@ -14,7 +14,7 @@ use ruma::{
 	push::{Action, HighlightTweakValue, HttpPusherData, PushFormat, Ruleset, Tweak},
 };
 use serde_json::Value;
-use tuwunel_core::{Result, err, implement, matrix::Event, utils::BoolExt, warn};
+use tuwunel_core::{Result, err, error, implement, matrix::Event, trace, utils::BoolExt};
 use url::Url;
 
 use super::Evaluate;
@@ -52,6 +52,20 @@ where
 		.await;
 
 	let notify = actions.iter().any(Action::should_notify);
+	let tweak_count = actions
+		.iter()
+		.filter(|action| matches!(action, Action::SetTweak(_)))
+		.count();
+
+	trace!(
+		%user_id,
+		event_id = %event.event_id(),
+		actions = %actions.len(),
+		notify,
+		tweaks = tweak_count,
+		"Push notice decision",
+	);
+
 	if notify || self.services.config.push_everything {
 		let tweaks: Vec<Tweak> = actions
 			.iter()
@@ -234,7 +248,13 @@ async fn send_http_notice(
 	let pushkey = &pusher.ids.pushkey;
 
 	if response.rejected.contains(pushkey) {
-		warn!(url = %http.url, %pushkey, "Push gateway rejected the pushkey; removing pusher");
+		error!(
+			url = %http.url,
+			%pushkey,
+			"Push gateway rejected the pushkey; removing the pusher. Push notifications \
+			 for this device stop until the client registers a new pusher.",
+		);
+
 		self.delete_pusher(user_id, pushkey).await;
 
 		return Ok(());

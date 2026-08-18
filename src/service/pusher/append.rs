@@ -22,6 +22,7 @@ use tuwunel_core::{
 		event::Event,
 		pdu::{Count, Pdu, PduId, RawPduId},
 	},
+	trace,
 	utils::{
 		BoolExt, ReadyExt, future::TryExtExt, option::OptionExt, result::ErrLog, time::now_millis,
 	},
@@ -147,6 +148,7 @@ async fn append_pdu_for_user(
 		.account_data
 		.get_global(user, GlobalAccountDataEventType::PushRules)
 		.await
+		.log_err(Level::TRACE)
 		.map_or_else(|_| Ruleset::server_default(user), |ev: PushRulesEvent| ev.content.global);
 
 	let actions = self
@@ -165,6 +167,15 @@ async fn append_pdu_for_user(
 	let highlight = actions.iter().any(|action| {
 		matches!(action, Action::SetTweak(Tweak::Highlight(HighlightTweakValue::Yes)))
 	});
+
+	trace!(
+		%user,
+		event_id = %pdu.event_id(),
+		actions = %actions.len(),
+		notify,
+		highlight,
+		"Push rules evaluated",
+	);
 
 	// Mutually-exclusive partition: each notify (and each highlight)
 	// lands in either the room-level or thread bucket, never both.
