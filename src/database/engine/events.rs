@@ -20,8 +20,13 @@ impl Events {
 
 impl EventListener for Events {
 	#[tracing::instrument(name = "error", level = "error", skip_all)]
-	fn on_background_error(&self, reason: DBBackgroundErrorReason, _status: MutableStatus) {
-		error!(error = ?reason, "Critical RocksDB Error");
+	fn on_background_error(&self, reason: DBBackgroundErrorReason, status: MutableStatus) {
+		error!(
+			?reason,
+			severity = ?status.severity(),
+			error = ?status.result().as_ref().err(),
+			"Critical RocksDB Error",
+		);
 	}
 
 	#[tracing::instrument(name = "stall", level = "warn", skip_all)]
