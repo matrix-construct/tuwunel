@@ -121,17 +121,22 @@ pub(crate) async fn get_client_hierarchy(
 		| false => Identifier::UserId(sender_user),
 	};
 
-	// Fetch the root room up front so we can return precise errors for
-	// inaccessibility rather than silently dropping it.
-	let root_via: Via = match bypass_visibility {
-		| true => Via::new(),
-		| false => room_id
-			.server_name()
-			.map(ToOwned::to_owned)
-			.into_iter()
-			.collect(),
+	// A v12 room id carries no server name, so fall back to any via recorded from
+	// an invite rather than declining to federate at all.
+	let root_via: Via = match room_id.server_name() {
+		| _ if bypass_visibility => Via::new(),
+		| Some(server) => [server.to_owned()].into(),
+		| None =>
+			services
+				.state_cache
+				.servers_invite_via(room_id)
+				.map(ToOwned::to_owned)
+				.collect()
+				.await,
 	};
 
+	// Fetch the root room up front so we can return precise errors for
+	// inaccessibility rather than silently dropping it.
 	let root_summary = match services
 		.spaces
 		.get_summary_and_children(room_id, &sender, &root_via)
