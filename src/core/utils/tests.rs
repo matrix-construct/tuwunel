@@ -1,9 +1,21 @@
-use std::task::{Context, Waker};
+use std::{
+	panic::{AssertUnwindSafe, catch_unwind},
+	sync::{
+		Arc,
+		atomic::{AtomicBool, Ordering},
+	},
+	task::{Context, Waker},
+};
 
 use crate::{
-	Error,
-	utils::{self, MutexMap, math::usize_from_f64, url::hostname_matches_domain},
+	Error, Result,
+	utils::{
+		self, MutexMap, math::usize_from_f64, two_phase_counter::Counter,
+		url::hostname_matches_domain,
+	},
 };
+
+type CounterCallback = Box<dyn Fn(u64) -> Result + Send + Sync>;
 
 #[test]
 fn increment_none() {
@@ -374,6 +386,39 @@ fn page_size() {
 	println!("{val:?}");
 
 	assert!(val != 0, "page size was zero");
+}
+
+#[test]
+fn two_phase_counter_recovers_from_panicking_commit() {
+	let refuse = Arc::new(AtomicBool::new(false));
+	let refuse_in_commit = refuse.clone();
+	let commit: CounterCallback = Box::new(move |count| {
+		assert!(
+			!refuse_in_commit.load(Ordering::Relaxed),
+			"commit refused sequence number {count}"
+		);
+
+		Ok(())
+	});
+
+	let release: CounterCallback = Box::new(|_| Ok(()));
+	let counter = Counter::new(0, commit, release);
+	let first = counter.next().expect("first sequence number");
+
+	assert_eq!(*first, 1, "the first sequence number dispatched is one");
+	drop(first);
+
+	refuse.store(true, Ordering::Relaxed);
+	catch_unwind(AssertUnwindSafe(|| drop(counter.next())))
+		.expect_err("a panicking commit callback unwinds out of the counter");
+
+	refuse.store(false, Ordering::Relaxed);
+	let second = counter
+		.next()
+		.expect("the counter outlives a poisoned lock");
+
+	assert_eq!(*second, 2, "the failed dispatch consumed no sequence number");
+	assert_eq!(counter.current(), 1, "the retirement value trails the pending permit");
 }
 
 #[test]
