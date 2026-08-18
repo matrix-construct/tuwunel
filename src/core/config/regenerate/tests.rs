@@ -21,6 +21,8 @@ use std::{
 use figment::Figment;
 #[cfg(target_os = "macos")]
 use libc::{getxattr, setxattr};
+#[cfg(target_os = "macos")]
+use smallvec::SmallVec;
 use toml::{Value, from_str, value::Table};
 
 #[cfg(target_os = "macos")]
@@ -30,6 +32,9 @@ use super::{
 	write::write_atomic_with_precommit, write_example_config,
 };
 use crate::config::{ENV_PREFIXES, Sources};
+
+#[cfg(target_os = "macos")]
+type XattrValue = SmallVec<[u8; 32]>;
 
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
@@ -633,10 +638,10 @@ fn set_xattr(path: &Path, name: &str, value: &[u8]) {
 }
 
 #[cfg(target_os = "macos")]
-fn get_xattr(path: &Path, name: &str) -> Option<Vec<u8>> {
+fn get_xattr(path: &Path, name: &str) -> Option<XattrValue> {
 	let path = path_cstring(path).expect("xattr path encoded");
 	let name = CString::new(name).expect("xattr name encoded");
-	let mut value = vec![0_u8; 256];
+	let mut value = [0_u8; 256];
 
 	// SAFETY: The value buffer stays writable for the call, which bounds it by len.
 	let length = unsafe {
@@ -645,9 +650,7 @@ fn get_xattr(path: &Path, name: &str) -> Option<Vec<u8>> {
 
 	let length = usize::try_from(length).ok()?;
 
-	value.truncate(length);
-
-	Some(value)
+	value.get(..length).map(XattrValue::from_slice)
 }
 
 // Matches figment's uncased prefix filter, which trims the key first.

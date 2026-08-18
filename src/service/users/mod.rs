@@ -232,18 +232,25 @@ impl Service {
 			.is_ok()
 	}
 
-	/// MSC3939: account is locked (401 + soft_logout, sessions retained).
-	pub async fn is_locked(&self, user_id: &UserId) -> bool {
-		self.db.userid_locked.get(user_id).await.is_ok()
+	/// MSC3939: reject a request from a locked account.
+	///
+	/// The rejection maps to 401 `M_USER_LOCKED` with `soft_logout: true`, so
+	/// the client retains its session and polls for the unlock. The login
+	/// route and the request middleware share this gate.
+	pub async fn locked_check(&self, user_id: &UserId) -> Result {
+		self.is_locked(user_id)
+			.await
+			.is_false()
+			.ok_or_else(|| err!(Request(UserLocked("This account has been locked."))))
 	}
 
-	/// MSC3939: reject a request from a locked account.
-	pub async fn locked_check(&self, user_id: &UserId) -> Result {
-		if self.is_locked(user_id).await {
-			return Err!(Request(UserLocked("This account has been locked.")));
-		}
-
-		Ok(())
+	/// MSC3939: account is locked (401 + soft_logout, sessions retained).
+	///
+	/// The row's presence is the entire state, and locking never invalidates
+	/// access tokens, so clearing the row restores every session intact.
+	/// Both `locked_check` and the admin lock surfaces read it.
+	pub async fn is_locked(&self, user_id: &UserId) -> bool {
+		self.db.userid_locked.get(user_id).await.is_ok()
 	}
 
 	/// MSC4025: the user's events serve as pruned copies to recipients not

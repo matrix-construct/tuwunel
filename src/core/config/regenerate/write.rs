@@ -25,8 +25,6 @@ use std::{
 	os::unix::ffi::OsStrExt as _,
 };
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
-use libc::c_int;
 #[cfg(target_os = "linux")]
 use libc::{AT_FDCWD, RENAME_EXCHANGE, SYS_renameat2, syscall};
 #[cfg(target_os = "macos")]
@@ -347,13 +345,7 @@ fn exchange(left: &Path, right: &Path) -> Result {
 	let left_name = path_cstring(left)?;
 	let right_name = path_cstring(right)?;
 
-	if swap(&left_name, &right_name) == -1 {
-		let error = IoError::last_os_error();
-
-		return Err(fs_pair_error(&error, "exchange", left, right));
-	}
-
-	Ok(())
+	swap(&left_name, &right_name).map_err(|error| fs_pair_error(&error, "exchange", left, right))
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
@@ -368,7 +360,7 @@ fn exchange(left: &Path, right: &Path) -> Result {
 // The raw syscall stands in for the renameat2 wrapper musl never provides,
 // though the libc crate declares it for every Linux target.
 #[cfg(target_os = "linux")]
-fn swap(left: &CStr, right: &CStr) -> c_int {
+fn swap(left: &CStr, right: &CStr) -> IoResult<()> {
 	// SAFETY: Both paths stay borrowed for the call and are NUL-terminated. The
 	// kernel copies them and reports every path condition through errno.
 	let result = unsafe {
@@ -382,14 +374,20 @@ fn swap(left: &CStr, right: &CStr) -> c_int {
 		)
 	};
 
-	c_int::try_from(result).unwrap_or(-1)
+	(result == 0)
+		.then_some(())
+		.ok_or_else(IoError::last_os_error)
 }
 
 #[cfg(target_os = "macos")]
-fn swap(left: &CStr, right: &CStr) -> c_int {
+fn swap(left: &CStr, right: &CStr) -> IoResult<()> {
 	// SAFETY: Both paths stay borrowed for the call and are NUL-terminated. The
 	// kernel copies them and reports every path condition through errno.
-	unsafe { renamex_np(left.as_ptr(), right.as_ptr(), RENAME_SWAP) }
+	let result = unsafe { renamex_np(left.as_ptr(), right.as_ptr(), RENAME_SWAP) };
+
+	(result == 0)
+		.then_some(())
+		.ok_or_else(IoError::last_os_error)
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -487,35 +485,6 @@ fn set_output_metadata(file: &File, metadata: Option<&Metadata>, path: &Path) ->
 	Ok(())
 }
 
-#[cfg(target_os = "macos")]
-fn copy_security_attributes(source: &File, output: &File, path: &Path) -> Result {
-	// SAFETY: Both descriptors are live for the call and the null state selects
-	// the default copy behavior.
-	let result = unsafe {
-		fcopyfile(
-			source.as_raw_fd(),
-			output.as_raw_fd(),
-			null_mut(),
-			COPYFILE_ACL | COPYFILE_XATTR,
-		)
-	};
-
-	if result < 0 {
-		let error = fs_error(
-			&IoError::last_os_error(),
-			"preserve output security attributes on temporary file",
-			path,
-		);
-
-		return Err(error);
-	}
-
-	Ok(())
-}
-
-#[cfg(not(target_os = "macos"))]
-fn copy_security_attributes(_source: &File, _output: &File, _path: &Path) -> Result { Ok(()) }
-
 // Applied after commit so a failed replacement never installs a backup whose
 // copied entries could refuse deletion during cleanup.
 #[cfg(target_os = "macos")]
@@ -538,6 +507,28 @@ fn preserve_backup_attributes(source: &File, backup: &File, path: &Path) {
 
 #[cfg(not(target_os = "macos"))]
 fn preserve_backup_attributes(_source: &File, _backup: &File, _path: &Path) {}
+
+#[cfg(target_os = "macos")]
+fn copy_security_attributes(source: &File, output: &File, path: &Path) -> Result {
+	// SAFETY: Both descriptors are live for the call and the null state selects
+	// the default copy behavior.
+	let result = unsafe {
+		fcopyfile(
+			source.as_raw_fd(),
+			output.as_raw_fd(),
+			null_mut(),
+			COPYFILE_ACL | COPYFILE_XATTR,
+		)
+	};
+
+	(result == 0)
+		.then_some(())
+		.ok_or_else(IoError::last_os_error)
+		.map_err(|error| fs_error(&error, "preserve security attributes", path))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn copy_security_attributes(_source: &File, _output: &File, _path: &Path) -> Result { Ok(()) }
 
 #[cfg(unix)]
 fn sync_parent(parent: &Path) -> Result {

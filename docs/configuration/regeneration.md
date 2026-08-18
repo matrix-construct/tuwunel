@@ -75,7 +75,7 @@ Tuwunel applies the following safeguards:
   its previous contents to an adjacent `.bak` file. Replacement is refused if
   that backup already exists.
 - On macOS, forced replacement also carries the destination's ACLs and extended
-  attributes onto the replacement and its backup.
+  attributes onto the replacement, and onto its backup on a best-effort basis.
 - Nonregular destinations, including symbolic links, are refused.
 - Forced replacement is supported on Linux and macOS. Other platforms can write
   a new destination and replace it manually after review.
