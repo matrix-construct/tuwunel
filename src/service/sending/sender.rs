@@ -46,12 +46,14 @@ use ruma::{
 };
 use serde::Deserialize;
 use tuwunel_core::{
-	Error, Event, Result, debug, debug_warn, err, error, extract_variant,
+	Error, Event, Result, debug, debug_warn, err, error,
+	error::error_chain,
+	extract_variant, implement,
 	result::LogErr,
 	smallvec::SmallVec,
 	trace,
 	utils::{
-		BoolExt, ReadyExt, calculate_hash, continue_exponential_backoff_secs,
+		BoolExt, ReadyExt, calculate_hash, exponential_backoff_remaining_secs,
 		future::TryExtExt,
 		rand::secs as rand_secs,
 		stream::{BroadbandExt, IterStream, WidebandExt},
@@ -141,6 +143,7 @@ struct ToDeviceRecipient {
 const SELECT_PRESENCE_LIMIT: usize = 256;
 const SELECT_RECEIPT_LIMIT: usize = 256;
 const DEQUEUE_LIMIT: usize = 48;
+const PUSH_FAILURE_STREAK: u32 = 4;
 
 pub const PDU_LIMIT: usize = 50;
 pub const EDU_LIMIT: usize = 100;
@@ -237,6 +240,20 @@ impl Service {
 							arm_wake(wakes, server, earliest_retry);
 						}
 					},
+					| dest @ Destination::Push(..) => {
+						let Some(status @ TransactionStatus::Failed(tries, _)) =
+							statuses.get(&dest)
+						else {
+							return;
+						};
+
+						let tries = *tries;
+						let retry_in = self
+							.push_backoff_remaining(Some(status))
+							.unwrap_or_default();
+
+						Self::record_push_failure(&dest, &e, tries, retry_in);
+					},
 					| dest if matches!(retry_action, RetryAction::Force) =>
 						self.handle_force_retry(dest, futures, statuses)
 							.await,
@@ -245,7 +262,50 @@ impl Service {
 			},
 		}
 	}
+}
 
+#[implement(Service)]
+fn record_push_failure(dest: &Destination, error: &Error, tries: u32, retry_in: Duration) {
+	let Destination::Push(user_id, pushkey) = dest else {
+		return;
+	};
+
+	match tries {
+		| PUSH_FAILURE_STREAK => error!(
+			%user_id,
+			%pushkey,
+			streak = tries,
+			retry_in_seconds = retry_in.as_secs(),
+			chain = %error_chain(error),
+			"Push notifications for this pusher are not being delivered",
+		),
+		| _ => warn!(
+			%user_id,
+			%pushkey,
+			streak = tries,
+			retry_in_seconds = retry_in.as_secs(),
+			chain = %error_chain(error),
+			"Push transaction failed",
+		),
+	}
+}
+
+#[implement(Service)]
+#[inline]
+fn push_backoff_remaining(&self, status: Option<&TransactionStatus>) -> Option<Duration> {
+	let Some(TransactionStatus::Failed(tries, time)) = status else {
+		return None;
+	};
+
+	exponential_backoff_remaining_secs(
+		self.server.config.sender_timeout,
+		self.server.config.sender_retry_backoff_limit,
+		time.elapsed(),
+		*tries,
+	)
+}
+
+impl Service {
 	async fn handle_force_retry<'a>(
 		&'a self,
 		dest: Destination,
@@ -637,7 +697,17 @@ impl Service {
 					// Push backoff: hold off until the exponential window elapses.
 					let min = self.server.config.sender_timeout;
 					let max = self.server.config.sender_retry_backoff_limit;
-					if continue_exponential_backoff_secs(min, max, time.elapsed(), *tries) {
+					let remaining =
+						exponential_backoff_remaining_secs(min, max, time.elapsed(), *tries);
+
+					trace!(
+						?dest,
+						tries = *tries,
+						?remaining,
+						"Push destination remains in backoff",
+					);
+
+					if remaining.is_some() {
 						allow = false;
 					} else {
 						retry = true;
