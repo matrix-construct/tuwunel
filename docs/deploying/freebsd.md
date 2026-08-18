@@ -64,10 +64,10 @@ none for `__FreeBSD__`, while its FreeBSD branch calls `elf_aux_info(AT_HWCAP,
 ...)`. `elf_aux_info` is declared in `<sys/auxv.h>` and `AT_HWCAP` in
 `<sys/elf_common.h>`, and neither header was reached on this platform.
 
-The include block is present as of `rust-rocksdb` `c6e73b5`, which is what the
-workspace pins. Building an older revision needs the headers supplied by hand
-instead, and `<sys/elf_common.h>` is not self contained, so `<sys/types.h>` has
-to precede it:
+The include block landed in `rust-rocksdb` `c6e73b5`, so every revision from
+there on carries it, the one the workspace pins included. Building an older
+revision needs the headers supplied by hand instead, and `<sys/elf_common.h>` is
+not self contained, so `<sys/types.h>` has to precede it:
 
 ```sh
 export CXXFLAGS="-include sys/types.h -include sys/elf_common.h -include sys/auxv.h"
