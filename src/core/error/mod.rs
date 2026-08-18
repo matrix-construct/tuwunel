@@ -239,7 +239,7 @@ pub enum Error {
 	///
 	/// The stored text reports the poisoning without retaining the guard.
 	/// Poison conversion supplies the originating error text.
-	#[error("Mutex poisoned: {0}")]
+	#[error("{0}")]
 	Poison(Cow<'static, str>),
 
 	/// Reports an invalid regular expression.
