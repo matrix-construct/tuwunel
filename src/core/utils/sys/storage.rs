@@ -1,15 +1,14 @@
-//! Block-device and queue-discovery utilities.
+//! Block-device, filesystem, and queue-discovery utilities.
 //!
 //! The helpers inspect filesystem metadata and system block-device information.
-//! Discovery covers backing device names, software RAID, and multi-queue
-//! properties.
+//! Discovery covers backing device names, software RAID, multi-queue
+//! properties, and the filesystem hosting a path.
 //!
-//! Discovery reads sysfs under `/sys/dev/block/` and stats the device through
-//! `MetadataExt`, neither of which exists outside the unix family. On
-//! non-unix targets these functions report no raid or return an unsupported
-//! error, so callers need no condition of their own.
+//! Discovery reads sysfs under `/sys/dev/block/`, stats the device through
+//! `MetadataExt`, and calls `statfs(2)`, which not every target provides.
+//! Where an interface is missing these functions report no raid or return an
+//! unsupported error, so callers need no condition of their own.
 
-use std::path::Path;
 #[cfg(unix)]
 use std::{
 	ffi::OsStr,
@@ -17,6 +16,7 @@ use std::{
 	fs::{FileType, read_to_string},
 	path::PathBuf,
 };
+use std::{fmt, path::Path};
 
 #[cfg(unix)]
 use itertools::Itertools;
@@ -64,6 +64,28 @@ pub struct Queue {
 
 	/// CPU affinities for the queue.
 	pub cpu_list: Vec<usize>,
+}
+
+/// Filesystem hosting a path, among those needing special handling.
+///
+/// Copy-on-Write filesystems interact badly with RocksDB's `fallocate(2)`
+/// preallocation. Anything else is reported as absent rather than named.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Filesystem {
+	/// Preallocation survives truncation, so a short log pins a whole extent.
+	Btrfs,
+
+	/// Preallocation is unimplemented and `fallocate(2)` gives `EOPNOTSUPP`.
+	Zfs,
+}
+
+impl fmt::Display for Filesystem {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.write_str(match self {
+			| Self::Btrfs => "btrfs",
+			| Self::Zfs => "ZFS",
+		})
+	}
 }
 
 /// Get properties of a MultiDevice (md) storage system
@@ -212,6 +234,66 @@ pub fn name_from_path(_path: &Path) -> Result<String> {
 	use std::io::{Error, ErrorKind::Unsupported};
 
 	Err(Error::new(Unsupported, "Block device discovery requires sysfs.").into())
+}
+
+/// Get the filesystem on which Path is mounted, when it needs special
+/// handling.
+///
+/// Linux reports a superblock magic rather than a name, and neither libc nor
+/// nix carries one for out-of-tree OpenZFS. Any other filesystem reports
+/// `None`.
+#[cfg(any(target_os = "linux", target_os = "android"))]
+pub fn filesystem_from_path(path: &Path) -> Result<Option<Filesystem>> {
+	use nix::sys::statfs::{BTRFS_SUPER_MAGIC, FsType, statfs};
+
+	// <https://github.com/openzfs/zfs/blob/zfs-2.4.3/include/sys/fs/zfs.h>
+	const ZFS_SUPER_MAGIC: FsType = FsType(0x2FC1_2FC1);
+
+	Ok(match statfs(path)?.filesystem_type() {
+		| BTRFS_SUPER_MAGIC => Some(Filesystem::Btrfs),
+		| ZFS_SUPER_MAGIC => Some(Filesystem::Zfs),
+		| _ => None,
+	})
+}
+
+/// Get the filesystem on which Path is mounted, when it needs special
+/// handling.
+///
+/// The BSDs and macOS report a type name rather than a superblock magic. Any
+/// other filesystem reports `None`.
+#[cfg(any(
+	target_os = "freebsd",
+	target_os = "dragonfly",
+	target_os = "openbsd",
+	target_vendor = "apple"
+))]
+pub fn filesystem_from_path(path: &Path) -> Result<Option<Filesystem>> {
+	use nix::sys::statfs::statfs;
+
+	Ok(match statfs(path)?.filesystem_type_name() {
+		| "btrfs" => Some(Filesystem::Btrfs),
+		| "zfs" => Some(Filesystem::Zfs),
+		| _ => None,
+	})
+}
+
+/// Get the filesystem on which Path is mounted, when it needs special
+/// handling.
+///
+/// Naming the filesystem requires `statfs(2)`, so this always returns an
+/// unsupported error.
+#[cfg(not(any(
+	target_os = "linux",
+	target_os = "android",
+	target_os = "freebsd",
+	target_os = "dragonfly",
+	target_os = "openbsd",
+	target_vendor = "apple"
+)))]
+pub fn filesystem_from_path(_path: &Path) -> Result<Option<Filesystem>> {
+	use std::io::{Error, ErrorKind::Unsupported};
+
+	Err(Error::new(Unsupported, "Filesystem discovery requires statfs.").into())
 }
 
 /// Get the (major, minor) of the block device on which Path is mounted.

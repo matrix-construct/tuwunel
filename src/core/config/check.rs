@@ -17,7 +17,14 @@ use regex::RegexSet;
 use url::Url;
 
 use super::{DEPRECATED_KEYS, IdentityProvider, IpSource, KNOWN_KEYS};
-use crate::{Config, Err, Result, debug, debug_info, err, error, utils::is_secret_set, warn};
+use crate::{
+	Config, Err, Result, debug, debug_info, err, error,
+	utils::{
+		is_secret_set,
+		sys::storage::{Filesystem, filesystem_from_path},
+	},
+	warn,
+};
 
 /// Performs check() with additional checks specific to reloading old config
 /// with new config.
@@ -215,6 +222,17 @@ fn check_storage(config: &Config) -> Result {
 		));
 	}
 
+	if config.rocksdb_allow_fallocate
+		&& let Some(filesystem) = database_filesystem(config)
+	{
+		warn!(
+			%filesystem,
+			"database_path is on a Copy-on-Write filesystem, where preallocating write-ahead \
+			 logs cannot reserve write space and can pin far more disk than the logs contain. \
+			 Set rocksdb_allow_fallocate = false."
+		);
+	}
+
 	// yeah, unless the user built a debug build hopefully for local testing only
 	#[cfg(not(debug_assertions))]
 	if config.server_name == "your.server.name" {
@@ -225,6 +243,19 @@ fn check_storage(config: &Config) -> Result {
 	}
 
 	Ok(())
+}
+
+/// Identify the filesystem that will host the database.
+///
+/// A first boot has no `database_path` yet, since rocksdb creates it well
+/// after this check. The nearest existing ancestor stands in for it there.
+fn database_filesystem(config: &Config) -> Option<Filesystem> {
+	config
+		.database_path
+		.ancestors()
+		.map(filesystem_from_path)
+		.find_map(Result::ok)
+		.flatten()
 }
 
 fn check_registration(config: &Config) -> Result {

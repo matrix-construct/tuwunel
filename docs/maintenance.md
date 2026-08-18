@@ -69,7 +69,8 @@ performance. See <https://btrfs.readthedocs.io/en/latest/Compression.html#compat
 btrfs is Copy-on-Write, which interacts badly with the way RocksDB allocates
 its write-ahead logs. Set `rocksdb_allow_fallocate = false` in `tuwunel.toml`.
 Preallocation cannot reserve in-place write space on a CoW filesystem anyway,
-so there is nothing to lose by turning it off there.
+so there is nothing to lose by turning it off there. Tuwunel warns at startup
+when `database_path` is on btrfs and the option is still enabled.
 
 RocksDB preallocates each WAL with `fallocate(2)`, writes to it, then truncates
 it to the written length on close. btrfs does not split the preallocated extent
@@ -103,7 +104,8 @@ In `tuwunel.toml`:
   RocksDB cannot guarantee.
 - `rocksdb_allow_fallocate = false`. OpenZFS does not implement
   `fallocate(2)` preallocation; only `FALLOC_FL_PUNCH_HOLE` and
-  `FALLOC_FL_ZERO_RANGE` are supported.
+  `FALLOC_FL_ZERO_RANGE` are supported. Tuwunel warns at startup while this
+  is left enabled on ZFS.
 - Leave `rocksdb_optimize_for_spinning_disks = false` on NVMe or SSD pools,
   even when running on ZFS.
 
