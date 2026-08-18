@@ -30,14 +30,39 @@ use tuwunel_core::{
 	},
 	utils::stream::ReadyExt,
 };
-use tuwunel_service::{Services, presence::Ping, sending::Destination};
+use tuwunel_service::{
+	Services,
+	presence::Ping,
+	sending::Destination,
+};
 
-type StubPusher = (Pusher, PusherAction, UnboundedReceiver<(String, Vec<u8>)>, AbortOnDrop);
+type CapturedRequest = (String, Vec<u8>);
+type CaptureRx = UnboundedReceiver<CapturedRequest>;
+type CaptureTx = UnboundedSender<CapturedRequest>;
+type StubPusher = (Pusher, PusherAction, CaptureRx, AbortOnDrop);
+
+struct StubPusherConfig<'a> {
+	path: &'a str,
+	event_id_only: bool,
+	disable_badge_count: bool,
+	response_body: &'a str,
+}
 
 const APP_ID: &str = "app.tuwunel.test";
 const EVENT_ID: &str = "$push:remote.example";
 const SENDER: &str = "@alice:remote.example";
 const NOTIFY_PATH: &str = "/_matrix/push/v1/notify";
+
+impl<'a> StubPusherConfig<'a> {
+	fn new(response_body: &'a str) -> Self {
+		Self {
+			path: NOTIFY_PATH,
+			event_id_only: false,
+			disable_badge_count: false,
+			response_body,
+		}
+	}
+}
 
 /// Inputs shared by the delivery cases; the event is driven straight through
 /// the pusher service rather than through a real room and timeline.
@@ -114,7 +139,7 @@ impl Drop for AbortOnDrop {
 
 struct BadgeRecovery {
 	destination: Destination,
-	rx: UnboundedReceiver<(String, Vec<u8>)>,
+	rx: CaptureRx,
 	_stub: AbortOnDrop,
 }
 
@@ -488,8 +513,11 @@ async fn account_wide_count_delivery(fixture: &Fixture<'_>, room_id: &RoomId) ->
 
 async fn badge_count_opt_out(fixture: &Fixture<'_>) -> Result {
 	let pushkey = "pk-badge-disabled";
-	let (pusher, _action, mut rx, _stub) =
-		stub_pusher(fixture, pushkey, false, true, r#"{"rejected":[]}"#).await?;
+	let config = StubPusherConfig {
+		disable_badge_count: true,
+		..StubPusherConfig::new(r#"{"rejected":[]}"#)
+	};
+	let (pusher, _action, mut rx, _stub) = stub_pusher(fixture, pushkey, config).await?;
 
 	fixture
 		.services
@@ -537,8 +565,8 @@ async fn badge_delivery_memo(fixture: &Fixture<'_>, room_id: &RoomId) -> Result 
 	unread.put((fixture.user, room_id, &root), 0_u64);
 
 	let pushkey = "pk-badge-memo";
-	let (pusher, action, mut rx, _stub) =
-		stub_pusher(fixture, pushkey, false, false, r#"{"rejected":[]}"#).await?;
+	let config = StubPusherConfig::new(r#"{"rejected":[]}"#);
+	let (pusher, action, mut rx, _stub) = stub_pusher(fixture, pushkey, config).await?;
 
 	let refresh = || {
 		fixture
@@ -615,8 +643,8 @@ async fn badge_delivery_memo(fixture: &Fixture<'_>, room_id: &RoomId) -> Result 
 /// notifications are deferred by suppression.
 async fn badge_bypasses_suppression(fixture: &Fixture<'_>) -> Result {
 	let pushkey = "pk-badge-suppressed";
-	let (_pusher, _action, mut rx, _stub) =
-		stub_pusher(fixture, pushkey, false, false, r#"{"rejected":[]}"#).await?;
+	let config = StubPusherConfig::new(r#"{"rejected":[]}"#);
+	let (_pusher, _action, mut rx, _stub) = stub_pusher(fixture, pushkey, config).await?;
 
 	// Drive the active heuristic: online presence plus a fresh sync stamp.
 	fixture
@@ -686,8 +714,11 @@ async fn deliver(
 	badge_only: bool,
 	response_body: &str,
 ) -> Result<(String, Value)> {
-	let (pusher, _action, mut rx, _stub) =
-		stub_pusher(fixture, pushkey, event_id_only, false, response_body).await?;
+	let config = StubPusherConfig {
+		event_id_only,
+		..StubPusherConfig::new(response_body)
+	};
+	let (pusher, _action, mut rx, _stub) = stub_pusher(fixture, pushkey, config).await?;
 
 	let pusher_service = &fixture.services.pusher;
 
@@ -717,13 +748,11 @@ async fn deliver(
 async fn stub_pusher(
 	fixture: &Fixture<'_>,
 	pushkey: &str,
-	event_id_only: bool,
-	disable_badge_count: bool,
-	response_body: &str,
+	config: StubPusherConfig<'_>,
 ) -> Result<StubPusher> {
 	let listener = TcpListener::bind("127.0.0.1:0").await?;
-	let url = format!("http://{}{NOTIFY_PATH}", listener.local_addr()?);
-	let action = pusher_action(pushkey, url, event_id_only, disable_badge_count);
+	let url = format!("http://{}{}", listener.local_addr()?, config.path);
+	let action = pusher_action(pushkey, url, config.event_id_only, config.disable_badge_count);
 
 	fixture
 		.services
@@ -738,7 +767,7 @@ async fn stub_pusher(
 		.await?;
 
 	let (tx, rx) = unbounded_channel();
-	let stub = AbortOnDrop(spawn(stub_gateway(listener, tx, response_body.to_owned())));
+	let stub = AbortOnDrop(spawn(stub_gateway(listener, tx, config.response_body.to_owned())));
 
 	Ok((pusher, action, rx, stub))
 }
@@ -767,7 +796,7 @@ fn pusher_action(
 	SetPusherRequest::post(pusher).action
 }
 
-async fn recv(rx: &mut UnboundedReceiver<(String, Vec<u8>)>) -> Result<(String, Vec<u8>)> {
+async fn recv(rx: &mut CaptureRx) -> Result<CapturedRequest> {
 	timeout(Duration::from_secs(10), rx.recv())
 		.await
 		.map_err(|_| err!("timed out waiting for a push notification"))?
@@ -778,7 +807,7 @@ async fn recv(rx: &mut UnboundedReceiver<(String, Vec<u8>)>) -> Result<(String, 
 /// `POST /_matrix/push/v1/notify`, then answers `response_body` with a `200`.
 async fn stub_gateway(
 	listener: TcpListener,
-	tx: UnboundedSender<(String, Vec<u8>)>,
+	tx: CaptureTx,
 	response_body: String,
 ) {
 	let response = format!(
