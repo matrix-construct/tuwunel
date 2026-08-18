@@ -219,6 +219,13 @@ async fn remote_room_summary_hierarchy_response(
 		)));
 	}
 
+	if servers.is_empty() {
+		return Err!(Request(NotFound(
+			"Room is unknown to this server and no servers were provided to fetch it over \
+			 federation."
+		)));
+	}
+
 	let request = get_hierarchy::v1::Request::new(room_id.to_owned());
 
 	let mut requests: FuturesUnordered<_> = servers
