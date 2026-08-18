@@ -51,6 +51,7 @@ pub(crate) struct Descriptor {
 	pub(crate) ttl: u64,
 	pub(crate) compaction: CompactionStyle,
 	pub(crate) compaction_pri: CompactionPri,
+	pub(crate) compaction_size: u64,
 	pub(crate) compression: CompressionType,
 	pub(crate) compressed_index: bool,
 	pub(crate) compression_shape: [i32; 7],
@@ -97,6 +98,7 @@ static BASE: Descriptor = Descriptor {
 	ttl: 60 * 60 * 24 * 21,
 	compaction: CompactionStyle::Level,
 	compaction_pri: CompactionPri::MinOverlappingRatio,
+	compaction_size: 1024 * 1024 * 64,
 	compression: CompressionType::Zstd,
 	compressed_index: true,
 	compression_shape: [0, 0, 0, 1, 1, 1, 1],
@@ -122,6 +124,7 @@ pub(crate) static DROPPED: Descriptor = Descriptor { dropped: true, ..IGNORED };
 /// Descriptor for large datasets where writes scatter across the keyspace.
 pub(crate) static RANDOM: Descriptor = Descriptor {
 	compaction_pri: CompactionPri::OldestSmallestSeqFirst,
+	compaction_size: 1024 * 1024 * 256,
 	write_size: 1024 * 1024 * 32,
 	cache_shards: 64,
 	compression_level: -3,
@@ -134,6 +137,7 @@ pub(crate) static RANDOM: Descriptor = Descriptor {
 /// keyspace.
 pub(crate) static SEQUENTIAL: Descriptor = Descriptor {
 	compaction_pri: CompactionPri::OldestLargestSeqFirst,
+	compaction_size: 1024 * 1024 * 512,
 	write_size: 1024 * 1024 * 64,
 	level_size: 1024 * 1024 * 32,
 	file_size: 1024 * 1024 * 2,
@@ -148,6 +152,7 @@ pub(crate) static SEQUENTIAL: Descriptor = Descriptor {
 /// Descriptor for small datasets where writes scatter across the keyspace.
 pub(crate) static RANDOM_SMALL: Descriptor = Descriptor {
 	compaction: CompactionStyle::Universal,
+	compaction_size: 1024 * 1024 * 128,
 	write_size: 1024 * 1024 * 16,
 	level_size: 1024 * 512,
 	file_size: 1024 * 128,
@@ -165,6 +170,7 @@ pub(crate) static RANDOM_SMALL: Descriptor = Descriptor {
 /// keyspace.
 pub(crate) static SEQUENTIAL_SMALL: Descriptor = Descriptor {
 	compaction: CompactionStyle::Universal,
+	compaction_size: 1024 * 1024 * 128,
 	write_size: 1024 * 1024 * 16,
 	level_size: 1024 * 1024,
 	file_size: 1024 * 512,
@@ -183,6 +189,7 @@ pub(crate) static SEQUENTIAL_SMALL: Descriptor = Descriptor {
 /// is reached.
 pub(crate) static RANDOM_CACHE: Descriptor = Descriptor {
 	compaction: CompactionStyle::Fifo,
+	compaction_size: 1024 * 1024 * 32,
 	limit_size: 1024 * 1024 * 1024 * 2,
 	ttl: 60 * 60 * 24 * 180,
 	..RANDOM
@@ -192,8 +199,9 @@ pub(crate) static RANDOM_CACHE: Descriptor = Descriptor {
 /// the end of the keyspace. Lowest keys are evicted off the front once
 /// `limit_size` is reached.
 pub(crate) static SEQUENTIAL_CACHE: Descriptor = Descriptor {
-	compaction: CompactionStyle::Fifo,
 	cache_disp: CacheDisp::Unique,
+	compaction: CompactionStyle::Fifo,
+	compaction_size: 1024 * 1024 * 64,
 	limit_size: 1024 * 1024 * 1024 * 2,
 	ttl: 60 * 60 * 24 * 180,
 	..SEQUENTIAL
@@ -203,8 +211,9 @@ pub(crate) static SEQUENTIAL_CACHE: Descriptor = Descriptor {
 /// keyspace. Oldest entries are evicted by FIFO compaction once `limit_size`
 /// is reached.
 pub(crate) static RANDOM_SMALL_CACHE: Descriptor = Descriptor {
-	compaction: CompactionStyle::Fifo,
 	compression: CompressionType::None,
+	compaction: CompactionStyle::Fifo,
+	compaction_size: 1024 * 1024 * 16,
 	limit_size: 1024 * 1024 * 64,
 	ttl: 60 * 60 * 24 * 180,
 	file_shape: 2,
@@ -215,9 +224,10 @@ pub(crate) static RANDOM_SMALL_CACHE: Descriptor = Descriptor {
 /// the end of the keyspace. Lowest keys are evicted off the front once
 /// `limit_size` is reached.
 pub(crate) static SEQUENTIAL_SMALL_CACHE: Descriptor = Descriptor {
-	compaction: CompactionStyle::Fifo,
 	cache_disp: CacheDisp::Unique,
 	compression: CompressionType::None,
+	compaction: CompactionStyle::Fifo,
+	compaction_size: 1024 * 1024 * 16,
 	limit_size: 1024 * 1024 * 64,
 	ttl: 60 * 60 * 24 * 180,
 	file_shape: 2,

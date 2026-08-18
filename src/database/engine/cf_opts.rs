@@ -38,6 +38,7 @@ fn descriptor_cf_options(
 	opts.set_target_file_size_base(desc.file_size);
 	opts.set_target_file_size_multiplier(desc.file_shape);
 
+	opts.set_max_compaction_bytes(desc.compaction_size);
 	opts.set_level_zero_file_num_compaction_trigger(desc.level0_width);
 	opts.set_level_compaction_dynamic_level_bytes(false);
 	opts.set_ttl(desc.ttl);
