@@ -297,6 +297,7 @@ async fn run_cases(services: &Services) -> Result {
 	reject_bad_url(&fixture).await?;
 	full_format_delivery(&fixture).await?;
 	event_id_only_delivery(&fixture).await?;
+	gateway_url_paths(&fixture).await?;
 	rejected_pushkey_removed(&fixture).await?;
 	foreign_rejected_key_noop(&fixture).await?;
 	counts_only_delivery(&fixture, &room_id, &other_room_id).await?;
@@ -391,6 +392,42 @@ async fn event_id_only_delivery(fixture: &Fixture<'_>) -> Result {
 	expect_absent(notification, "sender")?;
 
 	expect_absent(first_device(notification)?, "tweaks")
+}
+
+async fn gateway_url_paths(fixture: &Fixture<'_>) -> Result {
+	let cases = [
+		(
+			"pk-url-mid-path",
+			"/_matrix/push/v1/notify/gw",
+			"/_matrix/push/v1/notify/gw/_matrix/push/v1/notify",
+		),
+		("pk-url-prefix", "/gw/_matrix/push/v1/notify", "/gw/_matrix/push/v1/notify"),
+		("pk-url-trailing-slash", "/_matrix/push/v1/notify/", NOTIFY_PATH),
+	];
+
+	for (pushkey, registered_path, expected_path) in cases {
+		let config = StubPusherConfig {
+			path: registered_path,
+			..StubPusherConfig::new(r#"{"rejected":[]}"#)
+		};
+		let (pusher, _action, mut rx, _stub) = stub_pusher(fixture, pushkey, config).await?;
+
+		fixture
+			.services
+			.pusher
+			.send_push_notice(fixture.user, &pusher, fixture.ruleset, fixture.pdu)
+			.await?;
+
+		let (request_path, _body) = recv(&mut rx).await?;
+
+		if request_path != expected_path {
+			return Err!(
+				"path {registered_path} produced {request_path}, expected {expected_path}"
+			);
+		}
+	}
+
+	Ok(())
 }
 
 /// A pushkey the gateway names in `rejected` is removed along with its pusher.

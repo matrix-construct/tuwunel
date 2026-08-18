@@ -34,7 +34,9 @@ still applies.
 
 Every push notification is sent to the gateway's Matrix spec path
 `/_matrix/push/v1/notify`; this path is not configurable. The
-`notification_push_path` option only controls a substring stripped from
-the stored pusher URL before that spec path is rebuilt onto the
-remainder, so leave it at its default unless your pushers register URLs
-that embed a different path needing to be removed first.
+`notification_push_path` option only names the path suffix stripped from
+the end of a stored pusher URL before that spec path is appended to the
+remainder. An occurrence anywhere earlier in the URL is left in place,
+and a URL whose path does not end with the configured value is used
+unchanged, so leave the option at its default unless your pushers
+register URLs that end in a different path needing to be removed first.

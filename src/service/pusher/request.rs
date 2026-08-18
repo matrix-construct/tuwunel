@@ -11,6 +11,7 @@ use tuwunel_core::{
 	Err, Result, debug_warn, err, error::error_chain, implement, trace, utils::string_from_bytes,
 	warn,
 };
+use url::Url;
 
 use crate::client::read_response_capped;
 
@@ -22,11 +23,37 @@ where
 	for<'a> T::Authentication: AuthScheme<Input<'a> = ()>,
 	for<'a> T::PathBuilder: PathBuilder<Input<'a> = ()>,
 {
-	let dest = dest.replace(&self.services.config.notification_push_path, "");
+	let dest = if dest.contains(['?', '#']) {
+		let parsed = Url::parse(dest).ok();
+
+		warn!(
+			gateway_host = parsed
+				.as_ref()
+				.and_then(|url| url.host_str())
+				.unwrap_or("<invalid>"),
+			has_query = dest.contains('?'),
+			has_fragment = dest.contains('#'),
+			"Push gateway URL carries a query string or fragment, which is not supported; the \
+			 notification path is appended after it",
+		);
+
+		dest
+	} else {
+		let push_path = self
+			.services
+			.config
+			.notification_push_path
+			.trim_end_matches('/');
+
+		let dest = dest.trim_end_matches('/');
+
+		dest.strip_suffix(push_path).unwrap_or(dest)
+	};
+
 	trace!("Push gateway destination: {dest}");
 
 	let http_request = request
-		.try_into_http_request::<BytesMut>(&dest, (), ())
+		.try_into_http_request::<BytesMut>(dest, (), ())
 		.map_err(|e| {
 			err!(BadServerResponse(warn!(
 				"Failed to find destination {dest} for push gateway: {e}"
@@ -63,8 +90,8 @@ where
 		.execute(reqwest_request)
 		.await
 	{
-		| Err(error) => handler_err(&dest, error),
-		| Ok(response) => self.handle_ok::<T>(&dest, response).await,
+		| Err(error) => handler_err(dest, error),
+		| Ok(response) => self.handle_ok::<T>(dest, response).await,
 	}
 }
 
