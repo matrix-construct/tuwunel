@@ -26,6 +26,7 @@ use ruma::{
 			DeviceLists, EphemeralData, Request as PushEventsRequest,
 		},
 		client::push::Pusher,
+		error::ErrorKind,
 		federation::transactions::{
 			edu::{
 				DeviceListUpdateContent, Edu, PresenceContent, PresenceUpdate, ReceiptContent,
@@ -89,6 +90,7 @@ type SendingResult = Result<Destination, SendingError>;
 type SendingFuture<'a> = BoxFuture<'a, SendingResult>;
 type SendingFutures<'a> = FuturesUnordered<SendingFuture<'a>>;
 type CurTransactionStatus = HashMap<Destination, TransactionStatus>;
+type FailedPushIds = SmallVec<[RawPduId; 1]>;
 
 /// MSC3202 `device_one_time_keys_count`: unclaimed one-time-key counts per
 /// algorithm, keyed by user then device. Matches the ruma request field type.
@@ -142,6 +144,21 @@ struct Selected {
 struct ToDeviceRecipient {
 	to_user_id: OwnedUserId,
 	to_device_id: OwnedDeviceId,
+}
+
+#[derive(Default)]
+struct PushFailures {
+	ids: FailedPushIds,
+	error: Option<Error>,
+}
+
+impl PushFailures {
+	fn retain(mut self, pdu_id: RawPduId, error: Error) -> Self {
+		self.ids.push(pdu_id);
+		self.error = self.error.or(Some(error));
+
+		self
+	}
 }
 
 const SELECT_PRESENCE_LIMIT: usize = 256;
@@ -1512,11 +1529,22 @@ impl Service {
 
 		// Reconciliation, not an alert: a suppressed drop strands a stale badge.
 		if events.contains(&SendingEvent::BadgeRefresh) {
-			self.services
+			let result = self
+				.services
 				.pusher
 				.send_badge_notice(&user_id, &pusher)
-				.map_err(|e| (Destination::Push(user_id.clone(), pushkey.clone()), e))
-				.await?;
+				.await;
+
+			match result {
+				| Ok(()) => (),
+				| Err(error) if is_permanent_push_error(&error) => warn!(
+					%user_id,
+					%pushkey,
+					chain = %error_chain(&error),
+					"Dropping a badge push with a permanent local error",
+				),
+				| Err(error) => return Err((destination(), error)),
+			}
 		}
 
 		if suppressed {
@@ -1540,33 +1568,77 @@ impl Service {
 			"non-suppressed push",
 		);
 
-		if let Some(rules_for_user) = rules_for_user {
-			let _sent = events
-				.iter()
-				.stream()
-				.ready_filter_map(|event| extract_variant!(event, SendingEvent::Pdu))
-				.wide_filter_map(|pdu_id| {
-					self.services
-						.timeline
-						.get_pdu_from_id(pdu_id)
-						.ok()
-				})
-				.ready_filter(|pdu| !pdu.is_redacted())
-				.wide_filter_map(async |pdu| {
-					self.services
-						.pusher
-						.send_push_notice(&user_id, &pusher, &rules_for_user, &pdu)
-						.await
-						.map_err(|e| (Destination::Push(user_id.clone(), pushkey.clone()), e))
-						.ok()
-				})
-				.count()
-				.await;
-		}
+		let failures = match rules_for_user {
+			| None => PushFailures::default(),
+			| Some(rules_for_user) =>
+				events
+					.iter()
+					.stream()
+					.ready_filter_map(|event| extract_variant!(event, SendingEvent::Pdu))
+					.wide_filter_map(async |pdu_id| {
+						self.services
+							.timeline
+							.get_pdu_from_id(pdu_id)
+							.map_ok(|pdu| (*pdu_id, pdu))
+							.await
+							.ok()
+					})
+					.ready_filter(|(_, pdu)| !pdu.is_redacted())
+					.wide_then(async |(pdu_id, pdu)| {
+						let result = self
+							.services
+							.pusher
+							.send_push_notice(&user_id, &pusher, &rules_for_user, &pdu)
+							.await;
 
-		Ok(Destination::Push(user_id, pushkey))
+						(pdu_id, result)
+					})
+					.ready_fold(
+						PushFailures::default(),
+						|failures, (pdu_id, result)| match result {
+							| Ok(()) => failures,
+							| Err(error) if is_permanent_push_error(&error) => {
+								warn!(
+									%user_id,
+									%pushkey,
+									?pdu_id,
+									chain = %error_chain(&error),
+									"Dropping a push with a permanent local error",
+								);
+
+								failures
+							},
+							| Err(error) => failures.retain(pdu_id, error),
+						},
+					)
+					.await,
+		};
+
+		let PushFailures { ids, error: Some(error) } = failures else {
+			return Ok(Destination::Push(user_id, pushkey));
+		};
+
+		let dest = Destination::Push(user_id, pushkey);
+
+		events
+			.iter()
+			.filter_map(|event| extract_variant!(event, SendingEvent::Pdu))
+			.filter(|pdu_id| !ids.contains(*pdu_id))
+			.for_each(|pdu_id| {
+				self.db
+					.delete_active_request(&dest.event_key(pdu_id));
+			});
+
+		Err((dest, error))
 	}
+}
 
+#[inline]
+fn is_permanent_push_error(error: &Error) -> bool {
+	matches!(error, Error::Request(ErrorKind::InvalidParam, ..))
+}
+
+impl Service {
 	/// Schedule a flush of the pushes suppressed for one pushkey.
 	///
 	/// The flush runs as a task this service owns, so the caller never waits on

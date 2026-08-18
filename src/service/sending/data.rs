@@ -134,17 +134,17 @@ impl Data {
 	{
 		let keys: Vec<_> = requests
 			.clone()
-			.map(|(event, dest)| {
-				let mut key = dest.get_prefix();
-				if let SendingEvent::Pdu(value) = event {
-					key.extend(value.as_ref());
-				} else {
+			.map(|(event, dest)| match event {
+				| SendingEvent::Pdu(pdu_id) => dest.event_key(pdu_id),
+				| _ => {
 					let count = self.services.globals.next_count();
 					let count = count.to_be_bytes();
-					key.extend(&count);
-				}
+					let mut key = dest.get_prefix_with_capacity(count.len());
 
-				key
+					key.extend_from_slice(&count);
+
+					key
+				},
 			})
 			.collect();
 

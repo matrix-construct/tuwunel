@@ -19,7 +19,7 @@ use tuwunel_core::{
 	Err, Result, err,
 	matrix::{Pdu, PduCount, PduId, RawPduId},
 	ruma::{
-		DeviceId, EventId, OwnedRoomId, RoomId, UInt, UserId,
+		DeviceId, EventId, OwnedEventId, OwnedRoomId, RoomId, UInt, UserId,
 		api::client::push::{
 			Pusher, PusherIds, PusherInit, PusherKind,
 			set_pusher::v3::{PusherAction, Request as SetPusherRequest},
@@ -34,7 +34,7 @@ use tuwunel_database::Json;
 use tuwunel_service::{
 	Services,
 	presence::Ping,
-	sending::Destination,
+	sending::{Destination, SendingEvent},
 };
 
 type CapturedRequest = (String, Vec<u8>);
@@ -52,6 +52,9 @@ struct StubPusherConfig<'a> {
 const APP_ID: &str = "app.tuwunel.test";
 const EVENT_ID: &str = "$push:remote.example";
 const MISSING_PUSHER_EVENT_ID: &str = "$push-missing:remote.example";
+const PERMANENT_EVENT_ID: &str = "$push-permanent:remote.example";
+const RETRY_EVENT_ID_1: &str = "$push-retry-one:remote.example";
+const RETRY_EVENT_ID_2: &str = "$push-retry-two:remote.example";
 const SENDER: &str = "@alice:remote.example";
 const NOTIFY_PATH: &str = "/_matrix/push/v1/notify";
 const PUSH_FIXTURE_SHORT_ROOM_ID: u64 = 0x543;
@@ -109,6 +112,7 @@ fn pusher_notify() -> Result {
 	let result: Result = runtime.block_on(async {
 		let services = Services::build(server.server.clone()).await?;
 		let mut recovery = prepare_badge_recovery(&services).await?;
+		let mut push_retry = prepare_push_retry(&services).await?;
 		let services = services.start().await?;
 		_ = server
 			.services
@@ -118,7 +122,9 @@ fn pusher_notify() -> Result {
 
 		let outcome = async {
 			verify_badge_recovery(&services, &mut recovery).await?;
+			verify_push_retry(&services, &mut push_retry).await?;
 			verify_badge_retry(&services).await?;
+			verify_permanent_push_error(&services).await?;
 			verify_missing_pusher_reap(&services).await?;
 			run_cases(&services).await
 		}
@@ -151,6 +157,15 @@ struct BadgeRecovery {
 	_stub: AbortOnDrop,
 }
 
+struct PushRetry {
+	destination: Destination,
+	first_id: RawPduId,
+	second_id: RawPduId,
+	permits: UnboundedSender<()>,
+	rx: CaptureRx,
+	_stub: AbortOnDrop,
+}
+
 async fn prepare_badge_recovery(services: &Services) -> Result<BadgeRecovery> {
 	let server_name = services.globals.server_name();
 	let user = UserId::parse_with_server_name("badge-recovery", server_name)?;
@@ -173,6 +188,54 @@ async fn prepare_badge_recovery(services: &Services) -> Result<BadgeRecovery> {
 
 	Ok(BadgeRecovery {
 		destination: Destination::Push(user, pushkey.to_owned()),
+		rx,
+		_stub: stub,
+	})
+}
+
+async fn prepare_push_retry(services: &Services) -> Result<PushRetry> {
+	let server_name = services.globals.server_name();
+	let user = UserId::parse_with_server_name("push-retry", server_name)?;
+	let pushkey = "pk-push-retry";
+	let room_id = OwnedRoomId::from_parts('!', "push-retry", Some(server_name.as_str()))?;
+
+	let listener = TcpListener::bind("127.0.0.1:0").await?;
+	let url = format!("http://{}{NOTIFY_PATH}", listener.local_addr()?);
+	let action = pusher_action(pushkey, url, false, true);
+
+	services
+		.pusher
+		.set_pusher(&user, device_id!("PUSHRETRY"), &action)
+		.await?;
+
+	let (tx, rx) = unbounded_channel();
+	let (permits, permit_rx) = unbounded_channel();
+	let stub = AbortOnDrop(spawn(stub_gateway_scripted(
+		listener,
+		tx,
+		r#"{"rejected":[]}"#.to_owned(),
+		1,
+		permit_rx,
+	)));
+
+	let first_id = persist_message_pdu(services, &room_id, RETRY_EVENT_ID_1, 1)?;
+	let second_id = persist_message_pdu(services, &room_id, RETRY_EVENT_ID_2, 2)?;
+
+	services
+		.sending
+		.send_pdu_push(&first_id, &user, pushkey.to_owned())?;
+
+	services
+		.sending
+		.send_pdu_push(&second_id, &user, pushkey.to_owned())?;
+
+	services.sending.refresh_push_badge(&user).await?;
+
+	Ok(PushRetry {
+		destination: Destination::Push(user, pushkey.to_owned()),
+		first_id,
+		second_id,
+		permits,
 		rx,
 		_stub: stub,
 	})
@@ -241,10 +304,114 @@ async fn verify_badge_recovery(services: &Services, recovery: &mut BadgeRecovery
 	}
 }
 
+async fn verify_push_retry(services: &Services, retry: &mut PushRetry) -> Result {
+	let (first_path, first_body) = recv(&mut retry.rx).await?;
+
+	if first_path != NOTIFY_PATH {
+		return Err!("queued push notification hit unexpected path {first_path}");
+	}
+
+	let first = captured_event_id(&first_body)?;
+
+	permit_response(&retry.permits)?;
+
+	let (second_path, second_body) = recv(&mut retry.rx).await?;
+
+	if second_path != NOTIFY_PATH {
+		return Err!("queued push notification hit unexpected path {second_path}");
+	}
+
+	let second = captured_event_id(&second_body)?;
+
+	if first == second {
+		return Err!("initial push transaction delivered the same event twice");
+	}
+
+	let initial = [first.as_str(), second.as_str()];
+
+	if !initial.contains(&RETRY_EVENT_ID_1) || !initial.contains(&RETRY_EVENT_ID_2) {
+		return Err!("initial push transaction did not contain both fixture events");
+	}
+
+	permit_response(&retry.permits)?;
+
+	let (retry_path, retry_body) = recv(&mut retry.rx).await?;
+
+	if retry_path != NOTIFY_PATH {
+		return Err!("queued push notification hit unexpected path {retry_path}");
+	}
+
+	let retried = captured_event_id(&retry_body)?;
+
+	if retried != first {
+		return Err!("push retry did not contain only the failed event");
+	}
+
+	let expected_id = retry_pdu_id(retry, &first)?;
+
+	expect_retry_active_set(services, &retry.destination, expected_id).await?;
+	permit_response(&retry.permits)?;
+	wait_for_queue_cleanup(services, &retry.destination).await?;
+
+	expect_quiescent(&mut retry.rx, "push retry")
+}
+
 fn permit_response(permits: &UnboundedSender<()>) -> Result {
 	permits
 		.send(())
 		.map_err(|_| err!("scripted gateway stopped before response permit"))
+}
+
+fn retry_pdu_id<'a>(retry: &'a PushRetry, event_id: &EventId) -> Result<&'a RawPduId> {
+	match event_id.as_str() {
+		| RETRY_EVENT_ID_1 => Ok(&retry.first_id),
+		| RETRY_EVENT_ID_2 => Ok(&retry.second_id),
+		| _ => Err!("captured unexpected retry fixture event {event_id}"),
+	}
+}
+
+async fn expect_retry_active_set(
+	services: &Services,
+	destination: &Destination,
+	expected: &RawPduId,
+) -> Result {
+	let queued = services
+		.sending
+		.db
+		.queued_requests(destination)
+		.ready_any(|_| true)
+		.await;
+
+	if queued {
+		return Err!("mixed push result left a queued request");
+	}
+
+	let (pdu_count, expected_active, badge_count, other_count) = services
+		.sending
+		.db
+		.active_requests_for(destination)
+		.ready_fold((0_usize, false, 0_usize, 0_usize), |state, (_, event)| {
+			let (pdu_count, expected_active, badge_count, other_count) = state;
+
+			match event {
+				| SendingEvent::Pdu(pdu_id) => (
+					pdu_count.saturating_add(1),
+					expected_active || &pdu_id == expected,
+					badge_count,
+					other_count,
+				),
+				| SendingEvent::BadgeRefresh =>
+					(pdu_count, expected_active, badge_count.saturating_add(1), other_count),
+				| _ => (pdu_count, expected_active, badge_count, other_count.saturating_add(1)),
+			}
+		})
+		.await;
+
+	match (pdu_count, expected_active, badge_count, other_count) {
+		| (1, true, 1, 0) => Ok(()),
+		| (1, false, 1, 0) => Err!("mixed push result retained the wrong PDU"),
+		| state => Err!("mixed push result retained unexpected active state {state:?}"),
+	}
 }
 
 /// Covers timer-driven retry and queue cleanup after a gateway failure.
@@ -326,6 +493,41 @@ fn captured_unread_count(body: &[u8], case: &str) -> Result<u64> {
 		.and_then(|counts| counts.get("unread"))
 		.and_then(Value::as_u64)
 		.ok_or_else(|| err!("{case} had no unread count"))
+}
+
+async fn verify_permanent_push_error(services: &Services) -> Result {
+	let server_name = services.globals.server_name();
+	let user = UserId::parse_with_server_name("push-permanent", server_name)?;
+	let pushkey = "pk-push-permanent";
+	let room_id = OwnedRoomId::from_parts('!', "push-permanent", Some(server_name.as_str()))?;
+	let action =
+		pusher_action(pushkey, "ftp://127.0.0.1/_matrix/push/v1/notify".to_owned(), false, false);
+
+	// Bypass creation validation to model a legacy or corrupt stored pusher.
+	services
+		.db
+		.get("senderkey_pusher")?
+		.put((&user, pushkey), Json(&action));
+
+	services.pusher.get_pusher(&user, pushkey).await?;
+
+	let pdu_id = persist_message_pdu(services, &room_id, PERMANENT_EVENT_ID, 3)?;
+	let destination = Destination::Push(user.clone(), pushkey.to_owned());
+
+	services
+		.sending
+		.send_pdu_push(&pdu_id, &user, pushkey.to_owned())?;
+
+	wait_for_queue_cleanup(services, &destination).await?;
+	services.sending.refresh_push_badge(&user).await?;
+	wait_for_queue_cleanup(services, &destination).await?;
+
+	match services.pusher.get_pusher(&user, pushkey).await {
+		| Ok(_) => Ok(()),
+		| Err(error) if error.is_not_found() =>
+			Err!("permanently invalid pusher was removed during delivery"),
+		| Err(error) => Err(error),
+	}
 }
 
 async fn verify_missing_pusher_reap(services: &Services) -> Result {
@@ -1013,6 +1215,19 @@ async fn recv(rx: &mut CaptureRx) -> Result<CapturedRequest> {
 		.await
 		.map_err(|_| err!("timed out waiting for a push notification"))?
 		.ok_or_else(|| err!("stub gateway channel closed"))
+}
+
+fn captured_event_id(body: &[u8]) -> Result<OwnedEventId> {
+	let body: Value = serde_json::from_slice(body)
+		.map_err(|e| err!("queued push notification body was not json: {e}"))?;
+
+	let event_id = notification(&body)?
+		.get("event_id")
+		.and_then(Value::as_str)
+		.ok_or_else(|| err!("queued push notification had no event_id"))?;
+
+	EventId::parse(event_id)
+		.map_err(|e| err!("queued push notification had invalid event_id: {e}"))
 }
 
 fn expect_quiescent(rx: &mut CaptureRx, case: &str) -> Result {
