@@ -20,6 +20,8 @@
 
 use std::sync::Arc;
 
+use tuwunel_core::error;
+
 use crate::{Database, Engine};
 
 /// Scoped guard that coalesces write-ahead-log flushes for its lifetime.
@@ -82,11 +84,19 @@ impl Drop for Cork {
 	/// Lower the cork count, then flush and/or sync the WAL per the policy.
 	fn drop(&mut self) {
 		self.engine.uncork();
+
 		if self.flush {
-			self.engine.flush().ok();
+			self.engine
+				.flush()
+				.inspect_err(|error| error!(%error, "Failed to flush the write-ahead log."))
+				.ok();
 		}
+
 		if self.sync {
-			self.engine.sync().ok();
+			self.engine
+				.sync()
+				.inspect_err(|error| error!(%error, "Failed to sync the write-ahead log."))
+				.ok();
 		}
 	}
 }
