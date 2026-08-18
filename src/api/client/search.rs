@@ -37,6 +37,7 @@ type RoomState = Vec<Raw<AnyStateEvent>>;
 
 const LIMIT_DEFAULT: usize = 10;
 const LIMIT_MAX: usize = 100;
+const CONTEXT_MAX: usize = 20;
 const BATCH_MAX: usize = 20;
 
 /// # `POST /_matrix/client/r0/search`
@@ -216,8 +217,9 @@ where
 	};
 
 	let room_id = pdu.room_id();
-	let before_limit: usize = event_context.before_limit.try_into().unwrap_or(0);
-	let after_limit: usize = event_context.after_limit.try_into().unwrap_or(0);
+	let bounded = |limit: UInt| limit.try_into().unwrap_or(0).min(CONTEXT_MAX);
+	let before_limit = bounded(event_context.before_limit);
+	let after_limit = bounded(event_context.after_limit);
 
 	let events_before = collect_context_half(
 		services,
