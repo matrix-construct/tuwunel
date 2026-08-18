@@ -45,7 +45,10 @@ pub(crate) async fn registration_route(
 			.and_then(|value| value.strip_prefix("Bearer "));
 
 		if presented != Some(required_token) {
-			return Err!(Request(Forbidden("A valid initial access token is required")));
+			return Err!(Request(Forbidden(
+				"A valid initial access token is required; this server has \
+				 oidc_registration_access_token set"
+			)));
 		}
 	}
 

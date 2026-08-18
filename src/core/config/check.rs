@@ -73,6 +73,7 @@ pub fn check(config: &Config) -> Result {
 	check_url_previews(config)?;
 	check_room_version(config)?;
 	check_identity_providers(config)?;
+	warn_oidc_registration_token(config);
 	check_media_providers(config)?;
 	check_well_known_support_contact_validity(config)?;
 	check_email(config)?;
@@ -607,6 +608,17 @@ fn check_identity_provider_secret(i: &str, provider: &IdentityProvider) -> Resul
 	}
 
 	Ok(())
+}
+
+fn warn_oidc_registration_token(config: &Config) {
+	if !config.oidc_registration_access_token.is_empty() {
+		warn!(
+			"oidc_registration_access_token is set, so dynamic client registration requires an \
+			 RFC 7591 initial access token. No Matrix client sends one, so next-gen auth login \
+			 will fail with `M_FORBIDDEN` for every ordinary client. Leave it empty unless \
+			 every OAuth client on this server is registered out of band."
+		);
+	}
 }
 
 fn check_media_providers(config: &Config) -> Result {

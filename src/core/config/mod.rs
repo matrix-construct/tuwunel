@@ -1836,8 +1836,10 @@ pub struct Config {
 	/// (RFC 7591).
 	///
 	/// When set, the registration endpoint requires the caller to present this
-	/// token as an `Authorization: Bearer` credential. The default (empty)
-	/// leaves dynamic client registration open.
+	/// token as an `Authorization: Bearer` credential. No Matrix client sends
+	/// one, so any value here blocks next-gen auth login for every ordinary
+	/// client, Element X included. Leave it empty unless every OAuth client on
+	/// this server is registered out of band.
 	///
 	/// reloadable: yes
 	/// default:

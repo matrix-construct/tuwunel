@@ -243,3 +243,8 @@ according to the account-matching policy described above.
   `trusted = true`, `userid_claims = ["username"]`, and that MAS returns the
   provisioned localpart as `username`.
 - If MAS never sends provisioning calls, verify that a MAS worker is running.
+- If a client fails at registration with an `M_FORBIDDEN` error naming
+  `oidc_registration_access_token`, unset that option. The gate belongs to
+  Tuwunel's own OIDC server rather than to MAS, it applies to every client
+  regardless of how MAS is configured, and no Matrix client can satisfy it. See
+  [Dynamic client registration](../oidc-server.md#dynamic-client-registration).

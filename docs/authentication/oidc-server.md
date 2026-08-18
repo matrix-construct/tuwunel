@@ -222,7 +222,7 @@ OIDC server was not already running takes effect on the next restart.
 
 | Option | Default | Description |
 |---|---|---|
-| `oidc_registration_access_token` | (unset) | When set, the registration endpoint requires callers to present this value as an `Authorization: Bearer` credential. Unset leaves dynamic registration open to any client. |
+| `oidc_registration_access_token` | (unset) | When set, the registration endpoint requires callers to present this value as an `Authorization: Bearer` credential. Matrix clients have no way to supply one, so any value here blocks next-gen auth for every ordinary client. Leave it unset unless the only callers are ones you register yourself. |
 | `oidc_registration_allowed_redirect_hosts` | `[]` | When non-empty, every `redirect_uri` presented at registration must use a host in this list, otherwise the registration is rejected. Empty imposes no host restriction. |
 
 ### Rate limiting
@@ -246,9 +246,27 @@ before starting the authorization flow, using RFC 7591 at
 `POST /_tuwunel/oidc/registration`. By default no pre-configuration of clients
 is required: any client that supports dynamic registration can authenticate.
 
-If you need to constrain who may register, use `oidc_registration_access_token`
-to require an initial access token, and `oidc_registration_allowed_redirect_hosts`
-to bound which redirect hosts a registered client may use.
+To bound which clients may register, use
+`oidc_registration_allowed_redirect_hosts`. It restricts registration to clients
+whose `redirect_uri` hosts you list, and ordinary Matrix clients keep working so
+long as their hosts appear in it.
+
+`oidc_registration_access_token` is a stricter control that carries a cost worth
+understanding before you enable it. RFC 7591 §3 makes the initial access token
+optional and asks the registration endpoint to allow requests that carry none,
+and MSC2966 defines no such token, so no current Matrix client sends the
+`Authorization` header this gate checks. Set it only where every OAuth client is
+registered out of band by something you operate, and expect ordinary client
+logins to stop working.
+
+While it is set, Tuwunel logs a warning naming the option at startup and on
+every configuration reload, and a client that tries to register is refused with
+`M_FORBIDDEN: A valid initial access token is required; this server has
+oidc_registration_access_token set`. Element X surfaces that as a failure to get
+an OAuth URL and never reaches the login page. Check the environment as well as
+the configuration file, since the same option is set by
+`TUWUNEL_OIDC_REGISTRATION_ACCESS_TOKEN` and by its `CONDUWUIT_` and `CONDUIT_`
+legacy equivalents.
 
 ## Account management
 

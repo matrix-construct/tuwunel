@@ -239,6 +239,35 @@ client_secret = "oauth-secret"
 }
 
 #[test]
+fn check_warns_when_oidc_registration_token_is_set() {
+	let token_unset = "[global]\n";
+
+	let token_empty = r#"[global]
+oidc_registration_access_token = ""
+"#;
+
+	let token_set = r#"[global]
+oidc_registration_access_token = "initial-access-token"
+"#;
+
+	let cases = [
+		("token unset", token_unset, false),
+		("token empty", token_empty, false),
+		("token set", token_set, true),
+	];
+
+	for (name, toml, warns) in cases {
+		let config = config_from_toml(toml).expect("OIDC registration config should parse");
+		let (result, logs) = check_with_captured_logs(&config);
+		let secret = config.oidc_registration_access_token.as_str();
+
+		result.expect("OIDC registration config should pass config check");
+		assert_eq!(logs.contains("oidc_registration_access_token is set"), warns, "{name}");
+		assert!(secret.is_empty() || !logs.contains(secret), "{name} leaked the token value");
+	}
+}
+
+#[test]
 fn reload_rejects_none_to_some_and_some_to_none() {
 	let none = config_from_toml("[global]\n").unwrap();
 	let some = config_from_toml(
