@@ -17,7 +17,7 @@ use tokio::{
 use tuwunel::{Args, Runtime, Server, async_run, async_stop};
 use tuwunel_core::{
 	Err, Result, err,
-	matrix::Pdu,
+	matrix::{Pdu, PduCount, PduId, RawPduId},
 	ruma::{
 		DeviceId, EventId, OwnedRoomId, RoomId, UInt, UserId,
 		api::client::push::{
@@ -30,6 +30,7 @@ use tuwunel_core::{
 	},
 	utils::stream::ReadyExt,
 };
+use tuwunel_database::Json;
 use tuwunel_service::{
 	Services,
 	presence::Ping,
@@ -50,8 +51,11 @@ struct StubPusherConfig<'a> {
 
 const APP_ID: &str = "app.tuwunel.test";
 const EVENT_ID: &str = "$push:remote.example";
+const MISSING_PUSHER_EVENT_ID: &str = "$push-missing:remote.example";
 const SENDER: &str = "@alice:remote.example";
 const NOTIFY_PATH: &str = "/_matrix/push/v1/notify";
+const PUSH_FIXTURE_SHORT_ROOM_ID: u64 = 0x543;
+const RETRY_QUIET_WINDOW: Duration = Duration::from_secs(4);
 
 impl<'a> StubPusherConfig<'a> {
 	fn new(response_body: &'a str) -> Self {
@@ -97,6 +101,8 @@ fn pusher_notify() -> Result {
 		.push("startup_netburst=true".to_owned());
 	args.option
 		.push("suppress_push_when_active=true".to_owned());
+	args.option
+		.push("sender_retry_backoff_limit=1".to_owned());
 
 	let runtime = Runtime::new(Some(&args))?;
 	let server = Server::new(Some(&args), Some(&runtime))?;
@@ -112,6 +118,8 @@ fn pusher_notify() -> Result {
 
 		let outcome = async {
 			verify_badge_recovery(&services, &mut recovery).await?;
+			verify_badge_retry(&services).await?;
+			verify_missing_pusher_reap(&services).await?;
 			run_cases(&services).await
 		}
 		.await;
@@ -189,7 +197,7 @@ async fn verify_badge_recovery(services: &Services, recovery: &mut BadgeRecovery
 	}
 
 	expect_absent(first_device(recovered)?, "tweaks")?;
-	wait_for_badge_queue_cleanup(services, &recovery.destination).await?;
+	wait_for_queue_cleanup(services, &recovery.destination).await?;
 
 	let Destination::Push(user_id, _) = &recovery.destination else {
 		unreachable!("badge recovery destination is push");
@@ -212,7 +220,7 @@ async fn verify_badge_recovery(services: &Services, recovery: &mut BadgeRecovery
 		.refresh_push_badge(user_id)
 		.await?;
 
-	wait_for_badge_queue_cleanup(services, &recovery.destination).await?;
+	wait_for_queue_cleanup(services, &recovery.destination).await?;
 
 	let (path, body) = recv(&mut recovery.rx).await?;
 
@@ -233,7 +241,109 @@ async fn verify_badge_recovery(services: &Services, recovery: &mut BadgeRecovery
 	}
 }
 
-async fn wait_for_badge_queue_cleanup(services: &Services, destination: &Destination) -> Result {
+fn permit_response(permits: &UnboundedSender<()>) -> Result {
+	permits
+		.send(())
+		.map_err(|_| err!("scripted gateway stopped before response permit"))
+}
+
+/// Covers timer-driven retry and queue cleanup after a gateway failure.
+///
+/// The one-shot fourth-failure escalation remains a manual log check because
+/// this harness does not install a tracing capture layer.
+async fn verify_badge_retry(services: &Services) -> Result {
+	let server_name = services.globals.server_name();
+	let user = UserId::parse_with_server_name("badge-retry", server_name)?;
+	let pushkey = "pk-badge-retry";
+
+	let listener = TcpListener::bind("127.0.0.1:0").await?;
+	let url = format!("http://{}{NOTIFY_PATH}", listener.local_addr()?);
+	let action = pusher_action(pushkey, url, false, false);
+
+	services
+		.pusher
+		.set_pusher(&user, device_id!("BADGERETRY"), &action)
+		.await?;
+
+	let (tx, mut rx) = unbounded_channel();
+	let (permits, permit_rx) = unbounded_channel();
+	let _stub = AbortOnDrop(spawn(stub_gateway_scripted(
+		listener,
+		tx,
+		r#"{"rejected":[]}"#.to_owned(),
+		1,
+		permit_rx,
+	)));
+
+	let destination = Destination::Push(user.clone(), pushkey.to_owned());
+
+	services.sending.refresh_push_badge(&user).await?;
+
+	let (first_path, first_body) = recv(&mut rx).await?;
+
+	if first_path != NOTIFY_PATH {
+		return Err!("refused badge notification hit unexpected path {first_path}");
+	}
+
+	permit_response(&permits)?;
+
+	let (second_path, second_body) = recv(&mut rx).await?;
+
+	if second_path != NOTIFY_PATH {
+		return Err!("badge retry hit unexpected path {second_path}");
+	}
+
+	let active = services
+		.sending
+		.db
+		.active_requests_for(&destination)
+		.ready_any(|_| true)
+		.await;
+
+	if !active {
+		return Err!("failed badge notification did not remain active");
+	}
+
+	let first_count = captured_unread_count(&first_body, "refused badge notification")?;
+	let second_count = captured_unread_count(&second_body, "badge retry")?;
+
+	if first_count != second_count {
+		return Err!("badge retry changed the unread count");
+	}
+
+	permit_response(&permits)?;
+	wait_for_queue_cleanup(services, &destination).await?;
+
+	expect_quiescent_for(&mut rx, "badge retry", RETRY_QUIET_WINDOW).await
+}
+
+fn captured_unread_count(body: &[u8], case: &str) -> Result<u64> {
+	let body: Value =
+		serde_json::from_slice(body).map_err(|e| err!("{case} body was not json: {e}"))?;
+
+	notification(&body)?
+		.get("counts")
+		.and_then(|counts| counts.get("unread"))
+		.and_then(Value::as_u64)
+		.ok_or_else(|| err!("{case} had no unread count"))
+}
+
+async fn verify_missing_pusher_reap(services: &Services) -> Result {
+	let server_name = services.globals.server_name();
+	let user = UserId::parse_with_server_name("push-missing", server_name)?;
+	let pushkey = "pk-push-missing";
+	let room_id = OwnedRoomId::from_parts('!', "push-missing", Some(server_name.as_str()))?;
+	let pdu_id = persist_message_pdu(services, &room_id, MISSING_PUSHER_EVENT_ID, 4)?;
+	let destination = Destination::Push(user.clone(), pushkey.to_owned());
+
+	services
+		.sending
+		.send_pdu_push(&pdu_id, &user, pushkey.to_owned())?;
+
+	wait_for_queue_cleanup(services, &destination).await
+}
+
+async fn wait_for_queue_cleanup(services: &Services, destination: &Destination) -> Result {
 	let cleared = async {
 		loop {
 			let queued = services
@@ -260,7 +370,7 @@ async fn wait_for_badge_queue_cleanup(services: &Services, destination: &Destina
 
 	timeout(Duration::from_secs(10), cleared)
 		.await
-		.map_err(|_| err!("timed out waiting for recovered badge queue cleanup"))
+		.map_err(|_| err!("timed out waiting for sender queue cleanup"))
 }
 
 async fn run_cases(services: &Services) -> Result {
@@ -282,7 +392,7 @@ async fn run_cases(services: &Services) -> Result {
 		unread.put((&user, room_id), 1_u64);
 	}
 
-	let pdu = message_event(room_id.as_str())?;
+	let pdu = message_event(room_id.as_str(), EVENT_ID)?;
 	let ruleset = Ruleset::server_default(&user);
 
 	let fixture = Fixture {
@@ -308,11 +418,11 @@ async fn run_cases(services: &Services) -> Result {
 	badge_bypasses_suppression(&fixture).await
 }
 
-fn message_event(room_id: &str) -> Result<Pdu> {
+fn message_event(room_id: &str, event_id: &str) -> Result<Pdu> {
 	serde_json::from_value(json!({
 		"type": "m.room.message",
 		"content": { "msgtype": "m.text", "body": "hello world" },
-		"event_id": EVENT_ID,
+		"event_id": event_id,
 		"room_id": room_id,
 		"sender": SENDER,
 		"prev_events": ["$prev:remote.example"],
@@ -322,6 +432,27 @@ fn message_event(room_id: &str) -> Result<Pdu> {
 		"hashes": { "sha256": "thishashcoversallfieldsincasethisisredacted" },
 	}))
 	.map_err(|e| err!("invalid test pdu: {e}"))
+}
+
+fn persist_message_pdu(
+	services: &Services,
+	room_id: &RoomId,
+	event_id: &str,
+	count: u64,
+) -> Result<RawPduId> {
+	let pdu = message_event(room_id.as_str(), event_id)?;
+	let pdu_id: RawPduId = PduId {
+		shortroomid: PUSH_FIXTURE_SHORT_ROOM_ID,
+		count: PduCount::Normal(count),
+	}
+	.into();
+
+	services
+		.db
+		.get("pduid_pdu")?
+		.raw_put(pdu_id, Json(&pdu));
+
+	Ok(pdu_id)
 }
 
 /// A pusher URL that is neither http nor https is rejected at creation.
@@ -892,27 +1023,72 @@ fn expect_quiescent(rx: &mut CaptureRx, case: &str) -> Result {
 	}
 }
 
-/// Minimal push gateway: captures the request path and body from one
-/// `POST /_matrix/push/v1/notify`, then answers `response_body` with a `200`.
-async fn stub_gateway(
-	listener: TcpListener,
-	tx: CaptureTx,
-	response_body: String,
-) {
-	let response = format!(
-		"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: \
-		 close\r\n\r\n{response_body}",
-		response_body.len(),
-	);
+async fn expect_quiescent_for(rx: &mut CaptureRx, case: &str, window: Duration) -> Result {
+	match timeout(window, rx.recv()).await {
+		| Err(_) => Ok(()),
+		| Ok(None) => Err!("stub gateway channel closed after {case}"),
+		| Ok(Some(_)) => Err!("{case} produced a delayed spurious notification"),
+	}
+}
+
+async fn stub_gateway(listener: TcpListener, tx: CaptureTx, response_body: String) {
+	let response = http_response("200 OK", &response_body);
 
 	while let Ok((mut socket, _)) = listener.accept().await {
-		if let Some((path, body)) = read_request(&mut socket).await {
-			tx.send((path, body)).ok();
+		let Some((path, body)) = read_request(&mut socket).await else {
+			continue;
+		};
+
+		if tx.send((path, body)).is_err() {
+			return;
 		}
 
 		socket.write_all(response.as_bytes()).await.ok();
 		socket.flush().await.ok();
 	}
+}
+
+async fn stub_gateway_scripted(
+	listener: TcpListener,
+	tx: CaptureTx,
+	response_body: String,
+	mut failures: usize,
+	mut permits: UnboundedReceiver<()>,
+) {
+	let accepted = http_response("200 OK", &response_body);
+	let refused = http_response("502 Bad Gateway", "{}");
+
+	while let Ok((mut socket, _)) = listener.accept().await {
+		let Some((path, body)) = read_request(&mut socket).await else {
+			continue;
+		};
+
+		if tx.send((path, body)).is_err() {
+			break;
+		}
+
+		if permits.recv().await.is_none() {
+			break;
+		}
+
+		let response = match failures {
+			| 0 => &accepted,
+			| _ => &refused,
+		};
+
+		failures = failures.saturating_sub(1);
+
+		socket.write_all(response.as_bytes()).await.ok();
+		socket.flush().await.ok();
+	}
+}
+
+fn http_response(status: &str, body: &str) -> String {
+	format!(
+		"HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: \
+		 {}\r\nConnection: close\r\n\r\n{body}",
+		body.len(),
+	)
 }
 
 async fn read_request(socket: &mut TcpStream) -> Option<(String, Vec<u8>)> {

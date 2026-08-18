@@ -45,6 +45,7 @@ use ruma::{
 	uint,
 };
 use serde::Deserialize;
+use tokio::time::Instant as TokioInstant;
 use tuwunel_core::{
 	Error, Event, Result, debug, debug_warn, err, error,
 	error::error_chain,
@@ -102,10 +103,13 @@ type FallbackTypes = BTreeMap<OwnedUserId, BTreeMap<OwnedDeviceId, Vec<OneTimeKe
 /// sender's plus matched PDU senders' devices and the to-device recipients.
 type Devices = SmallVec<[(OwnedUserId, OwnedDeviceId); 1]>;
 
-/// Per-worker retry timer keyed by earliest-retry deadline (tokio time). Every
-/// recorded federation failure arms one entry; heap size is bounded by the
-/// concurrently-sad destinations plus transient re-arms.
-type WakeQueue = BinaryHeap<Reverse<(tokio::time::Instant, OwnedServerName)>>;
+/// Per-worker retry timer keyed by earliest-retry deadline and destination.
+///
+/// Every recorded federation or push failure arms an entry. Stale entries are
+/// consumed by the destination's in-flight or newer failure generation. The
+/// heap is bounded by concurrently failing destinations, transient federation
+/// re-arms, and stale push entries.
+type WakeQueue = BinaryHeap<Reverse<(TokioInstant, Destination)>>;
 
 /// Per-(room, user) bucket of `ReceiptData`. MSC3771 allows one receipt
 /// per thread context per user per EDU window; the dominant case is
@@ -144,6 +148,8 @@ const SELECT_PRESENCE_LIMIT: usize = 256;
 const SELECT_RECEIPT_LIMIT: usize = 256;
 const DEQUEUE_LIMIT: usize = 48;
 const PUSH_FAILURE_STREAK: u32 = 4;
+const WAKE_OVERFLOW_DELAY_SECS: u64 = 365 * 24 * 60 * 60;
+const WAKE_OVERFLOW_DELAY: Duration = Duration::from_secs(WAKE_OVERFLOW_DELAY_SECS);
 
 pub const PDU_LIMIT: usize = 50;
 pub const EDU_LIMIT: usize = 100;
@@ -237,7 +243,7 @@ impl Service {
 							.should_attempt(&server)
 							.await
 						{
-							arm_wake(wakes, server, earliest_retry);
+							arm_wake(wakes, Destination::Federation(server), earliest_retry);
 						}
 					},
 					| dest @ Destination::Push(..) => {
@@ -248,11 +254,13 @@ impl Service {
 						};
 
 						let tries = *tries;
-						let retry_in = self
+						let delay = self
 							.push_backoff_remaining(Some(status))
 							.unwrap_or_default();
+						let (deadline, retry_in) = wake_deadline(delay);
 
 						Self::record_push_failure(&dest, &e, tries, retry_in);
+						wakes.push(Reverse((deadline, dest)));
 					},
 					| dest if matches!(retry_action, RetryAction::Force) =>
 						self.handle_force_retry(dest, futures, statuses)
@@ -262,6 +270,29 @@ impl Service {
 			},
 		}
 	}
+}
+
+fn arm_wake_in(wakes: &mut WakeQueue, dest: Destination, delay: Duration) {
+	let (deadline, _) = wake_deadline(delay);
+	wakes.push(Reverse((deadline, dest)));
+}
+
+fn wake_deadline(delay: Duration) -> (TokioInstant, Duration) {
+	// Floor the delay at 1s so clock steps and past deadlines wake promptly.
+	let delay = delay.max(Duration::from_secs(1));
+
+	// Spread the wake over another delay-width (3s minimum), so destinations
+	// sharing a backoff tier trickle back rather than retrying in one burst.
+	let jitter = rand_secs(0..delay.as_secs().max(3));
+	let now = TokioInstant::now();
+	let scheduled = delay.saturating_add(jitter);
+	let deadline = now.checked_add(scheduled).unwrap_or_else(|| {
+		now.checked_add(WAKE_OVERFLOW_DELAY)
+			.unwrap_or(now)
+	});
+	let scheduled = deadline.saturating_duration_since(now);
+
+	(deadline, scheduled)
 }
 
 #[implement(Service)]
@@ -461,40 +492,81 @@ impl Service {
 			.peek()
 			.is_some_and(|Reverse((due, _))| *due <= now)
 		{
-			let Reverse((_, server)) = wakes.pop().expect("peeked entry");
-			self.handle_wake(server, futures, statuses, wakes)
+			let Reverse((_, dest)) = wakes.pop().expect("peeked entry");
+			self.handle_wake(dest, futures, statuses, wakes)
 				.await;
 		}
 	}
 
 	async fn handle_wake<'a>(
 		&'a self,
-		server: OwnedServerName,
+		dest: Destination,
 		futures: &mut SendingFutures<'a>,
 		statuses: &mut CurTransactionStatus,
 		wakes: &mut WakeQueue,
 	) {
-		let dest = Destination::Federation(server.clone());
-		if matches!(statuses.get(&dest), Some(TransactionStatus::Running)) {
+		let status = statuses.get(&dest);
+
+		if matches!(
+			status,
+			Some(TransactionStatus::Running | TransactionStatus::RunningForceRetry)
+		) {
 			return;
 		}
 
-		match self
-			.services
-			.federation
-			.should_attempt(&server)
-			.await
-		{
-			| ShouldAttempt::No { earliest_retry } => arm_wake(wakes, server, earliest_retry),
-			| _ => {
-				let msg = Msg {
-					dest,
-					event: SendingEvent::Flush,
-					queue_id: Vec::new(),
-				};
+		if matches!(
+			(&dest, status),
+			(Destination::Push(..), Some(TransactionStatus::Retrying(_)))
+		) {
+			trace!(?dest, "Dropping push wake while retry is in flight");
+			return;
+		}
 
-				self.handle_request(msg, futures, statuses).await;
+		if let (Destination::Push(..), Some(remaining)) =
+			(&dest, self.push_backoff_remaining(status))
+		{
+			if wakes
+				.iter()
+				.any(|Reverse((_, armed_dest))| armed_dest == &dest)
+			{
+				trace!(?dest, "Dropping stale push wake");
+			} else {
+				trace!(?dest, ?remaining, "Re-arming early push wake");
+				arm_wake_in(wakes, dest, remaining);
+			}
+
+			return;
+		}
+
+		match dest {
+			| Destination::Federation(server) => {
+				let should_attempt = self
+					.services
+					.federation
+					.should_attempt(&server)
+					.await;
+
+				let dest = Destination::Federation(server);
+
+				match should_attempt {
+					| ShouldAttempt::No { earliest_retry } =>
+						arm_wake(wakes, dest, earliest_retry),
+					| _ => {
+						let msg = Msg {
+							dest,
+							event: SendingEvent::Flush,
+							queue_id: Vec::new(),
+						};
+
+						self.handle_request(msg, futures, statuses).await;
+					},
+				}
 			},
+			| dest @ Destination::Push(..) => {
+				self.handle_force_retry(dest, futures, statuses)
+					.await;
+			},
+			| Destination::Appservice(_) => {},
 		}
 	}
 
@@ -1405,16 +1477,20 @@ impl Service {
 			.iter()
 			.any(|event| matches!(event, SendingEvent::Pdu(_)));
 
+		let destination = || Destination::Push(user_id.clone(), pushkey.clone());
 		let suppressed = self.pushing_suppressed(&user_id).map(Ok);
 		let pusher = self
 			.services
 			.pusher
 			.get_pusher(&user_id, &pushkey)
-			.map_err(|_| {
-				(
-					Destination::Push(user_id.clone(), pushkey.clone()),
-					err!(Database(error!(?user_id, ?pushkey, "Missing pusher"))),
-				)
+			.map(|result| match result {
+				| Ok(pusher) => Ok(Some(pusher)),
+				| Err(error) if error.is_not_found() => {
+					error!(%user_id, %pushkey, "Pusher disappeared before delivery");
+
+					Ok(None)
+				},
+				| Err(error) => Err((destination(), error)),
 			});
 
 		let rules_for_user = has_pdu
@@ -1429,6 +1505,10 @@ impl Service {
 
 		let (pusher, rules_for_user, suppressed) =
 			try_join3(pusher, rules_for_user, suppressed).await?;
+
+		let Some(pusher) = pusher else {
+			return Ok(Destination::Push(user_id, pushkey));
+		};
 
 		// Reconciliation, not an alert: a suppressed drop strands a stale badge.
 		if events.contains(&SendingEvent::BadgeRefresh) {
@@ -1880,21 +1960,10 @@ impl Service {
 	}
 }
 
-fn arm_wake(wakes: &mut WakeQueue, server: OwnedServerName, earliest_retry: SystemTime) {
-	use tokio::time::Instant;
-
-	// Floor the delay at 1s so clock steps and past deadlines wake promptly.
+fn arm_wake(wakes: &mut WakeQueue, dest: Destination, earliest_retry: SystemTime) {
 	let delay = earliest_retry
 		.duration_since(SystemTime::now())
-		.unwrap_or_default()
-		.max(Duration::from_secs(1));
+		.unwrap_or_default();
 
-	// Spread the wake over another delay-width (3s minimum), so destinations
-	// sharing a backoff tier trickle back rather than retrying in one burst.
-	let jitter = rand_secs(0..delay.as_secs().max(3));
-	let deadline = Instant::now()
-		.checked_add(delay.saturating_add(jitter))
-		.unwrap_or_else(Instant::now);
-
-	wakes.push(Reverse((deadline, server)));
+	arm_wake_in(wakes, dest, delay);
 }

@@ -3,7 +3,7 @@ use std::fmt::Debug;
 use ruma::{OwnedServerName, OwnedUserId};
 use tuwunel_core::implement;
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Destination {
 	Appservice(String),
 	Push(OwnedUserId, String), // user and pushkey
