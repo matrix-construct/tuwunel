@@ -14,7 +14,7 @@ use ruma::{
 	push::{Action, HighlightTweakValue, HttpPusherData, PushFormat, Ruleset, Tweak},
 };
 use serde_json::Value;
-use tuwunel_core::{Err, Result, err, implement, matrix::Event, utils::BoolExt, warn};
+use tuwunel_core::{Result, err, implement, matrix::Event, utils::BoolExt, warn};
 use url::Url;
 
 use super::Evaluate;
@@ -31,9 +31,6 @@ pub async fn send_push_notice<E>(
 where
 	E: Event,
 {
-	let mut notify = None;
-	let mut tweaks = Vec::new();
-
 	let power_levels = self
 		.services
 		.state_accessor
@@ -54,26 +51,16 @@ where
 		})
 		.await;
 
-	for action in actions {
-		let n = match action {
-			| Action::Notify => true,
-			| Action::SetTweak(tweak) => {
-				tweaks.push(tweak.clone());
-				continue;
-			},
-			| _ => false,
-		};
+	let notify = actions.iter().any(Action::should_notify);
+	if notify || self.services.config.push_everything {
+		let tweaks: Vec<Tweak> = actions
+			.iter()
+			.filter_map(|action| match action {
+				| Action::SetTweak(tweak) => Some(tweak.clone()),
+				| _ => None,
+			})
+			.collect();
 
-		if notify.is_some() {
-			return Err!(Request(BadJson(
-				r#"Malformed pushrule contains more than one of these actions: ["dont_notify", "notify", "coalesce"]"#
-			)));
-		}
-
-		notify = Some(n);
-	}
-
-	if notify == Some(true) || self.services.config.push_everything {
 		self.send_notice(user_id, pusher, tweaks, event)
 			.await?;
 	}

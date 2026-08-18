@@ -300,6 +300,7 @@ async fn run_cases(services: &Services) -> Result {
 	gateway_url_paths(&fixture).await?;
 	rejected_pushkey_removed(&fixture).await?;
 	foreign_rejected_key_noop(&fixture).await?;
+	legacy_actions(&fixture).await?;
 	counts_only_delivery(&fixture, &room_id, &other_room_id).await?;
 	account_wide_count_delivery(&fixture, &room_id).await?;
 	badge_count_opt_out(&fixture).await?;
@@ -475,6 +476,49 @@ async fn foreign_rejected_key_noop(fixture: &Fixture<'_>) -> Result {
 		.await
 		.map(|_| ())
 		.map_err(|_| err!("pusher was removed for a foreign rejected key"))
+}
+
+async fn legacy_actions(fixture: &Fixture<'_>) -> Result {
+	let pushkey = "pk-legacy-actions";
+	let config = StubPusherConfig::new(r#"{"rejected":[]}"#);
+	let (pusher, _action, mut rx, _stub) = stub_pusher(fixture, pushkey, config).await?;
+
+	let notify_ruleset = legacy_ruleset(&json!(["notify", "dont_notify"]))?;
+
+	fixture
+		.services
+		.pusher
+		.send_push_notice(fixture.user, &pusher, &notify_ruleset, fixture.pdu)
+		.await?;
+
+	let (_path, body) = recv(&mut rx).await?;
+	let body = serde_json::from_slice(&body)
+		.map_err(|e| err!("legacy-action notification body was not json: {e}"))?;
+
+	expect_str(notification(&body)?, "event_id", EVENT_ID)?;
+
+	let quiet_ruleset = legacy_ruleset(&json!(["dont_notify", "coalesce"]))?;
+
+	fixture
+		.services
+		.pusher
+		.send_push_notice(fixture.user, &pusher, &quiet_ruleset, fixture.pdu)
+		.await?;
+
+	expect_quiescent(&mut rx, "quiet legacy actions")
+}
+
+fn legacy_ruleset(actions: &Value) -> Result<Ruleset> {
+	serde_json::from_value(json!({
+		"override": [{
+			"rule_id": "tuwunel.test.legacy",
+			"default": false,
+			"enabled": true,
+			"conditions": [],
+			"actions": actions,
+		}],
+	}))
+	.map_err(|e| err!("invalid test ruleset: {e}"))
 }
 
 async fn counts_only_delivery(
@@ -838,6 +882,14 @@ async fn recv(rx: &mut CaptureRx) -> Result<CapturedRequest> {
 		.await
 		.map_err(|_| err!("timed out waiting for a push notification"))?
 		.ok_or_else(|| err!("stub gateway channel closed"))
+}
+
+fn expect_quiescent(rx: &mut CaptureRx, case: &str) -> Result {
+	match rx.try_recv() {
+		| Err(TryRecvError::Empty) => Ok(()),
+		| Err(TryRecvError::Disconnected) => Err!("stub gateway channel closed after {case}"),
+		| Ok(_) => Err!("{case} produced a spurious notification"),
+	}
 }
 
 /// Minimal push gateway: captures the request path and body from one

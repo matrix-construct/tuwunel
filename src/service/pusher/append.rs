@@ -160,9 +160,7 @@ async fn append_pdu_for_user(
 		})
 		.await;
 
-	let notify = actions
-		.iter()
-		.any(|action| matches!(action, Action::Notify));
+	let notify = actions.iter().any(Action::should_notify);
 
 	let highlight = actions.iter().any(|action| {
 		matches!(action, Action::SetTweak(Tweak::Highlight(HighlightTweakValue::Yes)))
