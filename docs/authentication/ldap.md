@@ -75,10 +75,14 @@ uri = "ldaps://ldap.example.org:636"
 bind_dn = "cn={username},ou=users,dc=example,dc=org"
 ```
 
-This is the simplest mode but has two limitations: it cannot apply a search
-filter (so anyone in the bind DN's subtree can log in), and **admin
-synchronization does not work** because Tuwunel never gets a chance to query
-the directory under a service account.
+This is the simplest mode but has three limitations. It cannot apply a search
+filter, so anyone in the bind DN's subtree can log in. **Admin
+synchronization does not work**, because Tuwunel never gets a chance to query
+the directory under a service account. And there is **no local-password
+fallback**: that fallback is triggered by a search returning no matches, and
+this mode runs no search, so every `m.login.password` request is decided by
+the directory alone. An account that must keep a working local password, such
+as a bootstrap admin, cannot log in while direct-bind mode is active.
 
 ## Configuration reference
 
@@ -158,10 +162,11 @@ Both commands are gated by the `ldap` build feature.
 
 ## Disabling password login for non-LDAP users
 
-Tuwunel's LDAP integration always falls back to local password verification
-when the LDAP search returns no matches. To enforce LDAP-only login for
-everyone (apart from accounts that authenticate via SSO), pair LDAP with a
-restrictive `filter` that matches every legitimate user, and remove or
+In the search-then-bind modes, Tuwunel falls back to local password
+verification when the LDAP search returns no matches. To enforce LDAP-only
+login for everyone (apart from accounts that authenticate via SSO), pair LDAP
+with a restrictive `filter` that matches every legitimate user, and remove or
 invalidate local passwords for accounts that should no longer be able to log
-in directly. Alternatively, set `login_with_password = false` and rely on
+in directly. Direct-bind mode already has no fallback, so it enforces this on
+its own. Alternatively, set `login_with_password = false` and rely on
 [identity providers](providers.md) for non-LDAP users.
