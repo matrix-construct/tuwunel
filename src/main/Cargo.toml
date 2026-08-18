@@ -47,6 +47,11 @@ name = "tuwunel"
 summary = """\
 High performance Matrix homeserver written in Rust"""
 require-sh = false
+# The binary reads its trust roots from the platform store rather than bundling
+# webpki roots, so a host without a CA bundle refuses to start. --auto-req only
+# discovers shared libraries, which leaves this one undeclared. rpm/tuwunel.spec
+# states the same requirement for the COPR build.
+requires = { ca-certificates = "*" }
 post_install_script = "rpm/postinst"
 assets = [
 	{ source = "target/release/tuwunel", dest = "/usr/sbin/tuwunel", mode = "755" },
