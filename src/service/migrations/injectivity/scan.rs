@@ -10,7 +10,7 @@ use tuwunel_core::{
 	Result, err, implement, info,
 	smallvec::SmallVec,
 	utils::{
-		BoolExt, ReadyExt,
+		BoolExt, ReadyExt, TryReadyExt,
 		stream::{IterStream, TryIgnore},
 	},
 	warn,
@@ -52,9 +52,9 @@ type Resolution = (Vec<u64>, BTreeMap<u64, u64>, Candidates, u64);
 
 /// What dereferencing one candidate's identity proved.
 ///
-/// Absent is the only outcome a promotion may act on. A failed read and a
-/// forward row whose value is not a short id both leave the row unsettled,
-/// which is not the same as proving nothing is there.
+/// Absent is the only outcome a promotion may act on. A forward row whose
+/// value is not a short id remains unsettled, which is not the same as
+/// proving nothing is there; a failed read never produces an outcome.
 enum Resolved {
 	Winner(u64),
 	Absent,
@@ -64,7 +64,7 @@ enum Resolved {
 /// Exclusive upper bound on verifiable short ids.
 ///
 /// Each scan bitmap costs one bit per id up to the global counter, and the
-/// deep sweep holds up to five at once. At or above this bound the scan
+/// deep sweep holds up to four at once. At or above this bound the scan
 /// reports unverifiable instead.
 const MAX_SHORT: u64 = 1 << 30;
 
@@ -89,8 +89,9 @@ pub(super) struct Family {
 
 /// Everything one scan measured, and the worklists the repair consumes.
 ///
-/// The deep counts stay zero when neither family has a loser, since the
-/// deeper indexes are not read in that case.
+/// The deep counts stay zero unless the sweep ran: a loserless scan, a
+/// healable residue, and a family anomaly all decide the boot without
+/// reading the deeper indexes.
 #[derive(Default)]
 pub(super) struct Scan {
 	pub(super) events: Family,
@@ -98,9 +99,8 @@ pub(super) struct Scan {
 	pub(super) dirty: u64,
 	pub(super) entries: u64,
 	pub(super) infected: BTreeSet<u64>,
-	pub(super) orphans: u64,
-	pub(super) missing_parents: u64,
 	pub(super) infected_parents: u64,
+	pub(super) orphans: u64,
 	pub(super) malformed_diffs: u64,
 	pub(super) moves: Vec<u64>,
 	pub(super) relations: Relations,
@@ -129,10 +129,10 @@ struct Diffs<'a> {
 #[derive(Default)]
 struct Counts {
 	infected: BTreeSet<u64>,
+	infected_parents: u64,
 	ghosts: u64,
 	removed_ghosts: u64,
 	orphans: u64,
-	missing_parents: u64,
 	malformed: u64,
 }
 
@@ -149,7 +149,8 @@ struct Notification {
 ///
 /// Each reverse map streams before its forward map, so a concurrent
 /// allocation surfaces only on the forward side and cannot be flagged
-/// stale. The deeper indexes are read only when a loser exists.
+/// stale. The deeper indexes are read only when a loser exists and no
+/// family-level verdict already decided the boot.
 #[tracing::instrument(level = "debug", skip_all)]
 pub(super) async fn scan(services: &Services) -> Result<Scan> {
 	info!("Scanning ShortID columns for duplicate values...");
@@ -159,8 +160,7 @@ pub(super) async fn scan(services: &Services) -> Result<Scan> {
 	if counter >= MAX_SHORT {
 		warn!(
 			%counter,
-			"Short id space too large to verify injectivity; stale auth chain caches, if \
-			 any, survive and can distort state resolution until `server clear-caches`."
+			"Short id space too large to verify injectivity; refusing the destructive repair."
 		);
 		return Ok(Scan { unverifiable: true, ..Default::default() });
 	}
@@ -169,53 +169,57 @@ pub(super) async fn scan(services: &Services) -> Result<Scan> {
 		.map_err(|_| err!("short id bitmap exceeds the address width"))?;
 
 	let (events, event_reverse) =
-		family(services, "eventid_shorteventid", "shorteventid_eventid", counter, words).await;
+		family(services, "eventid_shorteventid", "shorteventid_eventid", counter, words).await?;
 
 	let (statekeys, statekey_reverse) =
 		family(services, "statekey_shortstatekey", "shortstatekey_statekey", counter, words)
-			.await;
+			.await?;
 
 	if events.losers.is_empty() && statekeys.losers.is_empty() {
 		return Ok(Scan { events, statekeys, ..Default::default() });
 	}
 
-	let swept =
-		sweep(services, &events, &statekeys, event_reverse, statekey_reverse, counter).await;
+	let families = Scan { events, statekeys, ..Default::default() };
 
-	let scan = Scan { events, statekeys, ..swept };
-
-	// The stray census is the widest pass and gates nothing; it reports on
-	// the boot that acts and skips the rescans a refusal or a heal causes.
-	match scan.anomalous() || scan.healable() {
-		| true => Ok(scan),
-		| false => {
-			let strays = strays(&services.db, counter, words).await;
-
-			Ok(Scan { strays, ..scan })
-		},
+	// Both a heal and a family anomaly decide the boot without a deep
+	// count, so neither pays for one.
+	if families.family_anomalous() || families.healable() {
+		return Ok(families);
 	}
+
+	let Scan { events, statekeys, .. } = families;
+
+	let swept =
+		sweep(services, &events, &statekeys, event_reverse, statekey_reverse, counter).await?;
+
+	Ok(Scan { events, statekeys, ..swept })
 }
 
-/// Whether any count impugns the scan or exceeds what the repair handles.
+/// Whether any count impugns the repair's own input.
 ///
 /// Any anomaly refuses the destructive repair lane; the cache-clearing
-/// lane is unconditionally safe and proceeds regardless. The classes a
-/// heal pass completes are gone by the time this decides, so they are
-/// absent here.
+/// lane is unconditionally safe and proceeds regardless. A malformed diff
+/// row leaves the statediff walk's own output in doubt, and a child of an
+/// infected state would need its whole chain rederived, so both gate
+/// alongside the family anomalies.
 #[implement(Scan)]
 pub(super) fn anomalous(&self) -> bool {
-	self.events.anomalous()
-		|| self.statekeys.anomalous()
-		|| self.orphans > 0
-		|| self.missing_parents > 0
-		|| self.infected_parents > 0
-		|| self.malformed_diffs > 0
+	self.family_anomalous() || self.infected_parents > 0 || self.malformed_diffs > 0
+}
+
+/// Whether either short id family carries an unhandled shape.
+///
+/// This predicate uses only the family passes, so callers can distinguish
+/// their early verdict from counters a deep sweep never measured.
+#[implement(Scan)]
+pub(super) fn family_anomalous(&self) -> bool {
+	self.events.anomalous() || self.statekeys.anomalous()
 }
 
 /// Whether a heal pass has rows to complete in either family.
 ///
-/// The orphan and parent counts are taken against bitmaps a heal then
-/// changes, so a healable scan decides nothing else until it rescans.
+/// A healable scan decides nothing else until it rescans, since a heal
+/// changes the losers and winners every deeper measure is taken against.
 #[implement(Scan)]
 pub(super) fn healable(&self) -> bool { self.events.healable() || self.statekeys.healable() }
 
@@ -260,23 +264,24 @@ async fn family(
 	reverse: &'static str,
 	counter: u64,
 	words: usize,
-) -> (Family, Bits) {
+) -> Result<(Family, Bits)> {
 	let db = &services.db;
 
-	let (reverse_bits, rows, reverse_malformed) = reverse_bitmap(&db[reverse], words).await;
+	let (reverse_bits, rows, reverse_malformed) = reverse_bitmap(&db[reverse], words).await?;
 
 	let (forward_bits, mut dangling, forward_malformed) =
-		dangling_winners(&db[forward], &reverse_bits, counter, words).await;
+		dangling_winners(&db[forward], &reverse_bits, counter, words).await?;
 
 	// A set reverse bit no forward value claims is what the pass collects.
 	let candidates = match any_unclaimed(&reverse_bits, &forward_bits, counter) {
 		| false => Candidates::new(),
-		| true => loser_candidates(&db[reverse], &forward_bits, counter).await,
+		| true => loser_candidates(&db[reverse], &forward_bits, counter).await?,
 	};
 
 	drop(forward_bits);
 
-	let (losers, winners, mut promotable, unresolved) = resolve(&db[forward], &candidates).await;
+	let (losers, winners, mut promotable, unresolved) =
+		resolve(&db[forward], &candidates).await?;
 
 	let contended = contenders(&mut dangling, by_short)
 		.saturating_add(contenders(&mut promotable, by_identity));
@@ -305,7 +310,7 @@ async fn family(
 		"Finished scanning column pair."
 	);
 
-	(family, reverse_bits)
+	Ok((family, reverse_bits))
 }
 
 /// Streams a reverse map into its keyset bitmap, its row count, and its
@@ -313,20 +318,19 @@ async fn family(
 ///
 /// The rows are counted here rather than in the loser pass, which a clean
 /// family skips.
-async fn reverse_bitmap(map: &Arc<Map>, words: usize) -> (Bits, u64, u64) {
+async fn reverse_bitmap(map: &Arc<Map>, words: usize) -> Result<(Bits, u64, u64)> {
 	map.raw_keys()
-		.ignore_err()
-		.ready_fold((vec![0_u64; words], 0_u64, 0_u64), |(mut bits, rows, malformed), key| {
+		.ready_try_fold((vec![0_u64; words], 0_u64, 0_u64), |(mut bits, rows, malformed), key| {
 			let rows = rows.saturating_add(1);
 
-			match short_of(key) {
+			Ok(match short_of(key) {
 				| None => (bits, rows, malformed.saturating_add(1)),
 				| Some(short) => {
 					set_bit(&mut bits, short);
 
 					(bits, rows, malformed)
 				},
-			}
+			})
 		})
 		.await
 }
@@ -342,22 +346,23 @@ async fn dangling_winners(
 	reverse_bits: &[u64],
 	counter: u64,
 	words: usize,
-) -> (Bits, Candidates, u64) {
+) -> Result<(Bits, Candidates, u64)> {
 	map.raw_stream()
-		.ignore_err()
-		.ready_fold(
+		.ready_try_fold(
 			(vec![0_u64; words], Candidates::new(), 0_u64),
-			|(mut bits, mut dangling, malformed), (key, value)| match short_of(value) {
-				| None => (bits, dangling, malformed.saturating_add(1)),
-				| Some(short) => {
-					if short <= counter && !get_bit(reverse_bits, short) {
-						dangling.push((short, Identity::from_slice(key)));
-					}
+			|(mut bits, mut dangling, malformed), (key, value)| {
+				Ok(match short_of(value) {
+					| None => (bits, dangling, malformed.saturating_add(1)),
+					| Some(short) => {
+						if short <= counter && !get_bit(reverse_bits, short) {
+							dangling.push((short, Identity::from_slice(key)));
+						}
 
-					set_bit(&mut bits, short);
+						set_bit(&mut bits, short);
 
-					(bits, dangling, malformed)
-				},
+						(bits, dangling, malformed)
+					},
+				})
 			},
 		)
 		.await
@@ -393,10 +398,13 @@ fn any_unclaimed(reverse_bits: &[u64], forward_bits: &[u64], counter: u64) -> bo
 /// Collects reverse keys no forward value claims.
 ///
 /// The identity each row names rides along for the dereference pass.
-async fn loser_candidates(map: &Arc<Map>, forward_bits: &[u64], counter: u64) -> Candidates {
+async fn loser_candidates(
+	map: &Arc<Map>,
+	forward_bits: &[u64],
+	counter: u64,
+) -> Result<Candidates> {
 	map.raw_stream()
-		.ignore_err()
-		.ready_fold(Candidates::new(), |mut candidates, (key, value)| {
+		.ready_try_fold(Candidates::new(), |mut candidates, (key, value)| {
 			let unclaimed =
 				short_of(key).filter(|short| *short <= counter && !get_bit(forward_bits, *short));
 
@@ -404,7 +412,7 @@ async fn loser_candidates(map: &Arc<Map>, forward_bits: &[u64], counter: u64) ->
 				candidates.push((short, Identity::from_slice(value)));
 			}
 
-			candidates
+			Ok(candidates)
 		})
 		.await
 }
@@ -414,22 +422,22 @@ async fn loser_candidates(map: &Arc<Map>, forward_bits: &[u64], counter: u64) ->
 /// The identity a loser's reverse row names must hold a live forward row,
 /// whose value is the winner. A candidate resolving to itself was a
 /// concurrent allocation, not a loser.
-async fn resolve(map: &Arc<Map>, candidates: &[(u64, Identity)]) -> Resolution {
+async fn resolve(map: &Arc<Map>, candidates: &[(u64, Identity)]) -> Result<Resolution> {
 	let (mut losers, winners, promotable, unsettled, paired) = candidates
 		.iter()
 		.map(candidate_identity)
 		.stream()
 		.get(map)
-		.map(resolution)
 		.zip(candidates.iter().stream())
-		.ready_fold(
+		.map(|(result, candidate)| resolution(result).map(|resolved| (resolved, candidate)))
+		.ready_try_fold(
 			(Vec::new(), BTreeMap::new(), Candidates::new(), 0_u64, 0_usize),
 			|(mut losers, mut winners, mut promotable, unsettled, paired),
 			 (resolved, candidate)| {
 				let paired = paired.saturating_add(1);
 				let loser = candidate_short(candidate);
 
-				match resolved {
+				Ok(match resolved {
 					| Resolved::Winner(winner) if winner == loser =>
 						(losers, winners, promotable, unsettled, paired),
 					| Resolved::Winner(winner) => {
@@ -449,19 +457,19 @@ async fn resolve(map: &Arc<Map>, candidates: &[(u64, Identity)]) -> Resolution {
 
 						(losers, winners, promotable, unsettled.saturating_add(1), paired)
 					},
-				}
+				})
 			},
 		)
-		.await;
+		.await?;
 
-	// A batched lookup can compress a failed chunk into one error item,
-	// desynchronizing the zip; the unpaired tail is undereferenced, so it refuses.
+	// A successful batch preserves cardinality. Retain a fail-closed tail
+	// defense in case an adapter ever truncates a clean lookup stream.
 	let tail = candidates.get(paired..).unwrap_or_default();
 	losers.extend(tail.iter().map(candidate_short));
 
 	let unresolved = unsettled.saturating_add(u64::try_from(tail.len()).unwrap_or(u64::MAX));
 
-	(losers, winners, promotable, unresolved)
+	Ok((losers, winners, promotable, unresolved))
 }
 
 /// Counts candidates contending for a slot another candidate already
@@ -496,19 +504,19 @@ fn by_identity(a: &Candidate, b: &Candidate) -> Ordering { a.1.cmp(&b.1) }
 
 // A failed read is not an absent row; only the not-found error proves the
 // forward row is missing, and a promotion is a write.
-fn resolution(result: Result<Handle<'_>>) -> Resolved {
+fn resolution(result: Result<Handle<'_>>) -> Result<Resolved> {
 	match result {
-		| Ok(handle) => short_of(&handle).map_or(Resolved::Unsettled, Resolved::Winner),
-		| Err(error) if error.is_not_found() => Resolved::Absent,
-		| Err(_) => Resolved::Unsettled,
+		| Ok(handle) => Ok(short_of(&handle).map_or(Resolved::Unsettled, Resolved::Winner)),
+		| Err(error) if error.is_not_found() => Ok(Resolved::Absent),
+		| Err(error) => Err(error),
 	}
 }
 
-/// Reads the deeper indexes once a loser exists in either family.
+/// Reads the deeper indexes for the worklists the repair consumes.
 ///
-/// Statediff entries are tested against both families and chain-cache rows
-/// against either, while the shortroomid families are counted for the
-/// report without gating any repair.
+/// Statediff entries are tested against both families and chain-cache
+/// rows against either. The caller runs this only when a loser exists and
+/// no family-level verdict already decided the boot.
 #[tracing::instrument(level = "debug", skip_all)]
 async fn sweep(
 	services: &Services,
@@ -517,7 +525,7 @@ async fn sweep(
 	event_reverse: Bits,
 	statekey_reverse: Bits,
 	counter: u64,
-) -> Scan {
+) -> Result<Scan> {
 	let db = &services.db;
 	let words = event_reverse.len();
 	let event_stale = bits_of(&events.losers, words);
@@ -531,61 +539,46 @@ async fn sweep(
 		statekey_reverse: &statekey_reverse,
 	};
 
-	let counts = diffs(db, words, walk).await;
+	let counts = db["shortstatehash_statediff"]
+		.raw_stream()
+		.ready_try_fold(
+			Counts::default(),
+			|counts, (key, value)| Ok(walk.row(counts, key, value)),
+		)
+		.await?;
 
 	drop(event_reverse);
 	drop(statekey_reverse);
-
-	// A descendant of an infected state would need re-derivation down the
-	// diff chain, which is not built; the anomaly refuses the destructive
-	// lane instead.
-	let infected_parents = match counts.infected.is_empty() {
-		| true => 0,
-		| false =>
-			db["shortstatehash_statediff"]
-				.raw_stream()
-				.ignore_err()
-				.ready_fold(0_u64, |descendants, (_, value)| {
-					let parent = value.get(0..8).and_then(short_of);
-
-					descendants.saturating_add(u64::from(
-						parent.is_some_and(|parent| counts.infected.contains(&parent)),
-					))
-				})
-				.await,
-	};
 
 	// A key or value that is stale or not a whole number of short ids
 	// poisons the row either way.
 	let (dirty, entries) = db["authchainkey_authchain"]
 		.raw_stream()
-		.ignore_err()
-		.ready_fold((0_u64, 0_u64), |(dirty, entries), (key, chain)| {
+		.ready_try_fold((0_u64, 0_u64), |(dirty, entries), (key, chain)| {
 			let hit = disposable(key, &event_stale, &statekey_stale)
 				|| disposable(chain, &event_stale, &statekey_stale);
 
-			(dirty.saturating_add(u64::from(hit)), entries.saturating_add(1))
+			Ok((dirty.saturating_add(u64::from(hit)), entries.saturating_add(1)))
 		})
-		.await;
+		.await?;
 
-	// ready_fold rather than ready_filter_map: the higher-ranked adapter
-	// fails the boot coroutine's Send obligation over cursor-borrowed items.
+	// ready_try_fold rather than ready_try_filter_map: the higher-ranked
+	// adapter fails the boot coroutine's Send obligation over cursor-borrowed
+	// items.
 	let moves: Vec<u64> = db["shorteventid_shortstatehash"]
 		.raw_keys()
-		.ignore_err()
-		.ready_fold(Vec::new(), |mut moves, key| {
+		.ready_try_fold(Vec::new(), |mut moves, key| {
 			if let Some(loser) = short_of(key).filter(|short| get_bit(&event_stale, *short)) {
 				moves.push(loser);
 			}
 
-			moves
+			Ok(moves)
 		})
-		.await;
+		.await?;
 
 	let relations: Relations = db["relatesto_typed"]
 		.raw_stream()
-		.ignore_err()
-		.ready_fold(Relations::new(), |mut relations, (key, value)| {
+		.ready_try_fold(Relations::new(), |mut relations, (key, value)| {
 			let dirty = short_of(value)
 				.filter(|loser| get_bit(&event_stale, *loser))
 				.zip(RelationKey::try_from(key).ok());
@@ -594,65 +587,37 @@ async fn sweep(
 				relations.push((key, loser));
 			}
 
-			relations
+			Ok(relations)
 		})
-		.await;
+		.await?;
 
-	// dirty and entries read zero on any boot whose chain clear ran first;
-	// a refusing database's later boots report the live dirt instead.
+	// dirty and entries read zero on a boot whose one-time chain clear ran
+	// first; split-marker upgrades report the live dirt instead.
 	warn!(
 		dirty,
 		entries,
 		infected = counts.infected.len(),
+		infected_parents = counts.infected_parents,
 		ghosts = counts.ghosts,
 		removed_ghosts = counts.removed_ghosts,
 		orphans = counts.orphans,
-		missing_parents = counts.missing_parents,
-		infected_parents,
 		malformed_diffs = counts.malformed,
 		moves = moves.len(),
 		relations = relations.len(),
 		"Swept the deeper short id indexes."
 	);
 
-	Scan {
+	Ok(Scan {
 		dirty,
 		entries,
 		infected: counts.infected,
+		infected_parents: counts.infected_parents,
 		orphans: counts.orphans,
-		missing_parents: counts.missing_parents,
-		infected_parents,
 		malformed_diffs: counts.malformed,
 		moves,
 		relations,
 		..Default::default()
-	}
-}
-
-/// Folds every statediff row through the walk, its parent keyset first.
-///
-/// The whole keyset must precede the row walk, a row's parent appearing
-/// anywhere in the file.
-async fn diffs(db: &Database, words: usize, walk: Diffs<'_>) -> Counts {
-	let parents = db["shortstatehash_statediff"]
-		.raw_keys()
-		.ignore_err()
-		.ready_fold(vec![0_u64; words], |mut bits, key| {
-			if let Some(short) = short_of(key) {
-				set_bit(&mut bits, short);
-			}
-
-			bits
-		})
-		.await;
-
-	db["shortstatehash_statediff"]
-		.raw_stream()
-		.ignore_err()
-		.ready_fold(Counts::default(), |counts, (key, value)| {
-			walk.row(counts, key, value, &parents)
-		})
-		.await
+	})
 }
 
 impl Diffs<'_> {
@@ -662,15 +627,23 @@ impl Diffs<'_> {
 	/// statekey and an event half, an added run first and a removed run
 	/// only behind an 8-byte zero sentinel. The sentinel shifts entry
 	/// alignment by 8, so the walk is sequential rather than chunked.
-	fn row(&self, mut counts: Counts, key: &[u8], value: &[u8], parents: &[u64]) -> Counts {
+	fn row(&self, mut counts: Counts, key: &[u8], value: &[u8]) -> Counts {
 		let (Some(row), Some(parent)) = (short_of(key), value.get(0..8).and_then(short_of))
 		else {
 			counts.malformed = counts.malformed.saturating_add(1);
 			return counts;
 		};
 
-		if parent != 0 && parent <= self.counter && !get_bit(parents, parent) {
-			counts.missing_parents = counts.missing_parents.saturating_add(1);
+		// Rows stream in ascending shortstatehash order, and the writer can
+		// only name an already allocated parent. Failing this premise closed
+		// keeps the one-pass descendant check sound.
+		if parent != 0 && parent >= row {
+			counts.malformed = counts.malformed.saturating_add(1);
+			return counts;
+		}
+
+		if parent != 0 && counts.infected.contains(&parent) {
+			counts.infected_parents = counts.infected_parents.saturating_add(1);
 		}
 
 		let mut removed_run = false;
@@ -729,7 +702,10 @@ impl Diffs<'_> {
 ///
 /// Purged rooms and losing allocations both produce them; no repair step
 /// touches a shortroomid family, so the count reports and gates nothing.
+/// Retained (unused) as the only in-tree measurement of the stray class,
+/// one restored call away from a repair that learns to act on it.
 #[tracing::instrument(level = "debug", skip_all)]
+#[expect(dead_code)]
 async fn strays(db: &Database, counter: u64, words: usize) -> u64 {
 	let rooms = db["roomid_shortroomid"]
 		.raw_stream()
@@ -833,13 +809,16 @@ fn disposable(bytes: &[u8], event_stale: &[u64], statekey_stale: &[u64]) -> bool
 }
 
 fn references(bytes: &[u8], event_stale: &[u64], statekey_stale: &[u64]) -> bool {
-	bytes
+	let mut shorts = bytes
 		.as_chunks::<{ size_of::<u64>() }>()
 		.0
 		.iter()
 		.copied()
-		.map(u64::from_be_bytes)
-		.any(|short| get_bit(event_stale, short) || get_bit(statekey_stale, short))
+		.map(u64::from_be_bytes);
+
+	Iterator::any(&mut shorts, |short| {
+		get_bit(event_stale, short) || get_bit(statekey_stale, short)
+	})
 }
 
 fn set_bit(bits: &mut [u64], index: u64) {
@@ -860,10 +839,24 @@ fn get_bit(bits: &[u64], index: u64) -> bool {
 
 #[cfg(test)]
 mod tests {
-	use super::{Candidate, Family, Identity, by_identity, by_short, contenders};
+	use tuwunel_core::err;
+
+	use super::{
+		Candidate, Counts, Diffs, Family, Identity, Resolved, Scan, by_identity, by_short,
+		contenders, resolution,
+	};
 
 	fn candidate(short: u64, identity: &[u8]) -> Candidate {
 		(short, Identity::from_slice(identity))
+	}
+
+	fn statediff(parent: u64, statekey: u64, event: u64) -> [u8; 24] {
+		let mut value = [0_u8; 24];
+		value[..8].copy_from_slice(&parent.to_be_bytes());
+		value[8..16].copy_from_slice(&statekey.to_be_bytes());
+		value[16..].copy_from_slice(&event.to_be_bytes());
+
+		value
 	}
 
 	#[test]
@@ -930,5 +923,66 @@ mod tests {
 		};
 
 		assert!(!family.healable());
+		assert!(family.anomalous());
+	}
+
+	#[test]
+	fn a_forward_read_error_propagates() {
+		let result = resolution(Err(err!(Database("test read failure"))));
+
+		assert!(result.is_err());
+	}
+
+	#[test]
+	fn a_missing_forward_row_remains_absent() {
+		let result = resolution(Err(err!(Request(NotFound("test row")))));
+
+		assert!(matches!(result, Ok(Resolved::Absent)));
+	}
+
+	#[test]
+	fn a_descendant_of_an_infected_state_refuses_the_repair() {
+		let event_stale = [1_u64 << 7];
+		let empty = [0_u64];
+		let walk = Diffs {
+			counter: 0,
+			event_stale: &event_stale,
+			statekey_stale: &empty,
+			event_reverse: &empty,
+			statekey_reverse: &empty,
+		};
+
+		let infected = statediff(0, 3, 7);
+		let child = statediff(10, 4, 8);
+		let counts = walk.row(Counts::default(), &10_u64.to_be_bytes(), &infected);
+		let counts = walk.row(counts, &11_u64.to_be_bytes(), &child);
+
+		assert!(counts.infected.contains(&10));
+		assert_eq!(counts.infected_parents, 1);
+
+		let scan = Scan {
+			events: Family { losers: vec![7], ..Default::default() },
+			infected_parents: counts.infected_parents,
+			..Default::default()
+		};
+
+		assert!(scan.anomalous());
+	}
+
+	#[test]
+	fn a_statediff_parent_must_precede_its_child() {
+		let empty = [0_u64];
+		let walk = Diffs {
+			counter: 0,
+			event_stale: &empty,
+			statekey_stale: &empty,
+			event_reverse: &empty,
+			statekey_reverse: &empty,
+		};
+		let value = statediff(11, 3, 8);
+
+		let counts = walk.row(Counts::default(), &10_u64.to_be_bytes(), &value);
+
+		assert_eq!(counts.malformed, 1);
 	}
 }

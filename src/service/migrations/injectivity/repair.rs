@@ -3,7 +3,7 @@ use std::{collections::BTreeMap, sync::Arc};
 use tuwunel_core::{
 	Result, debug, info,
 	smallvec::SmallVec,
-	utils::{ReadyExt, hash::sha256::Digest, stream::TryIgnore},
+	utils::{TryReadyExt, hash::sha256::Digest},
 	warn,
 };
 use tuwunel_database::{Map, Txn};
@@ -104,15 +104,32 @@ fn heal_family(txn: &mut Txn, reverse: &Map, forward: &Map, family: &Family) -> 
 
 /// Applies whatever repair the scan cleared, in hazard order.
 ///
-/// The cache-clearing lane runs on any dirty chain and is unconditionally
-/// safe; the destructive lane runs only when no anomaly impugned the scan.
-/// Returns whether the residue settled: a refusal reports false so the
-/// caller leaves the marker unwritten and the next boot scans again, while
-/// an anomaly with nothing to repair settles with a warning instead.
+/// The cache-clearing lane runs when the deep scan finds dirt or a verdict
+/// skips that scan, and is unconditionally safe. The destructive lane runs
+/// only when no anomaly impugned the scan. A decline logs its residue and
+/// returns like a settled repair, since the caller stamps on any verdict;
+/// only an error withholds the stamp.
 #[tracing::instrument(level = "debug", skip_all)]
-pub(super) async fn repair(services: &Services, scan: &Scan) -> Result<bool> {
+pub(super) async fn repair(
+	services: &Services,
+	scan: &Scan,
+	chains_cleared_this_boot: bool,
+) -> Result {
+	let healable = scan.healable();
+	let family_anomalous = scan.family_anomalous();
+	let needs_chain_clear = scan.unverifiable || healable || family_anomalous;
+
+	if !chains_cleared_this_boot && needs_chain_clear {
+		warn!(
+			"Short id verdict skipped the deep auth chain census; clearing the cache before \
+			 finalizing."
+		);
+
+		clear_chains(services).await?;
+	}
+
 	if scan.unverifiable {
-		return Ok(false);
+		return Ok(());
 	}
 
 	if scan.strays > 0 {
@@ -130,14 +147,12 @@ pub(super) async fn repair(services: &Services, scan: &Scan) -> Result<bool> {
 			 chain cache."
 		);
 
-		clear_chains(services).await;
+		clear_chains(services).await?;
 	}
 
-	// Refused rather than repaired, so the cache-clearing lane above still
-	// runs on a boot whose heals never settled. A promoted row is also a
-	// loser, so repairing an unhealed residue would delete the reverse row
-	// a promotion was about to complete.
-	if scan.healable() {
+	// A promoted row is also a loser, so repairing an unhealed residue
+	// would delete the reverse row a promotion was about to complete.
+	if healable {
 		warn!(
 			dangling_events = scan.events.dangling.len(),
 			dangling_statekeys = scan.statekeys.dangling.len(),
@@ -146,29 +161,10 @@ pub(super) async fn repair(services: &Services, scan: &Scan) -> Result<bool> {
 			"Short id heals did not settle; refusing the repair while residue stays healable."
 		);
 
-		return Ok(false);
+		return Ok(());
 	}
 
-	if scan.events.losers.is_empty() && scan.statekeys.losers.is_empty() {
-		match scan.anomalous() {
-			| false => info!("Short id mappings verified injective."),
-			| true => warn!(
-				dangling_events = scan.events.dangling.len(),
-				dangling_statekeys = scan.statekeys.dangling.len(),
-				contended_events = scan.events.contended,
-				contended_statekeys = scan.statekeys.contended,
-				unresolved_events = scan.events.unresolved,
-				unresolved_statekeys = scan.statekeys.unresolved,
-				malformed_event_keys = scan.events.malformed,
-				malformed_statekey_keys = scan.statekeys.malformed,
-				"Short id anomalies exist with no stale mappings to repair; not scanning again."
-			),
-		}
-
-		return Ok(true);
-	}
-
-	if scan.anomalous() {
+	if family_anomalous {
 		warn!(
 			dangling_events = scan.events.dangling.len(),
 			dangling_statekeys = scan.statekeys.dangling.len(),
@@ -180,23 +176,37 @@ pub(super) async fn repair(services: &Services, scan: &Scan) -> Result<bool> {
 			unresolved_statekeys = scan.statekeys.unresolved,
 			malformed_event_keys = scan.events.malformed,
 			malformed_statekey_keys = scan.statekeys.malformed,
-			orphan_entries = scan.orphans,
-			missing_parents = scan.missing_parents,
-			infected_parents = scan.infected_parents,
-			malformed_diffs = scan.malformed_diffs,
-			"Refusing the destructive short id repair; the nonzero counts name shapes it does \
-			 not handle. Please report this line upstream, since the scan repeats each boot \
-			 until a release handles them."
+			"Refusing the destructive short id repair; the family census contains an unhandled \
+			 shape. The residue is recorded and left in place. Please report this line upstream."
 		);
 
-		return Ok(false);
+		return Ok(());
+	}
+
+	if scan.events.losers.is_empty() && scan.statekeys.losers.is_empty() {
+		info!("Short id mappings verified injective.");
+
+		return Ok(());
+	}
+
+	if scan.anomalous() {
+		warn!(
+			infected_parents = scan.infected_parents,
+			orphan_entries = scan.orphans,
+			malformed_diffs = scan.malformed_diffs,
+			"Refusing the destructive short id repair; the nonzero counts name shapes it does \
+			 not handle. The residue is recorded and left in place. Please report this line \
+			 upstream."
+		);
+
+		return Ok(());
 	}
 
 	patch_statediffs(services, scan).await?;
 	move_keys(services, scan).await?;
 	delete_losers(services, scan);
 
-	Ok(true)
+	Ok(())
 }
 
 /// Patches the ghost halves of infected statediff entries to their winners.
@@ -214,8 +224,7 @@ async fn patch_statediffs(services: &Services, scan: &Scan) -> Result {
 
 	let digests: Digests = services.db["statehash_shortstatehash"]
 		.raw_stream()
-		.ignore_err()
-		.ready_fold(Digests::new(), |mut digests, (key, value)| {
+		.ready_try_fold(Digests::new(), |mut digests, (key, value)| {
 			let infected = short_of(value)
 				.filter(|state| scan.infected.contains(state))
 				.and_then(|state| key.try_into().ok().map(|digest| (state, digest)));
@@ -224,9 +233,9 @@ async fn patch_statediffs(services: &Services, scan: &Scan) -> Result {
 				digests.entry(state).or_default().push(digest);
 			}
 
-			digests
+			Ok(digests)
 		})
-		.await;
+		.await?;
 
 	// Serial: each state's patch and digest delete form one transaction,
 	// and the measured population is a handful of rows.
