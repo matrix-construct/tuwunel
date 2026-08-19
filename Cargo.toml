@@ -106,7 +106,7 @@ default-features = false
 features = ["serde", "std"]
 
 [workspace.dependencies.cargo_toml]
-version = "0.22"
+version = "1.0"
 default-features = false
 features = ["features"]
 
