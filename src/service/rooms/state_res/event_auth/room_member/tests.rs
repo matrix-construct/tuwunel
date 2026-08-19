@@ -1,3 +1,5 @@
+use std::io::Error as IoError;
+
 use ruma::{
 	Signatures,
 	events::{
@@ -13,16 +15,29 @@ use ruma::{
 	third_party_invite::IdentityServerBase64PublicKey,
 };
 use serde_json::{json, value::to_raw_value as to_raw_json_value};
+use tuwunel_core::{Error, matrix::PduEvent};
 
 use super::{
-	super::events::RoomMemberEvent,
+	super::events::{RoomMemberEvent, member::RoomMemberEventResultExt},
 	check_room_member,
 	test_utils::{
 		INITIAL_EVENTS, INITIAL_EVENTS_CREATE_ROOM, TestStateMap, alice, bob, charlie, ella,
-		event_id, init_subscriber, member_content_ban, member_content_join,
+		event_id, init_subscriber, member_content_ban, member_content_join, not_found,
 		room_third_party_invite, to_pdu_event, zara,
 	},
 };
+
+#[test]
+fn membership_result_preserves_failure_polarity() {
+	let missing: Result<RoomMemberEvent<PduEvent>, Error> = Err(not_found());
+
+	assert_eq!(missing.membership().unwrap(), MembershipState::Leave);
+
+	let failure: Result<RoomMemberEvent<PduEvent>, Error> =
+		Err(IoError::other("injected membership failure").into());
+
+	assert!(matches!(failure.membership(), Err(Error::Io(..))));
+}
 
 #[tokio::test]
 async fn missing_state_key() {

@@ -1,6 +1,9 @@
+use std::io::Error as IoError;
+
 use ruma::{
+	api::error::ErrorKind::InvalidParam,
 	events::{
-		TimelineEventType,
+		StateEventType, TimelineEventType,
 		room::{
 			join_rules::{JoinRule, Restricted, RoomJoinRulesEventContent},
 			member::{MembershipState, RoomMemberEventContent},
@@ -16,12 +19,15 @@ use serde_json::{json, value::to_raw_value as to_raw_json_value};
 
 mod room_power_levels;
 
-use tuwunel_core::matrix::{Event, EventHash, PduEvent, StateKey};
+use tuwunel_core::{
+	Error, err,
+	matrix::{Event, EventHash, PduEvent, StateKey},
+};
 
 use self::room_power_levels::default_room_power_levels;
 use super::{
-	check_room_create, check_room_redaction, check_state_dependent_auth_rules,
-	check_state_independent_auth_rules,
+	AuthCheckOutcome, auth_check_outcome, check_room_create, check_room_redaction,
+	check_state_dependent_auth_rules, check_state_independent_auth_rules, classify_auth_error,
 	events::{RoomCreateEvent, RoomPowerLevelsEvent},
 	test_utils::{
 		INITIAL_EVENTS, INITIAL_HYDRA_EVENTS, TestStateMap, alice, charlie, ella, event_id,
@@ -30,6 +36,158 @@ use super::{
 		to_pdu_event, zara,
 	},
 };
+
+#[tokio::test]
+async fn auth_outcome_classifies_denials() {
+	let _guard = init_subscriber();
+
+	assert!(matches!(
+		classify_auth_error(err!("clean denial")),
+		Ok(AuthCheckOutcome::Deny(Error::Err(..)))
+	));
+
+	let init_events = INITIAL_EVENTS();
+	let fetch_event = async |event_id| {
+		init_events
+			.get(&event_id)
+			.cloned()
+			.ok_or_else(not_found)
+	};
+
+	let state = TestStateMap::new(&init_events);
+	let fetch_state = state.fetch_state_fn();
+
+	let invalid = to_pdu_event(
+		"INVALID",
+		charlie(),
+		TimelineEventType::RoomMember,
+		Some(charlie().as_str()),
+		to_raw_json_value(&json!({})).unwrap(),
+		&["CREATE", "IMA", "IPOWER"],
+		&["IPOWER"],
+	);
+
+	let outcome =
+		auth_check_outcome(&RoomVersionRules::V6, &invalid, &fetch_event, &fetch_state).await;
+
+	assert!(matches!(outcome, Ok(AuthCheckOutcome::Deny(Error::Request(InvalidParam, ..)))));
+
+	let absent_member = to_pdu_event(
+		"ABSENT_MEMBER",
+		ella(),
+		TimelineEventType::RoomMessage,
+		None,
+		to_raw_json_value(&RoomMessageEventContent::text_plain("Hi!")).unwrap(),
+		&["IPOWER", "CREATE"],
+		&["IPOWER"],
+	);
+
+	let outcome =
+		auth_check_outcome(&RoomVersionRules::V6, &absent_member, &fetch_event, &fetch_state)
+			.await;
+
+	assert!(
+		matches!(
+			outcome,
+			Ok(AuthCheckOutcome::Deny(Error::Err(reason)))
+				if reason == "sender's membership `leave` is not `join`"
+		),
+		"absent membership produced the wrong denial"
+	);
+
+	let mut state_events = init_events.clone();
+
+	state_events.remove(&event_id("IPOWER")).unwrap();
+
+	let state = TestStateMap::new(&state_events);
+	let fetch_state = state.fetch_state_fn();
+	let absent_power_levels = to_pdu_event(
+		"ABSENT_POWER",
+		charlie(),
+		TimelineEventType::RoomMessage,
+		Some(""),
+		to_raw_json_value(&RoomMessageEventContent::text_plain("Hi!")).unwrap(),
+		&["CREATE", "IMC", "IPOWER"],
+		&["IPOWER"],
+	);
+
+	let outcome = auth_check_outcome(
+		&RoomVersionRules::V6,
+		&absent_power_levels,
+		&fetch_event,
+		&fetch_state,
+	)
+	.await;
+
+	assert!(
+		matches!(
+			outcome,
+			Ok(AuthCheckOutcome::Deny(Error::Err(reason)))
+				if reason.starts_with("sender does not have enough power (")
+					&& reason.ends_with(") for `m.room.message` event type (50)")
+		),
+		"absent power levels did not use the default power rules"
+	);
+}
+
+#[tokio::test]
+async fn auth_outcome_propagates_fetch_failures() {
+	let _guard = init_subscriber();
+
+	let incoming_event = allowed_message();
+	let init_events = INITIAL_EVENTS();
+	let fetch_event = async |event_id| {
+		init_events
+			.get(&event_id)
+			.cloned()
+			.ok_or_else(not_found)
+	};
+
+	let database_failure = async |_event_type: StateEventType, _state_key: StateKey| {
+		Err(err!(Database("injected state failure")))
+	};
+
+	let outcome = auth_check_outcome(
+		&RoomVersionRules::V6,
+		&incoming_event,
+		&fetch_event,
+		&database_failure,
+	)
+	.await;
+
+	assert!(matches!(outcome, Err(Error::Database(..))));
+
+	let io_failure = async |_event_type: StateEventType, _state_key: StateKey| {
+		Err(IoError::other("injected state failure").into())
+	};
+
+	let outcome =
+		auth_check_outcome(&RoomVersionRules::V6, &incoming_event, &fetch_event, &io_failure)
+			.await;
+
+	assert!(matches!(outcome, Err(Error::Io(..))));
+
+	let state = TestStateMap::new(&init_events);
+	let fetch_state = state.fetch_state_fn();
+	let missing_event = async |_event_id| Err(not_found());
+	let outcome =
+		auth_check_outcome(&RoomVersionRules::V6, &incoming_event, &missing_event, &fetch_state)
+			.await;
+
+	assert!(matches!(outcome, Err(error) if error.is_not_found()));
+}
+
+fn allowed_message() -> PduEvent {
+	to_pdu_event(
+		"ALLOWED",
+		alice(),
+		TimelineEventType::RoomMessage,
+		None,
+		to_raw_json_value(&RoomMessageEventContent::text_plain("Hi!")).unwrap(),
+		&["CREATE", "IMA", "IPOWER"],
+		&["IPOWER"],
+	)
+}
 
 #[test]
 fn valid_room_create() {

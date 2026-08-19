@@ -646,7 +646,17 @@ async fn gated_fold(
 			.get(&shortstatekey)
 			.ok_or_else(|| err!(Request(NotFound("Not in state before event."))))?;
 
-		self.services.timeline.get_pdu(event_id).await
+		self.services
+			.timeline
+			.get_pdu(event_id)
+			.await
+			.map_err(|error| {
+				if error.is_not_found() {
+					err!(Database("State map references missing event {event_id}."))
+				} else {
+					error
+				}
+			})
 	};
 
 	let event_fetch = async |event_id: OwnedEventId| self.event_fetch(&event_id).await;

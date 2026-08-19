@@ -8,7 +8,7 @@ use ruma::{
 };
 use serde::Deserialize;
 use serde_json::value::RawValue as RawJsonValue;
-use tuwunel_core::{Err, Error, Result, debug_error, err, matrix::Event};
+use tuwunel_core::{Err, Error, Result, err, matrix::Event};
 
 /// A helper type for an [`Event`] of type `m.room.member`.
 ///
@@ -54,19 +54,15 @@ pub(crate) trait RoomMemberEventResultExt {
 	/// The membership of the user.
 	///
 	/// Defaults to `leave` if there is no `m.room.member` event.
-	fn membership(&self) -> Result<MembershipState>;
+	fn membership(self) -> Result<MembershipState>;
 }
 
 impl<E: Event> RoomMemberEventResultExt for Result<RoomMemberEvent<E>> {
-	fn membership(&self) -> Result<MembershipState> {
+	fn membership(self) -> Result<MembershipState> {
 		match self {
 			| Ok(event) => event.membership(),
-			| Err(e) if e.is_not_found() => Ok(MembershipState::Leave),
-			| Err(e) if cfg!(test) => panic!("membership(): unexpected: {e}"),
-			| Err(e) => {
-				debug_error!("membership(): unexpected: {e}");
-				Ok(MembershipState::Leave)
-			},
+			| Err(error) if error.is_not_found() => Ok(MembershipState::Leave),
+			| Err(error) => Err(error),
 		}
 	}
 }

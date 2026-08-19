@@ -35,6 +35,11 @@ use super::{
 	},
 };
 
+enum AuthCheckOutcome {
+	Allow,
+	Deny(Error),
+}
+
 #[tracing::instrument(
 	level = "debug",
 	skip_all,
@@ -55,14 +60,41 @@ where
 	StateFut: Future<Output = Result<Pdu>> + Send,
 	Pdu: Event,
 {
-	let dependent = check_state_dependent_auth_rules(rules, incoming_event, fetch_state);
+	match auth_check_outcome(rules, incoming_event, fetch_event, fetch_state).await {
+		| Ok(AuthCheckOutcome::Allow) => Ok(()),
+		| Ok(AuthCheckOutcome::Deny(error @ Error::Request(InvalidParam, ..))) => Err(error),
+		| Ok(AuthCheckOutcome::Deny(error)) | Err(error) =>
+			Err(Error::AuthCheck(Box::new(error))),
+	}
+}
 
+async fn auth_check_outcome<FetchEvent, EventFut, FetchState, StateFut, Pdu>(
+	rules: &RoomVersionRules,
+	incoming_event: &Pdu,
+	fetch_event: &FetchEvent,
+	fetch_state: &FetchState,
+) -> Result<AuthCheckOutcome>
+where
+	FetchEvent: Fn(OwnedEventId) -> EventFut + Sync,
+	EventFut: Future<Output = Result<Pdu>> + Send,
+	FetchState: Fn(StateEventType, StateKey) -> StateFut + Sync,
+	StateFut: Future<Output = Result<Pdu>> + Send,
+	Pdu: Event,
+{
+	let dependent = check_state_dependent_auth_rules(rules, incoming_event, fetch_state);
 	let independent = check_state_independent_auth_rules(rules, incoming_event, fetch_event);
 
 	match try_join(independent, dependent).await {
-		| Err(e) if matches!(e, Error::Request(InvalidParam, ..)) => Err(e),
-		| Err(e) => Err(Error::AuthCheck(Box::new(e))),
-		| Ok(_) => Ok(()),
+		| Ok(_) => Ok(AuthCheckOutcome::Allow),
+		| Err(error) => classify_auth_error(error),
+	}
+}
+
+fn classify_auth_error(error: Error) -> Result<AuthCheckOutcome> {
+	match error {
+		| error @ (Error::Err(..) | Error::Request(InvalidParam, ..)) =>
+			Ok(AuthCheckOutcome::Deny(error)),
+		| error => Err(error),
 	}
 }
 
@@ -315,6 +347,8 @@ where
 	if sender_membership != MembershipState::Join {
 		return Err!("sender's membership `{sender_membership}` is not `join`");
 	}
+
+	let current_room_power_levels_event = current_room_power_levels_event?;
 
 	let creators = room_create_event.creators(&rules.authorization)?;
 	let sender_power_level = current_room_power_levels_event.user_power_level(

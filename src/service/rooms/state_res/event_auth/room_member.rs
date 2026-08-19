@@ -222,7 +222,7 @@ where
 			return Err!("`join_authorised_via_users_server` is not joined");
 		}
 
-		let room_power_levels_event = fetch_state.room_power_levels_event().await;
+		let room_power_levels_event = fetch_state.room_power_levels_event().await?;
 
 		let authorized_via_user_power_level =
 			room_power_levels_event.user_power_level(&authorized_via_user, creators, rules)?;
@@ -293,6 +293,8 @@ where
 		return Err!("cannot invite user that is joined or banned");
 	}
 
+	let room_power_levels_event = room_power_levels_event?;
+
 	let creators = room_create_event.creators(rules)?;
 	let sender_power_level =
 		room_power_levels_event.user_power_level(room_member_event.sender(), creators, rules)?;
@@ -344,7 +346,7 @@ where
 	// state with state_key matching token, reject.
 	let Some(room_third_party_invite_event) = fetch_state
 		.room_third_party_invite_event(third_party_invite_token)
-		.await
+		.await?
 	else {
 		return Err!("no `m.room.third_party_invite` in room state matches the token");
 	};
@@ -462,6 +464,7 @@ where
 
 	let creators = room_create_event.creators(rules)?;
 	let current_target_user_membership = current_target_user_membership?;
+	let room_power_levels_event = room_power_levels_event?;
 
 	let sender_power_level = room_power_levels_event.user_power_level(
 		room_member_event.sender(),
@@ -524,6 +527,8 @@ where
 	if sender_membership != MembershipState::Join {
 		return Err!("cannot ban if sender is not joined");
 	}
+
+	let room_power_levels_event = room_power_levels_event?;
 
 	let creators = room_create_event.creators(rules)?;
 

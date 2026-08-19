@@ -393,21 +393,22 @@ async fn resolve_state_at_incoming_event(
 		return Ok((state, ResolvedVia::Derived));
 	}
 
-	if let Some(state) = self
-		.cached_resolved_state(incoming_pdu.event_id())
-		.await
+	let config = &self.services.server.config;
+	let enabled = config.resolve_state_locally && config.resolve_state_locally_max > 0;
+
+	if enabled
+		&& let Some(state) = self
+			.cached_resolved_state(incoming_pdu.event_id())
+			.await
 	{
 		return Ok((state, ResolvedVia::Memo));
 	}
 
-	let config = &self.services.server.config;
 	let mode = if config.resolve_state_locally_shadow {
 		WalkMode::Shadow
 	} else {
 		WalkMode::Active
 	};
-
-	let enabled = config.resolve_state_locally && config.resolve_state_locally_max > 0;
 
 	let local = enabled
 		.then_async(|| {
@@ -475,7 +476,17 @@ async fn auth_check_outlier_pdu(
 				)))
 			})?;
 
-		self.services.timeline.get_pdu(event_id).await
+		self.services
+			.timeline
+			.get_pdu(event_id)
+			.await
+			.map_err(|error| {
+				if error.is_not_found() {
+					err!(Database("State map references missing event {event_id}."))
+				} else {
+					error
+				}
+			})
 	};
 
 	let event_fetch = async |event_id: OwnedEventId| self.event_fetch(&event_id).await;
