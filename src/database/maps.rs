@@ -104,6 +104,10 @@ pub(super) static MAPS: &[Descriptor] = &[
 		..descriptor::RANDOM_SMALL
 	},
 	Descriptor {
+		name: "delayid_event",
+		..descriptor::RANDOM_SMALL
+	},
+	Descriptor {
 		name: "disabledroomids",
 		..descriptor::RANDOM_SMALL
 	},
