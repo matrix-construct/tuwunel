@@ -23,3 +23,8 @@ powers next-generation Matrix auth.
 
 - [**Enterprise JWT**](authentication/jwt.md): an operator-controlled signing key that
   can mint a token authenticating as any user.
+
+- [**Migrating Databases**](authentication/migrating.md): preserve provider
+  sign-in to migrated accounts after a supported database migration. The
+  one-time association procedure does not apply to databases created by
+  Tuwunel.

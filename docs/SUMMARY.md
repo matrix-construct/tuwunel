@@ -41,6 +41,7 @@
     - [Authentik](authentication/providers/authentik.md)
     - [Keycloak](authentication/providers/keycloak.md)
     - [Matrix Authentication Service](authentication/providers/mas.md)
+  - [Migrating Databases](authentication/migrating.md)
 - [Multimedia and Storage](media.md)
   - [Storage Providers](media/storage.md)
   - [URL Previews](media/url-previews.md)

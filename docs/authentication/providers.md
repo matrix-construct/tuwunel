@@ -259,11 +259,10 @@ unique per user.
 must complete their login before the server is restarted, or the command must
 be run again.
 
-`query oauth adopt <provider>` creates durable subject associations in bulk
-for a database migrated from a Conduit-family fork. The configured provider
-must use the same issuer and subject space as the source database. If the
-source ever changed providers, do not use the bulk command; associate each
-user individually.
+After a supported database migration, stored provider mappings can be adopted
+in bulk from the source database. This one-time procedure has additional safety
+requirements and must be completed before migrated users sign in. See
+[Migrating Databases](migrating.md).
 
 ### How Tuwunel derives Matrix user IDs from claims
 
@@ -387,9 +386,9 @@ These admin room commands help manage OAuth state:
 | `!admin query oauth show-provider <provider_id>` | Show the active configuration for a provider. |
 | `!admin query oauth show-user @user:example.com` | Show OAuth sessions for a user. |
 | `!admin query oauth associate <provider_id> @user:example.com --claim key=value` | Associate an existing Matrix account with future OAuth claims from a provider. Useful for onboarding existing users to SSO. |
-| `!admin query oauth adopt <provider_id>` | Adopt provider subjects from a migrated database. |
+| `!admin query oauth adopt <provider_id>` | Adopt stored provider mappings in bulk after a supported database migration. See [Migrating Databases](migrating.md). |
 | `!admin query oauth revoke <session_id\|@user:example.com>` | Revoke tokens for a session or all sessions of a user. |
-| `!admin query oauth delete <session_id\|@user:example.com>` | Remove OAuth state entirely (destructive). |
+| `!admin query oauth delete <session_id\|@user:example.com>` | Remove OAuth state entirely (destructive). Requires the `force` option. |
 
 ## Protocol flow reference
 
