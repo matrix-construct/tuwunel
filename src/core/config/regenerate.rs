@@ -14,7 +14,7 @@ mod write;
 
 use figment::{
 	Figment,
-	providers::{Data, Format as _, Toml},
+	providers::{Data, Format as _},
 	value::{Dict, Value},
 };
 use itertools::Itertools as _;
@@ -32,7 +32,7 @@ use self::{
 	},
 	write::write_atomic,
 };
-use super::{Config, DEPRECATED_KEYS, Sources};
+use super::{Config, DEPRECATED_KEYS, Sources, format::Toml};
 use crate::{Err, Error, Result, err, implement, utils::BoolExt};
 
 const NEVER_EMIT: [&str; 2] = ["database_restore_backup", "force_migration"];

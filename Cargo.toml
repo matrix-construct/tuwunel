@@ -172,7 +172,7 @@ features = ["serde"]
 [workspace.dependencies.figment]
 version = "0.10"
 default-features = false
-features = ["env", "toml"]
+features = ["env"]
 
 [workspace.dependencies.futures]
 version = "0.3"

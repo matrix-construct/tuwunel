@@ -5,6 +5,7 @@
 //! generated example configuration.
 
 pub mod check;
+mod format;
 mod identity_provider_serde;
 pub mod ip_source;
 pub mod manager;
@@ -29,7 +30,7 @@ use either::{Either, Either::Left};
 pub use figment::{Figment, value::Value as FigmentValue};
 use figment::{
 	Profile, Provider,
-	providers::{Env, Format, Toml},
+	providers::{Env, Format},
 };
 use ipnet::IpNet;
 use itertools::Itertools;
@@ -53,6 +54,7 @@ pub use self::{
 	sources::Sources,
 };
 use self::{
+	format::Toml,
 	net::{ListeningAddr, ListeningPort},
 	proxy::ProxyConfig,
 };
