@@ -40,7 +40,7 @@ pub use self::{
 	engine::Engine,
 	handle::Handle,
 	keyval::{KeyBuf, KeyVal, Slice, serialize_key, serialize_val},
-	map::{Get, Map, Qry, compact},
+	map::{Get, Map, Qry, RecursiveGetOutput, compact},
 	ser::{Cbor, Interfix, Json, SEP, Separator, serialize, serialize_to, serialize_to_vec},
 	txn::Txn,
 };
