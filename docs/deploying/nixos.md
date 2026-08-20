@@ -14,16 +14,27 @@ Tuwunel publishes prebuilt store paths, so building from the flake does not
 have to compile RocksDB and the Rust toolchain locally. The cache is public
 and reading from it needs no account.
 
-* Substituter: `https://tuwunel.cachix.org`
-* Public key: `tuwunel.cachix.org-1:VRecUeDcaPxtYDA6bnMF3snPM7VYX8K605z4uuG2nWc=`
+| | Substituter | Public key |
+|---|---|---|
+| Self-hosted | `https://cache.tuwunel.chat` | `cache.tuwunel.chat-1:ZafUaXiRMozDa9N2SWim6EdzH0EEjWjwfvlTxXvcjLA=` |
+| Cachix | `https://tuwunel.cachix.org` | `tuwunel.cachix.org-1:VRecUeDcaPxtYDA6bnMF3snPM7VYX8K605z4uuG2nWc=` |
 
-On NixOS, add both to `nix.settings`:
+Both are live and either works on its own. Prefer `cache.tuwunel.chat`: it
+stores the whole closure, stock nixpkgs paths included, so a build can be
+satisfied from it without reaching `cache.nixos.org` at all. The Cachix cache
+holds only Tuwunel's own binaries and forked dependencies.
+
+On NixOS, add them to `nix.settings`:
 
 ```nix
 {
   nix.settings = {
-    extra-substituters = [ "https://tuwunel.cachix.org" ];
+    extra-substituters = [
+      "https://cache.tuwunel.chat"
+      "https://tuwunel.cachix.org"
+    ];
     extra-trusted-public-keys = [
+      "cache.tuwunel.chat-1:ZafUaXiRMozDa9N2SWim6EdzH0EEjWjwfvlTxXvcjLA="
       "tuwunel.cachix.org-1:VRecUeDcaPxtYDA6bnMF3snPM7VYX8K605z4uuG2nWc="
     ];
   };
@@ -34,16 +45,20 @@ Everywhere else, put the same two settings in `/etc/nix/nix.conf` and restart
 the daemon:
 
 ```ini
-extra-substituters = https://tuwunel.cachix.org
-extra-trusted-public-keys = tuwunel.cachix.org-1:VRecUeDcaPxtYDA6bnMF3snPM7VYX8K605z4uuG2nWc=
+extra-substituters = https://cache.tuwunel.chat https://tuwunel.cachix.org
+extra-trusted-public-keys = cache.tuwunel.chat-1:ZafUaXiRMozDa9N2SWim6EdzH0EEjWjwfvlTxXvcjLA= tuwunel.cachix.org-1:VRecUeDcaPxtYDA6bnMF3snPM7VYX8K605z4uuG2nWc=
 ```
 
 ```bash
 sudo systemctl restart nix-daemon
 ```
 
-With the `cachix` client installed, `cachix use tuwunel` writes that
-configuration for you.
+Listing a substituter that is unreachable is not fatal. Nix treats it as a
+cache miss, warns, and builds from source, so keeping both configured costs
+nothing if one is down.
+
+With the `cachix` client installed, `cachix use tuwunel` writes the Cachix half
+of that configuration for you.
 
 The repository flake also declares the cache in its `nixConfig`, but do not
 rely on that alone. Nix treats a flake's configuration as untrusted: an
@@ -52,9 +67,9 @@ it with `ignoring untrusted flake configuration setting`, so an unattended
 deployment that configured nothing else would quietly build everything from
 source. Set the two values as shown above, or pass `--accept-flake-config`.
 
-A self-hosted cache at `cache.tuwunel.chat` is planned. It will be announced
-here with its own public key; the Cachix substituter above stays valid in the
-meantime.
+`cache.tuwunel.chat` is self-hosted on Tuwunel's own infrastructure, behind a
+caching proxy that keeps serving already-fetched paths even if the cache
+application itself is down.
 
 ### NixOS module
 

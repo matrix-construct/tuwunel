@@ -1,8 +1,8 @@
 # syntax = docker/dockerfile:1.11-labs
 
 FROM input AS nix-base
-ARG nix_substituter="https://tuwunel.cachix.org"
-ARG nix_public_key="tuwunel.cachix.org-1:VRecUeDcaPxtYDA6bnMF3snPM7VYX8K605z4uuG2nWc="
+ARG nix_substituter="https://cache.tuwunel.chat https://tuwunel.cachix.org"
+ARG nix_public_key="cache.tuwunel.chat-1:ZafUaXiRMozDa9N2SWim6EdzH0EEjWjwfvlTxXvcjLA= tuwunel.cachix.org-1:VRecUeDcaPxtYDA6bnMF3snPM7VYX8K605z4uuG2nWc="
 
 # The substituter is recorded in nix.conf rather than relying on the flake's
 # nixConfig, because build-nix realises the tree through default.nix, where

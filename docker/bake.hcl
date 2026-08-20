@@ -109,10 +109,10 @@ variable "complement_skip" {
 # CACHIX_AUTH_TOKEN in the environment, which bake.sh detects to set
 # cachix_push.
 variable "nix_substituter" {
-    default = "https://tuwunel.cachix.org"
+    default = "https://cache.tuwunel.chat https://tuwunel.cachix.org"
 }
 variable "nix_public_key" {
-    default = "tuwunel.cachix.org-1:VRecUeDcaPxtYDA6bnMF3snPM7VYX8K605z4uuG2nWc="
+    default = "cache.tuwunel.chat-1:ZafUaXiRMozDa9N2SWim6EdzH0EEjWjwfvlTxXvcjLA= tuwunel.cachix.org-1:VRecUeDcaPxtYDA6bnMF3snPM7VYX8K605z4uuG2nWc="
 }
 variable "cachix_cache" {
     default = "tuwunel"

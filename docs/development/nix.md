@@ -10,12 +10,15 @@ a token that only the main repository holds.
 
 ## Cache identity
 
-| | |
-|---|---|
-| Substituter | `https://tuwunel.cachix.org` |
-| Public key | `tuwunel.cachix.org-1:VRecUeDcaPxtYDA6bnMF3snPM7VYX8K605z4uuG2nWc=` |
-| Provider | [Cachix](https://cachix.org) |
-| Visibility | Public read, authenticated write |
+| | Substituter | Public key | Provider |
+|---|---|---|---|
+| Self-hosted | `https://cache.tuwunel.chat` | `cache.tuwunel.chat-1:ZafUaXiRMozDa9N2SWim6EdzH0EEjWjwfvlTxXvcjLA=` | Attic behind a caching proxy |
+| Cachix | `https://tuwunel.cachix.org` | `tuwunel.cachix.org-1:VRecUeDcaPxtYDA6bnMF3snPM7VYX8K605z4uuG2nWc=` | [Cachix](https://cachix.org) |
+
+Both are public read, authenticated write, and both are configured everywhere so
+they run side by side. They differ in what they hold: the self-hosted cache
+stores the entire closure including stock nixpkgs paths, while Cachix skips
+anything `cache.nixos.org` already serves.
 
 Operators configuring a deployment should follow
 [NixOS deployment](../deploying/nixos.md#binary-cache) instead; this page covers
@@ -126,15 +129,15 @@ nix/pkgs/complement/bin/nix-build-and-cache just .#all-features
 and `ci` builds the tooling CI needs. Set `CACHIX_CACHE` to target a cache
 other than `tuwunel`.
 
-The script also retains an [Attic](https://github.com/zhaofengli/attic)
-uploader for the planned self-hosted cache. It stays dormant unless both
-`ATTIC_TOKEN` and `ATTIC_ENDPOINT` are set, and it no longer defaults to any
-endpoint.
+The script also carries an [Attic](https://github.com/zhaofengli/attic)
+uploader for the self-hosted cache. It stays dormant unless both `ATTIC_TOKEN`
+and `ATTIC_ENDPOINT` are set, and it defaults to no endpoint.
 
-## Moving to a self-hosted cache
+## Where the substituter values live
 
-A self-hosted cache at `cache.tuwunel.chat` is planned. The substituter URL and
-public key appear in exactly these places:
+`cache.tuwunel.chat` is live and configured alongside Cachix. Both substituters
+and both keys appear in exactly these places, so adding or retiring one is a
+known edit:
 
 | File | Purpose |
 |---|---|
@@ -145,6 +148,8 @@ public key appear in exactly these places:
 | This page | Contributor reference |
 
 `docker/Dockerfile.nix` carries the same values as `ARG` defaults, which the
-bake variables override, so a CI-only switch needs no Dockerfile edit. Serving
-both caches during a transition means listing both substituters and both keys;
-Nix queries them in priority order and falls through on a miss.
+bake variables override, so a CI-only change needs no Dockerfile edit. Both
+`extra-substituters` and `extra-trusted-public-keys` are space-separated lists
+in `nix.conf`, so a single bake variable holds both entries and no list plumbing
+is required. Nix queries substituters in priority order and falls through on a
+miss, so retiring Cachix later is a matter of deleting its entries.
