@@ -32,6 +32,13 @@ Nix applies a flake's `nixConfig` without asking only for accounts in
 `trusted-users`; otherwise it prompts. Adding the two values to your own
 `nix.conf`, or running `cachix use tuwunel`, avoids the prompt entirely.
 
+A substituter that answers with a 5xx is worse than one that is down. Nix
+retries and then **fails the build**, where an unreachable host or a 404 is
+just a miss it falls through, so a cache that is unhealthy rather than absent
+can break CI. `cache.tuwunel.chat` converts reverse-proxy backend failures to
+404 for narinfo and NAR reads for exactly this reason. If some other
+substituter ever fails this way, stop listing it until it recovers.
+
 CI does not rely on `nixConfig`. The `nix-base` stage in
 `docker/Dockerfile.nix` appends the substituter and key to `/etc/nix/nix.conf`
 during image construction, because the stages that realise the tree through
