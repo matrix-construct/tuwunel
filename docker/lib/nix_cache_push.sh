@@ -50,14 +50,39 @@ if [ ! -s "$paths" ]; then
 fi
 
 count="$(wc -l < "$paths")"
+log="$(mktemp)"
+trap 'rm -f "$paths" "$log"' EXIT
+
+# An upload stays non-fatal: the artifact is good and only the cache missed it.
+# It must not be silent, though. A push that is rejected wholesale looks
+# identical to a successful one unless the outcome is stated, and on the first
+# real push 2710 of 3988 paths were rejected while the job still reported
+# success. Output is captured rather than streamed so the exit status belongs to
+# the client and not to a pipeline.
+report() {
+    label="$1"
+    status="$2"
+
+    cat "$log" >&2
+    rejected="$(grep -c '❌' "$log" 2>/dev/null)" || rejected=0
+
+    if [ "$status" -ne 0 ] || [ "${rejected:-0}" -gt 0 ]; then
+        echo "nix_cache_push: WARNING ${label} upload incomplete:" \
+            "exit ${status}, ${rejected:-0} of ${count} paths rejected." \
+            "the build is unaffected; the cache is missing paths." >&2
+    else
+        echo "nix_cache_push: ${label} accepted ${count} paths" >&2
+    fi
+}
 
 if [ "$want_cachix" = "1" ]; then
     cache="${cachix_cache:-tuwunel}"
     echo "nix_cache_push: uploading ${count} paths to cachix ${cache}" >&2
 
     # shellcheck disable=SC2086
-    nix $nix_flags shell --inputs-from . cachix \
-        -c xargs -r -a "$paths" cachix push "$cache" || true
+    if nix $nix_flags shell --inputs-from . cachix \
+        -c xargs -r -a "$paths" cachix push "$cache" > "$log" 2>&1
+    then report cachix 0; else report cachix "$?"; fi
 fi
 
 if [ "$want_attic" = "1" ]; then
@@ -70,8 +95,9 @@ if [ "$want_attic" = "1" ]; then
     # shell so the token stays in this process tree and never reaches a
     # command line the caller traces.
     # shellcheck disable=SC2086
-    nix $nix_flags shell --inputs-from . attic -c sh -c '
+    if nix $nix_flags shell --inputs-from . attic -c sh -c '
         attic login "$ATTIC_CACHE" "$ATTIC_ENDPOINT" "$ATTIC_TOKEN" > /dev/null &&
         xargs -r -a "$ATTIC_PATHS" attic push "$ATTIC_CACHE"
-    ' || true
+    ' > "$log" 2>&1
+    then report attic 0; else report attic "$?"; fi
 fi
