@@ -28,7 +28,7 @@ case "$1" in
     legacy_active=''
     if [ -d /run/systemd/system ] && command -v systemctl > /dev/null 2>&1; then
       for unit in conduwuit.service matrix-conduwuit.service \
-        continuwuity.service conduit.service matrix-conduit.service; do
+        conduit.service matrix-conduit.service; do
         if systemctl is-active --quiet "$unit" 2>/dev/null; then
           legacy_active="$unit"
         fi
