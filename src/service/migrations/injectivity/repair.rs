@@ -225,11 +225,9 @@ async fn patch_statediffs(services: &Services, scan: &Scan) -> Result {
 	let digests: Digests = services.db["statehash_shortstatehash"]
 		.raw_stream()
 		.ready_try_fold(Digests::new(), |mut digests, (key, value)| {
-			let infected = short_of(value)
-				.filter(|state| scan.infected.contains(state))
-				.and_then(|state| key.try_into().ok().map(|digest| (state, digest)));
-
-			if let Some((state, digest)) = infected {
+			if let Some(state) = short_of(value).filter(|state| scan.infected.contains(state))
+				&& let Ok(digest) = key.try_into()
+			{
 				digests.entry(state).or_default().push(digest);
 			}
 
