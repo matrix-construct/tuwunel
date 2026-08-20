@@ -120,6 +120,15 @@ variable "cachix_cache" {
 variable "cachix_push" {
     default = "0"
 }
+variable "attic_endpoint" {
+    default = "https://cache.tuwunel.chat"
+}
+variable "attic_cache" {
+    default = "tuwunel"
+}
+variable "attic_push" {
+    default = "0"
+}
 
 # Package metadata inputs
 variable "package_name" {
@@ -1387,8 +1396,14 @@ target "build-nix" {
         nix_public_key = nix_public_key
         cachix_cache = cachix_cache
         cachix_push = cachix_push
+        attic_endpoint = attic_endpoint
+        attic_cache = attic_cache
+        attic_push = attic_push
     }
-    secret = cachix_push == "1"? ["type=env,id=cachix_auth_token,env=CACHIX_AUTH_TOKEN"]: []
+    secret = concat(
+        cachix_push == "1"? ["type=env,id=cachix_auth_token,env=CACHIX_AUTH_TOKEN"]: [],
+        attic_push == "1"? ["type=env,id=attic_token,env=ATTIC_TOKEN"]: [],
+    )
 }
 
 #

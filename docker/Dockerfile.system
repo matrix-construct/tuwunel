@@ -36,5 +36,5 @@ EOF
 COPY --link --chmod=0755 \
     docker/lib/sched_wrap.sh \
     docker/lib/perf_wrap.sh \
-    docker/lib/cachix_push.sh \
+    docker/lib/nix_cache_push.sh \
     /usr/local/bin/

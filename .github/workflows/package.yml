@@ -69,7 +69,10 @@ on:
     secrets:
       cachix_auth_token:
         required: false
-        description: Write token for the Nix binary cache.
+        description: Write token for the Cachix binary cache.
+      attic_token:
+        required: false
+        description: Write token for the self-hosted binary cache.
 
 jobs:
   docs:
@@ -253,6 +256,7 @@ jobs:
         }
     secrets:
       cachix_auth_token: ${{secrets.cachix_auth_token}}
+      attic_token: ${{secrets.attic_token}}
 
   checks:
     if: >

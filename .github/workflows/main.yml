@@ -360,6 +360,7 @@ jobs:
 
     secrets:
       cachix_auth_token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+      attic_token: ${{ secrets.ATTIC_TOKEN }}
 
   package:
     if: >
@@ -431,6 +432,7 @@ jobs:
 
     secrets:
       cachix_auth_token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+      attic_token: ${{ secrets.ATTIC_TOKEN }}
 
   publish:
     if: >

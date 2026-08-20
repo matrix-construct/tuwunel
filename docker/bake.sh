@@ -94,6 +94,14 @@ else
     cachix_push=0
 fi
 
+attic_cache="${attic_cache:-tuwunel}"
+attic_endpoint="${attic_endpoint:-https://cache.tuwunel.chat}"
+if test -n "$ATTIC_TOKEN"; then
+    attic_push=1
+else
+    attic_push=0
+fi
+
 # other options
 rustdoc_base_path="${rustdoc_base_path:-}"
 rocksdb_opt_level=3

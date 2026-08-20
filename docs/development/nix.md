@@ -52,7 +52,7 @@ pull requests degrade to read-only rather than failing.
 
 The in-bake pushes are what keep CI fast: they upload build dependencies
 alongside the output, so a later run substitutes the toolchain and RocksDB
-instead of rebuilding them. All three call `docker/lib/cachix_push.sh`, which
+instead of rebuilding them. All three call `docker/lib/nix_cache_push.sh`, which
 is installed into every layer by `docker/Dockerfile.system` next to
 `sched_wrap.sh` and stays a no-op until a token is mounted. A failed upload
 never fails the build that produced the paths.
@@ -85,19 +85,29 @@ including cross-compiled static binaries, OCI images, and debug variants, and
 each matrix entry is its own job. Use the `attrs` dispatch input to publish a
 subset, and `max-parallel` to bound how much of the runner pool a run takes.
 
-The producers upload build closures rather than only final outputs, but cachix
-skips any path already served by `cache.nixos.org`, so what actually lands is
-the Tuwunel-specific subset: our binaries and our forked dependencies. The
-first `all-features` upload offered 3988 paths and stored 2158 of them, and a
-closure still resolves completely because Nix queries both substituters. Stock
-nixpkgs dependencies stay upstream and are never duplicated here.
+The producers upload build closures rather than only final outputs, and the two
+caches then keep different amounts of that. Cachix skips any path already served
+by `cache.nixos.org`, so it holds only the Tuwunel-specific subset: the first
+`all-features` upload offered 3988 paths and stored 2158. The self-hosted cache
+keeps everything, stock nixpkgs paths included, which is deliberate: a complete
+closure means a build can be satisfied from `cache.tuwunel.chat` alone without
+`cache.nixos.org` being reachable.
 
 ## Credentials
 
-Pushing requires a token with write access to the cache, generated from the
-Cachix dashboard and stored as the repository secret `CACHIX_AUTH_TOKEN`.
+Each cache has its own write token, and each uploader is gated on its own, so
+either may be absent without disturbing the other.
 
-For `nix.yml` the secret is read directly. For the bake path it is threaded
+| Secret | Cache | Also needs |
+|---|---|---|
+| `CACHIX_AUTH_TOKEN` | Cachix | nothing |
+| `ATTIC_TOKEN` | self-hosted | `ATTIC_ENDPOINT`, defaulted to `https://cache.tuwunel.chat` |
+
+`ATTIC_ENDPOINT` is the Attic server the client logs into, which is not the
+substituter URL even though the two share a host. The bake path sets it from the
+`attic_endpoint` build arg in `nix-base`, so derived stages inherit it.
+
+For `nix.yml` the secrets are read directly. For the bake path they are threaded
 explicitly, because reusable workflows do not inherit secrets:
 
 ```text
@@ -105,15 +115,15 @@ main.yml  ->  test.yml     ->  bake.yml  ->  docker/bake.sh  ->  docker/bake.hcl
           ->  package.yml  ->
 ```
 
-`bake.sh` never passes the token as a build argument. It only sets
-`cachix_push` when the token is present in its environment; the token itself
-reaches the build as a BuildKit secret mount, declared once on the `build-nix`
-bake target and inherited by `nix` and `smoke-nix`, then read from
-`/run/secrets` inside each stage.
+`bake.sh` never passes a token as a build argument. It only sets `cachix_push`
+and `attic_push` from whether each token is present in its environment; the
+tokens themselves reach the build as BuildKit secret mounts, declared once on
+the `build-nix` bake target and inherited by `nix` and `smoke-nix`, then read
+from `/run/secrets` inside each stage.
 
-`cachix_push` deliberately participates in the layer cache key. Without it, a
-tokenless build could populate the cache entry for that layer and suppress the
-upload on the next tokened build of the same tree.
+Both `cachix_push` and `attic_push` deliberately participate in the layer cache
+key. Without them, a tokenless build could populate the cache entry for that
+layer and suppress the upload on the next tokened build of the same tree.
 
 ## Pushing by hand
 

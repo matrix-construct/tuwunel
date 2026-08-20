@@ -156,6 +156,17 @@ jobs:
         run: |
           nix build -L --print-build-logs ".#${{matrix.attr}}"
 
+      # cachix-action's post-build hook covers Cachix; the self-hosted cache
+      # reuses the same helper the bake stages call, so the closure logic and
+      # the never-fail-the-build guarantee live in one place.
+      - name: Push ${{matrix.attr}} to the self-hosted cache
+        env:
+          attic_push: ${{secrets.ATTIC_TOKEN != '' && '1' || '0'}}
+          ATTIC_TOKEN: ${{secrets.ATTIC_TOKEN}}
+          ATTIC_ENDPOINT: https://cache.tuwunel.chat
+        run: |
+          docker/lib/nix_cache_push.sh result
+
   devshells:
     name: devShell ${{matrix.shell}}
     needs: [discover]
@@ -193,3 +204,11 @@ jobs:
           nix develop -L ".#${{matrix.shell}}" \
             --profile "${RUNNER_TEMP}/devshell-${{matrix.shell}}" \
             --command true
+
+      - name: Push devShell ${{matrix.shell}} to the self-hosted cache
+        env:
+          attic_push: ${{secrets.ATTIC_TOKEN != '' && '1' || '0'}}
+          ATTIC_TOKEN: ${{secrets.ATTIC_TOKEN}}
+          ATTIC_ENDPOINT: https://cache.tuwunel.chat
+        run: |
+          docker/lib/nix_cache_push.sh "${RUNNER_TEMP}/devshell-${{matrix.shell}}"

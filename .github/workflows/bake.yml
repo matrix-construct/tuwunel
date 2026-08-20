@@ -88,8 +88,13 @@ on:
       cachix_auth_token:
         required: false
         description: >
-          Write token for the Nix binary cache. When absent the nix targets still
-          substitute from the cache, they just do not upload to it.
+          Write token for the Cachix binary cache. When absent the nix targets
+          still substitute from the caches, they just do not upload.
+      attic_token:
+        required: false
+        description: >
+          Write token for the self-hosted binary cache. Independent of the
+          Cachix token; either, both, or neither may be present.
 
 jobs:
   bake:
@@ -154,6 +159,7 @@ jobs:
         git_checkout: ${{inputs.checkout}}
         rustdoc_base_path: ${{inputs.rustdoc_base_path}}
         CACHIX_AUTH_TOKEN: ${{secrets.cachix_auth_token}}
+        ATTIC_TOKEN: ${{secrets.attic_token}}
 
       run: |
         docker/bake.sh "${{matrix.bake_target}}"

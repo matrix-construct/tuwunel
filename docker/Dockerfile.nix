@@ -3,6 +3,11 @@
 FROM input AS nix-base
 ARG nix_substituter="https://cache.tuwunel.chat https://tuwunel.cachix.org"
 ARG nix_public_key="cache.tuwunel.chat-1:ZafUaXiRMozDa9N2SWim6EdzH0EEjWjwfvlTxXvcjLA= tuwunel.cachix.org-1:VRecUeDcaPxtYDA6bnMF3snPM7VYX8K605z4uuG2nWc="
+ARG attic_endpoint="https://cache.tuwunel.chat"
+
+# The attic server the uploader logs into, which is not the substituter URL
+# even though they share a host. Set here so every derived stage inherits it.
+ENV ATTIC_ENDPOINT=${attic_endpoint}
 
 # The substituter is recorded in nix.conf rather than relying on the flake's
 # nixConfig, because build-nix realises the tree through default.nix, where
@@ -36,6 +41,8 @@ ARG sched_policy="--batch"
 ARG sched_prio=0
 ARG cachix_cache="tuwunel"
 ARG cachix_push=0
+ARG attic_cache="tuwunel"
+ARG attic_push=0
 
 WORKDIR /usr/src/tuwunel
 COPY --link --from=source /usr/src/tuwunel .
@@ -50,6 +57,7 @@ RUN \
 --mount=type=cache,dst=/root/.cache/nix,sharing=shared \
 --mount=type=cache,dst=/root/.local/state/nix,sharing=shared \
 --mount=type=secret,id=cachix_auth_token,env=CACHIX_AUTH_TOKEN \
+--mount=type=secret,id=attic_token,env=ATTIC_TOKEN \
 <<EOF
 	set -eux
 
@@ -62,7 +70,7 @@ RUN \
 
 	cp -afRL --copy-contents result /opt/tuwunel
 
-	cachix_push.sh result
+	nix_cache_push.sh result
 EOF
 
 
@@ -71,6 +79,8 @@ ARG sched_policy="--rr"
 ARG sched_prio=1
 ARG cachix_cache="tuwunel"
 ARG cachix_push=0
+ARG attic_cache="tuwunel"
+ARG attic_push=0
 
 WORKDIR /usr/src/tuwunel
 COPY --link --from=source /usr/src/tuwunel .
@@ -87,6 +97,7 @@ RUN \
 --mount=type=cache,dst=/root/.cache/nix,sharing=shared \
 --mount=type=cache,dst=/root/.local/state/nix,sharing=shared \
 --mount=type=secret,id=cachix_auth_token,env=CACHIX_AUTH_TOKEN \
+--mount=type=secret,id=attic_token,env=ATTIC_TOKEN \
 <<EOF
     set -eux
 
@@ -110,7 +121,7 @@ RUN \
         --extra-experimental-features flakes \
         build --no-link --print-out-paths .#all-features > /tmp/smoke-out
 
-    cachix_push.sh $(cat /tmp/smoke-out)
+    nix_cache_push.sh $(cat /tmp/smoke-out)
 EOF
 
 
@@ -119,6 +130,8 @@ ARG sched_policy="--rr"
 ARG sched_prio=1
 ARG cachix_cache="tuwunel"
 ARG cachix_push=0
+ARG attic_cache="tuwunel"
+ARG attic_push=0
 
 WORKDIR /usr/src/tuwunel
 COPY --link --from=source /usr/src/tuwunel .
@@ -129,6 +142,7 @@ RUN \
 --mount=type=cache,dst=/root/.cache/nix,sharing=shared \
 --mount=type=cache,dst=/root/.local/state/nix,sharing=shared \
 --mount=type=secret,id=cachix_auth_token,env=CACHIX_AUTH_TOKEN \
+--mount=type=secret,id=attic_token,env=ATTIC_TOKEN \
 <<EOF
     set -eux
     alias nix="nix --extra-experimental-features nix-command --extra-experimental-features flakes"
@@ -139,5 +153,5 @@ RUN \
     nix-store --export $ID > tuwunel/tuwunel.drv
     tar -cvf /opt/tuwunel.nix.tar tuwunel
 
-    cachix_push.sh $ID
+    nix_cache_push.sh $ID
 EOF
