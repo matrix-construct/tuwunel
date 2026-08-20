@@ -1,5 +1,6 @@
 mod account_data;
 mod appservice;
+mod feds;
 mod globals;
 mod oauth;
 mod peer_status;
@@ -21,9 +22,9 @@ use clap::Subcommand;
 use tuwunel_core::Result;
 
 use self::{
-	account_data::AccountDataCommand, appservice::AppserviceCommand, globals::GlobalsCommand,
-	oauth::OauthCommand, peer_status::PeerStatusCommand, presence::PresenceCommand,
-	pusher::PusherCommand, raw::RawCommand, resolver::ResolverCommand,
+	account_data::AccountDataCommand, appservice::AppserviceCommand, feds::FedsCommand,
+	globals::GlobalsCommand, oauth::OauthCommand, peer_status::PeerStatusCommand,
+	presence::PresenceCommand, pusher::PusherCommand, raw::RawCommand, resolver::ResolverCommand,
 	room_alias::RoomAliasCommand, room_state_cache::RoomStateCacheCommand,
 	room_timeline::RoomTimelineCommand, sending::SendingCommand, short::ShortCommand,
 	storage::StorageCommand, sync::SyncCommand, threepid::ThreepidCommand, users::UsersCommand,
@@ -41,6 +42,10 @@ pub(super) enum QueryCommand {
 	/// - appservice.rs iterators and getters
 	#[command(subcommand)]
 	Appservice(AppserviceCommand),
+
+	/// - federation fanout diagnostics
+	#[command(subcommand)]
+	Feds(FedsCommand),
 
 	/// - presence.rs iterators and getters
 	#[command(subcommand)]

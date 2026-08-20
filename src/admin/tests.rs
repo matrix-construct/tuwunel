@@ -2,7 +2,7 @@
 
 use clap::Parser;
 
-use crate::{admin::AdminCommand, media::MediaCommand};
+use crate::{admin::AdminCommand, media::MediaCommand, query::QueryCommand};
 
 #[test]
 fn get_help_short() { get_help_inner("-h"); }
@@ -58,6 +58,44 @@ fn delete_range_accepts_one_direction() {
 		assert!(older_than, "{direction} must select the older-than direction");
 		assert!(!newer_than, "{direction} must leave the newer-than direction unset");
 	}
+}
+
+#[test]
+fn query_feds_parse() {
+	for survey in ["version", "state", "head"] {
+		let command =
+			parse_ok(&["argv[0] doesn't matter", "query", "feds", survey, "!room:example.org"]);
+
+		assert!(
+			matches!(command, AdminCommand::Query(QueryCommand::Feds(_))),
+			"{survey} must parse as a query feds command"
+		);
+	}
+}
+
+#[test]
+fn query_feds_require_a_room() {
+	for survey in ["version", "state", "head"] {
+		assert!(
+			parse_err(&["argv[0] doesn't matter", "query", "feds", survey]).contains("ROOM"),
+			"{survey} must require a room"
+		);
+	}
+}
+
+#[test]
+fn query_feds_reject_zero_width() {
+	let error = parse_err(&[
+		"argv[0] doesn't matter",
+		"query",
+		"feds",
+		"version",
+		"!room:example.org",
+		"--width",
+		"0",
+	]);
+
+	assert!(error.contains("invalid value '0'"), "a survey width must be nonzero");
 }
 
 fn get_help_inner(input: &str) {
