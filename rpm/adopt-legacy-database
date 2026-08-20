@@ -1,0 +1,100 @@
+#!/bin/sh
+# Adopt the database of a previous Conduit lineage homeserver into
+# /var/lib/tuwunel so an existing server continues transparently and migrates
+# on the next start. The old directory is moved into place, never copied or
+# deleted, and the locations it used are left behind as symlinks.
+#
+# The package runs this once on install. It is safe to run again by hand,
+# which is how an operator finishes a migration that was deferred because the
+# old server was still running.
+set -e
+
+TUWUNEL_DATABASE_PATH=/var/lib/tuwunel
+SELF=/usr/libexec/tuwunel/adopt-legacy-database
+
+# Never reshape another homeserver's data while it could still be writing.
+legacy_active=''
+if [ -d /run/systemd/system ] && command -v systemctl > /dev/null 2>&1; then
+  for unit in conduwuit.service matrix-conduwuit.service \
+    conduit.service matrix-conduit.service; do
+    if systemctl is-active --quiet "$unit" 2>/dev/null; then
+      legacy_active="$unit"
+    fi
+  done
+fi
+
+if [ -n "$legacy_active" ]; then
+  echo "NOTE: $legacy_active is still running, its database was left in place." 1>&2
+  echo "NOTE: stop it, then adopt its database with: $SELF" 1>&2
+  exit 0
+fi
+
+mkdir -p "$TUWUNEL_DATABASE_PATH"
+
+# A directory on another filesystem is never moved: mv would silently become a
+# copy of the whole database, and the target may not even have room for it.
+# Comparing devices covers a mount at the directory itself and a mount further
+# up the path alike.
+state_device=$(stat -c %d /var/lib)
+
+# The /var/lib/private paths hold the real directory when the old server ran
+# under systemd's DynamicUser=, reaching the public path through a symlink.
+for legacy in /var/lib/conduwuit /var/lib/private/conduwuit \
+  /var/lib/matrix-conduit /var/lib/private/matrix-conduit; do
+  { [ -d "$legacy" ] && ! [ -L "$legacy" ]; } || continue
+
+  if [ "$(stat -c %d "$legacy")" != "$state_device" ]; then
+    echo "NOTE: $legacy is on another filesystem, mount it at $TUWUNEL_DATABASE_PATH instead" 1>&2
+    continue
+  fi
+
+  # An empty leftover directory only stands in the way of the symlink below.
+  if ! [ "$(ls -A "$legacy")" ]; then
+    rmdir "$legacy"
+    continue
+  fi
+
+  # Clear an empty target so the old directory can take its place, unless a
+  # filesystem is mounted there, where rmdir would fail and abort the install.
+  if [ -d "$TUWUNEL_DATABASE_PATH" ] && ! [ -L "$TUWUNEL_DATABASE_PATH" ] \
+    && [ "$(stat -c %d "$TUWUNEL_DATABASE_PATH")" = "$state_device" ] \
+    && ! [ "$(ls -A "$TUWUNEL_DATABASE_PATH")" ]; then
+    rmdir "$TUWUNEL_DATABASE_PATH"
+  fi
+
+  if [ -e "$TUWUNEL_DATABASE_PATH" ]; then
+    echo "NOTE: leaving $legacy in place, $TUWUNEL_DATABASE_PATH already exists" 1>&2
+  else
+    echo "Adopting the existing database at $legacy" 1>&2
+    mv "$legacy" "$TUWUNEL_DATABASE_PATH"
+    # clean up the stray symlink a previous package version may have left
+    # inside the old database directory
+    if [ -L "$TUWUNEL_DATABASE_PATH/tuwunel" ] \
+      && [ "$(readlink "$TUWUNEL_DATABASE_PATH/tuwunel")" = "$TUWUNEL_DATABASE_PATH" ]; then
+      rm "$TUWUNEL_DATABASE_PATH/tuwunel"
+    fi
+  fi
+done
+
+# Leave the previous locations pointing here, so a later removal of the old
+# package reaches a symlink rather than the database. A symlink left dangling
+# by the adoption above is replaced; anything else is reported and kept.
+for legacy in /var/lib/matrix-conduit /var/lib/conduwuit; do
+  if [ -L "$legacy" ] && ! [ -e "$legacy" ]; then
+    rm "$legacy"
+  fi
+  if ! [ -e "$legacy" ] && ! [ -L "$legacy" ]; then
+    ln -s "$TUWUNEL_DATABASE_PATH" "$legacy"
+  elif [ -L "$legacy" ] \
+    && [ "$(readlink -f "$legacy")" != "$(readlink -f "$TUWUNEL_DATABASE_PATH")" ]; then
+    echo "NOTE: $legacy points to $(readlink -f "$legacy") and was not adopted" 1>&2
+  fi
+done
+
+chown -R tuwunel:tuwunel "$TUWUNEL_DATABASE_PATH"
+chmod 0740 "$TUWUNEL_DATABASE_PATH"
+
+# An adopted directory carries the labels of wherever it came from.
+if command -v restorecon > /dev/null 2>&1; then
+  restorecon -R "$TUWUNEL_DATABASE_PATH" > /dev/null 2>&1 || :
+fi

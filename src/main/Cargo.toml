@@ -52,9 +52,12 @@ require-sh = false
 # discovers shared libraries, which leaves this one undeclared. rpm/tuwunel.spec
 # states the same requirement for the COPR build.
 requires = { ca-certificates = "*" }
+# Same reasoning as the deb metadata above: one database directory, one server.
+conflicts = { conduwuit = "*", matrix-conduit = "*" }
 post_install_script = "rpm/postinst"
 assets = [
 	{ source = "target/release/tuwunel", dest = "/usr/sbin/tuwunel", mode = "755" },
+	{ source = "rpm/adopt-legacy-database", dest = "/usr/libexec/tuwunel/adopt-legacy-database", mode = "755" },
 	{ source = "README.md", dest = "/usr/share/doc/tuwunel/", mode = "644", doc = true },
 	{ source = "tuwunel-example.toml", dest = "/etc/tuwunel/tuwunel.toml", mode = "640", config = "noreplace", user = "tuwunel", group = "tuwunel" },
 	{ source = "rpm/tuwunel.service", dest = "/etc/systemd/system/", mode = "644" },

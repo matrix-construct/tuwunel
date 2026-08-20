@@ -1,11 +1,9 @@
 #!/bin/sh
 set -e
 
-# TODO: make a real RPM spec file and move all of this into the spec file
-# <https://docs.fedoraproject.org/en-US/packaging-guidelines/Scriptlets/>
-
 TUWUNEL_DATABASE_PATH=/var/lib/tuwunel
 TUWUNEL_CONFIG_PATH=/etc/tuwunel
+TUWUNEL_ADOPT=/usr/libexec/tuwunel/adopt-legacy-database
 
 # Create the `tuwunel` user if it does not exist yet.
 if ! getent passwd tuwunel > /dev/null ; then
@@ -16,25 +14,23 @@ if ! getent passwd tuwunel > /dev/null ; then
     tuwunel
 fi
 
-# Create the database path if it does not exist yet and fix up ownership
-# and permissions for the config.
-mkdir -v -p "$TUWUNEL_DATABASE_PATH"
+chown tuwunel:tuwunel -R "$TUWUNEL_CONFIG_PATH"
 
-# symlink the previous location for compatibility if it does not exist yet.
-if ! test -L "/var/lib/matrix-conduit" ; then
-    ln -s -v "$TUWUNEL_DATABASE_PATH" "/var/lib/matrix-conduit"
+# Adopt a previous homeserver's database and leave the compatibility symlinks.
+# A failure here is reported rather than raised: the package is installed and
+# correct either way, and the command can be run again once its cause is gone.
+if [ -x "$TUWUNEL_ADOPT" ]; then
+  if ! "$TUWUNEL_ADOPT"; then
+    echo "NOTE: adopting a previous database failed; run $TUWUNEL_ADOPT by hand" 1>&2
+  fi
+else
+  mkdir -p "$TUWUNEL_DATABASE_PATH"
+  chown tuwunel:tuwunel -R "$TUWUNEL_DATABASE_PATH"
+  chmod 0740 "$TUWUNEL_DATABASE_PATH"
 fi
-
-if ! test -L "/var/lib/conduwuit" ; then
-    ln -s -v "$TUWUNEL_DATABASE_PATH" "/var/lib/conduwuit"
-fi
-
-chown -v tuwunel:tuwunel -R "$TUWUNEL_DATABASE_PATH"
-chown -v tuwunel:tuwunel -R "$TUWUNEL_CONFIG_PATH"
-
-chmod -v 740 "$TUWUNEL_DATABASE_PATH"
 
 echo ''
 echo 'Make sure you edit the example config at /etc/tuwunel/tuwunel.toml before starting!'
+echo 'If migrating from another homeserver, port its settings (especially server_name) into that config.'
 echo 'To start the server, run: systemctl start tuwunel.service'
 echo ''

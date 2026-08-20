@@ -35,6 +35,12 @@ BuildRequires:  findutils
 
 Requires:       ca-certificates
 Requires(pre):  shadow-utils
+# Two homeservers of this lineage cannot share the database directory this
+# package claims, and installing one over the other silently would leave the
+# running server's data behind. Removing the other package first is the
+# supported path, and its database is adopted on install.
+Conflicts:      conduwuit
+Conflicts:      matrix-conduit
 %if %{with selinux}
 Requires:       (%{name}-selinux if selinux-policy-%{selinuxtype})
 %endif
@@ -87,6 +93,8 @@ install -Dpm 0640 tuwunel-example.toml %{buildroot}%{_sysconfdir}/tuwunel/tuwune
 install -Dpm 0644 rpm/tuwunel.service %{buildroot}%{_unitdir}/tuwunel.service
 install -Dpm 0644 rpm/tuwunel.socket %{buildroot}%{_unitdir}/tuwunel.socket
 install -Dpm 0644 rpm/sysusers %{buildroot}%{_sysusersdir}/tuwunel.conf
+install -Dpm 0755 rpm/adopt-legacy-database \
+    %{buildroot}%{_libexecdir}/tuwunel/adopt-legacy-database
 install -dm 0740 %{buildroot}%{_sharedstatedir}/tuwunel
 %if %{with selinux}
 install -Dpm 0644 rpm/selinux/tuwunel.pp.bz2 \
@@ -104,9 +112,10 @@ exit 0
 
 %post
 %systemd_post tuwunel.service
-# Compatibility locations for databases created by predecessor packages.
-test -e /var/lib/matrix-conduit || ln -s %{_sharedstatedir}/tuwunel /var/lib/matrix-conduit || :
-test -e /var/lib/conduwuit || ln -s %{_sharedstatedir}/tuwunel /var/lib/conduwuit || :
+# Adopt a predecessor package's database and leave the compatibility symlinks.
+# Never raised: the package is installed and correct whether or not a previous
+# database was found, and the command can be run again by hand.
+%{_libexecdir}/tuwunel/adopt-legacy-database || :
 
 %preun
 # The socket is never preset in %%post, so socket activation stays opt-in; it is
@@ -141,6 +150,8 @@ fi
 %{_unitdir}/tuwunel.service
 %{_unitdir}/tuwunel.socket
 %{_sysusersdir}/tuwunel.conf
+%dir %{_libexecdir}/tuwunel
+%{_libexecdir}/tuwunel/adopt-legacy-database
 %dir %attr(0740, tuwunel, tuwunel) %{_sharedstatedir}/tuwunel
 
 %if %{with selinux}

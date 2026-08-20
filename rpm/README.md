@@ -25,6 +25,39 @@ file for your release from the
 [COPR project page](https://copr.fedorainfracloud.org/coprs/trapacid/tuwunel/)
 into `/etc/yum.repos.d/` instead.
 
+### Migrating from another homeserver
+
+Homeservers of the Conduit lineage (including forks) cannot run alongside
+Tuwunel and must be uninstalled first. The package declares a conflict with
+them, so the transaction is refused rather than leaving two servers claiming
+one database directory:
+
+```sh
+sudo dnf remove conduwuit
+```
+
+Installing the Tuwunel package then adopts the existing database by moving it
+to `/var/lib/tuwunel`; nothing is copied or deleted, and the data is migrated
+on the next startup. Databases are discovered at `/var/lib/conduwuit` and
+`/var/lib/matrix-conduit`, and also under `/var/lib/private`, where systemd
+keeps the state of a service that ran with `DynamicUser=`. The locations they
+used are left behind as symlinks into `/var/lib/tuwunel`, so a package removed
+later reaches a symlink rather than the database.
+
+Adoption is skipped while an old homeserver unit is still active, and a
+database on its own filesystem is never moved, since moving it across
+filesystems would copy the whole database. Stop the old unit, or mount that
+filesystem at `/var/lib/tuwunel`, then finish the migration with:
+
+```sh
+sudo /usr/libexec/tuwunel/adopt-legacy-database
+```
+
+That command is safe to run at any time and does nothing once the database is
+in place. Port the settings from your old configuration (especially
+`server_name`) into `/etc/tuwunel/tuwunel.toml` before starting the service.
+Removing Tuwunel leaves `/var/lib/tuwunel` and its contents alone.
+
 ### Configuration
 
 When installed, the example config is placed at `/etc/tuwunel/tuwunel.toml`
