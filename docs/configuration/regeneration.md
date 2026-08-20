@@ -73,7 +73,9 @@ Tuwunel applies the following safeguards:
 - An existing destination is never replaced unless `--force` is supplied.
 - Forced replacement preserves the destination's mode and ownership, and saves
   its previous contents to an adjacent `.bak` file. Replacement is refused if
-  that backup already exists.
+  that backup already exists. Preserving the ownership of a destination owned by
+  another account needs privilege the service rarely holds; see
+  [Destinations under systemd](#destinations-under-systemd).
 - On macOS, forced replacement also carries the destination's ACLs and extended
   attributes onto the replacement, and onto its backup on a best-effort basis.
 - Nonregular destinations, including symbolic links, are refused.
@@ -87,8 +89,35 @@ Tuwunel applies the following safeguards:
 The admin command returns only the destination and a summary. It does not send
 the configuration or its secrets to the admin room.
 
-The destination for an admin command must be writable by the Tuwunel service
-account.
+## Destinations under systemd
+
+The packaged units confine the server to a small set of writable paths, so
+`ReadWritePaths=` decides where the admin command can write, not the file mode
+alone. The Debian, Red Hat, and Arch units each grant `/etc/tuwunel`. A
+destination outside every granted path is refused before anything is written,
+however permissive its mode.
+
+Regenerating to a new file never depends on ownership, but the granted directory
+must also be writable by the service account. Forced replacement additionally
+carries the existing file's ownership onto its replacement, which succeeds
+without privilege only when that file already belongs to that account.
+
+Under `DynamicUser=yes` the account is reallocated on every boot, so it owns
+neither the configuration directory nor the file in it. Regeneration there needs
+a destination the service can write, such as the directory named by
+`StateDirectory=`, and forced replacement of the active configuration is not
+available. [Review and adopt the result](#review-and-adopt-the-result) covers
+installing the generated file afterwards.
+
+The units also answer a blocked system call with `EPERM`, which reaches the log
+as an ordinary permission error. When a regeneration failure reports a
+permission problem on a path that looks writable, compare it against the unit's
+`ReadWritePaths=` and `SystemCallFilter=` settings before changing anything on
+disk:
+
+```console
+systemctl show tuwunel -p ReadWritePaths -p SystemCallFilter -p User
+```
 
 ## Limitations
 
@@ -127,7 +156,8 @@ backup before repeating a forced replacement. Restart Tuwunel or use
 [configuration reload](../deploying/configuration-reload.md) only after
 reviewing the generated file.
 
-For a running server, write to a new absolute path first:
+For a running server, write to a new absolute path the service can reach, per
+[Destinations under systemd](#destinations-under-systemd):
 
 ```text
 !admin server regenerate-config /etc/tuwunel/tuwunel.toml.new
