@@ -454,16 +454,7 @@ fn set_output_metadata(file: &File, metadata: Option<&Metadata>, path: &Path) ->
 		return Ok(());
 	};
 
-	// SAFETY: The descriptor is live and the numeric IDs were supplied by the OS.
-	if unsafe { fchown(file.as_raw_fd(), metadata.uid(), metadata.gid()) } == -1 {
-		let error = fs_error(
-			&IoError::last_os_error(),
-			"preserve output ownership on temporary file",
-			path,
-		);
-
-		return Err(error);
-	}
+	set_output_owner(file, metadata, path)?;
 
 	file.set_permissions(Permissions::from_mode(metadata.mode()))
 		.map_err(|error| {
@@ -483,6 +474,28 @@ fn set_output_metadata(file: &File, metadata: Option<&Metadata>, path: &Path) ->
 	}
 
 	Ok(())
+}
+
+#[cfg(unix)]
+fn set_output_owner(file: &File, origin: &Metadata, path: &Path) -> Result {
+	let staged = file
+		.metadata()
+		.map_err(|error| fs_error(&error, "inspect temporary output", path))?;
+
+	let (uid, gid) = (origin.uid(), origin.gid());
+
+	// A sandbox can deny the chown syscall even where it would change nothing.
+	if staged.uid() == uid && staged.gid() == gid {
+		return Ok(());
+	}
+
+	// SAFETY: The descriptor is live and the numeric IDs were supplied by the OS.
+	let result = unsafe { fchown(file.as_raw_fd(), uid, gid) };
+
+	(result == 0)
+		.then_some(())
+		.ok_or_else(IoError::last_os_error)
+		.map_err(|error| fs_error(&error, "preserve output ownership on temporary file", path))
 }
 
 // Applied after commit so a failed replacement never installs a backup whose
