@@ -2,6 +2,7 @@ use std::{
 	cmp::Ordering,
 	collections::BTreeMap,
 	fmt::{Result as FmtResult, Write as _},
+	time::{Duration, Instant},
 };
 
 use futures::StreamExt;
@@ -14,10 +15,13 @@ use ruma::{
 };
 use serde::Deserialize;
 use smallvec::SmallVec;
-use tuwunel_core::{Err, Error, Result};
+use tuwunel_core::{Err, Error, Result, utils::time::Elapsed};
 use tuwunel_service::federation::feds::{Fault, Outcome};
 
-use super::{SweepArgs, fault_message, markdown_cell, prepare, sorted_event_id_difference};
+use super::{
+	SweepArgs, fault_message, markdown_cell, prepare, render_total_time,
+	sorted_event_id_difference,
+};
 use crate::admin_command;
 
 type Extremities = SmallVec<[OwnedEventId; 1]>;
@@ -73,6 +77,7 @@ pub(super) async fn feds_head(
 		.collect();
 
 	let request_room = prepared.room_id.clone();
+	let started = Instant::now();
 	let outcomes = self
 		.services
 		.federation
@@ -89,7 +94,9 @@ pub(super) async fn feds_head(
 		.collect::<Vec<_>>()
 		.await;
 
-	let output = render(outcomes, local_depth, &local_extremities);
+	let total = started.elapsed();
+
+	let output = render(outcomes, local_depth, &local_extremities, total);
 
 	self.write_str(&output).await
 }
@@ -126,6 +133,7 @@ fn render(
 	mut outcomes: Vec<Outcome<Head>>,
 	local_depth: UInt,
 	local_extremities: &[OwnedEventId],
+	total: Duration,
 ) -> String {
 	outcomes.sort_by(|left, right| match (&left.result, &right.result) {
 		| (Err(_), Err(_)) => left.origin.cmp(&right.origin),
@@ -139,7 +147,7 @@ fn render(
 
 	let mut output = String::new();
 
-	render_into(&mut output, &outcomes, local_depth, local_extremities)
+	render_into(&mut output, &outcomes, local_depth, local_extremities, total)
 		.expect("writing to a String cannot fail");
 
 	output
@@ -150,6 +158,7 @@ fn render_into(
 	outcomes: &[Outcome<Head>],
 	local_depth: UInt,
 	local_extremities: &[OwnedEventId],
+	total: Duration,
 ) -> FmtResult {
 	let classes: Classes<'_> = outcomes
 		.iter()
@@ -204,7 +213,7 @@ fn render_into(
 		match &outcome.result {
 			| Ok(head) => writeln!(
 				output,
-				"| {} | {} | {} | {} | {:?} | |",
+				"| {} | {} | {} | {} | {} | |",
 				outcome.origin,
 				head.depth,
 				head.prev_events.len(),
@@ -212,13 +221,19 @@ fn render_into(
 					.get(head.prev_events.as_slice())
 					.copied()
 					.unwrap_or_default(),
-				outcome.elapsed,
+				Elapsed::from(outcome.elapsed),
+			)?,
+			| Err(fault @ Fault::NotAttempted) => writeln!(
+				output,
+				"| {} | | | | | {} |",
+				outcome.origin,
+				markdown_cell(&fault_message(fault)),
 			)?,
 			| Err(fault) => writeln!(
 				output,
-				"| {} | | | | {:?} | {} |",
+				"| {} | | | | {} | {} |",
 				outcome.origin,
-				outcome.elapsed,
+				Elapsed::from(outcome.elapsed),
 				markdown_cell(&fault_message(fault)),
 			)?,
 		}
@@ -247,5 +262,28 @@ fn render_into(
 		writeln!(output, "```")?;
 	}
 
-	Ok(())
+	render_total_time(output, total)
+}
+
+#[cfg(test)]
+mod tests {
+	use ruma::server_name;
+
+	use super::*;
+
+	#[test]
+	fn undispatched_destination_has_no_elapsed_time() {
+		let outcomes: Vec<Outcome<Head>> = vec![Outcome {
+			origin: server_name!("skipped.example").to_owned(),
+			elapsed: Duration::ZERO,
+			result: Err(Fault::NotAttempted),
+		}];
+
+		let output = render(outcomes, UInt::from(1_u8), &[], Duration::ZERO);
+
+		assert!(
+			output
+				.contains("| skipped.example | | | | | sweep budget exhausted before dispatch |")
+		);
+	}
 }

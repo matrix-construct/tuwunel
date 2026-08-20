@@ -4,9 +4,12 @@
 //! human-readable durations, and choose display units. These clocks are not
 //! monotonic and can be affected by system-time changes.
 
+mod elapsed;
 pub mod exponential_backoff;
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+pub use elapsed::Elapsed;
 
 use crate::{Result, err};
 

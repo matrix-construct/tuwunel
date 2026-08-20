@@ -2,6 +2,7 @@ use std::{
 	cmp::Ordering,
 	collections::BTreeMap,
 	fmt::{Result as FmtResult, Write as _},
+	time::{Duration, Instant},
 };
 
 use futures::{StreamExt, stream::iter as stream_iter};
@@ -19,11 +20,11 @@ use ruma::{
 use tuwunel_core::{
 	Err, Error, Result, err,
 	matrix::{event::gen_event_id, room_version::rules as room_version_rules},
-	utils::stream::BroadbandExt,
+	utils::{stream::BroadbandExt, time::Elapsed},
 };
 use tuwunel_service::federation::feds::{Fault, Outcome};
 
-use super::{SweepArgs, fault_message, markdown_cell, prepare};
+use super::{SweepArgs, fault_message, markdown_cell, prepare, render_total_time};
 use crate::{Context, admin_command};
 
 type SigningKeys = BTreeMap<OwnedServerName, Vec<OwnedServerSigningKeyId>>;
@@ -75,12 +76,15 @@ pub(super) async fn feds_event(
 		.get_room_version(&prepared.room_id)
 		.await?;
 
+	let started = Instant::now();
 	let outcomes = self
 		.services
 		.federation
 		.for_room(&prepared.room_id, |_| Request { event_id: event_id.clone() }, prepared.opts)
 		.collect::<Vec<_>>()
 		.await;
+
+	let total = started.elapsed();
 
 	let event_id = &event_id;
 	let room_version = &room_version;
@@ -109,7 +113,7 @@ pub(super) async fn feds_event(
 		.collect::<Vec<_>>()
 		.await;
 
-	let output = render(verified);
+	let output = render(verified, total);
 
 	self.write_str(&output).await
 }
@@ -319,12 +323,12 @@ fn signature_input(
 	Ok((event, keys))
 }
 
-fn render(mut outcomes: Vec<Outcome<Verification>>) -> String {
+fn render(mut outcomes: Vec<Outcome<Verification>>, total: Duration) -> String {
 	outcomes.sort_unstable_by(outcome_order);
 
 	let mut output = String::new();
 
-	render_into(&mut output, &outcomes).expect("writing to a String cannot fail");
+	render_into(&mut output, &outcomes, total).expect("writing to a String cannot fail");
 	output
 }
 
@@ -343,7 +347,11 @@ fn outcome_order(left: &Outcome<Verification>, right: &Outcome<Verification>) ->
 	}
 }
 
-fn render_into(output: &mut String, outcomes: &[Outcome<Verification>]) -> FmtResult {
+fn render_into(
+	output: &mut String,
+	outcomes: &[Outcome<Verification>],
+	total: Duration,
+) -> FmtResult {
 	writeln!(output, "| rank | origin | elapsed | hash | signature | fault |")?;
 	writeln!(output, "| ---: | :--- | ---: | :--- | :--- | :--- |")?;
 
@@ -365,8 +373,9 @@ fn render_into(output: &mut String, outcomes: &[Outcome<Verification>]) -> FmtRe
 
 				writeln!(
 					output,
-					"| {rank} | {} | {:?} | | | {fault} |",
-					outcome.origin, outcome.elapsed,
+					"| {rank} | {} | {} | | | {fault} |",
+					outcome.origin,
+					Elapsed::from(outcome.elapsed),
 				)?;
 			},
 			| Ok(verification) => {
@@ -376,16 +385,16 @@ fn render_into(output: &mut String, outcomes: &[Outcome<Verification>]) -> FmtRe
 
 				writeln!(
 					output,
-					"| {rank} | {} | {:?} | {} | {signature} | |",
+					"| {rank} | {} | {} | {} | {signature} | |",
 					outcome.origin,
-					outcome.elapsed,
+					Elapsed::from(outcome.elapsed),
 					hash_cell(verification.hash),
 				)?;
 			},
 		}
 	}
 
-	Ok(())
+	render_total_time(output, total)
 }
 
 fn hash_cell(status: Option<HashStatus>) -> &'static str {
@@ -398,8 +407,6 @@ fn hash_cell(status: Option<HashStatus>) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-	use std::time::Duration;
-
 	use ruma::{ServerName, server_name};
 	use serde_json::json;
 
@@ -516,18 +523,18 @@ mod tests {
 			verification(server_name!("unchecked.example"), 37, None, false),
 			Outcome {
 				origin: server_name!("timeout.example").to_owned(),
-				elapsed: Duration::from_millis(20),
+				elapsed: Duration::from_nanos(12_559_999),
 				result: Err(Fault::Elapsed),
 			},
 		];
 
-		let output = render(outcomes);
+		let output = render(outcomes, Duration::from_millis(15_499));
 		let fast = output
 			.find("| 1 | fast.example | 10ms | ok | ok | |")
 			.unwrap();
 
 		let timeout = output
-			.find("| 2 | timeout.example | 20ms | | | request deadline exceeded |")
+			.find("| 2 | timeout.example | 12.55ms | | | request deadline exceeded |")
 			.unwrap();
 
 		let no_hash = output
@@ -563,6 +570,8 @@ mod tests {
 				&& slow < alpha_skipped
 				&& alpha_skipped < skipped
 		);
+
+		assert!(output.ends_with("\nFederation fanout took 15.49s.\n"));
 	}
 
 	fn event() -> CanonicalJsonObject {

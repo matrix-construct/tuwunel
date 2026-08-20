@@ -2,6 +2,7 @@ use std::{
 	borrow::Cow,
 	collections::BTreeMap,
 	fmt::{Result as FmtResult, Write as _},
+	time::{Duration, Instant},
 };
 
 use futures::StreamExt;
@@ -9,10 +10,10 @@ use ruma::{
 	OwnedRoomOrAliasId,
 	api::federation::discovery::get_server_version::v1::{Request, Response, Server},
 };
-use tuwunel_core::Result;
-use tuwunel_service::federation::feds::Outcome;
+use tuwunel_core::{Result, utils::time::Elapsed};
+use tuwunel_service::federation::feds::{Fault, Outcome};
 
-use super::{SweepArgs, fault_message, markdown_cell, prepare};
+use super::{SweepArgs, fault_message, markdown_cell, prepare, render_total_time};
 use crate::admin_command;
 
 #[derive(Eq, Ord, PartialEq, PartialOrd)]
@@ -27,10 +28,12 @@ struct Version {
 
 type ClassCounts<'a> = BTreeMap<&'a Version, usize>;
 type ClassNumbers<'a> = BTreeMap<&'a Version, usize>;
+type VersionOutcome = Outcome<Option<Version>>;
 
 #[admin_command]
 pub(super) async fn feds_version(&self, room: OwnedRoomOrAliasId, sweep: SweepArgs) -> Result {
 	let prepared = prepare(self, &room, sweep).await?;
+	let started = Instant::now();
 	let outcomes = self
 		.services
 		.federation
@@ -43,7 +46,9 @@ pub(super) async fn feds_version(&self, room: OwnedRoomOrAliasId, sweep: SweepAr
 		.collect::<Vec<_>>()
 		.await;
 
-	let output = render(outcomes);
+	let total = started.elapsed();
+
+	let output = render(outcomes, total);
 
 	self.write_str(&output).await
 }
@@ -71,17 +76,17 @@ fn into_version(response: Response) -> Option<Version> {
 	})
 }
 
-fn render(mut outcomes: Vec<Outcome<Option<Version>>>) -> String {
+fn render(mut outcomes: Vec<VersionOutcome>, total: Duration) -> String {
 	outcomes.sort_by(|left, right| left.origin.cmp(&right.origin));
 
 	let mut output = String::new();
 
-	render_into(&mut output, &outcomes).expect("writing to a String cannot fail");
+	render_into(&mut output, &outcomes, total).expect("writing to a String cannot fail");
 
 	output
 }
 
-fn render_into(output: &mut String, outcomes: &[Outcome<Option<Version>>]) -> FmtResult {
+fn render_into(output: &mut String, outcomes: &[VersionOutcome], total: Duration) -> FmtResult {
 	let counts: ClassCounts<'_> = outcomes
 		.iter()
 		.filter_map(|outcome| {
@@ -145,30 +150,37 @@ fn render_into(output: &mut String, outcomes: &[Outcome<Option<Version>>]) -> Fm
 		match &outcome.result {
 			| Ok(Some(version)) => writeln!(
 				output,
-				"| {} | {} | {:?} | |",
+				"| {} | {} | {} | |",
 				outcome.origin,
 				class_numbers
 					.get(version)
 					.copied()
 					.unwrap_or_default(),
-				outcome.elapsed,
+				Elapsed::from(outcome.elapsed),
 			)?,
 			| Ok(None) => writeln!(
 				output,
-				"| {} | | {:?} | missing server metadata |",
-				outcome.origin, outcome.elapsed,
+				"| {} | | {} | missing server metadata |",
+				outcome.origin,
+				Elapsed::from(outcome.elapsed),
+			)?,
+			| Err(fault @ Fault::NotAttempted) => writeln!(
+				output,
+				"| {} | | | {} |",
+				outcome.origin,
+				markdown_cell(&fault_message(fault)),
 			)?,
 			| Err(fault) => writeln!(
 				output,
-				"| {} | | {:?} | {} |",
+				"| {} | | {} | {} |",
 				outcome.origin,
-				outcome.elapsed,
+				Elapsed::from(outcome.elapsed),
 				markdown_cell(&fault_message(fault)),
 			)?,
 		}
 	}
 
-	Ok(())
+	render_total_time(output, total)
 }
 
 fn option_cell(value: Option<&str>) -> Cow<'_, str> {
@@ -179,8 +191,6 @@ fn option_cell(value: Option<&str>) -> Cow<'_, str> {
 
 #[cfg(test)]
 mod tests {
-	use std::time::Duration;
-
 	use ruma::{ServerName, server_name};
 
 	use super::*;
@@ -191,9 +201,14 @@ mod tests {
 			success(server_name!("rare.example"), "alpha"),
 			success(server_name!("popular-a.example"), "zeta"),
 			success(server_name!("popular-b.example"), "zeta"),
+			Outcome {
+				origin: server_name!("skipped.example").to_owned(),
+				elapsed: Duration::ZERO,
+				result: Err(Fault::NotAttempted),
+			},
 		];
 
-		let output = render(outcomes);
+		let output = render(outcomes, Duration::ZERO);
 		let popular = output
 			.find("| 1 | 2 | 2 | zeta |  |  |  |  |  |")
 			.expect("popular class should be rendered first");
@@ -212,9 +227,13 @@ mod tests {
 			output.contains("| rare.example | 1 |"),
 			"origin rows should keep the stable class number",
 		);
+
+		assert!(
+			output.contains("| skipped.example | | | sweep budget exhausted before dispatch |")
+		);
 	}
 
-	fn success(origin: &ServerName, name: &str) -> Outcome<Option<Version>> {
+	fn success(origin: &ServerName, name: &str) -> VersionOutcome {
 		let version = Version {
 			name: Some(name.to_owned()),
 			version: None,

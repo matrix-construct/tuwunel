@@ -3,6 +3,7 @@ use std::{
 	collections::BTreeMap,
 	fmt::{Error as FmtError, Write as _},
 	iter::once,
+	time::{Duration, Instant},
 };
 
 use futures::StreamExt;
@@ -13,12 +14,24 @@ use ruma::{
 use tuwunel_core::Result as CoreResult;
 use tuwunel_service::federation::feds::{Fault, Grid, Origins, OutcomeExt};
 
-use super::{SweepArgs, fault_message, markdown_cell, prepare, sorted_event_id_difference};
+use super::{
+	SweepArgs, fault_message, markdown_cell, prepare, render_total_time,
+	sorted_event_id_difference,
+};
 use crate::admin_command;
 
 type RenderResult<T = ()> = Result<T, FmtError>;
 type SetClass<'a> = (&'a [OwnedEventId], &'a Origins);
 type OriginClasses<'a> = BTreeMap<&'a ServerName, usize>;
+
+struct Render<'a> {
+	event_id: &'a OwnedEventId,
+	grid: &'a Grid<StateSet>,
+	local_state: &'a [OwnedEventId],
+	auth_chain: bool,
+	full: bool,
+	total: Duration,
+}
 
 #[derive(Eq, Ord, PartialEq, PartialOrd)]
 enum StateSet {
@@ -75,6 +88,7 @@ pub(super) async fn feds_state(
 	let local_state = normalize(local_state);
 	let request_room = prepared.room_id.clone();
 	let request_event = event_id.clone();
+	let started = Instant::now();
 	let grid = self
 		.services
 		.federation
@@ -94,7 +108,9 @@ pub(super) async fn feds_state(
 		})
 		.await;
 
-	let output = render(&event_id, &grid, &local_state, auth_chain, full);
+	let total = started.elapsed();
+
+	let output = render(&event_id, &grid, &local_state, auth_chain, full, total);
 
 	self.write_str(&output).await
 }
@@ -112,22 +128,33 @@ fn render(
 	local_state: &[OwnedEventId],
 	auth_chain: bool,
 	full: bool,
+	total: Duration,
 ) -> String {
 	let mut output = String::new();
+	let args = Render {
+		event_id,
+		grid,
+		local_state,
+		auth_chain,
+		full,
+		total,
+	};
 
-	render_into(&mut output, event_id, grid, local_state, auth_chain, full)
-		.expect("writing to a String cannot fail");
+	render_into(&mut output, args).expect("writing to a String cannot fail");
 
 	output
 }
 
 fn render_into(
 	output: &mut String,
-	event_id: &OwnedEventId,
-	grid: &Grid<StateSet>,
-	local_state: &[OwnedEventId],
-	auth_chain: bool,
-	full: bool,
+	Render {
+		event_id,
+		grid,
+		local_state,
+		auth_chain,
+		full,
+		total,
+	}: Render<'_>,
 ) -> RenderResult {
 	writeln!(output, "State identifiers before `{event_id}`.")?;
 
@@ -182,7 +209,7 @@ fn render_into(
 		}
 	}
 
-	Ok(())
+	render_total_time(output, total)
 }
 
 fn classes_for(

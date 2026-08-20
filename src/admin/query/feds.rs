@@ -5,12 +5,21 @@ mod state;
 mod tests;
 mod version;
 
-use std::{borrow::Cow, cmp::Ordering, num::NonZeroUsize, time::Duration};
+use std::{
+	borrow::Cow,
+	cmp::Ordering,
+	fmt::{Result as FmtResult, Write as _},
+	num::NonZeroUsize,
+	time::Duration,
+};
 
 use clap::{ArgAction, Args, Subcommand};
 use futures::StreamExt;
 use ruma::{OwnedEventId, OwnedRoomId, OwnedRoomOrAliasId, OwnedUserId};
-use tuwunel_core::{Err, Result, utils::stream::ReadyExt};
+use tuwunel_core::{
+	Err, Result,
+	utils::{stream::ReadyExt, time::Elapsed},
+};
 use tuwunel_service::federation::feds::{Fault, Opts, Record};
 
 use crate::{Context, admin_command_dispatch};
@@ -179,6 +188,10 @@ pub(super) fn fault_message(fault: &Fault) -> Cow<'static, str> {
 		| Fault::NotAttempted => Cow::Borrowed("sweep budget exhausted before dispatch"),
 		| Fault::Error(error) => Cow::Owned(format!("{:?}: {}", error.kind(), error.message())),
 	}
+}
+
+pub(super) fn render_total_time(output: &mut String, duration: Duration) -> FmtResult {
+	writeln!(output, "\nFederation fanout took {}.", Elapsed::from(duration))
 }
 
 pub(super) fn markdown_cell(value: &str) -> Cow<'_, str> {
