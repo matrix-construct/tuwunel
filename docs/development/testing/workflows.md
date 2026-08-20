@@ -15,6 +15,7 @@ test logic lives in `bake.hcl`.
 | `bake.yml` | `workflow_call` | Bake executor: runs `docker/bake.sh` and extracts artifacts |
 | `package.yml` | `workflow_call` | Package phase: docs, book, binaries, containers, distro |
 | `publish.yml` | `workflow_call` | Publish phase: GitHub Pages, GHCR, Docker Hub |
+| `nix.yml` | Tag + dispatch | Publishes flake outputs to the [Nix binary cache](../nix.md) |
 | `autocopr.yml` | Cron + dispatch | Daily RPM spec auto-update |
 
 ---

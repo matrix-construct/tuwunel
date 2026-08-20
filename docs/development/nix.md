@@ -1,0 +1,126 @@
+# Nix Binary Cache
+
+Building Tuwunel from the flake compiles a pinned Rust toolchain, a patched
+RocksDB, and liburing before it ever reaches Tuwunel's own crates. The binary
+cache holds the results of that work so neither CI nor a contributor has to
+repeat it.
+
+Reading from the cache is public and needs no credentials. Writing to it needs
+a token that only the main repository holds.
+
+## Cache identity
+
+| | |
+|---|---|
+| Substituter | `https://tuwunel.cachix.org` |
+| Public key | `tuwunel.cachix.org-1:VRecUeDcaPxtYDA6bnMF3snPM7VYX8K605z4uuG2nWc=` |
+| Provider | [Cachix](https://cachix.org) |
+| Visibility | Public read, authenticated write |
+
+Operators configuring a deployment should follow
+[NixOS deployment](../deploying/nixos.md#binary-cache) instead; this page covers
+how the cache is filled and maintained.
+
+## Consuming
+
+The flake declares the substituter in its `nixConfig`, so `nix build`,
+`nix develop`, and `nix run` against this repository offer it automatically.
+Nix applies a flake's `nixConfig` without asking only for accounts in
+`trusted-users`; otherwise it prompts. Adding the two values to your own
+`nix.conf`, or running `cachix use tuwunel`, avoids the prompt entirely.
+
+CI does not rely on `nixConfig`. The `nix-base` stage in
+`docker/Dockerfile.nix` appends the substituter and key to `/etc/nix/nix.conf`
+during image construction, because `build-nix` realises the tree through
+`default.nix`, where a flake's `nixConfig` has no effect. The values arrive as
+the `nix_substituter` and `nix_public_key` build args, defaulted in
+`docker/bake.hcl`.
+
+## Populating
+
+Two producers write to the cache. Both are inert without a token, so forks and
+pull requests degrade to read-only rather than failing.
+
+| Producer | Trigger | Scope |
+|---|---|---|
+| `build-nix` stage in `docker/Dockerfile.nix` | Every CI run of the `nix` and `smoke-nix` bake targets | The realised default package plus its full build closure |
+| `.github/workflows/nix.yml` | Version tags and manual dispatch | Every package and devShell the flake exposes for the runner's system |
+
+The in-bake push is the one that keeps CI fast: it uploads build dependencies
+alongside the output, so a later run substitutes the toolchain and RocksDB
+instead of rebuilding them. It runs after `nix-build` succeeds and can never
+fail the build.
+
+`nix.yml` is the publishing path. It enumerates attributes with
+`nix flake show` rather than hardcoding a list, so outputs added to the flake
+are published without editing the workflow. Uploads come from the post-build
+hook installed by `cachix-action`, which captures every path realised during
+the job.
+
+A full pass is expensive. The flake currently exposes 54 packages per system,
+including cross-compiled static binaries, OCI images, and debug variants, and
+each matrix entry is its own job. Use the `attrs` dispatch input to publish a
+subset, and `max-parallel` to bound how much of the runner pool a run takes.
+
+Because both producers upload build closures and not just final outputs, the
+cache grows considerably faster than the size of a Tuwunel binary would
+suggest. Watch the cache size before assuming a plan tier is sufficient.
+
+## Credentials
+
+Pushing requires a token with write access to the cache, generated from the
+Cachix dashboard and stored as the repository secret `CACHIX_AUTH_TOKEN`.
+
+For `nix.yml` the secret is read directly. For the bake path it is threaded
+explicitly, because reusable workflows do not inherit secrets:
+
+```text
+main.yml  ->  test.yml     ->  bake.yml  ->  docker/bake.sh  ->  docker/bake.hcl
+          ->  package.yml  ->
+```
+
+`bake.sh` never passes the token as a build argument. It only sets
+`cachix_push` when the token is present in its environment; the token itself
+reaches the build as a BuildKit secret mount, declared on the `build-nix`
+target and read from `/run/secrets` inside the stage.
+
+`cachix_push` deliberately participates in the layer cache key. Without it, a
+tokenless build could populate the cache entry for that layer and suppress the
+upload on the next tokened build of the same tree.
+
+## Pushing by hand
+
+`nix/pkgs/complement/bin/nix-build-and-cache` builds an installable and
+uploads it:
+
+```bash
+export CACHIX_AUTH_TOKEN=...
+nix/pkgs/complement/bin/nix-build-and-cache just .#all-features
+```
+
+`just` builds one installable, `packages` builds everything the flake exposes,
+and `ci` builds the tooling CI needs. Set `CACHIX_CACHE` to target a cache
+other than `tuwunel`.
+
+The script also retains an [Attic](https://github.com/zhaofengli/attic)
+uploader for the planned self-hosted cache. It stays dormant unless both
+`ATTIC_TOKEN` and `ATTIC_ENDPOINT` are set, and it no longer defaults to any
+endpoint.
+
+## Moving to a self-hosted cache
+
+A self-hosted cache at `cache.tuwunel.chat` is planned. The substituter URL and
+public key appear in exactly these places:
+
+| File | Purpose |
+|---|---|
+| `flake.nix` | `nixConfig` offered to anyone building the flake |
+| `docker/bake.hcl` | `nix_substituter` and `nix_public_key` defaults for CI |
+| `.github/workflows/nix.yml` | `NIX_CONFIG` for the publishing workflow |
+| `docs/deploying/nixos.md` | Operator instructions |
+| This page | Contributor reference |
+
+`docker/Dockerfile.nix` carries the same values as `ARG` defaults, which the
+bake variables override, so a CI-only switch needs no Dockerfile edit. Serving
+both caches during a transition means listing both substituters and both keys;
+Nix queries them in priority order and falls through on a miss.

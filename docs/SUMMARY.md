@@ -75,6 +75,7 @@
     - [Benchmarks and Performance](development/testing/performance.md)
     - [Pipeline Phases](development/testing/pipeline.md)
     - [Complement Testing](development/testing/complement.md)
+  - [Nix Binary Cache](development/nix.md)
   - [Hot Reloading ("Live" Development)](development/hot_reload.md)
   - [RISC-V](development/riscv.md)
   - [32-bit ARM](development/arm32.md)

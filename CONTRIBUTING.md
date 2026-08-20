@@ -74,7 +74,10 @@ root.
 - To build the book using local stages of the CI pipeline run
 `docker/bake.sh book`; the produced docker image will contain it.
 
-- To build the book using Nix, run: `bin/nix-build-and-cache just .#book`
+- To build the book using Nix, run:
+`nix/pkgs/complement/bin/nix-build-and-cache just .#book`. Exporting
+`CACHIX_AUTH_TOKEN` first also uploads the result to the [binary
+cache](docs/development/nix.md).
 
 Rust API documentation (rustdoc) is generated from the sourcecode contained
 in `src/` and deployed via CI to a directory within GitHub Pages adjacent to

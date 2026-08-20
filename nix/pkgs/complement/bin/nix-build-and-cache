@@ -4,6 +4,13 @@ set -eo pipefail
 
 toplevel="$(git rev-parse --show-toplevel)"
 
+# Cachix is the cache Tuwunel publishes to today. Attic remains wired up for
+# the self-hosted cache at cache.tuwunel.chat; point ATTIC_ENDPOINT at it and
+# set ATTIC_TOKEN to use it. Each uploader is independent, so having a token
+# for one does not require a token for the other.
+cachix_cache="${CACHIX_CACHE:-tuwunel}"
+attic_endpoint="${ATTIC_ENDPOINT:-}"
+
 # Build just the single installable and forward any other arguments too
 just() {
     # uses nix-output-monitor (nom) if available
@@ -13,17 +20,11 @@ just() {
         nix build -L "$@"
     fi
 
-    if [ -z "$ATTIC_TOKEN" ]; then
-        echo "\$ATTIC_TOKEN is unset, skipping uploading to the binary cache"
+    if [ -z "$ATTIC_TOKEN" ] && [ -z "$CACHIX_AUTH_TOKEN" ]; then
+        echo "no cache token set, skipping uploading to the binary cache"
+        echo "set CACHIX_AUTH_TOKEN, or ATTIC_TOKEN with ATTIC_ENDPOINT"
         return
     fi
-
-    # historical "conduit" store for compatibility purposes, same as tuwunel
-    nix run --inputs-from "$toplevel" attic -- \
-        login \
-        conduit \
-        "${ATTIC_ENDPOINT:-https://attic.kennel.juneis.dog/conduit}" \
-        "$ATTIC_TOKEN"
 
     # Find all output paths of the installables and their build dependencies
     #readarray -t derivations < <(nix path-info --derivation "$@")
@@ -39,14 +40,35 @@ just() {
         )
     done
 
-    withattic() {
-        nix shell --inputs-from "$toplevel" attic --command xargs attic push "$@" <<< "${cache[*]}"
-    }
-    # Upload them to Attic (conduit store)
+    # Upload to Cachix.
     #
     # Use `xargs` and a here-string because something would probably explode if
     # several thousand arguments got passed to a command at once. Hopefully no
     # store paths include a newline in them.
+    if [ -n "$CACHIX_AUTH_TOKEN" ]; then
+        (
+            IFS=$'\n'
+            nix shell --inputs-from "$toplevel" cachix -c xargs \
+                cachix push "$cachix_cache" <<< "${cache[*]}" || true
+        )
+    fi
+
+    if [ -z "$ATTIC_TOKEN" ] || [ -z "$attic_endpoint" ]; then
+        return
+    fi
+
+    withattic() {
+        nix shell --inputs-from "$toplevel" attic --command xargs attic push "$@" <<< "${cache[*]}"
+    }
+
+    # historical "conduit" store for compatibility purposes, same as tuwunel
+    nix run --inputs-from "$toplevel" attic -- \
+        login \
+        conduit \
+        "${attic_endpoint}/conduit" \
+        "$ATTIC_TOKEN"
+
+    # Upload them to Attic (conduit store)
     (
         IFS=$'\n'
         withattic conduit || withattic conduit || withattic conduit || true
@@ -56,23 +78,13 @@ just() {
     nix run --inputs-from "$toplevel" attic -- \
         login \
         tuwunel \
-        "${ATTIC_ENDPOINT:-https://attic.kennel.juneis.dog/tuwunel}" \
+        "${attic_endpoint}/tuwunel" \
         "$ATTIC_TOKEN"
 
-    # Upload them to Attic (tuwunel store) and Cachix
-    #
-    # Use `xargs` and a here-string because something would probably explode if
-    # several thousand arguments got passed to a command at once. Hopefully no
-    # store paths include a newline in them.
+    # Upload them to Attic (tuwunel store)
     (
         IFS=$'\n'
         withattic tuwunel || withattic tuwunel || withattic tuwunel || true
-
-        # push to cachix if available
-        if [ "$CACHIX_AUTH_TOKEN" ]; then
-            nix shell --inputs-from "$toplevel" cachix -c xargs \
-            cachix push tuwunel <<< "${cache[*]}"
-        fi
     )
 }
 
