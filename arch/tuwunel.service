@@ -26,6 +26,8 @@ TTYVTDisallocate=no
 TTYColumns=120
 TTYRows=40
 
+ReadWritePaths=/etc/tuwunel
+
 AmbientCapabilities=
 CapabilityBoundingSet=
 
