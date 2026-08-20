@@ -34,7 +34,7 @@ use libc::{O_CLOEXEC, O_NOFOLLOW, O_NONBLOCK, fchown};
 
 #[cfg(target_os = "macos")]
 use crate::warn;
-use crate::{Err, Error, Result, debug_warn, err};
+use crate::{Err, Error, Result, debug_warn, err, utils::BoolExt};
 
 type Origin<'a> = (&'a File, &'a Metadata);
 
@@ -495,7 +495,26 @@ fn set_output_owner(file: &File, origin: &Metadata, path: &Path) -> Result {
 	(result == 0)
 		.then_some(())
 		.ok_or_else(IoError::last_os_error)
-		.map_err(|error| fs_error(&error, "preserve output ownership on temporary file", path))
+		.map_err(|error| owner_error(&error, &staged, origin, path))
+}
+
+#[cfg(unix)]
+fn owner_error(error: &IoError, staged: &Metadata, origin: &Metadata, path: &Path) -> Error {
+	let hint = (error.kind() == ErrorKind::PermissionDenied).copy_or(
+		"",
+		" Changing ownership requires privilege the service does not have, or a sandbox is \
+		 blocking the chown syscall.",
+	);
+
+	err!(
+		"Failed to change ownership of temporary file `{}` from uid {} gid {} to uid {} gid {}: \
+		 {error}.{hint}",
+		path.display(),
+		staged.uid(),
+		staged.gid(),
+		origin.uid(),
+		origin.gid(),
+	)
 }
 
 // Applied after commit so a failed replacement never installs a backup whose
