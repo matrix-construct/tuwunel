@@ -8,7 +8,6 @@ use axum::{
 	response::{IntoResponse, Response},
 	routing::{MethodFilter, on},
 };
-use futures::future::BoxFuture;
 use http::{Method, Request};
 use ruma::api::{IncomingRequest, path_builder::PathBuilder};
 use tuwunel_core::{Result, trace};
@@ -16,40 +15,46 @@ use tuwunel_core::{Result, trace};
 use super::{Ruma, RumaResponse, State, auth::AuthDispatch};
 
 pub(in super::super) trait RumaHandler<T> {
-	fn add_route(&'static self, router: Router<State>, path: &str) -> Router<State>;
 	fn add_routes(&'static self, router: Router<State>) -> Router<State>;
-	fn call_route(handler: RouteHandler, state: State, request: Request<Body>) -> RouteResponse;
+
+	fn add_route(&'static self, router: Router<State>, path: &str) -> Router<State>;
+
+	fn call_route(
+		handler: RouteHandler,
+		state: State,
+		request: Request<Body>,
+	) -> impl Future<Output = Response> + Send + 'static;
 }
 
 pub(in super::super) trait RouterExt {
-	fn ruma_route<H, T>(self, handler: &'static H) -> Self
-	where
-		H: RumaHandler<T>;
+	fn ruma_route<H: RumaHandler<T>, T>(self, handler: &'static H) -> Self;
 }
 
-/// A route handler reduced to one fn-pointer shape: axum's generic routing
-/// stack instantiates once for this type instead of once per endpoint.
-#[derive(Clone, Copy)]
-struct Route {
-	call: RouteCall,
+struct Route<Fut> {
+	call: RouteCall<Fut>,
 	handler: RouteHandler,
 }
 
-type RouteCall = fn(RouteHandler, State, Request<Body>) -> RouteResponse;
+type RouteCall<Fut> = fn(RouteHandler, State, Request<Body>) -> Fut;
 type RouteHandler = &'static (dyn Any + Send + Sync);
-type RouteResponse = BoxFuture<'static, Response>;
+
+impl<Fut> Copy for Route<Fut> {}
+
+impl<Fut> Clone for Route<Fut> {
+	fn clone(&self) -> Self { *self }
+}
 
 impl RouterExt for Router<State> {
-	fn ruma_route<H, T>(self, handler: &'static H) -> Self
-	where
-		H: RumaHandler<T>,
-	{
+	fn ruma_route<H: RumaHandler<T>, T>(self, handler: &'static H) -> Self {
 		handler.add_routes(self)
 	}
 }
 
-impl Handler<(), State> for Route {
-	type Future = RouteResponse;
+impl<Fut> Handler<(), State> for Route<Fut>
+where
+	Fut: Future<Output = Response> + Send + 'static,
+{
+	type Future = Fut;
 
 	fn call(self, request: Request<Body>, state: State) -> Self::Future {
 		(self.call)(self.handler, state, request)
@@ -62,7 +67,7 @@ macro_rules! ruma_handler {
 		impl<Err, Req, Fut, Fun, $($tx,)*> RumaHandler<($($tx,)* Ruma<Req>,)> for Fun
 		where
 			Fun: Fn($($tx,)* Ruma<Req>,) -> Fut + Send + Sync + 'static,
-			Fut: Future<Output = Result<Req::OutgoingResponse, Err>> + Send,
+			Fut: Future<Output = Result<Req::OutgoingResponse, Err>> + Send + 'static,
 			Req: IncomingRequest + Debug + Send + Sync + 'static,
 			Req::Authentication: AuthDispatch,
 			Err: IntoResponse + Debug + Send,
@@ -85,7 +90,7 @@ macro_rules! ruma_handler {
 				handler: RouteHandler,
 				state: State,
 				request: Request<Body>,
-			) -> RouteResponse {
+			) -> impl Future<Output = Response> + Send + 'static {
 				let handler: &'static Fun = handler
 					.downcast_ref()
 					.expect("route handler matches the type it registered with");
@@ -112,7 +117,10 @@ macro_rules! ruma_handler {
 					}
 				};
 
-				Box::pin(response)
+				cfg_select! {
+					debug_assertions => Box::pin(response),
+					_ => response,
+				}
 			}
 		}
 	}
