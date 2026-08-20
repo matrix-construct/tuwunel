@@ -66,6 +66,11 @@ on:
         type: string
         default: '["deb", "rpm", "nix"]'
 
+    secrets:
+      cachix_auth_token:
+        required: false
+        description: Write token for the Nix binary cache.
+
 jobs:
   docs:
     if: >
@@ -246,6 +251,8 @@ jobs:
             "zstd": 11
           }
         }
+    secrets:
+      cachix_auth_token: ${{secrets.cachix_auth_token}}
 
   checks:
     if: >

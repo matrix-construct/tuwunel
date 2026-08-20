@@ -84,6 +84,13 @@ on:
           value is a JSON object containing keys 'src' and 'dst'. dst is the artifact name,
           src is optional path inside image, defaulting to dst.
 
+    secrets:
+      cachix_auth_token:
+        required: false
+        description: >
+          Write token for the Nix binary cache. When absent the nix targets still
+          substitute from the cache, they just do not upload to it.
+
 jobs:
   bake:
     if: >
@@ -146,6 +153,7 @@ jobs:
         rust_nightly: ${{inputs.rust_nightly}}
         git_checkout: ${{inputs.checkout}}
         rustdoc_base_path: ${{inputs.rustdoc_base_path}}
+        CACHIX_AUTH_TOKEN: ${{secrets.cachix_auth_token}}
 
       run: |
         docker/bake.sh "${{matrix.bake_target}}"

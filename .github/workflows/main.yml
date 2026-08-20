@@ -358,6 +358,9 @@ jobs:
           {"sys_target": "x86_64-v4-linux-gnu", "feat_set": "default"},
         ]
 
+    secrets:
+      cachix_auth_token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+
   package:
     if: >
       !failure() && !cancelled()
@@ -425,6 +428,9 @@ jobs:
           {"sys_target": "x86_64-v4-linux-gnu", "feat_set": "logging"},
           {"sys_target": "x86_64-v4-linux-gnu", "bake_target": "nix"},
         ]
+
+    secrets:
+      cachix_auth_token: ${{ secrets.CACHIX_AUTH_TOKEN }}
 
   publish:
     if: >

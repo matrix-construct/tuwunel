@@ -120,6 +120,11 @@ on:
         type: string
         default: '1'
 
+    secrets:
+      cachix_auth_token:
+        required: false
+        description: Write token for the Nix binary cache.
+
 jobs:
   doc:
     if: >
@@ -325,6 +330,8 @@ jobs:
       excludes: ${{inputs.excludes}}
       includes: ${{inputs.includes}}
       checkout: ${{inputs.checkout}}
+    secrets:
+      cachix_auth_token: ${{secrets.cachix_auth_token}}
 
   mas:
     if: >

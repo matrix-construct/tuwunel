@@ -84,6 +84,16 @@ package_version="${package_version:-${git_semantic:-$cargo_semantic}}"
 package_revision="${package_revision:-$(git rev-parse HEAD 2>/dev/null || true)}"
 package_last_modified="${package_last_modified:-$(git show -s --format=%cI HEAD 2>/dev/null || true)}"
 
+# Nix binary cache. Substituting from the cache is public and unconditional;
+# uploading requires a token, so forks and local builds simply skip the push.
+# CACHIX_AUTH_TOKEN itself reaches buildkit as a secret mount, never an arg.
+cachix_cache="${cachix_cache:-tuwunel}"
+if test -n "$CACHIX_AUTH_TOKEN"; then
+    cachix_push=1
+else
+    cachix_push=0
+fi
+
 # other options
 rustdoc_base_path="${rustdoc_base_path:-}"
 rocksdb_opt_level=3

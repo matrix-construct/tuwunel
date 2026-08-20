@@ -105,6 +105,22 @@ variable "complement_skip" {
     default = ""
 }
 
+# Nix binary cache options. Pulling is public and always on; pushing needs
+# CACHIX_AUTH_TOKEN in the environment, which bake.sh detects to set
+# cachix_push.
+variable "nix_substituter" {
+    default = "https://tuwunel.cachix.org"
+}
+variable "nix_public_key" {
+    default = "tuwunel.cachix.org-1:VRecUeDcaPxtYDA6bnMF3snPM7VYX8K605z4uuG2nWc="
+}
+variable "cachix_cache" {
+    default = "tuwunel"
+}
+variable "cachix_push" {
+    default = "0"
+}
+
 # Package metadata inputs
 variable "package_name" {
     default = "tuwunel"
@@ -1366,6 +1382,13 @@ target "build-nix" {
         input = elem("target:builder", [sys_name, sys_version, sys_target]),
         source = elem("target:source", [sys_name, sys_version, sys_target]),
     }
+    args = {
+        nix_substituter = nix_substituter
+        nix_public_key = nix_public_key
+        cachix_cache = cachix_cache
+        cachix_push = cachix_push
+    }
+    secret = cachix_push == "1"? ["type=env,id=cachix_auth_token,env=CACHIX_AUTH_TOKEN"]: []
 }
 
 #
