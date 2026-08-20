@@ -67,6 +67,16 @@ are published without editing the workflow. Uploads come from the post-build
 hook installed by `cachix-action`, which captures every path realised during
 the job.
 
+Unlike the bake targets, it runs Nix directly on the runner rather than inside
+a container, so it depends on the runner's own installation. The
+`.github/actions/install-nix` action absorbs the two ways that differs from a
+hosted runner: it reuses an existing Nix rather than installing over one, and
+it points `build-dir` at the runner's temp directory. That second part is not
+optional on the self-hosted pool. Nix 2.30 moved build directories under
+`/nix/var/nix/builds`, which is root-owned there while the rest of the store
+belongs to the runner user, so every build fails with a permission error while
+evaluation keeps working and hides the cause.
+
 A full pass is expensive. The flake currently exposes 54 packages per system,
 including cross-compiled static binaries, OCI images, and debug variants, and
 each matrix entry is its own job. Use the `attrs` dispatch input to publish a

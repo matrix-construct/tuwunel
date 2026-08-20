@@ -31,6 +31,25 @@ runs:
           experimental-features = nix-command flakes
           accept-flake-config = true
 
+    # Nix 2.30 moved build directories under /nix/var/nix/builds. On a runner
+    # whose /nix is owned by the runner user, that one directory can still be
+    # root-owned, which fails every build with EACCES while evaluation keeps
+    # working. Pointing build-dir at the runner's own temp needs no root.
+    - name: Ensure a writable build directory
+      shell: bash
+      run: |
+        dir="${RUNNER_TEMP}/nix-build"
+        mkdir -p "$dir"
+
+        {
+          printf 'NIX_CONFIG<<__TUWUNEL_NIX_CONFIG__\n'
+          if [ -n "${NIX_CONFIG:-}" ]; then
+            printf '%s\n' "$NIX_CONFIG"
+          fi
+          printf 'build-dir = %s\n' "$dir"
+          printf '__TUWUNEL_NIX_CONFIG__\n'
+        } >> "$GITHUB_ENV"
+
     - name: Report system
       id: probe
       shell: bash
