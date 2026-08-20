@@ -39,13 +39,23 @@ Tuwunel and must be uninstalled first. Remove the old package with
 sudo apt remove conduwuit
 ```
 
-Installing the Tuwunel package adopts an existing database from
-`/var/lib/conduwuit` or `/var/lib/matrix-conduit` automatically by moving it
-to `/var/lib/tuwunel`; nothing is copied or deleted, and the data is migrated
-on the next startup. Databases from conduwuit and Conduit are supported; for
-other forks of the lineage, compatibility varies with how far the fork has
-diverged. If a fork keeps its database somewhere else, stop its service and
-move that directory to `/var/lib/tuwunel` before installing.
+Installing the Tuwunel package adopts an existing database automatically by
+moving it to `/var/lib/tuwunel`; nothing is copied or deleted, and the data
+is migrated on the next startup. Databases are discovered at
+`/var/lib/conduwuit` and `/var/lib/matrix-conduit`, and also under
+`/var/lib/private`, where systemd keeps the state of services that ran with
+`DynamicUser=`. The old locations are left behind as symlinks into
+`/var/lib/tuwunel`, so purging the old package after the adoption removes at
+most a symlink and can no longer reach the data.
+
+Adoption is skipped while an old homeserver unit is still active, and a
+database kept on its own mounted filesystem is never moved; in those cases
+stop the old unit, or mount the filesystem at `/var/lib/tuwunel`, and run
+`dpkg-reconfigure tuwunel`. If a filesystem is already mounted at
+`/var/lib/tuwunel`, move the old database's contents into it instead. Databases from conduwuit and Conduit are
+supported; for other forks of the lineage, compatibility varies with how far
+the fork has diverged. If a fork keeps its database somewhere else, stop its
+service and move that directory to `/var/lib/tuwunel` before installing.
 
 Port the settings from your old configuration (especially `server_name`) into
 `/etc/tuwunel/tuwunel.toml` before starting the service. Uninstalling Tuwunel

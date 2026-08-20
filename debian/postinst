@@ -19,45 +19,80 @@ case "$1" in
         tuwunel
     fi
 
-    # Adopt the database of a previous conduwuit or conduit installation so
-    # an existing server continues transparently and migrates on the next
-    # start. The old directory is moved into place, never copied or deleted.
-    for legacy in /var/lib/conduwuit /var/lib/matrix-conduit; do
-      if [ -d "$legacy" ] && ! [ -L "$legacy" ]; then
-        if [ -d "$TUWUNEL_DATABASE_PATH" ] && ! [ -L "$TUWUNEL_DATABASE_PATH" ] \
-          && ! [ "$(ls -A "$TUWUNEL_DATABASE_PATH")" ]; then
-          rmdir -v "$TUWUNEL_DATABASE_PATH"
-        fi
-        if [ -e "$TUWUNEL_DATABASE_PATH" ]; then
-          echo "NOTE: leaving $legacy in place, $TUWUNEL_DATABASE_PATH already exists" 1>&2
-        else
-          echo "Adopting the existing database at $legacy" 1>&2
-          mv -v "$legacy" "$TUWUNEL_DATABASE_PATH"
-          # clean up the stray symlink a previous package version may have
-          # left inside the old database directory
-          if [ -L "$TUWUNEL_DATABASE_PATH/tuwunel" ] \
-            && [ "$(readlink "$TUWUNEL_DATABASE_PATH/tuwunel")" = "$TUWUNEL_DATABASE_PATH" ]; then
-            rm -v "$TUWUNEL_DATABASE_PATH/tuwunel"
-          fi
-        fi
-      fi
-    done
-
-    # Create the database path if it does not exist yet and fix up ownership
-    # and permissions for the config.
+    # Create the database path if it does not exist yet.
     mkdir -v -p "$TUWUNEL_DATABASE_PATH"
 
-    # symlink the previous locations for compatibility if nothing occupies
-    # them, replacing any dangling symlink left from an uninstalled server.
-    for legacy in /var/lib/matrix-conduit /var/lib/conduwuit; do
-      if [ -L "$legacy" ] && ! [ -e "$legacy" ]; then
-        rm -v "$legacy"
-      fi
-      if ! [ -e "$legacy" ] && ! [ -L "$legacy" ]; then
-        ln -s -v "$TUWUNEL_DATABASE_PATH" "$legacy"
-      fi
-    done
+    # Never adopt or reshape another homeserver's data while it could still
+    # be writing; the adoption below runs again on the next upgrade or on
+    # dpkg-reconfigure once the old unit is stopped.
+    legacy_active=''
+    if [ -d /run/systemd/system ] && command -v systemctl > /dev/null 2>&1; then
+      for unit in conduwuit.service matrix-conduwuit.service \
+        continuwuity.service conduit.service matrix-conduit.service; do
+        if systemctl is-active --quiet "$unit" 2>/dev/null; then
+          legacy_active="$unit"
+        fi
+      done
+    fi
 
+    if [ -n "$legacy_active" ]; then
+      echo "NOTE: $legacy_active is still running, its database was left in place." 1>&2
+      echo "NOTE: stop it, then adopt its database with: dpkg-reconfigure tuwunel" 1>&2
+    else
+      # Adopt the database of a previous conduwuit or conduit installation so
+      # an existing server continues transparently and migrates on the next
+      # start. The old directory is moved into place, never copied or deleted.
+      # The /var/lib/private paths hold the real directory when the old server
+      # ran under systemd's DynamicUser=, reaching the public path through a
+      # symlink; a mounted database filesystem is never moved, and an empty
+      # leftover directory is cleared so the compatibility symlink can take
+      # its place.
+      for legacy in /var/lib/conduwuit /var/lib/private/conduwuit \
+        /var/lib/matrix-conduit /var/lib/private/matrix-conduit; do
+        if [ -d "$legacy" ] && ! [ -L "$legacy" ]; then
+          if mountpoint -q "$legacy"; then
+            echo "NOTE: $legacy is a mount point, mount it at $TUWUNEL_DATABASE_PATH instead" 1>&2
+          elif ! [ "$(ls -A "$legacy")" ]; then
+            rmdir -v "$legacy"
+          else
+            if [ -d "$TUWUNEL_DATABASE_PATH" ] && ! [ -L "$TUWUNEL_DATABASE_PATH" ] \
+              && ! mountpoint -q "$TUWUNEL_DATABASE_PATH" \
+              && ! [ "$(ls -A "$TUWUNEL_DATABASE_PATH")" ]; then
+              rmdir -v "$TUWUNEL_DATABASE_PATH"
+            fi
+            if [ -e "$TUWUNEL_DATABASE_PATH" ]; then
+              echo "NOTE: leaving $legacy in place, $TUWUNEL_DATABASE_PATH already exists" 1>&2
+            else
+              echo "Adopting the existing database at $legacy" 1>&2
+              mv -v "$legacy" "$TUWUNEL_DATABASE_PATH"
+              # clean up the stray symlink a previous package version may have
+              # left inside the old database directory
+              if [ -L "$TUWUNEL_DATABASE_PATH/tuwunel" ] \
+                && [ "$(readlink "$TUWUNEL_DATABASE_PATH/tuwunel")" = "$TUWUNEL_DATABASE_PATH" ]; then
+                rm -v "$TUWUNEL_DATABASE_PATH/tuwunel"
+              fi
+            fi
+          fi
+        fi
+      done
+
+      # symlink the previous locations for compatibility if nothing occupies
+      # them, replacing any symlink left dangling by the adoption above or by
+      # an uninstalled server.
+      for legacy in /var/lib/matrix-conduit /var/lib/conduwuit; do
+        if [ -L "$legacy" ] && ! [ -e "$legacy" ]; then
+          rm -v "$legacy"
+        fi
+        if ! [ -e "$legacy" ] && ! [ -L "$legacy" ]; then
+          ln -s -v "$TUWUNEL_DATABASE_PATH" "$legacy"
+        elif [ -L "$legacy" ] \
+          && [ "$(readlink -f "$legacy")" != "$(readlink -f "$TUWUNEL_DATABASE_PATH")" ]; then
+          echo "NOTE: $legacy points to $(readlink -f "$legacy") and was not adopted" 1>&2
+        fi
+      done
+    fi
+
+    # Fix up ownership and permissions for the database and the config.
     chown -v tuwunel:tuwunel -R "$TUWUNEL_DATABASE_PATH"
     chown -v tuwunel:tuwunel -R "$TUWUNEL_CONFIG_PATH"
 

@@ -22,7 +22,7 @@ license-file = ["../../LICENSE", "3"]
 # procps owns /usr/bin/kill, which the unit's ExecReload= invokes. It is only
 # Priority: important, so a trimmed install would not otherwise carry it.
 depends = "$auto, ca-certificates, adduser, procps"
-conflicts = "conduwuit"
+conflicts = "conduwuit, matrix-conduit"
 extended-description = """\
 High performance Matrix homeserver written in Rust"""
 section = "net"
