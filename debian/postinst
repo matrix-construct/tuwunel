@@ -44,19 +44,27 @@ case "$1" in
       # start. The old directory is moved into place, never copied or deleted.
       # The /var/lib/private paths hold the real directory when the old server
       # ran under systemd's DynamicUser=, reaching the public path through a
-      # symlink; a mounted database filesystem is never moved, and an empty
-      # leftover directory is cleared so the compatibility symlink can take
-      # its place.
+      # symlink, and an empty leftover directory is cleared so the
+      # compatibility symlink can take its place.
+      #
+      # A directory on another filesystem is never moved: mv would silently
+      # become a copy of the whole database, and the target may not even have
+      # room for it. Comparing devices covers a mount at the directory itself
+      # and a mount further up the path alike.
+      state_device=$(stat -c %d /var/lib)
       for legacy in /var/lib/conduwuit /var/lib/private/conduwuit \
         /var/lib/matrix-conduit /var/lib/private/matrix-conduit; do
         if [ -d "$legacy" ] && ! [ -L "$legacy" ]; then
-          if mountpoint -q "$legacy"; then
-            echo "NOTE: $legacy is a mount point, mount it at $TUWUNEL_DATABASE_PATH instead" 1>&2
+          if [ "$(stat -c %d "$legacy")" != "$state_device" ]; then
+            echo "NOTE: $legacy is on another filesystem, mount it at $TUWUNEL_DATABASE_PATH instead" 1>&2
           elif ! [ "$(ls -A "$legacy")" ]; then
             rmdir -v "$legacy"
           else
+            # Clear an empty target so the old directory can take its place,
+            # unless a filesystem is mounted there, where rmdir would fail and
+            # abort the configure step.
             if [ -d "$TUWUNEL_DATABASE_PATH" ] && ! [ -L "$TUWUNEL_DATABASE_PATH" ] \
-              && ! mountpoint -q "$TUWUNEL_DATABASE_PATH" \
+              && [ "$(stat -c %d "$TUWUNEL_DATABASE_PATH")" = "$state_device" ] \
               && ! [ "$(ls -A "$TUWUNEL_DATABASE_PATH")" ]; then
               rmdir -v "$TUWUNEL_DATABASE_PATH"
             fi
