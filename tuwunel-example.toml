@@ -879,6 +879,15 @@
 #
 #feds_max_width = 0
 
+# Maximum destinations an admin feds survey contacts without confirmation.
+#
+# A room exceeding this requires the command's confirmation flag. Higher
+# values permit longer diagnostic commands on the serial admin worker.
+#
+# reloadable: yes
+#
+#feds_destination_limit = 2048
+
 # Derive the state at an incoming federation event from locally held
 # events when its previous events are stored but not yet resolved,
 # instead of requesting /state_ids from the origin server. Only an event

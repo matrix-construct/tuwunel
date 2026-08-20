@@ -1119,6 +1119,16 @@ pub struct Config {
 	#[serde(default)]
 	pub feds_max_width: usize,
 
+	/// Maximum destinations an admin feds survey contacts without confirmation.
+	///
+	/// A room exceeding this requires the command's confirmation flag. Higher
+	/// values permit longer diagnostic commands on the serial admin worker.
+	///
+	/// reloadable: yes
+	/// default: 2048
+	#[serde(default = "default_feds_destination_limit")]
+	pub feds_destination_limit: usize,
+
 	/// Derive the state at an incoming federation event from locally held
 	/// events when its previous events are stored but not yet resolved,
 	/// instead of requesting /state_ids from the origin server. Only an event
@@ -5327,6 +5337,8 @@ fn default_federation_timeout() -> u64 { 25 }
 fn default_federation_keys_timeout() -> u64 { 8 }
 
 fn default_feds_timeout() -> u64 { 15 }
+
+fn default_feds_destination_limit() -> usize { 2048 }
 
 fn default_federation_idle_timeout() -> u64 { 25 }
 

@@ -15,9 +15,6 @@ use tuwunel_service::federation::feds::{Fault, Opts, Record};
 
 use crate::{Context, admin_command_dispatch};
 
-// Feds queries share one serial worker, so larger sweeps require confirmation.
-const DESTINATION_LIMIT: usize = 512;
-
 /// Run feds diagnostics against every participating server in a room.
 ///
 /// Each command bounds concurrency and time while reporting every successful
@@ -150,10 +147,16 @@ pub(super) async fn prepare(
 		.count()
 		.await;
 
-	if destinations > DESTINATION_LIMIT && !sweep.yes_i_want_to_do_this {
+	let destination_limit = context
+		.services
+		.server
+		.config
+		.feds_destination_limit;
+
+	if destinations > destination_limit && !sweep.yes_i_want_to_do_this {
 		return Err!(
 			"Room has {destinations} feds destinations, exceeding the safety cap of \
-			 {DESTINATION_LIMIT}. Pass the confirmation flag to continue."
+			 {destination_limit}. Pass the confirmation flag to continue."
 		);
 	}
 
