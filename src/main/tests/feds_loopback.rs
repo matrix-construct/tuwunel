@@ -13,12 +13,13 @@ mod tests {
 	use tuwunel::{Args, Runtime, Server, async_run, async_start, async_stop};
 	use tuwunel_admin::{fini, init};
 	use tuwunel_core::{Err, Result, err, ruma::ServerName};
-	use tuwunel_service::Services;
+	use tuwunel_service::{Services, admin::CommandOutput};
 
 	const CERTIFICATE: &str = "../../nix/pkgs/complement/certificate.crt";
 	const PRIVATE_KEY: &str = "../../nix/pkgs/complement/private_key.key";
 	const CLASS_HEADER: &str =
 		"| rank | class | servers | name | version | commit | compiler | kernel | arch |";
+	const EVENT_HEADER: &str = "| rank | origin | elapsed | hash | signature | fault |";
 	const ORIGIN_HEADER: &str = "| origin | class | elapsed | fault |";
 
 	struct DatabasePath(PathBuf);
@@ -27,13 +28,13 @@ mod tests {
 		fn drop(&mut self) { remove_dir_all(&self.0).ok(); }
 	}
 
-	/// Exercises the wired version feds query through the local federation
+	/// Exercises wired feds queries through the local federation
 	/// listener.
 	///
-	/// The parsed tables must account for the room's only destination exactly
-	/// once.
+	/// Each parsed table must account for the room's only destination exactly
+	/// once, including event verification.
 	#[test]
-	fn version_feds_query_reports_this_server() -> Result {
+	fn feds_queries_report_this_server() -> Result {
 		let listener = TcpListener::bind(("127.0.0.1", 0))?;
 		let port = listener.local_addr()?.port();
 		let root = var("TMPDIR").unwrap_or_else(|_| "/nvme/target/tmp".into());
@@ -96,7 +97,11 @@ mod tests {
 		);
 		init(&services.admin);
 
-		let outcome = query_feds(services).await;
+		let outcome = async {
+			query_version(services).await?;
+			query_event(services).await
+		}
+		.await;
 
 		fini(&services.admin);
 
@@ -129,34 +134,46 @@ mod tests {
 		Ok(())
 	}
 
-	async fn query_feds(services: &Services) -> Result {
+	async fn query_version(services: &Services) -> Result {
 		let room_id = services.admin.get_admin_room().await?;
 		let command = format!("query feds version {room_id}");
-		let output = match services
+		let output = command_output(services, command, "version").await?;
+
+		verify_version_output(output.as_str(), services.globals.server_name())
+	}
+
+	async fn query_event(services: &Services) -> Result {
+		let room_id = services.admin.get_admin_room().await?;
+		let event_id = services
+			.timeline
+			.latest_pdu_in_room(&room_id)
+			.await?
+			.event_id;
+
+		let command = format!("query feds event {event_id}");
+		let output = command_output(services, command, "event").await?;
+
+		verify_event_output(output.as_str(), services.globals.server_name())
+	}
+
+	async fn command_output(
+		services: &Services,
+		command: String,
+		query: &str,
+	) -> Result<CommandOutput> {
+		match services
 			.admin
 			.command_in_place(command, None)
 			.await
 		{
-			| Ok(Some(output)) => output,
-			| Ok(None) => return Err!("feds version query produced no output"),
-			| Err(output) => return Err!("feds version query failed: {}", output.as_str()),
-		};
-
-		verify_output(output.as_str(), services.globals.server_name())
+			| Ok(Some(output)) => Ok(output),
+			| Ok(None) => Err!("feds {query} query produced no output"),
+			| Err(output) => Err!("feds {query} query failed: {}", output.as_str()),
+		}
 	}
 
-	fn verify_output(output: &str, local: &ServerName) -> Result {
-		let heading = output
-			.lines()
-			.find_map(|line| line.strip_prefix("Querying "))
-			.ok_or_else(|| err!("feds output omitted its destination count"))?;
-
-		let destinations: usize = heading
-			.split_once(" servers in ")
-			.map(|(count, _room_id)| count)
-			.ok_or_else(|| err!("feds destination count was malformed"))?
-			.parse()
-			.map_err(|error| err!("feds destination count was not a number: {error}"))?;
+	fn verify_version_output(output: &str, local: &ServerName) -> Result {
+		let destinations = destination_count(output)?;
 
 		if destinations != 1 {
 			return Err!("expected one feds destination, found {destinations}");
@@ -204,6 +221,50 @@ mod tests {
 		}
 
 		Ok(())
+	}
+
+	fn verify_event_output(output: &str, local: &ServerName) -> Result {
+		if destination_count(output)? != 1 {
+			return Err!("expected one feds event destination");
+		}
+
+		let row = only_row(output, EVENT_HEADER, "event origin")?;
+
+		if parse_number(cell(row, 0)?, "event rank")? != 1 {
+			return Err!("the local event did not rank first");
+		}
+
+		if cell(row, 1)? != local.as_str() {
+			return Err!("the event query did not report the local origin");
+		}
+
+		if cell(row, 2)?.is_empty() {
+			return Err!("the event query omitted its latency");
+		}
+
+		if cell(row, 3)? != "ok" || cell(row, 4)? != "ok" {
+			return Err!("the local event did not pass hash and signature verification");
+		}
+
+		if !cell(row, 5)?.is_empty() {
+			return Err!("the local event query reported a fault");
+		}
+
+		Ok(())
+	}
+
+	fn destination_count(output: &str) -> Result<usize> {
+		let heading = output
+			.lines()
+			.find_map(|line| line.strip_prefix("Querying "))
+			.ok_or_else(|| err!("feds output omitted its destination count"))?;
+
+		heading
+			.split_once(" servers in ")
+			.map(|(count, _room_id)| count)
+			.ok_or_else(|| err!("feds destination count was malformed"))?
+			.parse()
+			.map_err(|error| err!("feds destination count was not a number: {error}"))
 	}
 
 	fn only_row<'a>(output: &'a str, header: &str, name: &str) -> Result<&'a str> {

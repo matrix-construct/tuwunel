@@ -1,10 +1,13 @@
+mod event;
 mod head;
 mod state;
+#[cfg(test)]
+mod tests;
 mod version;
 
 use std::{borrow::Cow, cmp::Ordering, num::NonZeroUsize, time::Duration};
 
-use clap::{Args, Subcommand};
+use clap::{ArgAction, Args, Subcommand};
 use futures::StreamExt;
 use ruma::{OwnedEventId, OwnedRoomId, OwnedRoomOrAliasId, OwnedUserId};
 use tuwunel_core::{Err, Result, utils::stream::ReadyExt};
@@ -25,6 +28,34 @@ pub(crate) enum FedsCommand {
 	/// Compare implementation versions reported by participating servers.
 	Version {
 		room: OwnedRoomOrAliasId,
+
+		#[command(flatten)]
+		sweep: SweepArgs,
+	},
+
+	/// Compare copies of one event reported by participating servers.
+	///
+	/// Reports transport latency and enabled validation results for every
+	/// destination.
+	Event {
+		event_id: OwnedEventId,
+
+		/// Select the room containing the event.
+		///
+		/// The local PDU supplies the room when this argument is omitted.
+		room: Option<OwnedRoomOrAliasId>,
+
+		/// Control event content-hash verification.
+		///
+		/// Verification is enabled by default.
+		#[arg(long, default_value_t = true, action = ArgAction::Set)]
+		verify_hash: bool,
+
+		/// Control verification of signatures required by the room version.
+		///
+		/// Verification is enabled by default.
+		#[arg(long, default_value_t = true, action = ArgAction::Set)]
+		verify_signature: bool,
 
 		#[command(flatten)]
 		sweep: SweepArgs,

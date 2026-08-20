@@ -74,6 +74,14 @@ fn query_feds_parse() {
 }
 
 #[test]
+fn query_feds_event_parse() {
+	let command =
+		parse_ok(&["argv[0] doesn't matter", "query", "feds", "event", "$event:example.org"]);
+
+	assert!(matches!(command, AdminCommand::Query(QueryCommand::Feds(_))));
+}
+
+#[test]
 fn query_feds_require_a_room() {
 	for survey in ["version", "state", "head"] {
 		assert!(
