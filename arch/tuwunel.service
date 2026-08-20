@@ -61,6 +61,8 @@ SystemCallFilter=~@clock @debug @module @mount @reboot @swap @cpu-emulation @obs
 # Restore the pipe syscalls subtracted with @ipc above: a configured
 # media_video_thumbnail_command is spawned with pipes.
 SystemCallFilter=pipe pipe2
+# A denied call returns this errno instead of killing the process, so a filter
+# trip is indistinguishable from an ordinary permission error and is not logged.
 SystemCallErrorNumber=EPERM
 StateDirectory=tuwunel
 
