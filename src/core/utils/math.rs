@@ -3,8 +3,12 @@
 //! Exported macros separate recoverable, expected, and prevalidated arithmetic.
 //! Conversion helpers centralize errors, panics, and deliberate truncation.
 
+use std::num::NonZeroUsize;
+
 mod expect_into;
 mod expected;
+#[cfg(test)]
+mod tests;
 mod tried;
 
 /// Transforms arithmetic expressions into checked operations.
@@ -42,6 +46,18 @@ const USIZE_MAX_EXCLUSIVE: f64 = match usize::BITS {
 	| 64 => 18_446_744_073_709_551_616.0,
 	| _ => panic!("unsupported usize width"),
 };
+
+/// Combines per-call and configuration concurrency caps.
+///
+/// An absent per-call cap and a zero configuration cap each mean unbounded.
+/// When both sides are bounded, the lower cap wins.
+#[inline]
+#[must_use]
+pub fn effective_cap(requested: Option<NonZeroUsize>, config: usize) -> usize {
+	requested
+		.map_or(usize::MAX, NonZeroUsize::get)
+		.min(NonZeroUsize::new(config).map_or(usize::MAX, NonZeroUsize::get))
+}
 
 /// Evaluates a checked arithmetic expression as a [`Result`].
 ///

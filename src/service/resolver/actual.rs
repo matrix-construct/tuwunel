@@ -32,16 +32,34 @@ impl ActualDest {
 #[implement(super::Service)]
 #[tracing::instrument(skip_all, level = "debug", name = "resolve")]
 pub(crate) async fn get_actual_dest(&self, server_name: &ServerName) -> Result<ActualDest> {
-	let (CachedDest { dest, host, .. }, _cached) = self.lookup_actual_dest(server_name).await?;
+	let (CachedDest { dest, host, .. }, _cached) = self
+		.lookup_actual_dest_with_policy(server_name, false)
+		.await?;
 
 	Ok(ActualDest { dest, host })
 }
 
 #[implement(super::Service)]
-pub(crate) async fn lookup_actual_dest(
+#[tracing::instrument(skip_all, level = "debug", name = "resolve")]
+pub(crate) async fn get_actual_dest_allow_self(
 	&self,
 	server_name: &ServerName,
+) -> Result<ActualDest> {
+	let (CachedDest { dest, host, .. }, _cached) = self
+		.lookup_actual_dest_with_policy(server_name, true)
+		.await?;
+
+	Ok(ActualDest { dest, host })
+}
+
+#[implement(super::Service)]
+async fn lookup_actual_dest_with_policy(
+	&self,
+	server_name: &ServerName,
+	allow_self: bool,
 ) -> Result<(CachedDest, bool)> {
+	self.validate_self_destination(server_name, allow_self)?;
+
 	if let Ok(result) = self.cache.get_destination(server_name).await {
 		return Ok((result, true));
 	}
@@ -51,7 +69,9 @@ pub(crate) async fn lookup_actual_dest(
 		return Ok((result, true));
 	}
 
-	self.resolve_actual_dest(server_name, true)
+	self.validate_dest_address(server_name)?;
+
+	self.resolve_actual_dest_unchecked(server_name, true)
 		.inspect_ok(|result| self.cache.set_destination(server_name, result))
 		.map_ok(|result| (result, false))
 		.boxed()
@@ -63,9 +83,19 @@ pub(crate) async fn lookup_actual_dest(
 /// Numbers in comments below refer to bullet points in linked section of
 /// specification
 #[implement(super::Service)]
-#[tracing::instrument(name = "actual", level = "debug", skip(self, cache))]
 pub async fn resolve_actual_dest(&self, dest: &ServerName, cache: bool) -> Result<CachedDest> {
-	self.validate_dest(dest)?;
+	self.validate_dest(dest, false)?;
+	self.resolve_actual_dest_unchecked(dest, cache)
+		.await
+}
+
+#[implement(super::Service)]
+#[tracing::instrument(name = "actual", level = "debug", skip(self, cache))]
+async fn resolve_actual_dest_unchecked(
+	&self,
+	dest: &ServerName,
+	cache: bool,
+) -> Result<CachedDest> {
 	let mut host: DestString = dest.as_str().into();
 	let actual_dest = self.actual_dest(dest, cache, &mut host).await?;
 	let actual_host = Self::dest_host(&host);
@@ -401,11 +431,25 @@ fn handle_resolve_error(e: &NetError, host: &'_ str) -> Result {
 }
 
 #[implement(super::Service)]
-fn validate_dest(&self, dest: &ServerName) -> Result {
-	if dest == self.services.server.name && !self.services.server.config.federation_loopback {
+fn validate_dest(&self, dest: &ServerName, allow_self: bool) -> Result {
+	self.validate_self_destination(dest, allow_self)?;
+	self.validate_dest_address(dest)
+}
+
+#[implement(super::Service)]
+fn validate_self_destination(&self, dest: &ServerName, allow_self: bool) -> Result {
+	if !allow_self
+		&& dest == self.services.server.name
+		&& !self.services.server.config.federation_loopback
+	{
 		return Err!("Won't send federation request to ourselves");
 	}
 
+	Ok(())
+}
+
+#[implement(super::Service)]
+fn validate_dest_address(&self, dest: &ServerName) -> Result {
 	if dest.is_ip_literal() || IPAddress::is_valid(dest.host()) {
 		self.validate_dest_ip_literal(dest)?;
 	}

@@ -589,6 +589,17 @@
 #
 #federation_keys_timeout = 8
 
+# Timeout (seconds) for each request in a bounded federation fanout.
+#
+# This applies to admin surveys and migrated room fanouts. A server that
+# exceeds the deadline is reported as timed out while other destinations
+# continue. Keep this below `federation_timeout` and above
+# `federation_keys_timeout`.
+#
+# reloadable: yes
+#
+#feds_timeout = 15
+
 # Federation client idle connection pool timeout (seconds).
 #
 #federation_idle_timeout = 25
@@ -857,6 +868,16 @@
 # reloadable: yes
 #
 #fetch_fanout_rounds = 0
+
+# Maximum concurrency for bounded federation fanouts.
+#
+# This caps admin surveys and migrated room and key fanouts. Lower values
+# trade sweep latency for load without dropping destinations. 0 selects
+# the built-in bounded default.
+#
+# reloadable: yes
+#
+#feds_max_width = 0
 
 # Derive the state at an incoming federation event from locally held
 # events when its previous events are stored but not yet resolved,

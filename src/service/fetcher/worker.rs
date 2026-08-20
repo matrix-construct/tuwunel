@@ -6,7 +6,6 @@
 
 use std::{
 	collections::{HashMap, VecDeque},
-	num::NonZeroUsize,
 	sync::{Arc, Weak},
 };
 
@@ -14,7 +13,7 @@ use bytes::Bytes;
 use futures::{FutureExt, StreamExt, future::BoxFuture, stream::FuturesUnordered};
 use ruma::OwnedServerName;
 use tokio::sync::watch::channel;
-use tuwunel_core::{debug_warn, implement, trace};
+use tuwunel_core::{debug_warn, implement, trace, utils::math::effective_cap};
 
 use super::{
 	Failure, Msg, Opts, Outcome, Service,
@@ -264,14 +263,6 @@ async fn run_attempts(&self, opts: &Opts, interest: &Weak<()>) -> SharedResult {
 	}
 
 	Err(Failure::NotFound { attempted })
-}
-
-/// Effective ceiling combining an `opts` cap with a config sentinel, where a
-/// `None` opts value or a `0` config value means unbounded and the tighter
-/// wins.
-pub(super) fn effective_cap(opt: Option<NonZeroUsize>, config: usize) -> usize {
-	opt.map_or(usize::MAX, NonZeroUsize::get)
-		.min(NonZeroUsize::new(config).map_or(usize::MAX, NonZeroUsize::get))
 }
 
 /// Fetch one candidate and validate it: `Some(bytes)` on a clean response,

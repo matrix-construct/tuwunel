@@ -787,6 +787,18 @@ pub struct Config {
 	#[serde(default = "default_federation_keys_timeout")]
 	pub federation_keys_timeout: u64,
 
+	/// Timeout (seconds) for each request in a bounded federation fanout.
+	///
+	/// This applies to admin surveys and migrated room fanouts. A server that
+	/// exceeds the deadline is reported as timed out while other destinations
+	/// continue. Keep this below `federation_timeout` and above
+	/// `federation_keys_timeout`.
+	///
+	/// reloadable: yes
+	/// default: 15
+	#[serde(default = "default_feds_timeout")]
+	pub feds_timeout: u64,
+
 	/// Federation client idle connection pool timeout (seconds).
 	///
 	/// default: 25
@@ -1095,6 +1107,17 @@ pub struct Config {
 	/// default: 0
 	#[serde(default)]
 	pub fetch_fanout_rounds: usize,
+
+	/// Maximum concurrency for bounded federation fanouts.
+	///
+	/// This caps admin surveys and migrated room and key fanouts. Lower values
+	/// trade sweep latency for load without dropping destinations. 0 selects
+	/// the built-in bounded default.
+	///
+	/// reloadable: yes
+	/// default: 0
+	#[serde(default)]
+	pub feds_max_width: usize,
 
 	/// Derive the state at an incoming federation event from locally held
 	/// events when its previous events are stored but not yet resolved,
@@ -5302,6 +5325,8 @@ fn default_well_known_timeout() -> u64 { 10 }
 fn default_federation_timeout() -> u64 { 25 }
 
 fn default_federation_keys_timeout() -> u64 { 8 }
+
+fn default_feds_timeout() -> u64 { 15 }
 
 fn default_federation_idle_timeout() -> u64 { 25 }
 

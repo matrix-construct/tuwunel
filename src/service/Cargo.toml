@@ -145,6 +145,7 @@ insta.workspace = true
 maplit.workspace = true
 minicbor-serde.workspace = true
 similar.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
 tracing-subscriber.workspace = true
 
 [lints]

@@ -113,15 +113,12 @@ where
 	result
 }
 
-/// Like [`execute_on`] but leaves peer-status untouched, for callers that
-/// must honor backoff without contributing to it.
+/// Executes one Feds request while permitting only this server as a
+/// self-destination and preserving ordinary peer-status recording.
+///
+/// Other federation entry points retain the configured loopback gate.
 #[implement(super::Service)]
-#[tracing::instrument(
-	name = "fed",
-	level = INFO_SPAN_LEVEL,
-	skip(self, client, request),
-)]
-async fn execute_uncounted<T>(
+pub(super) async fn execute_on_allow_self<T>(
 	&self,
 	client: &Client,
 	dest: &ServerName,
@@ -132,6 +129,83 @@ where
 	T::Authentication: FedAuth,
 	T::PathBuilder: FedPath,
 {
+	let result = self
+		.execute_uncounted_allow_self(client, dest, request)
+		.await;
+
+	match &result {
+		| Ok(_) => self.record_success(dest).await,
+		| Err(error) =>
+			if let Some(class) = classify_error(error) {
+				self.record_failure(dest, class);
+			},
+	}
+
+	result
+}
+
+/// Like [`execute_on`] but leaves peer-status untouched, for callers that
+/// must honor backoff without contributing to it.
+#[implement(super::Service)]
+#[tracing::instrument(
+	name = "fed",
+	level = INFO_SPAN_LEVEL,
+	skip(self, client, request),
+)]
+pub(super) async fn execute_uncounted<T>(
+	&self,
+	client: &Client,
+	dest: &ServerName,
+	request: T,
+) -> Result<T::IncomingResponse>
+where
+	T: OutgoingRequest + Send,
+	T::Authentication: FedAuth,
+	T::PathBuilder: FedPath,
+{
+	self.validate_request_destination(dest)?;
+	let actual = self
+		.services
+		.resolver
+		.get_actual_dest(dest)
+		.await?;
+	let request = self.prepare(&actual, dest, request)?;
+
+	self.perform::<T>(&actual, dest, request, client)
+		.await
+}
+
+/// Executes one Feds request while permitting only this server as a
+/// self-destination and leaving peer status untouched.
+///
+/// Other federation entry points retain the configured loopback gate.
+#[implement(super::Service)]
+#[tracing::instrument(name = "fed", level = "debug", skip(self, client, request))]
+pub(super) async fn execute_uncounted_allow_self<T>(
+	&self,
+	client: &Client,
+	dest: &ServerName,
+	request: T,
+) -> Result<T::IncomingResponse>
+where
+	T: OutgoingRequest + Send,
+	T::Authentication: FedAuth,
+	T::PathBuilder: FedPath,
+{
+	self.validate_request_destination(dest)?;
+	let actual = self
+		.services
+		.resolver
+		.get_actual_dest_allow_self(dest)
+		.await?;
+	let request = self.prepare(&actual, dest, request)?;
+
+	self.perform::<T>(&actual, dest, request, client)
+		.await
+}
+
+#[implement(super::Service)]
+fn validate_request_destination(&self, dest: &ServerName) -> Result {
 	if !self.services.server.config.allow_federation {
 		return Err!(Config("allow_federation", "Federation is disabled."));
 	}
@@ -145,16 +219,7 @@ where
 		return Err!(Request(Forbidden(debug_warn!("Federation with {dest} is not allowed."))));
 	}
 
-	let actual = self
-		.services
-		.resolver
-		.get_actual_dest(dest)
-		.await?;
-
-	let request = self.prepare(&actual, dest, request)?;
-
-	self.perform::<T>(&actual, dest, request, client)
-		.await
+	Ok(())
 }
 
 #[implement(super::Service)]
