@@ -29,6 +29,7 @@ fn descriptor_cf_options(
 	cache: Option<&Cache>,
 ) -> Result<Options> {
 	set_compression(&mut desc, config);
+	set_preview_retention(&mut desc, config.url_preview_cache_ttl);
 	set_table_options(&mut opts, &desc, cache)?;
 
 	opts.set_min_write_buffer_number(1);
@@ -151,6 +152,20 @@ fn set_compression(desc: &mut Descriptor, config: &Config) {
 
 	if !config.rocksdb_bottommost_compression {
 		desc.bottommost_level = None;
+	}
+}
+
+/// Raise the preview columns' FIFO ttl to the configured preview lifetime
+/// when it exceeds their floor.
+///
+/// A preview evicted before it expires is fetched from the origin again, and
+/// one whose lazy media mapping went with it serves an `mxc://` URI that no
+/// longer resolves, so the configured lifetime raises both columns. Only the
+/// time arm moves: `limit_size` still caps each column, and evicts oldest
+/// first once reached.
+pub(super) fn set_preview_retention(desc: &mut Descriptor, configured: u64) {
+	if matches!(desc.name, "url_preview" | "mediaid_lazy") {
+		desc.ttl = desc.ttl.max(configured);
 	}
 }
 

@@ -310,6 +310,7 @@ budget, caching, and troubleshooting an empty preview.
 | `url_preview_check_root_domain` | `false` | When enabled, domain allowlist checks are applied to the root domain. Allows all subdomains of any allowed domain — e.g. allowing `wikipedia.org` also allows `en.m.wikipedia.org`. |
 | `url_preview_max_spider_size` | `786432` | Maximum bytes read from a page when generating a preview (default: 768 KiB). A page whose OpenGraph tags sit past this point yields an empty preview. |
 | `url_preview_max_media_size` | `52428800` | Maximum size of a single media item fetched or relayed for a URL preview: the og:image measurement fetch and the lazy-media relay. Media larger than this is not registered, and an over-cap relay is refused (default: 50 MiB). |
+| `url_preview_cache_ttl` | `86400` | Seconds a generated preview is cached before the page is fetched again, empty previews included (default: 24 hours). Raise it to spare origins in a room whose history is read often, lower it to pick up changed OpenGraph metadata sooner. |
 | `url_preview_bound_interface` | — | Network interface name or IP address to bind when making URL preview requests. Example: `"eth0"` or `"1.2.3.4"`. |
 | `url_preview_user_agent` | — | User-Agent header sent when fetching pages to extract their OpenGraph tags. Defaults to the versioned server User-Agent, e.g. `"Tuwunel/1.8.1 preview"`. |
 | `url_preview_media_user_agent` | — | User-Agent header sent when fetching and relaying preview media files themselves. Falls back to `url_preview_user_agent`. |

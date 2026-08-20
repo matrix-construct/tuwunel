@@ -20,6 +20,7 @@ use crate::{
 	Cbor, Database, Ignore, Interfix, Txn,
 	de::from_slice,
 	keyval::{serialize_key, serialize_val},
+	maps::descriptor,
 	ser,
 	ser::{Json, serialize_to_vec},
 	txn::next_record,
@@ -1068,17 +1069,8 @@ fn serde_tuple_string_integer_string() {
 
 #[test]
 fn lazy_media_outlives_url_preview() {
-	use crate::maps::MAPS;
-
-	let ttl = |name: &str| {
-		MAPS.iter()
-			.find(|desc| desc.name == name)
-			.map(|desc| desc.ttl)
-			.expect("descriptor present")
-	};
-
 	assert!(
-		ttl("mediaid_lazy") >= ttl("url_preview"),
+		descriptor("mediaid_lazy").ttl >= descriptor("url_preview").ttl,
 		"a served preview's mxc must still resolve while the preview is cached"
 	);
 }

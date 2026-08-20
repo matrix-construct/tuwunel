@@ -6,11 +6,12 @@ use rocksdb::{
 };
 
 use super::{
-	cf_opts::register_pool,
+	cf_opts::{register_pool, set_preview_retention},
 	context::{ColCache, ColCaches, SHARED_POOL},
 	descriptor::{self, CacheDisp, Descriptor},
 	open::is_remnant,
 };
+use crate::maps::descriptor;
 
 fn fresh_caches() -> ColCaches {
 	let shared = ColCache {
@@ -192,4 +193,18 @@ fn remnants_classified_by_name() {
 	assert!(!is_remnant("conduit.db"));
 	assert!(!is_remnant(".sst"));
 	assert!(!is_remnant("backup.log"));
+}
+
+#[test]
+fn preview_columns_cover_configured_lifetime() {
+	for ttl in [0, 60 * 60 * 24, 60 * 60 * 24 * 365] {
+		let mut preview = *descriptor("url_preview");
+		let mut lazy_media = *descriptor("mediaid_lazy");
+
+		set_preview_retention(&mut preview, ttl);
+		set_preview_retention(&mut lazy_media, ttl);
+
+		assert!(preview.ttl >= ttl, "url_preview ttl below the configured lifetime");
+		assert!(lazy_media.ttl >= preview.ttl, "mediaid_lazy ttl below url_preview ttl");
+	}
 }

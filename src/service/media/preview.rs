@@ -138,13 +138,8 @@ pub(super) struct CachedPreview {
 }
 
 impl CachedPreview {
-	// refetch daily; og metadata drifts
-	const EXPIRE: Duration = Duration::from_hours(24);
-
-	fn new(preview: UrlPreviewData) -> Self {
-		let expire = timepoint_from_now(Self::EXPIRE).expect("1 day from now is representable");
-
-		Self { preview, expire }
+	fn new(ttl: Duration, preview: UrlPreviewData) -> Result<Self> {
+		timepoint_from_now(ttl).map(|expire| Self { preview, expire })
 	}
 
 	#[inline]
@@ -302,7 +297,9 @@ pub async fn request_url_preview(&self, url: &Url) -> Result<UrlPreviewData> {
 		| _ => return Err!(Request(Unknown("Unsupported Content-Type"))),
 	};
 
-	let cached = CachedPreview::new(data);
+	let ttl = Duration::from_secs(self.services.config.url_preview_cache_ttl);
+	let cached = CachedPreview::new(ttl, data)?;
+
 	self.db.set_url_preview(url.as_str(), &cached)?;
 
 	Ok(cached.preview)
@@ -1123,14 +1120,17 @@ pub fn url_preview_allowed(&self, url: &Url) -> bool {
 
 #[cfg(test)]
 mod tests {
-	use std::time::{Duration, SystemTime};
+	use std::time::Duration;
 
 	use minicbor_serde::{from_slice, to_vec};
+	use tuwunel_core::utils::time::timepoint_ago;
 	use url::Url;
 
 	use super::{CachedPreview, UrlPreviewData, is_youtube};
 	#[cfg(feature = "url_preview")]
 	use super::{oembed_endpoint, reserve_capped, video_type};
+
+	const TTL: Duration = Duration::from_hours(24);
 
 	fn sample() -> UrlPreviewData {
 		UrlPreviewData {
@@ -1155,7 +1155,7 @@ mod tests {
 
 	#[test]
 	fn cached_preview_roundtrip() {
-		let cached = CachedPreview::new(sample());
+		let cached = CachedPreview::new(TTL, sample()).expect("representable");
 		let bytes = to_vec(&cached).expect("encodes");
 		let decoded: CachedPreview = from_slice(&bytes).expect("decodes");
 
@@ -1219,11 +1219,33 @@ mod tests {
 
 	#[test]
 	fn cached_preview_expiry() {
-		let mut cached = CachedPreview::new(UrlPreviewData::default());
+		let cached = CachedPreview::new(TTL, UrlPreviewData::default()).expect("representable");
+
 		assert!(cached.valid());
 
-		cached.expire = SystemTime::now() - Duration::from_secs(1);
-		assert!(!cached.valid());
+		let expired = CachedPreview {
+			preview: UrlPreviewData::default(),
+			expire: timepoint_ago(Duration::from_secs(1)).expect("representable"),
+		};
+
+		assert!(!expired.valid());
+	}
+
+	#[test]
+	fn cached_preview_honors_configured_lifetime() {
+		let day = CachedPreview::new(TTL, UrlPreviewData::default()).expect("representable");
+		let month =
+			CachedPreview::new(TTL * 30, UrlPreviewData::default()).expect("representable");
+
+		assert!(month.expire > day.expire);
+	}
+
+	#[test]
+	fn cached_preview_unrepresentable_lifetime_refused() {
+		let refused =
+			CachedPreview::new(Duration::from_secs(u64::MAX), UrlPreviewData::default());
+
+		assert!(refused.is_err(), "a lifetime past representable time errors rather than panics");
 	}
 
 	#[test]

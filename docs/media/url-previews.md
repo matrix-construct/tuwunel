@@ -34,7 +34,7 @@ denylist does not already block. Prefer naming the domains you want.
    for `og:` tags, falling back to `twitter:` card tags and then to the
    document `<title>`.
 4. `og:image` is fetched once to measure its dimensions, then staged.
-5. The result is cached for 24 hours.
+5. The result is cached for `url_preview_cache_ttl` seconds.
 
 Only the first `url_preview_max_spider_size` bytes are parsed, so a page that
 puts a large script block ahead of its `<head>` metadata can be cut off
@@ -106,9 +106,20 @@ description rather than the channel name.
 
 ## Refreshing a cached preview
 
-A preview is cached for 24 hours, including an empty one. Changing the user
-agent or the spider size does not clear what is already stored, so a link
-that previewed badly keeps doing so until the entry ages out.
+A preview is cached for `url_preview_cache_ttl` seconds, 24 hours by default,
+including an empty one. Changing the user agent or the spider size does not
+clear what is already stored, so a link that previewed badly keeps doing so
+until the entry ages out.
+
+Raising the setting spares origins in a room whose history is read often, at
+the cost of serving metadata a page has since changed; lowering it does the
+reverse. It costs no unbounded disk either way: previews are metadata living
+in a column capped at 128 MiB that drops its oldest entries once full, and a
+longer lifetime does not copy any more media into storage.
+
+Each entry carries the lifetime in force when it was written, so a change
+applies to previews generated after it, and the column retaining them picks
+up a longer lifetime at the next restart.
 
 To refetch one URL immediately and overwrite its cache entry:
 

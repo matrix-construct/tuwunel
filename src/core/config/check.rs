@@ -8,6 +8,7 @@ use std::{
 	env::consts::OS,
 	fs::read_to_string,
 	net::{IpAddr, SocketAddr},
+	time::Duration,
 };
 
 use either::Either;
@@ -22,6 +23,7 @@ use crate::{
 	utils::{
 		is_secret_set,
 		sys::storage::{Filesystem, filesystem_from_path},
+		time::timepoint_from_now,
 	},
 	warn,
 };
@@ -499,6 +501,13 @@ fn check_url_previews(config: &Config) -> Result {
 	{
 		return Err!(Config("url_preview_media_user_agent", "Not a valid HTTP header value."));
 	}
+
+	timepoint_from_now(Duration::from_secs(config.url_preview_cache_ttl)).map_err(|_| {
+		err!(Config(
+			"url_preview_cache_ttl",
+			"Value is too large to add to the current time."
+		))
+	})?;
 
 	Ok(())
 }

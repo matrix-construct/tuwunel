@@ -2582,6 +2582,18 @@
 #
 #url_preview_max_media_size = 50 MiB
 
+# Lifetime in seconds of a cached URL preview, including an empty one.
+#
+# Raising it spares origins in a room whose history is read often, at the
+# cost of serving OpenGraph metadata a page has since changed. A value of
+# 0 fetches on every request. Raising it beyond seven days takes effect at
+# the next restart, since the database applies its retention floor when it
+# opens.
+#
+# reloadable: yes
+#
+#url_preview_cache_ttl = 86400
+
 # Option to decide whether you would like to run the domain allowlist
 # checks (contains and explicit) on the root domain or not. Does not apply
 # to URL contains allowlist. Defaults to false.

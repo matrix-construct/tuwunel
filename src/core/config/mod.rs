@@ -2977,6 +2977,19 @@ pub struct Config {
 	)]
 	pub url_preview_max_media_size: usize,
 
+	/// Lifetime in seconds of a cached URL preview, including an empty one.
+	///
+	/// Raising it spares origins in a room whose history is read often, at the
+	/// cost of serving OpenGraph metadata a page has since changed. A value of
+	/// 0 fetches on every request. Raising it beyond seven days takes effect at
+	/// the next restart, since the database applies its retention floor when it
+	/// opens.
+	///
+	/// reloadable: yes
+	/// default: 86400
+	#[serde(default = "default_url_preview_cache_ttl")]
+	pub url_preview_cache_ttl: u64,
+
 	/// Option to decide whether you would like to run the domain allowlist
 	/// checks (contains and explicit) on the root domain or not. Does not apply
 	/// to URL contains allowlist. Defaults to false.
@@ -5450,6 +5463,8 @@ fn default_url_preview_max_spider_size() -> usize {
 fn default_url_preview_max_media_size() -> usize {
 	50 * 1024 * 1024 // 50 MiB
 }
+
+fn default_url_preview_cache_ttl() -> u64 { 60 * 60 * 24 }
 
 fn default_new_user_displayname_suffix() -> String { "💕".to_owned() }
 
