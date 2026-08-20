@@ -18,8 +18,12 @@ RUN \
 	sh ./nix-install --daemon
 	rm nix-install
 
+	# accept-flake-config is gated behind the flakes feature, and nix.conf is
+	# parsed before the --extra-experimental-features the stages pass, so the
+	# feature has to be enabled here or the setting is discarded.
 	mkdir -p /etc/nix
 	printf '%s\n' \
+		"experimental-features = nix-command flakes" \
 		"extra-substituters = ${nix_substituter}" \
 		"extra-trusted-public-keys = ${nix_public_key}" \
 		"accept-flake-config = true" \
