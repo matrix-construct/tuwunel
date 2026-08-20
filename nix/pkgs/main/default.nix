@@ -184,7 +184,12 @@ let
         ];
       };
 
-    doCheck = true;
+    # The check phase reaches /etc/resolv.conf through libredirect, which works
+    # by LD_PRELOAD and is therefore inert in a statically linked binary. A
+    # static build would run the tests with no resolver configuration at all and
+    # fail before reaching them, so it packages without checking; the unit and
+    # integ jobs cover that code on the dynamic path.
+    doCheck = !stdenv.hostPlatform.isStatic;
 
     # Cargo applies the selected profile to every target, so checking under
     # release links each test binary with thin LTO. Tests build under the test
@@ -269,7 +274,7 @@ craneLib.buildPackage (
         export TUWUNEL_DATABASE_PATH="$(mktemp -d)/smoketest.db"
         export SSL_CERT_FILE="${pkgsBuildHost.cacert}/etc/ssl/certs/ca-bundle.crt"
       '';
-    doCheck = true;
+    doCheck = !stdenv.hostPlatform.isStatic;
 
     doBenchmark = false;
 
