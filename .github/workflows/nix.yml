@@ -1,0 +1,195 @@
+name: Nix
+
+on:
+  push:
+    tags:
+      - "v*"
+      - "!v*-*"
+
+  workflow_dispatch:
+    inputs:
+      committish:
+        type: string
+        description: "Branch, tag, or commit to build (defaults to the triggering ref)"
+      attrs:
+        type: string
+        description: >
+          JSON array of package attributes to build. Empty builds every
+          package the flake exposes for the runner's system.
+        default: '[]'
+      devshells:
+        type: string
+        description: "Also realise and upload the development shells"
+        default: 'true'
+      machine:
+        type: string
+        description: "Hardware platform label"
+        default: 'X64'
+      runner:
+        type: string
+        description: "Runner mask"
+        default: 'self-hosted'
+      max-parallel:
+        type: number
+        description: "Limit number of concurrent builds"
+        default: 4
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nix-${{github.ref}}
+  cancel-in-progress: false
+
+env:
+  # Applies whether Nix came from install-nix-action or was already present on
+  # a self-hosted runner, so the substituter does not depend on the runner's
+  # own nix.conf.
+  NIX_CONFIG: |
+    experimental-features = nix-command flakes
+    accept-flake-config = true
+    extra-substituters = https://tuwunel.cachix.org
+    extra-trusted-public-keys = tuwunel.cachix.org-1:VRecUeDcaPxtYDA6bnMF3snPM7VYX8K605z4uuG2nWc=
+
+jobs:
+  discover:
+    name: Discover
+    if: github.repository == 'matrix-construct/tuwunel'
+    runs-on: ["${{inputs.machine || 'X64'}}", "${{inputs.runner || 'self-hosted'}}"]
+
+    outputs:
+      attrs: ${{steps.attrs.outputs.attrs}}
+      shells: ${{steps.attrs.outputs.shells}}
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{inputs.committish || github.ref}}
+          persist-credentials: false
+
+      - name: Install Nix
+        id: install
+        uses: ./.github/actions/install-nix
+
+      # Self-hosted runners are not guaranteed to carry jq, and the flake
+      # already pins a nixpkgs to take it from.
+      - name: Provide jq
+        run: |
+          if command -v jq > /dev/null 2>&1; then
+            exit 0
+          fi
+
+          # jq is multi-output, so select the one that actually carries the
+          # binary rather than trusting the order of --print-out-paths.
+          for out in $(nix build --no-link --print-out-paths --inputs-from . nixpkgs#jq); do
+            if test -x "$out/bin/jq"; then
+              printf '%s/bin\n' "$out" >> "$GITHUB_PATH"
+              exit 0
+            fi
+          done
+
+          echo "could not locate jq in the nixpkgs outputs" >&2
+          exit 1
+
+      # Enumerated rather than hardcoded, so outputs added to the flake are
+      # published without editing this workflow.
+      - name: Enumerate flake outputs
+        id: attrs
+        env:
+          requested: ${{inputs.attrs || '[]'}}
+          system: ${{steps.install.outputs.system}}
+        run: |
+          nix flake show --json > flake-show.json
+
+          shells="$(jq -c --arg sys "$system" \
+            '.devShells[$sys] // {} | keys' flake-show.json)"
+
+          if test "$(printf '%s' "$requested" | jq 'length')" -gt 0; then
+            attrs="$(printf '%s' "$requested" | jq -c '.')"
+          else
+            attrs="$(jq -c --arg sys "$system" \
+              '.packages[$sys] | keys' flake-show.json)"
+          fi
+
+          test "$(printf '%s' "$attrs" | jq 'length')" -gt 0
+
+          printf 'attrs=%s\n' "$attrs" >> "$GITHUB_OUTPUT"
+          printf 'shells=%s\n' "$shells" >> "$GITHUB_OUTPUT"
+
+          printf 'packages (%s):\n' "$(printf '%s' "$attrs" | jq 'length')"
+          printf '%s\n' "$attrs" | jq -r '.[]'
+          printf 'devShells (%s):\n' "$(printf '%s' "$shells" | jq 'length')"
+          printf '%s\n' "$shells" | jq -r '.[]'
+
+  packages:
+    name: ${{matrix.attr}}
+    needs: [discover]
+    if: >
+      !failure() && !cancelled()
+      && fromJSON(needs.discover.outputs.attrs)[0] != null
+
+    runs-on: ["${{inputs.machine || 'X64'}}", "${{inputs.runner || 'self-hosted'}}"]
+
+    strategy:
+      fail-fast: false
+      max-parallel: ${{inputs.max-parallel || 4}}
+      matrix:
+        attr: ${{fromJSON(needs.discover.outputs.attrs)}}
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{inputs.committish || github.ref}}
+          persist-credentials: false
+
+      - name: Install Nix
+        uses: ./.github/actions/install-nix
+
+      # Installs a post-build hook, so every path realised below is uploaded,
+      # build dependencies included, not just the final output.
+      - uses: cachix/cachix-action@v17
+        with:
+          name: tuwunel
+          authToken: ${{secrets.CACHIX_AUTH_TOKEN}}
+
+      - name: Build ${{matrix.attr}}
+        run: |
+          nix build -L --print-build-logs ".#${{matrix.attr}}"
+
+  devshells:
+    name: devShell ${{matrix.shell}}
+    needs: [discover]
+    if: >
+      !failure() && !cancelled()
+      && needs.discover.result == 'success'
+      && (inputs.devshells == null || fromJSON(inputs.devshells))
+      && fromJSON(needs.discover.outputs.shells)[0] != null
+
+    runs-on: ["${{inputs.machine || 'X64'}}", "${{inputs.runner || 'self-hosted'}}"]
+
+    strategy:
+      fail-fast: false
+      matrix:
+        shell: ${{fromJSON(needs.discover.outputs.shells)}}
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{inputs.committish || github.ref}}
+          persist-credentials: false
+
+      - name: Install Nix
+        uses: ./.github/actions/install-nix
+
+      - uses: cachix/cachix-action@v17
+        with:
+          name: tuwunel
+          authToken: ${{secrets.CACHIX_AUTH_TOKEN}}
+
+      # A devShell is not a buildable output, so realise it into a profile to
+      # pin every input the shell needs before the hook uploads them.
+      - name: Realise devShell ${{matrix.shell}}
+        run: |
+          nix develop -L ".#${{matrix.shell}}" \
+            --profile "${RUNNER_TEMP}/devshell-${{matrix.shell}}" \
+            --command true

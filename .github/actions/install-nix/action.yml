@@ -1,0 +1,43 @@
+name: Install Nix
+description: >
+  Ensure a flake-capable Nix on the runner and report its system double.
+  Self-hosted runners frequently carry a Nix already; installing over it
+  fails, so the installer only runs when nothing is found on PATH.
+
+outputs:
+  system:
+    description: "Nix system double of this runner, e.g. x86_64-linux"
+    value: ${{steps.probe.outputs.system}}
+
+runs:
+  using: composite
+
+  steps:
+    - name: Probe for an existing Nix
+      id: present
+      shell: bash
+      run: |
+        if command -v nix > /dev/null 2>&1; then
+          printf 'present=true\n' >> "$GITHUB_OUTPUT"
+        else
+          printf 'present=false\n' >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Install Nix
+      if: steps.present.outputs.present != 'true'
+      uses: cachix/install-nix-action@v31
+      with:
+        extra_nix_config: |
+          experimental-features = nix-command flakes
+          accept-flake-config = true
+
+    - name: Report system
+      id: probe
+      shell: bash
+      run: |
+        nix --extra-experimental-features nix-command --version
+        system="$(nix \
+          --extra-experimental-features nix-command \
+          eval --impure --raw --expr 'builtins.currentSystem')"
+
+        printf 'system=%s\n' "$system" >> "$GITHUB_OUTPUT"
