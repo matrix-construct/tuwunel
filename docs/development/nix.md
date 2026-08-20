@@ -72,9 +72,12 @@ including cross-compiled static binaries, OCI images, and debug variants, and
 each matrix entry is its own job. Use the `attrs` dispatch input to publish a
 subset, and `max-parallel` to bound how much of the runner pool a run takes.
 
-Because both producers upload build closures and not just final outputs, the
-cache grows considerably faster than the size of a Tuwunel binary would
-suggest. Watch the cache size before assuming a plan tier is sufficient.
+The producers upload build closures rather than only final outputs, but cachix
+skips any path already served by `cache.nixos.org`, so what actually lands is
+the Tuwunel-specific subset: our binaries and our forked dependencies. The
+first `all-features` upload offered 3988 paths and stored 2158 of them, and a
+closure still resolves completely because Nix queries both substituters. Stock
+nixpkgs dependencies stay upstream and are never duplicated here.
 
 ## Credentials
 

@@ -22,6 +22,7 @@ RUN \
 	printf '%s\n' \
 		"extra-substituters = ${nix_substituter}" \
 		"extra-trusted-public-keys = ${nix_public_key}" \
+		"accept-flake-config = true" \
 		>> /etc/nix/nix.conf
 EOF
 

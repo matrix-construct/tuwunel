@@ -45,11 +45,12 @@ sudo systemctl restart nix-daemon
 With the `cachix` client installed, `cachix use tuwunel` writes that
 configuration for you.
 
-The repository flake also declares the cache in its `nixConfig`, so building
-from the flake offers the substituter without any of the above. Nix accepts
-that offer silently only for accounts listed in `trusted-users`; everyone else
-is prompted once per invocation, which is why a permanent deployment should
-set the values explicitly.
+The repository flake also declares the cache in its `nixConfig`, but do not
+rely on that alone. Nix treats a flake's configuration as untrusted: an
+interactive build asks whether to accept it, and a non-interactive one skips
+it with `ignoring untrusted flake configuration setting`, so an unattended
+deployment that configured nothing else would quietly build everything from
+source. Set the two values as shown above, or pass `--accept-flake-config`.
 
 A self-hosted cache at `cache.tuwunel.chat` is planned. It will be announced
 here with its own public key; the Cachix substituter above stays valid in the
