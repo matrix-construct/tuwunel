@@ -4,21 +4,25 @@ use axum::extract::State;
 use futures::{StreamExt, future::join};
 use ruma::{
 	OneTimeKeyAlgorithm, OwnedDeviceId, OwnedOneTimeKeyId, OwnedUserId, ServerName, UserId,
-	api::{client::keys::claim_keys, federation},
+	api::{
+		client::keys::claim_keys,
+		federation::keys::claim_keys::v1::{
+			Request as FederationRequest, Response as FederationResponse,
+		},
+	},
 	encryption::OneTimeKey,
 	serde::Raw,
 };
-use serde_json::json;
 use tuwunel_core::{
-	Result, debug_warn,
-	utils::{
-		BoolExt, IterStream,
-		stream::{BroadbandExt, ReadyExt},
-	},
+	Result,
+	utils::{BoolExt, IterStream, stream::BroadbandExt},
 };
-use tuwunel_service::Services;
+use tuwunel_service::{
+	Services,
+	federation::feds::{OutcomeExt, fanout_with},
+};
 
-use super::FailureMap;
+use super::{FailureMap, federation_failures, federation_opts};
 use crate::Ruma;
 
 #[derive(Default)]
@@ -147,33 +151,36 @@ async fn collect_federation_one_time_keys(
 	services: &Services,
 	server: ServerClaims<'_>,
 ) -> Claims {
-	server
+	let requests = server
 		.into_iter()
 		.stream()
-		.broad_then(async |(server, one_time_keys)| {
-			let failed = || Claims {
-				failures: [(server.to_string(), json!({}))].into(),
-				..Default::default()
-			};
+		.map(|(server, one_time_keys)| (server.to_owned(), FederationRequest { one_time_keys }));
 
-			let request = federation::keys::claim_keys::v1::Request { one_time_keys };
-
-			match services
+	let outcomes = fanout_with(
+		requests,
+		async |server, request| {
+			services
 				.federation
-				.execute_keys(server, request)
+				.execute_keys(&server, request)
 				.await
-				.inspect_err(
-					|e| debug_warn!(%server, "claim_keys federation request failed: {e}"),
-				) {
-				| Err(_e) => failed(),
-				| Ok(keys) => Claims {
-					one_time_keys: keys.one_time_keys,
-					failures: Default::default(),
-				},
-			}
+		},
+		federation_opts(services),
+	);
+
+	let (claims, faults) = outcomes
+		.merge(Claims::default(), |mut claims, response: FederationResponse| {
+			claims
+				.one_time_keys
+				.extend(response.one_time_keys);
+
+			claims
 		})
-		.ready_fold(Claims::default(), Claims::merge)
-		.await
+		.await;
+
+	Claims {
+		failures: federation_failures("claim_keys", faults).collect(),
+		..claims
+	}
 }
 
 impl Claims {

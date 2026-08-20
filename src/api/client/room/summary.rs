@@ -1,5 +1,5 @@
 use axum::extract::State;
-use futures::{FutureExt, StreamExt, TryFutureExt, future::join3, stream::FuturesUnordered};
+use futures::{FutureExt, StreamExt, TryFutureExt, future::join3};
 use ruma::{
 	OwnedServerName, RoomId, UserId,
 	api::{
@@ -13,7 +13,10 @@ use tuwunel_core::{
 	Err, Result, debug_warn, trace,
 	utils::{IterStream, future::TryExtExt, option::OptionExt},
 };
-use tuwunel_service::Services;
+use tuwunel_service::{
+	Services,
+	federation::feds::{Fault, Opts, OutcomeExt, Record},
+};
 
 use crate::{ClientIp, Ruma, RumaResponse};
 
@@ -227,54 +230,62 @@ async fn remote_room_summary_hierarchy_response(
 	}
 
 	let request = get_hierarchy::v1::Request::new(room_id.to_owned());
+	let opts = Opts {
+		record: Record::Contribute,
+		..Default::default()
+	};
+	let acceptable = |response: &get_hierarchy::v1::Response| {
+		trace!(?response, "federation response");
+		let returned_room_id = &response.room.summary.room_id;
+		let accepted = returned_room_id == room_id;
 
-	let mut requests: FuturesUnordered<_> = servers
-		.iter()
-		.map(|server| {
-			services
-				.federation
-				.execute(server, request.clone())
-		})
-		.collect();
-
-	while let Some(result) = requests.next().await {
-		let response = match result {
-			| Ok(response) => response,
-			| Err(e) => {
-				debug_warn!(?e, "Failed to fetch room hierarchy over federation");
-				continue;
-			},
-		};
-
-		trace!("{response:?}");
-		let room = response.room;
-		let summary = &room.summary;
-		if summary.room_id != room_id {
+		if !accepted {
 			debug_warn!(
-				"Room ID {} returned does not belong to the requested room ID {}",
-				summary.room_id,
-				room_id
+				%returned_room_id,
+				requested_room_id = %room_id,
+				"federation room hierarchy response did not match request"
 			);
-			continue;
 		}
 
-		return user_can_see_summary(
-			services,
-			room_id,
-			&summary.join_rule,
-			summary.guest_can_join,
-			summary.world_readable,
-			summary.join_rule.allowed_room_ids(),
-			sender_user,
-		)
-		.await
-		.map(|()| room);
-	}
+		accepted
+	};
 
-	Err!(Request(NotFound(
-		"Room is unknown to this server and was unable to fetch over federation with the \
-		 provided servers available"
-	)))
+	let response = services
+		.federation
+		.fanout_to(servers.iter().cloned().stream(), move |_| request.clone(), opts)
+		.inspect(|outcome| match &outcome.result {
+			| Ok(_) => {},
+			| Err(Fault::Error(e)) => {
+				debug_warn!(?e, "Failed to fetch room hierarchy over federation");
+			},
+			| Err(fault) => {
+				debug_warn!(?fault, "Failed to fetch room hierarchy over federation");
+			},
+		})
+		.first_acceptable(acceptable)
+		.await;
+
+	let Some((_, response)) = response else {
+		return Err!(Request(NotFound(
+			"Room is unknown to this server and was unable to fetch over federation with the \
+			 provided servers available"
+		)));
+	};
+
+	let room = response.room;
+	let summary = &room.summary;
+
+	user_can_see_summary(
+		services,
+		room_id,
+		&summary.join_rule,
+		summary.guest_can_join,
+		summary.world_readable,
+		summary.join_rule.allowed_room_ids(),
+		sender_user,
+	)
+	.await
+	.map(|()| room)
 }
 
 async fn user_can_see_summary<'a, I>(

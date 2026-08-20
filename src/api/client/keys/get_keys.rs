@@ -13,12 +13,14 @@ use ruma::{
 	UserId,
 	api::{
 		client::{device::Device, keys::get_keys},
-		federation,
+		federation::keys::get_keys::v1::{
+			Request as FederationRequest, Response as FederationResponse,
+		},
 	},
 	encryption::{CrossSigningKey, DeviceKeys},
 	serde::Raw,
 };
-use serde_json::{json, value::to_raw_value};
+use serde_json::value::to_raw_value;
 use tuwunel_core::{
 	Result, debug_warn, implement,
 	utils::{
@@ -28,9 +30,13 @@ use tuwunel_core::{
 		stream::{BroadbandExt, ReadyExt},
 	},
 };
-use tuwunel_service::{Services, users::parse_master_key};
+use tuwunel_service::{
+	Services,
+	federation::feds::{Outcome, OutcomeExt, fanout_with},
+	users::parse_master_key,
+};
 
-use super::FailureMap;
+use super::{FailureMap, federation_failures, federation_opts};
 use crate::Ruma;
 
 #[derive(Default)]
@@ -261,50 +267,67 @@ async fn collect_federation_keys<F>(
 where
 	F: Fn(&UserId) -> bool + Send + Sync,
 {
-	server
+	let requests = server
 		.into_iter()
 		.stream()
-		.broad_then(async |(server, device_keys)| {
-			let failed = || Keys {
-				failures: BTreeMap::from([(server.to_string(), json!({}))]),
-				..Default::default()
-			};
+		.map(|(server, device_keys)| (server.to_owned(), FederationRequest { device_keys }));
 
-			let request = federation::keys::get_keys::v1::Request { device_keys };
-
-			match services
+	let outcomes = fanout_with(
+		requests,
+		async |server, request| {
+			services
 				.federation
-				.execute_keys(server, request)
+				.execute_keys(&server, request)
 				.await
-			{
-				| Ok(response) =>
-					process_federation_response(
-						services,
-						sender_user,
-						allowed_signatures,
-						response,
-					)
-					.await,
-				| Err(e) => {
-					debug_warn!(%server, "key federation request failed: {e}");
-					failed()
-				},
-			}
-		})
-		.ready_fold(Keys::default(), Keys::merge)
-		.await
+		},
+		federation_opts(services),
+	)
+	.broad_then(async |outcome| {
+		process_federation_outcome(services, sender_user, allowed_signatures, outcome).await
+	});
+
+	let (keys, faults) = outcomes.merge(Keys::default(), Keys::merge).await;
+
+	Keys {
+		failures: federation_failures("get_keys", faults).collect(),
+		..keys
+	}
+}
+
+async fn process_federation_outcome<F>(
+	services: &Services,
+	sender_user: Option<&UserId>,
+	allowed_signatures: &F,
+	outcome: Outcome<FederationResponse>,
+) -> Outcome<Keys>
+where
+	F: Fn(&UserId) -> bool + Send + Sync,
+{
+	let Outcome { origin, elapsed, result } = outcome;
+	let result = match result {
+		| Err(fault) => Err(fault),
+		| Ok(response) => {
+			let keys =
+				process_federation_response(services, sender_user, allowed_signatures, response)
+					.await;
+
+			Ok(keys)
+		},
+	};
+
+	Outcome { origin, elapsed, result }
 }
 
 async fn process_federation_response<F>(
 	services: &Services,
 	sender_user: Option<&UserId>,
 	allowed_signatures: &F,
-	response: federation::keys::get_keys::v1::Response,
+	response: FederationResponse,
 ) -> Keys
 where
 	F: Fn(&UserId) -> bool + Send + Sync,
 {
-	let federation::keys::get_keys::v1::Response {
+	let FederationResponse {
 		master_keys,
 		self_signing_keys,
 		device_keys,

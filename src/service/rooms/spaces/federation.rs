@@ -1,4 +1,4 @@
-use futures::{StreamExt, pin_mut, stream::FuturesUnordered};
+use futures::StreamExt;
 use ruma::{
 	OwnedServerName, RoomId,
 	api::federation::space::{
@@ -7,13 +7,14 @@ use ruma::{
 	},
 	room::RoomType,
 };
-use tuwunel_core::{Err, Result, debug, implement};
+use tuwunel_core::{Err, Result, debug, implement, utils::IterStream};
 
 use super::{
 	Accessibility,
 	Accessibility::{Accessible, Inaccessible},
 	Identifier,
 };
+use crate::federation::feds::{Fault, Opts, OutcomeExt, Record};
 
 /// Gets the summary of a space using solely federation.
 #[implement(super::Service)]
@@ -35,38 +36,30 @@ pub(super) async fn get_summary_and_children_federation(
 		suggested_only: false,
 	};
 
-	let requests: FuturesUnordered<_> = via
-		.iter()
-		.map(|server| {
-			self.services
-				.federation
-				.execute(server, request.clone())
-		})
-		.collect();
-
-	pin_mut!(requests);
 	debug!(
 		?current_room,
 		?sender,
 		?via,
-		requests = requests.len(),
+		requests = via.len(),
 		"waiting for federation response"
 	);
+	let opts = Opts {
+		record: Record::Contribute,
+		..Default::default()
+	};
 
-	let mut response = None;
-	while let Some(result) = requests.next().await {
-		match result {
-			| Ok(ok_response) => {
-				debug!(?ok_response, "federation response");
-
-				response = Some(ok_response);
-				break;
-			},
-			| Err(error) => {
-				debug!(?error, "federation error");
-			},
-		}
-	}
+	let response = self
+		.services
+		.federation
+		.fanout_to(via.iter().cloned().stream(), move |_| request.clone(), opts)
+		.inspect(|outcome| match &outcome.result {
+			| Ok(response) => debug!(?response, "federation response"),
+			| Err(Fault::Error(error)) => debug!(?error, "federation error"),
+			| Err(fault) => debug!(?fault, "federation error"),
+		})
+		.first_acceptable(|_| true)
+		.await
+		.map(|(_, response)| response);
 
 	let Some(Response { room, children, inaccessible_children }) = response else {
 		self.cache_put(current_room, None);
