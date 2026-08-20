@@ -68,15 +68,9 @@
             inherit inputs;
             main = self.callPackage ./nix/pkgs/main { };
             oci-image = self.callPackage ./nix/pkgs/oci-image { };
-            tini = pkgs.tini.overrideAttrs {
-              # newer clang/gcc is unhappy with tini-static: <https://3.dog/~strawberry/pb/c8y4>
-              patches = [
-                (pkgs.fetchpatch {
-                  url = "https://patch-diff.githubusercontent.com/raw/krallin/tini/pull/224.patch";
-                  hash = "sha256-4bTfAhRyIT71VALhHY13hUgbjLEUyvgkIJMt3w9ag3k=";
-                })
-              ];
-            };
+            # tini comes from nixpkgs unmodified: it already carries the musl
+            # basename fix this used to patch in, plus the two that raise
+            # cmake_minimum_required for cmake 4.
             liburing = pkgs.liburing.overrideAttrs {
               # Tests weren't building
               outputs = [
