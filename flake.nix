@@ -1,4 +1,14 @@
 {
+  # Substituters offering prebuilt Tuwunel store paths. Nix only honours these
+  # for trusted users; everyone else is prompted to accept them, or can add the
+  # same values to nix.conf. See docs/deploying/nixos.md.
+  nixConfig = {
+    extra-substituters = [ "https://tuwunel.cachix.org" ];
+    extra-trusted-public-keys = [
+      "tuwunel.cachix.org-1:VRecUeDcaPxtYDA6bnMF3snPM7VYX8K605z4uuG2nWc="
+    ];
+  };
+
   inputs = {
     attic.url = "github:zhaofengli/attic?ref=main";
     cachix.url = "github:cachix/cachix?ref=master";

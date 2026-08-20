@@ -4,9 +4,56 @@ Tuwunel can be acquired by Nix from various places:
 
 * The `flake.nix` at the root of the repo
 * The `default.nix` at the root of the repo
-* From Tuwunel's binary cache
+* From Tuwunel's [binary cache](#binary-cache)
 
 A community maintained NixOS package is available at [`tuwunel`](https://search.nixos.org/packages?channel=unstable&show=tuwunel&from=0&size=50&sort=relevance&type=packages&query=tuwunel)
+
+### Binary cache
+
+Tuwunel publishes prebuilt store paths, so building from the flake does not
+have to compile RocksDB and the Rust toolchain locally. The cache is public
+and reading from it needs no account.
+
+* Substituter: `https://tuwunel.cachix.org`
+* Public key: `tuwunel.cachix.org-1:VRecUeDcaPxtYDA6bnMF3snPM7VYX8K605z4uuG2nWc=`
+
+On NixOS, add both to `nix.settings`:
+
+```nix
+{
+  nix.settings = {
+    extra-substituters = [ "https://tuwunel.cachix.org" ];
+    extra-trusted-public-keys = [
+      "tuwunel.cachix.org-1:VRecUeDcaPxtYDA6bnMF3snPM7VYX8K605z4uuG2nWc="
+    ];
+  };
+}
+```
+
+Everywhere else, put the same two settings in `/etc/nix/nix.conf` and restart
+the daemon:
+
+```ini
+extra-substituters = https://tuwunel.cachix.org
+extra-trusted-public-keys = tuwunel.cachix.org-1:VRecUeDcaPxtYDA6bnMF3snPM7VYX8K605z4uuG2nWc=
+```
+
+```bash
+sudo systemctl restart nix-daemon
+```
+
+With the `cachix` client installed, `cachix use tuwunel` writes that
+configuration for you.
+
+The repository flake also declares the cache in its `nixConfig`, so building
+from the flake offers the substituter without any of the above. Nix accepts
+that offer silently only for accounts listed in `trusted-users`; everyone else
+is prompted once per invocation, which is why a permanent deployment should
+set the values explicitly.
+
+A self-hosted cache at `cache.tuwunel.chat` is planned. It will be announced
+here with its own public key; the Cachix substituter above stays valid in the
+meantime.
 
 ### NixOS module
 
