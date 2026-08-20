@@ -499,7 +499,12 @@ fn set_output_owner(file: &File, origin: &Metadata, path: &Path) -> Result {
 }
 
 #[cfg(unix)]
-fn owner_error(error: &IoError, staged: &Metadata, origin: &Metadata, path: &Path) -> Error {
+pub(super) fn owner_error(
+	error: &IoError,
+	staged: &Metadata,
+	origin: &Metadata,
+	path: &Path,
+) -> Error {
 	let hint = (error.kind() == ErrorKind::PermissionDenied).copy_or(
 		"",
 		" Changing ownership requires privilege the service does not have, or a sandbox is \

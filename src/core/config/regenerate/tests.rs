@@ -3,6 +3,8 @@ use std::ffi::CString;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 use std::fs::rename;
 #[cfg(unix)]
+use std::io::{Error as IoError, ErrorKind};
+#[cfg(unix)]
 use std::os::unix::fs::{PermissionsExt as _, symlink};
 use std::{
 	env::{current_exe, temp_dir, var_os, vars_os},
@@ -25,6 +27,8 @@ use libc::{getxattr, setxattr};
 use smallvec::SmallVec;
 use toml::{Value, from_str, value::Table};
 
+#[cfg(unix)]
+use super::write::owner_error;
 #[cfg(target_os = "macos")]
 use super::write::path_cstring;
 use super::{
@@ -419,6 +423,29 @@ fn headerless_input_is_normalized_and_named_profiles_are_rejected() {
 			.to_string()
 			.contains("Unsupported configuration profiles: staging")
 	);
+}
+
+#[cfg(unix)]
+#[test]
+fn ownership_failure_reports_operands_and_hints_at_a_blocked_syscall() {
+	const HINT: &str = "blocking the chown syscall";
+
+	let temp = TempDir::new("owner");
+	let staged = temp.join("config.toml.tmp");
+
+	write(&staged, "").expect("staged file created");
+
+	let owner = metadata(&staged).expect("staged metadata");
+	let denied = IoError::from(ErrorKind::PermissionDenied);
+	let denied = owner_error(&denied, &owner, &owner, &staged).to_string();
+
+	assert!(denied.contains("uid"), "the message names the ownership operands");
+	assert!(denied.contains(HINT), "a permission failure names the possible causes");
+
+	let unsupported = IoError::from(ErrorKind::Unsupported);
+	let unsupported = owner_error(&unsupported, &owner, &owner, &staged).to_string();
+
+	assert!(!unsupported.contains(HINT), "the hint is limited to permission failures");
 }
 
 #[cfg(unix)]
