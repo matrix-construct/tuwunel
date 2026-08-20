@@ -31,25 +31,35 @@ Nix applies a flake's `nixConfig` without asking only for accounts in
 
 CI does not rely on `nixConfig`. The `nix-base` stage in
 `docker/Dockerfile.nix` appends the substituter and key to `/etc/nix/nix.conf`
-during image construction, because `build-nix` realises the tree through
-`default.nix`, where a flake's `nixConfig` has no effect. The values arrive as
+during image construction, because the stages that realise the tree through
+`default.nix` get no effect from a flake's `nixConfig`. The values arrive as
 the `nix_substituter` and `nix_public_key` build args, defaulted in
 `docker/bake.hcl`.
 
 ## Populating
 
-Two producers write to the cache. Both are inert without a token, so forks and
+Three producers write to the cache. All are inert without a token, so forks and
 pull requests degrade to read-only rather than failing.
 
 | Producer | Trigger | Scope |
 |---|---|---|
-| `build-nix` stage in `docker/Dockerfile.nix` | Every CI run of the `nix` and `smoke-nix` bake targets | The realised default package plus its full build closure |
+| `smoke-nix` stage in `docker/Dockerfile.nix` | Every branch push that runs the Smoke NixOS job | `all-features` plus its full build closure |
+| `nix-pkg` stage in `docker/Dockerfile.nix` | Tags, `main` and `test`, where distro packaging is enabled | The default package plus its full build closure |
 | `.github/workflows/nix.yml` | Version tags and manual dispatch | Every package and devShell the flake exposes for the runner's system |
 
-The in-bake push is the one that keeps CI fast: it uploads build dependencies
+The in-bake pushes are what keep CI fast: they upload build dependencies
 alongside the output, so a later run substitutes the toolchain and RocksDB
-instead of rebuilding them. It runs after `nix-build` succeeds and can never
-fail the build.
+instead of rebuilding them. All three call `docker/lib/cachix_push.sh`, which
+is installed into every layer by `docker/Dockerfile.system` next to
+`sched_wrap.sh` and stays a no-op until a token is mounted. A failed upload
+never fails the build that produced the paths.
+
+Note which stage runs when. `build-nix` is not a target any workflow invokes,
+and `nix-pkg` only runs where `is_fat` holds, so `smoke-nix` is the sole
+producer on an ordinary branch push. A push added to `build-nix` alone would
+never execute in CI, because bake's `inherits` copies target attributes rather
+than creating a stage dependency, and both other stages derive from
+`nix-base`.
 
 `nix.yml` is the publishing path. It enumerates attributes with
 `nix flake show` rather than hardcoding a list, so outputs added to the flake
@@ -81,8 +91,9 @@ main.yml  ->  test.yml     ->  bake.yml  ->  docker/bake.sh  ->  docker/bake.hcl
 
 `bake.sh` never passes the token as a build argument. It only sets
 `cachix_push` when the token is present in its environment; the token itself
-reaches the build as a BuildKit secret mount, declared on the `build-nix`
-target and read from `/run/secrets` inside the stage.
+reaches the build as a BuildKit secret mount, declared once on the `build-nix`
+bake target and inherited by `nix` and `smoke-nix`, then read from
+`/run/secrets` inside each stage.
 
 `cachix_push` deliberately participates in the layer cache key. Without it, a
 tokenless build could populate the cache entry for that layer and suppress the

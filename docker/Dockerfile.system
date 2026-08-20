@@ -31,7 +31,10 @@ EOF
 # stage has to copy them. Both build stages (cargo, rocksdb, nix) and runtime
 # testees (complement) reach this stage, so a single placement here serves the
 # whole tree; each is a transparent exec until its environment knobs are set.
+# The binary cache uploader follows the same rule: every nix stage calls it and
+# it stays a no-op until a token is mounted.
 COPY --link --chmod=0755 \
     docker/lib/sched_wrap.sh \
     docker/lib/perf_wrap.sh \
+    docker/lib/cachix_push.sh \
     /usr/local/bin/
