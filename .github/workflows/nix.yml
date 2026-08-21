@@ -31,7 +31,7 @@ on:
       max-parallel:
         type: number
         description: "Limit number of concurrent builds"
-        default: 4
+        default: 2
 
 permissions:
   contents: read
@@ -129,9 +129,12 @@ jobs:
 
     runs-on: ["${{inputs.machine || 'X64'}}", "${{inputs.runner || 'self-hosted'}}"]
 
+    # Deliberately low. This workflow shares the self-hosted pool with the
+    # release build, which takes priority; publishing the cache is background
+    # work and is allowed to take as long as it needs.
     strategy:
       fail-fast: false
-      max-parallel: ${{inputs.max-parallel || 4}}
+      max-parallel: ${{inputs.max-parallel || 2}}
       matrix:
         attr: ${{fromJSON(needs.discover.outputs.attrs)}}
 
