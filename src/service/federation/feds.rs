@@ -94,6 +94,18 @@ pub enum Fault {
 	/// The sweep deadline expired before dispatch.
 	NotAttempted,
 
+	/// Peer health suppressed dispatch until its current backoff expires.
+	Backoff {
+		/// Classification of the newest surviving peer failure.
+		class: Classification,
+
+		/// Age of the surviving failure streak.
+		age: Duration,
+
+		/// Remaining delay before the peer becomes eligible.
+		retry: Duration,
+	},
+
 	/// Federation transport or protocol failure.
 	Error(Error),
 }

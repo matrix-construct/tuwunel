@@ -113,6 +113,9 @@ pub(super) struct Streak {
 /// epoch.
 #[derive(Clone, Copy, Debug)]
 pub struct PeerBackoff {
+	/// Classification of the newest surviving failure.
+	pub class: Classification,
+
 	/// Newest failure instant, the backoff anchor.
 	pub anchor_secs: u64,
 
@@ -307,6 +310,7 @@ fn backoff(&self, run: Streak) -> Backoff {
 #[implement(super::Service)]
 fn peer_backoff_from(&self, streak: Streak) -> PeerBackoff {
 	PeerBackoff {
+		class: streak.class,
 		anchor_secs: streak.anchor_secs,
 		oldest_secs: streak
 			.oldest_bucket

@@ -199,6 +199,11 @@ pub(super) fn fault_message(fault: &Fault) -> Cow<'static, str> {
 	match fault {
 		| Fault::Elapsed => Cow::Borrowed("request deadline exceeded"),
 		| Fault::NotAttempted => Cow::Borrowed("sweep budget exhausted before dispatch"),
+		| Fault::Backoff { class, age, retry } => Cow::Owned(format!(
+			"peer backoff ({class:?}, age {}, retry {})",
+			Elapsed::from(*age),
+			Elapsed::from(*retry),
+		)),
 		| Fault::Error(error) => Cow::Owned(format!("{:?}: {}", error.kind(), error.message())),
 	}
 }

@@ -3,15 +3,18 @@ use std::{
 	collections::BTreeMap,
 	fmt::{Result as FmtResult, Write as _},
 	num::NonZeroUsize,
-	time::{Duration, Instant},
+	time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-use futures::StreamExt;
+use futures::{StreamExt, stream::iter};
 use ruma::{
 	OwnedRoomOrAliasId,
 	api::federation::discovery::get_server_version::v1::{Request, Response, Server},
 };
-use tuwunel_core::{Result, utils::time::Elapsed};
+use tuwunel_core::{
+	Result,
+	utils::{stream::ReadyExt, time::Elapsed},
+};
 use tuwunel_service::federation::feds::{Fault, Outcome};
 
 use super::{SweepArgs, fault_message, markdown_cell, prepare, render_total_time};
@@ -50,16 +53,62 @@ pub(super) async fn feds_version(
 	sweep: SweepArgs,
 ) -> Result {
 	let prepared = prepare(self, &room, sweep, WIDTH_DEFAULT).await?;
+	let backoffs = self.services.federation.peer_backoffs().await;
+	let now = SystemTime::now()
+		.duration_since(UNIX_EPOCH)
+		.unwrap_or_default()
+		.as_secs();
+
+	let (eligible, outcomes) = self
+		.services
+		.state_cache
+		.room_servers(&prepared.room_id)
+		.ready_filter(|server| {
+			!prepared.opts.exclude_self || !self.services.globals.server_is_ours(server)
+		})
+		.map(ToOwned::to_owned)
+		.ready_fold((Vec::new(), Vec::new()), |(mut eligible, mut outcomes), origin| {
+			let Some(backoff) = backoffs.get(&origin) else {
+				eligible.push(origin);
+				return (eligible, outcomes);
+			};
+
+			let retry_at = backoff
+				.anchor_secs
+				.saturating_add(backoff.delay_secs);
+
+			if retry_at <= now {
+				eligible.push(origin);
+				return (eligible, outcomes);
+			}
+
+			outcomes.push(Outcome {
+				origin,
+				elapsed: Duration::ZERO,
+				result: Err(Fault::Backoff {
+					class: backoff.class,
+					age: Duration::from_secs(now.saturating_sub(backoff.oldest_secs)),
+					retry: Duration::from_secs(retry_at.saturating_sub(now)),
+				}),
+			});
+
+			(eligible, outcomes)
+		})
+		.await;
+
 	let started = Instant::now();
-	let outcomes = self
+	let responses = self
 		.services
 		.federation
-		.for_room(&prepared.room_id, |_| Request::new(), prepared.opts)
+		.fanout_to(iter(eligible), |_| Request::new(), prepared.opts)
 		.map(|outcome| Outcome {
 			origin: outcome.origin,
 			elapsed: outcome.elapsed,
 			result: outcome.result.map(into_version),
-		})
+		});
+
+	let outcomes = iter(outcomes)
+		.chain(responses)
 		.collect::<Vec<_>>()
 		.await;
 
@@ -186,7 +235,7 @@ fn render_into(
 				outcome.origin,
 				Elapsed::from(outcome.elapsed),
 			)?,
-			| Err(fault @ Fault::NotAttempted) => writeln!(
+			| Err(fault @ (Fault::NotAttempted | Fault::Backoff { .. })) => writeln!(
 				output,
 				"| {} | | | {} |",
 				outcome.origin,
@@ -214,6 +263,7 @@ fn option_cell(value: Option<&str>) -> Cow<'_, str> {
 #[cfg(test)]
 mod tests {
 	use ruma::{ServerName, server_name};
+	use tuwunel_service::federation::Classification;
 
 	use super::*;
 
@@ -258,11 +308,23 @@ mod tests {
 	#[test]
 	fn detail_listing_is_opt_in_and_filters_by_request_result() {
 		let outcomes = || {
-			vec![success(server_name!("good.example"), "alpha"), Outcome {
-				origin: server_name!("bad.example").to_owned(),
-				elapsed: Duration::from_secs(1),
-				result: Err(Fault::Elapsed),
-			}]
+			vec![
+				success(server_name!("good.example"), "alpha"),
+				Outcome {
+					origin: server_name!("bad.example").to_owned(),
+					elapsed: Duration::from_secs(1),
+					result: Err(Fault::Elapsed),
+				},
+				Outcome {
+					origin: server_name!("backoff.example").to_owned(),
+					elapsed: Duration::ZERO,
+					result: Err(Fault::Backoff {
+						class: Classification::Transient,
+						age: Duration::from_secs(30),
+						retry: Duration::from_secs(10),
+					}),
+				},
+			]
 		};
 
 		let summary = render(outcomes(), Duration::ZERO, ListMode::None);
@@ -273,11 +335,17 @@ mod tests {
 
 		assert!(successes.contains("good.example"));
 		assert!(!successes.contains("bad.example"));
+		assert!(!successes.contains("backoff.example"));
+
+		let all = render(outcomes(), Duration::ZERO, ListMode::All);
+
+		assert!(all.contains("backoff.example"));
 
 		let errors = render(outcomes(), Duration::ZERO, ListMode::Errors);
 
 		assert!(!errors.contains("good.example"));
 		assert!(errors.contains("bad.example"));
+		assert!(errors.contains("backoff.example"));
 	}
 
 	fn success(origin: &ServerName, name: &str) -> VersionOutcome {

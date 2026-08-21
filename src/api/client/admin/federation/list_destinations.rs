@@ -128,7 +128,7 @@ mod tests {
 	use std::cmp::Ordering;
 
 	use ruma::{UInt, server_name, uint};
-	use tuwunel_service::federation::PeerBackoff;
+	use tuwunel_service::federation::{Classification, PeerBackoff};
 
 	use super::{
 		Destination, DestinationSortOrder, destination_from_backoff, destination_ordering,
@@ -148,6 +148,7 @@ mod tests {
 	#[test]
 	fn failing_destination_maps_seconds_to_millis() {
 		let backoff = PeerBackoff {
+			class: Classification::Transient,
 			anchor_secs: 10,
 			oldest_secs: 5,
 			delay_secs: 60,
@@ -164,6 +165,7 @@ mod tests {
 	#[test]
 	fn millis_saturates() {
 		let backoff = PeerBackoff {
+			class: Classification::Transient,
 			anchor_secs: u64::MAX,
 			oldest_secs: 0,
 			delay_secs: 0,
