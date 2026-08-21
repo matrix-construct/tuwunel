@@ -33,8 +33,23 @@ type ClassCounts<'a> = BTreeMap<&'a Version, usize>;
 type ClassNumbers<'a> = BTreeMap<&'a Version, usize>;
 type VersionOutcome = Outcome<Option<Version>>;
 
+#[derive(Clone, Copy)]
+enum ListMode {
+	None,
+	Successes,
+	All,
+	Errors,
+}
+
 #[admin_command]
-pub(super) async fn feds_version(&self, room: OwnedRoomOrAliasId, sweep: SweepArgs) -> Result {
+pub(super) async fn feds_version(
+	&self,
+	room: OwnedRoomOrAliasId,
+	list: bool,
+	list_all: bool,
+	list_errors: bool,
+	sweep: SweepArgs,
+) -> Result {
 	let prepared = prepare(self, &room, sweep, WIDTH_DEFAULT).await?;
 	let started = Instant::now();
 	let outcomes = self
@@ -51,7 +66,14 @@ pub(super) async fn feds_version(&self, room: OwnedRoomOrAliasId, sweep: SweepAr
 
 	let total = started.elapsed();
 
-	let output = render(outcomes, total);
+	let list_mode = match (list, list_all, list_errors) {
+		| (true, false, false) => ListMode::Successes,
+		| (false, true, false) => ListMode::All,
+		| (false, false, true) => ListMode::Errors,
+		| _ => ListMode::None,
+	};
+
+	let output = render(outcomes, total, list_mode);
 
 	self.write_str(&output).await
 }
@@ -79,17 +101,23 @@ fn into_version(response: Response) -> Option<Version> {
 	})
 }
 
-fn render(mut outcomes: Vec<VersionOutcome>, total: Duration) -> String {
+fn render(mut outcomes: Vec<VersionOutcome>, total: Duration, list_mode: ListMode) -> String {
 	outcomes.sort_by(|left, right| left.origin.cmp(&right.origin));
 
 	let mut output = String::new();
 
-	render_into(&mut output, &outcomes, total).expect("writing to a String cannot fail");
+	render_into(&mut output, &outcomes, total, list_mode)
+		.expect("writing to a String cannot fail");
 
 	output
 }
 
-fn render_into(output: &mut String, outcomes: &[VersionOutcome], total: Duration) -> FmtResult {
+fn render_into(
+	output: &mut String,
+	outcomes: &[VersionOutcome],
+	total: Duration,
+	list_mode: ListMode,
+) -> FmtResult {
 	let counts: ClassCounts<'_> = outcomes
 		.iter()
 		.filter_map(|outcome| {
@@ -147,9 +175,18 @@ fn render_into(output: &mut String, outcomes: &[VersionOutcome], total: Duration
 		)?;
 	}
 
+	if matches!(list_mode, ListMode::None) {
+		return render_total_time(output, total);
+	}
+
 	writeln!(output, "\n| origin | class | elapsed | fault |")?;
 	writeln!(output, "| :--- | ----: | ---: | :--- |")?;
-	for outcome in outcomes {
+	for outcome in outcomes.iter().filter(|outcome| match list_mode {
+		| ListMode::None => false,
+		| ListMode::Successes => outcome.result.is_ok(),
+		| ListMode::All => true,
+		| ListMode::Errors => outcome.result.is_err(),
+	}) {
 		match &outcome.result {
 			| Ok(Some(version)) => writeln!(
 				output,
@@ -211,7 +248,7 @@ mod tests {
 			},
 		];
 
-		let output = render(outcomes, Duration::ZERO);
+		let output = render(outcomes, Duration::ZERO, ListMode::All);
 		let popular = output
 			.find("| 1 | 2 | 2 | zeta |  |  |  |  |  |")
 			.expect("popular class should be rendered first");
@@ -234,6 +271,31 @@ mod tests {
 		assert!(
 			output.contains("| skipped.example | | | sweep budget exhausted before dispatch |")
 		);
+	}
+
+	#[test]
+	fn detail_listing_is_opt_in_and_filters_by_request_result() {
+		let outcomes = || {
+			vec![success(server_name!("good.example"), "alpha"), Outcome {
+				origin: server_name!("bad.example").to_owned(),
+				elapsed: Duration::from_secs(1),
+				result: Err(Fault::Elapsed),
+			}]
+		};
+
+		let summary = render(outcomes(), Duration::ZERO, ListMode::None);
+
+		assert!(!summary.contains("| origin |"));
+
+		let successes = render(outcomes(), Duration::ZERO, ListMode::Successes);
+
+		assert!(successes.contains("good.example"));
+		assert!(!successes.contains("bad.example"));
+
+		let errors = render(outcomes(), Duration::ZERO, ListMode::Errors);
+
+		assert!(!errors.contains("good.example"));
+		assert!(errors.contains("bad.example"));
 	}
 
 	fn success(origin: &ServerName, name: &str) -> VersionOutcome {

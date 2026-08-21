@@ -35,6 +35,18 @@ pub(crate) enum FedsCommand {
 	Version {
 		room: OwnedRoomOrAliasId,
 
+		/// List servers whose request did not produce an error.
+		#[arg(long, group = "version_list")]
+		list: bool,
+
+		/// List every server.
+		#[arg(long, group = "version_list")]
+		list_all: bool,
+
+		/// List servers whose request produced an error.
+		#[arg(long, group = "version_list")]
+		list_errors: bool,
+
 		#[command(flatten)]
 		sweep: SweepArgs,
 	},

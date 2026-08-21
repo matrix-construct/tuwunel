@@ -136,7 +136,7 @@ mod tests {
 
 	async fn query_version(services: &Services) -> Result {
 		let room_id = services.admin.get_admin_room().await?;
-		let command = format!("query feds version {room_id}");
+		let command = format!("query feds version {room_id} --list-all");
 		let output = command_output(services, command, "version").await?;
 
 		verify_version_output(output.as_str(), services.globals.server_name())

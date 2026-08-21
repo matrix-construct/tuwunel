@@ -12,6 +12,32 @@ fn command_width_defaults_match_request_costs() {
 }
 
 #[test]
+fn version_listing_modes_are_mutually_exclusive() {
+	for option in ["--list", "--list-all", "--list-errors"] {
+		AdminCommand::try_parse_from([
+			"admin",
+			"query",
+			"feds",
+			"version",
+			"!room:example.org",
+			option,
+		])
+		.expect("each version listing mode should parse independently");
+	}
+
+	AdminCommand::try_parse_from([
+		"admin",
+		"query",
+		"feds",
+		"version",
+		"!room:example.org",
+		"--list",
+		"--list-errors",
+	])
+	.expect_err("version listing modes should be mutually exclusive");
+}
+
+#[test]
 fn event_verification_defaults_on_and_switches_independently() {
 	assert_eq!(
 		event_verification(["admin", "query", "feds", "event", "$event:example.org"]),
