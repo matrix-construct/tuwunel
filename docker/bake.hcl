@@ -2052,7 +2052,7 @@ target "ingredients" {
     }
 }
 
-# Compile-relevant subset of source.
+# Source subset needed to build and test the workspace.
 target "source-rust" {
     name = elem("source-rust", [sys_name, sys_version, sys_target])
     tags = [
