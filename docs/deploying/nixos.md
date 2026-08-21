@@ -53,9 +53,11 @@ extra-trusted-public-keys = cache.tuwunel.chat-1:ZafUaXiRMozDa9N2SWim6EdzH0EEjWj
 sudo systemctl restart nix-daemon
 ```
 
-Listing a substituter that is unreachable is not fatal. Nix treats it as a
-cache miss, warns, and builds from source, so keeping both configured costs
-nothing if one is down.
+Nix falls through to another substituter or a source build when a cache returns
+HTTP 404 for a missing path. A reachable cache that returns HTTP 5xx is
+different: Nix treats that as a transfer error, retries it, and can fail the
+build. The Tuwunel cache therefore converts reverse-proxy backend failures to
+404 for narinfo and NAR reads while continuing to serve cached responses.
 
 With the `cachix` client installed, `cachix use tuwunel` writes the Cachix half
 of that configuration for you.
