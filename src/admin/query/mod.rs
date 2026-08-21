@@ -29,7 +29,10 @@ use self::{
 	room_timeline::RoomTimelineCommand, sending::SendingCommand, short::ShortCommand,
 	storage::StorageCommand, sync::SyncCommand, threepid::ThreepidCommand, users::UsersCommand,
 };
-use crate::admin_command_dispatch;
+use crate::{
+	admin_command_dispatch,
+	event_fetcher::{self as fetch, EventFetcherCommand},
+};
 
 #[admin_command_dispatch]
 #[derive(Debug, Subcommand)]
@@ -46,6 +49,10 @@ pub(super) enum QueryCommand {
 	/// - federation fanout diagnostics
 	#[command(subcommand)]
 	Feds(FedsCommand),
+
+	/// - Drive the federation event-fetcher service directly (diagnostic)
+	#[command(subcommand)]
+	Fetch(EventFetcherCommand),
 
 	/// - presence.rs iterators and getters
 	#[command(subcommand)]

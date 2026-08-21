@@ -5,7 +5,6 @@ mod database_stats;
 mod delete_forward_extremities;
 mod dump_pdus;
 mod echo;
-mod event_fetcher;
 mod first_pdu_in_room;
 mod force_device_list_updates;
 mod force_set_room_state_from_server;
@@ -44,8 +43,11 @@ use ruma::{OwnedEventId, OwnedRoomId, OwnedRoomOrAliasId, OwnedServerName};
 use tuwunel_core::Result;
 use tuwunel_service::rooms::short::ShortRoomId;
 
-use self::{event_fetcher::EventFetcherCommand, tester::TesterCommand};
-use crate::admin_command_dispatch;
+use self::tester::TesterCommand;
+use crate::{
+	admin_command_dispatch,
+	event_fetcher::{self, EventFetcherCommand},
+};
 
 #[admin_command_dispatch]
 #[derive(Debug, Subcommand)]
@@ -340,6 +342,7 @@ pub(super) enum DebugCommand {
 
 	/// - Drive the federation event-fetcher service directly (diagnostic)
 	#[command(subcommand)]
+	#[clap(hide = true)]
 	EventFetcher(EventFetcherCommand),
 
 	/// - Developer test stubs
