@@ -2,6 +2,7 @@ use std::{
 	cmp::Ordering,
 	collections::BTreeMap,
 	fmt::{Result as FmtResult, Write as _},
+	num::NonZeroUsize,
 	time::{Duration, Instant},
 };
 
@@ -24,6 +25,8 @@ use super::{
 };
 use crate::admin_command;
 
+pub(super) const WIDTH_DEFAULT: NonZeroUsize = NonZeroUsize::new(192).expect("192 is nonzero");
+
 type Extremities = SmallVec<[OwnedEventId; 1]>;
 
 #[derive(Deserialize)]
@@ -42,7 +45,7 @@ pub(super) async fn feds_head(
 	probe_user: Option<OwnedUserId>,
 	sweep: SweepArgs,
 ) -> Result {
-	let prepared = prepare(self, &room, sweep).await?;
+	let prepared = prepare(self, &room, sweep, WIDTH_DEFAULT).await?;
 	let probe_user = match probe_user {
 		| Some(probe_user) => probe_user,
 		| None =>

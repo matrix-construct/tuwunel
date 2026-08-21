@@ -4,6 +4,14 @@ use super::*;
 use crate::{admin::AdminCommand, query::QueryCommand};
 
 #[test]
+fn command_width_defaults_match_request_costs() {
+	assert_eq!(version::WIDTH_DEFAULT.get(), 192);
+	assert_eq!(event::WIDTH_DEFAULT.get(), 192);
+	assert_eq!(head::WIDTH_DEFAULT.get(), 192);
+	assert_eq!(state::WIDTH_DEFAULT.get(), 16);
+}
+
+#[test]
 fn event_verification_defaults_on_and_switches_independently() {
 	assert_eq!(
 		event_verification(["admin", "query", "feds", "event", "$event:example.org"]),
@@ -66,7 +74,14 @@ fn event_room_and_sweep_options_parse_after_event_id() {
 	};
 
 	assert_eq!(room.as_str(), "!room:example.org");
-	assert_eq!(sweep.width.get(), 3);
+	assert_eq!(
+		sweep
+			.width
+			.expect("explicit width should be present")
+			.get(),
+		3
+	);
+
 	assert_eq!(sweep.timeout, 4);
 	assert_eq!(sweep.budget, 5);
 	assert!(sweep.no_loopback);

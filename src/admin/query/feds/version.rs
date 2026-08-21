@@ -2,6 +2,7 @@ use std::{
 	borrow::Cow,
 	collections::BTreeMap,
 	fmt::{Result as FmtResult, Write as _},
+	num::NonZeroUsize,
 	time::{Duration, Instant},
 };
 
@@ -15,6 +16,8 @@ use tuwunel_service::federation::feds::{Fault, Outcome};
 
 use super::{SweepArgs, fault_message, markdown_cell, prepare, render_total_time};
 use crate::admin_command;
+
+pub(super) const WIDTH_DEFAULT: NonZeroUsize = NonZeroUsize::new(192).expect("192 is nonzero");
 
 #[derive(Eq, Ord, PartialEq, PartialOrd)]
 struct Version {
@@ -32,7 +35,7 @@ type VersionOutcome = Outcome<Option<Version>>;
 
 #[admin_command]
 pub(super) async fn feds_version(&self, room: OwnedRoomOrAliasId, sweep: SweepArgs) -> Result {
-	let prepared = prepare(self, &room, sweep).await?;
+	let prepared = prepare(self, &room, sweep, WIDTH_DEFAULT).await?;
 	let started = Instant::now();
 	let outcomes = self
 		.services

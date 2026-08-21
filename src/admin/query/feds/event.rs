@@ -2,6 +2,7 @@ use std::{
 	cmp::Ordering,
 	collections::BTreeMap,
 	fmt::{Result as FmtResult, Write as _},
+	num::NonZeroUsize,
 	time::{Duration, Instant},
 };
 
@@ -27,6 +28,8 @@ use tuwunel_service::federation::feds::{Fault, Outcome};
 use super::{SweepArgs, fault_message, markdown_cell, prepare, render_total_time};
 use crate::{Context, admin_command};
 
+pub(super) const WIDTH_DEFAULT: NonZeroUsize = NonZeroUsize::new(192).expect("192 is nonzero");
+
 type SigningKeys = BTreeMap<OwnedServerName, Vec<OwnedServerSigningKeyId>>;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -50,7 +53,8 @@ pub(super) async fn feds_event(
 	verify_signature: bool,
 	sweep: SweepArgs,
 ) -> Result {
-	let validation_width = sweep.width.get();
+	let validation_width = sweep.width.unwrap_or(WIDTH_DEFAULT).get();
+
 	let room = match room {
 		| Some(room) => room,
 		| None => self
@@ -68,7 +72,7 @@ pub(super) async fn feds_event(
 			.into(),
 	};
 
-	let prepared = prepare(self, &room, sweep).await?;
+	let prepared = prepare(self, &room, sweep, WIDTH_DEFAULT).await?;
 
 	let room_version = self
 		.services

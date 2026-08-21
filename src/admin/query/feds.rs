@@ -111,8 +111,8 @@ pub(crate) enum FedsCommand {
 #[derive(Clone, Copy, Debug, Args)]
 pub(crate) struct SweepArgs {
 	/// Maximum requests in flight.
-	#[arg(long, default_value = "16")]
-	width: NonZeroUsize,
+	#[arg(long)]
+	width: Option<NonZeroUsize>,
 
 	/// Per-destination deadline in seconds.
 	#[arg(long, default_value_t = 10)]
@@ -140,6 +140,7 @@ pub(super) async fn prepare(
 	context: &Context<'_>,
 	room: &OwnedRoomOrAliasId,
 	sweep: SweepArgs,
+	default_width: NonZeroUsize,
 ) -> Result<Prepared> {
 	if !context.services.server.config.allow_federation {
 		return Err!("Federation is disabled on this homeserver.");
@@ -172,7 +173,7 @@ pub(super) async fn prepare(
 	writeln!(context, "Querying {destinations} servers in {room_id}.\n").await?;
 
 	let opts = Opts {
-		width: Some(sweep.width),
+		width: Some(sweep.width.unwrap_or(default_width)),
 		timeout: Some(Duration::from_secs(sweep.timeout)),
 		sweep_deadline: Some(Duration::from_secs(sweep.budget)),
 		exclude_self: sweep.no_loopback,

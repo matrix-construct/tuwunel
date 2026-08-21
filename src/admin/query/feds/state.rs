@@ -3,6 +3,7 @@ use std::{
 	collections::BTreeMap,
 	fmt::{Error as FmtError, Write as _},
 	iter::once,
+	num::NonZeroUsize,
 	time::{Duration, Instant},
 };
 
@@ -19,6 +20,8 @@ use super::{
 	sorted_event_id_difference,
 };
 use crate::admin_command;
+
+pub(super) const WIDTH_DEFAULT: NonZeroUsize = NonZeroUsize::new(16).expect("16 is nonzero");
 
 type RenderResult<T = ()> = Result<T, FmtError>;
 type SetClass<'a> = (&'a [OwnedEventId], &'a Origins);
@@ -60,7 +63,7 @@ pub(super) async fn feds_state(
 	full: bool,
 	sweep: SweepArgs,
 ) -> CoreResult {
-	let prepared = prepare(self, &room, sweep).await?;
+	let prepared = prepare(self, &room, sweep, WIDTH_DEFAULT).await?;
 	let event_id = match at {
 		| Some(event_id) => event_id,
 		| None =>
