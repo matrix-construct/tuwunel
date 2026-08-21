@@ -87,6 +87,13 @@ optional on the self-hosted pool. Nix 2.30 moved build directories under
 belongs to the runner user, so every build fails with a permission error while
 evaluation keeps working and hides the cause.
 
+Nix builds run the unit tests but not the integration ones. The targets under
+`src/main/tests` each boot a server, and a Nix builder has no network, denies
+`io_uring`, and offers no resolver configuration, so they cannot run there. The
+`unit` and `integ` CI jobs cover them with those things available. What the Nix
+check phase is for is confirming that the nixpkgs-linked build of our own crates
+works at all, and the unit tests do that.
+
 A full pass is expensive. The flake currently exposes 54 packages per system,
 including cross-compiled static binaries, OCI images, and debug variants, and
 each matrix entry is its own job. Use the `attrs` dispatch input to publish a
