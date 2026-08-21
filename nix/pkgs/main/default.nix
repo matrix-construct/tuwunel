@@ -196,7 +196,14 @@ let
     # profile instead, matching the profile the unit and integ jobs use.
     # Full-server integration binaries are large enough that concurrent links
     # can exhaust memory and drive the builder into swap.
-    cargoTestCommand = "cargo test -j 1";
+    #
+    # Only the unit tests run here. The 41 integration targets under
+    # src/main/tests each boot a server, which a nix builder cannot support: it
+    # has no network, denies io_uring, and offers no resolver configuration. The
+    # unit and integ CI jobs run them with those things available. What is left
+    # is what the check phase is actually useful for, confirming that the
+    # nixpkgs-linked build of our own crates works.
+    cargoTestCommand = "cargo test --lib --bins -j 1";
     RUST_TEST_THREADS = "1";
 
     cargoExtraArgs =
