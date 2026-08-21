@@ -4,6 +4,9 @@ on:
   push:
     tags:
       - "v*"
+      # Prerelease tags are deliberately excluded. A COPR build lands in the
+      # public repo on success, and a prerelease version still outranks the
+      # last stable release, so dnf would upgrade users into it.
       - "!v*-*"
 
   workflow_dispatch:
