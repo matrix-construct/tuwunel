@@ -19,11 +19,10 @@ use crate::admin_command;
 
 pub(super) const WIDTH_DEFAULT: NonZeroUsize = NonZeroUsize::new(192).expect("192 is nonzero");
 
-#[derive(Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Default, Eq, Ord, PartialEq, PartialOrd)]
 struct Version {
 	name: Option<String>,
 	version: Option<String>,
-	commit: Option<String>,
 	compiler: Option<String>,
 	kernel: Option<String>,
 	arch: Option<String>,
@@ -81,23 +80,10 @@ pub(super) async fn feds_version(
 fn into_version(response: Response) -> Option<Version> {
 	response.server.map(|server| {
 		let Server {
-			name,
-			version,
-			commit,
-			compiler,
-			kernel,
-			arch,
-			..
+			name, version, compiler, kernel, arch, ..
 		} = server;
 
-		Version {
-			name,
-			version,
-			commit,
-			compiler,
-			kernel,
-			arch,
-		}
+		Version { name, version, compiler, kernel, arch }
 	})
 }
 
@@ -153,22 +139,18 @@ fn render_into(
 			.then_with(|| left_version.cmp(right_version))
 	});
 
-	writeln!(
-		output,
-		"| rank | class | servers | name | version | commit | compiler | kernel | arch |"
-	)?;
-	writeln!(output, "| ---: | ----: | ------: | :--- | :--- | :--- | :--- | :--- | :--- |",)?;
+	writeln!(output, "| rank | class | servers | name | version | compiler | kernel | arch |")?;
+	writeln!(output, "| ---: | ----: | ------: | :--- | :--- | :--- | :--- | :--- |",)?;
 
 	for (rank, (class, version, count)) in classes.iter().enumerate() {
 		writeln!(
 			output,
-			"| {} | {} | {} | {} | {} | {} | {} | {} | {} |",
+			"| {} | {} | {} | {} | {} | {} | {} | {} |",
 			rank.saturating_add(1),
 			class,
 			count,
 			option_cell(version.name.as_deref()),
 			option_cell(version.version.as_deref()),
-			option_cell(version.commit.as_deref()),
 			option_cell(version.compiler.as_deref()),
 			option_cell(version.kernel.as_deref()),
 			option_cell(version.arch.as_deref()),
@@ -250,11 +232,11 @@ mod tests {
 
 		let output = render(outcomes, Duration::ZERO, ListMode::All);
 		let popular = output
-			.find("| 1 | 2 | 2 | zeta |  |  |  |  |  |")
+			.find("| 1 | 2 | 2 | zeta |  |  |  |  |")
 			.expect("popular class should be rendered first");
 
 		let rare = output
-			.find("| 2 | 1 | 1 | alpha |  |  |  |  |  |")
+			.find("| 2 | 1 | 1 | alpha |  |  |  |  |")
 			.expect("rare class should be rendered second");
 
 		assert!(popular < rare, "larger classes should precede smaller classes");
@@ -301,11 +283,7 @@ mod tests {
 	fn success(origin: &ServerName, name: &str) -> VersionOutcome {
 		let version = Version {
 			name: Some(name.to_owned()),
-			version: None,
-			commit: None,
-			compiler: None,
-			kernel: None,
-			arch: None,
+			..Default::default()
 		};
 
 		Outcome {
