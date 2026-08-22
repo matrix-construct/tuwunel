@@ -23,8 +23,9 @@ use crate::Services;
 /// Global marker recording the scan and repair reached a verdict.
 ///
 /// A decline stamps it like a settled repair, so no residue causes a
-/// rescan on later boots; only an error leaves it unwritten, and an
-/// error fails the boot.
+/// rescan on later boots; the decline's counters become the value where
+/// a settled repair leaves it empty. Only an error leaves it unwritten,
+/// and an error fails the boot. Every reader tests presence only.
 static MARKER: &[u8] = b"fix_short_injectivity";
 
 /// Global marker recording the one-time auth chain cache clear.
@@ -40,13 +41,48 @@ static CLEAR_MARKER: &[u8] = b"clear_auth_chain_cache";
 /// settled residue or declines one that remains healable.
 const PASSES: usize = 3;
 
+/// The verdict [`repair`] reaches; the caller stamps [`MARKER`] on any
+/// verdict.
+///
+/// Only an error escapes without a verdict, leaving the marker unwritten
+/// and failing the boot.
+enum Verdict {
+	Settled,
+	Declined(Reason),
+}
+
+/// Why a repair declined, numbered for the decline record.
+///
+/// The reason decides which counters of the record were measured: an
+/// unverifiable scan measured nothing past the counter, a healable or
+/// family-anomalous verdict measured the families only, and a deep
+/// anomaly measured everything.
+enum Reason {
+	Unverifiable = 1,
+	Healable = 2,
+	FamilyAnomalous = 3,
+	DeepAnomalous = 4,
+}
+
+impl From<Reason> for u64 {
+	fn from(reason: Reason) -> Self {
+		match reason {
+			| Reason::Unverifiable => 1,
+			| Reason::Healable => 2,
+			| Reason::FamilyAnomalous => 3,
+			| Reason::DeepAnomalous => 4,
+		}
+	}
+}
+
 /// Runs the one-time chain cache clear, then the injectivity scan, heal,
 /// and repair behind [`MARKER`].
 ///
 /// The clear takes [`CLEAR_MARKER`] and runs ahead of the early return, so
 /// a database that already completed the repair still discards its chains.
-/// The stamp follows any verdict, a decline included; only an error leaves
-/// it unwritten and fails the boot. A heal rescans rather than repairing,
+/// The stamp follows any verdict: a settled repair stamps the empty value,
+/// a decline stamps its counters, and only an error leaves the marker
+/// unwritten and fails the boot. A heal rescans rather than repairing,
 /// because it changes the losers and winners the repair consumes.
 #[tracing::instrument(level = "debug", skip_all)]
 pub(super) async fn fix(services: &Services) -> Result {
@@ -80,8 +116,10 @@ pub(super) async fn fix(services: &Services) -> Result {
 			continue;
 		}
 
-		repair(services, &residue, chains_cleared_this_boot).await?;
-		global.insert(MARKER, []);
+		match repair(services, &residue, chains_cleared_this_boot).await? {
+			| Verdict::Settled => global.insert(MARKER, []),
+			| Verdict::Declined(reason) => global.raw_put(MARKER, residue.decline_record(reason)),
+		}
 
 		break;
 	}

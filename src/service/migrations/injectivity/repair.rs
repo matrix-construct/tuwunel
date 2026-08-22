@@ -9,7 +9,7 @@ use tuwunel_core::{
 use tuwunel_database::{Map, Txn};
 
 use super::{
-	clear_chains,
+	Reason, Verdict, clear_chains,
 	scan::{Family, Scan, short_of},
 };
 use crate::{
@@ -122,14 +122,14 @@ fn heal_family(txn: &mut Txn, reverse: &Map, forward: &Map, family: &Family) -> 
 /// The cache-clearing lane runs when the deep scan finds dirt or a verdict
 /// skips that scan, and is unconditionally safe. The destructive lane runs
 /// only when no anomaly impugned the scan. A decline logs its residue and
-/// returns like a settled repair, since the caller stamps on any verdict;
-/// only an error withholds the stamp.
+/// names its reason, so the caller's stamp records the counters; only an
+/// error withholds the stamp.
 #[tracing::instrument(level = "debug", skip_all)]
 pub(super) async fn repair(
 	services: &Services,
 	scan: &Scan,
 	chains_cleared_this_boot: bool,
-) -> Result {
+) -> Result<Verdict> {
 	let healable = scan.healable();
 	let family_anomalous = scan.family_anomalous();
 	let needs_chain_clear = scan.unverifiable || healable || family_anomalous;
@@ -144,7 +144,7 @@ pub(super) async fn repair(
 	}
 
 	if scan.unverifiable {
-		return Ok(());
+		return Ok(Verdict::Declined(Reason::Unverifiable));
 	}
 
 	if scan.strays > 0 {
@@ -173,10 +173,11 @@ pub(super) async fn repair(
 			dangling_statekeys = scan.statekeys.dangling.len(),
 			promotable_events = scan.events.promotable.len(),
 			promotable_statekeys = scan.statekeys.promotable.len(),
-			"Short id heals did not settle; refusing the repair while residue stays healable."
+			"Refusing the destructive short id repair; the heal passes did not settle. The \
+			 residue is recorded and left in place. Please report this line upstream."
 		);
 
-		return Ok(());
+		return Ok(Verdict::Declined(Reason::Healable));
 	}
 
 	if family_anomalous {
@@ -195,13 +196,13 @@ pub(super) async fn repair(
 			 shape. The residue is recorded and left in place. Please report this line upstream."
 		);
 
-		return Ok(());
+		return Ok(Verdict::Declined(Reason::FamilyAnomalous));
 	}
 
 	if scan.events.losers.is_empty() && scan.statekeys.losers.is_empty() {
 		info!("Short id mappings verified injective.");
 
-		return Ok(());
+		return Ok(Verdict::Settled);
 	}
 
 	if scan.anomalous() {
@@ -215,14 +216,14 @@ pub(super) async fn repair(
 			 upstream."
 		);
 
-		return Ok(());
+		return Ok(Verdict::Declined(Reason::DeepAnomalous));
 	}
 
 	patch_statediffs(services, scan).await?;
 	move_keys(services, scan).await?;
 	delete_losers(services, scan);
 
-	Ok(())
+	Ok(Verdict::Settled)
 }
 
 /// Patches the ghost halves of infected statediff entries to their winners.

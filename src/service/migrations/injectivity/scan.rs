@@ -7,7 +7,9 @@ use std::{
 use futures::StreamExt;
 use serde::Deserialize;
 use tuwunel_core::{
-	Result, err, implement, info,
+	Result,
+	arrayvec::ArrayVec,
+	err, implement, info,
 	smallvec::SmallVec,
 	utils::{
 		BoolExt, ReadyExt, TryReadyExt,
@@ -17,6 +19,7 @@ use tuwunel_core::{
 };
 use tuwunel_database::{Database, Get, Handle, Map, SEP};
 
+use super::Reason;
 use crate::{
 	Services,
 	rooms::{pdu_metadata::typed_relations::Key as RelationKey, state_compressor::StateDiff},
@@ -71,6 +74,28 @@ enum Resolved {
 /// reports unverifiable instead.
 const MAX_SHORT: u64 = 1 << 30;
 
+/// Format word leading every decline record.
+///
+/// A reader finding any other value here must treat the remaining words
+/// as opaque rather than assume this layout.
+const RECORD_FORMAT: u64 = 1;
+
+/// The counters a declined repair stamps as the marker value.
+///
+/// Twenty-two words: the format, the reason, the global counter, seven
+/// counts per family (rows, losers, dangling, promotable, contended,
+/// unresolved, malformed) for events then statekeys, and the five deep
+/// counts (infected, infected parents, orphans, malformed diffs,
+/// colliding diffs). The reason alone decides which words were measured:
+/// an
+/// unverifiable scan measured nothing past the counter, a healable or
+/// family-anomalous verdict measured the families only, and only a deep
+/// decline measured everything, so an unmeasured zero is no measurement.
+/// A nonzero malformed-diffs word also voids the colliding word, whose
+/// census skips impeached framing. The value serializer packs the words
+/// as contiguous big-endian bytes.
+pub(super) type DeclineRecord = ArrayVec<u64, 22>;
+
 /// One family's residue: its losers, their winners, the rows a heal pass
 /// completes, and the counts that impugn the scan.
 ///
@@ -97,6 +122,7 @@ pub(super) struct Family {
 /// reading the deeper indexes.
 #[derive(Default)]
 pub(super) struct Scan {
+	pub(super) counter: u64,
 	pub(super) events: Family,
 	pub(super) statekeys: Family,
 	pub(super) dirty: u64,
@@ -166,7 +192,11 @@ pub(super) async fn scan(services: &Services) -> Result<Scan> {
 			%counter,
 			"Short id space too large to verify injectivity; refusing the destructive repair."
 		);
-		return Ok(Scan { unverifiable: true, ..Default::default() });
+		return Ok(Scan {
+			counter,
+			unverifiable: true,
+			..Default::default()
+		});
 	}
 
 	let words = usize::try_from((counter / 64).saturating_add(1))
@@ -180,10 +210,20 @@ pub(super) async fn scan(services: &Services) -> Result<Scan> {
 			.await?;
 
 	if events.losers.is_empty() && statekeys.losers.is_empty() {
-		return Ok(Scan { events, statekeys, ..Default::default() });
+		return Ok(Scan {
+			counter,
+			events,
+			statekeys,
+			..Default::default()
+		});
 	}
 
-	let families = Scan { events, statekeys, ..Default::default() };
+	let families = Scan {
+		counter,
+		events,
+		statekeys,
+		..Default::default()
+	};
 
 	// Both a heal and a family anomaly decide the boot without a deep
 	// count, so neither pays for one.
@@ -204,6 +244,7 @@ pub(super) async fn scan(services: &Services) -> Result<Scan> {
 	};
 
 	Ok(Scan {
+		counter,
 		events,
 		statekeys,
 		colliding_diffs,
@@ -242,6 +283,44 @@ pub(super) fn family_anomalous(&self) -> bool {
 /// changes the losers and winners every deeper measure is taken against.
 #[implement(Scan)]
 pub(super) fn healable(&self) -> bool { self.events.healable() || self.statekeys.healable() }
+
+/// Packs the verdict's counters into the value a decline stamps.
+///
+/// The record outlives the boot log, handing a follow-up migration and
+/// any support thread the counters as they stood before the stamp.
+/// [`DeclineRecord`] owns the layout; a length past the integer range
+/// saturates rather than wrapping.
+#[implement(Scan)]
+pub(super) fn decline_record(&self, reason: Reason) -> DeclineRecord {
+	let count = |len: usize| u64::try_from(len).unwrap_or(u64::MAX);
+
+	let record: [u64; 22] = [
+		RECORD_FORMAT,
+		reason.into(),
+		self.counter,
+		self.events.rows,
+		count(self.events.losers.len()),
+		count(self.events.dangling.len()),
+		count(self.events.promotable.len()),
+		self.events.contended,
+		self.events.unresolved,
+		self.events.malformed,
+		self.statekeys.rows,
+		count(self.statekeys.losers.len()),
+		count(self.statekeys.dangling.len()),
+		count(self.statekeys.promotable.len()),
+		self.statekeys.contended,
+		self.statekeys.unresolved,
+		self.statekeys.malformed,
+		count(self.infected.len()),
+		self.infected_parents,
+		self.orphans,
+		self.malformed_diffs,
+		self.colliding_diffs,
+	];
+
+	record.into()
+}
 
 /// Whether this family carries a shape the repair does not handle.
 ///
@@ -890,10 +969,11 @@ mod tests {
 	use std::{collections::BTreeSet, sync::Arc};
 
 	use tuwunel_core::err;
+	use tuwunel_database::serialize_to_vec;
 
 	use super::{
-		Candidate, Counts, Diffs, Family, Identity, Resolved, Scan, StateDiff, by_identity,
-		by_short, contenders, intersecting, resolution,
+		Candidate, Counts, Diffs, Family, Identity, Reason, Resolved, Scan, StateDiff,
+		by_identity, by_short, contenders, intersecting, resolution,
 	};
 
 	fn candidate(short: u64, identity: &[u8]) -> Candidate {
@@ -1051,6 +1131,74 @@ mod tests {
 		};
 
 		assert!(!intersecting(&diff));
+	}
+
+	#[test]
+	fn a_decline_record_serializes_as_contiguous_be_words() {
+		let scan = Scan {
+			counter: 7,
+			colliding_diffs: 9,
+			..Default::default()
+		};
+
+		let record = scan.decline_record(Reason::Unverifiable);
+		let bytes = serialize_to_vec(&record).expect("record serializes");
+
+		let expected: Vec<u8> = record
+			.iter()
+			.flat_map(|word| word.to_be_bytes())
+			.collect();
+
+		assert_eq!(bytes, expected);
+		assert_eq!(bytes.len(), 22 * 8);
+	}
+
+	#[test]
+	fn a_decline_record_packs_the_counters_in_layout_order() {
+		let scan = Scan {
+			counter: 2,
+			events: Family {
+				rows: 10,
+				losers: vec![0; 11],
+				dangling: vec![candidate(0, b"$a"); 12],
+				promotable: vec![candidate(0, b"$a"); 13],
+				contended: 14,
+				unresolved: 15,
+				malformed: 16,
+				..Default::default()
+			},
+			statekeys: Family {
+				rows: 20,
+				losers: vec![0; 21],
+				dangling: vec![candidate(0, b"$a"); 22],
+				promotable: vec![candidate(0, b"$a"); 23],
+				contended: 24,
+				unresolved: 25,
+				malformed: 26,
+				..Default::default()
+			},
+			infected: (0..30).collect(),
+			infected_parents: 31,
+			orphans: 32,
+			malformed_diffs: 33,
+			colliding_diffs: 34,
+			..Default::default()
+		};
+
+		let record = scan.decline_record(Reason::DeepAnomalous);
+		let expected: [u64; 22] = [
+			1, 4, 2, 10, 11, 12, 13, 14, 15, 16, 20, 21, 22, 23, 24, 25, 26, 30, 31, 32, 33, 34,
+		];
+
+		assert_eq!(record.as_slice(), expected.as_slice());
+	}
+
+	#[test]
+	fn decline_reasons_keep_their_record_numbers() {
+		assert_eq!(u64::from(Reason::Unverifiable), 1);
+		assert_eq!(u64::from(Reason::Healable), 2);
+		assert_eq!(u64::from(Reason::FamilyAnomalous), 3);
+		assert_eq!(u64::from(Reason::DeepAnomalous), 4);
 	}
 
 	#[test]
