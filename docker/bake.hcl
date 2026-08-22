@@ -229,10 +229,17 @@ dynamic_libs = [
     "-C link-arg=-lm",
 ]
 
+# The next-generation trait solver became the nightly default in
+# nightly-2026-08-22 (rust-lang/rust#160895). It overflows the recursion limit
+# in tuwunel_service and tuwunel_api, ICEs clippy's large_futures lint on
+# tuwunel_core, and ICEs MIR validation at every async_noinline site. Selecting
+# "coherence" restores the solver every prior release used, leaving the new one
+# where it has long been the default. Drop this once those are fixed upstream.
 nightly_rustflags = [
     "--cfg tokio_unstable",
     "--allow=unstable-features",
     "-Z enforce-type-length-limit",
+    "-Z next-solver=coherence",
 ]
 
 dynamic_nightly_rustflags = [
