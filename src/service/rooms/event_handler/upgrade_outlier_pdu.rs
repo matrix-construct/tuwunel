@@ -1,6 +1,6 @@
 use std::{borrow::Borrow, collections::HashMap, iter::once, sync::Arc, time::Instant};
 
-use futures::{FutureExt, StreamExt, TryFutureExt};
+use futures::{FutureExt, StreamExt};
 use ruma::{
 	CanonicalJsonObject, EventId, OwnedEventId, RoomId, RoomVersionId, ServerName,
 	events::StateEventType, room_version_rules::RoomVersionRules,
@@ -24,7 +24,7 @@ use super::{
 use crate::rooms::{
 	state::{RoomMutexGuard, Trigger, prune_goal},
 	state_compressor::{CompressedState, HashSetCompressStateEvent},
-	state_res::auth_check,
+	state_res::{AuthCheckOutcome, auth_check},
 	timeline::RawPduId,
 };
 
@@ -124,7 +124,7 @@ pub(super) async fn upgrade_outlier_to_timeline_pdu(
 	// 14. Check if the event passes auth based on the current room state.
 	let soft_fail_current_state = !self
 		.current_state_auth_passes(room_id, &incoming_pdu, &room_rules)
-		.await;
+		.await?;
 
 	let soft_fail = soft_fail_pre || soft_fail_current_state;
 
@@ -267,9 +267,9 @@ async fn current_state_auth_passes(
 	room_id: &RoomId,
 	incoming_pdu: &PduEvent,
 	room_rules: &RoomVersionRules,
-) -> bool {
+) -> Result<bool> {
 	trace!("Gathering current-state auth events.");
-	let Ok(auth_events) = self
+	let auth_events = self
 		.services
 		.state
 		.get_auth_events(
@@ -281,33 +281,26 @@ async fn current_state_auth_passes(
 			&room_rules.authorization,
 			true,
 		)
-		.await
-		.inspect_err(|error| {
-			warn!(
-				auth_leg = "current_state",
-				event_id = %incoming_pdu.event_id(),
-				%room_id,
-				%error,
-				"Current-state auth event lookup failed; soft-failing event.",
-			);
-		})
-	else {
-		return false;
-	};
-
-	let state_fetch = async |k: StateEventType, s: StateKey| {
-		auth_events
-			.get(&k.with_state_key(s.as_str()))
-			.map(ToOwned::to_owned)
-			.ok_or_else(|| err!(Request(NotFound("state event not found"))))
-	};
-
-	let event_fetch = async |event_id: OwnedEventId| self.event_fetch(&event_id).await;
+		.await;
 
 	trace!("Performing current-state auth check.");
-	auth_check(room_rules, incoming_pdu, &event_fetch, &state_fetch)
-		.await
-		.inspect_err(|error| {
+	let outcome = current_state_auth_outcome(auth_events, async move |auth_events| {
+		let state_fetch = async |k: StateEventType, s: StateKey| {
+			auth_events
+				.get(&k.with_state_key(s.as_str()))
+				.map(ToOwned::to_owned)
+				.ok_or_else(|| err!(Request(NotFound("state event not found"))))
+		};
+
+		let event_fetch = async |event_id: OwnedEventId| self.event_fetch(&event_id).await;
+
+		auth_check(room_rules, incoming_pdu, &event_fetch, &state_fetch).await
+	})
+	.await;
+
+	match outcome {
+		| Ok(AuthCheckOutcome::Allow) => Ok(true),
+		| Ok(AuthCheckOutcome::Deny(error)) => {
 			warn!(
 				auth_leg = "current_state",
 				event_id = %incoming_pdu.event_id(),
@@ -315,8 +308,32 @@ async fn current_state_auth_passes(
 				%error,
 				"Current-state auth check failed; soft-failing event.",
 			);
-		})
-		.is_ok()
+
+			Ok(false)
+		},
+		| Err(error) => {
+			warn!(
+				auth_leg = "current_state",
+				event_id = %incoming_pdu.event_id(),
+				%room_id,
+				%error,
+				"Current-state auth check could not be evaluated.",
+			);
+
+			Err(error)
+		},
+	}
+}
+
+async fn current_state_auth_outcome<AuthEvents, Check, CheckFuture>(
+	auth_events: Result<AuthEvents>,
+	check: Check,
+) -> Result<AuthCheckOutcome>
+where
+	Check: FnOnce(AuthEvents) -> CheckFuture,
+	CheckFuture: Future<Output = Result<AuthCheckOutcome>>,
+{
+	check(auth_events?).await
 }
 
 /// Re-examines an event that already carries a soft-fail marker.
@@ -459,7 +476,10 @@ async fn auth_check_outlier_pdu(
 	room_rules: &RoomVersionRules,
 	state_at_incoming_event: &HashMap<u64, OwnedEventId>,
 ) -> Result {
-	// 11. Check the auth of the event passes based on the state of the event
+	// Every event holding a `shorteventid_shortstatehash` row passed spec check 5
+	// (auth against the state at its own position) as a hard reject; soft failure
+	// (spec check 6) still writes the row, so soft-failed events are valid fold
+	// inputs while positionally rejected events never gain a row.
 
 	let state_fetch = async |k: StateEventType, s: StateKey| {
 		let shortstatekey = self
@@ -493,6 +513,8 @@ async fn auth_check_outlier_pdu(
 
 	trace!("Performing positional auth check.");
 	auth_check(room_rules, incoming_pdu, &event_fetch, &state_fetch)
+		.await
+		.and_then(AuthCheckOutcome::into_result)
 		.inspect_err(|error| {
 			warn!(
 				auth_leg = "positional",
@@ -502,9 +524,6 @@ async fn auth_check_outlier_pdu(
 				"Positional auth check failed.",
 			);
 		})
-		.await?;
-
-	Ok(())
 }
 
 #[implement(super::Service)]

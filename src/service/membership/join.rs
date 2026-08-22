@@ -357,7 +357,8 @@ async fn join_remote(
 			self.services.timeline.get_pdu(event_id).await
 		},
 	)
-	.inspect_err(|e| error!("send_join auth check failed: {e:?}"))
+	.and_then(async |outcome| outcome.into_result())
+	.inspect_err(|e| error!(?e, "send_join auth check failed"))
 	.boxed()
 	.await?;
 

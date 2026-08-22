@@ -7,10 +7,11 @@ use tuwunel_database::Deserialized;
 
 use crate::rooms::{short::ShortStateHash, state_compressor::CompressedState};
 
-/// State resolved for an event not in our timeline, keyed by event id, held
-/// only to spare a repeat `/state_ids` fetch on the next walk. The value is a
-/// `shortstatehash` into the shared compressor tables, never the authoritative
-/// `shorteventid_shortstatehash`, so no authoritative state read observes it.
+/// Caches state resolved for an event outside the timeline by event id.
+///
+/// The value is a non-authoritative compressor pointer that avoids a repeat
+/// `/state_ids` fetch. A successful positional check can later promote the
+/// materialized state into the event's authoritative state row.
 #[implement(super::Service)]
 pub(super) async fn cached_resolved_state(
 	&self,

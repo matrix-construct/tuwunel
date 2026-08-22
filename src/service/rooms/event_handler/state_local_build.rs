@@ -25,7 +25,7 @@ use tuwunel_core::{
 use crate::rooms::{
 	short::{ShortStateHash, ShortStateKey},
 	state_compressor::CompressedState,
-	state_res::auth_check,
+	state_res::{AuthCheckOutcome, auth_check},
 };
 
 /// State before or after one event, in the shape the sibling builders return.
@@ -101,6 +101,7 @@ enum Fallback {
 	Entries,
 	Canary,
 	CreateMismatch,
+	Unevaluable,
 	Error,
 }
 
@@ -496,7 +497,7 @@ async fn walk_node(&self, walk: &mut Walk<'_>, index: usize) -> bool {
 	};
 
 	let after = match walk.nodes[index].pdu.state_key() {
-		| None => before,
+		| None => Ok(before),
 		| Some(_) =>
 			self.gated_fold(
 				&walk.room_rules,
@@ -505,6 +506,15 @@ async fn walk_node(&self, walk: &mut Walk<'_>, index: usize) -> bool {
 				&before,
 			)
 			.await,
+	};
+
+	let after = after.inspect_err(|error| {
+		debug_warn!(event_id = %event_id, %error, "Auth gate could not be evaluated.");
+	});
+
+	let Ok(after) = after else {
+		walk.fallback = Some(Fallback::Unevaluable);
+		return false;
 	};
 
 	if !walk.retain(event_id, after) {
@@ -541,8 +551,12 @@ async fn state_after(&self, walk: &mut Walk<'_>, event_id: &EventId) -> Option<A
 }
 
 /// State after a committed frontier event: its stored state plus its own key
-/// folded unguarded, exactly the degree-one builder's shape; a committed
-/// event passed full state-dependent auth at its own upgrade.
+/// folded unguarded, exactly the degree-one builder's shape.
+///
+/// Every event holding a `shorteventid_shortstatehash` row passed spec check 5
+/// (auth against the state at its own position) as a hard reject; soft failure
+/// (spec check 6) still writes the row, so soft-failed events are valid fold
+/// inputs while positionally rejected events never gain a row.
 #[implement(super::Service)]
 async fn committed_state_after(
 	&self,
@@ -620,13 +634,21 @@ async fn memoized_state_after(
 		.gated_fold(&walk.room_rules, &mut walk.gate_drops, &pdu, &before)
 		.await;
 
-	Some(after)
+	match after {
+		| Ok(after) => Some(after),
+		| Err(error) => {
+			debug_warn!(%event_id, %error, "Memoized auth gate could not be evaluated.");
+			walk.fallback = Some(Fallback::Unevaluable);
+			None
+		},
+	}
 }
 
 /// Fold the event's own state key over its state-before, only when the
 /// position-correct auth gate passes; a rejection leaves state unchanged.
-/// Discovery pre-verified the auth events exist locally, so a gate error is a
-/// deterministic auth verdict, not an unevaluable input.
+///
+/// Evaluation failures abort the local walk so federation can rebuild a
+/// complete input state.
 #[implement(super::Service)]
 async fn gated_fold(
 	&self,
@@ -634,7 +656,17 @@ async fn gated_fold(
 	gate_drops: &mut usize,
 	pdu: &PduEvent,
 	before: &Arc<StateIds>,
-) -> Arc<StateIds> {
+) -> Result<Arc<StateIds>> {
+	let create_shortstatekey = self
+		.services
+		.short
+		.get_shortstatekey(&StateEventType::RoomCreate, "")
+		.await?;
+
+	if !before.contains_key(&create_shortstatekey) {
+		return Err(err!(Database("State before event is missing the room create event.")));
+	}
+
 	let state_fetch = async |k: StateEventType, s: StateKey| {
 		let shortstatekey = self
 			.services
@@ -661,10 +693,12 @@ async fn gated_fold(
 
 	let event_fetch = async |event_id: OwnedEventId| self.event_fetch(&event_id).await;
 
-	if let Err(e) = auth_check(room_rules, pdu, &event_fetch, &state_fetch).await {
-		debug!(event_id = %pdu.event_id(), %e, "Auth gate rejected fold.");
+	if let AuthCheckOutcome::Deny(error) =
+		auth_check(room_rules, pdu, &event_fetch, &state_fetch).await?
+	{
+		debug!(event_id = %pdu.event_id(), %error, "Auth gate rejected fold.");
 		*gate_drops = gate_drops.saturating_add(1);
-		return before.clone();
+		return Ok(before.clone());
 	}
 
 	let state_key = pdu.state_key().expect("only state events fold");
@@ -679,7 +713,7 @@ async fn gated_fold(
 	let mut state = StateIds::clone(before);
 	state.insert(shortstatekey, pdu.event_id().to_owned());
 
-	Arc::new(state)
+	Ok(Arc::new(state))
 }
 
 /// State before a fork node, resolving the state after each of its prevs
@@ -877,6 +911,7 @@ impl Fallback {
 			| Self::Entries => "entries",
 			| Self::Canary => "canary",
 			| Self::CreateMismatch => "create_mismatch",
+			| Self::Unevaluable => "unevaluable",
 			| Self::Error => "error",
 		}
 	}

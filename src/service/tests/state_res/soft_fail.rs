@@ -9,7 +9,7 @@ use tuwunel_core::{
 	Result, err,
 	matrix::{Event, Pdu, StateKey},
 };
-use tuwunel_service::rooms::state_res::auth_check;
+use tuwunel_service::rooms::state_res::{AuthCheckOutcome, auth_check};
 
 type Events = HashMap<OwnedEventId, Pdu>;
 type State = HashMap<StateEventType, HashMap<String, OwnedEventId>>;
@@ -57,13 +57,15 @@ async fn delayed_branch_valid_leave_fails_only_current_state_auth() {
 			.any(|event_id| event_id == ghost_join),
 	);
 
-	auth_check(&rules, incoming, &fetch_event, &positional_fetch)
+	let positional = auth_check(&rules, incoming, &fetch_event, &positional_fetch)
 		.await
 		.expect("delayed leave should pass against its positional branch state");
+	assert!(matches!(positional, AuthCheckOutcome::Allow));
 
-	auth_check(&rules, incoming, &fetch_event, &current_fetch)
+	let current = auth_check(&rules, incoming, &fetch_event, &current_fetch)
 		.await
-		.expect_err("delayed leave should fail against the later current membership");
+		.expect("current-state denial should remain evaluable");
+	assert!(matches!(current, AuthCheckOutcome::Deny(_)));
 }
 
 fn load_fixture() -> Events {

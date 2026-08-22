@@ -35,11 +35,41 @@ use super::{
 	},
 };
 
-enum AuthCheckOutcome {
+/// Describes a completed event authorization decision.
+///
+/// Denials retain the rule error for caller-specific handling. Failures to
+/// evaluate authorization remain in the surrounding [`Result`].
+#[must_use = "authorization outcomes must be handled"]
+pub enum AuthCheckOutcome {
+	/// Authorization accepted the event.
+	///
+	/// The caller may continue processing the event.
 	Allow,
+
+	/// Authorization rejected the event.
+	///
+	/// The error retains the rule's denial reason and wire mapping.
 	Deny(Error),
 }
 
+impl AuthCheckOutcome {
+	/// Converts a completed decision to the compatibility result.
+	///
+	/// Acceptance becomes success. Denials retain the existing
+	/// invalid-parameter passthrough and authorization-error wrapping.
+	pub fn into_result(self) -> Result {
+		match self {
+			| Self::Allow => Ok(()),
+			| Self::Deny(error @ Error::Request(InvalidParam, ..)) => Err(error),
+			| Self::Deny(error) => Err(Error::AuthCheck(Box::new(error))),
+		}
+	}
+}
+
+/// Checks an event against its state-independent and state-dependent rules.
+///
+/// A completed check returns an explicit allowance or denial. Failures to
+/// obtain or evaluate the required authorization inputs remain errors.
 #[tracing::instrument(
 	level = "debug",
 	skip_all,
@@ -52,7 +82,7 @@ pub async fn auth_check<FetchEvent, EventFut, FetchState, StateFut, Pdu>(
 	incoming_event: &Pdu,
 	fetch_event: &FetchEvent,
 	fetch_state: &FetchState,
-) -> Result
+) -> Result<AuthCheckOutcome>
 where
 	FetchEvent: Fn(OwnedEventId) -> EventFut + Sync,
 	EventFut: Future<Output = Result<Pdu>> + Send,
@@ -60,12 +90,7 @@ where
 	StateFut: Future<Output = Result<Pdu>> + Send,
 	Pdu: Event,
 {
-	match auth_check_outcome(rules, incoming_event, fetch_event, fetch_state).await {
-		| Ok(AuthCheckOutcome::Allow) => Ok(()),
-		| Ok(AuthCheckOutcome::Deny(error @ Error::Request(InvalidParam, ..))) => Err(error),
-		| Ok(AuthCheckOutcome::Deny(error)) | Err(error) =>
-			Err(Error::AuthCheck(Box::new(error))),
-	}
+	auth_check_outcome(rules, incoming_event, fetch_event, fetch_state).await
 }
 
 async fn auth_check_outcome<FetchEvent, EventFut, FetchState, StateFut, Pdu>(

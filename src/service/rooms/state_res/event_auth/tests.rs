@@ -26,7 +26,7 @@ use tuwunel_core::{
 
 use self::room_power_levels::default_room_power_levels;
 use super::{
-	AuthCheckOutcome, auth_check_outcome, check_room_create, check_room_redaction,
+	AuthCheckOutcome, auth_check, check_room_create, check_room_redaction,
 	check_state_dependent_auth_rules, check_state_independent_auth_rules, classify_auth_error,
 	events::{RoomCreateEvent, RoomPowerLevelsEvent},
 	test_utils::{
@@ -36,6 +36,21 @@ use super::{
 		to_pdu_event, zara,
 	},
 };
+
+#[test]
+fn auth_outcome_preserves_denial_wire_mapping() {
+	AuthCheckOutcome::Allow
+		.into_result()
+		.expect("allow outcomes must pass");
+
+	let invalid = AuthCheckOutcome::Deny(err!(Request(InvalidParam("invalid event"))));
+
+	assert!(matches!(invalid.into_result(), Err(Error::Request(InvalidParam, ..))));
+
+	let denial = AuthCheckOutcome::Deny(err!("clean denial"));
+
+	assert!(matches!(denial.into_result(), Err(Error::AuthCheck(..))));
+}
 
 #[tokio::test]
 async fn auth_outcome_classifies_denials() {
@@ -67,10 +82,13 @@ async fn auth_outcome_classifies_denials() {
 		&["IPOWER"],
 	);
 
-	let outcome =
-		auth_check_outcome(&RoomVersionRules::V6, &invalid, &fetch_event, &fetch_state).await;
+	let outcome = auth_check(&RoomVersionRules::V6, &invalid, &fetch_event, &fetch_state).await;
 
-	assert!(matches!(outcome, Ok(AuthCheckOutcome::Deny(Error::Request(InvalidParam, ..)))));
+	assert!(matches!(&outcome, Ok(AuthCheckOutcome::Deny(Error::Request(InvalidParam, ..)))));
+	assert!(matches!(
+		outcome.and_then(AuthCheckOutcome::into_result),
+		Err(Error::Request(InvalidParam, ..))
+	));
 
 	let absent_member = to_pdu_event(
 		"ABSENT_MEMBER",
@@ -83,17 +101,20 @@ async fn auth_outcome_classifies_denials() {
 	);
 
 	let outcome =
-		auth_check_outcome(&RoomVersionRules::V6, &absent_member, &fetch_event, &fetch_state)
-			.await;
+		auth_check(&RoomVersionRules::V6, &absent_member, &fetch_event, &fetch_state).await;
 
 	assert!(
 		matches!(
-			outcome,
+			&outcome,
 			Ok(AuthCheckOutcome::Deny(Error::Err(reason)))
 				if reason == "sender's membership `leave` is not `join`"
 		),
 		"absent membership produced the wrong denial"
 	);
+	assert!(matches!(
+		outcome.and_then(AuthCheckOutcome::into_result),
+		Err(Error::AuthCheck(..))
+	));
 
 	let mut state_events = init_events.clone();
 
@@ -111,13 +132,8 @@ async fn auth_outcome_classifies_denials() {
 		&["IPOWER"],
 	);
 
-	let outcome = auth_check_outcome(
-		&RoomVersionRules::V6,
-		&absent_power_levels,
-		&fetch_event,
-		&fetch_state,
-	)
-	.await;
+	let outcome =
+		auth_check(&RoomVersionRules::V6, &absent_power_levels, &fetch_event, &fetch_state).await;
 
 	assert!(
 		matches!(
@@ -147,13 +163,8 @@ async fn auth_outcome_propagates_fetch_failures() {
 		Err(err!(Database("injected state failure")))
 	};
 
-	let outcome = auth_check_outcome(
-		&RoomVersionRules::V6,
-		&incoming_event,
-		&fetch_event,
-		&database_failure,
-	)
-	.await;
+	let outcome =
+		auth_check(&RoomVersionRules::V6, &incoming_event, &fetch_event, &database_failure).await;
 
 	assert!(matches!(outcome, Err(Error::Database(..))));
 
@@ -162,8 +173,7 @@ async fn auth_outcome_propagates_fetch_failures() {
 	};
 
 	let outcome =
-		auth_check_outcome(&RoomVersionRules::V6, &incoming_event, &fetch_event, &io_failure)
-			.await;
+		auth_check(&RoomVersionRules::V6, &incoming_event, &fetch_event, &io_failure).await;
 
 	assert!(matches!(outcome, Err(Error::Io(..))));
 
@@ -171,8 +181,7 @@ async fn auth_outcome_propagates_fetch_failures() {
 	let fetch_state = state.fetch_state_fn();
 	let missing_event = async |_event_id| Err(not_found());
 	let outcome =
-		auth_check_outcome(&RoomVersionRules::V6, &incoming_event, &missing_event, &fetch_state)
-			.await;
+		auth_check(&RoomVersionRules::V6, &incoming_event, &missing_event, &fetch_state).await;
 
 	assert!(matches!(outcome, Err(error) if error.is_not_found()));
 }

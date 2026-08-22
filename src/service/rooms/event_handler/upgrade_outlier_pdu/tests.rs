@@ -1,8 +1,27 @@
-use std::{ops::Range, time::Duration};
+use std::{io::Error as IoError, ops::Range, time::Duration};
 
-use tuwunel_core::utils::continue_exponential_backoff;
+use tuwunel_core::{Error, Result, err, utils::continue_exponential_backoff};
 
-use super::UPGRADE_RETRY;
+use super::{AuthCheckOutcome, UPGRADE_RETRY, current_state_auth_outcome};
+
+#[tokio::test]
+async fn current_state_auth_lookup_failure_propagates() {
+	let auth_events: Result = Err(err!(Database("injected current-state lookup failure")));
+	let outcome =
+		current_state_auth_outcome(auth_events, async |()| Ok(AuthCheckOutcome::Allow)).await;
+
+	assert!(matches!(outcome, Err(Error::Database(..))));
+}
+
+#[tokio::test]
+async fn current_state_auth_evaluation_failure_propagates() {
+	let outcome = current_state_auth_outcome(Ok(()), async |()| {
+		Err(IoError::other("injected current-state auth failure").into())
+	})
+	.await;
+
+	assert!(matches!(outcome, Err(Error::Io(..))));
+}
 
 #[test]
 fn upgrade_retry_releases_after_the_window() {

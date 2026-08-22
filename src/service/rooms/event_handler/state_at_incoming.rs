@@ -74,6 +74,10 @@ where
 		"Resolved state at prev_event.",
 	);
 
+	// Every event holding a `shorteventid_shortstatehash` row passed spec check 5
+	// (auth against the state at its own position) as a hard reject; soft failure
+	// (spec check 6) still writes the row, so soft-failed events are valid fold
+	// inputs while positionally rejected events never gain a row.
 	if let Some(state_key) = prev_event.state_key() {
 		let prev_event_type = prev_event.event_type().to_cow_str().into();
 
@@ -198,6 +202,10 @@ async fn state_at_incoming_fork<Pdu>(
 where
 	Pdu: Event,
 {
+	// Every event holding a `shorteventid_shortstatehash` row passed spec check 5
+	// (auth against the state at its own position) as a hard reject; soft failure
+	// (spec check 6) still writes the row, so soft-failed events are valid fold
+	// inputs while positionally rejected events never gain a row.
 	let leaf = prev_event
 		.state_key()
 		.map_stream(async |state_key| {

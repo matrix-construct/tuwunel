@@ -160,7 +160,8 @@ pub async fn create_hash_and_sign_event(
 		&async |event_id: OwnedEventId| self.get_pdu(&event_id).await,
 		&auth_fetch,
 	)
-	.await?;
+	.await?
+	.into_result()?;
 
 	// Hash and sign
 	let mut pdu_json = to_canonical_object(&pdu).map_err(|e| {
