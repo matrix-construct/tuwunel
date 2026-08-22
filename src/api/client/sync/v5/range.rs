@@ -18,7 +18,7 @@ use tuwunel_core::{
 };
 use tuwunel_service::{
 	rooms::read_receipt::{PrivateReadEvents, pack_receipts_fallible},
-	sync::Connection,
+	sync::{Connection, Room},
 };
 
 use super::{
@@ -26,7 +26,7 @@ use super::{
 	rooms::{
 		Failure as RoomFailure,
 		Failure::{Payload as PayloadFailure, Timeline as TimelineFailure},
-		handle_room,
+		RoomDetails, handle_room, merged_room_details, room_config_hash,
 	},
 };
 use crate::client::is_empty_account_data_event;
@@ -63,6 +63,7 @@ impl From<RoomFailure> for Failure {
 #[derive(Debug)]
 struct CompleteRange {
 	payload: Option<response::Room>,
+	config_hash: Option<u64>,
 	receipts: Option<Raw<SyncReceiptEvent>>,
 	account_data: Vec<Raw<AnyRoomAccountDataEvent>>,
 }
@@ -73,8 +74,10 @@ pub(super) struct Results {
 }
 
 #[implement(Results)]
-pub(super) fn keys(&self) -> impl Iterator<Item = &RoomId> {
-	self.ranges.keys().map(AsRef::as_ref)
+pub(super) fn room_updates(&self) -> impl Iterator<Item = (&RoomId, Option<u64>)> {
+	self.ranges
+		.iter()
+		.map(|(room_id, range)| (room_id.as_ref(), range.config_hash))
 }
 
 #[implement(Results)]
@@ -122,19 +125,21 @@ pub(super) async fn collect(
 		.iter()
 		.stream()
 		.broad_filter_map(async |(room_id, window_room)| {
-			let roomsince = conn
+			let room = conn
 				.rooms
 				.get(room_id)
-				.map(|room| room.roomsince)
+				.copied()
 				.unwrap_or_default();
 
-			match collect_room(sync_info, conn, window_room, roomsince, &ignored).await {
+			let room_details = merged_room_details(conn, &window_room.lists, room_id);
+
+			match collect_room(sync_info, conn, window_room, room, room_details, &ignored).await {
 				| Ok(range) => Some((room_id.clone(), range)),
 				| Err(Failure { domain, error }) => {
 					error!(
 						%room_id,
 						?domain,
-						roomsince,
+						roomsince = room.roomsince,
 						next_batch = conn.next_batch,
 						%error,
 						"sliding sync range failed"
@@ -153,30 +158,33 @@ async fn collect_room(
 	sync_info: SyncInfo<'_>,
 	conn: &Connection,
 	window_room: &WindowRoom,
-	roomsince: u64,
+	room: Room,
+	room_details: RoomDetails,
 	ignored: &OnceCell<Option<IgnoredUserListEvent>>,
 ) -> Result<CompleteRange, Failure> {
 	let room_id = &window_room.room_id;
+	let config_hash = room_config_hash(&room_details);
+	let payload_is_fresh =
+		window_room.payload_is_fresh(room.roomsince) || room.config_hash != config_hash;
 
-	let payload = window_room
-		.payload_is_fresh(roomsince)
-		.then_async(|| handle_room(sync_info, conn, window_room, roomsince))
+	let payload = payload_is_fresh
+		.then_async(|| handle_room(sync_info, conn, window_room, room.roomsince, room_details))
 		.map(Option::transpose)
 		.map_err(Failure::from);
 
-	let public_receipts = public_receipts(sync_info, conn, room_id, roomsince, ignored)
+	let public_receipts = public_receipts(sync_info, conn, room_id, room.roomsince, ignored)
 		.map_err(|error| Failure::new(Domain::PublicReceipt, error));
 
-	let private_receipts = private_receipts(sync_info, conn, room_id, roomsince)
+	let private_receipts = private_receipts(sync_info, conn, room_id, room.roomsince)
 		.map_err(|error| Failure::new(Domain::PrivateRead, error));
 
-	let account_data = room_account_data(sync_info, conn, room_id, roomsince)
+	let account_data = room_account_data(sync_info, conn, room_id, room.roomsince)
 		.map_err(|error| Failure::new(Domain::RoomAccountData, error));
 
 	let (payload, public_receipts, private_receipts, account_data) =
 		try_join4(payload, public_receipts, private_receipts, account_data).await?;
 
-	assemble(payload, public_receipts, private_receipts, account_data)
+	assemble(payload, public_receipts, private_receipts, account_data, config_hash)
 }
 
 async fn public_receipts(
@@ -261,6 +269,7 @@ fn assemble<PublicReceipts>(
 	public_receipts: PublicReceipts,
 	private_receipts: PrivateReadEvents,
 	account_data: Vec<Raw<AnyRoomAccountDataEvent>>,
+	config_hash: u64,
 ) -> Result<CompleteRange, Failure>
 where
 	PublicReceipts: Iterator<Item = Raw<AnySyncEphemeralRoomEvent>>,
@@ -273,7 +282,14 @@ where
 		.transpose()
 		.map_err(|error| Failure::new(Domain::ReceiptSerialization, error))?;
 
-	Ok(CompleteRange { payload, receipts, account_data })
+	let config_hash = payload.as_ref().map(|_| config_hash);
+
+	Ok(CompleteRange {
+		payload,
+		config_hash,
+		receipts,
+		account_data,
+	})
 }
 
 #[cfg(test)]
@@ -295,6 +311,7 @@ mod tests {
 			vec![malformed].into_iter(),
 			PrivateReadEvents::new(),
 			Vec::new(),
+			7,
 		);
 
 		let error = range.expect_err("malformed receipt must fail the complete range");
@@ -310,11 +327,12 @@ mod tests {
 	#[test]
 	fn extension_only_range_commits_without_a_room_payload() {
 		let room_id = room_id!("!extension-only:example.com");
-		let range = assemble(None, Vec::new().into_iter(), PrivateReadEvents::new(), Vec::new());
+		let range =
+			assemble(None, Vec::new().into_iter(), PrivateReadEvents::new(), Vec::new(), 7);
 
 		let range = publish(room_id, range);
 
-		assert_eq!(range.keys().collect::<Vec<_>>(), [room_id]);
+		assert_eq!(range.room_updates().collect::<Vec<_>>(), [(room_id, None)]);
 		assert!(range.into_payloads().is_empty());
 	}
 
@@ -332,6 +350,7 @@ mod tests {
 
 		let range = CompleteRange {
 			payload: None,
+			config_hash: None,
 			receipts: Some(receipt),
 			account_data: vec![account_data],
 		};

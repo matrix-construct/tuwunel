@@ -160,7 +160,14 @@ pub(crate) async fn sync_events_v5_route(
 	// Update parameters regardless of replay or advance
 	conn.next_batch = services.globals.wait_pending().await?;
 	conn.globalsince = since.min(conn.next_batch);
-	conn.update_cache(request);
+	let config_changed = conn.update_cache(request);
+	let caught_up = conn.globalsince == conn.next_batch;
+
+	if config_change_needs_position(config_changed, advancing, caught_up, since) {
+		// The permit publishes the reserved position when it retires on drop.
+		drop(services.globals.next_count());
+	}
+
 	conn.update_rooms_prologue(retarding.then_some(since));
 
 	let mut response = Response {
@@ -206,7 +213,7 @@ pub(crate) async fn sync_events_v5_route(
 			let mut extensions = extensions?;
 
 			apply_ranges(&conn, &window, &mut ranges, &mut extensions);
-			conn.update_rooms_epilogue(ranges.keys());
+			conn.update_rooms_epilogue(ranges.room_updates());
 			response.rooms = ranges.into_payloads();
 			response.extensions = extensions.into_response(&response.rooms);
 
@@ -244,6 +251,29 @@ pub(crate) async fn sync_events_v5_route(
 	}
 }
 
+fn config_change_needs_position(
+	config_changed: bool,
+	advancing: bool,
+	caught_up: bool,
+	since: u64,
+) -> bool {
+	config_changed && advancing && caught_up && since != 0
+}
+
 fn is_empty_response(response: &Response) -> bool {
 	response.extensions.is_empty() && response.rooms.is_empty()
+}
+
+#[cfg(test)]
+mod tests {
+	use super::config_change_needs_position;
+
+	#[test]
+	fn caught_up_advancing_config_change_needs_position() {
+		assert!(config_change_needs_position(true, true, true, 1));
+		assert!(!config_change_needs_position(false, true, true, 1));
+		assert!(!config_change_needs_position(true, false, true, 1));
+		assert!(!config_change_needs_position(true, true, false, 1));
+		assert!(!config_change_needs_position(true, true, true, 0));
+	}
 }

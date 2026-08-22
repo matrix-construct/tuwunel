@@ -19,15 +19,19 @@ use ruma::{
 	serde::Raw,
 };
 use tuwunel_core::{
-	Error, Result, at, is_equal_to,
+	Error, Result, at, format_small_string, is_equal_to,
 	itertools::Itertools,
 	matrix::{
 		Event, StateKey,
 		pdu::{PduCount, PduEvent},
 	},
 	ref_at,
+	smallstr::SmallString,
 	utils::{
 		BoolExt, IterStream, ReadyExt, TryFutureExtExt,
+		hash::sha256::{
+			Digest as Sha256Digest, delimited as sha256_delimited, hash as sha256_hash,
+		},
 		math::usize_from_ruma,
 		result::FlatOk,
 		stream::{BroadbandExt, WidebandExt},
@@ -49,6 +53,8 @@ pub(super) enum Failure {
 }
 
 type ThreadCounts = BTreeMap<OwnedEventId, (u64, u64)>;
+type EventTypeString = SmallString<[u8; 32]>;
+pub(super) type RoomDetails = (usize, HashSet<(StateEventType, StateKey)>);
 
 #[tracing::instrument(
 	name = "room",
@@ -61,6 +67,7 @@ pub(super) async fn handle_room(
 	conn: &Connection,
 	window_room: &WindowRoom,
 	roomsince: u64,
+	room_details: RoomDetails,
 ) -> Result<response::Room, Failure> {
 	let SyncInfo {
 		services,
@@ -69,8 +76,6 @@ pub(super) async fn handle_room(
 		..
 	} = sync_info;
 	let WindowRoom { lists, membership, room_id, .. } = window_room;
-
-	debug_assert!(window_room.payload_is_fresh(roomsince), "Room payload should be fresh");
 
 	if matches!(*membership, Some(MembershipState::Leave | MembershipState::Ban)) {
 		return leave_or_ban_response(sync_info, conn, window_room, roomsince)
@@ -82,7 +87,7 @@ pub(super) async fn handle_room(
 
 	let encrypted = services.state_accessor.is_encrypted_room(room_id);
 
-	let (timeline_limit, required_state) = merged_room_details(conn, lists, room_id);
+	let (timeline_limit, required_state) = room_details;
 	let required_state = membership_allows_required_state(membership.as_ref())
 		.then_some(required_state)
 		.unwrap_or_default();
@@ -240,20 +245,45 @@ async fn leave_or_ban_response(
 	})
 }
 
-fn merged_room_details(
+pub(super) fn merged_room_details(
 	conn: &Connection,
 	lists: &ListIds,
 	room_id: &RoomId,
-) -> (usize, HashSet<(StateEventType, StateKey)>) {
+) -> RoomDetails {
 	lists
 		.iter()
 		.filter_map(|list_id| conn.lists.get(list_id))
 		.map(|list| &list.room_details)
 		.chain(conn.subscriptions.get(room_id))
 		.fold((0_usize, HashSet::new()), |(timeline_limit, mut required_state), config| {
-			required_state.extend(config.required_state.clone());
+			required_state.extend(config.required_state.iter().cloned());
 			(timeline_limit.max(usize_from_ruma(config.timeline_limit)), required_state)
 		})
+}
+
+pub(super) fn room_config_hash((timeline_limit, required_state): &RoomDetails) -> u64 {
+	let timeline_limit = u64::try_from(*timeline_limit).expect("timeline limit must fit u64");
+	let digest = sha256_hash(timeline_limit.to_be_bytes());
+
+	required_state
+		.iter()
+		.map(required_state_hash)
+		.fold(digest_word(digest), |hash, entry| hash ^ entry)
+}
+
+fn required_state_hash((event_type, state_key): &(StateEventType, StateKey)) -> u64 {
+	let event_type: EventTypeString = format_small_string!("{event_type}");
+	let digest = sha256_delimited([event_type.as_str(), state_key.as_str()].into_iter());
+
+	digest_word(digest)
+}
+
+fn digest_word(digest: Sha256Digest) -> u64 {
+	u64::from_be_bytes(
+		digest[..8]
+			.try_into()
+			.expect("SHA-256 digest must contain eight bytes"),
+	)
 }
 
 fn membership_allows_required_state(membership: Option<&MembershipState>) -> bool {
@@ -498,11 +528,18 @@ async fn wildcard_state_keys(
 
 #[cfg(test)]
 mod tests {
-	use ruma::{UInt, events::room::member::MembershipState, uint};
+	use std::{collections::HashSet, iter::once};
+
+	use ruma::{
+		UInt,
+		events::{StateEventType, room::member::MembershipState},
+		uint,
+	};
 	use tuwunel_core::matrix::pdu::PduCount;
 
 	use super::{
-		membership_allows_required_state, room_timeline_limited, room_timeline_metadata,
+		membership_allows_required_state, room_config_hash, room_timeline_limited,
+		room_timeline_metadata,
 	};
 
 	fn timeline(positions: &[u64]) -> Vec<(PduCount, ())> {
@@ -571,5 +608,38 @@ mod tests {
 		assert!(!room_timeline_limited(0, true));
 		assert!(room_timeline_limited(1, true));
 		assert!(!room_timeline_limited(1, false));
+	}
+
+	#[test]
+	fn config_hash_is_order_independent() {
+		let first: HashSet<_> =
+			[(StateEventType::RoomName, "".into()), (StateEventType::RoomMember, "*".into())]
+				.into();
+
+		let second: HashSet<_> =
+			[(StateEventType::RoomMember, "*".into()), (StateEventType::RoomName, "".into())]
+				.into();
+
+		assert_eq!(room_config_hash(&(0, first)), room_config_hash(&(0, second)));
+	}
+
+	#[test]
+	fn config_hash_uses_deduplicated_state() {
+		let entry = (StateEventType::RoomName, "".into());
+		let duplicated = [entry.clone(), entry.clone()]
+			.into_iter()
+			.collect();
+
+		let deduplicated = once(entry).collect();
+
+		assert_eq!(room_config_hash(&(0, duplicated)), room_config_hash(&(0, deduplicated)));
+	}
+
+	#[test]
+	fn config_hash_tracks_timeline_limit() {
+		let empty = HashSet::new();
+
+		assert_ne!(room_config_hash(&(0, empty.clone())), 0);
+		assert_ne!(room_config_hash(&(0, empty.clone())), room_config_hash(&(1, empty)));
 	}
 }

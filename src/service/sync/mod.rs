@@ -58,6 +58,8 @@ pub struct Connection {
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize)]
 pub struct Room {
 	pub roomsince: u64,
+	#[serde(default)]
+	pub config_hash: u64,
 }
 
 type Connections = TokioMutex<BTreeMap<ConnectionKey, ConnectionVal>>;
@@ -67,6 +69,7 @@ pub type ConnectionKey = (OwnedUserId, Option<OwnedDeviceId>, Option<ConnectionI
 pub type Subscriptions = BTreeMap<OwnedRoomId, request::ListConfig>;
 pub type Lists = BTreeMap<ListId, request::List>;
 pub type Rooms = BTreeMap<OwnedRoomId, Room>;
+type RoomUpdate<'a> = (&'a RoomId, Option<u64>);
 
 impl crate::Service for Service {
 	fn build(args: &crate::Args<'_>) -> Result<Arc<Self>> {
@@ -254,6 +257,7 @@ pub fn update_rooms_prologue(&mut self, retard_since: Option<u64>) {
 			&& room.roomsince > retard_since
 		{
 			room.roomsince = retard_since;
+			room.config_hash = 0;
 		}
 	});
 }
@@ -267,56 +271,127 @@ pub fn update_rooms_prologue(&mut self, retard_since: Option<u64>) {
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn update_rooms_epilogue<'a, Complete>(&mut self, complete: Complete)
 where
-	Complete: Iterator<Item = &'a RoomId> + Send + 'a,
+	Complete: Iterator<Item = RoomUpdate<'a>> + Send + 'a,
 {
 	let next_batch = self.next_batch;
-	complete.for_each(|room_id| {
-		if let Some(room) = self.rooms.get_mut(room_id) {
-			room.roomsince = next_batch;
-		} else {
-			self.rooms
-				.entry(room_id.into())
-				.or_default()
-				.roomsince = next_batch;
+	complete.for_each(|(room_id, config_hash)| {
+		let room = self.rooms.entry(room_id.into()).or_default();
+
+		room.roomsince = next_batch;
+		if let Some(config_hash) = config_hash {
+			room.config_hash = config_hash;
 		}
 	});
 }
 
 #[implement(Connection)]
 #[tracing::instrument(level = "debug", skip_all)]
-pub fn update_cache(&mut self, request: &Request) {
-	Self::update_cache_lists(request, self);
-	Self::update_cache_subscriptions(request, self);
+pub fn update_cache(&mut self, request: &Request) -> bool {
+	let lists_changed = Self::update_cache_lists(request, self);
+	let subscriptions_changed = Self::update_cache_subscriptions(request, self);
+
 	Self::update_cache_extensions(request, self);
+
+	lists_changed || subscriptions_changed
 }
 
 #[implement(Connection)]
-fn update_cache_lists(request: &Request, cached: &mut Self) {
-	for (list_id, request_list) in &request.lists {
+fn update_cache_lists(request: &Request, cached: &mut Self) -> bool {
+	request
+		.lists
+		.iter()
+		.fold(false, |changed, (list_id, request_list)| {
+			let list_changed = match cached.lists.get_mut(list_id) {
+				| Some(cached_list) => Self::update_cache_list(request_list, cached_list),
+				| None => {
+					cached
+						.lists
+						.insert(list_id.clone(), request_list.clone());
+
+					true
+				},
+			};
+
+			changed | list_changed
+		})
+}
+
+#[implement(Connection)]
+fn update_cache_list(request: &request::List, cached: &mut request::List) -> bool {
+	let ranges_changed = request.ranges != cached.ranges;
+	let timeline_limit_changed =
+		request.room_details.timeline_limit != cached.room_details.timeline_limit;
+
+	let required_state_changed = !request.room_details.required_state.is_empty()
+		&& request.room_details.required_state != cached.room_details.required_state;
+
+	let filters_changed = request.filters.as_ref().is_some_and(|request| {
 		cached
-			.lists
-			.entry(list_id.clone())
-			.and_modify(|cached_list| {
-				Self::update_cache_list(request_list, cached_list);
-			})
-			.or_insert_with(|| request_list.clone());
+			.filters
+			.as_ref()
+			.is_none_or(|cached| !list_filters_are_equal(request, cached))
+	});
+
+	let changed =
+		ranges_changed || timeline_limit_changed || required_state_changed || filters_changed;
+
+	if ranges_changed {
+		cached.ranges.clone_from(&request.ranges);
 	}
-}
 
-#[implement(Connection)]
-fn update_cache_list(request: &request::List, cached: &mut request::List) {
-	cached.ranges.clone_from(&request.ranges);
-	list_or_sticky(&request.room_details.required_state, &mut cached.room_details.required_state);
+	cached.room_details.timeline_limit = request.room_details.timeline_limit;
 
-	// Clients re-send filters each request; replace so a dropped one clears.
-	if request.filters.is_some() {
+	if required_state_changed {
+		cached
+			.room_details
+			.required_state
+			.clone_from(&request.room_details.required_state);
+	}
+
+	if filters_changed {
 		cached.filters.clone_from(&request.filters);
 	}
+
+	changed
 }
 
 #[implement(Connection)]
-fn update_cache_subscriptions(request: &Request, cached: &mut Self) {
-	cached.subscriptions = request.room_subscriptions.clone();
+fn update_cache_subscriptions(request: &Request, cached: &mut Self) -> bool {
+	let changed = !subscriptions_are_equal(&request.room_subscriptions, &cached.subscriptions);
+
+	if changed {
+		cached
+			.subscriptions
+			.clone_from(&request.room_subscriptions);
+	}
+
+	changed
+}
+
+fn subscriptions_are_equal(request: &Subscriptions, cached: &Subscriptions) -> bool {
+	request.len() == cached.len()
+		&& request
+			.iter()
+			.zip(cached)
+			.all(|(request, cached)| {
+				request.0 == cached.0 && list_config_is_equal(request.1, cached.1)
+			})
+}
+
+fn list_config_is_equal(request: &request::ListConfig, cached: &request::ListConfig) -> bool {
+	request.timeline_limit == cached.timeline_limit
+		&& request.required_state == cached.required_state
+}
+
+fn list_filters_are_equal(request: &request::ListFilters, cached: &request::ListFilters) -> bool {
+	request.is_dm == cached.is_dm
+		&& request.is_encrypted == cached.is_encrypted
+		&& request.is_invite == cached.is_invite
+		&& request.room_types == cached.room_types
+		&& request.not_room_types == cached.not_room_types
+		&& request.tags == cached.tags
+		&& request.not_tags == cached.not_tags
+		&& request.spaces == cached.spaces
 }
 
 #[implement(Connection)]
@@ -361,12 +436,6 @@ fn update_cache_to_device(request: &ToDevice, cached: &mut ToDevice) {
 #[implement(Connection)]
 fn update_cache_e2ee(request: &E2EE, cached: &mut E2EE) {
 	some_or_sticky(request.enabled.as_ref(), &mut cached.enabled);
-}
-
-fn list_or_sticky<T: Clone>(target: &Vec<T>, cached: &mut Vec<T>) {
-	if !target.is_empty() {
-		cached.clone_from(target);
-	}
 }
 
 fn some_or_sticky<T: Clone>(target: Option<&T>, cached: &mut Option<T>) {
