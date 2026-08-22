@@ -133,7 +133,11 @@ pub async fn delete(
 		.await
 }
 
-/// Searches the room account data for a specific kind.
+/// Searches the global account data for a specific kind.
+///
+/// Global data is stored under no room, so one kind can be held once globally
+/// and once in every room without collision. The record is the whole
+/// `{type, content}` event, so `T` names the event rather than its content.
 #[implement(Service)]
 pub async fn get_global<T>(&self, user_id: &UserId, kind: GlobalAccountDataEventType) -> Result<T>
 where
@@ -144,7 +148,11 @@ where
 		.deserialized()
 }
 
-/// Searches the global account data for a specific kind.
+/// Searches the room account data for a specific kind.
+///
+/// The room scopes the lookup, so one kind may hold different data in each of
+/// them. The record is the whole `{type, content}` event, so `T` names the
+/// event rather than its content.
 #[implement(Service)]
 pub async fn get_room<T>(
 	&self,
