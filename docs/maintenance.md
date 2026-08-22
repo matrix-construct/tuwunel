@@ -89,7 +89,8 @@ reports the small one; only `df` or `btrfs filesystem usage` shows the disk
 filling. `compsize` reports both for a directory. Defragmenting does not give
 the space back, so the files have to be rewritten or removed: setting the
 option stops any further growth, and an offline copy of `database_path` (see
-[Offline backups](#offline-backups)) reclaims what has already accumulated.
+[Offline backups](backups.md#offline-backups)) reclaims what has already
+accumulated.
 
 ### ZFS
 
@@ -144,92 +145,10 @@ useless for average users unless troubleshooting something low-level. If you
 would like to store nearly none at all, see the `rocksdb_max_log_files`
 config option.
 
-### Online backups
+### Backups
 
-Currently only RocksDB supports online backups. If you'd like to backup your
-database online without any downtime, see the `!admin server` command for the
-backup commands and the `database_backup_path` config options in the example
-config.
-
-Please note that the format of the database backup is not the exact same as the
-database itself. This is unfortunately a design choice by Facebook, as we are
-using the database backup engine API from RocksDB; the data is all still there,
-and Tuwunel restores it for you (see below).
-
-A backup can be checked at any time with `!admin server verify-backup [id]`,
-which confirms all of the backup's files are still present with their expected
-sizes. File checksums are additionally verified while a backup is restored.
-
-#### Restoring online backup
-
-To restore a backup, shut down Tuwunel, then start it once with the
-`--restore-backup` command line argument:
-
-```bash
-tuwunel --restore-backup
-```
-
-This restores the most recent backup found in `database_backup_path` into
-`database_path`, verifying the checksum of every file along the way, then
-continues starting up normally on the restored database. To restore a specific
-backup instead, pass its ID as listed by `!admin server list-backups`:
-
-```bash
-tuwunel --restore-backup=3
-```
-
-The restore replaces the database files in `database_path`. The `media/`
-directory inside it is not part of an online backup and is left in place by
-RocksDB's restore; since media has no backup to restore from, copying it
-aside beforehand is cheap insurance. Only `--restore-backup` selects a backup;
-the setting is refused from a configuration file, from the environment, and
-from `-O`, so a forgotten one cannot roll the database back again on a later
-restart. A configuration reload does not carry the setting forward either, and
-an in-place `!admin server restart` drops it, which would otherwise repeat the
-restore in the process it starts.
-
-With systemd, run the restore as the service user while the service is
-stopped, then start the service again:
-
-```bash
-systemctl stop tuwunel
-sudo -u tuwunel tuwunel --config /etc/tuwunel/tuwunel.toml --restore-backup \
-	--maintenance --execute "server shutdown"
-systemctl start tuwunel
-```
-
-`--maintenance` keeps the restore run from serving clients, and `--execute
-"server shutdown"` exits it cleanly once startup, and therefore the restore,
-has completed. Both can be omitted to simply continue running on the restored
-database. With Docker or Podman, the image's entrypoint is the `tuwunel`
-binary, so append `--restore-backup` to a one-off `docker run` with your usual
-volumes and environment, then recreate your normal container.
-
-##### Restoring by hand
-
-If the server binary cannot be run for some reason, a backup can also be
-reassembled manually:
-
-- create a new directory for merging together the data
-- in the online backup created, copy all `.sst` files in
-`$DATABASE_BACKUP_PATH/shared_checksum` to your new directory
-- trim all the strings so instead of `######_sxxxxxxxxx.sst`, it reads
-`######.sst`. A way of doing this with sed and bash is `for file in *.sst; do mv
-"$file" "$(echo "$file" | sed 's/_s.*/.sst/')"; done`
-- copy all the files in `$DATABASE_BACKUP_PATH/1` (or the latest backup number
-if you have multiple) to your new directory
-- set your `database_path` config option to your new directory, or replace your
-old one with the new one you crafted
-- start up Tuwunel again and it should open as normal
-
-### Offline backups
-
-If you'd like to do an offline backup, shutdown Tuwunel and copy your
-`database_path` directory elsewhere. This can be restored with no modifications
-needed.
-
-Backing up media is also just copying the `media/` directory from your database
-directory.
+Database backup, checkpoint, and restore procedures are documented on the
+[Backups](backups.md) page.
 
 ## Media
 

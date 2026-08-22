@@ -32,10 +32,13 @@ use std::{
 	ffi::CStr,
 	fmt,
 	fmt::{Debug, Display},
+	path::Path,
 	sync::Arc,
 };
 
-use rocksdb::{AsColumnFamilyRef, ColumnFamily, DBCommon, ReadOptions, WriteOptions};
+use rocksdb::{
+	AsColumnFamilyRef, ColumnFamily, DBCommon, ReadOptions, WriteOptions, checkpoint::Checkpoint,
+};
 use tuwunel_core::Result;
 
 pub(crate) use self::options::{
@@ -100,6 +103,20 @@ impl Map {
 		let cf = self.cf();
 		let flushoptions = rocksdb::FlushOptions::default();
 		DBCommon::flush_cf_opt(&self.engine.db, &cf, &flushoptions).map_err(map_err)
+	}
+
+	/// Exports this map's column family to a physical checkpoint at `path`.
+	///
+	/// RocksDB flushes the column family before exporting its live SST files.
+	#[tracing::instrument(level = "info", skip(self))]
+	pub fn checkpoint(&self, path: &Path) -> Result {
+		let checkpoint = Checkpoint::new(&self.engine.db).map_err(map_err)?;
+		let cf = self.cf();
+
+		checkpoint
+			.export_column_family(&cf, path)
+			.map(drop)
+			.map_err(map_err)
 	}
 
 	/// Reads an integer RocksDB property for this map.

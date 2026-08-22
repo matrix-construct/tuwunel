@@ -55,6 +55,7 @@
 
 # Servicing
 
+- [Backup and Recovery](backups.md)
 - [Maintenance](maintenance.md)
 - [Troubleshooting](troubleshooting.md)
 
