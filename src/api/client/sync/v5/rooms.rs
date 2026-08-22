@@ -83,6 +83,9 @@ pub(super) async fn handle_room(
 	let encrypted = services.state_accessor.is_encrypted_room(room_id);
 
 	let (timeline_limit, required_state) = merged_room_details(conn, lists, room_id);
+	let required_state = membership_allows_required_state(membership.as_ref())
+		.then_some(required_state)
+		.unwrap_or_default();
 
 	let timeline = is_invite.is_false().then_async(|| {
 		load_timeline_fallible(
@@ -103,12 +106,9 @@ pub(super) async fn handle_room(
 
 	// A failed load must fail the room, else roomsince advances past unsent events.
 	let (timeline_pdus, limited, last_timeline_count) =
-		timeline?.unwrap_or_else(|| (Vec::new(), true, PduCount::default()));
+		timeline?.unwrap_or_else(|| (Vec::new(), false, PduCount::default()));
 
-	let required_state = required_state
-		.into_iter()
-		.filter(|_| !timeline_pdus.is_empty())
-		.collect::<Vec<_>>();
+	let limited = room_timeline_limited(timeline_limit, limited);
 
 	let prev_batch = timeline_pdus
 		.first()
@@ -256,6 +256,14 @@ fn merged_room_details(
 		})
 }
 
+fn membership_allows_required_state(membership: Option<&MembershipState>) -> bool {
+	matches!(membership, None | Some(MembershipState::Join))
+}
+
+fn room_timeline_limited(timeline_limit: usize, limited: bool) -> bool {
+	timeline_limit > 0 && limited
+}
+
 fn room_timeline_metadata<Event>(
 	roomsince: u64,
 	previous_connection_pos: Option<u64>,
@@ -394,7 +402,7 @@ async fn collect_required_state(
 	services: &Services,
 	sender_user: &UserId,
 	room_id: &RoomId,
-	required_state: &[(StateEventType, StateKey)],
+	required_state: &HashSet<(StateEventType, StateKey)>,
 	timeline_pdus: &[(PduCount, PduEvent)],
 	encrypted: bool,
 ) -> Vec<Raw<AnySyncStateEvent>> {
@@ -490,10 +498,12 @@ async fn wildcard_state_keys(
 
 #[cfg(test)]
 mod tests {
-	use ruma::{UInt, uint};
+	use ruma::{UInt, events::room::member::MembershipState, uint};
 	use tuwunel_core::matrix::pdu::PduCount;
 
-	use super::room_timeline_metadata;
+	use super::{
+		membership_allows_required_state, room_timeline_limited, room_timeline_metadata,
+	};
 
 	fn timeline(positions: &[u64]) -> Vec<(PduCount, ())> {
 		positions
@@ -546,5 +556,20 @@ mod tests {
 			UInt::try_from(returned_timeline.len()).expect("timeline length fits UInt");
 
 		assert!(num_live.expect("incremental response") <= timeline_len);
+	}
+
+	#[test]
+	fn required_state_is_limited_to_visible_memberships() {
+		assert!(membership_allows_required_state(None));
+		assert!(membership_allows_required_state(Some(&MembershipState::Join)));
+		assert!(!membership_allows_required_state(Some(&MembershipState::Invite)));
+		assert!(!membership_allows_required_state(Some(&MembershipState::Knock)));
+	}
+
+	#[test]
+	fn zero_timeline_limit_is_not_limited() {
+		assert!(!room_timeline_limited(0, true));
+		assert!(room_timeline_limited(1, true));
+		assert!(!room_timeline_limited(1, false));
 	}
 }
