@@ -114,6 +114,12 @@ async fn exercise(services: &Services, base: &str) -> Result {
 		.await?
 		.ok_or_else(|| err!("the accepted room is missing from the invitee's m.direct"))?;
 
+	services
+		.account_data
+		.is_direct(&invitee_id, &direct)
+		.await
+		.ok_or_else(|| err!("the server does not read the accepted room back as direct"))?;
+
 	joined(services, &invitee_id, &plain)
 		.await
 		.is_false()
