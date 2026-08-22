@@ -19,6 +19,7 @@ use ruma::{
 	push,
 	serde::{JsonObject, Raw},
 };
+use serde::Deserialize;
 use tuwunel_core::{
 	Err, Error, Result, debug_warn, err,
 	matrix::{Event, PduCount, PduEvent, event::gen_event_id},
@@ -34,6 +35,13 @@ use tuwunel_service::{
 };
 
 use crate::{ClientIp, Ruma};
+
+/// The one membership field the invite acceptance policy reads.
+#[derive(Deserialize)]
+struct ExtractIsDirect {
+	#[serde(default)]
+	is_direct: bool,
+}
 
 /// # `PUT /_matrix/federation/v2/invite/{roomId}/{eventId}`
 ///
@@ -343,6 +351,14 @@ async fn record_local_invite(
 		})
 		.await?;
 	drop(count);
+
+	let is_direct = pdu
+		.get_content()
+		.is_ok_and(|content: ExtractIsDirect| content.is_direct);
+
+	services
+		.membership
+		.auto_accept(&body.room_id, invited_user, sender, is_direct);
 
 	notify_pushers(services, invited_user, pdu).await;
 

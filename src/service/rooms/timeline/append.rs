@@ -275,41 +275,7 @@ async fn append_pdu_effects(
 					.await?;
 			}
 		},
-		| TimelineEventType::RoomMember => {
-			if let Some(state_key) = pdu.state_key() {
-				// if the state_key fails
-				let target_user_id =
-					UserId::parse(state_key).expect("This state_key was previously validated");
-
-				let content: RoomMemberEventContent = pdu.get_content()?;
-				let stripped_state = match content.membership {
-					| MembershipState::Invite | MembershipState::Knock => self
-						.services
-						.state
-						.summary_stripped(pdu)
-						.await
-						.into(),
-					| _ => None,
-				};
-
-				// Update our membership info, we do this here incase a user is invited or
-				// knocked and immediately leaves we need the DB to record the invite or
-				// knock event for auth
-				self.services
-					.state_cache
-					.update_membership(MembershipUpdate {
-						room_id: pdu.room_id(),
-						user_id: &target_user_id,
-						membership_event: content,
-						sender: pdu.sender(),
-						last_state: stripped_state,
-						invite_via: None,
-						update_joined_count: true,
-						count,
-					})
-					.await?;
-			}
-		},
+		| TimelineEventType::RoomMember => self.append_member_effects(pdu, count).await?,
 		| TimelineEventType::RoomMessage => {
 			let content: ExtractBody = pdu.get_content()?;
 			if let Some(body) = content.body {
@@ -397,6 +363,55 @@ async fn append_pdu_effects(
 			},
 			| _ => {}, // TODO: Aggregate other types
 		}
+	}
+
+	Ok(())
+}
+
+/// Record the membership transition an `m.room.member` event carries.
+///
+/// The cache is written here rather than off the resolved state so that a
+/// user who is invited or knocked and leaves immediately still leaves the
+/// earlier event on record for auth.
+#[implement(super::Service)]
+async fn append_member_effects(&self, pdu: &PduEvent, count: PduCount) -> Result {
+	let Some(state_key) = pdu.state_key() else {
+		return Ok(());
+	};
+
+	let user_id = UserId::parse(state_key).expect("This state_key was previously validated");
+	let content: RoomMemberEventContent = pdu.get_content()?;
+	let is_invite = content.membership == MembershipState::Invite;
+	let is_direct = content.is_direct;
+
+	let stripped_state = match content.membership {
+		| MembershipState::Invite | MembershipState::Knock => self
+			.services
+			.state
+			.summary_stripped(pdu)
+			.await
+			.into(),
+		| _ => None,
+	};
+
+	self.services
+		.state_cache
+		.update_membership(MembershipUpdate {
+			room_id: pdu.room_id(),
+			user_id: &user_id,
+			membership_event: content,
+			sender: pdu.sender(),
+			last_state: stripped_state,
+			invite_via: None,
+			update_joined_count: true,
+			count,
+		})
+		.await?;
+
+	if is_invite {
+		self.services
+			.membership
+			.auto_accept(pdu.room_id(), &user_id, pdu.sender(), is_direct);
 	}
 
 	Ok(())
