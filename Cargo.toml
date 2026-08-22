@@ -775,6 +775,7 @@ inherits = "release-native.build-override"
 #]
 
 [profile.bench]
+split-debuginfo = "unpacked"
 strip = "none"
 #rustflags = [
 #	"-Cremark=all",
@@ -883,11 +884,11 @@ opt-level = 'z'
 # primarily used for CI
 [profile.test]
 debug = "limited"
+split-debuginfo = "unpacked"
 incremental = false
 
 [profile.test.package.'*']
 debug = 0
-strip = "symbols"
 opt-level = 'z'
 
 ###############################################################################
