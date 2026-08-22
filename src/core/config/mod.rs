@@ -3160,6 +3160,35 @@ pub struct Config {
 	#[serde(default)]
 	pub block_non_admin_invites: bool,
 
+	/// Automatically join local users to any room they are invited to.
+	///
+	/// The join runs in the background once the invite is recorded, and is
+	/// retried for a short while when a federated invite has not yet settled
+	/// on the inviting server. Users who are deactivated, suspended, or locked
+	/// are never joined.
+	///
+	/// reloadable: yes
+	#[serde(default)]
+	pub auto_accept_invites: bool,
+
+	/// Restrict `auto_accept_invites` to direct-message invites.
+	///
+	/// The invite must carry `is_direct` in its membership content, which
+	/// clients set when starting a direct chat. Invites to any other room are
+	/// left for the user to answer.
+	///
+	/// reloadable: yes
+	#[serde(default)]
+	pub auto_accept_invites_direct_only: bool,
+
+	/// Restrict `auto_accept_invites` to invites sent by local users.
+	///
+	/// Invites arriving from another server are left for the user to answer.
+	///
+	/// reloadable: yes
+	#[serde(default)]
+	pub auto_accept_invites_local_only: bool,
+
 	/// Enforce MSC4311 validation of the create event in federated invite and
 	/// knock stripped state. When enabled, an invite whose m.room.create event
 	/// is missing, not a full PDU, bound to a different room, or fails
