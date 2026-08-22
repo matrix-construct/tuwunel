@@ -20,8 +20,12 @@ use tuwunel_core::{
 };
 use tuwunel_service::Services;
 
-use self::msc3664::{CONDITION_KIND, Client, highlighted, notified, register, wait_until_ready};
+use self::{
+	client::{Client, register, wait_until_ready},
+	msc3664::{CONDITION_KIND, highlighted, notified},
+};
 
+mod client;
 mod msc3664;
 
 const AUTHOR_TOKEN: &str = "msc3664-related-event-match-author-token";

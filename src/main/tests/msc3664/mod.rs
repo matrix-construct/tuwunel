@@ -1,76 +1,24 @@
-//! Client-API harness shared by the MSC3664 push condition tests.
+//! Endpoints and assertions particular to the MSC3664 push condition tests.
 //!
-//! Each server-booting test is its own binary, so the two MSC3664 tests would
-//! otherwise carry one copy of this each. Both use every item here, which is
-//! what keeps the module free of dead code in either binary.
+//! The generic half of the harness lives in `crate::client`; both MSC3664
+//! binaries use every item here, which keeps the module free of dead code in
+//! either.
 
 use std::time::Duration;
 
 use serde_json::{Value, json};
-use tokio::time::{sleep, timeout};
 use tuwunel_core::{
-	Result, err,
-	ruma::{OwnedEventId, OwnedRoomId, OwnedUserId, RoomId, UserId},
+	Result,
+	ruma::{OwnedEventId, OwnedRoomId, RoomId, UserId},
 };
-use tuwunel_service::{Services, users::Register};
+use tuwunel_service::Services;
+
+use crate::client::{Client, field, poll_until};
 
 /// The unstable kind of the push condition under test.
 pub(crate) const CONDITION_KIND: &str = "im.nheko.msc3664.related_event_match";
 
-/// One user's authenticated view of the client API.
-pub(crate) struct Client<'a> {
-	pub(crate) services: &'a Services,
-	pub(crate) base: &'a str,
-	pub(crate) token: &'a str,
-}
-
-/// Wait for the listener to answer, which the boot does not itself await.
-pub(crate) async fn wait_until_ready(services: &Services, base: &str) -> Result {
-	let url = format!("{base}/_matrix/client/versions");
-
-	timeout(Duration::from_secs(10), async {
-		while services
-			.client
-			.clients
-			.default
-			.get(&url)
-			.send()
-			.await
-			.is_err()
-		{
-			sleep(Duration::from_millis(20)).await;
-		}
-	})
-	.await
-	.map_err(|_| err!("server listener did not become ready"))?;
-
-	Ok(())
-}
-
-/// Register a local user and give it a device holding `token`.
-pub(crate) async fn register(
-	services: &Services,
-	localpart: &str,
-	token: &str,
-) -> Result<OwnedUserId> {
-	let user_id = UserId::parse_with_server_name(localpart, services.globals.server_name())?;
-
-	services
-		.users
-		.full_register(Register {
-			user_id: Some(&user_id),
-			password: Some("msc3664-password"),
-			..Default::default()
-		})
-		.await?;
-
-	services
-		.users
-		.create_device(&user_id, None, (Some(token), None), None, None, None)
-		.await?;
-
-	Ok(user_id)
-}
+const PUSH_DEADLINE: Duration = Duration::from_secs(5);
 
 impl Client<'_> {
 	pub(crate) async fn create_room(&self) -> Result<OwnedRoomId> {
@@ -169,41 +117,26 @@ impl Client<'_> {
 
 		Ok(capability)
 	}
-
-	fn url(&self, path: &str) -> String { format!("{}/_matrix/client/v3/{path}", self.base) }
-}
-
-/// Read a required string field out of a response body.
-fn field<'a>(response: &'a Value, name: &str) -> Result<&'a str> {
-	response
-		.get(name)
-		.and_then(Value::as_str)
-		.ok_or_else(|| err!("response omitted {name}"))
 }
 
 /// Whether the room's notification count reaches `want` before the deadline.
 ///
-/// Push evaluation trails the send response, so neither outcome can be read off
-/// a single sample: a positive case needs the poll, and a negative case is only
-/// proven by the whole deadline elapsing.
+/// Push evaluation trails the send response, so the count is polled rather
+/// than sampled once.
 pub(crate) async fn notified(
 	services: &Services,
 	user_id: &UserId,
 	room_id: &RoomId,
 	want: u64,
 ) -> bool {
-	timeout(Duration::from_secs(5), async {
-		while services
+	poll_until(PUSH_DEADLINE, async || {
+		services
 			.pusher
 			.notification_count(user_id, room_id)
 			.await
-			.lt(&want)
-		{
-			sleep(Duration::from_millis(20)).await;
-		}
+			.ge(&want)
 	})
 	.await
-	.is_ok()
 }
 
 /// Whether the room's highlight count reaches `want` before the deadline.
@@ -217,16 +150,12 @@ pub(crate) async fn highlighted(
 	room_id: &RoomId,
 	want: u64,
 ) -> bool {
-	timeout(Duration::from_secs(5), async {
-		while services
+	poll_until(PUSH_DEADLINE, async || {
+		services
 			.pusher
 			.highlight_count(user_id, room_id)
 			.await
-			.lt(&want)
-		{
-			sleep(Duration::from_millis(20)).await;
-		}
+			.ge(&want)
 	})
 	.await
-	.is_ok()
 }

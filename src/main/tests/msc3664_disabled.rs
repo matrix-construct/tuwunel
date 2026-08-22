@@ -9,8 +9,12 @@ use tuwunel::{Args, Runtime, Server, async_run, async_start, async_stop};
 use tuwunel_core::{Err, Result, utils::BoolExt};
 use tuwunel_service::Services;
 
-use self::msc3664::{CONDITION_KIND, Client, highlighted, notified, register, wait_until_ready};
+use self::{
+	client::{Client, register, wait_until_ready},
+	msc3664::{CONDITION_KIND, highlighted, notified},
+};
 
+mod client;
 mod msc3664;
 
 const AUTHOR_TOKEN: &str = "msc3664-disabled-author-access-token";
