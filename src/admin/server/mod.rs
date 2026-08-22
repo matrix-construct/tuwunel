@@ -1,5 +1,6 @@
 mod admin_notice;
 mod backup_database;
+mod checkpoint_database;
 mod clear_caches;
 mod delete_backups;
 mod list_backups;
@@ -83,6 +84,22 @@ pub(super) enum ServerCommand {
 	/// - Performs an online backup of the database (only available for RocksDB
 	///   at the moment)
 	BackupDatabase,
+
+	/// - Create a physical RocksDB checkpoint of the database or one map
+	CheckpointDatabase {
+		/// Map to export instead of checkpointing the complete database.
+		#[arg(long, alias = "column")]
+		map: Option<String>,
+
+		/// Destination directory. Defaults inside the current database
+		/// directory.
+		#[arg(long)]
+		path: Option<PathBuf>,
+
+		/// Write-ahead log size threshold for flushing a database checkpoint.
+		#[arg(long, num_args = 0..=1, default_value_t = 0, default_missing_value = "0")]
+		log_size: u64,
+	},
 
 	/// - List database backups
 	ListBackups,

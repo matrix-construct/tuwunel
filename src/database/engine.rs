@@ -4,8 +4,8 @@
 //! shared open-time context, and the flags fixed at open (read-only, secondary,
 //! checksums). Per-column-family reads and writes go through `Map`; the methods
 //! here act on the database as a whole: WAL flush and sync, memtable flush,
-//! manual compaction and primary catch-up, property queries, and the cork
-//! counter that coalesces WAL writes (see the `cork` module).
+//! manual compaction and primary catch-up, checkpoints, property queries, and
+//! the cork counter that coalesces WAL writes (see the `cork` module).
 
 mod backup;
 mod cf_opts;
@@ -25,6 +25,7 @@ mod tests;
 use std::{
 	collections::BTreeMap,
 	ffi::CStr,
+	path::Path,
 	sync::{
 		Arc, OnceLock, Weak,
 		atomic::{AtomicU32, Ordering},
@@ -33,7 +34,7 @@ use std::{
 
 use rocksdb::{
 	AsColumnFamilyRef, BoundColumnFamily, DBCommon, DBWithThreadMode, MultiThreaded,
-	WaitForCompactOptions, WriteOptions,
+	WaitForCompactOptions, WriteOptions, checkpoint::Checkpoint,
 };
 use tuwunel_core::{Err, Result, debug, implement, info, warn};
 
@@ -120,6 +121,19 @@ impl Engine {
 		//TODO: Call flush_cfs_opt instead.
 		let flushoptions = rocksdb::FlushOptions::default();
 		result(DBCommon::flush_opt(&self.db, &flushoptions))
+	}
+
+	/// Creates a physical checkpoint of the database at `path`.
+	///
+	/// `log_size` is forwarded to RocksDB as the write-ahead log size threshold
+	/// for flushing before checkpoint creation. A value of zero forces a flush.
+	#[tracing::instrument(level = "info", skip(self))]
+	pub fn checkpoint(&self, path: &Path, log_size: u64) -> Result {
+		let checkpoint = Checkpoint::new(&self.db).map_err(map_err)?;
+
+		checkpoint
+			.create_checkpoint_with_log_size(path, log_size)
+			.map_err(map_err)
 	}
 
 	/// Catch a secondary instance up to the primary's latest writes.
