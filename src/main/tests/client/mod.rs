@@ -10,7 +10,8 @@ use serde_json::Value;
 use tokio::time::{sleep, timeout};
 use tuwunel_core::{
 	Result, err, implement,
-	ruma::{OwnedUserId, UserId},
+	ruma::{OwnedRoomId, OwnedUserId, UserId},
+	utils::BoolExt,
 };
 use tuwunel_service::{Services, users::Register};
 
@@ -32,6 +33,29 @@ pub(crate) struct Client<'a> {
 	pub(crate) services: &'a Services,
 	pub(crate) base: &'a str,
 	pub(crate) token: &'a str,
+}
+
+/// Create a room from a `createRoom` body and return its id.
+///
+/// The body stays the caller's, since what makes a room interesting differs
+/// per test; only the request and the id it answers with are shared.
+#[implement(Client, params = "<'_>")]
+pub(crate) async fn create_room(&self, body: &Value) -> Result<OwnedRoomId> {
+	let response: Value = self
+		.services
+		.client
+		.clients
+		.default
+		.post(self.url("createRoom"))
+		.bearer_auth(self.token)
+		.json(body)
+		.send()
+		.await?
+		.error_for_status()?
+		.json()
+		.await?;
+
+	Ok(field(&response, "room_id")?.try_into()?)
 }
 
 /// The versioned client-API URL for one endpoint path.
@@ -63,7 +87,7 @@ pub(crate) async fn wait_until_ready(services: &Services, base: &str) -> Result 
 	.await;
 
 	ready
-		.then_some(())
+		.into_option()
 		.ok_or_else(|| err!("server listener did not become ready"))
 }
 

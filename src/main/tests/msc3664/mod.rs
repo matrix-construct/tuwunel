@@ -9,7 +9,7 @@ use std::time::Duration;
 use serde_json::{Value, json};
 use tuwunel_core::{
 	Result,
-	ruma::{OwnedEventId, OwnedRoomId, RoomId, UserId},
+	ruma::{OwnedEventId, RoomId, UserId},
 };
 use tuwunel_service::Services;
 
@@ -21,24 +21,6 @@ pub(crate) const CONDITION_KIND: &str = "im.nheko.msc3664.related_event_match";
 const PUSH_DEADLINE: Duration = Duration::from_secs(5);
 
 impl Client<'_> {
-	pub(crate) async fn create_room(&self) -> Result<OwnedRoomId> {
-		let response = self
-			.services
-			.client
-			.clients
-			.default
-			.post(self.url("createRoom"))
-			.bearer_auth(self.token)
-			.json(&json!({ "preset": "public_chat" }))
-			.send()
-			.await?
-			.error_for_status()?
-			.json::<Value>()
-			.await?;
-
-		Ok(field(&response, "room_id")?.try_into()?)
-	}
-
 	pub(crate) async fn join(&self, room_id: &RoomId) -> Result {
 		self.services
 			.client
@@ -118,6 +100,12 @@ impl Client<'_> {
 		Ok(capability)
 	}
 }
+
+/// The body every room in these tests is created from.
+///
+/// Both binaries drive the identical room shape, so the enabled and disabled
+/// halves of the gate stay comparable.
+pub(crate) fn public_room() -> Value { json!({ "preset": "public_chat" }) }
 
 /// Whether the room's notification count reaches `want` before the deadline.
 ///

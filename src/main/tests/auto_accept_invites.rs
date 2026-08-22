@@ -10,12 +10,12 @@ use serde_json::{Value, json};
 use tuwunel::{Args, Runtime, Server, async_run, async_start, async_stop};
 use tuwunel_core::{
 	Result, err, implement,
-	ruma::{OwnedRoomId, RoomId, UserId},
+	ruma::{RoomId, UserId},
 	utils::BoolExt,
 };
 use tuwunel_service::Services;
 
-use self::client::{Client, field, poll_until, register, wait_until_ready};
+use self::client::{Client, poll_until, register, wait_until_ready};
 
 mod client;
 
@@ -28,6 +28,7 @@ const INVITEE_TOKEN: &str = "auto-accept-invites-invitee-token";
 ///
 /// The flag reaches the invite's membership content only through room
 /// creation, since the invite endpoint has no field carrying it.
+#[derive(Clone, Copy)]
 enum Chat {
 	Direct,
 	Plain,
@@ -98,11 +99,11 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	let invitee = Client { services, base, token: INVITEE_TOKEN };
 
 	let plain = inviter
-		.create_room(&invitee_id, Chat::Plain)
+		.create_room(&invite_body(&invitee_id, Chat::Plain))
 		.await?;
 
 	let direct = inviter
-		.create_room(&invitee_id, Chat::Direct)
+		.create_room(&invite_body(&invitee_id, Chat::Direct))
 		.await?;
 
 	joined(services, &invitee_id, &direct)
@@ -126,30 +127,16 @@ async fn exercise(services: &Services, base: &str) -> Result {
 		.ok_or_else(|| err!("a plain room invitation was accepted under the direct-only policy"))
 }
 
-/// Create a room inviting `invitee`, flagged a direct chat or not.
-#[implement(Client, params = "<'_>")]
-async fn create_room(&self, invitee: &UserId, chat: Chat) -> Result<OwnedRoomId> {
-	let body = json!({
+/// A `createRoom` body inviting `invitee` into a private room.
+///
+/// Both rooms the test creates differ only in the direct-chat flag, so the
+/// rest of the body is written once.
+fn invite_body(invitee: &UserId, chat: Chat) -> Value {
+	json!({
 		"preset": "private_chat",
 		"invite": [invitee],
 		"is_direct": matches!(chat, Chat::Direct),
-	});
-
-	let response: Value = self
-		.services
-		.client
-		.clients
-		.default
-		.post(self.url("createRoom"))
-		.bearer_auth(self.token)
-		.json(&body)
-		.send()
-		.await?
-		.error_for_status()?
-		.json()
-		.await?;
-
-	Ok(field(&response, "room_id")?.try_into()?)
+	})
 }
 
 /// Whether the user's `m.direct` names the room under `counterparty`.

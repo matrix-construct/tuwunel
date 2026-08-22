@@ -11,7 +11,7 @@ use tuwunel_service::Services;
 
 use self::{
 	client::{Client, register, wait_until_ready},
-	msc3664::{CONDITION_KIND, highlighted, notified},
+	msc3664::{CONDITION_KIND, highlighted, notified, public_room},
 };
 
 mod client;
@@ -90,7 +90,7 @@ async fn exercise(services: &Services, base: &str) -> Result {
 
 	let writer = Client { services, base, token: AUTHOR_TOKEN };
 	let reader = Client { services, base, token: READER_TOKEN };
-	let room = writer.create_room().await?;
+	let room = writer.create_room(&public_room()).await?;
 
 	reader.join(&room).await?;
 

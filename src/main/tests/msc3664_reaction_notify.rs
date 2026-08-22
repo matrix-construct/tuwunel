@@ -22,7 +22,7 @@ use tuwunel_service::Services;
 
 use self::{
 	client::{Client, register, wait_until_ready},
-	msc3664::{CONDITION_KIND, highlighted, notified},
+	msc3664::{CONDITION_KIND, highlighted, notified, public_room},
 };
 
 mod client;
@@ -101,7 +101,7 @@ async fn exercise(services: &Services, base: &str) -> Result {
 
 	old_rulesets_gain_reply(services, &writer, &author).await?;
 
-	let room = writer.create_room().await?;
+	let room = writer.create_room(&public_room()).await?;
 
 	reader.join(&room).await?;
 
@@ -345,7 +345,7 @@ async fn cross_room_relations_are_not_followed(
 	author: &UserId,
 	room: &RoomId,
 ) -> Result {
-	let elsewhere = writer.create_room().await?;
+	let elsewhere = writer.create_room(&public_room()).await?;
 	let hidden = writer
 		.send(
 			&elsewhere,
