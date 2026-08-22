@@ -7,13 +7,15 @@ use ruma::{
 };
 use tuwunel_core::{Result, at, implement, is_equal_to};
 
+/// Whether the room is listed as a direct chat in the user's `m.direct`.
+///
+/// The map is keyed by counterparty rather than by room, so any one of its
+/// lists naming the room answers yes. A user with no `m.direct` at all has no
+/// direct rooms.
 #[implement(super::Service)]
 pub async fn is_direct(&self, user_id: &UserId, room_id: &RoomId) -> bool {
-	self.services
-		.account_data
-		.get_global(user_id, GlobalAccountDataEventType::Direct)
+	self.direct_content(user_id)
 		.await
-		.map(|content: DirectEventContent| content)
 		.into_iter()
 		.flat_map(DirectEventContent::into_iter)
 		.map(at!(1))
@@ -29,11 +31,8 @@ pub async fn is_direct(&self, user_id: &UserId, room_id: &RoomId) -> bool {
 #[implement(super::Service)]
 pub async fn mark_direct(&self, user_id: &UserId, target: &UserId, room_id: &RoomId) -> Result {
 	let mut content = self
-		.services
-		.account_data
-		.get_global(user_id, GlobalAccountDataEventType::Direct)
+		.direct_content(user_id)
 		.await
-		.map(|event: DirectEvent| event.content)
 		.unwrap_or_default();
 
 	let target: &DirectUserIdentifier = target.into();
@@ -60,4 +59,17 @@ pub async fn mark_direct(&self, user_id: &UserId, target: &UserId, room_id: &Roo
 		.account_data
 		.update(None, user_id, event_type, &event)
 		.await
+}
+
+/// The user's `m.direct` content, absent when they have never had one.
+///
+/// Account data is stored as the whole event rather than as its content, so
+/// the record deserializes as an event and the content comes off it.
+#[implement(super::Service)]
+async fn direct_content(&self, user_id: &UserId) -> Result<DirectEventContent> {
+	self.services
+		.account_data
+		.get_global(user_id, GlobalAccountDataEventType::Direct)
+		.await
+		.map(|event: DirectEvent| event.content)
 }
