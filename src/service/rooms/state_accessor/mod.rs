@@ -92,12 +92,6 @@ impl Service {
 			.await
 	}
 
-	pub async fn is_direct(&self, room_id: &RoomId, user_id: &UserId) -> bool {
-		self.get_member(room_id, user_id)
-			.await
-			.is_ok_and(|content| content.is_direct)
-	}
-
 	pub async fn get_member(
 		&self,
 		room_id: &RoomId,

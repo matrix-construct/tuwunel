@@ -73,8 +73,10 @@ pub(super) async fn handle_room(
 		services,
 		sender_user,
 		previous_connection_pos,
+		direct_rooms,
 		..
 	} = sync_info;
+
 	let WindowRoom { lists, membership, room_id, .. } = window_room;
 
 	if matches!(*membership, Some(MembershipState::Leave | MembershipState::Ban)) {
@@ -166,12 +168,12 @@ pub(super) async fn handle_room(
 		.map(|(position, pdu)| (position, Event::into_format(pdu)))
 		.collect::<Vec<_>>();
 
-	let meta = room_meta_future(services, sender_user, room_id);
+	let meta = room_meta_future(services, room_id);
 	let events = join3(timeline, required_state, invite_state);
 	let member_counts = member_counts_future(services, room_id);
 	let notification_counts = notification_counts_future(services, sender_user, room_id);
 	let (
-		(room_name, room_avatar, is_dm),
+		(room_name, room_avatar),
 		(timeline, required_state, invite_state),
 		(joined_count, invited_count),
 		(highlight_count, notification_count, _last_notification_read, thread_counts),
@@ -200,7 +202,7 @@ pub(super) async fn handle_room(
 		membership: membership.clone(),
 		name: room_name.or(heroes_name),
 		avatar: JsOption::from_option(room_avatar.or(heroes_avatar)),
-		is_dm,
+		is_dm: direct_rooms.contains(room_id).then_some(true),
 		heroes,
 		required_state,
 		invite_state: invite_state.flatten(),
@@ -333,9 +335,8 @@ async fn resolve_heroes(
 
 fn room_meta_future<'a>(
 	services: &'a Services,
-	sender_user: &'a UserId,
 	room_id: &'a RoomId,
-) -> impl Future<Output = (Option<DisplayName>, Option<OwnedMxcUri>, Option<bool>)> + Send + 'a {
+) -> impl Future<Output = (Option<DisplayName>, Option<OwnedMxcUri>)> + Send + 'a {
 	let room_name = services
 		.state_accessor
 		.get_name(room_id)
@@ -349,12 +350,7 @@ fn room_meta_future<'a>(
 		.ok()
 		.map(Option::flatten);
 
-	let is_dm = services
-		.state_accessor
-		.is_direct(room_id, sender_user)
-		.map(|is_dm| is_dm.then_some(is_dm));
-
-	join3(room_name, room_avatar, is_dm)
+	join(room_name, room_avatar)
 }
 
 fn member_counts_future<'a>(

@@ -117,8 +117,10 @@ async fn exercise(services: &Services, base: &str) -> Result {
 
 	services
 		.account_data
-		.is_direct(&invitee_id, &direct)
+		.direct_rooms(&invitee_id)
 		.await
+		.contains(&direct)
+		.into_option()
 		.ok_or_else(|| err!("the server does not read the accepted room back as direct"))?;
 
 	joined(services, &invitee_id, &plain)

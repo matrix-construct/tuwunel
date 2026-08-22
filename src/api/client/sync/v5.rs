@@ -4,7 +4,12 @@ mod range;
 mod rooms;
 mod selector;
 
-use std::{collections::BTreeMap, fmt::Debug, sync::Arc, time::Duration};
+use std::{
+	collections::{BTreeMap, BTreeSet},
+	fmt::Debug,
+	sync::Arc,
+	time::Duration,
+};
 
 use axum::extract::{Extension, State};
 use futures::{FutureExt, TryFutureExt, future::join};
@@ -45,6 +50,11 @@ struct SyncInfo<'a> {
 	sender_user: &'a UserId,
 	sender_device: Option<&'a DeviceId>,
 	previous_connection_pos: Option<u64>,
+
+	/// The rooms the user calls direct, read once for the whole pass.
+	///
+	/// Both the list filters and every room payload answer `is_dm` from this.
+	direct_rooms: &'a BTreeSet<OwnedRoomId>,
 }
 
 #[derive(Clone, Debug)]
@@ -182,12 +192,6 @@ pub(crate) async fn sync_events_v5_route(
 		.checked_add(Duration::from_millis(timeout))
 		.expect("configuration must limit maximum timeout");
 
-	let sync_info = SyncInfo {
-		services,
-		sender_user,
-		sender_device,
-		previous_connection_pos: since.ne(&0).then_some(since),
-	};
 	loop {
 		debug_assert!(
 			conn.globalsince <= conn.next_batch,
@@ -201,6 +205,19 @@ pub(crate) async fn sync_events_v5_route(
 			.await;
 
 		conn.next_batch = services.globals.wait_pending().await?;
+		let direct_rooms = services
+			.account_data
+			.direct_rooms(sender_user)
+			.await;
+
+		let sync_info = SyncInfo {
+			services,
+			sender_user,
+			sender_device,
+			previous_connection_pos: since.ne(&0).then_some(since),
+			direct_rooms: &direct_rooms,
+		};
+
 		(window, response.lists) = selector::selector(&mut conn, sync_info)
 			.boxed()
 			.await;

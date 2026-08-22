@@ -18,7 +18,7 @@ use super::SyncInfo;
 
 #[tracing::instrument(name = "filter", level = "trace", skip_all)]
 pub(super) async fn filter_room(
-	SyncInfo { services, sender_user, .. }: SyncInfo<'_>,
+	SyncInfo { services, sender_user, direct_rooms, .. }: SyncInfo<'_>,
 	filter: &ListFilters,
 	room_id: &RoomId,
 	membership: Option<&MembershipState>,
@@ -38,19 +38,9 @@ pub(super) async fn filter_room(
 					.await == is_invite,
 		});
 
-	let match_direct = filter.is_dm.map_async(async |is_dm| {
-		services
-			.account_data
-			.is_direct(sender_user, room_id)
-			.await == is_dm
-	});
-
-	let match_direct_member = filter.is_dm.map_async(async |is_dm| {
-		services
-			.state_accessor
-			.is_direct(room_id, sender_user)
-			.await == is_dm
-	});
+	let match_direct = filter
+		.is_dm
+		.is_none_or(is_equal_to!(direct_rooms.contains(room_id)));
 
 	let match_encrypted = filter
 		.is_encrypted
@@ -103,16 +93,15 @@ pub(super) async fn filter_room(
 			&& (filter.room_types.is_empty() || filter.room_types.contains(&room_type))
 	});
 
-	future::and7(
-		match_invite.is_none_or(is_true!()),
-		match_encrypted.is_none_or(is_true!()),
-		match_direct.is_none_or(is_true!()),
-		match_direct_member.is_none_or(is_true!()),
-		match_space_child.is_none_or(is_true!()),
-		match_room_type.is_none_or(is_true!()),
-		match_room_tag.is_none_or(is_true!()),
-	)
-	.await
+	match_direct
+		&& future::and5(
+			match_invite.is_none_or(is_true!()),
+			match_encrypted.is_none_or(is_true!()),
+			match_space_child.is_none_or(is_true!()),
+			match_room_type.is_none_or(is_true!()),
+			match_room_tag.is_none_or(is_true!()),
+		)
+		.await
 }
 
 #[tracing::instrument(name = "filter_meta", level = "trace", skip_all)]

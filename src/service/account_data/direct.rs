@@ -1,5 +1,7 @@
+use std::collections::BTreeSet;
+
 use ruma::{
-	RoomId, UserId,
+	OwnedRoomId, RoomId, UserId,
 	events::{
 		GlobalAccountDataEventType,
 		direct::{DirectEvent, DirectEventContent, DirectUserIdentifier},
@@ -7,20 +9,20 @@ use ruma::{
 };
 use tuwunel_core::{Result, at, implement, is_equal_to};
 
-/// Whether the room is listed as a direct chat in the user's `m.direct`.
+/// The rooms the user's `m.direct` names, whoever the counterparty is.
 ///
-/// The map is keyed by counterparty rather than by room, so any one of its
-/// lists naming the room answers yes. A user with no `m.direct` at all has no
+/// The map is keyed by counterparty rather than by room, so answering for one
+/// room means flattening all of it. A user with no `m.direct` at all has no
 /// direct rooms.
 #[implement(super::Service)]
-pub async fn is_direct(&self, user_id: &UserId, room_id: &RoomId) -> bool {
+pub async fn direct_rooms(&self, user_id: &UserId) -> BTreeSet<OwnedRoomId> {
 	self.direct_content(user_id)
 		.await
 		.into_iter()
 		.flat_map(DirectEventContent::into_iter)
 		.map(at!(1))
 		.flat_map(Vec::into_iter)
-		.any(is_equal_to!(room_id))
+		.collect()
 }
 
 /// Record a room as a direct chat with `target` in the user's `m.direct`.
