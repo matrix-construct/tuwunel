@@ -37,6 +37,21 @@ struct Healed {
 	promoted: usize,
 }
 
+/// What patching one statediff row computed, before it is written back.
+///
+/// The change counts say how many entries each run rewrote winner-ward;
+/// `shrunk` counts duplicates that converged inside one run; `colliding`
+/// counts entries subtracted from the removed run because the patch left
+/// them in both.
+struct Patched {
+	added: CompressedState,
+	removed: CompressedState,
+	added_changes: u64,
+	removed_changes: u64,
+	shrunk: usize,
+	colliding: usize,
+}
+
 /// Completes the torn writes the residue names on its own.
 ///
 /// The pre-fix allocator put the forward and reverse rows separately, so a
@@ -194,6 +209,7 @@ pub(super) async fn repair(
 			infected_parents = scan.infected_parents,
 			orphan_entries = scan.orphans,
 			malformed_diffs = scan.malformed_diffs,
+			colliding_diffs = scan.colliding_diffs,
 			"Refusing the destructive short id repair; the nonzero counts name shapes it does \
 			 not handle. The residue is recorded and left in place. Please report this line \
 			 upstream."
@@ -261,8 +277,14 @@ async fn patch_state(services: &Services, scan: &Scan, digests: &Digests, state:
 		.get_statediff(state)
 		.await?;
 
-	let (added, added_changes) = patch(&diff.added, scan);
-	let (removed, removed_changes) = patch(&diff.removed, scan);
+	let Patched {
+		added,
+		removed,
+		added_changes,
+		removed_changes,
+		shrunk,
+		colliding,
+	} = patch_runs(&diff, scan);
 
 	if removed_changes > 0 {
 		warn!(
@@ -273,18 +295,20 @@ async fn patch_state(services: &Services, scan: &Scan, digests: &Digests, state:
 		);
 	}
 
-	let shrunk = diff
-		.added
-		.len()
-		.saturating_add(diff.removed.len())
-		.saturating_sub(added.len())
-		.saturating_sub(removed.len());
-
 	if shrunk > 0 {
 		info!(
 			%state,
 			entries = shrunk,
 			"Patching converged duplicate entries; the state shrank."
+		);
+	}
+
+	if colliding > 0 {
+		warn!(
+			%state,
+			entries = colliding,
+			"Subtracted colliding entries from the removed run; each state key keeps its \
+			 event rather than vanishing."
 		);
 	}
 
@@ -318,6 +342,46 @@ async fn patch_state(services: &Services, scan: &Scan, digests: &Digests, state:
 	);
 
 	Ok(())
+}
+
+/// Rebuilds one diff's runs winner-ward and subtracts the collision the
+/// patch creates.
+///
+/// The runs are mapped independently, so a ghost in one run whose winner
+/// sits in the other patches both to one entry, and applying added before
+/// removed would then erase the state key. Subtracting the intersection
+/// from removed is exact in both orientations: the row meant the key
+/// holds this event before the patch, and it still does after. `shrunk`
+/// is taken first, keeping its meaning to duplicates converging inside
+/// one run.
+fn patch_runs(diff: &StateDiff, scan: &Scan) -> Patched {
+	let (added, added_changes) = patch(&diff.added, scan);
+	let (patched_removed, removed_changes) = patch(&diff.removed, scan);
+
+	let shrunk = diff
+		.added
+		.len()
+		.saturating_add(diff.removed.len())
+		.saturating_sub(added.len())
+		.saturating_sub(patched_removed.len());
+
+	let removed: CompressedState = patched_removed
+		.difference(&added)
+		.copied()
+		.collect();
+
+	let colliding = patched_removed
+		.len()
+		.saturating_sub(removed.len());
+
+	Patched {
+		added,
+		removed,
+		added_changes,
+		removed_changes,
+		shrunk,
+		colliding,
+	}
 }
 
 /// Maps both halves of each entry through the winner maps.
@@ -440,5 +504,70 @@ fn delete_losers(services: &Services, scan: &Scan) {
 
 	for loser in &scan.statekeys.losers {
 		statekeys.remove(&loser.to_be_bytes());
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use std::{collections::BTreeMap, sync::Arc};
+
+	use super::{CompressedState, Family, Scan, StateDiff, compress_state_event, patch_runs};
+
+	fn ghost_scan(loser: u64, winner: u64) -> Scan {
+		Scan {
+			events: Family {
+				losers: vec![loser],
+				winners: BTreeMap::from([(loser, winner)]),
+				..Default::default()
+			},
+			..Default::default()
+		}
+	}
+
+	fn diff_of(added: &[(u64, u64)], removed: &[(u64, u64)]) -> StateDiff {
+		let compress = |entries: &[(u64, u64)]| -> CompressedState {
+			entries
+				.iter()
+				.map(|&(statekey, event)| compress_state_event(statekey, event))
+				.collect()
+		};
+
+		StateDiff {
+			parent: None,
+			added: Arc::new(compress(added)),
+			removed: Arc::new(compress(removed)),
+		}
+	}
+
+	#[test]
+	fn a_ghost_added_with_its_winner_removed_keeps_the_state_key() {
+		let scan = ghost_scan(7, 3);
+		let diff = diff_of(&[(5, 7)], &[(5, 3)]);
+
+		let patched = patch_runs(&diff, &scan);
+		let winner_entry = compress_state_event(5, 3);
+
+		assert_eq!(patched.colliding, 1);
+		assert_eq!(patched.shrunk, 0);
+		assert_eq!(patched.added_changes, 1);
+		assert_eq!(patched.removed_changes, 0);
+		assert!(patched.added.contains(&winner_entry));
+		assert!(patched.removed.is_empty());
+	}
+
+	#[test]
+	fn a_ghost_removed_with_its_winner_added_keeps_the_state_key() {
+		let scan = ghost_scan(7, 3);
+		let diff = diff_of(&[(5, 3)], &[(5, 7)]);
+
+		let patched = patch_runs(&diff, &scan);
+		let winner_entry = compress_state_event(5, 3);
+
+		assert_eq!(patched.colliding, 1);
+		assert_eq!(patched.shrunk, 0);
+		assert_eq!(patched.added_changes, 0);
+		assert_eq!(patched.removed_changes, 1);
+		assert!(patched.added.contains(&winner_entry));
+		assert!(patched.removed.is_empty());
 	}
 }

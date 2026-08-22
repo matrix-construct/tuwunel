@@ -11,13 +11,16 @@ use tuwunel_core::{
 	smallvec::SmallVec,
 	utils::{
 		BoolExt, ReadyExt, TryReadyExt,
-		stream::{IterStream, TryIgnore},
+		stream::{BroadbandExt, IterStream, TryIgnore},
 	},
 	warn,
 };
 use tuwunel_database::{Database, Get, Handle, Map, SEP};
 
-use crate::{Services, rooms::pdu_metadata::typed_relations::Key as RelationKey};
+use crate::{
+	Services,
+	rooms::{pdu_metadata::typed_relations::Key as RelationKey, state_compressor::StateDiff},
+};
 
 /// Owned copy of a reverse-map identity, used to dereference a loser.
 ///
@@ -102,6 +105,7 @@ pub(super) struct Scan {
 	pub(super) infected_parents: u64,
 	pub(super) orphans: u64,
 	pub(super) malformed_diffs: u64,
+	pub(super) colliding_diffs: u64,
 	pub(super) moves: Vec<u64>,
 	pub(super) relations: Relations,
 	pub(super) strays: u64,
@@ -192,19 +196,35 @@ pub(super) async fn scan(services: &Services) -> Result<Scan> {
 	let swept =
 		sweep(services, &events, &statekeys, event_reverse, statekey_reverse, counter).await?;
 
-	Ok(Scan { events, statekeys, ..swept })
+	// Malformed framing already refuses the lane, and the typed read would
+	// trust the framing the walk just impeached.
+	let colliding_diffs = match swept.malformed_diffs {
+		| 0 => colliding_diffs(services, &swept.infected).await?,
+		| _ => 0,
+	};
+
+	Ok(Scan {
+		events,
+		statekeys,
+		colliding_diffs,
+		..swept
+	})
 }
 
 /// Whether any count impugns the repair's own input.
 ///
 /// Any anomaly refuses the destructive repair lane; the cache-clearing
 /// lane is unconditionally safe and proceeds regardless. A malformed diff
-/// row leaves the statediff walk's own output in doubt, and a child of an
-/// infected state would need its whole chain rederived, so both gate
-/// alongside the family anomalies.
+/// row leaves the statediff walk's own output in doubt, a child of an
+/// infected state would need its whole chain rederived, and an infected
+/// row whose stored runs already intersect is malformed input no writer
+/// produces, so all three gate alongside the family anomalies.
 #[implement(Scan)]
 pub(super) fn anomalous(&self) -> bool {
-	self.family_anomalous() || self.infected_parents > 0 || self.malformed_diffs > 0
+	self.family_anomalous()
+		|| self.infected_parents > 0
+		|| self.malformed_diffs > 0
+		|| self.colliding_diffs > 0
 }
 
 /// Whether either short id family carries an unhandled shape.
@@ -698,6 +718,34 @@ impl Diffs<'_> {
 	}
 }
 
+/// Counts infected rows whose stored runs already intersect.
+///
+/// No writer emits a row whose added and removed runs share an entry, so
+/// a hit is malformed input of unknown provenance and refuses the
+/// destructive lane rather than being rewritten. The population is the
+/// repair's own worklist, read back through the same typed round-trip the
+/// patch trusts.
+#[tracing::instrument(level = "debug", skip_all)]
+async fn colliding_diffs(services: &Services, infected: &BTreeSet<u64>) -> Result<u64> {
+	infected
+		.iter()
+		.copied()
+		.stream()
+		.broad_then(async |state| {
+			services
+				.state_compressor
+				.get_statediff(state)
+				.await
+		})
+		.ready_try_fold(0_u64, |colliding, diff| {
+			Ok(colliding.saturating_add(u64::from(intersecting(&diff))))
+		})
+		.await
+}
+
+/// Whether one diff row's stored runs share an entry.
+fn intersecting(diff: &StateDiff) -> bool { !diff.added.is_disjoint(&diff.removed) }
+
 /// Counts shortroomid references with no forward row.
 ///
 /// Purged rooms and losing allocations both produce them; no repair step
@@ -839,11 +887,13 @@ fn get_bit(bits: &[u64], index: u64) -> bool {
 
 #[cfg(test)]
 mod tests {
+	use std::{collections::BTreeSet, sync::Arc};
+
 	use tuwunel_core::err;
 
 	use super::{
-		Candidate, Counts, Diffs, Family, Identity, Resolved, Scan, by_identity, by_short,
-		contenders, resolution,
+		Candidate, Counts, Diffs, Family, Identity, Resolved, Scan, StateDiff, by_identity,
+		by_short, contenders, intersecting, resolution,
 	};
 
 	fn candidate(short: u64, identity: &[u8]) -> Candidate {
@@ -967,6 +1017,40 @@ mod tests {
 		};
 
 		assert!(scan.anomalous());
+	}
+
+	#[test]
+	fn an_intersecting_infected_row_refuses_the_repair() {
+		let scan = Scan {
+			events: Family { losers: vec![7], ..Default::default() },
+			colliding_diffs: 1,
+			..Default::default()
+		};
+
+		assert!(scan.anomalous());
+		assert!(!scan.family_anomalous());
+	}
+
+	#[test]
+	fn runs_sharing_an_entry_intersect() {
+		let diff = StateDiff {
+			parent: None,
+			added: Arc::new(BTreeSet::from([[1_u8; 16], [2_u8; 16]])),
+			removed: Arc::new(BTreeSet::from([[2_u8; 16], [3_u8; 16]])),
+		};
+
+		assert!(intersecting(&diff));
+	}
+
+	#[test]
+	fn disjoint_runs_do_not_intersect() {
+		let diff = StateDiff {
+			parent: None,
+			added: Arc::new(BTreeSet::from([[1_u8; 16]])),
+			removed: Arc::new(BTreeSet::from([[2_u8; 16]])),
+		};
+
+		assert!(!intersecting(&diff));
 	}
 
 	#[test]
