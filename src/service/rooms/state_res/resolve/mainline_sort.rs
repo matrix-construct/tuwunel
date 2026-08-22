@@ -1,8 +1,6 @@
 use std::collections::HashMap;
 
-use futures::{
-	FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt, pin_mut, stream::try_unfold,
-};
+use futures::{Stream, StreamExt, TryFutureExt, TryStreamExt, pin_mut, stream::try_unfold};
 use ruma::{EventId, OwnedEventId, events::TimelineEventType};
 use tuwunel_core::{
 	Error, Result, at,
@@ -94,21 +92,29 @@ where
 
 	events
 		.map(ToOwned::to_owned)
-		.broad_filter_map(async |event_id| {
-			let event = fetch(event_id.clone()).await.ok()?;
-			let origin_server_ts = event.origin_server_ts();
-			let position = mainline_position(Some(event), &positions, fetch)
-				.await
-				.ok()?;
+		.broad_then(async |event_id| {
+			let event = match fetch(event_id.clone()).await {
+				| Ok(event) => event,
+				| Err(error) if error.is_not_found() => return Ok(None),
+				| Err(error) => return Err(error),
+			};
 
-			Some((event_id, (position, origin_server_ts)))
+			let origin_server_ts = event.origin_server_ts();
+			let position = match mainline_position(Some(event), &positions, fetch).await {
+				| Ok(position) => position,
+				| Err(error) if error.is_not_found() => return Ok(None),
+				| Err(error) => return Err(error),
+			};
+
+			Ok(Some((event_id, (position, origin_server_ts))))
 		})
-		.inspect(|(event_id, (position, origin_server_ts))| {
+		.ready_try_filter_map(Result::Ok)
+		.inspect_ok(|(event_id, (position, origin_server_ts))| {
 			trace!(position, ?origin_server_ts, ?event_id, "mainline position");
 		})
-		.collect()
-		.map(|mut vec: Vec<_>| {
-			vec.sort_by(|a, b| {
+		.try_collect()
+		.map_ok(|mut events: Vec<_>| {
+			events.sort_by(|a, b| {
 				let (a_pos, a_ots) = &a.1;
 				let (b_pos, b_ots) = &b.1;
 				a_pos
@@ -117,9 +123,8 @@ where
 					.then(a.cmp(b))
 			});
 
-			vec.into_iter().map(at!(0)).collect()
+			events.into_iter().map(at!(0)).collect()
 		})
-		.map(Ok)
 		.await
 }
 

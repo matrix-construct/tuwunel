@@ -9,7 +9,7 @@ use ruma::{
 use tuwunel_core::{
 	Result, err,
 	matrix::Event,
-	utils::stream::{BroadbandExt, IterStream, TryBroadbandExt},
+	utils::stream::{IterStream, TryBroadbandExt, TryReadyExt},
 };
 
 use super::{
@@ -63,17 +63,19 @@ where
 	// that are in the full conflicted set. Fill the graph.
 	let graph = full_conflicted_set
 		.iter()
-		.stream()
-		.broad_filter_map(async |id| {
+		.try_stream()
+		.broad_and_then(async |id| {
 			is_power_event_id(id, fetch)
+				.map_ok(|is_power| is_power.then(|| id.clone()))
 				.await
-				.then(|| id.clone())
 		})
+		.ready_try_filter_map(Result::Ok)
 		.enumerate()
-		.fold(HashMap::new(), |graph, (i, event_id)| {
+		.map(|(i, event_id)| event_id.map(|event_id| (i, event_id)))
+		.try_fold(HashMap::new(), |graph, (i, event_id)| {
 			add_event_auth_chain(full_conflicted_set, graph, event_id, fetch, i)
 		})
-		.await;
+		.await?;
 
 	// The map of event ID to the power level of the sender of the event.
 	// Get the power level of the sender of each event in the graph.
@@ -84,7 +86,6 @@ where
 		.broad_and_then(|event_id| {
 			power_level_for_sender(event_id, rules, fetch)
 				.map_ok(move |sender_power| (event_id.to_owned(), sender_power))
-				.map_err(|e| err!(Request(NotFound("Missing PL for sender: {e}"))))
 		})
 		.try_collect()
 		.await?;
@@ -103,6 +104,9 @@ where
 
 /// Add the event with the given event ID and all the events in its auth chain
 /// that are in the full conflicted set to the graph.
+///
+/// Missing events are skipped. Other fetch errors preserve their original
+/// kind.
 #[tracing::instrument(
 	name = "auth_chain",
 	level = "trace",
@@ -113,22 +117,22 @@ where
 		%i,
 	)
 )]
-async fn add_event_auth_chain<Fetch, Fut, Pdu>(
+pub(super) async fn add_event_auth_chain<Fetch, Fut, Pdu>(
 	full_conflicted_set: &ConflictedSet,
 	mut graph: HashMap<OwnedEventId, ReferencedIds>,
 	event_id: OwnedEventId,
 	fetch: &Fetch,
 	i: usize,
-) -> HashMap<OwnedEventId, ReferencedIds>
+) -> Result<HashMap<OwnedEventId, ReferencedIds>>
 where
 	Fetch: Fn(OwnedEventId) -> Fut + Sync,
 	Fut: Future<Output = Result<Pdu>> + Send,
 	Pdu: Event,
 {
-	let mut todo: FuturesUnordered<Fut> = once(fetch(event_id)).collect();
+	let mut todo: FuturesUnordered<_> = once(fetch_optional_event(event_id, fetch)).collect();
 
 	while let Some(event) = todo.next().await {
-		let Ok(event) = event else {
+		let Some(event) = event? else {
 			continue;
 		};
 
@@ -141,7 +145,7 @@ where
 			.filter(|auth_event_id| full_conflicted_set.contains(auth_event_id))
 		{
 			if !graph.contains_key(&auth_event_id) {
-				todo.push(fetch(auth_event_id.clone()));
+				todo.push(fetch_optional_event(auth_event_id.clone(), fetch));
 			}
 
 			let references = graph
@@ -154,30 +158,13 @@ where
 		}
 	}
 
-	graph
+	Ok(graph)
 }
 
-/// Find the power level for the sender of the event of the given event ID or
-/// return a default value of zero.
+/// Finds the power level for an event sender.
 ///
-/// We find the most recent `m.room.power_levels` by walking backwards in the
-/// auth chain of the event.
-///
-/// Do NOT use this anywhere but topological sort.
-///
-/// ## Arguments
-///
-/// * `event_id` - The event ID of the event to get the power level of the
-///   sender of.
-///
-/// * `rules` - The authorization rules for the current room version.
-///
-/// * `fetch` - Function to fetch an event in the room given its event ID.
-///
-/// ## Returns
-///
-/// Returns the power level of the sender of the event or an `Err(_)` if one of
-/// the auth events if malformed.
+/// This is only valid for topological sorting. Missing events retain the
+/// default-power behavior; other dependency failures are returned unchanged.
 #[tracing::instrument(
 	name = "sender_power",
 	level = "trace",
@@ -186,7 +173,7 @@ where
 		?event_id,
 	)
 )]
-async fn power_level_for_sender<Fetch, Fut, Pdu>(
+pub(super) async fn power_level_for_sender<Fetch, Fut, Pdu>(
 	event_id: &EventId,
 	rules: &RoomVersionRules,
 	fetch: &Fetch,
@@ -196,14 +183,15 @@ where
 	Fut: Future<Output = Result<Pdu>> + Send,
 	Pdu: Event,
 {
-	let event = fetch(event_id.into()).await;
+	let event = fetch_optional_event(event_id.to_owned(), fetch).await?;
+
 	let hydra_room_id = rules
 		.authorization
 		.room_create_event_id_as_room_id;
 
 	let mut create_event = None;
 	let mut power_levels_event = None;
-	if hydra_room_id && let Ok(event) = event.as_ref() {
+	if hydra_room_id && let Some(event) = event.as_ref() {
 		let create_id = event.room_id().as_event_id()?;
 		let fetched = fetch(create_id).await?;
 
@@ -218,7 +206,8 @@ where
 	{
 		use TimelineEventType::{RoomCreate, RoomPowerLevels};
 
-		let Ok(auth_event) = fetch(auth_event_id.to_owned()).await else {
+		let Some(auth_event) = fetch_optional_event(auth_event_id.to_owned(), fetch).await?
+		else {
 			continue;
 		};
 
@@ -235,9 +224,10 @@ where
 
 	let creators = create_event
 		.as_ref()
-		.and_then(|event| event.creators(&rules.authorization).ok());
+		.map(|event| event.creators(&rules.authorization))
+		.transpose()?;
 
-	if let Some((event, creators)) = event.ok().zip(creators) {
+	if let Some((event, creators)) = event.as_ref().zip(creators) {
 		power_levels_event.user_power_level(event.sender(), creators, &rules.authorization)
 	} else {
 		power_levels_event
@@ -257,14 +247,32 @@ where
 		?event_id,
 	)
 )]
-async fn is_power_event_id<Fetch, Fut, Pdu>(event_id: &EventId, fetch: &Fetch) -> bool
+pub(super) async fn is_power_event_id<Fetch, Fut, Pdu>(
+	event_id: &EventId,
+	fetch: &Fetch,
+) -> Result<bool>
 where
 	Fetch: Fn(OwnedEventId) -> Fut + Sync,
 	Fut: Future<Output = Result<Pdu>> + Send,
 	Pdu: Event,
 {
-	match fetch(event_id.to_owned()).await {
-		| Ok(state) => is_power_event(&state),
-		| _ => false,
+	Ok(fetch_optional_event(event_id.to_owned(), fetch)
+		.await?
+		.is_some_and(|event| is_power_event(&event)))
+}
+
+async fn fetch_optional_event<Fetch, Fut, Pdu>(
+	event_id: OwnedEventId,
+	fetch: &Fetch,
+) -> Result<Option<Pdu>>
+where
+	Fetch: Fn(OwnedEventId) -> Fut + Sync,
+	Fut: Future<Output = Result<Pdu>> + Send,
+	Pdu: Event,
+{
+	match fetch(event_id).await {
+		| Ok(event) => Ok(Some(event)),
+		| Err(error) if error.is_not_found() => Ok(None),
+		| Err(error) => Err(error),
 	}
 }

@@ -115,7 +115,7 @@ where
 	}
 }
 
-fn classify_auth_error(error: Error) -> Result<AuthCheckOutcome> {
+pub(super) fn classify_auth_error(error: Error) -> Result<AuthCheckOutcome> {
 	match error {
 		| error @ (Error::Err(..) | Error::Request(InvalidParam, ..)) =>
 			Ok(AuthCheckOutcome::Deny(error)),

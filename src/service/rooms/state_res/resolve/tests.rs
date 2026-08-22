@@ -1,5 +1,6 @@
 use std::{
 	collections::HashMap,
+	io::Error as IoError,
 	iter::once,
 	sync::atomic::{AtomicUsize, Ordering},
 };
@@ -8,10 +9,14 @@ use futures::StreamExt;
 use maplit::hashmap;
 use rand::seq::SliceRandom;
 use ruma::{
-	MilliSecondsSinceUnixEpoch, OwnedEventId,
+	EventId, MilliSecondsSinceUnixEpoch, OwnedEventId, UserId,
+	api::error::ErrorKind::InvalidParam,
 	events::{
 		StateEventType, TimelineEventType,
-		room::join_rules::{JoinRule, RoomJoinRulesEventContent},
+		room::{
+			join_rules::{JoinRule, RoomJoinRulesEventContent},
+			power_levels::UserPowerLevel,
+		},
 	},
 	int,
 	room_version_rules::RoomVersionRules,
@@ -20,13 +25,16 @@ use ruma::{
 use serde_json::{json, value::to_raw_value as to_raw_json_value};
 use tokio::sync::{Notify, watch::channel as watch_channel};
 use tuwunel_core::{
-	debug,
+	Error, Result, debug, err,
 	matrix::{Event, EventTypeExt, PduEvent},
 	utils::stream::IterStream,
 };
 
 use super::{
-	AuthSet, StateMap,
+	AuthSet, ConflictedSet, StateMap,
+	power_sort::{
+		add_event_auth_chain, is_power_event_id, power_level_for_sender, power_sort as sort_power,
+	},
 	test_utils::{
 		INITIAL_EVENTS, TestStore, alice, bob, charlie, do_check, ella, event_id,
 		member_content_ban, member_content_join, not_found, room_id, to_init_pdu_event,
@@ -1201,4 +1209,477 @@ async fn mainline_sort_no_pl_ancestor_sorts_first() {
 		event_id("OLDEST_ROOTED"),
 		event_id("CURRENT_ROOTED"),
 	]);
+}
+
+#[tokio::test]
+async fn mainline_sort_omits_missing_remaining_event() {
+	let present = to_init_pdu_event(
+		"PRESENT",
+		alice(),
+		TimelineEventType::RoomCreate,
+		Some(""),
+		to_raw_json_value(&json!({ "creator": alice() })).unwrap(),
+	);
+
+	let present_id = present.event_id().to_owned();
+	let events: HashMap<OwnedEventId, PduEvent> = [(present_id.clone(), present)].into();
+	let to_sort = [present_id.clone(), event_id("MISSING")];
+	let sorted = mainline_without_power(&to_sort, &async |id| {
+		events.get(&id).cloned().ok_or_else(not_found)
+	})
+	.await
+	.unwrap();
+
+	assert_eq!(sorted, vec![present_id]);
+}
+
+#[tokio::test]
+async fn mainline_sort_propagates_remaining_event_failure() {
+	let to_sort = [event_id("FAULT")];
+	let result = mainline_without_power(&to_sort, &async |_id| {
+		Err::<PduEvent, _>(err!(Database("injected remaining event failure")))
+	})
+	.await;
+
+	assert!(matches!(result, Err(Error::Database(..))));
+}
+
+#[tokio::test]
+async fn mainline_sort_omits_missing_position_auth_event() {
+	let create = to_init_pdu_event(
+		"CREATE_POSITION_MISS",
+		alice(),
+		TimelineEventType::RoomCreate,
+		Some(""),
+		to_raw_json_value(&json!({ "creator": alice() })).unwrap(),
+	);
+
+	let candidate = to_pdu_event(
+		"POSITION_MISS",
+		alice(),
+		TimelineEventType::RoomMessage,
+		None,
+		to_raw_json_value(&json!({})).unwrap(),
+		&["MISSING_POSITION_AUTH"],
+		&["CREATE_POSITION_MISS"],
+	);
+
+	let create_id = create.event_id().to_owned();
+	let candidate_id = candidate.event_id().to_owned();
+	let events: HashMap<OwnedEventId, PduEvent> = [create, candidate]
+		.into_iter()
+		.map(|event| (event.event_id().to_owned(), event))
+		.collect();
+
+	let to_sort = [create_id.clone(), candidate_id];
+	let sorted = mainline_without_power(&to_sort, &async |id| {
+		events.get(&id).cloned().ok_or_else(not_found)
+	})
+	.await
+	.unwrap();
+
+	assert_eq!(sorted, vec![create_id]);
+}
+
+#[tokio::test]
+async fn mainline_sort_propagates_position_auth_event_failure() {
+	let candidate = to_pdu_event(
+		"POSITION_FAILURE",
+		alice(),
+		TimelineEventType::RoomMessage,
+		None,
+		to_raw_json_value(&json!({})).unwrap(),
+		&["FAULTY_POSITION_AUTH"],
+		&["CREATE_POSITION_FAILURE"],
+	);
+
+	let candidate_id = candidate.event_id().to_owned();
+	let failure_id = event_id("FAULTY_POSITION_AUTH");
+	let events: HashMap<OwnedEventId, PduEvent> = [(candidate_id.clone(), candidate)].into();
+
+	let fetch = async |id| match events.get(&id) {
+		| Some(event) => Ok(event.clone()),
+		| None if id == failure_id => Err(IoError::other("injected position failure").into()),
+		| None => Err(not_found()),
+	};
+
+	let to_sort = [candidate_id];
+	let result = mainline_without_power(&to_sort, &fetch).await;
+
+	assert!(matches!(result, Err(Error::Io(..))));
+}
+
+#[tokio::test]
+async fn iterative_auth_skips_candidate_without_state_key() {
+	let candidate = to_init_pdu_event(
+		"STATELESS_CANDIDATE",
+		alice(),
+		TimelineEventType::RoomMessage,
+		None,
+		to_raw_json_value(&json!({})).unwrap(),
+	);
+
+	let candidate_id = candidate.event_id().to_owned();
+	let events = events_with([candidate]);
+	let state = auth_state();
+	let expected = state.clone();
+	let resolved =
+		iterative_one(&candidate_id, state, &async |id| fetch_from_events(&events, &id))
+			.await
+			.unwrap();
+
+	assert_eq!(resolved, expected);
+}
+
+#[tokio::test]
+async fn iterative_auth_skips_malformed_candidate() {
+	let candidate = to_init_pdu_event(
+		"MALFORMED_MEMBER_CANDIDATE",
+		alice(),
+		TimelineEventType::RoomMember,
+		Some(alice().as_str()),
+		to_raw_json_value(&json!({})).unwrap(),
+	);
+
+	let candidate_id = candidate.event_id().to_owned();
+	let events = events_with([candidate]);
+	let state = auth_state();
+	let expected = state.clone();
+	let calls = AtomicUsize::new(0);
+	let fetch = async |id: OwnedEventId| {
+		calls.fetch_add(1, Ordering::SeqCst);
+
+		fetch_from_events(&events, &id)
+	};
+
+	let resolved = iterative_one(&candidate_id, state, &fetch)
+		.await
+		.unwrap();
+
+	assert_eq!(resolved, expected);
+	assert_eq!(calls.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn iterative_auth_skips_clean_denial() {
+	let candidate = join_rule_event_from("DENIED_JOIN_RULE", zara(), &["CREATE", "IPOWER"]);
+
+	let candidate_id = candidate.event_id().to_owned();
+	let events = events_with([candidate]);
+	let state = auth_state();
+	let resolved =
+		iterative_one(&candidate_id, state, &async |id| fetch_from_events(&events, &id))
+			.await
+			.unwrap();
+
+	let key = StateEventType::RoomJoinRules.with_state_key("");
+
+	assert!(!resolved.contains_key(&key));
+}
+
+#[tokio::test]
+async fn iterative_auth_state_fetch_distinguishes_missing_from_failure() {
+	let candidate = join_rule_event("STATE_FETCH_CANDIDATE", &["CREATE", "IMA", "IPOWER"]);
+
+	let candidate_id = candidate.event_id().to_owned();
+	let missing_id = event_id("MISSING_STATE_CREATE");
+	let events = events_with([candidate]);
+	let state = state_set! {
+		StateEventType::RoomCreate => "" => missing_id.clone(),
+		StateEventType::RoomMember => alice().as_str() => event_id("IMA"),
+		StateEventType::RoomPowerLevels => "" => event_id("IPOWER"),
+	};
+
+	let resolved =
+		iterative_one(&candidate_id, state.clone(), &async |id| fetch_from_events(&events, &id))
+			.await
+			.unwrap();
+
+	let key = StateEventType::RoomJoinRules.with_state_key("");
+
+	assert_eq!(resolved.get(&key), Some(&candidate_id));
+
+	let fetch = async |id| match events.get(&id) {
+		| Some(event) => Ok(event.clone()),
+		| None if id == missing_id => Err(err!(Database("injected state-derived auth failure"))),
+		| None => Err(not_found()),
+	};
+
+	let failure = iterative_one(&candidate_id, state, &fetch).await;
+
+	assert!(matches!(failure, Err(Error::Database(..))));
+}
+
+#[tokio::test]
+async fn iterative_auth_event_fetch_distinguishes_missing_from_failure() {
+	let auth_events = ["MISSING_EVENT_AUTH", "CREATE", "IMA", "IPOWER"];
+	let candidate = join_rule_event("EVENT_FETCH_CANDIDATE", &auth_events);
+
+	let candidate_id = candidate.event_id().to_owned();
+	let missing_id = event_id("MISSING_EVENT_AUTH");
+	let events = events_with([candidate]);
+	let state = auth_state();
+	let resolved =
+		iterative_one(&candidate_id, state.clone(), &async |id| fetch_from_events(&events, &id))
+			.await
+			.unwrap();
+
+	let key = StateEventType::RoomJoinRules.with_state_key("");
+
+	assert_eq!(resolved.get(&key), Some(&candidate_id));
+
+	let fetch = async |id| match events.get(&id) {
+		| Some(event) => Ok(event.clone()),
+		| None if id == missing_id =>
+			Err(IoError::other("injected event-owned auth failure").into()),
+		| None => Err(not_found()),
+	};
+
+	let failure = iterative_one(&candidate_id, state, &fetch).await;
+
+	assert!(matches!(failure, Err(Error::Io(..))));
+}
+
+#[tokio::test]
+async fn iterative_auth_rejects_stateless_auth_dependency() {
+	let auth_events = ["STATELESS_AUTH_DEPENDENCY", "CREATE", "IMA", "IPOWER"];
+	let candidate = join_rule_event("STATELESS_DEPENDENCY_CANDIDATE", &auth_events);
+
+	let dependency = to_init_pdu_event(
+		"STATELESS_AUTH_DEPENDENCY",
+		alice(),
+		TimelineEventType::RoomMessage,
+		None,
+		to_raw_json_value(&json!({})).unwrap(),
+	);
+
+	let candidate_id = candidate.event_id().to_owned();
+	let events = events_with([candidate, dependency]);
+	let failure =
+		iterative_one(&candidate_id, auth_state(), &async |id| fetch_from_events(&events, &id))
+			.await;
+
+	assert!(matches!(failure, Err(Error::Request(InvalidParam, ..))));
+}
+
+#[tokio::test]
+async fn power_event_probe_distinguishes_missing_from_failure() {
+	let event_id = event_id("MISSING_POWER_PROBE");
+	let is_power = is_power_event_id(&event_id, &async |_id| Err::<PduEvent, _>(not_found()))
+		.await
+		.unwrap();
+
+	assert!(!is_power);
+
+	let failure = is_power_event_id(&event_id, &async |_id| {
+		Err::<PduEvent, _>(err!(Database("injected power probe failure")))
+	})
+	.await;
+
+	assert!(matches!(failure, Err(Error::Database(..))));
+}
+
+#[tokio::test]
+async fn power_auth_chain_distinguishes_missing_from_failure() {
+	let root = to_pdu_event(
+		"POWER_CHAIN_ROOT",
+		alice(),
+		TimelineEventType::RoomPowerLevels,
+		Some(""),
+		to_raw_json_value(&json!({ "users": { alice(): 100 } })).unwrap(),
+		&["MISSING_POWER_CHAIN"],
+		&["CREATE"],
+	);
+
+	let root_id = root.event_id().to_owned();
+	let missing_id = event_id("MISSING_POWER_CHAIN");
+	let conflicted: ConflictedSet = [root_id.clone(), missing_id.clone()]
+		.into_iter()
+		.collect();
+
+	let fetch_missing = async |id| match id {
+		| id if id == root_id => Ok(root.clone()),
+		| _ => Err(not_found()),
+	};
+
+	let graph =
+		add_event_auth_chain(&conflicted, HashMap::new(), root_id.clone(), &fetch_missing, 0)
+			.await
+			.unwrap();
+
+	assert!(graph[&root_id].contains(&missing_id));
+	assert!(!graph.contains_key(&missing_id));
+
+	let fetch_failure = async |id| match id {
+		| id if id == root_id => Ok(root.clone()),
+		| _ => Err(err!(Database("injected power auth-chain failure"))),
+	};
+
+	let failure =
+		add_event_auth_chain(&conflicted, HashMap::new(), root_id.clone(), &fetch_failure, 0)
+			.await;
+
+	assert!(matches!(failure, Err(Error::Database(..))));
+}
+
+#[tokio::test]
+async fn sender_power_initial_fetch_distinguishes_missing_from_failure() {
+	let event_id = event_id("MISSING_SENDER_POWER_EVENT");
+	let power = power_level_for_sender(&event_id, &RoomVersionRules::V6, &async |_id| {
+		Err::<PduEvent, _>(not_found())
+	})
+	.await
+	.unwrap();
+
+	assert_eq!(power, UserPowerLevel::from(int!(0)));
+
+	let failure = power_level_for_sender(&event_id, &RoomVersionRules::V6, &async |_id| {
+		Err::<PduEvent, _>(err!(Database("injected sender-power failure")))
+	})
+	.await;
+
+	assert!(matches!(failure, Err(Error::Database(..))));
+}
+
+#[tokio::test]
+async fn sender_power_auth_walk_distinguishes_missing_from_failure() {
+	let auth_events = ["MISSING_SENDER_POWER_AUTH", "CREATE", "IPOWER"];
+	let candidate = join_rule_event("SENDER_POWER_CANDIDATE", &auth_events);
+
+	let candidate_id = candidate.event_id().to_owned();
+	let missing_id = event_id("MISSING_SENDER_POWER_AUTH");
+	let events = events_with([candidate]);
+	let power = power_level_for_sender(&candidate_id, &RoomVersionRules::V6, &async |id| {
+		fetch_from_events(&events, &id)
+	})
+	.await
+	.unwrap();
+
+	assert_eq!(power, UserPowerLevel::from(int!(100)));
+
+	let fetch = async |id| match events.get(&id) {
+		| Some(event) => Ok(event.clone()),
+		| None if id == missing_id => Err(err!(Database("injected sender-power auth failure"))),
+		| None => Err(not_found()),
+	};
+
+	let failure = power_level_for_sender(&candidate_id, &RoomVersionRules::V6, &fetch).await;
+
+	assert!(matches!(failure, Err(Error::Database(..))));
+}
+
+#[tokio::test]
+async fn sender_power_rejects_malformed_create_dependency() {
+	let candidate =
+		join_rule_event("MALFORMED_CREATE_CANDIDATE", &["MALFORMED_POWER_CREATE", "IPOWER"]);
+
+	let malformed_create = to_init_pdu_event(
+		"MALFORMED_POWER_CREATE",
+		alice(),
+		TimelineEventType::RoomCreate,
+		Some(""),
+		to_raw_json_value(&json!({ "creator": 7 })).unwrap(),
+	);
+
+	let candidate_id = candidate.event_id().to_owned();
+	let events = events_with([candidate, malformed_create]);
+	let failure = power_level_for_sender(&candidate_id, &RoomVersionRules::V6, &async |id| {
+		fetch_from_events(&events, &id)
+	})
+	.await;
+
+	failure.expect_err("malformed create dependency must fail");
+}
+
+#[tokio::test]
+async fn power_sort_preserves_sender_power_error_kind() {
+	let root = to_init_pdu_event(
+		"POWER_SORT_ERROR_ROOT",
+		alice(),
+		TimelineEventType::RoomPowerLevels,
+		Some(""),
+		to_raw_json_value(&json!({ "users": { alice(): 100 } })).unwrap(),
+	);
+
+	let root_id = root.event_id().to_owned();
+	let conflicted: ConflictedSet = once(root_id).collect();
+	let calls = AtomicUsize::new(0);
+	let fetch = async |_id| match calls.fetch_add(1, Ordering::SeqCst) {
+		| 0 | 1 => Ok(root.clone()),
+		| _ => Err(err!(Database("injected caller-boundary failure"))),
+	};
+
+	let failure = sort_power(&RoomVersionRules::V6, &conflicted, &fetch).await;
+
+	assert!(matches!(failure, Err(Error::Database(..))));
+	assert_eq!(calls.load(Ordering::SeqCst), 3);
+}
+
+async fn iterative_one<Fetch, Fut>(
+	event_id: &EventId,
+	state: StateMap<OwnedEventId>,
+	fetch: &Fetch,
+) -> Result<StateMap<OwnedEventId>>
+where
+	Fetch: Fn(OwnedEventId) -> Fut + Sync,
+	Fut: Future<Output = Result<PduEvent>> + Send,
+{
+	super::iterative_auth_check(&RoomVersionRules::V6, once(event_id).stream(), state, fetch)
+		.await
+}
+
+async fn mainline_without_power<Fetch, Fut>(
+	event_ids: &[OwnedEventId],
+	fetch: &Fetch,
+) -> Result<Vec<OwnedEventId>>
+where
+	Fetch: Fn(OwnedEventId) -> Fut + Sync,
+	Fut: Future<Output = Result<PduEvent>> + Send,
+{
+	super::mainline_sort(None, event_ids.iter().map(AsRef::as_ref).stream(), fetch).await
+}
+
+fn events_with<const N: usize>(events: [PduEvent; N]) -> HashMap<OwnedEventId, PduEvent> {
+	INITIAL_EVENTS()
+		.into_iter()
+		.chain(
+			events
+				.into_iter()
+				.map(|event| (event.event_id().to_owned(), event)),
+		)
+		.collect()
+}
+
+fn fetch_from_events(
+	events: &HashMap<OwnedEventId, PduEvent>,
+	event_id: &EventId,
+) -> Result<PduEvent> {
+	events
+		.get(event_id)
+		.cloned()
+		.ok_or_else(not_found)
+}
+
+fn auth_state() -> StateMap<OwnedEventId> {
+	state_set! {
+		StateEventType::RoomCreate => "" => event_id("CREATE"),
+		StateEventType::RoomMember => alice().as_str() => event_id("IMA"),
+		StateEventType::RoomPowerLevels => "" => event_id("IPOWER"),
+	}
+}
+
+fn join_rule_event(id: &str, auth_events: &[&str]) -> PduEvent {
+	join_rule_event_from(id, alice(), auth_events)
+}
+
+fn join_rule_event_from(id: &str, sender: &UserId, auth_events: &[&str]) -> PduEvent {
+	to_pdu_event(
+		id,
+		sender,
+		TimelineEventType::RoomJoinRules,
+		Some(""),
+		to_raw_json_value(&RoomJoinRulesEventContent::new(JoinRule::Public)).unwrap(),
+		auth_events,
+		&["IPOWER"],
+	)
 }

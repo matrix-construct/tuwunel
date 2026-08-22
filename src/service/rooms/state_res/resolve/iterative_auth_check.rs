@@ -5,7 +5,7 @@ use ruma::{
 	room_version_rules::RoomVersionRules,
 };
 use tuwunel_core::{
-	Error, Result, debug_warn, err, error,
+	Result, debug_warn, err, error,
 	matrix::{Event, EventTypeExt, StateKey},
 	smallvec::SmallVec,
 	trace,
@@ -13,7 +13,10 @@ use tuwunel_core::{
 };
 
 use super::{
-	super::{auth_types_for_event, check_state_dependent_auth_rules},
+	super::{
+		AuthCheckOutcome, auth_types_for_event, check_state_dependent_auth_rules,
+		event_auth::classify_auth_error,
+	},
 	StateMap,
 };
 
@@ -65,13 +68,11 @@ where
 		.map(Ok)
 		.wide_and_then(async |event_id| {
 			let event = fetch(event_id.to_owned()).await?;
-			let state_key: StateKey = event
-				.state_key()
-				.ok_or_else(|| err!(Request(InvalidParam("Missing state_key"))))?
-				.into();
+			let state_key = event.state_key().map(StateKey::from);
 
-			Ok((event_id, state_key, event))
+			Ok(state_key.map(|state_key| (event_id, state_key, event)))
 		})
+		.ready_try_filter_map(Result::<_>::Ok)
 		.try_fold(state, |state, (event_id, state_key, event)| {
 			auth_check(rules, state, event_id, state_key, event, fetch)
 		})
@@ -120,20 +121,16 @@ where
 				.map(move |auth_event_id| (auth_event_id, key))
 		})
 		.filter_map(async |(id, key)| {
-			fetch(id.clone())
-				.inspect_err(|e| debug_warn!(%id, "missing auth event: {e}"))
-				.inspect_err(|e| debug_assert!(!cfg!(test), "missing auth {id:?}: {e:?}"))
-				.map_ok(move |auth_event| (key, auth_event))
+			fetch_auth_event(id, fetch)
 				.await
-				.ok()
+				.map(|event| event.map(|event| (key, event)))
 		})
-		.ready_filter_map(|(key, auth_event)| {
-			auth_event
+		.ready_try_filter_map(|(key, auth_event)| {
+			Ok(auth_event
 				.rejected()
 				.eq(&false)
-				.then_some((key, auth_event))
-		})
-		.map(Ok);
+				.then_some((key, auth_event)))
+		});
 
 	// If the `m.room.create` event is not in the auth events, we need to add it,
 	// because it's always part of the state and required in the auth rules.
@@ -150,14 +147,7 @@ where
 		.auth_events()
 		.chain(also_create_id.as_deref().into_iter())
 		.stream()
-		.filter_map(async |id| {
-			fetch(id.to_owned())
-				.inspect_err(|e| debug_warn!(%id, "missing auth event: {e}"))
-				.inspect_err(|e| debug_assert!(!cfg!(test), "missing auth {id:?}: {e:?}"))
-				.await
-				.ok()
-		})
-		.map(Result::<Pdu, Error>::Ok)
+		.filter_map(async |id| fetch_auth_event(id, fetch).await)
 		.ready_try_filter_map(|auth_event| {
 			let state_key = auth_event
 				.state_key()
@@ -190,23 +180,44 @@ where
 			.map_err(|_| err!(Request(NotFound("Missing auth_event {ty:?},{key:?}"))))
 	};
 
-	// Add authentic event to the partially resolved state.
-	if check_state_dependent_auth_rules(rules, &event, &fetch_state)
-		.await
-		.inspect_err(|e| {
+	let outcome = match check_state_dependent_auth_rules(rules, &event, &fetch_state).await {
+		| Ok(()) => AuthCheckOutcome::Allow,
+		| Err(error) => classify_auth_error(error)?,
+	};
+
+	match outcome {
+		| AuthCheckOutcome::Allow => {
+			let key = event.event_type().with_state_key(state_key);
+
+			state.insert(key, event_id.to_owned());
+		},
+		| AuthCheckOutcome::Deny(error) => {
 			debug_warn!(
 				%event_id,
 				sender = %event.sender(),
 				event_type = ?event.event_type(),
 				?state_key,
-				"event failed auth check: {e}"
+				%error,
+				"event failed auth check"
 			);
-		})
-		.is_ok()
-	{
-		let key = event.event_type().with_state_key(state_key);
-		state.insert(key, event_id.to_owned());
+		},
 	}
 
 	Ok(state)
+}
+
+async fn fetch_auth_event<Fetch, Fut, Pdu>(id: &EventId, fetch: &Fetch) -> Option<Result<Pdu>>
+where
+	Fetch: Fn(OwnedEventId) -> Fut + Sync,
+	Fut: Future<Output = Result<Pdu>> + Send,
+	Pdu: Event,
+{
+	match fetch(id.to_owned()).await {
+		| Ok(event) => Some(Ok(event)),
+		| Err(error) if error.is_not_found() => {
+			debug_warn!(%id, %error, "missing auth event");
+			None
+		},
+		| Err(error) => Some(Err(error)),
+	}
 }
