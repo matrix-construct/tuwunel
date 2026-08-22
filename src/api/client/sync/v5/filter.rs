@@ -1,7 +1,9 @@
 use futures::{StreamExt, pin_mut};
 use ruma::{
-	RoomId, api::client::sync::sync_events::v5::request::ListFilters, directory::RoomTypeFilter,
-	events::room::member::MembershipState,
+	RoomId,
+	api::client::sync::sync_events::v5::request::ListFilters,
+	directory::RoomTypeFilter,
+	events::{room::member::MembershipState, tag::TagName},
 };
 use tuwunel_core::{
 	is_equal_to, is_true,
@@ -74,19 +76,18 @@ pub(super) async fn filter_room(
 		});
 
 	let fetch_tags = !filter.tags.is_empty() || !filter.not_tags.is_empty();
+
+	// MSC4186: `tags` is a union, and `not_tags` takes priority over it.
 	let match_room_tag = fetch_tags.then_async(async || {
-		services
+		let tags = services
 			.account_data
 			.get_room_tags(sender_user, room_id)
 			.await
-			.ok()
-			.filter(|tags| !tags.is_empty())
-			.map_or(filter.tags.is_empty(), |tags| {
-				tags.keys().any(|tag| {
-					(filter.not_tags.is_empty() || !filter.not_tags.contains(tag))
-						|| (!filter.tags.is_empty() && filter.tags.contains(tag))
-				})
-			})
+			.unwrap_or_default();
+
+		let tagged = |names: &[TagName]| tags.keys().any(|tag| names.contains(tag));
+
+		(filter.tags.is_empty() || tagged(&filter.tags)) && !tagged(&filter.not_tags)
 	});
 
 	let fetch_room_type = !filter.room_types.is_empty() || !filter.not_room_types.is_empty();
