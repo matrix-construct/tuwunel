@@ -13,7 +13,7 @@ use ruma::{
 	DeviceId, OwnedDeviceId, OwnedRoomId, OwnedUserId, RoomId, UserId,
 	api::client::sync::sync_events::v5::{
 		ConnId as ConnectionId, ListId, Request, request,
-		request::{AccountData, E2EE, Receipts, ToDevice, Typing},
+		request::{AccountData, E2EE, Profiles, Receipts, ToDevice, Typing},
 	},
 };
 use serde::{Deserialize, Serialize};
@@ -406,6 +406,7 @@ fn update_cache_extensions(request: &Request, cached: &mut Self) {
 	Self::update_cache_typing(&request.typing, &mut cached.typing);
 	Self::update_cache_to_device(&request.to_device, &mut cached.to_device);
 	Self::update_cache_e2ee(&request.e2ee, &mut cached.e2ee);
+	Self::update_cache_profiles(&request.profiles, &mut cached.profiles);
 }
 
 #[implement(Connection)]
@@ -433,6 +434,14 @@ fn update_cache_typing(request: &Typing, cached: &mut Typing) {
 fn update_cache_to_device(request: &ToDevice, cached: &mut ToDevice) {
 	some_or_sticky(request.enabled.as_ref(), &mut cached.enabled);
 	cached.since.clone_from(&request.since);
+}
+
+#[implement(Connection)]
+fn update_cache_profiles(request: &Profiles, cached: &mut Profiles) {
+	some_or_sticky(request.enabled.as_ref(), &mut cached.enabled);
+	some_or_sticky(request.rooms.as_ref(), &mut cached.rooms);
+	some_or_sticky(request.lists.as_ref(), &mut cached.lists);
+	some_or_sticky(request.fields.as_ref(), &mut cached.fields);
 }
 
 #[implement(Connection)]

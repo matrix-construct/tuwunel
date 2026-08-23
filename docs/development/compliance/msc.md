@@ -18,9 +18,9 @@
 
 ## Counts
 
-- ✅ `yes`: 258
-- 🟨 `partial`: 34
-- ❌ `no`: 446
+- ✅ `yes`: 259
+- 🟨 `partial`: 35
+- ❌ `no`: 444
 - ⬛ `n/a`: 286
 
 ### Status by inventory bucket
@@ -28,7 +28,7 @@
 | Inv | yes | partial | no | n/a | total |
 |---|---|---|---|---|---|
 | merged | 186 | 7 | 7 | 59 | 259 |
-| open | 64 | 26 | 399 | 175 | 664 |
+| open | 65 | 27 | 397 | 175 | 664 |
 | closed | 8 | 1 | 40 | 52 | 101 |
 
 ## Merged
@@ -305,7 +305,7 @@ in the [Out of scope](#out-of-scope) section.
 | MSC4429 | ❌ ● | 0/0 | Profile Updates for Legacy Sync | No top-level users field in /sync; no profile_fields filter |
 | MSC4428 | ❌ ● | 0/0 | Stable identifiers for Room Members | No member_info or unsigned.stable_id added to events or sync |
 | MSC4427 | ❌ ● | 0/0 | Custom banners for user profiles | No m.banner_url or chat.commet.profile_banner support |
-| MSC4426 | ❌ ◐ | 20/20 | User Status Profile Fields | Profile keys passthrough via MSC4133 endpoints; no specific m.status/m.call v... |
+| MSC4426 | ✅ ● | 90/90 | User Status Profile Fields | Both budgets enforced with 400 M_TOO_LARGE; no rate limiting anywhere in the ... |
 | MSC4425 | ❌ ● | 0/0 | Ephemeral media | no ephemeral query param; no DELETE on /_matrix/client/v1/media/.../.... |
 | MSC4420 | ❌ ● | 0/0 | Duplicate one-time key error response for /keys/upload | add_one_time_key silently overwrites; no M_DUPLICATE_ONE_TIME_KEY emitted. |
 | MSC4418 | ✅ ● | 100/100 | Make `destination` a required server authentication field | destination required on inbound and outbound; cited verbatim in MSC. |
@@ -378,7 +378,7 @@ in the [Out of scope](#out-of-scope) section.
 | MSC4265 | ❌ ◐ | 10/10 | Data Protection Officer contact in /.well-known/matrix/support | support_role configurable; MSC role string accepted as Custom |
 | MSC4264 | ❌ ● | 0/0 | Tokens for Contacting Accounts or Joining Semi-Public Rooms | Tokens for contact / semi-public-room joins not implemented |
 | MSC4263 | ❌ ◐ | 10/10 | Preventing MXID enumeration via key queries | MUST floor met implicitly; MAY restriction unused |
-| MSC4262 | ❌ ● | 0/0 | Sliding Sync Extension: Profile Updates | Sliding-sync profiles extension not implemented |
+| MSC4262 | 🟨 ● | 75/80 | Sliding Sync Extension: Profile Updates | Extension served from a profile change log; no lists/rooms scoping, no drop s... |
 | MSC4259 | ❌ ● | 0/0 | Profile Update EDUs for Federation | m.profile EDU broadcast not implemented |
 | MSC4258 | ❌ ● | 0/0 | Federated User Directory | Federated user_directory/search not implemented |
 | MSC4257 | ❌ ● | 0/0 | Profiles Arent Auth: Move profile contents to a separate event | m.room.member.profile separate event not supported |

@@ -407,6 +407,7 @@ features = [
     "unstable-msc4186",
     "unstable-msc4195",
     "unstable-msc4203", # sending to-device events to appservices
+    "unstable-msc4262", # sliding sync profiles extension
     "unstable-msc4265",
     "unstable-msc4266",
     "unstable-msc4310",

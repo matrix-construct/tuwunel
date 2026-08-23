@@ -1,12 +1,13 @@
 mod account_data;
 mod e2ee;
+mod profiles;
 mod receipts;
 mod to_device;
 mod typing;
 
 use std::{collections::BTreeMap, fmt::Debug};
 
-use futures::{FutureExt, future::join4};
+use futures::{FutureExt, future::join5};
 use ruma::{
 	OwnedRoomId, RoomId,
 	api::client::sync::sync_events::v5::{
@@ -22,6 +23,7 @@ use self::{
 	account_data::{
 		collect as collect_account_data, collect_ranges as collect_account_data_ranges,
 	},
+	profiles::collect as collect_profiles,
 	receipts::collect_ranges as collect_receipt_ranges,
 };
 use super::{SyncInfo, Window, WindowRoom, range::Results, share_encrypted_room};
@@ -85,9 +87,17 @@ pub(super) async fn handle(
 		.unwrap_or(false)
 		.then_async(|| e2ee::collect(sync_info, conn));
 
-	let (account_data, typing, to_device, e2ee) = join4(account_data, typing, to_device, e2ee)
-		.map(apply!(4, |t: Option<_>| t.unwrap_or(Ok(Default::default()))))
-		.await;
+	let profiles = conn
+		.extensions
+		.profiles
+		.enabled
+		.unwrap_or(false)
+		.then_async(|| collect_profiles(sync_info, conn, window));
+
+	let (account_data, typing, to_device, e2ee, profiles) =
+		join5(account_data, typing, to_device, e2ee, profiles)
+			.map(apply!(5, |t: Option<_>| t.unwrap_or(Ok(Default::default()))))
+			.await;
 
 	// Receipt and room account-data payloads only exist as bounded room-range
 	// outputs, applied by `apply_ranges` after the ranges resolve.
@@ -97,6 +107,7 @@ pub(super) async fn handle(
 		typing: Default::default(),
 		to_device: to_device?,
 		e2ee: e2ee?,
+		profiles: profiles?,
 	};
 
 	Ok(Collected { response, typing: typing? })
