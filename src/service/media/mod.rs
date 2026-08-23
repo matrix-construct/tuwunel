@@ -411,6 +411,9 @@ impl Service {
 	}
 
 	/// Get file from local storage.
+	///
+	/// A metadata miss falls through to the lazy-media path, which serializes
+	/// on a per-mxc mutex and fetches the origin once.
 	#[tracing::instrument(level = "debug", skip(self))]
 	pub async fn get_stored(&self, mxc: &Mxc<'_>) -> Result<Media> {
 		let meta = self
@@ -419,7 +422,8 @@ impl Service {
 			.await;
 
 		let Ok(Metadata { content_type, content_disposition, key }) = meta else {
-			return self.fetch_lazy_media(mxc).await;
+			// query-depth firewall
+			return Box::pin(self.fetch_lazy_media(mxc)).await;
 		};
 
 		let path = self.get_media_name_sha256(&key);
