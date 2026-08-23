@@ -18,7 +18,8 @@ use tuwunel_core::{
 	matrix::{Event, pdu::PduCount},
 	pair_of,
 	utils::{
-		BoolExt, IterStream, ReadyExt, TryFutureExtExt, future::OptionStream,
+		BoolExt, FutureBoolExt, IterStream, ReadyExt, TryFutureExtExt,
+		future::{OptionFutureExt, OptionStream, ReadyBoolExt},
 		stream::BroadbandExt,
 	},
 };
@@ -145,44 +146,48 @@ async fn collect_room(
 		return Ok(lists);
 	}
 
-	let encrypted_room = services
-		.state_accessor
-		.state_get(current_shortstatehash, &StateEventType::RoomEncryption, "")
-		.is_ok();
+	let skip_unencrypted = services
+		.config
+		.device_key_update_encrypted_rooms_only
+		.then_async(|| {
+			services
+				.state_accessor
+				.state_get_shortid(current_shortstatehash, &StateEventType::RoomEncryption, "")
+				.is_err()
+		})
+		.unwrap_or_default();
 
-	let since_encryption = services
-		.state_accessor
-		.state_get(since_shortstatehash, &StateEventType::RoomEncryption, "")
-		.is_ok();
-
-	let sender_joined_count = services
-		.state_cache
-		.get_joined_count(room_id, sender_user);
-
-	let (encrypted_room, since_encryption, sender_joined_count) =
-		join3(encrypted_room, since_encryption, sender_joined_count).await;
-
-	if !encrypted_room
-		&& services
-			.config
-			.device_key_update_encrypted_rooms_only
-	{
+	if skip_unencrypted.await {
 		return Ok(lists);
 	}
 
-	let encrypted_since_last_sync = !since_encryption;
-	let joined_since_last_sync = sender_joined_count.is_ok_and(|count| count > conn.globalsince);
-	let joined_members_burst =
-		(joined_since_last_sync || encrypted_since_last_sync).then_async(|| {
-			services
-				.state_cache
-				.room_members(room_id)
-				.ready_filter(|&user_id| user_id != sender_user)
-				.map(ToOwned::to_owned)
-				.map(|user_id| (MembershipState::Join, user_id))
-				.boxed()
-				.into_future()
-		});
+	let joined_since_last_sync = services
+		.state_cache
+		.get_joined_count(room_id, sender_user)
+		.map_ok_or(false, |count| count > conn.globalsince);
+
+	let since_encrypted = services
+		.state_accessor
+		.state_get_shortid(since_shortstatehash, &StateEventType::RoomEncryption, "")
+		.is_ok();
+
+	// The keyed membership read leads; the state lookup trails it.
+	let members_burst = joined_since_last_sync
+		.is_false()
+		.and(since_encrypted)
+		.is_false()
+		.await;
+
+	let joined_members_burst = members_burst.then_async(|| {
+		services
+			.state_cache
+			.room_members(room_id)
+			.ready_filter(|&user_id| user_id != sender_user)
+			.map(ToOwned::to_owned)
+			.map(|user_id| (MembershipState::Join, user_id))
+			.boxed()
+			.into_future()
+	});
 
 	services
 		.state_accessor
