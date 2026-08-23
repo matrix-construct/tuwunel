@@ -1,4 +1,4 @@
-use futures::{FutureExt, future::join3};
+use futures::FutureExt;
 use ruma::{
 	Int, OwnedUserId, RoomId, UserId,
 	events::{
@@ -11,8 +11,9 @@ use ruma::{
 	},
 };
 use tuwunel_core::{
-	Err, Result, debug_info, debug_warn, error, implement, matrix::pdu::PduBuilder,
-	utils::stream::ReadyExt,
+	Err, Result, debug_info, debug_warn, error, implement,
+	matrix::pdu::PduBuilder,
+	utils::{FutureBoolExt, future::ReadyBoolExt, stream::ReadyExt},
 };
 
 use crate::rooms::state::RoomMutexGuard;
@@ -182,9 +183,13 @@ pub async fn make_room_admin(&self, room_id: &RoomId, target: &UserId) -> Result
 		.is_invited(target, room_id);
 
 	let is_public = self.services.metadata.is_public(room_id);
-	let (is_joined, is_invited, is_public) = join3(is_joined, is_invited, is_public).await;
 
-	if !is_joined && !is_invited && !is_public {
+	// The membership probes lead; the public check is the multi-read leg.
+	let needs_invite = is_joined
+		.is_false()
+		.and2(is_invited.is_false(), is_public.is_false());
+
+	if needs_invite.await {
 		self.services
 			.membership
 			.invite(&sender, target, room_id, None, false)
