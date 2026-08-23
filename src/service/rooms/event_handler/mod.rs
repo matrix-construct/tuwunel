@@ -21,7 +21,11 @@ use ruma::{EventId, OwnedRoomId, RoomVersionId, events::AnyStrippedStateEvent, s
 use tuwunel_core::{Result, implement, matrix::PduEvent, utils::MutexMap};
 use tuwunel_database::Map;
 
-pub use self::{policy_server::PolicyCheck, state_local_build::LocalBuildReport};
+use self::state_local_build::StateLocalCounters;
+pub use self::{
+	policy_server::PolicyCheck,
+	state_local_build::{LocalBuildReport, StateLocalMetrics},
+};
 
 pub struct Service {
 	/// Serializes room federation as the outermost per-room operation.
@@ -31,6 +35,7 @@ pub struct Service {
 	pub mutex_federation: RoomMutexMap,
 	services: Arc<crate::services::OnceServices>,
 	db: Data,
+	state_local: Arc<StateLocalCounters>,
 }
 
 struct Data {
@@ -50,6 +55,7 @@ impl crate::Service for Service {
 		Ok(Arc::new(Self {
 			mutex_federation: RoomMutexMap::new(),
 			services: args.services.clone(),
+			state_local: Arc::new(StateLocalCounters::default()),
 			db: Data {
 				eventid_backoff: args.db["eventid_backoff"].clone(),
 				eventid_policysigstate: args.db["eventid_policysigstate"].clone(),

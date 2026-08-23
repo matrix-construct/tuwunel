@@ -19,7 +19,7 @@ use tuwunel_core::{
 use super::{
 	backoff::{Context, Disposition, UPGRADE_RETRY},
 	policy_server::PolicyCheck,
-	state_local_build::{WalkMode, compare_shadow},
+	state_local_build::WalkMode,
 };
 use crate::rooms::{
 	state::{RoomMutexGuard, Trigger, prune_goal},
@@ -471,7 +471,8 @@ async fn resolve_state_at_incoming_event(
 		.expect("fetch_state always resolves state to some");
 
 	if let Some(local) = shadow {
-		compare_shadow(room_id, incoming_pdu.event_id(), &local, &state);
+		self.compare_shadow(room_id, incoming_pdu.event_id(), &local, &state)
+			.await;
 	}
 
 	Ok((state, ResolvedVia::Fetch))

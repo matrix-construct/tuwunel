@@ -43,7 +43,10 @@ use tuwunel_core::{
 use tuwunel_database::{Deserialized, serialize_key};
 use tuwunel_service::{
 	Services,
-	rooms::{short::ShortStateHash, state_compressor::CompressedState},
+	rooms::{
+		event_handler::StateLocalMetrics, short::ShortStateHash,
+		state_compressor::CompressedState,
+	},
 	users::Register,
 };
 
@@ -336,7 +339,15 @@ async fn missing_state_diff(
 		.map_err(|error| err!("state diff fixture corrupted the restored state: {error}"))?;
 	suppress_upgrade(services, held.event_id.as_ref())?;
 	assert_unevaluable(services, top.event_id.as_ref(), "missing state diff").await?;
-	assert_fetches(services, &room_id, &top, top_json, "missing state diff").await
+	assert_fetches(
+		services,
+		&room_id,
+		&top,
+		top_json,
+		ExpectedWalkOutcome::Unevaluable,
+		"missing state diff",
+	)
+	.await
 }
 
 async fn missing_event_reverse(
@@ -356,7 +367,15 @@ async fn missing_event_reverse(
 	remove_short_row(services, "shorteventid_eventid", shorteventid).await?;
 	suppress_upgrade(services, held.event_id.as_ref())?;
 	assert_unevaluable(services, top.event_id.as_ref(), "missing event reverse map").await?;
-	assert_fetches(services, &room_id, &top, top_json, "missing event reverse map").await
+	assert_fetches(
+		services,
+		&room_id,
+		&top,
+		top_json,
+		ExpectedWalkOutcome::Unevaluable,
+		"missing event reverse map",
+	)
+	.await
 }
 
 async fn missing_state_key_reverse(
@@ -379,7 +398,15 @@ async fn missing_state_key_reverse(
 	suppress_upgrade(services, left.event_id.as_ref())?;
 	suppress_upgrade(services, right.event_id.as_ref())?;
 	assert_unevaluable(services, top.event_id.as_ref(), "missing state key reverse map").await?;
-	assert_fetches(services, &room_id, &top, top_json, "missing state key reverse map").await
+	assert_fetches(
+		services,
+		&room_id,
+		&top,
+		top_json,
+		ExpectedWalkOutcome::Unevaluable,
+		"missing state key reverse map",
+	)
+	.await
 }
 
 async fn missing_named_pdu(
@@ -415,10 +442,16 @@ async fn missing_named_pdu(
 	corrupt_timeline_pdu(services, &missing, PduFailure::Missing).await?;
 	suppress_upgrade(services, fork.event_id.as_ref())?;
 
+	let before_report = services.event_handler.state_local_metrics();
+
 	let report = services
 		.event_handler
 		.local_state_report(top.event_id.as_ref())
 		.await?;
+
+	let after_report = services.event_handler.state_local_metrics();
+
+	assert_eq!(after_report, before_report, "local state diagnostic changed production metrics");
 
 	assert_eq!(report.gate_drops, 0, "missing map-named PDU became a denial");
 	assert_eq!(
@@ -429,7 +462,15 @@ async fn missing_named_pdu(
 
 	assert_eq!(report.state_len, None, "missing map-named PDU produced state");
 	assert_no_memo(services, fork.event_id.as_ref()).await?;
-	assert_fetches(services, &room_id, &top, top_json, "missing map-named PDU").await
+	assert_fetches(
+		services,
+		&room_id,
+		&top,
+		top_json,
+		ExpectedWalkOutcome::Unevaluable,
+		"missing map-named PDU",
+	)
+	.await
 }
 
 async fn auth_ancestor_failure(
@@ -482,7 +523,8 @@ async fn auth_ancestor_failure(
 		assert_no_memo(services, fork.event_id.as_ref()).await?;
 	}
 
-	assert_fetches(services, &room_id, &top, top_json, context).await?;
+	assert_fetches(services, &room_id, &top, top_json, ExpectedWalkOutcome::Unevaluable, context)
+		.await?;
 
 	Ok(())
 }
@@ -661,7 +703,15 @@ async fn walk_memo_failure_is_unevaluable(
 	assert_eq!(report.state_len, None, "walk memo failure produced state");
 	assert_no_memo(services, middle.event_id.as_ref()).await?;
 
-	assert_fetches(services, &room_id, &top, top_json, "walk memo failure").await
+	assert_fetches(
+		services,
+		&room_id,
+		&top,
+		top_json,
+		ExpectedWalkOutcome::Unevaluable,
+		"walk memo failure",
+	)
+	.await
 }
 
 async fn degree_one_state_miss(
@@ -705,7 +755,15 @@ async fn degree_one_state_miss(
 		.await
 		.map_err(|error| err!("degree one fixture corrupted the restored state: {error}"))?;
 	assert_all_committed(services, incoming.event_id.as_ref(), "degree one state miss").await?;
-	assert_fetches(services, &room_id, &incoming, incoming_json, "degree one state miss").await
+	assert_fetches(
+		services,
+		&room_id,
+		&incoming,
+		incoming_json,
+		ExpectedWalkOutcome::AllCommitted,
+		"degree one state miss",
+	)
+	.await
 }
 
 async fn sibling_state_miss(
@@ -753,7 +811,15 @@ async fn sibling_state_miss(
 
 	remove_short_row(services, "shortstatehash_statediff", left_state).await?;
 	assert_all_committed(services, incoming.event_id.as_ref(), "sibling state miss").await?;
-	assert_fetches(services, &room_id, &incoming, incoming_json, "sibling state miss").await
+	assert_fetches(
+		services,
+		&room_id,
+		&incoming,
+		incoming_json,
+		ExpectedWalkOutcome::AllCommitted,
+		"sibling state miss",
+	)
+	.await
 }
 
 async fn held_message_chain(
@@ -1051,6 +1117,7 @@ async fn assert_fetches(
 	room_id: &RoomId,
 	incoming: &PduEvent,
 	incoming_json: CanonicalJsonObject,
+	expected: ExpectedWalkOutcome,
 	context: &str,
 ) -> Result {
 	let room_version = match services.state.get_room_version(room_id).await {
@@ -1059,6 +1126,8 @@ async fn assert_fetches(
 	};
 
 	let incoming_json = into_outgoing_federation(incoming_json, &room_version);
+	let before = services.event_handler.state_local_metrics();
+
 	let result = services
 		.event_handler
 		.handle_incoming_pdu(
@@ -1069,6 +1138,10 @@ async fn assert_fetches(
 			true,
 		)
 		.await;
+
+	let after = services.event_handler.state_local_metrics();
+
+	assert_one_settled_walk(before, after, expected, context);
 
 	let Err(error) = result else {
 		return Err!("{context} did not fall through to federation fetch");
@@ -1099,6 +1172,108 @@ async fn assert_fetches(
 	);
 
 	Ok(())
+}
+
+#[derive(Clone, Copy)]
+enum ExpectedWalkOutcome {
+	Resolved,
+	AllCommitted,
+	Unevaluable,
+}
+
+fn assert_one_settled_walk(
+	before: StateLocalMetrics,
+	after: StateLocalMetrics,
+	expected: ExpectedWalkOutcome,
+	context: &str,
+) {
+	let actual = walk_metrics_delta(&before, &after, context);
+	let expected = expected_walk_metrics(expected);
+
+	assert_eq!(actual, expected, "{context} used the wrong local walk outcome");
+	assert_eq!(settled_walks(&actual), 1, "{context} did not settle exactly once");
+}
+
+fn walk_metrics_delta(
+	before: &StateLocalMetrics,
+	after: &StateLocalMetrics,
+	context: &str,
+) -> StateLocalMetrics {
+	StateLocalMetrics {
+		walk_attempts: counter_delta(after.walk_attempts, before.walk_attempts, context),
+		walk_resolved: counter_delta(after.walk_resolved, before.walk_resolved, context),
+		fallback_absent: counter_delta(after.fallback_absent, before.fallback_absent, context),
+		fallback_ceiling: counter_delta(after.fallback_ceiling, before.fallback_ceiling, context),
+		fallback_auth_missing: counter_delta(
+			after.fallback_auth_missing,
+			before.fallback_auth_missing,
+			context,
+		),
+		fallback_all_committed: counter_delta(
+			after.fallback_all_committed,
+			before.fallback_all_committed,
+			context,
+		),
+		fallback_entries: counter_delta(after.fallback_entries, before.fallback_entries, context),
+		fallback_canary: counter_delta(after.fallback_canary, before.fallback_canary, context),
+		fallback_create_mismatch: counter_delta(
+			after.fallback_create_mismatch,
+			before.fallback_create_mismatch,
+			context,
+		),
+		fallback_unevaluable: counter_delta(
+			after.fallback_unevaluable,
+			before.fallback_unevaluable,
+			context,
+		),
+		fallback_error: counter_delta(after.fallback_error, before.fallback_error, context),
+		walk_failures: counter_delta(after.walk_failures, before.walk_failures, context),
+		..StateLocalMetrics::default()
+	}
+}
+
+fn counter_delta(after: u64, before: u64, context: &str) -> u64 {
+	after
+		.checked_sub(before)
+		.unwrap_or_else(|| panic!("{context} local walk counter decreased"))
+}
+
+fn expected_walk_metrics(outcome: ExpectedWalkOutcome) -> StateLocalMetrics {
+	match outcome {
+		| ExpectedWalkOutcome::Resolved => StateLocalMetrics {
+			walk_attempts: 1,
+			walk_resolved: 1,
+			..StateLocalMetrics::default()
+		},
+		| ExpectedWalkOutcome::AllCommitted => StateLocalMetrics {
+			walk_attempts: 1,
+			fallback_all_committed: 1,
+			..StateLocalMetrics::default()
+		},
+		| ExpectedWalkOutcome::Unevaluable => StateLocalMetrics {
+			walk_attempts: 1,
+			fallback_unevaluable: 1,
+			..StateLocalMetrics::default()
+		},
+	}
+}
+
+fn settled_walks(metrics: &StateLocalMetrics) -> u64 {
+	[
+		metrics.walk_resolved,
+		metrics.fallback_absent,
+		metrics.fallback_ceiling,
+		metrics.fallback_auth_missing,
+		metrics.fallback_all_committed,
+		metrics.fallback_entries,
+		metrics.fallback_canary,
+		metrics.fallback_create_mismatch,
+		metrics.fallback_unevaluable,
+		metrics.fallback_error,
+		metrics.walk_failures,
+	]
+	.into_iter()
+	.sum()
 }
 
 async fn assert_accepts(
@@ -1295,10 +1470,16 @@ async fn held_multi_prev_fork_resolves_locally(
 		.count()
 		.await;
 
+	let before_report = services.event_handler.state_local_metrics();
+
 	let report = services
 		.event_handler
 		.local_state_report(top.event_id.as_ref())
 		.await?;
+
+	let after_report = services.event_handler.state_local_metrics();
+
+	assert_eq!(after_report, before_report, "local state diagnostic changed production metrics");
 
 	assert_eq!(report.visited, 2, "local traversal missed a held parent");
 	assert_eq!(report.forks, 1, "local traversal missed the fork");
@@ -1314,6 +1495,8 @@ async fn held_multi_prev_fork_resolves_locally(
 	let room_version = services.state.get_room_version(room_id).await?;
 	let top_json = into_outgoing_federation(top_json, &room_version);
 
+	let before = services.event_handler.state_local_metrics();
+
 	services
 		.event_handler
 		.handle_incoming_pdu(
@@ -1324,6 +1507,18 @@ async fn held_multi_prev_fork_resolves_locally(
 			true,
 		)
 		.await?;
+
+	let after = services.event_handler.state_local_metrics();
+
+	assert_one_settled_walk(before, after, ExpectedWalkOutcome::Resolved, "held multi-prev fork");
+	assert_eq!(
+		after
+			.walk_resolved
+			.checked_sub(before.walk_resolved)
+			.expect("walk resolved counter should not decrease"),
+		1,
+		"held multi-prev fork did not resolve locally",
+	);
 
 	services
 		.timeline
@@ -1354,7 +1549,11 @@ async fn positional_rejection_stays_uncommitted(
 	room_id: &RoomId,
 ) -> Result {
 	let base = append_message(services, user_id, room_id, "position base").await?;
-	let (denied, denied_json) = sign_state(services, user_id, room_id, "denied").await?;
+	let (denied_left, denied_left_json) =
+		sign_state(services, user_id, room_id, "denied left").await?;
+
+	let (denied_right, denied_right_json) =
+		sign_state(services, user_id, room_id, "denied right").await?;
 
 	replace_state_before_without(
 		services,
@@ -1366,50 +1565,52 @@ async fn positional_rejection_stays_uncommitted(
 	.await?;
 
 	let room_version = services.state.get_room_version(room_id).await?;
-	let denied_json = into_outgoing_federation(denied_json, &room_version);
-	let result = services
-		.event_handler
-		.handle_incoming_pdu(
-			services.globals.server_name(),
-			room_id,
-			denied.event_id.as_ref(),
-			denied_json,
-			true,
-		)
-		.await;
 
-	assert!(
-		matches!(&result, Err(Error::AuthCheck(..))),
-		"positionally invalid event had an unexpected result: {result:?}"
-	);
+	for (denied, denied_json) in
+		[(&denied_left, denied_left_json), (&denied_right, denied_right_json)]
+	{
+		let denied_json = into_outgoing_federation(denied_json, &room_version);
+		let result = services
+			.event_handler
+			.handle_incoming_pdu(
+				services.globals.server_name(),
+				room_id,
+				denied.event_id.as_ref(),
+				denied_json,
+				true,
+			)
+			.await;
 
-	assert!(
-		services
-			.timeline
-			.pdu_exists(denied.event_id.as_ref())
-			.await,
-		"positionally rejected event was not retained as an outlier"
-	);
+		assert!(
+			matches!(&result, Err(Error::AuthCheck(..))),
+			"positionally invalid event had an unexpected result: {result:?}"
+		);
 
-	assert!(
-		services
-			.state
-			.pdu_shortstatehash(denied.event_id.as_ref())
-			.await
-			.is_err_and(|error| error.is_not_found()),
-		"positionally rejected event gained a state row"
-	);
+		assert!(
+			services
+				.timeline
+				.pdu_exists(denied.event_id.as_ref())
+				.await,
+			"positionally rejected event was not retained as an outlier"
+		);
 
-	suppress_upgrade(services, denied.event_id.as_ref())?;
+		assert!(
+			services
+				.state
+				.pdu_shortstatehash(denied.event_id.as_ref())
+				.await
+				.is_err_and(|error| error.is_not_found()),
+			"positionally rejected event gained a state row"
+		);
 
-	let state_lock = services.state.mutex.lock(room_id).await;
+		suppress_upgrade(services, denied.event_id.as_ref())?;
+	}
 
-	services
-		.state
-		.set_forward_extremities(room_id, once(denied.event_id.as_ref()), &state_lock)
-		.await;
-
-	drop(state_lock);
+	set_forward_extremities(services, room_id, [
+		denied_left.event_id.as_ref(),
+		denied_right.event_id.as_ref(),
+	])
+	.await;
 
 	let (top, top_json) = sign_message(services, user_id, room_id, "denial top").await?;
 
@@ -1417,15 +1618,62 @@ async fn positional_rejection_stays_uncommitted(
 		.timeline
 		.add_pdu_outlier(&top.event_id, &top_json);
 
+	let before_report = services.event_handler.state_local_metrics();
+
 	let report = services
 		.event_handler
 		.local_state_report(top.event_id.as_ref())
 		.await?;
 
-	assert_eq!(report.visited, 1, "local traversal missed the denied event");
-	assert_eq!(report.gate_drops, 1, "gate denial was not counted exactly once");
+	let after_report = services.event_handler.state_local_metrics();
+
+	assert_eq!(after_report, before_report, "local state diagnostic changed production metrics");
+
+	assert_eq!(report.visited, 2, "local traversal missed a denied event");
+	assert_eq!(report.forks, 1, "local traversal missed the denied fork");
+	assert_eq!(report.gate_drops, 2, "gate denials were not counted exactly once each");
 	assert_eq!(report.fallback, None, "clean gate denial triggered a fetch");
 	assert!(report.state_len.is_some(), "clean gate denial lost the built state");
+
+	let before = services.event_handler.state_local_metrics();
+	let top_json = into_outgoing_federation(top_json, &room_version);
+	let is_timeline_event = true;
+
+	let result = services
+		.event_handler
+		.handle_incoming_pdu(
+			services.globals.server_name(),
+			room_id,
+			top.event_id.as_ref(),
+			top_json,
+			is_timeline_event,
+		)
+		.await;
+
+	assert!(
+		matches!(&result, Err(Error::AuthCheck(..))),
+		"event over denied membership had an unexpected result: {result:?}",
+	);
+
+	let after = services.event_handler.state_local_metrics();
+
+	assert_one_settled_walk(before, after, ExpectedWalkOutcome::Resolved, "clean gate denial");
+	assert_eq!(
+		after
+			.walk_resolved
+			.checked_sub(before.walk_resolved)
+			.expect("walk resolved counter should not decrease"),
+		1,
+		"clean gate denial did not resolve locally",
+	);
+	assert_eq!(
+		after
+			.gate_denials
+			.checked_sub(before.gate_denials)
+			.expect("gate denial counter should not decrease"),
+		u64::try_from(report.gate_drops).expect("gate denial count should fit in u64"),
+		"clean gate denials were not aggregated exactly once each",
+	);
 
 	Ok(())
 }

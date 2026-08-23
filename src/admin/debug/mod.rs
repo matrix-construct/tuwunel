@@ -30,6 +30,7 @@ mod runtime_interval;
 mod runtime_metrics;
 mod sign_json;
 mod state_at_incoming;
+mod state_local_metrics;
 mod task_interval;
 mod task_metrics;
 pub(crate) mod tester;
@@ -258,6 +259,11 @@ pub(super) enum DebugCommand {
 
 	/// - Print detailed tokio task metrics accumulated in total.
 	TaskMetrics,
+
+	/// - Print process-lifetime state-local build metrics.
+	///
+	/// Difference two snapshots to observe an interval.
+	StateLocalMetrics,
 
 	/// - Print detailed tokio task metrics accumulated since last command
 	///   invocation.

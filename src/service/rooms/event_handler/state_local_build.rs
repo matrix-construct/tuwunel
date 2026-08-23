@@ -4,7 +4,7 @@ use std::{
 	mem::take,
 	sync::{
 		Arc,
-		atomic::{AtomicBool, Ordering},
+		atomic::{AtomicBool, AtomicU64, Ordering},
 	},
 };
 
@@ -14,14 +14,17 @@ use ruma::{
 	events::{StateEventType, TimelineEventType},
 	room_version_rules::RoomVersionRules,
 };
-use tracing::Span;
+use tracing::{Instrument, Span};
 use tuwunel_core::{
-	Result, debug, debug_warn, defer, err, implement,
+	Result,
+	arrayvec::ArrayVec,
+	debug, debug_warn, defer, err, implement,
 	matrix::{
 		Event, PduEvent, StateKey,
 		pdu::PrevEvents,
 		room_version::{self, from_create_event},
 	},
+	smallvec::SmallVec,
 	trace,
 	utils::stream::{BroadbandExt, IterStream, ReadyExt, WidebandExt},
 	warn,
@@ -33,8 +36,17 @@ use crate::rooms::{
 	state_res::{AuthCheckOutcome, auth_check},
 };
 
+#[cfg(test)]
+mod tests;
+
 /// State before or after one event, in the shape the sibling builders return.
 type StateIds = HashMap<ShortStateKey, OwnedEventId>;
+
+const DIVERGENCE_SAMPLE: usize = 8;
+const DIVERGENCE_INLINE: usize = 1;
+
+type DivergenceKeys = ArrayVec<ShortStateKey, DIVERGENCE_SAMPLE>;
+type DivergenceSample = SmallVec<[DivergenceKey; DIVERGENCE_INLINE]>;
 
 /// Summary of one local build attempt, for the admin debug command.
 #[derive(Debug)]
@@ -45,6 +57,177 @@ pub struct LocalBuildReport {
 	pub gate_drops: usize,
 	pub memo_hits: usize,
 	pub fallback: Option<String>,
+}
+
+/// Immutable process-lifetime totals for production local state builds.
+///
+/// Relaxed loads make each snapshot observational rather than a
+/// synchronization primitive.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct StateLocalMetrics {
+	/// Production local walks started.
+	pub walk_attempts: u64,
+	/// Local walks that produced complete state.
+	pub walk_resolved: u64,
+	/// Walks that fell back because an ancestor was absent.
+	pub fallback_absent: u64,
+	/// Walks that reached the configured node ceiling.
+	pub fallback_ceiling: u64,
+	/// Walks with an absent auth dependency.
+	pub fallback_auth_missing: u64,
+	/// Walks whose ancestors were all committed.
+	pub fallback_all_committed: u64,
+	/// Walks that reached the live-entry ceiling.
+	pub fallback_entries: u64,
+	/// Walks whose memo canary was absent.
+	pub fallback_canary: u64,
+	/// Walks whose create event did not match.
+	pub fallback_create_mismatch: u64,
+	/// Walks whose complete inputs could not be evaluated.
+	pub fallback_unevaluable: u64,
+	/// Walks that fell back after a recoverable lookup or state-build error.
+	pub fallback_error: u64,
+	/// Walks whose inner result errored or whose task did not complete.
+	pub walk_failures: u64,
+	/// State-event folds denied by the positional auth gate.
+	pub gate_denials: u64,
+	/// Shadow results compared with fetched state.
+	pub shadow_compares: u64,
+	/// Shadow comparisons with equal state.
+	pub shadow_agreements: u64,
+	/// Shadow comparisons with differing state.
+	pub shadow_divergences: u64,
+}
+
+#[derive(Default)]
+pub(super) struct StateLocalCounters {
+	walk_attempts: AtomicU64,
+	walk_resolved: AtomicU64,
+	fallback_absent: AtomicU64,
+	fallback_ceiling: AtomicU64,
+	fallback_auth_missing: AtomicU64,
+	fallback_all_committed: AtomicU64,
+	fallback_entries: AtomicU64,
+	fallback_canary: AtomicU64,
+	fallback_create_mismatch: AtomicU64,
+	fallback_unevaluable: AtomicU64,
+	fallback_error: AtomicU64,
+	walk_failures: AtomicU64,
+	gate_denials: AtomicU64,
+	shadow_compares: AtomicU64,
+	shadow_agreements: AtomicU64,
+	shadow_divergences: AtomicU64,
+}
+
+struct WalkAttempt {
+	counters: Arc<StateLocalCounters>,
+	settled: bool,
+}
+
+#[implement(StateLocalCounters)]
+fn start_walk(&self) { self.walk_attempts.fetch_add(1, Ordering::Relaxed); }
+
+#[implement(StateLocalCounters)]
+fn settle_walk(&self, outcome: WalkOutcome) {
+	match outcome {
+		| WalkOutcome::Resolved => {
+			self.walk_resolved.fetch_add(1, Ordering::Relaxed);
+		},
+		| WalkOutcome::Fallback(fallback) => self.record_fallback(fallback),
+		| WalkOutcome::Failure => {
+			self.walk_failures.fetch_add(1, Ordering::Relaxed);
+		},
+	}
+}
+
+#[implement(StateLocalCounters)]
+fn record_fallback(&self, fallback: Fallback) {
+	let counter = match fallback {
+		| Fallback::Absent => &self.fallback_absent,
+		| Fallback::Ceiling => &self.fallback_ceiling,
+		| Fallback::AuthMissing => &self.fallback_auth_missing,
+		| Fallback::AllCommitted => &self.fallback_all_committed,
+		| Fallback::Entries => &self.fallback_entries,
+		| Fallback::Canary => &self.fallback_canary,
+		| Fallback::CreateMismatch => &self.fallback_create_mismatch,
+		| Fallback::Unevaluable => &self.fallback_unevaluable,
+		| Fallback::Error => &self.fallback_error,
+	};
+
+	counter.fetch_add(1, Ordering::Relaxed);
+}
+
+#[implement(StateLocalCounters)]
+fn add_gate_denials(&self, gate_denials: usize) {
+	if gate_denials == 0 {
+		return;
+	}
+
+	let gate_denials = gate_denials.try_into().unwrap_or(u64::MAX);
+
+	self.gate_denials
+		.fetch_add(gate_denials, Ordering::Relaxed);
+}
+
+#[implement(StateLocalCounters)]
+fn settle_shadow(&self, outcome: ShadowOutcome) {
+	self.shadow_compares
+		.fetch_add(1, Ordering::Relaxed);
+
+	let counter = match outcome {
+		| ShadowOutcome::Agreement => &self.shadow_agreements,
+		| ShadowOutcome::Divergence => &self.shadow_divergences,
+	};
+
+	counter.fetch_add(1, Ordering::Relaxed);
+}
+
+#[implement(StateLocalCounters)]
+fn snapshot(&self) -> StateLocalMetrics {
+	StateLocalMetrics {
+		walk_attempts: self.walk_attempts.load(Ordering::Relaxed),
+		walk_resolved: self.walk_resolved.load(Ordering::Relaxed),
+		fallback_absent: self.fallback_absent.load(Ordering::Relaxed),
+		fallback_ceiling: self.fallback_ceiling.load(Ordering::Relaxed),
+		fallback_auth_missing: self.fallback_auth_missing.load(Ordering::Relaxed),
+		fallback_all_committed: self
+			.fallback_all_committed
+			.load(Ordering::Relaxed),
+		fallback_entries: self.fallback_entries.load(Ordering::Relaxed),
+		fallback_canary: self.fallback_canary.load(Ordering::Relaxed),
+		fallback_create_mismatch: self
+			.fallback_create_mismatch
+			.load(Ordering::Relaxed),
+		fallback_unevaluable: self.fallback_unevaluable.load(Ordering::Relaxed),
+		fallback_error: self.fallback_error.load(Ordering::Relaxed),
+		walk_failures: self.walk_failures.load(Ordering::Relaxed),
+		gate_denials: self.gate_denials.load(Ordering::Relaxed),
+		shadow_compares: self.shadow_compares.load(Ordering::Relaxed),
+		shadow_agreements: self.shadow_agreements.load(Ordering::Relaxed),
+		shadow_divergences: self.shadow_divergences.load(Ordering::Relaxed),
+	}
+}
+
+#[implement(WalkAttempt)]
+fn start(counters: Arc<StateLocalCounters>) -> Self {
+	counters.start_walk();
+
+	Self { counters, settled: false }
+}
+
+#[implement(WalkAttempt)]
+fn settle(mut self, outcome: WalkOutcome, gate_denials: usize) {
+	self.counters.add_gate_denials(gate_denials);
+	self.counters.settle_walk(outcome);
+	self.settled = true;
+}
+
+impl Drop for WalkAttempt {
+	fn drop(&mut self) {
+		if !self.settled {
+			self.counters.settle_walk(WalkOutcome::Failure);
+		}
+	}
 }
 
 /// Active writes fork-node memo rows; Shadow suppresses all persistent
@@ -75,6 +258,7 @@ struct Walk<'a> {
 	gate_drops: usize,
 	memo_hits: usize,
 	fallback: Option<Fallback>,
+	attempt: Option<WalkAttempt>,
 }
 
 /// Held outlier in the walk sub-DAG.
@@ -110,14 +294,36 @@ enum Fallback {
 	Error,
 }
 
+#[derive(Clone, Copy)]
+enum WalkOutcome {
+	Resolved,
+	Fallback(Fallback),
+	Failure,
+}
+
+#[derive(Clone, Copy)]
+enum ShadowOutcome {
+	Agreement,
+	Divergence,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+enum DivergenceKey {
+	Resolved(StateEventType, StateKey),
+	UnresolvedShortStateKey(ShortStateKey),
+}
+
+#[derive(Default)]
+struct DivergenceSide {
+	count: usize,
+	sample: DivergenceKeys,
+}
+
 /// Ceiling on simultaneously live state-map entries across one walk: the sum
 /// of the lengths of materialized maps no consumer has released yet.
 /// Exceeding it falls back to the federation fetch. Deliberately a const, not
 /// config; revisit only if operation trips it.
 const MAX_LIVE_ENTRIES: usize = 1 << 19;
-
-/// Bound on diverging shortstatekeys sampled into the shadow-mode debug log.
-const DIVERGENCE_SAMPLE: usize = 16;
 
 /// Build the state before `incoming_pdu` from events we already hold, walking
 /// locally held uncommitted ancestry down to committed or memoized ancestors
@@ -147,16 +353,21 @@ where
 	let room_version = room_version.clone();
 	let create_event_id = create_event_id.to_owned();
 	let parent = Span::current();
+	let attempt = WalkAttempt::start(self.state_local.clone());
 
-	let task = self.services.server.runtime().spawn(async move {
-		services
-			.event_handler
-			.walk_task(room_id, room_version, create_event_id, mode, top_prevs, parent)
-			.await
-	});
+	let task = self.services.server.runtime().spawn(
+		async move {
+			services
+				.event_handler
+				.walk_task(room_id, room_version, create_event_id, mode, top_prevs, attempt)
+				.await
+		}
+		.instrument(parent),
+	);
 
 	// Abort on caller cancellation; a dropped JoinHandle only detaches.
 	let abort = task.abort_handle();
+
 	defer! {{ abort.abort(); }};
 
 	task.await.unwrap_or_else(|error| {
@@ -173,7 +384,7 @@ where
 /// task root, and under /send intake, already the server's deepest stack, the
 /// walk's auth-gate subtree overflows the worker stack in debug builds.
 #[implement(super::Service)]
-#[tracing::instrument(name = "local", level = "debug", parent = &parent, skip_all)]
+#[tracing::instrument(name = "local", level = "debug", skip_all)]
 async fn walk_task(
 	&self,
 	room_id: OwnedRoomId,
@@ -181,7 +392,7 @@ async fn walk_task(
 	create_event_id: OwnedEventId,
 	mode: WalkMode,
 	top_prevs: PrevEvents,
-	parent: Span,
+	attempt: WalkAttempt,
 ) -> Result<Option<StateIds>> {
 	let max_nodes = self
 		.services
@@ -189,10 +400,20 @@ async fn walk_task(
 		.config
 		.resolve_state_locally_max;
 
-	let mut walk =
-		Walk::new(&room_id, &room_version, &create_event_id, mode, max_nodes, top_prevs)?;
+	let mut walk = Walk::new(
+		&room_id,
+		&room_version,
+		&create_event_id,
+		mode,
+		max_nodes,
+		top_prevs,
+		Some(attempt),
+	)?;
 
-	let state = self.walk_state(&mut walk).await?;
+	let state = self.walk_state(&mut walk).await;
+	let state = state.inspect_err(|_| {
+		walk.settle(WalkOutcome::Failure);
+	})?;
 
 	debug!(
 		visited = walk.nodes.len(),
@@ -211,8 +432,27 @@ async fn walk_task(
 		);
 	}
 
+	let (state, outcome) = match (state, walk.fallback) {
+		| (Some(state), None) => (Some(state), WalkOutcome::Resolved),
+		| (None, Some(fallback)) => (None, WalkOutcome::Fallback(fallback)),
+		| _ => {
+			debug_assert!(false, "local walk state and fallback disagree");
+			(None, WalkOutcome::Failure)
+		},
+	};
+
+	walk.settle(outcome);
+
 	Ok(state)
 }
+
+/// Read an observational snapshot of production local-build totals.
+///
+/// The values cover this process lifetime and do not reset when read.
+#[implement(super::Service)]
+#[inline]
+#[must_use]
+pub fn state_local_metrics(&self) -> StateLocalMetrics { self.state_local.snapshot() }
 
 /// Run a read-only (shadow-mode) walk for one stored event and describe the
 /// outcome, for the admin debug command.
@@ -242,6 +482,7 @@ pub async fn local_state_report(&self, event_id: &EventId) -> Result<LocalBuildR
 		WalkMode::Shadow,
 		max_nodes,
 		top_prevs,
+		None,
 	)?;
 
 	let state = self.walk_state(&mut walk).await?;
@@ -259,44 +500,90 @@ pub async fn local_state_report(&self, event_id: &EventId) -> Result<LocalBuildR
 }
 
 /// Diff a shadow-mode local build against the authoritative fetched state.
+///
 /// Divergence is neutral on which side is wrong; the soak analysis decides.
-pub(super) fn compare_shadow(
+#[implement(super::Service)]
+#[tracing::instrument(name = "shadow_compare", level = "debug", skip_all)]
+pub(super) async fn compare_shadow(
+	&self,
 	room_id: &RoomId,
 	event_id: &EventId,
 	local: &StateIds,
 	fetched: &StateIds,
 ) {
-	let only_local: Vec<ShortStateKey> = diverging(local, fetched).collect();
-	let only_fetch: Vec<ShortStateKey> = diverging(fetched, local).collect();
+	let only_local = divergent(local, fetched);
+	let only_fetch = divergent(fetched, local);
+	let agreement = only_local.count == 0 && only_fetch.count == 0;
 
-	if only_local.is_empty() && only_fetch.is_empty() {
+	let outcome = if agreement {
+		ShadowOutcome::Agreement
+	} else {
+		ShadowOutcome::Divergence
+	};
+
+	self.state_local.settle_shadow(outcome);
+
+	if agreement {
 		debug!(%room_id, %event_id, "Shadow local state build matches fetched state.");
 		return;
 	}
 
+	let resolve = |shortstatekey| {
+		self.services
+			.short
+			.get_statekey_from_short(shortstatekey)
+	};
+
+	let (only_local_sample, only_fetch_sample) = join(
+		resolve_divergence_sample(only_local.sample, &resolve),
+		resolve_divergence_sample(only_fetch.sample, &resolve),
+	)
+	.await;
+
 	warn!(
 		%room_id,
 		%event_id,
-		only_local = only_local.len(),
-		only_fetch = only_fetch.len(),
+		only_local = only_local.count,
+		only_fetch = only_fetch.count,
+		?only_local_sample,
+		?only_fetch_sample,
 		"Shadow local state build diverges from fetched state.",
 	);
-
-	let sample: Vec<_> = only_local
-		.iter()
-		.chain(only_fetch.iter())
-		.copied()
-		.take(DIVERGENCE_SAMPLE)
-		.collect();
-
-	debug!(?sample, "Diverging shortstatekeys.");
 }
 
-/// Keys of entries in `a` absent from or differing in `b`.
-fn diverging<'a>(a: &'a StateIds, b: &'a StateIds) -> impl Iterator<Item = ShortStateKey> + 'a {
+// Count all entries in `a` absent from or differing in `b`, sampling a bounded
+// prefix for diagnostics.
+fn divergent(a: &StateIds, b: &StateIds) -> DivergenceSide {
 	a.iter()
-		.filter(|&(shortstatekey, event_id)| b.get(shortstatekey) != Some(event_id))
-		.map(|(&shortstatekey, _)| shortstatekey)
+		.filter(|(shortstatekey, event_id)| b.get(shortstatekey) != Some(event_id))
+		.fold(DivergenceSide::default(), |mut divergence, (&shortstatekey, _)| {
+			divergence.count = divergence.count.saturating_add(1);
+
+			if !divergence.sample.is_full() {
+				divergence.sample.push(shortstatekey);
+			}
+
+			divergence
+		})
+}
+
+async fn resolve_divergence_sample<Resolve, Fut>(
+	sample: DivergenceKeys,
+	resolve: &Resolve,
+) -> DivergenceSample
+where
+	Resolve: Fn(ShortStateKey) -> Fut + Sync,
+	Fut: Future<Output = Result<(StateEventType, StateKey)>> + Send,
+{
+	sample
+		.into_iter()
+		.stream()
+		.wide_then(async |shortstatekey| match resolve(shortstatekey).await {
+			| Ok((event_type, state_key)) => DivergenceKey::Resolved(event_type, state_key),
+			| Err(_) => DivergenceKey::UnresolvedShortStateKey(shortstatekey),
+		})
+		.collect()
+		.await
 }
 
 /// Drive discovery then the post-order build; any abnormality sets
@@ -853,6 +1140,7 @@ impl<'a> Walk<'a> {
 		mode: WalkMode,
 		max_nodes: usize,
 		top_prevs: PrevEvents,
+		attempt: Option<WalkAttempt>,
 	) -> Result<Self> {
 		Ok(Self {
 			room_id,
@@ -873,7 +1161,14 @@ impl<'a> Walk<'a> {
 			gate_drops: 0,
 			memo_hits: 0,
 			fallback: None,
+			attempt,
 		})
+	}
+
+	fn settle(&mut self, outcome: WalkOutcome) {
+		if let Some(attempt) = self.attempt.take() {
+			attempt.settle(outcome, self.gate_drops);
+		}
 	}
 
 	/// Consumer counts drive state-map reaping: each held node's prevs and
@@ -948,6 +1243,10 @@ impl<'a> Walk<'a> {
 			}
 		}
 	}
+}
+
+impl Drop for Walk<'_> {
+	fn drop(&mut self) { self.settle(WalkOutcome::Failure); }
 }
 
 impl Fallback {
