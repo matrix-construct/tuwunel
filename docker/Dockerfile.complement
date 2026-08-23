@@ -82,7 +82,6 @@ COPY <<EOF complement.toml
     registration_shared_secret = "complement"
     request_conn_timeout = 60
     request_timeout = 120
-    resolve_state_locally_shadow = true
     rocksdb_log_level = "debug"
     rocksdb_max_log_files = 1
     rocksdb_parallelism_threads = 2
@@ -155,7 +154,7 @@ ENTRYPOINT exec /complement/provision_complement.sh sched_wrap.sh valgrind \
 FROM input AS complement-base
 ARG var_cache
 ARG var_lib_apt
-ARG complement_ref="80aa45d4c29e3d0e40662f79e396b949dce26348"
+ARG complement_ref="b21330e19fc2ee69e043b72cb2072d2f5db03471"
 ARG complement_tags="conduwuit_blacklist,complemau"
 ARG complement_tests="./tests/..."
 ARG complement_run=".*"

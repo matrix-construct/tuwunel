@@ -163,6 +163,17 @@
 {"Action":"pass","Test":"TestFetchMessagesFromNonExistentRoom"}
 {"Action":"pass","Test":"TestFilter"}
 {"Action":"fail","Test":"TestFilterMessagesByRelType"}
+{"Action":"pass","Test":"TestForwardExtremityPrune"}
+{"Action":"pass","Test":"TestGapFillingAuthorizedStateEvent"}
+{"Action":"pass","Test":"TestGapFillingDeepChain"}
+{"Action":"pass","Test":"TestGapFillingDroppedStateEventDependents"}
+{"Action":"pass","Test":"TestGapFillingForkResolution"}
+{"Action":"pass","Test":"TestGapFillingManufacturedGapSoftFail"}
+{"Action":"pass","Test":"TestGapFillingManufacturedGapSoftFail/control:_the_same_branch_without_the_ban"}
+{"Action":"pass","Test":"TestGapFillingManufacturedGapSoftFail/message_soft_fails_against_the_integrated_ban"}
+{"Action":"pass","Test":"TestGapFillingUnauthorizedStateEvent"}
+{"Action":"pass","Test":"TestGapFillingUnauthorizedStateEvent/ban_backfilled_after_probe"}
+{"Action":"pass","Test":"TestGapFillingUnauthorizedStateEvent/ban_delivered_first"}
 {"Action":"pass","Test":"TestGappedSyncLeaveSection"}
 {"Action":"pass","Test":"TestGetFilteredRoomMembers"}
 {"Action":"pass","Test":"TestGetFilteredRoomMembers/membership/join"}

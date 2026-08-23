@@ -4,14 +4,14 @@ Tuwunel runs the [Complement](https://github.com/matrix-org/complement) Matrix h
 
 ## Counts
 
-- Test groups: 207. Passing: **84.1%**
-  - ✅ `pass`: 174
+- Test groups: 214. Passing: **84.6%**
+  - ✅ `pass`: 181
   - 🟨 `some`: 15
   - ❌ `fail`: 18
   - ⬛ `skip`: 0
 
-- Subtests: 595. Passing: **78.8%**
-  - ✅ `pass`: 469
+- Subtests: 599. Passing: **79.0%**
+  - ✅ `pass`: 473
   - ❌ `fail`: 118
   - ⬛ `skip`: 8
 
@@ -74,6 +74,13 @@ Tuwunel runs the [Complement](https://github.com/matrix-org/complement) Matrix h
 | ✅ | – | `FetchMessagesFromNonExistentRoom` |
 | ✅ | – | `Filter` |
 | ❌ | – | `FilterMessagesByRelType` |
+| ✅ | – | `ForwardExtremityPrune` |
+| ✅ | – | `GapFillingAuthorizedStateEvent` |
+| ✅ | – | `GapFillingDeepChain` |
+| ✅ | – | `GapFillingDroppedStateEventDependents` |
+| ✅ | – | `GapFillingForkResolution` |
+| ✅ | 2/0/0 | `GapFillingManufacturedGapSoftFail` |
+| ✅ | 2/0/0 | `GapFillingUnauthorizedStateEvent` |
 | ✅ | – | `GappedSyncLeaveSection` |
 | ✅ | 3/0/0 | `GetFilteredRoomMembers` |
 | ✅ | – | `GetMissingEventsGapFilling` |
