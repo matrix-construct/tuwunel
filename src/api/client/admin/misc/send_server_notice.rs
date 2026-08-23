@@ -1,8 +1,5 @@
 use axum::extract::State;
-use futures::{
-	FutureExt, StreamExt,
-	future::{join, join3},
-};
+use futures::{FutureExt, StreamExt};
 use ruma::{
 	DeviceId, OwnedEventId, OwnedRoomId, RoomId, RoomVersionId, TransactionId, UserId,
 	events::{
@@ -17,7 +14,7 @@ use ruma::{
 			name::RoomNameEventContent,
 			power_levels::RoomPowerLevelsEventContent,
 		},
-		tag::{TagName, Tags},
+		tag::TagName,
 	},
 	serde::Raw,
 };
@@ -28,7 +25,7 @@ use synapse_admin_api::server_notices::send::{
 use tuwunel_core::{
 	Err, Result,
 	matrix::{Event, pdu::PduBuilder, room_version::rules as get_room_version_rules},
-	utils::{stream::ReadyExt, string_from_bytes},
+	utils::{FutureBoolExt, future::ReadyBoolExt, stream::ReadyExt, string_from_bytes},
 };
 use tuwunel_service::Services;
 
@@ -130,9 +127,9 @@ async fn send_notice(
 
 	let is_joined = services.state_cache.is_joined(target, &room_id);
 	let is_invited = services.state_cache.is_invited(target, &room_id);
-	let (is_joined, is_invited) = join(is_joined, is_invited).await;
+	let needs_invite = is_joined.is_false().and(is_invited.is_false());
 
-	if !is_joined && !is_invited {
+	if needs_invite.await {
 		let pdu = PduBuilder::state(
 			String::from(target),
 			&RoomMemberEventContent::new(MembershipState::Invite),
@@ -238,20 +235,18 @@ async fn room_is_notice(
 		.state_cache
 		.is_joined(server_user, room_id);
 
-	let tags = services
+	let is_tagged = services
 		.account_data
-		.get_room_tags(target, room_id);
+		.get_room_tags(target, room_id)
+		.map(|tags| tags.is_ok_and(|tags| tags.contains_key(tag)));
 
-	let create = services
+	let from_server = services
 		.state_accessor
-		.room_state_get(room_id, &StateEventType::RoomCreate, "");
+		.room_state_get(room_id, &StateEventType::RoomCreate, "")
+		.map(|create| create.is_ok_and(|create| is_notice_creator(create.sender(), server_user)));
 
-	let (server_joined, tags, create) = join3(server_joined, tags, create).await;
-
-	server_joined
-		&& create.is_ok_and(|create| {
-			is_notice_marker(create.sender(), server_user, &tags.unwrap_or_default(), tag)
-		})
+	// The create fetch trails; an untagged candidate settles it first.
+	server_joined.and2(is_tagged, from_server).await
 }
 
 async fn create_notice_room(services: &Services, target: &UserId) -> Result<OwnedRoomId> {
@@ -362,13 +357,8 @@ fn notice_tag(tag: &str) -> TagName {
 		.map_or(TagName::ServerNotice, Into::into)
 }
 
-fn is_notice_marker(
-	create_sender: &UserId,
-	server_user: &UserId,
-	tags: &Tags,
-	tag: &TagName,
-) -> bool {
-	create_sender == server_user && tags.contains_key(tag)
+fn is_notice_creator(create_sender: &UserId, server_user: &UserId) -> bool {
+	create_sender == server_user
 }
 
 fn notice_power_levels(server_user: &UserId) -> RoomPowerLevelsEventContent {
@@ -406,13 +396,9 @@ async fn check_existing_txnid(
 
 #[cfg(test)]
 mod tests {
-	use ruma::{
-		Int,
-		events::tag::{TagInfo, TagName, Tags},
-		user_id,
-	};
+	use ruma::{Int, events::tag::TagName, user_id};
 
-	use super::{is_notice_marker, notice_power_levels, notice_tag};
+	use super::{is_notice_creator, notice_power_levels, notice_tag};
 
 	#[test]
 	fn power_levels_mute_the_target() {
@@ -426,14 +412,12 @@ mod tests {
 	}
 
 	#[test]
-	fn marker_requires_create_sender_and_tag() {
+	fn only_the_server_user_creates_a_notice_room() {
 		let server = user_id!("@server:example.com");
 		let other = user_id!("@other:example.com");
-		let tagged = Tags::from([(TagName::ServerNotice, TagInfo::new())]);
 
-		assert!(is_notice_marker(server, server, &tagged, &TagName::ServerNotice));
-		assert!(!is_notice_marker(other, server, &tagged, &TagName::ServerNotice));
-		assert!(!is_notice_marker(server, server, &Tags::new(), &TagName::ServerNotice));
+		assert!(is_notice_creator(server, server));
+		assert!(!is_notice_creator(other, server));
 	}
 
 	#[test]
