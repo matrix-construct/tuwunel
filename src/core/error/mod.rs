@@ -18,6 +18,10 @@ use std::{
 	sync::{Mutex, PoisonError},
 };
 
+// Aliased so the variants already spelling this path qualified stay clean
+// under unused_qualifications.
+use ruma::api::error::ErrorKind as MatrixErrorKind;
+
 pub use self::{err::visit, log::*};
 use crate::utils::{assert_ref_unwind_safe, assert_send, assert_sync, assert_unwind_safe};
 
@@ -463,6 +467,14 @@ pub enum Error {
 	#[error("{0}: {1}")]
 	Request(ruma::api::error::ErrorKind, Cow<'static, str>, http::StatusCode),
 
+	/// Carries a client error whose HTTP status is authoritative.
+	///
+	/// `Request` treats a bad-request status as unset and lets the kind promote
+	/// it. Use this variant where a specification mandates a status the
+	/// promotion table would override.
+	#[error("{0}: {1}")]
+	RequestStatus(MatrixErrorKind, Cow<'static, str>, http::StatusCode),
+
 	/// Reports a structured Matrix API error.
 	///
 	/// Automatic conversion preserves the Ruma status, kind, and message.
@@ -566,7 +578,9 @@ impl Error {
 			| Self::FeatureDisabled(..) => FeatureDisabled,
 			| Self::CanonicalJson(..) | Self::Json(..) => NotJson,
 			| Self::AuthCheck(..) => ErrorKind::forbidden(),
-			| Self::BadRequest(kind, ..) | Self::Request(kind, ..) => kind.clone(),
+			| Self::BadRequest(kind, ..)
+			| Self::Request(kind, ..)
+			| Self::RequestStatus(kind, ..) => kind.clone(),
 			| Self::Federation(_, error) | Self::Ruma(error) =>
 				response::ruma_error_kind(error).clone(),
 			| _ => Unknown,
@@ -593,7 +607,7 @@ impl Error {
 			| Self::BadRequest(kind, ..) => response::bad_request_code(kind),
 			| Self::Request(kind, _, code) => response::status_code(kind, *code),
 			| Self::Io(error) => response::io_error_code(error.kind()),
-			| Self::HttpJson(code, ..) => *code,
+			| Self::HttpJson(code, ..) | Self::RequestStatus(.., code) => *code,
 			| Self::Reqwest(error) => error
 				.status()
 				.unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),

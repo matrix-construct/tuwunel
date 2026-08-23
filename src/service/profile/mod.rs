@@ -1,3 +1,6 @@
+#[cfg(test)]
+mod tests;
+
 use std::{collections::BTreeMap, sync::Arc};
 
 use futures::{Stream, StreamExt, future::join};
@@ -36,6 +39,12 @@ impl crate::Service for Service {
 
 	fn name(&self) -> &str { crate::service::make_name(std::module_path!()) }
 }
+
+/// MSC4426 maximum `m.status` text length, in bytes.
+const MAX_STATUS_TEXT_LENGTH: usize = 256;
+
+/// MSC4426 maximum `m.status` emoji length, in bytes.
+const MAX_STATUS_EMOJI_LENGTH: usize = 32;
 
 /// Per-update policy for fanning a global profile change out to each of
 /// the user's joined rooms as a fresh `m.room.member` event. Mirrors the
@@ -328,6 +337,7 @@ pub async fn set_profile_keys(
 			check_profile_key(name.as_str())?;
 
 			if let Some(value) = value {
+				check_profile_value(name.as_str(), value)?;
 				self.enforce_profile_size(user_id, name.as_str(), value)
 					.await?;
 			}
@@ -375,7 +385,13 @@ where
 		.useridprofilekey_value
 		.qry(&key)
 		.await
-		.map_err(|_| err!(Request(NotFound("The requested profile key does not exist."))))?
+		.map_err(|error| {
+			if error.is_not_found() {
+				err!(Request(NotFound("The requested profile key does not exist.")))
+			} else {
+				error
+			}
+		})?
 		.deserialized()
 		.map_err(|_| err!(Database("Cannot deserialize database profile value")))?;
 
@@ -487,4 +503,70 @@ fn check_profile_key(name: &str) -> Result {
 	}
 
 	Ok(())
+}
+
+/// Validate a profile field value against the schema of the proposal naming
+/// the field.
+///
+/// MSC4133 reserves no schema of its own, so a field this does not recognize
+/// carries any JSON the size cap admits. A stored `null` clears the field for
+/// readers without removing it, and is accepted for every field name.
+fn check_profile_value(name: &str, value: &Value) -> Result {
+	if value.is_null() {
+		return Ok(());
+	}
+
+	match name {
+		| "m.status" | "org.matrix.msc4426.status" => check_status(value),
+		| "m.call" | "org.matrix.msc4426.call" => check_call(value),
+		| _ => Ok(()),
+	}
+}
+
+/// Validate an MSC4426 status against its two required fields and their byte
+/// budgets.
+///
+/// Both `text` and `emoji` are required, so a partial object is rejected
+/// rather than stored for clients to render half of. The emoji budget counts
+/// bytes and never graphemes, which the proposal calls out because grapheme
+/// definitions keep growing.
+fn check_status(value: &Value) -> Result {
+	let (Some(text), Some(emoji)) = (
+		value.get("text").and_then(Value::as_str),
+		value.get("emoji").and_then(Value::as_str),
+	) else {
+		return Err!(Request(BadJson("Status requires a text and an emoji string.")));
+	};
+
+	check_status_length(text, MAX_STATUS_TEXT_LENGTH, "text")?;
+	check_status_length(emoji, MAX_STATUS_EMOJI_LENGTH, "emoji")
+}
+
+/// Bound one status field by its byte budget.
+///
+/// MSC4426 mandates both the `M_TOO_LARGE` errcode and a 400, while the
+/// kind-derived table promotes that errcode to 413, so this is one of the few
+/// call sites naming its own status.
+fn check_status_length(value: &str, max: usize, field: &str) -> Result {
+	value.len().le(&max).then_some(()).ok_or_else(|| {
+		err!(RequestStatus(
+			BAD_REQUEST,
+			TooLarge("Status {field} cannot be longer than {max} bytes.")
+		))
+	})
+}
+
+/// Validate an MSC4426 call indicator.
+///
+/// Every field is optional, so an empty object is the valid "in a call, joined
+/// at an unstated time" value the proposal's own example uses.
+fn check_call(value: &Value) -> Result {
+	let Some(call) = value.as_object() else {
+		return Err!(Request(BadJson("Call must be an object.")));
+	};
+
+	call.get("call_joined_ts")
+		.is_none_or(Value::is_number)
+		.then_some(())
+		.ok_or_else(|| err!(Request(BadJson("Call join timestamp must be a number."))))
 }
