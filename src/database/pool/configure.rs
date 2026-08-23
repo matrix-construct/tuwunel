@@ -81,6 +81,8 @@ pub(super) fn configure(server: &Arc<Server>) -> (Vec<usize>, Vec<usize>, Vec<us
 	let workers =
 		compute_workers(&devices, config, default_worker_count, topology.len(), chan_limit);
 
+	let workers = constrain_workers(workers, max_workers);
+
 	let queues: Vec<usize> = workers
 		.iter()
 		.map(|count| {
@@ -112,10 +114,9 @@ pub(super) fn configure(server: &Arc<Server>) -> (Vec<usize>, Vec<usize>, Vec<us
 	);
 
 	assert!(total_workers > 0, "some workers expected");
-	debug_assert!(
-		total_workers <= max_workers || !topology_detected,
-		"spawning too many workers"
-	);
+	// A queue's capacity is positive exactly when its group is populated, so
+	// num_queues is the floor constrain_workers guarantees.
+	debug_assert!(total_workers <= max_workers.max(num_queues), "spawning too many workers");
 
 	assert!(!queues.is_empty(), "some queues expected");
 	assert!(!queues.iter().copied().all(is_equal_to!(0)), "positive queue capacity expected");
@@ -261,6 +262,39 @@ fn compute_workers(
 		.collect()
 }
 
+/// Reduce the worker groups until their total satisfies the configured
+/// maximum.
+///
+/// Group counts are levelled down toward an even share of the maximum, with
+/// the remainder spread one apiece over the leading populated groups. Every
+/// populated group retains at least one worker so its queue keeps service,
+/// making the number of populated groups the effective floor.
+fn constrain_workers(mut workers: Vec<usize>, max_workers: usize) -> Vec<usize> {
+	let total: usize = workers.iter().sum();
+
+	if total <= max_workers {
+		return workers;
+	}
+
+	let num_groups = workers.iter().filter(|&&count| count > 0).count();
+
+	let share = expected!(max_workers / num_groups);
+	let extra = expected!(max_workers % num_groups);
+
+	workers
+		.iter_mut()
+		.filter(|count| **count > 0)
+		.enumerate()
+		.for_each(|(rank, count)| {
+			*count = share
+				.saturating_add(usize::from(rank < extra))
+				.max(1)
+				.min(*count);
+		});
+
+	workers
+}
+
 #[expect(clippy::too_many_arguments)]
 fn log_topology(
 	topology_detected: bool,
@@ -346,4 +380,29 @@ fn update_stream_width(
 		?new_amp,
 		"Updated global stream width"
 	);
+}
+
+#[cfg(test)]
+mod tests {
+	use super::constrain_workers;
+
+	#[test]
+	fn constrain_respects_the_maximum() {
+		let constrained = constrain_workers(vec![8; 24], 64);
+
+		assert_eq!(constrained.iter().sum::<usize>(), 64);
+		assert!(constrained.iter().all(|&count| count > 0));
+	}
+
+	#[test]
+	fn constrain_floors_populated_groups() {
+		assert_eq!(constrain_workers(vec![8, 0, 8, 8], 2), vec![1, 0, 1, 1]);
+	}
+
+	#[test]
+	fn constrain_passes_a_satisfied_total() {
+		let workers = vec![4, 0, 4];
+
+		assert_eq!(constrain_workers(workers.clone(), 8), workers);
+	}
 }

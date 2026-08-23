@@ -3533,6 +3533,9 @@ pub struct Config {
 	/// sum of all groups exceeds this value the worker counts are reduced until
 	/// this constraint is satisfied.
 	///
+	/// Each populated worker group retains at least one worker, so the number
+	/// of populated groups is the effective floor of this value.
+	///
 	/// By default this value is only effective on larger systems (e.g. 16+
 	/// cores) where it will tamper the overall thread-count. The thread-pool
 	/// model will never achieve hardware capacity but this value can be raised
