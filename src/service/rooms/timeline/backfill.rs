@@ -1,7 +1,7 @@
 use std::{collections::HashSet, iter::once, num::NonZeroUsize};
 
 use futures::{
-	FutureExt, StreamExt, TryFutureExt,
+	FutureExt, StreamExt,
 	future::{join, try_join, try_join4},
 };
 use rand::seq::SliceRandom;
@@ -35,6 +35,10 @@ use crate::{
 /// Events requested per backfill batch.
 const BACKFILL_LIMIT: NonZeroUsize = NonZeroUsize::new(100).unwrap();
 
+const BACKFILL_ATTEMPT_LIMIT: NonZeroUsize = NonZeroUsize::new(5).unwrap();
+
+const BACKFILL_BATCH_ATTEMPTS: usize = 3;
+
 /// The `event_id` and timestamp parsed back out of an [`Op::TimestampToEvent`]
 /// fetch outcome.
 #[derive(Deserialize)]
@@ -46,12 +50,8 @@ struct TimestampHit {
 #[implement(super::Service)]
 #[tracing::instrument(name = "backfill", level = "debug", skip(self))]
 pub async fn backfill_if_required(&self, room_id: &RoomId, from: PduCount) -> Result {
-	let (first_pdu_count, first_pdu) = self
-		.first_item_in_room(room_id)
-		.await
-		.expect("Room is not empty");
+	let (first_pdu_count, first_pdu) = self.first_item_in_room(room_id).await?;
 
-	// No backfill required, there are still events between them
 	if first_pdu_count < from {
 		return Ok(());
 	}
@@ -78,7 +78,7 @@ pub async fn backfill_if_required(&self, room_id: &RoomId, from: PduCount) -> Re
 		return Ok(());
 	}
 
-	let eligible = self.backfill_candidates(room_id).await;
+	let mut eligible = self.backfill_candidates(room_id).await;
 
 	let no_backfill = || {
 		warn!(%room_id, "No servers could backfill, but backfill was needed");
@@ -92,33 +92,52 @@ pub async fn backfill_if_required(&self, room_id: &RoomId, from: PduCount) -> Re
 		return no_backfill();
 	}
 
-	let opts = Opts::new(Op::Backfill, room_id.to_owned())
-		.event_id(first_pdu.event_id().to_owned())
-		.candidates(eligible)
-		.backfill_limit(BACKFILL_LIMIT);
+	for _ in 0..BACKFILL_BATCH_ATTEMPTS {
+		let opts = Opts::new(Op::Backfill, room_id.to_owned())
+			.event_id(first_pdu.event_id().to_owned())
+			.candidates(eligible.iter().cloned())
+			.attempt_limit(BACKFILL_ATTEMPT_LIMIT)
+			.backfill_limit(BACKFILL_LIMIT);
 
-	let Ok(outcome) = self
-		.services
-		.fetcher
-		.fetch(opts)
-		.inspect_err(|e| warn!(%room_id, "Backfilling failed: {e}"))
-		.await
-	else {
-		return no_backfill();
-	};
+		let Ok(outcome) = self.services.fetcher.fetch(opts).await else {
+			return no_backfill();
+		};
 
-	let pdus: Vec<Box<RawJsonValue>> = serde_json::from_slice(&outcome.bytes)?;
+		let pdus: Vec<Box<RawJsonValue>> = serde_json::from_slice(&outcome.bytes)?;
+		let batch_size = pdus.len();
+		let prepended = pdus
+			.into_iter()
+			.stream()
+			.fold(0_usize, async |prepended, pdu| {
+				let inserted = self
+					.backfill_pdu(room_id, &outcome.origin, pdu)
+					.await
+					.inspect_err(|e| debug_warn!(%room_id, %e, "Failed to add backfilled pdu"))
+					.unwrap_or(false);
 
-	pdus.into_iter()
-		.stream()
-		.for_each(async |pdu| {
-			self.backfill_pdu(room_id, &outcome.origin, pdu)
-				.await
-				.inspect_err(|e| debug_warn!(%room_id, "Failed to add backfilled pdu: {e}"))
-				.ok();
-		})
-		.await;
+				prepended.saturating_add(usize::from(inserted))
+			})
+			.await;
 
+		debug!(
+			%room_id,
+			origin = %outcome.origin,
+			batch_size,
+			prepended,
+			"Processed backfill response",
+		);
+
+		if prepended > 0 {
+			return Ok(());
+		}
+
+		eligible.retain(|server| server != &outcome.origin);
+		if eligible.is_empty() {
+			break;
+		}
+	}
+
+	warn!(%room_id, "Backfill was required but prepended no events");
 	Ok(())
 }
 
@@ -319,7 +338,9 @@ pub async fn fetch_remote_event(&self, room_id: &RoomId, event_id: &EventId) -> 
 	let pdu: Box<RawJsonValue> = serde_json::from_slice(&outcome.bytes)?;
 
 	self.backfill_pdu(room_id, &outcome.origin, pdu)
-		.await
+		.await?;
+
+	Ok(())
 }
 
 #[implement(super::Service)]
@@ -329,7 +350,7 @@ pub async fn backfill_pdu(
 	room_id: &RoomId,
 	origin: &ServerName,
 	pdu: Box<RawJsonValue>,
-) -> Result {
+) -> Result<bool> {
 	let parsed = self
 		.services
 		.event_handler
@@ -355,7 +376,7 @@ pub async fn backfill_pdu(
 
 	// Bail if the PDU already exists; a duplicate insertion is not good.
 	if existed {
-		return Ok(());
+		return Ok(false);
 	}
 
 	let pdu = self.get_pdu(&event_id);
@@ -391,8 +412,7 @@ pub async fn backfill_pdu(
 
 	match pdu.kind {
 		| TimelineEventType::RoomMessage => {
-			let content: ExtractBody = pdu.get_content()?;
-			if let Some(body) = content.body {
+			if let Ok(ExtractBody { body: Some(body) }) = pdu.get_content() {
 				self.services
 					.search
 					.index_pdu(shortroomid, &pdu_id, &body);
@@ -410,7 +430,7 @@ pub async fn backfill_pdu(
 	drop(mutex_lock);
 
 	debug!("Prepended backfill pdu");
-	Ok(())
+	Ok(true)
 }
 
 #[implement(super::Service)]
