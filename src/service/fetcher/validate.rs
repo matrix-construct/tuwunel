@@ -16,8 +16,19 @@ use super::{Op, Opts};
 #[tracing::instrument(name = "validate", level = "trace", skip_all)]
 pub(super) async fn validate(&self, opts: &Opts, bytes: &[u8]) -> Result {
 	if opts.check_conforms {
-		serde_json::from_slice::<IgnoredAny>(bytes)
-			.map_err(|e| err!(BadServerResponse("malformed federation response: {e}")))?;
+		match opts.op {
+			| Op::Backfill => serde_json::from_slice(bytes)
+				.map(|pdus: Vec<IgnoredAny>| !pdus.is_empty())
+				.map_err(|e| err!(BadServerResponse("malformed federation response: {e}")))
+				.and_then(|populated| {
+					populated
+						.then_some(())
+						.ok_or_else(|| err!(BadServerResponse("empty backfill response")))
+				}),
+			| _ => serde_json::from_slice(bytes)
+				.map(|_: IgnoredAny| ())
+				.map_err(|e| err!(BadServerResponse("malformed federation response: {e}"))),
+		}?;
 	}
 
 	let deep = opts.check_event_id || opts.check_hashes || opts.check_signature;
