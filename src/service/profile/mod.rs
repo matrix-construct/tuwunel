@@ -15,17 +15,19 @@ use serde_json::Value;
 use tuwunel_core::{
 	Err, Result, err, extract_variant, implement,
 	matrix::PduBuilder,
+	smallvec::SmallVec,
 	utils::{
-		TryReadyExt,
+		ReadyExt, TryReadyExt,
 		future::TryExtExt,
 		stream::{IterStream, TryIgnore, automatic_width},
 	},
 	warn,
 };
-use tuwunel_database::{Deserialized, Ignore, Interfix, Json, Map};
+use tuwunel_database::{Deserialized, Ignore, Interfix, Json, KeyVal, Map};
 
 pub struct Service {
 	services: Arc<crate::services::OnceServices>,
+	profilechangeid_userid: Arc<Map>,
 	useridprofilekey_value: Arc<Map>,
 }
 
@@ -33,12 +35,29 @@ impl crate::Service for Service {
 	fn build(args: &crate::Args<'_>) -> Result<Arc<Self>> {
 		Ok(Arc::new(Self {
 			services: args.services.clone(),
+			profilechangeid_userid: args.db["profilechangeid_userid"].clone(),
 			useridprofilekey_value: args.db["useridprofilekey_value"].clone(),
 		}))
 	}
 
 	fn name(&self) -> &str { crate::service::make_name(std::module_path!()) }
 }
+
+/// One logged profile write: the user whose profile changed, and the name of
+/// the field that changed.
+///
+/// Both members borrow the database cursor that produced them, so a consumer
+/// retaining either past the cursor's next advance must own it first.
+pub type ProfileChange<'a> = (&'a UserId, &'a str);
+
+/// A row of the profile change log: the field's name rides the key so that a
+/// write covering several fields needs one count, and the value names the user
+/// for the rows keyed by room.
+type ChangeKeyVal<'a> = KeyVal<'a, (&'a str, u64, &'a str), &'a UserId>;
+
+/// The field names one write actually changes, almost always just the one the
+/// caller named.
+type ChangedFields<'a> = SmallVec<[&'a str; 1]>;
 
 /// MSC4426 maximum `m.status` text length, in bytes.
 const MAX_STATUS_TEXT_LENGTH: usize = 256;
@@ -361,6 +380,8 @@ pub async fn set_profile_keys(
 			.await;
 	}
 
+	let changed = self.changed_fields(user_id, profile_values).await;
+
 	for (name, value) in profile_values {
 		let key = (user_id, name.as_str());
 
@@ -371,7 +392,127 @@ pub async fn set_profile_keys(
 		}
 	}
 
+	self.mark_profile_update(user_id, &changed).await;
+
 	Ok(())
+}
+
+/// Names the fields whose stored value the write would actually change.
+///
+/// A profile write that restores what is already stored is a change to nobody,
+/// and the on-demand remote refresh reissues every field on every lookup of a
+/// remote profile, so logging those would multiply the log by the request rate
+/// rather than the change rate.
+#[implement(Service)]
+async fn changed_fields<'a>(
+	&self,
+	user_id: &UserId,
+	profile_values: &'a [(ProfileFieldName, Option<Value>)],
+) -> ChangedFields<'a> {
+	profile_values
+		.iter()
+		.stream()
+		.filter_map(async |(name, value)| {
+			let stored: Option<Value> = self.profile_key(user_id, name).await.ok();
+
+			stored
+				.as_ref()
+				.ne(&value.as_ref())
+				.then_some(name.as_str())
+		})
+		.collect()
+		.await
+}
+
+/// Records a profile write under the user's own prefix and under every room
+/// they are joined to.
+///
+/// The key names the changed field and not only the user because a removal is
+/// otherwise unreportable: a reader re-reading the live profile cannot tell a
+/// cleared field from one that was never set. Remote users are logged too, but
+/// only as fresh as the on-demand fetch that replaced their stored fields,
+/// since nothing pushes a remote profile change to us.
+#[implement(Service)]
+#[tracing::instrument(
+	name = "profile_update",
+	level = "debug",
+	skip_all,
+	fields(
+		%user_id,
+	),
+)]
+async fn mark_profile_update(&self, user_id: &UserId, changed: &[&str]) {
+	if changed.is_empty() {
+		return;
+	}
+
+	let count = self.services.globals.next_count();
+
+	for name in changed {
+		self.profilechangeid_userid
+			.put_raw((user_id, *count, name), user_id);
+	}
+
+	self.services
+		.state_cache
+		.rooms_joined(user_id)
+		.ready_for_each(|room_id| {
+			for name in changed {
+				self.profilechangeid_userid
+					.put_raw((room_id, *count, name), user_id);
+			}
+		})
+		.await;
+}
+
+/// Streams the profile fields the user changed themselves.
+///
+/// The range is half-open on the low side, so a caller passes the sync token
+/// it already delivered. An absent `to` leaves the walk unbounded above.
+#[implement(Service)]
+#[inline]
+pub fn profile_changed<'a>(
+	&'a self,
+	user_id: &'a UserId,
+	from: u64,
+	to: Option<u64>,
+) -> impl Stream<Item = ProfileChange<'a>> + Send + 'a {
+	self.profile_changed_user_or_room(user_id.as_str(), from, to)
+}
+
+/// Streams the profile fields any member of the room changed.
+///
+/// The range works as it does for a single user. A member appears once per
+/// field they changed, however many of the caller's rooms they share.
+#[implement(Service)]
+#[inline]
+pub fn room_profile_changed<'a>(
+	&'a self,
+	room_id: &'a RoomId,
+	from: u64,
+	to: Option<u64>,
+) -> impl Stream<Item = ProfileChange<'a>> + Send + 'a {
+	self.profile_changed_user_or_room(room_id.as_str(), from, to)
+}
+
+#[implement(Service)]
+fn profile_changed_user_or_room<'a>(
+	&'a self,
+	user_or_room_id: &'a str,
+	from: u64,
+	to: Option<u64>,
+) -> impl Stream<Item = ProfileChange<'a>> + Send + 'a {
+	let to = to.unwrap_or(u64::MAX);
+	let start = (user_or_room_id, from.saturating_add(1));
+
+	// User and room ids never collide as a prefix here: their sigils differ.
+	self.profilechangeid_userid
+		.stream_from(&start)
+		.ignore_err()
+		.ready_take_while(move |((prefix, count, _), _): &ChangeKeyVal<'_>| {
+			*prefix == user_or_room_id && *count <= to
+		})
+		.map(|((_, _, field), user_id): ChangeKeyVal<'_>| (user_id, field))
 }
 
 /// Gets a specific user profile key

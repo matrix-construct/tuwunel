@@ -1,6 +1,7 @@
-use ruma::api::error::ErrorKind;
+use ruma::{api::error::ErrorKind, room_id, user_id};
 use serde_json::json;
 use tuwunel_core::{Error, http::StatusCode};
+use tuwunel_database::{deserialize_from_slice, serialize_to_vec};
 
 use super::{MAX_STATUS_EMOJI_LENGTH, MAX_STATUS_TEXT_LENGTH, check_profile_value};
 
@@ -74,6 +75,38 @@ fn call_join_timestamp_must_be_a_number() {
 fn unrecognized_field_carries_any_json() {
 	check_profile_value("m.tz", &json!("Europe/Paris")).unwrap();
 	check_profile_value("com.example.thing", &json!({ "any": [1, 2] })).unwrap();
+}
+
+// Both readers decode the log's key and value back, and the codec checks for
+// undecoded trailing bytes only in debug builds, so a drift in either shape
+// misreads the log in release rather than failing loudly.
+#[test]
+fn change_log_record_round_trips() {
+	let user_id = user_id!("@alice:example.com");
+	let field = "org.matrix.msc4426.status";
+
+	let key = serialize_to_vec((user_id.as_str(), 42_u64, field)).unwrap();
+
+	let (prefix, count, changed_field): (&str, u64, &str) = deserialize_from_slice(&key).unwrap();
+
+	assert_eq!(prefix, user_id.as_str());
+	assert_eq!(count, 42);
+	assert_eq!(changed_field, field);
+}
+
+// The same family carries a room-keyed copy of every change, and a room id is
+// not a user id, so its prefix has to survive the same round trip.
+#[test]
+fn change_log_room_key_round_trips() {
+	let room_id = room_id!("!room:example.com");
+
+	let key = serialize_to_vec((room_id.as_str(), u64::MAX, "m.status")).unwrap();
+
+	let (prefix, count, field): (&str, u64, &str) = deserialize_from_slice(&key).unwrap();
+
+	assert_eq!(prefix, room_id.as_str());
+	assert_eq!(count, u64::MAX);
+	assert_eq!(field, "m.status");
 }
 
 fn too_large(error: &Error) -> bool {

@@ -64,6 +64,11 @@ where
 			.keychangeid_userid
 			.watch_raw_prefix(&userid_prefix)
 			.boxed(),
+		// Profile changes (used when user is not joined to any rooms)
+		self.db
+			.profilechangeid_userid
+			.watch_raw_prefix(&userid_prefix)
+			.boxed(),
 		// One time keys
 		self.db
 			.userid_lastonetimekeyupdate
@@ -109,6 +114,12 @@ where
 		futures.push(
 			self.db
 				.keychangeid_userid
+				.watch_prefix((room_id, Interfix))
+				.boxed(),
+		);
+		futures.push(
+			self.db
+				.profilechangeid_userid
 				.watch_prefix((room_id, Interfix))
 				.boxed(),
 		);

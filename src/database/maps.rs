@@ -15,7 +15,7 @@ use crate::{
 	Engine, Map,
 	engine::descriptor::{
 		self, CacheDisp, DROPPED as LEGACY_AUTH_CHAIN_DESCRIPTOR, Descriptor,
-		RANDOM_SMALL as PRIVATE_READ_SYNC_DESCRIPTOR,
+		RANDOM as PROFILE_CHANGE_DESCRIPTOR, RANDOM_SMALL as PRIVATE_READ_SYNC_DESCRIPTOR,
 		RANDOM_SMALL_CACHE as THREEPID_SESSION_DESCRIPTOR,
 	},
 };
@@ -288,6 +288,10 @@ pub(super) static MAPS: &[Descriptor] = &[
 		block_size: 2048,
 		index_size: 512,
 		..descriptor::SEQUENTIAL
+	},
+	Descriptor {
+		name: "profilechangeid_userid",
+		..PROFILE_CHANGE_DESCRIPTOR
 	},
 	Descriptor {
 		name: "publicroomids",
