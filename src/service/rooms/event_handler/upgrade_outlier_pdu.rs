@@ -6,7 +6,7 @@ use ruma::{
 	events::StateEventType, room_version_rules::RoomVersionRules,
 };
 use tuwunel_core::{
-	Result, debug, debug_info, err, implement, is_equal_to,
+	Result, debug, debug_info, debug_warn, err, implement, is_equal_to,
 	matrix::{Event, EventTypeExt, PduEvent, StateKey, pdu::check_rules, room_version},
 	trace,
 	utils::{
@@ -168,6 +168,8 @@ pub(super) async fn upgrade_outlier_to_timeline_pdu(
 		.map(Arc::new)
 		.await;
 
+	// Memoize only complete local or fetched state after positional auth succeeds;
+	// soft-failed events cannot establish reusable state.
 	if matches!(resolved_via, ResolvedVia::Local | ResolvedVia::Fetch) && !soft_fail {
 		self.cache_resolved_state(room_id, incoming_pdu.event_id(), state_ids_compressed.clone())
 			.await;
@@ -413,12 +415,19 @@ async fn resolve_state_at_incoming_event(
 	let config = &self.services.server.config;
 	let enabled = config.resolve_state_locally && config.resolve_state_locally_max > 0;
 
-	if enabled
-		&& let Some(state) = self
+	if enabled {
+		match self
 			.cached_resolved_state(incoming_pdu.event_id())
 			.await
-	{
-		return Ok((state, ResolvedVia::Memo));
+		{
+			| Ok(Some(state)) => return Ok((state, ResolvedVia::Memo)),
+			| Ok(None) => (),
+			| Err(error) => debug_warn!(
+				event_id = %incoming_pdu.event_id(),
+				%error,
+				"Failed to load resolved state memo.",
+			),
+		}
 	}
 
 	let mode = if config.resolve_state_locally_shadow {

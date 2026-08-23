@@ -83,6 +83,37 @@ where
 		.try_flatten_stream()
 }
 
+/// Streams an auth chain and reports whether its observed inputs were complete.
+///
+/// The caller initializes `complete` to `true` and checks it after consuming
+/// the stream. Cached chains leave it unchanged. Any polled reverse-mapping or
+/// ancestor-walk failure sets it to `false`.
+#[implement(Service)]
+pub fn event_ids_iter_strict<'a, I>(
+	&'a self,
+	room_id: &'a RoomId,
+	room_version: &'a RoomVersionId,
+	starting_events: I,
+	complete: &'a AtomicBool,
+) -> impl Stream<Item = Result<OwnedEventId>> + Send + 'a
+where
+	I: Iterator<Item = &'a EventId> + Clone + ExactSizeIterator + Send + 'a,
+{
+	self.get_auth_chain_strict(room_id, room_version, starting_events, complete)
+		.map_ok(move |chain| {
+			self.services
+				.short
+				.multi_get_eventid_from_short(chain.into_iter().stream())
+				.inspect(move |result| {
+					if result.is_err() {
+						complete.store(false, Ordering::Relaxed);
+					}
+				})
+				.ready_filter(Result::is_ok)
+		})
+		.try_flatten_stream()
+}
+
 #[implement(Service)]
 #[tracing::instrument(
 	name = "auth_chain",
@@ -98,6 +129,48 @@ pub async fn get_auth_chain<'a, I>(
 	room_id: &RoomId,
 	room_version: &RoomVersionId,
 	starting_events: I,
+) -> Result<Vec<ShortEventId>>
+where
+	I: Iterator<Item = &'a EventId> + Clone + ExactSizeIterator + Send + 'a,
+{
+	let complete = AtomicBool::new(true);
+
+	self.get_auth_chain_inner(room_id, room_version, starting_events, &complete)
+		.await
+}
+
+#[implement(Service)]
+#[tracing::instrument(
+	name = "auth_chain",
+	level = "debug",
+	skip_all,
+	fields(
+		%room_id,
+		starting_events = %starting_events.clone().count(),
+	)
+)]
+async fn get_auth_chain_strict<'a, I>(
+	&'a self,
+	room_id: &RoomId,
+	room_version: &RoomVersionId,
+	starting_events: I,
+	complete: &AtomicBool,
+) -> Result<Vec<ShortEventId>>
+where
+	I: Iterator<Item = &'a EventId> + Clone + ExactSizeIterator + Send + 'a,
+{
+	self.get_auth_chain_inner(room_id, room_version, starting_events, complete)
+		.inspect_err(|_| complete.store(false, Ordering::Relaxed))
+		.await
+}
+
+#[implement(Service)]
+async fn get_auth_chain_inner<'a, I>(
+	&'a self,
+	room_id: &RoomId,
+	room_version: &RoomVersionId,
+	starting_events: I,
+	complete: &AtomicBool,
 ) -> Result<Vec<ShortEventId>>
 where
 	I: Iterator<Item = &'a EventId> + Clone + ExactSizeIterator + Send + 'a,
@@ -137,6 +210,7 @@ where
 				&started,
 				starting_events.iter().copied(),
 				&room_rules,
+				complete,
 			)
 			.boxed()
 		})
@@ -172,6 +246,7 @@ fn get_chunk_auth_chain<'a, I>(
 	started: &'a Instant,
 	starting_events: I,
 	room_rules: &'a RoomVersionRules,
+	complete: &'a AtomicBool,
 ) -> impl Stream<Item = ShortEventId> + Send + 'a
 where
 	I: Iterator<Item = (ShortEventId, &'a EventId)> + Clone + Send + Sync + 'a,
@@ -181,7 +256,7 @@ where
 		.map_ok(IterStream::try_stream)
 		.or_else(async move |_| {
 			let chain = self
-				.build_chunk_auth_chain(room_id, started, starting_events, room_rules)
+				.build_chunk_auth_chain(room_id, started, starting_events, room_rules, complete)
 				.await;
 
 			Ok(chain.into_iter().try_stream())
@@ -197,6 +272,7 @@ async fn build_chunk_auth_chain<'a, I>(
 	started: &'a Instant,
 	starting_events: I,
 	room_rules: &'a RoomVersionRules,
+	complete: &'a AtomicBool,
 ) -> Vec<ShortEventId>
 where
 	I: Iterator<Item = (ShortEventId, &'a EventId)> + Clone + Send + Sync + 'a,
@@ -216,7 +292,10 @@ where
 
 		match event_complete.load(Ordering::Relaxed) {
 			| true => self.put_cached_auth_chain(once(shortid), auth_chain.as_slice()),
-			| false => chunk_complete.store(false, Ordering::Relaxed),
+			| false => {
+				chunk_complete.store(false, Ordering::Relaxed);
+				complete.store(false, Ordering::Relaxed);
+			},
 		}
 
 		debug!(
@@ -403,7 +482,13 @@ where
 		.authchainkey_authchain
 		.qry(key.as_slice())
 		.map_err(|_| err!(Request(NotFound("auth_chain not cached"))))
-		.await?
+		.await?;
+
+	if !chain.len().is_multiple_of(size_of::<u64>()) {
+		return Err!(Request(NotFound("malformed auth_chain cache")));
+	}
+
+	let chain = chain
 		.as_chunks::<{ size_of::<u64>() }>()
 		.0
 		.iter()

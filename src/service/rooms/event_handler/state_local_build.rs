@@ -1,9 +1,14 @@
-use std::{borrow::Borrow, collections::HashMap, mem::take, sync::Arc};
-
-use futures::{
-	FutureExt, StreamExt, TryFutureExt,
-	future::{join, try_join},
+use std::{
+	borrow::Borrow,
+	collections::HashMap,
+	mem::take,
+	sync::{
+		Arc,
+		atomic::{AtomicBool, Ordering},
+	},
 };
+
+use futures::{FutureExt, StreamExt, TryFutureExt, TryStreamExt, future::join};
 use ruma::{
 	EventId, OwnedEventId, OwnedRoomId, RoomId, RoomVersionId,
 	events::{StateEventType, TimelineEventType},
@@ -569,14 +574,20 @@ async fn committed_state_after(
 	let state = self
 		.services
 		.state_accessor
-		.state_full_ids(shortstatehash)
-		.collect::<StateIds>()
-		.map(Ok);
+		.state_full_ids_strict(shortstatehash)
+		.try_collect::<StateIds>();
 
-	let Ok((pdu, mut state)) = try_join(pdu, state)
-		.inspect_err(|e| debug_warn!(%event_id, %e, "Failed loading committed state."))
-		.await
-	else {
+	let (pdu, state) = join(pdu, state).await;
+	let Ok(mut state) = state.inspect_err(|e| {
+		debug_warn!(%event_id, %e, "Failed loading complete committed state.");
+	}) else {
+		walk.fallback = Some(Fallback::Unevaluable);
+		return None;
+	};
+
+	let Ok(pdu) = pdu.inspect_err(|e| {
+		debug_warn!(%event_id, %e, "Failed loading committed event.");
+	}) else {
 		walk.fallback = Some(Fallback::Error);
 		return None;
 	};
@@ -595,8 +606,9 @@ async fn committed_state_after(
 	Some(Arc::new(state))
 }
 
-/// State after a memoized frontier event: the memo row is its state-before
-/// (the column's uniform meaning), so its own gated fold recomputes on top.
+/// State after a memoized frontier event: the memo row is its complete
+/// state-before, so its own gated fold preserves that guarantee for
+/// descendants.
 #[implement(super::Service)]
 async fn memoized_state_after(
 	&self,
@@ -615,9 +627,17 @@ async fn memoized_state_after(
 
 	let (state, pdu) = join(state, pdu).await;
 
-	let Some(state) = state else {
-		walk.fallback = Some(Fallback::Canary);
-		return None;
+	let state = match state {
+		| Ok(Some(state)) => state,
+		| Ok(None) => {
+			walk.fallback = Some(Fallback::Canary);
+			return None;
+		},
+		| Err(e) => {
+			debug_warn!(%event_id, %e, "Failed loading complete memoized state.");
+			walk.fallback = Some(Fallback::Unevaluable);
+			return None;
+		},
 	};
 
 	let Ok(pdu) = pdu else {
@@ -735,30 +755,57 @@ async fn fork_resolve(
 	}
 
 	let (room_id, room_version) = (walk.room_id, walk.room_version);
-	let fork_states = afters.iter().stream().wide_then(|after| {
-		let state = after
-			.iter()
-			.map(|(shortstatekey, event_id)| (*shortstatekey, event_id));
+	let fork_states: Result<Vec<_>> = afters
+		.iter()
+		.stream()
+		.wide_then(async |after| {
+			let state = after
+				.iter()
+				.map(|(shortstatekey, event_id)| (*shortstatekey, event_id));
 
-		self.fork_state(state)
-	});
+			self.fork_state(state).await
+		})
+		.try_collect()
+		.await;
 
+	let Ok(fork_states) = fork_states.inspect_err(|e| {
+		debug_warn!(%e, "Failed converting complete fork state.");
+	}) else {
+		walk.fallback = Some(Fallback::Unevaluable);
+		return None;
+	};
+
+	let chain_complete = AtomicBool::new(true);
 	let auth_chains = prevs
 		.iter()
 		.zip(&afters)
 		.stream()
 		.wide_then(|(prev_event, after)| {
-			self.fork_chain(room_id, room_version, after.values().map(Borrow::borrow))
-				.inspect_err(move |e| {
-					debug_warn!(%prev_event, %e, "Skipping failed fork auth chain.");
-				})
+			self.fork_chain_strict(
+				room_id,
+				room_version,
+				after.values().map(Borrow::borrow),
+				&chain_complete,
+			)
+			.inspect_err(move |e| {
+				debug_warn!(%prev_event, %e, "Failed loading complete fork auth chain.");
+			})
 		})
 		.ready_filter_map(Result::ok);
 
-	let Ok(resolved) = self
-		.state_resolution(room_id, room_version, fork_states, auth_chains)
-		.await
-	else {
+	let resolved = self
+		.state_resolution(room_id, room_version, fork_states.into_iter().stream(), auth_chains)
+		.await;
+
+	// Only polled chains can affect resolution. Check completeness before using
+	// its result or writing the transitively complete memo.
+	if !chain_complete.load(Ordering::Relaxed) {
+		debug_warn!("Polled fork auth chain was incomplete.");
+		walk.fallback = Some(Fallback::Unevaluable);
+		return None;
+	}
+
+	let Ok(resolved) = resolved else {
 		walk.fallback = Some(Fallback::Error);
 		return None;
 	};
@@ -777,6 +824,8 @@ async fn fork_resolve(
 		.await;
 
 	if let Some(event_id) = memo_event_id.filter(|_| walk.mode == WalkMode::Active) {
+		// Strict frontier loads and the polled-chain sentinel make this state
+		// transitively complete for later memo consumers.
 		let compressed: Arc<CompressedState> = self
 			.services
 			.state_compressor

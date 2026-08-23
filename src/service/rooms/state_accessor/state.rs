@@ -1,6 +1,8 @@
 use std::{ops::Deref, sync::Arc};
 
-use futures::{FutureExt, Stream, StreamExt, TryFutureExt, future::try_join, pin_mut};
+use futures::{
+	FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt, future::try_join, pin_mut,
+};
 use ruma::{
 	OwnedEventId, UserId,
 	events::{
@@ -375,6 +377,41 @@ pub fn state_full_ids(
 				.ready_filter_map(|(eid, ssk)| eid.ok().map(|eid| (ssk, eid)))
 		})
 		.flatten_stream()
+}
+
+/// Builds a complete StateMap for the given state hash.
+///
+/// Snapshot and reverse-mapping failures are returned without yielding a
+/// partial map.
+#[implement(super::Service)]
+pub fn state_full_ids_strict(
+	&self,
+	shortstatehash: ShortStateHash,
+) -> impl Stream<Item = Result<(ShortStateKey, OwnedEventId)>> + Send + '_ {
+	self.state_full_shortids(shortstatehash)
+		.try_fold(
+			(Vec::new(), Vec::new()),
+			async |(mut shortstatekeys, mut shorteventids), (shortstatekey, shorteventid)| {
+				shortstatekeys.push(shortstatekey);
+				shorteventids.push(shorteventid);
+
+				Ok((shortstatekeys, shorteventids))
+			},
+		)
+		.and_then(async move |(shortstatekeys, shorteventids)| {
+			self.services
+				.short
+				.multi_get_eventid_from_short(shorteventids.into_iter().stream())
+				.zip(shortstatekeys.into_iter().stream())
+				.map(|(event_id, shortstatekey)| {
+					event_id.map(|event_id| (shortstatekey, event_id))
+				})
+				.try_collect::<Vec<_>>()
+				.await
+		})
+		.map_ok(Vec::into_iter)
+		.map_ok(IterStream::try_stream)
+		.try_flatten_stream()
 }
 
 #[implement(super::Service)]

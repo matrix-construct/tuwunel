@@ -3,13 +3,23 @@
 #![allow(clippy::unnecessary_debug_formatting)]
 
 use std::{
-	collections::BTreeSet, env::var, fs::remove_dir_all, iter::once, net::TcpListener,
-	path::PathBuf, process::id as process_id, sync::Arc, time::Duration,
+	collections::BTreeSet,
+	env::var,
+	fs::remove_dir_all,
+	iter::once,
+	net::TcpListener,
+	path::PathBuf,
+	process::id as process_id,
+	sync::{
+		Arc,
+		atomic::{AtomicBool, Ordering},
+	},
+	time::Duration,
 };
 
 use futures::{
-	StreamExt,
-	future::{join, ready},
+	StreamExt, TryStreamExt,
+	future::{BoxFuture, join, ready},
 };
 use serde_json::{Value, json};
 use tokio::time::{sleep, timeout};
@@ -30,27 +40,81 @@ use tuwunel_core::{
 		},
 	},
 };
-use tuwunel_database::Deserialized;
+use tuwunel_database::{Deserialized, serialize_key};
 use tuwunel_service::{
 	Services,
 	rooms::{short::ShortStateHash, state_compressor::CompressedState},
 	users::Register,
 };
 
-#[test]
-fn state_local_build_paths() -> Result {
-	run_case(false)?;
-	run_case(true)
+#[derive(Clone, Copy)]
+enum Case {
+	Disabled,
+	Baseline,
+	MissingStateDiff,
+	MissingEventReverse,
+	MissingStateKeyReverse,
+	MissingNamedPdu,
+	MissingAuthAncestor,
+	MalformedAuthAncestor,
+	CorruptChainCache,
+	DirectMemoFailure,
+	WalkMemoFailure,
+	DegreeOneStateMiss,
+	SiblingStateMiss,
+	UnpolledChain,
+	InteriorForkSentinel,
 }
 
-fn run_case(resolve_state_locally: bool) -> Result {
-	let listener = TcpListener::bind(("127.0.0.1", 0))?;
-	let port = listener.local_addr()?.port();
+#[derive(Clone, Copy)]
+enum AncestorFailure {
+	Missing,
+	Malformed,
+	InteriorFork,
+}
+
+#[derive(Clone, Copy)]
+enum PduFailure {
+	Missing,
+	Malformed,
+}
+
+const CASES: [Case; 15] = [
+	Case::Disabled,
+	Case::Baseline,
+	Case::MissingStateDiff,
+	Case::MissingEventReverse,
+	Case::MissingStateKeyReverse,
+	Case::MissingNamedPdu,
+	Case::MissingAuthAncestor,
+	Case::MalformedAuthAncestor,
+	Case::CorruptChainCache,
+	Case::DirectMemoFailure,
+	Case::WalkMemoFailure,
+	Case::DegreeOneStateMiss,
+	Case::SiblingStateMiss,
+	Case::UnpolledChain,
+	Case::InteriorForkSentinel,
+];
+
+#[test]
+fn state_local_build_paths() -> Result { CASES.into_iter().try_for_each(run_case) }
+
+fn run_case(case: Case) -> Result {
+	let name = case_name(case);
+	let case_error = |error: Error| err!("state local build case {name} failed: {error}");
+	let listener =
+		TcpListener::bind(("127.0.0.1", 0)).map_err(|error| case_error(error.into()))?;
+	let port = listener
+		.local_addr()
+		.map_err(|error| case_error(error.into()))?
+		.port();
 
 	let root = var("TMPDIR").unwrap_or_else(|_| "/nvme/target/tmp".into());
-	let mode = if resolve_state_locally { "enabled" } else { "disabled" };
 	let db_path =
-		PathBuf::from(root).join(format!("tuwunel-state-local-build-{mode}-{}", process_id()));
+		PathBuf::from(root).join(format!("tuwunel-state-local-build-{name}-{}", process_id()));
+
+	let resolve_state_locally = !matches!(case, Case::Disabled);
 
 	let mut args = Args::default_test(&["fresh", "cleanup"]);
 
@@ -64,8 +128,8 @@ fn run_case(resolve_state_locally: bool) -> Result {
 		"resolve_state_locally_shadow=false".to_owned(),
 	]);
 
-	let runtime = Runtime::new(Some(&args))?;
-	let server = Server::new(Some(&args), Some(&runtime))?;
+	let runtime = Runtime::new(Some(&args)).map_err(&case_error)?;
+	let server = Server::new(Some(&args), Some(&runtime)).map_err(&case_error)?;
 	let result = runtime.block_on(async {
 		let services = async_start(&server).await?;
 		let base = format!("http://127.0.0.1:{port}");
@@ -73,7 +137,7 @@ fn run_case(resolve_state_locally: bool) -> Result {
 		drop(listener);
 
 		let exercise = async {
-			let outcome = exercise(&services, &base, resolve_state_locally).await;
+			let outcome = exercise(&services, &base, case).await;
 			let shutdown = server.server.shutdown();
 
 			outcome.and(shutdown)
@@ -92,15 +156,31 @@ fn run_case(resolve_state_locally: bool) -> Result {
 	drop(runtime);
 	remove_dir_all(&db_path).ok();
 
-	result
+	result.map_err(case_error)
+}
+
+fn case_name(case: Case) -> &'static str {
+	match case {
+		| Case::Disabled => "disabled",
+		| Case::Baseline => "baseline",
+		| Case::MissingStateDiff => "missing-state-diff",
+		| Case::MissingEventReverse => "missing-event-reverse",
+		| Case::MissingStateKeyReverse => "missing-state-key-reverse",
+		| Case::MissingNamedPdu => "missing-named-pdu",
+		| Case::MissingAuthAncestor => "missing-auth-ancestor",
+		| Case::MalformedAuthAncestor => "malformed-auth-ancestor",
+		| Case::CorruptChainCache => "corrupt-chain-cache",
+		| Case::DirectMemoFailure => "direct-memo-failure",
+		| Case::WalkMemoFailure => "walk-memo-failure",
+		| Case::DegreeOneStateMiss => "degree-one-state-miss",
+		| Case::SiblingStateMiss => "sibling-state-miss",
+		| Case::UnpolledChain => "unpolled-chain",
+		| Case::InteriorForkSentinel => "interior-fork-sentinel",
+	}
 }
 
 #[async_noinline]
-async fn exercise<'a>(
-	services: &'a Services,
-	base: &'a str,
-	resolve_state_locally: bool,
-) -> Result {
+async fn exercise<'a>(services: &'a Services, base: &'a str, case: Case) -> Result {
 	wait_until_ready(services, base).await?;
 
 	let user_id = UserId::parse_with_server_name("localbuild", services.globals.server_name())?;
@@ -120,27 +200,967 @@ async fn exercise<'a>(
 		.create_device(&user_id, None, (Some(token), None), None, None, None)
 		.await?;
 
-	if resolve_state_locally {
-		let fork_room = create_room(services, base, token).await?;
+	exercise_case(services, base, token, &user_id, case).await
+}
 
-		held_multi_prev_fork_resolves_locally(services, &user_id, &fork_room).await?;
+fn exercise_case<'a>(
+	services: &'a Services,
+	base: &'a str,
+	token: &'a str,
+	user_id: &'a UserId,
+	case: Case,
+) -> BoxFuture<'a, Result> {
+	match case {
+		| Case::Baseline => Box::pin(enabled_baseline(services, base, token, user_id)),
+		| Case::MissingStateDiff => Box::pin(missing_state_diff(services, base, token, user_id)),
+		| Case::MissingEventReverse =>
+			Box::pin(missing_event_reverse(services, base, token, user_id)),
+		| Case::MissingStateKeyReverse =>
+			Box::pin(missing_state_key_reverse(services, base, token, user_id)),
+		| Case::MissingNamedPdu => Box::pin(missing_named_pdu(services, base, token, user_id)),
+		| Case::MissingAuthAncestor => Box::pin(auth_ancestor_failure(
+			services,
+			base,
+			token,
+			user_id,
+			AncestorFailure::Missing,
+		)),
+		| Case::MalformedAuthAncestor => Box::pin(auth_ancestor_failure(
+			services,
+			base,
+			token,
+			user_id,
+			AncestorFailure::Malformed,
+		)),
+		| Case::CorruptChainCache =>
+			Box::pin(corrupt_chain_cache_rebuilds(services, base, token, user_id)),
+		| Case::DirectMemoFailure =>
+			Box::pin(direct_memo_failure_is_miss(services, base, token, user_id)),
+		| Case::WalkMemoFailure =>
+			Box::pin(walk_memo_failure_is_unevaluable(services, base, token, user_id)),
+		| Case::DegreeOneStateMiss =>
+			Box::pin(degree_one_state_miss(services, base, token, user_id)),
+		| Case::SiblingStateMiss => Box::pin(sibling_state_miss(services, base, token, user_id)),
+		| Case::UnpolledChain =>
+			Box::pin(unpolled_chain_stays_clear(services, base, token, user_id)),
+		| Case::InteriorForkSentinel => Box::pin(auth_ancestor_failure(
+			services,
+			base,
+			token,
+			user_id,
+			AncestorFailure::InteriorFork,
+		)),
+		| Case::Disabled => Box::pin(async move {
+			let room_id = create_room(services, base, token).await?;
 
-		let denial_room = create_room(services, base, token).await?;
-
-		positional_rejection_stays_uncommitted(services, &user_id, &denial_room).await?;
-
-		let missing_create_room = create_room(services, base, token).await?;
-
-		missing_create_falls_through_to_fetch(services, &user_id, &missing_create_room).await?;
-
-		let soft_fail_room = create_room(services, base, token).await?;
-
-		soft_failed_event_keeps_state_row(services, &user_id, &soft_fail_room).await
-	} else {
-		let room_id = create_room(services, base, token).await?;
-
-		disabled_local_build_ignores_planted_memo(services, &user_id, &room_id).await
+			disabled_local_build_ignores_planted_memo(services, user_id, &room_id).await
+		}),
 	}
+}
+
+async fn enabled_baseline(
+	services: &Services,
+	base: &str,
+	token: &str,
+	user_id: &UserId,
+) -> Result {
+	let step_error = |step: &str, error: Error| err!("baseline {step} failed: {error}");
+
+	let fork_room = create_room(services, base, token)
+		.await
+		.map_err(|error| step_error("held multi-prev fork", error))?;
+
+	held_multi_prev_fork_resolves_locally(services, user_id, &fork_room)
+		.await
+		.map_err(|error| step_error("held multi-prev fork", error))?;
+
+	let denial_room = create_room(services, base, token)
+		.await
+		.map_err(|error| step_error("positional rejection", error))?;
+
+	positional_rejection_stays_uncommitted(services, user_id, &denial_room)
+		.await
+		.map_err(|error| step_error("positional rejection", error))?;
+
+	let missing_create_room = create_room(services, base, token)
+		.await
+		.map_err(|error| step_error("missing-create fallback", error))?;
+
+	missing_create_falls_through_to_fetch(services, user_id, &missing_create_room)
+		.await
+		.map_err(|error| step_error("missing-create fallback", error))?;
+
+	let soft_fail_room = create_room(services, base, token)
+		.await
+		.map_err(|error| step_error("soft-failed state row", error))?;
+
+	soft_failed_event_keeps_state_row(services, user_id, &soft_fail_room)
+		.await
+		.map_err(|error| step_error("soft-failed state row", error))
+}
+
+async fn missing_state_diff(
+	services: &Services,
+	base: &str,
+	token: &str,
+	user_id: &UserId,
+) -> Result {
+	let room_id = create_room(services, base, token).await?;
+	let anchor = append_message(services, user_id, &room_id, "state diff anchor").await?;
+	let intact_state = services.state.pdu_shortstatehash(&anchor).await?;
+	append_state(services, user_id, &room_id, "state diff change").await?;
+	let boundary = append_message(services, user_id, &room_id, "state diff boundary").await?;
+	let (held, top, top_json) =
+		held_message_chain(services, user_id, &room_id, &boundary).await?;
+	let corrupt_state = services
+		.state
+		.pdu_shortstatehash(&boundary)
+		.await?;
+
+	assert_ne!(intact_state, corrupt_state, "state diff fixture reused the intact state");
+	restore_room_state(services, &room_id, intact_state, &anchor).await;
+	remove_short_row(services, "shortstatehash_statediff", corrupt_state).await?;
+	assert_eq!(
+		services
+			.state
+			.get_room_shortstatehash(&room_id)
+			.await?,
+		intact_state,
+		"state diff fixture did not restore the current room state",
+	);
+	services
+		.state_accessor
+		.state_full_ids_strict(intact_state)
+		.try_collect::<Vec<_>>()
+		.await
+		.map_err(|error| err!("state diff fixture corrupted the restored state: {error}"))?;
+	suppress_upgrade(services, held.event_id.as_ref())?;
+	assert_unevaluable(services, top.event_id.as_ref(), "missing state diff").await?;
+	assert_fetches(services, &room_id, &top, top_json, "missing state diff").await
+}
+
+async fn missing_event_reverse(
+	services: &Services,
+	base: &str,
+	token: &str,
+	user_id: &UserId,
+) -> Result {
+	let room_id = create_room(services, base, token).await?;
+	let named = append_state(services, user_id, &room_id, "reverse mapping state").await?;
+	let boundary =
+		append_message(services, user_id, &room_id, "reverse mapping boundary").await?;
+	let (held, top, top_json) =
+		held_message_chain(services, user_id, &room_id, &boundary).await?;
+	let shorteventid = services.short.get_shorteventid(&named).await?;
+
+	remove_short_row(services, "shorteventid_eventid", shorteventid).await?;
+	suppress_upgrade(services, held.event_id.as_ref())?;
+	assert_unevaluable(services, top.event_id.as_ref(), "missing event reverse map").await?;
+	assert_fetches(services, &room_id, &top, top_json, "missing event reverse map").await
+}
+
+async fn missing_state_key_reverse(
+	services: &Services,
+	base: &str,
+	token: &str,
+	user_id: &UserId,
+) -> Result {
+	let room_id = create_room(services, base, token).await?;
+
+	append_state(services, user_id, &room_id, "state key boundary").await?;
+
+	let (left, right, top, top_json) = held_state_fork(services, user_id, &room_id).await?;
+	let shortstatekey = services
+		.short
+		.get_shortstatekey(&StateEventType::RoomName, "")
+		.await?;
+
+	remove_short_row(services, "shortstatekey_statekey", shortstatekey).await?;
+	suppress_upgrade(services, left.event_id.as_ref())?;
+	suppress_upgrade(services, right.event_id.as_ref())?;
+	assert_unevaluable(services, top.event_id.as_ref(), "missing state key reverse map").await?;
+	assert_fetches(services, &room_id, &top, top_json, "missing state key reverse map").await
+}
+
+async fn missing_named_pdu(
+	services: &Services,
+	base: &str,
+	token: &str,
+	user_id: &UserId,
+) -> Result {
+	let room_id = create_room(services, base, token).await?;
+	let missing = append_state(services, user_id, &room_id, "named pdu left").await?;
+	let left = append_message(services, user_id, &room_id, "named pdu left boundary").await?;
+
+	append_state(services, user_id, &room_id, "named pdu right").await?;
+
+	let right = append_message(services, user_id, &room_id, "named pdu right boundary").await?;
+
+	set_forward_extremities(services, &room_id, [left.as_ref(), right.as_ref()]).await;
+
+	let (fork, fork_json) = sign_message(services, user_id, &room_id, "named pdu fork").await?;
+
+	services
+		.timeline
+		.add_pdu_outlier(&fork.event_id, &fork_json);
+
+	set_forward_extremity(services, &room_id, fork.event_id.as_ref()).await;
+
+	let (top, top_json) = sign_message(services, user_id, &room_id, "named pdu top").await?;
+
+	services
+		.timeline
+		.add_pdu_outlier(&top.event_id, &top_json);
+
+	corrupt_timeline_pdu(services, &missing, PduFailure::Missing).await?;
+	suppress_upgrade(services, fork.event_id.as_ref())?;
+
+	let report = services
+		.event_handler
+		.local_state_report(top.event_id.as_ref())
+		.await?;
+
+	assert_eq!(report.gate_drops, 0, "missing map-named PDU became a denial");
+	assert_eq!(
+		report.fallback.as_deref(),
+		Some("unevaluable"),
+		"missing map-named PDU used the wrong fallback",
+	);
+
+	assert_eq!(report.state_len, None, "missing map-named PDU produced state");
+	assert_no_memo(services, fork.event_id.as_ref()).await?;
+	assert_fetches(services, &room_id, &top, top_json, "missing map-named PDU").await
+}
+
+async fn auth_ancestor_failure(
+	services: &Services,
+	base: &str,
+	token: &str,
+	user_id: &UserId,
+	failure: AncestorFailure,
+) -> Result {
+	let pdu_failure = match failure {
+		| AncestorFailure::Malformed => PduFailure::Malformed,
+		| AncestorFailure::Missing | AncestorFailure::InteriorFork => PduFailure::Missing,
+	};
+
+	let interior = matches!(failure, AncestorFailure::InteriorFork);
+	let room_id = create_room(services, base, token).await?;
+	let ancestor = verified_replaced_membership_ancestor(services, &room_id, user_id).await?;
+	let (left, right, fork, fork_json) = held_state_fork(services, user_id, &room_id).await?;
+	let (top, top_json) = if interior {
+		set_forward_extremity(services, &room_id, fork.event_id.as_ref()).await;
+
+		let (top, top_json) = sign_message(services, user_id, &room_id, "sentinel top").await?;
+
+		services
+			.timeline
+			.add_pdu_outlier(&top.event_id, &top_json);
+
+		(top, top_json)
+	} else {
+		(fork.clone(), fork_json)
+	};
+
+	corrupt_timeline_pdu(services, &ancestor, pdu_failure).await?;
+	suppress_upgrade(services, left.event_id.as_ref())?;
+	suppress_upgrade(services, right.event_id.as_ref())?;
+
+	if interior {
+		suppress_upgrade(services, fork.event_id.as_ref())?;
+	}
+
+	let context = match failure {
+		| AncestorFailure::Missing => "missing auth ancestor",
+		| AncestorFailure::Malformed => "malformed auth ancestor",
+		| AncestorFailure::InteriorFork => "interior fork sentinel",
+	};
+
+	assert_unevaluable(services, top.event_id.as_ref(), context).await?;
+
+	if interior {
+		assert_no_memo(services, fork.event_id.as_ref()).await?;
+	}
+
+	assert_fetches(services, &room_id, &top, top_json, context).await?;
+
+	Ok(())
+}
+
+async fn corrupt_chain_cache_rebuilds(
+	services: &Services,
+	base: &str,
+	token: &str,
+	user_id: &UserId,
+) -> Result {
+	let room_id = create_room(services, base, token).await?;
+	let membership = services
+		.state_accessor
+		.room_state_get(&room_id, &StateEventType::RoomMember, user_id.as_str())
+		.await?;
+
+	let room_version = services.state.get_room_version(&room_id).await?;
+	let shorteventid = services
+		.short
+		.get_shorteventid(membership.event_id.as_ref())
+		.await?;
+
+	let key = serialize_key([shorteventid].as_slice())?;
+
+	services.clear_cache().await;
+
+	let first_complete = AtomicBool::new(true);
+	let mut expected = services
+		.auth_chain
+		.event_ids_iter_strict(
+			&room_id,
+			&room_version,
+			once(membership.event_id.as_ref()),
+			&first_complete,
+		)
+		.try_collect::<Vec<_>>()
+		.await?;
+
+	assert!(first_complete.load(Ordering::Relaxed), "initial auth chain was incomplete");
+	assert!(!expected.is_empty(), "auth-chain cache fixture has an empty chain");
+
+	let cache = services.db.get("authchainkey_authchain")?;
+
+	cache
+		.exists(&key)
+		.await
+		.map_err(|error| err!("initial auth-chain cache row was not written: {error}"))?;
+
+	cache.insert(&key, b"!");
+
+	let complete = AtomicBool::new(true);
+	let mut rebuilt = services
+		.auth_chain
+		.event_ids_iter_strict(
+			&room_id,
+			&room_version,
+			once(membership.event_id.as_ref()),
+			&complete,
+		)
+		.try_collect::<Vec<_>>()
+		.await?;
+
+	expected.sort_unstable();
+	rebuilt.sort_unstable();
+
+	assert_eq!(rebuilt, expected, "malformed auth-chain cache did not rebuild");
+	assert!(complete.load(Ordering::Relaxed), "cache rebuild tripped completeness");
+
+	let rebuilt = cache.get(&key).await?;
+
+	assert!(
+		rebuilt.len().is_multiple_of(size_of::<u64>()),
+		"rebuilt auth-chain cache remains malformed"
+	);
+
+	assert_ne!(&*rebuilt, b"!", "malformed auth-chain cache was not replaced");
+
+	Ok(())
+}
+
+async fn unpolled_chain_stays_clear(
+	services: &Services,
+	base: &str,
+	token: &str,
+	user_id: &UserId,
+) -> Result {
+	let room_id = create_room(services, base, token).await?;
+	let ancestor = verified_replaced_membership_ancestor(services, &room_id, user_id).await?;
+	let (left, right, top, top_json) = held_message_fork(services, user_id, &room_id).await?;
+
+	corrupt_timeline_pdu(services, &ancestor, PduFailure::Missing).await?;
+	suppress_upgrade(services, left.event_id.as_ref())?;
+	suppress_upgrade(services, right.event_id.as_ref())?;
+
+	let report = services
+		.event_handler
+		.local_state_report(top.event_id.as_ref())
+		.await?;
+
+	assert_eq!(report.forks, 1, "unpolled fixture missed its fork");
+	assert_eq!(report.gate_drops, 0, "unpolled chain became a denial");
+	assert_eq!(report.fallback, None, "unpolled chain tripped the sentinel");
+	assert!(report.state_len.is_some(), "unpolled chain produced no state");
+	assert_accepts(services, &room_id, &top, top_json, "unpolled chain").await
+}
+
+async fn direct_memo_failure_is_miss(
+	services: &Services,
+	base: &str,
+	token: &str,
+	user_id: &UserId,
+) -> Result {
+	let room_id = create_room(services, base, token).await?;
+	let boundary = append_message(services, user_id, &room_id, "direct memo boundary").await?;
+	let (held, top, top_json) =
+		held_message_chain(services, user_id, &room_id, &boundary).await?;
+
+	services.clear_cache().await;
+	suppress_upgrade(services, held.event_id.as_ref())?;
+	plant_memo(services, top.event_id.as_ref(), ShortStateHash::MAX).await?;
+
+	let memo = services.db.get("eventid_resolvedstate")?;
+
+	memo.exists(&top.event_id)
+		.await
+		.map_err(|error| err!("direct memo fixture was not planted: {error}"))?;
+
+	let report = services
+		.event_handler
+		.local_state_report(top.event_id.as_ref())
+		.await?;
+
+	assert_eq!(report.memo_hits, 0, "direct memo failure entered the walk");
+	assert_eq!(report.gate_drops, 0, "direct memo failure became a denial");
+	assert_eq!(report.fallback, None, "direct memo failure triggered fallback");
+	assert!(report.state_len.is_some(), "direct memo failure produced no state");
+
+	assert_accepts(services, &room_id, &top, top_json, "direct memo failure").await
+}
+
+async fn walk_memo_failure_is_unevaluable(
+	services: &Services,
+	base: &str,
+	token: &str,
+	user_id: &UserId,
+) -> Result {
+	let room_id = create_room(services, base, token).await?;
+	let boundary = append_message(services, user_id, &room_id, "walk memo boundary").await?;
+	let (memo, middle, _) = held_message_chain(services, user_id, &room_id, &boundary).await?;
+
+	set_forward_extremity(services, &room_id, middle.event_id.as_ref()).await;
+
+	let (top, top_json) = sign_message(services, user_id, &room_id, "walk memo top").await?;
+
+	services
+		.timeline
+		.add_pdu_outlier(&top.event_id, &top_json);
+
+	services.clear_cache().await;
+	suppress_upgrade(services, memo.event_id.as_ref())?;
+	suppress_upgrade(services, middle.event_id.as_ref())?;
+	plant_memo(services, memo.event_id.as_ref(), ShortStateHash::MAX).await?;
+
+	let report = services
+		.event_handler
+		.local_state_report(top.event_id.as_ref())
+		.await?;
+
+	assert_eq!(report.memo_hits, 1, "walk memo was not materialized");
+	assert_eq!(report.gate_drops, 0, "walk memo failure became a denial");
+	assert_eq!(
+		report.fallback.as_deref(),
+		Some("unevaluable"),
+		"walk memo failure used the wrong fallback",
+	);
+	assert_eq!(report.state_len, None, "walk memo failure produced state");
+	assert_no_memo(services, middle.event_id.as_ref()).await?;
+
+	assert_fetches(services, &room_id, &top, top_json, "walk memo failure").await
+}
+
+async fn degree_one_state_miss(
+	services: &Services,
+	base: &str,
+	token: &str,
+	user_id: &UserId,
+) -> Result {
+	let room_id = create_room(services, base, token).await?;
+	let anchor = append_message(services, user_id, &room_id, "degree one anchor").await?;
+	let intact_state = services.state.pdu_shortstatehash(&anchor).await?;
+	append_state(services, user_id, &room_id, "degree one change").await?;
+	let boundary = append_message(services, user_id, &room_id, "degree one boundary").await?;
+	let (incoming, incoming_json) =
+		sign_message(services, user_id, &room_id, "degree one top").await?;
+
+	let corrupt_state = services
+		.state
+		.pdu_shortstatehash(&boundary)
+		.await?;
+
+	services
+		.timeline
+		.add_pdu_outlier(&incoming.event_id, &incoming_json);
+
+	assert_ne!(intact_state, corrupt_state, "degree one fixture reused the intact state");
+	restore_room_state(services, &room_id, intact_state, &anchor).await;
+	remove_short_row(services, "shortstatehash_statediff", corrupt_state).await?;
+	assert_eq!(
+		services
+			.state
+			.get_room_shortstatehash(&room_id)
+			.await?,
+		intact_state,
+		"degree one fixture did not restore the current room state",
+	);
+	services
+		.state_accessor
+		.state_full_ids_strict(intact_state)
+		.try_collect::<Vec<_>>()
+		.await
+		.map_err(|error| err!("degree one fixture corrupted the restored state: {error}"))?;
+	assert_all_committed(services, incoming.event_id.as_ref(), "degree one state miss").await?;
+	assert_fetches(services, &room_id, &incoming, incoming_json, "degree one state miss").await
+}
+
+async fn sibling_state_miss(
+	services: &Services,
+	base: &str,
+	token: &str,
+	user_id: &UserId,
+) -> Result {
+	let room_id = create_room(services, base, token).await?;
+	let boundary = append_message(services, user_id, &room_id, "sibling boundary").await?;
+	let boundary_state = services
+		.state
+		.pdu_shortstatehash(&boundary)
+		.await?;
+	append_state(services, user_id, &room_id, "sibling left change").await?;
+	let left = append_message(services, user_id, &room_id, "sibling left").await?;
+	let state_lock = services.state.mutex.lock(&room_id).await;
+
+	services
+		.state
+		.set_room_state(&room_id, boundary_state, &state_lock);
+
+	services
+		.state
+		.set_forward_extremities(&room_id, once(boundary.as_ref()), &state_lock)
+		.await;
+
+	drop(state_lock);
+
+	let right = append_message(services, user_id, &room_id, "sibling right").await?;
+
+	set_forward_extremities(services, &room_id, [left.as_ref(), right.as_ref()]).await;
+
+	let (incoming, incoming_json) =
+		sign_message(services, user_id, &room_id, "sibling top").await?;
+
+	let left_state = services.state.pdu_shortstatehash(&left).await?;
+	let right_state = services.state.pdu_shortstatehash(&right).await?;
+
+	assert_ne!(left_state, right_state, "sibling fixture states did not diverge");
+
+	services
+		.timeline
+		.add_pdu_outlier(&incoming.event_id, &incoming_json);
+
+	remove_short_row(services, "shortstatehash_statediff", left_state).await?;
+	assert_all_committed(services, incoming.event_id.as_ref(), "sibling state miss").await?;
+	assert_fetches(services, &room_id, &incoming, incoming_json, "sibling state miss").await
+}
+
+async fn held_message_chain(
+	services: &Services,
+	user_id: &UserId,
+	room_id: &RoomId,
+	boundary: &EventId,
+) -> Result<(PduEvent, PduEvent, CanonicalJsonObject)> {
+	set_forward_extremity(services, room_id, boundary).await;
+
+	let (held, held_json) = sign_message(services, user_id, room_id, "held corruption").await?;
+
+	services
+		.timeline
+		.add_pdu_outlier(&held.event_id, &held_json);
+
+	set_forward_extremity(services, room_id, held.event_id.as_ref()).await;
+
+	let (top, top_json) = sign_message(services, user_id, room_id, "corruption top").await?;
+
+	services
+		.timeline
+		.add_pdu_outlier(&top.event_id, &top_json);
+
+	Ok((held, top, top_json))
+}
+
+async fn held_state_fork(
+	services: &Services,
+	user_id: &UserId,
+	room_id: &RoomId,
+) -> Result<(PduEvent, PduEvent, PduEvent, CanonicalJsonObject)> {
+	let (left, left_json) = sign_state(services, user_id, room_id, "fork left").await?;
+	let (right, right_json) = sign_state(services, user_id, room_id, "fork right").await?;
+
+	services
+		.timeline
+		.add_pdu_outlier(&left.event_id, &left_json);
+
+	services
+		.timeline
+		.add_pdu_outlier(&right.event_id, &right_json);
+
+	set_forward_extremities(services, room_id, [left.event_id.as_ref(), right.event_id.as_ref()])
+		.await;
+
+	let (top, top_json) = sign_message(services, user_id, room_id, "fork top").await?;
+
+	services
+		.timeline
+		.add_pdu_outlier(&top.event_id, &top_json);
+
+	Ok((left, right, top, top_json))
+}
+
+async fn held_message_fork(
+	services: &Services,
+	user_id: &UserId,
+	room_id: &RoomId,
+) -> Result<(PduEvent, PduEvent, PduEvent, CanonicalJsonObject)> {
+	let (left, left_json) = sign_message(services, user_id, room_id, "plain fork left").await?;
+	let (right, right_json) =
+		sign_message(services, user_id, room_id, "plain fork right").await?;
+
+	services
+		.timeline
+		.add_pdu_outlier(&left.event_id, &left_json);
+
+	services
+		.timeline
+		.add_pdu_outlier(&right.event_id, &right_json);
+
+	set_forward_extremities(services, room_id, [left.event_id.as_ref(), right.event_id.as_ref()])
+		.await;
+
+	let (top, top_json) = sign_message(services, user_id, room_id, "plain fork top").await?;
+
+	services
+		.timeline
+		.add_pdu_outlier(&top.event_id, &top_json);
+
+	Ok((left, right, top, top_json))
+}
+
+async fn verified_replaced_membership_ancestor(
+	services: &Services,
+	room_id: &RoomId,
+	user_id: &UserId,
+) -> Result<OwnedEventId> {
+	let ancestor = services
+		.state_accessor
+		.room_state_get(room_id, &StateEventType::RoomMember, user_id.as_str())
+		.await?;
+	let content = RoomMemberEventContent::new(MembershipState::Join);
+	let builder = PduBuilder::state(user_id.to_string(), &content);
+	let state_lock = services.state.mutex.lock(room_id).await;
+	let membership = services
+		.timeline
+		.build_and_append_pdu(builder, user_id, room_id, &state_lock)
+		.await?;
+	drop(state_lock);
+	let current = services
+		.state_accessor
+		.room_state_get(room_id, &StateEventType::RoomMember, user_id.as_str())
+		.await?;
+
+	if current.event_id != membership {
+		return Err!("replacement membership did not become current room state");
+	}
+
+	let room_version = services.state.get_room_version(room_id).await?;
+	let has_ancestor = services
+		.auth_chain
+		.event_ids_iter(room_id, &room_version, once(membership.as_ref()))
+		.try_any(|event_id| ready(event_id == ancestor.event_id))
+		.await?;
+
+	if !has_ancestor {
+		return Err!("replaced membership is not an auth ancestor of its successor");
+	}
+
+	Ok(ancestor.event_id.clone())
+}
+
+async fn append_state(
+	services: &Services,
+	user_id: &UserId,
+	room_id: &RoomId,
+	name: &str,
+) -> Result<OwnedEventId> {
+	let content = RoomNameEventContent::new(name.to_owned());
+	let builder = PduBuilder::state(String::new(), &content);
+	let state_lock = services.state.mutex.lock(room_id).await;
+
+	services
+		.timeline
+		.build_and_append_pdu(builder, user_id, room_id, &state_lock)
+		.await
+}
+
+async fn remove_short_row(services: &Services, map_name: &str, short: u64) -> Result {
+	let map = services
+		.db
+		.get(map_name)
+		.map_err(|error| err!("short-id map {map_name} unavailable for {short}: {error}"))?;
+
+	let key = short.to_be_bytes();
+
+	map.exists(&key)
+		.await
+		.map_err(|error| err!("short-id row {map_name}[{short}] unavailable: {error}"))?;
+
+	map.remove(&key);
+	services.clear_cache().await;
+
+	assert!(
+		map.exists(&key)
+			.await
+			.is_err_and(|error| error.is_not_found()),
+		"raw short-id mutation left {map_name}[{short}] readable"
+	);
+
+	Ok(())
+}
+
+async fn corrupt_timeline_pdu(
+	services: &Services,
+	event_id: &EventId,
+	failure: PduFailure,
+) -> Result {
+	let pdu_id = services
+		.timeline
+		.get_pdu_id(event_id)
+		.await
+		.map_err(|error| err!("timeline PDU {event_id} has no raw id: {error}"))?;
+
+	let pdus = services
+		.db
+		.get("pduid_pdu")
+		.map_err(|error| err!("timeline PDU map unavailable for {event_id}: {error}"))?;
+
+	pdus.exists(&pdu_id)
+		.await
+		.map_err(|error| err!("timeline PDU row unavailable for {event_id}: {error}"))?;
+
+	let failure_name = match failure {
+		| PduFailure::Missing => {
+			pdus.remove(&pdu_id);
+			"missing"
+		},
+		| PduFailure::Malformed => {
+			pdus.insert(&pdu_id, b"{");
+			"malformed"
+		},
+	};
+
+	services.clear_cache().await;
+
+	let result = services.timeline.get_pdu_from_id(&pdu_id).await;
+	let Err(error) = result else {
+		return Err!("{failure_name} timeline PDU {event_id} remained readable");
+	};
+
+	match failure {
+		| PduFailure::Missing => assert!(
+			error.is_not_found(),
+			"missing timeline PDU {event_id} returned an unexpected error: {error}"
+		),
+		| PduFailure::Malformed => assert!(
+			matches!(&error, Error::Json(_)),
+			"malformed timeline PDU {event_id} returned an unexpected error: {error}"
+		),
+	}
+
+	Ok(())
+}
+
+async fn plant_memo(
+	services: &Services,
+	event_id: &EventId,
+	shortstatehash: ShortStateHash,
+) -> Result {
+	let memo = services
+		.db
+		.get("eventid_resolvedstate")
+		.map_err(|error| err!("resolved-state memo map unavailable for {event_id}: {error}"))?;
+
+	memo.raw_aput::<{ size_of::<ShortStateHash>() }, _, _>(event_id.as_bytes(), shortstatehash);
+
+	let stored: ShortStateHash = memo
+		.get(event_id)
+		.await
+		.deserialized()
+		.map_err(|error| err!("resolved-state memo for {event_id} was unreadable: {error}"))?;
+
+	assert_eq!(
+		stored, shortstatehash,
+		"resolved-state memo for {event_id} stored the wrong state hash"
+	);
+
+	Ok(())
+}
+
+async fn assert_unevaluable(services: &Services, event_id: &EventId, context: &str) -> Result {
+	let report = services
+		.event_handler
+		.local_state_report(event_id)
+		.await?;
+
+	assert!(report.visited > 0, "{context} did not exercise the local walk");
+	assert_eq!(report.gate_drops, 0, "{context} became a denial");
+	assert_eq!(
+		report.fallback.as_deref(),
+		Some("unevaluable"),
+		"{context} used the wrong fallback",
+	);
+	assert_eq!(report.state_len, None, "{context} produced state");
+
+	Ok(())
+}
+
+async fn assert_all_committed(services: &Services, event_id: &EventId, context: &str) -> Result {
+	let report = services
+		.event_handler
+		.local_state_report(event_id)
+		.await?;
+
+	assert_eq!(report.visited, 0, "{context} unexpectedly walked a held event");
+	assert_eq!(report.gate_drops, 0, "{context} became a denial");
+	assert_eq!(
+		report.fallback.as_deref(),
+		Some("all_committed"),
+		"{context} used the wrong fallback",
+	);
+	assert_eq!(report.state_len, None, "{context} produced state");
+
+	Ok(())
+}
+
+async fn assert_no_memo(services: &Services, event_id: &EventId) -> Result {
+	let memo = services.db.get("eventid_resolvedstate")?;
+
+	assert!(
+		memo.exists(event_id)
+			.await
+			.is_err_and(|error| error.is_not_found()),
+		"failed fork {event_id} wrote a resolved-state memo"
+	);
+
+	Ok(())
+}
+
+async fn assert_fetches(
+	services: &Services,
+	room_id: &RoomId,
+	incoming: &PduEvent,
+	incoming_json: CanonicalJsonObject,
+	context: &str,
+) -> Result {
+	let room_version = match services.state.get_room_version(room_id).await {
+		| Ok(room_version) => room_version,
+		| Err(error) => return Err!("{context} failed to load the room version: {error}"),
+	};
+
+	let incoming_json = into_outgoing_federation(incoming_json, &room_version);
+	let result = services
+		.event_handler
+		.handle_incoming_pdu(
+			services.globals.server_name(),
+			room_id,
+			incoming.event_id.as_ref(),
+			incoming_json,
+			true,
+		)
+		.await;
+
+	let Err(error) = result else {
+		return Err!("{context} did not fall through to federation fetch");
+	};
+
+	if !error
+		.to_string()
+		.contains("no candidate servers available")
+	{
+		return Err!("{context} failed before federation fetch: {error}");
+	}
+
+	assert!(
+		services
+			.timeline
+			.non_outlier_pdu_exists(incoming.event_id.as_ref())
+			.await
+			.is_err_and(|error| error.is_not_found()),
+		"{context} unexpectedly reached the timeline"
+	);
+
+	assert!(
+		services
+			.timeline
+			.pdu_exists(incoming.event_id.as_ref())
+			.await,
+		"{context} was not retained as an outlier"
+	);
+
+	Ok(())
+}
+
+async fn assert_accepts(
+	services: &Services,
+	room_id: &RoomId,
+	incoming: &PduEvent,
+	incoming_json: CanonicalJsonObject,
+	context: &str,
+) -> Result {
+	let room_version = match services.state.get_room_version(room_id).await {
+		| Ok(room_version) => room_version,
+		| Err(error) => return Err!("{context} failed to load the room version: {error}"),
+	};
+
+	let incoming_json = into_outgoing_federation(incoming_json, &room_version);
+
+	assert!(
+		services
+			.timeline
+			.non_outlier_pdu_exists(incoming.event_id.as_ref())
+			.await
+			.is_err_and(|error| error.is_not_found()),
+		"{context} unexpectedly started in the timeline"
+	);
+
+	let result = match services
+		.event_handler
+		.handle_incoming_pdu(
+			services.globals.server_name(),
+			room_id,
+			incoming.event_id.as_ref(),
+			incoming_json,
+			true,
+		)
+		.await
+	{
+		| Ok(result) => result,
+		| Err(error) => return Err!("{context} failed to handle the incoming PDU: {error}"),
+	};
+
+	assert!(result.is_some(), "{context} did not continue through local state");
+	match services
+		.timeline
+		.non_outlier_pdu_exists(incoming.event_id.as_ref())
+		.await
+	{
+		| Ok(()) => Ok(()),
+		| Err(error) => Err!("{context} did not reach the timeline: {error}"),
+	}
+}
+
+async fn set_forward_extremities<const N: usize>(
+	services: &Services,
+	room_id: &RoomId,
+	event_ids: [&EventId; N],
+) {
+	let state_lock = services.state.mutex.lock(room_id).await;
+
+	services
+		.state
+		.set_forward_extremities(room_id, event_ids.into_iter(), &state_lock)
+		.await;
 }
 
 async fn disabled_local_build_ignores_planted_memo(
@@ -730,6 +1750,24 @@ async fn prepare_soft_fail_descendant<'a>(
 
 async fn set_forward_extremity(services: &Services, room_id: &RoomId, event_id: &EventId) {
 	let state_lock = services.state.mutex.lock(room_id).await;
+
+	services
+		.state
+		.set_forward_extremities(room_id, once(event_id), &state_lock)
+		.await;
+}
+
+async fn restore_room_state(
+	services: &Services,
+	room_id: &RoomId,
+	shortstatehash: ShortStateHash,
+	event_id: &EventId,
+) {
+	let state_lock = services.state.mutex.lock(room_id).await;
+
+	services
+		.state
+		.set_room_state(room_id, shortstatehash, &state_lock);
 
 	services
 		.state
