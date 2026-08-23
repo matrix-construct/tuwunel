@@ -1,4 +1,13 @@
-//! Extended external extensions to futures::FutureExt
+//! Short-circuiting Boolean combinators over concurrently polled futures.
+//!
+//! The fixed-arity forms poll their inputs in the order given, and a pass ends
+//! at the first input to decide the result, leaving those after it unpolled.
+//! An unpolled input runs none of the work its future defers to `poll`, which
+//! for a database read is the pool dispatch and the storage I/O. The elision
+//! needs the deciding input ready on its first poll, since a pending one does
+//! not end the pass. Order the arguments cheapest and likeliest to decide
+//! first; the iterator forms promise no such order.
+
 #![expect(clippy::many_single_char_names, clippy::impl_trait_in_params)]
 
 use futures::{
@@ -23,7 +32,9 @@ where
 	/// Computes the disjunction of two Boolean futures.
 	///
 	/// Both futures are polled concurrently. The returned future resolves true
-	/// on the first true output or false after both produce false.
+	/// on the first true output or false after both produce false. Unlike the
+	/// conjunctions, this collects its inputs into a heap `Vec`, so a chain of
+	/// `or` allocates once per link.
 	fn or<B>(self, b: B) -> impl Future<Output = bool> + Send
 	where
 		B: Future<Output = bool> + Send + Unpin,
@@ -103,7 +114,9 @@ where
 /// Computes the conjunction of an iterator of Boolean futures.
 ///
 /// All inputs are polled concurrently and false short-circuits the operation.
-/// An empty iterator resolves to true.
+/// An empty iterator resolves to true. An exact upper size hint of thirty or
+/// fewer keeps a stack-resident boxed slice polled in order; anything else, an
+/// absent hint included, builds a `FuturesOrdered` polled by readiness.
 pub fn and<I, F>(args: I) -> impl Future<Output = bool> + Send
 where
 	I: Iterator<Item = F> + Send,
