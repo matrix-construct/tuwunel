@@ -184,8 +184,9 @@ pub(crate) async fn get_messages(
 		.await;
 
 	let shortroomid = services.short.get_shortroomid(room_id).await?;
-
+	let mut scanned = None;
 	let events: Vec<_> = it
+		.inspect(|(count, _)| scanned = Some(*count))
 		.ready_take_while(|(count, _)| Some(*count) != to)
 		.ready_filter_map(|item| event_filter(item, filter))
 		.wide_filter_map(|item| related_by_filter(services, shortroomid, filter, item))
@@ -227,7 +228,8 @@ pub(crate) async fn get_messages(
 		.collect()
 		.await;
 
-	let next_token = events.last().map(at!(0));
+	let exhausted = matches!(dir, Direction::Backward) && events.len() < limit && scanned != to;
+	let next_token = if exhausted { scanned } else { events.last().map(at!(0)) };
 
 	let chunk = events
 		.into_iter()
