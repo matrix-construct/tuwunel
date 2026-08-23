@@ -60,6 +60,9 @@ enum Behavior {
 	/// Valid JSON array of two events ([`BATCH_BODY`]).
 	Batch,
 
+	/// Valid empty JSON array.
+	EmptyBatch,
+
 	/// Block until released, then answer with garbage.
 	BlockGarbage,
 
@@ -184,6 +187,7 @@ impl Transport for MockTransport {
 			| Behavior::Garbage => Ok(Bytes::from_static(b"not json")),
 			| Behavior::Fail => Err(err!("mock transport failure")),
 			| Behavior::Batch => Ok(Bytes::from_static(BATCH_BODY)),
+			| Behavior::EmptyBatch => Ok(Bytes::from_static(b"[]")),
 			| Behavior::BlockGarbage => {
 				let mut guard = CancelGuard {
 					dropped: &self.dropped,
@@ -826,6 +830,7 @@ async fn attempt_limit_caps_total_contacts() {
 		.iter()
 		.cloned()
 		.map(|server| (server, Behavior::Fail));
+
 	let mock = Arc::new(MockTransport::new(behaviors));
 	let select = Arc::new(MockSelect::new([(event.clone(), pool.clone())]));
 	let svc = Service::test_spawn(mock.clone(), select, 4);
@@ -841,6 +846,36 @@ async fn attempt_limit_caps_total_contacts() {
 
 	assert!(error.to_string().contains("not found"), "unexpected error: {error}");
 	assert_eq!(mock.call_count(), 3, "attempt_limit caps total contacts across rounds");
+	assert_eq!(mock.calls(), pool[..3].to_vec(), "first three candidates, in order");
+}
+
+#[tokio::test]
+async fn backfill_empty_batches_respect_attempt_limit() {
+	let pool = pool8()[..5].to_vec();
+	let event = event_id!("$ev:test.local").to_owned();
+
+	let behaviors = pool
+		.iter()
+		.cloned()
+		.map(|server| (server, Behavior::EmptyBatch));
+
+	let mock = Arc::new(MockTransport::new(behaviors));
+	let select = Arc::new(MockSelect::fixed(pool.clone()));
+	let svc = Service::test_spawn(mock.clone(), select, 4);
+
+	let opts = Opts::new(Op::Backfill, room())
+		.event_id(event)
+		.backfill_limit(nz(100))
+		.fanout(FanoutGrowth::Geometric { base: nz(1), factor: nz(2) })
+		.attempt_limit(nz(3));
+
+	let error = svc
+		.fetch(opts)
+		.await
+		.expect_err("empty backfill batches exhaust the candidates");
+
+	assert!(error.is_not_found(), "unexpected error: {error}");
+	assert_eq!(mock.call_count(), 3, "attempt_limit caps empty batches");
 	assert_eq!(mock.calls(), pool[..3].to_vec(), "first three candidates, in order");
 }
 
@@ -920,6 +955,25 @@ async fn missing_events_batch_round_trips() {
 }
 
 #[tokio::test]
+async fn missing_events_accepts_empty_batch() {
+	let server = server_name!("s.test.local").to_owned();
+	let mock = Arc::new(MockTransport::new([(server.clone(), Behavior::EmptyBatch)]));
+	let select = Arc::new(MockSelect::fixed([server.clone()]));
+	let svc = Service::test_spawn(mock, select, 4);
+
+	let opts = Opts::new(Op::MissingEvents, room())
+		.latest_events([event_id!("$l:test.local").to_owned()]);
+
+	let outcome = svc
+		.fetch(opts)
+		.await
+		.expect("empty missing-events batch accepted");
+
+	assert_eq!(&*outcome.bytes, b"[]", "the empty batch round-trips verbatim");
+	assert_eq!(outcome.origin, server, "the answering server is reported");
+}
+
+#[tokio::test]
 async fn backfill_parses_pdu_batch() {
 	let server = server_name!("s.test.local").to_owned();
 	let mock = Arc::new(MockTransport::new([(server.clone(), Behavior::Batch)]));
@@ -937,4 +991,26 @@ async fn backfill_parses_pdu_batch() {
 
 	assert_eq!(pdus.len(), 2, "both pdus survive the round-trip");
 	assert_eq!(outcome.origin, server, "the answering server is reported");
+}
+
+#[tokio::test]
+async fn backfill_fails_over_past_empty_batch() {
+	let a = server_name!("a.test.local").to_owned();
+	let b = server_name!("b.test.local").to_owned();
+	let mock = Arc::new(MockTransport::new([
+		(a.clone(), Behavior::EmptyBatch),
+		(b.clone(), Behavior::Batch),
+	]));
+
+	let select = Arc::new(MockSelect::fixed([a.clone(), b.clone()]));
+	let svc = Service::test_spawn(mock.clone(), select, 4);
+
+	let opts = Opts::new(Op::Backfill, room())
+		.event_id(event_id!("$first:test.local").to_owned())
+		.backfill_limit(nz(100));
+
+	let outcome = svc.fetch(opts).await.expect("backfill fetched");
+
+	assert_eq!(outcome.origin, b, "the nonempty server answers");
+	assert_eq!(mock.calls(), vec![a, b], "the empty batch is a miss");
 }
