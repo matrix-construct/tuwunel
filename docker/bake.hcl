@@ -757,7 +757,7 @@ group "integration" {
 }
 
 variable "valgrind_max_workers" {
-    default = 128
+    default = 16
 }
 
 variable "valgrind_flags" {
