@@ -10,8 +10,12 @@ use ruma::{
 	room::{JoinRuleSummary, RoomSummary},
 };
 use tuwunel_core::{
-	Err, Result, debug_warn, trace,
-	utils::{IterStream, future::TryExtExt, option::OptionExt},
+	Err, Result, debug_warn, err, trace,
+	utils::{
+		BoolExt, FutureBoolExt, IterStream,
+		future::{OptionFutureExt, ReadyBoolExt, TryExtExt},
+		option::OptionExt,
+	},
 };
 use tuwunel_service::{
 	Services,
@@ -305,49 +309,47 @@ where
 		JoinRuleSummary::Public | JoinRuleSummary::Knock | JoinRuleSummary::KnockRestricted(_)
 	);
 
-	match sender_user {
-		| Some(sender_user) => {
-			let user_can_see_state_events = services
-				.state_accessor
-				.user_can_see_state_events(sender_user, room_id);
+	if is_public_room {
+		return Ok(());
+	}
 
-			let is_guest = services
-				.users
-				.is_deactivated(sender_user)
-				.unwrap_or(false);
-
-			let user_in_allowed_restricted_room = allowed_room_ids
-				.stream()
-				.any(|room| services.state_cache.is_joined(sender_user, room));
-
-			let (user_can_see_state_events, is_guest, user_in_allowed_restricted_room) =
-				join3(user_can_see_state_events, is_guest, user_in_allowed_restricted_room)
-					.boxed()
-					.await;
-
-			if user_can_see_state_events
-				|| (is_guest && guest_can_join)
-				|| is_public_room
-				|| user_in_allowed_restricted_room
-			{
-				return Ok(());
-			}
-
-			Err!(Request(Forbidden(
-				"Room is not world readable, not publicly accessible/joinable, restricted room \
-				 conditions not met, and guest access is forbidden. Not allowed to see details \
-				 of this room."
-			)))
-		},
-		| None => {
-			if is_public_room || world_readable {
-				return Ok(());
-			}
-
-			Err!(Request(Forbidden(
+	let Some(sender_user) = sender_user else {
+		return world_readable.ok_or_else(|| {
+			err!(Request(Forbidden(
 				"Room is not world readable or publicly accessible/joinable, authentication is \
 				 required"
 			)))
-		},
-	}
+		});
+	};
+
+	let user_can_see_state_events = services
+		.state_accessor
+		.user_can_see_state_events(sender_user, room_id);
+
+	let guest_admitted = guest_can_join
+		.then_async(|| {
+			services
+				.users
+				.is_deactivated(sender_user)
+				.unwrap_or(false)
+		})
+		.unwrap_or_default();
+
+	let user_in_allowed_restricted_room = allowed_room_ids
+		.stream()
+		.any(|room| services.state_cache.is_joined(sender_user, room));
+
+	// The allowed-room scan trails; either cheap check can admit first.
+	let can_see = user_can_see_state_events
+		.is_false()
+		.and2(guest_admitted.is_false(), user_in_allowed_restricted_room.is_false())
+		.is_false();
+
+	can_see.boxed().await.ok_or_else(|| {
+		err!(Request(Forbidden(
+			"Room is not world readable, not publicly accessible/joinable, restricted room \
+			 conditions not met, and guest access is forbidden. Not allowed to see details of \
+			 this room."
+		)))
+	})
 }
