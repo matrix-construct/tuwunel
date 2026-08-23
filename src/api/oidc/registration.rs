@@ -5,7 +5,7 @@ use tuwunel_core::{Err, Result, info};
 use tuwunel_service::oauth::server::DcrRequest;
 use url::{Host, Url};
 
-use super::oauth_error;
+use super::{oauth_error, redirect_allowlisted};
 use crate::ClientIp;
 
 /// RFC 7591 §3.2.2 client-registration error response.
@@ -38,6 +38,7 @@ pub(crate) async fn registration_route(
 
 	// Initial access token (RFC 7591): gate registration when one is configured.
 	let required_token = config.oidc_registration_access_token.as_str();
+
 	if !required_token.is_empty() {
 		let presented = headers
 			.get(AUTHORIZATION)
@@ -53,25 +54,24 @@ pub(crate) async fn registration_route(
 	}
 
 	let require_client_uri = config.oidc_registration_require_client_uri;
+
 	if let Err(error) = validate_client_metadata(&body, require_client_uri) {
 		return Ok(error.into_response());
 	}
 
-	// Redirect-host allowlist (RFC 7591): every redirect_uri host must be listed.
+	// Redirect allowlist (RFC 7591): every redirect_uri must name a listed host,
+	// or a listed private-use scheme when it carries no host.
 	let allowed = &config.oidc_registration_allowed_redirect_hosts;
-	if !allowed.is_empty() {
-		let host_allowed = |uri: &String| {
-			Url::parse(uri).is_ok_and(|url| {
-				url.host_str()
-					.is_some_and(|host| allowed.iter().any(|entry| entry.as_str() == host))
-			})
-		};
 
-		if !body.redirect_uris.iter().all(host_allowed) {
-			return Err!(Request(Forbidden(
-				"A redirect_uri host is not in the registration allowlist"
-			)));
-		}
+	if !allowed.is_empty()
+		&& !body
+			.redirect_uris
+			.iter()
+			.all(|uri| redirect_allowlisted(allowed, uri))
+	{
+		return Err!(Request(Forbidden(
+			"A redirect_uri host or scheme is not in the registration allowlist"
+		)));
 	}
 
 	let reg = oidc.register_client(body).await?;
@@ -404,6 +404,22 @@ mod tests {
 			validate_client_metadata(&private, true),
 			Err(DcrError::RedirectUri(_))
 		));
+	}
+
+	#[test]
+	fn allowlist_covers_hosts_and_private_use_schemes() {
+		let allowed = ["element.io".to_owned(), "io.element.android".to_owned()];
+
+		assert!(redirect_allowlisted(&allowed, "https://element.io/oauth/ios/x"));
+		// A private-use scheme has no host, so the scheme stands in for one.
+		assert!(redirect_allowlisted(&allowed, "io.element.android:/callback"));
+		assert!(redirect_allowlisted(&["Element.IO".to_owned()], "https://element.io/cb"));
+
+		assert!(!redirect_allowlisted(&allowed, "https://attacker.example/callback"));
+		assert!(!redirect_allowlisted(&allowed, "com.attacker.app:/callback"));
+		assert!(!redirect_allowlisted(&allowed, "https://app.element.io/cb"));
+		assert!(!redirect_allowlisted(&[], "https://element.io/cb"));
+		assert!(!redirect_allowlisted(&allowed, "not a uri"));
 	}
 
 	#[test]

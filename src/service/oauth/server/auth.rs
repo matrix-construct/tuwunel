@@ -101,25 +101,38 @@ pub fn store_auth_request(&self, req_id: &str, request: &AuthRequest) {
 		.raw_put(req_id, Cbor(request));
 }
 
+/// Read an authorization request without consuming it.
+///
+/// A flow that pauses for a user gesture reads the request to decide what to
+/// show, then retires it with `remove_auth_request` once the gesture arrives.
+/// An unknown or expired request is a `NotFound`, and an expired one is evicted
+/// as it is found, so no caller ever renders against a stale request.
 #[implement(super::Server)]
-pub async fn take_auth_request(&self, req_id: &str) -> Result<AuthRequest> {
-	let request: AuthRequest = self
+pub async fn peek_auth_request(&self, req_id: &str) -> Result<AuthRequest> {
+	let request = self
 		.db
 		.oidcreqid_authrequest
 		.get(req_id)
 		.await
-		.deserialized::<Cbor<_>>()
+		.deserialized()
 		.map(|cbor: Cbor<AuthRequest>| cbor.0)
 		.map_err(|_| err!(Request(NotFound("Unknown or expired authorization request"))))?;
 
-	self.db.oidcreqid_authrequest.remove(req_id);
-
 	if SystemTime::now() > request.expires_at {
+		self.remove_auth_request(req_id);
+
 		return Err!(Request(NotFound("Authorization request has expired")));
 	}
 
 	Ok(request)
 }
+
+/// Retire a pending authorization request.
+///
+/// The request is single-use, so a flow removes it before minting anything
+/// against it. Removing a key that is already gone is a no-op.
+#[implement(super::Server)]
+pub fn remove_auth_request(&self, req_id: &str) { self.db.oidcreqid_authrequest.remove(req_id); }
 
 #[implement(super::Server)]
 pub async fn exchange_auth_code(

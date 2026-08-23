@@ -83,6 +83,7 @@ pub fn check(config: &Config) -> Result {
 	check_room_version(config)?;
 	check_identity_providers(config)?;
 	warn_oidc_registration_token(config);
+	warn_oidc_client_approval(config);
 	check_media_providers(config)?;
 	check_well_known_support_contact_validity(config)?;
 	check_email(config)?;
@@ -648,6 +649,18 @@ fn check_identity_provider_secret(i: &str, provider: &IdentityProvider) -> Resul
 	}
 
 	Ok(())
+}
+
+fn warn_oidc_client_approval(config: &Config) {
+	if !config.oidc_require_client_approval {
+		warn!(
+			"oidc_require_client_approval is disabled, so an authorization code is issued \
+			 without asking the user, whichever client requested it. Anyone who can reach \
+			 dynamic client registration can then register a client with a redirect target they \
+			 control and phish a sign-in link. Prefer listing the clients you serve in \
+			 oidc_registration_allowed_redirect_hosts, which waives the prompt for them alone."
+		);
+	}
 }
 
 fn warn_oidc_registration_token(config: &Config) {

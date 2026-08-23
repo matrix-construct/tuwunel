@@ -124,7 +124,7 @@ grant.
 | Method | Endpoint | Description |
 |---|---|---|
 | `GET` | `/_tuwunel/oidc/authorize` | Authorization endpoint; starts the code flow |
-| `GET` | `/_tuwunel/oidc/_complete` | Completes authorization after the provider callback |
+| `GET`/`POST` | `/_tuwunel/oidc/_complete` | Completes authorization after the provider callback; the POST is the approval form's target |
 | `GET`/`POST` | `/_tuwunel/oidc/native` | Native login/registration page and submission (no upstream IdP) |
 | `POST` | `/_tuwunel/oidc/token` | Token endpoint; exchanges codes, refresh tokens, and device codes |
 | `POST` | `/_tuwunel/oidc/device_authorization` | Device authorization request (RFC 8628) |
@@ -223,7 +223,8 @@ OIDC server was not already running takes effect on the next restart.
 | Option | Default | Description |
 |---|---|---|
 | `oidc_registration_access_token` | (unset) | When set, the registration endpoint requires callers to present this value as an `Authorization: Bearer` credential. Matrix clients have no way to supply one, so any value here blocks next-gen auth for every ordinary client. Leave it unset unless the only callers are ones you register yourself. |
-| `oidc_registration_allowed_redirect_hosts` | `[]` | When non-empty, every `redirect_uri` presented at registration must use a host in this list, otherwise the registration is rejected. Empty imposes no host restriction. |
+| `oidc_registration_allowed_redirect_hosts` | `[]` | When non-empty, every `redirect_uri` presented at registration must match this list, otherwise the registration is rejected. A `redirect_uri` with a host matches an entry naming that host; a private-use scheme carries no host (RFC 8252, as in `io.element.android:/`) and matches an entry naming the scheme. Matching ignores case. Empty imposes no restriction at registration, and vouches for no client. |
+| `oidc_require_client_approval` | `true` | Show the user an approve/deny page naming the client before an authorization code is issued to a client the operator has not vetted. A client is vetted when its redirect host or private-use scheme appears in `oidc_registration_allowed_redirect_hosts`. |
 
 ### Rate limiting
 
@@ -248,8 +249,48 @@ is required: any client that supports dynamic registration can authenticate.
 
 To bound which clients may register, use
 `oidc_registration_allowed_redirect_hosts`. It restricts registration to clients
-whose `redirect_uri` hosts you list, and ordinary Matrix clients keep working so
-long as their hosts appear in it.
+whose `redirect_uri` you list, and ordinary Matrix clients keep working so long
+as they appear in it. List a web client by host and a mobile client by its
+private-use scheme, so a deployment serving Element X on both platforms reads:
+
+```toml
+oidc_registration_allowed_redirect_hosts = ["element.io", "io.element.android"]
+```
+
+### Approving an unvetted client
+
+Open registration means anyone can register a client pointing at a redirect
+target they control, then send one of your users an authorization link for it.
+Nothing in the registration rules can tell that client apart from a legitimate
+one: they only require a client's own metadata to be self-consistent, and an
+attacker's metadata describes an attacker's domain consistently.
+
+So by default Tuwunel asks. When the redirect target of a sign-in is not vetted,
+the user is shown a page naming the client, its website, and where the sign-in
+is about to be handed, with Approve and Deny buttons; the authorization code is
+minted only on Approve. A client counts as vetted when its redirect host or
+private-use scheme appears in `oidc_registration_allowed_redirect_hosts`. An
+initial access token deliberately does not vet anything, because closing
+registration says nothing about the clients that were already registered when
+you closed it.
+
+Listing the clients you serve therefore restores a sign-in with no extra step,
+and is the recommended configuration. Understand what an entry vouches for: a
+scheme entry covers any app on the device that claims that scheme (RFC 8252
+§8.6), and a host entry covers every path on that host, an open redirector or
+user-content subdomain included.
+
+The prompt is a step a person takes, inside a window sized for a machine:
+`login_token_ttl` defaults to two minutes, and a user who leaves the page
+sitting past it has to start the sign-in again. Raise it on a server that shows
+the prompt routinely.
+
+Set `oidc_require_client_approval` to `false` only if you accept that any
+registered client can be handed a user's authorization code on a single click.
+Tuwunel logs a warning naming the option at startup and on every configuration
+reload while it is disabled.
+
+### Closing registration entirely
 
 `oidc_registration_access_token` is a stricter control that carries a cost worth
 understanding before you enable it. RFC 7591 §3 makes the initial access token

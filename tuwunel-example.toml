@@ -1577,13 +1577,43 @@
 # Allowlist of hostnames permitted in a dynamically-registered OIDC
 # client's redirect_uris.
 #
-# When non-empty, every redirect_uri presented at registration must have a
-# host in this list or the registration is rejected. The default (empty)
-# imposes no host restriction.
+# When non-empty, every redirect_uri presented at registration must match
+# this list or the registration is rejected. A redirect_uri with a host
+# matches an entry naming that host, compared case-insensitively; a
+# private-use scheme carries no host (RFC 8252, as in
+# `io.element.android:/`) and matches an entry naming the scheme, so
+# `["element.io", "io.element.android"]` covers a client on both web and
+# mobile.
+#
+# The default (empty) imposes no restriction at registration, but then
+# vouches for no client either, so every sign-in is subject to
+# `oidc_require_client_approval`. Listing an entry vouches for whatever
+# answers to it, so a scheme entry covers any app on the device claiming
+# that scheme (RFC 8252 §8.6) and a host entry covers every path on it.
 #
 # reloadable: yes
 #
 #oidc_registration_allowed_redirect_hosts = []
+
+# Ask the user to approve an unvetted OIDC client before its
+# authorization code is issued.
+#
+# Dynamic client registration is open by default, so anyone can register a
+# client with a redirect target they control and send an authorization
+# link to one of your users; without this prompt a single click hands that
+# client an authorization code for the account. When true (default), a
+# sign-in whose redirect target is not vetted shows an approve/deny page
+# naming the client first.
+#
+# A client is vetted when its redirect host or private-use scheme appears
+# in `oidc_registration_allowed_redirect_hosts`, so listing the clients
+# you serve restores a prompt-free sign-in. Because the prompt is a step
+# a person takes, a server that shows it wants a `login_token_ttl` long
+# enough to read the page.
+#
+# reloadable: yes
+#
+#oidc_require_client_approval = true
 
 # Require a `client_uri` in dynamic client registration requests
 # (RFC 7591 / MSC2966).

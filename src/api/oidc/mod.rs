@@ -72,6 +72,23 @@ async fn peek_login_token(services: &Services, token: Option<&str>) -> Result<Ow
 		.map_err(|_| err!(Request(Forbidden("Invalid or expired login token"))))
 }
 
+/// Whether a redirect URI is covered by the operator's redirect allowlist.
+///
+/// A URI carrying a host matches an allowlist entry naming that host. A
+/// private-use scheme carries no host at all (RFC 8252 §7.1, as in
+/// `io.element.android:/callback`), so it matches an entry naming the scheme
+/// instead, which is what lets one list cover both a web and a mobile client.
+/// Either way the comparison ignores case.
+fn redirect_allowlisted(allowed: &[String], uri: &str) -> bool {
+	Url::parse(uri).is_ok_and(|url| {
+		let name = url.host_str().unwrap_or_else(|| url.scheme());
+
+		allowed
+			.iter()
+			.any(|entry| entry.eq_ignore_ascii_case(name))
+	})
+}
+
 fn sso_redirect_url(base: &str, idp_id: &str, callback: &Url) -> Result<Url> {
 	let idp_id_enc = url_encode(idp_id);
 	let mut sso_url =

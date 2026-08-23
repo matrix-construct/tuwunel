@@ -21,7 +21,12 @@ pub(super) use self::{
 	args::Args as Ruma, auth::auth_uiaa, client_ip::ClientIp, response::RumaResponse,
 	state::State,
 };
-use crate::{client, oidc, server};
+// Aliased to keep the subsystem visible where the sibling routes stay qualified.
+use crate::{
+	client, oidc,
+	oidc::{complete_route as oidc_complete, post_complete_route as oidc_post_complete},
+	server,
+};
 
 pub fn build(router: Router<State>, server: &Server) -> Router<State> {
 	let config = &server.config;
@@ -426,7 +431,7 @@ fn register_oidc_routes(router: Router<State>) -> Router<State> {
 	router
 		.route("/_tuwunel/oidc/registration", post(oidc::registration_route))
 		.route("/_tuwunel/oidc/authorize", get(oidc::authorize_route))
-		.route("/_tuwunel/oidc/_complete", get(oidc::complete_route))
+		.route("/_tuwunel/oidc/_complete", get(oidc_complete).post(oidc_post_complete))
 		.route(
 			"/_tuwunel/oidc/native",
 			get(oidc::native_get_route).post(oidc::native_submit_route),
