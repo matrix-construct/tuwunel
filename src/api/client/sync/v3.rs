@@ -2336,17 +2336,15 @@ async fn filter_hero<Pdu: Event>(
 		return None;
 	}
 
-	let (is_invited, is_joined) = join(
-		services.state_cache.is_invited(user_id, room_id),
-		services.state_cache.is_joined(user_id, room_id),
-	)
-	.await;
+	// The join read leads; a joined hero settles it before the invite read.
+	let is_hero = services
+		.state_cache
+		.is_joined(user_id, room_id)
+		.is_false()
+		.and(services.state_cache.is_invited(user_id, room_id))
+		.is_false();
 
-	if !is_joined && is_invited {
-		return None;
-	}
-
-	Some(user_id.to_owned())
+	is_hero.await.then(|| user_id.to_owned())
 }
 
 async fn typings_event_for_user(
