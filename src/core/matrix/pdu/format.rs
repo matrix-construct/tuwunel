@@ -22,6 +22,7 @@ pub fn into_outgoing_federation(
 		.and_then(|val| val.as_object_mut())
 	{
 		unsigned.remove("transaction_id");
+		unsigned.remove("org.matrix.msc4140.delay_id");
 	}
 
 	let Ok(room_rules) = room_version::rules(room_version) else {

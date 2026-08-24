@@ -614,6 +614,23 @@ pub struct Config {
 	)]
 	pub max_request_size: usize,
 
+	/// Maximum delay for an MSC4140 delayed event, in seconds. The default is
+	/// 24 hours.
+	///
+	/// Set to 0 to disable delayed events.
+	///
+	/// default: 86400
+	#[serde(default = "default_max_event_delay_duration")]
+	pub max_event_delay_duration: u64,
+
+	/// Maximum number of MSC4140 delayed events a user may have scheduled.
+	///
+	/// Set to 0 to disable delayed events.
+	///
+	/// default: 100
+	#[serde(default = "default_max_delayed_events_per_user")]
+	pub max_delayed_events_per_user: usize,
+
 	/// Maximum size of a response body buffered from a remote server. Applies
 	/// to federation requests, push gateway and appservice transactions, and
 	/// remote media fetched for URL previews. A peer cannot be trusted to honor
@@ -5362,6 +5379,10 @@ fn default_dns_timeout() -> u64 { 10 }
 fn default_ip_lookup_strategy() -> u8 { 5 }
 
 fn default_max_request_size() -> usize { 24 * 1024 * 1024 }
+
+fn default_max_event_delay_duration() -> u64 { 24 * 60 * 60 }
+
+fn default_max_delayed_events_per_user() -> usize { 100 }
 
 fn default_max_response_size() -> usize { 256 * 1024 * 1024 }
 

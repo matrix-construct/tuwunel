@@ -23,7 +23,7 @@ pub fn remove_transaction_id_unless_sender(&mut self, user_id: Option<&UserId>) 
 	}
 }
 
-/// Removes the local transaction ID from unsigned event metadata.
+/// Removes sender-private IDs from unsigned event metadata.
 ///
 /// Other unsigned properties are retained and the object is re-encoded. An
 /// event without unsigned data, or without the key, is left unchanged.
@@ -44,6 +44,7 @@ pub fn remove_transaction_id(&mut self) -> Result {
 		.map_err(|e| err!(Database("Invalid unsigned in pdu event: {e}")))?;
 
 	unsigned.remove("transaction_id");
+	unsigned.remove("org.matrix.msc4140.delay_id");
 	self.unsigned = to_raw_value(&unsigned)
 		.map(Into::into)
 		.map(Some)

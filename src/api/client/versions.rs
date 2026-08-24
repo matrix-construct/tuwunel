@@ -43,6 +43,11 @@ pub(crate) async fn get_supported_versions_route(
 					.rendezvous_enabled
 					.then_some("org.matrix.msc4108"),
 			)
+			.chain(
+				(services.config.max_event_delay_duration > 0
+					&& services.config.max_delayed_events_per_user > 0)
+					.then_some("org.matrix.msc4140"),
+			)
 			.map(Into::into)
 			.zip(once(true).cycle())
 			.collect(),

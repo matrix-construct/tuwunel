@@ -63,12 +63,15 @@ pub(crate) async fn get_notifications_route(
 				count: count.into(),
 			};
 
-			let event = services
+			let mut event = services
 				.timeline
 				.get_pdu_from_id(&pdu_id.into())
 				.await
 				.ok()
 				.filter(|event| !event.is_redacted())?;
+			if event.sender() != sender_user {
+				event.remove_transaction_id().ok();
+			}
 
 			let read = services
 				.pusher

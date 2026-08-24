@@ -165,6 +165,34 @@ fn remove_prev_state_absent_unsigned_noop() {
 	assert!(pdu.unsigned.is_none());
 }
 
+#[test]
+fn remove_transaction_id_strips_all_sender_private_ids() {
+	let mut pdu = member_pdu(&json!({
+		"age": 4612,
+		"transaction_id": "txn",
+		"org.matrix.msc4140.delay_id": "delay",
+	}));
+
+	pdu.remove_transaction_id().expect("strip failed");
+
+	let unsigned: serde_json::Value = serde_json::from_str(
+		pdu.unsigned
+			.as_ref()
+			.expect("unsigned kept")
+			.json()
+			.get(),
+	)
+	.expect("valid unsigned");
+
+	assert!(unsigned.get("transaction_id").is_none());
+	assert!(
+		unsigned
+			.get("org.matrix.msc4140.delay_id")
+			.is_none()
+	);
+	assert_eq!(unsigned["age"], 4612);
+}
+
 fn replacement_raw() -> Raw<AnySyncMessageLikeEvent> {
 	to_raw_value(&json!({
 		"type": "m.room.message",

@@ -9,7 +9,7 @@ pub mod state;
 use axum::{
 	Router,
 	response::IntoResponse,
-	routing::{any, get, post},
+	routing::{any, get, post, put},
 };
 pub use client_ip::{ConfiguredIpSource, TrustedPeerSubnets};
 use http::{HeaderValue, header};
@@ -343,8 +343,23 @@ fn register_client_room_routes(router: Router<State>) -> Router<State> {
 
 fn register_client_state_and_sync_routes(router: Router<State>) -> Router<State> {
 	router
-		.ruma_route(&client::send_message_event_route)
-		.ruma_route(&client::send_state_event_for_key_route)
+		.route(
+			"/_matrix/client/r0/rooms/{room_id}/send/{event_type}/{txn_id}",
+			put(client::send_message_event_or_delayed_route),
+		)
+		.route(
+			"/_matrix/client/v3/rooms/{room_id}/send/{event_type}/{txn_id}",
+			put(client::send_message_event_or_delayed_route),
+		)
+		.ruma_route(&client::send_delayed_event_route)
+		.route(
+			"/_matrix/client/r0/rooms/{room_id}/state/{event_type}/{state_key}",
+			put(client::send_state_event_or_delayed_route),
+		)
+		.route(
+			"/_matrix/client/v3/rooms/{room_id}/state/{event_type}/{state_key}",
+			put(client::send_state_event_or_delayed_route),
+		)
 		.ruma_route(&client::get_state_events_route)
 		.ruma_route(&client::get_state_events_for_key_route)
 		// Ruma doesn't have support for multiple paths for a single endpoint yet, and these
@@ -417,6 +432,10 @@ fn register_client_misc_routes(router: Router<State>) -> Router<State> {
 		.ruma_route(&client::turn_server_route)
 		.ruma_route(&client::get_transports_route)
 		.ruma_route(&client::well_known_support)
+		.ruma_route(&client::get_all_delayed_events_route)
+		.ruma_route(&client::get_delayed_event_route)
+		.ruma_route(&client::update_delayed_event_v1_route)
+		.ruma_route(&client::update_delayed_event_v2_route)
 		.ruma_route(&client::well_known_client)
 		.ruma_route(&client::tuwunel_remote_version)
 		.route("/_tuwunel/server_version", get(client::tuwunel_server_version))
