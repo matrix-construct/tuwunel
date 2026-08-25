@@ -51,11 +51,7 @@ pub(crate) async fn get_notifications_route(
 		.pusher
 		.get_notifications(sender_user, from)
 		.ready_filter(|(_, notify)| {
-			if only_highlight && !notify.actions.iter().any(Action::is_highlight) {
-				return false;
-			}
-
-			true
+			!only_highlight || notify.actions.iter().any(Action::is_highlight)
 		})
 		.wide_filter_map(async |(count, notify)| {
 			let pdu_id = PduId {
