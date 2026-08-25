@@ -371,7 +371,7 @@ features = [
 
 [workspace.dependencies.ruma]
 git = "https://github.com/matrix-construct/ruma"
-rev = "20c914e17d0f364e41e62ae7484e2d225a86a9d9"
+rev = "20c5c6aff3644e765f51681f2d209950254a1f88"
 features = [
     "__compat",
     "appservice-api-c",
@@ -404,6 +404,7 @@ features = [
     "unstable-msc4121",
     "unstable-msc4125",
     "unstable-msc4143",
+    "unstable-msc4155",
     "unstable-msc4186",
     "unstable-msc4195",
     "unstable-msc4203", # sending to-device events to appservices
@@ -411,6 +412,7 @@ features = [
     "unstable-msc4265",
     "unstable-msc4266",
     "unstable-msc4310",
+    "unstable-msc4380",
     "unstable-msc4383",
     "unstable-msc4388",
     "unstable-msc4439",
@@ -419,7 +421,7 @@ features = [
 
 [workspace.dependencies.synapse-admin-api]
 git = "https://github.com/matrix-construct/synapse-admin-api"
-rev = "af22c04251d228961fc2ad2bde5226b3c973fb73"
+rev = "66ac328bfdb26736300d735ca70056499ed1ad43"
 features = ["server"]
 
 [workspace.dependencies.rustls]
