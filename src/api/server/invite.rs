@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, mem::take};
 
 use axum::extract::State;
 use base64::{Engine as _, engine::general_purpose};
@@ -9,7 +9,7 @@ use ruma::{
 	api::{
 		appservice::event::push_events::{self, v1::DeviceLists},
 		error::{ErrorKind, IncompatibleRoomVersionErrorData},
-		federation::membership::create_invite,
+		federation::membership::{RawStrippedState, create_invite},
 	},
 	events::{
 		AnyStrippedStateEvent, GlobalAccountDataEventType, StateEventType,
@@ -30,7 +30,8 @@ use tuwunel_core::{
 use tuwunel_service::{
 	Services,
 	membership::{
-		StrippedCreateVerdict, enforce_stripped_create, into_client_stripped, v12_room_ids,
+		StrippedCreateVerdict, dedup_stripped_state, enforce_stripped_create,
+		into_client_stripped, v12_room_ids, without_member,
 	},
 	rooms::state_cache::MembershipUpdate,
 };
@@ -51,7 +52,7 @@ struct ExtractIsDirect {
 pub(crate) async fn create_invite_route(
 	State(services): State<crate::State>,
 	ClientIp(client): ClientIp,
-	body: Ruma<create_invite::v2::Request>,
+	mut body: Ruma<create_invite::v2::Request>,
 ) -> Result<create_invite::v2::Response> {
 	services
 		.sending
@@ -60,7 +61,10 @@ pub(crate) async fn create_invite_route(
 
 	validate_request(&services, &body).await?;
 
-	enforce_stripped_state(&services, &body).await?;
+	// Settled before any reader, so validation and the invitee agree.
+	let stripped_state = dedup_stripped_state(take(&mut body.body.invite_room_state));
+
+	enforce_stripped_state(&services, &body, &stripped_state).await?;
 
 	let (mut signed_event, invited_user) = parse_and_validate_event(&services, &body).await?;
 
@@ -72,10 +76,8 @@ pub(crate) async fn create_invite_route(
 
 	let pdu = build_pdu(&body)?;
 
-	let invite_state: Vec<_> = body
-		.invite_room_state
-		.clone()
-		.into_iter()
+	// Built above the room lock, so the per-entry reparse stays outside it.
+	let invite_state: Vec<_> = without_member(stripped_state, &invited_user)
 		.filter_map(|state| into_client_stripped(&body.room_id, state))
 		.chain([pdu.to_format()])
 		.collect();
@@ -141,10 +143,11 @@ async fn validate_request(
 async fn enforce_stripped_state(
 	services: &Services,
 	body: &Ruma<create_invite::v2::Request>,
-) -> Result<()> {
+	stripped_state: &[RawStrippedState],
+) -> Result {
 	let verdict = services
 		.membership
-		.validate_stripped_create(&body.invite_room_state, &body.room_id, &body.room_version)
+		.validate_stripped_create(stripped_state, &body.room_id, &body.room_version)
 		.await?;
 
 	if verdict != StrippedCreateVerdict::Valid {

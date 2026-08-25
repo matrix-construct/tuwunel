@@ -182,12 +182,13 @@ fn invite_permitted(
 
 /// The sender of the stripped membership event inviting `user_id`.
 ///
-/// The last matching entry wins. A federated invite's stripped state is the
-/// inviting server's arbitrary `invite_room_state` blob followed by our own
-/// copy of the signed membership PDU, and only the latter has a sender the
-/// origin check authenticated. The array carries no ordering semantics in the
-/// spec, so this leans on every implementation appending its genuine copy
-/// last.
+/// The last matching entry wins. An invite this server recorded after the
+/// federation route began sanitising stripped state holds one entry for this
+/// cell, our own copy of the signed membership PDU, whose sender the origin
+/// check authenticated. An invite stored before that still carries whatever
+/// the inviting server sent ahead of our copy, and the array has no ordering
+/// semantics in the spec, so reading the last entry is what keeps those
+/// answering with the authenticated sender too.
 fn invite_sender(
 	user_id: &UserId,
 	invite_state: &[Raw<AnyStrippedStateEvent>],

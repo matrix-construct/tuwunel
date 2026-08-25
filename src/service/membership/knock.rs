@@ -4,7 +4,15 @@ use futures::{FutureExt, StreamExt};
 use ruma::{
 	CanonicalJsonObject, CanonicalJsonValue, OwnedEventId, OwnedServerName, RoomId,
 	RoomOrAliasId, RoomVersionId, UserId,
-	api::federation::{self, membership::RawStrippedState},
+	api::federation::{
+		self,
+		membership::{
+			RawStrippedState,
+			create_knock_event::v1::{
+				Request as SendKnockRequest, Response as SendKnockResponse,
+			},
+		},
+	},
 	canonical_json::to_canonical_value,
 	events::{
 		StateEventType,
@@ -20,7 +28,8 @@ use tuwunel_core::{
 };
 
 use super::{
-	Service, StrippedCreateVerdict, enforce_stripped_create, into_client_stripped, v12_room_ids,
+	Service, StrippedCreateVerdict, dedup_stripped_state, enforce_stripped_create,
+	into_client_stripped, v12_room_ids,
 };
 use crate::{
 	membership::join::get_servers_for_room,
@@ -247,7 +256,7 @@ async fn finalize_knock_membership(
 	sender_user: &UserId,
 	event_id: &OwnedEventId,
 	knock_event: CanonicalJsonObject,
-	send_knock_response: federation::membership::create_knock_event::v1::Response,
+	send_knock_response: SendKnockResponse,
 	state_lock: &RoomMutexGuard,
 ) -> Result {
 	info!("Parsing knock event");
@@ -480,9 +489,9 @@ async fn execute_send_knock(
 	event_id: &OwnedEventId,
 	knock_event: &CanonicalJsonObject,
 	room_version_id: &RoomVersionId,
-) -> Result<federation::membership::create_knock_event::v1::Response> {
+) -> Result<SendKnockResponse> {
 	info!("Asking {remote_server} for send_knock in room {room_id}");
-	let send_knock_request = federation::membership::create_knock_event::v1::Request {
+	let send_knock_request = SendKnockRequest {
 		room_id: room_id.to_owned(),
 		event_id: event_id.clone(),
 		pdu: self
@@ -499,7 +508,9 @@ async fn execute_send_knock(
 		.await?;
 
 	info!("send_knock finished");
-	Ok(response)
+
+	// Settled here so all three readers of this array agree.
+	Ok(SendKnockResponse::new(dedup_stripped_state(response.knock_room_state)))
 }
 
 #[implement(Service)]
@@ -511,7 +522,7 @@ async fn execute_send_knock(
 async fn ingest_send_knock_state(
 	&self,
 	room_id: &RoomId,
-	send_knock_response: &federation::membership::create_knock_event::v1::Response,
+	send_knock_response: &SendKnockResponse,
 	room_version_id: &RoomVersionId,
 ) -> Result<HashMap<u64, OwnedEventId>> {
 	info!("Going through send_knock response knock state events");

@@ -18,7 +18,8 @@ use self::auto_accept::Pending;
 pub use self::{
 	join::Join,
 	stripped_state::{
-		StrippedCreateVerdict, enforce_stripped_create, into_client_stripped, v12_room_ids,
+		StrippedCreateVerdict, dedup_stripped_state, enforce_stripped_create,
+		into_client_stripped, v12_room_ids, without_member,
 	},
 };
 
