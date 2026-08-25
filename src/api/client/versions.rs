@@ -81,7 +81,7 @@ static VERSIONS: [&str; 27] = [
 	"v1.19",  /* mutual rooms (MSC2666) */
 ];
 
-static UNSTABLE_FEATURES: [&str; 39] = [
+static UNSTABLE_FEATURES: [&str; 40] = [
 	"org.matrix.e2e_cross_signing",
 	// private read receipts (https://github.com/matrix-org/matrix-spec-proposals/pull/2285)
 	"org.matrix.msc2285.stable",
@@ -140,6 +140,8 @@ static UNSTABLE_FEATURES: [&str; 39] = [
 	"org.matrix.msc3824",
 	// Backwards-compatible redaction sending via /send (https://github.com/matrix-org/matrix-spec-proposals/pull/4169)
 	"com.beeper.msc4169",
+	// Invite filtering lists in m.invite_permission_config (https://github.com/matrix-org/matrix-spec-proposals/pull/4155)
+	"org.matrix.msc4155",
 	// Invite blocking via m.invite_permission_config (https://github.com/matrix-org/matrix-spec-proposals/pull/4380)
 	"org.matrix.msc4380",
 	"org.matrix.msc4380.stable",

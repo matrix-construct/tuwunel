@@ -13,15 +13,16 @@ use tuwunel_core::{
 	matrix::PduCount,
 	trace,
 	utils::{
-		BoolExt, ReadyExt,
+		BoolExt,
 		math::usize_from_ruma,
 		option::OptionExt,
 		stream::{BroadbandExt, IterStream},
 	},
 };
-use tuwunel_service::sync::Connection;
+use tuwunel_service::{sync::Connection, users::InviteFilter};
 
 use super::{
+	super::invite_permitted_room,
 	ListIds, ResponseLists, SyncInfo, Window, WindowRoom,
 	filter::{filter_room, filter_room_meta},
 };
@@ -35,15 +36,31 @@ pub(super) async fn selector(
 
 	let SyncInfo { services, sender_user, .. } = sync_info;
 
-	// MSC4380: when m.invite_permission_config blocks invites, omit invited
-	// rooms from the sliding-sync window; an unblock re-exposes them.
-	let invites_blocked = services.users.invites_blocked(sender_user).await;
+	// MSC4155: a stored invite the recipient ignores or blocks is kept out of
+	// the window, and relaxing the configuration re-exposes it.
+	let invite_filter = services.users.invite_filter(sender_user).await;
 
-	let actives = services
+	let memberships = services
 		.state_cache
 		.user_memberships(sender_user, Some(&[Join, Invite, Knock]))
-		.ready_filter(move |(m, _)| !invites_blocked || !matches!(m, Invite))
-		.map(|(membership, room_id)| (room_id.to_owned(), Some(membership)));
+		.map(|(membership, room_id)| (room_id.to_owned(), membership));
+
+	// A recipient filtering nothing is the common case, and judging an invite
+	// costs a stripped-state load, so only the filtering path buffers futures.
+	let actives = match invite_filter.is_permissive() {
+		| true => memberships
+			.map(|(room_id, membership)| (room_id, Some(membership)))
+			.left_stream(),
+		| false => memberships
+			.broad_filter_map(async |(room_id, membership)| {
+				let permitted = !matches!(membership, Invite)
+					|| invite_permitted_room(services, sender_user, &invite_filter, &room_id)
+						.await;
+
+				permitted.then_some((room_id, Some(membership)))
+			})
+			.right_stream(),
+	};
 
 	// Source retractions from tracked rooms, not a full left-state scan.
 	let retracted = conn
@@ -75,7 +92,7 @@ pub(super) async fn selector(
 	let lists = response_lists(rooms.iter());
 
 	trace!(?lists);
-	let window = window(sync_info, conn, rooms.iter(), &lists, invites_blocked).await;
+	let window = window(sync_info, conn, rooms.iter(), &lists, &invite_filter).await;
 
 	trace!(?window);
 	(window, lists)
@@ -293,7 +310,7 @@ async fn window<'a, Rooms>(
 	conn: &Connection,
 	rooms: Rooms,
 	lists: &ResponseLists,
-	invites_blocked: bool,
+	invite_filter: &InviteFilter,
 ) -> Window
 where
 	Rooms: Iterator<Item = &'a WindowRoom> + Clone + Send + Sync,
@@ -375,15 +392,20 @@ where
 				.await
 			};
 
-			// MSC4380: suppress invited-room subscriptions when invites are blocked.
-			let suppress = invites_blocked && matches!(membership, Some(MembershipState::Invite));
-
-			if !filter || suppress {
+			if !filter {
 				return None;
 			}
 
 			if let Some(room) = room {
 				return Some(detached_room(room));
+			}
+
+			// MSC4155: a subscription the window never admitted has no verdict
+			// yet, so an ignored or blocked invite is judged here instead.
+			if matches!(membership, Some(MembershipState::Invite))
+				&& !invite_permitted_room(services, sender_user, invite_filter, room_id).await
+			{
+				return None;
 			}
 
 			matcher(sync_info, conn, room_id.clone(), membership)

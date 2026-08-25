@@ -9,7 +9,9 @@ use ruma::{
 	api::client::push::ProfileTag,
 	events::{
 		AnySyncTimelineEvent, GlobalAccountDataEventType, TimelineEventType,
-		push_rules::PushRulesEvent, room::power_levels::RoomPowerLevels,
+		invite_permission_config::InvitePermission,
+		push_rules::PushRulesEvent,
+		room::{member::MembershipState, power_levels::RoomPowerLevels},
 	},
 	push::{Action, Actions, HighlightTweakValue, Ruleset, Tweak},
 	serde::Raw,
@@ -101,6 +103,7 @@ pub(crate) async fn append_pdu(&self, pdu_id: RawPduId, pdu: &Pdu) -> Result {
 			.users
 			.is_active_local(&target_user_id)
 			.await
+		&& self.invite_notifiable(pdu, &target_user_id).await
 	{
 		push_target.insert(target_user_id);
 	}
@@ -128,6 +131,30 @@ pub(crate) async fn append_pdu(&self, pdu_id: RawPduId, pdu: &Pdu) -> Result {
 	}
 
 	Ok(())
+}
+
+/// MSC4155: whether an invite may notify the user it names.
+///
+/// Every other membership transition notifies as before; only an invite the
+/// recipient ignores or blocks is withheld, matching what sync serves them.
+#[implement(super::Service)]
+async fn invite_notifiable(&self, pdu: &Pdu, user_id: &UserId) -> bool {
+	#[derive(Deserialize)]
+	struct Membership {
+		membership: MembershipState,
+	}
+
+	let is_invite = pdu
+		.get_content()
+		.is_ok_and(|content: Membership| content.membership == MembershipState::Invite);
+
+	!is_invite
+		|| self
+			.services
+			.users
+			.invite_permission(pdu.sender(), user_id)
+			.await
+			.eq(&InvitePermission::Allow)
 }
 
 #[implement(super::Service)]

@@ -1,11 +1,14 @@
-use futures::FutureExt;
+use futures::{FutureExt, future::join};
 use ruma::{
 	OwnedServerName, RoomId, UserId,
 	api::{
 		error::ErrorKind,
 		federation::membership::{RawStrippedState, create_invite},
 	},
-	events::room::member::{MembershipState, RoomMemberEventContent},
+	events::{
+		invite_permission_config::InvitePermission,
+		room::member::{MembershipState, RoomMemberEventContent},
+	},
 };
 use tuwunel_core::{
 	Err, Result, at, err, implement, matrix::event::gen_event_id_canonical_json, pdu::PduBuilder,
@@ -182,16 +185,24 @@ async fn local_invite(
 	reason: Option<&String>,
 	is_direct: bool,
 ) -> Result {
-	if self.services.users.invites_blocked(user_id).await {
-		return Err!(Request(InviteBlocked("{user_id} has blocked invites.")));
-	}
+	let blocked = self
+		.services
+		.users
+		.invite_permission(sender_user, user_id)
+		.map(|permission| permission.eq(&InvitePermission::Block));
 
-	if !self
+	let joined = self
 		.services
 		.state_cache
-		.is_joined(sender_user, room_id)
-		.await
-	{
+		.is_joined(sender_user, room_id);
+
+	let (blocked, joined) = join(blocked, joined).await;
+
+	if blocked {
+		return Err!(Request(InviteBlocked("{user_id} has blocked this invite.")));
+	}
+
+	if !joined {
 		return Err!(Request(Forbidden(
 			"You must be joined in the room you are trying to invite from."
 		)));

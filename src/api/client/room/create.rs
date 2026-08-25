@@ -15,6 +15,7 @@ use ruma::{
 	},
 	events::{
 		StateEventType, TimelineEventType,
+		ignored_user_list::IgnoredUserListEventContent,
 		room::{
 			canonical_alias::RoomCanonicalAliasEventContent,
 			create::{PreviousRoom, RoomCreateEventContent},
@@ -278,15 +279,15 @@ async fn build_power_levels_users(
 		return seed;
 	}
 
+	let ignored = services.users.ignored_users(sender_user).await;
+
 	body.invite
 		.iter()
-		.stream()
-		.filter(|&invite| invite_allowed(services, sender_user, invite))
-		.ready_fold(seed, |mut users, invite| {
+		.filter(|invite| invite_allowed(ignored.as_ref(), invite))
+		.fold(seed, |mut users, invite| {
 			users.insert(invite.clone(), int!(100));
 			users
 		})
-		.await
 }
 
 async fn apply_canonical_alias_pdu(
@@ -503,10 +504,12 @@ async fn process_invites(
 	room_id: &RoomId,
 ) {
 	// 8. Events implied by invite (and TODO: invite_3pid)
+	let ignored = services.users.ignored_users(sender_user).await;
+
 	body.invite
 		.iter()
 		.stream()
-		.filter(|&user_id| invite_allowed(services, sender_user, user_id))
+		.ready_filter(|user_id| invite_allowed(ignored.as_ref(), user_id))
 		.for_each(async |user_id| {
 			if let Err(e) = services
 				.membership
@@ -520,16 +523,14 @@ async fn process_invites(
 		.await;
 }
 
-/// Gate an invitee against the sender's ignore list, the recipient's ignore
-/// list, and MSC4380 `m.invite_permission_config`.
-async fn invite_allowed(services: &Services, sender_user: &UserId, invitee: &UserId) -> bool {
-	!(services
-		.users
-		.user_is_ignored(sender_user, invitee)
-		.await || services
-		.users
-		.user_is_ignored(invitee, sender_user)
-		.await || services.users.invites_blocked(invitee).await)
+/// Gate an invitee against the sender's own ignore list.
+///
+/// The invitee's own invite permission is not consulted here: `local_invite`
+/// is the authoritative check and refuses a blocked invite the same way any
+/// other failed invite is handled, while an ignored one proceeds and is
+/// withheld from the invitee afterwards.
+fn invite_allowed(ignored: Option<&IgnoredUserListEventContent>, invitee: &UserId) -> bool {
+	ignored.is_none_or(|content| !content.ignored_users.contains_key(invitee))
 }
 
 async fn finalize_alias_and_directory(

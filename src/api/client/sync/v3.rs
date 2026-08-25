@@ -68,9 +68,10 @@ use tuwunel_service::{
 		read_receipt::PrivateReadEvents,
 		short::{ShortEventId, ShortStateHash, ShortStateKey},
 	},
+	users::InviteFilter,
 };
 
-use super::{load_timeline, share_encrypted_room, strip_prev_state};
+use super::{invite_permitted, load_timeline, share_encrypted_room, strip_prev_state};
 use crate::{
 	ClientIp, Ruma,
 	client::{ignored_filter, is_empty_account_data_event, with_membership},
@@ -397,9 +398,9 @@ async fn build_sync_events(
 	state_after: StateAfter,
 	filter: &FilterDefinition,
 ) -> Result<sync_events::v3::Response> {
-	// MSC4380: when m.invite_permission_config blocks invites, suppress stored
-	// invite events from /sync entirely; a later unblock re-exposes them.
-	let invites_blocked = services.users.invites_blocked(sender_user).await;
+	// MSC4155: a stored invite the recipient ignores or blocks is withheld
+	// here, and relaxing the configuration re-exposes it.
+	let invite_filter = services.users.invite_filter(sender_user).await;
 
 	let joined_rooms = collect_joined_rooms(
 		services,
@@ -423,7 +424,7 @@ async fn build_sync_events(
 	);
 
 	let invited_rooms =
-		collect_invited_rooms(services, sender_user, since, next_batch, filter, invites_blocked);
+		collect_invited_rooms(services, sender_user, since, next_batch, filter, &invite_filter);
 
 	let knocked_rooms = collect_knocked_rooms(services, sender_user, since, next_batch, filter);
 
@@ -611,13 +612,15 @@ async fn collect_invited_rooms<'a>(
 	since: u64,
 	next_batch: u64,
 	filter: &'a FilterDefinition,
-	invites_blocked: bool,
+	invite_filter: &'a InviteFilter,
 ) -> BTreeMap<OwnedRoomId, InvitedRoom> {
 	services
 		.state_cache
 		.rooms_invited_state(sender_user)
-		.ready_filter(move |_| !invites_blocked)
 		.ready_filter(|(room_id, _)| filter.room.matches(room_id))
+		.ready_filter(|(_, invite_state)| {
+			invite_permitted(sender_user, invite_filter, invite_state)
+		})
 		.fold_default(async |mut invited_rooms: BTreeMap<_, _>, (room_id, invite_state)| {
 			let invite_count = services
 				.state_cache

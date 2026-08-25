@@ -13,6 +13,7 @@ use ruma::{
 	},
 	events::{
 		AnyStrippedStateEvent, GlobalAccountDataEventType, StateEventType,
+		invite_permission_config::InvitePermission,
 		push_rules::PushRulesEvent,
 		room::member::{MembershipState, RoomMemberEventContent},
 	},
@@ -67,7 +68,7 @@ pub(crate) async fn create_invite_route(
 
 	let sender = validate_origins(&signed_event, body.origin())?;
 
-	check_invite_permitted(&services, &body, &invited_user).await?;
+	check_invite_permitted(&services, &body, &invited_user, sender).await?;
 
 	let pdu = build_pdu(&body)?;
 
@@ -206,14 +207,6 @@ async fn parse_and_validate_event(
 		return Err!(Request(InvalidParam("User does not belong to this homeserver.")));
 	}
 
-	if services
-		.users
-		.invites_blocked(&invited_user)
-		.await
-	{
-		return Err!(Request(InviteBlocked("{invited_user} has blocked invites.")));
-	}
-
 	let content: RoomMemberEventContent = signed_event
 		.get("content")
 		.cloned()
@@ -279,6 +272,7 @@ async fn check_invite_permitted(
 	services: &Services,
 	body: &Ruma<create_invite::v2::Request>,
 	invited_user: &UserId,
+	sender: &UserId,
 ) -> Result<()> {
 	if services.metadata.is_banned(&body.room_id).await
 		&& !services.admin.user_is_admin(invited_user).await
@@ -290,6 +284,19 @@ async fn check_invite_permitted(
 		&& !services.admin.user_is_admin(invited_user).await
 	{
 		return Err!(Request(Forbidden("This server does not allow room invites.")));
+	}
+
+	// The recipient's own policy is the only per-sender answer this route
+	// gives, so it waits for the origin check to bind the sender. Answering
+	// earlier would let any server read a local user's rules for user ids it
+	// cannot speak for.
+	if services
+		.users
+		.invite_permission(sender, invited_user)
+		.await
+		.eq(&InvitePermission::Block)
+	{
+		return Err!(Request(InviteBlocked("{invited_user} has blocked this invite.")));
 	}
 
 	Ok(())

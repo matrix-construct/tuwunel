@@ -33,33 +33,24 @@ pub(crate) async fn invite_user_route(
 		return Err!(Request(ThreepidDenied("Third party identifiers are not implemented")));
 	};
 
-	let sender_ignored_recipient = services
-		.users
-		.user_is_ignored(sender_user, user_id);
+	// TODO: this should be in the service, but moving it from here would run the
+	// sender's ignore-list check before the banned check, revealing the ignore
+	// state to the sending user if the recipient is banned
+	let member = services
+		.state_accessor
+		.get_member(room_id, user_id);
 
-	let recipient_ignored_by_sender = services
+	let ignored = services
 		.users
 		.user_is_ignored(user_id, sender_user);
 
-	let (sender_ignored_recipient, recipient_ignored_by_sender) =
-		join!(sender_ignored_recipient, recipient_ignored_by_sender);
+	let (member, ignored) = join!(member, ignored);
 
-	if sender_ignored_recipient {
-		return Ok(invite_user::v3::Response {});
-	}
-
-	// TODO: this should be in the service, but moving it from here would
-	// trigger the recipient_ignored_by_sender check before the banned check,
-	// revealing the ignore state to the sending user if the recipient is banned
-	if let Ok(target_user_membership) = services
-		.state_accessor
-		.get_member(room_id, user_id)
-		.await && target_user_membership.membership == MembershipState::Ban
-	{
+	if member.is_ok_and(|member| member.membership == MembershipState::Ban) {
 		return Err!(Request(Forbidden("User is banned from this room.")));
 	}
 
-	if recipient_ignored_by_sender {
+	if ignored {
 		// silently drop the invite to the recipient if they've been ignored by the
 		// sender, pretend it worked
 		return Ok(invite_user::v3::Response {});

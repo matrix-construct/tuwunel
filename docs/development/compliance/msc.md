@@ -18,9 +18,9 @@
 
 ## Counts
 
-- ✅ `yes`: 259
+- ✅ `yes`: 260
 - 🟨 `partial`: 35
-- ❌ `no`: 444
+- ❌ `no`: 443
 - ⬛ `n/a`: 286
 
 ### Status by inventory bucket
@@ -28,7 +28,7 @@
 | Inv | yes | partial | no | n/a | total |
 |---|---|---|---|---|---|
 | merged | 186 | 7 | 7 | 59 | 259 |
-| open | 65 | 27 | 397 | 175 | 664 |
+| open | 66 | 27 | 396 | 175 | 664 |
 | closed | 8 | 1 | 40 | 52 | 101 |
 
 ## Merged
@@ -435,7 +435,7 @@ in the [Out of scope](#out-of-scope) section.
 | MSC4164 | ✅ ● | 100/100 | Leave all rooms on deactivation | deactivation leaves all joined/invited/knocked rooms |
 | MSC4162 | ❌ ◐ | 10/10 | One-Time Key Reset Endpoint | no /keys/reset; claim ordering is implicit via key prefix iter |
 | MSC4158 | ✅ ◐ | 80/100 | MatrixRTC focus information in .well-known | rtc_foci exposed in .well-known/matrix/client |
-| MSC4155 | ❌ ● | 0/0 | Invite filtering | no m.invite_permission_config handling |
+| MSC4155 | ✅ ● | 95/100 | Invite filtering | Six glob lists evaluated per sender; blanket block outranks the ignore list |
 | MSC4154 | ✅ ● | 100/100 | Request max body size | max_request_size default 24MB, M_TOO_LARGE returns 413 |
 | MSC4152 | ❌ ● | 0/0 | Room labeling and filtering | room labels and /rooms/{roomId}/labels not implemented |
 | MSC4149 | 🟨 ◐ | 80/80 | Update CSP Directives for Media Repository | global CSP aligns with MSC; missing font-src and script-src 'none' |

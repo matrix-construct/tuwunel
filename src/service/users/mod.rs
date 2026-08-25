@@ -1,5 +1,6 @@
 mod dehydrated_device;
 pub mod device;
+mod invite_filter;
 mod keys;
 mod ldap;
 mod register;
@@ -12,8 +13,7 @@ use ruma::{
 	api::client::filter::FilterDefinition,
 	events::{
 		GlobalAccountDataEventType,
-		ignored_user_list::IgnoredUserListEvent,
-		invite_permission_config::{InvitePermissionAction, InvitePermissionConfigEvent},
+		ignored_user_list::{IgnoredUserListEvent, IgnoredUserListEventContent},
 	},
 };
 use serde::{Deserialize, Serialize};
@@ -25,7 +25,10 @@ use tuwunel_core::{
 };
 use tuwunel_database::{Deserialized, Json, Map};
 
-pub use self::{dehydrated_device::DehydratedDevice, keys::parse_master_key, register::Register};
+pub use self::{
+	dehydrated_device::DehydratedDevice, invite_filter::InviteFilter, keys::parse_master_key,
+	register::Register,
+};
 
 pub const PASSWORD_SENTINEL: &str = "*";
 pub const PASSWORD_DISABLED: &str = "";
@@ -119,28 +122,27 @@ impl Service {
 	/// Returns true/false based on whether the recipient/receiving user has
 	/// blocked the sender
 	pub async fn user_is_ignored(&self, sender_user: &UserId, recipient_user: &UserId) -> bool {
-		self.services
-			.account_data
-			.get_global(recipient_user, GlobalAccountDataEventType::IgnoredUserList)
+		self.ignored_users(recipient_user)
 			.await
-			.is_ok_and(|ignored: IgnoredUserListEvent| {
+			.is_some_and(|ignored| {
 				ignored
-					.content
 					.ignored_users
 					.keys()
 					.any(|blocked_user| blocked_user == sender_user)
 			})
 	}
 
-	/// MSC4380: `m.invite_permission_config.default_action == "block"`.
-	pub async fn invites_blocked(&self, user_id: &UserId) -> bool {
+	/// The users a user ignores account-wide.
+	///
+	/// Callers testing one list against many users take this rather than
+	/// [`Self::user_is_ignored`], which re-reads the list per test.
+	pub async fn ignored_users(&self, user_id: &UserId) -> Option<IgnoredUserListEventContent> {
 		self.services
 			.account_data
-			.get_global(user_id, GlobalAccountDataEventType::InvitePermissionConfig)
+			.get_global(user_id, GlobalAccountDataEventType::IgnoredUserList)
 			.await
-			.is_ok_and(|event: InvitePermissionConfigEvent| {
-				matches!(event.content.default_action, Some(InvitePermissionAction::Block))
-			})
+			.map(|ignored: IgnoredUserListEvent| ignored.content)
+			.ok()
 	}
 
 	/// Create a new user account on this homeserver.

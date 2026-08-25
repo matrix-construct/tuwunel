@@ -1,14 +1,23 @@
+#[cfg(test)]
+mod tests;
 mod v3;
 mod v5;
 
 use futures::{StreamExt, pin_mut};
-use ruma::{RoomId, UserId, events::TimelineEventType::RoomMember};
+use ruma::{
+	OwnedUserId, RoomId, UserId,
+	events::{
+		AnyStrippedStateEvent, TimelineEventType::RoomMember,
+		invite_permission_config::InvitePermission,
+	},
+	serde::Raw,
+};
 use tuwunel_core::{
-	Error, PduCount, Result,
+	Error, PduCount, Result, is_equal_to,
 	matrix::{Event, pdu::PduEvent},
 	utils::{ReadyExt, result::LogErr, stream::BroadbandExt},
 };
-use tuwunel_service::Services;
+use tuwunel_service::{Services, users::InviteFilter};
 
 pub(crate) use self::{
 	v3::{calculate_heroes, sync_events_route},
@@ -133,6 +142,70 @@ async fn share_encrypted_room(
 				.await
 		})
 		.await
+}
+
+/// MSC4155: whether a stored invite may be served to the invitee.
+///
+/// The verdict is the recipient's own, judged against the sender of the
+/// stripped invite membership event. An invite whose sender cannot be derived
+/// is withheld from a filtering user rather than shown to them.
+async fn invite_permitted_room(
+	services: &Services,
+	user_id: &UserId,
+	filter: &InviteFilter,
+	room_id: &RoomId,
+) -> bool {
+	filter.is_permissive()
+		|| services
+			.state_cache
+			.invite_state(user_id, room_id)
+			.await
+			.is_ok_and(|invite_state| invite_permitted(user_id, filter, &invite_state))
+}
+
+/// [`invite_permitted_room`] for a room whose stripped state is in hand.
+///
+/// Callers walking stored invites already hold the state and take this form,
+/// which spares them the load the room-keyed form pays per room.
+fn invite_permitted(
+	user_id: &UserId,
+	filter: &InviteFilter,
+	invite_state: &[Raw<AnyStrippedStateEvent>],
+) -> bool {
+	filter.is_permissive()
+		|| invite_sender(user_id, invite_state).is_some_and(|sender| {
+			filter
+				.permission(&sender)
+				.eq(&InvitePermission::Allow)
+		})
+}
+
+/// The sender of the stripped membership event inviting `user_id`.
+///
+/// The last matching entry wins. A federated invite's stripped state is the
+/// inviting server's arbitrary `invite_room_state` blob followed by our own
+/// copy of the signed membership PDU, and only the latter has a sender the
+/// origin check authenticated. The array carries no ordering semantics in the
+/// spec, so this leans on every implementation appending its genuine copy
+/// last.
+fn invite_sender(
+	user_id: &UserId,
+	invite_state: &[Raw<AnyStrippedStateEvent>],
+) -> Option<OwnedUserId> {
+	invite_state
+		.iter()
+		.rev()
+		.filter(|event| {
+			event
+				.get_field::<&str>("state_key")
+				.is_ok_and(|state_key| state_key.is_some_and(is_equal_to!(user_id.as_str())))
+		})
+		.filter_map(|event| event.deserialize().ok())
+		.find_map(|event| match event {
+			| AnyStrippedStateEvent::RoomMember(member) if member.state_key == user_id =>
+				Some(member.sender),
+			| _ => None,
+		})
 }
 
 /// State sections strip the stored `prev_content`/`prev_sender` pair

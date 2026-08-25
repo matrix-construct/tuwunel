@@ -5,8 +5,10 @@
 
 use std::time::Duration;
 
-use futures::StreamExt;
-use ruma::{OwnedRoomId, OwnedUserId, RoomId, UserId};
+use futures::{FutureExt, StreamExt};
+use ruma::{
+	OwnedRoomId, OwnedUserId, RoomId, UserId, events::invite_permission_config::InvitePermission,
+};
 use tokio::time::sleep;
 use tuwunel_core::{
 	debug, debug_warn, implement,
@@ -99,7 +101,10 @@ pub(super) async fn accept_worker(&self) {
 	),
 )]
 async fn accept(&self, Pending { room_id, user_id, sender, is_direct }: Pending) {
-	if !self.join_invited(&room_id, &user_id).await {
+	if !self
+		.join_invited(&room_id, &user_id, &sender)
+		.await
+	{
 		return;
 	}
 
@@ -120,7 +125,7 @@ async fn accept(&self, Pending { room_id, user_id, sender, is_direct }: Pending)
 /// Withdrawing the invite ends the attempts, and so does the last delay
 /// elapsing, which leaves the room for its user to join by hand.
 #[implement(Service)]
-async fn join_invited(&self, room_id: &RoomId, user_id: &UserId) -> bool {
+async fn join_invited(&self, room_id: &RoomId, user_id: &UserId, sender: &UserId) -> bool {
 	for attempt in 0..ATTEMPTS {
 		let delay = attempt
 			.checked_sub(1)
@@ -128,7 +133,7 @@ async fn join_invited(&self, room_id: &RoomId, user_id: &UserId) -> bool {
 
 		sleep(delay).await;
 
-		if !self.acceptable(room_id, user_id).await {
+		if !self.acceptable(room_id, user_id, sender).await {
 			return false;
 		}
 
@@ -157,17 +162,17 @@ async fn join_invited(&self, room_id: &RoomId, user_id: &UserId) -> bool {
 ///
 /// Deactivated, suspended, and locked accounts are refused their own requests
 /// by the middleware, so answering an invite for one would route around it.
-/// A user whose `m.invite_permission_config` blocks invites never sees the
-/// stored invite in sync (MSC4380), and a join on their behalf would surface
-/// the room regardless, so blocked users are skipped as well. Every attempt
+/// An invite the user's filtering configuration blocks or ignores never
+/// reaches them in sync (MSC4380, MSC4155), and a join on their behalf would
+/// surface the room regardless, so those are skipped as well. Every attempt
 /// re-reads this, since the delays leave room for any of it to change
 /// underneath.
 ///
 /// The conjunction short-circuits, so the invite leads as the loop's own
-/// exit condition, and `invites_blocked` trails on two chained reads and a
-/// deserialization.
+/// exit condition, and `invite_permission` trails on four concurrent reads
+/// and their deserialization.
 #[implement(Service)]
-async fn acceptable(&self, room_id: &RoomId, user_id: &UserId) -> bool {
+async fn acceptable(&self, room_id: &RoomId, user_id: &UserId, sender: &UserId) -> bool {
 	let state_cache = &self.services.state_cache;
 	let users = &self.services.users;
 
@@ -175,7 +180,9 @@ async fn acceptable(&self, room_id: &RoomId, user_id: &UserId) -> bool {
 	let active = users.is_active_local(user_id);
 	let unsuspended = users.is_suspended(user_id).is_false();
 	let unlocked = users.is_locked(user_id).is_false();
-	let unblocked = users.invites_blocked(user_id).is_false();
+	let permitted = users
+		.invite_permission(sender, user_id)
+		.map(|permission| permission.eq(&InvitePermission::Allow));
 
-	and5(invited, active, unsuspended, unlocked, unblocked).await
+	and5(invited, active, unsuspended, unlocked, permitted).await
 }

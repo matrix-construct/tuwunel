@@ -9,6 +9,7 @@ use ruma::{
 	},
 	events::{
 		AnyStateEventContent, StateEventType,
+		invite_permission_config::InvitePermission,
 		room::{
 			canonical_alias::RoomCanonicalAliasEventContent,
 			history_visibility::{HistoryVisibility, RoomHistoryVisibilityEventContent},
@@ -492,9 +493,13 @@ async fn validate_member(
 
 	if membership_content.membership == MembershipState::Invite
 		&& services.globals.user_is_local(&target_user)
-		&& services.users.invites_blocked(&target_user).await
+		&& services
+			.users
+			.invite_permission(sender, &target_user)
+			.await
+			.eq(&InvitePermission::Block)
 	{
-		return Err!(Request(InviteBlocked("{target_user} has blocked invites.")));
+		return Err!(Request(InviteBlocked("{target_user} has blocked this invite.")));
 	}
 
 	let Some(authorising_user) = membership_content.join_authorized_via_users_server else {
