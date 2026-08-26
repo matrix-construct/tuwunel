@@ -7,18 +7,13 @@ use crate::admin_command;
 pub(super) async fn alias_remove(&self, room_alias_localpart: String) -> Result {
 	let room_alias = parse_alias_from_localpart(self.services, &room_alias_localpart)?;
 
-	let id = self
+	// remove_alias fails only when the alias is absent or its value is invalid.
+	let room_id = self
 		.services
-		.alias
-		.resolve_local_alias(&room_alias)
-		.await
-		.map_err(|_| err!("Alias isn't in use."))?;
-
-	self.services
 		.alias
 		.remove_alias(&room_alias)
 		.await
-		.map_err(|err| err!("Failed to remove alias: {err}"))?;
+		.map_err(|_| err!("Alias isn't in use."))?;
 
-	write!(self, "Removed alias from {id}").await
+	write!(self, "Removed alias from {room_id}").await
 }
