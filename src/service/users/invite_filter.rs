@@ -133,6 +133,24 @@ pub async fn invite_permission(&self, sender: &UserId, recipient: &UserId) -> In
 		.permission(sender)
 }
 
+/// Whether an invite from `sender` may be served to its recipient.
+///
+/// A `sender` of `None` means the stored invite state named no sender, which is
+/// a defect in what this server wrote rather than anything the recipient asked
+/// for, so every rule needing a sender falls open and the invite is served.
+/// The blanket block is decided without one and still applies, since the
+/// invite-permission module makes withholding those from sync a MUST.
+#[implement(InviteFilter)]
+#[must_use]
+pub fn permits(&self, sender: Option<&UserId>) -> bool {
+	match sender {
+		| None => !self.blocks_all(),
+		| Some(sender) => self
+			.permission(sender)
+			.eq(&InvitePermission::Allow),
+	}
+}
+
 /// The recipient's verdict on an invite from `sender`.
 ///
 /// A blanket block outranks everything, since the invite-permission module
@@ -247,6 +265,37 @@ mod tests {
 		let ignored_only = filter(Some(ignored), None, None);
 
 		assert_eq!(ignored_only.permission(sender), InvitePermission::Ignore);
+	}
+
+	#[test]
+	fn senderless_invite_is_served() {
+		let sender = user_id!("@alice:example.org");
+		let blocked = filter(None, None, Some(json!({"blocked_servers": ["*"]})));
+
+		assert!(!blocked.is_permissive());
+		assert_eq!(blocked.permission(sender), InvitePermission::Block);
+		assert!(blocked.permits(None));
+		assert!(!blocked.permits(Some(sender)));
+
+		let ignored = json!({"ignored_users": {"@alice:example.org": {}}});
+		let ignoring = filter(Some(ignored), None, None);
+
+		assert!(ignoring.permits(None));
+		assert!(!ignoring.permits(Some(sender)));
+
+		let blanket = blanket_filter(true);
+
+		assert!(!blanket.permits(None));
+		assert!(!blanket.permits(Some(sender)));
+	}
+
+	#[test]
+	fn permissive_filter_permits_every_sender() {
+		let permissive = filter(None, None, Some(json!({})));
+
+		assert!(permissive.is_permissive());
+		assert!(permissive.permits(None));
+		assert!(permissive.permits(Some(user_id!("@alice:example.org"))));
 	}
 
 	#[test]

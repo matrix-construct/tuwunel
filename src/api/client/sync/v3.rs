@@ -398,8 +398,8 @@ async fn build_sync_events(
 	state_after: StateAfter,
 	filter: &FilterDefinition,
 ) -> Result<sync_events::v3::Response> {
-	// MSC4155: a stored invite the recipient ignores or blocks is withheld
-	// here, and relaxing the configuration re-exposes it.
+	// MSC4155: a stored invite whose sender the recipient ignores or blocks is
+	// withheld here, and relaxing the configuration re-exposes it.
 	let invite_filter = services.users.invite_filter(sender_user).await;
 
 	let joined_rooms = collect_joined_rooms(
@@ -618,8 +618,8 @@ async fn collect_invited_rooms<'a>(
 		.state_cache
 		.rooms_invited_state(sender_user)
 		.ready_filter(|(room_id, _)| filter.room.matches(room_id))
-		.ready_filter(|(_, invite_state)| {
-			invite_permitted(sender_user, invite_filter, invite_state)
+		.ready_filter(|(room_id, invite_state)| {
+			invite_permitted(sender_user, room_id, invite_filter, invite_state)
 		})
 		.fold_default(async |mut invited_rooms: BTreeMap<_, _>, (room_id, invite_state)| {
 			let invite_count = services

@@ -36,8 +36,8 @@ pub(super) async fn selector(
 
 	let SyncInfo { services, sender_user, .. } = sync_info;
 
-	// MSC4155: a stored invite the recipient ignores or blocks is kept out of
-	// the window, and relaxing the configuration re-exposes it.
+	// MSC4155: a stored invite whose sender the recipient ignores or blocks is
+	// kept out of the window, and relaxing the configuration re-exposes it.
 	let invite_filter = services.users.invite_filter(sender_user).await;
 
 	let memberships = services
@@ -54,7 +54,7 @@ pub(super) async fn selector(
 		| false => memberships
 			.broad_filter_map(async |(room_id, membership)| {
 				let permitted = !matches!(membership, Invite)
-					|| invite_permitted_room(services, sender_user, &invite_filter, &room_id)
+					|| invite_permitted_room(services, sender_user, &room_id, &invite_filter)
 						.await;
 
 				permitted.then_some((room_id, Some(membership)))
@@ -403,7 +403,7 @@ where
 			// MSC4155: a subscription the window never admitted has no verdict
 			// yet, so an ignored or blocked invite is judged here instead.
 			if matches!(membership, Some(MembershipState::Invite))
-				&& !invite_permitted_room(services, sender_user, invite_filter, room_id).await
+				&& !invite_permitted_room(services, sender_user, room_id, invite_filter).await
 			{
 				return None;
 			}

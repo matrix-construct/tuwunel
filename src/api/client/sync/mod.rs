@@ -6,14 +6,11 @@ mod v5;
 use futures::{StreamExt, pin_mut};
 use ruma::{
 	OwnedUserId, RoomId, UserId,
-	events::{
-		AnyStrippedStateEvent, TimelineEventType::RoomMember,
-		invite_permission_config::InvitePermission,
-	},
+	events::{AnyStrippedStateEvent, TimelineEventType::RoomMember},
 	serde::Raw,
 };
 use tuwunel_core::{
-	Error, PduCount, Result, is_equal_to,
+	Error, PduCount, Result, debug_warn, is_equal_to,
 	matrix::{Event, pdu::PduEvent},
 	utils::{ReadyExt, result::LogErr, stream::BroadbandExt},
 };
@@ -147,37 +144,53 @@ async fn share_encrypted_room(
 /// MSC4155: whether a stored invite may be served to the invitee.
 ///
 /// The verdict is the recipient's own, judged against the sender of the
-/// stripped invite membership event. An invite whose sender cannot be derived
-/// is withheld from a filtering user rather than shown to them.
+/// stripped invite membership event. Unreadable invite state takes the same
+/// verdict as the sender-less case below, since neither can name a sender.
 async fn invite_permitted_room(
 	services: &Services,
 	user_id: &UserId,
-	filter: &InviteFilter,
 	room_id: &RoomId,
+	filter: &InviteFilter,
 ) -> bool {
 	filter.is_permissive()
 		|| services
 			.state_cache
 			.invite_state(user_id, room_id)
 			.await
-			.is_ok_and(|invite_state| invite_permitted(user_id, filter, &invite_state))
+			.map_or_else(
+				|error| {
+					debug_warn!(%user_id, %room_id, ?error, "invite state is unreadable; skipping the sender rules");
+					filter.permits(None)
+				},
+				|invite_state| invite_permitted(user_id, room_id, filter, &invite_state),
+			)
 }
 
 /// [`invite_permitted_room`] for a room whose stripped state is in hand.
 ///
 /// Callers walking stored invites already hold the state and take this form,
-/// which spares them the load the room-keyed form pays per room.
+/// which spares them the load the room-keyed form pays per room. `room_id`
+/// names the affected row in the sender-less diagnostic and does not enter the
+/// verdict. That diagnostic stays at debug on a release build deliberately,
+/// since the condition repeats for every sync an affected user makes.
 fn invite_permitted(
 	user_id: &UserId,
+	room_id: &RoomId,
 	filter: &InviteFilter,
 	invite_state: &[Raw<AnyStrippedStateEvent>],
 ) -> bool {
-	filter.is_permissive()
-		|| invite_sender(user_id, invite_state).is_some_and(|sender| {
-			filter
-				.permission(&sender)
-				.eq(&InvitePermission::Allow)
-		})
+	// Load-bearing: keeps a permissive user off the sender derivation below.
+	if filter.is_permissive() {
+		return true;
+	}
+
+	let sender = invite_sender(user_id, invite_state);
+
+	if sender.is_none() {
+		debug_warn!(%user_id, %room_id, "invite state names no sender; skipping the sender rules");
+	}
+
+	filter.permits(sender.as_deref())
 }
 
 /// The sender of the stripped membership event inviting `user_id`.
