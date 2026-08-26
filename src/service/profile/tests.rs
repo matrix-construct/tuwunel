@@ -3,10 +3,14 @@ use serde_json::json;
 use tuwunel_core::{Error, http::StatusCode};
 use tuwunel_database::{deserialize_from_slice, serialize_to_vec};
 
-use super::{MAX_STATUS_EMOJI_LENGTH, MAX_STATUS_TEXT_LENGTH, check_profile_value};
+use super::{
+	MAX_STATUS_EMOJI_LENGTH, MAX_STATUS_TEXT_LENGTH, MAX_TIMEZONE_LENGTH, check_profile_value,
+};
 
 const STATUS: &str = "org.matrix.msc4426.status";
 const CALL: &str = "org.matrix.msc4426.call";
+const TZ: &str = "m.tz";
+const TZ_UNSTABLE: &str = "us.cloke.msc4175.tz";
 
 // Four bytes, so the emoji budget divides evenly into repeats of it.
 const PALM: &str = "🌴";
@@ -73,9 +77,63 @@ fn call_join_timestamp_must_be_a_number() {
 
 #[test]
 fn unrecognized_field_carries_any_json() {
-	check_profile_value("m.tz", &json!("Europe/Paris")).unwrap();
 	check_profile_value("com.example.thing", &json!({ "any": [1, 2] })).unwrap();
 }
+
+#[test]
+fn timezone_accepts_a_database_name() {
+	check_profile_value(TZ, &json!("Europe/Paris")).unwrap();
+	check_profile_value(TZ, &json!("UTC")).unwrap();
+	check_profile_value(TZ, &json!("America/Argentina/Buenos_Aires")).unwrap();
+	check_profile_value(TZ, &json!("Etc/GMT+12")).unwrap();
+}
+
+// Element Web publishes to the stable and unstable names on every update, so
+// validating one without the other leaves a bypass.
+#[test]
+fn timezone_unstable_name_is_validated_too() {
+	check_profile_value(TZ_UNSTABLE, &json!("Europe/Paris")).unwrap();
+
+	assert_invalid_param(&check_profile_value(TZ_UNSTABLE, &json!("+05:30")).unwrap_err());
+}
+
+// The proposal's rejected alternative, which a client may still send.
+#[test]
+fn timezone_offset_is_rejected() {
+	assert_invalid_param(&check_profile_value(TZ, &json!("+05:30")).unwrap_err());
+	assert_invalid_param(&check_profile_value(TZ, &json!("0530")).unwrap_err());
+}
+
+// A Windows registry time zone id, which a client reading the platform's own
+// identifier rather than an IANA one would send.
+#[test]
+fn timezone_display_name_is_rejected() {
+	assert_invalid_param(&check_profile_value(TZ, &json!("Eastern Standard Time")).unwrap_err());
+}
+
+#[test]
+fn timezone_malformed_path_is_rejected() {
+	assert_invalid_param(&check_profile_value(TZ, &json!("")).unwrap_err());
+	assert_invalid_param(&check_profile_value(TZ, &json!("America//New_York")).unwrap_err());
+	assert_invalid_param(&check_profile_value(TZ, &json!("a/b/c/d")).unwrap_err());
+}
+
+#[test]
+fn timezone_past_its_budget_is_rejected() {
+	let name = "A".repeat(MAX_TIMEZONE_LENGTH + 1);
+
+	assert_invalid_param(&check_profile_value(TZ, &json!(name)).unwrap_err());
+}
+
+// Both entry points type the stable name through ruma, which refuses a
+// non-string first; only the unstable name reaches the check as raw JSON.
+#[test]
+fn timezone_as_a_non_string_is_rejected() {
+	assert_invalid_param(&check_profile_value(TZ_UNSTABLE, &json!(3600)).unwrap_err());
+}
+
+#[test]
+fn timezone_null_clears_the_field() { check_profile_value(TZ, &json!(null)).unwrap(); }
 
 // Both readers decode the log's key and value back, and the codec checks for
 // undecoded trailing bytes only in debug builds, so a drift in either shape
@@ -115,4 +173,9 @@ fn too_large(error: &Error) -> bool {
 
 fn assert_bad_json(error: &Error) {
 	assert_eq!(error.kind(), ErrorKind::BadJson);
+}
+
+fn assert_invalid_param(error: &Error) {
+	assert_eq!(error.kind(), ErrorKind::InvalidParam);
+	assert_eq!(error.status_code(), StatusCode::BAD_REQUEST);
 }

@@ -660,6 +660,7 @@ fn check_profile_value(name: &str, value: &Value) -> Result {
 	match name {
 		| "m.status" | "org.matrix.msc4426.status" => check_status(value),
 		| "m.call" | "org.matrix.msc4426.call" => check_call(value),
+		| "m.tz" | "us.cloke.msc4175.tz" => check_timezone(value),
 		| _ => Ok(()),
 	}
 }
@@ -710,4 +711,69 @@ fn check_call(value: &Value) -> Result {
 		.is_none_or(Value::is_number)
 		.then_some(())
 		.ok_or_else(|| err!(Request(BadJson("Call join timestamp must be a number."))))
+}
+
+/// Maximum `m.tz` length, in bytes.
+///
+/// The longest name the database ships is 32 bytes, so this is headroom for
+/// later additions rather than a limit any real zone approaches.
+const MAX_TIMEZONE_LENGTH: usize = 64;
+
+/// Maximum number of `/`-separated components in an `m.tz` name.
+///
+/// The deepest names the database ships are three deep, in the
+/// `America/Argentina/Buenos_Aires` shape.
+const MAX_TIMEZONE_COMPONENTS: usize = 3;
+
+/// Validate an MSC4175 time zone against the shape of an IANA Time Zone
+/// Database name.
+///
+/// Membership in a bundled copy of the database is deliberately not tested:
+/// the proposal's rationale for a loose check is that clients and servers
+/// carry different database versions, so a browser one release ahead of ours
+/// would have a newly added zone rejected. Shape alone still refuses offsets,
+/// platform display names, and anything else that could never name a zone.
+fn check_timezone(value: &Value) -> Result {
+	let Some(name) = value.as_str() else {
+		return Err!(Request(InvalidParam("Time zone must be a string.")));
+	};
+
+	is_timezone_name(name)
+		.then_some(())
+		.ok_or_else(|| {
+			err!(Request(InvalidParam(
+				"Time zone must be a name from the IANA Time Zone Database."
+			)))
+		})
+}
+
+/// Test a string against the tzfile naming rules, narrowed to what every name
+/// the database ships actually uses.
+///
+/// A name is one to three `/`-separated components. Draining the remainder
+/// afterwards is what rejects a fourth, leaving the whole test one pass over
+/// the string.
+fn is_timezone_name(name: &str) -> bool {
+	let mut components = name.split('/');
+
+	name.len().le(&MAX_TIMEZONE_LENGTH)
+		&& components
+			.by_ref()
+			.take(MAX_TIMEZONE_COMPONENTS)
+			.all(is_timezone_component)
+		&& components.next().is_none()
+}
+
+/// Test one `/`-separated component of an `m.tz` name.
+///
+/// Components hold ASCII alphanumerics, `_`, `+`, and `-`. Each begins with a
+/// letter, which is what refuses a bare numeric offset.
+fn is_timezone_component(component: &str) -> bool {
+	component
+		.bytes()
+		.next()
+		.is_some_and(|byte| byte.is_ascii_alphabetic())
+		&& component
+			.bytes()
+			.all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'+' | b'-'))
 }
