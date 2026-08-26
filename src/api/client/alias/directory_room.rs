@@ -2,10 +2,11 @@ use axum::extract::State;
 use futures::StreamExt;
 use rand::seq::SliceRandom;
 use ruma::{
-	OwnedServerName, RoomAliasId, RoomId,
+	OwnedServerName, RoomAliasId, RoomId, UserId,
 	api::client::alias::{create_alias, delete_alias, get_alias},
+	events::{StateEventType, room::canonical_alias::RoomCanonicalAliasEventContent},
 };
-use tuwunel_core::{Err, Result, debug, err};
+use tuwunel_core::{Err, Result, debug, err, matrix::pdu::PduBuilder};
 use tuwunel_service::Services;
 
 use crate::Ruma;
@@ -53,7 +54,9 @@ pub(crate) async fn create_alias_route(
 ///
 /// Deletes a room alias from this server.
 ///
-/// - TODO: Update canonical alias event
+/// The deleted alias is also stripped from the room's canonical alias event on
+/// a best-effort basis. A sender without permission to send that state event
+/// still deletes the alias.
 pub(crate) async fn delete_alias_route(
 	State(services): State<crate::State>,
 	body: Ruma<delete_alias::v3::Request>,
@@ -64,12 +67,22 @@ pub(crate) async fn delete_alias_route(
 		.appservice_checks(&body.room_alias, &body.appservice_info)
 		.await?;
 
+	let room_id = services
+		.alias
+		.resolve_local_alias(&body.room_alias)
+		.await;
+
 	services
 		.alias
 		.remove_alias_by(&body.room_alias, sender_user)
 		.await?;
 
-	// TODO: update alt_aliases?
+	if let Ok(room_id) = room_id {
+		retire_canonical_alias(&services, &room_id, &body.room_alias, sender_user)
+			.await
+			.inspect_err(|e| debug!(%room_id, "Not updating canonical alias: {e}"))
+			.ok();
+	}
 
 	Ok(delete_alias::v3::Response::new())
 }
@@ -93,6 +106,51 @@ pub(crate) async fn get_alias_route(
 	debug!(?room_alias, ?room_id, "available servers: {servers:?}");
 
 	Ok(get_alias::v3::Response::new(room_id, servers))
+}
+
+/// Removes a deleted alias from the room's canonical alias state.
+///
+/// The directory entry is authoritative and has already been removed, so this
+/// runs on a best-effort basis. A sender lacking permission to send
+/// `m.room.canonical_alias` leaves the stale state event in place.
+async fn retire_canonical_alias(
+	services: &Services,
+	room_id: &RoomId,
+	deleted: &RoomAliasId,
+	sender_user: &UserId,
+) -> Result {
+	let state_lock = services.state.mutex.lock(room_id).await;
+
+	let Ok(content) = services
+		.state_accessor
+		.room_state_get_content::<RoomCanonicalAliasEventContent>(
+			room_id,
+			&StateEventType::RoomCanonicalAlias,
+			"",
+		)
+		.await
+	else {
+		return Ok(());
+	};
+
+	if !content.aliases().any(|alias| alias == deleted) {
+		return Ok(());
+	}
+
+	let content = RoomCanonicalAliasEventContent {
+		alias: content.alias.filter(|alias| alias != deleted),
+		alt_aliases: content
+			.alt_aliases
+			.into_iter()
+			.filter(|alt| alt != deleted)
+			.collect(),
+	};
+
+	services
+		.timeline
+		.build_and_append_pdu(PduBuilder::state("", &content), sender_user, room_id, &state_lock)
+		.await
+		.map(|_| ())
 }
 
 async fn room_available_servers(

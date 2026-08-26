@@ -629,11 +629,11 @@
 {"Action":"pass","Test":"TestRoomCreationReportsEventsToMyself/parallel/Room_creation_reports_m.room.member_to_myself"}
 {"Action":"pass","Test":"TestRoomCreationReportsEventsToMyself/parallel/Setting_room_topic_reports_m.room.topic_to_myself"}
 {"Action":"pass","Test":"TestRoomCreationReportsEventsToMyself/parallel/Setting_state_twice_is_idempotent"}
-{"Action":"fail","Test":"TestRoomDeleteAlias"}
-{"Action":"fail","Test":"TestRoomDeleteAlias/Parallel"}
+{"Action":"pass","Test":"TestRoomDeleteAlias"}
+{"Action":"pass","Test":"TestRoomDeleteAlias/Parallel"}
 {"Action":"pass","Test":"TestRoomDeleteAlias/Parallel/Alias_creators_can_delete_alias_with_no_ops"}
 {"Action":"pass","Test":"TestRoomDeleteAlias/Parallel/Alias_creators_can_delete_canonical_alias_with_no_ops"}
-{"Action":"fail","Test":"TestRoomDeleteAlias/Parallel/Can_delete_canonical_alias"}
+{"Action":"pass","Test":"TestRoomDeleteAlias/Parallel/Can_delete_canonical_alias"}
 {"Action":"pass","Test":"TestRoomDeleteAlias/Parallel/Deleting_a_non-existent_alias_should_return_a_404"}
 {"Action":"pass","Test":"TestRoomDeleteAlias/Parallel/Regular_users_can_add_and_delete_aliases_in_the_default_room_configuration"}
 {"Action":"pass","Test":"TestRoomDeleteAlias/Parallel/Regular_users_can_add_and_delete_aliases_when_m.room.aliases_is_restricted"}
