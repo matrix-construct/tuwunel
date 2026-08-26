@@ -4,15 +4,15 @@ Tuwunel runs the [Complement](https://github.com/matrix-org/complement) Matrix h
 
 ## Counts
 
-- Test groups: 214. Passing: **84.6%**
-  - ✅ `pass`: 181
-  - 🟨 `some`: 15
+- Test groups: 214. Passing: **85.0%**
+  - ✅ `pass`: 182
+  - 🟨 `some`: 14
   - ❌ `fail`: 18
   - ⬛ `skip`: 0
 
-- Subtests: 599. Passing: **79.0%**
-  - ✅ `pass`: 473
-  - ❌ `fail`: 118
+- Subtests: 599. Passing: **80.3%**
+  - ✅ `pass`: 481
+  - ❌ `fail`: 110
   - ⬛ `skip`: 8
 
 ## All Top-Level Tests
@@ -90,7 +90,7 @@ Tuwunel runs the [Complement](https://github.com/matrix-org/complement) Matrix h
 | ✅ | – | `InboundFederationKeys` |
 | ✅ | 2/0/0 | `InboundFederationProfile` |
 | ❌ | – | `InboundFederationRejectsEventsWithRejectedAuthEvents` |
-| 🟨 | 3/8/0 | `InviteFiltering` |
+| ✅ | 11/0/0 | `InviteFiltering` |
 | ✅ | – | `InviteFromIgnoredUsersDoesNotAppearInSync` |
 | ✅ | – | `IsDirectFlagFederation` |
 | ✅ | – | `IsDirectFlagLocal` |
