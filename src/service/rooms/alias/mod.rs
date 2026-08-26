@@ -78,7 +78,15 @@ impl Service {
 		Ok(())
 	}
 
-	pub async fn remove_alias_by(&self, alias: &RoomAliasId, user_id: &UserId) -> Result {
+	/// Removes a local alias on a user's behalf and returns its room.
+	///
+	/// The user must be the alias creator, a server admin, or otherwise
+	/// permitted to change the room's canonical alias.
+	pub async fn remove_alias_by(
+		&self,
+		alias: &RoomAliasId,
+		user_id: &UserId,
+	) -> Result<OwnedRoomId> {
 		if !self.user_can_remove_alias(alias, user_id).await? {
 			return Err!(Request(Forbidden("User is not permitted to remove this alias.")));
 		}
@@ -86,14 +94,26 @@ impl Service {
 		self.remove_alias(alias).await
 	}
 
+	/// Removes a local alias from the directory and returns its room.
+	///
+	/// The returned id names the room the removed mapping pointed at, which a
+	/// caller cannot recover afterwards because the alias no longer resolves.
+	/// It comes back whether or not the alias was that room's canonical one.
 	#[tracing::instrument(skip(self))]
-	pub async fn remove_alias(&self, alias: &RoomAliasId) -> Result {
+	pub async fn remove_alias(&self, alias: &RoomAliasId) -> Result<OwnedRoomId> {
 		let alias = alias.alias();
-		let Ok(room_id) = self.db.alias_roomid.get(&alias).await else {
+		let Ok(room_id) = self
+			.db
+			.alias_roomid
+			.get(&alias)
+			.await
+			.deserialized()
+		else {
 			return Err!(Request(NotFound("Alias does not exist or is invalid.")));
 		};
 
 		let prefix = (&room_id, Interfix);
+
 		self.db
 			.aliasid_alias
 			.keys_prefix_raw(&prefix)
@@ -104,7 +124,7 @@ impl Service {
 		self.db.alias_roomid.remove(alias.as_bytes());
 		self.db.alias_userid.remove(alias.as_bytes());
 
-		Ok(())
+		Ok(room_id)
 	}
 
 	#[inline]

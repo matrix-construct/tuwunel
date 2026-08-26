@@ -69,20 +69,13 @@ pub(crate) async fn delete_alias_route(
 
 	let room_id = services
 		.alias
-		.resolve_local_alias(&body.room_alias)
-		.await;
-
-	services
-		.alias
 		.remove_alias_by(&body.room_alias, sender_user)
 		.await?;
 
-	if let Ok(room_id) = room_id {
-		retire_canonical_alias(&services, &room_id, &body.room_alias, sender_user)
-			.await
-			.inspect_err(|e| debug!(%room_id, "Not updating canonical alias: {e}"))
-			.ok();
-	}
+	retire_canonical_alias(&services, &room_id, &body.room_alias, sender_user)
+		.await
+		.inspect_err(|e| debug!(%room_id, "Not updating canonical alias: {e}"))
+		.ok();
 
 	Ok(delete_alias::v3::Response::new())
 }
