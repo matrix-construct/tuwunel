@@ -7,3 +7,16 @@ Volume=/path/to/db:/var/lib/tuwunel
 
 [Service]
 Restart=always
+
+# The first boot after an upgrade can run a database migration that must not be
+# interrupted, and podman's own stop timeout governs rather than the unit's.
+StopTimeout=1800
+
+# The published image is OCI format, which carries no healthcheck field, so the
+# image's HEALTHCHECK is invisible to podman. The exec form is required: a bare
+# string runs through a shell, and the image has none.
+HealthCmd=["/usr/bin/tuwunel", "--health-check"]
+HealthInterval=30s
+HealthTimeout=15s
+HealthStartPeriod=60s
+HealthRetries=3

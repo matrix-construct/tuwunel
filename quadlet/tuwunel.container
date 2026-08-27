@@ -13,6 +13,22 @@ Volume=tuwunel-db:/var/lib/tuwunel/
 Volume=%h/tuwunel/config/tuwunel.toml:/etc/tuwunel.toml
 EnvironmentFile=tuwunel.env
 
+# Podman's own stop timeout governs a stopped container, not the TimeoutStopSec
+# the generator writes into the unit. The first boot after an upgrade can run a
+# database migration that must not be interrupted partway, so allow well past
+# the longest one instead of the ten second default.
+StopTimeout=1800
+
+# The published image is OCI format, and the OCI image spec carries no
+# healthcheck field, so the image's own HEALTHCHECK is invisible to Podman.
+# Declaring it here restores the same probe Docker users get. The exec form is
+# required: a bare string runs through a shell, and the image has none.
+HealthCmd=["/usr/bin/tuwunel", "--health-check"]
+HealthInterval=30s
+HealthTimeout=15s
+HealthStartPeriod=60s
+HealthRetries=3
+
 [Service]
 # Uncomment when your system is properly configured, restart=always can mask start up errors. 
 #Restart=always
