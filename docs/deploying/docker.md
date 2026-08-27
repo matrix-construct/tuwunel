@@ -99,6 +99,18 @@ and the steps that already finished are recorded, so the remainder run on the
 next start. That only helps if the runtime waits long enough for the current
 step to end, which is what the settings above buy.
 
+While a migration runs the server logs a line every fifteen seconds naming the
+step, how far into it the server is, and how long it has been going, so
+`docker logs -f` shows work in progress rather than silence:
+
+```
+Database migration in progress progress=fix_short_injectivity: event short ids / reverse rows, 1204833 done, 12.55 minutes
+```
+
+A step reports a position without a total when it cannot count its remaining
+work without a second pass over the data. A position that keeps climbing is the
+signal that the migration is progressing.
+
 ### Docker-compose
 
 If the `docker run` command is not for you or your setup, you can also use one

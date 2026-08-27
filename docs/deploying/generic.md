@@ -131,6 +131,24 @@ letting systemd open the listening socket instead. That is what allows the
 server to answer on a privileged port such as 443 or 8448 while holding no
 capability of its own. See [systemd socket activation](socket-activation.md).
 
+The first boot after an upgrade can run a one-time database migration, and the
+listener does not open until it finishes. While one is running the unit stays
+in `activating` and its status line names the step, how far into it the server
+is, and how long it has been going, so `systemctl status tuwunel` answers
+whether anything is happening:
+
+```
+     Active: activating (start) since Thu 2026-08-27 14:10:47 UTC; 12min ago
+     Status: "retroactively_fix_bad_data_from_roomuserid_joined, 412 of 3100, 6.20 minutes"
+```
+
+The same line goes to the journal every fifteen seconds. A step reports a
+position without a total when it cannot count its remaining work without a
+second pass over the data; a position that keeps climbing is the signal that
+the migration is progressing. Do not kill the server to interrupt one. A stop
+request is honored between steps and the steps that finished are recorded, so
+the migration resumes on the next start.
+
 If you are using a different `database_path` other than the systemd unit
 configured default `/var/lib/tuwunel`, you need to add your path to the
 systemd unit's `ReadWritePaths=`. This can be done by either directly editing
