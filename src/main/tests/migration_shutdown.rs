@@ -25,10 +25,8 @@ fn migration_cancelled_by_shutdown() -> Result {
 
 	create_dir_all(&db)?;
 
-	let mut args = Args::default_test(&["smoke", "fresh", "cleanup"]);
-
-	args.option
-		.push(format!("database_path=\"{}\"", db.display()));
+	let args = Args::default_test(&["smoke", "fresh", "cleanup"])
+		.with_option(format!("database_path=\"{}\"", db.display()));
 
 	let runtime = Runtime::new(Some(&args))?;
 	let server = Server::new(Some(&args), Some(&runtime))?;

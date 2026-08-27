@@ -6,7 +6,7 @@ use clap::{ArgAction, Parser};
 use tuwunel_core::{
 	Err, Result,
 	config::{Figment, FigmentValue},
-	err, is_true, toml,
+	err, implement, is_true, toml,
 	utils::available_parallelism,
 };
 
@@ -298,19 +298,41 @@ pub struct Args {
 	pub gc_muzzy: Option<bool>,
 }
 
-impl Args {
-	#[must_use]
-	pub fn default_test(name: &[&str]) -> Self {
-		let mut args = Self::default();
+/// Returns arguments for a test, naming the harnesses it opts into.
+///
+/// The server name is preset to `localhost`. A test wanting another appends its
+/// own override, which wins, since the later value of a key takes precedence.
+#[implement(Args)]
+#[must_use]
+pub fn default_test(name: &[&str]) -> Self {
+	Self::default()
+		.with_tests(name)
+		.with_option("server_name=\"localhost\"")
+}
 
-		args.test
-			.extend(name.iter().copied().map(ToOwned::to_owned));
+/// Returns these arguments with more test harnesses appended.
+///
+/// Appends rather than replaces, because the arguments a process was launched
+/// with may already name one.
+#[implement(Args)]
+#[must_use]
+fn with_tests(mut self, names: &[&str]) -> Self {
+	self.test
+		.extend(names.iter().copied().map(ToOwned::to_owned));
 
-		args.option
-			.push("server_name=\"localhost\"".into());
+	self
+}
 
-		args
-	}
+/// Returns these arguments with one more configuration override appended.
+///
+/// The override takes the TOML `key=value` syntax `-O` takes on the command
+/// line.
+#[implement(Args)]
+#[must_use]
+pub fn with_option<S: Into<String>>(mut self, option: S) -> Self {
+	self.option.push(option.into());
+
+	self
 }
 
 impl Default for Args {
