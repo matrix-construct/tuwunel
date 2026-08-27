@@ -1142,7 +1142,7 @@ target "docker" {
         COPY --from=input . .
         EXPOSE 8008 8448
         ENTRYPOINT ["tuwunel"]
-        HEALTHCHECK --interval=30s --timeout=15s --start-period=60s CMD ["tuwunel", "--health-check"]
+        HEALTHCHECK --interval=30s --timeout=15s --start-period=1800s CMD ["tuwunel", "--health-check"]
 EOF
 }
 

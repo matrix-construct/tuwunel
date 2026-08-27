@@ -26,7 +26,12 @@ StopTimeout=1800
 HealthCmd=["/usr/bin/tuwunel", "--health-check"]
 HealthInterval=30s
 HealthTimeout=15s
-HealthStartPeriod=60s
+
+# The probe answers whether the server is serving, and a migrating one is not,
+# so the start period is what keeps a long first boot reported as starting
+# rather than unhealthy. An unhealthy container invites the restart that kills
+# a migration mid-write.
+HealthStartPeriod=1800s
 HealthRetries=3
 
 [Service]
