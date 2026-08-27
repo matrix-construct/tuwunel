@@ -24,6 +24,10 @@ services:
         ### then you are ready to go.
         image: jevolk/tuwunel:latest
         restart: unless-stopped
+        # The first boot after an upgrade can run a database migration that must not be
+        # interrupted. Compose stops with a 10 second grace by default, which is far too
+        # short; this waits instead of killing the server part way through.
+        stop_grace_period: 30m
         volumes:
             - db:/var/lib/tuwunel
             #- ./tuwunel.toml:/etc/tuwunel.toml

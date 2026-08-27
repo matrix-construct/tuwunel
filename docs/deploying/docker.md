@@ -33,8 +33,13 @@ docker run -d -p 8448:8008 \
     -v db:/var/lib/tuwunel/ \
     -e TUWUNEL_SERVER_NAME="your.server.name" \
     -e TUWUNEL_ALLOW_REGISTRATION=false \
+    --stop-timeout 1800 \
     --name tuwunel $LINK
 ```
+
+The `--stop-timeout` is what lets an upgrade finish its database migration
+instead of being killed part way through; see [Stopping during a
+migration](#stopping-during-a-migration).
 
 or you can use [docker compose](#docker-compose).
 
@@ -61,6 +66,38 @@ command-line arguments override the health check accordingly. The probe
 targets the configured listeners, so sockets passed in by a process manager
 (systemd socket activation) are not covered. The same flag also works outside
 containers, e.g. as a Kubernetes exec probe.
+
+### Stopping during a migration
+
+The first boot after an upgrade can run a one-time database migration, and the
+listener does not open until it finishes. On a large database that can take many
+minutes.
+
+**A container runtime will not wait that long by default.** `docker stop` and
+`podman stop` send `SIGTERM`, then `SIGKILL` ten seconds later; Kubernetes
+allows thirty. A kill part way through a migration leaves the database half
+migrated, and no admin command repairs that. Raise the grace period so the
+server is allowed to reach a safe point:
+
+| Runtime | Setting | Default |
+|---|---|---|
+| `docker run` | `--stop-timeout 1800` | 10s |
+| Compose | `stop_grace_period: 30m` | 10s |
+| Podman quadlet | `StopTimeout=1800` in `[Container]` | 10s |
+| Kubernetes | `terminationGracePeriodSeconds: 1800` | 30s |
+
+There is no way to carry this in the image, so it has to be set where the
+container is run. The compose files shipped in this directory already set it,
+and so does the quadlet unit.
+
+Under a quadlet, note that the `TimeoutStopSec` the generator writes into the
+unit is not what governs; podman's own stop timeout is, and it is what
+`StopTimeout=` sets.
+
+Tuwunel leaves the migration at the next safe point when it is asked to stop,
+and the steps that already finished are recorded, so the remainder run on the
+next start. That only helps if the runtime waits long enough for the current
+step to end, which is what the settings above buy.
 
 ### Docker-compose
 
