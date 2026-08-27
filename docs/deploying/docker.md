@@ -111,6 +111,29 @@ A step reports a position without a total when it cannot count its remaining
 work without a second pass over the data. A position that keeps climbing is the
 signal that the migration is progressing.
 
+### Health during a migration
+
+The health probe answers whether the server is serving, and a migrating one is
+not, so it fails until the listener opens. That is why the image sets a health
+start period of thirty minutes: a container inside its start period reports
+`starting` rather than `unhealthy`, and failures there do not count against the
+retry budget.
+
+```
+Up 12 minutes (health: starting)
+```
+
+An `unhealthy` container is what invites the `docker restart` that kills a
+migration mid-write, so the wide window exists to keep that reading off the
+screen while the server is doing exactly what it should. A container that
+reports healthy once leaves the start period behind, and a migration that
+fails ends the process rather than lingering unhealthy.
+
+Nothing waiting on health is misled by this. A Compose service gated on
+`depends_on: condition: service_healthy` waits through `starting` and runs only
+once the listener answers, which is the behaviour you want and the reason the
+probe is not simply made to report healthy while migrating.
+
 ### Docker-compose
 
 If the `docker run` command is not for you or your setup, you can also use one
