@@ -81,6 +81,8 @@ pub(crate) async fn run(services: Arc<Services>) -> Result {
 pub(crate) async fn start(server: Arc<Server>) -> Result<Arc<Services>> {
 	debug!("Starting...");
 
+	// The keepalive holds the stop timeout open too, so aborting it any earlier
+	// lets a stop request kill a migration mid-write.
 	#[cfg(all(feature = "systemd", target_os = "linux"))]
 	let keepalive = server.runtime().spawn(extend_systemd_startup());
 

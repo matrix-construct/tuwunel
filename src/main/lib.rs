@@ -12,7 +12,10 @@ pub mod signals;
 use std::sync::Arc;
 
 use log as _;
-use tuwunel_core::{Result, debug_info, error, mod_ctor, mod_dtor, rustc_flags_capture};
+use tuwunel_core::{
+	Error, Result, Server as CoreServer, debug_info, defer, error, info, mod_ctor, mod_dtor,
+	rustc_flags_capture,
+};
 use tuwunel_service::Services;
 
 pub use self::{args::Args, runtime::Runtime, server::Server};
@@ -45,7 +48,24 @@ pub async fn async_exec(server: &Arc<Server>) -> Result {
 		.runtime()
 		.spawn(signals::enable(server.clone()));
 
-	async_start(server).await?;
+	let abort = signals.abort_handle();
+	defer! {{
+		abort.abort();
+	}}
+
+	let started = async_start(server).await;
+
+	// Services were never inserted, so run and stop have nothing to operate on,
+	// and the listener must not open on a half-migrated database.
+	if let Err(error) = &started
+		&& cancelled_by_shutdown(&server.server, error)
+	{
+		signals.await?;
+
+		return Ok(());
+	}
+
+	started?;
 	async_run(server).await?;
 	async_stop(server).await?;
 	signals.await?;
@@ -54,6 +74,20 @@ pub async fn async_exec(server: &Arc<Server>) -> Result {
 	Ok(())
 }
 
+/// Whether a failed startup is a stop request being honored rather than a
+/// fault.
+///
+/// A cancelled startup exits zero, while a fault does not, and restart policies
+/// keyed on failure act on the difference.
+fn cancelled_by_shutdown(server: &CoreServer, error: &Error) -> bool {
+	error.is_interrupted() && server.is_stopping()
+}
+
+/// Builds the services and runs every startup phase, inserting them on success.
+///
+/// The interrupted error a shutdown produces is passed through unchanged rather
+/// than reported as a fault, so the caller can tell the two apart. Services are
+/// inserted only on success, so a failed start leaves the slot empty.
 #[cfg(any(not(tuwunel_mods), not(feature = "tuwunel_mods")))]
 pub async fn async_start(server: &Arc<Server>) -> Result<Arc<Services>> {
 	extern crate tuwunel_router as router;
@@ -67,7 +101,12 @@ pub async fn async_start(server: &Arc<Server>) -> Result<Arc<Services>> {
 			.clone(),
 
 		| Err(error) => {
-			error!("Critical error starting server: {error}");
+			if cancelled_by_shutdown(&server.server, &error) {
+				info!("Stop requested during startup; exiting before the server began serving.");
+			} else {
+				error!("Critical error starting server: {error}");
+			}
+
 			return Err(error);
 		},
 	})

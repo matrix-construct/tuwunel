@@ -15,6 +15,7 @@ use std::{
 	any::Any,
 	borrow::Cow,
 	convert::Infallible,
+	io::ErrorKind as IoErrorKind,
 	sync::{Mutex, PoisonError},
 };
 
@@ -622,6 +623,19 @@ impl Error {
 	/// nested `Option`.
 	#[inline]
 	pub fn is_not_found(&self) -> bool { self.status_code() == http::StatusCode::NOT_FOUND }
+
+	/// Tests whether this error reports an interrupted operation.
+	///
+	/// [`Server::check_running`] produces this shape once shutdown begins, so a
+	/// caller can tell work abandoned at a cancellation point from work that
+	/// genuinely failed. It matches the I/O variant only, so a layer that
+	/// rewraps the error into another variant hides the cancellation.
+	///
+	/// [`Server::check_running`]: crate::Server::check_running
+	#[inline]
+	pub fn is_interrupted(&self) -> bool {
+		matches!(self, Self::Io(error) if error.kind() == IoErrorKind::Interrupted)
+	}
 }
 
 impl std::fmt::Debug for Error {

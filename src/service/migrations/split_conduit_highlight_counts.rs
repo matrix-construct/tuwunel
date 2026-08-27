@@ -11,6 +11,8 @@ use crate::Services;
 /// unless a room-keyed row is present, so it is a cheap no-op on a native
 /// database.
 pub(super) async fn split_conduit_highlight_counts(services: &Services) -> Result {
+	services.server.check_running()?;
+
 	let db = &services.db;
 
 	if db["global"]

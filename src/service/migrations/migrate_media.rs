@@ -11,6 +11,8 @@ use crate::{
 ///
 /// Otherwise runs the key-addressed media migrations.
 pub(super) async fn migrate_media(services: &Services) -> Result {
+	services.server.check_running()?;
+
 	let db = &services.db;
 	let config = &services.server.config;
 

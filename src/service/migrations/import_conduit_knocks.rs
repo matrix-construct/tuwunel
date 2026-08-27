@@ -10,6 +10,8 @@ use crate::Services;
 /// only the first time; a re-import would resurrect a knock the user later
 /// resolved.
 pub(super) async fn import_conduit_knocks(services: &Services) -> Result {
+	services.server.check_running()?;
+
 	let db = &services.db;
 
 	let pending = db["global"]

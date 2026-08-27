@@ -100,6 +100,9 @@ pub(crate) async fn migrations(services: &Services) -> Result {
 		return Ok(());
 	}
 
+	// A stop before any step ran leaves nothing to resume from.
+	services.server.check_running()?;
+
 	let users_count = services.users.count().await;
 	if users_count == 0 {
 		return fresh(services).await;
@@ -112,11 +115,22 @@ pub(crate) async fn migrations(services: &Services) -> Result {
 	check_database_version(services, foreign_lineage).await?;
 	check_server_name(services).await?;
 
+	services.server.check_running()?;
+
 	// Repairs residue rather than the schema, so it sits behind the gates
 	// that can still refuse this database.
 	fix_injectivity(services).await?;
 
-	migrate(services, foreign_lineage).await
+	migrate(services, foreign_lineage)
+		.await
+		.inspect_err(|error| {
+			if error.is_interrupted() {
+				warn!(
+					"Stopped during database migrations. The steps that completed are recorded; \
+					 the rest run on the next start."
+				);
+			}
+		})
 }
 
 /// Whether the database comes from a foreign (non-tuwunel) lineage: it predates
@@ -241,9 +255,10 @@ async fn fresh(services: &Services) -> Result {
 }
 
 /// Apply any migrations
-#[expect(clippy::too_many_lines)]
 async fn migrate(services: &Services, foreign_lineage: bool) -> Result {
 	let db = &services.db;
+
+	services.server.check_running()?;
 
 	let target_version = DATABASE_VERSION;
 	let discovered = services.globals.db.database_version().await;
@@ -263,11 +278,7 @@ async fn migrate(services: &Services, foreign_lineage: bool) -> Result {
 
 	migrate_media(services).await?;
 
-	if db["global"]
-		.get(b"fix_pdu_missing_room_id")
-		.await
-		.is_not_found()
-	{
+	if pending(services, b"fix_pdu_missing_room_id").await? {
 		conduit::migrate_conduit_pdus(services).await?;
 		db["global"].insert(b"fix_pdu_missing_room_id", []);
 	}
@@ -285,75 +296,39 @@ async fn migrate(services: &Services, foreign_lineage: bool) -> Result {
 		db["global"].insert(b"retroactively_fix_bad_data_from_roomuserid_joined", []);
 	}
 
-	if db["global"]
-		.get(b"fix_bad_double_separator_in_state_cache")
-		.await
-		.is_not_found()
-	{
+	if pending(services, b"fix_bad_double_separator_in_state_cache").await? {
 		fix_bad_double_separator_in_state_cache(services).await?;
 	}
 
-	if db["global"]
-		.get(b"retroactively_fix_bad_data_from_roomuserid_joined")
-		.await
-		.is_not_found()
-	{
+	if pending(services, b"retroactively_fix_bad_data_from_roomuserid_joined").await? {
 		retroactively_fix_bad_data_from_roomuserid_joined(services).await?;
 	}
 
-	if db["global"]
-		.get(b"fix_referencedevents_missing_sep")
-		.await
-		.is_not_found()
-	{
+	if pending(services, b"fix_referencedevents_missing_sep").await? {
 		fix_referencedevents_missing_sep(services).await?;
 	}
 
-	if db["global"]
-		.get(b"fix_readreceiptid_readreceipt_duplicates")
-		.await
-		.is_not_found()
-	{
+	if pending(services, b"fix_readreceiptid_readreceipt_duplicates").await? {
 		fix_readreceiptid_readreceipt_duplicates(services).await?;
 	}
 
-	if db["global"]
-		.get(b"fix_hashed_sentinel_passwords")
-		.await
-		.is_not_found()
-	{
+	if pending(services, b"fix_hashed_sentinel_passwords").await? {
 		fix_hashed_sentinel_passwords(services).await?;
 	}
 
-	if db["global"]
-		.get(b"upgrade_legacy_mediaid_user")
-		.await
-		.is_not_found()
-	{
+	if pending(services, b"upgrade_legacy_mediaid_user").await? {
 		upgrade_legacy_mediaid_user(services).await?;
 	}
 
-	if db["global"]
-		.get(b"remove_remote_media_userid")
-		.await
-		.is_not_found()
-	{
+	if pending(services, b"remove_remote_media_userid").await? {
 		remove_remote_media_userid(services).await?;
 	}
 
-	if db["global"]
-		.get(b"rebuild_roomid_tscount_pducount")
-		.await
-		.is_not_found()
-	{
+	if pending(services, b"rebuild_roomid_tscount_pducount").await? {
 		rebuild_roomid_tscount_pducount(services).await?;
 	}
 
-	if db["global"]
-		.get(b"rebuild_relatesto_typed")
-		.await
-		.is_not_found()
-	{
+	if pending(services, b"rebuild_relatesto_typed").await? {
 		services
 			.pdu_metadata
 			.rebuild_typed_relations()
@@ -362,29 +337,17 @@ async fn migrate(services: &Services, foreign_lineage: bool) -> Result {
 		db["global"].insert(b"rebuild_relatesto_typed", []);
 	}
 
-	if db["global"]
-		.get(b"migrate_profile_keys_to_useridprofilekey")
-		.await
-		.is_not_found()
-	{
+	if pending(services, b"migrate_profile_keys_to_useridprofilekey").await? {
 		migrate_profile_keys(services).await?;
 	}
 
-	if db["global"]
-		.get(b"rebuild_thread_activity")
-		.await
-		.is_not_found()
-	{
+	if pending(services, b"rebuild_thread_activity").await? {
 		services.threads.rebuild_thread_activity().await?;
 
 		db["global"].insert(b"rebuild_thread_activity", []);
 	}
 
-	if db["global"]
-		.get(b"clear_servername_status")
-		.await
-		.is_not_found()
-	{
+	if pending(services, b"clear_servername_status").await? {
 		clear_servername_status(services).await?;
 	}
 
@@ -393,21 +356,13 @@ async fn migrate(services: &Services, foreign_lineage: bool) -> Result {
 	// carries on the next one.
 	moderation::migrate_moderation(services).await?;
 
-	if db["global"]
-		.get(b"adopt_foreign_account_status")
-		.await
-		.is_not_found()
-	{
+	if pending(services, b"adopt_foreign_account_status").await? {
 		migrate_account_status(services).await?;
 
 		db["global"].insert(b"adopt_foreign_account_status", []);
 	}
 
-	if db["global"]
-		.get(b"adopt_foreign_email_bindings")
-		.await
-		.is_not_found()
-	{
+	if pending(services, b"adopt_foreign_email_bindings").await? {
 		migrate_email_bindings(services).await?;
 
 		db["global"].insert(b"adopt_foreign_email_bindings", []);
@@ -490,6 +445,23 @@ async fn migrate(services: &Services, foreign_lineage: bool) -> Result {
 	info!("Loaded RocksDB database with schema version {DATABASE_VERSION}");
 
 	Ok(())
+}
+
+/// Whether a named migration step still needs to run, refusing once shutdown
+/// begins.
+///
+/// A step gate is the safe place to observe a stop request: every step that has
+/// already run stamped its marker, so the ladder is consistent here and the
+/// remaining steps resume on the next start.
+async fn pending(services: &Services, marker: &[u8]) -> Result<bool> {
+	services.server.check_running()?;
+
+	let pending = services.db["global"]
+		.get(marker)
+		.await
+		.is_not_found();
+
+	Ok(pending)
 }
 
 /// Assembles a local user id from a localpart a foreign column records.
