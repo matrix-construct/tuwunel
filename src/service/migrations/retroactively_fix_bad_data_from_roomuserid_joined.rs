@@ -17,6 +17,14 @@ pub(super) async fn retroactively_fix_bad_data_from_roomuserid_joined(
 	let db = &services.db;
 	let _cork = db.cork_and_sync();
 
+	// The room count is cheap beside the per-member work, so the total is exact.
+	let total = services.metadata.iter_ids().count().await;
+
+	services
+		.server
+		.progress
+		.expect_total(u64::try_from(total).unwrap_or(u64::MAX));
+
 	services
 		.metadata
 		.iter_ids()
@@ -59,6 +67,8 @@ pub(super) async fn retroactively_fix_bad_data_from_roomuserid_joined(
 				.state_cache
 				.update_joined_count(room_id)
 				.await;
+
+			services.server.progress.advance();
 		})
 		.await;
 

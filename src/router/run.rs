@@ -1,3 +1,5 @@
+#[cfg(all(feature = "systemd", target_os = "linux"))]
+use std::env::var_os;
 use std::{
 	sync::{Arc, Weak, atomic::Ordering},
 	time::Duration,
@@ -6,12 +8,21 @@ use std::{
 use futures::{FutureExt, future::join, pin_mut};
 #[cfg(all(feature = "systemd", target_os = "linux"))]
 use sd_notify::{NotifyState, notify, notify_and_unset_env, watchdog_enabled};
+use tokio::time::{MissedTickBehavior, interval};
 use tuwunel_core::{
-	Error, Result, Server, debug, debug_error, debug_info, error, info, utils::BoolExt,
+	Error, Result, Server, debug, debug_error, debug_info, defer, error, info, utils::BoolExt,
+	warn,
 };
 use tuwunel_service::Services;
 
 use crate::{handle::ServerHandle, serve};
+
+/// How often startup reports its progress and extends the service manager's
+/// timeout.
+///
+/// The extension asks for twice this, so one missed tick does not end the
+/// grace the service manager is holding open.
+const STARTUP_INTERVAL: Duration = Duration::from_secs(15);
 
 /// Main loop base
 #[tracing::instrument(skip_all)]
@@ -81,18 +92,22 @@ pub(crate) async fn run(services: Arc<Services>) -> Result {
 pub(crate) async fn start(server: Arc<Server>) -> Result<Arc<Services>> {
 	debug!("Starting...");
 
-	// The keepalive holds the stop timeout open too, so aborting it any earlier
-	// lets a stop request kill a migration mid-write.
-	#[cfg(all(feature = "systemd", target_os = "linux"))]
-	let keepalive = server.runtime().spawn(extend_systemd_startup());
+	// The ticker holds the stop timeout open too, so ending it any earlier lets a
+	// stop request kill a migration mid-write.
+	let reporter = server
+		.runtime()
+		.spawn(report_startup_progress(server.clone()));
+
+	let abort = reporter.abort_handle();
+
+	defer! {{
+		abort.abort();
+	}}
 
 	let services = async move { Services::build(server).await?.start().await }.await;
 
-	#[cfg(all(feature = "systemd", target_os = "linux"))]
-	{
-		keepalive.abort();
-		_ = keepalive.await;
-	};
+	reporter.abort();
+	_ = reporter.await;
 
 	let services = services?;
 
@@ -204,53 +219,98 @@ fn handle_services_finish(
 #[cfg(all(feature = "systemd", target_os = "linux"))]
 #[expect(clippy::infinite_loop)]
 async fn start_systemd_watchdog() {
-	use tokio::time::MissedTickBehavior;
-
 	let Some(watchdog) = watchdog_enabled() else {
 		return;
 	};
 
 	let watchdog_usec = u64::try_from(watchdog.as_micros()).unwrap_or(u64::MAX);
 	let interval_usec = (watchdog_usec / 2).max(1);
-	let interval = Duration::from_micros(interval_usec);
+	let period = Duration::from_micros(interval_usec);
 
-	let mut ticker = tokio::time::interval(interval);
+	let mut ticker = interval(period);
 	ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
 	loop {
 		ticker.tick().await;
 
-		if let Err(e) = notify(&[NotifyState::Watchdog]) {
-			error!(%e, "failed to notify systemd watchdog state");
-		}
+		notify_systemd(&[NotifyState::Watchdog], "watchdog");
 	}
 }
 
-#[cfg(all(feature = "systemd", target_os = "linux"))]
+/// Reports the long startup phase in flight and keeps the service manager
+/// waiting for it.
+///
+/// A database migration can run for many minutes with nothing else to show for
+/// it, so every tick logs the phase, its position and how long it has been
+/// running. The same tick extends systemd's timeout, which covers the stop
+/// timeout as well as the start timeout, so ending this task early lets a stop
+/// request kill a migration mid-write.
 #[expect(clippy::infinite_loop)]
-async fn extend_systemd_startup() {
-	use std::env;
+async fn report_startup_progress(server: Arc<Server>) {
+	#[cfg(all(feature = "systemd", target_os = "linux"))]
+	let notifiable = var_os("NOTIFY_SOCKET").is_some();
 
-	use tokio::time::MissedTickBehavior;
+	let mut ticker = interval(STARTUP_INTERVAL);
+	let mut announced = false;
 
-	const INTERVAL: Duration = Duration::from_secs(15);
-
-	// Keep systemd's start timeout extended while a slow boot such as a database
-	// migration runs, so a healthy service is not killed before it signals ready.
-	if env::var_os("NOTIFY_SOCKET").is_none() {
-		return;
-	}
-
-	let extend_usec = u32::try_from(INTERVAL.as_micros())
-		.unwrap_or(u32::MAX)
-		.saturating_mul(2);
-
-	let mut ticker = tokio::time::interval(INTERVAL);
 	ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
 	loop {
 		ticker.tick().await;
 
-		if let Err(e) = notify(&[NotifyState::ExtendTimeoutUsec(extend_usec)]) {
-			error!(%e, "failed to extend systemd startup timeout");
+		let progress = server.progress.report();
+
+		#[cfg(all(feature = "systemd", target_os = "linux"))]
+		if notifiable {
+			notify_systemd_startup(progress.as_deref());
 		}
+
+		let Some(progress) = progress else {
+			continue;
+		};
+
+		if announced {
+			info!(%progress, "Database migration in progress");
+			continue;
+		}
+
+		announced = true;
+		warn!(
+			%progress,
+			"Database migration in progress. A large database can take many minutes. A stop \
+			 request is honored between steps and every step that finished is recorded, so the \
+			 migration resumes where it left off; killing the process instead can leave the \
+			 database mid-write."
+		);
+	}
+}
+
+/// Extends the service manager's timeout by another interval and reports what
+/// the server is waiting on.
+///
+/// The extension applies to whichever timeout is armed, so it holds a stop
+/// request off a migration in flight as much as it holds off the start
+/// timeout. The caller establishes that a service manager is listening.
+#[cfg(all(feature = "systemd", target_os = "linux"))]
+fn notify_systemd_startup(status: Option<&str>) {
+	let extend_usec = u32::try_from(STARTUP_INTERVAL.as_micros())
+		.unwrap_or(u32::MAX)
+		.saturating_mul(2);
+
+	notify_systemd(&[NotifyState::ExtendTimeoutUsec(extend_usec)], "startup timeout extension");
+
+	let Some(status) = status else {
+		return;
+	};
+
+	notify_systemd(&[NotifyState::Status(status)], "startup status");
+}
+
+/// Sends notification states to the service manager.
+///
+/// A notification is advisory, so a failure is logged against the name of what
+/// could not be sent and never reaches the caller.
+#[cfg(all(feature = "systemd", target_os = "linux"))]
+fn notify_systemd(states: &[NotifyState<'_>], about: &'static str) {
+	if let Err(e) = notify(states) {
+		error!(%e, %about, "failed to notify systemd");
 	}
 }

@@ -15,9 +15,10 @@ pub(super) async fn migrate_media(services: &Services) -> Result {
 
 	let db = &services.db;
 	let config = &services.server.config;
+	let progress = &services.server.progress;
 
 	let sha256_done = !db["global"]
-		.get(b"feat_sha256_media")
+		.get("feat_sha256_media")
 		.await
 		.is_not_found();
 
@@ -27,14 +28,17 @@ pub(super) async fn migrate_media(services: &Services) -> Result {
 			.open_cf("servernamemediaid_metadata")?
 			.is_some()
 	{
+		progress.begin("migrate_conduit_media");
 		migrate_conduit_media(services).await?;
-		db["global"].insert(b"feat_sha256_media", []);
+		db["global"].insert("feat_sha256_media", []);
 		return Ok(());
 	}
 
 	if !sha256_done {
+		progress.begin("migrate_sha256_media");
 		migrate_sha256_media(services).await?;
 	} else if config.media_startup_check {
+		progress.begin("checkup_sha256_media");
 		checkup_sha256_media(services).await?;
 	}
 

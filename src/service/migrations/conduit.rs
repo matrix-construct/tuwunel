@@ -407,6 +407,7 @@ fn sha256_hex(digest: &[u8]) -> String {
 /// outlier key).
 pub(super) async fn migrate_conduit_pdus(services: &Services) -> Result {
 	let db = &services.db;
+	let progress = &services.server.progress;
 
 	// shortroomid -> room_id, inverted once so resolving each timeline PDU's
 	// room is a lookup rather than a scan of roomid_shortroomid.
@@ -421,19 +422,27 @@ pub(super) async fn migrate_conduit_pdus(services: &Services) -> Result {
 	let cork = db.cork_and_sync();
 
 	let pduid_pdu = &db["pduid_pdu"];
+
+	progress.enter("timeline rows");
 	let timeline = pduid_pdu
 		.raw_stream()
 		.ignore_err()
 		.ready_fold((0_usize, 0_usize), |acc, (key, value)| {
+			progress.advance();
+
 			tally(acc, inject_room_id(pduid_pdu, key, value, |_| pduid_room(&rooms, key)))
 		})
 		.await;
 
 	let outlier = &db["eventid_outlierpdu"];
+
+	progress.enter("outlier rows");
 	let outliers = outlier
 		.raw_stream()
 		.ignore_err()
 		.ready_fold((0_usize, 0_usize), |acc, (key, value)| {
+			progress.advance();
+
 			tally(acc, inject_room_id(outlier, key, value, |pdu| outlier_room(key, pdu)))
 		})
 		.await;

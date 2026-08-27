@@ -3,6 +3,7 @@
 //! The server coordinates reload, restart, and shutdown notifications. Shared
 //! services use its state to stop work promptly during teardown.
 
+mod progress;
 #[cfg(test)]
 mod tests;
 
@@ -17,6 +18,7 @@ use std::{
 use ruma::OwnedServerName;
 use tokio::{runtime, sync::broadcast};
 
+pub use self::progress::Progress;
 use crate::{Err, Result, config, config::Config, log::Logging, metrics::Metrics};
 
 /// Server runtime state; public portion
@@ -62,6 +64,9 @@ pub struct Server {
 
 	/// Metrics subsystem state
 	pub metrics: Arc<Metrics>,
+
+	/// Progress of the long startup phase in flight, when there is one.
+	pub progress: Progress,
 }
 
 impl Server {
@@ -91,6 +96,7 @@ impl Server {
 			signal: broadcast::channel::<&'static str>(1).0,
 			log,
 			metrics,
+			progress: Progress::default(),
 		}
 	}
 

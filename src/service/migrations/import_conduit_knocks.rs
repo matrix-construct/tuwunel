@@ -1,6 +1,6 @@
-use tuwunel_core::{Result, result::NotFound};
+use tuwunel_core::Result;
 
-use super::conduit::migrate_conduit_knocks;
+use super::{conduit::migrate_conduit_knocks, pending};
 use crate::Services;
 
 /// Imports a Conduit database's pending knocks once.
@@ -14,14 +14,11 @@ pub(super) async fn import_conduit_knocks(services: &Services) -> Result {
 
 	let db = &services.db;
 
-	let pending = db["global"]
-		.get(b"imported_conduit_knocks")
-		.await
-		.is_not_found();
-
-	if pending && db.open_cf("roomuserid_knockcount")?.is_some() {
+	if db.open_cf("roomuserid_knockcount")?.is_some()
+		&& pending(services, "imported_conduit_knocks").await?
+	{
 		migrate_conduit_knocks(services).await?;
-		db["global"].insert(b"imported_conduit_knocks", []);
+		db["global"].insert("imported_conduit_knocks", []);
 	}
 
 	Ok(())

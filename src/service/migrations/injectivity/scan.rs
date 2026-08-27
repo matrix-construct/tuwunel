@@ -7,7 +7,7 @@ use std::{
 use futures::StreamExt;
 use serde::Deserialize;
 use tuwunel_core::{
-	Result,
+	Progress, Result,
 	arrayvec::ArrayVec,
 	err, implement, info,
 	smallvec::SmallVec,
@@ -202,9 +202,13 @@ pub(super) async fn scan(services: &Services) -> Result<Scan> {
 	let words = usize::try_from((counter / 64).saturating_add(1))
 		.map_err(|_| err!("short id bitmap exceeds the address width"))?;
 
+	let progress = &services.server.progress;
+
+	progress.begin("fix_short_injectivity: event short ids");
 	let (events, event_reverse) =
 		family(services, "eventid_shorteventid", "shorteventid_eventid", counter, words).await?;
 
+	progress.begin("fix_short_injectivity: state key short ids");
 	let (statekeys, statekey_reverse) =
 		family(services, "statekey_shortstatekey", "shortstatekey_statekey", counter, words)
 			.await?;
@@ -233,8 +237,11 @@ pub(super) async fn scan(services: &Services) -> Result<Scan> {
 
 	let Scan { events, statekeys, .. } = families;
 
+	progress.begin("fix_short_injectivity: deep indexes");
 	let swept =
 		sweep(services, &events, &statekeys, event_reverse, statekey_reverse, counter).await?;
+
+	progress.begin("fix_short_injectivity: colliding state diffs");
 
 	// Malformed framing already refuses the lane, and the typed read would
 	// trust the framing the walk just impeached.
@@ -365,22 +372,29 @@ async fn family(
 	words: usize,
 ) -> Result<(Family, Bits)> {
 	let db = &services.db;
+	let progress = &services.server.progress;
 
-	let (reverse_bits, rows, reverse_malformed) = reverse_bitmap(&db[reverse], words).await?;
+	progress.enter("reverse rows");
+	let (reverse_bits, rows, reverse_malformed) =
+		reverse_bitmap(&db[reverse], words, progress).await?;
 
+	progress.enter("forward rows");
 	let (forward_bits, mut dangling, forward_malformed) =
-		dangling_winners(&db[forward], &reverse_bits, counter, words).await?;
+		dangling_winners(&db[forward], &reverse_bits, counter, words, progress).await?;
+
+	progress.enter("unclaimed reverse rows");
 
 	// A set reverse bit no forward value claims is what the pass collects.
 	let candidates = match any_unclaimed(&reverse_bits, &forward_bits, counter) {
 		| false => Candidates::new(),
-		| true => loser_candidates(&db[reverse], &forward_bits, counter).await?,
+		| true => loser_candidates(&db[reverse], &forward_bits, counter, progress).await?,
 	};
 
 	drop(forward_bits);
 
+	progress.enter("candidate identities");
 	let (losers, winners, mut promotable, unresolved) =
-		resolve(&db[forward], &candidates).await?;
+		resolve(&db[forward], &candidates, progress).await?;
 
 	let contended = contenders(&mut dangling, by_short)
 		.saturating_add(contenders(&mut promotable, by_identity));
@@ -417,9 +431,15 @@ async fn family(
 ///
 /// The rows are counted here rather than in the loser pass, which a clean
 /// family skips.
-async fn reverse_bitmap(map: &Arc<Map>, words: usize) -> Result<(Bits, u64, u64)> {
+async fn reverse_bitmap(
+	map: &Arc<Map>,
+	words: usize,
+	progress: &Progress,
+) -> Result<(Bits, u64, u64)> {
 	map.raw_keys()
 		.ready_try_fold((vec![0_u64; words], 0_u64, 0_u64), |(mut bits, rows, malformed), key| {
+			progress.advance();
+
 			let rows = rows.saturating_add(1);
 
 			Ok(match short_of(key) {
@@ -445,11 +465,14 @@ async fn dangling_winners(
 	reverse_bits: &[u64],
 	counter: u64,
 	words: usize,
+	progress: &Progress,
 ) -> Result<(Bits, Candidates, u64)> {
 	map.raw_stream()
 		.ready_try_fold(
 			(vec![0_u64; words], Candidates::new(), 0_u64),
 			|(mut bits, mut dangling, malformed), (key, value)| {
+				progress.advance();
+
 				Ok(match short_of(value) {
 					| None => (bits, dangling, malformed.saturating_add(1)),
 					| Some(short) => {
@@ -501,9 +524,12 @@ async fn loser_candidates(
 	map: &Arc<Map>,
 	forward_bits: &[u64],
 	counter: u64,
+	progress: &Progress,
 ) -> Result<Candidates> {
 	map.raw_stream()
 		.ready_try_fold(Candidates::new(), |mut candidates, (key, value)| {
+			progress.advance();
+
 			let unclaimed =
 				short_of(key).filter(|short| *short <= counter && !get_bit(forward_bits, *short));
 
@@ -521,7 +547,11 @@ async fn loser_candidates(
 /// The identity a loser's reverse row names must hold a live forward row,
 /// whose value is the winner. A candidate resolving to itself was a
 /// concurrent allocation, not a loser.
-async fn resolve(map: &Arc<Map>, candidates: &[(u64, Identity)]) -> Result<Resolution> {
+async fn resolve(
+	map: &Arc<Map>,
+	candidates: &[(u64, Identity)],
+	progress: &Progress,
+) -> Result<Resolution> {
 	let (mut losers, winners, promotable, unsettled, paired) = candidates
 		.iter()
 		.map(candidate_identity)
@@ -533,6 +563,8 @@ async fn resolve(map: &Arc<Map>, candidates: &[(u64, Identity)]) -> Result<Resol
 			(Vec::new(), BTreeMap::new(), Candidates::new(), 0_u64, 0_usize),
 			|(mut losers, mut winners, mut promotable, unsettled, paired),
 			 (resolved, candidate)| {
+				progress.advance();
+
 				let paired = paired.saturating_add(1);
 				let loser = candidate_short(candidate);
 
@@ -626,6 +658,7 @@ async fn sweep(
 	counter: u64,
 ) -> Result<Scan> {
 	let db = &services.db;
+	let progress = &services.server.progress;
 	let words = event_reverse.len();
 	let event_stale = bits_of(&events.losers, words);
 	let statekey_stale = bits_of(&statekeys.losers, words);
@@ -638,12 +671,14 @@ async fn sweep(
 		statekey_reverse: &statekey_reverse,
 	};
 
+	progress.enter("state diff rows");
 	let counts = db["shortstatehash_statediff"]
 		.raw_stream()
-		.ready_try_fold(
-			Counts::default(),
-			|counts, (key, value)| Ok(walk.row(counts, key, value)),
-		)
+		.ready_try_fold(Counts::default(), |counts, (key, value)| {
+			progress.advance();
+
+			Ok(walk.row(counts, key, value))
+		})
 		.await?;
 
 	drop(event_reverse);
@@ -651,9 +686,12 @@ async fn sweep(
 
 	// A key or value that is stale or not a whole number of short ids
 	// poisons the row either way.
+	progress.enter("auth chain rows");
 	let (dirty, entries) = db["authchainkey_authchain"]
 		.raw_stream()
 		.ready_try_fold((0_u64, 0_u64), |(dirty, entries), (key, chain)| {
+			progress.advance();
+
 			let hit = disposable(key, &event_stale, &statekey_stale)
 				|| disposable(chain, &event_stale, &statekey_stale);
 
@@ -664,9 +702,12 @@ async fn sweep(
 	// ready_try_fold rather than ready_try_filter_map: the higher-ranked
 	// adapter fails the boot coroutine's Send obligation over cursor-borrowed
 	// items.
+	progress.enter("event state rows");
 	let moves: Vec<u64> = db["shorteventid_shortstatehash"]
 		.raw_keys()
 		.ready_try_fold(Vec::new(), |mut moves, key| {
+			progress.advance();
+
 			if let Some(loser) = short_of(key).filter(|short| get_bit(&event_stale, *short)) {
 				moves.push(loser);
 			}
@@ -675,9 +716,12 @@ async fn sweep(
 		})
 		.await?;
 
+	progress.enter("typed relation rows");
 	let relations: Relations = db["relatesto_typed"]
 		.raw_stream()
 		.ready_try_fold(Relations::new(), |mut relations, (key, value)| {
+			progress.advance();
+
 			let dirty = short_of(value)
 				.filter(|loser| get_bit(&event_stale, *loser))
 				.zip(RelationKey::try_from(key).ok());

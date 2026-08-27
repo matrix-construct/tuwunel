@@ -27,6 +27,8 @@ pub(super) async fn fix_readreceiptid_readreceipt_duplicates(services: &Services
 		.keys()
 		.expect_ok()
 		.ready_for_each(|key: Key<'_>| {
+			services.server.progress.advance();
+
 			let (room_id, _, user_id) = key;
 			let last_room = cur_room.replace(
 				room_id

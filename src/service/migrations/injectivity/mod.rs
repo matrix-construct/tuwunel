@@ -26,13 +26,13 @@ use crate::Services;
 /// rescan on later boots; the decline's counters become the value where
 /// a settled repair leaves it empty. Only an error leaves it unwritten,
 /// and an error fails the boot. Every reader tests presence only.
-static MARKER: &[u8] = b"fix_short_injectivity";
+static MARKER: &str = "fix_short_injectivity";
 
 /// Global marker recording the one-time auth chain cache clear.
 ///
 /// Gating the clear on [`MARKER`] would re-run it on every boot an
 /// errored repair leaves unstamped.
-static CLEAR_MARKER: &[u8] = b"clear_auth_chain_cache";
+static CLEAR_MARKER: &str = "clear_auth_chain_cache";
 
 /// Scan passes one boot allows before giving up on convergence.
 ///
@@ -151,10 +151,16 @@ async fn clear_chain_cache(services: &Services) -> Result {
 /// that populate the cache.
 pub(super) async fn clear_chains(services: &Services) -> Result {
 	let _cork = services.db.cork_and_sync();
+	let progress = &services.server.progress;
 
+	progress.begin(CLEAR_MARKER);
 	services.db["authchainkey_authchain"]
 		.for_clear()
-		.ready_try_for_each(|_| Ok(()))
+		.ready_try_for_each(|_| {
+			progress.advance();
+
+			Ok(())
+		})
 		.await
 }
 

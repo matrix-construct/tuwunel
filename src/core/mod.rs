@@ -33,7 +33,7 @@ pub use config::Config;
 pub use error::Error;
 pub use info::{rustc_flags_capture, version, version::version};
 pub use matrix::{Event, EventTypeExt, Pdu, PduCount, PduEvent, PduId, RoomVersion, pdu};
-pub use server::Server;
+pub use server::{Progress, Server};
 pub use utils::{async_noinline, ctor, dtor, implement, result, result::Result};
 
 pub use crate as tuwunel_core;

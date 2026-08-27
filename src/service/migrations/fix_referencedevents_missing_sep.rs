@@ -26,6 +26,8 @@ pub(super) async fn fix_referencedevents_missing_sep(services: &Services) -> Res
 		.ready_fold(totals, |mut a, (i, (key, val))| {
 			debug_assert!(val.is_empty(), "expected no value");
 
+			services.server.progress.advance();
+
 			let has_sep = key.contains(&SEP);
 
 			if !has_sep {

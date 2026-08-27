@@ -121,16 +121,18 @@ pub(crate) async fn migrations(services: &Services) -> Result {
 	// that can still refuse this database.
 	fix_injectivity(services).await?;
 
-	migrate(services, foreign_lineage)
-		.await
-		.inspect_err(|error| {
-			if error.is_interrupted() {
-				warn!(
-					"Stopped during database migrations. The steps that completed are recorded; \
-					 the rest run on the next start."
-				);
-			}
-		})
+	let migrated = migrate(services, foreign_lineage).await;
+
+	services.server.progress.end();
+
+	migrated.inspect_err(|error| {
+		if error.is_interrupted() {
+			warn!(
+				"Stopped during database migrations. The steps that completed are recorded; the \
+				 rest run on the next start."
+			);
+		}
+	})
 }
 
 /// Whether the database comes from a foreign (non-tuwunel) lineage: it predates
@@ -224,22 +226,22 @@ async fn fresh(services: &Services) -> Result {
 		.bump_database_version(DATABASE_VERSION);
 
 	db["global"].insert(SERVER_NAME_KEY, services.server.name.as_str());
-	db["global"].insert(b"feat_sha256_media", []);
-	db["global"].insert(b"fix_pdu_missing_room_id", []);
-	db["global"].insert(b"fix_bad_double_separator_in_state_cache", []);
-	db["global"].insert(b"retroactively_fix_bad_data_from_roomuserid_joined", []);
-	db["global"].insert(b"fix_referencedevents_missing_sep", []);
-	db["global"].insert(b"fix_readreceiptid_readreceipt_duplicates", []);
-	db["global"].insert(b"fix_hashed_sentinel_passwords", []);
-	db["global"].insert(b"upgrade_legacy_mediaid_user", []);
-	db["global"].insert(b"remove_remote_media_userid", []);
-	db["global"].insert(b"rebuild_roomid_tscount_pducount", []);
-	db["global"].insert(b"rebuild_relatesto_typed", []);
-	db["global"].insert(b"migrate_profile_keys_to_useridprofilekey", []);
-	db["global"].insert(b"rebuild_thread_activity", []);
-	db["global"].insert(b"clear_servername_status", []);
-	db["global"].insert(b"adopt_foreign_account_status", []);
-	db["global"].insert(b"adopt_foreign_email_bindings", []);
+	db["global"].insert("feat_sha256_media", []);
+	db["global"].insert("fix_pdu_missing_room_id", []);
+	db["global"].insert("fix_bad_double_separator_in_state_cache", []);
+	db["global"].insert("retroactively_fix_bad_data_from_roomuserid_joined", []);
+	db["global"].insert("fix_referencedevents_missing_sep", []);
+	db["global"].insert("fix_readreceiptid_readreceipt_duplicates", []);
+	db["global"].insert("fix_hashed_sentinel_passwords", []);
+	db["global"].insert("upgrade_legacy_mediaid_user", []);
+	db["global"].insert("remove_remote_media_userid", []);
+	db["global"].insert("rebuild_roomid_tscount_pducount", []);
+	db["global"].insert("rebuild_relatesto_typed", []);
+	db["global"].insert("migrate_profile_keys_to_useridprofilekey", []);
+	db["global"].insert("rebuild_thread_activity", []);
+	db["global"].insert("clear_servername_status", []);
+	db["global"].insert("adopt_foreign_account_status", []);
+	db["global"].insert("adopt_foreign_email_bindings", []);
 	mark_clean_injectivity(services);
 
 	// Create the admin room and server user on first run
@@ -278,9 +280,9 @@ async fn migrate(services: &Services, foreign_lineage: bool) -> Result {
 
 	migrate_media(services).await?;
 
-	if pending(services, b"fix_pdu_missing_room_id").await? {
+	if pending(services, "fix_pdu_missing_room_id").await? {
 		conduit::migrate_conduit_pdus(services).await?;
-		db["global"].insert(b"fix_pdu_missing_room_id", []);
+		db["global"].insert("fix_pdu_missing_room_id", []);
 	}
 
 	import_conduit_knocks(services).await?;
@@ -292,80 +294,84 @@ async fn migrate(services: &Services, foreign_lineage: bool) -> Result {
 		.open_cf("servernamemediaid_metadata")?
 		.is_some()
 	{
-		db["global"].insert(b"fix_bad_double_separator_in_state_cache", []);
-		db["global"].insert(b"retroactively_fix_bad_data_from_roomuserid_joined", []);
+		db["global"].insert("fix_bad_double_separator_in_state_cache", []);
+		db["global"].insert("retroactively_fix_bad_data_from_roomuserid_joined", []);
 	}
 
-	if pending(services, b"fix_bad_double_separator_in_state_cache").await? {
+	if pending(services, "fix_bad_double_separator_in_state_cache").await? {
 		fix_bad_double_separator_in_state_cache(services).await?;
 	}
 
-	if pending(services, b"retroactively_fix_bad_data_from_roomuserid_joined").await? {
+	if pending(services, "retroactively_fix_bad_data_from_roomuserid_joined").await? {
 		retroactively_fix_bad_data_from_roomuserid_joined(services).await?;
 	}
 
-	if pending(services, b"fix_referencedevents_missing_sep").await? {
+	if pending(services, "fix_referencedevents_missing_sep").await? {
 		fix_referencedevents_missing_sep(services).await?;
 	}
 
-	if pending(services, b"fix_readreceiptid_readreceipt_duplicates").await? {
+	if pending(services, "fix_readreceiptid_readreceipt_duplicates").await? {
 		fix_readreceiptid_readreceipt_duplicates(services).await?;
 	}
 
-	if pending(services, b"fix_hashed_sentinel_passwords").await? {
+	if pending(services, "fix_hashed_sentinel_passwords").await? {
 		fix_hashed_sentinel_passwords(services).await?;
 	}
 
-	if pending(services, b"upgrade_legacy_mediaid_user").await? {
+	if pending(services, "upgrade_legacy_mediaid_user").await? {
 		upgrade_legacy_mediaid_user(services).await?;
 	}
 
-	if pending(services, b"remove_remote_media_userid").await? {
+	if pending(services, "remove_remote_media_userid").await? {
 		remove_remote_media_userid(services).await?;
 	}
 
-	if pending(services, b"rebuild_roomid_tscount_pducount").await? {
+	if pending(services, "rebuild_roomid_tscount_pducount").await? {
 		rebuild_roomid_tscount_pducount(services).await?;
 	}
 
-	if pending(services, b"rebuild_relatesto_typed").await? {
+	if pending(services, "rebuild_relatesto_typed").await? {
 		services
 			.pdu_metadata
 			.rebuild_typed_relations()
 			.await?;
 
-		db["global"].insert(b"rebuild_relatesto_typed", []);
+		db["global"].insert("rebuild_relatesto_typed", []);
 	}
 
-	if pending(services, b"migrate_profile_keys_to_useridprofilekey").await? {
+	if pending(services, "migrate_profile_keys_to_useridprofilekey").await? {
 		migrate_profile_keys(services).await?;
 	}
 
-	if pending(services, b"rebuild_thread_activity").await? {
+	if pending(services, "rebuild_thread_activity").await? {
 		services.threads.rebuild_thread_activity().await?;
 
-		db["global"].insert(b"rebuild_thread_activity", []);
+		db["global"].insert("rebuild_thread_activity", []);
 	}
 
-	if pending(services, b"clear_servername_status").await? {
+	if pending(services, "clear_servername_status").await? {
 		clear_servername_status(services).await?;
 	}
 
 	// Non-destructive and idempotent, so it runs every boot rather than once: a
 	// suspension added by an origin server after a prior tuwunel boot still
 	// carries on the next one.
+	services
+		.server
+		.progress
+		.begin("migrate_moderation");
 	moderation::migrate_moderation(services).await?;
 
-	if pending(services, b"adopt_foreign_account_status").await? {
+	if pending(services, "adopt_foreign_account_status").await? {
 		migrate_account_status(services).await?;
 
-		db["global"].insert(b"adopt_foreign_account_status", []);
+		db["global"].insert("adopt_foreign_account_status", []);
 	}
 
-	if pending(services, b"adopt_foreign_email_bindings").await? {
+	if pending(services, "adopt_foreign_email_bindings").await? {
 		migrate_email_bindings(services).await?;
 
-		db["global"].insert(b"adopt_foreign_email_bindings", []);
+		db["global"].insert("adopt_foreign_email_bindings", []);
 	}
 
 	// A newer same-lineage database was already refused; stamping ours is safe. A
@@ -386,7 +392,25 @@ async fn migrate(services: &Services, foreign_lineage: bool) -> Result {
 		| Ordering::Equal => {},
 	}
 
+	warn_forbidden_names(services).await;
+
+	info!("Loaded RocksDB database with schema version {DATABASE_VERSION}");
+
+	Ok(())
+}
+
+/// Warns about existing names the configuration now forbids.
+///
+/// The patterns are advisory rather than enforced retroactively, so a match
+/// only names the user or the alias in the log. Neither scan runs when its own
+/// pattern list is empty.
+async fn warn_forbidden_names(services: &Services) {
 	if !services.config.forbidden_usernames.is_empty() {
+		services
+			.server
+			.progress
+			.begin("scan_forbidden_usernames");
+
 		services
 			.users
 			.stream()
@@ -410,6 +434,11 @@ async fn migrate(services: &Services, foreign_lineage: bool) -> Result {
 	}
 
 	if !services.config.forbidden_alias_names.is_empty() {
+		services
+			.server
+			.progress
+			.begin("scan_forbidden_alias_names");
+
 		services
 			.metadata
 			.iter_ids()
@@ -441,10 +470,6 @@ async fn migrate(services: &Services, foreign_lineage: bool) -> Result {
 			.boxed()
 			.await;
 	}
-
-	info!("Loaded RocksDB database with schema version {DATABASE_VERSION}");
-
-	Ok(())
 }
 
 /// Whether a named migration step still needs to run, refusing once shutdown
@@ -452,14 +477,20 @@ async fn migrate(services: &Services, foreign_lineage: bool) -> Result {
 ///
 /// A step gate is the safe place to observe a stop request: every step that has
 /// already run stamped its marker, so the ladder is consistent here and the
-/// remaining steps resume on the next start.
-async fn pending(services: &Services, marker: &[u8]) -> Result<bool> {
+/// remaining steps resume on the next start. A step about to run is also named
+/// as the phase in flight, so the operator sees which one a long boot is
+/// spending its time on.
+async fn pending(services: &Services, marker: &'static str) -> Result<bool> {
 	services.server.check_running()?;
 
 	let pending = services.db["global"]
 		.get(marker)
 		.await
 		.is_not_found();
+
+	if pending {
+		services.server.progress.begin(marker);
+	}
 
 	Ok(pending)
 }

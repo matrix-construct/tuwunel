@@ -239,9 +239,14 @@ async fn patch_statediffs(services: &Services, scan: &Scan) -> Result {
 		return Ok(());
 	}
 
+	let progress = &services.server.progress;
+
+	progress.begin("fix_short_injectivity: patch state diffs");
 	let digests: Digests = services.db["statehash_shortstatehash"]
 		.raw_stream()
 		.ready_try_fold(Digests::new(), |mut digests, (key, value)| {
+			progress.advance();
+
 			if let Some(state) = short_of(value).filter(|state| scan.infected.contains(state))
 				&& let Ok(digest) = key.try_into()
 			{
@@ -426,6 +431,10 @@ async fn move_keys(services: &Services, scan: &Scan) -> Result {
 		return Ok(());
 	}
 
+	let progress = &services.server.progress;
+
+	progress.begin("fix_short_injectivity: move keys");
+
 	// Serial: the loser decisions feed one shared transaction, and the
 	// measured population is zero to a handful of rows.
 	let states = &services.db["shorteventid_shortstatehash"];
@@ -487,6 +496,9 @@ async fn move_state_row(states: &Arc<Map>, txn: &mut Txn, loser: u64, winner: u6
 /// per key, and any earlier placement would destroy the resolver an
 /// interrupted repair needs to resume.
 fn delete_losers(services: &Services, scan: &Scan) {
+	let progress = &services.server.progress;
+
+	progress.begin("fix_short_injectivity: delete losers");
 	info!(
 		stale_events = scan.events.losers.len(),
 		stale_statekeys = scan.statekeys.losers.len(),

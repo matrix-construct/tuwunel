@@ -27,6 +27,8 @@ pub(super) async fn rebuild_roomid_tscount_pducount(services: &Services) -> Resu
 		.raw_stream()
 		.ignore_err()
 		.ready_fold(0_usize, |count, (key, value)| {
+			services.server.progress.advance();
+
 			let Ok(pdu) = serde_json::from_slice::<PduRoomTs>(value) else {
 				return count;
 			};
