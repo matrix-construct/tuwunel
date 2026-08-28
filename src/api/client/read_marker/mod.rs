@@ -2,7 +2,7 @@ mod read_markers;
 mod receipt;
 
 use ruma::{EventId, MilliSecondsSinceUnixEpoch, RoomId, UserId, events::receipt::ReceiptThread};
-use tuwunel_core::{Err, PduCount, Result, err, utils::result::LogErr};
+use tuwunel_core::{PduCount, Result, err, utils::result::LogErr};
 use tuwunel_service::{Services, rooms::read_receipt::PrivateRead};
 
 pub(crate) use self::{read_markers::set_read_marker_route, receipt::create_receipt_route};
@@ -11,7 +11,8 @@ pub(crate) use self::{read_markers::set_read_marker_route, receipt::create_recei
 /// marker for `thread` there.
 ///
 /// Returns whether the marker advanced. A backfilled event carries no forward
-/// position, so it is rejected rather than stored.
+/// position, so it is skipped like a non-advancing write rather than failing
+/// the request.
 async fn set_private_marker(
 	services: &Services,
 	room_id: &RoomId,
@@ -25,10 +26,10 @@ async fn set_private_marker(
 		.await
 		.map_err(|_| err!(Request(NotFound("Event not found."))))?;
 
+	// A backfilled event has no forward position; its position is below every
+	// live event, so storing it can never advance the marker.
 	let PduCount::Normal(count) = count else {
-		return Err!(Request(InvalidParam(
-			"Event is a backfilled PDU and cannot be marked as read."
-		)));
+		return Ok(false);
 	};
 
 	let advanced = services
