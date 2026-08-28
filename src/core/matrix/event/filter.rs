@@ -53,24 +53,12 @@ impl<E: Event> Matches<&E> for RoomEventFilter {
 
 impl Matches<&RoomId> for RoomFilter {
 	#[inline]
-	fn matches(&self, room_id: &RoomId) -> bool {
-		if !matches_room_id(room_id, self) {
-			return false;
-		}
-
-		true
-	}
+	fn matches(&self, room_id: &RoomId) -> bool { matches_room_id(room_id, self) }
 }
 
 impl Matches<&UserId> for Filter {
 	#[inline]
-	fn matches(&self, user_id: &UserId) -> bool {
-		if !matches_user_id(user_id, self) {
-			return false;
-		}
-
-		true
-	}
+	fn matches(&self, user_id: &UserId) -> bool { matches_user_id(user_id, self) }
 }
 
 fn matches_user_id(user_id: &UserId, filter: &Filter) -> bool {
