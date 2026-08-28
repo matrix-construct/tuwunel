@@ -4,16 +4,12 @@ use axum::extract::State;
 use ruma::{
 	MilliSecondsSinceUnixEpoch,
 	api::client::receipt::create_receipt::{self, v3::ReceiptType as CreateReceiptType},
-	events::{
-		RoomAccountDataEventType,
-		fully_read::{FullyReadEvent, FullyReadEventContent},
-		receipt::{Receipt, ReceiptEvent, ReceiptEventContent, ReceiptThread, ReceiptType},
-	},
+	events::receipt::{Receipt, ReceiptEvent, ReceiptEventContent, ReceiptThread, ReceiptType},
 };
 use tuwunel_core::{Err, Result};
 use tuwunel_service::presence::Ping;
 
-use super::{reset_and_refresh_badge, set_private_marker};
+use super::{reset_and_refresh_badge, set_fully_read, set_private_marker};
 use crate::{ClientIp, Ruma};
 
 /// # `POST /_matrix/client/r0/rooms/{roomId}/receipt/{receiptType}/{eventId}`
@@ -72,18 +68,7 @@ pub(crate) async fn create_receipt_route(
 
 	let advanced = match body.receipt_type {
 		| CreateReceiptType::FullyRead => {
-			let fully_read_event = FullyReadEvent {
-				content: FullyReadEventContent { event_id: body.event_id.clone() },
-			};
-			services
-				.account_data
-				.update(
-					Some(&body.room_id),
-					sender_user,
-					RoomAccountDataEventType::FullyRead,
-					&serde_json::to_value(fully_read_event)?,
-				)
-				.await?;
+			set_fully_read(&services, &body.room_id, sender_user, &body.event_id).await?;
 
 			false
 		},
