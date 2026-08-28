@@ -2,7 +2,7 @@ mod read_markers;
 mod receipt;
 
 use ruma::{EventId, MilliSecondsSinceUnixEpoch, RoomId, UserId, events::receipt::ReceiptThread};
-use tuwunel_core::{PduCount, Result, err, utils::result::LogErr};
+use tuwunel_core::{PduCount, Result, debug, err, utils::result::LogErr};
 use tuwunel_service::{Services, rooms::read_receipt::PrivateRead};
 
 pub(crate) use self::{read_markers::set_read_marker_route, receipt::create_receipt_route};
@@ -29,6 +29,7 @@ async fn set_private_marker(
 	// A backfilled event has no forward position; its position is below every
 	// live event, so storing it can never advance the marker.
 	let PduCount::Normal(count) = count else {
+		debug!(%user_id, %room_id, %event, "Backfilled event was requested to be marked as read");
 		return Ok(false);
 	};
 
