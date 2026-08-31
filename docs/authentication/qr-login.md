@@ -53,5 +53,29 @@ unchanged. Browser clients also need the server's
 `Access-Control-Expose-Headers: ETag` response header to reach the client
 unchanged.
 
+Do not compress responses under either namespace. A proxy that compresses a
+session body has changed its bytes, so it downgrades the strong `ETag` to a weak
+one of the form `W/"..."`. The scanning device reads the session, keeps that
+weakened tag, and sends it back as `If-Match` when it writes its half of the
+handshake. `If-Match` requires a strong match, so the write is refused with 412
+and the sign-in fails immediately after the QR code is scanned. Clients report
+this as a generic error with no further detail.
+
+Tuwunel already sets `Cache-Control: no-store, no-transform` on every session
+response, but not every proxy honors it. Session bodies are served as
+`text/plain`, which several stock configurations compress by default. In nginx,
+disable compression for the location:
+
+```nginx
+location /_matrix/client/unstable/org.matrix.msc4108/rendezvous {
+    gzip off;
+    proxy_pass http://tuwunel;
+}
+```
+
+To confirm a proxy is the cause, request a session twice and compare the `ETag`
+it returns under `Accept-Encoding: gzip` against `Accept-Encoding: identity`. A
+`W/` prefix on the compressed response is the whole diagnosis.
+
 For MSC4388, preserve the `Sec-Fetch-*` request headers. Tuwunel returns 403 for
 browser navigation requests to session URLs.
