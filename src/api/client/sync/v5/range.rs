@@ -26,7 +26,7 @@ use super::{
 	rooms::{
 		Failure as RoomFailure,
 		Failure::{Payload as PayloadFailure, Timeline as TimelineFailure},
-		RoomDetails, handle_room, merged_room_details, room_config_hash,
+		RoomDetails, handle_room, merged_room_details, room_config_hash, state_mode,
 	},
 };
 use crate::client::is_empty_account_data_event;
@@ -164,11 +164,14 @@ async fn collect_room(
 ) -> Result<CompleteRange, Failure> {
 	let room_id = &window_room.room_id;
 	let config_hash = room_config_hash(&room_details);
-	let payload_is_fresh =
-		window_room.payload_is_fresh(room.roomsince) || room.config_hash != config_hash;
+	let config_changed = room.config_hash != config_hash;
+	let state_mode = state_mode(room.roomsince, config_changed);
+	let payload_is_fresh = window_room.payload_is_fresh(room.roomsince) || config_changed;
 
 	let payload = payload_is_fresh
-		.then_async(|| handle_room(sync_info, conn, window_room, room.roomsince, room_details))
+		.then_async(|| {
+			handle_room(sync_info, conn, window_room, room.roomsince, state_mode, room_details)
+		})
 		.map(Option::transpose)
 		.map_err(Failure::from);
 

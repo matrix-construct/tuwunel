@@ -20,13 +20,13 @@ use ruma::{
 };
 use tuwunel_core::{
 	Error, Result, at, format_small_string, is_equal_to,
-	itertools::Itertools,
 	matrix::{
 		Event, StateKey,
-		pdu::{PduCount, PduEvent},
+		pdu::{PduCount, PduEvent, RawPduId},
 	},
 	ref_at,
 	smallstr::SmallString,
+	smallvec::SmallVec,
 	utils::{
 		BoolExt, IterStream, ReadyExt, TryFutureExtExt,
 		hash::sha256::{
@@ -54,7 +54,14 @@ pub(super) enum Failure {
 
 type ThreadCounts = BTreeMap<OwnedEventId, (u64, u64)>;
 type EventTypeString = SmallString<[u8; 32]>;
+type TimelineMembers<'a> = SmallVec<[&'a str; 2]>;
 pub(super) type RoomDetails = (usize, HashSet<(StateEventType, StateKey)>);
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum StateMode {
+	Full,
+	Delta(PduCount),
+}
 
 #[tracing::instrument(
 	name = "room",
@@ -67,6 +74,7 @@ pub(super) async fn handle_room(
 	conn: &Connection,
 	window_room: &WindowRoom,
 	roomsince: u64,
+	state_mode: StateMode,
 	room_details: RoomDetails,
 ) -> Result<response::Room, Failure> {
 	let SyncInfo {
@@ -139,6 +147,7 @@ pub(super) async fn handle_room(
 		services,
 		sender_user,
 		room_id,
+		state_mode,
 		&required_state,
 		&timeline_pdus,
 		encrypted,
@@ -271,6 +280,13 @@ pub(super) fn room_config_hash((timeline_limit, required_state): &RoomDetails) -
 		.iter()
 		.map(required_state_hash)
 		.fold(digest_word(digest), |hash, entry| hash ^ entry)
+}
+
+pub(super) fn state_mode(roomsince: u64, config_changed: bool) -> StateMode {
+	match (roomsince, config_changed) {
+		| (0, _) | (_, true) => StateMode::Full,
+		| (roomsince, false) => StateMode::Delta(PduCount::Normal(roomsince)),
+	}
 }
 
 fn required_state_hash((event_type, state_key): &(StateEventType, StateKey)) -> u64 {
@@ -428,6 +444,7 @@ async fn collect_required_state(
 	services: &Services,
 	sender_user: &UserId,
 	room_id: &RoomId,
+	state_mode: StateMode,
 	required_state: &HashSet<(StateEventType, StateKey)>,
 	timeline_pdus: &[(PduCount, PduEvent)],
 	encrypted: bool,
@@ -450,25 +467,30 @@ async fn collect_required_state(
 		.filter(|event| *event.event_type() == TimelineEventType::RoomMember)
 		.filter_map(Event::state_key);
 
-	let timeline_senders = timeline_senders
-		.chain(timeline_member_targets)
-		.sorted_unstable()
-		.dedup()
-		.map(|sender| (StateEventType::RoomMember, StateKey::from_str(sender)))
-		.collect::<Vec<_>>();
-
-	let wildcard_types: Vec<StateEventType> = required_state
+	let wildcard_state = required_state
 		.iter()
 		.filter(|(_, state_key)| state_key == "*")
-		.map(|(event_type, _)| event_type.clone())
+		.stream()
+		.flat_map(|(event_type, _)| {
+			services
+				.state_accessor
+				.room_state_keys_with_ids(room_id, event_type)
+				.ready_filter_map(Result::ok)
+				.map(move |(state_key, event_id)| {
+					((event_type.clone(), state_key), Some(event_id), false)
+				})
+		});
+
+	let mut timeline_members: TimelineMembers<'_> = timeline_senders
+		.chain(timeline_member_targets)
 		.collect();
 
-	let wildcard_state: Vec<(StateEventType, StateKey)> = wildcard_types
+	timeline_members.sort_unstable();
+	timeline_members.dedup();
+
+	let timeline_members = timeline_members
 		.into_iter()
-		.stream()
-		.broad_then(|event_type| wildcard_state_keys(services, room_id, event_type))
-		.concat()
-		.await;
+		.map(|sender| (StateEventType::RoomMember, StateKey::from_str(sender)));
 
 	let in_timeline = |event: &PduEvent| {
 		timeline_pdus
@@ -481,22 +503,49 @@ async fn collect_required_state(
 	required_state
 		.iter()
 		.cloned()
+		.map(|state| (state, None, false))
 		.stream()
-		.chain(wildcard_state.into_iter().stream())
-		.chain(timeline_senders.into_iter().stream())
-		.broad_filter_map(async |state| {
-			let state_key: StateKey = match state.1.as_str() {
+		.chain(wildcard_state)
+		.chain(
+			timeline_members
+				.map(|state| (state, None, true))
+				.stream(),
+		)
+		.broad_filter_map(async |(state, event_id, lazy)| {
+			let (event_type, state_key) = state;
+			let state_key: StateKey = match state_key.as_str() {
 				| "$LAZY" | "*" => return None,
 				| "$ME" => sender_user.as_str().into(),
-				| _ => state.1.clone(),
+				| _ => state_key,
 			};
 
-			let mut pdu = services
-				.state_accessor
-				.room_state_get(room_id, &state.0, &state_key)
-				.map_ok(Event::into_pdu)
-				.ok()
-				.await?;
+			let event_id = match event_id {
+				| Some(event_id) => event_id,
+				| None =>
+					services
+						.state_accessor
+						.room_state_get_id(room_id, &event_type, &state_key)
+						.ok()
+						.await?,
+			};
+
+			let pdu_id = services.timeline.get_pdu_id(&event_id).await.ok();
+			let count = pdu_id.map(RawPduId::pdu_count);
+			let pdu_id = state_is_required(state_mode, count, lazy).then_some(pdu_id)?;
+
+			let mut pdu = match pdu_id {
+				| None => services
+					.timeline
+					.get_outlier_pdu(&event_id)
+					.await
+					.ok()?,
+				| Some(pdu_id) => services
+					.timeline
+					.get_pdu_from_id(&pdu_id)
+					.or_else(|_| services.timeline.get_outlier_pdu(&event_id))
+					.await
+					.ok()?,
+			};
 
 			annotate_membership(services, &mut pdu, sender_user, encrypted).await;
 
@@ -507,19 +556,11 @@ async fn collect_required_state(
 		.collect()
 		.await
 }
-
-async fn wildcard_state_keys(
-	services: &Services,
-	room_id: &RoomId,
-	event_type: StateEventType,
-) -> Vec<(StateEventType, StateKey)> {
-	services
-		.state_accessor
-		.room_state_keys(room_id, &event_type)
-		.ready_filter_map(Result::ok)
-		.map(|state_key| (event_type.clone(), state_key))
-		.collect()
-		.await
+fn state_is_required(state_mode: StateMode, count: Option<PduCount>, lazy: bool) -> bool {
+	lazy || match state_mode {
+		| StateMode::Full => true,
+		| StateMode::Delta(since) => count.is_none_or(|count| count > since),
+	}
 }
 
 #[cfg(test)]
@@ -528,14 +569,15 @@ mod tests {
 
 	use ruma::{
 		UInt,
+		api::client::sync::sync_events::v5::response::Room as ResponseRoom,
 		events::{StateEventType, room::member::MembershipState},
 		uint,
 	};
 	use tuwunel_core::matrix::pdu::PduCount;
 
 	use super::{
-		membership_allows_required_state, room_config_hash, room_timeline_limited,
-		room_timeline_metadata,
+		StateMode, membership_allows_required_state, room_config_hash, room_timeline_limited,
+		room_timeline_metadata, state_is_required, state_mode,
 	};
 
 	fn timeline(positions: &[u64]) -> Vec<(PduCount, ())> {
@@ -597,6 +639,48 @@ mod tests {
 		assert!(membership_allows_required_state(Some(&MembershipState::Join)));
 		assert!(!membership_allows_required_state(Some(&MembershipState::Invite)));
 		assert!(!membership_allows_required_state(Some(&MembershipState::Knock)));
+	}
+
+	#[test]
+	fn required_state_is_full_initially_and_after_config_changes() {
+		assert_eq!(state_mode(0, false), StateMode::Full);
+		assert_eq!(state_mode(7, true), StateMode::Full);
+		assert_eq!(state_mode(7, false), StateMode::Delta(PduCount::Normal(7)));
+		assert!(state_is_required(StateMode::Full, Some(PduCount::Normal(1)), false));
+	}
+
+	#[test]
+	fn incremental_required_state_omits_unchanged_events() {
+		let mode = StateMode::Delta(PduCount::Normal(7));
+
+		assert!(!state_is_required(mode, Some(PduCount::Normal(7)), false));
+		assert!(!state_is_required(mode, Some(PduCount::Normal(6)), false));
+	}
+
+	#[test]
+	fn incremental_required_state_includes_only_changes() {
+		let mode = StateMode::Delta(PduCount::Normal(7));
+		let included = [PduCount::Normal(6), PduCount::Normal(8)]
+			.into_iter()
+			.filter(|count| state_is_required(mode, Some(*count), false))
+			.count();
+
+		assert_eq!(included, 1);
+	}
+
+	#[test]
+	fn incremental_required_state_keeps_lazy_members() {
+		let mode = StateMode::Delta(PduCount::Normal(7));
+
+		assert!(state_is_required(mode, Some(PduCount::Normal(1)), true));
+		assert!(state_is_required(mode, None, false));
+	}
+
+	#[test]
+	fn empty_required_state_is_omitted() {
+		let room = serde_json::to_value(ResponseRoom::new()).expect("room must serialize");
+
+		assert!(room.get("required_state").is_none());
 	}
 
 	#[test]
