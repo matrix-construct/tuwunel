@@ -47,7 +47,8 @@ commands. Run any command with `--help` for argument detail.
 - `!admin rooms moderation ban-list-of-rooms`: bulk variant; takes a code
   block of room IDs or aliases.
 - `!admin rooms moderation unban-room <room>`: reverses a ban and re-enables
-  federation.
+  inbound federation handling; the `m.federate` caveat under
+  [Federation](#federation) below applies here too.
 - `!admin rooms moderation list-banned-rooms`: lists every banned room.
 - `!admin rooms delete <room>`: harder than ban; removes the room from the
   database after evicting users.
@@ -58,6 +59,9 @@ commands. Run any command with `--help` for argument detail.
   room without banning it. Useful for stalling a runaway room while
   investigating.
 - `!admin federation enable-room <room>`: re-enables inbound handling.
+  Neither command touches the `m.federate` property of the room's
+  `m.room.create` event, which is fixed when the room is created; see
+  [Troubleshooting](./troubleshooting.md).
 - `!admin federation incoming-federation`: lists rooms with active inbound
   PDU handlers.
 - `!admin federation fetch-support-well-known <server>`: fetches a remote

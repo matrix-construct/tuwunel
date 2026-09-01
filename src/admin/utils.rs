@@ -1,7 +1,14 @@
+use std::borrow::Cow;
+
 use futures::StreamExt;
 use ruma::{OwnedRoomId, OwnedUserId, RoomId, UserId};
-use tuwunel_core::{Err, Result, err};
+use tuwunel_core::{Err, Result, err, utils::BoolExt};
 use tuwunel_service::Services;
+
+const UNFEDERATABLE_CAVEAT: &str = ", but this room's `m.room.create` event sets `m.federate` \
+                                    to false, so remote users still cannot join it or be \
+                                    invited to it. That property is fixed when the room is \
+                                    created and no command can change it.";
 
 pub(crate) async fn get_room_info(
 	services: &Services,
@@ -26,6 +33,26 @@ pub(crate) async fn get_room_info(
 	};
 
 	(room_id.into(), join_count, name)
+}
+
+/// Builds the reply for a command that re-enables a room's inbound
+/// federation handling.
+///
+/// A room whose create event sets `m.federate` to false still cannot
+/// federate afterward, so the reply for such a room extends `prefix` with
+/// that caveat rather than confirming with `confirmation`. `confirmation`
+/// is a complete sentence; `prefix` is a fragment the caveat continues.
+pub(crate) async fn room_enabled_reply(
+	services: &Services,
+	room_id: &RoomId,
+	confirmation: &'static str,
+	prefix: &'static str,
+) -> Cow<'static, str> {
+	services
+		.state_accessor
+		.is_federating(room_id)
+		.await
+		.map_or_else(|| format!("{prefix}{UNFEDERATABLE_CAVEAT}").into(), || confirmation.into())
 }
 
 /// Parses user ID

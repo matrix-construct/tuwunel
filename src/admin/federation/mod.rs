@@ -17,11 +17,17 @@ pub(super) enum FederationCommand {
 	IncomingFederation,
 
 	/// - Disables incoming federation handling for a room.
+	///
+	/// The room's `m.federate` property is unaffected; it is fixed at room
+	/// creation.
 	DisableRoom {
 		room_id: OwnedRoomId,
 	},
 
 	/// - Enables incoming federation handling for a room again.
+	///
+	/// The room's `m.federate` property is unaffected; it is fixed at room
+	/// creation.
 	EnableRoom {
 		room_id: OwnedRoomId,
 	},

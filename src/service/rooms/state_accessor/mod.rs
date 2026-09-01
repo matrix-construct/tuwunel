@@ -29,7 +29,7 @@ use ruma::{
 	room::RoomType,
 };
 use tuwunel_core::{
-	Result, err,
+	Result, err, implement,
 	matrix::{Pdu, room_version},
 	utils::BoolExt,
 };
@@ -173,6 +173,19 @@ impl Service {
 			.await
 			.is_ok()
 	}
+}
+
+/// Checks whether the room federates, per `m.federate` in its create event.
+///
+/// An absent `m.federate` means the room federates, which is the spec
+/// default. A missing or unparsable create event reports the same, so a
+/// failed read never reports a room as non-federating.
+#[implement(Service)]
+pub async fn is_federating(&self, room_id: &RoomId) -> bool {
+	self.get_create(room_id)
+		.await
+		.and_then(|create| create.federate())
+		.unwrap_or(true)
 }
 
 /// Resolves an `m.room.topic` to its plain-text rendering: the `m.topic`

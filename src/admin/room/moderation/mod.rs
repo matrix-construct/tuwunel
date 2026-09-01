@@ -31,6 +31,9 @@ pub(crate) enum RoomModerationCommand {
 	BanListOfRooms,
 
 	/// - Unbans a room to allow local users to join again
+	///
+	/// The room's `m.federate` property is unaffected; it is fixed at room
+	/// creation.
 	UnbanRoom {
 		/// The room in the format of `!roomid:example.com` or a room alias in
 		/// the format of `#roomalias:example.com`

@@ -18,6 +18,32 @@ argument once to invite yourself to the admin room on startup
 - Or specify the `emergency_password` config option to allow you to temporarily
 log into the server account (`@conduit`) from a web client
 
+#### A room created with federation disabled cannot federate later
+
+`m.federate` lives in the room's `m.room.create` event, so it is fixed for the
+life of the room. Element sets it from the "Block anyone not part of `<server>`
+from ever joining this room" checkbox, whose own help text says the choice
+cannot be changed later. Inviting a user from another server into such a room
+is rejected with:
+
+```
+Auth check failed: MSC4361: room is not federated and target user domain does not match `m.room.create` event's sender domain
+```
+
+Synapse rejects the same event ("This room has been marked as unfederatable"),
+so the restriction is not specific to Tuwunel.
+
+`!admin federation enable-room` does not lift it. That command clears an
+inbound-PDU block set earlier by `!admin federation disable-room`, a separate
+mechanism described under [Policy and Moderation](./moderation.md); run it on a
+non-federating room and it says so in its reply. The `federate_created_rooms`
+config option is no help either: it applies when a room is created, so
+changing it leaves every existing room alone.
+
+Upgrading the room is not a workaround either: the replacement room inherits
+`m.federate` from its predecessor, as it does on Synapse. Moving the
+conversation to a newly created room is the only remedy.
+
 ## General potential issues
 
 #### Potential DNS issues when using Docker
