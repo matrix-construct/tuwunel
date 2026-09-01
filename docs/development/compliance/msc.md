@@ -76,7 +76,7 @@ in the [Out of scope](#out-of-scope) section.
 | MSC4156 | ✅ ● | 100/100 | Migrate `server_name` to `via` | via parameter handled via Ruma |
 | MSC4151 | ✅ ● | 100/100 | Reporting rooms (Client-Server API) | POST /rooms/{roomId}/report implemented and routed |
 | MSC4138 | ✅ ● | 100/100 | Update allowed HTTP methods in CORS responses | CORS METHODS list includes HEAD and PATCH; excludes CONNECT/TRACE |
-| MSC4133 | ✅ ● | 90/100 | Extending User Profile API with Custom Key:Value Pairs | field endpoints + 64KiB/255B caps, M_*_TOO_LARGE errcodes, namespaced keys |
+| MSC4133 | ✅ ● | 90/100 | Extending User Profile API with Custom Key:Value Pairs | endpoints + caps/errcodes; unset legacy 200 omit by choice, 404 key-scoped |
 | MSC4126 | ✅ ● | 100/100 | Deprecation of query string auth | deprecation of query string auth; server still accepts both |
 | MSC4115 | ✅ ● | 100/100 | membership metadata on events | src/core/matrix/pdu/unsigned.rs add_membership; src/service/rooms/state_acces... |
 | MSC4041 | ✅ ◐ | 90/90 | Use http header Retry-After to enable library-assisted retry handling | Ruma error type emits Retry-After header for LimitExceeded responses. |

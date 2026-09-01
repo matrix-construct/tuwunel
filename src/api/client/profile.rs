@@ -2,9 +2,11 @@ use axum::extract::State;
 use futures::StreamExt;
 use ruma::{
 	api::client::profile::{
-		PropagateTo, delete_profile_field, get_profile, get_profile_field, set_profile_field,
+		PropagateTo, delete_profile_field, get_profile,
+		get_profile_field::{self, v3::Response as GetProfileFieldResponse},
+		set_profile_field,
 	},
-	profile::ProfileFieldValue,
+	profile::{ProfileFieldName, ProfileFieldValue},
 };
 use tuwunel_core::{Err, Result, err};
 use tuwunel_service::{presence::Ping, profile::Propagation};
@@ -61,10 +63,12 @@ pub(crate) async fn get_profile_route(
 ///
 /// - If user is on another server and we do not have a local copy already fetch
 ///   `timezone` over federation
+/// - An unset `displayname` or `avatar_url` is a 200 with the field omitted, as
+///   before Matrix 1.16; other unset fields are a 404 per MSC4133.
 pub(crate) async fn get_profile_field_route(
 	State(services): State<crate::State>,
 	body: Ruma<get_profile_field::v3::Request>,
-) -> Result<get_profile_field::v3::Response> {
+) -> Result<GetProfileFieldResponse> {
 	if !services.globals.user_is_local(&body.user_id) {
 		services
 			.profile
@@ -78,18 +82,30 @@ pub(crate) async fn get_profile_field_route(
 		return Err!(Request(NotFound("Profile was not found.")));
 	}
 
+	let legacy =
+		matches!(body.field, ProfileFieldName::AvatarUrl | ProfileFieldName::DisplayName);
+
 	let value = services
 		.profile
 		.profile_key(&body.user_id, &body.field)
-		.await?;
+		.await
+		.map(Some)
+		.or_else(|error| {
+			(legacy && error.is_not_found())
+				.then_some(None)
+				.ok_or(error)
+		})?
+		.map(|value| ProfileFieldValue::new(body.field.as_str(), value))
+		.transpose()
+		.map_err(|_| {
+			err!(Database(error!(
+				user_id = %body.user_id,
+				key = %body.field,
+				"Invalid json in database profile value",
+			)))
+		})?;
 
-	let profile_value = ProfileFieldValue::new(body.field.as_str(), value).map_err(|_| {
-		err!(Database(
-			error!(user_id = %body.user_id, key = %body.field, "Invalid json in database profile value")
-		))
-	})?;
-
-	Ok(get_profile_field::v3::Response { value: Some(profile_value) })
+	Ok(GetProfileFieldResponse { value })
 }
 
 /// # `PUT /_matrix/client/v3/profile/{user_id}/{field}`
