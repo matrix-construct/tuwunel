@@ -1,7 +1,7 @@
-use std::io::Error as IoError;
+use std::{collections::HashMap, io::Error as IoError};
 
 use ruma::{
-	Signatures,
+	OwnedEventId, Signatures, UserId,
 	events::{
 		TimelineEventType,
 		room::{
@@ -15,15 +15,15 @@ use ruma::{
 	third_party_invite::IdentityServerBase64PublicKey,
 };
 use serde_json::{json, value::to_raw_value as to_raw_json_value};
-use tuwunel_core::{Error, matrix::PduEvent};
+use tuwunel_core::{Error, Result, matrix::PduEvent};
 
 use super::{
 	super::events::{RoomMemberEvent, member::RoomMemberEventResultExt},
 	check_room_member,
 	test_utils::{
-		INITIAL_EVENTS, INITIAL_EVENTS_CREATE_ROOM, TestStateMap, alice, bob, charlie, ella,
-		event_id, init_subscriber, member_content_ban, member_content_join, not_found,
-		room_third_party_invite, to_pdu_event, zara,
+		INITIAL_EVENTS, INITIAL_EVENTS_CREATE_ROOM, INITIAL_EVENTS_NO_FEDERATE, TestStateMap,
+		alice, aya, bob, charlie, ella, event_id, init_subscriber, member_content_ban,
+		member_content_join, not_found, room_third_party_invite, to_pdu_event, zara,
 	},
 };
 
@@ -1589,22 +1589,48 @@ async fn invite_sender_not_enough_power() {
 async fn invite() {
 	let _guard = init_subscriber();
 
+	// The invite is valid.
+	check_invite(ella(), INITIAL_EVENTS())
+		.await
+		.unwrap();
+}
+
+#[tokio::test]
+async fn invite_remote_target() {
+	let _guard = init_subscriber();
+
+	// A federating room accepts an invite whose target is on another server.
+	check_invite(aya(), INITIAL_EVENTS())
+		.await
+		.unwrap();
+}
+
+#[tokio::test]
+async fn invite_remote_target_no_federate() {
+	let _guard = init_subscriber();
+
+	// MSC4361: a non-federating room rejects a member event whose target is on
+	// another server.
+	check_invite(aya(), INITIAL_EVENTS_NO_FEDERATE())
+		.await
+		.unwrap_err();
+}
+
+async fn check_invite(target: &UserId, init_events: HashMap<OwnedEventId, PduEvent>) -> Result {
 	let incoming_event = to_pdu_event(
 		"HELLO",
 		charlie(),
 		TimelineEventType::RoomMember,
-		Some(ella().as_str()),
+		Some(target.as_str()),
 		to_raw_json_value(&RoomMemberEventContent::new(MembershipState::Invite)).unwrap(),
 		&["CREATE", "IJR", "IPOWER"],
 		&["IPOWER"],
 	);
 
-	let init_events = INITIAL_EVENTS();
 	let auth_events = TestStateMap::new(&init_events);
 	let fetch_state = auth_events.fetch_state_fn();
 	let room_create_event = auth_events.room_create_event();
 
-	// The invite is valid.
 	check_room_member(
 		&RoomMemberEvent::new(incoming_event),
 		&AuthorizationRules::V8,
@@ -1612,7 +1638,6 @@ async fn invite() {
 		&fetch_state,
 	)
 	.await
-	.unwrap();
 }
 
 #[tokio::test]

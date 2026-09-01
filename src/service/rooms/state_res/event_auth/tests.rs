@@ -30,10 +30,10 @@ use super::{
 	check_state_dependent_auth_rules, check_state_independent_auth_rules, classify_auth_error,
 	events::{RoomCreateEvent, RoomPowerLevelsEvent},
 	test_utils::{
-		INITIAL_EVENTS, INITIAL_HYDRA_EVENTS, TestStateMap, alice, charlie, ella, event_id,
-		init_subscriber, member_content_join, not_found, room_create_hydra_pdu_event, room_id,
-		room_redaction_pdu_event, room_third_party_invite, to_hydra_pdu_event, to_init_pdu_event,
-		to_pdu_event, zara,
+		INITIAL_EVENTS, INITIAL_EVENTS_NO_FEDERATE, INITIAL_HYDRA_EVENTS, TestStateMap, alice,
+		aya, charlie, ella, event_id, init_subscriber, member_content_join, not_found,
+		room_create_hydra_pdu_event, room_id, room_redaction_pdu_event, room_third_party_invite,
+		to_hydra_pdu_event, to_init_pdu_event, to_pdu_event, zara,
 	},
 };
 
@@ -499,7 +499,7 @@ async fn reject_missing_room_create_auth_events() {
 async fn no_federate_different_server() {
 	let _guard = init_subscriber();
 
-	let sender = user_id!("@aya:other.server");
+	let sender = aya();
 	let incoming_event = to_pdu_event(
 		"AYA_JOIN",
 		sender,
@@ -510,19 +510,7 @@ async fn no_federate_different_server() {
 		&["IMB"],
 	);
 
-	let mut init_events = INITIAL_EVENTS();
-	*init_events.get_mut(&event_id("CREATE")).unwrap() = to_init_pdu_event(
-		"CREATE",
-		alice(),
-		TimelineEventType::RoomCreate,
-		Some(""),
-		to_raw_json_value(&json!({
-			"creator": alice(),
-			"m.federate": false,
-		}))
-		.unwrap(),
-	);
-
+	let init_events = INITIAL_EVENTS_NO_FEDERATE();
 	let auth_events = TestStateMap::new(&init_events);
 	let fetch_state = auth_events.fetch_state_fn();
 
@@ -547,19 +535,7 @@ async fn no_federate_same_server() {
 		&["IMB"],
 	);
 
-	let mut init_events = INITIAL_EVENTS();
-	*init_events.get_mut(&event_id("CREATE")).unwrap() = to_init_pdu_event(
-		"CREATE",
-		alice(),
-		TimelineEventType::RoomCreate,
-		Some(""),
-		to_raw_json_value(&json!({
-			"creator": alice(),
-			"m.federate": false,
-		}))
-		.unwrap(),
-	);
-
+	let init_events = INITIAL_EVENTS_NO_FEDERATE();
 	let auth_events = TestStateMap::new(&init_events);
 	let fetch_state = auth_events.fetch_state_fn();
 

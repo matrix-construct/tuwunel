@@ -438,6 +438,8 @@ pub(super) fn event_id(id: &str) -> OwnedEventId {
 
 pub(super) fn alice() -> &'static UserId { user_id!("@alice:foo") }
 
+pub(super) fn aya() -> &'static UserId { user_id!("@aya:other.server") }
+
 pub(super) fn bob() -> &'static UserId { user_id!("@bob:foo") }
 
 pub(super) fn charlie() -> &'static UserId { user_id!("@charlie:foo") }
@@ -854,6 +856,21 @@ pub(super) fn INITIAL_EVENTS_CREATE_ROOM() -> HashMap<OwnedEventId, PduEvent> {
 	.into_iter()
 	.map(|ev| (ev.event_id().to_owned(), ev))
 	.collect()
+}
+
+#[expect(non_snake_case)]
+pub(super) fn INITIAL_EVENTS_NO_FEDERATE() -> HashMap<OwnedEventId, PduEvent> {
+	let create = to_init_pdu_event(
+		"CREATE",
+		alice(),
+		TimelineEventType::RoomCreate,
+		Some(""),
+		to_raw_json_value(&json!({ "creator": alice(), "m.federate": false })).unwrap(),
+	);
+
+	let mut events = INITIAL_EVENTS();
+	events.insert(event_id("CREATE"), create);
+	events
 }
 
 #[expect(non_snake_case)]
