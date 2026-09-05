@@ -26,6 +26,7 @@ use tuwunel_core::{
 	warn,
 };
 use tuwunel_database::{Deserialized, Ignore, Interfix, Map};
+use update::EMPTY_INVITE_STATE;
 pub use update::{MembershipUpdate, StrippedRoomState};
 
 use crate::appservice::RegistrationInfo;
@@ -608,6 +609,22 @@ pub async fn invite_state(
 		.and_then(|val: Raw<Vec<AnyStrippedStateEvent>>| {
 			val.deserialize_as_unchecked().map_err(Into::into)
 		})
+}
+
+/// Whether the user's stored invite carries any stripped state.
+///
+/// The row is probed raw rather than decoded through [`Self::invite_state`], so
+/// no stripped state is materialized to answer it.
+#[implement(Service)]
+#[tracing::instrument(skip(self), level = "trace")]
+pub async fn has_invite_state(&self, user_id: &UserId, room_id: &RoomId) -> bool {
+	let key = (user_id, room_id);
+
+	self.db
+		.userroomid_invitestate
+		.qry(&key)
+		.await
+		.is_ok_and(|state| state.len() > EMPTY_INVITE_STATE.len())
 }
 
 #[implement(Service)]

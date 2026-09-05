@@ -17,10 +17,10 @@ use ruma::{
 use tuwunel_core::{
 	Result, implement, is_not_empty,
 	matrix::PduCount,
-	utils::{ReadyExt, result::LogErr},
+	utils::{BoolExt, ReadyExt, result::LogErr},
 	warn,
 };
-use tuwunel_database::{Json, serialize_key, serialize_val};
+use tuwunel_database::{Json, keyval::ValBuf, serialize_key, serialize_val};
 
 /// Optional stripped room state attached to invite and knock transitions.
 pub type StrippedRoomState = Option<Vec<Raw<AnyStrippedStateEvent>>>;
@@ -52,7 +52,8 @@ pub struct MembershipUpdate<'a> {
 
 	/// Stripped room state associated with an invite or knock.
 	///
-	/// Other membership transitions leave this value unused.
+	/// Other membership transitions leave this value unused. An absent or empty
+	/// value preserves an invite's stored state rather than clearing it.
 	pub last_state: StrippedRoomState,
 
 	/// Servers supplied as routing hints for an invite.
@@ -337,6 +338,13 @@ fn mark_as_once_joined(&self, user_id: &UserId, room_id: &RoomId) {
 	txn.execute();
 }
 
+/// Length floor for an invite whose stripped state holds no events.
+///
+/// `mark_as_invited` below stores the state as JSON, so a row longer than the
+/// empty array carries at least one event. `has_invite_state` probes against
+/// this length, so a change to the value codec here moves that floor.
+pub(super) const EMPTY_INVITE_STATE: &[u8] = b"[]";
+
 #[implement(super::Service)]
 #[tracing::instrument(level = "debug", skip(self, last_state, invite_via))]
 pub(crate) async fn mark_as_invited(
@@ -353,8 +361,22 @@ pub(crate) async fn mark_as_invited(
 	let roomuser_id = (room_id, user_id);
 	let roomuser_id = serialize_key(roomuser_id).expect("failed to serialize roomuser_id");
 
-	let invite_state = serialize_val(Json(last_state.unwrap_or_default()))
-		.expect("failed to serialize invite state");
+	// A replay carrying no stripped state must not blank a row that has some, or
+	// the read side loses the sender it judges the invite by.
+	let last_state = last_state.filter(is_not_empty!());
+	let stored = last_state
+		.is_none()
+		.then_async(|| self.db.userroomid_invitestate.get(&userroom_id))
+		.await
+		.and_then(Result::ok);
+
+	let invite_state = stored.as_deref().map_or_else(
+		|| {
+			serialize_val(Json(last_state.unwrap_or_default()))
+				.expect("failed to serialize invite state")
+		},
+		ValBuf::from_slice,
+	);
 
 	let count = count.into_unsigned().to_be_bytes();
 	let mut txn = self.services.db.txn();

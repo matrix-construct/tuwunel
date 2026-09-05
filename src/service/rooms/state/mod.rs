@@ -8,7 +8,10 @@ pub(crate) use prune::prune_goal;
 pub use prune::{PruneSummary, Trigger};
 use ruma::{
 	CanonicalJsonObject, EventId, OwnedEventId, OwnedRoomId, RoomId, RoomVersionId, UserId,
-	events::{AnyStrippedStateEvent, StateEventType, TimelineEventType},
+	events::{
+		AnyStrippedStateEvent, StateEventType, TimelineEventType,
+		room::member::{MembershipState, RoomMemberEventContent},
+	},
 	room_version_rules::AuthorizationRules,
 	serde::Raw,
 };
@@ -22,7 +25,7 @@ use tuwunel_core::{
 	smallvec::SmallVec,
 	trace,
 	utils::{
-		IterStream, MutexMap, MutexMapGuard, ReadyExt, calculate_hash,
+		BoolExt, IterStream, MutexMap, MutexMapGuard, ReadyExt, calculate_hash,
 		mutex_map::Guard,
 		stream::{BroadbandExt, TryIgnore, WidebandExt},
 	},
@@ -33,7 +36,7 @@ use tuwunel_database::{Deserialized, Ignore, Interfix, Map, Txn};
 use crate::{
 	rooms::{
 		short::{ShortEventId, ShortStateHash, ShortStateKey},
-		state_cache::MembershipUpdate,
+		state_cache::{MembershipUpdate, StrippedRoomState},
 		state_compressor::{CompressedState, parse_compressed_state_event},
 		state_res::{StateMap, auth_types_for_event},
 	},
@@ -125,35 +128,7 @@ pub async fn force_state(
 		})
 		.map(Ok)
 		.try_for_each(async |pdu| match pdu.kind {
-			| TimelineEventType::RoomMember => {
-				let Some(user_id) = pdu
-					.state_key
-					.as_ref()
-					.map(UserId::parse)
-					.flat_ok()
-				else {
-					return Ok(());
-				};
-
-				let Ok(membership_event) = pdu.get_content() else {
-					return Ok(());
-				};
-
-				let count = self.services.globals.next_count();
-				self.services
-					.state_cache
-					.update_membership(MembershipUpdate {
-						room_id,
-						user_id: &user_id,
-						membership_event,
-						sender: &pdu.sender,
-						last_state: None,
-						invite_via: None,
-						update_joined_count: false,
-						count: PduCount::Normal(*count),
-					})
-					.await
-			},
+			| TimelineEventType::RoomMember => self.force_member_effects(room_id, &pdu).await,
 			| _ => Ok(()),
 		})
 		.boxed()
@@ -170,6 +145,72 @@ pub async fn force_state(
 	self.services.spaces.cache_evict(room_id);
 
 	Ok(())
+}
+
+/// Record the membership transition a replayed `m.room.member` event carries.
+///
+/// A replayed invite is judged by the sender named in its stripped state, so a
+/// local invitee's row has to carry one. An event whose state key or content
+/// does not parse is skipped rather than failing the whole replay.
+#[implement(Service)]
+async fn force_member_effects(&self, room_id: &RoomId, pdu: &PduEvent) -> Result {
+	let Some(user_id) = pdu
+		.state_key
+		.as_ref()
+		.map(UserId::parse)
+		.flat_ok()
+	else {
+		return Ok(());
+	};
+
+	let Ok(membership_event): Result<RoomMemberEventContent> = pdu.get_content() else {
+		return Ok(());
+	};
+
+	let last_state = membership_event
+		.membership
+		.eq(&MembershipState::Invite)
+		.and_is(self.services.globals.user_is_local(&user_id))
+		.then_async(|| self.replayed_invite_state(room_id, &user_id, pdu))
+		.map(Option::flatten)
+		.await;
+
+	let count = self.services.globals.next_count();
+
+	self.services
+		.state_cache
+		.update_membership(MembershipUpdate {
+			room_id,
+			user_id: &user_id,
+			membership_event,
+			sender: &pdu.sender,
+			last_state,
+			invite_via: None,
+			update_joined_count: false,
+			count: PduCount::Normal(*count),
+		})
+		.await
+}
+
+/// Computes stripped state for a replayed invite, unless the row has some.
+///
+/// A reset reaches this before the new state is installed, so the summary built
+/// here is thinner than what the invite itself stored. Returning nothing leaves
+/// the stored row for `mark_as_invited` to keep.
+#[implement(Service)]
+async fn replayed_invite_state(
+	&self,
+	room_id: &RoomId,
+	user_id: &UserId,
+	pdu: &PduEvent,
+) -> StrippedRoomState {
+	self.services
+		.state_cache
+		.has_invite_state(user_id, room_id)
+		.await
+		.is_false()
+		.then_async(|| self.summary_stripped(pdu))
+		.await
 }
 
 /// Generates a new StateHash and associates it with the incoming event.
