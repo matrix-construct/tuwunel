@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use tuwunel_core::{
 	Err, Error, Result,
 	debug::INFO_SPAN_LEVEL,
-	debug_error, err, implement,
+	debug_error, debug_warn, err, implement,
 	smallvec::SmallVec,
 	utils::{
 		BoolExt, IterStream, ReadyExt,
@@ -399,6 +399,7 @@ pub async fn prune_one_time_keys(&self, user_id: &UserId, device_id: &DeviceId, 
 		})
 		.await;
 }
+
 /// Drops every one-time key still outstanding for this `(user, device)`.
 ///
 /// Device removal has to reach the pool as well as the MSC2732 fallback key,
@@ -910,6 +911,11 @@ fn keys_changed_user_or_room<'a>(
 		.map(|((_, count), user_id): KeyVal<'_>| (user_id, count))
 }
 
+/// Records a device-list change for a user and pushes it to interested peers.
+///
+/// The change is durable before any peer is contacted, and the unbounded sender
+/// channels refuse only once closed, so a refused flush is a shutdown race
+/// rather than a fault.
 #[implement(super::Service)]
 #[tracing::instrument(
 	name = "device_key_update"
@@ -989,7 +995,8 @@ pub async fn mark_device_key_update(&self, user_id: &UserId) {
 		.sending
 		.flush_servers(servers.iter().map(|server| &**server).stream())
 		.await
-		.expect("device key update flush failed");
+		.inspect_err(|e| debug_warn!(%e, "device list flush refused"))
+		.ok();
 }
 
 #[implement(super::Service)]
