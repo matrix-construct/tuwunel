@@ -47,7 +47,7 @@ pub struct MembershipUpdate<'a> {
 
 	/// User who sent the membership event.
 	///
-	/// Invite handling uses the sender when applying the ignored-user policy.
+	/// The transition records it for trace attribution rather than reading it.
 	pub sender: &'a UserId,
 
 	/// Stripped room state associated with an invite or knock.
@@ -109,15 +109,8 @@ pub async fn update_membership(
 			self.handle_join(room_id, user_id, count).await?;
 		},
 		| MembershipState::Invite => {
-			if self
-				.services
-				.users
-				.user_is_ignored(sender, user_id)
-				.await
-			{
-				return Ok(());
-			}
-
+			// An ignored sender's invite is stored anyway; the recipient's list
+			// is applied when it is served, by InviteFilter::permission.
 			self.mark_as_invited(user_id, room_id, count, last_state, invite_via)
 				.await;
 		},
