@@ -651,7 +651,7 @@ in the [Out of scope](#out-of-scope) section.
 | MSC2802 | ❌ ● | 0/0 | Full Room Abstraction | open meta proposal to redesign spec; not implementable as-is |
 | MSC2787 | ❌ ● | 0/0 | Portable Identities | no UPK/UDK/attestation infrastructure |
 | MSC2785 | ❌ ● | 0/0 | Event notification attributes and actions | no notification_attribute_data or notifications_profile endpoints |
-| MSC2782 | ✅ ● | 80/90 | Pushers with the full event content | full_event opt-in works via _Custom; membership absent, user_is_target wrong |
+| MSC2782 | ✅ ● | 90/90 | Pushers with the full event content | full_event opt-in works; membership absent, user_is_target now correct |
 | MSC2772 | ❌ ◐ | 0/0 | Notifications for Jitsi Calls | no .m.jitsi default underride push rules |
 | MSC2757 | ❌ ● | 0/0 | Sign Events | No event_signing key type; no client signature plumbing |
 | MSC2755 | ❌ ● | 0/0 | Lazy load rooms | No room_limit_by_complexity filter handling |

@@ -175,7 +175,7 @@ async fn send_http_event_notice<Pdu: Event>(
 		notify.content = serde_json::value::to_raw_value(event.content()).ok();
 
 		if *event.kind() == TimelineEventType::RoomMember {
-			notify.user_is_target = event.state_key() == Some(event.sender().as_str());
+			notify.user_is_target = event.state_key() == Some(user_id.as_str());
 		}
 
 		let (display_name, room_name, room_alias, unread) = join4(
