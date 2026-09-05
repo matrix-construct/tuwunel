@@ -399,6 +399,20 @@ pub async fn prune_one_time_keys(&self, user_id: &UserId, device_id: &DeviceId, 
 		})
 		.await;
 }
+/// Drops every one-time key still outstanding for this `(user, device)`.
+///
+/// Device removal has to reach the pool as well as the MSC2732 fallback key,
+/// or a claim against the deleted device still succeeds from the rows left
+/// behind.
+#[implement(super::Service)]
+pub async fn remove_one_time_keys(&self, user_id: &UserId, device_id: &DeviceId) {
+	let Some(otk) = self.db.onetimekeyid4225_otk.as_ref() else {
+		return;
+	};
+
+	otk.del_prefix(&(user_id, device_id, Interfix))
+		.await;
+}
 
 #[implement(super::Service)]
 pub async fn add_device_keys(
