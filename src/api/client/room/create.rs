@@ -34,7 +34,10 @@ use ruma::{
 	serde::{JsonObject, Raw},
 };
 use serde::Deserialize;
-use serde_json::{Value as JsonValue, json, value::to_raw_value};
+use serde_json::{
+	Value as JsonValue, json,
+	value::{RawValue as RawJsonValue, to_raw_value},
+};
 use tuwunel_core::{
 	Err, Result, debug_info, debug_warn, err, info,
 	matrix::{
@@ -42,7 +45,7 @@ use tuwunel_core::{
 		pdu::{Content, PduBuilder},
 		room_version,
 	},
-	utils::{BoolExt, IterStream, ReadyExt, option::OptionExt},
+	utils::{BoolExt, IterStream, ReadyExt, option::OptionExt, result::FlatOk},
 	warn,
 };
 use tuwunel_service::{Services, appservice::RegistrationInfo, rooms::state::RoomMutexGuard};
@@ -413,9 +416,7 @@ async fn apply_initial_state_pdus(
 	room_id: &RoomId,
 	state_lock: &RoomMutexGuard,
 ) -> Result {
-	let is_encrypted = initial_state
-		.iter()
-		.any(|event| event.event_type == StateEventType::RoomEncryption);
+	let is_encrypted = encrypts_room(&initial_state);
 
 	for event in initial_state {
 		services
@@ -459,6 +460,22 @@ async fn apply_initial_state_pdus(
 		.await?;
 
 	Ok(())
+}
+
+/// Whether `initial_state` already configures the room's encryption.
+///
+/// The last entry at the empty state key is the one that survives state
+/// resolution, so it alone decides whether the server's forced default is
+/// displaced, and only by naming a string `algorithm`. The raw field is read
+/// rather than deserialized so an escaped string still counts as one.
+fn encrypts_room(initial_state: &[InitialEvent]) -> bool {
+	initial_state
+		.iter()
+		.rfind(|event| {
+			event.event_type == StateEventType::RoomEncryption && event.state_key.is_empty()
+		})
+		.and_then(|event| event.content.get_field("algorithm").flat_ok())
+		.is_some_and(|algorithm: &RawJsonValue| algorithm.get().starts_with('"'))
 }
 
 async fn apply_name_and_topic_pdus(
@@ -1143,5 +1160,62 @@ mod tests {
 			.expect("explicit guest access pdu");
 
 		assert_eq!(guest_access(&pdu), GuestAccess::Forbidden);
+	}
+
+	#[test]
+	fn encryption_needs_a_string_algorithm() {
+		for content in [
+			r#"{"algorithm":"m.megolm.v1.aes-sha2"}"#,
+			r#"{"algorithm":"\u006d.megolm.v1.aes-sha2"}"#,
+			r#"{"algorithm":"whatever","rotation_period_ms":604800000}"#,
+			r#"{"algorithm" : "m.megolm.v1.aes-sha2"}"#,
+		] {
+			assert!(encrypts_room(&[initial_state_event("m.room.encryption", "", content)]));
+		}
+	}
+
+	fn initial_state_event(event_type: &str, state_key: &str, content: &str) -> InitialEvent {
+		let json =
+			format!(r#"{{"type":"{event_type}","state_key":"{state_key}","content":{content}}}"#);
+
+		serde_json::from_str(&json).expect("initial state event")
+	}
+
+	#[test]
+	fn contentless_encryption_leaves_the_forced_default() {
+		for content in ["{}", "{ }", r#"{"x":1}"#, r#"{"algorithm":1}"#, r#"{"algorithm":null}"#]
+		{
+			assert!(!encrypts_room(&[initial_state_event("m.room.encryption", "", content)]));
+		}
+	}
+
+	#[test]
+	fn the_last_entry_at_the_empty_state_key_decides() {
+		let valid = r#"{"algorithm":"m.megolm.v1.aes-sha2"}"#;
+		let junk = r#"{"x":1}"#;
+		let event = |content| initial_state_event("m.room.encryption", "", content);
+
+		assert!(!encrypts_room(&[event(valid), event(junk)]));
+		assert!(encrypts_room(&[event(junk), event(valid)]));
+		assert!(encrypts_room(&[
+			event(valid),
+			initial_state_event("m.room.encryption", "x", junk)
+		]));
+	}
+
+	#[test]
+	fn a_foreign_state_key_never_encrypts() {
+		let content = r#"{"algorithm":"m.megolm.v1.aes-sha2"}"#;
+		let event = initial_state_event("m.room.encryption", "x", content);
+
+		assert!(!encrypts_room(&[event]));
+	}
+
+	#[test]
+	fn other_event_types_never_encrypt() {
+		let event =
+			initial_state_event("m.room.name", "", r#"{"algorithm":"m.megolm.v1.aes-sha2"}"#);
+
+		assert!(!encrypts_room(&[event]));
 	}
 }
