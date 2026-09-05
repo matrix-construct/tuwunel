@@ -1,5 +1,9 @@
 use axum::extract::State;
-use futures::{FutureExt, StreamExt, TryFutureExt, future::Either, pin_mut};
+use futures::{
+	FutureExt, StreamExt, TryFutureExt,
+	future::{Either, ready},
+	pin_mut,
+};
 use ruma::{
 	DeviceId, RoomId, UInt, UserId,
 	api::{
@@ -13,7 +17,7 @@ use ruma::{
 	serde::Raw,
 };
 use tuwunel_core::{
-	Err, PduId, Result, at,
+	Err, PduId, Result, at, err,
 	matrix::{
 		event::{Event, Matches},
 		pdu::{PduCount, PduEvent},
@@ -22,7 +26,7 @@ use tuwunel_core::{
 	smallvec::SmallVec,
 	utils::{
 		BoolExt, IterStream, ReadyExt,
-		result::{FlatOk, LogErr},
+		result::LogErr,
 		stream::{BroadbandExt, TryIgnore, WidebandExt},
 	},
 };
@@ -141,13 +145,17 @@ pub(crate) async fn get_messages(
 
 	let from: PduCount = from
 		.map(str::parse)
-		.transpose()?
+		.transpose()
+		.map_err(|_| err!(Request(InvalidParam("Invalid `from` token."))))?
 		.unwrap_or_else(|| match dir {
 			| Direction::Forward => PduCount::min(),
 			| Direction::Backward => PduCount::max(),
 		});
 
-	let to: Option<PduCount> = to.map(str::parse).flat_ok();
+	let to: Option<PduCount> = to
+		.map(str::parse)
+		.transpose()
+		.map_err(|_| err!(Request(InvalidParam("Invalid `to` token."))))?;
 
 	let limit: usize = limit
 		.and_then(|limit| limit.try_into().ok())
@@ -185,9 +193,17 @@ pub(crate) async fn get_messages(
 
 	let shortroomid = services.short.get_shortroomid(room_id).await?;
 	let mut scanned = None;
+	let mut reached_to = false;
 	let events: Vec<_> = it
 		.inspect(|(count, _)| scanned = Some(*count))
-		.ready_take_while(|(count, _)| Some(*count) != to)
+		.take_while(|(count, _)| {
+			reached_to = to.is_some_and(|to| match dir {
+				| Direction::Forward => *count >= to,
+				| Direction::Backward => *count <= to,
+			});
+
+			ready(!reached_to)
+		})
 		.ready_filter_map(|item| event_filter(item, filter))
 		.wide_filter_map(|item| related_by_filter(services, shortroomid, filter, item))
 		.wide_filter_map(|item| event_filters(services, sender_user, item, bypass_visibility))
@@ -228,7 +244,7 @@ pub(crate) async fn get_messages(
 		.collect()
 		.await;
 
-	let exhausted = matches!(dir, Direction::Backward) && events.len() < limit && scanned != to;
+	let exhausted = matches!(dir, Direction::Backward) && events.len() < limit && !reached_to;
 	let next_token = if exhausted { scanned } else { events.last().map(at!(0)) };
 
 	let chunk = events
