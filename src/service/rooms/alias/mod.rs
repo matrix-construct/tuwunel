@@ -101,11 +101,11 @@ impl Service {
 	/// It comes back whether or not the alias was that room's canonical one.
 	#[tracing::instrument(skip(self))]
 	pub async fn remove_alias(&self, alias: &RoomAliasId) -> Result<OwnedRoomId> {
-		let alias = alias.alias();
+		let localpart = alias.alias();
 		let Ok(room_id) = self
 			.db
 			.alias_roomid
-			.get(&alias)
+			.get(&localpart)
 			.await
 			.deserialized()
 		else {
@@ -114,15 +114,18 @@ impl Service {
 
 		let prefix = (&room_id, Interfix);
 
+		// The row key carries the counter it was written under, so the row to drop is
+		// found by its value; deleting the prefix would take the room's other aliases.
 		self.db
 			.aliasid_alias
-			.keys_prefix_raw(&prefix)
+			.stream_prefix_raw(&prefix)
 			.ignore_err()
+			.ready_filter_map(|(key, stored)| stored.eq(alias.as_bytes()).then_some(key))
 			.ready_for_each(|key| self.db.aliasid_alias.remove(key))
 			.await;
 
-		self.db.alias_roomid.remove(alias.as_bytes());
-		self.db.alias_userid.remove(alias.as_bytes());
+		self.db.alias_roomid.remove(localpart.as_bytes());
+		self.db.alias_userid.remove(localpart.as_bytes());
 
 		Ok(room_id)
 	}
