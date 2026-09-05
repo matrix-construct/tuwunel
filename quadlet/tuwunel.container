@@ -13,11 +13,14 @@ Volume=tuwunel-db:/var/lib/tuwunel/
 Volume=%h/tuwunel/config/tuwunel.toml:/etc/tuwunel.toml
 EnvironmentFile=tuwunel.env
 
-# Podman's own stop timeout governs a stopped container, not the TimeoutStopSec
-# the generator writes into the unit. The first boot after an upgrade can run a
-# database migration that must not be interrupted partway, so allow well past
-# the longest one instead of the ten second default.
-StopTimeout=1800
+# The first boot after an upgrade can run a database migration that must not be
+# interrupted partway, so both stop deadlines have to clear the longest one.
+# This is podman's, raising the ten second default it applies to the container
+# on the way down. StopTimeout= is the native key for it, but quadlet rejects
+# the whole file on an unknown key and only learned that key in podman 5.0, so
+# spelling it as a passthrough argument keeps the unit generating on the 4.x
+# that Ubuntu 24.04 LTS and RHEL 9 ship.
+PodmanArgs=--stop-timeout=1800
 
 # The published image is OCI format, and the OCI image spec carries no
 # healthcheck field, so the image's own HEALTHCHECK is invisible to Podman.
@@ -35,6 +38,11 @@ HealthStartPeriod=1800s
 HealthRetries=3
 
 [Service]
+# The other stop deadline. Quadlet writes no TimeoutStopSec= of its own, so
+# without this systemd's DefaultTimeoutStopSec (90s) SIGKILLs the container
+# cgroup mid-migration however long podman was told to wait.
+TimeoutStopSec=1830
+
 # Uncomment when your system is properly configured, restart=always can mask start up errors. 
 #Restart=always
 

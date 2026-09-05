@@ -83,16 +83,18 @@ server is allowed to reach a safe point:
 |---|---|---|
 | `docker run` | `--stop-timeout 1800` | 10s |
 | Compose | `stop_grace_period: 30m` | 10s |
-| Podman quadlet | `StopTimeout=1800` in `[Container]` | 10s |
+| Podman quadlet | `PodmanArgs=--stop-timeout=1800`, plus `TimeoutStopSec=1830` | 10s |
 | Kubernetes | `terminationGracePeriodSeconds: 1800` | 30s |
 
 There is no way to carry this in the image, so it has to be set where the
 container is run. The compose files shipped in this directory already set it,
 and so does the quadlet unit.
 
-Under a quadlet, note that the `TimeoutStopSec` the generator writes into the
-unit is not what governs; podman's own stop timeout is, and it is what
-`StopTimeout=` sets.
+Under a quadlet both deadlines have to be set. The generator writes no
+`TimeoutStopSec=` of its own, so systemd's ninety second default ends the
+container before podman's timeout is reached, and `StopTimeout=` only became a
+`[Container]` key in podman 5.0, where an unknown key makes the generator emit
+no unit at all, so the value reaches podman as a passthrough argument instead.
 
 Tuwunel leaves the migration at the next safe point when it is asked to stop,
 and the steps that already finished are recorded, so the remainder run on the
