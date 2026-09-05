@@ -10,6 +10,7 @@ crypto/event-shields.spec.ts :: should show correct shields on events sent by us
 crypto/event-shields.spec.ts :: should show the correct shield on e2e events
 crypto/event-shields.spec.ts :: should show the correct shield on edited e2e events
 crypto/history-sharing.spec.ts :: Messages sent when we believed the room history was unshared should not be visible
+crypto/invisible-crypto.spec.ts :: Messages fail to decrypt when sender is previously verified
 crypto/user-verification.spec.ts :: can abort emoji verification when emoji mismatch
 crypto/user-verification.spec.ts :: can receive a verification request when there is no existing DM
 lazy-loading/lazy-loading.spec.ts :: should handle lazy loading properly even when offline
