@@ -66,9 +66,9 @@ impl Data {
 	/// Stores `event` as the user's receipt for its thread context, reporting
 	/// whether it advanced.
 	///
-	/// A receipt naming the stored event, or an earlier one, is rejected
-	/// without allocating a stream position or writing anything. An accepted
-	/// receipt replaces every superseded row in one transaction.
+	/// Earlier events are rejected without writing. The stored event is
+	/// re-announced under a fresh stream position so clients which missed the
+	/// receipt can repair their unread state, but is not an advance.
 	#[inline]
 	pub(super) async fn readreceipt_update(
 		&self,
@@ -124,9 +124,13 @@ impl Data {
 			})
 			.await;
 
-		if !self
-			.receipt_advanced(current.as_deref(), event_id)
-			.await
+		// Identical receipts re-announce but never advance.
+		let reannounce = current.as_deref() == Some(event_id);
+
+		if !reannounce
+			&& !self
+				.receipt_advanced(current.as_deref(), event_id)
+				.await
 		{
 			return false;
 		}
@@ -144,7 +148,7 @@ impl Data {
 		txn.put(&self.readreceiptid_readreceipt, latest_id, Json(event));
 		txn.execute();
 
-		true
+		!reannounce
 	}
 
 	/// Whether a receipt for `incoming` supersedes the stored one at
@@ -211,6 +215,9 @@ impl Data {
 	/// Sets the private read marker for `(room, user, thread)`, reporting
 	/// whether it advanced.
 	///
+	/// Strictly older markers are rejected without writing. An identical
+	/// marker is re-announced (the sync gate bumps) but is not an advance.
+	///
 	/// Unthreaded writes use the legacy 2-tuple `(room, user)` key shape
 	/// and sweep any pre-existing per-thread rows so the room-wide receipt
 	/// supersedes prior thread state. Threaded writes (Main, Thread, custom)
@@ -234,11 +241,21 @@ impl Data {
 	) -> bool {
 		let thread_kind = thread.as_str().unwrap_or_default();
 
-		if self
+		let stored = self
 			.private_read_position(room_id, user_id, thread_kind)
 			.await
-			.is_ok_and(|(stored, _)| count <= stored)
-		{
+			.ok()
+			.map(|(stored, _)| stored);
+
+		// Strictly older markers are rejected.
+		if stored.is_some_and(|stored| count < stored) {
+			return false;
+		}
+
+		// Identical markers re-announce but never advance.
+		let reannounce = stored.is_some_and(|stored| count == stored);
+
+		if reannounce && !announce {
 			return false;
 		}
 
@@ -309,7 +326,7 @@ impl Data {
 
 		txn.execute();
 
-		true
+		!reannounce
 	}
 
 	/// Private read position for an exact `(room, user, thread)` context.

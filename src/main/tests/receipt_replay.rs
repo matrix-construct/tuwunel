@@ -27,7 +27,7 @@ impl Drop for DatabasePath {
 }
 
 #[test]
-fn replayed_receipts_hold_their_stream_position() -> Result {
+fn replayed_receipts_reannounce() -> Result {
 	let root = var("TMPDIR").unwrap_or_else(|_| "/nvme/target/tmp".into());
 	let db_path = DatabasePath(
 		PathBuf::from(root).join(format!("tuwunel-receipt-replay-{}", process_id())),
@@ -86,11 +86,11 @@ async fn exercise(services: &Services) -> Result {
 		return Err!("first receipt did not store exactly one row");
 	}
 
-	if replayed || after_replay != after_store {
-		return Err!("replayed receipt moved the receipt stream");
+	if replayed || after_replay.len() != 1 || after_replay[0] <= after_store[0] {
+		return Err!("replayed receipt did not re-announce at a fresh position");
 	}
 
-	if !advanced || after_advance.len() != 1 || after_advance[0] <= after_store[0] {
+	if !advanced || after_advance.len() != 1 || after_advance[0] <= after_replay[0] {
 		return Err!("receipt naming another event did not take a new position");
 	}
 
@@ -132,21 +132,32 @@ async fn private_read_replay(services: &Services, room: &RoomId, user: &UserId) 
 	let stored = set_private_read(services, room, user, 5, true).await;
 	let after_store = token().await;
 	let replayed = set_private_read(services, room, user, 5, true).await;
-	let earlier = set_private_read(services, room, user, 4, true).await;
 	let after_replay = token().await;
+	let earlier = set_private_read(services, room, user, 4, true).await;
+	let after_earlier = token().await;
 	let advanced = set_private_read(services, room, user, 6, true).await;
 	let after_advance = token().await;
+	let silent = set_private_read(services, room, user, 6, false).await;
+	let after_silent = token().await;
 
 	if !stored || !advanced {
 		return Err!("private marker rejected an advancing position");
 	}
 
-	if replayed || earlier || after_replay != after_store {
-		return Err!("private marker accepted a position it already held");
+	if replayed || after_replay <= after_store {
+		return Err!("identical private marker did not re-announce");
 	}
 
-	if after_advance <= after_store {
+	if earlier || after_earlier != after_replay {
+		return Err!("older private marker was not rejected");
+	}
+
+	if after_advance <= after_replay {
 		return Err!("advancing private marker did not move the update token");
+	}
+
+	if silent || after_silent != after_advance {
+		return Err!("unannounced identical private marker was not a no-op");
 	}
 
 	private_read_unannounced(services, room, user).await
