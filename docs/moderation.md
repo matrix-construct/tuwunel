@@ -150,25 +150,47 @@ verification on federated receives, fetch-on-missing for inbound events
 without a signature, and refusal/backoff caching to avoid hammering a server
 that is rate-limiting or has refused.
 
-Two configuration knobs:
+Configuration knobs:
 
 - `enable_policy_servers`: master switch (default `false`). When `false`,
-  Tuwunel ignores policy state entirely. When `true`, the gate engages only
-  in rooms that carry a valid `m.room.policy` state event.
+  Tuwunel ignores policy state entirely. When `true`, the gate engages in
+  rooms that carry a valid `m.room.policy` state event — and, if a mandatory
+  server is configured, in every room.
 - `policy_server_request_timeout`: seconds (default `5`) for both outbound
   `/sign` and inbound signature-fetch requests.
+- `policy_server_mandatory_url`, `policy_server_mandatory_name`,
+  `policy_server_mandatory_public_key`: together, an operator-configured
+  policy server consulted for every event in every room, reached directly at
+  the URL rather than by federation resolution. All three or none.
+- `policy_server_fail_closed`: refuse local sends when the policy server is
+  unreachable instead of sending them unsigned (default `false`).
 
 Operator-relevant implications when enabling:
 
-- **Per-room opt-in.** The global flag only allows the gate to engage; the
-  room's own `m.room.policy` state event is what activates it. Rooms without
-  the state event are unaffected.
+- **Per-room opt-in — unless a mandatory server is set.** By default the
+  global flag only allows the gate to engage; the room's own `m.room.policy`
+  state event is what activates it, and rooms without the state event are
+  unaffected. With `policy_server_mandatory_*` configured, the deployment's
+  policy server is consulted for every event in every room, `m.room.policy`
+  is ignored for that purpose (a room cannot opt out by unsetting it, and the
+  room-creator power of room version 12 does not help either), the policy
+  server does not need a user joined to the room, and federation need not be
+  enabled. This is the shape for a policy server that is a moderation control
+  of the deployment rather than a community's choice.
+- **The mandatory URL is trusted, on purpose.** `/sign` goes straight to the
+  configured base URL: no `.well-known`/SRV resolution, no
+  `forbidden_remote_server_names`, no `ip_range_denylist` — a policy server
+  on a loopback or private address is the common deployment and would
+  otherwise be denied. Point it only at a service you operate.
 - **Latency cost.** Every outbound send in a policy-room round-trips to the
   policy server before federating. The default 5-second cap prevents a
   single misbehaving policy server from stalling sends indefinitely.
-- **Fail-open on transport failure.** Network errors and timeouts are logged
-  and the event is sent or accepted unsigned, on the assumption that the
-  next homeserver in the room will pick up the gap.
+- **Fail-open on transport failure — by default.** Network errors, timeouts
+  and rate-limit backoffs are logged and the event is sent or accepted
+  unsigned, on the assumption that the next homeserver in the room will pick
+  up the gap. With `policy_server_fail_closed = true` the local send is
+  refused instead and inbound events soft-fail; the policy server then sits
+  on the availability path of every send, and must be run accordingly.
 - **Fail-closed on explicit refusal.** A policy server returning
   `400 M_FORBIDDEN` (or, on the unstable variant, `200 OK` with no signature
   for the configured `via`) causes outbound sends to fail with `M_FORBIDDEN`,
@@ -193,7 +215,9 @@ Operator-relevant implications when enabling:
 - **Privacy in encrypted rooms.** The PDU is forwarded to the policy server
   for signing. Ciphertext is opaque, but metadata (sender, timestamp, room,
   event type) is not. Encrypted-room policy delegation is the room's call;
-  Tuwunel does not block it.
+  Tuwunel does not block it. A mandatory server sees that metadata for
+  every event on the server, including rooms that never opted in — say so
+  in the deployment's privacy notice.
 - **Refusal and rate-limit caching.** Per-event refusals and
   `M_LIMIT_EXCEEDED` backoffs are persisted, so repeated arrivals of the same
   event do not re-hit a refusing or throttled server.

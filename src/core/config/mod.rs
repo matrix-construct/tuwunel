@@ -37,7 +37,7 @@ use itertools::Itertools;
 use regex::RegexSet;
 use ruma::{
 	OwnedMxcUri, OwnedRoomOrAliasId, OwnedServerName, OwnedUserId, RoomVersionId,
-	api::client::discovery::discover_support::ContactRole,
+	api::client::discovery::discover_support::ContactRole, serde::Base64,
 };
 use serde::{Deserialize, de::IgnoredAny};
 use tuwunel_macros::config_example_generator;
@@ -1432,6 +1432,57 @@ pub struct Config {
 	/// default: 5
 	#[serde(default = "default_policy_server_request_timeout")]
 	pub policy_server_request_timeout: u64,
+
+	/// MSC4284: an operator-configured policy server consulted for EVERY
+	/// local event, regardless of whether the room carries an `m.room.policy`
+	/// state event. `/sign` is sent directly to this base URL, bypassing
+	/// federation server-name resolution, the `allow_federation` switch, the
+	/// `forbidden_remote_server_names` list, the `ip_range_denylist` and the
+	/// "policy server must be joined to the room" rule — the URL is trusted
+	/// because the operator wrote it. Use this when the policy server is a
+	/// moderation control of this deployment rather than a room's choice.
+	///
+	/// Requires `enable_policy_servers` and both companion fields below.
+	///
+	/// reloadable: yes
+	/// default: unset
+	/// config-example: "https://policy.internal:8448"
+	#[serde(default)]
+	pub policy_server_mandatory_url: Option<Url>,
+
+	/// MSC4284: the server name the mandatory policy server signs as. It is
+	/// the key under `event.signatures` and the X-Matrix `destination` of the
+	/// `/sign` request, and must equal the name the policy server uses for
+	/// itself.
+	///
+	/// reloadable: yes
+	/// default: unset
+	/// config-example: "policy.internal"
+	#[serde(default)]
+	pub policy_server_mandatory_name: Option<OwnedServerName>,
+
+	/// MSC4284: the mandatory policy server's ed25519 public key, unpadded
+	/// base64, as it would appear in `m.room.policy` `public_keys.ed25519`.
+	/// Inbound signatures are verified against it exactly as room-configured
+	/// keys are.
+	///
+	/// reloadable: yes
+	/// default: unset
+	/// config-example: "A6EHv/POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg"
+	#[serde(default)]
+	pub policy_server_mandatory_public_key: Option<Base64>,
+
+	/// MSC4284: when the policy server cannot be reached (network error,
+	/// timeout, or rate-limit backoff), refuse the local send instead of
+	/// letting it through. Off by default: a transient policy-server outage
+	/// then degrades to unsigned events. Turn it on when the policy server is
+	/// a hard requirement of the deployment and its availability is managed
+	/// accordingly.
+	///
+	/// reloadable: yes
+	/// default: false
+	#[serde(default)]
+	pub policy_server_fail_closed: bool,
 
 	/// MSC3925: fold the most recent message edit (an `m.replace` relation)
 	/// into `unsigned.m.relations` on a served event as the full replacement

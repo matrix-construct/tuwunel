@@ -12,7 +12,7 @@ use ruma::{
 		federation::policy::sign_event::v1 as sign_event,
 	},
 	events::{
-		StateEventType,
+		StateEventType, TimelineEventType,
 		room::policy::{POLICY_SERVER_ED25519_SIGNING_KEY_ID, RoomPolicyEventContent},
 	},
 	serde::Base64,
@@ -22,7 +22,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::value::to_raw_value;
 use tuwunel_core::{
 	Err, Result, at, debug, implement,
-	matrix::{Event, pdu::into_outgoing_federation, room_version::rules as room_version_rules},
+	matrix::{
+		Event,
+		pdu::into_outgoing_federation,
+		room_version::{from_create_event, rules as room_version_rules},
+	},
 	trace,
 	utils::time::now_secs,
 	warn,
@@ -104,6 +108,59 @@ enum PolicySigState {
 	},
 }
 
+/// Where `/sign` goes for a room: the room's own `m.room.policy` server
+/// (reached by federation resolution of `content.via`) or the operator's
+/// mandatory server (reached directly at `direct_url`). Signature slot, key
+/// and X-Matrix destination come from `content` in both cases, so the
+/// verification path is identical.
+#[derive(Clone, Debug)]
+pub(super) struct PolicyTarget {
+	pub content: RoomPolicyEventContent,
+	pub direct_url: Option<String>,
+}
+
+/// What a caller does with a `/sign` outcome that yielded no signature.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Reaction {
+	/// Send or accept the event unsigned.
+	Proceed,
+	/// Refuse the local send; soft-fail the inbound event.
+	Reject,
+}
+
+/// The single place where fail-open versus fail-closed is decided. An explicit
+/// refusal always rejects; a signature always proceeds; everything in between
+/// (transport failure, timeout, rate-limit backoff) follows the switch.
+fn react_to_fetch(outcome: &FetchOutcome, fail_closed: bool) -> Reaction {
+	match outcome {
+		| FetchOutcome::Signed(_) => Reaction::Proceed,
+		| FetchOutcome::Refused { .. } => Reaction::Reject,
+		| FetchOutcome::FailOpen | FetchOutcome::RateLimited { .. } =>
+			if fail_closed {
+				Reaction::Reject
+			} else {
+				Reaction::Proceed
+			},
+	}
+}
+
+/// The mandatory server, when configured, is consulted for every room and the
+/// room's own `m.room.policy` is not consulted at all — otherwise a room could
+/// opt out of a deployment-wide control by unsetting one state event.
+fn resolve_policy_target(
+	mandatory: Option<(OwnedServerName, Base64, String)>,
+	room: Option<RoomPolicyEventContent>,
+) -> Option<PolicyTarget> {
+	if let Some((name, key, url)) = mandatory {
+		return Some(PolicyTarget {
+			content: RoomPolicyEventContent::new(name, key),
+			direct_url: Some(url),
+		});
+	}
+
+	room.map(|content| PolicyTarget { content, direct_url: None })
+}
+
 /// Lenient deserialiser that accepts either the stable
 /// `public_keys: { ed25519: ... }` shape or the MSC4284 unstable singular
 /// `public_key: <ed25519>` shape, and folds the latter into the former.
@@ -182,6 +239,28 @@ fn current_policy_state(
 		})
 }
 
+/// The policy target for a room: the operator's mandatory server if
+/// configured (without touching room state), else the room's own.
+#[implement(super::Service)]
+pub(super) async fn lookup_policy_target(&self, room_id: &RoomId) -> Option<PolicyTarget> {
+	let config = &self.services.server.config;
+	let mandatory = match (
+		&config.policy_server_mandatory_url,
+		&config.policy_server_mandatory_name,
+		&config.policy_server_mandatory_public_key,
+	) {
+		| (Some(url), Some(name), Some(key)) =>
+			Some((name.clone(), key.clone(), url.to_string())),
+		| _ => None,
+	};
+
+	if mandatory.is_some() {
+		return resolve_policy_target(mandatory, None);
+	}
+
+	resolve_policy_target(None, self.lookup_policy_server(room_id).await)
+}
+
 /// Returns the room's policy event content when a policy server is in effect:
 /// state event present (stable `m.room.policy`, falling back to MSC4284's
 /// unstable `org.matrix.msc4284.policy`), parses cleanly under either the
@@ -231,19 +310,30 @@ where
 		return Ok(());
 	}
 
-	let Ok(room_version) = self
+	// The create event has no room state yet, so its version comes from its
+	// own content. Without this the mandatory policy server would never see
+	// room creation at all.
+	let room_version = match self
 		.services
 		.state
 		.get_room_version(pdu.room_id())
 		.await
-	else {
-		return Ok(());
+	{
+		| Ok(room_version) => room_version,
+		| Err(_) if *pdu.kind() == TimelineEventType::RoomCreate => from_create_event(pdu)?,
+		| Err(_) => return Ok(()),
 	};
 
-	let Some(policy) = self.lookup_policy_server(pdu.room_id()).await else {
+	let Some(target) = self.lookup_policy_target(pdu.room_id()).await else {
 		trace!(room_id = %pdu.room_id(), "no policy server configured");
 		return Ok(());
 	};
+	let policy = &target.content;
+	let fail_closed = self
+		.services
+		.server
+		.config
+		.policy_server_fail_closed;
 
 	let event_id = pdu.event_id();
 	match self.cached_policy_state(event_id).await {
@@ -252,17 +342,23 @@ where
 
 		| Some(PolicySigState::BackoffUntil { until_secs }) if until_secs > now_secs() => {
 			debug!(via = %policy.via, until_secs, "skipping outbound /sign during policy backoff");
+			if fail_closed {
+				return Err!(Request(Unknown(
+					"Policy server is in backoff and policy_server_fail_closed is set."
+				)));
+			}
 			return Ok(());
 		},
 		| _ => {},
 	}
 
-	match self
-		.fetch_policy_signature(&policy, pdu_json, &room_version)
-		.await
-	{
+	let outcome = self
+		.fetch_policy_signature(&target, pdu_json, &room_version)
+		.await;
+
+	match &outcome {
 		| FetchOutcome::Signed(signature) => {
-			insert_policy_signature(pdu_json, &policy.via, &signature);
+			insert_policy_signature(pdu_json, &policy.via, signature);
 			debug!(via = %policy.via, event_id = %event_id, "folded policy server signature");
 		},
 		| FetchOutcome::Refused { status, errcode } => {
@@ -279,9 +375,20 @@ where
 			return Err!(Request(Forbidden("Event was rejected by the room's policy server.")));
 		},
 		| FetchOutcome::RateLimited { until_secs } => {
-			self.cache_policy_backoff(event_id, until_secs);
+			self.cache_policy_backoff(event_id, *until_secs);
 		},
 		| FetchOutcome::FailOpen => {},
+	}
+
+	if react_to_fetch(&outcome, fail_closed) == Reaction::Reject {
+		warn!(
+			via = %policy.via,
+			event_id = %event_id,
+			"policy server unreachable and policy_server_fail_closed is set; refusing"
+		);
+		return Err!(Request(Unknown(
+			"Policy server unreachable and policy_server_fail_closed is set."
+		)));
 	}
 
 	Ok(())
@@ -295,14 +402,15 @@ where
 	name = "policy_fetch",
 	level = "debug",
 	skip_all,
-	fields(via = %policy.via)
+	fields(via = %target.content.via)
 )]
 async fn fetch_policy_signature(
 	&self,
-	policy: &RoomPolicyEventContent,
+	target: &PolicyTarget,
 	pdu_json: &CanonicalJsonObject,
 	room_version: &RoomVersionId,
 ) -> FetchOutcome {
+	let policy = &target.content;
 	let outgoing = into_outgoing_federation(pdu_json.clone(), room_version);
 	let Ok(raw) = to_raw_value(&outgoing) else {
 		warn!(via = %policy.via, "failed to serialize PDU for policy /sign; failing open");
@@ -318,9 +426,7 @@ async fn fetch_policy_signature(
 
 	let response = match tokio::time::timeout(
 		timeout,
-		self.services
-			.federation
-			.execute(&policy.via, sign_event::Request::new(raw)),
+		self.call_sign(target, sign_event::Request::new(raw)),
 	)
 	.await
 	{
@@ -379,6 +485,27 @@ async fn fetch_policy_signature(
 			FetchOutcome::Refused { status: StatusCode::OK, errcode: None },
 			FetchOutcome::Signed,
 		)
+}
+
+/// One `/sign` round-trip over the transport the target asks for.
+#[implement(super::Service)]
+async fn call_sign(
+	&self,
+	target: &PolicyTarget,
+	request: sign_event::Request,
+) -> Result<sign_event::Response> {
+	match &target.direct_url {
+		| Some(base_url) =>
+			self.services
+				.federation
+				.execute_at(base_url, &target.content.via, request)
+				.await,
+		| None =>
+			self.services
+				.federation
+				.execute(&target.content.via, request)
+				.await,
+	}
 }
 
 fn classify_fetch_error(
@@ -449,8 +576,19 @@ async fn fetch_inbound_policy_signature<E>(
 where
 	E: Event,
 {
-	let Some(policy) = self.lookup_policy_server(pdu.room_id()).await else {
+	let Some(target) = self.lookup_policy_target(pdu.room_id()).await else {
 		return PolicyCheck::NotApplicable;
+	};
+	let policy = &target.content;
+	let fail_closed = self
+		.services
+		.server
+		.config
+		.policy_server_fail_closed;
+	let unreachable = if fail_closed {
+		PolicyCheck::Invalid
+	} else {
+		PolicyCheck::Pass
 	};
 
 	let Ok(room_version) = self
@@ -469,18 +607,20 @@ where
 			debug!(
 				until_secs,
 				via = %policy.via,
-				"policy server in backoff; failing open"
+				fail_closed,
+				"policy server in backoff"
 			);
 
-			return PolicyCheck::Pass;
+			return unreachable;
 		},
 		| _ => {},
 	}
 
-	match self
-		.fetch_policy_signature(&policy, pdu_json, &room_version)
-		.await
-	{
+	let outcome = self
+		.fetch_policy_signature(&target, pdu_json, &room_version)
+		.await;
+
+	match &outcome {
 		| FetchOutcome::Signed(signature) => {
 			debug!(
 				via = %policy.via,
@@ -488,8 +628,8 @@ where
 				"folded inbound policy server signature"
 			);
 
-			insert_policy_signature(pdu_json, &policy.via, &signature);
-			PolicyCheck::Pass
+			insert_policy_signature(pdu_json, &policy.via, signature);
+			return PolicyCheck::Pass;
 		},
 		| FetchOutcome::Refused { status, errcode } => {
 			warn!(
@@ -502,13 +642,17 @@ where
 			);
 
 			self.cache_policy_refused(event_id);
-			PolicyCheck::Invalid
+			return PolicyCheck::Invalid;
 		},
 		| FetchOutcome::RateLimited { until_secs } => {
-			self.cache_policy_backoff(event_id, until_secs);
-			PolicyCheck::Pass
+			self.cache_policy_backoff(event_id, *until_secs);
 		},
-		| FetchOutcome::FailOpen => PolicyCheck::Pass,
+		| FetchOutcome::FailOpen => {},
+	}
+
+	match react_to_fetch(&outcome, fail_closed) {
+		| Reaction::Proceed => PolicyCheck::Pass,
+		| Reaction::Reject => PolicyCheck::Invalid,
 	}
 }
 
@@ -535,9 +679,10 @@ where
 		return PolicyCheck::NotApplicable;
 	}
 
-	let Some(policy) = self.lookup_policy_server(pdu.room_id()).await else {
+	let Some(target) = self.lookup_policy_target(pdu.room_id()).await else {
 		return PolicyCheck::NotApplicable;
 	};
+	let policy = &target.content;
 
 	let Ok(room_version) = self
 		.services
@@ -548,7 +693,8 @@ where
 		return PolicyCheck::NotApplicable;
 	};
 
-	// `lookup_policy_server` already verified the ed25519 entry is present.
+	// Both target kinds carry an ed25519 entry: the room lookup verified it,
+	// and the mandatory target is built from one.
 	let Some(public_key) = policy
 		.public_keys
 		.get(&SigningKeyAlgorithm::Ed25519)

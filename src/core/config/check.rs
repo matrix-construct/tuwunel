@@ -76,6 +76,7 @@ pub fn check(config: &Config) -> Result {
 
 	check_observability(config)?;
 	check_network(config)?;
+	check_policy_servers(config)?;
 	check_storage(config)?;
 	check_registration(config)?;
 	check_registration_terms(config)?;
@@ -216,6 +217,53 @@ fn warn_loopback_in_container(addr: &SocketAddr) {
 			 Please change this to \"0.0.0.0\". If this is expected, you can ignore.",
 		);
 	}
+}
+
+/// The mandatory policy server is three fields that only mean something
+/// together, and a fail-closed switch that only means something with the
+/// master switch. A half-set triple would be read as "no mandatory server"
+/// and silently enforce nothing.
+fn check_policy_servers(config: &Config) -> Result {
+	let set = [
+		config.policy_server_mandatory_url.is_some(),
+		config.policy_server_mandatory_name.is_some(),
+		config
+			.policy_server_mandatory_public_key
+			.is_some(),
+	];
+	let any = set.iter().any(|s| *s);
+	if any && !set.iter().all(|s| *s) {
+		return Err!(Config(
+			"policy_server_mandatory_url",
+			"policy_server_mandatory_url, policy_server_mandatory_name and \
+			 policy_server_mandatory_public_key must be set together or not at all"
+		));
+	}
+
+	if any && !config.enable_policy_servers {
+		return Err!(Config(
+			"policy_server_mandatory_url",
+			"a mandatory policy server requires enable_policy_servers = true"
+		));
+	}
+
+	if config.policy_server_fail_closed && !config.enable_policy_servers {
+		return Err!(Config(
+			"policy_server_fail_closed",
+			"policy_server_fail_closed requires enable_policy_servers = true"
+		));
+	}
+
+	if let Some(url) = &config.policy_server_mandatory_url
+		&& !matches!(url.scheme(), "http" | "https")
+	{
+		return Err!(Config(
+			"policy_server_mandatory_url",
+			"policy_server_mandatory_url must be an http:// or https:// URL"
+		));
+	}
+
+	Ok(())
 }
 
 fn check_storage(config: &Config) -> Result {

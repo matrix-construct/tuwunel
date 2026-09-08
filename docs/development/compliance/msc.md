@@ -63,7 +63,7 @@ in the [Out of scope](#out-of-scope) section.
 | MSC4297 | ✅ ● | 100/100 | State Resolution v2.1 | src/service/rooms/state_res/resolve.rs:257 conflicted state subgraph; tests pass |
 | MSC4291 | ✅ ● | 100/100 | Room IDs as hashes of the create event | v12 upgrade create event omits deprecated predecessor.event_id |
 | MSC4289 | ✅ ● | 100/100 | Explicitly privilege room creators | Room v12 creator privilege; complement 22 pass, 0 fail across six named tests |
-| MSC4284 | 🟨 ● | 70/90 | Policy Servers | outbound /sign, inbound verify, fetch-on-missing, reversible soft-fail |
+| MSC4284 | 🟨 ● | 70/90 | Policy Servers | outbound /sign, inbound verify, fetch-on-missing, reversible soft-fail; operator-mandatory server at a direct URL and optional fail-closed (beyond the MSC) |
 | MSC4277 | ✅ ● | 100/100 | Harmonizing the reporting endpoints | all 3 wired; score removed; user report 200 regardless to deter enumeration |
 | MSC4267 | ✅ ● | 90/100 | Automatically forgetting rooms on leave | auto-forget on Leave/Ban; stable + unstable capability advertised |
 | MSC4260 | ✅ ● | 85/90 | Reporting users (Client-Server API) | src/api/client/report.rs:63; admin notification, 404 M_NOT_FOUND on unknown u... |
@@ -268,7 +268,7 @@ for spec compliance.
 | MSC4178 | 🟨 ● | 75/90 | 1.13 | Error codes for requestToken | msisdn returns M_THREEPID_MEDIUM_NOT_SUPPORTED; bad email returns M_INVALID_P... |
 | MSC2409 | 🟨 ● | 70/70 | 1.13 | Proposal to send typing, presence and receipts to appservices | typing+receipt EDUs sent to AS; presence not forwarded |
 | MSC3970 | 🟨 ◐ | 70/80 | 1.7 | Scope transaction IDs to devices | txn key is user, device, txn with no path; redact untracked; echo user scoped |
-| MSC4284 | 🟨 ● | 70/90 | 1.18 | Policy Servers | outbound /sign, inbound verify, fetch-on-missing, reversible soft-fail |
+| MSC4284 | 🟨 ● | 70/90 | 1.18 | Policy Servers | outbound /sign, inbound verify, fetch-on-missing, reversible soft-fail; operator-mandatory server at a direct URL and optional fail-closed (beyond the MSC) |
 | MSC2290 | 🟨 ● | 65/55 |  | Separate Endpoints for Binding Threepids | add endpoint (UIA+dupe) + HS email validation; IS-bind half out of scope |
 | MSC1915 | 🟨 ● | 60/55 |  | MSC 1915 - Add unbind 3PID APIs | delete + deactivate return id_server_unbind_result; IS unbind out of HS scope |
 | MSC2675 | 🟨 ◐ | 60/75 | 1.3 | Serverside aggregations of message relationships | thread+edit+reference bundled (edit/ref gated); reactions unbundled |

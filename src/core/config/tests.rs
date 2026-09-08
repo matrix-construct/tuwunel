@@ -862,6 +862,42 @@ fn a_weak_cost_passes_the_config_check_with_a_warning() {
 	}
 }
 
+/// The mandatory policy server is only meaningful as a whole: a partial triple,
+/// or one without the master switch, must be refused at startup rather than
+/// read as "no mandatory server" and enforce nothing.
+#[test]
+fn mandatory_policy_server_is_all_or_nothing_and_needs_the_master_switch() {
+	const KEY: &str = "A6EHv/POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg";
+	let full = format!(
+		"[global]\nenable_policy_servers = true\npolicy_server_mandatory_url = \
+		 \"https://policy.internal:8448\"\npolicy_server_mandatory_name = \
+		 \"policy.internal\"\npolicy_server_mandatory_public_key = \"{KEY}\"\n"
+	);
+	for (name, toml, ok) in [
+		("full triple with switch", full.as_str(), true),
+		(
+			"url only",
+			"[global]\nenable_policy_servers = true\npolicy_server_mandatory_url = \
+			 \"https://policy.internal:8448\"\n",
+			false,
+		),
+		(
+			"triple without switch",
+			"[global]\npolicy_server_mandatory_url = \"https://policy.internal:8448\"\n\
+			 policy_server_mandatory_name = \"policy.internal\"\n\
+			 policy_server_mandatory_public_key = \"A6EHv/POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg\"\n",
+			false,
+		),
+		("fail-closed without switch", "[global]\npolicy_server_fail_closed = true\n", false),
+		("fail-closed with switch", "[global]\nenable_policy_servers = true\npolicy_server_fail_closed = true\n", true),
+		("nothing set", "[global]\n", true),
+	] {
+		let config = config_from_toml(toml).expect("the config should parse");
+		let (result, _logs) = check_with_captured_logs(&config);
+		assert_eq!(result.is_ok(), ok, "{name}: {result:?}");
+	}
+}
+
 /// A documented default is published to operators through the generated
 /// tuwunel-example.toml, so one that disagrees with the code hands out a value
 /// the server never uses. Only integer defaults are compared; prose such as
