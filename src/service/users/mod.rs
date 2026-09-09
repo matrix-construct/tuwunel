@@ -4,6 +4,7 @@ mod invite_filter;
 mod keys;
 mod ldap;
 mod register;
+mod server_user;
 
 use std::sync::Arc;
 
@@ -335,6 +336,19 @@ impl Service {
 	/// Returns the number of users registered on this server.
 	#[inline]
 	pub async fn count(&self) -> usize { self.db.userid_password.count().await }
+
+	/// Returns whether the user table contains no accounts.
+	///
+	/// The lookup stops after the first account and propagates storage errors.
+	#[tracing::instrument(level = "trace", skip_all)]
+	pub async fn is_empty(&self) -> Result<bool> {
+		self.db
+			.userid_password
+			.keys()
+			.take(1)
+			.ready_fold(Ok(true), |_, user: Result<&UserId>| user.map(|_| false))
+			.await
+	}
 
 	/// Returns an iterator over all users on this homeserver.
 	pub fn stream(&self) -> impl Stream<Item = &UserId> + Send {

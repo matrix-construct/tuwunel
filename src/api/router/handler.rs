@@ -64,9 +64,9 @@ where
 macro_rules! ruma_handler {
 	( $($tx:ident),* $(,)? ) => {
 		#[allow(clippy::allow_attributes, non_snake_case)]
-		impl<Err, Req, Fut, Fun, $($tx,)*> RumaHandler<($($tx,)* Ruma<Req>,)> for Fun
+		impl<Err, Req, Fut, Fun, const ADMIN: bool, $($tx,)*> RumaHandler<($($tx,)* Ruma<Req, ADMIN>,)> for Fun
 		where
-			Fun: Fn($($tx,)* Ruma<Req>,) -> Fut + Send + Sync + 'static,
+			Fun: Fn($($tx,)* Ruma<Req, ADMIN>,) -> Fut + Send + Sync + 'static,
 			Fut: Future<Output = Result<Req::OutgoingResponse, Err>> + Send + 'static,
 			Req: IncomingRequest + Debug + Send + Sync + 'static,
 			Req::Authentication: AuthDispatch,
@@ -106,7 +106,7 @@ macro_rules! ruma_handler {
 					)*
 
 					let request = Request::from_parts(parts, body);
-					let args = match Ruma::<Req>::from_request(request, &state).await {
+					let args = match Ruma::<Req, ADMIN>::from_request(request, &state).await {
 						| Err(error) => return error.into_response(),
 						| Ok(args) => args,
 					};

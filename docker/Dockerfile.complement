@@ -61,18 +61,20 @@ COPY <<EOF complement.toml
     appservice_dir = "/complement/appservice"
     argon2_m_cost = 64
     argon2_t_cost = 1
-    create_admin_room = false
+    create_admin_room = true
     database_path = "/database"
     db_pool_max_workers = 64
     dns_attempts = 20
     dns_timeout = 60
     error_on_unknown_config_opts = true
     federation_idle_timeout = 300
+    grant_admin_to_first_user = false
     ip_range_denylist = []
     log = "debug,tuwunel=trace,h2=warn,hyper=warn"
     log_colors = false
     log_guest_registrations = false
     log_span_events = "NONE"
+    server_user_localpart = "_server"
     log_thread_ids = true
     max_fetch_prev_events = 224
     media_compat_file_link = false

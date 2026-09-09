@@ -5,7 +5,7 @@ pub mod server;
 
 use log as _;
 
-pub(crate) use self::router::{ClientIp, Ruma, RumaResponse, State};
+pub(crate) use self::router::{ClientIp, Ruma, RumaAdmin, RumaResponse, State};
 
 tuwunel_core::mod_ctor! {}
 tuwunel_core::mod_dtor! {}

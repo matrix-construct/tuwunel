@@ -1,24 +1,34 @@
 use axum::extract::State;
 use futures::FutureExt;
-use ruma::api::client::membership::leave_room;
-use tuwunel_core::Result;
+use ruma::api::client::membership::leave_room::v3::{Request, Response};
+use tuwunel_core::{Err, Result};
 
-use crate::Ruma;
+use crate::{Ruma, client::admin::misc::is_notice_room};
 
-/// # `POST /_matrix/client/v3/rooms/{roomId}/leave`
+/// Leaves a room through `POST /_matrix/client/v3/rooms/{roomId}/leave`.
 ///
-/// Tries to leave the sender user from a room.
-///
-/// - This should always work if the user is currently joined.
+/// Server-notice invitations cannot be rejected, but joined recipients can leave.
+#[tracing::instrument(level = "debug", skip_all)]
 pub(crate) async fn leave_room_route(
 	State(services): State<crate::State>,
-	body: Ruma<leave_room::v3::Request>,
-) -> Result<leave_room::v3::Response> {
+	Ruma { body, sender_user, .. }: Ruma<Request>,
+) -> Result<Response> {
 	let state_lock = services.state.mutex.lock(&body.room_id).await;
+	let sender = sender_user
+		.as_deref()
+		.expect("user must be authenticated for this handler");
+
+	if services
+		.state_cache
+		.is_invited(sender, &body.room_id)
+		.await && is_notice_room(&services, sender, &body.room_id).await?
+	{
+		return Err!(Request(CannotLeaveServerNoticeRoom("You cannot reject this invite")));
+	}
 
 	services
 		.membership
-		.leave(body.sender_user(), &body.room_id, body.reason.clone(), false, &state_lock)
+		.leave(sender, &body.room_id, body.reason, false, &state_lock)
 		.await?;
 
 	if services.config.delete_rooms_after_leave {
@@ -29,5 +39,5 @@ pub(crate) async fn leave_room_route(
 			.await;
 	}
 
-	Ok(leave_room::v3::Response {})
+	Ok(Response {})
 }

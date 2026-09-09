@@ -219,6 +219,7 @@ pub async fn start(self: &Arc<Self>) -> Result<Arc<Self>> {
 	debug_info!("Starting services...");
 
 	super::migrations::migrations(self).await?;
+	self.users.validate_server_user().await?;
 
 	self.manager
 		.lock()

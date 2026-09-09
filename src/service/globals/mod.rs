@@ -22,18 +22,34 @@ impl crate::Service for Service {
 	fn build(args: &crate::Args<'_>) -> Result<Arc<Self>> {
 		let db = Data::new(args);
 
+		let server_user =
+			server_user(&args.server.config.server_user_localpart, &args.server.name)?;
+
 		Ok(Arc::new(Self {
 			db,
 			server: args.server.clone(),
-			server_user: UserId::parse_with_server_name(
-				String::from("conduit"),
-				&args.server.name,
-			)
-			.expect("@conduit:server_name is valid"),
+			server_user,
 		}))
 	}
 
 	fn name(&self) -> &str { service::make_name(std::module_path!()) }
+}
+
+/// Resolves the configured localpart to this server's administrative user.
+///
+/// Full user IDs are rejected so the configuration cannot select an identity
+/// belonging to another server. Invalid input names the configuration setting.
+fn server_user(localpart: &str, server_name: &ServerName) -> Result<OwnedUserId> {
+	UserId::parse_with_server_name(localpart, server_name)
+		.map_err(|e| err!("Invalid server_user_localpart configuration: {e}"))
+		.and_then(|user| {
+			user.localpart()
+				.eq(localpart)
+				.then_some(user)
+				.ok_or_else(|| {
+					err!("server_user_localpart must be a localpart, not a full user ID")
+				})
+		})
 }
 
 impl Service {
@@ -117,5 +133,23 @@ impl Service {
 		} else {
 			Ok(())
 		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use ruma::server_name;
+
+	use super::server_user;
+
+	#[test]
+	fn configured_server_user_must_be_valid() {
+		let server_name = server_name!("example.org");
+
+		assert_eq!(server_user("conduit", server_name).unwrap(), "@conduit:example.org");
+		assert_eq!(server_user("_server", server_name).unwrap(), "@_server:example.org");
+		server_user("bad:localpart", server_name).unwrap_err();
+		server_user("@conduit:example.org", server_name).unwrap_err();
+		server_user("@conduit:elsewhere.org", server_name).unwrap_err();
 	}
 }

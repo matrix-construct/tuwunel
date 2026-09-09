@@ -40,6 +40,7 @@ use ruma::{
 	api::client::discovery::discover_support::ContactRole,
 };
 use serde::{Deserialize, de::IgnoredAny};
+use smallstr::SmallString;
 use tuwunel_macros::config_example_generator;
 use url::Url;
 
@@ -67,6 +68,12 @@ use crate::{
 
 // Later prefixes override earlier ones.
 pub(crate) const ENV_PREFIXES: [&str; 3] = ["CONDUIT_", "CONDUWUIT_", "TUWUNEL_"];
+
+/// Stores the configured localpart for the server's administrative user.
+///
+/// The inline budget covers ordinary Matrix localparts without a heap
+/// allocation. Longer valid localparts spill transparently.
+pub type ServerUserLocalpart = SmallString<[u8; 32]>;
 
 /// All the config options for tuwunel.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
@@ -3427,6 +3434,15 @@ pub struct Config {
 	#[serde(default = "default_admin_room_tag")]
 	pub admin_room_tag: String,
 
+	/// The localpart of the server's administrative user.
+	///
+	/// This identity is durable after first boot. Changing it on an existing
+	/// database is unsupported and prevents startup.
+	///
+	/// default: "conduit"
+	#[serde(default = "default_server_user_localpart")]
+	pub server_user_localpart: ServerUserLocalpart,
+
 	/// The room that user, room, and event reports are posted to, instead of
 	/// the admin room. Accepts a room ID or room alias; the server user must be
 	/// joined with permission to post there. Reports fall back to the admin
@@ -5746,6 +5762,11 @@ fn default_admin_log_capture() -> String {
 }
 
 fn default_admin_room_tag() -> String { "m.server_notice".to_owned() }
+
+/// Preserves the administrative identity used before it was configurable.
+///
+/// Omitting the setting keeps existing installations on their original user.
+fn default_server_user_localpart() -> ServerUserLocalpart { "conduit".into() }
 
 fn default_admin_output_max_events() -> usize { 1 }
 

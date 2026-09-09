@@ -2980,6 +2980,13 @@
 #
 #admin_room_tag = "m.server_notice"
 
+# The localpart of the server's administrative user.
+#
+# This identity is durable after first boot. Changing it on an existing
+# database is unsupported and prevents startup.
+#
+#server_user_localpart = "conduit"
+
 # The room that user, room, and event reports are posted to, instead of
 # the admin room. Accepts a room ID or room alias; the server user must be
 # joined with permission to post there. Reports fall back to the admin

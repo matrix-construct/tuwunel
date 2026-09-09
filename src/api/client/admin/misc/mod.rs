@@ -5,6 +5,8 @@ mod scheduled_tasks;
 mod send_server_notice;
 mod server_version;
 
+pub(crate) use send_server_notice::is_notice_room;
+
 pub(crate) use self::{
 	fetch_event::admin_fetch_event_route,
 	scheduled_tasks::admin_scheduled_tasks_route,
