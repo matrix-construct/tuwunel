@@ -55,11 +55,12 @@ async fn reset_and_refresh_badge(
 	services: &Services,
 	user_id: &UserId,
 	room_id: &RoomId,
+	acknowledged: Option<&EventId>,
 	thread: &ReceiptThread,
 ) {
 	services
 		.pusher
-		.reset_notification_counts_for_thread(user_id, room_id, thread)
+		.reset_notification_counts_for_thread(user_id, room_id, acknowledged, thread)
 		.await;
 
 	services

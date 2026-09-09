@@ -106,6 +106,7 @@ pub(crate) async fn set_read_marker_route(
 			&services,
 			sender_user,
 			&body.room_id,
+			None,
 			&ReceiptThread::Unthreaded,
 		)
 		.await;

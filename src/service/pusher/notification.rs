@@ -135,15 +135,18 @@ pub async fn clear_all_thread_notification_counts(&self, user_id: &UserId, room_
 /// Dispatcher: route a receipt's `ReceiptThread` to the matching reset path.
 ///
 /// `Unthreaded` clears all room and thread counts; `Main` clears only the
-/// main-timeline counts; `Thread(id)` clears just that thread.
+/// main-timeline counts; `Thread(id)` clears just that thread unless the
+/// acknowledged event is the thread root. `None` denotes a non-receipt reset.
 #[implement(super::Service)]
 pub async fn reset_notification_counts_for_thread(
 	&self,
 	user_id: &UserId,
 	room_id: &RoomId,
+	acknowledged: Option<&EventId>,
 	thread: &ReceiptThread,
 ) {
 	match thread {
+		| ReceiptThread::Thread(root) if acknowledged == Some(root) => {},
 		| ReceiptThread::Main =>
 			self.reset_notification_counts(user_id, room_id)
 				.await,

@@ -140,7 +140,14 @@ pub(crate) async fn create_receipt_route(
 	};
 
 	if advanced {
-		reset_and_refresh_badge(&services, sender_user, &body.room_id, &body.thread).await;
+		reset_and_refresh_badge(
+			&services,
+			sender_user,
+			&body.room_id,
+			Some(&body.event_id),
+			&body.thread,
+		)
+		.await;
 	}
 
 	Ok(create_receipt::v3::Response {})

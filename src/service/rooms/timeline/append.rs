@@ -199,6 +199,7 @@ where
 		.reset_notification_counts_for_thread(
 			pdu.sender(),
 			pdu.room_id(),
+			None,
 			&ReceiptThread::Unthreaded,
 		)
 		.await;
