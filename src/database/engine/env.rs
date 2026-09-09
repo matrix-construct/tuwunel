@@ -27,26 +27,35 @@ static ENV: Mutex<Weak<Env>> = Mutex::new(Weak::new());
 /// Take a reference to the shared environment, creating one when no context
 /// currently holds it.
 ///
-/// The slot is held for the whole body so an acquisition cannot interleave
-/// with the teardown in [`Drop for Env`]. The priority knobs apply to
-/// the environment rather than to any one context, so they are read from the
-/// config of whichever server first needs it.
+/// The priority knobs apply to the environment rather than to any one context,
+/// so they are read from the config of whichever server first needs it.
 #[implement(Env)]
 pub(super) fn acquire(server: &Server) -> Result<Arc<Self>> {
+	Self::acquire_with_priorities(
+		server.config.rocksdb_compaction_prio_idle,
+		server.config.rocksdb_compaction_ioprio_idle,
+	)
+}
+
+/// Take a shared environment reference with the requested idle priorities.
+///
+/// The slot is held throughout acquisition so it cannot interleave with
+/// teardown; priorities apply only when creating the shared handle.
+#[implement(Env)]
+pub(super) fn acquire_with_priorities(cpu_idle: bool, io_idle: bool) -> Result<Arc<Self>> {
 	let mut slot = ENV.lock().expect("environment slot locked");
 
 	if let Some(env) = slot.upgrade() {
 		return Ok(env);
 	}
 
-	let config = &server.config;
 	let mut env = rocksdb::Env::new().or_else(or_else)?;
 
-	if config.rocksdb_compaction_prio_idle {
+	if cpu_idle {
 		env.lower_thread_pool_cpu_priority();
 	}
 
-	if config.rocksdb_compaction_ioprio_idle {
+	if io_idle {
 		env.lower_thread_pool_io_priority();
 	}
 

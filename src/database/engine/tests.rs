@@ -1,7 +1,7 @@
-use std::{env::temp_dir, fs, process};
+use std::{env::temp_dir, fs, path::Path, process::id, sync::Arc, thread::spawn};
 
 use rocksdb::{
-	Cache, DB, Env, Options,
+	Cache, DB, Env as RocksEnv, Options,
 	backup::{BackupEngine, BackupEngineOptions, RestoreOptions},
 };
 
@@ -9,6 +9,7 @@ use super::{
 	cf_opts::{register_pool, set_preview_retention},
 	context::{ColCache, ColCaches, SHARED_POOL},
 	descriptor::{self, CacheDisp, Descriptor},
+	env::Env,
 	open::is_remnant,
 };
 use crate::maps::descriptor;
@@ -112,33 +113,44 @@ fn shared_disposition_joins_global_pool() {
 
 #[test]
 fn restore_selects_backup_and_preserves_media_dir() {
-	let root = temp_dir().join(format!("tuwunel-restore-test-{}", process::id()));
+	let root = temp_dir().join(format!("tuwunel-restore-test-{}", id()));
 	let db_dir = root.join("db");
 	let backup_dir = root.join("backup");
 	fs::create_dir_all(&db_dir).expect("create db dir");
 	fs::create_dir_all(&backup_dir).expect("create backup dir");
 
-	let mut opts = Options::default();
-	opts.create_if_missing(true);
+	let env = Env::acquire_with_priorities(false, false).expect("acquire environment");
+	let other = Env::acquire_with_priorities(false, false).expect("acquire another owner");
 
-	// Takes the default environment directly rather than the shared one, so a
-	// concurrent teardown of that one can still reach these pools.
-	let env = Env::new().expect("create env");
+	assert!(Arc::ptr_eq(&env, &other));
+
 	let backup_opts = BackupEngineOptions::new(&backup_dir).expect("create backup options");
-	let mut engine = BackupEngine::open(&backup_opts, &env).expect("open backup engine");
+	let opts = options(&env.lock().expect("environment locked"));
+	let engine = BackupEngine::open(&backup_opts, &env.lock().expect("environment locked"))
+		.expect("open backup engine");
 
 	let db = DB::open(&opts, &db_dir).expect("open fresh db");
+	let owner = Arc::downgrade(&other);
+
+	spawn(move || drop(other))
+		.join()
+		.expect("drop overlapping environment owner");
+
+	assert!(
+		owner
+			.upgrade()
+			.is_some_and(|owner| Arc::ptr_eq(&env, &owner))
+	);
+
 	db.put(b"first", b"before backup")
 		.expect("put first");
-	engine
-		.create_new_backup_flush(&db, true)
-		.expect("create backup #1");
+
+	let engine = create_backup(engine, &db);
 
 	db.put(b"second", b"after backup #1")
 		.expect("put second");
-	engine
-		.create_new_backup_flush(&db, true)
-		.expect("create backup #2");
+
+	let engine = create_backup(engine, &db);
 
 	drop(db);
 
@@ -154,9 +166,7 @@ fn restore_selects_backup_and_preserves_media_dir() {
 	fs::create_dir_all(&media).expect("create media dir");
 	fs::write(media.join("marker"), b"media file").expect("write media marker");
 
-	engine
-		.restore_from_backup(&db_dir, &db_dir, &RestoreOptions::default(), 1)
-		.expect("restore backup #1");
+	let engine = restore_backup(engine, &db_dir);
 
 	let marker = fs::read(media.join("marker")).expect("media dir survives restore");
 
@@ -176,7 +186,35 @@ fn restore_selects_backup_and_preserves_media_dir() {
 	);
 
 	drop(db);
+	drop(engine);
+	drop(opts);
+	drop(env);
 	fs::remove_dir_all(&root).ok();
+}
+
+fn options(env: &RocksEnv) -> Options {
+	let mut opts = Options::default();
+
+	opts.create_if_missing(true);
+	opts.set_env(env);
+
+	opts
+}
+
+fn create_backup(mut engine: BackupEngine, db: &DB) -> BackupEngine {
+	engine
+		.create_new_backup_flush(db, true)
+		.expect("create backup");
+
+	engine
+}
+
+fn restore_backup(mut engine: BackupEngine, dir: &Path) -> BackupEngine {
+	engine
+		.restore_from_backup(dir, dir, &RestoreOptions::default(), 1)
+		.expect("restore backup #1");
+
+	engine
 }
 
 #[test]
