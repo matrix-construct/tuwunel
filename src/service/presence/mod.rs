@@ -20,7 +20,7 @@ use ruma::{
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 use tuwunel_core::{
-	Result, checked, debug, debug_warn, err,
+	Result, checked, debug, debug_warn, err, implement,
 	result::LogErr,
 	trace,
 	utils::{self, TryFutureExtExt},
@@ -295,4 +295,15 @@ impl Service {
 			},
 		}
 	}
+}
+
+/// Returns the latest optional presence event.
+///
+/// An absent index returns none. Payload and decoding errors remain visible.
+#[implement(Service)]
+pub async fn get_presence_optional(&self, user_id: &UserId) -> Result<Option<PresenceEvent>> {
+	self.db
+		.get_presence_optional(user_id)
+		.map_ok(|presence| presence.map(|(_, presence)| presence))
+		.await
 }

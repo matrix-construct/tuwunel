@@ -479,8 +479,8 @@
 {"Action":"pass","Test":"TestPowerLevels/GET_/rooms/:room_id/state/m.room.power_levels_can_fetch_levels"}
 {"Action":"pass","Test":"TestPowerLevels/PUT_/rooms/:room_id/state/m.room.power_levels_can_set_levels"}
 {"Action":"pass","Test":"TestPowerLevels/PUT_power_levels_should_not_explode_if_the_old_power_levels_were_empty"}
-{"Action":"fail","Test":"TestPresence"}
-{"Action":"fail","Test":"TestPresence/GET_/presence/:user_id/status_fetches_initial_status"}
+{"Action":"pass","Test":"TestPresence"}
+{"Action":"pass","Test":"TestPresence/GET_/presence/:user_id/status_fetches_initial_status"}
 {"Action":"pass","Test":"TestPresence/PUT_/presence/:user_id/status_updates_my_presence"}
 {"Action":"pass","Test":"TestPresence/Presence_can_be_set_from_sync"}
 {"Action":"pass","Test":"TestPresence/Presence_changes_are_reported_to_local_room_members"}

@@ -4,15 +4,15 @@ Tuwunel runs the [Complement](https://github.com/matrix-org/complement) Matrix h
 
 ## Counts
 
-- Test groups: 214. Passing: **86.9%**
-  - ✅ `pass`: 186
-  - 🟨 `some`: 13
+- Test groups: 214. Passing: **87.4%**
+  - ✅ `pass`: 187
+  - 🟨 `some`: 12
   - ❌ `fail`: 15
   - ⬛ `skip`: 0
 
-- Subtests: 599. Passing: **82.0%**
-  - ✅ `pass`: 491
-  - ❌ `fail`: 100
+- Subtests: 599. Passing: **82.1%**
+  - ✅ `pass`: 492
+  - ❌ `fail`: 99
   - ⬛ `skip`: 8
 
 ## All Top-Level Tests
@@ -150,7 +150,7 @@ Tuwunel runs the [Complement](https://github.com/matrix-org/complement) Matrix h
 | ❌ | 0/59/6 | `PartialStateJoin` |
 | ✅ | 1/0/0 | `PollsLocalPushRules` |
 | ✅ | 3/0/0 | `PowerLevels` |
-| 🟨 | 4/1/0 | `Presence` |
+| ✅ | 5/0/0 | `Presence` |
 | ✅ | – | `PresenceSyncDifferentRooms` |
 | ✅ | 2/0/0 | `ProfileAvatarURL` |
 | ✅ | 2/0/0 | `ProfileDisplayName` |

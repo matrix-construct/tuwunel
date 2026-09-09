@@ -3,8 +3,8 @@ use std::sync::Arc;
 use futures::Stream;
 use ruma::{UInt, UserId, events::presence::PresenceEvent, presence::PresenceState};
 use tuwunel_core::{
-	Result, debug_warn, utils,
-	utils::{ReadyExt, stream::TryIgnore},
+	Result, debug_warn, implement, utils,
+	utils::{ReadyExt, result::NotFound, stream::TryIgnore},
 };
 use tuwunel_database::{Deserialized, Json, Map};
 
@@ -24,25 +24,6 @@ impl Data {
 			userid_presenceid: db["userid_presenceid"].clone(),
 			services: args.services.clone(),
 		}
-	}
-
-	#[inline]
-	pub(super) async fn get_presence(&self, user_id: &UserId) -> Result<(u64, PresenceEvent)> {
-		let count = self
-			.userid_presenceid
-			.get(user_id)
-			.await
-			.deserialized::<u64>()?;
-
-		let key = presenceid_key(count, user_id);
-		let bytes = self.presenceid_presence.get(&key).await?;
-		let event = self
-			.services
-			.presence
-			.from_json_bytes_to_event(&bytes, user_id)
-			.await?;
-
-		Ok((count, event))
 	}
 
 	pub(super) async fn get_presence_raw(&self, user_id: &UserId) -> Result<(u64, Presence)> {
@@ -174,6 +155,53 @@ impl Data {
 					.then_some((user_id, count, presence))
 			})
 	}
+}
+
+#[implement(Data)]
+#[inline]
+pub(super) async fn get_presence(&self, user_id: &UserId) -> Result<(u64, PresenceEvent)> {
+	let count = self
+		.userid_presenceid
+		.get(user_id)
+		.await
+		.deserialized::<u64>()?;
+
+	let event = self.get_presence_event(count, user_id).await?;
+
+	Ok((count, event))
+}
+
+#[implement(Data)]
+#[inline]
+pub(super) async fn get_presence_optional(
+	&self,
+	user_id: &UserId,
+) -> Result<Option<(u64, PresenceEvent)>> {
+	let Some(count) = self
+		.userid_presenceid
+		.get(user_id)
+		.await
+		.optional()?
+	else {
+		return Ok(None);
+	};
+
+	let count = count.deserialized::<u64>()?;
+	let event = self.get_presence_event(count, user_id).await?;
+
+	Ok(Some((count, event)))
+}
+
+#[implement(Data)]
+#[tracing::instrument(level = "trace", skip(self))]
+async fn get_presence_event(&self, count: u64, user_id: &UserId) -> Result<PresenceEvent> {
+	let key = presenceid_key(count, user_id);
+	let bytes = self.presenceid_presence.get(&key).await?;
+
+	self.services
+		.presence
+		.from_json_bytes_to_event(&bytes, user_id)
+		.await
 }
 
 #[inline]
