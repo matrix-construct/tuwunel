@@ -122,7 +122,7 @@ pub(crate) async fn create_leave_event_v2_route(
 		.handle_incoming_pdu(origin, room_id, &event_id, value, true)
 		.await?
 		.map(at!(0))
-		.ok_or_else(|| err!(Request(InvalidParam("Could not accept as timeline event."))))?;
+		.ok_or_else(|| err!(Request(Forbidden("Could not accept as timeline event."))))?;
 
 	drop(mutex_lock);
 
