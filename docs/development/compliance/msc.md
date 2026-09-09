@@ -118,7 +118,7 @@ in the [Out of scope](#out-of-scope) section.
 | MSC3873 | ✅ ● | 100/100 | event_match dotted keys | dotted-key escape semantics handled in ruma flattened JSON |
 | MSC3861 | ✅ ● | 90/95 | Next-generation auth for Matrix, based on OAuth 2.0/OIDC | Advertised as org.matrix.msc3861; cores 2964-2967 + merged periphery all yes |
 | MSC3860 | ✅ ◐ | 95/100 | Media Download Redirects | Emits 307 to presigned object-store URL on allow_redirect; default-off gate |
-| MSC3856 | ✅ ● | 85/100 | Threads List API | Latest-activity order, participated, ignored views, 403, next_batch all served |
+| MSC3856 | ✅ ● | 90/100 | Threads List API | src/api/client/threads.rs:81 roots retained; full API, residual fallbacks |
 | MSC3844 | ✅ ● | 100/100 | Remove "Mjolnir" (policy room) sharing mechanism | removal of unused Mjolnir share endpoint; Tuwunel never implemented it |
 | MSC3828 | ✅ ● | 100/100 | Content Repository Cross Origin Resource Policy (CORP) Headers | media endpoints return Cross-Origin-Resource-Policy: cross-origin |
 | MSC3827 | ✅ ● | 100/100 | Filtering of `/publicRooms` by room type | /publicRooms supports room_types filter and returns room_type |

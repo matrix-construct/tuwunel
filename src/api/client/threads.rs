@@ -5,7 +5,11 @@ use futures::{StreamExt, TryStreamExt};
 use ruma::{
 	OwnedUserId,
 	api::client::threads::get_threads,
-	events::{GlobalAccountDataEventType, ignored_user_list::IgnoredUserListEvent},
+	events::{
+		AnySyncMessageLikeEvent, GlobalAccountDataEventType,
+		ignored_user_list::IgnoredUserListEvent,
+	},
+	serde::Raw,
 };
 use tuwunel_core::{
 	Err, Result, at,
@@ -74,7 +78,7 @@ pub(crate) async fn get_threads_route(
 				.await
 				.then_some((count, pdu)))
 		})
-		.try_filter_map(async |(count, pdu)| {
+		.and_then(async |(count, pdu)| {
 			let view = match ignored.is_empty() {
 				| true => IgnoredThreadView::Unchanged,
 				| false =>
@@ -84,10 +88,7 @@ pub(crate) async fn get_threads_route(
 						.await,
 			};
 
-			Ok(match view {
-				| IgnoredThreadView::Omitted => None,
-				| view => Some((count, pdu, view)),
-			})
+			Ok((count, pdu, view))
 		})
 		.take(limit.saturating_add(1))
 		.wide_and_then(async |(count, pdu, view)| {
@@ -125,11 +126,38 @@ pub(crate) async fn get_threads_route(
 /// the served `unsigned`: the redacted root replaces content only and keeps
 /// that `unsigned`, minus any `m.replace` bundle (a folded edit shares the
 /// root's sender, so it would re-serve the ignored content).
-fn apply_ignored_view(mut pdu: PduEvent, view: IgnoredThreadView) -> PduEvent {
-	let IgnoredThreadView::Adjusted { root, count, latest } = view else {
-		return pdu;
-	};
+fn apply_ignored_view(pdu: PduEvent, view: IgnoredThreadView) -> PduEvent {
+	match view {
+		| IgnoredThreadView::Unchanged => pdu,
+		| IgnoredThreadView::WithoutSummary { root } =>
+			without_thread_bundle(apply_redacted_root(pdu, root)),
+		| IgnoredThreadView::Adjusted { root, count, latest } =>
+			apply_redacted_root(adjust_thread_bundle(pdu, count, latest), root),
+	}
+}
 
+fn without_thread_bundle(mut pdu: PduEvent) -> PduEvent {
+	pdu.remove_thread_bundle().log_err().ok();
+	pdu
+}
+
+fn apply_redacted_root(pdu: PduEvent, root: Option<Box<PduEvent>>) -> PduEvent {
+	match root {
+		| None => pdu,
+		| Some(mut root) => {
+			root.unsigned = pdu.unsigned;
+			root.remove_replacement_bundle().log_err().ok();
+
+			*root
+		},
+	}
+}
+
+fn adjust_thread_bundle(
+	mut pdu: PduEvent,
+	count: Option<usize>,
+	latest: Option<Raw<AnySyncMessageLikeEvent>>,
+) -> PduEvent {
 	if let Some(count) = count {
 		pdu.set_thread_count(count).log_err().ok();
 	}
@@ -140,13 +168,5 @@ fn apply_ignored_view(mut pdu: PduEvent, view: IgnoredThreadView) -> PduEvent {
 			.ok();
 	}
 
-	match root {
-		| None => pdu,
-		| Some(mut root) => {
-			root.unsigned = pdu.unsigned;
-			root.remove_replacement_bundle().log_err().ok();
-
-			*root
-		},
-	}
+	pdu
 }

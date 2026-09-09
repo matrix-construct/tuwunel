@@ -17,7 +17,7 @@ use tuwunel_core::{
 
 use super::{
 	ExtractRelatesTo, IgnoredThreadView,
-	IgnoredThreadView::{Adjusted, Omitted, Unchanged},
+	IgnoredThreadView::{Adjusted, Unchanged, WithoutSummary},
 	Service,
 	typed_relations::{CHILD_COUNT_OFFSET, KEY_LEN, Tag, prefix},
 };
@@ -303,11 +303,12 @@ fn replacement_children<'a>(
 		})
 }
 
-/// MSC3856: evaluate one served thread root against the requester's ignore
-/// list. A cheap participant intersection gates the reply walk; one walk then
-/// yields the replacement `latest_event`, the ignored-aware `count`, and the
-/// omit-when-every-reply-is-ignored verdict. A root whose replies are not
-/// indexed (backfilled history) adjusts nothing beyond its own redacted form.
+/// Evaluate one thread root against the requester's ignore list.
+///
+/// A cheap participant intersection gates the reply walk. One walk then yields
+/// the replacement `latest_event`, the ignored-aware `count`, and the
+/// summary-omission verdict when every reply is ignored. A root whose replies
+/// are not indexed adjusts nothing beyond its own redacted form.
 #[implement(Service)]
 #[tracing::instrument(skip_all, level = "trace")]
 pub async fn ignored_thread_view(
@@ -373,7 +374,9 @@ pub async fn ignored_thread_view(
 	}
 
 	if unignored == 0 {
-		return Omitted;
+		return WithoutSummary {
+			root: self.redacted_root(ignored, root).await,
+		};
 	}
 
 	let swap = root

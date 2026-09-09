@@ -38,16 +38,20 @@ struct ExtractRelatesTo {
 /// Requester-specific MSC3856 adjustment for one thread root in `/threads`.
 ///
 /// Root redaction, visible replies, latest event, and reply count depend on the
-/// requesting user and their ignore list. The resulting view must not be reused
-/// across requesters.
+/// requesting user and their ignore list, so the resulting view must not be
+/// reused across requesters.
 ///
-/// `Unchanged` preserves the served root, while `Omitted` removes it from the
-/// response. Each `Adjusted` field is `None` when that facet needs no change. A
-/// supplied `root` provides redacted content while the caller retains the
-/// served `unsigned`.
+/// `Unchanged` preserves the served root, while `WithoutSummary` removes only
+/// its thread bundle. Each `Adjusted` field is `None` when that facet needs no
+/// change. A supplied `root` provides redacted content while the caller retains
+/// the served `unsigned`.
 pub enum IgnoredThreadView {
 	Unchanged,
-	Omitted,
+	/// Retains the root without its thread summary.
+	WithoutSummary {
+		/// The redacted root to serve when its sender is ignored.
+		root: Option<Box<Pdu>>,
+	},
 	Adjusted {
 		root: Option<Box<Pdu>>,
 		count: Option<usize>,
