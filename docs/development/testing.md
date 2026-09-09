@@ -24,10 +24,10 @@ deliverables from reaching users.
 
 | Phase | Access | Description |
 |---|---|---|
-| **[Lint](testing/pipeline.md#linting-phase)** | everything (unless masked) | format, spelling, security audit, dead links, clippy |
-| **[Test](testing/pipeline.md#testing-phase)** | everything (unless masked) | unit, integration, smoke, Complement, Matrix SDK |
-| **[Package](testing/pipeline.md#package-phase)** | main, test, releases, PRs (limited) | binaries, containers, distro packages, docs |
-| **[Publish](testing/pipeline.md#publish-phase)** | main and tagged releases only  | container registries, GitHub Pages |
+| **[Lint](testing/pipeline.md#1-linting-phase)** | everything (unless masked) | format, spelling, security audit, dead links, clippy |
+| **[Test](testing/pipeline.md#2-testing-phase)** | everything (unless masked) | unit, integration, smoke, Complement, Matrix SDK |
+| **[Package](testing/pipeline.md#3-package-phase)** | main, test, releases, PRs (limited) | binaries, containers, distro packages, docs |
+| **[Publish](testing/pipeline.md#4-publish-phase)** | main and tagged releases only  | container registries, GitHub Pages |
 
 ## Chapters
 

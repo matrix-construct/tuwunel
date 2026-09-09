@@ -25,6 +25,7 @@ RUN \
             --verbose \
             --no-progress \
             --offline \
+            --include-fragments \
             --cache \
             --max-cache-age "${lychee_cache_age}" \
             --mode "${lychee_mode}" \

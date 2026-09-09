@@ -11,9 +11,9 @@ Federating servers and clients accessing tuwunel at `example.com` will attempt t
 
 ## Configuration
 
-Make sure the following are set in your [configuration file](<../configuration/examples.md#:~:text=### Tuwunel Configuration>) or via [environment variables](../configuration.md#environment-variables):
+Make sure the following are set in your [configuration file](../configuration/examples.md#example-configuration) or via [environment variables](../configuration.md#environment-variables):
 
-1. [Server name](<../configuration/examples.md#:~:text=# The server_name,#server_name>): set `TUWUNEL_SERVER_NAME=example.com` or in the configuration file:
+1. [Server name](../configuration/examples.md#example-configuration): set `TUWUNEL_SERVER_NAME=example.com` or in the configuration file:
     ```toml,hidelines=~
     [global]
     ~
@@ -36,7 +36,7 @@ Make sure the following are set in your [configuration file](<../configuration/e
     ~#
     server_name = example.com
     ```
-2. [Client-server URL](../configuration/examples.md#:~:text=#[global.well_known],#client): set `TUWUNEL_WELL_KNOWN__CLIENT=https://matrix.example.com` or in the configuration file:
+2. [Client-server URL](../configuration/examples.md#example-configuration): set `TUWUNEL_WELL_KNOWN__CLIENT=https://matrix.example.com` or in the configuration file:
     ```toml,hidelines=~
     [global.well_known]
     ~
@@ -47,7 +47,7 @@ Make sure the following are set in your [configuration file](<../configuration/e
     ~#
     client = https://matrix.example.com
     ```
-3. [Server-server federation domain and port](<../configuration/examples.md#:~:text=# The server base domain,#server>): where `<PORT>` is the external port for federation (default 8448, but often 443 when reverse proxying), set `TUWUNEL_WELL_KNOWN__SERVER=matrix.example.com:<PORT>` or in the configuration file:
+3. [Server-server federation domain and port](../configuration/examples.md#example-configuration): where `<PORT>` is the external port for federation (default 8448, but often 443 when reverse proxying), set `TUWUNEL_WELL_KNOWN__SERVER=matrix.example.com:<PORT>` or in the configuration file:
     ```toml,hidelines=~
     [global.well_known]
     ~
