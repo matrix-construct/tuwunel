@@ -591,14 +591,16 @@ pub async fn sign_key(
 			.as_deref()
 			.ok_or_else(|| err!(Database("canonical key was not initialized")))?;
 
-		self.verify_key_signature(
-			sender_id,
-			signature_key_id,
-			signer_role,
-			&signature,
-			canonical.as_bytes(),
-		)
-		.await?;
+		let signature = self
+			.verify_key_signature(
+				sender_id,
+				signature_key_id,
+				signer_role,
+				&signature,
+				canonical.as_bytes(),
+			)
+			.map_ok(|signature| signature.encode())
+			.await?;
 
 		changed |= match write {
 			| SignatureWrite::Merge =>
@@ -621,7 +623,15 @@ pub async fn sign_key(
 	let key = (target_id, key_id);
 	self.db.keyid_key.put(key, Json(target_key));
 
-	self.mark_device_key_update(target_id).await;
+	if same_user {
+		self.mark_device_key_update(target_id).await;
+	} else {
+		let count = self.services.globals.next_count();
+
+		self.db
+			.keychangeid_userid
+			.put_raw((sender_id, *count), target_id);
+	}
 
 	Ok(())
 }
@@ -740,7 +750,7 @@ async fn verify_key_signature(
 	role: KeyRole,
 	signature: &str,
 	canonical: &[u8],
-) -> Result {
+) -> Result<Base64> {
 	let signing_key: serde_json::Value = self
 		.db
 		.keyid_key
@@ -775,7 +785,7 @@ fn verify_signature(
 	public_key: &str,
 	signature: &str,
 	canonical: &[u8],
-) -> Result {
+) -> Result<Base64> {
 	let public_key = Base64::<Standard>::parse(public_key)
 		.map_err(|_| VerificationError::NoPublicKeysForEntity(sender_id.to_string()))?;
 
@@ -793,7 +803,7 @@ fn verify_signature(
 		canonical,
 	)?;
 
-	Ok(())
+	Ok(signature)
 }
 
 fn insert_signatures(
