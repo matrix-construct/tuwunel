@@ -1102,7 +1102,7 @@ async fn load_joined_room(
 		next_batch,
 		&timeline_pdus,
 		last_timeline_count,
-		timeline_changed,
+		timeline_changed || full_state || initial,
 		state_after,
 	)
 	.boxed()
@@ -1636,10 +1636,10 @@ async fn gather_room_metadata(
 	next_batch: u64,
 	timeline_pdus: &[(PduCount, PduEvent)],
 	last_timeline_count: PduCount,
-	timeline_changed: bool,
+	include_state: bool,
 	state_after: StateAfter,
 ) -> Result<RoomMetadata> {
-	let since_shortstatehash = timeline_changed.then_async(|| {
+	let since_shortstatehash = include_state.then_async(|| {
 		services
 			.timeline
 			.prev_shortstatehash(room_id, PduCount::Normal(since).saturating_add(1))
@@ -1668,17 +1668,29 @@ async fn gather_room_metadata(
 			.inspect_err(inspect_debug_log)
 	});
 
-	let current_shortstatehash = timeline_changed.then_async(|| {
-		services
-			.timeline
-			.get_shortstatehash(room_id, last_timeline_count)
-			.inspect_err(inspect_debug_log)
+	let current_shortstatehash = include_state.then_async(async || {
+		// An empty timeline needs state after the last event, not before it.
+		let state = async {
+			if timeline_pdus.is_empty() {
+				services
+					.timeline
+					.next_shortstatehash(room_id, last_timeline_count)
+					.await
+			} else {
+				services
+					.timeline
+					.get_shortstatehash(room_id, last_timeline_count)
+					.await
+			}
+		};
+		state
 			.or_else(|_| services.state.get_room_shortstatehash(room_id))
+			.await
 			.map_err(|_| err!(Database(error!("Room {room_id} has no state"))))
 	});
 
 	let encrypted_room =
-		timeline_changed.then_async(|| services.state_accessor.is_encrypted_room(room_id));
+		include_state.then_async(|| services.state_accessor.is_encrypted_room(room_id));
 
 	let receipt_events = services
 		.read_receipt
