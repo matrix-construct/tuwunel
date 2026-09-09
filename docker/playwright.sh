@@ -16,7 +16,7 @@ default_sys_target="x86_64-v1-linux-gnu"
 default_sys_version="testing-slim"
 
 default_playwright_run=".*"
-default_playwright_skip="Read.receipts|oidc-native|backups-mas|login-sso|soft_logout_oauth|register/email|forgot-password"
+default_playwright_skip="oidc-native|backups-mas|login-sso|soft_logout_oauth|register/email|forgot-password"
 default_playwright_shard="1/1"
 default_playwright_count=1
 default_playwright_workers=1
@@ -27,10 +27,7 @@ run="${1:-$default_playwright_run}"
 # Skip-list: alternation of regexes matched against each test id (its file path
 # and title). Mirrors the equivalent block in docker/complement.sh, and like it
 # stays space-free so the value survives the unquoted docker arg below.
-#   "Read.receipts" holds out the entire read-receipts directory (every spec
-# there nests under the "Read receipts" describe; the dot matches that space)
-# pending a fix for position-blind notification counts.
-#   The trailing stems hold out specs that need a MAS, OAuth, or SMTP sidecar
+#   These stems hold out specs that need a MAS, OAuth, or SMTP sidecar
 # the harness does not provision (no-ops in docker/lib/playwright.tuwunel.ts):
 # element-web builds those fixtures before its own homeserver-type skip, so
 # against tuwunel they error in setup instead of skipping themselves.
