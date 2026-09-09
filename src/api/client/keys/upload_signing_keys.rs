@@ -5,7 +5,7 @@ use ruma::{
 		keys::upload_signing_keys,
 		uiaa::{AuthFlow, AuthType, UiaaInfo},
 	},
-	encryption::CrossSigningKey,
+	encryption::{CrossSigningKey, KeyUsage},
 	serde::Raw,
 };
 use serde_json::{json, value::to_raw_value};
@@ -18,6 +18,15 @@ use tuwunel_core::{
 use tuwunel_service::{Services, uiaa::SESSION_ID_LENGTH, users::parse_master_key};
 
 use crate::{Ruma, router::auth_uiaa};
+
+struct Keys<'a> {
+	user_id: &'a UserId,
+	master_key: &'a Option<Raw<CrossSigningKey>>,
+	self_signing_key: &'a Option<Raw<CrossSigningKey>>,
+	user_signing_key: &'a Option<Raw<CrossSigningKey>>,
+}
+
+struct ValidatedKeys<'a>(Keys<'a>);
 
 /// # `POST /_matrix/client/r0/keys/device_signing/upload`
 ///
@@ -32,6 +41,13 @@ pub(crate) async fn upload_signing_keys_route(
 	body: Ruma<upload_signing_keys::v3::Request>,
 ) -> Result<upload_signing_keys::v3::Response> {
 	let sender_user = body.sender_user();
+
+	let keys = validate_keys(Keys {
+		user_id: sender_user,
+		master_key: &body.master_key,
+		self_signing_key: &body.self_signing_key,
+		user_signing_key: &body.user_signing_key,
+	})?;
 
 	// Access token is required for this endpoint regardless of conditional UIAA so
 	// we'll always have a sender_user.
@@ -53,7 +69,7 @@ pub(crate) async fn upload_signing_keys_route(
 
 		// Some of the keys weren't found, so we let them upload
 		debug!("Skipping UIA as per MSC3967: user had no existing keys");
-		return persist_signing_keys(&services, &body).await;
+		return persist_signing_keys(&services, keys).await;
 	}
 
 	// MSC4190: appservices with device_management may replace existing
@@ -68,7 +84,7 @@ pub(crate) async fn upload_signing_keys_route(
 			 enabled"
 		);
 
-		return persist_signing_keys(&services, &body).await;
+		return persist_signing_keys(&services, keys).await;
 	}
 
 	let is_oidc = body
@@ -90,7 +106,7 @@ pub(crate) async fn upload_signing_keys_route(
 			.can_replace_cross_signing_keys(sender_user)
 			.await
 	{
-		return persist_signing_keys(&services, &body).await;
+		return persist_signing_keys(&services, keys).await;
 	}
 
 	// First attempt from OIDC device: issue m.oauth flow.
@@ -101,20 +117,64 @@ pub(crate) async fn upload_signing_keys_route(
 	let authed_user = auth_uiaa(&services, &body).await?;
 
 	assert_eq!(sender_user, authed_user, "Expected UIAA of {sender_user} and not {authed_user}");
-	persist_signing_keys(&services, &body).await
+	persist_signing_keys(&services, keys).await
+}
+
+fn validate_keys(keys: Keys<'_>) -> Result<ValidatedKeys<'_>> {
+	[
+		(keys.master_key.as_ref(), KeyUsage::Master),
+		(keys.self_signing_key.as_ref(), KeyUsage::SelfSigning),
+		(keys.user_signing_key.as_ref(), KeyUsage::UserSigning),
+	]
+	.into_iter()
+	.try_for_each(|(key, usage)| validate_key(keys.user_id, key, &usage))?;
+
+	Ok(ValidatedKeys(keys))
+}
+
+fn validate_key(
+	user_id: &UserId,
+	key: Option<&Raw<CrossSigningKey>>,
+	usage: &KeyUsage,
+) -> Result {
+	let Some(key) = key else {
+		return Ok(());
+	};
+
+	let key = key
+		.deserialize()
+		.map_err(|error| err!(Request(InvalidParam("Invalid cross-signing key: {error}"))))?;
+
+	if key.user_id != user_id {
+		return Err!(Request(InvalidParam("Cross-signing key belongs to another user.")));
+	}
+
+	if !key.usage.contains(usage) {
+		return Err!(Request(InvalidParam(
+			"Cross-signing key does not include the required usage."
+		)));
+	}
+
+	if key.keys.len() != 1 {
+		return Err!(Request(InvalidParam("Cross-signing key must contain exactly one key.")));
+	}
+
+	Ok(())
 }
 
 async fn persist_signing_keys(
 	services: &Services,
-	body: &Ruma<upload_signing_keys::v3::Request>,
+	keys: ValidatedKeys<'_>,
 ) -> Result<upload_signing_keys::v3::Response> {
+	let ValidatedKeys(keys) = keys;
+
 	services
 		.users
 		.add_cross_signing_keys(
-			body.sender_user(),
-			&body.master_key,
-			&body.self_signing_key,
-			&body.user_signing_key,
+			keys.user_id,
+			keys.master_key,
+			keys.self_signing_key,
+			keys.user_signing_key,
 			true, // notify so that other users see the new keys
 		)
 		.await?;
@@ -230,4 +290,154 @@ async fn master_key_matches(
 	}
 
 	Ok(true)
+}
+
+#[cfg(test)]
+mod tests {
+	use ruma::{api::error::ErrorKind::InvalidParam, user_id};
+	use serde_json::Map;
+
+	use super::*;
+
+	#[test]
+	fn accepts_valid_unsigned_keys_and_additional_usages() {
+		let user_id = user_id!("@alice:example.com");
+		let master_key =
+			Some(signing_key(user_id, &["master", "self_signing"], &["ed25519:master"]));
+
+		let self_signing_key =
+			Some(signing_key(user_id, &["self_signing", "user_signing"], &["ed25519:self"]));
+
+		let user_signing_key =
+			Some(signing_key(user_id, &["user_signing", "master"], &["ed25519:user"]));
+
+		validate_keys(Keys {
+			user_id,
+			master_key: &master_key,
+			self_signing_key: &self_signing_key,
+			user_signing_key: &user_signing_key,
+		})
+		.expect("valid unsigned keys should pass structural validation");
+	}
+
+	#[test]
+	fn rejects_wrong_owner_for_each_role() {
+		let user_id = user_id!("@alice:example.com");
+		let other_user = user_id!("@mallory:elsewhere.example");
+		let none = None;
+		let master_key = Some(signing_key(other_user, &["master"], &["ed25519:master"]));
+		let self_signing_key =
+			Some(signing_key(other_user, &["self_signing"], &["ed25519:self"]));
+
+		let user_signing_key =
+			Some(signing_key(other_user, &["user_signing"], &["ed25519:user"]));
+
+		assert_invalid(&validate_keys(Keys {
+			user_id,
+			master_key: &master_key,
+			self_signing_key: &none,
+			user_signing_key: &none,
+		}));
+
+		assert_invalid(&validate_keys(Keys {
+			user_id,
+			master_key: &none,
+			self_signing_key: &self_signing_key,
+			user_signing_key: &none,
+		}));
+
+		assert_invalid(&validate_keys(Keys {
+			user_id,
+			master_key: &none,
+			self_signing_key: &none,
+			user_signing_key: &user_signing_key,
+		}));
+	}
+
+	#[test]
+	fn rejects_missing_usage_for_each_role() {
+		let user_id = user_id!("@alice:example.com");
+		let none = None;
+		let master_key = Some(signing_key(user_id, &["self_signing"], &["ed25519:master"]));
+		let self_signing_key = Some(signing_key(user_id, &["master"], &["ed25519:self"]));
+		let user_signing_key = Some(signing_key(user_id, &["master"], &["ed25519:user"]));
+
+		assert_invalid(&validate_keys(Keys {
+			user_id,
+			master_key: &master_key,
+			self_signing_key: &none,
+			user_signing_key: &none,
+		}));
+
+		assert_invalid(&validate_keys(Keys {
+			user_id,
+			master_key: &none,
+			self_signing_key: &self_signing_key,
+			user_signing_key: &none,
+		}));
+
+		assert_invalid(&validate_keys(Keys {
+			user_id,
+			master_key: &none,
+			self_signing_key: &none,
+			user_signing_key: &user_signing_key,
+		}));
+	}
+
+	#[test]
+	fn rejects_invalid_key_counts() {
+		let user_id = user_id!("@alice:example.com");
+		let none = None;
+		let empty = Some(signing_key(user_id, &["master"], &[]));
+		let multiple =
+			Some(signing_key(user_id, &["self_signing"], &["ed25519:first", "ed25519:second"]));
+
+		assert_invalid(&validate_keys(Keys {
+			user_id,
+			master_key: &empty,
+			self_signing_key: &none,
+			user_signing_key: &none,
+		}));
+
+		assert_invalid(&validate_keys(Keys {
+			user_id,
+			master_key: &none,
+			self_signing_key: &multiple,
+			user_signing_key: &none,
+		}));
+	}
+
+	#[test]
+	fn rejects_a_malformed_later_key_before_persistence() {
+		let user_id = user_id!("@alice:example.com");
+		let master_key = Some(signing_key(user_id, &["master"], &["ed25519:master"]));
+		let self_signing_key = Some(signing_key(user_id, &["self_signing"], &["ed25519:self"]));
+		let user_signing_key = Some(signing_key(user_id, &["master"], &["ed25519:user"]));
+
+		assert_invalid(&validate_keys(Keys {
+			user_id,
+			master_key: &master_key,
+			self_signing_key: &self_signing_key,
+			user_signing_key: &user_signing_key,
+		}));
+	}
+
+	fn signing_key(user_id: &UserId, usage: &[&str], key_ids: &[&str]) -> Raw<CrossSigningKey> {
+		let keys: Map<_, _> = key_ids
+			.iter()
+			.map(|key_id| ((*key_id).to_owned(), json!("public-key")))
+			.collect();
+
+		let key = json!({
+			"user_id": user_id,
+			"usage": usage,
+			"keys": keys,
+		});
+
+		Raw::from_json(to_raw_value(&key).expect("cross-signing key should serialize"))
+	}
+
+	fn assert_invalid(result: &Result<ValidatedKeys<'_>>) {
+		assert!(matches!(result, Err(Error::Request(InvalidParam, ..))));
+	}
 }
