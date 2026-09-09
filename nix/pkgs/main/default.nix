@@ -19,8 +19,6 @@
   default_features ? true,
   # default list of disabled features
   disable_features ? [
-    # dont include experimental features
-    "experimental"
     # jemalloc profiling/stats features are expensive and shouldn't
     # be expected on non-debug builds.
     "jemalloc_prof"

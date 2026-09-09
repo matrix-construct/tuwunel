@@ -240,8 +240,6 @@
         packages = {
           default = scopeHost.main.override {
             disable_features = [
-              # dont include experimental features
-              "experimental"
               # jemalloc profiling/stats features are expensive and shouldn't
               # be expected on non-debug builds.
               "jemalloc_prof"
@@ -255,8 +253,6 @@
             # debug build users expect full logs
             disable_release_max_log_level = true;
             disable_features = [
-              # dont include experimental features
-              "experimental"
               # this is non-functional on nix for some reason
               "tuwunel_mods"
             ];
@@ -266,8 +262,6 @@
             profile = "test";
             disable_release_max_log_level = true;
             disable_features = [
-              # dont include experimental features
-              "experimental"
               # this is non-functional on nix for some reason
               "tuwunel_mods"
             ];
@@ -275,8 +269,6 @@
           all-features = scopeHost.main.override {
             all_features = true;
             disable_features = [
-              # dont include experimental features
-              "experimental"
               # jemalloc profiling/stats features are expensive and shouldn't
               # be expected on non-debug builds.
               "jemalloc_prof"
@@ -291,8 +283,6 @@
             # debug build users expect full logs
             disable_release_max_log_level = true;
             disable_features = [
-              # dont include experimental features
-              "experimental"
               # this is non-functional on nix for some reason
               "tuwunel_mods"
             ];
@@ -303,8 +293,6 @@
             main = scopeHost.main.override {
               all_features = true;
               disable_features = [
-                # dont include experimental features
-                "experimental"
                 # jemalloc profiling/stats features are expensive and shouldn't
                 # be expected on non-debug builds.
                 "jemalloc_prof"
@@ -321,8 +309,6 @@
               # debug build users expect full logs
               disable_release_max_log_level = true;
               disable_features = [
-                # dont include experimental features
-                "experimental"
                 # tuwunel_mods is a development-only hot reload feature
                 "tuwunel_mods"
               ];
@@ -381,8 +367,6 @@
                       profile = "test";
                       disable_release_max_log_level = true;
                       disable_features = [
-                        # dont include experimental features
-                        "experimental"
                         # tuwunel_mods is a development-only hot reload feature
                         "tuwunel_mods"
                       ];
@@ -395,8 +379,6 @@
                     value = scopeCrossStatic.main.override {
                       all_features = true;
                       disable_features = [
-                        # dont include experimental features
-                        "experimental"
                         # jemalloc profiling/stats features are expensive and shouldn't
                         # be expected on non-debug builds.
                         "jemalloc_prof"
@@ -414,8 +396,6 @@
                     value = scopeCrossStatic.main.override {
                       all_features = true;
                       disable_features = [
-                        # dont include experimental features
-                        "experimental"
                         # jemalloc profiling/stats features are expensive and shouldn't
                         # be expected on non-debug builds.
                         "jemalloc_prof"
@@ -438,8 +418,6 @@
                       # debug build users expect full logs
                       disable_release_max_log_level = true;
                       disable_features = [
-                        # dont include experimental features
-                        "experimental"
                         # tuwunel_mods is a development-only hot reload feature
                         "tuwunel_mods"
                       ];
@@ -484,8 +462,6 @@
                       main = scopeCrossStatic.main.override {
                         all_features = true;
                         disable_features = [
-                          # dont include experimental features
-                          "experimental"
                           # jemalloc profiling/stats features are expensive and shouldn't
                           # be expected on non-debug builds.
                           "jemalloc_prof"
@@ -505,8 +481,6 @@
                       main = scopeCrossStatic.main.override {
                         all_features = true;
                         disable_features = [
-                          # dont include experimental features
-                          "experimental"
                           # jemalloc profiling/stats features are expensive and shouldn't
                           # be expected on non-debug builds.
                           "jemalloc_prof"
@@ -531,8 +505,6 @@
                         # debug build users expect full logs
                         disable_release_max_log_level = true;
                         disable_features = [
-                          # dont include experimental features
-                          "experimental"
                           # tuwunel_mods is a development-only hot reload feature
                           "tuwunel_mods"
                         ];
@@ -564,8 +536,6 @@
               main = prev.main.override {
                 all_features = true;
                 disable_features = [
-                  # dont include experimental features
-                  "experimental"
                   # jemalloc profiling/stats features are expensive and shouldn't
                   # be expected on non-debug builds.
                   "jemalloc_prof"

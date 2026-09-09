@@ -928,9 +928,17 @@ mismatched_lifetime_syntaxes = "allow"
 dead_code_pub_in_binary = "allow"
 let_underscore_drop = "allow"
 missing_docs = "allow"
-# cfgs cannot be limited to expected cfgs or their de facto non-transitive/opt-in use-case e.g.
-# tokio_unstable will warn.
-unexpected_cfgs = "allow"
+unexpected_cfgs = { level = "warn", check-cfg = [
+	'cfg(core_intrinsics)',
+	'cfg(disable)',
+	'cfg(panic_trap)',
+	'cfg(tokio_unstable)',
+	'cfg(tuwunel_always_prove_sendness)',
+	'cfg(tuwunel_always_prove_syncness)',
+	'cfg(tuwunel_debug_logging)',
+	'cfg(tuwunel_mods)',
+	'cfg(unabridged)',
+] }
 # buggy, but worth checking on occasionally
 unused_crate_dependencies = "allow"
 unsafe_code = "allow"

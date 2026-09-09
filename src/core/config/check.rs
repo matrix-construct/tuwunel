@@ -72,16 +72,6 @@ pub fn check(config: &Config) -> Result {
 	warn_legacy_state_local(config);
 	warn_unknown_key(config)?;
 
-	#[cfg(all(
-		feature = "hardened_malloc",
-		feature = "jemalloc",
-		not(target_env = "msvc")
-	))]
-	debug_warn!(
-		"hardened_malloc and jemalloc compile-time features are both enabled, this causes \
-		 jemalloc to be used."
-	);
-
 	check_observability(config)?;
 	check_network(config)?;
 	check_storage(config)?;

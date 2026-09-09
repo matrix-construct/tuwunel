@@ -23,10 +23,6 @@ let
       # sentry telemetry isn't useful for complement, disabled by default anyways
       "sentry_telemetry"
       "perf_measurements"
-      # this is non-functional on nix for some reason
-      "hardened_malloc"
-      # dont include experimental features
-      "experimental"
       # compression isn't needed for complement
       "brotli_compression"
       "gzip_compression"
