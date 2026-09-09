@@ -2,7 +2,7 @@ use axum::extract::State;
 use ruma::{
 	DeviceId, UserId, api::client::keys::upload_keys, encryption::DeviceKeys, serde::Raw,
 };
-use tuwunel_core::{Err, Result, debug, err};
+use tuwunel_core::{Err, Result, debug, err, utils::result::NotFound};
 use tuwunel_service::Services;
 
 use crate::Ruma;
@@ -80,12 +80,21 @@ async fn store_device_keys(
 	// Workaround for a nheko bug which omits cross-signing signatures when
 	// re-uploading the same DeviceKeys: ignore an exact-copy re-upload so the
 	// existing signatures are preserved.
-	let unchanged = services
+	let existing = services
 		.users
 		.get_device_keys(sender_user, sender_device)
 		.await
-		.and_then(|keys| keys.deserialize().map_err(Into::into))
-		.is_ok_and(|existing| existing.keys == new_keys.keys);
+		.optional()
+		.and_then(|existing| {
+			existing
+				.map(|keys| keys.deserialize().map_err(Into::into))
+				.transpose()
+		})
+		.map_err(|error| {
+			err!(Database(debug_warn!("Failed to read stored device keys: {error}")))
+		})?;
+
+	let unchanged = existing.is_some_and(|existing| existing.keys == new_keys.keys);
 
 	if unchanged {
 		debug!(
