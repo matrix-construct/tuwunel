@@ -5,7 +5,7 @@ use futures::{FutureExt, StreamExt, TryStreamExt};
 use ruma::{MilliSecondsSinceUnixEpoch, api::federation::backfill::get_backfill};
 use tuwunel_core::{
 	PduCount, Result,
-	utils::{IterStream, ReadyExt},
+	utils::{IterStream, ReadyExt, math::usize_from_ruma_bounded},
 };
 
 use super::AccessCheck;
@@ -34,11 +34,7 @@ pub(crate) async fn get_backfill_route(
 	.check()
 	.await?;
 
-	let limit = body
-		.limit
-		.try_into()
-		.unwrap_or(LIMIT_DEFAULT)
-		.min(LIMIT_MAX);
+	let limit = usize_from_ruma_bounded(body.limit, LIMIT_DEFAULT, LIMIT_MAX);
 
 	let from = body
 		.v

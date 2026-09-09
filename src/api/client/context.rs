@@ -16,6 +16,7 @@ use tuwunel_core::{
 	utils::{
 		BoolExt, IterStream,
 		future::TryExtExt,
+		math::usize_from_ruma_bounded,
 		stream::{BroadbandExt, ReadyExt, TryIgnore, WidebandExt},
 	},
 };
@@ -101,10 +102,8 @@ pub(crate) async fn event_context(
 		return Err!(Request(Forbidden("Room does not exist to this server")));
 	}
 
-	let limit: usize = limit
-		.and_then(|limit| limit.try_into().ok())
-		.unwrap_or(LIMIT_DEFAULT)
-		.min(LIMIT_MAX);
+	let limit = limit
+		.map_or(LIMIT_DEFAULT, |limit| usize_from_ruma_bounded(limit, LIMIT_DEFAULT, LIMIT_MAX));
 
 	let (base_id, base_pdu) =
 		resolve_base_event(services, room_id, event_id, sender_user, bypass_visibility).await?;

@@ -25,6 +25,7 @@ use tuwunel_core::{
 	},
 	utils::{
 		BoolExt,
+		math::usize_from_ruma_bounded,
 		result::FlatOk,
 		stream::{ReadyExt, WidebandExt},
 	},
@@ -135,11 +136,7 @@ async fn paginate_relations_with_filter(
 	// Spec (v1.10) recommends depth of at least 3
 	let max_depth: usize = if recurse { 3 } else { 0 };
 
-	let limit: usize = limit
-		.map(TryInto::try_into)
-		.flat_ok()
-		.unwrap_or(30)
-		.min(100);
+	let limit = limit.map_or(30, |limit| usize_from_ruma_bounded(limit, 30, 100));
 
 	let target_event_id: &EventId = target;
 

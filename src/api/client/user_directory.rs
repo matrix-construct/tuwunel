@@ -7,6 +7,7 @@ use tuwunel_core::{
 	Result,
 	utils::{
 		BoolExt, FutureBoolExt,
+		math::usize_from_ruma_bounded,
 		stream::{BroadbandExt, ReadyExt},
 	},
 };
@@ -30,9 +31,7 @@ pub(crate) async fn search_users_route(
 	body: Ruma<search_users::v3::Request>,
 ) -> Result<search_users::v3::Response> {
 	let sender_user = body.sender_user();
-	let limit = usize::try_from(body.limit)
-		.unwrap_or(LIMIT_DEFAULT)
-		.min(LIMIT_MAX);
+	let limit = usize_from_ruma_bounded(body.limit, LIMIT_DEFAULT, LIMIT_MAX);
 
 	let search_term = body.search_term.to_lowercase();
 	let users = services

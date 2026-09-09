@@ -18,9 +18,9 @@ use search_events::v3::{Request, Response};
 use tuwunel_core::{
 	Err, Result, at, is_true,
 	matrix::Event,
-	result::FlatOk,
 	utils::{
 		IterStream,
+		math::usize_from_ruma_bounded,
 		option::OptionExt,
 		stream::{ReadyExt, TryIgnore, WidebandExt},
 	},
@@ -76,12 +76,9 @@ async fn category_room_events(
 ) -> Result<ResultRoomEvents> {
 	let filter = &criteria.filter;
 
-	let limit: usize = filter
+	let limit = filter
 		.limit
-		.map(TryInto::try_into)
-		.flat_ok()
-		.unwrap_or(LIMIT_DEFAULT)
-		.min(LIMIT_MAX);
+		.map_or(LIMIT_DEFAULT, |limit| usize_from_ruma_bounded(limit, LIMIT_DEFAULT, LIMIT_MAX));
 
 	let next_batch: usize = next_batch
 		.map(str::parse)
@@ -217,9 +214,8 @@ where
 	};
 
 	let room_id = pdu.room_id();
-	let bounded = |limit: UInt| limit.try_into().unwrap_or(0).min(CONTEXT_MAX);
-	let before_limit = bounded(event_context.before_limit);
-	let after_limit = bounded(event_context.after_limit);
+	let before_limit = usize_from_ruma_bounded(event_context.before_limit, 0, CONTEXT_MAX);
+	let after_limit = usize_from_ruma_bounded(event_context.after_limit, 0, CONTEXT_MAX);
 
 	let events_before = collect_context_half(
 		services,

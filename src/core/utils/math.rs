@@ -154,6 +154,16 @@ pub fn usize_from_ruma(val: ruma::UInt) -> usize {
 	usize::try_from(val).expect("failed conversion from ruma::UInt to usize")
 }
 
+/// Converts a Matrix unsigned integer to a bounded `usize`.
+///
+/// Conversion failure uses `fallback`. The result is limited to `max` after
+/// either conversion path.
+#[inline]
+#[must_use]
+pub fn usize_from_ruma_bounded(val: ruma::UInt, fallback: usize, max: usize) -> usize {
+	usize::try_from(val).unwrap_or(fallback).min(max)
+}
+
 /// Converts a `u64` to a Matrix unsigned integer.
 ///
 /// The conversion is exact. It panics if the value exceeds the range supported

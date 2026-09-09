@@ -22,6 +22,7 @@ use tuwunel_core::{
 	smallvec::SmallVec,
 	utils::{
 		BoolExt, IterStream, ReadyExt,
+		math::usize_from_ruma_bounded,
 		result::LogErr,
 		stream::{BroadbandExt, TryIgnore, WidebandExt},
 	},
@@ -153,10 +154,8 @@ pub(crate) async fn get_messages(
 		.transpose()
 		.map_err(|_| err!(Request(InvalidParam("Invalid `to` token."))))?;
 
-	let limit: usize = limit
-		.and_then(|limit| limit.try_into().ok())
-		.unwrap_or(LIMIT_DEFAULT)
-		.min(LIMIT_MAX);
+	let limit = limit
+		.map_or(LIMIT_DEFAULT, |limit| usize_from_ruma_bounded(limit, LIMIT_DEFAULT, LIMIT_MAX));
 
 	if matches!(dir, Direction::Backward) {
 		services

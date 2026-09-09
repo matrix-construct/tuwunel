@@ -13,7 +13,10 @@ use ruma::{
 use tuwunel_core::{
 	Error, Result, debug, err,
 	matrix::room_version::rules as room_version_rules,
-	utils::stream::{TryWidebandExt, automatic_width},
+	utils::{
+		math::usize_from_ruma_bounded,
+		stream::{TryWidebandExt, automatic_width},
+	},
 };
 
 use super::AccessCheck;
@@ -61,11 +64,7 @@ pub(crate) async fn get_missing_events_route(
 	};
 
 	// min_depth is intentionally ignored, matching Synapse's responder.
-	let limit = body
-		.limit
-		.try_into()
-		.unwrap_or(LIMIT_DEFAULT)
-		.min(LIMIT_MAX);
+	let limit = usize_from_ruma_bounded(body.limit, LIMIT_DEFAULT, LIMIT_MAX);
 
 	let (seen, pending) = walk_seed(&body);
 	let seen_max = seen.len().saturating_add(WALK_MAX);
