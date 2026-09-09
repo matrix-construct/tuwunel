@@ -7,7 +7,11 @@ use std::{
 
 use futures::future::{AbortHandle, Abortable};
 use rustyline_async::{Readline, ReadlineError, ReadlineEvent};
-use termimad::MadSkin;
+use termimad::{
+	FmtText, MadSkin,
+	minimad::{Compound, Line, Options, parse_text},
+	terminal_size,
+};
 use tokio::task::JoinHandle;
 use tuwunel_core::{Server, debug, defer, error, log, log::is_systemd_mode};
 
@@ -194,11 +198,12 @@ impl Console {
 
 	fn output_err(self: Arc<Self>, output_content: &CommandOutput) {
 		let output = configure_output_err(self.output.clone());
-		output.print_text(output_content.as_str());
+
+		print_output(&output, output_content.as_str());
 	}
 
 	fn output(self: Arc<Self>, output_content: &CommandOutput) {
-		self.output.print_text(output_content.as_str());
+		print_output(&self.output, output_content.as_str());
 	}
 
 	fn set_history(&self, readline: &mut Readline) {
@@ -231,12 +236,40 @@ impl Console {
 /// Standalone/static markdown printer for errors.
 pub fn print_err(markdown: &str) {
 	let output = configure_output_err(MadSkin::default_dark());
-	output.print_text(markdown);
+
+	print_output(&output, markdown);
 }
 /// Standalone/static markdown printer.
 pub fn print(markdown: &str) {
 	let output = configure_output(MadSkin::default_dark());
-	output.print_text(markdown);
+
+	print_output(&output, markdown);
+}
+
+fn print_output(output: &MadSkin, markdown: &str) {
+	let (width, _) = terminal_size();
+
+	print!("{}", format_output(output, markdown, usize::from(width)));
+}
+
+fn format_output<'k, 's>(
+	output: &'k MadSkin,
+	markdown: &'s str,
+	width: usize,
+) -> FmtText<'k, 's> {
+	let mut text = parse_text(markdown, Options::default());
+	for line in &mut text.lines {
+		let Line::TableRow(row) = line else {
+			continue;
+		};
+
+		for cell in &mut row.cells {
+			cell.compounds.insert(0, Compound::raw_str(" "));
+			cell.compounds.push(Compound::raw_str(" "));
+		}
+	}
+
+	FmtText::from_text(output, text, Some(width))
 }
 
 fn configure_output_err(mut output: MadSkin) -> MadSkin {
@@ -268,8 +301,8 @@ fn configure_output(mut output: MadSkin) -> MadSkin {
 
 	let table_style = CompoundStyle::default();
 	output.table = LineStyle {
-		left_margin: 1,
-		right_margin: 1,
+		left_margin: 0,
+		right_margin: 0,
 		align: Alignment::Left,
 		compound_style: table_style,
 	};
