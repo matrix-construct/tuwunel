@@ -1,10 +1,12 @@
 use std::collections::BTreeMap;
 
 use axum::extract::State;
-use futures::{FutureExt, future::try_join4};
+use futures::future::try_join4;
 use ruma::{
 	DeviceId, RoomId, TransactionId, UserId,
-	api::client::message::send_message_event,
+	api::client::message::{
+		send_message_event, send_message_event::v3::Response as SendMessageResponse,
+	},
 	events::{
 		AnyMessageLikeEventContent, MessageLikeEventType,
 		reaction::ReactionEventContent,
@@ -15,9 +17,10 @@ use ruma::{
 use serde::Deserialize;
 use serde_json::from_str;
 use tuwunel_core::{
-	Err, Result, debug_warn, err,
+	Err, PduEvent, Result, debug_warn, err,
 	matrix::{Event, pdu::PduBuilder},
-	utils, warn,
+	utils::string_from_bytes,
+	warn,
 };
 use tuwunel_service::Services;
 
@@ -108,9 +111,17 @@ pub(crate) async fn send_message_event_route(
 	}
 
 	let state_lock = services.state.mutex.lock(&body.room_id).await;
+	let event_type = body.event_type.to_cow_str();
 
 	let (existing_txnid, ..) = try_join4(
-		check_existing_txnid(&services, sender_user, sender_device, &body.txn_id).map(Ok),
+		check_existing_txnid(
+			&services,
+			sender_user,
+			sender_device,
+			&body.txn_id,
+			&body.room_id,
+			&event_type,
+		),
 		check_duplicate_reaction(&services, &body.event_type, sender_user, &body.body.body),
 		check_public_call_invite(&services, &body.event_type, &body.room_id),
 		check_nested_thread(&services, &body.body.body),
@@ -118,7 +129,7 @@ pub(crate) async fn send_message_event_route(
 	.await?;
 
 	if let Some(existing_txnid) = existing_txnid {
-		return existing_txnid;
+		return Ok(existing_txnid);
 	}
 
 	let mut unsigned = BTreeMap::new();
@@ -144,10 +155,12 @@ pub(crate) async fn send_message_event_route(
 		)
 		.await?;
 
-	services.transaction_ids.add_txnid(
+	services.transaction_ids.add_room_txnid(
 		sender_user,
 		sender_device,
 		&body.txn_id,
+		&body.room_id,
+		&event_type,
 		event_id.as_bytes(),
 	);
 
@@ -238,26 +251,157 @@ async fn check_existing_txnid(
 	sender_user: &UserId,
 	sender_device: Option<&DeviceId>,
 	txn_id: &TransactionId,
-) -> Option<Result<send_message_event::v3::Response>> {
-	let Ok(response) = services
+	room_id: &RoomId,
+	event_type: &str,
+) -> Result<Option<SendMessageResponse>> {
+	let response = services
 		.transaction_ids
-		.existing_txnid(sender_user, sender_device, txn_id)
-		.await
-	else {
-		return None;
-	};
+		.existing_room_txnid(sender_user, sender_device, txn_id, room_id, event_type)
+		.await;
 
-	// The client might have sent a txnid of the /sendToDevice endpoint
-	// This txnid has no response associated with it
-	if response.is_empty() {
-		return Some(Err!(Request(InvalidParam(
-			"Tried to use txn_id already used for an incompatible endpoint."
-		))));
+	match response {
+		| Ok(response) => return txnid_response(&response).map(Some),
+		| Err(error) if !error.is_not_found() => return Err(error),
+		| Err(_) => (),
 	}
 
-	let Ok(Ok(event_id)) = utils::string_from_bytes(&response).map(TryInto::try_into) else {
-		return Some(Err!(Database("Invalid event_id in txn_id data: {response:?}.")));
+	let response = services
+		.transaction_ids
+		.existing_txnid(sender_user, sender_device, txn_id)
+		.await;
+
+	let response = match response {
+		| Ok(response) => response,
+		| Err(error) if error.is_not_found() => return Ok(None),
+		| Err(error) => return Err(error),
 	};
 
-	Some(Ok(send_message_event::v3::Response { event_id }))
+	let Some(response) = legacy_txnid_response(&response)? else {
+		return Ok(None);
+	};
+
+	let event_id = &response.event_id;
+	let pdu = match services
+		.timeline
+		.get_non_outlier_pdu(event_id)
+		.await
+	{
+		| Ok(pdu) => pdu,
+		| Err(error) if error.is_not_found() => return Ok(None),
+		| Err(error) => return Err(error),
+	};
+
+	if !legacy_txnid_matches(&pdu, room_id, event_type, sender_user) {
+		return Ok(None);
+	}
+
+	services.transaction_ids.add_room_txnid(
+		sender_user,
+		sender_device,
+		txn_id,
+		room_id,
+		event_type,
+		event_id.as_bytes(),
+	);
+
+	Ok(Some(response))
+}
+
+fn txnid_response(response: &[u8]) -> Result<SendMessageResponse> {
+	let event_id = string_from_bytes(response)?
+		.try_into()
+		.map_err(|_| err!(Database("Invalid event_id in txn_id data: {response:?}.")))?;
+
+	Ok(SendMessageResponse { event_id })
+}
+
+fn legacy_txnid_response(response: &[u8]) -> Result<Option<SendMessageResponse>> {
+	if response.is_empty() {
+		return Ok(None);
+	}
+
+	txnid_response(response).map(Some)
+}
+
+fn legacy_txnid_matches(
+	pdu: &PduEvent,
+	room_id: &RoomId,
+	event_type: &str,
+	sender_user: &UserId,
+) -> bool {
+	pdu.room_id == room_id && pdu.kind.to_cow_str() == event_type && pdu.sender == sender_user
+}
+
+#[cfg(test)]
+mod tests {
+	use ruma::{event_id, room_id, user_id};
+	use serde_json::json;
+
+	use super::{PduEvent, legacy_txnid_matches, legacy_txnid_response};
+
+	#[test]
+	fn legacy_response_requires_a_valid_nonempty_event_id() {
+		assert!(
+			legacy_txnid_response(b"")
+				.expect("empty marker is valid")
+				.is_none()
+		);
+
+		legacy_txnid_response(b"not an event ID").expect_err("invalid event ID");
+		legacy_txnid_response(&[0xFF]).expect_err("invalid UTF-8");
+
+		let response = legacy_txnid_response(b"$event:example.com")
+			.expect("valid event ID")
+			.expect("nonempty response");
+
+		assert_eq!(response.event_id, event_id!("$event:example.com"));
+	}
+
+	#[test]
+	fn legacy_response_requires_matching_provenance() {
+		let pdu = pdu();
+		assert!(legacy_txnid_matches(
+			&pdu,
+			room_id!("!room:example.com"),
+			"m.room.message",
+			user_id!("@alice:example.com"),
+		));
+
+		assert!(!legacy_txnid_matches(
+			&pdu,
+			room_id!("!other:example.com"),
+			"m.room.message",
+			user_id!("@alice:example.com"),
+		));
+
+		assert!(!legacy_txnid_matches(
+			&pdu,
+			room_id!("!room:example.com"),
+			"m.room.encrypted",
+			user_id!("@alice:example.com"),
+		));
+
+		assert!(!legacy_txnid_matches(
+			&pdu,
+			room_id!("!room:example.com"),
+			"m.room.message",
+			user_id!("@bob:example.com"),
+		));
+	}
+
+	fn pdu() -> PduEvent {
+		serde_json::from_value(json!({
+			"type": "m.room.message",
+			"content": {},
+			"event_id": "$event:example.com",
+			"room_id": "!room:example.com",
+			"sender": "@alice:example.com",
+			"prev_events": ["$prev:example.com"],
+			"auth_events": ["$auth:example.com"],
+			"origin_server_ts": 1,
+			"depth": 1,
+			"hashes": { "sha256": "thishashcoversallfieldsincasethisisredacted" },
+		}))
+		.expect("valid PDU")
+	}
 }

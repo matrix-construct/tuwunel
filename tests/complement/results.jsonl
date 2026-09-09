@@ -772,7 +772,7 @@
 {"Action":"pass","Test":"TestToDeviceMessagesOverFederation"}
 {"Action":"pass","Test":"TestToDeviceMessagesOverFederation/good_connectivity"}
 {"Action":"pass","Test":"TestTxnIdWithRefreshToken"}
-{"Action":"fail","Test":"TestTxnIdempotency"}
+{"Action":"pass","Test":"TestTxnIdempotency"}
 {"Action":"pass","Test":"TestTxnIdempotencyScopedToDevice"}
 {"Action":"pass","Test":"TestTxnInEvent"}
 {"Action":"pass","Test":"TestTxnScopeOnLocalEcho"}
