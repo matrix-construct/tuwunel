@@ -9,15 +9,9 @@ use std::{collections::BTreeMap, sync::Arc};
 use rocksdb::DBCompressionType as CompressionType;
 use tuwunel_core::Result;
 
-// The descriptor aliases keep this file's other qualified descriptor
-// spellings clean under unused_qualifications.
 use crate::{
 	Engine, Map,
-	engine::descriptor::{
-		self, CacheDisp, DROPPED as LEGACY_AUTH_CHAIN_DESCRIPTOR, Descriptor,
-		RANDOM as PROFILE_CHANGE_DESCRIPTOR, RANDOM_SMALL as PRIVATE_READ_SYNC_DESCRIPTOR,
-		RANDOM_SMALL_CACHE as THREEPID_SESSION_DESCRIPTOR,
-	},
+	engine::descriptor::{self, CacheDisp, Descriptor},
 };
 
 /// Indexes opened logical maps by column-family name.
@@ -291,7 +285,7 @@ pub(super) static MAPS: &[Descriptor] = &[
 	},
 	Descriptor {
 		name: "profilechangeid_userid",
-		..PROFILE_CHANGE_DESCRIPTOR
+		..descriptor::RANDOM
 	},
 	Descriptor {
 		name: "publicroomids",
@@ -415,11 +409,9 @@ pub(super) static MAPS: &[Descriptor] = &[
 		name: "roomuserid_privateread",
 		..descriptor::RANDOM_SMALL
 	},
-	// Aliased: importing RANDOM_SMALL unaliased makes every qualified sibling
-	// an unused_qualifications error.
 	Descriptor {
 		name: "roomuserid_privatereadsync",
-		..PRIVATE_READ_SYNC_DESCRIPTOR
+		..descriptor::RANDOM_SMALL
 	},
 	Descriptor {
 		name: "roomuseroncejoinedids",
@@ -484,7 +476,7 @@ pub(super) static MAPS: &[Descriptor] = &[
 	},
 	Descriptor {
 		name: "shorteventid_authchain",
-		..LEGACY_AUTH_CHAIN_DESCRIPTOR
+		..descriptor::DROPPED
 	},
 	Descriptor {
 		name: "shorteventid_eventid",
@@ -548,7 +540,7 @@ pub(super) static MAPS: &[Descriptor] = &[
 	Descriptor {
 		name: "threepidsid_pending",
 		ttl: 60 * 60 * 24, // pending validation session; minutes to complete
-		..THREEPID_SESSION_DESCRIPTOR
+		..descriptor::RANDOM_SMALL_CACHE
 	},
 	Descriptor {
 		name: "timeredacted_eventid",
@@ -620,7 +612,7 @@ pub(super) static MAPS: &[Descriptor] = &[
 	Descriptor {
 		name: "userdevicesessionid_threepid",
 		ttl: 60 * 60 * 24, // interactive-auth session; minutes to complete
-		..THREEPID_SESSION_DESCRIPTOR
+		..descriptor::RANDOM_SMALL_CACHE
 	},
 	Descriptor {
 		name: "userdevicesessionid_uiaainfo",
