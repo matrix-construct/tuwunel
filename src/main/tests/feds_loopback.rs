@@ -17,10 +17,9 @@ mod tests {
 
 	const CERTIFICATE: &str = "../../nix/pkgs/complement/certificate.crt";
 	const PRIVATE_KEY: &str = "../../nix/pkgs/complement/private_key.key";
-	const CLASS_HEADER: &str =
-		"| rank | class | servers | name | version | compiler | kernel | arch |";
+	const VERSION_HEADER: &str = "| rank | servers | name | version | compiler | kernel | arch |";
 	const EVENT_HEADER: &str = "| rank | origin | elapsed | hash | signature | fault |";
-	const ORIGIN_HEADER: &str = "| origin | class | elapsed | fault |";
+	const ORIGIN_HEADER: &str = "| origin | elapsed | fault |";
 
 	struct DatabasePath(PathBuf);
 
@@ -179,15 +178,13 @@ mod tests {
 			return Err!("expected one feds destination, found {destinations}");
 		}
 
-		let class = only_row(output, CLASS_HEADER, "version class")?;
-		let class_rank = parse_number(cell(class, 0)?, "class rank")?;
-		let class_number = parse_number(cell(class, 1)?, "class number")?;
-		let class_servers = parse_number(cell(class, 2)?, "class server count")?;
+		let version = only_row(output, VERSION_HEADER, "version summary")?;
+		let version_rank = parse_number(cell(version, 0)?, "version rank")?;
+		let version_servers = parse_number(cell(version, 1)?, "version server count")?;
 		let origin = only_row(output, ORIGIN_HEADER, "origin")?;
 		let origin_name = cell(origin, 0)?;
-		let origin_class = cell(origin, 1)?;
-		let fault = cell(origin, 3)?;
-		let successes = usize::from(!origin_class.is_empty());
+		let fault = cell(origin, 2)?;
+		let successes = usize::from(fault.is_empty());
 		let faults = usize::from(!fault.is_empty());
 
 		if successes.saturating_add(faults) != destinations {
@@ -197,15 +194,15 @@ mod tests {
 			);
 		}
 
-		if class_servers != successes {
+		if version_servers != successes {
 			return Err!(
-				"version class reports {class_servers} servers but {successes} origin rows \
-				 reference it"
+				"version summary reports {version_servers} servers but {successes} origin rows \
+				 succeeded"
 			);
 		}
 
-		if class_rank != 1 {
-			return Err!("the local version class did not rank first");
+		if version_rank != 1 {
+			return Err!("the local version did not rank first");
 		}
 
 		if origin_name != local.as_str() {
@@ -213,11 +210,7 @@ mod tests {
 		}
 
 		if successes != 1 {
-			return Err!("the local server did not return a version class");
-		}
-
-		if parse_number(origin_class, "origin class")? != class_number {
-			return Err!("the local origin referenced a different version class");
+			return Err!("the local server did not return version metadata");
 		}
 
 		Ok(())

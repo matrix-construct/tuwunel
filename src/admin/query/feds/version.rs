@@ -13,6 +13,7 @@ use ruma::{
 };
 use tuwunel_core::{
 	Result,
+	itertools::Itertools,
 	utils::{stream::ReadyExt, time::Elapsed},
 };
 use tuwunel_service::federation::feds::{Fault, Outcome};
@@ -32,7 +33,6 @@ struct Version {
 }
 
 type ClassCounts<'a> = BTreeMap<&'a Version, usize>;
-type ClassNumbers<'a> = BTreeMap<&'a Version, usize>;
 type VersionOutcome = Outcome<Option<Version>>;
 
 #[derive(Clone, Copy)]
@@ -171,32 +171,22 @@ fn render_into(
 			classes
 		});
 
-	let mut classes: Vec<_> = counts
-		.into_iter()
-		.enumerate()
-		.map(|(class, (version, count))| (class.saturating_add(1), version, count))
-		.collect();
+	writeln!(output, "| rank | servers | name | version | compiler | kernel | arch |")?;
+	writeln!(output, "| ---: | ------: | :--- | :--- | :--- | :--- | :--- |",)?;
 
-	let class_numbers: ClassNumbers<'_> = classes
-		.iter()
-		.map(|(class, version, _)| (*version, *class))
-		.collect();
+	let classes = counts.into_iter().sorted_unstable_by(
+		|(left_version, left_count), (right_version, right_count)| {
+			right_count
+				.cmp(left_count)
+				.then_with(|| left_version.cmp(right_version))
+		},
+	);
 
-	classes.sort_unstable_by(|(_, left_version, left_count), (_, right_version, right_count)| {
-		right_count
-			.cmp(left_count)
-			.then_with(|| left_version.cmp(right_version))
-	});
-
-	writeln!(output, "| rank | class | servers | name | version | compiler | kernel | arch |")?;
-	writeln!(output, "| ---: | ----: | ------: | :--- | :--- | :--- | :--- | :--- |",)?;
-
-	for (rank, (class, version, count)) in classes.iter().enumerate() {
+	for (rank, (version, count)) in classes.enumerate() {
 		writeln!(
 			output,
-			"| {} | {} | {} | {} | {} | {} | {} | {} |",
+			"| {} | {} | {} | {} | {} | {} | {} |",
 			rank.saturating_add(1),
-			class,
 			count,
 			option_cell(version.name.as_deref()),
 			option_cell(version.version.as_deref()),
@@ -210,8 +200,8 @@ fn render_into(
 		return render_total_time(output, total);
 	}
 
-	writeln!(output, "\n| origin | class | elapsed | fault |")?;
-	writeln!(output, "| :--- | ----: | ---: | :--- |")?;
+	writeln!(output, "\n| origin | elapsed | fault |")?;
+	writeln!(output, "| :--- | ---: | :--- |")?;
 	for outcome in outcomes.iter().filter(|outcome| match list_mode {
 		| ListMode::None => false,
 		| ListMode::Successes => outcome.result.is_ok(),
@@ -219,31 +209,23 @@ fn render_into(
 		| ListMode::Errors => outcome.result.is_err(),
 	}) {
 		match &outcome.result {
-			| Ok(Some(version)) => writeln!(
-				output,
-				"| {} | {} | {} | |",
-				outcome.origin,
-				class_numbers
-					.get(version)
-					.copied()
-					.unwrap_or_default(),
-				Elapsed::from(outcome.elapsed),
-			)?,
+			| Ok(Some(_)) =>
+				writeln!(output, "| {} | {} | |", outcome.origin, Elapsed::from(outcome.elapsed),)?,
 			| Ok(None) => writeln!(
 				output,
-				"| {} | | {} | missing server metadata |",
+				"| {} | {} | missing server metadata |",
 				outcome.origin,
 				Elapsed::from(outcome.elapsed),
 			)?,
 			| Err(fault @ (Fault::NotAttempted | Fault::Backoff { .. })) => writeln!(
 				output,
-				"| {} | | | {} |",
+				"| {} | | {} |",
 				outcome.origin,
 				markdown_cell(&fault_message(fault)),
 			)?,
 			| Err(fault) => writeln!(
 				output,
-				"| {} | | {} | {} |",
+				"| {} | {} | {} |",
 				outcome.origin,
 				Elapsed::from(outcome.elapsed),
 				markdown_cell(&fault_message(fault)),
@@ -268,7 +250,7 @@ mod tests {
 	use super::*;
 
 	#[test]
-	fn render_ranks_classes_without_renumbering_and_leaves_missing_metadata_blank() {
+	fn render_ranks_versions_by_population_and_leaves_missing_metadata_blank() {
 		let outcomes = vec![
 			success(server_name!("rare.example"), "alpha"),
 			success(server_name!("popular-a.example"), "zeta"),
@@ -282,26 +264,17 @@ mod tests {
 
 		let output = render(outcomes, Duration::ZERO, ListMode::All);
 		let popular = output
-			.find("| 1 | 2 | 2 | zeta |  |  |  |  |")
-			.expect("popular class should be rendered first");
+			.find("| 1 | 2 | zeta |  |  |  |  |")
+			.expect("popular version should be rendered first");
 
 		let rare = output
-			.find("| 2 | 1 | 1 | alpha |  |  |  |  |")
-			.expect("rare class should be rendered second");
+			.find("| 2 | 1 | alpha |  |  |  |  |")
+			.expect("rare version should be rendered second");
 
-		assert!(popular < rare, "larger classes should precede smaller classes");
+		assert!(popular < rare, "more common versions should precede rarer versions");
 		assert_eq!(option_cell(None), "", "missing metadata should render blank");
 		assert!(
-			output.contains("| popular-a.example | 2 |"),
-			"origin rows should keep the stable class number",
-		);
-		assert!(
-			output.contains("| rare.example | 1 |"),
-			"origin rows should keep the stable class number",
-		);
-
-		assert!(
-			output.contains("| skipped.example | | | sweep budget exhausted before dispatch |")
+			output.contains("| skipped.example | | sweep budget exhausted before dispatch |")
 		);
 	}
 
