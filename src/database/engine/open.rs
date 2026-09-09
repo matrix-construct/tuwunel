@@ -7,7 +7,7 @@ use std::{
 
 use rocksdb::{ColumnFamilyDescriptor, Options, WriteOptions};
 use tuwunel_core::{
-	Result, debug, debug_warn, err, implement, info, itertools::Itertools, trace, warn,
+	Result, debug, debug_warn, err, error, implement, info, itertools::Itertools, trace, warn,
 };
 
 use super::{
@@ -60,10 +60,9 @@ pub(crate) async fn open(ctx: Arc<Context>, desc: &[Descriptor]) -> Result<Arc<S
 	.or_else(or_else)?;
 
 	if !config.rocksdb_read_only && !config.rocksdb_secondary {
-		for name in &dropped {
-			debug!("Deleting dropped column {name:?} ...");
-			db.drop_cf(name).or_else(or_else)?;
-		}
+		drop_columns(dropped.iter().map(String::as_str), |name| {
+			db.drop_cf(name).or_else(or_else)
+		})?;
 	}
 
 	info!(
@@ -84,6 +83,39 @@ pub(crate) async fn open(ctx: Arc<Context>, desc: &[Descriptor]) -> Result<Arc<S
 		cf_index: OnceLock::new(),
 		corks: AtomicU32::new(0),
 	}))
+}
+
+pub(super) fn drop_columns<N>(
+	names: impl IntoIterator<Item = N>,
+	mut drop: impl FnMut(&str) -> Result,
+) -> Result
+where
+	N: AsRef<str>,
+{
+	let failed = names
+		.into_iter()
+		.filter(|name| {
+			let name = name.as_ref();
+			debug!(%name, "Deleting dropped database column");
+
+			drop(name)
+				.inspect_err(|error| {
+					error!(%name, ?error, "Failed to delete dropped database column");
+				})
+				.is_err()
+		})
+		.collect::<Vec<_>>();
+
+	failed.is_empty().then_some(()).ok_or_else(|| {
+		err!(Database(
+			"Failed to delete {} dropped database columns: {}",
+			failed.len(),
+			failed
+				.iter()
+				.map(|name: &N| name.as_ref())
+				.format(", ")
+		))
+	})
 }
 
 #[implement(Engine)]

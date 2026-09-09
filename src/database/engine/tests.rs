@@ -1,18 +1,26 @@
-use std::{env::temp_dir, fs, path::Path, process::id, sync::Arc, thread::spawn};
+use std::{
+	env::temp_dir,
+	fs::{self, create_dir_all, remove_dir_all},
+	path::Path,
+	process::id,
+	sync::Arc,
+	thread::spawn,
+};
 
 use rocksdb::{
 	Cache, DB, Env as RocksEnv, Options,
 	backup::{BackupEngine, BackupEngineOptions, RestoreOptions},
 };
+use tuwunel_core::err;
 
 use super::{
 	cf_opts::{register_pool, set_preview_retention},
 	context::{ColCache, ColCaches, SHARED_POOL},
 	descriptor::{self, CacheDisp, Descriptor},
 	env::Env,
-	open::is_remnant,
+	open::{drop_columns, is_remnant},
 };
-use crate::maps::descriptor;
+use crate::{maps::descriptor, or_else};
 
 fn fresh_caches() -> ColCaches {
 	let shared = ColCache {
@@ -116,8 +124,9 @@ fn restore_selects_backup_and_preserves_media_dir() {
 	let root = temp_dir().join(format!("tuwunel-restore-test-{}", id()));
 	let db_dir = root.join("db");
 	let backup_dir = root.join("backup");
-	fs::create_dir_all(&db_dir).expect("create db dir");
-	fs::create_dir_all(&backup_dir).expect("create backup dir");
+
+	create_dir_all(&db_dir).expect("create db dir");
+	create_dir_all(&backup_dir).expect("create backup dir");
 
 	let env = Env::acquire_with_priorities(false, false).expect("acquire environment");
 	let other = Env::acquire_with_priorities(false, false).expect("acquire another owner");
@@ -163,7 +172,8 @@ fn restore_selects_backup_and_preserves_media_dir() {
 	assert_eq!(ids, [1, 2], "backup ids ascend from 1, reserving 0 for most-recent");
 
 	let media = db_dir.join("media");
-	fs::create_dir_all(&media).expect("create media dir");
+
+	create_dir_all(&media).expect("create media dir");
 	fs::write(media.join("marker"), b"media file").expect("write media marker");
 
 	let engine = restore_backup(engine, &db_dir);
@@ -189,7 +199,7 @@ fn restore_selects_backup_and_preserves_media_dir() {
 	drop(engine);
 	drop(opts);
 	drop(env);
-	fs::remove_dir_all(&root).ok();
+	remove_dir_all(&root).ok();
 }
 
 fn options(env: &RocksEnv) -> Options {
@@ -231,6 +241,63 @@ fn remnants_classified_by_name() {
 	assert!(!is_remnant("conduit.db"));
 	assert!(!is_remnant(".sst"));
 	assert!(!is_remnant("backup.log"));
+}
+
+#[test]
+fn dropped_columns_continue_after_failures_and_retry() {
+	let root = temp_dir().join(format!("tuwunel-drop-columns-test-{}", id()));
+
+	create_dir_all(&root).expect("create database dir");
+
+	let env = Env::acquire_with_priorities(false, false).expect("acquire environment");
+	let opts = options(&env.lock().expect("environment locked"));
+
+	let db = DB::open(&opts, &root).expect("open database");
+
+	for name in ["first", "second", "third"] {
+		db.create_cf(name, &opts).expect("create column");
+	}
+
+	let result = drop_columns(["first", "second", "third"], |name| match name {
+		| "first" | "third" => Err(err!(Database("injected drop failure"))),
+		| _ => db.drop_cf(name).or_else(or_else),
+	});
+
+	let error = result
+		.expect_err("injected failures must fail the reap")
+		.to_string();
+
+	assert!(
+		error.contains("Failed to delete 2 dropped database columns: first, third"),
+		"error must count and name every failure: {error}"
+	);
+
+	drop(db);
+	let remaining = DB::list_cf(&opts, &root).expect("list columns after partial reap");
+
+	assert!(remaining.iter().any(|name| name == "first"));
+	assert!(!remaining.iter().any(|name| name == "second"));
+	assert!(remaining.iter().any(|name| name == "third"));
+
+	let db = DB::open_cf(&opts, &root, &remaining).expect("reopen database");
+
+	let retry = remaining
+		.iter()
+		.map(String::as_str)
+		.filter(|&name| name.ne("default"));
+
+	drop_columns(retry, |name| db.drop_cf(name).or_else(or_else))
+		.expect("retry drops every remaining column");
+
+	drop(db);
+
+	assert_eq!(DB::list_cf(&opts, &root).expect("list columns after successful retry"), [
+		"default"
+	]);
+
+	drop(opts);
+	drop(env);
+	remove_dir_all(&root).ok();
 }
 
 #[test]
