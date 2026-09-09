@@ -290,7 +290,7 @@
 {"Action":"pass","Test":"TestKnockingInMSC3787Room/Users_in_the_room_see_a_user's_membership_update_when_they_knock#01"}
 {"Action":"pass","Test":"TestLeakyTyping"}
 {"Action":"pass","Test":"TestLeaveEventInviteRejection"}
-{"Action":"fail","Test":"TestLeaveEventVisibility"}
+{"Action":"pass","Test":"TestLeaveEventVisibility"}
 {"Action":"fail","Test":"TestLeftRoomFixture"}
 {"Action":"fail","Test":"TestLeftRoomFixture/Can_get_'m.room.name'_state_for_a_departed_room"}
 {"Action":"fail","Test":"TestLeftRoomFixture/Can_get_rooms/{roomId}/members_for_a_departed_room"}
