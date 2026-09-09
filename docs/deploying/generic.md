@@ -58,6 +58,20 @@ If wanting to build using standard Rust toolchains, make sure you install:
 
 You can build Tuwunel using `cargo build --release --all-features`
 
+A plain build targets the baseline architecture, which is the `-v1-` equivalent
+and gets RocksDB's software CRC32C. Pass `-C target-cpu=` to get the hardware
+implementation the `-v2-` and `-v3-` packages use: `native` when the binary
+stays on the machine that built it, or a named architecture such as `broadwell`
+when it does not.
+
+```bash
+RUSTFLAGS="-C target-cpu=native" cargo build --release --all-features
+```
+
+Add `--locked` to build against the committed `Cargo.lock`. Without it Cargo
+re-resolves the whole dependency graph, which is not the combination that gets
+tested.
+
 ## Adding a Tuwunel user
 
 While Tuwunel can run as any user it is better to use dedicated users for
