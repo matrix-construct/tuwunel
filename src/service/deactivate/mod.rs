@@ -5,7 +5,12 @@ use ruma::{
 	OwnedRoomId, UserId,
 	events::{StateEventType, room::power_levels::RoomPowerLevelsEventContent},
 };
-use tuwunel_core::{Event, Result, info, pdu::PduBuilder, warn};
+use tuwunel_core::{
+	Event, Result, info,
+	pdu::PduBuilder,
+	utils::{IterStream, stream::automatic_width},
+	warn,
+};
 
 pub struct Service {
 	services: Arc<crate::services::OnceServices>,
@@ -29,7 +34,8 @@ impl Service {
 	/// - Leaving all rooms (and forgets all of them)
 	///
 	/// When `erase` is `true`, additionally erase non-event data per
-	/// MSC4025: all global and per-room account data for the user.
+	/// MSC4025: contact 3PIDs and all global and per-room account data for the
+	/// user.
 	pub async fn full_deactivate(&self, user_id: &UserId, erase: bool) -> Result {
 		self.services
 			.users
@@ -135,6 +141,26 @@ impl Service {
 		// the user so their events serve as pruned copies (phase B).
 		if erase {
 			self.services.users.set_erased(user_id);
+
+			// Snapshot the prefix scan before deleting from its map.
+			let threepids: Vec<_> = self
+				.services
+				.threepid
+				.get_bindings(user_id)
+				.map(|binding| binding.address)
+				.collect()
+				.await;
+
+			threepids
+				.into_iter()
+				.stream()
+				.for_each_concurrent(automatic_width(), async |address| {
+					self.services
+						.threepid
+						.del_binding(user_id, &address)
+						.await;
+				})
+				.await;
 
 			self.services
 				.account_data
