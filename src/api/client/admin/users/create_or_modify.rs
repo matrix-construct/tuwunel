@@ -92,7 +92,11 @@ pub(crate) async fn admin_create_or_modify_route(
 	}
 
 	match body.deactivated {
-		| Some(true) => services.users.deactivate_account(user_id).await?,
+		| Some(true) =>
+			services
+				.deactivate
+				.full_deactivate(user_id, false)
+				.await?,
 		| Some(false)
 			if services
 				.users
