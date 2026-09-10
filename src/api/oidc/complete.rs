@@ -1,17 +1,13 @@
 use std::{iter::once, net::IpAddr};
 
-use axum::{
-	Form,
-	extract::State,
-	response::{IntoResponse, Redirect, Response},
-};
+use axum::{Form, extract::State, response::Response};
 use const_str::format as const_format;
 use http::StatusCode;
 use ruma::UserId;
 use serde::Deserialize;
-use tuwunel_core::{Result, err, utils::html::escape as html_escape};
+use tuwunel_core::{Err, Result, err, utils::html::escape as html_escape};
 use tuwunel_service::{Services, oauth::server::AuthRequest};
-use url::{Url, form_urlencoded};
+use url::{Url, form_urlencoded::Serializer};
 
 use super::{
 	account::{ACCOUNT_HEAD, account_error_response, account_html_response},
@@ -236,44 +232,60 @@ async fn release_code(
 	params: &CompleteParams,
 ) -> Result<Response> {
 	let oidc = services.oauth.get_server()?;
+	let redirect_url = Url::parse(&auth_req.redirect_uri)
+		.map_err(|_| err!(Request(InvalidParam("Invalid redirect_uri"))))?;
+
+	let scheme = redirect_url.scheme();
+
+	if !matches!(scheme, "http" | "https") && !scheme.contains('.') {
+		return Err!(Request(InvalidParam("Invalid redirect_uri scheme")));
+	}
+
+	let native = scheme == "https"
+		&& oidc
+			.get_client(&auth_req.client_id)
+			.await?
+			.application_type
+			.as_deref()
+			== Some("native");
 
 	oidc.remove_auth_request(&params.oidc_req_id);
 
 	let user_id = consume_login_token(services, Some(&params.login_token)).await?;
 	let code = oidc.create_auth_code(auth_req, user_id);
-	let redirect_url = Url::parse(&auth_req.redirect_uri)
-		.map_err(|_| err!(Request(InvalidParam("Invalid redirect_uri"))))
-		.map(|mut url| {
-			let pairs = once(("code", code.as_str()))
-				.chain(auth_req.state.as_deref().map(|s| ("state", s)));
-
-			match auth_req.response_mode.as_deref() {
-				| Some("fragment") => {
-					let body = form_urlencoded::Serializer::new(String::new())
-						.extend_pairs(pairs)
-						.finish();
-
-					url.set_fragment(Some(&body));
-				},
-				| _ => {
-					url.query_pairs_mut().extend_pairs(pairs);
-				},
-			}
-
-			url
-		})?;
-
-	let native = redirect_url.scheme() == "https"
-		&& oidc
-			.get_client(&auth_req.client_id)
-			.await
-			.is_ok_and(|client| client.application_type.as_deref() == Some("native"));
-
-	Ok(if needs_interstitial(&redirect_url, native) {
-		account_html_response(StatusCode::OK, complete_continue_html(redirect_url.as_str()))
+	let redirect_url = code_redirect(redirect_url, auth_req, &code);
+	let html = if needs_interstitial(&redirect_url, native) {
+		complete_continue_html(redirect_url.as_str())
 	} else {
-		Redirect::temporary(redirect_url.as_str()).into_response()
-	})
+		complete_refresh_html(redirect_url.as_str())
+	};
+
+	Ok(account_html_response(StatusCode::OK, html))
+}
+
+fn code_redirect(url: Url, auth_req: &AuthRequest, code: &str) -> Url {
+	let pairs = once(("code", code)).chain(auth_req.state.as_deref().map(|s| ("state", s)));
+
+	match auth_req.response_mode.as_deref() {
+		| mode if mode != Some("fragment") => with_query(url, pairs),
+		| _ => {
+			let body = Serializer::new(String::new())
+				.extend_pairs(pairs)
+				.finish();
+
+			with_fragment(url, &body)
+		},
+	}
+}
+
+fn with_query<'a>(mut url: Url, pairs: impl Iterator<Item = (&'a str, &'a str)>) -> Url {
+	url.query_pairs_mut().extend_pairs(pairs);
+	url
+}
+
+fn with_fragment(mut url: Url, fragment: &str) -> Url {
+	url.set_fragment(Some(fragment));
+	url
 }
 
 /// Discard a refused authorization.
@@ -294,14 +306,11 @@ async fn refuse_code(services: &Services, params: &CompleteParams) -> Result<Res
 	Ok(account_html_response(StatusCode::OK, DENIED_HTML.to_owned()))
 }
 
-/// Whether the auth code is handed back via a "Continue" interstitial (a user
-/// gesture) rather than a direct redirect. True for private-use reverse-DNS app
-/// schemes (RFC 8252, e.g. `io.element.android`), which Chrome will not
-/// auto-follow, and for a native client's `https` universal link, which iOS
-/// opens into the app only on a user navigation, not a silent 3xx. Web `https`
-/// and native `http` loopback redirect directly; a `javascript:` or `data:`
-/// target is neither dotted nor `https`, so it stays an inert `Location`, never
-/// a clickable link.
+/// Whether returning the authorization code requires a user gesture.
+///
+/// Private-use reverse-DNS schemes and native HTTPS universal links need a
+/// Continue link to open the application. Web HTTPS and native HTTP loopback
+/// callbacks use an automatic HTML handoff.
 fn needs_interstitial(redirect_url: &Url, native: bool) -> bool {
 	redirect_url.scheme().contains('.') || (native && redirect_url.scheme() == "https")
 }
@@ -327,12 +336,32 @@ fn complete_continue_html(redirect_url: &str) -> String {
 	)
 }
 
+fn complete_refresh_html(redirect_url: &str) -> String {
+	REFRESH_HTML.replace("{href}", &html_escape(redirect_url))
+}
+
+static REFRESH_HTML: &str = r#"
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8">
+		<meta http-equiv="refresh" content="0; URL={href}">
+		<title>Continue</title>
+	</head>
+	<body>
+		<p>Continue to finish signing in.</p>
+		<a href="{href}">Continue</a>
+	</body>
+</html>"#;
+
 #[cfg(test)]
 mod tests {
 	use ruma::user_id;
 	use url::Url;
 
-	use super::{Approval, approved, complete_continue_html, needs_interstitial};
+	use super::{
+		Approval, approved, complete_continue_html, complete_refresh_html, needs_interstitial,
+	};
 
 	fn approval(client_name: &str, login_token: &str) -> String {
 		Approval {
@@ -383,6 +412,19 @@ mod tests {
 		assert!(html.contains(r#"href="io.element.android:"#));
 		assert!(html.contains("&amp;"));
 		assert!(html.contains("Continue"));
+		assert!(!html.contains("http-equiv=\"refresh\""));
+	}
+
+	#[test]
+	fn refresh_html_escapes_both_destinations() {
+		let html = complete_refresh_html("https://client.example/cb?x=\"<&code=a#state={href}");
+		let escaped = "https://client.example/cb?x=&quot;&lt;&amp;code=a#state={href}";
+
+		assert!(html.contains(&format!(r#"content="0; URL={escaped}""#)));
+		assert!(html.contains(&format!(r#"href="{escaped}""#)));
+		assert!(!html.contains("<script"));
+		assert!(!html.contains("stylesheet"));
+		assert!(!html.contains("<form"));
 	}
 
 	#[test]
