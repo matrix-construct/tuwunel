@@ -30,7 +30,7 @@ fn storage_s3_upload_download() -> Result {
 		return Ok(());
 	};
 
-	let mut args = Args::default_test(&["fresh", "cleanup"]).with_test_database("storage-s3");
+	let mut args = Args::default_test(&["fresh", "cleanup"]);
 
 	args.maintenance = true;
 	args.option.extend(options);

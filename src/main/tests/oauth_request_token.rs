@@ -35,8 +35,7 @@ fn oauth_request_token() -> Result {
 		return Ok(());
 	};
 
-	let mut args =
-		Args::default_test(&["fresh", "cleanup"]).with_test_database("oauth-request-token");
+	let mut args = Args::default_test(&["fresh", "cleanup"]);
 
 	args.maintenance = true;
 	args.option.extend(options);

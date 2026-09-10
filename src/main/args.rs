@@ -1,13 +1,13 @@
 //! Integration with `clap`
 
-use std::{env::var, path::PathBuf, process::id as process_id};
+use std::{env::temp_dir, path::PathBuf};
 
 use clap::{ArgAction, Parser, builder::RangedU64ValueParser};
 use tuwunel_core::{
 	Err, Result,
 	config::{Figment, FigmentValue},
 	err, implement, is_true, toml,
-	utils::available_parallelism,
+	utils::{available_parallelism, random_string},
 };
 
 /// Only its own argument may set this, since restoring is destructive and
@@ -307,35 +307,22 @@ fn histogram_buckets_parser() -> RangedU64ValueParser<usize> {
 
 /// Returns arguments for a test, naming the harnesses it opts into.
 ///
-/// The server name is preset to `localhost`. A test wanting another appends its
-/// own override, which wins, since the later value of a key takes precedence.
+/// The server name is preset to `localhost`, with a separate temporary database
+/// path for each call. Random names avoid reusing stale paths after process-id
+/// reuse. A test can append its own override, which takes precedence.
 #[implement(Args)]
 #[must_use]
 pub fn default_test(name: &[&str]) -> Self {
-	Self::default()
-		.with_tests(name)
-		.with_option("server_name=\"localhost\"")
-}
-
-/// Returns these arguments with a database path isolated to this test.
-///
-/// Cargo compiles every integration test into its own binary and runs those
-/// binaries in parallel, so a shared path is a lock conflict rather than a slow
-/// test. The root is taken from `TMPDIR`, which a sandboxed or remote build
-/// sets to the directory it can actually write. The option is read back as a
-/// line of TOML, so the path is escaped and quoted as a basic string rather
-/// than rendered through `Debug`.
-#[implement(Args)]
-#[must_use]
-pub fn with_test_database(self, name: &str) -> Self {
-	let root = var("TMPDIR").unwrap_or_else(|_| "/nvme/target/tmp".into());
-	let path = PathBuf::from(root).join(format!("tuwunel-{name}-{}", process_id()));
-	let escaped = path
+	let database_path = temp_dir().join("tuwunel").join(random_string(32));
+	let escaped = database_path
 		.to_string_lossy()
 		.replace('\\', "\\\\")
 		.replace('"', "\\\"");
 
-	self.with_option(format!("database_path=\"{escaped}\""))
+	Self::default()
+		.with_tests(name)
+		.with_option("server_name=\"localhost\"")
+		.with_option(format!("database_path=\"{escaped}\""))
 }
 
 /// Returns these arguments with more test harnesses appended.

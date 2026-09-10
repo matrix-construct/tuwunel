@@ -16,7 +16,6 @@ fn smoke_async() -> Result {
 		let port = listener.local_addr()?.port();
 
 		let args = Args::default_test(&["smoke", "fresh", "cleanup"])
-			.with_test_database("smoke-async")
 			.with_option(format!("port={port}"));
 
 		let runtime = Runtime::new(Some(&args))?;

@@ -16,7 +16,6 @@ fn admin_execute_echo() -> Result {
 		let port = listener.local_addr()?.port();
 
 		let mut args = Args::default_test(&["smoke", "fresh", "cleanup"])
-			.with_test_database("admin-execute-echo")
 			.with_option(format!("port={port}"));
 
 		args.execute.push("debug echo Test".into());

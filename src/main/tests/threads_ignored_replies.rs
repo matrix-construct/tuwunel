@@ -25,7 +25,6 @@ fn threads_retain_roots_when_every_reply_is_ignored() -> Result {
 	let listener = TcpListener::bind(("127.0.0.1", 0))?;
 	let port = listener.local_addr()?.port();
 	let args = Args::default_test(&["fresh", "cleanup"])
-		.with_test_database("threads-ignored-replies")
 		.with_option("address=[\"127.0.0.1\"]")
 		.with_option(format!("port={port}"))
 		.with_option("listening=true")

@@ -17,7 +17,6 @@ fn listener_conf_ok() -> Result {
 		let port = listener.local_addr()?.port();
 
 		let args = Args::default_test(&["smoke", "fresh", "cleanup"])
-			.with_test_database("listener-conf-ok")
 			.with_option("address=[\"0.0.0.0\"]")
 			.with_option(format!("port={port}"));
 
