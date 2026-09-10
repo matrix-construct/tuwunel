@@ -9,7 +9,7 @@ use futures::future::{AbortHandle, Abortable};
 use rustyline_async::{Readline, ReadlineError, ReadlineEvent};
 use termimad::{
 	FmtText, MadSkin,
-	minimad::{Compound, Line, Options, parse_text},
+	minimad::{Compound, Line, Options, Text, parse_text},
 	terminal_size,
 };
 use tokio::task::JoinHandle;
@@ -248,8 +248,9 @@ pub fn print(markdown: &str) {
 
 fn print_output(output: &MadSkin, markdown: &str) {
 	let (width, _) = terminal_size();
+	let output = format_output(output, markdown, usize::from(width));
 
-	print!("{}", format_output(output, markdown, usize::from(width)));
+	print!("{output}");
 }
 
 fn format_output<'k, 's>(
@@ -257,19 +258,22 @@ fn format_output<'k, 's>(
 	markdown: &'s str,
 	width: usize,
 ) -> FmtText<'k, 's> {
-	let mut text = parse_text(markdown, Options::default());
-	for line in &mut text.lines {
-		let Line::TableRow(row) = line else {
-			continue;
-		};
+	let lines = parse_text(markdown, Options::default())
+		.lines
+		.into_iter()
+		.map(|mut line| {
+			if let Line::TableRow(row) = &mut line {
+				for cell in &mut row.cells {
+					cell.compounds.insert(0, Compound::raw_str(" "));
+					cell.compounds.push(Compound::raw_str(" "));
+				}
+			}
 
-		for cell in &mut row.cells {
-			cell.compounds.insert(0, Compound::raw_str(" "));
-			cell.compounds.push(Compound::raw_str(" "));
-		}
-	}
+			line
+		})
+		.collect();
 
-	FmtText::from_text(output, text, Some(width))
+	FmtText::from_text(output, Text { lines }, Some(width))
 }
 
 fn configure_output_err(mut output: MadSkin) -> MadSkin {
