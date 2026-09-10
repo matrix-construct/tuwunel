@@ -59,6 +59,7 @@ pub use self::{
 		now_millis as millis_since_unix_epoch, timepoint_ago, timepoint_from_now,
 		timepoint_has_passed,
 	},
+	url::SanitizedUri,
 };
 
 /// Asserts at compile time that `T` implements `Send`.

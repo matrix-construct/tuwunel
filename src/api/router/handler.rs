@@ -10,7 +10,7 @@ use axum::{
 };
 use http::{Method, Request};
 use ruma::api::{IncomingRequest, path_builder::PathBuilder};
-use tuwunel_core::{Result, trace};
+use tuwunel_core::Result;
 
 use super::{Ruma, RumaResponse, State, auth::AuthDispatch};
 
@@ -70,8 +70,8 @@ macro_rules! ruma_handler {
 			Fut: Future<Output = Result<Req::OutgoingResponse, Err>> + Send + 'static,
 			Req: IncomingRequest + Debug + Send + Sync + 'static,
 			Req::Authentication: AuthDispatch,
-			Err: IntoResponse + Debug + Send,
-			<Req as IncomingRequest>::OutgoingResponse: Debug + Send,
+			Err: IntoResponse + Send,
+			<Req as IncomingRequest>::OutgoingResponse: Send,
 			$( $tx: FromRequestParts<State> + Send + Sync + 'static, )*
 		{
 			fn add_routes(&'static self, router: Router<State>) -> Router<State> {
@@ -111,7 +111,7 @@ macro_rules! ruma_handler {
 						| Ok(args) => args,
 					};
 
-					match handler($($tx,)* args).await.inspect(|response| trace!(?response)) {
+					match handler($($tx,)* args).await {
 						| Err(error) => error.into_response(),
 						| Ok(response) => RumaResponse(response).into_response(),
 					}

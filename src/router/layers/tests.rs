@@ -2,7 +2,7 @@
 
 use axum::Extension;
 use http::{
-	HeaderMap, Response,
+	HeaderMap, Request, Response,
 	header::{CONTENT_SECURITY_POLICY, CONTENT_TYPE, X_FRAME_OPTIONS},
 };
 use ipnet::IpNet;
@@ -46,6 +46,20 @@ fn trusted_peer_subnets_layer_populated_returns_extension_branch() {
 	};
 
 	assert_eq!(nets.len(), 2);
+}
+
+#[test]
+fn request_path_str_drops_query_string() {
+	let request = Request::builder()
+		.uri("/_matrix/client/v3/sync?access_token=syt_realtoken")
+		.body(())
+		.expect("valid request");
+
+	let path = super::request_path_str(&request);
+
+	assert_eq!(path, "/_matrix/client/v3/sync");
+	assert!(!path.contains('?'));
+	assert!(!path.contains("access_token"));
 }
 
 #[test]

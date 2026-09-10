@@ -5,7 +5,7 @@ use axum_extra::extract::cookie::CookieJar;
 use bytes::Bytes;
 use http::request::Parts;
 use serde::Deserialize;
-use tuwunel_core::{Result, err, smallstr::SmallString, smallvec::SmallVec, trace};
+use tuwunel_core::{Result, err, smallstr::SmallString, smallvec::SmallVec};
 use tuwunel_service::Services;
 
 #[derive(Debug, Deserialize)]
@@ -46,9 +46,8 @@ pub(super) type PathParam = SmallString<[u8; 32]>;
 #[tracing::instrument(
 	name = "parse",
 	level = "trace",
-	skip(services),
+	skip_all,
 	err(level = "debug")
-	ret(level = "trace"),
 )]
 pub(super) async fn from(
 	services: &Services,
@@ -56,13 +55,9 @@ pub(super) async fn from(
 ) -> Result<Request> {
 	let limited = request.with_limited_body();
 	let (mut parts, body) = limited.into_parts();
-	trace!(?parts, ?body);
 
 	let cookie: CookieJar = parts.extract().await?;
-	trace!(?cookie);
-
 	let path: Path<PathParams> = parts.extract().await?;
-	trace!(?path);
 
 	let query = parts.uri.query().unwrap_or_default();
 	let query = serde_html_form::from_str(query)

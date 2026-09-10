@@ -9,7 +9,7 @@ use ruma::{
 	OwnedUserId, ServerName, UserId, api::IncomingRequest,
 };
 use serde_json::{Value as JsonValue, from_slice};
-use tuwunel_core::{Error, Result, err, implement, trace, utils::string::EMPTY};
+use tuwunel_core::{Error, Result, err, implement, utils::string::EMPTY};
 use tuwunel_service::{Services, appservice::RegistrationInfo};
 
 use super::{
@@ -112,13 +112,7 @@ where
 {
 	type Rejection = Error;
 
-	#[tracing::instrument(
-		name = "ar",
-		level = "debug",
-		skip(services),
-		err(level = "debug")
-		ret(level = "trace"),
-	)]
+	#[tracing::instrument(name = "ar", level = "debug", skip_all, err(level = "debug"))]
 	async fn from_request(
 		request: HttpRequest<Body>,
 		services: &State,
@@ -129,10 +123,14 @@ where
 			| false => Ok(parse_json(&request)?),
 		};
 
-		trace!(?request);
-
 		let json = json_body.as_ref().ok().and_then(Option::as_ref);
 		let (request, auth) = authenticate::<T>(request, services, json).await?;
+
+		_ = request
+			.parts
+			.extensions
+			.get::<tracing::Span>()
+			.inspect(|span| record_auth_context(span, &auth));
 
 		if ADMIN {
 			let sender = auth.sender_user.as_deref().ok_or_else(|| {
@@ -144,6 +142,26 @@ where
 
 		make_args(services, request, json_body?, auth)
 	}
+}
+
+fn record_auth_context(span: &tracing::Span, auth: &Auth) {
+	_ = auth
+		.sender_user
+		.as_deref()
+		.inspect(|sender_user| {
+			span.record("user_id", sender_user.as_str());
+		});
+
+	_ = auth
+		.sender_device
+		.as_deref()
+		.inspect(|sender_device| {
+			span.record("device_id", sender_device.as_str());
+		});
+
+	_ = auth.origin.as_deref().inspect(|origin| {
+		span.record("origin", origin.as_str());
+	});
 }
 
 /// Parses canonical JSON while retaining ordinary JSON for typed deserialization.

@@ -6,7 +6,7 @@ use std::{
 };
 
 use axum::{
-	extract::Request,
+	extract::{MatchedPath, Request},
 	response::{IntoResponse, Response},
 };
 use futures::FutureExt;
@@ -14,8 +14,10 @@ use http::{Method, StatusCode, Uri};
 use ruma::api::error::ErrorKind;
 use tokio::{sync::Notify, task, time::sleep};
 use tower::{Service, ServiceExt};
-use tracing::Span;
-use tuwunel_core::{Error, Result, debug, debug_error, debug_warn, defer, error, trace};
+use tracing::{Span, field::Empty};
+use tuwunel_core::{
+	Error, Result, debug, debug_error, debug_warn, defer, error, trace, utils::SanitizedUri,
+};
 use tuwunel_service::Services;
 
 #[tracing::instrument(
@@ -29,12 +31,15 @@ use tuwunel_service::Services;
 			.server
 			.metrics
 			.requests_count
-			.fetch_add(1, Ordering::Relaxed)
+			.fetch_add(1, Ordering::Relaxed),
+		origin = Empty,
+		user_id = Empty,
+		device_id = Empty,
 	)
 )]
 pub(crate) async fn handle<S>(
 	services: Arc<Services>,
-	req: Request,
+	mut req: Request,
 	inner: S,
 ) -> Result<Response, StatusCode>
 where
@@ -42,10 +47,17 @@ where
 	S::Response: IntoResponse,
 	S::Future: Send + 'static,
 {
+	let matched_path = req.extensions().get::<MatchedPath>().cloned();
+
 	if !services.server.is_running() {
+		let uri = matched_path.as_ref().map_or_else(
+			|| SanitizedUri::new(req.uri()),
+			|path| SanitizedUri::with_path(req.uri(), path.as_str()),
+		);
+
 		debug_warn!(
 			method = %req.method(),
-			uri = %req.uri(),
+			%uri,
 			"unavailable pending shutdown"
 		);
 
@@ -55,13 +67,15 @@ where
 	let uri = req.uri().clone();
 	let method = req.method().clone();
 	let parent = Span::current();
+	req.extensions_mut().insert(parent.clone());
+
 	let response = match method {
 		| Method::PUT | Method::POST | Method::DELETE | Method::PATCH =>
 			spawn_execute(services, req, inner, parent).await?,
 		| _ => execute(&services, req, inner, &parent).await,
 	};
 
-	handle_result(&method, &uri, response)
+	handle_result(&method, &uri, matched_path.as_ref(), response)
 }
 
 async fn spawn_execute<S>(
@@ -159,21 +173,32 @@ where
 		.await
 }
 
-fn handle_result(method: &Method, uri: &Uri, result: Response) -> Result<Response, StatusCode> {
+fn handle_result(
+	method: &Method,
+	uri: &Uri,
+	matched_path: Option<&MatchedPath>,
+	result: Response,
+) -> Result<Response, StatusCode> {
 	let status = result.status();
 	let code = status.as_u16();
 	let reason = status
 		.canonical_reason()
 		.unwrap_or("Unknown Reason");
 
-	if status.is_server_error() {
-		error!(method = ?method, uri = ?uri, "{code} {reason}");
-	} else if status.is_client_error() {
-		debug_error!(method = ?method, uri = ?uri, "{code} {reason}");
-	} else if status.is_redirection() {
-		debug!(method = ?method, uri = ?uri, "{code} {reason}");
-	} else {
-		trace!(method = ?method, uri = ?uri, "{code} {reason}");
+	let uri = matched_path.map_or_else(
+		|| SanitizedUri::new(uri),
+		|path| SanitizedUri::with_path(uri, path.as_str()),
+	);
+
+	match status {
+		| status if status.is_redirection() =>
+			debug!(method = ?method, %uri, status = code, %reason, "request complete"),
+		| status if status.is_server_error() =>
+			error!(method = ?method, %uri, status = code, %reason, "request complete"),
+		| status if status.is_client_error() => {
+			debug_error!(method = ?method, %uri, status = code, %reason, "request complete");
+		},
+		| _ => trace!(method = ?method, %uri, status = code, %reason, "request complete"),
 	}
 
 	if status == StatusCode::METHOD_NOT_ALLOWED {
@@ -190,7 +215,7 @@ fn handle_result(method: &Method, uri: &Uri, result: Response) -> Result<Respons
 
 #[cold]
 fn unhandled<Error: Debug>(e: Error) -> StatusCode {
-	error!("unhandled error or panic during request: {e:?}");
+	error!(error = ?e, "unhandled error or panic during request");
 
 	StatusCode::INTERNAL_SERVER_ERROR
 }

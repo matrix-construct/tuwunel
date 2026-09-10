@@ -5,7 +5,7 @@ use std::{
 	any::Any,
 	convert::Infallible,
 	mem::replace,
-	sync::Arc,
+	sync::{Arc, atomic::Ordering},
 	task::{Context, Poll},
 	time::Duration,
 };
@@ -22,7 +22,6 @@ use http::{
 		self, CONTENT_SECURITY_POLICY, CONTENT_TYPE, ETAG, HeaderName, IF_MATCH, IF_NONE_MATCH,
 		X_FRAME_OPTIONS,
 	},
-	uri::PathAndQuery,
 };
 use ipnet::IpNet;
 use tower::{
@@ -300,21 +299,18 @@ fn catch_panic(
 		.server
 		.metrics
 		.requests_panic
-		.fetch_add(1, std::sync::atomic::Ordering::Release);
+		.fetch_add(1, Ordering::Release);
 
-	let details = match err.downcast_ref::<String>() {
-		| Some(s) => s.clone(),
-		| _ => match err.downcast_ref::<&str>() {
-			| Some(s) => (*s).to_owned(),
-			| _ => "Unknown internal server error occurred.".to_owned(),
-		},
-	};
+	let details = err
+		.downcast_ref::<String>()
+		.map(String::as_str)
+		.or_else(|| err.downcast_ref::<&str>().copied())
+		.unwrap_or("Unknown internal server error occurred.");
 
 	error!("{details:#}");
 	let body = serde_json::json!({
 		"errcode": "M_UNKNOWN",
 		"error": "M_UNKNOWN: Internal server error occurred",
-		"details": details,
 	});
 
 	http::Response::builder()
@@ -339,13 +335,7 @@ fn tracing_span<T>(request: &http::Request<T>) -> tracing::Span {
 	}
 }
 
-fn request_path_str<T>(request: &http::Request<T>) -> &str {
-	request
-		.uri()
-		.path_and_query()
-		.map(PathAndQuery::as_str)
-		.unwrap_or("/")
-}
+fn request_path_str<T>(request: &http::Request<T>) -> &str { request.uri().path() }
 
 fn truncated_matched_path(path: &MatchedPath) -> &str {
 	path.as_str()

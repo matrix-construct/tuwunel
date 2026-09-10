@@ -17,6 +17,20 @@ use super::{Error, error_chain, response::ruma_error_kind};
 const REMOTE_MESSAGE: &str = "your session was revoked";
 
 #[test]
+fn database_details_are_withheld() {
+	let message = message_of(Error::Database("room state key leaked".into()));
+
+	assert_eq!(message, "Database error occurred.");
+}
+
+#[test]
+fn io_details_are_withheld() {
+	let message = message_of(Error::Io(IoError::other("storage path leaked")));
+
+	assert_eq!(message, "I/O error occurred.");
+}
+
+#[test]
 fn a_remote_unknown_token_is_withheld() {
 	let (status, kind) = client_response(remote(unknown_token(), StatusCode::UNAUTHORIZED));
 

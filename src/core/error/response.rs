@@ -48,7 +48,11 @@ impl From<Error> for UiaaResponse {
 			| _ => error.status_code(),
 		};
 
-		matrix_response(status, error.kind(), error.message())
+		_ = status
+			.is_server_error()
+			.then(|| error!(?error, "request failed"));
+
+		matrix_response(status, error.kind(), error.sanitized_message())
 	}
 }
 

@@ -59,12 +59,7 @@ pub(super) struct Auth {
 	pub(super) _expires_at: Option<SystemTime>,
 }
 
-#[tracing::instrument(
-	level = "trace",
-	skip(services, request, json_body),
-	err(level = "debug"),
-	ret
-)]
+#[tracing::instrument(level = "trace", skip_all, err(level = "debug"))]
 pub(super) async fn auth<A: AuthDispatch>(
 	services: &Services,
 	request: &mut Request,
