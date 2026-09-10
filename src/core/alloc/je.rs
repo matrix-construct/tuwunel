@@ -8,6 +8,8 @@ use std::{
 	sync::atomic::{AtomicBool, AtomicU64, Ordering},
 };
 
+#[cfg(feature = "jemalloc_conf")]
+use const_str::concat_bytes;
 use jevmalloc::{
 	Jemalloc,
 	global::hook::{ALLOC, ALLOC_ZEROED},
@@ -24,19 +26,34 @@ type TraceLine = ArrayVec<u8, 128>;
 
 /// Provides the process-wide jemalloc startup configuration.
 ///
-/// Jemalloc reads this unmangled symbol during allocator initialization, which
-/// can occur before `main`. The NUL-terminated options enable CPU-affine
-/// arenas, background purging, metadata huge pages, and tuned cache and decay
-/// thresholds.
+/// Jemalloc reads this symbol during allocator initialization, which can occur
+/// before `main`. The NUL-terminated options enable CPU-affine arenas,
+/// metadata huge pages, tuned cache and decay thresholds, and background
+/// purging on the platforms whose jemalloc provides it.
 #[cfg(feature = "jemalloc_conf")]
 #[used]
 #[unsafe(no_mangle)]
-pub static malloc_conf: &[u8] = const_str::concat_bytes!(
+pub static malloc_conf: &[u8] = MALLOC_CONF;
+
+/// Provides the jemalloc startup configuration under the symbol name a
+/// prefixed build reads.
+///
+/// Jemalloc renames its public symbols when configured with a prefix, which
+/// `jevmalloc-sys` does for musl, Apple, Android and DragonFly, and which a
+/// substituted `JEMALLOC_OVERRIDE` library may do on any target. Defining both
+/// names lets the linked allocator take whichever one it declares and leaves
+/// the other unreferenced.
+#[cfg(feature = "jemalloc_conf")]
+#[used]
+#[unsafe(export_name = "_rjem_malloc_conf")]
+pub static MALLOC_CONF_PREFIXED: &[u8] = MALLOC_CONF;
+
+#[cfg(feature = "jemalloc_conf")]
+const MALLOC_CONF: &[u8] = concat_bytes!(
 	"tcache:true",
 	",percpu_arena:percpu",
 	",metadata_thp:always",
-	",background_thread:true",
-	",max_background_threads:-1",
+	MALLOC_CONF_BACKGROUND,
 	",lg_extent_max_active_fit:4",
 	",oversize_threshold:2097152",
 	",tcache_max:8192",
@@ -45,6 +62,12 @@ pub static malloc_conf: &[u8] = const_str::concat_bytes!(
 	//MALLOC_CONF_PROF,
 	0
 );
+
+// Apple's jemalloc has no background threads and prints a notice when asked.
+#[cfg(all(feature = "jemalloc_conf", not(target_vendor = "apple")))]
+const MALLOC_CONF_BACKGROUND: &str = ",background_thread:true,max_background_threads:-1";
+#[cfg(all(feature = "jemalloc_conf", target_vendor = "apple"))]
+const MALLOC_CONF_BACKGROUND: &str = "";
 
 #[cfg(all(
 	feature = "jemalloc_conf",
