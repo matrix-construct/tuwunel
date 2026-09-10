@@ -225,6 +225,14 @@ pub async fn stop(&self) {
 		manager.stop().await;
 	}
 
+	// Everything that dispatches PDU counts has stopped, so the counter is
+	// final and can be recorded for the next startup to read instead of
+	// recovering it by scanning every PDU key. Deliberately last: if we never
+	// reach here (crash, SIGKILL, power loss) no mark is written and the next
+	// startup falls back to the scan, which is the safe direction.
+	let count = self.globals.persist_clean_shutdown();
+	info!(count, "Recorded clean shutdown counter.");
+
 	debug_info!("Services shutdown complete.");
 }
 

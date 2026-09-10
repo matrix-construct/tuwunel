@@ -76,6 +76,11 @@ impl Service {
 	#[must_use]
 	pub fn current_count(&self) -> u64 { self.db.current_count() }
 
+	/// Record the counter high-water mark for the next startup, which then
+	/// skips the `pduid_pdu` recovery scan. Call only from the graceful
+	/// shutdown path, after everything that dispatches counts has stopped.
+	pub fn persist_clean_shutdown(&self) -> u64 { self.db.persist_clean_shutdown() }
+
 	#[must_use]
 	pub fn pending_count(&self) -> Range<u64> { self.db.pending_count() }
 
