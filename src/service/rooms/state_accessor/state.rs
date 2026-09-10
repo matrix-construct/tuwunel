@@ -17,7 +17,7 @@ use tuwunel_core::{
 	pair_of,
 	utils::{
 		result::FlatOk,
-		stream::{BroadbandExt, IterStream, ReadyExt, TryIgnore},
+		stream::{BroadbandExt, IterStream, ReadyExt, TryBroadbandExt, TryIgnore},
 	},
 };
 
@@ -357,6 +357,16 @@ pub fn state_full_pdus(
 				.await
 				.ok()
 		})
+}
+
+/// Returns every PDU in the selected room-state snapshot.
+#[implement(super::Service)]
+pub fn state_full_pdus_strict(
+	&self,
+	shortstatehash: ShortStateHash,
+) -> impl Stream<Item = Result<impl Event>> + Send + '_ {
+	self.state_full_ids_strict(shortstatehash)
+		.broad_and_then(async |(_, event_id)| self.services.timeline.get_pdu(&event_id).await)
 }
 
 /// Builds a StateMap by iterating over all keys that start
