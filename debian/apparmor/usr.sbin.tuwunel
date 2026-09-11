@@ -1,0 +1,85 @@
+# AppArmor profile for the tuwunel Matrix homeserver.
+#
+# The packaged systemd unit already clears the capability bounding set and
+# mounts everything outside the database and configuration directories
+# read-only, so this profile grants no capabilities and confines writes to the
+# same paths the unit grants, plus the runtime directory. Reads are broader
+# than writes so that a configured TLS certificate or trust store keeps
+# working.
+#
+# Deployments that move the database, serve TLS from an unusual location, or
+# configure media_video_thumbnail_command add those paths to
+# /etc/apparmor.d/local/usr.sbin.tuwunel rather than editing this file.
+#
+# The abi is pinned to 3.0 so the profile still parses on Debian 12 and Ubuntu
+# 22.04, whose AppArmor userspace predates 4.0. That leaves io_uring
+# unmediated, which costs nothing: mediation covers only rings created with
+# SQPOLL, and the database engine asks for SINGLE_ISSUER and DEFER_TASKRUN.
+
+abi <abi/3.0>,
+
+include <tunables/global>
+
+profile tuwunel /usr/{bin,sbin}/tuwunel flags=(attach_disconnected) {
+  include <abstractions/base>
+  include <abstractions/nameservice>
+  include <abstractions/openssl>
+  include <abstractions/ssl_certs>
+
+  # Client and federation listeners, outbound federation, and the DNS
+  # resolver, which binds its own random high ports against cache poisoning.
+  network inet stream,
+  network inet6 stream,
+  network inet dgram,
+  network inet6 dgram,
+  network unix stream,
+  network unix dgram,
+  network netlink raw,
+
+  # sd_notify readiness, reload, and watchdog messages.
+  unix (send) type=dgram peer=(addr="@*"),
+  /run/systemd/notify w,
+
+  # A restart re-execs this same binary in place, which needs ix so the
+  # replacement image stays under this profile instead of being denied.
+  /usr/{bin,sbin}/tuwunel mrix,
+
+  # The unit's ReadWritePaths, plus the runtime directory. Config
+  # regeneration writes a temp file beside its destination and hard-links it
+  # into place, so both it and the database directory need link permission.
+  /var/lib/tuwunel/{,**} rwkl,
+  /run/tuwunel/{,**} rwk,
+  /etc/tuwunel/{,**} rwl,
+
+  # Trust roots and certificates in their conventional locations.
+  /etc/letsencrypt/{,**} r,
+  /etc/pki/{,**} r,
+  /etc/ssl/{,**} r,
+
+  # Storage topology detection for the database pool.
+  @{sys}/block/{,**} r,
+  @{sys}/devices/** r,
+
+  # The pool reads the cgroup task limit to warn when a container ceiling
+  # would starve thread creation.
+  @{sys}/fs/cgroup/{,**} r,
+  @{PROC}/@{pid}/cgroup r,
+
+  @{PROC}/@{pid}/{limits,maps,smaps,stat,statm,status} r,
+  @{PROC}/@{pid}/task/ r,
+  @{PROC}/@{pid}/task/*/stat r,
+  @{PROC}/{cpuinfo,meminfo,stat} r,
+  @{PROC}/sys/kernel/hostname r,
+  @{PROC}/sys/kernel/osrelease r,
+  @{PROC}/sys/kernel/random/uuid r,
+  @{PROC}/sys/vm/overcommit_memory r,
+
+  # The runtime names its own threads.
+  @{PROC}/@{pid}/task/*/comm rw,
+
+  # The allocator reads the transparent hugepage policy.
+  @{sys}/kernel/mm/transparent_hugepage/* r,
+
+  # Site-specific additions and overrides. See local/README for details.
+  include if exists <local/usr.sbin.tuwunel>
+}

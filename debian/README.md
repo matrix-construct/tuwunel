@@ -91,3 +91,54 @@ intend to federate.
 Consult various online documentation and guides on setting up a reverse proxy
 and TLS. Caddy is documented at the [generic deployment guide](https://matrix-construct.github.io/tuwunel/deploying/generic.html#setting-up-the-reverse-proxy)
 as it's the easiest and most user friendly.
+
+### AppArmor
+
+The package installs an AppArmor profile at
+`/etc/apparmor.d/usr.sbin.tuwunel` and loads it where AppArmor is enabled,
+which is the default on Debian and Ubuntu. It takes effect the next time the
+service starts. A host without the `apparmor` parser runs the server
+unconfined instead of failing to start.
+
+The profile grants no capabilities, because the packaged unit already clears
+the capability bounding set, and it confines writes to the same paths the unit
+lists in `ReadWritePaths`, plus the runtime directory: `/var/lib/tuwunel`,
+`/etc/tuwunel`, and `/run/tuwunel`. Writing to `/etc/tuwunel` is what
+[config regeneration](https://matrix-construct.github.io/tuwunel/configuration/regeneration.html)
+needs. Reads are wider than writes so a configured TLS certificate or trust
+store keeps working, and the server is allowed to re-exec itself so that
+`!admin server restart` still works.
+
+The profile pins the AppArmor 3.0 policy abi so it parses on Debian 12 and
+Ubuntu 22.04 as well, whose AppArmor userspace predates 4.0.
+
+Because the profile grants no capabilities, a manual command that has to read
+the `tuwunel`-owned configuration runs as that user rather than as root, which
+needs no capability to override file permissions:
+
+```sh
+sudo -u tuwunel tuwunel -c /etc/tuwunel/tuwunel.toml --regenerate-config
+```
+
+Deployments that move the database or read TLS material from an unusual
+location add those paths to `/etc/apparmor.d/local/usr.sbin.tuwunel`, which
+the profile includes if present. A configured `media_video_thumbnail_command`
+needs an execute rule rather than a path rule there, such as
+`/usr/bin/ffmpeg ix,`, since the profile grants no execute permission of its
+own; its staging directory under the database path is already covered:
+
+```sh
+echo '/srv/matrix/** rwkl,' >> /etc/apparmor.d/local/usr.sbin.tuwunel
+apparmor_parser -r -T -W /etc/apparmor.d/usr.sbin.tuwunel
+systemctl restart tuwunel.service
+```
+
+Denials are logged to the audit log. Inspect them with
+`journalctl -k | grep apparmor` or `aa-status`, and report them to the
+[issue tracker](https://github.com/matrix-construct/tuwunel/issues). As a
+temporary measure the profile can be put in complain mode with
+`aa-complain /usr/sbin/tuwunel`, which logs what it would have denied and
+blocks nothing; `aa-enforce /usr/sbin/tuwunel` restores it.
+
+Confinement inside a container is a separate matter, covered by
+[container security profiles and limits](https://matrix-construct.github.io/tuwunel/deploying/container-security.html).

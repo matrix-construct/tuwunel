@@ -6,6 +6,18 @@ set -e
 TUWUNEL_DATABASE_PATH=/var/lib/tuwunel
 
 case $1 in
+  remove|purge)
+    # Unload the profile so a binary later installed at the same path is not
+    # confined by a leftover until the next boot, when apparmor.service reloads
+    # everything still in /etc/apparmor.d. The conffile is dpkg's to remove.
+    if command -v apparmor_parser > /dev/null 2>&1 \
+      && [ -f /etc/apparmor.d/usr.sbin.tuwunel ]; then
+      apparmor_parser -R /etc/apparmor.d/usr.sbin.tuwunel || true
+    fi
+    ;;
+esac
+
+case $1 in
   purge)
     # The database and anything else under /var/lib/tuwunel are never
     # deleted, even on purge; remove that directory manually if that is

@@ -25,12 +25,13 @@ license-file = ["../../LICENSE", "3"]
 # invokes; it is only Priority: important, so a trimmed install would not
 # otherwise carry it.
 depends = "ca-certificates, adduser, procps"
+recommends = "apparmor"
 conflicts = "conduwuit, matrix-conduit"
 extended-description = """\
 High performance Matrix homeserver written in Rust"""
 section = "net"
 priority = "optional"
-conf-files = ["/etc/tuwunel/tuwunel.toml"]
+conf-files = ["/etc/tuwunel/tuwunel.toml", "/etc/apparmor.d/usr.sbin.tuwunel"]
 maintainer-scripts = "../../debian/"
 # cargo-deb enables every unit it installs into the systemd directory, and
 # socket activation stays opt-in, so nothing is enabled from here and
@@ -42,6 +43,7 @@ assets = [
 	["target/release/tuwunel", "usr/sbin/tuwunel", "755"],
 	["../../tuwunel-example.toml", "etc/tuwunel/tuwunel.toml", "640"],
 	["../../debian/units/tuwunel.socket", "usr/lib/systemd/system/tuwunel.socket", "644"],
+	["../../debian/apparmor/usr.sbin.tuwunel", "etc/apparmor.d/usr.sbin.tuwunel", "644"],
 ]
 
 [package.metadata.generate-rpm]

@@ -115,6 +115,43 @@ case "$1" in
     ;;
 esac
 
+# Load the AppArmor profile. It needs both the userspace parser, which this
+# package only recommends, and a kernel with AppArmor enabled; with either
+# absent the server runs unconfined rather than failing to start. This has to
+# precede the debhelper marker below, which carries the restart-on-upgrade
+# that would otherwise bring the service back before its profile is in place.
+if [ "$1" = "configure" ] && command -v apparmor_parser >/dev/null 2>&1 \
+  && [ -d /sys/kernel/security/apparmor ]; then
+  apparmor_parser -r -T -W /etc/apparmor.d/usr.sbin.tuwunel || true
+fi
+
+# The profile matches resolved paths, so a data directory relocated by a
+# drop-in or reached through a symlink is denied even though the unit grants
+# it. Name it here, before the restart below brings the service back confined.
+if [ "$1" = "configure" ] && [ -d /sys/kernel/security/apparmor ]; then
+  uncovered=''
+  for path in /var/lib/tuwunel /etc/tuwunel; do
+    if [ -L "$path" ]; then
+      uncovered="$uncovered $path -> $(readlink -f "$path")"
+    fi
+  done
+  if command -v systemctl > /dev/null 2>&1; then
+    for path in $(systemctl show -p ReadWritePaths --value tuwunel.service 2>/dev/null); do
+      case "$path" in
+        /var/lib/tuwunel | /etc/tuwunel) ;;
+        *) uncovered="$uncovered $path" ;;
+      esac
+    done
+  fi
+  if [ -n "$uncovered" ]; then
+    echo "NOTE: the AppArmor profile does not cover:$uncovered" 1>&2
+    echo "NOTE: add it to /etc/apparmor.d/local/usr.sbin.tuwunel and reload the profile," 1>&2
+    echo "NOTE: or the confined server is denied that path on its next start." 1>&2
+  fi
+fi
+
+# cargo-deb expands every occurrence of the marker token, comments included,
+# so it is spelled out nowhere else in this script.
 #DEBHELPER#
 
 # Enablement is declined for the package as a whole so the socket unit stays
