@@ -223,6 +223,10 @@ impl Service {
 			.await
 			.map_err(|e| err!(Request(InvalidParam("Thread root not found: {e:?}"))))?;
 
+		if root_pdu.room_id() != event.room_id() {
+			return Ok(());
+		}
+
 		let mut root_pdu_json = self
 			.services
 			.timeline
@@ -237,8 +241,6 @@ impl Service {
 
 		users.push(event.sender().to_owned());
 
-		// Commit participants and activity before the bundle so concurrent MSC3816
-		// readers never observe stale participation.
 		let mut txn = self.services.db.txn();
 
 		self.update_participants(&mut txn, &root_id, &users);
@@ -250,8 +252,6 @@ impl Service {
 			txn.insert_raw(&self.db.threadrootid_latestcount, root_id, count.to_be_bytes());
 		}
 
-		txn.execute();
-
 		if let CanonicalJsonValue::Object(unsigned) = root_pdu_json
 			.entry("unsigned".into())
 			.or_insert_with(|| CanonicalJsonValue::Object(BTreeMap::default()))
@@ -260,10 +260,10 @@ impl Service {
 
 			self.services
 				.timeline
-				.replace_pdu(&root_id, &root_pdu_json)
-				.await?;
+				.stage_replace_pdu(&mut txn, &root_id, &root_pdu_json);
 		}
 
+		txn.execute();
 		Ok(())
 	}
 

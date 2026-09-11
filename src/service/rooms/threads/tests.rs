@@ -7,6 +7,8 @@ use tuwunel_core::{
 
 use super::update_thread_bundle_raw;
 
+mod append;
+
 #[test]
 fn backfilled_activity_key_sorts_before_normal() {
 	let shortroomid = 0x0102_0304_0506_0708_u64;

@@ -13,6 +13,7 @@ use tuwunel_core::{
 	config::{Config, Figment, Sources},
 	err,
 	log::{LogLevelReloadHandles, Logging, capture::State},
+	matrix::{PduCount, PduId, RawPduId},
 	metrics::Metrics,
 	utils::random_string,
 };
@@ -98,6 +99,14 @@ async fn build(config: Figment, path: &Path) -> Result<Fixture> {
 	let services = Services::build(server).await?;
 
 	Ok(Fixture { services })
+}
+
+pub(crate) fn pdu_id(count: u64) -> RawPduId {
+	PduId {
+		shortroomid: 1,
+		count: PduCount::Normal(count),
+	}
+	.into()
 }
 
 impl Drop for DatabasePath {
