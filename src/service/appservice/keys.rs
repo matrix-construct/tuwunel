@@ -16,12 +16,19 @@ use ruma::{
 use tuwunel_core::{
 	implement,
 	smallvec::SmallVec,
-	utils::{IterStream, stream::ReadyExt},
+	utils::{
+		IterStream,
+		stream::{ReadyExt, WidebandExt},
+	},
 };
+
+use super::RegistrationInfo;
 
 type ClaimedKeys = BTreeMap<OwnedDeviceId, BTreeMap<OwnedOneTimeKeyId, Raw<OneTimeKey>>>;
 type QueriedKeys = BTreeMap<OwnedDeviceId, Raw<DeviceKeys>>;
 type Registrations = SmallVec<[Registration; 1]>;
+const KEY_QUERY_CONCURRENCY: usize = 4;
+type UserMatches = fn(&RegistrationInfo, &UserId) -> bool;
 
 #[implement(super::Service)]
 #[tracing::instrument(level = "debug", skip(self, one_time_keys))]
@@ -30,7 +37,7 @@ pub async fn claim_keys(
 	user_id: &UserId,
 	one_time_keys: &BTreeMap<OwnedDeviceId, OneTimeKeyAlgorithm>,
 ) -> ClaimedKeys {
-	self.registrations_for_user(user_id)
+	self.registrations_for_user(user_id, RegistrationInfo::is_user_match)
 		.await
 		.into_iter()
 		.stream()
@@ -77,11 +84,11 @@ pub async fn claim_keys(
 #[implement(super::Service)]
 #[tracing::instrument(level = "debug", skip(self, devices))]
 pub async fn query_keys(&self, user_id: &UserId, devices: &[OwnedDeviceId]) -> QueriedKeys {
-	self.registrations_for_user(user_id)
+	self.registrations_for_user(user_id, RegistrationInfo::is_exclusive_user_match)
 		.await
 		.into_iter()
 		.stream()
-		.filter_map(async |registration| {
+		.widen_filter_map(Some(KEY_QUERY_CONCURRENCY), async |registration| {
 			let request = QueryRequest {
 				device_keys: [(user_id.to_owned(), devices.to_vec())].into(),
 			};
@@ -100,11 +107,11 @@ pub async fn query_keys(&self, user_id: &UserId, devices: &[OwnedDeviceId]) -> Q
 }
 
 #[implement(super::Service)]
-async fn registrations_for_user(&self, user_id: &UserId) -> Registrations {
+async fn registrations_for_user(&self, user_id: &UserId, is_match: UserMatches) -> Registrations {
 	self.read()
 		.await
 		.values()
-		.filter(|info| info.is_user_match(user_id))
+		.filter(|info| is_match(info, user_id))
 		.map(|info| info.registration.clone())
 		.collect()
 }
