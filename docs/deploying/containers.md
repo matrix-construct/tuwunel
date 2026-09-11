@@ -17,6 +17,11 @@ manage services on the host.
   by systemd user units, suited to single-host setups where containers should
   behave like native services.
 
+Whichever style you pick, [**security profiles and limits**](container-security.md)
+covers the two runtime defaults that affect this server: the task limit that
+can stop startup outright, and the seccomp profile that decides whether the
+database gets io_uring.
+
 ## Image registries
 
 | Registry        | Image                                             | Tags                          |
