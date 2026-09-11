@@ -28,6 +28,7 @@
     - [Docker](deploying/docker.md)
     - [Podman](deploying/podman-systemd.md)
     - [Kubernetes](deploying/kubernetes.md)
+    - [Security profiles and limits](deploying/container-security.md)
 
 # Operation
 

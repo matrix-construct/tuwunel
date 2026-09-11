@@ -18,7 +18,11 @@ project, so check the version it offers against our
 
 Our own release binaries are fully static and run on Alpine unmodified, and the
 published container images are built around that same binary. Either of those
-saves you a long compile.
+saves you a long compile. Running one of them in an Alpine container brings its
+runtime's defaults into play, which
+[security profiles and limits](container-security.md) covers: the task limit
+that can stop startup, and the seccomp profile that decides whether the
+database gets io_uring.
 
 If you want to build from source but not natively, the Nix route in
 [Compiling](generic.md#compiling) produces a static binary and is reproducible
