@@ -2,6 +2,8 @@ mod data;
 mod dest;
 mod sender;
 #[cfg(test)]
+mod test_utils;
+#[cfg(test)]
 mod tests;
 
 use std::{
