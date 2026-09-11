@@ -1,3 +1,4 @@
+mod create;
 mod dehydrated_device;
 pub mod device;
 mod invite_filter;
@@ -159,6 +160,12 @@ impl Service {
 		origin: Option<&str>,
 	) -> Result {
 		let origin = origin.unwrap_or("password");
+
+		if password.is_none() {
+			self.create_disabled(user_id, origin);
+			return Ok(());
+		}
+
 		self.db.userid_origin.insert(user_id, origin);
 		self.set_password(user_id, password).await
 	}
