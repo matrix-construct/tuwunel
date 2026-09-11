@@ -1,8 +1,9 @@
 mod read_markers;
 mod receipt;
 
+use futures::future::try_join;
 use ruma::{EventId, MilliSecondsSinceUnixEpoch, RoomId, UserId, events::receipt::ReceiptThread};
-use tuwunel_core::{PduCount, Result, debug, err, utils::result::LogErr};
+use tuwunel_core::{Err, PduCount, PduId, Result, debug, err, utils::result::LogErr};
 use tuwunel_service::{Services, rooms::read_receipt::PrivateRead};
 
 pub(crate) use self::{read_markers::set_read_marker_route, receipt::create_receipt_route};
@@ -20,13 +21,18 @@ async fn set_private_marker(
 	event: &EventId,
 	thread: &ReceiptThread,
 ) -> Result<bool> {
-	let count = services
-		.timeline
-		.get_pdu_count(event)
-		.await
-		.map_err(|_| err!(Request(NotFound("Event not found."))))?;
+	let (pdu_id, shortroomid) =
+		try_join(services.timeline.get_pdu_id(event), services.short.get_shortroomid(room_id))
+			.await
+			.map_err(|_| err!(Request(NotFound("Event not found."))))?;
 
-	let PduCount::Normal(count) = count else {
+	let pdu_id = PduId::from(pdu_id);
+
+	if pdu_id.shortroomid != shortroomid {
+		return Err!(Request(NotFound("Event not found.")));
+	}
+
+	let PduCount::Normal(count) = pdu_id.count else {
 		debug!(%user_id, %room_id, %event, "Skipping private read marker at a backfilled event");
 		return Ok(false);
 	};
