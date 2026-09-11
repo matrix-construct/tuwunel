@@ -2252,7 +2252,7 @@ checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 [[package]]
 name = "jevmalloc"
 version = "0.0.0+5.3.1-2-gee054313a33bef077b946fe744adae423b1a1b4f"
-source = "git+https://github.com/matrix-construct/jevmalloc?rev=ef3e8e6c903aa632ab87c3dd720a448e9b98a0c4#ef3e8e6c903aa632ab87c3dd720a448e9b98a0c4"
+source = "git+https://github.com/matrix-construct/jevmalloc?rev=c7cfedd5f2e3e7c573cf75e122354441a21f53eb#c7cfedd5f2e3e7c573cf75e122354441a21f53eb"
 dependencies = [
  "arrayvec",
  "jevmalloc-sys",
@@ -2262,7 +2262,7 @@ dependencies = [
 [[package]]
 name = "jevmalloc-sys"
 version = "0.0.0+5.3.1-2-gee054313a33bef077b946fe744adae423b1a1b4f"
-source = "git+https://github.com/matrix-construct/jevmalloc?rev=ef3e8e6c903aa632ab87c3dd720a448e9b98a0c4#ef3e8e6c903aa632ab87c3dd720a448e9b98a0c4"
+source = "git+https://github.com/matrix-construct/jevmalloc?rev=c7cfedd5f2e3e7c573cf75e122354441a21f53eb#c7cfedd5f2e3e7c573cf75e122354441a21f53eb"
 dependencies = [
  "cc",
  "libc",
@@ -4023,7 +4023,7 @@ dependencies = [
 [[package]]
 name = "rust-librocksdb-sys"
 version = "0.48.0+11.8.1"
-source = "git+https://github.com/matrix-construct/rust-rocksdb?rev=9c0aad8e358339afc1ab1acb658afe55a1a4c012#9c0aad8e358339afc1ab1acb658afe55a1a4c012"
+source = "git+https://github.com/matrix-construct/rust-rocksdb?rev=94071b3d6dc1aa34bf6af69d1f0fe415d432424d#94071b3d6dc1aa34bf6af69d1f0fe415d432424d"
 dependencies = [
  "bindgen",
  "bzip2-sys",
@@ -4041,7 +4041,7 @@ dependencies = [
 [[package]]
 name = "rust-rocksdb"
 version = "0.52.0"
-source = "git+https://github.com/matrix-construct/rust-rocksdb?rev=9c0aad8e358339afc1ab1acb658afe55a1a4c012#9c0aad8e358339afc1ab1acb658afe55a1a4c012"
+source = "git+https://github.com/matrix-construct/rust-rocksdb?rev=94071b3d6dc1aa34bf6af69d1f0fe415d432424d#94071b3d6dc1aa34bf6af69d1f0fe415d432424d"
 dependencies = [
  "libc",
  "parking_lot",
