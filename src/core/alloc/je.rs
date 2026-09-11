@@ -65,7 +65,7 @@ const MALLOC_CONF: &[u8] = concat_bytes!(
 
 // Apple's jemalloc has no background threads and prints a notice when asked.
 #[cfg(all(feature = "jemalloc_conf", not(target_vendor = "apple")))]
-const MALLOC_CONF_BACKGROUND: &str = ",background_thread:true,max_background_threads:-1";
+const MALLOC_CONF_BACKGROUND: &str = ",background_thread:false,max_background_threads:-1";
 #[cfg(all(feature = "jemalloc_conf", target_vendor = "apple"))]
 const MALLOC_CONF_BACKGROUND: &str = "";
 
