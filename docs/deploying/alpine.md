@@ -121,22 +121,19 @@ route above.
 
 ## Memory behavior on musl
 
-Tuwunel's own allocations go through jemalloc as usual, but RocksDB's are
-served by musl's allocator instead. On musl, jemalloc is built so that it does
-not replace the system allocator, which avoids a class of crash. This is normal
-for a musl build rather than a problem with yours; our glibc release binaries
-use jemalloc throughout.
+The default build uses jemalloc for both tuwunel's own allocations and
+RocksDB's allocations. On musl, jemalloc replaces the public system allocator
+functions, just as it does in our glibc release binaries.
 
-The allocator tuning tuwunel ships with does apply. If you want to override any
-of it at runtime, note that a musl build reads `_RJEM_MALLOC_CONF` rather than
-the usual `MALLOC_CONF`:
+The allocator tuning tuwunel ships with applies. To override it at runtime,
+use `MALLOC_CONF`:
 
 ```bash
-_RJEM_MALLOC_CONF=background_thread:false tuwunel
+MALLOC_CONF=background_thread:false tuwunel
 ```
 
 The same variable will show you what a binary is actually running with:
 
 ```bash
-_RJEM_MALLOC_CONF=stats_print:true tuwunel --version
+MALLOC_CONF=stats_print:true tuwunel -V
 ```
