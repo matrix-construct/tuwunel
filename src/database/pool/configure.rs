@@ -11,11 +11,13 @@ use tuwunel_core::{
 		stream,
 		stream::{AMPLIFICATION_LIMIT, WIDTH_LIMIT},
 		sys::{
+			cgroup_max_tasks,
 			compute::{available_parallelism, cores_available, is_core_available},
 			max_threads,
 			storage::{self, MultiDevice},
 		},
 	},
+	warn,
 };
 
 use super::{QUEUE_LIMIT, WORKER_LIMIT};
@@ -112,6 +114,8 @@ pub(super) fn configure(server: &Arc<Server>) -> (Vec<usize>, Vec<usize>, Vec<us
 		total_tags,
 		total_capacity,
 	);
+
+	warn_task_budget(total_workers, num_cores);
 
 	assert!(total_workers > 0, "some workers expected");
 	// A queue's capacity is positive exactly when its group is populated, so
@@ -329,6 +333,35 @@ fn log_topology(
 			stream_width = ?stream::automatic_width(),
 			amplification = ?stream::automatic_amplification(),
 			"Storage hardware not detected for database directory; assuming defaults.",
+		);
+	}
+}
+
+/// Warn when the pool's threads and the rest of the process may exceed a
+/// container task limit.
+///
+/// The check is advisory and the pool is not resized: which of the two
+/// numbers is the wrong one is the operator's call. A host whose cgroup sets
+/// no task limit is skipped.
+fn warn_task_budget(total_workers: usize, num_cores: usize) {
+	// Threads outside the pool measured 6 on two cores and 22 on eight, the
+	// tokio workers being num_cores of them.
+	const TASK_RESERVE: usize = 32;
+
+	let Some(max_tasks) = cgroup_max_tasks() else {
+		return;
+	};
+
+	let tasks = total_workers
+		.saturating_add(num_cores)
+		.saturating_add(TASK_RESERVE);
+
+	if tasks > max_tasks {
+		warn!(
+			?total_workers,
+			?max_tasks,
+			"The database pool may exceed this container's task limit; raise the task limit \
+			 (--pids-limit for docker and podman) or lower db_pool_max_workers."
 		);
 	}
 }
