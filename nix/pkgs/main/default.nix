@@ -11,7 +11,6 @@
   removeReferencesTo,
   rust,
   autoPatchelfHook,
-  rust-jemalloc-sys-unprefixed,
   stdenv,
 
   # Options (keep sorted)
@@ -61,40 +60,14 @@ let
 
   enableLiburing = featureEnabled "io_uring" && !stdenv.hostPlatform.isDarwin;
 
-  # This derivation will set the JEMALLOC_OVERRIDE variable, causing the
-  # tikv-jemalloc-sys crate to use the nixpkgs jemalloc instead of building it's
-  # own. In order for this to work, we need to set flags on the build that match
-  # whatever flags tikv-jemalloc-sys was going to use. These are dependent on
-  # which features we enable in tikv-jemalloc-sys.
-  rust-jemalloc-sys' =
-    # tikv-jemalloc-sys/unprefixed_malloc_on_supported_platforms feature
-    rust-jemalloc-sys-unprefixed.overrideAttrs (old: {
-      configureFlags =
-        old.configureFlags
-        ++
-          # we dont need docs
-          [ "--disable-doc" ]
-        ++
-          # we dont need cxx/C++ integration
-          [ "--disable-cxx" ]
-        ++
-          # tikv-jemalloc-sys/profiling feature
-          lib.optional (featureEnabled "jemalloc_prof") "--enable-prof"
-        ++
-          # tikv-jemalloc-sys/stats feature
-          (if (featureEnabled "jemalloc_stats") then [ "--enable-stats" ] else [ "--disable-stats" ]);
-    });
-
   rocksdb' =
     (rocksdb.override {
-      jemalloc = lib.optional (featureEnabled "jemalloc") rust-jemalloc-sys';
-      # rocksdb fails to build with prefixed jemalloc, which is required on
-      # darwin due to [1]. In this case, fall back to building rocksdb with
-      # libc malloc. This should not cause conflicts, because all of the
-      # jemalloc symbols are prefixed.
-      #
-      # [1]: https://github.com/tikv/jemallocator/blob/ab0676d77e81268cd09b059260c75b38dbef2d51/jemalloc-sys/src/env.rs#L17
-      enableJemalloc = featureEnabled "jemalloc" && !stdenv.hostPlatform.isDarwin;
+      # RocksDB's C++ allocations reach jemalloc by symbol interposition
+      # from the unprefixed allocator the Rust build links, so it needs
+      # none of its own. A second jemalloc here would serve only the
+      # opt-in nodump allocator and malloc-stats, out of a separate heap,
+      # and tuwunel uses neither.
+      enableJemalloc = false;
 
       # for some reason enableLiburing in nixpkgs rocksdb is default true
       # which breaks Darwin entirely
@@ -213,9 +186,8 @@ let
     dontPatchELF = profile == "dev" || profile == "test";
 
     buildInputs =
-      lib.optional (featureEnabled "jemalloc") rust-jemalloc-sys-unprefixed
       # needed to build Rust applications on macOS
-      ++ lib.optionals stdenv.hostPlatform.isDarwin [
+      lib.optionals stdenv.hostPlatform.isDarwin [
         # https://github.com/NixOS/nixpkgs/issues/206242
         # ld: library not found for -liconv
         libiconv
