@@ -12,6 +12,9 @@ use tuwunel_database::{Deserialized, Json, Map};
 
 use crate::rooms::timeline::RoomMutexGuard;
 
+#[cfg(test)]
+mod tests;
+
 pub struct Service {
 	services: Arc<crate::services::OnceServices>,
 	eventid_originalpdu: Arc<Map>,
@@ -100,13 +103,16 @@ pub async fn save_original_pdu(
 		return;
 	}
 
-	let now = now().as_secs();
+	self.insert_original(event_id, pdu, now().as_secs());
+}
 
-	self.eventid_originalpdu
-		.raw_put(event_id, Json(pdu));
+#[implement(Service)]
+fn insert_original(&self, event_id: &EventId, pdu: &CanonicalJsonObject, time: u64) {
+	let mut txn = self.services.db.txn();
 
-	self.timeredacted_eventid
-		.put_raw((now, event_id), []);
+	txn.raw_put(&self.eventid_originalpdu, event_id, Json(pdu));
+	txn.put_raw(&self.timeredacted_eventid, (time, event_id), []);
+	txn.execute();
 }
 
 #[implement(Service)]
