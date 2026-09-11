@@ -121,22 +121,32 @@ route above.
 
 ## Memory behavior on musl
 
-Tuwunel's own allocations go through jemalloc as usual, but RocksDB's are
-served by musl's allocator instead. On musl, jemalloc is built so that it does
-not replace the system allocator, which avoids a class of crash. This is normal
-for a musl build rather than a problem with yours; our glibc release binaries
-use jemalloc throughout.
+Tuwunel's own allocations go through jemalloc. RocksDB's go to musl's
+allocator instead, so a musl build splits its heap between the two. This is
+normal for a musl build rather than a problem with yours; our glibc release
+binaries use jemalloc throughout.
 
-The allocator tuning tuwunel ships with does apply. If you want to override any
-of it at runtime, note that a musl build reads `_RJEM_MALLOC_CONF` rather than
-the usual `MALLOC_CONF`:
+Both of those follow from how jemalloc is built here. On musl it is compiled
+with a symbol prefix, so it provides `_rjem_malloc`, `_rjem_free` and the
+rest rather than taking over the plain `malloc` that RocksDB and the other C
+libraries call. Tuwunel's own code calls the prefixed names directly, which
+is why its allocations still land in jemalloc.
+
+The prefix covers jemalloc's configuration variable too, so a musl build
+reads `_RJEM_MALLOC_CONF` where a glibc build reads `MALLOC_CONF`. The
+tuning tuwunel ships with still applies; use the prefixed name to change it:
 
 ```bash
 _RJEM_MALLOC_CONF=background_thread:false tuwunel
 ```
 
-The same variable will show you what a binary is actually running with:
+> [!NOTE]
+> jemalloc ignores the unprefixed name in silence, with no warning that it
+> went unread. If a setting appears to have no effect, check which name the
+> binary actually read.
+
+The same variable prints what a binary is actually running with:
 
 ```bash
-_RJEM_MALLOC_CONF=stats_print:true tuwunel --version
+_RJEM_MALLOC_CONF=stats_print:true tuwunel -V
 ```
