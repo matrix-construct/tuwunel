@@ -69,11 +69,16 @@ use super::{
 };
 use crate::{federation::ShouldAttempt, rooms::timeline::RawPduId};
 
+#[cfg(test)]
+mod tests;
+
 /// In-flight bookkeeping for one `Destination`. Cross-attempt backoff lives
 /// in `peer_status` (federation only); appservice/push paths keep their own
 /// status because they are not server-keyed.
 #[derive(Debug)]
 enum TransactionStatus {
+	// A durable active generation awaiting its first dispatch after restart.
+	Pending,
 	Running,
 	RunningForceRetry,
 	Failed(u32, Instant), // push backoff: tries, last failure
@@ -384,7 +389,7 @@ impl Service {
 		};
 
 		let (tries, retry_action) = match status {
-			| TransactionStatus::Running => (1, RetryAction::None),
+			| TransactionStatus::Pending | TransactionStatus::Running => (1, RetryAction::None),
 			| TransactionStatus::RunningForceRetry => (1, RetryAction::Force),
 			| TransactionStatus::Failed(n, _) | TransactionStatus::Retrying(n) =>
 				(n.saturating_add(1), RetryAction::None),
@@ -649,12 +654,19 @@ impl Service {
 			}
 		}
 
-		for (dest, events) in txns {
-			if self.server.config.startup_netburst && !events.is_empty() {
-				statuses.insert(dest.clone(), TransactionStatus::Running);
-				futures.push(self.send_events(dest, events));
-			}
-		}
+		txns.into_iter()
+			.filter(|(_, events)| !events.is_empty())
+			.for_each(|(dest, events)| {
+				let status = match self.server.config.startup_netburst {
+					| true => TransactionStatus::Running,
+					| false => TransactionStatus::Pending,
+				};
+
+				statuses.insert(dest.clone(), status);
+				if self.server.config.startup_netburst {
+					futures.push(self.send_events(dest, events));
+				}
+			});
 
 		// Active transaction generations must own their queued successors before
 		// queued-only badge destinations are woken.
@@ -723,7 +735,9 @@ impl Service {
 				.ready_for_each(|(_, e)| events.push(e))
 				.await;
 
-			return Ok(Some(events));
+			if !events.is_empty() {
+				return Ok(Some(events));
+			}
 		}
 
 		// Compose the next transaction
@@ -806,7 +820,7 @@ impl Service {
 				| TransactionStatus::Retrying(_) if matches!(dest, Destination::Push(..)) => {
 					allow = false; // push retry already in flight
 				},
-				| TransactionStatus::Retrying(_) => {
+				| TransactionStatus::Pending | TransactionStatus::Retrying(_) => {
 					// Promote to Running so a concurrent select does not double-send.
 					retry = true;
 					*e = TransactionStatus::Running;
