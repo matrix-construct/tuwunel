@@ -68,6 +68,14 @@ ifdef(`files_runtime_filetrans',`
 
 kernel_read_system_state(tuwunel_t)
 
+# The database pool reads the cgroup task limit to warn when a container
+# ceiling would starve thread creation. auth_use_nsswitch below already
+# carries this on Fedora-family policies; naming it keeps the grant
+# deliberate rather than incidental.
+ifdef(`fs_read_cgroup_files',`
+	fs_read_cgroup_files(tuwunel_t)
+')
+
 # Client and federation listeners: 8008 is http_port_t, 8448 and any
 # other configured port are unreserved.
 corenet_tcp_bind_generic_node(tuwunel_t)

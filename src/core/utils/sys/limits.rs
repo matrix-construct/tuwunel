@@ -4,12 +4,20 @@
 //! supported. Platform-specific implementations provide neutral fallbacks when
 //! an interface is unavailable.
 
+#[cfg(target_os = "linux")]
+use std::{
+	fs::read_to_string,
+	path::{Path, PathBuf},
+};
+
 #[cfg(unix)]
 use nix::sys::resource::{Resource, getrlimit};
 #[cfg(unix)]
 use nix::unistd::{SysconfVar, sysconf};
 
 use crate::Result;
+#[cfg(target_os = "linux")]
+use crate::utils::result::FlatOk;
 #[cfg(unix)]
 use crate::{apply, debug, utils::math::ExpectInto};
 
@@ -161,6 +169,55 @@ pub fn max_threads() -> Result<(usize, usize)> {
 #[cfg(any(not(unix), target_os = "macos"))]
 #[inline]
 pub fn max_threads() -> Result<(usize, usize)> { Ok((usize::MAX, usize::MAX)) }
+
+/// Returns the cgroup task-count limit applying to this process.
+///
+/// Container runtimes impose a task ceiling through the cgroup v2 `pids`
+/// controller, which `RLIMIT_NPROC` does not reflect: Podman defaults to 2,048
+/// tasks while leaving the rlimit unbounded. The effective ceiling is the
+/// lowest limit set anywhere in the cgroup's ancestry, so every ancestor is
+/// read; `None` means none of them sets one, which also covers a cgroup v1
+/// hierarchy.
+#[cfg(target_os = "linux")]
+#[must_use]
+pub fn cgroup_max_tasks() -> Option<usize> {
+	let cgroup = read_to_string("/proc/self/cgroup").unwrap_or_default();
+	let leaf = cgroup
+		.lines()
+		.find_map(|line| line.strip_prefix("0::"))
+		.unwrap_or_default();
+
+	let mount = Path::new("/sys/fs/cgroup");
+	let limit = Path::new("pids.max");
+
+	Path::new(leaf.trim_start_matches('/'))
+		.ancestors()
+		.map(|dir| [mount, dir, limit].into_iter().collect())
+		.filter_map(pids_max)
+		.min()
+}
+
+/// Returns no cgroup task limit on systems without cgroups.
+///
+/// No operating-system query is performed.
+#[cfg(not(target_os = "linux"))]
+#[must_use]
+#[inline]
+pub fn cgroup_max_tasks() -> Option<usize> { None }
+
+/// Reads one cgroup `pids.max` file.
+///
+/// An unreadable file and the literal `max` both yield `None`, so a cgroup
+/// setting no limit of its own contributes nothing to the minimum.
+#[cfg(target_os = "linux")]
+fn pids_max(path: PathBuf) -> Option<usize> {
+	read_to_string(path)
+		.ok()
+		.as_deref()
+		.map(str::trim)
+		.map(str::parse)
+		.flat_ok()
+}
 
 #[cfg(unix)]
 /// Get the system's page size in bytes.
