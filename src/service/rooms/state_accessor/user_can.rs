@@ -35,6 +35,13 @@ pub async fn user_can_redact(
 
 	if redacting_event
 		.as_ref()
+		.is_ok_and(|pdu| pdu.room_id() != room_id)
+	{
+		return Ok(false);
+	}
+
+	if redacting_event
+		.as_ref()
 		.is_ok_and(|pdu| *pdu.kind() == TimelineEventType::RoomCreate)
 	{
 		return Err!(Request(Forbidden("Redacting m.room.create is not safe, forbidding.")));
@@ -281,3 +288,6 @@ pub async fn user_can_tombstone(
 		.await
 		.is_ok()
 }
+
+#[cfg(test)]
+mod tests;
