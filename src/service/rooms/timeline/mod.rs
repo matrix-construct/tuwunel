@@ -39,7 +39,7 @@ use tuwunel_core::{
 	},
 	warn,
 };
-use tuwunel_database::{Database, Deserialized, Json, Map};
+use tuwunel_database::{Database, Deserialized, Json, Map, Txn};
 
 pub use self::pdus::{PdusIterItem, bias_count};
 use crate::rooms::short::{ShortRoomId, ShortStateHash};
@@ -124,6 +124,19 @@ pub async fn replace_pdu(&self, pdu_id: &RawPduId, pdu_json: &CanonicalJsonObjec
 	self.db.pduid_pdu.raw_put(pdu_id, Json(pdu_json));
 
 	Ok(())
+}
+
+/// Stage replacement of a PDU already loaded under its room's guard.
+///
+/// The caller retains the guard until the transaction commits.
+#[implement(Service)]
+pub(super) fn stage_replace_pdu(
+	&self,
+	txn: &mut Txn,
+	pdu_id: &RawPduId,
+	pdu_json: &CanonicalJsonObject,
+) {
+	txn.raw_put(&self.db.pduid_pdu, pdu_id, Json(pdu_json));
 }
 
 #[implement(Service)]
