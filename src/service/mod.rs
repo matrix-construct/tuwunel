@@ -5,6 +5,8 @@ pub(crate) mod migrations;
 mod once_services;
 mod service;
 pub mod services;
+#[cfg(test)]
+mod test_utils;
 
 pub mod account_data;
 pub mod admin;
