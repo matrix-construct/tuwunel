@@ -29,7 +29,7 @@ use tuwunel_database::{Deserialized, Json, Map};
 
 pub use self::{
 	dehydrated_device::DehydratedDevice, invite_filter::InviteFilter, keys::parse_master_key,
-	register::Register,
+	register::Register, server_user::SERVER_USER_KEY,
 };
 
 pub const PASSWORD_SENTINEL: &str = "*";
