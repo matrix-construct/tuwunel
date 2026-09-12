@@ -225,9 +225,10 @@ then
 
 	# The seed source is a live builder whose GC unlinks snapshots while the copy
 	# runs, so cp reports vanished-file errors and exits non-zero even when the
-	# result is a usable warm cache. Keep whatever copied and let the bootstrap
-	# below arbitrate: a cache too torn to open is discarded and rebuilt cold by
-	# the fallback, while a few missing snapshots are just cache misses.
+	# result is a usable warm cache. Keep whatever copied and let the probe
+	# below arbitrate: a snapshot that vanished before the metadata was copied
+	# is simply absent from it, and a cache that names snapshots it lacks is
+	# discarded and rebuilt cold by the fallback.
 	docker run --rm \
 		-v "${seed_state}:/seed:ro" \
 		-v "${this_state}:/state" \
@@ -245,14 +246,26 @@ create_builder() {
 		--buildkitd-flags "--allow-insecure-entitlement network.host"
 }
 
-# A seed copied from a live builder can carry a torn cache.db; if bootstrap
-# rejects it, discard the seed and cold-start so a build is never blocked.
-if ! create_builder; then
-	if test -n "$seeded"; then
-		docker buildx rm "$builder" || true
-		docker volume rm -f "$this_state" || true
-		create_builder
-	else
-		exit 1
-	fi
+# A seed copied from a live builder can carry a torn cache. Bootstrap rejects
+# a torn cache.db outright, but a cache whose metadata names snapshots the copy
+# never got (created on the live source after the copy had walked the snapshot
+# directory but before it copied the metadata, or collected in between) opens
+# fine, then fails every build that mounts one of them and aborts every GC pass
+# at the first, so the builder never heals. Walking the cache once with du
+# stats every snapshot whose size the source had not yet recorded, which is
+# where records still being written mid-copy land; one the source had already
+# sized slips through, so this is a backstop, not a consistency guarantee. On
+# either failure discard the seed and cold-start so a build is never blocked.
+probe_cache() {
+	docker exec "buildx_buildkit_${builder}0" buildctl du >/dev/null
+}
+
+if create_builder && { test -z "$seeded" || probe_cache; }; then
+	:
+elif test -n "$seeded"; then
+	docker buildx rm "$builder" || true
+	docker volume rm -f "$this_state" || true
+	create_builder
+else
+	exit 1
 fi
