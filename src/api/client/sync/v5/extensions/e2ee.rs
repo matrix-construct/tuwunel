@@ -146,18 +146,20 @@ async fn collect_room(
 		return Ok(lists);
 	}
 
-	let skip_unencrypted = services
-		.config
-		.device_key_update_encrypted_rooms_only
-		.then_async(|| {
-			services
-				.state_accessor
-				.state_get_shortid(current_shortstatehash, &StateEventType::RoomEncryption, "")
-				.is_err()
-		})
-		.unwrap_or_default();
+	let encrypted_at = |shortstatehash| {
+		services
+			.state_accessor
+			.state_get_shortid(shortstatehash, &StateEventType::RoomEncryption, "")
+			.is_ok()
+	};
 
-	if skip_unencrypted.await {
+	let current_encrypted = encrypted_at(current_shortstatehash).await;
+
+	if !current_encrypted
+		&& services
+			.config
+			.device_key_update_encrypted_rooms_only
+	{
 		return Ok(lists);
 	}
 
@@ -166,15 +168,15 @@ async fn collect_room(
 		.get_joined_count(room_id, sender_user)
 		.map_ok_or(false, |count| count > conn.globalsince);
 
-	let since_encrypted = services
-		.state_accessor
-		.state_get_shortid(since_shortstatehash, &StateEventType::RoomEncryption, "")
-		.is_ok();
+	// A plaintext room bursts only on the sender's own join.
+	let newly_encrypted = current_encrypted
+		.then_async(|| encrypted_at(since_shortstatehash).is_false())
+		.unwrap_or_default();
 
 	// The keyed membership read leads; the state lookup trails it.
 	let members_burst = joined_since_last_sync
 		.is_false()
-		.and(since_encrypted)
+		.and(newly_encrypted.is_false())
 		.is_false()
 		.await;
 
