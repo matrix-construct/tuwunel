@@ -96,8 +96,9 @@ fn auth_server_checks(services: &Services, x_matrix: &XMatrix) -> Result {
 	}
 
 	let destination = services.globals.server_name();
-	if x_matrix.destination.as_deref() != Some(destination) {
-		return Err!(Request(Forbidden("Invalid destination.")));
+	let x_matrix_destination = x_matrix.destination.as_deref();
+	if x_matrix_destination.is_some() && x_matrix_destination != Some(destination) {
+		return Err!(Request(Unauthorized("Invalid destination.")));
 	}
 
 	let origin = &x_matrix.origin;
