@@ -37,6 +37,43 @@ where
 	self.execute_on(client, dest, request).await
 }
 
+/// Sends a request to an operator-configured base URL instead of a resolved
+/// federation destination. Used for the mandatory policy server (MSC4284):
+/// the request is still signed as a federation request to `dest`, but the
+/// transport DELIBERATELY bypasses server-name resolution, the
+/// `allow_federation` switch, the forbidden-server list, the IP denylist and
+/// peer-status bookkeeping. The URL is trusted because the operator wrote it
+/// in the configuration; it is not a peer discovered from room state.
+#[implement(super::Service)]
+#[tracing::instrument(skip_all, name = "request_at", level = "debug")]
+pub async fn execute_at<T>(
+	&self,
+	base_url: &str,
+	dest: &ServerName,
+	request: T,
+) -> Result<T::IncomingResponse>
+where
+	T: OutgoingRequest + Debug + Send,
+	T::Authentication: FedAuth,
+	T::PathBuilder: FedPath,
+{
+	let client = &self.services.client.federation;
+	let request = self.to_http_request_at::<T>(base_url, dest, request)?;
+	let request = Request::try_from(request)?;
+	self.services.server.check_running()?;
+
+	let url = request.url().clone();
+	let method = request.method().clone();
+	let limit = self.services.server.config.max_response_size;
+	debug!(?method, ?url, "Sending request to configured URL");
+
+	let response = client.execute(request).await?;
+	let response = into_http_response(dest, base_url, &method, &url, response, limit).await?;
+
+	T::IncomingResponse::try_from_http_response(response)
+		.map_err(|e| err!(BadServerResponse("Server returned bad 200 response: {e:?}")))
+}
+
 /// Client-initiated key lookup (`/keys/query`, `/keys/claim`) over federation:
 /// skips servers already in backoff and bounds the request by
 /// `federation_keys_timeout` so a waiting client is not held past its own send
@@ -291,7 +328,8 @@ where
 	T::Authentication: FedAuth,
 	T::PathBuilder: FedPath,
 {
-	let response = into_http_response(dest, actual, method, url, response, limit).await?;
+	let response =
+		into_http_response(dest, &actual.to_string(), method, url, response, limit).await?;
 
 	T::IncomingResponse::try_from_http_response(response)
 		.map_err(|e| err!(BadServerResponse("Server returned bad 200 response: {e:?}")))
@@ -299,7 +337,7 @@ where
 
 async fn into_http_response(
 	dest: &ServerName,
-	actual: &ActualDest,
+	actual: &str,
 	method: &Method,
 	url: &Url,
 	mut response: Response,
@@ -310,8 +348,7 @@ async fn into_http_response(
 		?status, ?method,
 		request_url = ?url,
 		response_url = ?response.url(),
-		"Received response from {}",
-		actual.to_string(),
+		"Received response from {actual}",
 	);
 
 	let mut http_response_builder = http::Response::builder()
@@ -410,6 +447,22 @@ where
 	T::Authentication: FedAuth,
 	T::PathBuilder: FedPath,
 {
+	self.to_http_request_at::<T>(actual.to_string().as_str(), dest, request)
+}
+
+/// Builds and signs the federation request against an explicit base URL.
+#[implement(super::Service)]
+fn to_http_request_at<T>(
+	&self,
+	base_url: &str,
+	dest: &ServerName,
+	request: T,
+) -> Result<http::Request<Vec<u8>>>
+where
+	T: OutgoingRequest + Send,
+	T::Authentication: FedAuth,
+	T::PathBuilder: FedPath,
+{
 	const VERSIONS: [MatrixVersion; 1] = [MatrixVersion::V1_11];
 	let supported = SupportedVersions {
 		versions: VERSIONS.into(),
@@ -424,6 +477,6 @@ where
 	let path = T::PathBuilder::input(&supported);
 
 	request
-		.try_into_http_request::<Vec<u8>>(actual.to_string().as_str(), auth, path)
+		.try_into_http_request::<Vec<u8>>(base_url, auth, path)
 		.map_err(|e| err!(BadServerResponse("Invalid destination: {e:?}")))
 }
