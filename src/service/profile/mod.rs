@@ -357,6 +357,23 @@ pub fn all_profile_keys(&self, user_id: &UserId) -> impl Stream<Item = ProfileFi
 		.ignore_err()
 }
 
+/// Streams the names of the fields a user's profile holds.
+///
+/// The name rides the key, so a caller after names alone skips deserializing
+/// every value the way `all_profile_keys` must.
+#[implement(Service)]
+pub fn profile_field_names(
+	&self,
+	user_id: &UserId,
+) -> impl Stream<Item = ProfileFieldName> + Send {
+	let prefix = (user_id, Interfix);
+
+	self.useridprofilekey_value
+		.keys_prefix(&prefix)
+		.ignore_err()
+		.map(|(_, name): (Ignore, &str)| name.into())
+}
+
 /// Clears every stored profile field and propagates canonical removals.
 ///
 /// The removal is serialized with profile writes. Every joined room's member
