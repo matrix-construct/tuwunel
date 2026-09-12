@@ -1279,7 +1279,7 @@ pub struct Config {
 
 	/// Disable MSC3983/MSC3984 to avoid unwanted errors ping on appservices
 	/// use it if none of your appservices support theses MSC to avoid
-	/// warnings on appservices returning unsuccessfull HTTP responses
+	/// warnings on appservices returning unsuccessful HTTP responses
 	///
 	/// reloadable: probably???
 	/// default: false
