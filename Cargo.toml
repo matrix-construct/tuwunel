@@ -40,11 +40,11 @@ name = "tuwunel"
 #
 
 [workspace.dependencies.argon2]
-version = "0.5"
+version = "0.6"
 default-features = false
 features = [
 	"alloc",
-	"rand",
+	"password-hash",
 ]
 
 [workspace.dependencies.arrayvec]

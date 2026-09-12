@@ -1,10 +1,10 @@
 use std::fmt::Display;
 
 use argon2::{
-	Algorithm, Argon2, Error as Argon2Error, Params, PasswordHash, PasswordHasher,
-	PasswordVerifier, Version,
-	password_hash::{Salt, SaltString},
+	Algorithm, Argon2, Error as Argon2Error, Params, PasswordHasher, PasswordVerifier, Version,
+	password_hash::phc::Salt,
 };
+use rand::random;
 use smallstr::SmallString;
 
 use crate::{Error, Result, err, format_small_string, implement};
@@ -38,15 +38,11 @@ pub struct Cost {
 /// PHC-formatted string containing the salt and parameters needed for
 /// verification.
 pub fn password(password: &str, cost: Cost) -> Result<PhcString> {
-	let mut bytes = [0_u8; Salt::RECOMMENDED_LENGTH];
-
-	rand::fill(&mut bytes);
-
-	let salt = SaltString::encode_b64(&bytes).map_err(map_err)?;
+	let salt: [u8; Salt::RECOMMENDED_LENGTH] = random();
 
 	hasher(cost)
 		.map_err(map_err)?
-		.hash_password(password.as_bytes(), &salt)
+		.hash_password_with_salt(password.as_bytes(), &salt)
 		.map(|hash| format_small_string!("{hash}"))
 		.map_err(map_err)
 }
@@ -57,10 +53,8 @@ pub fn password(password: &str, cost: Cost) -> Result<PhcString> {
 /// cost still verifies. Malformed hashes and password mismatches return an
 /// error.
 pub fn verify_password(password: &str, password_hash: &str) -> Result {
-	let password_hash = PasswordHash::new(password_hash).map_err(map_err)?;
-
 	Argon2::default()
-		.verify_password(password.as_bytes(), &password_hash)
+		.verify_password(password.as_bytes(), password_hash)
 		.map_err(map_err)
 }
 
