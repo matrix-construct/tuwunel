@@ -6,7 +6,7 @@ use std::{
 use axum::extract::State;
 use futures::{
 	FutureExt, StreamExt, TryFutureExt, TryStreamExt,
-	future::{join, join3, join4, join5},
+	future::{join, join3, join4, join5, try_join},
 	pin_mut,
 };
 use ruma::{
@@ -83,6 +83,10 @@ struct StateChanges {
 	joined_member_count: Option<u64>,
 	invited_member_count: Option<u64>,
 	state_events: Vec<PduEvent>,
+
+	/// Witnessed members' current state, lazily loaded for display; never a
+	/// membership change, so the device-list scan leaves them out.
+	lazy_members: Vec<PduEvent>,
 }
 
 struct StateChangeParams<'a> {
@@ -1138,6 +1142,7 @@ async fn load_joined_room(
 			joined_member_count,
 			invited_member_count,
 			mut state_events,
+			lazy_members,
 		},
 	) = compute_join_state_changes(
 		services,
@@ -1201,6 +1206,8 @@ async fn load_joined_room(
 		filter,
 	)
 	.await;
+
+	let state_events = state_events.into_iter().chain(lazy_members);
 
 	let (joined_room, device_list_updates, left_encrypted_users) = finalize_joined_room(
 		services,
@@ -1324,7 +1331,7 @@ fn compute_join_prev_batch(
 #[expect(clippy::too_many_arguments)]
 async fn assemble_join_state_events(
 	services: &Services,
-	state_events: Vec<PduEvent>,
+	state_events: impl Iterator<Item = PduEvent> + Send,
 	sender_user: &UserId,
 	encrypted: bool,
 	room_events: &[PduEvent],
@@ -1490,7 +1497,7 @@ async fn finalize_joined_room(
 	services: &Services,
 	sender_user: &UserId,
 	filter: &FilterDefinition,
-	state_events: Vec<PduEvent>,
+	state_events: impl Iterator<Item = PduEvent> + Send,
 	aggregates: JoinAggregates,
 	receipt_events: Vec<(OwnedUserId, Raw<AnySyncEphemeralRoomEvent>)>,
 	heroes: Option<Vec<OwnedUserId>>,
@@ -2082,7 +2089,7 @@ async fn gather_device_list_updates(
 
 async fn assemble_state_events(
 	services: &Services,
-	state_events: Vec<PduEvent>,
+	state_events: impl Iterator<Item = PduEvent> + Send,
 	sender_user: &UserId,
 	encrypted: bool,
 	include_in_state: impl Fn(&PduEvent) -> bool + Send + Sync,
@@ -2090,7 +2097,6 @@ async fn assemble_state_events(
 	event_fields: Option<&[String]>,
 ) -> Vec<Raw<AnySyncStateEvent>> {
 	state_events
-		.into_iter()
 		.filter(include_in_state)
 		.stream()
 		.wide_then(|pdu| with_membership(services, pdu, sender_user, encrypted))
@@ -2221,6 +2227,13 @@ async fn calculate_state_changes<'a>(
 			.ok()
 	};
 
+	let get_pdu = |shorteventid: ShortEventId| {
+		services
+			.timeline
+			.get_pdu_from_shorteventid(shorteventid)
+			.ok()
+	};
+
 	let lazy_state_ids = witness.map_async(|witness| {
 		witness
 			.iter()
@@ -2264,22 +2277,21 @@ async fn calculate_state_changes<'a>(
 			Ok(event_id)
 		})
 		.ready_try_filter_map(Result::Ok)
-		.chain(lazy_state_ids.stream().map(Result::Ok))
-		.broad_and_then(async |shorteventid| {
-			let pdu = services
-				.timeline
-				.get_pdu_from_shorteventid(shorteventid)
-				.ok()
-				.await;
-
-			Ok(pdu)
-		})
+		.broad_and_then(|shorteventid| get_pdu(shorteventid).map(Ok))
 		.ready_try_filter_map(Result::Ok)
-		.try_collect::<Vec<_>>()
-		.await?;
+		.try_collect::<Vec<_>>();
+
+	let lazy_members = lazy_state_ids
+		.stream()
+		.broad_filter_map(get_pdu)
+		.collect::<Vec<_>>()
+		.map(Ok);
+
+	let (state_events, lazy_members) = try_join(state_events, lazy_members).await?;
 
 	let send_member_counts = state_events
 		.iter()
+		.chain(lazy_members.iter())
 		.any(|event| *event.kind() == RoomMember);
 
 	let member_counts = send_member_counts
@@ -2293,6 +2305,7 @@ async fn calculate_state_changes<'a>(
 		joined_member_count,
 		invited_member_count,
 		state_events,
+		lazy_members,
 	})
 }
 
