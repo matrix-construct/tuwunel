@@ -1,20 +1,16 @@
 #![cfg(feature = "sentry_telemetry")]
 
-use std::{
-	str::FromStr,
-	sync::{Arc, OnceLock},
-};
+use std::sync::{Arc, OnceLock};
 
 use reqwest::{Client, ClientBuilder, Proxy};
 use sentry::{
-	Breadcrumb, ClientOptions, Level, Transport, TransportOptions,
+	Breadcrumb, ClientOptions, Level, Transport, TransportOptions, release_name,
 	transports::ReqwestHttpTransportOptions,
-	types::{
-		Dsn,
-		protocol::v7::{Context, Event},
-	},
+	types::protocol::v7::{Context, Event},
 };
-use tuwunel_core::{config::Config, debug, error, error::error_chain, trace};
+use tuwunel_core::{
+	config::Config, debug, error, error::error_chain, trace, version::user_agent,
+};
 
 static SEND_PANIC: OnceLock<bool> = OnceLock::new();
 static SEND_ERROR: OnceLock<bool> = OnceLock::new();
@@ -39,23 +35,22 @@ fn options(config: &Config) -> ClientOptions {
 		.expect("init_sentry should only be called if sentry is enabled and this is not None")
 		.as_str();
 
-	let server_name = config
-		.sentry_send_server_name
-		.then(|| config.server_name.to_string().into());
+	let options = ClientOptions::new()
+		.dsn(dsn)
+		.traces_sample_rate(config.sentry_traces_sample_rate)
+		.debug(cfg!(debug_assertions))
+		.maybe_release(release_name!())
+		.user_agent(user_agent())
+		.attach_stacktrace(config.sentry_attach_stacktrace)
+		.before_send(before_send)
+		.before_breadcrumb(before_breadcrumb)
+		.transport(build_transport);
 
-	ClientOptions {
-		dsn: Some(Dsn::from_str(dsn).expect("sentry_endpoint must be a valid URL")),
-		server_name,
-		traces_sample_rate: config.sentry_traces_sample_rate,
-		debug: cfg!(debug_assertions),
-		release: sentry::release_name!(),
-		user_agent: tuwunel_core::version::user_agent().into(),
-		attach_stacktrace: config.sentry_attach_stacktrace,
-		before_send: Some(Arc::new(before_send)),
-		before_breadcrumb: Some(Arc::new(before_breadcrumb)),
-		transport: Some(Arc::new(build_transport)),
-		..Default::default()
-	}
+	config
+		.sentry_send_server_name
+		.then(|| config.server_name.to_string())
+		.into_iter()
+		.fold(options, ClientOptions::server_name)
 }
 
 fn build_transport(options: &ClientOptions) -> Arc<dyn Transport> {

@@ -461,7 +461,7 @@ version = "0.5"
 default-features = false
 
 [workspace.dependencies.sentry]
-version = "0.48"
+version = "0.49"
 default-features = false
 features = [
     "backtrace",
@@ -477,10 +477,10 @@ features = [
 ]
 
 [workspace.dependencies.sentry-tower]
-version = "0.48"
+version = "0.49"
 
 [workspace.dependencies.sentry-tracing]
-version = "0.48"
+version = "0.49"
 
 [workspace.dependencies.serde]
 version = "1.0"

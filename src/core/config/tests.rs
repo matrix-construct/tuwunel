@@ -1015,6 +1015,40 @@ fn a_weak_cost_passes_the_config_check_with_a_warning() {
 	}
 }
 
+/// A Sentry traces sample rate outside the unit interval fails the check.
+///
+/// The Sentry client panics on such a value at initialization, so the check
+/// turns that into a configuration error. The rate is left alone when Sentry
+/// is disabled.
+#[test]
+fn an_out_of_range_sentry_sample_rate_fails_the_config_check() {
+	const SENTRY: &str =
+		"[global]\nsentry = true\nsentry_endpoint = \"https://key@sentry.example/1\"\n";
+
+	for (toml, valid) in [
+		(format!("{SENTRY}sentry_traces_sample_rate = 1.5\n"), false),
+		(format!("{SENTRY}sentry_traces_sample_rate = -0.5\n"), false),
+		(format!("{SENTRY}sentry_traces_sample_rate = nan\n"), false),
+		(format!("{SENTRY}sentry_traces_sample_rate = 1.0\n"), true),
+		(format!("{SENTRY}sentry_traces_sample_rate = 0.0\n"), true),
+		("[global]\nsentry_traces_sample_rate = 1.5\n".to_owned(), true),
+	] {
+		let config = config_from_toml(&toml).expect("the config should parse");
+		let result = check(&config);
+
+		assert_eq!(result.is_ok(), valid, "{toml}: {result:?}");
+
+		if let Err(error) = result {
+			assert!(
+				error
+					.to_string()
+					.contains("'sentry_traces_sample_rate' directive"),
+				"{error}"
+			);
+		}
+	}
+}
+
 /// A documented default is published to operators through the generated
 /// tuwunel-example.toml, so one that disagrees with the code hands out a value
 /// the server never uses. Only integer defaults are compared; prose such as

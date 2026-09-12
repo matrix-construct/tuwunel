@@ -3034,9 +3034,9 @@
 
 # Performance monitoring/tracing sample rate for Sentry.io.
 #
-# Note that too high values may impact performance, and can be disabled by
-# setting it to 0.0 (0%) This value is read as a percentage to Sentry,
-# represented as a decimal. Defaults to 15% of traces (0.15)
+# Sentry reads this as a fraction, so it must lie between 0.0 and 1.0
+# inclusive when Sentry is enabled. High values may impact performance;
+# 0.0 disables sampling.
 #
 #sentry_traces_sample_rate = 0.15
 

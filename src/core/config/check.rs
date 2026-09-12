@@ -108,6 +108,13 @@ fn check_observability(config: &Config) -> Result {
 		));
 	}
 
+	if config.sentry && !(0.0..=1.0).contains(&config.sentry_traces_sample_rate) {
+		return Err!(Config(
+			"sentry_traces_sample_rate",
+			"Sentry traces sample rate must be between 0.0 and 1.0 inclusive"
+		));
+	}
+
 	Ok(())
 }
 
