@@ -68,6 +68,39 @@ reap_idle_hours=$(echo -n "$reap_idle_hours" | jq -r ".$runner")
 reap_min_free=$(echo -n "$reap_min_free" | jq -r ".$runner")
 seed_budget=$(echo -n "$seed_budget" | jq -r ".$runner")
 
+# Daemon-store sweep. buildkit's GC governs only the cache inside each builder;
+# what bake loads into the docker daemon has no owner at all. Every rebuild of
+# a per-cell tag orphans its predecessor as a dangling image, every artifact
+# extraction leaves a created container behind (pinning its image against any
+# prune), the MAS runner's postgres leaves an anonymous volume, and a killed
+# job leaves its testee containers and networks running. All of it is garbage
+# the moment its run has finished, and nothing else removes it. The 24h floor
+# keeps the sweep clear of anything a concurrent run could still be about to
+# use; a test container still running after 12h belongs to a job that is long
+# gone. Ordered so each step unpins the next: containers pin images and
+# networks; images and volumes pin nothing.
+stale_test_containers() {
+	local cutoff=$(( $(date +%s) - $1 ))
+	{
+		docker ps -q --filter "label=complement_context"
+		docker ps -q --filter "label=org.testcontainers"
+	} 2>/dev/null | sort -u | while read -r cid; do
+		created=$(docker inspect --format '{{.Created}}' "$cid" 2>/dev/null) || continue
+		test "$(date -d "$created" +%s)" -lt "$cutoff" && echo "$cid"
+	done
+}
+
+sweep_daemon() {
+	stale_test_containers $(( 12 * 3600 )) | xargs -r docker rm -f >/dev/null 2>&1
+	docker container prune -f --filter until=24h >/dev/null 2>&1
+	docker image prune -a -f --filter label=complement_context --filter until=24h >/dev/null 2>&1
+	docker image prune -f --filter until=24h >/dev/null 2>&1
+	docker volume prune -f >/dev/null 2>&1
+	docker network prune -f --filter until=24h >/dev/null 2>&1
+}
+
+sweep_daemon
+
 # Reaper. Per-actor builders accumulate one full-fat state volume each and
 # nothing else removes them, so without this a handful of stale contributors
 # fill the disk on their own. buildkit's own GC is per-builder and blind to
@@ -153,45 +186,60 @@ set -eux
 cat <<EOF > ./buildkitd.toml
 [system]
   platformsCacheMaxAge = "504h"
+# The gcpolicy rules below replace buildkit's default policy outright; the
+# worker-level sizes only seed that default and are ignored once rules exist.
+# Each rule measures the whole cache (every non-shared record, of every type)
+# against its caps and deletes only the records its filter admits.
 [worker.oci]
   enabled = true
   rootless = false
   gc = true
-  reservedSpace = "${reserved_space}"
-  maxUsedSpace = "${max_used_space}"
-  minFreeSpace = "${min_free_space}"
 
 # Dependency cache mounts: cargo registry, cargo git, rustup downloads, the nix
 # store, go module cache. Expensive to refetch or rebuild and, crucially, the
 # only place the nix store can live (cache exporters cannot carry a cachemount),
-# so this bucket alone is what keeps smoke-nix warm. Its own long keepDuration
-# and size cap keep it isolated from the layer churn below: shrinking the layer
-# ceiling never evicts the nix store, and this cap keeps the store itself from
-# growing without bound.
+# so this bucket alone is what keeps smoke-nix warm. Its own rule keeps it apart
+# from the layer churn below: the ceiling rule's filter never admits a cache
+# mount, and a mount is evicted here only once unused for two weeks while the
+# whole cache stands over this size (a whole-cache threshold, not a bucket cap).
 [[worker.oci.gcpolicy]]
   filters = ["type==exec.cachemount"]
   keepDuration = "336h"
   maxUsedSpace = "${cachemount_max}"
 
-# Everything else: build layers, sources, frontend. reservedSpace is the warm
-# floor GC never prunes below, so the most-recently-used reservedSpace of layers
-# (the foundation and cooked deps, touched at the start of every run) survives
-# regardless of age. maxUsedSpace is the ceiling GC trims the total back to, but
-# only records older than keepDuration are eligible: on a builder rebuilt many
-# times a day a long keepDuration shields nearly the whole cache, the ceiling
-# never binds, and it grows until the disk-pressure valve below dumps everything.
-# 12h keeps the shielded set under maxUsedSpace so GC can trim the older tail.
+# Everything else: build layers, sources, frontend. maxUsedSpace is the ceiling
+# GC trims the whole cache back to after every build, least-recently-used and
+# least-reused records first, so the foundation and cooked deps every leg
+# touches are the last to go and a run's dead leg output is the first. There is
+# deliberately no keepDuration here: buildkit never deletes a record used more
+# recently than keepDuration, whatever the size caps say, and one pipeline
+# writes well over 100GB an hour (a contributor's builder reached 460GB under a
+# 120GB ceiling with 385GB shielded by a 12h keepDuration), so any age shield
+# turns the ceiling into a suggestion. Records in use by a running build are
+# never deleted regardless. Size the ceiling to hold one pipeline's leg output
+# plus the foundation, or later legs evict what earlier legs built.
 [[worker.oci.gcpolicy]]
   filters = ["type!=exec.cachemount"]
-  keepDuration = "12h"
   reservedSpace = "${reserved_space}"
   maxUsedSpace = "${max_used_space}"
   all = true
 
-# Safety floor: under critical disk pressure, evict anything regardless of age
-# or type. Last relief valve when the ceiling above has not sufficed; the reaper
-# and the seed guard exist so this is never reached in normal operation, because
-# reaching it evicts the nix store along with everything else.
+# Disk-pressure valve. The ceiling bounds one builder; this bounds their sum
+# against the shared disk. When the filesystem's free space drops under
+# minFreeSpace, the next build on any builder trims that builder's cache, again
+# least-recently-used first and never past reservedSpace, until the free space
+# is restored. Set it well above what the runner, the daemon's image store and
+# the other builders need to keep working: a valve that opens at a few GB free
+# opens after ENOSPC has already killed the runner listeners.
+[[worker.oci.gcpolicy]]
+  minFreeSpace = "${min_free_space}"
+  reservedSpace = "${reserved_space}"
+  all = true
+
+# Last resort: with the disk critically low, evict anything, below the floor
+# and cache mounts included. The reaper and the valve above exist so this is
+# never reached in normal operation, because reaching it evicts the nix store
+# along with everything else.
 [[worker.oci.gcpolicy]]
   minFreeSpace = "${safety_free_space}"
   all = true

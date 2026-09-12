@@ -180,6 +180,7 @@ jobs:
 
       run: |
         cid=$(docker create "$iid" /)
+        trap 'docker rm -f "$cid" >/dev/null' EXIT
         rm -rf _artifact
         mkdir -p "_artifact"
         docker cp "$cid:$src" "_artifact/$dst"
