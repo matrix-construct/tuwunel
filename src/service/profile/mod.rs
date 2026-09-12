@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests;
 
-use std::{collections::BTreeMap, sync::Arc};
+use std::{collections::BTreeMap, mem::replace, sync::Arc};
 
 use futures::{Stream, StreamExt, TryStreamExt, future::join};
 use ruma::{
@@ -57,6 +57,10 @@ pub type ProfileChange<'a> = (&'a UserId, &'a str);
 /// write covering several fields needs one count, and the value names the user
 /// for the rows keyed by room.
 type ChangeKeyVal<'a> = KeyVal<'a, (&'a str, u64, &'a str), &'a UserId>;
+
+/// One field of a profile write: the name and the value to store, or `None`
+/// to clear it.
+type ProfileValue = (ProfileFieldName, Option<Value>);
 
 /// The field names one write actually changes, almost always just the one the
 /// caller named.
@@ -171,7 +175,11 @@ async fn update_room(
 		| Propagation::None => return Ok(()),
 	};
 
-	let mut content = self
+	// Held from the read so a membership change landing between the two
+	// cannot be overwritten by the append.
+	let state_lock = self.services.state.mutex.lock(room_id).await;
+
+	let content = self
 		.services
 		.state_accessor
 		.get_member(room_id, user_id)
@@ -181,47 +189,11 @@ async fn update_room(
 		return Ok(());
 	}
 
-	let mut changed = false;
-
-	for (name, value) in profile_values {
-		match name {
-			| ProfileFieldName::DisplayName => {
-				if unchanged && content.displayname.as_deref() != current_displayname {
-					continue;
-				}
-
-				let displayname = value.clone().map(|value| {
-					extract_variant!(value, Value::String).expect("invalid profile value type")
-				});
-
-				content.displayname = displayname;
-
-				changed = true;
-			},
-			| ProfileFieldName::AvatarUrl => {
-				if unchanged && content.avatar_url.as_deref() != current_avatar_url {
-					continue;
-				}
-
-				let avatar_url = value.clone().map(|value| {
-					serde_json::from_value(value).expect("invalid profile value type")
-				});
-
-				content.avatar_url = avatar_url;
-
-				changed = true;
-			},
-			| _ => {},
-		}
-	}
-
-	if !changed {
+	let Some(content) =
+		apply_fields(content, profile_values, unchanged, current_displayname, current_avatar_url)
+	else {
 		return Ok(());
-	}
-
-	content.reason = None;
-
-	let state_lock = self.services.state.mutex.lock(room_id).await;
+	};
 
 	self.services
 		.timeline
@@ -234,6 +206,53 @@ async fn update_room(
 		.await?;
 
 	Ok(())
+}
+
+/// Lays a profile write over a room's member content.
+///
+/// Returns the content only when a field differs from what the room holds,
+/// so a write restoring the stored value emits no member event. Under
+/// `Propagation::Unchanged` a room whose value departs from the user's prior
+/// global value keeps its override.
+fn apply_fields(
+	content: RoomMemberEventContent,
+	profile_values: &[ProfileValue],
+	unchanged: bool,
+	current_displayname: Option<&str>,
+	current_avatar_url: Option<&MxcUri>,
+) -> Option<RoomMemberEventContent> {
+	let mut content = RoomMemberEventContent { reason: None, ..content };
+	let mut changed = false;
+
+	for (name, value) in profile_values {
+		match name {
+			| ProfileFieldName::DisplayName
+				if !unchanged || content.displayname.as_deref() == current_displayname =>
+			{
+				let displayname = value.clone().map(|value| {
+					extract_variant!(value, Value::String).expect("invalid profile value type")
+				});
+
+				changed |= assign(&mut content.displayname, displayname);
+			},
+			| ProfileFieldName::AvatarUrl
+				if !unchanged || content.avatar_url.as_deref() == current_avatar_url =>
+			{
+				let avatar_url = value.clone().map(|value| {
+					serde_json::from_value(value).expect("invalid profile value type")
+				});
+
+				changed |= assign(&mut content.avatar_url, avatar_url);
+			},
+			| _ => {},
+		}
+	}
+
+	changed.then_some(content)
+}
+
+fn assign<T: PartialEq>(slot: &mut Option<T>, next: Option<T>) -> bool {
+	replace(slot, next).ne(slot)
 }
 
 /// Sets a new displayname or removes it if displayname is None. You still
