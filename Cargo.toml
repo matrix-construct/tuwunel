@@ -660,7 +660,7 @@ rev = "879968ba99c2558ae234fd67a057b7ea6f761fd3"
 # adds LIFO queue scheduling; this should be updated with PR progress.
 [patch.crates-io.event-listener]
 git = "https://github.com/matrix-construct/event-listener"
-rev = "18af85c4df39a11b44b39629783ed3ddec6a8853"
+rev = "f2a3389999cbcb2bdda52dbf5493635a027e7d94"
 [patch.crates-io.async-channel]
 git = "https://github.com/matrix-construct/async-channel"
 rev = "debb93f14a20fa7c1989042c2f07f53654d75908"

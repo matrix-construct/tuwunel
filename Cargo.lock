@@ -1376,8 +1376,8 @@ dependencies = [
 
 [[package]]
 name = "event-listener"
-version = "5.4.1"
-source = "git+https://github.com/matrix-construct/event-listener?rev=18af85c4df39a11b44b39629783ed3ddec6a8853#18af85c4df39a11b44b39629783ed3ddec6a8853"
+version = "5.4.2"
+source = "git+https://github.com/matrix-construct/event-listener?rev=f2a3389999cbcb2bdda52dbf5493635a027e7d94#f2a3389999cbcb2bdda52dbf5493635a027e7d94"
 dependencies = [
  "parking",
  "pin-project-lite",
