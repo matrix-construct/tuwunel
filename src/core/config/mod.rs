@@ -1277,6 +1277,15 @@ pub struct Config {
 	#[serde(default)]
 	pub federation_loopback: bool,
 
+	/// Disable MSC3983/MSC3984 to avoid unwanted errors ping on appservices
+	/// use it if none of your appservices support theses MSC to avoid
+	/// warnings on appservices returning unsuccessful HTTP responses
+	///
+	/// reloadable: probably???
+	/// default: false
+	#[serde(default)]
+	pub disable_appservice_keys_claims: bool,
+
 	/// Always calls /forget on behalf of the user if leaving a room. This is a
 	/// part of MSC4267 "Automatically forgetting rooms on leave"
 	/// reloadable: yes
