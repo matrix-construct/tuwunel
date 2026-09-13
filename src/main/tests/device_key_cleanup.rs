@@ -79,7 +79,7 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	services
 		.users
 		.remove_device(&user_id, device_id)
-		.await;
+		.await?;
 	if !query(&observer, &user_id).await?.is_null() {
 		return Err!("Deleted device remained queryable");
 	}

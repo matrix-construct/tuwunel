@@ -103,9 +103,10 @@ async fn deletion_orders_identity_uploads_and_signatures() -> Result {
 			.expect("another user's identity upload was blocked")?;
 
 			drop(guard);
-			let ((), written) = timeout(Duration::from_secs(5), join(delete, write))
+			let (deleted, written) = timeout(Duration::from_secs(5), join(delete, write))
 				.await
 				.expect("identity writer and deletion did not finish");
+			deleted?;
 			if deletion_first {
 				assert!(
 					written.is_err_and(|error| error.is_not_found()),
@@ -161,7 +162,7 @@ async fn deletion_preserves_colliding_cross_signing_keys() -> Result {
 			.add_cross_signing_keys(user, &keys[0], &keys[1], &keys[2], false)
 			.await?;
 		users.put_device_metadata(user, false, &Device::new(device.to_owned()));
-		users.remove_device(user, device).await;
+		users.remove_device(user, device).await?;
 		assert!(!users.device_exists(user, device).await);
 		let stored = services.db["keyid_key"]
 			.qry(&(user, device))
@@ -169,6 +170,152 @@ async fn deletion_preserves_colliding_cross_signing_keys() -> Result {
 		assert_eq!(serde_json::from_slice::<serde_json::Value>(&stored)?, value);
 	}
 
+	Ok(())
+}
+
+#[tokio::test]
+async fn colliding_identity_is_not_retained_after_device_removal() -> Result {
+	let Some(fixture) = fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+	let services = &fixture.services;
+	let users = &services.users;
+	let user = user_id!("@identitycollision:localhost");
+	users
+		.create(user, Some(PASSWORD_SENTINEL), None)
+		.await?;
+	let mut failures = Vec::new();
+	for (index, (seed, usage)) in [(7_u8, "master"), (9, "self_signing"), (11, "user_signing")]
+		.into_iter()
+		.enumerate()
+	{
+		for overlap in [false, true] {
+			let seed = seed + u8::from(overlap);
+			let public_key = Base64::<Standard>::new(vec![seed; 32]).encode();
+			let device: &ruma::DeviceId = public_key.as_str().into();
+			let signing_value = json!({
+				"user_id": user, "usage": [usage],
+				"keys": {format!("ed25519:{public_key}"): &public_key},
+			});
+			let signing: Raw<CrossSigningKey> = serde_json::from_value(signing_value)?;
+			let mut signing_keys = [None, None, None];
+			signing_keys[index] = Some(signing);
+			users
+				.add_cross_signing_keys(
+					user,
+					&signing_keys[0],
+					&signing_keys[1],
+					&signing_keys[2],
+					false,
+				)
+				.await?;
+			let mut value = json!({
+				"user_id": user, "device_id": device,
+				"algorithms": ["m.olm.v1.curve25519-aes-sha2"],
+				"keys": {format!("ed25519:{device}"): &public_key},
+				"signatures": {},
+			});
+			if overlap {
+				value["usage"] = json!([usage]);
+				// Both schemas accept this object; its matching device_id must win.
+				let _: CrossSigningKey = serde_json::from_value(value.clone())?;
+			}
+			let keys: Raw<DeviceKeys> = serde_json::from_value(value.clone())?;
+			keys.deserialize()?;
+			let data = serde_json::from_value(json!({
+				"algorithm": "org.matrix.msc3814.v1.olm", "device_pickle": "encrypted-pickle",
+			}))?;
+			let request = Request::new(device.to_owned(), data, keys);
+			timeout(Duration::from_secs(5), users.set_dehydrated_device(user, request))
+				.await
+				.expect("colliding dehydrated upload did not finish")?;
+			let stored = services.db["keyid_key"]
+				.qry(&(user, device))
+				.await?;
+			let overwritten = serde_json::from_slice::<serde_json::Value>(&stored)? == value;
+			drop(stored);
+			users.remove_device(user, device).await?;
+			let metadata_removed = !users.device_exists(user, device).await;
+			let identity_retained = match users.get_device_keys(user, device).await {
+				| Ok(_) => true,
+				| Err(error) if error.is_not_found() => false,
+				| Err(error) => return Err(error),
+			};
+			users
+				.create_device(user, Some(device), (None, None), None, None, None)
+				.await?;
+			let stale_visible = match users.get_device_keys(user, device).await {
+				| Ok(visible) =>
+					users.device_exists(user, device).await
+						&& serde_json::from_str::<serde_json::Value>(visible.json().get())?
+							== value,
+				| Err(error) if error.is_not_found() => false,
+				| Err(error) => return Err(error),
+			};
+			if !overwritten || !metadata_removed || identity_retained || stale_visible {
+				failures.push((
+					usage,
+					overlap,
+					overwritten,
+					metadata_removed,
+					identity_retained,
+					stale_visible,
+				));
+			}
+		}
+	}
+	assert!(
+		failures.is_empty(),
+		"(role, overlap, overwritten, metadata removed, retained, stale after reuse): \
+		 {failures:?}"
+	);
+	Ok(())
+}
+
+#[tokio::test]
+async fn referenced_identity_cleanup_rejects_unclassifiable_rows() -> Result {
+	let Some(fixture) = fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+	let services = &fixture.services;
+	let users = &services.users;
+	let user = user_id!("@uncertain:localhost");
+	let device = device_id!("UNCERTAIN");
+	let row_key = serialize_key((user, device))?;
+	services.db["userid_selfsigningkeyid"].insert(user, &row_key);
+	let _guard = users.key_update_mutex.lock(user).await;
+
+	// A dangling pointer must not make an already-absent row fail cleanup.
+	users.remove_device_keys(user, device).await?;
+	assert!(
+		services.db["keyid_key"]
+			.qry(&(user, device))
+			.await
+			.is_err_and(|error| error.is_not_found())
+	);
+
+	let payloads: [(&str, &[u8]); 4] = [
+		("empty object", b"{}"),
+		("wrong user", br#"{"user_id":"@elsewhere:localhost","device_id":"UNCERTAIN","algorithms":[],"keys":{},"signatures":{}}"#),
+		("wrong device", br#"{"user_id":"@uncertain:localhost","device_id":"ELSEWHERE","algorithms":[],"keys":{},"signatures":{}}"#),
+		("malformed JSON", b"{"),
+	];
+	let mut failures = Vec::new();
+	for (label, payload) in payloads {
+		services.db["keyid_key"].insert(&row_key, payload);
+		let rejected = users
+			.remove_device_keys(user, device)
+			.await
+			.is_err();
+		let stored = services.db["keyid_key"]
+			.qry(&(user, device))
+			.await?;
+		let unchanged = &*stored == payload;
+		if !rejected || !unchanged {
+			failures.push((label, rejected, unchanged));
+		}
+	}
+	assert!(failures.is_empty(), "(payload, rejected, bytes preserved): {failures:?}");
 	Ok(())
 }
 
@@ -216,7 +363,7 @@ async fn dehydrated_device_replacement_cleans_identity() -> Result {
 	}
 
 	let device = previous.expect("the fixture created a dehydrated device");
-	users.remove_device(user, &device).await;
+	users.remove_device(user, &device).await?;
 	assert!(
 		users
 			.get_dehydrated_device_id(user)
@@ -273,9 +420,10 @@ async fn deletion_orders_colliding_cross_signing_updates() -> Result {
 				.is_err_and(|error| error.is_not_found())
 		);
 		drop(guard);
-		let ((), written) = timeout(Duration::from_secs(5), join(delete, write))
+		let (deleted, written) = timeout(Duration::from_secs(5), join(delete, write))
 			.await
 			.expect("cross-signing writer and deletion did not finish");
+		deleted?;
 		written?;
 		assert!(!users.device_exists(user, device).await);
 		let stored = users

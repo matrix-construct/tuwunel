@@ -15,11 +15,7 @@ use serde::Deserialize;
 use serde_json::json;
 use tuwunel_core::{
 	Err, Error, Result, err, info,
-	utils::{
-		BoolExt,
-		future::OptionFutureExt,
-		time::{now, timepoint_has_passed},
-	},
+	utils::time::{now, timepoint_has_passed},
 	warn,
 };
 use tuwunel_service::{
@@ -297,19 +293,18 @@ async fn token_refresh(services: &Services, body: &TokenRequest) -> Result<Respo
 	{
 		| RefreshToken::Current { user_id, device_id, expires_at } => {
 			if expires_at.is_some_and(timepoint_has_passed) {
-				services
-					.server
-					.config
-					.refresh_token_hard_logout
-					.then_async(|| services.users.remove_device(&user_id, &device_id))
-					.unwrap_or_else_async(async || {
-						services
-							.users
-							.remove_refresh_token(&user_id, &device_id)
-							.await
-							.ok();
-					})
-					.await;
+				if services.server.config.refresh_token_hard_logout {
+					services
+						.users
+						.remove_device(&user_id, &device_id)
+						.await?;
+				} else {
+					services
+						.users
+						.remove_refresh_token(&user_id, &device_id)
+						.await
+						.ok();
+				}
 
 				return Err!(Request(Forbidden("Refresh token has expired")));
 			}
@@ -350,7 +345,7 @@ async fn token_refresh(services: &Services, body: &TokenRequest) -> Result<Respo
 				services
 					.users
 					.remove_device(&user_id, &device_id)
-					.await;
+					.await?;
 			}
 
 			Err!(Request(Forbidden("Refresh token has already been used")))

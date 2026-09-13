@@ -11,7 +11,7 @@ use ruma::{
 };
 use serde_json::json;
 use tuwunel_core::{
-	Err, Result, at, debug_warn, implement, trace,
+	Err, Result, at, implement, trace,
 	utils::{
 		self, BoolExt, ReadyExt, random_string,
 		stream::{IterStream, TryIgnore},
@@ -76,9 +76,13 @@ fn resolve_device_id(device_id: Option<&DeviceId>) -> OwnedDeviceId {
 /// Removes a device from a user.
 #[implement(super::Service)]
 #[tracing::instrument(level = "info", skip(self))]
-pub async fn remove_device(&self, user_id: &UserId, device_id: &DeviceId) {
-	// Remove access tokens
+pub async fn remove_device(&self, user_id: &UserId, device_id: &DeviceId) -> Result {
+	// Revoke tokens even if identity cleanup cannot complete.
 	self.remove_tokens(user_id, device_id).await;
+
+	let guard = self.key_update_mutex.lock(user_id).await;
+	self.remove_device_keys(user_id, device_id)
+		.await?;
 
 	// Remove todevice events
 	self.db
@@ -123,18 +127,15 @@ pub async fn remove_device(&self, user_id: &UserId, device_id: &DeviceId) {
 		.await
 		.ok();
 
-	{
-		let _guard = self.key_update_mutex.lock(user_id).await;
-		if let Err(error) = self.remove_device_keys(user_id, device_id).await {
-			debug_warn!(?error, "Failed to remove device identity keys");
-		}
-		let userdeviceid = (user_id, device_id);
-		self.db.userdeviceid_metadata.del(userdeviceid);
-		self.db.oidcdevice_userdeviceid.del(userdeviceid);
-	};
+	let userdeviceid = (user_id, device_id);
+	self.db.userdeviceid_metadata.del(userdeviceid);
+	self.db.oidcdevice_userdeviceid.del(userdeviceid);
+	drop(guard);
 
 	self.mark_device_key_update(user_id).await;
 	increment(&self.db.userid_devicelistversion, user_id.as_bytes());
+
+	Ok(())
 }
 
 /// Returns an iterator over all device ids of this user.

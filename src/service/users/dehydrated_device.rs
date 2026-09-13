@@ -46,7 +46,7 @@ pub async fn set_dehydrated_device(&self, user_id: &UserId, request: Request) ->
 	}
 
 	if let Ok(existing_id) = existing_id {
-		self.remove_device(user_id, &existing_id).await;
+		self.remove_device(user_id, &existing_id).await?;
 	}
 
 	let device_id = self

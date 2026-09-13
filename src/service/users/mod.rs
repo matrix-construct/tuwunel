@@ -184,10 +184,11 @@ impl Service {
 			.revoke_user_tokens(user_id)
 			.await;
 
-		// Remove all associated devices
+		// Attempt every device before reporting a cleanup failure.
 		self.all_device_ids(user_id)
-			.for_each(|device_id| self.remove_device(user_id, device_id))
-			.await;
+			.then(|device_id| self.remove_device(user_id, device_id))
+			.ready_fold(Ok(()), Result::and)
+			.await?;
 
 		// Set the password to "" to indicate a deactivated account. Hashes will never
 		// result in an empty string, so the user will not be able to log in again.

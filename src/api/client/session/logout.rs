@@ -1,7 +1,7 @@
 use axum::extract::State;
 use futures::StreamExt;
 use ruma::api::client::session::{logout, logout_all};
-use tuwunel_core::Result;
+use tuwunel_core::{Result, utils::ReadyExt};
 
 use crate::{ClientIp, Ruma};
 
@@ -23,7 +23,7 @@ pub(crate) async fn logout_route(
 	services
 		.users
 		.remove_device(body.sender_user(), body.sender_device()?)
-		.await;
+		.await?;
 
 	Ok(logout::v3::Response::new())
 }
@@ -50,12 +50,13 @@ pub(crate) async fn logout_all_route(
 	services
 		.users
 		.all_device_ids(body.sender_user())
-		.for_each(|device_id| {
+		.then(|device_id| {
 			services
 				.users
 				.remove_device(body.sender_user(), device_id)
 		})
-		.await;
+		.ready_fold(Ok(()), Result::and)
+		.await?;
 
 	Ok(logout_all::v3::Response::new())
 }

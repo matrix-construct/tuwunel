@@ -443,7 +443,7 @@ pub async fn add_device_keys(
 }
 
 /// The caller holds the user's key update lock. Cross-signing keys share this
-/// namespace, so a colliding device ID must not remove a referenced row.
+/// namespace, so preserve actual signing material, not just referenced rows.
 #[implement(super::Service)]
 pub(super) async fn remove_device_keys(&self, user_id: &UserId, device_id: &DeviceId) -> Result {
 	let key = (user_id, device_id);
@@ -455,9 +455,35 @@ pub(super) async fn remove_device_keys(&self, user_id: &UserId, device_id: &Devi
 	)
 	.await?;
 
-	if !root && !self_signing && !user_signing {
-		self.db.keyid_key.del(key);
+	if root || self_signing || user_signing {
+		let value = match self.db.keyid_key.qry(&key).await {
+			| Ok(row) => row
+				.deserialized::<serde_json::Value>()
+				.map_err(|e| err!(Database(debug_warn!("key in keyid_key is invalid: {e:?}"))))?,
+			| Err(error) if error.is_not_found() => return Ok(()),
+			| Err(error) => return Err(error),
+		};
+
+		// An identity upload can overwrite a signing row without changing its
+		// pointer. A matching device identity must still be removed in that case.
+		if !key_matches_role(&value, user_id, device_id.as_str(), KeyRole::Device) {
+			let signing = [
+				(root, KeyRole::CrossSigningRoot),
+				(self_signing, KeyRole::SelfSigning),
+				(user_signing, KeyRole::UserSigning),
+			]
+			.into_iter()
+			.any(|(referenced, role)| {
+				referenced && key_matches_role(&value, user_id, device_id.as_str(), role)
+			});
+			if !signing {
+				return Err!(Database("Referenced key does not match a device or signing key"));
+			}
+			return Ok(());
+		}
 	}
+
+	self.db.keyid_key.del(key);
 
 	Ok(())
 }
