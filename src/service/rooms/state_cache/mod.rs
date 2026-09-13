@@ -7,7 +7,7 @@ use std::{
 	sync::{Arc, RwLock},
 };
 
-use futures::{Stream, StreamExt, future::join5, pin_mut};
+use futures::{Stream, StreamExt, TryStreamExt, future::join5, pin_mut};
 use ruma::{
 	OwnedRoomId, OwnedServerName, RoomId, ServerName, UserId,
 	events::{AnyStrippedStateEvent, AnySyncStateEvent, room::member::MembershipState},
@@ -490,6 +490,25 @@ pub fn rooms_joined<'a>(
 		.keys_raw_prefix(user_id)
 		.ignore_err()
 		.map(|(_, room_id): (Ignore, &RoomId)| room_id)
+}
+
+/// Streams joined rooms within the user's exact encoded prefix.
+///
+/// Storage and room-key decoding failures are surfaced as error items rather
+/// than dropped. Room IDs borrow the cursor and must be consumed or owned
+/// before advancing it.
+#[implement(Service)]
+#[tracing::instrument(skip(self), level = "trace")]
+pub fn rooms_joined_checked<'a>(
+	&'a self,
+	user_id: &'a UserId,
+) -> impl Stream<Item = Result<&'a RoomId>> + Send + 'a {
+	let prefix = (user_id, Interfix);
+
+	self.db
+		.userroomid_joinedcount
+		.keys_prefix(&prefix)
+		.map_ok(|(_, room_id): (Ignore, &RoomId)| room_id)
 }
 
 /// Returns an iterator over all rooms a user was invited to.

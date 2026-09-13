@@ -1,3 +1,6 @@
+#[path = "tests/publication.rs"]
+mod publication;
+
 use ruma::{api::error::ErrorKind, room_id, user_id};
 use serde_json::json;
 use tuwunel_core::{Error, http::StatusCode};

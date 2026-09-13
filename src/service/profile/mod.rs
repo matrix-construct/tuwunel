@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests;
 
-use std::{collections::BTreeMap, mem::replace, sync::Arc};
+use std::{borrow::Cow, collections::BTreeMap, iter::once, mem::replace, sync::Arc};
 
 use futures::{Stream, StreamExt, TryStreamExt, future::join};
 use ruma::{
@@ -20,11 +20,11 @@ use tuwunel_core::{
 		MutexMap, ReadyExt,
 		future::TryExtExt,
 		result::NotFound,
-		stream::{IterStream, TryIgnore, automatic_width},
+		stream::{IterStream, TryIgnore, TryReadyExt, automatic_width},
 	},
 	warn,
 };
-use tuwunel_database::{Deserialized, Ignore, Interfix, Json, KeyVal, Map};
+use tuwunel_database::{Deserialized, Ignore, Interfix, Json, KeyVal, Map, Txn};
 
 pub struct Service {
 	mutex: MutexMap<OwnedUserId, ()>,
@@ -71,6 +71,9 @@ type ChangedFields<'a> = SmallVec<[&'a str; 1]>;
 /// A profile commonly holds only the two canonical fields, which sizes the
 /// inline budget.
 type ClearedFields = SmallVec<[ProfileFieldName; 2]>;
+
+/// The stored profile as it would read after one candidate field is written.
+type ProspectiveProfile<'a> = BTreeMap<ProfileFieldName, Cow<'a, Value>>;
 
 /// MSC4426 maximum `m.status` text length, in bytes.
 const MAX_STATUS_TEXT_LENGTH: usize = 256;
@@ -340,21 +343,34 @@ pub async fn timezone(&self, user_id: &UserId) -> Result<String> {
 		.await
 }
 
-/// Gets all the user's profile keys and values in an iterator
+/// Streams every stored profile field.
+///
+/// A field whose stored value no longer parses is dropped; `try_all_profile_keys`
+/// surfaces it instead.
 #[implement(Service)]
 pub fn all_profile_keys(&self, user_id: &UserId) -> impl Stream<Item = ProfileFieldValue> + Send {
+	self.try_all_profile_keys(user_id).ignore_err()
+}
+
+/// Streams every stored profile field, surfacing storage and decoding errors.
+///
+/// A stored value that no longer parses as a profile field is an error item
+/// rather than a dropped one, so a caller validating the whole profile can
+/// refuse to proceed on it.
+#[implement(Service)]
+pub fn try_all_profile_keys(
+	&self,
+	user_id: &UserId,
+) -> impl Stream<Item = Result<ProfileFieldValue>> + Send {
 	let prefix = (user_id, Interfix);
+
 	self.useridprofilekey_value
 		.stream_prefix(&prefix)
-		.ignore_err()
-		.map(move |((_, key), Json(val)): ((Ignore, _), _)| {
+		.ready_and_then(move |((_, key), Json(val)): ((Ignore, &str), Json<Value>)| {
 			ProfileFieldValue::new(key, val).map_err(|_| {
-				err!(Database(
-					error!(%user_id, %key, "Invalid json in database profile value while iterating")
-				))
+				err!(Database(error!(%user_id, %key, "Invalid json in database profile value")))
 			})
 		})
-		.ignore_err()
 }
 
 /// Streams the names of the fields a user's profile holds.
@@ -376,9 +392,9 @@ pub fn profile_field_names(
 
 /// Clears every stored profile field and propagates canonical removals.
 ///
-/// The removal is serialized with profile writes. Every joined room's member
-/// event drops the canonical fields, then each stored field is deleted and
-/// recorded in the profile change log.
+/// Member events are rewritten only for a local user, before the removals and
+/// their change rows commit together under the profile lock. A preparation
+/// error leaves storage unchanged but does not undo emitted member events.
 #[implement(Service)]
 pub async fn clear_profile_keys(&self, user_id: &UserId) -> Result {
 	let _profile_lock = self.mutex.lock(user_id).await;
@@ -391,24 +407,37 @@ pub async fn clear_profile_keys(&self, user_id: &UserId) -> Result {
 		.try_collect()
 		.await?;
 
-	self.update_all_rooms(
-		user_id,
-		&[(ProfileFieldName::DisplayName, None), (ProfileFieldName::AvatarUrl, None)],
-		Propagation::All,
-	)
-	.await;
-
-	for field in &fields {
-		self.useridprofilekey_value
-			.del((user_id, field.as_str()));
+	if self.services.globals.user_is_local(user_id) {
+		self.update_all_rooms(
+			user_id,
+			&[(ProfileFieldName::DisplayName, None), (ProfileFieldName::AvatarUrl, None)],
+			Propagation::All,
+		)
+		.await;
 	}
 
-	self.mark_profile_update(user_id, &fields).await;
+	let txn = fields
+		.iter()
+		.fold(self.services.db.txn(), |mut txn, field| {
+			txn.del(&self.useridprofilekey_value, (user_id, field.as_str()));
+			txn
+		});
 
-	Ok(())
+	let rooms = || {
+		self.services
+			.state_cache
+			.rooms_joined_checked(user_id)
+	};
+
+	self.publish_update(user_id, &fields, txn, rooms)
+		.await
 }
 
-/// Sets new profile key values, removes the key if value is None
+/// Sets profile field values, removing a field whose value is `None`.
+///
+/// Member events are rewritten first, then the stored fields and their change
+/// rows commit together under the profile lock. A preparation error leaves
+/// storage unchanged but does not undo emitted member events.
 #[implement(Service)]
 pub async fn set_profile_keys(
 	&self,
@@ -451,19 +480,28 @@ pub async fn set_profile_keys(
 			.await;
 	}
 
-	for (name, value) in profile_values {
-		let key = (user_id, name.as_str());
+	let txn = profile_values
+		.iter()
+		.fold(self.services.db.txn(), |mut txn, (name, value)| {
+			let key = (user_id, name.as_str());
 
-		if let Some(value) = value {
-			self.useridprofilekey_value.put(key, Json(value));
-		} else {
-			self.useridprofilekey_value.del(key);
-		}
-	}
+			if let Some(value) = value {
+				txn.put(&self.useridprofilekey_value, key, Json(value));
+			} else {
+				txn.del(&self.useridprofilekey_value, key);
+			}
 
-	self.mark_profile_update(user_id, &changed).await;
+			txn
+		});
 
-	Ok(())
+	let rooms = || {
+		self.services
+			.state_cache
+			.rooms_joined_checked(user_id)
+	};
+
+	self.publish_update(user_id, &changed, txn, rooms)
+		.await
 }
 
 /// Names the fields whose stored value the write would actually change.
@@ -495,14 +533,13 @@ async fn changed_fields<'a>(
 		.await
 }
 
-/// Records a profile write under the user's own prefix and under every room
-/// they are joined to.
+/// Commits staged profile fields together with a change row per field under
+/// the user's own prefix and under every room they are joined to.
 ///
-/// The key names the changed field and not only the user because a removal is
+/// The row names the changed field and not only the user because a removal is
 /// otherwise unreportable: a reader re-reading the live profile cannot tell a
-/// cleared field from one that was never set. Remote users are logged too, but
-/// only as fresh as the on-demand fetch that replaced their stored fields,
-/// since nothing pushes a remote profile change to us.
+/// cleared field from one that was never set. A room scan error discards the
+/// whole batch, so no row for that count is ever visible.
 #[implement(Service)]
 #[tracing::instrument(
 	name = "profile_update",
@@ -512,31 +549,51 @@ async fn changed_fields<'a>(
 		%user_id,
 	),
 )]
-async fn mark_profile_update<T>(&self, user_id: &UserId, changed: &[T])
+async fn publish_update<'a, T, S>(
+	&self,
+	user_id: &UserId,
+	changed: &[T],
+	txn: Txn,
+	rooms: impl FnOnce() -> S + Send,
+) -> Result
 where
 	T: AsRef<str> + Sync,
+	S: Stream<Item = Result<&'a RoomId>> + Send,
 {
 	if changed.is_empty() {
-		return;
+		txn.execute();
+		return Ok(());
 	}
 
 	let count = self.services.globals.next_count();
-
-	for name in changed {
-		self.profilechangeid_userid
-			.put_raw((user_id, *count, name.as_ref()), user_id);
-	}
-
-	self.services
-		.state_cache
-		.rooms_joined(user_id)
-		.ready_for_each(|room_id| {
-			for name in changed {
-				self.profilechangeid_userid
-					.put_raw((room_id, *count, name.as_ref()), user_id);
-			}
+	let txn = self.stage_update(txn, user_id.as_str(), user_id, *count, changed);
+	let txn = rooms()
+		.ready_try_fold(txn, |txn, room_id| {
+			Ok(self.stage_update(txn, room_id.as_str(), user_id, *count, changed))
 		})
-		.await;
+		.await?;
+
+	txn.execute();
+
+	Ok(())
+}
+
+#[implement(Service)]
+fn stage_update<T>(
+	&self,
+	txn: Txn,
+	scope: &str,
+	user_id: &UserId,
+	count: u64,
+	changed: &[T],
+) -> Txn
+where
+	T: AsRef<str>,
+{
+	changed.iter().fold(txn, |mut txn, name| {
+		txn.put_raw(&self.profilechangeid_userid, (scope, count, name.as_ref()), user_id);
+		txn
+	})
 }
 
 /// Streams the profile fields the user changed themselves.
@@ -665,22 +722,25 @@ pub async fn fetch_remote_profile(&self, user_id: &UserId) -> Result {
 /// full profile including displayname and avatar_url.
 pub(super) const MAX_PROFILE_SIZE: usize = 65_536;
 
-/// MSC4133: reject a prospective profile write that would push the full
-/// profile over the 64 KiB cap. `value` is what `key` will hold after the
-/// write; a removal cannot grow the profile, so callers skip it.
+/// Reject a prospective profile write exceeding the MSC4133 64 KiB cap.
+///
+/// The candidate value replaces the stored field for the size calculation. A
+/// stored field that no longer parses is logged and left out of the total, so
+/// it cannot block writes to the other fields; removals skip this check.
 #[implement(Service)]
 async fn enforce_profile_size(&self, user_id: &UserId, key: &str, value: &Value) -> Result {
-	let mut profile: BTreeMap<_, _> = self
-		.all_profile_keys(user_id)
-		.map(|profile_value| {
-			(
-				profile_value.field_name().as_str().to_owned(),
-				profile_value.value().into_owned(),
-			)
+	let replacement = once((ProfileFieldName::from(key), Cow::Borrowed(value))).stream();
+	let profile: ProspectiveProfile<'_> = self
+		.try_all_profile_keys(user_id)
+		.ready_filter_map(|field| {
+			field
+				.inspect_err(|e| warn!(%user_id, %e, "Skipping unreadable profile field"))
+				.ok()
 		})
+		.map(|field| (field.field_name(), Cow::Owned(field.value().into_owned())))
+		.chain(replacement)
 		.collect()
 		.await;
-	profile.insert(key.to_owned(), value.clone());
 
 	let profile_size = serde_json::to_vec(&profile).map_or(0, |buf| buf.len());
 
