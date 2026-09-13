@@ -2,10 +2,7 @@ use axum::extract::State;
 use futures::{FutureExt, StreamExt, TryFutureExt, future::join3};
 use ruma::{
 	OwnedServerName, RoomId, UserId,
-	api::{
-		client::room::get_summary,
-		federation::space::{SpaceHierarchyParentSummary, get_hierarchy},
-	},
+	api::{client::room::get_summary, federation::space::get_hierarchy},
 	events::room::member::MembershipState,
 	room::{JoinRuleSummary, RoomSummary},
 };
@@ -85,9 +82,8 @@ async fn room_summary_response(
 			.await;
 	}
 
-	let summary = remote_room_summary_hierarchy_response(services, room_id, servers, sender_user)
-		.await?
-		.summary;
+	let summary =
+		remote_room_summary_hierarchy_response(services, room_id, servers, sender_user).await?;
 
 	Ok(get_summary::v1::Response {
 		summary,
@@ -214,7 +210,7 @@ async fn remote_room_summary_hierarchy_response(
 	room_id: &RoomId,
 	servers: &[OwnedServerName],
 	sender_user: Option<&UserId>,
-) -> Result<SpaceHierarchyParentSummary> {
+) -> Result<RoomSummary> {
 	trace!(?sender_user, ?servers, "Sending remote room summary response for {room_id:?}");
 	if !services.config.allow_federation {
 		return Err!(Request(Forbidden("Federation is disabled.")));
@@ -289,7 +285,7 @@ async fn remote_room_summary_hierarchy_response(
 		sender_user,
 	)
 	.await
-	.map(|()| room)
+	.map(|()| room.summary)
 }
 
 async fn user_can_see_summary<'a, I>(
