@@ -41,7 +41,7 @@ pub async fn claim_keys(
 		return ClaimedKeys::new();
 	}
 
-	self.registrations_for_user(user_id, RegistrationInfo::is_user_match)
+	self.registrations_for_user(user_id, RegistrationInfo::is_keys_claims_match)
 		.await
 		.into_iter()
 		.stream()

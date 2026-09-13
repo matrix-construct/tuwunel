@@ -1279,9 +1279,10 @@ pub struct Config {
 
 	/// Sends MSC3983 one-time key claims to appservices.
 	///
-	/// An appservice that does not serve the claim route answers every
-	/// attempt with an error. Disable this when none of the deployment's
-	/// appservices serve it.
+	/// Each appservice also opts in with `keys_claims: true` in its own
+	/// registration (the default is false). An appservice that does not serve
+	/// the claim route answers every attempt with an error, and disabling this
+	/// stops the claims for every registration at once.
 	/// reloadable: yes
 	#[serde(default = "true_fn")]
 	pub appservice_keys_claims: bool,
@@ -5198,6 +5199,15 @@ pub struct AppService {
 	/// default: false
 	#[serde(default)]
 	pub msc3202_transaction_extensions: bool,
+
+	/// Whether the application service serves MSC3983 one-time key claims.
+	///
+	/// The server forwards a claim for one of the application service's users
+	/// only when this is set and the global `appservice_keys_claims` is on.
+	///
+	/// default: false
+	#[serde(default)]
+	pub keys_claims: bool,
 }
 
 impl From<AppService> for ruma::api::appservice::Registration {
@@ -5216,6 +5226,7 @@ impl From<AppService> for ruma::api::appservice::Registration {
 			receive_ephemeral: conf.receive_ephemeral,
 			device_management: conf.device_management,
 			msc3202_transaction_extensions: conf.msc3202_transaction_extensions,
+			keys_claims: conf.keys_claims,
 			protocols: conf.protocols.into(),
 			rate_limited: conf.rate_limited.into(),
 			sender_localpart,

@@ -29,6 +29,17 @@ impl RegistrationInfo {
 		})
 	}
 
+	/// MSC3983: the registration opted into key claims and matches the user.
+	///
+	/// Both the registration's `keys_claims` flag and the MSC3905 user match
+	/// are required. The global `appservice_keys_claims` knob is the caller's
+	/// check.
+	#[inline]
+	#[must_use]
+	pub fn is_keys_claims_match(&self, user_id: &UserId) -> bool {
+		self.registration.keys_claims && self.is_user_match(user_id)
+	}
+
 	/// MSC3905: the `users` regex matches local users only.
 	#[inline]
 	#[must_use]

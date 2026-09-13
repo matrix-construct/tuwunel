@@ -29,14 +29,14 @@
 
 | ✅ `yes` | 🟨 `part` | ❌ `no` | ⬛ `n/a` | total |
 |---:|---:|---:|---:|---:|
-| 255 | 55 | 435 | 330 | 1075 |
+| 254 | 56 | 435 | 330 | 1075 |
 
 ### Status by inventory bucket
 
 | Inv | yes | part | no | n/a | total |
 |---|---|---|---|---|---|
 | merged | 182 | 15 | 12 | 60 | 269 |
-| open | 42 | 28 | 336 | 198 | 604 |
+| open | 41 | 29 | 336 | 198 | 604 |
 | closed | 31 | 12 | 87 | 72 | 202 |
 
 ## Merged
@@ -539,7 +539,7 @@ in the [Out of scope](#out-of-scope) section.
 | MSC3993 | ❌ ● | 0/0 | Room takeover | room takeover variants not implemented |
 | MSC3991 | ❌ ● | 0/0 | Power level up! Taking the room to new heights | raise own power level above max not allowed |
 | MSC3984 | ✅ ● | 80/90 | Sending key queries to appservices | src/api/client/keys/get_keys.rs:178 appservice device overlay; no cross-signi... |
-| MSC3983 | ✅ ● | 90/100 | Sending One-Time Key (OTK) claims to appservices | src/api/client/keys/claim_keys.rs:92 local OTK, appservice, fallback; interes... |
+| MSC3983 | 🟨 ● | 70/70 | Sending One-Time Key (OTK) claims to appservices | claim proxy behind registration keys_claims, default off; local OTK, fallback |
 | MSC3982 | ❌ ● | 0/0 | Limit maximum number of events sent to an AS | no 100-event cap on appservice transactions |
 | MSC3964 | ❌ ● | 0/0 | Notifications for room tags | room_tag push condition not implemented |
 | MSC3963 | ❌ ● | 0/0 | Oblivious Matrix over HTTPS | Oblivious MoH endpoints absent |

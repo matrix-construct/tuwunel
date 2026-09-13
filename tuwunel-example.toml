@@ -1007,9 +1007,10 @@
 
 # Sends MSC3983 one-time key claims to appservices.
 #
-# An appservice that does not serve the claim route answers every
-# attempt with an error. Disable this when none of the deployment's
-# appservices serve it.
+# Each appservice also opts in with `keys_claims: true` in its own
+# registration (the default is false). An appservice that does not serve
+# the claim route answers every attempt with an error, and disabling this
+# stops the claims for every registration at once.
 # reloadable: yes
 #
 #appservice_keys_claims = true
@@ -4276,6 +4277,13 @@
 # key is `msc3202_transaction_extensions`.
 #
 #msc3202_transaction_extensions = false
+
+# Whether the application service serves MSC3983 one-time key claims.
+#
+# The server forwards a claim for one of the application service's users
+# only when this is set and the global `appservice_keys_claims` is on.
+#
+#keys_claims = false
 
 
 
