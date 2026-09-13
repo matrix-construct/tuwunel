@@ -35,8 +35,8 @@
 
 | Inv | yes | part | no | n/a | total |
 |---|---|---|---|---|---|
-| merged | 182 | 15 | 11 | 60 | 268 |
-| open | 42 | 28 | 337 | 198 | 605 |
+| merged | 182 | 15 | 12 | 60 | 269 |
+| open | 42 | 28 | 336 | 198 | 604 |
 | closed | 31 | 12 | 87 | 72 | 202 |
 
 ## Merged
@@ -86,6 +86,7 @@ in the [Out of scope](#out-of-scope) section.
 | MSC4163 | ✅ ● | 100/100 | Make ACLs apply to EDUs | ACLs applied on receipt and typing EDUs |
 | MSC4156 | ✅ ● | 100/100 | Migrate `server_name` to `via` | via parameter handled via Ruma |
 | MSC4151 | ✅ ● | 100/100 | Reporting rooms (Client-Server API) | POST /rooms/{roomId}/report implemented and routed |
+| MSC4140 | ❌ ● | 0/0 | Cancellable delayed events | No delayed_event routes, no m.delayed_events capability, no delay_id anywhere |
 | MSC4138 | ✅ ● | 100/100 | Update allowed HTTP methods in CORS responses | CORS METHODS list includes HEAD and PATCH; excludes CONNECT/TRACE |
 | MSC4133 | ✅ ● | 90/100 | Extending User Profile API with Custom Key:Value Pairs | endpoints + caps/errcodes; unset legacy 200 omit by choice, 404 key-scoped |
 | MSC4127 | ❌ ● | 0/0 | Removal of query string auth | src/api/router/auth.rs:78 still falls back to request.query.access_token |
@@ -287,6 +288,7 @@ for spec compliance.
 | MSC3288 | ❌ ● | 0/0 | 1.2 | Add room type to `/_matrix/identity/v2/store-invite` API | sole clause is addressed to homeservers, so not n/a; no 3PID invite at all |
 | MSC3550 | ❌ ◐ | 0/0 | 1.2 | Add HTTP 403 to possible profile lookup responses | CS /profile returns 403 M_FORBIDDEN when outbound profile lookup disabled |
 | MSC4127 | ❌ ● | 0/0 |  | Removal of query string auth | src/api/router/auth.rs:78 still falls back to request.query.access_token |
+| MSC4140 | ❌ ● | 0/0 |  | Cancellable delayed events | No delayed_event routes, no m.delayed_events capability, no delay_id anywhere |
 | MSC4183 | ❌ ● | 0/0 | 1.18 | Additional Error Codes for submitToken endpoints | mixed MSC; the submit_url half is homeserver scope and we emit no submit_url |
 | MSC4335 | ❌ ● | 0/0 | 1.18 | M_USER_LIMIT_EXCEEDED error code | M_USER_LIMIT_EXCEEDED error code not used |
 
@@ -471,7 +473,6 @@ in the [Out of scope](#out-of-scope) section.
 | MSC4145 | ❌ ● | 0/0 | Simple verified accounts | m.verified profile field and endpoint not implemented |
 | MSC4143 | 🟨 ◐ | 60/60 | MatrixRTC | GET rtc/transports served; slots and sticky membership are client and MSC4354 |
 | MSC4141 | ❌ ● | 0/0 | Time based notification filtering | time_and_day push rule condition not supported |
-| MSC4140 | ❌ ● | 0/0 | Cancellable delayed events | No delayed_event routes, no m.delayed_events capability, no delay_id anywhere |
 | MSC4136 | ❌ ● | 0/0 | Shared retry hints between servers | retry_hints in /send_join response not implemented |
 | MSC4128 | ✅ ● | 100/100 | Error on invalid auth where it is optional | invalid token returns error even on optional auth endpoints |
 | MSC4125 | ✅ ● | 90/100 | Specify servers to join via for federated invites | federation invite via field used both inbound and outbound |
@@ -1185,3 +1186,4 @@ place of the (uniformly empty) `Impl` cell.
 | MSC971 | ⬛ ● | closed | Add groups stuff to spec | [→ MSC1772] groups stuff superseded by Spaces (MSC1772); proposal is doc link... |
 | MSC701 | ⬛ ◐ | open | Auth/linking for content repo (and enforcing GDPR erasure) | legacy 2016 issue tracked via redirect; auth/linking for content repo address... |
 | MSC455 | ⬛ ● | closed | Do we want to specify a matrix:// URI scheme for rooms? (SPEC-5) | [→ MSC2312] stub Google doc; matrix:// URI scheme superseded by matrix: URI (... |
+
