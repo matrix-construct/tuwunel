@@ -11,7 +11,7 @@ use ruma::{
 };
 use serde_json::json;
 use tuwunel_core::{
-	Err, Result, at, implement, trace,
+	Err, Result, at, debug_warn, implement, trace,
 	utils::{
 		self, BoolExt, ReadyExt, random_string,
 		stream::{IterStream, TryIgnore},
@@ -123,9 +123,15 @@ pub async fn remove_device(&self, user_id: &UserId, device_id: &DeviceId) {
 		.await
 		.ok();
 
-	let userdeviceid = (user_id, device_id);
-	self.db.userdeviceid_metadata.del(userdeviceid);
-	self.db.oidcdevice_userdeviceid.del(userdeviceid);
+	{
+		let _guard = self.key_update_mutex.lock(user_id).await;
+		if let Err(error) = self.remove_device_keys(user_id, device_id).await {
+			debug_warn!(?error, "Failed to remove device identity keys");
+		}
+		let userdeviceid = (user_id, device_id);
+		self.db.userdeviceid_metadata.del(userdeviceid);
+		self.db.oidcdevice_userdeviceid.del(userdeviceid);
+	};
 
 	self.mark_device_key_update(user_id).await;
 	increment(&self.db.userid_devicelistversion, user_id.as_bytes());

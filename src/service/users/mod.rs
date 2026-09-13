@@ -1,6 +1,8 @@
 mod create;
 mod dehydrated_device;
 pub mod device;
+#[cfg(test)]
+mod device_key_tests;
 mod invite_filter;
 mod keys;
 mod ldap;
@@ -23,7 +25,9 @@ use tuwunel_core::{
 	Err, Result, debug_warn, err, is_equal_to,
 	matrix::pdu::PduCount,
 	trace,
-	utils::{self, BoolExt, ReadyExt, hash::password as hash_password, stream::TryIgnore},
+	utils::{
+		self, BoolExt, MutexMap, ReadyExt, hash::password as hash_password, stream::TryIgnore,
+	},
 };
 use tuwunel_database::{Deserialized, Json, Map};
 
@@ -47,6 +51,7 @@ pub struct Moderation {
 pub struct Service {
 	services: Arc<crate::services::OnceServices>,
 	db: Data,
+	key_update_mutex: MutexMap<OwnedUserId, ()>,
 }
 
 struct Data {
@@ -84,6 +89,7 @@ impl crate::Service for Service {
 	fn build(args: &crate::Args<'_>) -> Result<Arc<Self>> {
 		Ok(Arc::new(Self {
 			services: args.services.clone(),
+			key_update_mutex: MutexMap::new(),
 			db: Data {
 				keychangeid_userid: args.db["keychangeid_userid"].clone(),
 				keyid_key: args.db["keyid_key"].clone(),
