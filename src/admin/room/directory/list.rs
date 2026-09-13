@@ -1,24 +1,21 @@
 use futures::StreamExt;
-use tuwunel_core::Result;
+use tuwunel_core::{Result, itertools::Itertools};
 
 use crate::{PAGE_SIZE, admin_command, get_room_info};
 
 #[admin_command]
 pub(super) async fn directory_list(&self, page: Option<usize>) -> Result {
 	let page = page.unwrap_or(1);
-	let mut rooms: Vec<_> = self
+	let rooms: Vec<_> = self
 		.services
 		.directory
 		.public_rooms()
 		.then(|room_id| get_room_info(self.services, room_id))
-		.collect()
-		.await;
-
-	rooms.sort_by_key(|r| r.1);
-	rooms.reverse();
-
-	let rooms: Vec<_> = rooms
+		.collect::<Vec<_>>()
+		.await
 		.into_iter()
+		.sorted_by_key(|r| r.1)
+		.rev()
 		.skip(page.saturating_sub(1).saturating_mul(PAGE_SIZE))
 		.take(PAGE_SIZE)
 		.collect();

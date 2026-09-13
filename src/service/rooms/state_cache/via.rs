@@ -22,15 +22,16 @@ pub(crate) async fn add_servers_invite_via(
 	room_id: &RoomId,
 	servers: Vec<OwnedServerName>,
 ) {
-	let mut servers: Vec<_> = self
+	let servers = self
 		.servers_invite_via(room_id)
 		.map(ToOwned::to_owned)
 		.chain(iter(servers.into_iter()))
-		.collect()
-		.await;
-
-	servers.sort_unstable();
-	servers.dedup();
+		.collect::<Vec<_>>()
+		.await
+		.into_iter()
+		.sorted_unstable()
+		.dedup()
+		.collect_vec();
 
 	let servers = servers
 		.iter()

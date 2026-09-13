@@ -21,6 +21,7 @@ use ruma::{
 use serde_json::{Value as JsonValue, json, value::to_raw_value};
 use tuwunel_core::{
 	Err, Result, debug_info, err, error, implement, info, is_equal_to, is_less_than,
+	itertools::Itertools,
 	matrix::{Event, StateKey, pdu::PduBuilder, room_version},
 	utils::{
 		ReadyExt,
@@ -204,7 +205,7 @@ async fn upgrade_room_create(
 	new_version: &RoomVersionId,
 	version_rules: &RoomVersionRules,
 	predecessor: PreviousRoom,
-	mut additional_creators: Vec<OwnedUserId>,
+	additional_creators: Vec<OwnedUserId>,
 ) -> Result<(OwnedRoomId, RoomMutexGuard)> {
 	// Get the old room creation event
 	let mut content: CanonicalJsonObject = services
@@ -224,8 +225,12 @@ async fn upgrade_room_create(
 		.authorization
 		.additional_room_creators
 	{
-		additional_creators.sort();
-		additional_creators.dedup();
+		let additional_creators = additional_creators
+			.into_iter()
+			.sorted()
+			.dedup()
+			.collect_vec();
+
 		content.remove("additional_creators");
 		if !additional_creators.is_empty() {
 			content.insert("additional_creators".into(), json!(additional_creators).try_into()?);

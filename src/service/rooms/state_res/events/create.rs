@@ -7,7 +7,11 @@ use ruma::{
 	serde::from_raw_json_value,
 };
 use serde::{Deserialize, de::IgnoredAny};
-use tuwunel_core::{Error, Result, err, matrix::Event};
+use tuwunel_core::{
+	Error, Result, err,
+	itertools::{Either, Itertools},
+	matrix::Event,
+};
 
 /// A helper type for an [`Event`] of type `m.room.create`.
 ///
@@ -112,16 +116,20 @@ impl<E: Event> RoomCreateEvent<E> {
 		}
 
 		Ok(if rules.additional_room_creators {
-			let mut content: RoomCreateContentAdditionalCreators =
+			let content: RoomCreateContentAdditionalCreators =
 				from_raw_json_value(self.content()).map_err(|err: serde_json::Error| {
 					err!("invalid `additional_creators` field in `m.room.create` event: {err}")
 				})?;
 
-			content.additional_creators.sort();
-			content.additional_creators.dedup();
-			content.additional_creators.into_iter()
+			Either::Left(
+				content
+					.additional_creators
+					.into_iter()
+					.sorted()
+					.dedup(),
+			)
 		} else {
-			Vec::new().into_iter()
+			Either::Right(Vec::new().into_iter())
 		})
 	}
 

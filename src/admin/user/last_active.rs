@@ -1,9 +1,10 @@
-use std::cmp;
+use std::cmp::{self, Reverse};
 
 use futures::{FutureExt, StreamExt, TryStreamExt};
 use ruma::{MilliSecondsSinceUnixEpoch, uint};
 use tuwunel_core::{
 	Result,
+	itertools::Itertools,
 	utils::{ReadyExt, stream::IterStream},
 };
 
@@ -30,11 +31,8 @@ pub(super) async fn last_active(&self, limit: Option<usize>) -> Result {
 		})
 		.ready_filter(|(ts, ..)| ts.get() > uint!(0))
 		.collect::<Vec<_>>()
-		.map(|mut vec| {
-			vec.sort_by_key(|k| cmp::Reverse(k.0));
-			vec
-		})
-		.map(Vec::into_iter)
+		.map(IntoIterator::into_iter)
+		.map(|iter| iter.sorted_by_key(|k| Reverse(k.0)))
 		.map(IterStream::try_stream)
 		.flatten_stream()
 		.take(limit.unwrap_or(48))

@@ -1,5 +1,5 @@
 use futures::StreamExt;
-use tuwunel_core::{Err, Result};
+use tuwunel_core::{Err, Result, itertools::Itertools};
 
 use crate::{PAGE_SIZE, admin_command, get_room_info};
 
@@ -13,7 +13,7 @@ pub(super) async fn room_list(
 ) -> Result {
 	// TODO: i know there's a way to do this with clap, but i can't seem to find it
 	let page = page.unwrap_or(1);
-	let mut rooms = self
+	let rooms = self
 		.services
 		.metadata
 		.iter_ids()
@@ -27,13 +27,10 @@ pub(super) async fn room_list(
 		})
 		.then(|room_id| get_room_info(self.services, room_id))
 		.collect::<Vec<_>>()
-		.await;
-
-	rooms.sort_by_key(|r| r.1);
-	rooms.reverse();
-
-	let rooms = rooms
+		.await
 		.into_iter()
+		.sorted_by_key(|r| r.1)
+		.rev()
 		.skip(page.saturating_sub(1).saturating_mul(PAGE_SIZE))
 		.take(PAGE_SIZE)
 		.collect::<Vec<_>>();

@@ -12,6 +12,7 @@ use ruma::{OwnedUserId, UserId};
 use serde::{Deserialize, Serialize};
 use tuwunel_core::{
 	Err, Result, at, implement,
+	itertools::Itertools,
 	result::NotFound,
 	utils::{
 		MutexMap,
@@ -291,16 +292,15 @@ async fn put_locked(&self, session: &Session, unique_id: Option<&str>) {
 
 	let user_sessions = async {
 		let user_id = session.user_id.as_deref()?;
-		let sess_ids = self
+		let sess_ids: Vec<_> = self
 			.get_sess_id_by_user(user_id)
 			.ready_filter_map(Result::ok)
 			.chain(once(sess_id.to_owned()).stream())
 			.collect::<Vec<_>>()
-			.map(|mut ids| {
-				ids.sort_unstable();
-				ids.dedup();
-				ids
-			})
+			.map(IntoIterator::into_iter)
+			.map(Itertools::sorted_unstable)
+			.map(Itertools::dedup)
+			.map(Iterator::collect)
 			.await;
 
 		Some((user_id, sess_ids))

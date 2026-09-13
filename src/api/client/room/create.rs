@@ -670,8 +670,12 @@ async fn create_create_event(
 			additional_creators.extend(body.invite.clone());
 		}
 
-		additional_creators.sort();
-		additional_creators.dedup();
+		let additional_creators = additional_creators
+			.into_iter()
+			.sorted()
+			.dedup()
+			.collect_vec();
+
 		if !additional_creators.is_empty() {
 			create_content
 				.insert("additional_creators".into(), json!(additional_creators).try_into()?);
