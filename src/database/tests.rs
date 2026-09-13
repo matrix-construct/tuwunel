@@ -1,7 +1,10 @@
 #![allow(unused_features)] // 1.96.0-nightly 2026-03-07 bug
 #![expect(clippy::needless_borrows_for_generic_args)]
 
-use std::{env::var, fmt::Debug, process::id as process_id, sync::Arc};
+use std::{
+	env::temp_dir, fmt::Debug, fs::remove_dir_all, path::PathBuf, process::id as process_id,
+	sync::Arc,
+};
 
 use rocksdb::WriteBatch;
 use serde::{Deserialize, Serialize};
@@ -1137,25 +1140,13 @@ fn txn_record_truncated() {
 
 #[tokio::test]
 async fn txn_insert_raw_preserves_bytes() -> Result {
-	let root = var("TMPDIR").unwrap_or_else(|_| "/nvme/target/tmp".into());
-
-	let path = format!("{root}/tuwunel-database-txn-{}", process_id());
+	let path = database_path("txn");
 	let raw_config = Figment::new()
 		.merge(("server_name", "localhost"))
 		.merge(("database_path", &path))
 		.merge(("test", ["fresh", "cleanup"]));
 
-	let config = Config::new(&raw_config)?;
-	let runtime = Handle::current();
-	let logging = Logging {
-		subscriber: Arc::new(NoSubscriber::new()),
-		reload: LogLevelReloadHandles::default(),
-		capture: Arc::new(State::new()),
-	};
-
-	let metrics = Metrics::new(Some(&runtime));
-	let server =
-		Arc::new(Server::new(config, Sources::default(), Some(&runtime), logging, metrics));
+	let server = new_server(&raw_config)?;
 	let database = Database::open(&server).await?;
 
 	let first = database.get("alias_roomid")?;
@@ -1261,19 +1252,14 @@ async fn txn_insert_raw_preserves_bytes() -> Result {
 	Ok(())
 }
 
-#[tokio::test]
-async fn a_restore_is_not_repeated_on_reopen() -> Result {
-	let root = var("TMPDIR").unwrap_or_else(|_| "/nvme/target/tmp".into());
+fn database_path(name: &str) -> PathBuf {
+	temp_dir()
+		.join("tuwunel")
+		.join(format!("database-{name}-{}", process_id()))
+}
 
-	let path = format!("{root}/tuwunel-database-restore-{}", process_id());
-	let raw_config = Figment::new()
-		.merge(("server_name", "localhost"))
-		.merge(("database_path", &path))
-		.merge(("database_backup_path", format!("{path}-backups")))
-		.merge(("database_restore_backup", 1))
-		.merge(("test", ["fresh", "cleanup"]));
-
-	let config = Config::new(&raw_config)?;
+fn new_server(raw_config: &Figment) -> Result<Arc<Server>> {
+	let config = Config::new(raw_config)?;
 	let runtime = Handle::current();
 	let logging = Logging {
 		subscriber: Arc::new(NoSubscriber::new()),
@@ -1282,8 +1268,23 @@ async fn a_restore_is_not_repeated_on_reopen() -> Result {
 	};
 
 	let metrics = Metrics::new(Some(&runtime));
-	let server =
-		Arc::new(Server::new(config, Sources::default(), Some(&runtime), logging, metrics));
+	let server = Server::new(config, Sources::default(), Some(&runtime), logging, metrics);
+
+	Ok(Arc::new(server))
+}
+
+#[tokio::test]
+async fn a_restore_is_not_repeated_on_reopen() -> Result {
+	let path = database_path("restore");
+	let backups = path.with_extension("backups");
+	let raw_config = Figment::new()
+		.merge(("server_name", "localhost"))
+		.merge(("database_path", &path))
+		.merge(("database_backup_path", &backups))
+		.merge(("database_restore_backup", 1))
+		.merge(("test", ["fresh", "cleanup"]));
+
+	let server = new_server(&raw_config)?;
 
 	// No such backup exists, so the open which claims the restore fails; the
 	// reopen declines the claim and succeeds on the very same configuration.
@@ -1293,6 +1294,10 @@ async fn a_restore_is_not_repeated_on_reopen() -> Result {
 		.expect_err("the claimed restore has no backup to find");
 
 	Database::open(&server).await?;
+
+	// The backup engine creates its directory on open; cleanup removes only
+	// the database path.
+	remove_dir_all(&backups).ok();
 
 	Ok(())
 }
