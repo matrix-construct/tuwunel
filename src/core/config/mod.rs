@@ -1277,6 +1277,15 @@ pub struct Config {
 	#[serde(default)]
 	pub federation_loopback: bool,
 
+	/// Sends MSC3983 one-time key claims to appservices.
+	///
+	/// An appservice that does not serve the claim route answers every
+	/// attempt with an error. Disable this when none of the deployment's
+	/// appservices serve it.
+	/// reloadable: yes
+	#[serde(default = "true_fn")]
+	pub appservice_keys_claims: bool,
+
 	/// Always calls /forget on behalf of the user if leaving a room. This is a
 	/// part of MSC4267 "Automatically forgetting rooms on leave"
 	/// reloadable: yes

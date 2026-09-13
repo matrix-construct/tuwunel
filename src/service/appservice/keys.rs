@@ -37,6 +37,10 @@ pub async fn claim_keys(
 	user_id: &UserId,
 	one_time_keys: &BTreeMap<OwnedDeviceId, OneTimeKeyAlgorithm>,
 ) -> ClaimedKeys {
+	if !self.services.config.appservice_keys_claims {
+		return ClaimedKeys::new();
+	}
+
 	self.registrations_for_user(user_id, RegistrationInfo::is_user_match)
 		.await
 		.into_iter()
