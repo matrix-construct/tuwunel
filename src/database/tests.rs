@@ -1,6 +1,8 @@
 #![allow(unused_features)] // 1.96.0-nightly 2026-03-07 bug
 #![expect(clippy::needless_borrows_for_generic_args)]
 
+mod cbor;
+
 use std::{
 	env::temp_dir, fmt::Debug, fs::remove_dir_all, path::PathBuf, process::id as process_id,
 	sync::Arc,

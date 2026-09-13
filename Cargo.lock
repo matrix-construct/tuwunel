@@ -5577,6 +5577,7 @@ dependencies = [
  "minicbor-serde",
  "rust-rocksdb",
  "serde",
+ "serde_bytes",
  "serde_json",
  "tokio",
  "tracing",

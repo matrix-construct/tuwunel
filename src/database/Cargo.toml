@@ -69,6 +69,7 @@ tracing.workspace = true
 tuwunel-core.workspace = true
 
 [dev-dependencies]
+serde_bytes.workspace = true
 criterion.workspace = true
 
 [lints]
