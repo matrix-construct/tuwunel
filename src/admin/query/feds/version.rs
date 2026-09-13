@@ -18,7 +18,7 @@ use tuwunel_core::{
 };
 use tuwunel_service::federation::feds::{Fault, Outcome};
 
-use super::{SweepArgs, fault_message, markdown_cell, prepare, render_total_time};
+use super::{SweepArgs, count_results, fault_message, markdown_cell, prepare, render_totals};
 use crate::admin_command;
 
 pub(super) const WIDTH_DEFAULT: NonZeroUsize = NonZeroUsize::new(192).expect("192 is nonzero");
@@ -153,6 +153,7 @@ fn render_into(
 	total: Duration,
 	list_mode: ListMode,
 ) -> FmtResult {
+	let results = count_results(outcomes);
 	let counts: ClassCounts<'_> = outcomes
 		.iter()
 		.filter_map(|outcome| {
@@ -197,7 +198,7 @@ fn render_into(
 	}
 
 	if matches!(list_mode, ListMode::None) {
-		return render_total_time(output, total);
+		return render_totals(output, results, total);
 	}
 
 	writeln!(output, "\n| origin | elapsed | fault |")?;
@@ -233,7 +234,7 @@ fn render_into(
 		}
 	}
 
-	render_total_time(output, total)
+	render_totals(output, results, total)
 }
 
 fn option_cell(value: Option<&str>) -> Cow<'_, str> {
@@ -256,6 +257,11 @@ mod tests {
 			success(server_name!("popular-a.example"), "zeta"),
 			success(server_name!("popular-b.example"), "zeta"),
 			Outcome {
+				origin: server_name!("bare.example").to_owned(),
+				elapsed: Duration::ZERO,
+				result: Ok(None),
+			},
+			Outcome {
 				origin: server_name!("skipped.example").to_owned(),
 				elapsed: Duration::ZERO,
 				result: Err(Fault::NotAttempted),
@@ -276,6 +282,9 @@ mod tests {
 		assert!(
 			output.contains("| skipped.example | | sweep budget exhausted before dispatch |")
 		);
+
+		assert!(output.contains("| bare.example | 0ns | missing server metadata |"));
+		assert!(output.ends_with("\n4 results in 0ns.\n"));
 	}
 
 	#[test]
@@ -303,6 +312,7 @@ mod tests {
 		let summary = render(outcomes(), Duration::ZERO, ListMode::None);
 
 		assert!(!summary.contains("| origin |"));
+		assert!(summary.ends_with("\n1 result in 0ns.\n"));
 
 		let successes = render(outcomes(), Duration::ZERO, ListMode::Successes);
 
@@ -319,6 +329,7 @@ mod tests {
 		assert!(!errors.contains("good.example"));
 		assert!(errors.contains("bad.example"));
 		assert!(errors.contains("backoff.example"));
+		assert!(errors.ends_with("\n1 result in 0ns.\n"));
 	}
 
 	fn success(origin: &ServerName, name: &str) -> VersionOutcome {

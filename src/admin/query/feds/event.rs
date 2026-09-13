@@ -25,7 +25,7 @@ use tuwunel_core::{
 };
 use tuwunel_service::federation::feds::{Fault, Outcome};
 
-use super::{SweepArgs, fault_message, markdown_cell, prepare, render_total_time};
+use super::{SweepArgs, count_results, fault_message, markdown_cell, prepare, render_totals};
 use crate::{Context, admin_command};
 
 pub(super) const WIDTH_DEFAULT: NonZeroUsize = NonZeroUsize::new(192).expect("192 is nonzero");
@@ -398,7 +398,7 @@ fn render_into(
 		}
 	}
 
-	render_total_time(output, total)
+	render_totals(output, count_results(outcomes), total)
 }
 
 fn hash_cell(status: Option<HashStatus>) -> &'static str {
@@ -575,7 +575,7 @@ mod tests {
 				&& alpha_skipped < skipped
 		);
 
-		assert!(output.ends_with("\nFederation fanout took 15.49s.\n"));
+		assert!(output.ends_with("\n5 results in 15.49s.\n"));
 	}
 
 	fn event() -> CanonicalJsonObject {

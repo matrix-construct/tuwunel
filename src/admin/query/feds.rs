@@ -20,7 +20,7 @@ use tuwunel_core::{
 	Err, Result,
 	utils::{stream::ReadyExt, time::Elapsed},
 };
-use tuwunel_service::federation::feds::{Fault, Opts, Record};
+use tuwunel_service::federation::feds::{Fault, Opts, Outcome, Record};
 
 use crate::{Context, admin_command_dispatch};
 
@@ -208,8 +208,21 @@ pub(super) fn fault_message(fault: &Fault) -> Cow<'static, str> {
 	}
 }
 
-pub(super) fn render_total_time(output: &mut String, duration: Duration) -> FmtResult {
-	writeln!(output, "\nFederation fanout took {}.", Elapsed::from(duration))
+pub(super) fn count_results<T>(outcomes: &[Outcome<T>]) -> usize {
+	outcomes
+		.iter()
+		.filter(|outcome| outcome.result.is_ok())
+		.count()
+}
+
+pub(super) fn render_totals(
+	output: &mut String,
+	results: usize,
+	duration: Duration,
+) -> FmtResult {
+	let noun = if results == 1 { "result" } else { "results" };
+
+	writeln!(output, "\n{results} {noun} in {}.", Elapsed::from(duration))
 }
 
 pub(super) fn markdown_cell(value: &str) -> Cow<'_, str> {

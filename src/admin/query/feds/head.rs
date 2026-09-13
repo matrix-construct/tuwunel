@@ -20,7 +20,7 @@ use tuwunel_core::{Err, Error, Result, utils::time::Elapsed};
 use tuwunel_service::federation::feds::{Fault, Outcome};
 
 use super::{
-	SweepArgs, fault_message, markdown_cell, prepare, render_total_time,
+	SweepArgs, count_results, fault_message, markdown_cell, prepare, render_totals,
 	sorted_event_id_difference,
 };
 use crate::admin_command;
@@ -265,7 +265,7 @@ fn render_into(
 		writeln!(output, "```")?;
 	}
 
-	render_total_time(output, total)
+	render_totals(output, count_results(outcomes), total)
 }
 
 #[cfg(test)]
@@ -288,5 +288,7 @@ mod tests {
 			output
 				.contains("| skipped.example | | | | | sweep budget exhausted before dispatch |")
 		);
+
+		assert!(output.ends_with("\n0 results in 0ns.\n"));
 	}
 }

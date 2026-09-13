@@ -16,8 +16,7 @@ use tuwunel_core::Result as CoreResult;
 use tuwunel_service::federation::feds::{Fault, Grid, Origins, OutcomeExt};
 
 use super::{
-	SweepArgs, fault_message, markdown_cell, prepare, render_total_time,
-	sorted_event_id_difference,
+	SweepArgs, fault_message, markdown_cell, prepare, render_totals, sorted_event_id_difference,
 };
 use crate::admin_command;
 
@@ -212,7 +211,11 @@ fn render_into(
 		}
 	}
 
-	render_total_time(output, total)
+	let results = state_origins
+		.len()
+		.saturating_add(grid.empty.len());
+
+	render_totals(output, results, total)
 }
 
 fn classes_for(
