@@ -12,6 +12,7 @@ use ruma::{OwnedUserId, UserId};
 use serde::{Deserialize, Serialize};
 use tuwunel_core::{
 	Err, Result, at, implement,
+	result::NotFound,
 	utils::{
 		MutexMap,
 		stream::{IterStream, ReadyExt, TryExpect},
@@ -263,11 +264,10 @@ where
 	Fut: Future<Output = Result<(Session, T)>> + Send,
 {
 	let write_guard = self.write_locks.lock(unique_id).await;
-	let existing = match self.get_by_unique_id(unique_id).await {
-		| Ok(session) => Some(session),
-		| Err(e) if e.is_not_found() => None,
-		| Err(e) => return Err(e),
-	};
+	let existing = self
+		.get_by_unique_id(unique_id)
+		.await
+		.optional()?;
 
 	let old_sess_id = existing
 		.as_ref()

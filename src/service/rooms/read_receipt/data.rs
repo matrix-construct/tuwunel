@@ -13,6 +13,7 @@ use serde::{Deserialize, de::IgnoredAny};
 use tuwunel_core::{
 	Result, error,
 	matrix::pdu::PduCount,
+	result::NotFound,
 	smallvec::SmallVec,
 	trace,
 	utils::{ReadyExt, TryReadyExt, stream::TryIgnore},
@@ -438,7 +439,8 @@ impl Data {
 			.qry(&key)
 			.await
 			.deserialized()
-			.or_else(|error| error.is_not_found().then_some(0).ok_or(error))
+			.optional()
+			.map(|count| count.unwrap_or(0))
 	}
 
 	#[inline]
@@ -463,7 +465,8 @@ impl Data {
 			.qry(&key)
 			.await
 			.deserialized()
-			.or_else(|error| error.is_not_found().then_some(0).ok_or(error))
+			.optional()
+			.map(|count| count.unwrap_or(0))
 	}
 
 	#[inline]

@@ -27,6 +27,7 @@ use tuwunel_core::{
 		Event,
 		pdu::{PduBuilder, PduEvent},
 	},
+	result::NotFound,
 	utils::{BoolExt, stream::TryBroadbandExt},
 };
 use tuwunel_service::Services;
@@ -203,8 +204,7 @@ async fn send_state_event_for_key_helper(
 			.state_accessor
 			.room_state_get(room_id, event_type, state_key)
 			.await
-			.map(Some)
-			.or_else(|error| error.is_not_found().then_some(None).ok_or(error))?,
+			.optional()?,
 	};
 
 	if let Some(current) = current

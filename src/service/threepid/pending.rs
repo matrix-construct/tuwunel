@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use subtle::ConstantTimeEq;
 use tuwunel_core::{
 	Err, Result, implement,
+	result::NotFound,
 	smallstr::SmallString,
 	utils::{
 		self,
@@ -464,8 +465,7 @@ async fn claim_sid(&self, claim: &UiaaKey) -> Result<Option<ClaimSid>> {
 		.qry(claim)
 		.await
 		.deserialized::<ClaimSid>()
-		.map(Some)
-		.or_else(|error| error.is_not_found().then_some(None).ok_or(error))
+		.optional()
 }
 
 #[implement(super::Service)]

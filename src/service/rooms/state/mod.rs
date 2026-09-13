@@ -21,7 +21,7 @@ use tuwunel_core::{
 	error::inspect_debug_log,
 	implement,
 	matrix::{PduCount, RoomVersionRules, StateKey, TypeStateKey, room_version},
-	result::{AndThenRef, FlatOk},
+	result::{AndThenRef, FlatOk, NotFound},
 	smallvec::SmallVec,
 	trace,
 	utils::{
@@ -449,10 +449,12 @@ where
 	StateEventType: Send + Sync,
 	StateKey: Send + Sync,
 {
-	let shortstatehash = match self.get_room_shortstatehash(room_id).await {
-		| Ok(shortstatehash) => shortstatehash,
-		| Err(error) if error.is_not_found() => return Ok(StateMap::new()),
-		| Err(error) => return Err(error),
+	let Some(shortstatehash) = self
+		.get_room_shortstatehash(room_id)
+		.await
+		.optional()?
+	else {
+		return Ok(StateMap::new());
 	};
 
 	let sauthevents: HashMap<ShortStateKey, TypeStateKey> =
@@ -460,16 +462,12 @@ where
 			.into_iter()
 			.try_stream()
 			.broad_and_then(async |(event_type, state_key): TypeStateKey| {
-				match self
-					.services
+				self.services
 					.short
 					.get_shortstatekey(&event_type, &state_key)
 					.await
-				{
-					| Ok(sstatekey) => Ok(Some((sstatekey, (event_type, state_key)))),
-					| Err(error) if error.is_not_found() => Ok(None),
-					| Err(error) => Err(error),
-				}
+					.map(|sstatekey| (sstatekey, (event_type, state_key)))
+					.optional()
 			})
 			.ready_try_filter_map(Result::Ok)
 			.try_collect()
@@ -492,18 +490,19 @@ where
 		.short
 		.multi_get_eventid_from_short(event_ids.into_iter().stream())
 		.zip(state_keys.into_iter().stream())
-		.map(|(event_id, (ty, sk))| match event_id {
-			| Ok(event_id) => Ok(Some(((ty, sk), event_id))),
-			| Err(error) if error.is_not_found() => Ok(None),
-			| Err(error) => Err(error),
+		.map(|(event_id, state_key)| {
+			event_id
+				.map(|event_id| (state_key, event_id))
+				.optional()
 		})
 		.ready_try_filter_map(Result::Ok)
 		.broad_and_then(async |((ty, sk), event_id): ((&_, &_), OwnedEventId)| {
-			match self.services.timeline.get_pdu(&event_id).await {
-				| Ok(pdu) => Ok(Some(((ty.clone(), sk.clone()), pdu))),
-				| Err(error) if error.is_not_found() => Ok(None),
-				| Err(error) => Err(error),
-			}
+			self.services
+				.timeline
+				.get_pdu(&event_id)
+				.map_ok(|pdu| ((ty.clone(), sk.clone()), pdu))
+				.await
+				.optional()
 		})
 		.ready_try_filter_map(Result::Ok)
 		.try_collect()

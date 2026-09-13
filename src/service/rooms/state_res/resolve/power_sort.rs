@@ -9,6 +9,7 @@ use ruma::{
 use tuwunel_core::{
 	Result, err,
 	matrix::Event,
+	result::NotFound,
 	utils::stream::{IterStream, TryBroadbandExt, TryReadyExt},
 };
 
@@ -270,9 +271,5 @@ where
 	Fut: Future<Output = Result<Pdu>> + Send,
 	Pdu: Event,
 {
-	match fetch(event_id).await {
-		| Ok(event) => Ok(Some(event)),
-		| Err(error) if error.is_not_found() => Ok(None),
-		| Err(error) => Err(error),
-	}
+	fetch(event_id).await.optional()
 }

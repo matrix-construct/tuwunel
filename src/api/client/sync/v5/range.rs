@@ -14,6 +14,7 @@ use ruma::{
 use tokio::sync::OnceCell;
 use tuwunel_core::{
 	Error, Result, at, err, error, extract_variant, implement,
+	result::NotFound,
 	utils::{BoolExt, IterStream, TryReadyExt, stream::BroadbandExt},
 };
 use tuwunel_service::{
@@ -211,8 +212,7 @@ async fn public_receipts(
 					.account_data
 					.get_global(sender_user, GlobalAccountDataEventType::IgnoredUserList)
 					.await
-					.map(Some)
-					.or_else(|error| error.is_not_found().then_some(None).ok_or(error))
+					.optional()
 			})
 			.await?;
 

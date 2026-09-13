@@ -5,6 +5,7 @@ use ruma::{EventId, OwnedEventId, events::TimelineEventType};
 use tuwunel_core::{
 	Error, Result, at,
 	matrix::{Event, event_id::RandomState},
+	result::NotFound,
 	trace,
 	utils::stream::{BroadbandExt, IterStream, TryReadyExt},
 };
@@ -93,17 +94,16 @@ where
 	events
 		.map(ToOwned::to_owned)
 		.broad_then(async |event_id| {
-			let event = match fetch(event_id.clone()).await {
-				| Ok(event) => event,
-				| Err(error) if error.is_not_found() => return Ok(None),
-				| Err(error) => return Err(error),
+			let Some(event) = fetch(event_id.clone()).await.optional()? else {
+				return Ok(None);
 			};
 
 			let origin_server_ts = event.origin_server_ts();
-			let position = match mainline_position(Some(event), &positions, fetch).await {
-				| Ok(position) => position,
-				| Err(error) if error.is_not_found() => return Ok(None),
-				| Err(error) => return Err(error),
+			let Some(position) = mainline_position(Some(event), &positions, fetch)
+				.await
+				.optional()?
+			else {
+				return Ok(None);
 			};
 
 			Ok(Some((event_id, (position, origin_server_ts))))

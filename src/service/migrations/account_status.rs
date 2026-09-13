@@ -4,6 +4,7 @@ use futures::TryStreamExt;
 use ruma::{OwnedUserId, UserId};
 use tuwunel_core::{
 	Result, err, info,
+	result::NotFound,
 	utils::{ReadyExt, option::OptionExt, stream::BroadbandExt},
 	warn,
 };
@@ -174,11 +175,11 @@ async fn restorable(
 /// active account nor a deactivated one, and mistaking it for either is how a
 /// pass that runs once leaves an account in the wrong state for good.
 async fn hash_empty(userid_password: &Arc<Map>, user_id: &UserId) -> Result<Option<bool>> {
-	match userid_password.get(user_id).await {
-		| Ok(hash) => Ok(Some(hash.is_empty())),
-		| Err(e) if e.is_not_found() => Ok(None),
-		| Err(e) => Err(e),
-	}
+	userid_password
+		.get(user_id)
+		.await
+		.map(|hash| hash.is_empty())
+		.optional()
 }
 
 /// Writes one adopted account, tallying it against the rows that could not be

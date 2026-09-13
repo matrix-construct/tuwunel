@@ -19,6 +19,7 @@ use serde_json::from_str;
 use tuwunel_core::{
 	Err, PduEvent, Result, debug_warn, err,
 	matrix::{Event, pdu::PduBuilder},
+	result::NotFound,
 	utils::string_from_bytes,
 	warn,
 };
@@ -259,10 +260,8 @@ async fn check_existing_txnid(
 		.existing_room_txnid(sender_user, sender_device, txn_id, room_id, event_type)
 		.await;
 
-	match response {
-		| Ok(response) => return txnid_response(&response).map(Some),
-		| Err(error) if !error.is_not_found() => return Err(error),
-		| Err(_) => (),
+	if let Some(response) = response.optional()? {
+		return txnid_response(&response).map(Some);
 	}
 
 	let response = services
@@ -270,10 +269,8 @@ async fn check_existing_txnid(
 		.existing_txnid(sender_user, sender_device, txn_id)
 		.await;
 
-	let response = match response {
-		| Ok(response) => response,
-		| Err(error) if error.is_not_found() => return Ok(None),
-		| Err(error) => return Err(error),
+	let Some(response) = response.optional()? else {
+		return Ok(None);
 	};
 
 	let Some(response) = legacy_txnid_response(&response)? else {
@@ -281,14 +278,13 @@ async fn check_existing_txnid(
 	};
 
 	let event_id = &response.event_id;
-	let pdu = match services
+	let Some(pdu) = services
 		.timeline
 		.get_non_outlier_pdu(event_id)
 		.await
-	{
-		| Ok(pdu) => pdu,
-		| Err(error) if error.is_not_found() => return Ok(None),
-		| Err(error) => return Err(error),
+		.optional()?
+	else {
+		return Ok(None);
 	};
 
 	if !legacy_txnid_matches(&pdu, room_id, event_type, sender_user) {

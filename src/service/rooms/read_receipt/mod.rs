@@ -25,6 +25,7 @@ use tuwunel_core::{
 		Event,
 		pdu::{PduCount, PduId, RawPduId},
 	},
+	result::NotFound,
 	smallstr::SmallString,
 	smallvec::SmallVec,
 	utils::{BoolExt, IterStream},
@@ -270,8 +271,8 @@ impl Service {
 
 		self.build_private_read_event_fallible(shortroomid, count, ts, user_id, thread_kind)
 			.await
-			.map(Some)
-			.or_else(|error| error.is_not_found().then(skip).ok_or(error))
+			.optional()
+			.map(|event| event.or_else(skip))
 	}
 
 	async fn build_private_read_event(

@@ -5,6 +5,7 @@ use ruma::{
 use tuwunel_core::{
 	Result, err,
 	matrix::{Event, StateKey},
+	result::NotFound,
 };
 
 use super::{
@@ -64,8 +65,7 @@ where
 			.await
 			.map_err(auth_input_error)
 			.map(RoomPowerLevelsEvent::new)
-			.map(Some)
-			.or_else(|error| error.is_not_found().then_some(None).ok_or(error))
+			.optional()
 	}
 
 	async fn join_rule(&self) -> Result<JoinRule> {
@@ -92,7 +92,6 @@ where
 			.await
 			.map_err(auth_input_error)
 			.map(RoomThirdPartyInviteEvent::new)
-			.map(Some)
-			.or_else(|error| error.is_not_found().then_some(None).ok_or(error))
+			.optional()
 	}
 }

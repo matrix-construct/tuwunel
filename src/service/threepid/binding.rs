@@ -3,7 +3,7 @@ use ruma::{
 	MilliSecondsSinceUnixEpoch, OwnedUserId, UserId,
 	thirdparty::{Medium, ThirdPartyIdentifier, ThirdPartyIdentifierInit},
 };
-use tuwunel_core::{Result, implement, utils::stream::TryIgnore};
+use tuwunel_core::{Result, implement, result::NotFound, utils::stream::TryIgnore};
 use tuwunel_database::{Cbor, Deserialized, Ignore, Interfix};
 
 use super::Binding;
@@ -115,11 +115,13 @@ pub async fn bound_elsewhere(&self, user_id: &UserId, email_canon: &str) -> Resu
 #[implement(super::Service)]
 #[tracing::instrument(level = "debug", skip(self))]
 pub async fn user_id_for_email(&self, email_canon: &str) -> Result<Option<OwnedUserId>> {
-	match self.db.email_userid.get(email_canon).await {
-		| Ok(handle) => handle.deserialized().map(Some),
-		| Err(error) if error.is_not_found() => Ok(None),
-		| Err(error) => Err(error),
-	}
+	self.db
+		.email_userid
+		.get(email_canon)
+		.await
+		.optional()?
+		.map(|handle| handle.deserialized())
+		.transpose()
 }
 
 /// Whether a canonical email address is already bound to some user.
