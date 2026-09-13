@@ -20,7 +20,7 @@ use tuwunel_core::{
 };
 
 use crate::{
-	Cbor, Database, Ignore, Interfix, Txn,
+	Cbor, Database, Ignore, Interfix, Map, Txn,
 	de::from_slice,
 	keyval::{serialize_key, serialize_val},
 	maps::descriptor,
@@ -1298,6 +1298,40 @@ async fn a_restore_is_not_repeated_on_reopen() -> Result {
 	// The backup engine creates its directory on open; cleanup removes only
 	// the database path.
 	remove_dir_all(&backups).ok();
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn sort_flushes_every_column_family() -> Result {
+	let path = database_path("sort");
+	let raw_config = Figment::new()
+		.merge(("server_name", "localhost"))
+		.merge(("database_path", &path))
+		.merge(("test", ["fresh", "cleanup"]));
+
+	let server = new_server(&raw_config)?;
+	let database = Database::open(&server).await?;
+
+	let first = database.get("alias_roomid")?;
+	let second = database.get("alias_userid")?;
+	let entries = |map: &Map| map.property_integer(c"rocksdb.num-entries-active-mem-table");
+
+	first.insert(b"first", b"value");
+	second.insert(b"second", b"value");
+
+	assert_eq!(entries(first)?, 1);
+	assert_eq!(entries(second)?, 1);
+
+	database.engine.sort()?;
+
+	assert_eq!(entries(first)?, 0);
+	assert_eq!(entries(second)?, 0);
+	assert_eq!(first.get(b"first").await?.as_ref(), b"value");
+	assert_eq!(second.get(b"second").await?.as_ref(), b"value");
+
+	drop(database);
+	drop(server);
 
 	Ok(())
 }

@@ -33,8 +33,8 @@ use std::{
 };
 
 use rocksdb::{
-	AsColumnFamilyRef, BoundColumnFamily, DBCommon, DBWithThreadMode, MultiThreaded,
-	WaitForCompactOptions, WriteOptions, checkpoint::Checkpoint,
+	AsColumnFamilyRef, BoundColumnFamily, DBCommon, DBWithThreadMode, FlushOptions,
+	MultiThreaded, WaitForCompactOptions, WriteOptions, checkpoint::Checkpoint,
 };
 use tuwunel_core::{Err, Result, debug, implement, info, warn};
 
@@ -105,11 +105,18 @@ impl Engine {
 		self.db.wait_for_compact(&opts).map_err(map_err)
 	}
 
-	/// Flush the memtables to SST files (a RocksDB LSM-tree flush).
+	/// Flush every column family's memtable to SST files (a RocksDB LSM-tree
+	/// flush).
 	///
-	/// Forces buffered writes out of memory into the on-disk LSM tree. An LSM
-	/// flush, not a libc `fflush(3)` or `fsync(2)`, and distinct from the
-	/// `flush` and `sync` methods here, which act on the write-ahead log.
+	/// Forces buffered writes out of memory into the on-disk LSM tree for all
+	/// opened families in one request, atomically when `rocksdb_atomic_flush`
+	/// is set. An LSM flush, not a libc `fflush(3)` or `fsync(2)`, and distinct
+	/// from the `flush` and `sync` methods here, which act on the write-ahead
+	/// log.
+	///
+	/// # Panics
+	///
+	/// Panics on a read-only or secondary database, which cannot flush.
 	#[tracing::instrument(
 		level = "info",
 		skip_all,
@@ -118,9 +125,19 @@ impl Engine {
 		),
 	)]
 	pub fn sort(&self) -> Result {
-		//TODO: Call flush_cfs_opt instead.
-		let flushoptions = rocksdb::FlushOptions::default();
-		result(DBCommon::flush_opt(&self.db, &flushoptions))
+		assert!(!self.is_read_only(), "memtables cannot be flushed on a read-only database");
+
+		let cfs: Vec<_> = self
+			.db
+			.cf_names()
+			.iter()
+			.filter_map(|name| self.db.cf_handle(name))
+			.collect();
+
+		let cfs: Vec<&_> = cfs.iter().collect();
+		let opts = FlushOptions::default();
+
+		result(DBCommon::flush_cfs_opt(&self.db, &cfs, &opts))
 	}
 
 	/// Creates a physical checkpoint of the database at `path`.
