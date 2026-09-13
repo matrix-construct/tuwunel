@@ -29,14 +29,14 @@
 
 | ✅ `yes` | 🟨 `part` | ❌ `no` | ⬛ `n/a` | total |
 |---:|---:|---:|---:|---:|
-| 255 | 55 | 435 | 330 | 1075 |
+| 255 | 54 | 436 | 330 | 1075 |
 
 ### Status by inventory bucket
 
 | Inv | yes | part | no | n/a | total |
 |---|---|---|---|---|---|
 | merged | 182 | 15 | 12 | 60 | 269 |
-| open | 42 | 28 | 336 | 198 | 604 |
+| open | 42 | 27 | 337 | 198 | 604 |
 | closed | 31 | 12 | 87 | 72 | 202 |
 
 ## Merged
@@ -111,7 +111,7 @@ in the [Out of scope](#out-of-scope) section.
 | MSC3939 | ✅ ● | 90/90 | Account locking | Login gate landed; /refresh and OIDC token paths still mint for locked accounts |
 | MSC3938 | ✅ ● | 100/100 | Remove deprecated `keyId` parameters from `/keys` endpoints | only the keyless /key/v2/server is routed; no notary /query left to change |
 | MSC3930 | ✅ ● | 100/100 | Polls push rules/notifications | Default poll push rules via ruma server_default; seeded at registration |
-| MSC3925 | 🟨 ◐ | 85/85 | m.replace aggregation with full event | Full m.replace bundle; gated default-off; typed index, ts-ordered selection |
+| MSC3925 | 🟨 ● | 70/70 | m.replace aggregation with full event | Full m.replace fold; off by default (bundle_edit_relations); backfill unindexed |
 | MSC3916 | ✅ ● | 90/100 | Authentication for media access, and new endpoint names | New /client/v1/media and /federation/v1/media auth endpoints implemented. |
 | MSC3905 | ✅ ● | 100/100 | Application services should only be interested in local users | src/service/appservice/append.rs:66; local-user guard at the three event-inte... |
 | MSC3904 | ✅ ● | 100/100 | Room version 10 as the default room version | default_room_version is v11, at or above the v10 the MSC suggests |
@@ -264,10 +264,10 @@ for spec compliance.
 
 | MSC | Status | Impl | Spec | Title | Note |
 |---|---|---:|---:|---|---|
-| MSC3925 | 🟨 ◐ | 85/85 | 1.7 | m.replace aggregation with full event | Full m.replace bundle; gated default-off; typed index, ts-ordered selection |
 | MSC2265 | 🟨 ● | 75/100 | 1.1 | Proposal for mandating case folding when processing e-mail addresses | HS case-folds whole email (ss-fold) before storage; IS migration out of scope |
 | MSC4178 | 🟨 ● | 75/90 | 1.13 | Error codes for requestToken | msisdn returns M_THREEPID_MEDIUM_NOT_SUPPORTED; bad email returns M_INVALID_P... |
 | MSC2409 | 🟨 ● | 70/70 | 1.13 | Proposal to send typing, presence and receipts to appservices | typing+receipt EDUs sent to AS; presence not forwarded |
+| MSC3925 | 🟨 ● | 70/70 | 1.7 | m.replace aggregation with full event | Full m.replace fold; off by default (bundle_edit_relations); backfill unindexed |
 | MSC3970 | 🟨 ◐ | 70/80 | 1.7 | Scope transaction IDs to devices | txn key is user, device, txn with no path; redact untracked; echo user scoped |
 | MSC4284 | 🟨 ● | 70/90 | 1.18 | Policy Servers | outbound /sign, inbound verify, fetch-on-missing, reversible soft-fail |
 | MSC2290 | 🟨 ● | 65/55 |  | Separate Endpoints for Binding Threepids | add endpoint (UIA+dupe) + HS email validation; IS-bind half out of scope |
@@ -469,7 +469,7 @@ in the [Out of scope](#out-of-scope) section.
 | MSC4155 | ✅ ● | 90/100 | Invite filtering | Six glob lists evaluated per sender; blanket block outranks the ignore list |
 | MSC4154 | ✅ ● | 100/100 | Request max body size | max_request_size default 24MB, M_TOO_LARGE returns 413 |
 | MSC4152 | ❌ ● | 0/0 | Room labeling and filtering | room labels and /rooms/{roomId}/labels not implemented |
-| MSC4149 | 🟨 ◐ | 80/80 | Update CSP Directives for Media Repository | global CSP aligns with MSC; missing font-src and script-src 'none' |
+| MSC4149 | ❌ ● | 0/10 | Update CSP Directives for Media Repository | Media CSP is the pre-MSC set verbatim (router.rs MEDIA_CSP); no directive landed |
 | MSC4145 | ❌ ● | 0/0 | Simple verified accounts | m.verified profile field and endpoint not implemented |
 | MSC4143 | 🟨 ◐ | 60/60 | MatrixRTC | GET rtc/transports served; slots and sticky membership are client and MSC4354 |
 | MSC4141 | ❌ ● | 0/0 | Time based notification filtering | time_and_day push rule condition not supported |
