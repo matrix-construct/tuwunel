@@ -455,8 +455,10 @@ pub async fn get_outlier_pdu(&self, event_id: &EventId) -> Result<PduEvent> {
 	self.get_outlier(event_id).await
 }
 
-/// Returns the pdu.
-/// Checks the `eventid_outlierpdu` Tree if not found in the timeline.
+/// Returns a PDU from the accepted timeline.
+///
+/// Looks up the accepted record only, without consulting outliers. Storage and
+/// decoding errors propagate to the caller.
 #[implement(Service)]
 pub async fn get_non_outlier_pdu(&self, event_id: &EventId) -> Result<PduEvent> {
 	self.get_non_outlier(event_id).await
@@ -483,8 +485,10 @@ pub async fn get_outlier_pdu_json(&self, event_id: &EventId) -> Result<Canonical
 	self.get_outlier(event_id).await
 }
 
-/// Returns the json of a pdu.
-/// Checks the `eventid_outlierpdu` Tree if not found in the timeline.
+/// Returns the JSON of a PDU from the accepted timeline.
+///
+/// Looks up the accepted record only, without consulting outliers. Storage and
+/// decoding errors propagate to the caller.
 #[implement(Service)]
 pub async fn get_non_outlier_pdu_json(&self, event_id: &EventId) -> Result<CanonicalJsonObject> {
 	self.get_non_outlier(event_id).await
@@ -529,8 +533,10 @@ where
 		.deserialized()
 }
 
-/// Returns the pdu into T.
-/// Checks the `eventid_outlierpdu` Tree if not found in the timeline.
+/// Deserializes a PDU from the accepted timeline into `T`.
+///
+/// Resolves the event ID through `eventid_pduid` and reads `pduid_pdu`, without
+/// consulting outliers. Storage and decoding errors propagate to the caller.
 #[implement(Service)]
 #[inline]
 pub async fn get_non_outlier<T>(&self, event_id: &EventId) -> Result<T>
