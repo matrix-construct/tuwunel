@@ -2327,6 +2327,14 @@
 #
 #allow_guests_auto_join_rooms = false
 
+# Prevent media from being embedded in frames, including same-origin frames.
+#
+# Setting false omits `frame-ancestors` from the download and thumbnail
+# Content-Security-Policy; other media security controls remain in place.
+# Requires a restart, and reverse proxy headers may still prevent framing.
+#
+#media_deny_framing = true
+
 # Enable the legacy unauthenticated Matrix media repository endpoints.
 # These endpoints consist of:
 # - /_matrix/media/*/config

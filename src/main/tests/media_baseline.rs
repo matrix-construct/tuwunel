@@ -6,12 +6,16 @@
 //! and every state of the MSC2705 `animated` parameter, over both client
 //! surfaces, and pins what a client observes as a snapshot. Both are swept
 //! because they reach one service through separate handlers, so either can
-//! regress alone.
+//! regress alone. The same boot reads the MSC4149 policy on every client
+//! media route, download and thumbnail alike, since a header the snapshot
+//! does not carry needs a check of its own.
 //!
 //! Regenerate deliberately, never to make a red run green:
 //! `INSTA_FORCE_UPDATE=1 cargo +nightly test --test media_baseline`.
 
 mod media;
+#[path = "media/policy.rs"]
+mod policy;
 
 // clippy's tests_outside_test_module does not see the compound cfg above as a
 // test module, so the wrapper is load-bearing rather than ceremony
@@ -25,12 +29,22 @@ mod tests {
 	use tuwunel_core::{Result, utils::stream::IterStream};
 	use tuwunel_service::Services;
 
-	use super::media::{
-		Ask, CORPUS, DatabasePath, Source, asks, register, row, thumbnail, upload,
-		wait_until_ready,
+	use super::{
+		media::{
+			Ask, CORPUS, DatabasePath, Source, asks, register, row, thumbnail, upload,
+			wait_until_ready,
+		},
+		policy::{TOKEN, check},
 	};
 
-	const TOKEN: &str = "media-baseline-harness-access-token";
+	/// The policy every client media answer carries, spelled as the wire does.
+	///
+	/// Written out rather than joined from the router's own constant, so the
+	/// check is of what a client receives and not of what the server meant.
+	const POLICY: &str = concat!(
+		"sandbox;default-src 'none';script-src 'none';font-src 'none';",
+		"frame-ancestors 'none';form-action 'none';base-uri 'none'",
+	);
 
 	/// One of the two client thumbnail surfaces.
 	///
@@ -77,7 +91,8 @@ mod tests {
 	/// not any client asked for it, and a row that moves for `animated` absent
 	/// is one nothing asked for at all, since absent is the only state clients
 	/// send today. The snapshot is therefore the change report for any edit to
-	/// the thumbnail path.
+	/// the thumbnail path. The policy read that follows it covers the header
+	/// the snapshot leaves out, on the download routes as well.
 	#[test]
 	fn thumbnail_surface_baseline() -> Result {
 		let listener = TcpListener::bind(("127.0.0.1", 0))?;
@@ -100,6 +115,9 @@ mod tests {
 
 		let runtime = Runtime::new(Some(&args))?;
 		let server = Server::new(Some(&args), Some(&runtime))?;
+
+		assert!(server.server.config.media_deny_framing);
+
 		let result = runtime.block_on(async {
 			let services = async_start(&server).await?;
 			let base = format!("http://127.0.0.1:{port}");
@@ -108,11 +126,14 @@ mod tests {
 
 			let exercise = async {
 				let report = sweep(&services, &base).await;
+				let policed = check(&services, &base, POLICY).await;
 				let shutdown = server.server.shutdown();
 
-				// a report gathered from a server that then failed to stop is not
-				// evidence of anything, so the shutdown outranks it
-				shutdown.and(report)
+				// the shutdown makes the report evidence and the sweep's account
+				// carries the policy read, so each failure outranks the next
+				shutdown
+					.and(report)
+					.and_then(|report| policed.map(|()| report))
 			};
 
 			let (run_result, outcome) = join(async_run(&server), exercise).await;

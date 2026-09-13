@@ -16,7 +16,7 @@ use image::{
 	codecs::{gif::GifDecoder, png::PngDecoder, webp::WebPDecoder},
 	guess_format,
 };
-use reqwest::RequestBuilder;
+use reqwest::{RequestBuilder, Response};
 use serde_json::Value;
 use tokio::time::{sleep, timeout};
 use tuwunel_core::{
@@ -354,26 +354,14 @@ pub(crate) async fn thumbnail(
 		.into_iter()
 		.fold(request, |request, animated| request.query(&[("animated", animated)]));
 
-	let request = token
-		.into_iter()
-		.fold(request, RequestBuilder::bearer_auth);
-
 	let request = user_id
 		.into_iter()
 		.fold(request, |request, user_id| request.query(&[("user_id", user_id)]));
 
-	let response = request.send().await?;
+	let response = authorize(request, token).send().await?;
 	let status = response.status().as_u16();
-	let header = |name: &str| {
-		response
-			.headers()
-			.get(name)
-			.and_then(|value| value.to_str().ok())
-			.map(ToOwned::to_owned)
-	};
-
-	let content_type = header("content-type");
-	let disposition = header("content-disposition");
+	let content_type = header(&response, "content-type").map(ToOwned::to_owned);
+	let disposition = header(&response, "content-disposition").map(ToOwned::to_owned);
 	let bytes = response.bytes().await?;
 
 	let body = match status {
@@ -382,6 +370,27 @@ pub(crate) async fn thumbnail(
 	};
 
 	Ok(Answer { status, content_type, disposition, body })
+}
+
+/// Carry a bearer token on a request when one is given.
+///
+/// An absent token leaves the request as it was, which is how the
+/// unauthenticated surfaces are addressed.
+pub(crate) fn authorize(request: RequestBuilder, token: Option<&str>) -> RequestBuilder {
+	token
+		.into_iter()
+		.fold(request, RequestBuilder::bearer_auth)
+}
+
+/// One response header as text, absent when missing or not text.
+///
+/// Borrowed from the response, so each caller keeps it in the form its own
+/// record wants.
+pub(crate) fn header<'a>(response: &'a Response, name: &str) -> Option<&'a str> {
+	response
+		.headers()
+		.get(name)
+		.and_then(|value| value.to_str().ok())
 }
 
 /// Render the decoded shape of a response body.

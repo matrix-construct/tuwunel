@@ -2720,6 +2720,14 @@ pub struct Config {
 	#[serde(default)]
 	pub allow_guests_auto_join_rooms: bool,
 
+	/// Prevent media from being embedded in frames, including same-origin frames.
+	///
+	/// Setting false omits `frame-ancestors` from the download and thumbnail
+	/// Content-Security-Policy; other media security controls remain in place.
+	/// Requires a restart, and reverse proxy headers may still prevent framing.
+	#[serde(default = "true_fn")]
+	pub media_deny_framing: bool,
+
 	/// Enable the legacy unauthenticated Matrix media repository endpoints.
 	/// These endpoints consist of:
 	/// - /_matrix/media/*/config
