@@ -18,9 +18,8 @@ pub struct TruncatedSlice<'a, T> {
 /// Wraps a UTF-8 string for threshold-limited `Debug` output.
 ///
 /// Strings no longer than `max_len` bytes keep ordinary quoted formatting.
-/// Longer strings end at the first scalar boundary at or after `max_len`, then
-/// append `...` outside the closing quote. Formatting panics if `max_len` lies
-/// within the final multibyte scalar because no later boundary exists.
+/// Longer strings end at the first scalar boundary at or after `max_len`,
+/// including the string's end, then append `...` outside the closing quote.
 pub struct TruncatedStr<'a> {
 	inner: &'a str,
 	max_len: usize,
@@ -40,9 +39,8 @@ pub fn slice_truncated<T: fmt::Debug>(
 /// Creates a tracing debug value that truncates a string.
 ///
 /// The returned value can be recorded directly in a structured tracing field.
-/// Truncation uses a byte threshold and ends at the first following UTF-8
-/// boundary. Formatting panics if the threshold lies within the final
-/// multibyte scalar.
+/// Strings exceeding the byte threshold end at the first UTF-8 boundary at or
+/// after it, including the string's end, with `...` outside the closing quote.
 #[must_use]
 pub fn str_truncated(s: &str, max_len: usize) -> tracing::field::DebugValue<TruncatedStr<'_>> {
 	tracing::field::debug(TruncatedStr { inner: s, max_len })
@@ -79,13 +77,7 @@ impl fmt::Debug for TruncatedStr<'_> {
 		if self.inner.len() <= self.max_len {
 			write!(f, "{:?}", self.inner)
 		} else {
-			let len = self
-				.inner
-				.char_indices()
-				.skip_while(|(i, _)| *i < self.max_len)
-				.map(|(i, _)| i)
-				.next()
-				.expect("At least one char_indice >= len for str");
+			let len = self.inner.ceil_char_boundary(self.max_len);
 
 			write!(f, "{:?}...", &self.inner[..len])
 		}

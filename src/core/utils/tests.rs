@@ -11,8 +11,8 @@ use std::{
 use crate::{
 	Error, Result,
 	utils::{
-		self, MutexMap, math::usize_from_f64, time::pretty, two_phase_counter::Counter,
-		url::hostname_matches_domain,
+		self, MutexMap, debug::str_truncated, math::usize_from_f64, time::pretty,
+		two_phase_counter::Counter, url::hostname_matches_domain,
 	},
 };
 
@@ -99,6 +99,28 @@ fn usize_from_f64_enforces_exclusive_bound() {
 #[test]
 fn pretty_zero_pads_the_fraction() {
 	assert_eq!(pretty(Duration::from_secs(12 * 60 + 3)), "12.05 minutes");
+}
+
+#[test]
+fn pretty_bounds_subsecond_fractions() {
+	assert_eq!(pretty(Duration::from_micros(1_500)), "1.50 milliseconds");
+	assert_eq!(pretty(Duration::from_nanos(2_250)), "2.25 microseconds");
+	assert_eq!(pretty(Duration::from_millis(250)), "250.00 milliseconds");
+	assert_eq!(pretty(Duration::from_micros(2)), "2.00 microseconds");
+	assert_eq!(pretty(Duration::from_micros(999)), "999.00 microseconds");
+	assert_eq!(pretty(Duration::from_millis(1)), "1.00 milliseconds");
+	assert_eq!(pretty(Duration::from_millis(999)), "999.00 milliseconds");
+	assert_eq!(pretty(Duration::from_secs(1)), "1.00 seconds");
+}
+
+#[test]
+fn str_truncated_rounds_inside_middle_scalar() {
+	assert_eq!(format!("{:?}", str_truncated("aéz", 2)), "\"aé\"...");
+}
+
+#[test]
+fn str_truncated_rounds_inside_final_scalar() {
+	assert_eq!(format!("{:?}", str_truncated("aé", 2)), "\"aé\"...");
 }
 
 #[tokio::test]

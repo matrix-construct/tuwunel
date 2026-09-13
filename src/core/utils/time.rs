@@ -175,8 +175,7 @@ pub fn pretty(d: Duration) -> String {
 	}
 }
 
-/// Pairs a duration's selected whole unit with a floating-point scale
-/// component.
+/// Pairs a duration's selected whole unit with its fraction in `[0, 1)`.
 ///
 /// For days through minutes, the second value is a whole-second remainder
 /// divided by the selected unit, so subsecond data is discarded. Seconds use
@@ -194,8 +193,8 @@ pub fn whole_and_frac(d: Duration) -> (Unit, f64) {
 		| Hours(_) => (d.as_secs() % 3_600) as f64 / 3_600.0,
 		| Mins(_) => (d.as_secs() % 60) as f64 / 60.0,
 		| Secs(_) => f64::from(d.subsec_millis()) / 1000.0,
-		| Millis(_) => f64::from(d.subsec_micros()) / 1000.0,
-		| Micros(_) => f64::from(d.subsec_nanos()) / 1000.0,
+		| Millis(_) => f64::from(d.subsec_micros() % 1000) / 1000.0,
+		| Micros(_) => f64::from(d.subsec_nanos() % 1000) / 1000.0,
 		| Nanos(_) => 0.0,
 	})
 }
