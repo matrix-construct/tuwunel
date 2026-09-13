@@ -88,6 +88,7 @@ Fields under `[global.appservice.<ID>]`:
 | `receive_ephemeral` | `false` | Include ephemeral events (typing notifications, read receipts) in pushes to the appservice. |
 | `device_management` | `false` | Allow the appservice to manage devices on behalf of virtual users ([MSC4190](https://github.com/matrix-org/matrix-spec-proposals/pull/4190)). |
 | `msc3202_transaction_extensions` | `false` | Include end-to-bridge encryption bookkeeping (device-list changes, one-time-key counts, unused fallback key types) in pushes, so encrypting bridges work without a `/sync` loop ([MSC3202](https://github.com/matrix-org/matrix-spec-proposals/pull/3202), paired with to-device delivery from [MSC4203](https://github.com/matrix-org/matrix-spec-proposals/pull/4203)). The registration-file key is `org.matrix.msc3202`. |
+| `keys_claims` | `false` | Forward one-time key claims for the appservice's users to its `/keys/claim` route ([MSC3983](https://github.com/matrix-org/matrix-spec-proposals/pull/3983)). Set it only when the appservice serves that route; the global `appservice_keys_claims` setting (default `true`) turns the claims off for every registration at once. |
 
 Namespace entries under `[[global.appservice.<ID>.users]]`, `aliases`, and `rooms`:
 
@@ -107,7 +108,7 @@ All commands run from the admin room (`!admin appservices <subcommand>`):
 | `show-config <id>` | Print the stored registration as YAML. |
 | `list` | List IDs of all loaded appservices. |
 
-## Connection settings
+## Server options
 
 These options go in the top-level `[global]` section:
 
@@ -116,6 +117,7 @@ These options go in the top-level `[global]` section:
 | `appservice_timeout` | `35` | Request timeout in seconds when pushing events to an appservice. |
 | `appservice_idle_timeout` | `300` | Idle connection pool timeout in seconds. |
 | `dns_passthru_appservices` | `false` | Bypass DNS passthru domain matching for all appservice URLs. More efficient than listing each domain in `dns_passthru_domains` when all appservices share the same network. |
+| `appservice_keys_claims` | `true` | Forward one-time key claims ([MSC3983](https://github.com/matrix-org/matrix-spec-proposals/pull/3983)) to the appservices whose registrations set `keys_claims`. Turn it off to stop the claims for every registration at once, for example when no appservice serves the `/keys/claim` route. Reloadable. |
 
 ## Getting help
 
