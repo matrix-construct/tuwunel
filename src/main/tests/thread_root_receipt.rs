@@ -1,9 +1,6 @@
 #![cfg(test)]
 
-use std::{
-	env::var, fs::remove_dir_all, net::TcpListener, path::PathBuf, process::id as process_id,
-	time::Duration,
-};
+use std::{fs::remove_dir_all, net::TcpListener, path::PathBuf, time::Duration};
 
 use futures::future::join;
 use serde_json::{Value, json};
@@ -33,10 +30,7 @@ impl Drop for DatabasePath {
 fn thread_root_receipt_preserves_unread_replies() -> Result {
 	let listener = TcpListener::bind(("127.0.0.1", 0))?;
 	let port = listener.local_addr()?.port();
-	let root = var("TMPDIR").unwrap_or_else(|_| "/nvme/target/tmp".into());
-	let db_path = DatabasePath(
-		PathBuf::from(root).join(format!("tuwunel-thread-root-receipt-{}", process_id())),
-	);
+	let db_path = DatabasePath(Args::test_database_path("thread-root-receipt"));
 
 	let args = Args::default_test(&["fresh", "cleanup"])
 		.with_option(format!("database_path={:?}", db_path.0))

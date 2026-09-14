@@ -1,6 +1,6 @@
 #![cfg(test)]
 
-use std::{env::temp_dir, fs::remove_dir_all, process::id as process_id};
+use std::fs::remove_dir_all;
 
 use tuwunel::{Args, Runtime, Server, async_run, async_start, async_stop};
 use tuwunel_core::{
@@ -11,9 +11,7 @@ use tuwunel_service::Services;
 
 #[test]
 fn optional_presence_preserves_data_errors() -> Result {
-	let path = temp_dir()
-		.join("tuwunel")
-		.join(format!("presence-optional-{}", process_id()));
+	let path = Args::test_database_path("presence-optional");
 
 	let escaped = path
 		.to_string_lossy()

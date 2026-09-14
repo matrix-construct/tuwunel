@@ -1,6 +1,6 @@
 #![cfg(test)]
 
-use std::{env::var, fs::remove_dir_all, path::PathBuf, process::id as process_id};
+use std::{fs::remove_dir_all, path::PathBuf};
 
 use futures::StreamExt;
 use serde_json::{Value, json};
@@ -23,9 +23,7 @@ impl Drop for DatabasePath {
 
 #[test]
 fn change_log_bounds_its_range() -> Result {
-	let root = var("TMPDIR").unwrap_or_else(|_| "/tmp".into());
-	let path = PathBuf::from(root).join(format!("tuwunel-profile-change-log-{}", process_id()));
-	let db_path = DatabasePath(path);
+	let db_path = DatabasePath(Args::test_database_path("profile-change-log"));
 
 	let mut args = Args {
 		maintenance: true,

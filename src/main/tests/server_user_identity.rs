@@ -1,10 +1,10 @@
 #![cfg(test)]
 
 use std::{
-	env::{current_exe, temp_dir, var},
+	env::{current_exe, var},
 	fs::remove_dir_all,
 	path::{Path, PathBuf},
-	process::{Command, id as process_id},
+	process::Command,
 	sync::Arc,
 };
 
@@ -62,11 +62,7 @@ fn server_user_identity_is_durable() -> Result {
 		};
 	}
 
-	let path = temp_dir()
-		.join("tuwunel")
-		.join(format!("server-user-identity-{}", process_id()));
-
-	let database = DatabasePath(path);
+	let database = DatabasePath(Args::test_database_path("server-user-identity"));
 
 	for phase in ["seed", "foreign", "read_only", "legacy", "adopted", "changed"] {
 		run_child(&database.0, phase)?;

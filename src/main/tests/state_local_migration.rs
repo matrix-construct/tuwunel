@@ -4,7 +4,7 @@ use std::{
 	env::{current_exe, var},
 	fs::remove_dir_all,
 	path::{Path, PathBuf},
-	process::{Command, id as process_id},
+	process::Command,
 };
 
 use tuwunel::{Args, Runtime, Server, async_exec, async_run, async_start, async_stop};
@@ -48,10 +48,7 @@ fn state_local_memo_migration_is_once_only_and_required() -> Result {
 		};
 	}
 
-	let root = var("TMPDIR").unwrap_or_else(|_| "/nvme/target/tmp".into());
-	let database = DatabasePath(
-		PathBuf::from(root).join(format!("tuwunel-state-local-migration-{}", process_id())),
-	);
+	let database = DatabasePath(Args::test_database_path("state-local-migration"));
 
 	for phase in ["seed", "migrate", "restart", "reject", "restore"] {
 		run_child(&database.0, phase)?;

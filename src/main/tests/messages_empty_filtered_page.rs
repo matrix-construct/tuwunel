@@ -1,8 +1,6 @@
 #![cfg(test)]
 
-use std::{
-	env::var, fs::remove_dir_all, net::TcpListener, path::PathBuf, process::id as process_id,
-};
+use std::{fs::remove_dir_all, net::TcpListener};
 
 use futures::future::join;
 use serde_json::{Value, json};
@@ -27,9 +25,7 @@ fn exhausted_backward_page_uses_scanned_edge() -> Result {
 	let listener = TcpListener::bind(("127.0.0.1", 0))?;
 	let port = listener.local_addr()?.port();
 
-	let root = var("TMPDIR").unwrap_or_else(|_| "/nvme/target/tmp".into());
-	let db_path =
-		PathBuf::from(root).join(format!("tuwunel-messages-empty-page-{}", process_id()));
+	let db_path = Args::test_database_path("messages-empty-page");
 
 	let mut args = Args::default_test(&["fresh", "cleanup"]);
 

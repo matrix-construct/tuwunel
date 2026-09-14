@@ -1,5 +1,5 @@
 #![cfg(test)]
-use std::{env::temp_dir, fs::remove_dir_all, net::TcpListener, process::id as process_id};
+use std::{fs::remove_dir_all, net::TcpListener};
 
 use futures::{FutureExt, future::join};
 use reqwest::{Method, RequestBuilder};
@@ -30,12 +30,10 @@ const TRANSACTION: &str = "/_synapse/admin/v1/send_server_notice/replay";
 fn authorization_and_notice_membership() -> Result {
 	let listener = TcpListener::bind(("127.0.0.1", 0))?;
 	let port = listener.local_addr()?.port();
-	let database = temp_dir()
-		.join("tuwunel")
-		.join(format!("server-notices-{}", process_id()));
+	let database = Args::test_database_path("server-notices");
 
 	let args = Args::default_test(&["fresh", "cleanup"])
-		.with_option(format!("database_path={database:?}"))
+		.with_database_path(&database)
 		.with_option("address=[\"127.0.0.1\"]")
 		.with_option(format!("port={port}"))
 		.with_option("listening=true")

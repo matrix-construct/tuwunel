@@ -1,8 +1,6 @@
 #![cfg(test)]
 
-use std::{
-	collections::BTreeMap, env::var, fs::remove_dir_all, path::PathBuf, process::id as process_id,
-};
+use std::{collections::BTreeMap, fs::remove_dir_all, path::PathBuf};
 
 use tuwunel::{Args, Runtime, Server, async_run, async_start, async_stop};
 use tuwunel_core::{
@@ -28,10 +26,7 @@ impl Drop for DatabasePath {
 
 #[test]
 fn replayed_receipts_hold_their_stream_position() -> Result {
-	let root = var("TMPDIR").unwrap_or_else(|_| "/nvme/target/tmp".into());
-	let db_path = DatabasePath(
-		PathBuf::from(root).join(format!("tuwunel-receipt-replay-{}", process_id())),
-	);
+	let db_path = DatabasePath(Args::test_database_path("receipt-replay"));
 
 	let mut args = Args::default_test(&["fresh", "cleanup"]);
 	args.maintenance = true;

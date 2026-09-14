@@ -1,10 +1,6 @@
 #![cfg(test)]
 
-use std::{
-	env::temp_dir,
-	fs::{create_dir_all, read_dir, remove_dir_all},
-	process::id as process_id,
-};
+use std::fs::{create_dir_all, read_dir, remove_dir_all};
 
 use tuwunel::{Args, Runtime, Server, async_exec};
 use tuwunel_core::Result;
@@ -13,7 +9,7 @@ use tuwunel_core::Result;
 /// `verify-backup` checks its files, and `delete-backups` purges every backup.
 #[test]
 fn admin_backup_database() -> Result {
-	let dir = temp_dir().join(format!("tuwunel-backup-{}", process_id()));
+	let dir = Args::test_database_path("backup");
 	let db = dir.join("db");
 	let backup = dir.join("backup");
 

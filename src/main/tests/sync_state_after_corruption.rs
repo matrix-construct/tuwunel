@@ -1,9 +1,6 @@
 #![cfg(test)]
 
-use std::{
-	env::var, fs::remove_dir_all, net::TcpListener, path::PathBuf, process::id as process_id,
-	time::Duration,
-};
+use std::{fs::remove_dir_all, net::TcpListener, time::Duration};
 
 use serde_json::{Value, json};
 use tokio::time::{sleep, timeout};
@@ -24,9 +21,7 @@ fn corrupt_state_after_is_scoped_to_one_joined_room() -> Result {
 	let listener = TcpListener::bind(("127.0.0.1", 0))?;
 	let port = listener.local_addr()?.port();
 
-	let root = var("TMPDIR").unwrap_or_else(|_| "/nvme/target/tmp".into());
-	let db_path =
-		PathBuf::from(root).join(format!("tuwunel-sync-state-after-corruption-{}", process_id()));
+	let db_path = Args::test_database_path("sync-state-after-corruption");
 
 	let mut args = Args::default_test(&["fresh", "cleanup"]);
 

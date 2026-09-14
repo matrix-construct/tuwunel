@@ -1,6 +1,6 @@
 #![cfg(test)]
 
-use std::{env::var, fs::remove_dir_all, path::PathBuf, process::id as process_id};
+use std::{fs::remove_dir_all, path::PathBuf};
 
 use futures::{StreamExt, pin_mut};
 use tuwunel::{Args, Runtime, Server, async_run, async_start, async_stop};
@@ -21,10 +21,7 @@ impl Drop for DatabasePath {
 
 #[test]
 fn batch_duplicates_share_one_shorteventid() -> Result {
-	let root = var("TMPDIR").unwrap_or_else(|_| "/nvme/target/tmp".into());
-	let db_path = DatabasePath(
-		PathBuf::from(root).join(format!("tuwunel-short-id-allocation-{}", process_id())),
-	);
+	let db_path = DatabasePath(Args::test_database_path("short-id-allocation"));
 
 	let mut args = Args::default_test(&["fresh", "cleanup"]);
 	args.maintenance = true;

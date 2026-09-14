@@ -1,6 +1,6 @@
 #![cfg(test)]
 
-use std::{env::temp_dir, fs::remove_dir_all, path::PathBuf, process::id as process_id};
+use std::{fs::remove_dir_all, path::PathBuf};
 
 use tuwunel::{Args, Runtime, Server, async_run, async_start, async_stop};
 use tuwunel_core::{
@@ -24,8 +24,7 @@ impl Drop for DatabasePath {
 /// sentinel reactivates it.
 #[test]
 fn ldap_login_gate_rejects_only_deactivated_accounts() -> Result {
-	let db_path =
-		DatabasePath(temp_dir().join(format!("tuwunel-ldap-login-gate-{}", process_id())));
+	let db_path = DatabasePath(Args::test_database_path("ldap-login-gate"));
 
 	let mut args = Args::default_test(&["fresh", "cleanup"]);
 

@@ -1,8 +1,6 @@
 #![cfg(test)]
 
-use std::{
-	env::var, fs::remove_dir_all, net::TcpListener, path::PathBuf, process::id as process_id,
-};
+use std::{fs::remove_dir_all, net::TcpListener};
 
 use serde_json::json;
 use tuwunel::{Args, Runtime, Server, async_run, async_start, async_stop};
@@ -35,8 +33,7 @@ fn related_event_match_is_inert_by_default() -> Result {
 	let listener = TcpListener::bind(("127.0.0.1", 0))?;
 	let port = listener.local_addr()?.port();
 
-	let root = var("TMPDIR").unwrap_or_else(|_| "/nvme/target/tmp".into());
-	let db_path = PathBuf::from(root).join(format!("tuwunel-msc3664-disabled-{}", process_id()));
+	let db_path = Args::test_database_path("msc3664-disabled");
 
 	let mut args = Args::default_test(&["fresh", "cleanup"]);
 

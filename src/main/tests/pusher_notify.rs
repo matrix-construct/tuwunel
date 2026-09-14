@@ -1,9 +1,6 @@
 #![cfg(test)]
 
-use std::{
-	env::var, fs::remove_dir_all, path::PathBuf, process::id as process_id, str::from_utf8,
-	time::Duration,
-};
+use std::{fs::remove_dir_all, str::from_utf8, time::Duration};
 
 use serde_json::{Value, json};
 use tokio::{
@@ -90,9 +87,7 @@ struct Fixture<'a> {
 /// One server boot runs the cases sequentially.
 #[test]
 fn pusher_notify() -> Result {
-	let root = var("TMPDIR").unwrap_or_else(|_| "/nvme/target/tmp".into());
-	let db_path =
-		PathBuf::from(root).join(format!("tuwunel-test-pusher-notify-{}", process_id()));
+	let db_path = Args::test_database_path("test-pusher-notify");
 
 	let mut args = Args::default_test(&["fresh", "cleanup"]);
 	args.option

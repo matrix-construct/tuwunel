@@ -1,6 +1,6 @@
 #![cfg(test)]
 
-use std::{fs::remove_dir_all, process::id as process_id};
+use std::fs::remove_dir_all;
 
 use tuwunel::{Args, Runtime, Server};
 use tuwunel_core::{Err, Result};
@@ -9,14 +9,12 @@ use tuwunel_core::{Err, Result};
 /// alone must not bring up the OIDC server.
 #[test]
 fn oidc_absent_without_idp_or_native() -> Result {
-	let db_path = format!("/tmp/tuwunel-test-native-gate-{}", process_id());
+	let db_path = Args::test_database_path("native-gate");
 
-	let mut args = Args::default_test(&["fresh", "cleanup"]);
-	args.maintenance = true;
-	args.option.extend([
-		format!("database_path=\"{db_path}\""),
-		"well_known.client=\"https://localhost\"".to_owned(),
-	]);
+	let args = Args::default_test(&["fresh", "cleanup"])
+		.with_database_path(&db_path)
+		.with_maintenance()
+		.with_option("well_known.client=\"https://localhost\"");
 
 	let runtime = Runtime::new(Some(&args))?;
 	let server = Server::new(Some(&args), Some(&runtime))?;

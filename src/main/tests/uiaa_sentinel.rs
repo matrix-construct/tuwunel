@@ -1,6 +1,6 @@
 #![cfg(test)]
 
-use std::{env::var, fs::remove_dir_all, path::PathBuf, process::id as process_id};
+use std::{fs::remove_dir_all, path::PathBuf};
 
 use tuwunel::{Args, Runtime, Server, async_run, async_start, async_stop};
 use tuwunel_core::{
@@ -23,10 +23,7 @@ impl Drop for DatabasePath {
 
 #[test]
 fn sentinel_password_does_not_bypass_uiaa() -> Result {
-	let root = var("TMPDIR").unwrap_or_else(|_| "/nvme/target/tmp".into());
-	let db_path = DatabasePath(
-		PathBuf::from(root).join(format!("tuwunel-test-uiaa-sentinel-{}", process_id())),
-	);
+	let db_path = DatabasePath(Args::test_database_path("test-uiaa-sentinel"));
 
 	let mut args = Args::default_test(&["fresh", "cleanup"]);
 

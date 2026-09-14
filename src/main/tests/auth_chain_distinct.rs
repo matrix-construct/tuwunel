@@ -1,6 +1,6 @@
 #![cfg(test)]
 
-use std::{env::var, fs::remove_dir_all, iter::once, path::PathBuf, process::id as process_id};
+use std::{fs::remove_dir_all, iter::once, path::PathBuf};
 
 use futures::TryStreamExt;
 use serde_json::json;
@@ -25,9 +25,7 @@ impl Drop for DatabasePath {
 
 #[test]
 fn auth_chain_is_distinct_and_caches_only_complete_walks() -> Result {
-	let root = var("TMPDIR").unwrap_or_else(|_| "/nvme/target/tmp".into());
-	let path = PathBuf::from(root).join(format!("tuwunel-auth-chain-distinct-{}", process_id()));
-	let db_path = DatabasePath(path);
+	let db_path = DatabasePath(Args::test_database_path("auth-chain-distinct"));
 
 	let mut args = Args::default_test(&["fresh", "cleanup"]);
 

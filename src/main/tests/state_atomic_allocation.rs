@@ -1,6 +1,6 @@
 #![cfg(test)]
 
-use std::{env::var, fs::remove_dir_all, path::PathBuf, process::id as process_id, sync::Arc};
+use std::{fs::remove_dir_all, path::PathBuf, sync::Arc};
 
 use tuwunel::{Args, Runtime, Server, async_run, async_start, async_stop};
 use tuwunel_core::{
@@ -23,10 +23,7 @@ impl Drop for DatabasePath {
 
 #[test]
 fn state_hash_allocation_persists_an_atomic_pair() -> Result {
-	let root = var("TMPDIR").unwrap_or_else(|_| "/nvme/target/tmp".into());
-	let db_path = DatabasePath(
-		PathBuf::from(root).join(format!("tuwunel-state-atomic-allocation-{}", process_id())),
-	);
+	let db_path = DatabasePath(Args::test_database_path("state-atomic-allocation"));
 
 	let mut args = Args::default_test(&["fresh", "cleanup"]);
 	args.maintenance = true;

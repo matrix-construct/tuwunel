@@ -53,15 +53,13 @@ fn uiaa_password_account_skips_ldap() -> Result {
 		}
 	});
 
-	let mut args = Args::default_test(&["fresh", "cleanup"]);
-	args.maintenance = true;
-	// Isolate the database under /tmp so parallel test binaries do not contend.
-	let db_path = format!("/tmp/tuwunel-test-uiaa-ldap-{}", std::process::id());
-	args.option
-		.push(format!("database_path=\"{db_path}\""));
-	args.option.push("ldap.enable=true".into());
-	args.option
-		.push(format!("ldap.uri=\"ldap://127.0.0.1:{port}\""));
+	let db_path = Args::test_database_path("uiaa-ldap");
+
+	let args = Args::default_test(&["fresh", "cleanup"])
+		.with_database_path(&db_path)
+		.with_maintenance()
+		.with_option("ldap.enable=true")
+		.with_option(format!("ldap.uri=\"ldap://127.0.0.1:{port}\""));
 
 	let runtime = Runtime::new(Some(&args))?;
 	let server = Server::new(Some(&args), Some(&runtime))?;

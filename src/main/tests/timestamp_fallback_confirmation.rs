@@ -2,11 +2,9 @@
 
 use std::{
 	convert::identity,
-	env::var,
 	fs::remove_dir_all,
 	net::TcpListener,
 	path::PathBuf,
-	process::id as process_id,
 	sync::{
 		Arc,
 		atomic::{AtomicUsize, Ordering::SeqCst},
@@ -112,10 +110,7 @@ fn timestamp_fallback_confirms_the_requested_event() -> Result {
 
 	peer_listener.set_nonblocking(true)?;
 
-	let root = var("TMPDIR").unwrap_or_else(|_| "/nvme/target/tmp".into());
-	let db_path = DatabasePath(
-		PathBuf::from(root).join(format!("tuwunel-timestamp-confirmation-{}", process_id())),
-	);
+	let db_path = DatabasePath(Args::test_database_path("timestamp-confirmation"));
 
 	let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
 	let certificate = manifest.join(CERTIFICATE);

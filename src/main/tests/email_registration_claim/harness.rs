@@ -3,7 +3,7 @@ use std::{
 	fs::{read, remove_dir_all, remove_file, write},
 	net::TcpListener,
 	path::{Path, PathBuf},
-	process::{Command, id as process_id},
+	process::Command,
 	sync::Arc,
 };
 
@@ -41,11 +41,7 @@ pub(super) struct ClaimState {
 
 impl DatabasePath {
 	pub(super) fn new(label: &str) -> Self {
-		let root = var("TMPDIR").unwrap_or_else(|_| "/nvme/target/tmp".into());
-		let path = PathBuf::from(root)
-			.join(format!("tuwunel-email-registration-claim-{label}-{}", process_id()));
-
-		Self(path)
+		Self(Args::test_database_path(format_args!("email-registration-claim-{label}")))
 	}
 }
 

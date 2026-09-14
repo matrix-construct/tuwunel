@@ -4,12 +4,9 @@
 
 use std::{
 	collections::BTreeSet,
-	env::var,
 	fs::remove_dir_all,
 	iter::once,
 	net::TcpListener,
-	path::PathBuf,
-	process::id as process_id,
 	sync::{
 		Arc,
 		atomic::{AtomicBool, Ordering},
@@ -126,9 +123,7 @@ fn run_case(case: Case) -> Result {
 		.map_err(|error| case_error(error.into()))?
 		.port();
 
-	let root = var("TMPDIR").unwrap_or_else(|_| "/nvme/target/tmp".into());
-	let db_path =
-		PathBuf::from(root).join(format!("tuwunel-state-local-build-{name}-{}", process_id()));
+	let db_path = Args::test_database_path(format_args!("state-local-build-{name}"));
 
 	let args = {
 		let mut args = Args::default_test(&["fresh", "cleanup"]);

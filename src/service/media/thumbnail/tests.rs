@@ -2,7 +2,7 @@
 
 use std::{
 	cell::Cell,
-	env::var,
+	env::temp_dir,
 	fs::remove_dir_all,
 	iter::repeat_with,
 	path::{Path, PathBuf},
@@ -522,10 +522,10 @@ async fn cancel_queued_request(
 }
 
 fn database_path(name: &str) -> DatabasePath {
-	let root = var("TMPDIR").unwrap_or_else(|_| "/nvme/target/tmp".into());
-
 	DatabasePath(
-		PathBuf::from(root).join(format!("tuwunel-media-admission-{}-{name}", process_id())),
+		temp_dir()
+			.join("tuwunel")
+			.join(format!("tuwunel-media-admission-{}-{name}", process_id())),
 	)
 }
 

@@ -3,7 +3,7 @@ use std::{
 	fs::{read, remove_dir_all, remove_file, write},
 	net::TcpListener,
 	path::{Path, PathBuf},
-	process::{Command, id as process_id},
+	process::Command,
 	sync::Arc,
 };
 
@@ -48,13 +48,9 @@ pub(super) fn run() -> Result {
 }
 
 fn run_restart_pair() -> Result {
-	let root = var("TMPDIR").unwrap_or_else(|_| "/nvme/target/tmp".into());
-	let root = PathBuf::from(root);
-	let suffix = process_id();
-	let paths = TestPaths {
-		database: root.join(format!("tuwunel-email-password-reset-{suffix}")),
-		state: root.join(format!("tuwunel-email-password-reset-{suffix}.json")),
-	};
+	let database = Args::test_database_path("email-password-reset");
+	let state = database.with_extension("json");
+	let paths = TestPaths { database, state };
 
 	let executable = current_exe()?;
 

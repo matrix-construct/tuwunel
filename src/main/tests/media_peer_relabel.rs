@@ -15,11 +15,9 @@
 //! since a request that stops recurring is visible in nothing else.
 
 use std::{
-	env::var,
 	fs::remove_dir_all,
 	net::TcpListener,
 	path::PathBuf,
-	process::id as process_id,
 	sync::{
 		Arc, Mutex,
 		atomic::{AtomicUsize, Ordering},
@@ -172,10 +170,7 @@ fn a_peers_mislabelled_thumbnail_is_cached_under_its_container() -> Result {
 	// the caller only as a peer that never answered
 	listener.set_nonblocking(true)?;
 
-	let root = var("TMPDIR").unwrap_or_else(|_| "/tmp".into());
-	let db_path = DatabasePath(
-		PathBuf::from(root).join(format!("tuwunel-media-peer-relabel-{}", process_id())),
-	);
+	let db_path = DatabasePath(Args::test_database_path("media-peer-relabel"));
 
 	let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
 	let certificate = manifest.join(CERTIFICATE);

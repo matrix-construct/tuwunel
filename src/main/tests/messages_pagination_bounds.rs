@@ -1,6 +1,6 @@
 #![cfg(test)]
 
-use std::{env::temp_dir, fs::remove_dir_all, net::TcpListener, process::id as process_id};
+use std::{fs::remove_dir_all, net::TcpListener};
 
 use futures::future::join;
 use reqwest::{Response, StatusCode};
@@ -32,7 +32,7 @@ const EMPTY_FILTER: &str = r#"{"types":["com.example.never"]}"#;
 fn messages_respect_pagination_bounds() -> Result {
 	let listener = TcpListener::bind(("127.0.0.1", 0))?;
 	let port = listener.local_addr()?.port();
-	let db_path = temp_dir().join(format!("tuwunel-pagination-bounds-{}", process_id()));
+	let db_path = Args::test_database_path("pagination-bounds");
 	let args = Args::default_test(&["fresh", "cleanup"])
 		.with_option(format!("database_path={db_path:?}"))
 		.with_option("address=[\"127.0.0.1\"]")

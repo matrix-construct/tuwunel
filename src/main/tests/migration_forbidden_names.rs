@@ -4,7 +4,7 @@ use std::{
 	env::{current_exe, var},
 	fs::remove_dir_all,
 	path::{Path, PathBuf},
-	process::{Command, id as process_id},
+	process::Command,
 	sync::{
 		Arc,
 		atomic::{AtomicUsize, Ordering::SeqCst},
@@ -48,10 +48,7 @@ fn forbidden_name_scans_stop_within_one_item() -> Result {
 		};
 	}
 
-	let root = var("TMPDIR").unwrap_or_else(|_| "/nvme/target/tmp".into());
-	let database = DatabasePath(
-		PathBuf::from(root).join(format!("tuwunel-migration-scan-{}", process_id())),
-	);
+	let database = DatabasePath(Args::test_database_path("migration-scan"));
 
 	for phase in ["seed", "users", "aliases"] {
 		run_child(&database.0, phase)?;

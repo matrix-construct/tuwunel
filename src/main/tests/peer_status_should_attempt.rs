@@ -1,6 +1,6 @@
 #![cfg(test)]
 
-use std::{env::temp_dir, fs::remove_dir_all, process::id as process_id};
+use std::fs::remove_dir_all;
 
 use tuwunel::{Args, Runtime, Server, async_run, async_start, async_stop};
 use tuwunel_core::{Result, err, ruma::OwnedServerName};
@@ -12,7 +12,7 @@ use tuwunel_service::federation::{Classification, ShouldAttempt};
 /// A peer that just failed must instead report `No`.
 #[test]
 fn should_attempt_backs_off_after_failure() -> Result {
-	let db_dir = temp_dir().join(format!("tuwunel-peer-status-should-attempt-{}", process_id()));
+	let db_dir = Args::test_database_path("peer-status-should-attempt");
 
 	let mut args = Args::default_test(&["fresh", "cleanup"]);
 	args.maintenance = true;

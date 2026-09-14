@@ -1,9 +1,6 @@
 #![cfg(test)]
 
-use std::{
-	env::temp_dir, fs::remove_dir_all, net::TcpListener, path::PathBuf,
-	process::id as process_id, time::Duration,
-};
+use std::{fs::remove_dir_all, net::TcpListener, path::PathBuf, time::Duration};
 
 use futures::future::join;
 use serde_json::{
@@ -59,11 +56,7 @@ impl Drop for DatabasePath {
 fn membership_nonacceptance_is_forbidden() -> Result {
 	let listener = TcpListener::bind(("127.0.0.1", 0))?;
 	let port = listener.local_addr()?.port();
-	let path = temp_dir()
-		.join("tuwunel")
-		.join(format!("membership-refusal-{}", process_id()));
-
-	let db_path = DatabasePath(path);
+	let db_path = DatabasePath(Args::test_database_path("membership-refusal"));
 
 	let mut args = Args::default_test(&["fresh", "cleanup"]);
 

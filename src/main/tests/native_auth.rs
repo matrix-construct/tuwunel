@@ -1,6 +1,6 @@
 #![cfg(test)]
 
-use std::{fs::remove_dir_all, process::id as process_id};
+use std::fs::remove_dir_all;
 
 use tuwunel::{Args, Runtime, Server};
 use tuwunel_core::{Err, Result, ruma::UserId};
@@ -11,16 +11,13 @@ use tuwunel_service::{Services, users::Register};
 /// relies on round-trips for a freshly registered local account.
 #[test]
 fn native_oidc_serves_local_accounts() -> Result {
-	// Isolate the database under /tmp so parallel test binaries do not contend.
-	let db_path = format!("/tmp/tuwunel-test-native-auth-{}", process_id());
+	let db_path = Args::test_database_path("native-auth");
 
-	let mut args = Args::default_test(&["fresh", "cleanup"]);
-	args.maintenance = true;
-	args.option.extend([
-		format!("database_path=\"{db_path}\""),
-		"well_known.client=\"https://localhost\"".to_owned(),
-		"oidc_native_auth=true".to_owned(),
-	]);
+	let args = Args::default_test(&["fresh", "cleanup"])
+		.with_database_path(&db_path)
+		.with_maintenance()
+		.with_option("well_known.client=\"https://localhost\"")
+		.with_option("oidc_native_auth=true");
 
 	let runtime = Runtime::new(Some(&args))?;
 	let server = Server::new(Some(&args), Some(&runtime))?;

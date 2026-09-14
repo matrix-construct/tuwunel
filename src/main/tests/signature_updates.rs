@@ -3,8 +3,6 @@
 #[path = "signature_updates/mod.rs"]
 mod fixture;
 
-use std::{env::temp_dir, process::id};
-
 use futures::{FutureExt, StreamExt};
 use tuwunel::{Args, Runtime, Server, async_run, async_start, async_stop};
 use tuwunel_core::{
@@ -18,12 +16,10 @@ use self::fixture::{Fixture, assert_changes, register_appservice};
 
 #[test]
 fn signatures_are_canonical_and_foreign_updates_are_private() -> Result {
-	let path = temp_dir()
-		.join("tuwunel")
-		.join(format!("signature-updates-{}", id()));
+	let database = Args::test_database_path("signature-updates");
 
 	let args = Args::default_test(&["fresh", "cleanup"])
-		.with_option(format!("database_path={path:?}"))
+		.with_database_path(&database)
 		.with_option("allow_local_presence=false")
 		.with_option("allow_outgoing_presence=false")
 		.with_option("device_key_update_encrypted_rooms_only=false");

@@ -21,7 +21,7 @@ mod policy;
 // test module, so the wrapper is load-bearing rather than ceremony
 #[cfg(test)]
 mod tests {
-	use std::{env::var, net::TcpListener, path::PathBuf, process::id as process_id};
+	use std::net::TcpListener;
 
 	use futures::{StreamExt, TryStreamExt, future::join};
 	use insta::{assert_snapshot, with_settings};
@@ -98,9 +98,7 @@ mod tests {
 		let listener = TcpListener::bind(("127.0.0.1", 0))?;
 		let port = listener.local_addr()?.port();
 
-		let root = var("TMPDIR").unwrap_or_else(|_| "/tmp".into());
-		let path = PathBuf::from(root).join(format!("tuwunel-media-baseline-{}", process_id()));
-		let db_path = DatabasePath(path);
+		let db_path = DatabasePath(Args::test_database_path("media-baseline"));
 
 		let args = [
 			format!("database_path={:?}", db_path.0),

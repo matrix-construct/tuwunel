@@ -1,6 +1,11 @@
 //! Integration with `clap`
 
-use std::{env::temp_dir, path::PathBuf};
+use std::{
+	env::temp_dir,
+	fmt::Display,
+	path::{Path, PathBuf},
+	process::id as process_id,
+};
 
 use clap::{ArgAction, Parser, builder::RangedU64ValueParser};
 use tuwunel_core::{
@@ -313,17 +318,42 @@ fn histogram_buckets_parser() -> RangedU64ValueParser<usize> {
 #[implement(Args)]
 #[must_use]
 pub fn default_test(name: &[&str]) -> Self {
-	let database_path = temp_dir().join("tuwunel").join(random_string(32));
-	let escaped = database_path
+	Self::default()
+		.with_tests(name)
+		.with_option("server_name=\"localhost\"")
+		.with_database_path(&test_database_root().join(random_string(32)))
+}
+
+/// Returns these arguments with the database path override appended.
+///
+/// The path is quoted as a TOML basic string, escaping backslashes and quotes,
+/// so any platform path survives the option parser.
+#[implement(Args)]
+#[must_use]
+pub fn with_database_path(self, path: &Path) -> Self {
+	let escaped = path
 		.to_string_lossy()
 		.replace('\\', "\\\\")
 		.replace('"', "\\\"");
 
-	Self::default()
-		.with_tests(name)
-		.with_option("server_name=\"localhost\"")
-		.with_option(format!("database_path=\"{escaped}\""))
+	self.with_option(format!("database_path=\"{escaped}\""))
 }
+
+/// Returns a dedicated database path for a named test.
+///
+/// The parent is the same `tuwunel` namespace under the platform temporary
+/// directory that `default_test` uses, so `TMPDIR` relocates every test
+/// database together; the child carries the name and the process id. The id
+/// rather than a random string keys the child so a fixture can hand the same
+/// path to its child processes, and a stale directory left by a reused id is
+/// cleared by the `fresh` harness on the first boot.
+#[implement(Args)]
+#[must_use]
+pub fn test_database_path<N: Display>(name: N) -> PathBuf {
+	test_database_root().join(format!("tuwunel-{name}-{}", process_id()))
+}
+
+fn test_database_root() -> PathBuf { temp_dir().join("tuwunel") }
 
 /// Returns these arguments with more test harnesses appended.
 ///
@@ -349,6 +379,22 @@ pub fn with_option<S: Into<String>>(mut self, option: S) -> Self {
 
 	self
 }
+
+/// Returns these arguments with one more console command to run at startup.
+#[implement(Args)]
+#[must_use]
+pub fn with_execute<S: Into<String>>(mut self, command: S) -> Self {
+	self.execute.push(command.into());
+
+	self
+}
+
+/// Returns these arguments with maintenance mode enabled.
+///
+/// The server boots without listening, so a test drives the services directly.
+#[implement(Args)]
+#[must_use]
+pub fn with_maintenance(self) -> Self { Self { maintenance: true, ..self } }
 
 impl Default for Args {
 	fn default() -> Self { Self::parse() }

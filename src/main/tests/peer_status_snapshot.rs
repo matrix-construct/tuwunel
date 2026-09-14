@@ -1,6 +1,6 @@
 #![cfg(test)]
 
-use std::{env::temp_dir, fs::remove_dir_all};
+use std::fs::remove_dir_all;
 
 use tuwunel::{Args, Runtime, Server, async_exec};
 use tuwunel_core::Result;
@@ -11,7 +11,7 @@ use tuwunel_core::Result;
 /// deserializer, so the first yielded row panics and the command fails.
 #[test]
 fn peer_status_snapshot_reads_recorded_failure() -> Result {
-	let db_dir = temp_dir().join("tuwunel-peer-status-snapshot-test");
+	let db_dir = Args::test_database_path("peer-status-snapshot");
 
 	let mut args = Args::default_test(&["smoke", "fresh", "cleanup"]);
 	args.option

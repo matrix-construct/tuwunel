@@ -3,10 +3,7 @@
 #[cfg(test)]
 mod tests {
 
-	use std::{
-		env::var, fs::remove_dir_all, net::TcpListener, path::PathBuf, process::id as process_id,
-		time::Duration,
-	};
+	use std::{fs::remove_dir_all, net::TcpListener, path::PathBuf, time::Duration};
 
 	use futures::future::join;
 	use tokio::time::{sleep, timeout};
@@ -36,10 +33,7 @@ mod tests {
 	fn feds_queries_report_this_server() -> Result {
 		let listener = TcpListener::bind(("127.0.0.1", 0))?;
 		let port = listener.local_addr()?.port();
-		let root = var("TMPDIR").unwrap_or_else(|_| "/nvme/target/tmp".into());
-		let database = DatabasePath(
-			PathBuf::from(root).join(format!("tuwunel-feds-query-{}", process_id())),
-		);
+		let database = DatabasePath(Args::test_database_path("feds-query"));
 
 		let source = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
 		let certificate = source.join(CERTIFICATE);

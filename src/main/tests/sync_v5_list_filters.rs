@@ -1,9 +1,6 @@
 #![cfg(test)]
 
-use std::{
-	collections::BTreeSet, env::var, fs::remove_dir_all, net::TcpListener, path::PathBuf,
-	process::id as process_id, time::Duration,
-};
+use std::{collections::BTreeSet, fs::remove_dir_all, net::TcpListener, time::Duration};
 
 use futures::future::join;
 use serde_json::{Value, json};
@@ -52,8 +49,7 @@ fn list_filters_partition_rooms_by_dm_and_tag() -> Result {
 	let listener = TcpListener::bind(("127.0.0.1", 0))?;
 	let port = listener.local_addr()?.port();
 
-	let root = var("TMPDIR").unwrap_or_else(|_| "/nvme/target/tmp".into());
-	let db_path = PathBuf::from(root).join(format!("tuwunel-sync-v5-filters-{}", process_id()));
+	let db_path = Args::test_database_path("sync-v5-filters");
 
 	let mut args = Args::default_test(&["fresh", "cleanup"]);
 

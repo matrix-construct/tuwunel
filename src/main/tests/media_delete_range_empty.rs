@@ -1,6 +1,6 @@
 #![cfg(test)]
 
-use std::{fs::remove_dir_all, process::id as process_id};
+use std::fs::remove_dir_all;
 
 use tuwunel::{Args, Runtime, Server, async_run, async_start, async_stop};
 use tuwunel_admin::{fini, init};
@@ -15,13 +15,11 @@ use tuwunel_service::Services;
 /// delete-range` admin command reports zero deleted files.
 #[test]
 fn media_delete_range_empty_set() -> Result {
-	// Isolate the database under /tmp so parallel test binaries do not contend.
-	let db_path = format!("/tmp/tuwunel-test-media-delete-range-empty-{}", process_id());
+	let db_path = Args::test_database_path("media-delete-range-empty");
 
-	let mut args = Args::default_test(&["fresh", "cleanup"]);
-	args.maintenance = true;
-	args.option
-		.push(format!("database_path=\"{db_path}\""));
+	let args = Args::default_test(&["fresh", "cleanup"])
+		.with_database_path(&db_path)
+		.with_maintenance();
 
 	let runtime = Runtime::new(Some(&args))?;
 	let server = Server::new(Some(&args), Some(&runtime))?;

@@ -1,7 +1,7 @@
 #![cfg(test)]
 #![cfg(feature = "media_thumbnail")]
 
-use std::{env::var, fs::remove_dir_all, path::PathBuf, process::id as process_id};
+use std::{fs::remove_dir_all, path::PathBuf};
 
 use tuwunel::{Args, Runtime, Server, async_run, async_start, async_stop};
 use tuwunel_core::{Err, Result, ruma::Mxc};
@@ -48,10 +48,7 @@ impl Drop for DatabasePath {
 /// is shown to withhold rather than to have broken generation outright.
 #[test]
 fn still_request_is_never_answered_with_an_animated_file() -> Result {
-	let root = var("TMPDIR").unwrap_or_else(|_| "/tmp".into());
-	let db_path = DatabasePath(
-		PathBuf::from(root).join(format!("tuwunel-media-thumbnail-still-{}", process_id())),
-	);
+	let db_path = DatabasePath(Args::test_database_path("media-thumbnail-still"));
 
 	let mut args = Args::default_test(&["fresh", "cleanup"])
 		.with_option(format!("database_path={:?}", db_path.0));

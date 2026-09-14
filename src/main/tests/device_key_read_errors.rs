@@ -1,6 +1,6 @@
 #![cfg(test)]
 
-use std::{env::temp_dir, fs::remove_dir_all, net::TcpListener};
+use std::{fs::remove_dir_all, net::TcpListener};
 
 use futures::future::join;
 use reqwest::{Response, StatusCode};
@@ -12,7 +12,6 @@ use tuwunel_core::{
 		DeviceId, UserId, device_id,
 		serde::{Base64, base64::Standard},
 	},
-	utils::random_string,
 };
 use tuwunel_service::{Services, users::Register};
 
@@ -33,8 +32,7 @@ const DEVICE: &str = "READERRORS";
 fn device_key_read_errors_preserve_stored_bytes() -> Result {
 	let listener = TcpListener::bind(("127.0.0.1", 0))?;
 	let port = listener.local_addr()?.port();
-	let db_path =
-		temp_dir().join(format!("tuwunel-device-key-read-errors-{}", random_string(32)));
+	let db_path = Args::test_database_path("device-key-read-errors");
 
 	let args = Args::default_test(&["fresh", "cleanup"])
 		.with_option(format!("database_path={db_path:?}"))

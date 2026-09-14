@@ -1,9 +1,6 @@
 #![cfg(test)]
 
-use std::{
-	fs::remove_dir_all, iter::once, process::id as process_id, str::from_utf8, sync::Arc,
-	time::Duration,
-};
+use std::{fs::remove_dir_all, iter::once, str::from_utf8, sync::Arc, time::Duration};
 
 use serde_json::{Value, json};
 use tokio::{
@@ -35,12 +32,11 @@ const FALLBACK: &str = "org.matrix.msc3202.device_unused_fallback_key_types";
 /// transaction IDs.
 #[test]
 fn appservice_e2ee_transactions() -> Result {
-	let db_path = format!("/tmp/tuwunel-test-appservice-txn-{}", process_id());
+	let db_path = Args::test_database_path("appservice-txn");
 
-	let mut args = Args::default_test(&["fresh", "cleanup"]);
-	args.maintenance = true;
-	args.option
-		.push(format!("database_path=\"{db_path}\""));
+	let args = Args::default_test(&["fresh", "cleanup"])
+		.with_database_path(&db_path)
+		.with_maintenance();
 
 	let runtime = Runtime::new(Some(&args))?;
 	let server = Server::new(Some(&args), Some(&runtime))?;

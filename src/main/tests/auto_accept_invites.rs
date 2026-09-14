@@ -1,9 +1,6 @@
 #![cfg(test)]
 
-use std::{
-	env::var, fs::remove_dir_all, net::TcpListener, path::PathBuf, process::id as process_id,
-	time::Duration,
-};
+use std::{fs::remove_dir_all, net::TcpListener, time::Duration};
 
 use futures::future::join;
 use serde_json::{Value, json};
@@ -45,8 +42,7 @@ fn direct_invites_are_accepted_and_others_are_not() -> Result {
 	let listener = TcpListener::bind(("127.0.0.1", 0))?;
 	let port = listener.local_addr()?.port();
 
-	let root = var("TMPDIR").unwrap_or_else(|_| "/nvme/target/tmp".into());
-	let db_path = PathBuf::from(root).join(format!("tuwunel-auto-accept-{}", process_id()));
+	let db_path = Args::test_database_path("auto-accept");
 
 	let mut args = Args::default_test(&["fresh", "cleanup"]);
 
