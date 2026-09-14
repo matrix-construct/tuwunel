@@ -6,6 +6,7 @@ use std::{
 	time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
+use clap::ValueEnum;
 use futures::{StreamExt, stream::iter};
 use ruma::{
 	OwnedRoomOrAliasId,
@@ -43,6 +44,22 @@ enum ListMode {
 	Errors,
 }
 
+/// Column ordering the detail listing.
+///
+/// Rows equal under the chosen column keep their origin order.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, ValueEnum)]
+pub(crate) enum Sort {
+	/// Server name.
+	#[default]
+	Origin,
+
+	/// Request latency, fastest first.
+	Elapsed,
+
+	/// Failure message.
+	Fault,
+}
+
 #[admin_command]
 pub(super) async fn feds_version(
 	&self,
@@ -50,6 +67,7 @@ pub(super) async fn feds_version(
 	list: bool,
 	list_all: bool,
 	list_errors: bool,
+	sort: Sort,
 	sweep: SweepArgs,
 ) -> Result {
 	let prepared = prepare(self, &room, sweep, WIDTH_DEFAULT).await?;
@@ -121,7 +139,7 @@ pub(super) async fn feds_version(
 		| _ => ListMode::None,
 	};
 
-	let output = render(outcomes, total, list_mode);
+	let output = render(outcomes, total, list_mode, sort);
 
 	self.write_str(&output).await
 }
@@ -136,15 +154,39 @@ fn into_version(response: Response) -> Option<Version> {
 	})
 }
 
-fn render(mut outcomes: Vec<VersionOutcome>, total: Duration, list_mode: ListMode) -> String {
-	outcomes.sort_by(|left, right| left.origin.cmp(&right.origin));
-
+fn render(
+	outcomes: Vec<VersionOutcome>,
+	total: Duration,
+	list_mode: ListMode,
+	sort: Sort,
+) -> String {
+	let outcomes = sorted(outcomes, sort);
 	let mut output = String::new();
 
 	render_into(&mut output, &outcomes, total, list_mode)
 		.expect("writing to a String cannot fail");
 
 	output
+}
+
+fn sorted(mut outcomes: Vec<VersionOutcome>, sort: Sort) -> Vec<VersionOutcome> {
+	// Both secondary sorts are stable, so origin order remains the tie-breaker.
+	outcomes.sort_by(|left, right| left.origin.cmp(&right.origin));
+	match sort {
+		| Sort::Origin => {},
+		| Sort::Elapsed => outcomes.sort_by_key(|outcome| outcome.elapsed),
+		| Sort::Fault => outcomes.sort_by_cached_key(fault_cell),
+	}
+
+	outcomes
+}
+
+fn fault_cell(outcome: &VersionOutcome) -> Cow<'static, str> {
+	match &outcome.result {
+		| Ok(Some(_)) => Cow::Borrowed(""),
+		| Ok(None) => Cow::Borrowed("missing server metadata"),
+		| Err(fault) => fault_message(fault),
+	}
 }
 
 fn render_into(
@@ -209,32 +251,28 @@ fn render_into(
 		| ListMode::All => true,
 		| ListMode::Errors => outcome.result.is_err(),
 	}) {
-		match &outcome.result {
-			| Ok(Some(_)) =>
-				writeln!(output, "| {} | {} | |", outcome.origin, Elapsed::from(outcome.elapsed),)?,
-			| Ok(None) => writeln!(
-				output,
-				"| {} | {} | missing server metadata |",
-				outcome.origin,
-				Elapsed::from(outcome.elapsed),
-			)?,
-			| Err(fault @ (Fault::NotAttempted | Fault::Backoff { .. })) => writeln!(
-				output,
-				"| {} | | {} |",
-				outcome.origin,
-				markdown_cell(&fault_message(fault)),
-			)?,
-			| Err(fault) => writeln!(
-				output,
-				"| {} | {} | {} |",
-				outcome.origin,
-				Elapsed::from(outcome.elapsed),
-				markdown_cell(&fault_message(fault)),
-			)?,
-		}
+		render_row(output, outcome)?;
 	}
 
 	render_totals(output, results, total)
+}
+
+fn render_row(output: &mut String, outcome: &VersionOutcome) -> FmtResult {
+	let fault = fault_cell(outcome);
+
+	match &outcome.result {
+		| Ok(Some(_)) =>
+			writeln!(output, "| {} | {} | |", outcome.origin, Elapsed::from(outcome.elapsed)),
+		| Err(Fault::NotAttempted | Fault::Backoff { .. }) =>
+			writeln!(output, "| {} | | {} |", outcome.origin, markdown_cell(&fault)),
+		| _ => writeln!(
+			output,
+			"| {} | {} | {} |",
+			outcome.origin,
+			Elapsed::from(outcome.elapsed),
+			markdown_cell(&fault),
+		),
+	}
 }
 
 fn option_cell(value: Option<&str>) -> Cow<'_, str> {
@@ -261,14 +299,10 @@ mod tests {
 				elapsed: Duration::ZERO,
 				result: Ok(None),
 			},
-			Outcome {
-				origin: server_name!("skipped.example").to_owned(),
-				elapsed: Duration::ZERO,
-				result: Err(Fault::NotAttempted),
-			},
+			failed(server_name!("skipped.example"), Duration::ZERO, Fault::NotAttempted),
 		];
 
-		let output = render(outcomes, Duration::ZERO, ListMode::All);
+		let output = render(outcomes, Duration::ZERO, ListMode::All, Sort::Origin);
 		let popular = output
 			.find("| 1 | 2 | zeta |  |  |  |  |")
 			.expect("popular version should be rendered first");
@@ -292,44 +326,93 @@ mod tests {
 		let outcomes = || {
 			vec![
 				success(server_name!("good.example"), "alpha"),
-				Outcome {
-					origin: server_name!("bad.example").to_owned(),
-					elapsed: Duration::from_secs(1),
-					result: Err(Fault::Elapsed),
-				},
-				Outcome {
-					origin: server_name!("backoff.example").to_owned(),
-					elapsed: Duration::ZERO,
-					result: Err(Fault::Backoff {
-						class: Classification::Transient,
-						age: Duration::from_secs(30),
-						retry: Duration::from_secs(10),
-					}),
-				},
+				failed(server_name!("bad.example"), Duration::from_secs(1), Fault::Elapsed),
+				failed(server_name!("backoff.example"), Duration::ZERO, Fault::Backoff {
+					class: Classification::Transient,
+					age: Duration::from_secs(30),
+					retry: Duration::from_secs(10),
+				}),
 			]
 		};
 
-		let summary = render(outcomes(), Duration::ZERO, ListMode::None);
+		let summary = render(outcomes(), Duration::ZERO, ListMode::None, Sort::Origin);
 
 		assert!(!summary.contains("| origin |"));
 		assert!(summary.ends_with("\n1 result in 0ns.\n"));
 
-		let successes = render(outcomes(), Duration::ZERO, ListMode::Successes);
+		let successes = render(outcomes(), Duration::ZERO, ListMode::Successes, Sort::Origin);
 
 		assert!(successes.contains("good.example"));
 		assert!(!successes.contains("bad.example"));
 		assert!(!successes.contains("backoff.example"));
 
-		let all = render(outcomes(), Duration::ZERO, ListMode::All);
+		let all = render(outcomes(), Duration::ZERO, ListMode::All, Sort::Origin);
 
 		assert!(all.contains("backoff.example"));
 
-		let errors = render(outcomes(), Duration::ZERO, ListMode::Errors);
+		let errors = render(outcomes(), Duration::ZERO, ListMode::Errors, Sort::Origin);
 
 		assert!(!errors.contains("good.example"));
 		assert!(errors.contains("bad.example"));
 		assert!(errors.contains("backoff.example"));
 		assert!(errors.ends_with("\n1 result in 0ns.\n"));
+	}
+
+	#[test]
+	fn detail_listing_sorts_by_column_with_origin_as_tie_breaker() {
+		let outcomes = || {
+			vec![
+				Outcome {
+					origin: server_name!("slow.example").to_owned(),
+					elapsed: Duration::from_secs(2),
+					result: Ok(Some(Version::default())),
+				},
+				failed(server_name!("b-timeout.example"), Duration::from_secs(1), Fault::Elapsed),
+				failed(server_name!("a-timeout.example"), Duration::from_secs(1), Fault::Elapsed),
+				failed(server_name!("skipped.example"), Duration::ZERO, Fault::NotAttempted),
+			]
+		};
+
+		let by_origin = render(outcomes(), Duration::ZERO, ListMode::All, Sort::Origin);
+
+		assert_eq!(listed_origins(&by_origin), [
+			"a-timeout.example",
+			"b-timeout.example",
+			"skipped.example",
+			"slow.example"
+		]);
+
+		let by_elapsed = render(outcomes(), Duration::ZERO, ListMode::All, Sort::Elapsed);
+
+		assert_eq!(listed_origins(&by_elapsed), [
+			"skipped.example",
+			"a-timeout.example",
+			"b-timeout.example",
+			"slow.example"
+		]);
+
+		let by_fault = render(outcomes(), Duration::ZERO, ListMode::All, Sort::Fault);
+
+		assert_eq!(listed_origins(&by_fault), [
+			"slow.example",
+			"a-timeout.example",
+			"b-timeout.example",
+			"skipped.example"
+		]);
+	}
+
+	fn listed_origins(output: &str) -> Vec<&str> {
+		let (_, listing) = output
+			.split_once("| origin | elapsed | fault |\n")
+			.expect("detail listing should be rendered");
+
+		listing
+			.lines()
+			.skip(1)
+			.take_while(|line| line.starts_with('|'))
+			.filter_map(|line| line.split('|').nth(1))
+			.map(str::trim)
+			.collect()
 	}
 
 	fn success(origin: &ServerName, name: &str) -> VersionOutcome {
@@ -342,6 +425,14 @@ mod tests {
 			origin: origin.to_owned(),
 			elapsed: Duration::ZERO,
 			result: Ok(Some(version)),
+		}
+	}
+
+	fn failed(origin: &ServerName, elapsed: Duration, fault: Fault) -> VersionOutcome {
+		Outcome {
+			origin: origin.to_owned(),
+			elapsed,
+			result: Err(fault),
 		}
 	}
 }

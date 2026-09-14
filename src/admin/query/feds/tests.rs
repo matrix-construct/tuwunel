@@ -38,6 +38,34 @@ fn version_listing_modes_are_mutually_exclusive() {
 }
 
 #[test]
+fn version_sort_requires_a_listing_mode() {
+	for column in ["origin", "elapsed", "fault"] {
+		AdminCommand::try_parse_from([
+			"admin",
+			"query",
+			"feds",
+			"version",
+			"!room:example.org",
+			"--list-all",
+			"--sort",
+			column,
+		])
+		.expect("each sort column should parse with a listing mode");
+	}
+
+	AdminCommand::try_parse_from([
+		"admin",
+		"query",
+		"feds",
+		"version",
+		"!room:example.org",
+		"--sort",
+		"elapsed",
+	])
+	.expect_err("sorting should require a listing mode");
+}
+
+#[test]
 fn event_verification_defaults_on_and_switches_independently() {
 	assert_eq!(
 		event_verification(["admin", "query", "feds", "event", "$event:example.org"]),

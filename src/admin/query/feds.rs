@@ -22,6 +22,7 @@ use tuwunel_core::{
 };
 use tuwunel_service::federation::feds::{Fault, Opts, Outcome, Record};
 
+use self::version::Sort;
 use crate::{Context, admin_command_dispatch};
 
 /// Run feds diagnostics against every participating server in a room.
@@ -46,6 +47,10 @@ pub(crate) enum FedsCommand {
 		/// List servers whose request produced an error.
 		#[arg(long, group = "version_list")]
 		list_errors: bool,
+
+		/// Order the listed servers by this column.
+		#[arg(long, value_enum, default_value_t, requires = "version_list")]
+		sort: Sort,
 
 		#[command(flatten)]
 		sweep: SweepArgs,
