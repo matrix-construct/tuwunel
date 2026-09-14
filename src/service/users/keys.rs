@@ -1017,8 +1017,7 @@ pub async fn mark_device_key_update(&self, user_id: &UserId) {
 		.broad_then(async |room_id: OwnedRoomId| {
 			self.services
 				.state_cache
-				.room_servers(&room_id)
-				.ready_filter(|server| !self.services.globals.server_is_ours(server))
+				.remote_room_servers(&room_id)
 				.map(ToOwned::to_owned)
 				.collect()
 				.await

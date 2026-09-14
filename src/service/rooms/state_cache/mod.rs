@@ -138,6 +138,20 @@ pub fn clear_appservice_in_room_cache(&self) {
 		.clear();
 }
 
+/// Returns a stream of the remote servers participating in this room.
+///
+/// Our own server is filtered out, so the result is the federation fan-out
+/// set for the room.
+#[implement(Service)]
+#[tracing::instrument(skip(self), level = "trace")]
+pub fn remote_room_servers<'a>(
+	&'a self,
+	room_id: &'a RoomId,
+) -> impl Stream<Item = &ServerName> + Send + 'a {
+	self.room_servers(room_id)
+		.ready_filter(|server| !self.services.globals.server_is_ours(server))
+}
+
 /// Returns an iterator of all servers participating in this room.
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "debug")]
