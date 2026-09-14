@@ -283,7 +283,7 @@ async fn room_is_notice(
 		.account_data
 		.get_room_tags(target, room_id)
 		.map_ok(|tags| tags.contains_key(tag))
-		.or_else(async |error| error.is_not_found().then_some(false).ok_or(error))
+		.or_else(|error| ready(error.is_not_found().then_ok_or(false, error)))
 		.await?;
 
 	if !tagged {
