@@ -1,6 +1,10 @@
 use std::{collections::BTreeMap, mem, ops::Deref, sync::Arc};
 
-use futures::{Stream, StreamExt, TryFutureExt, future::join4, pin_mut};
+use futures::{
+	Stream, StreamExt, TryFutureExt,
+	future::{join, try_join3},
+	pin_mut,
+};
 use ruma::{
 	AnyKeyName, DeviceId, KeyId, OneTimeKeyAlgorithm, OneTimeKeyId, OneTimeKeyName, OwnedKeyId,
 	OwnedOneTimeKeyId, OwnedRoomId, OwnedServerName, RoomId, SigningKeyId, UInt, UserId,
@@ -641,15 +645,40 @@ async fn uploaded_key_role(&self, user_id: &UserId, key_id: &str) -> Result<Opti
 	let row_key = serialize_key((user_id, key_id))?;
 	let device_id: &DeviceId = key_id.into();
 
-	let (device, root, self_signing, user_signing) = join4(
+	let (device, pointers) = join(
 		self.device_exists(user_id, device_id),
-		pointer_matches(&self.db.userid_masterkeyid, user_id, row_key.as_slice()),
-		pointer_matches(&self.db.userid_selfsigningkeyid, user_id, row_key.as_slice()),
-		pointer_matches(&self.db.userid_usersigningkeyid, user_id, row_key.as_slice()),
+		self.cross_signing_pointers(user_id, row_key.as_slice()),
 	)
 	.await;
 
-	Ok(key_role([device, root?, self_signing?, user_signing?]))
+	let [root, self_signing, user_signing] = pointers?;
+
+	Ok(key_role([device, root, self_signing, user_signing]))
+}
+
+#[implement(super::Service)]
+pub(super) async fn is_cross_signing_key_id(
+	&self,
+	user_id: &UserId,
+	key_id: &str,
+) -> Result<bool> {
+	// Cross-signing rows share the device key row space under the bare public key.
+	let row_key = serialize_key((user_id, key_id))?;
+
+	self.cross_signing_pointers(user_id, row_key.as_slice())
+		.map_ok(|pointers| pointers.contains(&true))
+		.await
+}
+
+#[implement(super::Service)]
+async fn cross_signing_pointers(&self, user_id: &UserId, row_key: &[u8]) -> Result<[bool; 3]> {
+	try_join3(
+		pointer_matches(&self.db.userid_masterkeyid, user_id, row_key),
+		pointer_matches(&self.db.userid_selfsigningkeyid, user_id, row_key),
+		pointer_matches(&self.db.userid_usersigningkeyid, user_id, row_key),
+	)
+	.map_ok(|(root, self_signing, user_signing)| [root, self_signing, user_signing])
+	.await
 }
 
 #[tracing::instrument(

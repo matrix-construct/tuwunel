@@ -30,6 +30,9 @@ const DEVICE_ID_LENGTH: usize = 10;
 pub const TOKEN_LENGTH: usize = 32;
 
 /// Adds a new device to a user.
+///
+/// A device ID coinciding with one of the user's cross-signing key IDs is
+/// refused, since both share the device key row space.
 #[implement(super::Service)]
 #[tracing::instrument(level = "info", skip(self, access_token))]
 pub async fn create_device(
@@ -47,6 +50,13 @@ pub async fn create_device(
 		return Err!(Request(InvalidParam(error!(
 			"Called create_device for non-existent user {user_id}"
 		))));
+	}
+
+	if self
+		.is_cross_signing_key_id(user_id, device_id.as_str())
+		.await?
+	{
+		return Err!(Request(Forbidden("Device ID matches a cross-signing key ID.")));
 	}
 
 	let notify = true;

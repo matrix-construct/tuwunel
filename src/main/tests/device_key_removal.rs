@@ -4,7 +4,7 @@ use std::{env::temp_dir, fs::remove_dir_all, net::TcpListener};
 
 use futures::future::join;
 use reqwest::{Method, RequestBuilder, Response, StatusCode};
-use serde_json::{Value, json};
+use serde_json::{Value, from_value, json};
 use tuwunel::{Args, Runtime, Server, async_run, async_start, async_stop};
 use tuwunel_core::{
 	Result,
@@ -32,7 +32,8 @@ const DEVICE: &str = "REMOVEDKEYS";
 /// Removing a device removes its identity keys with it.
 ///
 /// A later session under the same device ID must start without the removed
-/// device's keys.
+/// device's keys, and a device ID naming one of the user's cross-signing keys
+/// must be refused at login rather than overwrite the signing row.
 #[test]
 fn device_removal_drops_its_identity_keys() -> Result {
 	let listener = TcpListener::bind(("127.0.0.1", 0))?;
@@ -132,6 +133,26 @@ async fn exercise(services: &Services, base: &str) -> Result {
 
 	assert_eq!(uploaded.status(), StatusCode::OK, "replacement device-key upload");
 	assert_eq!(queried_keys(&client, &user_id).await?, Some(replacement));
+
+	let public_key = encoded(3, 32);
+	let master_key = json!({
+		"user_id": user_id,
+		"usage": ["master"],
+		"keys": {format!("ed25519:{public_key}"): public_key},
+	});
+
+	services
+		.users
+		.add_cross_signing_keys(&user_id, &Some(from_value(master_key)?), &None, &None, true)
+		.await?;
+
+	let collision = login(&client, &public_key).await?;
+
+	assert_eq!(
+		collision.status(),
+		StatusCode::FORBIDDEN,
+		"a device ID naming a cross-signing key must be refused",
+	);
 
 	Ok(())
 }
