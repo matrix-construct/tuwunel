@@ -17,7 +17,7 @@ use tuwunel_core::{
 	pair_of,
 	utils::{
 		result::FlatOk,
-		stream::{BroadbandExt, IterStream, ReadyExt, TryBroadbandExt, TryIgnore},
+		stream::{BroadbandExt, IterStream, ReadyExt, TryBroadbandExt, TryIgnore, TryTools},
 	},
 };
 
@@ -399,15 +399,7 @@ pub fn state_full_ids_strict(
 	shortstatehash: ShortStateHash,
 ) -> impl Stream<Item = Result<(ShortStateKey, OwnedEventId)>> + Send + '_ {
 	self.state_full_shortids(shortstatehash)
-		.try_fold(
-			(Vec::new(), Vec::new()),
-			async |(mut shortstatekeys, mut shorteventids), (shortstatekey, shorteventid)| {
-				shortstatekeys.push(shortstatekey);
-				shorteventids.push(shorteventid);
-
-				Ok((shortstatekeys, shorteventids))
-			},
-		)
+		.try_unzip::<Vec<_>, Vec<_>>()
 		.and_then(async move |(shortstatekeys, shorteventids)| {
 			self.services
 				.short
