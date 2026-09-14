@@ -5223,6 +5223,7 @@ impl From<AppService> for ruma::api::appservice::Registration {
 				aliases: conf.aliases.into_iter().map(Into::into).collect(),
 				rooms: conf.rooms.into_iter().map(Into::into).collect(),
 			},
+			keys_claims: false
 		}
 	}
 }
