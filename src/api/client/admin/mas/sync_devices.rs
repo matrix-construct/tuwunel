@@ -4,7 +4,7 @@ use ruma::OwnedDeviceId;
 use synapse_admin_api::mas::sync_devices::{Request, Response};
 use tuwunel_core::{
 	Result,
-	utils::stream::{IterStream, TryBroadbandExt, automatic_width},
+	utils::stream::{IterStream, ReadyExt, TryBroadbandExt},
 };
 
 use super::{Mas, existing_user};
@@ -28,14 +28,15 @@ pub(crate) async fn sync_devices_route(
 	current
 		.iter()
 		.filter(|device_id| !body.devices.contains(*device_id))
-		.stream()
-		.for_each_concurrent(automatic_width(), async |device_id| {
+		.try_stream()
+		.broad_and_then(async |device_id| {
 			services
 				.users
 				.remove_device(&user_id, device_id)
-				.await;
+				.await
 		})
-		.await;
+		.ready_fold(Ok(()), Result::and)
+		.await?;
 
 	body.devices
 		.iter()

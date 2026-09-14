@@ -69,7 +69,14 @@ async fn revoke(services: &Services, body: RevokeRequest) -> Result<Response, Re
 		services
 			.users
 			.remove_device(&user_id, &device_id)
-			.await;
+			.await
+			.map_err(|_| {
+				oauth_error(
+					StatusCode::INTERNAL_SERVER_ERROR,
+					"server_error",
+					"An internal error occurred",
+				)
+			})?;
 	}
 
 	Ok(Response::builder()

@@ -1,7 +1,10 @@
 use axum::extract::State;
 use futures::StreamExt;
 use synapse_admin_api::users::reset_password::v1 as reset_password;
-use tuwunel_core::{Err, Result, utils::stream::automatic_width};
+use tuwunel_core::{
+	Err, Result,
+	utils::{ReadyExt, stream::automatic_width},
+};
 
 use crate::{Ruma, client::admin::require_admin};
 
@@ -26,13 +29,15 @@ pub(crate) async fn admin_reset_password_route(
 			.users
 			.all_device_ids(&body.user_id)
 			.map(ToOwned::to_owned)
-			.for_each_concurrent(automatic_width(), async |device_id| {
+			.map(async |device_id| {
 				services
 					.users
 					.remove_device(&body.user_id, &device_id)
-					.await;
+					.await
 			})
-			.await;
+			.buffer_unordered(automatic_width())
+			.ready_fold(Ok(()), Result::and)
+			.await?;
 	}
 
 	Ok(reset_password::Response::new())

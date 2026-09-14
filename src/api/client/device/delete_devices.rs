@@ -1,9 +1,8 @@
 use axum::extract::State;
-use futures::StreamExt;
 use ruma::api::client::device::delete_devices::{self, v3::Response};
 use tuwunel_core::{
 	Result, debug,
-	utils::stream::{IterStream, automatic_width},
+	utils::stream::{IterStream, ReadyExt, TryBroadbandExt},
 };
 
 use crate::{Ruma, router::auth_uiaa};
@@ -35,13 +34,15 @@ pub(crate) async fn delete_devices_route(
 		);
 		body.devices
 			.iter()
-			.stream()
-			.for_each_concurrent(automatic_width(), |device_id| {
+			.try_stream()
+			.broad_and_then(async |device_id| {
 				services
 					.users
 					.remove_device(sender_user, device_id)
+					.await
 			})
-			.await;
+			.ready_fold(Ok(()), Result::and)
+			.await?;
 
 		return Ok(Response {});
 	}
@@ -50,13 +51,15 @@ pub(crate) async fn delete_devices_route(
 
 	body.devices
 		.iter()
-		.stream()
-		.for_each_concurrent(automatic_width(), |device_id| {
+		.try_stream()
+		.broad_and_then(async |device_id| {
 			services
 				.users
 				.remove_device(sender_user, device_id)
+				.await
 		})
-		.await;
+		.ready_fold(Ok(()), Result::and)
+		.await?;
 
 	Ok(Response {})
 }

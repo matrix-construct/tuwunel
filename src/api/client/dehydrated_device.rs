@@ -54,7 +54,7 @@ pub(crate) async fn delete_dehydrated_device_route(
 	services
 		.users
 		.remove_device(sender_user, &device_id)
-		.await;
+		.await?;
 
 	Ok(delete_dehydrated_device::Response { device_id })
 }

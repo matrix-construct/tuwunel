@@ -1,6 +1,10 @@
 use std::{collections::BTreeMap, mem, ops::Deref, sync::Arc};
 
-use futures::{Stream, StreamExt, TryFutureExt, future::join4, pin_mut};
+use futures::{
+	Stream, StreamExt, TryFutureExt,
+	future::{join4, try_join3},
+	pin_mut,
+};
 use ruma::{
 	AnyKeyName, DeviceId, KeyId, OneTimeKeyAlgorithm, OneTimeKeyId, OneTimeKeyName, OwnedKeyId,
 	OwnedOneTimeKeyId, OwnedRoomId, OwnedServerName, RoomId, SigningKeyId, UInt, UserId,
@@ -421,11 +425,67 @@ pub async fn add_device_keys(
 	user_id: &UserId,
 	device_id: &DeviceId,
 	device_keys: &Raw<DeviceKeys>,
-) {
+) -> Result {
+	let guard = self.key_update_mutex.lock(user_id).await;
+
+	// Authentication may have completed before a concurrent device deletion.
+	if !self.device_exists(user_id, device_id).await {
+		return Err!(Request(NotFound("Cannot add keys for an unknown device.")));
+	}
+
 	let key = (user_id, device_id);
 
 	self.db.keyid_key.put(key, Json(device_keys));
+	drop(guard);
 	self.mark_device_key_update(user_id).await;
+
+	Ok(())
+}
+
+/// The caller holds the user's key update lock. Cross-signing keys share this
+/// namespace, so preserve actual signing material, not just referenced rows.
+#[implement(super::Service)]
+pub(super) async fn remove_device_keys(&self, user_id: &UserId, device_id: &DeviceId) -> Result {
+	let key = (user_id, device_id);
+	let row_key = serialize_key(key)?;
+	let (root, self_signing, user_signing) = try_join3(
+		pointer_matches(&self.db.userid_masterkeyid, user_id, row_key.as_slice()),
+		pointer_matches(&self.db.userid_selfsigningkeyid, user_id, row_key.as_slice()),
+		pointer_matches(&self.db.userid_usersigningkeyid, user_id, row_key.as_slice()),
+	)
+	.await?;
+
+	if root || self_signing || user_signing {
+		let value = match self.db.keyid_key.qry(&key).await {
+			| Ok(row) => row
+				.deserialized::<serde_json::Value>()
+				.map_err(|e| err!(Database(debug_warn!("key in keyid_key is invalid: {e:?}"))))?,
+			| Err(error) if error.is_not_found() => return Ok(()),
+			| Err(error) => return Err(error),
+		};
+
+		// An identity upload can overwrite a signing row without changing its
+		// pointer. A matching device identity must still be removed in that case.
+		if !key_matches_role(&value, user_id, device_id.as_str(), KeyRole::Device) {
+			let signing = [
+				(root, KeyRole::CrossSigningRoot),
+				(self_signing, KeyRole::SelfSigning),
+				(user_signing, KeyRole::UserSigning),
+			]
+			.into_iter()
+			.any(|(referenced, role)| {
+				referenced && key_matches_role(&value, user_id, device_id.as_str(), role)
+			});
+			if !signing {
+				return Err!(Database("Referenced key does not match a device or signing key"));
+			}
+			return Ok(());
+		}
+	}
+
+	self.db.keyid_key.del(key);
+
+	Ok(())
 }
 
 #[implement(super::Service)]
@@ -439,6 +499,8 @@ pub async fn add_cross_signing_keys(
 ) -> Result {
 	// TODO: Check signatures
 	{
+		let _guard = self.key_update_mutex.lock(user_id).await;
+
 		let master_key_key = master_key
 			.as_ref()
 			.map(|master_key| parse_master_key(user_id, master_key).map(|(key, _)| key))
@@ -537,6 +599,9 @@ pub async fn sign_key(
 	signatures: Signatures,
 	sender_id: &UserId,
 ) -> Result {
+	// A signature update must not restore a device identity after deletion.
+	let guard = self.key_update_mutex.lock(target_id).await;
+
 	let key = (target_id, key_id);
 
 	let mut target_key: serde_json::Value = self
@@ -622,6 +687,7 @@ pub async fn sign_key(
 
 	let key = (target_id, key_id);
 	self.db.keyid_key.put(key, Json(target_key));
+	drop(guard);
 
 	if same_user {
 		self.mark_device_key_update(target_id).await;
