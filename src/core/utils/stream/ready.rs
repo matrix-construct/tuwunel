@@ -3,7 +3,7 @@
 
 use futures::{
 	future::{FutureExt, Ready, ready},
-	stream::{All, Any, FilterMap, Fold, ForEach, Scan, SkipWhile, Stream, StreamExt, TakeWhile},
+	stream::{All, Any, FilterMap, Fold, ForEach, Scan, Stream, StreamExt},
 };
 
 /// Adds synchronous counterparts to selected [`StreamExt`] combinators.
@@ -108,12 +108,11 @@ where
 	///
 	/// Evaluation stops at the first false result, and that boundary item is
 	/// not yielded. Accepted items retain source order.
-	fn ready_take_while<'a, F>(
-		self,
-		f: F,
-	) -> TakeWhile<Self, Ready<bool>, impl FnMut(&Item) -> Ready<bool> + 'a>
+	fn ready_take_while<'a, F>(self, f: F) -> impl Stream<Item = Item> + Send + 'a
 	where
-		F: Fn(&Item) -> bool + 'a;
+		Self: Send + 'a,
+		Item: Send,
+		F: Fn(&Item) -> bool + Send + 'a;
 
 	/// Transforms items with mutable state and a synchronous scan closure.
 	///
@@ -143,12 +142,11 @@ where
 	///
 	/// The first false item and every later item are yielded in source order.
 	/// The predicate is no longer called after the first false result.
-	fn ready_skip_while<'a, F>(
-		self,
-		f: F,
-	) -> SkipWhile<Self, Ready<bool>, impl FnMut(&Item) -> Ready<bool> + 'a>
+	fn ready_skip_while<'a, F>(self, f: F) -> impl Stream<Item = Item> + Send + 'a
 	where
-		F: Fn(&Item) -> bool + 'a;
+		Self: Send + 'a,
+		Item: Send,
+		F: Fn(&Item) -> bool + Send + 'a;
 }
 
 impl<Item, S> ReadyExt<Item> for S
@@ -256,12 +254,11 @@ where
 	}
 
 	#[inline]
-	fn ready_take_while<'a, F>(
-		self,
-		f: F,
-	) -> TakeWhile<Self, Ready<bool>, impl FnMut(&Item) -> Ready<bool> + 'a>
+	fn ready_take_while<'a, F>(self, f: F) -> impl Stream<Item = Item> + Send + 'a
 	where
-		F: Fn(&Item) -> bool + 'a,
+		Self: Send + 'a,
+		Item: Send,
+		F: Fn(&Item) -> bool + Send + 'a,
 	{
 		self.take_while(move |t| ready(f(t)))
 	}
@@ -294,12 +291,11 @@ where
 	}
 
 	#[inline]
-	fn ready_skip_while<'a, F>(
-		self,
-		f: F,
-	) -> SkipWhile<Self, Ready<bool>, impl FnMut(&Item) -> Ready<bool> + 'a>
+	fn ready_skip_while<'a, F>(self, f: F) -> impl Stream<Item = Item> + Send + 'a
 	where
-		F: Fn(&Item) -> bool + 'a,
+		Self: Send + 'a,
+		Item: Send,
+		F: Fn(&Item) -> bool + Send + 'a,
 	{
 		self.skip_while(move |t| ready(f(t)))
 	}
