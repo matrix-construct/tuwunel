@@ -48,7 +48,6 @@ where
 	where
 		Self: Send + Unpin + 'a,
 		F: Fn(Item) -> Option<U> + Send + 'a,
-		Item: Send,
 		U: Send;
 
 	/// Retains items accepted by a synchronous predicate.
@@ -187,7 +186,6 @@ where
 	where
 		Self: Send + Unpin + 'a,
 		F: Fn(Item) -> Option<U> + Send + 'a,
-		Item: Send,
 		U: Send,
 	{
 		self.ready_filter_map(f)
