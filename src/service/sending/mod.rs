@@ -52,13 +52,6 @@ pub struct Service {
 	flushes: StdMutex<JoinSet<()>>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct Msg {
-	dest: Destination,
-	event: SendingEvent,
-	queue_id: Vec<u8>,
-}
-
 #[expect(clippy::module_name_repetitions)]
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum SendingEvent {
@@ -71,6 +64,27 @@ pub enum SendingEvent {
 	/// The sender recomputes the count when the row is delivered.
 	BadgeRefresh,
 	Flush, // none
+}
+
+/// Wire shape of one `de.sorunome.msc2409.to_device` entry (MSC4203): the
+/// stored to-device event flattened with the recipient's identifiers. The
+/// ruma `AnyAppserviceToDeviceEvent` deliberately has no `Serialize`, so the
+/// send side writes this local struct.
+#[derive(Serialize)]
+struct AsToDeviceEvent<'a> {
+	#[serde(rename = "type")]
+	kind: &'a str,
+	sender: &'a UserId,
+	content: &'a serde_json::Value,
+	to_user_id: &'a UserId,
+	to_device_id: &'a DeviceId,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Msg {
+	dest: Destination,
+	event: SendingEvent,
+	queue_id: Vec<u8>,
 }
 
 pub type EduBuf = SmallVec<[u8; EDU_BUF_CAP]>;
@@ -98,20 +112,6 @@ impl SendingEvent {
 			| Self::Pdu(_) | Self::Flush => &[],
 		}
 	}
-}
-
-/// Wire shape of one `de.sorunome.msc2409.to_device` entry (MSC4203): the
-/// stored to-device event flattened with the recipient's identifiers. The
-/// ruma `AnyAppserviceToDeviceEvent` deliberately has no `Serialize`, so the
-/// send side writes this local struct.
-#[derive(Serialize)]
-struct AsToDeviceEvent<'a> {
-	#[serde(rename = "type")]
-	kind: &'a str,
-	sender: &'a UserId,
-	content: &'a serde_json::Value,
-	to_user_id: &'a UserId,
-	to_device_id: &'a DeviceId,
 }
 
 #[async_trait]
