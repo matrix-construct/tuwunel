@@ -1,8 +1,9 @@
 use axum::extract::State;
+use futures::StreamExt;
 use synapse_admin_api::devices::delete_devices::v1 as delete_devices;
 use tuwunel_core::{
 	Result,
-	utils::stream::{IterStream, ReadyExt, TryBroadbandExt},
+	utils::{IterStream, stream::automatic_width},
 };
 
 use super::require_local_user;
@@ -22,15 +23,11 @@ pub(crate) async fn admin_delete_devices_route(
 
 	body.devices
 		.iter()
-		.try_stream()
-		.broad_and_then(async |device_id| {
-			services
-				.users
-				.remove_device(user_id, device_id)
-				.await
+		.stream()
+		.for_each_concurrent(automatic_width(), |device_id| {
+			services.users.remove_device(user_id, device_id)
 		})
-		.ready_fold(Ok(()), Result::and)
-		.await?;
+		.await;
 
 	Ok(delete_devices::Response {})
 }

@@ -110,7 +110,7 @@ async fn store_device_keys(
 	services
 		.users
 		.add_device_keys(sender_user, sender_device, device_keys)
-		.await?;
+		.await;
 
 	Ok(())
 }

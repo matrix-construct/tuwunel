@@ -1,8 +1,6 @@
 mod create;
 mod dehydrated_device;
 pub mod device;
-#[cfg(test)]
-mod device_key_tests;
 mod invite_filter;
 mod keys;
 mod ldap;
@@ -25,9 +23,7 @@ use tuwunel_core::{
 	Err, Result, debug_warn, err, is_equal_to,
 	matrix::pdu::PduCount,
 	trace,
-	utils::{
-		self, BoolExt, MutexMap, ReadyExt, hash::password as hash_password, stream::TryIgnore,
-	},
+	utils::{self, BoolExt, ReadyExt, hash::password as hash_password, stream::TryIgnore},
 };
 use tuwunel_database::{Deserialized, Json, Map};
 
@@ -51,7 +47,6 @@ pub struct Moderation {
 pub struct Service {
 	services: Arc<crate::services::OnceServices>,
 	db: Data,
-	key_update_mutex: MutexMap<OwnedUserId, ()>,
 }
 
 struct Data {
@@ -89,7 +84,6 @@ impl crate::Service for Service {
 	fn build(args: &crate::Args<'_>) -> Result<Arc<Self>> {
 		Ok(Arc::new(Self {
 			services: args.services.clone(),
-			key_update_mutex: MutexMap::new(),
 			db: Data {
 				keychangeid_userid: args.db["keychangeid_userid"].clone(),
 				keyid_key: args.db["keyid_key"].clone(),
@@ -184,11 +178,10 @@ impl Service {
 			.revoke_user_tokens(user_id)
 			.await;
 
-		// Attempt every device before reporting a cleanup failure.
+		// Remove all associated devices
 		self.all_device_ids(user_id)
-			.then(|device_id| self.remove_device(user_id, device_id))
-			.ready_fold(Ok(()), Result::and)
-			.await?;
+			.for_each(|device_id| self.remove_device(user_id, device_id))
+			.await;
 
 		// Set the password to "" to indicate a deactivated account. Hashes will never
 		// result in an empty string, so the user will not be able to log in again.

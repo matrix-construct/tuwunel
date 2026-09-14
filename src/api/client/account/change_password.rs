@@ -56,9 +56,8 @@ pub(crate) async fn change_password_route(
 			.users
 			.all_device_ids(&sender_user)
 			.ready_filter(|&id| Some(id) != body.sender_device.as_deref())
-			.then(|id| services.users.remove_device(&sender_user, id))
-			.ready_fold(Ok(()), Result::and)
-			.await?;
+			.for_each(|id| services.users.remove_device(&sender_user, id))
+			.await;
 	}
 
 	info!("User {sender_user} changed their password.");

@@ -20,7 +20,7 @@ pub(crate) async fn admin_delete_device_route(
 	services
 		.users
 		.remove_device(user_id, &body.device_id)
-		.await?;
+		.await;
 
 	Ok(delete_device::Response {})
 }

@@ -16,7 +16,7 @@ pub(super) async fn delete_device(
 	self.services
 		.users
 		.remove_device(&user_id, &device_id)
-		.await?;
+		.await;
 
 	write!(self, "User {user_id}'s device {device_id} removed.").await
 }

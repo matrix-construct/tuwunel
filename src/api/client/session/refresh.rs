@@ -3,7 +3,10 @@ use ruma::api::{
 	client::session::refresh_token::v3::{Request, Response},
 	error::{ErrorKind, UnknownTokenErrorData},
 };
-use tuwunel_core::{Err, Error, Result, debug_info, utils::time::timepoint_has_passed};
+use tuwunel_core::{
+	Err, Error, Result, debug_info,
+	utils::{BoolExt, future::OptionFutureExt, time::timepoint_has_passed},
+};
 use tuwunel_service::users::device::{RefreshToken, generate_refresh_token};
 
 use crate::{ClientIp, Ruma};
@@ -33,18 +36,15 @@ pub(crate) async fn refresh_token_route(
 		| RefreshToken::Current { user_id, device_id, expires_at } => {
 			if expires_at.is_some_and(timepoint_has_passed) {
 				let hard = services.server.config.refresh_token_hard_logout;
-				if hard {
-					services
-						.users
-						.remove_device(&user_id, &device_id)
-						.await?;
-				} else {
-					services
-						.users
-						.remove_refresh_token(&user_id, &device_id)
-						.await
-						.ok();
-				}
+				hard.then_async(|| services.users.remove_device(&user_id, &device_id))
+					.unwrap_or_else_async(async || {
+						services
+							.users
+							.remove_refresh_token(&user_id, &device_id)
+							.await
+							.ok();
+					})
+					.await;
 
 				return Err(Error::BadRequest(
 					ErrorKind::UnknownToken(UnknownTokenErrorData { soft_logout: !hard }),
@@ -100,7 +100,7 @@ pub(crate) async fn refresh_token_route(
 				services
 					.users
 					.remove_device(&user_id, &device_id)
-					.await?;
+					.await;
 			}
 
 			Err(Error::BadRequest(

@@ -46,7 +46,7 @@ pub async fn set_dehydrated_device(&self, user_id: &UserId, request: Request) ->
 	}
 
 	if let Ok(existing_id) = existing_id {
-		self.remove_device(user_id, &existing_id).await?;
+		self.remove_device(user_id, &existing_id).await;
 	}
 
 	let device_id = self
@@ -71,7 +71,7 @@ pub async fn set_dehydrated_device(&self, user_id: &UserId, request: Request) ->
 
 	trace!(device_keys = ?request.device_keys);
 	self.add_device_keys(user_id, &device_id, &request.device_keys)
-		.await?;
+		.await;
 
 	trace!(one_time_keys = ?request.one_time_keys);
 	self.add_one_time_keys(

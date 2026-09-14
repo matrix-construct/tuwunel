@@ -57,15 +57,13 @@ pub(crate) async fn admin_create_or_modify_route(
 				.users
 				.all_device_ids(user_id)
 				.map(ToOwned::to_owned)
-				.map(async |device_id| {
+				.for_each_concurrent(automatic_width(), async |device_id| {
 					services
 						.users
 						.remove_device(user_id, &device_id)
-						.await
+						.await;
 				})
-				.buffer_unordered(automatic_width())
-				.ready_fold(Ok(()), Result::and)
-				.await?;
+				.await;
 		}
 	}
 
