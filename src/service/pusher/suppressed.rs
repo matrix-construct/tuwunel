@@ -17,8 +17,17 @@ const SUPPRESSED_MAX_EVENTS_PER_ROOM: usize = 512;
 const SUPPRESSED_MAX_EVENTS_PER_PUSHKEY: usize = 4096;
 const SUPPRESSED_MAX_ROOMS_PER_PUSHKEY: usize = 256;
 
-type SuppressedRooms = Vec<(OwnedRoomId, Vec<RawPduId>)>;
-type SuppressedPushes = Vec<(String, SuppressedRooms)>;
+/// The PDUs suppressed for one pusher, grouped by room.
+///
+/// The PDUs of one room are listed in the order they were withheld in and the
+/// rooms themselves are unordered; the flush admits a room's PDUs in that
+/// order but sends a few at a time, so delivery order is not promised.
+pub type SuppressedRooms = Vec<(OwnedRoomId, Vec<RawPduId>)>;
+
+/// The suppressed PDUs of every pusher a user owns, keyed by pushkey.
+///
+/// This is the shape a whole-user flush drains.
+pub type SuppressedPushes = Vec<(String, SuppressedRooms)>;
 
 #[derive(Default)]
 pub(super) struct SuppressedQueue {
@@ -132,11 +141,7 @@ pub fn queue_suppressed_push(
 
 /// Take and remove all suppressed PDUs for a given user + pushkey.
 #[implement(super::Service)]
-pub fn take_suppressed_for_pushkey(
-	&self,
-	user_id: &UserId,
-	pushkey: &str,
-) -> Vec<(OwnedRoomId, Vec<RawPduId>)> {
+pub fn take_suppressed_for_pushkey(&self, user_id: &UserId, pushkey: &str) -> SuppressedRooms {
 	let mut inner = self.suppressed.lock();
 	let Some(user_entry) = inner.get_mut(user_id) else {
 		return Vec::new();

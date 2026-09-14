@@ -16,26 +16,34 @@ use futures::{Stream, StreamExt, TryFutureExt, future::join};
 use ruma::{
 	DeviceId, OwnedDeviceId, OwnedEventId, OwnedRoomId, OwnedUserId, RoomId, UserId,
 	api::client::push::{Pusher, PusherKind, set_pusher::v3::PusherAction},
-	events::{AnySyncTimelineEvent, room::power_levels::RoomPowerLevels},
+	events::{
+		AnySyncTimelineEvent, GlobalAccountDataEventType, push_rules::PushRulesEvent,
+		room::power_levels::RoomPowerLevels,
+	},
 	push::{Action, FlattenedJson, PushConditionPowerLevelsCtx, PushConditionRoomCtx, Ruleset},
 	serde::Raw,
 	uint,
 };
 use serde::Deserialize;
+use tracing::Level;
 use tuwunel_core::{
 	Err, Result, err, implement,
 	matrix::Event,
 	utils::{
 		MutexMap,
 		future::TryExtExt,
+		result::ErrLog,
 		stream::{BroadbandExt, IterStream, ReadyExt, TryIgnore, WidebandExt},
 	},
 };
 use tuwunel_database::{Database, Deserialized, Ignore, Interfix, Json, Map};
 use url::Url;
 
-pub use self::append::Notified;
 use self::badge::SentBadges;
+pub use self::{
+	append::Notified,
+	suppressed::{SuppressedPushes, SuppressedRooms},
+};
 
 /// The events an event relates to, keyed by relation type, for MSC3664.
 type RelatedEvents = BTreeMap<String, FlattenedJson>;
@@ -284,6 +292,20 @@ pub fn get_pushkeys<'a>(&'a self, sender: &'a UserId) -> impl Stream<Item = &str
 		.keys_prefix(&prefix)
 		.ignore_err()
 		.map(|(_, pushkey): (Ignore, &str)| pushkey)
+}
+
+/// The push ruleset a user's notifications are evaluated against.
+///
+/// A user without stored rules gets the server default ruleset.
+#[implement(Service)]
+#[tracing::instrument(skip(self), level = "debug")]
+pub async fn ruleset(&self, user_id: &UserId) -> Ruleset {
+	self.services
+		.account_data
+		.get_global(user_id, GlobalAccountDataEventType::PushRules)
+		.await
+		.log_err(Level::TRACE)
+		.map_or_else(|_| Ruleset::server_default(user_id), |ev: PushRulesEvent| ev.content.global)
 }
 
 #[implement(Service)]

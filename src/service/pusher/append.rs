@@ -8,12 +8,11 @@ use ruma::{
 	EventId, RoomId, UserId,
 	api::client::push::ProfileTag,
 	events::{
-		AnySyncTimelineEvent, GlobalAccountDataEventType, TimelineEventType,
+		AnySyncTimelineEvent, TimelineEventType,
 		invite_permission_config::InvitePermission,
-		push_rules::PushRulesEvent,
 		room::{member::MembershipState, power_levels::RoomPowerLevels},
 	},
-	push::{Action, Actions, HighlightTweakValue, Ruleset, Tweak},
+	push::{Action, Actions, HighlightTweakValue, Tweak},
 	serde::Raw,
 };
 use serde::{Deserialize, Serialize};
@@ -170,18 +169,11 @@ async fn append_pdu_for_user(
 		related_events,
 	}: Appended<'_>,
 ) {
-	let rules_for_user = self
-		.services
-		.account_data
-		.get_global(user, GlobalAccountDataEventType::PushRules)
-		.await
-		.log_err(Level::TRACE)
-		.map_or_else(|_| Ruleset::server_default(user), |ev: PushRulesEvent| ev.content.global);
-
+	let ruleset = self.ruleset(user).await;
 	let actions = self
 		.get_actions(Evaluate {
 			user,
-			ruleset: &rules_for_user,
+			ruleset: &ruleset,
 			power_levels,
 			pdu: serialized,
 			room_id: pdu.room_id(),
