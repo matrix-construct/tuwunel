@@ -3,9 +3,7 @@
 
 use futures::{
 	future::{FutureExt, Ready, ready},
-	stream::{
-		All, Any, Filter, FilterMap, Fold, ForEach, Scan, SkipWhile, Stream, StreamExt, TakeWhile,
-	},
+	stream::{All, Any, FilterMap, Fold, ForEach, Scan, SkipWhile, Stream, StreamExt, TakeWhile},
 };
 
 /// Adds synchronous counterparts to selected [`StreamExt`] combinators.
@@ -57,12 +55,11 @@ where
 	///
 	/// The predicate borrows each item as it is polled. Accepted items preserve
 	/// their source order and value.
-	fn ready_filter<'a, F>(
-		self,
-		f: F,
-	) -> Filter<Self, Ready<bool>, impl FnMut(&Item) -> Ready<bool> + 'a>
+	fn ready_filter<'a, F>(self, f: F) -> impl Stream<Item = Item> + Send + 'a
 	where
-		F: Fn(&Item) -> bool + 'a;
+		Self: Send + 'a,
+		Item: Send,
+		F: Fn(&Item) -> bool + Send + 'a;
 
 	/// Maps items synchronously while filtering absent results.
 	///
@@ -202,12 +199,11 @@ where
 	}
 
 	#[inline]
-	fn ready_filter<'a, F>(
-		self,
-		f: F,
-	) -> Filter<Self, Ready<bool>, impl FnMut(&Item) -> Ready<bool> + 'a>
+	fn ready_filter<'a, F>(self, f: F) -> impl Stream<Item = Item> + Send + 'a
 	where
-		F: Fn(&Item) -> bool + 'a,
+		Self: Send + 'a,
+		Item: Send,
+		F: Fn(&Item) -> bool + Send + 'a,
 	{
 		self.filter(move |t| ready(f(t)))
 	}
