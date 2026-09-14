@@ -3,10 +3,7 @@ use std::collections::{BTreeMap, HashMap};
 use axum::extract::State;
 use futures::{
 	FutureExt, StreamExt,
-	future::{
-		Either::{Left, Right},
-		join, join5,
-	},
+	future::{join, join5},
 };
 use ruma::{
 	CanonicalJsonObject, CanonicalJsonValue, DeviceId, OwnedDeviceId, OwnedUserId, ServerName,
@@ -212,14 +209,13 @@ async fn collect_local_device_keys(
 	include_display_names: bool,
 ) -> BTreeMap<OwnedDeviceId, Raw<DeviceKeys>> {
 	let stream = if device_ids.is_empty() {
-		Left(
-			services
-				.users
-				.all_device_ids(user_id)
-				.map(ToOwned::to_owned),
-		)
+		services
+			.users
+			.all_device_ids(user_id)
+			.map(ToOwned::to_owned)
+			.left_stream()
 	} else {
-		Right(device_ids.iter().cloned().stream())
+		device_ids.iter().cloned().stream().right_stream()
 	};
 
 	stream

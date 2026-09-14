@@ -1,7 +1,4 @@
-use futures::{
-	Stream, TryFutureExt, TryStreamExt,
-	future::Either::{Left, Right},
-};
+use futures::{Stream, StreamExt, TryFutureExt, TryStreamExt};
 use ruma::{MilliSecondsSinceUnixEpoch, RoomId, UInt, UserId, api::Direction};
 use tuwunel_core::{
 	Result, at, err, implement,
@@ -99,16 +96,17 @@ pub fn pdu_ids_near_ts(
 		.map_err(|e| err!(Request(NotFound("Room not found: {e:?}"))))
 		.map_ok(move |shortroomid| {
 			match dir {
-				| Forward => Left(self.db.roomid_tscount_pducount.stream_from(&(
-					room_id,
-					ts,
-					u64::MIN,
-				))),
-				| Backward => Right(self.db.roomid_tscount_pducount.rev_stream_from(&(
-					room_id,
-					ts,
-					u64::MAX,
-				))),
+				| Forward => self
+					.db
+					.roomid_tscount_pducount
+					.stream_from(&(room_id, ts, u64::MIN))
+					.left_stream(),
+
+				| Backward => self
+					.db
+					.roomid_tscount_pducount
+					.rev_stream_from(&(room_id, ts, u64::MAX))
+					.right_stream(),
 			}
 			.ready_try_take_while(
 				move |((room_id_, ..), _): &KeyVal<'_>| Ok(room_id == *room_id_),

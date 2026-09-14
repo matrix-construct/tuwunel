@@ -7,7 +7,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::{Stream, StreamExt, future::Either, stream::empty};
+use futures::{Stream, StreamExt, stream::empty};
 use ruma::{EventId, OwnedServerName, RoomId, ServerName};
 use tuwunel_core::{
 	arrayvec::ArrayVec,
@@ -65,8 +65,11 @@ impl Select for RoomCandidates {
 		.map(ToOwned::to_owned);
 
 		let popular = match opts.room_id.as_deref() {
-			| None => Either::Right(empty::<OwnedServerName>()),
-			| Some(room_id) => Either::Left(self.route_by_popularity(room_id).await),
+			| None => empty::<OwnedServerName>().right_stream(),
+			| Some(room_id) => self
+				.route_by_popularity(room_id)
+				.await
+				.left_stream(),
 		};
 
 		let eligible = opts
@@ -162,15 +165,15 @@ async fn route_by_popularity<'a>(
 		.await;
 
 	if sampled.is_empty() {
-		return Either::Right(
-			self.services
-				.state_cache
-				.room_servers(room_id)
-				.map(ToOwned::to_owned),
-		);
+		return self
+			.services
+			.state_cache
+			.room_servers(room_id)
+			.map(ToOwned::to_owned)
+			.right_stream();
 	}
 
-	Either::Left(sampled.into_iter().stream())
+	sampled.into_iter().stream().left_stream()
 }
 
 /// Uniform-random window over the participating-server cursor: count, skip

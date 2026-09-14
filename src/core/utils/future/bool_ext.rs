@@ -12,10 +12,7 @@
 
 use futures::{
 	FutureExt,
-	future::{
-		Either::{Left, Right},
-		select_ok, try_join, try_join_all, try_join3, try_join4,
-	},
+	future::{select_ok, try_join, try_join_all, try_join3, try_join4},
 };
 
 use crate::utils::BoolExt as _;
@@ -80,7 +77,8 @@ where
 		B: Future<Output = bool> + Send + Unpin,
 		Self: Sized + Unpin,
 	{
-		select_ok([Left(self.map(test)), Right(b.map(test))]).map(|res| res.is_ok())
+		select_ok([self.map(test).left_future(), b.map(test).right_future()])
+			.map(|res| res.is_ok())
 	}
 
 	fn and<B>(self, b: B) -> impl Future<Output = bool> + Send

@@ -12,14 +12,7 @@ mod tests;
 use std::{fmt::Write, sync::Arc};
 
 use async_trait::async_trait;
-use futures::{
-	TryFutureExt, TryStreamExt,
-	future::{
-		Either::{Left, Right},
-		select_ok,
-	},
-	pin_mut,
-};
+use futures::{FutureExt, TryFutureExt, TryStreamExt, future::select_ok, pin_mut};
 use ruma::{
 	CanonicalJsonObject, EventId, MilliSecondsSinceUnixEpoch, OwnedEventId, OwnedRoomId, RoomId,
 	UserId, api::Direction, events::room::encrypted::Relation,
@@ -513,7 +506,7 @@ where
 	let outlier = self.get_outlier(event_id);
 
 	pin_mut!(accepted, outlier);
-	select_ok([Left(accepted), Right(outlier)])
+	select_ok([accepted.left_future(), outlier.right_future()])
 		.await
 		.map(at!(0))
 }
@@ -567,7 +560,7 @@ pub async fn pdu_exists<'a>(&'a self, event_id: &'a EventId) -> bool {
 	let outlier = self.outlier_pdu_exists(event_id);
 
 	pin_mut!(non_outlier, outlier);
-	select_ok([Left(non_outlier), Right(outlier)])
+	select_ok([non_outlier.left_future(), outlier.right_future()])
 		.await
 		.map(at!(0))
 		.is_ok()

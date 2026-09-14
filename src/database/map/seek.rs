@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
-use futures::{FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt, future::Either};
+use futures::{FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt};
 use rocksdb::Direction;
-use tokio::task;
+use tokio::task::consume_budget;
 use tuwunel_core::Result;
 
 use super::{Map, cache_iter_options_default, iter_options_default};
@@ -29,12 +29,11 @@ where
 	let state = stream::State::new(map, opts);
 	if is_cached(map, dir, from) {
 		let state = init(state, dir, from);
-		return Either::Left(
-			task::consume_budget()
-				.map(move |()| C::from(state))
-				.into_stream()
-				.flatten(),
-		);
+		return consume_budget()
+			.map(move |()| C::from(state))
+			.into_stream()
+			.flatten()
+			.left_stream();
 	}
 
 	let seek = Seek {
@@ -45,14 +44,13 @@ where
 		res: None,
 	};
 
-	Either::Right(
-		map.engine
-			.pool
-			.execute_iter(seek)
-			.ok_into::<C>()
-			.into_stream()
-			.try_flatten(),
-	)
+	map.engine
+		.pool
+		.execute_iter(seek)
+		.ok_into::<C>()
+		.into_stream()
+		.try_flatten()
+		.right_stream()
 }
 
 /// Tests whether an initial seek can complete from block cache.

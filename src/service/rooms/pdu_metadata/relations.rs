@@ -1,4 +1,4 @@
-use futures::{Stream, StreamExt, future::Either};
+use futures::{Stream, StreamExt};
 use ruma::{
 	EventId, OwnedUserId, UserId,
 	api::Direction,
@@ -141,8 +141,17 @@ pub fn get_relations<'a>(
 	};
 
 	match dir {
-		| Direction::Backward => Either::Left(self.db.tofrom_relation.rev_raw_keys_from(start)),
-		| Direction::Forward => Either::Right(self.db.tofrom_relation.raw_keys_from(start)),
+		| Direction::Backward => self
+			.db
+			.tofrom_relation
+			.rev_raw_keys_from(start)
+			.left_stream(),
+
+		| Direction::Forward => self
+			.db
+			.tofrom_relation
+			.raw_keys_from(start)
+			.right_stream(),
 	}
 	.ignore_err()
 	.ready_take_while(move |key| key.starts_with(&target))

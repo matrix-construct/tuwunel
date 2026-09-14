@@ -11,11 +11,8 @@ use axum_extra::{
 	headers::{Authorization, authorization::Bearer},
 };
 use futures::{
-	TryFutureExt,
-	future::{
-		Either::{Left, Right},
-		select_ok, try_join,
-	},
+	FutureExt, TryFutureExt,
+	future::{select_ok, try_join},
 	pin_mut,
 };
 use ruma::{
@@ -189,7 +186,7 @@ async fn find_token(services: &Services, token: Option<&str>) -> Result<Token> {
 		.map_ok(Token::Appservice);
 
 	pin_mut!(user_token, appservice_token);
-	match select_ok([Left(user_token), Right(appservice_token)]).await {
+	match select_ok([user_token.left_future(), appservice_token.right_future()]).await {
 		| Err(e) if !e.is_not_found() => Err(e),
 		| Ok((token, _)) => Ok(token),
 		| _ => Ok(Token::Invalid),

@@ -1,11 +1,8 @@
 use std::{fmt::Debug, sync::Arc};
 
-use futures::{
-	FutureExt, TryFutureExt,
-	future::{Either, ready},
-};
+use futures::{FutureExt, TryFutureExt, future::ready};
 use rocksdb::{DBPinnableSlice, ReadOptions};
-use tokio::task;
+use tokio::task::consume_budget;
 use tuwunel_core::{Err, Result, err, implement, utils::result::MapExpect};
 
 use crate::{
@@ -31,9 +28,9 @@ where
 
 	let cached = self.get_cached(key);
 	if matches!(cached, Err(_) | Ok(Some(_))) {
-		return Either::Left(
-			task::consume_budget().map(move |()| cached.map_expect("data found in cache")),
-		);
+		return consume_budget()
+			.map(move |()| cached.map_expect("data found in cache"))
+			.left_future();
 	}
 
 	debug_assert!(matches!(cached, Ok(None)), "expected status Incomplete");
@@ -43,12 +40,11 @@ where
 		res: None,
 	};
 
-	Either::Right(
-		self.engine
-			.pool
-			.execute_get(cmd)
-			.and_then(|mut res| ready(res.remove(0))),
-	)
+	self.engine
+		.pool
+		.execute_get(cmd)
+		.and_then(|mut res| ready(res.remove(0)))
+		.right_future()
 }
 
 /// Fetches a raw key from block cache without storage I/O.

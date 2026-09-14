@@ -1,5 +1,5 @@
 use axum::extract::State;
-use futures::{FutureExt, StreamExt, TryFutureExt, future::Either, pin_mut};
+use futures::{FutureExt, StreamExt, TryFutureExt, pin_mut};
 use ruma::{
 	DeviceId, RoomId, UInt, UserId,
 	api::{
@@ -167,18 +167,17 @@ pub(crate) async fn get_messages(
 	}
 
 	let it = match dir {
-		| Direction::Forward => Either::Left(
-			services
-				.timeline
-				.pdus(Some(sender_user), room_id, Some(from))
-				.ignore_err(),
-		),
-		| Direction::Backward => Either::Right(
-			services
-				.timeline
-				.pdus_rev(Some(sender_user), room_id, Some(from))
-				.ignore_err(),
-		),
+		| Direction::Forward => services
+			.timeline
+			.pdus(Some(sender_user), room_id, Some(from))
+			.ignore_err()
+			.left_stream(),
+
+		| Direction::Backward => services
+			.timeline
+			.pdus_rev(Some(sender_user), room_id, Some(from))
+			.ignore_err()
+			.right_stream(),
 	};
 
 	let encrypted = services

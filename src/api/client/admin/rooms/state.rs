@@ -1,5 +1,5 @@
 use axum::extract::State;
-use futures::{TryStreamExt, future::Either};
+use futures::{StreamExt, TryStreamExt};
 use ruma::events::StateEventType;
 use synapse_admin_api::rooms::admin_state::v1::{Request, Response};
 use tuwunel_core::{Result, matrix::Event, utils::stream::TryBroadbandExt};
@@ -33,18 +33,17 @@ pub(crate) async fn admin_room_state_route(
 		.map(StateEventType::from);
 
 	let pdus = match &event_type {
-		| Some(event_type) => Either::Left(
-			services
-				.state_accessor
-				.room_state_type_pdus(&body.room_id, event_type)
-				.map_ok(Event::into_pdu),
-		),
-		| None => Either::Right(
-			services
-				.state_accessor
-				.room_state_full_pdus(&body.room_id)
-				.map_ok(Event::into_pdu),
-		),
+		| Some(event_type) => services
+			.state_accessor
+			.room_state_type_pdus(&body.room_id, event_type)
+			.map_ok(Event::into_pdu)
+			.left_stream(),
+
+		| None => services
+			.state_accessor
+			.room_state_full_pdus(&body.room_id)
+			.map_ok(Event::into_pdu)
+			.right_stream(),
 	};
 
 	let state = pdus
