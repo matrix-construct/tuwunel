@@ -3,7 +3,7 @@ use std::iter::once;
 use tuwunel_core::Result;
 
 use super::{
-	CurTransactionStatus, Destination, SendingEvent, SendingFutures, TransactionStatus, enqueue,
+	Destination, SendingEvent, SendingFutures, TransactionStatus, TransactionStatuses, enqueue,
 	fixture, pdu_id,
 };
 
@@ -24,7 +24,7 @@ async fn reused_destination_promotes_first_request_after_cleanup() -> Result {
 	for dest in destinations {
 		let old = enqueue(sending, &dest, SendingEvent::Pdu(pdu_id(1)));
 		let mut futures = SendingFutures::new();
-		let mut statuses = CurTransactionStatus::new();
+		let mut statuses = TransactionStatuses::new();
 
 		sending.db.mark_as_active(once(&old));
 		sending
@@ -53,7 +53,7 @@ async fn reused_destination_promotes_first_request_after_cleanup() -> Result {
 		let new_id = pdu_id(2);
 		let successor = enqueue(sending, &dest, SendingEvent::Pdu(new_id));
 		let events = sending
-			.select_events(&dest, vec![successor.clone()], &mut statuses)
+			.select_events(&dest, [successor.clone()].into(), &mut statuses)
 			.await?;
 
 		assert_eq!(events, Some(vec![SendingEvent::Pdu(new_id)]));

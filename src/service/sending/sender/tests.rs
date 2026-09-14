@@ -1,14 +1,16 @@
+mod cleanup;
+mod fixture;
+
 use std::iter::once;
 
 use tuwunel_core::Result;
 
-use super::{
-	super::test_utils::{fixture, pdu_id},
-	CurTransactionStatus, Destination, QueueItem, SendingEvent, SendingFutures, Service,
-	TransactionStatus,
+use self::fixture::fixture;
+use super::{NewEvents, SendingFutures, TransactionStatus, TransactionStatuses};
+use crate::{
+	sending::{Destination, SendingEvent, Service, data::QueueItem},
+	test_utils::pdu_id,
 };
-
-mod cleanup;
 
 #[tokio::test]
 async fn restart_replays_active_before_queued_successors() -> Result {
@@ -33,7 +35,7 @@ async fn restart_replays_active_before_queued_successors() -> Result {
 
 		let successor = enqueue(sending, &dest, SendingEvent::Pdu(new_id));
 		let mut futures = SendingFutures::new();
-		let mut statuses = CurTransactionStatus::new();
+		let mut statuses = TransactionStatuses::new();
 
 		sending
 			.startup_netburst(0, &mut futures, &mut statuses)
@@ -42,7 +44,7 @@ async fn restart_replays_active_before_queued_successors() -> Result {
 		assert!(futures.is_empty());
 		assert!(matches!(statuses.get(&dest), Some(TransactionStatus::Pending)));
 
-		let payload = || vec![successor.clone()];
+		let payload = || [successor.clone()].into();
 		let events = sending
 			.select_events(&dest, payload(), &mut statuses)
 			.await?;
@@ -60,7 +62,7 @@ async fn restart_replays_active_before_queued_successors() -> Result {
 		active.exists(&old.0).await?;
 
 		sending
-			.handle_response_ok(&dest, &mut futures, &mut statuses)
+			.handle_response_ok(dest, &mut futures, &mut statuses)
 			.await;
 
 		assert_eq!(futures.len(), 1);
@@ -99,7 +101,7 @@ async fn restart_retains_the_configured_active_limit() -> Result {
 	let active = &sending.db.db["servercurrentevent_data"];
 
 	let mut futures = SendingFutures::new();
-	let mut statuses = CurTransactionStatus::new();
+	let mut statuses = TransactionStatuses::new();
 
 	sending
 		.db
@@ -120,7 +122,7 @@ async fn restart_retains_the_configured_active_limit() -> Result {
 	);
 
 	let events = sending
-		.select_events(&dest, Vec::new(), &mut statuses)
+		.select_events(&dest, NewEvents::new(), &mut statuses)
 		.await?;
 
 	assert_eq!(events, Some(vec![SendingEvent::Pdu(first_id)]));
@@ -138,7 +140,7 @@ async fn enabled_netburst_keeps_active_ownership() -> Result {
 	let dest = Destination::Appservice("netburst".into());
 	let old = enqueue(sending, &dest, SendingEvent::Pdu(pdu_id(1)));
 	let mut futures = SendingFutures::new();
-	let mut statuses = CurTransactionStatus::new();
+	let mut statuses = TransactionStatuses::new();
 
 	sending.db.mark_as_active(once(&old));
 	sending
@@ -149,7 +151,7 @@ async fn enabled_netburst_keeps_active_ownership() -> Result {
 	assert!(matches!(statuses.get(&dest), Some(TransactionStatus::Running)));
 	assert!(
 		sending
-			.select_events(&dest, Vec::new(), &mut statuses)
+			.select_events(&dest, NewEvents::new(), &mut statuses)
 			.await?
 			.is_none()
 	);
@@ -157,6 +159,46 @@ async fn enabled_netburst_keeps_active_ownership() -> Result {
 	sending.db.db["servercurrentevent_data"]
 		.exists(&old.0)
 		.await?;
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn zero_keep_drops_every_active_row_without_redelivery() -> Result {
+	let Some(fixture) = fixture(true, 0).await? else {
+		return Ok(());
+	};
+
+	let sending = &fixture.services.sending;
+	let active = &sending.db.db["servercurrentevent_data"];
+	let destinations = [
+		Destination::Appservice("zero".into()),
+		Destination::Push("@u:localhost".try_into()?, "zero".into()),
+	];
+
+	let rows: Vec<_> = destinations
+		.iter()
+		.map(|dest| enqueue(sending, dest, SendingEvent::Pdu(pdu_id(1))))
+		.collect();
+
+	let mut futures = SendingFutures::new(); // startup_netburst &mut out-param
+	let mut statuses = TransactionStatuses::new(); // startup_netburst &mut out-param
+
+	sending.db.mark_as_active(rows.iter());
+	sending
+		.startup_netburst(0, &mut futures, &mut statuses)
+		.await;
+
+	assert!(futures.is_empty());
+	assert!(statuses.is_empty());
+	for (key, _) in &rows {
+		assert!(
+			active
+				.get(key)
+				.await
+				.is_err_and(|error| error.is_not_found())
+		);
+	}
 
 	Ok(())
 }

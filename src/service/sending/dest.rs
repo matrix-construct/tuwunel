@@ -11,11 +11,23 @@ pub enum Destination {
 }
 
 #[implement(Destination)]
+#[inline]
 #[must_use]
 pub(super) fn event_key(&self, pdu_id: &RawPduId) -> Vec<u8> {
-	let mut key = self.get_prefix_with_capacity(pdu_id.as_ref().len());
+	self.suffixed_key(pdu_id.as_ref())
+}
 
-	key.extend_from_slice(pdu_id.as_ref());
+#[implement(Destination)]
+#[inline]
+#[must_use]
+pub(super) fn count_key(&self, count: u64) -> Vec<u8> { self.suffixed_key(&count.to_be_bytes()) }
+
+#[implement(Destination)]
+#[must_use]
+fn suffixed_key(&self, suffix: &[u8]) -> Vec<u8> {
+	let mut key = self.get_prefix_with_capacity(suffix.len());
+
+	key.extend_from_slice(suffix);
 	key
 }
 
