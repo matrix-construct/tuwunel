@@ -8,7 +8,6 @@ use tuwunel_core::{
 	matrix::{Event, Pdu},
 	utils::{
 		BoolExt,
-		future::BoolExt as _,
 		result::{FlatOk, LogErr},
 	},
 };
@@ -102,17 +101,16 @@ pub async fn erased_view(&self, user_id: &UserId, pdu: &Pdu) -> Option<Pdu> {
 /// MSC4025: whether `pdu` serves pruned to `user_id`: its sender is erased
 /// and the recipient was not joined in the room state at the event.
 ///
-/// Both lookups are polled concurrently, the erasure check first. A false
-/// result there resolves the conjunction without waiting on the membership
-/// read.
+/// The erasure check runs first and alone: it is a point get that is almost
+/// always false, while the membership read is a state lookup that only an
+/// erased sender needs.
 #[implement(super::Service)]
 pub async fn erased_for(&self, user_id: &UserId, pdu: &Pdu) -> bool {
-	let is_erased = self.services.users.is_erased(pdu.sender());
-	let not_joined = self
-		.user_membership_at_pdu(user_id, pdu)
-		.map(|membership| membership.ne(&MembershipState::Join));
-
-	is_erased.and(not_joined).await
+	self.services.users.is_erased(pdu.sender()).await
+		&& self
+			.user_membership_at_pdu(user_id, pdu)
+			.map(|membership| membership.ne(&MembershipState::Join))
+			.await
 }
 
 /// Prune per the room version's redaction rules. The pruned form carries no
