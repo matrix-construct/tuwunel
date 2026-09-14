@@ -107,7 +107,7 @@ All commands run from the admin room (`!admin appservices <subcommand>`):
 | `show-config <id>` | Print the stored registration as YAML. |
 | `list` | List IDs of all loaded appservices. |
 
-## Connection settings
+## Server options
 
 These options go in the top-level `[global]` section:
 
