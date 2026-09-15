@@ -26,6 +26,7 @@ const LIMIT_DEFAULT: usize = 10;
 /// - Hides any local users that aren't in any public rooms (i.e. those that
 ///   have the join rule set to public) and don't share a room with the sender
 /// - Hides appservice senders and users in exclusive appservice user namespaces
+///   unless `show_appservice_users_in_user_directory` is enabled
 pub(crate) async fn search_users_route(
 	State(services): State<crate::State>,
 	body: Ruma<search_users::v3::Request>,
@@ -85,10 +86,14 @@ async fn should_show_user(
 		return false;
 	}
 
-	if services
-		.appservice
-		.is_exclusive_user_id(target_user)
-		.await
+	if !services
+		.server
+		.config
+		.show_appservice_users_in_user_directory
+		&& services
+			.appservice
+			.is_exclusive_user_id(target_user)
+			.await
 	{
 		return false;
 	}

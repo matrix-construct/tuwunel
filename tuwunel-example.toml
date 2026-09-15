@@ -1096,6 +1096,15 @@
 #
 #show_all_local_users_in_user_directory = false
 
+# Include appservice senders and users in exclusive appservice user
+# namespaces in user directory searches. They remain subject to the
+# normal room visibility rules unless
+# `show_all_local_users_in_user_directory` is also enabled.
+#
+# reloadable: yes
+#
+#show_appservice_users_in_user_directory = false
+
 # Allow guest users to access TURN credentials.
 #
 # This is the equivalent of Synapse's `turn_allow_guests` config option.
