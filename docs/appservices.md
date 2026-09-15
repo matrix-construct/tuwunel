@@ -72,6 +72,18 @@ Regex matching is unanchored -- add `^` and `$` if you need to match the full st
 
 When `exclusive: true`, the homeserver rejects any attempt by a normal user to register a conflicting user ID or room alias. Multiple appservices can share a non-exclusive namespace; exclusive ranges must not overlap.
 
+## User directory visibility
+
+Appservice senders and users in exclusive appservice namespaces are hidden from
+user directory searches by default.
+To include them, set `show_appservice_users_in_user_directory = true` in `[global]`.
+They then follow the same public-room or shared-room visibility rules as other
+users.
+To make all local users discoverable regardless of room membership, also set
+`show_all_local_users_in_user_directory = true`.
+These settings affect directory results only; exclusive namespace ownership and
+room access rules remain unchanged.
+
 ## Configuration reference
 
 Fields under `[global.appservice.<ID>]`:

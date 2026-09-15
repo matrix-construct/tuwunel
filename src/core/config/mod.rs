@@ -1372,6 +1372,16 @@ pub struct Config {
 	#[serde(default)]
 	pub show_all_local_users_in_user_directory: bool,
 
+	/// Include appservice senders and users in exclusive appservice user
+	/// namespaces in user directory searches. They remain subject to the
+	/// normal room visibility rules unless
+	/// `show_all_local_users_in_user_directory` is also enabled.
+	///
+	/// reloadable: yes
+	/// default: false
+	#[serde(default)]
+	pub show_appservice_users_in_user_directory: bool,
+
 	/// Allow guest users to access TURN credentials.
 	///
 	/// This is the equivalent of Synapse's `turn_allow_guests` config option.
