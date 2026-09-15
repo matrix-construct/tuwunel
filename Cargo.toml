@@ -398,8 +398,6 @@ features = [
     "unstable-msc3664", # push rules for relations
     "unstable-msc3814",
     "unstable-msc3930", # polls push rules
-    "unstable-msc3983", # appservice one-time key claims
-    "unstable-msc3984", # appservice device key queries
     "unstable-msc4075",
     "unstable-msc4121",
     "unstable-msc4125",

@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, HashMap};
 use axum::extract::State;
 use futures::{
 	FutureExt, StreamExt,
-	future::{join, join5},
+	future::{join, join4},
 };
 use ruma::{
 	CanonicalJsonObject, CanonicalJsonValue, DeviceId, OwnedDeviceId, OwnedUserId, ServerName,
@@ -171,14 +171,8 @@ where
 		.then_async(|| services.users.get_user_signing_key(user_id).ok())
 		.map(Option::flatten);
 
-	let appservice_keys = services
-		.appservice
-		.query_keys(user_id, device_ids);
-
-	let (mut device_keys, master_key, self_signing_key, user_signing_key, appservice_keys) =
-		join5(device_keys, master_key, self_signing_key, user_signing_key, appservice_keys).await;
-
-	device_keys.extend(appservice_keys);
+	let (device_keys, master_key, self_signing_key, user_signing_key) =
+		join4(device_keys, master_key, self_signing_key, user_signing_key).await;
 
 	let owned = || user_id.to_owned();
 	Keys {

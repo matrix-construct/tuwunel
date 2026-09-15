@@ -29,7 +29,7 @@
 
 | ✅ `yes` | 🟨 `part` | ❌ `no` | ⬛ `n/a` | total |
 |---:|---:|---:|---:|---:|
-| 256 | 54 | 435 | 330 | 1075 |
+| 254 | 54 | 437 | 330 | 1075 |
 
 ### Status by inventory bucket
 
@@ -538,8 +538,8 @@ in the [Out of scope](#out-of-scope) section.
 | MSC3994 | ❌ ● | 0/0 | Display why an event caused a notification | rule_kind/rule_id not added to /notifications |
 | MSC3993 | ❌ ● | 0/0 | Room takeover | room takeover variants not implemented |
 | MSC3991 | ❌ ● | 0/0 | Power level up! Taking the room to new heights | raise own power level above max not allowed |
-| MSC3984 | ✅ ● | 80/90 | Sending key queries to appservices | src/api/client/keys/get_keys.rs:178 appservice device overlay; no cross-signi... |
-| MSC3983 | ✅ ● | 90/100 | Sending One-Time Key (OTK) claims to appservices | claim_keys.rs:96 local OTK, :112 appservice, :131 fallback; keys_claims opt-in |
+| MSC3984 | ❌ ● | 0/0 | Sending key queries to appservices | Sending key queries to appservices not implemented |
+| MSC3983 | ❌ ● | 0/0 | Sending One-Time Key (OTK) claims to appservices | OTK claim proxy to appservice not implemented |
 | MSC3982 | ❌ ● | 0/0 | Limit maximum number of events sent to an AS | no 100-event cap on appservice transactions |
 | MSC3964 | ❌ ● | 0/0 | Notifications for room tags | room_tag push condition not implemented |
 | MSC3963 | ❌ ● | 0/0 | Oblivious Matrix over HTTPS | Oblivious MoH endpoints absent |
