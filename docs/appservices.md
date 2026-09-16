@@ -118,6 +118,7 @@ These options go in the top-level `[global]` section:
 | `appservice_idle_timeout` | `300` | Idle connection pool timeout in seconds. |
 | `dns_passthru_appservices` | `false` | Bypass DNS passthru domain matching for all appservice URLs. More efficient than listing each domain in `dns_passthru_domains` when all appservices share the same network. |
 | `appservice_keys_claims` | `true` | Forward one-time key claims ([MSC3983](https://github.com/matrix-org/matrix-spec-proposals/pull/3983)) to the appservices whose registrations set `keys_claims`. Turn it off to stop the claims for every registration at once, for example when no appservice serves the `/keys/claim` route. Reloadable. |
+| `show_appservice_users_in_user_directory` | `false` | Include appservice senders and users in exclusive appservice user namespaces in user directory searches. They remain subject to the normal room visibility rules unless `show_all_local_users_in_user_directory` is also enabled; Synapse has no equivalent and always hides them. Reloadable. |
 
 ## Getting help
 

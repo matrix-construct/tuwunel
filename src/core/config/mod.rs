@@ -1363,14 +1363,29 @@ pub struct Config {
 	#[serde(default = "true_fn")]
 	pub allow_unlisted_room_search_by_id: bool,
 
-	/// Show all local users in user directory. With this set to false, only
-	/// users in public rooms or those that share a room with the user making
-	/// the search will be shown.
+	/// Show all local users in user directory.
+	///
+	/// With this set to false, only users in public rooms or those that share
+	/// a room with the user making the search will be shown. Appservice
+	/// senders and users in exclusive appservice user namespaces stay hidden
+	/// unless `show_appservice_users_in_user_directory` is also enabled.
 	///
 	/// reloadable: yes
 	/// default: false
 	#[serde(default)]
 	pub show_all_local_users_in_user_directory: bool,
+
+	/// Include appservice senders and users in exclusive appservice user
+	/// namespaces in user directory searches.
+	///
+	/// They remain subject to the normal room visibility rules unless
+	/// `show_all_local_users_in_user_directory` is also enabled. Synapse has
+	/// no equivalent and always hides them.
+	///
+	/// reloadable: yes
+	/// default: false
+	#[serde(default)]
+	pub show_appservice_users_in_user_directory: bool,
 
 	/// Allow guest users to access TURN credentials.
 	///

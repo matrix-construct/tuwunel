@@ -1,8 +1,8 @@
 //! Client-API harness shared by the server-booting tests that opt into it.
 //!
 //! Each such test is its own binary, so everything here would otherwise be
-//! copied once per binary. Every item is used by each binary declaring the
-//! module, which is what keeps it free of dead code in any one.
+//! copied once per binary. A binary using only part of the harness expects
+//! the dead code on its `mod client;` declaration.
 
 use std::time::Duration;
 
@@ -41,12 +41,23 @@ pub(crate) struct Client<'a> {
 /// per test; only the request and the id it answers with are shared.
 #[implement(Client, params = "<'_>")]
 pub(crate) async fn create_room(&self, body: &Value) -> Result<OwnedRoomId> {
-	let response: Value = self
+	let response = self.post("createRoom", body).await?;
+
+	Ok(field(&response, "room_id")?.try_into()?)
+}
+
+/// Post a JSON body to one endpoint path as this user and parse the reply.
+///
+/// A non-success status is the error, so a caller only ever sees the body of
+/// an accepted request.
+#[implement(Client, params = "<'_>")]
+pub(crate) async fn post(&self, path: &str, body: &Value) -> Result<Value> {
+	let response = self
 		.services
 		.client
 		.clients
 		.default
-		.post(self.url("createRoom"))
+		.post(self.url(path))
 		.bearer_auth(self.token)
 		.json(body)
 		.send()
@@ -55,7 +66,7 @@ pub(crate) async fn create_room(&self, body: &Value) -> Result<OwnedRoomId> {
 		.json()
 		.await?;
 
-	Ok(field(&response, "room_id")?.try_into()?)
+	Ok(response)
 }
 
 /// The versioned client-API URL for one endpoint path.
