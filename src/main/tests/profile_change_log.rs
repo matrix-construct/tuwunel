@@ -8,7 +8,7 @@ use tuwunel::{Args, Runtime, Server, async_run, async_start, async_stop};
 use tuwunel_core::{
 	Result, err,
 	ruma::{UserId, profile::ProfileFieldName, user_id},
-	utils::result::NotFound,
+	utils::{BoolExt, result::NotFound},
 };
 use tuwunel_service::Services;
 
@@ -74,11 +74,18 @@ async fn assert_change_log_bounds(services: &Services) -> Result {
 
 	expect_fields(services, user_id, (after, latest), &[STATUS], "the second write").await?;
 
+	set_status(services, user_id, "back").await?;
+
+	let restated = services.globals.current_count();
+
+	// Saving a value again is how a user repairs a client whose copy went stale.
+	expect_fields(services, user_id, (latest, restated), &[STATUS], "the restated write").await?;
+
 	set_call(services, user_id).await?;
 
 	let before_clear = services.globals.current_count();
 
-	expect_fields(services, user_id, (latest, before_clear), &[CALL], "the call write").await?;
+	expect_fields(services, user_id, (restated, before_clear), &[CALL], "the call write").await?;
 
 	services
 		.profile
@@ -105,6 +112,24 @@ async fn assert_change_log_bounds(services: &Services) -> Result {
 
 		assert!(value.is_not_found(), "{name} must be cleared");
 	}
+
+	let remote = user_id!("@statusbounds:remote.test");
+	let before_fetch = services.globals.current_count();
+
+	set_status(services, remote, "away").await?;
+
+	let fetched = services.globals.current_count();
+
+	expect_fields(services, remote, (before_fetch, fetched), &[STATUS], "a remote write").await?;
+
+	// A remote profile refresh reissues every field on each lookup.
+	set_status(services, remote, "away").await?;
+
+	expect_fields(services, remote, (fetched, u64::MAX), &[], "a restated remote write").await?;
+
+	BoolExt::ok_or_else(services.globals.current_count() == fetched, || {
+		err!("a restated remote write took a count")
+	})?;
 
 	let stranger = user_id!("@statusbounds-stranger:localhost");
 
