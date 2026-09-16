@@ -110,16 +110,16 @@ improvements, more features, faster-paced development, better client/server inte
 hacks upstream won't accept, etc
 - [facebook/rocksdb][2]: <https://github.com/matrix-construct/rocksdb> - liburing
 build fixes and GCC debug build fix
-- [tikv/jemallocator][3]: <https://github.com/matrix-construct/jemallocator> - musl
-builds seem to be broken on upstream, fixes some broken/suspicious code in
-places, additional safety measures, and support redzones for Valgrind
+- [tikv/jemallocator][3]: <https://github.com/matrix-construct/jevmalloc> - a hard
+fork, `jevmalloc`, with most of the upstream surface refactored or removed; it
+builds jemalloc from our fork, <https://github.com/matrix-construct/jemalloc>
 - [zyansheep/rustyline-async][4]:
 <https://github.com/matrix-construct/rustyline-async> - tab completion callback and
 `CTRL+\` signal quit event for Tuwunel console CLI
 - [rust-rocksdb/rust-rocksdb][5]:
-<https://github.com/matrix-construct/rust-rocksdb-zaidoon1> - [`@zaidoon1`][8]'s fork
+<https://github.com/matrix-construct/rust-rocksdb> - [`@zaidoon1`][8]'s fork
 has quicker updates, more up to date dependencies, etc. Our fork fixes musl build
-issues, removes unnecessary `gtest` include, and uses our RocksDB and jemallocator
+issues, removes unnecessary `gtest` include, and uses our RocksDB and jevmalloc
 forks.
 - [tokio-rs/tracing][6]: <https://github.com/matrix-construct/tracing> - Implements
 `Clone` for `EnvFilter` to support dynamically changing tracing envfilter's
