@@ -1,14 +1,16 @@
 use axum::extract::State;
 use futures::{FutureExt, StreamExt, pin_mut};
 use ruma::{
-	UserId, api::client::user_directory::search_users, events::room::join_rules::JoinRule,
+	UserId,
+	api::client::user_directory::search_users::v3::{Request, Response, User},
+	events::room::join_rules::JoinRule,
 };
 use tuwunel_core::{
 	Result,
 	utils::{
 		BoolExt, FutureBoolExt,
 		math::usize_from_ruma_bounded,
-		stream::{BroadbandExt, ReadyExt},
+		stream::{BroadbandExt, ReadyExt, WidebandExt},
 	},
 };
 use tuwunel_service::Services;
@@ -30,8 +32,8 @@ const LIMIT_DEFAULT: usize = 10;
 ///   unless `show_appservice_users_in_user_directory` is enabled
 pub(crate) async fn search_users_route(
 	State(services): State<crate::State>,
-	body: Ruma<search_users::v3::Request>,
-) -> Result<search_users::v3::Response> {
+	body: Ruma<Request>,
+) -> Result<Response> {
 	let sender_user = body.sender_user();
 	let limit = usize_from_ruma_bounded(body.limit, LIMIT_DEFAULT, LIMIT_MAX);
 
@@ -41,52 +43,43 @@ pub(crate) async fn search_users_route(
 		.stream()
 		.ready_filter(|&user_id| user_id != sender_user)
 		.map(ToOwned::to_owned)
-		.broad_filter_map(async |user_id| {
+		.wide_filter_map(async |user_id| {
 			let display_name = services.profile.displayname(&user_id).await.ok();
 
-			should_show_user(
-				&services,
-				sender_user,
-				&user_id,
-				display_name.as_deref(),
-				&search_term,
-			)
-			.await
-			.then_async(async || search_users::v3::User {
-				user_id: user_id.clone(),
-				display_name,
-				avatar_url: services.profile.avatar_url(&user_id).await.ok(),
-			})
-			.await
+			matches_term(&user_id, display_name.as_deref(), &search_term)
+				.then_some((user_id, display_name))
+		})
+		.wide_filter_map(async |(user_id, display_name)| {
+			should_show_user(&services, sender_user, &user_id)
+				.await
+				.then_async(async move || {
+					let avatar_url = services.profile.avatar_url(&user_id).await.ok();
+
+					User { user_id, display_name, avatar_url }
+				})
+				.await
 		});
 
 	pin_mut!(users);
 	let results = users.by_ref().take(limit).collect().await;
 	let limited = users.next().await.is_some();
 
-	Ok(search_users::v3::Response { results, limited })
+	Ok(Response { results, limited })
+}
+
+fn matches_term(user_id: &UserId, display_name: Option<&str>, search_term: &str) -> bool {
+	user_id
+		.as_str()
+		.to_lowercase()
+		.contains(search_term)
+		|| display_name.is_some_and(|name| name.to_lowercase().contains(search_term))
 }
 
 async fn should_show_user(
 	services: &Services,
 	sender_user: &UserId,
 	target_user: &UserId,
-	target_display_name: Option<&str>,
-	search_term: &str,
 ) -> bool {
-	let user_id_matches = target_user
-		.as_str()
-		.to_lowercase()
-		.contains(search_term);
-
-	let display_name_matches = target_display_name
-		.map(str::to_lowercase)
-		.is_some_and(|display_name| display_name.contains(search_term));
-
-	if !user_id_matches && !display_name_matches {
-		return false;
-	}
-
 	let config = &services.server.config;
 
 	if !config.show_appservice_users_in_user_directory
