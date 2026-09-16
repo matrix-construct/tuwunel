@@ -2,19 +2,23 @@
 
 use std::net::TcpListener;
 
-use futures::future::join;
+use futures::{Stream, StreamExt, future::join};
 use serde_json::{Value, json};
 use tuwunel::{Args, Runtime, Server, async_run, async_start, async_stop};
 use tuwunel_core::{
 	Result, err, implement,
-	ruma::{RoomId, UserId},
+	ruma::{RoomId, UserId, profile::ProfileFieldName},
+	smallvec::SmallVec,
 	utils::BoolExt,
 };
-use tuwunel_service::Services;
+use tuwunel_service::{Services, profile::ProfileChange};
 
 use self::client::{Client, register, wait_until_ready};
 
 mod client;
+
+// Each write in this test logs a single field.
+type Fields = SmallVec<[ProfileFieldName; 1]>;
 
 const TOKEN: &str = "profile-fanout-idempotent-test-access-token";
 
@@ -23,8 +27,9 @@ const MEMBER_FILTER: &str = r#"{"types":["m.room.member"]}"#;
 /// Drives a global profile write that restores what every joined room already
 /// holds.
 ///
-/// Such a write is a change to nobody, so no room gets a member event for it;
-/// a write that does change the value still gets exactly one.
+/// Such a write is a change to nobody else, so no room gets a member event or
+/// a change row for it. The writer's own devices still get a change row, and a
+/// write that does change the value still gets exactly one member event.
 #[test]
 fn restoring_a_profile_value_emits_no_member_event() -> Result {
 	let listener = TcpListener::bind(("127.0.0.1", 0))?;
@@ -76,6 +81,7 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	let joined = owner.member_events(&room).await?;
 
 	let displayname = services.profile.displayname(&user_id).await?;
+	let before = services.globals.current_count();
 
 	owner
 		.put_displayname(&user_id, &displayname)
@@ -87,13 +93,33 @@ async fn exercise(services: &Services, base: &str) -> Result {
 		err!("restoring the display name grew the member events from {joined} to {restored}")
 	})?;
 
+	let changes = services
+		.profile
+		.profile_changed(&user_id, before, None);
+
+	expect_logged(changes, &[ProfileFieldName::DisplayName], "restoring for the owner").await?;
+
+	let changes = services
+		.profile
+		.room_profile_changed(&room, before, None);
+
+	expect_logged(changes, &[], "restoring for the room").await?;
+
+	let before_rename = services.globals.current_count();
+
 	owner.put_displayname(&user_id, "renamed").await?;
 
 	let renamed = owner.member_events(&room).await?;
 
 	BoolExt::ok_or_else(renamed == joined.saturating_add(1), || {
 		err!("changing the display name grew the member events from {joined} to {renamed}")
-	})
+	})?;
+
+	let changes = services
+		.profile
+		.room_profile_changed(&room, before_rename, None);
+
+	expect_logged(changes, &[ProfileFieldName::DisplayName], "renaming for the room").await
 }
 
 /// How many member events the room's timeline holds.
@@ -138,4 +164,19 @@ async fn put_displayname(&self, user_id: &UserId, displayname: &str) -> Result {
 		.error_for_status()?;
 
 	Ok(())
+}
+
+async fn expect_logged(
+	changes: impl Stream<Item = ProfileChange<'_>>,
+	expected: &[ProfileFieldName],
+	subject: &str,
+) -> Result {
+	let logged: Fields = changes
+		.map(|(_, field)| field.into())
+		.collect()
+		.await;
+
+	BoolExt::ok_or_else(logged.as_slice() == expected, || {
+		err!("{subject} logged {logged:?}, expected {expected:?}")
+	})
 }

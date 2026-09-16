@@ -46,8 +46,8 @@ impl crate::Service for Service {
 	fn name(&self) -> &str { crate::service::make_name(std::module_path!()) }
 }
 
-/// One logged profile write: the user whose profile changed, and the name of
-/// the field that changed.
+/// One logged profile write: the user whose profile was written, and the name
+/// of a field the write logged.
 ///
 /// Both members borrow the database cursor that produced them, so a consumer
 /// retaining either past the cursor's next advance must own it first.
@@ -429,7 +429,7 @@ pub async fn clear_profile_keys(&self, user_id: &UserId) -> Result {
 			.rooms_joined_checked(user_id)
 	};
 
-	self.publish_update(user_id, &fields, txn, rooms)
+	self.publish_update(user_id, &fields, &fields, txn, rooms)
 		.await
 }
 
@@ -446,8 +446,9 @@ pub async fn set_profile_keys(
 	propagation: Option<Propagation>,
 ) -> Result {
 	let _profile_lock = self.mutex.lock(user_id).await;
+	let local = self.services.globals.user_is_local(user_id);
 
-	if self.services.globals.user_is_local(user_id) {
+	if local {
 		for (name, value) in profile_values {
 			check_profile_key(name.as_str())?;
 
@@ -475,7 +476,7 @@ pub async fn set_profile_keys(
 		},
 	);
 
-	if !matches!(propagation, Propagation::None) && self.services.globals.user_is_local(user_id) {
+	if !matches!(propagation, Propagation::None) && local {
 		self.update_all_rooms(user_id, profile_values, propagation)
 			.await;
 	}
@@ -500,16 +501,23 @@ pub async fn set_profile_keys(
 			.rooms_joined_checked(user_id)
 	};
 
-	self.publish_update(user_id, &changed, txn, rooms)
+	// A local write restating a stored value still reaches the writer's devices.
+	let logged = profile_values
+		.iter()
+		.map(|(name, _)| name.as_str())
+		.filter(|name| local || changed.contains(name));
+
+	self.publish_update(user_id, logged, &changed, txn, rooms)
 		.await
 }
 
 /// Names the fields whose stored value the write would actually change.
 ///
-/// A profile write that restores what is already stored is a change to nobody,
-/// and the on-demand remote refresh reissues every field on every lookup of a
-/// remote profile, so logging those would multiply the log by the request rate
-/// rather than the change rate.
+/// Only these are logged for the user's rooms, or at all for a remote user. A
+/// write restoring what is already stored is news to nobody else, and the
+/// on-demand remote refresh reissues every field on every lookup of a remote
+/// profile, so logging those would multiply the log by the request rate rather
+/// than the change rate.
 #[implement(Service)]
 async fn changed_fields<'a>(
 	&self,
@@ -533,13 +541,14 @@ async fn changed_fields<'a>(
 		.await
 }
 
-/// Commits staged profile fields together with a change row per field under
-/// the user's own prefix and under every room they are joined to.
+/// Commits staged profile fields together with their change rows.
 ///
-/// The row names the changed field and not only the user because a removal is
-/// otherwise unreportable: a reader re-reading the live profile cannot tell a
-/// cleared field from one that was never set. A room scan error discards the
-/// whole batch, so no row for that count is ever visible.
+/// Every logged field gets a row under the user's own prefix; every changed
+/// field also gets one under each room they are joined to. The row names the
+/// field and not only the user because a removal is otherwise unreportable: a
+/// reader re-reading the live profile cannot tell a cleared field from one
+/// that was never set. A room scan error discards the whole batch, so no row
+/// for that count is ever visible.
 #[implement(Service)]
 #[tracing::instrument(
 	name = "profile_update",
@@ -549,29 +558,35 @@ async fn changed_fields<'a>(
 		%user_id,
 	),
 )]
-async fn publish_update<'a, T, S>(
+async fn publish_update<'a, L, T, S>(
 	&self,
 	user_id: &UserId,
+	logged: L,
 	changed: &[T],
 	txn: Txn,
 	rooms: impl FnOnce() -> S + Send,
 ) -> Result
 where
+	L: IntoIterator<Item: AsRef<str>> + Clone,
 	T: AsRef<str> + Sync,
 	S: Stream<Item = Result<&'a RoomId>> + Send,
 {
-	if changed.is_empty() {
+	if logged.clone().into_iter().next().is_none() {
 		txn.execute();
 		return Ok(());
 	}
 
 	let count = self.services.globals.next_count();
-	let txn = self.stage_update(txn, user_id.as_str(), user_id, *count, changed);
-	let txn = rooms()
-		.ready_try_fold(txn, |txn, room_id| {
-			Ok(self.stage_update(txn, room_id.as_str(), user_id, *count, changed))
-		})
-		.await?;
+	let txn = self.stage_update(txn, user_id.as_str(), user_id, *count, logged);
+	let txn = if changed.is_empty() {
+		txn
+	} else {
+		rooms()
+			.ready_try_fold(txn, |txn, room_id| {
+				Ok(self.stage_update(txn, room_id.as_str(), user_id, *count, changed))
+			})
+			.await?
+	};
 
 	txn.execute();
 
@@ -579,24 +594,17 @@ where
 }
 
 #[implement(Service)]
-fn stage_update<T>(
-	&self,
-	txn: Txn,
-	scope: &str,
-	user_id: &UserId,
-	count: u64,
-	changed: &[T],
-) -> Txn
+fn stage_update<I>(&self, txn: Txn, scope: &str, user_id: &UserId, count: u64, fields: I) -> Txn
 where
-	T: AsRef<str>,
+	I: IntoIterator<Item: AsRef<str>>,
 {
-	changed.iter().fold(txn, |mut txn, name| {
+	fields.into_iter().fold(txn, |mut txn, name| {
 		txn.put_raw(&self.profilechangeid_userid, (scope, count, name.as_ref()), user_id);
 		txn
 	})
 }
 
-/// Streams the profile fields the user changed themselves.
+/// Streams the profile fields the user wrote themselves, restatements included.
 ///
 /// The range is half-open on the low side, so a caller passes the sync token
 /// it already delivered. An absent `to` leaves the walk unbounded above.

@@ -44,7 +44,7 @@ async fn failed_preparation_discards_rows_and_retires_count() -> Result {
 
 	let txn = transaction(service, false);
 
-	timeout(PAUSE, service.publish_update(user(), &FIELDS, txn, || stalled))
+	timeout(PAUSE, service.publish_update(user(), &FIELDS, &FIELDS, txn, || stalled))
 		.await
 		.expect_err("stalled publication is dropped here");
 
@@ -52,7 +52,7 @@ async fn failed_preparation_discards_rows_and_retires_count() -> Result {
 	let txn = transaction(service, false);
 
 	service
-		.publish_update(user(), &FIELDS, txn, || failing)
+		.publish_update(user(), &FIELDS, &FIELDS, txn, || failing)
 		.await
 		.expect_err("room scan failure aborts publication");
 
@@ -68,7 +68,7 @@ async fn failed_preparation_discards_rows_and_retires_count() -> Result {
 	let txn = transaction(service, false);
 
 	service
-		.publish_update(user(), &FIELDS, txn, || iter(rooms().map(Ok)))
+		.publish_update(user(), &FIELDS, &FIELDS, txn, || iter(rooms().map(Ok)))
 		.await?;
 
 	assert_present(service).await?;
@@ -172,7 +172,8 @@ async fn publish_and_observe(services: &Services, deletion: bool) -> Result {
 			.watch_prefix((rooms()[1], Interfix))
 	);
 
-	let mut publication = pin!(service.publish_update(user(), &FIELDS, txn, || joined));
+	let publication = service.publish_update(user(), &FIELDS, &FIELDS, txn, || joined);
+	let mut publication = pin!(publication); // Pin::as_mut resumes it after the timeout
 
 	timeout(PAUSE, publication.as_mut())
 		.await

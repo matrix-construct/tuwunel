@@ -45,7 +45,8 @@ const POLL_TIMEOUT: u64 = 1_500;
 /// Element X reads its own avatar and name from this extension alone, so a
 /// connection's first response must carry the whole profile, including a
 /// field the change log never saw, and a later round must carry only what
-/// changed since.
+/// changed since. Saving an unchanged value again still reaches the owner's
+/// connection, which is how a user repairs a stale client.
 #[test]
 fn first_response_seeds_the_whole_own_profile() -> Result {
 	let listener = TcpListener::bind(("127.0.0.1", 0))?;
@@ -113,6 +114,7 @@ async fn exercise(services: &Services, base: &str) -> Result {
 		.await?;
 
 	let resumed = owner.sync_profiles(Some(pos)).await?;
+	let pos = field(&resumed, "pos")?;
 	let updated = own_update(&resumed, &user_id);
 
 	BoolExt::ok_or_else(updated[STATUS].is_object(), || {
@@ -121,6 +123,20 @@ async fn exercise(services: &Services, base: &str) -> Result {
 
 	BoolExt::ok_or_else(updated.get("avatar_url").is_none(), || {
 		err!("the resumed round seeded the profile a second time")
+	})?;
+
+	let avatar = json!(PRELOG_AVATAR);
+
+	services
+		.profile
+		.set_profile_keys(&user_id, &[(ProfileFieldName::AvatarUrl, Some(avatar))], None)
+		.await?;
+
+	let resaved = owner.sync_profiles(Some(pos)).await?;
+	let updated = own_update(&resaved, &user_id);
+
+	BoolExt::ok_or_else(updated["avatar_url"] == PRELOG_AVATAR, || {
+		err!("saving the unchanged avatar again did not reach the owner's connection")
 	})?;
 
 	Ok(())
