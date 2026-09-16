@@ -27,9 +27,9 @@ type TraceLine = ArrayVec<u8, 128>;
 /// Provides the process-wide jemalloc startup configuration.
 ///
 /// Jemalloc reads this symbol during allocator initialization, which can occur
-/// before `main`. The NUL-terminated options enable CPU-affine arenas,
-/// metadata huge pages, tuned cache and decay thresholds, and background
-/// purging on the platforms whose jemalloc provides it.
+/// before `main`. The NUL-terminated options enable CPU-affine arenas and tune
+/// the cache and decay thresholds. Metadata huge pages and background thread
+/// settings are requested only on the platforms whose jemalloc provides them.
 #[cfg(feature = "jemalloc_conf")]
 #[used]
 #[unsafe(no_mangle)]
@@ -52,7 +52,7 @@ pub static MALLOC_CONF_PREFIXED: &[u8] = MALLOC_CONF;
 const MALLOC_CONF: &[u8] = concat_bytes!(
 	"tcache:true",
 	",percpu_arena:percpu",
-	",metadata_thp:always",
+	MALLOC_CONF_METADATA_THP,
 	MALLOC_CONF_BACKGROUND,
 	",lg_extent_max_active_fit:4",
 	",oversize_threshold:2097152",
@@ -62,6 +62,23 @@ const MALLOC_CONF: &[u8] = concat_bytes!(
 	//MALLOC_CONF_PROF,
 	0
 );
+
+/// Requests huge pages for allocator metadata where jemalloc can back them.
+///
+/// Jemalloc needs `MADV_HUGEPAGE` (which its build ignores on 32-bit ARM) or
+/// `memcntl`. Without either, a debug build aborts during allocator
+/// initialization, and a release build still rounds metadata to huge page
+/// boundaries it cannot back.
+#[cfg(feature = "jemalloc_conf")]
+const MALLOC_CONF_METADATA_THP: &str = if cfg!(any(
+	all(any(target_os = "linux", target_os = "android"), not(target_arch = "arm")),
+	target_os = "illumos",
+	target_os = "solaris",
+)) {
+	",metadata_thp:always"
+} else {
+	""
+};
 
 // Apple's jemalloc has no background threads and prints a notice when asked.
 #[cfg(all(feature = "jemalloc_conf", not(target_vendor = "apple")))]
