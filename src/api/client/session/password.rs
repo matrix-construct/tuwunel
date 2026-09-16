@@ -38,7 +38,7 @@ pub(super) async fn handle_login(
 
 	let lowercased_user_id = UserId::parse_with_server_name(
 		user_id.localpart().to_lowercase(),
-		&services.config.server_name,
+		user_id.server_name(),
 	)?;
 
 	let user_is_remote = !services.globals.user_is_local(&user_id)
