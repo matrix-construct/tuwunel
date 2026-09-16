@@ -270,14 +270,15 @@ bandwidth and computationally.
 
 #### Allocator memory stats
 
-When using jemalloc with jemallocator's `stats` feature (`--enable-stats`), you
-can see Tuwunel's high-level allocator stats by using
-`!admin server memory-usage` at the bottom.
+`!admin server memory-usage` reports the memory held by Tuwunel's caches and
+the database, not the allocator's own figures.
 
-If you are a developer, you can also view the raw jemalloc statistics with
+If you are a developer, you can view jemalloc's raw report with
 `!admin debug memory-stats`. Please note that this output is extremely large
 which may only be visible in the Tuwunel console CLI due to PDU size limits,
-and is not easy for non-developers to understand.
+and is not easy for non-developers to understand. When jemalloc is built as part
+of Tuwunel, statistics collection is disabled, so the report shows the
+allocator's configuration but no usage counters.
 
 [unbound-tuning]: https://unbound.docs.nlnetlabs.nl/en/latest/topics/core/performance.html
 [unbound-arch]: https://wiki.archlinux.org/title/Unbound

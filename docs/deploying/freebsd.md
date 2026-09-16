@@ -167,20 +167,6 @@ database_path = "/var/db/tuwunel"
 tuwunel -c /usr/local/etc/tuwunel/tuwunel.toml
 ```
 
-### The jemalloc notice
-
-Every invocation, `--version` included, prints one line to standard error:
-
-```
-<jemalloc>: option background_thread currently supports pthread only
-```
-
-Tuwunel compiles a `malloc_conf` string into the binary that asks for
-`background_thread:true`. FreeBSD's jemalloc does not implement that option and
-says so. The option is ignored and nothing else changes, so the notice is
-cosmetic. Building without the `jemalloc_conf` feature silences it, at the cost
-of the rest of the tuned allocator configuration.
-
 
 ## Running under rc.d
 

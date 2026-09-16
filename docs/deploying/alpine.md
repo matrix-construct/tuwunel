@@ -138,10 +138,11 @@ is why its allocations still land in jemalloc.
 
 The prefix covers jemalloc's configuration variable too, so a musl build
 reads `_RJEM_MALLOC_CONF` where a glibc build reads `MALLOC_CONF`. The
-tuning tuwunel ships with still applies; use the prefixed name to change it:
+tuning tuwunel ships with still applies; use the prefixed name to change it,
+for example to return freed memory to the system sooner:
 
 ```bash
-_RJEM_MALLOC_CONF=background_thread:false tuwunel
+_RJEM_MALLOC_CONF=muzzy_decay_ms:0 tuwunel
 ```
 
 > [!NOTE]
