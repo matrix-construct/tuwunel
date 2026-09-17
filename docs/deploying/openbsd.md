@@ -9,7 +9,10 @@ compiler has to come from `-current`.
 Verified against 1.8.3 on OpenBSD 7.9, `arm64` and `amd64`. The resulting server
 opens its database, answers the client and federation version endpoints,
 registers an account, creates a room, sends and reads back a message, reopens a
-populated database across a restart, and exits cleanly on `SIGTERM`.
+populated database across a restart, and exits cleanly on `SIGTERM`. That
+binary was built without `jemalloc`. A release build with the feature set below,
+`jemalloc` included, passed the same checks on both architectures against the
+tree after 1.9.1.
 
 Contributions for getting Tuwunel into ports are welcome.
 
@@ -198,24 +201,38 @@ for you here.
 ## Features
 
 The default feature set includes `io_uring` and `systemd`, both of which are
-Linux only, so the defaults have to be opted out of. The set below is what the
-verified binary was built with, and it also leaves out `jemalloc`:
+Linux only. Every OpenBSD build therefore has to opt out of the defaults and
+name its features explicitly:
 
 ```
 brotli_compression
 element_hacks
 gzip_compression
+jemalloc
+jemalloc_conf
 media_thumbnail
 release_max_log_level
 url_preview
 zstd_compression
 ```
 
-Leaving `jemalloc` out was a precaution rather than a requirement. It does
-compile here: building `tuwunel_core` with the feature takes `jevmalloc-sys`
-through its C build and links it without complaint. The server that was tested
-end to end simply did not include it, so adding it back is untested rather than
-known bad. OpenBSD's own allocator is the one in use otherwise.
+That is the default set with `io_uring` and `systemd` removed.
+
+Tuwunel 1.9.1 and earlier cannot use `jemalloc` here: a binary built with it
+aborts before it starts. Build those releases without `jemalloc` and
+`jemalloc_conf`, which leaves OpenBSD's own allocator in charge. Later releases
+can leave both out too, if you would rather every allocation went through
+OpenBSD's allocator and its hardening.
+
+On OpenBSD jemalloc is built with a symbol prefix, so Tuwunel's own allocations
+go through it while RocksDB and the other C and C++ libraries keep OpenBSD's
+allocator. The prefix covers jemalloc's configuration variable too: to change
+the tuning Tuwunel ships with, set `_RJEM_MALLOC_CONF` rather than
+`MALLOC_CONF`, and check what a binary is running with:
+
+```sh
+_RJEM_MALLOC_CONF=stats_print:true tuwunel -V
+```
 
 
 ## Building
@@ -226,7 +243,7 @@ export LIBCLANG_PATH=/usr/local/llvm21/lib
 export CARGO_TARGET_DIR=/home/build/target
 
 cargo build --release -p tuwunel --no-default-features \
-    --features brotli_compression,element_hacks,gzip_compression,media_thumbnail,release_max_log_level,url_preview,zstd_compression
+    --features brotli_compression,element_hacks,gzip_compression,jemalloc,jemalloc_conf,media_thumbnail,release_max_log_level,url_preview,zstd_compression
 ```
 
 Building the 1.8.3 release rather than the current tree needs one more change.
