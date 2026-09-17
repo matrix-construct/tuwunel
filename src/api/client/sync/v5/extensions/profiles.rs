@@ -34,8 +34,9 @@ type Field = (ProfileFieldName, Result<Option<Value>>);
 /// once under each room they know, because the log carries a copy of every
 /// write under both. Reading a field's current value is deferred until the two
 /// passes have folded away the duplicates, so a user who changed one field in
-/// forty shared rooms costs one read. A fresh connection also seeds the
-/// syncing user's own profile whole, ahead of both passes.
+/// forty shared rooms costs one read. The syncing user's own profile is also
+/// sent whole, ahead of both passes, until the client acknowledges a response
+/// carrying it, and again whenever the extension is switched back on.
 #[tracing::instrument(name = "profiles", level = "trace", skip_all)]
 pub(super) async fn collect(
 	SyncInfo { services, sender_user, .. }: SyncInfo<'_>,
@@ -75,21 +76,22 @@ pub(super) async fn collect(
 	Ok(Profiles { users })
 }
 
-/// The syncing user's own profile, every field, on a connection's first
-/// response.
+/// The syncing user's own profile, every field, while the connection owes it.
 ///
-/// The log names only the fields that changed since it began, so it cannot
-/// seed a profile older than itself. Element X reads its own avatar and name
-/// from this extension alone once the server advertises it, and holds nothing
-/// else to lay later deltas onto: a status set on such a profile left the
-/// client with a status and nothing more.
+/// The log names only the fields that changed since it began, and only from
+/// where the connection stands, so it cannot seed a profile older than itself
+/// or one the connection skipped past with the extension off. Element X reads
+/// its own avatar and name from this extension alone once the server advertises
+/// it, and holds nothing else to lay later deltas onto: a status laid on a
+/// profile it never received leaves the client holding a status and nothing
+/// more.
 async fn own_base(
 	services: &Services,
 	sender_user: &UserId,
 	conn: &Connection,
 	requested: Option<&[ProfileFieldName]>,
 ) -> Changes {
-	if conn.globalsince > 0 {
+	if !conn.own_profile_owed() {
 		return Changes::new();
 	}
 

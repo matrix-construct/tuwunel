@@ -48,6 +48,10 @@ struct Data {
 	roomuserid_lastnotificationread: Arc<Map>,
 }
 
+/// What a sliding sync connection carries from one request to the next.
+///
+/// It is stored after every response, so a client resuming from a position
+/// finds the lists, extension settings and per-room progress it left there.
 #[derive(Debug, Default, Deserialize, Serialize)]
 pub struct Connection {
 	pub globalsince: u64,
@@ -56,6 +60,14 @@ pub struct Connection {
 	pub extensions: request::Extensions,
 	pub subscriptions: Subscriptions,
 	pub rooms: Rooms,
+
+	/// Position of the response that last carried the syncing user's whole
+	/// profile in the MSC4262 profiles extension.
+	///
+	/// Zero until a response has carried it, and again whenever the extension is
+	/// switched off, so switching it back on sends the whole profile anew.
+	#[serde(default)]
+	pub own_profile_since: u64,
 }
 
 /// Delivery progress for one room on a Sliding Sync connection.
@@ -306,6 +318,32 @@ where
 	});
 }
 
+/// Records that this pass carried the syncing user's whole profile.
+///
+/// Called once the pass has assembled its extensions, so a pass that failed
+/// leaves the profile owed to the next one.
+#[implement(Connection)]
+#[tracing::instrument(level = "debug", skip_all)]
+pub fn update_profiles_epilogue(&mut self) {
+	if self.own_profile_owed() {
+		self.own_profile_since = self.next_batch;
+	}
+}
+
+/// Whether the syncing user's whole profile is owed to the profiles extension.
+///
+/// It is owed while the extension is on and the client has not acknowledged a
+/// response carrying it: the connection is new, the extension was switched on
+/// after the connection began, or the client is replaying from before the
+/// response that carried it.
+#[implement(Connection)]
+#[inline]
+#[must_use]
+pub fn own_profile_owed(&self) -> bool {
+	self.extensions.profiles.enabled.unwrap_or(false)
+		&& (self.own_profile_since == 0 || self.own_profile_since > self.globalsince)
+}
+
 #[implement(Connection)]
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn update_cache(&mut self, request: &Request) -> bool {
@@ -313,6 +351,7 @@ pub fn update_cache(&mut self, request: &Request) -> bool {
 	let subscriptions_changed = Self::update_cache_subscriptions(request, self);
 
 	Self::update_cache_extensions(request, self);
+	self.update_cache_own_profile();
 
 	lists_changed || subscriptions_changed
 }
@@ -467,6 +506,13 @@ fn update_cache_profiles(request: &Profiles, cached: &mut Profiles) {
 #[implement(Connection)]
 fn update_cache_e2ee(request: &E2EE, cached: &mut E2EE) {
 	some_or_sticky(request.enabled.as_ref(), &mut cached.enabled);
+}
+
+#[implement(Connection)]
+fn update_cache_own_profile(&mut self) {
+	if !self.extensions.profiles.enabled.unwrap_or(false) {
+		self.own_profile_since = 0;
+	}
 }
 
 fn some_or_sticky<T: Clone>(target: Option<&T>, cached: &mut Option<T>) {
