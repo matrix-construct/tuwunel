@@ -27,8 +27,8 @@ type TraceLine = ArrayVec<u8, 128>;
 /// Provides the process-wide jemalloc startup configuration.
 ///
 /// Jemalloc reads this symbol during allocator initialization, which can occur
-/// before `main`. The NUL-terminated options enable CPU-affine arenas and tune
-/// the cache and decay thresholds. Metadata huge pages and background thread
+/// before `main`. The NUL-terminated options tune the cache and decay
+/// thresholds. CPU-affine arenas, metadata huge pages and background thread
 /// settings are requested only on the platforms whose jemalloc provides them.
 #[cfg(feature = "jemalloc_conf")]
 #[used]
@@ -51,7 +51,7 @@ pub static MALLOC_CONF_PREFIXED: &[u8] = MALLOC_CONF;
 #[cfg(feature = "jemalloc_conf")]
 const MALLOC_CONF: &[u8] = concat_bytes!(
 	"tcache:true",
-	",percpu_arena:percpu",
+	MALLOC_CONF_PERCPU_ARENA,
 	MALLOC_CONF_METADATA_THP,
 	MALLOC_CONF_BACKGROUND,
 	",lg_extent_max_active_fit:4",
@@ -62,6 +62,25 @@ const MALLOC_CONF: &[u8] = concat_bytes!(
 	//MALLOC_CONF_PROF,
 	0
 );
+
+/// Assigns arenas by CPU where jemalloc can tell which CPU a thread runs on.
+///
+/// Jemalloc needs `sched_getcpu`, or its own Apple and Windows paths. Without
+/// them a release build falls back to its default arena count and prints a
+/// notice, and a debug build aborts during allocator initialization.
+#[cfg(feature = "jemalloc_conf")]
+const MALLOC_CONF_PERCPU_ARENA: &str = if cfg!(any(
+	target_os = "linux",
+	target_os = "android",
+	target_os = "freebsd",
+	target_os = "dragonfly",
+	target_vendor = "apple",
+	target_os = "windows",
+)) {
+	",percpu_arena:percpu"
+} else {
+	""
+};
 
 /// Requests huge pages for allocator metadata where jemalloc can back them.
 ///
