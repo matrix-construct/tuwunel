@@ -9,6 +9,7 @@ use ruma::{
 	},
 	directory::RoomTypeFilter,
 	events::StateEventType,
+	profile::ProfileFieldName,
 	room_id,
 };
 use serde::{Deserialize, Serialize};
@@ -382,6 +383,86 @@ fn omitted_profiles_config_keeps_the_acknowledged_own_profile() {
 }
 
 #[test]
+fn widening_the_fields_owes_the_own_profile_again() {
+	let mut conn = Connection {
+		globalsince: 7,
+		own_profile_since: 7,
+		..Default::default()
+	};
+
+	conn.update_cache(&request_with_fields(&[ProfileFieldName::AvatarUrl]));
+
+	assert!(!conn.own_profile_owed());
+
+	conn.update_cache(&request_with_fields(&[
+		ProfileFieldName::AvatarUrl,
+		ProfileFieldName::DisplayName,
+	]));
+
+	assert!(conn.own_profile_owed());
+	assert!(conn.profiles_fields_owed());
+}
+
+#[test]
+fn narrowing_the_fields_owes_nothing() {
+	let mut conn = Connection {
+		globalsince: 7,
+		own_profile_since: 7,
+		..Default::default()
+	};
+
+	conn.update_cache(&request_with_fields(&[
+		ProfileFieldName::AvatarUrl,
+		ProfileFieldName::DisplayName,
+	]));
+
+	conn.update_cache(&request_with_fields(&[ProfileFieldName::AvatarUrl]));
+
+	assert!(!conn.own_profile_owed());
+	assert!(!conn.profiles_fields_owed());
+}
+
+#[test]
+fn an_unfiltered_connection_cannot_widen() {
+	let mut conn = Connection {
+		globalsince: 7,
+		own_profile_since: 7,
+		..Default::default()
+	};
+
+	conn.update_cache(&request_with_profiles(true));
+	conn.update_cache(&request_with_fields(&[ProfileFieldName::AvatarUrl]));
+
+	assert!(!conn.own_profile_owed());
+	assert!(!conn.profiles_fields_owed());
+}
+
+#[test]
+fn widened_fields_clear_once_acknowledged() {
+	let mut conn = Connection {
+		globalsince: 7,
+		next_batch: 9,
+		own_profile_since: 7,
+		..Default::default()
+	};
+
+	let widened = [ProfileFieldName::AvatarUrl, ProfileFieldName::DisplayName];
+
+	conn.update_cache(&request_with_fields(&[ProfileFieldName::AvatarUrl]));
+	conn.update_cache(&request_with_fields(&widened));
+	conn.update_profiles_epilogue();
+
+	assert_eq!(conn.own_profile_since, 9);
+	assert!(conn.profiles_fields_owed());
+
+	conn.globalsince = 9;
+	conn.update_cache(&request_with_fields(&widened));
+
+	assert!(!conn.profiles_fields_owed());
+	assert!(!conn.profiles_fields_widened);
+}
+
+#[test]
 fn connection_cbor_is_compatible_across_versions() {
 	#[derive(Deserialize, Serialize)]
 	struct RoomV0 {
@@ -416,6 +497,7 @@ fn connection_cbor_is_compatible_across_versions() {
 	assert_eq!(decoded.rooms[room_id].roomsince, 7);
 	assert_eq!(decoded.rooms[room_id].config_hash, 0);
 	assert_eq!(decoded.own_profile_since, 0);
+	assert!(!decoded.profiles_fields_widened);
 
 	let current = Connection { own_profile_since: 9, ..decoded };
 	let bytes = to_vec(&current).expect("current connection must encode");
@@ -445,6 +527,14 @@ fn request_with_profiles(enabled: bool) -> Request {
 	let mut request = Request::new();
 
 	request.extensions.profiles.enabled = Some(enabled);
+
+	request
+}
+
+fn request_with_fields(fields: &[ProfileFieldName]) -> Request {
+	let mut request = request_with_profiles(true);
+
+	request.extensions.profiles.fields = Some(fields.to_owned());
 
 	request
 }
