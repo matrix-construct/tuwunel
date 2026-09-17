@@ -92,7 +92,7 @@ case "$1" in
           rm -v "$legacy"
         fi
         if ! [ -e "$legacy" ] && ! [ -L "$legacy" ]; then
-          ln -s -v "$TUWUNEL_DATABASE_PATH" "$legacy"
+          echo "NOTE: not creating compatibility symlink $legacy -> $TUWUNEL_DATABASE_PATH"
         elif [ -L "$legacy" ] \
           && [ "$(readlink -f "$legacy")" != "$(readlink -f "$TUWUNEL_DATABASE_PATH")" ]; then
           echo "NOTE: $legacy points to $(readlink -f "$legacy") and was not adopted" 1>&2
