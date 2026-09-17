@@ -11,7 +11,7 @@ use ruma::{
 	events::StateEventType,
 	room_id,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use super::{Connection, Lists, Room, Subscriptions};
 
@@ -287,13 +287,108 @@ fn epilogue_leaves_hash_for_extension_only_range() {
 }
 
 #[test]
-fn old_connection_cbor_defaults_room_hash() {
-	#[derive(Serialize)]
+fn own_profile_is_owed_to_a_new_connection() {
+	let mut conn = Connection::default();
+
+	conn.update_cache(&request_with_profiles(true));
+
+	assert!(conn.own_profile_owed());
+}
+
+#[test]
+fn own_profile_is_not_owed_without_the_extension() {
+	let mut conn = Connection { next_batch: 7, ..Default::default() };
+
+	conn.update_profiles_epilogue();
+
+	assert!(!conn.own_profile_owed());
+	assert_eq!(conn.own_profile_since, 0);
+}
+
+#[test]
+fn epilogue_records_an_owed_own_profile() {
+	let mut conn = Connection {
+		globalsince: 3,
+		next_batch: 7,
+		..Default::default()
+	};
+
+	conn.update_cache(&request_with_profiles(true));
+	conn.update_profiles_epilogue();
+
+	assert_eq!(conn.own_profile_since, 7);
+}
+
+#[test]
+fn acknowledged_own_profile_is_not_owed() {
+	let mut conn = Connection {
+		globalsince: 7,
+		next_batch: 9,
+		own_profile_since: 7,
+		..Default::default()
+	};
+
+	conn.update_cache(&request_with_profiles(true));
+	conn.update_profiles_epilogue();
+
+	assert!(!conn.own_profile_owed());
+	assert_eq!(conn.own_profile_since, 7);
+}
+
+#[test]
+fn own_profile_is_owed_again_on_replay() {
+	let mut conn = Connection {
+		globalsince: 5,
+		own_profile_since: 7,
+		..Default::default()
+	};
+
+	conn.update_cache(&request_with_profiles(true));
+
+	assert!(conn.own_profile_owed());
+}
+
+#[test]
+fn switching_profiles_off_owes_the_own_profile_again() {
+	let mut conn = Connection {
+		globalsince: 7,
+		own_profile_since: 7,
+		..Default::default()
+	};
+
+	conn.update_cache(&request_with_profiles(false));
+
+	assert!(!conn.own_profile_owed());
+	assert_eq!(conn.own_profile_since, 0);
+
+	conn.update_cache(&request_with_profiles(true));
+
+	assert!(conn.own_profile_owed());
+}
+
+#[test]
+fn omitted_profiles_config_keeps_the_acknowledged_own_profile() {
+	let mut conn = Connection {
+		globalsince: 7,
+		own_profile_since: 7,
+		..Default::default()
+	};
+
+	conn.update_cache(&request_with_profiles(true));
+	conn.update_cache(&Request::new());
+
+	assert!(!conn.own_profile_owed());
+	assert_eq!(conn.own_profile_since, 7);
+}
+
+#[test]
+fn connection_cbor_is_compatible_across_versions() {
+	#[derive(Deserialize, Serialize)]
 	struct RoomV0 {
 		roomsince: u64,
 	}
 
-	#[derive(Serialize)]
+	#[derive(Deserialize, Serialize)]
 	struct ConnectionV0 {
 		globalsince: u64,
 		next_batch: u64,
@@ -320,6 +415,14 @@ fn old_connection_cbor_defaults_room_hash() {
 	assert_eq!(decoded.next_batch, 8);
 	assert_eq!(decoded.rooms[room_id].roomsince, 7);
 	assert_eq!(decoded.rooms[room_id].config_hash, 0);
+	assert_eq!(decoded.own_profile_since, 0);
+
+	let current = Connection { own_profile_since: 9, ..decoded };
+	let bytes = to_vec(&current).expect("current connection must encode");
+	let downgraded: ConnectionV0 = from_slice(&bytes).expect("old binary must decode");
+
+	assert_eq!(downgraded.next_batch, 8);
+	assert_eq!(downgraded.rooms[room_id].roomsince, 7);
 }
 
 fn request_with_list(list: List) -> Request {
@@ -334,6 +437,14 @@ fn request_with_subscription(room_id: &RoomId, config: ListConfig) -> Request {
 	let mut request = Request::new();
 
 	request.room_subscriptions = [(room_id.to_owned(), config)].into();
+
+	request
+}
+
+fn request_with_profiles(enabled: bool) -> Request {
+	let mut request = Request::new();
+
+	request.extensions.profiles.enabled = Some(enabled);
 
 	request
 }

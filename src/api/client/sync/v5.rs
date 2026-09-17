@@ -173,7 +173,10 @@ pub(crate) async fn sync_events_v5_route(
 	let config_changed = conn.update_cache(request);
 	let caught_up = conn.globalsince == conn.next_batch;
 
-	if config_change_needs_position(config_changed, advancing, caught_up, since) {
+	// A whole profile owed to a caught-up connection needs a pass like a new list.
+	let needs_pass = config_changed || conn.own_profile_owed();
+
+	if config_change_needs_position(needs_pass, advancing, caught_up, since) {
 		// The permit publishes the reserved position when it retires on drop.
 		drop(services.globals.next_count());
 	}
@@ -231,6 +234,7 @@ pub(crate) async fn sync_events_v5_route(
 
 			apply_ranges(&conn, &window, &mut ranges, &mut extensions);
 			conn.update_rooms_epilogue(ranges.room_updates());
+			conn.update_profiles_epilogue();
 			response.rooms = ranges.into_payloads();
 			response.extensions = extensions.into_response(&response.rooms);
 
