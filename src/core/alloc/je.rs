@@ -39,10 +39,10 @@ pub static malloc_conf: &[u8] = MALLOC_CONF;
 /// prefixed build reads.
 ///
 /// Jemalloc renames its public symbols when configured with a prefix, which
-/// `jevmalloc-sys` does for musl, Apple, Android and DragonFly, and which a
-/// substituted `JEMALLOC_OVERRIDE` library may do on any target. Defining both
-/// names lets the linked allocator take whichever one it declares and leaves
-/// the other unreferenced.
+/// `jevmalloc-sys` does for musl, Apple, Android, DragonFly and OpenBSD, and
+/// which a substituted `JEMALLOC_OVERRIDE` library may do on any target.
+/// Defining both names lets the linked allocator take whichever one it declares
+/// and leaves the other unreferenced.
 #[cfg(feature = "jemalloc_conf")]
 #[used]
 #[unsafe(export_name = "_rjem_malloc_conf")]
