@@ -171,24 +171,6 @@ database_path = "/var/db/tuwunel"
 tuwunel -c /usr/pkg/etc/tuwunel/tuwunel.toml
 ```
 
-### The jemalloc notice
-
-Every invocation, `--version` included, writes to standard error:
-
-```
-<jemalloc>: No getcpu support: percpu_arena:percpu
-<jemalloc>: perCPU arena getcpu() not available. Setting narenas to 24.
-```
-
-The second line was seen on `amd64`; the arena count in it follows the CPU count.
-
-Tuwunel compiles a `malloc_conf` string into the binary that asks for
-`percpu_arena:percpu`, which needs a way to ask which CPU the calling thread is
-running on. NetBSD does not offer one, so jemalloc falls back to its normal
-arena assignment and says so. Nothing else changes, and the notice is cosmetic.
-Building without the `jemalloc_conf` feature silences it, at the cost of the
-rest of the tuned allocator configuration.
-
 
 ## Running under rc.d
 
