@@ -15,6 +15,7 @@ use ruma::{
 		ConnId as ConnectionId, ListId, Request, request,
 		request::{AccountData, E2EE, Profiles, Receipts, ToDevice, Typing},
 	},
+	profile::ProfileFieldName,
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex as TokioMutex;
@@ -68,6 +69,15 @@ pub struct Connection {
 	/// switched off, so switching it back on sends the whole profile anew.
 	#[serde(default)]
 	pub own_profile_since: u64,
+
+	/// Whether the connection asked for a profile field it did not have before.
+	///
+	/// It rides the whole profile above, so the rooms replay their slice of the
+	/// change log until the client advances past the response carrying the
+	/// widened field set, and it is forgotten with everything else the extension
+	/// owes when the extension goes off.
+	#[serde(default)]
+	pub profiles_fields_widened: bool,
 }
 
 /// Delivery progress for one room on a Sliding Sync connection.
@@ -330,6 +340,18 @@ pub fn update_profiles_epilogue(&mut self) {
 	}
 }
 
+/// Whether a base is owed for a profile field the connection did not have
+/// before.
+///
+/// MSC4262 asks for the widened fields of every user in the room subset, which
+/// the room passes deliver by replaying their whole slice of the change log.
+#[implement(Connection)]
+#[inline]
+#[must_use]
+pub fn profiles_fields_owed(&self) -> bool {
+	self.profiles_fields_widened && self.own_profile_owed()
+}
+
 /// Whether the syncing user's whole profile is owed to the profiles extension.
 ///
 /// It is owed while the extension is on and the client has not acknowledged a
@@ -350,8 +372,9 @@ pub fn update_cache(&mut self, request: &Request) -> bool {
 	let lists_changed = Self::update_cache_lists(request, self);
 	let subscriptions_changed = Self::update_cache_subscriptions(request, self);
 
-	Self::update_cache_extensions(request, self);
-	self.update_cache_own_profile();
+	let fields_widened = Self::update_cache_extensions(request, self);
+
+	self.update_cache_profiles_owed(fields_widened);
 
 	lists_changed || subscriptions_changed
 }
@@ -455,8 +478,12 @@ fn list_filters_are_equal(request: &request::ListFilters, cached: &request::List
 		&& request.spaces == cached.spaces
 }
 
+/// Merges the request's extension settings into the connection.
+///
+/// Returns whether the MSC4262 field filter named a field the connection did
+/// not have, which the profiles extension owes a base for.
 #[implement(Connection)]
-fn update_cache_extensions(request: &Request, cached: &mut Self) {
+fn update_cache_extensions(request: &Request, cached: &mut Self) -> bool {
 	let request = &request.extensions;
 	let cached = &mut cached.extensions;
 
@@ -465,7 +492,8 @@ fn update_cache_extensions(request: &Request, cached: &mut Self) {
 	Self::update_cache_typing(&request.typing, &mut cached.typing);
 	Self::update_cache_to_device(&request.to_device, &mut cached.to_device);
 	Self::update_cache_e2ee(&request.e2ee, &mut cached.e2ee);
-	Self::update_cache_profiles(&request.profiles, &mut cached.profiles);
+
+	Self::update_cache_profiles(&request.profiles, &mut cached.profiles)
 }
 
 #[implement(Connection)]
@@ -495,12 +523,35 @@ fn update_cache_to_device(request: &ToDevice, cached: &mut ToDevice) {
 	cached.since.clone_from(&request.since);
 }
 
+/// Merges the profiles extension settings into the connection.
+///
+/// Returns whether the request widened the field filter, which is read before
+/// the merge overwrites the filter it compares against.
 #[implement(Connection)]
-fn update_cache_profiles(request: &Profiles, cached: &mut Profiles) {
+fn update_cache_profiles(request: &Profiles, cached: &mut Profiles) -> bool {
 	some_or_sticky(request.enabled.as_ref(), &mut cached.enabled);
 	some_or_sticky(request.rooms.as_ref(), &mut cached.rooms);
 	some_or_sticky(request.lists.as_ref(), &mut cached.lists);
+
+	// Compare against the cached filter before the merge below overwrites it.
+	let widened = fields_widened(request.fields.as_deref(), cached.fields.as_deref());
+
 	some_or_sticky(request.fields.as_ref(), &mut cached.fields);
+
+	widened
+}
+
+/// Whether the request names a profile field the connection did not ask for.
+///
+/// An absent cached filter already covers every field, and an absent request
+/// keeps the cached one, so neither widens anything.
+fn fields_widened(
+	request: Option<&[ProfileFieldName]>,
+	cached: Option<&[ProfileFieldName]>,
+) -> bool {
+	request
+		.zip(cached)
+		.is_some_and(|(request, cached)| request.iter().any(|name| !cached.contains(name)))
 }
 
 #[implement(Connection)]
@@ -509,10 +560,13 @@ fn update_cache_e2ee(request: &E2EE, cached: &mut E2EE) {
 }
 
 #[implement(Connection)]
-fn update_cache_own_profile(&mut self) {
-	if !self.extensions.profiles.enabled.unwrap_or(false) {
+fn update_cache_profiles_owed(&mut self, fields_widened: bool) {
+	if fields_widened || !self.extensions.profiles.enabled.unwrap_or(false) {
 		self.own_profile_since = 0;
 	}
+
+	self.profiles_fields_widened =
+		fields_widened || (self.profiles_fields_widened && self.own_profile_owed());
 }
 
 fn some_or_sticky<T: Clone>(target: Option<&T>, cached: &mut Option<T>) {

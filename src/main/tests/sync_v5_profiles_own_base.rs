@@ -37,6 +37,8 @@ const OWNER_CONN: &str = "owner";
 
 const LATE_CONN: &str = "late";
 
+const FIELDS_CONN: &str = "fields";
+
 /// How long a resumed sync polls for, in milliseconds.
 ///
 /// The status write precedes the resumed round, so the poll answers on its
@@ -57,8 +59,8 @@ enum Extension {
 /// field the change log never saw, and a later round must carry only what
 /// changed since. Saving an unchanged value again still reaches the owner's
 /// connection, which is how a user repairs a stale client. A connection that
-/// switches the extension on late, or back on, gets the whole profile on that
-/// round.
+/// switches the extension on late, or back on, or widens the fields it asks
+/// for, gets the whole profile on that round.
 #[test]
 fn seeds_the_whole_own_profile() -> Result {
 	let listener = TcpListener::bind(("127.0.0.1", 0))?;
@@ -110,7 +112,7 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	services.db["useridprofilekey_value"].put((&user_id, "avatar_url"), Json(PRELOG_AVATAR));
 
 	let opening = owner
-		.sync_profiles(OWNER_CONN, Extension::On, None)
+		.sync_profiles(OWNER_CONN, Extension::On, None, None)
 		.await?;
 
 	let pos = field(&opening, "pos")?;
@@ -132,7 +134,7 @@ async fn exercise(services: &Services, base: &str) -> Result {
 		.await?;
 
 	let resumed = owner
-		.sync_profiles(OWNER_CONN, Extension::On, Some(pos))
+		.sync_profiles(OWNER_CONN, Extension::On, None, Some(pos))
 		.await?;
 
 	let pos = field(&resumed, "pos")?;
@@ -154,7 +156,7 @@ async fn exercise(services: &Services, base: &str) -> Result {
 		.await?;
 
 	let resaved = owner
-		.sync_profiles(OWNER_CONN, Extension::On, Some(pos))
+		.sync_profiles(OWNER_CONN, Extension::On, None, Some(pos))
 		.await?;
 
 	let updated = own_update(&resaved, &user_id);
@@ -163,7 +165,8 @@ async fn exercise(services: &Services, base: &str) -> Result {
 		err!("saving the unchanged avatar again did not reach the owner's connection")
 	})?;
 
-	switch_on_late(&owner, &user_id).await
+	switch_on_late(&owner, &user_id).await?;
+	widen_fields(&owner, &user_id).await
 }
 
 /// Switches the extension on, off, then on again for a connection that began
@@ -175,7 +178,7 @@ async fn exercise(services: &Services, base: &str) -> Result {
 /// only the whole profile can carry.
 async fn switch_on_late(owner: &Client<'_>, user_id: &UserId) -> Result {
 	let opening = owner
-		.sync_profiles(LATE_CONN, Extension::Off, None)
+		.sync_profiles(LATE_CONN, Extension::Off, None, None)
 		.await?;
 
 	let pos = field(&opening, "pos")?;
@@ -193,7 +196,7 @@ async fn switch_on_late(owner: &Client<'_>, user_id: &UserId) -> Result {
 	})?;
 
 	let enabling = owner
-		.sync_profiles(LATE_CONN, Extension::On, Some(pos))
+		.sync_profiles(LATE_CONN, Extension::On, None, Some(pos))
 		.await?;
 
 	let pos = field(&enabling, "pos")?;
@@ -201,7 +204,7 @@ async fn switch_on_late(owner: &Client<'_>, user_id: &UserId) -> Result {
 	expect_whole_profile(&enabling, user_id, "switching the extension on")?;
 
 	let disabling = owner
-		.sync_profiles(LATE_CONN, Extension::Off, Some(pos))
+		.sync_profiles(LATE_CONN, Extension::Off, None, Some(pos))
 		.await?;
 
 	let pos = field(&disabling, "pos")?;
@@ -211,14 +214,42 @@ async fn switch_on_late(owner: &Client<'_>, user_id: &UserId) -> Result {
 	})?;
 
 	let reenabling = owner
-		.sync_profiles(LATE_CONN, Extension::On, Some(pos))
+		.sync_profiles(LATE_CONN, Extension::On, None, Some(pos))
 		.await?;
 
 	expect_whole_profile(&reenabling, user_id, "switching the extension back on")
 }
 
+/// Widens the field filter of a connection that asked for one field.
+///
+/// MSC4262 wants the newly covered field sent for the users the client already
+/// knows, and the syncing user is one of them, so the round that widens carries
+/// a status written long before it.
+async fn widen_fields(owner: &Client<'_>, user_id: &UserId) -> Result {
+	let opening = owner
+		.sync_profiles(FIELDS_CONN, Extension::On, Some(&["avatar_url"]), None)
+		.await?;
+
+	let pos = field(&opening, "pos")?;
+	let updated = own_update(&opening, user_id);
+
+	BoolExt::ok_or_else(updated["avatar_url"] == PRELOG_AVATAR, || {
+		err!("the filtered round omitted the field it asked for")
+	})?;
+
+	BoolExt::ok_or_else(updated.get(STATUS).is_none(), || {
+		err!("the filtered round sent a field it did not ask for")
+	})?;
+
+	let widened = owner
+		.sync_profiles(FIELDS_CONN, Extension::On, Some(&["avatar_url", STATUS]), Some(pos))
+		.await?;
+
+	expect_whole_profile(&widened, user_id, "widening the fields")
+}
+
 /// One sliding sync on the named connection with the profiles extension
-/// switched on or off, optionally resuming a pos.
+/// switched on or off, optionally filtered to `fields` and resuming a pos.
 ///
 /// The user is in no room, so the extension has only the syncing user's own
 /// profile to speak of.
@@ -227,13 +258,14 @@ async fn sync_profiles(
 	&self,
 	conn_id: &str,
 	extension: Extension,
+	fields: Option<&[&str]>,
 	pos: Option<&str>,
 ) -> Result<Value> {
 	let body = json!({
 		"conn_id": conn_id,
 		"lists": {},
 		"extensions": {
-			PROFILES: { "enabled": matches!(extension, Extension::On) },
+			PROFILES: { "enabled": matches!(extension, Extension::On), "fields": fields },
 		},
 	});
 

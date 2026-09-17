@@ -36,7 +36,8 @@ type Field = (ProfileFieldName, Result<Option<Value>>);
 /// passes have folded away the duplicates, so a user who changed one field in
 /// forty shared rooms costs one read. The syncing user's own profile is also
 /// sent whole, ahead of both passes, until the client acknowledges a response
-/// carrying it, and again whenever the extension is switched back on.
+/// carrying it, and again whenever the extension is switched back on or its
+/// field set widens.
 #[tracing::instrument(name = "profiles", level = "trace", skip_all)]
 pub(super) async fn collect(
 	SyncInfo { services, sender_user, .. }: SyncInfo<'_>,
@@ -137,11 +138,13 @@ async fn fold_room(
 /// enters the window. That slice names exactly the members whose profile
 /// changed since the log began and nobody else, so it costs far less than the
 /// member list the proposal warns against sending for a room the size of
-/// Matrix HQ.
+/// Matrix HQ. A connection that widened its field set starts every room there
+/// too, so the new field reaches the members the log knows about, which is as
+/// much of the proposal's base for it as that slice can carry.
 fn changes_from(conn: &Connection, room_id: &RoomId) -> u64 {
 	conn.rooms
 		.get(room_id)
-		.is_some_and(|room| room.roomsince.gt(&0))
+		.is_some_and(|room| room.roomsince.gt(&0) && conn.profiles_fields_owed().is_false())
 		.then_some(conn.globalsince)
 		.unwrap_or_default()
 }
@@ -215,4 +218,34 @@ fn fold_field(mut changes: UserProfileChanges, (name, value): Field) -> UserProf
 	}
 
 	changes
+}
+
+#[cfg(test)]
+mod tests {
+	use ruma::room_id;
+	use tuwunel_service::sync::{Connection, Room};
+
+	use super::changes_from;
+
+	#[test]
+	fn a_widened_field_set_replays_a_known_room() {
+		let room_id = room_id!("!known:example.com");
+		let mut conn = Connection {
+			globalsince: 7,
+			rooms: [(room_id.to_owned(), Room { roomsince: 3, ..Default::default() })].into(),
+			..Default::default()
+		};
+
+		conn.extensions.profiles.enabled = Some(true);
+
+		assert_eq!(changes_from(&conn, room_id), 7);
+
+		conn.profiles_fields_widened = true;
+
+		assert_eq!(changes_from(&conn, room_id), 0);
+
+		conn.own_profile_since = 7;
+
+		assert_eq!(changes_from(&conn, room_id), 7);
+	}
 }
