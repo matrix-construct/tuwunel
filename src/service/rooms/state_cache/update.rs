@@ -7,7 +7,10 @@
 
 use std::collections::HashSet;
 
-use futures::StreamExt;
+use futures::{
+	FutureExt, StreamExt,
+	future::{join, join3},
+};
 use ruma::{
 	OwnedServerName, RoomId, UserId,
 	events::{
@@ -22,15 +25,16 @@ use ruma::{
 	serde::Raw,
 };
 use tuwunel_core::{
-	Result, implement, is_not_empty,
+	Result, at, implement, is_not_empty,
 	matrix::PduCount,
 	utils::{
-		BoolExt, ReadyExt,
+		BoolExt, FutureBoolExt, ReadyExt,
+		future::ReadyBoolExt,
 		result::{LogErr, NotFound},
 	},
 	warn,
 };
-use tuwunel_database::{Json, keyval::ValBuf, serialize_key, serialize_val};
+use tuwunel_database::{Json, Txn, keyval::ValBuf, serialize_key, serialize_val};
 
 /// Optional stripped room state attached to invite and knock transitions.
 ///
@@ -169,78 +173,66 @@ pub async fn update_membership(
 #[implement(super::Service)]
 #[tracing::instrument(level = "debug", skip(self))]
 pub async fn update_joined_count(&self, room_id: &RoomId) {
-	let mut joinedcount = 0_u64;
-	let mut invitedcount = 0_u64;
-	let mut knockedcount = 0_u64;
-	let mut joined_servers = HashSet::new();
+	let joined = self.joined_count(room_id);
+	let invited = self.room_members_invited(room_id).count();
+	let knocked = self.room_members_knocked(room_id).count();
+	// Overlap initial seeks; cursor traversal remains synchronous.
+	let ((joinedcount, joined_servers), invitedcount, knockedcount) =
+		join3(joined, invited, knocked).await;
 
-	self.room_members(room_id)
-		.ready_for_each(|joined| {
-			joined_servers.insert(joined.server_name().to_owned());
-			joinedcount = joinedcount.saturating_add(1);
-		})
-		.await;
+	let invitedcount = u64::try_from(invitedcount).unwrap_or(0);
+	let knockedcount = u64::try_from(knockedcount).unwrap_or(0);
+	let txn = Txn::insert_each_slice(&[
+		(&self.db.roomid_joinedcount, room_id, joinedcount.to_be_bytes()),
+		(&self.db.roomid_invitedcount, room_id, invitedcount.to_be_bytes()),
+		(&self.db.roomid_knockedcount, room_id, knockedcount.to_be_bytes()),
+	]);
 
-	invitedcount = invitedcount.saturating_add(
-		self.room_members_invited(room_id)
-			.count()
-			.await
-			.try_into()
-			.unwrap_or(0),
-	);
-
-	knockedcount = knockedcount.saturating_add(
-		self.room_members_knocked(room_id)
-			.count()
-			.await
-			.try_into()
-			.unwrap_or(0),
-	);
-
-	let joinedcount = joinedcount.to_be_bytes();
-	let invitedcount = invitedcount.to_be_bytes();
-	let knockedcount = knockedcount.to_be_bytes();
-	let mut txn = self.services.db.txn();
-
-	txn.insert_raw(&self.db.roomid_joinedcount, room_id, joinedcount);
-	txn.insert_raw(&self.db.roomid_invitedcount, room_id, invitedcount);
-	txn.insert_raw(&self.db.roomid_knockedcount, room_id, knockedcount);
-
-	self.room_servers(room_id)
-		.ready_for_each(|old_joined_server| {
-			if joined_servers.remove(old_joined_server) {
-				return;
+	let (txn, joined_servers) = self
+		.room_servers(room_id)
+		.ready_fold((txn, joined_servers), |(mut txn, mut servers), old_server| {
+			if !servers.remove(old_server) {
+				txn.del(&self.db.roomserverids, (room_id, old_server));
+				txn.del(&self.db.serverroomids, (old_server, room_id));
 			}
 
-			// Server not in room anymore
-			let roomserver_id = (room_id, old_joined_server);
-			let serverroom_id = (old_joined_server, room_id);
-
-			txn.del(&self.db.roomserverids, roomserver_id);
-			txn.del(&self.db.serverroomids, serverroom_id);
+			(txn, servers)
 		})
 		.await;
 
-	// Now only new servers are in joined_servers anymore
-	for server in &joined_servers {
-		let roomserver_id = (room_id, server);
-		let serverroom_id = (server, room_id);
-		let roomserver_id =
-			serialize_key(roomserver_id).expect("failed to serialize roomserver_id");
+	joined_servers
+		.iter()
+		.fold(txn, |mut txn, server| {
+			let roomserver_id =
+				serialize_key((room_id, server)).expect("failed to serialize roomserver_id");
 
-		let serverroom_id =
-			serialize_key(serverroom_id).expect("failed to serialize serverroom_id");
+			let serverroom_id =
+				serialize_key((server, room_id)).expect("failed to serialize serverroom_id");
 
-		txn.insert_raw(&self.db.roomserverids, roomserver_id, []);
-		txn.insert_raw(&self.db.serverroomids, serverroom_id, []);
-	}
-
-	txn.execute();
+			txn.insert_raw(&self.db.roomserverids, roomserver_id, []);
+			txn.insert_raw(&self.db.serverroomids, serverroom_id, []);
+			txn
+		})
+		.execute();
 
 	self.appservice_in_room_cache
 		.write()
 		.expect("locked")
 		.remove(room_id);
+}
+
+#[implement(super::Service)]
+fn joined_count<'a>(
+	&'a self,
+	room_id: &'a RoomId,
+) -> impl Future<Output = (u64, HashSet<OwnedServerName>)> + Send + 'a {
+	self.room_members(room_id).ready_fold(
+		(0_u64, HashSet::new()),
+		|(count, mut servers), joined| {
+			servers.insert(joined.server_name().to_owned());
+			(count.saturating_add(1), servers)
+		},
+	)
 }
 
 /// Writes the paired indexes for a current join transition.
@@ -467,22 +459,22 @@ async fn handle_join(&self, room_id: &RoomId, user_id: &UserId, count: PduCount)
 
 #[implement(super::Service)]
 async fn copy_predecessor_data(&self, room_id: &RoomId, user_id: &UserId) -> Result {
-	let predecessor = self
+	let Ok(Some(predecessor)) = self
 		.services
 		.state_accessor
 		.room_state_get_content(room_id, &StateEventType::RoomCreate, "")
 		.await
-		.map(|content: RoomCreateEventContent| content.predecessor);
-
-	let Ok(Some(predecessor)) = predecessor else {
+		.map(|content: RoomCreateEventContent| content.predecessor)
+	else {
 		return Ok(());
 	};
 
-	self.copy_predecessor_tags(room_id, user_id, &predecessor.room_id)
-		.await;
-
-	self.copy_predecessor_direct(room_id, user_id, &predecessor.room_id)
-		.await
+	join(
+		self.copy_predecessor_tags(room_id, user_id, &predecessor.room_id),
+		self.copy_predecessor_direct(room_id, user_id, &predecessor.room_id),
+	)
+	.map(at!(1))
+	.await
 }
 
 #[implement(super::Service)]
@@ -547,7 +539,8 @@ async fn copy_predecessor_direct(
 		.to_string()
 		.into();
 
-	let direct_event = serde_json::to_value(&direct_event).expect("to json always works");
+	let direct_event =
+		serde_json::to_value(&direct_event).expect("failed to serialize DirectEvent");
 
 	self.services
 		.account_data
@@ -560,11 +553,27 @@ async fn copy_predecessor_direct(
 async fn handle_leave(&self, room_id: &RoomId, user_id: &UserId, count: PduCount) {
 	self.mark_as_left(user_id, room_id, count);
 
-	if self.services.globals.user_is_local(user_id)
-		&& (self.services.config.forget_forced_upon_leave
-			|| self.services.metadata.is_banned(room_id).await
-			|| self.services.metadata.is_disabled(room_id).await)
-	{
-		self.forget(room_id, user_id);
+	if !self.services.globals.user_is_local(user_id) {
+		return;
 	}
+
+	if !self.services.config.forget_forced_upon_leave {
+		let not_disabled = self
+			.services
+			.metadata
+			.is_disabled(room_id)
+			.is_false();
+
+		let not_banned = self
+			.services
+			.metadata
+			.is_banned(room_id)
+			.is_false();
+
+		if not_disabled.and(not_banned).await {
+			return;
+		}
+	}
+
+	self.forget(room_id, user_id);
 }
