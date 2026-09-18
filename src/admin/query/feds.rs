@@ -22,7 +22,7 @@ use tuwunel_core::{
 };
 use tuwunel_service::federation::feds::{Fault, Opts, Outcome, Record};
 
-use self::version::Sort;
+use self::version::{Field, Sort};
 use crate::{Context, admin_command_dispatch};
 
 /// Run feds diagnostics against every participating server in a room.
@@ -35,6 +35,10 @@ pub(crate) enum FedsCommand {
 	/// Compare implementation versions reported by participating servers.
 	Version {
 		room: OwnedRoomOrAliasId,
+
+		/// Select metadata fields used to group and display versions.
+		#[arg(long = "field", value_enum)]
+		fields: Vec<Field>,
 
 		/// List servers whose request did not produce an error.
 		#[arg(long, group = "version_list")]

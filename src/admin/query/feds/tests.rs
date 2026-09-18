@@ -38,6 +38,35 @@ fn version_listing_modes_are_mutually_exclusive() {
 }
 
 #[test]
+fn version_fields_are_repeatable_and_value_checked() {
+	AdminCommand::try_parse_from([
+		"admin",
+		"query",
+		"feds",
+		"version",
+		"!room:example.org",
+		"--field=name",
+		"--field=version",
+		"--field=compiler",
+	])
+	.expect("each version field should parse in one command");
+
+	for field in ["commit", "kernel", "arch", "operating-system"] {
+		let option = format!("--field={field}");
+
+		AdminCommand::try_parse_from([
+			"admin",
+			"query",
+			"feds",
+			"version",
+			"!room:example.org",
+			option.as_str(),
+		])
+		.expect_err("unknown version fields should be rejected");
+	}
+}
+
+#[test]
 fn version_sort_requires_a_listing_mode() {
 	for column in ["origin", "elapsed", "fault"] {
 		AdminCommand::try_parse_from([

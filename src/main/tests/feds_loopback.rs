@@ -14,7 +14,7 @@ mod tests {
 
 	const CERTIFICATE: &str = "../../nix/pkgs/complement/certificate.crt";
 	const PRIVATE_KEY: &str = "../../nix/pkgs/complement/private_key.key";
-	const VERSION_HEADER: &str = "| rank | servers | name | version | compiler | kernel | arch |";
+	const VERSION_HEADER: &str = "| rank | servers | name | version |";
 	const EVENT_HEADER: &str = "| rank | origin | elapsed | hash | signature | fault |";
 	const ORIGIN_HEADER: &str = "| origin | name | version | elapsed | fault |";
 
