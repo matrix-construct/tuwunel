@@ -1,5 +1,10 @@
 #![cfg(test)]
 
+//! Exercises concurrency, cancellation, and option resolution for federation fanout.
+//!
+//! The cases cover width caps, destination partitioning, winner selection,
+//! loser cancellation, and sweep deadlines.
+
 use std::{
 	collections::BTreeSet,
 	convert::identity,

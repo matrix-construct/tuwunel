@@ -1,8 +1,17 @@
+//! Compact numeric identifiers for room and event data.
+//!
+//! The service maps event IDs, state keys, state hashes, and room IDs into a shared global sequence
+//! space. Event IDs and state keys have paired forward and reverse mappings. State hashes have a
+//! partial forward index and no reverse mapping; room IDs have only a forward mapping.
+
 use std::{borrow::Borrow, sync::Arc};
 
 use futures::{FutureExt, Stream, StreamExt, pin_mut};
 use ruma::{EventId, OwnedEventId, OwnedRoomId, RoomId, events::StateEventType};
 use serde::Deserialize;
+/// Numeric identifier types shared with Matrix data structures.
+///
+/// Aliases name the compact identifier contexts used by event, state-key, and room mappings.
 pub use tuwunel_core::matrix::{ShortEventId, ShortId, ShortRoomId, ShortStateKey};
 use tuwunel_core::{
 	Err, Result, err, implement,
@@ -16,6 +25,10 @@ use tuwunel_core::{
 };
 use tuwunel_database::{Deserialized, Get, Map, Qry, Txn};
 
+/// Allocates and resolves compact identifiers used by room storage.
+///
+/// Per-identity locks serialize first allocation, and database transactions keep new forward and
+/// reverse mappings consistent where both are stored.
 pub struct Service {
 	db: Data,
 	creating: Creating,
@@ -45,6 +58,9 @@ struct Creating {
 	shortroomid: MutexMap<OwnedRoomId, ()>,
 }
 
+/// Compact identifier assigned to a complete room state hash.
+///
+/// State-hash IDs share the global numeric sequence with the other short identifier families.
 pub type ShortStateHash = ShortId;
 
 impl crate::Service for Service {
@@ -66,6 +82,14 @@ impl crate::Service for Service {
 	fn name(&self) -> &str { crate::service::make_name(std::module_path!()) }
 }
 
+/// Resolves an event ID to its compact identifier, allocating after an unsuccessful lookup.
+///
+/// New allocations publish the forward and reverse mappings in one transaction. Concurrent callers
+/// for the same event converge on one identifier.
+///
+/// # Panics
+///
+/// Panics when identifier dispatch or the paired mapping transaction fails.
 #[implement(Service)]
 pub async fn get_or_create_shorteventid(&self, event_id: &EventId) -> ShortEventId {
 	if let Ok(shorteventid) = self.get_shorteventid(event_id).await {
@@ -75,11 +99,16 @@ pub async fn get_or_create_shorteventid(&self, event_id: &EventId) -> ShortEvent
 	self.create_shorteventid(event_id).await
 }
 
-/// Resolves each event id to its short id, allocating any that are absent.
+/// Resolves each event ID to its short ID, allocating after unsuccessful lookups.
 ///
 /// Allocation runs ahead of consumer demand, so a caller that stops early
 /// still allocates for the events already buffered. Today's callers drain the
 /// stream in full.
+///
+/// # Panics
+///
+/// Panics when an existing mapping is malformed, identifier dispatch fails, or a paired mapping
+/// transaction fails.
 #[implement(Service)]
 pub fn multi_get_or_create_shorteventid<'a, I>(
 	&'a self,
@@ -117,6 +146,9 @@ async fn create_shorteventid(&self, event_id: &EventId) -> ShortEventId {
 	*short
 }
 
+/// Resolves an event ID to its existing compact identifier.
+///
+/// Missing or malformed mappings are returned as database errors.
 #[implement(Service)]
 pub async fn get_shorteventid(&self, event_id: &EventId) -> Result<ShortEventId> {
 	self.db
@@ -126,6 +158,14 @@ pub async fn get_shorteventid(&self, event_id: &EventId) -> Result<ShortEventId>
 		.deserialized()
 }
 
+/// Resolves a state event type and key, allocating an identifier after an unsuccessful lookup.
+///
+/// New allocations publish the forward and reverse mappings in one transaction. Concurrent callers
+/// for the same pair converge on one identifier.
+///
+/// # Panics
+///
+/// Panics when identifier dispatch or the paired mapping transaction fails.
 #[implement(Service)]
 pub async fn get_or_create_shortstatekey(
 	&self,
@@ -170,6 +210,10 @@ async fn create_shortstatekey(
 	*shortstatekey
 }
 
+/// Resolves a state event type and key to its existing compact identifier.
+///
+/// The event type and state key together form the forward lookup key. Missing or malformed mappings
+/// are returned as database errors.
 #[implement(Service)]
 pub async fn get_shortstatekey(
 	&self,
@@ -184,6 +228,10 @@ pub async fn get_shortstatekey(
 		.deserialized()
 }
 
+/// Resolves a compact event identifier through the reverse mapping.
+///
+/// The caller selects a deserializable event-ID representation whose owned form can be borrowed as
+/// [`EventId`]. Missing or malformed rows are reported with the compact identifier.
 #[implement(Service)]
 pub async fn get_eventid_from_short<Id>(&self, shorteventid: ShortEventId) -> Result<Id>
 where
@@ -200,6 +248,9 @@ where
 		.map_err(|e| err!(Database("Failed to find EventId from short {shorteventid:?}: {e:?}")))
 }
 
+/// Resolves a stream of compact event identifiers through the reverse mapping.
+///
+/// Input order is preserved. Each output carries its own lookup or deserialization result.
 #[implement(Service)]
 pub fn multi_get_eventid_from_short<'a, Id, S>(
 	&'a self,
@@ -215,6 +266,10 @@ where
 		.map(Deserialized::deserialized)
 }
 
+/// Resolves a compact state-key identifier to its event type and state key.
+///
+/// Missing or malformed reverse mappings are returned as database errors that identify the compact
+/// value.
 #[implement(Service)]
 pub async fn get_statekey_from_short(
 	&self,
@@ -234,6 +289,9 @@ pub async fn get_statekey_from_short(
 		})
 }
 
+/// Resolves a stream of compact state-key identifiers through the reverse mapping.
+///
+/// Input order is preserved. Each output carries its own lookup or deserialization result.
 #[implement(Service)]
 pub fn multi_get_statekey_from_short<'a, S>(
 	&'a self,
@@ -247,7 +305,19 @@ where
 		.map(Deserialized::deserialized)
 }
 
-/// Returns (shortstatehash, already_existed)
+/// Resolves a state hash, allocating a compact identifier after an unsuccessful lookup.
+///
+/// The returned boolean is `true` when the mapping already existed, in which case the callback is
+/// skipped. For a new identifier, `write_statediff` stages its associated state diff in the same
+/// transaction as the mapping.
+///
+/// # Errors
+///
+/// Returns an error when `write_statediff` rejects the new state diff. Neither row is committed.
+///
+/// # Panics
+///
+/// Panics when identifier dispatch or the mapping and state-diff transaction fails.
 #[implement(Service)]
 pub async fn get_or_create_shortstatehash<F>(
 	&self,
@@ -298,6 +368,9 @@ where
 	Ok((*shortstatehash, false))
 }
 
+/// Resolves a state hash to its existing compact identifier.
+///
+/// Missing or malformed mappings are returned as database errors.
 #[implement(Service)]
 pub async fn get_shortstatehash(&self, state_hash: &Digest) -> Result<ShortStateHash> {
 	self.db
@@ -307,6 +380,9 @@ pub async fn get_shortstatehash(&self, state_hash: &Digest) -> Result<ShortState
 		.deserialized()
 }
 
+/// Resolves a room ID to its existing compact identifier.
+///
+/// Missing or malformed mappings are returned as database errors.
 #[implement(Service)]
 pub async fn get_shortroomid(&self, room_id: &RoomId) -> Result<ShortRoomId> {
 	self.db
@@ -316,6 +392,10 @@ pub async fn get_shortroomid(&self, room_id: &RoomId) -> Result<ShortRoomId> {
 		.deserialized()
 }
 
+/// Resolves a compact room identifier by scanning the forward mapping.
+///
+/// Room identifiers have no dedicated reverse map, so the first matching value is returned.
+/// Unreadable rows are skipped during the scan.
 #[implement(Service)]
 pub async fn get_roomid_from_short(&self, shortroomid_: ShortRoomId) -> Result<OwnedRoomId> {
 	let stream = self
@@ -332,6 +412,14 @@ pub async fn get_roomid_from_short(&self, shortroomid_: ShortRoomId) -> Result<O
 		.ok_or_else(|| err!(Database("Failed to find RoomId from {shortroomid_:?}")))
 }
 
+/// Resolves a room ID to its compact identifier, allocating after an unsuccessful lookup.
+///
+/// Room mappings are stored only in the forward direction. Concurrent callers for the same room
+/// converge on one identifier.
+///
+/// # Panics
+///
+/// Panics when identifier dispatch or storing the forward mapping fails.
 #[implement(Service)]
 pub async fn get_or_create_shortroomid(&self, room_id: &RoomId) -> ShortRoomId {
 	if let Ok(shortroomid) = self.get_shortroomid(room_id).await {
@@ -362,6 +450,10 @@ async fn create_shortroomid(&self, room_id: &RoomId) -> ShortRoomId {
 	*short
 }
 
+/// Deletes the compact identifier mapping for a room.
+///
+/// Only the forward room mapping is removed. Any unsuccessful existence check is returned as a
+/// not-found database error.
 #[implement(Service)]
 pub async fn delete_shortroomid(&self, room_id: &RoomId) -> Result {
 	if self

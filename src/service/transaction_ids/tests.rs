@@ -1,5 +1,10 @@
 #![cfg(test)]
 
+//! Tests for transaction-key compatibility and room scoping.
+//!
+//! The cases preserve the original legacy key bytes. They also prove that the
+//! room tag, room identifier, and event type independently separate send keys.
+
 use ruma::{DeviceId, RoomId, TransactionId, UserId};
 use tuwunel_database::serialize_to_vec;
 

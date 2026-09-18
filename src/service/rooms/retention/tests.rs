@@ -1,3 +1,9 @@
+//! Exercises original-event retention and expiry behavior.
+//!
+//! These tests cover atomic visibility of the original and expiry index,
+//! preservation of the first retained original, and disabled-save behavior
+//! against an isolated database fixture.
+
 use std::{
 	sync::{
 		Arc,

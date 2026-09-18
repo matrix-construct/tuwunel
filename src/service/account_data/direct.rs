@@ -1,3 +1,8 @@
+//! Direct-room account data helpers.
+//!
+//! These operations read and update a user's `m.direct` mapping. Callers can list direct rooms
+//! without selecting a counterparty.
+
 use std::collections::BTreeSet;
 
 use ruma::{
@@ -30,6 +35,11 @@ pub async fn direct_rooms(&self, user_id: &UserId) -> BTreeSet<OwnedRoomId> {
 /// The room joins the counterparty's list, which is created when this is
 /// their first direct room. A list already naming the room is left alone,
 /// so repeated calls settle on one entry.
+///
+/// # Panics
+///
+/// Panics when storing a changed mapping requires a global sequence number that cannot be allocated
+/// or persisted.
 #[implement(super::Service)]
 pub async fn mark_direct(&self, user_id: &UserId, target: &UserId, room_id: &RoomId) -> Result {
 	let mut content = self

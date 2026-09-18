@@ -20,6 +20,10 @@ use tuwunel_core::{
 	},
 };
 
+/// Re-exports federation fanout fold results and stream helpers.
+///
+/// Callers use these types to aggregate completion-ordered outcomes while
+/// retaining per-origin failures.
 pub use self::fold::{Faults, Grid, Origins, OutcomeExt, Tally};
 use super::{
 	Classification,

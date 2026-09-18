@@ -1,3 +1,8 @@
+//! Resolves, signs, sends, and decodes one outbound federation request.
+//!
+//! Entry points select an HTTP client plus peer-status posture. Destination
+//! validation and resolver-cache eviction remain shared across those postures.
+
 use std::{fmt::Debug, mem, time::Duration};
 
 use bytes::Bytes;
@@ -24,7 +29,11 @@ use super::{
 };
 use crate::{client::read_response_capped, resolver::actual::ActualDest};
 
-/// Sends a request to a federation server
+/// Sends a federation request with the standard federation client.
+///
+/// The destination is validated and resolved before the request is signed and
+/// sent. Success clears peer failures and classifiable errors record a failure;
+/// this entry point does not itself consult peer backoff.
 #[implement(super::Service)]
 #[tracing::instrument(skip_all, name = "request", level = "debug")]
 pub async fn execute<T>(&self, dest: &ServerName, request: T) -> Result<T::IncomingResponse>
@@ -37,11 +46,12 @@ where
 	self.execute_on(client, dest, request).await
 }
 
-/// Client-initiated key lookup (`/keys/query`, `/keys/claim`) over federation:
-/// skips servers already in backoff and bounds the request by
-/// `federation_keys_timeout` so a waiting client is not held past its own send
-/// deadline. Honors peer-status but does not record into it; a slow key lookup
-/// must not suppress unrelated outbound traffic to the server.
+/// Sends a bounded, backoff-aware client key lookup over federation.
+///
+/// `/keys/query` and `/keys/claim` requests skip servers already in backoff and
+/// are limited by `federation_keys_timeout`. The uncounted send path
+/// deliberately records neither success, failure, nor timeout, so a slow key
+/// lookup does not suppress unrelated outbound traffic to the server.
 #[implement(super::Service)]
 #[tracing::instrument(skip_all, name = "keys", level = "debug")]
 pub async fn execute_keys<T>(&self, dest: &ServerName, request: T) -> Result<T::IncomingResponse>
@@ -69,7 +79,10 @@ where
 	}
 }
 
-/// Like execute() but with a very large timeout
+/// Sends a federation request with the long-timeout Synapse client.
+///
+/// Resolution, signing, response decoding, and peer-status recording match
+/// [`super::Service::execute`]; only the selected HTTP client differs.
 #[implement(super::Service)]
 #[tracing::instrument(skip_all, name = "synapse", level = "debug")]
 pub async fn execute_synapse<T>(
@@ -86,6 +99,11 @@ where
 	self.execute_on(client, dest, request).await
 }
 
+/// Sends through a supplied client and records the peer outcome.
+///
+/// A successful response clears every stored failure row for the destination.
+/// Only errors classified as peer failures are recorded, and no backoff gate is
+/// consulted before sending.
 #[implement(super::Service)]
 pub async fn execute_on<T>(
 	&self,
@@ -144,8 +162,10 @@ where
 	result
 }
 
-/// Like [`execute_on`] but leaves peer-status untouched, for callers that
-/// must honor backoff without contributing to it.
+/// Sends through a supplied client without changing peer status.
+///
+/// Callers that gate separately can honor existing backoff without adding
+/// success or failure records.
 #[implement(super::Service)]
 #[tracing::instrument(
 	name = "fed",

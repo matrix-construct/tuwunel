@@ -23,7 +23,14 @@ use ruma::{
 	signatures::Ed25519KeyPair,
 };
 
+/// Builds ruma authentication input from the local federation identity.
+///
+/// Implementations bridge each concrete [`AuthScheme`] to the common origin,
+/// destination, and signing-key context available to the service.
 pub trait FedAuth: AuthScheme {
+	/// Constructs the authentication input expected by this scheme.
+	///
+	/// Schemes that do not authenticate ignore some or all supplied context.
 	fn input(
 		origin: OwnedServerName,
 		dest: OwnedServerName,
@@ -51,7 +58,14 @@ impl FedAuth for ServerSignatures {
 	}
 }
 
+/// Builds ruma path input from the remote server's supported versions.
+///
+/// Implementations adapt either a single fixed path or a versioned endpoint
+/// history to the same federation request path.
 pub trait FedPath: PathBuilder {
+	/// Constructs the path-builder input expected by this endpoint.
+	///
+	/// Single-path endpoints ignore the advertised version history.
 	fn input(supported: &SupportedVersions) -> <Self as PathBuilder>::Input<'_>;
 }
 

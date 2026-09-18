@@ -1,3 +1,8 @@
+//! Sends federation requests and tracks per-peer reachability.
+//!
+//! The service resolves and signs outbound requests, records selected outcomes,
+//! ranks fallback candidates, and exposes bounded multi-destination fanout.
+
 mod execute;
 pub mod feds;
 mod format;
@@ -13,12 +18,20 @@ use tuwunel_core::{Result, utils::exponential_backoff_streak_cap};
 use tuwunel_database::Map;
 
 use self::peer::MAX_BACKOFF;
+/// Re-exports peer reachability verdicts and candidate-ranking types.
+///
+/// These types classify failures, expose retry eligibility, and preserve the
+/// ranking policy shared by federation request paths.
 pub use self::{
 	peer::{Classification, PeerBackoff, ShouldAttempt},
 	rank::{Candidates, WhenAllBackedOff},
 };
 use crate::services::OnceServices;
 
+/// Executes outbound federation traffic and maintains peer status.
+///
+/// Request entry points choose whether to consult or update reachability state.
+/// Fanout and candidate-ranking helpers build on the same transport policy.
 pub struct Service {
 	services: Arc<OnceServices>,
 	statuses: Arc<Map>,

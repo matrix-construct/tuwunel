@@ -1,9 +1,21 @@
+//! Durable transaction-response deduplication.
+//!
+//! Opaque response bytes are keyed by user, optional device, and transaction
+//! identifier. Room-send operations add a domain tag, room, and event type so
+//! independent send scopes cannot replay one another's responses.
+
 use std::sync::Arc;
 
 use ruma::{DeviceId, RoomId, TransactionId, UserId};
 use tuwunel_core::{Result, implement};
 use tuwunel_database::{Handle, Map};
 
+/// Persistent transaction-response lookup service.
+///
+/// Responses remain stored across process restarts and have no service-level
+/// expiry. Adding a response for an existing key replaces the stored bytes.
+/// Lookup and insertion are separate operations; the service does not reserve a
+/// transaction identifier against concurrent execution.
 pub struct Service {
 	db: Data,
 }
@@ -39,7 +51,9 @@ impl crate::Service for Service {
 #[implement(Service)]
 /// Records a response under the legacy transaction scope.
 ///
-/// This preserves the original non-room key layout for existing callers.
+/// The key contains the user, optional device, and transaction identifier.
+/// Writing the same key again replaces its opaque response bytes while
+/// preserving the original non-room key layout.
 pub fn add_txnid(
 	&self,
 	user_id: &UserId,
@@ -57,7 +71,9 @@ pub fn add_txnid(
 #[implement(Service)]
 /// Looks up a response under the legacy transaction scope.
 ///
-/// This preserves the original non-room key layout for existing callers.
+/// The key contains the user, optional device, and transaction identifier.
+/// A missing row remains a database not-found error, and a hit returns the
+/// stored opaque bytes through a database handle.
 pub async fn existing_txnid(
 	&self,
 	user_id: &UserId,
@@ -72,7 +88,9 @@ pub async fn existing_txnid(
 #[implement(Service)]
 /// Records a response under the scoped room-send transaction key.
 ///
-/// Room and event type are included so unrelated send endpoints cannot alias.
+/// A domain tag, room, and event type extend the legacy key so unrelated send
+/// scopes cannot alias. Writing the same complete key again replaces its
+/// opaque response bytes.
 pub fn add_room_txnid(
 	&self,
 	user_id: &UserId,
@@ -92,7 +110,9 @@ pub fn add_room_txnid(
 #[implement(Service)]
 /// Looks up a response under the scoped room-send transaction key.
 ///
-/// Room and event type are included so unrelated send endpoints cannot alias.
+/// A domain tag, room, and event type extend the legacy key so unrelated send
+/// scopes cannot alias. A missing row remains a database not-found error, and
+/// a hit returns the stored opaque bytes through a database handle.
 pub async fn existing_room_txnid(
 	&self,
 	user_id: &UserId,

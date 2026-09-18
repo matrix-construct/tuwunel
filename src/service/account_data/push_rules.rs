@@ -1,3 +1,8 @@
+//! Room push-rule migration helpers.
+//!
+//! The module carries a room-specific push rule to a successor room while preserving user choices.
+//! Shared account-data limits are enforced before the replacement ruleset is stored.
+
 use ruma::{
 	RoomId, UserId,
 	events::{GlobalAccountDataEventType, push_rules::PushRulesEvent},
@@ -12,6 +17,10 @@ use super::{MAX_RULE_BYTES, admits_rule};
 /// The source rule's enabled state travels with it, so a rule the user had
 /// switched off does not come back on in the successor. A destination rule that
 /// already exists keeps its own enabled state and takes only the actions.
+///
+/// # Panics
+///
+/// Panics when dispatching the global sequence number for the changed ruleset fails.
 #[implement(super::Service)]
 pub async fn copy_room_push_rule(
 	&self,

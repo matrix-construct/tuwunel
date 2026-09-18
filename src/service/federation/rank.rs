@@ -21,8 +21,10 @@ pub type Candidates = SmallVec<[OwnedServerName; 3]>;
 /// place by [`rank_from_verdicts`].
 type Verdicts = SmallVec<[(OwnedServerName, ShouldAttempt); 3]>;
 
-/// Behavior when every candidate is backed off (no `Yes` or `Deprioritize`
-/// verdict in the pool).
+/// Selects how ranking handles a pool with no immediately eligible server.
+///
+/// The policy applies only when every verdict is [`ShouldAttempt::No`]; mixed
+/// pools always discard backed-off candidates.
 #[derive(Clone, Copy, Debug)]
 pub enum WhenAllBackedOff {
 	/// Attempt the backed-off servers anyway, so a transient backoff never
@@ -33,8 +35,11 @@ pub enum WhenAllBackedOff {
 	Fail,
 }
 
-/// Gather each candidate's [`ShouldAttempt`] verdict and rank `eligible`,
-/// preserving the caller's order within each verdict bucket.
+/// Ranks eligible candidates by current peer reachability.
+///
+/// The method gathers each [`ShouldAttempt`] verdict, preserves caller order
+/// within each bucket, and applies `when_all` only when every peer is backed
+/// off.
 #[implement(super::Service)]
 pub async fn rank_candidates(
 	&self,

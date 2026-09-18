@@ -1,5 +1,10 @@
 #![allow(clippy::arithmetic_side_effects)]
 
+//! Tests peer failure classification, persistence, and retry backoff.
+//!
+//! The cases cover legacy and timestamped rows, class selection, grace tiers,
+//! delay curves, deadlines, and saturation.
+
 use std::{
 	sync::Arc,
 	time::{Duration, UNIX_EPOCH},

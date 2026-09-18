@@ -1,3 +1,8 @@
+//! Room tag account data helpers.
+//!
+//! The module updates and retrieves a user's `m.tag` content for an individual room. Tag writes
+//! preserve a readable stored tag set; read failures start a fresh set.
+
 use futures::TryFutureExt;
 use ruma::{
 	RoomId, UserId,
@@ -10,8 +15,12 @@ use tuwunel_core::{Result, implement};
 
 /// Add a tag to the room in the user's account data.
 ///
-/// The whole tag set is rewritten on every call, so it is read back first and
-/// the new tag merged into it. A tag already present is replaced.
+/// The whole tag set is rewritten on every call. A readable stored set is merged with the new tag,
+/// while a read failure starts from an empty set. A tag already present is replaced.
+///
+/// # Panics
+///
+/// Panics when dispatching the global sequence number for the changed tag set fails.
 #[implement(super::Service)]
 pub async fn set_room_tag(
 	&self,

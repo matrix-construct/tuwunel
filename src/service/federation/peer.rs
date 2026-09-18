@@ -1,24 +1,11 @@
-//! Per-server reachability store backed by the `servername_status` CF.
+//! Stores and evaluates per-server federation reachability.
 //!
-//! Each failure writes one row keyed `(servername, bucket)` with
-//! `bucket = now.as_secs() / window_secs`; the tuple codec joins the parts with
-//! `ser::SEP`, so the on-disk key is `servername || SEP || u64_be(bucket)`. The
-//! value is the [`Classification`] byte, optionally trailed by the failure
-//! instant as `u64_be` seconds. Two failures in one window collide on the same
-//! key (a correct collision: the window is the coalescing quantum) and two
-//! failures in different windows produce two rows, so a failure is always a
-//! blind write and never a read-modify-write.
-//!
-//! `should_attempt` scans a server's rows: the newest failure is the backoff
-//! anchor (its recorded instant) and the window span between the oldest and
-//! newest surviving rows is the streak, so the gate and the `earliest_retry`
-//! it reports are one comparison and stay coherent when the clock crosses a
-//! window boundary. `record_success` and `note_peer_alive` clear the whole
-//! prefix, so a recovered or reachable peer is immediately attemptable again.
-//!
-//! `window_secs` is sourced from `sender_timeout` at service build time so the
-//! peer-status curve does not drift from the sender's existing quadratic
-//! backoff when both observe the same peer.
+//! Each failure is a blind write keyed by `(server, bucket)`, with repeated
+//! failures in one window deliberately coalescing; current row values retain
+//! the classification and exact failure time. A scan derives the latest
+//! anchor and surviving bucket span before applying the retry curve. Successful
+//! outbound or inbound contact clears the server prefix. The bucket width
+//! comes from `sender_timeout`, keeping this gate aligned with sender backoff.
 
 use std::{
 	collections::BTreeMap,
@@ -37,14 +24,21 @@ use tuwunel_core::{
 };
 use tuwunel_database::Interfix;
 
-/// Backoff ceiling, matching `sender_retry_backoff_limit`'s 24h default.
+/// Caps peer-status backoff delays.
+///
+/// The duration matches the 24-hour default of `sender_retry_backoff_limit`.
 pub(super) const MAX_BACKOFF: Duration = Duration::from_hours(24);
 
 /// Permanence classification supplied alongside a failure.
+///
+/// The classification selects either the retry curve or the maximum backoff.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum Classification {
+	/// Marks a failure that may recover on a later attempt.
 	#[default]
 	Transient,
+
+	/// Marks a peer as unavailable for the maximum backoff duration.
 	Permanent,
 }
 
@@ -71,11 +65,18 @@ impl From<Classification> for u8 {
 	}
 }
 
-/// Verdict for [`Service::should_attempt`].
+/// Verdict returned by [`super::Service::should_attempt`].
+///
+/// Callers can attempt immediately, defer until a deadline, or retain an
+/// eligible peer behind preferred candidates.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ShouldAttempt {
+	/// Allows the peer to be attempted immediately.
 	Yes,
+
+	/// Defers the peer until its current backoff expires.
 	No {
+		/// Earliest wall-clock time at which another attempt is allowed.
 		earliest_retry: SystemTime,
 	},
 
@@ -85,32 +86,52 @@ pub enum ShouldAttempt {
 }
 
 /// Latest-failure state feeding the pure [`attempt_verdict`] decision.
+///
+/// Time values are injected as epoch seconds so the retry decision is
+/// deterministic in tests.
 pub(super) struct Backoff {
+	/// Classification of the newest surviving failure.
 	pub(super) class: Classification,
 
 	/// Failure instant the delay is measured from (seconds since the epoch).
 	pub(super) anchor_secs: u64,
 
+	/// Number of failure windows represented by the surviving rows.
 	pub(super) streak: u32,
 
 	/// Current time (seconds since the epoch); injected for testability.
 	pub(super) now: u64,
 
+	/// Width of one coalescing window in seconds.
 	pub(super) window_secs: u64,
+
+	/// Initial delay applied to a lone transient failure.
 	pub(super) grace_secs: u64,
 }
 
 /// Fold state accumulated over one server's failure rows.
+///
+/// Rows are folded in key order, retaining both ends of the surviving bucket
+/// span while the newest row supplies the class and anchor.
 #[derive(Clone, Copy)]
 pub(super) struct Streak {
+	/// Classification of the newest row.
 	pub(super) class: Classification,
+
+	/// Recorded failure instant of the newest row in epoch seconds.
 	pub(super) anchor_secs: u64,
+
+	/// Oldest bucket included in the streak.
 	pub(super) oldest_bucket: u64,
+
+	/// Newest bucket included in the streak.
 	pub(super) latest_bucket: u64,
 }
 
-/// Admin-facing summary of a peer's current failure streak, seconds since the
-/// epoch.
+/// Summarizes a peer's current failure streak for administration.
+///
+/// The anchor and oldest values are Unix epoch seconds; `delay_secs` is the
+/// retry duration applied from the anchor.
 #[derive(Clone, Copy, Debug)]
 pub struct PeerBackoff {
 	/// Classification of the newest surviving failure.
@@ -126,6 +147,9 @@ pub struct PeerBackoff {
 	pub delay_secs: u64,
 }
 
+/// Clears all recorded failures after a successful outbound request.
+///
+/// Removing the peer prefix makes the next attempt immediately eligible.
 #[implement(super::Service)]
 pub async fn record_success(&self, server: &ServerName) {
 	self.statuses
@@ -133,9 +157,10 @@ pub async fn record_success(&self, server: &ServerName) {
 		.await;
 }
 
-/// Clears a peer's failure rows after it has proven reachable via inbound
-/// activity, reporting whether any were present so the caller flushes only for
-/// a peer that was actually sad. The healthy-peer miss writes no tombstone.
+/// Clears failure rows after a peer proves reachable through inbound activity.
+///
+/// The return value reports whether any rows were present, allowing the caller
+/// to flush only after a change. A healthy-peer miss writes no tombstone.
 #[implement(super::Service)]
 #[tracing::instrument(
 	level = "trace",
@@ -156,7 +181,9 @@ pub async fn note_peer_alive(&self, server: &ServerName) -> bool {
 	sad
 }
 
-/// Whether the reachability store holds any failure rows for this peer.
+/// Reports whether the reachability store holds a failure row for a peer.
+///
+/// Database errors are ignored and therefore behave like an empty prefix.
 #[implement(super::Service)]
 #[tracing::instrument(
 	level = "trace",
@@ -173,6 +200,10 @@ pub async fn peer_has_failures(&self, server: &ServerName) -> bool {
 		.await
 }
 
+/// Records one classified failure in the peer's current time bucket.
+///
+/// Repeated failures in the same bucket overwrite the same row. The value also
+/// stores the exact failure instant while remaining compatible with old rows.
 #[implement(super::Service)]
 pub fn record_failure(&self, server: &ServerName, classification: Classification) {
 	// Raw-value additive extension; old one-byte rows stay readable.
@@ -184,6 +215,10 @@ pub fn record_failure(&self, server: &ServerName, classification: Classification
 		.put_raw((server, self.current_bucket()), value);
 }
 
+/// Determines whether a federation request should currently target a peer.
+///
+/// A peer without readable failure rows is immediately eligible. Otherwise the
+/// verdict is derived from its newest failure and surviving bucket span.
 #[implement(super::Service)]
 #[tracing::instrument(skip(self), fields(%server), level = "trace")]
 pub async fn should_attempt(&self, server: &ServerName) -> ShouldAttempt {
@@ -194,8 +229,9 @@ pub async fn should_attempt(&self, server: &ServerName) -> ShouldAttempt {
 	attempt_verdict(&self.backoff(streak))
 }
 
-/// Admin-facing backoff summary for one server, `None` when it has no failure
-/// rows.
+/// Returns the current admin-facing backoff summary for one server.
+///
+/// The result is `None` when the peer has no readable failure rows.
 #[implement(super::Service)]
 pub async fn peer_backoff(&self, server: &ServerName) -> Option<PeerBackoff> {
 	self.peer_streak(server)
@@ -203,9 +239,10 @@ pub async fn peer_backoff(&self, server: &ServerName) -> Option<PeerBackoff> {
 		.map(|streak| self.peer_backoff_from(streak))
 }
 
-/// Admin-facing backoff summary for every server with failure rows, in one
-/// pass over the reachability store. Rows group by server on disk, so a run of
-/// one server's buckets folds in place.
+/// Returns admin-facing backoff summaries for all peers with failure rows.
+///
+/// The store is scanned once. Rows group by server on disk, so each contiguous
+/// run of buckets is folded in place; database errors are skipped.
 #[implement(super::Service)]
 pub async fn peer_backoffs(&self) -> BTreeMap<OwnedServerName, PeerBackoff> {
 	let window_secs = self.window_secs;
@@ -232,8 +269,12 @@ pub async fn peer_backoffs(&self) -> BTreeMap<OwnedServerName, PeerBackoff> {
 		.collect()
 }
 
-/// Yields one tuple per populated bucket, ordered by `(server, bucket_start)`,
-/// backing the admin `peer-status snapshot` table.
+/// Streams one tuple per readable peer-status bucket.
+///
+/// Items are ordered by `(server, bucket_start)` for the admin snapshot table.
+/// Borrowed server names are cursor-backed and remain valid only until the next
+/// poll. Database and key-decoding errors are skipped; malformed values decode
+/// as transient failures.
 #[implement(super::Service)]
 pub fn peer_snapshot(
 	&self,
@@ -319,8 +360,11 @@ fn peer_backoff_from(&self, streak: Streak) -> PeerBackoff {
 	}
 }
 
-/// Pure backoff verdict from a peer's latest failure state: attemptable once
-/// the delay past the anchor has elapsed.
+/// Computes a retry verdict from a peer's latest failure state.
+///
+/// The peer becomes attemptable once the selected delay past the anchor has
+/// elapsed. Overflow while constructing the wall-clock deadline falls back to
+/// the current time.
 #[must_use]
 pub(super) fn attempt_verdict(backoff: &Backoff) -> ShouldAttempt {
 	let earliest_secs = backoff
@@ -339,9 +383,11 @@ pub(super) fn attempt_verdict(backoff: &Backoff) -> ShouldAttempt {
 }
 
 impl Backoff {
-	/// Backoff delay in seconds. `Permanent` and the saturating
-	/// `window * streak^2` curve both cap at [`MAX_BACKOFF`]; a lone
-	/// `Transient` failure gets the `grace` tier when it is enabled.
+	/// Calculates the bounded retry delay for this failure state.
+	///
+	/// Permanent failures use [`MAX_BACKOFF`]. A lone transient failure uses the
+	/// configured grace tier when enabled; larger streaks follow the saturating
+	/// `window * streak^2` curve and cap at the same maximum.
 	#[must_use]
 	pub(super) fn delay_secs(&self) -> u64 {
 		let max_backoff = MAX_BACKOFF.as_secs();
@@ -359,8 +405,10 @@ impl Backoff {
 	}
 }
 
-/// Folds one failure row into a server's running streak: the newest row sets
-/// the class and anchor, the oldest bucket is retained.
+/// Folds one failure row into a server's running streak.
+///
+/// The newest row supplies the class and anchor while the first row's bucket is
+/// retained as the oldest edge of the streak.
 #[must_use]
 pub(super) fn fold_streak(
 	window_secs: u64,
@@ -382,6 +430,10 @@ pub(super) fn fold_streak(
 
 #[inline]
 #[must_use]
+/// Decodes the classification byte from a peer-status value.
+///
+/// Missing and unrecognized bytes are treated as transient failures for
+/// compatibility with old or malformed rows.
 pub(super) fn classify(bytes: &[u8]) -> Classification {
 	bytes
 		.first()
@@ -389,8 +441,10 @@ pub(super) fn classify(bytes: &[u8]) -> Classification {
 		.map_or(Classification::Transient, Classification::from_byte)
 }
 
-/// Failure instant (seconds since the epoch) recorded after the classification
-/// byte; old single-byte rows carry no timestamp and yield `None`.
+/// Decodes the recorded failure instant in seconds since the epoch.
+///
+/// Old single-byte rows and truncated values carry no timestamp and yield
+/// `None`.
 #[must_use]
 pub(super) fn failure_secs(bytes: &[u8]) -> Option<u64> {
 	bytes
@@ -399,17 +453,11 @@ pub(super) fn failure_secs(bytes: &[u8]) -> Option<u64> {
 		.map(u64::from_be_bytes)
 }
 
-/// Classifies a failed federation attempt for the peer-reachability store, or
-/// `None` when it carries no reachability signal. An HTTP response proves the
-/// peer reachable, so a content-level 4xx (a forbidden invite, a 403 backfill)
-/// must not count against it; only 5xx or an explicit rate-limit (429) records
-/// `Transient`. A 410 is the exception: a Matrix server never returns it for
-/// one endpoint and not another, so a received 410 is a proxy operator
-/// deliberately signaling the peer is gone, and records `Permanent`. A non-JSON
-/// body is the other exception: it means a proxy or CDN answered rather than
-/// the homeserver, so it signals a stale route, not peer content, and records
-/// `Transient` to place the eviction that follows behind the backoff gate.
-/// Transport failures carry no response and are always transient.
+/// Classifies a failed federation attempt for the peer-reachability store.
+///
+/// A content-level 4xx proves the peer reachable and returns `None`; 5xx, 429,
+/// non-JSON responses, and transport failures are transient. A received 410 is
+/// treated as a permanent proxy-level signal that the peer is gone.
 #[must_use]
 pub(super) fn classify_error(error: &Error) -> Option<Classification> {
 	let Error::Federation(_, response) = error else {

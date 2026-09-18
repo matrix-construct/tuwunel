@@ -1,3 +1,8 @@
+//! User and room account data storage.
+//!
+//! The service stores raw account data events behind monotonic update counters and maintains a
+//! secondary index by room, user, and event type. Its streams expose changes for incremental sync.
+
 mod direct;
 mod push_rules;
 mod room_tags;
@@ -40,6 +45,11 @@ pub const MAX_RULE_ID_BYTES: usize = 300;
 /// Rule IDs are excluded and bounded separately by [`MAX_RULE_ID_BYTES`].
 pub const MAX_RULE_BYTES: usize = 1024;
 
+/// Stores and queries global and room-scoped account data.
+///
+/// Updates commit the secondary pointer and new event blob in one transaction while retaining
+/// monotonic counters for sync. Typed accessors deserialize the complete account data event
+/// envelope.
 pub struct Service {
 	services: Arc<crate::services::OnceServices>,
 	db: Data,
@@ -77,8 +87,14 @@ pub fn admits_rule(ruleset: &Ruleset, kind: RuleKind, rule_id: &str) -> bool {
 			|| ruleset.iter().take(MAX_RULES).count() < MAX_RULES)
 }
 
-/// Places one event in the account data of the user and removes the
-/// previous entry.
+/// Stores an account data event and replaces its previous revision.
+///
+/// The input must contain complete `type` and `content` fields. A new global counter value keys the
+/// event blob, secondary pointer, and removal of the superseded blob in one transaction.
+///
+/// # Panics
+///
+/// Panics when dispatching the global sequence number fails.
 #[implement(Service)]
 pub async fn update(
 	&self,
@@ -114,9 +130,14 @@ pub async fn update(
 	Ok(())
 }
 
-/// MSC3391: replace the stored event with a tombstone whose content is
-/// `{}`. Delta sync surfaces the empty content so clients can apply the
-/// deletion; initial sync and GET treat the tombstone as not-present.
+/// Replaces an account data event with an MSC3391 tombstone.
+///
+/// Delta sync surfaces the empty content so clients can apply the deletion. Zero-token V3 and V5
+/// sync responses and client account-data GET routes treat the tombstone as absent.
+///
+/// # Panics
+///
+/// Panics when dispatching the global sequence number fails.
 #[implement(Service)]
 pub async fn delete(
 	&self,
@@ -168,6 +189,10 @@ where
 		.deserialized()
 }
 
+/// Loads a stored account data event without deserializing it.
+///
+/// The optional room ID selects room-scoped or global account data. The lookup resolves the
+/// current secondary index entry before borrowing the raw event from storage.
 #[implement(Service)]
 pub async fn get_raw(
 	&self,
@@ -187,7 +212,10 @@ pub async fn get_raw(
 		.await
 }
 
-/// Returns all changes to the account data that happened after `since`.
+/// Streams account data changes after a counter value.
+///
+/// The optional upper bound is inclusive. Cursor and decoding failures are logged and omitted from
+/// this convenience stream.
 #[implement(Service)]
 pub fn changes_since<'a>(
 	&'a self,
@@ -236,10 +264,10 @@ pub fn changes_since_fallible<'a>(
 		})
 }
 
-/// MSC4025: erase all account data for a user in the given namespace
-/// (global if `room_id` is `None`, otherwise a single room). Mirrors
-/// `threads::delete_all_rooms_threads`: prefix-scan the keys and
-/// remove each.
+/// Erases a user's account data within one MSC4025 namespace.
+///
+/// An absent room selects global data, while a room selects only that room's data. Rows yielded
+/// successfully from both prefix scans are deleted together; scan errors are skipped.
 #[implement(Service)]
 pub async fn erase_user(&self, user_id: &UserId, room_id: Option<&RoomId>) {
 	let prefix = (room_id, user_id, Interfix);
@@ -262,7 +290,10 @@ pub async fn erase_user(&self, user_id: &UserId, room_id: Option<&RoomId>) {
 	txn.execute();
 }
 
-/// Returns all changes to the account data that happened after `since`.
+/// Returns the latest account data counter at or below an optional bound.
+///
+/// The lookup is scoped to one user and either global data or a single room. An empty scope produces
+/// a not-found request error.
 #[implement(Service)]
 pub async fn last_count<'a>(
 	&'a self,
