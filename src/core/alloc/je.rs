@@ -82,12 +82,14 @@ const MALLOC_CONF_PERCPU_ARENA: &str = if cfg!(any(
 	""
 };
 
-/// Requests huge pages for allocator metadata where jemalloc can back them.
+/// Asks jemalloc to back allocator metadata with huge pages where it can.
 ///
 /// Jemalloc needs `MADV_HUGEPAGE` (which its build ignores on 32-bit ARM) or
 /// `memcntl`. Without either, a debug build aborts during allocator
-/// initialization, and a release build still rounds metadata to huge page
-/// boundaries it cannot back.
+/// initialization, and the key's only remaining effect in release is
+/// whether the tcache stacks come from the never-purging base allocator,
+/// since base blocks keep the 2 MiB alignment and rounding of
+/// `BASE_BLOCK_MIN_ALIGN` either way.
 #[cfg(feature = "jemalloc_conf")]
 const MALLOC_CONF_METADATA_THP: &str = if cfg!(any(
 	all(any(target_os = "linux", target_os = "android"), not(target_arch = "arm")),
