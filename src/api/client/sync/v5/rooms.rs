@@ -1,6 +1,9 @@
 mod bump_stamp;
 mod heroes;
 
+#[cfg(test)]
+mod tests;
+
 use std::collections::{BTreeMap, HashSet};
 
 use futures::{
@@ -37,7 +40,10 @@ use tuwunel_core::{
 		stream::{BroadbandExt, WidebandExt},
 	},
 };
-use tuwunel_service::Services;
+use tuwunel_service::{
+	Services,
+	sync::{RequiredState, Room, RoomConfig},
+};
 
 use self::{bump_stamp::room_bump_stamp, heroes::calculate_heroes};
 use super::{
@@ -63,6 +69,13 @@ pub(super) enum StateMode {
 	Delta(PduCount),
 }
 
+#[derive(Clone, Copy)]
+struct StateSelection<'a> {
+	mode: StateMode,
+	previous: Option<&'a [u64]>,
+	changed: bool,
+}
+
 #[tracing::instrument(
 	name = "room",
 	level = "debug",
@@ -73,8 +86,8 @@ pub(super) async fn handle_room(
 	sync_info: SyncInfo<'_>,
 	conn: &Connection,
 	window_room: &WindowRoom,
-	roomsince: u64,
-	state_mode: StateMode,
+	room: &Room,
+	config_changed: bool,
 	room_details: RoomDetails,
 ) -> Result<response::Room, Failure> {
 	let SyncInfo {
@@ -86,6 +99,7 @@ pub(super) async fn handle_room(
 	} = sync_info;
 
 	let WindowRoom { lists, membership, room_id, .. } = window_room;
+	let roomsince = room.roomsince;
 
 	if matches!(*membership, Some(MembershipState::Leave | MembershipState::Ban)) {
 		return leave_or_ban_response(sync_info, conn, window_room, roomsince)
@@ -140,8 +154,15 @@ pub(super) async fn handle_room(
 	.map_err(Failure::Timeline)
 	.await?;
 
+	let mode = state_mode(roomsince, room.required_state.is_empty());
+	let state = StateSelection {
+		mode,
+		previous: config_changed.then_some(room.required_state.as_slice()),
+		changed: state_may_have_changed(mode, last_timeline_count),
+	};
+
 	let required_state = membership_allows_required_state(membership.as_ref())
-		.and_is(state_may_have_changed(state_mode, last_timeline_count))
+		.and_is(state.changed || state.previous.is_some())
 		.then_some(required_state)
 		.unwrap_or_default();
 
@@ -149,7 +170,7 @@ pub(super) async fn handle_room(
 		services,
 		sender_user,
 		room_id,
-		state_mode,
+		state,
 		&required_state,
 		&timeline_pdus,
 		encrypted,
@@ -274,26 +295,32 @@ pub(super) fn merged_room_details(
 		})
 }
 
-pub(super) fn room_config_hash((timeline_limit, required_state): &RoomDetails) -> u64 {
+pub(super) fn room_config((timeline_limit, required_state): &RoomDetails) -> RoomConfig {
 	let timeline_limit = u64::try_from(*timeline_limit).expect("timeline limit must fit u64");
 	let digest = sha256_hash(timeline_limit.to_be_bytes());
 
-	required_state
-		.iter()
-		.map(required_state_hash)
-		.fold(digest_word(digest), |hash, entry| hash ^ entry)
+	required_state.iter().fold(
+		(digest_word(digest), RequiredState::new()),
+		|(hash, mut selectors), (event_type, state_key)| {
+			let entry = required_state_hash(event_type, state_key.as_str());
+
+			selectors.extend(state_key.as_str().ne("$LAZY").then_some(entry));
+
+			(hash ^ entry, selectors)
+		},
+	)
 }
 
-pub(super) fn state_mode(roomsince: u64, config_changed: bool) -> StateMode {
-	match (roomsince, config_changed) {
+fn state_mode(roomsince: u64, unknown: bool) -> StateMode {
+	match (roomsince, unknown) {
 		| (0, _) | (_, true) => StateMode::Full,
 		| (roomsince, false) => StateMode::Delta(PduCount::Normal(roomsince)),
 	}
 }
 
-fn required_state_hash((event_type, state_key): &(StateEventType, StateKey)) -> u64 {
+fn required_state_hash(event_type: &StateEventType, state_key: &str) -> u64 {
 	let event_type: EventTypeString = format_small_string!("{event_type}");
-	let digest = sha256_delimited([event_type.as_str(), state_key.as_str()].into_iter());
+	let digest = sha256_delimited([event_type.as_str(), state_key].into_iter());
 
 	digest_word(digest)
 }
@@ -306,7 +333,7 @@ fn digest_word(digest: Sha256Digest) -> u64 {
 	)
 }
 
-fn membership_allows_required_state(membership: Option<&MembershipState>) -> bool {
+pub(super) fn membership_allows_required_state(membership: Option<&MembershipState>) -> bool {
 	matches!(membership, None | Some(MembershipState::Join))
 }
 
@@ -457,11 +484,12 @@ async fn collect_required_state(
 	services: &Services,
 	sender_user: &UserId,
 	room_id: &RoomId,
-	state_mode: StateMode,
+	selection: StateSelection<'_>,
 	required_state: &HashSet<(StateEventType, StateKey)>,
 	timeline_pdus: &[(PduCount, PduEvent)],
 	encrypted: bool,
 ) -> Vec<Raw<AnySyncStateEvent>> {
+	let StateSelection { mode: state_mode, previous, changed } = selection;
 	let lazy = required_state
 		.iter()
 		.any(is_equal_to!(&(StateEventType::RoomMember, "$LAZY".into())));
@@ -472,7 +500,7 @@ async fn collect_required_state(
 
 	// Falling back to current state would match every entry against itself.
 	let since_state = match state_mode {
-		| StateMode::Delta(since) if needs_since_state => services
+		| StateMode::Delta(since) if changed && needs_since_state => services
 			.timeline
 			.next_shortstatehash(room_id, since)
 			.ok()
@@ -481,17 +509,18 @@ async fn collect_required_state(
 		| _ => None,
 	};
 
-	// Equal hashes are the same state set, so only lazy members can be due.
-	let state_unchanged = since_state
-		.map_async(|(_, since_shortstatehash)| {
-			services
-				.state
-				.get_room_shortstatehash(room_id)
-				.ok()
-				.map(move |current| current == Some(since_shortstatehash))
-		})
-		.await
-		.unwrap_or(false);
+	// Equal hashes exclude changes, but newly requested keys may still be due.
+	let state_unchanged = !changed
+		|| since_state
+			.map_async(|(_, since_shortstatehash)| {
+				services
+					.state
+					.get_room_shortstatehash(room_id)
+					.ok()
+					.map(move |current| current == Some(since_shortstatehash))
+			})
+			.await
+			.unwrap_or(false);
 
 	let timeline_senders = timeline_pdus
 		.iter()
@@ -509,7 +538,7 @@ async fn collect_required_state(
 
 	let wildcard_state = required_state
 		.iter()
-		.filter(|(_, state_key)| !state_unchanged && state_key == "*")
+		.filter(|(_, state_key)| (!state_unchanged || previous.is_some()) && state_key == "*")
 		.stream()
 		.flat_map(|(event_type, _)| {
 			services
@@ -542,7 +571,7 @@ async fn collect_required_state(
 
 	required_state
 		.iter()
-		.filter(|_| !state_unchanged)
+		.filter(|_| !state_unchanged || previous.is_some())
 		.cloned()
 		.map(|state| (state, None, false))
 		.stream()
@@ -559,6 +588,17 @@ async fn collect_required_state(
 				| "$ME" => sender_user.as_str().into(),
 				| _ => state_key,
 			};
+
+			let state_mode = previous
+				.filter(|previous| {
+					!state_was_requested(previous, &event_type, state_key.as_str(), sender_user)
+				})
+				.map(|_| StateMode::Full)
+				.unwrap_or(state_mode);
+
+			if state_unchanged && !lazy && state_mode != StateMode::Full {
+				return None;
+			}
 
 			let event_id = match event_id {
 				| Some(event_id) => event_id,
@@ -611,6 +651,17 @@ async fn collect_required_state(
 		.await
 }
 
+fn state_was_requested(
+	previous: &[u64],
+	event_type: &StateEventType,
+	state_key: &str,
+	sender_user: &UserId,
+) -> bool {
+	let contains = |key| previous.contains(&required_state_hash(event_type, key));
+
+	contains("*") || contains(state_key) || (state_key == sender_user.as_str() && contains("$ME"))
+}
+
 fn state_is_required(
 	state_mode: StateMode,
 	count: Option<PduCount>,
@@ -620,188 +671,5 @@ fn state_is_required(
 	lazy || match state_mode {
 		| StateMode::Full => true,
 		| StateMode::Delta(since) => count.is_none_or(|count| count > since) || !same_at_since,
-	}
-}
-
-#[cfg(test)]
-mod tests {
-	use std::{collections::HashSet, iter::once};
-
-	use ruma::{
-		UInt,
-		api::client::sync::sync_events::v5::response::Room as ResponseRoom,
-		events::{StateEventType, room::member::MembershipState},
-		uint,
-	};
-	use tuwunel_core::matrix::pdu::PduCount;
-
-	use super::{
-		StateMode, membership_allows_required_state, room_config_hash, room_timeline_limited,
-		room_timeline_metadata, state_is_required, state_may_have_changed, state_mode,
-	};
-
-	fn timeline(positions: &[u64]) -> Vec<(PduCount, ())> {
-		positions
-			.iter()
-			.copied()
-			.map(|position| (PduCount::Normal(position), ()))
-			.collect()
-	}
-
-	#[test]
-	fn first_connection_timeline_is_initial_and_historical() {
-		let (initial, num_live) = room_timeline_metadata(0, None, &timeline(&[8, 9, 10]));
-
-		assert_eq!(initial, Some(true));
-		assert_eq!(num_live, None);
-	}
-
-	#[test]
-	fn incremental_new_room_has_one_live_event() {
-		let (initial, num_live) = room_timeline_metadata(0, Some(10), &timeline(&[8, 9, 11]));
-
-		assert_eq!(initial, Some(true));
-		assert_eq!(num_live, Some(uint!(1)));
-	}
-
-	#[test]
-	fn incremental_range_expansion_has_no_live_events() {
-		let (initial, num_live) = room_timeline_metadata(0, Some(10), &timeline(&[7, 8, 9]));
-
-		assert_eq!(initial, Some(true));
-		assert_eq!(num_live, Some(uint!(0)));
-	}
-
-	#[test]
-	fn incremental_timeline_counts_only_live_suffix() {
-		let (initial, num_live) = room_timeline_metadata(5, Some(10), &timeline(&[8, 9, 11, 12]));
-
-		assert_eq!(initial, None);
-		assert_eq!(num_live, Some(uint!(2)));
-	}
-
-	#[test]
-	fn limited_timeline_counts_only_returned_live_events() {
-		// Earlier live events at positions 11 through 13 were truncated.
-		let returned_timeline = timeline(&[14, 15]);
-		let (_, num_live) = room_timeline_metadata(5, Some(10), &returned_timeline);
-
-		assert_eq!(num_live, Some(uint!(2)));
-		let timeline_len =
-			UInt::try_from(returned_timeline.len()).expect("timeline length fits UInt");
-
-		assert!(num_live.expect("incremental response") <= timeline_len);
-	}
-
-	#[test]
-	fn required_state_is_limited_to_visible_memberships() {
-		assert!(membership_allows_required_state(None));
-		assert!(membership_allows_required_state(Some(&MembershipState::Join)));
-		assert!(!membership_allows_required_state(Some(&MembershipState::Invite)));
-		assert!(!membership_allows_required_state(Some(&MembershipState::Knock)));
-	}
-
-	#[test]
-	fn required_state_is_full_initially_and_after_config_changes() {
-		assert_eq!(state_mode(0, false), StateMode::Full);
-		assert_eq!(state_mode(7, true), StateMode::Full);
-		assert_eq!(state_mode(7, false), StateMode::Delta(PduCount::Normal(7)));
-		assert!(state_is_required(StateMode::Full, Some(PduCount::Normal(1)), false, true));
-	}
-
-	#[test]
-	fn incremental_required_state_omits_unchanged_events() {
-		let mode = StateMode::Delta(PduCount::Normal(7));
-
-		assert!(!state_is_required(mode, Some(PduCount::Normal(7)), false, true));
-		assert!(!state_is_required(mode, Some(PduCount::Normal(6)), false, true));
-	}
-
-	#[test]
-	fn incremental_required_state_includes_only_changes() {
-		let mode = StateMode::Delta(PduCount::Normal(7));
-		let included = [PduCount::Normal(6), PduCount::Normal(8)]
-			.into_iter()
-			.filter(|count| state_is_required(mode, Some(*count), false, true))
-			.count();
-
-		assert_eq!(included, 1);
-	}
-
-	#[test]
-	fn incremental_required_state_keeps_reselected_old_event() {
-		let mode = StateMode::Delta(PduCount::Normal(7));
-
-		assert!(state_is_required(mode, Some(PduCount::Normal(6)), false, false));
-	}
-
-	#[test]
-	fn incremental_required_state_keeps_uncounted_events() {
-		let mode = StateMode::Delta(PduCount::Normal(7));
-
-		assert!(state_is_required(mode, None, false, false));
-	}
-
-	#[test]
-	fn incremental_required_state_needs_a_newer_timeline_event() {
-		let mode = StateMode::Delta(PduCount::Normal(7));
-
-		assert!(!state_may_have_changed(mode, PduCount::Normal(7)));
-		assert!(state_may_have_changed(mode, PduCount::Normal(8)));
-		assert!(state_may_have_changed(StateMode::Full, PduCount::Normal(0)));
-	}
-
-	#[test]
-	fn incremental_required_state_keeps_lazy_members() {
-		let mode = StateMode::Delta(PduCount::Normal(7));
-
-		assert!(state_is_required(mode, Some(PduCount::Normal(1)), true, true));
-	}
-
-	#[test]
-	fn empty_required_state_is_omitted() {
-		let room = serde_json::to_value(ResponseRoom::new()).expect("room must serialize");
-
-		assert!(room.get("required_state").is_none());
-	}
-
-	#[test]
-	fn zero_timeline_limit_is_not_limited() {
-		assert!(!room_timeline_limited(0, true));
-		assert!(room_timeline_limited(1, true));
-		assert!(!room_timeline_limited(1, false));
-	}
-
-	#[test]
-	fn config_hash_is_order_independent() {
-		let first: HashSet<_> =
-			[(StateEventType::RoomName, "".into()), (StateEventType::RoomMember, "*".into())]
-				.into();
-
-		let second: HashSet<_> =
-			[(StateEventType::RoomMember, "*".into()), (StateEventType::RoomName, "".into())]
-				.into();
-
-		assert_eq!(room_config_hash(&(0, first)), room_config_hash(&(0, second)));
-	}
-
-	#[test]
-	fn config_hash_uses_deduplicated_state() {
-		let entry = (StateEventType::RoomName, "".into());
-		let duplicated = [entry.clone(), entry.clone()]
-			.into_iter()
-			.collect();
-
-		let deduplicated = once(entry).collect();
-
-		assert_eq!(room_config_hash(&(0, duplicated)), room_config_hash(&(0, deduplicated)));
-	}
-
-	#[test]
-	fn config_hash_tracks_timeline_limit() {
-		let empty = HashSet::new();
-
-		assert_ne!(room_config_hash(&(0, empty.clone())), 0);
-		assert_ne!(room_config_hash(&(0, empty.clone())), room_config_hash(&(1, empty)));
 	}
 }

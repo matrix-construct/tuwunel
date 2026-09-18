@@ -18,7 +18,9 @@ use ruma::{
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex as TokioMutex;
-use tuwunel_core::{Result, at, debug, err, implement, is_equal_to, utils::stream::TryIgnore};
+use tuwunel_core::{
+	Result, at, debug, err, implement, is_equal_to, smallvec::SmallVec, utils::stream::TryIgnore,
+};
 use tuwunel_database::{Cbor, Deserialized, Map};
 
 pub struct Service {
@@ -56,12 +58,28 @@ pub struct Connection {
 	pub rooms: Rooms,
 }
 
-#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize)]
+/// Delivery progress for one room on a Sliding Sync connection.
+///
+/// The cursor advances with complete ranges; configuration tracks room payloads.
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct Room {
 	pub roomsince: u64,
 	#[serde(default)]
 	pub config_hash: u64,
+	/// Fingerprints of the required-state selectors last delivered for this room.
+	#[serde(default)]
+	pub required_state: RequiredState,
 }
+
+/// Fingerprints of delivered required-state selectors.
+///
+/// The inline capacity covers common room-list and open-room selections.
+pub type RequiredState = SmallVec<[u64; 18]>;
+
+/// A delivered room configuration and its required-state coverage.
+///
+/// Both values advance together only after a room payload is assembled.
+pub type RoomConfig = (u64, RequiredState);
 
 type Connections = TokioMutex<BTreeMap<ConnectionKey, ConnectionVal>>;
 pub type ConnectionVal = Arc<TokioMutex<Connection>>;
@@ -70,7 +88,7 @@ pub type ConnectionKey = (OwnedUserId, Option<OwnedDeviceId>, Option<ConnectionI
 pub type Subscriptions = BTreeMap<OwnedRoomId, request::ListConfig>;
 pub type Lists = BTreeMap<ListId, request::List>;
 pub type Rooms = BTreeMap<OwnedRoomId, Room>;
-type RoomUpdate<'a> = (&'a RoomId, Option<u64>);
+type RoomUpdate<'a> = (&'a RoomId, Option<RoomConfig>);
 
 impl crate::Service for Service {
 	fn build(args: &crate::Args<'_>) -> Result<Arc<Self>> {
@@ -260,6 +278,7 @@ pub fn update_rooms_prologue(&mut self, retard_since: Option<u64>) {
 		{
 			room.roomsince = retard_since;
 			room.config_hash = 0;
+			room.required_state.clear();
 		}
 	});
 }
@@ -276,12 +295,13 @@ where
 	Complete: Iterator<Item = RoomUpdate<'a>> + Send + 'a,
 {
 	let next_batch = self.next_batch;
-	complete.for_each(|(room_id, config_hash)| {
+	complete.for_each(|(room_id, config)| {
 		let room = self.rooms.entry(room_id.into()).or_default();
 
 		room.roomsince = next_batch;
-		if let Some(config_hash) = config_hash {
+		if let Some((config_hash, required_state)) = config {
 			room.config_hash = config_hash;
+			room.required_state = required_state;
 		}
 	});
 }

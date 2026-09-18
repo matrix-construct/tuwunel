@@ -11,11 +11,27 @@ use ruma::{
 	events::StateEventType,
 	room_id,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use super::{Connection, Lists, Room, Subscriptions};
 
 const LIST_ID: &str = "main";
+
+#[derive(Deserialize, Serialize)]
+struct RoomV1 {
+	roomsince: u64,
+	config_hash: u64,
+}
+
+#[derive(Deserialize, Serialize)]
+struct ConnectionV1 {
+	globalsince: u64,
+	next_batch: u64,
+	lists: Lists,
+	extensions: request::Extensions,
+	subscriptions: Subscriptions,
+	rooms: BTreeMap<OwnedRoomId, RoomV1>,
+}
 
 #[test]
 fn update_cache_replaces_existing_list_ranges() {
@@ -107,22 +123,33 @@ fn update_cache_keeps_filters_when_omitted() {
 fn epilogue_advances_only_complete_ranges() {
 	let complete = room_id!("!a:example.com");
 	let incomplete = room_id!("!b:example.com");
+	let complete_room = Room {
+		roomsince: 3,
+		config_hash: 11,
+		required_state: [2, 4].into_iter().collect(),
+	};
+
+	let incomplete_room = Room {
+		roomsince: 3,
+		config_hash: 12,
+		required_state: [3, 5].into_iter().collect(),
+	};
+
 	let mut conn = Connection {
 		next_batch: 5,
-		rooms: [
-			(complete.to_owned(), Room { roomsince: 3, config_hash: 11 }),
-			(incomplete.to_owned(), Room { roomsince: 3, config_hash: 12 }),
-		]
-		.into(),
+		rooms: [(complete.to_owned(), complete_room), (incomplete.to_owned(), incomplete_room)]
+			.into(),
 		..Default::default()
 	};
 
-	conn.update_rooms_epilogue(once((complete, Some(23))));
+	conn.update_rooms_epilogue(once((complete, Some((23, once(4).collect())))));
 
 	assert_eq!(conn.rooms[complete].roomsince, 5);
 	assert_eq!(conn.rooms[complete].config_hash, 23);
+	assert_eq!(conn.rooms[complete].required_state.as_slice(), &[4]);
 	assert_eq!(conn.rooms[incomplete].roomsince, 3);
 	assert_eq!(conn.rooms[incomplete].config_hash, 12);
+	assert_eq!(conn.rooms[incomplete].required_state.as_slice(), &[3, 5]);
 }
 
 #[test]
@@ -134,18 +161,27 @@ fn epilogue_tracks_a_first_complete_range() {
 
 	assert_eq!(conn.rooms[complete].roomsince, 7);
 	assert_eq!(conn.rooms[complete].config_hash, 0);
+	assert!(conn.rooms[complete].required_state.is_empty());
 }
 
 #[test]
 fn prologue_rewinds_a_complete_range_for_replay() {
 	let replay = room_id!("!replay:example.com");
 	let retained = room_id!("!retained:example.com");
+	let replay_room = Room {
+		roomsince: 9,
+		config_hash: 17,
+		required_state: [2, 4].into_iter().collect(),
+	};
+
+	let retained_room = Room {
+		roomsince: 4,
+		config_hash: 18,
+		required_state: [3, 5].into_iter().collect(),
+	};
+
 	let mut conn = Connection {
-		rooms: [
-			(replay.to_owned(), Room { roomsince: 9, config_hash: 17 }),
-			(retained.to_owned(), Room { roomsince: 4, config_hash: 18 }),
-		]
-		.into(),
+		rooms: [(replay.to_owned(), replay_room), (retained.to_owned(), retained_room)].into(),
 		..Default::default()
 	};
 
@@ -153,8 +189,10 @@ fn prologue_rewinds_a_complete_range_for_replay() {
 
 	assert_eq!(conn.rooms[replay].roomsince, 5);
 	assert_eq!(conn.rooms[replay].config_hash, 0);
+	assert!(conn.rooms[replay].required_state.is_empty());
 	assert_eq!(conn.rooms[retained].roomsince, 4);
 	assert_eq!(conn.rooms[retained].config_hash, 18);
+	assert_eq!(conn.rooms[retained].required_state.as_slice(), &[3, 5]);
 }
 
 #[test]
@@ -272,11 +310,17 @@ fn update_cache_tracks_subscription_changes() {
 }
 
 #[test]
-fn epilogue_leaves_hash_for_extension_only_range() {
+fn epilogue_leaves_configuration_for_extension_only_range() {
 	let room_id = room_id!("!extension:example.com");
+	let room = Room {
+		roomsince: 3,
+		config_hash: 19,
+		required_state: [2, 4].into_iter().collect(),
+	};
+
 	let mut conn = Connection {
 		next_batch: 7,
-		rooms: [(room_id.to_owned(), Room { roomsince: 3, config_hash: 19 })].into(),
+		rooms: [(room_id.to_owned(), room)].into(),
 		..Default::default()
 	};
 
@@ -284,6 +328,7 @@ fn epilogue_leaves_hash_for_extension_only_range() {
 
 	assert_eq!(conn.rooms[room_id].roomsince, 7);
 	assert_eq!(conn.rooms[room_id].config_hash, 19);
+	assert_eq!(conn.rooms[room_id].required_state.as_slice(), &[2, 4]);
 }
 
 #[test]
@@ -320,6 +365,61 @@ fn old_connection_cbor_defaults_room_hash() {
 	assert_eq!(decoded.next_batch, 8);
 	assert_eq!(decoded.rooms[room_id].roomsince, 7);
 	assert_eq!(decoded.rooms[room_id].config_hash, 0);
+	assert!(decoded.rooms[room_id].required_state.is_empty());
+}
+
+#[test]
+fn previous_connection_cbor_defaults_required_state() {
+	let room_id = room_id!("!legacy:example.com");
+	let room = RoomV1 { roomsince: 7, config_hash: 19 };
+	let legacy = ConnectionV1 {
+		globalsince: 5,
+		next_batch: 8,
+		lists: Default::default(),
+		extensions: Default::default(),
+		subscriptions: Default::default(),
+		rooms: [(room_id.to_owned(), room)].into(),
+	};
+
+	let bytes = to_vec(&legacy).expect("previous connection must encode");
+	let decoded: Connection = from_slice(&bytes).expect("previous connection must decode");
+
+	assert_eq!(decoded.globalsince, 5);
+	assert_eq!(decoded.next_batch, 8);
+	assert_eq!(decoded.rooms[room_id].roomsince, 7);
+	assert_eq!(decoded.rooms[room_id].config_hash, 19);
+	assert!(decoded.rooms[room_id].required_state.is_empty());
+}
+
+#[test]
+fn connection_cbor_preserves_required_state_and_allows_downgrade() {
+	let room_id = room_id!("!stored:example.com");
+	let room = Room {
+		roomsince: 7,
+		config_hash: 19,
+		required_state: (1..=32).collect(),
+	};
+
+	let conn = Connection {
+		globalsince: 5,
+		next_batch: 8,
+		rooms: [(room_id.to_owned(), room)].into(),
+		..Default::default()
+	};
+
+	let bytes = to_vec(&conn).expect("connection must encode");
+	let decoded: Connection = from_slice(&bytes).expect("connection must decode");
+	let downgraded: ConnectionV1 = from_slice(&bytes).expect("previous reader must decode");
+
+	assert_eq!(decoded.globalsince, 5);
+	assert_eq!(decoded.next_batch, 8);
+	assert_eq!(decoded.rooms[room_id].roomsince, 7);
+	assert_eq!(decoded.rooms[room_id].config_hash, 19);
+	assert_eq!(decoded.rooms[room_id].required_state, conn.rooms[room_id].required_state);
+	assert_eq!(downgraded.globalsince, 5);
+	assert_eq!(downgraded.next_batch, 8);
+	assert_eq!(downgraded.rooms[room_id].roomsince, 7);
+	assert_eq!(downgraded.rooms[room_id].config_hash, 19);
 }
 
 fn request_with_list(list: List) -> Request {
