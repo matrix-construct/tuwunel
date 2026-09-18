@@ -1,10 +1,23 @@
+//! Stores room state snapshots and tracks each room's forward extremities.
+//!
+//! The service associates events with compressed state hashes and replays
+//! derived cache effects when state is forced. State snapshots themselves are
+//! encoded and reconstructed by the state compressor service.
+
 mod prune;
 
 use std::{collections::HashMap, fmt::Write, iter::once, sync::Arc};
 
 use async_trait::async_trait;
 use futures::{FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt, future::join_all};
+/// Re-exports the receive-path pruning goal calculation within the crate.
+///
+/// Sibling room services use it to pace extremity reduction.
 pub(crate) use prune::prune_goal;
+/// Re-exports the forward-extremity pruning result and invocation source.
+///
+/// Callers use these types to report pruning effects and select path-specific
+/// behavior.
 pub use prune::{PruneSummary, Trigger};
 use ruma::{
 	CanonicalJsonObject, EventId, OwnedEventId, OwnedRoomId, RoomId, RoomVersionId, UserId,
@@ -43,6 +56,11 @@ use crate::{
 	services::OnceServices,
 };
 
+/// Manages current room state, event state snapshots, and forward extremities.
+///
+/// State mutations are serialized per room and delegated to the compressor for
+/// persistent delta encoding. The service also coordinates cache updates that
+/// follow forced state changes.
 pub struct Service {
 	/// Serializes room state as the middle per-room operation.
 	///
@@ -61,6 +79,10 @@ struct Data {
 }
 
 type RoomMutexMap = MutexMap<OwnedRoomId, ()>;
+/// Guard proving exclusive access to a room's state mutation path.
+///
+/// Acquire it after the federation guard and before the timeline insertion
+/// guard when the same operation needs all three.
 pub type RoomMutexGuard = MutexMapGuard<OwnedRoomId, ()>;
 type ForwardExtremities = SmallVec<[OwnedEventId; 1]>;
 
@@ -88,7 +110,13 @@ impl crate::Service for Service {
 	fn name(&self) -> &str { crate::service::make_name(std::module_path!()) }
 }
 
-/// Set the room to the given statehash and update caches.
+/// Forces a room to use an existing state snapshot.
+///
+/// Resolvable membership additions replay their cache effects before the
+/// current state hash is installed. Reverse-ID and PDU lookup failures are
+/// skipped, while a membership-effect error returns before the state hash
+/// changes. Joined counts are refreshed and the cached space summary is
+/// invalidated while the caller retains the room state guard.
 #[implement(Service)]
 #[tracing::instrument(
 	name = "force",
@@ -216,10 +244,11 @@ async fn replayed_invite_state(
 		.await
 }
 
-/// Generates a new StateHash and associates it with the incoming event.
+/// Associates an event with a complete compressed state snapshot.
 ///
-/// This adds all current state events (not including the incoming event)
-/// to `stateid_pduid` and adds the incoming event to `eventid_statehash`.
+/// The snapshot hash is reused when known; otherwise a short state hash and a
+/// delta from the room's current snapshot are stored together. This records the
+/// event's state without advancing the room's current state.
 #[implement(Service)]
 #[tracing::instrument(
 	name = "set",
@@ -312,12 +341,18 @@ pub async fn set_event_state(
 	Ok(shortstatehash)
 }
 
-/// Generates a new StateHash and associates it with the incoming event.
+/// Derives the state snapshot produced by appending a local PDU.
 ///
-/// This adds all current state events (not including the incoming event)
-/// to `stateid_pduid` and adds the incoming event to `eventid_statehash`.
-/// The event's short id is allocated here if absent, which is the only
+/// The event is associated with the preceding snapshot before a state event
+/// creates a one-entry delta and a new short state hash. A non-state event
+/// retains the preceding hash, and an unchanged state event reuses it.
+/// The event's short ID is allocated here if absent, which is the only
 /// allocation of it on the local append path.
+///
+/// # Panics
+///
+/// Panics if a room's first event is not state-bearing or if an unchanged state
+/// entry is found without a preceding room snapshot.
 #[implement(Service)]
 #[tracing::instrument(
 	name = "set",
@@ -414,7 +449,10 @@ pub async fn append_to_state(&self, new_pdu: &PduEvent) -> Result<u64> {
 	}
 }
 
-/// Set the state hash to a new version, but does not update state_cache.
+/// Sets the room's current state hash without updating derived state caches.
+///
+/// The guard proves that the caller owns the room state mutation path. Callers
+/// that change effective state must update the relevant caches separately.
 #[implement(Service)]
 #[tracing::instrument(skip(self, _mutex_lock), level = "debug")]
 pub fn set_room_state(
@@ -431,7 +469,11 @@ pub fn set_room_state(
 		.raw_aput::<BUFSIZE, _, _>(room_id, shortstatehash);
 }
 
-/// This fetches auth events from the current state.
+/// Fetches the auth events required from a room's current state.
+///
+/// The required state keys are derived from the proposed event and room
+/// authorization rules. A room without current state yields an empty map, and
+/// missing short-key mappings or stored PDUs are omitted.
 #[implement(Service)]
 #[expect(clippy::too_many_arguments)]
 #[tracing::instrument(skip(self, content), level = "debug")]
@@ -509,6 +551,11 @@ where
 		.await
 }
 
+/// Builds stripped invite-state context for a membership event.
+///
+/// Recommended room state cells are fetched on a best-effort basis, then the
+/// supplied membership event is appended last. Failed state lookups are
+/// omitted from the summary.
 #[implement(Service)]
 #[tracing::instrument(skip_all, level = "debug")]
 pub async fn summary_stripped<Pdu: Event>(&self, event: &Pdu) -> Vec<Raw<AnyStrippedStateEvent>> {
@@ -538,10 +585,11 @@ pub async fn summary_stripped<Pdu: Event>(&self, event: &Pdu) -> Vec<Raw<AnyStri
 		.collect()
 }
 
-/// Like `summary_stripped`, but formats each event as a full federation PDU
-/// per the room version's event format (MSC4311). The membership `event` is
-/// formatted from its `event_json`; the recommended state cells are fetched
-/// from stored room state.
+/// Builds full-PDU invite-state context for a membership event.
+///
+/// Recommended stored state and the supplied event are formatted for the given
+/// room version as required by MSC4311. Failed state or JSON lookups are
+/// omitted, and the supplied membership event is appended last.
 #[implement(Service)]
 #[tracing::instrument(skip_all, level = "debug")]
 pub async fn summary_pdus<Pdu: Event>(
@@ -598,7 +646,9 @@ pub async fn summary_pdus<Pdu: Event>(
 		.await
 }
 
-/// Returns the room's version rules
+/// Returns the authorization and event-format rules for a room.
+///
+/// The rules are selected from the room version declared by its create event.
 #[implement(Service)]
 #[inline]
 pub async fn get_room_version_rules(&self, room_id: &RoomId) -> Result<RoomVersionRules> {
@@ -607,13 +657,15 @@ pub async fn get_room_version_rules(&self, room_id: &RoomId) -> Result<RoomVersi
 		.and_then_ref(room_version::rules)
 }
 
-/// Returns the room's version.
 #[implement(Service)]
 #[tracing::instrument(
 	level = "debug"
 	skip(self),
 	ret(level = "trace"),
 )]
+/// Returns the room version declared by the room's create event.
+///
+/// Missing or malformed create-event content is reported to the caller.
 pub async fn get_room_version(&self, room_id: &RoomId) -> Result<RoomVersionId> {
 	self.services
 		.state_accessor
@@ -631,6 +683,10 @@ pub async fn get_room_version(&self, room_id: &RoomId) -> Result<RoomVersionId> 
 	skip(self),
 	ret(level = "trace"),
 )]
+/// Returns the short hash of a room's current state snapshot.
+///
+/// The lookup reads only the current room-to-state mapping and does not
+/// reconstruct the snapshot.
 pub async fn get_room_shortstatehash(&self, room_id: &RoomId) -> Result<ShortStateHash> {
 	self.db
 		.roomid_shortstatehash
@@ -639,7 +695,10 @@ pub async fn get_room_shortstatehash(&self, room_id: &RoomId) -> Result<ShortSta
 		.deserialized()
 }
 
-/// Returns the state hash at this event.
+/// Returns the state hash recorded for an event.
+///
+/// The event ID is first resolved to its short event ID before the snapshot
+/// association is read.
 #[implement(Service)]
 pub async fn pdu_shortstatehash(&self, event_id: &EventId) -> Result<ShortStateHash> {
 	self.services
@@ -649,13 +708,15 @@ pub async fn pdu_shortstatehash(&self, event_id: &EventId) -> Result<ShortStateH
 		.await
 }
 
-/// Returns the state hash at this event.
 #[implement(Service)]
 #[tracing::instrument(
 	level = "debug"
 	skip(self),
 	ret(level = "trace"),
 )]
+/// Returns the state hash recorded for a short event ID.
+///
+/// This is the direct lookup used after an event ID has already been shortened.
 pub async fn get_shortstatehash(&self, shorteventid: ShortEventId) -> Result<ShortStateHash> {
 	const BUFSIZE: usize = size_of::<ShortEventId>();
 
@@ -666,6 +727,10 @@ pub async fn get_shortstatehash(&self, shorteventid: ShortEventId) -> Result<Sho
 		.deserialized()
 }
 
+/// Deletes a room's current state-hash mapping.
+///
+/// The supplied guard proves exclusive access to the room state mutation path;
+/// compressed snapshots and event associations remain stored.
 #[implement(Service)]
 pub(super) fn delete_room_shortstatehash(
 	&self,
@@ -677,8 +742,10 @@ pub(super) fn delete_room_shortstatehash(
 	Ok(())
 }
 
-/// Collapses the room to a single forward extremity, keeping the one furthest
-/// along in stream order, and returns the number removed.
+/// Collapses a room to the resolvable forward extremity latest in stream order.
+///
+/// Rooms with at most one leaf, or with no leaf that resolves to a timeline
+/// count, are left unchanged. The return value is the number of leaves removed.
 #[implement(Service)]
 #[tracing::instrument(
 	level = "debug"
@@ -729,6 +796,11 @@ pub async fn collapse_forward_extremities(
 	level = "trace"
 	skip(self),
 )]
+/// Streams the event IDs currently stored as a room's forward extremities.
+///
+/// Invalid rows and cursor errors are omitted. Returned references borrow the
+/// database cursor and must be owned before they are retained across another
+/// poll.
 pub fn get_forward_extremities<'a>(
 	&'a self,
 	room_id: &'a RoomId,
@@ -748,6 +820,11 @@ pub fn get_forward_extremities<'a>(
 	skip_all,
 	fields(%room_id),
 )]
+/// Replaces all stored forward extremities for a room.
+///
+/// Existing rows are removed before the supplied IDs are inserted while the
+/// caller holds the state guard. The wipe and reinsertion are not transactional,
+/// and errors encountered while scanning old rows are ignored.
 pub async fn set_forward_extremities<'a, I>(
 	&'a self,
 	room_id: &'a RoomId,
@@ -770,6 +847,10 @@ pub async fn set_forward_extremities<'a, I>(
 	}
 }
 
+/// Deletes every stored forward extremity for a room.
+///
+/// Cursor errors are ignored, so this best-effort cleanup always returns
+/// success after removing every row it can read.
 #[implement(Service)]
 pub(super) async fn delete_all_rooms_forward_extremities(&self, room_id: &RoomId) -> Result {
 	let prefix = (room_id, Interfix);

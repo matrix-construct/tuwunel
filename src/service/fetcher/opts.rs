@@ -14,12 +14,16 @@ use tuwunel_core::smallvec::SmallVec;
 
 use crate::federation::Candidates;
 
-/// Event-id window for the batch ops, inline-sized for the common single-prev
-/// case and spilling to the heap past that.
+/// Stores an event-ID window for batch federation operations.
+///
+/// One entry remains inline for the common single-previous-event case, while
+/// larger windows spill to the heap.
 pub type EventWindow = SmallVec<[OwnedEventId; 1]>;
 
-/// Federation endpoint a fetch targets. The dedup key folds this in, so two
-/// callers asking for the same event over different endpoints do not coalesce.
+/// Identifies the federation endpoint targeted by a fetch.
+///
+/// The operation participates in the dedup key, so callers using different
+/// endpoints never coalesce even when their other options match.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum Op {
 	/// `GET /_matrix/federation/v1/event/{eventId}`
@@ -58,22 +62,29 @@ pub enum FanoutGrowth {
 
 	/// `base`, `base + step`, `base + 2*step`, ...
 	Linear {
+		/// Width used for the first round.
 		base: NonZeroUsize,
+
+		/// Width added for each subsequent round.
 		step: NonZeroUsize,
 	},
 
 	/// `base`, `base * factor`, `base * factor^2`, ...  Base 1, factor 2 is the
 	/// 1 -> 2 -> 4 -> 8 hedging ramp.
 	Geometric {
+		/// Width used for the first round.
 		base: NonZeroUsize,
+
+		/// Multiplier applied for each subsequent round.
 		factor: NonZeroUsize,
 	},
 }
 
 impl FanoutGrowth {
-	/// Width for round `round` (0-based). Always >= 1; saturating, so a runaway
-	/// exponent cannot overflow (the candidate pool and `attempt_limit` clamp
-	/// the value to something small regardless).
+	/// Computes the candidate width for a zero-based fanout round.
+	///
+	/// The arithmetic saturates before the worker clamps the result to the
+	/// candidate pool, per-round ceiling, and remaining attempt budget.
 	#[must_use]
 	pub fn round_width(self, round: usize) -> usize {
 		match self {
@@ -91,9 +102,12 @@ impl FanoutGrowth {
 	}
 }
 
-/// Caller contract. `event_id` is the sought datum for [`Op::Event`] /
-/// [`Op::AuthEvent`] / [`Op::AuthChain`] / [`Op::StateIds`] and a reference
-/// point for the others.
+/// Describes one caller's federation fetch policy.
+///
+/// `event_id` addresses Event, AuthEvent, AuthChain, and StateIds requests and
+/// anchors Backfill; MissingEvents uses its event windows, while
+/// TimestampToEvent uses `ts` and `dir`. Candidate, retry, fanout, and
+/// validation settings also participate in single-flight identity.
 #[derive(Clone, Debug)]
 pub struct Opts {
 	/// Federation endpoint this fetch targets.
@@ -103,7 +117,7 @@ pub struct Opts {
 	/// fetch.
 	pub room_id: Option<OwnedRoomId>,
 
-	/// Event to fetch (id-addressed ops) or anchor from (room-scoped ops).
+	/// Target for Event, AuthEvent, AuthChain, and StateIds or Backfill anchor; unused by MissingEvents and TimestampToEvent.
 	pub event_id: Option<OwnedEventId>,
 
 	/// Timestamp the [`Op::TimestampToEvent`] search starts from; `None` for
@@ -129,7 +143,7 @@ pub struct Opts {
 	/// ranking; empty defers to the room-derived candidates.
 	pub candidates: Candidates,
 
-	/// Room version governing id and signature checks; `None` assumes V11.
+	/// Room version for Event and AuthEvent validation; `None` assumes V11, and other operations do not consult it.
 	pub room_version: Option<RoomVersionId>,
 
 	/// Cap on candidate servers tried; `None` tries every candidate.
@@ -147,34 +161,42 @@ pub struct Opts {
 	/// round at `n`.
 	pub fanout_max_width: Option<NonZeroUsize>,
 
-	/// Cap on escalation rounds before giving up. `None` runs until exhaustion.
+	/// Optional per-call round cap; the global round cap still applies.
 	pub fanout_rounds: Option<NonZeroUsize>,
 
-	/// Reject a response whose event does not hash to the requested id.
+	/// For Event and AuthEvent, reject a response whose calculated event ID differs; other operations ignore this flag.
 	pub check_event_id: bool,
 
 	/// Reject a response that is not well-formed JSON.
 	pub check_conforms: bool,
 
-	/// Reject a response that fails content-hash verification.
+	/// Requests combined event verification for Event and AuthEvent responses.
+	///
+	/// Either this flag or `check_signature` runs the verifier. Its returned
+	/// `Verified` status is currently ignored, so a content-hash mismatch with
+	/// valid signatures is accepted; other operations ignore the flag.
 	pub check_hashes: bool,
 
 	/// Accepted but not yet consulted; redaction-aware hash verification is
 	/// unimplemented.
 	pub authoritative_redaction: bool,
 
-	/// Reject a response that fails signature verification.
+	/// For Event and AuthEvent, reject verifier errors when either verification flag is enabled; other operations ignore this flag.
 	pub check_signature: bool,
 }
 
 impl Opts {
-	/// Scope a fetch to a room.
+	/// Creates a fetch scoped to a room.
+	///
+	/// Validation gates start enabled, while the fixed width of one keeps
+	/// attempts sequential unless the caller opts into staged fanout.
 	#[must_use]
 	pub fn new(op: Op, room_id: OwnedRoomId) -> Self { Self::with_room_id(op, Some(room_id)) }
 
-	/// A fetch with no room scope, for id-addressed callers such as
-	/// `get-remote-pdu`; room-derived candidate ranking is skipped, leaving the
-	/// hint, the caller-supplied pool, and the event id's origin.
+	/// Creates an unscoped fetch for an ID-addressed operation.
+	///
+	/// Room-derived candidate ranking is skipped, leaving the hint,
+	/// caller-supplied pool, and event ID origin as candidate sources.
 	#[must_use]
 	pub fn unscoped(op: Op) -> Self { Self::with_room_id(op, None) }
 
@@ -204,21 +226,33 @@ impl Opts {
 		}
 	}
 
-	/// Set the target event; required for the id-addressed ops.
+	/// Sets the target event or Backfill anchor.
+	///
+	/// Event, AuthEvent, AuthChain, Backfill, and StateIds require this value;
+	/// MissingEvents and TimestampToEvent do not consult it.
 	#[must_use]
 	pub fn event_id(self, event_id: OwnedEventId) -> Self {
 		Self { event_id: Some(event_id), ..self }
 	}
 
-	/// Set the timestamp the [`Op::TimestampToEvent`] search starts from.
+	/// Sets the timestamp for a [`Op::TimestampToEvent`] search.
+	///
+	/// Other operations retain the value in coalescing identity but do not
+	/// consult it during transport.
 	#[must_use]
 	pub fn ts(self, ts: MilliSecondsSinceUnixEpoch) -> Self { Self { ts: Some(ts), ..self } }
 
-	/// Set the direction the [`Op::TimestampToEvent`] search runs.
+	/// Sets the direction for a [`Op::TimestampToEvent`] search.
+	///
+	/// Other operations retain the value in coalescing identity but do not
+	/// consult it during transport.
 	#[must_use]
 	pub fn dir(self, dir: Direction) -> Self { Self { dir: Some(dir), ..self } }
 
-	/// Set the boundary the [`Op::MissingEvents`] backward walk stops at.
+	/// Sets the boundary where a [`Op::MissingEvents`] backward walk stops.
+	///
+	/// Only MissingEvents consults this window, whose order is normalized in the
+	/// single-flight key.
 	#[must_use]
 	pub fn earliest_events<I>(self, earliest_events: I) -> Self
 	where
@@ -230,7 +264,10 @@ impl Opts {
 		}
 	}
 
-	/// Set the frontier an [`Op::MissingEvents`] window fills behind.
+	/// Sets the frontier a [`Op::MissingEvents`] request fills behind.
+	///
+	/// Only MissingEvents consults this window, whose order is normalized in the
+	/// single-flight key.
 	#[must_use]
 	pub fn latest_events<I>(self, latest_events: I) -> Self
 	where
@@ -242,11 +279,17 @@ impl Opts {
 		}
 	}
 
-	/// Try the named server ahead of the ranked candidates.
+	/// Adds a server ahead of the initial candidate order.
+	///
+	/// Reachability ranking may still drop or deprioritize it, and a failed
+	/// attempt falls through to remaining candidates.
 	#[must_use]
 	pub fn hint(self, hint: OwnedServerName) -> Self { Self { hint: Some(hint), ..self } }
 
-	/// Supply the candidate pool verbatim, bypassing the room-derived ranking.
+	/// Supplies a candidate pool in place of room-derived discovery.
+	///
+	/// The supplied servers remain subject to eligibility filtering,
+	/// deduplication, and peer-reachability ranking.
 	#[must_use]
 	pub fn candidates<I>(self, candidates: I) -> Self
 	where
@@ -258,15 +301,20 @@ impl Opts {
 		}
 	}
 
-	/// Room version for [`Op::Event`] id and signature checks. `None` keeps the
-	/// V11 default, so callers on a non-V11 room must name it to avoid a
-	/// spurious rejection.
+	/// Sets the room version for Event and AuthEvent deep validation.
+	///
+	/// `None` keeps the V11 default, so callers from another room version must
+	/// set it to avoid spurious rejection. Other operations retain the value in
+	/// coalescing identity but do not consult it during validation.
 	#[must_use]
 	pub fn room_version(self, room_version: RoomVersionId) -> Self {
 		Self { room_version: Some(room_version), ..self }
 	}
 
-	/// Cap the number of candidate servers tried.
+	/// Caps the number of candidate servers contacted.
+	///
+	/// `None` permits candidate exhaustion, and each round stays within the
+	/// remaining budget.
 	#[must_use]
 	pub fn attempt_limit(self, attempt_limit: NonZeroUsize) -> Self {
 		Self {
@@ -275,8 +323,10 @@ impl Opts {
 		}
 	}
 
-	/// Set the events requested per [`Op::Backfill`] / [`Op::MissingEvents`]
-	/// batch.
+	/// Sets the event limit for Backfill and MissingEvents batches.
+	///
+	/// Other operations retain the value in coalescing identity but do not send
+	/// it on the wire.
 	#[must_use]
 	pub fn backfill_limit(self, backfill_limit: NonZeroUsize) -> Self {
 		Self {
@@ -285,11 +335,16 @@ impl Opts {
 		}
 	}
 
-	/// Set the per-round fan-out width schedule.
+	/// Sets the per-round fanout width schedule.
+	///
+	/// The worker clamps each computed width to the candidate pool, optional
+	/// ceiling, and remaining attempt budget.
 	#[must_use]
 	pub fn fanout(self, growth: FanoutGrowth) -> Self { Self { fanout_growth: growth, ..self } }
 
-	/// Cap the per-round fan-out concurrency.
+	/// Caps concurrent candidate attempts in each fanout round.
+	///
+	/// `None` lets the configured growth curve run until another budget binds.
 	#[must_use]
 	pub fn fanout_max_width(self, max_width: NonZeroUsize) -> Self {
 		Self {
@@ -298,15 +353,20 @@ impl Opts {
 		}
 	}
 
-	/// Cap the number of escalation rounds.
+	/// Caps the number of fanout escalation rounds.
+	///
+	/// `None` leaves the per-call cap unset; the global round cap, candidate pool,
+	/// or attempt budget can still stop escalation.
 	#[must_use]
 	pub fn fanout_rounds(self, rounds: NonZeroUsize) -> Self {
 		Self { fanout_rounds: Some(rounds), ..self }
 	}
 
-	/// Apply the op's advised staged-fan-out ramp. `Opts::new` is otherwise
-	/// dark on every op, so a callsite opts in by chaining this; the generic
-	/// and single-shot-batch ops keep the sequential default.
+	/// Applies the operation's recommended staged fanout profile.
+	///
+	/// [`Opts::new`] is sequential unless the caller opts in here. AuthEvent,
+	/// AuthChain, StateIds, and MissingEvents receive profiles; Event, Backfill,
+	/// and TimestampToEvent remain unchanged.
 	#[must_use]
 	pub fn fanout_for_op(self) -> Self {
 		use FanoutGrowth::{Geometric, Linear};
@@ -337,9 +397,10 @@ impl Opts {
 		}
 	}
 
-	/// Toggle every validation gate at once. Callers that re-validate
-	/// downstream pass `false` to fetch raw bytes without rejecting non-V11
-	/// events.
+	/// Toggles the four implemented validation gates together.
+	///
+	/// Passing `false` accepts transport bytes without conformance or deep PDU
+	/// checks. The unused `authoritative_redaction` option remains unchanged.
 	#[must_use]
 	pub fn checks(self, enabled: bool) -> Self {
 		Self {
@@ -352,10 +413,15 @@ impl Opts {
 	}
 }
 
-/// Raw response body plus the server that answered. `bytes` is ref-counted so
-/// concurrent callers coalesced onto one fetch share a single buffer.
+/// Contains a raw response body and the server that supplied it.
+///
+/// The bytes are reference-counted so concurrent callers coalesced onto one
+/// fetch share a single buffer.
 #[derive(Debug)]
 pub struct Outcome {
+	/// Raw response body accepted by every enabled validation gate.
 	pub bytes: Bytes,
+
+	/// Server whose response won the attempt race.
 	pub origin: OwnedServerName,
 }

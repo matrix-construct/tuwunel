@@ -57,16 +57,22 @@ struct Identity<'a> {
 	check_signature: bool,
 }
 
-/// Outcome shared by every caller coalesced onto one fetch. Cheap to clone so
-/// the worker can broadcast it down each subscriber's channel.
+/// Represents the outcome shared by callers coalesced onto one fetch.
+///
+/// Successful responses remain cheap to broadcast because each result holds a
+/// reference-counted [`Outcome`].
 pub(super) type SharedResult = Result<Arc<Outcome>, Failure>;
 
-/// Reply handed to a caller: the channel it awaits the outcome on, plus the
-/// sole strong liveness token whose drop cancels the in-flight fetch.
+/// Carries a caller's result channel and liveness token.
+///
+/// Dropping the final strong token tells the worker that it may cancel the
+/// in-flight fetch.
 pub(super) type Subscription = (Receiver<Option<SharedResult>>, Arc<()>);
 
-/// One in-flight fetch, owned by the worker. The worker is the sole mutator, so
-/// no lock guards it; coalesced callers reach it only through their channels.
+/// Holds one worker-owned fetch and its subscribers.
+///
+/// The worker is the sole mutator, so no lock guards this state; coalesced
+/// callers reach it only through their channels.
 pub(super) struct Inflight {
 	/// Result channel. Coalesced callers subscribe to await the outcome.
 	pub(super) tx: Sender<Option<SharedResult>>,
@@ -93,7 +99,10 @@ impl Hash for Key {
 	fn hash<H: Hasher>(&self, state: &mut H) { self.fingerprint.hash(state); }
 }
 
-/// Derive the single-flight key from a request's [`Opts`].
+/// Derives the single-flight key from a request's [`Opts`].
+///
+/// Missing-event windows are sorted before hashing so equivalent windows
+/// coalesce regardless of caller ordering.
 #[implement(Key)]
 pub(super) fn new(mut opts: Opts) -> Self {
 	if matches!(opts.op, Op::MissingEvents) {

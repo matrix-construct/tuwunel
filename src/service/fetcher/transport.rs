@@ -26,14 +26,23 @@ use tuwunel_core::{Result, err, utils::BoolExt};
 use super::{Op, Opts};
 use crate::services::OnceServices;
 
-/// Injection seam between the fetcher and the network. The production impl
-/// routes through `federation::execute`; tests substitute a scripted mock.
+/// Abstracts the network operation for one federation fetch attempt.
+///
+/// The production implementation routes through federation execution while
+/// tests substitute a scripted mock.
 #[async_trait]
 pub(super) trait Transport: Send + Sync {
+	/// Executes one endpoint operation and returns its raw response body.
+	///
+	/// Required option fields are validated before the federation request is sent.
 	async fn fetch_raw(&self, op: Op, server: &ServerName, opts: &Opts) -> Result<Bytes>;
 }
 
+/// Production transport backed by the federation request service.
+///
+/// Each operation is converted to its corresponding ruma federation request.
 pub(super) struct FederationTransport {
+	/// Services used to execute typed federation requests.
 	pub(super) services: Arc<OnceServices>,
 }
 

@@ -1,4 +1,7 @@
-// RAM fits 4 KiB, minute-lived sessions; restarts end them like OAuth state.
+//! In-memory rendezvous session exchange.
+//!
+//! The service holds short-lived client rendezvous payloads, conditional validators, and per-client
+//! rate-limit buckets. Sessions are bounded in count and intentionally disappear on restart.
 
 use std::{
 	cmp::max,
@@ -20,11 +23,22 @@ use tuwunel_core::{
 	utils::{hash::sha256::concat, rand::string_array, time::duration_since_epoch},
 };
 
+/// Fixed-capacity identifier for a rendezvous session.
+///
+/// New sessions receive a random 32-character ASCII identifier.
 pub type SessionId = ArrayString<SESSION_ID_LENGTH>;
+
+/// Quoted HTTP entity tag for rendezvous payload state.
+///
+/// The fixed capacity holds the encoded digest and its surrounding quotation marks.
 pub type Etag = ArrayString<ETAG_LENGTH>;
 type Sessions = BTreeMap<SessionId, Session>;
 type Ratelimiter = Mutex<HashMap<IpAddr, (Instant, f64)>>;
 
+/// Stores bounded rendezvous sessions and request rate-limit state.
+///
+/// Both stores are process-local and shared through locks. Expired sessions are removed lazily
+/// during creation, retrieval, or conditional mutation.
 pub struct Service {
 	sessions: RwLock<Sessions>,
 	// At most 4096 short-lived per-IP buckets.
@@ -32,6 +46,10 @@ pub struct Service {
 	services: Arc<crate::services::OnceServices>,
 }
 
+/// Complete process-local state for one rendezvous session.
+///
+/// Creation time determines capacity eviction, while modification and expiration times drive HTTP
+/// metadata and lifecycle decisions.
 struct Session {
 	data: Bytes,
 	etag: Etag,
@@ -40,33 +58,70 @@ struct Session {
 	expires_at: SystemTime,
 }
 
+/// HTTP metadata associated with a rendezvous payload.
+///
+/// The entity tag and modification time identify the current representation. Expiration determines
+/// how long the session remains active.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Meta {
+	/// Quoted entity tag for conditional requests.
 	pub etag: Etag,
+
+	/// Absolute time at which the session expires.
 	pub expires_at: SystemTime,
+
+	/// Last payload modification time.
 	pub last_modified: SystemTime,
 }
 
+/// Outcome of retrieving a rendezvous session.
+///
+/// A matching conditional validator returns metadata without cloning the payload. Missing and
+/// expired sessions share the not-found outcome.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Get {
+	/// Current payload and its HTTP metadata.
 	Data {
+		/// Opaque rendezvous payload.
 		data: Bytes,
+
+		/// Metadata describing the returned representation.
 		meta: Meta,
 	},
+
+	/// Metadata for a representation matching the request validator.
 	NotModified(Meta),
+
+	/// Session was absent or expired.
 	NotFound,
 }
 
+/// Outcome of conditionally replacing a rendezvous payload.
+///
+/// Accepted updates return current metadata, including idempotent retries. A stale validator for
+/// different data returns the existing metadata as a precondition failure.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Put {
+	/// Replacement or idempotent retry was accepted.
 	Accepted(Meta),
+
+	/// Validator was stale and the submitted payload differed.
 	PreconditionFailed(Meta),
+
+	/// Session was absent or expired.
 	NotFound,
 }
 
+/// Conditional validator accepted by the update state machine.
+///
+/// HTTP updates use the quoted entity tag, while protocol sequence-token updates use its unquoted
+/// value.
 #[derive(Clone, Copy)]
 enum Validator<'a> {
+	/// Quoted HTTP entity tag supplied through `If-Match`.
 	Etag(&'a str),
+
+	/// Unquoted protocol sequence token.
 	SequenceToken(&'a str),
 }
 
@@ -93,6 +148,10 @@ impl crate::Service for Service {
 	fn name(&self) -> &str { crate::service::make_name(std::module_path!()) }
 }
 
+/// Charges one request against a client's rendezvous rate-limit bucket.
+///
+/// Buckets refill at the configured rate up to the configured burst size. A depleted bucket returns
+/// a limit-exceeded request error, and the per-client table remains bounded.
 #[implement(Service)]
 pub fn check_rate_limit(&self, client: IpAddr) -> Result {
 	let config = &self.services.server.config;
@@ -156,6 +215,15 @@ fn check_bucket_at(
 	Ok(())
 }
 
+/// Creates a rendezvous session for an opaque payload.
+///
+/// Expired sessions are pruned first, then the oldest live sessions are evicted to honor the
+/// configured capacity, with an effective minimum of one. The returned metadata describes the
+/// newly stored representation.
+///
+/// # Panics
+///
+/// Panics if the session lock has been poisoned.
 #[implement(Service)]
 pub fn create(&self, data: Bytes) -> (SessionId, Meta) {
 	let config = &self.services.server.config;
@@ -210,6 +278,14 @@ fn create_at(
 	(id, meta)
 }
 
+/// Retrieves a rendezvous payload with optional entity-tag validation.
+///
+/// A matching tag or wildcard returns [`Get::NotModified`]; otherwise a live session returns its
+/// data. Expired sessions are removed and reported as not found.
+///
+/// # Panics
+///
+/// Panics if the session lock has been poisoned.
 #[implement(Service)]
 pub fn get(&self, id: &str, if_none_match: Option<&str>) -> Get {
 	self.get_at(id, if_none_match, SystemTime::now())
@@ -244,6 +320,14 @@ fn get_at(&self, id: &str, if_none_match: Option<&str>, now: SystemTime) -> Get 
 		.map_or(Get::NotFound, |session| get_outcome(session, if_none_match))
 }
 
+/// Conditionally replaces a rendezvous payload using a quoted entity tag.
+///
+/// A matching validator stores the new payload and advances its metadata. A stale validator accepts
+/// identical data as a retry but rejects different data with the current metadata.
+///
+/// # Panics
+///
+/// Panics if the session lock has been poisoned.
 #[implement(Service)]
 pub fn put(&self, id: &str, if_match: &str, data: Bytes) -> Put {
 	let ttl = Duration::from_secs(self.services.server.config.rendezvous_session_ttl);
@@ -256,6 +340,14 @@ fn put_at(&self, id: &str, if_match: &str, data: Bytes, now: SystemTime, ttl: Du
 	self.put_with_at(id, Validator::Etag(if_match), data, now, ttl)
 }
 
+/// Conditionally replaces a rendezvous payload using an unquoted sequence token.
+///
+/// Update and retry behavior matches [`Self::put`], but the validator is compared with the entity
+/// tag's unquoted value.
+///
+/// # Panics
+///
+/// Panics if the session lock has been poisoned.
 #[implement(Service)]
 pub fn put_token(&self, id: &str, sequence_token: &str, data: Bytes) -> Put {
 	let ttl = Duration::from_secs(self.services.server.config.rendezvous_session_ttl);
@@ -275,6 +367,10 @@ fn put_token_at(
 	self.put_with_at(id, Validator::SequenceToken(sequence_token), data, now, ttl)
 }
 
+/// Applies the shared conditional-update state machine at a supplied time.
+///
+/// Expired sessions are removed before validation. Successful replacements advance modification
+/// time monotonically, while identical stale retries only refresh expiration.
 #[implement(Service)]
 fn put_with_at(
 	&self,
@@ -324,6 +420,13 @@ fn put_with_at(
 	Put::Accepted(session.meta())
 }
 
+/// Deletes a rendezvous session regardless of expiration.
+///
+/// The return value reports whether any stored session was removed, including an expired one.
+///
+/// # Panics
+///
+/// Panics if the session lock has been poisoned.
 #[implement(Service)]
 pub fn delete(&self, id: &str) -> bool {
 	self.sessions
@@ -333,6 +436,13 @@ pub fn delete(&self, id: &str) -> bool {
 		.is_some()
 }
 
+/// Deletes a rendezvous session and reports whether it was active.
+///
+/// Expired sessions are still removed but return `false`. An absent session also returns `false`.
+///
+/// # Panics
+///
+/// Panics if the session lock has been poisoned.
 #[implement(Service)]
 pub fn delete_if_active(&self, id: &str) -> bool {
 	self.delete_if_active_at(id, SystemTime::now())
@@ -347,6 +457,13 @@ fn delete_if_active_at(&self, id: &str, now: SystemTime) -> bool {
 		.is_some_and(|session| session.expires_at > now)
 }
 
+/// Returns the unquoted sequence token for this representation.
+///
+/// The token is the digest value contained by the HTTP entity tag.
+///
+/// # Panics
+///
+/// Panics if [`Self::etag`] does not contain matching quotation marks.
 #[implement(Meta)]
 #[must_use]
 #[inline]
@@ -359,6 +476,9 @@ fn etag_value(etag: &Etag) -> &str {
 		.expect("ETag is quoted")
 }
 
+/// Returns the remaining lifetime of the session.
+///
+/// Expired sessions report [`Duration::ZERO`] rather than a negative duration.
 #[implement(Meta)]
 #[must_use]
 #[inline]

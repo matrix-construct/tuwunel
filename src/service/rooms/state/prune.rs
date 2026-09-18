@@ -1,3 +1,9 @@
+//! Selects a bounded set of useful room forward extremities.
+//!
+//! Leaves are classified by reachability, reference status, origin, event kind,
+//! and stream position. Receive and administrative callers share the scoring
+//! logic but differ in whether referenced leaves need another sweep.
+
 use std::{cmp::Ordering, collections::BTreeMap};
 
 use futures::StreamExt;
@@ -21,20 +27,35 @@ type Servers = SmallVec<[OwnedServerName; 1]>;
 /// contains `after + 1` entries.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct PruneSummary {
+	/// Number of candidate extremities before pruning.
 	pub before: usize,
+
+	/// Number of extremities retained after pruning.
 	pub after: usize,
+
+	/// Number of unresolved extremities removed without consuming the goal.
 	pub dangling: usize,
+
+	/// Number of already-referenced extremities removed by an administrative pass.
 	pub referenced: usize,
+
+	/// Number of message-like extremities removed toward the goal.
 	pub message: usize,
+
+	/// Number of state extremities removed toward the goal.
 	pub state: usize,
 }
 
-/// Selects whether the prune sweeps already-referenced leaves: the receive
-/// path's retained set has excluded them upstream, an operator's raw band has
-/// not.
+/// Selects the call path that initiated an extremity pruning pass.
+///
+/// Receive processing has already excluded referenced leaves, while an
+/// administrative pass starts from the raw stored band and sweeps them here.
 #[derive(Clone, Copy, Debug)]
 pub enum Trigger {
+	/// Pruning performed while receiving and appending an event.
 	Receive,
+
+	/// Pruning requested directly by an administrator.
 	Admin,
 }
 
@@ -72,10 +93,12 @@ enum Partial {
 	},
 }
 
-/// Scores the retained forward-extremity set and drops the least useful leaves
-/// in place until `goal` of them are gone, sweeping dangling leaves (and, under
-/// `Trigger::Admin`, already-referenced ones) for free first. Never drops an
-/// own-server leaf and always leaves at least one survivor.
+/// Prunes the least useful leaves from a room's forward-extremity candidates.
+///
+/// Dangling leaves and, for an administrative pass, referenced leaves are
+/// removed before the requested goal is charged. The selection never removes
+/// a local-server leaf and never empties a nonempty supplied vector;
+/// persistence remains the caller's responsibility.
 #[implement(super::Service)]
 #[tracing::instrument(
 	level = "debug"
@@ -273,9 +296,11 @@ fn drop_order(a: &Live, b: &Live) -> Ordering {
 		.then(a.count.cmp(&b.count))
 }
 
-/// Per-round drop goal for the paced receive-path prune: an uncapped cut down
-/// to the emergency bound, but never slower than the per-event batch down to
-/// the cap. All saturating.
+/// Calculates the drop goal for one paced receive-path pruning round.
+///
+/// The result is the greater of the uncapped cut to the emergency bound and a
+/// batch-limited cut toward the ordinary cap. All arithmetic saturates, and
+/// the emergency bound is clamped to the cap.
 pub(crate) fn prune_goal(len: usize, max: usize, emergency: usize, batch: usize) -> usize {
 	// Clamp emergency up to the cap so a value below it cannot invert the arms.
 	let emergency = emergency.max(max);

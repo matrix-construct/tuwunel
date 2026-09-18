@@ -26,8 +26,10 @@ use super::{
 type FetchFuture<'a> = BoxFuture<'a, (Key, SharedResult)>;
 type FetchFutures<'a> = FuturesUnordered<FetchFuture<'a>>;
 
-/// Service worker. Owns the request map, the deferral queue, and every
-/// in-flight fetch on its stack, so no lock guards any of them.
+/// Runs the single owner task for request, deferral, and in-flight state.
+///
+/// The request map, pending queue, and fetch futures are owned exclusively by
+/// this task, so no lock guards them.
 #[implement(Service)]
 pub(super) async fn run_worker(self: Arc<Self>) {
 	let mut inflight: HashMap<Key, Inflight> = HashMap::new();

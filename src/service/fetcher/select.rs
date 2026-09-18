@@ -25,14 +25,24 @@ use crate::{
 /// fan-out per missing event.
 const ROUTE_FANOUT: usize = 5;
 
-/// Candidate enumeration seam. The production impl derives the server pool from
-/// room state; tests substitute a fixed list.
+/// Abstracts candidate enumeration for a federation fetch.
+///
+/// The production implementation derives the server pool from room state while
+/// tests substitute a fixed list.
 #[async_trait]
 pub(super) trait Select: Send + Sync {
+	/// Returns ranked, eligible servers for the supplied fetch options.
+	///
+	/// Implementations may use an explicit override or derive candidates from
+	/// room membership and routing hints.
 	async fn candidates(&self, opts: &Opts) -> Candidates;
 }
 
+/// Selects candidate servers from room state and federation routing data.
+///
+/// Self and explicitly forbidden servers are removed before peer-status ranking.
 pub(super) struct RoomCandidates {
+	/// Services used for room membership and federation ranking queries.
 	pub(super) services: Arc<OnceServices>,
 }
 

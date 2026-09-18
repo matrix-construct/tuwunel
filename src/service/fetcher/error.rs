@@ -1,28 +1,34 @@
-//! Internal failure type for a fetch.
+//! Internal failure reporting for federation fetches.
+//!
+//! Failures remain cloneable for broadcast to coalesced callers and retain the
+//! servers actually contacted for operator-facing diagnostics.
 
 use std::fmt;
 
 use ruma::OwnedServerName;
 use tuwunel_core::{err, smallvec::SmallVec};
 
-/// Servers tried before a fetch gave up; sized to the candidate-pool budget.
+/// Servers contacted before a fetch gave up.
+///
+/// Inline storage is sized to the common candidate-pool budget.
 pub(super) type Attempted = SmallVec<[OwnedServerName; 3]>;
 
-/// Internal failure shape. Kept `Clone` so it can ride the shared-result
-/// channel to every coalesced caller; converted to [`tuwunel_core::Error`] at
-/// the public boundary. Carries the servers tried for the operator-facing
-/// message.
+/// Describes why a coalesced fetch produced no response.
+///
+/// The cloneable value is broadcast to every subscriber and converted to
+/// [`tuwunel_core::Error`] at the public boundary.
 #[derive(Clone, Debug)]
 pub(super) enum Failure {
-	/// Every candidate was tried and none returned a valid response.
+	/// The permitted attempts or rounds ended without a valid response.
 	NotFound {
+		/// Servers actually contacted before the fetch stopped.
 		attempted: Attempted,
 	},
 
 	/// No candidate servers were available to try.
 	NoCandidates,
 
-	/// All callers dropped the future before a server answered.
+	/// Caller interest vanished or worker communication closed before a response arrived.
 	Cancelled,
 }
 

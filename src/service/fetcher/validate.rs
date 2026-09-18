@@ -1,6 +1,10 @@
-//! Two-tier response validation: a cheap conformance check, then an opt-in deep
-//! PDU pass (event id, content hashes, signatures) that runs only for event ops
-//! with those checks enabled. The per-check toggles live on [`Opts`].
+//! Two-tier response validation for fetched federation data.
+//!
+//! A cheap conformance check can cover every operation, followed by an opt-in
+//! deep PDU pass only for event and auth-event fetches. When either cryptographic
+//! flag is enabled, the deep pass invokes event verification, but currently
+//! ignores its `Verified` status and therefore does not reject a content-hash
+//! mismatch by itself.
 
 use ruma::{CanonicalJsonObject, RoomVersionId};
 use serde::de::IgnoredAny;
@@ -8,10 +12,11 @@ use tuwunel_core::{Err, Result, err, implement, matrix::event::gen_event_id};
 
 use super::{Op, Opts};
 
-/// Poison detection applied before a response is accepted, so a hostile server
-/// answering with garbage transparently rolls onto the next candidate. Full
-/// auth resolution stays outside; this only rejects responses we can prove bad
-/// from the bytes alone.
+/// Applies poison detection before a fetched response is accepted.
+///
+/// When `check_conforms` is enabled, malformed JSON rolls over to the next
+/// candidate; Backfill also rejects an empty batch while MissingEvents accepts
+/// one. Deep validation is limited to event and auth-event operations.
 #[implement(super::Service)]
 #[tracing::instrument(name = "validate", level = "trace", skip_all)]
 pub(super) async fn validate(&self, opts: &Opts, bytes: &[u8]) -> Result {
@@ -39,6 +44,10 @@ pub(super) async fn validate(&self, opts: &Opts, bytes: &[u8]) -> Result {
 	Ok(())
 }
 
+/// Applies enabled event-ID and cryptographic checks to one PDU response.
+///
+/// Event verification errors are propagated, but its `Verified` classification
+/// is currently discarded, so `check_hashes` does not enforce a hash match.
 #[implement(super::Service)]
 #[tracing::instrument(level = "trace", skip_all)]
 async fn verify_pdu(&self, opts: &Opts, bytes: &[u8]) -> Result {

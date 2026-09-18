@@ -1,3 +1,8 @@
+//! Exercises coalescing, cancellation, failover, fanout, and response validation.
+//!
+//! The cases cover capacity backpressure, option identity, staged rounds,
+//! operation-specific transport, and accepted response shapes.
+
 use std::{collections::HashMap, num::NonZeroUsize, sync::Mutex};
 
 use async_trait::async_trait;

@@ -1,3 +1,8 @@
+//! Rendezvous session service tests.
+//!
+//! The cases exercise conditional updates, expiration, capacity eviction, and rate-limit behavior
+//! with deterministic timestamps.
+
 use std::{
 	net::{IpAddr, Ipv4Addr},
 	sync::{Arc, Mutex, RwLock},

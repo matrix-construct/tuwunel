@@ -26,6 +26,10 @@ use tokio::sync::{
 };
 use tuwunel_core::{Result, implement};
 
+/// Re-exports the fetch request contract, operation types, and response value.
+///
+/// Callers build an [`Opts`] value for an [`Op`] and receive the winning
+/// [`Outcome`] through [`Service::fetch`].
 pub use self::opts::{EventWindow, FanoutGrowth, Op, Opts, Outcome};
 use self::{
 	error::Failure,
@@ -38,6 +42,11 @@ use crate::services::OnceServices;
 /// Upper bound on concurrent in-flight fetches across all keys.
 const REQUESTS_MAX: usize = 256;
 
+/// Coordinates coalesced, validated federation fetches with candidate failover.
+///
+/// A single worker owns all in-flight state and admits at most 256 distinct
+/// fetches at once; additional keys wait in its pending queue. Fetches have no
+/// whole-operation deadline or per-server fairness scheduler.
 pub struct Service {
 	services: Arc<OnceServices>,
 	channel: (Sender<Msg>, Receiver<Msg>),
@@ -86,10 +95,12 @@ impl crate::Service for Service {
 	fn name(&self) -> &str { crate::service::make_name(std::module_path!()) }
 }
 
-/// Fetch raw response bytes for an event over federation, coalescing concurrent
-/// callers for the same key onto a single network attempt. Server selection,
-/// failover, and poison detection happen internally; the future resolves only
-/// once a clean response arrives or every candidate is exhausted.
+/// Fetches raw response bytes over federation with coalescing and failover.
+///
+/// Requests coalesce only when their complete option identities match, except
+/// missing-event windows are order independent. The future resolves when one
+/// response passes every enabled check; candidate exhaustion, attempt limits,
+/// or round limits otherwise end it with failure.
 #[implement(Service)]
 #[tracing::instrument(
 	level = "debug",
