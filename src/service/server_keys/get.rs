@@ -1,3 +1,9 @@
+//! Retrieval of cached and remote federation verify keys.
+//!
+//! Event signature requirements are translated into ruma public-key maps.
+//! Individual keys can fall back from the cache to trusted notaries and the
+//! origin server according to configuration.
+
 use std::borrow::Borrow;
 
 use ruma::{
@@ -8,6 +14,10 @@ use tuwunel_core::{Err, Result, implement};
 
 use super::{PubKeyMap, PubKeys, extract_key};
 
+/// Resolves the public keys required to verify an event.
+///
+/// Invalid signature metadata returns an error. Fetch failures for individual
+/// keys are omitted, so a successful result can still be a partial key map.
 #[implement(super::Service)]
 pub async fn get_event_keys(
 	&self,
@@ -30,6 +40,10 @@ pub async fn get_event_keys(
 	Ok(self.get_pubkeys(batch).await)
 }
 
+/// Resolves public-key sets for a batch of servers and key IDs.
+///
+/// Every requested server is inserted, even when its key set is empty.
+/// Individual key errors are suppressed by [`Self::get_pubkeys_for`].
 #[implement(super::Service)]
 pub async fn get_pubkeys<'a, S, K>(&self, batch: S) -> PubKeyMap
 where
@@ -45,6 +59,10 @@ where
 	keys
 }
 
+/// Resolves the requested public keys for one server.
+///
+/// Keys that cannot be loaded or fetched are omitted, making the returned set
+/// intentionally partial rather than failing the whole request.
 #[implement(super::Service)]
 pub async fn get_pubkeys_for<'a, I>(&self, origin: &ServerName, key_ids: I) -> PubKeys
 where
@@ -60,6 +78,10 @@ where
 	keys
 }
 
+/// Retrieves one current or retired verify key for a server.
+///
+/// The cache is checked first. Trusted notaries and the origin are then queried
+/// in configured order, with origin requests disabled in notary-only mode.
 #[implement(super::Service)]
 pub async fn get_verify_key(
 	&self,

@@ -1,3 +1,9 @@
+//! Resolves the current state snapshot for a room.
+//!
+//! These adapters obtain a room's current short-state hash and delegate to the
+//! historical snapshot readers. Stream variants surface a missing room snapshot
+//! while retaining the delegated readers' best-effort item behavior.
+
 use futures::{Stream, StreamExt, TryFutureExt};
 use ruma::{OwnedEventId, RoomId, events::StateEventType};
 use serde::Deserialize;
@@ -6,7 +12,10 @@ use tuwunel_core::{
 	matrix::{Event, Pdu, StateKey},
 };
 
-/// Returns a single PDU from `room_id` with key (`event_type`,`state_key`).
+/// Deserializes one current state event's content.
+///
+/// The event is selected by `(event_type, state_key)`. Snapshot lookup,
+/// timeline lookup, and content errors are returned to the caller.
 #[implement(super::Service)]
 pub async fn room_state_get_content<T>(
 	&self,
@@ -22,7 +31,11 @@ where
 		.and_then(|event| event.get_content())
 }
 
-/// Returns the room state events for a specific type.
+/// Streams current state events of one type.
+///
+/// Failure to resolve the room's current snapshot is yielded as an error.
+/// Missing reverse mappings and unavailable PDUs are skipped by the delegated
+/// best-effort stream.
 #[implement(super::Service)]
 #[tracing::instrument(skip(self), level = "debug")]
 pub fn room_state_type_pdus<'a>(
@@ -41,7 +54,10 @@ pub fn room_state_type_pdus<'a>(
 		.try_flatten_stream()
 }
 
-/// Returns the full room state.
+/// Streams the room's full current state with type and state keys.
+///
+/// Failure to resolve the current snapshot is yielded as an error. Entries
+/// whose IDs, PDUs, or state keys cannot be resolved are skipped.
 #[implement(super::Service)]
 #[tracing::instrument(skip(self), level = "debug")]
 pub fn room_state_full<'a>(
@@ -56,7 +72,10 @@ pub fn room_state_full<'a>(
 		.try_flatten_stream()
 }
 
-/// Returns the full room state pdus
+/// Streams every resolvable PDU in the room's current state.
+///
+/// Failure to resolve the current snapshot is yielded as an error. Individual
+/// state entries with missing reverse mappings or PDUs are skipped.
 #[implement(super::Service)]
 #[tracing::instrument(skip(self), level = "debug")]
 pub fn room_state_full_pdus<'a>(
@@ -71,8 +90,10 @@ pub fn room_state_full_pdus<'a>(
 		.try_flatten_stream()
 }
 
-/// Returns a single EventId from `room_id` with key (`event_type`,
-/// `state_key`).
+/// Returns the event ID for one current state tuple.
+///
+/// The room's current snapshot must exist, and both short-ID mappings must
+/// resolve for `(event_type, state_key)`.
 #[implement(super::Service)]
 #[tracing::instrument(skip(self), level = "debug")]
 pub async fn room_state_get_id(
@@ -88,8 +109,10 @@ pub async fn room_state_get_id(
 		.await
 }
 
-/// Iterates the state_keys for an event_type in the state joined by the
-/// `event_id` from the current state.
+/// Streams state keys and event IDs for one current state event type.
+///
+/// Failure to resolve the current snapshot is yielded as an error. Individual
+/// short-ID mapping failures are omitted by the best-effort inner stream.
 #[implement(super::Service)]
 #[tracing::instrument(skip(self), level = "debug")]
 pub fn room_state_keys_with_ids<'a>(
@@ -108,7 +131,10 @@ pub fn room_state_keys_with_ids<'a>(
 		.try_flatten_stream()
 }
 
-/// Iterates the state_keys for an event_type in the state
+/// Streams state keys for one current state event type.
+///
+/// Failure to resolve the current snapshot is yielded as an error. Individual
+/// state-key mapping failures are omitted by the best-effort inner stream.
 #[implement(super::Service)]
 #[tracing::instrument(skip(self), level = "debug")]
 pub fn room_state_keys<'a>(
@@ -127,8 +153,10 @@ pub fn room_state_keys<'a>(
 		.try_flatten_stream()
 }
 
-/// Returns a single PDU from `room_id` with key (`event_type`,
-/// `state_key`).
+/// Returns one current state PDU.
+///
+/// The event is selected by `(event_type, state_key)`. Snapshot, short-ID, and
+/// timeline lookup failures are returned to the caller.
 #[implement(super::Service)]
 #[tracing::instrument(skip(self), level = "debug")]
 pub async fn room_state_get(

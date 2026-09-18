@@ -1,3 +1,8 @@
+//! Tests user authorization decisions against seeded room state.
+//!
+//! The fixtures exercise redaction boundaries with real service storage and
+//! verify that authority does not cross room identities.
+
 use std::sync::Arc;
 
 use ruma::{EventId, RoomId, UserId, event_id, events::StateEventType, room_id, user_id};

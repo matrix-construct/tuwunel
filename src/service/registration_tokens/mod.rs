@@ -1,8 +1,17 @@
+//! Registration token validation and lifecycle management.
+//!
+//! The service combines static configuration tokens with database-backed tokens whose stored use
+//! count or expiration time can invalidate them. Validation, consumption, listing, update, and
+//! revocation share one interface.
+
 mod data;
 
 use std::{collections::HashSet, fmt::Display, sync::Arc};
 
 use data::Data;
+/// Database-backed registration token metadata and expiration policy.
+///
+/// These types form the stored representation and are also exposed to administrative callers.
 pub use data::{DatabaseTokenInfo, TokenExpires};
 use futures::{Stream, StreamExt, pin_mut};
 use tuwunel_core::{
@@ -12,15 +21,25 @@ use tuwunel_core::{
 
 const RANDOM_TOKEN_LENGTH: usize = 16;
 
+/// Manages configured and database-backed registration tokens.
+///
+/// Configured tokens are read from the active configuration and optional token file on demand.
+/// Database tokens retain use counts and expiration limits in persistent storage.
 pub struct Service {
 	db: Data,
 	services: Arc<crate::services::OnceServices>,
 }
 
-/// A validated registration token which may be used to create an account.
+/// Registration token returned by the valid-token stream.
+///
+/// The accompanying metadata identifies whether the token came from configuration or persistent
+/// storage.
 #[derive(Debug)]
 pub struct ValidToken {
+	/// Literal token accepted during registration.
 	pub token: String,
+
+	/// Origin and metadata associated with the token.
 	pub info: TokenInfo,
 }
 
@@ -34,12 +53,16 @@ impl PartialEq<str> for ValidToken {
 	fn eq(&self, other: &str) -> bool { self.token == other }
 }
 
+/// Describes the origin and stored metadata of a registration token.
+///
+/// Configuration tokens have no mutable counters or expiry. Database tokens carry their current
+/// stored metadata, which callers may inspect independently of validity checks.
 #[derive(Clone, Copy, Debug)]
 pub enum TokenInfo {
-	/// The static token set in the homeserver's config file, which is
-	/// always valid.
+	/// Static token supplied by the homeserver configuration.
 	Config,
-	/// A database token which has been checked to be valid.
+
+	/// Metadata loaded for a database-backed token.
 	Database(DatabaseTokenInfo),
 }
 
@@ -64,9 +87,10 @@ impl crate::Service for Service {
 }
 
 impl Service {
-	/// Create a registration token, using the caller's token or generating a
-	/// random one of `length` characters (default `RANDOM_TOKEN_LENGTH`). A
-	/// token that already exists is rejected.
+	/// Creates a database-backed registration token.
+	///
+	/// A supplied token is stored verbatim; otherwise a random token of `length` characters is
+	/// generated, defaulting to the service length. Existing database tokens are rejected.
 	pub async fn create_token(
 		&self,
 		token: Option<&str>,
@@ -84,7 +108,10 @@ impl Service {
 		Ok((token, info))
 	}
 
-	/// Look up a token's stored metadata, returning `None` when it is absent.
+	/// Returns a token's origin and stored metadata.
+	///
+	/// Configured tokens return [`TokenInfo::Config`]. Database metadata is returned without a
+	/// validity check, while unknown tokens produce a not-found request error.
 	pub async fn get_token_info(&self, token: &str) -> Result<TokenInfo> {
 		if self.get_config_tokens().await.contains(token) {
 			return Ok(TokenInfo::Config);
@@ -96,8 +123,10 @@ impl Service {
 			.map(TokenInfo::Database)
 	}
 
-	/// Replace a token's expiry, preserving its use counter. Returns a `404`
-	/// when the token is unknown.
+	/// Replaces a database token's expiration policy.
+	///
+	/// The existing use counter is preserved. Configured tokens cannot be updated, and unknown
+	/// database tokens produce a not-found request error.
 	pub async fn update_token(
 		&self,
 		token: &str,
@@ -112,6 +141,10 @@ impl Service {
 		self.db.update_token(token, expires).await
 	}
 
+	/// Reports whether at least one valid registration token is available.
+	///
+	/// The check stops at the first configured or valid stored token. Invalid database entries
+	/// encountered before that result are removed as the stream advances.
 	pub async fn is_enabled(&self) -> bool {
 		let stream = self.iterate_tokens().await;
 
@@ -120,6 +153,10 @@ impl Service {
 		stream.next().await.is_some()
 	}
 
+	/// Loads every registration token supplied by configuration.
+	///
+	/// Whitespace-delimited tokens are read from the optional token file and combined with the inline
+	/// token. Failure to read the file is logged and leaves only other configured tokens.
 	pub async fn get_config_tokens(&self) -> HashSet<String> {
 		let mut tokens = HashSet::new();
 
@@ -140,8 +177,17 @@ impl Service {
 		tokens
 	}
 
+	/// Validates a registration token without consuming a use.
+	///
+	/// Configuration tokens are always valid. Invalid database tokens are removed and reported as a
+	/// forbidden request.
 	pub async fn is_token_valid(&self, token: &str) -> Result { self.check(token, false).await }
 
+	/// Validates a registration token and consumes one permitted use.
+	///
+	/// Configuration tokens are accepted without mutation. A database token is removed when its
+	/// updated count reaches the stored threshold. Concurrent consumers are not serialized and can
+	/// share a prior count. Invalid tokens are reported as forbidden.
 	pub async fn try_consume(&self, token: &str) -> Result { self.check(token, true).await }
 
 	async fn check(&self, token: &str, consume: bool) -> Result {
@@ -154,9 +200,10 @@ impl Service {
 		Err!(Request(Forbidden("Registration token not valid")))
 	}
 
-	/// Try to revoke a valid token.
+	/// Revokes a database-backed registration token.
 	///
-	/// Note that tokens set in the config file cannot be revoked.
+	/// Configuration tokens cannot be revoked through this service. An unknown database token
+	/// produces a not-found request error.
 	pub async fn revoke_token(&self, token: &str) -> Result {
 		if self.get_config_tokens().await.contains(token) {
 			return Err!(Request(Forbidden(
@@ -168,7 +215,10 @@ impl Service {
 		self.db.revoke_token(token).await
 	}
 
-	/// Iterate over all valid registration tokens.
+	/// Streams every currently valid registration token.
+	///
+	/// Configuration tokens are yielded first, followed by valid database tokens. Invalid stored
+	/// tokens are removed while the database stream is consumed.
 	pub async fn iterate_tokens(&self) -> impl Stream<Item = ValidToken> + Send + '_ {
 		let config_tokens = self
 			.get_config_tokens()

@@ -1,3 +1,9 @@
+//! Federation signing-key storage, acquisition, signing, and verification.
+//!
+//! The service loads the local Ed25519 identity, caches remote current and old
+//! verify keys, fetches missing keys from origins or configured notaries, and
+//! supplies the cryptographic operations used by federation event handling.
+
 mod acquire;
 mod get;
 mod keypair;
@@ -23,6 +29,10 @@ use tuwunel_core::{
 };
 use tuwunel_database::{Deserialized, Json, Map};
 
+/// Manages the local signing identity and cached remote verification keys.
+///
+/// Cached keys are retained by key ID without enforcing `valid_until_ts` on
+/// reads. Missing keys can be acquired from remote origins or trusted notaries.
 pub struct Service {
 	keypair: Box<Ed25519KeyPair>,
 	verify_keys: VerifyKeys,
@@ -35,8 +45,20 @@ struct Data {
 	server_signingkeys: Arc<Map>,
 }
 
+/// Verify keys indexed by Matrix server signing-key ID.
+///
+/// Current and retired keys can be merged into this representation for event
+/// verification.
 pub type VerifyKeys = BTreeMap<OwnedServerSigningKeyId, VerifyKey>;
+
+/// Public keys grouped first by server name and then by key ID.
+///
+/// This is the map shape accepted by ruma's signature verification helpers.
 pub type PubKeyMap = PublicKeyMap;
+
+/// Public keys for one server, indexed by textual key ID.
+///
+/// Values contain the decoded public-key material expected by ruma.
 pub type PubKeys = PublicKeySet;
 
 impl crate::Service for Service {
@@ -60,16 +82,28 @@ impl crate::Service for Service {
 	fn name(&self) -> &str { crate::service::make_name(std::module_path!()) }
 }
 
+/// Returns the local Ed25519 signing keypair.
+///
+/// The keypair is loaded or generated when the service is built and remains
+/// fixed for the service lifetime.
 #[implement(Service)]
 #[inline]
 #[must_use]
 pub fn keypair(&self) -> &Ed25519KeyPair { &self.keypair }
 
+/// Returns the signing-key ID for the active local verify key.
+///
+/// This delegates to [`Self::active_verify_key`] and therefore panics if the
+/// service was initialized without an active key.
 #[implement(Service)]
 #[inline]
 #[must_use]
 pub fn active_key_id(&self) -> &ServerSigningKeyId { self.active_verify_key().0 }
 
+/// Returns the active local signing-key ID and verify key.
+///
+/// Initialization normally supplies exactly one entry. A missing entry panics,
+/// and debug builds also assert that no second active key exists.
 #[implement(Service)]
 #[inline]
 #[must_use]
@@ -82,6 +116,11 @@ pub fn active_verify_key(&self) -> (&ServerSigningKeyId, &VerifyKey) {
 		.expect("missing active verify_key")
 }
 
+/// Merges a fetched signing-key document into the local cache.
+///
+/// Only current and old verify-key maps are retained from the incoming document;
+/// its signatures and validity timestamp are not preserved. The read, merge,
+/// and write sequence is not atomic.
 #[implement(Service)]
 async fn add_signing_keys(&self, new_keys: ServerSigningKeys) {
 	let origin = &new_keys.server_name;
@@ -107,6 +146,10 @@ async fn add_signing_keys(&self, new_keys: ServerSigningKeys) {
 		.raw_put(origin, Json(&keys));
 }
 
+/// Checks whether every signature key required by an event is cached.
+///
+/// Invalid signature metadata, database errors, and malformed stored key data
+/// all produce `false`; this method never fetches missing keys.
 #[implement(Service)]
 pub async fn required_keys_exist(
 	&self,
@@ -127,6 +170,10 @@ pub async fn required_keys_exist(
 		.await
 }
 
+/// Checks whether one current or retired verify key is cached for a server.
+///
+/// The check is based on key-ID presence only and does not evaluate the stored
+/// key document's validity interval. Read or decoding errors produce `false`.
 #[implement(Service)]
 pub async fn verify_key_exists(&self, origin: &ServerName, key_id: &ServerSigningKeyId) -> bool {
 	type KeysMap<'a> = BTreeMap<&'a ServerSigningKeyId, &'a RawJsonValue>;
@@ -156,6 +203,10 @@ pub async fn verify_key_exists(&self, origin: &ServerName, key_id: &ServerSignin
 	false
 }
 
+/// Returns all cached verify keys usable for a server.
+///
+/// Retired keys are converted and merged with current keys. Storage errors are
+/// suppressed to an empty map, and the local active key is added for our names.
 #[implement(Service)]
 pub async fn verify_keys_for(&self, origin: &ServerName) -> VerifyKeys {
 	let mut keys = self
@@ -171,6 +222,11 @@ pub async fn verify_keys_for(&self, origin: &ServerName) -> VerifyKeys {
 	keys
 }
 
+/// Loads the cached signing-key document for a server.
+///
+/// The returned document reflects the service's merged cache representation;
+/// reads do not enforce `valid_until_ts`. Acquisition currently preserves key
+/// maps but not incoming document signatures or validity metadata.
 #[implement(Service)]
 pub async fn signing_keys_for(&self, origin: &ServerName) -> Result<ServerSigningKeys> {
 	self.db

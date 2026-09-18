@@ -1,3 +1,8 @@
+//! Reads events and short IDs from a historical room-state snapshot.
+//!
+//! Strict streams preserve snapshot and reverse-mapping errors. The remaining
+//! collection streams are intentionally best effort and omit unresolved entries.
+
 use std::{ops::Deref, sync::Arc};
 
 use futures::{
@@ -26,7 +31,10 @@ use crate::rooms::{
 	state_compressor::{CompressedState, compress_state_event, parse_compressed_state_event},
 };
 
-/// The user was a joined member at this state (potentially in the past)
+/// Reports whether a user was joined in a selected state snapshot.
+///
+/// Missing or invalid membership state is treated as `leave`, so lookup errors
+/// return `false`.
 #[implement(super::Service)]
 #[inline]
 pub async fn user_was_joined(&self, shortstatehash: ShortStateHash, user_id: &UserId) -> bool {
@@ -34,8 +42,10 @@ pub async fn user_was_joined(&self, shortstatehash: ShortStateHash, user_id: &Us
 		.await == MembershipState::Join
 }
 
-/// The user was an invited or joined room member at this state (potentially
-/// in the past)
+/// Reports whether a user was invited or joined in a selected state snapshot.
+///
+/// Missing or invalid membership state is treated as `leave`, so lookup errors
+/// return `false`.
 #[implement(super::Service)]
 #[inline]
 pub async fn user_was_invited(&self, shortstatehash: ShortStateHash, user_id: &UserId) -> bool {
@@ -45,7 +55,10 @@ pub async fn user_was_invited(&self, shortstatehash: ShortStateHash, user_id: &U
 	s == MembershipState::Join || s == MembershipState::Invite
 }
 
-/// Get membership for given user in state
+/// Returns a user's membership in a selected state snapshot.
+///
+/// Missing state, unavailable events, and invalid membership content all fall
+/// back to [`MembershipState::Leave`].
 #[implement(super::Service)]
 pub async fn user_membership(
 	&self,
@@ -60,7 +73,8 @@ pub async fn user_membership(
 /// MSC4115: the user's room membership "just after" the given PDU landed.
 ///
 /// `pdu_shortstatehash` returns state-before-the-event, so a member event
-/// targeting `user_id` overrides that lookup with its own content.
+/// targeting `user_id` overrides that lookup with its own content. Missing or
+/// invalid state falls back to [`MembershipState::Leave`].
 #[implement(super::Service)]
 pub async fn user_membership_at_pdu(&self, user_id: &UserId, pdu: &Pdu) -> MembershipState {
 	if pdu.kind() == &TimelineEventType::RoomMember
@@ -83,7 +97,10 @@ pub async fn user_membership_at_pdu(&self, user_id: &UserId, pdu: &Pdu) -> Membe
 		.await
 }
 
-/// Returns a single PDU from `room_id` with key (`event_type`,`state_key`).
+/// Deserializes one event's content from a selected state snapshot.
+///
+/// The event is selected by `(event_type, state_key)`. State, short-ID,
+/// timeline, and content errors are returned to the caller.
 #[implement(super::Service)]
 pub async fn state_get_content<T>(
 	&self,
@@ -99,6 +116,10 @@ where
 		.and_then(|event| event.get_content())
 }
 
+/// Reports whether a state snapshot contains one state tuple.
+///
+/// Failure to resolve the tuple's short state key or load the snapshot is
+/// treated as absence.
 #[implement(super::Service)]
 pub async fn state_contains(
 	&self,
@@ -119,6 +140,10 @@ pub async fn state_contains(
 		.await
 }
 
+/// Reports whether a state snapshot contains any event of one type.
+///
+/// Snapshot and state-key mapping errors are omitted by the underlying
+/// best-effort stream and can therefore produce `false`.
 #[implement(super::Service)]
 pub async fn state_contains_type(
 	&self,
@@ -131,6 +156,10 @@ pub async fn state_contains_type(
 	state_keys.next().await.is_some()
 }
 
+/// Reports whether a snapshot contains a short state key.
+///
+/// The compressed snapshot is searched across every short event ID for the
+/// key. Failure to load the snapshot is treated as absence.
 #[implement(super::Service)]
 pub async fn state_contains_shortstatekey(
 	&self,
@@ -147,8 +176,10 @@ pub async fn state_contains_shortstatekey(
 		.is_some()
 }
 
-/// Returns a single PDU from `room_id` with key (`event_type`,
-/// `state_key`).
+/// Returns one PDU from a selected state snapshot.
+///
+/// The event is selected by `(event_type, state_key)`. Short-ID and timeline
+/// lookup failures are returned to the caller.
 #[implement(super::Service)]
 pub async fn state_get(
 	&self,
@@ -163,8 +194,9 @@ pub async fn state_get(
 	self.services.timeline.get_pdu(&event_id).await
 }
 
-/// Returns a single EventId from `room_id` with key (`event_type`,
-/// `state_key`).
+/// Returns one event ID from a selected state snapshot.
+///
+/// Both the state tuple's short key and its short event ID must resolve.
 #[implement(super::Service)]
 pub async fn state_get_id(
 	&self,
@@ -182,8 +214,10 @@ pub async fn state_get_id(
 		.await
 }
 
-/// Returns a single EventId from `room_id` with key (`event_type`,
-/// `state_key`).
+/// Returns one short event ID from a selected state snapshot.
+///
+/// The method resolves `(event_type, state_key)` to a short state key and
+/// searches the compressed snapshot. An absent tuple is returned as not found.
 #[implement(super::Service)]
 pub async fn state_get_shortid(
 	&self,
@@ -212,7 +246,10 @@ pub async fn state_get_shortid(
 		.await?
 }
 
-/// Iterates the events for an event_type in the state.
+/// Streams resolvable events of one type from a state snapshot.
+///
+/// Snapshot, short-ID, and timeline lookup failures are skipped, so this is a
+/// best-effort view rather than a completeness guarantee.
 #[implement(super::Service)]
 pub fn state_type_pdus<'a>(
 	&'a self,
@@ -230,8 +267,10 @@ pub fn state_type_pdus<'a>(
 		})
 }
 
-/// Iterates the state_keys for an event_type in the state; current state
-/// event_id included.
+/// Streams state keys and event IDs for one type in a snapshot.
+///
+/// Snapshot and reverse-mapping failures are skipped. The stream buffers the
+/// selected short IDs before resolving event IDs in a batch.
 #[implement(super::Service)]
 pub fn state_keys_with_ids<'a>(
 	&'a self,
@@ -250,8 +289,10 @@ pub fn state_keys_with_ids<'a>(
 		.flatten_stream()
 }
 
-/// Iterates the state_keys for an event_type in the state; current state
-/// event_id included.
+/// Streams state keys and short event IDs for one type in a snapshot.
+///
+/// Snapshot and short-state-key mapping failures are skipped. The full
+/// compressed snapshot is buffered before filtering by event type.
 #[implement(super::Service)]
 pub fn state_keys_with_shortids<'a>(
 	&'a self,
@@ -276,7 +317,10 @@ pub fn state_keys_with_shortids<'a>(
 		.flatten_stream()
 }
 
-/// Iterates the state_keys for an event_type in the state
+/// Streams state keys for one event type in a snapshot.
+///
+/// Snapshot and short-state-key mapping failures are skipped, so the stream is
+/// best effort.
 #[implement(super::Service)]
 pub fn state_keys<'a>(
 	&'a self,
@@ -297,8 +341,10 @@ pub fn state_keys<'a>(
 		})
 }
 
-/// Returns the state events removed between the interval (present in .0 but
-/// not in .1)
+/// Streams state entries removed between two snapshots.
+///
+/// Entries present in the first hash and absent from the second are returned.
+/// Failure to load either snapshot produces an empty stream.
 #[implement(super::Service)]
 #[inline]
 pub fn state_removed(
@@ -308,8 +354,10 @@ pub fn state_removed(
 	self.state_added((shortstatehash.1, shortstatehash.0))
 }
 
-/// Returns the state events added between the interval (present in .1 but
-/// not in .0)
+/// Streams state entries added between two snapshots.
+///
+/// Entries absent from the first hash and present in the second are returned.
+/// Failure to load either snapshot produces an empty stream.
 #[implement(super::Service)]
 pub fn state_added(
 	&self,
@@ -325,6 +373,10 @@ pub fn state_added(
 		.map(parse_compressed_state_event)
 }
 
+/// Streams resolvable keyed events from a state snapshot.
+///
+/// Events without a state key and entries with failed short-ID or timeline
+/// lookups are omitted by the underlying best-effort PDU stream.
 #[implement(super::Service)]
 pub fn state_full(
 	&self,
@@ -336,6 +388,10 @@ pub fn state_full(
 		})
 }
 
+/// Streams every resolvable PDU from a state snapshot.
+///
+/// Snapshot, reverse-mapping, and timeline failures are silently skipped. Use
+/// [`Self::state_full_pdus_strict`] when completeness is required.
 #[implement(super::Service)]
 pub fn state_full_pdus(
 	&self,
@@ -359,7 +415,10 @@ pub fn state_full_pdus(
 		})
 }
 
-/// Returns every PDU in the selected room-state snapshot.
+/// Streams every PDU in a state snapshot while preserving errors.
+///
+/// Snapshot and reverse-mapping failures are emitted before any partial ID map.
+/// Timeline lookup failures are yielded for their individual entries.
 #[implement(super::Service)]
 pub fn state_full_pdus_strict(
 	&self,
@@ -369,8 +428,10 @@ pub fn state_full_pdus_strict(
 		.broad_and_then(async |(_, event_id)| self.services.timeline.get_pdu(&event_id).await)
 }
 
-/// Builds a StateMap by iterating over all keys that start
-/// with state_hash, this gives the full state for the given state_hash.
+/// Streams short state keys and resolvable event IDs from a snapshot.
+///
+/// Snapshot and reverse-mapping failures are skipped, so this best-effort
+/// stream can be partial. Use [`Self::state_full_ids_strict`] for completeness.
 #[implement(super::Service)]
 pub fn state_full_ids(
 	&self,
@@ -389,7 +450,7 @@ pub fn state_full_ids(
 		.flatten_stream()
 }
 
-/// Builds a complete StateMap for the given state hash.
+/// Streams a complete short-state-key to event-ID map for a snapshot.
 ///
 /// Snapshot and reverse-mapping failures are returned without yielding a
 /// partial map.
@@ -416,6 +477,10 @@ pub fn state_full_ids_strict(
 		.try_flatten_stream()
 }
 
+/// Streams every compressed `(short state key, short event ID)` pair.
+///
+/// A snapshot-load failure is yielded as an error. Once loaded, the immutable
+/// compressed state is copied into the stream without further lookups.
 #[implement(super::Service)]
 pub fn state_full_shortids(
 	&self,

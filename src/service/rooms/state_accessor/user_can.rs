@@ -1,3 +1,9 @@
+//! Evaluates user visibility and event-authoring permissions.
+//!
+//! Historical visibility checks combine event-time state with retained
+//! membership metadata. Invite and tombstone checks use the normal event-build
+//! pipeline as non-persisting authorization probes.
+
 use futures::pin_mut;
 use ruma::{
 	EventId, RoomId, UserId,
@@ -19,10 +25,12 @@ use tuwunel_core::{
 
 use crate::rooms::{short::ShortStateHash, state::RoomMutexGuard};
 
-/// Checks if a given user can redact a given event
+/// Reports whether a user may redact an event in a room.
 ///
-/// If federation is true, it allows redaction events from any user of the
-/// same server as the original event sender
+/// Cross-room targets are denied, while create and server-ACL targets return a
+/// forbidden error. Federation permits the own-event rule for any sender on
+/// the target sender's server; power-level failures fall back to create-event
+/// ownership and exact sender equality.
 #[implement(super::Service)]
 pub async fn user_can_redact(
 	&self,
@@ -87,8 +95,11 @@ pub async fn user_can_redact(
 	}
 }
 
-/// Whether a user is allowed to see an event, based on
-/// the room's history_visibility at that event's state.
+/// Reports whether a user may see an event under its historical visibility.
+///
+/// Missing event state is allowed, and missing or invalid history visibility
+/// defaults to `shared`. The `shared` decision also accounts for the user's
+/// membership intervals around the event.
 #[implement(super::Service)]
 #[tracing::instrument(skip_all, level = "trace")]
 pub async fn user_can_see_event(
@@ -176,8 +187,12 @@ async fn user_shared_history(
 	event_count <= PduCount::from_unsigned(left_count)
 }
 
-/// Whether a user is allowed to see an event, based on
-/// the room's history_visibility at that event's state.
+/// Reports whether a user may read the room's current state events.
+///
+/// Current membership grants immediate access. Otherwise world-readable
+/// history grants access; invited and shared visibility consult current
+/// invitation or retained once-joined metadata. Missing visibility defaults
+/// to `shared`.
 #[implement(super::Service)]
 #[tracing::instrument(skip_all, level = "trace")]
 pub async fn user_can_see_state_events(&self, user_id: &UserId, room_id: &RoomId) -> bool {
@@ -216,9 +231,11 @@ pub async fn user_can_see_state_events(&self, user_id: &UserId, room_id: &RoomId
 	}
 }
 
-/// Whether a user may see a room: a current or prior membership (joined,
-/// invited, left), or a world-readable room. Forgetting a room clears the
-/// user's left-state, so a forgotten room is not visible.
+/// Reports whether a user may discover or inspect a room.
+///
+/// Current join, invite, retained left membership, or world-readable history
+/// grants access. Forgetting a room clears the retained left membership and can
+/// therefore remove this visibility.
 #[implement(super::Service)]
 pub async fn user_can_see_room(&self, user_id: &UserId, room_id: &RoomId) -> bool {
 	let state_cache = &self.services.state_cache;
@@ -235,6 +252,11 @@ pub async fn user_can_see_room(&self, user_id: &UserId, room_id: &RoomId) -> boo
 		.await
 }
 
+/// Probes whether a sender may invite a target user.
+///
+/// The normal event-build, authorization, and signing path runs under the
+/// caller's room-state lock, but the synthetic membership event is not stored.
+/// Any build error denies the invite, while build-time ID allocations may remain.
 #[implement(super::Service)]
 pub async fn user_can_invite(
 	&self,
@@ -258,6 +280,11 @@ pub async fn user_can_invite(
 		.is_ok()
 }
 
+/// Probes whether a user may send a room tombstone.
+///
+/// The user must currently be joined. The normal event-build, authorization,
+/// and signing path evaluates a synthetic tombstone without storing it; any
+/// build error denies permission, while build-time ID allocations may remain.
 #[implement(super::Service)]
 pub async fn user_can_tombstone(
 	&self,

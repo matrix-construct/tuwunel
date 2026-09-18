@@ -1,3 +1,10 @@
+//! Resolves and caches transitive authorization-event ancestry.
+//!
+//! Traversals operate on short event IDs, enforce room membership on cache
+//! misses, and store complete chains for repeated starting sets. Public stream
+//! adapters translate the results back to event IDs with tolerant or explicit
+//! completeness reporting.
+
 use std::{
 	collections::{BTreeSet, HashSet},
 	iter::once,
@@ -35,6 +42,14 @@ use tuwunel_database::Map;
 
 use crate::rooms::short::ShortEventId;
 
+/// Computes transitive authorization chains and maintains their persistent cache.
+///
+/// Starting events are distributed across a fixed number of buckets before
+/// traversal. Only complete cache-miss walks are written. Existing cache hits
+/// are trusted without rechecking completeness, so historical or
+/// downgrade-written rows can still supply partial chains until they expire or
+/// are cleared. Combined bucket results are sorted and deduplicated by short
+/// event ID rather than graph order.
 pub struct Service {
 	services: Arc<crate::services::OnceServices>,
 	db: Data,
@@ -63,6 +78,11 @@ impl crate::Service for Service {
 	fn name(&self) -> &str { crate::service::make_name(std::module_path!()) }
 }
 
+/// Streams the transitive auth ancestors of a set of starting events.
+///
+/// The starting events themselves are not included unless encountered as
+/// ancestors. Traversal and reverse-mapping failures are filtered from this
+/// tolerant interface, so the stream can yield a partial chain without error.
 #[implement(Service)]
 pub fn event_ids_iter<'a, I>(
 	&'a self,
@@ -87,7 +107,8 @@ where
 ///
 /// The caller initializes `complete` to `true` and checks it after consuming
 /// the stream. Cached chains leave it unchanged. Any polled reverse-mapping or
-/// ancestor-walk failure sets it to `false`.
+/// ancestor-walk failure sets it to `false`, so the stream must be fully
+/// consumed before the flag is inspected.
 #[implement(Service)]
 pub fn event_ids_iter_strict<'a, I>(
 	&'a self,
@@ -124,6 +145,13 @@ where
 		starting_events = %starting_events.clone().count(),
 	)
 )]
+/// Returns sorted short IDs for the transitive auth ancestors of starting events.
+///
+/// Starting events are excluded unless reached again as ancestors, and missing
+/// ancestry can produce a partial successful result. Complete per-bucket
+/// results are cached under roomless keys derived from each bucket's exact set
+/// of starting short IDs; uncached traversal still rejects events from another
+/// room.
 pub async fn get_auth_chain<'a, I>(
 	&'a self,
 	room_id: &RoomId,

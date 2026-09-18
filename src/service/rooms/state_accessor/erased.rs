@@ -1,3 +1,9 @@
+//! Applies sender-erasure pruning to client and federation event views.
+//!
+//! The helpers retain original events when erasure is disabled or redaction
+//! inputs cannot be resolved. Membership lookup failures are treated as not
+//! joined and can therefore trigger pruning.
+
 use futures::FutureExt;
 use ruma::{
 	CanonicalJsonObject, CanonicalJsonValue, EventId, RoomId, ServerName, UserId,
@@ -12,9 +18,11 @@ use tuwunel_core::{
 	},
 };
 
-/// MSC4025: prune a federation-served event: its sender is erased and
-/// `origin` had no user joined in the room state at the event. Composes with
-/// history visibility rather than replacing it.
+/// Applies MSC4025 pruning to an event served over federation.
+///
+/// The event is pruned when its sender is erased and `origin` had no joined
+/// user at the event. This check composes with history visibility rather than
+/// replacing it, and unresolved redaction inputs leave the event intact.
 #[implement(super::Service)]
 pub async fn erased_for_server(
 	&self,

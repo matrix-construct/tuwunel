@@ -1,3 +1,9 @@
+//! Federation requests for origin and notary signing-key documents.
+//!
+//! Notary queries include the configured minimum validity horizon and can be
+//! split across bounded concurrent batches. Origin responses are checked to
+//! ensure the returned server name matches the requested target.
+
 use std::{collections::BTreeMap, convert::identity, fmt::Debug};
 
 use futures::{FutureExt, StreamExt, TryFutureExt};
@@ -14,6 +20,10 @@ use tuwunel_core::{
 	utils::stream::{IterStream, ReadyExt, TryBroadbandExt, TryReadyExt},
 };
 
+/// Requests a batch of signing-key documents from one trusted notary.
+///
+/// The request is split by configured batch size and concurrency. Malformed
+/// individual documents are skipped, while a failed batch aborts the operation.
 #[implement(super::Service)]
 pub(super) async fn batch_notary_request<'a, S, K>(
 	&self,
@@ -135,6 +145,10 @@ where
 		.await
 }
 
+/// Requests signing-key documents for one target from a trusted notary.
+///
+/// The query requires the configured minimum validity horizon. Malformed
+/// documents in an otherwise successful response are omitted from the iterator.
 #[implement(super::Service)]
 pub async fn notary_request(
 	&self,
@@ -161,6 +175,10 @@ pub async fn notary_request(
 	Ok(response)
 }
 
+/// Requests the current signing-key document directly from its origin server.
+///
+/// The response must deserialize and name the requested target; a mismatched
+/// `server_name` is rejected as a bad server response.
 #[implement(super::Service)]
 pub async fn server_request(&self, target: &ServerName) -> Result<ServerSigningKeys> {
 	use get_server_keys::v2::Request;
