@@ -1,3 +1,4 @@
+mod profiles;
 #[cfg(test)]
 mod tests;
 mod v3;

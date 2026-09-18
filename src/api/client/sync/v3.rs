@@ -71,7 +71,10 @@ use tuwunel_service::{
 	users::InviteFilter,
 };
 
-use super::{invite_permitted, load_timeline, share_encrypted_room, strip_prev_state};
+use super::{
+	invite_permitted, load_timeline, profiles::collect as collect_profiles, share_encrypted_room,
+	strip_prev_state,
+};
 use crate::{
 	ClientIp, Ruma,
 	client::{ignored_filter, is_empty_account_data_event, with_membership},
@@ -330,7 +333,8 @@ pub(crate) async fn sync_events_route(
 				&& response.presence.is_empty()
 				&& response.account_data.is_empty()
 				&& response.device_lists.is_empty()
-				&& response.to_device.is_empty();
+				&& response.to_device.is_empty()
+				&& response.users.is_empty();
 
 			if !empty || full_state {
 				return Ok(response);
@@ -509,30 +513,40 @@ async fn build_sync_events(
 
 	device_list_updates.extend(keys_changed);
 
-	let device_list_left =
-		collect_device_list_left(services, sender_user, left_encrypted_users).await;
+	let rooms = Rooms {
+		leave: left_rooms,
+		join: joined_rooms,
+		invite: invited_rooms,
+		knock: knocked_rooms,
+	};
+
+	// The profile reads and the left-device fan-out both pend on the pool.
+	let (device_list_left, users) = join(
+		collect_device_list_left(services, sender_user, left_encrypted_users),
+		collect_profiles(services, sender_user, since, next_batch, filter, &rooms),
+	)
+	.await;
 
 	let presence_events = build_presence_events(presence_updates);
+	let device_lists = DeviceLists {
+		left: device_list_left,
+		changed: device_list_updates.into_iter().collect(),
+	};
+
+	let to_device = ToDevice {
+		events: to_device_events.unwrap_or_default(),
+	};
 
 	Ok(sync_events::v3::Response {
 		account_data: GlobalAccountData { events: account_data },
-		device_lists: DeviceLists {
-			left: device_list_left,
-			changed: device_list_updates.into_iter().collect(),
-		},
+		device_lists,
 		device_one_time_keys_count: device_one_time_keys_count.unwrap_or_default(),
 		device_unused_fallback_key_types,
 		next_batch: next_batch.to_string(),
 		presence: Presence { events: presence_events },
-		rooms: Rooms {
-			leave: left_rooms,
-			join: joined_rooms,
-			invite: invited_rooms,
-			knock: knocked_rooms,
-		},
-		to_device: ToDevice {
-			events: to_device_events.unwrap_or_default(),
-		},
+		rooms,
+		to_device,
+		users,
 	})
 }
 

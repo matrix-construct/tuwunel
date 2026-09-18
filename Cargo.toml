@@ -415,6 +415,7 @@ features = [
     "unstable-msc4380",
     "unstable-msc4383",
     "unstable-msc4388",
+    "unstable-msc4429", # profile updates for legacy sync
     "unstable-msc4439",
     "unstable-msc4466",
 ]
