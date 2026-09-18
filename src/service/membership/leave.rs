@@ -1,6 +1,10 @@
 use std::collections::HashSet;
 
-use futures::{FutureExt, StreamExt, TryFutureExt, future::ready, pin_mut};
+use futures::{
+	FutureExt, StreamExt, TryFutureExt,
+	future::{join, ready},
+	pin_mut,
+};
 use ruma::{
 	CanonicalJsonObject, CanonicalJsonValue, OwnedServerName, RoomId, UserId,
 	api::federation,
@@ -257,58 +261,61 @@ async fn remote_leave(
 	let mut make_leave_response_and_server =
 		Err!(BadServerResponse("No remote server available to assist in leaving {room_id}."));
 
-	let mut servers: HashSet<OwnedServerName> = self
+	let invite_servers = self
 		.services
 		.state_cache
 		.servers_invite_via(room_id)
-		.chain(self.services.state_cache.room_servers(room_id))
-		.map(ToOwned::to_owned)
-		.collect()
-		.await;
+		.map(ToOwned::to_owned);
 
-	match self
+	let room_servers = self
 		.services
 		.state_cache
-		.invite_state(user_id, room_id)
-		.await
-	{
-		| Ok(invite_state) => {
-			servers.extend(
-				invite_state
-					.iter()
-					.filter_map(|event| event.get_field("sender").ok().flatten())
-					.filter_map(|sender: &str| UserId::parse(sender).ok())
-					.map(|user| user.server_name().to_owned()),
-			);
-		},
-		| _ => {
-			match self
-				.services
+		.room_servers(room_id)
+		.map(ToOwned::to_owned);
+
+	let servers = invite_servers
+		.chain(room_servers)
+		.collect::<HashSet<OwnedServerName>>();
+
+	let invite_state = self
+		.services
+		.state_cache
+		.invite_state(user_id, room_id);
+
+	let (servers, invite_state) = join(servers, invite_state).await;
+
+	let (state, is_knock) = match invite_state {
+		| Ok(state) => (state, false),
+		| _ =>
+			self.services
 				.state_cache
 				.knock_state(user_id, room_id)
-				.await
-			{
-				| Ok(knock_state) => {
-					servers.extend(
-						knock_state
-							.iter()
-							.filter_map(|event| event.get_field("sender").ok().flatten())
-							.filter_map(|sender: &str| UserId::parse(sender).ok())
-							.filter_map(|sender| {
-								(!self.services.globals.user_is_local(&sender))
-									.then(|| sender.server_name().to_owned())
-							}),
-					);
-				},
-				| _ => {},
-			}
-		},
-	}
+				.map(Result::unwrap_or_default)
+				.map(|state| (state, true))
+				.await,
+	};
 
-	servers.insert(user_id.server_name().to_owned());
-	if let Some(room_id_server_name) = room_id.server_name() {
-		servers.insert(room_id_server_name.to_owned());
-	}
+	let extend_servers = |mut servers: HashSet<OwnedServerName>| {
+		servers.extend(
+			state
+				.iter()
+				.filter_map(|event| event.get_field("sender").ok().flatten())
+				.filter_map(|sender: &str| UserId::parse(sender).ok())
+				.filter(|sender| !is_knock || !self.services.globals.user_is_local(sender))
+				.map(|sender| sender.server_name().to_owned()),
+		);
+
+		servers.insert(user_id.server_name().to_owned());
+		if let Some(room_id_server_name) = room_id.server_name() {
+			servers.insert(room_id_server_name.to_owned());
+		}
+
+		servers
+	};
+
+	let servers = extend_servers(servers);
+
+	drop(state);
 
 	debug_info!("servers in remote_leave_room: {servers:?}");
 

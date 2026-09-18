@@ -67,22 +67,17 @@ async fn remote_invite(
 			.fill_profile_data(user_id, &mut content)
 			.await;
 
-		let (pdu, pdu_json) = self
-			.services
-			.timeline
-			.create_hash_and_sign_event(
-				PduBuilder::state(user_id.to_string(), &content),
-				sender_user,
-				room_id,
-				&state_lock,
-			)
-			.await?;
+		let event = self.services.timeline.create_hash_and_sign_event(
+			PduBuilder::state(user_id.to_string(), &content),
+			sender_user,
+			room_id,
+			&state_lock,
+		);
 
-		let room_version_id = self
-			.services
-			.state
-			.get_room_version(room_id)
-			.await?;
+		let room_version_id = self.services.state.get_room_version(room_id);
+		let (event, room_version_id) = join(event, room_version_id).await;
+		let (pdu, pdu_json) = event?;
+		let room_version_id = room_version_id?;
 
 		let invite_room_state = self
 			.services
@@ -95,6 +90,19 @@ async fn remote_invite(
 		(pdu, pdu_json, invite_room_state, room_version_id)
 	};
 
+	let event = self
+		.services
+		.federation
+		.format_pdu_into(pdu_json.clone(), Some(&room_version_id));
+
+	let via = self
+		.services
+		.state_cache
+		.servers_route_via(room_id)
+		.map(Result::ok);
+
+	let (event, via) = join(event, via).await;
+
 	let response = self
 		.services
 		.federation
@@ -102,21 +110,12 @@ async fn remote_invite(
 			room_id: room_id.to_owned(),
 			event_id: (*pdu.event_id).to_owned(),
 			room_version: room_version_id.clone(),
-			event: self
-				.services
-				.federation
-				.format_pdu_into(pdu_json.clone(), Some(&room_version_id))
-				.await,
+			event,
 			invite_room_state: invite_room_state
 				.into_iter()
 				.map(RawStrippedState::Pdu)
 				.collect(),
-			via: self
-				.services
-				.state_cache
-				.servers_route_via(room_id)
-				.await
-				.ok(),
+			via,
 		})
 		.await
 		.map_err(|e| match e.kind() {

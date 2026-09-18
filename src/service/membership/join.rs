@@ -6,7 +6,7 @@ use std::{
 	sync::Arc,
 };
 
-use futures::{FutureExt, StreamExt, TryFutureExt, TryStreamExt};
+use futures::{FutureExt, StreamExt, TryFutureExt, TryStreamExt, future::join};
 use ruma::{
 	CanonicalJsonObject, CanonicalJsonValue, OwnedEventId, OwnedServerName, OwnedUserId, RoomId,
 	RoomOrAliasId, RoomVersionId, UserId,
@@ -1112,25 +1112,18 @@ pub(super) async fn get_servers_for_room(
 	via: &[OwnedServerName],
 ) -> Result<Vec<OwnedServerName>> {
 	// add invited vias
-	let mut additional_servers = services
+	let additional_servers = services
 		.state_cache
 		.servers_invite_via(room_id)
 		.map(ToOwned::to_owned)
-		.collect::<Vec<_>>()
-		.await;
+		.collect::<Vec<_>>();
 
-	// add invite senders' servers
-	additional_servers.extend(
-		services
-			.state_cache
-			.invite_state(user_id, room_id)
-			.await
-			.unwrap_or_default()
-			.iter()
-			.filter_map(|event| event.get_field("sender").ok().flatten())
-			.filter_map(|sender: &str| UserId::parse(sender).ok())
-			.map(|user| user.server_name().to_owned()),
-	);
+	let invite_state = services
+		.state_cache
+		.invite_state(user_id, room_id)
+		.map(Result::unwrap_or_default);
+
+	let (additional_servers, invite_state) = join(additional_servers, invite_state).await;
 
 	let mut servers = Vec::from(via);
 	shuffle(&mut servers);
@@ -1153,7 +1146,20 @@ pub(super) async fn get_servers_for_room(
 		}
 	}
 
-	shuffle(&mut additional_servers);
+	let extend_and_shuffle = |mut servers: Vec<OwnedServerName>| {
+		servers.extend(
+			invite_state
+				.iter()
+				.filter_map(|event| event.get_field("sender").ok().flatten())
+				.filter_map(|sender: &str| UserId::parse(sender).ok())
+				.map(|user| user.server_name().to_owned()),
+		);
+
+		shuffle(&mut servers);
+		servers
+	};
+
+	let additional_servers = extend_and_shuffle(additional_servers);
 
 	servers.extend_from_slice(&additional_servers);
 
