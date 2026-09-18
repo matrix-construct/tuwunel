@@ -14,7 +14,12 @@ use std::{
 	sync::{Arc, RwLock},
 };
 
-use futures::{Stream, StreamExt, TryStreamExt, future::join5, pin_mut};
+use futures::{
+	Stream, StreamExt, TryStreamExt,
+	future::join5,
+	pin_mut,
+	stream::{empty, select},
+};
 use ruma::{
 	OwnedRoomId, OwnedServerName, RoomId, ServerName, UserId,
 	events::{AnyStrippedStateEvent, AnySyncStateEvent, room::member::MembershipState},
@@ -26,8 +31,7 @@ use tuwunel_core::{
 	matrix::{Event, Pdu, event::Owned},
 	trace,
 	utils::{
-		self, BoolExt,
-		future::OptionStream,
+		self,
 		result::NotFound,
 		stream::{BroadbandExt, ReadyExt, TryIgnore},
 	},
@@ -571,49 +575,43 @@ pub fn user_memberships<'a>(
 	user_id: &'a UserId,
 	mask: Option<&[MembershipState]>,
 ) -> impl Stream<Item = (MembershipState, &RoomId)> + Send + 'a {
-	use MembershipState::*;
-	use futures::stream::select;
-
 	let joined = mask
-		.is_none_or(|mask| mask.contains(&Join))
-		.then_async(|| {
+		.is_none_or(|mask| mask.contains(&MembershipState::Join))
+		.then(|| {
 			self.rooms_joined(user_id)
-				.map(|room_id| (Join, room_id))
-				.boxed()
-				.into_future()
-		});
+				.map(|room_id| (MembershipState::Join, room_id))
+				.left_stream()
+		})
+		.unwrap_or_else(|| empty().right_stream());
 
 	let invited = mask
-		.is_none_or(|mask| mask.contains(&Invite))
-		.then_async(|| {
+		.is_none_or(|mask| mask.contains(&MembershipState::Invite))
+		.then(|| {
 			self.rooms_invited(user_id)
-				.map(|room_id| (Invite, room_id))
-				.boxed()
-				.into_future()
-		});
+				.map(|room_id| (MembershipState::Invite, room_id))
+				.left_stream()
+		})
+		.unwrap_or_else(|| empty().right_stream());
 
 	let knocked = mask
-		.is_none_or(|mask| mask.contains(&Knock))
-		.then_async(|| {
+		.is_none_or(|mask| mask.contains(&MembershipState::Knock))
+		.then(|| {
 			self.rooms_knocked(user_id)
-				.map(|room_id| (Knock, room_id))
-				.boxed()
-				.into_future()
-		});
+				.map(|room_id| (MembershipState::Knock, room_id))
+				.left_stream()
+		})
+		.unwrap_or_else(|| empty().right_stream());
 
 	let left = mask
-		.is_none_or(|mask| mask.contains(&Leave))
-		.then_async(|| {
+		.is_none_or(|mask| mask.contains(&MembershipState::Leave))
+		.then(|| {
 			self.rooms_left(user_id)
-				.map(|room_id| (Leave, room_id))
-				.boxed()
-				.into_future()
-		});
+				.map(|room_id| (MembershipState::Leave, room_id))
+				.left_stream()
+		})
+		.unwrap_or_else(|| empty().right_stream());
 
-	select(
-		select(joined.stream(), left.stream()),
-		select(invited.stream(), knocked.stream()),
-	)
+	select(select(joined, left), select(invited, knocked))
 }
 
 /// Streams rooms in which a user is currently indexed as joined.

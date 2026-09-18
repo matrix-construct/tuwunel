@@ -160,6 +160,7 @@ fn membership_rooms<'a>(
 		.state_cache
 		.user_memberships(user_id, Some(CURRENT_MEMBERSHIPS))
 		.map(|(_, room_id)| room_id.to_owned())
+		.boxed() // demarcation for size
 }
 
 #[implement(Service)]
