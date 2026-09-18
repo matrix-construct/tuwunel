@@ -2343,11 +2343,12 @@
 
 # Prevent media from being embedded in frames, including same-origin frames.
 #
-# Setting false omits `frame-ancestors` from the download and thumbnail
-# Content-Security-Policy; other media security controls remain in place.
-# Requires a restart, and reverse proxy headers may still prevent framing.
+# This is disabled by default for compatibility with attachment viewers.
+# Enabling it adds `frame-ancestors 'none'` to the download and thumbnail
+# Content-Security-Policy. Requires a restart, and reverse proxy headers may
+# still prevent framing.
 #
-#media_deny_framing = true
+#media_deny_framing = false
 
 # Enable the legacy unauthenticated Matrix media repository endpoints.
 # These endpoints consist of:

@@ -6,9 +6,9 @@
 //! and every state of the MSC2705 `animated` parameter, over both client
 //! surfaces, and pins what a client observes as a snapshot. Both are swept
 //! because they reach one service through separate handlers, so either can
-//! regress alone. The same boot reads the MSC4149 policy on every client
-//! media route, download and thumbnail alike, since a header the snapshot
-//! does not carry needs a check of its own.
+//! regress alone. The same boot reads the default media policy on every
+//! client media route, download and thumbnail alike, since a header the
+//! snapshot does not carry needs a check of its own.
 //!
 //! Regenerate deliberately, never to make a red run green:
 //! `INSTA_FORCE_UPDATE=1 cargo +nightly test --test media_baseline`.
@@ -43,7 +43,7 @@ mod tests {
 	/// check is of what a client receives and not of what the server meant.
 	const POLICY: &str = concat!(
 		"sandbox;default-src 'none';script-src 'none';font-src 'none';",
-		"frame-ancestors 'none';form-action 'none';base-uri 'none'",
+		"form-action 'none';base-uri 'none'",
 	);
 
 	/// One of the two client thumbnail surfaces.
@@ -114,7 +114,7 @@ mod tests {
 		let runtime = Runtime::new(Some(&args))?;
 		let server = Server::new(Some(&args), Some(&runtime))?;
 
-		assert!(server.server.config.media_deny_framing);
+		assert!(!server.server.config.media_deny_framing);
 
 		let result = runtime.block_on(async {
 			let services = async_start(&server).await?;

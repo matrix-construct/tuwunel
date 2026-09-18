@@ -469,7 +469,7 @@ in the [Out of scope](#out-of-scope) section.
 | MSC4155 | ✅ ● | 90/100 | Invite filtering | Six glob lists evaluated per sender; blanket block outranks the ignore list |
 | MSC4154 | ✅ ● | 100/100 | Request max body size | max_request_size default 24MB, M_TOO_LARGE returns 413 |
 | MSC4152 | ❌ ● | 0/0 | Room labeling and filtering | room labels and /rooms/{roomId}/labels not implemented |
-| MSC4149 | ✅ ● | 100/100 | Update CSP Directives for Media Repository | Media CSP is the MSC set on every client download/thumbnail route; wire-tested |
+| MSC4149 | ✅ ● | 100/100 | Update CSP Directives for Media Repository | MSC policy available; frame denial defaults off for attachment compatibility |
 | MSC4145 | ❌ ● | 0/0 | Simple verified accounts | m.verified profile field and endpoint not implemented |
 | MSC4143 | 🟨 ◐ | 60/60 | MatrixRTC | GET rtc/transports served; slots and sticky membership are client and MSC4354 |
 | MSC4141 | ❌ ● | 0/0 | Time based notification filtering | time_and_day push rule condition not supported |

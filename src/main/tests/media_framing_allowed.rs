@@ -1,6 +1,6 @@
 #![cfg(all(test, feature = "media_thumbnail"))]
 
-//! Media responses with the frame ancestry restriction disabled.
+//! Media responses with the frame ancestry restriction enabled.
 //!
 //! This binary boots separately from the default-policy baseline so each
 //! process initializes the server once.
@@ -25,11 +25,11 @@ mod tests {
 
 	const POLICY: &str = concat!(
 		"sandbox;default-src 'none';script-src 'none';font-src 'none';",
-		"form-action 'none';base-uri 'none'",
+		"frame-ancestors 'none';form-action 'none';base-uri 'none'",
 	);
 
 	#[test]
-	fn framing_removes_only_the_ancestor_restriction() -> Result {
+	fn framing_restriction_can_be_enabled() -> Result {
 		let listener = TcpListener::bind(("127.0.0.1", 0))?;
 		let port = listener.local_addr()?.port();
 		let args = [
@@ -37,7 +37,7 @@ mod tests {
 			format!("port={port}"),
 			"listening=true".to_owned(),
 			"allow_legacy_media=true".to_owned(),
-			"media_deny_framing=false".to_owned(),
+			"media_deny_framing=true".to_owned(),
 			"log=\"error\"".to_owned(),
 		]
 		.into_iter()
@@ -46,7 +46,7 @@ mod tests {
 		let runtime = Runtime::new(Some(&args))?;
 		let server = Server::new(Some(&args), Some(&runtime))?;
 
-		assert!(!server.server.config.media_deny_framing);
+		assert!(server.server.config.media_deny_framing);
 
 		runtime.block_on(async {
 			let services = async_start(&server).await?;

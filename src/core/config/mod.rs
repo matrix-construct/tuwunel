@@ -2737,10 +2737,11 @@ pub struct Config {
 
 	/// Prevent media from being embedded in frames, including same-origin frames.
 	///
-	/// Setting false omits `frame-ancestors` from the download and thumbnail
-	/// Content-Security-Policy; other media security controls remain in place.
-	/// Requires a restart, and reverse proxy headers may still prevent framing.
-	#[serde(default = "true_fn")]
+	/// This is disabled by default for compatibility with attachment viewers.
+	/// Enabling it adds `frame-ancestors 'none'` to the download and thumbnail
+	/// Content-Security-Policy. Requires a restart, and reverse proxy headers may
+	/// still prevent framing.
+	#[serde(default)]
 	pub media_deny_framing: bool,
 
 	/// Enable the legacy unauthenticated Matrix media repository endpoints.
