@@ -1,3 +1,10 @@
+//! Durable email-verification proofs and UIAA ownership claims.
+//!
+//! Pending rows bind a client secret, token, address, expiry, and use state to
+//! a deterministic session identifier. Keyed in-memory locks serialize local
+//! updates while database transactions keep claim indexes aligned with proof
+//! state.
+
 use std::time::{Duration, SystemTime};
 
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD as b64encode};
@@ -40,9 +47,12 @@ enum PendingUse {
 	Spent,
 }
 
-/// CBOR value of a `threepidsid_pending` row. The whole row carries a TTL via
-/// `expires_at` so a validated-but-unconsumed session self-reaps rather than
-/// leaking.
+/// Stored state for a pending third-party identifier validation.
+///
+/// The `expires_at` timestamp is enforced lazily when operations read the row.
+/// Expiry-aware mutating operations delete an expired row, but unaccessed rows
+/// and non-consuming [`super::Service::session_validated`] checks do not
+/// self-reap it.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 struct Pending {
 	client_secret: String,
@@ -57,20 +67,26 @@ struct Pending {
 	use_state: PendingUse,
 }
 
-/// Result of [`create_or_reuse_pending`]: the session id to hand the client,
-/// and the freshly minted token when a new message must be sent. A reused
-/// session yields `None`, signalling no new mail.
+/// Outcome of creating or reusing a pending verification session.
+///
+/// The session identifier is always returned to the client. A newly minted
+/// token is present only when the caller must send another verification
+/// message.
 #[derive(Clone, Debug)]
 pub struct PendingOutcome {
+	/// Deterministic identifier of the pending verification session.
 	pub sid: String,
+
+	/// New token to deliver, or `None` when an existing send is reused.
 	pub freshly_minted_token: Option<String>,
 }
 
-/// Open a pending verification, or reuse an in-flight one for the same
-/// request identity. The session id is derived from `(medium, address,
-/// client_secret)`, so a resubmit collides on the same row: a non-validated
-/// session whose `send_attempt` did not advance returns the same `sid` with no
-/// new token (and thus no new mail), per the send-attempt dedup rule.
+/// Opens or reuses a pending verification for one request identity.
+///
+/// The session identifier is derived from the medium, address, and client
+/// secret. A live unvalidated session with no greater send attempt is reused
+/// without minting another token; other accepted attempts replace the pending
+/// proof and restart its expiry.
 #[implement(super::Service)]
 #[tracing::instrument(level = "debug", skip(self, client_secret))]
 pub async fn create_or_reuse_pending(
@@ -122,10 +138,11 @@ pub async fn create_or_reuse_pending(
 	Ok(PendingOutcome { sid, freshly_minted_token: Some(token) })
 }
 
-/// Validate a submitted token against a pending session. A wrong
-/// `client_secret` or `token` counts toward the attempt ceiling and burns the
-/// session once exceeded; the caller learns nothing about session or token
-/// liveness beyond pass or fail.
+/// Validates a submitted secret and token against a pending session.
+///
+/// Each mismatch increments the durable attempt count, and the fifth mismatch
+/// deletes the session. Failure responses avoid distinguishing the secret from
+/// the token, while expired and already-used sessions remain separate errors.
 #[implement(super::Service)]
 #[tracing::instrument(level = "debug", skip(self, client_secret, token))]
 pub async fn validate_pending_token(
@@ -178,6 +195,8 @@ pub async fn validate_pending_token(
 ///
 /// Invalid or unavailable proofs return `false`; storage and decoding failures
 /// remain errors so registration cannot silently continue through them.
+/// Repeating the same claim is accepted, while a different owner or existing
+/// session for that claim is rejected.
 #[implement(super::Service)]
 #[tracing::instrument(level = "debug", skip(self, client_secret, claim))]
 pub async fn claim_validated(
@@ -244,6 +263,8 @@ pub async fn claim_validated(
 ///
 /// Rewriting both rows keeps their persistence lifetime aligned with later
 /// successful stages that refresh the owning UIAA session.
+/// Missing, expired, or inconsistent rows return `false` after stale indexes
+/// are removed where possible.
 #[implement(super::Service)]
 #[tracing::instrument(level = "debug", skip(self, claim))]
 pub async fn refresh_claim(&self, claim: &UiaaKey) -> Result<bool> {
@@ -295,6 +316,7 @@ pub async fn refresh_claim(&self, claim: &UiaaKey) -> Result<bool> {
 ///
 /// Redemption atomically records the pending proof as spent and removes the
 /// claim index, so retries cannot yield the association again.
+/// Expired, missing, changed, or differently owned claims return an error.
 #[implement(super::Service)]
 #[tracing::instrument(level = "debug", skip(self, claim))]
 pub async fn redeem_claim(&self, claim: &UiaaKey) -> Result<Association> {
@@ -359,8 +381,11 @@ pub async fn redeem_claim(&self, claim: &UiaaKey) -> Result<Association> {
 
 /// Spends an unclaimed validated session directly, returning its association.
 ///
-/// The pending row remains as a spent tombstone until expiry so replayed
-/// requests fail closed instead of reusing a previously accepted proof.
+/// The pending row remains as a spent tombstone so replayed requests fail closed
+/// instead of reusing a previously accepted proof. An expiry-aware later
+/// operation removes the tombstone after observing expiry; passage of time alone
+/// does not delete it.
+/// Claimed sessions must instead be consumed through `Service::redeem_claim`.
 #[implement(super::Service)]
 #[tracing::instrument(level = "debug", skip(self, client_secret))]
 pub async fn redeem_validated(&self, sid: &str, client_secret: &str) -> Result<Association> {
@@ -401,6 +426,7 @@ pub async fn redeem_validated(&self, sid: &str, client_secret: &str) -> Result<A
 ///
 /// This non-consuming gate maps wrong secrets, expired or unknown sessions,
 /// spent proofs, and storage failures to `false`, revealing no extra liveness.
+/// It does not refresh, claim, redeem, or delete the pending row.
 #[implement(super::Service)]
 #[tracing::instrument(level = "debug", skip(self, client_secret))]
 pub async fn session_validated(&self, sid: &str, client_secret: &str) -> bool {

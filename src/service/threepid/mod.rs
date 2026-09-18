@@ -1,3 +1,9 @@
+//! Email third-party identifier bindings and verification sessions.
+//!
+//! The service stores bidirectional email bindings, durable pending proofs,
+//! and UIAA ownership claims. Process-local token buckets separately limit
+//! verification requests by caller address and canonical email.
+
 mod binding;
 mod canonical;
 mod pending;
@@ -15,6 +21,11 @@ use serde::{Deserialize, Serialize};
 use tuwunel_core::{Result, smallstr::SmallString, utils::MutexMap};
 use tuwunel_database::{Database, Map};
 
+/// Public helpers and result types exposed by the threepid service.
+///
+/// Email canonicalization produces storage keys, while pending outcomes tell
+/// callers whether a verification message must be sent.
+/// Both APIs preserve the service's canonical addressing rules.
 pub use self::{canonical::canonicalize_email, pending::PendingOutcome};
 
 /// Token-bucket table keyed on a throttle axis: last-refill instant and
@@ -49,11 +60,14 @@ struct Data {
 /// Stores a UIAA session identifier inline in the common case.
 ///
 /// The 32-byte budget matches identifiers minted by the UIAA service.
+/// Longer identifiers spill to the backing allocation without changing their
+/// value semantics.
 pub type UiaaSessionId = SmallString<[u8; 32]>;
 
 /// Identifies the exact UIAA session that owns a validated threepid.
 ///
 /// Owned components let the durable claim key outlive an individual request.
+/// The tuple scopes a claim by user, device, and UIAA session identifier.
 pub type UiaaKey = (OwnedUserId, OwnedDeviceId, UiaaSessionId);
 
 /// CBOR value of a `userid_email` row: the per-binding metadata, with the
@@ -65,11 +79,17 @@ struct Binding {
 	added_at: MilliSecondsSinceUnixEpoch,
 }
 
-/// Validated `(medium, address)` pair handed back when a pending verification
-/// is consumed by the add flow.
+/// Validated third-party identifier consumed from a pending proof.
+///
+/// Redemption returns the original medium and address stored with the
+/// verification session. Owning both values lets the result outlive the
+/// pending-row read.
 #[derive(Clone, Debug)]
 pub struct Association {
+	/// Third-party identifier medium that was verified.
 	pub medium: Medium,
+
+	/// Address exactly as stored by the verification session.
 	pub address: String,
 }
 

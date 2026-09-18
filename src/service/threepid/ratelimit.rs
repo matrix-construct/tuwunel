@@ -1,3 +1,8 @@
+//! Verification-request limits keyed by source and destination.
+//!
+//! Separate token buckets protect the caller-IP and target-address axes. Their
+//! state is process-local, bounded in size, and reset when the service restarts.
+
 use std::{borrow::Borrow, hash::Hash, net::IpAddr, time::Instant};
 
 use http::StatusCode;
@@ -18,15 +23,19 @@ const RATELIMIT_MAP_CAP: usize = 1 << 16;
 #[cfg(test)]
 mod tests;
 
-/// Per-caller-IP requestToken throttle, the axis bounding one source spraying
-/// many addresses.
+/// Applies the verification-request limit for one caller IP address.
+///
+/// This axis bounds one source attempting many target addresses. Exhausted
+/// buckets return a rate-limit error without a retry interval.
 #[implement(super::Service)]
 pub fn check_ip_rate_limit(&self, client: IpAddr) -> Result {
 	check_bucket(&self.ip_ratelimiter, &client, || client, RC_PER_SECOND, RC_BURST)
 }
 
-/// Per-target-address requestToken throttle, the axis bounding many sources
-/// spraying one address.
+/// Applies the verification-request limit for one target address.
+///
+/// This axis bounds many sources attempting the same exact address key.
+/// Exhausted buckets return a rate-limit error without a retry interval.
 #[implement(super::Service)]
 pub fn check_address_rate_limit(&self, address: &str) -> Result {
 	check_bucket(

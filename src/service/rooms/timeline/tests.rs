@@ -1,3 +1,8 @@
+//! Checks timeline key-boundary behavior.
+//!
+//! The focused regression test ensures a forward scan preserves the lowest
+//! valid backfilled count when deriving its database start key.
+
 use super::{Direction, PduCount, Service};
 
 #[test]

@@ -1,3 +1,8 @@
+//! Outbound email delivery.
+//!
+//! The service builds messages from the configured sender and delivers them through a pooled SMTP
+//! transport. It remains disabled when no SMTP connection URI is configured.
+
 use std::sync::Arc;
 
 use lettre::{
@@ -6,8 +11,10 @@ use lettre::{
 };
 use tuwunel_core::{Err, Result, err, implement};
 
-/// Outbound email transport. Holds a pooled SMTP connection and the configured
-/// sender mailbox when `[global.smtp]` is present; disabled otherwise.
+/// Delivers outbound email through the configured SMTP transport.
+///
+/// The service retains a pooled connection and sender mailbox when SMTP is configured. Without a
+/// connection URI it remains disabled and rejects delivery attempts.
 pub struct Service {
 	transport: Option<Transport>,
 }
@@ -32,14 +39,18 @@ impl crate::Service for Service {
 	fn name(&self) -> &str { crate::service::make_name(std::module_path!()) }
 }
 
-/// Whether the email subsystem is configured and able to send.
+/// Reports whether outbound email is configured.
+///
+/// An enabled service has both a validated sender mailbox and an SMTP transport ready for use.
 #[implement(Service)]
 #[inline]
 #[must_use]
 pub fn is_enabled(&self) -> bool { self.transport.is_some() }
 
-/// Send a single HTML message to one recipient from the configured sender.
-/// Returns an error when the subsystem is disabled or delivery fails.
+/// Sends an HTML message to one recipient from the configured sender.
+///
+/// Message construction and SMTP delivery occur in one operation. A disabled transport, invalid
+/// message, or delivery failure returns an error.
 #[implement(Service)]
 #[tracing::instrument(
 	level = "debug",
@@ -70,7 +81,10 @@ pub async fn send(&self, to: &Address, subject: &str, body_html: String) -> Resu
 	Ok(())
 }
 
-/// A malformed address maps to `M_INVALID_PARAM`.
+/// Parses a recipient address and sends an HTML message.
+///
+/// A malformed address maps to `M_INVALID_PARAM`. Valid addresses are delivered through
+/// [`Self::send`].
 #[implement(Service)]
 pub async fn send_to(&self, to: &str, subject: &str, body_html: String) -> Result<()> {
 	let to: Address = to
@@ -80,8 +94,9 @@ pub async fn send_to(&self, to: &str, subject: &str, body_html: String) -> Resul
 	self.send(&to, subject, body_html).await
 }
 
-/// Confirms a string address parses as a deliverable mailbox. A malformed
-/// address maps to `M_INVALID_PARAM`.
+/// Validates that a string parses as an email address.
+///
+/// The address is not contacted or retained. A malformed value maps to `M_INVALID_PARAM`.
 #[implement(Service)]
 pub fn check_address(&self, to: &str) -> Result<()> {
 	to.parse::<Address>()

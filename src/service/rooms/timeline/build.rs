@@ -1,3 +1,9 @@
+//! Builds and appends locally authored room events.
+//!
+//! Event construction, authorization, signing, state advancement, and timeline
+//! insertion are coordinated under the caller's room state guard. Successfully
+//! persisted events are then queued for federation to participating servers.
+
 use std::{collections::HashSet, iter::once};
 
 use futures::{FutureExt, StreamExt};
@@ -17,9 +23,12 @@ use tuwunel_core::{
 
 use super::RoomMutexGuard;
 
-/// Creates a new persisted data unit and adds it to a room. This function
-/// takes a roomid_mutex_state, meaning that only this function is able to
-/// mutate the room state.
+/// Builds, signs, validates, and persists a locally authored room event.
+///
+/// The caller's state guard serializes state derivation and advancement while
+/// the event is inserted into the accepted timeline. Federation enqueue occurs
+/// after persistence, so its failure can be returned after the event and room
+/// state have already been stored.
 #[implement(super::Service)]
 #[tracing::instrument(
 	name = "build_and_append"

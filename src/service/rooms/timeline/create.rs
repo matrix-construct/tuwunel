@@ -1,3 +1,9 @@
+//! Constructs and signs local room events without persisting them.
+//!
+//! The builder derives authorization events, depth, predecessor hashes, and
+//! unsigned prior-state data from the current room. Room-version rules then
+//! govern canonical hashing, signing, event IDs, and room IDs.
+
 use std::cmp;
 
 use futures::{StreamExt, TryStreamExt};
@@ -25,6 +31,12 @@ use tuwunel_core::{
 use super::RoomMutexGuard;
 use crate::rooms::state_res;
 
+/// Builds a canonical signed PDU and its structured representation.
+///
+/// Up to twenty current forward extremities become predecessors, and a
+/// non-create event is rejected when no predecessor is available. The event is
+/// authorization-checked and formatted under the room version, including the
+/// version-specific room-ID rules, but is not persisted here.
 #[implement(super::Service)]
 pub async fn create_hash_and_sign_event(
 	&self,

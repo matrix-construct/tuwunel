@@ -1,3 +1,9 @@
+//! Streams, indexes, and deletes accepted room timeline rows.
+//!
+//! Directional scans use encoded room-local counts, while a secondary index
+//! supports timestamp lookup. Decoded streams apply requester-specific event
+//! presentation without changing which rows are selected.
+
 use futures::{Stream, StreamExt, TryFutureExt, TryStreamExt};
 use ruma::{MilliSecondsSinceUnixEpoch, RoomId, UInt, UserId, api::Direction};
 use tuwunel_core::{
@@ -14,10 +20,16 @@ use tuwunel_database::{KeyVal, keyval::Val};
 
 use super::{PduId, RawPduId};
 
+/// Standard item yielded by decoded room timeline streams.
+///
+/// The count is the event's room-local pagination token. The producer
+/// determines whether the decoded PDU receives presentation adjustments.
 pub type PdusIterItem = (PduCount, PduEvent);
 
-/// Offset-binary `u64` of a PDU count, so key order matches signed value order
-/// (backfilled negatives sort below normal positives).
+/// Converts a signed PDU-count encoding into ordered offset-binary form.
+///
+/// The transformation preserves signed numeric ordering in unsigned database
+/// keys, placing negative backfilled counts before positive normal counts.
 #[must_use]
 pub fn bias_count(count: [u8; 8]) -> u64 {
 	i64::from_be_bytes(count)
@@ -25,6 +37,11 @@ pub fn bias_count(count: [u8; 8]) -> u64 {
 		.cast_unsigned()
 }
 
+/// Deletes every accepted timeline row belonging to a room.
+///
+/// Each event's accepted row, ID mapping, outlier copy, and timestamp index are
+/// removed in one transaction. An error stops the scan after any prior events
+/// were already removed, and metadata owned by other services is not purged.
 #[implement(super::Service)]
 pub async fn delete_pdus(&self, room_id: &RoomId) -> Result {
 	let current = self
@@ -59,6 +76,11 @@ pub async fn delete_pdus(&self, room_id: &RoomId) -> Result {
 		.await
 }
 
+/// Streams decoded room events from the timestamp index in one direction.
+///
+/// The timestamp boundary is inclusive. `user_id` controls sender-only
+/// transaction metadata, while event age is always updated. It does not filter
+/// which events are yielded.
 #[implement(super::Service)]
 pub fn pdus_near_ts(
 	&self,
@@ -77,6 +99,11 @@ pub fn pdus_near_ts(
 		.ready_and_then(move |item| Self::each_pdu(item, user_id))
 }
 
+/// Streams timestamp and PDU-ID pairs from the room timestamp index.
+///
+/// Forward scans begin at the first row at or after the timestamp, while
+/// backward scans begin at the first row at or before it. Only rows for the
+/// requested room are yielded.
 #[implement(super::Service)]
 pub fn pdu_ids_near_ts(
 	&self,
@@ -118,8 +145,11 @@ pub fn pdu_ids_near_ts(
 		.try_flatten_stream()
 }
 
-/// Returns an iterator over all PDUs in a room. Unknown rooms produce no
-/// items.
+/// Streams all accepted PDUs in a room in forward order.
+///
+/// The requesting user receives sender-only transaction metadata where
+/// applicable. Unknown rooms and all per-item storage or decoding errors are
+/// suppressed, producing only successfully presented events.
 #[implement(super::Service)]
 #[inline]
 pub fn all_pdus<'a>(
@@ -131,8 +161,11 @@ pub fn all_pdus<'a>(
 		.ignore_err()
 }
 
-/// Returns an iterator over all events and their tokens in a room that
-/// happened after the event with id `from` in order.
+/// Streams accepted room events after an optional count in forward order.
+///
+/// The count boundary is exclusive and defaults to the minimum count. The
+/// optional user controls presentation only; stream, storage, and decoding
+/// errors remain visible to the caller.
 #[implement(super::Service)]
 #[tracing::instrument(skip(self), level = "debug")]
 pub fn pdus<'a>(
@@ -154,8 +187,11 @@ pub fn pdus<'a>(
 		.try_flatten_stream()
 }
 
-/// Returns an iterator over all events and their tokens in a room that
-/// happened before the event with id `until` in reverse-order.
+/// Streams accepted room events before an optional count in reverse order.
+///
+/// The count boundary is exclusive and defaults to the maximum count. The
+/// optional user controls presentation only; stream, storage, and decoding
+/// errors remain visible to the caller.
 #[implement(super::Service)]
 #[tracing::instrument(skip(self), level = "debug")]
 pub fn pdus_rev<'a>(
@@ -177,11 +213,19 @@ pub fn pdus_rev<'a>(
 		.try_flatten_stream()
 }
 
+/// Streams raw JSON values from all accepted timeline rows.
+///
+/// Values borrow the database cursor and must be owned before they are retained
+/// across another poll. Storage errors remain in the stream.
 #[implement(super::Service)]
 pub fn pdus_raw(&self) -> impl Stream<Item = Result<Val<'_>>> + Send {
 	self.db.pduid_pdu.raw_stream().map_ok(at!(1))
 }
 
+/// Streams raw JSON values from all outlier rows.
+///
+/// Values borrow the database cursor and must be owned before they are retained
+/// across another poll. Storage errors remain in the stream.
 #[implement(super::Service)]
 pub fn outlier_pdus_raw(&self) -> impl Stream<Item = Result<Val<'_>>> + Send {
 	self.db

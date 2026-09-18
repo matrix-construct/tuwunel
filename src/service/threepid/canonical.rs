@@ -1,3 +1,9 @@
+//! Canonical email keys for binding and verification lookups.
+//!
+//! Canonicalization splits on the final at sign, lowercases both components,
+//! and expands the German sharp s. It does not otherwise normalize mailbox or
+//! domain syntax.
+
 use tuwunel_core::{Err, Result, err};
 
 /// Upper bound on an email address length, applied before canonicalization so
@@ -9,8 +15,8 @@ const MAX_EMAIL_LEN: usize = 500;
 /// Both components are lowercased, and `ß` is expanded to `ss`, so
 /// `Strauß@Example.com` and `strauss@example.com` share one key.
 ///
-/// Returns an error when the address exceeds [`MAX_EMAIL_LEN`] bytes or its
-/// final `@` does not separate nonempty local and domain parts.
+/// Returns an error when the address exceeds 500 bytes or its final `@` does
+/// not separate nonempty local and domain parts.
 pub fn canonicalize_email(address: &str) -> Result<String> {
 	if address.len() > MAX_EMAIL_LEN {
 		return Err!(Request(InvalidParam("Email address is too long")));
@@ -30,9 +36,11 @@ pub fn canonicalize_email(address: &str) -> Result<String> {
 	Ok(format!("{local}@{domain}"))
 }
 
-/// Per-character Unicode case fold. `char::to_lowercase` covers the common
-/// path; the full-fold expansions it omits (the German sharp s being the one
-/// that matters for email) are mapped explicitly.
+/// Applies the service's per-character email case fold.
+///
+/// Unicode lowercase expansion covers the common path. The German sharp s is
+/// mapped explicitly because `char::to_lowercase` does not perform that full
+/// fold.
 fn case_fold(input: &str) -> String {
 	input.chars().fold(String::new(), |mut out, c| {
 		match c {

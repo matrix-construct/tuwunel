@@ -1,3 +1,9 @@
+//! Stores accepted room events, outliers, and their timeline indexes.
+//!
+//! The service maps event IDs to per-room stream positions, presents events to
+//! users, and coordinates append, backfill, purge, and redaction operations.
+//! Timeline insertion is serialized by the innermost per-room lock.
+
 mod append;
 mod backfill;
 mod build;
@@ -18,6 +24,9 @@ use ruma::{
 	UserId, api::Direction, events::room::encrypted::Relation,
 };
 use serde::Deserialize;
+/// Re-exports the typed and raw persistent timeline identifiers.
+///
+/// Both forms encode a room-local stream position suitable for database keys.
 pub use tuwunel_core::matrix::pdu::{PduId, RawPduId};
 use tuwunel_core::{
 	Err, Result, at, err, implement,
@@ -34,9 +43,17 @@ use tuwunel_core::{
 };
 use tuwunel_database::{Database, Deserialized, Json, Map, Txn};
 
+/// Re-exports the standard timeline item and count-key transformation.
+///
+/// Timeline consumers use these alongside the service's directional streams.
 pub use self::pdus::{PdusIterItem, bias_count};
 use crate::rooms::short::{ShortRoomId, ShortStateHash};
 
+/// Provides persistent event lookup, insertion, and room timeline traversal.
+///
+/// Accepted events and outliers occupy separate maps while event IDs point to
+/// accepted timeline positions. A per-room insertion lock serializes the final
+/// mutation stage after federation and state work.
 pub struct Service {
 	services: Arc<crate::services::OnceServices>,
 	db: Data,
@@ -78,6 +95,10 @@ struct ExtractBody {
 }
 
 type RoomMutexMap = MutexMap<OwnedRoomId, ()>;
+/// Guard proving exclusive access to a room's timeline insertion path.
+///
+/// Acquire it after any federation or state guard held for the same room, and
+/// never acquire either outer guard while retaining it.
 pub type RoomMutexGuard = MutexMapGuard<OwnedRoomId, ()>;
 
 #[async_trait]
@@ -106,7 +127,10 @@ impl crate::Service for Service {
 	fn name(&self) -> &str { crate::service::make_name(std::module_path!()) }
 }
 
-/// Removes a pdu and creates a new one with the same id.
+/// Replaces the stored JSON of an accepted PDU without changing its ID.
+///
+/// A definite missing-row result is returned as `NotFound`; otherwise the
+/// accepted timeline row is overwritten in place.
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "debug")]
 pub async fn replace_pdu(&self, pdu_id: &RawPduId, pdu_json: &CanonicalJsonObject) -> Result {
@@ -132,6 +156,10 @@ pub(super) fn stage_replace_pdu(
 	txn.raw_put(&self.db.pduid_pdu, pdu_id, Json(pdu_json));
 }
 
+/// Stores an event as an outlier outside the accepted room timeline.
+///
+/// The event is keyed directly by event ID and no accepted-timeline mapping or
+/// stream position is created.
 #[implement(Service)]
 #[tracing::instrument(skip(self, pdu), level = "debug")]
 pub fn add_pdu_outlier(&self, event_id: &EventId, pdu: &CanonicalJsonObject) {
@@ -140,12 +168,19 @@ pub fn add_pdu_outlier(&self, event_id: &EventId, pdu: &CanonicalJsonObject) {
 		.raw_put(event_id, Json(pdu));
 }
 
+/// Returns the earliest accepted PDU in a room.
+///
+/// Unknown or empty rooms report the underlying stream's not-found result.
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "debug")]
 pub async fn first_pdu_in_room(&self, room_id: &RoomId) -> Result<PduEvent> {
 	self.first_item_in_room(room_id).await.map(at!(1))
 }
 
+/// Returns the latest accepted PDU in a room.
+///
+/// Presentation removes sender-only transaction metadata because no requesting
+/// user is supplied.
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "debug")]
 #[inline]
@@ -153,6 +188,10 @@ pub async fn latest_pdu_in_room(&self, room_id: &RoomId) -> Result<PduEvent> {
 	self.latest_item_in_room(None, room_id).await
 }
 
+/// Returns the earliest accepted PDU and its room-local stream count.
+///
+/// The forward room stream provides the first available item after applying
+/// ordinary presentation transformations.
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "debug")]
 pub async fn first_item_in_room(&self, room_id: &RoomId) -> Result<(PduCount, PduEvent)> {
@@ -164,6 +203,10 @@ pub async fn first_item_in_room(&self, room_id: &RoomId) -> Result<(PduCount, Pd
 		.ok_or_else(|| err!(Request(NotFound("No PDU found in room"))))
 }
 
+/// Returns the latest accepted PDU in a room.
+///
+/// `sender_user` controls presentation of sender-only transaction metadata; it
+/// does not filter events by sender.
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "debug")]
 pub async fn latest_item_in_room(
@@ -181,9 +224,10 @@ pub async fn latest_item_in_room(
 		.ok_or_else(|| err!(Request(NotFound("No PDU's found in room"))))
 }
 
-/// Returns the shortstatehash of the room at the event directly preceding the
-/// exclusive `before` param. `before` does not have to be a valid count
-/// or in the room.
+/// Returns the state snapshot at the room event directly before a count.
+///
+/// The `before` boundary is exclusive and need not identify an existing event
+/// or even belong to the room.
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "debug")]
 pub async fn prev_shortstatehash(
@@ -213,9 +257,10 @@ pub async fn prev_shortstatehash(
 		.await
 }
 
-/// Returns the shortstatehash of the room at the event directly following the
-/// exclusive `after` param. `after` does not have to be a valid count or
-/// in the room.
+/// Returns the state snapshot at the room event directly after a count.
+///
+/// The `after` boundary is exclusive and need not identify an existing event
+/// or even belong to the room.
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "debug")]
 pub async fn next_shortstatehash(
@@ -245,7 +290,10 @@ pub async fn next_shortstatehash(
 		.await
 }
 
-/// Returns the shortstatehash of the room at the event
+/// Returns the state snapshot recorded at a room timeline count.
+///
+/// The count is resolved through the room's accepted timeline row and then its
+/// event-to-state association.
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "debug")]
 pub async fn get_shortstatehash(
@@ -270,8 +318,10 @@ pub async fn get_shortstatehash(
 		.await
 }
 
-/// Returns the shorteventid in the room preceding the exclusive `before` param.
-/// `before` does not have to be a valid shorteventid or in the room.
+/// Returns the room timeline count directly before an encoded PDU ID.
+///
+/// The boundary is exclusive and need not identify an existing row. Its room
+/// component selects the timeline prefix to scan.
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "debug")]
 pub async fn prev_timeline_count(&self, before: &PduId) -> Result<PduCount> {
@@ -292,8 +342,10 @@ pub async fn prev_timeline_count(&self, before: &PduId) -> Result<PduCount> {
 		.ok_or_else(|| err!(Request(NotFound("No earlier PDU's found in room"))))
 }
 
-/// Returns the next shorteventid in the room after the exclusive `after` param.
-/// `after` does not have to be a valid shorteventid or in the room.
+/// Returns the room timeline count directly after an encoded PDU ID.
+///
+/// The boundary is exclusive and need not identify an existing row. Its room
+/// component selects the timeline prefix to scan.
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "debug")]
 pub async fn next_timeline_count(&self, after: &PduId) -> Result<PduCount> {
@@ -314,6 +366,11 @@ pub async fn next_timeline_count(&self, after: &PduId) -> Result<PduCount> {
 		.ok_or(err!(Request(NotFound("No more PDU's found in room"))))
 }
 
+/// Returns the latest normal timeline count at or below an optional bound.
+///
+/// Backfilled counts are not returned. When no normal event qualifies, the
+/// sentinel `PduCount::max()` is returned instead of a not-found error;
+/// `sender_user` affects presentation only.
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "debug")]
 pub async fn last_timeline_count(
@@ -337,6 +394,11 @@ pub async fn last_timeline_count(
 	Ok(last_count)
 }
 
+/// Returns the indexed event ID nearest a timestamp in one direction.
+///
+/// Forward lookup selects the first event at or after the timestamp; backward
+/// lookup selects the first event at or before it. The stored event timestamp
+/// is returned with the ID.
 #[implement(Service)]
 pub async fn get_event_id_near_ts(
 	&self,
@@ -353,6 +415,11 @@ pub async fn get_event_id_near_ts(
 		.await
 }
 
+/// Returns the indexed PDU ID nearest a timestamp in one direction.
+///
+/// Forward lookup selects the first event at or after the timestamp; backward
+/// lookup selects the first event at or before it. A room with no qualifying
+/// event returns `NotFound`.
 #[implement(Service)]
 pub async fn get_pdu_id_near_ts(
 	&self,
@@ -369,6 +436,11 @@ pub async fn get_pdu_id_near_ts(
 		.ok_or_else(|| err!(Request(NotFound("No event found near this timestamp."))))
 }
 
+/// Returns the accepted PDU nearest a timestamp in one direction.
+///
+/// The result contains the selected room-local count and decoded PDU. The
+/// current `_user_id` parameter has no effect and no presentation or visibility
+/// filtering is applied.
 #[implement(Service)]
 pub async fn get_pdu_near_ts(
 	&self,
@@ -423,8 +495,10 @@ fn pdu_count_to_id(shortroomid: ShortRoomId, count: PduCount, dir: Direction) ->
 	pdu_id.into()
 }
 
-/// Returns the pdu from shorteventid
-/// Checks the `eventid_outlierpdu` Tree if not found in the timeline.
+/// Returns a decoded PDU resolved from a short event ID.
+///
+/// The short ID is expanded to an event ID before accepted and outlier storage
+/// are queried through [`Service::get_pdu`].
 #[implement(Service)]
 pub async fn get_pdu_from_shorteventid(&self, shorteventid: ShortEventId) -> Result<PduEvent> {
 	let event_id: OwnedEventId = self
@@ -436,13 +510,17 @@ pub async fn get_pdu_from_shorteventid(&self, shorteventid: ShortEventId) -> Res
 	self.get_pdu(&event_id).await
 }
 
-/// Returns the pdu.
-/// Checks the `eventid_outlierpdu` Tree if not found in the timeline.
+/// Returns a decoded PDU from accepted or outlier storage.
+///
+/// Both lookups are polled concurrently, so if duplicate rows exist the first
+/// successful lookup determines the returned value.
 #[implement(Service)]
 pub async fn get_pdu(&self, event_id: &EventId) -> Result<PduEvent> { self.get(event_id).await }
 
-/// Returns the pdu.
-/// Checks the `eventid_outlierpdu` Tree if not found in the timeline.
+/// Returns a decoded PDU from outlier storage.
+///
+/// Accepted timeline storage is not consulted, and storage or decoding errors
+/// propagate to the caller.
 #[implement(Service)]
 pub async fn get_outlier_pdu(&self, event_id: &EventId) -> Result<PduEvent> {
 	self.get_outlier(event_id).await
@@ -457,22 +535,28 @@ pub async fn get_non_outlier_pdu(&self, event_id: &EventId) -> Result<PduEvent> 
 	self.get_non_outlier(event_id).await
 }
 
-/// Returns the pdu.
-/// This does __NOT__ check the outliers `Tree`.
+/// Returns a decoded PDU by its accepted timeline ID.
+///
+/// The accepted row is read directly without consulting the event-ID mapping
+/// or outlier storage.
 #[implement(Service)]
 pub async fn get_pdu_from_id(&self, pdu_id: &RawPduId) -> Result<PduEvent> {
 	self.get_from_id(pdu_id).await
 }
 
-/// Returns the json of a pdu.
-/// Checks the `eventid_outlierpdu` Tree if not found in the timeline.
+/// Returns canonical PDU JSON from accepted or outlier storage.
+///
+/// Both lookups are polled concurrently, so if duplicate rows exist the first
+/// successful lookup determines the returned value.
 #[implement(Service)]
 pub async fn get_pdu_json(&self, event_id: &EventId) -> Result<CanonicalJsonObject> {
 	self.get(event_id).await
 }
 
-/// Returns the json of a pdu.
-/// Checks the `eventid_outlierpdu` Tree if not found in the timeline.
+/// Returns canonical PDU JSON from outlier storage.
+///
+/// Accepted timeline storage is not consulted, and storage or decoding errors
+/// propagate to the caller.
 #[implement(Service)]
 pub async fn get_outlier_pdu_json(&self, event_id: &EventId) -> Result<CanonicalJsonObject> {
 	self.get_outlier(event_id).await
@@ -487,15 +571,19 @@ pub async fn get_non_outlier_pdu_json(&self, event_id: &EventId) -> Result<Canon
 	self.get_non_outlier(event_id).await
 }
 
-/// Returns the pdu as a `BTreeMap<String, CanonicalJsonValue>`.
-/// This does __NOT__ check the outliers `Tree`.
+/// Returns canonical PDU JSON by its accepted timeline ID.
+///
+/// The accepted row is read directly without consulting the event-ID mapping
+/// or outlier storage.
 #[implement(Service)]
 pub async fn get_pdu_json_from_id(&self, pdu_id: &RawPduId) -> Result<CanonicalJsonObject> {
 	self.get_from_id(pdu_id).await
 }
 
-/// Returns the pdu into T.
-/// Checks the `eventid_outlierpdu` Tree if not found in the timeline.
+/// Deserializes an event from accepted or outlier storage into `T`.
+///
+/// Both lookups are polled concurrently, so if duplicate rows exist the first
+/// successful lookup determines the returned value.
 #[implement(Service)]
 #[inline]
 pub async fn get<T>(&self, event_id: &EventId) -> Result<T>
@@ -511,8 +599,10 @@ where
 		.map(at!(0))
 }
 
-/// Returns the pdu into T.
-/// Checks the `eventid_outlierpdu` Tree if not found in the timeline.
+/// Deserializes an event from outlier storage into `T`.
+///
+/// Accepted timeline storage is not consulted, and storage or decoding errors
+/// propagate to the caller.
 #[implement(Service)]
 #[inline]
 pub async fn get_outlier<T>(&self, event_id: &EventId) -> Result<T>
@@ -541,8 +631,10 @@ where
 	self.get_from_id(&pdu_id).await
 }
 
-/// Returns the pdu into T.
-/// This does __NOT__ check the outliers `Tree`.
+/// Deserializes an accepted timeline row into `T` by PDU ID.
+///
+/// The row is read directly without consulting the event-ID mapping or outlier
+/// storage.
 #[implement(Service)]
 #[inline]
 pub async fn get_from_id<T>(&self, pdu_id: &RawPduId) -> Result<T>
@@ -552,8 +644,10 @@ where
 	self.db.pduid_pdu.get(pdu_id).await.deserialized()
 }
 
-/// Checks if pdu exists
-/// Checks the `eventid_outlierpdu` Tree if not found in the timeline.
+/// Reports whether an event exists in accepted or outlier storage.
+///
+/// The two existence checks run concurrently, and any lookup errors are
+/// treated as absence.
 #[implement(Service)]
 pub async fn pdu_exists<'a>(&'a self, event_id: &'a EventId) -> bool {
 	let non_outlier = self.non_outlier_pdu_exists(event_id);
@@ -566,10 +660,12 @@ pub async fn pdu_exists<'a>(&'a self, event_id: &'a EventId) -> bool {
 		.is_ok()
 }
 
-/// Resolves once `event_id` lands in the timeline (its `eventid_pduid` row is
-/// written), waking a task waiting for the event to arrive via concurrent
-/// ingest. Registration is eager: the watcher is in place when this returns,
-/// before the future is awaited.
+/// Returns a future that resolves on the next event-to-PDU mapping mutation.
+///
+/// Registration against the event-to-PDU mapping is eager, so the watcher is
+/// installed before the returned future is first awaited. Accepted insertion
+/// is the normal wakeup, but any mutation under the event-ID prefix can resolve
+/// the future.
 #[implement(Service)]
 pub fn watch_event<'a>(&'a self, event_id: &EventId) -> impl Future<Output = ()> + Send + 'a {
 	self.db
@@ -577,8 +673,10 @@ pub fn watch_event<'a>(&'a self, event_id: &EventId) -> impl Future<Output = ()>
 		.watch_raw_prefix_once(event_id)
 }
 
-/// Like get_non_outlier_pdu(), but without the expense of fetching and
-/// parsing the PduEvent
+/// Checks whether an event has an accepted timeline row.
+///
+/// The event-to-PDU mapping is resolved first and the target row is then tested
+/// without fetching or decoding the PDU.
 #[implement(Service)]
 pub async fn non_outlier_pdu_exists(&self, event_id: &EventId) -> Result {
 	let pduid = self.get_pdu_id(event_id).await?;
@@ -586,15 +684,19 @@ pub async fn non_outlier_pdu_exists(&self, event_id: &EventId) -> Result {
 	self.db.pduid_pdu.exists(&pduid).await
 }
 
-/// Like get_non_outlier_pdu(), but without the expense of fetching and
-/// parsing the PduEvent
+/// Checks whether an event has an outlier row.
+///
+/// Accepted timeline storage is not consulted and the PDU is not fetched or
+/// decoded.
 #[implement(Service)]
 #[inline]
 pub async fn outlier_pdu_exists(&self, event_id: &EventId) -> Result {
 	self.db.eventid_outlierpdu.exists(event_id).await
 }
 
-/// Returns the `count` of this pdu's id.
+/// Returns the room-local timeline count assigned to an accepted event.
+///
+/// The event ID is resolved through the accepted event-to-PDU mapping.
 #[implement(Service)]
 pub async fn get_pdu_count(&self, event_id: &EventId) -> Result<PduCount> {
 	self.get_pdu_id(event_id)
@@ -602,7 +704,10 @@ pub async fn get_pdu_count(&self, event_id: &EventId) -> Result<PduCount> {
 		.map(RawPduId::pdu_count)
 }
 
-/// Returns the `shorteventid` from the `pdu_id`
+/// Returns the short event ID represented by an accepted PDU ID.
+///
+/// The accepted row supplies the full event ID, which is then resolved through
+/// the short-ID service.
 #[implement(Service)]
 pub async fn get_shorteventid_from_pdu_id(&self, pdu_id: &PduId) -> Result<ShortEventId> {
 	let event_id = self.get_event_id_from_pdu_id(pdu_id).await?;
@@ -613,7 +718,9 @@ pub async fn get_shorteventid_from_pdu_id(&self, pdu_id: &PduId) -> Result<Short
 		.await
 }
 
-/// Returns the `event_id` from the `pdu_id`
+/// Returns the event ID stored at an accepted PDU ID.
+///
+/// The accepted row is decoded as a PDU to recover its event ID.
 #[implement(Service)]
 pub async fn get_event_id_from_pdu_id(&self, pdu_id: &PduId) -> Result<OwnedEventId> {
 	let pdu_id: RawPduId = (*pdu_id).into();
@@ -623,7 +730,10 @@ pub async fn get_event_id_from_pdu_id(&self, pdu_id: &PduId) -> Result<OwnedEven
 		.await
 }
 
-/// Returns the `pdu_id` from the `shorteventid`
+/// Returns the accepted PDU ID associated with a short event ID.
+///
+/// The short ID is first expanded to its full event ID before the timeline
+/// mapping is read.
 #[implement(Service)]
 pub async fn get_pdu_id_from_shorteventid(&self, shorteventid: ShortEventId) -> Result<RawPduId> {
 	let event_id: OwnedEventId = self
@@ -635,7 +745,10 @@ pub async fn get_pdu_id_from_shorteventid(&self, shorteventid: ShortEventId) -> 
 	self.get_pdu_id(&event_id).await
 }
 
-/// Returns the pdu's id.
+/// Returns the accepted timeline ID associated with an event.
+///
+/// Outlier storage is not consulted because outliers have no room timeline
+/// position.
 #[implement(Service)]
 pub async fn get_pdu_id(&self, event_id: &EventId) -> Result<RawPduId> {
 	self.db

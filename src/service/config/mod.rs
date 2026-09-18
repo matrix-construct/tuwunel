@@ -1,3 +1,8 @@
+//! Reloadable homeserver configuration.
+//!
+//! The service exposes the active configuration and replaces it after validation.
+//! Reloads replay the startup sources so command-line paths and overrides remain in force.
+
 #[cfg(all(feature = "systemd", target_os = "linux"))]
 use std::borrow::Cow;
 use std::{iter::empty, ops::Deref, path::Path, sync::Arc};
@@ -13,6 +18,10 @@ use tuwunel_core::{
 	error, implement,
 };
 
+/// Provides access to the active configuration and its reload path.
+///
+/// Values are read through the shared server configuration handle. Reloads publish a
+/// replacement only after the new configuration passes the reload checks.
 pub struct Service {
 	server: Arc<Server>,
 }
@@ -104,6 +113,10 @@ fn one_line(status: &str) -> String {
 		.collect()
 }
 
+/// Loads, validates, and publishes a replacement configuration.
+///
+/// The stored startup sources are replayed together with `paths`. The active configuration
+/// remains unchanged when loading or reload validation fails.
 #[implement(Service)]
 pub fn reload<'a, I>(&'a self, paths: I) -> Result<Arc<Config>>
 where

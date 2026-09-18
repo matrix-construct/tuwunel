@@ -1,3 +1,9 @@
+//! Retrieves older room history from federation and inserts validated events.
+//!
+//! Candidate servers are selected from trusted and room-related origins, while
+//! remote timestamp claims are checked against the ingested event. Backfilled
+//! events receive negative stream counts so they sort before normal history.
+
 use std::{collections::HashSet, iter::once, num::NonZeroUsize};
 
 use futures::{
@@ -48,6 +54,11 @@ struct TimestampHit {
 	origin_server_ts: MilliSecondsSinceUnixEpoch,
 }
 
+/// Attempts federation backfill when a request reaches local history's edge.
+///
+/// Backfill is skipped after the create event and for effectively empty rooms
+/// that are not world-readable. No candidate, a remote fetch failure, or an
+/// empty accepted chunk is treated as a successful best-effort outcome.
 #[implement(super::Service)]
 #[tracing::instrument(name = "backfill", level = "debug", skip(self))]
 pub async fn backfill_if_required(&self, room_id: &RoomId, from: PduCount) -> Result {
@@ -220,11 +231,11 @@ async fn backfill_candidates(&self, room_id: &RoomId) -> Candidates {
 }
 
 #[implement(super::Service)]
-/// Find the nearest visible event to the requested timestamp.
+/// Finds the nearest event to a timestamp with a federation fallback.
 ///
 /// The local answer is retained unless a closer remote claim can be ingested.
-/// Its event must be readable in this room with the claimed timestamp on the
-/// requested side of the query.
+/// The ingested event must belong to this room and its actual timestamp must
+/// remain on the requested side of the query.
 pub async fn get_event_id_near_ts_with_fallback(
 	&self,
 	room_id: &RoomId,
@@ -365,9 +376,12 @@ async fn backfill_event(
 	}
 }
 
-/// Fetch a single event we have not received over federation and persist it via
-/// the backfill path, so a subsequent local lookup resolves it. Checks are off:
-/// `backfill_pdu` performs full signature, hash, and auth validation itself.
+/// Fetches one remote event and persists it through the backfill path.
+///
+/// Fetcher checks are disabled only for retrieval; `backfill_pdu`
+/// performs signature, hash, and authorization validation. An event already
+/// accepted completes successfully without another insertion, while a stored
+/// outlier is still validated and promoted.
 #[implement(super::Service)]
 #[tracing::instrument(skip(self), level = "debug")]
 pub async fn fetch_remote_event(&self, room_id: &RoomId, event_id: &EventId) -> Result {
@@ -385,6 +399,12 @@ pub async fn fetch_remote_event(&self, room_id: &RoomId, event_id: &EventId) -> 
 	Ok(())
 }
 
+/// Validates and inserts one remotely supplied event as backfilled history.
+///
+/// An already accepted duplicate returns `false` without insertion. A new event
+/// or stored outlier receives a negative backfill count, moves to accepted
+/// storage, updates its timestamp and ID indexes, and adds searchable message
+/// or topic content.
 #[implement(super::Service)]
 #[tracing::instrument(skip(self, pdu), level = "debug")]
 pub async fn backfill_pdu(

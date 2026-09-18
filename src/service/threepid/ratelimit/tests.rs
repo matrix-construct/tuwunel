@@ -1,3 +1,8 @@
+//! Tests for the threepid token-bucket capacity policy.
+//!
+//! The coverage verifies that insertion beyond the fixed map capacity evicts
+//! an old bucket. It also confirms that the table does not grow past its bound.
+
 use std::time::{Duration, Instant};
 
 use super::{EmailKey, Ratelimiter, check_bucket_at};

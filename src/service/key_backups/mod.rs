@@ -1,3 +1,8 @@
+//! Versioned room key backup storage.
+//!
+//! The service stores encrypted session keys by user, backup version, room, and session. Backup
+//! metadata and change tags are maintained alongside the key rows for client synchronization.
+
 use std::{cmp::Ordering, collections::BTreeMap, module_path, sync::Arc};
 
 use futures::{FutureExt, Stream, StreamExt, TryStreamExt, future::try_join};
@@ -25,6 +30,10 @@ type StoredKeyVal<'a> = (StoredKey<'a>, Raw<KeyBackupData>);
 type StoredRoomKeyVal<'a> = ((Ignore, Ignore, Ignore, &'a str), Raw<KeyBackupData>);
 type VersionKey<'a> = (&'a UserId, &'a str);
 
+/// Stores and mutates versioned room key backups.
+///
+/// Mutations take a per-user lock so concurrent update paths cannot interleave. Read operations
+/// stream directly from the versioned database prefixes.
 pub struct Service {
 	db: Data,
 	mutex: MutexMap<OwnedUserId, ()>,
@@ -53,6 +62,14 @@ impl crate::Service for Service {
 	fn name(&self) -> &str { crate::service::make_name(module_path!()) }
 }
 
+/// Creates an empty backup version and returns its identifier.
+///
+/// The version and initial change tag use separate global sequence numbers. Metadata and the change
+/// tag are committed together while the user's backup lock is held.
+///
+/// # Panics
+///
+/// Panics when dispatching either global sequence number fails.
 #[implement(Service)]
 pub async fn create_backup(
 	&self,
@@ -74,6 +91,10 @@ pub async fn create_backup(
 	Ok(version_string)
 }
 
+/// Deletes a backup version and its stored session keys.
+///
+/// Metadata and the change tag are removed before the version's key rows are scanned. Missing
+/// versions are accepted, and unreadable key rows are skipped during cleanup.
 #[implement(Service)]
 pub async fn delete_backup(&self, user_id: &UserId, version: &str) {
 	let _backup_lock = self.mutex.lock(user_id).await;
@@ -93,6 +114,14 @@ pub async fn delete_backup(&self, user_id: &UserId, version: &str) {
 		.await;
 }
 
+/// Replaces a backup version's metadata and advances its change tag.
+///
+/// The version must already exist. Its metadata and fresh change tag are committed together while
+/// the user's backup lock is held.
+///
+/// # Panics
+///
+/// Panics when dispatching the new global sequence number fails.
 #[implement(Service)]
 pub async fn update_backup<'a>(
 	&self,
@@ -122,6 +151,10 @@ pub async fn update_backup<'a>(
 	Ok(version)
 }
 
+/// Returns a user's latest numeric backup version.
+///
+/// The greatest parseable version number is selected. Unreadable rows and nonnumeric version names
+/// are skipped, and an absent result is reported as not found.
 #[implement(Service)]
 pub async fn get_latest_backup_version(&self, user_id: &UserId) -> Result<String> {
 	let key = (user_id, Interfix);
@@ -144,6 +177,10 @@ pub async fn get_latest_backup_version(&self, user_id: &UserId) -> Result<String
 	Ok(latest.to_string())
 }
 
+/// Returns a user's latest backup version and its algorithm metadata.
+///
+/// The version is selected by [`Self::get_latest_backup_version`]. Missing or unreadable metadata
+/// is reported as a not-found request error.
 #[implement(Service)]
 pub async fn get_latest_backup(
 	&self,
@@ -161,6 +198,10 @@ pub async fn get_latest_backup(
 		.map_err(|e| err!(Request(NotFound("No backup found: {e}"))))
 }
 
+/// Loads the algorithm metadata for a backup version.
+///
+/// The raw value retains the stored JSON representation while constraining it to
+/// [`BackupAlgorithm`].
 #[implement(Service)]
 pub async fn get_backup(&self, user_id: &UserId, version: &str) -> Result<Raw<BackupAlgorithm>> {
 	let key = (user_id, version);
@@ -175,6 +216,11 @@ pub async fn get_backup(&self, user_id: &UserId, version: &str) -> Result<Raw<Ba
 ///
 /// The stream is drained serially while this user's backup mutations are
 /// locked. The returned count and etag describe the completed operation.
+///
+/// # Panics
+///
+/// Panics when an accepted key requires a global sequence number that cannot be allocated or
+/// persisted.
 #[implement(Service)]
 pub async fn add_keys<'a, S>(
 	&self,
@@ -261,8 +307,10 @@ async fn add_key(
 	Ok(())
 }
 
-// Per MSC1219: prefer verified, then lower `first_message_index`, then lower
-// `forwarded_count`; equal on all three keeps the existing key.
+/// Reports whether a new session key should replace the stored key.
+///
+/// MSC1219 prefers verified keys, then lower `first_message_index`, then lower
+/// `forwarded_count`. A complete tie preserves the existing key.
 fn is_better_key(old: &Raw<KeyBackupData>, new: &Raw<KeyBackupData>) -> Result<bool> {
 	let old_verified = old
 		.get_field::<bool>("is_verified")?
@@ -313,6 +361,9 @@ pub async fn get_count_etag(&self, user_id: &UserId, version: &str) -> Result<(u
 	try_join(count, etag).await
 }
 
+/// Counts the session keys stored in a backup version.
+///
+/// Every raw key row under the user's version prefix contributes to the count.
 #[implement(Service)]
 pub async fn count_keys(&self, user_id: &UserId, version: &str) -> usize {
 	let prefix = (user_id, version, Interfix);
@@ -324,6 +375,9 @@ pub async fn count_keys(&self, user_id: &UserId, version: &str) -> usize {
 		.await
 }
 
+/// Returns the current change tag for a backup version.
+///
+/// The tag advances whenever accepted key data or metadata changes.
 #[implement(Service)]
 pub async fn get_etag(&self, user_id: &UserId, version: &str) -> Result<u64> {
 	let key = (user_id, version);
@@ -335,6 +389,10 @@ pub async fn get_etag(&self, user_id: &UserId, version: &str) -> Result<u64> {
 		.deserialized::<u64>()
 }
 
+/// Loads every session key in a backup version, grouped by room.
+///
+/// Session identifiers map to their raw key backup data within each room. Unreadable rows are
+/// omitted from the result.
 #[implement(Service)]
 pub async fn get_all(
 	&self,
@@ -362,6 +420,10 @@ pub async fn get_all(
 		.await
 }
 
+/// Loads every backed-up session key for one room.
+///
+/// The returned map is keyed by session ID and retains each value as raw key backup data.
+/// Unreadable rows are omitted.
 #[implement(Service)]
 pub async fn get_room(
 	&self,
@@ -382,6 +444,10 @@ pub async fn get_room(
 		.await
 }
 
+/// Loads one backed-up session key.
+///
+/// The key is selected by user, backup version, room, and session ID. The stored JSON is returned
+/// without eagerly deserializing the key data.
 #[implement(Service)]
 pub async fn get_session(
 	&self,
@@ -399,6 +465,14 @@ pub async fn get_session(
 		.deserialized()
 }
 
+/// Deletes session keys from a backup version.
+///
+/// The version must exist. Rows whose scan reports an error are skipped. Deletion runs under the
+/// user's backup lock, advances the change tag, and reports a zero remaining count with the new tag.
+///
+/// # Panics
+///
+/// Panics when dispatching the new change tag fails.
 #[implement(Service)]
 pub async fn delete_all_keys(&self, user_id: &UserId, version: &str) -> Result<(usize, u64)> {
 	let _backup_lock = self.mutex.lock(user_id).await;
@@ -442,6 +516,15 @@ fn bump_etag(&self, user_id: &UserId, version: &str) -> u64 {
 	*etag
 }
 
+/// Deletes session keys for one room in a backup version.
+///
+/// The version must exist. Rows whose scan reports an error are skipped. Deletion runs under the
+/// user's backup lock, advances the change tag, and returns the remaining key count from the
+/// exact-version scan.
+///
+/// # Panics
+///
+/// Panics when dispatching the new change tag fails.
 #[implement(Service)]
 pub async fn delete_room_keys(
 	&self,
@@ -468,6 +551,14 @@ pub async fn delete_room_keys(
 	Ok((count, etag))
 }
 
+/// Deletes one session key from a backup version.
+///
+/// The version must exist. The change tag advances even when the selected key was absent, and the
+/// returned count covers every remaining key in the version.
+///
+/// # Panics
+///
+/// Panics when dispatching the new change tag fails.
 #[implement(Service)]
 pub async fn delete_room_key(
 	&self,

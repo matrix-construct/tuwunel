@@ -1,3 +1,9 @@
+//! Replaces accepted timeline events with their room-version redacted form.
+//!
+//! Redaction can retain the original JSON for operators and removes searchable
+//! or relational content before overwriting the accepted row. These side
+//! effects are coordinated under the caller's room timeline guard.
+
 use ruma::{
 	EventId, RoomId,
 	canonical_json::{RedactedBecause, redact_in_place},
@@ -6,7 +12,12 @@ use tuwunel_core::{Result, err, implement, matrix::event::Event};
 
 use crate::rooms::{short::ShortRoomId, timeline::RoomMutexGuard};
 
-/// Replace a PDU with the redacted form.
+/// Replaces an accepted PDU with its room-version redacted form.
+///
+/// Failure to resolve the event's accepted PDU ID is treated as a successful
+/// no-op. Original retention, search removal, and relation deletion occur
+/// before the accepted row is replaced, so the operation is not atomic if a
+/// later step fails.
 #[implement(super::Service)]
 #[tracing::instrument(name = "redact", level = "debug", skip(self))]
 pub async fn redact_pdu<Pdu: Event + Send + Sync>(

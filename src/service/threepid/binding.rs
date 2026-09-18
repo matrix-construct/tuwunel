@@ -1,3 +1,9 @@
+//! Persistent email-to-user bindings.
+//!
+//! Forward rows retain binding metadata for each user, while reverse rows
+//! resolve one canonical email to its owner. Streamed listing and point lookup
+//! expose the two index directions to account and invitation flows.
+
 use futures::{Stream, StreamExt};
 use ruma::{
 	MilliSecondsSinceUnixEpoch, OwnedUserId, UserId,
@@ -8,8 +14,11 @@ use tuwunel_database::{Cbor, Deserialized, Ignore, Interfix};
 
 use super::Binding;
 
-/// Persist a binding in both directions: the forward `(user, email)` row with
-/// its metadata, and the reverse `email -> user` lookup.
+/// Persists a canonical email binding in both index directions.
+///
+/// The forward row stores the medium and timestamps, while the reverse row
+/// stores the owning user. These are separate map writes, so callers must not
+/// treat the two rows as one atomic snapshot.
 #[implement(super::Service)]
 #[tracing::instrument(
 	level = "debug",
@@ -35,8 +44,10 @@ pub async fn put_binding(
 	self.db.email_userid.insert(email_canon, user_id);
 }
 
-/// All third-party identifiers bound to `user_id`, lazily decoded from the
-/// `(user, email)` prefix scan.
+/// Streams all third-party identifiers bound to `user_id`.
+///
+/// Entries are decoded lazily from the user's forward-index prefix. Storage or
+/// decoding failures are skipped, and each yielded identifier owns its data.
 #[implement(super::Service)]
 #[tracing::instrument(
 	level = "debug",
@@ -66,9 +77,11 @@ pub fn get_bindings<'a>(
 		})
 }
 
-/// Remove a binding in both directions; blind-delete, tolerant of an absent
-/// row. The reverse lookup is removed only when it still maps to this user, so
-/// one user's delete cannot wipe another's reverse row.
+/// Removes a canonical email binding from both index directions.
+///
+/// The forward row is deleted even when absent. The reverse row is removed
+/// only when a successful lookup still names this user, so a read failure or a
+/// different owner leaves that row untouched.
 #[implement(super::Service)]
 #[tracing::instrument(
 	level = "debug",
@@ -94,9 +107,8 @@ pub async fn del_binding(&self, user_id: &UserId, email_canon: &str) {
 /// Whether a canonical email address is bound to an account other than this
 /// one.
 ///
-/// Separates rebinding an address a user already holds, which is permitted,
-/// from claiming one another account owns, which is not. The lookup's own
-/// error handling decides what an unreadable row does.
+/// No binding or a binding to `user_id` returns `false`. Storage and decoding
+/// failures from the reverse lookup are propagated.
 #[implement(super::Service)]
 #[tracing::instrument(
 	level = "debug",
@@ -111,7 +123,10 @@ pub async fn bound_elsewhere(&self, user_id: &UserId, email_canon: &str) -> Resu
 		.map(|bound| bound.is_some_and(|bound| bound != user_id))
 }
 
-/// The user bound to a canonical email address, if any.
+/// Returns the user bound to a canonical email address.
+///
+/// An absent reverse row returns `None`. Storage and user-ID decoding failures
+/// are propagated.
 #[implement(super::Service)]
 #[tracing::instrument(level = "debug", skip(self))]
 pub async fn user_id_for_email(&self, email_canon: &str) -> Result<Option<OwnedUserId>> {
@@ -124,7 +139,10 @@ pub async fn user_id_for_email(&self, email_canon: &str) -> Result<Option<OwnedU
 		.transpose()
 }
 
-/// Whether a canonical email address is already bound to some user.
+/// Tests whether a canonical email address has a readable reverse row.
+///
+/// Any successful raw lookup returns `true` without decoding the stored user.
+/// Absence and all storage failures are both collapsed to `false`.
 #[implement(super::Service)]
 #[tracing::instrument(level = "debug", skip(self))]
 pub async fn address_in_use(&self, email_canon: &str) -> bool {

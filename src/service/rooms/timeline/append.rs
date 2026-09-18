@@ -1,3 +1,9 @@
+//! Appends authenticated events to room timelines and applies their side effects.
+//!
+//! Incoming events first receive a state snapshot, while accepted events are
+//! assigned a normal stream count and committed to the timeline. Subsequent
+//! cache, indexing, notification, and membership effects are coordinated here.
+
 use std::{collections::BTreeMap, sync::Arc};
 
 use ruma::{
@@ -32,8 +38,12 @@ use crate::rooms::{
 
 type Band<'a> = SmallVec<[&'a EventId; 1]>;
 
-/// Append the incoming event setting the state snapshot to the state from
-/// the server that sent the event.
+/// Appends an incoming event with its locally resolved state snapshot.
+///
+/// The snapshot is recorded even when the event is soft-failed. A soft-failed
+/// event is not inserted into the accepted timeline, but its predecessors are
+/// marked referenced. Only a nonempty replacement extremity band is stored; an
+/// empty calculation preserves the prior band.
 #[implement(super::Service)]
 #[tracing::instrument(
 	name = "append_incoming",
@@ -94,12 +104,12 @@ where
 	(!leafs.is_empty()).then_some(leafs)
 }
 
-/// Creates a new persisted data unit and adds it to a room.
+/// Persists an authenticated event and applies its timeline side effects.
 ///
-/// By this point the incoming event should be fully authenticated, no auth
-/// happens in `append_pdu`.
-///
-/// Returns pdu id
+/// This method performs no authentication. The accepted row, event mapping,
+/// outlier removal, and timestamp index are committed together, but later
+/// cache, indexing, notification, and membership work is not part of that
+/// transaction, so an error can be returned after the event is stored.
 #[implement(super::Service)]
 #[tracing::instrument(name = "append", level = "debug", skip_all, ret(Debug))]
 pub async fn append_pdu<'a, Leafs>(

@@ -1,3 +1,10 @@
+//! Selectively removes historical accepted events from a room timeline.
+//!
+//! Purging preserves state events and leaves forward-extremity mappings
+//! untouched while coordinating deletion from search, relation, and
+//! redaction-retention indexes. Selection follows room stream order rather
+//! than graph depth.
+
 use futures::TryStreamExt;
 use ruma::{RoomId, api::Direction, events::TimelineEventType};
 use tuwunel_core::{
@@ -12,12 +19,12 @@ use tuwunel_core::{
 
 use super::{ExtractBody, RawPduId, bias_count};
 
-/// Selectively purges room history strictly before `until` in stream order,
-/// returning the number of events removed. State events are always preserved,
-/// and locally-sent events are kept unless `delete_local_events`. Forward
-/// extremities are never touched, so the room stays live. tuwunel orders by
-/// per-room stream position rather than topological depth, so "same-depth
-/// events retained" becomes "strictly earlier in stream order".
+/// Purges eligible room history strictly before a timeline count.
+///
+/// State events are preserved, and locally sent events remain unless
+/// `delete_local_events` is set. Forward extremities are untouched, while
+/// search, relation, and retained-original data are removed for each deleted
+/// event; an error can stop the operation after partial progress.
 #[implement(super::Service)]
 pub async fn purge_history(
 	&self,
