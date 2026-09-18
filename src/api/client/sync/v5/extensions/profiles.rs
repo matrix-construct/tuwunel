@@ -1,5 +1,3 @@
-use std::collections::{BTreeMap, BTreeSet};
-
 use futures::StreamExt;
 use itertools::Itertools;
 use ruma::{
@@ -7,26 +5,14 @@ use ruma::{
 	api::client::sync::sync_events::v5::response::Profiles,
 	profile::{ProfileFieldName, UserProfileChanges, UserProfileUpdate},
 };
-use serde_json::Value;
 use tuwunel_core::{
 	Result,
-	utils::{BoolExt, IterStream, ReadyExt, result::NotFound, stream::BroadbandExt},
-	warn,
+	utils::{BoolExt, IterStream, ReadyExt, stream::BroadbandExt},
 };
-use tuwunel_service::{Services, profile::ProfileChange, sync::Connection};
+use tuwunel_service::{Services, sync::Connection};
 
 use super::{SyncInfo, Window};
-
-type Fields = BTreeSet<ProfileFieldName>;
-
-/// Every field change the syncing user is entitled to see, by user.
-///
-/// The log is keyed per field, so one user appearing under several rooms or
-/// several counts folds into one entry here and is read back once.
-type Changes = BTreeMap<OwnedUserId, Fields>;
-
-/// One changed field paired with whatever reading it back produced.
-type Field = (ProfileFieldName, Result<Option<Value>>);
+use crate::client::sync::profiles::{Changes, FieldValue, Fields, fold_change, read_field};
 
 /// Collects the MSC4262 profiles extension payload.
 ///
@@ -157,15 +143,6 @@ fn was_requested(requested: Option<&[ProfileFieldName]>, field: &str) -> bool {
 	requested.is_none_or(|fields| fields.iter().any(|name| name.as_str() == field))
 }
 
-fn fold_change(mut changes: Changes, (user_id, field): ProfileChange<'_>) -> Changes {
-	changes
-		.entry(user_id.to_owned())
-		.or_default()
-		.insert(field.into());
-
-	changes
-}
-
 async fn collect_user(
 	services: &Services,
 	user_id: OwnedUserId,
@@ -193,20 +170,7 @@ async fn read_update(services: &Services, user_id: &UserId, fields: Fields) -> U
 	UserProfileUpdate::Updated(changes)
 }
 
-async fn read_field(services: &Services, user_id: &UserId, name: ProfileFieldName) -> Field {
-	let value = services
-		.profile
-		.profile_key(user_id, &name)
-		.await
-		.optional()
-		.inspect_err(
-			|error| warn!(%user_id, %name, %error, "Failed to read a changed profile field"),
-		);
-
-	(name, value)
-}
-
-fn fold_field(mut changes: UserProfileChanges, (name, value): Field) -> UserProfileChanges {
+fn fold_field(mut changes: UserProfileChanges, (name, value): FieldValue) -> UserProfileChanges {
 	// Only an absent field is a removal: a row that fails to read is this
 	// server's problem, not a signal to wipe the client's copy.
 	match value {

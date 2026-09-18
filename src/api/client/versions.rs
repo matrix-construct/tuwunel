@@ -81,7 +81,7 @@ static VERSIONS: [&str; 27] = [
 	"v1.19",  /* mutual rooms (MSC2666) */
 ];
 
-static UNSTABLE_FEATURES: [&str; 40] = [
+static UNSTABLE_FEATURES: [&str; 41] = [
 	"org.matrix.e2e_cross_signing",
 	// private read receipts (https://github.com/matrix-org/matrix-spec-proposals/pull/2285)
 	"org.matrix.msc2285.stable",
@@ -124,6 +124,8 @@ static UNSTABLE_FEATURES: [&str; 40] = [
 	"org.matrix.simplified_msc3575",
 	// Sliding sync profiles extension (https://github.com/matrix-org/matrix-spec-proposals/pull/4262)
 	"org.matrix.msc4262",
+	// Profile updates for legacy sync (https://github.com/matrix-org/matrix-spec-proposals/pull/4429)
+	"org.matrix.msc4429",
 	// Allow room moderators to view redacted event content (https://github.com/matrix-org/matrix-spec-proposals/pull/2815)
 	"fi.mau.msc2815",
 	// OIDC-native auth umbrella (https://github.com/matrix-org/matrix-spec-proposals/pull/3861)
