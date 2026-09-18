@@ -1,3 +1,10 @@
+//! Persistent indexes derived from room membership state.
+//!
+//! The service maintains paired user-to-room and room-to-user membership rows,
+//! aggregate counts, participating-server indexes, and cached stripped state.
+//! Read helpers expose point queries and cursor-backed streams over those
+//! derived indexes.
+
 mod update;
 mod via;
 
@@ -28,10 +35,20 @@ use tuwunel_core::{
 };
 use tuwunel_database::{Deserialized, Ignore, Interfix, Map};
 use update::EMPTY_INVITE_STATE;
+/// Input types for applying membership-cache transitions.
+///
+/// The update descriptor owns event data while borrowing the affected user and
+/// room identifiers. Optional stripped state accompanies invite and knock
+/// transitions.
 pub use update::{MembershipUpdate, StrippedRoomState};
 
 use crate::appservice::RegistrationInfo;
 
+/// Persistent room-membership cache and derived-index service.
+///
+/// Paired indexes answer membership queries in either direction, while room
+/// aggregates track counts and participating servers. A process-local cache
+/// memoizes appservice membership decisions.
 pub struct Service {
 	appservice_in_room_cache: AppServiceInRoomCache,
 	services: Arc<crate::services::OnceServices>,
@@ -88,6 +105,13 @@ impl crate::Service for Service {
 	fn name(&self) -> &str { crate::service::make_name(std::module_path!()) }
 }
 
+/// Tests whether an appservice participates in a room.
+///
+/// A registration participates when its sender or a namespace-matching user is
+/// joined. Results are memoized by room and registration identifier. Membership
+/// rebuilds and explicit clears remove cached entries, but do not fence an
+/// in-flight lookup from republishing an older result. Deleting a room's
+/// membership indexes does not invalidate this cache.
 #[implement(Service)]
 #[tracing::instrument(level = "trace", skip_all)]
 pub async fn appservice_in_room(&self, room_id: &RoomId, appservice: &RegistrationInfo) -> bool {
@@ -119,6 +143,11 @@ pub async fn appservice_in_room(&self, room_id: &RoomId, appservice: &Registrati
 	in_room
 }
 
+/// Returns the appservice membership cache's room count and capacity.
+///
+/// The first value counts room-level map entries rather than individual
+/// registrations. The second reports the backing map's current allocation
+/// capacity.
 #[implement(Service)]
 pub fn get_appservice_in_room_cache_usage(&self) -> (usize, usize) {
 	let cache = self
@@ -129,6 +158,11 @@ pub fn get_appservice_in_room_cache_usage(&self) -> (usize, usize) {
 	(cache.len(), cache.capacity())
 }
 
+/// Clears every memoized appservice membership decision.
+///
+/// Persistent membership indexes are not changed. Later uncached lookups
+/// recompute and cache their answers from current joined membership, but a
+/// lookup already in flight can republish an older result after the clear.
 #[implement(Service)]
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn clear_appservice_in_room_cache(&self) {
@@ -141,7 +175,9 @@ pub fn clear_appservice_in_room_cache(&self) {
 /// Returns a stream of the remote servers participating in this room.
 ///
 /// Our own server is filtered out, so the result is the federation fan-out
-/// set for the room.
+/// set for the room. Items borrow the database cursor and are invalid after the
+/// next poll; consume or own each item before advancing. Storage errors are
+/// skipped as in [`Self::room_servers`].
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "trace")]
 pub fn remote_room_servers<'a>(
@@ -152,7 +188,10 @@ pub fn remote_room_servers<'a>(
 		.ready_filter(|server| !self.services.globals.server_is_ours(server))
 }
 
-/// Returns an iterator of all servers participating in this room.
+/// Streams all servers recorded as participating in a room.
+///
+/// Storage and key-decoding failures are skipped. Each server name borrows the
+/// cursor and must be consumed or owned before the stream advances.
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "debug")]
 pub fn room_servers<'a>(
@@ -167,6 +206,10 @@ pub fn room_servers<'a>(
 		.map(|(_, server): (Ignore, &ServerName)| server)
 }
 
+/// Tests whether a server is recorded as participating in a room.
+///
+/// The reverse server-to-room index supplies the answer. Missing rows and
+/// storage failures both return `false`.
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "trace")]
 pub async fn server_in_room<'a>(&'a self, server: &'a ServerName, room_id: &'a RoomId) -> bool {
@@ -174,8 +217,10 @@ pub async fn server_in_room<'a>(&'a self, server: &'a ServerName, room_id: &'a R
 	self.db.serverroomids.qry(&key).await.is_ok()
 }
 
-/// Returns an iterator of all rooms a server participates in (as far as we
-/// know).
+/// Streams all rooms recorded for a participating server.
+///
+/// Storage and key-decoding failures are skipped. Each room identifier borrows
+/// the cursor and must be consumed or owned before the stream advances.
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "debug")]
 pub fn server_rooms<'a>(
@@ -190,8 +235,11 @@ pub fn server_rooms<'a>(
 		.map(|(_, room_id): (Ignore, &RoomId)| room_id)
 }
 
-/// Yields every server participating in at least one known room, each name
-/// once, in ascending order.
+/// Streams each server participating in at least one known room.
+///
+/// Adjacent duplicate prefixes are collapsed, yielding server names in
+/// ascending key order. Storage and decoding failures are skipped, and each
+/// item borrows the cursor until its next poll.
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "debug")]
 pub fn servers(&self) -> impl Stream<Item = &ServerName> + Send + '_ {
@@ -214,7 +262,10 @@ pub fn servers(&self) -> impl Stream<Item = &ServerName> + Send + '_ {
 		.ready_filter_map(identity)
 }
 
-/// Returns true if the server participates in at least one room we know of.
+/// Tests whether a server participates in any known room.
+///
+/// The check stops at the first reverse-index row. Errors skipped by
+/// [`Self::server_rooms`] are indistinguishable from absence.
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "trace")]
 pub async fn server_shares_room(&self, server: &ServerName) -> bool {
@@ -223,7 +274,10 @@ pub async fn server_shares_room(&self, server: &ServerName) -> bool {
 		.await
 }
 
-/// Returns true if server can see user by sharing at least one room.
+/// Tests whether a server shares a joined room with a user.
+///
+/// The check searches rooms recorded for the server for any current user
+/// join. Index errors are treated as absent rows by the underlying helpers.
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "trace")]
 pub async fn server_sees_user(&self, server: &ServerName, user_id: &UserId) -> bool {
@@ -233,7 +287,10 @@ pub async fn server_sees_user(&self, server: &ServerName, user_id: &UserId) -> b
 		.await
 }
 
-/// Returns true if user_a and user_b share at least one room.
+/// Tests whether two users share a currently joined room.
+///
+/// The check consumes only the first intersection result. Storage or decoding
+/// failures skipped by the joined-room streams can produce `false`.
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "trace")]
 pub async fn user_sees_user(&self, user_a: &UserId, user_b: &UserId) -> bool {
@@ -243,7 +300,12 @@ pub async fn user_sees_user(&self, user_a: &UserId, user_b: &UserId) -> bool {
 	get_shared_rooms.next().await.is_some()
 }
 
-/// List the rooms common between two users
+/// Streams rooms in which both users are currently joined.
+///
+/// The two key-ordered joined-room streams are intersected without
+/// materializing either set. Items borrow their source database cursor and are
+/// invalid after the next poll; consume or own each item before advancing. Read
+/// failures are skipped by the source streams.
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "debug")]
 pub fn get_shared_rooms<'a>(
@@ -257,7 +319,10 @@ pub fn get_shared_rooms<'a>(
 	utils::set::intersection_sorted_stream2(a, b)
 }
 
-/// Returns an iterator of all joined members of a room.
+/// Streams all users currently indexed as joined to a room.
+///
+/// Storage and key-decoding failures are skipped. Each user identifier borrows
+/// the cursor and must be consumed or owned before the stream advances.
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "debug")]
 pub fn room_members<'a>(
@@ -272,7 +337,11 @@ pub fn room_members<'a>(
 		.map(|(_, user_id): (Ignore, &UserId)| user_id)
 }
 
-/// Returns the number of users which are currently in a room
+/// Returns the stored number of users currently joined to a room.
+///
+/// The aggregate is rebuilt from membership indexes by
+/// [`Self::update_joined_count`]. Missing or malformed count rows return an
+/// error.
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "trace")]
 pub async fn room_joined_count(&self, room_id: &RoomId) -> Result<u64> {
@@ -283,7 +352,11 @@ pub async fn room_joined_count(&self, room_id: &RoomId) -> Result<u64> {
 		.deserialized()
 }
 
-/// Returns the number of users which are currently invited to a room
+/// Returns the stored number of users currently invited to a room.
+///
+/// The aggregate is rebuilt from membership indexes by
+/// [`Self::update_joined_count`]. Missing or malformed count rows return an
+/// error.
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "trace")]
 pub async fn room_invited_count(&self, room_id: &RoomId) -> Result<u64> {
@@ -294,7 +367,11 @@ pub async fn room_invited_count(&self, room_id: &RoomId) -> Result<u64> {
 		.deserialized()
 }
 
-/// Returns the number of users which are currently knocking upon a room
+/// Returns the stored number of users currently knocking on a room.
+///
+/// The aggregate is rebuilt from membership indexes by
+/// [`Self::update_joined_count`]. Missing or malformed count rows return an
+/// error.
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "trace")]
 pub async fn room_knocked_count(&self, room_id: &RoomId) -> Result<u64> {
@@ -305,8 +382,11 @@ pub async fn room_knocked_count(&self, room_id: &RoomId) -> Result<u64> {
 		.deserialized()
 }
 
-/// Returns an iterator of all our local joined users in a room who are
-/// active (not deactivated, not guest)
+/// Streams active local users currently joined to a room.
+///
+/// Local joined users are filtered through the user service, excluding guests
+/// and deactivated accounts. The stream otherwise inherits
+/// [`Self::room_members`]'s cursor lifetime and error policy.
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "debug")]
 pub fn active_local_users_in_room<'a>(
@@ -317,8 +397,10 @@ pub fn active_local_users_in_room<'a>(
 		.filter(|user| self.services.users.is_active(user))
 }
 
-/// Returns an iterator of all our local users in the room, even if they're
-/// deactivated/guests
+/// Streams all local users currently joined to a room.
+///
+/// Guest and deactivated accounts remain included. The stream otherwise
+/// inherits [`Self::room_members`]'s cursor lifetime and error policy.
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "debug")]
 pub fn local_users_in_room<'a>(
@@ -329,7 +411,10 @@ pub fn local_users_in_room<'a>(
 		.ready_filter(|user| self.services.globals.user_is_local(user))
 }
 
-/// Returns an iterator of only our users invited to this room.
+/// Streams local users currently invited to a room.
+///
+/// Remote invitees are filtered out by server name. The stream otherwise
+/// inherits [`Self::room_members_invited`]'s cursor lifetime and error policy.
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "debug")]
 pub fn local_users_invited_to_room<'a>(
@@ -340,7 +425,13 @@ pub fn local_users_invited_to_room<'a>(
 		.ready_filter(|user| self.services.globals.user_is_local(user))
 }
 
-/// Returns an iterator over all User IDs who ever joined a room.
+/// Streams user identifiers from the once-joined index under a room prefix.
+///
+/// Once-joined rows are currently written with user-first keys, while this
+/// accessor probes a room-first prefix, so the stored layout can yield no
+/// matches. Yielded user identifiers borrow the database cursor and are invalid
+/// after the next poll; consume or own each item before advancing. Storage and
+/// decoding failures are skipped.
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "debug")]
 pub fn room_useroncejoined<'a>(
@@ -355,7 +446,10 @@ pub fn room_useroncejoined<'a>(
 		.map(|(_, user_id): (Ignore, &UserId)| user_id)
 }
 
-/// Returns an iterator over all invited members of a room.
+/// Streams all users currently indexed as invited to a room.
+///
+/// Storage and key-decoding failures are skipped. Each user identifier borrows
+/// the cursor and must be consumed or owned before the stream advances.
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "debug")]
 pub fn room_members_invited<'a>(
@@ -370,7 +464,10 @@ pub fn room_members_invited<'a>(
 		.map(|(_, user_id): (Ignore, &UserId)| user_id)
 }
 
-/// Returns an iterator over all knocked members of a room.
+/// Streams all users currently indexed as knocking on a room.
+///
+/// Storage and key-decoding failures are skipped. Each user identifier borrows
+/// the cursor and must be consumed or owned before the stream advances.
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "debug")]
 pub fn room_members_knocked<'a>(
@@ -385,6 +482,10 @@ pub fn room_members_knocked<'a>(
 		.map(|(_, user_id): (Ignore, &UserId)| user_id)
 }
 
+/// Returns the stream position associated with a user's current invite.
+///
+/// This value identifies the membership transition rather than counting
+/// invitations. Missing or malformed index rows return an error.
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "trace")]
 pub async fn get_invite_count(&self, room_id: &RoomId, user_id: &UserId) -> Result<u64> {
@@ -396,6 +497,10 @@ pub async fn get_invite_count(&self, room_id: &RoomId, user_id: &UserId) -> Resu
 		.deserialized()
 }
 
+/// Returns the stream position associated with a user's current knock.
+///
+/// This value identifies the membership transition rather than counting
+/// knocks. Missing or malformed index rows return an error.
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "trace")]
 pub async fn get_knock_count(&self, room_id: &RoomId, user_id: &UserId) -> Result<u64> {
@@ -407,6 +512,10 @@ pub async fn get_knock_count(&self, room_id: &RoomId, user_id: &UserId) -> Resul
 		.deserialized()
 }
 
+/// Returns the stream position associated with a user's current leave row.
+///
+/// This value identifies the membership transition rather than counting
+/// leaves. Missing or malformed index rows return an error.
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "trace")]
 pub async fn get_left_count(&self, room_id: &RoomId, user_id: &UserId) -> Result<u64> {
@@ -418,6 +527,10 @@ pub async fn get_left_count(&self, room_id: &RoomId, user_id: &UserId) -> Result
 		.deserialized()
 }
 
+/// Returns the stream position associated with a user's current join.
+///
+/// This value identifies the membership transition rather than counting
+/// joins. Missing or malformed index rows return an error.
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "trace")]
 pub async fn get_joined_count(&self, room_id: &RoomId, user_id: &UserId) -> Result<u64> {
@@ -429,7 +542,12 @@ pub async fn get_joined_count(&self, room_id: &RoomId, user_id: &UserId) -> Resu
 		.deserialized()
 }
 
-/// Returns an iterator over all memberships for a user.
+/// Streams every cached membership category for a user.
+///
+/// Join, leave, invite, and knock indexes are combined without a global
+/// ordering guarantee. Yielded room identifiers borrow their source database
+/// cursor and are invalid after the next poll; consume or own each item before
+/// advancing. Source-stream errors are skipped.
 #[implement(Service)]
 #[inline]
 pub fn all_user_memberships<'a>(
@@ -439,7 +557,13 @@ pub fn all_user_memberships<'a>(
 	self.user_memberships(user_id, None)
 }
 
-/// Returns an iterator over all specified memberships for a user.
+/// Streams selected cached membership categories for a user.
+///
+/// A missing mask selects join, leave, invite, and knock; an empty mask selects
+/// none. Category streams are interleaved without a global ordering guarantee,
+/// and their storage errors are skipped. Yielded room identifiers borrow their
+/// source database cursor and are invalid after the next poll; consume or own
+/// each item before advancing.
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "debug")]
 pub fn user_memberships<'a>(
@@ -492,7 +616,11 @@ pub fn user_memberships<'a>(
 	)
 }
 
-/// Returns an iterator over all rooms this user joined.
+/// Streams rooms in which a user is currently indexed as joined.
+///
+/// The raw user prefix preserves the established key scan. Storage and
+/// decoding failures are skipped, and each room identifier borrows the cursor
+/// until its next poll.
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "debug")]
 pub fn rooms_joined<'a>(
@@ -525,7 +653,11 @@ pub fn rooms_joined_checked<'a>(
 		.map_ok(|(_, room_id): (Ignore, &RoomId)| room_id)
 }
 
-/// Returns an iterator over all rooms a user was invited to.
+/// Streams rooms in which a user is currently indexed as invited.
+///
+/// The raw user prefix preserves the established key scan. Storage and
+/// decoding failures are skipped, and each room identifier borrows the cursor
+/// until its next poll.
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "debug")]
 pub fn rooms_invited<'a>(
@@ -539,7 +671,11 @@ pub fn rooms_invited<'a>(
 		.map(|(_, room_id): (Ignore, &RoomId)| room_id)
 }
 
-/// Returns an iterator over all rooms a user is currently knocking.
+/// Streams rooms in which a user is currently indexed as knocking.
+///
+/// The raw user prefix preserves the established key scan. Storage and
+/// decoding failures are skipped, and each room identifier borrows the cursor
+/// until its next poll.
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "debug")]
 pub fn rooms_knocked<'a>(
@@ -553,7 +689,11 @@ pub fn rooms_knocked<'a>(
 		.map(|(_, room_id): (Ignore, &RoomId)| room_id)
 }
 
-/// Returns an iterator over all rooms a user left.
+/// Streams rooms for which a user's leave state is retained.
+///
+/// Forgotten rooms have no leave row and therefore do not appear. Storage and
+/// decoding failures are skipped, and each room identifier borrows the cursor
+/// until its next poll.
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "debug")]
 pub fn rooms_left<'a>(&'a self, user_id: &'a UserId) -> impl Stream<Item = &RoomId> + Send + 'a {
@@ -564,7 +704,10 @@ pub fn rooms_left<'a>(&'a self, user_id: &'a UserId) -> impl Stream<Item = &Room
 		.map(|(_, room_id): (Ignore, &RoomId)| room_id)
 }
 
-/// Returns an iterator over all rooms a user was invited to.
+/// Streams stored stripped state for a user's current invitations.
+///
+/// Each item owns its room identifier and decoded state vector. Storage,
+/// key-decoding, and state-deserialization failures are skipped.
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "debug")]
 pub fn rooms_invited_state<'a>(
@@ -584,7 +727,10 @@ pub fn rooms_invited_state<'a>(
 		.ignore_err()
 }
 
-/// Returns an iterator over all rooms a user is currently knocking.
+/// Streams stored stripped state for a user's current knocks.
+///
+/// Each item owns its room identifier and decoded state vector. Storage,
+/// key-decoding, and state-deserialization failures are skipped.
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "trace")]
 pub fn rooms_knocked_state<'a>(
@@ -604,7 +750,11 @@ pub fn rooms_knocked_state<'a>(
 		.ignore_err()
 }
 
-/// Returns an iterator over all rooms a user left.
+/// Streams stored state for rooms a user has left but not forgotten.
+///
+/// Both native state arrays and compatible single-event rows are accepted.
+/// Storage and key-decoding failures are skipped, while unusable state values
+/// yield an empty event vector for their room.
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "debug")]
 pub fn rooms_left_state<'a>(
@@ -627,6 +777,10 @@ pub fn rooms_left_state<'a>(
 		})
 }
 
+/// Returns the stripped state stored for a user's current invitation.
+///
+/// The value is decoded as an array of stripped state events. Missing rows,
+/// storage failures, and malformed state return an error.
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "trace")]
 pub async fn invite_state(
@@ -663,6 +817,10 @@ pub async fn has_invite_state(&self, user_id: &UserId, room_id: &RoomId) -> Resu
 		.map(|state| state.is_some_and(|state| state.len() > EMPTY_INVITE_STATE.len()))
 }
 
+/// Returns the stripped state stored for a user's current knock.
+///
+/// The value is decoded as an array of stripped state events. Missing rows,
+/// storage failures, and malformed state return an error.
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "trace")]
 pub async fn knock_state(
@@ -681,6 +839,11 @@ pub async fn knock_state(
 		})
 }
 
+/// Returns the cached state for a room a user has left.
+///
+/// Native state arrays and compatible single-event rows are normalized into
+/// one vector. Missing or unreadable rows return an error, while an unusable
+/// stored JSON shape is logged and becomes an empty vector.
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "trace")]
 pub async fn left_state(
@@ -697,6 +860,12 @@ pub async fn left_state(
 		.map(|state: Raw<Vec<AnyStrippedStateEvent>>| state_events(room_id, &state))
 }
 
+/// Infers a user's cached membership state for one room.
+///
+/// Current indexes take precedence in join, leave, knock, then invite order.
+/// When none exists, a once-joined marker is reported as `Ban`; no marker
+/// returns `None`. Read failures from the boolean probes are treated as
+/// absence.
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "trace")]
 pub async fn user_membership(
@@ -723,6 +892,10 @@ pub async fn user_membership(
 	}
 }
 
+/// Tests whether a user has ever been marked as joined to a room.
+///
+/// The durable marker survives later membership transitions and explicit
+/// forget operations. Missing rows and storage failures both return `false`.
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "debug")]
 pub async fn once_joined(&self, user_id: &UserId, room_id: &RoomId) -> bool {
@@ -730,6 +903,10 @@ pub async fn once_joined(&self, user_id: &UserId, room_id: &RoomId) -> bool {
 	self.db.roomuseroncejoinedids.contains(&key).await
 }
 
+/// Tests whether a user is currently indexed as joined to a room.
+///
+/// The user-to-room join index supplies the answer. Missing rows and storage
+/// failures both return `false`.
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "trace")]
 pub async fn is_joined<'a>(&'a self, user_id: &'a UserId, room_id: &'a RoomId) -> bool {
@@ -740,6 +917,10 @@ pub async fn is_joined<'a>(&'a self, user_id: &'a UserId, room_id: &'a RoomId) -
 		.await
 }
 
+/// Tests whether a user is currently indexed as knocking on a room.
+///
+/// The stored knock-state row supplies the answer. Missing rows and storage
+/// failures both return `false`.
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "trace")]
 pub async fn is_knocked<'a>(&'a self, user_id: &'a UserId, room_id: &'a RoomId) -> bool {
@@ -750,6 +931,10 @@ pub async fn is_knocked<'a>(&'a self, user_id: &'a UserId, room_id: &'a RoomId) 
 		.await
 }
 
+/// Tests whether a user is currently indexed as invited to a room.
+///
+/// The stored invite-state row supplies the answer. Missing rows and storage
+/// failures both return `false`.
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "trace")]
 pub async fn is_invited(&self, user_id: &UserId, room_id: &RoomId) -> bool {
@@ -760,6 +945,10 @@ pub async fn is_invited(&self, user_id: &UserId, room_id: &RoomId) -> bool {
 		.await
 }
 
+/// Tests whether a user's leave state is currently retained for a room.
+///
+/// Explicitly forgotten rooms have no row and return `false`. Missing rows and
+/// storage failures are otherwise indistinguishable.
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "trace")]
 pub async fn is_left(&self, user_id: &UserId, room_id: &RoomId) -> bool {
@@ -767,6 +956,14 @@ pub async fn is_left(&self, user_id: &UserId, room_id: &RoomId) -> bool {
 	self.db.userroomid_leftstate.contains(&key).await
 }
 
+/// Deletes a room's aggregate and paired membership indexes.
+///
+/// Aggregate rows and every paired index row found during enumeration are
+/// deleted in one database transaction. Local users' leave rows survive unless
+/// `force` is true, while remote leave rows are always removed. Once-joined
+/// markers and appservice membership-cache entries are untouched. Storage
+/// errors encountered during enumeration are skipped and can leave index rows
+/// behind.
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "trace")]
 pub async fn delete_room_join_counts(&self, room_id: &RoomId, force: bool) -> Result {
@@ -864,11 +1061,11 @@ pub async fn delete_room_join_counts(&self, room_id: &RoomId, force: bool) -> Re
 	Ok(())
 }
 
-/// A sibling conduwuit-lineage server writes the leave event itself into this
-/// column rather than the array of state events written here, and a database
-/// imported from one keeps those rows as it wrote them. Both shapes are read,
-/// neither is rewritten, and the origin writes its own shape again on a swap
-/// back, so this column is not guaranteed to hold one format on disk.
+/// Normalizes either supported cached leave-state representation.
+///
+/// Imported databases can contain one leave event where this service writes an
+/// array of state events. Both shapes are read without rewriting the row, and
+/// malformed values are logged before producing an empty vector.
 fn state_events<T, U>(room_id: &RoomId, state: &Raw<T>) -> Vec<U>
 where
 	U: DeserializeOwned + From<Owned<Pdu>>,

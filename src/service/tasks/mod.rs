@@ -37,28 +37,63 @@ const GC_INTERVAL: Duration = Duration::from_hours(1);
 /// A task's random id: a fixed 16-byte string kept inline.
 type TaskId = ArrayString<TASK_ID_LEN>;
 
+/// Process-local registry of detached administrative tasks.
+///
+/// Task futures run on the server runtime and retain abort handles for service
+/// shutdown. Terminal records are pruned by their scheduling timestamp and by
+/// a bounded retention policy, while nonterminal records are never evicted.
 pub struct Service {
 	services: Arc<crate::services::OnceServices>,
 	tasks: StdMutex<BTreeMap<TaskId, Task>>,
 }
 
+/// Execution state of a tracked administrative task.
+///
+/// Tasks normally progress from [`Self::Scheduled`] to [`Self::Active`] and
+/// finish as either [`Self::Complete`] or [`Self::Failed`]. A panic or abort can
+/// leave the last recorded state nonterminal. Terminal records remain available
+/// until the service's retention policy prunes them.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Status {
+	/// The task is recorded but its future has not begun running.
 	Scheduled,
+
+	/// The task future has begun running and has not completed.
 	Active,
+
+	/// The task future completed with a result value.
 	Complete,
+
+	/// The task future completed with an error.
 	Failed,
 }
 
-/// A tracked task's public snapshot, cloned out from under the lock.
+/// Snapshot of one tracked administrative task.
+///
+/// Snapshots clone their owned result and error data while the registry is
+/// locked, then remain independent of subsequent task transitions. Their
+/// ordering in query results is not a creation-time ordering.
 #[derive(Clone, Debug)]
 pub struct TaskInfo {
+	/// Random identifier assigned when the task was scheduled.
 	pub id: TaskId,
+
+	/// Static action name used to classify the task.
 	pub action: &'static str,
+
+	/// Caller-supplied identifier of the resource being acted upon.
 	pub resource_id: String,
+
+	/// Current execution state captured by this snapshot.
 	pub status: Status,
+
+	/// Unix timestamp in milliseconds recorded when the task was scheduled.
 	pub timestamp_ms: u64,
+
+	/// Successful task result, present only after completion.
 	pub result: Option<JsonValue>,
+
+	/// Rendered task error, present only after failure.
 	pub error: Option<String>,
 }
 
@@ -97,9 +132,11 @@ impl crate::Service for Service {
 	fn name(&self) -> &str { crate::service::make_name(std::module_path!()) }
 }
 
-/// Spawn `work` on the runtime as a tracked task, returning its id. The record
-/// transitions Scheduled -> Active -> Complete/Failed; `work`'s `Ok` value is
-/// stored as the result, its `Err` as the error string.
+/// Spawns `work` on the server runtime and returns its tracking identifier.
+///
+/// The record is inserted as scheduled before the task can mark itself active.
+/// A successful output becomes the stored result, while an error becomes its
+/// rendered failure text.
 #[implement(Service)]
 pub fn spawn<F>(self: &Arc<Self>, action: &'static str, resource_id: String, work: F) -> TaskId
 where
@@ -131,7 +168,10 @@ where
 	id
 }
 
-/// The task with this id, if it is still tracked.
+/// Returns the tracked task with identifier `id`.
+///
+/// The returned snapshot is cloned out of the registry lock. Missing and
+/// already-pruned identifiers return `None`.
 #[implement(Service)]
 pub fn get(&self, id: &str) -> Option<TaskInfo> {
 	self.tasks
@@ -141,7 +181,10 @@ pub fn get(&self, id: &str) -> Option<TaskInfo> {
 		.map(|(id, task)| task.info(id))
 }
 
-/// Every tracked task acting on `resource_id`, newest ordering not guaranteed.
+/// Returns every tracked task acting on `resource_id`.
+///
+/// Each result is an independent snapshot. Results follow the identifier-keyed
+/// registry order rather than creation or completion time.
 #[implement(Service)]
 pub fn by_resource(&self, resource_id: &str) -> Vec<TaskInfo> {
 	self.tasks
@@ -153,7 +196,10 @@ pub fn by_resource(&self, resource_id: &str) -> Vec<TaskInfo> {
 		.collect()
 }
 
-/// Whether a nonterminal task matches both `action` and `resource_id`.
+/// Tests whether a matching task is still nonterminal.
+///
+/// Both the action and resource identifier must match. Completed and failed
+/// tasks never satisfy the predicate even while their records are retained.
 #[implement(Service)]
 pub fn has_nonterminal(&self, action: &str, resource_id: &str) -> bool {
 	self.tasks
@@ -167,7 +213,10 @@ fn matches_nonterminal(task: &Task, action: &str, resource_id: &str) -> bool {
 	task.action == action && task.resource_id == resource_id && !task.status.is_terminal()
 }
 
-/// Every tracked task; callers filter by action or status.
+/// Returns snapshots of every retained task.
+///
+/// Callers can filter the snapshots by action, resource, or status. Results
+/// follow the identifier-keyed registry order rather than chronological order.
 #[implement(Service)]
 pub fn list(&self) -> Vec<TaskInfo> {
 	self.tasks
@@ -222,9 +271,17 @@ fn abort_all(&self) {
 }
 
 impl Status {
+	/// Tests whether no further execution transition is expected.
+	///
+	/// Complete and failed tasks are terminal. Scheduled and active tasks can
+	/// still transition as their futures run.
 	#[must_use]
 	pub fn is_terminal(self) -> bool { matches!(self, Self::Complete | Self::Failed) }
 
+	/// Returns the lowercase status spelling used by administrative responses.
+	///
+	/// The returned string is static and allocation-free. Each enum variant has
+	/// one stable spelling.
 	#[must_use]
 	pub fn as_str(self) -> &'static str {
 		match self {

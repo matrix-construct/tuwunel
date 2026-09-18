@@ -1,3 +1,9 @@
+//! Routing-server hints derived from membership and invitation state.
+//!
+//! Power levels and joined-member distribution produce prospective routing
+//! servers, while inbound invite hints are kept in a compact aggregate row.
+//! The aggregate reader exposes only the final stored server from each row.
+
 use std::cmp::Reverse;
 
 use futures::{Stream, StreamExt, stream::iter};
@@ -14,6 +20,11 @@ use tuwunel_core::{
 };
 use tuwunel_database::{Ignore, Txn};
 
+/// Merges invitation routing hints into the caller's membership transaction.
+///
+/// The existing reader exposes only the aggregate row's final server, so older
+/// hints before that tail are not retained by this rewrite. Concurrent callers
+/// are not serialized and can overwrite one another's read-modify-write result.
 #[implement(super::Service)]
 #[tracing::instrument(level = "debug", skip(self, txn, servers))]
 pub(crate) async fn add_servers_invite_via(
@@ -42,10 +53,13 @@ pub(crate) async fn add_servers_invite_via(
 	txn.insert_raw(&self.db.roomid_inviteviaservers, room_id.as_bytes(), &servers);
 }
 
-/// Gets up to five servers that are likely to be in the room in the
-/// distant future.
+/// Selects up to five servers likely to remain useful for room routing.
 ///
-/// See <https://spec.matrix.org/latest/appendices/#routing>
+/// The highest-power user's server is considered first, followed by servers in
+/// descending joined-user count. The two sources are not deduplicated, and a
+/// missing power-level event simply omits the first candidate.
+///
+/// See <https://spec.matrix.org/latest/appendices/#routing>.
 #[implement(super::Service)]
 #[tracing::instrument(skip(self), level = "trace")]
 pub async fn servers_route_via(&self, room_id: &RoomId) -> Result<Vec<OwnedServerName>> {
@@ -58,8 +72,10 @@ pub async fn servers_route_via(&self, room_id: &RoomId) -> Result<Vec<OwnedServe
 		.collect())
 }
 
-/// The room's highest power-level user's server, provided that user holds at
-/// least power level 50.
+/// Returns the highest-power user's server when its level is at least 50.
+///
+/// Missing, unreadable, or malformed power-level state returns `None`.
+/// Equal-power ties follow the underlying users map's iteration order.
 #[implement(super::Service)]
 #[tracing::instrument(skip(self), level = "trace")]
 pub async fn most_powerful_user_server(&self, room_id: &RoomId) -> Option<OwnedServerName> {
@@ -78,9 +94,11 @@ pub async fn most_powerful_user_server(&self, room_id: &RoomId) -> Option<OwnedS
 		})
 }
 
-/// Servers participating in the room, ordered by descending resident user
-/// count. Counting members per server is an aggregation, so the result is
-/// materialized rather than streamed.
+/// Returns participating servers ordered by descending joined-user count.
+///
+/// Joined members are counted per server and the resulting servers are sorted.
+/// Read failures skipped by the membership stream can reduce the observed
+/// counts, and equal-count ordering is unspecified.
 #[implement(super::Service)]
 #[tracing::instrument(skip(self), level = "trace")]
 pub async fn popular_servers(&self, room_id: &RoomId) -> Vec<OwnedServerName> {
@@ -93,6 +111,13 @@ pub async fn popular_servers(&self, room_id: &RoomId) -> Vec<OwnedServerName> {
 		.collect()
 }
 
+/// Streams the final routing hint from each matching aggregate row.
+///
+/// The current room-keyed representation stores several servers in one value,
+/// but this accessor exposes only the last decoded server and therefore at most
+/// one item per room. Storage and decoding failures are skipped. Yielded names
+/// borrow the cursor and are invalid after the next poll; consume or own each
+/// item before advancing.
 #[implement(super::Service)]
 #[tracing::instrument(skip(self), level = "debug")]
 pub fn servers_invite_via<'a>(

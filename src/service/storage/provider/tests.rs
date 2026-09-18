@@ -1,3 +1,8 @@
+//! Tests for storage-provider payload chunking.
+//!
+//! The cases cover aligned, partial, empty, and maximum-sized payloads. They
+//! verify chunk boundaries without requiring a live storage backend.
+
 use object_store::PutPayload;
 
 use super::chunked;

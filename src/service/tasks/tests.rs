@@ -1,3 +1,8 @@
+//! Tests for background-task status and retention policy.
+//!
+//! The cases exercise terminal classification and duplicate-work detection.
+//! They also cover age pruning and the cap on retained terminal records.
+
 use std::collections::BTreeMap;
 
 use super::{CAPACITY, RETENTION_MS, Status, Task, TaskId, matches_nonterminal, prune_tasks};

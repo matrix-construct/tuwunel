@@ -1,5 +1,16 @@
+//! S3-compatible storage-provider construction.
+//!
+//! Configuration and environment values feed the object-store S3 builder.
+//! Providers without a URL or bucket are treated as disabled, while enabled
+//! providers expose signing through the common interface.
+
 use std::{sync::Arc, time::Duration};
 
+/// Object-store transfer types used by the S3 provider boundary.
+///
+/// These re-exports match the common storage module's transfer vocabulary and
+/// avoid exposing backend-specific paths to callers.
+/// Their behavior remains defined by the object-store backend.
 pub use object_store::{GetResult, GetResultPayload, PutPayload, PutResult};
 use object_store::{aws::AmazonS3Builder, client::ClientOptions, signer::Signer};
 use tuwunel_core::{
@@ -11,6 +22,11 @@ use tuwunel_core::{
 
 use super::Provider;
 
+/// Builds an enabled S3-compatible provider.
+///
+/// A configuration with neither a URL nor a bucket returns `None`. Other
+/// settings override the environment-derived builder before the client and its
+/// URL signer are retained by the provider.
 #[tracing::instrument(name = "new", level = "info", skip_all, err)]
 pub(in super::super) fn new(
 	args: &crate::Args<'_>,

@@ -1,4 +1,21 @@
+//! Common interface over local and S3-compatible object stores.
+//!
+//! Providers apply an optional base path, choose single-part or multipart
+//! uploads, and expose streaming reads and deletes. Backend failures are
+//! translated into the service's shared error type.
+
+/// Local-filesystem storage-provider construction.
+///
+/// The constructor validates the configured directory and can create it when
+/// requested before wrapping it as a provider.
+/// Disabled local configurations return no provider.
 pub mod local;
+
+/// S3-compatible storage-provider construction.
+///
+/// The constructor applies endpoint, credential, transport, and signing
+/// options before wrapping the object-store client as a provider.
+/// Configurations with neither a URL nor a bucket return no provider.
 pub mod s3;
 
 #[cfg(test)]
@@ -33,17 +50,27 @@ use tuwunel_core::{
 };
 use url::Url;
 
+/// One configured object-storage backend.
+///
+/// The provider normalizes configured paths and transfer policies before
+/// delegating operations to its local or S3-compatible object store.
+/// Optional startup checks and URL signing remain backend capabilities.
 #[derive(Debug)]
 pub struct Provider {
+	/// Configuration identifier for this provider.
 	pub name: String,
 
+	/// Backend-specific configuration used to construct this provider.
 	pub config: StorageProvider,
 
+	/// Erased object-store implementation receiving provider operations.
 	pub(crate) provider: Box<DynObjectStore>,
 
 	#[debug(skip)]
+	/// Optional backend signer used to create time-limited object URLs.
 	pub(crate) signer: Option<Arc<dyn Signer>>,
 
+	/// Prefix prepended to logical object paths before backend operations.
 	pub(crate) base_path: Option<Path>,
 
 	startup_check: bool,
@@ -53,9 +80,24 @@ pub struct Provider {
 	services: Arc<crate::services::OnceServices>,
 }
 
+/// One streamed object chunk with its returned range and complete object size.
+///
+/// Every chunk from one fetch carries a clone of the range and size metadata
+/// reported by the backend for that request.
+/// Stream and backend failures are represented separately as error items.
 pub type FetchItem = (Bytes, (Range<u64>, u64));
+
+/// One streamed object chunk with shared response metadata and attributes.
+///
+/// The metadata tuple is shared by [`Arc`] across every chunk from the same
+/// fetch, avoiding a per-chunk clone of the backend response details.
+/// Stream and backend failures are represented separately as error items.
 pub type FetchMetaItem = (Bytes, Arc<(Range<u64>, ObjectMeta, Attributes)>);
 
+/// Starts this provider and performs its configured connectivity check.
+///
+/// Providers with startup checks disabled become ready without backend I/O.
+/// An enabled check lists at most one object and propagates any backend error.
 #[implement(Provider)]
 #[tracing::instrument(skip_all, err)]
 pub(super) async fn start(self: &Arc<Self>) -> Result {
@@ -83,11 +125,10 @@ async fn startup_check(self: &Arc<Self>) -> Result {
 		.await
 }
 
-/// Put object into store from streaming input.
+/// Stores a streamed object under `path`.
 ///
-/// Recommended to know the total size of the object. If size is `None`,
-/// multi-part upload may be selected even for small uploads below the
-/// configured threshold.
+/// Supplying the total size permits a single-part upload below the configured
+/// threshold. A missing or large size selects multipart upload instead.
 #[implement(Provider)]
 #[tracing::instrument(
 	level = "debug",
@@ -125,10 +166,10 @@ where
 	self.put_single(path, payload).await
 }
 
-/// Put object into the store from contiguous input.
+/// Stores one contiguous object under `path`.
 ///
-/// The size of input will be determined and multipart upload will be chosen as
-/// necessary internally.
+/// The input length selects single-part or multipart upload against the
+/// configured threshold. Backend upload failures are propagated.
 #[implement(Provider)]
 #[tracing::instrument(
 	level = "debug",
@@ -162,7 +203,10 @@ where
 		.await
 }
 
-/// Put object into the store from streaming input using multipart upload.
+/// Stores streamed input through a multipart upload.
+///
+/// Input chunks are written as ordered multipart parts. Upload cleanup and
+/// backend failures are delegated to the object-store implementation.
 #[implement(Provider)]
 #[tracing::instrument(
 	level = "debug",
@@ -219,7 +263,10 @@ where
 	}
 }
 
-/// Put object into the store from contiguous input non-multipart upload.
+/// Stores contiguous input through a single-part upload.
+///
+/// The provider prefix is applied before the backend request. Backend failures
+/// are propagated without retrying as multipart upload.
 #[implement(Provider)]
 #[tracing::instrument(
 	level = "debug",
@@ -239,6 +286,11 @@ async fn put_single(&self, path: &str, input: PutPayload) -> Result<PutResult> {
 		.await
 }
 
+/// Streams an object's bytes together with shared response metadata.
+///
+/// The provider prefix is applied to `path`, and each successful chunk shares
+/// the same range, object metadata, and attributes. Load and stream failures
+/// are returned as items rather than being discarded.
 #[implement(Provider)]
 #[tracing::instrument(
 	level = "debug",
@@ -266,6 +318,11 @@ pub fn fetch_with_metadata(
 		.try_flatten_stream()
 }
 
+/// Streams an object's bytes together with its returned range and total size.
+///
+/// The provider prefix is applied to `path`. Load and stream failures are
+/// returned as items, allowing callers to consume the body without buffering
+/// the complete object.
 #[implement(Provider)]
 #[tracing::instrument(
 	level = "debug",
@@ -290,6 +347,10 @@ pub fn fetch(&self, path: &str) -> impl Stream<Item = Result<FetchItem>> + Send 
 		.try_flatten_stream()
 }
 
+/// Loads an entire object into one contiguous byte buffer.
+///
+/// The provider prefix is applied before the backend request. Backend and body
+/// streaming failures are propagated to the caller.
 #[implement(Provider)]
 #[tracing::instrument(
 	level = "debug",
@@ -308,6 +369,10 @@ pub async fn get(&self, path: &str) -> Result<Bytes> {
 		.await
 }
 
+/// Opens an object and returns the backend's raw read result.
+///
+/// The provider prefix is applied before the request. Callers can inspect the
+/// returned range and metadata or consume its body as a stream.
 #[implement(Provider)]
 #[tracing::instrument(
 	level = "debug",
@@ -327,8 +392,10 @@ pub async fn load(&self, path: &str) -> Result<GetResult> {
 		.await
 }
 
-/// Presign a time-limited GET URL for an object, when this provider supports
-/// signing (S3).
+/// Creates a time-limited GET URL when the backend supports signing.
+///
+/// The provider prefix is applied before signing. Backends without a signer,
+/// such as local filesystem providers, return `None` without performing I/O.
 #[implement(Provider)]
 #[tracing::instrument(
 	level = "debug",
@@ -354,6 +421,10 @@ pub async fn signed_get_url(&self, path: &str, ttl: Duration) -> Result<Option<U
 		.await
 }
 
+/// Deletes one object from this provider.
+///
+/// This consumes [`Self::delete`] to completion and discards its yielded path.
+/// Invalid paths and backend failures are propagated.
 #[implement(Provider)]
 #[tracing::instrument(
 	level = "debug",
@@ -371,6 +442,10 @@ pub async fn delete_one(self: &Arc<Self>, path: &str) -> Result {
 		.await
 }
 
+/// Lazily deletes each supplied object path.
+///
+/// The provider prefix is applied to every path before it reaches the backend.
+/// Invalid paths and backend failures are emitted by the returned stream.
 #[implement(Provider)]
 #[tracing::instrument(
 	level = "debug",
@@ -401,6 +476,10 @@ where
 		.map_err(Error::from)
 }
 
+/// Renames an object within this provider.
+///
+/// Both paths receive the provider prefix. [`CopyMode::Create`] refuses an
+/// existing destination, while [`CopyMode::Overwrite`] permits replacement.
 #[implement(Provider)]
 #[tracing::instrument(
 	level = "debug",
@@ -428,6 +507,10 @@ pub async fn rename(&self, src: &str, dst: &str, overwrite: CopyMode) -> Result 
 	.await
 }
 
+/// Copies an object within this provider.
+///
+/// Both paths receive the provider prefix. [`CopyMode::Create`] refuses an
+/// existing destination, while [`CopyMode::Overwrite`] permits replacement.
 #[implement(Provider)]
 #[tracing::instrument(
 	level = "debug",
@@ -455,6 +538,10 @@ pub async fn copy(&self, src: &str, dst: &str, overwrite: CopyMode) -> Result {
 	.await
 }
 
+/// Streams object metadata beneath an optional logical prefix.
+///
+/// The configured provider prefix is applied to the backend query and removed
+/// from each returned location. Backend failures remain stream items.
 #[implement(Provider)]
 #[tracing::instrument(
 	level = "debug",
@@ -479,6 +566,10 @@ pub fn list(&self, prefix: Option<&str>) -> impl Stream<Item = Result<ObjectMeta
 		})
 }
 
+/// Returns metadata for one object.
+///
+/// The provider prefix is applied before the backend request. Missing objects
+/// and backend failures are propagated.
 #[implement(Provider)]
 #[tracing::instrument(
 	level = "debug",
@@ -496,6 +587,10 @@ pub async fn head(&self, path: &str) -> Result<ObjectMeta> {
 		.await
 }
 
+/// Probes whether this provider can service a listing request.
+///
+/// The probe consumes at most the first result, so an empty store succeeds.
+/// Any path or backend error is logged and returned.
 #[implement(Provider)]
 #[tracing::instrument(
 	level = "debug",
@@ -572,6 +667,10 @@ fn multipart_part_size(&self) -> usize {
 		.unwrap_or(usize::MAX)
 }
 
+/// Splits a payload into nonempty parts no larger than `part_size`.
+///
+/// The iterator owns the payload buffer and advances it without copying the
+/// bytes in each yielded part.
 fn chunked(payload: PutPayload, part_size: usize) -> impl Iterator<Item = PutPayload> {
 	let mut buf: Bytes = payload.into();
 	from_fn(move || {

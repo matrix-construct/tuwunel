@@ -1,3 +1,14 @@
+//! Configured object-storage providers for media and other binary data.
+//!
+//! The service builds local-filesystem and S3-compatible backends behind one
+//! provider API. A local media provider rooted under the database directory is
+//! supplied when no explicit `media` provider is configured.
+
+/// Backend implementations and the common provider interface.
+///
+/// Provider instances normalize paths, transfers, and optional URL signing
+/// across local and S3-compatible object stores.
+/// The module also owns backend construction and startup connectivity checks.
 pub mod provider;
 
 use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
@@ -5,6 +16,11 @@ use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
 use async_trait::async_trait;
 use derive_more::Debug;
 use futures::TryStreamExt;
+/// Object-store transfer types used by provider APIs.
+///
+/// Re-exporting these types keeps callers independent of the service's direct
+/// object-store dependency path. Their behavior is supplied by the selected
+/// storage backend.
 pub use object_store::{CopyMode, GetResult, GetResultPayload, PutPayload, PutResult};
 use tuwunel_core::{
 	Result, at,
@@ -13,8 +29,18 @@ use tuwunel_core::{
 	utils::{BoolExt, stream::IterStream},
 };
 
+/// A configured object-storage provider.
+///
+/// Each provider wraps one local or S3-compatible backend and applies its
+/// configured path and transfer policies.
+/// Callers share the provider through the service registry's [`Arc`] values.
 pub use self::provider::Provider;
 
+/// Registry of configured object-storage providers.
+///
+/// The registry includes every enabled provider and supplies a default local
+/// `media` provider when the configuration does not define one.
+/// Provider identifiers determine lookup and iteration order.
 #[derive(Debug)]
 pub struct Service {
 	providers: Providers,
@@ -100,7 +126,10 @@ async fn start_providers(&self) -> Result {
 		.await
 }
 
-/// Get the specific storage provider's instance by ID.
+/// Returns the storage provider with the exact identifier `id`.
+///
+/// A missing or disabled provider produces a not-found request error. The
+/// returned provider remains owned by this service.
 #[implement(Service)]
 pub fn provider<'a>(&'a self, id: &'a str) -> Result<&'a Arc<Provider>> {
 	self.providers
@@ -108,7 +137,10 @@ pub fn provider<'a>(&'a self, id: &'a str) -> Result<&'a Arc<Provider>> {
 		.ok_or_else(|| err!(Request(NotFound(error!("No instance of provider")))))
 }
 
-/// Get the specific storage provider's configuration by ID.
+/// Returns the first provider configuration whose identifier starts with `id`.
+///
+/// This uses the same prefix filter as [`Self::configs`], so callers requiring
+/// an exact match should validate the returned identifier separately.
 #[implement(Service)]
 pub fn config<'a>(&'a self, id: &'a str) -> Result<&'a StorageProvider> {
 	self.configs(Some(id))
@@ -117,13 +149,20 @@ pub fn config<'a>(&'a self, id: &'a str) -> Result<&'a StorageProvider> {
 		.ok_or_else(|| err!(Request(NotFound("No configuration for provider"))))
 }
 
-/// Iterate the storage provider configurations.
+/// Iterates over the enabled storage-provider instances.
+///
+/// Iteration follows the registry's identifier order. Each item remains owned
+/// by this service and can be shared by cloning its [`Arc`].
 #[implement(Service)]
 pub fn providers(&self) -> impl Iterator<Item = &Arc<Provider>> + Send + '_ {
 	self.providers.values()
 }
 
-/// Iterate the storage provider configurations.
+/// Iterates over configured providers, optionally filtered by identifier prefix.
+///
+/// Passing `None` yields every configuration, while `Some(id)` yields entries
+/// whose identifiers start with `id`. Disabled configurations can appear here
+/// even though they have no corresponding [`Provider`] instance.
 #[implement(Service)]
 pub fn configs<'a, Id>(
 	&'a self,

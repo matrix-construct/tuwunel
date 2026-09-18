@@ -1,3 +1,10 @@
+//! Membership-transition writes for the state cache.
+//!
+//! Each transition updates paired membership indexes and removes incompatible
+//! prior states in one database transaction. Optional aggregate rebuilding
+//! refreshes room counts, server participation, and appservice decisions after
+//! the per-user transition lands.
+
 use std::collections::HashSet;
 
 use futures::StreamExt;
@@ -26,6 +33,10 @@ use tuwunel_core::{
 use tuwunel_database::{Json, keyval::ValBuf, serialize_key, serialize_val};
 
 /// Optional stripped room state attached to invite and knock transitions.
+///
+/// `None` means the caller supplied no state, while `Some` can contain an empty
+/// event vector. Invite handling preserves an existing nonempty row when no new
+/// state is supplied.
 pub type StrippedRoomState = Option<Vec<Raw<AnyStrippedStateEvent>>>;
 
 /// Parameters for one membership cache transition.
@@ -77,7 +88,13 @@ pub struct MembershipUpdate<'a> {
 	pub count: PduCount,
 }
 
-/// Update current membership data.
+/// Applies one membership transition to the derived cache indexes.
+///
+/// Remote users are created before their transition is recorded, and paired
+/// forward and reverse rows change together. Joins can copy predecessor-room
+/// account data, while leaves can trigger push-badge refresh and configured
+/// forget behavior. Aggregate room counts are rebuilt only when requested by
+/// the update descriptor.
 #[implement(super::Service)]
 #[tracing::instrument(
 		level = "debug",
@@ -143,6 +160,12 @@ pub async fn update_membership(
 	Ok(())
 }
 
+/// Rebuilds a room's aggregate membership and server indexes.
+///
+/// Current join, invite, and knock rows are counted, and participating servers
+/// are reconciled in one database transaction. Source-stream errors are
+/// skipped, and the room's appservice membership cache is invalidated after
+/// the transaction executes.
 #[implement(super::Service)]
 #[tracing::instrument(level = "debug", skip(self))]
 pub async fn update_joined_count(&self, room_id: &RoomId) {
@@ -220,9 +243,12 @@ pub async fn update_joined_count(&self, room_id: &RoomId) {
 		.remove(room_id);
 }
 
-/// Direct DB function to directly mark a user as joined. It is not
-/// recommended to use this directly. You most likely should use
-/// `update_membership` instead
+/// Writes the paired indexes for a current join transition.
+///
+/// Invite, leave, and knock rows for the same user and room are removed in the
+/// same transaction. This low-level helper skips once-joined bookkeeping,
+/// predecessor copying, and aggregate rebuilding performed by
+/// [`super::Service::update_membership`].
 #[implement(super::Service)]
 #[tracing::instrument(skip(self), level = "debug")]
 pub(crate) fn mark_as_joined(&self, user_id: &UserId, room_id: &RoomId, count: PduCount) {
@@ -246,9 +272,12 @@ pub(crate) fn mark_as_joined(&self, user_id: &UserId, room_id: &RoomId, count: P
 	txn.execute();
 }
 
-/// Direct DB function to directly mark a user as left. It is not
-/// recommended to use this directly. You most likely should use
-/// `update_membership` instead
+/// Writes the paired indexes for a current leave transition.
+///
+/// The leave state starts as an empty event array, and join, invite, and knock
+/// rows are removed in the same transaction. This low-level helper skips leave
+/// policy and aggregate rebuilding performed by
+/// [`super::Service::update_membership`].
 #[implement(super::Service)]
 #[tracing::instrument(skip(self), level = "debug")]
 pub(crate) fn mark_as_left(&self, user_id: &UserId, room_id: &RoomId, count: PduCount) {
@@ -275,9 +304,11 @@ pub(crate) fn mark_as_left(&self, user_id: &UserId, room_id: &RoomId, count: Pdu
 	txn.execute();
 }
 
-/// Direct DB function to directly mark a user as knocked. It is not
-/// recommended to use this directly. You most likely should use
-/// `update_membership` instead
+/// Writes the paired indexes for a current knock transition.
+///
+/// Missing stripped state is stored as an empty array, and join, invite, and
+/// leave rows are removed in the same transaction. This low-level helper skips
+/// aggregate rebuilding performed by [`super::Service::update_membership`].
 #[implement(super::Service)]
 #[tracing::instrument(skip(self), level = "debug")]
 pub(crate) fn mark_as_knocked(
@@ -310,7 +341,11 @@ pub(crate) fn mark_as_knocked(
 	txn.execute();
 }
 
-/// Makes a user forget a room.
+/// Forgets a user's retained leave state for a room.
+///
+/// Only the paired leave rows are deleted; once-joined history and other room
+/// data remain untouched. Without a separate forget marker, absence of these
+/// rows is the durable forgotten state.
 #[implement(super::Service)]
 #[tracing::instrument(skip(self), level = "debug")]
 pub fn forget(&self, room_id: &RoomId, user_id: &UserId) {
@@ -341,6 +376,12 @@ fn mark_as_once_joined(&self, user_id: &UserId, room_id: &RoomId) {
 /// this length, so a change to the value codec here moves that floor.
 pub(super) const EMPTY_INVITE_STATE: &[u8] = b"[]";
 
+/// Writes the paired indexes for a current invite transition.
+///
+/// Missing or empty stripped state preserves an existing nonempty invite row,
+/// while a new state replaces it. Nonempty routing hints are merged into the
+/// room's aggregate hint row and committed with the membership indexes; other
+/// membership rows are removed in the same transaction.
 #[implement(super::Service)]
 #[tracing::instrument(level = "debug", skip(self, last_state, invite_via))]
 pub(crate) async fn mark_as_invited(

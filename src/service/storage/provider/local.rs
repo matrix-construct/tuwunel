@@ -1,3 +1,9 @@
+//! Local-filesystem storage-provider construction.
+//!
+//! A configured directory is wrapped by the common provider interface. Empty
+//! base paths disable the provider, while optional directory creation happens
+//! before the backend is initialized.
+
 use std::{fs, sync::Arc};
 
 use object_store::local::LocalFileSystem;
@@ -9,6 +15,10 @@ use tuwunel_core::{
 
 use super::Provider;
 
+/// Builds an enabled local-filesystem provider.
+///
+/// An empty base path returns `None`. When requested, the directory is created
+/// before the backend is configured with its cleanup policy.
 #[tracing::instrument(name = "new", level = "info", skip_all, err)]
 pub(in super::super) fn new(
 	args: &crate::Args<'_>,
