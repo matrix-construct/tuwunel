@@ -2744,6 +2744,15 @@ pub struct Config {
 	#[serde(default)]
 	pub media_deny_framing: bool,
 
+	/// Prevent inline styles in media documents.
+	///
+	/// This is disabled by default so browser image viewers retain their
+	/// presentation styles. Enabling it omits `style-src 'unsafe-inline'` from
+	/// the download and thumbnail Content-Security-Policy. Requires a restart,
+	/// and reverse proxy headers may still restrict styles.
+	#[serde(default)]
+	pub media_deny_inline_styles: bool,
+
 	/// Enable the legacy unauthenticated Matrix media repository endpoints.
 	/// These endpoints consist of:
 	/// - /_matrix/media/*/config

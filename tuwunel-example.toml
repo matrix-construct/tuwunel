@@ -2350,6 +2350,15 @@
 #
 #media_deny_framing = false
 
+# Prevent inline styles in media documents.
+#
+# This is disabled by default so browser image viewers retain their
+# presentation styles. Enabling it omits `style-src 'unsafe-inline'` from
+# the download and thumbnail Content-Security-Policy. Requires a restart,
+# and reverse proxy headers may still restrict styles.
+#
+#media_deny_inline_styles = false
+
 # Enable the legacy unauthenticated Matrix media repository endpoints.
 # These endpoints consist of:
 # - /_matrix/media/*/config

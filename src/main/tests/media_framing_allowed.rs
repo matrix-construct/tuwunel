@@ -1,9 +1,9 @@
 #![cfg(all(test, feature = "media_thumbnail"))]
 
-//! Media responses with the frame ancestry restriction enabled.
+//! Media responses with optional CSP restrictions enabled.
 //!
-//! This binary boots separately from the default-policy baseline so each
-//! process initializes the server once.
+//! Each non-default combination boots sequentially with logging disabled.
+//! The baseline separately covers the default policy.
 
 #[expect(dead_code)] // This probe uses the shared fixtures without the thumbnail sweep.
 mod media;
@@ -23,13 +23,29 @@ mod tests {
 		policy::{TOKEN, check},
 	};
 
-	const POLICY: &str = concat!(
+	const FRAMING: &str = concat!(
+		"sandbox;default-src 'none';script-src 'none';font-src 'none';",
+		"frame-ancestors 'none';form-action 'none';base-uri 'none';style-src 'unsafe-inline'",
+	);
+
+	const INLINE_STYLES: &str = concat!(
+		"sandbox;default-src 'none';script-src 'none';font-src 'none';",
+		"form-action 'none';base-uri 'none'",
+	);
+
+	const BOTH: &str = concat!(
 		"sandbox;default-src 'none';script-src 'none';font-src 'none';",
 		"frame-ancestors 'none';form-action 'none';base-uri 'none'",
 	);
 
 	#[test]
-	fn framing_restriction_can_be_enabled() -> Result {
+	fn restrictions_can_be_enabled_independently() -> Result {
+		exercise(true, false, FRAMING)?;
+		exercise(false, true, INLINE_STYLES)?;
+		exercise(true, true, BOTH)
+	}
+
+	fn exercise(deny_framing: bool, deny_inline_styles: bool, policy: &str) -> Result {
 		let listener = TcpListener::bind(("127.0.0.1", 0))?;
 		let port = listener.local_addr()?.port();
 		let args = [
@@ -37,8 +53,9 @@ mod tests {
 			format!("port={port}"),
 			"listening=true".to_owned(),
 			"allow_legacy_media=true".to_owned(),
-			"media_deny_framing=true".to_owned(),
-			"log=\"error\"".to_owned(),
+			format!("media_deny_framing={deny_framing}"),
+			format!("media_deny_inline_styles={deny_inline_styles}"),
+			"log_enable=false".to_owned(),
 		]
 		.into_iter()
 		.fold(Args::default_test(&["fresh", "cleanup"]), Args::with_option);
@@ -46,7 +63,8 @@ mod tests {
 		let runtime = Runtime::new(Some(&args))?;
 		let server = Server::new(Some(&args), Some(&runtime))?;
 
-		assert!(server.server.config.media_deny_framing);
+		assert_eq!(server.server.config.media_deny_framing, deny_framing);
+		assert_eq!(server.server.config.media_deny_inline_styles, deny_inline_styles);
 
 		runtime.block_on(async {
 			let services = async_start(&server).await?;
@@ -58,7 +76,7 @@ mod tests {
 				let checked = async {
 					wait_until_ready(&services, &base).await?;
 					register(&services, "mediaframing", TOKEN).await?;
-					check(&services, &base, POLICY).await
+					check(&services, &base, policy).await
 				}
 				.await;
 

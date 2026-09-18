@@ -43,7 +43,7 @@ mod tests {
 	/// check is of what a client receives and not of what the server meant.
 	const POLICY: &str = concat!(
 		"sandbox;default-src 'none';script-src 'none';font-src 'none';",
-		"form-action 'none';base-uri 'none'",
+		"form-action 'none';base-uri 'none';style-src 'unsafe-inline'",
 	);
 
 	/// One of the two client thumbnail surfaces.
@@ -115,6 +115,7 @@ mod tests {
 		let server = Server::new(Some(&args), Some(&runtime))?;
 
 		assert!(!server.server.config.media_deny_framing);
+		assert!(!server.server.config.media_deny_inline_styles);
 
 		let result = runtime.block_on(async {
 			let services = async_start(&server).await?;

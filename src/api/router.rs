@@ -12,7 +12,7 @@ use axum::{
 	routing::{any, get, post},
 };
 pub use client_ip::{ConfiguredIpSource, TrustedPeerSubnets};
-use const_str::{join, replace};
+use const_str::{concat, join, replace};
 use http::{HeaderValue, header};
 use tower_http::set_header::SetResponseHeaderLayer;
 use tuwunel_core::{Server, err};
@@ -41,7 +41,12 @@ pub fn build(router: Router<State>, server: &Server) -> Router<State> {
 	let router = register_client_keys_and_backup_routes(router);
 	let router = register_client_room_routes(router);
 	let router = register_client_state_and_sync_routes(router);
-	let router = register_client_media_and_device_routes(router, config.media_deny_framing);
+	let router = register_client_media_and_device_routes(
+		router,
+		config.media_deny_framing,
+		config.media_deny_inline_styles,
+	);
+
 	let router = register_client_misc_routes(router);
 	let router = register_synapse_admin_users_routes(router, mas_active);
 	let router = register_synapse_admin_devices_routes(router, mas_active);
@@ -54,7 +59,12 @@ pub fn build(router: Router<State>, server: &Server) -> Router<State> {
 	let router = register_server_misc_routes(router);
 	let router = register_federation_routes(router, config.allow_federation);
 
-	register_legacy_media_routes(router, config.allow_legacy_media, config.media_deny_framing)
+	register_legacy_media_routes(
+		router,
+		config.allow_legacy_media,
+		config.media_deny_framing,
+		config.media_deny_inline_styles,
+	)
 }
 
 fn register_client_auth_routes(router: Router<State>) -> Router<State> {
@@ -392,13 +402,15 @@ fn register_client_state_and_sync_routes(router: Router<State>) -> Router<State>
 fn register_client_media_and_device_routes(
 	router: Router<State>,
 	media_deny_framing: bool,
+	media_deny_inline_styles: bool,
 ) -> Router<State> {
 	let media_content_router = Router::new()
 		.ruma_route(&client::get_content_thumbnail_route)
 		.ruma_route(&client::get_content_route)
 		.ruma_route(&client::get_content_as_filename_route);
 
-	let media_content_router = media_content_headers(media_content_router, media_deny_framing);
+	let media_content_router =
+		media_content_headers(media_content_router, media_deny_framing, media_deny_inline_styles);
 
 	router
 		.ruma_route(&client::create_content_route)
@@ -543,6 +555,7 @@ fn register_legacy_media_routes(
 	router: Router<State>,
 	allow_legacy_media: bool,
 	media_deny_framing: bool,
+	media_deny_inline_styles: bool,
 ) -> Router<State> {
 	if allow_legacy_media {
 		let media_content_router = Router::new()
@@ -571,8 +584,11 @@ fn register_legacy_media_routes(
 				get(client::get_content_thumbnail_legacy_route),
 			);
 
-		let media_content_router =
-			media_content_headers(media_content_router, media_deny_framing);
+		let media_content_router = media_content_headers(
+			media_content_router,
+			media_deny_framing,
+			media_deny_inline_styles,
+		);
 
 		router
 			.ruma_route(&client::get_media_config_legacy_route)
@@ -587,7 +603,11 @@ fn register_legacy_media_routes(
 	}
 }
 
-fn media_content_headers(router: Router<State>, deny_framing: bool) -> Router<State> {
+fn media_content_headers(
+	router: Router<State>,
+	deny_framing: bool,
+	deny_inline_styles: bool,
+) -> Router<State> {
 	// The MSC4149 media policy, stricter than the spec's recommendation.
 	const MEDIA_CSP: &[&str] = &[
 		"sandbox",
@@ -601,8 +621,15 @@ fn media_content_headers(router: Router<State>, deny_framing: bool) -> Router<St
 
 	const POLICY: &str = join!(MEDIA_CSP, ";");
 	const FRAMING_POLICY: &str = replace!(POLICY, "frame-ancestors 'none';", "");
+	const STYLED_POLICY: &str = concat!(POLICY, ";style-src 'unsafe-inline'");
+	const FRAMING_STYLED_POLICY: &str = concat!(FRAMING_POLICY, ";style-src 'unsafe-inline'");
 
-	let policy = if deny_framing { POLICY } else { FRAMING_POLICY };
+	let policy = match (deny_framing, deny_inline_styles) {
+		| (false, false) => FRAMING_STYLED_POLICY,
+		| (false, true) => FRAMING_POLICY,
+		| (true, false) => STYLED_POLICY,
+		| (true, true) => POLICY,
+	};
 
 	router.route_layer(SetResponseHeaderLayer::overriding(
 		header::CONTENT_SECURITY_POLICY,
