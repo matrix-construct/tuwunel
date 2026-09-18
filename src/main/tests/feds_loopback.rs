@@ -16,7 +16,7 @@ mod tests {
 	const PRIVATE_KEY: &str = "../../nix/pkgs/complement/private_key.key";
 	const VERSION_HEADER: &str = "| rank | servers | name | version | compiler | kernel | arch |";
 	const EVENT_HEADER: &str = "| rank | origin | elapsed | hash | signature | fault |";
-	const ORIGIN_HEADER: &str = "| origin | elapsed | fault |";
+	const ORIGIN_HEADER: &str = "| origin | name | version | elapsed | fault |";
 
 	struct DatabasePath(PathBuf);
 
@@ -177,7 +177,7 @@ mod tests {
 		let version_servers = parse_number(cell(version, 1)?, "version server count")?;
 		let origin = only_row(output, ORIGIN_HEADER, "origin")?;
 		let origin_name = cell(origin, 0)?;
-		let fault = cell(origin, 2)?;
+		let fault = cell(origin, 4)?;
 		let successes = usize::from(fault.is_empty());
 		let faults = usize::from(!fault.is_empty());
 
@@ -205,6 +205,10 @@ mod tests {
 
 		if successes != 1 {
 			return Err!("the local server did not return version metadata");
+		}
+
+		if cell(origin, 1)? != cell(version, 2)? || cell(origin, 2)? != cell(version, 3)? {
+			return Err!("the local origin name and version did not match the summary");
 		}
 
 		Ok(())

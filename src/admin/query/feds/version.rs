@@ -243,8 +243,8 @@ fn render_into(
 		return render_totals(output, results, total);
 	}
 
-	writeln!(output, "\n| origin | elapsed | fault |")?;
-	writeln!(output, "| :--- | ---: | :--- |")?;
+	writeln!(output, "\n| origin | name | version | elapsed | fault |")?;
+	writeln!(output, "| :--- | :--- | :--- | ---: | :--- |")?;
 	for outcome in outcomes.iter().filter(|outcome| match list_mode {
 		| ListMode::None => false,
 		| ListMode::Successes => outcome.result.is_ok(),
@@ -261,13 +261,19 @@ fn render_row(output: &mut String, outcome: &VersionOutcome) -> FmtResult {
 	let fault = fault_cell(outcome);
 
 	match &outcome.result {
-		| Ok(Some(_)) =>
-			writeln!(output, "| {} | {} | |", outcome.origin, Elapsed::from(outcome.elapsed)),
+		| Ok(Some(version)) => writeln!(
+			output,
+			"| {} | {} | {} | {} | |",
+			outcome.origin,
+			option_cell(version.name.as_deref()),
+			option_cell(version.version.as_deref()),
+			Elapsed::from(outcome.elapsed),
+		),
 		| Err(Fault::NotAttempted | Fault::Backoff { .. }) =>
-			writeln!(output, "| {} | | {} |", outcome.origin, markdown_cell(&fault)),
+			writeln!(output, "| {} | | | | {} |", outcome.origin, markdown_cell(&fault)),
 		| _ => writeln!(
 			output,
-			"| {} | {} | {} |",
+			"| {} | | | {} | {} |",
 			outcome.origin,
 			Elapsed::from(outcome.elapsed),
 			markdown_cell(&fault),
@@ -314,10 +320,10 @@ mod tests {
 		assert!(popular < rare, "more common versions should precede rarer versions");
 		assert_eq!(option_cell(None), "", "missing metadata should render blank");
 		assert!(
-			output.contains("| skipped.example | | sweep budget exhausted before dispatch |")
+			output.contains("| skipped.example | | | | sweep budget exhausted before dispatch |")
 		);
 
-		assert!(output.contains("| bare.example | 0ns | missing server metadata |"));
+		assert!(output.contains("| bare.example | | | 0ns | missing server metadata |"));
 		assert!(output.ends_with("\n4 results in 0ns.\n"));
 	}
 
@@ -342,7 +348,7 @@ mod tests {
 
 		let successes = render(outcomes(), Duration::ZERO, ListMode::Successes, Sort::Origin);
 
-		assert!(successes.contains("good.example"));
+		assert!(successes.contains("| good.example | alpha |  | 0ns | |"));
 		assert!(!successes.contains("bad.example"));
 		assert!(!successes.contains("backoff.example"));
 
@@ -356,6 +362,36 @@ mod tests {
 		assert!(errors.contains("bad.example"));
 		assert!(errors.contains("backoff.example"));
 		assert!(errors.ends_with("\n1 result in 0ns.\n"));
+	}
+
+	#[test]
+	fn detail_listing_associates_servers_with_escaped_versions() {
+		for list_mode in [ListMode::Successes, ListMode::All] {
+			let outcomes = [
+				(server_name!("first.example"), "alpha", "1.0"),
+				(server_name!("second.example"), "be|ta", "2.0\nrc"),
+			]
+			.into_iter()
+			.map(|(origin, name, version)| {
+				let version = Version {
+					name: Some(name.to_owned()),
+					version: Some(version.to_owned()),
+					..Default::default()
+				};
+
+				Outcome {
+					origin: origin.to_owned(),
+					elapsed: Duration::ZERO,
+					result: Ok(Some(version)),
+				}
+			})
+			.collect();
+
+			let output = render(outcomes, Duration::ZERO, list_mode, Sort::Origin);
+
+			assert!(output.contains("| first.example | alpha | 1.0 | 0ns | |"));
+			assert!(output.contains("| second.example | be\\|ta | 2.0 rc | 0ns | |"));
+		}
 	}
 
 	#[test]
@@ -403,7 +439,7 @@ mod tests {
 
 	fn listed_origins(output: &str) -> Vec<&str> {
 		let (_, listing) = output
-			.split_once("| origin | elapsed | fault |\n")
+			.split_once("| origin | name | version | elapsed | fault |\n")
 			.expect("detail listing should be rendered");
 
 		listing
