@@ -59,7 +59,7 @@ in the [Out of scope](#out-of-scope) section.
 | MSC4312 | ✅ ● | 85/85 | Resetting cross-signing keys in the OAuth world | cross-signing reset via OAuth account deep-link; dual-stage advertise deferred |
 | MSC4311 | ✅ ● | 85/95 | Ensuring the create event is available on invites | full-PDU invite/knock state; create-event validation + M_MISSING_PARAM + 5xx |
 | MSC4307 | ✅ ● | 100/100 | Validate that `auth_events` are in the correct room | auth_event room_id mismatch rejected |
-| MSC4304 | ✅ ● | 90/100 | Room Version 12 | V12 supported as stable; default is V11 |
+| MSC4304 | ✅ ● | 100/100 | Room Version 12 | V12 stable and the default room version |
 | MSC4297 | ✅ ● | 100/100 | State Resolution v2.1 | src/service/rooms/state_res/resolve.rs:257 conflicted state subgraph; tests pass |
 | MSC4291 | ✅ ● | 100/100 | Room IDs as hashes of the create event | v12 upgrade create event omits deprecated predecessor.event_id |
 | MSC4289 | ✅ ● | 100/100 | Explicitly privilege room creators | Room v12 creator privilege; complement 22 pass, 0 fail across six named tests |
@@ -68,7 +68,7 @@ in the [Out of scope](#out-of-scope) section.
 | MSC4267 | ✅ ● | 90/100 | Automatically forgetting rooms on leave | auto-forget on Leave/Ban; stable + unstable capability advertised |
 | MSC4260 | ✅ ● | 85/90 | Reporting users (Client-Server API) | src/api/client/report.rs:63; admin notification, 404 M_NOT_FOUND on unknown u... |
 | MSC4254 | ✅ ● | 95/100 | Usage of [RFC7009] Token Revocation for Matrix client logout | src/api/oidc/revoke.rs:37; RFC7009 form-urlencoded; revokes both tokens; 200 ... |
-| MSC4239 | ✅ ● | 100/100 | Room version 11 as the default room version | default_default_room_version = V11 |
+| MSC4239 | ✅ ● | 100/100 | Room version 11 as the default room version | default is V12, at or above the v11 the MSC suggests |
 | MSC4225 | ✅ ● | 100/100 | Specification of an order in which one-time-keys should be issued | OTKs issued in upload order via count_be prefix; src/service/users/keys.rs:99 |
 | MSC4222 | ✅ ● | 95/100 | Adding `state_after` to `/sync` | dialects honored; lazy-loaded state_after carries changed members |
 | MSC4213 | ✅ ● | 90/90 | Remove `server_name` parameter | join/knock use via; server_name still accepted via Ruma fallback |
@@ -114,7 +114,7 @@ in the [Out of scope](#out-of-scope) section.
 | MSC3925 | 🟨 ● | 70/70 | m.replace aggregation with full event | Full m.replace fold; off by default (bundle_edit_relations); backfill unindexed |
 | MSC3916 | ✅ ● | 90/100 | Authentication for media access, and new endpoint names | New /client/v1/media and /federation/v1/media auth endpoints implemented. |
 | MSC3905 | ✅ ● | 100/100 | Application services should only be interested in local users | src/service/appservice/append.rs:66; local-user guard at the three event-inte... |
-| MSC3904 | ✅ ● | 100/100 | Room version 10 as the default room version | default_room_version is v11, at or above the v10 the MSC suggests |
+| MSC3904 | ✅ ● | 100/100 | Room version 10 as the default room version | default is V12, at or above the v10 the MSC suggests |
 | MSC3882 | ✅ ● | 90/100 | Allow an existing session to sign in a new session | POST /login/get_token implemented with UIA |
 | MSC3873 | ✅ ● | 100/100 | event_match dotted keys | dotted-key escape semantics handled in ruma flattened JSON |
 | MSC3861 | ✅ ● | 90/95 | Next-generation auth for Matrix, based on OAuth 2.0/OIDC | Advertised as org.matrix.msc3861; cores 2964-2967 + merged periphery all yes |
@@ -141,7 +141,7 @@ in the [Out of scope](#out-of-scope) section.
 | MSC3667 | ✅ ● | 100/100 | Enforce integer power levels | integer_power_levels enforced via RoomVersionRules from V10+ |
 | MSC3666 | ✅ ● | 90/100 | Bundled aggregations for server side search | result + context events bundled; thread always, edit/ref gated default-off |
 | MSC3604 | ✅ ● | 100/100 | Room Version 10 | V10 supported; integer_power_levels and knock_restricted enforced |
-| MSC3589 | ✅ ● | 100/100 | Room version 9 as a default | default_room_version defaults to V11 (exceeds V9) |
+| MSC3589 | ✅ ● | 100/100 | Room version 9 as a default | default_room_version defaults to V12 (exceeds V9) |
 | MSC3582 | ✅ ● | 100/100 | Remove m.room.message.feedback | feedback removal; tuwunel never produces or dispatches on m.room.message.feed... |
 | MSC3567 | ✅ ● | 100/100 | Allow requesting events from the start/end of the room history | from is optional; defaults to start/end based on dir |
 | MSC3550 | ❌ ◐ | 0/0 | Add HTTP 403 to possible profile lookup responses | CS /profile returns 403 M_FORBIDDEN when outbound profile lookup disabled |
@@ -173,7 +173,7 @@ in the [Out of scope](#out-of-scope) section.
 | MSC2858 | ✅ ● | 100/100 | Multiple SSO Identity Providers | identity_providers in /login flows; /login/sso/redirect/{idpId} routed |
 | MSC2844 | ✅ ● | 90/90 | Using a global version number for the entire specification | src/api/client/versions.rs advertises v1.1 through v1.15 |
 | MSC2832 | ✅ ● | 100/100 | Homeserver -&gt; Application Service authorization header | src/service/appservice/request.rs sends Bearer header and query |
-| MSC2788 | ✅ ● | 100/100 | Room version 6 as a default | default_default_room_version is V11 in src/core/config/mod.rs:3842 |
+| MSC2788 | ✅ ● | 100/100 | Room version 6 as a default | default_default_room_version is V12 in src/core/config/mod.rs:5752 |
 | MSC2778 | ✅ ● | 100/100 | Providing authentication method for appservice users | src/api/client/session/appservice.rs implements m.login.application_service |
 | MSC2732 | ✅ ● | 100/100 | Olm fallback keys | src/api/client/keys/claim_keys.rs:86; upload, claim-fallback, sync-unused-lis... |
 | MSC2705 | ✅ ● | 90/90 | Animated thumbnails | animated honored and animated GIF generated; webp output preference unmet |
@@ -200,7 +200,7 @@ in the [Out of scope](#out-of-scope) section.
 | MSC2409 | 🟨 ● | 70/70 | Proposal to send typing, presence and receipts to appservices | typing+receipt EDUs sent to AS; presence not forwarded |
 | MSC2403 | ✅ ● | 90/90 | Add "knock" feature | Knock CS+SS endpoints, sync key, public-rooms join_rule all wired |
 | MSC2367 | ✅ ● | 100/100 | Allowing Reasons in all Membership Events | reason field handled in invite/leave/kick/ban/unban/join membership routes |
-| MSC2334 | ✅ ● | 100/100 | [MSC2334](https://github.com/matrix-org/matrix-doc/pull/2334) - Change defaul... | Default room version is V11, well past V5 |
+| MSC2334 | ✅ ● | 100/100 | [MSC2334](https://github.com/matrix-org/matrix-doc/pull/2334) - Change defaul... | Default room version is V12, well past V5 |
 | MSC2290 | 🟨 ● | 65/55 | Separate Endpoints for Binding Threepids | add endpoint (UIA+dupe) + HS email validation; IS-bind half out of scope |
 | MSC2285 | ✅ ● | 90/100 | Private read receipts | src/api/client/read_marker.rs handles ReadPrivate via private_read_set |
 | MSC2265 | 🟨 ● | 75/100 | Proposal for mandating case folding when processing e-mail addresses | HS case-folds whole email (ss-fold) before storage; IS migration out of scope |
@@ -825,7 +825,7 @@ in the [Out of scope](#out-of-scope) section.
 | MSC2000 | ❌ ● | 0/0 | MSC 2000: Proposal for server-side password policies | branch; no /password_policy endpoint or password validation |
 | MSC1998 | ❌ ● | 0/0 | Two-Factor Authentication Providers | closed; TOTP/recovery 2FA never adopted by spec |
 | MSC1953 | ✅ ● | 100/100 | Remove prev_content from the essential keys list | ruma redact() does not retain prev_content |
-| MSC1943 | ✅ ● | 100/100 | Set v3 to be the default room version | default room version V11 (&gt;= v3) |
+| MSC1943 | ✅ ● | 100/100 | Set v3 to be the default room version | default room version V12 (&gt;= v3) |
 | MSC1935 | 🟨 ● | 30/40 | Key validity enforcement | [→ MSC2076] no valid_until_ts enforcement; v4 and v5 supported but listed uns... |
 | MSC1888 | ✅ ● | 90/100 | Proposal to send EDUs to appservices | [→ MSC2409] appservice receive_ephemeral with EDU push; src/service/sending/s... |
 | MSC1840 | 🟨 ● | 60/100 | Typed rooms | room_types filter on sliding sync only; v3 filter API unextended |

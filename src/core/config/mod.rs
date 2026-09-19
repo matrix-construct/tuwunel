@@ -5745,12 +5745,12 @@ fn default_rocksdb_stats_level() -> u8 { 1 }
 
 /// Returns the default Matrix room version.
 ///
-/// Room version 11 is selected when `default_room_version` is omitted. The
+/// Room version 12 is selected when `default_room_version` is omitted. The
 /// value is returned without consulting runtime configuration.
 // I know, it's a great name
 #[must_use]
 #[inline]
-pub fn default_default_room_version() -> RoomVersionId { RoomVersionId::V11 }
+pub fn default_default_room_version() -> RoomVersionId { RoomVersionId::V12 }
 
 fn default_ip_range_denylist() -> Vec<String> {
 	vec![

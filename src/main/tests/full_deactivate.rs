@@ -94,12 +94,16 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	let retained_client = Client { services, base, token: RETAINED_TOKEN };
 	let peer_client = Client { services, base, token: PEER_TOKEN };
 
+	// MSC4289 rooms never list the creator in power_levels.users, so the
+	// entries whose erasure is asserted below need a version 11 room.
+	let listed_creator_room = json!({ "preset": "private_chat", "room_version": "11" });
+
 	let joined_a = erased_client
-		.create_room(&json!({ "preset": "private_chat" }))
+		.create_room(&listed_creator_room)
 		.await?;
 
 	let joined_b = erased_client
-		.create_room(&json!({ "preset": "private_chat" }))
+		.create_room(&listed_creator_room)
 		.await?;
 
 	// Version 12 creators are privileged without a power-levels entry.
@@ -135,7 +139,7 @@ async fn exercise(services: &Services, base: &str) -> Result {
 		.await?;
 
 	let retained_room = retained_client
-		.create_room(&json!({ "preset": "private_chat" }))
+		.create_room(&listed_creator_room)
 		.await?;
 
 	assert!(
