@@ -12,7 +12,7 @@ use tuwunel_core::implement;
 
 use crate::{
 	Engine, Map,
-	keyval::{serialize_key, serialize_val},
+	keyval::{Key, Slice, serialize_key, serialize_val},
 	util::or_else,
 };
 
@@ -30,7 +30,7 @@ pub struct Txn {
 /// Record parser yielding each queued key with its resolved map.
 struct Keys<'a> {
 	engine: &'a Engine,
-	data: &'a [u8],
+	data: Key<'a>,
 }
 
 /// Batch representation header: a fixed64 sequence then a fixed32 count.
@@ -97,8 +97,8 @@ pub fn with_capacity_bytes(engine: &Arc<Engine>, capacity_bytes: usize) -> Self 
 pub fn insert<I, K, V>(map: &Map, items: I) -> Self
 where
 	I: IntoIterator<Item = (K, V)>,
-	K: AsRef<[u8]>,
-	V: AsRef<[u8]>,
+	K: AsRef<Slice>,
+	V: AsRef<Slice>,
 {
 	items
 		.into_iter()
@@ -116,8 +116,8 @@ where
 #[implement(Txn)]
 pub fn insert_slice<K, V>(map: &Map, items: &[(K, V)]) -> Self
 where
-	K: AsRef<[u8]>,
-	V: AsRef<[u8]>,
+	K: AsRef<Slice>,
+	V: AsRef<Slice>,
 {
 	let capacity_bytes = size_hint(items.iter().map(|(key, val)| (key, val)));
 
@@ -144,8 +144,8 @@ where
 pub fn insert_each<'a, I, K, V>(items: I) -> Self
 where
 	I: IntoIterator<Item = (&'a Map, K, V)>,
-	K: AsRef<[u8]>,
-	V: AsRef<[u8]>,
+	K: AsRef<Slice>,
+	V: AsRef<Slice>,
 {
 	let mut items = items.into_iter();
 	let (map, key, val) = items
@@ -261,7 +261,7 @@ where
 pub fn put_raw<K, V>(&mut self, map: &Map, key: K, val: V)
 where
 	K: Serialize + Debug,
-	V: AsRef<[u8]>,
+	V: AsRef<Slice>,
 {
 	self.assert_map(map);
 
@@ -283,7 +283,7 @@ where
 #[implement(Txn)]
 pub fn raw_put<K, V>(&mut self, map: &Map, key: K, val: V)
 where
-	K: AsRef<[u8]>,
+	K: AsRef<Slice>,
 	V: Serialize,
 {
 	self.assert_map(map);
@@ -326,7 +326,7 @@ where
 #[implement(Txn)]
 pub fn del_raw<K>(&mut self, map: &Map, key: K)
 where
-	K: AsRef<[u8]>,
+	K: AsRef<Slice>,
 {
 	self.assert_map(map);
 	self.batch.delete_cf(&map.cf(), key);
@@ -394,7 +394,7 @@ fn notify(&self) {
 /// Iteration panics if a record has an unsupported operation tag, is truncated,
 /// or contains a varint whose fifth byte retains its continuation bit.
 #[implement(Txn)]
-pub fn keys(&self) -> impl Iterator<Item = (Arc<Map>, &[u8])> + '_ {
+pub fn keys(&self) -> impl Iterator<Item = (Arc<Map>, &Slice)> + '_ {
 	let data = self.batch.data();
 
 	Keys {
@@ -449,8 +449,8 @@ pub fn clear(&mut self) { self.batch.clear(); }
 #[implement(Txn)]
 pub fn insert_raw<K, V>(&mut self, map: &Map, key: K, val: V)
 where
-	K: AsRef<[u8]>,
-	V: AsRef<[u8]>,
+	K: AsRef<Slice>,
+	V: AsRef<Slice>,
 {
 	self.assert_map(map);
 	self.batch.put_cf(&map.cf(), key, val);
@@ -475,7 +475,7 @@ fn assert_map(&self, map: &Map) {
 }
 
 impl<'a> Iterator for Keys<'a> {
-	type Item = (Arc<Map>, &'a [u8]);
+	type Item = (Arc<Map>, Key<'a>);
 
 	fn next(&mut self) -> Option<Self::Item> {
 		while !self.data.is_empty() {
@@ -502,8 +502,8 @@ impl<'a> Iterator for Keys<'a> {
 /// Panics when any map belongs to another database engine.
 impl<'a, K, V> Extend<(&'a Map, K, V)> for Txn
 where
-	K: AsRef<[u8]>,
-	V: AsRef<[u8]>,
+	K: AsRef<Slice>,
+	V: AsRef<Slice>,
 {
 	fn extend<I>(&mut self, items: I)
 	where
@@ -525,7 +525,7 @@ where
 /// Panics when any map belongs to another database engine.
 impl<'a, K> Extend<(&'a Map, K)> for Txn
 where
-	K: AsRef<[u8]>,
+	K: AsRef<Slice>,
 {
 	fn extend<I>(&mut self, items: I)
 	where
@@ -543,7 +543,7 @@ where
 /// tags, truncated fields, and varints whose fifth byte retains its
 /// continuation bit return `None` and may leave the input advanced through the
 /// parsed prefix.
-pub(crate) fn next_record<'a>(data: &mut &'a [u8]) -> Option<(u32, &'a [u8])> {
+pub(crate) fn next_record<'a>(data: &mut Key<'a>) -> Option<(u32, Key<'a>)> {
 	let (&tag, rest) = data.split_first()?;
 	*data = rest;
 
@@ -567,7 +567,7 @@ pub(crate) fn next_record<'a>(data: &mut &'a [u8]) -> Option<(u32, &'a [u8])> {
 ///
 /// The returned slice borrows the original batch representation, and `data`
 /// advances past it. Invalid lengths or truncated input return `None`.
-fn take_varstring<'a>(data: &mut &'a [u8]) -> Option<&'a [u8]> {
+fn take_varstring<'a>(data: &mut Key<'a>) -> Option<Key<'a>> {
 	let len = take_varint32(data)?.try_into().ok()?;
 
 	let (string, rest) = data.split_at_checked(len)?;
@@ -580,7 +580,7 @@ fn take_varstring<'a>(data: &mut &'a [u8]) -> Option<&'a [u8]> {
 ///
 /// The parser consumes at most five bytes and advances `data` as bytes are
 /// read. A missing byte or a continuation bit on the fifth byte returns `None`.
-fn take_varint32(data: &mut &[u8]) -> Option<u32> {
+fn take_varint32(data: &mut &Slice) -> Option<u32> {
 	let mut result = 0_u32;
 
 	for shift in (0_u32..32).step_by(7) {
@@ -604,8 +604,8 @@ fn take_varint32(data: &mut &[u8]) -> Option<u32> {
 fn size_hint<'a, K, V, I>(items: I) -> usize
 where
 	I: Iterator<Item = (&'a K, &'a V)>,
-	K: AsRef<[u8]> + 'a,
-	V: AsRef<[u8]> + 'a,
+	K: AsRef<Slice> + 'a,
+	V: AsRef<Slice> + 'a,
 {
 	items.fold(HEADER, |capacity_bytes, (key, val)| {
 		capacity_bytes
