@@ -812,15 +812,14 @@ async fn join_local(
 		.map(Option::flatten)
 		.await;
 
-	let mut content = RoomMemberEventContent {
-		reason: reason.clone(),
-		join_authorized_via_users_server,
-		..RoomMemberEventContent::new(MembershipState::Join)
-	};
-
-	self.services
+	let content = self
+		.services
 		.profile
-		.fill_profile_data(sender_user, &mut content)
+		.fill_content(sender_user, RoomMemberEventContent {
+			reason: reason.clone(),
+			join_authorized_via_users_server,
+			..RoomMemberEventContent::new(MembershipState::Join)
+		})
 		.await;
 
 	let content = merge_member_content(content, extra_content.as_ref())?;
@@ -938,15 +937,14 @@ async fn create_join_event(
 		})
 		.and_then(|s| OwnedUserId::try_from(s.as_str().unwrap_or_default()).ok());
 
-	let mut content = RoomMemberEventContent {
-		reason,
-		join_authorized_via_users_server: join_authorized_via_users_server.clone(),
-		..RoomMemberEventContent::new(MembershipState::Join)
-	};
-
-	self.services
+	let content = self
+		.services
 		.profile
-		.fill_profile_data(sender_user, &mut content)
+		.fill_content(sender_user, RoomMemberEventContent {
+			reason,
+			join_authorized_via_users_server: join_authorized_via_users_server.clone(),
+			..RoomMemberEventContent::new(MembershipState::Join)
+		})
 		.await;
 
 	let content = merge_member_content(content, extra_content.as_ref())?;

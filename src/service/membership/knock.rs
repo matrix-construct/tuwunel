@@ -145,14 +145,13 @@ async fn knock_room_helper_local(
 
 	ensure_room_version_supports_knock(&room_version_id)?;
 
-	let mut content = RoomMemberEventContent {
-		reason: reason.clone(),
-		..RoomMemberEventContent::new(MembershipState::Knock)
-	};
-
-	self.services
+	let content = self
+		.services
 		.profile
-		.fill_profile_data(sender_user, &mut content)
+		.fill_content(sender_user, RoomMemberEventContent {
+			reason: reason.clone(),
+			..RoomMemberEventContent::new(MembershipState::Knock)
+		})
 		.await;
 
 	let Err(error) = self
@@ -423,14 +422,13 @@ async fn build_knock_event(
 			err!(BadServerResponse("Invalid make_knock event json received from server: {e:?}"))
 		})?;
 
-	let mut content = RoomMemberEventContent {
-		reason,
-		..RoomMemberEventContent::new(MembershipState::Knock)
-	};
-
-	self.services
+	let content = self
+		.services
 		.profile
-		.fill_profile_data(sender_user, &mut content)
+		.fill_content(sender_user, RoomMemberEventContent {
+			reason,
+			..RoomMemberEventContent::new(MembershipState::Knock)
+		})
 		.await;
 
 	knock_event_stub.insert(

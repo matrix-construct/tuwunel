@@ -368,14 +368,13 @@ async fn remote_leave(
 			)))
 		})?;
 
-	let mut content = RoomMemberEventContent {
-		reason,
-		..RoomMemberEventContent::new(MembershipState::Leave)
-	};
-
-	self.services
+	let content = self
+		.services
 		.profile
-		.fill_profile_data(user_id, &mut content)
+		.fill_content(user_id, RoomMemberEventContent {
+			reason,
+			..RoomMemberEventContent::new(MembershipState::Leave)
+		})
 		.await;
 
 	event.insert("content".into(), to_canonical_value(content)?);

@@ -195,14 +195,12 @@ async fn apply_creator_join_pdu(
 	room_id: &RoomId,
 	state_lock: &RoomMutexGuard,
 ) -> Result {
-	let mut content = RoomMemberEventContent {
-		is_direct: body.is_direct,
-		..RoomMemberEventContent::new(MembershipState::Join)
-	};
-
-	services
+	let content = services
 		.profile
-		.fill_profile_data(sender_user, &mut content)
+		.fill_content(sender_user, RoomMemberEventContent {
+			is_direct: body.is_direct,
+			..RoomMemberEventContent::new(MembershipState::Join)
+		})
 		.await;
 
 	services

@@ -671,8 +671,16 @@ where
 	Ok(value)
 }
 
+/// Fill membership content with the user's display name and avatar.
+///
+/// Profile lookup failures clear the corresponding fields. All other content
+/// fields are preserved.
 #[implement(Service)]
-pub async fn fill_profile_data(&self, user_id: &UserId, content: &mut RoomMemberEventContent) {
+pub async fn fill_content(
+	&self,
+	user_id: &UserId,
+	mut content: RoomMemberEventContent,
+) -> RoomMemberEventContent {
 	let displayname = self.displayname(user_id).ok();
 	let avatar_url = self.avatar_url(user_id).ok();
 
@@ -680,6 +688,8 @@ pub async fn fill_profile_data(&self, user_id: &UserId, content: &mut RoomMember
 
 	content.displayname = displayname;
 	content.avatar_url = avatar_url;
+
+	content
 }
 
 #[implement(Service)]
