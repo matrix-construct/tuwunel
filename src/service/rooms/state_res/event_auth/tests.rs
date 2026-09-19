@@ -70,7 +70,6 @@ async fn auth_outcome_classifies_denials() {
 	};
 
 	let state = TestStateMap::new(&init_events);
-	let fetch_state = state.fetch_state_fn();
 
 	let invalid = to_pdu_event(
 		"INVALID",
@@ -82,7 +81,7 @@ async fn auth_outcome_classifies_denials() {
 		&["IPOWER"],
 	);
 
-	let outcome = auth_check(&RoomVersionRules::V6, &invalid, &fetch_event, &fetch_state).await;
+	let outcome = auth_check(&RoomVersionRules::V6, &invalid, &fetch_event, &state).await;
 
 	assert!(matches!(&outcome, Ok(AuthCheckOutcome::Deny(Error::Request(InvalidParam, ..)))));
 	assert!(matches!(
@@ -100,8 +99,7 @@ async fn auth_outcome_classifies_denials() {
 		&["IPOWER"],
 	);
 
-	let outcome =
-		auth_check(&RoomVersionRules::V6, &absent_member, &fetch_event, &fetch_state).await;
+	let outcome = auth_check(&RoomVersionRules::V6, &absent_member, &fetch_event, &state).await;
 
 	assert!(
 		matches!(
@@ -121,7 +119,6 @@ async fn auth_outcome_classifies_denials() {
 	state_events.remove(&event_id("IPOWER")).unwrap();
 
 	let state = TestStateMap::new(&state_events);
-	let fetch_state = state.fetch_state_fn();
 	let absent_power_levels = to_pdu_event(
 		"ABSENT_POWER",
 		charlie(),
@@ -133,7 +130,7 @@ async fn auth_outcome_classifies_denials() {
 	);
 
 	let outcome =
-		auth_check(&RoomVersionRules::V6, &absent_power_levels, &fetch_event, &fetch_state).await;
+		auth_check(&RoomVersionRules::V6, &absent_power_levels, &fetch_event, &state).await;
 
 	assert!(
 		matches!(
@@ -178,10 +175,9 @@ async fn auth_outcome_propagates_fetch_failures() {
 	assert!(matches!(outcome, Err(Error::Io(..))));
 
 	let state = TestStateMap::new(&init_events);
-	let fetch_state = state.fetch_state_fn();
 	let missing_event = async |_event_id| Err(not_found());
 	let outcome =
-		auth_check(&RoomVersionRules::V6, &incoming_event, &missing_event, &fetch_state).await;
+		auth_check(&RoomVersionRules::V6, &incoming_event, &missing_event, &state).await;
 
 	assert!(matches!(outcome, Err(error) if error.is_not_found()));
 }
@@ -223,9 +219,7 @@ async fn auth_outcome_rejects_malformed_dependencies_as_database_errors() {
 		.collect();
 
 	let state = TestStateMap::new(&malformed_membership);
-	let outcome =
-		auth_check(&RoomVersionRules::V6, &incoming_event, &fetch_event, &state.fetch_state_fn())
-			.await;
+	let outcome = auth_check(&RoomVersionRules::V6, &incoming_event, &fetch_event, &state).await;
 
 	assert!(matches!(outcome, Err(Error::Database(..))));
 
@@ -247,9 +241,7 @@ async fn auth_outcome_rejects_malformed_dependencies_as_database_errors() {
 		.collect();
 
 	let state = TestStateMap::new(&malformed_power_levels);
-	let outcome =
-		auth_check(&RoomVersionRules::V6, &incoming_event, &fetch_event, &state.fetch_state_fn())
-			.await;
+	let outcome = auth_check(&RoomVersionRules::V6, &incoming_event, &fetch_event, &state).await;
 
 	assert!(matches!(outcome, Err(Error::Database(..))));
 }
@@ -580,10 +572,9 @@ async fn no_federate_different_server() {
 
 	let init_events = INITIAL_EVENTS_NO_FEDERATE();
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 
 	// Cannot accept event if not federating and different server.
-	check_state_dependent_auth_rules(&RoomVersionRules::V6, &incoming_event, &fetch_state)
+	check_state_dependent_auth_rules(&RoomVersionRules::V6, &incoming_event, &auth_events)
 		.await
 		.unwrap_err();
 }
@@ -605,10 +596,9 @@ async fn no_federate_same_server() {
 
 	let init_events = INITIAL_EVENTS_NO_FEDERATE();
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 
 	// Accept event if not federating and same server.
-	check_state_dependent_auth_rules(&RoomVersionRules::V6, &incoming_event, &fetch_state)
+	check_state_dependent_auth_rules(&RoomVersionRules::V6, &incoming_event, &auth_events)
 		.await
 		.unwrap();
 }
@@ -632,10 +622,9 @@ async fn sender_not_in_room() {
 
 	let init_events = INITIAL_EVENTS();
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 
 	// Cannot accept event if user not in room.
-	check_state_dependent_auth_rules(&RoomVersionRules::V6, &incoming_event, &fetch_state)
+	check_state_dependent_auth_rules(&RoomVersionRules::V6, &incoming_event, &auth_events)
 		.await
 		.unwrap_err();
 }
@@ -662,10 +651,9 @@ async fn room_third_party_invite_not_enough_power() {
 	);
 
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 
 	// Cannot accept `m.room.third_party_invite` if not enough power.
-	check_state_dependent_auth_rules(&RoomVersionRules::V6, &incoming_event, &fetch_state)
+	check_state_dependent_auth_rules(&RoomVersionRules::V6, &incoming_event, &auth_events)
 		.await
 		.unwrap_err();
 }
@@ -678,10 +666,9 @@ async fn room_third_party_invite_with_enough_power() {
 
 	let init_events = INITIAL_EVENTS();
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 
 	// Accept `m.room.third_party_invite` if enough power.
-	check_state_dependent_auth_rules(&RoomVersionRules::V6, &incoming_event, &fetch_state)
+	check_state_dependent_auth_rules(&RoomVersionRules::V6, &incoming_event, &auth_events)
 		.await
 		.unwrap();
 }
@@ -718,10 +705,9 @@ async fn event_type_not_enough_power() {
 	);
 
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 
 	// Cannot send event if not enough power for the event's type.
-	check_state_dependent_auth_rules(&RoomVersionRules::V6, &incoming_event, &fetch_state)
+	check_state_dependent_auth_rules(&RoomVersionRules::V6, &incoming_event, &auth_events)
 		.await
 		.unwrap_err();
 }
@@ -742,11 +728,10 @@ async fn user_id_state_key_not_sender() {
 
 	let init_events = INITIAL_EVENTS();
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 
 	// Cannot send state event with a user ID as a state key that doesn't match the
 	// sender.
-	check_state_dependent_auth_rules(&RoomVersionRules::V6, &incoming_event, &fetch_state)
+	check_state_dependent_auth_rules(&RoomVersionRules::V6, &incoming_event, &auth_events)
 		.await
 		.unwrap_err();
 }
@@ -767,10 +752,9 @@ async fn user_id_state_key_is_sender() {
 
 	let init_events = INITIAL_EVENTS();
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 
 	// Can send state event with a user ID as a state key that matches the sender.
-	check_state_dependent_auth_rules(&RoomVersionRules::V6, &incoming_event, &fetch_state)
+	check_state_dependent_auth_rules(&RoomVersionRules::V6, &incoming_event, &auth_events)
 		.await
 		.unwrap();
 }
@@ -1182,9 +1166,8 @@ async fn v12_additional_creator_cannot_bootstrap_join() {
 	init_events.insert(charlie_join.event_id().to_owned(), charlie_join.clone());
 
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 
-	check_state_dependent_auth_rules(&RoomVersionRules::V12, &charlie_join, &fetch_state)
+	check_state_dependent_auth_rules(&RoomVersionRules::V12, &charlie_join, &auth_events)
 		.await
 		.unwrap_err();
 }
@@ -1219,9 +1202,8 @@ async fn v12_create_sender_can_bootstrap_join() {
 	init_events.insert(alice_join.event_id().to_owned(), alice_join.clone());
 
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 
-	check_state_dependent_auth_rules(&RoomVersionRules::V12, &alice_join, &fetch_state)
+	check_state_dependent_auth_rules(&RoomVersionRules::V12, &alice_join, &auth_events)
 		.await
 		.unwrap();
 }
@@ -1318,9 +1300,8 @@ async fn knock_with_public_join_rule_rejected_v7() {
 
 	let init_events = knock_test_events(JoinRule::Public);
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 
-	check_state_dependent_auth_rules(&RoomVersionRules::V7, &zara_knock_event(), &fetch_state)
+	check_state_dependent_auth_rules(&RoomVersionRules::V7, &zara_knock_event(), &auth_events)
 		.await
 		.unwrap_err();
 }
@@ -1331,9 +1312,8 @@ async fn knock_with_invite_join_rule_rejected_v8() {
 
 	let init_events = knock_test_events(JoinRule::Invite);
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 
-	check_state_dependent_auth_rules(&RoomVersionRules::V8, &zara_knock_event(), &fetch_state)
+	check_state_dependent_auth_rules(&RoomVersionRules::V8, &zara_knock_event(), &auth_events)
 		.await
 		.unwrap_err();
 }
@@ -1344,9 +1324,8 @@ async fn knock_with_knock_join_rule_accepted_v7() {
 
 	let init_events = knock_test_events(JoinRule::Knock);
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 
-	check_state_dependent_auth_rules(&RoomVersionRules::V7, &zara_knock_event(), &fetch_state)
+	check_state_dependent_auth_rules(&RoomVersionRules::V7, &zara_knock_event(), &auth_events)
 		.await
 		.unwrap();
 }
@@ -1357,9 +1336,8 @@ async fn knock_with_public_join_rule_rejected_v10() {
 
 	let init_events = knock_test_events(JoinRule::Public);
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 
-	check_state_dependent_auth_rules(&RoomVersionRules::V10, &zara_knock_event(), &fetch_state)
+	check_state_dependent_auth_rules(&RoomVersionRules::V10, &zara_knock_event(), &auth_events)
 		.await
 		.unwrap_err();
 }
@@ -1370,9 +1348,8 @@ async fn knock_with_knock_restricted_join_rule_accepted_v10() {
 
 	let init_events = knock_test_events(JoinRule::KnockRestricted(Restricted::new(vec![])));
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 
-	check_state_dependent_auth_rules(&RoomVersionRules::V10, &zara_knock_event(), &fetch_state)
+	check_state_dependent_auth_rules(&RoomVersionRules::V10, &zara_knock_event(), &auth_events)
 		.await
 		.unwrap();
 }
@@ -1385,9 +1362,8 @@ async fn knock_with_knock_restricted_join_rule_rejected_v8() {
 	// value is `knock`.
 	let init_events = knock_test_events(JoinRule::KnockRestricted(Restricted::new(vec![])));
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 
-	check_state_dependent_auth_rules(&RoomVersionRules::V8, &zara_knock_event(), &fetch_state)
+	check_state_dependent_auth_rules(&RoomVersionRules::V8, &zara_knock_event(), &auth_events)
 		.await
 		.unwrap_err();
 }

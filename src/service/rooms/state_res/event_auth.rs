@@ -4,7 +4,7 @@ mod room_member;
 mod tests;
 
 use futures::{
-	FutureExt, TryStreamExt,
+	TryStreamExt,
 	future::{join3, try_join},
 };
 use ruma::{
@@ -18,7 +18,7 @@ use ruma::{
 };
 use tuwunel_core::{
 	Err, Error, Result, err,
-	matrix::{Event, PduEvent, StateKey},
+	matrix::{Event, PduEvent},
 	trace,
 	utils::stream::{IterStream, TryReadyExt},
 };
@@ -28,7 +28,7 @@ use self::room_member::check_room_member;
 #[cfg(test)]
 use super::test_utils;
 use super::{
-	FetchEvent, FetchStateExt, TypeStateKey, events,
+	FetchEvent, FetchState, TypeStateKey, events,
 	events::{
 		RoomCreateEvent, RoomMemberEvent, RoomPowerLevelsEvent,
 		power_levels::{self, RoomPowerLevelsEventOptionExt, RoomPowerLevelsIntField},
@@ -77,32 +77,28 @@ impl AuthCheckOutcome {
 		event_id = ?incoming_event.event_id(),
 	)
 )]
-pub async fn auth_check<Fetch, FetchState, StateFut, Pdu>(
+pub async fn auth_check<Fetch, State>(
 	rules: &RoomVersionRules,
-	incoming_event: &Pdu,
+	incoming_event: &PduEvent,
 	fetch_event: Fetch,
-	fetch_state: &FetchState,
+	fetch_state: State,
 ) -> Result<AuthCheckOutcome>
 where
 	Fetch: FetchEvent,
-	FetchState: Fn(StateEventType, StateKey) -> StateFut + Sync,
-	StateFut: Future<Output = Result<Pdu>> + Send,
-	Pdu: Event,
+	State: FetchState,
 {
 	auth_check_outcome(rules, incoming_event, fetch_event, fetch_state).await
 }
 
-async fn auth_check_outcome<Fetch, FetchState, StateFut, Pdu>(
+async fn auth_check_outcome<Fetch, State>(
 	rules: &RoomVersionRules,
-	incoming_event: &Pdu,
+	incoming_event: &PduEvent,
 	fetch_event: Fetch,
-	fetch_state: &FetchState,
+	fetch_state: State,
 ) -> Result<AuthCheckOutcome>
 where
 	Fetch: FetchEvent,
-	FetchState: Fn(StateEventType, StateKey) -> StateFut + Sync,
-	StateFut: Future<Output = Result<Pdu>> + Send,
-	Pdu: Event,
+	State: FetchState,
 {
 	let dependent = check_state_dependent_auth_rules(rules, incoming_event, fetch_state);
 	let independent = check_state_independent_auth_rules(rules, incoming_event, fetch_event);
@@ -144,18 +140,18 @@ pub(super) fn classify_auth_error(error: Error) -> Result<AuthCheckOutcome> {
 		sender = ?incoming_event.sender(),
 	)
 )]
-pub(super) async fn check_state_independent_auth_rules<Fetch, Pdu>(
+pub(super) async fn check_state_independent_auth_rules<Fetch>(
 	rules: &RoomVersionRules,
-	incoming_event: &Pdu,
+	incoming_event: &PduEvent,
 	fetch_event: Fetch,
 ) -> Result
 where
 	Fetch: FetchEvent,
-	Pdu: Event,
 {
 	// Since v1, if type is m.room.create:
 	if *incoming_event.event_type() == TimelineEventType::RoomCreate {
-		let room_create_event = RoomCreateEvent::new(incoming_event.clone());
+		let room_create_event = RoomCreateEvent::new(incoming_event);
+
 		return check_room_create(&room_create_event, &rules.authorization);
 	}
 
@@ -297,15 +293,13 @@ where
 		sender = ?incoming_event.sender(),
 	)
 )]
-pub(super) async fn check_state_dependent_auth_rules<Fetch, Fut, Pdu>(
+pub(super) async fn check_state_dependent_auth_rules<Fetch>(
 	rules: &RoomVersionRules,
-	incoming_event: &Pdu,
-	fetch_state: &Fetch,
+	incoming_event: &PduEvent,
+	fetch_state: Fetch,
 ) -> Result
 where
-	Fetch: Fn(StateEventType, StateKey) -> Fut + Sync,
-	Fut: Future<Output = Result<Pdu>> + Send,
-	Pdu: Event,
+	Fetch: FetchState,
 {
 	// There are no state-dependent auth rules for create events.
 	if *incoming_event.event_type() == TimelineEventType::RoomCreate {
@@ -360,14 +354,14 @@ where
 
 	// Since v1, if type is m.room.member:
 	if *incoming_event.event_type() == TimelineEventType::RoomMember {
-		let room_member_event = RoomMemberEvent::new(incoming_event.clone());
+		let room_member_event = RoomMemberEvent::new(incoming_event);
+
 		return check_room_member(
 			&room_member_event,
 			&rules.authorization,
 			&room_create_event,
 			fetch_state,
 		)
-		.boxed()
 		.await;
 	}
 
@@ -436,7 +430,8 @@ where
 
 	// If type is m.room.power_levels
 	if *incoming_event.event_type() == TimelineEventType::RoomPowerLevels {
-		let room_power_levels_event = RoomPowerLevelsEvent::new(incoming_event.clone());
+		let room_power_levels_event = RoomPowerLevelsEvent::new(incoming_event);
+
 		return check_room_power_levels(
 			&room_power_levels_event,
 			current_room_power_levels_event.as_ref(),
@@ -528,9 +523,9 @@ where
 /// Check whether the given event passes the `m.room.power_levels` authorization
 /// rules.
 #[tracing::instrument(level = "trace", skip_all)]
-fn check_room_power_levels<Creators, Pdu>(
+fn check_room_power_levels<Creators, Pdu, StatePdu>(
 	room_power_levels_event: &RoomPowerLevelsEvent<Pdu>,
-	current_room_power_levels_event: Option<&RoomPowerLevelsEvent<Pdu>>,
+	current_room_power_levels_event: Option<&RoomPowerLevelsEvent<StatePdu>>,
 	rules: &AuthorizationRules,
 	sender_power_level: impl Into<UserPowerLevel>,
 	mut room_creators: Creators,
@@ -538,6 +533,7 @@ fn check_room_power_levels<Creators, Pdu>(
 where
 	Creators: Iterator<Item = OwnedUserId> + Clone,
 	Pdu: Event,
+	StatePdu: Event,
 {
 	let sender_power_level = sender_power_level.into();
 
@@ -754,14 +750,15 @@ where
 
 /// Check whether the given event passes the `m.room.redaction` authorization
 /// rules.
-fn check_room_redaction<Pdu>(
+fn check_room_redaction<Pdu, StatePdu>(
 	room_redaction_event: &Pdu,
-	current_room_power_levels_event: Option<&RoomPowerLevelsEvent<Pdu>>,
+	current_room_power_levels_event: Option<&RoomPowerLevelsEvent<StatePdu>>,
 	rules: &AuthorizationRules,
 	sender_level: UserPowerLevel,
 ) -> Result
 where
 	Pdu: Event,
+	StatePdu: Event,
 {
 	let redact_level = current_room_power_levels_event
 		.cloned()

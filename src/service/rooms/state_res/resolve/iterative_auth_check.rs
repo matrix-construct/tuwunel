@@ -1,16 +1,11 @@
-use std::future::ready;
-
 use futures::{Stream, StreamExt, TryFutureExt, TryStreamExt};
 use ruma::{
-	EventId, OwnedEventId,
-	events::{StateEventType, TimelineEventType},
-	room_version_rules::RoomVersionRules,
+	EventId, OwnedEventId, events::TimelineEventType, room_version_rules::RoomVersionRules,
 };
 use tuwunel_core::{
 	Result, debug_warn, err, error,
 	matrix::{Event, EventTypeExt, PduEvent, StateKey, TypeStateKey},
 	smallvec::SmallVec,
-	trace,
 	utils::stream::{IterStream, ReadyExt, TryReadyExt, TryWidebandExt},
 };
 
@@ -172,20 +167,11 @@ where
 		})
 		.await?;
 
-	let fetch_state = |ty: StateEventType, key: StateKey| {
-		trace!(?ty, ?key, auth_events = auth_events.len(), "fetch state");
-		ready(
-			auth_events
-				.binary_search_by(|a| ty.cmp(&a.0.0).then(key.cmp(&a.0.1)))
-				.map(|i| auth_events[i].1.clone())
-				.map_err(|_| err!(Request(NotFound("Missing auth_event {ty:?},{key:?}")))),
-		)
-	};
-
-	let outcome = match check_state_dependent_auth_rules(rules, &event, &fetch_state).await {
-		| Ok(()) => AuthCheckOutcome::Allow,
-		| Err(error) => classify_auth_error(error)?,
-	};
+	let outcome =
+		match check_state_dependent_auth_rules(rules, &event, auth_events.as_slice()).await {
+			| Ok(()) => AuthCheckOutcome::Allow,
+			| Err(error) => classify_auth_error(error)?,
+		};
 
 	match outcome {
 		| AuthCheckOutcome::Allow => {

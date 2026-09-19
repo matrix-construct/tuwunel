@@ -1,13 +1,11 @@
-use std::future::ready;
-
 use futures::{StreamExt, TryFutureExt};
 use ruma::{
 	CanonicalJsonObject, EventId, RoomId, RoomVersionId, ServerName, events::TimelineEventType,
 };
 use tuwunel_core::{
-	Err, Result, debug, debug_info, err, implement,
+	Err, Result, debug, debug_info, implement,
 	matrix::{Event, PduEvent, event::TypeExt, room_version},
-	ref_at, trace,
+	trace,
 	utils::{ReadyExt, future::TryExtExt, stream::IterStream},
 	warn,
 };
@@ -132,20 +130,9 @@ pub(super) async fn handle_outlier_pdu(
 		.collect()
 		.await;
 
-	auth_check(&room_rules, &event, &*self.services.timeline, &|event_type, state_key| {
-		let target = event_type.with_state_key(state_key);
-
-		ready(
-			auth_events
-				.iter()
-				.find(|(type_state_key, _)| *type_state_key == target)
-				.map(ref_at!(1))
-				.cloned()
-				.ok_or_else(|| err!(Request(NotFound("state not found")))),
-		)
-	})
-	.await?
-	.into_result()?;
+	auth_check(&room_rules, &event, &*self.services.timeline, auth_events.as_slice())
+		.await?
+		.into_result()?;
 
 	trace!("Validation successful.");
 

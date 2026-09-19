@@ -55,7 +55,6 @@ async fn missing_state_key() {
 
 	let init_events = INITIAL_EVENTS();
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 	let room_create_event = auth_events.room_create_event();
 
 	// Event should have a state key.
@@ -63,7 +62,7 @@ async fn missing_state_key() {
 		&RoomMemberEvent::new(incoming_event),
 		&AuthorizationRules::V6,
 		&room_create_event,
-		&fetch_state,
+		&auth_events,
 	)
 	.await
 	.unwrap_err();
@@ -85,7 +84,6 @@ async fn missing_membership() {
 
 	let init_events = INITIAL_EVENTS();
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 	let room_create_event = auth_events.room_create_event();
 
 	// Content should at least include `membership`.
@@ -93,7 +91,7 @@ async fn missing_membership() {
 		&RoomMemberEvent::new(incoming_event),
 		&AuthorizationRules::V6,
 		&room_create_event,
-		&fetch_state,
+		&auth_events,
 	)
 	.await
 	.unwrap_err();
@@ -115,7 +113,6 @@ async fn join_after_create_creator_match() {
 
 	let init_events = INITIAL_EVENTS_CREATE_ROOM();
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 	let room_create_event = auth_events.room_create_event();
 
 	// Before v11, the `creator` of `m.room.create` must be the same as the state
@@ -124,7 +121,7 @@ async fn join_after_create_creator_match() {
 		&RoomMemberEvent::new(incoming_event),
 		&AuthorizationRules::V6,
 		&room_create_event,
-		&fetch_state,
+		&auth_events,
 	)
 	.await
 	.unwrap();
@@ -146,7 +143,6 @@ async fn join_after_create_creator_mismatch() {
 
 	let init_events = INITIAL_EVENTS_CREATE_ROOM();
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 	let room_create_event = auth_events.room_create_event();
 
 	// Before v11, the `creator` of `m.room.create` must be the same as the state
@@ -155,7 +151,7 @@ async fn join_after_create_creator_mismatch() {
 		&RoomMemberEvent::new(incoming_event),
 		&AuthorizationRules::V6,
 		&room_create_event,
-		&fetch_state,
+		&auth_events,
 	)
 	.await
 	.unwrap_err();
@@ -177,7 +173,6 @@ async fn join_after_create_sender_match() {
 
 	let init_events = INITIAL_EVENTS_CREATE_ROOM();
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 	let room_create_event = auth_events.room_create_event();
 
 	// Since v11, the `sender` of `m.room.create` must be the same as the state key.
@@ -185,7 +180,7 @@ async fn join_after_create_sender_match() {
 		&RoomMemberEvent::new(incoming_event),
 		&AuthorizationRules::V11,
 		&room_create_event,
-		&fetch_state,
+		&auth_events,
 	)
 	.await
 	.unwrap();
@@ -207,7 +202,6 @@ async fn join_after_create_sender_mismatch() {
 
 	let init_events = INITIAL_EVENTS_CREATE_ROOM();
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 	let room_create_event = auth_events.room_create_event();
 
 	// Since v11, the `sender` of `m.room.create` must be the same as the state key.
@@ -215,7 +209,7 @@ async fn join_after_create_sender_mismatch() {
 		&RoomMemberEvent::new(incoming_event),
 		&AuthorizationRules::V11,
 		&room_create_event,
-		&fetch_state,
+		&auth_events,
 	)
 	.await
 	.unwrap_err();
@@ -237,7 +231,6 @@ async fn join_sender_state_key_mismatch() {
 
 	let init_events = INITIAL_EVENTS();
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 	let room_create_event = auth_events.room_create_event();
 
 	// For join events, the sender must be the same as the state key.
@@ -245,7 +238,7 @@ async fn join_sender_state_key_mismatch() {
 		&RoomMemberEvent::new(incoming_event),
 		&AuthorizationRules::V6,
 		&room_create_event,
-		&fetch_state,
+		&auth_events,
 	)
 	.await
 	.unwrap_err();
@@ -277,7 +270,6 @@ async fn join_banned() {
 	);
 
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 	let room_create_event = auth_events.room_create_event();
 
 	// A user cannot join if they are banned.
@@ -285,7 +277,7 @@ async fn join_banned() {
 		&RoomMemberEvent::new(incoming_event),
 		&AuthorizationRules::V6,
 		&room_create_event,
-		&fetch_state,
+		&auth_events,
 	)
 	.await
 	.unwrap_err();
@@ -317,7 +309,6 @@ async fn join_invite_join_rule_already_joined() {
 	);
 
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 	let room_create_event = auth_events.room_create_event();
 
 	// A user can send a join event in a room with `invite` join rule if they
@@ -326,7 +317,7 @@ async fn join_invite_join_rule_already_joined() {
 		&RoomMemberEvent::new(incoming_event),
 		&AuthorizationRules::V6,
 		&room_create_event,
-		&fetch_state,
+		&auth_events,
 	)
 	.await
 	.unwrap();
@@ -367,7 +358,6 @@ async fn join_knock_join_rule_already_invited() {
 	);
 
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 	let room_create_event = auth_events.room_create_event();
 
 	// Since v7, a user can send a join event in a room with `knock` join rule if
@@ -376,7 +366,7 @@ async fn join_knock_join_rule_already_invited() {
 		&RoomMemberEvent::new(incoming_event),
 		&AuthorizationRules::V7,
 		&room_create_event,
-		&fetch_state,
+		&auth_events,
 	)
 	.await
 	.unwrap();
@@ -408,7 +398,6 @@ async fn join_knock_join_rule_not_supported() {
 	);
 
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 	let room_create_event = auth_events.room_create_event();
 
 	// Before v7, a user CANNOT send a join event in a room with `knock` join rule.
@@ -418,7 +407,7 @@ async fn join_knock_join_rule_not_supported() {
 		&RoomMemberEvent::new(incoming_event),
 		&AuthorizationRules::V6,
 		&room_create_event,
-		&fetch_state,
+		&auth_events,
 	)
 	.await
 	.unwrap_err();
@@ -453,7 +442,6 @@ async fn join_restricted_join_rule_not_supported() {
 	);
 
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 	let room_create_event = auth_events.room_create_event();
 
 	// Before v8, a user CANNOT send a join event in a room with `restricted` join
@@ -463,7 +451,7 @@ async fn join_restricted_join_rule_not_supported() {
 		&RoomMemberEvent::new(incoming_event),
 		&AuthorizationRules::V6,
 		&room_create_event,
-		&fetch_state,
+		&auth_events,
 	)
 	.await
 	.unwrap_err();
@@ -498,7 +486,6 @@ async fn join_knock_restricted_join_rule_not_supported() {
 	);
 
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 	let room_create_event = auth_events.room_create_event();
 
 	// Before v10, a user CANNOT send a join event in a room with `knock_restricted`
@@ -508,7 +495,7 @@ async fn join_knock_restricted_join_rule_not_supported() {
 		&RoomMemberEvent::new(incoming_event),
 		&AuthorizationRules::V6,
 		&room_create_event,
-		&fetch_state,
+		&auth_events,
 	)
 	.await
 	.unwrap_err();
@@ -543,7 +530,6 @@ async fn join_restricted_join_rule_already_joined() {
 	);
 
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 	let room_create_event = auth_events.room_create_event();
 
 	// Since v8, a user can send a join event in a room with `restricted` join rule
@@ -552,7 +538,7 @@ async fn join_restricted_join_rule_already_joined() {
 		&RoomMemberEvent::new(incoming_event),
 		&AuthorizationRules::V8,
 		&room_create_event,
-		&fetch_state,
+		&auth_events,
 	)
 	.await
 	.unwrap();
@@ -596,7 +582,6 @@ async fn join_knock_restricted_join_rule_already_invited() {
 	);
 
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 	let room_create_event = auth_events.room_create_event();
 
 	// Since v10, a user can send a join event in a room with `knock_restricted`
@@ -605,7 +590,7 @@ async fn join_knock_restricted_join_rule_already_invited() {
 		&RoomMemberEvent::new(incoming_event),
 		&AuthorizationRules::V10,
 		&room_create_event,
-		&fetch_state,
+		&auth_events,
 	)
 	.await
 	.unwrap();
@@ -640,7 +625,6 @@ async fn join_restricted_join_rule_missing_join_authorised_via_users_server() {
 	);
 
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 	let room_create_event = auth_events.room_create_event();
 
 	// Since v8, a user CANNOT join event in a room with `restricted` join rule if
@@ -649,7 +633,7 @@ async fn join_restricted_join_rule_missing_join_authorised_via_users_server() {
 		&RoomMemberEvent::new(incoming_event),
 		&AuthorizationRules::V8,
 		&room_create_event,
-		&fetch_state,
+		&auth_events,
 	)
 	.await
 	.unwrap_err();
@@ -687,7 +671,6 @@ async fn join_restricted_join_rule_authorised_via_user_not_in_room() {
 	);
 
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 	let room_create_event = auth_events.room_create_event();
 
 	// Since v8, a user CANNOT join event in a room with `restricted` join rule if
@@ -696,7 +679,7 @@ async fn join_restricted_join_rule_authorised_via_user_not_in_room() {
 		&RoomMemberEvent::new(incoming_event),
 		&AuthorizationRules::V8,
 		&room_create_event,
-		&fetch_state,
+		&auth_events,
 	)
 	.await
 	.unwrap_err();
@@ -743,7 +726,6 @@ async fn join_restricted_join_rule_authorised_via_user_with_not_enough_power() {
 	);
 
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 	let room_create_event = auth_events.room_create_event();
 
 	// Since v8, a user CANNOT join event in a room with `restricted` join rule if
@@ -752,7 +734,7 @@ async fn join_restricted_join_rule_authorised_via_user_with_not_enough_power() {
 		&RoomMemberEvent::new(incoming_event),
 		&AuthorizationRules::V8,
 		&room_create_event,
-		&fetch_state,
+		&auth_events,
 	)
 	.await
 	.unwrap_err();
@@ -821,7 +803,6 @@ async fn join_restricted_join_rule_authorised_via_user() {
 		);
 
 		let auth_events = TestStateMap::new(&init_events);
-		let fetch_state = auth_events.fetch_state_fn();
 		let room_create_event = auth_events.room_create_event();
 
 		// Since v8, a user can join event in a room with `restricted` join rule if they
@@ -830,7 +811,7 @@ async fn join_restricted_join_rule_authorised_via_user() {
 			&RoomMemberEvent::new(incoming_event.clone()),
 			&AuthorizationRules::V8,
 			&room_create_event,
-			&fetch_state,
+			&auth_events,
 		)
 		.await
 		.unwrap();
@@ -862,7 +843,6 @@ async fn join_public_join_rule() {
 
 	let init_events = INITIAL_EVENTS();
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 	let room_create_event = auth_events.room_create_event();
 
 	for content in contents_to_check {
@@ -881,7 +861,7 @@ async fn join_public_join_rule() {
 			&RoomMemberEvent::new(incoming_event),
 			&AuthorizationRules::V8,
 			&room_create_event,
-			&fetch_state,
+			&auth_events,
 		)
 		.await
 		.unwrap();
@@ -928,7 +908,6 @@ async fn invite_via_third_party_invite_banned() {
 	);
 
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 	let room_create_event = auth_events.room_create_event();
 
 	// A user cannot be invited via third party invite if they were banned.
@@ -936,7 +915,7 @@ async fn invite_via_third_party_invite_banned() {
 		&RoomMemberEvent::new(incoming_event),
 		&AuthorizationRules::V8,
 		&room_create_event,
-		&fetch_state,
+		&auth_events,
 	)
 	.await
 	.unwrap_err();
@@ -965,7 +944,6 @@ async fn invite_via_third_party_invite_missing_signed() {
 
 	let init_events = INITIAL_EVENTS();
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 	let room_create_event = auth_events.room_create_event();
 
 	// Third party invite content must have a `joined` property.
@@ -973,7 +951,7 @@ async fn invite_via_third_party_invite_missing_signed() {
 		&RoomMemberEvent::new(incoming_event),
 		&AuthorizationRules::V8,
 		&room_create_event,
-		&fetch_state,
+		&auth_events,
 	)
 	.await
 	.unwrap_err();
@@ -1005,7 +983,6 @@ async fn invite_via_third_party_invite_missing_mxid() {
 
 	let init_events = INITIAL_EVENTS();
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 	let room_create_event = auth_events.room_create_event();
 
 	// Third party invite content must have a `joined.mxid` property.
@@ -1013,7 +990,7 @@ async fn invite_via_third_party_invite_missing_mxid() {
 		&RoomMemberEvent::new(incoming_event),
 		&AuthorizationRules::V8,
 		&room_create_event,
-		&fetch_state,
+		&auth_events,
 	)
 	.await
 	.unwrap_err();
@@ -1045,7 +1022,6 @@ async fn invite_via_third_party_invite_missing_token() {
 
 	let init_events = INITIAL_EVENTS();
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 	let room_create_event = auth_events.room_create_event();
 
 	// Third party invite content must have a `joined.token` property.
@@ -1053,7 +1029,7 @@ async fn invite_via_third_party_invite_missing_token() {
 		&RoomMemberEvent::new(incoming_event),
 		&AuthorizationRules::V8,
 		&room_create_event,
-		&fetch_state,
+		&auth_events,
 	)
 	.await
 	.unwrap_err();
@@ -1086,7 +1062,6 @@ async fn invite_via_third_party_invite_mxid_mismatch() {
 
 	let init_events = INITIAL_EVENTS();
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 	let room_create_event = auth_events.room_create_event();
 
 	// `mxid` of third party invite must match state key.
@@ -1094,7 +1069,7 @@ async fn invite_via_third_party_invite_mxid_mismatch() {
 		&RoomMemberEvent::new(incoming_event),
 		&AuthorizationRules::V8,
 		&room_create_event,
-		&fetch_state,
+		&auth_events,
 	)
 	.await
 	.unwrap_err();
@@ -1145,7 +1120,6 @@ async fn invite_via_third_party_invite_missing_room_third_party_invite() {
 	);
 
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 	let room_create_event = auth_events.room_create_event();
 
 	// There must be an `m.room.third_party_invite` event with the same token in the
@@ -1154,7 +1128,7 @@ async fn invite_via_third_party_invite_missing_room_third_party_invite() {
 		&RoomMemberEvent::new(incoming_event),
 		&AuthorizationRules::V8,
 		&room_create_event,
-		&fetch_state,
+		&auth_events,
 	)
 	.await
 	.unwrap_err();
@@ -1189,7 +1163,6 @@ async fn invite_via_third_party_invite_room_third_party_invite_sender_mismatch()
 	init_events.insert(event_id("THIRD_PARTY"), room_third_party_invite(bob()));
 
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 	let room_create_event = auth_events.room_create_event();
 
 	// `mxid` of third party invite must match state key.
@@ -1197,7 +1170,7 @@ async fn invite_via_third_party_invite_room_third_party_invite_sender_mismatch()
 		&RoomMemberEvent::new(incoming_event),
 		&AuthorizationRules::V8,
 		&room_create_event,
-		&fetch_state,
+		&auth_events,
 	)
 	.await
 	.unwrap_err();
@@ -1233,7 +1206,6 @@ async fn invite_via_third_party_invite_with_room_missing_signatures() {
 	init_events.insert(event_id("THIRD_PARTY"), room_third_party_invite(charlie()));
 
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 	let room_create_event = auth_events.room_create_event();
 
 	// `signed` must have a `signatures` field.
@@ -1241,7 +1213,7 @@ async fn invite_via_third_party_invite_with_room_missing_signatures() {
 		&RoomMemberEvent::new(incoming_event),
 		&AuthorizationRules::V8,
 		&room_create_event,
-		&fetch_state,
+		&auth_events,
 	)
 	.await
 	.unwrap_err();
@@ -1278,7 +1250,6 @@ async fn invite_via_third_party_invite_with_room_empty_signatures() {
 	init_events.insert(event_id("THIRD_PARTY"), room_third_party_invite(charlie()));
 
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 	let room_create_event = auth_events.room_create_event();
 
 	// There is no signature to verify, we need at least one.
@@ -1286,7 +1257,7 @@ async fn invite_via_third_party_invite_with_room_empty_signatures() {
 		&RoomMemberEvent::new(incoming_event),
 		&AuthorizationRules::V8,
 		&room_create_event,
-		&fetch_state,
+		&auth_events,
 	)
 	.await
 	.unwrap_err();
@@ -1327,7 +1298,6 @@ async fn invite_via_third_party_invite_with_wrong_signature() {
 	init_events.insert(event_id("THIRD_PARTY"), room_third_party_invite(charlie()));
 
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 	let room_create_event = auth_events.room_create_event();
 
 	// No public key will manage to verify the signature.
@@ -1335,7 +1305,7 @@ async fn invite_via_third_party_invite_with_wrong_signature() {
 		&RoomMemberEvent::new(incoming_event),
 		&AuthorizationRules::V8,
 		&room_create_event,
-		&fetch_state,
+		&auth_events,
 	)
 	.await
 	.unwrap_err();
@@ -1376,7 +1346,6 @@ async fn invite_via_third_party_invite_with_wrong_signing_algorithm() {
 	init_events.insert(event_id("THIRD_PARTY"), room_third_party_invite(charlie()));
 
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 	let room_create_event = auth_events.room_create_event();
 
 	// Can't verify a signature with an unsupported algorithm, so there is no
@@ -1385,7 +1354,7 @@ async fn invite_via_third_party_invite_with_wrong_signing_algorithm() {
 		&RoomMemberEvent::new(incoming_event),
 		&AuthorizationRules::V8,
 		&room_create_event,
-		&fetch_state,
+		&auth_events,
 	)
 	.await
 	.unwrap_err();
@@ -1431,7 +1400,6 @@ async fn invite_via_third_party_invite() {
 	init_events.insert(event_id("THIRD_PARTY"), room_third_party_invite(charlie()));
 
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 	let room_create_event = auth_events.room_create_event();
 
 	// Valid third party invite works.
@@ -1439,7 +1407,7 @@ async fn invite_via_third_party_invite() {
 		&RoomMemberEvent::new(incoming_event),
 		&AuthorizationRules::V8,
 		&room_create_event,
-		&fetch_state,
+		&auth_events,
 	)
 	.await
 	.unwrap();
@@ -1461,7 +1429,6 @@ async fn invite_sender_not_joined() {
 
 	let init_events = INITIAL_EVENTS();
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 	let room_create_event = auth_events.room_create_event();
 
 	// The sender of the invite must have joined the room.
@@ -1469,7 +1436,7 @@ async fn invite_sender_not_joined() {
 		&RoomMemberEvent::new(incoming_event),
 		&AuthorizationRules::V8,
 		&room_create_event,
-		&fetch_state,
+		&auth_events,
 	)
 	.await
 	.unwrap_err();
@@ -1501,7 +1468,6 @@ async fn invite_banned() {
 	);
 
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 	let room_create_event = auth_events.room_create_event();
 
 	// The sender of the invite must have joined the room.
@@ -1509,7 +1475,7 @@ async fn invite_banned() {
 		&RoomMemberEvent::new(incoming_event),
 		&AuthorizationRules::V8,
 		&room_create_event,
-		&fetch_state,
+		&auth_events,
 	)
 	.await
 	.unwrap_err();
@@ -1531,7 +1497,6 @@ async fn invite_already_joined() {
 
 	let init_events = INITIAL_EVENTS();
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 	let room_create_event = auth_events.room_create_event();
 
 	// The sender of the invite must have joined the room.
@@ -1539,7 +1504,7 @@ async fn invite_already_joined() {
 		&RoomMemberEvent::new(incoming_event),
 		&AuthorizationRules::V8,
 		&room_create_event,
-		&fetch_state,
+		&auth_events,
 	)
 	.await
 	.unwrap_err();
@@ -1571,7 +1536,6 @@ async fn invite_sender_not_enough_power() {
 	);
 
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 	let room_create_event = auth_events.room_create_event();
 
 	// The sender must have enough power to invite in the room.
@@ -1579,7 +1543,7 @@ async fn invite_sender_not_enough_power() {
 		&RoomMemberEvent::new(incoming_event),
 		&AuthorizationRules::V8,
 		&room_create_event,
-		&fetch_state,
+		&auth_events,
 	)
 	.await
 	.unwrap_err();
@@ -1628,14 +1592,13 @@ async fn check_invite(target: &UserId, init_events: HashMap<OwnedEventId, PduEve
 	);
 
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 	let room_create_event = auth_events.room_create_event();
 
 	check_room_member(
 		&RoomMemberEvent::new(incoming_event),
 		&AuthorizationRules::V8,
 		&room_create_event,
-		&fetch_state,
+		&auth_events,
 	)
 	.await
 }
@@ -1656,7 +1619,6 @@ async fn leave_after_leave() {
 
 	let init_events = INITIAL_EVENTS();
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 	let room_create_event = auth_events.room_create_event();
 
 	// User can only leave after `invite`, `join` or `knock`.
@@ -1664,7 +1626,7 @@ async fn leave_after_leave() {
 		&RoomMemberEvent::new(incoming_event),
 		&AuthorizationRules::V8,
 		&room_create_event,
-		&fetch_state,
+		&auth_events,
 	)
 	.await
 	.unwrap_err();
@@ -1686,7 +1648,6 @@ async fn leave_after_join() {
 
 	let init_events = INITIAL_EVENTS();
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 	let room_create_event = auth_events.room_create_event();
 
 	// User can leave after join.
@@ -1694,7 +1655,7 @@ async fn leave_after_join() {
 		&RoomMemberEvent::new(incoming_event),
 		&AuthorizationRules::V8,
 		&room_create_event,
-		&fetch_state,
+		&auth_events,
 	)
 	.await
 	.unwrap();
@@ -1726,7 +1687,6 @@ async fn leave_after_invite() {
 	);
 
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 	let room_create_event = auth_events.room_create_event();
 
 	// User can leave after invite.
@@ -1734,7 +1694,7 @@ async fn leave_after_invite() {
 		&RoomMemberEvent::new(incoming_event),
 		&AuthorizationRules::V8,
 		&room_create_event,
-		&fetch_state,
+		&auth_events,
 	)
 	.await
 	.unwrap();
@@ -1766,7 +1726,6 @@ async fn leave_after_knock() {
 	);
 
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 	let room_create_event = auth_events.room_create_event();
 
 	// User can leave after knock.
@@ -1774,7 +1733,7 @@ async fn leave_after_knock() {
 		&RoomMemberEvent::new(incoming_event),
 		&AuthorizationRules::V8,
 		&room_create_event,
-		&fetch_state,
+		&auth_events,
 	)
 	.await
 	.unwrap();
@@ -1806,7 +1765,6 @@ async fn leave_after_knock_not_supported() {
 	);
 
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 	let room_create_event = auth_events.room_create_event();
 
 	// User can't leave if the room version does not support knocking. Servers
@@ -1816,7 +1774,7 @@ async fn leave_after_knock_not_supported() {
 		&RoomMemberEvent::new(incoming_event),
 		&AuthorizationRules::V6,
 		&room_create_event,
-		&fetch_state,
+		&auth_events,
 	)
 	.await
 	.unwrap_err();
@@ -1838,7 +1796,6 @@ async fn leave_kick_sender_left() {
 
 	let init_events = INITIAL_EVENTS();
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 	let room_create_event = auth_events.room_create_event();
 
 	// User can't kick if not joined.
@@ -1846,7 +1803,7 @@ async fn leave_kick_sender_left() {
 		&RoomMemberEvent::new(incoming_event),
 		&AuthorizationRules::V6,
 		&room_create_event,
-		&fetch_state,
+		&auth_events,
 	)
 	.await
 	.unwrap_err();
@@ -1878,7 +1835,6 @@ async fn leave_unban_not_enough_power() {
 	);
 
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 	let room_create_event = auth_events.room_create_event();
 
 	// User can't unban if not enough power.
@@ -1886,7 +1842,7 @@ async fn leave_unban_not_enough_power() {
 		&RoomMemberEvent::new(incoming_event),
 		&AuthorizationRules::V6,
 		&room_create_event,
-		&fetch_state,
+		&auth_events,
 	)
 	.await
 	.unwrap_err();
@@ -1918,7 +1874,6 @@ async fn leave_unban() {
 	);
 
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 	let room_create_event = auth_events.room_create_event();
 
 	// User can unban with enough power.
@@ -1926,7 +1881,7 @@ async fn leave_unban() {
 		&RoomMemberEvent::new(incoming_event),
 		&AuthorizationRules::V6,
 		&room_create_event,
-		&fetch_state,
+		&auth_events,
 	)
 	.await
 	.unwrap();
@@ -1948,7 +1903,6 @@ async fn leave_kick_not_enough_power() {
 
 	let init_events = INITIAL_EVENTS();
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 	let room_create_event = auth_events.room_create_event();
 
 	// User can't kick if not enough power for it.
@@ -1956,7 +1910,7 @@ async fn leave_kick_not_enough_power() {
 		&RoomMemberEvent::new(incoming_event),
 		&AuthorizationRules::V6,
 		&room_create_event,
-		&fetch_state,
+		&auth_events,
 	)
 	.await
 	.unwrap_err();
@@ -1995,7 +1949,6 @@ async fn leave_kick_greater_power() {
 	);
 
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 	let room_create_event = auth_events.room_create_event();
 
 	// Can't kick user with greater power level.
@@ -2003,7 +1956,7 @@ async fn leave_kick_greater_power() {
 		&RoomMemberEvent::new(incoming_event),
 		&AuthorizationRules::V6,
 		&room_create_event,
-		&fetch_state,
+		&auth_events,
 	)
 	.await
 	.unwrap_err();
@@ -2042,7 +1995,6 @@ async fn leave_kick_same_power() {
 	);
 
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 	let room_create_event = auth_events.room_create_event();
 
 	// Can't kick user with same power level.
@@ -2050,7 +2002,7 @@ async fn leave_kick_same_power() {
 		&RoomMemberEvent::new(incoming_event),
 		&AuthorizationRules::V6,
 		&room_create_event,
-		&fetch_state,
+		&auth_events,
 	)
 	.await
 	.unwrap_err();
@@ -2072,7 +2024,6 @@ async fn leave_kick() {
 
 	let init_events = INITIAL_EVENTS();
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 	let room_create_event = auth_events.room_create_event();
 
 	// Can kick user with enough power.
@@ -2080,7 +2031,7 @@ async fn leave_kick() {
 		&RoomMemberEvent::new(incoming_event),
 		&AuthorizationRules::V6,
 		&room_create_event,
-		&fetch_state,
+		&auth_events,
 	)
 	.await
 	.unwrap();
@@ -2102,7 +2053,6 @@ async fn ban_sender_not_joined() {
 
 	let init_events = INITIAL_EVENTS();
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 	let room_create_event = auth_events.room_create_event();
 
 	// Can't ban user if not in room.
@@ -2110,7 +2060,7 @@ async fn ban_sender_not_joined() {
 		&RoomMemberEvent::new(incoming_event),
 		&AuthorizationRules::V6,
 		&room_create_event,
-		&fetch_state,
+		&auth_events,
 	)
 	.await
 	.unwrap_err();
@@ -2132,7 +2082,6 @@ async fn ban_not_enough_power() {
 
 	let init_events = INITIAL_EVENTS();
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 	let room_create_event = auth_events.room_create_event();
 
 	// Can't ban user if not enough power.
@@ -2140,7 +2089,7 @@ async fn ban_not_enough_power() {
 		&RoomMemberEvent::new(incoming_event),
 		&AuthorizationRules::V6,
 		&room_create_event,
-		&fetch_state,
+		&auth_events,
 	)
 	.await
 	.unwrap_err();
@@ -2179,7 +2128,6 @@ async fn ban_greater_power() {
 	);
 
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 	let room_create_event = auth_events.room_create_event();
 
 	// Can't ban user with greater power level.
@@ -2187,7 +2135,7 @@ async fn ban_greater_power() {
 		&RoomMemberEvent::new(incoming_event),
 		&AuthorizationRules::V6,
 		&room_create_event,
-		&fetch_state,
+		&auth_events,
 	)
 	.await
 	.unwrap_err();
@@ -2226,7 +2174,6 @@ async fn ban_same_power() {
 	);
 
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 	let room_create_event = auth_events.room_create_event();
 
 	// Can't ban user with same power level.
@@ -2234,7 +2181,7 @@ async fn ban_same_power() {
 		&RoomMemberEvent::new(incoming_event),
 		&AuthorizationRules::V6,
 		&room_create_event,
-		&fetch_state,
+		&auth_events,
 	)
 	.await
 	.unwrap_err();
@@ -2256,7 +2203,6 @@ async fn ban() {
 
 	let init_events = INITIAL_EVENTS();
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 	let room_create_event = auth_events.room_create_event();
 
 	// Can ban user with enough power.
@@ -2264,7 +2210,7 @@ async fn ban() {
 		&RoomMemberEvent::new(incoming_event),
 		&AuthorizationRules::V6,
 		&room_create_event,
-		&fetch_state,
+		&auth_events,
 	)
 	.await
 	.unwrap();
@@ -2286,7 +2232,6 @@ async fn knock_public_join_rule() {
 
 	let init_events = INITIAL_EVENTS();
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 	let room_create_event = auth_events.room_create_event();
 
 	// User can't knock if join rule is not `knock` or `knock_restricted`.
@@ -2294,7 +2239,7 @@ async fn knock_public_join_rule() {
 		&RoomMemberEvent::new(incoming_event),
 		&AuthorizationRules::V11,
 		&room_create_event,
-		&fetch_state,
+		&auth_events,
 	)
 	.await
 	.unwrap_err();
@@ -2326,7 +2271,6 @@ async fn knock_knock_join_rule() {
 	);
 
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 	let room_create_event = auth_events.room_create_event();
 
 	// User can knock if room version supports it.
@@ -2334,7 +2278,7 @@ async fn knock_knock_join_rule() {
 		&RoomMemberEvent::new(incoming_event),
 		&AuthorizationRules::V7,
 		&room_create_event,
-		&fetch_state,
+		&auth_events,
 	)
 	.await
 	.unwrap();
@@ -2366,7 +2310,6 @@ async fn knock_knock_join_rule_not_supported() {
 	);
 
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 	let room_create_event = auth_events.room_create_event();
 
 	// User CANNOT knock if room version doesn't support it.
@@ -2374,7 +2317,7 @@ async fn knock_knock_join_rule_not_supported() {
 		&RoomMemberEvent::new(incoming_event),
 		&AuthorizationRules::V3,
 		&room_create_event,
-		&fetch_state,
+		&auth_events,
 	)
 	.await
 	.unwrap_err();
@@ -2409,7 +2352,6 @@ async fn knock_knock_restricted_join_rule() {
 	);
 
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 	let room_create_event = auth_events.room_create_event();
 
 	// User can knock if room version supports it.
@@ -2417,7 +2359,7 @@ async fn knock_knock_restricted_join_rule() {
 		&RoomMemberEvent::new(incoming_event),
 		&AuthorizationRules::V10,
 		&room_create_event,
-		&fetch_state,
+		&auth_events,
 	)
 	.await
 	.unwrap();
@@ -2452,7 +2394,6 @@ async fn knock_knock_restricted_join_rule_not_supported() {
 	);
 
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 	let room_create_event = auth_events.room_create_event();
 
 	// User CANNOT knock if room version doesn't support it.
@@ -2460,7 +2401,7 @@ async fn knock_knock_restricted_join_rule_not_supported() {
 		&RoomMemberEvent::new(incoming_event),
 		&AuthorizationRules::V3,
 		&room_create_event,
-		&fetch_state,
+		&auth_events,
 	)
 	.await
 	.unwrap_err();
@@ -2492,7 +2433,6 @@ async fn knock_sender_state_key_mismatch() {
 	);
 
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 	let room_create_event = auth_events.room_create_event();
 
 	// User cannot knock if state key doesn't match sender.
@@ -2500,7 +2440,7 @@ async fn knock_sender_state_key_mismatch() {
 		&RoomMemberEvent::new(incoming_event),
 		&AuthorizationRules::V7,
 		&room_create_event,
-		&fetch_state,
+		&auth_events,
 	)
 	.await
 	.unwrap_err();
@@ -2541,7 +2481,6 @@ async fn knock_after_ban() {
 	);
 
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 	let room_create_event = auth_events.room_create_event();
 
 	// User cannot knock if banned.
@@ -2549,7 +2488,7 @@ async fn knock_after_ban() {
 		&RoomMemberEvent::new(incoming_event),
 		&AuthorizationRules::V7,
 		&room_create_event,
-		&fetch_state,
+		&auth_events,
 	)
 	.await
 	.unwrap_err();
@@ -2590,7 +2529,6 @@ async fn knock_after_invite() {
 	);
 
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 	let room_create_event = auth_events.room_create_event();
 
 	// User cannot knock after being invited.
@@ -2598,7 +2536,7 @@ async fn knock_after_invite() {
 		&RoomMemberEvent::new(incoming_event),
 		&AuthorizationRules::V7,
 		&room_create_event,
-		&fetch_state,
+		&auth_events,
 	)
 	.await
 	.unwrap_err();
@@ -2630,7 +2568,6 @@ async fn knock_after_join() {
 	);
 
 	let auth_events = TestStateMap::new(&init_events);
-	let fetch_state = auth_events.fetch_state_fn();
 	let room_create_event = auth_events.room_create_event();
 
 	// User cannot knock after being invited.
@@ -2638,7 +2575,7 @@ async fn knock_after_join() {
 		&RoomMemberEvent::new(incoming_event),
 		&AuthorizationRules::V7,
 		&room_create_event,
-		&fetch_state,
+		&auth_events,
 	)
 	.await
 	.unwrap_err();

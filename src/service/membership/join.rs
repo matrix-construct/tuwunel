@@ -39,7 +39,7 @@ use crate::{
 	Services,
 	federation::{Candidates, WhenAllBackedOff},
 	rooms::{
-		state::RoomMutexGuard,
+		state::{IdMapState, RoomMutexGuard},
 		state_compressor::{CompressedState, HashSetCompressStateEvent},
 		state_res,
 	},
@@ -343,19 +343,7 @@ async fn join_remote(
 		&room_version_rules,
 		&parsed_join_pdu,
 		&*self.services.timeline,
-		&async |event_type, state_key| {
-			let shortstatekey = self
-				.services
-				.short
-				.get_shortstatekey(&event_type, state_key.as_str())
-				.await?;
-
-			let event_id = state.get(&shortstatekey).ok_or_else(|| {
-				err!(Request(NotFound("Missing fetch_state {shortstatekey:?}")))
-			})?;
-
-			self.services.timeline.get_pdu(event_id).await
-		},
+		IdMapState { services: &self.services, ids: &state },
 	)
 	.and_then(async |outcome| outcome.into_result())
 	.inspect_err(|e| error!(?e, "send_join auth check failed"))

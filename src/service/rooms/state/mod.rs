@@ -4,11 +4,16 @@
 //! derived cache effects when state is forced. State snapshots themselves are
 //! encoded and reconstructed by the state compressor service.
 
+mod fetch_state;
 mod prune;
 
 use std::{collections::HashMap, fmt::Write, iter::once, sync::Arc};
 
 use async_trait::async_trait;
+/// Fetches state events through a held map of short state keys.
+///
+/// Sibling services share its distinction between absent state and missing storage.
+pub(crate) use fetch_state::IdMapState;
 use futures::{FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt, future::join_all};
 /// Re-exports the receive-path pruning goal calculation within the crate.
 ///

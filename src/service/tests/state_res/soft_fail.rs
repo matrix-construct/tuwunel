@@ -1,7 +1,7 @@
 //! Soft-fail auth-boundary integration tests.
 #![cfg(test)]
 
-use std::{collections::HashMap, fs::read_to_string, path::Path};
+use std::{collections::HashMap, fs::read_to_string, future::ready, path::Path};
 
 use ruma::{EventId, OwnedEventId, RoomVersionId, events::StateEventType};
 use serde_json::from_str as from_json_str;
@@ -39,11 +39,13 @@ async fn delayed_branch_valid_leave_fails_only_current_state_auth() {
 		.expect("room version should be supported");
 
 	let fetch_event = async |event_id: OwnedEventId| get_event(&events, &event_id);
-	let positional_fetch =
-		async |event_type, state_key| get_state(&events, &positional, &event_type, &state_key);
+	let positional_fetch = |event_type: StateEventType, state_key: StateKey| {
+		ready(get_state(&events, &positional, &event_type, &state_key))
+	};
 
-	let current_fetch =
-		async |event_type, state_key| get_state(&events, &current, &event_type, &state_key);
+	let current_fetch = |event_type: StateEventType, state_key: StateKey| {
+		ready(get_state(&events, &current, &event_type, &state_key))
+	};
 
 	let ghost_join = event(&events, "$ghost_join").event_id();
 	assert!(

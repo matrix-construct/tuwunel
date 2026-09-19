@@ -69,10 +69,11 @@ pub mod topological_sort;
 
 use tuwunel_core::matrix::TypeStateKey;
 
-use self::{event_auth::check_state_dependent_auth_rules, fetch_state::FetchStateExt};
+use self::event_auth::check_state_dependent_auth_rules;
 pub use self::{
 	event_auth::{AuthCheckOutcome, AuthTypes, auth_check, auth_types_for_event},
 	fetch_event::FetchEvent,
+	fetch_state::FetchState,
 	resolve::{AuthSet, ConflictMap, StateMap, resolve},
 	topological_sort::{is_topologically_sorted_in_place, topological_sort},
 };

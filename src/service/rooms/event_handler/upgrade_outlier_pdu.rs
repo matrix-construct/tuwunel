@@ -3,11 +3,11 @@ use std::{borrow::Borrow, collections::HashMap, iter::once, sync::Arc, time::Ins
 use futures::{FutureExt, StreamExt};
 use ruma::{
 	CanonicalJsonObject, EventId, OwnedEventId, RoomId, RoomVersionId, ServerName,
-	events::StateEventType, room_version_rules::RoomVersionRules,
+	room_version_rules::RoomVersionRules,
 };
 use tuwunel_core::{
-	Result, debug, debug_info, debug_warn, err, implement, is_equal_to,
-	matrix::{Event, EventTypeExt, PduEvent, StateKey, pdu::check_rules, room_version},
+	Result, debug, debug_info, debug_warn, implement, is_equal_to,
+	matrix::{Event, PduEvent, pdu::check_rules, room_version},
 	trace,
 	utils::{
 		BoolExt,
@@ -22,7 +22,7 @@ use super::{
 	state_local_build::WalkMode,
 };
 use crate::rooms::{
-	state::{RoomMutexGuard, Trigger, prune_goal},
+	state::{IdMapState, RoomMutexGuard, Trigger, prune_goal},
 	state_compressor::{CompressedState, HashSetCompressStateEvent},
 	state_res::{AuthCheckOutcome, auth_check},
 	timeline::RawPduId,
@@ -287,14 +287,7 @@ async fn current_state_auth_passes(
 
 	trace!("Performing current-state auth check.");
 	let outcome = current_state_auth_outcome(auth_events, async move |auth_events| {
-		let state_fetch = async |k: StateEventType, s: StateKey| {
-			auth_events
-				.get(&k.with_state_key(s.as_str()))
-				.map(ToOwned::to_owned)
-				.ok_or_else(|| err!(Request(NotFound("state event not found"))))
-		};
-
-		auth_check(room_rules, incoming_pdu, &*self.services.timeline, &state_fetch).await
+		auth_check(room_rules, incoming_pdu, &*self.services.timeline, &auth_events).await
 	})
 	.await;
 
@@ -477,36 +470,13 @@ async fn auth_check_outlier_pdu(
 	// (spec check 6) still writes the row, so soft-failed events are valid fold
 	// inputs while positionally rejected events never gain a row.
 
-	let state_fetch = async |k: StateEventType, s: StateKey| {
-		let shortstatekey = self
-			.services
-			.short
-			.get_shortstatekey(&k, s.as_str())
-			.await?;
-
-		let event_id = state_at_incoming_event
-			.get(&shortstatekey)
-			.ok_or_else(|| {
-				err!(Request(NotFound(
-					"shortstatekey {shortstatekey:?} not found for ({k:?},{s:?})"
-				)))
-			})?;
-
-		self.services
-			.timeline
-			.get_pdu(event_id)
-			.await
-			.map_err(|error| {
-				if error.is_not_found() {
-					err!(Database("State map references missing event {event_id}."))
-				} else {
-					error
-				}
-			})
+	let state_fetch = IdMapState {
+		services: &self.services,
+		ids: state_at_incoming_event,
 	};
 
 	trace!("Performing positional auth check.");
-	auth_check(room_rules, incoming_pdu, &*self.services.timeline, &state_fetch)
+	auth_check(room_rules, incoming_pdu, &*self.services.timeline, state_fetch)
 		.await
 		.and_then(AuthCheckOutcome::into_result)
 		.inspect_err(|error| {

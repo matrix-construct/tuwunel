@@ -10,7 +10,7 @@ use futures::{StreamExt, TryStreamExt};
 use ruma::{
 	CanonicalJsonObject, CanonicalJsonValue, MilliSecondsSinceUnixEpoch, OwnedRoomId, RoomId,
 	UserId,
-	events::{StateEventType, TimelineEventType, room::create::RoomCreateEventContent},
+	events::{TimelineEventType, room::create::RoomCreateEventContent},
 	room_version_rules::RoomIdFormatVersion,
 	uint,
 };
@@ -18,7 +18,7 @@ use serde_json::value::to_raw_value;
 use tuwunel_core::{
 	Err, Error, Result, err, implement,
 	matrix::{
-		event::{Event, StateKey, TypeExt},
+		event::Event,
 		pdu::{EventHash, PduBuilder, PduEvent, PrevEvents, check_rules},
 		room_version,
 	},
@@ -159,14 +159,7 @@ pub async fn create_hash_and_sign_event(
 			.collect(),
 	};
 
-	let auth_fetch = async |k: StateEventType, s: StateKey| {
-		auth_events
-			.get(&k.with_state_key(s.as_str()))
-			.map(ToOwned::to_owned)
-			.ok_or_else(|| err!(Request(NotFound("Missing auth events"))))
-	};
-
-	auth_check(&version_rules, &pdu, self, &auth_fetch)
+	auth_check(&version_rules, &pdu, self, &auth_events)
 		.await?
 		.into_result()?;
 

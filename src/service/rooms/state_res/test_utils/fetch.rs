@@ -1,10 +1,18 @@
 use std::{collections::HashMap, future::ready, hash::BuildHasher};
 
-use ruma::{EventId, OwnedEventId};
+use ruma::{EventId, OwnedEventId, events::StateEventType};
 use serde::Deserialize;
-use tuwunel_core::{Result, matrix::PduEvent};
+use tuwunel_core::{
+	Result,
+	matrix::{PduEvent, StateKey},
+};
 
-use super::{super::FetchEvent, event_not_found};
+#[cfg(test)]
+use super::TestStateMap;
+use super::{
+	super::{FetchEvent, FetchState},
+	event_not_found,
+};
 
 impl<F, Fut> FetchEvent for &F
 where
@@ -40,7 +48,7 @@ where
 	where
 		T: for<'de> Deserialize<'de> + Send,
 	{
-		self.0.get(event_id)
+		FetchEvent::get(self.0, event_id)
 	}
 
 	fn exists(self, event_id: &EventId) -> impl Future<Output = Result<bool>> + Send {
@@ -79,6 +87,35 @@ impl<S: BuildHasher + Sync> FetchEvent for &HashMap<OwnedEventId, Vec<u8>, S> {
 
 	fn exists(self, event_id: &EventId) -> impl Future<Output = Result<bool>> + Send {
 		ready(Ok(self.contains_key(event_id)))
+	}
+}
+
+impl<F, Fut> FetchState for &F
+where
+	F: Fn(StateEventType, StateKey) -> Fut + Sync,
+	Fut: Future<Output = Result<PduEvent>> + Send,
+{
+	type Pdu = PduEvent;
+
+	fn get(
+		self,
+		event_type: StateEventType,
+		state_key: StateKey,
+	) -> impl Future<Output = Result<Self::Pdu>> + Send {
+		self(event_type, state_key)
+	}
+}
+
+#[cfg(test)]
+impl<'a> FetchState for &'a TestStateMap {
+	type Pdu = &'a PduEvent;
+
+	fn get(
+		self,
+		event_type: StateEventType,
+		state_key: StateKey,
+	) -> impl Future<Output = Result<Self::Pdu>> + Send {
+		ready(TestStateMap::get(self, &event_type, state_key.as_str()))
 	}
 }
 

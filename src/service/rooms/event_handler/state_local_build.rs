@@ -18,7 +18,7 @@ use tracing::{Instrument, Span};
 use tuwunel_core::{
 	Result, debug, debug_warn, defer, err, implement,
 	matrix::{
-		Event, PduEvent, StateKey,
+		Event, PduEvent,
 		pdu::PrevEvents,
 		room_version::{self, from_create_event},
 	},
@@ -28,6 +28,7 @@ use tuwunel_core::{
 
 use crate::rooms::{
 	short::{ShortStateHash, ShortStateKey},
+	state::IdMapState,
 	state_compressor::CompressedState,
 	state_res::{AuthCheckOutcome, auth_check},
 };
@@ -836,32 +837,10 @@ async fn gated_fold(
 		return Err(err!(Database("State before event is missing the room create event.")));
 	}
 
-	let state_fetch = async |k: StateEventType, s: StateKey| {
-		let shortstatekey = self
-			.services
-			.short
-			.get_shortstatekey(&k, s.as_str())
-			.await?;
-
-		let event_id = before
-			.get(&shortstatekey)
-			.ok_or_else(|| err!(Request(NotFound("Not in state before event."))))?;
-
-		self.services
-			.timeline
-			.get_pdu(event_id)
-			.await
-			.map_err(|error| {
-				if error.is_not_found() {
-					err!(Database("State map references missing event {event_id}."))
-				} else {
-					error
-				}
-			})
-	};
+	let state_fetch = IdMapState { services: &self.services, ids: before };
 
 	if let AuthCheckOutcome::Deny(error) =
-		auth_check(room_rules, pdu, &*self.services.timeline, &state_fetch).await?
+		auth_check(room_rules, pdu, &*self.services.timeline, state_fetch).await?
 	{
 		debug!(event_id = %pdu.event_id(), %error, "Auth gate rejected fold.");
 		*gate_drops = gate_drops.saturating_add(1);

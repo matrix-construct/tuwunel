@@ -10,8 +10,6 @@ use std::{
 	slice,
 	sync::atomic::{AtomicU64, Ordering::SeqCst},
 };
-#[cfg(test)]
-use std::{pin::Pin, sync::Arc};
 
 use ruma::{
 	EventId, OwnedEventId, RoomId, UserId,
@@ -47,6 +45,9 @@ use super::{AuthSet, StateMap};
 use super::{auth_types_for_event, events::RoomCreateEvent};
 #[cfg(test)]
 use crate::rooms::state_res::topological_sort::ReferencedIds;
+
+#[cfg(test)]
+type StateEvents = HashMap<StateEventType, HashMap<String, PduEvent>>;
 
 static SERVER_TIMESTAMP: AtomicU64 = AtomicU64::new(0);
 
@@ -999,55 +1000,39 @@ pub(super) fn init_subscriber() -> tracing::dispatcher::DefaultGuard {
 
 /// Wrapper around a state map.
 #[cfg(test)]
-pub(super) struct TestStateMap(HashMap<StateEventType, HashMap<String, PduEvent>>);
+pub(super) struct TestStateMap(StateEvents);
 
 #[cfg(test)]
 impl TestStateMap {
-	/// Construct a `TestStateMap` from the given event map.
-	pub(super) fn new(events: &HashMap<OwnedEventId, PduEvent>) -> Arc<Self> {
-		let mut state_map: HashMap<StateEventType, HashMap<String, PduEvent>> = HashMap::new();
+	pub(super) fn new(events: &HashMap<OwnedEventId, PduEvent>) -> Self {
+		let state_map = events
+			.values()
+			.fold(StateEvents::new(), |mut state, event| {
+				let event_type = StateEventType::from(event.event_type().to_string());
 
-		for event in events.values() {
-			let event_type = StateEventType::from(event.event_type().to_string());
+				state
+					.entry(event_type)
+					.or_default()
+					.insert(event.state_key().unwrap().to_owned(), event.clone());
 
-			state_map
-				.entry(event_type)
-				.or_default()
-				.insert(event.state_key().unwrap().to_owned(), event.clone());
-		}
+				state
+			});
 
-		Arc::new(Self(state_map))
+		Self(state_map)
 	}
 
-	/// Get the event with the given event type and state key.
-	pub(super) fn get(
-		self: &Arc<Self>,
-		event_type: &StateEventType,
-		state_key: &str,
-	) -> Result<PduEvent> {
+	pub(super) fn get(&self, event_type: &StateEventType, state_key: &str) -> Result<&PduEvent> {
 		self.0
 			.get(event_type)
 			.ok_or_else(|| state_not_found(event_type, state_key))?
 			.get(state_key)
-			.cloned()
 			.ok_or_else(|| state_not_found(event_type, state_key))
-	}
-
-	/// A function to get a state event from this map.
-	pub(super) fn fetch_state_fn(
-		self: &Arc<Self>,
-	) -> impl Fn(StateEventType, StateKey) -> Pin<Box<dyn Future<Output = Result<PduEvent>> + Send>>
-	{
-		move |event_type: StateEventType, state_key: StateKey| {
-			let s = self.clone();
-			Box::pin(async move { s.get(&event_type, state_key.as_str()) })
-		}
 	}
 
 	/// The `m.room.create` event contained in this map.
 	///
 	/// Panics if there is no `m.room.create` event in this map.
-	pub(super) fn room_create_event(self: &Arc<Self>) -> RoomCreateEvent<PduEvent> {
+	pub(super) fn room_create_event(&self) -> RoomCreateEvent<&PduEvent> {
 		RoomCreateEvent::new(self.get(&StateEventType::RoomCreate, "").unwrap())
 	}
 }

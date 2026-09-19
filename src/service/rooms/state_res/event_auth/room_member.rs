@@ -3,15 +3,12 @@ use std::borrow::Borrow;
 use futures::future::{join, join3};
 use ruma::{
 	AnyKeyName, EventId, SigningKeyId, UserId,
-	events::{StateEventType, room::member::MembershipState},
+	events::room::member::MembershipState,
 	room_version_rules::AuthorizationRules,
 	serde::{Base64, base64::Standard},
 	signatures::verify_canonical_json_bytes,
 };
-use tuwunel_core::{
-	Err, Result, err,
-	matrix::{Event, StateKey},
-};
+use tuwunel_core::{Err, Result, err, matrix::Event};
 
 #[cfg(test)]
 mod tests;
@@ -19,7 +16,7 @@ mod tests;
 #[cfg(test)]
 use super::test_utils;
 use super::{
-	FetchStateExt, auth_input_error,
+	FetchState, auth_input_error,
 	events::{
 		JoinRule, RoomCreateEvent, RoomMemberEvent, RoomPowerLevelsIntField,
 		member::ThirdPartyInvite, power_levels::RoomPowerLevelsEventOptionExt,
@@ -33,15 +30,14 @@ use super::{
 /// as some authorization rules depend on the signatures being valid on the
 /// event.
 #[tracing::instrument(level = "trace", skip_all)]
-pub(super) async fn check_room_member<Fetch, Fut, Pdu>(
+pub(super) async fn check_room_member<Fetch, Pdu>(
 	room_member_event: &RoomMemberEvent<Pdu>,
 	rules: &AuthorizationRules,
-	room_create_event: &RoomCreateEvent<Pdu>,
-	fetch_state: &Fetch,
+	room_create_event: &RoomCreateEvent<Fetch::Pdu>,
+	fetch_state: Fetch,
 ) -> Result
 where
-	Fetch: Fn(StateEventType, StateKey) -> Fut + Sync,
-	Fut: Future<Output = Result<Pdu>> + Send,
+	Fetch: FetchState,
 	Pdu: Event,
 {
 	// Since v1, if there is no state_key property, or no membership property in
@@ -133,16 +129,15 @@ where
 /// Check whether the given event passes the `m.room.member` authorization rules
 /// with a membership of `join`.
 #[tracing::instrument(level = "trace", skip_all)]
-async fn check_room_member_join<Fetch, Fut, Pdu>(
+async fn check_room_member_join<Fetch, Pdu>(
 	room_member_event: &RoomMemberEvent<Pdu>,
 	target_user: &UserId,
 	rules: &AuthorizationRules,
-	room_create_event: &RoomCreateEvent<Pdu>,
-	fetch_state: &Fetch,
+	room_create_event: &RoomCreateEvent<Fetch::Pdu>,
+	fetch_state: Fetch,
 ) -> Result
 where
-	Fetch: Fn(StateEventType, StateKey) -> Fut + Sync,
-	Fut: Future<Output = Result<Pdu>> + Send,
+	Fetch: FetchState,
 	Pdu: Event,
 {
 	let creator = room_create_event
@@ -257,16 +252,15 @@ where
 /// Check whether the given event passes the `m.room.member` authorization rules
 /// with a membership of `invite`.
 #[tracing::instrument(level = "trace", skip_all)]
-async fn check_room_member_invite<Fetch, Fut, Pdu>(
+async fn check_room_member_invite<Fetch, Pdu>(
 	room_member_event: &RoomMemberEvent<Pdu>,
 	target_user: &UserId,
 	rules: &AuthorizationRules,
-	room_create_event: &RoomCreateEvent<Pdu>,
-	fetch_state: &Fetch,
+	room_create_event: &RoomCreateEvent<Fetch::Pdu>,
+	fetch_state: Fetch,
 ) -> Result
 where
-	Fetch: Fn(StateEventType, StateKey) -> Fut + Sync,
-	Fut: Future<Output = Result<Pdu>> + Send,
+	Fetch: FetchState,
 	Pdu: Event,
 {
 	let third_party_invite = room_member_event.third_party_invite()?;
@@ -328,15 +322,14 @@ where
 /// Check whether the `third_party_invite` from the `m.room.member` event passes
 /// the authorization rules.
 #[tracing::instrument(level = "trace", skip_all)]
-async fn check_third_party_invite<Fetch, Fut, Pdu>(
+async fn check_third_party_invite<Fetch, Pdu>(
 	room_member_event: &RoomMemberEvent<Pdu>,
 	third_party_invite: &ThirdPartyInvite,
 	target_user: &UserId,
-	fetch_state: &Fetch,
+	fetch_state: Fetch,
 ) -> Result
 where
-	Fetch: Fn(StateEventType, StateKey) -> Fut + Sync,
-	Fut: Future<Output = Result<Pdu>> + Send,
+	Fetch: FetchState,
 	Pdu: Event,
 {
 	let current_target_user_membership = fetch_state.user_membership(target_user).await?;
@@ -437,16 +430,15 @@ where
 /// Check whether the given event passes the `m.room.member` authorization rules
 /// with a membership of `leave`.
 #[tracing::instrument(level = "trace", skip_all)]
-async fn check_room_member_leave<Fetch, Fut, Pdu>(
+async fn check_room_member_leave<Fetch, Pdu>(
 	room_member_event: &RoomMemberEvent<Pdu>,
 	target_user: &UserId,
 	rules: &AuthorizationRules,
-	room_create_event: &RoomCreateEvent<Pdu>,
-	fetch_state: &Fetch,
+	room_create_event: &RoomCreateEvent<Fetch::Pdu>,
+	fetch_state: Fetch,
 ) -> Result
 where
-	Fetch: Fn(StateEventType, StateKey) -> Fut + Sync,
-	Fut: Future<Output = Result<Pdu>> + Send,
+	Fetch: FetchState,
 	Pdu: Event,
 {
 	let (sender_membership, room_power_levels_event, current_target_user_membership) = join3(
@@ -525,16 +517,15 @@ where
 /// Check whether the given event passes the `m.room.member` authorization rules
 /// with a membership of `ban`.
 #[tracing::instrument(level = "trace", skip_all)]
-async fn check_room_member_ban<Fetch, Fut, Pdu>(
+async fn check_room_member_ban<Fetch, Pdu>(
 	room_member_event: &RoomMemberEvent<Pdu>,
 	target_user: &UserId,
 	rules: &AuthorizationRules,
-	room_create_event: &RoomCreateEvent<Pdu>,
-	fetch_state: &Fetch,
+	room_create_event: &RoomCreateEvent<Fetch::Pdu>,
+	fetch_state: Fetch,
 ) -> Result
 where
-	Fetch: Fn(StateEventType, StateKey) -> Fut + Sync,
-	Fut: Future<Output = Result<Pdu>> + Send,
+	Fetch: FetchState,
 	Pdu: Event,
 {
 	let (sender_membership, room_power_levels_event) = join(
@@ -581,15 +572,14 @@ where
 /// Check whether the given event passes the `m.room.member` authorization rules
 /// with a membership of `knock`.
 #[tracing::instrument(level = "trace", skip_all)]
-async fn check_room_member_knock<Fetch, Fut, Pdu>(
+async fn check_room_member_knock<Fetch, Pdu>(
 	room_member_event: &RoomMemberEvent<Pdu>,
 	target_user: &UserId,
 	rules: &AuthorizationRules,
-	fetch_state: &Fetch,
+	fetch_state: Fetch,
 ) -> Result
 where
-	Fetch: Fn(StateEventType, StateKey) -> Fut + Sync,
-	Fut: Future<Output = Result<Pdu>> + Send,
+	Fetch: FetchState,
 	Pdu: Event,
 {
 	let sender = room_member_event.sender();
