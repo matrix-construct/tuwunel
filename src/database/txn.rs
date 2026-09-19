@@ -8,7 +8,7 @@ use std::{fmt::Debug, iter::once, sync::Arc};
 
 use rocksdb::WriteBatch;
 use serde::Serialize;
-use tuwunel_core::implement;
+use tuwunel_core::{error, implement};
 
 use crate::{
 	Engine, Map,
@@ -336,8 +336,25 @@ where
 /// watchers.
 ///
 /// An empty transaction returns without touching the engine. For a nonempty
-/// batch, notifications occur only after the write and any required flush
-/// succeed.
+/// batch, notifications occur only after the write.
+///
+/// # Panics
+///
+/// Panics when RocksDB rejects the batch write or when the required database
+/// flush fails.
+#[implement(Txn)]
+#[inline]
+pub fn execute(self) {
+	if self.is_empty() {
+		return;
+	}
+
+	self.commit();
+}
+
+/// Commits the batch atomically, flushes unless corked, and notifies matchers.
+///
+/// Batch must not be empty. Notifications occur only after the write.
 ///
 /// # Panics
 ///
@@ -352,10 +369,8 @@ where
 		bytes = self.size_in_bytes(),
 	)
 )]
-pub fn execute(self) {
-	if self.is_empty() {
-		return;
-	}
+fn commit(self) {
+	debug_assert!(!self.is_empty(), "Txn must not be empty.");
 
 	self.engine
 		.db
@@ -364,7 +379,10 @@ pub fn execute(self) {
 		.expect("database transaction execute error");
 
 	if !self.engine.corked() {
-		self.engine.flush().expect("database flush error");
+		self.engine
+			.flush()
+			.inspect_err(|e| error!(?e, "database flush error"))
+			.ok();
 	}
 
 	self.notify();
