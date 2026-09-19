@@ -1,4 +1,5 @@
 use clap::Parser;
+use tuwunel_service::federation::Classification;
 
 use super::*;
 use crate::{admin::AdminCommand, query::QueryCommand};
@@ -8,33 +9,42 @@ fn command_width_defaults_match_request_costs() {
 	assert_eq!(version::WIDTH_DEFAULT.get(), 192);
 	assert_eq!(event::WIDTH_DEFAULT.get(), 192);
 	assert_eq!(head::WIDTH_DEFAULT.get(), 192);
+	assert_eq!(ping::WIDTH_DEFAULT.get(), 192);
 	assert_eq!(state::WIDTH_DEFAULT.get(), 16);
 }
 
 #[test]
-fn version_listing_modes_are_mutually_exclusive() {
-	for option in ["--list", "--list-all", "--list-errors"] {
-		AdminCommand::try_parse_from([
-			"admin",
-			"query",
-			"feds",
-			"version",
-			"!room:example.org",
-			option,
-		])
-		.expect("each version listing mode should parse independently");
-	}
+fn listing_modes_are_mutually_exclusive() {
+	for command in ["version", "ping"] {
+		for option in ["--list", "--list-all", "--list-errors"] {
+			parse_room_command(command, &[option])
+				.expect("each listing mode should parse independently");
+		}
 
-	AdminCommand::try_parse_from([
-		"admin",
-		"query",
-		"feds",
-		"version",
-		"!room:example.org",
-		"--list",
-		"--list-errors",
-	])
-	.expect_err("version listing modes should be mutually exclusive");
+		parse_room_command(command, &["--list", "--list-errors"])
+			.expect_err("listing modes should be mutually exclusive");
+	}
+}
+
+#[test]
+fn backoff_fault_expires_with_the_retry_delay() {
+	let backoff = PeerBackoff {
+		class: Classification::Transient,
+		anchor_secs: 900,
+		oldest_secs: 600,
+		delay_secs: 60,
+	};
+
+	assert!(backoff_fault(&backoff, 960).is_none());
+	assert!(retry_after(&backoff, 960).is_none());
+
+	let Some(Fault::Backoff { class, age, retry }) = backoff_fault(&backoff, 930) else {
+		panic!("an unexpired backoff should produce a backoff fault");
+	};
+
+	assert_eq!(class, Classification::Transient);
+	assert_eq!(age, Duration::from_secs(330));
+	assert_eq!(retry, Duration::from_secs(30));
 }
 
 #[test]
@@ -67,31 +77,16 @@ fn version_fields_are_repeatable_and_value_checked() {
 }
 
 #[test]
-fn version_sort_requires_a_listing_mode() {
-	for column in ["origin", "elapsed", "fault"] {
-		AdminCommand::try_parse_from([
-			"admin",
-			"query",
-			"feds",
-			"version",
-			"!room:example.org",
-			"--list-all",
-			"--sort",
-			column,
-		])
-		.expect("each sort column should parse with a listing mode");
-	}
+fn sort_requires_a_listing_mode() {
+	for command in ["version", "ping"] {
+		for column in ["origin", "elapsed", "fault"] {
+			parse_room_command(command, &["--list-all", "--sort", column])
+				.expect("each sort column should parse with a listing mode");
+		}
 
-	AdminCommand::try_parse_from([
-		"admin",
-		"query",
-		"feds",
-		"version",
-		"!room:example.org",
-		"--sort",
-		"elapsed",
-	])
-	.expect_err("sorting should require a listing mode");
+		parse_room_command(command, &["--sort", "elapsed"])
+			.expect_err("sorting should require a listing mode");
+	}
 }
 
 #[test]
@@ -168,6 +163,12 @@ fn event_room_and_sweep_options_parse_after_event_id() {
 	assert_eq!(sweep.timeout, 4);
 	assert_eq!(sweep.budget, 5);
 	assert!(sweep.no_loopback);
+}
+
+fn parse_room_command(command: &str, args: &[&str]) -> clap::error::Result<AdminCommand> {
+	let prefix = ["admin", "query", "feds", command, "!room:example.org"];
+
+	AdminCommand::try_parse_from(prefix.iter().chain(args))
 }
 
 fn event_verification<const N: usize>(args: [&str; N]) -> (bool, bool) {

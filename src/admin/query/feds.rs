@@ -1,5 +1,6 @@
 mod event;
 mod head;
+mod ping;
 mod state;
 #[cfg(test)]
 mod tests;
@@ -8,22 +9,28 @@ mod version;
 use std::{
 	borrow::Cow,
 	cmp::Ordering,
+	collections::BTreeMap,
 	fmt::{Result as FmtResult, Write as _},
 	num::NonZeroUsize,
 	time::Duration,
 };
 
-use clap::{ArgAction, Args, Subcommand};
+use clap::{ArgAction, Args, Subcommand, ValueEnum};
 use futures::StreamExt;
-use ruma::{OwnedEventId, OwnedRoomId, OwnedRoomOrAliasId, OwnedUserId};
+use ruma::{OwnedEventId, OwnedRoomId, OwnedRoomOrAliasId, OwnedServerName, OwnedUserId};
 use tuwunel_core::{
-	Err, Result,
+	Err, Result, implement,
 	utils::{stream::ReadyExt, time::Elapsed},
 };
-use tuwunel_service::federation::feds::{Fault, Opts, Outcome, Record};
+use tuwunel_service::federation::{
+	PeerBackoff,
+	feds::{Fault, Opts, Outcome, Record},
+};
 
-use self::version::{Field, Sort};
+use self::version::Field;
 use crate::{Context, admin_command_dispatch};
+
+pub(super) type Backoffs = BTreeMap<OwnedServerName, PeerBackoff>;
 
 /// Run feds diagnostics against every participating server in a room.
 ///
@@ -54,6 +61,33 @@ pub(crate) enum FedsCommand {
 
 		/// Order the listed servers by this column.
 		#[arg(long, value_enum, default_value_t, requires = "version_list")]
+		sort: Sort,
+
+		#[command(flatten)]
+		sweep: SweepArgs,
+	},
+
+	/// Measure request latency to participating servers.
+	///
+	/// Reports latency distribution statistics beside the peer-status record
+	/// held for each destination.
+	Ping {
+		room: OwnedRoomOrAliasId,
+
+		/// List servers whose request did not produce an error.
+		#[arg(long, group = "ping_list")]
+		list: bool,
+
+		/// List every server.
+		#[arg(long, group = "ping_list")]
+		list_all: bool,
+
+		/// List servers whose request produced an error.
+		#[arg(long, group = "ping_list")]
+		list_errors: bool,
+
+		/// Order the listed servers by this column.
+		#[arg(long, value_enum, default_value_t, requires = "ping_list")]
 		sort: Sort,
 
 		#[command(flatten)]
@@ -152,6 +186,30 @@ pub(crate) struct SweepArgs {
 	yes_i_want_to_do_this: bool,
 }
 
+/// Column ordering the detail listing.
+///
+/// Rows equal under the chosen column keep their origin order.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, ValueEnum)]
+pub(crate) enum Sort {
+	/// Server name.
+	#[default]
+	Origin,
+
+	/// Request latency, fastest first.
+	Elapsed,
+
+	/// Failure message.
+	Fault,
+}
+
+#[derive(Clone, Copy)]
+pub(super) enum ListMode {
+	None,
+	Successes,
+	All,
+	Errors,
+}
+
 pub(super) struct Prepared {
 	pub(super) room_id: OwnedRoomId,
 	pub(super) opts: Opts,
@@ -204,6 +262,104 @@ pub(super) async fn prepare(
 	Ok(Prepared { room_id, opts })
 }
 
+#[implement(ListMode)]
+pub(super) fn new(list: bool, list_all: bool, list_errors: bool) -> Self {
+	match (list, list_all, list_errors) {
+		| (true, false, false) => Self::Successes,
+		| (false, true, false) => Self::All,
+		| (false, false, true) => Self::Errors,
+		| _ => Self::None,
+	}
+}
+
+#[implement(ListMode)]
+pub(super) fn includes<T>(self, outcome: &Outcome<T>) -> bool {
+	match self {
+		| Self::None => false,
+		| Self::Successes => outcome.result.is_ok(),
+		| Self::All => true,
+		| Self::Errors => outcome.result.is_err(),
+	}
+}
+
+/// Splits the room's destinations into dispatchable origins and held origins.
+///
+/// An origin still inside its peer backoff at `now` becomes a `Fault::Backoff`
+/// outcome with zero elapsed time instead of a destination.
+pub(super) async fn partition_backoffs<T>(
+	context: &Context<'_>,
+	prepared: &Prepared,
+	backoffs: &Backoffs,
+	now: u64,
+) -> (Vec<OwnedServerName>, Vec<Outcome<T>>) {
+	context
+		.services
+		.state_cache
+		.room_servers(&prepared.room_id)
+		.ready_filter(|server| {
+			!prepared.opts.exclude_self || !context.services.globals.server_is_ours(server)
+		})
+		.map(ToOwned::to_owned)
+		.ready_fold((Vec::new(), Vec::new()), |(mut eligible, mut outcomes), origin| {
+			match backoffs
+				.get(&origin)
+				.and_then(|backoff| backoff_fault(backoff, now))
+			{
+				| None => eligible.push(origin),
+				| Some(fault) => outcomes.push(Outcome {
+					origin,
+					elapsed: Duration::ZERO,
+					result: Err(fault),
+				}),
+			}
+
+			(eligible, outcomes)
+		})
+		.await
+}
+
+/// Describes a peer's backoff as a fault while it has not expired at `now`.
+///
+/// The age spans the oldest surviving failure bucket and the retry is the
+/// remaining delay.
+pub(super) fn backoff_fault(backoff: &PeerBackoff, now: u64) -> Option<Fault> {
+	retry_after(backoff, now).map(|retry| Fault::Backoff {
+		class: backoff.class,
+		age: Duration::from_secs(now.saturating_sub(backoff.oldest_secs)),
+		retry,
+	})
+}
+
+/// Computes the remaining delay before the peer becomes eligible.
+///
+/// The delay is measured from the newest failure; an expired backoff yields
+/// `None`.
+pub(super) fn retry_after(backoff: &PeerBackoff, now: u64) -> Option<Duration> {
+	let retry_at = backoff
+		.anchor_secs
+		.saturating_add(backoff.delay_secs);
+
+	retry_at
+		.gt(&now)
+		.then(|| Duration::from_secs(retry_at.saturating_sub(now)))
+}
+
+pub(super) fn sorted<T>(
+	mut outcomes: Vec<Outcome<T>>,
+	sort: Sort,
+	fault_key: impl Fn(&Outcome<T>) -> Cow<'static, str>,
+) -> Vec<Outcome<T>> {
+	// Both secondary sorts are stable, so origin order remains the tie-breaker.
+	outcomes.sort_by(|left, right| left.origin.cmp(&right.origin));
+	match sort {
+		| Sort::Origin => {},
+		| Sort::Elapsed => outcomes.sort_by_key(|outcome| outcome.elapsed),
+		| Sort::Fault => outcomes.sort_by_cached_key(fault_key),
+	}
+
+	outcomes
+}
+
 pub(super) fn fault_message(fault: &Fault) -> Cow<'static, str> {
 	match fault {
 		| Fault::Elapsed => Cow::Borrowed("request deadline exceeded"),
@@ -232,6 +388,26 @@ pub(super) fn render_totals(
 	let noun = if results == 1 { "result" } else { "results" };
 
 	writeln!(output, "\n{results} {noun} in {}.", Elapsed::from(duration))
+}
+
+/// Writes the elapsed cell of a listing row.
+///
+/// A destination that was never dispatched has no latency and takes a blank
+/// cell.
+pub(super) fn write_elapsed_cell<T>(output: &mut String, outcome: &Outcome<T>) -> FmtResult {
+	if matches!(&outcome.result, Err(Fault::NotAttempted | Fault::Backoff { .. })) {
+		write!(output, " |")
+	} else {
+		write!(output, " {} |", Elapsed::from(outcome.elapsed))
+	}
+}
+
+pub(super) fn write_cell(output: &mut String, value: &str) -> FmtResult {
+	if value.is_empty() {
+		write!(output, " |")
+	} else {
+		write!(output, " {value} |")
+	}
 }
 
 pub(super) fn markdown_cell(value: &str) -> Cow<'_, str> {

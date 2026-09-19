@@ -17,6 +17,8 @@ mod tests {
 	const VERSION_HEADER: &str = "| rank | servers | name | version |";
 	const EVENT_HEADER: &str = "| rank | origin | elapsed | hash | signature | fault |";
 	const ORIGIN_HEADER: &str = "| origin | name | version | elapsed | fault |";
+	const PING_HEADER: &str = "| origin | elapsed | class | newest | oldest | retry | fault |";
+	const PING_RESPONDED: &str = "| responded | 1 | 100.0% |";
 
 	struct DatabasePath(PathBuf);
 
@@ -92,7 +94,8 @@ mod tests {
 
 		let outcome = async {
 			query_version(services).await?;
-			query_event(services).await
+			query_event(services).await?;
+			query_ping(services).await
 		}
 		.await;
 
@@ -147,6 +150,14 @@ mod tests {
 		let output = command_output(services, command, "event").await?;
 
 		verify_event_output(output.as_str(), services.globals.server_name())
+	}
+
+	async fn query_ping(services: &Services) -> Result {
+		let room_id = services.admin.get_admin_room().await?;
+		let command = format!("query feds ping {room_id} --list-all");
+		let output = command_output(services, command, "ping").await?;
+
+		verify_ping_output(output.as_str(), services.globals.server_name())
 	}
 
 	async fn command_output(
@@ -239,6 +250,32 @@ mod tests {
 
 		if !cell(row, 5)?.is_empty() {
 			return Err!("the local event query reported a fault");
+		}
+
+		Ok(())
+	}
+
+	fn verify_ping_output(output: &str, local: &ServerName) -> Result {
+		if destination_count(output)? != 1 {
+			return Err!("expected one feds ping destination");
+		}
+
+		if !output.contains(PING_RESPONDED) {
+			return Err!("the ping query did not count the local response");
+		}
+
+		let row = only_row(output, PING_HEADER, "ping origin")?;
+
+		if cell(row, 0)? != local.as_str() {
+			return Err!("the ping query did not report the local origin");
+		}
+
+		if cell(row, 1)?.is_empty() {
+			return Err!("the ping query omitted its latency");
+		}
+
+		if !cell(row, 6)?.is_empty() {
+			return Err!("the local ping query reported a fault");
 		}
 
 		Ok(())

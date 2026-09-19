@@ -4,7 +4,7 @@ use std::{
 	collections::BTreeMap,
 	fmt::{Result as FmtResult, Write as _},
 	num::NonZeroUsize,
-	time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+	time::{Duration, Instant},
 };
 
 use clap::ValueEnum;
@@ -13,14 +13,13 @@ use ruma::{
 	OwnedRoomOrAliasId,
 	api::federation::discovery::get_server_version::v1::{Request, Response, Server},
 };
-use tuwunel_core::{
-	Result,
-	itertools::Itertools,
-	utils::{stream::ReadyExt, time::Elapsed},
-};
-use tuwunel_service::federation::feds::{Fault, Outcome};
+use tuwunel_core::{Result, itertools::Itertools, utils::time::now_secs};
+use tuwunel_service::federation::feds::Outcome;
 
-use super::{SweepArgs, count_results, fault_message, markdown_cell, prepare, render_totals};
+use super::{
+	ListMode, Sort, SweepArgs, count_results, fault_message, markdown_cell, partition_backoffs,
+	prepare, render_totals, sorted, write_cell, write_elapsed_cell,
+};
 use crate::admin_command;
 
 pub(super) const WIDTH_DEFAULT: NonZeroUsize = NonZeroUsize::new(192).expect("192 is nonzero");
@@ -91,30 +90,6 @@ impl PartialEq for VersionClass<'_> {
 type ClassCounts<'a> = BTreeMap<VersionClass<'a>, usize>;
 type VersionOutcome = Outcome<Option<Version>>;
 
-#[derive(Clone, Copy)]
-enum ListMode {
-	None,
-	Successes,
-	All,
-	Errors,
-}
-
-/// Column ordering the detail listing.
-///
-/// Rows equal under the chosen column keep their origin order.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, ValueEnum)]
-pub(crate) enum Sort {
-	/// Server name.
-	#[default]
-	Origin,
-
-	/// Request latency, fastest first.
-	Elapsed,
-
-	/// Failure message.
-	Fault,
-}
-
 #[admin_command]
 pub(super) async fn feds_version(
 	&self,
@@ -128,47 +103,7 @@ pub(super) async fn feds_version(
 ) -> Result {
 	let prepared = prepare(self, &room, sweep, WIDTH_DEFAULT).await?;
 	let backoffs = self.services.federation.peer_backoffs().await;
-	let now = SystemTime::now()
-		.duration_since(UNIX_EPOCH)
-		.unwrap_or_default()
-		.as_secs();
-
-	let (eligible, outcomes) = self
-		.services
-		.state_cache
-		.room_servers(&prepared.room_id)
-		.ready_filter(|server| {
-			!prepared.opts.exclude_self || !self.services.globals.server_is_ours(server)
-		})
-		.map(ToOwned::to_owned)
-		.ready_fold((Vec::new(), Vec::new()), |(mut eligible, mut outcomes), origin| {
-			let Some(backoff) = backoffs.get(&origin) else {
-				eligible.push(origin);
-				return (eligible, outcomes);
-			};
-
-			let retry_at = backoff
-				.anchor_secs
-				.saturating_add(backoff.delay_secs);
-
-			if retry_at <= now {
-				eligible.push(origin);
-				return (eligible, outcomes);
-			}
-
-			outcomes.push(Outcome {
-				origin,
-				elapsed: Duration::ZERO,
-				result: Err(Fault::Backoff {
-					class: backoff.class,
-					age: Duration::from_secs(now.saturating_sub(backoff.oldest_secs)),
-					retry: Duration::from_secs(retry_at.saturating_sub(now)),
-				}),
-			});
-
-			(eligible, outcomes)
-		})
-		.await;
+	let (eligible, outcomes) = partition_backoffs(self, &prepared, &backoffs, now_secs()).await;
 
 	let started = Instant::now();
 	let responses = self
@@ -188,13 +123,7 @@ pub(super) async fn feds_version(
 
 	let total = started.elapsed();
 
-	let list_mode = match (list, list_all, list_errors) {
-		| (true, false, false) => ListMode::Successes,
-		| (false, true, false) => ListMode::All,
-		| (false, false, true) => ListMode::Errors,
-		| _ => ListMode::None,
-	};
-
+	let list_mode = ListMode::new(list, list_all, list_errors);
 	let fields = selected_fields(fields);
 	let output = render(outcomes, total, list_mode, sort, &fields);
 
@@ -226,25 +155,13 @@ fn render(
 	sort: Sort,
 	fields: &[Field],
 ) -> String {
-	let outcomes = sorted(outcomes, sort);
+	let outcomes = sorted(outcomes, sort, fault_cell);
 	let mut output = String::new();
 
 	render_into(&mut output, &outcomes, total, list_mode, fields)
 		.expect("writing to a String cannot fail");
 
 	output
-}
-
-fn sorted(mut outcomes: Vec<VersionOutcome>, sort: Sort) -> Vec<VersionOutcome> {
-	// Both secondary sorts are stable, so origin order remains the tie-breaker.
-	outcomes.sort_by(|left, right| left.origin.cmp(&right.origin));
-	match sort {
-		| Sort::Origin => {},
-		| Sort::Elapsed => outcomes.sort_by_key(|outcome| outcome.elapsed),
-		| Sort::Fault => outcomes.sort_by_cached_key(fault_cell),
-	}
-
-	outcomes
 }
 
 fn fault_cell(outcome: &VersionOutcome) -> Cow<'static, str> {
@@ -329,12 +246,10 @@ fn render_into(
 	}
 
 	writeln!(output, " ---: | :--- |")?;
-	for outcome in outcomes.iter().filter(|outcome| match list_mode {
-		| ListMode::None => false,
-		| ListMode::Successes => outcome.result.is_ok(),
-		| ListMode::All => true,
-		| ListMode::Errors => outcome.result.is_err(),
-	}) {
+	for outcome in outcomes
+		.iter()
+		.filter(|outcome| list_mode.includes(outcome))
+	{
 		render_row(output, outcome, fields)?;
 	}
 
@@ -364,11 +279,7 @@ fn render_row(output: &mut String, outcome: &VersionOutcome, fields: &[Field]) -
 		write_version_cell(output, version, field)?;
 	}
 
-	if matches!(&outcome.result, Err(Fault::NotAttempted | Fault::Backoff { .. })) {
-		write!(output, " |")?;
-	} else {
-		write!(output, " {} |", Elapsed::from(outcome.elapsed))?;
-	}
+	write_elapsed_cell(output, outcome)?;
 
 	let fault = markdown_cell(&fault);
 	write_cell(output, &fault)?;
@@ -382,14 +293,6 @@ fn write_version_cell(output: &mut String, version: Option<&Version>, field: Fie
 	}
 }
 
-fn write_cell(output: &mut String, value: &str) -> FmtResult {
-	if value.is_empty() {
-		write!(output, " |")
-	} else {
-		write!(output, " {value} |")
-	}
-}
-
 fn option_cell(value: Option<&str>) -> Cow<'_, str> {
 	value
 		.map(markdown_cell)
@@ -399,7 +302,7 @@ fn option_cell(value: Option<&str>) -> Cow<'_, str> {
 #[cfg(test)]
 mod tests {
 	use ruma::{ServerName, server_name};
-	use tuwunel_service::federation::Classification;
+	use tuwunel_service::federation::{Classification, feds::Fault};
 
 	use super::*;
 
