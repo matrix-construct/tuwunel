@@ -122,7 +122,10 @@ async fn demote_room(&self, user_id: &UserId, room_id: &RoomId) -> Result {
 		.transpose()?
 		.unwrap_or_default();
 
-	let power_levels = without_user(power_levels, user_id);
+	// Privileged creators hold no entry, so there is nothing to demote.
+	let Some(power_levels) = without_user(power_levels, user_id) else {
+		return Ok(());
+	};
 
 	self.services
 		.timeline
@@ -147,9 +150,12 @@ async fn demote_room(&self, user_id: &UserId, room_id: &RoomId) -> Result {
 fn without_user(
 	mut power_levels: RoomPowerLevelsEventContent,
 	user_id: &UserId,
-) -> RoomPowerLevelsEventContent {
-	power_levels.users.remove(user_id);
+) -> Option<RoomPowerLevelsEventContent> {
 	power_levels
+		.users
+		.remove(user_id)
+		.is_some()
+		.then_some(power_levels)
 }
 
 #[implement(Service)]

@@ -7,7 +7,10 @@ use serde_json::json;
 use tuwunel::{Args, Runtime, Server, async_run, async_start, async_stop};
 use tuwunel_core::{
 	Result,
-	ruma::{MilliSecondsSinceUnixEpoch, RoomId, UserId, thirdparty::Medium},
+	ruma::{
+		MilliSecondsSinceUnixEpoch, OwnedEventId, RoomId, UserId, events::StateEventType,
+		thirdparty::Medium,
+	},
 	utils::stream::ReadyExt,
 };
 use tuwunel_service::Services;
@@ -21,6 +24,7 @@ struct Deactivation<'a> {
 	retained: &'a UserId,
 	joined_a: &'a RoomId,
 	joined_b: &'a RoomId,
+	privileged: &'a RoomId,
 	invited: &'a RoomId,
 	knocked: &'a RoomId,
 	left: &'a RoomId,
@@ -96,6 +100,11 @@ async fn exercise(services: &Services, base: &str) -> Result {
 
 	let joined_b = erased_client
 		.create_room(&json!({ "preset": "private_chat" }))
+		.await?;
+
+	// Version 12 creators are privileged without a power-levels entry.
+	let privileged = erased_client
+		.create_room(&json!({ "preset": "private_chat", "room_version": "12" }))
 		.await?;
 
 	let left = erased_client
@@ -212,6 +221,7 @@ async fn exercise(services: &Services, base: &str) -> Result {
 		retained: &retained,
 		joined_a: &joined_a,
 		joined_b: &joined_b,
+		privileged: &privileged,
 		invited: &invited,
 		knocked: &knocked,
 		left: &left,
@@ -231,12 +241,15 @@ async fn deactivate_and_assert(
 		retained,
 		joined_a,
 		joined_b,
+		privileged,
 		invited,
 		knocked,
 		left,
 		retained_room,
 	}: Deactivation<'_>,
 ) -> Result {
+	let power_levels_before = power_levels_event_id(services, privileged).await?;
+
 	services
 		.deactivate
 		.full_deactivate(erased, true)
@@ -289,7 +302,7 @@ async fn deactivate_and_assert(
 	assert_eq!(retained_binding_count, 1);
 	assert_eq!(matching_binding_count, 1);
 
-	for room_id in [joined_a, joined_b] {
+	for room_id in [joined_a, joined_b, privileged] {
 		assert!(
 			!services
 				.state_cache
@@ -358,6 +371,12 @@ async fn deactivate_and_assert(
 	)
 	.await?;
 
+	assert_eq!(
+		power_levels_event_id(services, privileged).await?,
+		power_levels_before,
+		"privileged creator demotion emitted a power-levels event",
+	);
+
 	assert!(!has_data(services, erased, None).await);
 
 	for room_id in [joined_a, joined_b, invited, knocked, left] {
@@ -371,6 +390,14 @@ async fn deactivate_and_assert(
 	assert!(has_data(services, retained, Some(retained_room)).await);
 
 	Ok(())
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+async fn power_levels_event_id(services: &Services, room_id: &RoomId) -> Result<OwnedEventId> {
+	services
+		.state_accessor
+		.room_state_get_id(room_id, &StateEventType::RoomPowerLevels, "")
+		.await
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
