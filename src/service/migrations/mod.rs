@@ -36,6 +36,7 @@ use self::{
 	remove_remote_media_userid::remove_remote_media_userid,
 	retroactively_fix_bad_data_from_roomuserid_joined::retroactively_fix_bad_data_from_roomuserid_joined,
 	split_conduit_highlight_counts::split_conduit_highlight_counts,
+	token_expiry::migrate_token_expiry,
 	upgrade_legacy_mediaid_user::upgrade_legacy_mediaid_user,
 };
 use crate::Services;
@@ -58,6 +59,7 @@ mod rebuild_roomid_tscount_pducount;
 mod remove_remote_media_userid;
 mod retroactively_fix_bad_data_from_roomuserid_joined;
 mod split_conduit_highlight_counts;
+mod token_expiry;
 mod upgrade_legacy_mediaid_user;
 
 #[cfg(test)]
@@ -255,6 +257,7 @@ async fn fresh(services: &Services) -> Result {
 	db["global"].insert(CLEAR_STATE_LOCAL_ERROR_MEMOS, []);
 	db["global"].insert("adopt_foreign_account_status", []);
 	db["global"].insert("adopt_foreign_email_bindings", []);
+	db["global"].insert("adopt_foreign_token_expiry", []);
 	mark_clean_injectivity(services);
 
 	// Create the admin room and server user on first run
@@ -391,6 +394,12 @@ async fn migrate(services: &Services, foreign_lineage: bool) -> Result {
 		migrate_email_bindings(services).await?;
 
 		db["global"].insert("adopt_foreign_email_bindings", []);
+	}
+
+	if pending(services, "adopt_foreign_token_expiry").await? {
+		migrate_token_expiry(services).await?;
+
+		db["global"].insert("adopt_foreign_token_expiry", []);
 	}
 
 	services.server.check_running()?;
