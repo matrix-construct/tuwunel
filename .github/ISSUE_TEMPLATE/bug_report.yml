@@ -14,6 +14,21 @@ body:
         private channels in our
         [security policy](https://github.com/matrix-construct/tuwunel/blob/main/SECURITY.md)
         instead.
+  - type: dropdown
+    id: main-branch
+    attributes:
+      label: Tested against main
+      description: >-
+        Fixes reach the `main` branch before they reach a tagged release,
+        so a bug in your version may already be gone. Every merge to
+        `main` is published as an image, so testing it usually costs a
+        pull rather than a build: `ghcr.io/matrix-construct/tuwunel:main`
+        or `docker.io/jevolk/tuwunel:main`.
+      options:
+        - "Yes, I reproduced it on a build of the main branch"
+        - "No, I could not run main; the version below is what I tested"
+    validations:
+      required: true
   - type: input
     id: version
     attributes:
