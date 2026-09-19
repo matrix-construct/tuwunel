@@ -314,6 +314,9 @@
 {"Action":"pass","Test":"TestLogout/Can_logout_current_device"}
 {"Action":"pass","Test":"TestLogout/Request_to_logout_with_invalid_an_access_token_is_rejected"}
 {"Action":"pass","Test":"TestLogout/Request_to_logout_without_an_access_token_is_rejected"}
+{"Action":"fail","Test":"TestMSC3389RedactionPreservesPlainRelation"}
+{"Action":"fail","Test":"TestMSC3389RedactionPreservesRelation"}
+{"Action":"pass","Test":"TestMSC3389RedactionStripsRelationInOlderVersions"}
 {"Action":"fail","Test":"TestMSC3757OwnedState"}
 {"Action":"pass","Test":"TestMSC3967"}
 {"Action":"pass","Test":"TestMSC4289PrivilegedRoomCreators"}
@@ -349,6 +352,13 @@
 {"Action":"fail","Test":"TestMSC4308ThreadSubscriptionsSlidingSync/Receives_thread_subscriptions_over_incremental_sliding_sync"}
 {"Action":"fail","Test":"TestMSC4308ThreadSubscriptionsSlidingSync/Receives_thread_subscriptions_over_initial_sliding_sync"}
 {"Action":"pass","Test":"TestMSC4311FullCreateEventOnStrippedState"}
+{"Action":"fail","Test":"TestMSC4429ProfileUpdates"}
+{"Action":"fail","Test":"TestMSC4429ProfileUpdates/A_user_leaving_the_last_shared_room_returns_a_profile_update_of_null"}
+{"Action":"fail","Test":"TestMSC4429ProfileUpdates/Cleared_profile_field_is_returned_as_null"}
+{"Action":"fail","Test":"TestMSC4429ProfileUpdates/Incremental_sync_returns_the_latest_update"}
+{"Action":"fail","Test":"TestMSC4429ProfileUpdates/Initial_sync_includes_requested_profile_fields_and_filters_others"}
+{"Action":"fail","Test":"TestMSC4429ProfileUpdates/No_updates_without_profile_fields_filter"}
+{"Action":"fail","Test":"TestMSC4429ProfileUpdates/Widening_profile_fields_filter_does_not_return_old_filtered_updates"}
 {"Action":"pass","Test":"TestMediaConfig"}
 {"Action":"pass","Test":"TestMediaFilenames"}
 {"Action":"pass","Test":"TestMediaFilenames/Parallel"}
@@ -517,8 +527,8 @@
 {"Action":"pass","Test":"TestPushSync/Setting_actions_for_a_push_rule_wakes_up_an_incremental_/sync"}
 {"Action":"pass","Test":"TestRedact"}
 {"Action":"pass","Test":"TestRedact/Event_content_is_redacted"}
-{"Action":"pass","Test":"TestRegistration"}
-{"Action":"pass","Test":"TestRegistration/parallel"}
+{"Action":"fail","Test":"TestRegistration"}
+{"Action":"fail","Test":"TestRegistration/parallel"}
 {"Action":"pass","Test":"TestRegistration/parallel/GET_/register/available_returns_M_INVALID_USERNAME_for_invalid_user_name"}
 {"Action":"pass","Test":"TestRegistration/parallel/GET_/register/available_returns_M_USER_IN_USE_for_registered_user_name"}
 {"Action":"pass","Test":"TestRegistration/parallel/GET_/register/available_returns_available_for_unregistered_user_name"}
@@ -541,6 +551,7 @@
 {"Action":"pass","Test":"TestRegistration/parallel/POST_/register_returns_the_same_device_id_as_that_in_the_request"}
 {"Action":"pass","Test":"TestRegistration/parallel/POST_{}_returns_a_set_of_flows"}
 {"Action":"pass","Test":"TestRegistration/parallel/Registration_accepts_non-ascii_passwords"}
+{"Action":"fail","Test":"TestRegistration/parallel/Registration_without_a_session_fails"}
 {"Action":"pass","Test":"TestRelations"}
 {"Action":"pass","Test":"TestRelationsPagination"}
 {"Action":"pass","Test":"TestRelationsPaginationSync"}

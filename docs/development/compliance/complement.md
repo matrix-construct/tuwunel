@@ -4,15 +4,15 @@ Tuwunel runs the [Complement](https://github.com/matrix-org/complement) Matrix h
 
 ## Counts
 
-- Test groups: 214. Passing: **87.9%**
+- Test groups: 218. Passing: **86.2%**
   - ✅ `pass`: 188
-  - 🟨 `some`: 11
-  - ❌ `fail`: 15
+  - 🟨 `some`: 12
+  - ❌ `fail`: 18
   - ⬛ `skip`: 0
 
-- Subtests: 599. Passing: **82.3%**
-  - ✅ `pass`: 493
-  - ❌ `fail`: 98
+- Subtests: 606. Passing: **81.2%**
+  - ✅ `pass`: 492
+  - ❌ `fail`: 106
   - ⬛ `skip`: 8
 
 ## All Top-Level Tests
@@ -116,6 +116,9 @@ Tuwunel runs the [Complement](https://github.com/matrix-org/complement) Matrix h
 | ✅ | 2/0/0 | `LocalPngThumbnail` |
 | ✅ | 8/0/0 | `Login` |
 | ✅ | 4/0/0 | `Logout` |
+| ❌ | – | `MSC3389RedactionPreservesPlainRelation` |
+| ❌ | – | `MSC3389RedactionPreservesRelation` |
+| ✅ | – | `MSC3389RedactionStripsRelationInOlderVersions` |
 | ❌ | – | `MSC3757OwnedState` |
 | ✅ | – | `MSC3967` |
 | ✅ | 11/0/0 | `MSC4289PrivilegedRoomCreators` |
@@ -133,6 +136,7 @@ Tuwunel runs the [Complement](https://github.com/matrix-org/complement) Matrix h
 | ✅ | – | `MSC4297StateResolutionV2_1_starts_from_empty_set` |
 | ❌ | 0/2/0 | `MSC4308ThreadSubscriptionsSlidingSync` |
 | ✅ | – | `MSC4311FullCreateEventOnStrippedState` |
+| ❌ | 0/6/0 | `MSC4429ProfileUpdates` |
 | ✅ | – | `MediaConfig` |
 | ✅ | 25/0/0 | `MediaFilenames` |
 | ✅ | 4/0/0 | `MediaWithoutFileName` |
@@ -159,7 +163,7 @@ Tuwunel runs the [Complement](https://github.com/matrix-org/complement) Matrix h
 | ✅ | 5/0/0 | `PushRuleRoomUpgrade` |
 | ✅ | 5/0/0 | `PushSync` |
 | ✅ | 1/0/0 | `Redact` |
-| ✅ | 23/0/0 | `Registration` |
+| 🟨 | 22/2/0 | `Registration` |
 | ✅ | – | `Relations` |
 | ✅ | – | `RelationsPagination` |
 | ✅ | – | `RelationsPaginationSync` |
