@@ -181,7 +181,7 @@
 {"Action":"pass","Test":"TestGetFilteredRoomMembers/not_membership"}
 {"Action":"pass","Test":"TestGetMissingEventsGapFilling"}
 {"Action":"pass","Test":"TestGetRoomMembers"}
-{"Action":"fail","Test":"TestGetRoomMembersAtPoint"}
+{"Action":"pass","Test":"TestGetRoomMembersAtPoint"}
 {"Action":"pass","Test":"TestInboundCanReturnMissingEvents"}
 {"Action":"pass","Test":"TestInboundCanReturnMissingEvents/Inbound_federation_can_return_missing_events_for_invited_visibility"}
 {"Action":"pass","Test":"TestInboundCanReturnMissingEvents/Inbound_federation_can_return_missing_events_for_joined_visibility"}

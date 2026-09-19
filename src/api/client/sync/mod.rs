@@ -7,7 +7,10 @@ mod v5;
 use futures::{StreamExt, pin_mut};
 use ruma::{
 	OwnedUserId, RoomId, UserId,
-	events::{AnyStrippedStateEvent, TimelineEventType::RoomMember},
+	events::{
+		AnyStrippedStateEvent,
+		TimelineEventType::{RoomCreate, RoomMember},
+	},
 	serde::Raw,
 };
 use tuwunel_core::{
@@ -120,6 +123,23 @@ async fn load_timeline_with_errors(
 	timeline_pdus.reverse();
 
 	Ok((timeline_pdus, limited, last_timeline_count))
+}
+
+/// Returns the backward pagination token for a timeline slice.
+///
+/// A slice beginning at room creation has nothing before it, so its window's
+/// end lets a members query describe the room as received.
+/// Backward pagination from that token re-reads the slice once before ending.
+fn timeline_prev_batch(
+	timeline_pdus: &[(PduCount, PduEvent)],
+	window_end: PduCount,
+) -> Option<PduCount> {
+	timeline_pdus
+		.first()
+		.map(|(count, pdu)| match pdu.kind() {
+			| RoomCreate => window_end,
+			| _ => *count,
+		})
 }
 
 async fn share_encrypted_room(

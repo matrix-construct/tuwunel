@@ -73,7 +73,7 @@ use tuwunel_service::{
 
 use super::{
 	invite_permitted, load_timeline, profiles::collect as collect_profiles, share_encrypted_room,
-	strip_prev_state,
+	strip_prev_state, timeline_prev_batch,
 };
 use crate::{
 	ClientIp, Ruma,
@@ -996,10 +996,8 @@ async fn load_left_room(
 		.then_some(left_count)
 		.map(PduCount::Normal);
 
-	let prev_batch = timeline_pdus
-		.first()
+	let prev_batch = timeline_prev_batch(&timeline_pdus, PduCount::Normal(left_count))
 		.filter(|_| timeline_limit > 0)
-		.map(at!(0))
 		.or(left_prev_batch)
 		.as_ref()
 		.map(ToString::to_string);
@@ -1184,7 +1182,7 @@ async fn load_joined_room(
 	);
 
 	let prev_batch =
-		compute_join_prev_batch(&timeline_pdus, joined_sender_member.as_ref(), since);
+		compute_join_prev_batch(&timeline_pdus, joined_sender_member.as_ref(), since, next_batch);
 
 	let in_window = in_window(since, next_batch);
 
@@ -1333,8 +1331,9 @@ fn compute_join_prev_batch(
 	timeline_pdus: &[(PduCount, PduEvent)],
 	joined_sender_member: Option<&PduEvent>,
 	since: u64,
+	next_batch: u64,
 ) -> Option<PduCount> {
-	timeline_pdus.first().map(at!(0)).or_else(|| {
+	timeline_prev_batch(timeline_pdus, PduCount::Normal(next_batch)).or_else(|| {
 		joined_sender_member
 			.is_some()
 			.then_some(since)

@@ -4,10 +4,10 @@ Tuwunel runs the [Complement](https://github.com/matrix-org/complement) Matrix h
 
 ## Counts
 
-- Test groups: 218. Passing: **86.2%**
-  - ✅ `pass`: 188
+- Test groups: 218. Passing: **86.7%**
+  - ✅ `pass`: 189
   - 🟨 `some`: 12
-  - ❌ `fail`: 18
+  - ❌ `fail`: 17
   - ⬛ `skip`: 0
 
 - Subtests: 606. Passing: **81.2%**
@@ -85,7 +85,7 @@ Tuwunel runs the [Complement](https://github.com/matrix-org/complement) Matrix h
 | ✅ | 3/0/0 | `GetFilteredRoomMembers` |
 | ✅ | – | `GetMissingEventsGapFilling` |
 | ✅ | – | `GetRoomMembers` |
-| ❌ | – | `GetRoomMembersAtPoint` |
+| ✅ | – | `GetRoomMembersAtPoint` |
 | ✅ | 4/0/0 | `InboundCanReturnMissingEvents` |
 | ✅ | – | `InboundFederationKeys` |
 | ✅ | 2/0/0 | `InboundFederationProfile` |
