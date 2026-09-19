@@ -14,8 +14,8 @@ use ruma::{
 	},
 };
 use tuwunel_core::{
-	Err, Result, at, is_equal_to, is_not_equal_to,
-	matrix::Event,
+	Err, Result, at, err, is_equal_to, is_not_equal_to,
+	matrix::{Event, PduCount},
 	utils::{
 		future::{BoolExt, TryExtExt},
 		stream::ReadyExt,
@@ -24,12 +24,11 @@ use tuwunel_core::{
 
 use crate::Ruma;
 
-/// # `GET /_matrix/client/r0/rooms/{roomId}/members`
+/// Lists the room's member events at the current state or a token's snapshot.
 ///
-/// Lists all joined users in a room (TODO: at a specific point in time, with a
-/// specific membership).
-///
-/// - Only works if the user is currently joined
+/// Accepts sync `prev_batch`/`next_batch` and `/messages` tokens.
+/// Visibility is decided from the caller's current membership; Synapse
+/// decides it from the state at the token.
 pub(crate) async fn get_member_events_route(
 	State(services): State<crate::State>,
 	body: Ruma<get_member_events::v3::Request>,
@@ -44,6 +43,27 @@ pub(crate) async fn get_member_events_route(
 		)));
 	}
 
+	let at: Option<PduCount> = body
+		.at
+		.as_deref()
+		.map(str::parse)
+		.transpose()
+		.map_err(|_| err!(Request(InvalidParam("Invalid `at` token."))))?;
+
+	let shortstatehash = match at {
+		| None => services
+			.state
+			.get_room_shortstatehash(&body.room_id)
+			.await
+			.map_err(|e| err!(Database("Missing state for {:?}: {e:?}", body.room_id)))?,
+
+		| Some(at) =>
+			services
+				.timeline
+				.shortstatehash_after(&body.room_id, at)
+				.await?,
+	};
+
 	let membership = body.membership.as_ref();
 	let not_membership = body.not_membership.as_ref();
 	let membership_filter = |content: &RoomMemberEventContent| {
@@ -54,8 +74,7 @@ pub(crate) async fn get_member_events_route(
 	Ok(get_member_events::v3::Response {
 		chunk: services
 			.state_accessor
-			.room_state_full(&body.room_id)
-			.ready_filter_map(Result::ok)
+			.state_full(shortstatehash)
 			.ready_filter(|((ty, _), _)| *ty == StateEventType::RoomMember)
 			.map(at!(1))
 			.ready_filter(|pdu| {

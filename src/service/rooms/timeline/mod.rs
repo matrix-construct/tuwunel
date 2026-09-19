@@ -297,6 +297,49 @@ pub async fn next_shortstatehash(
 		.await
 }
 
+/// Returns the state snapshot after every room event at or before a count.
+///
+/// The boundary is inclusive because a client's sync position is often the
+/// count of the newest event it received, and need not belong to this room.
+/// The snapshot precedes the first event strictly after the count, falling
+/// back to current state only when no event follows; a count before the room's
+/// first recorded snapshot is not found.
+#[implement(Service)]
+#[tracing::instrument(skip(self), level = "debug")]
+pub async fn shortstatehash_after(
+	&self,
+	room_id: &RoomId,
+	count: PduCount,
+) -> Result<ShortStateHash> {
+	let shortroomid: ShortRoomId = self
+		.services
+		.short
+		.get_shortroomid(room_id)
+		.map_err(|e| err!(Request(NotFound("Room {room_id:?} not found: {e:?}"))))
+		.await?;
+
+	let after = PduId { shortroomid, count };
+	let count = match self.next_timeline_count(&after).await {
+		| Ok(count) => count,
+		| Err(e) if !e.is_not_found() => return Err(e),
+		| Err(_) => {
+			return self
+				.services
+				.state
+				.get_room_shortstatehash(room_id)
+				.await;
+		},
+	};
+
+	let next = PduId { shortroomid, count };
+	let shorteventid = self.get_shorteventid_from_pdu_id(&next).await?;
+
+	self.services
+		.state
+		.get_shortstatehash(shorteventid)
+		.await
+}
+
 /// Returns the state snapshot recorded at a room timeline count.
 ///
 /// The count is resolved through the room's accepted timeline row and then its
