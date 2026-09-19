@@ -2867,7 +2867,7 @@
 #
 # reloadable: yes
 #
-#deprioritize_joins_through_servers = ["matrix\.org"]
+#deprioritize_joins_through_servers = ["matrix\\.org"]
 
 # Maximum make_join requests to attempt within each join attempt. Each
 # attempt tries a different server, as each server is only tried once;

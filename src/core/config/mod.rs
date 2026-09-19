@@ -3308,6 +3308,7 @@ pub struct Config {
 	///
 	/// reloadable: yes
 	/// default: ["matrix\.org"]
+	/// config-example: ["matrix\\.org"]
 	#[serde(
 		default = "default_deprioritize_joins_through_servers",
 		with = "serde_regex"
