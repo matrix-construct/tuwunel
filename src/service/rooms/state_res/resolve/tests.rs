@@ -1,3 +1,5 @@
+mod power_event_projection;
+
 use std::{
 	collections::HashMap,
 	future::ready,

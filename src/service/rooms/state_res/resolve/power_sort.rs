@@ -18,7 +18,7 @@ use super::{
 	super::{
 		FetchEvent,
 		events::{
-			RoomCreateEvent, RoomPowerLevelsEvent, RoomPowerLevelsIntField, is_power_event,
+			PowerEvent, RoomCreateEvent, RoomPowerLevelsEvent, RoomPowerLevelsIntField,
 			power_levels::RoomPowerLevelsEventOptionExt,
 		},
 		fetch_event::AuthRefs,
@@ -34,14 +34,11 @@ use super::{
 ///
 /// ## Arguments
 ///
-/// * `conflicted_power_events` - The list of power events in the full
-///   conflicted set.
-///
 /// * `full_conflicted_set` - The full conflicted set.
 ///
 /// * `rules` - The authorization rules for the current room version.
 ///
-/// * `fetch` - Function to fetch an event in the room given its event ID.
+/// * `fetch` - Handle for reading events in the room by event ID.
 ///
 /// ## Returns
 ///
@@ -94,7 +91,7 @@ pub(super) async fn power_sort(
 			.get(&event_id)
 			.ok_or_else(|| err!(Request(NotFound("Missing PL event: {event_id}"))))?;
 
-		let event = fetch.get::<PduEvent>(&event_id).await?;
+		let event: PduEvent = fetch.get(&event_id).await?;
 
 		Ok((power_level, event.origin_server_ts()))
 	};
@@ -173,7 +170,7 @@ pub(super) async fn power_level_for_sender(
 	rules: &RoomVersionRules,
 	fetch: impl FetchEvent,
 ) -> Result<UserPowerLevel> {
-	let event = fetch.get::<PduEvent>(event_id).await.optional()?;
+	let event: Option<PduEvent> = fetch.get(event_id).await.optional()?;
 
 	let hydra_room_id = rules
 		.authorization
@@ -183,7 +180,7 @@ pub(super) async fn power_level_for_sender(
 	let mut power_levels_event = None;
 	if hydra_room_id && let Some(event) = event.as_ref() {
 		let create_id = event.room_id().as_event_id()?;
-		let fetched = fetch.get::<PduEvent>(&create_id).await?;
+		let fetched: PduEvent = fetch.get(&create_id).await?;
 
 		_ = create_event.insert(RoomCreateEvent::new(fetched));
 	}
@@ -248,7 +245,7 @@ pub(super) async fn is_power_event_id(
 		.get(event_id)
 		.await
 		.optional()?
-		.is_some_and(|event: PduEvent| is_power_event(&event)))
+		.is_some_and(|PowerEvent(is_power)| is_power))
 }
 
 async fn fetch_optional_event<T>(
