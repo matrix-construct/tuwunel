@@ -328,6 +328,15 @@ fn ser_json_raw_field_roundtrip() {
 }
 
 #[test]
+fn de_u8() {
+	for byte in u8::MIN..=u8::MAX {
+		assert_eq!(from_slice::<u8>(&[byte]).expect("decode byte"), byte);
+	}
+
+	from_slice::<u8>(&[]).expect_err("empty input has no byte");
+}
+
+#[test]
 fn de_tuple() {
 	let user_id: &UserId = "@user:example.com".try_into().unwrap();
 	let room_id: &RoomId = "!room:example.com".try_into().unwrap();

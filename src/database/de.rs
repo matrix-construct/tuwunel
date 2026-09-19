@@ -380,11 +380,15 @@ impl<'a, 'de: 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
 	}
 
 	#[cfg_attr(unabridged, tracing::instrument(level = "trace", skip_all))]
-	fn deserialize_u8<V: Visitor<'de>>(self, _visitor: V) -> Result<V::Value> {
-		unhandled!(
-			"deserialize u8 not implemented; try dereferencing the Handle for [u8] access \
-			 instead"
-		)
+	fn deserialize_u8<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
+		let byte = self
+			.buf
+			.get(self.pos)
+			.copied()
+			.ok_or_else(|| Self::Error::SerdeDe("u8 buffer underflow".into()))?;
+
+		self.inc_pos(1);
+		visitor.visit_u8(byte)
 	}
 
 	#[cfg_attr(unabridged, tracing::instrument(level = "trace", skip_all))]
