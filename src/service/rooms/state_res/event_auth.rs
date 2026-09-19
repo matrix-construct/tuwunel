@@ -8,7 +8,7 @@ use futures::{
 	future::{join3, try_join},
 };
 use ruma::{
-	EventId, Int, OwnedEventId, OwnedUserId,
+	EventId, Int, OwnedUserId,
 	api::error::ErrorKind::InvalidParam,
 	events::{
 		StateEventType, TimelineEventType,
@@ -18,7 +18,7 @@ use ruma::{
 };
 use tuwunel_core::{
 	Err, Error, Result, err,
-	matrix::{Event, StateKey},
+	matrix::{Event, PduEvent, StateKey},
 	trace,
 	utils::stream::{IterStream, TryReadyExt},
 };
@@ -28,7 +28,7 @@ use self::room_member::check_room_member;
 #[cfg(test)]
 use super::test_utils;
 use super::{
-	FetchStateExt, TypeStateKey, events,
+	FetchEvent, FetchStateExt, TypeStateKey, events,
 	events::{
 		RoomCreateEvent, RoomMemberEvent, RoomPowerLevelsEvent,
 		power_levels::{self, RoomPowerLevelsEventOptionExt, RoomPowerLevelsIntField},
@@ -77,15 +77,14 @@ impl AuthCheckOutcome {
 		event_id = ?incoming_event.event_id(),
 	)
 )]
-pub async fn auth_check<FetchEvent, EventFut, FetchState, StateFut, Pdu>(
+pub async fn auth_check<Fetch, FetchState, StateFut, Pdu>(
 	rules: &RoomVersionRules,
 	incoming_event: &Pdu,
-	fetch_event: &FetchEvent,
+	fetch_event: Fetch,
 	fetch_state: &FetchState,
 ) -> Result<AuthCheckOutcome>
 where
-	FetchEvent: Fn(OwnedEventId) -> EventFut + Sync,
-	EventFut: Future<Output = Result<Pdu>> + Send,
+	Fetch: FetchEvent,
 	FetchState: Fn(StateEventType, StateKey) -> StateFut + Sync,
 	StateFut: Future<Output = Result<Pdu>> + Send,
 	Pdu: Event,
@@ -93,15 +92,14 @@ where
 	auth_check_outcome(rules, incoming_event, fetch_event, fetch_state).await
 }
 
-async fn auth_check_outcome<FetchEvent, EventFut, FetchState, StateFut, Pdu>(
+async fn auth_check_outcome<Fetch, FetchState, StateFut, Pdu>(
 	rules: &RoomVersionRules,
 	incoming_event: &Pdu,
-	fetch_event: &FetchEvent,
+	fetch_event: Fetch,
 	fetch_state: &FetchState,
 ) -> Result<AuthCheckOutcome>
 where
-	FetchEvent: Fn(OwnedEventId) -> EventFut + Sync,
-	EventFut: Future<Output = Result<Pdu>> + Send,
+	Fetch: FetchEvent,
 	FetchState: Fn(StateEventType, StateKey) -> StateFut + Sync,
 	StateFut: Future<Output = Result<Pdu>> + Send,
 	Pdu: Event,
@@ -146,14 +144,13 @@ pub(super) fn classify_auth_error(error: Error) -> Result<AuthCheckOutcome> {
 		sender = ?incoming_event.sender(),
 	)
 )]
-pub(super) async fn check_state_independent_auth_rules<Fetch, Fut, Pdu>(
+pub(super) async fn check_state_independent_auth_rules<Fetch, Pdu>(
 	rules: &RoomVersionRules,
 	incoming_event: &Pdu,
-	fetch_event: &Fetch,
+	fetch_event: Fetch,
 ) -> Result
 where
-	Fetch: Fn(OwnedEventId) -> Fut + Sync,
-	Fut: Future<Output = Result<Pdu>> + Send,
+	Fetch: FetchEvent,
 	Pdu: Event,
 {
 	// Since v1, if type is m.room.create:
@@ -176,12 +173,12 @@ where
 	let seen_auth_types = incoming_event
 		.auth_events()
 		.try_stream()
-		.and_then(async |event_id: &EventId| match fetch_event(event_id.to_owned()).await {
+		.and_then(async |event_id: &EventId| match fetch_event.get(event_id).await {
 			| Ok(auth_event) => Ok(auth_event),
 			| Err(e) if e.is_not_found() => Err!(Request(NotFound("auth event {event_id}: {e}"))),
 			| Err(e) => Err(auth_input_error(e)),
 		})
-		.ready_try_fold(seen_auth_types, |mut seen_auth_types, auth_event| {
+		.ready_try_fold(seen_auth_types, |mut seen_auth_types, auth_event: PduEvent| {
 			let event_id = auth_event.event_id();
 
 			// The auth event must be in the same room as the incoming event.
@@ -250,7 +247,8 @@ where
 				)))
 			})?;
 
-		let room_create_event = fetch_event(room_create_event_id.clone())
+		let room_create_event = fetch_event
+			.get::<PduEvent>(&room_create_event_id)
 			.await
 			.map_err(|error| match error {
 				| error if error.is_not_found() => err!(Request(NotFound(

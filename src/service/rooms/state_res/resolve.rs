@@ -19,7 +19,7 @@ use ruma::{OwnedEventId, events::StateEventType, room_version_rules::RoomVersion
 use tuwunel_core::{
 	Result, debug,
 	itertools::Itertools,
-	matrix::{Event, TypeStateKey, event_id::RandomState},
+	matrix::{TypeStateKey, event_id::RandomState},
 	smallvec::SmallVec,
 	trace,
 	utils::{
@@ -33,6 +33,7 @@ use self::{
 	iterative_auth_check::iterative_auth_check, mainline_sort::mainline_sort,
 	power_sort::power_sort, split_conflicted::split_conflicted_state,
 };
+use super::FetchEvent;
 #[cfg(test)]
 use super::test_utils;
 
@@ -116,22 +117,17 @@ impl<Id> IntoIterator for AuthSet<Id> {
 ///
 /// [state resolution]: https://spec.matrix.org/latest/rooms/v2/#state-resolution
 #[tracing::instrument(level = "debug", skip_all)]
-pub async fn resolve<States, AuthSets, FetchExists, ExistsFut, FetchEvent, EventFut, Pdu>(
+pub async fn resolve<States, AuthSets, Fetch>(
 	rules: &RoomVersionRules,
 	state_maps: States,
 	auth_sets: AuthSets,
-	fetch: &FetchEvent,
-	exists: &FetchExists,
+	fetch: Fetch,
 	hydra_backports: bool,
 ) -> Result<StateMap<OwnedEventId>>
 where
 	States: Stream<Item = StateMap<OwnedEventId>> + Send,
 	AuthSets: Stream<Item = AuthSet<OwnedEventId>> + Send,
-	FetchExists: Fn(OwnedEventId) -> ExistsFut + Sync,
-	ExistsFut: Future<Output = Result<bool>> + Send,
-	FetchEvent: Fn(OwnedEventId) -> EventFut + Sync,
-	EventFut: Future<Output = Result<Pdu>> + Send,
-	Pdu: Event + Clone,
+	Fetch: FetchEvent,
 {
 	// Split the unconflicted state map and the conflicted state set.
 	let (unconflicted_state, conflicted_states) = split_conflicted_state(state_maps).await;
@@ -160,8 +156,7 @@ where
 	// 0. The full conflicted set is the union of the conflicted state set and the
 	//    auth difference. Don't honor events that don't exist.
 	let full_conflicted_set =
-		full_conflicted_set(rules, conflicted_states, auth_sets, fetch, exists, hydra_backports)
-			.await?;
+		full_conflicted_set(rules, conflicted_states, auth_sets, fetch, hydra_backports).await?;
 
 	// 1. Select the set X of all power events that appear in the full conflicted
 	//    set. For each such power event P, enlarge X by adding the events in the
@@ -269,21 +264,15 @@ where
 		events = conflicted_states.values().flatten().count()
 	),
 )]
-async fn full_conflicted_set<AuthSets, FetchExists, ExistsFut, FetchEvent, EventFut, Pdu>(
+async fn full_conflicted_set<AuthSets>(
 	rules: &RoomVersionRules,
 	conflicted_states: ConflictMap<OwnedEventId>,
 	auth_sets: AuthSets,
-	fetch: &FetchEvent,
-	exists: &FetchExists,
+	fetch: impl FetchEvent,
 	hydra_backports: bool,
 ) -> Result<ConflictedSet>
 where
 	AuthSets: Stream<Item = AuthSet<OwnedEventId>> + Send,
-	FetchExists: Fn(OwnedEventId) -> ExistsFut + Sync,
-	ExistsFut: Future<Output = Result<bool>> + Send,
-	FetchEvent: Fn(OwnedEventId) -> EventFut + Sync,
-	EventFut: Future<Output = Result<Pdu>> + Send,
-	Pdu: Event,
 {
 	let consider_conflicted_subgraph = rules
 		.state_res
@@ -316,9 +305,9 @@ where
 	auth_difference(auth_sets)
 		.chain(conflicted_state_ids)
 		.broad_then(async |id| {
-			exists(id.clone())
-				.map_ok(|exists| exists.then_some(id))
-				.await
+			let exists = fetch.exists(&id).await?;
+
+			Ok(exists.then_some(id))
 		})
 		.ready_filter_map(Result::transpose)
 		.chain(conflicted_subgraph)

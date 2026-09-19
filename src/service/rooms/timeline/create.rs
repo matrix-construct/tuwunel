@@ -8,8 +8,8 @@ use std::cmp;
 
 use futures::{StreamExt, TryStreamExt};
 use ruma::{
-	CanonicalJsonObject, CanonicalJsonValue, MilliSecondsSinceUnixEpoch, OwnedEventId,
-	OwnedRoomId, RoomId, UserId,
+	CanonicalJsonObject, CanonicalJsonValue, MilliSecondsSinceUnixEpoch, OwnedRoomId, RoomId,
+	UserId,
 	events::{StateEventType, TimelineEventType, room::create::RoomCreateEventContent},
 	room_version_rules::RoomIdFormatVersion,
 	uint,
@@ -29,7 +29,7 @@ use tuwunel_core::{
 };
 
 use super::RoomMutexGuard;
-use crate::rooms::state_res;
+use crate::rooms::state_res::auth_check;
 
 /// Builds a canonical signed PDU and its structured representation.
 ///
@@ -166,14 +166,9 @@ pub async fn create_hash_and_sign_event(
 			.ok_or_else(|| err!(Request(NotFound("Missing auth events"))))
 	};
 
-	state_res::auth_check(
-		&version_rules,
-		&pdu,
-		&async |event_id: OwnedEventId| self.get_pdu(&event_id).await,
-		&auth_fetch,
-	)
-	.await?
-	.into_result()?;
+	auth_check(&version_rules, &pdu, self, &auth_fetch)
+		.await?
+		.into_result()?;
 
 	// Hash and sign
 	let mut pdu_json = to_canonical_object(&pdu).map_err(|e| {

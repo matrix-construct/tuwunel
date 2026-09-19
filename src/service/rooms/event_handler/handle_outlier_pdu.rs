@@ -1,3 +1,5 @@
+use std::future::ready;
+
 use futures::{StreamExt, TryFutureExt};
 use ruma::{
 	CanonicalJsonObject, EventId, RoomId, RoomVersionId, ServerName, events::TimelineEventType,
@@ -130,22 +132,21 @@ pub(super) async fn handle_outlier_pdu(
 		.collect()
 		.await;
 
-	auth_check(
-		&room_rules,
-		&event,
-		&async |event_id| self.event_fetch(&event_id).await,
-		&async |event_type, state_key| {
-			let target = event_type.with_state_key(state_key);
+	auth_check(&room_rules, &event, &*self.services.timeline, &|event_type, state_key| {
+		let target = event_type.with_state_key(state_key);
+
+		ready(
 			auth_events
 				.iter()
 				.find(|(type_state_key, _)| *type_state_key == target)
 				.map(ref_at!(1))
 				.cloned()
-				.ok_or_else(|| err!(Request(NotFound("state not found"))))
-		},
-	)
+				.ok_or_else(|| err!(Request(NotFound("state not found")))),
+		)
+	})
 	.await?
 	.into_result()?;
+
 	trace!("Validation successful.");
 
 	// 7. Persist the event as an outlier.

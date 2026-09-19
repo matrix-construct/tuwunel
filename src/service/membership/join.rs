@@ -342,7 +342,7 @@ async fn join_remote(
 	state_res::auth_check(
 		&room_version_rules,
 		&parsed_join_pdu,
-		&async |event_id| self.services.timeline.get_pdu(&event_id).await,
+		&*self.services.timeline,
 		&async |event_type, state_key| {
 			let shortstatekey = self
 				.services

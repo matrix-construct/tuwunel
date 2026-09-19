@@ -2,6 +2,8 @@
 //!
 //! The fixtures exercise authorization and resolution without a running server.
 
+mod fetch;
+
 use std::{
 	borrow::Borrow,
 	collections::{BTreeSet, HashMap},
@@ -205,8 +207,7 @@ async fn merge_prev_states(
 		&rules,
 		state_sets.into_iter().stream(),
 		auth_chain_sets.into_iter().stream(),
-		&async |id| event_map.get(&id).cloned().ok_or_else(not_found),
-		&async |id| Ok(event_map.contains_key(&id)),
+		event_map,
 		false,
 	)
 	.await

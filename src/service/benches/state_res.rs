@@ -9,18 +9,19 @@ use ruma::{
 };
 use serde_json::{json, value::to_raw_value as to_raw_json_value};
 use tuwunel_core::{
-	err,
 	matrix::{Event, PduEvent, event::TypeExt},
 	utils::stream::IterStream,
 };
 use tuwunel_service::rooms::state_res::{
-	AuthSet, StateMap,
+	AuthSet, StateMap, resolve,
 	test_utils::{
 		INITIAL_EVENTS, TestStore, alice, bob, ella, event_id, member_content_ban,
 		member_content_join, room_id, to_pdu_event,
 	},
 	topological_sort,
 };
+
+type Rows = HashMap<OwnedEventId, Vec<u8>>;
 
 criterion_group!(
 	benches,
@@ -62,22 +63,16 @@ fn resolution_shallow_auth_chain(c: &mut Criterion) {
 		let (state_at_bob, state_at_charlie, _) = store.set_up();
 
 		let rules = RoomVersionId::V6.rules().unwrap();
-		let ev_map = store.0.clone();
+		let rows = rows(&store.0);
 		let state_sets = [state_at_bob, state_at_charlie];
 		let auth_chains = auth_chains(&store, &state_sets);
 
 		let func = async || {
-			if let Err(e) = tuwunel_service::rooms::state_res::resolve(
+			if let Err(e) = resolve(
 				&rules,
 				state_sets.clone().into_iter().stream(),
 				auth_chains.clone().into_iter().stream(),
-				&async |id| {
-					ev_map
-						.get(&id)
-						.cloned()
-						.ok_or(err!(Request(NotFound("Not Found"))))
-				},
-				&async |id| Ok(ev_map.contains_key(&id)),
+				&rows,
 				false,
 			)
 			.await
@@ -90,6 +85,17 @@ fn resolution_shallow_auth_chain(c: &mut Criterion) {
 			func().await;
 		});
 	});
+}
+
+fn rows(events: &HashMap<OwnedEventId, PduEvent>) -> Rows {
+	events
+		.iter()
+		.map(|(id, event)| {
+			let row = serde_json::to_vec(event).expect("fixture event should serialize");
+
+			(id.clone(), row)
+		})
+		.collect()
 }
 
 fn auth_chains(
@@ -156,18 +162,14 @@ fn resolve_deeper_event_set(c: &mut Criterion) {
 		let state_sets = [state_set_a, state_set_b];
 		let auth_chains = auth_chains(&store, &state_sets);
 
+		let rows = rows(&inner);
+
 		let func = async || {
-			if let Err(e) = tuwunel_service::rooms::state_res::resolve(
+			if let Err(e) = resolve(
 				&rules,
 				state_sets.clone().into_iter().stream(),
 				auth_chains.clone().into_iter().stream(),
-				&async |id| {
-					inner
-						.get(&id)
-						.cloned()
-						.ok_or(err!(Request(NotFound("Not Found"))))
-				},
-				&async |id| Ok(inner.contains_key(&id)),
+				&rows,
 				false,
 			)
 			.await

@@ -1,3 +1,5 @@
+use std::future::ready;
+
 use futures::{Stream, StreamExt, TryFutureExt, TryStreamExt};
 use ruma::{
 	EventId, OwnedEventId,
@@ -6,7 +8,7 @@ use ruma::{
 };
 use tuwunel_core::{
 	Result, debug_warn, err, error,
-	matrix::{Event, EventTypeExt, StateKey},
+	matrix::{Event, EventTypeExt, PduEvent, StateKey, TypeStateKey},
 	smallvec::SmallVec,
 	trace,
 	utils::stream::{IterStream, ReadyExt, TryReadyExt, TryWidebandExt},
@@ -14,11 +16,13 @@ use tuwunel_core::{
 
 use super::{
 	super::{
-		AuthCheckOutcome, auth_types_for_event, check_state_dependent_auth_rules,
+		AuthCheckOutcome, FetchEvent, auth_types_for_event, check_state_dependent_auth_rules,
 		event_auth::classify_auth_error,
 	},
 	StateMap,
 };
+
+type AuthEvents = SmallVec<[(TypeStateKey, PduEvent); 4]>;
 
 /// Perform the iterative auth checks to the given list of events.
 ///
@@ -52,22 +56,20 @@ use super::{
 		states = ?state.len(),
 	)
 )]
-pub(super) async fn iterative_auth_check<'b, SortedPowerEvents, Fetch, Fut, Pdu>(
+pub(super) async fn iterative_auth_check<'b, SortedPowerEvents, Fetch>(
 	rules: &RoomVersionRules,
 	events: SortedPowerEvents,
 	state: StateMap<OwnedEventId>,
-	fetch: &Fetch,
+	fetch: Fetch,
 ) -> Result<StateMap<OwnedEventId>>
 where
 	SortedPowerEvents: Stream<Item = &'b EventId> + Send,
-	Fetch: Fn(OwnedEventId) -> Fut + Sync,
-	Fut: Future<Output = Result<Pdu>> + Send,
-	Pdu: Event,
+	Fetch: FetchEvent,
 {
 	events
 		.map(Ok)
 		.wide_and_then(async |event_id| {
-			let event = fetch(event_id.to_owned()).await?;
+			let event: PduEvent = fetch.get(event_id).await?;
 			let state_key = event.state_key().map(StateKey::from);
 
 			Ok(state_key.map(|state_key| (event_id, state_key, event)))
@@ -88,18 +90,16 @@ where
 		?state_key,
 	)
 )]
-async fn auth_check<Fetch, Fut, Pdu>(
+async fn auth_check<Fetch>(
 	rules: &RoomVersionRules,
 	mut state: StateMap<OwnedEventId>,
 	event_id: &EventId,
 	state_key: StateKey,
-	event: Pdu,
-	fetch: &Fetch,
+	event: PduEvent,
+	fetch: Fetch,
 ) -> Result<StateMap<OwnedEventId>>
 where
-	Fetch: Fn(OwnedEventId) -> Fut + Sync,
-	Fut: Future<Output = Result<Pdu>> + Send,
-	Pdu: Event,
+	Fetch: FetchEvent,
 {
 	let Ok(auth_types) = auth_types_for_event(
 		event.event_type(),
@@ -164,7 +164,7 @@ where
 	let auth_events = auth_events
 		.chain(auth_types_events)
 		.try_collect()
-		.map_ok(|mut vec: SmallVec<[_; 4]>| {
+		.map_ok(|mut vec: AuthEvents| {
 			vec.sort_by(|a, b| a.0.cmp(&b.0));
 			vec.reverse();
 			vec.dedup_by(|a, b| a.0.eq(&b.0));
@@ -172,12 +172,14 @@ where
 		})
 		.await?;
 
-	let fetch_state = async |ty: StateEventType, key: StateKey| -> Result<Pdu> {
+	let fetch_state = |ty: StateEventType, key: StateKey| {
 		trace!(?ty, ?key, auth_events = auth_events.len(), "fetch state");
-		auth_events
-			.binary_search_by(|a| ty.cmp(&a.0.0).then(key.cmp(&a.0.1)))
-			.map(|i| auth_events[i].1.clone())
-			.map_err(|_| err!(Request(NotFound("Missing auth_event {ty:?},{key:?}"))))
+		ready(
+			auth_events
+				.binary_search_by(|a| ty.cmp(&a.0.0).then(key.cmp(&a.0.1)))
+				.map(|i| auth_events[i].1.clone())
+				.map_err(|_| err!(Request(NotFound("Missing auth_event {ty:?},{key:?}")))),
+		)
 	};
 
 	let outcome = match check_state_dependent_auth_rules(rules, &event, &fetch_state).await {
@@ -206,13 +208,11 @@ where
 	Ok(state)
 }
 
-async fn fetch_auth_event<Fetch, Fut, Pdu>(id: &EventId, fetch: &Fetch) -> Option<Result<Pdu>>
+async fn fetch_auth_event<Fetch>(id: &EventId, fetch: Fetch) -> Option<Result<PduEvent>>
 where
-	Fetch: Fn(OwnedEventId) -> Fut + Sync,
-	Fut: Future<Output = Result<Pdu>> + Send,
-	Pdu: Event,
+	Fetch: FetchEvent,
 {
-	match fetch(id.to_owned()).await {
+	match fetch.get::<PduEvent>(id).await {
 		| Ok(event) => Some(Ok(event)),
 		| Err(error) if error.is_not_found() => {
 			debug_warn!(%id, %error, "missing auth event");

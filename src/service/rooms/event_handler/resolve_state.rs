@@ -8,9 +8,10 @@ use std::{
 };
 
 use futures::{FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt};
-use ruma::{OwnedEventId, RoomId, RoomVersionId};
+use ruma::{EventId, OwnedEventId, RoomId, RoomVersionId};
+use serde::Deserialize;
 use tuwunel_core::{
-	Result, err, error, implement,
+	Err, Result, err, error, implement,
 	matrix::room_version,
 	trace,
 	utils::stream::{IterStream, ReadyExt, TryWidebandExt, WidebandExt},
@@ -18,8 +19,15 @@ use tuwunel_core::{
 
 use crate::rooms::{
 	state_compressor::CompressedState,
-	state_res::{self, AuthSet, StateMap},
+	state_res::{self, AuthSet, FetchEvent, StateMap},
+	timeline,
 };
+
+#[derive(Clone, Copy)]
+struct Strict<'a> {
+	timeline: &'a timeline::Service,
+	complete: Option<&'a AtomicBool>,
+}
 
 #[implement(super::Service)]
 #[tracing::instrument(
@@ -128,34 +136,16 @@ where
 	StateSets: Stream<Item = StateMap<OwnedEventId>> + Send,
 	AuthSets: Stream<Item = AuthSet<OwnedEventId>> + Send,
 {
-	let fetch = async |event_id: OwnedEventId| match self.event_fetch(&event_id).await {
-		| Err(error) if complete.is_some() && error.is_not_found() => {
-			if let Some(complete) = complete {
-				complete.store(false, Ordering::Relaxed);
-			}
-
-			Err(err!(Database("State resolution references missing event {event_id}.")))
-		},
-		| result => result,
-	};
-
-	let exists = async |event_id: OwnedEventId| match self.event_exists(&event_id).await {
-		| Ok(false) if complete.is_some() => {
-			if let Some(complete) = complete {
-				complete.store(false, Ordering::Relaxed);
-			}
-
-			Err(err!(Database("State resolution references missing event {event_id}.")))
-		},
-		| result => result,
+	let fetch = Strict {
+		timeline: &self.services.timeline,
+		complete,
 	};
 
 	state_res::resolve(
 		&room_version::rules(room_version)?,
 		state_sets,
 		auth_chains,
-		&fetch,
-		&exists,
+		fetch,
 		self.services.server.config.hydra_backports,
 	)
 	.inspect_err(|error| {
@@ -166,4 +156,35 @@ where
 		error!(?error, "State resolution failed.");
 	})
 	.await
+}
+
+impl FetchEvent for Strict<'_> {
+	async fn get<T>(self, event_id: &EventId) -> Result<T>
+	where
+		T: for<'de> Deserialize<'de> + Send,
+	{
+		FetchEvent::get(self.timeline, event_id)
+			.map_err(|error| match self.complete.filter(|_| error.is_not_found()) {
+				| None => error,
+				| Some(complete) => {
+					complete.store(false, Ordering::Relaxed);
+
+					err!(Database("State resolution references missing event {event_id}."))
+				},
+			})
+			.await
+	}
+
+	async fn exists(self, event_id: &EventId) -> Result<bool> {
+		let found = FetchEvent::exists(self.timeline, event_id).await?;
+
+		match self.complete.filter(|_| !found) {
+			| None => Ok(found),
+			| Some(complete) => {
+				complete.store(false, Ordering::Relaxed);
+
+				Err!(Database("State resolution references missing event {event_id}."))
+			},
+		}
+	}
 }

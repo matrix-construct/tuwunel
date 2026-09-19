@@ -22,7 +22,7 @@ use serde_json::{
 use similar::{Algorithm, udiff::unified_diff};
 use tracing_subscriber::EnvFilter;
 use tuwunel_core::{
-	Result, err,
+	Result,
 	matrix::{Event, Pdu, StateKey},
 	utils::stream::IterStream,
 };
@@ -359,20 +359,11 @@ async fn test_contrived_states(pdus_paths: &[&str], state_sets_paths: &[&str]) -
 		})
 		.collect();
 
-	let exists = async |x| Ok(pdus_by_id.contains_key(&x));
-	let fetch = async |x| {
-		pdus_by_id
-			.get(&x)
-			.cloned()
-			.ok_or_else(|| err!(Request(NotFound("event not found"))))
-	};
-
 	let resolved_state = resolve(
 		&rules,
 		state_sets.into_iter().stream(),
 		auth_chains.into_iter().stream(),
-		&fetch,
-		&exists,
+		&pdus_by_id,
 		false,
 	)
 	.await
@@ -451,21 +442,11 @@ where
 		auth_chain_sets.push(auth_events_dfs(&*pdus_by_id, pdu)?.collect());
 	}
 
-	let fetch = async |x| {
-		pdus_by_id
-			.get(&x)
-			.cloned()
-			.ok_or_else(|| err!(Request(NotFound("event not found"))))
-	};
-
-	let exists = async |x| Ok(pdus_by_id.contains_key(&x));
-
 	resolve(
 		rules,
 		state_sets.into_iter().stream(),
 		auth_chain_sets.into_iter().stream(),
-		&fetch,
-		&exists,
+		&*pdus_by_id,
 		false,
 	)
 	.await
@@ -525,14 +506,6 @@ where
 		.map(|pdu| (pdu.event_id().to_owned(), pdu.to_owned()))
 		.collect();
 
-	let exists = async |x| Ok(pdus_by_id.contains_key(&x));
-	let fetch = async |x| {
-		pdus_by_id
-			.get(&x)
-			.cloned()
-			.ok_or_else(|| err!(Request(NotFound("event not found"))))
-	};
-
 	let mut state_at_events: HashMap<OwnedEventId, StateMap<OwnedEventId>> = HashMap::new();
 	let mut leaves = Vec::new();
 
@@ -582,8 +555,7 @@ where
 				rules,
 				states_before_event.clone().into_iter().stream(),
 				auth_chain_sets.clone().into_iter().stream(),
-				&fetch,
-				&exists,
+				&pdus_by_id,
 				false,
 			)
 			.await?;
@@ -608,8 +580,7 @@ where
 					.into_iter()
 					.stream(),
 				auth_chain_sets.into_iter().stream(),
-				&fetch,
-				&exists,
+				&pdus_by_id,
 				false,
 			)
 			.await?;
@@ -654,8 +625,7 @@ where
 		rules,
 		leaf_states.into_iter().stream(),
 		auth_chain_sets.into_iter().stream(),
-		&fetch,
-		&exists,
+		&pdus_by_id,
 		false,
 	)
 	.await

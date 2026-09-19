@@ -1,14 +1,16 @@
 use std::collections::HashMap;
 
-use futures::{Stream, StreamExt, TryFutureExt, TryStreamExt, pin_mut, stream::try_unfold};
+use futures::{Stream, StreamExt, TryFutureExt, TryStreamExt, stream::try_unfold};
 use ruma::{EventId, OwnedEventId, events::TimelineEventType};
 use tuwunel_core::{
 	Error, Result, at,
-	matrix::{Event, event_id::RandomState},
+	matrix::{Event, PduEvent, event_id::RandomState},
 	result::NotFound,
 	trace,
-	utils::stream::{BroadbandExt, IterStream, TryReadyExt},
+	utils::stream::{BroadbandExt, TryReadyExt},
 };
+
+use super::super::FetchEvent;
 
 /// Mainline position of each power-levels event, oldest first.
 type Positions<'a> = HashMap<&'a EventId, usize, RandomState>;
@@ -48,16 +50,13 @@ type Positions<'a> = HashMap<&'a EventId, usize, RandomState>;
 			.unwrap_or_default(),
 	)
 )]
-pub(super) async fn mainline_sort<'a, RemainingEvents, Fetch, Fut, Pdu>(
+pub(super) async fn mainline_sort<'a, RemainingEvents>(
 	power_level_event_id: Option<OwnedEventId>,
 	events: RemainingEvents,
-	fetch: &Fetch,
+	fetch: impl FetchEvent,
 ) -> Result<Vec<OwnedEventId>>
 where
 	RemainingEvents: Stream<Item = &'a EventId> + Send,
-	Fetch: Fn(OwnedEventId) -> Fut + Sync,
-	Fut: Future<Output = Result<Pdu>> + Send,
-	Pdu: Event,
 {
 	// Populate the mainline of the power level.
 	let mainline: Vec<_> = try_unfold(power_level_event_id, async |power_level_event_id| {
@@ -65,7 +64,10 @@ where
 			return Ok::<_, Error>(None);
 		};
 
-		let power_level_event = fetch(power_level_event_id).await?;
+		let power_level_event = fetch
+			.get::<PduEvent>(&power_level_event_id)
+			.await?;
+
 		let this_event_id = power_level_event.event_id().to_owned();
 		let next_event_id = get_power_levels_auth_event(&power_level_event, fetch)
 			.map_ok(|event| {
@@ -94,7 +96,11 @@ where
 	events
 		.map(ToOwned::to_owned)
 		.broad_then(async |event_id| {
-			let Some(event) = fetch(event_id.clone()).await.optional()? else {
+			let Some(event) = fetch
+				.get::<PduEvent>(&event_id)
+				.await
+				.optional()?
+			else {
 				return Ok(None);
 			};
 
@@ -150,16 +156,11 @@ where
 		event = ?current_event.as_ref().map(Event::event_id).map(ToOwned::to_owned),
 	)
 )]
-async fn mainline_position<Fetch, Fut, Pdu>(
-	mut current_event: Option<Pdu>,
+async fn mainline_position(
+	mut current_event: Option<PduEvent>,
 	positions: &Positions<'_>,
-	fetch: &Fetch,
-) -> Result<usize>
-where
-	Fetch: Fn(OwnedEventId) -> Fut + Sync,
-	Fut: Future<Output = Result<Pdu>> + Send,
-	Pdu: Event,
-{
+	fetch: impl FetchEvent,
+) -> Result<usize> {
 	while let Some(event) = current_event {
 		trace!(
 			event_id = ?event.event_id(),
@@ -182,26 +183,19 @@ where
 	Ok(0)
 }
 
-#[expect(clippy::redundant_closure)]
 #[tracing::instrument(level = "trace", skip_all)]
-async fn get_power_levels_auth_event<Fetch, Fut, Pdu>(
-	event: &Pdu,
-	fetch: &Fetch,
-) -> Result<Option<Pdu>>
-where
-	Fetch: Fn(OwnedEventId) -> Fut + Sync,
-	Fut: Future<Output = Result<Pdu>> + Send,
-	Pdu: Event,
-{
-	let power_level_event = event
-		.auth_events()
-		.try_stream()
-		.map_ok(ToOwned::to_owned)
-		.and_then(|auth_event_id| fetch(auth_event_id))
-		.ready_try_skip_while(|auth_event| {
-			Ok(!auth_event.is_type_and_state_key(&TimelineEventType::RoomPowerLevels, ""))
-		});
+async fn get_power_levels_auth_event(
+	event: &PduEvent,
+	fetch: impl FetchEvent,
+) -> Result<Option<PduEvent>> {
+	// A stream adapter cannot satisfy the borrowed fetch future's higher-ranked bound.
+	for auth_event_id in event.auth_events() {
+		let auth_event: PduEvent = fetch.get(auth_event_id).await?;
 
-	pin_mut!(power_level_event);
-	power_level_event.try_next().await
+		if auth_event.is_type_and_state_key(&TimelineEventType::RoomPowerLevels, "") {
+			return Ok(Some(auth_event));
+		}
+	}
+
+	Ok(None)
 }

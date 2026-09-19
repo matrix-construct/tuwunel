@@ -294,9 +294,7 @@ async fn current_state_auth_passes(
 				.ok_or_else(|| err!(Request(NotFound("state event not found"))))
 		};
 
-		let event_fetch = async |event_id: OwnedEventId| self.event_fetch(&event_id).await;
-
-		auth_check(room_rules, incoming_pdu, &event_fetch, &state_fetch).await
+		auth_check(room_rules, incoming_pdu, &*self.services.timeline, &state_fetch).await
 	})
 	.await;
 
@@ -507,10 +505,8 @@ async fn auth_check_outlier_pdu(
 			})
 	};
 
-	let event_fetch = async |event_id: OwnedEventId| self.event_fetch(&event_id).await;
-
 	trace!("Performing positional auth check.");
-	auth_check(room_rules, incoming_pdu, &event_fetch, &state_fetch)
+	auth_check(room_rules, incoming_pdu, &*self.services.timeline, &state_fetch)
 		.await
 		.and_then(AuthCheckOutcome::into_result)
 		.inspect_err(|error| {

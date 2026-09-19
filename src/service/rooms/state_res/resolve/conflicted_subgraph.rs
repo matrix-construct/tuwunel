@@ -11,7 +11,7 @@ use futures::{
 use ruma::{EventId, OwnedEventId};
 use tuwunel_core::{
 	Result, implement, is_equal_to,
-	matrix::{Event, event_id::RandomState, pdu::AuthEvents},
+	matrix::{Event, PduEvent, event_id::RandomState, pdu::AuthEvents},
 	smallvec::SmallVec,
 	utils::{
 		BoolExt,
@@ -19,6 +19,8 @@ use tuwunel_core::{
 		stream::{IterStream, automatic_width},
 	},
 };
+
+use super::super::FetchEvent;
 
 struct Global<Fut: Future + Send> {
 	subgraph: Subgraph,
@@ -100,15 +102,10 @@ const CAPACITY_MULTIPLIER: usize = 4;
 		starting_events = %conflicted_set.len(),
 	)
 )]
-pub(super) fn conflicted_subgraph_dfs<Fetch, Fut, Pdu>(
+pub(super) fn conflicted_subgraph_dfs(
 	conflicted_set: &Vec<&OwnedEventId>,
-	fetch: &Fetch,
-) -> impl Stream<Item = Result<OwnedEventId>> + Send
-where
-	Fetch: Fn(OwnedEventId) -> Fut + Sync,
-	Fut: Future<Output = Result<Pdu>> + Send,
-	Pdu: Event,
-{
+	fetch: impl FetchEvent,
+) -> impl Stream<Item = Result<OwnedEventId>> + Send {
 	let initial_capacity = conflicted_set
 		.len()
 		.saturating_mul(CAPACITY_MULTIPLIER);
@@ -207,30 +204,25 @@ where
 	.try_flatten()
 }
 
-fn fetch_auth<Fetch, Fut, Pdu>(
+async fn fetch_auth(
 	id: usize,
 	event_id: OwnedEventId,
-	fetch: &Fetch,
-) -> impl Future<Output = (usize, OwnedEventId, Result<Pdu>)> + Send
-where
-	Fetch: Fn(OwnedEventId) -> Fut,
-	Fut: Future<Output = Result<Pdu>> + Send,
-{
-	let fut = fetch(event_id.clone());
+	fetch: impl FetchEvent,
+) -> (usize, OwnedEventId, Result<PduEvent>) {
+	let event = fetch.get::<PduEvent>(&event_id).await;
 
-	async move { (id, event_id, fut.await) }
+	(id, event_id, event)
 }
 
-fn process_fetch<Fut, Pdu>(
+fn process_fetch<Fut>(
 	state: &mut Global<Fut>,
 	id: usize,
 	event_id: OwnedEventId,
-	event: Result<Pdu>,
+	event: Result<PduEvent>,
 	outputs: &mut Path,
 ) -> Result<Option<OwnedEventId>>
 where
 	Fut: Future + Send,
-	Pdu: Event,
 {
 	match event {
 		| Ok(event) => {

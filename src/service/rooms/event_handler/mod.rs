@@ -17,12 +17,8 @@ mod upgrade_outlier_pdu;
 use std::{fmt::Write, num::NonZeroUsize, sync::Arc};
 
 use async_trait::async_trait;
-use futures::{
-	future::{Either, select},
-	pin_mut,
-};
 use ruma::{EventId, OwnedRoomId, RoomVersionId, events::AnyStrippedStateEvent, serde::Raw};
-use tuwunel_core::{Error, Result, implement, matrix::PduEvent, utils::MutexMap};
+use tuwunel_core::{Result, implement, matrix::PduEvent, utils::MutexMap};
 use tuwunel_database::Map;
 
 use self::state_local_build::StateLocalCounters;
@@ -81,40 +77,6 @@ impl crate::Service for Service {
 	}
 
 	fn name(&self) -> &str { crate::service::make_name(std::module_path!()) }
-}
-
-#[implement(Service)]
-#[tracing::instrument(
-	name = "exists",
-	level = "trace",
-	ret(level = "trace"),
-	skip_all,
-	fields(%event_id)
-)]
-async fn event_exists(&self, event_id: &EventId) -> Result<bool> {
-	let non_outlier = self
-		.services
-		.timeline
-		.non_outlier_pdu_exists(event_id);
-
-	let outlier = self
-		.services
-		.timeline
-		.outlier_pdu_exists(event_id);
-
-	let classify = |first: Error, second: Result| match second {
-		| Ok(()) => Ok(true),
-		| Err(second) if first.is_not_found() && second.is_not_found() => Ok(false),
-		| Err(second) if first.is_not_found() => Err(second),
-		| Err(_) => Err(first),
-	};
-
-	pin_mut!(non_outlier, outlier);
-	match select(non_outlier, outlier).await {
-		| Either::Left((Ok(()), _)) | Either::Right((Ok(()), _)) => Ok(true),
-		| Either::Left((Err(first), second)) => classify(first, second.await),
-		| Either::Right((Err(first), second)) => classify(first, second.await),
-	}
 }
 
 #[implement(Service)]

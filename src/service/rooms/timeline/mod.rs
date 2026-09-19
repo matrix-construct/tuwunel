@@ -18,7 +18,11 @@ mod tests;
 use std::{fmt::Write, sync::Arc};
 
 use async_trait::async_trait;
-use futures::{FutureExt, TryFutureExt, TryStreamExt, future::select_ok, pin_mut};
+use futures::{
+	FutureExt, TryFutureExt, TryStreamExt,
+	future::{Either, select, select_ok},
+	pin_mut,
+};
 use ruma::{
 	CanonicalJsonObject, EventId, MilliSecondsSinceUnixEpoch, OwnedEventId, OwnedRoomId, RoomId,
 	UserId, api::Direction, events::room::encrypted::Relation,
@@ -29,7 +33,7 @@ use serde::Deserialize;
 /// Both forms encode a room-local stream position suitable for database keys.
 pub use tuwunel_core::matrix::pdu::{PduId, RawPduId};
 use tuwunel_core::{
-	Err, Result, at, err, implement,
+	Err, Error, Result, at, err, implement,
 	matrix::{
 		ShortEventId,
 		pdu::{PduCount, PduEvent},
@@ -47,7 +51,10 @@ use tuwunel_database::{Database, Deserialized, Json, Map, Txn};
 ///
 /// Timeline consumers use these alongside the service's directional streams.
 pub use self::pdus::{PdusIterItem, bias_count};
-use crate::rooms::short::{ShortRoomId, ShortStateHash};
+use crate::rooms::{
+	short::{ShortRoomId, ShortStateHash},
+	state_res::FetchEvent,
+};
 
 /// Provides persistent event lookup, insertion, and room timeline traversal.
 ///
@@ -597,6 +604,33 @@ where
 	select_ok([accepted.left_future(), outlier.right_future()])
 		.await
 		.map(at!(0))
+}
+
+impl FetchEvent for &Service {
+	async fn get<T>(self, event_id: &EventId) -> Result<T>
+	where
+		T: for<'de> Deserialize<'de> + Send,
+	{
+		Service::get(self, event_id).await
+	}
+
+	async fn exists(self, event_id: &EventId) -> Result<bool> {
+		let non_outlier = self.non_outlier_pdu_exists(event_id);
+		let outlier = self.outlier_pdu_exists(event_id);
+		let classify = |first: Error, second: Result| match second {
+			| Ok(()) => Ok(true),
+			| Err(second) if first.is_not_found() && second.is_not_found() => Ok(false),
+			| Err(second) if first.is_not_found() => Err(second),
+			| Err(_) => Err(first),
+		};
+
+		pin_mut!(non_outlier, outlier);
+		match select(non_outlier, outlier).await {
+			| Either::Left((Ok(()), _)) | Either::Right((Ok(()), _)) => Ok(true),
+			| Either::Left((Err(first), second)) => classify(first, second.await),
+			| Either::Right((Err(first), second)) => classify(first, second.await),
+		}
+	}
 }
 
 /// Deserializes an event from outlier storage into `T`.

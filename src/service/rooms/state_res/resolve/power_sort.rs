@@ -8,13 +8,14 @@ use ruma::{
 };
 use tuwunel_core::{
 	Result, err,
-	matrix::Event,
+	matrix::{Event, PduEvent},
 	result::NotFound,
 	utils::stream::{IterStream, TryBroadbandExt, TryReadyExt},
 };
 
 use super::{
 	super::{
+		FetchEvent,
 		events::{
 			RoomCreateEvent, RoomPowerLevelsEvent, RoomPowerLevelsIntField, is_power_event,
 			power_levels::RoomPowerLevelsEventOptionExt,
@@ -50,16 +51,11 @@ use super::{
 		conflicted = full_conflicted_set.len(),
 	)
 )]
-pub(super) async fn power_sort<Fetch, Fut, Pdu>(
+pub(super) async fn power_sort(
 	rules: &RoomVersionRules,
 	full_conflicted_set: &ConflictedSet,
-	fetch: &Fetch,
-) -> Result<Vec<OwnedEventId>>
-where
-	Fetch: Fn(OwnedEventId) -> Fut + Sync,
-	Fut: Future<Output = Result<Pdu>> + Send,
-	Pdu: Event,
-{
+	fetch: impl FetchEvent,
+) -> Result<Vec<OwnedEventId>> {
 	// A representation of the DAG, a map of event ID to its list of auth events
 	// that are in the full conflicted set. Fill the graph.
 	let graph = full_conflicted_set
@@ -96,7 +92,8 @@ where
 			.get(&event_id)
 			.ok_or_else(|| err!(Request(NotFound("Missing PL event: {event_id}"))))?;
 
-		let event = fetch(event_id).await?;
+		let event = fetch.get::<PduEvent>(&event_id).await?;
+
 		Ok((power_level, event.origin_server_ts()))
 	};
 
@@ -118,18 +115,13 @@ where
 		%i,
 	)
 )]
-pub(super) async fn add_event_auth_chain<Fetch, Fut, Pdu>(
+pub(super) async fn add_event_auth_chain(
 	full_conflicted_set: &ConflictedSet,
 	mut graph: HashMap<OwnedEventId, ReferencedIds>,
 	event_id: OwnedEventId,
-	fetch: &Fetch,
+	fetch: impl FetchEvent,
 	i: usize,
-) -> Result<HashMap<OwnedEventId, ReferencedIds>>
-where
-	Fetch: Fn(OwnedEventId) -> Fut + Sync,
-	Fut: Future<Output = Result<Pdu>> + Send,
-	Pdu: Event,
-{
+) -> Result<HashMap<OwnedEventId, ReferencedIds>> {
 	let mut todo: FuturesUnordered<_> = once(fetch_optional_event(event_id, fetch)).collect();
 
 	while let Some(event) = todo.next().await {
@@ -174,17 +166,12 @@ where
 		?event_id,
 	)
 )]
-pub(super) async fn power_level_for_sender<Fetch, Fut, Pdu>(
+pub(super) async fn power_level_for_sender(
 	event_id: &EventId,
 	rules: &RoomVersionRules,
-	fetch: &Fetch,
-) -> Result<UserPowerLevel>
-where
-	Fetch: Fn(OwnedEventId) -> Fut + Sync,
-	Fut: Future<Output = Result<Pdu>> + Send,
-	Pdu: Event,
-{
-	let event = fetch_optional_event(event_id.to_owned(), fetch).await?;
+	fetch: impl FetchEvent,
+) -> Result<UserPowerLevel> {
+	let event = fetch.get::<PduEvent>(event_id).await.optional()?;
 
 	let hydra_room_id = rules
 		.authorization
@@ -194,7 +181,7 @@ where
 	let mut power_levels_event = None;
 	if hydra_room_id && let Some(event) = event.as_ref() {
 		let create_id = event.room_id().as_event_id()?;
-		let fetched = fetch(create_id).await?;
+		let fetched = fetch.get::<PduEvent>(&create_id).await?;
 
 		_ = create_event.insert(RoomCreateEvent::new(fetched));
 	}
@@ -207,7 +194,10 @@ where
 	{
 		use TimelineEventType::{RoomCreate, RoomPowerLevels};
 
-		let Some(auth_event) = fetch_optional_event(auth_event_id.to_owned(), fetch).await?
+		let Some(auth_event) = fetch
+			.get::<PduEvent>(auth_event_id)
+			.await
+			.optional()?
 		else {
 			continue;
 		};
@@ -248,28 +238,20 @@ where
 		?event_id,
 	)
 )]
-pub(super) async fn is_power_event_id<Fetch, Fut, Pdu>(
+pub(super) async fn is_power_event_id(
 	event_id: &EventId,
-	fetch: &Fetch,
-) -> Result<bool>
-where
-	Fetch: Fn(OwnedEventId) -> Fut + Sync,
-	Fut: Future<Output = Result<Pdu>> + Send,
-	Pdu: Event,
-{
-	Ok(fetch_optional_event(event_id.to_owned(), fetch)
-		.await?
-		.is_some_and(|event| is_power_event(&event)))
+	fetch: impl FetchEvent,
+) -> Result<bool> {
+	Ok(fetch
+		.get(event_id)
+		.await
+		.optional()?
+		.is_some_and(|event: PduEvent| is_power_event(&event)))
 }
 
-async fn fetch_optional_event<Fetch, Fut, Pdu>(
+async fn fetch_optional_event(
 	event_id: OwnedEventId,
-	fetch: &Fetch,
-) -> Result<Option<Pdu>>
-where
-	Fetch: Fn(OwnedEventId) -> Fut + Sync,
-	Fut: Future<Output = Result<Pdu>> + Send,
-	Pdu: Event,
-{
-	fetch(event_id).await.optional()
+	fetch: impl FetchEvent,
+) -> Result<Option<PduEvent>> {
+	fetch.get::<PduEvent>(&event_id).await.optional()
 }

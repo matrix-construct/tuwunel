@@ -1,5 +1,6 @@
 use std::{
 	collections::HashMap,
+	future::ready,
 	io::Error as IoError,
 	iter::once,
 	sync::atomic::{AtomicUsize, Ordering},
@@ -25,7 +26,7 @@ use ruma::{
 use serde_json::{json, value::to_raw_value as to_raw_json_value};
 use tokio::sync::{Notify, watch::channel as watch_channel};
 use tuwunel_core::{
-	Error, Result, debug, err,
+	Err, Error, Result, debug, err,
 	matrix::{Event, EventTypeExt, PduEvent},
 	utils::stream::IterStream,
 };
@@ -480,8 +481,7 @@ async fn event_map_none() {
 		&rules,
 		state_sets.into_iter().stream(),
 		auth_chains.into_iter().stream(),
-		&async |id| ev_map.get(&id).cloned().ok_or_else(not_found),
-		&async |id| Ok(ev_map.contains_key(&id)),
+		&ev_map,
 		false,
 	)
 	.await
@@ -645,8 +645,7 @@ async fn ban_with_auth_chains2() {
 		&RoomVersionRules::V6,
 		state_sets.into_iter().stream(),
 		auth_chains.into_iter().stream(),
-		&async |id| ev_map.get(&id).cloned().ok_or_else(not_found),
-		&async |id| Ok(ev_map.contains_key(&id)),
+		ev_map,
 		false,
 	)
 	.await
@@ -1164,14 +1163,14 @@ async fn full_conflicted_set_distinguishes_missing_from_failure() {
 	.into();
 
 	let auth_sets = Vec::<AuthSet<OwnedEventId>>::new();
-	let fetch = async |_id| -> Result<PduEvent> { Err(not_found()) };
+	let fetch = |_id| ready(Result::<PduEvent>::Err(not_found()));
+	let exists = |id| ready(Ok(id != a));
 
 	let filtered = super::full_conflicted_set(
 		&RoomVersionRules::V6,
 		conflicted.clone(),
 		auth_sets.clone().into_iter().stream(),
-		&fetch,
-		&async |id| Ok(id != a),
+		(&fetch, &exists),
 		false,
 	)
 	.await
@@ -1181,15 +1180,18 @@ async fn full_conflicted_set_distinguishes_missing_from_failure() {
 
 	assert_eq!(filtered, expected);
 
+	let exists = |id| {
+		ready(match id {
+			| id if id == b => Err!(Database("injected existence failure")),
+			| _ => Ok(true),
+		})
+	};
+
 	let failure = super::full_conflicted_set(
 		&RoomVersionRules::V6,
 		conflicted,
 		auth_sets.into_iter().stream(),
-		&fetch,
-		&async |id| match id {
-			| id if id == b => Err(err!(Database("injected existence failure"))),
-			| _ => Ok(true),
-		},
+		(&fetch, &exists),
 		false,
 	)
 	.await;
@@ -1643,11 +1645,9 @@ async fn sender_power_auth_walk_distinguishes_missing_from_failure() {
 	let candidate_id = candidate.event_id().to_owned();
 	let missing_id = event_id("MISSING_SENDER_POWER_AUTH");
 	let events = events_with([candidate]);
-	let power = power_level_for_sender(&candidate_id, &RoomVersionRules::V6, &async |id| {
-		fetch_from_events(&events, &id)
-	})
-	.await
-	.unwrap();
+	let power = power_level_for_sender(&candidate_id, &RoomVersionRules::V6, &events)
+		.await
+		.unwrap();
 
 	assert_eq!(power, UserPowerLevel::from(int!(100)));
 
@@ -1677,10 +1677,7 @@ async fn sender_power_rejects_malformed_create_dependency() {
 
 	let candidate_id = candidate.event_id().to_owned();
 	let events = events_with([candidate, malformed_create]);
-	let failure = power_level_for_sender(&candidate_id, &RoomVersionRules::V6, &async |id| {
-		fetch_from_events(&events, &id)
-	})
-	.await;
+	let failure = power_level_for_sender(&candidate_id, &RoomVersionRules::V6, &events).await;
 
 	failure.expect_err("malformed create dependency must fail");
 }

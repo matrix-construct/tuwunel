@@ -11,7 +11,6 @@
 
 use std::{
 	collections::{BTreeSet, HashMap},
-	future::ready,
 	iter::{from_fn, once},
 };
 
@@ -28,7 +27,6 @@ use serde_json::{
 	value::{RawValue as RawJsonValue, to_raw_value as to_raw_json_value},
 };
 use tuwunel_core::{
-	Result, err,
 	matrix::{Event, PduEvent, event::TypeExt},
 	smallstr::SmallString,
 	smallvec::SmallVec,
@@ -118,22 +116,11 @@ async fn run_resolve(
 	rules: &RoomVersionRules,
 	hydra_backports: bool,
 ) {
-	let fetch = |id: OwnedEventId| {
-		ready(
-			rows.get(&id)
-				.ok_or_else(|| err!(Request(NotFound("event not found"))))
-				.and_then(|row| serde_json::from_slice::<PduEvent>(row).map_err(Into::into)),
-		)
-	};
-
-	let exists = |id: OwnedEventId| ready(Result::Ok(rows.contains_key(&id)));
-
 	resolve(
 		rules,
 		states.into_iter().stream(),
 		auth_sets.into_iter().stream(),
-		&fetch,
-		&exists,
+		rows,
 		hydra_backports,
 	)
 	.await

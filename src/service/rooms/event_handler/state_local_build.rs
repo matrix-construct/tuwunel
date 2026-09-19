@@ -860,10 +860,8 @@ async fn gated_fold(
 			})
 	};
 
-	let event_fetch = async |event_id: OwnedEventId| self.event_fetch(&event_id).await;
-
 	if let AuthCheckOutcome::Deny(error) =
-		auth_check(room_rules, pdu, &event_fetch, &state_fetch).await?
+		auth_check(room_rules, pdu, &*self.services.timeline, &state_fetch).await?
 	{
 		debug!(event_id = %pdu.event_id(), %error, "Auth gate rejected fold.");
 		*gate_drops = gate_drops.saturating_add(1);
