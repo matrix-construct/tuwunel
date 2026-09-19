@@ -1,8 +1,9 @@
 #![expect(clippy::wrong_self_convention)]
 
-use futures::{FutureExt, future::OptionFuture};
-
-use super::super::BoolExt;
+use futures::{
+	FutureExt,
+	future::{OptionFuture, ready},
+};
 
 /// Adds option-like combinators to futures with optional output.
 ///
@@ -41,15 +42,14 @@ pub trait OptionFutureExt<T> {
 	/// value passes through without invoking it.
 	fn unwrap_or_else(self, f: impl FnOnce() -> T + Send) -> impl Future<Output = T> + Send;
 
-	/// Runs an asynchronous fallback only when the future yields `None`.
+	/// Returns the future's value or lazily awaits an asynchronous fallback.
 	///
-	/// Absent output becomes `Some` of the fallback future's output. Present
-	/// output suppresses the fallback and becomes `None` rather than being
-	/// returned.
+	/// The closure is called only after the future yields `None`. A present
+	/// value passes through without invoking it.
 	fn unwrap_or_else_async<F: Future<Output = T> + Send>(
 		self,
 		f: impl FnOnce() -> F + Send,
-	) -> impl Future<Output = Option<T>> + Send;
+	) -> impl Future<Output = T> + Send;
 }
 
 impl<T, Fut> OptionFutureExt<T> for OptionFuture<Fut>
@@ -87,7 +87,8 @@ where
 	fn unwrap_or_else_async<F: Future<Output = T> + Send>(
 		self,
 		f: impl FnOnce() -> F + Send,
-	) -> impl Future<Output = Option<T>> + Send {
-		self.map(|o| o.is_none().then_async(f)).flatten()
+	) -> impl Future<Output = T> + Send {
+		self.map(|o| o.map_or_else(|| f().right_future(), |t| ready(t).left_future()))
+			.flatten()
 	}
 }
