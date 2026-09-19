@@ -70,6 +70,7 @@ pub fn check(config: &Config) -> Result {
 
 	warn_deprecated(config);
 	warn_legacy_state_local(config);
+	warn_literal_patterns(config);
 	warn_unknown_key(config)?;
 
 	check_observability(config)?;
@@ -887,6 +888,71 @@ fn warn_deprecated(config: &Config) {
 			 check your configuration if any new configuration parameters should be adjusted"
 		);
 	}
+}
+
+/// Warns where a pattern option holds text that reads as a plain name.
+///
+/// These options are regular expressions, so an unescaped dot matches any
+/// character and an entry typed as a plain name therefore matches more than it
+/// names. Only escaping is suggested: whether the pattern should also be
+/// anchored depends on what the operator meant it to match, and a substring
+/// match is sometimes the intent.
+fn warn_literal_patterns(config: &Config) {
+	let options = [
+		("dns_passthru_domains", &config.dns_passthru_domains),
+		(
+			"allowed_remote_server_names_experimental",
+			&config.allowed_remote_server_names_experimental,
+		),
+		("prevent_media_downloads_from", &config.prevent_media_downloads_from),
+		("forbidden_remote_server_names", &config.forbidden_remote_server_names),
+		(
+			"forbidden_remote_room_directory_server_names",
+			&config.forbidden_remote_room_directory_server_names,
+		),
+		("forbidden_alias_names", &config.forbidden_alias_names),
+		("forbidden_usernames", &config.forbidden_usernames),
+		("deprioritize_joins_through_servers", &config.deprioritize_joins_through_servers),
+	];
+
+	options
+		.into_iter()
+		.flat_map(|(name, regexes)| {
+			regexes
+				.patterns()
+				.iter()
+				.map(move |pattern| (name, pattern.as_str()))
+		})
+		.filter(|(_, pattern)| is_literal_dotted(pattern))
+		.for_each(warn_literal_pattern);
+}
+
+/// Whether a pattern is a plain dotted name rather than an expression.
+///
+/// True only for a pattern holding a dot, holding something more than dots, and
+/// built from characters a server name or a localpart may contain, none of which
+/// carry regex meaning. Anything using regex syntax of its own is left alone,
+/// `+` included, as is a pattern of bare dots, which is the any-character idiom
+/// rather than a name.
+fn is_literal_dotted(pattern: &str) -> bool {
+	let nameable =
+		|c: char| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | '=' | '/');
+
+	pattern.contains('.')
+		&& pattern.chars().any(|c| c.is_ascii_alphanumeric())
+		&& pattern.chars().all(nameable)
+}
+
+fn warn_literal_pattern((name, pattern): (&str, &str)) {
+	let escaped = pattern.replace('.', "\\.");
+
+	// Interpolated rather than carried as fields: the admin-room capture surface
+	// renders only the message, and this one is unactionable without all three.
+	warn!(
+		"Config option {name:?} holds the pattern {pattern:?}, which is a regular expression: \
+		 its unescaped dots match any character, so it matches more than the name it reads as. \
+		 To match the dots literally, write it as {escaped:?}, quoted exactly as shown."
+	);
 }
 
 /// iterates over all the catchall keys (unknown config options) and warns or

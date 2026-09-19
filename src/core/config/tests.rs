@@ -166,6 +166,82 @@ resolve_state_locally_shadow = true
 }
 
 #[test]
+fn literal_pattern_is_warned_with_the_escaped_form() {
+	let config = config_from_toml(
+		"[global]
+dns_passthru_domains = [\"example.com\"]
+",
+	)
+	.unwrap();
+
+	let (result, logs) = check_with_captured_logs(&config);
+
+	result.expect("a literal pattern should warn rather than refuse the config");
+	assert!(logs.contains("dns_passthru_domains"));
+	// A raw string: the rendered suggestion carries the doubled backslash a TOML
+	// basic string needs, so this is the text an operator can paste.
+	assert!(
+		logs.contains(r#""example\\.com""#),
+		"the warning offers the escaped form: {logs}"
+	);
+}
+
+// Two of the options match localparts, so the check must cover them without the
+// wording claiming they are hosts.
+#[test]
+fn a_localpart_option_is_covered_too() {
+	let config = config_from_toml(
+		"[global]
+forbidden_usernames = [\"bad_user.name\"]
+",
+	)
+	.unwrap();
+
+	let (result, logs) = check_with_captured_logs(&config);
+
+	result.expect("a literal pattern should warn rather than refuse the config");
+	assert!(logs.contains("forbidden_usernames"));
+	assert!(!logs.contains("host name"), "localparts are not host names: {logs}");
+}
+
+// A pattern of bare dots is the any-character idiom, not a name typed by mistake.
+#[test]
+fn an_any_character_pattern_is_left_alone() {
+	let config = config_from_toml(
+		"[global]
+dns_passthru_domains = [\".\", \"..\"]
+",
+	)
+	.unwrap();
+
+	let (result, logs) = check_with_captured_logs(&config);
+
+	result.expect("an any-character pattern should pass the config check");
+	assert!(
+		!logs.contains("which is a regular expression"),
+		"bare dots must not warn: {logs}"
+	);
+}
+
+#[test]
+fn deliberate_patterns_are_left_alone() {
+	let config = config_from_toml(
+		"[global]
+dns_passthru_domains = [\"^example\\\\.com$\", \".*\\\\.example\\\\.com\", \"localhost\"]
+",
+	)
+	.unwrap();
+
+	let (result, logs) = check_with_captured_logs(&config);
+
+	result.expect("deliberate patterns should pass the config check");
+	assert!(
+		!logs.contains("which is a regular expression"),
+		"escaped, anchored and dotless patterns must not warn: {logs}"
+	);
+}
+
+#[test]
 fn unrelated_unknown_key_remains_strictly_rejected() {
 	let config = config_from_toml(
 		"[global]
