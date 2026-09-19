@@ -62,8 +62,8 @@ mod event_auth;
 pub mod events;
 mod fetch_state;
 mod resolve;
-#[cfg(test)]
-mod test_utils;
+#[cfg(any(test, feature = "test_utils"))]
+pub mod test_utils;
 pub mod topological_sort;
 
 use tuwunel_core::matrix::TypeStateKey;

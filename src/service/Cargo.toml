@@ -73,6 +73,7 @@ release_max_log_level = [
 systemd = [
 	"dep:sd-notify",
 ]
+test_utils = []
 url_preview = [
 	"dep:image",
 	"dep:webpage",
@@ -140,6 +141,7 @@ sd-notify.workspace = true
 sd-notify.optional = true
 
 [dev-dependencies]
+tuwunel_service = { path = ".", features = ["test_utils"] }
 criterion.workspace = true
 insta.workspace = true
 maplit.workspace = true
@@ -153,4 +155,8 @@ workspace = true
 
 [[bench]]
 name = "state_res"
+harness = false
+
+[[bench]]
+name = "state_res_msc4297"
 harness = false

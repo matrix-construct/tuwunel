@@ -1,52 +1,66 @@
+//! Event builders and in-memory stores for state-resolution tests and benchmarks.
+//!
+//! The fixtures exercise authorization and resolution without a running server.
+
 use std::{
 	borrow::Borrow,
 	collections::{BTreeSet, HashMap},
-	pin::Pin,
 	slice,
-	sync::{
-		Arc,
-		atomic::{AtomicU64, Ordering::SeqCst},
-	},
+	sync::atomic::{AtomicU64, Ordering::SeqCst},
 };
+#[cfg(test)]
+use std::{pin::Pin, sync::Arc};
 
 use ruma::{
-	EventId, MilliSecondsSinceUnixEpoch, OwnedEventId, RoomId, UserId, event_id,
+	EventId, OwnedEventId, RoomId, UserId,
 	events::{
-		StateEventType, TimelineEventType,
+		TimelineEventType,
 		room::{
 			join_rules::{JoinRule, RoomJoinRulesEventContent},
 			member::{MembershipState, RoomMemberEventContent},
 		},
 	},
-	int, room_id,
+	room_id, uint, user_id,
+};
+#[cfg(test)]
+use ruma::{
+	MilliSecondsSinceUnixEpoch, event_id,
+	events::StateEventType,
+	int,
 	room_version_rules::{AuthorizationRules, RoomVersionRules},
-	uint, user_id,
 };
 use serde_json::{
 	json,
 	value::{RawValue as RawJsonValue, to_raw_value as to_raw_json_value},
 };
 use tuwunel_core::{
-	Error, Result, err, info,
-	matrix::{Event, EventHash, EventTypeExt, PduEvent, StateKey},
-	utils::stream::IterStream,
+	Error, Result, err,
+	matrix::{Event, EventHash, EventTypeExt, PduEvent},
 };
+#[cfg(test)]
+use tuwunel_core::{info, matrix::StateKey, utils::stream::IterStream};
 
-use super::{AuthSet, StateMap, auth_types_for_event, events::RoomCreateEvent};
+use super::{AuthSet, StateMap};
+#[cfg(test)]
+use super::{auth_types_for_event, events::RoomCreateEvent};
+#[cfg(test)]
 use crate::rooms::state_res::topological_sort::ReferencedIds;
 
 static SERVER_TIMESTAMP: AtomicU64 = AtomicU64::new(0);
 
+#[cfg(test)]
 pub(super) fn not_found() -> Error { err!(Request(NotFound("Test event not found"))) }
 
 pub(super) fn event_not_found(event_id: &EventId) -> Error {
 	err!(Request(NotFound("Test event not found: {event_id:?}")))
 }
 
+#[cfg(test)]
 pub(super) fn state_not_found(ty: &StateEventType, sk: &str) -> Error {
 	err!(Request(NotFound("Test state not found: ({ty:?},{sk:?})")))
 }
 
+#[cfg(test)]
 pub(super) async fn do_check(
 	events: &[PduEvent],
 	edges: Vec<Vec<OwnedEventId>>,
@@ -90,6 +104,7 @@ pub(super) async fn do_check(
 	assert_eq!(expected_state, end_state);
 }
 
+#[cfg(test)]
 fn build_test_store(
 	init_events: &HashMap<OwnedEventId, PduEvent>,
 	events: &[PduEvent],
@@ -103,6 +118,7 @@ fn build_test_store(
 	)
 }
 
+#[cfg(test)]
 fn build_event_graph(
 	init_events: &HashMap<OwnedEventId, PduEvent>,
 	events: &[PduEvent],
@@ -124,6 +140,7 @@ fn build_event_graph(
 	(graph, fake_event_map)
 }
 
+#[cfg(test)]
 fn add_chain_edges(graph: &mut HashMap<OwnedEventId, ReferencedIds>, chain: &[OwnedEventId]) {
 	for pair in chain.windows(2) {
 		if let [a, b] = pair {
@@ -135,6 +152,7 @@ fn add_chain_edges(graph: &mut HashMap<OwnedEventId, ReferencedIds>, chain: &[Ow
 	}
 }
 
+#[cfg(test)]
 async fn resolve_state_before(
 	store: &TestStore,
 	event_map: &HashMap<OwnedEventId, PduEvent>,
@@ -149,6 +167,7 @@ async fn resolve_state_before(
 	}
 }
 
+#[cfg(test)]
 async fn merge_prev_states(
 	store: &TestStore,
 	event_map: &HashMap<OwnedEventId, PduEvent>,
@@ -194,6 +213,7 @@ async fn merge_prev_states(
 	.unwrap_or_else(|e| panic!("resolution for {node} failed: {e}"))
 }
 
+#[cfg(test)]
 fn state_after_with(
 	state_before: &StateMap<OwnedEventId>,
 	fake_event: &PduEvent,
@@ -206,6 +226,7 @@ fn state_after_with(
 	state_after
 }
 
+#[cfg(test)]
 fn collect_auth_events(
 	fake_event: &PduEvent,
 	state_before: &StateMap<OwnedEventId>,
@@ -224,6 +245,7 @@ fn collect_auth_events(
 	.collect()
 }
 
+#[cfg(test)]
 fn rebuild_with_auth(
 	fake_event: &PduEvent,
 	auth_events: &[OwnedEventId],
@@ -240,6 +262,7 @@ fn rebuild_with_auth(
 	)
 }
 
+#[cfg(test)]
 fn build_expected_state(
 	expected_state_ids: &[OwnedEventId],
 	event_map: &HashMap<OwnedEventId, PduEvent>,
@@ -264,6 +287,7 @@ fn build_expected_state(
 		.collect()
 }
 
+#[cfg(test)]
 fn compute_end_state(
 	state_at_event: &HashMap<OwnedEventId, StateMap<OwnedEventId>>,
 	expected_state: &StateMap<OwnedEventId>,
@@ -285,7 +309,13 @@ fn compute_end_state(
 		.collect()
 }
 
-pub(super) struct TestStore(pub(super) HashMap<OwnedEventId, PduEvent>);
+/// An in-memory fixture event store.
+///
+/// Fixture events can be fetched by identifier or traversed through their auth chains.
+pub struct TestStore(
+	/// Events indexed by their identifiers.
+	pub HashMap<OwnedEventId, PduEvent>,
+);
 
 impl TestStore {
 	pub(super) fn get_event(&self, _: &RoomId, event_id: &EventId) -> Result<PduEvent> {
@@ -299,7 +329,7 @@ impl TestStore {
 	///
 	/// Each identifier appears at most once. Traversal fails if a required
 	/// event is absent from the store.
-	pub(super) fn auth_event_ids(
+	pub fn auth_event_ids(
 		&self,
 		room_id: &RoomId,
 		event_ids: Vec<OwnedEventId>,
@@ -326,7 +356,10 @@ impl TestStore {
 
 // A StateStore implementation for testing
 impl TestStore {
-	pub(super) fn set_up(
+	/// Populates the store with a room and two simultaneous membership forks.
+	///
+	/// Returns the two fork states and their expected merged state.
+	pub fn set_up(
 		&mut self,
 	) -> (StateMap<OwnedEventId>, StateMap<OwnedEventId>, StateMap<OwnedEventId>) {
 		let create_event = to_pdu_event::<&EventId>(
@@ -334,10 +367,12 @@ impl TestStore {
 			alice(),
 			TimelineEventType::RoomCreate,
 			Some(""),
-			to_raw_json_value(&json!({ "creator": alice() })).unwrap(),
+			to_raw_json_value(&json!({ "creator": alice() }))
+				.expect("fixture content serializes to JSON"),
 			&[],
 			&[],
 		);
+
 		let cre = create_event.event_id().to_owned();
 		self.0.insert(cre.clone(), create_event.clone());
 
@@ -358,10 +393,12 @@ impl TestStore {
 			alice(),
 			TimelineEventType::RoomJoinRules,
 			Some(""),
-			to_raw_json_value(&RoomJoinRulesEventContent::new(JoinRule::Public)).unwrap(),
+			to_raw_json_value(&RoomJoinRulesEventContent::new(JoinRule::Public))
+				.expect("fixture content serializes to JSON"),
 			&[cre.clone(), alice_mem.event_id().to_owned()],
 			&[alice_mem.event_id().to_owned()],
 		);
+
 		self.0
 			.insert(join_rules.event_id().to_owned(), join_rules.clone());
 
@@ -395,8 +432,10 @@ impl TestStore {
 			.iter()
 			.map(|e| {
 				(
-					e.event_type()
-						.with_state_key(e.state_key().unwrap()),
+					e.event_type().with_state_key(
+						e.state_key()
+							.expect("fixture event has a state key"),
+					),
 					e.event_id().to_owned(),
 				)
 			})
@@ -406,8 +445,10 @@ impl TestStore {
 			.iter()
 			.map(|e| {
 				(
-					e.event_type()
-						.with_state_key(e.state_key().unwrap()),
+					e.event_type().with_state_key(
+						e.state_key()
+							.expect("fixture event has a state key"),
+					),
 					e.event_id().to_owned(),
 				)
 			})
@@ -417,8 +458,10 @@ impl TestStore {
 			.iter()
 			.map(|e| {
 				(
-					e.event_type()
-						.with_state_key(e.state_key().unwrap()),
+					e.event_type().with_state_key(
+						e.state_key()
+							.expect("fixture event has a state key"),
+					),
 					e.event_id().to_owned(),
 				)
 			})
@@ -428,38 +471,80 @@ impl TestStore {
 	}
 }
 
-pub(super) fn event_id(id: &str) -> OwnedEventId {
+/// Constructs a synthetic event identifier, preserving a supplied full identifier.
+///
+/// Bare names receive the fixture server suffix.
+#[must_use]
+pub fn event_id(id: &str) -> OwnedEventId {
 	if id.contains('$') {
-		return id.try_into().unwrap();
+		return id
+			.try_into()
+			.expect("fixture event identifier is valid");
 	}
 
-	format!("${id}:foo").try_into().unwrap()
+	format!("${id}:foo")
+		.try_into()
+		.expect("fixture event identifier is valid")
 }
 
-pub(super) fn alice() -> &'static UserId { user_id!("@alice:foo") }
+/// Returns the Alice fixture user.
+///
+/// The identifier belongs to the fixture server.
+#[must_use]
+pub fn alice() -> &'static UserId { user_id!("@alice:foo") }
 
+#[cfg(test)]
 pub(super) fn aya() -> &'static UserId { user_id!("@aya:other.server") }
 
-pub(super) fn bob() -> &'static UserId { user_id!("@bob:foo") }
+/// Returns the Bob fixture user.
+///
+/// The identifier belongs to the fixture server.
+#[must_use]
+pub fn bob() -> &'static UserId { user_id!("@bob:foo") }
 
-pub(super) fn charlie() -> &'static UserId { user_id!("@charlie:foo") }
+/// Returns the Charlie fixture user.
+///
+/// The identifier belongs to the fixture server.
+#[must_use]
+pub fn charlie() -> &'static UserId { user_id!("@charlie:foo") }
 
-pub(super) fn ella() -> &'static UserId { user_id!("@ella:foo") }
+/// Returns the Ella fixture user.
+///
+/// The identifier belongs to the fixture server.
+#[must_use]
+pub fn ella() -> &'static UserId { user_id!("@ella:foo") }
 
+#[cfg(test)]
 pub(super) fn zara() -> &'static UserId { user_id!("@zara:foo") }
 
-pub(super) fn room_id() -> &'static RoomId { room_id!("!test:foo") }
+/// Returns the fixture room identifier.
+///
+/// The room belongs to the fixture server.
+#[must_use]
+pub fn room_id() -> &'static RoomId { room_id!("!test:foo") }
 
+#[cfg(test)]
 pub(crate) fn hydra_room_id() -> &'static RoomId { room_id!("!CREATE") }
 
-pub(super) fn member_content_ban() -> Box<RawJsonValue> {
-	to_raw_json_value(&RoomMemberEventContent::new(MembershipState::Ban)).unwrap()
+/// Builds membership content for a banned user.
+///
+/// Other membership fields use their default values.
+#[must_use]
+pub fn member_content_ban() -> Box<RawJsonValue> {
+	to_raw_json_value(&RoomMemberEventContent::new(MembershipState::Ban))
+		.expect("fixture content serializes to JSON")
 }
 
-pub(super) fn member_content_join() -> Box<RawJsonValue> {
-	to_raw_json_value(&RoomMemberEventContent::new(MembershipState::Join)).unwrap()
+/// Builds membership content for a joined user.
+///
+/// Other membership fields use their default values.
+#[must_use]
+pub fn member_content_join() -> Box<RawJsonValue> {
+	to_raw_json_value(&RoomMemberEventContent::new(MembershipState::Join))
+		.expect("fixture content serializes to JSON")
 }
 
+#[cfg(test)]
 pub(super) fn to_init_pdu_event(
 	id: &str,
 	sender: &UserId,
@@ -494,7 +579,10 @@ pub(super) fn to_init_pdu_event(
 	}
 }
 
-pub(super) fn to_pdu_event<S>(
+/// Builds a fixture PDU with synthetic identifiers and an increasing timestamp.
+///
+/// Auth and previous event references accept bare names or full identifiers.
+pub fn to_pdu_event<S>(
 	id: &str,
 	sender: &UserId,
 	ev_type: TimelineEventType,
@@ -525,11 +613,15 @@ where
 		.collect();
 
 	PduEvent {
-		event_id: id.try_into().unwrap(),
+		event_id: id
+			.try_into()
+			.expect("fixture event identifier is valid"),
 		room_id: room_id().to_owned(),
 		sender: sender.to_owned(),
 		origin: None,
-		origin_server_ts: ts.try_into().unwrap(),
+		origin_server_ts: ts
+			.try_into()
+			.expect("fixture timestamp fits the protocol integer"),
 		state_key: state_key.map(Into::into),
 		kind: ev_type,
 		content: content.into(),
@@ -545,6 +637,7 @@ where
 
 /// Same as `to_pdu_event()`, but uses the default m.room.create event ID to
 /// generate the room ID.
+#[cfg(test)]
 pub(super) fn to_hydra_pdu_event<S>(
 	id: &str,
 	sender: &UserId,
@@ -597,6 +690,7 @@ where
 	}
 }
 
+#[cfg(test)]
 pub(super) fn room_redaction_pdu_event<S>(
 	id: &str,
 	sender: &UserId,
@@ -644,6 +738,7 @@ where
 	}
 }
 
+#[cfg(test)]
 pub(super) fn room_create_hydra_pdu_event(
 	id: &str,
 	sender: &UserId,
@@ -682,14 +777,19 @@ pub(super) fn room_create_hydra_pdu_event(
 
 // all graphs start with these input events
 #[expect(non_snake_case)]
-pub(super) fn INITIAL_EVENTS() -> HashMap<OwnedEventId, PduEvent> {
+/// Builds the common room state and membership fixture events.
+///
+/// Events are indexed by identifier for use in resolution fixtures.
+#[must_use]
+pub fn INITIAL_EVENTS() -> HashMap<OwnedEventId, PduEvent> {
 	vec![
 		to_pdu_event::<&EventId>(
 			"CREATE",
 			alice(),
 			TimelineEventType::RoomCreate,
 			Some(""),
-			to_raw_json_value(&json!({ "creator": alice() })).unwrap(),
+			to_raw_json_value(&json!({ "creator": alice() }))
+				.expect("fixture content serializes to JSON"),
 			&[],
 			&[],
 		),
@@ -707,7 +807,8 @@ pub(super) fn INITIAL_EVENTS() -> HashMap<OwnedEventId, PduEvent> {
 			alice(),
 			TimelineEventType::RoomPowerLevels,
 			Some(""),
-			to_raw_json_value(&json!({ "users": { alice(): 100 } })).unwrap(),
+			to_raw_json_value(&json!({ "users": { alice(): 100 } }))
+				.expect("fixture content serializes to JSON"),
 			&["CREATE", "IMA"],
 			&["IMA"],
 		),
@@ -716,7 +817,8 @@ pub(super) fn INITIAL_EVENTS() -> HashMap<OwnedEventId, PduEvent> {
 			alice(),
 			TimelineEventType::RoomJoinRules,
 			Some(""),
-			to_raw_json_value(&RoomJoinRulesEventContent::new(JoinRule::Public)).unwrap(),
+			to_raw_json_value(&RoomJoinRulesEventContent::new(JoinRule::Public))
+				.expect("fixture content serializes to JSON"),
 			&["CREATE", "IMA", "IPOWER"],
 			&["IPOWER"],
 		),
@@ -743,7 +845,7 @@ pub(super) fn INITIAL_EVENTS() -> HashMap<OwnedEventId, PduEvent> {
 			charlie(),
 			TimelineEventType::RoomMessage,
 			Some("dummy"),
-			to_raw_json_value(&json!({})).unwrap(),
+			to_raw_json_value(&json!({})).expect("fixture content serializes to JSON"),
 			&[],
 			&[],
 		),
@@ -752,7 +854,7 @@ pub(super) fn INITIAL_EVENTS() -> HashMap<OwnedEventId, PduEvent> {
 			charlie(),
 			TimelineEventType::RoomMessage,
 			Some("dummy"),
-			to_raw_json_value(&json!({})).unwrap(),
+			to_raw_json_value(&json!({})).expect("fixture content serializes to JSON"),
 			&[],
 			&[],
 		),
@@ -765,6 +867,7 @@ pub(super) fn INITIAL_EVENTS() -> HashMap<OwnedEventId, PduEvent> {
 /// Batch of initial events to use for incoming events from room version
 /// `org.matrix.hydra.11` onwards.
 #[expect(non_snake_case)]
+#[cfg(test)]
 pub(super) fn INITIAL_HYDRA_EVENTS() -> HashMap<OwnedEventId, PduEvent> {
 	vec![
 		room_create_hydra_pdu_event(
@@ -843,6 +946,7 @@ pub(super) fn INITIAL_HYDRA_EVENTS() -> HashMap<OwnedEventId, PduEvent> {
 
 // all graphs start with these input events
 #[expect(non_snake_case)]
+#[cfg(test)]
 pub(super) fn INITIAL_EVENTS_CREATE_ROOM() -> HashMap<OwnedEventId, PduEvent> {
 	vec![to_pdu_event::<&EventId>(
 		"CREATE",
@@ -859,6 +963,7 @@ pub(super) fn INITIAL_EVENTS_CREATE_ROOM() -> HashMap<OwnedEventId, PduEvent> {
 }
 
 #[expect(non_snake_case)]
+#[cfg(test)]
 pub(super) fn INITIAL_EVENTS_NO_FEDERATE() -> HashMap<OwnedEventId, PduEvent> {
 	let create = to_init_pdu_event(
 		"CREATE",
@@ -874,6 +979,7 @@ pub(super) fn INITIAL_EVENTS_NO_FEDERATE() -> HashMap<OwnedEventId, PduEvent> {
 }
 
 #[expect(non_snake_case)]
+#[cfg(test)]
 pub(super) fn INITIAL_EDGES() -> Vec<OwnedEventId> {
 	vec!["START", "IMC", "IMB", "IJR", "IPOWER", "IMA", "CREATE"]
 		.into_iter()
@@ -881,6 +987,7 @@ pub(super) fn INITIAL_EDGES() -> Vec<OwnedEventId> {
 		.collect::<Vec<_>>()
 }
 
+#[cfg(test)]
 pub(super) fn init_subscriber() -> tracing::dispatcher::DefaultGuard {
 	tracing::subscriber::set_default(
 		tracing_subscriber::fmt()
@@ -890,8 +997,10 @@ pub(super) fn init_subscriber() -> tracing::dispatcher::DefaultGuard {
 }
 
 /// Wrapper around a state map.
+#[cfg(test)]
 pub(super) struct TestStateMap(HashMap<StateEventType, HashMap<String, PduEvent>>);
 
+#[cfg(test)]
 impl TestStateMap {
 	/// Construct a `TestStateMap` from the given event map.
 	pub(super) fn new(events: &HashMap<OwnedEventId, PduEvent>) -> Arc<Self> {
@@ -943,6 +1052,7 @@ impl TestStateMap {
 }
 
 /// Create an `m.room.third_party_invite` event with the given sender.
+#[cfg(test)]
 pub(super) fn room_third_party_invite(sender: &UserId) -> PduEvent {
 	let content = json!({
 		"display_name": "o...@g...",
