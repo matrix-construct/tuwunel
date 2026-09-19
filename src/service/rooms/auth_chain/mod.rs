@@ -240,14 +240,14 @@ where
 				&room_rules,
 				complete,
 			)
-			.boxed()
+			.boxed() // Unpin for flat_map_unordered
 		})
 		.collect::<Vec<_>>()
 		.map(IntoIterator::into_iter)
 		.map(Itertools::sorted_unstable)
 		.map(Itertools::dedup)
 		.map(Iterator::collect)
-		.boxed()
+		.boxed() // erase region
 		.await;
 
 	debug!(

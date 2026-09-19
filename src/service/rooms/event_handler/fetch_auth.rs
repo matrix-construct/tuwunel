@@ -53,7 +53,7 @@ where
 		.stream()
 		.broad_then(|event_id| self.fetch_auth_chain(origin, room_id, event_id, room_version))
 		.collect()
-		.boxed()
+		.boxed() // size firewall
 		.await;
 
 	events_with_auth_events
@@ -88,6 +88,7 @@ where
 						return pdus;
 					}
 
+					// recursion cycle
 					let outlier = Box::pin(self.handle_outlier_pdu(
 						origin,
 						room_id,

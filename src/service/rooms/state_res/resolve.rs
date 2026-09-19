@@ -165,7 +165,7 @@ where
 	let sorted_power_set: Vec<_> = power_sort(rules, &full_conflicted_set, fetch)
 		.inspect_ok(|list| debug!(count = list.len(), "sorted power events"))
 		.inspect_ok(|list| trace!(?list, "sorted power events"))
-		.boxed()
+		.boxed() // size firewall
 		.await?;
 
 	let power_set_event_ids: Vec<_> = sorted_power_set
@@ -192,11 +192,12 @@ where
 	// 2. Apply the iterative auth checks algorithm, starting from the unconflicted
 	//    state map, to the list of events from the previous step to get a partially
 	//    resolved state.
+	// query-depth firewall
 	let partially_resolved_state =
 		iterative_auth_check(rules, sorted_power_set, initial_state, fetch)
+			.boxed()
 			.inspect_ok(|map| debug!(count = map.len(), "partially resolved power state"))
 			.inspect_ok(|map| trace!(?map, "partially resolved power state"))
-			.boxed()
 			.await?;
 
 	// This "epochs" power level event
@@ -223,7 +224,7 @@ where
 	//    state obtained in step 2.
 	let sorted_remaining_events = have_remaining_events
 		.then_async(move || mainline_sort(power_event.cloned(), remaining_events, fetch))
-		.boxed();
+		.boxed(); // size firewall
 
 	let sorted_remaining_events = sorted_remaining_events
 		.await
@@ -239,6 +240,7 @@ where
 
 	// 4. Apply the iterative auth checks algorithm on the partial resolved state
 	//    and the list of events from the previous step.
+	// query-depth firewall
 	let mut resolved_state =
 		iterative_auth_check(rules, sorted_remaining_events, partially_resolved_state, fetch)
 			.boxed()
@@ -294,7 +296,7 @@ where
 		.map(IterStream::stream)
 		.flatten_stream()
 		.flatten()
-		.boxed();
+		.boxed(); // erase region
 
 	let conflicted_state_ids = conflicted_state_set
 		.iter()

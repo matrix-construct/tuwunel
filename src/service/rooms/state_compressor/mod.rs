@@ -233,7 +233,8 @@ async fn new_shortstatehash_info(
 		}]);
 	};
 
-	let mut stack = Box::pin(self.load_shortstatehash_info(parent)).await?;
+	let mut stack = Box::pin(self.load_shortstatehash_info(parent)).await?; // recursion cycle
+
 	let top = stack.last().expect("at least one frame");
 
 	let mut full_state = (*top.full_state).clone();

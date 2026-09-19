@@ -45,7 +45,7 @@ pub async fn build_and_append_pdu(
 ) -> Result<OwnedEventId> {
 	if pdu_builder.event_type == TimelineEventType::RoomMember {
 		self.sanitize_member_authorisation(&mut pdu_builder, room_id)
-			.boxed()
+			.boxed() // size firewall
 			.await?;
 	}
 
@@ -69,7 +69,7 @@ pub async fn build_and_append_pdu(
 		.await
 	{
 		self.check_pdu_for_admin_room(&pdu, sender)
-			.boxed()
+			.boxed() // cold arm: admin room
 			.await?;
 	}
 
@@ -101,7 +101,7 @@ pub async fn build_and_append_pdu(
 	self.services
 		.event_handler
 		.sign_outgoing_pdu(&mut pdu_json, &pdu)
-		.boxed()
+		.boxed() // size firewall
 		.await?;
 
 	// We append to state before appending the pdu, so we don't have a moment in
@@ -118,7 +118,7 @@ pub async fn build_and_append_pdu(
 			once(pdu.event_id()),
 			state_lock,
 		)
-		.boxed()
+		.boxed() // size firewall
 		.await?;
 
 	// We set the room state after inserting the pdu, so that we never have a moment
@@ -242,7 +242,7 @@ where
 						.local_users_in_room(pdu.room_id())
 						.ready_filter(|user| *user != target)
 						.count()
-						.boxed()
+						.boxed() // cold arm: admin membership check
 						.await;
 
 					if count < 2 {
@@ -265,7 +265,7 @@ where
 						.local_users_in_room(pdu.room_id())
 						.ready_filter(|user| *user != target)
 						.count()
-						.boxed()
+						.boxed() // cold arm: admin membership check
 						.await;
 
 					if count < 2 {

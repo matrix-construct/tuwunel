@@ -70,6 +70,6 @@ pub(super) async fn handle_prev_pdu(
 		recursion_level,
 		create_event_id,
 	)
-	.boxed()
+	.boxed() // size firewall
 	.await
 }

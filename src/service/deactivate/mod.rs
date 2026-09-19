@@ -9,7 +9,7 @@ use ruma::{
 	},
 };
 use tuwunel_core::{
-	Event, Result, implement, info,
+	Event, Result, async_noinline, implement, info,
 	pdu::PduBuilder,
 	utils::{IterStream, future::TryExtExt, stream::BroadbandExt},
 	warn,
@@ -39,8 +39,10 @@ impl crate::Service for Service {
 /// erasure also marks the user erased and removes contact identifiers and
 /// global and room account data before leaving rooms.
 #[implement(Service)]
+// cross-crate codegen firewall
+#[async_noinline]
 #[tracing::instrument(skip(self), level = "debug")]
-pub async fn full_deactivate(&self, user_id: &UserId, erase: bool) -> Result {
+pub async fn full_deactivate<'a>(&'a self, user_id: &'a UserId, erase: bool) -> Result {
 	self.services
 		.users
 		.deactivate_account(user_id)

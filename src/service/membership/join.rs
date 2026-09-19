@@ -57,6 +57,7 @@ pub struct Join<'a> {
 }
 
 #[implement(Service)]
+// cross-crate codegen firewall
 #[async_noinline]
 #[tracing::instrument(
 	name = "join",
@@ -136,12 +137,12 @@ pub async fn join<'a>(
 				state_lock,
 				extra_content,
 			)
-			.boxed()
+			.boxed() // cold arm: remote join
 			.await?,
 		| federation_lock => {
 			drop(federation_lock);
 			self.join_local(sender_user, room_id, reason, &servers, state_lock, extra_content)
-				.boxed()
+				.boxed() // size firewall
 				.await?;
 		},
 	}
@@ -347,7 +348,7 @@ async fn join_remote(
 	)
 	.and_then(async |outcome| outcome.into_result())
 	.inspect_err(|e| error!(?e, "send_join auth check failed"))
-	.boxed()
+	.boxed() // cold arm: remote-join auth check
 	.await?;
 
 	self.apply_send_join_state(room_id, &state, &state_lock)
@@ -793,7 +794,7 @@ async fn join_local(
 					)
 				})
 				.map(ToOwned::to_owned)
-				.boxed()
+				.boxed() // Unpin for next
 				.next()
 				.await
 		})

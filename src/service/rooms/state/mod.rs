@@ -164,7 +164,7 @@ pub async fn force_state(
 			| TimelineEventType::RoomMember => self.force_member_effects(room_id, &pdu).await,
 			| _ => Ok(()),
 		})
-		.boxed()
+		.boxed() // size firewall
 		.await?;
 
 	self.services

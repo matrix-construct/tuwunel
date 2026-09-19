@@ -459,7 +459,9 @@ async fn walk_state(&self, walk: &mut Walk<'_>) -> Result<Option<StateIds>> {
 		return Ok(None);
 	}
 
-	self.walk_build(walk).await
+	self.walk_build(walk)
+		.boxed() // size firewall
+		.await
 }
 
 /// Classify the uncommitted ancestry below the incoming event with point

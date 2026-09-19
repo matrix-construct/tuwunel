@@ -60,6 +60,7 @@ type Handled = Option<(RawPduId, bool)>;
 /// 14. Check if the event passes auth based on the "current state" of the room,
 ///     if not soft fail it
 #[implement(super::Service)]
+// cross-crate codegen firewall
 #[async_noinline]
 #[tracing::instrument(
 	name = "pdu",
@@ -200,7 +201,7 @@ pub async fn handle_incoming_pdu<'a>(
 		first_ts_in_room,
 		create_event.event_id(),
 	)
-	.boxed()
+	.boxed() // size firewall
 	.await?;
 
 	// Done with prev events, now handling the incoming event
@@ -213,7 +214,7 @@ pub async fn handle_incoming_pdu<'a>(
 		recursion_level,
 		create_event.event_id(),
 	)
-	.boxed()
+	.boxed() // size firewall
 	.await
 }
 
@@ -393,7 +394,7 @@ async fn handle_prev_events(
 			.await
 		})
 		.try_collect::<PrevResultsHandled>()
-		.boxed()
+		.boxed() // size firewall
 		.await?;
 
 	// Walk interior events forward so each parent commits before its children.
@@ -417,7 +418,7 @@ async fn handle_prev_events(
 
 			Ok(())
 		})
-		.boxed()
+		.boxed() // size firewall
 		.await
 }
 

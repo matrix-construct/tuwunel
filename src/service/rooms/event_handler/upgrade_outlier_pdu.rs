@@ -185,7 +185,7 @@ pub(super) async fn upgrade_outlier_to_timeline_pdu(
 			&state_at_incoming_event,
 			&state_lock,
 		)
-		.boxed()
+		.boxed() // cold arm: state event
 		.await?;
 	}
 
@@ -395,7 +395,7 @@ async fn resolve_state_at_incoming_event(
 			.await?
 	} else {
 		self.state_at_incoming_resolved(incoming_pdu, room_id, room_version)
-			.boxed()
+			.boxed() // cold arm: multiple prev events
 			.await?
 	};
 
@@ -450,7 +450,7 @@ async fn resolve_state_at_incoming_event(
 			recursion_level,
 			create_event_id,
 		)
-		.boxed()
+		.boxed() // cold arm: federation fallback
 		.await?
 		.expect("fetch_state always resolves state to some");
 
@@ -594,7 +594,7 @@ async fn resolve_and_force_state_after(
 	trace!("Resolving new room state.");
 	let new_room_state = self
 		.resolve_state(room_id, room_version, state_after)
-		.boxed()
+		.boxed() // size firewall
 		.await?;
 
 	// Set the new room state to the resolved state

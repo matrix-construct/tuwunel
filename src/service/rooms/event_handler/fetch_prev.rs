@@ -94,7 +94,7 @@ where
 
 			(event_id, auth)
 		})
-		.map(FutureExt::boxed)
+		.map(FutureExt::boxed) // heterogeneous FuturesOrdered
 		.collect()
 		.await;
 
@@ -161,7 +161,7 @@ where
 					(prev_prev, fetch)
 				};
 
-				todo_outlier_stack.push_back(fetch.boxed());
+				todo_outlier_stack.push_back(fetch.boxed()); // heterogeneous FuturesOrdered
 			}
 
 			graph.insert(
@@ -312,6 +312,7 @@ async fn land_missing_event(
 
 	let event_id = gen_event_id(&value, room_version)?;
 
+	// cold arm: missing events
 	Box::pin(self.handle_outlier_pdu(
 		origin,
 		room_id,
