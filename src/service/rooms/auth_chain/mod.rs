@@ -33,7 +33,7 @@ use tuwunel_core::{
 	smallvec::SmallVec,
 	trace,
 	utils::{
-		IterStream,
+		BoolExt, IterStream,
 		stream::{BroadbandExt, ReadyExt, TryExpect, automatic_width},
 	},
 	validated, warn,
@@ -401,22 +401,26 @@ fn get_event_auth_chain_ids<'a>(
 	struct State<Fut> {
 		todo: FuturesUnordered<Fut>,
 		seen: HashSet<OwnedEventId>,
+		implied: Option<OwnedEventId>,
 	}
+
+	// MSC4291 rooms imply the create event rather than naming it in auth_events.
+	let create_event_id = room_rules
+		.authorization
+		.room_create_event_id_as_room_id
+		.and_then(|| room_id.as_event_id().ok())
+		.filter(|create_event_id| create_event_id.ne(&event_id));
 
 	let starting_events = self.get_event_auth_event_ids(room_id, event_id.to_owned());
 
 	let state = State {
 		todo: once(starting_events).collect(),
-		seen: room_rules
-			.authorization
-			.room_create_event_id_as_room_id
-			.then_some(room_id.as_event_id().ok())
-			.into_iter()
-			.flatten()
-			.collect(),
+		seen: create_event_id.iter().cloned().collect(),
+		implied: create_event_id,
 	};
 
 	let eval = |auth_events: AuthEvents, mut state: State<_>| {
+		let implied = state.implied.take();
 		let push = |auth_event: &OwnedEventId| {
 			trace!(todo = state.todo.len(), ?auth_event, "push");
 			state
@@ -431,10 +435,14 @@ fn get_event_auth_chain_ids<'a>(
 				.then_some(auth_event)
 		};
 
-		let out = auth_events
+		let unseen = auth_events
 			.into_iter()
 			.filter_map(seen)
-			.inspect(push)
+			.inspect(push);
+
+		let out = implied
+			.into_iter()
+			.chain(unseen)
 			.collect::<AuthEvents>()
 			.into_iter()
 			.stream();

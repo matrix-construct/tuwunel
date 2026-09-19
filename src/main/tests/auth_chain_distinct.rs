@@ -38,6 +38,7 @@ fn auth_chain_is_distinct_and_caches_only_complete_walks() -> Result {
 	let result = runtime.block_on(async {
 		let services = async_start(&server).await?;
 		let outcome = exercise(&services).await;
+		let implied = exercise_implied_create(&services).await;
 		let shutdown = server.server.shutdown();
 
 		drop(services);
@@ -45,7 +46,11 @@ fn auth_chain_is_distinct_and_caches_only_complete_walks() -> Result {
 		let run = async_run(&server).await;
 		let stop = async_stop(&server).await;
 
-		outcome.and(shutdown).and(run).and(stop)
+		outcome
+			.and(implied)
+			.and(shutdown)
+			.and(run)
+			.and(stop)
 	});
 
 	drop(runtime);
@@ -97,9 +102,7 @@ async fn exercise(services: &Services) -> Result {
 	assert!(foreign_chain.is_empty(), "foreign room walk yields nothing");
 	assert!(cache.exists(&left_key).await.is_not_found());
 
-	let mut torn_chain = walk(services, room_id, &room_version, once(torn)).await?;
-
-	torn_chain.sort_unstable();
+	let torn_chain = walk(services, room_id, &room_version, once(torn)).await?;
 
 	assert_eq!(torn_chain, [absent.to_owned(), tail.to_owned()]);
 	assert!(cache.exists(&torn_key).await.is_not_found());
@@ -123,6 +126,60 @@ async fn exercise(services: &Services) -> Result {
 	Ok(())
 }
 
+/// Walks a room version 12 chain, whose create event is implied by the room ID.
+///
+/// The create event joins every other event's chain, is absent from its own,
+/// stays withheld from a foreign-room starting event, and survives memoization.
+async fn exercise_implied_create(services: &Services) -> Result {
+	let room_id = room_id!("!authchainimpliedcreate");
+	let foreign_room_id = room_id!("!authchainforeigncreate");
+	let create = room_id.as_event_id()?;
+	let power = event_id!("$power:localhost");
+	let member = event_id!("$member:localhost");
+	let stranger = event_id!("$stranger:localhost");
+
+	add_outlier(services, room_id, &create, &[])?;
+	add_outlier(services, room_id, power, &[])?;
+	add_outlier(services, room_id, member, &[power])?;
+	add_outlier(services, foreign_room_id, stranger, &[])?;
+
+	let member_short = services
+		.short
+		.get_or_create_shorteventid(member)
+		.await;
+
+	let stranger_short = services
+		.short
+		.get_or_create_shorteventid(stranger)
+		.await;
+
+	let room_version = RoomVersionId::V12;
+	let cache = services.db.get("authchainkey_authchain")?;
+	let member_key = serialize_key([member_short].as_slice())?;
+	let stranger_key = serialize_key([stranger_short].as_slice())?;
+	let expected = [create.clone(), power.to_owned()];
+
+	let create_chain = walk(services, room_id, &room_version, once(create.as_ref())).await?;
+
+	assert!(create_chain.is_empty(), "the create event is absent from its own chain");
+
+	let foreign_chain = walk(services, room_id, &room_version, once(stranger)).await?;
+
+	assert!(foreign_chain.is_empty(), "a foreign event gains no implied create event");
+	assert!(cache.exists(&stranger_key).await.is_not_found());
+
+	let chain = walk(services, room_id, &room_version, once(member)).await?;
+
+	assert_eq!(chain, expected, "the implied create event joins the chain");
+	assert!(cache.exists(&member_key).await.is_ok(), "complete walk is memoized");
+
+	let cached_chain = walk(services, room_id, &room_version, once(member)).await?;
+
+	assert_eq!(cached_chain, expected, "the cached chain keeps the create event");
+
+	Ok(())
+}
+
 async fn walk<'a, I>(
 	services: &'a Services,
 	room_id: &'a RoomId,
@@ -137,6 +194,12 @@ where
 		.event_ids_iter(room_id, room_version, starting_events)
 		.try_collect()
 		.await
+		.map(sorted)
+}
+
+fn sorted(mut chain: Vec<OwnedEventId>) -> Vec<OwnedEventId> {
+	chain.sort_unstable();
+	chain
 }
 
 /// Mints right-side events until one lands outside the left bucket.
