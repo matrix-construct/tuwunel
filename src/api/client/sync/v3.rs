@@ -917,15 +917,11 @@ async fn load_left_room(
 				.ok()
 		});
 
-	// MSC4222 `state_after`: state at the leave (end of timeline). The
-	// stored shortstatehash at the leave PDU is state-before-leave, so
-	// step to the next PDU; if no event followed, the room's current
-	// shortstatehash is the post-leave state.
+	// MSC4222 `state_after` describes the state at the leave.
 	let after_shortstatehash = state_after.requested().then_async(|| {
 		services
 			.timeline
-			.next_shortstatehash(room_id, PduCount::Normal(left_count))
-			.or_else(|_| services.state.get_room_shortstatehash(room_id))
+			.shortstatehash_after(room_id, PduCount::Normal(left_count))
 			.inspect_err(inspect_debug_log)
 	});
 
@@ -1676,15 +1672,11 @@ async fn gather_room_metadata(
 				.inspect_err(log_horizon_error)
 		});
 
-	// MSC4222 `state_after` semantics: state at the *end* of the timeline
-	// window. `next_shortstatehash` reads state-before the next PDU, which
-	// equals state-after our last PDU; falling back to the room's current
-	// state covers the case where our window already touches HEAD.
+	// MSC4222 `state_after` describes the state at the end of the timeline.
 	let after_shortstatehash = state_after.requested().then_async(|| {
 		services
 			.timeline
-			.next_shortstatehash(room_id, last_timeline_count)
-			.or_else(|_| services.state.get_room_shortstatehash(room_id))
+			.shortstatehash_after(room_id, last_timeline_count)
 			.inspect_err(inspect_debug_log)
 	});
 
