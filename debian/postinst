@@ -145,10 +145,10 @@ case "$1" in
     fi
 
     # Fix up ownership and permissions for the database and the config.
-    chown -v tuwunel:tuwunel -R "$TUWUNEL_DATABASE_PATH"
-    chown -v tuwunel:tuwunel -R "$TUWUNEL_CONFIG_PATH"
+    chown -c tuwunel:tuwunel -R "$TUWUNEL_DATABASE_PATH"
+    chown -c tuwunel:tuwunel -R "$TUWUNEL_CONFIG_PATH"
 
-    chmod -v 740 "$TUWUNEL_DATABASE_PATH"
+    chmod -c 740 "$TUWUNEL_DATABASE_PATH"
 
     echo ''
     echo 'Make sure you edit the example config at /etc/tuwunel/tuwunel.toml before starting!'
