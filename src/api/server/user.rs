@@ -1,14 +1,21 @@
+use std::collections::BTreeMap;
+
 use axum::extract::State;
-use futures::{FutureExt, StreamExt, TryFutureExt, future::join5};
+use futures::{FutureExt, StreamExt, TryFutureExt, future::join4};
 use ruma::{
-	UserId,
+	OwnedDeviceId, UserId,
 	api::{
 		client::device::Device,
 		federation::{
-			device::get_devices::{self, v1::UserDevice},
+			device::get_devices::{
+				self,
+				v1::{Response as GetDevicesResponse, UserDevice},
+			},
 			keys::{claim_keys, get_keys},
 		},
 	},
+	encryption::DeviceKeys,
+	serde::Raw,
 	uint,
 };
 use tuwunel_core::{Err, Result, utils::future::TryExtExt};
@@ -17,6 +24,8 @@ use crate::{
 	Ruma,
 	client::{claim_keys_helper, get_keys_helper},
 };
+
+type AppserviceKeys = BTreeMap<OwnedDeviceId, Raw<DeviceKeys>>;
 
 /// # `GET /_matrix/federation/v1/user/devices/{userId}`
 ///
@@ -31,6 +40,13 @@ pub(crate) async fn get_devices_route(
 	}
 
 	let allowed_signatures = |u: &UserId| u.server_name() == body.origin();
+	let stream_id = services
+		.users
+		.get_devicelist_version(user_id)
+		.map_ok(TryInto::try_into)
+		.map_ok(Result::ok)
+		.ok()
+		.await;
 
 	let master_key = services
 		.users
@@ -40,13 +56,6 @@ pub(crate) async fn get_devices_route(
 	let self_signing_key = services
 		.users
 		.get_self_signing_key(None, user_id, &allowed_signatures)
-		.ok();
-
-	let stream_id = services
-		.users
-		.get_devicelist_version(user_id)
-		.map_ok(TryInto::try_into)
-		.map_ok(Result::ok)
 		.ok();
 
 	let devices = services
@@ -75,16 +84,25 @@ pub(crate) async fn get_devices_route(
 
 	let appservice_keys = services.appservice.query_keys(user_id, &[]);
 
-	let (stream_id, master_key, self_signing_key, mut devices, appservice_keys) =
-		join5(stream_id, master_key, self_signing_key, devices, appservice_keys)
+	let (master_key, self_signing_key, devices, appservice_keys) =
+		join4(master_key, self_signing_key, devices, appservice_keys)
 			.boxed()
 			.await;
 
-	if !appservice_keys.is_empty() {
-		devices.retain(|device| !appservice_keys.contains_key(&device.device_id));
+	Ok(GetDevicesResponse {
+		user_id: body.body.user_id,
+		stream_id: stream_id.flatten().unwrap_or_else(|| uint!(0)),
+		devices: overlay_devices(devices, appservice_keys),
+		self_signing_key,
+		master_key,
+	})
+}
+
+fn overlay_devices(mut devices: Vec<UserDevice>, keys: AppserviceKeys) -> Vec<UserDevice> {
+	if !keys.is_empty() {
+		devices.retain(|device| !keys.contains_key(&device.device_id));
 		devices.extend(
-			appservice_keys
-				.into_iter()
+			keys.into_iter()
 				.map(|(device_id, keys)| UserDevice {
 					device_id,
 					keys,
@@ -93,13 +111,7 @@ pub(crate) async fn get_devices_route(
 		);
 	}
 
-	Ok(get_devices::v1::Response {
-		user_id: body.body.user_id,
-		stream_id: stream_id.flatten().unwrap_or_else(|| uint!(0)),
-		devices,
-		self_signing_key,
-		master_key,
-	})
+	devices
 }
 
 /// # `POST /_matrix/federation/v1/user/keys/query`

@@ -1,6 +1,5 @@
 use std::{
 	net::IpAddr,
-	sync::Arc,
 	time::{Duration, SystemTime},
 };
 
@@ -13,7 +12,7 @@ use serde_json::json;
 use tuwunel_core::{
 	Err, Result, at, implement, trace,
 	utils::{
-		self, BoolExt, ReadyExt, random_string,
+		BoolExt, ReadyExt, random_string,
 		stream::{IterStream, TryIgnore},
 		string::to_small_string,
 		time::{
@@ -21,7 +20,9 @@ use tuwunel_core::{
 		},
 	},
 };
-use tuwunel_database::{Cbor, Deserialized, Ignore, Interfix, Json, Map, Txn};
+use tuwunel_database::{Cbor, Deserialized, Ignore, Interfix, Json, Txn};
+
+use super::DeviceListChange;
 
 /// generated device ID length
 const DEVICE_ID_LENGTH: usize = 10;
@@ -65,7 +66,8 @@ pub async fn create_device(
 		display_name: initial_device_display_name.map(Into::into),
 		last_seen_ts: Some(MilliSecondsSinceUnixEpoch::now()),
 		last_seen_ip: client_ip.map(to_small_string),
-	});
+	})
+	.await;
 
 	if let Some(access_token) = access_token {
 		self.set_access_token(user_id, &device_id, access_token, expires_in, refresh_token)
@@ -142,8 +144,8 @@ pub async fn remove_device(&self, user_id: &UserId, device_id: &DeviceId) {
 	self.db.userdeviceid_metadata.del(userdeviceid);
 	self.db.oidcdevice_userdeviceid.del(userdeviceid);
 
-	self.mark_device_key_update(user_id).await;
-	increment(&self.db.userid_devicelistversion, user_id.as_bytes());
+	self.mark_device_key_update(user_id, DeviceListChange::Deleted(device_id))
+		.await;
 }
 
 /// Returns an iterator over all device ids of this user.
@@ -669,20 +671,27 @@ pub async fn update_device_last_seen(
 		.last_seen_ts
 		.replace(last_seen_ts.unwrap_or_else(MilliSecondsSinceUnixEpoch::now));
 
-	self.put_device_metadata(user_id, false, &device);
+	self.put_device_metadata(user_id, false, &device)
+		.await;
 
 	Ok(())
 }
 
+/// Persists device metadata and optionally announces the changed device.
+///
+/// Silent updates leave the device-list version and notification rows unchanged.
 #[implement(super::Service)]
-pub fn put_device_metadata(&self, user_id: &UserId, notify: bool, device: &Device) {
+#[tracing::instrument(level = "trace", skip(self, device))]
+pub async fn put_device_metadata(&self, user_id: &UserId, notify: bool, device: &Device) {
 	let key = (user_id, &device.device_id);
 	self.db
 		.userdeviceid_metadata
 		.put(key, Json(device));
 
 	if notify {
-		increment(&self.db.userid_devicelistversion, user_id.as_bytes());
+		self.mark_device_key_update(user_id, DeviceListChange::Device(&device.device_id))
+			.boxed() // Size firewall for device creation and rename callers.
+			.await;
 	}
 }
 
@@ -801,13 +810,6 @@ pub fn all_devices_metadata<'a>(
 		.stream_prefix(&key)
 		.ignore_err()
 		.map(|(_, val): (Ignore, Device)| val)
-}
-
-//TODO: this is an ABA
-fn increment(db: &Arc<Map>, key: &[u8]) {
-	let old = db.get_blocking(key);
-	let new = utils::increment(old.ok().as_deref());
-	db.insert(key, new);
 }
 
 #[cfg(test)]

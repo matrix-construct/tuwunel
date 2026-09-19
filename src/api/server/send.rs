@@ -48,6 +48,7 @@ use tuwunel_service::{
 	Services,
 	rooms::state_res::{is_topologically_sorted_in_place, topological_sort},
 	sending::{EDU_LIMIT, PDU_LIMIT},
+	users::DeviceListChange,
 };
 
 use crate::{ClientIp, Ruma};
@@ -648,7 +649,7 @@ async fn handle_edu_device_list_update(
 
 	services
 		.users
-		.mark_device_key_update(&user_id)
+		.mark_device_key_update(&user_id, DeviceListChange::Resync)
 		.await;
 }
 

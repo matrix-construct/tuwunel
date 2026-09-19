@@ -29,7 +29,8 @@ pub(crate) async fn update_device_display_name_route(
 	device.display_name = Some(body.display_name.as_str().into());
 	services
 		.users
-		.put_device_metadata(&user_id, true, &device);
+		.put_device_metadata(&user_id, true, &device)
+		.await;
 
 	Ok(Response::new())
 }

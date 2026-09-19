@@ -133,9 +133,9 @@
 {"Action":"fail","Test":"TestEventRelationships"}
 {"Action":"pass","Test":"TestFederatedClientSpaces"}
 {"Action":"fail","Test":"TestFederatedEventRelationships"}
-{"Action":"fail","Test":"TestFederationKeyUploadQuery"}
+{"Action":"pass","Test":"TestFederationKeyUploadQuery"}
 {"Action":"pass","Test":"TestFederationKeyUploadQuery/Can_claim_remote_one_time_key_using_POST"}
-{"Action":"fail","Test":"TestFederationKeyUploadQuery/Can_query_remote_device_keys_using_POST"}
+{"Action":"pass","Test":"TestFederationKeyUploadQuery/Can_query_remote_device_keys_using_POST"}
 {"Action":"pass","Test":"TestFederationRedactSendsWithoutEvent"}
 {"Action":"pass","Test":"TestFederationRejectInvite"}
 {"Action":"pass","Test":"TestFederationRoomsInvite"}

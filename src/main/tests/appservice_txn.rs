@@ -19,7 +19,7 @@ use tuwunel_core::{
 		device_id,
 	},
 };
-use tuwunel_service::Services;
+use tuwunel_service::{Services, users::DeviceListChange};
 
 const TO_DEVICE: &str = "de.sorunome.msc2409.to_device";
 const DEVICE_LISTS: &str = "org.matrix.msc3202.device_lists";
@@ -97,8 +97,9 @@ async fn run_cases(services: &Arc<Services>) -> Result {
 	// A device-key change fans out a `device_lists.changed` marker.
 	services
 		.users
-		.mark_device_key_update(&on_ghost)
+		.mark_device_key_update(&on_ghost, DeviceListChange::Resync)
 		.await;
+
 	let (_, body) = recv_txn(&mut rx).await?;
 	let txn = parse(&body)?;
 	assert_device_lists_changed(&txn, &on_ghost)?;

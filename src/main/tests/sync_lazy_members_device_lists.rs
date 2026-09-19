@@ -10,7 +10,7 @@ use tuwunel_core::{
 	ruma::{OwnedEventId, RoomId, UserId},
 	utils::BoolExt,
 };
-use tuwunel_service::Services;
+use tuwunel_service::{Services, users::DeviceListChange};
 
 use self::client::{Client, field, register, wait_until_ready};
 
@@ -102,7 +102,7 @@ async fn exercise(services: &Services, base: &str) -> Result {
 
 	services
 		.users
-		.mark_device_key_update(&sender_id)
+		.mark_device_key_update(&sender_id, DeviceListChange::Resync)
 		.await;
 
 	let rekeyed = reader.sync(Some(since)).await?;

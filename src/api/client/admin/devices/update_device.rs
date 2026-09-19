@@ -47,7 +47,8 @@ pub(crate) async fn admin_update_device_route(
 
 	services
 		.users
-		.put_device_metadata(user_id, notify, &device);
+		.put_device_metadata(user_id, notify, &device)
+		.await;
 
 	Ok(update_device::Response {})
 }

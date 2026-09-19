@@ -4,15 +4,15 @@ Tuwunel runs the [Complement](https://github.com/matrix-org/complement) Matrix h
 
 ## Counts
 
-- Test groups: 214. Passing: **87.4%**
-  - ✅ `pass`: 187
-  - 🟨 `some`: 12
+- Test groups: 214. Passing: **87.9%**
+  - ✅ `pass`: 188
+  - 🟨 `some`: 11
   - ❌ `fail`: 15
   - ⬛ `skip`: 0
 
-- Subtests: 599. Passing: **82.1%**
-  - ✅ `pass`: 492
-  - ❌ `fail`: 99
+- Subtests: 599. Passing: **82.3%**
+  - ✅ `pass`: 493
+  - ❌ `fail`: 98
   - ⬛ `skip`: 8
 
 ## All Top-Level Tests
@@ -58,7 +58,7 @@ Tuwunel runs the [Complement](https://github.com/matrix-org/complement) Matrix h
 | ❌ | – | `EventRelationships` |
 | ✅ | – | `FederatedClientSpaces` |
 | ❌ | – | `FederatedEventRelationships` |
-| 🟨 | 1/1/0 | `FederationKeyUploadQuery` |
+| ✅ | 2/0/0 | `FederationKeyUploadQuery` |
 | ✅ | – | `FederationRedactSendsWithoutEvent` |
 | ✅ | – | `FederationRejectInvite` |
 | ✅ | 10/0/0 | `FederationRoomsInvite` |

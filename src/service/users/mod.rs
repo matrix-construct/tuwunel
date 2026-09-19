@@ -23,13 +23,18 @@ use tuwunel_core::{
 	Err, Result, debug_warn, err, is_equal_to,
 	matrix::pdu::PduCount,
 	trace,
-	utils::{self, BoolExt, ReadyExt, hash::password as hash_password, stream::TryIgnore},
+	utils::{
+		self, BoolExt, MutexMap, ReadyExt, hash::password as hash_password, stream::TryIgnore,
+	},
 };
 use tuwunel_database::{Deserialized, Json, Map};
 
 pub use self::{
-	dehydrated_device::DehydratedDevice, invite_filter::InviteFilter, keys::parse_master_key,
-	register::Register, server_user::SERVER_USER_KEY,
+	dehydrated_device::DehydratedDevice,
+	invite_filter::InviteFilter,
+	keys::{DeviceListChange, DeviceListRecord, parse_master_key},
+	register::Register,
+	server_user::SERVER_USER_KEY,
 };
 
 pub const PASSWORD_SENTINEL: &str = "*";
@@ -47,9 +52,11 @@ pub struct Moderation {
 pub struct Service {
 	services: Arc<crate::services::OnceServices>,
 	db: Data,
+	device_list_mutex: MutexMap<OwnedUserId, ()>,
 }
 
 struct Data {
+	keychangeid_devicechange: Arc<Map>,
 	keychangeid_userid: Arc<Map>,
 	keyid_key: Arc<Map>,
 	onetimekeyid4225_otk: Option<Arc<Map>>,
@@ -84,7 +91,9 @@ impl crate::Service for Service {
 	fn build(args: &crate::Args<'_>) -> Result<Arc<Self>> {
 		Ok(Arc::new(Self {
 			services: args.services.clone(),
+			device_list_mutex: MutexMap::new(),
 			db: Data {
+				keychangeid_devicechange: args.db["keychangeid_devicechange"].clone(),
 				keychangeid_userid: args.db["keychangeid_userid"].clone(),
 				keyid_key: args.db["keyid_key"].clone(),
 				onetimekeyid4225_otk: args.db.get("onetimekeyid4225_otk").ok().cloned(),

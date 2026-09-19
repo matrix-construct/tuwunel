@@ -84,11 +84,12 @@ pub(super) fn store_signer(&self, services: &Services) -> Result {
 }
 
 #[implement(Fixture)]
-pub(super) fn store_device_signer(&self, services: &Services, device: &DeviceId) -> Result {
+pub(super) async fn store_device_signer(&self, services: &Services, device: &DeviceId) -> Result {
 	self.store(services)?;
 	services
 		.users
-		.put_device_metadata(&self.sender, false, &Device::new(device.to_owned()));
+		.put_device_metadata(&self.sender, false, &Device::new(device.to_owned()))
+		.await;
 
 	let key = json!({"user_id": self.sender, "device_id": device,
 		"keys": {"ed25519:SIGNER": self.signer_key}});

@@ -6,8 +6,9 @@ use futures::{
 	pin_mut,
 };
 use ruma::{
-	AnyKeyName, DeviceId, KeyId, OneTimeKeyAlgorithm, OneTimeKeyId, OneTimeKeyName, OwnedKeyId,
-	OwnedOneTimeKeyId, OwnedRoomId, OwnedServerName, RoomId, SigningKeyId, UInt, UserId,
+	AnyKeyName, DeviceId, KeyId, OneTimeKeyAlgorithm, OneTimeKeyId, OneTimeKeyName,
+	OwnedDeviceId, OwnedKeyId, OwnedOneTimeKeyId, OwnedRoomId, OwnedServerName, RoomId,
+	SigningKeyId, UInt, UserId,
 	encryption::{CrossSigningKey, DeviceKeys, OneTimeKey},
 	serde::{Base64, Raw, base64::Standard},
 	signatures::{
@@ -27,10 +28,49 @@ use tuwunel_core::{
 		to_canonical_object,
 	},
 };
-use tuwunel_database::{Deserialized, Ignore, Interfix, Json, KeyBuf, Map, Txn, serialize_key};
+use tuwunel_database::{
+	Deserialized, Ignore, Interfix, Json, KeyBuf, Map, Txn, deserialize_from_slice, serialize_key,
+};
 
 type Servers = SmallVec<[OwnedServerName; 1]>;
 type Signatures = SmallVec<[(String, String); 1]>;
+
+/// Mutation announced to clients and federation peers.
+///
+/// Device identifiers are borrowed at mutation sites and owned in stored records.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DeviceListChange<D> {
+	/// A device was created or its keys or metadata changed.
+	Device(D),
+
+	/// A device was removed.
+	Deleted(D),
+
+	/// Cross-signing keys or their signatures changed.
+	CrossSigning,
+
+	/// Peers must fetch the user's device-list snapshot.
+	Resync,
+}
+
+/// Durable detail for one local user's device-list notification.
+///
+/// Cross-signing changes retain the current stream position without advancing it.
+#[derive(Debug, Eq, PartialEq)]
+pub struct DeviceListRecord {
+	/// Mutation associated with the notification count.
+	pub change: DeviceListChange<OwnedDeviceId>,
+
+	/// Per-user stream position after the mutation.
+	pub stream_id: u64,
+}
+
+enum DeviceListChangeKind {
+	Resync = 0,
+	Device = 1,
+	Deleted = 2,
+	CrossSigning = 3,
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum KeyRole {
@@ -429,7 +469,8 @@ pub async fn add_device_keys(
 	let key = (user_id, device_id);
 
 	self.db.keyid_key.put(key, Json(device_keys));
-	self.mark_device_key_update(user_id).await;
+	self.mark_device_key_update(user_id, DeviceListChange::Device(device_id))
+		.await;
 }
 
 #[implement(super::Service)]
@@ -506,7 +547,8 @@ pub async fn add_cross_signing_keys(
 	};
 
 	if notify {
-		self.mark_device_key_update(user_id).await;
+		self.mark_device_key_update(user_id, DeviceListChange::CrossSigning)
+			.await;
 	}
 
 	Ok(())
@@ -628,7 +670,13 @@ pub async fn sign_key(
 	self.db.keyid_key.put(key, Json(target_key));
 
 	if same_user {
-		self.mark_device_key_update(target_id).await;
+		let change = match target_role {
+			| KeyRole::Device => DeviceListChange::Device(key_id.into()),
+			| _ => DeviceListChange::CrossSigning,
+		};
+
+		self.mark_device_key_update(target_id, change)
+			.await;
 	} else {
 		let count = self.services.globals.next_count();
 
@@ -962,7 +1010,11 @@ fn keys_changed_user_or_room<'a>(
 	skip_all,
 	fields(%user_id),
 )]
-pub async fn mark_device_key_update(&self, user_id: &UserId) {
+pub async fn mark_device_key_update(
+	&self,
+	user_id: &UserId,
+	change: DeviceListChange<&DeviceId>,
+) {
 	let update_all_rooms = !self
 		.services
 		.config
@@ -977,7 +1029,42 @@ pub async fn mark_device_key_update(&self, user_id: &UserId) {
 				.await
 	};
 
+	let local = self.services.globals.user_is_local(user_id);
+	let guard = local
+		.then_async(async || self.device_list_mutex.lock(user_id).await)
+		.await;
+
 	let count = self.services.globals.next_count();
+
+	if local {
+		let current = self
+			.get_devicelist_version(user_id)
+			.await
+			.unwrap_or(0);
+
+		let stream_id = current
+			.checked_add(u64::from(!matches!(change, DeviceListChange::CrossSigning)))
+			.expect("device-list stream exhausted");
+
+		if !matches!(change, DeviceListChange::CrossSigning) {
+			self.db
+				.userid_devicelistversion
+				.raw_put(user_id, stream_id);
+		}
+
+		let (kind, device_id) = match change {
+			| DeviceListChange::Resync => (DeviceListChangeKind::Resync, ""),
+			| DeviceListChange::Device(id) => (DeviceListChangeKind::Device, id.as_str()),
+			| DeviceListChange::Deleted(id) => (DeviceListChangeKind::Deleted, id.as_str()),
+			| DeviceListChange::CrossSigning => (DeviceListChangeKind::CrossSigning, ""),
+		};
+
+		// The value layout is (kind: u8, stream_id: u64, device_id: str).
+		self.db
+			.keychangeid_devicechange
+			.put(*count, (u8::from(kind), stream_id, device_id));
+	}
+
 	let user_key = (user_id, *count);
 
 	self.db
@@ -996,6 +1083,8 @@ pub async fn mark_device_key_update(&self, user_id: &UserId) {
 		})
 		.await;
 
+	drop(guard);
+
 	self.services
 		.sending
 		.send_device_list_appservices(user_id, *count)
@@ -1003,7 +1092,7 @@ pub async fn mark_device_key_update(&self, user_id: &UserId) {
 		.log_err()
 		.ok();
 
-	if !self.services.globals.user_is_local(user_id) {
+	if !local {
 		return;
 	}
 
@@ -1035,6 +1124,55 @@ pub async fn mark_device_key_update(&self, user_id: &UserId) {
 		.await
 		.inspect_err(|e| debug_warn!(%e, "device list flush refused"))
 		.ok();
+}
+
+/// Reads the mutation recorded for a local device-list notification.
+///
+/// Missing records return `NotFound`; unknown kind tags request a snapshot resync.
+#[implement(super::Service)]
+#[tracing::instrument(level = "trace", skip(self))]
+pub async fn device_list_change(&self, count: u64) -> Result<DeviceListRecord> {
+	let row = self
+		.db
+		.keychangeid_devicechange
+		.qry(&count)
+		.await?;
+
+	let (kind, stream_id, device_id): (u8, u64, &str) = deserialize_from_slice(&row)?;
+	let change =
+		match DeviceListChangeKind::try_from(kind).unwrap_or(DeviceListChangeKind::Resync) {
+			| DeviceListChangeKind::Resync => DeviceListChange::Resync,
+			| DeviceListChangeKind::Device => DeviceListChange::Device(device_id.into()),
+			| DeviceListChangeKind::Deleted => DeviceListChange::Deleted(device_id.into()),
+			| DeviceListChangeKind::CrossSigning => DeviceListChange::CrossSigning,
+		};
+
+	Ok(DeviceListRecord { change, stream_id })
+}
+
+impl From<DeviceListChangeKind> for u8 {
+	fn from(kind: DeviceListChangeKind) -> Self {
+		match kind {
+			| DeviceListChangeKind::Resync => 0,
+			| DeviceListChangeKind::Device => 1,
+			| DeviceListChangeKind::Deleted => 2,
+			| DeviceListChangeKind::CrossSigning => 3,
+		}
+	}
+}
+
+impl TryFrom<u8> for DeviceListChangeKind {
+	type Error = ();
+
+	fn try_from(kind: u8) -> Result<Self, Self::Error> {
+		match kind {
+			| 0 => Ok(Self::Resync),
+			| 1 => Ok(Self::Device),
+			| 2 => Ok(Self::Deleted),
+			| 3 => Ok(Self::CrossSigning),
+			| _ => Err(()),
+		}
+	}
 }
 
 #[implement(super::Service)]
@@ -1203,8 +1341,28 @@ mod tests {
 		signatures::{Ed25519KeyPair, KeyPair},
 		user_id,
 	};
+	use tuwunel_database::serialize_to_vec;
 
 	use super::*;
+
+	#[test]
+	fn device_list_record_codec() {
+		for device_id in ["DEVICE", ""] {
+			let record = (1_u8, 42_u64, device_id);
+			let bytes = serialize_to_vec(record).expect("serialize device change");
+
+			assert_eq!(bytes.len(), 1 + 1 + 8 + 1 + device_id.len());
+			assert_eq!(bytes[0], 1);
+			assert_eq!(bytes[1], 0xFF);
+			assert_eq!(&bytes[2..10], &42_u64.to_be_bytes());
+			assert_eq!(bytes[10], 0xFF);
+			assert_eq!(&bytes[11..], device_id.as_bytes());
+			let decoded: (u8, u64, &str) =
+				deserialize_from_slice(&bytes).expect("decode device change");
+
+			assert_eq!(decoded, record);
+		}
+	}
 
 	fn signature_fixture() -> (String, String, Vec<u8>) {
 		let der = Ed25519KeyPair::generate();

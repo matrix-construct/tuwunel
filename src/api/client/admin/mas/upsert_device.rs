@@ -27,7 +27,8 @@ pub(crate) async fn upsert_device_route(
 			device.display_name = Some(display_name.into());
 			services
 				.users
-				.put_device_metadata(&user_id, true, &device);
+				.put_device_metadata(&user_id, true, &device)
+				.await;
 		}
 
 		false

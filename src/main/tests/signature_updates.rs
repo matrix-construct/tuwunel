@@ -123,7 +123,9 @@ async fn exercise(services: &Services) -> Result {
 
 	let own = Fixture::new(&target, &target)?;
 
-	own.store_device_signer(services, device_id!("SIGNER"))?;
+	own.store_device_signer(services, device_id!("SIGNER"))
+		.await?;
+
 	let before = services.globals.current_count();
 	let appservice_watcher = services.db["servernameevent_data"].watch_raw_prefix(b"+");
 	let padded = format!("{}==", own.signature);

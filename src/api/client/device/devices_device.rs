@@ -57,7 +57,8 @@ pub(crate) async fn update_device_route(
 			assert_eq!(device.device_id, body.device_id, "device_id mismatch");
 			services
 				.users
-				.put_device_metadata(sender_user, notify, &device);
+				.put_device_metadata(sender_user, notify, &device)
+				.await;
 
 			Ok(update_device::v3::Response::new())
 		},
