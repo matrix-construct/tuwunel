@@ -11,7 +11,7 @@ use futures::{
 use ruma::{EventId, OwnedEventId};
 use tuwunel_core::{
 	Result, implement, is_equal_to,
-	matrix::{Event, PduEvent, event_id::RandomState, pdu::AuthEvents},
+	matrix::{event_id::RandomState, pdu::AuthEvents},
 	smallvec::SmallVec,
 	utils::{
 		BoolExt,
@@ -20,7 +20,7 @@ use tuwunel_core::{
 	},
 };
 
-use super::super::FetchEvent;
+use super::super::{FetchEvent, fetch_event::AuthRefs};
 
 struct Global<Fut: Future + Send> {
 	subgraph: Subgraph,
@@ -208,8 +208,8 @@ async fn fetch_auth(
 	id: usize,
 	event_id: OwnedEventId,
 	fetch: impl FetchEvent,
-) -> (usize, OwnedEventId, Result<PduEvent>) {
-	let event = fetch.get::<PduEvent>(&event_id).await;
+) -> (usize, OwnedEventId, Result<AuthRefs>) {
+	let event = fetch.get::<AuthRefs>(&event_id).await;
 
 	(id, event_id, event)
 }
@@ -218,7 +218,7 @@ fn process_fetch<Fut>(
 	state: &mut Global<Fut>,
 	id: usize,
 	event_id: OwnedEventId,
-	event: Result<PduEvent>,
+	event: Result<AuthRefs>,
 	outputs: &mut Path,
 ) -> Result<Option<OwnedEventId>>
 where
@@ -229,9 +229,7 @@ where
 			let local = &mut state.locals[id];
 
 			local.path.push(event_id);
-			local
-				.stack
-				.push(event.auth_events_into().into_iter().collect());
+			local.stack.push(event.auth_events);
 		},
 		| Err(error) if error.is_not_found() => {
 			let Global { subgraph, waiters, ready, parked, .. } = state;

@@ -6,6 +6,7 @@ use ruma::{
 	events::{TimelineEventType, room::power_levels::UserPowerLevel},
 	room_version_rules::RoomVersionRules,
 };
+use serde::Deserialize;
 use tuwunel_core::{
 	Result, err,
 	matrix::{Event, PduEvent},
@@ -20,6 +21,7 @@ use super::{
 			RoomCreateEvent, RoomPowerLevelsEvent, RoomPowerLevelsIntField, is_power_event,
 			power_levels::RoomPowerLevelsEventOptionExt,
 		},
+		fetch_event::AuthRefs,
 		topological_sort,
 		topological_sort::ReferencedIds,
 	},
@@ -125,15 +127,15 @@ pub(super) async fn add_event_auth_chain(
 	let mut todo: FuturesUnordered<_> = once(fetch_optional_event(event_id, fetch)).collect();
 
 	while let Some(event) = todo.next().await {
-		let Some(event) = event? else {
+		let (event_id, event): (_, Option<AuthRefs>) = event?;
+		let Some(event) = event else {
 			continue;
 		};
 
-		let event_id = event.event_id().to_owned();
 		graph.entry(event_id.clone()).or_default();
 
 		for auth_event_id in event
-			.auth_events_into()
+			.auth_events
 			.into_iter()
 			.filter(|auth_event_id| full_conflicted_set.contains(auth_event_id))
 		{
@@ -249,9 +251,14 @@ pub(super) async fn is_power_event_id(
 		.is_some_and(|event: PduEvent| is_power_event(&event)))
 }
 
-async fn fetch_optional_event(
+async fn fetch_optional_event<T>(
 	event_id: OwnedEventId,
 	fetch: impl FetchEvent,
-) -> Result<Option<PduEvent>> {
-	fetch.get::<PduEvent>(&event_id).await.optional()
+) -> Result<(OwnedEventId, Option<T>)>
+where
+	T: for<'de> Deserialize<'de> + Send,
+{
+	let event = fetch.get::<T>(&event_id).await.optional()?;
+
+	Ok((event_id, event))
 }

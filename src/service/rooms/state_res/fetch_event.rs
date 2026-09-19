@@ -1,6 +1,11 @@
 use ruma::EventId;
 use serde::Deserialize;
-use tuwunel_core::Result;
+use tuwunel_core::{Result, matrix::pdu::AuthEvents};
+
+#[derive(Deserialize)]
+pub(super) struct AuthRefs {
+	pub(super) auth_events: AuthEvents,
+}
 
 /// Reads events through a copyable handle to their storage.
 ///
