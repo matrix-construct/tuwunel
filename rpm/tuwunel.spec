@@ -112,7 +112,7 @@ exit 0
 
 %post
 %systemd_post tuwunel.service
-# Adopt a predecessor package's database and leave the compatibility symlinks.
+# Adopt a predecessor package's database, leaving a symlink where it was.
 # Never raised: the package is installed and correct whether or not a previous
 # database was found, and the command can be run again by hand.
 %{_libexecdir}/tuwunel/adopt-legacy-database || :
