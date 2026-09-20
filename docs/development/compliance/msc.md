@@ -420,7 +420,7 @@ in the [Out of scope](#out-of-scope) section.
 | MSC4265 | ❌ ◐ | 10/10 | Data Protection Officer contact in /.well-known/matrix/support | support_role configurable; MSC role string accepted as Custom |
 | MSC4264 | ❌ ● | 0/0 | Tokens for Contacting Accounts or Joining Semi-Public Rooms | Tokens for contact / semi-public-room joins not implemented |
 | MSC4263 | ❌ ◐ | 10/10 | Preventing MXID enumeration via key queries | MUST floor met implicitly; MAY restriction unused |
-| MSC4262 | 🟨 ● | 70/70 | Sliding Sync Extension: Profile Updates | Change-log extension; own and widened-field bases; no scoping, drop, lazy |
+| MSC4262 | 🟨 ● | 70/70 | Sliding Sync Extension: Profile Updates | Visible updates and selected initial bases; no atomic snapshots or user drops. |
 | MSC4261 | ✅ ◐ | 80/100 | "Do not encrypt for device" flag | DeviceKeys stored and served raw, so do_not_encrypt survives upload and query |
 | MSC4259 | ❌ ● | 0/0 | Profile Update EDUs for Federation | m.profile EDU broadcast not implemented |
 | MSC4258 | ❌ ● | 0/0 | Federated User Directory | Federated user_directory/search not implemented |

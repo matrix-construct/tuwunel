@@ -83,6 +83,13 @@ pub(super) fn room_updates(&mut self) -> impl Iterator<Item = (&RoomId, Option<R
 }
 
 #[implement(Results)]
+pub(super) fn payload(&self, room_id: &RoomId) -> Option<&response::Room> {
+	self.ranges
+		.get(room_id)
+		.and_then(|range| range.payload.as_ref())
+}
+
+#[implement(Results)]
 pub(super) fn into_payloads(self) -> BTreeMap<OwnedRoomId, response::Room> {
 	self.ranges
 		.into_iter()

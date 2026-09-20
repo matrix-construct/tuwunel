@@ -1,132 +1,222 @@
-use futures::StreamExt;
+use futures::{StreamExt, TryStreamExt};
 use itertools::Itertools;
 use ruma::{
 	OwnedUserId, RoomId, UserId,
-	api::client::sync::sync_events::v5::response::Profiles,
+	api::client::sync::sync_events::v5::response::{Profiles, Room as ResponseRoom},
+	events::{StateEventType, room::member::MembershipState},
 	profile::{ProfileFieldName, UserProfileChanges, UserProfileUpdate},
+	serde::Raw,
 };
+use serde_json::Value;
 use tuwunel_core::{
 	Result,
-	utils::{BoolExt, IterStream, ReadyExt, stream::BroadbandExt},
+	utils::{
+		BoolExt, IterStream,
+		stream::{BroadbandExt, TryReadyExt},
+	},
 };
 use tuwunel_service::{Services, sync::Connection};
 
-use super::{SyncInfo, Window};
-use crate::client::sync::profiles::{Changes, FieldValue, Fields, fold_change, read_field};
+use super::{
+	super::{range::Results, rooms::merged_room_details},
+	SyncInfo, Window, selector,
+};
+use crate::client::sync::profiles::{Changes, Fields, fold_change, read_field, visible};
 
 /// Collects the MSC4262 profiles extension payload.
 ///
-/// The change log is read twice, once under the syncing user's own prefix and
-/// once under each room they know, because the log carries a copy of every
-/// write under both. Reading a field's current value is deferred until the two
-/// passes have folded away the duplicates, so a user who changed one field in
-/// forty shared rooms costs one read. The syncing user's own profile is also
-/// sent whole, ahead of both passes, until the client acknowledges a response
-/// carrying it, and again whenever the extension is switched back on or its
-/// field set widens.
+/// Current selected-room bases and bounded discovery share one user-field set.
+/// Visibility and read errors resolve before the response position is acknowledged.
 #[tracing::instrument(name = "profiles", level = "trace", skip_all)]
 pub(super) async fn collect(
 	SyncInfo { services, sender_user, .. }: SyncInfo<'_>,
 	conn: &Connection,
 	window: &Window,
+	ranges: &Results,
 ) -> Result<Profiles> {
 	let requested = conn.extensions.profiles.fields.as_deref();
+	if requested.is_some_and(<[_]>::is_empty) {
+		return Ok(Profiles::default());
+	}
 
-	let changes = own_base(services, sender_user, conn, requested).await;
+	let bases = room_bases(services, conn, window, ranges).await?;
+	let changes = bases
+		.chain(
+			conn.own_profile_owed()
+				.then_some(sender_user.to_owned()),
+		)
+		.sorted_unstable()
+		.dedup()
+		.stream()
+		.broad_then(|user_id| base(services, sender_user, user_id, requested))
+		.ready_try_filter_map(Result::Ok)
+		.try_collect()
+		.await?;
 
 	let changes = services
 		.profile
-		.profile_changed(sender_user, conn.globalsince, Some(conn.next_batch))
-		.ready_filter(|(_, field)| was_requested(requested, field))
-		.ready_fold(changes, fold_change)
-		.await;
+		.try_profile_changed(sender_user, conn.globalsince, Some(conn.next_batch))
+		.ready_try_filter(|(_, field)| was_requested(requested, field))
+		.ready_try_fold(changes, |changes, change| Ok(fold_change(changes, change)))
+		.await?;
 
-	// Every room the connection knows, not only the window: sliding out of the
-	// window does not stop a member's profile from mattering to this client.
 	let changes = window
 		.keys()
 		.merge(conn.rooms.keys())
 		.dedup()
-		.stream()
-		.fold(changes, |changes, room_id| {
-			fold_room(changes, services, conn, room_id, requested)
+		.filter(|_| conn.globalsince != 0)
+		.try_stream()
+		.try_fold(changes, async |changes, room_id| {
+			fold_room(changes, services, conn, room_id, requested).await
 		})
-		.await;
+		.await?;
 
 	let users = changes
 		.into_iter()
 		.stream()
-		.broad_then(|(user_id, fields)| collect_user(services, user_id, fields))
-		.collect()
-		.await;
+		.broad_then(|(user_id, fields)| collect_user(services, sender_user, user_id, fields))
+		.ready_try_filter_map(Result::Ok)
+		.try_collect()
+		.await?;
 
 	Ok(Profiles { users })
 }
 
-/// The syncing user's own profile, every field, while the connection owes it.
-///
-/// The log names only the fields that changed since it began, and only from
-/// where the connection stands, so it cannot seed a profile older than itself
-/// or one the connection skipped past with the extension off. Element X reads
-/// its own avatar and name from this extension alone once the server advertises
-/// it, and holds nothing else to lay later deltas onto: a status laid on a
-/// profile it never received leaves the client holding a status and nothing
-/// more.
-async fn own_base(
+#[tracing::instrument(level = "trace", skip_all)]
+async fn room_bases(
 	services: &Services,
-	sender_user: &UserId,
 	conn: &Connection,
-	requested: Option<&[ProfileFieldName]>,
-) -> Changes {
-	if !conn.own_profile_owed() {
-		return Changes::new();
-	}
+	window: &Window,
+	ranges: &Results,
+) -> Result<impl Iterator<Item = OwnedUserId>> {
+	let config = &conn.extensions.profiles;
 
-	let fields: Fields = services
-		.profile
-		.profile_field_names(sender_user)
-		.ready_filter(|name| was_requested(requested, name.as_str()))
-		.collect()
-		.await;
+	let subjects = selector(
+		conn,
+		window,
+		config.lists.as_ref().map(|lists| lists.iter()),
+		config.rooms.as_ref().map(|rooms| rooms.iter()),
+	)
+	.filter_map(|room_id| {
+		ranges
+			.payload(room_id)
+			.map(|room| (room_id, room))
+	})
+	.filter(|(_, room)| room.initial.unwrap_or(false) || conn.own_profile_owed())
+	.try_stream()
+	.try_fold(Vec::new(), async |bases, (room_id, room)| {
+		let bases = extend_subjects(bases, subjects(room));
 
-	fields
-		.is_empty()
-		.is_false()
-		.then(|| (sender_user.to_owned(), fields))
-		.into_iter()
-		.collect()
+		let Some(selected) = window.get(room_id) else {
+			return Ok(bases);
+		};
+
+		let (_, state) = merged_room_details(conn, &selected.lists, room_id);
+		let lazy = state
+			.iter()
+			.any(|(kind, key)| kind == &StateEventType::RoomMember && key == "$LAZY");
+
+		let full = state.iter().any(|(kind, key)| {
+			(kind == &StateEventType::RoomMember || kind == &StateEventType::from("*"))
+				&& key == "*"
+		});
+
+		if (lazy && !full) || room.membership != Some(MembershipState::Join) {
+			return Ok(bases);
+		}
+
+		services
+			.state_cache
+			.room_members_checked(room_id)
+			.map_ok(ToOwned::to_owned)
+			.ready_try_fold(bases, |bases, user_id| Ok(extend_subjects(bases, [user_id])))
+			.await
+	})
+	.await?;
+
+	Ok(subjects.into_iter())
 }
 
-/// Folds the changes one room's members made into the running set.
-///
-/// The room scans share one accumulator rather than each building its own: a
-/// cursor stream resolves inside its first poll, so a fan-out here would buy no
-/// concurrency and only leave a map per room to merge afterwards.
+fn extend_subjects(
+	mut subjects: Vec<OwnedUserId>,
+	additional: impl IntoIterator<Item = OwnedUserId>,
+) -> Vec<OwnedUserId> {
+	subjects.extend(additional);
+	subjects
+}
+
+fn subjects(room: &ResponseRoom) -> impl Iterator<Item = OwnedUserId> + '_ {
+	let senders = room
+		.timeline
+		.iter()
+		.filter_map(|event| event.get_field("sender").ok().flatten());
+
+	let members = room
+		.timeline
+		.iter()
+		.filter_map(member)
+		.chain(room.required_state.iter().filter_map(member));
+
+	let heroes = room
+		.heroes
+		.iter()
+		.flatten()
+		.map(|hero| hero.user_id.clone());
+
+	senders.chain(members).chain(heroes)
+}
+
+fn member<T>(event: &Raw<T>) -> Option<OwnedUserId> {
+	event
+		.get_field("type")
+		.ok()
+		.flatten()
+		.filter(|kind: &StateEventType| kind == &StateEventType::RoomMember)
+		.and_then(|_| event.get_field("state_key").ok().flatten())
+}
+
+#[tracing::instrument(level = "trace", skip_all)]
+async fn base(
+	services: &Services,
+	sender_user: &UserId,
+	user_id: OwnedUserId,
+	requested: Option<&[ProfileFieldName]>,
+) -> Result<Option<(OwnedUserId, Fields)>> {
+	if !visible(services, sender_user, &user_id).await? {
+		return Ok(None);
+	}
+
+	let fields: Fields = match requested {
+		| Some(fields) => fields.iter().cloned().collect(),
+		| None =>
+			services
+				.profile
+				.try_profile_field_names(&user_id)
+				.try_collect()
+				.await?,
+	};
+
+	Ok(fields
+		.is_empty()
+		.is_false()
+		.then_some((user_id, fields)))
+}
+
 async fn fold_room(
 	changes: Changes,
 	services: &Services,
 	conn: &Connection,
 	room_id: &RoomId,
 	requested: Option<&[ProfileFieldName]>,
-) -> Changes {
+) -> Result<Changes> {
 	services
 		.profile
-		.room_profile_changed(room_id, changes_from(conn, room_id), Some(conn.next_batch))
-		.ready_filter(|(_, field)| was_requested(requested, field))
-		.ready_fold(changes, fold_change)
+		.try_room_profile_changed(room_id, changes_from(conn, room_id), Some(conn.next_batch))
+		.ready_try_filter(|(_, field)| was_requested(requested, field))
+		.ready_try_fold(changes, |changes, change| Ok(fold_change(changes, change)))
 		.await
 }
 
-/// Where a room's slice of the change log starts.
-///
-/// A room this connection has never delivered starts at the beginning of the
-/// log, which stands in for the initial base MSC4262 asks for when a room
-/// enters the window. That slice names exactly the members whose profile
-/// changed since the log began and nobody else, so it costs far less than the
-/// member list the proposal warns against sending for a room the size of
-/// Matrix HQ. A connection that widened its field set starts every room there
-/// too, so the new field reaches the members the log knows about, which is as
-/// much of the proposal's base for it as that slice can carry.
 fn changes_from(conn: &Connection, room_id: &RoomId) -> u64 {
 	conn.rooms
 		.get(room_id)
@@ -135,48 +225,50 @@ fn changes_from(conn: &Connection, room_id: &RoomId) -> u64 {
 		.unwrap_or_default()
 }
 
-/// Whether the connection asked for the changed field.
-///
-/// An absent filter means every field, which is the only case Element X
-/// produces: it never names the fields it wants.
 fn was_requested(requested: Option<&[ProfileFieldName]>, field: &str) -> bool {
 	requested.is_none_or(|fields| fields.iter().any(|name| name.as_str() == field))
 }
 
 async fn collect_user(
 	services: &Services,
+	sender_user: &UserId,
 	user_id: OwnedUserId,
 	fields: Fields,
-) -> (OwnedUserId, UserProfileUpdate) {
-	let update = read_update(services, &user_id, fields).await;
+) -> Result<Option<(OwnedUserId, UserProfileUpdate)>> {
+	if !visible(services, sender_user, &user_id).await? {
+		return Ok(None);
+	}
 
-	(user_id, update)
+	let update = read_update(services, &user_id, fields).await?;
+
+	Ok(Some((user_id, update)))
 }
 
-/// Reads back what the logged fields hold now.
-///
-/// The log records that a field changed and never what it changed to, so the
-/// current value is the one to send: both proposals want only the latest
-/// update, and a field the log names but the profile no longer holds is the
-/// removal a client needs to clear its own copy.
-async fn read_update(services: &Services, user_id: &UserId, fields: Fields) -> UserProfileUpdate {
+async fn read_update(
+	services: &Services,
+	user_id: &UserId,
+	fields: Fields,
+) -> Result<UserProfileUpdate> {
 	let changes = fields
 		.into_iter()
 		.stream()
 		.then(|name| read_field(services, user_id, name))
-		.ready_fold(UserProfileChanges::new(), fold_field)
-		.await;
+		.map(|(name, value)| value.map(|value| (name, value)))
+		.ready_try_fold(UserProfileChanges::new(), |changes, field| {
+			Ok(fold_field(changes, field))
+		})
+		.await?;
 
-	UserProfileUpdate::Updated(changes)
+	Ok(UserProfileUpdate::Updated(changes))
 }
 
-fn fold_field(mut changes: UserProfileChanges, (name, value): FieldValue) -> UserProfileChanges {
-	// Only an absent field is a removal: a row that fails to read is this
-	// server's problem, not a signal to wipe the client's copy.
+fn fold_field(
+	mut changes: UserProfileChanges,
+	(name, value): (ProfileFieldName, Option<Value>),
+) -> UserProfileChanges {
 	match value {
-		| Ok(None) => changes.removed.push(name),
-		| Err(_) => (),
-		| Ok(Some(value)) => {
+		| None => changes.removed.push(name),
+		| Some(value) => {
 			changes.updated.insert(name, value);
 		},
 	}

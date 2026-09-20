@@ -347,7 +347,11 @@ async fn collect_user(
 }
 
 #[tracing::instrument(level = "trace", skip_all)]
-async fn visible(services: &Services, sender_user: &UserId, user_id: &UserId) -> Result<bool> {
+pub(super) async fn visible(
+	services: &Services,
+	sender_user: &UserId,
+	user_id: &UserId,
+) -> Result<bool> {
 	if sender_user == user_id {
 		return Ok(true);
 	}

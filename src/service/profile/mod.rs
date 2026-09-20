@@ -388,12 +388,22 @@ pub fn profile_field_names(
 	&self,
 	user_id: &UserId,
 ) -> impl Stream<Item = ProfileFieldName> + Send {
+	self.try_profile_field_names(user_id).ignore_err()
+}
+
+/// Enumerates current profile field names, preserving storage and decoding errors.
+///
+/// Sync bases must finish this inventory before acknowledging profile delivery.
+#[implement(Service)]
+pub fn try_profile_field_names(
+	&self,
+	user_id: &UserId,
+) -> impl Stream<Item = Result<ProfileFieldName>> + Send {
 	let prefix = (user_id, Interfix);
 
 	self.useridprofilekey_value
 		.keys_prefix(&prefix)
-		.ignore_err()
-		.map(|(_, name): (Ignore, &str)| name.into())
+		.map_ok(|(_, name): (Ignore, &str)| name.into())
 }
 
 /// Clears every stored profile field and propagates canonical removals.

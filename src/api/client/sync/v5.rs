@@ -38,7 +38,7 @@ use tuwunel_service::{
 };
 
 use self::{
-	extensions::{apply_ranges, handle as handle_extensions},
+	extensions::{apply_profiles, apply_ranges, handle as handle_extensions},
 	range::collect as collect_ranges,
 };
 use super::share_encrypted_room;
@@ -232,6 +232,7 @@ pub(crate) async fn sync_events_v5_route(
 
 			let mut extensions = extensions?;
 
+			apply_profiles(sync_info, &conn, &window, &ranges, &mut extensions).await?;
 			apply_ranges(&conn, &window, &mut ranges, &mut extensions);
 			conn.update_rooms_epilogue(ranges.room_updates());
 			conn.update_profiles_epilogue();
