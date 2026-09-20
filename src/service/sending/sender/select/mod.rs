@@ -14,7 +14,9 @@ use tuwunel_core::{
 	utils::{BoolExt, ReadyExt},
 };
 
-use super::{EDU_LIMIT, NewEvents, RetryAction, TransactionStatus, TransactionStatuses};
+use super::{
+	DEQUEUE_LIMIT, EDU_LIMIT, NewEvents, RetryAction, TransactionStatus, TransactionStatuses,
+};
 use crate::{
 	federation::ShouldAttempt,
 	sending::{Destination, EduBuf, EduVec, SendingEvent, Service},
@@ -181,22 +183,66 @@ fn transition(
 pub(super) async fn with_edus(
 	&self,
 	dest: &Destination,
-	mut events: Vec<SendingEvent>,
+	events: Vec<SendingEvent>,
 ) -> Vec<SendingEvent> {
 	let Destination::Federation(server_name) = dest else {
 		return events;
 	};
+
+	let events = if events.is_empty() {
+		self.resume_queued(dest).await
+	} else {
+		events
+	};
+
+	// Fresh signing keys must not overtake an older queued signing update.
+	if self
+		.db
+		.queued_requests(dest)
+		.take(1)
+		.count()
+		.await
+		.ne(&0)
+	{
+		return events;
+	}
 
 	let budget_used = events
 		.iter()
 		.filter(|event| matches!(event, SendingEvent::Edu(_)))
 		.count();
 
-	if let Ok(edus) = self.select_edus(server_name, budget_used).await {
-		events.extend(edus.into_iter().map(SendingEvent::Edu));
+	let edus = self
+		.select_edus(server_name, budget_used)
+		.await
+		.unwrap_or_default();
+
+	append_edus(events, edus)
+}
+
+fn append_edus(mut events: Vec<SendingEvent>, edus: EduVec) -> Vec<SendingEvent> {
+	events.extend(edus.into_iter().map(SendingEvent::Edu));
+	events
+}
+
+#[implement(Service)]
+#[tracing::instrument(level = "trace", skip_all)]
+async fn resume_queued(&self, dest: &Destination) -> Vec<SendingEvent> {
+	let queued: NewEvents = self
+		.db
+		.queued_requests(dest)
+		.take(DEQUEUE_LIMIT)
+		.collect()
+		.await;
+
+	if !queued.is_empty() {
+		self.db.mark_as_active(queued.iter());
 	}
 
-	events
+	queued
+		.into_iter()
+		.map(|(_, event)| event)
+		.collect()
 }
 
 #[implement(Service)]

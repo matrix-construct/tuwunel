@@ -1,5 +1,6 @@
 mod cleanup;
 mod fixture;
+mod ordering;
 
 use std::iter::once;
 
