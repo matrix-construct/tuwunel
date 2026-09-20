@@ -29,14 +29,14 @@
 
 | ✅ `yes` | 🟨 `part` | ❌ `no` | ⬛ `n/a` | total |
 |---:|---:|---:|---:|---:|
-| 256 | 54 | 435 | 330 | 1075 |
+| 257 | 54 | 434 | 330 | 1075 |
 
 ### Status by inventory bucket
 
 | Inv | yes | part | no | n/a | total |
 |---|---|---|---|---|---|
 | merged | 182 | 15 | 12 | 60 | 269 |
-| open | 43 | 27 | 336 | 198 | 604 |
+| open | 44 | 27 | 335 | 198 | 604 |
 | closed | 31 | 12 | 87 | 72 | 202 |
 
 ## Merged
@@ -361,7 +361,7 @@ in the [Out of scope](#out-of-scope) section.
 | MSC4432 | ❌ ● | 0/0 | Server-wide room name overrides | No m.room.name.server_wide propagation; no capability |
 | MSC4431 | ❌ ● | 0/0 | Personalised room name overrides | Server side passively allows m.room.name.private as account data |
 | MSC4430 | ❌ ● | 0/0 | Member Keys | No member-key room version, no /member_key federation endpoint |
-| MSC4429 | ✅ ● | 85/85 | Profile Updates for Legacy Sync | users block served from the profile change log, filtered by profile_fields; n... |
+| MSC4429 | ✅ ● | 85/85 | Profile Updates for Legacy Sync | Filtered legacy profile updates; no atomic snapshots or whole-user drops. |
 | MSC4428 | ❌ ● | 0/0 | Stable identifiers for Room Members | No member_info or unsigned.stable_id added to events or sync |
 | MSC4427 | ❌ ● | 10/10 | Custom banners for user profiles | No m.banner_url handling; MSC4133 plumbing accepts it opaquely |
 | MSC4426 | ✅ ● | 90/90 | User Status Profile Fields | Both budgets enforced with 400 M_TOO_LARGE; no rate limiting anywhere in the ... |

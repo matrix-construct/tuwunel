@@ -8,7 +8,7 @@ use tuwunel::{Args, Runtime, Server, async_run, async_start, async_stop};
 use tuwunel_core::{
 	Result, err,
 	ruma::{UserId, profile::ProfileFieldName, user_id},
-	utils::{BoolExt, result::NotFound},
+	utils::{BoolExt, TryReadyExt, result::NotFound},
 };
 use tuwunel_service::Services;
 
@@ -133,7 +133,88 @@ async fn assert_change_log_bounds(services: &Services) -> Result {
 
 	let stranger = user_id!("@statusbounds-stranger:localhost");
 
-	expect_fields(services, stranger, (before, cleared), &[], "another user's prefix").await
+	expect_fields(services, stranger, (before, cleared), &[], "another user's prefix").await?;
+	assert_corrupt_range_boundaries(services).await
+}
+
+#[tracing::instrument(level = "trace", skip_all)]
+async fn assert_corrupt_range_boundaries(services: &Services) -> Result {
+	let user_id = user_id!("@zzprofilebounds:localhost");
+	let next_user = user_id!("@zzprofileboundt:localhost");
+	let changes = &services.db["profilechangeid_userid"];
+
+	changes.put_raw((user_id, 10_u64, STATUS), user_id.as_bytes());
+	changes.put_raw((user_id, 20_u64, STATUS), b"not-a-user-id");
+	changes.put_raw((next_user, 10_u64, STATUS), b"not-a-user-id");
+
+	expect_checked_fields(services, user_id, (0, 10), &[STATUS]).await?;
+	assert!(
+		services
+			.profile
+			.try_profile_changed(user_id, 10, Some(20))
+			.ready_try_fold((), |(), _| Ok(()))
+			.await
+			.is_err(),
+		"in-range corrupt values must fail discovery"
+	);
+
+	changes.del((user_id, 20_u64, STATUS));
+	expect_checked_fields(services, user_id, (0, 20), &[STATUS]).await?;
+
+	let invalid_field = (user_id, 11_u64, &b"\x80"[..]);
+
+	changes.put_raw(invalid_field, user_id.as_bytes());
+	expect_checked_fields(services, user_id, (0, 10), &[STATUS]).await?;
+	assert!(
+		services
+			.profile
+			.try_profile_changed(user_id, 10, Some(11))
+			.ready_try_fold((), |(), _| Ok(()))
+			.await
+			.is_err(),
+		"in-range corrupt keys must fail discovery"
+	);
+
+	expect_checked_fields(services, user_id, (10, 10), &[]).await?;
+	expect_checked_fields(services, user_id, (20, 10), &[]).await?;
+	changes.del(invalid_field);
+
+	changes.put_raw((user_id, u64::MAX, STATUS), b"not-a-user-id");
+	expect_checked_fields(services, user_id, (u64::MAX, u64::MAX), &[]).await?;
+	assert!(
+		services
+			.profile
+			.try_profile_changed(user_id, u64::MAX, None)
+			.ready_try_fold((), |(), _| Ok(()))
+			.await
+			.is_ok(),
+		"an exhausted unbounded range must not replay its last row"
+	);
+
+	changes.put_raw((user_id, u64::MAX, STATUS), user_id.as_bytes());
+	expect_checked_fields(services, user_id, (u64::MAX - 1, u64::MAX), &[STATUS]).await
+}
+
+#[tracing::instrument(level = "trace", skip_all)]
+async fn expect_checked_fields(
+	services: &Services,
+	user_id: &UserId,
+	(from, to): (u64, u64),
+	expected: &[&str],
+) -> Result {
+	let count = services
+		.profile
+		.try_profile_changed(user_id, from, Some(to))
+		.ready_try_fold(0_usize, |index, (_, field)| {
+			assert_eq!(Some(field), expected.get(index).copied());
+
+			Ok(index.saturating_add(1))
+		})
+		.await?;
+
+	assert_eq!(count, expected.len());
+
+	Ok(())
 }
 
 async fn set_status(services: &Services, user_id: &UserId, text: &str) -> Result {

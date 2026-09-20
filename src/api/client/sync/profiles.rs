@@ -1,11 +1,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use futures::StreamExt;
+use futures::{StreamExt, TryStreamExt, future::ready};
 use itertools::Itertools;
 use ruma::{
 	OwnedUserId, RoomId, UserId,
 	api::client::{
-		filter::FilterDefinition,
+		filter::{FilterDefinition, LazyLoadOptions},
 		sync::sync_events::v3::{JoinedRoom, Rooms, State, UserUpdate},
 	},
 	events::{AnySyncStateEvent, StateEventType, room::member::MembershipState},
@@ -16,7 +16,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use tuwunel_core::{
 	Result,
-	utils::{IterStream, ReadyExt, result::NotFound, stream::BroadbandExt},
+	utils::{IterStream, TryReadyExt, result::NotFound, stream::BroadbandExt},
 	warn,
 };
 use tuwunel_service::{Services, profile::ProfileChange};
@@ -36,8 +36,8 @@ pub(super) type Changes = BTreeMap<OwnedUserId, Fields>;
 
 /// One field paired with whatever reading it back produced.
 ///
-/// The error rides per field rather than propagating, so one unreadable row
-/// costs that field alone and not the user's entry.
+/// Keeping the name beside the result lets each collector distinguish a
+/// confirmed absence from a storage or decoding failure.
 pub(super) type FieldValue = (ProfileFieldName, Result<Option<Value>>);
 
 /// The values one user's entry carries, by field name.
@@ -64,35 +64,38 @@ struct MemberContent {
 
 /// Collects the MSC4429 profile updates for a legacy sync response.
 ///
-/// The client names the fields it wants in its sync filter, and an empty list,
-/// which is the default, asks for nothing at all. Two sources feed the block:
-/// the members whose profile changed since the client's token, and the members
-/// whose membership this response carries, whose current values ride along so
-/// that the client can render them without a profile request per user.
+/// The filter selects fields, with an empty default opting out. Changes and
+/// current bases share a user-field set and require current shared membership,
+/// except for self. Read failures abort collection before its position can be
+/// acknowledged.
 #[tracing::instrument(name = "profiles", level = "trace", skip_all)]
 pub(super) async fn collect(
 	services: &Services,
 	sender_user: &UserId,
-	since: u64,
+	since: Option<u64>,
 	next_batch: u64,
 	filter: &FilterDefinition,
 	rooms: &Rooms,
-) -> Users {
+) -> Result<Users> {
 	let requested = filter.profile_fields.ids.as_slice();
 
 	if requested.is_empty() {
-		return Users::new();
+		return Ok(Users::new());
 	}
 
-	let changes = changed(services, sender_user, since, next_batch, requested).await;
-	let changes = witnessed(services, sender_user, since, rooms, requested, changes).await;
+	let changes =
+		changed(services, sender_user, since.unwrap_or(0), next_batch, requested).await?;
+
+	let changes =
+		witnessed(services, sender_user, since.is_none(), rooms, filter, changes).await?;
 
 	changes
 		.into_iter()
 		.stream()
-		.broad_then(|(user_id, fields)| collect_user(services, user_id, fields))
-		.ready_filter(|(_, update)| carries_a_field(update))
-		.collect()
+		.broad_then(|(user_id, fields)| collect_user(services, sender_user, user_id, fields))
+		.ready_try_filter_map(Result::Ok)
+		.ready_try_filter(|(_, update)| carries_a_field(update))
+		.try_collect()
 		.await
 }
 
@@ -103,26 +106,27 @@ pub(super) async fn collect(
 /// are a MUST so that their other devices learn of them, and the rooms are the
 /// whole joined set rather than the rooms this response carries: a member's new
 /// status matters to a client whose room had no events.
+#[tracing::instrument(level = "trace", skip_all)]
 async fn changed(
 	services: &Services,
 	sender_user: &UserId,
 	since: u64,
 	next_batch: u64,
 	requested: &[ProfileFieldName],
-) -> Changes {
+) -> Result<Changes> {
 	let changes = services
 		.profile
-		.profile_changed(sender_user, since, Some(next_batch))
-		.ready_filter(|(_, field)| was_requested(requested, field))
-		.ready_fold(Changes::new(), fold_change)
-		.await;
+		.try_profile_changed(sender_user, since, Some(next_batch))
+		.ready_try_filter(|(_, field)| was_requested(requested, field))
+		.ready_try_fold(Changes::new(), |changes, change| Ok(fold_change(changes, change)))
+		.await?;
 
 	// A cursor stream resolves in its first poll, so a buffered fan-out buys nothing.
 	services
 		.state_cache
-		.rooms_joined(sender_user)
-		.map(ToOwned::to_owned)
-		.fold(changes, async |changes, room_id| {
+		.rooms_joined_checked(sender_user)
+		.map_ok(ToOwned::to_owned)
+		.try_fold(changes, async |changes, room_id| {
 			room_changed(services, &room_id, since, next_batch, requested, changes).await
 		})
 		.await
@@ -133,6 +137,7 @@ async fn changed(
 /// The accumulator is threaded rather than merged afterwards, because each
 /// room's scan resolves inside its first poll and would only leave a map to
 /// reduce.
+#[tracing::instrument(level = "trace", skip_all)]
 async fn room_changed(
 	services: &Services,
 	room_id: &RoomId,
@@ -140,12 +145,12 @@ async fn room_changed(
 	next_batch: u64,
 	requested: &[ProfileFieldName],
 	changes: Changes,
-) -> Changes {
+) -> Result<Changes> {
 	services
 		.profile
-		.room_profile_changed(room_id, since, Some(next_batch))
-		.ready_filter(|(_, field)| was_requested(requested, field))
-		.ready_fold(changes, fold_change)
+		.try_room_profile_changed(room_id, since, Some(next_batch))
+		.ready_try_filter(|(_, field)| was_requested(requested, field))
+		.ready_try_fold(changes, |changes, change| Ok(fold_change(changes, change)))
 		.await
 }
 
@@ -162,23 +167,22 @@ pub(super) fn fold_change(mut changes: Changes, (user_id, field): ProfileChange<
 	changes
 }
 
-/// The current values of the members this response names.
+/// Adds current bases for the initial scope and members this response names.
 ///
-/// MSC4429 requires a request with no token to send current values rather than
-/// only later changes, and licenses a reduced set when the client lazy-loads
-/// members. Reading the membership back out of the response answers both: a
-/// lazy-loading client is sent the members it is about to render, and a
-/// full-state client everyone it was sent. The syncing user is added on that
-/// first request, to name them when they share no room with anybody.
+/// Non-lazy initial bases use current joined membership independently of event
+/// filtering. Lazy and incremental responses also introduce the subjects their
+/// member events name, while self gets an initial base even without rooms.
+#[tracing::instrument(level = "trace", skip_all)]
 async fn witnessed(
 	services: &Services,
 	sender_user: &UserId,
-	since: u64,
+	initial: bool,
 	rooms: &Rooms,
-	requested: &[ProfileFieldName],
+	filter: &FilterDefinition,
 	changes: Changes,
-) -> Changes {
-	let own = since.eq(&0).then_some(sender_user.to_owned());
+) -> Result<Changes> {
+	let requested = filter.profile_fields.ids.as_slice();
+	let own = initial.then_some(sender_user.to_owned());
 
 	// A member of several rooms would otherwise be read back once per room.
 	let members = rooms
@@ -189,34 +193,71 @@ async fn witnessed(
 		.sorted_unstable()
 		.dedup();
 
-	members
-		.stream()
-		.broad_then(async |user_id| {
-			let fields = held(services, &user_id, requested).await;
+	let changes = members.fold(changes, |changes, user_id| base(changes, user_id, requested));
 
-			(user_id, fields)
-		})
-		.ready_fold(changes, fold_held)
-		.await
-}
-
-/// The requested fields this user's profile actually holds.
-///
-/// Only stored fields are collected, so a field this user never set stays out
-/// of the block rather than arriving as the `null` that means a removal.
-async fn held(services: &Services, user_id: &UserId, requested: &[ProfileFieldName]) -> Fields {
-	services
-		.profile
-		.profile_field_names(user_id)
-		.ready_filter(|name| was_requested(requested, name.as_str()))
-		.collect()
-		.await
-}
-
-fn fold_held(mut changes: Changes, (user_id, fields): (OwnedUserId, Fields)) -> Changes {
-	if !fields.is_empty() {
-		changes.entry(user_id).or_default().extend(fields);
+	if !initial {
+		return Ok(changes);
 	}
+
+	services
+		.state_cache
+		.rooms_joined_checked(sender_user)
+		.map_ok(ToOwned::to_owned)
+		.try_fold(changes, async |changes, room_id| {
+			initial_room(services, &room_id, filter, changes).await
+		})
+		.await
+}
+
+#[tracing::instrument(level = "trace", skip_all)]
+async fn initial_room(
+	services: &Services,
+	room_id: &RoomId,
+	filter: &FilterDefinition,
+	changes: Changes,
+) -> Result<Changes> {
+	if lazy_room(services, room_id, filter).await? {
+		return Ok(changes);
+	}
+
+	services
+		.state_cache
+		.room_members_checked(room_id)
+		.ready_try_fold(changes, |changes, user_id| {
+			Ok(base(changes, user_id.to_owned(), &filter.profile_fields.ids))
+		})
+		.await
+}
+
+#[tracing::instrument(level = "trace", skip_all)]
+async fn lazy_room(
+	services: &Services,
+	room_id: &RoomId,
+	filter: &FilterDefinition,
+) -> Result<bool> {
+	let options = [&filter.room.state.lazy_load_options, &filter.room.timeline.lazy_load_options];
+
+	if options
+		.into_iter()
+		.all(LazyLoadOptions::is_disabled)
+	{
+		return Ok(false);
+	}
+
+	let encrypted = services
+		.state_accessor
+		.room_state_get(room_id, &StateEventType::RoomEncryption, "")
+		.await
+		.optional()?;
+
+	Ok(encrypted.is_none())
+}
+
+fn base(mut changes: Changes, user_id: OwnedUserId, requested: &[ProfileFieldName]) -> Changes {
+	changes
+		.entry(user_id)
+		.or_default()
+		.extend(requested.iter().cloned());
 
 	changes
 }
@@ -247,14 +288,10 @@ fn state_events(state: &State) -> &[Raw<AnySyncStateEvent>] {
 	}
 }
 
-/// The subject of one event, when it is a membership this client still renders.
+/// The subject of a membership event that can introduce a profile base.
 ///
-/// A full-state response carries every departure the room ever saw, and MSC4429
-/// asks a server not to send profiles for users who share no room, so a
-/// membership that has ended names nobody here. The state key is read as an
-/// owned id rather than borrowed out of the JSON, because a borrowed `&str`
-/// refuses any string the parser had to unescape, and a historical user id may
-/// hold the quote or backslash that forces one.
+/// Current shared membership is checked before reading any candidate's values.
+/// The state key is owned because a historical user ID may need JSON unescaping.
 fn present_member<T>(event: &Raw<T>) -> Option<OwnedUserId> {
 	event
 		.get_field("type")
@@ -269,8 +306,8 @@ fn present_member<T>(event: &Raw<T>) -> Option<OwnedUserId> {
 impl MemberContent {
 	/// Whether the member is in the room, or on their way in.
 	///
-	/// Invites count because a client renders an invited user's name beside
-	/// their pending membership, which is the same reason heroes do.
+	/// Invited subjects remain candidates when another joined room grants
+	/// current shared visibility.
 	fn is_present(&self) -> bool {
 		matches!(self.membership, MembershipState::Join | MembershipState::Invite)
 	}
@@ -293,14 +330,43 @@ fn carries_a_field(update: &UserUpdate) -> bool {
 		.is_some_and(|updates| !updates.is_empty())
 }
 
+#[tracing::instrument(level = "trace", skip_all)]
 async fn collect_user(
 	services: &Services,
+	sender_user: &UserId,
 	user_id: OwnedUserId,
 	fields: Fields,
-) -> (OwnedUserId, UserUpdate) {
-	let update = read_update(services, &user_id, fields).await;
+) -> Result<Option<(OwnedUserId, UserUpdate)>> {
+	if !visible(services, sender_user, &user_id).await? {
+		return Ok(None);
+	}
 
-	(user_id, update)
+	let update = read_update(services, &user_id, fields).await?;
+
+	Ok(Some((user_id, update)))
+}
+
+#[tracing::instrument(level = "trace", skip_all)]
+async fn visible(services: &Services, sender_user: &UserId, user_id: &UserId) -> Result<bool> {
+	if sender_user == user_id {
+		return Ok(true);
+	}
+
+	services
+		.state_cache
+		.rooms_joined_checked(user_id)
+		.map_ok(ToOwned::to_owned)
+		.and_then(async |room_id| {
+			let joined = services
+				.state_cache
+				.get_joined_count(&room_id, sender_user)
+				.await
+				.optional()?;
+
+			Ok(joined.is_some())
+		})
+		.try_any(ready)
+		.await
 }
 
 /// Reads back what the collected fields hold now.
@@ -309,15 +375,21 @@ async fn collect_user(
 /// current value is the one to send. A field the log names but the profile no
 /// longer holds is the removal a client needs to clear its own copy, which the
 /// proposal spells as a `null` value.
-async fn read_update(services: &Services, user_id: &UserId, fields: Fields) -> UserUpdate {
+#[tracing::instrument(level = "trace", skip_all)]
+async fn read_update(
+	services: &Services,
+	user_id: &UserId,
+	fields: Fields,
+) -> Result<UserUpdate> {
 	let profile_updates = fields
 		.into_iter()
 		.stream()
 		.then(|name| read_field(services, user_id, name))
-		.ready_fold(Updates::new(), fold_field)
-		.await;
+		.map(Ok)
+		.ready_try_fold(Updates::new(), fold_field)
+		.await?;
 
-	UserUpdate::new(profile_updates)
+	Ok(UserUpdate::new(profile_updates))
 }
 
 pub(super) async fn read_field(
@@ -337,12 +409,12 @@ pub(super) async fn read_field(
 	(name, value)
 }
 
-fn fold_field(mut updates: Updates, (name, value): FieldValue) -> Updates {
-	// Only an absent field is a removal: a row that fails to read is this
-	// server's problem, not a signal to wipe the client's copy.
-	if let Ok(value) = value {
-		updates.insert(name, value.unwrap_or(Value::Null));
-	}
+fn fold_field(updates: Updates, (name, value): FieldValue) -> Result<Updates> {
+	value.map(|value| insert_field(updates, name, value.unwrap_or(Value::Null)))
+}
+
+fn insert_field(mut updates: Updates, name: ProfileFieldName, value: Value) -> Updates {
+	updates.insert(name, value);
 
 	updates
 }
@@ -377,14 +449,15 @@ mod tests {
 		let updates = [
 			(field("m.status"), Ok(Some(json!({"emoji": "🏊"})))),
 			(field("displayname"), Ok(None)),
-			(field("avatar_url"), Err!("unreadable")),
 		]
 		.into_iter()
-		.fold(Updates::new(), fold_field);
+		.try_fold(Updates::new(), fold_field)
+		.expect("readable fields");
 
 		assert_eq!(updates.get(&field("m.status")), Some(&json!({"emoji": "🏊"})));
 		assert_eq!(updates.get(&field("displayname")), Some(&Value::Null));
-		assert_eq!(updates.get(&field("avatar_url")), None);
+		fold_field(updates, (field("avatar_url"), Err!("unreadable")))
+			.expect_err("unreadable fields abort collection");
 	}
 
 	/// One member event to build: its type, whom it names, and their membership.

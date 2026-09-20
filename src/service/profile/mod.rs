@@ -3,7 +3,11 @@ mod tests;
 
 use std::{borrow::Cow, collections::BTreeMap, iter::once, mem::replace, sync::Arc};
 
-use futures::{Stream, StreamExt, TryStreamExt, future::join};
+use futures::{
+	Stream, StreamExt, TryStreamExt,
+	future::{Either, join},
+	stream::empty,
+};
 use ruma::{
 	MxcUri, OwnedMxcUri, OwnedRoomId, OwnedUserId, RoomId, UserId,
 	api::federation::query::get_profile_information,
@@ -24,7 +28,9 @@ use tuwunel_core::{
 	},
 	warn,
 };
-use tuwunel_database::{Deserialized, Ignore, Interfix, Json, KeyVal, Map, Txn};
+use tuwunel_database::{
+	Deserialized, Ignore, Interfix, Json, KeyVal, Map, Txn, deserialize_from_slice, serialize_key,
+};
 
 pub struct Service {
 	mutex: MutexMap<OwnedUserId, ()>,
@@ -608,6 +614,7 @@ where
 ///
 /// The range is half-open on the low side, so a caller passes the sync token
 /// it already delivered. An absent `to` leaves the walk unbounded above.
+/// Storage and decoding failures are logged and skipped.
 #[implement(Service)]
 #[inline]
 pub fn profile_changed<'a>(
@@ -616,6 +623,23 @@ pub fn profile_changed<'a>(
 	from: u64,
 	to: Option<u64>,
 ) -> impl Stream<Item = ProfileChange<'a>> + Send + 'a {
+	self.try_profile_changed(user_id, from, to)
+		.inspect_err(|error| warn!(%error, "Profile change log row failed to read"))
+		.ignore_err()
+}
+
+/// Streams the user's logged profile fields, surfacing read failures.
+///
+/// The range excludes `from` and includes `to`, when provided. Fields and user
+/// IDs borrow the cursor and must be consumed or owned before it advances.
+#[implement(Service)]
+#[inline]
+pub fn try_profile_changed<'a>(
+	&'a self,
+	user_id: &'a UserId,
+	from: u64,
+	to: Option<u64>,
+) -> impl Stream<Item = Result<ProfileChange<'a>>> + Send + 'a {
 	self.profile_changed_user_or_room(user_id.as_str(), from, to)
 }
 
@@ -623,6 +647,7 @@ pub fn profile_changed<'a>(
 ///
 /// The range works as it does for a single user. A member appears once per
 /// field they changed, however many of the caller's rooms they share.
+/// Storage and decoding failures are logged and skipped.
 #[implement(Service)]
 #[inline]
 pub fn room_profile_changed<'a>(
@@ -631,6 +656,23 @@ pub fn room_profile_changed<'a>(
 	from: u64,
 	to: Option<u64>,
 ) -> impl Stream<Item = ProfileChange<'a>> + Send + 'a {
+	self.try_room_profile_changed(room_id, from, to)
+		.inspect_err(|error| warn!(%error, "Profile change log row failed to read"))
+		.ignore_err()
+}
+
+/// Streams a room's logged profile fields, surfacing read failures.
+///
+/// The range excludes `from` and includes `to`, when provided. Fields and user
+/// IDs borrow the cursor and must be consumed or owned before it advances.
+#[implement(Service)]
+#[inline]
+pub fn try_room_profile_changed<'a>(
+	&'a self,
+	room_id: &'a RoomId,
+	from: u64,
+	to: Option<u64>,
+) -> impl Stream<Item = Result<ProfileChange<'a>>> + Send + 'a {
 	self.profile_changed_user_or_room(room_id.as_str(), from, to)
 }
 
@@ -640,19 +682,37 @@ fn profile_changed_user_or_room<'a>(
 	user_or_room_id: &'a str,
 	from: u64,
 	to: Option<u64>,
-) -> impl Stream<Item = ProfileChange<'a>> + Send + 'a {
+) -> impl Stream<Item = Result<ProfileChange<'a>>> + Send + 'a {
 	let to = to.unwrap_or(u64::MAX);
-	let start = (user_or_room_id, from.saturating_add(1));
 
-	// User and room ids never collide as a prefix here: their sigils differ.
-	self.profilechangeid_userid
-		.stream_from(&start)
-		.inspect_err(|error| warn!(%error, "Profile change log row failed to read"))
-		.ignore_err()
-		.ready_take_while(move |((prefix, count, _), _): &ChangeKeyVal<'_>| {
-			*prefix == user_or_room_id && *count <= to
+	if from >= to {
+		return Either::Left(empty());
+	}
+
+	let start = (user_or_room_id, from.saturating_add(1));
+	let prefix = serialize_key((user_or_room_id, Interfix)).expect("profile scope prefix");
+	let end = to
+		.checked_add(1)
+		.map(|count| serialize_key((user_or_room_id, count)).expect("profile range end"));
+
+	// Bound raw keys before decoding so unrelated corrupt rows cannot fail this range.
+	let changes = self
+		.profilechangeid_userid
+		.stream_from_raw(&start)
+		.ready_try_take_while(move |(key, _)| {
+			Ok(key.starts_with(prefix.as_slice())
+				&& end
+					.as_ref()
+					.is_none_or(|end| *key < end.as_slice()))
 		})
-		.map(|((_, _, field), user_id): ChangeKeyVal<'_>| (user_id, field))
+		.ready_and_then(|(key, value)| {
+			let ((_, _, field), user_id): ChangeKeyVal<'_> =
+				(deserialize_from_slice(key)?, deserialize_from_slice(value)?);
+
+			Ok((user_id, field))
+		});
+
+	Either::Right(changes)
 }
 
 /// Gets a specific user profile key

@@ -80,6 +80,17 @@ use crate::{
 	client::{ignored_filter, is_empty_account_data_event, with_membership},
 };
 
+struct SyncParams<'a> {
+	services: &'a Services,
+	sender_user: &'a UserId,
+	sender_device: Option<&'a DeviceId>,
+	since: Option<u64>,
+	next_batch: u64,
+	full_state: bool,
+	state_after: StateAfter,
+	filter: &'a FilterDefinition,
+}
+
 #[derive(Default)]
 struct StateChanges {
 	heroes: Option<Vec<OwnedUserId>>,
@@ -280,9 +291,7 @@ pub(crate) async fn sync_events_route(
 		.body
 		.since
 		.as_deref()
-		.map(str::parse)
-		.flat_ok()
-		.unwrap_or(0);
+		.map(|since| since.parse().unwrap_or(0));
 
 	let timeout = body
 		.body
@@ -311,22 +320,22 @@ pub(crate) async fn sync_events_route(
 			.await;
 
 		let next_batch = services.globals.wait_pending().await?;
-		if since > next_batch {
-			debug_error!(since, next_batch, "received since > next_batch, clamping");
-			since = next_batch;
+		if since.is_some_and(|since| since > next_batch) {
+			debug_error!(?since, next_batch, "received since > next_batch, clamping");
+			since = Some(next_batch);
 		}
 
-		if since < next_batch || full_state {
-			let response = build_sync_events(
-				&services,
+		if since.is_none_or(|since| since < next_batch) || full_state {
+			let response = build_sync_events(SyncParams {
+				services: &services,
 				sender_user,
 				sender_device,
 				since,
 				next_batch,
 				full_state,
 				state_after,
-				&filter,
-			)
+				filter: &filter,
+			})
 			.await?;
 
 			let empty = response.rooms.is_empty()
@@ -346,19 +355,19 @@ pub(crate) async fn sync_events_route(
 			let response =
 				build_empty_response(&services, sender_user, sender_device, next_batch).await;
 
-			trace!(since, next_batch, "empty response");
+			trace!(?since, next_batch, "empty response");
 			return Ok(response);
 		}
 
 		trace!(
-			since,
+			?since,
 			last_batch = ?next_batch,
 			count = ?services.globals.pending_count(),
 			stop_at = ?stop_at,
 			"notified by watcher"
 		);
 
-		since = next_batch;
+		since = Some(next_batch);
 	}
 }
 
@@ -396,22 +405,26 @@ async fn build_empty_response(
 	level = INFO_SPAN_LEVEL,
 	skip_all,
 	fields(
-		%since,
+		?since,
 		%next_batch,
 		count = ?services.globals.pending_count(),
     )
 )]
-#[expect(clippy::too_many_arguments)]
 async fn build_sync_events(
-	services: &Services,
-	sender_user: &UserId,
-	sender_device: Option<&DeviceId>,
-	since: u64,
-	next_batch: u64,
-	full_state: bool,
-	state_after: StateAfter,
-	filter: &FilterDefinition,
+	SyncParams {
+		services,
+		sender_user,
+		sender_device,
+		since,
+		next_batch,
+		full_state,
+		state_after,
+		filter,
+	}: SyncParams<'_>,
 ) -> Result<sync_events::v3::Response> {
+	let profile_since = since;
+	let since = since.unwrap_or(0);
+
 	// MSC4155: a stored invite whose sender the recipient ignores or blocks is
 	// withheld here, and relaxing the configuration re-exposes it.
 	let invite_filter = services.users.invite_filter(sender_user).await;
@@ -523,7 +536,7 @@ async fn build_sync_events(
 	// The profile reads and the left-device fan-out both pend on the pool.
 	let (device_list_left, users) = join(
 		collect_device_list_left(services, sender_user, left_encrypted_users),
-		collect_profiles(services, sender_user, since, next_batch, filter, &rooms),
+		collect_profiles(services, sender_user, profile_since, next_batch, filter, &rooms),
 	)
 	.await;
 
@@ -546,7 +559,7 @@ async fn build_sync_events(
 		presence: Presence { events: presence_events },
 		rooms,
 		to_device,
-		users,
+		users: users?,
 	})
 }
 

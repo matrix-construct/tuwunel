@@ -333,12 +333,26 @@ pub fn room_members<'a>(
 	&'a self,
 	room_id: &'a RoomId,
 ) -> impl Stream<Item = &UserId> + Send + 'a {
+	self.room_members_checked(room_id).ignore_err()
+}
+
+/// Streams joined users within the room's exact encoded prefix.
+///
+/// Storage and user-key decoding failures are surfaced as error items rather
+/// than dropped. User IDs borrow the cursor and must be consumed or owned
+/// before advancing it.
+#[implement(Service)]
+#[tracing::instrument(skip(self), level = "debug")]
+pub fn room_members_checked<'a>(
+	&'a self,
+	room_id: &'a RoomId,
+) -> impl Stream<Item = Result<&'a UserId>> + Send + 'a {
 	let prefix = (room_id, Interfix);
+
 	self.db
 		.roomuserid_joinedcount
 		.keys_prefix(&prefix)
-		.ignore_err()
-		.map(|(_, user_id): (Ignore, &UserId)| user_id)
+		.map_ok(|(_, user_id): (Ignore, &UserId)| user_id)
 }
 
 /// Returns the stored number of users currently joined to a room.
