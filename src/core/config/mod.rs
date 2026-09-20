@@ -1277,16 +1277,6 @@ pub struct Config {
 	#[serde(default)]
 	pub federation_loopback: bool,
 
-	/// Sends MSC3983 one-time key claims to appservices.
-	///
-	/// Each appservice also opts in with `keys_claims: true` in its own
-	/// registration (the default is false). An appservice that does not serve
-	/// the claim route answers every attempt with an error, and disabling this
-	/// stops the claims for every registration at once.
-	/// reloadable: yes
-	#[serde(default = "true_fn")]
-	pub appservice_keys_claims: bool,
-
 	/// Always calls /forget on behalf of the user if leaving a room. This is a
 	/// part of MSC4267 "Automatically forgetting rooms on leave"
 	/// reloadable: yes
@@ -5233,15 +5223,6 @@ pub struct AppService {
 	/// default: false
 	#[serde(default)]
 	pub msc3202_transaction_extensions: bool,
-
-	/// Whether the application service serves MSC3983 one-time key claims.
-	///
-	/// The server forwards a claim for one of the application service's users
-	/// only when this is set and the global `appservice_keys_claims` is on.
-	///
-	/// default: false
-	#[serde(default)]
-	pub keys_claims: bool,
 }
 
 impl From<AppService> for ruma::api::appservice::Registration {
@@ -5260,7 +5241,6 @@ impl From<AppService> for ruma::api::appservice::Registration {
 			receive_ephemeral: conf.receive_ephemeral,
 			device_management: conf.device_management,
 			msc3202_transaction_extensions: conf.msc3202_transaction_extensions,
-			keys_claims: conf.keys_claims,
 			protocols: conf.protocols.into(),
 			rate_limited: conf.rate_limited.into(),
 			sender_localpart,
@@ -5269,6 +5249,7 @@ impl From<AppService> for ruma::api::appservice::Registration {
 				aliases: conf.aliases.into_iter().map(Into::into).collect(),
 				rooms: conf.rooms.into_iter().map(Into::into).collect(),
 			},
+			keys_claims: false,
 		}
 	}
 }
@@ -5306,10 +5287,11 @@ impl From<AppServiceNamespace> for ruma::api::appservice::Namespace {
 /// configured. This is important for environment variables which share the
 /// `TUWUNEL_` prefix namespace but aren't config items;  match them here in
 /// their split+lowercased format.
-static KNOWN_KEYS: &[&str; 2] = &["^config$", "^runtime_[a-z0-9_]+$"];
+static KNOWN_KEYS: &[&str; 3] = &["^config$", "^runtime_[a-z0-9_]+$", "^appservice_keys_claims$"];
 
 /// Items listed here generate a deprecation warning when configured.
-static DEPRECATED_KEYS: &[&str; 10] = &[
+static DEPRECATED_KEYS: &[&str; 11] = &[
+	"appservice_keys_claims",
 	"cache_capacity",
 	"conduit_cache_capacity_modifier",
 	"ldap.name_attribute",

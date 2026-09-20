@@ -1,9 +1,7 @@
-use std::collections::BTreeMap;
-
 use axum::extract::State;
-use futures::{FutureExt, StreamExt, TryFutureExt, future::join4};
+use futures::{FutureExt, StreamExt, TryFutureExt, future::join3};
 use ruma::{
-	OwnedDeviceId, UserId,
+	UserId,
 	api::{
 		client::device::Device,
 		federation::{
@@ -14,8 +12,6 @@ use ruma::{
 			keys::{claim_keys, get_keys},
 		},
 	},
-	encryption::DeviceKeys,
-	serde::Raw,
 	uint,
 };
 use tuwunel_core::{Err, Result, utils::future::TryExtExt};
@@ -24,8 +20,6 @@ use crate::{
 	Ruma,
 	client::{claim_keys_helper, get_keys_helper},
 };
-
-type AppserviceKeys = BTreeMap<OwnedDeviceId, Raw<DeviceKeys>>;
 
 /// # `GET /_matrix/federation/v1/user/devices/{userId}`
 ///
@@ -82,36 +76,18 @@ pub(crate) async fn get_devices_route(
 		})
 		.collect::<Vec<_>>();
 
-	let appservice_keys = services.appservice.query_keys(user_id, &[]);
-
-	let (master_key, self_signing_key, devices, appservice_keys) =
-		join4(master_key, self_signing_key, devices, appservice_keys)
-			.boxed()
-			.await;
+	// size firewall
+	let (master_key, self_signing_key, devices) = join3(master_key, self_signing_key, devices)
+		.boxed()
+		.await;
 
 	Ok(GetDevicesResponse {
 		user_id: body.body.user_id,
 		stream_id: stream_id.flatten().unwrap_or_else(|| uint!(0)),
-		devices: overlay_devices(devices, appservice_keys),
+		devices,
 		self_signing_key,
 		master_key,
 	})
-}
-
-fn overlay_devices(mut devices: Vec<UserDevice>, keys: AppserviceKeys) -> Vec<UserDevice> {
-	if !keys.is_empty() {
-		devices.retain(|device| !keys.contains_key(&device.device_id));
-		devices.extend(
-			keys.into_iter()
-				.map(|(device_id, keys)| UserDevice {
-					device_id,
-					keys,
-					device_display_name: None,
-				}),
-		);
-	}
-
-	devices
 }
 
 /// # `POST /_matrix/federation/v1/user/keys/query`
