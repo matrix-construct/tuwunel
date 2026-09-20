@@ -1,88 +1,67 @@
-# Tuwunel 1.9.1
+# Tuwunel 1.9.2
 
-September 12, 2026
-
-> [!IMPORTANT]
-> **Upgrading from 1.8.3 or earlier?** The first boot runs a one-time database migration before the listener opens, so back up first ([docs/backups.md](https://github.com/matrix-construct/tuwunel/blob/v1.9.1/docs/backups.md)). It can take a while on a large database, but progress now appears in the log and in `systemctl status` every fifteen seconds, and a normal stop is honored at the next safe point and resumes on restart; only a forced kill is unsafe, and the recovery is your backup. A standalone binary in a chroot, distroless, or `FROM scratch` image also needs a CA bundle or `SSL_CERT_FILE` since 1.9.0; the container image and both packages include one.
+September 20, 2026
 
 ### New Features & Enhancements
 
-- **Animated thumbnails are generated on demand (MSC2705)**, shipped by @x86pup. An explicit `animated=true` request can produce a bounded, cached GIF from animated GIF, WebP, or APNG media, while absent or false requests remain still. Current shipping clients omit the parameter, so the server capability arrives ahead of client adoption. Normal builds include it and `media_thumbnail_animated` defaults to `true`; frame, pixel, and concurrency limits bound its resource use.
+- **New rooms are created as room version 12 by default.** A room created without an explicit `room_version` gets a hashed room ID with no server name and a creator nobody can demote or list in `power_levels.users`; existing rooms are unaffected. A `default_power_level_content_override`, or a client override, whose `users` map names the creating user now fails `createRoom`, matching Synapse; `default_room_version = "11"` restores the previous default.
 
-- **Prebuilt Nix store paths are available from project caches**, courtesy of @x86pup. The flake covers packages and development shells, although unattended Nix installations must trust the substituters and public keys explicitly. Cache upload is non-fatal, so an individual release may still have incomplete coverage.
+- **User status and extended profile fields now arrive through sync (MSC4133, MSC4429, MSC4262)**, shipped by @x86pup after @doits raised the request in (#582). Legacy `/sync` carries an `org.matrix.msc4429.users` block for the fields selected by the client's filter. The Sliding Sync profiles extension also sends the syncing user's own profile base, so status changes reach peers on Element Web and Element X without separate profile requests for each user. Atomic snapshots and whole-user drops are not delivered yet. Over Sliding Sync, a change in a room outside the client's window waits until that room enters it.
 
-- **Debian and RPM packages can adopt an existing Conduwuit or Conduit database**, with appreciation to @x86pup. Adoption uses a same-filesystem rename into `/var/lib/tuwunel`, refuses a nonempty destination, and waits for the old service to stop. This relocates the database; normal startup migrations still perform any format conversion.
+- **The Debian package confines the server with an AppArmor profile**, graciously contributed by @x86pup. This shipped without mention in 1.9.1, so operators on 1.9.1 already have it. The profile grants no capabilities and limits writes to `/var/lib/tuwunel`, `/run/tuwunel` and `/etc/tuwunel`. A data or config directory relocated through a unit drop-in or symlink is denied until it is added to `/etc/apparmor.d/local/usr.sbin.tuwunel` and the profile is reloaded with `apparmor_parser -r`; postinst names each uncovered path. Root invocations of the execute, regenerate-config and restore-backup modes must run as `sudo -u tuwunel`. See [debian/README.md](https://github.com/matrix-construct/tuwunel/blob/v1.9.1/debian/README.md); the RPM package is unaffected.
 
-- **Users can control invitations by sender (MSC4155)** through stable and unstable invite-permission account data. Blocked invitations are refused, while ignored invitations stay out of sync, push, and automatic acceptance until policy changes. Graciously added by @x86pup.
+- Containers get two hardening aids from @x86pup, carried over from 1.9.1. `docker/seccomp-io-uring.sh` derives a profile from the runtime default and re-permits only the io_uring syscalls omitted by Docker and Podman, replacing `seccomp=unconfined`. The database pool also warns at startup when its thread count would exceed the container's cgroup pids limit and explains how to fix it. See [docs/deploying/container-security.md](https://github.com/matrix-construct/tuwunel/blob/v1.9.1/docs/deploying/container-security.md).
 
-- Operators can enable automatic invite acceptance for local users with the reloadable `auto_accept_invites` option, which defaults to `false`. Direct-only and local-sender-only filters are available, and accepted direct chats are recorded in `m.direct`. Opened by @sanyamseac in (#513) and implemented by @x86pup.
+- Allocator tuning now takes effect on musl, macOS and OpenBSD builds, where the override variable is `_RJEM_MALLOC_CONF` rather than `MALLOC_CONF`. OpenBSD also builds and runs with `jemalloc`. No GitHub release asset is affected. With appreciation to @x86pup.
 
-- Tuwunel now validates custom status, call, and timezone profile fields and serves changed values through the client-enabled Sliding Sync profiles extension (MSC4262 and MSC4426). This is the server foundation used by clients such as Element X, but does not add the separate legacy `/sync` delivery path. Credit to @x86pup.
+- The appservice one-time-key claim and key query proxies (MSC3983, MSC3984) are removed, following an initial disable option in (#587). Tip of the hat to @Lama-Thematique for (#593). A bridge that relied on Tuwunel to forward those requests must answer them itself. A leftover `appservice_keys_claims` key produces a deprecation warning rather than a parse error.
 
-- Federated events can build state from complete local history, reducing dependence on an origin server's `/state_ids` response. `resolve_state_locally` is reloadable and defaults to `true`; incomplete or unsafe local results retain the existing federation fallback.
+- Media download and thumbnail responses adopt the MSC4149 Content-Security-Policy: `plugin-types` and `object-src` are removed, while `font-src`, `form-action`, and `base-uri 'none'` are added. Two opt-in options go further. Both default to `false` and require a restart: `media_deny_framing` adds `frame-ancestors 'none'`, while `media_deny_inline_styles` removes `style-src 'unsafe-inline'`.
 
-- New admin commands provide diagnostics through parallel federation requests: `query feds version`, `event`, `state`, and `head`. Surveys report per-peer outcomes and require explicit confirmation above 2,048 destinations; the `head` query can cause a remote server to persist an otherwise unused short event identifier (e2c74fda9, 23789f48d, 9acf26f69, 6bfb79717, 85db28f0b, e77de564f, 3e9db3f65, 84e83957b, 5a2b4d25e).
-
-- URL preview cache lifetime is configurable with reloadable `url_preview_cache_ttl`, courtesy of @x86pup and inspired by @alemidev in (#558). The 24-hour default is unchanged; values above seven days require a restart for the RocksDB retention floor, and size limits can still evict entries earlier.
-
-- URL preview requests can carry an operator-selected `Accept-Language` header for pages, media, and oEmbed. The reloadable `url_preview_accept_language` option defaults to unset, and cached previews keep their prior language until expiry. Implemented by @tototomate123 in (#580), after @dlrudie opened (#575).
-
-- A new admin command creates a complete RocksDB checkpoint or exports one named column family. A single-column export is not a restorable server backup, and the default destination shares the live database filesystem (b11b5e123).
-
-- Argon2id memory, time, and parallelism costs are configurable for newly written password hashes. Existing hashes retain their stored parameters, and the production defaults remain 19,456 KiB, two iterations, and one lane (0635833d1, 3d8267c31).
-
-- Alpine source builds have a recipe tested on x86_64 and aarch64, and musl builds now route Tuwunel and RocksDB allocations through the pinned jemalloc. No Alpine artifact or support commitment is added; `-C target-feature=-crt-static` is required, and host-specific `target-cpu=native` output may not run on older CPUs. Thanks to @x86pup.
-
-- Long startup migrations now report their phase, elapsed time, and position every fifteen seconds in logs and systemd status. Graceful stops are honored at step boundaries and resume unfinished work on restart; forced kills remain unsafe. The shipped Podman unit gains migration-aware health and stop timing. Credit to @x86pup.
+- The admin `query feds ping` command surveys federation peers and reports the round-trip latency distribution beside each origin's peer-status record. `query feds version` gains field selection, column sorting and a result-count footer.
 
 ### Bug Fixes
 
-- **Sliding Sync now delivers subscribed-room required state and changed room configuration without waiting for timeline events or a client reload.** The first collection after upgrading may resend the configured timeline window because older connection records lack its configuration hash. Reported by @AngelBePro in (#560) and fixed in (#561).
+- **A hand-rebuilt admin room no longer stops the server from booting.** The 1.9.1 startup guard inferred whether `server_user_localpart` had changed from the admin room's creator, so it rejected an operator-rebuilt room with a mismatch error. The first boot now records the configured localpart in the database, and later boots compare against that value. Thank you @exentio for reporting (#589).
 
-- **Legacy full-state sync includes quiet joined rooms and their latest state**, even with an empty timeline or `timeline.limit: 0`. Graciously contributed by @basnijholt in (#583).
+- **Debian and RPM packages stop planting `/var/lib/conduwuit` and `/var/lib/matrix-conduit` symlinks on every install**, courtesy of @meoovv in (#595), with follow-ups by @x86pup. With these links present, `rm -rf /var/lib/conduwuit/` with a trailing slash followed the link into the live database. Fresh installs create neither link, adopted databases keep the link they came with, and upgrades remove a leftover unless `database_path` is set. Point any backup script that uses an old path at `/var/lib/tuwunel`, or set `database_path` before upgrading.
 
-- **Element X for iOS location markers move as room state changes arrive.** Incremental Sliding Sync now compares selected state at the delivered cursor with current resolved state, including across federation forks. Thank you @utop-top for reporting (#569).
+- Deleting a device now removes its uploaded identity keys too, graciously contributed by @basnijholt in (#591); the stale row outlived the device and could be served by `/keys/query` when a later login reused the device ID. Login now refuses a device ID that collides with lingering keys.
 
-- FluffyChat can clear stale unread markers after a receipt advances because legacy sync now emits an explicit zero when the room or thread read cursor proves a reset, including on initial sync. Credit to @ruka-hamanasu for (#564).
+- With LDAP enabled, a passwordless SSO account is no longer offered the password stage it can never complete, so Element's confirmation dialog on deactivation or an email change stops asking for a password that does not exist. Credit to @basnijholt for (#590).
 
-- Private read markers targeting backfilled events become a safe no-op instead of failing the entire read-marker request, so public receipts and unread resets can still complete. Shipped by @ruka-hamanasu in (#566).
+- Appservice-managed users can appear in user directory searches again through the new `show_appservice_users_in_user_directory` option, which defaults to `false`. The exclusion added in 1.8.3 ran before `show_all_local_users_in_user_directory` was consulted, causing bridge puppets and bot accounts to vanish from invite search. Shipped by @basnijholt in (#594) after MindRoom's agents disappeared on 1.9.1.
 
-- Directional `/messages` bounds now honor valid global sync tokens even when the room has no event at that exact position, while malformed tokens return `M_INVALID_PARAM`. With appreciation to @basnijholt for (#574).
+- Federation requests whose `X-Matrix` Authorization header omits `destination` are now accepted for compatibility, as the specification requires. Older Synapse peers such as 1.56.0 previously received a constant stream of 403 responses. A present but incorrect `destination` still fails, now with 401 instead of 403. With appreciation to @kybe236 for (#588).
 
-- Device-key uploads fail safely when an existing row cannot be read or decoded instead of overwriting identity material. Courtesy of @basnijholt in (#577).
+- Live location sharing in Element X no longer sticks when the client changes what state it asks for mid-session. Sliding Sync remembers the required-state selectors last delivered for each room and sends only the delta instead of treating a configuration change as a full replay. Thank you @utop-top for reporting (#569) and its recurrence in (#596).
 
-- Large `query storage sync` operations now report a single copy summary rather than overflowing the admin response with one line per object. Thanks to @tototomate123 for (#579) and @justinbrick for reporting (#571).
+- Startup warns when a regex-valued list option such as `forbidden_remote_server_names` or `dns_passthru_domains` contains a plain name with unescaped dots, which matches more than it appears to. The warning prints the escaped form to paste in without rejecting the configuration. The example `deprioritize_joins_through_servers` line in `tuwunel-example.toml` also contained an invalid TOML escape and could not be uncommented as shipped. Both fixes are courtesy of @x86pup.
 
-- Both Synapse-compatible account-deactivation routes now make the local user leave their rooms. Reactivation does not restore prior memberships. Graciously contributed by @obodnikov in (#584) and (#585).
+- Importing a Conduit or fork database now preserves the expiry of each origin-issued access token. The shared token column previously dropped the expiry, making every imported session appear non-expiring. The one-time migration runs on the next boot and leaves tokens issued after the import untouched. Credit to @x86pup.
 
-- Native OIDC browser callbacks now complete in Chrome when the client and homeserver use different origins. This built-in authentication path remains gated by `oidc_native_auth`, which defaults to `false`. Reported by @asmj1108 in (#573).
+- Test fixtures now place their databases under the platform temp directory, so `cargo test` no longer fails with a permission error when `TMPDIR` is unset or restricted. Reported by @vehlwn in (#592) while packaging for Arch Linux.
 
-- Room enable and unban commands now explain when an immutable `m.federate: false` creation setting prevents remote joins or invites, with remote-target invite coverage for MSC4361. Thank you @tcyrus for reporting (#568).
+- Outbound federation now sends per-device device-list updates. Every device-key or cross-signing change previously produced an EDU with an empty `prev_id`, causing each peer to discard and fetch the user's entire device list again. Peers now receive the specific device with its real `prev_id` and `deleted` flag, plus a signing-key update when cross-signing changes. A full resync happens only above ten changed devices, and queued updates drain before fresh ones are selected (e5da06b49, c0d0528ec, 62a608553).
 
-- Sliding Sync direct-message and room-tag filters now use stored `m.direct` and tag account data, including account-data changes during a long poll. Shipped by @x86pup.
+- Plaintext rooms no longer over-report device-list changes. Sliding Sync placed a plaintext room's entire member list in `device_lists.changed` after every state change (regression 0adec1e3a, shipped in 1.6.1), while legacy sync counted lazy-loaded members as joins and flagged every speaker on each round (regression c337ea186, shipped in 1.3.0). FluffyChat, nheko and bridges then downloaded every listed user's keys again (48769caed, 1ecd6c5d7).
 
-- Deleting a local room alias removes only that alias from the reverse index and updates canonical-alias state when the sender has permission, courtesy of @x86pup (9221685cb, aa9bf1b86, 3f44bdaf6, 295c0377d).
+- `/event_auth` chains for room version 12 were one event short. The implied create event was marked as seen before it could be yielded, so peers walking a v12 room's auth chain from this server received the rest of the chain without its create event (818e64f3d, regression 944f16520 shipped in 1.5.0).
 
-- Invitation state handling now preserves authoritative and stripped state, including senderless stored invites, with appreciation to @x86pup (31c547f30, a10704671, 49f9d0e05, 36a73db5a).
+- `/members?at=` now serves the membership snapshot at the requested token instead of ignoring `at`. A timeline beginning at the room's create event returns the window's end as `prev_batch` rather than the create event's own position. Visibility is still decided from the caller's current membership, a documented divergence from Synapse (6fe0095dd, 5895a78b9, 15201a4e0).
 
-- Backup restore is now an explicit one-process action through the `restore-backup` command-line option. Tuwunel refuses `database_restore_backup` in TOML, environment configuration, and generic option overrides, and regeneration omits it, preventing a destructive restore request from persisting or repeating (7a0cdb63f, 956d6c08b).
+- The admin database flush command reported success after flushing only RocksDB's empty default column family. It now flushes every column family, so a flush-then-snapshot backup captures buffered writes (ad13deab9).
 
-- OIDC authorization now requires explicit user approval before releasing a code to a dynamically registered client whose redirect target the operator has not vetted. `oidc_require_client_approval` defaults to `true`; the prompt informs but does not authenticate the client (143562be5).
+- User directory search now paginates results in user order. The concurrent visibility walk previously yielded in completion order, so identical queries could return a different set of users each time (773bb5ce2).
 
-- Server notices now create and reuse private notice rooms, deduplicate transactional retries, and prevent invite rejection while still allowing joined users to leave (868b846ae).
+- A profile write that restores the value a room already holds appends no member event there, so it no longer wipes that room's membership `reason` (13804b576). Account deactivation separates cleanup from room departures and bounds concurrent leaves at eight, with a lifecycle test covering erasure across every membership state (c53d80d80, 259337054).
 
-- Federation history and fetch recovery are more reliable: empty or duplicate-only backfill responses no longer count as progress, timestamp answers are validated against the room and requested time after ingestion, incompatible single-flight requests no longer share results, and previous-event recovery width is reloadable (65eb68d8c, e3a5dd107, b1389597b, 35fc5c123, 14bf02d5b).
+- Profile field publication and its discovery entry now commit in one transaction (925975ceb).
 
-- Declined short-ID migrations now finalize safely, forbidden-name scans stop promptly when shutdown is requested, and injectivity patch additions cannot collide with removals (8f0035e63, 032248ee8, bfe4a276e, 67fb14d54).
+- The sending service is split into focused units, carrying four fixes: queue writes hold their counter permit until the rows land, a panicking sender shard restarts the service instead of remaining dead, the presence cap counts distinct users again, and a malformed stored receipt is dropped with a log entry instead of causing a panic (dec5bc10a, 54ebeaa96). A failed post-write flush now logs an error instead of panicking; the write itself was already durable (042769db8).
 
-- Key-backup versions and etags are validated while mutations are serialized (1dd1b12f7, 4106440d6). Account erasure closes login and thread leaks and removes contact bindings (942bf2aab, 090e42001).
+- State resolution now decodes only the fields it needs and borrows authorization state instead of cloning it for each lookup. A send-join check whose held state names an event absent from the timeline reports a storage error rather than not-found (d741a57ad, cb3ed70ed, 49a6fcb62, 6b736549a, cfb93dac4). Log string truncation no longer panics inside a multibyte character, and subsecond durations now format correctly (e373df7c3).
 
-- Cross-signing uploads now validate ownership, role usage, key shape, and signature relationships while keeping foreign signatures private (e87a9aa2b, 1cd92aac5). To-device events addressed to the server user are delivered (ad1ed82c3).
+- Dependencies advance to sentry 0.49, argon2 0.6, rustls 0.23.45 and ipaddress 0.2. With Sentry enabled, a `sentry_traces_sample_rate` outside 0.0 to 1.0 now prevents startup with a specific configuration error. The argon2 update leaves verification of existing hashes unchanged. The Ruma pin carries the final MSC4140 delayed-events types, but the endpoints are not served in this release.
 
-- Room-send transaction identifiers are scoped by room and event type, with checked compatibility for legacy rows (99908c1e3). Redactions and private receipts reject cross-room event targets (6c02023c5, 323e1ba03).
-
-- Thread updates are room-bound and transactional, and a receipt on the root no longer clears unread replies (5d4db96e9, bffd8e679). Retained events and expiry indexes are stored atomically and replay in order (65d2483eb, 3a8d1c482).
-
-- Passwordless user creation writes its origin and disabled-password marker atomically (3a835c8e6). Presence queries return a default status when no row exists (3f7869bd9).
-
-- Sync and timeline edge cases are corrected: left-room state uses the correct incremental anchor, ignored replies no longer remove the thread root, and exhausted filtered backward pages advance their cursor (83b6253a4, 0ea5de07b, 609c5118b).
+- Bug reporters are now asked whether they tested a `main` build and are pointed to the prebuilt `main` image tags, courtesy of @x86pup (0de3d08b5).
