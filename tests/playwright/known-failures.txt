@@ -13,6 +13,7 @@ crypto/history-sharing.spec.ts :: Messages sent when we believed the room histor
 crypto/invisible-crypto.spec.ts :: Messages fail to decrypt when sender is previously verified
 crypto/user-verification.spec.ts :: can abort emoji verification when emoji mismatch
 crypto/user-verification.spec.ts :: can receive a verification request when there is no existing DM
+integration-manager/kick.spec.ts :: should not kick the target if lacking permissions
 lazy-loading/lazy-loading.spec.ts :: should handle lazy loading properly even when offline
 read-receipts/editing-messages-in-threads.spec.ts :: A room with an edited threaded message is still read after restart
 read-receipts/editing-messages-in-threads.spec.ts :: An edit of a threaded message makes the room unread
@@ -45,6 +46,8 @@ settings/appearance-user-settings-tab/message-layout-panel.spec.ts :: should dis
 settings/appearance-user-settings-tab/message-layout-panel.spec.ts :: should enable compact layout when the modern layout is selected
 settings/encryption-user-tab/other-devices.spec.ts :: verified devices should be able to decrypt while global blacklist is toggled
 settings/encryption-user-tab/recovery.spec.ts :: should setup the recovery key
+settings/room-settings/roles-permissions-room-settings-tab.spec.ts :: should be able to change the role of a user
+settings/room-settings/room-security-tab.spec.ts :: should disallow changing from public to private if the user cannot alter history
 sliding-sync/sliding-sync.spec.ts :: should show and be able to accept/reject/rescind invites
 spaces/threads-activity-centre/threadsActivityCentre.spec.ts :: should order by recency after notification level
 spaces/threads-activity-centre/threadsActivityCentre.spec.ts :: should show a highlight indicator when there is a mention in a thread
@@ -52,3 +55,6 @@ spaces/threads-activity-centre/threadsActivityCentre.spec.ts :: should show a no
 spaces/threads-activity-centre/threadsActivityCentre.spec.ts :: should show the rooms with unread threads
 spaces/threads-activity-centre/threadsActivityCentre.spec.ts :: should update with a thread is read
 timeline/timeline.spec.ts :: should show historical profiles if disabled
+widgets/widget-pip-close.spec.ts :: should be closed on ban
+widgets/widget-pip-close.spec.ts :: should be closed on kick
+widgets/widget-pip-close.spec.ts :: should be closed on leave
