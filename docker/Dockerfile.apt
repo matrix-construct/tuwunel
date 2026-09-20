@@ -24,7 +24,7 @@ RUN <<EOF
 
     dpkg --status tuwunel
     getent passwd tuwunel
-    test -L /var/lib/conduwuit
+    test -d /var/lib/tuwunel
     test -f /etc/tuwunel/tuwunel.toml
     /usr/sbin/tuwunel --version
 EOF

@@ -44,13 +44,14 @@ case "$1" in
       # start. The old directory is moved into place, never copied or deleted.
       # The /var/lib/private paths hold the real directory when the old server
       # ran under systemd's DynamicUser=, reaching the public path through a
-      # symlink, and an empty leftover directory is cleared so the
-      # compatibility symlink can take its place.
+      # symlink, and an empty leftover directory is cleared rather than left
+      # behind.
       #
       # A directory on another filesystem is never moved: mv would silently
       # become a copy of the whole database, and the target may not even have
       # room for it. Comparing devices covers a mount at the directory itself
       # and a mount further up the path alike.
+      adopted=''
       state_device=$(stat -c %d /var/lib)
       for legacy in /var/lib/conduwuit /var/lib/private/conduwuit \
         /var/lib/matrix-conduit /var/lib/private/matrix-conduit; do
@@ -73,6 +74,9 @@ case "$1" in
             else
               echo "Adopting the existing database at $legacy" 1>&2
               mv -v "$legacy" "$TUWUNEL_DATABASE_PATH"
+              # the public name is the one a configuration carries, even where
+              # the database itself lived under /var/lib/private
+              adopted="$adopted /var/lib/${legacy##*/}"
               # clean up the stray symlink a previous package version may have
               # left inside the old database directory
               if [ -L "$TUWUNEL_DATABASE_PATH/tuwunel" ] \
@@ -84,27 +88,67 @@ case "$1" in
         fi
       done
 
-      # symlink the previous locations for compatibility if nothing occupies
-      # them, replacing any symlink left dangling by the adoption above or by
-      # an uninstalled server.
+      # A configuration that sets database_path may name a previous location,
+      # so an installation carrying one keeps whatever symlinks it has. The
+      # server reads the packaged file and any the unit's environment names,
+      # and a file that cannot be read counts as naming a path, since what it
+      # holds cannot be known.
+      configured_path=''
+      config_files="$TUWUNEL_CONFIG_PATH/tuwunel.toml"
+      if command -v systemctl > /dev/null 2>&1; then
+        unit_env=$(systemctl show -p Environment --value tuwunel.service 2>/dev/null || true)
+        case "$unit_env" in
+          *_DATABASE_PATH=*) configured_path='yes' ;;
+        esac
+        for assignment in $unit_env; do
+          case "$assignment" in
+            CONDUIT_CONFIG=* | CONDUWUIT_CONFIG=* | TUWUNEL_CONFIG=*)
+              config_files="$config_files ${assignment#*=}" ;;
+          esac
+        done
+      fi
+      for config_file in $config_files; do
+        if ! [ -r "$config_file" ] \
+          || grep -qE '^[[:space:]]*database_path[[:space:]]*=' "$config_file"; then
+          configured_path='yes'
+        fi
+      done
+
+      # Symlink a location a database was adopted from, so a configuration
+      # ported from the old server keeps reaching it, and clear a symlink left
+      # dangling by that adoption or by an uninstalled server. Nowhere else is
+      # linked: a previous server's name pointing at the database is one
+      # `rm -r` away from deleting it, because a trailing slash makes that
+      # command follow the symlink. A symlink an earlier version of this
+      # package left where nothing was ever adopted is removed for the same
+      # reason, once the configuration is known not to name it.
       for legacy in /var/lib/matrix-conduit /var/lib/conduwuit; do
         if [ -L "$legacy" ] && ! [ -e "$legacy" ]; then
           rm -v "$legacy"
         fi
-        if ! [ -e "$legacy" ] && ! [ -L "$legacy" ]; then
-          ln -s -v "$TUWUNEL_DATABASE_PATH" "$legacy"
-        elif [ -L "$legacy" ] \
-          && [ "$(readlink -f "$legacy")" != "$(readlink -f "$TUWUNEL_DATABASE_PATH")" ]; then
+        case " $adopted " in
+          *" $legacy "*)
+            if ! [ -e "$legacy" ] && ! [ -L "$legacy" ]; then
+              ln -s -v "$TUWUNEL_DATABASE_PATH" "$legacy"
+            fi
+            continue
+            ;;
+        esac
+        [ -L "$legacy" ] || continue
+        if [ "$(readlink -f "$legacy")" != "$(readlink -f "$TUWUNEL_DATABASE_PATH")" ]; then
           echo "NOTE: $legacy points to $(readlink -f "$legacy") and was not adopted" 1>&2
+        elif [ -z "$adopted" ] && [ -z "$configured_path" ]; then
+          echo "Removing the unused compatibility symlink $legacy" 1>&2
+          rm "$legacy"
         fi
       done
     fi
 
     # Fix up ownership and permissions for the database and the config.
-    chown -v tuwunel:tuwunel -R "$TUWUNEL_DATABASE_PATH"
-    chown -v tuwunel:tuwunel -R "$TUWUNEL_CONFIG_PATH"
+    chown -c tuwunel:tuwunel -R "$TUWUNEL_DATABASE_PATH"
+    chown -c tuwunel:tuwunel -R "$TUWUNEL_CONFIG_PATH"
 
-    chmod -v 740 "$TUWUNEL_DATABASE_PATH"
+    chmod -c 740 "$TUWUNEL_DATABASE_PATH"
 
     echo ''
     echo 'Make sure you edit the example config at /etc/tuwunel/tuwunel.toml before starting!'

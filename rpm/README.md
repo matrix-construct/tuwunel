@@ -40,9 +40,14 @@ Installing the Tuwunel package then adopts the existing database by moving it
 to `/var/lib/tuwunel`; nothing is copied or deleted, and the data is migrated
 on the next startup. Databases are discovered at `/var/lib/conduwuit` and
 `/var/lib/matrix-conduit`, and also under `/var/lib/private`, where systemd
-keeps the state of a service that ran with `DynamicUser=`. The locations they
-used are left behind as symlinks into `/var/lib/tuwunel`, so a package removed
-later reaches a symlink rather than the database.
+keeps the state of a service that ran with `DynamicUser=`. The location a
+database was adopted from is left behind as a symlink into `/var/lib/tuwunel`,
+so a configuration ported from the old server still reaches it, and a package
+removed later reaches a symlink rather than the database. Nothing else is
+linked: a fresh installation creates no such symlink, and one left by an
+earlier version of this package is removed unless the configuration sets
+`database_path`, since a previous server's name pointing at the database is
+one `rm -r` away from deleting it.
 
 Adoption is skipped while an old homeserver unit is still active, and a
 database on its own filesystem is never moved, since moving it across

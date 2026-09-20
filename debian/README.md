@@ -44,9 +44,13 @@ moving it to `/var/lib/tuwunel`; nothing is copied or deleted, and the data
 is migrated on the next startup. Databases are discovered at
 `/var/lib/conduwuit` and `/var/lib/matrix-conduit`, and also under
 `/var/lib/private`, where systemd keeps the state of services that ran with
-`DynamicUser=`. The old locations are left behind as symlinks into
-`/var/lib/tuwunel`, so purging the old package after the adoption removes at
-most a symlink and can no longer reach the data.
+`DynamicUser=`. The location a database was adopted from is left behind as a
+symlink into `/var/lib/tuwunel`, so a configuration ported from the old server
+still reaches it, and purging the old package afterwards removes at most that
+symlink. Nothing else is linked: a fresh installation creates no such symlink,
+and one left by an earlier version of this package is removed on upgrade
+unless the configuration sets `database_path`, since a previous server's name
+pointing at the database is one `rm -r` away from deleting it.
 
 Adoption is skipped while an old homeserver unit is still active, and a
 database kept on its own mounted filesystem is never moved; in those cases

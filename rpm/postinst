@@ -16,7 +16,7 @@ fi
 
 chown tuwunel:tuwunel -R "$TUWUNEL_CONFIG_PATH"
 
-# Adopt a previous homeserver's database and leave the compatibility symlinks.
+# Adopt a previous homeserver's database, leaving a symlink where it was.
 # A failure here is reported rather than raised: the package is installed and
 # correct either way, and the command can be run again once its cause is gone.
 if [ -x "$TUWUNEL_ADOPT" ]; then
