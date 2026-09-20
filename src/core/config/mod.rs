@@ -1788,6 +1788,70 @@ pub struct Config {
 	#[serde(default = "true_fn")]
 	pub login_with_password: bool,
 
+	/// Token-bucket refill rate (attempts per second) for password logins
+	/// against one account, successful or not.
+	///
+	/// Applies to `/login` with `m.login.password` and to the built-in OIDC
+	/// login page. Keyed on the account being tried, not on the client IP, so
+	/// it holds behind a reverse proxy or tunnel that does not forward the
+	/// client address. Mirrors Synapse's `rc_login.account`, with its default:
+	/// after `login_rc_account_burst_count` attempts, about one every five
+	/// and a half minutes.
+	///
+	/// The cost: while somebody keeps trying an account's password, its owner
+	/// cannot sign in with that password either — a correct password is
+	/// refused with `M_LIMIT_EXCEEDED` like a wrong one. Existing sessions and
+	/// non-password logins (token, SSO, JWT) are unaffected.
+	///
+	/// `0` disables this limit rather than making a bucket that never refills.
+	///
+	/// reloadable: yes
+	/// default: 0.003
+	#[serde(default = "default_login_rc_account_per_second")]
+	pub login_rc_account_per_second: f64,
+
+	/// Token-bucket depth (burst size) for password logins against one account.
+	///
+	/// The number of attempts allowed before `login_rc_account_per_second`
+	/// governs. `0` disables this limit, as does a `0` rate. The default is
+	/// Synapse's `rc_login.account.burst_count`.
+	///
+	/// reloadable: yes
+	/// default: 5
+	#[serde(default = "default_login_rc_account_burst_count")]
+	pub login_rc_account_burst_count: u32,
+
+	/// Token-bucket refill rate (failures per second) for wrong passwords
+	/// against one account.
+	///
+	/// Only a wrong password debits this bucket, and a drained bucket refuses
+	/// the next attempt even if its password is correct. Applies to `/login`,
+	/// the built-in OIDC login page, and password re-entry for sensitive
+	/// actions (UIAA). Keyed on the account, like
+	/// `login_rc_account_per_second`, and with the same cost. Mirrors Synapse's
+	/// `rc_login.failed_attempts`, with its default: after
+	/// `login_rc_failed_burst_count` failures, about one attempt every six
+	/// seconds.
+	///
+	/// `0` disables this limit rather than making a bucket that never refills.
+	///
+	/// reloadable: yes
+	/// default: 0.17
+	#[serde(default = "default_login_rc_failed_per_second")]
+	pub login_rc_failed_per_second: f64,
+
+	/// Token-bucket depth (burst size) for wrong passwords against one
+	/// account.
+	///
+	/// The number of failures allowed before `login_rc_failed_per_second`
+	/// governs. `0` disables this limit, as does a `0` rate. The default is
+	/// Synapse's `rc_login.failed_attempts.burst_count`.
+	///
+	/// reloadable: yes
+	/// default: 3
+	#[serde(default = "default_login_rc_failed_burst_count")]
+	pub login_rc_failed_burst_count: u32,
+
 	/// Login token expiration/TTL in milliseconds.
 	///
 	/// These are short-lived tokens for the m.login.token endpoint.
@@ -5469,6 +5533,17 @@ fn default_rendezvous_max_sessions() -> usize { 100 }
 fn default_rendezvous_rc_per_second() -> u32 { 10 }
 
 fn default_rendezvous_rc_burst_count() -> u32 { 20 }
+
+// The four `login_rc_*` defaults are Synapse's `rc_login.account` and
+// `rc_login.failed_attempts` defaults, taken unchanged:
+// https://element-hq.github.io/synapse/latest/usage/configuration/config_documentation.html#rc_login
+fn default_login_rc_account_per_second() -> f64 { 0.003 }
+
+fn default_login_rc_account_burst_count() -> u32 { 5 }
+
+fn default_login_rc_failed_per_second() -> f64 { 0.17 }
+
+fn default_login_rc_failed_burst_count() -> u32 { 3 }
 
 fn some_true_fn() -> Option<bool> { Some(true) }
 

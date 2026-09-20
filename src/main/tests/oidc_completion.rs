@@ -41,6 +41,7 @@ fn native_completion_ends_form_navigation() -> Result {
 		.with_option("oidc_require_pkce=false")
 		.with_option("oidc_require_client_approval=true")
 		.with_option("oidc_rc_per_second=0")
+		.with_option("login_rc_account_per_second=0")
 		.with_option(
 			"oidc_registration_allowed_redirect_hosts=[\"trusted.example\",\"127.0.0.1\"]",
 		);

@@ -69,6 +69,14 @@ pub(super) async fn password_login(
 	lowercased_user_id: &UserId,
 	password: &str,
 ) -> Result<OwnedUserId> {
+	// Per-account throttle before anything about the account is looked up, so
+	// a refusal reads the same for accounts that exist and ones that do not.
+	// Its cost — a guessed-at owner cannot sign in by password either while it
+	// lasts — is set out in the `login_ratelimit` service.
+	services
+		.login_ratelimit
+		.check_login_rate_limit(user_id)?;
+
 	// Restrict login to accounts only of type 'password', including untyped
 	// legacy accounts which are equivalent to 'password'.
 	if services
@@ -90,7 +98,12 @@ pub(super) async fn password_login(
 				.password_hash(lowercased_user_id)
 				.map_ok(|hash| (hash, lowercased_user_id))
 		})
-		.map_err(|_| err!(Request(Forbidden("Wrong username or password."))))
+		.map_err(|_| {
+			services
+				.login_ratelimit
+				.record_failed_login(user_id);
+			err!(Request(Forbidden("Wrong username or password.")))
+		})
 		.await?;
 
 	if hash.is_empty() {
@@ -99,7 +112,12 @@ pub(super) async fn password_login(
 
 	hash::verify_password(password, &hash)
 		.inspect_err(|e| debug_error!("{e}"))
-		.map_err(|_| err!(Request(Forbidden("Wrong username or password."))))?;
+		.map_err(|_| {
+			services
+				.login_ratelimit
+				.record_failed_login(user_id);
+			err!(Request(Forbidden("Wrong username or password.")))
+		})?;
 
 	Ok(user_id.to_owned())
 }
