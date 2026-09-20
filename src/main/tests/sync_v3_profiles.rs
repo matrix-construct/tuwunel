@@ -192,15 +192,22 @@ async fn filtered_bases(
 	room_id: &str,
 ) -> Result {
 	let absent = "org.example.absent";
+	let reference = owner.sync(Some(&[STATUS, absent]), None).await?;
 
 	for room in [
+		json!({}),
 		json!({ "not_rooms": [room_id] }),
 		json!({
 			"state": { "not_types": ["m.room.member"] },
 			"timeline": { "not_types": ["m.room.member"] },
 		}),
 	] {
-		let filter = json!({ PROFILE_FIELDS: { "ids": [STATUS, absent] }, "room": room });
+		let filter = json!({
+			PROFILE_FIELDS: { "ids": [absent, STATUS, absent, STATUS] },
+			"event_fields": ["type", "state_key"],
+			"room": room,
+		});
+
 		let response: Value = owner
 			.sync_response(Some(&filter.to_string()), None)
 			.await?
@@ -212,6 +219,7 @@ async fn filtered_bases(
 		assert_eq!(update(&response, owner_id)[STATUS]["text"], "busy");
 		assert_eq!(update(&response, peer_id).get(absent), Some(&Value::Null));
 		assert_eq!(update(&response, owner_id).get(absent), Some(&Value::Null));
+		assert_eq!(response.get(USERS), reference.get(USERS));
 	}
 
 	Ok(())

@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use futures::{StreamExt, TryStreamExt, future::ready};
-use itertools::Itertools;
+use itertools::{Either, Itertools};
 use ruma::{
 	OwnedUserId, RoomId, UserId,
 	api::client::{
@@ -33,6 +33,18 @@ pub(super) type Fields = BTreeSet<ProfileFieldName>;
 /// The change log is keyed per field, so one user appearing under several rooms
 /// or several counts folds into one entry here and is read back once.
 pub(super) type Changes = BTreeMap<OwnedUserId, Fields>;
+
+/// Candidate subjects with delta fields or a complete requested base.
+///
+/// Discovered deltas are restricted to the request selection and are subsumed
+/// by a base when the response also witnesses that subject.
+type Candidates = BTreeMap<OwnedUserId, Candidate>;
+
+/// Delta fields, with an empty set selecting the shared requested base.
+///
+/// A discovered delta always starts with one field, so the empty marker cannot
+/// collide with a delta and needs no additional per-subject discriminant.
+struct Candidate(Fields);
 
 /// One field paired with whatever reading it back produced.
 ///
@@ -89,10 +101,25 @@ pub(super) async fn collect(
 	let changes =
 		witnessed(services, sender_user, since.is_none(), rooms, filter, changes).await?;
 
+	let requested = changes
+		.values()
+		.any(is_base)
+		.then(|| {
+			requested
+				.iter()
+				.cloned()
+				.sorted_unstable()
+				.dedup()
+				.collect::<Vec<_>>()
+		})
+		.unwrap_or_default();
+
 	changes
 		.into_iter()
 		.stream()
-		.broad_then(|(user_id, fields)| collect_user(services, sender_user, user_id, fields))
+		.broad_then(|(user_id, fields)| {
+			collect_user(services, sender_user, user_id, fields, &requested)
+		})
 		.ready_try_filter_map(Result::Ok)
 		.ready_try_filter(|(_, update)| carries_a_field(update))
 		.try_collect()
@@ -113,12 +140,12 @@ async fn changed(
 	since: u64,
 	next_batch: u64,
 	requested: &[ProfileFieldName],
-) -> Result<Changes> {
+) -> Result<Candidates> {
 	let changes = services
 		.profile
 		.try_profile_changed(sender_user, since, Some(next_batch))
 		.ready_try_filter(|(_, field)| was_requested(requested, field))
-		.ready_try_fold(Changes::new(), |changes, change| Ok(fold_change(changes, change)))
+		.ready_try_fold(Candidates::new(), |changes, change| Ok(fold_delta(changes, change)))
 		.await?;
 
 	// A cursor stream resolves in its first poll, so a buffered fan-out buys nothing.
@@ -144,15 +171,32 @@ async fn room_changed(
 	since: u64,
 	next_batch: u64,
 	requested: &[ProfileFieldName],
-	changes: Changes,
-) -> Result<Changes> {
+	changes: Candidates,
+) -> Result<Candidates> {
 	services
 		.profile
 		.try_room_profile_changed(room_id, since, Some(next_batch))
 		.ready_try_filter(|(_, field)| was_requested(requested, field))
-		.ready_try_fold(changes, |changes, change| Ok(fold_change(changes, change)))
+		.ready_try_fold(changes, |changes, change| Ok(fold_delta(changes, change)))
 		.await
 }
+
+fn fold_delta(mut changes: Candidates, (user_id, field): ProfileChange<'_>) -> Candidates {
+	changes
+		.entry(user_id.to_owned())
+		.and_modify(|candidate| add_delta(candidate, field))
+		.or_insert_with(|| Candidate([field.into()].into()));
+
+	changes
+}
+
+fn add_delta(candidate: &mut Candidate, field: &str) {
+	if !is_base(candidate) {
+		candidate.0.insert(field.into());
+	}
+}
+
+fn is_base(candidate: &Candidate) -> bool { candidate.0.is_empty() }
 
 /// Records that one member changed one field.
 ///
@@ -179,21 +223,17 @@ async fn witnessed(
 	initial: bool,
 	rooms: &Rooms,
 	filter: &FilterDefinition,
-	changes: Changes,
-) -> Result<Changes> {
-	let requested = filter.profile_fields.ids.as_slice();
+	changes: Candidates,
+) -> Result<Candidates> {
 	let own = initial.then_some(sender_user.to_owned());
 
-	// A member of several rooms would otherwise be read back once per room.
 	let members = rooms
 		.join
 		.values()
 		.flat_map(joined_room_members)
-		.chain(own)
-		.sorted_unstable()
-		.dedup();
+		.chain(own);
 
-	let changes = members.fold(changes, |changes, user_id| base(changes, user_id, requested));
+	let changes = members.fold(changes, base);
 
 	if !initial {
 		return Ok(changes);
@@ -214,8 +254,8 @@ async fn initial_room(
 	services: &Services,
 	room_id: &RoomId,
 	filter: &FilterDefinition,
-	changes: Changes,
-) -> Result<Changes> {
+	changes: Candidates,
+) -> Result<Candidates> {
 	if lazy_room(services, room_id, filter).await? {
 		return Ok(changes);
 	}
@@ -223,9 +263,7 @@ async fn initial_room(
 	services
 		.state_cache
 		.room_members_checked(room_id)
-		.ready_try_fold(changes, |changes, user_id| {
-			Ok(base(changes, user_id.to_owned(), &filter.profile_fields.ids))
-		})
+		.ready_try_fold(changes, |changes, user_id| Ok(base(changes, user_id.to_owned())))
 		.await
 }
 
@@ -253,11 +291,8 @@ async fn lazy_room(
 	Ok(encrypted.is_none())
 }
 
-fn base(mut changes: Changes, user_id: OwnedUserId, requested: &[ProfileFieldName]) -> Changes {
-	changes
-		.entry(user_id)
-		.or_default()
-		.extend(requested.iter().cloned());
+fn base(mut changes: Candidates, user_id: OwnedUserId) -> Candidates {
+	changes.insert(user_id, Candidate(Fields::new()));
 
 	changes
 }
@@ -335,15 +370,28 @@ async fn collect_user(
 	services: &Services,
 	sender_user: &UserId,
 	user_id: OwnedUserId,
-	fields: Fields,
+	fields: Candidate,
+	requested: &[ProfileFieldName],
 ) -> Result<Option<(OwnedUserId, UserUpdate)>> {
 	if !visible(services, sender_user, &user_id).await? {
 		return Ok(None);
 	}
 
+	let fields = selected_fields(fields, requested);
 	let update = read_update(services, &user_id, fields).await?;
 
 	Ok(Some((user_id, update)))
+}
+
+fn selected_fields(
+	fields: Candidate,
+	requested: &[ProfileFieldName],
+) -> impl Iterator<Item = ProfileFieldName> + '_ {
+	if is_base(&fields) {
+		Either::Left(requested.iter().cloned())
+	} else {
+		Either::Right(fields.0.into_iter())
+	}
 }
 
 #[tracing::instrument(level = "trace", skip_all)]
@@ -383,10 +431,9 @@ pub(super) async fn visible(
 async fn read_update(
 	services: &Services,
 	user_id: &UserId,
-	fields: Fields,
+	fields: impl Iterator<Item = ProfileFieldName> + Send,
 ) -> Result<UserUpdate> {
 	let profile_updates = fields
-		.into_iter()
 		.stream()
 		.then(|name| read_field(services, user_id, name))
 		.map(Ok)
@@ -425,18 +472,80 @@ fn insert_field(mut updates: Updates, name: ProfileFieldName, value: Value) -> U
 
 #[cfg(test)]
 mod tests {
-	use ruma::api::client::sync::sync_events::v3::{StateEvents, Timeline};
+	use ruma::{
+		api::client::sync::sync_events::v3::{StateEvents, Timeline},
+		user_id,
+	};
 	use serde_json::{Value, json};
 	use tuwunel_core::Err;
 
 	use super::{
-		JoinedRoom, OwnedUserId, ProfileFieldName, Raw, State, Updates, fold_field,
-		joined_room_members, was_requested,
+		Candidates, JoinedRoom, OwnedUserId, ProfileFieldName, Raw, State, Updates, base,
+		fold_delta, fold_field, is_base, joined_room_members, selected_fields, was_requested,
 	};
 
 	fn field(name: &str) -> ProfileFieldName { name.into() }
 
 	fn members(room: &JoinedRoom) -> Vec<OwnedUserId> { joined_room_members(room).collect() }
+
+	#[test]
+	fn candidate_deltas_union_fields_without_duplicates() {
+		let user = user_id!("@alice:example.com");
+		let changes = [(user, "org.z"), (user, "org.a"), (user, "org.z")]
+			.into_iter()
+			.fold(Candidates::new(), fold_delta);
+
+		let fields = changes.into_values().next().expect("one subject");
+		let selected = selected_fields(fields, &[]).collect::<Vec<_>>();
+
+		assert_eq!(selected, [field("org.a"), field("org.z")]);
+	}
+
+	#[test]
+	fn vacant_delta_and_existing_base_stay_distinct() {
+		let user = user_id!("@alice:example.com");
+		let vacant = fold_delta(Candidates::new(), (user, "org.z"));
+		let existing = base(Candidates::new(), user.to_owned());
+		let existing = fold_delta(existing, (user, "org.z"));
+
+		assert!(!is_base(vacant.values().next().expect("one delta")));
+		assert!(is_base(existing.values().next().expect("one base")));
+	}
+
+	#[test]
+	fn full_bases_subsume_deltas_in_either_order() {
+		let user = user_id!("@alice:example.com");
+		let requested = [field("org.a"), field("org.z")];
+
+		let delta_first = fold_delta(Candidates::new(), (user, "org.z"));
+		let delta_first = base(delta_first, user.to_owned());
+		let base_first = base(Candidates::new(), user.to_owned());
+		let base_first = fold_delta(base_first, (user, "org.z"));
+
+		for changes in [delta_first, base_first] {
+			let fields = changes.into_values().next().expect("one subject");
+
+			assert!(is_base(&fields), "a base keeps no per-subject field set");
+
+			let selected = selected_fields(fields, &requested).collect::<Vec<_>>();
+
+			assert_eq!(selected, [field("org.a"), field("org.z")]);
+		}
+	}
+
+	#[test]
+	fn repeated_base_subjects_share_one_selection() {
+		let alice = user_id!("@alice:example.com");
+		let bob = user_id!("@bob:example.com");
+		let changes = [bob, alice, bob, alice]
+			.into_iter()
+			.map(ToOwned::to_owned)
+			.fold(Candidates::new(), base);
+
+		assert_eq!(changes.len(), 2);
+		assert!(changes.values().all(is_base));
+		assert_eq!(changes.into_keys().collect::<Vec<_>>(), [alice, bob]);
+	}
 
 	#[test]
 	fn only_the_filtered_fields_are_carried() {
