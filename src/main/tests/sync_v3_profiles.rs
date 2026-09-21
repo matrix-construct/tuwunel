@@ -357,7 +357,9 @@ async fn membership_failures(
 	let key = (room_id, owner_id);
 	let saved = members.qry(&key).await?;
 
-	members.put_raw(key, b"invalid-count");
+	// Shorter than a u64, so the decoder rejects it in every profile; an
+	// over-long value only trips a debug assertion.
+	members.put_raw(key, b"short");
 	fails_with_filter(owner, &filter, None).await?;
 	members.put_raw(key, saved.as_ref());
 
