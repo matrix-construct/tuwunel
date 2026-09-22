@@ -325,6 +325,15 @@ async fn fails_with_filter(owner: &Client<'_>, filter: &str, since: Option<&str>
 }
 
 #[tracing::instrument(level = "trace", skip_all)]
+async fn reads_status(owner: &Client<'_>, filter: &str, peer_id: &UserId) -> Result {
+	let response = owner.sync_json(Some(filter), None).await?;
+
+	assert_eq!(update(&response, peer_id)[STATUS]["text"], "readable");
+
+	Ok(())
+}
+
+#[tracing::instrument(level = "trace", skip_all)]
 async fn membership_failures(
 	owner: &Client<'_>,
 	owner_id: &UserId,
@@ -344,15 +353,7 @@ async fn membership_failures(
 	members.put_raw(invalid, 1_u64.to_be_bytes());
 	fails_with_filter(owner, &filter, None).await?;
 	members.del(invalid);
-
-	let repaired: Value = owner
-		.sync_response(Some(&filter), None)
-		.await?
-		.error_for_status()?
-		.json()
-		.await?;
-
-	assert_eq!(update(&repaired, peer_id)[STATUS]["text"], "readable");
+	reads_status(owner, &filter, peer_id).await?;
 
 	let key = (room_id, owner_id);
 	let saved = members.qry(&key).await?;
@@ -362,15 +363,12 @@ async fn membership_failures(
 	members.put_raw(key, b"short");
 	fails_with_filter(owner, &filter, None).await?;
 	members.put_raw(key, saved.as_ref());
+	reads_status(owner, &filter, peer_id).await?;
 
-	let repaired: Value = owner
-		.sync_response(Some(&filter), None)
-		.await?
-		.error_for_status()?
-		.json()
-		.await?;
-
-	assert_eq!(update(&repaired, peer_id)[STATUS]["text"], "readable");
+	// A join recorded before positions were stored holds an empty value.
+	members.put_raw(key, b"");
+	reads_status(owner, &filter, peer_id).await?;
+	members.put_raw(key, saved.as_ref());
 
 	Ok(())
 }
@@ -443,7 +441,13 @@ async fn set_status(services: &Services, user_id: &UserId, value: Option<Value>)
 async fn sync(&self, fields: Option<&[&str]>, since: Option<&str>) -> Result<Value> {
 	let filter = fields.map(|ids| json!({ PROFILE_FIELDS: { "ids": ids } }).to_string());
 
-	self.sync_response(filter.as_deref(), since)
+	self.sync_json(filter.as_deref(), since).await
+}
+
+#[implement(Client, params = "<'_>")]
+#[tracing::instrument(level = "trace", skip_all)]
+async fn sync_json(&self, filter: Option<&str>, since: Option<&str>) -> Result<Value> {
+	self.sync_response(filter, since)
 		.await?
 		.error_for_status()?
 		.json()

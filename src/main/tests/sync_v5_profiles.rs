@@ -286,6 +286,17 @@ async fn membership_failures(
 
 	assert_eq!(update(&repaired, peer_id)[STATUS]["text"], "readable");
 
+	// A join recorded before positions were stored holds an empty value.
+	members.put_raw(key, b"");
+
+	let legacy = owner
+		.sync_profiles("member-legacy", room, None)
+		.await?;
+
+	assert_eq!(update(&legacy, peer_id)[STATUS]["text"], "readable");
+
+	members.put_raw(key, saved.as_ref());
+
 	Ok(())
 }
 
