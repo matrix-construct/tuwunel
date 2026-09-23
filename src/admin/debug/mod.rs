@@ -28,6 +28,7 @@ mod resolve_true_destination;
 mod resync_database;
 mod runtime_interval;
 mod runtime_metrics;
+mod show_remote_pdu;
 mod sign_json;
 mod state_at_incoming;
 mod state_local_metrics;
@@ -86,6 +87,16 @@ pub(super) enum DebugCommand {
 
 		/// PduCount integer
 		count: i64,
+	},
+
+	/// - Requests a PDU from a remote server and prints the result. The PDU is
+	///   not inserted into the database.
+	ShowRemotePdu {
+		/// An event ID (a $ followed by the base64 reference hash)
+		event_id: OwnedEventId,
+
+		/// Server to fetch the PDU from
+		server: OwnedServerName,
 	},
 
 	/// - Attempts to retrieve a PDU from a remote server. Inserts it into our
