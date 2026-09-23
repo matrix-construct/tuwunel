@@ -18,7 +18,7 @@ pub struct Service {
 
 impl crate::Service for Service {
 	fn build(args: &crate::Args<'_>) -> Result<Arc<Self>> {
-		let db = Data::new(args);
+		let db = Data::new(args)?;
 		let config = &args.server.config;
 
 		let turn_secret = config

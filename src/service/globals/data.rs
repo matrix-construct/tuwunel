@@ -42,14 +42,14 @@ pub(super) const PROMOTION_COUNTER_GAP: u64 = 100_000_000;
 const CLEAN_COUNTER: &[u8] = b"clean_c";
 
 impl Data {
-	pub(super) fn new(args: &crate::Args<'_>) -> Self {
+	pub(super) fn new(args: &crate::Args<'_>) -> Result<Self> {
 		let db = args.db.clone();
 		let global = args.db["global"].clone();
 
 		// `global['c']` is cork-buffered and can lag behind durable `pduid_pdu`
 		// writes; on promote-restart, derive the high-water mark from both so
 		// the new primary doesn't re-issue colliding counts.
-		let from_global_c = Self::stored_count(&global).expect("initialize global counter");
+		let from_global_c = Self::stored_count(&global)?;
 
 		// Recovering that mark from `pduid_pdu` reads every PDU key in the
 		// database. That is ~60 minutes on a 12GB/868M-event database, and the
@@ -88,8 +88,7 @@ impl Data {
 					 scanning pduid_pdu; this is proportional to database size and the \
 					 listener stays unbound until it completes."
 				);
-				Self::max_pdu_count_across_rooms(&args.db["pduid_pdu"])
-					.expect("recover pdu high-water mark")
+				Self::max_pdu_count_across_rooms(&args.db["pduid_pdu"], args.server)?
 			},
 		};
 
@@ -126,16 +125,12 @@ impl Data {
 				 advancing the PDU counter clear of the previous primary's range."
 			);
 			let _cork = db.cork_and_sync();
-			Self::store_count(&db, &global, count).expect("persist advanced counter");
-			args.db
-				.set_replication_resume_seq(0)
-				.expect("clear replication cursor");
-			args.db
-				.set_replication_primary(None)
-				.expect("clear replication primary");
+			Self::store_count(&db, &global, count)?;
+			args.db.set_replication_resume_seq(0)?;
+			args.db.set_replication_primary(None)?;
 		}
 		let retires = Sender::new(count);
-		Self {
+		Ok(Self {
 			db: args.db.clone(),
 			global: args.db["global"].clone(),
 			retires: retires.clone(),
@@ -144,7 +139,7 @@ impl Data {
 				Box::new(move |count| Self::store_count(&db, &db["global"], count)),
 				Box::new(move |count| Self::handle_retire(&retires, count)),
 			),
-		}
+		})
 	}
 
 	#[inline]
@@ -264,10 +259,24 @@ impl Data {
 	/// cheap — every iterator here runs with `total_order_seek`, so seeking
 	/// per-room costs more index reads than stepping does — which is why the
 	/// caller avoids reaching it rather than optimising it.
-	fn max_pdu_count_across_rooms(pduid_pdu: &Arc<Map>) -> Result<u64> {
+	///
+	/// Checks for shutdown every `SCAN_SHUTDOWN_CHECK_EVERY` keys and gives up
+	/// with an error if one was requested. The scan runs before the signal
+	/// handlers can act on anything, so without this a `systemctl stop` sat
+	/// out the whole scan and was only ended by systemd's SIGKILL — on
+	/// core2-phx on 2026-09-23 that took the full ~6 minute stop timeout. An
+	/// abandoned scan leaves nothing half-done: no marker is written, and the
+	/// next start simply scans again.
+	fn max_pdu_count_across_rooms(pduid_pdu: &Arc<Map>, server: &tuwunel_core::Server) -> Result<u64> {
+		const SCAN_SHUTDOWN_CHECK_EVERY: u64 = 1 << 20;
 		let mut max: u64 = 0;
+		let mut seen: u64 = 0;
 		for key in pduid_pdu.rev_raw_keys_blocking() {
 			let key = key?;
+			seen = seen.wrapping_add(1);
+			if seen.is_multiple_of(SCAN_SHUTDOWN_CHECK_EVERY) {
+				server.check_running()?;
+			}
 			if let Some(count) = decode_normal_count(&key) {
 				if count > max {
 					max = count;
