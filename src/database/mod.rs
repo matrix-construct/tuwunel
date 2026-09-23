@@ -155,6 +155,35 @@ impl Database {
 		map.insert(b"primary_resume_seq", seq.to_le_bytes());
 		Ok(())
 	}
+
+	/// The primary whose WAL the persisted resume cursor refers to, if one was
+	/// recorded.
+	///
+	/// A RocksDB sequence number only means something on the database that
+	/// issued it — a replica applying the same batches still numbers them in
+	/// its own space, and runs ahead because it also writes this cursor — so a
+	/// cursor is only valid against the primary it was recorded from.
+	pub fn get_replication_primary(&self) -> Result<Option<String>> {
+		use tuwunel_core::utils::result::NotFound;
+
+		let map = &self["replication_meta"];
+		let result = map.get_blocking(b"primary_url");
+		if result.is_not_found() {
+			return Ok(None);
+		}
+		let handle = result?;
+		Ok(std::str::from_utf8(&handle).ok().map(ToOwned::to_owned))
+	}
+
+	/// Record which primary the resume cursor refers to. `None` clears it.
+	pub fn set_replication_primary(&self, primary_url: Option<&str>) -> Result {
+		let map = &self["replication_meta"];
+		match primary_url {
+			| Some(url) => map.insert(b"primary_url", url.as_bytes()),
+			| None => map.remove(b"primary_url"),
+		}
+		Ok(())
+	}
 }
 
 impl Index<&str> for Database {

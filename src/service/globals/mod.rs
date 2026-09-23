@@ -81,6 +81,14 @@ impl Service {
 	/// shutdown path, after everything that dispatches counts has stopped.
 	pub fn persist_clean_shutdown(&self) -> u64 { self.db.persist_clean_shutdown() }
 
+	/// Jump the counter clear of the previous primary's range as this node is
+	/// promoted. Call before the node takes any write as primary. Returns the
+	/// new counter value.
+	pub fn advance_counter_for_promotion(&self) -> Result<u64> {
+		self.db
+			.advance_for_promotion(data::PROMOTION_COUNTER_GAP)
+	}
+
 	#[must_use]
 	pub fn pending_count(&self) -> Range<u64> { self.db.pending_count() }
 

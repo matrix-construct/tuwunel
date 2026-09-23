@@ -12,13 +12,15 @@
 //!
 //! ```text
 //! startup
-//!   -> load resume_seq from replication_meta CF
-//!   -> if resume_seq == 0: bootstrap (GET /checkpoint, restore, set resume_seq)
+//!   -> load resume_seq (and the primary it belongs to) from replication_meta
+//!   -> if there is no cursor for THIS primary: bootstrap (GET /checkpoint,
+//!      restore, set resume_seq) — including on an ex-primary rejoining
 //!   -> connect to GET /wal?since=<resume_seq>
 //!   -> stream: for each frame apply batch, advance resume_seq, persist cursor
 //!   -> on disconnect / error: exponential backoff, reconnect
 //!   -> on 410 Gone (WAL gap): stop with error (manual restore required)
-//!   -> on promote(): enter standby loop, instance becomes standalone primary
+//!   -> on promote(): jump the PDU counter clear of the old primary's range,
+//!      enter standby loop, instance becomes standalone primary
 //!   -> on demote(url): exit standby, bootstrap from new primary, resume stream
 //! ```
 
@@ -46,6 +48,7 @@ const BACKOFF_MAX_MS: u64 = 30_000;
 pub struct Service {
 	db: Arc<Database>,
 	server: Arc<tuwunel_core::Server>,
+	services: Arc<crate::services::OnceServices>,
 	/// HTTP client used for all primary connections.
 	client: reqwest::Client,
 	/// Set to true when `promote()` is called; worker enters standby mode.
@@ -71,6 +74,7 @@ impl crate::Service for Service {
 		Ok(Arc::new(Self {
 			db: args.db.clone(),
 			server: args.server.clone(),
+			services: args.services.clone(),
 			client,
 			promoted: AtomicBool::new(false),
 			promote_notify: Notify::new(),
@@ -149,26 +153,38 @@ impl crate::Service for Service {
 				let seq: u64 = seq_str.trim().parse()
 					.map_err(|e| err!(Database("Parsing bootstrap sidecar: {e}")))?;
 				self.db.set_replication_resume_seq(seq)?;
+				self.db.set_replication_primary(Some(&primary_url))?;
 				std::fs::remove_file(&sidecar)
 					.map_err(|e| err!(Database("Removing bootstrap sidecar: {e}")))?;
 				info!("Bootstrap complete via pre-open path; resume_seq = {seq}");
 			} else {
 				// No sidecar — steady-state re-open, or first start of an ex-primary.
+				//
+				// Resume only from a cursor recorded against THIS primary. A
+				// RocksDB sequence number is local to the database that issued
+				// it, so neither our own sequence (an ex-primary rejoining) nor
+				// a cursor recorded against a previous primary names any point
+				// in this primary's WAL. Streaming from one either replays
+				// batches we already hold or — silently — skips batches we never
+				// got. A checkpoint restore is ~2 minutes; bootstrap instead.
 				let resume_seq = self.db.get_replication_resume_seq()?;
-				if resume_seq == 0 {
-					let db_seq = self.db.latest_wal_sequence();
-					if db_seq > 0 {
-						info!(
-							"resume_seq == 0 but database has sequence {db_seq} (was primary). \
-							 Attempting WAL resume from {db_seq}."
-						);
-						self.db.set_replication_resume_seq(db_seq)?;
+				let cursor_primary = self.db.get_replication_primary()?;
+				let cursor_is_ours = cursor_primary.as_deref() == Some(primary_url.as_str());
+				if resume_seq == 0 || !cursor_is_ours {
+					let reason = if resume_seq == 0 && self.db.latest_wal_sequence() == 0 {
+						"Empty database".to_owned()
+					} else if resume_seq == 0 {
+						"No resume cursor (this node was primary)".to_owned()
 					} else {
-						std::fs::write(&sidecar, "0")
-							.map_err(|e| err!(Database("Writing bootstrap trigger: {e}")))?;
-						info!("Empty database, bootstrap required. Triggering restart.");
-						return Err(err!(Database("Restarting for pre-open checkpoint bootstrap")));
-					}
+						format!(
+							"Resume cursor belongs to {}, not {primary_url}",
+							cursor_primary.as_deref().unwrap_or("an unrecorded primary")
+						)
+					};
+					std::fs::write(&sidecar, "0")
+						.map_err(|e| err!(Database("Writing bootstrap trigger: {e}")))?;
+					info!("{reason}; bootstrap required. Triggering restart.");
+					return self.restart_for_bootstrap();
 				}
 			}
 
@@ -200,12 +216,7 @@ impl crate::Service for Service {
 						if let Err(e) = self.db.set_replication_resume_seq(0) {
 							error!("Failed to reset resume_seq after WAL gap: {e}");
 						}
-						// Shut down cleanly — systemd will restart tuwunel via Restart=on-failure.
-						if let Err(e) = self.server.shutdown() {
-							error!("Failed to trigger shutdown after WAL gap: {e}");
-							return Err(err!(Database("WAL gap; failed to trigger restart")));
-						}
-						return Ok(());
+						return self.restart_for_bootstrap();
 					},
 					| Err(ref e) => {
 						if self.promoted.load(Ordering::Acquire) {
@@ -233,17 +244,45 @@ impl crate::Service for Service {
 }
 
 impl Service {
+	/// Restart the process so the pre-open path can restore a checkpoint; the
+	/// sidecar must already be written.
+	fn restart_for_bootstrap(&self) -> Result {
+		if let Err(e) = self.server.shutdown() {
+			error!("Failed to trigger shutdown for checkpoint bootstrap: {e}");
+			return Err(err!(Database("Bootstrap required; failed to trigger restart")));
+		}
+		Ok(())
+	}
+
 	/// Promote this secondary to a standalone primary.
 	///
 	/// Stops the replication worker immediately and clears `resume_seq` so a
 	/// future demote (or checkpoint served to a future secondary) doesn't
 	/// carry stale secondary-era state. The caller is responsible for
 	/// updating the VIP / load balancer to route client traffic to this node.
+	///
+	/// First jumps the PDU counter past anything the old primary could have
+	/// issued (see `PROMOTION_COUNTER_GAP`). That has to happen here rather
+	/// than on the restart that health-check.sh performs afterwards: this
+	/// process accepts writes as primary the moment the flag below is set —
+	/// the appservice is repointed at it in the same step — and until now its
+	/// in-memory counter was frozen at wherever this replica started. If the
+	/// jump fails, promotion fails; a primary numbering events inside the old
+	/// primary's range is worse than no failover.
 	pub fn promote(&self) -> Result<()> {
+		let count = self
+			.services
+			.globals
+			.advance_counter_for_promotion()?;
 		self.db.set_replication_resume_seq(0)?;
+		self.db.set_replication_primary(None)?;
 		self.promoted.store(true, Ordering::Release);
 		self.promote_notify.notify_waiters();
-		info!("Promotion requested; stopping replication worker.");
+		info!(
+			count,
+			"Promotion requested; counter advanced clear of the previous primary; stopping \
+			 replication worker."
+		);
 		Ok(())
 	}
 
@@ -253,10 +292,10 @@ impl Service {
 	/// Demote this promoted primary back to a secondary replicating from
 	/// `new_primary_url`.
 	///
-	/// Does NOT reset the resume cursor — the worker will attempt WAL resume
-	/// from the new primary first. If the new primary returns 410 (WAL gap),
-	/// the worker resets to 0 and bootstraps automatically. This avoids a full
-	/// snapshot in the common case where the node was only down briefly.
+	/// The worker then bootstraps from a checkpoint of the new primary: this
+	/// node's cursor was cleared on promotion, and its own sequence numbers
+	/// mean nothing against another database's WAL, so there is no safe point
+	/// to resume from.
 	///
 	/// The caller is responsible for ensuring the VIP / load balancer has been
 	/// updated to route writes to the new primary before calling this.
@@ -275,7 +314,7 @@ impl Service {
 		self.promoted.store(false, Ordering::Release);
 		self.demote_notify.notify_waiters();
 
-		info!("Demotion requested; will attempt WAL resume from {new_primary_url}");
+		info!("Demotion requested; will bootstrap from {new_primary_url}");
 		Ok(())
 	}
 

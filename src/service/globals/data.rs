@@ -23,6 +23,18 @@ type Callback = Box<dyn Fn(u64) -> Result + Send + Sync>;
 
 const COUNTER: &[u8] = b"c";
 
+/// How far a promotion moves the counter past everything this node knows of.
+///
+/// Replication is asynchronous, so when a primary dies it has usually issued
+/// counts this replica never received, and clients that synced against it hold
+/// `since` tokens inside that unreplicated tail. A client is only ever sent
+/// events numbered above its token, so a new primary that resumed numbering
+/// inside the tail would hide every new event there from every such client —
+/// silently, and permanently for those events. No replica can know the exact
+/// extent of a tail it never received, so the new primary starts clear of any
+/// plausible one instead.
+pub(super) const PROMOTION_COUNTER_GAP: u64 = 100_000_000;
+
 /// High-water mark written by a graceful shutdown. Its presence means the
 /// counter was persisted in full and `pduid_pdu` need not be scanned; its
 /// absence means the process stopped without recording one and the scan is
@@ -49,11 +61,26 @@ impl Data {
 		// the scan is skipped. It is only needed after an unclean stop, which
 		// is the one case where `global['c']` may genuinely lag durable
 		// `pduid_pdu` writes.
+		//
+		// A replica needs no scan at all. It issues no counts while it is a
+		// replica — every PDU it holds arrives already numbered, through the
+		// WAL stream — and promotion does not rely on this value either:
+		// `replication::Service::promote` moves the counter clear of the old
+		// primary's range itself, before the node takes a write. So a replica
+		// skips the scan and starts from the stored counter.
+		let is_replica = args.server.config.rocksdb_primary_url.is_some();
 		let from_clean = Self::stored_clean_count(&global);
 		let from_pdus = match from_clean {
 			| Some(clean) => {
 				info!(clean, "Clean shutdown recorded: skipping PDU high-water scan.");
 				clean
+			},
+			| None if is_replica => {
+				info!(
+					"Starting as a replica: skipping PDU high-water scan. A replica issues no \
+					 counts, and promotion advances the counter itself."
+				);
+				0
 			},
 			| None => {
 				warn!(
@@ -77,7 +104,36 @@ impl Data {
 
 		info!(from_global_c, from_pdus, "Recovered PDU counter high-water mark");
 
-		let count = from_global_c.max(from_pdus);
+		let mut count = from_global_c.max(from_pdus);
+
+		// Becoming primary without `replication::Service::promote`.
+		//
+		// promote() is where a replica's counter normally jumps clear of the
+		// old primary's range (see PROMOTION_COUNTER_GAP), and it clears the
+		// replication cursor as it does. A database that starts as primary with
+		// that cursor still in place was therefore a replica until now and
+		// skipped the jump — started as primary by hand, or by a script path
+		// that bypassed promote(). Its clients could otherwise hold sync tokens
+		// above everything it is about to issue. Apply the jump here, persist
+		// it, and clear the cursor so the next restart does not jump again.
+		let was_replica = args.db.get_replication_primary().ok().flatten().is_some()
+			|| args.db.get_replication_resume_seq().unwrap_or(0) > 0;
+		if !is_replica && was_replica {
+			count = count.saturating_add(PROMOTION_COUNTER_GAP);
+			warn!(
+				count,
+				"Starting as primary on a database that was a replica and was never promoted; \
+				 advancing the PDU counter clear of the previous primary's range."
+			);
+			let _cork = db.cork_and_sync();
+			Self::store_count(&db, &global, count).expect("persist advanced counter");
+			args.db
+				.set_replication_resume_seq(0)
+				.expect("clear replication cursor");
+			args.db
+				.set_replication_primary(None)
+				.expect("clear replication primary");
+		}
 		let retires = Sender::new(count);
 		Self {
 			db: args.db.clone(),
@@ -168,12 +224,36 @@ impl Data {
 	/// before returning: a mark left in the write buffer would be lost by the
 	/// very shutdown it is describing, and the next startup would fall back to
 	/// scanning — correct, but slow for no reason.
+	///
+	/// On a replica the in-memory counter never moves — replicated writes land
+	/// in `global['c']` without passing through it — so it only says where the
+	/// counter stood when this process started. The stored counter is what the
+	/// primary has been advancing all along, so record whichever is higher.
+	/// On a primary the stored counter never leads the in-memory one, and this
+	/// is unchanged.
 	pub(super) fn persist_clean_shutdown(&self) -> u64 {
-		let count = self.counter.dispatched();
+		let stored = Self::stored_count(&self.global).unwrap_or(0);
+		let count = self.counter.dispatched().max(stored);
 		let _cork = self.db.cork_and_sync();
 		self.global.insert(CLEAN_COUNTER, count.to_be_bytes());
 
 		count
+	}
+
+	/// Move the counter past anything the old primary could have issued, as
+	/// this node becomes primary. See `PROMOTION_COUNTER_GAP`.
+	///
+	/// Starts from the higher of the in-memory counter and the stored one: on a
+	/// replica the in-memory value is only where the counter stood when this
+	/// process started, while `global['c']` has been following the primary
+	/// through the WAL. Synced before returning, so the jump survives a crash
+	/// in the window before the next write would have persisted it.
+	pub(super) fn advance_for_promotion(&self, gap: u64) -> Result<u64> {
+		let stored = Self::stored_count(&self.global)?;
+		let base = self.counter.dispatched().max(stored);
+		let target = base.saturating_add(gap);
+		let _cork = self.db.cork_and_sync();
+		self.counter.advance_to(target)
 	}
 
 	/// Largest `Normal` PDU count across `pduid_pdu`. Backfilled counts are

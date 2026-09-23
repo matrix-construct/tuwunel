@@ -77,6 +77,15 @@ impl<F: Fn(u64) -> Result + Sync> Counter<F> {
 		Ok(Permit::<F> { state: self.clone(), retired, id })
 	}
 
+	/// Raise the counter to at least `min` without issuing the numbers in
+	/// between, persisting the new value through the commit callback. Returns
+	/// the resulting dispatched value; a `min` at or below it is a no-op.
+	///
+	/// The skipped numbers are never handed out, so nothing can be written
+	/// under them; when nothing is pending they are reported as retired at
+	/// once, which is accurate — there is nothing left to wait for.
+	pub fn advance_to(&self, min: u64) -> Result<u64> { self.inner.write()?.advance_to(min) }
+
 	/// Load the current and dispatched values simultaneously
 	#[inline]
 	pub fn range(&self) -> Range<u64> {
@@ -136,6 +145,21 @@ impl<F: Fn(u64) -> Result + Sync> State<F> {
 		self.dispatched = dispatched;
 		self.pending.push_back(self.dispatched);
 		Ok((retired, self.dispatched))
+	}
+
+	/// See `Counter::advance_to`.
+	fn advance_to(&mut self, min: u64) -> Result<u64> {
+		if min <= self.dispatched {
+			return Ok(self.dispatched);
+		}
+
+		(self.commit)(min)?;
+		self.dispatched = min;
+		if self.pending.is_empty() {
+			(self.release)(min)?;
+		}
+
+		Ok(min)
 	}
 
 	/// Retire the sequence number `id`.
@@ -223,5 +247,70 @@ impl<F: Fn(u64) -> Result + Sync> Drop for Permit<F> {
 			.write()
 			.expect("locked for writing")
 			.retire(self.id);
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use std::sync::{Arc, Mutex};
+
+	use super::Counter;
+	use crate::Result;
+
+	type Log = Arc<Mutex<Vec<u64>>>;
+	type Cb = Box<dyn Fn(u64) -> Result + Send + Sync>;
+
+	fn counter(init: u64) -> (Arc<Counter<Cb>>, Log, Log) {
+		let commits: Log = Arc::default();
+		let releases: Log = Arc::default();
+		let (c, r) = (commits.clone(), releases.clone());
+		let commit: Cb = Box::new(move |n| {
+			c.lock().unwrap().push(n);
+			Ok(())
+		});
+		let release: Cb = Box::new(move |n| {
+			r.lock().unwrap().push(n);
+			Ok(())
+		});
+		(Counter::new(init, commit, release), commits, releases)
+	}
+
+	#[test]
+	fn advance_to_skips_ahead_and_persists() {
+		let (counter, commits, releases) = counter(10);
+		assert_eq!(counter.advance_to(1_000).unwrap(), 1_000);
+		assert_eq!(counter.dispatched(), 1_000);
+		assert_eq!(counter.current(), 1_000);
+		assert_eq!(*commits.lock().unwrap(), vec![1_000]);
+		assert_eq!(*releases.lock().unwrap(), vec![1_000]);
+
+		// The next number issued comes after the jump, never inside it.
+		let permit = counter.next().unwrap();
+		assert_eq!(*permit, 1_001);
+	}
+
+	#[test]
+	fn advance_to_never_moves_backwards() {
+		let (counter, commits, _) = counter(500);
+		assert_eq!(counter.advance_to(100).unwrap(), 500);
+		assert_eq!(counter.advance_to(500).unwrap(), 500);
+		assert_eq!(counter.dispatched(), 500);
+		assert!(commits.lock().unwrap().is_empty());
+	}
+
+	#[test]
+	fn advance_to_with_pending_keeps_retirement_behind_it() {
+		let (counter, _, releases) = counter(0);
+		let permit = counter.next().unwrap();
+		assert_eq!(*permit, 1);
+
+		counter.advance_to(1_000).unwrap();
+		// 1 is still in flight, so nothing past it is visible to readers yet.
+		assert_eq!(counter.current(), 0);
+		assert!(releases.lock().unwrap().is_empty());
+
+		drop(permit);
+		assert_eq!(counter.current(), 1_000);
+		assert_eq!(counter.next().map(|p| *p).unwrap(), 1_001);
 	}
 }
