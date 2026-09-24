@@ -6,6 +6,7 @@
 
 use std::time::Duration;
 
+use reqwest::Response;
 use serde_json::Value;
 use tokio::time::{sleep, timeout};
 use tuwunel_core::{
@@ -53,14 +54,7 @@ pub(crate) async fn create_room(&self, body: &Value) -> Result<OwnedRoomId> {
 #[implement(Client, params = "<'_>")]
 pub(crate) async fn post(&self, path: &str, body: &Value) -> Result<Value> {
 	let response = self
-		.services
-		.client
-		.clients
-		.default
-		.post(self.url(path))
-		.bearer_auth(self.token)
-		.json(body)
-		.send()
+		.post_url(&self.url(path), body)
 		.await?
 		.error_for_status()?
 		.json()
@@ -71,11 +65,31 @@ pub(crate) async fn post(&self, path: &str, body: &Value) -> Result<Value> {
 
 /// The versioned client-API URL for one endpoint path.
 ///
-/// Every request in the harness is addressed through here, so the base and
-/// the version prefix are stated once.
+/// Every versioned client-API request in the harness is addressed through
+/// here, so the base and the version prefix are stated once.
 #[implement(Client, params = "<'_>")]
 pub(crate) fn url(&self, path: &str) -> String {
 	format!("{}/_matrix/client/v3/{path}", self.base)
+}
+
+/// Post a JSON body to an absolute URL as this user and keep the raw reply.
+///
+/// The status stays the caller's to judge, so a test can assert a refusal as
+/// readily as a success, on any API the server hosts.
+#[implement(Client, params = "<'_>")]
+pub(crate) async fn post_url(&self, url: &str, body: &Value) -> Result<Response> {
+	let response = self
+		.services
+		.client
+		.clients
+		.default
+		.post(url)
+		.bearer_auth(self.token)
+		.json(body)
+		.send()
+		.await?;
+
+	Ok(response)
 }
 
 /// Wait for the listener to answer, which the boot does not itself await.
