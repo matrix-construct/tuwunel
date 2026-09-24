@@ -1,4 +1,5 @@
 use axum::extract::State;
+use ruma::events::room::join_rules::JoinRule;
 use synapse_admin_api::room_membership::join_room::v1::{Request, Response};
 use tuwunel_core::{Err, Result};
 use tuwunel_service::membership::Join;
@@ -13,7 +14,9 @@ pub(crate) async fn admin_join_room_route(
 	State(services): State<crate::State>,
 	body: Ruma<Request>,
 ) -> Result<Response> {
-	require_admin(&services, body.sender_user()).await?;
+	let sender_user = body.sender_user();
+
+	require_admin(&services, sender_user).await?;
 
 	let user_id = &body.user_id;
 
@@ -29,6 +32,19 @@ pub(crate) async fn admin_join_room_route(
 		.alias
 		.maybe_resolve_with_servers(&body.room_id_or_alias, Some(body.server_name.as_slice()))
 		.await?;
+
+	// Match Synapse: private-style rooms require a valid invite before the
+	// target user can take the ordinary Matrix join path below.
+	if services
+		.state_accessor
+		.get_join_rules(&room_id)
+		.await != JoinRule::Public
+	{
+		services
+			.membership
+			.invite(sender_user, user_id, &room_id, None, false)
+			.await?;
+	}
 
 	services
 		.membership
