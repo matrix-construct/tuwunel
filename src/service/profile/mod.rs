@@ -1,3 +1,4 @@
+mod remote;
 #[cfg(test)]
 mod tests;
 
@@ -21,7 +22,7 @@ use tuwunel_core::{
 	matrix::PduBuilder,
 	smallvec::SmallVec,
 	utils::{
-		MutexMap, ReadyExt,
+		MutexMap, MutexMapGuard, ReadyExt,
 		future::TryExtExt,
 		result::NotFound,
 		stream::{IterStream, TryIgnore, TryReadyExt, automatic_width},
@@ -31,6 +32,8 @@ use tuwunel_core::{
 use tuwunel_database::{
 	Deserialized, Ignore, Interfix, Json, KeyVal, Map, Txn, deserialize_from_slice, serialize_key,
 };
+
+type ProfileLock = MutexMapGuard<OwnedUserId, ()>;
 
 pub struct Service {
 	mutex: MutexMap<OwnedUserId, ()>,
@@ -461,7 +464,24 @@ pub async fn set_profile_keys(
 	profile_values: &[(ProfileFieldName, Option<Value>)],
 	propagation: Option<Propagation>,
 ) -> Result {
-	let _profile_lock = self.mutex.lock(user_id).await;
+	let profile_lock = self.mutex.lock(user_id).await;
+
+	self.set_profile_keys_locked(&profile_lock, user_id, profile_values, propagation)
+		.await
+}
+
+/// Sets profile field values under a profile lock the caller already holds.
+///
+/// A caller that must read the stored profile and write it back without an
+/// interleaved writer takes the lock once and passes it here.
+#[implement(Service)]
+async fn set_profile_keys_locked(
+	&self,
+	_profile_lock: &ProfileLock,
+	user_id: &UserId,
+	profile_values: &[(ProfileFieldName, Option<Value>)],
+	propagation: Option<Propagation>,
+) -> Result {
 	let local = self.services.globals.user_is_local(user_id);
 
 	if local {

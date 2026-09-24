@@ -1,5 +1,6 @@
 #[path = "tests/publication.rs"]
 mod publication;
+mod remote;
 
 use ruma::{api::error::ErrorKind, room_id, user_id};
 use serde_json::json;
