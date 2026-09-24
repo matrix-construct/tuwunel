@@ -8,12 +8,16 @@ use crate::{Ruma, client::admin::require_admin};
 /// # `POST /_synapse/admin/v1/join/{room_id_or_alias}`
 ///
 /// Joins a local user to a room on an admin's behalf, resolving an alias and
-/// using the supplied servers as remote-join candidates.
+/// using the supplied servers as remote-join candidates. When the join rule
+/// admits no one uninvited, the admin invites the user first, so the admin
+/// must be joined there with power to invite.
 pub(crate) async fn admin_join_room_route(
 	State(services): State<crate::State>,
 	body: Ruma<Request>,
 ) -> Result<Response> {
-	require_admin(&services, body.sender_user()).await?;
+	let sender_user = body.sender_user();
+
+	require_admin(&services, sender_user).await?;
 
 	let user_id = &body.user_id;
 
@@ -29,6 +33,17 @@ pub(crate) async fn admin_join_room_route(
 		.alias
 		.maybe_resolve_with_servers(&body.room_id_or_alias, Some(body.server_name.as_slice()))
 		.await?;
+
+	if services
+		.membership
+		.join_needs_invite(&room_id, user_id)
+		.await
+	{
+		services
+			.membership
+			.invite(sender_user, user_id, &room_id, None, false)
+			.await?;
+	}
 
 	services
 		.membership

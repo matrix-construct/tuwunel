@@ -7,11 +7,17 @@ use ruma::{
 	},
 	events::{
 		invite_permission_config::InvitePermission,
-		room::member::{MembershipState, RoomMemberEventContent},
+		room::{
+			join_rules::JoinRule,
+			member::{MembershipState, RoomMemberEventContent},
+		},
 	},
 };
 use tuwunel_core::{
-	Err, Result, at, err, implement, matrix::event::gen_event_id_canonical_json, pdu::PduBuilder,
+	Err, Result, at, err, implement,
+	matrix::event::gen_event_id_canonical_json,
+	pdu::PduBuilder,
+	utils::future::{ReadyBoolExt, and4},
 };
 
 use super::Service;
@@ -41,6 +47,53 @@ pub async fn invite(
 	}
 
 	Ok(())
+}
+
+/// Reports whether a user must be invited before joining a room.
+///
+/// True when this server is in the room, the user is neither joined nor
+/// invited, and the join rule would refuse the user uninvited: a public rule
+/// admits anyone, and a restricted rule admits members of the rooms it
+/// allows. When this server is not in the room its view of the join rule may
+/// be stale or absent, so the remote join is left to decide.
+#[implement(Service)]
+pub async fn join_needs_invite(&self, room_id: &RoomId, user_id: &UserId) -> bool {
+	let server_in_room = self
+		.services
+		.state_cache
+		.server_in_room(self.services.globals.server_name(), room_id);
+
+	let joined = self
+		.services
+		.state_cache
+		.is_joined(user_id, room_id);
+
+	let invited = self
+		.services
+		.state_cache
+		.is_invited(user_id, room_id);
+
+	let admitted = self
+		.services
+		.state_accessor
+		.get_join_rules(room_id)
+		.then(async |rule| self.admits_uninvited(&rule, user_id).await);
+
+	// and4 polls in order, so a point read refusing at once spares the join-rule reads.
+	and4(server_in_room, joined.is_false(), invited.is_false(), admitted.is_false()).await
+}
+
+#[implement(Service)]
+async fn admits_uninvited(&self, rule: &JoinRule, user_id: &UserId) -> bool {
+	match rule {
+		| JoinRule::Public => true,
+		| JoinRule::Restricted(_) | JoinRule::KnockRestricted(_) =>
+			self.services
+				.state_cache
+				.is_joined_any(user_id, rule.allowed_room_ids())
+				.await,
+		| _ => false,
+	}
 }
 
 #[implement(Service)]
