@@ -144,8 +144,14 @@ case "$1" in
       done
     fi
 
-    # Fix up ownership and permissions for the database and the config.
-    chown -c tuwunel:tuwunel -R "$TUWUNEL_DATABASE_PATH"
+    # Fix up ownership and permissions for the database and the config. Only
+    # an adopted database or a directory not yet the server's is walked: an
+    # upgrade leaves the server running until the restart below, creating and
+    # deleting files under a walk that would fail on the first one to vanish.
+    if [ -n "$adopted" ] \
+      || [ "$(stat -c %U:%G "$TUWUNEL_DATABASE_PATH")" != tuwunel:tuwunel ]; then
+      chown -c tuwunel:tuwunel -R "$TUWUNEL_DATABASE_PATH"
+    fi
     chown -c tuwunel:tuwunel -R "$TUWUNEL_CONFIG_PATH"
 
     chmod -c 740 "$TUWUNEL_DATABASE_PATH"

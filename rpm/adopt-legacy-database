@@ -134,7 +134,13 @@ for legacy in /var/lib/matrix-conduit /var/lib/conduwuit; do
   fi
 done
 
-chown -R tuwunel:tuwunel "$TUWUNEL_DATABASE_PATH"
+# Only an adopted database or a directory not yet the server's is walked: an
+# upgrade leaves the server running, creating and deleting files under a walk
+# that would fail on the first one to vanish.
+if [ -n "$adopted" ] \
+  || [ "$(stat -c %U:%G "$TUWUNEL_DATABASE_PATH")" != tuwunel:tuwunel ]; then
+  chown -R tuwunel:tuwunel "$TUWUNEL_DATABASE_PATH"
+fi
 chmod 0740 "$TUWUNEL_DATABASE_PATH"
 
 # An adopted directory carries the labels of wherever it came from.
