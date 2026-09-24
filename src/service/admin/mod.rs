@@ -21,7 +21,7 @@ pub use create::create_admin_room;
 use futures::TryFutureExt;
 use ruma::{OwnedEventId, OwnedRoomAliasId, OwnedRoomId, RoomId, RoomOrAliasId, UserId};
 use tokio::sync::mpsc;
-use tuwunel_core::{Err, Event, Result, debug, err, error::default_log, warn};
+use tuwunel_core::{Err, Event, Result, debug, err, error::default_log, utils::ReadyExt, warn};
 
 pub struct Service {
 	services: Arc<crate::services::OnceServices>,
@@ -220,6 +220,38 @@ impl Service {
 		self.services
 			.state_cache
 			.is_joined(user_id, &admin_room)
+			.await
+	}
+
+	/// Checks whether a given user is the only active admin left on this server
+	///
+	/// The server user is never counted: it can sign in only while an emergency
+	/// password is configured. Deactivated accounts still joined to the admin
+	/// room are not counted either, since none of them can sign in to act.
+	pub async fn user_is_last_admin(&self, user_id: &UserId) -> bool {
+		let server_user: &UserId = &self.services.globals.server_user;
+		if user_id == server_user {
+			return false;
+		}
+
+		let Ok(admin_room) = self.get_admin_room().await else {
+			return false;
+		};
+
+		if !self
+			.services
+			.state_cache
+			.is_joined(user_id, &admin_room)
+			.await
+		{
+			return false;
+		}
+
+		!self
+			.services
+			.state_cache
+			.active_local_users_in_room(&admin_room)
+			.ready_any(|member| member != user_id && member != server_user)
 			.await
 	}
 
