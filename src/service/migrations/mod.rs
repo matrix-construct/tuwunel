@@ -36,7 +36,7 @@ use self::{
 	remove_remote_media_userid::remove_remote_media_userid,
 	retroactively_fix_bad_data_from_roomuserid_joined::retroactively_fix_bad_data_from_roomuserid_joined,
 	split_conduit_highlight_counts::split_conduit_highlight_counts,
-	token_expiry::migrate_token_expiry,
+	token_expiry::{migrate_token_expiry, restore_token_expiry},
 	upgrade_legacy_mediaid_user::upgrade_legacy_mediaid_user,
 };
 use crate::Services;
@@ -257,7 +257,8 @@ async fn fresh(services: &Services) -> Result {
 	db["global"].insert(CLEAR_STATE_LOCAL_ERROR_MEMOS, []);
 	db["global"].insert("adopt_foreign_account_status", []);
 	db["global"].insert("adopt_foreign_email_bindings", []);
-	db["global"].insert("adopt_foreign_token_expiry", []);
+	db["global"].insert(token_expiry::RESTORE_MARKER, []);
+	db["global"].insert(token_expiry::ADOPT_MARKER, []);
 	mark_clean_injectivity(services);
 
 	// Create the admin room and server user on first run
@@ -396,13 +397,9 @@ async fn migrate(services: &Services, foreign_lineage: bool) -> Result {
 		db["global"].insert("adopt_foreign_email_bindings", []);
 	}
 
-	if pending(services, "adopt_foreign_token_expiry").await? {
-		let finished = migrate_token_expiry(services).await?;
-
-		if finished {
-			db["global"].insert("adopt_foreign_token_expiry", []);
-		}
-	}
+	// The restore hands adopted rows back to the adoption, so it runs first.
+	until_finished(services, token_expiry::RESTORE_MARKER, restore_token_expiry).await?;
+	until_finished(services, token_expiry::ADOPT_MARKER, migrate_token_expiry).await?;
 
 	services.server.check_running()?;
 
@@ -427,6 +424,25 @@ async fn migrate(services: &Services, foreign_lineage: bool) -> Result {
 	warn_forbidden_names(services).await?;
 
 	info!("Loaded RocksDB database with schema version {DATABASE_VERSION}");
+
+	Ok(())
+}
+
+/// Runs a pass whose work may wait on a condition outside the database.
+///
+/// The marker is stamped only once the pass reports it finished, so a pass that
+/// waits runs again on a later boot.
+async fn until_finished<F>(services: &Services, marker: &'static str, pass: F) -> Result
+where
+	F: AsyncFnOnce(&Services) -> Result<bool>,
+{
+	if pending(services, marker).await? {
+		let finished = pass(services).await?;
+
+		if finished {
+			services.db["global"].insert(marker, []);
+		}
+	}
 
 	Ok(())
 }

@@ -1,18 +1,18 @@
-//! Boots the foreign token-expiry adoption against a seeded origin column.
+//! Boots the token-expiry passes against a seeded origin column.
 //!
 //! The origin column is outside this server's catalog and nothing here can
-//! create it, so the parent process writes it with the storage engine directly
-//! between child boots, alongside a token in the foreign two-field shape and
-//! with the marker a fresh database pre-stamps cleared. Each boot is a child
-//! process because a stopped server keeps the database lock until its process
-//! exits.
+//! create it, so the parent process writes it with the storage engine between
+//! child boots, alongside a token row in one of the shapes a migrated database
+//! holds and with the pre-stamped markers cleared to match. Each boot is a child
+//! process because a stopped server keeps the database lock until it exits.
 //!
-//! Without an OIDC provider the pass must leave the token alone and the marker
-//! unstamped, because the client's refresh would fail at discovery and never
-//! sign the session out, while an origin column whose rows this server can
-//! never adopt finishes the pass at once. With a provider it must adopt, refuse
-//! the token with the sign-out signal, and answer the refresh with the one OAuth
-//! error the client acts on.
+//! Without an OIDC provider the adoption must leave the token alone and its
+//! marker unstamped, because the client's refresh would fail at discovery and
+//! never sign the session out, and finish at once on a column with nothing to
+//! adopt; with a provider it must adopt, refuse the token with the sign-out
+//! signal, and answer the refresh with the one OAuth error the client acts on.
+//! A row the ungated release stamped must be restored and handed back to the
+//! adoption at once, and only while no provider could refresh it.
 
 #![cfg(test)]
 
@@ -52,7 +52,8 @@ const CHILD_DATABASE_ENV: &str = "TOKEN_EXPIRY_TEST_DATABASE";
 const CHILD_PHASE_ENV: &str = "TOKEN_EXPIRY_TEST_PHASE";
 const FOREIGN_TOKEN: &str = "token-expiry-adoption-foreign-access-token";
 const NATIVE_TOKEN: &str = "token-expiry-adoption-native-access-token";
-const MARKER: &[u8] = b"adopt_foreign_token_expiry";
+const ADOPT_MARKER: &[u8] = b"adopt_foreign_token_expiry";
+const RESTORE_MARKER: &[u8] = b"restore_foreign_token_expiry";
 const ORIGIN_COLUMN: &str = "userdeviceid_tokenexpires";
 const PAST_EXPIRY_SECS: u64 = 1_600_000_000;
 
@@ -68,12 +69,19 @@ enum Phase {
 }
 
 /// The shape the seeded session's token row is left in.
+///
+/// It also decides which pre-stamped markers are cleared, since each shape is
+/// what one earlier release leaves behind.
 #[derive(Clone, Copy)]
 enum Seed {
-	/// The origin's two-field row, which the pass may annotate.
+	/// The origin's two-field row, as a release before either pass left it.
 	Foreign,
-	/// A row this server wrote, which the pass must leave alone.
+
+	/// A row this server wrote, as a release before either pass left it.
 	Native,
+
+	/// The row the ungated release stamped, with its marker still set.
+	Adopted,
 }
 
 #[test]
@@ -87,25 +95,30 @@ fn foreign_expiry_adoption_waits_for_a_provider() -> Result {
 			| "register" => boot(&database, Phase::Register, register_phase),
 			| "without-provider" => boot(&database, Phase::WithoutProvider, unadopted_phase),
 			| "settled" => boot(&database, Phase::WithoutProvider, finished_phase),
+			| "restored" => boot(&database, Phase::WithoutProvider, restored_phase),
+			| "kept" => boot(&database, Phase::WithProvider, kept_phase),
 			| "with-provider" => boot(&database, Phase::WithProvider, adopted_phase),
 			| _ => Err!("unknown token expiry child phase: {phase}"),
 		};
 	}
 
-	let database = ScratchDatabase(Args::test_database_path("token-expiry-adoption"));
+	let phases = ["without-provider", "without-provider", "with-provider"];
+
+	run_case("token-expiry-adoption", Seed::Foreign, &phases)?;
+	run_case("token-expiry-adoption-settled", Seed::Native, &["settled"])?;
+	run_case("token-expiry-adoption-stamped", Seed::Adopted, &["restored", "with-provider"])?;
+	run_case("token-expiry-adoption-kept", Seed::Adopted, &["kept", "restored"])
+}
+
+fn run_case(name: &str, seed: Seed, phases: &[&str]) -> Result {
+	let database = ScratchDatabase(Args::test_database_path(name));
 
 	run_child(database.path(), "register")?;
-	seed_origin_column(database.path(), &read_session(database.path())?, Seed::Foreign)?;
+	seed_origin_column(database.path(), &read_session(database.path())?, seed)?;
 
-	for phase in ["without-provider", "without-provider", "with-provider"] {
-		run_child(database.path(), phase)?;
-	}
-
-	let settled = ScratchDatabase(Args::test_database_path("token-expiry-adoption-settled"));
-
-	run_child(settled.path(), "register")?;
-	seed_origin_column(settled.path(), &read_session(settled.path())?, Seed::Native)?;
-	run_child(settled.path(), "settled")
+	phases
+		.iter()
+		.try_for_each(|phase| run_child(database.path(), phase))
 }
 
 impl ScratchDatabase {
@@ -213,14 +226,62 @@ async fn register_phase(services: &Services, _: &str, database: &Path) -> Result
 
 async fn unadopted_phase(services: &Services, base: &str, _: &Path) -> Result {
 	tokens_live(services, base).await?;
-	assert!(!marker_stamped(services).await?, "skip must leave the marker clear");
+	assert!(
+		!marker_stamped(services, ADOPT_MARKER).await?,
+		"skip must leave the marker clear"
+	);
+
+	assert!(
+		marker_stamped(services, RESTORE_MARKER).await?,
+		"a column with nothing to restore must finish the restore"
+	);
 
 	Ok(())
 }
 
 async fn finished_phase(services: &Services, base: &str, _: &Path) -> Result {
 	tokens_live(services, base).await?;
-	assert!(marker_stamped(services).await?, "an unadoptable column must finish the pass");
+	assert!(
+		marker_stamped(services, ADOPT_MARKER).await?,
+		"an unadoptable column must finish the pass"
+	);
+
+	assert!(marker_stamped(services, RESTORE_MARKER).await?, "restore must stamp its marker");
+
+	Ok(())
+}
+
+async fn restored_phase(services: &Services, base: &str, _: &Path) -> Result {
+	tokens_live(services, base).await?;
+
+	let (.., expires) = services
+		.users
+		.find_from_token(FOREIGN_TOKEN)
+		.await?;
+
+	assert!(expires.is_none(), "restore must put the token back into the foreign shape");
+	assert!(
+		!marker_stamped(services, ADOPT_MARKER).await?,
+		"restore must hand the column back to the adoption"
+	);
+
+	assert!(marker_stamped(services, RESTORE_MARKER).await?, "restore must stamp its marker");
+
+	Ok(())
+}
+
+// The stamped token is not presented, since a refusal would remove it.
+async fn kept_phase(services: &Services, base: &str, _: &Path) -> Result {
+	assert_eq!(whoami(services, base, NATIVE_TOKEN).await?.0, StatusCode::OK);
+	assert!(
+		!marker_stamped(services, RESTORE_MARKER).await?,
+		"restore must wait while a provider exists"
+	);
+
+	assert!(
+		marker_stamped(services, ADOPT_MARKER).await?,
+		"restore must not hand back a column a provider can refresh"
+	);
 
 	Ok(())
 }
@@ -239,7 +300,7 @@ async fn adopted_phase(services: &Services, base: &str, _: &Path) -> Result {
 	assert_eq!(body["errcode"], "M_UNKNOWN_TOKEN");
 	assert!(body.get("soft_logout").is_none());
 	assert_eq!(whoami(services, base, NATIVE_TOKEN).await?.0, StatusCode::OK);
-	assert!(marker_stamped(services).await?, "adoption must stamp the marker");
+	assert!(marker_stamped(services, ADOPT_MARKER).await?, "adoption must stamp the marker");
 
 	refresh_rejected(services, base).await
 }
@@ -328,9 +389,10 @@ fn sidecar(database: &Path) -> PathBuf { database.with_extension("device") }
 /// Writes what a migrated origin database holds in the origin's expiry column.
 ///
 /// The column is created with a past expiry for the session's device, and the
-/// token row is either rewritten into the foreign two-field shape or left as
-/// this server wrote it. The pre-stamped marker is cleared either way so the
-/// pass runs on the next boot.
+/// token row is rewritten into the foreign two-field shape, left as this server
+/// wrote it, or stamped as the ungated adoption left it. A database upgraded
+/// from before either pass holds neither marker, while one the ungated release
+/// stamped holds the adoption's, so the markers are cleared to match the seed.
 fn seed_origin_column(database: &Path, (user_id, device_id): &Session, seed: Seed) -> Result {
 	let opts = Options::default();
 	let columns = DB::list_cf(&opts, database).map_err(storage_error)?;
@@ -349,16 +411,27 @@ fn seed_origin_column(database: &Path, (user_id, device_id): &Session, seed: See
 	let expiries = column(ORIGIN_COLUMN)?;
 	let global = column("global")?;
 
-	if matches!(seed, Seed::Foreign) {
-		db.put_cf(&owners, FOREIGN_TOKEN, &device)
-			.map_err(storage_error)?;
-	}
-
 	db.put_cf(&expiries, &device, PAST_EXPIRY_SECS.to_be_bytes())
 		.map_err(storage_error)?;
 
-	db.delete_cf(&global, MARKER)
+	let row = match seed {
+		| Seed::Native => None,
+		| Seed::Foreign => Some(device),
+		| Seed::Adopted => Some(serialize_key((user_id, device_id, Some(PAST_EXPIRY_SECS)))?),
+	};
+
+	if let Some(row) = row {
+		db.put_cf(&owners, FOREIGN_TOKEN, &row)
+			.map_err(storage_error)?;
+	}
+
+	db.delete_cf(&global, RESTORE_MARKER)
 		.map_err(storage_error)?;
+
+	if !matches!(seed, Seed::Adopted) {
+		db.delete_cf(&global, ADOPT_MARKER)
+			.map_err(storage_error)?;
+	}
 
 	db.flush_wal(true).map_err(storage_error)?;
 
@@ -371,12 +444,12 @@ fn seed_origin_column(database: &Path, (user_id, device_id): &Session, seed: See
 )]
 fn storage_error(error: EngineError) -> Error { err!("storage engine: {error}") }
 
-async fn marker_stamped(services: &Services) -> Result<bool> {
+async fn marker_stamped(services: &Services, marker: &[u8]) -> Result<bool> {
 	services.db["global"]
-		.get(MARKER)
+		.get(marker)
 		.await
 		.optional()
-		.map(|marker| marker.is_some())
+		.map(|stamped| stamped.is_some())
 }
 
 async fn whoami(services: &Services, base: &str, token: &str) -> Result<(StatusCode, Value)> {
