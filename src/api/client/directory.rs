@@ -5,6 +5,7 @@ use futures::{
 	FutureExt, StreamExt, TryFutureExt,
 	future::{join, join4, join5},
 };
+use http::StatusCode;
 use ruma::{
 	OwnedRoomAliasId, OwnedRoomId, RoomAliasId, RoomId, ServerName, UInt, UserId,
 	api::{
@@ -214,21 +215,20 @@ pub(crate) async fn get_public_rooms_filtered_helper(
 	filter: &Filter,
 	_network: &RoomNetwork,
 ) -> Result<get_public_rooms_filtered::v3::Response> {
-	if let Some(other_server) = remote_server(services, server) {
+	if let Some(server) = server
+		&& !services.globals.server_is_ours(server)
+	{
 		let response = services
 			.federation
-			.execute(
-				other_server,
-				federation::directory::get_public_rooms_filtered::v1::Request {
-					limit,
-					since: since.map(ToOwned::to_owned),
-					filter: Filter {
-						generic_search_term: filter.generic_search_term.clone(),
-						room_types: filter.room_types.clone(),
-					},
-					room_network: RoomNetwork::Matrix,
+			.execute(server, federation::directory::get_public_rooms_filtered::v1::Request {
+				limit,
+				since: since.map(ToOwned::to_owned),
+				filter: Filter {
+					generic_search_term: filter.generic_search_term.clone(),
+					room_types: filter.room_types.clone(),
 				},
-			)
+				room_network: RoomNetwork::Matrix,
+			})
 			.await?;
 
 		return Ok(get_public_rooms_filtered::v3::Response {
@@ -494,30 +494,22 @@ fn check_server_banned(services: &Services, server: Option<&ServerName>) -> Resu
 	Ok(())
 }
 
-/// Masks a remote directory failure behind a generic gateway error.
-///
-/// The remote chooses its own error, so forwarding one verbatim lets a third
-/// party pick what our client sees. A query served locally contacts nobody, so
-/// its error is returned unchanged rather than relabelled as an upstream
-/// failure.
+/// Masks a remote directory failure behind a M_CONNECTION_FAILED, passes
+/// through M_FORBIDDEN. Local errors are unchanged.
 fn mask_remote_failure(services: &Services, server: Option<&ServerName>, error: Error) -> Error {
-	let Some(server) = remote_server(services, server) else {
+	let Some(server) = server else {
 		return error;
 	};
 
+	if services.globals.server_is_ours(server) {
+		return error;
+	}
+
 	warn!(%server, %error, "Failed to query remote public rooms directory");
 
-	err!(Request(ConnectionFailed("Unable to query the remote public rooms directory.")))
-}
+	if matches!(error, Error::Federation(..)) && error.status_code() == StatusCode::FORBIDDEN {
+		return error;
+	}
 
-/// The server a directory query is routed to, when that server is not us.
-///
-/// Routing the query and masking its failure both read this, so the set of
-/// requests that reach a third party cannot drift from the set whose errors are
-/// masked.
-fn remote_server<'a>(
-	services: &Services,
-	server: Option<&'a ServerName>,
-) -> Option<&'a ServerName> {
-	server.filter(|server| !services.globals.server_is_ours(server))
+	err!(Request(ConnectionFailed("Unable to query the remote public rooms directory.")))
 }
