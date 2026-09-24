@@ -770,14 +770,10 @@ async fn join_local(
 		| _ => Vec::new(),
 	};
 
-	let is_joined_restricted_rooms = restriction_rooms
-		.iter()
-		.stream()
-		.any(|restriction_room_id| {
-			self.services
-				.state_cache
-				.is_joined(sender_user, restriction_room_id)
-		})
+	let is_joined_restricted_rooms = self
+		.services
+		.state_cache
+		.is_joined_any(sender_user, restriction_rooms.iter().map(AsRef::as_ref))
 		.await;
 
 	let join_authorized_via_users_server = is_joined_restricted_rooms

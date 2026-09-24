@@ -33,7 +33,7 @@ use tuwunel_core::{
 	utils::{
 		self, BoolExt,
 		result::NotFound,
-		stream::{BroadbandExt, ReadyExt, TryIgnore},
+		stream::{BroadbandExt, IterStream, ReadyExt, TryIgnore},
 	},
 	warn,
 };
@@ -919,6 +919,25 @@ pub async fn user_membership(
 pub async fn once_joined(&self, user_id: &UserId, room_id: &RoomId) -> bool {
 	let key = (user_id, room_id);
 	self.db.roomuseroncejoinedids.contains(&key).await
+}
+
+/// Tests whether a user is currently joined to any of the given rooms.
+///
+/// The rooms are probed concurrently and the first joined room decides the
+/// answer; an empty set of rooms answers `false`. A probe that fails counts
+/// as not joined, as it does for [`Self::is_joined`].
+#[implement(Service)]
+#[tracing::instrument(skip(self, room_ids), level = "trace")]
+pub async fn is_joined_any<'a, Rooms>(&self, user_id: &UserId, room_ids: Rooms) -> bool
+where
+	Rooms: IntoIterator<Item = &'a RoomId> + Send,
+	Rooms::IntoIter: Send,
+{
+	room_ids
+		.into_iter()
+		.stream()
+		.broad_any(|room_id| self.is_joined(user_id, room_id))
+		.await
 }
 
 /// Tests whether a user is currently indexed as joined to a room.
