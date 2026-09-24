@@ -84,7 +84,15 @@ commands. Run any command with `--help` for argument detail.
   the room default when permissions allow.
 - `!admin users set-profile-key <user> <key> <value>`: sets a single profile
   key (e.g. `displayname`, `avatar_url`, `m.tz`, or a custom key) on a local
-  user, for example to remove an abusive display name.
+  user, for example to remove an abusive display name. With `--clear` in
+  place of a value it removes the key instead, and then also accepts a remote
+  user (without `--propagate-to`), dropping this server's cached copy of their
+  field. The value returns on their next profile lookup if their server still
+  serves it.
+- `!admin users refresh-profile <user>`: re-fetches a remote user's profile
+  from their server and drops cached fields it no longer serves, such as a
+  status the user has since removed. Clients see the removal on their next
+  sync.
 - `!admin users delete-room-tag` / `put-room-tag`: room-tag housekeeping;
   the `m.server_notice` tag pinned to the admin room is the typical use.
 

@@ -19,6 +19,7 @@ mod list_users;
 mod make_user_admin;
 mod put_room_tag;
 mod redact_event;
+mod refresh_profile;
 mod reject_invites;
 mod reset_password;
 mod set_profile_key;
@@ -206,7 +207,8 @@ pub(super) enum UserCommand {
 			.args(["value", "clear"]),
 	))]
 	SetProfileKey {
-		/// User for whom the profile key should be set
+		/// User for whom the profile key should be set; a remote user accepts
+		/// only `--clear`, without `--propagate-to`
 		user_id: String,
 
 		/// Profile key name (e.g. displayname, avatar_url, m.tz, or a custom
@@ -216,13 +218,21 @@ pub(super) enum UserCommand {
 		/// Value to set (used as string if not parseable as JSON)
 		value: Vec<String>,
 
-		/// Remove the profile key instead of setting a value
+		/// Remove the profile key instead of setting a value; a remote user's
+		/// key returns on its next lookup if their server still serves it
 		#[arg(short, long)]
 		clear: bool,
 
 		/// How to propagate the change to the user's joined rooms
 		#[arg(short, long)]
 		propagate_to: Option<PropagateTo>,
+	},
+
+	/// - Re-fetch a remote user's profile, dropping cached fields their server
+	///   no longer serves
+	RefreshProfile {
+		/// Remote user whose cached profile should be refreshed
+		user_id: OwnedUserId,
 	},
 
 	/// - Puts a room tag for the specified user and room ID.

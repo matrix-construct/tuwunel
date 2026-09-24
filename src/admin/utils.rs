@@ -89,3 +89,15 @@ pub(crate) async fn parse_active_local_user_id(
 
 	Ok(user_id)
 }
+
+pub(crate) async fn check_known_remote_user(services: &Services, user_id: &UserId) -> Result {
+	if services.globals.user_is_local(user_id) {
+		return Err!("User {user_id:?} belongs to our server.");
+	}
+
+	if !services.users.exists(user_id).await {
+		return Err!("User {user_id:?} is not known to this server.");
+	}
+
+	Ok(())
+}
