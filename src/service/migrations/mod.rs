@@ -397,9 +397,11 @@ async fn migrate(services: &Services, foreign_lineage: bool) -> Result {
 	}
 
 	if pending(services, "adopt_foreign_token_expiry").await? {
-		migrate_token_expiry(services).await?;
+		let finished = migrate_token_expiry(services).await?;
 
-		db["global"].insert("adopt_foreign_token_expiry", []);
+		if finished {
+			db["global"].insert("adopt_foreign_token_expiry", []);
+		}
 	}
 
 	services.server.check_running()?;

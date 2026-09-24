@@ -276,6 +276,7 @@ maplit.workspace = true
 quoted_printable.workspace = true
 reqwest.workspace = true
 reqwest.features = ["form", "query"]
+rust-rocksdb.workspace = true
 serde_json.workspace = true
 serde_urlencoded.workspace = true
 similar.workspace = true

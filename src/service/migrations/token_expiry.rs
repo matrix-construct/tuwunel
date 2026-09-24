@@ -1,6 +1,6 @@
-use std::sync::Arc;
+use std::{pin::pin, sync::Arc};
 
-use futures::TryStreamExt;
+use futures::{TryFutureExt, TryStreamExt};
 use ruma::{DeviceId, UserId};
 use tuwunel_core::{Result, debug_warn, err, info, result::NotFound, warn};
 use tuwunel_database::{KeyVal, Map, deserialize_from_slice, serialize_key};
@@ -23,25 +23,49 @@ struct Tally {
 	unreadable: usize,
 }
 
+/// Whether a row's adoption is carried out or only tested for.
+#[derive(Clone, Copy)]
+enum Mode {
+	Probe,
+	Adopt,
+}
+
 /// Adopts the access-token expiry a foreign database keeps in a column of its
-/// own.
+/// own, returning whether the pass is finished with that column.
 ///
-/// Some databases record when an access token expires in a separate column
-/// keyed by device, while this server keeps the expiry alongside the owner in
-/// the token column itself. That column is shared and its rows carry over, so a
-/// migrated session keeps authenticating while its expiry does not, and a token
-/// the origin would have refused is honoured here indefinitely.
+/// That column is keyed by device while this server keeps the expiry alongside
+/// the owner in the shared token column, so a migrated session keeps
+/// authenticating while its expiry does not.
 ///
-/// Adoption happens once, because this server writes the same column afterward
-/// and a second pass would resurrect an expiry a later login had replaced.
+/// Every row names an OAuth session whose client can only recover from the
+/// expiry by refreshing against an OIDC provider here, so without one the pass
+/// waits, unfinished, rather than stranding sessions. With one it adopts once,
+/// since this server writes the same column afterward and a second pass would
+/// resurrect a replaced expiry.
 #[tracing::instrument(level = "debug", skip_all)]
-pub(super) async fn migrate_token_expiry(services: &Services) -> Result {
+pub(super) async fn migrate_token_expiry(services: &Services) -> Result<bool> {
 	let Some(tokenexpires) = services.db.open_cf("userdeviceid_tokenexpires")? else {
-		return Ok(());
+		return Ok(true);
 	};
 
 	let device_tokens = &services.db["userdeviceid_token"];
 	let token_owners = &services.db["token_userdeviceid"];
+
+	if services.oauth.get_server().is_err() {
+		let mut adoptable = pin!(tokenexpires.raw_stream().try_filter_map(|row| {
+			adopt_one(device_tokens, token_owners, row, Mode::Probe)
+				.map_ok(|adoptable| adoptable.then_some(()))
+		}));
+
+		let waiting = adoptable.try_next().await?.is_some();
+
+		if waiting {
+			info!("Migrated OAuth sessions keep their origin lifetime; no OIDC provider");
+		}
+
+		return Ok(!waiting);
+	}
+
 	let cork = services.db.cork_and_sync();
 
 	// One row at a time: each is read before it is rewritten, so a concurrent
@@ -51,7 +75,7 @@ pub(super) async fn migrate_token_expiry(services: &Services) -> Result {
 	let tally = tokenexpires
 		.raw_stream()
 		.try_fold(Tally::default(), async |tally, row| {
-			Ok(tally.record(adopt_one(device_tokens, token_owners, row).await))
+			Ok(tally.record(adopt_one(device_tokens, token_owners, row, Mode::Adopt).await))
 		})
 		.await?;
 
@@ -69,7 +93,7 @@ pub(super) async fn migrate_token_expiry(services: &Services) -> Result {
 	// the pass is idempotent, so the next boot retries it whole.
 	unreadable
 		.eq(&0)
-		.then_some(())
+		.then_some(true)
 		.ok_or_else(|| err!(Database("{unreadable} token expiries could not be read")))
 }
 
@@ -88,17 +112,19 @@ impl Tally {
 	}
 }
 
-/// Carries one device's expiry onto the token it names, reporting whether it
-/// wrote.
+/// Carries one device's expiry onto the token it names, reporting whether the
+/// row was adoptable.
 ///
 /// A `false` return is a row with nothing to carry: one this pass cannot make
 /// sense of, a device holding no token here, or a value this server has already
 /// written. Only a failed lookup returns an error, because a row that will never
-/// decode would otherwise refuse every later boot as well.
+/// decode would otherwise refuse every later boot as well. In probe mode the
+/// verdict is returned without the write.
 async fn adopt_one(
 	device_tokens: &Arc<Map>,
 	token_owners: &Arc<Map>,
 	(key, value): KeyVal<'_>,
+	mode: Mode,
 ) -> Result<bool> {
 	let Ok((user_id, device_id)) = deserialize_from_slice::<Device<'_>>(key) else {
 		warn!("skipping a foreign token expiry whose device could not be read");
@@ -139,7 +165,9 @@ async fn adopt_one(
 		return Ok(false);
 	};
 
-	token_owners.raw_put(token, (owner, device, Some(expires)));
+	if matches!(mode, Mode::Adopt) {
+		token_owners.raw_put(token, (owner, device, Some(expires)));
+	}
 
 	Ok(true)
 }

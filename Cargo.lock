@@ -5406,6 +5406,7 @@ dependencies = [
  "opentelemetry_sdk",
  "quoted_printable",
  "reqwest",
+ "rust-rocksdb",
  "sentry",
  "sentry-tower",
  "sentry-tracing",
