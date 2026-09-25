@@ -5386,7 +5386,7 @@ checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
 name = "tuwunel"
-version = "1.9.2"
+version = "1.9.3"
 dependencies = [
  "axum",
  "axum-server",
@@ -5430,7 +5430,7 @@ dependencies = [
 
 [[package]]
 name = "tuwunel_admin"
-version = "1.9.2"
+version = "1.9.3"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -5459,7 +5459,7 @@ dependencies = [
 
 [[package]]
 name = "tuwunel_api"
-version = "1.9.2"
+version = "1.9.3"
 dependencies = [
  "axum",
  "axum-extra",
@@ -5495,7 +5495,7 @@ dependencies = [
 
 [[package]]
 name = "tuwunel_core"
-version = "1.9.2"
+version = "1.9.3"
 dependencies = [
  "argon2",
  "arrayvec",
@@ -5565,7 +5565,7 @@ dependencies = [
 
 [[package]]
 name = "tuwunel_database"
-version = "1.9.2"
+version = "1.9.3"
 dependencies = [
  "async-channel",
  "const-str",
@@ -5587,7 +5587,7 @@ dependencies = [
 
 [[package]]
 name = "tuwunel_macros"
-version = "1.9.2"
+version = "1.9.3"
 dependencies = [
  "itertools 0.15.0",
  "proc-macro2",
@@ -5597,7 +5597,7 @@ dependencies = [
 
 [[package]]
 name = "tuwunel_router"
-version = "1.9.2"
+version = "1.9.3"
 dependencies = [
  "axum",
  "axum-server",
@@ -5630,7 +5630,7 @@ dependencies = [
 
 [[package]]
 name = "tuwunel_service"
-version = "1.9.2"
+version = "1.9.3"
 dependencies = [
  "async-trait",
  "aws-lc-rs",
