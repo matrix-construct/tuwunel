@@ -72,7 +72,8 @@ commands. Run any command with `--help` for argument detail.
 ### Users
 
 - `!admin users deactivate <user>`: deactivates a local account; by default
-  also leaves all rooms.
+  also leaves all rooms. The last active admin cannot be deactivated, by this
+  command or any other route: make another user an admin first.
 - `!admin users deactivate-all`: bulk variant accepting a code block of
   usernames.
 - `!admin users reject-invites <user>`: rejects all pending invites, with
