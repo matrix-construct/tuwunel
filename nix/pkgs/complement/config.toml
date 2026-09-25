@@ -30,6 +30,12 @@ rocksdb_recovery_mode = 0
 rocksdb_paranoid_file_checks = true
 log_guest_registrations = false
 allow_legacy_media = true
+
+# The suite signs one account in many times over, and tests wrong passwords on
+# purpose, so the per-account login limits have to be off here as they are in
+# other homeservers' test images.
+login_rc_account_burst_count = 0
+login_rc_failed_burst_count = 0
 startup_netburst = true
 startup_netburst_keep = -1
 
