@@ -19,14 +19,14 @@ use ruma::{
 	},
 };
 use tuwunel_core::{
-	Result, err, error, implement,
+	Result, debug_warn, err, error, implement,
 	matrix::{
 		event::Event,
 		pdu::{PduCount, PduEvent, PduId, RawPduId},
 		room_version,
 	},
 	smallvec::SmallVec,
-	utils::{self, result::LogErr},
+	utils::result::{LogErr, NotFound},
 };
 use tuwunel_database::Json;
 
@@ -140,37 +140,8 @@ where
 			.entry("unsigned".into())
 			.or_insert_with(|| CanonicalJsonValue::Object(BTreeMap::default()))
 		{
-			if let Ok(shortstatehash) = self
-				.services
-				.state
-				.pdu_shortstatehash(pdu.event_id())
-				.await
-				&& let Ok(prev_state) = self
-					.services
-					.state_accessor
-					.state_get(shortstatehash, &pdu.kind().to_string().into(), state_key)
-					.await
-			{
-				unsigned.insert(
-					"prev_content".into(),
-					CanonicalJsonValue::Object(
-						utils::to_canonical_object(prev_state.get_content_as_value()).map_err(
-							|e| {
-								err!(Database(error!(
-									"Failed to convert prev_state to canonical JSON: {e}",
-								)))
-							},
-						)?,
-					),
-				);
-				unsigned.insert(
-					"prev_sender".into(),
-					CanonicalJsonValue::String(prev_state.sender().to_string()),
-				);
-				unsigned.insert(
-					"replaces_state".into(),
-					CanonicalJsonValue::String(prev_state.event_id().to_string()),
-				);
+			if let Some(prev_state) = self.prev_state(pdu, state_key).await {
+				unsigned.extend(prev_state_unsigned(&prev_state)?);
 			}
 		} else {
 			error!("Invalid unsigned type in pdu.");
@@ -253,6 +224,54 @@ where
 		.ok();
 
 	Ok(pdu_id)
+}
+
+#[implement(super::Service)]
+async fn prev_state(&self, pdu: &PduEvent, state_key: &str) -> Option<PduEvent> {
+	let event_id = pdu.event_id();
+	let shortstatehash = self
+		.services
+		.state
+		.pdu_shortstatehash(event_id)
+		.await
+		.optional()
+		.inspect_err(|error| debug_warn!(%event_id, %error, "State snapshot read failed."))
+		.ok()
+		.flatten()?;
+
+	let event_type = pdu.kind().to_cow_str().into();
+
+	self.services
+		.state_accessor
+		.state_get(shortstatehash, &event_type, state_key)
+		.await
+		.optional()
+		.inspect_err(|error| debug_warn!(%event_id, %error, "Replaced state read failed."))
+		.ok()
+		.flatten()
+}
+
+fn prev_state_unsigned(prev_state: &PduEvent) -> Result<CanonicalJsonObject> {
+	let prev_content = prev_state
+		.get_content::<CanonicalJsonObject>()
+		.map_err(|e| {
+			err!(Database(error!("Failed to convert prev_state to canonical JSON: {e}")))
+		})?;
+
+	let unsigned = [
+		("prev_content".into(), CanonicalJsonValue::Object(prev_content)),
+		(
+			"prev_sender".into(),
+			CanonicalJsonValue::String(prev_state.sender().to_string()),
+		),
+		(
+			"replaces_state".into(),
+			CanonicalJsonValue::String(prev_state.event_id().to_string()),
+		),
+	]
+	.into();
+
+	Ok(unsigned)
 }
 
 #[implement(super::Service)]
