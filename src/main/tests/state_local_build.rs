@@ -37,8 +37,9 @@ use tuwunel_core::{
 			},
 		},
 	},
+	utils::time::now_secs,
 };
-use tuwunel_database::{Deserialized, serialize_key};
+use tuwunel_database::{Deserialized, Interfix, serialize_key};
 use tuwunel_service::{
 	Services,
 	rooms::{
@@ -87,6 +88,39 @@ enum PduFailure {
 enum CacheHandling {
 	Clear,
 	Preserve,
+}
+
+// Mirrors the event handler's private on-disk backoff discriminants.
+#[derive(Clone, Copy)]
+enum Context {
+	Upgrade,
+	Incoming,
+}
+
+#[derive(Clone, Copy)]
+enum Disposition {
+	Pending,
+	Transient,
+	Permanent,
+}
+
+impl From<Context> for u8 {
+	fn from(context: Context) -> Self {
+		match context {
+			| Context::Upgrade => 2,
+			| Context::Incoming => 3,
+		}
+	}
+}
+
+impl From<Disposition> for u64 {
+	fn from(disposition: Disposition) -> Self {
+		match disposition {
+			| Disposition::Pending => 0,
+			| Disposition::Transient => 1,
+			| Disposition::Permanent => 2,
+		}
+	}
 }
 
 const CASES: [Case; 18] = [
@@ -331,7 +365,15 @@ async fn enabled_baseline(
 
 	soft_failed_event_keeps_state_row(services, user_id, &soft_fail_room)
 		.await
-		.map_err(|error| step_error("soft-failed state row", error))
+		.map_err(|error| step_error("soft-failed state row", error))?;
+
+	let redelivery_room = create_room(services, base, token)
+		.await
+		.map_err(|error| step_error("gapped redelivery backoff", error))?;
+
+	gapped_redelivery_backs_off(services, user_id, &redelivery_room)
+		.await
+		.map_err(|error| step_error("gapped redelivery backoff", error))
 }
 
 async fn missing_state_diff(
@@ -1360,13 +1402,6 @@ async fn assert_accepts(
 	incoming_json: CanonicalJsonObject,
 	context: &str,
 ) -> Result {
-	let room_version = match services.state.get_room_version(room_id).await {
-		| Ok(room_version) => room_version,
-		| Err(error) => return Err!("{context} failed to load the room version: {error}"),
-	};
-
-	let incoming_json = into_outgoing_federation(incoming_json, &room_version);
-
 	assert!(
 		services
 			.timeline
@@ -1376,7 +1411,35 @@ async fn assert_accepts(
 		"{context} unexpectedly started in the timeline"
 	);
 
-	let result = match services
+	let handled = redeliver(services, room_id, incoming, incoming_json, context).await?;
+
+	assert!(handled, "{context} did not continue through local state");
+	match services
+		.timeline
+		.non_outlier_pdu_exists(incoming.event_id.as_ref())
+		.await
+	{
+		| Ok(()) => Ok(()),
+		| Err(error) => Err!("{context} did not reach the timeline: {error}"),
+	}
+}
+
+async fn redeliver(
+	services: &Services,
+	room_id: &RoomId,
+	incoming: &PduEvent,
+	incoming_json: CanonicalJsonObject,
+	context: &str,
+) -> Result<bool> {
+	let room_version = services
+		.state
+		.get_room_version(room_id)
+		.await
+		.map_err(|error| err!("{context} failed to load the room version: {error}"))?;
+
+	let incoming_json = into_outgoing_federation(incoming_json, &room_version);
+
+	services
 		.event_handler
 		.handle_incoming_pdu(
 			services.globals.server_name(),
@@ -1386,20 +1449,8 @@ async fn assert_accepts(
 			true,
 		)
 		.await
-	{
-		| Ok(result) => result,
-		| Err(error) => return Err!("{context} failed to handle the incoming PDU: {error}"),
-	};
-
-	assert!(result.is_some(), "{context} did not continue through local state");
-	match services
-		.timeline
-		.non_outlier_pdu_exists(incoming.event_id.as_ref())
-		.await
-	{
-		| Ok(()) => Ok(()),
-		| Err(error) => Err!("{context} did not reach the timeline: {error}"),
-	}
+		.map(|handled| handled.is_some())
+		.map_err(|error| err!("{context} failed to handle the incoming PDU: {error}"))
 }
 
 async fn set_forward_extremities<const N: usize>(
@@ -2241,6 +2292,137 @@ async fn prepare_soft_fail_descendant<'a>(
 	Ok(top.event_id)
 }
 
+async fn gapped_redelivery_backs_off(
+	services: &Services,
+	user_id: &UserId,
+	room_id: &RoomId,
+) -> Result {
+	let boundary = append_message(services, user_id, room_id, "backoff boundary").await?;
+	let (_, top, top_json) = held_message_chain(services, user_id, room_id, &boundary).await?;
+	let (failed, failed_json) =
+		sign_message(services, user_id, room_id, "backoff failed").await?;
+
+	let (control, control_json) =
+		sign_message(services, user_id, room_id, "backoff control").await?;
+
+	let failed_id: &EventId = failed.event_id.as_ref();
+	let control_id: &EventId = control.event_id.as_ref();
+
+	services
+		.timeline
+		.add_pdu_outlier(failed_id, &failed_json);
+
+	services
+		.timeline
+		.add_pdu_outlier(control_id, &control_json);
+
+	plant_incoming_rows(services, &top.event_id, Disposition::Pending, 3)?;
+	plant_incoming_rows(services, failed_id, Disposition::Transient, 1)?;
+	plant_incoming_rows(services, control_id, Disposition::Pending, 2)?;
+	assert_backs_off(services, room_id, &top, top_json, 3, "three-attempt redelivery").await?;
+	assert_backs_off(services, room_id, &failed, failed_json, 1, "failed redelivery").await?;
+	assert_accepts(services, room_id, &control, control_json, "two-attempt redelivery").await?;
+
+	let rows = incoming_rows(services, control_id).await?;
+
+	assert_eq!(rows, 0, "integrated redelivery kept its attempt rows");
+
+	let (closed, closed_json) =
+		sign_message(services, user_id, room_id, "backoff closed").await?;
+
+	let closed_id: &EventId = closed.event_id.as_ref();
+
+	assert_ne!(
+		closed.prev_events, top.prev_events,
+		"closed-gap event still names the held prev"
+	);
+
+	services
+		.timeline
+		.add_pdu_outlier(closed_id, &closed_json);
+
+	plant_incoming_rows(services, closed_id, Disposition::Pending, 3)?;
+	assert_accepts(services, room_id, &closed, closed_json, "closed-gap redelivery").await?;
+
+	let rows = incoming_rows(services, closed_id).await?;
+
+	assert_eq!(rows, 3, "closed-gap redelivery consulted the backoff store");
+
+	Ok(())
+}
+
+fn plant_incoming_rows(
+	services: &Services,
+	event_id: &EventId,
+	disposition: Disposition,
+	rows: u32,
+) -> Result {
+	let now = now_secs();
+	let minute = u32::try_from(now / 60)?;
+
+	(1..=rows)
+		.map(|age| minute.saturating_sub(age))
+		.try_for_each(|bucket| {
+			plant_backoff_row(services, Context::Incoming, event_id, bucket, disposition, now)
+		})
+}
+
+fn plant_backoff_row(
+	services: &Services,
+	context: Context,
+	event_id: &EventId,
+	bucket: u32,
+	disposition: Disposition,
+	secs: u64,
+) -> Result {
+	services
+		.db
+		.get("eventid_backoff")?
+		.put((u8::from(context), event_id, bucket), (u64::from(disposition), secs));
+
+	Ok(())
+}
+
+async fn assert_backs_off(
+	services: &Services,
+	room_id: &RoomId,
+	incoming: &PduEvent,
+	incoming_json: CanonicalJsonObject,
+	rows: usize,
+	context: &str,
+) -> Result {
+	let incoming_id: &EventId = incoming.event_id.as_ref();
+	let handled = redeliver(services, room_id, incoming, incoming_json, context).await?;
+
+	assert!(!handled, "{context} was not backed off");
+
+	let surviving = incoming_rows(services, incoming_id).await?;
+
+	assert_eq!(surviving, rows, "{context} touched its backoff rows");
+
+	let timeline_row = services
+		.timeline
+		.non_outlier_pdu_exists(incoming_id)
+		.await;
+
+	assert!(
+		timeline_row.is_err_and(|error| error.is_not_found()),
+		"{context} reached the timeline"
+	);
+
+	Ok(())
+}
+
+async fn incoming_rows(services: &Services, event_id: &EventId) -> Result<usize> {
+	let rows = services
+		.db
+		.get("eventid_backoff")?
+		.count_prefix(&(u8::from(Context::Incoming), event_id, Interfix))
+		.await;
+
+	Ok(rows)
+}
+
 async fn set_forward_extremity(services: &Services, room_id: &RoomId, event_id: &EventId) {
 	let state_lock = services.state.mutex.lock(room_id).await;
 
@@ -2304,12 +2486,7 @@ async fn sign_message(
 }
 
 fn suppress_upgrade(services: &Services, event_id: &EventId) -> Result {
-	services
-		.db
-		.get("eventid_backoff")?
-		.put((2_u8, event_id, 0_u32), (2_u64, u64::MAX));
-
-	Ok(())
+	plant_backoff_row(services, Context::Upgrade, event_id, 0, Disposition::Permanent, u64::MAX)
 }
 
 async fn wait_until_ready(services: &Services, base: &str) -> Result {
