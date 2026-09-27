@@ -49,24 +49,23 @@ ENTRYPOINT tuwunel -Oserver_name=\""$SERVER_NAME\""
 FROM mcr.microsoft.com/playwright:v1.61.0-noble AS playwright-base
 ARG element_web_ref="develop"
 
-# corepack's bundled signing keys in this image are stale relative to current
-# pnpm releases; install pnpm directly via npm to sidestep that mismatch.
-# `serve` is pre-installed so playwright.config.ts's webServer (which runs
-# `npx serve -p 8080 -L ./webapp` in CI mode) starts instantly instead of
-# spending most of its 30s startup window fetching the package.
-RUN npm install -g pnpm serve
-
 WORKDIR /usr/src
 ADD https://github.com/element-hq/element-web.git#${element_web_ref} element-web
 
-WORKDIR /usr/src/element-web
+# corepack's bundled signing keys in this image are stale relative to current
+# pnpm releases; install pnpm directly via npm to sidestep that mismatch, at
+# the exact version element-web declares in devEngines.packageManager (which
+# also satisfies its own version gate). An unpinned install floats to the
+# latest release, and pnpm 12.6.0 began running `pnpm exec` commands in a
+# process group of their own: Playwright's webServer teardown kills the pnpm
+# process group and then waits for the command's stdio to close, so the
+# orphaned `serve` kept every acceptance shard alive after its last test.
+# `serve` is pre-installed so playwright.config.ts's webServer (which runs
+# `pnpm exec serve -p 8080 -L ./webapp` in CI mode) starts instantly instead
+# of spending most of its 30s startup window fetching the package.
+RUN npm install -g "pnpm@$(node -p "require('/usr/src/element-web/package.json').devEngines.packageManager.version")" serve
 
-# element-web pins pnpm via devEngines.packageManager with onFail "error"; the
-# npm-installed pnpm above floats to latest and would hard-fail the version
-# check, including in the child pnpm a postinstall script spawns (which a CLI
-# --pm-on-fail flag cannot reach). Relax the gate to a warning at the source so
-# every pnpm process proceeds; devEngines is not part of the frozen lockfile.
-RUN node -e "const fs=require('fs'),p=require('./package.json');if(p.devEngines?.packageManager)p.devEngines.packageManager.onFail='warn';fs.writeFileSync('package.json',JSON.stringify(p,null,2))"
+WORKDIR /usr/src/element-web
 
 RUN --mount=type=cache,target=/root/.local/share/pnpm,sharing=locked \
     pnpm install --frozen-lockfile
