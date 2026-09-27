@@ -24,19 +24,21 @@ pub(super) async fn filter_room(
 	membership: Option<&MembershipState>,
 ) -> bool {
 	#[expect(clippy::match_same_arms)] // helps readability
-	let match_invite = filter
-		.is_invite
-		.map_async(async |is_invite| match (membership, is_invite) {
-			| (Some(MembershipState::Invite), true) => true,
-			| (Some(MembershipState::Invite), false) => false,
-			| (Some(_), true) => false,
-			| (Some(_), false) => true,
-			| _ =>
-				services
-					.state_cache
-					.is_invited(sender_user, room_id)
-					.await == is_invite,
-		});
+	let match_invite =
+		filter
+			.is_invite
+			.map_async(async |is_invite| match (membership, is_invite) {
+				| (Some(MembershipState::Invite), true) => true,
+				| (Some(MembershipState::Invite), false) => false,
+				| (Some(_), true) => false,
+				| (Some(_), false) => true,
+				| _ =>
+					services
+						.state_cache
+						.is_invited(sender_user, room_id)
+						.await
+						== is_invite,
+			});
 
 	let match_direct = filter
 		.is_dm
@@ -48,7 +50,8 @@ pub(super) async fn filter_room(
 			services
 				.state_accessor
 				.is_encrypted_room(room_id)
-				.await == is_encrypted
+				.await
+				== is_encrypted
 		});
 
 	let match_space_child = filter

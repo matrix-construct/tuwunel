@@ -67,7 +67,8 @@ async fn invited_room_version(&self, room_id: &RoomId) -> Option<RoomVersionId> 
 				.services
 				.state_cache
 				.invite_state(&user_id, room_id)
-				.await && let Some(room_version) = super::room_version_of(&stripped)
+				.await
+			&& let Some(room_version) = super::room_version_of(&stripped)
 		{
 			return Some(room_version);
 		}

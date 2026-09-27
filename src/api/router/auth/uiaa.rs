@@ -36,9 +36,10 @@ where
 				.unwrap_or(false)
 		})
 		.unwrap_or(false)
-		.await || (cfg!(feature = "ldap")
-		&& services.config.ldap.enable
-		&& user_origin.as_deref() == Some("ldap"));
+		.await
+		|| (cfg!(feature = "ldap")
+			&& services.config.ldap.enable
+			&& user_origin.as_deref() == Some("ldap"));
 
 	// Determine the exact IdP to bind to the UIAA session.
 	//

@@ -310,7 +310,8 @@ async fn handle_rescinded_invite(
 		.services
 		.state_cache
 		.user_membership(&target, room_id)
-		.await != Some(MembershipState::Invite)
+		.await
+		!= Some(MembershipState::Invite)
 	{
 		return Ok(false);
 	}

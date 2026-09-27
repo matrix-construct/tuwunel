@@ -144,11 +144,12 @@ where
 				.services
 				.state
 				.pdu_shortstatehash(pdu.event_id())
-				.await && let Ok(prev_state) = self
-				.services
-				.state_accessor
-				.state_get(shortstatehash, &pdu.kind().to_string().into(), state_key)
 				.await
+				&& let Ok(prev_state) = self
+					.services
+					.state_accessor
+					.state_get(shortstatehash, &pdu.kind().to_string().into(), state_key)
+					.await
 			{
 				unsigned.insert(
 					"prev_content".into(),

@@ -21,7 +21,8 @@ pub(crate) async fn leave_room_route(
 	if services
 		.state_cache
 		.is_invited(sender, &body.room_id)
-		.await && is_notice_room(&services, sender, &body.room_id).await?
+		.await
+		&& is_notice_room(&services, sender, &body.room_id).await?
 	{
 		return Err!(Request(CannotLeaveServerNoticeRoom("You cannot reject this invite")));
 	}

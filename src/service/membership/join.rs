@@ -115,7 +115,8 @@ pub async fn join<'a>(
 		.services
 		.state_accessor
 		.get_member(room_id, sender_user)
-		.await && membership.membership == MembershipState::Ban
+		.await
+		&& membership.membership == MembershipState::Ban
 		&& !self
 			.services
 			.state_cache

@@ -66,7 +66,8 @@ pub(crate) async fn create_knock_event_template_route(
 	if let Ok(membership) = services
 		.state_accessor
 		.get_member(&body.room_id, &body.user_id)
-		.await && membership.membership == MembershipState::Ban
+		.await
+		&& membership.membership == MembershipState::Ban
 	{
 		debug_warn!(
 			"Remote user {} is banned from {} but attempted to knock",

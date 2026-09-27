@@ -80,7 +80,8 @@ async fn exercise(services: &Services) -> Result {
 			.users
 			.room_keys_changed(room, before, None)
 			.count()
-			.await == 0
+			.await
+			== 0
 	);
 
 	let other = Fixture::new(&sender, &target)?.with_target(&fixture)?;

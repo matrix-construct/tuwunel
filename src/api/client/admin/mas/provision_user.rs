@@ -121,7 +121,8 @@ async fn sync_emails(
 			if let Some(prior) = services
 				.threepid
 				.user_id_for_email(address)
-				.await? && prior != user_id
+				.await?
+				&& prior != user_id
 			{
 				warn!(%user_id, %prior, "MAS provisioned an email bound to another user; reassigning");
 

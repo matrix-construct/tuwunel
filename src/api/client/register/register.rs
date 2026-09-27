@@ -264,7 +264,8 @@ async fn check_appservice_namespace(
 	} else if services
 		.appservice
 		.is_exclusive_user_id(user_id)
-		.await && !emergency_mode_enabled
+		.await
+		&& !emergency_mode_enabled
 	{
 		return Err!(Request(Exclusive("Username is reserved by an appservice.")));
 	}
