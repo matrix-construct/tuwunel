@@ -38,9 +38,11 @@ use crate::rooms::{
 #[implement(super::Service)]
 #[inline]
 pub async fn user_was_joined(&self, shortstatehash: ShortStateHash, user_id: &UserId) -> bool {
-	self.user_membership(shortstatehash, user_id)
-		.await
-		== MembershipState::Join
+	matches!(
+		self.user_membership(shortstatehash, user_id)
+			.await,
+		MembershipState::Join
+	)
 }
 
 /// Reports whether a user was invited or joined in a selected state snapshot.
@@ -50,10 +52,11 @@ pub async fn user_was_joined(&self, shortstatehash: ShortStateHash, user_id: &Us
 #[implement(super::Service)]
 #[inline]
 pub async fn user_was_invited(&self, shortstatehash: ShortStateHash, user_id: &UserId) -> bool {
-	let s = self
+	let membership = self
 		.user_membership(shortstatehash, user_id)
 		.await;
-	s == MembershipState::Join || s == MembershipState::Invite
+
+	matches!(membership, MembershipState::Join | MembershipState::Invite)
 }
 
 /// Returns a user's membership in a selected state snapshot.

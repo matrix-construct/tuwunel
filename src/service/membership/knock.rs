@@ -67,7 +67,7 @@ pub async fn knock<'a>(
 		.is_invited(sender_user, room_id)
 		.await
 	{
-		debug_warn!("{sender_user} is already invited in {room_id} but attempted to knock");
+		debug_warn!(%sender_user, %room_id, "Invited user attempted to knock.");
 		return Err!(Request(Forbidden(
 			"You cannot knock on a room you are already invited/accepted to."
 		)));
@@ -79,7 +79,7 @@ pub async fn knock<'a>(
 		.is_joined(sender_user, room_id)
 		.await
 	{
-		debug_warn!("{sender_user} is already joined in {room_id} but attempted to knock");
+		debug_warn!(%sender_user, %room_id, "Joined user attempted to knock.");
 		return Err!(Request(Forbidden("You cannot knock on a room you are already joined in.")));
 	}
 
@@ -97,18 +97,18 @@ pub async fn knock<'a>(
 			.is_knocked(sender_user, room_id)
 			.await
 	{
-		debug_warn!("{sender_user} is already knocked in {room_id}");
+		debug_warn!(%sender_user, %room_id, "User is already knocking.");
 		return Ok(());
 	}
 
-	if let Ok(membership) = self
+	if self
 		.services
 		.state_accessor
 		.get_member(room_id, sender_user)
 		.await
-		&& membership.membership == MembershipState::Ban
+		.is_ok_and(|content| content.membership == MembershipState::Ban)
 	{
-		debug_warn!("{sender_user} is banned from {room_id} but attempted to knock");
+		debug_warn!(%sender_user, %room_id, "Banned user attempted to knock.");
 		return Err!(Request(Forbidden("You cannot knock on a room you are banned from.")));
 	}
 
@@ -555,21 +555,23 @@ async fn ingest_send_knock_state(
 
 	for event in state {
 		let Some(state_key) = event.get("state_key") else {
-			debug_warn!("send_knock stripped state event missing state_key: {event:?}");
+			debug_warn!(?event, "Knock response state event lacks a state key.");
 			continue;
 		};
+
 		let Some(event_type) = event.get("type") else {
-			debug_warn!("send_knock stripped state event missing event type: {event:?}");
+			debug_warn!(?event, "Knock response state event lacks a type.");
 			continue;
 		};
 
 		let Ok(state_key) = serde_json::from_value::<String>(state_key.clone().into()) else {
-			debug_warn!("send_knock stripped state event has invalid state_key: {event:?}");
+			debug_warn!(?event, "Knock response state event has an invalid state key.");
 			continue;
 		};
+
 		let Ok(event_type) = serde_json::from_value::<StateEventType>(event_type.clone().into())
 		else {
-			debug_warn!("send_knock stripped state event has invalid event type: {event:?}");
+			debug_warn!(?event, "Knock response state event has an invalid type.");
 			continue;
 		};
 

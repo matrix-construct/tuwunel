@@ -5,6 +5,8 @@ use ruma::{
 use serde_json::value::RawValue as RawJsonValue;
 use tuwunel_core::{Result, err, implement, matrix::event::gen_event_id, result::FlatOk};
 
+use super::room_version_of;
+
 type Parsed = (OwnedRoomId, OwnedEventId, CanonicalJsonObject);
 
 #[implement(super::Service)]
@@ -68,7 +70,7 @@ async fn invited_room_version(&self, room_id: &RoomId) -> Option<RoomVersionId> 
 				.state_cache
 				.invite_state(&user_id, room_id)
 				.await
-			&& let Some(room_version) = super::room_version_of(&stripped)
+			&& let Some(room_version) = room_version_of(&stripped)
 		{
 			return Some(room_version);
 		}

@@ -75,14 +75,13 @@ async fn exercise(services: &Services) -> Result {
 
 	assert_changes(services, &sender, before, &[&target]).await?;
 	assert_changes(services, &target, before, &[]).await?;
-	assert!(
-		services
-			.users
-			.room_keys_changed(room, before, None)
-			.count()
-			.await
-			== 0
-	);
+	let changed = services
+		.users
+		.room_keys_changed(room, before, None)
+		.count()
+		.await;
+
+	assert_eq!(changed, 0);
 
 	let other = Fixture::new(&sender, &target)?.with_target(&fixture)?;
 

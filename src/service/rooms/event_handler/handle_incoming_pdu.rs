@@ -18,12 +18,16 @@ use tuwunel_core::{
 	trace,
 	utils::{
 		BoolExt,
+		future::ReadyEqExt,
 		stream::{IterStream, TryWidebandExt},
 	},
 	warn,
 };
 
-use super::backoff::{Context, Disposition, Suppression, UPGRADE_RETRY};
+use super::{
+	backoff::{Context, Disposition, Suppression, UPGRADE_RETRY},
+	room_version_of,
+};
 use crate::rooms::{state_cache::MembershipUpdate, timeline::RawPduId};
 
 type PrevResultsHandled = SmallVec<[PrevHandled; MAX_PREV_EVENTS]>;
@@ -310,8 +314,8 @@ async fn handle_rescinded_invite(
 		.services
 		.state_cache
 		.user_membership(&target, room_id)
+		.ne(&Some(MembershipState::Invite))
 		.await
-		!= Some(MembershipState::Invite)
 	{
 		return Ok(false);
 	}
@@ -336,7 +340,7 @@ async fn handle_rescinded_invite(
 		return Ok(false);
 	}
 
-	let Some(room_version_id) = super::room_version_of(&invite_state) else {
+	let Some(room_version_id) = room_version_of(&invite_state) else {
 		return Ok(false);
 	};
 

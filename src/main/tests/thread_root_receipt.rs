@@ -8,7 +8,7 @@ use tuwunel::{Args, Runtime, Server, async_run, async_start, async_stop};
 use tuwunel_core::{
 	Err, Result, err, implement,
 	ruma::{EventId, OwnedEventId, RoomId, UserId},
-	utils::{BoolExt, ReadyExt},
+	utils::{BoolExt, ReadyExt, future::ReadyEqExt},
 };
 use tuwunel_service::Services;
 
@@ -125,18 +125,18 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	if services
 		.pusher
 		.notification_count(&reader_id, &room)
+		.ne(&main_before)
 		.await
-		!= main_before
 		|| services
 			.pusher
 			.thread_notification_counts(&reader_id, &room)
+			.ne(&threads_before)
 			.await
-			!= threads_before
 		|| services
 			.pusher
 			.thread_last_notification_reads(&reader_id, &room)
+			.ne(&watermarks_before)
 			.await
-			!= watermarks_before
 	{
 		return Err!("a receipt on the thread root changed unread state");
 	}
@@ -172,8 +172,8 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	if services
 		.pusher
 		.notification_count(&reader_id, &room)
+		.ne(&main_before)
 		.await
-		!= main_before
 		|| threads_after.get(&root_a) != Some(&(0, 0))
 		|| threads_after.get(&root_b) != threads_before.get(&root_b)
 		|| !watermarks_after.contains_key(&root_a)

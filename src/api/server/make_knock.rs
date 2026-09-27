@@ -63,16 +63,16 @@ pub(crate) async fn create_knock_event_template_route(
 
 	let state_lock = services.state.mutex.lock(&body.room_id).await;
 
-	if let Ok(membership) = services
+	if services
 		.state_accessor
 		.get_member(&body.room_id, &body.user_id)
 		.await
-		&& membership.membership == MembershipState::Ban
+		.is_ok_and(|content| content.membership == MembershipState::Ban)
 	{
 		debug_warn!(
-			"Remote user {} is banned from {} but attempted to knock",
-			&body.user_id,
-			&body.room_id
+			user_id = %body.user_id,
+			room_id = %body.room_id,
+			"Banned remote user attempted to knock."
 		);
 
 		return Err!(Request(Forbidden("You cannot knock on a room you are banned from.")));
