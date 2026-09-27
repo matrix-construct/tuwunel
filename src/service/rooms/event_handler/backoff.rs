@@ -2,7 +2,7 @@ use std::{ops::Range, time::Duration};
 
 use ruma::EventId;
 use tuwunel_core::{
-	implement,
+	Error, implement,
 	utils::{
 		continue_exponential_backoff,
 		stream::{ReadyExt, TryIgnore},
@@ -32,6 +32,7 @@ pub(super) enum Context {
 	Fetch = 0,
 	Auth = 1,
 	Upgrade = 2,
+	Incoming = 3,
 }
 
 impl From<Context> for u8 {
@@ -41,6 +42,7 @@ impl From<Context> for u8 {
 			| Context::Fetch => 0,
 			| Context::Auth => 1,
 			| Context::Upgrade => 2,
+			| Context::Incoming => 3,
 		}
 	}
 }
@@ -59,7 +61,13 @@ pub(super) enum Disposition {
 
 /// Verdict from consulting the store before a federation step.
 pub(super) enum Suppression {
+	/// No row is recorded for the event in this context.
+	Absent,
+
+	/// Rows are recorded but no hold is in force.
 	Allow,
+
+	/// A hold is in force; skip the step.
 	Deny,
 }
 
@@ -118,27 +126,65 @@ impl Summary {
 
 /// Record a federation attempt before a cancellable await, so a premature
 /// cancellation still leaves a `Pending` row behind to rate-gate against.
+///
+/// Returns the attempt's bucket for `record_completion` to settle.
 #[implement(super::Service)]
-pub(super) fn record_attempt(&self, ctx: Context, event_id: &EventId) {
-	self.record_outcome(ctx, event_id, Disposition::Pending);
+pub(super) fn record_attempt(&self, ctx: Context, event_id: &EventId) -> u32 {
+	let bucket = current_bucket();
+
+	self.record_outcome_at(ctx, event_id, bucket, Disposition::Pending);
+	bucket
+}
+
+/// Settle a step once its work has finished.
+///
+/// An appended event clears what the context holds for it: only the attempt's
+/// own row when nothing preceded it, every row otherwise. A failure is recorded
+/// as `Transient` in the bucket of the attempt it settles, replacing that
+/// attempt's `Pending` row, or in the current bucket when rows preceded the
+/// step but no attempt was written. A withheld event, a failure from an
+/// interruption or shutdown, or a step with no rows and no attempt records
+/// nothing. Rows an earlier gapped pass left behind outlive a later append
+/// that found no gap, until the store reaps them.
+#[implement(super::Service)]
+pub(super) async fn record_completion(
+	&self,
+	ctx: Context,
+	event_id: &EventId,
+	standing: Suppression,
+	attempt: Option<u32>,
+	appended: Result<bool, &Error>,
+) {
+	match (appended, standing, attempt) {
+		| (_, Suppression::Absent, None) | (Ok(false), ..) => {},
+		| (Err(error), ..) if error.is_interrupted() || self.services.server.is_stopping() => {},
+		| (Ok(true), Suppression::Absent, Some(bucket)) =>
+			self.clear_outcome_at(ctx, event_id, bucket),
+		| (Ok(true), ..) => self.record_success(ctx, event_id).await,
+		| (Err(_), _, attempt) => {
+			let bucket = attempt.unwrap_or_else(current_bucket);
+
+			self.record_outcome_at(ctx, event_id, bucket, Disposition::Transient);
+		},
+	}
 }
 
 #[implement(super::Service)]
 pub(super) fn record_outcome(&self, ctx: Context, event_id: &EventId, disposition: Disposition) {
-	self.db.eventid_backoff.put(
-		(u8::from(ctx), event_id, current_bucket()),
-		(u64::from(disposition), now_secs()),
-	);
+	self.record_outcome_at(ctx, event_id, current_bucket(), disposition);
 }
 
-/// Clears the upgrade backoff recorded against an event.
+/// Clears the backoffs recorded against an event's delivery.
 ///
-/// The soft-fail marker and this backoff gate the same retry, so operator
-/// recovery has to drop both for the next delivery to evaluate the event
-/// without waiting out the window.
+/// The soft-fail marker and these backoffs gate the same retry, so operator
+/// recovery has to drop all of them before the event is next evaluated,
+/// whether by a redelivery or as the prev of a later event.
 #[implement(super::Service)]
-pub async fn clear_upgrade_backoff(&self, event_id: &EventId) {
+pub async fn clear_delivery_backoff(&self, event_id: &EventId) {
 	self.record_success(Context::Upgrade, event_id)
+		.await;
+
+	self.record_success(Context::Incoming, event_id)
 		.await;
 }
 
@@ -166,7 +212,7 @@ pub(super) async fn is_suppressed(
 		.await;
 
 	if summary.total == 0 {
-		return Suppression::Allow;
+		return Suppression::Absent;
 	}
 
 	if matches!(summary.latest_class, Disposition::Permanent) {
@@ -185,3 +231,23 @@ pub(super) async fn is_suppressed(
 }
 
 fn current_bucket() -> u32 { u32::try_from(now_secs() / QUANTUM).unwrap_or(u32::MAX) }
+
+#[implement(super::Service)]
+fn record_outcome_at(
+	&self,
+	ctx: Context,
+	event_id: &EventId,
+	bucket: u32,
+	disposition: Disposition,
+) {
+	self.db
+		.eventid_backoff
+		.put((u8::from(ctx), event_id, bucket), (u64::from(disposition), now_secs()));
+}
+
+#[implement(super::Service)]
+fn clear_outcome_at(&self, ctx: Context, event_id: &EventId, bucket: u32) {
+	self.db
+		.eventid_backoff
+		.del((u8::from(ctx), event_id, bucket));
+}

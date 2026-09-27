@@ -344,9 +344,9 @@ pub struct Config {
 	pub eventid_pdu_cache_capacity: u32,
 
 	/// Maximum number of entries in the RocksDB block cache for the
-	/// `eventid_backoff` column family: the recent fetch, auth, and upgrade
-	/// outcomes an event is rate-gated against, keyed by federation step,
-	/// event ID, and time bucket.
+	/// `eventid_backoff` column family: the recent fetch, auth, upgrade, and
+	/// delivery outcomes an event is rate-gated against, keyed by federation
+	/// step, event ID, and time bucket.
 	///
 	/// Same entry-count semantics as `pdu_cache_capacity`. A server working
 	/// through a large missing-ancestry gap reads this column heavily.

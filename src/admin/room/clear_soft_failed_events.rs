@@ -69,7 +69,7 @@ async fn clear_event(services: &Services, event_id: &EventId) -> ClearSummary {
 
 	services
 		.event_handler
-		.clear_upgrade_backoff(event_id)
+		.clear_delivery_backoff(event_id)
 		.await;
 
 	services

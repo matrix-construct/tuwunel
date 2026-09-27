@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use futures::{FutureExt, TryStreamExt, future::try_join5};
+use futures::{FutureExt, TryFutureExt, TryStreamExt, future::try_join5};
 use ruma::{
 	CanonicalJsonObject, CanonicalJsonValue, EventId, MilliSecondsSinceUnixEpoch, OwnedEventId,
 	RoomId, RoomVersionId, ServerName, UserId,
@@ -12,7 +12,7 @@ use ruma::{
 use tuwunel_core::{
 	Err, Result, async_noinline, debug,
 	debug::INFO_SPAN_LEVEL,
-	debug_warn, err, implement,
+	debug_warn, err, implement, info,
 	matrix::{Event, PduCount, PduEvent, pdu::MAX_PREV_EVENTS, room_version::from_create_event},
 	smallvec::SmallVec,
 	trace,
@@ -23,7 +23,7 @@ use tuwunel_core::{
 	warn,
 };
 
-use super::backoff::{Context, Disposition};
+use super::backoff::{Context, Disposition, Suppression, UPGRADE_RETRY};
 use crate::rooms::{state_cache::MembershipUpdate, timeline::RawPduId};
 
 type PrevResultsHandled = SmallVec<[PrevHandled; MAX_PREV_EVENTS]>;
@@ -176,6 +176,21 @@ pub async fn handle_incoming_pdu<'a>(
 		return Ok(None);
 	}
 
+	let standing = self
+		.services
+		.timeline
+		.non_outlier_pdus_exist(incoming_pdu.prev_events())
+		.await
+		.is_false()
+		.then_async(|| self.is_suppressed(Context::Incoming, event_id, UPGRADE_RETRY))
+		.await
+		.unwrap_or(Suppression::Absent);
+
+	if standing.is_deny() {
+		info!(%origin, %room_id, %event_id, "Backing off from a gapped incoming event.");
+		return Ok(None);
+	}
+
 	// 9. Fetch any missing prev events doing all checks listed here starting at 1.
 	//    These are timeline events
 	let (sorted_prev_events, eventid_info) = self
@@ -190,32 +205,48 @@ pub async fn handle_incoming_pdu<'a>(
 		)
 		.await?;
 
-	self.handle_prev_events(
-		origin,
-		room_id,
-		event_id,
-		sorted_prev_events,
-		eventid_info,
-		&room_version,
-		recursion_level,
-		first_ts_in_room,
-		create_event.event_id(),
-	)
-	.boxed() // size firewall
-	.await?;
+	let attempt = sorted_prev_events
+		.is_empty()
+		.is_false()
+		.then(|| self.record_attempt(Context::Incoming, event_id));
 
-	// Done with prev events, now handling the incoming event
-	self.upgrade_outlier_to_timeline_pdu(
-		origin,
-		room_id,
-		incoming_pdu,
-		pdu,
-		&room_version,
-		recursion_level,
-		create_event.event_id(),
+	let handled = self
+		.handle_prev_events(
+			origin,
+			room_id,
+			event_id,
+			sorted_prev_events,
+			eventid_info,
+			&room_version,
+			recursion_level,
+			first_ts_in_room,
+			create_event.event_id(),
+		)
+		.boxed() // size firewall
+		.and_then(|()| {
+			self.upgrade_outlier_to_timeline_pdu(
+				origin,
+				room_id,
+				incoming_pdu,
+				pdu,
+				&room_version,
+				recursion_level,
+				create_event.event_id(),
+			)
+			.boxed() // size firewall
+		})
+		.await;
+
+	self.record_completion(
+		Context::Incoming,
+		event_id,
+		standing,
+		attempt,
+		handled.as_ref().map(Option::is_some),
 	)
-	.boxed() // size firewall
-	.await
+	.await;
+
+	handled
 }
 
 /// Apply a federated leave that rescinds an out-of-band invite for a local

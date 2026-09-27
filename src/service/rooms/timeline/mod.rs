@@ -19,7 +19,7 @@ use std::{fmt::Write, sync::Arc};
 
 use async_trait::async_trait;
 use futures::{
-	FutureExt, TryFutureExt, TryStreamExt,
+	FutureExt, StreamExt, TryFutureExt, TryStreamExt,
 	future::{Either, select, select_ok},
 	pin_mut,
 };
@@ -40,8 +40,9 @@ use tuwunel_core::{
 	},
 	utils::{
 		MutexMap, MutexMapGuard,
+		future::TryExtExt,
 		result::{LogErr, NotFound},
-		stream::TryReadyExt,
+		stream::{IterStream, TryReadyExt},
 	},
 	warn,
 };
@@ -735,6 +736,23 @@ pub async fn pdu_exists<'a>(&'a self, event_id: &'a EventId) -> bool {
 		.await
 		.map(at!(0))
 		.is_ok()
+}
+
+/// Reports whether every event has an accepted timeline row.
+///
+/// The probe stops at the first event without one, and an empty input reports
+/// true; a lookup error counts as absence. The rows are read one at a time, so
+/// callers pass a small set such as one event's references, never a bulk
+/// population.
+#[implement(Service)]
+pub async fn non_outlier_pdus_exist<'a, I>(&self, event_ids: I) -> bool
+where
+	I: Iterator<Item = &'a EventId> + Send,
+{
+	event_ids
+		.stream()
+		.all(|event_id| self.non_outlier_pdu_exists(event_id).is_ok())
+		.await
 }
 
 /// Returns a future that resolves on the next event-to-PDU mapping mutation.
