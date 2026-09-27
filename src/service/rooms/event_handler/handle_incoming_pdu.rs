@@ -454,8 +454,12 @@ async fn handle_prev_events(
 		.await
 }
 
-/// Upgrade one previous event, folding a transient failure into a no-op so a
-/// single bad prev does not abort the batch; a shutdown still propagates.
+/// Upgrade one previous event, folding a failure into a non-fatal skip so a
+/// single bad prev does not abort the batch.
+///
+/// A failure records a transient backoff for the prev. A shutdown propagates
+/// through the leading running check; an interruption surfacing from inside
+/// the upgrade is not a verdict on the prev and records nothing.
 #[implement(super::Service)]
 #[expect(clippy::too_many_arguments)]
 async fn upgrade_prev_event(
@@ -485,6 +489,11 @@ async fn upgrade_prev_event(
 		)
 		.await
 	{
+		| Err(error) if error.is_interrupted() || self.services.server.is_stopping() => {
+			debug!(?prev_id, ?event_id, ?room_id, %error, "Prev event processing interrupted.");
+
+			Ok((prev_id, None))
+		},
 		| Ok(handled) => {
 			if handled.is_some() {
 				self.record_success(Context::Upgrade, &prev_id)
@@ -496,9 +505,9 @@ async fn upgrade_prev_event(
 
 			Ok((prev_id, handled))
 		},
-		| Err(e) => {
+		| Err(error) => {
 			self.record_outcome(Context::Upgrade, &prev_id, Disposition::Transient);
-			warn!(?prev_id, ?event_id, ?room_id, "Prev event processing failed: {e}");
+			warn!(?prev_id, ?event_id, ?room_id, %error, "Prev event processing failed.");
 
 			Ok((prev_id, None))
 		},
