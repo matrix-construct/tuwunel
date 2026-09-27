@@ -28,18 +28,21 @@ where
 		.map_async(|sender_user| services.users.origin(sender_user).ok())
 		.unwrap_or(None)
 		.await;
-	let has_password = sender_user
-		.map_async(|sender_user| {
-			services
-				.users
-				.has_password(sender_user)
-				.unwrap_or(false)
-		})
-		.unwrap_or(false)
-		.await
-		|| (cfg!(feature = "ldap")
-			&& services.config.ldap.enable
-			&& user_origin.as_deref() == Some("ldap"));
+
+	let ldap_origin = cfg!(feature = "ldap")
+		&& services.config.ldap.enable
+		&& user_origin.as_deref() == Some("ldap");
+
+	let has_password = ldap_origin
+		|| sender_user
+			.map_async(|sender_user| {
+				services
+					.users
+					.has_password(sender_user)
+					.unwrap_or(false)
+			})
+			.unwrap_or(false)
+			.await;
 
 	// Determine the exact IdP to bind to the UIAA session.
 	//
