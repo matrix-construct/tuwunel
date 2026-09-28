@@ -3398,14 +3398,17 @@ pub struct Config {
 	#[serde(default)]
 	pub enforce_stripped_state_pdu_validation: bool,
 
-	/// Allow admins to enter commands in rooms other than "#admins" (admin
-	/// room) by prefixing your message with "\!admin" or "\\!admin" followed up
-	/// a normal tuwunel admin command. The reply will be publicly visible to
-	/// the room, originating from the sender.
+	/// Allow admins to run commands outside the admin room ("#admins") by
+	/// prefixing a message with "\!admin" or "\\!admin" and a normal command.
+	///
+	/// The reply is publicly visible to the room, originating from the sender.
+	/// Disabled by default: the server cannot tell a command an admin typed
+	/// from one in a message the admin forwarded or a bot on their account
+	/// reposted. Message formatting can also hide the command from the admin.
 	///
 	/// reloadable: yes
 	/// example: \\!admin debug ping puppygock.gay
-	#[serde(default = "true_fn")]
+	#[serde(default)]
 	pub admin_escape_commands: bool,
 
 	/// Automatically activate the tuwunel admin room console / CLI on

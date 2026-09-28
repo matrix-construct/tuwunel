@@ -88,15 +88,26 @@ fn check_with_captured_logs(config: &Config) -> (Result, String) {
 }
 
 #[test]
+fn admin_escape_commands_default_to_off() {
+	let config = default_config();
+
+	assert!(!config.admin_escape_commands);
+}
+
+fn default_config() -> Config {
+	config_from_toml("[global]\n").expect("default config should parse")
+}
+
+#[test]
 fn url_preview_accept_language_defaults_to_none() {
-	let config = config_from_toml("[global]\n").expect("default config should parse");
+	let config = default_config();
 
 	assert!(config.url_preview_accept_language.is_none());
 }
 
 #[test]
 fn url_preview_accept_language_can_be_reloaded_and_removed() {
-	let original = config_from_toml("[global]\n").expect("default config should parse");
+	let original = default_config();
 	let english = config_from_toml(
 		r#"[global]
 url_preview_accept_language = "en-US,en;q=0.9"
@@ -117,7 +128,7 @@ url_preview_accept_language = "en-US,en;q=0.9"
 
 #[test]
 fn url_preview_accept_language_rejects_invalid_headers() {
-	let original = config_from_toml("[global]\n").expect("default config should parse");
+	let original = default_config();
 
 	for value in ["en\r\nX-Injected: true", "en\n", "en\0"] {
 		let config = Config {
@@ -140,14 +151,14 @@ fn url_preview_accept_language_rejects_invalid_headers() {
 
 #[test]
 fn ip_source_absent_parses_as_none() {
-	let config = config_from_toml("[global]\n").unwrap();
+	let config = default_config();
 
 	assert_eq!(config.ip_source, None);
 }
 
 #[test]
 fn legacy_state_local_switch_is_recognized_and_warned() {
-	let default = config_from_toml("[global]\n").unwrap();
+	let default = default_config();
 	let disabled = config_from_toml(
 		"[global]
 resolve_state_locally = true
@@ -274,7 +285,7 @@ fn legacy_state_local_switch_is_reloadable() {
 
 #[test]
 fn prev_events_concurrency_is_nonzero_and_reloadable() {
-	let default = config_from_toml("[global]\n").unwrap();
+	let default = default_config();
 	let zero = config_from_toml("[global]\nprev_events_concurrency = 0\n").unwrap();
 	let one = config_from_toml("[global]\nprev_events_concurrency = 1\n").unwrap();
 
@@ -384,7 +395,7 @@ ip_source = "{value}"
 
 #[test]
 fn check_accepts_absent_connect_info_and_cf_connecting_ip() {
-	let absent = config_from_toml("[global]\n").unwrap();
+	let absent = default_config();
 	let connect_info = config_from_toml(
 		r#"[global]
 ip_source = "connect_info"
@@ -502,7 +513,7 @@ fn check_bounds_the_animated_thumbnail_concurrency() {
 
 #[test]
 fn reload_rejects_none_to_some_and_some_to_none() {
-	let none = config_from_toml("[global]\n").unwrap();
+	let none = default_config();
 	let some = config_from_toml(
 		r#"[global]
 ip_source = "connect_info"
@@ -571,7 +582,7 @@ fn s3_storage_provider_debug_masks_credentials() {
 
 #[test]
 fn reload_accepts_unchanged_none_and_unchanged_some() {
-	let none = config_from_toml("[global]\n").unwrap();
+	let none = default_config();
 	let some = config_from_toml(
 		r#"[global]
 ip_source = "rightmost_x_forwarded_for"
