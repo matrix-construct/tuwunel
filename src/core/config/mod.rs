@@ -1424,6 +1424,13 @@ pub struct Config {
 	#[serde(default = "true_fn")]
 	pub allow_room_creation: bool,
 
+	/// Allow standard users to create room aliases. Appservices and admins are
+	/// always allowed to create room aliases.
+	/// reloadable: yes
+	/// default: true
+	#[serde(default = "true_fn")]
+	pub allow_room_alias_creation: bool,
+
 	/// Set to false to disable users from joining or creating room versions
 	/// that aren't officially supported by tuwunel. Unstable room versions may
 	/// have flawed specifications or our implementation may be non-conforming.
