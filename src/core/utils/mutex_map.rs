@@ -120,6 +120,22 @@ where
 	#[must_use]
 	pub fn len(&self) -> usize { self.map.lock().expect("locked").len() }
 
+	/// Returns a copy of the keys currently tracked.
+	///
+	/// Each key has a held mutex or contenders still referencing it, and the
+	/// two are not told apart. The copy is taken under the internal map lock,
+	/// which panics if poisoned.
+	#[must_use]
+	pub fn keys(&self) -> impl ExactSizeIterator<Item = Key> + Send + use<Key, Val> {
+		self.map
+			.lock()
+			.expect("locked")
+			.keys()
+			.cloned()
+			.collect::<Vec<_>>()
+			.into_iter()
+	}
+
 	fn entry<K>(&self, k: &K) -> Guard<Key, Val>
 	where
 		K: ?Sized + ToOwned<Owned = Key>,

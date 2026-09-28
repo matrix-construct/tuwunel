@@ -14,6 +14,7 @@ use futures::{
 	StreamExt,
 	future::{OptionFuture, ready, try_join},
 };
+use itertools::Itertools;
 use tokio::{spawn, sync::Barrier};
 
 use crate::{
@@ -209,6 +210,29 @@ fn poll_pending<F: Future>(future: F) -> Option<Pin<Box<F>>> {
 		.poll(&mut Context::from_waker(Waker::noop()))
 		.is_pending()
 		.then_some(future)
+}
+
+#[tokio::test]
+async fn mutex_map_keys() {
+	let map = MutexMap::<String, ()>::new();
+	let sorted_keys = || map.keys().sorted_unstable().collect::<Vec<_>>();
+
+	let foo = map.lock("foo").await;
+	let bar = map.lock("bar").await;
+	let contender = poll_pending(map.lock("foo")).expect("must contend");
+
+	assert_eq!(sorted_keys(), ["bar", "foo"], "a contended key must be listed once");
+	assert_eq!(map.keys().len(), map.len(), "the copy must count each entry once");
+
+	drop(foo);
+	assert_eq!(sorted_keys(), ["bar", "foo"], "a key with a contender must stay listed");
+	assert!(map.try_lock("foo").is_err(), "the contender must own the released key");
+
+	drop(contender);
+	assert_eq!(sorted_keys(), ["bar"], "a dropped contender must release its key");
+
+	drop(bar);
+	assert_eq!(map.keys().len(), 0, "an empty map must list no keys");
 }
 
 #[tokio::test]
