@@ -379,6 +379,14 @@ pub(super) static MAPS: &[Descriptor] = &[
 		..descriptor::DROPPED
 	},
 	Descriptor {
+		name: "roomtseventid_prevwalk",
+		cache_disp: CacheDisp::Unique, // admin sweeps would evict the shared pool
+		cache_shards: 8,               // 512 KiB each, RocksDB's default minimum shard
+		block_size: 4096,              // scanned, never point-read
+		ttl: 60 * 60 * 24 * 3,         // the "up to three days" the view's docs name
+		..descriptor::RANDOM_SMALL_CACHE
+	},
+	Descriptor {
 		name: "roomuserdataid_accountdata",
 		..descriptor::RANDOM_SMALL
 	},

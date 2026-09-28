@@ -4,6 +4,7 @@ use std::{
 		Mutex, MutexGuard,
 		atomic::{AtomicU64, Ordering},
 	},
+	thread::panicking,
 	time::{Duration, Instant},
 };
 
@@ -14,8 +15,10 @@ use tuwunel_core::{
 	warn,
 };
 
+pub use self::history::{PrevWalkPass, PrevWalkRoom};
 use super::{Service, fetch_prev::PrevFetch, handle_prev_pdu::PrevUpgrade};
 
+mod history;
 #[cfg(test)]
 mod tests;
 
@@ -151,7 +154,8 @@ pub(super) struct InFlightWalks {
 /// The event is listed in flight while the guard lives. Dropping the guard
 /// records the event under its outcome, or as a cancelled fetch or walk when
 /// dropped unsettled. A walk, a failed fetch and a cancelled fetch each log one
-/// line; a hold and a fetch that leaves nothing to walk log none.
+/// line and record one row in the room's history, the row skipped while the
+/// thread unwinds; a hold and a fetch that leaves nothing to walk do neither.
 #[clippy::has_significant_drop]
 #[must_use]
 pub(super) struct PrevWalk<'a> {
@@ -165,8 +169,8 @@ pub(super) struct PrevWalk<'a> {
 
 /// The end of one pass, computed once when its guard drops.
 ///
-/// The counters and the log line both read this one record, so they agree on
-/// the outcome and the timings.
+/// The counters, the log line and the room's history row all read this one
+/// record, so they agree on the outcome and the timings.
 #[derive(Clone, Copy)]
 struct Pass {
 	outcome: Outcome,
@@ -177,16 +181,35 @@ struct Pass {
 	upgrade: Duration,
 }
 
-#[derive(Clone, Copy)]
-enum Outcome {
-	Held,
-	Closed,
-	FetchFailed,
-	FetchCancelled,
-	Appended,
-	NotAppended,
-	Failed,
-	Cancelled,
+/// How the pass of a gapped incoming event ended.
+///
+/// The first four end a pass before its walk began, and the last four end a
+/// walk.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Outcome {
+	/// Withheld by a backoff hold.
+	Held = 0,
+
+	/// The backward fetch left nothing to walk.
+	Closed = 1,
+
+	/// The backward fetch returned an error.
+	FetchFailed = 2,
+
+	/// Dropped before the walk began, or the backward fetch was interrupted.
+	FetchCancelled = 3,
+
+	/// The walk appended the incoming event.
+	Appended = 4,
+
+	/// The walk finished without appending the incoming event.
+	NotAppended = 5,
+
+	/// The walk returned an error.
+	Failed = 6,
+
+	/// The walk was dropped before it settled, or interrupted by shutdown.
+	Cancelled = 7,
 }
 
 /// Read a snapshot of incoming previous-event walk totals.
@@ -428,6 +451,11 @@ impl Drop for PrevWalk<'_> {
 			| None => log_fetch_end(upgrade, &pass),
 			| Some(_) => log_walk_end(upgrade, &pass),
 		}
+
+		// A panic from the write while unwinding would abort the process.
+		if !panicking() {
+			service.record_pass(upgrade, &pass);
+		}
 	}
 }
 
@@ -482,7 +510,7 @@ fn settle_pass(&self, &Pass { outcome, capped, unprocessed, .. }: &Pass) {
 	fetch_add_usize(&self.unprocessed_prevs, unprocessed, Ordering::Relaxed);
 }
 
-/// Whether a pass ending this way logs its end.
+/// Whether a pass ending this way logs and records its end.
 #[implement(Outcome)]
 fn reported(self) -> bool {
 	match self {
@@ -545,8 +573,13 @@ fn log_walk_end(upgrade: &PrevUpgrade<'_>, pass: &Pass) {
 	}
 }
 
+/// The outcome's name.
+///
+/// The same name labels the outcome in the `Prev walk ended.` log line and in
+/// the per-room history view.
 #[implement(Outcome)]
-fn name(self) -> &'static str {
+#[must_use]
+pub fn name(self) -> &'static str {
 	match self {
 		| Self::Held => "held",
 		| Self::Closed => "closed",

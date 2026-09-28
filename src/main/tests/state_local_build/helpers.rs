@@ -1,9 +1,10 @@
 use std::{iter::once, time::Duration};
 
+use futures::StreamExt;
 use serde_json::{Value, json};
 use tokio::time::{sleep, timeout};
 use tuwunel_core::{
-	Err, Result, err,
+	Err, Result, async_noinline, err,
 	matrix::{PduEvent, pdu::into_outgoing_federation},
 	pdu::PduBuilder,
 	ruma::{
@@ -16,13 +17,26 @@ use tuwunel_database::Interfix;
 use tuwunel_service::{
 	Services,
 	rooms::{
-		event_handler::{BackoffMetrics, PrevWalkMetrics, StateLocalMetrics, Verdicts},
+		event_handler::{
+			BackoffMetrics, PrevWalkMetrics, PrevWalkOutcome, StateLocalMetrics, Verdicts,
+		},
 		short::ShortStateHash,
 	},
 };
 
 pub(super) type SignedPdu = (PduEvent, CanonicalJsonObject);
 pub(super) type HeldFork = (PduEvent, PduEvent, PduEvent, CanonicalJsonObject);
+
+/// A pass a case expects its room to have recorded.
+///
+/// The origin is left out: every pass in the fixture comes from the server
+/// itself, which `assert_recorded` checks.
+pub(super) struct ExpectedPass<'a> {
+	pub(super) event_id: &'a EventId,
+	pub(super) outcome: PrevWalkOutcome,
+	pub(super) prevs: u64,
+	pub(super) unprocessed: u64,
+}
 
 /// Prev-walk and backoff totals read together, so a case can check they agree.
 ///
@@ -531,6 +545,38 @@ fn verdicts_delta(before: &Verdicts, after: &Verdicts, context: &str) -> Verdict
 		allowed: delta(|verdicts| verdicts.allowed),
 		denied: delta(|verdicts| verdicts.denied),
 	}
+}
+
+/// Asserts the passes a room recorded, latest first.
+///
+/// Every pass in the fixture comes from the server itself, so each is expected
+/// to name it as the origin.
+// size firewall
+#[async_noinline]
+pub(super) async fn assert_recorded<'a>(
+	services: &'a Services,
+	room_id: &'a RoomId,
+	expected: &'a [ExpectedPass<'a>],
+	context: &'a str,
+) {
+	let origin = services.globals.server_name();
+	let recorded: Vec<_> = services
+		.event_handler
+		.prev_walk_passes(room_id)
+		.map(|pass| (pass.event_id, pass.origin, pass.outcome, pass.prevs, pass.unprocessed))
+		.collect()
+		.await;
+
+	let expected: Vec<_> = expected
+		.iter()
+		.map(|pass| {
+			let ExpectedPass { event_id, outcome, prevs, unprocessed } = *pass;
+
+			(event_id.to_owned(), Some(origin.to_owned()), Some(outcome), prevs, unprocessed)
+		})
+		.collect();
+
+	assert_eq!(recorded, expected, "{context} recorded the wrong passes");
 }
 
 pub(super) async fn assert_accepts(

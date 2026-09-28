@@ -1,21 +1,34 @@
-use std::pin::pin;
+use std::{pin::pin, time::Duration};
 
 use futures::future::{Either, join, select};
 use tuwunel_core::{
 	Err, Result, async_noinline, err,
-	ruma::{EventId, RoomId, UserId},
+	ruma::{EventId, RoomId, UserId, event_id, room_id},
 };
 use tuwunel_service::{
 	Services,
-	rooms::event_handler::{InFlightWalk, PrevWalkMetrics, Walk},
+	rooms::event_handler::{InFlightWalk, PrevWalkMetrics, PrevWalkOutcome, Walk},
 };
 
 use super::helpers::{
-	SignedPdu, append_message, assert_prev_walk, create_room, poll, redeliver,
-	set_forward_extremity, sign_message, sign_outlier_message, walk_metrics,
+	ExpectedPass, SignedPdu, append_message, assert_prev_walk, assert_recorded, create_room,
+	poll, redeliver, set_forward_extremity, sign_message, sign_outlier_message, walk_metrics,
 };
 
 type OutlierPair = (SignedPdu, Result<SignedPdu>);
+
+// Mirrors the event handler's private pass row, keyed by the end in milliseconds.
+type PlantedKey<'a> = (&'a RoomId, u64, &'a EventId);
+
+#[derive(Clone, Copy)]
+struct PlantedPass {
+	outcome: PrevWalkOutcome,
+	prevs: u64,
+	unprocessed: u64,
+	capped: bool,
+	fetch_ms: u64,
+	upgrade_ms: u64,
+}
 
 // size firewall
 #[async_noinline]
@@ -40,7 +53,9 @@ pub(super) async fn prev_walk_ends<'a>(
 
 	let walking_room = create_room(services, base, token).await?;
 
-	dropped_walk_is_cancelled(services, user_id, &walking_room).await
+	dropped_walk_is_cancelled(services, user_id, &walking_room).await?;
+
+	planted_passes_read_per_room(services).await
 }
 
 // size firewall
@@ -76,6 +91,7 @@ async fn gap_closed_during_fetch<'a>(
 	};
 
 	assert_prev_walk(before, after, expected, context);
+	assert_recorded(services, room_id, &[], context).await;
 
 	Ok(())
 }
@@ -110,7 +126,15 @@ async fn foreign_prev_fails_fetch<'a>(
 		..PrevWalkMetrics::default()
 	};
 
+	let expected_passes = [ExpectedPass {
+		event_id: &incoming.event_id,
+		outcome: PrevWalkOutcome::FetchFailed,
+		prevs: 0,
+		unprocessed: 0,
+	}];
+
 	assert_prev_walk(before, after, expected, context);
+	assert_recorded(services, room_id, &expected_passes, context).await;
 
 	Ok(())
 }
@@ -161,7 +185,15 @@ async fn dropped_fetch_is_cancelled<'a>(
 		..PrevWalkMetrics::default()
 	};
 
+	let expected_passes = [ExpectedPass {
+		event_id: &incoming.event_id,
+		outcome: PrevWalkOutcome::FetchCancelled,
+		prevs: 0,
+		unprocessed: 0,
+	}];
+
 	assert_prev_walk(before, after, expected, context);
+	assert_recorded(services, room_id, &expected_passes, context).await;
 
 	Ok(())
 }
@@ -206,7 +238,95 @@ async fn dropped_walk_is_cancelled<'a>(
 		..PrevWalkMetrics::default()
 	};
 
+	let expected_passes = [ExpectedPass {
+		event_id: &incoming.event_id,
+		outcome: PrevWalkOutcome::Cancelled,
+		prevs: 1,
+		unprocessed: 0,
+	}];
+
 	assert_prev_walk(before, after, expected, context);
+	assert_recorded(services, room_id, &expected_passes, context).await;
+
+	Ok(())
+}
+
+/// Reads planted passes back per room.
+///
+/// No case ends two passes in one room, so the rows are planted: two a
+/// millisecond apart in one room, and one in a room whose id extends the
+/// first's, which sorts just below it.
+// size firewall
+#[async_noinline]
+async fn planted_passes_read_per_room(services: &Services) -> Result {
+	let context = "planted passes";
+	let room_id = room_id!("!plantedwalks:example.org");
+	let extended_id = room_id!("!plantedwalks:example.org.extended");
+	let earlier = event_id!("$plantedearlier");
+	let later = event_id!("$plantedlater");
+	let extended = event_id!("$plantedextended");
+	let planted = [
+		((room_id, 1_700_000_000_000, earlier), PlantedPass {
+			outcome: PrevWalkOutcome::Appended,
+			prevs: 3,
+			unprocessed: 1,
+			capped: false,
+			fetch_ms: 5,
+			upgrade_ms: 7,
+		}),
+		((room_id, 1_700_000_000_001, later), PlantedPass {
+			outcome: PrevWalkOutcome::Cancelled,
+			prevs: 1,
+			unprocessed: 0,
+			capped: true,
+			fetch_ms: 11,
+			upgrade_ms: 13,
+		}),
+		((extended_id, 1_700_000_000_002, extended), PlantedPass {
+			outcome: PrevWalkOutcome::FetchFailed,
+			prevs: 0,
+			unprocessed: 0,
+			capped: false,
+			fetch_ms: 17,
+			upgrade_ms: 0,
+		}),
+	];
+
+	planted
+		.into_iter()
+		.try_for_each(|(key, pass)| plant_pass(services, key, pass))?;
+
+	let expected_passes = [
+		ExpectedPass {
+			event_id: later,
+			outcome: PrevWalkOutcome::Cancelled,
+			prevs: 1,
+			unprocessed: 0,
+		},
+		ExpectedPass {
+			event_id: earlier,
+			outcome: PrevWalkOutcome::Appended,
+			prevs: 3,
+			unprocessed: 1,
+		},
+	];
+
+	assert_recorded(services, room_id, &expected_passes, context).await;
+
+	let tallies: Vec<_> = services
+		.event_handler
+		.prev_walk_rooms()
+		.await
+		.filter(|room| room.room_id == room_id || room.room_id == extended_id)
+		.map(|room| (room.room_id, room.passes, room.capped, room.prevs, room.fetch))
+		.collect();
+
+	let expected = [
+		(extended_id.to_owned(), 1, 0, 0, Duration::from_millis(17)),
+		(room_id.to_owned(), 2, 1, 4, Duration::from_millis(16)),
+	];
+
+	assert_eq!(tallies, expected, "{context} were not tallied once per room");
 
 	Ok(())
 }
@@ -305,4 +425,33 @@ async fn walk_listed(services: &Services, event_id: &EventId) -> Result<Walk> {
 	};
 
 	poll(listed, "the incoming event's walk was never listed").await
+}
+
+fn plant_pass(services: &Services, key: PlantedKey<'_>, pass: PlantedPass) -> Result {
+	let PlantedPass {
+		outcome,
+		prevs,
+		unprocessed,
+		capped,
+		fetch_ms,
+		upgrade_ms,
+	} = pass;
+
+	let origin = services.globals.server_name().as_str();
+	let val = (
+		u8::from(outcome),
+		prevs,
+		unprocessed,
+		u8::from(capped),
+		fetch_ms,
+		upgrade_ms,
+		origin,
+	);
+
+	services
+		.db
+		.get("roomtseventid_prevwalk")?
+		.put(key, val);
+
+	Ok(())
 }

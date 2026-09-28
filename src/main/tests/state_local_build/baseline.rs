@@ -5,13 +5,16 @@ use tuwunel_core::{
 	ruma::{RoomId, RoomVersionId, UserId},
 	utils::result::NotFound,
 };
-use tuwunel_service::{Services, rooms::event_handler::PrevWalkMetrics};
+use tuwunel_service::{
+	Services,
+	rooms::event_handler::{PrevWalkMetrics, PrevWalkOutcome},
+};
 
 use super::{
 	helpers::{
-		ExpectedWalkOutcome, assert_one_settled_walk, assert_prev_walk, counter_delta,
-		create_room, create_room_version, held_fork, held_state_fork, sign_message,
-		suppress_upgrade, walk_metrics,
+		ExpectedPass, ExpectedWalkOutcome, assert_one_settled_walk, assert_prev_walk,
+		assert_recorded, counter_delta, create_room, create_room_version, held_fork,
+		held_state_fork, sign_message, suppress_upgrade, walk_metrics,
 	},
 	positional::{missing_create_falls_through_to_fetch, positional_rejection_stays_uncommitted},
 	prev_walk::prev_walk_ends,
@@ -163,8 +166,16 @@ async fn held_multi_prev_fork_resolves_locally(
 		..PrevWalkMetrics::default()
 	};
 
+	let expected = [ExpectedPass {
+		event_id: &top.event_id,
+		outcome: PrevWalkOutcome::Appended,
+		prevs: 2,
+		unprocessed: 2,
+	}];
+
 	assert_one_settled_walk(before, after, ExpectedWalkOutcome::Resolved, context);
 	assert_prev_walk(walks_before, walks_after, appended, context);
+	assert_recorded(services, room_id, &expected, context).await;
 
 	let resolved = counter_delta(after.walk_resolved, before.walk_resolved, context);
 

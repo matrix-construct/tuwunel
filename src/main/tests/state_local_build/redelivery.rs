@@ -7,8 +7,8 @@ use tuwunel_core::{
 use tuwunel_service::{Services, rooms::event_handler::PrevWalkMetrics};
 
 use super::helpers::{
-	Context, Disposition, append_message, assert_accepts, assert_prev_walk, backoff_rows,
-	held_message_chain, plant_backoff_rows, redeliver, sign_message, walk_metrics,
+	Context, Disposition, append_message, assert_accepts, assert_prev_walk, assert_recorded,
+	backoff_rows, held_message_chain, plant_backoff_rows, redeliver, sign_message, walk_metrics,
 };
 
 pub(super) async fn gapped_redelivery_backs_off(
@@ -53,6 +53,7 @@ pub(super) async fn gapped_redelivery_backs_off(
 	};
 
 	assert_prev_walk(walks_before, walks_after, hold, context);
+	assert_recorded(services, room_id, &[], context).await;
 	assert_backs_off(services, room_id, &failed, failed_json, 1, "failed redelivery").await?;
 	assert_accepts(services, room_id, &control, control_json, "two-attempt redelivery").await?;
 

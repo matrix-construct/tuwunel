@@ -2,7 +2,8 @@
 //!
 //! The service authorizes incoming PDUs, fetches the events they depend on,
 //! derives their state and appends them. Observability counters cover the
-//! local state build, the previous-event walk and the backoff verdicts.
+//! local state build, the previous-event walk and the backoff verdicts. A
+//! per-room history keeps the previous-event walk passes for up to three days.
 
 mod acl_check;
 mod backoff;
@@ -36,9 +37,13 @@ use self::{
 pub use self::{
 	backoff::{BackoffMetrics, Verdicts},
 	policy_server::PolicyCheck,
-	prev_walk::{InFlightWalk, PrevWalkMetrics, Walk},
+	prev_walk::{
+		InFlightWalk, Outcome as PrevWalkOutcome, PrevWalkMetrics, PrevWalkPass, PrevWalkRoom,
+		Walk,
+	},
 	state_local_build::{LocalBuildReport, StateLocalMetrics},
 };
+use crate::service::make_name;
 
 /// Handles incoming events: authorization, fetching missing events, state
 /// resolution and upgrade into the timeline.
@@ -71,6 +76,7 @@ struct Data {
 	eventid_backoff: Arc<Map>,
 	eventid_policysigstate: Arc<Map>,
 	eventid_resolvedstate: Arc<Map>,
+	roomtseventid_prevwalk: Arc<Map>,
 }
 
 type RoomMutexMap = MutexMap<OwnedRoomId, ()>;
@@ -92,6 +98,7 @@ impl crate::Service for Service {
 				eventid_backoff: args.db["eventid_backoff"].clone(),
 				eventid_policysigstate: args.db["eventid_policysigstate"].clone(),
 				eventid_resolvedstate: args.db["eventid_resolvedstate"].clone(),
+				roomtseventid_prevwalk: args.db["roomtseventid_prevwalk"].clone(),
 			},
 		}))
 	}
@@ -113,7 +120,7 @@ impl crate::Service for Service {
 		self.db.eventid_resolvedstate.clear().await;
 	}
 
-	fn name(&self) -> &str { crate::service::make_name(std::module_path!()) }
+	fn name(&self) -> &str { make_name(module_path!()) }
 }
 
 #[implement(Service)]
