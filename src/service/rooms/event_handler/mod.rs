@@ -29,12 +29,14 @@ use tuwunel_core::{Result, implement, matrix::PduEvent, utils::MutexMap};
 use tuwunel_database::Map;
 
 use self::{
-	backoff::BackoffCounters, prev_walk::PrevWalkCounters, state_local_build::StateLocalCounters,
+	backoff::BackoffCounters,
+	prev_walk::{InFlightWalks, PrevWalkCounters},
+	state_local_build::StateLocalCounters,
 };
 pub use self::{
 	backoff::{BackoffMetrics, Verdicts},
 	policy_server::PolicyCheck,
-	prev_walk::PrevWalkMetrics,
+	prev_walk::{InFlightWalk, PrevWalkMetrics, Walk},
 	state_local_build::{LocalBuildReport, StateLocalMetrics},
 };
 
@@ -53,6 +55,15 @@ pub struct Service {
 	db: Data,
 	state_local: Arc<StateLocalCounters>,
 	prev_walk: PrevWalkCounters,
+
+	/// Gapped incoming events whose passes are in flight.
+	///
+	/// An entry lives exactly as long as its pass. Top-level timeline passes run
+	/// under the room's `mutex_federation` except for remote invites and a local
+	/// join's federation fallback, so entries stay within one per room holding its
+	/// federation mutex, plus any passes those two callers have in flight.
+	prev_walks_in_flight: InFlightWalks,
+
 	backoff: BackoffCounters,
 }
 
@@ -75,6 +86,7 @@ impl crate::Service for Service {
 			services: args.services.clone(),
 			state_local: Arc::new(StateLocalCounters::default()),
 			prev_walk: PrevWalkCounters::default(),
+			prev_walks_in_flight: InFlightWalks::default(),
 			backoff: BackoffCounters::default(),
 			db: Data {
 				eventid_backoff: args.db["eventid_backoff"].clone(),
@@ -86,7 +98,12 @@ impl crate::Service for Service {
 
 	async fn memory_usage(&self, out: &mut (dyn Write + Send)) -> Result {
 		let mutex_federation = self.mutex_federation.len();
+
 		writeln!(out, "- federation_mutex: {mutex_federation}")?;
+
+		let prev_walks_in_flight = self.prev_walks_in_flight_count();
+
+		writeln!(out, "- prev_walks_in_flight: {prev_walks_in_flight}")?;
 
 		Ok(())
 	}

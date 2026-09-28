@@ -6,7 +6,7 @@ use std::{fs::remove_dir_all, net::TcpListener, time::Duration};
 use futures::future::{BoxFuture, join};
 use tokio::time::{sleep, timeout};
 use tuwunel::{Args, Runtime, Server, async_run, async_start, async_stop};
-use tuwunel_core::{Error, Result, async_noinline, err, ruma::UserId};
+use tuwunel_core::{Err, Error, Result, async_noinline, err, ruma::UserId};
 use tuwunel_service::{Services, users::Register};
 
 use self::{
@@ -16,7 +16,7 @@ use self::{
 	},
 	baseline::enabled_baseline,
 	disabled::ignores_planted_memo,
-	helpers::create_room,
+	helpers::{create_room, walks_in_flight},
 	memo::{direct_memo_failure_is_miss, walk_memo_failure_is_unevaluable},
 	missing_rows::{
 		missing_event_reverse, missing_named_pdu, missing_state_diff, missing_state_key_reverse,
@@ -195,7 +195,14 @@ async fn exercise<'a>(services: &'a Services, base: &'a str, case: Case) -> Resu
 		.create_device(&user_id, None, (Some(token), None), None, None, None)
 		.await?;
 
-	exercise_case(services, base, token, &user_id, case).await
+	exercise_case(services, base, token, &user_id, case).await?;
+
+	let in_flight = walks_in_flight(services);
+
+	match in_flight {
+		| 0 => Ok(()),
+		| _ => Err!("a prev walk outlived its case, {in_flight} still in flight"),
+	}
 }
 
 async fn wait_until_ready(services: &Services, base: &str) -> Result {

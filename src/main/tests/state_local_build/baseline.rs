@@ -14,7 +14,7 @@ use super::{
 		suppress_upgrade, walk_metrics,
 	},
 	positional::{missing_create_falls_through_to_fetch, positional_rejection_stays_uncommitted},
-	prev_walk::prev_walk_fetch_ends,
+	prev_walk::prev_walk_ends,
 	redelivery::gapped_redelivery_backs_off,
 	soft_fail::soft_failed_event_keeps_state_row,
 };
@@ -81,9 +81,9 @@ pub(super) async fn enabled_baseline(
 		.await
 		.map_err(step(label))?;
 
-	prev_walk_fetch_ends(services, base, token, user_id)
+	prev_walk_ends(services, base, token, user_id)
 		.await
-		.map_err(step("prev walk fetch ends"))
+		.map_err(step("prev walk ends"))
 }
 
 async fn held_multi_prev_fork_resolves_locally(

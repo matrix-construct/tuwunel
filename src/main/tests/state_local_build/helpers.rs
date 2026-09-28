@@ -1,6 +1,7 @@
-use std::iter::once;
+use std::{iter::once, time::Duration};
 
 use serde_json::{Value, json};
+use tokio::time::{sleep, timeout};
 use tuwunel_core::{
 	Err, Result, err,
 	matrix::{PduEvent, pdu::into_outgoing_federation},
@@ -26,11 +27,14 @@ pub(super) type HeldFork = (PduEvent, PduEvent, PduEvent, CanonicalJsonObject);
 /// Prev-walk and backoff totals read together, so a case can check they agree.
 ///
 /// The Incoming lookups are checked against the gapped and held counts, so both
-/// snapshots are taken at the same point of a case.
+/// snapshots are taken at the same point of a case. The count of passes still
+/// in flight rides along, so a case can check each measured step settled its
+/// passes.
 #[derive(Clone, Copy)]
 pub(super) struct WalkMetrics {
 	pub(super) prev_walk: PrevWalkMetrics,
 	pub(super) backoff: BackoffMetrics,
+	pub(super) in_flight: usize,
 }
 
 #[derive(Clone, Copy)]
@@ -441,7 +445,14 @@ pub(super) fn walk_metrics(services: &Services) -> WalkMetrics {
 	WalkMetrics {
 		prev_walk: services.event_handler.prev_walk_metrics(),
 		backoff: services.event_handler.backoff_metrics(),
+		in_flight: walks_in_flight(services),
 	}
+}
+
+pub(super) fn walks_in_flight(services: &Services) -> usize {
+	services
+		.event_handler
+		.prev_walks_in_flight_count()
 }
 
 pub(super) fn assert_prev_walk(
@@ -473,6 +484,7 @@ pub(super) fn assert_prev_walk(
 
 	let lookups = incoming.lookups();
 
+	assert_eq!(after.in_flight, 0, "{context} left a pass in flight");
 	assert_eq!(actual.gapped, gapped_ends, "{context} left a gapped event without an end");
 	assert_eq!(actual.walked, walk_ends, "{context} left a walk without an outcome");
 	assert_eq!(actual.held, incoming.denied, "{context} held without a backoff denial");
@@ -761,4 +773,24 @@ async fn create_room_with_body(
 		.ok_or_else(|| err!("createRoom response omitted room_id"))?
 		.try_into()
 		.map_err(Into::into)
+}
+
+/// Probes every millisecond until the probe finds its value, for up to five
+/// seconds.
+///
+/// A probe still empty at the deadline fails with the `missed` message.
+pub(super) async fn poll<T>(probe: impl Fn() -> Option<T>, missed: &str) -> Result<T> {
+	timeout(Duration::from_secs(5), until_found(probe))
+		.await
+		.map_err(|_| err!("{missed}"))
+}
+
+async fn until_found<T>(probe: impl Fn() -> Option<T>) -> T {
+	loop {
+		if let Some(found) = probe() {
+			break found;
+		}
+
+		sleep(Duration::from_millis(1)).await;
+	}
 }

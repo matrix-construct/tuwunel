@@ -1,11 +1,25 @@
 use std::{
-	sync::atomic::{AtomicU64, Ordering},
+	collections::BTreeMap,
+	sync::{
+		Mutex, MutexGuard,
+		atomic::{AtomicU64, Ordering},
+	},
 	time::Instant,
 };
 
-use tuwunel_core::{Error, Result, implement, info, utils::math::fetch_add_usize, warn};
+use ruma::{OwnedEventId, OwnedRoomId, OwnedServerName};
+use tuwunel_core::{
+	Error, Result, implement, info,
+	utils::{MutexExt, math::fetch_add_usize},
+	warn,
+};
 
 use super::{fetch_prev::PrevFetch, handle_prev_pdu::PrevUpgrade};
+
+#[cfg(test)]
+mod tests;
+
+type Walks = BTreeMap<u64, InFlightWalk>;
 
 /// Snapshot of process-lifetime totals for incoming previous-event walks.
 ///
@@ -63,6 +77,44 @@ pub struct PrevWalkMetrics {
 	pub unprocessed_prevs: u64,
 }
 
+/// A gapped incoming event whose pass is in flight.
+///
+/// The event is listed from its gap check until its pass settles or is dropped.
+#[derive(Clone, Debug)]
+pub struct InFlightWalk {
+	/// Room of the incoming event.
+	pub room_id: OwnedRoomId,
+
+	/// The gapped incoming event.
+	pub event_id: OwnedEventId,
+
+	/// Server the incoming event arrived from.
+	pub origin: OwnedServerName,
+
+	/// When the pass started, right after the gap check.
+	pub started: Instant,
+
+	/// The walking phase, absent while the backoff lookup or backward fetch runs.
+	pub walk: Option<Walk>,
+}
+
+/// The walking phase of a pass, entered when the backward fetch returns
+/// previous events.
+///
+/// A pass dropped before its walk starts counts as a cancelled fetch rather
+/// than a cancelled walk.
+#[derive(Clone, Copy, Debug)]
+pub struct Walk {
+	/// When the backward fetch returned.
+	pub fetched: Instant,
+
+	/// Previous events the fetch collected for upgrade.
+	pub prevs: usize,
+
+	/// Whether the fetch hit the `max_fetch_prev_events` cap.
+	pub capped: bool,
+}
+
 #[derive(Default)]
 pub(super) struct PrevWalkCounters {
 	entered: AtomicU64,
@@ -81,32 +133,35 @@ pub(super) struct PrevWalkCounters {
 	unprocessed_prevs: AtomicU64,
 }
 
-/// Drop guard over one gapped incoming event, from its backoff consult through
+/// Registry of the passes in flight, keyed by ids taken in registration order.
+///
+/// Concurrent passes in one room would collide on a room key, so each pass
+/// takes its own id. An entry lives exactly as long as its pass's guard, whose
+/// drop removes it, so the registry never outgrows the gapped passes running at
+/// once. The lock is never held across an await.
+#[derive(Default)]
+pub(super) struct InFlightWalks {
+	next: AtomicU64,
+	walks: Mutex<Walks>,
+}
+
+/// Drop guard over one gapped incoming event, from its backoff lookup through
 /// the backward fetch and the upgrade of its previous events.
 ///
-/// Dropping the guard records the event under its outcome, or as a cancelled
-/// fetch or walk when dropped unsettled. A walk, a failed fetch and a cancelled
-/// fetch each log one line; a hold and a fetch that leaves nothing to walk log
-/// none.
+/// The event is listed in flight while the guard lives. Dropping the guard
+/// records the event under its outcome, or as a cancelled fetch or walk when
+/// dropped unsettled. A walk, a failed fetch and a cancelled fetch each log one
+/// line; a hold and a fetch that leaves nothing to walk log none.
 #[clippy::has_significant_drop]
 #[must_use]
 pub(super) struct PrevWalk<'a> {
 	counters: &'a PrevWalkCounters,
+	in_flight: &'a InFlightWalks,
+	id: u64,
 	upgrade: &'a PrevUpgrade<'a>,
 	started: Instant,
 	walk: Option<Walk>,
 	settled: Option<(Outcome, usize)>,
-}
-
-/// The walking phase, entered when the backward fetch returns previous events.
-///
-/// The guard holds none while the fetch runs, so an unsettled drop without one
-/// counts as a cancelled fetch rather than a cancelled walk.
-#[derive(Clone, Copy)]
-struct Walk {
-	fetched: Instant,
-	prevs: usize,
-	capped: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -149,6 +204,47 @@ fn snapshot(&self) -> PrevWalkMetrics {
 	}
 }
 
+/// Read the gapped incoming events whose passes are in flight, in registration
+/// order.
+///
+/// The entries are copied out under the registry lock, since an iterator over
+/// the registry itself could not outlive the lock.
+#[implement(super::Service)]
+#[inline]
+#[must_use]
+pub fn prev_walks_in_flight(&self) -> impl ExactSizeIterator<Item = InFlightWalk> + Send + use<> {
+	self.prev_walks_in_flight.snapshot()
+}
+
+/// Count the gapped incoming events whose passes are in flight.
+///
+/// Counting copies nothing out of the registry.
+#[implement(super::Service)]
+#[inline]
+#[must_use]
+pub fn prev_walks_in_flight_count(&self) -> usize { self.prev_walks_in_flight.len() }
+
+#[implement(InFlightWalks)]
+fn snapshot(&self) -> impl ExactSizeIterator<Item = InFlightWalk> + Send + use<> {
+	self.lock()
+		.values()
+		.cloned()
+		.collect::<Vec<_>>()
+		.into_iter()
+}
+
+/// Take the registry lock, adopting a poisoned one.
+///
+/// Nothing under the lock can panic, so a poisoned lock still guards a
+/// consistent map. Adopting it keeps `PrevWalk`'s drop from panicking.
+#[implement(InFlightWalks)]
+#[inline]
+fn lock(&self) -> MutexGuard<'_, Walks> { self.walks.lock_adopting() }
+
+#[implement(InFlightWalks)]
+#[inline]
+pub(super) fn len(&self) -> usize { self.lock().len() }
+
 #[implement(PrevWalkCounters)]
 pub(super) fn enter(&self, gapped: bool) {
 	self.entered.fetch_add(1, Ordering::Relaxed);
@@ -159,14 +255,40 @@ pub(super) fn enter(&self, gapped: bool) {
 }
 
 #[implement(PrevWalk, generics = "<'a>", params = "<'a>")]
-pub(super) fn start(counters: &'a PrevWalkCounters, upgrade: &'a PrevUpgrade<'a>) -> Self {
+pub(super) fn start(
+	counters: &'a PrevWalkCounters,
+	in_flight: &'a InFlightWalks,
+	upgrade: &'a PrevUpgrade<'a>,
+) -> Self {
+	let started = Instant::now();
+	let id = in_flight.insert(upgrade, started);
+
 	Self {
 		counters,
+		in_flight,
+		id,
 		upgrade,
-		started: Instant::now(),
+		started,
 		walk: None,
 		settled: None,
 	}
+}
+
+#[implement(InFlightWalks)]
+fn insert(&self, upgrade: &PrevUpgrade<'_>, started: Instant) -> u64 {
+	let PrevUpgrade { origin, room_id, event_id, .. } = *upgrade;
+	let id = self.next.fetch_add(1, Ordering::Relaxed);
+	let entry = InFlightWalk {
+		room_id: room_id.to_owned(),
+		event_id: event_id.to_owned(),
+		origin: origin.to_owned(),
+		started,
+		walk: None,
+	};
+
+	self.lock().insert(id, entry);
+
+	id
 }
 
 #[implement(PrevWalk, params = "<'_>")]
@@ -212,7 +334,7 @@ fn fetch_error(error: &Error, stopping: bool) -> Self {
 fn cut_off(error: &Error, stopping: bool) -> bool { stopping || error.is_interrupted() }
 
 #[implement(PrevWalk, params = "<'_>")]
-fn begin_walk(mut self, fetch: &PrevFetch) -> Self {
+fn begin_walk(self, fetch: &PrevFetch) -> Self {
 	let prevs = fetch.pdus.len();
 	let walk = Walk {
 		fetched: Instant::now(),
@@ -221,15 +343,27 @@ fn begin_walk(mut self, fetch: &PrevFetch) -> Self {
 	};
 
 	self.counters.start_walk(prevs);
-	self.walk = Some(walk);
-
-	self
+	self.in_flight.walking(self.id, walk);
+	self.with_walk(walk)
 }
 
 #[implement(PrevWalkCounters)]
 fn start_walk(&self, prevs: usize) {
 	self.walked.fetch_add(1, Ordering::Relaxed);
 	fetch_add_usize(&self.walked_prevs, prevs, Ordering::Relaxed);
+}
+
+#[implement(InFlightWalks)]
+fn walking(&self, id: u64, walk: Walk) {
+	self.lock()
+		.entry(id)
+		.and_modify(|in_flight| in_flight.walk = Some(walk));
+}
+
+#[implement(PrevWalk, params = "<'_>")]
+fn with_walk(mut self, walk: Walk) -> Self {
+	self.walk = Some(walk);
+	self
 }
 
 #[implement(PrevWalk, params = "<'_>")]
@@ -261,11 +395,15 @@ impl Drop for PrevWalk<'_> {
 	fn drop(&mut self) {
 		let Self {
 			counters,
+			in_flight,
+			id,
 			upgrade,
 			started,
 			walk,
 			settled,
 		} = *self;
+
+		in_flight.remove(id);
 
 		let unsettled = walk.map_or(Outcome::FetchCancelled, |_| Outcome::Cancelled);
 		let (outcome, unprocessed) = settled.unwrap_or((unsettled, 0));
@@ -279,6 +417,9 @@ impl Drop for PrevWalk<'_> {
 		}
 	}
 }
+
+#[implement(InFlightWalks)]
+fn remove(&self, id: u64) { self.lock().remove(&id); }
 
 #[implement(PrevWalkCounters)]
 fn settle_pass(&self, outcome: Outcome, capped: bool, unprocessed: usize) {

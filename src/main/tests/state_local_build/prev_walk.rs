@@ -1,21 +1,25 @@
-use std::{pin::pin, time::Duration};
+use std::pin::pin;
 
 use futures::future::{Either, join, select};
-use tokio::time::{sleep, timeout};
 use tuwunel_core::{
 	Err, Result, async_noinline, err,
 	ruma::{EventId, RoomId, UserId},
 };
-use tuwunel_service::{Services, rooms::event_handler::PrevWalkMetrics};
+use tuwunel_service::{
+	Services,
+	rooms::event_handler::{InFlightWalk, PrevWalkMetrics, Walk},
+};
 
 use super::helpers::{
-	SignedPdu, append_message, assert_prev_walk, create_room, redeliver, set_forward_extremity,
-	sign_message, sign_outlier_message, walk_metrics,
+	SignedPdu, append_message, assert_prev_walk, create_room, poll, redeliver,
+	set_forward_extremity, sign_message, sign_outlier_message, walk_metrics,
 };
+
+type OutlierPair = (SignedPdu, Result<SignedPdu>);
 
 // size firewall
 #[async_noinline]
-pub(super) async fn prev_walk_fetch_ends<'a>(
+pub(super) async fn prev_walk_ends<'a>(
 	services: &'a Services,
 	base: &'a str,
 	token: &'a str,
@@ -32,7 +36,11 @@ pub(super) async fn prev_walk_fetch_ends<'a>(
 
 	let dropped_room = create_room(services, base, token).await?;
 
-	dropped_fetch_is_cancelled(services, user_id, &dropped_room).await
+	dropped_fetch_is_cancelled(services, user_id, &dropped_room).await?;
+
+	let walking_room = create_room(services, base, token).await?;
+
+	dropped_walk_is_cancelled(services, user_id, &walking_room).await
 }
 
 // size firewall
@@ -125,6 +133,24 @@ async fn dropped_fetch_is_cancelled<'a>(
 	};
 
 	checked?;
+
+	let listed: Vec<_> = services
+		.event_handler
+		.prev_walks_in_flight()
+		.collect();
+
+	let fetching = |pass: &InFlightWalk| {
+		pass.event_id == incoming.event_id
+			&& pass.room_id == room_id
+			&& pass.origin == services.globals.server_name()
+			&& pass.walk.is_none()
+	};
+
+	assert!(
+		matches!(listed.as_slice(), [pass] if fetching(pass)),
+		"{context} is not listed once in its fetch phase: {listed:?}"
+	);
+
 	drop(deliver);
 
 	let after = walk_metrics(services);
@@ -140,19 +166,80 @@ async fn dropped_fetch_is_cancelled<'a>(
 	Ok(())
 }
 
+// size firewall
+#[async_noinline]
+async fn dropped_walk_is_cancelled<'a>(
+	services: &'a Services,
+	user_id: &'a UserId,
+	room_id: &'a RoomId,
+) -> Result {
+	let context = "walk dropped while upgrading its prev";
+	let (incoming, incoming_json) = sign_outlier_pair(services, user_id, room_id)
+		.await
+		.and_then(|(_, incoming)| incoming)?;
+
+	let before = walk_metrics(services);
+	// parks the prev's upgrade, so the walk stays in flight until dropped
+	let state_lock = services.state.mutex.lock(room_id).await;
+	// owned, so dropping it cancels the delivery
+	let deliver = Box::pin(redeliver(services, room_id, &incoming, incoming_json, context));
+	let listed = pin!(walk_listed(services, &incoming.event_id));
+	let Either::Right((walk, deliver)) = select(deliver, listed).await else {
+		return Err!("{context} finished before it could be dropped");
+	};
+
+	let walk = walk?;
+
+	assert_eq!(walk.prevs, 1, "{context} collected the wrong number of prevs");
+	assert!(!walk.capped, "{context} hit the fetch cap");
+
+	drop(deliver);
+	drop(state_lock);
+
+	let after = walk_metrics(services);
+	let expected = PrevWalkMetrics {
+		entered: 1,
+		gapped: 1,
+		walked: 1,
+		walked_prevs: 1,
+		cancelled: 1,
+		..PrevWalkMetrics::default()
+	};
+
+	assert_prev_walk(before, after, expected, context);
+
+	Ok(())
+}
+
 async fn sign_gapped_pair(
 	services: &Services,
 	user_id: &UserId,
 	room_id: &RoomId,
 ) -> Result<(SignedPdu, SignedPdu)> {
+	let (prev, incoming) = sign_outlier_pair(services, user_id, room_id).await?;
+
+	remove_outlier(services, &prev.0.event_id).await?;
+
+	Ok((prev, incoming?))
+}
+
+/// Signs an outlier prev and a child whose only previous event it is.
+///
+/// The prev stays out of the timeline, so the child counts as gapped, but its
+/// walk finds the prev locally instead of waiting for it to arrive. The child's
+/// signing result is returned as is, so a caller can remove the prev before a
+/// signing error propagates.
+async fn sign_outlier_pair(
+	services: &Services,
+	user_id: &UserId,
+	room_id: &RoomId,
+) -> Result<OutlierPair> {
 	let boundary = append_message(services, user_id, room_id, "gap boundary").await?;
 	let prev = sign_outlier_message(services, user_id, room_id, "gap prev").await?;
 	let incoming =
 		sign_child(services, user_id, room_id, &prev.0.event_id, &boundary, "gap incoming").await;
 
-	remove_outlier(services, &prev.0.event_id).await?;
-
-	Ok((prev, incoming?))
+	Ok((prev, incoming))
 }
 
 /// Signs a message whose only previous event is `prev_id`, then points the room
@@ -199,13 +286,23 @@ async fn remove_outlier(services: &Services, event_id: &EventId) -> Result {
 }
 
 async fn gap_checked(services: &Services, gapped_before: u64) -> Result {
-	let checked = || services.event_handler.prev_walk_metrics().gapped > gapped_before;
+	let checked = || {
+		let gapped = services.event_handler.prev_walk_metrics().gapped;
 
-	timeout(Duration::from_secs(5), async {
-		while !checked() {
-			sleep(Duration::from_millis(1)).await;
-		}
-	})
-	.await
-	.map_err(|_| err!("the incoming event never reached the gap check"))
+		gapped.gt(&gapped_before).then_some(())
+	};
+
+	poll(checked, "the incoming event never reached the gap check").await
+}
+
+async fn walk_listed(services: &Services, event_id: &EventId) -> Result<Walk> {
+	let listed = || {
+		services
+			.event_handler
+			.prev_walks_in_flight()
+			.find(|pass| pass.event_id == event_id)
+			.and_then(|pass| pass.walk)
+	};
+
+	poll(listed, "the incoming event's walk was never listed").await
 }
