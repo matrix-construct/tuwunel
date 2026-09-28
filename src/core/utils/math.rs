@@ -3,7 +3,10 @@
 //! Exported macros separate recoverable, expected, and prevalidated arithmetic.
 //! Conversion helpers centralize errors, panics, and deliberate truncation.
 
-use std::num::NonZeroUsize;
+use std::{
+	num::NonZeroUsize,
+	sync::atomic::{AtomicU64, Ordering},
+};
 
 mod expect_into;
 mod expected;
@@ -192,6 +195,22 @@ pub fn ruma_from_usize(val: usize) -> ruma::UInt {
 #[must_use]
 #[expect(clippy::as_conversions, clippy::cast_possible_truncation)]
 pub fn usize_from_u64_truncated(val: u64) -> usize { val as usize }
+
+/// Converts a `usize` to `u64`, saturating at `u64::MAX`.
+///
+/// The conversion is exact wherever `usize` is at most 64 bits wide.
+#[inline]
+#[must_use]
+pub fn u64_from_usize_saturating(val: usize) -> u64 { val.try_into().unwrap_or(u64::MAX) }
+
+/// Adds a `usize` count to an atomic `u64` counter, saturating the count at
+/// `u64::MAX`.
+///
+/// Returns the previous value; the counter itself wraps as `fetch_add` does.
+#[inline]
+pub fn fetch_add_usize(counter: &AtomicU64, count: usize, order: Ordering) -> u64 {
+	counter.fetch_add(u64_from_usize_saturating(count), order)
+}
 
 /// Converts a value with [`TryFrom`] and panics if conversion fails.
 ///

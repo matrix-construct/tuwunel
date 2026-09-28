@@ -5,12 +5,13 @@ use tuwunel_core::{
 	ruma::{RoomId, RoomVersionId, UserId},
 	utils::result::NotFound,
 };
-use tuwunel_service::Services;
+use tuwunel_service::{Services, rooms::event_handler::PrevWalkMetrics};
 
 use super::{
 	helpers::{
-		ExpectedWalkOutcome, assert_one_settled_walk, counter_delta, create_room,
-		create_room_version, held_fork, held_state_fork, sign_message, suppress_upgrade,
+		ExpectedWalkOutcome, assert_one_settled_walk, assert_prev_walk, counter_delta,
+		create_room, create_room_version, held_fork, held_state_fork, sign_message,
+		suppress_upgrade,
 	},
 	positional::{missing_create_falls_through_to_fetch, positional_rejection_stays_uncommitted},
 	redelivery::gapped_redelivery_backs_off,
@@ -130,7 +131,9 @@ async fn held_multi_prev_fork_resolves_locally(
 	let room_version = services.state.get_room_version(room_id).await?;
 	let top_json = into_outgoing_federation(top_json, &room_version);
 
+	let context = "held multi-prev fork";
 	let before = services.event_handler.state_local_metrics();
+	let prev_walks_before = services.event_handler.prev_walk_metrics();
 
 	services
 		.event_handler
@@ -144,11 +147,21 @@ async fn held_multi_prev_fork_resolves_locally(
 		.await?;
 
 	let after = services.event_handler.state_local_metrics();
+	let prev_walks_after = services.event_handler.prev_walk_metrics();
+	let appended = PrevWalkMetrics {
+		entered: 1,
+		gapped: 1,
+		walked: 1,
+		walked_prevs: 2,
+		appended: 1,
+		unprocessed_prevs: 2,
+		..PrevWalkMetrics::default()
+	};
 
-	assert_one_settled_walk(before, after, ExpectedWalkOutcome::Resolved, "held multi-prev fork");
+	assert_one_settled_walk(before, after, ExpectedWalkOutcome::Resolved, context);
+	assert_prev_walk(prev_walks_before, prev_walks_after, appended, context);
 
-	let resolved =
-		counter_delta(after.walk_resolved, before.walk_resolved, "held multi-prev fork");
+	let resolved = counter_delta(after.walk_resolved, before.walk_resolved, context);
 
 	assert_eq!(resolved, 1, "held multi-prev fork did not resolve locally");
 

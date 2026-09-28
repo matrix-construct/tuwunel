@@ -22,6 +22,7 @@ mod list_dependencies;
 mod memory_stats;
 mod parse_pdu;
 mod ping;
+mod prev_walk_metrics;
 mod rebuild_relation_index;
 mod rebuild_thread_index;
 mod resolve_true_destination;
@@ -264,6 +265,11 @@ pub(super) enum DebugCommand {
 	///
 	/// Difference two snapshots to observe an interval.
 	StateLocalMetrics,
+
+	/// - Print process-lifetime incoming prev-walk metrics.
+	///
+	/// Difference two snapshots to observe an interval.
+	PrevWalkMetrics,
 
 	/// - Print detailed tokio task metrics accumulated since last command
 	///   invocation.

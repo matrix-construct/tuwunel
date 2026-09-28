@@ -4,11 +4,11 @@ use tuwunel_core::{
 	ruma::{CanonicalJsonObject, EventId, RoomId, UserId},
 	utils::result::NotFound,
 };
-use tuwunel_service::Services;
+use tuwunel_service::{Services, rooms::event_handler::PrevWalkMetrics};
 
 use super::helpers::{
-	Context, Disposition, append_message, assert_accepts, backoff_rows, held_message_chain,
-	plant_backoff_rows, redeliver, sign_message,
+	Context, Disposition, append_message, assert_accepts, assert_prev_walk, backoff_rows,
+	held_message_chain, plant_backoff_rows, redeliver, sign_message,
 };
 
 pub(super) async fn gapped_redelivery_backs_off(
@@ -38,7 +38,21 @@ pub(super) async fn gapped_redelivery_backs_off(
 	plant_backoff_rows(services, Context::Incoming, &top.event_id, Disposition::Pending, 3)?;
 	plant_backoff_rows(services, Context::Incoming, failed_id, Disposition::Transient, 1)?;
 	plant_backoff_rows(services, Context::Incoming, control_id, Disposition::Pending, 2)?;
-	assert_backs_off(services, room_id, &top, top_json, 3, "three-attempt redelivery").await?;
+
+	let context = "three-attempt redelivery";
+	let prev_walks_before = services.event_handler.prev_walk_metrics();
+
+	assert_backs_off(services, room_id, &top, top_json, 3, context).await?;
+
+	let prev_walks_after = services.event_handler.prev_walk_metrics();
+	let hold = PrevWalkMetrics {
+		entered: 1,
+		gapped: 1,
+		held: 1,
+		..PrevWalkMetrics::default()
+	};
+
+	assert_prev_walk(prev_walks_before, prev_walks_after, hold, context);
 	assert_backs_off(services, room_id, &failed, failed_json, 1, "failed redelivery").await?;
 	assert_accepts(services, room_id, &control, control_json, "two-attempt redelivery").await?;
 
@@ -61,7 +75,16 @@ pub(super) async fn gapped_redelivery_backs_off(
 		.add_pdu_outlier(closed_id, &closed_json);
 
 	plant_backoff_rows(services, Context::Incoming, closed_id, Disposition::Pending, 3)?;
-	assert_accepts(services, room_id, &closed, closed_json, "closed-gap redelivery").await?;
+
+	let context = "closed-gap redelivery";
+	let prev_walks_before = services.event_handler.prev_walk_metrics();
+
+	assert_accepts(services, room_id, &closed, closed_json, context).await?;
+
+	let prev_walks_after = services.event_handler.prev_walk_metrics();
+	let ungapped = PrevWalkMetrics { entered: 1, ..PrevWalkMetrics::default() };
+
+	assert_prev_walk(prev_walks_before, prev_walks_after, ungapped, context);
 
 	let rows = backoff_rows(services, Context::Incoming, closed_id).await?;
 

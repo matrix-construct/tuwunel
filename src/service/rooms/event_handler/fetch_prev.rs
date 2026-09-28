@@ -11,7 +11,7 @@ use ruma::{
 use serde_json::value::RawValue as RawJsonValue;
 use tokio::time::{Instant, timeout_at};
 use tuwunel_core::{
-	Result, debug_warn, err, implement,
+	Result, err, implement,
 	matrix::{
 		Event, PduEvent,
 		event::gen_event_id,
@@ -23,11 +23,35 @@ use tuwunel_core::{
 	},
 };
 
+use super::handle_prev_pdu::PrevUpgrade;
 use crate::{
 	fetcher::{EventWindow, Op, Opts},
 	rooms::state_res::topological_sort,
 };
 
+pub(super) type Pdus = HashMap<OwnedEventId, (PduEvent, CanonicalJsonObject)>;
+
+/// An incoming event's missing previous events, walked backwards.
+///
+/// The incoming event's handler upgrades the walked events and records
+/// `capped` in the prev-walk counters.
+pub(super) struct PrevFetch {
+	/// Walked event ids in topological order, including placeholders for events
+	/// that failed to fetch or fell past the cap.
+	pub(super) sorted: Vec<OwnedEventId>,
+
+	/// Fetched PDUs of the walked events.
+	pub(super) pdus: Pdus,
+
+	/// Whether the `max_fetch_prev_events` cap cut the walk.
+	pub(super) capped: bool,
+}
+
+/// Walk an incoming event's missing previous events backwards.
+///
+/// Each fetched event queues its own missing previous events in turn, until
+/// they reach the timeline, predate the room, or exceed the
+/// `max_fetch_prev_events` cap.
 #[implement(super::Service)]
 #[tracing::instrument(
 	level = "debug",
@@ -37,17 +61,19 @@ use crate::{
 		events = %initial_set.clone().count(),
 	),
 )]
-#[expect(clippy::type_complexity, clippy::too_many_arguments)]
 pub(super) async fn fetch_prev<'a, Events>(
 	&self,
-	origin: &ServerName,
-	room_id: &RoomId,
-	incoming_event_id: &EventId,
+	PrevUpgrade {
+		origin,
+		room_id,
+		event_id: incoming_event_id,
+		room_version,
+		recursion_level,
+		first_ts_in_room,
+		..
+	}: PrevUpgrade<'_>,
 	initial_set: Events,
-	room_version: &RoomVersionId,
-	recursion_level: usize,
-	first_ts_in_room: MilliSecondsSinceUnixEpoch,
-) -> Result<(Vec<OwnedEventId>, HashMap<OwnedEventId, (PduEvent, CanonicalJsonObject)>)>
+) -> Result<PrevFetch>
 where
 	Events: Iterator<Item = &'a EventId> + Clone + Send,
 {
@@ -98,9 +124,11 @@ where
 		.collect()
 		.await;
 
-	let mut amount = 0;
-	let mut eventid_info = HashMap::new();
+	let limit = usize::from(self.services.server.config.max_fetch_prev_events);
+	let mut amount = 0_usize;
+	let mut pdus = HashMap::new();
 	let mut graph: HashMap<OwnedEventId, _> = HashMap::with_capacity(todo_outlier_stack.len());
+
 	while let Some((prev_event_id, mut outlier)) = todo_outlier_stack.next().await {
 		self.services.server.check_running()?;
 
@@ -112,9 +140,9 @@ where
 
 		check_room_id(&pdu, room_id)?;
 
-		let limit = self.services.server.config.max_fetch_prev_events;
 		if amount > limit {
-			debug_warn!(?limit, "Max prev event limit reached!");
+			// keep counting so the capped check below sees the cut
+			amount = amount.saturating_add(1);
 			graph.insert(prev_event_id.clone(), Default::default());
 			continue;
 		}
@@ -173,11 +201,11 @@ where
 			graph.insert(prev_event_id.clone(), Default::default());
 		}
 
-		eventid_info.insert(prev_event_id.clone(), (pdu, json));
+		pdus.insert(prev_event_id.clone(), (pdu, json));
 	}
 
 	let event_fetch = async |event_id: OwnedEventId| {
-		let origin_server_ts = eventid_info
+		let origin_server_ts = pdus
 			.get(&event_id)
 			.map_or_else(|| uint!(0), |info| info.0.origin_server_ts().get());
 
@@ -199,11 +227,14 @@ where
 	);
 
 	debug_assert!(
-		sorted.len() >= eventid_info.len(),
-		"returned topologically sorted events differ from eventid_info"
+		sorted.len() >= pdus.len(),
+		"returned topologically sorted events differ from pdus"
 	);
 
-	Ok((sorted, eventid_info))
+	// at most limit + 1 events are admitted, so more means one was cut
+	let capped = amount > limit.saturating_add(1);
+
+	Ok(PrevFetch { sorted, pdus, capped })
 }
 
 #[implement(super::Service)]

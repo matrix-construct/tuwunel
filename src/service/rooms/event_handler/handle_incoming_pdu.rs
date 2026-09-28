@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use futures::{FutureExt, TryFutureExt, TryStreamExt, future::try_join5};
 use ruma::{
 	CanonicalJsonObject, CanonicalJsonValue, EventId, OwnedEventId, RoomId, ServerName, UserId,
@@ -18,20 +16,20 @@ use tuwunel_core::{
 	utils::{
 		BoolExt,
 		future::ReadyEqExt,
-		stream::{IterStream, TryWidebandExt},
+		stream::{IterStream, TryBroadbandExt, TryReadyExt},
 	},
 	warn,
 };
 
 use super::{
 	backoff::{Context, Disposition, Suppression, UPGRADE_RETRY},
+	fetch_prev::{Pdus, PrevFetch},
 	handle_prev_pdu::PrevUpgrade,
+	prev_walk::PrevWalk,
 	room_version_of,
 };
 use crate::rooms::{state_cache::MembershipUpdate, timeline::RawPduId};
 
-type PrevResultsHandled = SmallVec<[PrevHandled; MAX_PREV_EVENTS]>;
-type PrevHandled = (OwnedEventId, Handled);
 type PrevSplit = SmallVec<[OwnedEventId; MAX_PREV_EVENTS]>;
 
 type Handled = Option<(RawPduId, bool)>;
@@ -181,40 +179,27 @@ pub async fn handle_incoming_pdu<'a>(
 		return Ok(None);
 	}
 
-	let standing = self
+	let gapped = self
 		.services
 		.timeline
 		.non_outlier_pdus_exist(incoming_pdu.prev_events())
 		.await
-		.is_false()
+		.is_false();
+
+	self.prev_walk.enter(gapped);
+
+	let standing = gapped
 		.then_async(|| self.is_suppressed(Context::Incoming, event_id, UPGRADE_RETRY))
 		.await
 		.unwrap_or(Suppression::Absent);
 
 	if standing.is_deny() {
+		self.prev_walk.hold();
 		info!(%origin, %room_id, %event_id, "Backing off from a gapped incoming event.");
 		return Ok(None);
 	}
 
-	// 9. Fetch any missing prev events doing all checks listed here starting at 1.
-	//    These are timeline events
-	let (sorted_prev_events, eventid_info) = self
-		.fetch_prev(
-			origin,
-			room_id,
-			event_id,
-			incoming_pdu.prev_events(),
-			&room_version,
-			recursion_level,
-			first_ts_in_room,
-		)
-		.await?;
-
-	let attempt = sorted_prev_events
-		.is_empty()
-		.is_false()
-		.then(|| self.record_attempt(Context::Incoming, event_id));
-
+	let create_event_id = create_event.event_id();
 	let upgrade = PrevUpgrade {
 		origin,
 		room_id,
@@ -222,13 +207,24 @@ pub async fn handle_incoming_pdu<'a>(
 		room_version: &room_version,
 		recursion_level,
 		first_ts_in_room,
-		create_event_id: create_event.event_id(),
+		create_event_id,
 	};
 
-	let handled = self
-		.handle_prev_events(upgrade, sorted_prev_events, eventid_info)
+	// 9. Fetch any missing prev events doing all checks listed here starting at 1.
+	//    These are timeline events
+	let fetch = self
+		.fetch_prev(upgrade, incoming_pdu.prev_events())
+		.await?;
+
+	let walking = fetch.sorted.is_empty().is_false();
+	let attempt = walking.then(|| self.record_attempt(Context::Incoming, event_id));
+	let walk = walking.then(|| PrevWalk::start(&self.prev_walk, upgrade, &fetch));
+	let PrevFetch { sorted, pdus, .. } = fetch;
+
+	let (handled, upgraded) = self
+		.handle_prev_events(upgrade, sorted, pdus)
 		.boxed() // size firewall
-		.and_then(|()| {
+		.and_then(|upgraded| {
 			self.upgrade_outlier_to_timeline_pdu(
 				origin,
 				room_id,
@@ -236,20 +232,22 @@ pub async fn handle_incoming_pdu<'a>(
 				pdu,
 				&room_version,
 				recursion_level,
-				create_event.event_id(),
+				create_event_id,
 			)
 			.boxed() // size firewall
+			.map(move |handled| Ok((handled, upgraded)))
 		})
+		.unwrap_or_else(|error| (Err(error), 0))
 		.await;
 
-	self.record_completion(
-		Context::Incoming,
-		event_id,
-		standing,
-		attempt,
-		handled.as_ref().map(Option::is_some),
-	)
-	.await;
+	let appended = handled.as_ref().map(Option::is_some);
+
+	if let Some(walk) = walk {
+		walk.settle(appended, upgraded, self.services.server.is_stopping());
+	}
+
+	self.record_completion(Context::Incoming, event_id, standing, attempt, appended)
+		.await;
 
 	handled
 }
@@ -378,15 +376,14 @@ async fn handle_rescinded_invite(
 /// their parents so each derives state locally instead of refetching it.
 ///
 /// Extremities upgrade concurrently up to `prev_events_concurrency`; interior
-/// events upgrade one at a time, parents first.
+/// events upgrade one at a time. Returns how many previous events were upgraded.
 #[implement(super::Service)]
 async fn handle_prev_events(
 	&self,
 	upgrade: PrevUpgrade<'_>,
 	sorted_prev_events: Vec<OwnedEventId>,
-	// remove moves each info out
-	mut eventid_info: HashMap<OwnedEventId, (PduEvent, CanonicalJsonObject)>,
-) -> Result {
+	mut pdus: Pdus, // HashMap::remove takes &mut self
+) -> Result<usize> {
 	trace!(
 		events = sorted_prev_events.len(),
 		event_ids = ?sorted_prev_events,
@@ -396,9 +393,9 @@ async fn handle_prev_events(
 	let (interior, extremities): (PrevSplit, PrevSplit) = sorted_prev_events
 		.into_iter()
 		.partition(|prev_id| {
-			eventid_info.get(prev_id).is_some_and(|(pdu, _)| {
+			pdus.get(prev_id).is_some_and(|(pdu, _)| {
 				pdu.prev_events()
-					.any(|prev| eventid_info.contains_key(prev))
+					.any(|prev| pdus.contains_key(prev))
 			})
 		});
 
@@ -409,15 +406,15 @@ async fn handle_prev_events(
 			.prev_events_concurrency,
 	);
 
-	extremities
+	let upgraded = extremities
 		.into_iter()
 		.try_stream()
-		.map_ok(|prev_id| (eventid_info.remove(&prev_id), prev_id))
-		.widen_and_then(concurrency, async |(info, prev_id)| {
-			self.upgrade_prev_event(upgrade, info, prev_id)
+		.map_ok(|prev_id| (pdus.remove(&prev_id), prev_id))
+		.broadn_and_then(concurrency, async |(info, prev_id)| {
+			self.upgrade_prev_event(upgrade, info, &prev_id)
 				.await
 		})
-		.try_collect::<PrevResultsHandled>()
+		.ready_try_fold(0, tally_upgraded)
 		.boxed() // size firewall
 		.await?;
 
@@ -425,12 +422,12 @@ async fn handle_prev_events(
 	interior
 		.into_iter()
 		.try_stream()
-		.map_ok(|prev_id| (eventid_info.remove(&prev_id), prev_id))
-		.try_for_each(async |(info, prev_id)| {
-			self.upgrade_prev_event(upgrade, info, prev_id)
-				.map_ok(drop)
+		.map_ok(|prev_id| (pdus.remove(&prev_id), prev_id))
+		.and_then(async |(info, prev_id)| {
+			self.upgrade_prev_event(upgrade, info, &prev_id)
 				.await
 		})
+		.ready_try_fold(upgraded, tally_upgraded)
 		.boxed() // size firewall
 		.await
 }
@@ -446,38 +443,40 @@ async fn upgrade_prev_event(
 	&self,
 	upgrade: PrevUpgrade<'_>,
 	info: Option<(PduEvent, CanonicalJsonObject)>,
-	prev_id: OwnedEventId,
-) -> Result<PrevHandled> {
+	prev_id: &EventId,
+) -> Result<Handled> {
 	self.services.server.check_running()?;
 
 	let PrevUpgrade { room_id, event_id, .. } = upgrade;
 
-	match self
-		.handle_prev_pdu(upgrade, info, &prev_id)
-		.await
-	{
+	match self.handle_prev_pdu(upgrade, info, prev_id).await {
 		| Err(error) if error.is_interrupted() || self.services.server.is_stopping() => {
 			debug!(?prev_id, ?event_id, ?room_id, %error, "Prev event processing interrupted.");
 
-			Ok((prev_id, None))
-		},
-		| Ok(handled) => {
-			if handled.is_some() {
-				self.record_success(Context::Upgrade, &prev_id)
-					.await;
-
-				debug!(?prev_id, ?handled, "Prev event processed.");
-			} else {
-				debug_warn!(?prev_id, "Prev event not processed.");
-			}
-
-			Ok((prev_id, handled))
+			Ok(None)
 		},
 		| Err(error) => {
-			self.record_outcome(Context::Upgrade, &prev_id, Disposition::Transient);
+			self.record_outcome(Context::Upgrade, prev_id, Disposition::Transient);
 			warn!(?prev_id, ?event_id, ?room_id, %error, "Prev event processing failed.");
 
-			Ok((prev_id, None))
+			Ok(None)
+		},
+		| Ok(None) => {
+			debug_warn!(?prev_id, "Prev event not processed.");
+
+			Ok(None)
+		},
+		| Ok(handled) => {
+			self.record_success(Context::Upgrade, prev_id)
+				.await;
+
+			debug!(?prev_id, ?handled, "Prev event processed.");
+
+			Ok(handled)
 		},
 	}
+}
+
+fn tally_upgraded(upgraded: usize, handled: Handled) -> Result<usize> {
+	Ok(upgraded.saturating_add(usize::from(handled.is_some())))
 }

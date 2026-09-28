@@ -14,7 +14,10 @@ use tuwunel_core::{
 use tuwunel_database::Interfix;
 use tuwunel_service::{
 	Services,
-	rooms::{event_handler::StateLocalMetrics, short::ShortStateHash},
+	rooms::{
+		event_handler::{PrevWalkMetrics, StateLocalMetrics},
+		short::ShortStateHash,
+	},
 };
 
 pub(super) type SignedPdu = (PduEvent, CanonicalJsonObject);
@@ -353,9 +356,7 @@ fn walk_metrics_delta(
 	after: &StateLocalMetrics,
 	context: &str,
 ) -> StateLocalMetrics {
-	let delta = |counter: fn(&StateLocalMetrics) -> u64| {
-		counter_delta(counter(after), counter(before), context)
-	};
+	let delta = field_delta(before, after, context);
 
 	StateLocalMetrics {
 		walk_attempts: delta(|metrics| metrics.walk_attempts),
@@ -377,7 +378,15 @@ fn walk_metrics_delta(
 pub(super) fn counter_delta(after: u64, before: u64, context: &str) -> u64 {
 	after
 		.checked_sub(before)
-		.unwrap_or_else(|| panic!("{context} local walk counter decreased"))
+		.unwrap_or_else(|| panic!("{context} walk counter decreased"))
+}
+
+fn field_delta<'a, Metrics>(
+	before: &'a Metrics,
+	after: &'a Metrics,
+	context: &'a str,
+) -> impl Fn(fn(&Metrics) -> u64) -> u64 + 'a {
+	move |counter| counter_delta(counter(after), counter(before), context)
 }
 
 fn expected_walk_metrics(outcome: ExpectedWalkOutcome) -> StateLocalMetrics {
@@ -416,6 +425,40 @@ fn settled_walks(metrics: &StateLocalMetrics) -> u64 {
 	]
 	.into_iter()
 	.sum()
+}
+
+pub(super) fn assert_prev_walk(
+	before: PrevWalkMetrics,
+	after: PrevWalkMetrics,
+	expected: PrevWalkMetrics,
+	context: &str,
+) {
+	let actual = prev_walk_metrics_delta(&before, &after, context);
+
+	assert_eq!(actual, expected, "{context} miscounted its prev walk");
+}
+
+fn prev_walk_metrics_delta(
+	before: &PrevWalkMetrics,
+	after: &PrevWalkMetrics,
+	context: &str,
+) -> PrevWalkMetrics {
+	let delta = field_delta(before, after, context);
+
+	// Exhaustive on purpose: a new counter fails to compile until it is covered here.
+	PrevWalkMetrics {
+		entered: delta(|metrics| metrics.entered),
+		gapped: delta(|metrics| metrics.gapped),
+		held: delta(|metrics| metrics.held),
+		walked: delta(|metrics| metrics.walked),
+		walked_prevs: delta(|metrics| metrics.walked_prevs),
+		capped: delta(|metrics| metrics.capped),
+		appended: delta(|metrics| metrics.appended),
+		not_appended: delta(|metrics| metrics.not_appended),
+		failed: delta(|metrics| metrics.failed),
+		cancelled: delta(|metrics| metrics.cancelled),
+		unprocessed_prevs: delta(|metrics| metrics.unprocessed_prevs),
+	}
 }
 
 pub(super) async fn assert_accepts(

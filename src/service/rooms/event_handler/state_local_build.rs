@@ -23,7 +23,10 @@ use tuwunel_core::{
 		room_version::{self, from_create_event},
 	},
 	trace,
-	utils::stream::{BroadbandExt, IterStream, ReadyExt, WidebandExt},
+	utils::{
+		math::fetch_add_usize,
+		stream::{BroadbandExt, IterStream, ReadyExt, WidebandExt},
+	},
 };
 
 use crate::rooms::{
@@ -145,10 +148,7 @@ fn add_gate_denials(&self, gate_denials: usize) {
 		return;
 	}
 
-	let gate_denials = gate_denials.try_into().unwrap_or(u64::MAX);
-
-	self.gate_denials
-		.fetch_add(gate_denials, Ordering::Relaxed);
+	fetch_add_usize(&self.gate_denials, gate_denials, Ordering::Relaxed);
 }
 
 #[implement(StateLocalCounters)]

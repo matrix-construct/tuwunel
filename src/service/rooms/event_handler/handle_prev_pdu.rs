@@ -11,10 +11,10 @@ use tuwunel_core::{
 
 use super::backoff::{Context, UPGRADE_RETRY};
 
-/// Context of an incoming event, shared by the upgrade of each of its previous
-/// events.
+/// Context of an incoming event, shared across the fetch and upgrade of its
+/// previous events.
 ///
-/// The previous event's own id and fetched PDU stay per-call arguments.
+/// A previous event's own id and fetched PDU stay per-call arguments.
 #[derive(Clone, Copy)]
 pub(super) struct PrevUpgrade<'a> {
 	pub(super) origin: &'a ServerName,
