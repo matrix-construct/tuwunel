@@ -1,6 +1,7 @@
 use std::{
 	future::Ready,
 	panic::{AssertUnwindSafe, catch_unwind},
+	pin::Pin,
 	sync::{
 		Arc,
 		atomic::{AtomicBool, Ordering},
@@ -9,13 +10,28 @@ use std::{
 	time::Duration,
 };
 
-use futures::future::{OptionFuture, ready};
+use futures::{
+	StreamExt,
+	future::{OptionFuture, ready, try_join},
+};
+use tokio::{spawn, sync::Barrier};
 
 use crate::{
-	Error, Result,
+	Error, Result, checked,
 	utils::{
-		self, MutexMap, debug::str_truncated, future::OptionFutureExt, math::usize_from_f64,
-		time::pretty, two_phase_counter::Counter, url::hostname_matches_domain,
+		IterStream, MutexMap,
+		debug::str_truncated,
+		future::OptionFutureExt,
+		increment,
+		math::usize_from_f64,
+		set::{
+			difference_sorted_stream2, intersection, intersection_sorted,
+			intersection_sorted_stream2,
+		},
+		sys::page_size,
+		time::pretty,
+		two_phase_counter::Counter,
+		url::hostname_matches_domain,
 	},
 };
 
@@ -23,8 +39,9 @@ type CounterCallback = Box<dyn Fn(u64) -> Result + Send + Sync>;
 
 #[test]
 fn increment_none() {
-	let bytes: [u8; 8] = utils::increment(None);
+	let bytes: [u8; 8] = increment(None);
 	let res = u64::from_be_bytes(bytes);
+
 	assert_eq!(res, 1);
 }
 
@@ -32,8 +49,9 @@ fn increment_none() {
 fn increment_fault() {
 	let start: u8 = 127;
 	let bytes: [u8; 1] = start.to_be_bytes();
-	let bytes: [u8; 8] = utils::increment(Some(&bytes));
+	let bytes: [u8; 8] = increment(Some(&bytes));
 	let res = u64::from_be_bytes(bytes);
+
 	assert_eq!(res, 1);
 }
 
@@ -41,8 +59,9 @@ fn increment_fault() {
 fn increment_norm() {
 	let start: u64 = 1_234_567;
 	let bytes: [u8; 8] = start.to_be_bytes();
-	let bytes: [u8; 8] = utils::increment(Some(&bytes));
+	let bytes: [u8; 8] = increment(Some(&bytes));
 	let res = u64::from_be_bytes(bytes);
+
 	assert_eq!(res, 1_234_568);
 }
 
@@ -50,15 +69,14 @@ fn increment_norm() {
 fn increment_wrap() {
 	let start = u64::MAX;
 	let bytes: [u8; 8] = start.to_be_bytes();
-	let bytes: [u8; 8] = utils::increment(Some(&bytes));
+	let bytes: [u8; 8] = increment(Some(&bytes));
 	let res = u64::from_be_bytes(bytes);
+
 	assert_eq!(res, 0);
 }
 
 #[test]
 fn checked_add() {
-	use crate::checked;
-
 	let a = 1234;
 	let res = checked!(a + 1).unwrap();
 	assert_eq!(res, 1235);
@@ -67,8 +85,6 @@ fn checked_add() {
 #[test]
 #[should_panic(expected = "overflow")]
 fn checked_add_overflow() {
-	use crate::checked;
-
 	let a = u64::MAX;
 	let res = checked!(a + 1).expect("overflow");
 	assert_eq!(res, 0);
@@ -139,10 +155,6 @@ async fn mutex_map_cleanup() {
 
 #[tokio::test]
 async fn mutex_map_contend() {
-	use std::sync::Arc;
-
-	use tokio::sync::Barrier;
-
 	let map = Arc::new(MutexMap::<String, ()>::new());
 	let seq = Arc::new([Barrier::new(2), Barrier::new(2)]);
 	let str = "foo".to_owned();
@@ -150,8 +162,9 @@ async fn mutex_map_contend() {
 	let seq_ = seq.clone();
 	let map_ = map.clone();
 	let str_ = str.clone();
-	let join_a = tokio::spawn(async move {
+	let join_a = spawn(async move {
 		let _lock = map_.lock(&str_).await;
+
 		assert!(!map_.is_empty(), "A0 must not be empty");
 		seq_[0].wait().await;
 		assert!(map_.contains(&str_), "A1 must contain key");
@@ -160,8 +173,9 @@ async fn mutex_map_contend() {
 	let seq_ = seq.clone();
 	let map_ = map.clone();
 	let str_ = str.clone();
-	let join_b = tokio::spawn(async move {
+	let join_b = spawn(async move {
 		let _lock = map_.lock(&str_).await;
+
 		assert!(!map_.is_empty(), "B0 must not be empty");
 		seq_[1].wait().await;
 		assert!(map_.contains(&str_), "B1 must contain key");
@@ -171,7 +185,7 @@ async fn mutex_map_contend() {
 	assert!(map.contains(&str), "Must contain key");
 	seq[1].wait().await;
 
-	tokio::try_join!(join_b, join_a).expect("joined");
+	try_join(join_b, join_a).await.expect("joined");
 	assert!(map.is_empty(), "Must be empty");
 }
 
@@ -180,14 +194,21 @@ async fn mutex_map_cancel() {
 	let map = MutexMap::<String, ()>::new();
 
 	let lock = map.lock("foo").await;
-	let mut contend = Box::pin(map.lock("foo"));
-	let mut cx = Context::from_waker(Waker::noop());
-
-	assert!(contend.as_mut().poll(&mut cx).is_pending(), "must contend");
+	let contender = poll_pending(map.lock("foo")).expect("must contend");
 
 	drop(lock);
-	drop(contend);
+	drop(contender);
 	assert!(map.is_empty(), "map must be empty");
+}
+
+fn poll_pending<F: Future>(future: F) -> Option<Pin<Box<F>>> {
+	let mut future = Box::pin(future); // pinned for the poll, owned for the caller's drop
+
+	future
+		.as_mut()
+		.poll(&mut Context::from_waker(Waker::noop()))
+		.is_pending()
+		.then_some(future)
 }
 
 #[tokio::test]
@@ -204,8 +225,6 @@ async fn mutex_map_try_cleanup() {
 
 #[test]
 fn set_intersection_none() {
-	use utils::set::intersection;
-
 	let a: [&str; 0] = [];
 	let b: [&str; 0] = [];
 	let i = [a.iter(), b.iter()];
@@ -234,8 +253,6 @@ fn set_intersection_none() {
 #[test]
 #[expect(clippy::iter_on_single_items, clippy::many_single_char_names)]
 fn set_intersection_all() {
-	use utils::set::intersection;
-
 	let a = ["foo"];
 	let b = ["foo"];
 	let i = [a.iter(), b.iter()];
@@ -262,8 +279,6 @@ fn set_intersection_all() {
 #[test]
 #[expect(clippy::iter_on_single_items, clippy::many_single_char_names)]
 fn set_intersection_some() {
-	use utils::set::intersection;
-
 	let a = ["foo"];
 	let b = ["bar", "foo"];
 	let i = [a.iter(), b.iter()];
@@ -284,8 +299,6 @@ fn set_intersection_some() {
 #[test]
 #[expect(clippy::iter_on_single_items, clippy::many_single_char_names)]
 fn set_intersection_sorted_some() {
-	use utils::set::intersection_sorted;
-
 	let a = ["bar"];
 	let b = ["bar", "foo"];
 	let i = [a.iter(), b.iter()];
@@ -306,8 +319,6 @@ fn set_intersection_sorted_some() {
 #[test]
 #[expect(clippy::iter_on_single_items, clippy::many_single_char_names)]
 fn set_intersection_sorted_all() {
-	use utils::set::intersection_sorted;
-
 	let a = ["foo"];
 	let b = ["foo"];
 	let i = [a.iter(), b.iter()];
@@ -333,19 +344,18 @@ fn set_intersection_sorted_all() {
 
 #[tokio::test]
 async fn set_intersection_sorted_stream2() {
-	use futures::StreamExt;
-	use utils::{IterStream, set::intersection_sorted_stream2};
-
 	let a = ["bar"];
 	let b = ["bar", "foo"];
 	let r = intersection_sorted_stream2(a.iter().stream(), b.iter().stream())
 		.collect::<Vec<&str>>()
 		.await;
+
 	assert_eq!(r, &["bar"]);
 
 	let r = intersection_sorted_stream2(b.iter().stream(), a.iter().stream())
 		.collect::<Vec<&str>>()
 		.await;
+
 	assert_eq!(r, &["bar"]);
 
 	let a = ["aaa", "ccc", "xxx", "yyy"];
@@ -353,6 +363,7 @@ async fn set_intersection_sorted_stream2() {
 	let r = intersection_sorted_stream2(a.iter().stream(), b.iter().stream())
 		.collect::<Vec<&str>>()
 		.await;
+
 	assert!(r.is_empty(), "{r:?}");
 
 	let a = ["aaa", "ccc", "eee", "ggg"];
@@ -360,6 +371,7 @@ async fn set_intersection_sorted_stream2() {
 	let r = intersection_sorted_stream2(a.iter().stream(), b.iter().stream())
 		.collect::<Vec<&str>>()
 		.await;
+
 	assert_eq!(r, &["aaa", "ccc", "eee"]);
 
 	let a = ["aaa", "ccc", "eee", "ggg", "hhh", "iii"];
@@ -367,24 +379,24 @@ async fn set_intersection_sorted_stream2() {
 	let r = intersection_sorted_stream2(a.iter().stream(), b.iter().stream())
 		.collect::<Vec<&str>>()
 		.await;
+
 	assert_eq!(r, &["ccc", "ggg", "iii"]);
 }
 
 #[tokio::test]
 async fn set_difference_sorted_stream2() {
-	use futures::StreamExt;
-	use utils::{IterStream, set::difference_sorted_stream2};
-
 	let a = ["bar", "foo"];
 	let b = ["bar"];
 	let r = difference_sorted_stream2(a.iter().stream(), b.iter().stream())
 		.collect::<Vec<&str>>()
 		.await;
+
 	assert_eq!(r, &["foo"]);
 
 	let r = difference_sorted_stream2(b.iter().stream(), a.iter().stream())
 		.collect::<Vec<&str>>()
 		.await;
+
 	assert!(r.is_empty(), "{r:?}");
 
 	let a = ["aaa", "ccc", "xxx", "yyy"];
@@ -392,6 +404,7 @@ async fn set_difference_sorted_stream2() {
 	let r = difference_sorted_stream2(a.iter().stream(), b.iter().stream())
 		.collect::<Vec<&str>>()
 		.await;
+
 	assert_eq!(r, &["aaa", "ccc", "xxx", "yyy"]);
 
 	let a = ["aaa", "ccc", "eee", "ggg"];
@@ -399,6 +412,7 @@ async fn set_difference_sorted_stream2() {
 	let r = difference_sorted_stream2(a.iter().stream(), b.iter().stream())
 		.collect::<Vec<&str>>()
 		.await;
+
 	assert_eq!(r, &["ggg"]);
 
 	let a = ["aaa", "ccc", "eee", "ggg", "hhh", "iii"];
@@ -406,13 +420,12 @@ async fn set_difference_sorted_stream2() {
 	let r = difference_sorted_stream2(a.iter().stream(), b.iter().stream())
 		.collect::<Vec<&str>>()
 		.await;
+
 	assert_eq!(r, &["aaa", "eee", "hhh"]);
 }
 
 #[test]
-fn page_size() {
-	use crate::utils::sys::page_size;
-
+fn page_size_is_nonzero() {
 	let val = page_size().expect("Failed to get system page size");
 	println!("{val:?}");
 
