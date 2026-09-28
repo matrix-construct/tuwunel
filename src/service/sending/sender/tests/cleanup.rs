@@ -57,7 +57,7 @@ async fn reused_destination_promotes_first_request_after_cleanup() -> Result {
 			.await?;
 
 		assert_eq!(events, Some(vec![SendingEvent::Pdu(new_id)]));
-		assert!(matches!(statuses.get(&dest), Some(TransactionStatus::Running)));
+		assert!(matches!(statuses.get(&dest), Some(TransactionStatus::Running { tries: 0 })));
 		active.exists(&successor.0).await?;
 		assert!(
 			queued

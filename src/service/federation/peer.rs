@@ -453,6 +453,14 @@ pub(super) fn failure_secs(bytes: &[u8]) -> Option<u64> {
 		.map(u64::from_be_bytes)
 }
 
+/// Whether a failed federation attempt is a content rejection from a reachable
+/// peer, the one failure the peer-reachability store does not record.
+///
+/// A caller that retries the same request cannot learn of such a rejection
+/// from peer backoff and has to report it itself.
+#[must_use]
+pub fn is_content_rejection(error: &Error) -> bool { classify_error(error).is_none() }
+
 /// Classifies a failed federation attempt for the peer-reachability store.
 ///
 /// A content-level 4xx proves the peer reachable and returns `None`; 5xx, 429,

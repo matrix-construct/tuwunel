@@ -35,14 +35,27 @@ use super::{Destination, Msg, SendingEvent, Service, data::QueueItem};
 enum TransactionStatus {
 	/// A durable active generation awaiting its first dispatch after restart.
 	Pending,
-	Running,
-	RunningForceRetry,
-	/// Push backoff: the attempt count and the time of the last failure.
+
+	/// A transaction is in flight after this many consecutive failures.
+	Running {
+		tries: u32,
+	},
+
+	/// As `Running`, with a forced retry requested while it runs.
+	RunningForceRetry {
+		tries: u32,
+	},
+
+	/// Push backoff: consecutive failures and the time of the last one.
 	Failed {
 		tries: u32,
 		last: Instant,
 	},
-	/// A retry is in flight after this many failures.
+
+	/// Retry state after this many consecutive failures.
+	///
+	/// For push the retry is already in flight; for other destinations the
+	/// batch waits for its replay.
 	Retrying {
 		tries: u32,
 	},

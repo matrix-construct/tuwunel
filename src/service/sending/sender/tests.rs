@@ -4,10 +4,13 @@ mod ordering;
 
 use std::iter::once;
 
-use tuwunel_core::Result;
+use http::StatusCode;
+use ruma::{OwnedServerName, api::error::ErrorBody};
+use serde_json::Value;
+use tuwunel_core::{Error, Result};
 
 use self::fixture::fixture;
-use super::{NewEvents, SendingFutures, TransactionStatus, TransactionStatuses};
+use super::{NewEvents, SendingFutures, TransactionStatus, TransactionStatuses, WakeQueue};
 use crate::{
 	sending::{Destination, SendingEvent, Service, data::QueueItem},
 	test_utils::pdu_id,
@@ -51,7 +54,7 @@ async fn restart_replays_active_before_queued_successors() -> Result {
 			.await?;
 
 		assert_eq!(events, Some(vec![SendingEvent::Pdu(old_id)]));
-		assert!(matches!(statuses.get(&dest), Some(TransactionStatus::Running)));
+		assert!(matches!(statuses.get(&dest), Some(TransactionStatus::Running { tries: 0 })));
 		assert!(
 			sending
 				.select_events(&dest, payload(), &mut statuses)
@@ -149,7 +152,7 @@ async fn enabled_netburst_keeps_active_ownership() -> Result {
 		.await;
 
 	assert_eq!(futures.len(), 1);
-	assert!(matches!(statuses.get(&dest), Some(TransactionStatus::Running)));
+	assert!(matches!(statuses.get(&dest), Some(TransactionStatus::Running { tries: 0 })));
 	assert!(
 		sending
 			.select_events(&dest, NewEvents::new(), &mut statuses)
@@ -200,6 +203,61 @@ async fn zero_keep_drops_every_active_row_without_redelivery() -> Result {
 				.is_err_and(|error| error.is_not_found())
 		);
 	}
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn failure_streak_survives_replays() -> Result {
+	let Some(fixture) = fixture(false, -1).await? else {
+		return Ok(());
+	};
+
+	let sending = &fixture.services.sending;
+	let server: OwnedServerName = "remote.example".try_into()?;
+	let dest = Destination::Federation(server.clone());
+	let head = SendingEvent::Pdu(pdu_id(1));
+	let mut futures = SendingFutures::new();
+	let mut statuses = TransactionStatuses::new(); // handle_response takes &mut state
+	let mut wakes = WakeQueue::new(); // handle_response takes &mut state
+
+	for (before, after, id) in [(0, 1, 1), (1, 2, 2), (2, 3, 3)] {
+		let queued = enqueue(sending, &dest, SendingEvent::Pdu(pdu_id(id)));
+		let events = sending
+			.select_events(&dest, [queued].into(), &mut statuses)
+			.await?;
+
+		assert!(events.is_some_and(|events| events.contains(&head)));
+		assert!(matches!(
+			statuses.get(&dest),
+			Some(&TransactionStatus::Running { tries }) if tries == before
+		));
+
+		let rejection = ErrorBody::Json(Value::Null).into_error(StatusCode::FORBIDDEN);
+		let rejected = Err((dest.clone(), Error::Federation(server.clone(), rejection)));
+
+		sending
+			.handle_response(rejected, &mut futures, &mut statuses, &mut wakes)
+			.await;
+
+		assert!(matches!(
+			statuses.get(&dest),
+			Some(&TransactionStatus::Retrying { tries }) if tries == after
+		));
+	}
+
+	let events = sending
+		.select_events(&dest, NewEvents::new(), &mut statuses)
+		.await?;
+
+	assert!(events.is_some_and(|events| events.contains(&head)));
+	assert!(matches!(statuses.get(&dest), Some(TransactionStatus::Running { tries: 3 })));
+
+	sending
+		.handle_response(Ok(dest.clone()), &mut futures, &mut statuses, &mut wakes)
+		.await;
+
+	assert!(matches!(statuses.get(&dest), Some(TransactionStatus::Running { tries: 0 })));
 
 	Ok(())
 }

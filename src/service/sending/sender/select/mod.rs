@@ -131,7 +131,7 @@ async fn select_events_current(
 		return self.transition(dest, status, retry_action);
 	}
 
-	statuses.insert(dest.clone(), TransactionStatus::Running);
+	statuses.insert(dest.clone(), TransactionStatus::Running { tries: 0 });
 	(true, false)
 }
 
@@ -149,9 +149,10 @@ fn transition(
 	let remaining = self.push_backoff_remaining(Some(&*status));
 
 	match status {
-		| TransactionStatus::Running | TransactionStatus::RunningForceRetry => {
+		| TransactionStatus::Running { tries }
+		| TransactionStatus::RunningForceRetry { tries } => {
 			if matches!(retry_action, RetryAction::Force) {
-				*status = TransactionStatus::RunningForceRetry;
+				*status = TransactionStatus::RunningForceRetry { tries: *tries };
 			}
 
 			(false, false)
@@ -169,8 +170,12 @@ fn transition(
 			*status = TransactionStatus::Retrying { tries };
 			(true, true)
 		},
-		| TransactionStatus::Pending | TransactionStatus::Retrying { .. } => {
-			*status = TransactionStatus::Running;
+		| TransactionStatus::Pending => {
+			*status = TransactionStatus::Running { tries: 0 };
+			(true, true)
+		},
+		| TransactionStatus::Retrying { tries } => {
+			*status = TransactionStatus::Running { tries: *tries };
 			(true, true)
 		},
 	}

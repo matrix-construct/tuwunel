@@ -1,13 +1,16 @@
 use std::time::Instant;
 
 use futures::StreamExt;
-use tuwunel_core::{Error, debug, implement};
+use tuwunel_core::{Error, debug, error::error_chain, implement, info, warn};
 
 use super::{
 	DEQUEUE_LIMIT, NewEvents, RetryAction, SendingFutures, TransactionStatus,
 	TransactionStatuses, WakeQueue, dispatch::SendingResult,
 };
-use crate::sending::{Destination, Service};
+use crate::{
+	federation::is_content_rejection,
+	sending::{Destination, Service},
+};
 
 #[implement(Service)]
 #[tracing::instrument(name = "response", level = "debug", skip_all)]
@@ -36,6 +39,8 @@ pub(super) async fn handle_response_ok<'a>(
 	futures: &mut SendingFutures<'a>,
 	statuses: &mut TransactionStatuses,
 ) {
+	log_recovery(&dest, statuses);
+
 	let _cork = self.db.db.cork();
 
 	self.db
@@ -59,6 +64,7 @@ pub(super) async fn handle_response_ok<'a>(
 		.collect();
 
 	let events = self.with_edus(&dest, events).await;
+
 	if events.is_empty() {
 		statuses.remove(&dest);
 		return;
@@ -66,6 +72,27 @@ pub(super) async fn handle_response_ok<'a>(
 
 	run_status(&dest, statuses);
 	futures.push(self.send_events(dest, events));
+}
+
+/// Log a delivery that ends a destination's streak of failed transactions.
+///
+/// Reads the streak before `run_status` resets it, so it runs first. Push,
+/// whose retry in flight is `Retrying`, reports its own failures instead.
+fn log_recovery(dest: &Destination, statuses: &TransactionStatuses) {
+	if let Some(
+		&(TransactionStatus::Running { tries } | TransactionStatus::RunningForceRetry { tries }),
+	) = statuses.get(dest)
+		&& tries > 0
+	{
+		info!(?dest, streak = tries, "Transaction delivered after failures");
+	}
+}
+
+/// Mark a destination's transaction as running, if one is tracked.
+fn run_status(dest: &Destination, statuses: &mut TransactionStatuses) {
+	if let Some(status) = statuses.get_mut(dest) {
+		*status = TransactionStatus::Running { tries: 0 };
+	}
 }
 
 #[implement(Service)]
@@ -77,8 +104,9 @@ async fn handle_response_err<'a>(
 	statuses: &mut TransactionStatuses,
 	wakes: &mut WakeQueue,
 ) {
-	debug!(?dest, ?error, "Transaction failed");
 	let retry_action = fail_status(&dest, statuses);
+
+	log_failure(&dest, &error, statuses);
 
 	match dest {
 		| Destination::Federation(server) => self.arm_federation_wake(server, wakes).await,
@@ -87,13 +115,6 @@ async fn handle_response_err<'a>(
 			self.handle_force_retry(dest, futures, statuses)
 				.await,
 		| _ => {},
-	}
-}
-
-/// Mark a destination's transaction as running, if one is tracked.
-fn run_status(dest: &Destination, statuses: &mut TransactionStatuses) {
-	if let Some(status) = statuses.get_mut(dest) {
-		*status = TransactionStatus::Running;
 	}
 }
 
@@ -109,10 +130,12 @@ fn fail_status(dest: &Destination, statuses: &mut TransactionStatuses) -> RetryA
 	};
 
 	let (tries, retry_action) = match status {
-		| TransactionStatus::Pending | TransactionStatus::Running => (1, RetryAction::None),
-		| TransactionStatus::RunningForceRetry => (1, RetryAction::Force),
-		| TransactionStatus::Failed { tries, .. } | TransactionStatus::Retrying { tries } =>
-			(tries.saturating_add(1), RetryAction::None),
+		| TransactionStatus::Pending => (1, RetryAction::None),
+		| TransactionStatus::RunningForceRetry { tries } =>
+			(tries.saturating_add(1), RetryAction::Force),
+		| TransactionStatus::Running { tries }
+		| TransactionStatus::Failed { tries, .. }
+		| TransactionStatus::Retrying { tries } => (tries.saturating_add(1), RetryAction::None),
 	};
 
 	*status = if push {
@@ -122,6 +145,20 @@ fn fail_status(dest: &Destination, statuses: &mut TransactionStatuses) -> RetryA
 	};
 
 	retry_action
+}
+
+/// Log a failed transaction, at warn when a content rejection starts a
+/// destination's streak.
+///
+/// A content rejection records no peer backoff and its batch replays unchanged,
+/// so without the warning a stuck destination is silent at default levels.
+/// Call it after `fail_status`, whose advanced status it reads.
+fn log_failure(dest: &Destination, error: &Error, statuses: &TransactionStatuses) {
+	match statuses.get(dest) {
+		| Some(TransactionStatus::Retrying { tries: 1 }) if is_content_rejection(error) =>
+			warn!(?dest, chain = %error_chain(error), "Transaction failed"),
+		| _ => debug!(?dest, chain = %error_chain(error), "Transaction failed"),
+	}
 }
 
 #[implement(Service)]

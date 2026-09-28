@@ -18,7 +18,7 @@ use tuwunel_core::{Error, err};
 
 use super::peer::{
 	Backoff, Classification, MAX_BACKOFF, ShouldAttempt, attempt_verdict, classify,
-	classify_error, failure_secs, fold_streak,
+	classify_error, failure_secs, fold_streak, is_content_rejection,
 };
 
 fn federation_error(status: StatusCode) -> Error {
@@ -95,6 +95,17 @@ fn non_federation_error_is_transient() {
 	let error = err!(BadServerResponse("transport failure"));
 
 	assert!(matches!(classify_error(&error), Some(Classification::Transient)));
+}
+
+#[test]
+fn content_rejection_is_only_the_unrecorded_class() {
+	assert!(is_content_rejection(&federation_error(StatusCode::FORBIDDEN)));
+	assert!(is_content_rejection(&federation_error(StatusCode::PAYLOAD_TOO_LARGE)));
+	assert!(!is_content_rejection(&federation_error(StatusCode::GONE)));
+	assert!(!is_content_rejection(&federation_error(StatusCode::BAD_GATEWAY)));
+	assert!(!is_content_rejection(&federation_error(StatusCode::TOO_MANY_REQUESTS)));
+	assert!(!is_content_rejection(&federation_error_notjson(StatusCode::NOT_FOUND)));
+	assert!(!is_content_rejection(&err!(Request(Forbidden("local")))));
 }
 
 #[test]

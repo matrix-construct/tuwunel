@@ -20,10 +20,10 @@ use tuwunel_database::Map;
 use self::peer::MAX_BACKOFF;
 /// Re-exports peer reachability verdicts and candidate-ranking types.
 ///
-/// These types classify failures, expose retry eligibility, and preserve the
+/// These items classify failures, expose retry eligibility, and preserve the
 /// ranking policy shared by federation request paths.
 pub use self::{
-	peer::{Classification, PeerBackoff, ShouldAttempt},
+	peer::{Classification, PeerBackoff, ShouldAttempt, is_content_rejection},
 	rank::{Candidates, WhenAllBackedOff},
 };
 use crate::services::OnceServices;

@@ -49,7 +49,7 @@ pub(super) async fn startup_netburst<'a>(
 		.filter(|(_, events)| !events.is_empty())
 		.for_each(|(dest, events)| {
 			let status = match netburst {
-				| true => TransactionStatus::Running,
+				| true => TransactionStatus::Running { tries: 0 },
 				| false => TransactionStatus::Pending,
 			};
 

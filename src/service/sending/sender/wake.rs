@@ -53,7 +53,10 @@ async fn handle_wake<'a>(
 ) {
 	let status = statuses.get(&dest);
 
-	if matches!(status, Some(TransactionStatus::Running | TransactionStatus::RunningForceRetry)) {
+	if matches!(
+		status,
+		Some(TransactionStatus::Running { .. } | TransactionStatus::RunningForceRetry { .. })
+	) {
 		return;
 	}
 
