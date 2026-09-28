@@ -4,7 +4,7 @@ use std::{
 		Mutex, MutexGuard,
 		atomic::{AtomicU64, Ordering},
 	},
-	time::Instant,
+	time::{Duration, Instant},
 };
 
 use ruma::{OwnedEventId, OwnedRoomId, OwnedServerName};
@@ -14,7 +14,7 @@ use tuwunel_core::{
 	warn,
 };
 
-use super::{fetch_prev::PrevFetch, handle_prev_pdu::PrevUpgrade};
+use super::{Service, fetch_prev::PrevFetch, handle_prev_pdu::PrevUpgrade};
 
 #[cfg(test)]
 mod tests;
@@ -155,13 +155,26 @@ pub(super) struct InFlightWalks {
 #[clippy::has_significant_drop]
 #[must_use]
 pub(super) struct PrevWalk<'a> {
-	counters: &'a PrevWalkCounters,
-	in_flight: &'a InFlightWalks,
+	service: &'a Service,
 	id: u64,
 	upgrade: &'a PrevUpgrade<'a>,
 	started: Instant,
 	walk: Option<Walk>,
 	settled: Option<(Outcome, usize)>,
+}
+
+/// The end of one pass, computed once when its guard drops.
+///
+/// The counters and the log line both read this one record, so they agree on
+/// the outcome and the timings.
+#[derive(Clone, Copy)]
+struct Pass {
+	outcome: Outcome,
+	prevs: usize,
+	unprocessed: usize,
+	capped: bool,
+	fetch: Duration,
+	upgrade: Duration,
 }
 
 #[derive(Clone, Copy)]
@@ -179,7 +192,7 @@ enum Outcome {
 /// Read a snapshot of incoming previous-event walk totals.
 ///
 /// Reading does not reset the totals.
-#[implement(super::Service)]
+#[implement(Service)]
 #[inline]
 #[must_use]
 pub fn prev_walk_metrics(&self) -> PrevWalkMetrics { self.prev_walk.snapshot() }
@@ -209,7 +222,7 @@ fn snapshot(&self) -> PrevWalkMetrics {
 ///
 /// The entries are copied out under the registry lock, since an iterator over
 /// the registry itself could not outlive the lock.
-#[implement(super::Service)]
+#[implement(Service)]
 #[inline]
 #[must_use]
 pub fn prev_walks_in_flight(&self) -> impl ExactSizeIterator<Item = InFlightWalk> + Send + use<> {
@@ -219,7 +232,7 @@ pub fn prev_walks_in_flight(&self) -> impl ExactSizeIterator<Item = InFlightWalk
 /// Count the gapped incoming events whose passes are in flight.
 ///
 /// Counting copies nothing out of the registry.
-#[implement(super::Service)]
+#[implement(Service)]
 #[inline]
 #[must_use]
 pub fn prev_walks_in_flight_count(&self) -> usize { self.prev_walks_in_flight.len() }
@@ -255,17 +268,14 @@ pub(super) fn enter(&self, gapped: bool) {
 }
 
 #[implement(PrevWalk, generics = "<'a>", params = "<'a>")]
-pub(super) fn start(
-	counters: &'a PrevWalkCounters,
-	in_flight: &'a InFlightWalks,
-	upgrade: &'a PrevUpgrade<'a>,
-) -> Self {
+pub(super) fn start(service: &'a Service, upgrade: &'a PrevUpgrade<'a>) -> Self {
 	let started = Instant::now();
-	let id = in_flight.insert(upgrade, started);
+	let id = service
+		.prev_walks_in_flight
+		.insert(upgrade, started);
 
 	Self {
-		counters,
-		in_flight,
+		service,
 		id,
 		upgrade,
 		started,
@@ -342,8 +352,11 @@ fn begin_walk(self, fetch: &PrevFetch) -> Self {
 		capped: fetch.capped,
 	};
 
-	self.counters.start_walk(prevs);
-	self.in_flight.walking(self.id, walk);
+	self.service.prev_walk.start_walk(prevs);
+	self.service
+		.prev_walks_in_flight
+		.walking(self.id, walk);
+
 	self.with_walk(walk)
 }
 
@@ -394,8 +407,7 @@ fn new(appended: Result<bool, &Error>, stopping: bool) -> Self {
 impl Drop for PrevWalk<'_> {
 	fn drop(&mut self) {
 		let Self {
-			counters,
-			in_flight,
+			service,
 			id,
 			upgrade,
 			started,
@@ -403,18 +415,45 @@ impl Drop for PrevWalk<'_> {
 			settled,
 		} = *self;
 
-		in_flight.remove(id);
+		let pass = Pass::new(started, walk, settled, Instant::now());
 
-		let unsettled = walk.map_or(Outcome::FetchCancelled, |_| Outcome::Cancelled);
-		let (outcome, unprocessed) = settled.unwrap_or((unsettled, 0));
-		let capped = walk.is_some_and(|walk| walk.capped);
+		service.prev_walks_in_flight.remove(id);
+		service.prev_walk.settle_pass(&pass);
 
-		counters.settle_pass(outcome, capped, unprocessed);
+		if !pass.outcome.reported() {
+			return;
+		}
 
 		match walk {
-			| None => log_fetch_end(upgrade, outcome, started),
-			| Some(walk) => log_walk_end(upgrade, outcome, started, walk, unprocessed),
+			| None => log_fetch_end(upgrade, &pass),
+			| Some(_) => log_walk_end(upgrade, &pass),
 		}
+	}
+}
+
+/// Compute how a pass ended as of `ended`.
+///
+/// An unsettled pass counts as cancelled, as a fetch before its walk began and
+/// as a walk after. The fetch phase runs until the walk began, or until the end
+/// for a pass that never walked.
+#[implement(Pass)]
+fn new(
+	started: Instant,
+	walk: Option<Walk>,
+	settled: Option<(Outcome, usize)>,
+	ended: Instant,
+) -> Self {
+	let unsettled = walk.map_or(Outcome::FetchCancelled, |_| Outcome::Cancelled);
+	let (outcome, unprocessed) = settled.unwrap_or((unsettled, 0));
+	let fetched = walk.map_or(ended, |walk| walk.fetched);
+
+	Self {
+		outcome,
+		prevs: walk.map_or(0, |walk| walk.prevs),
+		unprocessed,
+		capped: walk.is_some_and(|walk| walk.capped),
+		fetch: fetched.saturating_duration_since(started),
+		upgrade: ended.saturating_duration_since(fetched),
 	}
 }
 
@@ -422,7 +461,7 @@ impl Drop for PrevWalk<'_> {
 fn remove(&self, id: u64) { self.lock().remove(&id); }
 
 #[implement(PrevWalkCounters)]
-fn settle_pass(&self, outcome: Outcome, capped: bool, unprocessed: usize) {
+fn settle_pass(&self, &Pass { outcome, capped, unprocessed, .. }: &Pass) {
 	let counter = match outcome {
 		| Outcome::Held => &self.held,
 		| Outcome::Closed => &self.closed,
@@ -443,33 +482,39 @@ fn settle_pass(&self, outcome: Outcome, capped: bool, unprocessed: usize) {
 	fetch_add_usize(&self.unprocessed_prevs, unprocessed, Ordering::Relaxed);
 }
 
-fn log_fetch_end(upgrade: &PrevUpgrade<'_>, outcome: Outcome, started: Instant) {
-	let PrevUpgrade { origin, room_id, event_id, .. } = *upgrade;
-
-	if matches!(outcome, Outcome::FetchFailed | Outcome::FetchCancelled) {
-		let fetch_ms = started.elapsed().as_millis();
-
-		warn!(
-			%room_id,
-			%event_id,
-			%origin,
-			outcome = outcome.name(),
-			fetch_ms,
-			"Prev walk ended."
-		);
+/// Whether a pass ending this way logs its end.
+#[implement(Outcome)]
+fn reported(self) -> bool {
+	match self {
+		| Self::Held | Self::Closed => false,
+		| Self::FetchFailed
+		| Self::FetchCancelled
+		| Self::Appended
+		| Self::NotAppended
+		| Self::Failed
+		| Self::Cancelled => true,
 	}
 }
 
-fn log_walk_end(
-	upgrade: &PrevUpgrade<'_>,
-	outcome: Outcome,
-	started: Instant,
-	Walk { fetched, prevs, capped }: Walk,
-	unprocessed: usize,
-) {
+fn log_fetch_end(upgrade: &PrevUpgrade<'_>, pass: &Pass) {
 	let PrevUpgrade { origin, room_id, event_id, .. } = *upgrade;
-	let fetch_ms = fetched.duration_since(started).as_millis();
-	let upgrade_ms = fetched.elapsed().as_millis();
+	let fetch_ms = pass.fetch.as_millis();
+
+	warn!(
+		%room_id,
+		%event_id,
+		%origin,
+		outcome = pass.outcome.name(),
+		fetch_ms,
+		"Prev walk ended."
+	);
+}
+
+fn log_walk_end(upgrade: &PrevUpgrade<'_>, pass: &Pass) {
+	let PrevUpgrade { origin, room_id, event_id, .. } = *upgrade;
+	let Pass { outcome, prevs, unprocessed, capped, .. } = *pass;
+	let fetch_ms = pass.fetch.as_millis();
+	let upgrade_ms = pass.upgrade.as_millis();
 
 	if capped || matches!(outcome, Outcome::Failed | Outcome::Cancelled) {
 		warn!(

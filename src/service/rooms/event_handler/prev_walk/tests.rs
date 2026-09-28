@@ -1,8 +1,11 @@
-use std::{thread::scope, time::Instant};
+use std::{
+	thread::scope,
+	time::{Duration, Instant},
+};
 
 use ruma::{MilliSecondsSinceUnixEpoch, RoomVersionId, event_id, room_id, server_name, uint};
 
-use super::{InFlightWalks, PrevUpgrade, Walk};
+use super::{InFlightWalks, Outcome, Pass, PrevUpgrade, Walk};
 
 #[test]
 fn poisoned_registry_keeps_listing() {
@@ -52,4 +55,45 @@ fn poisoned_registry_keeps_listing() {
 	registry.remove(id);
 
 	assert_eq!(registry.len(), 0, "the poisoned registry kept a removed pass");
+}
+
+#[test]
+fn pass_splits_its_time_at_the_walk() {
+	let started = Instant::now();
+	let at = |secs| {
+		started
+			.checked_add(Duration::from_secs(secs))
+			.expect("the test instant is in range")
+	};
+
+	let walk = Walk { fetched: at(2), prevs: 4, capped: true };
+	let ended = at(5);
+	let passes = [
+		Pass::new(started, Some(walk), Some((Outcome::NotAppended, 1)), ended),
+		Pass::new(started, None, Some((Outcome::FetchFailed, 0)), ended),
+		Pass::new(started, Some(walk), None, ended),
+		Pass::new(started, None, None, ended),
+	];
+
+	let ends = passes.map(|pass| {
+		let Pass {
+			outcome,
+			prevs,
+			unprocessed,
+			capped,
+			fetch,
+			upgrade,
+		} = pass;
+
+		(outcome.name(), prevs, unprocessed, capped, fetch.as_secs(), upgrade.as_secs())
+	});
+
+	let expected = [
+		("not_appended", 4, 1, true, 2, 3),
+		("fetch_failed", 0, 0, false, 5, 0),
+		("cancelled", 4, 0, true, 2, 3),
+		("fetch_cancelled", 0, 0, false, 5, 0),
+	];
+
+	assert_eq!(ends, expected, "a pass split its time or mapped its outcome wrong");
 }

@@ -200,8 +200,7 @@ pub async fn handle_incoming_pdu<'a>(
 	};
 
 	// Start before the first await so a dropped future still settles the gapped count.
-	let pass =
-		gapped.then(|| PrevWalk::start(&self.prev_walk, &self.prev_walks_in_flight, &upgrade));
+	let pass = gapped.then(|| PrevWalk::start(self, &upgrade));
 
 	let standing = gapped
 		.then_async(|| self.is_suppressed(Context::Incoming, event_id, UPGRADE_RETRY))
