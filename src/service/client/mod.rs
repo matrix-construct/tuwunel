@@ -10,7 +10,7 @@ use ipaddress::{IPAddress, ipv4::from_u32 as ipv4_from_u32};
 use reqwest::{Client, ClientBuilder, Url, dns::Resolve, header::HeaderValue, redirect::Policy};
 use tuwunel_core::{
 	Config, Err, Result, config::proxy::ProxySnapshot, debug, either::Either, err,
-	error::error_chain, implement, trace,
+	error::error_chain, implement, trace, utils::math::u64_from_usize_saturating,
 };
 use url::Host;
 
@@ -284,7 +284,7 @@ pub async fn read_response_capped(
 	limit: usize,
 ) -> Result<Bytes> {
 	let mut body = match response.content_length() {
-		| Some(len) if len > limit.try_into().unwrap_or(u64::MAX) => {
+		| Some(len) if len > u64_from_usize_saturating(limit) => {
 			debug!(%len, %limit, "rejecting response: advertised body exceeds limit");
 			return Err!(BadServerResponse(
 				"Response body length {len} exceeds the {limit} byte limit"

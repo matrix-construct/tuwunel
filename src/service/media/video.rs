@@ -25,7 +25,7 @@ use tokio::{
 };
 use tuwunel_core::{
 	Config, Err, Result, debug, debug_warn, defer, err, implement,
-	utils::{BoolExt, random_string},
+	utils::{BoolExt, math::u64_from_usize_saturating, random_string},
 };
 
 use super::{Dim, Media};
@@ -185,7 +185,7 @@ async fn extract_frame(&self, mxc: &Mxc<'_>, dim: &Dim, content: &[u8]) -> Resul
 		.iter()
 		.map(|arg| substitute(arg, &path, &width, &height));
 
-	let limit = u64::try_from(config.media_video_thumbnail_max_size).unwrap_or(u64::MAX);
+	let limit = u64_from_usize_saturating(config.media_video_thumbnail_max_size);
 	let frame = run(program, args, limit, deadline).await;
 
 	// the program reached a verdict on this video, so a failure is the video's
@@ -346,7 +346,7 @@ where
 		return Err!("Video thumbnail program produced no frame: {diagnostic}");
 	}
 
-	if u64::try_from(frame.len()).unwrap_or(u64::MAX) > limit {
+	if u64_from_usize_saturating(frame.len()) > limit {
 		return Err!("Video thumbnail program produced a frame past {limit} bytes.");
 	}
 

@@ -4,7 +4,7 @@
 //! The [`Transport`] seam isolates the network behind a trait the tests mock;
 //! [`FederationTransport`] is the production impl.
 
-use std::sync::Arc;
+use std::{num::NonZeroUsize, sync::Arc};
 
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -21,7 +21,10 @@ use ruma::{
 		},
 	},
 };
-use tuwunel_core::{Result, err, utils::BoolExt};
+use tuwunel_core::{
+	Result, err,
+	utils::{BoolExt, math::ruma_from_usize_saturating},
+};
 
 use super::{Op, Opts};
 use crate::services::OnceServices;
@@ -165,10 +168,9 @@ fn require_latest_events(opts: &Opts) -> Result {
 /// Event count requested per batch op, defaulting to the federation default of
 /// 10 and saturating an oversized cap to the wire `UInt`.
 fn batch_limit(opts: &Opts) -> UInt {
-	opts.backfill_limit.map_or_else(
-		|| UInt::from(10_u8),
-		|n| UInt::new_saturating(u64::try_from(n.get()).unwrap_or(u64::MAX)),
-	)
+	opts.backfill_limit
+		.map(NonZeroUsize::get)
+		.map_or_else(|| UInt::from(10_u8), ruma_from_usize_saturating)
 }
 
 fn to_bytes<T: serde::Serialize>(value: &T) -> Result<Bytes> {

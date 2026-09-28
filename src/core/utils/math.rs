@@ -8,6 +8,8 @@ use std::{
 	sync::atomic::{AtomicU64, Ordering},
 };
 
+use ruma::UInt;
+
 mod expect_into;
 mod expected;
 #[cfg(test)]
@@ -153,7 +155,7 @@ pub fn usize_from_f64(val: f64) -> Result<usize, Error> {
 /// `usize` range.
 #[inline]
 #[must_use]
-pub fn usize_from_ruma(val: ruma::UInt) -> usize {
+pub fn usize_from_ruma(val: UInt) -> usize {
 	usize::try_from(val).expect("failed conversion from ruma::UInt to usize")
 }
 
@@ -163,28 +165,39 @@ pub fn usize_from_ruma(val: ruma::UInt) -> usize {
 /// either conversion path.
 #[inline]
 #[must_use]
-pub fn usize_from_ruma_bounded(val: ruma::UInt, fallback: usize, max: usize) -> usize {
+pub fn usize_from_ruma_bounded(val: UInt, fallback: usize, max: usize) -> usize {
 	usize::try_from(val).unwrap_or(fallback).min(max)
 }
 
 /// Converts a `u64` to a Matrix unsigned integer.
 ///
 /// The conversion is exact. It panics if the value exceeds the range supported
-/// by [`ruma::UInt`].
+/// by [`UInt`].
 #[inline]
 #[must_use]
-pub fn ruma_from_u64(val: u64) -> ruma::UInt {
-	ruma::UInt::try_from(val).expect("failed conversion from u64 to ruma::UInt")
+pub fn ruma_from_u64(val: u64) -> UInt {
+	UInt::try_from(val).expect("failed conversion from u64 to ruma::UInt")
 }
 
 /// Converts a `usize` to a Matrix unsigned integer.
 ///
 /// The conversion is exact. It panics if the value exceeds the range supported
-/// by [`ruma::UInt`].
+/// by [`UInt`].
 #[inline]
 #[must_use]
-pub fn ruma_from_usize(val: usize) -> ruma::UInt {
-	ruma::UInt::try_from(val).expect("failed conversion from usize to ruma::UInt")
+pub fn ruma_from_usize(val: usize) -> UInt {
+	UInt::try_from(val).expect("failed conversion from usize to ruma::UInt")
+}
+
+/// Converts a `usize` to a Matrix unsigned integer, saturating at the largest
+/// value [`UInt`] supports.
+///
+/// Suits a wire limit taken from a local count, where an oversized value means
+/// as many as the protocol allows rather than an error.
+#[inline]
+#[must_use]
+pub fn ruma_from_usize_saturating(val: usize) -> UInt {
+	UInt::new_saturating(u64_from_usize_saturating(val))
 }
 
 /// Converts a `u64` to `usize` with deliberate truncation when necessary.

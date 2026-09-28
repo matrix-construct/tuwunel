@@ -18,6 +18,7 @@ use ruma::{EventId, OwnedEventId};
 
 /// The sha256 reference hash encoded by a v3+ event ID.
 pub use crate::utils::hash::sha256::Digest as Sha256;
+use crate::utils::math::u64_from_usize_saturating;
 
 /// `BuildHasher` for event-ID-keyed maps and sets.
 ///
@@ -96,7 +97,7 @@ fn hash_bytes(bytes: &[u8]) -> u64 {
 }
 
 fn fold_bytes(bytes: &[u8]) -> u64 {
-	let head = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
+	let head = u64_from_usize_saturating(bytes.len());
 
 	bytes.chunks(8).fold(head, |acc, chunk| {
 		let mut word = [0_u8; 8];

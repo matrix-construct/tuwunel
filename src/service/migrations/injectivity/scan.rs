@@ -13,6 +13,7 @@ use tuwunel_core::{
 	smallvec::SmallVec,
 	utils::{
 		BoolExt, ReadyExt, TryReadyExt,
+		math::u64_from_usize_saturating,
 		stream::{BroadbandExt, IterStream, TryIgnore},
 	},
 	warn,
@@ -299,7 +300,7 @@ pub(super) fn healable(&self) -> bool { self.events.healable() || self.statekeys
 /// saturates rather than wrapping.
 #[implement(Scan)]
 pub(super) fn decline_record(&self, reason: Reason) -> DeclineRecord {
-	let count = |len: usize| u64::try_from(len).unwrap_or(u64::MAX);
+	let count = u64_from_usize_saturating;
 
 	let record: [u64; 22] = [
 		RECORD_FORMAT,
@@ -598,7 +599,7 @@ async fn resolve(
 	let tail = candidates.get(paired..).unwrap_or_default();
 	losers.extend(tail.iter().map(candidate_short));
 
-	let unresolved = unsettled.saturating_add(u64::try_from(tail.len()).unwrap_or(u64::MAX));
+	let unresolved = unsettled.saturating_add(u64_from_usize_saturating(tail.len()));
 
 	Ok((losers, winners, promotable, unresolved))
 }
@@ -620,7 +621,7 @@ where
 		.filter(|pair| cmp(&pair[0], &pair[1]).is_eq())
 		.count();
 
-	u64::try_from(contenders).unwrap_or(u64::MAX)
+	u64_from_usize_saturating(contenders)
 }
 
 // Named for the higher-ranked closure generality the dereference stream

@@ -3,7 +3,7 @@ use ruma::events::room::member::MembershipState;
 use tuwunel_core::{
 	Result, debug_info, info,
 	matrix::PduCount,
-	utils::{ReadyExt, stream::BroadbandExt},
+	utils::{ReadyExt, math::u64_from_usize_saturating, stream::BroadbandExt},
 	warn,
 };
 
@@ -23,7 +23,7 @@ pub(super) async fn retroactively_fix_bad_data_from_roomuserid_joined(
 	services
 		.server
 		.progress
-		.expect_total(u64::try_from(total).unwrap_or(u64::MAX));
+		.expect_total(u64_from_usize_saturating(total));
 
 	services
 		.metadata
