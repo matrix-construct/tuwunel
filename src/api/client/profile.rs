@@ -121,6 +121,12 @@ pub(crate) async fn set_profile_field_route(
 	body: Ruma<set_profile_field::v3::Request>,
 ) -> Result<set_profile_field::v3::Response> {
 	let sender_user = body.sender_user();
+	if !services.config.enable_set_displayname
+		&& body.value.field_name() == ProfileFieldName::DisplayName
+		&& body.appservice_info.is_none()
+	{
+		return Err!(Request(Forbidden("Setting display names has been disabled.")));
+	}
 
 	if *sender_user != body.user_id
 		&& !body
@@ -169,6 +175,12 @@ pub(crate) async fn delete_profile_field_route(
 	body: Ruma<delete_profile_field::v3::Request>,
 ) -> Result<delete_profile_field::v3::Response> {
 	let sender_user = body.sender_user();
+	if !services.config.enable_set_displayname
+		&& body.field == ProfileFieldName::DisplayName
+		&& body.appservice_info.is_none()
+	{
+		return Err!(Request(Forbidden("Setting display names has been disabled.")));
+	}
 
 	if *sender_user != body.user_id
 		&& !body
