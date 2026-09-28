@@ -20,7 +20,11 @@ use futures::StreamExt;
 use ruma::{OwnedEventId, OwnedRoomId, OwnedRoomOrAliasId, OwnedServerName, OwnedUserId};
 use tuwunel_core::{
 	Err, Result, implement,
-	utils::{stream::ReadyExt, time::Elapsed},
+	utils::{
+		stream::ReadyExt,
+		string::{markdown_cell, plural},
+		time::Elapsed,
+	},
 };
 use tuwunel_service::federation::{
 	PeerBackoff,
@@ -385,7 +389,7 @@ pub(super) fn render_totals(
 	results: usize,
 	duration: Duration,
 ) -> FmtResult {
-	let noun = if results == 1 { "result" } else { "results" };
+	let noun = plural(results, "result", "results");
 
 	writeln!(output, "\n{results} {noun} in {}.", Elapsed::from(duration))
 }
@@ -408,29 +412,6 @@ pub(super) fn write_cell(output: &mut String, value: &str) -> FmtResult {
 	} else {
 		write!(output, " {value} |")
 	}
-}
-
-pub(super) fn markdown_cell(value: &str) -> Cow<'_, str> {
-	if !value.chars().any(|character| {
-		character.is_control() || matches!(character, '\\' | '|' | '\u{2028}' | '\u{2029}')
-	}) {
-		return Cow::Borrowed(value);
-	}
-
-	Cow::Owned(value.chars().fold(
-		String::with_capacity(value.len()),
-		|mut escaped, character| {
-			match character {
-				| '\\' => escaped.push_str("\\\\"),
-				| '|' => escaped.push_str("\\|"),
-				| '\u{2028}' | '\u{2029}' => escaped.push(' '),
-				| character if character.is_control() => escaped.push(' '),
-				| _ => escaped.push(character),
-			}
-
-			escaped
-		},
-	))
 }
 
 pub(super) fn sorted_event_id_difference(

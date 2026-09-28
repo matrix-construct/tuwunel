@@ -1,5 +1,8 @@
 #![cfg(test)]
 
+use std::borrow::Cow;
+
+use super::{markdown_cell, plural};
 use crate::{arrayvec::ArrayString, smallstr::SmallString};
 
 type SmallBuf = SmallString<[u8; 16]>;
@@ -152,6 +155,7 @@ fn chunk_markdown_fence_closes_and_reopens_with_info() {
 		"```rust\nline1\n```\n".to_owned(),
 		"```rust\nline2\n```\n".to_owned(),
 	]);
+
 	assert!(parts.iter().all(|p| p.len() <= 20));
 }
 
@@ -194,6 +198,7 @@ fn chunk_long_line_splits_on_char_boundaries() {
 fn chunk_every_segment_honors_the_budget() {
 	let text = "# header\n\n```json\n{\n  \"a\": 1,\n  \"b\": 2,\n  \"c\": 3\n}\n```\n\nfinal \
 	            paragraph with a fairly long single line of prose here\n";
+
 	let parts = chunks(text, true, 24);
 
 	assert!(parts.len() > 1);
@@ -211,4 +216,23 @@ fn chunk_segment_count_tracks_the_budget() {
 	assert_eq!(chunks(text, false, 4096).len(), 1);
 	assert_eq!(chunks(text, false, 10).len(), 2);
 	assert_eq!(chunks(text, false, 5).len(), 4);
+}
+
+#[test]
+fn markdown_cell_escapes_what_would_break_the_cell() {
+	assert_eq!(markdown_cell("a|b\\c\nd\u{2028}e"), "a\\|b\\\\c d e");
+}
+
+#[test]
+fn markdown_cell_borrows_a_clean_value() {
+	let clean = "!room:example.org";
+
+	assert!(matches!(markdown_cell(clean), Cow::Borrowed(borrowed) if borrowed == clean));
+}
+
+#[test]
+fn plural_takes_the_singular_for_one_only() {
+	let nouns = [0, 1, 2].map(|count| plural(count, "room", "rooms"));
+
+	assert_eq!(nouns, ["rooms", "room", "rooms"]);
 }

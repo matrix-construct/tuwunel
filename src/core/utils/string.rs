@@ -17,10 +17,12 @@ mod unquote;
 mod unquoted;
 
 use std::{
+	borrow::Cow,
 	fmt::{self, write},
 	io,
 	mem::replace,
 	ops::Range,
+	str::from_utf8,
 };
 
 pub use self::{
@@ -303,4 +305,48 @@ pub fn string_from_bytes(bytes: &[u8]) -> Result<String> {
 /// Valid input is returned without allocation. Invalid UTF-8 is returned as an
 /// error.
 #[inline]
-pub fn str_from_bytes(bytes: &[u8]) -> Result<&str> { Ok(std::str::from_utf8(bytes)?) }
+pub fn str_from_bytes(bytes: &[u8]) -> Result<&str> { Ok(from_utf8(bytes)?) }
+
+/// Escapes a value for one markdown table cell.
+///
+/// Backslashes and pipes are escaped, and control characters and Unicode line
+/// or paragraph separators become spaces, so the value cannot end its cell or
+/// row. A value needing no change is borrowed.
+#[must_use]
+pub fn markdown_cell(value: &str) -> Cow<'_, str> {
+	let breaks_cell = |character: char| {
+		character.is_control() || matches!(character, '\\' | '|' | '\u{2028}' | '\u{2029}')
+	};
+
+	let escape = |mut escaped: String, character: char| {
+		match character {
+			| '\\' => escaped.push_str("\\\\"),
+			| '|' => escaped.push_str("\\|"),
+			| _ if breaks_cell(character) => escaped.push(' '),
+			| _ => escaped.push(character),
+		}
+
+		escaped
+	};
+
+	value
+		.contains(breaks_cell)
+		.then(|| {
+			value
+				.chars()
+				.fold(String::with_capacity(value.len()), escape)
+		})
+		.map_or(Cow::Borrowed(value), Cow::Owned)
+}
+
+/// Picks the singular or plural form of a noun for a count.
+///
+/// Only a count of exactly one takes the singular, so zero reads as plural.
+#[inline]
+#[must_use]
+pub fn plural<'a>(count: usize, one: &'a str, many: &'a str) -> &'a str {
+	match count {
+		| 1 => one,
+		| _ => many,
+	}
+}
