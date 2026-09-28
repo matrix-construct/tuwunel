@@ -225,17 +225,9 @@ pub async fn handle_incoming_pdu<'a>(
 		.handle_prev_events(upgrade, sorted, pdus)
 		.boxed() // size firewall
 		.and_then(|upgraded| {
-			self.upgrade_outlier_to_timeline_pdu(
-				origin,
-				room_id,
-				incoming_pdu,
-				pdu,
-				&room_version,
-				recursion_level,
-				create_event_id,
-			)
-			.boxed() // size firewall
-			.map(move |handled| Ok((handled, upgraded)))
+			self.upgrade_outlier_to_timeline_pdu(upgrade, incoming_pdu, pdu)
+				.boxed() // size firewall
+				.map(move |handled| Ok((handled, upgraded)))
 		})
 		.unwrap_or_else(|error| (Err(error), 0))
 		.await;

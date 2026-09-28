@@ -18,6 +18,7 @@ use tuwunel_core::{
 
 use super::{
 	backoff::{Context, Disposition, UPGRADE_RETRY},
+	handle_prev_pdu::PrevUpgrade,
 	policy_server::PolicyCheck,
 	state_local_build::WalkMode,
 };
@@ -58,18 +59,22 @@ enum Standing {
 	level = "debug",
 	ret(level = "debug"),
 	skip_all,
-	fields(lev = %recursion_level)
+	fields(
+		lev = %recursion_level,
+	),
 )]
-#[expect(clippy::too_many_arguments)]
 pub(super) async fn upgrade_outlier_to_timeline_pdu(
 	&self,
-	origin: &ServerName,
-	room_id: &RoomId,
+	PrevUpgrade {
+		origin,
+		room_id,
+		room_version,
+		recursion_level,
+		create_event_id,
+		..
+	}: PrevUpgrade<'_>,
 	incoming_pdu: PduEvent,
 	mut pdu_json: CanonicalJsonObject,
-	room_version: &RoomVersionId,
-	recursion_level: usize,
-	create_event_id: &EventId,
 ) -> Result<Option<(RawPduId, bool)>> {
 	// Skip the PDU if we already have it as a timeline event
 	if let Ok(pdu_id) = self

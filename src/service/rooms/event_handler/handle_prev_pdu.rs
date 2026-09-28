@@ -11,10 +11,11 @@ use tuwunel_core::{
 
 use super::backoff::{Context, UPGRADE_RETRY};
 
-/// Context of an incoming event, shared across the fetch and upgrade of its
-/// previous events.
+/// Context of an incoming event, shared across fetching and upgrading its
+/// previous events, and upgrading the event itself.
 ///
-/// A previous event's own id and fetched PDU stay per-call arguments.
+/// `event_id` always names the incoming event; the event being upgraded, a
+/// previous one or the incoming one itself, is a separate argument.
 #[derive(Clone, Copy)]
 pub(super) struct PrevUpgrade<'a> {
 	pub(super) origin: &'a ServerName,
@@ -37,20 +38,19 @@ pub(super) struct PrevUpgrade<'a> {
 )]
 pub(super) async fn handle_prev_pdu(
 	&self,
-	PrevUpgrade {
-		origin,
-		room_id,
-		event_id,
-		room_version,
-		recursion_level,
-		first_ts_in_room,
-		create_event_id,
-	}: PrevUpgrade<'_>,
+	upgrade: PrevUpgrade<'_>,
 	eventid_info: Option<(PduEvent, CanonicalJsonObject)>,
 	prev_id: &EventId,
 ) -> Result<Option<(RawPduId, bool)>> {
 	// Check for disabled again because it might have changed
-	if self.services.metadata.is_disabled(room_id).await {
+	if self
+		.services
+		.metadata
+		.is_disabled(upgrade.room_id)
+		.await
+	{
+		let PrevUpgrade { origin, room_id, event_id, .. } = upgrade;
+
 		return Err!(Request(Forbidden(debug_warn!(
 			"Federaton of room {room_id} is currently disabled on this server. Request by \
 			 origin {origin} and event ID {event_id}"
@@ -63,7 +63,7 @@ pub(super) async fn handle_prev_pdu(
 	};
 
 	// Skip old events
-	if pdu.origin_server_ts() < first_ts_in_room {
+	if pdu.origin_server_ts() < upgrade.first_ts_in_room {
 		debug_warn!(?prev_id, "origin_server_ts older than room");
 		return Ok(None);
 	}
@@ -79,15 +79,7 @@ pub(super) async fn handle_prev_pdu(
 
 	self.record_attempt(Context::Upgrade, prev_id);
 
-	self.upgrade_outlier_to_timeline_pdu(
-		origin,
-		room_id,
-		pdu,
-		json,
-		room_version,
-		recursion_level,
-		create_event_id,
-	)
-	.boxed() // size firewall
-	.await
+	self.upgrade_outlier_to_timeline_pdu(upgrade, pdu, json)
+		.boxed() // size firewall
+		.await
 }
