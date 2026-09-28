@@ -24,6 +24,7 @@ mod memory_stats;
 mod parse_pdu;
 mod ping;
 mod prev_walk_metrics;
+mod prev_walk_rooms;
 mod rebuild_relation_index;
 mod rebuild_thread_index;
 mod resolve_true_destination;
@@ -276,6 +277,20 @@ pub(super) enum DebugCommand {
 	///
 	/// Difference two snapshots to observe an interval.
 	BackoffMetrics,
+
+	/// - Print the prev walk passes recorded per room, kept for up to three days.
+	///
+	/// Without a room, lists the rooms with the most recorded passes and their
+	/// totals. With a room, lists its latest passes. A pass is recorded when it
+	/// ends, unless a backoff hold withheld it or its fetch left nothing to walk.
+	PrevWalkRooms {
+		/// The room to list the latest passes of
+		room_id: Option<OwnedRoomId>,
+
+		/// How many rooms or passes to list
+		#[arg(short, long, default_value_t = 20)]
+		limit: usize,
+	},
 
 	/// - Print detailed tokio task metrics accumulated since last command
 	///   invocation.

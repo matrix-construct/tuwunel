@@ -1,9 +1,11 @@
 #![cfg(test)]
 
 use clap::Parser;
+use ruma::room_id;
 
 use crate::{
-	admin::AdminCommand, federation::FederationCommand, media::MediaCommand, query::QueryCommand,
+	admin::AdminCommand, debug::DebugCommand, federation::FederationCommand, media::MediaCommand,
+	query::QueryCommand,
 };
 
 #[test]
@@ -70,6 +72,33 @@ fn federation_incoming_parse() {
 		matches!(command, AdminCommand::Federation(FederationCommand::IncomingFederation)),
 		"incoming-federation must parse as a federation command"
 	);
+}
+
+#[test]
+fn debug_prev_walk_rooms_parse() {
+	let cases: [(&[&str], _, _); 3] = [
+		(&[], None, 20),
+		(&["--limit", "5"], None, 5),
+		(&["!room:example.org", "-l", "3"], Some(room_id!("!room:example.org")), 3),
+	];
+
+	let command = ["argv[0] doesn't matter", "debug", "prev-walk-rooms"];
+
+	for (args, expected_room, expected_limit) in cases {
+		let argv: Vec<_> = command.iter().chain(args).copied().collect();
+		let AdminCommand::Debug(DebugCommand::PrevWalkRooms { room_id, limit }) = parse_ok(&argv)
+		else {
+			panic!("{argv:?} must parse as a debug prev-walk-rooms command");
+		};
+
+		assert_eq!(room_id.as_deref(), expected_room, "{argv:?} parsed the wrong room");
+		assert_eq!(limit, expected_limit, "{argv:?} parsed the wrong limit");
+	}
+
+	let argv: Vec<_> = command.iter().chain(&["5"]).copied().collect();
+	let error = parse_err(&argv);
+
+	assert!(error.contains("ROOM_ID"), "a bare number must not pass for a limit");
 }
 
 #[test]

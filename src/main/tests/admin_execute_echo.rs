@@ -18,7 +18,9 @@ fn admin_execute_echo() -> Result {
 		let args = Args::default_test(&["smoke", "fresh", "cleanup"])
 			.with_option(format!("port={port}"))
 			.with_execute("debug echo Test")
-			.with_execute("federation incoming-federation");
+			.with_execute("federation incoming-federation")
+			.with_execute("debug prev-walk-rooms")
+			.with_execute("debug prev-walk-rooms !none:localhost");
 
 		let runtime = Runtime::new(Some(&args))?;
 		let server = Server::new(Some(&args), Some(&runtime))?;
