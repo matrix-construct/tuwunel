@@ -15,6 +15,7 @@ pub mod hash;
 pub mod html;
 pub mod json;
 pub mod math;
+pub mod mutex;
 pub mod mutex_map;
 pub mod option;
 pub mod rand;
@@ -43,6 +44,7 @@ pub use self::{
 	future::{BoolExt as FutureBoolExt, OptionStream, TryExtExt as TryFutureExtExt},
 	hash::sha256::delimited as calculate_hash,
 	json::{deserialize_from_str, serialized_len, to_canonical_object},
+	mutex::MutexExt,
 	mutex_map::{Guard as MutexMapGuard, MutexMap},
 	option::OptionExt,
 	rand::{shuffle, string as random_string, string_from as random_string_from},
