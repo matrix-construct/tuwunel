@@ -52,7 +52,7 @@ pub(super) async fn handle_prev_pdu(
 		let PrevUpgrade { origin, room_id, event_id, .. } = upgrade;
 
 		return Err!(Request(Forbidden(debug_warn!(
-			"Federaton of room {room_id} is currently disabled on this server. Request by \
+			"Federation of room {room_id} is currently disabled on this server. Request by \
 			 origin {origin} and event ID {event_id}"
 		))));
 	}

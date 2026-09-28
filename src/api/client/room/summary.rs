@@ -218,7 +218,7 @@ async fn remote_room_summary_hierarchy_response(
 
 	if services.metadata.is_disabled(room_id).await {
 		return Err!(Request(Forbidden(
-			"Federaton of room {room_id} is currently disabled on this server."
+			"Federation of room {room_id} is currently disabled on this server."
 		)));
 	}
 
