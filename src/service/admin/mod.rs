@@ -21,7 +21,9 @@ pub use create::create_admin_room;
 use futures::TryFutureExt;
 use ruma::{OwnedEventId, OwnedRoomAliasId, OwnedRoomId, RoomId, RoomOrAliasId, UserId};
 use tokio::sync::mpsc;
-use tuwunel_core::{Err, Event, Result, debug, err, error::default_log, warn};
+use tuwunel_core::{
+	Err, Event, Result, debug, err, error::default_log, matrix::event::MsgType, warn,
+};
 
 pub struct Service {
 	services: Arc<crate::services::OnceServices>,
@@ -273,6 +275,13 @@ impl Service {
 			.ok_or_else(|| err!("server user is not joined to the configured report room"))
 	}
 
+	/// Returns whether a message event is an admin command to run.
+	///
+	/// Only an `m.text` from an admin qualifies: prefixed with `!admin` or the
+	/// server user's ID in the admin room, or escaped as `\!admin` by a local
+	/// admin anywhere when escape commands are enabled. The server user's own
+	/// messages in the admin room are refused unless the emergency password is
+	/// set.
 	pub async fn is_admin_command<Pdu>(&self, event: &Pdu, body: &str) -> bool
 	where
 		Pdu: Event,
@@ -308,6 +317,12 @@ impl Service {
 
 		// Check if server-side command-escape is disabled by configuration
 		if is_public_escape && !self.services.server.config.admin_escape_commands {
+			return false;
+		}
+
+		// Spec: an m.notice must never be answered automatically. Other msgtypes'
+		// bodies are captions, filenames or emotes a forward or repost can carry.
+		if event.msgtype() != Some(MsgType::Text) {
 			return false;
 		}
 

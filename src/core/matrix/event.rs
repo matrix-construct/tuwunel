@@ -8,6 +8,7 @@ mod content;
 mod filter;
 mod format;
 mod id;
+mod msgtype;
 mod redact;
 mod relation;
 pub mod state_key;
@@ -25,15 +26,16 @@ use ruma::{
 use serde::Deserialize;
 use serde_json::{Value as JsonValue, value::RawValue as RawJsonValue};
 
-use self::format::to_sync_message_like_without_unsigned;
 pub use self::{
 	filter::{Matches, trim_event_fields},
 	format::{Owned, Ref},
 	id::*,
+	msgtype::MsgType,
 	relation::RelationTypeEqual,
 	state_key::{StateKey, TypeStateKey},
 	type_ext::TypeExt,
 };
+use self::{format::to_sync_message_like_without_unsigned, msgtype::content_msgtype};
 use super::pdu::Pdu;
 use crate::{Result, utils};
 
@@ -159,6 +161,18 @@ pub trait Event: Clone + Debug + Send + Sync {
 		Self: Sized,
 	{
 		content::get::<T, _>(self)
+	}
+
+	/// Reads the `msgtype` of this event's message content.
+	///
+	/// Only that one field is deserialized, and the event type is not checked.
+	/// Content with no readable `msgtype` returns `None`.
+	#[inline]
+	fn msgtype(&self) -> Option<MsgType>
+	where
+		Self: Sized,
+	{
+		content_msgtype(self)
 	}
 
 	/// Resolves the event ID targeted by a redaction event.
