@@ -2,14 +2,13 @@ use tuwunel_core::{
 	Result,
 	matrix::PduEvent,
 	ruma::{CanonicalJsonObject, EventId, RoomId, UserId},
-	utils::time::now_secs,
+	utils::result::NotFound,
 };
-use tuwunel_database::Interfix;
 use tuwunel_service::Services;
 
 use super::helpers::{
-	Context, Disposition, append_message, assert_accepts, held_message_chain, plant_backoff_row,
-	redeliver, sign_message,
+	Context, Disposition, append_message, assert_accepts, backoff_rows, held_message_chain,
+	plant_backoff_rows, redeliver, sign_message,
 };
 
 pub(super) async fn gapped_redelivery_backs_off(
@@ -36,14 +35,14 @@ pub(super) async fn gapped_redelivery_backs_off(
 		.timeline
 		.add_pdu_outlier(control_id, &control_json);
 
-	plant_incoming_rows(services, &top.event_id, Disposition::Pending, 3)?;
-	plant_incoming_rows(services, failed_id, Disposition::Transient, 1)?;
-	plant_incoming_rows(services, control_id, Disposition::Pending, 2)?;
+	plant_backoff_rows(services, Context::Incoming, &top.event_id, Disposition::Pending, 3)?;
+	plant_backoff_rows(services, Context::Incoming, failed_id, Disposition::Transient, 1)?;
+	plant_backoff_rows(services, Context::Incoming, control_id, Disposition::Pending, 2)?;
 	assert_backs_off(services, room_id, &top, top_json, 3, "three-attempt redelivery").await?;
 	assert_backs_off(services, room_id, &failed, failed_json, 1, "failed redelivery").await?;
 	assert_accepts(services, room_id, &control, control_json, "two-attempt redelivery").await?;
 
-	let rows = incoming_rows(services, control_id).await?;
+	let rows = backoff_rows(services, Context::Incoming, control_id).await?;
 
 	assert_eq!(rows, 0, "integrated redelivery kept its attempt rows");
 
@@ -61,30 +60,14 @@ pub(super) async fn gapped_redelivery_backs_off(
 		.timeline
 		.add_pdu_outlier(closed_id, &closed_json);
 
-	plant_incoming_rows(services, closed_id, Disposition::Pending, 3)?;
+	plant_backoff_rows(services, Context::Incoming, closed_id, Disposition::Pending, 3)?;
 	assert_accepts(services, room_id, &closed, closed_json, "closed-gap redelivery").await?;
 
-	let rows = incoming_rows(services, closed_id).await?;
+	let rows = backoff_rows(services, Context::Incoming, closed_id).await?;
 
 	assert_eq!(rows, 3, "closed-gap redelivery consulted the backoff store");
 
 	Ok(())
-}
-
-fn plant_incoming_rows(
-	services: &Services,
-	event_id: &EventId,
-	disposition: Disposition,
-	rows: u32,
-) -> Result {
-	let now = now_secs();
-	let minute = u32::try_from(now / 60)?;
-
-	(1..=rows)
-		.map(|age| minute.saturating_sub(age))
-		.try_for_each(|bucket| {
-			plant_backoff_row(services, Context::Incoming, event_id, bucket, disposition, now)
-		})
 }
 
 async fn assert_backs_off(
@@ -100,7 +83,7 @@ async fn assert_backs_off(
 
 	assert!(!handled, "{context} was not backed off");
 
-	let surviving = incoming_rows(services, incoming_id).await?;
+	let surviving = backoff_rows(services, Context::Incoming, incoming_id).await?;
 
 	assert_eq!(surviving, rows, "{context} touched its backoff rows");
 
@@ -109,20 +92,7 @@ async fn assert_backs_off(
 		.non_outlier_pdu_exists(incoming_id)
 		.await;
 
-	assert!(
-		timeline_row.is_err_and(|error| error.is_not_found()),
-		"{context} reached the timeline"
-	);
+	assert!(timeline_row.is_not_found(), "{context} reached the timeline");
 
 	Ok(())
-}
-
-async fn incoming_rows(services: &Services, event_id: &EventId) -> Result<usize> {
-	let rows = services
-		.db
-		.get("eventid_backoff")?
-		.count_prefix(&(u8::from(Context::Incoming), event_id, Interfix))
-		.await;
-
-	Ok(rows)
 }

@@ -1,5 +1,3 @@
-use std::iter::once;
-
 use futures::TryStreamExt;
 use tuwunel_core::{
 	Result, err,
@@ -10,6 +8,7 @@ use tuwunel_service::Services;
 use super::helpers::{
 	ExpectedWalkOutcome, append_message, append_state, assert_fetches, create_room,
 	remove_short_row, restore_room_state, set_forward_extremities, sign_message,
+	sign_outlier_message,
 };
 
 pub(super) async fn degree_one_state_miss(
@@ -21,14 +20,12 @@ pub(super) async fn degree_one_state_miss(
 	let room_id = create_room(services, base, token).await?;
 	let anchor = append_message(services, user_id, &room_id, "degree one anchor").await?;
 	let intact_state = services.state.pdu_shortstatehash(&anchor).await?;
+
 	append_state(services, user_id, &room_id, "degree one change").await?;
+
 	let boundary = append_message(services, user_id, &room_id, "degree one boundary").await?;
 	let (incoming, incoming_json) =
-		sign_message(services, user_id, &room_id, "degree one top").await?;
-
-	services
-		.timeline
-		.add_pdu_outlier(&incoming.event_id, &incoming_json);
+		sign_outlier_message(services, user_id, &room_id, "degree one top").await?;
 
 	let corrupt_state = services
 		.state
@@ -38,21 +35,24 @@ pub(super) async fn degree_one_state_miss(
 	assert_ne!(intact_state, corrupt_state, "degree one fixture reused the intact state");
 	restore_room_state(services, &room_id, intact_state, &anchor).await;
 	remove_short_row(services, "shortstatehash_statediff", corrupt_state).await?;
+
+	let restored = services
+		.state
+		.get_room_shortstatehash(&room_id)
+		.await?;
+
 	assert_eq!(
-		services
-			.state
-			.get_room_shortstatehash(&room_id)
-			.await?,
-		intact_state,
-		"degree one fixture did not restore the current room state",
+		restored, intact_state,
+		"degree one fixture did not restore the current room state"
 	);
 
 	services
 		.state_accessor
 		.state_full_ids_strict(intact_state)
-		.try_collect::<Vec<_>>()
-		.await
-		.map_err(|error| err!("degree one fixture corrupted the restored state: {error}"))?;
+		.map_err(|error| err!("degree one fixture corrupted the restored state: {error}"))
+		.map_ok(|_| ())
+		.try_collect::<()>()
+		.await?;
 
 	assert_all_committed(services, incoming.event_id.as_ref(), "degree one state miss").await?;
 	assert_fetches(
@@ -80,19 +80,10 @@ pub(super) async fn sibling_state_miss(
 		.await?;
 
 	append_state(services, user_id, &room_id, "sibling left change").await?;
+
 	let left = append_message(services, user_id, &room_id, "sibling left").await?;
-	let state_lock = services.state.mutex.lock(&room_id).await;
 
-	services
-		.state
-		.set_room_state(&room_id, boundary_state, &state_lock);
-
-	services
-		.state
-		.set_forward_extremities(&room_id, once(boundary.as_ref()), &state_lock)
-		.await;
-
-	drop(state_lock);
+	restore_room_state(services, &room_id, boundary_state, &boundary).await;
 
 	let right = append_message(services, user_id, &room_id, "sibling right").await?;
 

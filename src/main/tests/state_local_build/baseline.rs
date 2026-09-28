@@ -3,13 +3,14 @@ use tuwunel_core::{
 	Error, Result, err,
 	matrix::pdu::into_outgoing_federation,
 	ruma::{RoomId, RoomVersionId, UserId},
+	utils::result::NotFound,
 };
 use tuwunel_service::Services;
 
 use super::{
 	helpers::{
-		ExpectedWalkOutcome, assert_one_settled_walk, create_room, create_room_version,
-		held_state_fork, sign_message, suppress_upgrade,
+		ExpectedWalkOutcome, assert_one_settled_walk, counter_delta, create_room,
+		create_room_version, held_fork, held_state_fork, sign_message, suppress_upgrade,
 	},
 	positional::{missing_create_falls_through_to_fetch, positional_rejection_stays_uncommitted},
 	redelivery::gapped_redelivery_backs_off,
@@ -22,55 +23,61 @@ pub(super) async fn enabled_baseline(
 	token: &str,
 	user_id: &UserId,
 ) -> Result {
-	let step_error = |step: &str, error: Error| err!("baseline {step} failed: {error}");
+	let step = |label: &'static str| move |error: Error| err!("baseline {label} failed: {error}");
 
+	let label = "held multi-prev fork";
 	let fork_room = create_room(services, base, token)
 		.await
-		.map_err(|error| step_error("held multi-prev fork", error))?;
+		.map_err(step(label))?;
 
 	held_multi_prev_fork_resolves_locally(services, user_id, &fork_room)
 		.await
-		.map_err(|error| step_error("held multi-prev fork", error))?;
+		.map_err(step(label))?;
 
+	let label = "v12 conflicted fork";
 	let v12_fork_room = create_room_version(services, base, token, &RoomVersionId::V12)
 		.await
-		.map_err(|error| step_error("v12 conflicted fork", error))?;
+		.map_err(step(label))?;
 
 	held_conflicted_fork_resolves_locally(services, user_id, &v12_fork_room)
 		.await
-		.map_err(|error| step_error("v12 conflicted fork", error))?;
+		.map_err(step(label))?;
 
+	let label = "positional rejection";
 	let denial_room = create_room(services, base, token)
 		.await
-		.map_err(|error| step_error("positional rejection", error))?;
+		.map_err(step(label))?;
 
 	positional_rejection_stays_uncommitted(services, user_id, &denial_room)
 		.await
-		.map_err(|error| step_error("positional rejection", error))?;
+		.map_err(step(label))?;
 
+	let label = "missing-create fallback";
 	let missing_create_room = create_room(services, base, token)
 		.await
-		.map_err(|error| step_error("missing-create fallback", error))?;
+		.map_err(step(label))?;
 
 	missing_create_falls_through_to_fetch(services, user_id, &missing_create_room)
 		.await
-		.map_err(|error| step_error("missing-create fallback", error))?;
+		.map_err(step(label))?;
 
+	let label = "soft-failed state row";
 	let soft_fail_room = create_room(services, base, token)
 		.await
-		.map_err(|error| step_error("soft-failed state row", error))?;
+		.map_err(step(label))?;
 
 	soft_failed_event_keeps_state_row(services, user_id, &soft_fail_room)
 		.await
-		.map_err(|error| step_error("soft-failed state row", error))?;
+		.map_err(step(label))?;
 
+	let label = "gapped redelivery backoff";
 	let redelivery_room = create_room(services, base, token)
 		.await
-		.map_err(|error| step_error("gapped redelivery backoff", error))?;
+		.map_err(step(label))?;
 
 	gapped_redelivery_backs_off(services, user_id, &redelivery_room)
 		.await
-		.map_err(|error| step_error("gapped redelivery backoff", error))
+		.map_err(step(label))
 }
 
 async fn held_multi_prev_fork_resolves_locally(
@@ -80,33 +87,12 @@ async fn held_multi_prev_fork_resolves_locally(
 ) -> Result {
 	let (left, left_json) = sign_message(services, user_id, room_id, "left").await?;
 	let (right, right_json) = sign_message(services, user_id, room_id, "right").await?;
-
-	services
-		.timeline
-		.add_pdu_outlier(&left.event_id, &left_json);
-
-	services
-		.timeline
-		.add_pdu_outlier(&right.event_id, &right_json);
+	let (top, top_json) =
+		held_fork(services, user_id, room_id, (&left, &left_json), (&right, &right_json), "top")
+			.await?;
 
 	suppress_upgrade(services, &left.event_id)?;
 	suppress_upgrade(services, &right.event_id)?;
-
-	let state_lock = services.state.mutex.lock(room_id).await;
-	let prevs = [left.event_id.as_ref(), right.event_id.as_ref()];
-
-	services
-		.state
-		.set_forward_extremities(room_id, prevs.into_iter(), &state_lock)
-		.await;
-
-	drop(state_lock);
-
-	let (top, top_json) = sign_message(services, user_id, room_id, "top").await?;
-
-	services
-		.timeline
-		.add_pdu_outlier(&top.event_id, &top_json);
 
 	let shortstatehash = services
 		.state
@@ -160,14 +146,11 @@ async fn held_multi_prev_fork_resolves_locally(
 	let after = services.event_handler.state_local_metrics();
 
 	assert_one_settled_walk(before, after, ExpectedWalkOutcome::Resolved, "held multi-prev fork");
-	assert_eq!(
-		after
-			.walk_resolved
-			.checked_sub(before.walk_resolved)
-			.expect("walk resolved counter should not decrease"),
-		1,
-		"held multi-prev fork did not resolve locally",
-	);
+
+	let resolved =
+		counter_delta(after.walk_resolved, before.walk_resolved, "held multi-prev fork");
+
+	assert_eq!(resolved, 1, "held multi-prev fork did not resolve locally");
 
 	services
 		.timeline
@@ -175,18 +158,17 @@ async fn held_multi_prev_fork_resolves_locally(
 		.await?;
 
 	for parent in [left.event_id.as_ref(), right.event_id.as_ref()] {
-		assert!(
-			services
-				.timeline
-				.non_outlier_pdu_exists(parent)
-				.await
-				.is_err_and(|error| error.is_not_found()),
-			"held parent unexpectedly reached the timeline"
-		);
-		assert!(
-			services.timeline.pdu_exists(parent).await,
-			"held parent disappeared from the outlier store"
-		);
+		let absent = services
+			.timeline
+			.non_outlier_pdu_exists(parent)
+			.await
+			.is_not_found();
+
+		assert!(absent, "held parent unexpectedly reached the timeline");
+
+		let stored = services.timeline.pdu_exists(parent).await;
+
+		assert!(stored, "held parent disappeared from the outlier store");
 	}
 
 	Ok(())
@@ -211,7 +193,9 @@ async fn held_conflicted_fork_resolves_locally(
 		.state_accessor
 		.state_full_ids(shortstatehash)
 		.count()
-		.await;
+		.await
+		.checked_add(1)
+		.expect("state length fits in usize");
 
 	let before_report = services.event_handler.state_local_metrics();
 	let report = services
@@ -228,11 +212,7 @@ async fn held_conflicted_fork_resolves_locally(
 	assert_eq!(report.fallback, None, "v12 local traversal used federation");
 	assert_eq!(
 		report.state_len,
-		Some(
-			expected_state_len
-				.checked_add(1)
-				.expect("state length fits in usize")
-		),
+		Some(expected_state_len),
 		"v12 resolution did not add exactly one conflicted state key",
 	);
 
@@ -263,15 +243,13 @@ async fn held_conflicted_fork_resolves_locally(
 		.await?;
 
 	for parent in [left.event_id.as_ref(), right.event_id.as_ref()] {
-		assert!(
-			services
-				.timeline
-				.non_outlier_pdu_exists(parent)
-				.await
-				.is_err_and(|error| error.is_not_found()),
-			"v12 held parent unexpectedly reached the timeline",
-		);
+		let absent = services
+			.timeline
+			.non_outlier_pdu_exists(parent)
+			.await
+			.is_not_found();
 
+		assert!(absent, "v12 held parent unexpectedly reached the timeline");
 		assert!(services.timeline.pdu_exists(parent).await, "v12 held parent was lost");
 	}
 

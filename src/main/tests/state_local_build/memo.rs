@@ -7,7 +7,8 @@ use tuwunel_service::{Services, rooms::short::ShortStateHash};
 
 use super::helpers::{
 	ExpectedWalkOutcome, append_message, assert_accepts, assert_fetches, assert_no_memo,
-	create_room, held_message_chain, set_forward_extremity, sign_message, suppress_upgrade,
+	create_room, held_message_chain, set_forward_extremity, sign_outlier_message,
+	suppress_upgrade,
 };
 
 pub(super) async fn direct_memo_failure_is_miss(
@@ -24,12 +25,6 @@ pub(super) async fn direct_memo_failure_is_miss(
 	services.clear_cache().await;
 	suppress_upgrade(services, held.event_id.as_ref())?;
 	plant_memo(services, top.event_id.as_ref(), ShortStateHash::MAX).await?;
-
-	let memo = services.db.get("eventid_resolvedstate")?;
-
-	memo.exists(&top.event_id)
-		.await
-		.map_err(|error| err!("direct memo fixture was not planted: {error}"))?;
 
 	let report = services
 		.event_handler
@@ -52,20 +47,17 @@ pub(super) async fn walk_memo_failure_is_unevaluable(
 ) -> Result {
 	let room_id = create_room(services, base, token).await?;
 	let boundary = append_message(services, user_id, &room_id, "walk memo boundary").await?;
-	let (memo, middle, _) = held_message_chain(services, user_id, &room_id, &boundary).await?;
+	let (held, middle, _) = held_message_chain(services, user_id, &room_id, &boundary).await?;
 
 	set_forward_extremity(services, &room_id, middle.event_id.as_ref()).await;
 
-	let (top, top_json) = sign_message(services, user_id, &room_id, "walk memo top").await?;
-
-	services
-		.timeline
-		.add_pdu_outlier(&top.event_id, &top_json);
+	let (top, top_json) =
+		sign_outlier_message(services, user_id, &room_id, "walk memo top").await?;
 
 	services.clear_cache().await;
-	suppress_upgrade(services, memo.event_id.as_ref())?;
+	suppress_upgrade(services, held.event_id.as_ref())?;
 	suppress_upgrade(services, middle.event_id.as_ref())?;
-	plant_memo(services, memo.event_id.as_ref(), ShortStateHash::MAX).await?;
+	plant_memo(services, held.event_id.as_ref(), ShortStateHash::MAX).await?;
 
 	let report = services
 		.event_handler

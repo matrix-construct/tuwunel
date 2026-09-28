@@ -1,9 +1,6 @@
-use std::collections::BTreeSet;
-
-use futures::StreamExt;
 use tuwunel_core::{
-	Err, Result, async_noinline, err,
-	matrix::{PduEvent, pdu::into_outgoing_federation},
+	Err, Result, async_noinline,
+	matrix::PduEvent,
 	pdu::PduBuilder,
 	ruma::{
 		CanonicalJsonObject, EventId, OwnedEventId, RoomId, UserId,
@@ -12,11 +9,15 @@ use tuwunel_core::{
 			room::member::{MembershipState, RoomMemberEventContent},
 		},
 	},
+	utils::result::NotFound,
 };
 use tuwunel_service::Services;
 
-use super::helpers::{set_forward_extremity, sign_message, sign_state};
+use super::helpers::{
+	SignedPdu, redeliver, set_forward_extremity, sign_outlier_message, sign_state,
+};
 
+// size firewall
 #[async_noinline]
 pub(super) async fn soft_failed_event_keeps_state_row<'a>(
 	services: &'a Services,
@@ -25,15 +26,11 @@ pub(super) async fn soft_failed_event_keeps_state_row<'a>(
 ) -> Result {
 	let (first, first_json) = sign_leave(services, user_id, room_id, "first leave").await?;
 	let (delayed, delayed_json) = sign_leave(services, user_id, room_id, "delayed leave").await?;
-	let mut original_prevs = first.prev_events.iter();
-	let original_prev = original_prevs
-		.next()
-		.ok_or_else(|| err!("first leave has no predecessor"))?
-		.to_owned();
-
-	if original_prevs.next().is_some() {
-		return Err!("first leave has multiple predecessors");
-	}
+	let original_prev = match first.prev_events.as_slice() {
+		| [prev] => prev,
+		| [] => return Err!("first leave has no predecessor"),
+		| _ => return Err!("first leave has multiple predecessors"),
+	};
 
 	let top_event_id = prepare_soft_fail_descendant(
 		services,
@@ -41,90 +38,58 @@ pub(super) async fn soft_failed_event_keeps_state_row<'a>(
 		room_id,
 		&delayed,
 		&delayed_json,
-		&original_prev,
+		original_prev,
 	)
 	.await?;
 
-	let room_version = services.state.get_room_version(room_id).await?;
-	let first_json = into_outgoing_federation(first_json, &room_version);
-	let first_result = services
-		.event_handler
-		.handle_incoming_pdu(
-			services.globals.server_name(),
-			room_id,
-			first.event_id.as_ref(),
-			first_json,
-			true,
-		)
-		.await?;
+	let accepted = redeliver(services, room_id, &first, first_json, "first leave").await?;
 
-	assert!(first_result.is_some(), "first leave was not accepted");
+	assert!(accepted, "first leave was not accepted");
 
-	let delayed_json = into_outgoing_federation(delayed_json, &room_version);
-	let delayed_result = services
-		.event_handler
-		.handle_incoming_pdu(
-			services.globals.server_name(),
-			room_id,
-			delayed.event_id.as_ref(),
-			delayed_json,
-			true,
-		)
-		.await?;
+	let handled = redeliver(services, room_id, &delayed, delayed_json, "delayed leave").await?;
 
-	assert_eq!(delayed_result, None, "delayed leave was not soft failed");
-	assert!(
-		services
-			.pdu_metadata
-			.is_event_soft_failed(delayed.event_id.as_ref())
-			.await,
-		"delayed leave lacks its soft-fail marker"
-	);
+	assert!(!handled, "delayed leave was not soft failed");
 
-	assert!(
-		services
-			.timeline
-			.non_outlier_pdu_exists(delayed.event_id.as_ref())
-			.await
-			.is_err_and(|error| error.is_not_found()),
-		"soft-failed event reached the timeline"
-	);
+	let delayed_id: &EventId = delayed.event_id.as_ref();
+	let soft_failed = services
+		.pdu_metadata
+		.is_event_soft_failed(delayed_id)
+		.await;
 
-	assert!(
-		services
-			.timeline
-			.pdu_exists(delayed.event_id.as_ref())
-			.await,
-		"soft-failed event disappeared from the outlier store"
-	);
+	assert!(soft_failed, "delayed leave lacks its soft-fail marker");
+
+	let absent = services
+		.timeline
+		.non_outlier_pdu_exists(delayed_id)
+		.await
+		.is_not_found();
+
+	assert!(absent, "soft-failed event reached the timeline");
+
+	let retained = services.timeline.pdu_exists(delayed_id).await;
+
+	assert!(retained, "soft-failed event disappeared from the outlier store");
 
 	let shortstatehash = services
 		.state
-		.pdu_shortstatehash(delayed.event_id.as_ref())
+		.pdu_shortstatehash(delayed_id)
 		.await?;
 
-	let state_keys = services
+	let has_create = services
 		.state_accessor
-		.state_full_ids(shortstatehash)
-		.map(|(shortstatekey, _)| shortstatekey)
-		.collect::<BTreeSet<_>>()
-		.await;
+		.state_get_id(shortstatehash, &StateEventType::RoomCreate, "")
+		.await
+		.is_ok();
 
-	let create = services
-		.short
-		.get_shortstatekey(&StateEventType::RoomCreate, "")
-		.await?;
+	assert!(has_create, "soft-fail state row has no create event");
 
-	let membership = services
-		.short
-		.get_shortstatekey(&StateEventType::RoomMember, user_id.as_str())
-		.await?;
+	let has_membership = services
+		.state_accessor
+		.state_get_id(shortstatehash, &StateEventType::RoomMember, user_id.as_str())
+		.await
+		.is_ok();
 
-	assert!(state_keys.contains(&create), "soft-fail state row has no create event");
-	assert!(
-		state_keys.contains(&membership),
-		"soft-fail state row has no positional membership"
-	);
+	assert!(has_membership, "soft-fail state row has no positional membership");
 
 	let report = services
 		.event_handler
@@ -145,13 +110,13 @@ async fn sign_leave(
 	user_id: &UserId,
 	room_id: &RoomId,
 	reason: &str,
-) -> Result<(PduEvent, CanonicalJsonObject)> {
+) -> Result<SignedPdu> {
 	let content = RoomMemberEventContent {
 		reason: Some(reason.to_owned()),
 		..RoomMemberEventContent::new(MembershipState::Leave)
 	};
 
-	let builder = PduBuilder::state(user_id.to_string(), &content);
+	let builder = PduBuilder::state(user_id.as_str(), &content);
 	let state_lock = services.state.mutex.lock(room_id).await;
 
 	services
@@ -160,6 +125,7 @@ async fn sign_leave(
 		.await
 }
 
+// size firewall
 #[async_noinline]
 async fn prepare_soft_fail_descendant<'a>(
 	services: &'a Services,
@@ -175,6 +141,7 @@ async fn prepare_soft_fail_descendant<'a>(
 
 	set_forward_extremity(services, room_id, delayed.event_id.as_ref()).await;
 
+	// size firewall
 	let (held, held_json) =
 		Box::pin(sign_state(services, user_id, room_id, "held after leave")).await?;
 
@@ -184,12 +151,9 @@ async fn prepare_soft_fail_descendant<'a>(
 
 	set_forward_extremity(services, room_id, held.event_id.as_ref()).await;
 
-	let (top, top_json) =
-		Box::pin(sign_message(services, user_id, room_id, "top after leave")).await?;
-
-	services
-		.timeline
-		.add_pdu_outlier(&top.event_id, &top_json);
+	// size firewall
+	let (top, _) =
+		Box::pin(sign_outlier_message(services, user_id, room_id, "top after leave")).await?;
 
 	set_forward_extremity(services, room_id, original_prev).await;
 

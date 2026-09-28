@@ -1,16 +1,16 @@
-use std::{iter::once, sync::Arc};
-
-use futures::{StreamExt, future::ready};
+use futures::StreamExt;
 use tuwunel_core::{
 	Err, Error, Result,
 	matrix::pdu::into_outgoing_federation,
 	ruma::{EventId, RoomId, UserId, events::StateEventType},
+	utils::{ReadyExt, result::NotFound},
 };
 use tuwunel_service::{Services, rooms::state_compressor::CompressedState};
 
 use super::helpers::{
-	ExpectedWalkOutcome, append_message, assert_one_settled_walk, set_forward_extremities,
-	sign_message, sign_state, suppress_upgrade,
+	ExpectedWalkOutcome, append_message, assert_one_settled_walk, counter_delta,
+	set_forward_extremities, set_forward_extremity, sign_outlier_message, sign_state,
+	suppress_upgrade,
 };
 
 pub(super) async fn positional_rejection_stays_uncommitted(
@@ -35,19 +35,21 @@ pub(super) async fn positional_rejection_stays_uncommitted(
 	.await?;
 
 	let room_version = services.state.get_room_version(room_id).await?;
+	let is_timeline_event = true;
 
 	for (denied, denied_json) in
 		[(&denied_left, denied_left_json), (&denied_right, denied_right_json)]
 	{
+		let event_id: &EventId = denied.event_id.as_ref();
 		let denied_json = into_outgoing_federation(denied_json, &room_version);
 		let result = services
 			.event_handler
 			.handle_incoming_pdu(
 				services.globals.server_name(),
 				room_id,
-				denied.event_id.as_ref(),
+				event_id,
 				denied_json,
-				true,
+				is_timeline_event,
 			)
 			.await;
 
@@ -56,24 +58,15 @@ pub(super) async fn positional_rejection_stays_uncommitted(
 			"positionally invalid event had an unexpected result: {result:?}"
 		);
 
-		assert!(
-			services
-				.timeline
-				.pdu_exists(denied.event_id.as_ref())
-				.await,
-			"positionally rejected event was not retained as an outlier"
-		);
+		let retained = services.timeline.pdu_exists(event_id).await;
 
-		assert!(
-			services
-				.state
-				.pdu_shortstatehash(denied.event_id.as_ref())
-				.await
-				.is_err_and(|error| error.is_not_found()),
-			"positionally rejected event gained a state row"
-		);
+		assert!(retained, "positionally rejected event was not retained as an outlier");
 
-		suppress_upgrade(services, denied.event_id.as_ref())?;
+		let state_row = services.state.pdu_shortstatehash(event_id).await;
+
+		assert!(state_row.is_not_found(), "positionally rejected event gained a state row");
+
+		suppress_upgrade(services, event_id)?;
 	}
 
 	set_forward_extremities(services, room_id, [
@@ -82,11 +75,7 @@ pub(super) async fn positional_rejection_stays_uncommitted(
 	])
 	.await;
 
-	let (top, top_json) = sign_message(services, user_id, room_id, "denial top").await?;
-
-	services
-		.timeline
-		.add_pdu_outlier(&top.event_id, &top_json);
+	let (top, top_json) = sign_outlier_message(services, user_id, room_id, "denial top").await?;
 
 	let before_report = services.event_handler.state_local_metrics();
 
@@ -107,7 +96,6 @@ pub(super) async fn positional_rejection_stays_uncommitted(
 
 	let before = services.event_handler.state_local_metrics();
 	let top_json = into_outgoing_federation(top_json, &room_version);
-	let is_timeline_event = true;
 
 	let result = services
 		.event_handler
@@ -128,23 +116,15 @@ pub(super) async fn positional_rejection_stays_uncommitted(
 	let after = services.event_handler.state_local_metrics();
 
 	assert_one_settled_walk(before, after, ExpectedWalkOutcome::Resolved, "clean gate denial");
-	assert_eq!(
-		after
-			.walk_resolved
-			.checked_sub(before.walk_resolved)
-			.expect("walk resolved counter should not decrease"),
-		1,
-		"clean gate denial did not resolve locally",
-	);
 
-	assert_eq!(
-		after
-			.gate_denials
-			.checked_sub(before.gate_denials)
-			.expect("gate denial counter should not decrease"),
-		u64::try_from(report.gate_drops).expect("gate denial count should fit in u64"),
-		"clean gate denials were not aggregated exactly once each",
-	);
+	let resolved = counter_delta(after.walk_resolved, before.walk_resolved, "clean gate denial");
+
+	assert_eq!(resolved, 1, "clean gate denial did not resolve locally");
+
+	let denials = counter_delta(after.gate_denials, before.gate_denials, "clean gate denial");
+	let drops = u64::try_from(report.gate_drops).expect("gate denial count should fit in u64");
+
+	assert_eq!(denials, drops, "clean gate denials were not aggregated exactly once each");
 
 	Ok(())
 }
@@ -165,21 +145,10 @@ pub(super) async fn missing_create_falls_through_to_fetch(
 		.add_pdu_outlier(&held.event_id, &held_json);
 
 	suppress_upgrade(services, held.event_id.as_ref())?;
+	set_forward_extremity(services, room_id, held.event_id.as_ref()).await;
 
-	let state_lock = services.state.mutex.lock(room_id).await;
-
-	services
-		.state
-		.set_forward_extremities(room_id, once(held.event_id.as_ref()), &state_lock)
-		.await;
-
-	drop(state_lock);
-
-	let (top, top_json) = sign_message(services, user_id, room_id, "missing create top").await?;
-
-	services
-		.timeline
-		.add_pdu_outlier(&top.event_id, &top_json);
+	let (top, top_json) =
+		sign_outlier_message(services, user_id, room_id, "missing create top").await?;
 
 	let report = services
 		.event_handler
@@ -197,7 +166,7 @@ pub(super) async fn missing_create_falls_through_to_fetch(
 
 	let room_version = services.state.get_room_version(room_id).await?;
 	let top_json = into_outgoing_federation(top_json, &room_version);
-	let result = services
+	let Err(error) = services
 		.event_handler
 		.handle_incoming_pdu(
 			services.globals.server_name(),
@@ -206,9 +175,8 @@ pub(super) async fn missing_create_falls_through_to_fetch(
 			top_json,
 			true,
 		)
-		.await;
-
-	let Err(error) = result else {
+		.await
+	else {
 		return Err!("missing create did not fall through to federation fetch");
 	};
 
@@ -242,14 +210,14 @@ async fn replace_state_before_without(
 	let (state, excluded) = services
 		.state_accessor
 		.state_full_ids(shortstatehash)
-		.fold((Vec::new(), false), |(mut state, mut excluded), entry| {
+		.ready_fold((Vec::new(), false), |(mut state, mut excluded), entry| {
 			if entry.0 == shortstatekey {
 				excluded = true;
 			} else {
 				state.push(entry);
 			}
 
-			ready((state, excluded))
+			(state, excluded)
 		})
 		.await;
 
@@ -267,11 +235,9 @@ async fn replace_state_before_without(
 		.collect()
 		.await;
 
-	let compressed = Arc::new(compressed);
-
 	services
 		.state
-		.set_event_state(event_id, room_id, compressed)
+		.set_event_state(event_id, room_id, compressed.into())
 		.await?;
 
 	Ok(())

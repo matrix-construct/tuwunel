@@ -1,29 +1,32 @@
 use std::{
 	iter::once,
+	pin::pin,
 	sync::atomic::{AtomicBool, Ordering},
 };
 
-use futures::{StreamExt, TryStreamExt, future::ready, pin_mut};
+use futures::{TryStreamExt, future::ready};
 use tuwunel_core::{
 	Err, Result, err,
+	itertools::Itertools,
 	matrix::{PduEvent, pdu::into_outgoing_federation},
 	pdu::PduBuilder,
 	ruma::{
-		CanonicalJsonObject, EventId, OwnedEventId, RoomId, RoomVersionId, UserId,
+		EventId, OwnedEventId, RoomId, RoomVersionId, UserId,
 		events::{
 			StateEventType,
 			room::member::{MembershipState, RoomMemberEventContent},
 		},
 	},
+	utils::{BoolExt, result::NotFound},
 };
 use tuwunel_database::serialize_key;
 use tuwunel_service::Services;
 
 use super::helpers::{
-	CacheHandling, ExpectedWalkOutcome, PduFailure, append_message, assert_accepts,
+	CacheHandling, ExpectedWalkOutcome, HeldFork, PduFailure, append_message, assert_accepts,
 	assert_fetches, assert_no_memo, assert_unevaluable, corrupt_timeline_pdu, create_room,
-	create_room_version, held_state_fork, set_forward_extremities, set_forward_extremity,
-	sign_message, suppress_upgrade,
+	create_room_version, held_fork, held_state_fork, set_forward_extremity, sign_message,
+	sign_outlier_message, suppress_upgrade,
 };
 
 #[derive(Clone, Copy)]
@@ -33,7 +36,7 @@ pub(super) enum AncestorFailure {
 	V12InteriorFork,
 }
 
-pub(super) async fn auth_ancestor_failure(
+pub(super) async fn ancestor_failure(
 	services: &Services,
 	base: &str,
 	token: &str,
@@ -54,27 +57,19 @@ pub(super) async fn auth_ancestor_failure(
 	let (top, top_json) = if interior {
 		set_forward_extremity(services, &room_id, fork.event_id.as_ref()).await;
 
-		let (top, top_json) = sign_message(services, user_id, &room_id, "sentinel top").await?;
-
-		services
-			.timeline
-			.add_pdu_outlier(&top.event_id, &top_json);
-
-		(top, top_json)
+		sign_outlier_message(services, user_id, &room_id, "sentinel top").await?
 	} else {
 		(fork.clone(), fork_json)
 	};
 
-	let cached_auth_chain = match failure {
-		| AncestorFailure::InteriorFork | AncestorFailure::V12InteriorFork =>
-			Some(prime_local_auth_chain(services, top.event_id.as_ref()).await?),
-		| _ => None,
-	};
+	let cached_auth_chain = interior
+		.then_async(|| prime_local_auth_chain(services, top.event_id.as_ref()))
+		.await
+		.transpose()?;
 
-	let cache_handling = match cached_auth_chain {
-		| Some(_) => CacheHandling::Preserve,
-		| None => CacheHandling::Clear,
-	};
+	let cache_handling = cached_auth_chain
+		.as_ref()
+		.map_or(CacheHandling::Clear, |_| CacheHandling::Preserve);
 
 	corrupt_timeline_pdu(services, &ancestor, PduFailure::Missing, cache_handling).await?;
 
@@ -117,11 +112,7 @@ pub(super) async fn corrupt_chain_cache_rebuilds(
 	user_id: &UserId,
 ) -> Result {
 	let room_id = create_room(services, base, token).await?;
-	let membership = services
-		.state_accessor
-		.room_state_get(&room_id, &StateEventType::RoomMember, user_id.as_str())
-		.await?;
-
+	let membership = member_event(services, &room_id, user_id).await?;
 	let room_version = services.state.get_room_version(&room_id).await?;
 	let shorteventid = services
 		.short
@@ -129,20 +120,24 @@ pub(super) async fn corrupt_chain_cache_rebuilds(
 		.await?;
 
 	let key = serialize_key([shorteventid].as_slice())?;
+	let sorted_chain = async |complete: &AtomicBool| -> Result<Vec<OwnedEventId>> {
+		services
+			.auth_chain
+			.event_ids_iter_strict(
+				&room_id,
+				&room_version,
+				once(membership.event_id.as_ref()),
+				complete,
+			)
+			.try_collect::<Vec<_>>()
+			.await
+			.map(|event_ids| event_ids.into_iter().sorted_unstable().collect())
+	};
 
 	services.clear_cache().await;
 
 	let first_complete = AtomicBool::new(true);
-	let mut expected = services
-		.auth_chain
-		.event_ids_iter_strict(
-			&room_id,
-			&room_version,
-			once(membership.event_id.as_ref()),
-			&first_complete,
-		)
-		.try_collect::<Vec<_>>()
-		.await?;
+	let expected = sorted_chain(&first_complete).await?;
 
 	assert!(first_complete.load(Ordering::Relaxed), "initial auth chain was incomplete");
 	assert!(!expected.is_empty(), "auth-chain cache fixture has an empty chain");
@@ -157,31 +152,19 @@ pub(super) async fn corrupt_chain_cache_rebuilds(
 	cache.insert(&key, b"!");
 
 	let complete = AtomicBool::new(true);
-	let mut rebuilt = services
-		.auth_chain
-		.event_ids_iter_strict(
-			&room_id,
-			&room_version,
-			once(membership.event_id.as_ref()),
-			&complete,
-		)
-		.try_collect::<Vec<_>>()
-		.await?;
-
-	expected.sort_unstable();
-	rebuilt.sort_unstable();
+	let rebuilt = sorted_chain(&complete).await?;
 
 	assert_eq!(rebuilt, expected, "malformed auth-chain cache did not rebuild");
 	assert!(complete.load(Ordering::Relaxed), "cache rebuild tripped completeness");
 
-	let rebuilt = cache.get(&key).await?;
+	let row = cache.get(&key).await?;
 
 	assert!(
-		rebuilt.len().is_multiple_of(size_of::<u64>()),
+		row.len().is_multiple_of(size_of::<u64>()),
 		"rebuilt auth-chain cache remains malformed"
 	);
 
-	assert_ne!(&*rebuilt, b"!", "malformed auth-chain cache was not replaced");
+	assert_ne!(&*row, b"!", "malformed auth-chain cache was not replaced");
 
 	Ok(())
 }
@@ -230,10 +213,7 @@ pub(super) async fn current_state_auth_failure(
 
 	verified_replaced_membership_ancestor(services, &room_id, user_id).await?;
 
-	let current_membership = services
-		.state_accessor
-		.room_state_get(&room_id, &StateEventType::RoomMember, user_id.as_str())
-		.await?;
+	let current_membership = member_event(services, &room_id, user_id).await?;
 
 	corrupt_timeline_pdu(
 		services,
@@ -269,30 +249,28 @@ pub(super) async fn current_state_auth_failure(
 		current_membership.event_id,
 	);
 
-	assert!(
-		!services
-			.pdu_metadata
-			.is_event_soft_failed(incoming.event_id.as_ref())
-			.await,
-		"current-state dependency failure persisted a soft-fail marker",
-	);
+	let unmarked = services
+		.pdu_metadata
+		.is_event_soft_failed(incoming.event_id.as_ref())
+		.await
+		.is_false();
 
-	assert!(
-		services
-			.timeline
-			.non_outlier_pdu_exists(incoming.event_id.as_ref())
-			.await
-			.is_err_and(|error| error.is_not_found()),
-		"current-state dependency failure reached the timeline",
-	);
+	assert!(unmarked, "current-state dependency failure persisted a soft-fail marker");
 
-	assert!(
-		services
-			.timeline
-			.pdu_exists(incoming.event_id.as_ref())
-			.await,
-		"current-state dependency failure lost the outlier",
-	);
+	let absent = services
+		.timeline
+		.non_outlier_pdu_exists(incoming.event_id.as_ref())
+		.await
+		.is_not_found();
+
+	assert!(absent, "current-state dependency failure reached the timeline");
+
+	let retained = services
+		.timeline
+		.pdu_exists(incoming.event_id.as_ref())
+		.await;
+
+	assert!(retained, "current-state dependency failure lost the outlier");
 
 	assert_no_memo(services, incoming.event_id.as_ref()).await
 }
@@ -302,13 +280,9 @@ async fn verified_replaced_membership_ancestor(
 	room_id: &RoomId,
 	user_id: &UserId,
 ) -> Result<OwnedEventId> {
-	let ancestor = services
-		.state_accessor
-		.room_state_get(room_id, &StateEventType::RoomMember, user_id.as_str())
-		.await?;
-
+	let ancestor = member_event(services, room_id, user_id).await?;
 	let content = RoomMemberEventContent::new(MembershipState::Join);
-	let builder = PduBuilder::state(user_id.to_string(), &content);
+	let builder = PduBuilder::state(user_id.as_str(), &content);
 	let state_lock = services.state.mutex.lock(room_id).await;
 	let membership = services
 		.timeline
@@ -316,27 +290,33 @@ async fn verified_replaced_membership_ancestor(
 		.await?;
 
 	drop(state_lock);
-	let current = services
-		.state_accessor
-		.room_state_get(room_id, &StateEventType::RoomMember, user_id.as_str())
-		.await?;
+	let current = member_event(services, room_id, user_id).await?;
 
 	if current.event_id != membership {
 		return Err!("replacement membership did not become current room state");
 	}
 
 	let room_version = services.state.get_room_version(room_id).await?;
-	let has_ancestor = services
+
+	services
 		.auth_chain
 		.event_ids_iter(room_id, &room_version, once(membership.as_ref()))
 		.try_any(|event_id| ready(event_id == ancestor.event_id))
-		.await?;
+		.await?
+		.then_ok_or_else(ancestor.event_id, || {
+			err!("replaced membership is not an auth ancestor of its successor")
+		})
+}
 
-	if !has_ancestor {
-		return Err!("replaced membership is not an auth ancestor of its successor");
-	}
-
-	Ok(ancestor.event_id.clone())
+async fn member_event(
+	services: &Services,
+	room_id: &RoomId,
+	user_id: &UserId,
+) -> Result<PduEvent> {
+	services
+		.state_accessor
+		.room_state_get(room_id, &StateEventType::RoomMember, user_id.as_str())
+		.await
 }
 
 async fn prime_local_auth_chain(services: &Services, event_id: &EventId) -> Result<Vec<u8>> {
@@ -351,43 +331,32 @@ async fn prime_local_auth_chain(services: &Services, event_id: &EventId) -> Resu
 	assert!(report.state_len.is_some(), "auth-chain priming walk produced no state");
 
 	let cache = services.db.get("authchainkey_authchain")?;
-	let keys = cache.raw_keys();
 
-	pin_mut!(keys);
-	let key = keys
-		.next()
-		.await
-		.transpose()?
-		.ok_or_else(|| err!("auth-chain priming walk wrote no cache row"))?;
-
-	Ok(key.to_vec())
+	pin!(cache.raw_keys())
+		.try_next()
+		.await?
+		.map(<[u8]>::to_vec)
+		.ok_or_else(|| err!("auth-chain priming walk wrote no cache row"))
 }
 
 async fn held_message_fork(
 	services: &Services,
 	user_id: &UserId,
 	room_id: &RoomId,
-) -> Result<(PduEvent, PduEvent, PduEvent, CanonicalJsonObject)> {
+) -> Result<HeldFork> {
 	let (left, left_json) = sign_message(services, user_id, room_id, "plain fork left").await?;
 	let (right, right_json) =
 		sign_message(services, user_id, room_id, "plain fork right").await?;
 
-	services
-		.timeline
-		.add_pdu_outlier(&left.event_id, &left_json);
-
-	services
-		.timeline
-		.add_pdu_outlier(&right.event_id, &right_json);
-
-	set_forward_extremities(services, room_id, [left.event_id.as_ref(), right.event_id.as_ref()])
-		.await;
-
-	let (top, top_json) = sign_message(services, user_id, room_id, "plain fork top").await?;
-
-	services
-		.timeline
-		.add_pdu_outlier(&top.event_id, &top_json);
+	let (top, top_json) = held_fork(
+		services,
+		user_id,
+		room_id,
+		(&left, &left_json),
+		(&right, &right_json),
+		"plain fork top",
+	)
+	.await?;
 
 	Ok((left, right, top, top_json))
 }

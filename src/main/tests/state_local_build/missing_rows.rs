@@ -9,7 +9,7 @@ use super::helpers::{
 	CacheHandling, ExpectedWalkOutcome, PduFailure, append_message, append_state, assert_fetches,
 	assert_no_memo, assert_unevaluable, corrupt_timeline_pdu, create_room, held_message_chain,
 	held_state_fork, remove_short_row, restore_room_state, set_forward_extremities,
-	set_forward_extremity, sign_message, suppress_upgrade,
+	set_forward_extremity, sign_outlier_message, suppress_upgrade,
 };
 
 pub(super) async fn missing_state_diff(
@@ -21,7 +21,9 @@ pub(super) async fn missing_state_diff(
 	let room_id = create_room(services, base, token).await?;
 	let anchor = append_message(services, user_id, &room_id, "state diff anchor").await?;
 	let intact_state = services.state.pdu_shortstatehash(&anchor).await?;
+
 	append_state(services, user_id, &room_id, "state diff change").await?;
+
 	let boundary = append_message(services, user_id, &room_id, "state diff boundary").await?;
 	let (held, top, top_json) =
 		held_message_chain(services, user_id, &room_id, &boundary).await?;
@@ -34,21 +36,24 @@ pub(super) async fn missing_state_diff(
 	assert_ne!(intact_state, corrupt_state, "state diff fixture reused the intact state");
 	restore_room_state(services, &room_id, intact_state, &anchor).await;
 	remove_short_row(services, "shortstatehash_statediff", corrupt_state).await?;
+
+	let restored = services
+		.state
+		.get_room_shortstatehash(&room_id)
+		.await?;
+
 	assert_eq!(
-		services
-			.state
-			.get_room_shortstatehash(&room_id)
-			.await?,
-		intact_state,
-		"state diff fixture did not restore the current room state",
+		restored, intact_state,
+		"state diff fixture did not restore the current room state"
 	);
 
 	services
 		.state_accessor
 		.state_full_ids_strict(intact_state)
-		.try_collect::<Vec<_>>()
-		.await
-		.map_err(|error| err!("state diff fixture corrupted the restored state: {error}"))?;
+		.map_err(|error| err!("state diff fixture corrupted the restored state: {error}"))
+		.map_ok(|_| ())
+		.try_collect::<()>()
+		.await?;
 
 	suppress_upgrade(services, held.event_id.as_ref())?;
 	assert_unevaluable(services, top.event_id.as_ref(), "missing state diff").await?;
@@ -140,19 +145,12 @@ pub(super) async fn missing_named_pdu(
 
 	set_forward_extremities(services, &room_id, [left.as_ref(), right.as_ref()]).await;
 
-	let (fork, fork_json) = sign_message(services, user_id, &room_id, "named pdu fork").await?;
-
-	services
-		.timeline
-		.add_pdu_outlier(&fork.event_id, &fork_json);
+	let (fork, _) = sign_outlier_message(services, user_id, &room_id, "named pdu fork").await?;
 
 	set_forward_extremity(services, &room_id, fork.event_id.as_ref()).await;
 
-	let (top, top_json) = sign_message(services, user_id, &room_id, "named pdu top").await?;
-
-	services
-		.timeline
-		.add_pdu_outlier(&top.event_id, &top_json);
+	let (top, top_json) =
+		sign_outlier_message(services, user_id, &room_id, "named pdu top").await?;
 
 	corrupt_timeline_pdu(services, &missing, PduFailure::Missing, CacheHandling::Clear).await?;
 	suppress_upgrade(services, fork.event_id.as_ref())?;

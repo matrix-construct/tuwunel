@@ -1,36 +1,25 @@
-use std::iter::once;
-
 use tuwunel_core::{
 	Err, Result,
 	matrix::pdu::into_outgoing_federation,
 	ruma::{EventId, RoomId, UserId},
+	utils::{BoolExt, result::NotFound},
 };
 use tuwunel_database::Deserialized;
 use tuwunel_service::{Services, rooms::short::ShortStateHash};
 
-use super::helpers::{sign_message, suppress_upgrade};
+use super::helpers::{
+	set_forward_extremity, sign_message, sign_outlier_message, suppress_upgrade,
+};
 
-pub(super) async fn disabled_local_build_ignores_planted_memo(
+pub(super) async fn ignores_planted_memo(
 	services: &Services,
 	user_id: &UserId,
 	room_id: &RoomId,
 ) -> Result {
-	let (held, held_json) = sign_message(services, user_id, room_id, "held").await?;
-
-	services
-		.timeline
-		.add_pdu_outlier(&held.event_id, &held_json);
+	let (held, _) = sign_outlier_message(services, user_id, room_id, "held").await?;
 
 	suppress_upgrade(services, &held.event_id)?;
-
-	let state_lock = services.state.mutex.lock(room_id).await;
-
-	services
-		.state
-		.set_forward_extremities(room_id, once(held.event_id.as_ref()), &state_lock)
-		.await;
-
-	drop(state_lock);
+	set_forward_extremity(services, room_id, held.event_id.as_ref()).await;
 
 	let (incoming, incoming_json) = sign_message(services, user_id, room_id, "incoming").await?;
 	let shortstatehash = services
@@ -55,7 +44,7 @@ pub(super) async fn disabled_local_build_ignores_planted_memo(
 
 	let room_version = services.state.get_room_version(room_id).await?;
 	let incoming_json = into_outgoing_federation(incoming_json, &room_version);
-	let result = services
+	let Err(error) = services
 		.event_handler
 		.handle_incoming_pdu(
 			services.globals.server_name(),
@@ -64,34 +53,33 @@ pub(super) async fn disabled_local_build_ignores_planted_memo(
 			incoming_json,
 			true,
 		)
-		.await;
-
-	let Err(error) = result else {
+		.await
+	else {
 		return Err!("disabled local build served the planted memo");
 	};
 
-	if !error
+	if error
 		.to_string()
 		.contains("no candidate servers available")
+		.is_false()
 	{
 		return Err!("disabled local build failed before federation fallback: {error}");
 	}
 
-	assert!(
-		services
-			.timeline
-			.non_outlier_pdu_exists(incoming_event_id)
-			.await
-			.is_err_and(|error| error.is_not_found()),
-		"incoming event unexpectedly reached the timeline"
-	);
-	assert!(
-		services
-			.timeline
-			.pdu_exists(incoming_event_id)
-			.await,
-		"incoming event was not retained as an outlier"
-	);
+	let absent = services
+		.timeline
+		.non_outlier_pdu_exists(incoming_event_id)
+		.await
+		.is_not_found();
+
+	assert!(absent, "incoming event unexpectedly reached the timeline");
+
+	let retained = services
+		.timeline
+		.pdu_exists(incoming_event_id)
+		.await;
+
+	assert!(retained, "incoming event was not retained as an outlier");
 
 	Ok(())
 }
