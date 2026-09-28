@@ -13,7 +13,14 @@ use crate::admin_command_dispatch;
 #[admin_command_dispatch]
 #[derive(Debug, Subcommand)]
 pub(super) enum FederationCommand {
-	/// - List all rooms we are currently handling an incoming pdu from
+	/// - List incoming events walking back to missing prev events, then other
+	///   rooms busy with federation.
+	///
+	/// An event is listed while the server fetches or processes the earlier
+	/// events it is missing. The second list names the rooms where another
+	/// federation step, such as a transaction, a join or a backfill, holds the
+	/// room's federation lock, and shows no event or time. A room with a listed
+	/// event is left out of the second list.
 	IncomingFederation,
 
 	/// - Disables incoming federation handling for a room.

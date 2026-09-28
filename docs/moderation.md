@@ -62,8 +62,11 @@ commands. Run any command with `--help` for argument detail.
   Neither command touches the `m.federate` property of the room's
   `m.room.create` event, which is fixed when the room is created; see
   [Troubleshooting](./troubleshooting.md).
-- `!admin federation incoming-federation`: lists rooms with active inbound
-  PDU handlers.
+- `!admin federation incoming-federation`: lists the incoming events whose
+  missing earlier events the server is fetching or processing (room, event,
+  origin server, phase, elapsed time), then the rooms where another federation
+  step, such as a transaction, a join or a backfill, holds the room's
+  federation lock. A room with a listed event is left out of the second list.
 - `!admin federation fetch-support-well-known <server>`: fetches a remote
   server's `.well-known/matrix/support` record (administrator and security
   contacts), letting you raise abuse reports out-of-band before resorting to

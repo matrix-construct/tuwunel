@@ -2,7 +2,9 @@
 
 use clap::Parser;
 
-use crate::{admin::AdminCommand, media::MediaCommand, query::QueryCommand};
+use crate::{
+	admin::AdminCommand, federation::FederationCommand, media::MediaCommand, query::QueryCommand,
+};
 
 #[test]
 fn get_help_short() { get_help_inner("-h"); }
@@ -58,6 +60,16 @@ fn delete_range_accepts_one_direction() {
 		assert!(older_than, "{direction} must select the older-than direction");
 		assert!(!newer_than, "{direction} must leave the newer-than direction unset");
 	}
+}
+
+#[test]
+fn federation_incoming_parse() {
+	let command = parse_ok(&["argv[0] doesn't matter", "federation", "incoming-federation"]);
+
+	assert!(
+		matches!(command, AdminCommand::Federation(FederationCommand::IncomingFederation)),
+		"incoming-federation must parse as a federation command"
+	);
 }
 
 #[test]
