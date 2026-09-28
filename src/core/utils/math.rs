@@ -216,6 +216,14 @@ pub fn usize_from_u64_truncated(val: u64) -> usize { val as usize }
 #[must_use]
 pub fn u64_from_usize_saturating(val: usize) -> u64 { val.try_into().unwrap_or(u64::MAX) }
 
+/// Converts a `u128` to `u64`, saturating at `u64::MAX`.
+///
+/// Suits whole-unit `Duration` reads such as `as_millis()`, where clamping an
+/// out-of-range value beats failing on it.
+#[inline]
+#[must_use]
+pub fn u64_from_u128_saturating(val: u128) -> u64 { val.try_into().unwrap_or(u64::MAX) }
+
 /// Adds a `usize` count to an atomic `u64` counter, saturating the count at
 /// `u64::MAX`.
 ///
