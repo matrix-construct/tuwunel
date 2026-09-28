@@ -38,6 +38,8 @@ mod memo;
 mod missing_rows;
 #[path = "state_local_build/positional.rs"]
 mod positional;
+#[path = "state_local_build/prev_walk.rs"]
+mod prev_walk;
 #[path = "state_local_build/redelivery.rs"]
 mod redelivery;
 #[path = "state_local_build/soft_fail.rs"]

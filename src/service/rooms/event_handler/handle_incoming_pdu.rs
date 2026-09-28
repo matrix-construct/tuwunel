@@ -188,17 +188,6 @@ pub async fn handle_incoming_pdu<'a>(
 
 	self.prev_walk.enter(gapped);
 
-	let standing = gapped
-		.then_async(|| self.is_suppressed(Context::Incoming, event_id, UPGRADE_RETRY))
-		.await
-		.unwrap_or(Suppression::Absent);
-
-	if standing.is_deny() {
-		self.prev_walk.hold();
-		info!(%origin, %room_id, %event_id, "Backing off from a gapped incoming event.");
-		return Ok(None);
-	}
-
 	let create_event_id = create_event.event_id();
 	let upgrade = PrevUpgrade {
 		origin,
@@ -210,15 +199,34 @@ pub async fn handle_incoming_pdu<'a>(
 		create_event_id,
 	};
 
+	// Start before the first await so a dropped future still settles the gapped count.
+	let pass = gapped.then(|| PrevWalk::start(&self.prev_walk, &upgrade));
+	let standing = gapped
+		.then_async(|| self.is_suppressed(Context::Incoming, event_id, UPGRADE_RETRY))
+		.await
+		.unwrap_or(Suppression::Absent);
+
+	if standing.is_deny() {
+		if let Some(pass) = pass {
+			pass.hold();
+		}
+
+		info!(%origin, %room_id, %event_id, "Backing off from a gapped incoming event.");
+		return Ok(None);
+	}
+
 	// 9. Fetch any missing prev events doing all checks listed here starting at 1.
 	//    These are timeline events
 	let fetch = self
 		.fetch_prev(upgrade, incoming_pdu.prev_events())
-		.await?;
+		.await;
+
+	let stopping = self.services.server.is_stopping();
+	let walk = pass.and_then(|pass| pass.fetched(fetch.as_ref(), stopping));
+	let fetch = fetch?;
 
 	let walking = fetch.sorted.is_empty().is_false();
 	let attempt = walking.then(|| self.record_attempt(Context::Incoming, event_id));
-	let walk = walking.then(|| PrevWalk::start(&self.prev_walk, upgrade, &fetch));
 	let PrevFetch { sorted, pdus, .. } = fetch;
 
 	let (handled, upgraded) = self

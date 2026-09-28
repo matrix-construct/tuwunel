@@ -434,7 +434,22 @@ pub(super) fn assert_prev_walk(
 	context: &str,
 ) {
 	let actual = prev_walk_metrics_delta(&before, &after, context);
+	let gapped_ends: u64 = [
+		actual.held,
+		actual.closed,
+		actual.fetch_failed,
+		actual.fetch_cancelled,
+		actual.walked,
+	]
+	.into_iter()
+	.sum();
 
+	let walk_ends: u64 = [actual.appended, actual.not_appended, actual.failed, actual.cancelled]
+		.into_iter()
+		.sum();
+
+	assert_eq!(actual.gapped, gapped_ends, "{context} left a gapped event without an end");
+	assert_eq!(actual.walked, walk_ends, "{context} left a walk without an outcome");
 	assert_eq!(actual, expected, "{context} miscounted its prev walk");
 }
 
@@ -450,6 +465,9 @@ fn prev_walk_metrics_delta(
 		entered: delta(|metrics| metrics.entered),
 		gapped: delta(|metrics| metrics.gapped),
 		held: delta(|metrics| metrics.held),
+		closed: delta(|metrics| metrics.closed),
+		fetch_failed: delta(|metrics| metrics.fetch_failed),
+		fetch_cancelled: delta(|metrics| metrics.fetch_cancelled),
 		walked: delta(|metrics| metrics.walked),
 		walked_prevs: delta(|metrics| metrics.walked_prevs),
 		capped: delta(|metrics| metrics.capped),
