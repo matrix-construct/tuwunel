@@ -15,13 +15,23 @@ use tuwunel_database::Interfix;
 use tuwunel_service::{
 	Services,
 	rooms::{
-		event_handler::{PrevWalkMetrics, StateLocalMetrics},
+		event_handler::{BackoffMetrics, PrevWalkMetrics, StateLocalMetrics, Verdicts},
 		short::ShortStateHash,
 	},
 };
 
 pub(super) type SignedPdu = (PduEvent, CanonicalJsonObject);
 pub(super) type HeldFork = (PduEvent, PduEvent, PduEvent, CanonicalJsonObject);
+
+/// Prev-walk and backoff totals read together, so a case can check they agree.
+///
+/// The Incoming lookups are checked against the gapped and held counts, so both
+/// snapshots are taken at the same point of a case.
+#[derive(Clone, Copy)]
+pub(super) struct WalkMetrics {
+	pub(super) prev_walk: PrevWalkMetrics,
+	pub(super) backoff: BackoffMetrics,
+}
 
 #[derive(Clone, Copy)]
 pub(super) enum PduFailure {
@@ -427,13 +437,21 @@ fn settled_walks(metrics: &StateLocalMetrics) -> u64 {
 	.sum()
 }
 
+pub(super) fn walk_metrics(services: &Services) -> WalkMetrics {
+	WalkMetrics {
+		prev_walk: services.event_handler.prev_walk_metrics(),
+		backoff: services.event_handler.backoff_metrics(),
+	}
+}
+
 pub(super) fn assert_prev_walk(
-	before: PrevWalkMetrics,
-	after: PrevWalkMetrics,
+	before: WalkMetrics,
+	after: WalkMetrics,
 	expected: PrevWalkMetrics,
 	context: &str,
 ) {
-	let actual = prev_walk_metrics_delta(&before, &after, context);
+	let actual = prev_walk_metrics_delta(&before.prev_walk, &after.prev_walk, context);
+	let incoming = verdicts_delta(&before.backoff.incoming, &after.backoff.incoming, context);
 	let gapped_ends: u64 = [
 		actual.held,
 		actual.closed,
@@ -448,8 +466,22 @@ pub(super) fn assert_prev_walk(
 		.into_iter()
 		.sum();
 
+	// A pass dropped during its lookup records no verdict.
+	let lookup_bounds = actual
+		.gapped
+		.saturating_sub(actual.fetch_cancelled)..=actual.gapped;
+
+	let lookups = incoming.lookups();
+
 	assert_eq!(actual.gapped, gapped_ends, "{context} left a gapped event without an end");
 	assert_eq!(actual.walked, walk_ends, "{context} left a walk without an outcome");
+	assert_eq!(actual.held, incoming.denied, "{context} held without a backoff denial");
+	assert!(
+		lookup_bounds.contains(&lookups),
+		"{context} looked up the incoming backoff {lookups} times for {} gapped events",
+		actual.gapped,
+	);
+
 	assert_eq!(actual, expected, "{context} miscounted its prev walk");
 }
 
@@ -476,6 +508,16 @@ fn prev_walk_metrics_delta(
 		failed: delta(|metrics| metrics.failed),
 		cancelled: delta(|metrics| metrics.cancelled),
 		unprocessed_prevs: delta(|metrics| metrics.unprocessed_prevs),
+	}
+}
+
+fn verdicts_delta(before: &Verdicts, after: &Verdicts, context: &str) -> Verdicts {
+	let delta = field_delta(before, after, context);
+
+	Verdicts {
+		absent: delta(|verdicts| verdicts.absent),
+		allowed: delta(|verdicts| verdicts.allowed),
+		denied: delta(|verdicts| verdicts.denied),
 	}
 }
 

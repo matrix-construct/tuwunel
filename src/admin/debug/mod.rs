@@ -1,3 +1,4 @@
+mod backoff_metrics;
 mod change_log_level;
 mod create_jwt;
 mod database_files;
@@ -270,6 +271,11 @@ pub(super) enum DebugCommand {
 	///
 	/// Difference two snapshots to observe an interval.
 	PrevWalkMetrics,
+
+	/// - Print process-lifetime backoff verdict metrics.
+	///
+	/// Difference two snapshots to observe an interval.
+	BackoffMetrics,
 
 	/// - Print detailed tokio task metrics accumulated since last command
 	///   invocation.

@@ -8,7 +8,7 @@ use tuwunel_service::{Services, rooms::event_handler::PrevWalkMetrics};
 
 use super::helpers::{
 	Context, Disposition, append_message, assert_accepts, assert_prev_walk, backoff_rows,
-	held_message_chain, plant_backoff_rows, redeliver, sign_message,
+	held_message_chain, plant_backoff_rows, redeliver, sign_message, walk_metrics,
 };
 
 pub(super) async fn gapped_redelivery_backs_off(
@@ -40,11 +40,11 @@ pub(super) async fn gapped_redelivery_backs_off(
 	plant_backoff_rows(services, Context::Incoming, control_id, Disposition::Pending, 2)?;
 
 	let context = "three-attempt redelivery";
-	let prev_walks_before = services.event_handler.prev_walk_metrics();
+	let walks_before = walk_metrics(services);
 
 	assert_backs_off(services, room_id, &top, top_json, 3, context).await?;
 
-	let prev_walks_after = services.event_handler.prev_walk_metrics();
+	let walks_after = walk_metrics(services);
 	let hold = PrevWalkMetrics {
 		entered: 1,
 		gapped: 1,
@@ -52,7 +52,7 @@ pub(super) async fn gapped_redelivery_backs_off(
 		..PrevWalkMetrics::default()
 	};
 
-	assert_prev_walk(prev_walks_before, prev_walks_after, hold, context);
+	assert_prev_walk(walks_before, walks_after, hold, context);
 	assert_backs_off(services, room_id, &failed, failed_json, 1, "failed redelivery").await?;
 	assert_accepts(services, room_id, &control, control_json, "two-attempt redelivery").await?;
 
@@ -77,14 +77,14 @@ pub(super) async fn gapped_redelivery_backs_off(
 	plant_backoff_rows(services, Context::Incoming, closed_id, Disposition::Pending, 3)?;
 
 	let context = "closed-gap redelivery";
-	let prev_walks_before = services.event_handler.prev_walk_metrics();
+	let walks_before = walk_metrics(services);
 
 	assert_accepts(services, room_id, &closed, closed_json, context).await?;
 
-	let prev_walks_after = services.event_handler.prev_walk_metrics();
+	let walks_after = walk_metrics(services);
 	let ungapped = PrevWalkMetrics { entered: 1, ..PrevWalkMetrics::default() };
 
-	assert_prev_walk(prev_walks_before, prev_walks_after, ungapped, context);
+	assert_prev_walk(walks_before, walks_after, ungapped, context);
 
 	let rows = backoff_rows(services, Context::Incoming, closed_id).await?;
 

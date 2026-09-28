@@ -11,7 +11,7 @@ use super::{
 	helpers::{
 		ExpectedWalkOutcome, assert_one_settled_walk, assert_prev_walk, counter_delta,
 		create_room, create_room_version, held_fork, held_state_fork, sign_message,
-		suppress_upgrade,
+		suppress_upgrade, walk_metrics,
 	},
 	positional::{missing_create_falls_through_to_fetch, positional_rejection_stays_uncommitted},
 	prev_walk::prev_walk_fetch_ends,
@@ -138,7 +138,7 @@ async fn held_multi_prev_fork_resolves_locally(
 
 	let context = "held multi-prev fork";
 	let before = services.event_handler.state_local_metrics();
-	let prev_walks_before = services.event_handler.prev_walk_metrics();
+	let walks_before = walk_metrics(services);
 
 	services
 		.event_handler
@@ -152,7 +152,7 @@ async fn held_multi_prev_fork_resolves_locally(
 		.await?;
 
 	let after = services.event_handler.state_local_metrics();
-	let prev_walks_after = services.event_handler.prev_walk_metrics();
+	let walks_after = walk_metrics(services);
 	let appended = PrevWalkMetrics {
 		entered: 1,
 		gapped: 1,
@@ -164,7 +164,7 @@ async fn held_multi_prev_fork_resolves_locally(
 	};
 
 	assert_one_settled_walk(before, after, ExpectedWalkOutcome::Resolved, context);
-	assert_prev_walk(prev_walks_before, prev_walks_after, appended, context);
+	assert_prev_walk(walks_before, walks_after, appended, context);
 
 	let resolved = counter_delta(after.walk_resolved, before.walk_resolved, context);
 

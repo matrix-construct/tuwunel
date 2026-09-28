@@ -10,7 +10,7 @@ use tuwunel_service::{Services, rooms::event_handler::PrevWalkMetrics};
 
 use super::helpers::{
 	SignedPdu, append_message, assert_prev_walk, create_room, redeliver, set_forward_extremity,
-	sign_message, sign_outlier_message,
+	sign_message, sign_outlier_message, walk_metrics,
 };
 
 // size firewall
@@ -46,11 +46,11 @@ async fn gap_closed_during_fetch<'a>(
 	let ((prev, prev_json), (incoming, incoming_json)) =
 		sign_gapped_pair(services, user_id, room_id).await?;
 
-	let before = services.event_handler.prev_walk_metrics();
+	let before = walk_metrics(services);
 	let deliver = redeliver(services, room_id, &incoming, incoming_json, context);
 	// Counts closed unless this append outlasts both the gap wait and the prefetch.
 	let close_gap = async {
-		gap_checked(services, before.gapped).await?;
+		gap_checked(services, before.prev_walk.gapped).await?;
 		redeliver(services, room_id, &prev, prev_json, "closing prev").await
 	};
 
@@ -59,7 +59,7 @@ async fn gap_closed_during_fetch<'a>(
 	assert!(closed?, "the closing prev was not appended");
 	assert!(appended?, "{context} did not append the incoming event");
 
-	let after = services.event_handler.prev_walk_metrics();
+	let after = walk_metrics(services);
 	let expected = PrevWalkMetrics {
 		entered: 2,
 		gapped: 1,
@@ -89,12 +89,12 @@ async fn foreign_prev_fails_fetch<'a>(
 		sign_child(services, user_id, room_id, &foreign.event_id, &boundary, "foreign child")
 			.await?;
 
-	let before = services.event_handler.prev_walk_metrics();
+	let before = walk_metrics(services);
 	let handled = redeliver(services, room_id, &incoming, incoming_json, context).await;
 
 	assert!(handled.is_err(), "{context} was handled despite a prev from another room");
 
-	let after = services.event_handler.prev_walk_metrics();
+	let after = walk_metrics(services);
 	let expected = PrevWalkMetrics {
 		entered: 1,
 		gapped: 1,
@@ -116,10 +116,10 @@ async fn dropped_fetch_is_cancelled<'a>(
 ) -> Result {
 	let context = "fetch dropped while waiting on the gap";
 	let (_, (incoming, incoming_json)) = sign_gapped_pair(services, user_id, room_id).await?;
-	let before = services.event_handler.prev_walk_metrics();
+	let before = walk_metrics(services);
 	// owned, so dropping it cancels the delivery
 	let deliver = Box::pin(redeliver(services, room_id, &incoming, incoming_json, context));
-	let checked = pin!(gap_checked(services, before.gapped));
+	let checked = pin!(gap_checked(services, before.prev_walk.gapped));
 	let Either::Right((checked, deliver)) = select(deliver, checked).await else {
 		return Err!("{context} finished before it could be dropped");
 	};
@@ -127,7 +127,7 @@ async fn dropped_fetch_is_cancelled<'a>(
 	checked?;
 	drop(deliver);
 
-	let after = services.event_handler.prev_walk_metrics();
+	let after = walk_metrics(services);
 	let expected = PrevWalkMetrics {
 		entered: 1,
 		gapped: 1,

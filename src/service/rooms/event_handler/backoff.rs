@@ -1,15 +1,23 @@
-use std::{ops::Range, time::Duration};
+use std::{
+	ops::Range,
+	sync::atomic::{AtomicU64, Ordering},
+	time::Duration,
+};
 
+use futures::FutureExt;
 use ruma::EventId;
 use tuwunel_core::{
 	Error, implement,
 	utils::{
-		continue_exponential_backoff,
+		BoolExt, continue_exponential_backoff,
 		stream::{ReadyExt, TryIgnore},
 		time::now_secs,
 	},
 };
 use tuwunel_database::{Ignore, Interfix};
+
+#[cfg(test)]
+mod tests;
 
 /// Bucket width in seconds. Records within one bucket collide onto a single key
 /// (`<=` the smallest call-site backoff floor), coalescing concurrent failures.
@@ -79,6 +87,60 @@ struct Summary {
 	latest_class: Disposition,
 }
 
+/// Snapshot of process-lifetime verdicts from the backoff store, per federation
+/// step.
+///
+/// Every lookup that completes lands in exactly one verdict of its step; one
+/// dropped before the store answers lands in none. Each counter is loaded
+/// independently, so totals within one snapshot need not reconcile while
+/// lookups are in flight.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct BackoffMetrics {
+	/// Lookups before an event or its auth chain is fetched over federation.
+	pub fetch: Verdicts,
+
+	/// Lookups before handling a fetched event from an auth chain.
+	pub auth: Verdicts,
+
+	/// Lookups before upgrading a previous event, or re-weighing a soft-failed
+	/// one.
+	pub upgrade: Verdicts,
+
+	/// Lookups before walking a gapped incoming event's previous events.
+	pub incoming: Verdicts,
+}
+
+/// Verdict counts for one federation step.
+///
+/// Each completed lookup of the step increments exactly one field, so
+/// [`Verdicts::lookups`] is the step's lookup count.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct Verdicts {
+	/// Lookups that found no row for the event.
+	pub absent: u64,
+
+	/// Lookups that found rows but no hold in force.
+	pub allowed: u64,
+
+	/// Lookups that found a hold in force and skipped the step.
+	pub denied: u64,
+}
+
+#[derive(Default)]
+pub(super) struct BackoffCounters {
+	fetch: VerdictCounters,
+	auth: VerdictCounters,
+	upgrade: VerdictCounters,
+	incoming: VerdictCounters,
+}
+
+#[derive(Default)]
+struct VerdictCounters {
+	absent: AtomicU64,
+	allowed: AtomicU64,
+	denied: AtomicU64,
+}
+
 impl From<u64> for Disposition {
 	#[inline]
 	fn from(disc: u64) -> Self {
@@ -121,6 +183,47 @@ impl Summary {
 		}
 
 		self
+	}
+}
+
+impl Verdicts {
+	/// Lookups of the step, whatever their verdict.
+	///
+	/// Saturates at `u64::MAX` rather than wrapping.
+	#[inline]
+	#[must_use]
+	pub fn lookups(&self) -> u64 {
+		self.absent
+			.saturating_add(self.allowed)
+			.saturating_add(self.denied)
+	}
+}
+
+/// Read a snapshot of backoff verdict totals.
+///
+/// Reading does not reset the totals.
+#[implement(super::Service)]
+#[inline]
+#[must_use]
+pub fn backoff_metrics(&self) -> BackoffMetrics { self.backoff.snapshot() }
+
+#[implement(BackoffCounters)]
+fn snapshot(&self) -> BackoffMetrics {
+	BackoffMetrics {
+		fetch: self.fetch.snapshot(),
+		auth: self.auth.snapshot(),
+		upgrade: self.upgrade.snapshot(),
+		incoming: self.incoming.snapshot(),
+	}
+}
+
+impl VerdictCounters {
+	fn snapshot(&self) -> Verdicts {
+		Verdicts {
+			absent: self.absent.load(Ordering::Relaxed),
+			allowed: self.allowed.load(Ordering::Relaxed),
+			denied: self.denied.load(Ordering::Relaxed),
+		}
 	}
 }
 
@@ -196,13 +299,23 @@ pub(super) async fn record_success(&self, ctx: Context, event_id: &EventId) {
 		.await;
 }
 
+/// Consult the store before a federation step, counting the verdict.
+///
+/// The verdict is counted when the store answers, so a lookup dropped before
+/// then counts nothing.
 #[implement(super::Service)]
-pub(super) async fn is_suppressed(
+pub(super) fn is_suppressed(
 	&self,
 	ctx: Context,
 	event_id: &EventId,
 	range: Range<Duration>,
-) -> Suppression {
+) -> impl Future<Output = Suppression> + Send {
+	self.verdict(ctx, event_id, range)
+		.inspect(move |verdict| self.backoff.count(ctx, verdict))
+}
+
+#[implement(super::Service)]
+async fn verdict(&self, ctx: Context, event_id: &EventId, range: Range<Duration>) -> Suppression {
 	let summary = self
 		.db
 		.eventid_backoff
@@ -225,9 +338,27 @@ pub(super) async fn is_suppressed(
 		| _ => (summary.total, true),
 	};
 
-	(rate_ok && continue_exponential_backoff(range.start, range.end, elapsed, tries))
-		.then_some(Suppression::Deny)
-		.unwrap_or(Suppression::Allow)
+	let deny = rate_ok && continue_exponential_backoff(range.start, range.end, elapsed, tries);
+
+	deny.map_or(Suppression::Allow, || Suppression::Deny)
+}
+
+#[implement(BackoffCounters)]
+fn count(&self, ctx: Context, verdict: &Suppression) {
+	let counters = match ctx {
+		| Context::Fetch => &self.fetch,
+		| Context::Auth => &self.auth,
+		| Context::Upgrade => &self.upgrade,
+		| Context::Incoming => &self.incoming,
+	};
+
+	let counter = match verdict {
+		| Suppression::Absent => &counters.absent,
+		| Suppression::Allow => &counters.allowed,
+		| Suppression::Deny => &counters.denied,
+	};
+
+	counter.fetch_add(1, Ordering::Relaxed);
 }
 
 fn current_bucket() -> u32 { u32::try_from(now_secs() / QUANTUM).unwrap_or(u32::MAX) }

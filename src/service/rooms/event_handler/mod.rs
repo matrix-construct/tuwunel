@@ -1,8 +1,8 @@
 //! Incoming event handling, from the first signature check to the timeline.
 //!
 //! The service authorizes incoming PDUs, fetches the events they depend on,
-//! derives their state and appends them, keeping observability counters for
-//! the local state build and the previous-event walk.
+//! derives their state and appends them. Observability counters cover the
+//! local state build, the previous-event walk and the backoff verdicts.
 
 mod acl_check;
 mod backoff;
@@ -28,12 +28,15 @@ use ruma::{EventId, OwnedRoomId, RoomVersionId, events::AnyStrippedStateEvent, s
 use tuwunel_core::{Result, implement, matrix::PduEvent, utils::MutexMap};
 use tuwunel_database::Map;
 
+use self::{
+	backoff::BackoffCounters, prev_walk::PrevWalkCounters, state_local_build::StateLocalCounters,
+};
 pub use self::{
+	backoff::{BackoffMetrics, Verdicts},
 	policy_server::PolicyCheck,
 	prev_walk::PrevWalkMetrics,
 	state_local_build::{LocalBuildReport, StateLocalMetrics},
 };
-use self::{prev_walk::PrevWalkCounters, state_local_build::StateLocalCounters};
 
 /// Handles incoming events: authorization, fetching missing events, state
 /// resolution and upgrade into the timeline.
@@ -50,6 +53,7 @@ pub struct Service {
 	db: Data,
 	state_local: Arc<StateLocalCounters>,
 	prev_walk: PrevWalkCounters,
+	backoff: BackoffCounters,
 }
 
 struct Data {
@@ -71,6 +75,7 @@ impl crate::Service for Service {
 			services: args.services.clone(),
 			state_local: Arc::new(StateLocalCounters::default()),
 			prev_walk: PrevWalkCounters::default(),
+			backoff: BackoffCounters::default(),
 			db: Data {
 				eventid_backoff: args.db["eventid_backoff"].clone(),
 				eventid_policysigstate: args.db["eventid_policysigstate"].clone(),
