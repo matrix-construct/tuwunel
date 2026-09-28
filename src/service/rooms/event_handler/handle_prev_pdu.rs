@@ -11,25 +11,43 @@ use tuwunel_core::{
 
 use super::backoff::{Context, UPGRADE_RETRY};
 
+/// Context of an incoming event, shared by the upgrade of each of its previous
+/// events.
+///
+/// The previous event's own id and fetched PDU stay per-call arguments.
+#[derive(Clone, Copy)]
+pub(super) struct PrevUpgrade<'a> {
+	pub(super) origin: &'a ServerName,
+	pub(super) room_id: &'a RoomId,
+	pub(super) event_id: &'a EventId,
+	pub(super) room_version: &'a RoomVersionId,
+	pub(super) recursion_level: usize,
+	pub(super) first_ts_in_room: MilliSecondsSinceUnixEpoch,
+	pub(super) create_event_id: &'a EventId,
+}
+
 #[implement(super::Service)]
-#[expect(clippy::too_many_arguments)]
 #[tracing::instrument(
 	name = "prev",
 	level = INFO_SPAN_LEVEL,
 	skip_all,
-	fields(%prev_id),
+	fields(
+		%prev_id,
+	),
 )]
 pub(super) async fn handle_prev_pdu(
 	&self,
-	origin: &ServerName,
-	room_id: &RoomId,
-	event_id: &EventId,
+	PrevUpgrade {
+		origin,
+		room_id,
+		event_id,
+		room_version,
+		recursion_level,
+		first_ts_in_room,
+		create_event_id,
+	}: PrevUpgrade<'_>,
 	eventid_info: Option<(PduEvent, CanonicalJsonObject)>,
-	room_version: &RoomVersionId,
-	recursion_level: usize,
-	first_ts_in_room: MilliSecondsSinceUnixEpoch,
 	prev_id: &EventId,
-	create_event_id: &EventId,
 ) -> Result<Option<(RawPduId, bool)>> {
 	// Check for disabled again because it might have changed
 	if self.services.metadata.is_disabled(room_id).await {
