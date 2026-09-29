@@ -124,7 +124,10 @@ substitute identity for an existing one.
 A typical operator workflow for a forced password reset:
 
 1. Sign a JWT with `sub` set to the target user's localpart.
-2. Submit it as the `auth` field of `POST /_matrix/client/v3/account/password`:
+2. Submit it as the `auth` field of `POST /_matrix/client/v3/account/password`.
+   The request must carry an access token; without one it is refused with
+   `401 M_MISSING_TOKEN`. An operator with no session can open one by
+   logging in with a JWT for the same user (`org.matrix.login.jwt`, above).
 
    ```json
    {

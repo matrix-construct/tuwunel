@@ -78,7 +78,9 @@ fn init_verifier(config: &JwtConfig) -> Result<DecodingKey> {
 	Ok(match format.as_str() {
 		| "HMAC" => DecodingKey::from_secret(key.as_bytes()),
 
-		| "HMACB64" => DecodingKey::from_base64_secret(key.as_str())
+		// B64HMAC is the spelling the configuration reference and the docs give;
+		// HMACB64 was the only one accepted before and is kept for existing configs.
+		| "B64HMAC" | "HMACB64" => DecodingKey::from_base64_secret(key.as_str())
 			.map_err(|e| err!(Config("jwt.key", "JWT key is not valid base64: {e}")))?,
 
 		| "ECDSA" => DecodingKey::from_ec_pem(key.as_bytes())
