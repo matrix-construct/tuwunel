@@ -100,7 +100,9 @@ The first time a token authenticates as a user that does not yet exist:
 - If `register_user = false`, the request fails with `M_NOT_FOUND` and
   the account is not created.
 
-Subsequent logins reuse the existing account.
+Subsequent logins reuse the existing account. A deactivated account is
+refused with `M_USER_DEACTIVATED`, as it is for password login; a valid
+token does not bring it back.
 
 JWT does not synchronize admin status, group membership, or display
 names — the token grants login only. If you need ongoing identity
