@@ -19,7 +19,9 @@ use async_trait::async_trait;
 pub use context::Context;
 pub use create::create_admin_room;
 use futures::TryFutureExt;
-use ruma::{OwnedEventId, OwnedRoomAliasId, OwnedRoomId, RoomId, RoomOrAliasId, UserId};
+use ruma::{
+	OwnedEventId, OwnedRoomAliasId, OwnedRoomId, OwnedUserId, RoomId, RoomOrAliasId, UserId,
+};
 use tokio::sync::mpsc;
 use tuwunel_core::{
 	Err, Event, Result, debug, err, error::default_log, matrix::event::MsgType, warn,
@@ -35,11 +37,22 @@ pub struct Service {
 	pub console: Arc<console::Console>,
 }
 
-/// Inputs to a command are a multi-line string and optional reply_id.
+/// Inputs to a command: its multi-line text, the event to reply to, and who
+/// sent it.
+///
+/// An input without a sender is the operator's, from the console or the
+/// `admin_execute` and `admin_signal_execute` lists; converting a bare command
+/// string builds one.
 #[derive(Clone, Debug, Default)]
 pub struct CommandInput {
+	/// The command line, followed by any body lines.
 	pub command: String,
+
+	/// The event the command's response replies to.
 	pub reply_id: Option<OwnedEventId>,
+
+	/// The user who sent the command, or `None` for the operator.
+	pub sender: Option<OwnedUserId>,
 }
 
 /// Root of a clap command tree installed by a downstream crate.
@@ -64,6 +77,14 @@ pub type ProcessorResult = Result<Option<CommandOutput>, CommandOutput>;
 pub enum CommandOutput {
 	Markdown(String),
 	Plain(String),
+}
+
+impl From<String> for CommandInput {
+	fn from(command: String) -> Self { Self { command, ..Default::default() } }
+}
+
+impl From<&str> for CommandInput {
+	fn from(command: &str) -> Self { command.to_owned().into() }
 }
 
 impl CommandOutput {
@@ -139,11 +160,13 @@ impl crate::Service for Service {
 }
 
 impl Service {
-	/// Posts a command to the command processor queue and returns. Processing
-	/// will take place on the service worker's task asynchronously. Errors if
-	/// the queue is full.
-	pub async fn command(&self, command: String, reply_id: Option<OwnedEventId>) -> Result {
-		let Some(sender) = self
+	/// Queues a command for the service worker and returns once it is queued.
+	///
+	/// The worker processes it later and replies to the `reply_id` event in its
+	/// room, posting nothing without one. Queueing waits while the queue is
+	/// full, and errors when the queue is unavailable or closed.
+	pub async fn command(&self, input: CommandInput) -> Result {
+		let Some(queue) = self
 			.channel
 			.read()
 			.expect("locked for reading")
@@ -152,21 +175,19 @@ impl Service {
 			return Err!("Admin command queue unavailable.");
 		};
 
-		sender
-			.send(CommandInput { command, reply_id })
-			.await
+		queue
+			.send(input)
 			.map_err(|e| err!("Failed to enqueue admin command: {e:?}"))
+			.await
 	}
 
 	/// Dispatches a command to the processor on the current task and waits for
 	/// completion.
-	pub async fn command_in_place(
-		&self,
-		command: String,
-		reply_id: Option<OwnedEventId>,
-	) -> ProcessorResult {
-		self.process_command(&CommandInput { command, reply_id })
-			.await
+	///
+	/// The queue is bypassed, so the outcome returns to the caller rather than
+	/// being posted as a reply.
+	pub async fn command_in_place(&self, input: CommandInput) -> ProcessorResult {
+		self.process_command(&input).await
 	}
 
 	/// Invokes the tab-completer to complete the command. When unavailable,

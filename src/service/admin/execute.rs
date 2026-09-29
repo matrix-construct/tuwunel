@@ -115,7 +115,7 @@ pub(super) async fn signal_execute(&self) -> Result {
 async fn execute_command(&self, i: usize, command: String) -> Result {
 	debug!("Execute command #{i}: executing {command:?}");
 
-	match self.command_in_place(command, None).await {
+	match self.command_in_place(command.into()).await {
 		| Ok(Some(output)) => Self::execute_command_output(i, &output),
 		| Err(output) => Self::execute_command_error(i, &output),
 		| Ok(None) => {

@@ -1,6 +1,7 @@
 use std::{fmt, fmt::Debug, time::SystemTime};
 
 use futures::{FutureExt, lock::Mutex};
+use ruma::UserId;
 use tokio::time::Instant;
 use tuwunel_core::{Err, Result};
 
@@ -10,9 +11,17 @@ use crate::Services;
 /// it aborts rather than letting the buffer grow without bound.
 const OUTPUT_MAX_BYTES: usize = 64 * 1024 * 1024;
 
+/// What a command handler runs with, built afresh for each command.
+///
+/// The `body` holds the lines below the command line, and the processor takes
+/// whatever the handler wrote to `output` once the handler returns.
 pub struct Context<'a> {
 	pub services: &'a Services,
 	pub body: &'a [&'a str],
+
+	/// The user who issued the command, or `None` for the operator.
+	pub sender: Option<&'a UserId>,
+
 	pub timer: SystemTime,
 	pub output: Mutex<String>,
 }

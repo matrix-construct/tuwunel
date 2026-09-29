@@ -62,7 +62,7 @@ async fn empty_delete_range_is_zero(services: &Services) -> Result {
 
 	match services
 		.admin
-		.command_in_place("media delete-range 7d --older-than".into(), None)
+		.command_in_place("media delete-range 7d --older-than".into())
 		.await
 	{
 		| Ok(Some(output)) if output.as_str().contains("Deleted 0 total files.") => Ok(()),

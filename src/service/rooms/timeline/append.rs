@@ -31,9 +31,12 @@ use tuwunel_core::{
 use tuwunel_database::Json;
 
 use super::{ExtractBody, ExtractRelatesTo, ExtractRelatesToEventId, RoomMutexGuard, bias_count};
-use crate::rooms::{
-	read_receipt::PrivateRead, short::ShortRoomId, state_accessor::plain_text_topic,
-	state_cache::MembershipUpdate, state_compressor::CompressedState,
+use crate::{
+	admin::CommandInput,
+	rooms::{
+		read_receipt::PrivateRead, short::ShortRoomId, state_accessor::plain_text_topic,
+		state_cache::MembershipUpdate, state_compressor::CompressedState,
+	},
 };
 
 type Band<'a> = SmallVec<[&'a EventId; 1]>;
@@ -307,26 +310,9 @@ async fn append_pdu_effects(
 			}
 		},
 		| TimelineEventType::RoomMember => self.append_member_effects(pdu, count).await?,
-		| TimelineEventType::RoomMessage => {
-			let content: ExtractBody = pdu.get_content()?;
-			if let Some(body) = content.body {
-				self.services
-					.search
-					.index_pdu(shortroomid, &pdu_id, &body);
-
-				if self
-					.services
-					.admin
-					.is_admin_command(pdu, &body)
-					.await
-				{
-					self.services
-						.admin
-						.command(body, Some((pdu.event_id()).into()))
-						.await?;
-				}
-			}
-		},
+		| TimelineEventType::RoomMessage =>
+			self.append_message_effects(&pdu_id, pdu, shortroomid)
+				.await?,
 		| TimelineEventType::RoomTopic =>
 			if let Some(topic) = pdu.get_content().ok().and_then(plain_text_topic) {
 				self.services
@@ -443,6 +429,46 @@ async fn append_member_effects(&self, pdu: &PduEvent, count: PduCount) -> Result
 		self.services
 			.membership
 			.auto_accept(pdu.room_id(), &user_id, pdu.sender(), is_direct);
+	}
+
+	Ok(())
+}
+
+/// Index an `m.room.message` event's body, and queue it when it is an admin
+/// command.
+///
+/// The queued command carries the event's sender, so a handler can tell who
+/// issued it, and the event's id, which its response replies to.
+#[implement(super::Service)]
+async fn append_message_effects(
+	&self,
+	pdu_id: &RawPduId,
+	pdu: &PduEvent,
+	shortroomid: ShortRoomId,
+) -> Result {
+	let content: ExtractBody = pdu.get_content()?;
+	let Some(body) = content.body else {
+		return Ok(());
+	};
+
+	self.services
+		.search
+		.index_pdu(shortroomid, pdu_id, &body);
+
+	if self
+		.services
+		.admin
+		.is_admin_command(pdu, &body)
+		.await
+	{
+		self.services
+			.admin
+			.command(CommandInput {
+				command: body,
+				reply_id: Some(pdu.event_id().into()),
+				sender: Some(pdu.sender().into()),
+			})
+			.await?;
 	}
 
 	Ok(())

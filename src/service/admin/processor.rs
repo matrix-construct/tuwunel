@@ -91,6 +91,7 @@ async fn process_command(
 	let context = Context {
 		services: &services,
 		body: &body,
+		sender: input.sender.as_deref(),
 		timer: SystemTime::now(),
 		output: String::new().into(),
 	};

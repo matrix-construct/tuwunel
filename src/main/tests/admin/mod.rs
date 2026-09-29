@@ -14,7 +14,7 @@ use tuwunel_service::Services;
 pub(crate) async fn refused(services: &Services, command: &str, reason: &str) -> Result {
 	match services
 		.admin
-		.command_in_place(command.into(), None)
+		.command_in_place(command.into())
 		.await
 	{
 		| Err(output) if output.as_str().contains(reason) => Ok(()),
@@ -34,7 +34,7 @@ pub(crate) async fn refused(services: &Services, command: &str, reason: &str) ->
 pub(crate) async fn accepted(services: &Services, command: &str) -> Result {
 	services
 		.admin
-		.command_in_place(command.into(), None)
+		.command_in_place(command.into())
 		.await
 		.map(drop)
 		.map_err(|output| {

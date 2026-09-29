@@ -167,7 +167,7 @@ mod tests {
 	) -> Result<CommandOutput> {
 		match services
 			.admin
-			.command_in_place(command, None)
+			.command_in_place(command.into())
 			.await
 		{
 			| Ok(Some(output)) => Ok(output),

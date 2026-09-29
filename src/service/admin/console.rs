@@ -187,7 +187,7 @@ impl Console {
 		match self
 			.services
 			.admin
-			.command_in_place(line, None)
+			.command_in_place(line.into())
 			.await
 		{
 			| Ok(Some(ref content)) => self.output(content),
