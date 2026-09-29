@@ -5,18 +5,19 @@ use std::time::Duration;
 use serde_json::json;
 use tuwunel_core::{
 	Result,
-	pdu::PduBuilder,
-	ruma::{OwnedEventId, RoomId, UserId, events::room::message::RoomMessageEventContent},
+	ruma::{UserId, events::room::message::RoomMessageEventContent},
 };
 use tuwunel_service::Services;
 
 use self::{
 	client::{Client, poll_until, register},
 	fixture::boot,
+	timeline::append_message,
 };
 
 mod client;
 mod fixture;
+mod timeline;
 
 const ADMIN_TOKEN: &str = "admin-command-msgtype-admin-access-token";
 
@@ -100,23 +101,4 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	assert!(!deactivated(&escaped_emote_target).await?, "an escaped emote ran");
 
 	Ok(())
-}
-
-/// Append a message to a room as `sender` and return its event id.
-///
-/// The event goes straight through the timeline service under the room's
-/// state lock, so any msgtype can be sent without a client round trip.
-async fn append_message(
-	services: &Services,
-	sender: &UserId,
-	room_id: &RoomId,
-	content: &RoomMessageEventContent,
-) -> Result<OwnedEventId> {
-	let builder = PduBuilder::timeline(content);
-	let state_lock = services.state.mutex.lock(room_id).await;
-
-	services
-		.timeline
-		.build_and_append_pdu(builder, sender, room_id, &state_lock)
-		.await
 }

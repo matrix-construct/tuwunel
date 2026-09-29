@@ -22,6 +22,7 @@ mod redact_event;
 mod refresh_profile;
 mod reject_invites;
 mod reset_password;
+mod revoke_admin;
 mod set_profile_key;
 mod unerase;
 
@@ -197,6 +198,11 @@ pub(super) enum UserCommand {
 
 	/// - Grant server-admin privileges to a user.
 	MakeUserAdmin {
+		user_id: String,
+	},
+
+	/// - Revoke server-admin privileges from a user.
+	RevokeAdmin {
 		user_id: String,
 	},
 

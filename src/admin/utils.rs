@@ -89,7 +89,7 @@ pub(crate) async fn parse_existing_local_user_id(
 
 /// Parses user ID as our local user.
 ///
-/// The account need not exist; a command writing for the user takes
+/// The account need not exist; a command that requires one takes
 /// `parse_existing_local_user_id` instead.
 pub(crate) fn parse_local_user_id(services: &Services, user_id: &str) -> Result<OwnedUserId> {
 	let user_id = parse_user_id(services, user_id)?;

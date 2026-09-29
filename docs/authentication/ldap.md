@@ -133,8 +133,8 @@ admin_filter = "(uid={username})"
 ```
 
 Admin synchronization only runs in the search-then-bind modes. In direct-bind
-mode the admin search is silently skipped — manage admins manually with
-`!admin users make-admin` and `!admin users revoke-admin` if you need that
+mode the admin search is silently skipped; manage admins manually with
+`!admin users make-user-admin` and `!admin users revoke-admin` if you need that
 combination.
 
 ## Account lifecycle

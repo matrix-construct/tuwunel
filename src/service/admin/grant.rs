@@ -288,9 +288,16 @@ async fn invite_new_admin(
 }
 
 /// Demote an admin, removing its rights.
+///
+/// The server user is refused, since the admin room exists only while the
+/// server user stays joined.
 #[implement(super::Service)]
 pub async fn revoke_admin(&self, user_id: &UserId) -> Result {
 	use MembershipState::{Invite, Join, Knock, Leave};
+
+	if user_id == self.services.globals.server_user {
+		return Err!(Request(InvalidParam("The server user's admin rights cannot be revoked.")));
+	}
 
 	let Ok(room_id) = self.get_admin_room().await else {
 		return Err!(error!("No admin room available or created."));
