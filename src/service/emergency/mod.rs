@@ -20,13 +20,16 @@ impl crate::Service for Service {
 	}
 
 	async fn worker(self: Arc<Self>) -> Result {
-		if self
+		let password = self
 			.services
 			.config
 			.emergency_password
-			.as_ref()
-			.is_none_or(String::is_empty)
-		{
+			.as_deref()
+			.filter(|password| !password.is_empty());
+
+		// Once the option is removed, the server user must be signed out again. That
+		// only has work to do while a password from an earlier start remains.
+		if password.is_none() && !self.emergency_access_remains().await {
 			return Ok(());
 		}
 
@@ -35,15 +38,15 @@ impl crate::Service for Service {
 			return Ok(());
 		}
 
-		if self.services.config.ldap.enable {
+		if password.is_some() && self.services.config.ldap.enable {
 			warn!("emergency password feature not available with LDAP enabled.");
 			return Ok(());
 		}
 
-		self.set_emergency_access()
+		self.set_emergency_access(password)
 			.await
 			.inspect_err(|e| {
-				error!("Failed to set the emergency password for the server user: {e}");
+				error!("Failed to update emergency access for the server user: {e}");
 			})
 	}
 
@@ -51,17 +54,28 @@ impl crate::Service for Service {
 }
 
 impl Service {
+	/// Whether the server user still holds a password, which only an earlier
+	/// start with `emergency_password` set gives it.
+	async fn emergency_access_remains(&self) -> bool {
+		self.services
+			.users
+			.has_password(&self.services.globals.server_user)
+			.await
+			.unwrap_or(false)
+	}
+
 	/// Sets the emergency password and push rules for the server user account
-	/// in case emergency password is set
-	async fn set_emergency_access(&self) -> Result {
+	/// when a password is given, and removes them and signs the account out
+	/// when it is not.
+	async fn set_emergency_access(&self, password: Option<&str>) -> Result {
 		let server_user = &self.services.globals.server_user;
 
 		self.services
 			.users
-			.set_password(server_user, self.services.config.emergency_password.as_deref())
+			.set_password(server_user, password)
 			.await?;
 
-		let (ruleset, pwd_set) = match self.services.config.emergency_password {
+		let (ruleset, pwd_set) = match password {
 			| Some(_) => (Ruleset::server_default(server_user), true),
 			| None => (Ruleset::new(), false),
 		};
