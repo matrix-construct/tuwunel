@@ -1,11 +1,11 @@
 use tuwunel_core::{Err, Result, utils};
 
 use super::AUTO_GEN_PASSWORD_LENGTH;
-use crate::{admin_command, utils::parse_local_user_id};
+use crate::{admin_command, utils::parse_existing_local_user_id};
 
 #[admin_command]
 pub(super) async fn reset_password(&self, username: String, password: Option<String>) -> Result {
-	let user_id = parse_local_user_id(self.services, &username)?;
+	let user_id = parse_existing_local_user_id(self.services, &username).await?;
 
 	if user_id == self.services.globals.server_user {
 		return Err!(
