@@ -1,4 +1,8 @@
-use std::time::{Duration, Instant};
+use std::{
+	iter::repeat_with,
+	sync::MutexGuard,
+	time::{Duration, Instant},
+};
 
 use http::StatusCode;
 use ruma::{
@@ -8,8 +12,8 @@ use ruma::{
 use tuwunel_core::{Error, Result};
 
 use super::{
-	Axis, Hold, Limit, MAX_RETRY_AFTER, Ratelimiter, Reservation, account_key, debit_at,
-	refund_at, reserve_at, retry_after,
+	Axis, Hold, Limit, MAX_RETRY_AFTER, PRUNE_SAMPLE, Ratelimiter, Reservation, Table,
+	account_key, debit_at, refund_at, reserve_at, retry_after,
 };
 
 const CAP: usize = 16;
@@ -43,15 +47,15 @@ fn at(start: Instant, secs: f64) -> Instant {
 
 fn limit(rate: f64, burst: u32) -> Limit { Limit { rate, burst } }
 
-fn tokens(table: &Ratelimiter, key: &str) -> f64 { table.lock().expect("locked")[key].1 }
+fn tokens(table: &Ratelimiter, key: &str) -> f64 { lock(table).buckets[key].1 }
+
+fn lock(table: &Ratelimiter) -> MutexGuard<'_, Table> { table.lock().expect("locked") }
 
 fn holds(table: &Ratelimiter, expected: f64) -> bool {
 	(tokens(table, KEY) - expected).abs() < 1e-9
 }
 
-fn tracked(table: &Ratelimiter, key: &str) -> bool {
-	table.lock().expect("locked").contains_key(key)
-}
+fn tracked(table: &Ratelimiter, key: &str) -> bool { lock(table).buckets.contains_key(key) }
 
 fn stated_retry_after(error: &Error) -> Option<Duration> {
 	match error {
@@ -171,7 +175,7 @@ fn zero_burst_or_zero_rate_disables() {
 	}
 }
 
-fn untouched(table: &Ratelimiter) -> bool { table.lock().expect("locked").is_empty() }
+fn untouched(table: &Ratelimiter) -> bool { lock(table).buckets.is_empty() }
 
 #[test]
 fn full_table_prunes_refilled_buckets() {
@@ -188,9 +192,46 @@ fn full_table_prunes_refilled_buckets() {
 	debit_at(&table, "@new:x", fast, Axis::Account, at(start, 2.0), CAP)
 		.expect("a refilled bucket is pruned to admit a new account");
 
-	let buckets = table.lock().expect("locked");
-	assert!(buckets.len() <= CAP, "the table stays within its cap");
-	assert!(buckets.contains_key("@new:x"), "the new account was admitted");
+	let table = lock(&table);
+
+	assert!(table.buckets.len() <= CAP, "the table stays within its cap");
+	assert!(table.buckets.contains_key("@new:x"), "the new account was admitted");
+}
+
+#[test]
+fn full_table_pruning_moves_past_limiting_buckets() {
+	prune_moves_past_limiting_buckets(Axis::Failed);
+	prune_moves_past_limiting_buckets(Axis::Account);
+}
+
+fn prune_moves_past_limiting_buckets(axis: Axis) {
+	let cap = PRUNE_SAMPLE * 3;
+	let start = Instant::now();
+	let half = limit(0.5, 2);
+	let table = Ratelimiter::default();
+
+	// Zero-padded so key order follows i.
+	let account = |i: usize| format!("@u{i:03}:x");
+
+	for i in 0..cap {
+		debit_at(&table, &account(i), half, axis, start, cap).expect("filling the table");
+	}
+
+	// Spent again at 1.5s, these are still short of a full bucket at 2s.
+	for i in 0..PRUNE_SAMPLE {
+		debit_at(&table, &account(i), half, axis, at(start, 1.5), cap)
+			.expect("a limiting account's second try");
+	}
+
+	let admitted = repeat_with(|| debit_at(&table, "@new:x", half, axis, at(start, 2.0), cap))
+		.take(cap / PRUNE_SAMPLE)
+		.any(|debit| matches!(debit, Ok(Hold::Held)));
+
+	assert!(admitted, "{axis:?}: successive prunes reach the refilled buckets");
+	assert!(
+		(0..PRUNE_SAMPLE).all(|i| tracked(&table, &account(i))),
+		"{axis:?}: no limiting bucket was evicted to make room"
+	);
 }
 
 #[test]

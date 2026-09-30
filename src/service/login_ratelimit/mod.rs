@@ -9,7 +9,8 @@
 //! `[global.rate_limiting.login]` options sets out their costs.
 
 use std::{
-	collections::HashMap,
+	collections::BTreeMap,
+	ops::Bound::{Excluded, Included, Unbounded},
 	sync::{Arc, Mutex},
 	time::{Duration, Instant},
 };
@@ -47,15 +48,30 @@ pub struct Reservation {
 	hold: Hold,
 }
 
-/// Token-bucket table: last-refill instant and remaining tokens per account.
-type Ratelimiter = Mutex<HashMap<String, (Instant, f64)>>;
+type Ratelimiter = Mutex<Table>;
+
+/// One axis's token buckets, and where the next prune of them resumes.
+///
+/// Each account maps to its last-refill instant and remaining tokens, ordered
+/// by account so that pruning can resume in place. It holds at most
+/// [`RATELIMIT_MAP_CAP`] accounts, each only until its bucket refills to the
+/// burst and a prune or refund drops it.
+#[derive(Default)]
+struct Table {
+	buckets: Buckets,
+
+	/// The last account a prune inspected; the next one starts after it.
+	cursor: String,
+}
+
+type Buckets = BTreeMap<String, (Instant, f64)>;
 
 impl crate::Service for Service {
 	fn build(args: &crate::Args<'_>) -> Result<Arc<Self>> {
 		Ok(Arc::new(Self {
 			server: args.server.clone(),
-			account: Mutex::new(HashMap::new()),
-			failed: Mutex::new(HashMap::new()),
+			account: Ratelimiter::default(),
+			failed: Ratelimiter::default(),
 		}))
 	}
 
@@ -242,17 +258,18 @@ fn debit_at(
 
 	let Limit { rate, .. } = limit;
 	let burst = limit.burst();
-	let mut buckets = table.lock()?;
+	let mut table = table.lock()?;
+	let Table { buckets, cursor } = &mut *table;
 
 	debug_assert!(cap > 0, "rate-limit table cap must be positive");
 
 	let Some(bucket) = buckets.get_mut(key) else {
 		if buckets.len() >= cap {
-			prune_sample(&mut buckets, rate, burst, now);
+			prune_sample(buckets, cursor, rate, burst, now);
 		}
 
 		if buckets.len() >= cap {
-			drop(buckets);
+			drop(table);
 			warn_table_full(axis, now);
 			return axis.when_full();
 		}
@@ -285,7 +302,8 @@ fn refund_at(table: &Ratelimiter, key: &str, hold: Hold, limit: Limit, now: Inst
 	}
 
 	let burst = limit.burst();
-	let mut buckets = table.lock()?;
+	let mut table = table.lock()?;
+	let Table { buckets, .. } = &mut *table;
 
 	let Some((last_time, tokens)) = buckets.get_mut(key) else {
 		return Ok(());
@@ -310,17 +328,26 @@ fn refill(last: Instant, tokens: f64, rate: f64, burst: f64, now: Instant) -> f6
 		.min(burst)
 }
 
-/// Remove, from a bounded sample of the table, the buckets that have refilled
-/// completely. A bucket that is still restricting is never removed.
-fn prune_sample(
-	buckets: &mut HashMap<String, (Instant, f64)>,
-	rate: f64,
-	burst: f64,
-	now: Instant,
-) {
-	let refilled: Vec<String> = buckets
-		.iter()
-		.take(PRUNE_SAMPLE)
+/// Remove, from the next bounded sample of the table, the buckets that have
+/// refilled completely.
+///
+/// Each sample starts after the last account the previous one inspected and
+/// wraps around at the end, so successive samples reach every bucket even
+/// while the leading ones stay restricted. A bucket that is still restricted
+/// is never removed.
+fn prune_sample(buckets: &mut Buckets, cursor: &mut String, rate: f64, burst: f64, now: Instant) {
+	let after = (Excluded(cursor.as_str()), Unbounded);
+	let wrapped = (Unbounded, Included(cursor.as_str()));
+	let sample = buckets
+		.range::<str, _>(after)
+		.chain(buckets.range::<str, _>(wrapped))
+		.take(PRUNE_SAMPLE);
+
+	if let Some((key, _)) = sample.clone().last() {
+		cursor.clone_from(key);
+	}
+
+	let refilled: Vec<String> = sample
 		.filter(|(_, (last, tokens))| refill(*last, *tokens, rate, burst, now) >= burst)
 		.map(|(key, _)| key.clone())
 		.collect();
