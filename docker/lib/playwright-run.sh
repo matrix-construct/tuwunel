@@ -131,15 +131,23 @@ fi
 
 # Merge the pass reports into the results.json the caller extracts. The
 # summarisers classify by recursive descent, so a two-report array reads the
-# same as one report. A report absent because its pass matched nothing (an
-# acceptlist gone stale against upstream) is dropped rather than fatal.
+# same as one report. A pass 2 report absent because its pass matched nothing
+# (an acceptlist gone stale against upstream) is dropped rather than fatal.
+# Pass 1 must have run tests: one that died first (a webServer that never
+# came up, a failed global setup) leaves a report counting none, and merging
+# past it hands the gate only the known failures, which it passes. Write no
+# results.json then; the gate fails a shard that has none.
 node -e '
 	const fs = require("fs");
-	const [dest, ...srcs] = process.argv.slice(1);
-	const reports = srcs
-		.filter((f) => fs.existsSync(f))
-		.map((f) => JSON.parse(fs.readFileSync(f, "utf8")));
-	if (reports.length) {
-		fs.writeFileSync(dest, JSON.stringify(reports.length === 1 ? reports[0] : reports));
+	const [dest, pass1, ...srcs] = process.argv.slice(1);
+	const read = (f) => JSON.parse(fs.readFileSync(f, "utf8"));
+	const report = fs.existsSync(pass1) ? read(pass1) : undefined;
+	const { expected = 0, unexpected = 0, flaky = 0 } = report?.stats ?? {};
+	if (expected + unexpected + flaky === 0) {
+		console.error(`${pass1}: pass 1 ran no tests`);
+		for (const { message } of report?.errors ?? []) console.error(message);
+		process.exit(1);
 	}
+	const reports = [report, ...srcs.filter((f) => fs.existsSync(f)).map(read)];
+	fs.writeFileSync(dest, JSON.stringify(reports.length === 1 ? reports[0] : reports));
 ' "$out/results.json" "$out/results-expected.json" "$out/results-knownfail.json"
