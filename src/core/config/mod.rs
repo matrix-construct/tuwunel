@@ -1300,6 +1300,16 @@ pub struct Config {
 	#[serde(default = "true_fn")]
 	pub enable_set_displayname: bool,
 
+	/// Restrict client profile retrieval to the user themselves or users who
+	/// currently share a joined room. Requires `require_auth_for_profile_requests`
+	/// to be enabled. This does not affect federation profile lookups, which are
+	/// controlled separately by `allow_inbound_profile_lookup_federation_requests`.
+	///
+	/// reloadable: yes
+	/// default: false
+	#[serde(default)]
+	pub limit_profile_requests_to_users_who_share_rooms: bool,
+
 	/// Preserve per-room profile overrides during a global profile update.
 	///
 	/// When `true` (default), a profile change (displayname or avatar_url)

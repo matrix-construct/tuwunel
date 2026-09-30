@@ -35,6 +35,19 @@ pub(crate) async fn get_profile_route(
 	State(services): State<crate::State>,
 	body: Ruma<get_profile::v3::Request>,
 ) -> Result<get_profile::v3::Response> {
+	if services
+		.server
+		.config
+		.limit_profile_requests_to_users_who_share_rooms
+		&& body.sender_user() != body.user_id
+		&& !services
+			.state_cache
+			.user_sees_user(body.sender_user(), &body.user_id)
+			.await
+	{
+		return Err!(Request(NotFound("Profile was not found.")));
+	}
+
 	if !services.globals.user_is_local(&body.user_id) {
 		services
 			.profile
@@ -69,6 +82,19 @@ pub(crate) async fn get_profile_field_route(
 	State(services): State<crate::State>,
 	body: Ruma<get_profile_field::v3::Request>,
 ) -> Result<GetProfileFieldResponse> {
+	if services
+		.server
+		.config
+		.limit_profile_requests_to_users_who_share_rooms
+		&& body.sender_user() != body.user_id
+		&& !services
+			.state_cache
+			.user_sees_user(body.sender_user(), &body.user_id)
+			.await
+	{
+		return Err!(Request(NotFound("Profile was not found.")));
+	}
+
 	if !services.globals.user_is_local(&body.user_id) {
 		services
 			.profile

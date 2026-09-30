@@ -106,6 +106,23 @@ fn url_preview_accept_language_defaults_to_none() {
 }
 
 #[test]
+fn shared_room_profile_requests_require_profile_authentication() {
+	for (toml, valid) in [
+		("[global]\nlimit_profile_requests_to_users_who_share_rooms = true\n", false),
+		(
+			"[global]\nrequire_auth_for_profile_requests = true\n\
+			 limit_profile_requests_to_users_who_share_rooms = true\n",
+			true,
+		),
+	] {
+		let config = config_from_toml(toml).expect("the config should parse");
+		let result = check(&config);
+
+		assert_eq!(result.is_ok(), valid, "{toml}: {result:?}");
+	}
+}
+
+#[test]
 fn url_preview_accept_language_can_be_reloaded_and_removed() {
 	let original = default_config();
 	let english = config_from_toml(

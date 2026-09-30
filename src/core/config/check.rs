@@ -78,6 +78,7 @@ pub fn check(config: &Config) -> Result {
 	check_storage(config)?;
 	check_registration(config)?;
 	check_registration_terms(config)?;
+	check_profile_requests(config)?;
 	check_password_hashing(config)?;
 	check_turn_and_media_misc(config)?;
 	check_url_previews(config)?;
@@ -113,6 +114,20 @@ fn check_observability(config: &Config) -> Result {
 		return Err!(Config(
 			"sentry_traces_sample_rate",
 			"Sentry traces sample rate must be between 0.0 and 1.0 inclusive"
+		));
+	}
+
+	Ok(())
+}
+
+fn check_profile_requests(config: &Config) -> Result {
+	if config.limit_profile_requests_to_users_who_share_rooms
+		&& !config.require_auth_for_profile_requests
+	{
+		return Err!(Config(
+			"limit_profile_requests_to_users_who_share_rooms",
+			"limit_profile_requests_to_users_who_share_rooms requires \
+			 require_auth_for_profile_requests to be enabled"
 		));
 	}
 
