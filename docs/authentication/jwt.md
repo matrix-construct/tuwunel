@@ -56,8 +56,8 @@ issuer must agree with the server on this naming.
 | Field | Default | Description |
 |---|---|---|
 | `enable` | `false` | Master switch for JWT login. Also gates the UIAA flow. |
-| `key` | — | Verification key. Plaintext, base64, or PEM depending on `format`. **Sensitive** — keep private when used as an HMAC secret. |
-| `format` | `"HMAC"` | One of `HMAC`, `B64HMAC`, `ECDSA`, `EDDSA`. Selects how `key` is decoded. |
+| `key` | `""` | Verification key. Plaintext, base64, or PEM depending on `format`. **Sensitive**: keep private when used as an HMAC secret. |
+| `format` | `"HMAC"` | One of `HMAC`, `B64HMAC`, `ECDSA`, `EDDSA`, in any case (`HMACB64` is also accepted for `B64HMAC`). Selects how `key` is decoded. |
 | `algorithm` | `"HS256"` | JWT `alg` header value. Must be compatible with `format`. |
 | `register_user` | `true` | Auto-create a Matrix account on first valid login if the user doesn't already exist. Set to `false` to require pre-existing accounts. |
 | `audience` | `[]` | Optional list of accepted `aud` claim values. When non-empty, tokens must claim at least one entry; `aud` becomes a required claim. |
@@ -95,7 +95,7 @@ The first time a token authenticates as a user that does not yet exist:
 
 - If `register_user = true`, Tuwunel creates the account with origin
   `"jwt"` and a placeholder password marker. The local password field is
-  never read for a JWT-authenticated user — they can only re-authenticate
+  never read for a JWT-authenticated user; they can only re-authenticate
   by presenting another valid JWT.
 - If `register_user = false`, the request fails with `M_NOT_FOUND` and
   the account is not created.
@@ -105,12 +105,12 @@ refused with `M_USER_DEACTIVATED`, as it is for password login; a valid
 token does not bring it back.
 
 JWT does not synchronize admin status, group membership, or display
-names — the token grants login only. If you need ongoing identity
+names; the token grants login only. If you need ongoing identity
 attribute synchronization, use [LDAP](ldap.md) or an
 [OIDC identity provider](providers.md) instead.
 
 
-## UIAA — JWT for account override
+## UIAA: JWT for account override
 
 When `enable = true`, the `m.login.jwt` UIAA stage becomes available
 alongside `m.login.password` and `m.login.sso` for sensitive operations
@@ -130,6 +130,8 @@ A typical operator workflow for a forced password reset:
    The request must carry an access token; without one it is refused with
    `401 M_MISSING_TOKEN`. An operator with no session can open one by
    logging in with a JWT for the same user (`org.matrix.login.jwt`, above).
+   That login adds a device to the user's account, so log it out
+   (`POST /_matrix/client/v3/logout`) once the password is changed.
 
    ```json
    {
@@ -153,16 +155,20 @@ user on the server.
 ## Key formats and algorithms
 
 `format` selects how `key` is interpreted. `algorithm` selects the JWT
-signing algorithm. The two must agree.
+signing algorithm. The two must agree. While `enable = true`, the server
+refuses to start, and refuses a configuration reload, when `format` is
+not one of those below (in any case; `HMACB64` is also accepted for
+`B64HMAC`). A `key` that does not decode, or an `algorithm` that does not
+suit the format, is reported at each login instead.
 
 | Format | Algorithm | Key content |
 |---|---|---|
 | `HMAC` (default) | `HS256`, `HS384`, `HS512` | Plaintext shared secret. |
-| `B64HMAC` | `HS256`, `HS384`, `HS512` | Base64-encoded shared secret. Use this when the secret contains non-printable bytes. |
+| `B64HMAC` | `HS256`, `HS384`, `HS512` | Base64-encoded shared secret, in the standard alphabet (`+` and `/`) with `=` padding. Use this when the secret contains non-printable bytes. |
 | `ECDSA` | `ES256`, `ES384` | PEM-encoded ECDSA public key. |
 | `EDDSA` | `EdDSA` | PEM-encoded Ed25519 public key. |
 
-For asymmetric formats (`ECDSA`, `EDDSA`) the `key` is the **public** key —
+For asymmetric formats (`ECDSA`, `EDDSA`) the `key` is the **public** key:
 Tuwunel only verifies, it never signs. The corresponding private key
 stays with the issuer.
 
@@ -185,12 +191,12 @@ MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE...
 `exp` (expiration) and `nbf` (not-before) follow the spec semantics:
 seconds since the Unix epoch. Configure based on the issuer's behavior:
 
-- **Issuer always sets `exp`** — set `require_exp = true` to reject any
+- **Issuer always sets `exp`**: set `require_exp = true` to reject any
   token without an expiration. `validate_exp` is `true` by default.
-- **Issuer never sets `exp`** — leave both `require_exp` and
+- **Issuer never sets `exp`**: leave both `require_exp` and
   `validate_exp` at their defaults; tokens without `exp` are accepted as
   non-expiring (use cautiously).
-- **Mixed** — leave `require_exp = false` and `validate_exp = true` (the
+- **Mixed**: leave `require_exp = false` and `validate_exp = true` (the
   defaults). This is Synapse-compatible: `exp` is optional but enforced
   when present.
 

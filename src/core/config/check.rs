@@ -80,6 +80,7 @@ pub fn check(config: &Config) -> Result {
 	check_registration_terms(config)?;
 	check_profile_requests(config)?;
 	check_password_hashing(config)?;
+	check_jwt(config)?;
 	check_turn_and_media_misc(config)?;
 	check_url_previews(config)?;
 	check_room_version(config)?;
@@ -442,6 +443,17 @@ fn check_password_hashing(config: &Config) -> Result {
 			 hashes are cheaper to crack than the default. See argon2_m_cost for the \
 			 recommended pairs."
 		);
+	}
+
+	Ok(())
+}
+
+fn check_jwt(config: &Config) -> Result {
+	let jwt = &config.jwt;
+
+	// Without [global.jwt], the derived Default's empty format would fail this.
+	if jwt.enable {
+		jwt.key_format()?;
 	}
 
 	Ok(())

@@ -3773,13 +3773,13 @@
 #
 #key =
 
-# Format of the 'key'. Only HMAC, ECDSA, and B64HMAC are supported
-# Binary keys cannot be pasted into this config, so B64HMAC is an
-# alternative to HMAC for properly random secret strings.
-# - HMAC is a plaintext shared-secret private-key.
-# - B64HMAC is a base64-encoded version of HMAC.
-# - ECDSA is a PEM-encoded public-key.
-# - EDDSA is a PEM-encoded Ed25519 public-key.
+# Format of the 'key': HMAC, B64HMAC, ECDSA, or EDDSA, case-insensitive.
+#
+# HMAC is a plaintext shared secret, and B64HMAC (also spelled HMACB64)
+# is the same secret base64-encoded in the standard alphabet with '='
+# padding, for random binary secrets that cannot be pasted as text.
+# ECDSA and EDDSA are PEM-encoded public keys, EDDSA for Ed25519.
+# Startup and reload both refuse an unknown format while JWT is enabled.
 #
 # reloadable: yes
 #
@@ -3792,7 +3792,10 @@
 #
 #register_user = true
 
-# JWT algorithm
+# Signature algorithm for validating tokens.
+#
+# The name must suit the key format: HS256, HS384, or HS512 for HMAC
+# and B64HMAC, ES256 or ES384 for ECDSA, and EdDSA for EDDSA.
 #
 # reloadable: yes
 #

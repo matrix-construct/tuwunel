@@ -1196,6 +1196,40 @@ fn an_out_of_range_sentry_sample_rate_fails_the_config_check() {
 	}
 }
 
+/// An enabled JWT login fails the check with an unknown key format.
+///
+/// Every documented spelling passes regardless of letter case, the older
+/// HMACB64 included. A disabled or absent JWT table is left alone, since its
+/// format may be empty.
+#[test]
+fn an_unknown_jwt_key_format_fails_the_config_check() {
+	const ENABLED: &str = "[global.jwt]\nenable = true\n";
+
+	for (toml, valid) in [
+		("[global]\n".to_owned(), true),
+		("[global.jwt]\nformat = \"bogus\"\n".to_owned(), true),
+		(ENABLED.to_owned(), true),
+		(format!("{ENABLED}format = \"hmac\"\n"), true),
+		(format!("{ENABLED}format = \"B64HMAC\"\n"), true),
+		(format!("{ENABLED}format = \"HMACB64\"\n"), true),
+		(format!("{ENABLED}format = \"ECDSA\"\n"), true),
+		(format!("{ENABLED}format = \"EdDSA\"\n"), true),
+		(format!("{ENABLED}format = \"bogus\"\n"), false),
+		(format!("{ENABLED}format = \"\"\n"), false),
+	] {
+		let config = config_from_toml(&toml).expect("the config should parse");
+		let result = check(&config);
+
+		assert_eq!(result.is_ok(), valid, "{toml}: {result:?}");
+
+		if let Err(error) = result {
+			let error = error.to_string();
+
+			assert!(error.contains("'jwt.format' directive"), "{toml}: {error}");
+		}
+	}
+}
+
 /// A documented default is published to operators through the generated
 /// tuwunel-example.toml, so one that disagrees with the code hands out a value
 /// the server never uses. Only integer defaults are compared; prose such as

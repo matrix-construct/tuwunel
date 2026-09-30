@@ -1,9 +1,7 @@
-use std::str::FromStr;
-
 use serde::Serialize;
 use tuwunel_core::{
-	Err, Result, err,
-	jwt::{Algorithm, EncodingKey, Header, encode},
+	Result, err,
+	jwt::{Header, encode},
 	utils::time::now_secs,
 };
 
@@ -28,14 +26,8 @@ pub(super) async fn create_jwt(
 	}
 
 	let config = &self.services.config.jwt;
-	if config.format.as_str() != "HMAC" {
-		return Err!("This command only supports HMAC key format, not {}.", config.format);
-	}
-
-	let key = EncodingKey::from_secret(config.key.as_ref());
-	let alg = Algorithm::from_str(config.algorithm.as_str()).map_err(|e| {
-		err!(Config("jwt.algorithm", "JWT algorithm is not recognized or configured {e}"))
-	})?;
+	let key = config.encoding_key()?;
+	let alg = config.algorithm()?;
 
 	let header = Header { alg, ..Default::default() };
 	let claim = Claim {

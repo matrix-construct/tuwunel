@@ -1,12 +1,10 @@
-use std::str::FromStr;
-
-use jwt::{Algorithm, DecodingKey, Validation, dangerous::insecure_decode, decode};
+use jwt::{TokenData, Validation, dangerous::insecure_decode, decode};
 use ruma::{
 	OwnedUserId, UserId,
 	api::client::session::login::v3::{Request, Token},
 };
 use serde::Deserialize;
-use tuwunel_core::{Err, Result, at, config::JwtConfig, debug, err, jwt, warn};
+use tuwunel_core::{Err, Result, at, config::JwtConfig, debug, err, jwt, utils::BoolExt, warn};
 use tuwunel_service::Services;
 
 use crate::Ruma;
@@ -23,8 +21,10 @@ pub(super) async fn handle_login(
 	info: &Token,
 ) -> Result<OwnedUserId> {
 	let user_id = validate_user(services, &info.token)?;
+
 	if !services.users.exists(&user_id).await {
 		let config = &services.config.jwt;
+
 		if !config.register_user {
 			return Err!(Request(NotFound("User {user_id} is not registered on this server.")));
 		}
@@ -40,6 +40,7 @@ pub(super) async fn handle_login(
 
 pub(crate) fn validate_user(services: &Services, token: &str) -> Result<OwnedUserId> {
 	let config = &services.config.jwt;
+
 	if !config.enable {
 		return Err!(Request(Unauthorized("JWT login is not enabled.")));
 	}
@@ -57,72 +58,45 @@ pub(crate) fn validate_user(services: &Services, token: &str) -> Result<OwnedUse
 fn validate(config: &JwtConfig, token: &str) -> Result<Claim> {
 	let token_data = if cfg!(debug_assertions) && !config.validate_signature {
 		warn!("JWT signature validation is disabled!");
-		insecure_decode::<Claim>(token)
+		insecure_decode(token)
 	} else {
-		let verifier = init_verifier(config)?;
+		let verifier = config.decoding_key()?;
 		let validator = init_validator(config)?;
-		decode::<Claim>(token, &verifier, &validator)
+
+		decode(token, &verifier, &validator)
 	};
 
 	token_data
-		.map(|decoded| (decoded.header, decoded.claims))
+		.map(|decoded: TokenData<Claim>| (decoded.header, decoded.claims))
 		.inspect(|(head, claim)| debug!(?head, ?claim, "JWT token decoded"))
 		.map_err(|e| err!(Request(Forbidden("Invalid JWT token: {e}"))))
 		.map(at!(1))
 }
 
-fn init_verifier(config: &JwtConfig) -> Result<DecodingKey> {
-	let key = &config.key;
-	let format = config.format.to_uppercase();
-
-	Ok(match format.as_str() {
-		| "HMAC" => DecodingKey::from_secret(key.as_bytes()),
-
-		// B64HMAC is the spelling the configuration reference and the docs give;
-		// HMACB64 was the only one accepted before and is kept for existing configs.
-		| "B64HMAC" | "HMACB64" => DecodingKey::from_base64_secret(key.as_str())
-			.map_err(|e| err!(Config("jwt.key", "JWT key is not valid base64: {e}")))?,
-
-		| "ECDSA" => DecodingKey::from_ec_pem(key.as_bytes())
-			.map_err(|e| err!(Config("jwt.key", "JWT key is not valid ECDSA PEM: {e}")))?,
-
-		| "EDDSA" => DecodingKey::from_ed_pem(key.as_bytes())
-			.map_err(|e| err!(Config("jwt.key", "JWT key is not valid EDDSA PEM: {e}")))?,
-
-		| _ => return Err!(Config("jwt.format", "Key format {format:?} is not supported.")),
-	})
-}
-
 fn init_validator(config: &JwtConfig) -> Result<Validation> {
-	let alg = config.algorithm.as_str();
-	let alg = Algorithm::from_str(alg).map_err(|e| {
-		err!(Config("jwt.algorithm", "JWT algorithm is not recognized or configured {e}"))
-	})?;
+	let has_audience = config.audience.is_empty().is_false();
+	let has_issuer = config.issuer.is_empty().is_false();
+	let required = [
+		Some("sub"),
+		config.require_exp.then_some("exp"),
+		config.require_nbf.then_some("nbf"),
+		has_audience.then_some("aud"),
+		has_issuer.then_some("iss"),
+	];
 
-	let mut validator = Validation::new(alg);
-	let mut required_spec_claims: Vec<_> = ["sub"].into();
+	let validator = Validation {
+		required_spec_claims: required
+			.into_iter()
+			.flatten()
+			.map(ToOwned::to_owned)
+			.collect(),
+		validate_exp: config.validate_exp,
+		validate_nbf: config.validate_nbf,
+		aud: has_audience.then(|| config.audience.iter().cloned().collect()),
+		iss: has_issuer.then(|| config.issuer.iter().cloned().collect()),
+		..Validation::new(config.algorithm()?)
+	};
 
-	validator.validate_exp = config.validate_exp;
-	if config.require_exp {
-		required_spec_claims.push("exp");
-	}
-
-	validator.validate_nbf = config.validate_nbf;
-	if config.require_nbf {
-		required_spec_claims.push("nbf");
-	}
-
-	if !config.audience.is_empty() {
-		required_spec_claims.push("aud");
-		validator.set_audience(&config.audience);
-	}
-
-	if !config.issuer.is_empty() {
-		required_spec_claims.push("iss");
-		validator.set_issuer(&config.issuer);
-	}
-
-	validator.set_required_spec_claims(&required_spec_claims);
 	debug!(?validator, "JWT configured");
 
 	Ok(validator)
