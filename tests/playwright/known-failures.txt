@@ -11,6 +11,7 @@ crypto/event-shields.spec.ts :: should show the correct shield on e2e events
 crypto/event-shields.spec.ts :: should show the correct shield on edited e2e events
 crypto/history-sharing.spec.ts :: Messages sent when we believed the room history was unshared should not be visible
 crypto/invisible-crypto.spec.ts :: Messages fail to decrypt when sender is previously verified
+crypto/migration.spec.ts :: Should support migration from legacy crypto
 crypto/user-verification.spec.ts :: can abort emoji verification when emoji mismatch
 crypto/user-verification.spec.ts :: can receive a verification request when there is no existing DM
 integration-manager/kick.spec.ts :: should not kick the target if lacking permissions
