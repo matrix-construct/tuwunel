@@ -10,7 +10,7 @@ use tuwunel_database::Database;
 pub(crate) use crate::OnceServices;
 use crate::{
 	account_data, admin, appservice, client, config, deactivate, emergency, federation, fetcher,
-	globals, key_backups,
+	globals, key_backups, login_ratelimit,
 	manager::Manager,
 	media, membership, oauth, presence, profile, pusher, registration_tokens, rendezvous,
 	resolver,
@@ -30,6 +30,7 @@ pub struct Services {
 	pub fetcher: Arc<fetcher::Service>,
 	pub globals: Arc<globals::Service>,
 	pub key_backups: Arc<key_backups::Service>,
+	pub login_ratelimit: Arc<login_ratelimit::Service>,
 	pub media: Arc<media::Service>,
 	pub presence: Arc<presence::Service>,
 	pub pusher: Arc<pusher::Service>,
@@ -127,6 +128,7 @@ pub async fn build(server: Arc<Server>) -> Result<Arc<Self>> {
 		sync: sync::Service::build(&args)?,
 		tasks: tasks::Service::build(&args)?,
 		transaction_ids: transaction_ids::Service::build(&args)?,
+		login_ratelimit: login_ratelimit::Service::build(&args)?,
 		uiaa: uiaa::Service::build(&args)?,
 		users: users::Service::build(&args)?,
 		membership: membership::Service::build(&args)?,

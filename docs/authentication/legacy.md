@@ -126,6 +126,30 @@ accounts were created.
 | `login_via_token` | `true` | Accept `m.login.token` login tokens. Disabling this can break SSO flows where the server issues a token to complete the login. |
 | `login_via_existing_session` | `true` | Allow an authenticated session to mint a login token that a second client can use to log in. Requires interactive re-authentication. Disable if you want to prevent clients from spawning additional sessions this way. |
 
+## Login rate limits
+
+These bound password guessing. Both are keyed on the account being tried
+rather than on the client's address, so they hold behind a reverse proxy or
+tunnel that does not forward the caller's address, where a per-address limit
+would see one client for every user. An account that is out of tokens is
+refused with `M_LIMIT_EXCEEDED` and a `retry_after_ms`.
+
+The defaults are Synapse's `rc_login.account` and `rc_login.failed_attempts`.
+Setting either `burst_count` — or either `per_second` — to `0` disables that
+limit.
+
+| Option | Default | Description |
+|---|---|---|
+| `login_rc_account_per_second` | `0.003` | Refill rate for password attempts against one account, successful or not. |
+| `login_rc_account_burst_count` | `5` | Attempts allowed before that rate governs. |
+| `login_rc_failed_per_second` | `0.17` | Refill rate for wrong passwords against one account. A drained bucket refuses the next attempt even with the correct password. |
+| `login_rc_failed_burst_count` | `3` | Wrong passwords allowed before that rate governs. |
+
+**What this costs.** While someone keeps guessing an account's password, its
+owner cannot sign in with that password either — the refusal is what bounds the
+guessing. Existing sessions are untouched, and so is any login that is not a
+password: `m.login.token`, SSO and JWT.
+
 ## Token and session lifetimes
 
 | Option | Default | Description |

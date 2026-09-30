@@ -336,6 +336,13 @@ async fn verify_password(
 	}
 
 	let user_id = user_id_from_username;
+
+	// Only the failed-attempt axis: the caller already holds an access token,
+	// but a stolen one must not become an unlimited password oracle.
+	self.services
+		.login_ratelimit
+		.check_failed_login_rate_limit(&user_id)?;
+
 	// First try local password hash verification
 	let password_verified = self
 		.services
@@ -368,6 +375,9 @@ async fn verify_password(
 	};
 
 	if !password_verified {
+		self.services
+			.login_ratelimit
+			.record_failed_login(&user_id);
 		uiaainfo.auth_error = Some(Box::new(StandardErrorBody {
 			kind: ErrorKind::forbidden(),
 			message: "Invalid username or password.".to_owned(),

@@ -204,6 +204,19 @@ async fn verify_credentials(
 		return Err(invalid());
 	}
 
+	// The same per-account throttle as `/login`, sharing its buckets, so this
+	// page is not a second, unthrottled way to guess the same password.
+	services
+		.login_ratelimit
+		.check_login_rate_limit(&user_id)?;
+	let attempted = user_id.clone();
+	let failed = || {
+		services
+			.login_ratelimit
+			.record_failed_login(&attempted);
+		invalid()
+	};
+
 	// Native registration lowercases the localpart, so resolve to whichever case
 	// carries the password, mirroring `/login`.
 	let (user_id, hash) = match services.users.password_hash(&user_id).await {
@@ -216,7 +229,7 @@ async fn verify_credentials(
 				.users
 				.password_hash(&lowercased)
 				.await
-				.map_err(|_| invalid())?;
+				.map_err(|_| failed())?;
 
 			(lowercased, hash)
 		},
@@ -233,10 +246,10 @@ async fn verify_credentials(
 	}
 
 	if hash.is_empty() {
-		return Err(invalid());
+		return Err(failed());
 	}
 
-	hash::verify_password(password, &hash).map_err(|_| invalid())?;
+	hash::verify_password(password, &hash).map_err(|_| failed())?;
 
 	Ok(user_id)
 }
