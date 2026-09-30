@@ -206,6 +206,12 @@ ARG playwright_retries="1"
 
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 ENV CI=true
+# pnpm 11 verifies node_modules before every `pnpm exec` and reinstalls when
+# they look stale (verifyDepsBeforeRun defaults to install). CI=true alone
+# makes them look stale, since it flips enableGlobalVirtualStore, which pnpm
+# records at install time, and the reinstall outlasts the webServer's 30s
+# startup window. node_modules is final once the image is built.
+ENV pnpm_config_verify_deps_before_run=false
 ENV playwright_run=$playwright_run
 ENV playwright_skip=$playwright_skip
 ENV playwright_shard=$playwright_shard
