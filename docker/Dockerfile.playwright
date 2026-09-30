@@ -47,6 +47,19 @@ ENTRYPOINT tuwunel -Oserver_name=\""$SERVER_NAME\""
 # Playwright image already ships pinned Chromium / Firefox / WebKit and their
 # system deps. Pin its version via ARG.
 FROM mcr.microsoft.com/playwright:v1.61.0-noble AS playwright-base
+
+# element-web's root postinstall runs electron-builder's install-app-deps for
+# apps/desktop, which rebuilds native modules (pkcs11js) through node-gyp; the
+# image carries python3 but no make or C++ compiler.
+RUN \
+--mount=type=cache,dst=/var/cache/apt,id=playwright-var-cache-apt,sharing=locked \
+--mount=type=cache,dst=/var/lib/apt,id=playwright-var-lib-apt,sharing=locked \
+<<EOF
+    set -eux
+    rm -f /etc/apt/apt.conf.d/docker-clean
+    DEBIAN_FRONTEND=noninteractive apt-get -y -U install --no-install-recommends make g++
+EOF
+
 ARG element_web_ref="develop"
 
 WORKDIR /usr/src
