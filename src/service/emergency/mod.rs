@@ -7,7 +7,8 @@ use ruma::{
 	},
 	push::Ruleset,
 };
-use tuwunel_core::{Result, debug_warn, error, warn};
+use serde_json::to_value;
+use tuwunel_core::{Result, debug_warn, error, implement, warn};
 
 pub struct Service {
 	services: Arc<crate::services::OnceServices>,
@@ -45,69 +46,69 @@ impl crate::Service for Service {
 
 		self.set_emergency_access(password)
 			.await
-			.inspect_err(|e| {
-				error!("Failed to update emergency access for the server user: {e}");
-			})
+			.inspect_err(|e| error!(%e, "Failed to update emergency access for the server user"))
 	}
 
 	fn name(&self) -> &str { crate::service::make_name(std::module_path!()) }
 }
 
-impl Service {
-	/// Whether the server user still holds a password, which only an earlier
-	/// start with `emergency_password` set gives it.
-	async fn emergency_access_remains(&self) -> bool {
-		self.services
-			.users
-			.has_password(&self.services.globals.server_user)
-			.await
-			.unwrap_or(false)
-	}
+/// Whether the server user still holds a password.
+///
+/// Only an earlier start with `emergency_password` set gives it one.
+#[implement(Service)]
+async fn emergency_access_remains(&self) -> bool {
+	self.services
+		.users
+		.has_password(&self.services.globals.server_user)
+		.await
+		.unwrap_or(false)
+}
 
-	/// Sets the emergency password and push rules for the server user account
-	/// when a password is given, and removes them and signs the account out
-	/// when it is not.
-	async fn set_emergency_access(&self, password: Option<&str>) -> Result {
-		let server_user = &self.services.globals.server_user;
+/// Sets or removes the server user's emergency access.
+///
+/// A given password is set along with the default push rules. Without one, the
+/// push rules are cleared and the account is signed out and deactivated.
+#[implement(Service)]
+#[tracing::instrument(level = "debug", skip_all)]
+async fn set_emergency_access(&self, password: Option<&str>) -> Result {
+	let server_user = &self.services.globals.server_user;
 
+	// The password marks the account for cleanup on a later start, so on
+	// removal only `deactivate_account`, the last step, clears it.
+	if password.is_some() {
 		self.services
 			.users
 			.set_password(server_user, password)
 			.await?;
-
-		let (ruleset, pwd_set) = match password {
-			| Some(_) => (Ruleset::server_default(server_user), true),
-			| None => (Ruleset::new(), false),
-		};
-
-		self.services
-			.account_data
-			.update(
-				None,
-				server_user,
-				GlobalAccountDataEventType::PushRules
-					.to_string()
-					.into(),
-				&serde_json::to_value(&GlobalAccountDataEvent {
-					content: PushRulesEventContent { global: ruleset },
-				})
-				.expect("to json value always works"),
-			)
-			.await?;
-
-		if pwd_set {
-			warn!(
-				"The server account emergency password is set! Please unset it as soon as you \
-				 finish admin account recovery! You will be logged out of the server service \
-				 account when you finish."
-			);
-			Ok(())
-		} else {
-			// logs out any users still in the server service account and removes sessions
-			self.services
-				.users
-				.deactivate_account(server_user)
-				.await
-		}
 	}
+
+	let ruleset = password.map_or_else(Ruleset::new, |_| Ruleset::server_default(server_user));
+	let event_type = GlobalAccountDataEventType::PushRules
+		.to_string()
+		.into();
+
+	let content = to_value(&GlobalAccountDataEvent {
+		content: PushRulesEventContent { global: ruleset },
+	})
+	.expect("to json value always works");
+
+	self.services
+		.account_data
+		.update(None, server_user, event_type, &content)
+		.await?;
+
+	if password.is_some() {
+		warn!(
+			"The server account emergency password is set! Please unset it as soon as you \
+			 finish admin account recovery! You will be logged out of the server service \
+			 account when you finish."
+		);
+
+		return Ok(());
+	}
+
+	self.services
+		.users
+		.deactivate_account(server_user)
+		.await
 }

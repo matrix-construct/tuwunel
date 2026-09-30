@@ -3,7 +3,10 @@ use futures::StreamExt;
 use synapse_admin_api::users::reset_password::v1 as reset_password;
 use tuwunel_core::{Err, Result, utils::stream::automatic_width};
 
-use crate::{Ruma, client::admin::require_admin};
+use crate::{
+	Ruma,
+	client::admin::{refuse_server_user, require_admin},
+};
 
 /// # `POST /_synapse/admin/v1/reset_password/{user_id}`
 pub(crate) async fn admin_reset_password_route(
@@ -11,6 +14,7 @@ pub(crate) async fn admin_reset_password_route(
 	body: Ruma<reset_password::Request>,
 ) -> Result<reset_password::Response> {
 	require_admin(&services, body.sender_user()).await?;
+	refuse_server_user(services, &body.user_id)?;
 
 	if !services.users.exists(&body.user_id).await {
 		return Err!(Request(NotFound("User not found")));

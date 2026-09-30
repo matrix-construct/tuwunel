@@ -74,6 +74,21 @@ pub(crate) async fn require_admin(services: &crate::State, sender: &UserId) -> R
 		})
 }
 
+/// Refuses the server user as the target of a user endpoint.
+///
+/// Its password comes only from the `emergency_password` option, whose removal
+/// signs it out again; a password, session or status set here would outlast
+/// that.
+pub(crate) fn refuse_server_user(services: crate::State, user_id: &UserId) -> Result {
+	if user_id == services.globals.server_user {
+		return Err!(Request(InvalidParam(
+			"The server user cannot be changed through this endpoint."
+		)));
+	}
+
+	Ok(())
+}
+
 /// True when Matrix Authentication Service delegation is active, in which case
 /// the Synapse-mirrored admin routes MAS owns (user admin, login-as,
 /// reset_password, registration tokens) are left unregistered and answer 404,

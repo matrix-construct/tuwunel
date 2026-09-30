@@ -11,7 +11,10 @@ use tuwunel_core::{
 use tuwunel_service::{threepid::canonicalize_email, users::PASSWORD_SENTINEL};
 
 use super::user_details;
-use crate::{Ruma, client::admin::require_admin};
+use crate::{
+	Ruma,
+	client::admin::{refuse_server_user, require_admin},
+};
 
 /// # `PUT /_synapse/admin/v2/users/{user_id}`
 ///
@@ -40,6 +43,11 @@ pub(crate) async fn admin_create_or_modify_route(
 	}
 
 	let created = !services.users.exists(user_id).await;
+
+	// The server user's profile stays editable here; its access does not.
+	if created || changes_access(&body) {
+		refuse_server_user(services, user_id)?;
+	}
 
 	if created {
 		services
@@ -129,6 +137,14 @@ pub(crate) async fn admin_create_or_modify_route(
 	let details = user_details(services, user_id).await;
 
 	Ok(create_or_modify::Response::new(details))
+}
+
+fn changes_access(body: &create_or_modify::Request) -> bool {
+	body.password.is_some()
+		|| body.deactivated.is_some()
+		|| body.locked.is_some()
+		|| body.admin.is_some()
+		|| body.threepids.is_some()
 }
 
 /// Replaces the user's email bindings with exactly the email threepids in

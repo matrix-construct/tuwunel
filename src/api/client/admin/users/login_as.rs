@@ -5,7 +5,10 @@ use ruma::MilliSecondsSinceUnixEpoch;
 use synapse_admin_api::users::login_as::v1::{Request, Response};
 use tuwunel_core::{Err, Result};
 
-use crate::{Ruma, client::admin::require_admin};
+use crate::{
+	Ruma,
+	client::admin::{refuse_server_user, require_admin},
+};
 
 /// # `POST /_synapse/admin/v1/users/{user_id}/login`
 ///
@@ -21,6 +24,8 @@ pub(crate) async fn admin_login_as_route(
 	if !services.globals.user_is_local(&body.user_id) {
 		return Err!(Request(InvalidParam("Only local users can be logged in as")));
 	}
+
+	refuse_server_user(services, &body.user_id)?;
 
 	if body.sender_user() == body.user_id {
 		return Err!(Request(InvalidParam("Cannot use admin API to login as self")));

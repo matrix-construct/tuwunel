@@ -3,6 +3,7 @@
 use std::{
 	env::{current_exe, var},
 	fs::remove_dir_all,
+	future::ready,
 	path::{Path, PathBuf},
 	process::Command,
 	sync::Arc,
@@ -10,7 +11,7 @@ use std::{
 };
 
 use tuwunel::{Args, Runtime, Server, async_run, async_start, async_stop};
-use tuwunel_core::{Err, Result};
+use tuwunel_core::{Err, Result, result::NotFound, ruma::events::GlobalAccountDataEventType};
 use tuwunel_service::Services;
 
 use self::client::poll_until;
@@ -37,8 +38,10 @@ impl Drop for DatabasePath {
 /// user's password is cleared and the sessions opened with it are signed out,
 /// as `docs/authentication/legacy.md` promises.
 ///
-/// Separate child processes boot the one database twice: first with the
-/// option set and a session opened for the server user, then without it.
+/// Separate child processes boot one database in turn. A server that never
+/// set the option opens a session for the server user and restarts twice,
+/// leaving the session and its push rules alone; a fresh start then sets the
+/// option and opens a session, and the last start runs without it.
 #[test]
 fn removing_the_emergency_password_signs_the_server_user_out() -> Result {
 	if let Ok(phase) = var(CHILD_PHASE_ENV) {
@@ -47,6 +50,9 @@ fn removing_the_emergency_password_signs_the_server_user_out() -> Result {
 			.into();
 
 		return match phase.as_str() {
+			| "never_set" => never_set_phase(&database),
+			| "restart" => restart_phase(&database),
+			| "untouched" => untouched_phase(&database),
 			| "set" => set_phase(&database),
 			| "removed" => removed_phase(&database),
 			| _ => Err!("unknown emergency password child phase: {phase}"),
@@ -55,18 +61,60 @@ fn removing_the_emergency_password_signs_the_server_user_out() -> Result {
 
 	let database = DatabasePath(Args::test_database_path("emergency-password-removed"));
 
-	for phase in ["set", "removed"] {
-		run_child(&database.0, phase)?;
-	}
+	["never_set", "restart", "untouched", "set", "removed"]
+		.into_iter()
+		.try_for_each(|phase| run_child(&database.0, phase))
+}
 
-	Ok(())
+/// Boots a fresh database that never set the option and opens a session for
+/// the server user.
+///
+/// A cleanup started by mistake on a later start would sign that session out.
+fn never_set_phase(database: &Path) -> Result {
+	boot(&database_args(database, &["fresh"]), open_session)
+}
+
+/// Boots again without the option and does nothing else.
+///
+/// A cleanup this start wrongly began runs to the end before the process stops,
+/// so the next start sees all of its effect.
+fn restart_phase(database: &Path) -> Result {
+	boot(&database_args(database, &[]), |_: &Services| ready(Ok(())))
+}
+
+/// Boots once more and checks the session and the push rules the never-set
+/// start left.
+///
+/// No start without the option may sign the server user out, give it a
+/// password or reset its push rules.
+fn untouched_phase(database: &Path) -> Result {
+	boot(&database_args(database, &[]), async |services| {
+		let server_user = &services.globals.server_user;
+
+		if !has_session(services).await {
+			return Err!("a start without the emergency password signed {server_user} out");
+		}
+
+		if services.users.has_password(server_user).await? {
+			return Err!("a start without the emergency password gave {server_user} a password");
+		}
+
+		if has_push_rules(services).await? {
+			return Err!(
+				"a start without the emergency password reset the push rules of {server_user}"
+			);
+		}
+
+		Ok(())
+	})
 }
 
 /// Boots with the emergency password set and opens a session for the server
-/// user, as an operator recovering admin access does.
+/// user.
+///
+/// This is what an operator recovering admin access does.
 fn set_phase(database: &Path) -> Result {
-	let args = Args::default_test(&["fresh"])
-		.with_option(format!("database_path={database:?}"))
+	let args = database_args(database, &["fresh"])
 		.with_option(format!("emergency_password=\"{EMERGENCY_PASSWORD}\""));
 
 	boot(&args, async |services| {
@@ -76,10 +124,7 @@ fn set_phase(database: &Path) -> Result {
 			return Err!("the emergency password was never set for {server_user}");
 		}
 
-		services
-			.users
-			.create_device(server_user, None, (Some(SESSION_TOKEN), None), None, None, None)
-			.await?;
+		open_session(services).await?;
 
 		if !has_session(services).await {
 			return Err!("the session opened for {server_user} was not found");
@@ -89,12 +134,11 @@ fn set_phase(database: &Path) -> Result {
 	})
 }
 
-/// Boots the same database with the option removed. The password and the
-/// session must both be gone.
+/// Boots the same database with the option removed.
+///
+/// The password and the session must both be gone.
 fn removed_phase(database: &Path) -> Result {
-	let args = Args::default_test(&[]).with_option(format!("database_path={database:?}"));
-
-	boot(&args, async |services| {
+	boot(&database_args(database, &[]), async |services| {
 		let server_user = &services.globals.server_user;
 		let cleared = poll_until(DEADLINE, async || {
 			!has_password(services).await && !has_session(services).await
@@ -111,6 +155,25 @@ fn removed_phase(database: &Path) -> Result {
 	})
 }
 
+fn database_args(database: &Path, test: &[&str]) -> Args {
+	Args::default_test(test).with_option(format!("database_path={database:?}"))
+}
+
+async fn open_session(services: &Services) -> Result {
+	services
+		.users
+		.create_device(
+			&services.globals.server_user,
+			None,
+			(Some(SESSION_TOKEN), None),
+			None,
+			None,
+			None,
+		)
+		.await
+		.map(drop)
+}
+
 async fn has_password(services: &Services) -> bool {
 	services
 		.users
@@ -125,6 +188,18 @@ async fn has_session(services: &Services) -> bool {
 		.find_from_token(SESSION_TOKEN)
 		.await
 		.is_ok()
+}
+
+// A failed read is an error, not an absence, so it cannot pass for untouched rules.
+async fn has_push_rules(services: &Services) -> Result<bool> {
+	let kind = GlobalAccountDataEventType::PushRules.to_string();
+
+	services
+		.account_data
+		.get_raw(None, &services.globals.server_user, &kind)
+		.await
+		.optional()
+		.map(|raw| raw.is_some())
 }
 
 fn run_child(database: &Path, phase: &str) -> Result {
