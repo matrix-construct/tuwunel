@@ -131,23 +131,29 @@ fi
 
 # Merge the pass reports into the results.json the caller extracts. The
 # summarisers classify by recursive descent, so a two-report array reads the
-# same as one report. A pass 2 report absent because its pass matched nothing
-# (an acceptlist gone stale against upstream) is dropped rather than fatal.
+# same as one report. Pass 2 adds nothing when this shard drew no acceptlist
+# lines, and nothing the gate counts when its lines matched no tests (an
+# acceptlist gone stale against upstream); neither is fatal.
 # Pass 1 must have run tests: one that died first (a webServer that never
 # came up, a failed global setup) leaves a report counting none, and merging
-# past it hands the gate only the known failures, which it passes. Write no
-# results.json then; the gate fails a shard that has none.
+# past it hands the gate only the known failures, which it passes. Nor may
+# pass 1 report errors outside its tests (a worker fixture or the webServer
+# failing in teardown): Playwright fails such a run, but no test status the
+# gate reads shows it. Write no results.json then; the gate fails a shard
+# that has none.
 node -e '
 	const fs = require("fs");
 	const [dest, pass1, ...srcs] = process.argv.slice(1);
 	const read = (f) => JSON.parse(fs.readFileSync(f, "utf8"));
 	const report = fs.existsSync(pass1) ? read(pass1) : undefined;
 	const { expected = 0, unexpected = 0, flaky = 0 } = report?.stats ?? {};
-	if (expected + unexpected + flaky === 0) {
-		console.error(`${pass1}: pass 1 ran no tests`);
-		for (const { message } of report?.errors ?? []) console.error(message);
+	const fail = (reason) => {
+		console.error(`${pass1}: ${reason}`);
+		for (const { message, value } of report?.errors ?? []) console.error(message ?? value);
 		process.exit(1);
-	}
+	};
+	if (expected + unexpected + flaky === 0) fail("pass 1 ran no tests");
+	if (report.errors?.length) fail("pass 1 reported errors outside its tests");
 	const reports = [report, ...srcs.filter((f) => fs.existsSync(f)).map(read)];
 	fs.writeFileSync(dest, JSON.stringify(reports.length === 1 ? reports[0] : reports));
 ' "$out/results.json" "$out/results-expected.json" "$out/results-knownfail.json"

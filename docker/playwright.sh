@@ -63,11 +63,11 @@ envs="$envs -e SERVE_PORT=${base_port}"
 
 # The known-failures acceptlist steers run.sh's two-pass split (each known
 # failure runs once, dealt round-robin across shards); mounted from the
-# checkout so a baseline edit needs no tester rebuild. Without the file the
-# tester falls back to a single pass.
+# checkout so a baseline edit needs no tester rebuild. Without the file, or
+# with an empty one, the tester falls back to a single pass.
 vols=""
 acceptlist="$(cd "$BASEDIR/.." && pwd)/tests/playwright/known-failures.txt"
-if test -f "$acceptlist"; then
+if test -s "$acceptlist"; then
 	vols="-v $acceptlist:/playwright/known-failures.txt:ro"
 fi
 
@@ -96,6 +96,15 @@ docker rm -f "$name" 2>/dev/null || true
 docker network rm "$net" 2>/dev/null || true
 docker network create "$net" >/dev/null 2>&1 || true
 
+result_dst="tests/playwright/results.json"
+output_dst="tests/playwright/output.log"
+artifacts_dst="tests/playwright/test-results"
+mkdir -p tests/playwright "$artifacts_dst"
+
+# A run that dies before writing its report must not leave the previous run's
+# report to be judged in its place.
+rm -f "$result_dst"
+
 arg="-d $arg"
 cid=$(docker run $arg)
 
@@ -104,15 +113,11 @@ if test "$CI" = "true"; then
 fi
 
 result_src="$cid:/playwright/out/results.json"
-result_dst="tests/playwright/results.json"
 output_src="$cid:/playwright/out/output.log"
-output_dst="tests/playwright/output.log"
 # Per-failure traces, videos, and error-context.md, which Playwright writes to
 # the config outputDir. Only populated when a test fails, so the upload step
 # ignores an empty result.
 artifacts_src="$cid:/usr/src/element-web/apps/web/playwright/test-results/."
-artifacts_dst="tests/playwright/test-results"
-mkdir -p tests/playwright "$artifacts_dst"
 
 extract_output() {
 	docker cp "$output_src" "$output_dst" 2>/dev/null || true
@@ -127,10 +132,21 @@ extract_artifacts() {
 trap 'extract_output; extract_results; extract_artifacts; set +x; date; echo -e "\033[1;41;37mERROR\033[0m"' ERR
 trap 'docker container stop $cid; extract_output; extract_results; extract_artifacts' INT
 docker logs -f "$cid"
-docker wait "$cid" >/dev/null 2>&1 || true
+
+# docker wait prints the tester's exit status and exits 0 itself. In the
+# two-pass shape run.sh absorbs test failures for the gate to judge, so a
+# nonzero status means the harness broke; in the single-pass shape it is
+# Playwright's own status.
+rc=$(docker wait "$cid")
 
 extract_results
 extract_output
 extract_artifacts
+
+if test "$rc" != 0; then
+	date
+	echo -e "\033[1;41;37mERROR\033[0m"
+	exit "$rc"
+fi
 
 echo -e "\033[1;42;30mACCEPT\033[0m"
