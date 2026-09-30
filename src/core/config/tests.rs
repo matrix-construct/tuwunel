@@ -125,6 +125,47 @@ limit_profile_requests_to_users_who_share_rooms = true
 }
 
 #[test]
+fn login_rate_limits_default_every_option_left_unset() {
+	let rates = "[global.rate_limiting.login.failed]
+per_second = 1.5
+
+[global.rate_limiting.login.account]
+per_second = 2.5
+";
+
+	let bursts = "[global.rate_limiting.login.failed]
+burst_count = 7
+
+[global.rate_limiting.login.account]
+burst_count = 9
+";
+
+	let account = "[global.rate_limiting.login.account]
+burst_count = 9
+";
+
+	for (toml, expected) in [
+		("[global]\n", [(0.17, 3), (0.003, 5)]),
+		(rates, [(1.5, 3), (2.5, 5)]),
+		(bursts, [(0.17, 7), (0.003, 9)]),
+		(account, [(0.17, 3), (0.003, 9)]),
+	] {
+		let config = config_from_toml(toml).expect("the config should parse");
+
+		assert_eq!(login_limits(&config), expected, "{toml}");
+	}
+}
+
+fn login_limits(config: &Config) -> [(f64, u32); 2] {
+	let LoginRateLimits { failed, account } = &config.rate_limiting.login;
+
+	[
+		(failed.per_second, failed.burst_count),
+		(account.per_second, account.burst_count),
+	]
+}
+
+#[test]
 fn url_preview_accept_language_can_be_reloaded_and_removed() {
 	let original = default_config();
 	let english = config_from_toml(

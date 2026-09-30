@@ -99,8 +99,8 @@ pub type ServerUserLocalpart = SmallString<[u8; 32]>;
 ### For more information, see:
 ### https://tuwunel.chat/configuration.html
 "#,
-	ignore = "catchall well_known tls ldap jwt appservice identity_provider storage_provider \
-	          registration_terms smtp",
+	ignore = "catchall well_known tls rate_limiting ldap jwt appservice identity_provider \
+	          storage_provider registration_terms smtp",
 	hidden = "allow_invalid_tls_certificates resolve_state_locally_shadow",
 	forbidden = "database_restore_backup force_migration"
 )]
@@ -1821,65 +1821,11 @@ pub struct Config {
 	#[serde(default = "true_fn")]
 	pub login_with_password: bool,
 
-	/// Token-bucket refill rate (sign-ins per second) for successful password
-	/// logins to one account.
-	///
-	/// Applies to `/login` with `m.login.password` (not yet to the LDAP binds it
-	/// makes) and to the built-in OIDC login page, keyed on the account rather
-	/// than the client IP. Mirrors Synapse's `rc_login.account` and its default
-	/// of `login_rc_account_burst_count` sign-ins, then about one every five and
-	/// a half minutes; once those are used up, a correct password is refused
-	/// with `M_LIMIT_EXCEEDED`.
-	///
-	/// `0` disables this limit rather than making a bucket that never refills.
-	///
-	/// reloadable: yes
-	/// default: 0.003
-	#[serde(default = "default_login_rc_account_per_second")]
-	pub login_rc_account_per_second: f64,
-
-	/// Token-bucket depth (burst size) for successful password logins to one
-	/// account.
-	///
-	/// The number of sign-ins allowed before `login_rc_account_per_second`
-	/// governs. `0` disables this limit, as does a `0` rate. The default is
-	/// Synapse's `rc_login.account.burst_count`.
-	///
-	/// reloadable: yes
-	/// default: 5
-	#[serde(default = "default_login_rc_account_burst_count")]
-	pub login_rc_account_burst_count: u32,
-
-	/// Token-bucket refill rate (failures per second) for wrong passwords
-	/// against one account.
-	///
-	/// Every password attempt takes a token before the password is checked,
-	/// and only a wrong password keeps it; once the bucket is empty, even the
-	/// owner's correct password is refused with `M_LIMIT_EXCEEDED`. Applies to
-	/// `/login` (not yet to the LDAP binds it makes), the built-in OIDC login
-	/// page and password re-entry for sensitive actions (UIAA), keyed on the
-	/// account. Mirrors Synapse's `rc_login.failed_attempts` and its default:
-	/// `login_rc_failed_burst_count` failures, then about one attempt every six
-	/// seconds, or some 14,700 a day.
-	///
-	/// `0` disables this limit rather than making a bucket that never refills.
-	///
-	/// reloadable: yes
-	/// default: 0.17
-	#[serde(default = "default_login_rc_failed_per_second")]
-	pub login_rc_failed_per_second: f64,
-
-	/// Token-bucket depth (burst size) for wrong passwords against one
-	/// account.
-	///
-	/// The number of failures allowed before `login_rc_failed_per_second`
-	/// governs. `0` disables this limit, as does a `0` rate. The default is
-	/// Synapse's `rc_login.failed_attempts.burst_count`.
-	///
-	/// reloadable: yes
-	/// default: 3
-	#[serde(default = "default_login_rc_failed_burst_count")]
-	pub login_rc_failed_burst_count: u32,
+	/// Configures request rate limits, one `[global.rate_limiting]` subsection
+	/// per kind of request.
+	// external structure; separate section
+	#[serde(default)]
+	pub rate_limiting: RateLimits,
 
 	/// Login token expiration/TTL in milliseconds.
 	///
@@ -4684,6 +4630,127 @@ pub struct JwtConfig {
 	pub validate_signature: bool,
 }
 
+/// Configures request rate limits.
+///
+/// Each subsection limits one kind of request, such as password sign-in.
+#[derive(Clone, Copy, Debug, Default, Deserialize)]
+#[config_example_generator(
+	filename = "tuwunel-example.toml",
+	section = "global.rate_limiting",
+	ignore = "login"
+)]
+pub struct RateLimits {
+	/// Limits password sign-in per account, in the `failed` and `account`
+	/// subsections.
+	// external structure; separate section
+	#[serde(default)]
+	pub login: LoginRateLimits,
+}
+
+/// Limits password sign-in per account on two axes.
+///
+/// Both mirror Synapse's `rc_login` limits of the same purpose and are keyed on
+/// the account rather than the client address.
+#[derive(Clone, Copy, Debug, Default, Deserialize)]
+#[config_example_generator(
+	filename = "tuwunel-example.toml",
+	section = "global.rate_limiting.login",
+	ignore = "failed account"
+)]
+pub struct LoginRateLimits {
+	/// Limits wrong passwords against one account.
+	// external structure; separate section
+	#[serde(default)]
+	pub failed: LoginFailedRateLimit,
+
+	/// Limits successful sign-ins to one account.
+	// external structure; separate section
+	#[serde(default)]
+	pub account: LoginAccountRateLimit,
+}
+
+/// Limits wrong passwords against one account.
+///
+/// A name that matches no account counts as a wrong password, so the limit
+/// does not reveal which accounts exist.
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[config_example_generator(
+	filename = "tuwunel-example.toml",
+	section = "global.rate_limiting.login.failed"
+)]
+pub struct LoginFailedRateLimit {
+	/// Token-bucket refill rate (failures per second) for wrong passwords
+	/// against one account.
+	///
+	/// Every password attempt takes a token before the password is checked,
+	/// and only a wrong password keeps it; once the bucket is empty, even the
+	/// owner's correct password is refused with `M_LIMIT_EXCEEDED`. Applies to
+	/// `/login` (but not to the LDAP binds it makes), the built-in OIDC login
+	/// page and password re-entry for sensitive actions (UIAA), keyed on the
+	/// account. Mirrors Synapse's `rc_login.failed_attempts` and its default:
+	/// `burst_count` failures, then about one attempt every six seconds, or
+	/// some 14,700 a day.
+	///
+	/// `0` disables this limit rather than making a bucket that never refills.
+	///
+	/// reloadable: yes
+	/// default: 0.17
+	#[serde(default = "default_login_failed_per_second")]
+	pub per_second: f64,
+
+	/// Token-bucket depth (burst size) for wrong passwords against one
+	/// account.
+	///
+	/// The number of failures allowed before `per_second` governs. `0`
+	/// disables this limit, as does a `0` rate. The default is Synapse's
+	/// `rc_login.failed_attempts.burst_count`.
+	///
+	/// reloadable: yes
+	/// default: 3
+	#[serde(default = "default_login_failed_burst_count")]
+	pub burst_count: u32,
+}
+
+/// Limits successful sign-ins to one account.
+///
+/// Only a sign-in by a verified password takes a token, so wrong guesses never
+/// lock the owner out on this axis.
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[config_example_generator(
+	filename = "tuwunel-example.toml",
+	section = "global.rate_limiting.login.account"
+)]
+pub struct LoginAccountRateLimit {
+	/// Token-bucket refill rate (sign-ins per second) for successful password
+	/// logins to one account.
+	///
+	/// Applies to `/login` with `m.login.password` (but not to the LDAP binds it
+	/// makes) and to the built-in OIDC login page, keyed on the account rather
+	/// than the client IP. Mirrors Synapse's `rc_login.account` and its default
+	/// of `burst_count` sign-ins, then about one every five and a half minutes;
+	/// once those are used up, a correct password is refused with
+	/// `M_LIMIT_EXCEEDED`.
+	///
+	/// `0` disables this limit rather than making a bucket that never refills.
+	///
+	/// reloadable: yes
+	/// default: 0.003
+	#[serde(default = "default_login_account_per_second")]
+	pub per_second: f64,
+
+	/// Token-bucket depth (burst size) for successful password logins to one
+	/// account.
+	///
+	/// The number of sign-ins allowed before `per_second` governs. `0` disables
+	/// this limit, as does a `0` rate. The default is Synapse's
+	/// `rc_login.account.burst_count`.
+	///
+	/// reloadable: yes
+	/// default: 5
+	#[serde(default = "default_login_account_burst_count")]
+	pub burst_count: u32,
+}
+
 /// Configures outbound email verification through SMTP.
 ///
 /// The connection URI and sender identify the relay and source mailbox.
@@ -5552,6 +5619,24 @@ impl TlsConfig {
 	}
 }
 
+impl Default for LoginFailedRateLimit {
+	fn default() -> Self {
+		Self {
+			per_second: default_login_failed_per_second(),
+			burst_count: default_login_failed_burst_count(),
+		}
+	}
+}
+
+impl Default for LoginAccountRateLimit {
+	fn default() -> Self {
+		Self {
+			per_second: default_login_account_per_second(),
+			burst_count: default_login_account_burst_count(),
+		}
+	}
+}
+
 fn true_fn() -> bool { true }
 
 fn default_policy_server_request_timeout() -> u64 { 5 }
@@ -5566,16 +5651,15 @@ fn default_rendezvous_rc_per_second() -> u32 { 10 }
 
 fn default_rendezvous_rc_burst_count() -> u32 { 20 }
 
-// The four `login_rc_*` defaults are Synapse's `rc_login.account` and
-// `rc_login.failed_attempts` defaults, taken unchanged:
+// Synapse's `rc_login` defaults, taken unchanged:
 // https://element-hq.github.io/synapse/latest/usage/configuration/config_documentation.html#rc_login
-fn default_login_rc_account_per_second() -> f64 { 0.003 }
+fn default_login_failed_per_second() -> f64 { 0.17 }
 
-fn default_login_rc_account_burst_count() -> u32 { 5 }
+fn default_login_failed_burst_count() -> u32 { 3 }
 
-fn default_login_rc_failed_per_second() -> f64 { 0.17 }
+fn default_login_account_per_second() -> f64 { 0.003 }
 
-fn default_login_rc_failed_burst_count() -> u32 { 3 }
+fn default_login_account_burst_count() -> u32 { 5 }
 
 fn some_true_fn() -> Option<bool> { Some(true) }
 

@@ -152,29 +152,42 @@ per-address limit would see one client for every user. A refused attempt gets
   that has signed in too often is refused even with the correct password. This
   applies to `/login` and the built-in OIDC login page.
 
-Neither limit covers the LDAP binds `/login` makes yet: with LDAP enabled, only
+Neither limit covers the LDAP binds `/login` makes: with LDAP enabled, only
 an account `/login` does not find in the directory, and so checks locally, is
 limited.
 
-| Option | Default | Description |
+Each limit has its own section in the config file, shown here with its
+defaults:
+
+```toml
+[global.rate_limiting.login.failed]
+per_second = 0.17
+burst_count = 3
+
+[global.rate_limiting.login.account]
+per_second = 0.003
+burst_count = 5
+```
+
+| Section | Option | Description |
 |---|---|---|
-| `login_rc_account_per_second` | `0.003` | Refill rate for successful password sign-ins to one account. |
-| `login_rc_account_burst_count` | `5` | Sign-ins allowed before that rate governs. |
-| `login_rc_failed_per_second` | `0.17` | Refill rate for wrong passwords against one account. |
-| `login_rc_failed_burst_count` | `3` | Wrong passwords allowed before that rate governs. |
+| `failed` | `per_second` | Refill rate for wrong passwords against one account. |
+| `failed` | `burst_count` | Wrong passwords allowed before that rate governs. |
+| `account` | `per_second` | Refill rate for successful password sign-ins to one account. |
+| `account` | `burst_count` | Sign-ins allowed before that rate governs. |
 
 The defaults are Synapse's own, so a server moving between the two keeps the
-same behaviour: five sign-ins, then about one every five and a half minutes;
-and three wrong passwords, then about one attempt every six seconds. Setting
-either `burst_count`, or either `per_second`, to `0` disables that limit, rather
-than making a bucket that never refills.
+same behaviour: three wrong passwords, then about one attempt every six
+seconds; and five sign-ins, then about one every five and a half minutes.
+Setting either `burst_count`, or either `per_second`, to `0` disables that
+limit, rather than making a bucket that never refills.
 
 **What this costs.** While someone keeps sending wrong passwords for an
 account, its owner cannot sign in with a password either; the refusal is what
 bounds the guessing. At the defaults that lasts only while the wrong passwords
 keep coming, since the bucket gives back one attempt about every six seconds.
 That rate still allows about 14,700 wrong passwords a day against one account,
-and there is no per-address limit yet, so a per-IP limit at the reverse proxy is
+and there is no per-address limit, so a per-IP limit at the reverse proxy is
 the lever for tightening it. Existing sessions are untouched, and so is any
 login that is not a password: `m.login.token`, SSO and JWT.
 

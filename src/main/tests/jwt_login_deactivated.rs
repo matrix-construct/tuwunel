@@ -108,7 +108,8 @@ async fn exercise(services: &Services, base: &str) -> Result {
 
 	expect_error("deactivated account", status, &body, StatusCode::FORBIDDEN, DEACTIVATED)?;
 
-	let burst = services.config.login_rc_failed_burst_count;
+	let limit = &services.config.rate_limiting.login.failed;
+	let burst = limit.burst_count;
 
 	for attempt in 0..=burst {
 		let (status, body) = password_login(services, base, &deactivated, PASSWORD).await?;

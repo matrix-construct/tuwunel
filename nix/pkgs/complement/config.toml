@@ -38,8 +38,8 @@ allow_legacy_media = true
 # The suite signs one account in many times over, sometimes in parallel, and
 # tests wrong passwords on purpose, so the per-account login limits get bursts
 # it cannot reach rather than being turned off.
-login_rc_account_burst_count = 1000
-login_rc_failed_burst_count = 1000
+rate_limiting.login.account.burst_count = 1000
+rate_limiting.login.failed.burst_count = 1000
 startup_netburst = true
 startup_netburst_keep = -1
 

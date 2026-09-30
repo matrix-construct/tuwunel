@@ -16,10 +16,10 @@ const CAP: usize = 16;
 
 const KEY: &str = "@a:x";
 
-// The default `login_rc_failed_*` limit.
+// The default `[global.rate_limiting.login.failed]` limit.
 const FAILED: Limit = Limit { rate: 0.17, burst: 3 };
 
-// The default `login_rc_account_*` limit.
+// The default `[global.rate_limiting.login.account]` limit.
 const ACCOUNT: Limit = Limit { rate: 0.003, burst: 5 };
 
 #[derive(Clone, Copy, PartialEq, Eq)]

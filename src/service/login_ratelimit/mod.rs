@@ -5,8 +5,8 @@
 //! so concurrent guesses cannot share one token. Only a sign-in by a verified
 //! password debits the account bucket. Both are keyed on the account rather
 //! than the client address, mirroring Synapse's `rc_login.failed_attempts` and
-//! `rc_login.account`; the operator documentation for the `login_rc_*` options
-//! sets out their costs.
+//! `rc_login.account`; the operator documentation for the
+//! `[global.rate_limiting.login]` options sets out their costs.
 
 use std::{
 	collections::HashMap,
@@ -189,21 +189,21 @@ pub fn refund_login_attempt(&self, reservation: Reservation) -> Result {
 
 #[implement(Service)]
 fn failed_limit(&self) -> Limit {
-	let config = &self.server.config;
+	let failed = &self.server.config.rate_limiting.login.failed;
 
 	Limit {
-		rate: config.login_rc_failed_per_second,
-		burst: config.login_rc_failed_burst_count,
+		rate: failed.per_second,
+		burst: failed.burst_count,
 	}
 }
 
 #[implement(Service)]
 fn account_limit(&self) -> Limit {
-	let config = &self.server.config;
+	let account = &self.server.config.rate_limiting.login.account;
 
 	Limit {
-		rate: config.login_rc_account_per_second,
-		burst: config.login_rc_account_burst_count,
+		rate: account.per_second,
+		burst: account.burst_count,
 	}
 }
 

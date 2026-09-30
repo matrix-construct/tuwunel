@@ -1495,62 +1495,6 @@
 #
 #login_with_password = true
 
-# Token-bucket refill rate (sign-ins per second) for successful password
-# logins to one account.
-#
-# Applies to `/login` with `m.login.password` (not yet to the LDAP binds it
-# makes) and to the built-in OIDC login page, keyed on the account rather
-# than the client IP. Mirrors Synapse's `rc_login.account` and its default
-# of `login_rc_account_burst_count` sign-ins, then about one every five and
-# a half minutes; once those are used up, a correct password is refused
-# with `M_LIMIT_EXCEEDED`.
-#
-# `0` disables this limit rather than making a bucket that never refills.
-#
-# reloadable: yes
-#
-#login_rc_account_per_second = 0.003
-
-# Token-bucket depth (burst size) for successful password logins to one
-# account.
-#
-# The number of sign-ins allowed before `login_rc_account_per_second`
-# governs. `0` disables this limit, as does a `0` rate. The default is
-# Synapse's `rc_login.account.burst_count`.
-#
-# reloadable: yes
-#
-#login_rc_account_burst_count = 5
-
-# Token-bucket refill rate (failures per second) for wrong passwords
-# against one account.
-#
-# Every password attempt takes a token before the password is checked,
-# and only a wrong password keeps it; once the bucket is empty, even the
-# owner's correct password is refused with `M_LIMIT_EXCEEDED`. Applies to
-# `/login` (not yet to the LDAP binds it makes), the built-in OIDC login
-# page and password re-entry for sensitive actions (UIAA), keyed on the
-# account. Mirrors Synapse's `rc_login.failed_attempts` and its default:
-# `login_rc_failed_burst_count` failures, then about one attempt every six
-# seconds, or some 14,700 a day.
-#
-# `0` disables this limit rather than making a bucket that never refills.
-#
-# reloadable: yes
-#
-#login_rc_failed_per_second = 0.17
-
-# Token-bucket depth (burst size) for wrong passwords against one
-# account.
-#
-# The number of failures allowed before `login_rc_failed_per_second`
-# governs. `0` disables this limit, as does a `0` rate. The default is
-# Synapse's `rc_login.failed_attempts.burst_count`.
-#
-# reloadable: yes
-#
-#login_rc_failed_burst_count = 3
-
 # Login token expiration/TTL in milliseconds.
 #
 # These are short-lived tokens for the m.login.token endpoint.
@@ -3903,6 +3847,78 @@
 # reloadable: yes
 #
 #validate_signature = true
+
+
+
+#[global.rate_limiting]
+
+
+
+#[global.rate_limiting.login]
+
+
+
+#[global.rate_limiting.login.failed]
+
+# Token-bucket refill rate (failures per second) for wrong passwords
+# against one account.
+#
+# Every password attempt takes a token before the password is checked,
+# and only a wrong password keeps it; once the bucket is empty, even the
+# owner's correct password is refused with `M_LIMIT_EXCEEDED`. Applies to
+# `/login` (but not to the LDAP binds it makes), the built-in OIDC login
+# page and password re-entry for sensitive actions (UIAA), keyed on the
+# account. Mirrors Synapse's `rc_login.failed_attempts` and its default:
+# `burst_count` failures, then about one attempt every six seconds, or
+# some 14,700 a day.
+#
+# `0` disables this limit rather than making a bucket that never refills.
+#
+# reloadable: yes
+#
+#per_second = 0.17
+
+# Token-bucket depth (burst size) for wrong passwords against one
+# account.
+#
+# The number of failures allowed before `per_second` governs. `0`
+# disables this limit, as does a `0` rate. The default is Synapse's
+# `rc_login.failed_attempts.burst_count`.
+#
+# reloadable: yes
+#
+#burst_count = 3
+
+
+
+#[global.rate_limiting.login.account]
+
+# Token-bucket refill rate (sign-ins per second) for successful password
+# logins to one account.
+#
+# Applies to `/login` with `m.login.password` (but not to the LDAP binds it
+# makes) and to the built-in OIDC login page, keyed on the account rather
+# than the client IP. Mirrors Synapse's `rc_login.account` and its default
+# of `burst_count` sign-ins, then about one every five and a half minutes;
+# once those are used up, a correct password is refused with
+# `M_LIMIT_EXCEEDED`.
+#
+# `0` disables this limit rather than making a bucket that never refills.
+#
+# reloadable: yes
+#
+#per_second = 0.003
+
+# Token-bucket depth (burst size) for successful password logins to one
+# account.
+#
+# The number of sign-ins allowed before `per_second` governs. `0` disables
+# this limit, as does a `0` rate. The default is Synapse's
+# `rc_login.account.burst_count`.
+#
+# reloadable: yes
+#
+#burst_count = 5
 
 
 
