@@ -23,6 +23,10 @@ media_startup_check = true
 prune_missing_media = true
 log_colors = true
 admin_room_notices = false
+# Each test deploys a clean server, so the first account it registers would be
+# the server's only admin, and the server refuses to deactivate its last admin.
+# Tests that need an admin register one explicitly.
+grant_admin_to_first_user = false
 intentionally_unknown_config_option_for_testing = true
 rocksdb_log_level = "info"
 rocksdb_max_log_files = 1

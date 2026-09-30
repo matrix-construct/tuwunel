@@ -181,6 +181,21 @@ impl Service {
 
 	/// Deactivate account
 	pub async fn deactivate_account(&self, user_id: &UserId) -> Result {
+		// Nobody would be left to reactivate this account or any other. Every
+		// deactivation path reaches here first, while the admins room refuses the
+		// last admin's departure only after the account is already deactivated.
+		if self
+			.services
+			.admin
+			.user_is_last_admin(user_id)
+			.await
+		{
+			return Err!(Request(Forbidden(
+				"Cannot deactivate the last admin of this server. Make another user an admin \
+				 first."
+			)));
+		}
+
 		// Revoke any SSO authorizations
 		self.services
 			.oauth
