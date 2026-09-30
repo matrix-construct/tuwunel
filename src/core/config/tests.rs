@@ -107,14 +107,16 @@ fn url_preview_accept_language_defaults_to_none() {
 
 #[test]
 fn shared_room_profile_requests_require_profile_authentication() {
-	for (toml, valid) in [
-		("[global]\nlimit_profile_requests_to_users_who_share_rooms = true\n", false),
-		(
-			"[global]\nrequire_auth_for_profile_requests = true\n\
-			 limit_profile_requests_to_users_who_share_rooms = true\n",
-			true,
-		),
-	] {
+	let unauthenticated = "[global]
+limit_profile_requests_to_users_who_share_rooms = true
+";
+
+	let authenticated = "[global]
+require_auth_for_profile_requests = true
+limit_profile_requests_to_users_who_share_rooms = true
+";
+
+	for (toml, valid) in [(unauthenticated, false), (authenticated, true)] {
 		let config = config_from_toml(toml).expect("the config should parse");
 		let result = check(&config);
 

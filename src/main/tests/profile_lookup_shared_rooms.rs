@@ -6,19 +6,30 @@ use tuwunel_core::{Result, err, ruma::UserId};
 use tuwunel_service::Services;
 
 use self::{
+	appservice::{Bridge, register_appservice},
 	client::{Client, register},
 	fixture::boot,
 };
 
+mod appservice;
 mod client;
 mod fixture;
 
 const OWNER_TOKEN: &str = "profile-lookup-owner-access-token";
 const REQUESTER_TOKEN: &str = "profile-lookup-requester-access-token";
+const BRIDGE_TOKEN: &str = "profile-lookup-bridge-access-token";
 
-/// Profile reads remain available to their owner and users sharing a room, but
-/// unrelated authenticated users receive the same response as for an unknown
-/// profile.
+const BRIDGE: Bridge<'static> = Bridge {
+	id: "profile-lookup-shared-rooms",
+	token: BRIDGE_TOKEN,
+	sender_localpart: "profile_lookup_bridge",
+	users: "^@profile_lookup_bridge:.*$",
+	aliases: None,
+};
+
+/// Profile reads are refused with 403 to users who share no room with the owner.
+///
+/// The owner, users sharing a room, and appservices can still read them.
 #[test]
 fn profile_lookups_require_a_shared_room() -> Result {
 	let options = [
@@ -35,9 +46,16 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	let owner = Client { services, base, token: OWNER_TOKEN };
 	let requester = Client { services, base, token: REQUESTER_TOKEN };
 
-	assert_profile_status(&requester, &owner_id, StatusCode::NOT_FOUND).await?;
-	assert_profile_field_status(&requester, &owner_id, StatusCode::NOT_FOUND).await?;
+	assert_profile_status(&requester, &owner_id, StatusCode::FORBIDDEN).await?;
+	assert_profile_field_status(&requester, &owner_id, StatusCode::FORBIDDEN).await?;
 	assert_profile_status(&owner, &owner_id, StatusCode::OK).await?;
+
+	register_appservice(services, &BRIDGE).await?;
+
+	let bridge = Client { services, base, token: BRIDGE_TOKEN };
+
+	assert_profile_status(&bridge, &owner_id, StatusCode::OK).await?;
+	assert_profile_field_status(&bridge, &owner_id, StatusCode::OK).await?;
 
 	let room_id = owner
 		.create_room(&json!({ "preset": "private_chat", "invite": [&requester_id] }))

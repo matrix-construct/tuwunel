@@ -1031,9 +1031,14 @@
 #enable_set_displayname = true
 
 # Restrict client profile retrieval to the user themselves or users who
-# currently share a joined room. Requires `require_auth_for_profile_requests`
-# to be enabled. This does not affect federation profile lookups, which are
-# controlled separately by `allow_inbound_profile_lookup_federation_requests`.
+# currently share a joined room.
+#
+# Appservices are exempt, and other users are refused with 403
+# `M_FORBIDDEN`. The server refuses to start, or to reload its
+# configuration, with this enabled unless
+# `require_auth_for_profile_requests` is enabled too. Federation profile
+# lookups are unaffected; `allow_inbound_profile_lookup_federation_requests`
+# controls those.
 #
 # reloadable: yes
 #

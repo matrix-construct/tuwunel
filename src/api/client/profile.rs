@@ -1,6 +1,7 @@
 use axum::extract::State;
 use futures::StreamExt;
 use ruma::{
+	UserId,
 	api::client::profile::{
 		PropagateTo, delete_profile_field, get_profile,
 		get_profile_field::{self, v3::Response as GetProfileFieldResponse},
@@ -8,7 +9,7 @@ use ruma::{
 	},
 	profile::{ProfileFieldName, ProfileFieldValue},
 };
-use tuwunel_core::{Err, Result, err};
+use tuwunel_core::{Err, Result, err, utils::BoolExt};
 use tuwunel_service::{Services, presence::Ping, profile::Propagation};
 
 use crate::{ClientIp, Ruma, client::utils::may_set_displayname};
@@ -35,18 +36,7 @@ pub(crate) async fn get_profile_route(
 	State(services): State<crate::State>,
 	body: Ruma<get_profile::v3::Request>,
 ) -> Result<get_profile::v3::Response> {
-	if services
-		.server
-		.config
-		.limit_profile_requests_to_users_who_share_rooms
-		&& body.sender_user() != body.user_id
-		&& !services
-			.state_cache
-			.user_sees_user(body.sender_user(), &body.user_id)
-			.await
-	{
-		return Err!(Request(NotFound("Profile was not found.")));
-	}
+	shared_rooms_check(&services, &body, &body.user_id).await?;
 
 	if !services.globals.user_is_local(&body.user_id) {
 		services
@@ -82,18 +72,7 @@ pub(crate) async fn get_profile_field_route(
 	State(services): State<crate::State>,
 	body: Ruma<get_profile_field::v3::Request>,
 ) -> Result<GetProfileFieldResponse> {
-	if services
-		.server
-		.config
-		.limit_profile_requests_to_users_who_share_rooms
-		&& body.sender_user() != body.user_id
-		&& !services
-			.state_cache
-			.user_sees_user(body.sender_user(), &body.user_id)
-			.await
-	{
-		return Err!(Request(NotFound("Profile was not found.")));
-	}
+	shared_rooms_check(&services, &body, &body.user_id).await?;
 
 	if !services.globals.user_is_local(&body.user_id) {
 		services
@@ -231,6 +210,39 @@ pub(crate) async fn delete_profile_field_route(
 		.await?;
 
 	Ok(delete_profile_field::v3::Response {})
+}
+
+/// Refuses a profile read withheld by
+/// `limit_profile_requests_to_users_who_share_rooms`.
+///
+/// Appservices and a user reading their own profile are exempt. The refusal
+/// precedes the existence check, so it discloses nothing about the profile.
+async fn shared_rooms_check<T>(services: &Services, body: &Ruma<T>, user_id: &UserId) -> Result
+where
+	T: Sync,
+{
+	if services
+		.config
+		.limit_profile_requests_to_users_who_share_rooms
+		.is_false()
+		|| body.appservice_info.is_some()
+	{
+		return Ok(());
+	}
+
+	let visible = match body.sender_user.as_deref() {
+		| None => false,
+		| Some(sender_user) if sender_user == user_id => true,
+		| Some(sender_user) =>
+			services
+				.state_cache
+				.user_sees_user(sender_user, user_id)
+				.await,
+	};
+
+	visible
+		.into_option()
+		.ok_or_else(|| err!(Request(Forbidden("Profile isn't available."))))
 }
 
 /// Refuses a display name change withheld by `enable_set_displayname`.
