@@ -411,7 +411,7 @@ impl Service {
 	/// registrations setting a sentinel password will return false here.
 	pub async fn has_password(&self, user_id: &UserId) -> Result<bool> {
 		self.password_hash(user_id)
-			.map_ok(|value| value != PASSWORD_DISABLED && value != PASSWORD_SENTINEL)
+			.map_ok(|value| is_password_hash(&value))
 			.await
 	}
 
@@ -631,4 +631,12 @@ impl Service {
 	#[cfg(not(feature = "ldap"))]
 	#[must_use]
 	pub fn ldap_bind_dn(&self, _localpart: &str) -> Option<String> { None }
+}
+
+/// Whether a stored password value is a real hash rather than a marker.
+///
+/// The disabled marker and the sentinel hold no password to check against.
+#[must_use]
+pub fn is_password_hash(value: &str) -> bool {
+	value != PASSWORD_DISABLED && value != PASSWORD_SENTINEL
 }

@@ -26,6 +26,8 @@ COPY <<EOF /playwright/playwright.toml
     new_user_displayname_suffix = ""
     rc_messages_per_second = 10000
     rc_message_burst_count = 10000
+    login_rc_account_burst_count = 1000
+    login_rc_failed_burst_count = 1000
     log = "warn,tuwunel=info"
     log_colors = false
     log_thread_ids = false

@@ -21,6 +21,8 @@ use tuwunel_core::{
 };
 use tuwunel_database::{Deserialized, Json, Map};
 
+use crate::users::is_password_hash;
+
 pub struct Service {
 	userdevicesessionid_uiaarequest: RwLock<RequestMap>,
 	db: Data,
@@ -337,24 +339,27 @@ async fn verify_password(
 
 	let user_id = user_id_from_username;
 
-	// Only the failed-attempt axis: the caller already holds an access token,
-	// but a stolen one must not become an unlimited password oracle.
-	self.services
+	// A stolen access token must not become an unlimited password oracle.
+	let reservation = self
+		.services
 		.login_ratelimit
-		.check_failed_login_rate_limit(&user_id)?;
+		.reserve_login_attempt(&user_id)?;
 
-	// First try local password hash verification
-	let password_verified = self
+	// First try local password hash verification; `None` when the account has
+	// no local password to check.
+	let verified = self
 		.services
 		.users
 		.password_hash(&user_id)
 		.await
-		.is_ok_and(|hash| verify_password(password, &hash).is_ok());
+		.ok()
+		.filter(|hash| is_password_hash(hash))
+		.map(|hash| verify_password(password, &hash).is_ok());
 
 	// Only LDAP-origin accounts fall back to LDAP; others would trigger a
 	// directory-wide search.
 	#[cfg(feature = "ldap")]
-	let password_verified = if !password_verified
+	let verified = if verified != Some(true)
 		&& self.services.server.config.ldap.enable
 		&& self
 			.services
@@ -365,19 +370,27 @@ async fn verify_password(
 		&& let Ok(dns) = self.services.users.search_ldap(&user_id).await
 		&& let Some((user_dn, _is_admin)) = dns.first()
 	{
-		self.services
+		let bound = self
+			.services
 			.users
 			.auth_ldap(user_dn, password)
 			.await
-			.is_ok()
+			.is_ok();
+
+		Some(bound)
 	} else {
-		password_verified
+		verified
 	};
 
-	if !password_verified {
+	// Only the failed-attempt axis, since re-entering a password opens no
+	// session; a password checked and refused keeps the reservation.
+	if verified != Some(false) {
 		self.services
 			.login_ratelimit
-			.record_failed_login(&user_id);
+			.refund_login_attempt(reservation)?;
+	}
+
+	if verified != Some(true) {
 		uiaainfo.auth_error = Some(Box::new(StandardErrorBody {
 			kind: ErrorKind::forbidden(),
 			message: "Invalid username or password.".to_owned(),

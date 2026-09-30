@@ -128,27 +128,64 @@ accounts were created.
 
 ## Login rate limits
 
-These bound password guessing. Both are keyed on the account being tried
-rather than on the client's address, so they hold behind a reverse proxy or
-tunnel that does not forward the caller's address, where a per-address limit
-would see one client for every user. An account that is out of tokens is
-refused with `M_LIMIT_EXCEEDED` and a `retry_after_ms`.
+These bound password guessing, with the semantics of Synapse's
+`rc_login.failed_attempts` and `rc_login.account`. Both are keyed on the
+account being tried rather than on the client's address, so they hold behind a
+reverse proxy or tunnel that does not forward the caller's address, where a
+per-address limit would see one client for every user. A refused attempt gets
+`M_LIMIT_EXCEEDED`, with a `retry_after_ms` unless the sign-in table is full
+(see below).
 
-The defaults are Synapse's `rc_login.account` and `rc_login.failed_attempts`.
-Setting either `burst_count` — or either `per_second` — to `0` disables that
-limit.
+- **Wrong passwords.** Every password attempt takes a token from the account's
+  wrong-password bucket before the password is checked, and only a wrong
+  password keeps it. Attempts made at the same moment each hold a token until
+  their password is checked, so more simultaneous sign-ins to one account than
+  the burst are refused with a retry hint, even with the correct password. A
+  name that matches no account counts as a wrong password, so the limit does not
+  reveal which accounts exist; a refusal that checks no password at all, such as
+  for a deactivated account, gives the token back. Once the bucket is empty,
+  every password attempt for the account is refused, including one with the
+  correct password, until it refills. This applies to `/login`, the built-in
+  OIDC login page, and password re-entry for sensitive actions (UIAA).
+- **Successful sign-ins.** Only a sign-in whose password verified counts
+  against the account's sign-in bucket, so wrong passwords never do. An account
+  that has signed in too often is refused even with the correct password. This
+  applies to `/login` and the built-in OIDC login page.
+
+Neither limit covers the LDAP binds `/login` makes yet: with LDAP enabled, only
+an account `/login` does not find in the directory, and so checks locally, is
+limited.
 
 | Option | Default | Description |
 |---|---|---|
-| `login_rc_account_per_second` | `0.003` | Refill rate for password attempts against one account, successful or not. |
-| `login_rc_account_burst_count` | `5` | Attempts allowed before that rate governs. |
-| `login_rc_failed_per_second` | `0.17` | Refill rate for wrong passwords against one account. A drained bucket refuses the next attempt even with the correct password. |
+| `login_rc_account_per_second` | `0.003` | Refill rate for successful password sign-ins to one account. |
+| `login_rc_account_burst_count` | `5` | Sign-ins allowed before that rate governs. |
+| `login_rc_failed_per_second` | `0.17` | Refill rate for wrong passwords against one account. |
 | `login_rc_failed_burst_count` | `3` | Wrong passwords allowed before that rate governs. |
 
-**What this costs.** While someone keeps guessing an account's password, its
-owner cannot sign in with that password either — the refusal is what bounds the
-guessing. Existing sessions are untouched, and so is any login that is not a
-password: `m.login.token`, SSO and JWT.
+The defaults are Synapse's own, so a server moving between the two keeps the
+same behaviour: five sign-ins, then about one every five and a half minutes;
+and three wrong passwords, then about one attempt every six seconds. Setting
+either `burst_count`, or either `per_second`, to `0` disables that limit, rather
+than making a bucket that never refills.
+
+**What this costs.** While someone keeps sending wrong passwords for an
+account, its owner cannot sign in with a password either; the refusal is what
+bounds the guessing. At the defaults that lasts only while the wrong passwords
+keep coming, since the bucket gives back one attempt about every six seconds.
+That rate still allows about 14,700 wrong passwords a day against one account,
+and there is no per-address limit yet, so a per-IP limit at the reverse proxy is
+the lever for tightening it. Existing sessions are untouched, and so is any
+login that is not a password: `m.login.token`, SSO and JWT.
+
+**When a limit's table is full.** Each limit tracks at most 65536 accounts in
+memory, and forgets them all on restart. A bucket that has refilled completely
+is dropped to make room, but one that is still limiting never is, since that
+would hand the account being guessed a fresh start. When the wrong-password
+table is full, accounts not already in it are not limited on that axis until
+room frees up; when the sign-in table is full, a correct password for an
+account not in it is refused. Either case logs a warning, and a full
+wrong-password table usually means a spray of distinct user names.
 
 ## Token and session lifetimes
 

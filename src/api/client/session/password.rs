@@ -6,7 +6,7 @@ use ruma::{
 		uiaa,
 	},
 };
-use tuwunel_core::{Err, Result, debug_error, err, utils::hash};
+use tuwunel_core::{Err, Result, debug_error, err, utils::hash::verify_password};
 use tuwunel_service::Services;
 
 use super::ldap_login;
@@ -69,13 +69,12 @@ pub(super) async fn password_login(
 	lowercased_user_id: &UserId,
 	password: &str,
 ) -> Result<OwnedUserId> {
-	// Per-account throttle before anything about the account is looked up, so
-	// a refusal reads the same for accounts that exist and ones that do not.
-	// Its cost — a guessed-at owner cannot sign in by password either while it
-	// lasts — is set out in the `login_ratelimit` service.
-	services
+	// Before any account lookup, so a refusal reads alike for real and unknown accounts.
+	let reservation = services
 		.login_ratelimit
-		.check_login_rate_limit(user_id)?;
+		.reserve_login_attempt(user_id)?;
+
+	let wrong = || err!(Request(Forbidden("Wrong username or password.")));
 
 	// Restrict login to accounts only of type 'password', including untyped
 	// legacy accounts which are equivalent to 'password'.
@@ -85,9 +84,15 @@ pub(super) async fn password_login(
 		.await
 		.is_ok_and(|origin| origin != "password")
 	{
+		services
+			.login_ratelimit
+			.refund_login_attempt(reservation)?;
+
 		return Err!(Request(Forbidden("Account does not permit password login.")));
 	}
 
+	// An unknown account keeps the reservation as a wrong password does, so the
+	// limit is no oracle for which accounts exist.
 	let (hash, user_id) = services
 		.users
 		.password_hash(user_id)
@@ -98,26 +103,24 @@ pub(super) async fn password_login(
 				.password_hash(lowercased_user_id)
 				.map_ok(|hash| (hash, lowercased_user_id))
 		})
-		.map_err(|_| {
-			services
-				.login_ratelimit
-				.record_failed_login(user_id);
-			err!(Request(Forbidden("Wrong username or password.")))
-		})
+		.map_err(|_| wrong())
 		.await?;
 
 	if hash.is_empty() {
+		services
+			.login_ratelimit
+			.refund_login_attempt(reservation)?;
+
 		return Err!(Request(UserDeactivated("The user has been deactivated")));
 	}
 
-	hash::verify_password(password, &hash)
+	verify_password(password, &hash)
 		.inspect_err(|e| debug_error!("{e}"))
-		.map_err(|_| {
-			services
-				.login_ratelimit
-				.record_failed_login(user_id);
-			err!(Request(Forbidden("Wrong username or password.")))
-		})?;
+		.map_err(|_| wrong())?;
+
+	services
+		.login_ratelimit
+		.record_login(reservation)?;
 
 	Ok(user_id.to_owned())
 }

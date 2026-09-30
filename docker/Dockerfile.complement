@@ -76,6 +76,8 @@ COPY <<EOF complement.toml
     log_span_events = "NONE"
     server_user_localpart = "_server"
     log_thread_ids = true
+    login_rc_account_burst_count = 1000
+    login_rc_failed_burst_count = 1000
     max_fetch_prev_events = 224
     media_compat_file_link = false
     media_startup_check = true

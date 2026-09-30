@@ -1495,20 +1495,15 @@
 #
 #login_with_password = true
 
-# Token-bucket refill rate (attempts per second) for password logins
-# against one account, successful or not.
+# Token-bucket refill rate (sign-ins per second) for successful password
+# logins to one account.
 #
-# Applies to `/login` with `m.login.password` and to the built-in OIDC
-# login page. Keyed on the account being tried, not on the client IP, so
-# it holds behind a reverse proxy or tunnel that does not forward the
-# client address. Mirrors Synapse's `rc_login.account`, with its default:
-# after `login_rc_account_burst_count` attempts, about one every five
-# and a half minutes.
-#
-# The cost: while somebody keeps trying an account's password, its owner
-# cannot sign in with that password either — a correct password is
-# refused with `M_LIMIT_EXCEEDED` like a wrong one. Existing sessions and
-# non-password logins (token, SSO, JWT) are unaffected.
+# Applies to `/login` with `m.login.password` (not yet to the LDAP binds it
+# makes) and to the built-in OIDC login page, keyed on the account rather
+# than the client IP. Mirrors Synapse's `rc_login.account` and its default
+# of `login_rc_account_burst_count` sign-ins, then about one every five and
+# a half minutes; once those are used up, a correct password is refused
+# with `M_LIMIT_EXCEEDED`.
 #
 # `0` disables this limit rather than making a bucket that never refills.
 #
@@ -1516,9 +1511,10 @@
 #
 #login_rc_account_per_second = 0.003
 
-# Token-bucket depth (burst size) for password logins against one account.
+# Token-bucket depth (burst size) for successful password logins to one
+# account.
 #
-# The number of attempts allowed before `login_rc_account_per_second`
+# The number of sign-ins allowed before `login_rc_account_per_second`
 # governs. `0` disables this limit, as does a `0` rate. The default is
 # Synapse's `rc_login.account.burst_count`.
 #
@@ -1529,14 +1525,14 @@
 # Token-bucket refill rate (failures per second) for wrong passwords
 # against one account.
 #
-# Only a wrong password debits this bucket, and a drained bucket refuses
-# the next attempt even if its password is correct. Applies to `/login`,
-# the built-in OIDC login page, and password re-entry for sensitive
-# actions (UIAA). Keyed on the account, like
-# `login_rc_account_per_second`, and with the same cost. Mirrors Synapse's
-# `rc_login.failed_attempts`, with its default: after
-# `login_rc_failed_burst_count` failures, about one attempt every six
-# seconds.
+# Every password attempt takes a token before the password is checked,
+# and only a wrong password keeps it; once the bucket is empty, even the
+# owner's correct password is refused with `M_LIMIT_EXCEEDED`. Applies to
+# `/login` (not yet to the LDAP binds it makes), the built-in OIDC login
+# page and password re-entry for sensitive actions (UIAA), keyed on the
+# account. Mirrors Synapse's `rc_login.failed_attempts` and its default:
+# `login_rc_failed_burst_count` failures, then about one attempt every six
+# seconds, or some 14,700 a day.
 #
 # `0` disables this limit rather than making a bucket that never refills.
 #
