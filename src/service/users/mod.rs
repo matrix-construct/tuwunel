@@ -24,7 +24,8 @@ use tuwunel_core::{
 	matrix::pdu::PduCount,
 	trace,
 	utils::{
-		self, BoolExt, MutexMap, ReadyExt, hash::password as hash_password, stream::TryIgnore,
+		self, BoolExt, MutexMap, ReadyExt, hash::password as hash_password, result::NotFound,
+		stream::TryIgnore,
 	},
 };
 use tuwunel_database::{Deserialized, Json, Map};
@@ -250,10 +251,24 @@ impl Service {
 	/// however their account was created, and a localpart with no local
 	/// account passes on its way to registration.
 	pub async fn check_ldap_login(&self, user_id: &UserId) -> Result {
-		self.is_deactivated(user_id)
-			.unwrap_or_else(|_| false)
+		self.deactivated_check(user_id).await
+	}
+
+	/// Reject a deactivated account with 403 `M_USER_DEACTIVATED`.
+	///
+	/// An account that does not exist is not deactivated, as in Synapse. One
+	/// created without a password, as an appservice's users often are, reads
+	/// as deactivated, since both store an empty password.
+	pub async fn deactivated_check(&self, user_id: &UserId) -> Result {
+		self.db
+			.userid_password
+			.get(user_id)
+			.map_ok(|password| password.is_empty())
 			.await
+			.optional()?
+			.unwrap_or_default()
 			.is_false()
+			.into_option()
 			.ok_or_else(|| err!(Request(UserDeactivated("This user has been deactivated."))))
 	}
 

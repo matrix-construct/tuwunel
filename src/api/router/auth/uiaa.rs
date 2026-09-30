@@ -119,6 +119,11 @@ where
 				return Err!(Request(NotFound("User {sender_user} is not registered.")));
 			}
 
+			services
+				.users
+				.deactivated_check(&sender_user)
+				.await?;
+
 			// Success!
 			Ok(sender_user)
 		},

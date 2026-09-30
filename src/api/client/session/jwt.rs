@@ -33,10 +33,6 @@ pub(super) async fn handle_login(
 			.users
 			.create(&user_id, Some("*"), Some("jwt"))
 			.await?;
-	} else if services.users.is_deactivated(&user_id).await? {
-		// Password and LDAP login refuse a deactivated account; a valid token must not
-		// open a session on one either.
-		return Err!(Request(UserDeactivated("This user has been deactivated.")));
 	}
 
 	Ok(user_id)

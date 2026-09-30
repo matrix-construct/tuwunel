@@ -138,6 +138,11 @@ pub(crate) async fn login_route(
 		},
 	};
 
+	// Appservice users are often passwordless, which reads as deactivated.
+	if !matches!(body.login_info, LoginInfo::ApplicationService(_)) {
+		services.users.deactivated_check(&user_id).await?;
+	}
+
 	services.users.locked_check(&user_id).await?;
 
 	let (access_token, expires_in) = services
