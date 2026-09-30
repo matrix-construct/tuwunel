@@ -46,7 +46,8 @@ pub(crate) async fn get_capabilities_route(
 	};
 
 	// MSC3283: deprecated displayname/avatar capabilities for pre-1.16 clients.
-	capabilities.set_displayname = SetDisplayNameCapability::new(true);
+	capabilities.set_displayname =
+		SetDisplayNameCapability::new(services.config.enable_set_displayname);
 	capabilities.set_avatar_url = SetAvatarUrlCapability::new(true);
 
 	// 3PID add/remove is available only when the email subsystem can send.

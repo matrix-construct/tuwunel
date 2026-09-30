@@ -1292,6 +1292,14 @@ pub struct Config {
 	#[serde(default)]
 	pub require_auth_for_profile_requests: bool,
 
+	/// Allow standard users to set or clear their display names through the
+	/// client profile API. Administrative and application-service profile
+	/// synchronization remains allowed.
+	/// reloadable: yes
+	/// default: true
+	#[serde(default = "true_fn")]
+	pub enable_set_displayname: bool,
+
 	/// Preserve per-room profile overrides during a global profile update.
 	///
 	/// When `true` (default), a profile change (displayname or avatar_url)
