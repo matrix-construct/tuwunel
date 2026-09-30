@@ -19,12 +19,11 @@ pub(crate) async fn create_alias_route(
 	body: Ruma<create_alias::v3::Request>,
 ) -> Result<create_alias::v3::Response> {
 	let sender_user = body.sender_user();
-	if !services.config.allow_room_alias_creation
-		&& body.appservice_info.is_none()
-		&& !services.admin.user_is_admin(sender_user).await
-	{
-		return Err!(Request(Forbidden("Room alias creation has been disabled.")));
-	}
+
+	services
+		.alias
+		.creation_check(sender_user, body.appservice_info.as_ref())
+		.await?;
 
 	services
 		.alias

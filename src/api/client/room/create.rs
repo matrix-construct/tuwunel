@@ -84,11 +84,15 @@ pub(crate) async fn create_room_route(
 		})
 		.and_then(|version| Ok((version, room_version::rules(version)?)))?;
 
+	let sender_user = body.sender_user();
+
 	// Error on existing alias before committing to creation.
 	let alias = body
 		.room_alias_name
 		.as_ref()
-		.map_async(|alias| room_alias_check(&services, alias, body.appservice_info.as_ref()))
+		.map_async(|alias| {
+			room_alias_check(&services, alias, sender_user, body.appservice_info.as_ref())
+		})
 		.await
 		.transpose()?;
 
@@ -107,8 +111,6 @@ pub(crate) async fn create_room_route(
 					err!(Request(InvalidParam("Error while creating m.room.create event: {e}")))
 				})?,
 	};
-
-	let sender_user = body.sender_user();
 
 	// 2. Let the room creator join
 	apply_creator_join_pdu(&services, &body, sender_user, &room_id, &state_lock)
@@ -885,8 +887,14 @@ fn merge_power_level_content_override(
 async fn room_alias_check(
 	services: &Services,
 	room_alias_name: &str,
+	sender_user: &UserId,
 	appservice_info: Option<&RegistrationInfo>,
 ) -> Result<OwnedRoomAliasId> {
+	services
+		.alias
+		.creation_check(sender_user, appservice_info)
+		.await?;
+
 	// Basic checks on the room alias validity
 	if room_alias_name.contains(':') {
 		return Err!(Request(InvalidParam(

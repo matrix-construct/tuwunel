@@ -5,16 +5,26 @@ use tuwunel_core::{Result, err, ruma::RoomId};
 use tuwunel_service::Services;
 
 use self::{
+	appservice::{Bridge, register_appservice},
 	client::{Client, register},
 	fixture::boot,
 };
 
+mod appservice;
 mod client;
 mod fixture;
 
 const ADMIN_TOKEN: &str = "room-alias-creation-policy-admin-token";
 const USER_TOKEN: &str = "room-alias-creation-policy-user-token";
 const BRIDGE_TOKEN: &str = "room-alias-creation-policy-bridge-token";
+
+const BRIDGE: Bridge<'static> = Bridge {
+	id: "room-alias-creation-policy",
+	token: BRIDGE_TOKEN,
+	sender_localpart: "alias_bridge",
+	users: "^@alias_bridge:.*$",
+	aliases: Some("^#bridge_alias:.*$"),
+};
 
 #[test]
 fn alias_creation_preserves_admin_and_appservice_access() -> Result {
@@ -23,6 +33,7 @@ fn alias_creation_preserves_admin_and_appservice_access() -> Result {
 
 async fn exercise(services: &Services, base: &str) -> Result {
 	let admin_id = register(services, "alias_policy_admin", ADMIN_TOKEN).await?;
+
 	register(services, "alias_policy_user", USER_TOKEN).await?;
 	services.admin.make_user_admin(&admin_id).await?;
 
@@ -31,19 +42,18 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	let room_id = admin
 		.create_room(&json!({ "preset": "private_chat" }))
 		.await?;
+
 	let server_name = services.globals.server_name();
 
-	assert_status(
-		create_alias(&user, &format!("ordinary:{server_name}"), &room_id).await?,
-		403,
-	)?;
-	assert_status(
-		create_alias(&admin, &format!("admin:{server_name}"), &room_id).await?,
-		200,
-	)?;
+	assert_status(create_alias(&user, &format!("ordinary:{server_name}"), &room_id).await?, 403)?;
+	assert_status(create_alias(&admin, &format!("admin:{server_name}"), &room_id).await?, 200)?;
+	assert_status(create_room_with_alias(&user, "ordinary_room").await?, 403)?;
+	assert_status(create_room_with_alias(&admin, "admin_room").await?, 200)?;
 
-	register_appservice(services).await?;
+	register_appservice(services, &BRIDGE).await?;
+
 	let bridge = Client { services, base, token: BRIDGE_TOKEN };
+
 	assert_status(
 		create_alias(&bridge, &format!("bridge_alias:{server_name}"), &room_id).await?,
 		200,
@@ -71,22 +81,10 @@ fn assert_status(status: u16, expected: u16) -> Result {
 		.ok_or_else(|| err!("status was {status}, expected {expected}"))
 }
 
-async fn register_appservice(services: &Services) -> Result {
-	let registration = json!({
-		"id": "room-alias-creation-policy",
-		"url": null,
-		"as_token": BRIDGE_TOKEN,
-		"hs_token": "room-alias-creation-policy-hs-token",
-		"sender_localpart": "alias_bridge",
-		"namespaces": {
-			"users": [{"exclusive": true, "regex": "^@alias_bridge:.*$"}],
-			"aliases": [{"exclusive": true, "regex": "^#bridge_alias:.*$"}],
-			"rooms": []
-		}
-	});
-
-	services
-		.appservice
-		.register_appservice(serde_json::from_value(registration)?)
-		.await
+async fn create_room_with_alias(client: &Client<'_>, alias_name: &str) -> Result<u16> {
+	Ok(client
+		.post_url(&client.url("createRoom"), &json!({ "room_alias_name": alias_name }))
+		.await?
+		.status()
+		.as_u16())
 }
