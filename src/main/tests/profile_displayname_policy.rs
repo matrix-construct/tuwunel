@@ -5,15 +5,31 @@ use tuwunel_core::{Err, Result, err, ruma::UserId};
 use tuwunel_service::Services;
 
 use self::{
+	appservice::{Bridge, register_appservice},
 	client::{Client, register},
 	fixture::boot,
 };
 
+mod appservice;
+#[expect(
+	dead_code,
+	reason = "Only registration and request URLs are shared with the client API harness."
+)]
 mod client;
+
 mod fixture;
 
 const USER_TOKEN: &str = "profile-displayname-policy-user-token";
+const ADMIN_TOKEN: &str = "profile-displayname-policy-admin-token";
 const BRIDGE_TOKEN: &str = "profile-displayname-policy-bridge-token";
+
+const BRIDGE: Bridge<'static> = Bridge {
+	id: "profile-displayname-policy",
+	token: BRIDGE_TOKEN,
+	sender_localpart: "profile_bridge",
+	users: "^@profile_(policy_user|bridge):.*$",
+	aliases: None,
+};
 
 #[test]
 fn displayname_writes_follow_the_policy() -> Result {
@@ -43,14 +59,27 @@ async fn disabled(services: &Services, base: &str) -> Result {
 	assert_status(set_displayname(&client, &user_id, "blocked").await?, 403)?;
 	assert_status(clear_displayname(&client, &user_id).await?, 403)?;
 
-	register_appservice(services, "profile_bridge", "^@profile_(policy_user|bridge):.*$").await?;
+	let admin_id = register(services, "profile_policy_admin", ADMIN_TOKEN).await?;
+
+	services.admin.make_user_admin(&admin_id).await?;
+
+	let admin = Client { services, base, token: ADMIN_TOKEN };
+
+	assert_displayname_capability(&admin, true).await?;
+	assert_status(set_displayname(&admin, &admin_id, "exempt").await?, 200)?;
+	assert_status(clear_displayname(&admin, &admin_id).await?, 200)?;
+
+	register_appservice(services, &BRIDGE).await?;
+
 	let bridge = Client { services, base, token: BRIDGE_TOKEN };
+
+	assert_displayname_capability(&bridge, true).await?;
 	assert_status(set_displayname_as(&bridge, &user_id, "synchronized").await?, 200)?;
 	assert_status(clear_displayname_as(&bridge, &user_id).await?, 200)
 }
 
 async fn assert_displayname_capability(client: &Client<'_>, expected: bool) -> Result {
-	let capability: Value = client
+	let response: Value = client
 		.services
 		.client
 		.clients
@@ -63,8 +92,18 @@ async fn assert_displayname_capability(client: &Client<'_>, expected: bool) -> R
 		.json()
 		.await?;
 
-	if capability["capabilities"]["m.set_displayname"]["enabled"].as_bool() != Some(expected) {
-		return Err!("displayname capability was {capability}, expected enabled={expected}");
+	let capabilities = &response["capabilities"];
+	let enabled = capabilities["m.set_displayname"]["enabled"].as_bool();
+	let disallowed = capabilities["m.profile_fields"]["disallowed"]
+		.as_array()
+		.is_some_and(|fields| fields.iter().any(|field| field == "displayname"));
+
+	if enabled != Some(expected) || disallowed == expected {
+		return Err!(
+			"displayname capabilities were {capabilities}, expected m.set_displayname \
+			 enabled={expected} and displayname in m.profile_fields disallowed={}",
+			!expected
+		);
 	}
 
 	Ok(())
@@ -141,28 +180,4 @@ fn assert_status(status: u16, expected: u16) -> Result {
 	(status == expected)
 		.then_some(())
 		.ok_or_else(|| err!("status was {status}, expected {expected}"))
-}
-
-async fn register_appservice(
-	services: &Services,
-	sender_localpart: &str,
-	user_regex: &str,
-) -> Result {
-	let registration = json!({
-		"id": "profile-displayname-policy",
-		"url": null,
-		"as_token": BRIDGE_TOKEN,
-		"hs_token": "profile-displayname-policy-hs-token",
-		"sender_localpart": sender_localpart,
-		"namespaces": {
-			"users": [{"exclusive": true, "regex": user_regex}],
-			"aliases": [],
-			"rooms": []
-		}
-	});
-
-	services
-		.appservice
-		.register_appservice(serde_json::from_value(registration)?)
-		.await
 }

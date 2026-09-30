@@ -9,9 +9,9 @@ use ruma::{
 	profile::{ProfileFieldName, ProfileFieldValue},
 };
 use tuwunel_core::{Err, Result, err};
-use tuwunel_service::{presence::Ping, profile::Propagation};
+use tuwunel_service::{Services, presence::Ping, profile::Propagation};
 
-use crate::{ClientIp, Ruma};
+use crate::{ClientIp, Ruma, client::utils::may_set_displayname};
 
 /// Resolve a `PropagateTo` request value against the server default.
 ///
@@ -147,12 +147,9 @@ pub(crate) async fn set_profile_field_route(
 	body: Ruma<set_profile_field::v3::Request>,
 ) -> Result<set_profile_field::v3::Response> {
 	let sender_user = body.sender_user();
-	if !services.config.enable_set_displayname
-		&& body.value.field_name() == ProfileFieldName::DisplayName
-		&& body.appservice_info.is_none()
-	{
-		return Err!(Request(Forbidden("Setting display names has been disabled.")));
-	}
+	let field = body.value.field_name();
+
+	displayname_check(&services, &body, &field).await?;
 
 	if *sender_user != body.user_id
 		&& !body
@@ -169,7 +166,7 @@ pub(crate) async fn set_profile_field_route(
 		.profile
 		.set_profile_keys(
 			&body.user_id,
-			&[(body.value.field_name(), Some(body.value.value().into_owned()))],
+			&[(field, Some(body.value.value().into_owned()))],
 			Some(propagation),
 		)
 		.await?;
@@ -201,12 +198,8 @@ pub(crate) async fn delete_profile_field_route(
 	body: Ruma<delete_profile_field::v3::Request>,
 ) -> Result<delete_profile_field::v3::Response> {
 	let sender_user = body.sender_user();
-	if !services.config.enable_set_displayname
-		&& body.field == ProfileFieldName::DisplayName
-		&& body.appservice_info.is_none()
-	{
-		return Err!(Request(Forbidden("Setting display names has been disabled.")));
-	}
+
+	displayname_check(&services, &body, &body.field).await?;
 
 	if *sender_user != body.user_id
 		&& !body
@@ -238,4 +231,27 @@ pub(crate) async fn delete_profile_field_route(
 		.await?;
 
 	Ok(delete_profile_field::v3::Response {})
+}
+
+/// Refuses a display name change withheld by `enable_set_displayname`.
+///
+/// Only display name writes are gated; `may_set_displayname` decides who is
+/// exempt.
+async fn displayname_check<T>(
+	services: &Services,
+	body: &Ruma<T>,
+	field: &ProfileFieldName,
+) -> Result
+where
+	T: Sync,
+{
+	let is_admin = || services.admin.user_is_admin(body.sender_user());
+
+	if *field != ProfileFieldName::DisplayName
+		|| may_set_displayname(services, body, is_admin).await
+	{
+		return Ok(());
+	}
+
+	Err!(Request(Forbidden("Setting display names has been disabled.")))
 }

@@ -2,6 +2,8 @@ use ruma::{EventId, RoomId, UserId};
 use tuwunel_core::{Err, Event, Result, warn};
 use tuwunel_service::Services;
 
+use crate::Ruma;
+
 pub(crate) async fn invite_check(
 	services: &Services,
 	sender_user: &UserId,
@@ -26,4 +28,20 @@ pub(crate) async fn is_self_redaction(
 		.get_pdu(event_id)
 		.await
 		.is_ok_and(|target| target.sender() == user_id)
+}
+
+/// Whether the caller may change display names under `enable_set_displayname`.
+///
+/// Appservices and server admins are exempt, matching Synapse's exemption for
+/// admins. `is_admin` is awaited only when the option is off and the caller
+/// is not an appservice.
+pub(crate) async fn may_set_displayname<T>(
+	services: &Services,
+	body: &Ruma<T>,
+	is_admin: impl AsyncFnOnce() -> bool,
+) -> bool
+where
+	T: Sync,
+{
+	services.config.enable_set_displayname || body.appservice_info.is_some() || is_admin().await
 }

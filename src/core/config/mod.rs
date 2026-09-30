@@ -1293,8 +1293,11 @@ pub struct Config {
 	pub require_auth_for_profile_requests: bool,
 
 	/// Allow standard users to set or clear their display names through the
-	/// client profile API. Administrative and application-service profile
-	/// synchronization remains allowed.
+	/// client profile API.
+	///
+	/// Server admins and appservices are always allowed to change display
+	/// names.
+	///
 	/// reloadable: yes
 	/// default: true
 	#[serde(default = "true_fn")]
