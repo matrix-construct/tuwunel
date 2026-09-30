@@ -4,15 +4,31 @@ use std::{
 	env::{current_exe, var},
 	fs::remove_dir_all,
 	future::ready,
+	net::TcpListener,
 	path::{Path, PathBuf},
+	pin::pin,
 	process::Command,
 	sync::Arc,
 	time::Duration,
 };
 
+use axum::{
+	Json, Router,
+	extract::State,
+	routing::{get, post},
+};
+use axum_server::from_tcp;
+use futures::future::select;
+use serde_json::{Value as JsonValue, json};
+use tokio::{
+	sync::{Notify, Semaphore},
+	time::timeout,
+};
 use tuwunel::{Args, Runtime, Server, async_run, async_start, async_stop};
-use tuwunel_core::{Err, Result, result::NotFound, ruma::events::GlobalAccountDataEventType};
-use tuwunel_service::Services;
+use tuwunel_core::{
+	Err, Result, err, result::NotFound, ruma::events::GlobalAccountDataEventType, utils::BoolExt,
+};
+use tuwunel_service::{Services, oauth::Session};
 
 use self::client::poll_until;
 
@@ -26,9 +42,28 @@ const CHILD_DATABASE_ENV: &str = "EMERGENCY_PASSWORD_TEST_DATABASE";
 const CHILD_PHASE_ENV: &str = "EMERGENCY_PASSWORD_TEST_PHASE";
 const EMERGENCY_PASSWORD: &str = "emergency-password-test-secret";
 const SESSION_TOKEN: &str = "emergency-password-test-access-token";
+const PROVIDER_CLIENT_ID: &str = "emergency-password-test-idp";
+const PROVIDER_SESSION_ID: &str = "emergency-password-test-provider-session";
+const DISCOVERY_PATH: &str = "/.well-known/openid-configuration";
+const REVOCATION_PATH: &str = "/revoke";
 const DEADLINE: Duration = Duration::from_secs(10);
 
 struct DatabasePath(PathBuf);
+
+/// Identity provider stand-in holding each revocation open until the test has
+/// read the server user's password.
+///
+/// The password must still stand while a revocation is in flight, or a start
+/// interrupted there would not retry the cleanup.
+struct Provider {
+	issuer: String,
+
+	/// Signalled as each revocation arrives.
+	revoking: Notify,
+
+	/// Holds revocations unanswered until the test adds a permit.
+	answer: Semaphore,
+}
 
 impl Drop for DatabasePath {
 	fn drop(&mut self) { remove_dir_all(&self.0).ok(); }
@@ -41,7 +76,10 @@ impl Drop for DatabasePath {
 /// Separate child processes boot one database in turn. A server that never
 /// set the option opens a session for the server user and restarts twice,
 /// leaving the session and its push rules alone; a fresh start then sets the
-/// option and opens a session, and the last start runs without it.
+/// option and opens a session, and the last start runs without it. The server
+/// user's identity provider session must be revoked before its password is
+/// cleared, so a start interrupted mid-revocation still finds the password and
+/// retries.
 #[test]
 fn removing_the_emergency_password_signs_the_server_user_out() -> Result {
 	if let Ok(phase) = var(CHILD_PHASE_ENV) {
@@ -91,11 +129,11 @@ fn untouched_phase(database: &Path) -> Result {
 	boot(&database_args(database, &[]), async |services| {
 		let server_user = &services.globals.server_user;
 
-		if !has_session(services).await {
+		if !has_session(services).await? {
 			return Err!("a start without the emergency password signed {server_user} out");
 		}
 
-		if services.users.has_password(server_user).await? {
+		if has_password(services).await? {
 			return Err!("a start without the emergency password gave {server_user} a password");
 		}
 
@@ -109,10 +147,11 @@ fn untouched_phase(database: &Path) -> Result {
 	})
 }
 
-/// Boots with the emergency password set and opens a session for the server
-/// user.
+/// Boots with the emergency password set and opens a session and an identity
+/// provider session for the server user.
 ///
-/// This is what an operator recovering admin access does.
+/// This is what an operator recovering admin access does; the provider session
+/// stands in for one linked to the server user through SSO.
 fn set_phase(database: &Path) -> Result {
 	let args = database_args(database, &["fresh"])
 		.with_option(format!("emergency_password=\"{EMERGENCY_PASSWORD}\""));
@@ -120,13 +159,14 @@ fn set_phase(database: &Path) -> Result {
 	boot(&args, async |services| {
 		let server_user = &services.globals.server_user;
 
-		if !poll_until(DEADLINE, async || has_password(services).await).await {
+		if !poll_until(DEADLINE, async || has_password(services).await.unwrap_or(false)).await {
 			return Err!("the emergency password was never set for {server_user}");
 		}
 
 		open_session(services).await?;
+		open_provider_session(services).await;
 
-		if !has_session(services).await {
+		if !has_session(services).await? {
 			return Err!("the session opened for {server_user} was not found");
 		}
 
@@ -134,24 +174,110 @@ fn set_phase(database: &Path) -> Result {
 	})
 }
 
-/// Boots the same database with the option removed.
+async fn open_provider_session(services: &Services) {
+	let session = Session {
+		idp_id: PROVIDER_CLIENT_ID.to_owned().into(),
+		sess_id: PROVIDER_SESSION_ID.to_owned().into(),
+		access_token: SESSION_TOKEN.to_owned().into(),
+		user_id: services.globals.server_user.clone().into(),
+		..Default::default()
+	};
+
+	services.oauth.sessions.put(&session).await;
+}
+
+/// Boots the same database with the option removed and a stand-in identity
+/// provider.
 ///
-/// The password and the session must both be gone.
+/// The provider session's revocation must arrive while the password stands,
+/// and afterwards the password and the session must both be gone.
 fn removed_phase(database: &Path) -> Result {
-	boot(&database_args(database, &[]), async |services| {
-		let server_user = &services.globals.server_user;
-		let cleared = poll_until(DEADLINE, async || {
-			!has_password(services).await && !has_session(services).await
-		})
-		.await;
+	let listener = TcpListener::bind(("127.0.0.1", 0))?;
+	let provider = Arc::new(Provider {
+		issuer: format!("http://{}", listener.local_addr()?),
+		revoking: Notify::new(),
+		answer: Semaphore::new(0),
+	});
 
-		if !cleared {
-			return Err!(
-				"removing the emergency password left {server_user} with its password or session"
-			);
-		}
+	let args = database_args(database, &[])
+		.with_option(format!("identity_provider.test.client_id=\"{PROVIDER_CLIENT_ID}\""))
+		.with_option("identity_provider.test.client_secret=\"test-secret\"")
+		.with_option("identity_provider.test.brand=\"test\"")
+		.with_option(format!("identity_provider.test.issuer_url=\"{}\"", provider.issuer));
 
-		Ok(())
+	listener.set_nonblocking(true)?;
+
+	boot(&args, async |services| {
+		let serve = serve_provider(listener, Arc::clone(&provider));
+		let removal = check_removal(services, &provider);
+
+		select(pin!(serve), pin!(removal))
+			.await
+			.factor_first()
+			.0
+	})
+}
+
+/// Serves discovery and revocation until the test is done.
+///
+/// The server stopping first is an error, never a pass.
+async fn serve_provider(listener: TcpListener, provider: Arc<Provider>) -> Result {
+	let app = Router::new()
+		.route(DISCOVERY_PATH, get(discover))
+		.route(REVOCATION_PATH, post(revoke))
+		.with_state(provider);
+
+	from_tcp(listener)?
+		.serve(app.into_make_service())
+		.await?;
+
+	Err!("the identity provider stand-in stopped serving")
+}
+
+async fn discover(State(provider): State<Arc<Provider>>) -> Json<JsonValue> {
+	let revocation = format!("{}{REVOCATION_PATH}", provider.issuer);
+
+	Json(json!({
+		"issuer": provider.issuer,
+		"revocation_endpoint": revocation,
+	}))
+}
+
+async fn revoke(State(provider): State<Arc<Provider>>) -> Json<JsonValue> {
+	provider.revoking.notify_one();
+
+	// The permit returns on drop, so revocations after the first pass freely.
+	drop(provider.answer.acquire().await);
+
+	Json(json!({}))
+}
+
+async fn check_removal(services: &Services, provider: &Provider) -> Result {
+	let server_user = &services.globals.server_user;
+
+	timeout(DEADLINE, provider.revoking.notified())
+		.await
+		.map_err(|_| err!("the provider session of {server_user} was never revoked"))?;
+
+	let marked = has_password(services).await.unwrap_or(false);
+
+	provider.answer.add_permits(1);
+	if !marked {
+		return Err!(
+			"{server_user} lost its password before its provider session was revoked, so an \
+			 interrupted cleanup would not be retried"
+		);
+	}
+
+	poll_until(DEADLINE, async || {
+		// An unreadable password or session counts as still there.
+		!has_password(services).await.unwrap_or(true)
+			&& !has_session(services).await.unwrap_or(true)
+	})
+	.await
+	.into_option()
+	.ok_or_else(|| {
+		err!("removing the emergency password left {server_user} with its password or session")
 	})
 }
 
@@ -174,20 +300,20 @@ async fn open_session(services: &Services) -> Result {
 		.map(drop)
 }
 
-async fn has_password(services: &Services) -> bool {
+async fn has_password(services: &Services) -> Result<bool> {
 	services
 		.users
 		.has_password(&services.globals.server_user)
 		.await
-		.unwrap_or(false)
 }
 
-async fn has_session(services: &Services) -> bool {
+async fn has_session(services: &Services) -> Result<bool> {
 	services
 		.users
 		.find_from_token(SESSION_TOKEN)
 		.await
-		.is_ok()
+		.optional()
+		.map(|session| session.is_some())
 }
 
 // A failed read is an error, not an absence, so it cannot pass for untouched rules.

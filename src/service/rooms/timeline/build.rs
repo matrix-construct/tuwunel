@@ -18,7 +18,7 @@ use serde_json::value::to_raw_value;
 use tuwunel_core::{
 	Err, Result, implement,
 	matrix::{event::Event, pdu::PduBuilder, room_version},
-	utils::{IterStream, ReadyExt},
+	utils::IterStream,
 };
 
 use super::RoomMutexGuard;
@@ -220,64 +220,59 @@ where
 			return Err!(Request(Forbidden(error!("Encryption not supported in admins room."))));
 		},
 		| TimelineEventType::RoomMember => {
-			let target = pdu
-				.state_key()
-				.filter(|v| v.starts_with('@'))
-				.unwrap_or(sender.as_str());
-
-			let server_user = &self.services.globals.server_user.to_string();
-
-			let content: RoomMemberEventContent = pdu.get_content()?;
-			match content.membership {
-				| MembershipState::Leave => {
-					if target == server_user {
-						return Err!(Request(Forbidden(error!(
-							"Server user cannot leave the admins room."
-						))));
-					}
-
-					let count = self
-						.services
-						.state_cache
-						.local_users_in_room(pdu.room_id())
-						.ready_filter(|user| *user != target)
-						.count()
-						.boxed() // cold arm: admin membership check
-						.await;
-
-					if count < 2 {
-						return Err!(Request(Forbidden(error!(
-							"Last admin cannot leave the admins room."
-						))));
-					}
-				},
-
-				| MembershipState::Ban if pdu.state_key().is_some() => {
-					if target == server_user {
-						return Err!(Request(Forbidden(error!(
-							"Server cannot be banned from admins room."
-						))));
-					}
-
-					let count = self
-						.services
-						.state_cache
-						.local_users_in_room(pdu.room_id())
-						.ready_filter(|user| *user != target)
-						.count()
-						.boxed() // cold arm: admin membership check
-						.await;
-
-					if count < 2 {
-						return Err!(Request(Forbidden(error!(
-							"Last admin cannot be banned from admins room."
-						))));
-					}
-				},
-				| _ => {},
-			}
+			self.check_admin_room_member(pdu, sender).await?;
 		},
 		| _ => {},
+	}
+
+	Ok(())
+}
+
+/// Refuses a leave or ban that would take the server user, or the last active
+/// admin, out of the admins room.
+///
+/// Deactivation runs the same last-admin check under this room's state lock;
+/// see `lock_admin_room`.
+#[implement(super::Service)]
+async fn check_admin_room_member<Pdu>(&self, pdu: &Pdu, sender: &UserId) -> Result
+where
+	Pdu: Event,
+{
+	let content: RoomMemberEventContent = pdu.get_content()?;
+
+	let (server_user_refusal, last_admin_refusal) = match content.membership {
+		| MembershipState::Leave => (
+			"Server user cannot leave the admins room.",
+			"Last admin cannot leave the admins room.",
+		),
+		| MembershipState::Ban if pdu.state_key().is_some() => (
+			"Server cannot be banned from admins room.",
+			"Last admin cannot be banned from admins room.",
+		),
+		| _ => return Ok(()),
+	};
+
+	// A key that is no user ID names no admin; the auth rules refuse it later.
+	let Ok(target) = pdu
+		.state_key()
+		.filter(|v| v.starts_with('@'))
+		.map_or(Ok(sender), TryInto::try_into)
+	else {
+		return Ok(());
+	};
+
+	if target == self.services.globals.server_user {
+		return Err!(Request(Forbidden(error!("{server_user_refusal}"))));
+	}
+
+	if self
+		.services
+		.admin
+		.user_is_last_admin(target)
+		.boxed() // cold arm: admin membership check
+		.await
+	{
+		return Err!(Request(Forbidden(error!("{last_admin_refusal}"))));
 	}
 
 	Ok(())

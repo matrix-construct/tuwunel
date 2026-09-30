@@ -1,10 +1,14 @@
 #![cfg(test)]
 
-use std::net::TcpListener;
+use std::{net::TcpListener, pin::pin, time::Duration};
 
-use futures::{FutureExt, future::join};
+use futures::{
+	FutureExt,
+	future::{Either, join, select},
+};
 use reqwest::StatusCode;
 use serde_json::{Value, json};
+use tokio::time::sleep;
 use tuwunel::{Args, Runtime, Server, async_run, async_start, async_stop};
 use tuwunel_core::{
 	Err, Result,
@@ -23,12 +27,18 @@ mod client;
 const PASSWORD: &str = "last-admin-deactivation-password";
 const FIRST_TOKEN: &str = "last-admin-deactivation-first-access-token";
 const SECOND_TOKEN: &str = "last-admin-deactivation-second-access-token";
+const THIRD_TOKEN: &str = "last-admin-deactivation-third-access-token";
+
+/// How long a deactivation must stay waiting on the locked admins room.
+const LOCK_WAIT: Duration = Duration::from_millis(500);
 
 /// The last active admin cannot be deactivated, by themselves or by anyone.
 ///
 /// A second active admin lifts the refusal. A deactivated account still joined
-/// to the admins room does not count as that second admin, and the server
-/// user's own deactivation is unaffected.
+/// to the admins room does not count as that second admin, for deactivation or
+/// for revocation, and the server user's own deactivation is unaffected. A
+/// deactivation also waits on the admins room, so one overtaken there by
+/// another admin's deactivation is refused.
 #[test]
 fn last_admin_cannot_be_deactivated() -> Result {
 	let listener = TcpListener::bind(("127.0.0.1", 0))?;
@@ -141,6 +151,30 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	)?;
 	expect_intact_admin(services, &second).await?;
 
+	// Nor does it let the admins room's leave guard pass a revocation.
+	expect_forbidden(
+		services
+			.admin
+			.revoke_admin(&second)
+			.boxed() // size firewall
+			.await,
+		"revocation beside a deactivated admin",
+	)?;
+
+	expect_intact_admin(services, &second).await?;
+
+	let third = local_user(services, "third-admin", THIRD_TOKEN).await?;
+
+	services
+		.admin
+		.make_user_admin(&third)
+		.boxed() // size firewall
+		.await?;
+
+	overtaken_deactivation_is_refused(services, &second, &third)
+		.boxed() // size firewall
+		.await?;
+
 	// The emergency service deactivates the server user when its password is
 	// unset, and the server user is never counted as an admin here.
 	services
@@ -219,6 +253,36 @@ async fn self_deactivation_is_forbidden(
 	}
 
 	Ok(())
+}
+
+/// Deactivate `target` while the admins room is locked, standing in for
+/// `rival`'s deactivation holding the lock first.
+///
+/// The deactivation must wait for the lock instead of counting admins before
+/// taking it. Once the rival has lost its password there, `target` is the last
+/// active admin and must be refused.
+async fn overtaken_deactivation_is_refused(
+	services: &Services,
+	target: &UserId,
+	rival: &UserId,
+) -> Result {
+	let admin_lock = services.admin.lock_admin_room().await;
+	let deactivation = pin!(services.users.deactivate_account(target));
+	let waiting = pin!(sleep(LOCK_WAIT));
+
+	let deactivation = match select(deactivation, waiting).await {
+		| Either::Right(((), deactivation)) => deactivation,
+		| Either::Left((result, _)) => {
+			return Err!("{target}: deactivation did not wait for the admins room: {result:?}");
+		},
+	};
+
+	// The rival's deactivation, past its own check, clears its password here.
+	services.users.set_password(rival, None).await?;
+	drop(admin_lock);
+
+	expect_forbidden(deactivation.await, "deactivation overtaken in the admins room")?;
+	expect_intact_admin(services, target).await
 }
 
 fn expect_forbidden(result: Result, path: &str) -> Result {

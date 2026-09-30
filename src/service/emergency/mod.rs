@@ -107,6 +107,13 @@ async fn set_emergency_access(&self, password: Option<&str>) -> Result {
 		return Ok(());
 	}
 
+	// Before the password is cleared, so an interrupted revocation retries next start.
+	self.services
+		.oauth
+		.revoke_user_tokens(server_user)
+		.await;
+
+	// Never refused: the last-admin check does not count the server user.
 	self.services
 		.users
 		.deactivate_account(server_user)

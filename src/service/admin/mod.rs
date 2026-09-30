@@ -24,9 +24,11 @@ use ruma::{
 };
 use tokio::sync::mpsc;
 use tuwunel_core::{
-	Err, Event, Result, debug, err, error::default_log, matrix::event::MsgType, utils::ReadyExt,
-	warn,
+	Err, Event, Result, debug, err, error::default_log, implement, matrix::event::MsgType,
+	utils::ReadyExt, warn,
 };
+
+use crate::rooms::state::RoomMutexGuard;
 
 pub struct Service {
 	services: Arc<crate::services::OnceServices>,
@@ -247,11 +249,13 @@ impl Service {
 			.await
 	}
 
-	/// Checks whether a given user is the only active admin left on this server
+	/// Checks whether a given user is the only active admin left on this server.
 	///
 	/// The server user is never counted: it can sign in only while an emergency
 	/// password is configured. Deactivated accounts still joined to the admin
-	/// room are not counted either, since none of them can sign in to act.
+	/// room are not counted either, since none of them can sign in to act. Nor
+	/// is a passwordless account, such as an appservice's user, since it stores
+	/// the same empty password as a deactivated one.
 	pub async fn user_is_last_admin(&self, user_id: &UserId) -> bool {
 		let server_user: &UserId = &self.services.globals.server_user;
 		if user_id == server_user {
@@ -414,4 +418,22 @@ impl Service {
 			.await
 			.unwrap_or(false)
 	}
+}
+
+/// Locks the admins room's state, when there is an admins room.
+///
+/// Hold the guard from the [`Service::user_is_last_admin`] check until the
+/// change it permits is made. The admins room's leave and ban guard runs under
+/// the same lock, so two concurrent removals cannot each see the other as the
+/// admin who remains.
+#[implement(Service)]
+pub async fn lock_admin_room(&self) -> Option<RoomMutexGuard> {
+	let admin_room = self.get_admin_room().await.ok()?;
+
+	self.services
+		.state
+		.mutex
+		.lock(&admin_room)
+		.await
+		.into()
 }
