@@ -1,3 +1,4 @@
+mod appservice;
 mod cleanup;
 mod fixture;
 mod ordering;

@@ -6,6 +6,7 @@ use tuwunel_core::{Error, debug, error::error_chain, implement, info, warn};
 use super::{
 	DEQUEUE_LIMIT, NewEvents, RetryAction, SendingFutures, TransactionStatus,
 	TransactionStatuses, WakeQueue, dispatch::SendingResult, select::Selection,
+	wake::arm_appservice_wake,
 };
 use crate::{
 	federation::is_content_rejection,
@@ -115,6 +116,15 @@ async fn handle_response_err<'a>(
 
 	match dest {
 		| dest @ Destination::Push(..) => self.arm_push_wake(dest, &error, statuses, wakes),
+		| dest @ Destination::Appservice(_) => {
+			let forced = matches!(retry_action, RetryAction::Force).then(|| dest.clone());
+
+			arm_appservice_wake(wakes, dest, tries);
+			if let Some(dest) = forced {
+				self.handle_force_retry(dest, futures, statuses)
+					.await;
+			}
+		},
 		| Destination::Federation(server) => {
 			if tries > 0 {
 				self.stalled
@@ -126,10 +136,6 @@ async fn handle_response_err<'a>(
 			self.arm_federation_wake(server, tries, wakes)
 				.await;
 		},
-		| dest if matches!(retry_action, RetryAction::Force) =>
-			self.handle_force_retry(dest, futures, statuses)
-				.await,
-		| _ => {},
 	}
 }
 

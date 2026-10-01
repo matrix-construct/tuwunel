@@ -1,3 +1,6 @@
+#[cfg(test)]
+mod tests;
+
 use std::{
 	cmp::Reverse,
 	time::{Duration, SystemTime},
@@ -20,6 +23,8 @@ use crate::{
 };
 
 const PUSH_FAILURE_STREAK: u32 = 4;
+const APPSERVICE_RETRY_BASE: u64 = 2;
+const APPSERVICE_RETRY_MAX_SECS: u64 = 512;
 const WAKE_OVERFLOW_DELAY: Duration = Duration::from_hours(365 * 24);
 
 #[implement(Service)]
@@ -84,14 +89,30 @@ async fn handle_wake<'a>(
 	}
 
 	match dest {
-		| Destination::Appservice(_) => {},
-		| dest @ Destination::Push(..) =>
+		| dest @ (Destination::Appservice(_) | Destination::Push(..)) =>
 			self.handle_force_retry(dest, futures, statuses)
 				.await,
 		| Destination::Federation(server) =>
 			self.handle_federation_wake(server, futures, statuses, wakes)
 				.await,
 	}
+}
+
+pub(super) fn arm_appservice_wake(wakes: &mut WakeQueue, dest: Destination, tries: u32) {
+	if wakes
+		.iter()
+		.any(|Reverse((_, armed))| armed == &dest)
+	{
+		return;
+	}
+
+	arm_wake_in(wakes, dest, appservice_delay(tries));
+}
+
+fn appservice_delay(tries: u32) -> Duration {
+	let exponent = tries.min(APPSERVICE_RETRY_MAX_SECS.ilog(APPSERVICE_RETRY_BASE));
+
+	Duration::from_secs(APPSERVICE_RETRY_BASE.pow(exponent))
 }
 
 #[implement(Service)]

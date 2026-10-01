@@ -78,7 +78,7 @@ type NewEvents = SmallVec<[QueueItem; 1]>;
 
 /// Per-worker retry timer keyed by earliest-retry deadline and destination.
 ///
-/// Every federation or push failure arms an entry. Traffic-triggered retries
+/// Every federation, appservice, or push failure arms an entry. Traffic-triggered retries
 /// can leave stale entries, which skip an in-flight transaction or replay a
 /// waiting one. Multiple entries may therefore remain for one destination.
 type WakeQueue = BinaryHeap<Reverse<(TokioInstant, Destination)>>;
