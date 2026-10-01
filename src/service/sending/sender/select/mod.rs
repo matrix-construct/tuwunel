@@ -196,12 +196,24 @@ fn transition(
 		},
 		| TransactionStatus::Pending => {
 			*status = TransactionStatus::Running { tries: 0 };
+			self.clear_stalled(dest);
 			Current::Ready { replay: true }
 		},
 		| TransactionStatus::Retrying { tries } => {
 			*status = TransactionStatus::Running { tries: *tries };
+			self.clear_stalled(dest);
 			Current::Ready { replay: true }
 		},
+	}
+}
+
+#[implement(Service)]
+fn clear_stalled(&self, dest: &Destination) {
+	if let Destination::Federation(server) = dest {
+		self.stalled
+			.lock()
+			.expect("locked")
+			.remove(server);
 	}
 }
 

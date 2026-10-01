@@ -114,10 +114,18 @@ async fn handle_response_err<'a>(
 	};
 
 	match dest {
-		| Destination::Federation(server) =>
-			self.arm_federation_wake(server, tries, wakes)
-				.await,
 		| dest @ Destination::Push(..) => self.arm_push_wake(dest, &error, statuses, wakes),
+		| Destination::Federation(server) => {
+			if tries > 0 {
+				self.stalled
+					.lock()
+					.expect("locked")
+					.insert(server.clone(), Some(Instant::now()));
+			}
+
+			self.arm_federation_wake(server, tries, wakes)
+				.await;
+		},
 		| dest if matches!(retry_action, RetryAction::Force) =>
 			self.handle_force_retry(dest, futures, statuses)
 				.await,

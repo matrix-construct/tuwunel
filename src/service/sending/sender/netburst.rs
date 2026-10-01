@@ -55,6 +55,10 @@ pub(super) async fn startup_netburst<'a>(
 			};
 
 			statuses.insert(dest.clone(), status);
+			if !netburst {
+				self.mark_pending(&dest);
+			}
+
 			if netburst {
 				futures.push(self.send_events(dest, events));
 			}
@@ -82,5 +86,15 @@ pub(super) async fn startup_netburst<'a>(
 
 		self.handle_request(msg, futures, statuses, wakes)
 			.await;
+	}
+}
+
+#[implement(Service)]
+fn mark_pending(&self, dest: &Destination) {
+	if let Destination::Federation(server) = dest {
+		self.stalled
+			.lock()
+			.expect("locked")
+			.insert(server.clone(), None);
 	}
 }
