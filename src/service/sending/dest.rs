@@ -1,6 +1,6 @@
 use std::fmt::Debug;
 
-use ruma::{OwnedServerName, OwnedUserId};
+use ruma::{OwnedServerName, OwnedUserId, ServerName, UserId};
 use tuwunel_core::{implement, matrix::pdu::RawPduId};
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -8,6 +8,31 @@ pub enum Destination {
 	Appservice(String),
 	Push(OwnedUserId, String), // user and pushkey
 	Federation(OwnedServerName),
+}
+
+/// A borrowed destination with the same hash representation as its owned form.
+///
+/// Variant order and payload hashing preserve sender shard ownership.
+#[derive(Hash)]
+pub(super) enum DestinationRef<'a> {
+	/// An appservice registration identifier.
+	Appservice(&'a str),
+
+	/// A user and pusher key.
+	Push(&'a UserId, &'a str),
+
+	/// A federation peer.
+	Federation(&'a ServerName),
+}
+
+#[implement(Destination)]
+#[inline]
+pub(super) fn borrowed(&self) -> DestinationRef<'_> {
+	match self {
+		| Self::Appservice(id) => DestinationRef::Appservice(id),
+		| Self::Push(user, key) => DestinationRef::Push(user, key),
+		| Self::Federation(server) => DestinationRef::Federation(server),
+	}
 }
 
 #[implement(Destination)]

@@ -2,6 +2,7 @@ mod cleanup;
 mod fixture;
 mod ordering;
 mod recovery;
+mod startup;
 
 use std::iter::once;
 

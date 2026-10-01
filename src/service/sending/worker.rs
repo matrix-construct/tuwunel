@@ -1,17 +1,21 @@
+#[cfg(test)]
+mod tests;
+
 use std::{
-	hash::{BuildHasher, BuildHasherDefault, DefaultHasher},
+	hash::{BuildHasher, BuildHasherDefault, DefaultHasher, Hash},
 	mem::take,
 	sync::Arc,
 };
 
 use futures::FutureExt;
+use ruma::ServerName;
 use tokio::task::{JoinError, JoinSet, unconstrained};
 use tuwunel_core::{
 	Result, debug, err, error, implement,
 	utils::{available_parallelism, math::usize_from_u64_truncated},
 };
 
-use super::{Destination, Msg, Service};
+use super::{Destination, Msg, Service, dest::DestinationRef};
 use crate::{Args, Service as _};
 
 /// Run the sender workers to completion.
@@ -93,14 +97,24 @@ pub(super) fn dispatch(&self, msg: Msg) -> Result {
 
 #[implement(Service)]
 pub(super) fn shard_id(&self, dest: &Destination) -> usize {
-	if self.channels.len() <= 1 {
+	shard(&dest.borrowed(), self.channels.len())
+}
+
+#[implement(Service)]
+#[inline]
+pub(super) fn federation_shard_id(&self, server: &ServerName) -> usize {
+	shard(&DestinationRef::Federation(server), self.channels.len())
+}
+
+fn shard(dest: &impl Hash, count: usize) -> usize {
+	if count <= 1 {
 		return 0;
 	}
 
 	let hash = BuildHasherDefault::<DefaultHasher>::default().hash_one(dest);
 
 	usize_from_u64_truncated(hash)
-		.overflowing_rem(self.channels.len())
+		.overflowing_rem(count)
 		.0
 }
 

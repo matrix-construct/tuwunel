@@ -1,11 +1,19 @@
-use std::{fmt::Debug, sync::Arc};
+#[cfg(test)]
+mod tests;
 
-use futures::{Stream, StreamExt, stream::iter};
+use std::{fmt::Debug, pin::pin, sync::Arc};
+
+use futures::{
+	Stream, StreamExt,
+	stream::{iter, unfold},
+};
 use ruma::{OwnedServerName, ServerName, UserId};
 use tuwunel_core::{
 	Error, Result, at, implement, utils,
 	utils::{
 		ReadyExt,
+		bytes::prefix_successor,
+		str_from_bytes,
 		stream::{TryIgnore, WidebandExt},
 	},
 };
@@ -260,6 +268,107 @@ pub(super) fn queued_badge_refresh_destinations(
 		})
 }
 
+/// Streams distinct queued federation destinations belonging to this worker.
+///
+/// Each seek copies one key into the owned cursor and skips its complete
+/// destination prefix. Sigils and other shards are skipped before ownership.
+#[implement(Data)]
+pub(super) fn queued_federation_destinations<'a, F>(
+	&'a self,
+	owns: F,
+) -> impl Stream<Item = Result<Destination>> + Send + 'a
+where
+	F: Fn(&ServerName) -> bool + Copy + Send + 'a,
+{
+	queued_destinations(move |key| self.seek_queued_key(key), owns)
+}
+
+fn queued_destinations<S, F, C>(
+	seek: S,
+	owns: C,
+) -> impl Stream<Item = Result<Destination>> + Send
+where
+	S: Fn(Key) -> F + Send,
+	F: Future<Output = Result<Option<Key>>> + Send,
+	C: Fn(&ServerName) -> bool + Copy + Send,
+{
+	unfold((Some(Key::new()), seek, owns), async move |(lower, seek, owns)| {
+		let lower = lower?;
+		let (item, next) = match seek(lower).await {
+			| Ok(None) => return None,
+			| Err(error) => (Err(error), None),
+			| Ok(Some(key)) => queued_destination(key, owns),
+		};
+
+		Some((item, (next, seek, owns)))
+	})
+	.ready_filter_map(Result::transpose)
+}
+
+fn queued_destination(
+	key: Key,
+	owns: impl Fn(&ServerName) -> bool,
+) -> (Result<Option<Destination>>, Option<Key>) {
+	match key.first() {
+		| Some(b'$') => return (Ok(None), Some(single_key(key, b'%'))),
+		| Some(b'+') => return (Ok(None), Some(single_key(key, b','))),
+		| _ => {},
+	}
+
+	let Some(end) = key.iter().position(|byte| *byte == u8::MAX) else {
+		let error = Error::bad_database("Queued federation key has no destination delimiter");
+
+		return (Err(error), Some(after_key(key)));
+	};
+
+	let prefix = truncate_key(key, end.saturating_add(1));
+	let destination = str_from_bytes(&prefix[..end])
+		.ok()
+		.and_then(|server| <&ServerName>::try_from(server).ok())
+		.ok_or_else(|| Error::bad_database("Invalid queued federation destination"))
+		.map(|server| owns(server).then(|| Destination::Federation(server.to_owned())));
+
+	(destination, prefix_successor(prefix))
+}
+
+fn single_key(mut key: Key, byte: u8) -> Key {
+	key.clear();
+	key.push(byte);
+	key
+}
+
+fn after_key(mut key: Key) -> Key {
+	key.push(0);
+	key
+}
+
+fn truncate_key(mut key: Key, len: usize) -> Key {
+	key.truncate(len);
+	key
+}
+
+#[implement(Data)]
+#[tracing::instrument(level = "trace", skip_all)]
+async fn seek_queued_key(&self, mut key: Key) -> Result<Option<Key>> {
+	// The cursor callback copies into the owned seek buffer before its drop.
+	let found = pin!(
+		self.servernameevent_data
+			.raw_keys_from(&key)
+			.map(|item| item.map(|bytes| replace_key(&mut key, bytes)))
+	)
+	.next()
+	.await
+	.transpose()?
+	.is_some();
+
+	Ok(found.then_some(key))
+}
+
+fn replace_key(key: &mut Key, bytes: &[u8]) {
+	key.clear();
+	key.extend_from_slice(bytes);
+}
+
 #[implement(Data)]
 pub(super) fn set_latest_educount(&self, server_name: &ServerName, last_count: u64) {
 	self.servername_educount
@@ -326,8 +435,10 @@ pub(super) fn parse_servercurrentevent(
 		let user = parts
 			.next()
 			.expect("splitn always returns one element");
-		let user_string = utils::str_from_bytes(user)
+
+		let user_string = str_from_bytes(user)
 			.map_err(|_| Error::bad_database("Invalid user string in servercurrentevent"))?;
+
 		let user_id = UserId::parse(user_string)
 			.map_err(|_| Error::bad_database("Invalid user id in servercurrentevent"))?;
 

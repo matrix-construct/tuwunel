@@ -229,7 +229,7 @@ pub(super) fn arm_wake(wakes: &mut WakeQueue, dest: Destination, earliest_retry:
 	arm_wake_in(wakes, dest, delay);
 }
 
-fn arm_wake_in(wakes: &mut WakeQueue, dest: Destination, delay: Duration) {
+pub(super) fn arm_wake_in(wakes: &mut WakeQueue, dest: Destination, delay: Duration) {
 	let (deadline, _) = wake_deadline(delay);
 
 	wakes.push(Reverse((deadline, dest)));

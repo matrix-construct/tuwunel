@@ -3368,8 +3368,10 @@ pub struct Config {
 	pub max_join_attempts_per_join_request: usize,
 
 	/// Retry failed and incomplete messages to remote servers immediately upon
-	/// startup. This is called bursting. If this is disabled, said messages may
-	/// not be delivered until more messages are queued for that server. Do not
+	/// startup.
+	///
+	/// This is called bursting. If this is disabled, queued messages are retried
+	/// on a paced timer after startup instead of all at once. Do not
 	/// change this option unless server resources are extremely limited or the
 	/// scale of the server's deployment is huge. Do not disable this unless you
 	/// know what you are doing.

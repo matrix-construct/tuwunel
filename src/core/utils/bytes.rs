@@ -3,6 +3,9 @@
 //! The module handles human-readable sizes alongside fixed-width big-endian
 //! counters. Its size deserializers integrate human-readable values with Serde.
 
+#[cfg(test)]
+mod tests;
+
 use bytesize::ByteSize;
 use serde::{Deserialize, Deserializer, de};
 
@@ -77,3 +80,16 @@ pub fn u64_from_u8(bytes: &[u8]) -> u64 {
 /// Parses the big-endian bytes into an u64.
 #[inline]
 pub fn u64_from_bytes(bytes: &[u8]) -> Result<u64> { Ok(u64::from_be_bytes(bytes.try_into()?)) }
+
+/// Returns the least byte prefix strictly after every key with this prefix.
+///
+/// Trailing maximum bytes are removed before the remaining last byte advances.
+/// An empty or all-maximum prefix has no successor. The owned buffer is reused.
+#[must_use]
+pub fn prefix_successor(mut prefix: Vec<u8>) -> Option<Vec<u8>> {
+	let index = prefix.iter().rposition(|byte| *byte != u8::MAX)?;
+
+	prefix.truncate(index.saturating_add(1));
+	prefix[index] = prefix[index].saturating_add(1);
+	Some(prefix)
+}
