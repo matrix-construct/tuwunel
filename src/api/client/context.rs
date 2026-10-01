@@ -1,7 +1,7 @@
 use axum::extract::State;
 use futures::{
 	FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt,
-	future::{OptionFuture, join, join3, try_join3},
+	future::{OptionFuture, join, join3, try_join},
 };
 use ruma::{
 	DeviceId, EventId, OwnedEventId, RoomId, UInt, UserId,
@@ -257,12 +257,7 @@ async fn resolve_base_event(
 			.get_pdu(event_id)
 			.map_err(|_| err!(Request(NotFound("Base event not found."))));
 
-		let visible = services
-			.state_accessor
-			.user_can_see_event(sender_user, room_id, event_id)
-			.map(Ok);
-
-		try_join3(base_id, base_pdu, visible)
+		try_join(base_id, base_pdu)
 	};
 
 	let resolve_remote = services
@@ -270,7 +265,7 @@ async fn resolve_base_event(
 		.fetch_unreceived_contexts_over_federation
 		&& services.config.allow_federation;
 
-	let (base_id, base_pdu, visible) = match lookup().await {
+	let (base_id, base_pdu) = match lookup().await {
 		| Ok(found) => found,
 		| Err(e) if !resolve_remote => return Err(e),
 		| Err(_) => {
@@ -288,10 +283,15 @@ async fn resolve_base_event(
 		return Err!(Request(NotFound("Base event not found.")));
 	}
 
-	if !bypass_visibility && !visible {
+	if !bypass_visibility
+		&& !services
+			.state_accessor
+			.user_can_see_event(sender_user, &base_pdu)
+			.await
+	{
 		debug_warn!(
-			req_evt = ?event_id, ?base_id, ?room_id,
-			"Event requested by {sender_user} but is not allowed to see it."
+			req_evt = ?event_id, ?base_id, ?room_id, %sender_user,
+			"Event requested but the requester is not allowed to see it."
 		);
 
 		return Err!(Request(NotFound("Event not found.")));

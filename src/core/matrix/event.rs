@@ -19,7 +19,7 @@ use std::fmt::Debug;
 
 use ruma::{
 	CanonicalJsonObject, EventId, MilliSecondsSinceUnixEpoch, OwnedEventId, RoomId, UserId,
-	events::{AnySyncMessageLikeEvent, TimelineEventType},
+	events::{AnySyncMessageLikeEvent, TimelineEventType, room::member::MembershipState},
 	room_version_rules::RoomVersionRules,
 	serde::Raw,
 };
@@ -37,7 +37,12 @@ pub use self::{
 };
 use self::{format::to_sync_message_like_without_unsigned, msgtype::content_msgtype};
 use super::pdu::Pdu;
-use crate::{Result, utils};
+use crate::{Result, utils, utils::BoolExt};
+
+#[derive(Deserialize)]
+struct MemberContent {
+	membership: MembershipState,
+}
 
 /// Abstraction of a PDU so users can have their own PDU types.
 pub trait Event: Clone + Debug + Send + Sync {
@@ -48,6 +53,21 @@ pub trait Event: Clone + Debug + Send + Sync {
 	#[inline]
 	fn is_type_and_state_key(&self, kind: &TimelineEventType, state_key: &str) -> bool {
 		self.kind() == kind && self.state_key() == Some(state_key)
+	}
+
+	/// The membership this event sets for a user, when it is that user's own
+	/// member event.
+	///
+	/// Any other event yields `None`, as does member content whose `membership`
+	/// does not parse. Only that one field is deserialized.
+	#[inline]
+	fn membership_for(&self, user_id: &UserId) -> Option<MembershipState>
+	where
+		Self: Sized,
+	{
+		self.is_type_and_state_key(&TimelineEventType::RoomMember, user_id.as_str())
+			.and_then(|| self.get_content().ok())
+			.map(|content: MemberContent| content.membership)
 	}
 
 	/// Serialize into a Ruma JSON format, consuming.

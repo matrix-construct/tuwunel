@@ -213,7 +213,7 @@ async fn paginate_relations_with_filter(
 	.wide_filter_map(async |(depth, count, pdu)| {
 		services
 			.state_accessor
-			.user_can_see_event(sender_user, pdu.room_id(), pdu.event_id())
+			.user_can_see_event(sender_user, &pdu)
 			.await
 			.then_some((depth, count, pdu))
 	})

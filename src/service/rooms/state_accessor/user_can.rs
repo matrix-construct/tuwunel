@@ -99,16 +99,17 @@ pub async fn user_can_redact(
 ///
 /// Missing event state is allowed, and missing or invalid history visibility
 /// defaults to `shared`. The `shared` decision also accounts for the user's
-/// membership intervals around the event.
+/// membership intervals around the event. Under `joined` and `invited`, the
+/// user's own membership event is visible when the membership it sets
+/// qualifies, per the spec's before-or-after rule.
 #[implement(super::Service)]
 #[tracing::instrument(skip_all, level = "trace")]
-pub async fn user_can_see_event(
-	&self,
-	user_id: &UserId,
-	room_id: &RoomId,
-	event_id: &EventId,
-) -> bool {
-	let Some((shortstatehash, history_visibility)) = self.history_visibility_at(event_id).await
+pub async fn user_can_see_event<Pdu>(&self, user_id: &UserId, pdu: &Pdu) -> bool
+where
+	Pdu: Event,
+{
+	let Some((shortstatehash, history_visibility)) =
+		self.history_visibility_at(pdu.event_id()).await
 	else {
 		return true;
 	};
@@ -116,19 +117,25 @@ pub async fn user_can_see_event(
 	match history_visibility {
 		| HistoryVisibility::WorldReadable => true,
 
-		// Allow if any member on requesting server was AT LEAST invited, else deny
+		// Allow the user's own invite or join, or a user at least invited at the event
 		| HistoryVisibility::Invited =>
-			self.user_was_invited(shortstatehash, user_id)
+			matches!(
+				pdu.membership_for(user_id),
+				Some(MembershipState::Join | MembershipState::Invite)
+			) || self
+				.user_was_invited(shortstatehash, user_id)
 				.await,
 
-		// Allow if any member on requested server was joined, else deny
+		// Allow the user's own join, or a user joined at the event
 		| HistoryVisibility::Joined =>
-			self.user_was_joined(shortstatehash, user_id)
-				.await,
+			matches!(pdu.membership_for(user_id), Some(MembershipState::Join))
+				|| self
+					.user_was_joined(shortstatehash, user_id)
+					.await,
 
 		// An unrecognized value is treated as shared.
 		| HistoryVisibility::Shared | _ =>
-			self.user_shared_history(shortstatehash, room_id, event_id, user_id)
+			self.user_shared_history(shortstatehash, pdu.room_id(), pdu.event_id(), user_id)
 				.await,
 	}
 }

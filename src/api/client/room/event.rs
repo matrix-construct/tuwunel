@@ -1,5 +1,5 @@
 use axum::extract::State;
-use futures::{TryFutureExt, future::join3, pin_mut};
+use futures::{TryFutureExt, future::join, pin_mut};
 use ruma::api::client::room::get_room_event;
 use tuwunel_core::{
 	Err, Event, Pdu, Result, err,
@@ -59,22 +59,20 @@ pub(crate) async fn get_room_event_route(
 			}
 		});
 
-	let visible = services
-		.state_accessor
-		.user_can_see_event(sender_user, room_id, event_id);
+	let (event, retained_event) = join(event, retained_event).await;
 
-	let (mut event, retained_event, visible): (Result<Pdu>, Option<Result<Pdu>>, _) =
-		join3(event, retained_event, visible).await;
-
-	if event.as_ref().is_err_or(Event::is_redacted)
-		&& let Some(retained_event) = retained_event
-	{
-		event = retained_event;
-	}
+	let event: Result<Pdu> = retained_event
+		.filter(|_| event.as_ref().is_err_or(Event::is_redacted))
+		.unwrap_or(event);
 
 	let mut event = event?;
 
-	if !visible {
+	if event.room_id() != room_id
+		|| !services
+			.state_accessor
+			.user_can_see_event(sender_user, &event)
+			.await
+	{
 		return Err!(Request(NotFound("Event not found.")));
 	}
 
@@ -86,10 +84,7 @@ pub(crate) async fn get_room_event_route(
 		}));
 	}
 
-	debug_assert!(
-		event.event_id() == event_id && event.room_id() == room_id,
-		"Fetched PDU must match requested"
-	);
+	debug_assert!(event.event_id() == event_id, "Fetched PDU must match requested");
 
 	event.add_age().ok();
 

@@ -11,7 +11,7 @@ use futures::{
 use ruma::{
 	OwnedEventId, UserId,
 	events::{
-		StateEventType, TimelineEventType,
+		StateEventType,
 		room::member::{MembershipState, RoomMemberEventContent},
 	},
 };
@@ -81,11 +81,8 @@ pub async fn user_membership(
 /// invalid state falls back to [`MembershipState::Leave`].
 #[implement(super::Service)]
 pub async fn user_membership_at_pdu(&self, user_id: &UserId, pdu: &Pdu) -> MembershipState {
-	if pdu.kind() == &TimelineEventType::RoomMember
-		&& pdu.state_key() == Some(user_id.as_str())
-		&& let Ok(content) = pdu.get_content::<RoomMemberEventContent>()
-	{
-		return content.membership;
+	if let Some(membership) = pdu.membership_for(user_id) {
+		return membership;
 	}
 
 	let Ok(shortstatehash) = self

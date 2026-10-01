@@ -1,6 +1,6 @@
 use axum::extract::State;
 use ruma::api::client::room::get_event_by_timestamp::v1;
-use tuwunel_core::{Err, Result};
+use tuwunel_core::{Err, Result, utils::result::NotFound};
 
 use crate::router::Ruma;
 
@@ -14,7 +14,6 @@ pub(crate) async fn get_event_by_timestamp_route(
 	let sender_user = body.sender_user();
 	let room_id = &body.room_id;
 
-	// check if user can see the room
 	if !services
 		.state_accessor
 		.user_can_see_state_events(sender_user, room_id)
@@ -23,20 +22,25 @@ pub(crate) async fn get_event_by_timestamp_route(
 		return Err!(Request(Forbidden("You don't have permission to view this room.")));
 	}
 
-	// get the closest event to the given timestamp
 	let (origin_server_ts, event_id) = services
 		.timeline
 		.get_event_id_near_ts_with_fallback(room_id, body.ts, body.dir)
 		.await?;
 
-	if !services
-		.state_accessor
-		.user_can_see_event(sender_user, room_id, &event_id)
+	// An event this server does not hold has no recorded state, which the
+	// visibility check would allow as well.
+	if let Some(pdu) = services
+		.timeline
+		.get_pdu(&event_id)
 		.await
+		.optional()?
+		&& !services
+			.state_accessor
+			.user_can_see_event(sender_user, &pdu)
+			.await
 	{
 		return Err!(Request(Forbidden("You don't have permission to view this event.")));
 	}
 
-	// return the closest event found locally or from federation
 	Ok(v1::Response::new(event_id, origin_server_ts))
 }
