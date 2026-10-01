@@ -124,6 +124,7 @@ ARG VALGRIND_MAX_WORKERS=64
 ARG ROCKSDB_PARALLELISM_THREADS=2
 ARG sched_policy="--batch"
 ARG sched_prio=0
+ARG sched_scope=""
 
 WORKDIR /
 COPY --link --from=source /usr/src/tuwunel /usr/src/tuwunel
@@ -139,6 +140,7 @@ ENV TUWUNEL_DB_POOL_MAX_WORKERS="${VALGRIND_MAX_WORKERS}"
 ENV TUWUNEL_ROCKSDB_PARALLELISM_THREADS="${ROCKSDB_PARALLELISM_THREADS}"
 ENV sched_policy=${sched_policy}
 ENV sched_prio=${sched_prio}
+ENV sched_scope=${sched_scope}
 RUN \
 --mount=type=cache,dst=${RUSTUP_HOME}/downloads,sharing=locked \
 --mount=type=cache,dst=${CARGO_HOME}/registry,sharing=locked \

@@ -24,6 +24,16 @@ if test -n "${sched_ionice:-}"; then
 	sched="${sched} ionice ${sched_ionice}"
 fi
 
+# With sched_scope=runner the prefix becomes cargo's runner for the target, so
+# it reaches only the test and bench executables cargo launches while cargo,
+# rustc and build scripts keep the default class. A runner already set in the
+# environment is kept and runs under the prefix.
+if test "${sched_scope:-}" = "runner" && test -n "${sched}"; then
+	runner="CARGO_TARGET_$(tr 'a-z.-' 'A-Z__' <<< "${CARGO_TARGET:?sched_scope=runner needs CARGO_TARGET}")_RUNNER"
+	export "${runner}=${sched}${!runner:+ ${!runner}}"
+	exec "$@"
+fi
+
 # Exec the workload under the prefix so its scheduling policy, niceness and IO
 # class are inherited by every process it spawns. The unquoted expansion is
 # intentional: $sched splits into the leading words of the exec argv.

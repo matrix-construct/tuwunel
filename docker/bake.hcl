@@ -878,8 +878,11 @@ target "integ" {
             "--no-fail-fast --bench=*": "--no-fail-fast --test=*"
         )
 
+        # The realtime class is for running the test and bench binaries, never
+        # for compiling them: scope it to cargo's runner.
         sched_policy = (cargo_profile == "bench"? "--fifo": "--rr")
         sched_prio = (cargo_profile == "bench"? 3: 1)
+        sched_scope = "runner"
     }
 }
 
@@ -1032,8 +1035,11 @@ target "unit" {
             "--no-fail-fast --lib": "--no-fail-fast --lib --bins"
         )
 
+        # The realtime class is for running the test and bench binaries, never
+        # for compiling them: scope it to cargo's runner.
         sched_policy = (cargo_profile == "bench"? "--fifo": "--rr")
         sched_prio = (cargo_profile == "bench"? 3: 1)
+        sched_scope = "runner"
     }
 }
 
