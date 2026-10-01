@@ -16,6 +16,24 @@ if test -n "${sched_policy:-}"; then
 	fi
 fi
 
+# sched_cpus pins the workload to a CPU list in taskset syntax. The value
+# pcores names the performance cores of a hybrid CPU, leaving its efficiency
+# cores to the rest of the host; on a host without them it pins nothing.
+if test "${sched_cpus:-}" = "pcores"; then
+	sched_cpus=""
+	if test -r /sys/devices/cpu_core/cpus; then
+		sched_cpus=$(< /sys/devices/cpu_core/cpus)
+	fi
+fi
+
+if test -n "${sched_cpus:-}"; then
+	if taskset -c "${sched_cpus}" true 2>/dev/null; then
+		sched="${sched} taskset -c ${sched_cpus}"
+	else
+		echo "sched_wrap: taskset -c ${sched_cpus} rejected, running unpinned" >&2
+	fi
+fi
+
 if test -n "${sched_nice:-}"; then
 	sched="${sched} nice -n ${sched_nice}"
 fi
@@ -30,11 +48,12 @@ fi
 # environment is kept and runs under the prefix.
 if test "${sched_scope:-}" = "runner" && test -n "${sched}"; then
 	runner="CARGO_TARGET_$(tr 'a-z.-' 'A-Z__' <<< "${CARGO_TARGET:?sched_scope=runner needs CARGO_TARGET}")_RUNNER"
-	export "${runner}=${sched}${!runner:+ ${!runner}}"
+	export "${runner}=${sched# }${!runner:+ ${!runner}}"
 	exec "$@"
 fi
 
-# Exec the workload under the prefix so its scheduling policy, niceness and IO
-# class are inherited by every process it spawns. The unquoted expansion is
-# intentional: $sched splits into the leading words of the exec argv.
+# Exec the workload under the prefix so its scheduling policy, CPU affinity,
+# niceness and IO class are inherited by every process it spawns. The unquoted
+# expansion is intentional: $sched splits into the leading words of the exec
+# argv.
 exec ${sched} "$@"

@@ -425,9 +425,11 @@ target "complement-testee-valgrind" {
         complement-tester = elem("target:complement-tester-valgrind", [sys_name, sys_version, sys_target])
     }
     args = {
-        # Leave the valgrind testee on the default policy: it is already
-        # serialized by valgrind, and a realtime class would only interfere.
+        # Leave the valgrind testee on the default policy and unpinned: it is
+        # already serialized by valgrind, and a realtime class would only
+        # interfere.
         sched_policy = ""
+        sched_cpus = ""
     }
 }
 
@@ -456,8 +458,11 @@ target "complement-testee" {
         # timing-sensitive job under --fifo; the debug testee is an ordinary
         # test under --rr. Realtime needs CAP_SYS_NICE, which the Complement
         # runner grants the testee container; sched_wrap.sh degrades otherwise.
+        # The bench testee holds only the performance cores, as the unit and
+        # integ benches do.
         sched_policy = (cargo_profile == "test"? "--rr": "--fifo")
         sched_prio = (cargo_profile == "test"? 1: 2)
+        sched_cpus = (cargo_profile == "bench"? "pcores": "")
     }
 }
 
@@ -853,8 +858,10 @@ target "integ-valgrind" {
         cargo_cmd = "valgrind test"
         cargo_args = "--test=*"
 
-        # valgrind already serializes; keep it off the realtime class integ now grants
+        # valgrind already serializes; keep it off the realtime class and the
+        # bench pinning integ now grants
         sched_policy = ""
+        sched_cpus = ""
     }
 }
 
@@ -879,10 +886,12 @@ target "integ" {
         )
 
         # The realtime class is for running the test and bench binaries, never
-        # for compiling them: scope it to cargo's runner.
+        # for compiling them: scope it to cargo's runner. Benches hold only the
+        # performance cores so the efficiency cores keep the host responsive.
         sched_policy = (cargo_profile == "bench"? "--fifo": "--rr")
         sched_prio = (cargo_profile == "bench"? 3: 1)
         sched_scope = "runner"
+        sched_cpus = (cargo_profile == "bench"? "pcores": "")
     }
 }
 
@@ -1009,8 +1018,10 @@ target "unit-valgrind" {
         cargo_cmd = "valgrind test"
         cargo_args = "--lib --bins"
 
-        # valgrind already serializes; keep it off the realtime class unit now grants
+        # valgrind already serializes; keep it off the realtime class and the
+        # bench pinning unit now grants
         sched_policy = ""
+        sched_cpus = ""
     }
 }
 
@@ -1036,10 +1047,12 @@ target "unit" {
         )
 
         # The realtime class is for running the test and bench binaries, never
-        # for compiling them: scope it to cargo's runner.
+        # for compiling them: scope it to cargo's runner. Benches hold only the
+        # performance cores so the efficiency cores keep the host responsive.
         sched_policy = (cargo_profile == "bench"? "--fifo": "--rr")
         sched_prio = (cargo_profile == "bench"? 3: 1)
         sched_scope = "runner"
+        sched_cpus = (cargo_profile == "bench"? "pcores": "")
     }
 }
 

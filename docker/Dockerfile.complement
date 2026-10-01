@@ -126,16 +126,19 @@ ENV TUWUNEL_RUNTIME_USAGE_DIR="/var/log/tuwunel/metrics"
 FROM complement-testee-base AS complement-testee
 ARG sched_policy=""
 ARG sched_prio=1
+ARG sched_cpus=""
 ENV sched_policy=${sched_policy}
 ENV sched_prio=${sched_prio}
+ENV sched_cpus=${sched_cpus}
 RUN <<EOF
     set -eux
     apt-get update
     apt-get install -y --no-install-recommends linux-perf
     rm -rf /var/lib/apt/lists/*
 EOF
-# sched_wrap.sh leads the chain so its scheduling policy is inherited by
-# perf_wrap.sh and the server it runs; both wrappers ship in the base image.
+# sched_wrap.sh leads the chain so its scheduling policy and CPU pinning are
+# inherited by perf_wrap.sh and the server it runs; both wrappers ship in the
+# base image.
 ENTRYPOINT exec /complement/provision_complement.sh sched_wrap.sh perf_wrap.sh \
     tuwunel -Oserver_name=\""$SERVER_NAME\""
 

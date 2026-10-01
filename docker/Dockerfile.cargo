@@ -125,6 +125,7 @@ ARG ROCKSDB_PARALLELISM_THREADS=2
 ARG sched_policy="--batch"
 ARG sched_prio=0
 ARG sched_scope=""
+ARG sched_cpus=""
 
 WORKDIR /
 COPY --link --from=source /usr/src/tuwunel /usr/src/tuwunel
@@ -141,6 +142,7 @@ ENV TUWUNEL_ROCKSDB_PARALLELISM_THREADS="${ROCKSDB_PARALLELISM_THREADS}"
 ENV sched_policy=${sched_policy}
 ENV sched_prio=${sched_prio}
 ENV sched_scope=${sched_scope}
+ENV sched_cpus=${sched_cpus}
 RUN \
 --mount=type=cache,dst=${RUSTUP_HOME}/downloads,sharing=locked \
 --mount=type=cache,dst=${CARGO_HOME}/registry,sharing=locked \
