@@ -125,14 +125,33 @@ async fn handle_federation_wake<'a>(
 }
 
 #[implement(Service)]
-pub(super) async fn arm_federation_wake(&self, server: OwnedServerName, wakes: &mut WakeQueue) {
-	if let ShouldAttempt::No { earliest_retry } = self
+pub(super) async fn arm_federation_wake(
+	&self,
+	server: OwnedServerName,
+	tries: u32,
+	wakes: &mut WakeQueue,
+) {
+	let verdict = self
 		.services
 		.federation
 		.should_attempt(&server)
-		.await
-	{
-		arm_wake(wakes, Destination::Federation(server), earliest_retry);
+		.await;
+
+	let dest = Destination::Federation(server);
+
+	match verdict {
+		| ShouldAttempt::No { earliest_retry } => arm_wake(wakes, dest, earliest_retry),
+		| _ => {
+			let delay = exponential_backoff_remaining_secs(
+				self.server.config.sender_timeout,
+				self.server.config.sender_retry_backoff_limit,
+				Duration::ZERO,
+				tries,
+			)
+			.unwrap_or_default();
+
+			arm_wake_in(wakes, dest, delay);
+		},
 	}
 }
 

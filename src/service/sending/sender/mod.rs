@@ -29,8 +29,8 @@ use super::{Destination, Msg, SendingEvent, Service, data::QueueItem};
 
 /// In-flight bookkeeping for one `Destination`.
 ///
-/// Cross-attempt backoff lives in `peer_status` (federation only); appservice
-/// and push paths keep their own status because they are not server-keyed.
+/// Federation uses the peer gate when refused and the sender curve otherwise.
+/// Appservice and push retain their own destination status across retries.
 #[derive(Debug)]
 enum TransactionStatus {
 	/// A durable active generation awaiting its first dispatch after restart.
@@ -77,10 +77,9 @@ type NewEvents = SmallVec<[QueueItem; 1]>;
 
 /// Per-worker retry timer keyed by earliest-retry deadline and destination.
 ///
-/// Every recorded federation or push failure arms an entry. Stale entries are
-/// consumed by the destination's in-flight or newer failure generation. The
-/// heap is bounded by concurrently failing destinations, transient federation
-/// re-arms, and stale push entries.
+/// Every federation or push failure arms an entry. Traffic-triggered retries
+/// can leave stale entries, which skip an in-flight transaction or replay a
+/// waiting one. Multiple entries may therefore remain for one destination.
 type WakeQueue = BinaryHeap<Reverse<(TokioInstant, Destination)>>;
 
 const DEQUEUE_LIMIT: usize = 48;

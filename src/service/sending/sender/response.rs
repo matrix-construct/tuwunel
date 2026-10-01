@@ -108,8 +108,15 @@ async fn handle_response_err<'a>(
 
 	log_failure(&dest, &error, statuses);
 
+	let tries = match statuses.get(&dest) {
+		| Some(TransactionStatus::Retrying { tries }) => *tries,
+		| _ => 0,
+	};
+
 	match dest {
-		| Destination::Federation(server) => self.arm_federation_wake(server, wakes).await,
+		| Destination::Federation(server) =>
+			self.arm_federation_wake(server, tries, wakes)
+				.await,
 		| dest @ Destination::Push(..) => self.arm_push_wake(dest, &error, statuses, wakes),
 		| dest if matches!(retry_action, RetryAction::Force) =>
 			self.handle_force_retry(dest, futures, statuses)
@@ -122,7 +129,7 @@ async fn handle_response_err<'a>(
 ///
 /// Reports whether a forced retry was requested while the transaction ran.
 fn fail_status(dest: &Destination, statuses: &mut TransactionStatuses) -> RetryAction {
-	// Push backs off locally; federation defers to peer_status, appservice retries.
+	// Push records its local clock; other destinations wait for a replay trigger.
 	let push = matches!(dest, Destination::Push(..));
 
 	let Some(status) = statuses.get_mut(dest) else {
