@@ -1,5 +1,5 @@
 use axum::extract::State;
-use futures::{FutureExt, StreamExt, pin_mut};
+use futures::{FutureExt, StreamExt};
 use ruma::{
 	api::client::membership::{
 		get_member_events,
@@ -7,19 +7,13 @@ use ruma::{
 	},
 	events::{
 		StateEventType,
-		room::{
-			history_visibility::{HistoryVisibility, RoomHistoryVisibilityEventContent},
-			member::{MembershipState, RoomMemberEventContent},
-		},
+		room::member::{MembershipState, RoomMemberEventContent},
 	},
 };
 use tuwunel_core::{
 	Err, Result, at, err, is_equal_to, is_not_equal_to,
 	matrix::{Event, PduCount},
-	utils::{
-		future::{BoolExt, TryExtExt},
-		stream::ReadyExt,
-	},
+	utils::stream::ReadyExt,
 };
 
 use crate::Ruma;
@@ -99,19 +93,11 @@ pub(crate) async fn joined_members_route(
 	State(services): State<crate::State>,
 	body: Ruma<joined_members::v3::Request>,
 ) -> Result<joined_members::v3::Response> {
-	let is_joined = services
-		.state_cache
-		.is_joined(body.sender_user(), &body.room_id);
-
-	let is_world_readable = services
+	if !services
 		.state_accessor
-		.room_state_get_content(&body.room_id, &StateEventType::RoomHistoryVisibility, "")
-		.map_ok_or(false, |c: RoomHistoryVisibilityEventContent| {
-			c.history_visibility == HistoryVisibility::WorldReadable
-		});
-
-	pin_mut!(is_joined, is_world_readable);
-	if !is_joined.or(is_world_readable).await {
+		.user_can_peek(body.sender_user(), &body.room_id)
+		.await
+	{
 		return Err!(Request(Forbidden("You aren't a member of the room.")));
 	}
 

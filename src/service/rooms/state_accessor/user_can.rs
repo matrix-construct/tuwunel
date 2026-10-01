@@ -252,6 +252,22 @@ pub async fn user_can_see_room(&self, user_id: &UserId, room_id: &RoomId) -> boo
 		.await
 }
 
+/// Reports whether a user may peek into a room, as a room preview does.
+///
+/// A member always may, and anyone else only while the room's history is
+/// world-readable. Unlike `user_can_see_room`, a pending invite or a retained
+/// left membership grants nothing here.
+#[implement(super::Service)]
+#[tracing::instrument(skip_all, level = "trace")]
+pub async fn user_can_peek(&self, user_id: &UserId, room_id: &RoomId) -> bool {
+	// Sequenced rather than raced, so a member's point get skips the state read.
+	self.services
+		.state_cache
+		.is_joined(user_id, room_id)
+		.await
+		|| self.is_world_readable(room_id).await
+}
+
 /// Probes whether a sender may invite a target user.
 ///
 /// The normal event-build, authorization, and signing path runs under the
