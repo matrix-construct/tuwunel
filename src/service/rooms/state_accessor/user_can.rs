@@ -108,21 +108,10 @@ pub async fn user_can_see_event(
 	room_id: &RoomId,
 	event_id: &EventId,
 ) -> bool {
-	let Ok(shortstatehash) = self
-		.services
-		.state
-		.pdu_shortstatehash(event_id)
-		.await
+	let Some((shortstatehash, history_visibility)) = self.history_visibility_at(event_id).await
 	else {
 		return true;
 	};
-
-	let history_visibility = self
-		.state_get_content(shortstatehash, &StateEventType::RoomHistoryVisibility, "")
-		.await
-		.map_or(HistoryVisibility::Shared, |c: RoomHistoryVisibilityEventContent| {
-			c.history_visibility
-		});
 
 	match history_visibility {
 		| HistoryVisibility::WorldReadable => true,
@@ -142,6 +131,33 @@ pub async fn user_can_see_event(
 			self.user_shared_history(shortstatehash, room_id, event_id, user_id)
 				.await,
 	}
+}
+
+/// The room state an event was sent in and the history visibility it carried.
+///
+/// Missing or invalid history visibility reads as `shared`, and `None` means
+/// the event has no recorded state.
+#[implement(super::Service)]
+#[tracing::instrument(skip_all, level = "trace")]
+async fn history_visibility_at(
+	&self,
+	event_id: &EventId,
+) -> Option<(ShortStateHash, HistoryVisibility)> {
+	let shortstatehash = self
+		.services
+		.state
+		.pdu_shortstatehash(event_id)
+		.await
+		.ok()?;
+
+	let history_visibility = self
+		.state_get_content(shortstatehash, &StateEventType::RoomHistoryVisibility, "")
+		.await
+		.map_or(HistoryVisibility::Shared, |c: RoomHistoryVisibilityEventContent| {
+			c.history_visibility
+		});
+
+	Some((shortstatehash, history_visibility))
 }
 
 /// Whether a user may see an event under `shared` history visibility.
@@ -266,6 +282,33 @@ pub async fn user_can_peek(&self, user_id: &UserId, room_id: &RoomId) -> bool {
 		.is_joined(user_id, room_id)
 		.await
 		|| self.is_world_readable(room_id).await
+}
+
+/// Reports whether the room's history was world-readable at an event.
+///
+/// A peek may show only such events, so an event without recorded state, or
+/// with missing or invalid history visibility, does not qualify. The event that
+/// makes the room world-readable counts as well, as the spec requires.
+#[implement(super::Service)]
+#[tracing::instrument(skip_all, level = "trace")]
+pub async fn is_world_readable_at<Pdu>(&self, pdu: &Pdu) -> bool
+where
+	Pdu: Event,
+{
+	let opens_history = pdu.is_type_and_state_key(&TimelineEventType::RoomHistoryVisibility, "")
+		&& pdu
+			.get_content()
+			.is_ok_and(|c: RoomHistoryVisibilityEventContent| {
+				c.history_visibility == HistoryVisibility::WorldReadable
+			});
+
+	opens_history
+		|| self
+			.history_visibility_at(pdu.event_id())
+			.await
+			.is_some_and(|(_, history_visibility)| {
+				history_visibility == HistoryVisibility::WorldReadable
+			})
 }
 
 /// Probes whether a sender may invite a target user.
