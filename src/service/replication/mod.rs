@@ -308,6 +308,10 @@ impl Service {
 			)));
 		}
 
+		// This process is about to apply another primary's WAL as raw frames,
+		// which never reach the /sync change index's hooks: retire it for good.
+		self.services.sync.retire_change_index();
+
 		// Store the new primary URL and clear the promoted flag before notifying
 		// the worker so it sees a consistent state on wake-up.
 		*self.dynamic_primary_url.write().await = Some(new_primary_url.clone());

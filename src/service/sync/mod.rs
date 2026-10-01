@@ -1,3 +1,4 @@
+mod change_index;
 mod watch;
 
 use std::{
@@ -5,7 +6,8 @@ use std::{
 	sync::Arc,
 };
 
-use futures::{FutureExt, Stream};
+use async_trait::async_trait;
+use futures::{FutureExt, Stream, StreamExt, pin_mut};
 use ruma::{
 	DeviceId, OwnedDeviceId, OwnedRoomId, OwnedUserId, RoomId, UserId,
 	api::client::sync::sync_events::v5::{
@@ -15,14 +17,45 @@ use ruma::{
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex as TokioMutex;
-use tuwunel_core::{Result, at, debug, err, implement, is_equal_to, utils::stream::TryIgnore};
+use tuwunel_core::{
+	Result, at, debug, err, implement, is_equal_to, utils::stream::TryIgnore, warn,
+};
 use tuwunel_database::{Cbor, Deserialized, Map};
+
+use self::change_index::{ChangeIndex, Layout};
 
 pub struct Service {
 	services: Arc<crate::services::OnceServices>,
 	connections: Connections,
 	db: Data,
+	changes: Arc<ChangeIndex>,
+	/// False when a change hook could not be installed; the index then stays
+	/// off.
+	hooks_installed: bool,
 }
+
+/// Every map whose writes can change what an incremental v3 `/sync` returns:
+/// the maps `watch.rs` watches, plus the private-read maps that
+/// `load_joined_room` reads but nothing watches. Typing is in-memory and read
+/// from the typing service directly. Keep in step with `watch.rs`.
+const INDEXED_MAPS: &[(&str, Layout)] = &[
+	("userroomid_joined", Layout::User),
+	("userroomid_invitestate", Layout::User),
+	("userroomid_leftstate", Layout::User),
+	("userroomid_knockedstate", Layout::User),
+	("userroomid_notificationcount", Layout::User),
+	("userroomid_highlightcount", Layout::User),
+	("todeviceid_events", Layout::User),
+	("userid_lastonetimekeyupdate", Layout::User),
+	("keychangeid_userid", Layout::UserOrRoom),
+	("roomusertype_roomuserdataid", Layout::SecondIsUser),
+	("roomuserdataid_accountdata", Layout::SecondIsUser),
+	("roomuserid_lastnotificationread", Layout::SecondIsUser),
+	("roomuserid_privateread", Layout::SecondIsUser),
+	("roomuserid_lastprivatereadupdate", Layout::SecondIsUser),
+	("readreceiptid_readreceipt", Layout::Room),
+	("pduid_pdu", Layout::ShortRoom),
+];
 
 struct Data {
 	userdeviceconnid_conn: Arc<Map>,
@@ -65,9 +98,30 @@ pub type Subscriptions = BTreeMap<OwnedRoomId, request::ListConfig>;
 pub type Lists = BTreeMap<ListId, request::List>;
 pub type Rooms = BTreeMap<OwnedRoomId, Room>;
 
+#[async_trait]
 impl crate::Service for Service {
 	fn build(args: &crate::Args<'_>) -> Result<Arc<Self>> {
+		let changes = Arc::new(ChangeIndex::default());
+		let mut hooks_installed = true;
+		for &(name, layout) in INDEXED_MAPS {
+			let index = changes.clone();
+			let services = args.services.clone();
+			hooks_installed &= args.db[name].set_change_hook(Box::new(move |key| {
+				if !index.is_enabled() {
+					return;
+				}
+				// Enabled only after startup, so the services are always there;
+				// if they somehow are not, stamp the maximum: rebuild, never skip.
+				let count = services
+					.try_get()
+					.map_or(u64::MAX, |s| s.globals.pending_count().end);
+				index.record(layout, key, count);
+			}));
+		}
+
 		Ok(Arc::new(Self {
+			changes,
+			hooks_installed,
 			db: Data {
 				userdeviceconnid_conn: args.db["userdeviceconnid_conn"].clone(),
 				todeviceid_events: args.db["todeviceid_events"].clone(),
@@ -91,7 +145,82 @@ impl crate::Service for Service {
 		}))
 	}
 
+	/// Switch the change index on once startup (migrations included) is done.
+	///
+	/// Only in a process that started as primary. A replica applies the
+	/// primary's WAL with raw batch writes that never reach the hooks, and a
+	/// replica promoted in place keeps that history in memory, so it rebuilds
+	/// every poll as before until the restart that follows promotion.
+	async fn worker(self: Arc<Self>) -> Result {
+		if self.services.config.rocksdb_primary_url.is_some() {
+			return Ok(());
+		}
+		if !self.hooks_installed {
+			warn!("sync change index disabled: a map already had a change hook");
+			return Ok(());
+		}
+		let globals = self.services.globals.clone();
+		self.changes
+			.enable(|| globals.pending_count().end);
+		debug!("sync change index enabled");
+		Ok(())
+	}
+
 	fn name(&self) -> &str { crate::service::make_name(std::module_path!()) }
+}
+
+/// Switch the change index off for the rest of this process's life. Called on
+/// demotion: a replica's writes arrive as raw WAL frames that never stamp it.
+#[implement(Service)]
+pub fn retire_change_index(&self) { self.changes.retire(); }
+
+/// Whether anything an incremental v3 `/sync` for `user_id` reads may have
+/// changed after `since`. `false` means a rebuild from `since` would come back
+/// empty, so the caller can skip it and wait on the watchers instead.
+///
+/// Answers `true` ("rebuild") whenever it cannot vouch otherwise: index off or
+/// too new for `since`, presence on (not indexed), or a room without a short
+/// id.
+#[implement(Service)]
+pub async fn changed_since(&self, user_id: &UserId, since: u64) -> bool {
+	if self.services.config.allow_local_presence || !self.changes.covers(since) {
+		return true;
+	}
+	if self
+		.changes
+		.user_changed(user_id.as_bytes(), since)
+	{
+		return true;
+	}
+
+	let rooms = self
+		.services
+		.state_cache
+		.rooms_joined(user_id)
+		.chain(self.services.state_cache.rooms_invited(user_id));
+	pin_mut!(rooms);
+	while let Some(room_id) = rooms.next().await {
+		let Ok(shortroomid) = self.services.short.get_shortroomid(room_id).await else {
+			return true;
+		};
+		if self
+			.changes
+			.room_changed(room_id.as_bytes(), Some(shortroomid), since)
+		{
+			return true;
+		}
+		if self
+			.services
+			.typing
+			.last_typing_update(room_id)
+			.await
+			.is_ok_and(|count| count > since)
+		{
+			return true;
+		}
+	}
+
+	false
 }
 
 #[implement(Service)]

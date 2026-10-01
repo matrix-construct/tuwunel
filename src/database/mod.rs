@@ -34,7 +34,7 @@ pub use self::{
 	},
 	handle::Handle,
 	keyval::{KeyVal, Slice, serialize_key, serialize_val},
-	map::{Get, Map, Qry, compact},
+	map::{ChangeHook, Get, Map, Qry, compact},
 	ser::{Cbor, Interfix, Json, SEP, Separator, serialize, serialize_to, serialize_to_vec},
 };
 pub(crate) use self::{

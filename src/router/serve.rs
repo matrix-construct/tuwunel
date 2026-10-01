@@ -15,6 +15,30 @@ use tuwunel_service::Services;
 use super::layers;
 use crate::handle::ServerHandle;
 
+/// Listen backlog for the client/federation TCP listeners.
+///
+/// `std::net::TcpListener::bind` hard-codes 128. When every client reconnects
+/// at once (a restart, a failover, a web tier's pooled proxy connections all
+/// breaking together) the excess SYNs overflow that queue and are retried by
+/// the clients' TCP stacks at 1 s, 3 s, 7 s...: 5,000 simultaneous connects
+/// produced 2,751 listen-queue overflows on a 4-vCPU primary, and on a busy one
+/// half of 10,000 were still unconnected after 2.5 minutes (netsapiens-matrix
+/// load tests, 2026-09-30). The kernel caps this at net.core.somaxconn.
+const LISTEN_BACKLOG: u32 = 8192;
+
+/// Bind like `TcpListener::bind` (SO_REUSEADDR on Unix), with LISTEN_BACKLOG.
+fn bind_listener(addr: SocketAddr) -> std::io::Result<TcpListener> {
+	let socket = if addr.is_ipv4() {
+		tokio::net::TcpSocket::new_v4()?
+	} else {
+		tokio::net::TcpSocket::new_v6()?
+	};
+	#[cfg(unix)]
+	socket.set_reuseaddr(true)?;
+	socket.bind(addr)?;
+	socket.listen(LISTEN_BACKLOG)?.into_std()
+}
+
 /// Serve clients
 pub(super) async fn serve(services: Arc<Services>, handle: ServerHandle) -> Result {
 	let server = &services.server;
@@ -39,8 +63,8 @@ pub(super) async fn serve(services: Arc<Services>, handle: ServerHandle) -> Resu
 		.into_iter()
 		.filter(|_| systemd_listeners_is_empty)
 		.map(|addr| {
-			let listener = TcpListener::bind(addr)
-				.expect("Failed to bind configured TcpListener to {addr:?}");
+			let listener =
+				bind_listener(addr).expect("Failed to bind configured TcpListener to {addr:?}");
 
 			(listener, addr)
 		})
