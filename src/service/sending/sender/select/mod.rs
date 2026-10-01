@@ -5,6 +5,7 @@ mod receipts;
 use std::{
 	iter::once,
 	sync::atomic::{AtomicU64, AtomicUsize, Ordering},
+	time::SystemTime,
 };
 
 use futures::{StreamExt, future::join3};
@@ -30,6 +31,25 @@ use crate::{
 struct Selected {
 	shipped: EduVec,
 	overflow: Vec<EduBuf>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum Selection {
+	Events(Vec<SendingEvent>),
+	Busy,
+	Refused {
+		earliest_retry: SystemTime,
+	},
+}
+
+enum Current {
+	Ready {
+		replay: bool,
+	},
+	Busy,
+	Refused {
+		earliest_retry: SystemTime,
+	},
 }
 
 impl Selected {
@@ -61,7 +81,7 @@ pub(super) async fn select_events(
 	dest: &Destination,
 	new_events: NewEvents,
 	statuses: &mut TransactionStatuses,
-) -> Result<Option<Vec<SendingEvent>>> {
+) -> Result<Selection> {
 	let retry_action = if matches!(dest, Destination::Appservice(_))
 		&& new_events
 			.iter()
@@ -72,13 +92,16 @@ pub(super) async fn select_events(
 		RetryAction::None
 	};
 
-	let (allow, retry) = self
+	let current = self
 		.select_events_current(dest, statuses, retry_action)
 		.await;
 
-	if !allow {
-		return Ok(None);
-	}
+	let retry = match current {
+		| Current::Busy => return Ok(Selection::Busy),
+		| Current::Refused { earliest_retry } =>
+			return Ok(Selection::Refused { earliest_retry }),
+		| Current::Ready { replay } => replay,
+	};
 
 	if retry {
 		let active: Vec<_> = self
@@ -89,7 +112,7 @@ pub(super) async fn select_events(
 			.await;
 
 		if !active.is_empty() {
-			return Ok(Some(active));
+			return Ok(Selection::Events(active));
 		}
 	}
 
@@ -106,7 +129,9 @@ pub(super) async fn select_events(
 		.collect()
 		.await;
 
-	Ok(Some(self.with_edus(dest, events).await))
+	let events = self.with_edus(dest, events).await;
+
+	Ok(Selection::Events(events))
 }
 
 #[implement(Service)]
@@ -115,16 +140,16 @@ async fn select_events_current(
 	dest: &Destination,
 	statuses: &mut TransactionStatuses,
 	retry_action: RetryAction,
-) -> (bool, bool) {
+) -> Current {
 	// peer_status gates federation only; appservice and push fall through.
 	if let Destination::Federation(server) = dest
-		&& let ShouldAttempt::No { .. } = self
+		&& let ShouldAttempt::No { earliest_retry } = self
 			.services
 			.federation
 			.should_attempt(server)
 			.await
 	{
-		return (false, false);
+		return Current::Refused { earliest_retry };
 	}
 
 	if let Some(status) = statuses.get_mut(dest) {
@@ -132,51 +157,50 @@ async fn select_events_current(
 	}
 
 	statuses.insert(dest.clone(), TransactionStatus::Running { tries: 0 });
-	(true, false)
+	Current::Ready { replay: false }
 }
 
 /// Advance a destination's status for a new selection.
 ///
-/// Returns whether selection may proceed and whether the active set must be
-/// replayed first.
+/// Distinguishes busy destinations from permitted selection and active replay.
 #[implement(Service)]
 fn transition(
 	&self,
 	dest: &Destination,
 	status: &mut TransactionStatus,
 	retry_action: RetryAction,
-) -> (bool, bool) {
+) -> Current {
 	let remaining = self.push_backoff_remaining(Some(&*status));
 
 	match status {
+		| TransactionStatus::Retrying { .. } if matches!(dest, Destination::Push(..)) =>
+			Current::Busy,
 		| TransactionStatus::Running { tries }
 		| TransactionStatus::RunningForceRetry { tries } => {
 			if matches!(retry_action, RetryAction::Force) {
 				*status = TransactionStatus::RunningForceRetry { tries: *tries };
 			}
 
-			(false, false)
+			Current::Busy
 		},
-		| TransactionStatus::Retrying { .. } if matches!(dest, Destination::Push(..)) =>
-			(false, false),
 		| TransactionStatus::Failed { tries, .. } => {
 			let tries = *tries;
 
 			trace!(?dest, tries, ?remaining, "Push destination remains in backoff");
 			if remaining.is_some() {
-				return (false, false);
+				return Current::Busy;
 			}
 
 			*status = TransactionStatus::Retrying { tries };
-			(true, true)
+			Current::Ready { replay: true }
 		},
 		| TransactionStatus::Pending => {
 			*status = TransactionStatus::Running { tries: 0 };
-			(true, true)
+			Current::Ready { replay: true }
 		},
 		| TransactionStatus::Retrying { tries } => {
 			*status = TransactionStatus::Running { tries: *tries };
-			(true, true)
+			Current::Ready { replay: true }
 		},
 	}
 }

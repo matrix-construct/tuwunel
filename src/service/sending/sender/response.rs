@@ -5,7 +5,7 @@ use tuwunel_core::{Error, debug, error::error_chain, implement, info, warn};
 
 use super::{
 	DEQUEUE_LIMIT, NewEvents, RetryAction, SendingFutures, TransactionStatus,
-	TransactionStatuses, WakeQueue, dispatch::SendingResult,
+	TransactionStatuses, WakeQueue, dispatch::SendingResult, select::Selection,
 };
 use crate::{
 	federation::is_content_rejection,
@@ -175,7 +175,7 @@ pub(super) async fn handle_force_retry<'a>(
 	futures: &mut SendingFutures<'a>,
 	statuses: &mut TransactionStatuses,
 ) {
-	let Ok(Some(events)) = self
+	let Ok(Selection::Events(events)) = self
 		.select_events(&dest, NewEvents::new(), statuses)
 		.await
 	else {

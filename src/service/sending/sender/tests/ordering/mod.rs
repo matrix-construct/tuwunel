@@ -13,7 +13,10 @@ use tuwunel_core::Result;
 use super::{enqueue, fixture::fixture};
 use crate::sending::{
 	Destination, SendingEvent,
-	sender::{DEQUEUE_LIMIT, SendingFutures, TransactionStatuses, select::edu_buf},
+	sender::{
+		DEQUEUE_LIMIT, SendingFutures, TransactionStatuses,
+		select::{Selection, edu_buf},
+	},
 };
 
 #[tokio::test]
@@ -110,7 +113,7 @@ async fn flush_resumes_queued_backlog() -> Result {
 		.select_events(&dest, flush, &mut statuses)
 		.await?;
 
-	assert_eq!(events, Some(vec![old; DEQUEUE_LIMIT]));
+	assert_eq!(events, Selection::Events(vec![old; DEQUEUE_LIMIT]));
 	assert_eq!(sending.db.queued_requests(&dest).count().await, 1);
 	assert_eq!(
 		sending

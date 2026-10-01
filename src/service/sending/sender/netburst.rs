@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use futures::StreamExt;
 use tuwunel_core::{implement, itertools::Itertools, utils::ReadyExt, warn};
 
-use super::{SendingFutures, TransactionStatus, TransactionStatuses};
+use super::{SendingFutures, TransactionStatus, TransactionStatuses, WakeQueue};
 use crate::sending::{Destination, Msg, SendingEvent, Service};
 
 #[implement(Service)]
@@ -20,6 +20,7 @@ pub(super) async fn startup_netburst<'a>(
 	id: usize,
 	futures: &mut SendingFutures<'a>,
 	statuses: &mut TransactionStatuses,
+	wakes: &mut WakeQueue,
 ) {
 	let netburst = self.server.config.startup_netburst;
 	let keep = usize::try_from(self.server.config.startup_netburst_keep).ok();
@@ -79,6 +80,7 @@ pub(super) async fn startup_netburst<'a>(
 			queue_id: Vec::new(),
 		};
 
-		self.handle_request(msg, futures, statuses).await;
+		self.handle_request(msg, futures, statuses, wakes)
+			.await;
 	}
 }

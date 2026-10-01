@@ -22,9 +22,10 @@ use tuwunel_core::{
 	Result, implement,
 	smallvec::{SmallVec, smallvec},
 	trace,
+	utils::BoolExt,
 };
 
-use self::dispatch::SendingFuture;
+use self::{dispatch::SendingFuture, select::Selection, wake::arm_wake};
 use super::{Destination, Msg, SendingEvent, Service, data::QueueItem};
 
 /// In-flight bookkeeping for one `Destination`.
@@ -104,7 +105,7 @@ pub(super) async fn sender(self: Arc<Self>, id: usize) -> Result {
 	let mut futures = SendingFutures::new();
 	let mut wakes = WakeQueue::new();
 
-	self.startup_netburst(id, &mut futures, &mut statuses)
+	self.startup_netburst(id, &mut futures, &mut statuses, &mut wakes)
 		.boxed() // size firewall
 		.await;
 
@@ -153,7 +154,7 @@ async fn work_loop<'a>(
 				self.handle_response(response, futures, statuses, wakes).await;
 			},
 			request = receiver.recv_async() => match request {
-				Ok(request) => self.handle_request(request, futures, statuses).await,
+				Ok(request) => self.handle_request(request, futures, statuses, wakes).await,
 				Err(_) => return,
 			},
 			() = sleep_until(next_due), if !wakes.is_empty() => {
@@ -170,6 +171,7 @@ async fn handle_request<'a>(
 	msg: Msg,
 	futures: &mut SendingFutures<'a>,
 	statuses: &mut TransactionStatuses,
+	wakes: &mut WakeQueue,
 ) {
 	let synthetic_badge =
 		msg.queue_id.is_empty() && matches!(&msg.event, SendingEvent::BadgeRefresh);
@@ -185,11 +187,19 @@ async fn handle_request<'a>(
 				.await,
 	};
 
-	if let Ok(Some(events)) = self
+	match self
 		.select_events(&msg.dest, new_events, statuses)
 		.await
 	{
-		self.schedule_events(msg.dest, events, futures, statuses);
+		| Ok(Selection::Events(events)) =>
+			self.schedule_events(msg.dest, events, futures, statuses),
+		| Ok(Selection::Refused { earliest_retry })
+			if wakes
+				.iter()
+				.any(|Reverse((_, dest))| dest == &msg.dest)
+				.is_false() =>
+			arm_wake(wakes, msg.dest, earliest_retry),
+		| _ => {},
 	}
 }
 

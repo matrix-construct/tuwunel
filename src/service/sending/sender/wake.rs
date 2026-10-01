@@ -119,7 +119,8 @@ async fn handle_federation_wake<'a>(
 				queue_id: Vec::new(),
 			};
 
-			self.handle_request(msg, futures, statuses).await;
+			self.handle_request(msg, futures, statuses, wakes)
+				.await;
 		},
 	}
 }
@@ -220,7 +221,7 @@ fn record_push_failure(dest: &Destination, error: &Error, tries: u32, retry_in: 
 	}
 }
 
-fn arm_wake(wakes: &mut WakeQueue, dest: Destination, earliest_retry: SystemTime) {
+pub(super) fn arm_wake(wakes: &mut WakeQueue, dest: Destination, earliest_retry: SystemTime) {
 	let delay = earliest_retry
 		.duration_since(SystemTime::now())
 		.unwrap_or_default();

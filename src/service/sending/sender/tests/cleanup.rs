@@ -3,8 +3,8 @@ use std::iter::once;
 use tuwunel_core::Result;
 
 use super::{
-	Destination, SendingEvent, SendingFutures, TransactionStatus, TransactionStatuses, enqueue,
-	fixture, pdu_id,
+	Destination, Selection, SendingEvent, SendingFutures, TransactionStatus, TransactionStatuses,
+	WakeQueue, enqueue, fixture, pdu_id,
 };
 
 #[tokio::test]
@@ -28,7 +28,7 @@ async fn reused_destination_promotes_first_request_after_cleanup() -> Result {
 
 		sending.db.mark_as_active(once(&old));
 		sending
-			.startup_netburst(0, &mut futures, &mut statuses)
+			.startup_netburst(0, &mut futures, &mut statuses, &mut WakeQueue::new())
 			.await;
 
 		assert!(futures.is_empty());
@@ -56,7 +56,7 @@ async fn reused_destination_promotes_first_request_after_cleanup() -> Result {
 			.select_events(&dest, [successor.clone()].into(), &mut statuses)
 			.await?;
 
-		assert_eq!(events, Some(vec![SendingEvent::Pdu(new_id)]));
+		assert_eq!(events, Selection::Events(vec![SendingEvent::Pdu(new_id)]));
 		assert!(matches!(statuses.get(&dest), Some(TransactionStatus::Running { tries: 0 })));
 		active.exists(&successor.0).await?;
 		assert!(

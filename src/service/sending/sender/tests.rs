@@ -11,7 +11,10 @@ use serde_json::Value;
 use tuwunel_core::{Error, Result};
 
 use self::fixture::fixture;
-use super::{NewEvents, SendingFutures, TransactionStatus, TransactionStatuses, WakeQueue};
+use super::{
+	NewEvents, SendingFutures, TransactionStatus, TransactionStatuses, WakeQueue,
+	select::Selection,
+};
 use crate::{
 	sending::{Destination, SendingEvent, Service, data::QueueItem},
 	test_utils::pdu_id,
@@ -43,7 +46,7 @@ async fn restart_replays_active_before_queued_successors() -> Result {
 		let mut statuses = TransactionStatuses::new();
 
 		sending
-			.startup_netburst(0, &mut futures, &mut statuses)
+			.startup_netburst(0, &mut futures, &mut statuses, &mut WakeQueue::new())
 			.await;
 
 		assert!(futures.is_empty());
@@ -54,13 +57,13 @@ async fn restart_replays_active_before_queued_successors() -> Result {
 			.select_events(&dest, payload(), &mut statuses)
 			.await?;
 
-		assert_eq!(events, Some(vec![SendingEvent::Pdu(old_id)]));
+		assert_eq!(events, Selection::Events(vec![SendingEvent::Pdu(old_id)]));
 		assert!(matches!(statuses.get(&dest), Some(TransactionStatus::Running { tries: 0 })));
 		assert!(
 			sending
 				.select_events(&dest, payload(), &mut statuses)
 				.await?
-				.is_none()
+				.eq(&Selection::Busy)
 		);
 
 		queued.exists(&successor.0).await?;
@@ -113,7 +116,7 @@ async fn restart_retains_the_configured_active_limit() -> Result {
 		.mark_as_active([first.clone(), second.clone()].iter());
 
 	sending
-		.startup_netburst(0, &mut futures, &mut statuses)
+		.startup_netburst(0, &mut futures, &mut statuses, &mut WakeQueue::new())
 		.await;
 
 	assert!(futures.is_empty());
@@ -130,7 +133,7 @@ async fn restart_retains_the_configured_active_limit() -> Result {
 		.select_events(&dest, NewEvents::new(), &mut statuses)
 		.await?;
 
-	assert_eq!(events, Some(vec![SendingEvent::Pdu(first_id)]));
+	assert_eq!(events, Selection::Events(vec![SendingEvent::Pdu(first_id)]));
 
 	Ok(())
 }
@@ -149,7 +152,7 @@ async fn enabled_netburst_keeps_active_ownership() -> Result {
 
 	sending.db.mark_as_active(once(&old));
 	sending
-		.startup_netburst(0, &mut futures, &mut statuses)
+		.startup_netburst(0, &mut futures, &mut statuses, &mut WakeQueue::new())
 		.await;
 
 	assert_eq!(futures.len(), 1);
@@ -158,7 +161,7 @@ async fn enabled_netburst_keeps_active_ownership() -> Result {
 		sending
 			.select_events(&dest, NewEvents::new(), &mut statuses)
 			.await?
-			.is_none()
+			.eq(&Selection::Busy)
 	);
 
 	sending.db.db["servercurrentevent_data"]
@@ -191,7 +194,7 @@ async fn zero_keep_drops_every_active_row_without_redelivery() -> Result {
 
 	sending.db.mark_as_active(rows.iter());
 	sending
-		.startup_netburst(0, &mut futures, &mut statuses)
+		.startup_netburst(0, &mut futures, &mut statuses, &mut WakeQueue::new())
 		.await;
 
 	assert!(futures.is_empty());
@@ -228,7 +231,7 @@ async fn failure_streak_survives_replays() -> Result {
 			.select_events(&dest, [queued].into(), &mut statuses)
 			.await?;
 
-		assert!(events.is_some_and(|events| events.contains(&head)));
+		assert!(matches!(events, Selection::Events(events) if events.contains(&head)));
 		assert!(matches!(
 			statuses.get(&dest),
 			Some(&TransactionStatus::Running { tries }) if tries == before
@@ -251,7 +254,7 @@ async fn failure_streak_survives_replays() -> Result {
 		.select_events(&dest, NewEvents::new(), &mut statuses)
 		.await?;
 
-	assert!(events.is_some_and(|events| events.contains(&head)));
+	assert!(matches!(events, Selection::Events(events) if events.contains(&head)));
 	assert!(matches!(statuses.get(&dest), Some(TransactionStatus::Running { tries: 3 })));
 
 	sending
