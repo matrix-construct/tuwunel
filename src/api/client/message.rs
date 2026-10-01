@@ -37,6 +37,7 @@ use tuwunel_service::{
 	},
 };
 
+use super::visibility_filter;
 use crate::Ruma;
 
 /// Shared inputs for [`get_messages`], the pagination core behind both the
@@ -409,21 +410,6 @@ where
 			.users
 			.user_is_ignored(event.sender(), user_id)
 			.await
-}
-
-#[inline]
-pub(crate) async fn visibility_filter(
-	services: &Services,
-	item: PdusIterItem,
-	user_id: &UserId,
-) -> Option<PdusIterItem> {
-	let (_, pdu) = &item;
-
-	services
-		.state_accessor
-		.user_can_see_event(user_id, pdu.room_id(), pdu.event_id())
-		.await
-		.then_some(item)
 }
 
 #[inline]

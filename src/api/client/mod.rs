@@ -1,3 +1,7 @@
+use ruma::UserId;
+use tuwunel_core::Event;
+use tuwunel_service::{Services, rooms::timeline::PdusIterItem};
+
 pub(super) mod account;
 pub(super) mod account_data;
 pub(super) mod admin;
@@ -101,3 +105,22 @@ const TOKEN_LENGTH: usize = tuwunel_service::users::device::TOKEN_LENGTH;
 
 /// generated user session ID length
 const SESSION_ID_LENGTH: usize = tuwunel_service::uiaa::SESSION_ID_LENGTH;
+
+/// Keeps a timeline item only when the user may see its event.
+///
+/// The room's history visibility is read as it stood at that event rather than
+/// as it stands at the time of the request.
+#[inline]
+async fn visibility_filter(
+	services: &Services,
+	item: PdusIterItem,
+	user_id: &UserId,
+) -> Option<PdusIterItem> {
+	let (_, pdu) = &item;
+
+	services
+		.state_accessor
+		.user_can_see_event(user_id, pdu.room_id(), pdu.event_id())
+		.await
+		.then_some(item)
+}

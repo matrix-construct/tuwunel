@@ -30,7 +30,8 @@ use tuwunel_service::{
 	rooms::{search::RoomQuery, timeline::PdusIterItem},
 };
 
-use crate::{Ruma, client::message::visibility_filter};
+use super::visibility_filter;
+use crate::Ruma;
 
 type RoomStates = BTreeMap<OwnedRoomId, RoomState>;
 type RoomState = Vec<Raw<AnyStateEvent>>;

@@ -23,7 +23,7 @@ use tuwunel_core::{
 };
 use tuwunel_service::rooms::short::ShortStateHash;
 
-use crate::{Ruma, client::message::visibility_filter};
+use crate::{Ruma, client::visibility_filter};
 
 const LIMIT_MAX: usize = 50;
 
