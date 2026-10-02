@@ -1,17 +1,23 @@
-use std::{collections::BTreeSet, iter::once};
+use std::{
+	collections::BTreeSet,
+	io::{Error as IoError, ErrorKind as IoErrorKind},
+	iter::once,
+};
 
 use serde_json::{Value, json};
-use tuwunel_core::{Result, config::Figment, utils::BoolExt};
+use tuwunel_core::{Error, Result, config::Figment, err, smallvec::SmallVec, utils::BoolExt};
 use tuwunel_database::Database;
 
 use super::{
 	super::identity::{census as census_identities, repair as repair_identities},
-	Census, CompressedState, Mapping, Parents, Projection, States, apply, decode, depth, index,
-	materialize, repair,
+	Census, CompressedState, Mapping, Parents, Projection, States, apply, census, decode, depth,
+	digests,
+	history::{allowed, read_error, references as history_references},
+	index, mapping, materialize, publish, repair, target,
 };
 use crate::{
 	Services,
-	rooms::state_compressor::ShortStateInfo,
+	rooms::{state_compressor::ShortStateInfo, state_res::AuthCheckOutcome},
 	test_utils::{fixture, pdu_id},
 };
 
@@ -44,6 +50,7 @@ fn strict_framing_and_actual_parentless_semantics() {
 		orphans: [].into(),
 		complete: true,
 		projection,
+		exposed: BTreeSet::new(),
 	};
 
 	let census = index(census, None, Some(9), false);
@@ -330,6 +337,311 @@ async fn recoverable_key_orphans_keep_durable_identity_and_ambiguous_orphans_sta
 	Ok(())
 }
 
+#[test]
+fn authorization_evidence_errors_preserve_operational_failures() -> Result {
+	assert!(allowed(Ok(AuthCheckOutcome::Allow))?);
+	assert!(!allowed(Ok(AuthCheckOutcome::Deny(err!("rejected event"))))?);
+
+	for invalid in [
+		Error::Database("invalid authorization dependency".into()),
+		Error::SerdeDe("invalid event record".into()),
+		err!(Request(BadJson("invalid content"))),
+		err!(Request(NotFound("missing auth input"))),
+	] {
+		assert!(!allowed(Err(invalid))?);
+	}
+
+	let malformed: Result<Value> = serde_json::from_slice(b"{").map_err(Into::into);
+
+	assert!(!allowed(malformed.map(|_| AuthCheckOutcome::Allow))?);
+
+	let raw = IoError::new(IoErrorKind::PermissionDenied, "storage read failed");
+	let operational =
+		allowed(Err(read_error(raw.into()))).expect_err("storage failure remains operational");
+
+	let Error::Io(raw) = operational else {
+		panic!("storage error lost its variant");
+	};
+
+	assert_eq!(raw.kind(), IoErrorKind::PermissionDenied);
+
+	let absent: Error = IoError::new(IoErrorKind::NotFound, "engine read failed").into();
+
+	assert!(absent.is_not_found(), "unprotected engine failure resembles missing evidence");
+	let protected = read_error(absent);
+
+	assert!(!protected.is_not_found(), "auth must not reinterpret an engine failure");
+	let operational = allowed(Err(protected)).expect_err("engine failure remains operational");
+
+	let Error::Io(protected) = operational else {
+		panic!("engine error lost its protected origin");
+	};
+
+	assert_eq!(protected.kind(), IoErrorKind::Other);
+	let source = protected
+		.get_ref()
+		.and_then(|source| source.downcast_ref());
+
+	assert!(matches!(source, Some(Error::Io(source)) if source.kind() == IoErrorKind::NotFound));
+
+	let pool = allowed(Err(read_error(err!("recv failed"))))
+		.expect_err("pool failure cannot become invalid authorization content");
+
+	let Error::Io(pool) = pool else {
+		panic!("pool error lost its protected origin");
+	};
+
+	assert_eq!(pool.kind(), IoErrorKind::Other);
+	let origin = pool
+		.get_ref()
+		.and_then(|source| source.downcast_ref());
+
+	assert!(matches!(origin, Some(Error::Err(..))));
+
+	Ok(())
+}
+
+#[tokio::test]
+#[tracing::instrument(level = "trace", skip_all)]
+async fn historical_intersections_require_accepted_agreeing_anchors_and_preserve_intact_writers()
+-> Result {
+	let Some(fixture) = fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+
+	let services = &fixture.services;
+	let db = &services.db;
+
+	historical_fixture(db);
+
+	db["global"].insert(b"fix_short_injectivity", b"");
+	let clean = rerun(services).await?;
+
+	assert_eq!(clean.rewritten, 0, "old exposure without intersections is harmless");
+
+	assert!(clean.unfinished.is_empty());
+
+	let damaged = diff(1000, &[(3, 102)], &[(3, 102)]);
+	let descendant = diff(2000, &[(4, 103)], &[]);
+	let reset = || {
+		insert_diff(db, 2000, &damaged);
+
+		insert_diff(db, 3000, &descendant);
+	};
+
+	reset();
+
+	db["shorteventid_shortstatehash"].remove(&102_u64.to_be_bytes());
+	let unknown = rerun(services).await?;
+
+	assert_eq!(unknown.rewritten, 0);
+
+	assert_eq!(unknown.unfinished, BTreeSet::from([2000, 3000]));
+
+	assert_original(db, 2000, &damaged).await?;
+
+	assert_original(db, 3000, &descendant).await?;
+
+	db["shorteventid_shortstatehash"].insert(&102_u64.to_be_bytes(), 1000_u64.to_be_bytes());
+
+	let member_id = pdu_id(101);
+	let membership = db["pduid_pdu"]
+		.get(member_id.as_bytes())
+		.await?
+		.to_vec();
+
+	let invalid_member = changed(serde_json::from_slice(&membership)?, "content", json!({}));
+
+	db["pduid_pdu"].insert(member_id.as_bytes(), serde_json::to_vec(&invalid_member)?);
+
+	db["shortstatekey_statekey"].insert(&14_u64.to_be_bytes(), b"m.room.topic\xff");
+
+	insert_diff(db, 4000, diff(0, &[(14, 103)], &[]));
+	let severed = rerun(services).await?;
+
+	assert_eq!(severed.rewritten, 1, "unrelated state progresses beside invalid auth content");
+
+	assert_eq!(severed.unfinished, BTreeSet::from([2000, 3000]));
+
+	assert_original(db, 2000, &damaged).await?;
+
+	assert_original(db, 3000, &descendant).await?;
+
+	assert_snapshot(db, 4000, &[(4, 103)]).await?;
+
+	db["shortstatehash_statediff"].remove(&4000_u64.to_be_bytes());
+
+	db["shortstatekey_statekey"].remove(&14_u64.to_be_bytes());
+
+	db["pduid_pdu"].remove(member_id.as_bytes());
+	let unavailable = rerun(services).await?;
+
+	assert_eq!(unavailable.rewritten, 0, "missing accepted auth state is not an absent tuple");
+
+	db["pduid_pdu"].insert(member_id.as_bytes(), &membership);
+
+	let topic_id = pdu_id(103);
+	let topic = db["pduid_pdu"]
+		.get(topic_id.as_bytes())
+		.await?
+		.to_vec();
+
+	let pdu: Value = serde_json::from_slice(&topic)?;
+	let missing = changed(
+		pdu,
+		"auth_events",
+		json!(["$event100:example.org", "$event101:example.org", "$missing:example.org"]),
+	);
+
+	db["pduid_pdu"].insert(topic_id.as_bytes(), serde_json::to_vec(&missing)?);
+
+	let unavailable = rerun(services).await?;
+
+	assert_eq!(
+		unavailable.rewritten, 0,
+		"late missing auth input cannot reuse an earlier complete graph"
+	);
+
+	db["pduid_pdu"].insert(topic_id.as_bytes(), &topic);
+
+	insert_diff(db, 1100, diff(0, &[(1, 100), (2, 101)], &[]));
+
+	db["shorteventid_shortstatehash"].insert(&105_u64.to_be_bytes(), 1100_u64.to_be_bytes());
+
+	db["shorteventid_shortstatehash"].insert(&106_u64.to_be_bytes(), 2000_u64.to_be_bytes());
+	let conflicted = rerun(services).await?;
+
+	assert!(conflicted.unfinished.contains(&2000), "valid historical anchors must agree");
+
+	assert_original(db, 2000, &damaged).await?;
+
+	db["shorteventid_shortstatehash"].remove(&106_u64.to_be_bytes());
+
+	reset();
+
+	for column in ["roomid_shortstatehash", "eventid_resolvedstate"] {
+		db[column].insert(b"unattributed", 3000_u64.to_be_bytes());
+		let held = rerun(services).await?;
+
+		assert_eq!(held.rewritten, 0, "unattributed live referrer protects its ancestors");
+
+		db[column].remove(b"unattributed");
+	}
+
+	insert_diff(db, 3000, diff(2000, &[(3, 105), (4, 103)], &[]));
+	let contradictory = rerun(services).await?;
+
+	assert_eq!(
+		contradictory.rewritten, 0,
+		"intact descendant assignment at damaged key cannot be replaced"
+	);
+
+	assert_original(db, 2000, &damaged).await?;
+
+	reset();
+
+	for (digest, id) in [(b"old-c".as_slice(), 2000_u64), (b"old-d", 3000)] {
+		db["statehash_shortstatehash"].insert(digest, id.to_be_bytes());
+	}
+
+	let repaired = rerun(services).await?;
+
+	assert_eq!(repaired.rewritten, 2);
+
+	assert!(repaired.unfinished.is_empty());
+
+	assert_snapshot(db, 2000, &[(1, 100), (2, 101), (3, 102)]).await?;
+
+	assert_snapshot(db, 3000, &[(1, 100), (2, 101), (3, 102), (4, 103)]).await?;
+
+	assert_snapshot(db, 1000, &[(1, 100), (2, 101), (3, 105)]).await?;
+
+	for digest in [b"old-c".as_slice(), b"old-d"] {
+		assert_absent(db, "statehash_shortstatehash", digest, "rewritten digest removed").await;
+	}
+
+	reset();
+	let identity_census = census_identities(services).await?;
+	let statekeys = mapping(services, &identity_census.statekeys).await?;
+	let events = mapping(services, &identity_census.events).await?;
+	let projection = Projection { statekeys, events };
+
+	let scanned = census(services, projection).await?;
+	let affected = BTreeSet::from([2000, 3000]);
+	let digests = digests(services, &affected).await?;
+	let references = history_references(services, affected).await?;
+	let child = target(services, &scanned.projection, &references, 3000)
+		.await?
+		.expect("independently proved child");
+
+	let child_digests = digests
+		.get(&3000)
+		.map(SmallVec::as_slice)
+		.unwrap_or_default();
+
+	publish(services, &scanned.projection, &references, 3000, &child, child_digests).await?;
+
+	let fresh = census(services, scanned.projection).await?;
+
+	assert!(
+		fresh.exposed.contains(&2000),
+		"interruption after child leaves the ancestor's seed durable"
+	);
+
+	assert!(!fresh.exposed.contains(&3000), "verified child is detached");
+
+	assert_original(db, 2000, &damaged).await?;
+
+	let resumed = rerun(services).await?;
+
+	assert_eq!(resumed.rewritten, 1);
+
+	assert_snapshot(db, 2000, &[(1, 100), (2, 101), (3, 102)]).await?;
+
+	Ok(())
+}
+
+#[tokio::test]
+#[tracing::instrument(level = "trace", skip_all)]
+async fn historical_roots_serve_intersections_over_disagreeing_reconstructions() -> Result {
+	let Some(fixture) = fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+
+	let services = &fixture.services;
+	let db = &services.db;
+
+	historical_fixture(db);
+
+	// A parentless row serves its added entries and ignores its removes.
+	let served = diff(0, &[(1, 100), (2, 101), (3, 105)], &[(3, 105)]);
+
+	insert_diff(db, 2000, &served);
+	let withheld = rerun(services).await?;
+
+	assert_eq!(
+		withheld.rewritten, 0,
+		"a served root entry outranks a disagreeing reconstruction"
+	);
+
+	assert_eq!(withheld.unfinished, BTreeSet::from([2000]));
+
+	assert_original(db, 2000, &served).await?;
+
+	let agreeing = diff(0, &[(1, 100), (2, 101), (3, 102)], &[(3, 102)]);
+
+	insert_diff(db, 2000, &agreeing);
+	let published = rerun(services).await?;
+
+	assert_eq!(published.rewritten, 1, "the same anchors publish a root that agrees");
+
+	assert!(published.unfinished.is_empty());
+
+	assert_snapshot(db, 2000, &[(1, 100), (2, 101), (3, 102)]).await?;
+
+	Ok(())
+}
+
 fn words(values: &[u64]) -> Vec<u8> {
 	values
 		.iter()
@@ -462,3 +774,85 @@ fn insert_pdu(db: &Database, short: u64, pdu: &Value) {
 }
 
 fn event_id(short: u64) -> String { format!("$event{short}:example.org") }
+
+fn historical_fixture(db: &Database) {
+	statekey_identities(db, &[
+		(1, b"m.room.create\xff"),
+		(2, b"m.room.member\xff@user:example.org"),
+		(3, b"m.room.name\xff"),
+		(4, b"m.room.topic\xff"),
+	]);
+
+	let topic_auth = vec![100, 101];
+	let room_id = "!room:example.org";
+
+	for (short, kind, key, content, previous, auth) in [
+		(
+			100_u64,
+			"m.room.create",
+			Some(""),
+			json!({"creator":"@user:example.org","room_version":"6"}),
+			vec![],
+			vec![],
+		),
+		(
+			101,
+			"m.room.member",
+			Some("@user:example.org"),
+			json!({"membership":"join"}),
+			vec![100],
+			vec![100],
+		),
+		(102, "m.room.name", Some(""), json!({"name":"new"}), vec![105], vec![100, 101]),
+		(103, "m.room.topic", Some(""), json!({"topic":"later"}), vec![102], topic_auth),
+		(
+			104,
+			"m.room.message",
+			None,
+			json!({"msgtype":"m.text","body":"after"}),
+			vec![103],
+			vec![100, 101],
+		),
+		(105, "m.room.name", Some(""), json!({"name":"old"}), vec![101], vec![100, 101]),
+		(
+			106,
+			"m.room.message",
+			None,
+			json!({"msgtype":"m.text","body":"fork"}),
+			vec![105],
+			vec![100, 101],
+		),
+	] {
+		event_identity(db, short);
+		let pdu = json!({
+			"event_id": event_id(short),
+			"room_id": room_id,
+			"sender": "@user:example.org",
+			"type": kind,
+			"state_key": key,
+			"content": content,
+			"prev_events": event_ids(&previous),
+			"auth_events": event_ids(&auth),
+			"depth": short,
+			"origin_server_ts": short,
+			"hashes": { "sha256": "test" },
+		});
+
+		insert_pdu(db, short, &pdu);
+	}
+
+	db["roomid_shortroomid"].insert(room_id, 1_u64.to_be_bytes());
+
+	insert_diff(db, 1000, diff(0, &[(1, 100), (2, 101), (3, 105)], &[]));
+
+	for (event, state) in [(102_u64, 1000_u64), (103, 2000), (104, 3000)] {
+		db["shorteventid_shortstatehash"].insert(&event.to_be_bytes(), state.to_be_bytes());
+	}
+}
+
+fn event_ids(shorts: &[u64]) -> Vec<String> { shorts.iter().copied().map(event_id).collect() }
+
+fn changed(mut pdu: Value, key: &str, value: Value) -> Value {
+	pdu[key] = value;
+	pdu
+}

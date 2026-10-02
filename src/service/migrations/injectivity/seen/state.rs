@@ -32,11 +32,17 @@ use crate::{
 	},
 };
 
+mod history;
 mod orphan;
 #[cfg(test)]
 mod tests;
 
-use self::orphan::recover;
+use self::{
+	history::{
+		References as Historical, references as history_references, target as historical_target,
+	},
+	orphan::recover,
+};
 
 type Claimed = BTreeMap<u64, Digests>;
 type Digests = SmallVec<[Digest; 1]>;
@@ -77,6 +83,7 @@ struct Census {
 	orphans: Occurrences,
 	complete: bool,
 	projection: Projection,
+	exposed: BTreeSet<u64>,
 }
 
 struct Scanned {
@@ -145,15 +152,17 @@ pub(super) async fn repair(services: &Services, identities: &Identities) -> Resu
 	};
 
 	let digests = digests(services, &affected).await?;
+	let historical = descendants(&census.parents, &census.exposed);
+	let history = history_references(services, historical).await?;
 
-	// Serial: each target holds a full state in memory.
+	// Serial: each target holds a full state in memory, and history fans out within it.
 	let targets: BTreeMap<_, _> = affected
 		.iter()
 		.copied()
 		.try_stream()
 		.and_then(async |id| {
 			services.server.check_running()?;
-			target(services, &projection, id)
+			target(services, &projection, &history, id)
 				.map_ok(|target| (id, target))
 				.await
 		})
@@ -189,7 +198,7 @@ pub(super) async fn repair(services: &Services, identities: &Identities) -> Resu
 			.map(Digests::as_slice)
 			.unwrap_or_default();
 
-		publish(services, &projection, id, target, digests)
+		publish(services, &projection, &history, id, target, digests)
 			.map_ok(|published| match published {
 				| Publication::Applied(original, snapshot) =>
 					(accepted(states, id, original, snapshot), blocked),
@@ -230,6 +239,7 @@ async fn census(services: &Services, projection: Projection) -> Result<Census> {
 		orphans: Occurrences::new(),
 		complete: true,
 		projection,
+		exposed: BTreeSet::new(),
 	};
 
 	services.db["shortstatehash_statediff"]
@@ -287,8 +297,11 @@ fn tally(census: Census, Scanned { id, parent, diff, absences }: Scanned) -> Res
 		return Ok(index(incomplete(census), id, parent, true));
 	};
 
-	let seed = !absences.is_empty() || infected(&census.projection, &diff);
-	let census = absences.into_iter().fold(census, occurrence);
+	let exposed = !diff.added.is_disjoint(&diff.removed);
+	let seed = exposed || !absences.is_empty() || infected(&census.projection, &diff);
+	let census = absences
+		.into_iter()
+		.fold(exposure(census, id, exposed), occurrence);
 
 	Ok(index(census, id, parent, seed))
 }
@@ -302,6 +315,11 @@ fn infected(projection: &Projection, diff: &Diff) -> bool {
 		.any(|(key, event)| {
 			candidate(&projection.statekeys, key) || candidate(&projection.events, event)
 		})
+}
+
+fn exposure(mut census: Census, id: Option<u64>, exposed: bool) -> Census {
+	census.exposed.extend(id.filter(|_| exposed));
+	census
 }
 
 fn candidate(mapping: &Mapping, short: u64) -> bool {
@@ -407,8 +425,13 @@ async fn digests(services: &Services, affected: &BTreeSet<u64>) -> Result<Claime
 fn claim(value: &[u8]) -> Option<u64> { value.get(..8).and_then(short_of) }
 
 #[tracing::instrument(level = "trace", skip_all)]
-async fn target(services: &Services, projection: &Projection, id: u64) -> Result<Option<Target>> {
-	prepared(services, projection, id)
+async fn target(
+	services: &Services,
+	projection: &Projection,
+	history: &Historical,
+	id: u64,
+) -> Result<Option<Target>> {
+	prepared(services, projection, history, id)
 		.map_ok(|prepared| {
 			prepared.map(|(original, state)| Target {
 				original: hash(original),
@@ -419,7 +442,16 @@ async fn target(services: &Services, projection: &Projection, id: u64) -> Result
 }
 
 #[tracing::instrument(level = "trace", skip_all)]
-async fn prepared(services: &Services, projection: &Projection, id: u64) -> Result<Materialized> {
+async fn prepared(
+	services: &Services,
+	projection: &Projection,
+	history: &Historical,
+	id: u64,
+) -> Result<Materialized> {
+	if history.affected.contains(&id) {
+		return historical_target(services, projection, history, id).await;
+	}
+
 	let Some((original, state)) = materialize(services, id).await? else {
 		return Ok(None);
 	};
@@ -669,13 +701,14 @@ async fn identity(
 async fn publish(
 	services: &Services,
 	projection: &Projection,
+	history: &Historical,
 	id: u64,
 	target: &Target,
 	digests: &[Digest],
 ) -> Result<Publication> {
 	services.server.check_running()?;
 	let db = &services.db;
-	let Some((original, state)) = prepared(services, projection, id).await? else {
+	let Some((original, state)) = prepared(services, projection, history, id).await? else {
 		return Ok(Publication::Retained);
 	};
 
