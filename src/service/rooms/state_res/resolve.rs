@@ -43,8 +43,8 @@ pub type StateMap<Id> = BTreeMap<TypeStateKey, Id>;
 
 /// Full recursive auth chain for one candidate [`StateMap`].
 ///
-/// Values are distinct and immutable after construction. Their order is
-/// arbitrary, and consumers must not depend on it.
+/// Values are immutable after construction and normally distinct. Their order
+/// is arbitrary, and consumers must not depend on it.
 #[derive(Clone)]
 pub struct AuthSet<Id>(Vec<Id>);
 
@@ -60,10 +60,11 @@ type ConflictVec<Id> = SmallVec<[Id; 2]>;
 type ConflictedSet = HashSet<OwnedEventId, RandomState>;
 
 impl<Id> AuthSet<Id> {
-	/// Creates an auth set from distinct identifiers.
+	/// Creates an auth set from identifiers expected to be distinct.
 	///
-	/// The caller must ensure `ids` contains no duplicates. Duplicates are
-	/// not checked, so hot paths avoid redundant work.
+	/// Duplicates are neither checked nor removed, so hot paths avoid
+	/// redundant work. A damaged short-id mapping can still repeat an
+	/// identifier, which the auth difference counts once per set.
 	#[inline]
 	#[must_use]
 	pub(crate) fn from_distinct(ids: Vec<Id>) -> Self { Self(ids) }
@@ -91,29 +92,13 @@ impl<Id> IntoIterator for AuthSet<Id> {
 	fn into_iter(self) -> Self::IntoIter { self.0.into_iter() }
 }
 
-/// Apply the [state resolution] algorithm introduced in room version 2 to
-/// resolve the state of a room.
+/// Resolves the state of a room with the version 2 [state resolution] algorithm.
 ///
-/// ## Arguments
-///
-/// * `rules` - The rules to apply for the version of the current room.
-///
-/// * `state_maps` - The incoming states to resolve. Each `StateMap` represents
-///   a possible fork in the state of a room.
-///
-/// * `auth_sets` - The list of full recursive sets of `auth_events` for each
-///   event in the `state_maps`. Inputs must not contain duplicates.
-///
-/// * `fetch_event` - Function to fetch an event in the room given its event ID.
-///
-/// ## Invariants
-///
-/// The caller of `resolve` must ensure that all the events are from the same
-/// room.
-///
-/// ## Returns
-///
-/// The resolved room state.
+/// Each of `state_maps` is one possible fork of the room's state, and
+/// `auth_sets` holds the full recursive auth chain of each fork's events, where
+/// an event repeated within one set counts once. `fetch` loads an event by ID,
+/// and `rules` are those of the room's version. The caller must ensure that all
+/// the events are from the same room.
 ///
 /// [state resolution]: https://spec.matrix.org/latest/rooms/v2/#state-resolution
 #[tracing::instrument(level = "debug", skip_all)]

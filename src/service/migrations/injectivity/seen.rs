@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 use tuwunel_core::{Err, Result, implement, result::NotFound, smallvec::SmallVec, warn};
 use tuwunel_database::{Database, Json, Txn, keyval::ValBuf, serialize_key, serialize_val};
 
+mod identity;
+mod references;
 #[cfg(test)]
 mod tests;
 
