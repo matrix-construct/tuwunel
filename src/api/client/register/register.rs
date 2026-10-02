@@ -240,6 +240,11 @@ async fn resolve_registration_user_id(
 		return Err!(Request(UserInUse("User ID is not available.")));
 	}
 
+	services
+		.users
+		.check_creation(&proposed_user_id)
+		.await?;
+
 	Ok(proposed_user_id)
 }
 

@@ -183,7 +183,11 @@ impl Service {
 		self.set_password(user_id, password).await
 	}
 
-	async fn check_creation(&self, user_id: &UserId) -> Result {
+	/// Refuses a local user ID that once joined the admin room but has no account.
+	///
+	/// Refusals return `M_USER_IN_USE` and log the user ID without changing account
+	/// or membership state. Existing accounts and the server user remain eligible.
+	pub async fn check_creation(&self, user_id: &UserId) -> Result {
 		if self.services.globals.user_is_local(user_id)
 			&& user_id != self.services.globals.server_user
 			&& let Some(admin_room) = self

@@ -9,9 +9,12 @@ use futures::{FutureExt, TryFutureExt, future::try_join};
 use reqwest::header::{CONTENT_TYPE, HeaderValue};
 use ruma::{
 	Mxc, OwnedMxcUri, OwnedUserId, ServerName, UserId,
-	api::client::{
-		session::{SsoRedirectAction, sso_callback, sso_login, sso_login_with_provider},
-		uiaa::AuthType,
+	api::{
+		client::{
+			session::{SsoRedirectAction, sso_callback, sso_login, sso_login_with_provider},
+			uiaa::AuthType,
+		},
+		error::ErrorKind,
 	},
 };
 use serde::{Deserialize, Serialize};
@@ -902,14 +905,26 @@ async fn try_user_id(
 			debug_warn!(?username, "Username exists.");
 			return None;
 		}
-	} else if unique_id && !provider.unique_id_fallbacks {
-		debug_warn!(
-			?username,
-			provider = ?provider.brand,
-			"Unique ID fallbacks disabled.",
-		);
+	} else {
+		if unique_id && !provider.unique_id_fallbacks {
+			debug_warn!(
+				?username,
+				provider = ?provider.brand,
+				"Unique ID fallbacks disabled.",
+			);
 
-		return None;
+			return None;
+		}
+
+		// Keep the candidate on other errors because account creation retries the gate.
+		if services
+			.users
+			.check_creation(&user_id)
+			.await
+			.is_err_and(|error| error.kind() == ErrorKind::UserInUse)
+		{
+			return None;
+		}
 	}
 
 	Some(user_id)

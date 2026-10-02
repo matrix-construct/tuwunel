@@ -17,12 +17,16 @@ use self::{fixture::boot, timeline::append_pdu};
 mod client;
 
 mod fixture;
+#[path = "admin_grant_registration/probes.rs"]
+mod probes;
+
 #[expect(dead_code)] // Only membership events are appended.
 mod timeline;
 
 #[test]
 fn refuses_names_once_joined_to_admin_room() -> Result {
-	let options = ["create_admin_room=true", "grant_admin_to_first_user=true"];
+	let options =
+		["create_admin_room=true", "grant_admin_to_first_user=true", "log_enable=false"];
 
 	boot("admin-grant-registration", options, exercise)
 }

@@ -310,6 +310,8 @@ async fn do_register(services: &Services, body: &NativeSubmit) -> Result<OwnedUs
 		return Err!(Request(UserInUse("That username is taken.")));
 	}
 
+	services.users.check_creation(&user_id).await?;
+
 	// Acceptance is checked before any token is consumed, so a missing checkbox
 	// does not burn a single-use registration token.
 	if !services.config.registration_terms.is_empty()
