@@ -10,7 +10,7 @@ use std::{
 
 use ruma::{OwnedEventId, OwnedRoomId, OwnedServerName};
 use tuwunel_core::{
-	Error, Result, implement, info,
+	Error, Result, debug_info, implement,
 	utils::{MutexExt, math::fetch_add_usize},
 	warn,
 };
@@ -558,7 +558,7 @@ fn log_walk_end(upgrade: &PrevUpgrade<'_>, pass: &Pass) {
 			"Prev walk ended."
 		);
 	} else {
-		info!(
+		debug_info!(
 			%room_id,
 			%event_id,
 			%origin,

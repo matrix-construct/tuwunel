@@ -9,7 +9,7 @@ use ruma::{
 use tuwunel_core::{
 	Err, Result, async_noinline, debug,
 	debug::INFO_SPAN_LEVEL,
-	debug_warn, err, implement, info,
+	debug_warn, err, implement,
 	matrix::{Event, PduCount, PduEvent, pdu::MAX_PREV_EVENTS, room_version::from_create_event},
 	smallvec::SmallVec,
 	trace,
@@ -212,7 +212,7 @@ pub async fn handle_incoming_pdu<'a>(
 			pass.hold();
 		}
 
-		info!(%origin, %room_id, %event_id, "Backing off from a gapped incoming event.");
+		debug_warn!(%origin, %room_id, %event_id, "Backing off from a gapped incoming event.");
 		return Ok(None);
 	}
 

@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use tuwunel_core::{Error, debug, error::error_chain, implement, info, warn};
+use tuwunel_core::{Error, debug, debug_info, error::error_chain, implement, warn};
 
 use super::{
 	NewEvents, RetryAction, SendingFutures, TransactionStatus, TransactionStatuses, WakeQueue,
@@ -77,7 +77,7 @@ fn log_recovery(dest: &Destination, statuses: &TransactionStatuses) {
 	) = statuses.get(dest)
 		&& tries > 0
 	{
-		info!(?dest, streak = tries, "Transaction delivered after failures");
+		debug_info!(?dest, streak = tries, "Transaction delivered after failures");
 	}
 }
 
