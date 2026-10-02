@@ -323,8 +323,8 @@ where
 
 /// Collects the full auth chain for one fork branch.
 ///
-/// The ids are distinct as [`AuthSet::from_distinct`] requires: the chain
-/// walk dedups short ids and the short-to-event-id mapping is injective.
+/// The chain walk dedups short ids, so the ids are distinct unless a damaged
+/// short-id mapping repeats one, which the auth difference counts once.
 /// Iteration order is arbitrary.
 #[implement(super::Service)]
 pub(super) async fn fork_chain<'a, Events>(

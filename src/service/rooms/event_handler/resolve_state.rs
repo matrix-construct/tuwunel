@@ -65,8 +65,8 @@ pub async fn resolve_state(
 		.iter()
 		.try_stream()
 		.wide_and_then(|state| {
-			// The chain walk dedups short ids and maps them injectively, so
-			// the collected ids are distinct as `from_distinct` requires.
+			// The chain walk dedups short ids, so these are distinct unless a damaged
+			// short-id mapping repeats one, which the auth difference counts once.
 			self.services
 				.auth_chain
 				.event_ids_iter(room_id, room_version, state.values().map(Borrow::borrow))

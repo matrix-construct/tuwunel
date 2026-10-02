@@ -35,6 +35,7 @@ use tuwunel_core::{
 
 use super::{
 	AuthSet, ConflictMap, ConflictedSet, StateMap,
+	auth_difference::auth_difference,
 	power_sort::{
 		add_event_auth_chain, is_power_event_id, power_level_for_sender, power_sort as sort_power,
 	},
@@ -901,14 +902,24 @@ fn auth_set_from_iter_deduplicates() {
 
 // `auth_difference` returns events in fewer than every input chain
 // (∪Cᵢ - ∩Cᵢ), per the v2 state-res spec.
+#[tokio::test]
+async fn auth_difference_counts_repeated_ids_once_per_set() {
+	let result = auth_difference_result([
+		AuthSet::from_distinct(vec![event_id("e"), event_id("e"), event_id("f")]),
+		auth_set(&["f"]),
+	])
+	.await;
+
+	assert_eq!(result, [event_id("e")]);
+}
 
 fn auth_set(ids: &[&str]) -> AuthSet<OwnedEventId> { ids.iter().copied().map(event_id).collect() }
 
-async fn auth_difference_result(sets: Vec<AuthSet<OwnedEventId>>) -> Vec<OwnedEventId> {
-	let mut out: Vec<OwnedEventId> =
-		super::auth_difference::auth_difference(sets.into_iter().stream())
-			.collect()
-			.await;
+async fn auth_difference_result(
+	sets: impl IntoIterator<Item = AuthSet<OwnedEventId>, IntoIter: Send> + Send,
+) -> Vec<OwnedEventId> {
+	let mut out: Vec<OwnedEventId> = auth_difference(sets.stream()).collect().await;
+
 	out.sort();
 	out
 }
@@ -917,41 +928,41 @@ async fn auth_difference_result(sets: Vec<AuthSet<OwnedEventId>>) -> Vec<OwnedEv
 async fn auth_difference_three_sets_partial_overlap() {
 	// `a` is in all three sets so it is excluded; the other three are each
 	// missing from one set so they make up the difference.
-	let result = auth_difference_result(vec![
+	let result = auth_difference_result([
 		auth_set(&["a", "b", "c"]),
 		auth_set(&["a", "b", "d"]),
 		auth_set(&["a", "c", "d"]),
 	])
 	.await;
 
-	assert_eq!(result, vec![event_id("b"), event_id("c"), event_id("d")]);
+	assert_eq!(result, [event_id("b"), event_id("c"), event_id("d")]);
 }
 
 #[tokio::test]
 async fn auth_difference_three_sets_full_overlap() {
 	let result =
-		auth_difference_result(vec![auth_set(&["a"]), auth_set(&["a"]), auth_set(&["a"])]).await;
+		auth_difference_result([auth_set(&["a"]), auth_set(&["a"]), auth_set(&["a"])]).await;
 
 	assert!(result.is_empty(), "{result:?}");
 }
 
 #[tokio::test]
 async fn auth_difference_two_sets() {
-	let result = auth_difference_result(vec![auth_set(&["a", "b"]), auth_set(&["a", "c"])]).await;
+	let result = auth_difference_result([auth_set(&["a", "b"]), auth_set(&["a", "c"])]).await;
 
-	assert_eq!(result, vec![event_id("b"), event_id("c")]);
+	assert_eq!(result, [event_id("b"), event_id("c")]);
 }
 
 #[tokio::test]
 async fn auth_difference_no_sets() {
-	let result = auth_difference_result(vec![]).await;
+	let result = auth_difference_result([]).await;
 
 	assert!(result.is_empty(), "{result:?}");
 }
 
 #[tokio::test]
 async fn auth_difference_single_set() {
-	let result = auth_difference_result(vec![auth_set(&["a", "b", "c"])]).await;
+	let result = auth_difference_result([auth_set(&["a", "b", "c"])]).await;
 
 	assert!(result.is_empty(), "{result:?}");
 }

@@ -1,4 +1,4 @@
-use std::{cell::Cell, fmt::Debug, iter::repeat_with, sync::Arc};
+use std::{cell::Cell, fmt::Debug, iter::repeat_with, ops::RangeInclusive, sync::Arc};
 
 use futures::future::ready;
 use tuwunel_core::{
@@ -10,10 +10,15 @@ use tuwunel_core::{
 use tuwunel_database::{Database, Txn, TxnError};
 
 use super::{
-	Boundary, IDENTITY_LIMIT, MARKER, Outcome, Reason, SAMPLE_LIMIT, Sample, Shape, Status, run,
-	stamp,
+	Boundary, IDENTITY_LIMIT, MARKER, Outcome, Reason, SAMPLE_LIMIT, Sample, Shape, Status,
+	identity::{Kind, census as identity_census, repair as repair_identities},
+	references::{References, entries},
+	run, stamp,
 };
 use crate::test_utils::fixture;
+
+const EVENTS: (&str, &str) = ("eventid_shorteventid", "shorteventid_eventid");
+const STATEKEYS: (&str, &str) = ("statekey_shortstatekey", "shortstatekey_statekey");
 
 #[tokio::test]
 async fn runner_contains_errors_and_honors_only_its_marker() -> Result {
@@ -99,6 +104,225 @@ async fn runner_contains_errors_and_honors_only_its_marker() -> Result {
 }
 
 #[test]
+fn reference_framing_is_checked_before_absence() {
+	let row = words(&[0, 9, 10, 0, 11, 12]);
+
+	assert_eq!(entries(&row).collect::<Result<Vec<_>>>().unwrap(), [(9, 10), (11, 12)]);
+	for malformed in [words(&[0, 0]), words(&[0, 9]), words(&[0, 0, 0, 10]), vec![0; 7]] {
+		entries(&malformed)
+			.collect::<Result<Vec<_>>>()
+			.expect_err("malformed framing cannot prove absence");
+	}
+}
+
+#[tokio::test]
+#[tracing::instrument(level = "trace", skip_all)]
+async fn identity_heals_and_cleanup_are_candidate_scoped() -> Result {
+	let Some(fixture) = fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+
+	let services = &fixture.services;
+	let db = &services.db;
+	let event_id = |name| format!("${name}:example.org");
+	let aliases = [(112_u64, 113_u64, "disagree"), (114, 115, "claimed")];
+
+	db["eventid_shorteventid"].insert(&event_id("dangling"), 101_u64.to_be_bytes());
+	db["shorteventid_eventid"].insert(&102_u64.to_be_bytes(), event_id("promote"));
+	db["eventid_shorteventid"].insert(&event_id("alias"), 103_u64.to_be_bytes());
+	db["shorteventid_eventid"].insert(&103_u64.to_be_bytes(), event_id("alias"));
+	db["shorteventid_eventid"].insert(&104_u64.to_be_bytes(), event_id("alias"));
+	db["shorteventid_eventid"].insert(&105_u64.to_be_bytes(), event_id("ambiguous"));
+	db["shorteventid_eventid"].insert(&106_u64.to_be_bytes(), event_id("ambiguous"));
+	db["eventid_shorteventid"].insert(&event_id("other"), 106_u64.to_be_bytes());
+	db["eventid_shorteventid"].insert(&event_id("zero"), 0_u64.to_be_bytes());
+	db["eventid_shorteventid"].insert(&event_id("double1"), 111_u64.to_be_bytes());
+	db["eventid_shorteventid"].insert(&event_id("double2"), 111_u64.to_be_bytes());
+	for (loser, winner, name) in aliases {
+		db["eventid_shorteventid"].insert(&event_id(name), winner.to_be_bytes());
+		db["shorteventid_eventid"].insert(&loser.to_be_bytes(), event_id(name));
+		db["shorteventid_eventid"].insert(&winner.to_be_bytes(), event_id(name));
+	}
+
+	db["shorteventid_eventid"].insert(&113_u64.to_be_bytes(), event_id("wrong"));
+	db["eventid_shorteventid"].insert(&event_id("additional"), 115_u64.to_be_bytes());
+	db["statekey_shortstatekey"].insert(b"m.room.name\xff", 202_u64.to_be_bytes());
+	db["statekey_shortstatekey"].insert(b"invalid", b"malformed");
+	db["shortstatekey_statekey"].insert(&201_u64.to_be_bytes(), b"invalid");
+	db["global"].insert("fix_short_injectivity", []);
+	db["global"].insert("clear_auth_chain_cache", []);
+	db["authchainkey_authchain"].insert(&104_u64.to_be_bytes(), 104_u64.to_be_bytes());
+	let retained_forward = db["statekey_shortstatekey"]
+		.get(b"invalid")
+		.await?
+		.to_vec();
+
+	let retained_reverse = db["shortstatekey_statekey"]
+		.get(&201_u64.to_be_bytes())
+		.await?
+		.to_vec();
+
+	let identities = repair_identities(services).await?;
+
+	assert_stored(db, "shorteventid_eventid", &101_u64.to_be_bytes(), event_id("dangling"))
+		.await?;
+
+	assert_stored(db, "eventid_shorteventid", &event_id("promote"), 102_u64.to_be_bytes())
+		.await?;
+
+	assert_absent(db, "shorteventid_eventid", &104_u64.to_be_bytes(), "unused alias deleted")
+		.await;
+
+	assert_absent(db, "eventid_shorteventid", &event_id("ambiguous"), "all reverse claims count")
+		.await;
+
+	assert_absent(db, "shorteventid_eventid", &0_u64.to_be_bytes(), "zero never healed").await;
+	assert_stored(db, "statekey_shortstatekey", b"invalid", &retained_forward).await?;
+	assert_stored(db, "shortstatekey_statekey", &201_u64.to_be_bytes(), &retained_reverse)
+		.await?;
+
+	assert!(identities.statekeys.malformed > 0);
+	assert_stored(db, "shortstatekey_statekey", &202_u64.to_be_bytes(), b"m.room.name\xff")
+		.await?;
+
+	assert_absent(
+		db,
+		"shorteventid_eventid",
+		&111_u64.to_be_bytes(),
+		"ambiguous forward claim never healed",
+	)
+	.await;
+
+	for (loser, _, name) in aliases {
+		assert_stored(db, "shorteventid_eventid", &loser.to_be_bytes(), event_id(name)).await?;
+	}
+
+	assert!(
+		identities
+			.events
+			.candidates
+			.iter()
+			.any(|candidate| candidate.short == 105)
+	);
+
+	assert_absent(
+		db,
+		"authchainkey_authchain",
+		&104_u64.to_be_bytes(),
+		"old-stamped cache cleared",
+	)
+	.await;
+
+	assert_absent(db, "global", MARKER, "partial repair does not stamp").await;
+
+	Ok(())
+}
+
+#[tokio::test]
+#[tracing::instrument(level = "trace", skip_all)]
+async fn each_alias_residence_protects_its_reverse_row() -> Result {
+	let Some(fixture) = fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+
+	let services = &fixture.services;
+	let db = &services.db;
+	let event_id = |short: u64| format!("$residence{short}:example.org");
+	let statekey = |short: u64| {
+		[b"m.room.member\xff".as_slice(), format!("@{short}:example.org").as_bytes()].concat()
+	};
+
+	seed_aliases(db, EVENTS, 301..=307, event_id);
+	seed_aliases(db, STATEKEYS, 501..=502, statekey);
+	db["shortstatehash_statediff"]
+		.insert(&701_u64.to_be_bytes(), words(&[0, 501, 301, 0, 502, 302]));
+
+	db["shorteventid_shortstatehash"].insert(&303_u64.to_be_bytes(), 701_u64.to_be_bytes());
+	let relation = relation_key();
+
+	db["relatesto_typed"].insert(&relation, 304_u64.to_be_bytes());
+	db["authchainkey_authchain"].insert(&305_u64.to_be_bytes(), 306_u64.to_be_bytes());
+	let identities = identity_census(services).await?;
+	let references = References::census(services, &identities).await?;
+
+	assert!(references.events.contains(&305));
+	assert!(references.events.contains(&306));
+	let identities = repair_identities(services).await?;
+
+	for short in 301_u64..=304 {
+		assert_stored(db, "shorteventid_eventid", &short.to_be_bytes(), event_id(short)).await?;
+	}
+
+	for short in 305_u64..=307 {
+		assert_absent(
+			db,
+			"shorteventid_eventid",
+			&short.to_be_bytes(),
+			"cache refs durably removed or alias unused",
+		)
+		.await;
+	}
+
+	for short in 501_u64..=502 {
+		assert_stored(db, "shortstatekey_statekey", &short.to_be_bytes(), statekey(short))
+			.await?;
+	}
+
+	assert!(
+		identities
+			.events
+			.candidates
+			.iter()
+			.any(|candidate| matches!(candidate.kind, Kind::Alias(_)))
+	);
+
+	seed_aliases(db, EVENTS, 308..=310, event_id);
+	seed_aliases(db, STATEKEYS, 503..=504, statekey);
+	let malformed_key_state = words(&[0, 503, 308]);
+
+	db["shortstatehash_statediff"].insert(b"malformed_hash", &malformed_key_state);
+	db["relatesto_typed"].insert(b"malformed_key", 309_u64.to_be_bytes());
+	repair_identities(services).await?;
+	for short in [308_u64, 309] {
+		assert_stored(db, "shorteventid_eventid", &short.to_be_bytes(), event_id(short)).await?;
+	}
+
+	assert_absent(
+		db,
+		"shorteventid_eventid",
+		&310_u64.to_be_bytes(),
+		"unrelated event alias deleted",
+	)
+	.await;
+
+	assert_stored(db, "shortstatekey_statekey", &503_u64.to_be_bytes(), statekey(503)).await?;
+	assert_absent(
+		db,
+		"shortstatekey_statekey",
+		&504_u64.to_be_bytes(),
+		"unrelated statekey alias deleted",
+	)
+	.await;
+
+	assert_stored(db, "shortstatehash_statediff", b"malformed_hash", &malformed_key_state)
+		.await?;
+
+	assert_stored(db, "relatesto_typed", b"malformed_key", 309_u64.to_be_bytes()).await?;
+	db["shorteventid_eventid"].insert(&311_u64.to_be_bytes(), event_id(311));
+	db["eventid_shorteventid"].insert(&event_id(311), 411_u64.to_be_bytes());
+	db["shorteventid_eventid"].insert(&411_u64.to_be_bytes(), event_id(311));
+	db["relatesto_typed"].insert(b"malformed", b"malformed");
+	let identities = repair_identities(services).await?;
+	let references = References::census(services, &identities).await?;
+
+	assert!(!references.event_complete);
+	assert!(references.statekey_complete);
+	assert_stored(db, "shorteventid_eventid", &311_u64.to_be_bytes(), event_id(311)).await?;
+
+	Ok(())
+}
+
+#[test]
 fn marker_decode_contract() -> Result {
 	let clean = Outcome::clean();
 	let bytes = clean.encode()?;
@@ -153,6 +377,79 @@ fn marker_decode_contract() -> Result {
 	Ok(())
 }
 
+#[tokio::test]
+#[tracing::instrument(level = "trace", skip_all)]
+async fn malformed_forward_value_prefixes_withhold_identity_writes() -> Result {
+	let Some(fixture) = fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+
+	let services = &fixture.services;
+	let db = &services.db;
+	let hidden = |short: u64| format!("$hidden{short}:example.org");
+	let claimants = [601_u64, 602, 603, 606];
+	let aliases = [
+		(603_u64, 604_u64, b"$loser:example.org".as_slice()),
+		(605, 606, b"$winner:example.org"),
+	];
+
+	db["eventid_shorteventid"].insert(b"$dangling:example.org", words(&[601]));
+	db["shorteventid_eventid"].insert(&602_u64.to_be_bytes(), b"$promote:example.org");
+	for (loser, winner, event_id) in aliases {
+		db["eventid_shorteventid"].insert(event_id, words(&[winner]));
+		db["shorteventid_eventid"].insert(&winner.to_be_bytes(), event_id);
+		db["shorteventid_eventid"].insert(&loser.to_be_bytes(), event_id);
+	}
+
+	for short in claimants {
+		db["eventid_shorteventid"].insert(&hidden(short), [words(&[short]), vec![99]].concat());
+	}
+
+	repair_identities(services).await?;
+	assert_absent(
+		db,
+		"shorteventid_eventid",
+		&601_u64.to_be_bytes(),
+		"extra prefix claimant withholds the dangling winner heal",
+	)
+	.await;
+
+	assert_absent(
+		db,
+		"eventid_shorteventid",
+		b"$promote:example.org",
+		"prefix claimant withholds the reverse row promotion",
+	)
+	.await;
+
+	for (loser, _, event_id) in aliases {
+		assert_stored(db, "shorteventid_eventid", &loser.to_be_bytes(), event_id).await?;
+	}
+
+	for short in claimants {
+		db["eventid_shorteventid"].remove(&hidden(short));
+	}
+
+	repair_identities(services).await?;
+	assert_stored(db, "shorteventid_eventid", &601_u64.to_be_bytes(), b"$dangling:example.org")
+		.await?;
+
+	assert_stored(db, "eventid_shorteventid", b"$promote:example.org", 602_u64.to_be_bytes())
+		.await?;
+
+	for (loser, ..) in aliases {
+		assert_absent(
+			db,
+			"shorteventid_eventid",
+			&loser.to_be_bytes(),
+			"unclaimed alias deleted once the prefix claimants are gone",
+		)
+		.await;
+	}
+
+	Ok(())
+}
+
 async fn assert_absent<K>(db: &Database, map: &str, key: &K, message: &str)
 where
 	K: AsRef<[u8]> + Debug + Sync + ?Sized,
@@ -187,3 +484,47 @@ fn open_server(server: &Server, mode: &str) -> Result<Arc<Server>> {
 
 	Ok(Arc::new(server))
 }
+
+fn words(values: &[u64]) -> Vec<u8> {
+	values
+		.iter()
+		.copied()
+		.flat_map(u64::to_be_bytes)
+		.collect()
+}
+
+async fn assert_stored<K>(
+	db: &Database,
+	map: &str,
+	key: &K,
+	expected: impl AsRef<[u8]> + Send,
+) -> Result
+where
+	K: AsRef<[u8]> + Debug + Sync + ?Sized,
+{
+	let stored = db[map].get(key).await?;
+
+	assert_eq!(stored.as_ref(), expected.as_ref());
+	Ok(())
+}
+
+fn seed_aliases<I>(
+	db: &Database,
+	(forward, reverse): (&str, &str),
+	shorts: RangeInclusive<u64>,
+	identity: impl Fn(u64) -> I,
+) where
+	I: AsRef<[u8]>,
+{
+	for short in shorts {
+		let winner = short
+			.checked_add(100)
+			.expect("fixture short is bounded");
+
+		db[forward].insert(&identity(short), winner.to_be_bytes());
+		db[reverse].insert(&winner.to_be_bytes(), identity(short));
+		db[reverse].insert(&short.to_be_bytes(), identity(short));
+	}
+}
+
+fn relation_key() -> Vec<u8> { [words(&[1, 2]), vec![1], words(&[3, 4])].concat() }
