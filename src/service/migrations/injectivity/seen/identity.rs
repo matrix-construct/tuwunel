@@ -64,7 +64,7 @@ const CACHE_BATCH: usize = 64;
 
 #[tracing::instrument(level = "debug", skip_all)]
 pub(super) async fn repair(services: &Services) -> Result<Identities> {
-	clear_cache(services).await?;
+	clear_cache(services, "authchainkey_authchain").await?;
 	let identities = census(services).await?;
 	let events_healed = heal(services, &identities.events).await?;
 	let statekeys_healed = heal(services, &identities.statekeys).await?;
@@ -89,9 +89,9 @@ pub(super) async fn repair(services: &Services) -> Result<Identities> {
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
-async fn clear_cache(services: &Services) -> Result {
+pub(super) async fn clear_cache(services: &Services, column: &str) -> Result {
 	let db = &services.db;
-	let map = &db["authchainkey_authchain"];
+	let map = &db[column];
 
 	map.raw_keys()
 		.map_ok(KeyBuf::from_slice)
@@ -378,7 +378,11 @@ where
 }
 
 #[tracing::instrument(level = "trace", skip_all)]
-async fn admitted(db: &Database, family: &Family, candidate: &Candidate) -> Result<bool> {
+pub(super) async fn admitted(
+	db: &Database,
+	family: &Family,
+	candidate: &Candidate,
+) -> Result<bool> {
 	let Candidate { short, identity, kind } = candidate;
 
 	if malformed(family.forward, *short, identity) {
