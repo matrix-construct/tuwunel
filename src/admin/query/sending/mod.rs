@@ -1,6 +1,7 @@
 mod active_requests;
 mod active_requests_for;
 mod get_latest_edu_count;
+mod parked_rooms;
 mod queued_requests;
 
 use clap::Subcommand;
@@ -64,6 +65,12 @@ pub(crate) enum SendingCommand {
 	GetLatestEduCount {
 		server_name: OwnedServerName,
 	},
+
+	/// - Lists rooms held back from servers that keep rejecting them
+	///
+	/// A park whose time has passed is retried with the next transaction to
+	/// its server; its count resets once the room is delivered.
+	ParkedRooms,
 }
 
 fn parse_destination(

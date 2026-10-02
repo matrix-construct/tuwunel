@@ -55,15 +55,15 @@ const PARK_LIMIT: Duration = Duration::from_hours(24);
 /// The server's queued rows for the room are skipped until `until` passes,
 /// when the room is retried alone; a delivery ends the park.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) struct Park {
+pub struct Park {
 	/// The room's short id.
-	pub(super) room: ShortRoomId,
+	pub room: ShortRoomId,
 
 	/// When the room may be sent again, in seconds since the epoch.
-	pub(super) until: u64,
+	pub until: u64,
 
 	/// Consecutive parks without a delivery, each doubling the last.
-	pub(super) count: u64,
+	pub count: u64,
 }
 
 type ParkRow<'a> = ((&'a ServerName, ShortRoomId), (u64, u64));
@@ -423,6 +423,18 @@ pub(super) fn parks<'a>(
 		.ignore_err()
 		.map(park_row)
 		.map(at!(1))
+}
+
+/// Streams every parked room with its server, expired ones included.
+///
+/// The server is owned, so an item may be kept across polls.
+#[implement(Data)]
+pub fn parked(&self) -> impl Stream<Item = (OwnedServerName, Park)> + Send + '_ {
+	self.servershortroomid_park
+		.stream()
+		.ignore_err()
+		.map(park_row)
+		.map(|(server, park)| (server.to_owned(), park))
 }
 
 fn queue_item((key, val): (&[u8], &[u8])) -> QueueItem {

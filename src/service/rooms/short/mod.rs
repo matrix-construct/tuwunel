@@ -398,18 +398,27 @@ pub async fn get_shortroomid(&self, room_id: &RoomId) -> Result<ShortRoomId> {
 /// Unreadable rows are skipped during the scan.
 #[implement(Service)]
 pub async fn get_roomid_from_short(&self, shortroomid_: ShortRoomId) -> Result<OwnedRoomId> {
-	let stream = self
-		.db
-		.roomid_shortroomid
-		.stream()
-		.ready_filter_map(Result::ok);
+	let stream = self.iter_shortroomids();
 
 	pin_mut!(stream);
 	stream
 		.ready_find(|&(_, shortroomid)| shortroomid == shortroomid_)
-		.map(|found| found.map(|(room_id, _): (&RoomId, ShortRoomId)| room_id.to_owned()))
+		.map(|found| found.map(|(room_id, _)| room_id.to_owned()))
 		.await
 		.ok_or_else(|| err!(Database("Failed to find RoomId from {shortroomid_:?}")))
+}
+
+/// Streams every room ID with its compact identifier.
+///
+/// This scan is the only way back from a compact room identifier, so resolve
+/// several in one pass. Each borrowed ID is valid only until the next poll, and
+/// unreadable rows are skipped.
+#[implement(Service)]
+pub fn iter_shortroomids(&self) -> impl Stream<Item = (&RoomId, ShortRoomId)> + Send + '_ {
+	self.db
+		.roomid_shortroomid
+		.stream()
+		.ready_filter_map(Result::ok)
 }
 
 /// Resolves a room ID to its compact identifier, allocating after an unsuccessful lookup.

@@ -27,7 +27,7 @@ use tuwunel_core::{
 
 use self::worker::num_senders;
 pub use self::{
-	data::Data,
+	data::{Data, Park},
 	dest::Destination,
 	sender::{EDU_LIMIT, PDU_LIMIT},
 };
