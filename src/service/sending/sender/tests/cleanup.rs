@@ -50,13 +50,12 @@ async fn reused_destination_promotes_first_request_after_cleanup() -> Result {
 				.is_err_and(|error| error.is_not_found())
 		);
 
-		let new_id = pdu_id(2);
-		let successor = enqueue(sending, &dest, SendingEvent::Pdu(new_id));
+		let successor = enqueue(sending, &dest, SendingEvent::Pdu(pdu_id(2)));
 		let events = sending
 			.select_events(&dest, [successor.clone()].into(), &mut statuses)
 			.await?;
 
-		assert_eq!(events, Selection::Events(vec![SendingEvent::Pdu(new_id)]));
+		assert_eq!(events, Selection::Events(vec![successor.clone()]));
 		assert!(matches!(statuses.get(&dest), Some(TransactionStatus::Running { tries: 0 })));
 		active.exists(&successor.0).await?;
 		assert!(

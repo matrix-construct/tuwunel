@@ -25,7 +25,11 @@ use tuwunel_core::{
 	utils::BoolExt,
 };
 
-use self::{dispatch::SendingFuture, select::Selection, wake::arm_wake};
+use self::{
+	dispatch::{Completion, SendingFuture},
+	select::Selection,
+	wake::{arm_wake, is_armed},
+};
 use super::{Destination, Msg, SendingEvent, Service, data::QueueItem};
 
 /// In-flight bookkeeping for one `Destination`.
@@ -187,19 +191,11 @@ async fn handle_request<'a>(
 				.await,
 	};
 
-	match self
+	if let Ok(selection) = self
 		.select_events(&msg.dest, new_events, statuses)
 		.await
 	{
-		| Ok(Selection::Events(events)) =>
-			self.schedule_events(msg.dest, events, futures, statuses),
-		| Ok(Selection::Refused { earliest_retry })
-			if wakes
-				.iter()
-				.any(|Reverse((_, dest))| dest == &msg.dest)
-				.is_false() =>
-			arm_wake(wakes, msg.dest, earliest_retry),
-		| _ => {},
+		self.schedule_events(msg.dest, selection, futures, statuses, wakes);
 	}
 }
 
@@ -211,14 +207,19 @@ async fn handle_request<'a>(
 fn schedule_events<'a>(
 	&'a self,
 	dest: Destination,
-	events: Vec<SendingEvent>,
+	selection: Selection,
 	futures: &mut SendingFutures<'a>,
 	statuses: &mut TransactionStatuses,
+	wakes: &mut WakeQueue,
 ) {
-	if events.is_empty() {
-		statuses.remove(&dest);
-	} else {
-		futures.push(self.send_events(dest, events));
+	match selection {
+		| Selection::Events(items) if items.is_empty() => {
+			statuses.remove(&dest);
+		},
+		| Selection::Events(items) => futures.push(self.send_events(dest, items)),
+		| Selection::Refused { earliest_retry } if is_armed(wakes, &dest).is_false() =>
+			arm_wake(wakes, dest, earliest_retry),
+		| Selection::Refused { .. } | Selection::Busy => {},
 	}
 }
 
@@ -241,7 +242,8 @@ async fn finish_responses<'a>(&'a self, futures: &mut SendingFutures<'a>) {
 		select! {
 			() = sleep_until(deadline) => return,
 			response = futures.next() => match response {
-				Some(Ok(dest)) => self.db.delete_all_active_requests_for(&dest).await,
+				Some(Completion { result: Ok(_), keys, .. }) =>
+					self.db.delete_active_requests(&keys),
 				Some(_) => {},
 				None => return,
 			},

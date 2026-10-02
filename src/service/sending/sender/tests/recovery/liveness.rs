@@ -6,7 +6,8 @@ use serde_json::Value;
 use tuwunel_core::{Error, Result};
 
 use super::{
-	SendingFutures, TransactionStatus, TransactionStatuses, WakeQueue, enqueue, fixture, pdu_id,
+	SendingFutures, TransactionStatus, TransactionStatuses, WakeQueue, completion, enqueue,
+	fixture, pdu_id,
 };
 use crate::{
 	federation::Classification,
@@ -40,7 +41,7 @@ async fn inbound_admission_and_delayed_consumption_preserve_stalled_lifecycle() 
 	let response = || {
 		let rejection = ErrorBody::Json(Value::Null).into_error(StatusCode::FORBIDDEN);
 
-		Err((dest.clone(), Error::Federation(server.clone(), rejection)))
+		completion(Err((dest.clone(), Error::Federation(server.clone(), rejection))))
 	};
 
 	sending

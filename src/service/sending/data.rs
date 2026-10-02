@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests;
 
-use std::{fmt::Debug, pin::pin, sync::Arc};
+use std::{fmt::Debug, pin::pin, sync::Arc, vec};
 
 use futures::{
 	Stream, StreamExt,
@@ -31,6 +31,7 @@ pub(super) type SendingItem = (Key, SendingEvent);
 /// An empty key marks a synthetic wake that has no durable row.
 pub(super) type QueueItem = (Key, SendingEvent);
 pub(super) type Key = Vec<u8>;
+pub(super) type Keys = Vec<Key>;
 
 /// The sending service's column families.
 ///
@@ -64,15 +65,21 @@ pub(super) fn delete_active_request(&self, key: &[u8]) {
 	self.servercurrentevent_data.remove(key);
 }
 
+/// Acknowledges the active rows one transaction carried.
+///
+/// Empty keys mark synthetic events, which have no row.
 #[implement(Data)]
-pub(super) async fn delete_all_active_requests_for(&self, destination: &Destination) {
-	let prefix = destination.get_prefix();
-
-	self.servercurrentevent_data
-		.raw_keys_prefix(&prefix)
-		.ignore_err()
-		.ready_for_each(|key| self.servercurrentevent_data.remove(key))
-		.await;
+pub(super) fn delete_active_requests<'a, I>(&self, keys: I)
+where
+	I: IntoIterator<Item = &'a Key>,
+{
+	keys.into_iter()
+		.filter(|key| !key.is_empty())
+		.fold(self.db.txn(), |mut txn, key| {
+			txn.del_raw(&self.servercurrentevent_data, key);
+			txn
+		})
+		.execute();
 }
 
 #[implement(Data)]
@@ -109,9 +116,14 @@ where
 
 /// Write composed EDUs straight into the active set, keyed by fresh counts.
 ///
-/// Unlike `mark_as_active` there is no queue row to delete.
+/// Unlike `mark_as_active` there is no queue row to delete. Yields the new
+/// keys in `edus` order for the transaction to acknowledge.
 #[implement(Data)]
-pub(super) fn persist_active_edus(&self, server: &ServerName, edus: &[EduBuf]) {
+pub(super) fn persist_active_edus(
+	&self,
+	server: &ServerName,
+	edus: &[EduBuf],
+) -> vec::IntoIter<Key> {
 	let dest = Destination::Federation(server.to_owned());
 
 	// The permits retire their counts only once the rows have landed.
@@ -120,12 +132,19 @@ pub(super) fn persist_active_edus(&self, server: &ServerName, edus: &[EduBuf]) {
 		.map(|_| self.services.globals.next_count())
 		.collect();
 
-	let items = permits
+	let keys: Keys = permits
 		.iter()
-		.zip(edus)
-		.map(|(permit, edu)| (dest.count_key(**permit), edu.as_slice()));
+		.map(|permit| dest.count_key(**permit))
+		.collect();
+
+	let items = keys
+		.iter()
+		.map(Vec::as_slice)
+		.zip(edus.iter().map(EduBuf::as_slice));
 
 	Txn::insert(&self.servercurrentevent_data, items).execute();
+
+	keys.into_iter()
 }
 
 /// Streams every active row across all destinations.
@@ -162,21 +181,16 @@ pub fn active_requests_for(
 		.raw_stream_from(&prefix)
 		.ignore_err()
 		.ready_take_while(move |(key, _)| key.starts_with(&prefix))
-		.map(|(key, val)| {
-			let (_, event) =
-				parse_servercurrentevent(key, val).expect("invalid servercurrentevent");
-
-			(key.to_vec(), event)
-		})
+		.map(queue_item)
 }
 
 #[implement(Data)]
-pub(super) fn queue_requests<'a, I>(&self, requests: I) -> Vec<Key>
+pub(super) fn queue_requests<'a, I>(&self, requests: I) -> Keys
 where
 	I: Iterator<Item = (&'a SendingEvent, &'a Destination)> + Clone + Debug + Send,
 {
 	// The permits retire their counts only once the rows have landed.
-	let (keys, _permits): (Vec<Key>, Vec<_>) = requests
+	let (keys, _permits): (Keys, Vec<_>) = requests
 		.clone()
 		.map(|(event, dest)| match event {
 			| SendingEvent::Pdu(pdu_id) => (dest.event_key(pdu_id), None),
@@ -240,12 +254,13 @@ pub fn queued_requests(
 		.raw_stream_from(&prefix)
 		.ignore_err()
 		.ready_take_while(move |(key, _)| key.starts_with(&prefix))
-		.map(|(key, val)| {
-			let (_, event) =
-				parse_servercurrentevent(key, val).expect("invalid servercurrentevent");
+		.map(queue_item)
+}
 
-			(key.to_vec(), event)
-		})
+fn queue_item((key, val): (&[u8], &[u8])) -> QueueItem {
+	let (_, event) = parse_servercurrentevent(key, val).expect("invalid servercurrentevent");
+
+	(key.to_vec(), event)
 }
 
 /// Streams queued push destinations with a pending badge refresh.

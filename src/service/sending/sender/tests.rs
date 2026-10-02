@@ -7,18 +7,23 @@ mod startup;
 
 use std::iter::once;
 
+use futures::StreamExt;
 use http::StatusCode;
 use ruma::{OwnedServerName, api::error::ErrorBody};
 use serde_json::Value;
-use tuwunel_core::{Error, Result};
+use tuwunel_core::{Err, Error, Result};
 
 use self::fixture::fixture;
 use super::{
 	NewEvents, SendingFutures, TransactionStatus, TransactionStatuses, WakeQueue,
+	dispatch::{Completion, SendingResult},
 	select::Selection,
 };
 use crate::{
-	sending::{Destination, SendingEvent, Service, data::QueueItem},
+	sending::{
+		Destination, SendingEvent, Service,
+		data::{Keys, QueueItem},
+	},
 	test_utils::pdu_id,
 };
 
@@ -59,7 +64,7 @@ async fn restart_replays_active_before_queued_successors() -> Result {
 			.select_events(&dest, payload(), &mut statuses)
 			.await?;
 
-		assert_eq!(events, Selection::Events(vec![SendingEvent::Pdu(old_id)]));
+		assert_eq!(events, Selection::Events(vec![old.clone()]));
 		assert!(matches!(statuses.get(&dest), Some(TransactionStatus::Running { tries: 0 })));
 		assert!(
 			sending
@@ -72,7 +77,12 @@ async fn restart_replays_active_before_queued_successors() -> Result {
 		active.exists(&old.0).await?;
 
 		sending
-			.handle_response_ok(dest, &mut futures, &mut statuses)
+			.handle_response(
+				delivered(&dest, vec![old.0.clone()]),
+				&mut futures,
+				&mut statuses,
+				&mut WakeQueue::new(),
+			)
 			.await;
 
 		assert_eq!(futures.len(), 1);
@@ -135,7 +145,7 @@ async fn restart_retains_the_configured_active_limit() -> Result {
 		.select_events(&dest, NewEvents::new(), &mut statuses)
 		.await?;
 
-	assert_eq!(events, Selection::Events(vec![SendingEvent::Pdu(first_id)]));
+	assert_eq!(events, Selection::Events(vec![first]));
 
 	Ok(())
 }
@@ -233,7 +243,7 @@ async fn failure_streak_survives_replays() -> Result {
 			.select_events(&dest, [queued].into(), &mut statuses)
 			.await?;
 
-		assert!(matches!(events, Selection::Events(events) if events.contains(&head)));
+		assert!(matches!(events, Selection::Events(items) if carries(&items, &head)));
 		assert!(matches!(
 			statuses.get(&dest),
 			Some(&TransactionStatus::Running { tries }) if tries == before
@@ -243,7 +253,7 @@ async fn failure_streak_survives_replays() -> Result {
 		let rejected = Err((dest.clone(), Error::Federation(server.clone(), rejection)));
 
 		sending
-			.handle_response(rejected, &mut futures, &mut statuses, &mut wakes)
+			.handle_response(completion(rejected), &mut futures, &mut statuses, &mut wakes)
 			.await;
 
 		assert!(matches!(
@@ -252,23 +262,35 @@ async fn failure_streak_survives_replays() -> Result {
 		));
 	}
 
-	let events = sending
+	let Selection::Events(items) = sending
 		.select_events(&dest, NewEvents::new(), &mut statuses)
-		.await?;
+		.await?
+	else {
+		return Err!("the rejected batch replays");
+	};
 
-	assert!(matches!(events, Selection::Events(events) if events.contains(&head)));
+	assert!(carries(&items, &head));
 	assert!(matches!(statuses.get(&dest), Some(TransactionStatus::Running { tries: 3 })));
 
+	let keys = items.into_iter().map(|(key, _)| key).collect();
+
 	sending
-		.handle_response(Ok(dest.clone()), &mut futures, &mut statuses, &mut wakes)
+		.handle_response(delivered(&dest, keys), &mut futures, &mut statuses, &mut wakes)
 		.await;
 
+	let active: Vec<_> = sending
+		.db
+		.active_requests_for(&dest)
+		.collect()
+		.await;
+
+	assert!(!carries(&active, &head));
 	assert!(matches!(statuses.get(&dest), Some(TransactionStatus::Running { tries: 0 })));
 
 	Ok(())
 }
 
-fn enqueue(sending: &Service, dest: &Destination, event: SendingEvent) -> QueueItem {
+pub(super) fn enqueue(sending: &Service, dest: &Destination, event: SendingEvent) -> QueueItem {
 	let key = sending
 		.db
 		.queue_requests(once((&event, dest)))
@@ -277,3 +299,13 @@ fn enqueue(sending: &Service, dest: &Destination, event: SendingEvent) -> QueueI
 
 	(key, event)
 }
+
+pub(super) fn delivered(dest: &Destination, keys: Keys) -> Completion {
+	Completion { keys, ..completion(Ok(dest.clone())) }
+}
+
+fn carries(items: &[QueueItem], event: &SendingEvent) -> bool {
+	items.iter().any(|(_, carried)| carried == event)
+}
+
+fn completion(result: SendingResult) -> Completion { Completion { result, keys: Keys::new() } }

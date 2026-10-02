@@ -3,7 +3,7 @@ mod presence;
 mod receipts;
 
 use std::{
-	iter::once,
+	iter::repeat_with,
 	sync::atomic::{AtomicU64, AtomicUsize, Ordering},
 	time::SystemTime,
 };
@@ -20,7 +20,10 @@ use super::{
 };
 use crate::{
 	federation::ShouldAttempt,
-	sending::{Destination, EduBuf, EduVec, SendingEvent, Service},
+	sending::{
+		Destination, EduBuf, EduVec, SendingEvent, Service,
+		data::{Key, QueueItem},
+	},
 };
 
 /// Output of one EDU selector.
@@ -35,7 +38,7 @@ struct Selected {
 
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum Selection {
-	Events(Vec<SendingEvent>),
+	Events(Vec<QueueItem>),
 	Busy,
 	Refused {
 		earliest_retry: SystemTime,
@@ -104,12 +107,7 @@ pub(super) async fn select_events(
 	};
 
 	if retry {
-		let active: Vec<_> = self
-			.db
-			.active_requests_for(dest)
-			.map(|(_, event)| event)
-			.collect()
-			.await;
+		let active: Vec<_> = self.db.active_requests_for(dest).collect().await;
 
 		if !active.is_empty() {
 			return Ok(Selection::Events(active));
@@ -117,21 +115,10 @@ pub(super) async fn select_events(
 	}
 
 	let _cork = self.db.db.cork();
-	let events = self
-		.db
-		.retain_queued(new_events)
-		.inspect(|item| self.db.mark_as_active(once(item)))
-		.ready_filter_map(|(_, event)| {
-			matches!(event, SendingEvent::Flush)
-				.is_false()
-				.then_some(event)
-		})
-		.collect()
-		.await;
+	let items = self.claim_new(new_events).await;
+	let items = self.with_edus(dest, items).await;
 
-	let events = self.with_edus(dest, events).await;
-
-	Ok(Selection::Events(events))
+	Ok(Selection::Events(items))
 }
 
 #[implement(Service)]
@@ -152,12 +139,18 @@ async fn select_events_current(
 		return Current::Refused { earliest_retry };
 	}
 
-	if let Some(status) = statuses.get_mut(dest) {
-		return self.transition(dest, status, retry_action);
+	let Some(status) = statuses.get_mut(dest) else {
+		statuses.insert(dest.clone(), TransactionStatus::Running { tries: 0 });
+		return Current::Ready { replay: false };
+	};
+
+	let current = self.transition(dest, status, retry_action);
+
+	if matches!(current, Current::Ready { replay: true }) {
+		self.clear_stalled(dest);
 	}
 
-	statuses.insert(dest.clone(), TransactionStatus::Running { tries: 0 });
-	Current::Ready { replay: false }
+	current
 }
 
 /// Advance a destination's status for a new selection.
@@ -196,12 +189,10 @@ fn transition(
 		},
 		| TransactionStatus::Pending => {
 			*status = TransactionStatus::Running { tries: 0 };
-			self.clear_stalled(dest);
 			Current::Ready { replay: true }
 		},
 		| TransactionStatus::Retrying { tries } => {
 			*status = TransactionStatus::Running { tries: *tries };
-			self.clear_stalled(dest);
 			Current::Ready { replay: true }
 		},
 	}
@@ -217,23 +208,41 @@ fn clear_stalled(&self, dest: &Destination) {
 	}
 }
 
+/// Claim a request's own queue rows.
+///
+/// Flush markers carry no row and are dropped; the claimed rows turn active
+/// in one batch.
+#[implement(Service)]
+async fn claim_new(&self, new_events: NewEvents) -> Vec<QueueItem> {
+	let items: Vec<_> = self
+		.db
+		.retain_queued(new_events)
+		.ready_filter(|(_, event)| matches!(event, SendingEvent::Flush).is_false())
+		.collect()
+		.await;
+
+	self.db.mark_as_active(items.iter());
+	items
+}
+
 /// Top up a federation transaction with the EDUs accrued since its last window.
 ///
-/// Other destinations pass through unchanged.
+/// An empty transaction first claims the head of the queue; other destinations
+/// pass through unchanged.
 #[implement(Service)]
 pub(super) async fn with_edus(
 	&self,
 	dest: &Destination,
-	events: Vec<SendingEvent>,
-) -> Vec<SendingEvent> {
+	items: Vec<QueueItem>,
+) -> Vec<QueueItem> {
 	let Destination::Federation(server_name) = dest else {
-		return events;
+		return items;
 	};
 
-	let events = if events.is_empty() {
+	let items = if items.is_empty() {
 		self.resume_queued(dest).await
 	} else {
-		events
+		items
 	};
 
 	// Fresh signing keys must not overtake an older queued signing update.
@@ -245,45 +254,42 @@ pub(super) async fn with_edus(
 		.await
 		.ne(&0)
 	{
-		return events;
+		return items;
 	}
 
-	let budget_used = events
+	let budget_used = items
 		.iter()
-		.filter(|event| matches!(event, SendingEvent::Edu(_)))
+		.filter(|(_, event)| matches!(event, SendingEvent::Edu(_)))
 		.count();
 
-	let edus = self
-		.select_edus(server_name, budget_used)
-		.await
-		.unwrap_or_default();
+	let edus = self.select_edus(server_name, budget_used).await;
 
-	append_edus(events, edus)
+	append_edus(items, edus)
 }
 
-fn append_edus(mut events: Vec<SendingEvent>, edus: EduVec) -> Vec<SendingEvent> {
-	events.extend(edus.into_iter().map(SendingEvent::Edu));
-	events
+fn append_edus(
+	mut items: Vec<QueueItem>,
+	edus: impl Iterator<Item = QueueItem>,
+) -> Vec<QueueItem> {
+	items.extend(edus);
+	items
 }
 
+/// Claim the head of a destination's queue as its next transaction.
+///
+/// The claimed rows turn active in one batch.
 #[implement(Service)]
 #[tracing::instrument(level = "trace", skip_all)]
-async fn resume_queued(&self, dest: &Destination) -> Vec<SendingEvent> {
-	let queued: NewEvents = self
+pub(super) async fn resume_queued(&self, dest: &Destination) -> Vec<QueueItem> {
+	let queued: Vec<_> = self
 		.db
 		.queued_requests(dest)
 		.take(DEQUEUE_LIMIT)
 		.collect()
 		.await;
 
-	if !queued.is_empty() {
-		self.db.mark_as_active(queued.iter());
-	}
-
+	self.db.mark_as_active(queued.iter());
 	queued
-		.into_iter()
-		.map(|(_, event)| event)
-		.collect()
 }
 
 #[implement(Service)]
@@ -292,13 +298,13 @@ pub(super) async fn select_edus(
 	&self,
 	server_name: &ServerName,
 	budget_used: usize,
-) -> Result<EduVec> {
+) -> impl Iterator<Item = QueueItem> {
 	let since = self.db.get_latest_educount(server_name).await;
 	let since_upper = self.services.globals.current_count();
 
 	// Nothing new since the last window: skip the scan and the watermark.
 	if since == since_upper {
-		return Ok(EduVec::new());
+		return keyed(Vec::new().into_iter(), EduVec::new());
 	}
 
 	let batch = (since, since_upper);
@@ -362,10 +368,9 @@ pub(super) async fn select_edus(
 
 	// Persist the durable prefix so a failed or restarted transaction
 	// replays it; the ACK deletes these active rows.
-	if durable_len > 0 {
-		self.db
-			.persist_active_edus(server_name, &events[..durable_len]);
-	}
+	let keys = self
+		.db
+		.persist_active_edus(server_name, &events[..durable_len]);
 
 	let last_count = max_edu_count.load(Ordering::Acquire);
 	if last_count > since {
@@ -373,7 +378,17 @@ pub(super) async fn select_edus(
 			.set_latest_educount(server_name, last_count);
 	}
 
-	Ok(events)
+	keyed(keys, events)
+}
+
+/// Pair composed EDUs with their durable keys.
+///
+/// Presence rides past the durable prefix with empty keys, so a delivery has no
+/// row of it to acknowledge.
+fn keyed(keys: impl Iterator<Item = Key>, edus: EduVec) -> impl Iterator<Item = QueueItem> {
+	keys.chain(repeat_with(Key::new))
+		.zip(edus)
+		.map(|(key, edu)| (key, SendingEvent::Edu(edu)))
 }
 
 /// Serialize one EDU into its inline queue buffer.

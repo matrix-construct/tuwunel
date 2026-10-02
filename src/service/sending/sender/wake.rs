@@ -75,10 +75,7 @@ async fn handle_wake<'a>(
 
 	if let (Destination::Push(..), Some(remaining)) = (&dest, self.push_backoff_remaining(status))
 	{
-		if wakes
-			.iter()
-			.any(|Reverse((_, armed_dest))| armed_dest == &dest)
-		{
+		if is_armed(wakes, &dest) {
 			trace!(?dest, "Dropping stale push wake");
 		} else {
 			trace!(?dest, ?remaining, "Re-arming early push wake");
@@ -90,7 +87,7 @@ async fn handle_wake<'a>(
 
 	match dest {
 		| dest @ (Destination::Appservice(_) | Destination::Push(..)) =>
-			self.handle_force_retry(dest, futures, statuses)
+			self.handle_force_retry(dest, futures, statuses, wakes)
 				.await,
 		| Destination::Federation(server) =>
 			self.handle_federation_wake(server, futures, statuses, wakes)
@@ -99,10 +96,7 @@ async fn handle_wake<'a>(
 }
 
 pub(super) fn arm_appservice_wake(wakes: &mut WakeQueue, dest: Destination, tries: u32) {
-	if wakes
-		.iter()
-		.any(|Reverse((_, armed))| armed == &dest)
-	{
+	if is_armed(wakes, &dest) {
 		return;
 	}
 
@@ -240,6 +234,12 @@ fn record_push_failure(dest: &Destination, error: &Error, tries: u32, retry_in: 
 			"Push transaction failed",
 		),
 	}
+}
+
+pub(super) fn is_armed(wakes: &WakeQueue, dest: &Destination) -> bool {
+	wakes
+		.iter()
+		.any(|Reverse((_, armed))| armed == dest)
 }
 
 pub(super) fn arm_wake(wakes: &mut WakeQueue, dest: Destination, earliest_retry: SystemTime) {

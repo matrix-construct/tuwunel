@@ -1,11 +1,11 @@
 use std::time::Instant;
 
-use futures::StreamExt;
 use tuwunel_core::{Error, debug, error::error_chain, implement, info, warn};
 
 use super::{
-	DEQUEUE_LIMIT, NewEvents, RetryAction, SendingFutures, TransactionStatus,
-	TransactionStatuses, WakeQueue, dispatch::SendingResult, select::Selection,
+	NewEvents, RetryAction, SendingFutures, TransactionStatus, TransactionStatuses, WakeQueue,
+	dispatch::{Completion, SendingError},
+	select::Selection,
 	wake::arm_appservice_wake,
 };
 use crate::{
@@ -17,62 +17,40 @@ use crate::{
 #[tracing::instrument(name = "response", level = "debug", skip_all)]
 pub(super) async fn handle_response<'a>(
 	&'a self,
-	response: SendingResult,
+	Completion { result, keys }: Completion,
 	futures: &mut SendingFutures<'a>,
 	statuses: &mut TransactionStatuses,
 	wakes: &mut WakeQueue,
 ) {
-	match response {
-		| Ok(dest) =>
-			self.handle_response_ok(dest, futures, statuses)
-				.await,
-		| Err((dest, error)) =>
-			self.handle_response_err(dest, error, futures, statuses, wakes)
+	match result {
+		| Ok(dest) => {
+			let _cork = self.db.db.cork();
+
+			self.db.delete_active_requests(&keys);
+			self.handle_response_ok(dest, futures, statuses, wakes)
+				.await;
+		},
+		| Err(error) =>
+			self.handle_response_err(error, futures, statuses, wakes)
 				.await,
 	}
 }
 
 #[implement(Service)]
-#[expect(clippy::needless_pass_by_ref_mut)]
-pub(super) async fn handle_response_ok<'a>(
+async fn handle_response_ok<'a>(
 	&'a self,
 	dest: Destination,
 	futures: &mut SendingFutures<'a>,
 	statuses: &mut TransactionStatuses,
+	wakes: &mut WakeQueue,
 ) {
 	log_recovery(&dest, statuses);
 
-	let _cork = self.db.db.cork();
-
-	self.db
-		.delete_all_active_requests_for(&dest)
-		.await;
-
-	let new_events: NewEvents = self
-		.db
-		.queued_requests(&dest)
-		.take(DEQUEUE_LIMIT)
-		.collect()
-		.await;
-
-	if !new_events.is_empty() {
-		self.db.mark_as_active(new_events.iter());
-	}
-
-	let events = new_events
-		.into_iter()
-		.map(|(_, event)| event)
-		.collect();
-
-	let events = self.with_edus(&dest, events).await;
-
-	if events.is_empty() {
-		statuses.remove(&dest);
-		return;
-	}
+	let items = self.resume_queued(&dest).await;
+	let items = self.with_edus(&dest, items).await;
 
 	run_status(&dest, statuses);
-	futures.push(self.send_events(dest, events));
+	self.schedule_events(dest, Selection::Events(items), futures, statuses, wakes);
 }
 
 /// Log a delivery that ends a destination's streak of failed transactions.
@@ -99,8 +77,7 @@ fn run_status(dest: &Destination, statuses: &mut TransactionStatuses) {
 #[implement(Service)]
 async fn handle_response_err<'a>(
 	&'a self,
-	dest: Destination,
-	error: Error,
+	(dest, error): SendingError,
 	futures: &mut SendingFutures<'a>,
 	statuses: &mut TransactionStatuses,
 	wakes: &mut WakeQueue,
@@ -121,7 +98,7 @@ async fn handle_response_err<'a>(
 
 			arm_appservice_wake(wakes, dest, tries);
 			if let Some(dest) = forced {
-				self.handle_force_retry(dest, futures, statuses)
+				self.handle_force_retry(dest, futures, statuses, wakes)
 					.await;
 			}
 		},
@@ -188,13 +165,14 @@ pub(super) async fn handle_force_retry<'a>(
 	dest: Destination,
 	futures: &mut SendingFutures<'a>,
 	statuses: &mut TransactionStatuses,
+	wakes: &mut WakeQueue,
 ) {
-	let Ok(Selection::Events(events)) = self
+	let Ok(selection) = self
 		.select_events(&dest, NewEvents::new(), statuses)
 		.await
 	else {
 		return;
 	};
 
-	self.schedule_events(dest, events, futures, statuses);
+	self.schedule_events(dest, selection, futures, statuses, wakes);
 }

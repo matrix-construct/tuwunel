@@ -12,8 +12,8 @@ use tokio::time::Instant;
 use tuwunel_core::{Error, Result, config::Figment};
 
 use super::{
-	SendingFutures, TransactionStatus, TransactionStatuses, WakeQueue, enqueue, fixture::fixture,
-	pdu_id,
+	SendingFutures, TransactionStatus, TransactionStatuses, WakeQueue, completion, enqueue,
+	fixture::fixture, pdu_id,
 };
 use crate::{
 	federation::ShouldAttempt,
@@ -35,7 +35,7 @@ async fn content_rejection_arms_the_sender_curve() -> Result {
 	let mut wakes = WakeQueue::new(); // response and wake state out-param
 	let started = Instant::now();
 	let rejection = ErrorBody::Json(Value::Null).into_error(StatusCode::FORBIDDEN);
-	let response = Err((dest.clone(), Error::Federation(server.clone(), rejection)));
+	let response = completion(Err((dest.clone(), Error::Federation(server.clone(), rejection))));
 
 	sending
 		.handle_response(response, &mut futures, &mut statuses, &mut wakes)
@@ -92,7 +92,7 @@ async fn zero_timing_bounds_still_arm_a_retry() -> Result {
 	let mut wakes = WakeQueue::new(); // response state out-param
 	let started = Instant::now();
 	let rejection = ErrorBody::Json(Value::Null).into_error(StatusCode::FORBIDDEN);
-	let response = Err((dest.clone(), Error::Federation(server, rejection)));
+	let response = completion(Err((dest.clone(), Error::Federation(server, rejection))));
 
 	sending
 		.handle_response(response, &mut futures, &mut statuses, &mut wakes)

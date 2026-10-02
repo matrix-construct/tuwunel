@@ -1,4 +1,4 @@
-use std::{cmp::Reverse, collections::BTreeMap, time::Duration};
+use std::{collections::BTreeMap, time::Duration};
 
 use futures::StreamExt;
 use tuwunel_core::{
@@ -10,12 +10,14 @@ use tuwunel_core::{
 
 use super::{
 	SendingFutures, TransactionStatus, TransactionStatuses, WakeQueue,
-	wake::{arm_wake, arm_wake_in},
+	wake::{arm_wake, arm_wake_in, is_armed},
 };
 use crate::{
 	federation::ShouldAttempt,
-	sending::{Destination, Msg, SendingEvent, Service},
+	sending::{Destination, Msg, SendingEvent, Service, data::QueueItem},
 };
+
+type Txns = BTreeMap<Destination, Vec<QueueItem>>;
 
 const BOOT_ARM_PACE: Duration = Duration::from_secs(2);
 
@@ -41,27 +43,23 @@ pub(super) async fn startup_netburst<'a>(
 		.db
 		.active_requests()
 		.ready_filter(|(_, _, dest)| self.shard_id(dest) == id)
-		.ready_fold(
-			BTreeMap::new(),
-			|mut txns: BTreeMap<Destination, Vec<SendingEvent>>, (key, event, dest)| {
-				let len = txns.get(&dest).map_or(0, Vec::len);
+		.ready_fold(Txns::new(), |txns, (key, event, dest)| {
+			let len = txns.get(&dest).map_or(0, Vec::len);
 
-				match keep {
-					| Some(limit) if len >= limit => {
-						warn!(?dest, key = %String::from_utf8_lossy(&key), "Dropping unsent event");
-						self.db.delete_active_request(&key);
-					},
-					| _ => txns.entry(dest).or_default().push(event),
-				}
-
-				txns
-			},
-		)
+			match keep {
+				| Some(limit) if len >= limit => {
+					warn!(?dest, key = %String::from_utf8_lossy(&key), "Dropping unsent event");
+					self.db.delete_active_request(&key);
+					txns
+				},
+				| _ => batched(txns, dest, (key, event)),
+			}
+		})
 		.await;
 
 	txns.into_iter()
-		.filter(|(_, events)| !events.is_empty())
-		.for_each(|(dest, events)| {
+		.filter(|(_, items)| !items.is_empty())
+		.for_each(|(dest, items)| {
 			let status = match netburst {
 				| true => TransactionStatus::Running { tries: 0 },
 				| false => TransactionStatus::Pending,
@@ -73,7 +71,7 @@ pub(super) async fn startup_netburst<'a>(
 			}
 
 			if netburst {
-				futures.push(self.send_events(dest, events));
+				futures.push(self.send_events(dest, items));
 			}
 		});
 
@@ -161,10 +159,7 @@ pub(super) async fn arm_startup_wake(
 	index: u64,
 	wakes: &mut WakeQueue,
 ) -> u64 {
-	if wakes
-		.iter()
-		.any(|Reverse((_, armed))| armed == &dest)
-	{
+	if is_armed(wakes, &dest) {
 		return index;
 	}
 
@@ -189,6 +184,11 @@ pub(super) async fn arm_startup_wake(
 			index.saturating_add(1)
 		},
 	}
+}
+
+fn batched(mut txns: Txns, dest: Destination, item: QueueItem) -> Txns {
+	txns.entry(dest).or_default().push(item);
+	txns
 }
 
 fn boot_delay(timeout: u64, index: u64) -> Duration {

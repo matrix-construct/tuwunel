@@ -4,7 +4,9 @@ use futures::StreamExt;
 use tokio::time::{Instant, sleep_until};
 use tuwunel_core::{Error, Result};
 
-use super::{SendingFutures, TransactionStatus, WakeQueue, enqueue, fixture::fixture, pdu_id};
+use super::{
+	SendingFutures, TransactionStatus, WakeQueue, completion, enqueue, fixture::fixture, pdu_id,
+};
 use crate::sending::{Destination, SendingEvent};
 
 #[tokio::test]
@@ -24,10 +26,13 @@ async fn missing_appservice_registration_retries_on_its_timer_and_preserves_rows
 	let mut statuses = [(dest.clone(), TransactionStatus::Running { tries: 0 })].into();
 	let mut wakes = WakeQueue::new(); // response and wake state out-param
 	let response = sending
-		.send_events(dest.clone(), vec![old.1])
+		.send_events(dest.clone(), vec![old.clone()])
 		.await;
 
-	assert!(response.is_err());
+	response
+		.result
+		.as_ref()
+		.expect_err("appservice send fails");
 
 	let started = Instant::now();
 
@@ -66,7 +71,10 @@ async fn missing_appservice_registration_retries_on_its_timer_and_preserves_rows
 		.await
 		.expect("timer retry response");
 
-	assert!(response.is_err());
+	response
+		.result
+		.as_ref()
+		.expect_err("appservice send fails");
 
 	sending
 		.handle_response(response, &mut futures, &mut statuses, &mut wakes)
@@ -123,10 +131,13 @@ async fn ping_during_flight_retries_immediately_after_failure_and_stale_timer_is
 	));
 
 	let response = sending
-		.send_events(dest.clone(), vec![old.1])
+		.send_events(dest.clone(), vec![old.clone()])
 		.await;
 
-	assert!(response.is_err());
+	response
+		.result
+		.as_ref()
+		.expect_err("appservice send fails");
 
 	sending
 		.handle_response(response, &mut futures, &mut statuses, &mut wakes)
@@ -176,7 +187,9 @@ async fn very_large_appservice_failure_streak_is_capped_and_deduped() -> Result 
 	let mut statuses = [(dest.clone(), TransactionStatus::Running { tries: u32::MAX })].into();
 	let mut wakes = WakeQueue::new(); // response state out-param
 	let started = Instant::now();
-	let response = Err((dest.clone(), Error::bad_database("appservice fixture failure")));
+	let response =
+		completion(Err((dest.clone(), Error::bad_database("appservice fixture failure"))));
+
 	let response = sending.handle_response(response, &mut futures, &mut statuses, &mut wakes);
 
 	eprintln!("appservice response future={} bytes", size_of_val(&response));
@@ -196,7 +209,7 @@ async fn very_large_appservice_failure_streak_is_capped_and_deduped() -> Result 
 
 	statuses.insert(dest.clone(), TransactionStatus::Running { tries: u32::MAX });
 
-	let response = Err((dest, Error::bad_database("appservice fixture failure")));
+	let response = completion(Err((dest, Error::bad_database("appservice fixture failure"))));
 
 	sending
 		.handle_response(response, &mut futures, &mut statuses, &mut wakes)
