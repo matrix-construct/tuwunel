@@ -624,6 +624,16 @@ impl Error {
 	#[inline]
 	pub fn is_not_found(&self) -> bool { self.status_code() == http::StatusCode::NOT_FOUND }
 
+	/// Tests whether this error is a missing record rather than any 404.
+	///
+	/// Only `Request` with the `NotFound` kind matches, which is what the
+	/// database returns for an absent key. An I/O not-found and every other
+	/// error mapping to 404 do not, so a storage fault never reads as absence.
+	#[inline]
+	pub fn is_missing(&self) -> bool {
+		matches!(self, Self::Request(MatrixErrorKind::NotFound, ..))
+	}
+
 	/// Tests whether this error reports an interrupted operation.
 	///
 	/// [`Server::check_running`] produces this shape once shutdown begins, so a

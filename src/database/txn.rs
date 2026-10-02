@@ -4,11 +4,16 @@
 //! commits them only when [`Txn::execute`] consumes it. Typed operations use
 //! the database codec, while raw operations preserve caller-provided bytes.
 
-use std::{fmt::Debug, iter::once, sync::Arc};
+use std::{
+	error::Error as StdError,
+	fmt::{self, Debug, Display},
+	iter::once,
+	sync::Arc,
+};
 
 use rocksdb::WriteBatch;
 use serde::Serialize;
-use tuwunel_core::{error, implement};
+use tuwunel_core::{Error, Result, error, implement};
 
 use crate::{
 	Engine, Map,
@@ -25,6 +30,19 @@ use crate::{
 pub struct Txn {
 	batch: WriteBatch,
 	engine: Arc<Engine>,
+}
+
+/// Failure stage of a fallible transaction commit.
+///
+/// A sync failure follows an accepted atomic write, so callers must reconcile
+/// the stored bytes before advancing dependent work.
+#[derive(Debug)]
+pub enum TxnError {
+	/// The engine rejected the batch write.
+	Write(Error),
+
+	/// The batch was accepted but the WAL durability barrier failed.
+	Sync(Error),
 }
 
 /// Record parser yielding each queued key with its resolved map.
@@ -61,6 +79,21 @@ impl TryFrom<u8> for Tag {
 			| unrecognized => Err(unrecognized),
 		}
 	}
+}
+
+impl Display for TxnError {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match self {
+			| Self::Write(error) => write!(f, "transaction write failed: {error}"),
+			| Self::Sync(error) => write!(f, "transaction written but WAL sync failed: {error}"),
+		}
+	}
+}
+
+impl StdError for TxnError {}
+
+impl From<TxnError> for Error {
+	fn from(error: TxnError) -> Self { Self::Std(error.into()) }
 }
 
 /// Creates an empty transaction for one database engine.
@@ -352,6 +385,38 @@ pub fn execute(self) {
 	self.commit();
 }
 
+/// Commits an atomic batch and explicitly synchronizes the WAL to disk.
+///
+/// Unlike [`Txn::execute`], the durability barrier runs even while corked.
+/// Watchers are notified after an accepted write, including a failed sync.
+/// Empty batches perform neither a write nor a sync.
+#[implement(Txn)]
+#[tracing::instrument(level = "trace", skip_all)]
+pub fn try_execute(self) -> Result<(), TxnError> {
+	if self.is_empty() {
+		return Ok(());
+	}
+
+	self.write().map_err(TxnError::Write)?;
+	let synced = self.sync().map_err(TxnError::Sync);
+
+	self.notify();
+	synced
+}
+
+#[implement(Txn)]
+#[tracing::instrument(level = "trace", skip_all)]
+fn write(&self) -> Result {
+	self.engine
+		.db
+		.write_opt(&self.batch, &self.engine.write_options)
+		.or_else(or_else)
+}
+
+#[implement(Txn)]
+#[tracing::instrument(level = "trace", skip_all)]
+fn sync(&self) -> Result { self.engine.sync() }
+
 /// Commits the batch atomically, flushes unless corked, and notifies matchers.
 ///
 /// Batch must not be empty. Notifications occur only after the write.
@@ -372,10 +437,7 @@ pub fn execute(self) {
 fn commit(self) {
 	debug_assert!(!self.is_empty(), "Txn must not be empty.");
 
-	self.engine
-		.db
-		.write_opt(&self.batch, &self.engine.write_options)
-		.or_else(or_else)
+	self.write()
 		.expect("database transaction execute error");
 
 	if !self.engine.corked() {

@@ -11,6 +11,14 @@
 
 mod repair;
 mod scan;
+#[cfg_attr(
+	not(test),
+	expect(
+		dead_code,
+		reason = "repair boundary awaits complete repair integration"
+	)
+)]
+mod seen;
 
 use tuwunel_core::{Result, result::LogErr, utils::TryReadyExt, warn};
 
