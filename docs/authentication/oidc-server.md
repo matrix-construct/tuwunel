@@ -10,14 +10,14 @@ Tuwunel plays two roles here, and they are easy to confuse:
 - **As an authorization server**, Tuwunel is what a Matrix client authenticates
   against. It issues authorization codes, access tokens, and refresh tokens,
   and it publishes OAuth discovery metadata. That is what this page documents.
-- **As a relying party**, Tuwunel does not collect passwords itself. It
-  delegates authentication of the human to a configured upstream identity
-  provider (GitHub, Google, Keycloak, Authelia, your own Matrix Authentication
-  Service, and so on), covered on the [Identity Providers](providers.md) page.
+- **As a relying party**, Tuwunel can delegate authentication to a configured
+  upstream identity provider (GitHub, Google, Keycloak, Authelia, your own
+  Matrix Authentication Service, and so on), covered on the
+  [Identity Providers](providers.md) page. Native authentication instead
+  checks local account passwords.
 
 So the OIDC server is the Matrix-facing OAuth layer, while the actual login
-happens at whichever identity provider you configure. Next-gen auth needs both
-halves in place.
+happens through either native authentication or an upstream identity provider.
 
 ## Standards implemented
 
@@ -81,13 +81,13 @@ this:
 2. The client (registering itself first if needed, see
    [Dynamic client registration](#dynamic-client-registration)) sends the user
    to `GET /_tuwunel/oidc/authorize` with a PKCE `code_challenge`.
-3. Tuwunel validates the request and redirects the browser to the upstream
-   identity provider's SSO flow
+3. Tuwunel validates the request. With native authentication enabled, the
+   browser sees a page offering password login and each configured upstream
+   provider. Otherwise Tuwunel redirects to the default provider's SSO flow
    (`/_matrix/client/v3/login/sso/redirect/<provider>`). A client may request a
-   specific provider with an `idp_id` query parameter; otherwise the default
-   provider is used.
-4. The user authenticates with that provider. The provider redirects back, and
-   Tuwunel finishes the exchange at `GET /_tuwunel/oidc/_complete`.
+   specific provider with an `idp_id` query parameter to skip the chooser.
+4. The user signs in with a local password or an upstream provider. Tuwunel
+   finishes the exchange at `GET /_tuwunel/oidc/_complete`.
 5. Tuwunel returns an authorization code to the client, which the client
    exchanges at `POST /_tuwunel/oidc/token` for an access token, a refresh
    token, and (when `openid` was requested) an ID token.
@@ -97,9 +97,9 @@ later step-up actions (see [Cross-signing protection](#cross-signing-protection)
 re-authenticate against the same provider.
 
 When native authentication is enabled and the request selects no upstream
-provider (or carries `prompt=create`), step 3 instead serves a local
-login/registration page at `GET /_tuwunel/oidc/native`. The user authenticates
-against a local account and the flow rejoins at `_complete` exactly as above.
+provider, step 3 serves the local login/registration page at
+`GET /_tuwunel/oidc/native`. The user can authenticate against a local account
+or choose one of the configured providers. The flow rejoins at `_complete`.
 See [Native authentication](#native-authentication).
 
 ## Endpoints
@@ -200,11 +200,15 @@ behavior, so an existing deployment is unaffected until you opt in.
 
 | Option | Default | Description |
 |---|---|---|
-| `oidc_native_auth` | `false` | When `true`, the OIDC server serves a local login and registration page for clients that select no upstream provider, authenticating against this server's own accounts. Requires `well_known.client`. Coexists with configured identity providers. |
+| `oidc_native_auth` | `false` | When `true`, the OIDC server serves a login and registration page for clients that select no upstream provider. The login page offers local accounts alongside configured identity providers. Requires `well_known.client`. |
 
-With native auth enabled, an authorization request that selects no provider (or
-carries `prompt=create`) is served `GET /_tuwunel/oidc/native` instead of an SSO
-redirect. Registration there enforces the same `allow_registration`,
+With native auth enabled, an authorization request that selects no provider is
+served `GET /_tuwunel/oidc/native` instead of an automatic SSO redirect. With
+`single_sso` or `sso_custom_providers_page` set, the page offers one single
+sign-on entry for the default provider in place of the provider list. Once a
+provider is chosen, the request can only finish through that provider. A
+request with `prompt=create` opens the registration view. Registration there
+enforces the same `allow_registration`,
 registration-token, and `registration_terms` policy as the Matrix registration
 endpoint, and the metadata document advertises `prompt_values_supported =
 ["create"]` so clients can offer account creation. Enabling this knob where the

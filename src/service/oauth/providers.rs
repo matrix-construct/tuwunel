@@ -47,62 +47,57 @@ pub async fn get(&self, id: &str) -> Result<Provider> {
 	Ok(provider)
 }
 
-/// Get the admin-configured Provider which exists prior to any
-/// reconciliation with the well-known discovery (the server's config is
-/// immutable); though it is important to note the server config can be
-/// reloaded. This will Err NotFound for a non-existent idp.
+/// Clone the admin-configured Provider matching `id`.
 ///
-/// When no provider is found with a matching client_id, providers are then
-/// searched by brand. Brand matching will be invalidated when more than one
-/// provider matches the brand.
+/// It predates reconciliation with well-known discovery and follows a config
+/// reload; `find_config` documents how `id` resolves.
 #[implement(Providers)]
-pub fn get_config(&self, id: &str) -> Result<Provider> {
-	let providers = &self.services.config.identity_provider;
+pub fn get_config(&self, id: &str) -> Result<Provider> { self.find_config(id).cloned() }
 
-	if let Some(provider) = providers
+/// Borrow the admin-configured Provider matching `id`.
+///
+/// A provider whose client_id matches wins; otherwise `id` is taken as a brand,
+/// which resolves only when exactly one provider carries it. Anything else is
+/// `NotFound`, and a caller that only reads a field avoids cloning the whole
+/// configuration.
+#[implement(Providers)]
+pub fn find_config(&self, id: &str) -> Result<&Provider> {
+	let providers = &self.services.config.identity_provider;
+	let brand = |config: &&Provider| config.brand.eq_ignore_ascii_case(id);
+
+	providers
 		.values()
 		.find(|config| config.id() == id)
-		.cloned()
-	{
-		return Ok(provider);
-	}
-
-	if let Some(provider) = providers
-		.values()
-		.find(|config| config.brand.eq_ignore_ascii_case(id))
-		.filter(|_| {
+		.or_else(|| {
 			providers
 				.values()
-				.filter(|config| config.brand.eq_ignore_ascii_case(id))
-				.count()
-				.eq(&1)
+				.find(brand)
+				.filter(|_| providers.values().filter(brand).count().eq(&1))
 		})
-		.cloned()
-	{
-		return Ok(provider);
-	}
-
-	Err!(Request(NotFound("Unrecognized Identity Provider")))
+		.ok_or_else(|| err!(Request(NotFound("Unrecognized Identity Provider"))))
 }
 
 /// Get the ID of the provider considered "default" as selected by the admin or
 /// by fallback.
 #[implement(Providers)]
 pub fn get_default_id(&self) -> Option<String> {
-	self.services
-		.config
-		.identity_provider
-		.values()
-		.find(|idp| idp.default)
-		.or_else(|| {
-			self.services
-				.config
-				.identity_provider
-				.values()
-				.next()
-		})
+	self.find_default_config()
 		.map(Provider::id)
 		.map(ToOwned::to_owned)
+}
+
+/// Borrow the admin-configured Provider considered "default".
+///
+/// The provider marked `default` wins; otherwise the first configured one
+/// stands in, and `None` means no provider is configured.
+#[implement(Providers)]
+pub fn find_default_config(&self) -> Option<&Provider> {
+	let providers = &self.services.config.identity_provider;
+
+	providers
+		.values()
+		.find(|idp| idp.default)
+		.or_else(|| providers.values().next())
 }
 
 /// Get the discovered provider from the runtime cache. ID may be client_id or

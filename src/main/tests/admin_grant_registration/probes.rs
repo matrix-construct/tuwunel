@@ -1,15 +1,22 @@
+use std::time::SystemTime;
+
 use reqwest::{Client, RequestBuilder, Response, StatusCode, redirect::Policy};
 use serde_json::{Value, json};
 use tuwunel_core::{
 	Result,
 	ruma::{OwnedUserId, UserId},
 };
-use tuwunel_service::{Services, registration_tokens::TokenExpires};
+use tuwunel_service::{
+	Services,
+	oauth::server::{AUTH_REQUEST_LIFETIME, AuthRequest},
+	registration_tokens::TokenExpires,
+};
 
 use super::{MembershipState, boot, member, register};
 
 const PASSWORD: &str = "registration-test-password";
 const TOKEN: &str = "admin-name-one-use";
+const REQ_ID: &str = "registration-test";
 const OPTIONS: [&str; 7] = [
 	"create_admin_room=true",
 	"grant_admin_to_first_user=true",
@@ -71,6 +78,7 @@ async fn uiaa(services: &Services, base: &str) -> Result {
 
 async fn native(services: &Services, base: &str) -> Result {
 	prepare(services).await?;
+	pending_request(services)?;
 
 	let client = Client::builder()
 		.redirect(Policy::none())
@@ -106,6 +114,39 @@ async fn prepare(services: &Services) -> Result {
 	Ok(())
 }
 
+/// Store the authorization request the native page's submissions claim.
+///
+/// The page refuses a submission whose request is unknown before it reaches
+/// the registration checks under test.
+fn pending_request(services: &Services) -> Result {
+	let now = SystemTime::now();
+	let expires_at = now
+		.checked_add(AUTH_REQUEST_LIFETIME)
+		.expect("request expiry");
+
+	let request = AuthRequest {
+		client_id: "registration-probe".to_owned(),
+		redirect_uri: "https://localhost/callback".to_owned(),
+		scope: "openid".to_owned(),
+		state: None,
+		nonce: None,
+		code_challenge: None,
+		code_challenge_method: None,
+		idp_id: None,
+		local_auth_selected: false,
+		response_mode: None,
+		created_at: now,
+		expires_at,
+	};
+
+	services
+		.oauth
+		.get_server()?
+		.store_auth_request(REQ_ID, &request);
+
+	Ok(())
+}
+
 async fn post_json(
 	client: &Client,
 	url: &str,
@@ -124,7 +165,7 @@ async fn post_form(
 	status: StatusCode,
 ) -> Result<Response> {
 	let form = [
-		("oidc_req_id", "registration-test"),
+		("oidc_req_id", REQ_ID),
 		("mode", "register"),
 		("username", username),
 		("password", PASSWORD),

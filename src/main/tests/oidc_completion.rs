@@ -8,7 +8,7 @@ mod client;
 
 use std::{net::TcpListener, time::Duration};
 
-use futures::future::join;
+use futures::future::{join, try_join};
 use reqwest::{Client, Response, StatusCode, Url, redirect::Policy};
 use serde_json::{from_value, json};
 use serde_urlencoded::from_str;
@@ -25,7 +25,9 @@ struct Case<'a> {
 	automatic: bool,
 }
 
+const USERNAME: &str = "oidccompletion";
 const PASSWORD: &str = "oidc-completion-test-password";
+const REGISTRATION_TOKEN: &str = "oidc-registration-test";
 const STATE: &str = "state&<quoted>\"'";
 
 #[test]
@@ -37,6 +39,8 @@ fn native_completion_ends_form_navigation() -> Result {
 		.with_option(format!("port={port}"))
 		.with_option("listening=true")
 		.with_option("well_known.client=\"https://localhost\"")
+		.with_option("allow_registration=true")
+		.with_option(format!("registration_token=\"{REGISTRATION_TOKEN}\""))
 		.with_option("oidc_native_auth=true")
 		.with_option("oidc_require_pkce=false")
 		.with_option("oidc_require_client_approval=true")
@@ -45,6 +49,10 @@ fn native_completion_ends_form_navigation() -> Result {
 		.with_option(
 			"oidc_registration_allowed_redirect_hosts=[\"trusted.example\",\"127.0.0.1\"]",
 		);
+
+	let args = [("first", "First SSO"), ("second", "Second SSO")]
+		.into_iter()
+		.fold(args, with_provider);
 
 	let runtime = Runtime::new(Some(&args))?;
 	let server = Server::new(Some(&args), Some(&runtime))?;
@@ -72,10 +80,20 @@ fn native_completion_ends_form_navigation() -> Result {
 	})
 }
 
+fn with_provider(args: Args, (brand, name): (&str, &str)) -> Args {
+	let option = |key: &str, value: &str| format!("identity_provider.{brand}.{key}=\"{value}\"");
+
+	args.with_option(option("client_id", &format!("{brand}-idp")))
+		.with_option(option("client_secret", "test-secret"))
+		.with_option(option("brand", brand))
+		.with_option(option("name", name))
+		.with_option(option("issuer_url", &format!("https://{brand}.invalid")))
+}
+
 async fn exercise(services: &Services, base: &str) -> Result {
 	wait_until_ready(services, base).await?;
 
-	let user = UserId::parse_with_server_name("oidccompletion", services.globals.server_name())?;
+	let user = UserId::parse_with_server_name(USERNAME, services.globals.server_name())?;
 
 	services
 		.users
@@ -90,6 +108,13 @@ async fn exercise(services: &Services, base: &str) -> Result {
 		.redirect(Policy::none())
 		.timeout(Duration::from_secs(10))
 		.build()?;
+
+	check_provider_choices(services, &client, base).await?;
+	check_local_resubmission(services, &client, base).await?;
+	check_branch_race(services, &client, base).await?;
+	check_registration_claim(services, &client, base).await?;
+	concurrent_completion_only_once(services, &client, base).await?;
+	stale_refusal_burns_token(services, &client, base).await?;
 
 	for (redirect, native, waived, automatic) in [
 		("https://trusted.example/callback?existing=a%26b", false, true, true),
@@ -187,6 +212,330 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	Ok(())
 }
 
+async fn check_provider_choices(services: &Services, client: &Client, base: &str) -> Result {
+	let redirect = "https://trusted.example/callback";
+	let client_id = register_client(services, redirect).await?;
+
+	for (provider, other_provider) in [("first-idp", "second-idp"), ("second-idp", "first-idp")] {
+		let req_id = new_native_request(client, base, &client_id, redirect).await?;
+		let html = native_page(client, base, &req_id).await?;
+
+		assert!(html.contains("First SSO"));
+		assert!(html.contains("Second SSO"));
+		assert!(html.contains(r#"name="password""#));
+
+		let selection = select_provider(client, base, &req_id, provider)
+			.await?
+			.error_for_status()?;
+
+		let sso_url = location(&selection)?;
+
+		assert!(sso_url.path().ends_with(provider));
+
+		let callback = Url::parse(&parameter(&sso_url, "redirectUrl"))?;
+		let selected_req_id = parameter(&callback, "oidc_req_id");
+
+		assert_eq!(selected_req_id, req_id);
+
+		let selected = peek_request(services, &req_id).await?;
+
+		assert_eq!(selected.idp_id.as_deref(), Some(provider));
+		assert!(!selected.local_auth_selected);
+		assert_eq!(selected.redirect_uri, redirect);
+
+		let repeated = select_provider(client, base, &req_id, provider).await?;
+
+		assert!(
+			repeated.status().is_redirection(),
+			"repeating the chosen provider still redirects"
+		);
+
+		let second_selection = select_provider(client, base, &req_id, other_provider).await?;
+
+		assert!(second_selection.status().is_client_error());
+
+		let password_attempt = submit_password(client, base, &req_id).await?;
+
+		assert_eq!(password_attempt.status(), StatusCode::FORBIDDEN);
+
+		let returned = native_page(client, base, &req_id).await?;
+
+		assert!(returned.contains(&format!("idp_id={provider}")));
+		assert!(!returned.contains(&format!("idp_id={other_provider}")));
+		assert!(!returned.contains(r#"name="password""#));
+	}
+
+	let req_id = new_native_request(client, base, &client_id, redirect).await?;
+	let first = select_provider(client, base, &req_id, "first-idp");
+	let second = select_provider(client, base, &req_id, "second-idp");
+	let (first, second) = try_join(first, second).await?;
+	let statuses = [first.status(), second.status()];
+	let selected = statuses
+		.iter()
+		.copied()
+		.filter(StatusCode::is_redirection)
+		.count();
+
+	assert_eq!(selected, 1, "only one concurrent provider selection may succeed");
+	assert!(statuses.iter().any(StatusCode::is_client_error));
+
+	Ok(())
+}
+
+async fn register_client(services: &Services, redirect: &str) -> Result<String> {
+	let registration = json!({ "redirect_uris": [redirect] });
+
+	services
+		.oauth
+		.get_server()?
+		.register_client(from_value(registration)?)
+		.await
+		.map(|registration| registration.client_id)
+}
+
+async fn new_native_request(
+	client: &Client,
+	base: &str,
+	client_id: &str,
+	redirect: &str,
+) -> Result<String> {
+	let response = client
+		.get(format!("{base}/_tuwunel/oidc/authorize"))
+		.query(&[
+			("client_id", client_id),
+			("redirect_uri", redirect),
+			("response_type", "code"),
+			("scope", "openid"),
+		])
+		.send()
+		.await?
+		.error_for_status()?;
+
+	let native = location(&response)?;
+
+	assert_eq!(native.path(), "/_tuwunel/oidc/native");
+
+	Ok(parameter(&native, "oidc_req_id"))
+}
+
+async fn native_page(client: &Client, base: &str, req_id: &str) -> Result<String> {
+	client
+		.get(format!("{base}/_tuwunel/oidc/native"))
+		.query(&[("oidc_req_id", req_id)])
+		.send()
+		.await?
+		.error_for_status()?
+		.text()
+		.await
+		.map_err(Into::into)
+}
+
+async fn select_provider(
+	client: &Client,
+	base: &str,
+	req_id: &str,
+	provider: &str,
+) -> Result<Response> {
+	client
+		.get(format!("{base}/_tuwunel/oidc/native"))
+		.query(&[("oidc_req_id", req_id), ("idp_id", provider)])
+		.send()
+		.await
+		.map_err(Into::into)
+}
+
+fn location(response: &Response) -> Result<Url> {
+	let location = response.headers()["location"]
+		.to_str()
+		.expect("location header");
+
+	Url::parse(location).map_err(Into::into)
+}
+
+async fn peek_request(services: &Services, req_id: &str) -> Result<AuthRequest> {
+	services
+		.oauth
+		.get_server()?
+		.peek_auth_request(req_id)
+		.await
+}
+
+async fn submit_password(client: &Client, base: &str, req_id: &str) -> Result<Response> {
+	let fields = [("oidc_req_id", req_id), ("username", USERNAME), ("password", PASSWORD)];
+
+	post_form(client, base, "native", &fields).await
+}
+
+async fn post_form(
+	client: &Client,
+	base: &str,
+	route: &str,
+	fields: &[(&str, &str)],
+) -> Result<Response> {
+	client
+		.post(format!("{base}/_tuwunel/oidc/{route}"))
+		.form(fields)
+		.send()
+		.await
+		.map_err(Into::into)
+}
+
+async fn check_local_resubmission(services: &Services, client: &Client, base: &str) -> Result {
+	let redirect = "https://trusted.example/resubmission";
+	let client_id = register_client(services, redirect).await?;
+	let completion = login(client, base, &client_id, redirect, "query").await?;
+	let req_id = parameter(&completion, "oidc_req_id");
+	let local = peek_request(services, &req_id).await?;
+
+	assert!(local.local_auth_selected);
+	assert!(local.idp_id.is_none());
+
+	let resubmitted = submit_password(client, base, &req_id).await?;
+
+	assert_eq!(
+		resubmitted.status(),
+		StatusCode::SEE_OTHER,
+		"a resubmitted local form still completes"
+	);
+
+	let late_selection = select_provider(client, base, &req_id, "first-idp").await?;
+
+	assert!(late_selection.status().is_client_error());
+
+	Ok(())
+}
+
+async fn check_branch_race(services: &Services, client: &Client, base: &str) -> Result {
+	let redirect = "https://trusted.example/race";
+	let client_id = register_client(services, redirect).await?;
+	let req_id = new_native_request(client, base, &client_id, redirect).await?;
+	let password_attempt = submit_password(client, base, &req_id);
+	let selection = select_provider(client, base, &req_id, "first-idp");
+	let (password_attempt, selection) = try_join(password_attempt, selection).await?;
+
+	assert_ne!(
+		password_attempt.status().is_redirection(),
+		selection.status().is_redirection(),
+		"password and provider branches cannot both succeed",
+	);
+
+	Ok(())
+}
+
+async fn check_registration_claim(services: &Services, client: &Client, base: &str) -> Result {
+	let redirect = "https://trusted.example/registration";
+	let client_id = register_client(services, redirect).await?;
+	let req_id = new_native_request(client, base, &client_id, redirect).await?;
+	let server_name = services.globals.server_name();
+	let username = "oidcregistration";
+	let user = UserId::parse_with_server_name(username, server_name)?;
+	let rejected = submit_registration(client, base, &req_id, username, "invalid-token").await?;
+
+	assert_eq!(rejected.status(), StatusCode::FORBIDDEN);
+	assert!(!services.users.exists(&user).await);
+
+	let pending = peek_request(services, &req_id).await?;
+
+	assert!(!pending.local_auth_selected);
+	assert!(pending.idp_id.is_none());
+
+	let registered =
+		submit_registration(client, base, &req_id, username, REGISTRATION_TOKEN).await?;
+
+	assert_eq!(registered.status(), StatusCode::SEE_OTHER);
+	assert!(services.users.exists(&user).await);
+
+	let claimed = peek_request(services, &req_id).await?;
+
+	assert!(claimed.local_auth_selected);
+	assert!(claimed.idp_id.is_none());
+
+	let late_selection = select_provider(client, base, &req_id, "first-idp").await?;
+
+	assert!(late_selection.status().is_client_error());
+
+	let race_req_id = new_native_request(client, base, &client_id, redirect).await?;
+	let race_username = "oidcregistrationrace";
+	let race_user = UserId::parse_with_server_name(race_username, server_name)?;
+	let registration =
+		submit_registration(client, base, &race_req_id, race_username, REGISTRATION_TOKEN);
+
+	let selection = select_provider(client, base, &race_req_id, "first-idp");
+	let (registration, selection) = try_join(registration, selection).await?;
+
+	assert_ne!(registration.status().is_redirection(), selection.status().is_redirection());
+
+	let created = services.users.exists(&race_user).await;
+
+	assert_eq!(
+		created,
+		registration.status() == StatusCode::SEE_OTHER,
+		"a rejected registration must not create an account",
+	);
+
+	Ok(())
+}
+
+async fn submit_registration(
+	client: &Client,
+	base: &str,
+	req_id: &str,
+	username: &str,
+	token: &str,
+) -> Result<Response> {
+	let fields = [
+		("oidc_req_id", req_id),
+		("mode", "register"),
+		("username", username),
+		("password", PASSWORD),
+		("registration_token", token),
+	];
+
+	post_form(client, base, "native", &fields).await
+}
+
+async fn concurrent_completion_only_once(
+	services: &Services,
+	client: &Client,
+	base: &str,
+) -> Result {
+	let redirect = "https://trusted.example/one-shot";
+	let client_id = register_client(services, redirect).await?;
+	let completion = login(client, base, &client_id, redirect, "query").await?;
+	let fetch = || client.get(completion.as_str()).send();
+	let (first, second) = try_join(fetch(), fetch()).await?;
+	let statuses = [first.status(), second.status()];
+	let minted = statuses
+		.iter()
+		.filter(|status| **status == StatusCode::OK)
+		.count();
+
+	assert_eq!(minted, 1, "only one concurrent completion may mint a code");
+	assert!(statuses.contains(&StatusCode::NOT_FOUND));
+
+	Ok(())
+}
+
+async fn stale_refusal_burns_token(services: &Services, client: &Client, base: &str) -> Result {
+	let user = UserId::parse_with_server_name(USERNAME, services.globals.server_name())?;
+	let token = "oidc-stale-refusal-token";
+	let fields = [("oidc_req_id", "stale"), ("loginToken", token), ("action", "deny")];
+
+	_ = services.users.create_login_token(&user, token);
+
+	let refused = post_form(client, base, "_complete", &fields).await?;
+	let burned = services
+		.users
+		.peek_login_token(token)
+		.await
+		.is_err();
+
+	assert_eq!(refused.status(), StatusCode::OK);
+	assert!(burned, "a refusal burns the login token even when the request is gone");
+
+	Ok(())
+}
+
 async fn complete(
 	services: &Services,
 	client: &Client,
@@ -259,6 +608,9 @@ async fn complete(
 	if automatic {
 		assert!(html.contains(&format!("content=\"0; URL={destination}\"")));
 		assert!(!html.contains("stylesheet"));
+	} else {
+		assert!(html.contains("auth-card auth-complete"));
+		assert!(html.contains("Finish signing in"));
 	}
 
 	let destination = Url::parse(&destination.replace("&amp;", "&"))?;
@@ -348,30 +700,13 @@ async fn login(
 		.await?
 		.error_for_status()?;
 
-	let native = Url::parse(
-		response.headers()["location"]
-			.to_str()
-			.expect("native location"),
-	)?;
-
+	let native = location(&response)?;
 	let req_id = parameter(&native, "oidc_req_id");
-	let response = client
-		.post(format!("{base}/_tuwunel/oidc/native"))
-		.form(&[
-			("oidc_req_id", req_id.as_str()),
-			("username", "oidccompletion"),
-			("password", PASSWORD),
-		])
-		.send()
-		.await?;
+	let response = submit_password(client, base, &req_id).await?;
 
 	assert_eq!(response.status(), StatusCode::SEE_OTHER);
 
-	let completion = Url::parse(
-		response.headers()["location"]
-			.to_str()
-			.expect("completion location"),
-	)?;
+	let completion = location(&response)?;
 
 	let completion = Url::parse(&format!(
 		"{base}{}?{}",
@@ -388,19 +723,11 @@ async fn approve(
 	completion: &Url,
 	action: &str,
 ) -> Result<Response> {
-	let fields = [
-		("oidc_req_id", parameter(completion, "oidc_req_id")),
-		("loginToken", parameter(completion, "loginToken")),
-		("action", action.to_owned()),
-	];
+	let req_id = parameter(completion, "oidc_req_id");
+	let token = parameter(completion, "loginToken");
+	let fields = [("oidc_req_id", req_id.as_str()), ("loginToken", &token), ("action", action)];
 
-	let response = client
-		.post(format!("{base}/_tuwunel/oidc/_complete"))
-		.form(&fields)
-		.send()
-		.await?;
-
-	Ok(response)
+	post_form(client, base, "_complete", &fields).await
 }
 
 fn parameter(url: &Url, name: &str) -> String {

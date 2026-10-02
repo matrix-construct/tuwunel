@@ -11,6 +11,9 @@ pub(super) mod revoke;
 pub(super) mod token;
 pub(super) mod userinfo;
 
+#[cfg(test)]
+mod tests;
+
 use std::fmt::Write;
 
 use axum::{Json, body::Body, response::IntoResponse};
@@ -27,6 +30,12 @@ pub(super) use self::{
 };
 
 const OIDC_REQ_ID_LENGTH: usize = 32;
+
+#[derive(Clone, Copy)]
+struct NativeChoice {
+	native_enabled: bool,
+	has_default_idp: bool,
+}
 
 pub(crate) fn url_encode(s: &str) -> String {
 	s.bytes()
@@ -87,6 +96,28 @@ fn redirect_allowlisted(allowed: &[String], uri: &str) -> bool {
 			.iter()
 			.any(|entry| entry.eq_ignore_ascii_case(name))
 	})
+}
+
+/// Whether a flow with no provider chooser serves the native page.
+///
+/// Native applies only when native auth is enabled and no default provider is
+/// configured; every other flow goes through single sign-on.
+fn should_serve_native(NativeChoice { native_enabled, has_default_idp }: NativeChoice) -> bool {
+	native_enabled && !has_default_idp
+}
+
+/// Build the upstream SSO redirect URL for a pending authorization request.
+///
+/// The provider hands the browser back to the completion route carrying the
+/// request id, where the authorization code is minted. A trailing slash on the
+/// issuer is ignored.
+fn authorization_sso_url(issuer: &str, idp_id: &str, req_id: &str) -> Result<Url> {
+	let base = issuer.trim_end_matches('/');
+	let complete = format!("{base}/_tuwunel/oidc/_complete");
+	let callback = Url::parse_with_params(&complete, [("oidc_req_id", req_id)])
+		.map_err(|_| err!(error!("Failed to build complete URL")))?;
+
+	sso_redirect_url(base, idp_id, &callback)
 }
 
 fn sso_redirect_url(base: &str, idp_id: &str, callback: &Url) -> Result<Url> {

@@ -1936,9 +1936,10 @@ pub struct Config {
 	/// When false (default), the OIDC server runs only to broker for a
 	/// configured `identity_provider`, redirecting users to that upstream IdP.
 	/// When true, an authorization request that selects no provider is served a
-	/// native login or registration page checked against local accounts;
-	/// `well_known.client` must be set. Native and external providers coexist;
-	/// a configured `identity_provider` still brokers as before. Registration
+	/// login or registration page; `well_known.client` must be set. The login
+	/// page offers local accounts and each configured identity provider (one
+	/// single sign-on entry under `single_sso` or `sso_custom_providers_page`),
+	/// and an explicit `idp_id` goes directly to that provider. Registration
 	/// here honors `allow_registration`, the registration token, and
 	/// `registration_terms` exactly as the client registration endpoint does.
 	///
@@ -5093,6 +5094,7 @@ impl IdentityProvider {
 	///
 	/// The identifier is the OAuth application's client ID. It is borrowed from
 	/// this configuration without allocation.
+	#[inline]
 	#[must_use]
 	pub fn id(&self) -> &str { self.client_id.as_str() }
 
@@ -5114,6 +5116,14 @@ impl IdentityProvider {
 		Ok(client_secret.trim().to_owned())
 	}
 }
+
+/// Returns the name shown to a user choosing between providers.
+///
+/// The configured name wins, and the brand stands in when none is set.
+#[implement(IdentityProvider)]
+#[inline]
+#[must_use]
+pub fn display_name(&self) -> &str { self.name.as_deref().unwrap_or(&self.brand) }
 
 /// Selects the backend for a named media storage provider.
 ///
@@ -5603,6 +5613,17 @@ pub fn password_hash_cost(&self) -> Cost {
 		t_cost: self.argon2_t_cost,
 		p_cost: self.argon2_p_cost,
 	}
+}
+
+/// Returns whether login screens list each identity provider by name.
+///
+/// `single_sso` and `sso_custom_providers_page` each replace that list with
+/// one single sign-on entry.
+#[implement(Config)]
+#[inline]
+#[must_use]
+pub fn lists_identity_providers(&self) -> bool {
+	!self.sso_custom_providers_page && !self.single_sso
 }
 
 impl TlsConfig {

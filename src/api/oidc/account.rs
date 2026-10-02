@@ -37,7 +37,7 @@ use self::{
 	session_view::session_view_html,
 };
 use super::{
-	authorize::should_serve_native, consume_login_token, peek_login_token, sso_redirect_url,
+	NativeChoice, consume_login_token, peek_login_token, should_serve_native, sso_redirect_url,
 	url_encode,
 };
 
@@ -62,6 +62,7 @@ static ACCOUNT_CSS: &str = include_str!("account/account.css");
 
 pub(super) static ACCOUNT_HEAD: &str = r#"
 	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<link rel="stylesheet" href="/_tuwunel/oidc/account.css">
 "#;
 
@@ -114,9 +115,10 @@ fn account_auth_redirect(services: &Services, action: &str, device_id: &str) -> 
 	validate_account_action(action)?;
 
 	let idp_id = services.oauth.providers.get_default_id();
-	let wants_create = false;
-	let serve_native =
-		should_serve_native(services.config.oidc_native_auth, idp_id.is_some(), wants_create);
+	let serve_native = should_serve_native(NativeChoice {
+		native_enabled: services.config.oidc_native_auth,
+		has_default_idp: idp_id.is_some(),
+	});
 
 	match serve_native {
 		| true => account_native_redirect(services, action, device_id),

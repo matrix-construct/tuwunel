@@ -49,19 +49,18 @@ pub(crate) async fn get_login_types_route(
 ) -> Result<get_login_types::v3::Response> {
 	let get_login_token = services.config.login_via_existing_session;
 
-	let list_idps = !services.config.sso_custom_providers_page && !services.config.single_sso;
+	let list_idps = services.config.lists_identity_providers();
 
 	let identity_providers: Option<Vec<_>> = list_idps.then(|| {
 		services
 			.config
 			.identity_provider
 			.values()
-			.cloned()
 			.map(|config| IdentityProvider {
 				id: config.id().to_owned(),
-				brand: Some(config.brand.clone().into()),
-				icon: config.icon,
-				name: config.name.unwrap_or(config.brand),
+				brand: Some(config.brand.as_str().into()),
+				icon: config.icon.clone(),
+				name: config.display_name().to_owned(),
 			})
 			.collect()
 	});

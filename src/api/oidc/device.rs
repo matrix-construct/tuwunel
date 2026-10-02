@@ -23,7 +23,7 @@ use url::Url;
 
 use self::{consent::consent_html, entry::entry_html, error::error_html, result::result_html};
 use super::{
-	authorize::should_serve_native, consume_login_token, oauth_error, peek_login_token,
+	NativeChoice, consume_login_token, oauth_error, peek_login_token, should_serve_native,
 	sso_redirect_url, url_encode,
 };
 use crate::ClientIp;
@@ -160,8 +160,10 @@ fn handle_device_verify(services: &Services, user_code: Option<&str>) -> Result<
 	// Validating the code before authentication exposes the RFC 8628 §5.1
 	// brute-force oracle, so defer it to the authenticated callback.
 	let idp_id = services.oauth.providers.get_default_id();
-	let serve_native =
-		should_serve_native(services.config.oidc_native_auth, idp_id.is_some(), false);
+	let serve_native = should_serve_native(NativeChoice {
+		native_enabled: services.config.oidc_native_auth,
+		has_default_idp: idp_id.is_some(),
+	});
 
 	match serve_native {
 		| true => device_native_redirect(services, user_code),
