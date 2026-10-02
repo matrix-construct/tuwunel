@@ -1,7 +1,17 @@
 #[cfg(test)]
 mod tests;
 
-use std::{fmt::Debug, pin::pin, sync::Arc, vec};
+use std::{
+	fmt::Debug,
+	iter::once,
+	ops::{
+		Bound,
+		Bound::{Excluded, Included, Unbounded},
+	},
+	pin::pin,
+	sync::Arc,
+	vec,
+};
 
 use futures::{
 	Stream, StreamExt,
@@ -9,9 +19,11 @@ use futures::{
 };
 use ruma::{OwnedServerName, ServerName, UserId};
 use tuwunel_core::{
-	Error, Result, at, implement, utils,
+	Error, Result, at, implement,
+	matrix::ShortRoomId,
+	utils,
 	utils::{
-		ReadyExt,
+		IterStream, ReadyExt,
 		bytes::prefix_successor,
 		str_from_bytes,
 		stream::{TryIgnore, WidebandExt},
@@ -250,11 +262,89 @@ pub fn queued_requests(
 ) -> impl Stream<Item = QueueItem> + Send + '_ + use<'_> {
 	let prefix = destination.get_prefix();
 
+	self.queued_range(&prefix, prefix_end(prefix.clone()))
+}
+
+/// Streams the queued PDU rows of one room for a destination.
+///
+/// An EDU row whose count equals the room's short id has exactly the room's
+/// key prefix and is skipped.
+#[implement(Data)]
+pub(super) fn queued_room(
+	&self,
+	destination: &Destination,
+	room: ShortRoomId,
+) -> impl Stream<Item = QueueItem> + Send + '_ + use<'_> {
+	let start = destination.count_key(room);
+	let len = start.len();
+	let end = prefix_end(start.clone());
+
+	self.queued_range(&start, end)
+		.ready_filter(move |(key, _)| key.len() > len)
+}
+
+/// Streams the queued rows of one destination, past the PDU rows of `skip`.
+///
+/// `skip` must be sorted. Each skipped room costs one seek rather than a visit
+/// per row, and the EDU row sharing a skipped room's key bytes is still yielded.
+#[implement(Data)]
+pub(super) fn queued_except<'a>(
+	&'a self,
+	destination: &'a Destination,
+	skip: &'a [ShortRoomId],
+) -> impl Stream<Item = QueueItem> + Send + 'a {
+	debug_assert!(skip.is_sorted(), "skipped rooms must be sorted");
+
+	let resumes = skip
+		.iter()
+		.map(|room| destination.count_key(room.saturating_add(1)));
+
+	let ends = skip
+		.iter()
+		.map(|&room| Included(destination.count_key(room)))
+		.chain(once(prefix_end(destination.get_prefix())));
+
+	once(destination.get_prefix())
+		.chain(resumes)
+		.zip(ends)
+		.stream()
+		.flat_map(|(start, end)| self.queued_range(&start, end))
+}
+
+#[implement(Data)]
+fn queued_range(
+	&self,
+	start: &[u8],
+	end: Bound<Key>,
+) -> impl Stream<Item = QueueItem> + Send + '_ + use<'_> {
 	self.servernameevent_data
-		.raw_stream_from(&prefix)
+		.raw_stream_from(start)
 		.ignore_err()
-		.ready_take_while(move |(key, _)| key.starts_with(&prefix))
+		.ready_take_while(move |&(key, _)| match &end {
+			| Included(end) => key <= end.as_slice(),
+			| Excluded(end) => key < end.as_slice(),
+			| Unbounded => true,
+		})
 		.map(queue_item)
+}
+
+/// Moves a failed transaction's PDU rows back to the queue under their own keys.
+///
+/// EDU rows have no room, so they stay active and ride the next transaction.
+#[implement(Data)]
+pub(super) fn demote<'a, I>(&self, items: I)
+where
+	I: IntoIterator<Item = &'a QueueItem>,
+{
+	items
+		.into_iter()
+		.filter(|(_, event)| matches!(event, SendingEvent::Pdu(_)))
+		.fold(self.db.txn(), |mut txn, (key, _)| {
+			txn.insert_raw(&self.servernameevent_data, key, []);
+			txn.del_raw(&self.servercurrentevent_data, key);
+			txn
+		})
+		.execute();
 }
 
 fn queue_item((key, val): (&[u8], &[u8])) -> QueueItem {
@@ -262,6 +352,8 @@ fn queue_item((key, val): (&[u8], &[u8])) -> QueueItem {
 
 	(key.to_vec(), event)
 }
+
+fn prefix_end(prefix: Key) -> Bound<Key> { prefix_successor(prefix).map_or(Unbounded, Excluded) }
 
 /// Streams queued push destinations with a pending badge refresh.
 ///

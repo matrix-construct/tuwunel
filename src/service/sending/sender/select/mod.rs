@@ -4,6 +4,7 @@ mod receipts;
 
 use std::{
 	iter::repeat_with,
+	mem::replace,
 	sync::atomic::{AtomicU64, AtomicUsize, Ordering},
 	time::SystemTime,
 };
@@ -17,6 +18,7 @@ use tuwunel_core::{
 
 use super::{
 	DEQUEUE_LIMIT, EDU_LIMIT, NewEvents, RetryAction, TransactionStatus, TransactionStatuses,
+	split::Split,
 };
 use crate::{
 	federation::ShouldAttempt,
@@ -39,6 +41,7 @@ struct Selected {
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum Selection {
 	Events(Vec<QueueItem>),
+	Slice(Vec<QueueItem>, Split),
 	Busy,
 	Refused {
 		earliest_retry: SystemTime,
@@ -49,6 +52,7 @@ enum Current {
 	Ready {
 		replay: bool,
 	},
+	Split(Split),
 	Busy,
 	Refused {
 		earliest_retry: SystemTime,
@@ -104,6 +108,10 @@ pub(super) async fn select_events(
 		| Current::Refused { earliest_retry } =>
 			return Ok(Selection::Refused { earliest_retry }),
 		| Current::Ready { replay } => replay,
+		| Current::Split(split) => match self.slice(dest, split).await {
+			| Some((items, split)) => return Ok(Selection::Slice(items, split)),
+			| None => true,
+		},
 	};
 
 	if retry {
@@ -146,7 +154,7 @@ async fn select_events_current(
 
 	let current = self.transition(dest, status, retry_action);
 
-	if matches!(current, Current::Ready { replay: true }) {
+	if matches!(current, Current::Ready { replay: true } | Current::Split(_)) {
 		self.clear_stalled(dest);
 	}
 
@@ -195,6 +203,18 @@ fn transition(
 			*status = TransactionStatus::Running { tries: *tries };
 			Current::Ready { replay: true }
 		},
+		| TransactionStatus::Splitting { tries, .. } => {
+			let tries = *tries;
+
+			launch(status, tries)
+		},
+	}
+}
+
+fn launch(status: &mut TransactionStatus, tries: u32) -> Current {
+	match replace(status, TransactionStatus::Running { tries }) {
+		| TransactionStatus::Splitting { split, .. } => Current::Split(split),
+		| _ => Current::Ready { replay: true },
 	}
 }
 

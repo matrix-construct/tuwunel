@@ -14,6 +14,10 @@ use tuwunel_core::{
 use super::SendingResult;
 use crate::sending::{Destination, EduBuf, SendingEvent, Service};
 
+/// Send a federation transaction, reporting whether one went out at all.
+///
+/// Rows that all fail to load leave nothing to send; they still succeed, so
+/// their keys are acknowledged.
 #[implement(Service)]
 #[tracing::instrument(
 	name = "federation",
@@ -27,7 +31,7 @@ pub(super) async fn send_events_dest_federation(
 	&self,
 	server: OwnedServerName,
 	events: Vec<SendingEvent>,
-) -> SendingResult {
+) -> (SendingResult, bool) {
 	let pdus: Vec<_> = events
 		.iter()
 		.filter_map(|event| extract_variant!(event, SendingEvent::Pdu))
@@ -60,7 +64,7 @@ pub(super) async fn send_events_dest_federation(
 		.collect();
 
 	if pdus.is_empty() && edus.is_empty() {
-		return Ok(Destination::Federation(server));
+		return (Ok(Destination::Federation(server)), false);
 	}
 
 	let preimage = pdus
@@ -97,8 +101,10 @@ pub(super) async fn send_events_dest_federation(
 			warn!(%txn_id, %server, %event_id, %error, "error sending PDU to remote server");
 		});
 
-	match result {
+	let result = match result {
 		| Ok(_) => Ok(Destination::Federation(server)),
 		| Err(error) => Err((Destination::Federation(server), error)),
-	}
+	};
+
+	(result, true)
 }

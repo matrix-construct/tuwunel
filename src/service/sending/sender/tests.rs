@@ -308,4 +308,6 @@ fn carries(items: &[QueueItem], event: &SendingEvent) -> bool {
 	items.iter().any(|(_, carried)| carried == event)
 }
 
-fn completion(result: SendingResult) -> Completion { Completion { result, keys: Keys::new() } }
+fn completion(result: SendingResult) -> Completion {
+	Completion { result, keys: Keys::new(), split: None }
+}

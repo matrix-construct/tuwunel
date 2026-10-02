@@ -6,6 +6,7 @@ use super::{
 	NewEvents, RetryAction, SendingFutures, TransactionStatus, TransactionStatuses, WakeQueue,
 	dispatch::{Completion, SendingError},
 	select::Selection,
+	split::Split,
 	wake::arm_appservice_wake,
 };
 use crate::{
@@ -17,7 +18,7 @@ use crate::{
 #[tracing::instrument(name = "response", level = "debug", skip_all)]
 pub(super) async fn handle_response<'a>(
 	&'a self,
-	Completion { result, keys }: Completion,
+	Completion { result, keys, split }: Completion,
 	futures: &mut SendingFutures<'a>,
 	statuses: &mut TransactionStatuses,
 	wakes: &mut WakeQueue,
@@ -27,11 +28,11 @@ pub(super) async fn handle_response<'a>(
 			let _cork = self.db.db.cork();
 
 			self.db.delete_active_requests(&keys);
-			self.handle_response_ok(dest, futures, statuses, wakes)
+			self.handle_response_ok(dest, split, futures, statuses, wakes)
 				.await;
 		},
 		| Err(error) =>
-			self.handle_response_err(error, futures, statuses, wakes)
+			self.handle_response_err(error, split, futures, statuses, wakes)
 				.await,
 	}
 }
@@ -40,11 +41,20 @@ pub(super) async fn handle_response<'a>(
 async fn handle_response_ok<'a>(
 	&'a self,
 	dest: Destination,
+	split: Option<Split>,
 	futures: &mut SendingFutures<'a>,
 	statuses: &mut TransactionStatuses,
 	wakes: &mut WakeQueue,
 ) {
 	log_recovery(&dest, statuses);
+
+	if let Some(split) = split
+		&& let Some((items, split)) = self.split_delivered(&dest, split).await
+	{
+		run_status(&dest, statuses);
+		futures.push(self.send_events(dest, items, Some(split)));
+		return;
+	}
 
 	let items = self.resume_queued(&dest).await;
 	let items = self.with_edus(&dest, items).await;
@@ -78,6 +88,7 @@ fn run_status(dest: &Destination, statuses: &mut TransactionStatuses) {
 async fn handle_response_err<'a>(
 	&'a self,
 	(dest, error): SendingError,
+	split: Option<Split>,
 	futures: &mut SendingFutures<'a>,
 	statuses: &mut TransactionStatuses,
 	wakes: &mut WakeQueue,
@@ -110,6 +121,16 @@ async fn handle_response_err<'a>(
 					.insert(server.clone(), Some(Instant::now()));
 			}
 
+			let (split, tries) = self
+				.split_failure(&server, &error, split, tries)
+				.await;
+
+			if let Some(split) = split {
+				let status = TransactionStatus::Splitting { tries, split };
+
+				statuses.insert(Destination::Federation(server.clone()), status);
+			}
+
 			self.arm_federation_wake(server, tries, wakes)
 				.await;
 		},
@@ -133,6 +154,7 @@ fn fail_status(dest: &Destination, statuses: &mut TransactionStatuses) -> RetryA
 			(tries.saturating_add(1), RetryAction::Force),
 		| TransactionStatus::Running { tries }
 		| TransactionStatus::Failed { tries, .. }
+		| TransactionStatus::Splitting { tries, .. }
 		| TransactionStatus::Retrying { tries } => (tries.saturating_add(1), RetryAction::None),
 	};
 

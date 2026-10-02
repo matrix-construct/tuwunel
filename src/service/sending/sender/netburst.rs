@@ -71,7 +71,7 @@ pub(super) async fn startup_netburst<'a>(
 			}
 
 			if netburst {
-				futures.push(self.send_events(dest, items));
+				futures.push(self.send_events(dest, items, None));
 			}
 		});
 

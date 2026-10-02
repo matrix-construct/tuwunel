@@ -2,6 +2,7 @@ mod dispatch;
 mod netburst;
 mod response;
 mod select;
+mod split;
 #[cfg(test)]
 mod tests;
 mod wake;
@@ -28,6 +29,7 @@ use tuwunel_core::{
 use self::{
 	dispatch::{Completion, SendingFuture},
 	select::Selection,
+	split::Split,
 	wake::{arm_wake, is_armed},
 };
 use super::{Destination, Msg, SendingEvent, Service, data::QueueItem};
@@ -63,6 +65,12 @@ enum TransactionStatus {
 	/// batch waits for its replay.
 	Retrying {
 		tries: u32,
+	},
+
+	/// As `Retrying`, while a rejected transaction's rooms are sent apart.
+	Splitting {
+		tries: u32,
+		split: Split,
 	},
 }
 
@@ -216,7 +224,9 @@ fn schedule_events<'a>(
 		| Selection::Events(items) if items.is_empty() => {
 			statuses.remove(&dest);
 		},
-		| Selection::Events(items) => futures.push(self.send_events(dest, items)),
+		| Selection::Events(items) => futures.push(self.send_events(dest, items, None)),
+		| Selection::Slice(items, split) =>
+			futures.push(self.send_events(dest, items, Some(split))),
 		| Selection::Refused { earliest_retry } if is_armed(wakes, &dest).is_false() =>
 			arm_wake(wakes, dest, earliest_retry),
 		| Selection::Refused { .. } | Selection::Busy => {},

@@ -26,7 +26,7 @@ async fn missing_appservice_registration_retries_on_its_timer_and_preserves_rows
 	let mut statuses = [(dest.clone(), TransactionStatus::Running { tries: 0 })].into();
 	let mut wakes = WakeQueue::new(); // response and wake state out-param
 	let response = sending
-		.send_events(dest.clone(), vec![old.clone()])
+		.send_events(dest.clone(), vec![old.clone()], None)
 		.await;
 
 	response
@@ -131,7 +131,7 @@ async fn ping_during_flight_retries_immediately_after_failure_and_stale_timer_is
 	));
 
 	let response = sending
-		.send_events(dest.clone(), vec![old.clone()])
+		.send_events(dest.clone(), vec![old.clone()], None)
 		.await;
 
 	response
