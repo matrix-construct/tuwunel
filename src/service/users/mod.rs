@@ -289,8 +289,8 @@ impl Service {
 	/// MSC3939: reject a request from a locked account.
 	///
 	/// The rejection maps to 401 `M_USER_LOCKED` with `soft_logout: true`, so
-	/// the client retains its session and polls for the unlock. The login
-	/// route and the request middleware share this gate.
+	/// the client retains its session and polls for the unlock. The login and
+	/// refresh routes and the request middleware share this gate.
 	pub async fn locked_check(&self, user_id: &UserId) -> Result {
 		self.is_locked(user_id)
 			.await

@@ -52,6 +52,8 @@ pub(crate) async fn refresh_token_route(
 				));
 			}
 
+			services.users.locked_check(&user_id).await?;
+
 			let refresh_token = Some(generate_refresh_token());
 			let (access_token, expires_in_ms) = services.users.generate_access_token(true);
 
@@ -76,6 +78,8 @@ pub(crate) async fn refresh_token_route(
 		},
 
 		| RefreshToken::Replayed { user_id, device_id, current, grace } if grace => {
+			services.users.locked_check(&user_id).await?;
+
 			// Benign double-submit: re-issue an access token for the unchanged
 			// refresh token rather than rotating it.
 			let (access_token, expires_in_ms) = services.users.generate_access_token(true);
