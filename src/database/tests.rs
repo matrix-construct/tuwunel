@@ -2,9 +2,14 @@
 #![expect(clippy::needless_borrows_for_generic_args)]
 
 mod cbor;
+mod txn;
 
 use std::{
-	env::temp_dir, fmt::Debug, fs::remove_dir_all, path::PathBuf, process::id as process_id,
+	env::temp_dir,
+	fmt::Debug,
+	fs::remove_dir_all,
+	path::{Path, PathBuf},
+	process::id as process_id,
 	sync::Arc,
 };
 
@@ -1151,14 +1156,7 @@ fn txn_record_truncated() {
 
 #[tokio::test]
 async fn txn_insert_raw_preserves_bytes() -> Result {
-	let path = database_path("txn");
-	let raw_config = Figment::new()
-		.merge(("server_name", "localhost"))
-		.merge(("database_path", &path))
-		.merge(("test", ["fresh", "cleanup"]));
-
-	let server = new_server(&raw_config)?;
-	let database = Database::open(&server).await?;
+	let database = open_database("txn").await?;
 
 	let first = database.get("alias_roomid")?;
 	let second = database.get("alias_userid")?;
@@ -1258,15 +1256,28 @@ async fn txn_insert_raw_preserves_bytes() -> Result {
 	);
 
 	drop(database);
-	drop(server);
 
 	Ok(())
+}
+
+async fn open_database(name: &str) -> Result<Arc<Database>> {
+	let path = database_path(name);
+	let server = new_server(&base_config(&path))?;
+
+	Database::open(&server).await
 }
 
 fn database_path(name: &str) -> PathBuf {
 	temp_dir()
 		.join("tuwunel")
 		.join(format!("database-{name}-{}", process_id()))
+}
+
+fn base_config(path: &Path) -> Figment {
+	Figment::new()
+		.merge(("server_name", "localhost"))
+		.merge(("database_path", path))
+		.merge(("test", ["fresh", "cleanup"]))
 }
 
 fn new_server(raw_config: &Figment) -> Result<Arc<Server>> {
@@ -1288,12 +1299,9 @@ fn new_server(raw_config: &Figment) -> Result<Arc<Server>> {
 async fn a_restore_is_not_repeated_on_reopen() -> Result {
 	let path = database_path("restore");
 	let backups = path.with_extension("backups");
-	let raw_config = Figment::new()
-		.merge(("server_name", "localhost"))
-		.merge(("database_path", &path))
+	let raw_config = base_config(&path)
 		.merge(("database_backup_path", &backups))
-		.merge(("database_restore_backup", 1))
-		.merge(("test", ["fresh", "cleanup"]));
+		.merge(("database_restore_backup", 1));
 
 	let server = new_server(&raw_config)?;
 
@@ -1315,14 +1323,7 @@ async fn a_restore_is_not_repeated_on_reopen() -> Result {
 
 #[tokio::test]
 async fn sort_flushes_every_column_family() -> Result {
-	let path = database_path("sort");
-	let raw_config = Figment::new()
-		.merge(("server_name", "localhost"))
-		.merge(("database_path", &path))
-		.merge(("test", ["fresh", "cleanup"]));
-
-	let server = new_server(&raw_config)?;
-	let database = Database::open(&server).await?;
+	let database = open_database("sort").await?;
 
 	let first = database.get("alias_roomid")?;
 	let second = database.get("alias_userid")?;
@@ -1342,7 +1343,6 @@ async fn sort_flushes_every_column_family() -> Result {
 	assert_eq!(second.get(b"second").await?.as_ref(), b"value");
 
 	drop(database);
-	drop(server);
 
 	Ok(())
 }

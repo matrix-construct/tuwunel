@@ -42,7 +42,7 @@ pub use self::{
 	keyval::{KeyBuf, KeyVal, Slice, serialize_key, serialize_val},
 	map::{Get, Map, Qry, compact},
 	ser::{Cbor, Interfix, Json, SEP, Separator, serialize, serialize_to, serialize_to_vec},
-	txn::Txn,
+	txn::{Txn, TxnError},
 };
 pub(crate) use self::{engine::context::Context, util::or_else};
 use crate::maps::{Maps, MapsKey, MapsVal, open as open_maps};
