@@ -4,6 +4,7 @@ use tuwunel_database::{Database, Json, Txn, keyval::ValBuf, serialize_key, seria
 
 mod identity;
 mod references;
+mod state;
 #[cfg(test)]
 mod tests;
 
