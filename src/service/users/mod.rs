@@ -27,6 +27,7 @@ use tuwunel_core::{
 		self, BoolExt, MutexMap, ReadyExt, hash::password as hash_password, result::NotFound,
 		stream::TryIgnore,
 	},
+	warn,
 };
 use tuwunel_database::{Deserialized, Json, Map};
 
@@ -169,6 +170,8 @@ impl Service {
 		password: Option<&str>,
 		origin: Option<&str>,
 	) -> Result {
+		self.check_creation(user_id).await?;
+
 		let origin = origin.unwrap_or("password");
 
 		if password.is_none() {
@@ -178,6 +181,29 @@ impl Service {
 
 		self.db.userid_origin.insert(user_id, origin);
 		self.set_password(user_id, password).await
+	}
+
+	async fn check_creation(&self, user_id: &UserId) -> Result {
+		if self.services.globals.user_is_local(user_id)
+			&& user_id != self.services.globals.server_user
+			&& let Some(admin_room) = self
+				.services
+				.alias
+				.resolve_local_alias(&self.services.admin.admin_alias)
+				.await
+				.optional()?
+			&& self
+				.services
+				.state_cache
+				.once_joined(user_id, &admin_room)
+				.await
+			&& !self.exists(user_id).await
+		{
+			warn!(%user_id, "Refusing a name previously joined to the admin room");
+			return Err!(Request(UserInUse("User ID is not available.")));
+		}
+
+		Ok(())
 	}
 
 	/// Deactivate account
