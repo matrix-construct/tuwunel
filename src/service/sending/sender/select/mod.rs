@@ -12,13 +12,15 @@ use std::{
 use futures::{StreamExt, future::join3};
 use ruma::{ServerName, api::federation::transactions::edu::Edu};
 use tuwunel_core::{
-	Result, implement, trace,
-	utils::{BoolExt, ReadyExt},
+	Result, implement,
+	matrix::ShortRoomId,
+	trace,
+	utils::{BoolExt, ReadyExt, time::now_secs},
 };
 
 use super::{
 	DEQUEUE_LIMIT, EDU_LIMIT, NewEvents, RetryAction, TransactionStatus, TransactionStatuses,
-	split::Split,
+	split::{Split, pdu_room},
 };
 use crate::{
 	federation::ShouldAttempt,
@@ -42,6 +44,9 @@ struct Selected {
 pub(super) enum Selection {
 	Events(Vec<QueueItem>),
 	Slice(Vec<QueueItem>, Split),
+	Parked {
+		until: u64,
+	},
 	Busy,
 	Refused {
 		earliest_retry: SystemTime,
@@ -123,10 +128,15 @@ pub(super) async fn select_events(
 	}
 
 	let _cork = self.db.db.cork();
-	let items = self.claim_new(new_events).await;
-	let items = self.with_edus(dest, items).await;
+	let Destination::Federation(server) = dest else {
+		return Ok(Selection::Events(self.claim_new(new_events, &[]).await));
+	};
 
-	Ok(Selection::Events(items))
+	let selection = self
+		.federation_batch(dest, server, new_events)
+		.await;
+
+	Ok(selection)
 }
 
 #[implement(Service)]
@@ -228,16 +238,57 @@ fn clear_stalled(&self, dest: &Destination) {
 	}
 }
 
-/// Claim a request's own queue rows.
+/// Compose a federation destination's next transaction around its parked rooms.
+///
+/// Each expired park is retried alone first, and one whose room has nothing
+/// queued ends. Rows of other parked rooms stay queued, and a destination
+/// holding nothing else waits for the earliest park to expire.
+#[implement(Service)]
+pub(super) async fn federation_batch(
+	&self,
+	dest: &Destination,
+	server: &ServerName,
+	new_events: NewEvents,
+) -> Selection {
+	let parks: Vec<_> = self.db.parks(server).collect().await;
+	let now = now_secs();
+
+	for park in parks.iter().filter(|park| park.until <= now) {
+		if let Some((items, split)) = self.slice(dest, Split::probe(park.room)).await {
+			return Selection::Slice(items, split);
+		}
+
+		self.db.unpark(server, park.room);
+	}
+
+	let skip: Vec<_> = parks.iter().map(|park| park.room).collect();
+	let items = self.claim_new(new_events, &skip).await;
+	let items = self.with_edus(dest, server, items, &skip).await;
+	let until = parks
+		.iter()
+		.map(|park| park.until)
+		.filter(|&until| until > now)
+		.min();
+
+	match until {
+		| Some(until) if items.is_empty() => Selection::Parked { until },
+		| _ => Selection::Events(items),
+	}
+}
+
+/// Claim a request's own queue rows, leaving those of skipped rooms queued.
 ///
 /// Flush markers carry no row and are dropped; the claimed rows turn active
 /// in one batch.
 #[implement(Service)]
-async fn claim_new(&self, new_events: NewEvents) -> Vec<QueueItem> {
+async fn claim_new(&self, new_events: NewEvents, skip: &[ShortRoomId]) -> Vec<QueueItem> {
 	let items: Vec<_> = self
 		.db
 		.retain_queued(new_events)
-		.ready_filter(|(_, event)| matches!(event, SendingEvent::Flush).is_false())
+		.ready_filter(|item| {
+			matches!(item.1, SendingEvent::Flush).is_false()
+				&& pdu_room(item).is_none_or(|room| !skip.contains(&room))
+		})
 		.collect()
 		.await;
 
@@ -247,20 +298,18 @@ async fn claim_new(&self, new_events: NewEvents) -> Vec<QueueItem> {
 
 /// Top up a federation transaction with the EDUs accrued since its last window.
 ///
-/// An empty transaction first claims the head of the queue; other destinations
-/// pass through unchanged.
+/// An empty transaction first claims the head of the queue. Rows of the
+/// skipped rooms neither join the transaction nor hold back fresh EDUs.
 #[implement(Service)]
-pub(super) async fn with_edus(
+async fn with_edus(
 	&self,
 	dest: &Destination,
+	server_name: &ServerName,
 	items: Vec<QueueItem>,
+	skip: &[ShortRoomId],
 ) -> Vec<QueueItem> {
-	let Destination::Federation(server_name) = dest else {
-		return items;
-	};
-
 	let items = if items.is_empty() {
-		self.resume_queued(dest).await
+		self.resume_queued(dest, skip).await
 	} else {
 		items
 	};
@@ -268,7 +317,7 @@ pub(super) async fn with_edus(
 	// Fresh signing keys must not overtake an older queued signing update.
 	if self
 		.db
-		.queued_requests(dest)
+		.queued_except(dest, skip)
 		.take(1)
 		.count()
 		.await
@@ -297,13 +346,18 @@ fn append_edus(
 
 /// Claim the head of a destination's queue as its next transaction.
 ///
-/// The claimed rows turn active in one batch.
+/// Rows of the skipped rooms are passed over; the claimed rows turn active in
+/// one batch.
 #[implement(Service)]
 #[tracing::instrument(level = "trace", skip_all)]
-pub(super) async fn resume_queued(&self, dest: &Destination) -> Vec<QueueItem> {
+pub(super) async fn resume_queued(
+	&self,
+	dest: &Destination,
+	skip: &[ShortRoomId],
+) -> Vec<QueueItem> {
 	let queued: Vec<_> = self
 		.db
-		.queued_requests(dest)
+		.queued_except(dest, skip)
 		.take(DEQUEUE_LIMIT)
 		.collect()
 		.await;

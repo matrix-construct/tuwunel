@@ -1,16 +1,22 @@
 use std::pin::pin;
 
-use futures::StreamExt;
+use futures::{StreamExt, future::OptionFuture};
 use ruma::ServerName;
 use tuwunel_core::{
-	Error, debug_info, extract_variant, implement, matrix::ShortRoomId, smallvec::SmallVec,
-	utils::ReadyExt,
+	Error, debug_info, extract_variant, implement,
+	matrix::ShortRoomId,
+	smallvec::SmallVec,
+	utils::{IterStream, ReadyExt},
+	warn,
 };
 
 use super::PDU_LIMIT;
 use crate::{
 	federation::is_content_rejection,
-	sending::{Destination, SendingEvent, Service, data::QueueItem},
+	sending::{
+		Destination, SendingEvent, Service,
+		data::{Park, QueueItem},
+	},
 };
 
 /// Rooms of a rejected transaction still to send.
@@ -29,8 +35,8 @@ const SPLIT_AFTER: u32 = 4;
 ///
 /// The head room is the one in flight. Until a room is delivered, each failure
 /// moves the head last behind one more queued room brought in as a control. A
-/// room that fails after a delivery leaves the split, its rows queued again.
-/// Boxed to keep transaction statuses small.
+/// room that fails after a delivery is parked. Boxed to keep transaction
+/// statuses small.
 #[derive(Debug, Eq, PartialEq)]
 pub(super) struct Split(Box<Rounds>);
 
@@ -43,9 +49,9 @@ struct Rounds {
 /// Choose how a failed federation transaction continues.
 ///
 /// After repeated failures the transaction's PDU rows return to the queue and
-/// its rooms go out one per transaction; a room failing after a delivery leaves
-/// the split. Returns the split to keep and the failure count its retry backs
-/// off by, zero when the split advanced.
+/// its rooms go out one per transaction; a room failing after a delivery is
+/// parked. Returns the split to keep and the failure count its retry backs off
+/// by, zero when the split advanced.
 #[implement(Service)]
 pub(super) async fn split_failure(
 	&self,
@@ -62,14 +68,26 @@ pub(super) async fn split_failure(
 
 	let dest = Destination::Federation(server.to_owned());
 	let active: Vec<_> = self.db.active_requests_for(&dest).collect().await;
+	let rejected = split
+		.as_ref()
+		.filter(|split| implicated && split.0.delivered)
+		.and_then(Split::head)
+		.map(|room| self.db.next_park(server, room));
 
-	self.db.demote(&active);
+	let park = OptionFuture::from(rejected).await;
+
+	self.db
+		.demote(&active, park.map(|park| (server, park)));
+
+	if let Some(Park { room, until, count }) = park {
+		warn!(%server, room, until, count, "Parked a room the server keeps rejecting");
+	}
 
 	match split {
 		| Some(split) if !implicated => (Some(split), tries),
 		| Some(split) if split.0.delivered => (Some(split.skipped()), 0),
 		| Some(split) => {
-			let control = self.control(&dest, &split.0.rooms).await;
+			let control = self.control(&dest, server, &split.0.rooms).await;
 
 			(Some(split.rotated(control)), tries)
 		},
@@ -77,24 +95,41 @@ pub(super) async fn split_failure(
 	}
 }
 
-/// Find the first queued room outside the split.
+/// Find the first queued room outside the split and the server's parks.
 ///
 /// A control delivered while the split's rooms keep failing implicates those
 /// rooms rather than the destination.
 #[implement(Service)]
-async fn control(&self, dest: &Destination, rooms: &Rooms) -> Option<ShortRoomId> {
-	let skip = sorted(rooms.clone());
+async fn control(
+	&self,
+	dest: &Destination,
+	server: &ServerName,
+	rooms: &Rooms,
+) -> Option<ShortRoomId> {
+	let skip: Rooms = self
+		.db
+		.parks(server)
+		.map(|park| park.room)
+		.chain(rooms.iter().copied().stream())
+		.collect()
+		.await;
+
+	let skip = sorted(skip);
 
 	pin!(self.db.queued_except(dest, &skip))
 		.ready_find_map(|item| pdu_room(&item))
 		.await
 }
 
-/// Advance a split past its delivered head room.
+/// Advance a split past its delivered head room, ending any park it had.
 ///
 /// Returns the next room's transaction, or nothing once the split is done.
 #[implement(Service)]
 pub(super) async fn split_delivered(&self, dest: &Destination, split: Split) -> Option<Slice> {
+	if let (Destination::Federation(server), Some(room)) = (dest, split.head()) {
+		self.db.unpark(server, room);
+	}
+
 	let next = self.slice(dest, split.delivered()).await;
 
 	if next.is_none() {
@@ -131,6 +166,17 @@ pub(super) async fn slice(&self, dest: &Destination, split: Split) -> Option<Sli
 
 #[implement(Split)]
 fn new(rooms: Rooms) -> Self { Self(Box::new(Rounds { rooms, delivered: false })) }
+
+/// Retry a room whose park expired.
+///
+/// The probe counts as delivered, so a failure parks the room again at once.
+#[implement(Split)]
+pub(super) fn probe(room: ShortRoomId) -> Self {
+	Self(Box::new(Rounds {
+		rooms: Rooms::from_slice(&[room]),
+		delivered: true,
+	}))
+}
 
 #[implement(Split)]
 #[inline]

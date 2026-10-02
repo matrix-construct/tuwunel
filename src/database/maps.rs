@@ -487,6 +487,10 @@ pub(super) static MAPS: &[Descriptor] = &[
 		..descriptor::RANDOM_SMALL
 	},
 	Descriptor {
+		name: "servershortroomid_park",
+		..descriptor::RANDOM_SMALL
+	},
+	Descriptor {
 		name: "shorteventid_authchain",
 		..descriptor::DROPPED
 	},

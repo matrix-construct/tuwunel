@@ -56,11 +56,15 @@ async fn handle_response_ok<'a>(
 		return;
 	}
 
-	let items = self.resume_queued(&dest).await;
-	let items = self.with_edus(&dest, items).await;
+	let next = match &dest {
+		| Destination::Federation(server) =>
+			self.federation_batch(&dest, server, NewEvents::new())
+				.await,
+		| _ => Selection::Events(self.resume_queued(&dest, &[]).await),
+	};
 
 	run_status(&dest, statuses);
-	self.schedule_events(dest, Selection::Events(items), futures, statuses, wakes);
+	self.schedule_events(dest, next, futures, statuses, wakes);
 }
 
 /// Log a delivery that ends a destination's streak of failed transactions.

@@ -9,13 +9,14 @@ use tuwunel_core::{
 	config::Figment,
 	err,
 	matrix::{PduCount, PduId},
+	utils::time::now_secs,
 };
 
 use super::{Rooms, Slice, Split};
 use crate::{
 	sending::{
 		Destination, EduBuf, SendingEvent, Service,
-		data::QueueItem,
+		data::{Park, QueueItem},
 		sender::{
 			NewEvents, SendingFutures, TransactionStatus, TransactionStatuses, WakeQueue,
 			dispatch::Completion,
@@ -73,7 +74,7 @@ async fn only_repeated_content_failures_split() -> Result {
 }
 
 #[tokio::test]
-async fn rooms_go_out_apart_until_one_fails_after_a_delivery() -> Result {
+async fn rooms_go_out_apart_until_one_is_parked() -> Result {
 	let Some(fixture) = sender_fixture().await? else {
 		return Ok(());
 	};
@@ -127,14 +128,82 @@ async fn rooms_go_out_apart_until_one_fails_after_a_delivery() -> Result {
 		.await;
 
 	let queued: Vec<_> = sending.db.queued_requests(&dest).collect().await;
+	let parks: Vec<_> = sending.db.parks(&server).collect().await;
 
 	assert_eq!(queued, from_ref(&second));
+	assert!(matches!(parks[..], [Park { room: 2, count: 1, .. }]));
 
 	let selection = sending
 		.select_events(&dest, NewEvents::new(), &mut statuses)
 		.await?;
 
-	assert_eq!(selection, Selection::Events(vec![second]));
+	assert!(matches!(selection, Selection::Parked { .. }));
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn an_expired_park_retries_its_room_alone() -> Result {
+	let Some(fixture) = sender_fixture().await? else {
+		return Ok(());
+	};
+
+	let sending = &fixture.services.sending;
+	let server: OwnedServerName = "split.example".try_into()?;
+	let dest = Destination::Federation(server.clone());
+	let parked = enqueue(sending, &dest, room_pdu(1, 1));
+	let healthy = enqueue(sending, &dest, room_pdu(2, 2));
+	let mut futures = SendingFutures::new(); // handle_response out-param
+	let mut statuses = TransactionStatuses::new(); // handle_response out-param
+	let mut wakes = WakeQueue::new(); // handle_response out-param
+
+	park(sending, &server, 1, now_secs().saturating_add(3600));
+
+	let selection = sending
+		.select_events(&dest, [parked.clone()].into(), &mut statuses)
+		.await?;
+
+	assert_eq!(selection, Selection::Events(vec![healthy.clone()]));
+
+	sending
+		.handle_response(
+			delivered(&dest, vec![healthy.0]),
+			&mut futures,
+			&mut statuses,
+			&mut wakes,
+		)
+		.await;
+
+	assert!(statuses.is_empty());
+	assert_eq!(wakes.len(), 1);
+
+	park(sending, &server, 0, 0);
+	park(sending, &server, 1, 0);
+
+	let (items, split) = selected(sending, &dest, &mut statuses).await?;
+
+	assert_eq!(items, from_ref(&parked));
+
+	sending
+		.handle_response(failed(&server, Some(split)), &mut futures, &mut statuses, &mut wakes)
+		.await;
+
+	let parks: Vec<_> = sending.db.parks(&server).collect().await;
+
+	assert!(matches!(
+		parks[..],
+		[Park { room: 1, count: 2, until }] if until > now_secs().saturating_add(3600)
+	));
+
+	park(sending, &server, 1, 0);
+
+	let (items, split) = selected(sending, &dest, &mut statuses).await?;
+
+	sending
+		.handle_response(advanced(&dest, (items, split)), &mut futures, &mut statuses, &mut wakes)
+		.await;
+
+	assert_eq!(sending.db.parks(&server).count().await, 0);
 
 	Ok(())
 }
@@ -263,6 +332,12 @@ fn advanced(dest: &Destination, (items, split): Slice) -> Completion {
 		split: Some(split),
 		..delivered(dest, keys)
 	}
+}
+
+fn park(sending: &Service, server: &ServerName, room: u64, until: u64) {
+	sending
+		.db
+		.demote(&[], Some((server, Park { room, until, count: 1 })));
 }
 
 async fn slice(sending: &Service, dest: &Destination, split: Split) -> Result<Slice> {

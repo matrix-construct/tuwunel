@@ -10,6 +10,7 @@ use std::{
 	},
 	pin::pin,
 	sync::Arc,
+	time::Duration,
 	vec,
 };
 
@@ -27,9 +28,10 @@ use tuwunel_core::{
 		bytes::prefix_successor,
 		str_from_bytes,
 		stream::{TryIgnore, WidebandExt},
+		time::now_secs,
 	},
 };
-use tuwunel_database::{Database, Deserialized, Map, Txn};
+use tuwunel_database::{Database, Deserialized, Interfix, Map, Txn};
 
 use super::{
 	Destination, EduBuf, SendingEvent, TAG_BADGE_REFRESH, TAG_DEVICE_LIST_CHANGED, TAG_TO_DEVICE,
@@ -45,15 +47,38 @@ pub(super) type QueueItem = (Key, SendingEvent);
 pub(super) type Key = Vec<u8>;
 pub(super) type Keys = Vec<Key>;
 
+const PARK_BASE: Duration = Duration::from_hours(1);
+const PARK_LIMIT: Duration = Duration::from_hours(24);
+
+/// A room held back from a server that keeps rejecting it.
+///
+/// The server's queued rows for the room are skipped until `until` passes,
+/// when the room is retried alone; a delivery ends the park.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct Park {
+	/// The room's short id.
+	pub(super) room: ShortRoomId,
+
+	/// When the room may be sent again, in seconds since the epoch.
+	pub(super) until: u64,
+
+	/// Consecutive parks without a delivery, each doubling the last.
+	pub(super) count: u64,
+}
+
+type ParkRow<'a> = ((&'a ServerName, ShortRoomId), (u64, u64));
+
 /// The sending service's column families.
 ///
 /// Queued rows wait in `servernameevent_data` until a transaction claims them
 /// into `servercurrentevent_data`; `servername_educount` is the per-server EDU
-/// watermark.
+/// watermark, and `servershortroomid_park` holds rooms a server keeps
+/// rejecting.
 pub struct Data {
 	servercurrentevent_data: Arc<Map>,
 	servernameevent_data: Arc<Map>,
 	servername_educount: Arc<Map>,
+	servershortroomid_park: Arc<Map>,
 	pub(super) db: Arc<Database>,
 	services: Arc<crate::services::OnceServices>,
 }
@@ -66,6 +91,7 @@ pub(super) fn new(args: &crate::Args<'_>) -> Self {
 		servercurrentevent_data: db["servercurrentevent_data"].clone(),
 		servernameevent_data: db["servernameevent_data"].clone(),
 		servername_educount: db["servername_educount"].clone(),
+		servershortroomid_park: db["servershortroomid_park"].clone(),
 		db: args.db.clone(),
 		services: args.services.clone(),
 	}
@@ -331,20 +357,72 @@ fn queued_range(
 /// Moves a failed transaction's PDU rows back to the queue under their own keys.
 ///
 /// EDU rows have no room, so they stay active and ride the next transaction.
+/// A park lands in the same batch as the rows it holds back.
 #[implement(Data)]
-pub(super) fn demote<'a, I>(&self, items: I)
+pub(super) fn demote<'a, I>(&self, items: I, park: Option<(&ServerName, Park)>)
 where
 	I: IntoIterator<Item = &'a QueueItem>,
 {
-	items
+	let txn = items
 		.into_iter()
 		.filter(|(_, event)| matches!(event, SendingEvent::Pdu(_)))
 		.fold(self.db.txn(), |mut txn, (key, _)| {
 			txn.insert_raw(&self.servernameevent_data, key, []);
 			txn.del_raw(&self.servercurrentevent_data, key);
 			txn
+		});
+
+	park.into_iter()
+		.fold(txn, |mut txn, (server, park)| {
+			txn.put(&self.servershortroomid_park, (server, park.room), (park.until, park.count));
+			txn
 		})
 		.execute();
+}
+
+/// Computes the park for a room that failed again.
+///
+/// Each consecutive park doubles the last hold, up to a day; the caller
+/// writes it.
+#[implement(Data)]
+pub(super) async fn next_park(&self, server: &ServerName, room: ShortRoomId) -> Park {
+	let count = self
+		.servershortroomid_park
+		.qry(&(server, room))
+		.await
+		.deserialized()
+		.map_or(1, |(_, count): (u64, u64)| count.saturating_add(1));
+
+	let doublings = u32::try_from(count.saturating_sub(1)).unwrap_or(u32::MAX);
+	let hold = PARK_BASE
+		.saturating_mul(2_u32.saturating_pow(doublings))
+		.min(PARK_LIMIT);
+
+	Park {
+		room,
+		until: now_secs().saturating_add(hold.as_secs()),
+		count,
+	}
+}
+
+#[implement(Data)]
+pub(super) fn unpark(&self, server: &ServerName, room: ShortRoomId) {
+	self.servershortroomid_park.del((server, room));
+}
+
+/// Streams a server's parked rooms, expired ones included.
+///
+/// Rooms come in short id order, so their ids form a sorted skip list.
+#[implement(Data)]
+pub(super) fn parks<'a>(
+	&'a self,
+	server: &'a ServerName,
+) -> impl Stream<Item = Park> + Send + 'a {
+	self.servershortroomid_park
+		.stream_prefix(&(server, Interfix))
+		.ignore_err()
+		.map(park_row)
+		.map(at!(1))
 }
 
 fn queue_item((key, val): (&[u8], &[u8])) -> QueueItem {
@@ -354,6 +432,10 @@ fn queue_item((key, val): (&[u8], &[u8])) -> QueueItem {
 }
 
 fn prefix_end(prefix: Key) -> Bound<Key> { prefix_successor(prefix).map_or(Unbounded, Excluded) }
+
+fn park_row(((server, room), (until, count)): ParkRow<'_>) -> (&ServerName, Park) {
+	(server, Park { room, until, count })
+}
 
 /// Streams queued push destinations with a pending badge refresh.
 ///

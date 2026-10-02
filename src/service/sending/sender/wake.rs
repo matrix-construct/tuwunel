@@ -12,7 +12,9 @@ use tuwunel_core::{
 	Error, error,
 	error::error_chain,
 	implement, trace,
-	utils::{exponential_backoff_remaining_secs, rand::secs as rand_secs},
+	utils::{
+		BoolExt, exponential_backoff_remaining_secs, rand::secs as rand_secs, time::now_secs,
+	},
 	warn,
 };
 
@@ -234,6 +236,31 @@ fn record_push_failure(dest: &Destination, error: &Error, tries: u32, retry_in: 
 			"Push transaction failed",
 		),
 	}
+}
+
+/// Wake a destination holding only parked rooms when its earliest park expires.
+///
+/// Unlike a retry timer, it is not jittered, and it is skipped when a wake for
+/// the destination is already armed to fire no later.
+pub(super) fn arm_park_wake(wakes: &mut WakeQueue, dest: Destination, until: u64) {
+	let deadline = park_deadline(until);
+
+	if wakes
+		.iter()
+		.any(|Reverse((due, armed))| armed == &dest && *due <= deadline)
+		.is_false()
+	{
+		wakes.push(Reverse((deadline, dest)));
+	}
+}
+
+fn park_deadline(until: u64) -> Instant {
+	let now = Instant::now();
+	let delay = Duration::from_secs(until.saturating_sub(now_secs()));
+
+	now.checked_add(delay)
+		.or_else(|| now.checked_add(WAKE_OVERFLOW_DELAY))
+		.unwrap_or(now)
 }
 
 pub(super) fn is_armed(wakes: &WakeQueue, dest: &Destination) -> bool {

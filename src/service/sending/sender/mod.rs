@@ -30,7 +30,7 @@ use self::{
 	dispatch::{Completion, SendingFuture},
 	select::Selection,
 	split::Split,
-	wake::{arm_wake, is_armed},
+	wake::{arm_park_wake, arm_wake, is_armed},
 };
 use super::{Destination, Msg, SendingEvent, Service, data::QueueItem};
 
@@ -227,6 +227,10 @@ fn schedule_events<'a>(
 		| Selection::Events(items) => futures.push(self.send_events(dest, items, None)),
 		| Selection::Slice(items, split) =>
 			futures.push(self.send_events(dest, items, Some(split))),
+		| Selection::Parked { until } => {
+			statuses.remove(&dest);
+			arm_park_wake(wakes, dest, until);
+		},
 		| Selection::Refused { earliest_retry } if is_armed(wakes, &dest).is_false() =>
 			arm_wake(wakes, dest, earliest_retry),
 		| Selection::Refused { .. } | Selection::Busy => {},

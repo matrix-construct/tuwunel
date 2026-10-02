@@ -10,13 +10,13 @@ use ruma::{
 	server_name, user_id,
 };
 use serde_json::{from_value, json};
-use tuwunel_core::{Err, Result};
+use tuwunel_core::{Err, Result, utils::time::now_secs};
 
-use super::{delivered, enqueue, fixture::fixture};
+use super::{delivered, enqueue, fixture::fixture, pdu_id};
 use crate::{
 	sending::{
 		Destination, SendingEvent,
-		data::Keys,
+		data::{Keys, Park},
 		sender::{
 			DEQUEUE_LIMIT, SendingFutures, TransactionStatuses, WakeQueue,
 			select::{Selection, edu_buf},
@@ -169,6 +169,38 @@ async fn success_acknowledges_only_carried_rows() -> Result {
 		.await;
 
 	assert_eq!(active, [old]);
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn parked_rows_do_not_hold_back_fresh_edus() -> Result {
+	let Some(fixture) = fixture(false, -1).await? else {
+		return Ok(());
+	};
+
+	let sending = &fixture.services.sending;
+	let server = server_name!("remote.example");
+	let dest = Destination::Federation(server.to_owned());
+	let until = now_secs().saturating_add(3600);
+
+	enqueue(sending, &dest, SendingEvent::Pdu(pdu_id(1)));
+	sending
+		.db
+		.demote(&[], Some((server, Park { room: 1, until, count: 1 })));
+
+	key_change(&fixture, server, user_id!("@keys:localhost")).await?;
+
+	let mut statuses = TransactionStatuses::new(); // select_events out-param
+	let flush = [(Vec::new(), SendingEvent::Flush)].into();
+	let Selection::Events(items) = sending
+		.select_events(&dest, flush, &mut statuses)
+		.await?
+	else {
+		return Err!("flush composes the fresh key update");
+	};
+
+	assert!(matches!(items.as_slice(), [(_, SendingEvent::Edu(_))]));
 
 	Ok(())
 }
