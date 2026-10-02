@@ -108,6 +108,19 @@ fn capabilities(
 		capabilities.set("im.nheko.msc3664.related_event_match", json!({"enabled": true}))?;
 	}
 
+	// MSC4140: delayed events.
+	if services.config.max_event_delay_duration > 0
+		&& services.config.max_delayed_events_per_user > 0
+	{
+		capabilities.set(
+			"org.matrix.msc4140.delayed_events",
+			json!({
+				"max_delay_ms": services.config.max_event_delay_duration.saturating_mul(1000),
+				"max_scheduled": services.config.max_delayed_events_per_user,
+			}),
+		)?;
+	}
+
 	if account_moderation {
 		capabilities.account_moderation = AccountModerationCapability::new(true, true);
 	}
