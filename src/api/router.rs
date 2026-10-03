@@ -27,16 +27,26 @@ pub(super) use self::{
 };
 // Aliased to keep the subsystem visible where the sibling routes stay qualified.
 use crate::{
-	client, oidc,
+	client,
+	client::mas_active,
+	oidc,
 	oidc::{complete_route as oidc_complete, post_complete_route as oidc_post_complete},
 	server,
 };
 
 pub fn build(router: Router<State>, server: &Server) -> Router<State> {
+	router
+		.merge(client_routes(server))
+		.merge(admin_routes(server))
+		.merge(mas_routes())
+		.merge(oidc_routes())
+		.merge(server_routes(server))
+}
+
+fn client_routes(server: &Server) -> Router<State> {
 	let config = &server.config;
-	let mas_active = client::mas_active(config);
+	let router = Router::new();
 	let router = register_client_auth_routes(router);
-	let router = register_mas_routes(router);
 	let router = register_client_profile_and_data_routes(router);
 	let router = register_client_keys_and_backup_routes(router);
 	let router = register_client_room_routes(router);
@@ -48,16 +58,12 @@ pub fn build(router: Router<State>, server: &Server) -> Router<State> {
 	);
 
 	let router = register_client_misc_routes(router);
-	let router = register_synapse_admin_users_routes(router, mas_active);
-	let router = register_synapse_admin_devices_routes(router, mas_active);
-	let router = register_synapse_admin_rooms_routes(router);
-	let router = register_synapse_admin_media_routes(router);
-	let router = register_synapse_admin_federation_routes(router);
-	let router = register_synapse_admin_misc_routes(router);
-	let router = register_oidc_routes(router);
 	let router = register_rendezvous_routes(router);
-	let router = register_server_misc_routes(router);
-	let router = register_federation_routes(router, config.allow_federation);
+	let router = if config.allow_federation {
+		router.route("/_tuwunel/local_user_count", get(client::tuwunel_local_user_count))
+	} else {
+		router
+	};
 
 	register_legacy_media_routes(
 		router,
@@ -65,6 +71,42 @@ pub fn build(router: Router<State>, server: &Server) -> Router<State> {
 		config.media_deny_framing,
 		config.media_deny_inline_styles,
 	)
+}
+
+fn admin_routes(server: &Server) -> Router<State> {
+	let mas_active = mas_active(&server.config);
+	let router = Router::new();
+	let router = register_synapse_admin_users_routes(router, mas_active);
+	let router = register_synapse_admin_devices_routes(router, mas_active);
+	let router = register_synapse_admin_rooms_routes(router);
+	let router = register_synapse_admin_media_routes(router);
+	let router = register_synapse_admin_federation_routes(router);
+	let router = register_synapse_admin_misc_routes(router);
+
+	router
+		.ruma_route(&client::is_user_suspended_route)
+		.ruma_route(&client::suspend_user_route)
+		.ruma_route(&client::is_user_locked_route)
+		.ruma_route(&client::lock_user_route)
+}
+
+fn mas_routes() -> Router<State> {
+	let router = Router::new();
+
+	register_mas_routes(router)
+}
+
+fn oidc_routes() -> Router<State> {
+	let router = Router::new();
+
+	register_oidc_routes(router)
+}
+
+fn server_routes(server: &Server) -> Router<State> {
+	let router = Router::new();
+	let router = register_server_misc_routes(router);
+
+	register_federation_routes(router, server.config.allow_federation)
 }
 
 fn register_client_auth_routes(router: Router<State>) -> Router<State> {
@@ -94,10 +136,6 @@ fn register_client_auth_routes(router: Router<State>) -> Router<State> {
 		.ruma_route(&client::request_password_change_token_via_email_route)
 		.ruma_route(&client::check_registration_token_validity)
 		.ruma_route(&client::create_openid_token_route)
-		.ruma_route(&client::is_user_suspended_route)
-		.ruma_route(&client::suspend_user_route)
-		.ruma_route(&client::is_user_locked_route)
-		.ruma_route(&client::lock_user_route)
 		.route("/_tuwunel/sso/complete.js", get(client::sso_complete_js_route))
 		.route("/_tuwunel/sso/sso.css", get(client::sso_css_route))
 }
@@ -542,7 +580,6 @@ fn register_federation_routes(router: Router<State>, allow_federation: bool) -> 
 			.ruma_route(&server::get_hierarchy_route)
 			.ruma_route(&server::get_content_route)
 			.ruma_route(&server::get_content_thumbnail_route)
-			.route("/_tuwunel/local_user_count", get(client::tuwunel_local_user_count))
 	} else {
 		router
 			.route("/_matrix/federation/{*path}", any(federation_disabled))
