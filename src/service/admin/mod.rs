@@ -8,6 +8,8 @@ mod notices;
 mod processor;
 mod register;
 mod respond;
+#[cfg(test)]
+mod tests;
 
 use std::{
 	collections::BTreeMap,
@@ -22,7 +24,7 @@ use futures::TryFutureExt;
 use ruma::{
 	OwnedEventId, OwnedRoomAliasId, OwnedRoomId, OwnedUserId, RoomId, RoomOrAliasId, UserId,
 };
-use tokio::sync::mpsc;
+use tokio::sync::mpsc::{Receiver, Sender, channel};
 use tuwunel_core::{
 	Err, Event, Result, debug, err, error::default_log, implement, matrix::event::MsgType,
 	utils::ReadyExt, warn,
@@ -32,12 +34,28 @@ use crate::rooms::state::RoomMutexGuard;
 
 pub struct Service {
 	services: Arc<crate::services::OnceServices>,
-	channel: StdRwLock<Option<mpsc::Sender<CommandInput>>>,
+	queue: StdRwLock<Queue>,
 	pub command: StdRwLock<Option<Arc<dyn Command>>>,
 	pub admin_alias: OwnedRoomAliasId,
 	register_nonces: StdMutex<BTreeMap<String, Instant>>,
 	#[cfg(feature = "console")]
 	pub console: Arc<console::Console>,
+}
+
+/// State of the command queue's sending half.
+///
+/// Every worker start opens a fresh queue, so a worker restarted after a panic
+/// replaces the dead one. An interrupt closes it for good, and a worker first
+/// polled after that exits rather than open a queue nothing would close.
+enum Queue {
+	/// No worker has opened the queue yet.
+	Pending,
+
+	/// Commands sent here reach the running worker.
+	Open(Sender<CommandInput>),
+
+	/// Interrupted; no worker reopens the queue.
+	Closed,
 }
 
 /// Inputs to a command: its multi-line text, the event to reply to, and who
@@ -108,7 +126,7 @@ impl crate::Service for Service {
 	fn build(args: &crate::Args<'_>) -> Result<Arc<Self>> {
 		Ok(Arc::new(Self {
 			services: args.services.clone(),
-			channel: StdRwLock::new(None),
+			queue: StdRwLock::new(Queue::Pending),
 			command: StdRwLock::new(None),
 			admin_alias: OwnedRoomAliasId::try_from(format!("#admins:{}", args.server.name))
 				.expect("#admins:server_name is valid alias name"),
@@ -120,12 +138,14 @@ impl crate::Service for Service {
 
 	async fn worker(self: Arc<Self>) -> Result {
 		let mut signals = self.services.server.signal.subscribe();
-		let (sender, mut receiver) = mpsc::channel(COMMAND_QUEUE_LIMIT);
-		_ = self
-			.channel
+		let Some(mut receiver) = self
+			.queue
 			.write()
 			.expect("locked for writing")
-			.insert(sender);
+			.open()
+		else {
+			return Ok(());
+		};
 
 		self.console_auto_start().await;
 
@@ -152,14 +172,27 @@ impl crate::Service for Service {
 		#[cfg(feature = "console")]
 		self.console.interrupt();
 
-		_ = self
-			.channel
-			.write()
-			.expect("locked for writing")
-			.take();
+		*self.queue.write().expect("locked for writing") = Queue::Closed;
 	}
 
 	fn name(&self) -> &str { crate::service::make_name(std::module_path!()) }
+}
+
+/// Opens a fresh queue for a starting worker unless an interrupt closed it
+/// first.
+///
+/// Returns the receiving half, or `None` when the worker should exit.
+#[implement(Queue)]
+fn open(&mut self) -> Option<Receiver<CommandInput>> {
+	match self {
+		| Self::Closed => None,
+		| Self::Pending | Self::Open(_) => {
+			let (sender, receiver) = channel(COMMAND_QUEUE_LIMIT);
+
+			*self = Self::Open(sender);
+			Some(receiver)
+		},
+	}
 }
 
 impl Service {
@@ -170,10 +203,10 @@ impl Service {
 	/// full, and errors when the queue is unavailable or closed.
 	pub async fn command(&self, input: CommandInput) -> Result {
 		let Some(queue) = self
-			.channel
+			.queue
 			.read()
 			.expect("locked for reading")
-			.clone()
+			.sender()
 		else {
 			return Err!("Admin command queue unavailable.");
 		};
@@ -417,6 +450,15 @@ impl Service {
 			.map_ok(|room_id| room_id == room_id_)
 			.await
 			.unwrap_or(false)
+	}
+}
+
+#[implement(Queue)]
+#[inline]
+fn sender(&self) -> Option<Sender<CommandInput>> {
+	match self {
+		| Self::Open(sender) => Some(sender.clone()),
+		| Self::Pending | Self::Closed => None,
 	}
 }
 
