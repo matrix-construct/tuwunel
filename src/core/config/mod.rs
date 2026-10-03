@@ -423,20 +423,6 @@ pub struct Config {
 	#[serde(default = "default_servername_status_cache_capacity")]
 	pub servername_status_cache_capacity: u32,
 
-	/// Maximum number of entries in the in-memory LRU cache of decompressed
-	/// room state (a list of short state-info entries per state hash), used
-	/// by the state compressor to avoid re-walking
-	/// `shortstatehash_statediff` on every lookup.
-	///
-	/// Unlike the other caches on this page, this one is not backed by
-	/// RocksDB: it is a plain in-process cache sized directly in entries,
-	/// with no per-entry byte-size conversion. `cache_capacity_modifier`
-	/// still applies to it.
-	///
-	/// default: varies by system
-	#[serde(default = "default_stateinfo_cache_capacity")]
-	pub stateinfo_cache_capacity: u32,
-
 	/// Minimum time-to-live in seconds for room summary entries in the spaces
 	/// cache.
 	///
@@ -5473,15 +5459,21 @@ impl From<AppServiceNamespace> for ruma::api::appservice::Namespace {
 /// configured. This is important for environment variables which share the
 /// `TUWUNEL_` prefix namespace but aren't config items;  match them here in
 /// their split+lowercased format.
-static KNOWN_KEYS: &[&str; 3] = &["^config$", "^runtime_[a-z0-9_]+$", "^appservice_keys_claims$"];
+static KNOWN_KEYS: &[&str; 4] = &[
+	"^config$",
+	"^runtime_[a-z0-9_]+$",
+	"^appservice_keys_claims$",
+	"^stateinfo_cache_capacity$",
+];
 
 /// Items listed here generate a deprecation warning when configured.
-static DEPRECATED_KEYS: &[&str; 11] = &[
+static DEPRECATED_KEYS: &[&str; 12] = &[
 	"appservice_keys_claims",
 	"cache_capacity",
 	"conduit_cache_capacity_modifier",
 	"ldap.name_attribute",
 	"max_concurrent_requests",
+	"stateinfo_cache_capacity",
 	"well_known_client",
 	"well_known_server",
 	"well_known_support_page",
@@ -5761,8 +5753,6 @@ fn default_resolver_cache_capacity() -> u32 {
 }
 
 fn default_mediaid_lazycontent_cache_capacity() -> u32 { 128 }
-
-fn default_stateinfo_cache_capacity() -> u32 { parallelism_scaled_u32(100) }
 
 fn default_spacehierarchy_cache_ttl_min() -> u64 { 60 * 60 * 3 }
 
