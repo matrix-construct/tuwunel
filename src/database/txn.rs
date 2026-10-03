@@ -404,6 +404,22 @@ pub fn try_execute(self) -> Result<(), TxnError> {
 	synced
 }
 
+/// Commits an atomic batch and leaves its durability barrier to the caller.
+///
+/// A rejected write is returned and watchers are notified after an accepted
+/// one, as in [`Txn::try_execute`]. Nothing is flushed or synchronized, so a
+/// run of these batches ends with [`Engine::sync`] before any write that
+/// depends on them. Empty batches perform no write.
+#[implement(Txn)]
+#[tracing::instrument(level = "trace", skip_all, err)]
+pub fn try_write(self) -> Result {
+	if self.is_empty() {
+		return Ok(());
+	}
+
+	self.write().inspect(|()| self.notify())
+}
+
 #[implement(Txn)]
 #[tracing::instrument(level = "trace", skip_all)]
 fn write(&self) -> Result {

@@ -18,6 +18,7 @@ async fn fallible_transaction_barriers() -> Result {
 	let first = db.get("alias_roomid")?;
 	let second = db.get("alias_userid")?;
 	let key = b"accepted";
+	let unsynced = b"unsynced";
 	let cork = db.cork();
 
 	Txn::insert_each([(first.as_ref(), key, b"a"), (second.as_ref(), key, b"b")])
@@ -32,6 +33,15 @@ async fn fallible_transaction_barriers() -> Result {
 	Txn::new(&db.engine)
 		.try_execute()
 		.expect("empty transaction succeeds");
+
+	Txn::insert(first.as_ref(), [(unsynced, b"c")])
+		.try_write()
+		.expect("accepted write ahead of its barrier");
+
+	assert_eq!(first.get(unsynced).await?.as_ref(), b"c");
+	Txn::new(&db.engine)
+		.try_write()
+		.expect("empty unsynced transaction succeeds");
 
 	drop(cork);
 	db.engine.sync()?;
