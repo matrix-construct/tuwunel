@@ -222,6 +222,7 @@ zstd_compression = [
 tuwunel-admin.workspace = true
 tuwunel-api.workspace = true
 tuwunel-core.workspace = true
+tuwunel-matrix.workspace = true
 tuwunel-database.workspace = true
 tuwunel-macros.workspace = true
 tuwunel-router.workspace = true

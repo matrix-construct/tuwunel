@@ -9,10 +9,8 @@ use ruma::{
 	signatures::{Verified, verify_event},
 };
 use serde_json::value::RawValue as RawJsonValue;
-use tuwunel_core::{
-	Err, Result, implement,
-	matrix::{event::gen_event_id_canonical_json, room_version},
-};
+use tuwunel_core::{Err, Result, implement};
+use tuwunel_matrix::{event::gen_event_id_canonical_json, room_version};
 
 /// Derives an event ID, runs event verification, and returns canonical JSON.
 ///

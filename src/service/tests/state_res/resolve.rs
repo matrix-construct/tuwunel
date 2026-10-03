@@ -21,11 +21,8 @@ use serde_json::{
 };
 use similar::{Algorithm, udiff::unified_diff};
 use tracing_subscriber::EnvFilter;
-use tuwunel_core::{
-	Result,
-	matrix::{Event, Pdu, StateKey},
-	utils::stream::IterStream,
-};
+use tuwunel_core::{Result, utils::stream::IterStream};
+use tuwunel_matrix::{Event, Pdu, StateKey};
 use tuwunel_service::rooms::state_res::{AuthSet, StateMap, resolve};
 
 /// Create a new snapshot test.

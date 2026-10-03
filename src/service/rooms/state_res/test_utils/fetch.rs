@@ -2,10 +2,8 @@ use std::{collections::HashMap, future::ready, hash::BuildHasher};
 
 use ruma::{EventId, OwnedEventId, events::StateEventType};
 use serde::Deserialize;
-use tuwunel_core::{
-	Result,
-	matrix::{PduEvent, StateKey},
-};
+use tuwunel_core::Result;
+use tuwunel_matrix::{PduEvent, StateKey};
 
 #[cfg(test)]
 use super::TestStateMap;

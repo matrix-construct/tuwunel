@@ -28,7 +28,6 @@ use serde::Deserialize;
 use tracing::Level;
 use tuwunel_core::{
 	Err, Result, err, implement,
-	matrix::Event,
 	utils::{
 		MutexMap,
 		future::TryExtExt,
@@ -37,6 +36,7 @@ use tuwunel_core::{
 	},
 };
 use tuwunel_database::{Database, Deserialized, Ignore, Interfix, Json, Map};
+use tuwunel_matrix::Event;
 use url::Url;
 
 use self::badge::SentBadges;

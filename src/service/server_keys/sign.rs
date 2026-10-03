@@ -4,10 +4,8 @@
 //! Event-ID placement follows the selected room version's event format.
 
 use ruma::{CanonicalJsonObject, CanonicalJsonValue, OwnedEventId, RoomVersionId};
-use tuwunel_core::{
-	Result, err, implement,
-	matrix::{event::gen_event_id, room_version},
-};
+use tuwunel_core::{Result, err, implement};
+use tuwunel_matrix::{event::gen_event_id, room_version};
 
 /// Generates an event ID, content hash, and local signature in place.
 ///

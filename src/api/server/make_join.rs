@@ -14,11 +14,8 @@ use ruma::{
 		},
 	},
 };
-use tuwunel_core::{
-	Err, Error, Result, at, debug_info,
-	matrix::{RoomVersionRules, pdu::PduBuilder, room_version},
-	utils::IterStream,
-};
+use tuwunel_core::{Err, Error, Result, at, debug_info, utils::IterStream};
+use tuwunel_matrix::{RoomVersionRules, pdu::PduBuilder, room_version};
 use tuwunel_service::Services;
 
 use super::utils::require_known_room;

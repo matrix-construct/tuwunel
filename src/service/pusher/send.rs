@@ -14,7 +14,8 @@ use ruma::{
 	push::{Action, HighlightTweakValue, HttpPusherData, PushFormat, Ruleset, Tweak},
 };
 use serde_json::Value;
-use tuwunel_core::{Result, err, error, implement, matrix::Event, trace, utils::BoolExt};
+use tuwunel_core::{Result, err, error, implement, trace, utils::BoolExt};
+use tuwunel_matrix::Event;
 use url::Url;
 
 use super::Evaluate;

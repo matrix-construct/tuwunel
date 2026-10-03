@@ -1,5 +1,6 @@
 use ruma::{OwnedEventId, RoomVersionId};
-use tuwunel_core::{Err, Result, err, matrix::pdu::PduEvent, utils::string::EMPTY};
+use tuwunel_core::{Err, Result, err, utils::string::EMPTY};
+use tuwunel_matrix::pdu::PduEvent;
 
 use crate::admin_command;
 

@@ -15,11 +15,8 @@ use ruma::{
 	},
 };
 use serde_json::value::to_raw_value;
-use tuwunel_core::{
-	Err, Result, implement,
-	matrix::{event::Event, pdu::PduBuilder, room_version},
-	utils::IterStream,
-};
+use tuwunel_core::{Err, Result, implement, utils::IterStream};
+use tuwunel_matrix::{event::Event, pdu::PduBuilder, room_version};
 
 use super::RoomMutexGuard;
 

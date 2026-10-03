@@ -28,16 +28,8 @@ use ruma::{
 	UserId, api::Direction, events::room::encrypted::Relation,
 };
 use serde::Deserialize;
-/// Re-exports the typed and raw persistent timeline identifiers.
-///
-/// Both forms encode a room-local stream position suitable for database keys.
-pub use tuwunel_core::matrix::pdu::{PduId, RawPduId};
 use tuwunel_core::{
 	Err, Error, Result, at, err, implement,
-	matrix::{
-		ShortEventId,
-		pdu::{PduCount, PduEvent},
-	},
 	utils::{
 		MutexMap, MutexMapGuard,
 		future::TryExtExt,
@@ -47,6 +39,14 @@ use tuwunel_core::{
 	warn,
 };
 use tuwunel_database::{Database, Deserialized, Json, Map, Txn};
+/// Re-exports the typed and raw persistent timeline identifiers.
+///
+/// Both forms encode a room-local stream position suitable for database keys.
+pub use tuwunel_matrix::pdu::{PduId, RawPduId};
+use tuwunel_matrix::{
+	ShortEventId,
+	pdu::{PduCount, PduEvent},
+};
 
 /// Re-exports the standard timeline item and count-key transformation.
 ///

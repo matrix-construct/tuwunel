@@ -1,8 +1,6 @@
 use ruma::{OwnedEventId, events::room::redaction::RoomRedactionEventContent};
-use tuwunel_core::{
-	Err, Result,
-	matrix::{Event, pdu::PduBuilder},
-};
+use tuwunel_core::{Err, Result};
+use tuwunel_matrix::{Event, pdu::PduBuilder};
 
 use crate::admin_command;
 

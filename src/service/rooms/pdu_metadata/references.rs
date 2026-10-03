@@ -1,15 +1,14 @@
 use futures::{Stream, StreamExt, TryFutureExt};
 use ruma::{EventId, OwnedEventId, RoomId};
 use tuwunel_core::{
-	PduId, Result, implement,
-	matrix::{Event, Pdu},
-	trace,
+	Result, implement, trace,
 	utils::{
 		stream::{ReadyExt, TryIgnore, WidebandExt},
 		u64_from_u8,
 	},
 };
 use tuwunel_database::Interfix;
+use tuwunel_matrix::{Event, Pdu, PduId};
 
 use super::{
 	Service,

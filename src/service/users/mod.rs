@@ -20,9 +20,7 @@ use ruma::{
 };
 use serde::{Deserialize, Serialize};
 use tuwunel_core::{
-	Err, Result, debug_warn, err, is_equal_to,
-	matrix::pdu::PduCount,
-	trace,
+	Err, Result, debug_warn, err, is_equal_to, trace,
 	utils::{
 		self, BoolExt, MutexMap, ReadyExt, hash::password as hash_password, result::NotFound,
 		stream::TryIgnore,
@@ -30,6 +28,7 @@ use tuwunel_core::{
 	warn,
 };
 use tuwunel_database::{Deserialized, Json, Map};
+use tuwunel_matrix::pdu::PduCount;
 
 pub use self::{
 	dehydrated_device::DehydratedDevice,

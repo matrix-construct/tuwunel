@@ -15,11 +15,7 @@ use ruma::{
 use serde::Deserialize;
 use serde_json::json;
 use tuwunel_core::{
-	Event, Result, err, implement,
-	matrix::{
-		Pdu,
-		pdu::{PduCount, PduEvent, PduId, RawPduId},
-	},
+	Result, err, implement,
 	utils::{
 		BoolExt, ReadyExt,
 		result::{LogErr, NotFound},
@@ -27,6 +23,10 @@ use tuwunel_core::{
 	},
 };
 use tuwunel_database::{Deserialized, Map, Txn};
+use tuwunel_matrix::{
+	Event, Pdu,
+	pdu::{PduCount, PduEvent, PduId, RawPduId},
+};
 
 use crate::rooms::timeline::ExtractRelatesTo;
 

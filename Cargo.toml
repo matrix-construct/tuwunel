@@ -719,6 +719,11 @@ package = "tuwunel_core"
 path = "src/core"
 default-features = false
 
+[workspace.dependencies.tuwunel-matrix]
+package = "tuwunel_matrix"
+path = "src/matrix"
+default-features = false
+
 [workspace.dependencies.tuwunel-macros]
 package = "tuwunel_macros"
 path = "src/macros"
@@ -836,6 +841,9 @@ incremental = false
 #	'-Clink-arg=-Wl,-z,nodlopen',
 #	'-Clink-arg=-Wl,-z,nodelete',
 #]
+
+[profile.dev.package.tuwunel_matrix]
+incremental = false
 
 [profile.dev.package.'*']
 debug = 0

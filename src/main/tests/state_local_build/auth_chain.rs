@@ -8,8 +8,6 @@ use futures::{TryStreamExt, future::ready};
 use tuwunel_core::{
 	Err, Result, err,
 	itertools::Itertools,
-	matrix::{PduEvent, pdu::into_outgoing_federation},
-	pdu::PduBuilder,
 	ruma::{
 		EventId, OwnedEventId, RoomId, RoomVersionId, UserId,
 		events::{
@@ -20,6 +18,10 @@ use tuwunel_core::{
 	utils::{BoolExt, result::NotFound},
 };
 use tuwunel_database::serialize_key;
+use tuwunel_matrix::{
+	PduEvent,
+	pdu::{PduBuilder, into_outgoing_federation},
+};
 use tuwunel_service::Services;
 
 use super::helpers::{

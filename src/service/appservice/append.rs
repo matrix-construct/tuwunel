@@ -2,14 +2,14 @@ use futures::{FutureExt, StreamExt, TryFutureExt};
 use ruma::{UserId, events::TimelineEventType};
 use tuwunel_core::{
 	Result, error, implement,
-	matrix::{
-		event::Event,
-		pdu::{Pdu, RawPduId},
-	},
 	utils::{
 		ReadyExt,
 		stream::{IterStream, automatic_width},
 	},
+};
+use tuwunel_matrix::{
+	event::Event,
+	pdu::{Pdu, RawPduId},
 };
 
 use super::RegistrationInfo;

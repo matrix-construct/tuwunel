@@ -5,13 +5,10 @@ use ruma::{
 		self, Beacon, CallInvite, PollStart, RoomEncrypted, RoomMessage, Sticker,
 	},
 };
-use tuwunel_core::{
-	Result, is_equal_to,
-	matrix::{
-		Event,
-		pdu::{PduCount, PduEvent},
-	},
-	utils::TryReadyExt,
+use tuwunel_core::{Result, is_equal_to, utils::TryReadyExt};
+use tuwunel_matrix::{
+	Event,
+	pdu::{PduCount, PduEvent},
 };
 use tuwunel_service::Services;
 
@@ -82,7 +79,7 @@ mod tests {
 		user_id,
 	};
 	use serde_json::{json, value::to_raw_value};
-	use tuwunel_core::matrix::{StateKey, pdu::PduEvent};
+	use tuwunel_matrix::{StateKey, pdu::PduEvent};
 
 	use super::{DEFAULT_BUMP_TYPES, is_bumpable_pdu};
 

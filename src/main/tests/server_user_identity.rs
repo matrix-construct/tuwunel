@@ -12,7 +12,6 @@ use tuwunel::{Args, Runtime, Server, async_run, async_start, async_stop};
 use tuwunel_core::{
 	Err, Result,
 	config::ServerUserLocalpart,
-	pdu::PduBuilder,
 	ruma::{
 		OwnedRoomId, OwnedUserId, RoomId, UserId,
 		events::{
@@ -27,6 +26,7 @@ use tuwunel_core::{
 	utils::result::NotFound,
 };
 use tuwunel_database::Deserialized;
+use tuwunel_matrix::pdu::PduBuilder;
 use tuwunel_service::{Services, rooms::state::RoomMutexGuard, users::SERVER_USER_KEY};
 
 const CHILD_DATABASE_ENV: &str = "SERVER_USER_IDENTITY_TEST_DATABASE";

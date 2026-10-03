@@ -9,11 +9,11 @@ use ruma::{
 	},
 };
 use tuwunel_core::{
-	Event, Result, async_noinline, implement, info,
-	pdu::PduBuilder,
+	Result, async_noinline, implement, info,
 	utils::{IterStream, future::TryExtExt, stream::BroadbandExt},
 	warn,
 };
+use tuwunel_matrix::{Event, pdu::PduBuilder};
 
 const CURRENT_MEMBERSHIPS: &[MembershipState] =
 	&[MembershipState::Join, MembershipState::Invite, MembershipState::Knock];

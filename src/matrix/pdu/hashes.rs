@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
-
-use crate::arrayvec::ArrayString;
+use tuwunel_core::arrayvec::ArrayString;
 
 /// Content hashes of a PDU.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize)]

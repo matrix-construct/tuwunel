@@ -130,6 +130,7 @@ url.workspace = true
 webpage.workspace = true
 webpage.optional = true
 tuwunel-core.workspace = true
+tuwunel-matrix.workspace = true
 tuwunel-database.workspace = true
 
 # killpg, for reaping a video thumbnail program's process group

@@ -3,7 +3,8 @@ use ruma::{
 	CanonicalJsonObject, CanonicalJsonValue, OwnedEventId, OwnedRoomId, RoomId, RoomVersionId,
 };
 use serde_json::value::RawValue as RawJsonValue;
-use tuwunel_core::{Result, err, implement, matrix::event::gen_event_id, result::FlatOk};
+use tuwunel_core::{Result, err, implement, result::FlatOk};
+use tuwunel_matrix::event::gen_event_id;
 
 use super::room_version_of;
 

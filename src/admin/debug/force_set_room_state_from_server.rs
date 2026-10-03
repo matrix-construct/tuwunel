@@ -7,16 +7,16 @@ use ruma::{
 };
 use tuwunel_core::{
 	Err, Result, err, info,
-	matrix::{
-		Event, RoomVersionRules,
-		pdu::{PduEvent, from_incoming_federation},
-		room_version::rules as room_version_rules,
-	},
 	utils::{
 		IterStream, ReadyExt,
 		stream::{BroadbandExt, WidebandExt},
 	},
 	warn,
+};
+use tuwunel_matrix::{
+	Event, RoomVersionRules,
+	pdu::{PduEvent, from_incoming_federation},
+	room_version::rules as room_version_rules,
 };
 use tuwunel_service::{Services, rooms::state_compressor::HashSetCompressStateEvent};
 

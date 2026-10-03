@@ -1,10 +1,10 @@
 use ruma::{CanonicalJsonObject, CanonicalJsonValue, Mxc, OwnedEventId};
 use tuwunel_core::{
 	Err, Result, debug, err, info,
-	matrix::Event,
 	utils::{BoolExt, to_canonical_object},
 	warn,
 };
+use tuwunel_matrix::Event;
 
 use crate::admin_command;
 

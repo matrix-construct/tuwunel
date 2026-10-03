@@ -20,9 +20,7 @@ use futures::{
 };
 use ruma::{OwnedServerName, ServerName, UserId};
 use tuwunel_core::{
-	Error, Result, at, implement,
-	matrix::ShortRoomId,
-	utils,
+	Error, Result, at, implement, utils,
 	utils::{
 		IterStream, ReadyExt,
 		bytes::prefix_successor,
@@ -32,6 +30,7 @@ use tuwunel_core::{
 	},
 };
 use tuwunel_database::{Database, Deserialized, Interfix, Map, Txn};
+use tuwunel_matrix::ShortRoomId;
 
 use super::{
 	Destination, EduBuf, SendingEvent, TAG_BADGE_REFRESH, TAG_DEVICE_LIST_CHANGED, TAG_TO_DEVICE,

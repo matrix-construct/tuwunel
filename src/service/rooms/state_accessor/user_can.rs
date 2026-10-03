@@ -15,12 +15,8 @@ use ruma::{
 		},
 	},
 };
-use tuwunel_core::{
-	Err, Result, implement,
-	matrix::{Event, PduCount, StateKey},
-	pdu::PduBuilder,
-	utils::FutureBoolExt,
-};
+use tuwunel_core::{Err, Result, implement, utils::FutureBoolExt};
+use tuwunel_matrix::{Event, PduCount, StateKey, pdu::PduBuilder};
 
 use crate::rooms::{short::ShortStateHash, state::RoomMutexGuard};
 

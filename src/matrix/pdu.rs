@@ -27,6 +27,7 @@ use ruma::{
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue as RawJsonValue;
 use smallvec::SmallVec;
+use tuwunel_core::{Result, err};
 
 pub use self::{
 	Count as PduCount, Id as PduId, Pdu as PduEvent, RawId as RawPduId,
@@ -41,7 +42,6 @@ pub use self::{
 	raw_id::*,
 };
 use super::{Event, ShortRoomId, StateKey};
-use crate::{Result, err};
 
 /// Stores a Matrix persistent data unit in typed form.
 ///
@@ -174,9 +174,7 @@ pub type Unsigned = Raw<CanonicalJsonObject, 112>;
 /// [maximum size allowed]: <https://spec.matrix.org/latest/client-server-api/#size-limits>
 pub const MAX_PDU_BYTES: usize = 65_535;
 
-/// The [maximum length allowed] for the `prev_events` array of a PDU.
-/// [maximum length allowed]: <https://spec.matrix.org/latest/rooms/v1/#event-format>
-pub const MAX_PREV_EVENTS: usize = 20;
+pub use tuwunel_core::matrix::MAX_PREV_EVENTS;
 
 /// The [maximum length allowed] for the `auth_events` array of a PDU.
 /// [maximum length allowed]: <https://spec.matrix.org/latest/rooms/v1/#event-format>

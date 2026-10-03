@@ -29,8 +29,7 @@ use tokio::{
 };
 use tuwunel::{Args, Runtime, Server, async_run, async_start, async_stop};
 use tuwunel_core::{
-	PduCount, Result, err,
-	pdu::PduBuilder,
+	Result, err,
 	ruma::{
 		MilliSecondsSinceUnixEpoch, OwnedEventId, OwnedRoomId, OwnedServerName, RoomId,
 		RoomVersionId, ServerName, UInt, UserId,
@@ -40,6 +39,7 @@ use tuwunel_core::{
 		},
 	},
 };
+use tuwunel_matrix::{PduCount, pdu::PduBuilder};
 use tuwunel_service::{Services, rooms::state_cache::MembershipUpdate, users::Register};
 
 const CERTIFICATE: &str = "../../nix/pkgs/complement/certificate.crt";

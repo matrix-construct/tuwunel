@@ -5,8 +5,9 @@
 
 use ruma::{RoomVersionId, events::room::create::RoomCreateEventContent};
 pub use ruma::{RoomVersionId as RoomVersion, room_version_rules::RoomVersionRules};
+use tuwunel_core::{Result, err};
 
-use crate::{Result, err, matrix::Event};
+use crate::Event;
 
 /// Resolves the rule set for a supported room version.
 ///

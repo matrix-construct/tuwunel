@@ -7,7 +7,8 @@ use std::{
 };
 
 use serde_json::Value;
-use tuwunel_core::{implement, matrix::pdu::RawPduId};
+use tuwunel_core::implement;
+use tuwunel_matrix::pdu::RawPduId;
 
 use crate::Services;
 

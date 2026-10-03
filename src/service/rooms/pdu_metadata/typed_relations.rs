@@ -5,12 +5,12 @@ use tuwunel_core::{
 	Result,
 	arrayvec::ArrayVec,
 	implement,
-	matrix::{Event, PduCount, RawPduId},
 	utils::{
 		stream::{ReadyExt, TryIgnore},
 		u64_from_u8,
 	},
 };
+use tuwunel_matrix::{Event, PduCount, RawPduId};
 
 use super::Service;
 use crate::rooms::short::ShortRoomId;

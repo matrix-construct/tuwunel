@@ -10,10 +10,10 @@ use futures::StreamExt;
 use ruma::{EventId, OwnedEventId, OwnedServerName, RoomId};
 use tuwunel_core::{
 	implement,
-	matrix::{Event, PduCount},
 	smallvec::SmallVec,
 	utils::{IterStream, stream::BroadbandExt},
 };
+use tuwunel_matrix::{Event, PduCount};
 
 use crate::federation::ShouldAttempt;
 

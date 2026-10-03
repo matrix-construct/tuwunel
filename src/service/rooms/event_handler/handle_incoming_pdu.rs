@@ -10,7 +10,6 @@ use tuwunel_core::{
 	Err, Result, async_noinline, debug,
 	debug::INFO_SPAN_LEVEL,
 	debug_warn, err, implement,
-	matrix::{Event, PduCount, PduEvent, pdu::MAX_PREV_EVENTS, room_version::from_create_event},
 	smallvec::SmallVec,
 	trace,
 	utils::{
@@ -19,6 +18,9 @@ use tuwunel_core::{
 		stream::{IterStream, TryBroadbandExt, TryReadyExt},
 	},
 	warn,
+};
+use tuwunel_matrix::{
+	Event, PduCount, PduEvent, pdu::MAX_PREV_EVENTS, room_version::from_create_event,
 };
 
 use super::{

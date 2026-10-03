@@ -5,12 +5,13 @@ use std::{fs::remove_dir_all, path::PathBuf, sync::Arc};
 use futures::StreamExt;
 use tuwunel::{Args, Runtime, Server, async_run, async_start, async_stop};
 use tuwunel_core::{
-	Err, PduEvent, Result,
+	Err, Result,
 	ruma::{
 		CanonicalJsonObject, event_id, events::TimelineEventType, room_id, serde::Raw, uint,
 		user_id,
 	},
 };
+use tuwunel_matrix::PduEvent;
 use tuwunel_service::{Services, rooms::state_compressor::CompressedState};
 
 const SUCCESS_HASH: [u8; 32] = [0xA5; 32];

@@ -7,9 +7,12 @@ use reqwest::{Response, StatusCode};
 use serde_json::{Value, json};
 use tuwunel::{Args, Runtime, Server, async_run, async_start, async_stop};
 use tuwunel_core::{
-	PduId, Result,
-	matrix::pdu::{PduCount, RawPduId},
+	Result,
 	ruma::{EventId, OwnedEventId, OwnedRoomId, RoomId},
+};
+use tuwunel_matrix::{
+	PduId,
+	pdu::{PduCount, RawPduId},
 };
 use tuwunel_service::Services;
 

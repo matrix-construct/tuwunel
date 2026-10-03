@@ -79,6 +79,7 @@ base64.workspace = true
 bytes.workspace = true
 clap.workspace = true
 tuwunel-core.workspace = true
+tuwunel-matrix.workspace = true
 tuwunel-database.workspace = true
 tuwunel-macros.workspace = true
 tuwunel-service.workspace = true

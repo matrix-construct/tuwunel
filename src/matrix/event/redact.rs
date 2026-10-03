@@ -7,7 +7,7 @@ use serde::Deserialize;
 use serde_json::value::to_raw_value;
 
 use super::Event;
-use crate::matrix::pdu::Content;
+use crate::pdu::Content;
 
 /// Copies the `redacts` property of the event to the `content` dict and
 /// vice-versa.

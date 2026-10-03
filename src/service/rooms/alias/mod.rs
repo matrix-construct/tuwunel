@@ -10,10 +10,10 @@ use ruma::{
 };
 use tuwunel_core::{
 	Err, Result, err, implement,
-	matrix::Event,
 	utils::{ReadyExt, stream::TryIgnore},
 };
 use tuwunel_database::{Deserialized, Ignore, Interfix, Map};
+use tuwunel_matrix::Event;
 
 use crate::appservice::RegistrationInfo;
 

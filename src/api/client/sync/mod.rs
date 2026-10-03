@@ -14,10 +14,10 @@ use ruma::{
 	serde::Raw,
 };
 use tuwunel_core::{
-	Error, PduCount, Result, debug_warn, is_equal_to,
-	matrix::{Event, pdu::PduEvent},
+	Error, Result, debug_warn, is_equal_to,
 	utils::{ReadyExt, result::LogErr, stream::BroadbandExt},
 };
+use tuwunel_matrix::{Event, PduCount, pdu::PduEvent};
 use tuwunel_service::{Services, users::InviteFilter};
 
 pub(crate) use self::{

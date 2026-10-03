@@ -5,10 +5,8 @@ use std::{collections::HashMap, fs::read_to_string, future::ready, path::Path};
 
 use ruma::{EventId, OwnedEventId, RoomVersionId, events::StateEventType};
 use serde_json::from_str as from_json_str;
-use tuwunel_core::{
-	Result, err,
-	matrix::{Event, Pdu, StateKey},
-};
+use tuwunel_core::{Result, err};
+use tuwunel_matrix::{Event, Pdu, StateKey};
 use tuwunel_service::rooms::state_res::{AuthCheckOutcome, auth_check};
 
 type Events = HashMap<OwnedEventId, Pdu>;

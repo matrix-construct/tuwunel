@@ -15,10 +15,9 @@ use ruma::{
 };
 use tuwunel_core::{
 	Err, Result, at, err, implement,
-	matrix::event::gen_event_id_canonical_json,
-	pdu::PduBuilder,
 	utils::future::{ReadyBoolExt, and4},
 };
+use tuwunel_matrix::{event::gen_event_id_canonical_json, pdu::PduBuilder};
 
 use super::Service;
 

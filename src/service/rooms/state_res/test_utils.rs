@@ -33,12 +33,12 @@ use serde_json::{
 	json,
 	value::{RawValue as RawJsonValue, to_raw_value as to_raw_json_value},
 };
-use tuwunel_core::{
-	Error, Result, err,
-	matrix::{Event, EventHash, EventTypeExt, PduEvent},
-};
+use tuwunel_core::{Error, Result, err};
 #[cfg(test)]
-use tuwunel_core::{info, matrix::StateKey, utils::stream::IterStream};
+use tuwunel_core::{info, utils::stream::IterStream};
+#[cfg(test)]
+use tuwunel_matrix::StateKey;
+use tuwunel_matrix::{Event, EventHash, EventTypeExt, PduEvent};
 
 use super::{AuthSet, StateMap};
 #[cfg(test)]

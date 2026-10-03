@@ -1,5 +1,6 @@
 use ruma::{EventId, RoomId, UserId};
-use tuwunel_core::{Err, Event, Result, warn};
+use tuwunel_core::{Err, Result, warn};
+use tuwunel_matrix::Event;
 use tuwunel_service::Services;
 
 use crate::Ruma;

@@ -20,11 +20,14 @@ use ruma::{
 	},
 };
 use tuwunel_core::{
-	Err, Event, PduCount, Result, async_noinline, at, debug, debug_info, debug_warn, err,
-	implement, info,
-	matrix::{event::gen_event_id, room_version::rules as room_version_rules},
+	Err, Result, async_noinline, at, debug, debug_info, debug_warn, err, implement, info, trace,
+	utils, warn,
+};
+use tuwunel_matrix::{
+	Event, PduCount,
+	event::gen_event_id,
 	pdu::{PduBuilder, PduEvent, from_incoming_federation},
-	trace, utils, warn,
+	room_version::rules as room_version_rules,
 };
 
 use super::{

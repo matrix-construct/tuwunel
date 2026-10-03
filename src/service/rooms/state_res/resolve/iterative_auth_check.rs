@@ -4,10 +4,10 @@ use ruma::{
 };
 use tuwunel_core::{
 	Result, debug_warn, err, error,
-	matrix::{Event, EventTypeExt, PduEvent, StateKey, TypeStateKey},
 	smallvec::SmallVec,
 	utils::stream::{IterStream, ReadyExt, TryReadyExt, TryWidebandExt},
 };
+use tuwunel_matrix::{Event, EventTypeExt, PduEvent, StateKey, TypeStateKey};
 
 use super::{
 	super::{

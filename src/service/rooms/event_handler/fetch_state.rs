@@ -3,7 +3,8 @@ use std::collections::{HashMap, hash_map};
 use futures::FutureExt;
 use ruma::{EventId, OwnedEventId, RoomId, RoomVersionId, ServerName, events::StateEventType};
 use serde::Deserialize;
-use tuwunel_core::{Err, Result, debug, debug_warn, err, implement, matrix::Event};
+use tuwunel_core::{Err, Result, debug, debug_warn, err, implement};
+use tuwunel_matrix::Event;
 
 use crate::{
 	fetcher::{Op, Opts},

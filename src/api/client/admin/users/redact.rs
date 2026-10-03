@@ -17,14 +17,14 @@ use serde_json::Value as JsonValue;
 use synapse_admin_api::users::redact::v1::{Request, Response};
 use tuwunel_core::{
 	Err, Result,
-	matrix::{
-		Event,
-		pdu::{PduBuilder, PduEvent},
-	},
 	utils::{
 		BoolExt,
 		stream::{BroadbandExt, TryReadyExt},
 	},
+};
+use tuwunel_matrix::{
+	Event,
+	pdu::{PduBuilder, PduEvent},
 };
 
 use crate::{Ruma, client::admin::require_admin};

@@ -16,7 +16,8 @@ use ruma::{
 		topic::{RoomTopicEventContent, TopicContentBlock},
 	},
 };
-use tuwunel_core::{Result, matrix::room_version, pdu::PduBuilder};
+use tuwunel_core::Result;
+use tuwunel_matrix::{pdu::PduBuilder, room_version};
 
 use crate::Services;
 

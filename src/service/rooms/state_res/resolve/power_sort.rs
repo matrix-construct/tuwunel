@@ -9,10 +9,10 @@ use ruma::{
 use serde::Deserialize;
 use tuwunel_core::{
 	Result, err,
-	matrix::{Event, PduEvent},
 	result::NotFound,
 	utils::stream::{IterStream, TryBroadbandExt, TryReadyExt},
 };
+use tuwunel_matrix::{Event, PduEvent};
 
 use super::{
 	super::{

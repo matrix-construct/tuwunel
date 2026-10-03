@@ -3,7 +3,7 @@
 use futures::StreamExt;
 use tuwunel::{Args, Runtime, Server, async_run, async_start, async_stop};
 use tuwunel_core::{
-	Err, PduCount, Result,
+	Err, Result,
 	ruma::{
 		RoomId, ServerName, UserId,
 		events::room::member::{MembershipState, RoomMemberEventContent},
@@ -11,6 +11,7 @@ use tuwunel_core::{
 	},
 	utils::stream::ReadyExt,
 };
+use tuwunel_matrix::PduCount;
 use tuwunel_service::{Services, rooms::state_cache::MembershipUpdate};
 
 #[test]

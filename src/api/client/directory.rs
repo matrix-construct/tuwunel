@@ -23,7 +23,6 @@ use ruma::{
 };
 use tuwunel_core::{
 	Err, Error, Result, err, info,
-	matrix::Event,
 	utils::{
 		TryFutureExtExt,
 		math::Expected,
@@ -31,6 +30,7 @@ use tuwunel_core::{
 	},
 	warn,
 };
+use tuwunel_matrix::Event;
 use tuwunel_service::Services;
 
 use crate::{ClientIp, Ruma};

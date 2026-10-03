@@ -21,15 +21,15 @@ use tuwunel_core::{
 	Result, debug,
 	debug::INFO_SPAN_LEVEL,
 	err,
-	matrix::{
-		Event,
-		pdu::{PduCount, PduId, RawPduId},
-	},
 	result::NotFound,
 	smallstr::SmallString,
 	smallvec::SmallVec,
 	utils::{BoolExt, IterStream},
 	warn,
+};
+use tuwunel_matrix::{
+	Event,
+	pdu::{PduCount, PduId, RawPduId},
 };
 
 use self::data::{Data, ReceiptItem};

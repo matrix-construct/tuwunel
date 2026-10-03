@@ -33,11 +33,8 @@ use ruma::{
 	},
 	room::RoomType,
 };
-use tuwunel_core::{
-	Result, err, implement,
-	matrix::{Pdu, room_version},
-	utils::BoolExt,
-};
+use tuwunel_core::{Result, err, implement, utils::BoolExt};
+use tuwunel_matrix::{Pdu, room_version};
 
 use crate::rooms::state_res::events::RoomCreateEvent;
 

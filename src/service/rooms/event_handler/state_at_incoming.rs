@@ -8,13 +8,13 @@ use ruma::{EventId, OwnedEventId, RoomId, RoomVersionId};
 use tuwunel_core::{
 	Error, Result, debug, debug_warn, err, implement,
 	itertools::Itertools,
-	matrix::Event,
 	ref_at, trace,
 	utils::{
 		option::OptionExt,
 		stream::{BroadbandExt, IterStream, ReadyExt, TryBroadbandExt, WidebandExt},
 	},
 };
+use tuwunel_matrix::Event;
 
 use crate::rooms::{
 	short::{ShortStateHash, ShortStateKey},

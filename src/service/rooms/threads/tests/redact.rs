@@ -9,12 +9,12 @@ use std::{
 
 use ruma::{EventId, OwnedEventId, RoomId, event_id, events::StateEventType, room_id, user_id};
 use serde_json::{Value, json};
-use tuwunel_core::{
-	Event, Result,
-	config::Figment,
-	matrix::pdu::{PduCount, PduEvent, PduId, RawPduId},
-};
+use tuwunel_core::{Result, config::Figment};
 use tuwunel_database::Json;
+use tuwunel_matrix::{
+	Event,
+	pdu::{PduCount, PduEvent, PduId, RawPduId},
+};
 
 use crate::{
 	Services,

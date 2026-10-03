@@ -18,14 +18,13 @@ use ruma::{
 };
 use serde::Deserialize;
 use tuwunel_core::{
-	Result, at, err, implement,
-	matrix::{Event, Pdu, StateKey},
-	pair_of,
+	Result, at, err, implement, pair_of,
 	utils::{
 		result::FlatOk,
 		stream::{BroadbandExt, IterStream, ReadyExt, TryBroadbandExt, TryIgnore, TryTools},
 	},
 };
+use tuwunel_matrix::{Event, Pdu, StateKey};
 
 use crate::rooms::{
 	short::{ShortEventId, ShortStateHash, ShortStateKey},
