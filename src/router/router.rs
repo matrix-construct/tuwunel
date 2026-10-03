@@ -3,14 +3,26 @@ use std::sync::Arc;
 use axum::{Router, response::IntoResponse, routing::get};
 use http::{StatusCode, Uri};
 use ruma::api::error::ErrorKind;
-use tuwunel_api::router::{state, state::Guard};
+use tuwunel_api::{
+	client::{
+		admin::{mas::routes::build as mas_routes, routes::build as admin_routes},
+		routes::build as client_routes,
+	},
+	router::{oidc_routes, state, state::Guard},
+	server::routes::build as server_routes,
+};
 use tuwunel_core::Error;
 use tuwunel_service::Services;
 
 pub(crate) fn build(services: &Arc<Services>) -> (Router, Guard) {
 	let router = Router::<state::State>::new();
 	let (state, guard) = state::create(services.clone());
-	let router = tuwunel_api::router::build(router, &services.server)
+	let router = router
+		.merge(client_routes(&services.server))
+		.merge(admin_routes(&services.server))
+		.merge(mas_routes())
+		.merge(oidc_routes())
+		.merge(server_routes(&services.server))
 		.route("/", get(it_works))
 		.fallback(not_found)
 		.method_not_allowed_fallback(method_not_allowed)

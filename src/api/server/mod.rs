@@ -12,6 +12,10 @@ pub(super) mod media;
 pub(super) mod openid;
 pub(super) mod publicrooms;
 pub(super) mod query;
+/// Provides the server route builder.
+///
+/// It includes discovery endpoints and applies the federation setting.
+pub mod routes;
 pub(super) mod send;
 pub(super) mod send_join;
 pub(super) mod send_knock;

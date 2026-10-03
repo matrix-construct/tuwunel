@@ -3,7 +3,10 @@ use tuwunel_service::{Services, rooms::timeline::PdusIterItem};
 
 pub(super) mod account;
 pub(super) mod account_data;
-pub(super) mod admin;
+/// Provides administrator endpoint handlers.
+///
+/// Its public modules expose the administrator and Matrix Authentication Service route builders.
+pub mod admin;
 pub(super) mod alias;
 pub(super) mod appservice;
 pub(super) mod backup;
@@ -31,6 +34,10 @@ pub(super) mod relations;
 pub(super) mod rendezvous;
 pub(super) mod report;
 pub(super) mod room;
+/// Provides the client route builder.
+///
+/// It assembles client endpoints using the server configuration.
+pub mod routes;
 pub(super) mod rtc;
 pub(super) mod search;
 pub(super) mod send;

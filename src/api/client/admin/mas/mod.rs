@@ -5,6 +5,10 @@ mod is_localpart_available;
 mod provision_user;
 mod query_user;
 mod reactivate_user;
+/// Provides the Matrix Authentication Service route builder.
+///
+/// It groups the account and device integration endpoints.
+pub mod routes;
 mod set_displayname;
 mod sync_devices;
 mod unset_displayname;
