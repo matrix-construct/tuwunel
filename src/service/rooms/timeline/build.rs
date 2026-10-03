@@ -51,6 +51,7 @@ pub async fn build_and_append_pdu(
 
 	let (pdu, mut pdu_json) = self
 		.create_hash_and_sign_event(pdu_builder, sender, room_id, state_lock)
+		.boxed() // query-depth firewall
 		.await?;
 
 	//TODO: Use proper room version here

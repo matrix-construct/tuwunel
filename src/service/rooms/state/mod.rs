@@ -28,11 +28,15 @@ use ruma::{
 	CanonicalJsonObject, EventId, OwnedEventId, OwnedRoomId, RoomId, RoomVersionId, UserId,
 	events::{
 		AnyStrippedStateEvent, StateEventType, TimelineEventType,
-		room::member::{MembershipState, RoomMemberEventContent},
+		room::{
+			create::RoomCreateEventContent,
+			member::{MembershipState, RoomMemberEventContent},
+		},
 	},
 	room_version_rules::AuthorizationRules,
 	serde::Raw,
 };
+use serde::Deserialize;
 use serde_json::value::RawValue as RawJsonValue;
 use tuwunel_core::{
 	Event, PduEvent, Result, err,
@@ -90,6 +94,11 @@ type RoomMutexMap = MutexMap<OwnedRoomId, ()>;
 /// guard when the same operation needs all three.
 pub type RoomMutexGuard = MutexMapGuard<OwnedRoomId, ()>;
 type ForwardExtremities = SmallVec<[OwnedEventId; 1]>;
+
+#[derive(Deserialize)]
+struct CreateEvent {
+	content: RoomCreateEventContent,
+}
 
 #[async_trait]
 impl crate::Service for Service {
@@ -670,16 +679,17 @@ pub async fn get_room_version_rules(&self, room_id: &RoomId) -> Result<RoomVersi
 )]
 /// Returns the room version declared by the room's create event.
 ///
-/// Missing or malformed create-event content is reported to the caller.
+/// Only the event's content is decoded, so a create event stored without its
+/// room ID still yields the version. Missing or malformed create-event content
+/// is reported to the caller.
 pub async fn get_room_version(&self, room_id: &RoomId) -> Result<RoomVersionId> {
 	self.services
 		.state_accessor
-		.room_state_get_content(room_id, &StateEventType::RoomCreate, "")
-		.await
-		.as_ref()
-		.map(room_version::from_create_content)
-		.cloned()
+		.room_state_get_id(room_id, &StateEventType::RoomCreate, "")
+		.and_then(async |create_id| self.services.timeline.get(&create_id).await)
+		.map_ok(|create: CreateEvent| create.content.room_version)
 		.map_err(|e| err!(Request(NotFound("No create event found: {e:?}"))))
+		.await
 }
 
 #[implement(Service)]
