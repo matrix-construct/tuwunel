@@ -24,7 +24,7 @@ use super::{
 	account::{
 		ACCOUNT_HEAD, account_error_response, account_html_response, account_redirect_response,
 	},
-	authorization_sso_url, url_encode,
+	authorization_sso_url, require_account_usable, url_encode,
 };
 use crate::ClientIp;
 
@@ -343,6 +343,8 @@ async fn verify_credentials(
 	services
 		.login_ratelimit
 		.record_login(reservation)?;
+
+	require_account_usable(services, &user_id).await?;
 
 	Ok(user_id)
 }

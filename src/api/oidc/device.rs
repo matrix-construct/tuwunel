@@ -23,8 +23,8 @@ use url::Url;
 
 use self::{consent::consent_html, entry::entry_html, error::error_html, result::result_html};
 use super::{
-	NativeChoice, consume_login_token, oauth_error, peek_login_token, should_serve_native,
-	sso_redirect_url, url_encode,
+	NativeChoice, consume_login_token, oauth_error, peek_login_token, require_account_usable,
+	should_serve_native, sso_redirect_url, url_encode,
 };
 use crate::ClientIp;
 
@@ -310,6 +310,8 @@ async fn handle_device_callback_post(
 
 	match action {
 		| "approve" => {
+			require_account_usable(services, &user_id).await?;
+
 			let idp_id = services.oauth.providers.get_default_id();
 			server
 				.approve_device_grant(user_code, user_id, idp_id)
