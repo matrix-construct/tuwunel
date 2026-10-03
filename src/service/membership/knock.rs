@@ -22,8 +22,8 @@ use ruma::{
 use tuwunel_core::{
 	Err, Event, PduCount, Result, async_noinline, at, debug, debug_info, debug_warn, err,
 	implement, info,
-	matrix::event::gen_event_id,
-	pdu::{PduBuilder, PduEvent},
+	matrix::{event::gen_event_id, room_version::rules as room_version_rules},
+	pdu::{PduBuilder, PduEvent, from_incoming_federation},
 	trace, utils, warn,
 };
 
@@ -551,6 +551,8 @@ async fn ingest_send_knock_state(
 				serde_json::from_str::<CanonicalJsonObject>(raw.json().get()).ok(),
 		});
 
+	let rules = room_version_rules(room_version_id)?;
+
 	let mut state_map: HashMap<u64, OwnedEventId> = HashMap::new();
 
 	for event in state {
@@ -587,6 +589,8 @@ async fn ingest_send_knock_state(
 			.short
 			.get_or_create_shortstatekey(&event_type, &state_key)
 			.await;
+
+		let event = from_incoming_federation(room_id, &event_id, event, &rules);
 
 		self.services
 			.timeline
