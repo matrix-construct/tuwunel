@@ -2467,14 +2467,20 @@ pub struct Config {
 	/// Opens RocksDB in read-only mode.
 	///
 	/// Writes are rejected and missing column families cannot be created. This
-	/// mode is disabled by default.
+	/// mode is disabled by default. Open the database read-write with this
+	/// version first: that boot populates snapshot rows. Until it has run, a
+	/// read-only startup fails; with migrations disabled, state reads can fail
+	/// instead.
 	#[serde(default)]
 	pub rocksdb_read_only: bool,
 
 	/// Opens RocksDB as a secondary follower of a primary instance.
 	///
 	/// Writes are rejected while the primary's latest WAL can be replayed into
-	/// this instance's view. Missing column families cannot be created.
+	/// this instance's view. Missing column families cannot be created. Open
+	/// the database read-write with this version first: that boot populates
+	/// snapshot rows. Until it has run, a secondary startup fails; with
+	/// migrations disabled, state reads can fail instead.
 	#[serde(default)]
 	pub rocksdb_secondary: bool,
 
