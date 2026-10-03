@@ -1,9 +1,24 @@
+use std::collections::BTreeSet;
+
 use serde::{Deserialize, Serialize};
 use tuwunel_core::{
-	Err, Result, implement, result::NotFound, smallvec::SmallVec, utils::TryReadyExt, warn,
+	Err, Result, async_noinline, err, implement, info,
+	result::NotFound,
+	smallvec::SmallVec,
+	utils::{TryReadyExt, u64_from_bytes},
+	warn,
 };
 use tuwunel_database::{Database, Json, Txn, keyval::ValBuf, serialize_key, serialize_val};
 
+use self::{
+	identity::{Family, Kind, census as census_identities, cleanup, repair as repair_identities},
+	references::References,
+	rooms::{inspect as inspect_rooms, repair as repair_rooms},
+	state::{
+		gc::{collect, inspect as inspect_gc},
+		inspect as inspect_states, repair as repair_states,
+	},
+};
 use crate::Services;
 
 mod identity;
@@ -16,7 +31,7 @@ mod tests;
 type Samples = SmallVec<[Sample; 1]>;
 type Identity = SmallVec<[u8; 48]>;
 
-const MARKER: &str = "repair_short_injectivity_seen";
+pub(super) const MARKER: &str = "repair_short_injectivity_seen";
 const VERSION: u8 = 1;
 const SAMPLE_LIMIT: usize = 4;
 const IDENTITY_LIMIT: usize = 128;
@@ -46,6 +61,8 @@ const SHAPES: [Shape; 15] = [
 pub(super) struct Outcome {
 	version: u8,
 	status: Status,
+
+	/// Each count tallies occurrences, including overlaps and unknown censuses.
 	counts: [u64; SHAPES.len()],
 	samples: Samples,
 	truncated: bool,
@@ -132,6 +149,13 @@ struct Boundary<'a> {
 	db: &'a Database,
 }
 
+#[derive(Clone, Copy, Default)]
+struct Uncertain {
+	states: bool,
+	collected: bool,
+	rooms: bool,
+}
+
 impl From<Shape> for u8 {
 	fn from(shape: Shape) -> Self {
 		match shape {
@@ -177,6 +201,133 @@ impl TryFrom<u8> for Shape {
 			| unknown => Err(unknown),
 		}
 	}
+}
+
+/// Completes independent repair passes and verifies their residual populations.
+///
+/// Fresh identity and reference censuses precede final alias reclamation. Every
+/// final inspection is read-only and uses committed raw rows.
+// query-depth firewall
+#[async_noinline]
+#[tracing::instrument(level = "debug", skip_all)]
+pub(super) async fn repair(services: &Services) -> Result<Outcome> {
+	let progress = &services.server.progress;
+
+	progress.enter("short ids");
+	let identities = repair_identities(services).await?;
+
+	progress.enter("state snapshots");
+	let states = repair_states(services, &identities).await?;
+
+	progress.enter("unreachable states");
+	let collected = collect(services).await?;
+
+	progress.enter("rooms");
+	let rooms = repair_rooms(services).await?;
+
+	progress.enter("references");
+	let identities = census_identities(services).await?;
+	let references = References::census(services, &identities).await?;
+
+	cleanup(services, &identities.events, &references.events, references.event_complete).await?;
+
+	cleanup(
+		services,
+		&identities.statekeys,
+		&references.statekeys,
+		references.statekey_complete,
+	)
+	.await?;
+
+	// A verified restore leaves its own unit unestablished; independent stages still ran.
+	if states.restored || rooms.restored {
+		return Err!(
+			"published data failed verification and was restored; completion remains \
+			 unestablished"
+		);
+	}
+
+	progress.enter("verify");
+	services.server.check_running()?;
+	services.db.engine.sync()?;
+
+	let uncertain = Uncertain {
+		states: states.uncertain,
+		collected: collected.unknown,
+		rooms: rooms.unknown,
+	};
+
+	let outcome = verify(services, uncertain).await?;
+
+	info!(
+		rewritten = states.rewritten,
+		original_bytes = states.original_bytes,
+		snapshot_bytes = states.snapshot_bytes,
+		collected = collected.deleted,
+		purged = rooms.deleted,
+		moved = rooms.moved,
+		?outcome.counts,
+		"Injectivity repair verified; purge residue counts include unclassified room strays."
+	);
+
+	Ok(outcome)
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+async fn verify(services: &Services, uncertain: Uncertain) -> Result<Outcome> {
+	services.server.check_running()?;
+	let identities = census_identities(services).await?;
+	let outcome = Outcome::clean()
+		.residual_family(&identities.events, Shape::EventAlias)?
+		.residual_family(&identities.statekeys, Shape::StatekeyAlias)?;
+
+	let outcome = inspect_states(services, &identities, outcome).await?;
+	let collected = inspect_gc(services).await?;
+	let rooms = inspect_rooms(services).await?;
+
+	outcome
+		.residues(Shape::UnreachableState, &collected.unfinished, Reason::References)?
+		// An unclassified stray counts once as purge residue, even as a live-room alias.
+		.residues(Shape::PurgeResidue, &rooms.unfinished, Reason::Ownership)?
+		.uncertain(Shape::AffectedState, uncertain.states, Reason::HistoricalState)?
+		.uncertain(
+			Shape::UnreachableState,
+			uncertain.collected || collected.unknown,
+			Reason::References,
+		)?
+		.uncertain(Shape::PurgeResidue, uncertain.rooms || rooms.unknown, Reason::Ownership)
+}
+
+#[implement(Outcome)]
+fn residual_family(self, family: &Family, alias: Shape) -> Result<Self> {
+	family
+		.candidates
+		.iter()
+		.try_fold(self, |outcome, candidate| {
+			let shape = candidate_shape(candidate.kind, alias);
+
+			outcome.residue(shape, 1, &candidate.identity, Reason::Identity)
+		})?
+		.residue(alias, family.malformed, &[], Reason::Identity)
+}
+
+fn candidate_shape(kind: Kind, alias: Shape) -> Shape {
+	match kind {
+		| Kind::Reverse => Shape::DanglingWinner,
+		| Kind::Forward => Shape::PromotableReverse,
+		| Kind::Alias(_) | Kind::Unresolved => alias,
+	}
+}
+
+#[implement(Outcome)]
+fn residues(self, shape: Shape, ids: &BTreeSet<u64>, reason: Reason) -> Result<Self> {
+	ids.iter()
+		.try_fold(self, |outcome, id| outcome.residue(shape, 1, &id.to_be_bytes(), reason))
+}
+
+#[implement(Outcome)]
+fn uncertain(self, shape: Shape, unknown: bool, reason: Reason) -> Result<Self> {
+	self.residue(shape, u64::from(unknown), &[], reason)
 }
 
 /// Runs the repair unless a recognized outcome is already recorded.
@@ -255,6 +406,15 @@ async fn attempt(
 
 	db.engine.sync()?;
 	self.record(bytes)?;
+	if outcome.status == Status::Unfinished {
+		warn!(
+			?outcome.counts,
+			?outcome.samples,
+			truncated = outcome.truncated,
+			"Injectivity repair left unrepaired rows; purge residue counts include \
+			 unclassified room strays."
+		);
+	}
 
 	Ok(Some(outcome))
 }
@@ -288,6 +448,39 @@ fn clean() -> Self {
 		samples: Samples::new(),
 		truncated: false,
 	}
+}
+
+#[implement(Outcome)]
+fn residue(mut self, shape: Shape, count: u64, identity: &[u8], reason: Reason) -> Result<Self> {
+	if count == 0 {
+		return Ok(self);
+	}
+
+	let total = shape
+		.slot()
+		.and_then(|slot| self.counts.get_mut(slot))
+		.ok_or_else(|| err!("unsupported injectivity diagnostic shape"))?;
+
+	*total = total.saturating_add(count);
+	self.status = Status::Unfinished;
+	if self.samples.len() < SAMPLE_LIMIT {
+		let identity = identity.get(..IDENTITY_LIMIT).unwrap_or(identity);
+
+		self.samples.push(Sample {
+			shape,
+			identity: Identity::from_slice(identity),
+			reason,
+		});
+	} else {
+		self.truncated = true;
+	}
+
+	self.truncated |= identity.len() > IDENTITY_LIMIT || count > 1;
+	Ok(self)
+}
+
+impl Shape {
+	fn slot(self) -> Option<usize> { SHAPES.iter().position(|shape| *shape == self) }
 }
 
 #[implement(Outcome)]
@@ -338,3 +531,5 @@ async fn sweep<T: Send>(
 		})
 		.await
 }
+
+fn short_of(bytes: &[u8]) -> Option<u64> { u64_from_bytes(bytes).ok() }

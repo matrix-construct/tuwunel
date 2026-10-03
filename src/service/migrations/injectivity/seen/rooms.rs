@@ -9,7 +9,7 @@ use rows::{COLUMNS, SCANNED, decode, hints, word};
 use ruma::RoomId;
 use serde_json::from_slice;
 use tuwunel_core::{
-	Err, PduEvent, Result, err,
+	PduEvent, Result, err,
 	utils::{BoolExt, IterStream, TryReadyExt, result::NotFound, stream::TryWidebandExt},
 };
 use tuwunel_database::{Database, Interfix};
@@ -31,6 +31,7 @@ pub(super) struct Rooms {
 	pub(super) unknown: bool,
 	pub(super) deleted: u64,
 	pub(super) moved: u64,
+	pub(super) restored: bool,
 }
 
 #[derive(Default)]
@@ -96,11 +97,7 @@ pub(super) async fn repair(services: &Services) -> Result<Rooms> {
 		})
 		.await?;
 
-	if restored {
-		return Err!("room publication mismatch restored; completion remains unestablished");
-	}
-
-	Ok(result)
+	Ok(Rooms { restored, ..result })
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -202,6 +199,7 @@ fn pending(census: &Census) -> Rooms {
 		unknown: census.owner_unknown || census.residue_unknown,
 		deleted: 0,
 		moved: 0,
+		restored: false,
 	}
 }
 

@@ -133,7 +133,7 @@ pub(crate) async fn migrations(services: &Services) -> Result {
 
 	// Repairs residue rather than the schema, so it sits behind the gates
 	// that can still refuse this database.
-	fix_injectivity(services).await?;
+	fix_injectivity(services).await;
 
 	let migrated = migrate(services, foreign_lineage).await;
 

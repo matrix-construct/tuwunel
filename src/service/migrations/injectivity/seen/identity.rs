@@ -12,8 +12,8 @@ use tuwunel_core::{
 };
 use tuwunel_database::{Database, KeyBuf, Map, SEP, Txn, serialize_key, serialize_val};
 
-use super::{Identity, references::References};
-use crate::{Services, migrations::injectivity::scan::short_of};
+use super::{Identity, references::References, short_of};
+use crate::Services;
 
 pub(super) struct Identities {
 	pub(super) events: Family,
@@ -329,7 +329,7 @@ fn write(db: &Database, family: &Family, candidate: &Candidate) -> Result {
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
-async fn cleanup(
+pub(super) async fn cleanup(
 	services: &Services,
 	family: &Family,
 	references: &BTreeSet<u64>,

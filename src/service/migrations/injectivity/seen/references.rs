@@ -3,8 +3,11 @@ use std::{collections::BTreeSet, iter::repeat};
 use futures::TryStreamExt;
 use tuwunel_core::{Err, Result, err, implement, utils::TryReadyExt};
 
-use super::identity::{Family, Identities, Kind};
-use crate::{Services, migrations::injectivity::scan::short_of};
+use super::{
+	identity::{Family, Identities, Kind},
+	short_of,
+};
+use crate::Services;
 
 pub(super) struct References {
 	pub(super) events: BTreeSet<u64>,

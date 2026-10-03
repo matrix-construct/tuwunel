@@ -13,20 +13,20 @@ use tuwunel_core::{
 		BoolExt, IterStream, TryReadyExt,
 		hash::sha256::{concat, hash},
 		result::NotFound,
-		stream::TryBroadbandExt,
+		stream::{TryBroadbandExt, TryWidebandExt},
 	},
 };
 use tuwunel_database::{Database, SEP, Txn, TxnError, keyval::ValBuf};
 
 use super::{
-	Identity,
+	Identity, Outcome, Reason, Shape,
 	identity::{
 		Candidate, Family, Identities, Kind, admitted, census as census_identities, clear_cache,
 	},
+	short_of,
 };
 use crate::{
 	Services,
-	migrations::injectivity::scan::short_of,
 	rooms::state_compressor::{
 		CompressedState, CompressedStateEvent, compress_state_event, parse_compressed_state_event,
 	},
@@ -53,6 +53,8 @@ type Aliases = BTreeMap<u64, (u64, Identity)>;
 type Occurrences = BTreeMap<u64, BTreeSet<u64>>;
 type Absences = Vec<Absence>;
 type Absence = (u64, u64, bool, bool);
+type Observations = [Option<Observation>; 2];
+type Observation = (Shape, u64, Reason);
 type Materialized = Option<(ValBuf, CompressedState)>;
 
 const PARENTLESS: [u8; 8] = [0; 8];
@@ -210,16 +212,129 @@ pub(super) async fn repair(services: &Services, identities: &Identities) -> Resu
 			.await
 	};
 
-	let (states, _) = order
+	order
 		.try_stream()
 		.try_fold((pending(affected), blocked), publish_next)
+		.map_ok(|(states, _)| states)
+		.await
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+pub(super) async fn inspect(
+	services: &Services,
+	identities: &Identities,
+	outcome: Outcome,
+) -> Result<Outcome> {
+	let census = survey(services, identities).await?;
+	let outcome = outcome.residue(
+		Shape::AffectedState,
+		u64::from(census.unknown || !census.complete || !census.held.is_empty()),
+		&[],
+		Reason::References,
+	)?;
+
+	// Serial: each state materializes in full, and its entries already fan out.
+	descendants(&census.parents, &census.seeds)
+		.try_stream()
+		.try_fold(outcome, |outcome, id| inspect_state(services, &census, outcome, id))
+		.await
+}
+
+#[tracing::instrument(level = "trace", skip_all)]
+async fn inspect_state(
+	services: &Services,
+	census: &Census,
+	outcome: Outcome,
+	id: u64,
+) -> Result<Outcome> {
+	services.server.check_running()?;
+	let key = id.to_be_bytes();
+	let Some(bytes) = row(&services.db, id).await? else {
+		return Err!("state disappeared during final injectivity verification");
+	};
+
+	let Some(diff) = decode(&bytes) else {
+		return outcome.residue(Shape::AffectedState, 1, &key, Reason::HistoricalState);
+	};
+
+	let outcome = outcome.residue(
+		Shape::DiffCollision,
+		u64::from(!diff.added.is_disjoint(&diff.removed)),
+		&key,
+		Reason::HistoricalState,
+	)?;
+
+	let outcome = diff
+		.added
+		.iter()
+		.chain(&diff.removed)
+		.copied()
+		.try_stream()
+		.wide_and_then(|entry| inspect_entry(services, &census.projection, entry))
+		.ready_try_fold(outcome, inspect_observations)
 		.await?;
 
-	if states.restored {
-		return Err!("snapshot verification failed; original data restored");
+	let invalid = materialize(services, id)
+		.await?
+		.and_then(|(_, state)| project(state, &census.projection))
+		.is_none();
+
+	outcome.residue(
+		Shape::AffectedState,
+		u64::from(invalid || !census.seeds.contains(&id)),
+		&key,
+		Reason::HistoricalState,
+	)
+}
+
+#[tracing::instrument(level = "trace", skip_all)]
+async fn inspect_entry(
+	services: &Services,
+	projection: &Projection,
+	entry: CompressedStateEvent,
+) -> Result<Observations> {
+	let (key, event) = parse_compressed_state_event(entry);
+	let key = inspect_half(
+		services,
+		&projection.statekeys,
+		key,
+		"shortstatekey_statekey",
+		(Shape::StatekeyAliasEntry, Shape::StatekeyOrphanEntry),
+	);
+
+	let event = inspect_half(
+		services,
+		&projection.events,
+		event,
+		"shorteventid_eventid",
+		(Shape::EventAliasEntry, Shape::EventOrphanEntry),
+	);
+
+	try_join(key, event).map_ok(Into::into).await
+}
+
+fn inspect_observations(outcome: Outcome, observations: Observations) -> Result<Outcome> {
+	observations
+		.into_iter()
+		.flatten()
+		.try_fold(outcome, |outcome, (shape, short, reason)| {
+			outcome.residue(shape, 1, &short.to_be_bytes(), reason)
+		})
+}
+
+#[tracing::instrument(level = "trace", skip_all)]
+async fn inspect_half(
+	services: &Services,
+	mapping: &Mapping,
+	short: u64,
+	reverse: &str,
+	(alias, orphan): (Shape, Shape),
+) -> Result<Option<Observation>> {
+	if !present(&services.db, reverse, &short.to_be_bytes()).await? {
+		return Ok(Some((orphan, short, Reason::Identity)));
 	}
 
-	Ok(states)
+	Ok(candidate(mapping, short).then_some((alias, short, Reason::HistoricalState)))
 }
 
 #[tracing::instrument(level = "trace", skip_all)]
