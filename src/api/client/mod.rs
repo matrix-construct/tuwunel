@@ -19,6 +19,7 @@ pub(super) mod media;
 pub(super) mod media_legacy;
 pub(super) mod membership;
 pub(super) mod message;
+pub(super) mod notice;
 pub(super) mod openid;
 pub(super) mod presence;
 pub(super) mod profile;
