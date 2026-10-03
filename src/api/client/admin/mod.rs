@@ -2,7 +2,10 @@ mod get_nonce;
 mod is_user_locked;
 mod is_user_suspended;
 mod lock_user;
-pub(crate) mod mas;
+/// Provides Matrix Authentication Service endpoint handlers.
+///
+/// The route builder groups its account and device integration endpoints.
+pub mod mas;
 mod register;
 mod suspend_user;
 
@@ -11,6 +14,10 @@ pub(crate) mod federation;
 pub(crate) mod media;
 pub(crate) mod misc;
 pub(crate) mod rooms;
+/// Provides the administrator route builder.
+///
+/// It groups administrator endpoints for the configured authentication mode.
+pub mod routes;
 pub(crate) mod tokens;
 pub(crate) mod users;
 
