@@ -224,8 +224,9 @@ async fn final_verifier_reads_raw_state_and_preserves_uncertainty() -> Result {
 	db["statehash_shortstatehash"].insert(b"exposed", 900_u64.to_be_bytes());
 	services
 		.state_compressor
-		.load_shortstatehash_info(900)
-		.await?;
+		.rows(900, None, None)
+		.await?
+		.count();
 
 	let exposed = words(&[0, 201, 101, 0, 201, 101]);
 
@@ -236,19 +237,18 @@ async fn final_verifier_reads_raw_state_and_preserves_uncertainty() -> Result {
 	assert_eq!(
 		count(&outcome, Shape::DiffCollision),
 		1,
-		"raw diff collision survives a healthy stale compressor cache"
+		"raw diff collision survives healthy stale snapshot rows"
 	);
 
 	assert_stored(db, "shortstatehash_statediff", &900_u64.to_be_bytes(), &exposed).await?;
 
-	let cached = services
-		.state_compressor
-		.stateinfo_cache
-		.lock()
-		.expect("test cache lock")
-		.contains_key(&900);
-
-	assert!(cached, "read-only verification does not clear caches or repair");
+	assert!(
+		db["shortstatehash_statemeta"]
+			.get(&900_u64.to_be_bytes())
+			.await
+			.is_ok(),
+		"read-only verification does not clear rows or repair"
+	);
 	db["shortstatehash_statediff"].remove(&900_u64.to_be_bytes());
 	db["statehash_shortstatehash"].remove(b"exposed");
 	assert_eq!(verify(services, Uncertain::default()).await?, Outcome::clean());

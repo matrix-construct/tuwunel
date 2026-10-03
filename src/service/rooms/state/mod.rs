@@ -14,7 +14,10 @@ use async_trait::async_trait;
 ///
 /// Sibling services share its distinction between absent state and missing storage.
 pub(crate) use fetch_state::IdMapState;
-use futures::{FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt, future::join_all};
+use futures::{
+	FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt,
+	future::{OptionFuture, join_all},
+};
 /// Re-exports the receive-path pruning goal calculation within the crate.
 ///
 /// Sibling room services use it to pace extremity reduction.
@@ -55,7 +58,7 @@ use crate::{
 	rooms::{
 		short::{ShortEventId, ShortStateHash, ShortStateKey},
 		state_cache::{MembershipUpdate, StrippedRoomState},
-		state_compressor::{CompressedState, parse_compressed_state_event},
+		state_compressor::{CompressedState, compress_state_event, parse_compressed_state_event},
 		state_res::{StateMap, auth_types_for_event},
 	},
 	services::OnceServices,
@@ -293,44 +296,27 @@ pub async fn set_event_state(
 		return Ok(shortstatehash);
 	}
 
-	let previous_shortstatehash = self.get_room_shortstatehash(room_id).await;
-	let states_parents = match previous_shortstatehash {
-		| Ok(p) =>
-			self.services
-				.state_compressor
-				.load_shortstatehash_info(p)
-				.await?,
-		| _ => Vec::new(),
-	};
+	let parent = self
+		.get_room_shortstatehash(room_id)
+		.map(Result::ok)
+		.await;
 
-	let (statediffnew, statediffremoved) = if let Some(parent_stateinfo) = states_parents.last() {
-		let statediffnew: CompressedState = state_ids_compressed
-			.difference(&parent_stateinfo.full_state)
-			.copied()
-			.collect();
-
-		let statediffremoved: CompressedState = parent_stateinfo
-			.full_state
-			.difference(&state_ids_compressed)
-			.copied()
-			.collect();
-
-		(Arc::new(statediffnew), Arc::new(statediffremoved))
+	let compressor = &self.services.state_compressor;
+	let (added, removed) = if let Some(parent) = parent {
+		compressor
+			.parent_difference(parent, &state_ids_compressed)
+			.await?
 	} else {
-		(state_ids_compressed, Arc::new(CompressedState::new()))
+		(state_ids_compressed, Arc::default())
 	};
+
+	// no state will be based on this one
+	let prepared = compressor
+		.prepare_state_diff(added, removed, 1_000_000, parent)
+		.await?;
 
 	let save_statediff = |txn: &mut Txn, shortstatehash| {
-		self.services
-			.state_compressor
-			.save_state_from_diff(
-				txn,
-				shortstatehash,
-				statediffnew,
-				statediffremoved,
-				1_000_000, // high number because no state will be based on this one
-				states_parents,
-			)
+		compressor.save_state_from_diff(txn, shortstatehash, prepared)
 	};
 
 	let (shortstatehash, _) = self
@@ -389,62 +375,45 @@ pub async fn append_to_state(&self, new_pdu: &PduEvent) -> Result<u64> {
 
 	match &new_pdu.state_key {
 		| Some(state_key) => {
-			let states_parents = match previous_shortstatehash {
-				| Ok(p) =>
-					self.services
-						.state_compressor
-						.load_shortstatehash_info(p)
-						.await?,
-				| _ => Vec::new(),
-			};
-
+			let kind = StateEventType::from(new_pdu.kind.to_cow_str().as_ref());
 			let shortstatekey = self
 				.services
 				.short
-				.get_or_create_shortstatekey(&new_pdu.kind.to_string().into(), state_key)
+				.get_or_create_shortstatekey(&kind, state_key)
 				.await;
 
-			let new = self
-				.services
-				.state_compressor
+			let compressor = &self.services.state_compressor;
+			let new = compressor
 				.compress_state_event(shortstatekey, &new_pdu.event_id)
 				.await;
 
-			let replaces = states_parents
-				.last()
-				.map(|info| {
-					info.full_state
-						.iter()
-						.find(|bytes| bytes.starts_with(&shortstatekey.to_be_bytes()))
-				})
-				.unwrap_or_default();
+			let parent = previous_shortstatehash.ok();
+			let rows = parent.map(|parent| compressor.rows(parent, Some(&kind), Some(state_key)));
 
-			if Some(&new) == replaces {
-				return Ok(previous_shortstatehash.expect("must exist"));
+			let replaces = OptionFuture::from(rows)
+				.map(Option::transpose)
+				.await?
+				.and_then(|mut rows| rows.next())
+				.map(|row| compress_state_event(row.shortstatekey, row.shorteventid));
+
+			if let Some(parent) = parent.filter(|_| replaces == Some(new)) {
+				return Ok(parent);
 			}
+
+			let prepared = compressor
+				.prepare_state_diff(
+					Arc::new([new].into()),
+					Arc::new(replaces.into_iter().collect()),
+					2, // every state change is 2 event changes on average
+					parent,
+				)
+				.await?;
 
 			// TODO: statehash with deterministic inputs
 			let shortstatehash = self.services.globals.next_count();
 			let mut txn = self.services.db.txn();
 
-			let mut statediffnew = CompressedState::new();
-			statediffnew.insert(new);
-
-			let mut statediffremoved = CompressedState::new();
-			if let Some(replaces) = replaces {
-				statediffremoved.insert(*replaces);
-			}
-
-			self.services
-				.state_compressor
-				.save_state_from_diff(
-					&mut txn,
-					*shortstatehash,
-					Arc::new(statediffnew),
-					Arc::new(statediffremoved),
-					2,
-					states_parents,
-				)?;
+			compressor.save_state_from_diff(&mut txn, *shortstatehash, prepared)?;
 
 			txn.execute();
 

@@ -1,20 +1,32 @@
-use std::collections::BTreeSet;
+use std::{collections::BTreeSet, sync::Arc};
 
 use futures::{
 	StreamExt, TryFutureExt, TryStreamExt,
 	future::{join_all, try_join_all},
 	stream::try_unfold,
 };
-use ruma::events::StateEventType;
+use ruma::{
+	CanonicalJsonObject, EventId, OwnedEventId, RoomId, event_id,
+	events::{StateEventType, TimelineEventType},
+	room_id,
+	serde::Raw,
+	uint, user_id,
+};
 use serde_bytes::Bytes;
-use tuwunel_core::{Result, config::Figment, itertools::Itertools};
+use tuwunel_core::{
+	PduEvent, Result,
+	config::Figment,
+	err, expected, implement,
+	itertools::Itertools,
+	utils::{calculate_hash, u64_from_bytes},
+};
 use tuwunel_database::{deserialize_from_slice, map, serialize_to as ser, serialize_to_vec};
 
 use super::{
-	StateDiff, compress_state_event, parse_compressed_state_event,
+	CompressedState, Service, StateDiff, compress_state_event, parse_compressed_state_event,
 	rows::{pack, unpack},
 };
-use crate::{Services, test_utils::fixture};
+use crate::{Services, rooms::short::ShortStateHash, test_utils::fixture};
 
 type State = BTreeSet<(u64, u64)>;
 
@@ -266,4 +278,241 @@ fn fold_layer(mut state: State, diff: &StateDiff) -> State {
 	}
 
 	state
+}
+
+#[tokio::test]
+async fn writes_match_blob_fold() -> Result {
+	let Some(fixture) = fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+
+	let services = &fixture.services;
+	let compressor = &services.state_compressor;
+	let room = room_id!("!snapshot-writers:localhost");
+	let keys = join_all((0..16).map(async |index| {
+		services
+			.short
+			.get_or_create_shortstatekey(&StateEventType::RoomMember, &index.to_string())
+			.await
+	}))
+	.await;
+
+	for index in 0_u64..40 {
+		let event = EventId::parse(format!("$writer-{index}:localhost"))?;
+		let shortevent = services
+			.short
+			.get_or_create_shorteventid(&event)
+			.await;
+
+		let replacement = if index == 7 {
+			let removed = event_id!("$writer-5:localhost");
+
+			services
+				.short
+				.get_or_create_shorteventid(removed)
+				.await
+		} else {
+			shortevent
+		};
+
+		let expected = expected_state(&keys, index, replacement, shortevent);
+
+		if index == 8 {
+			let planted = 0x00FF_00AA_u64;
+
+			write_blob(services, planted, 0, &[(keys[1], 30_001)], &[(keys[0], shortevent)]);
+			set_room_state(services, room, planted).await;
+		}
+
+		let previous = services
+			.state
+			.get_room_shortstatehash(room)
+			.await
+			.ok();
+
+		let compressed: CompressedState = expected
+			.iter()
+			.map(|&(key, short)| compress_state_event(key, short))
+			.collect();
+
+		let digest = calculate_hash(compressed.iter().map(|record| &record[..]));
+		let append = index >= 9 && index.is_multiple_of(3);
+		let hash = write_state(services, room, event, compressed, index).await?;
+
+		let stored = services.db[map!("shortstatehash_statemeta")]
+			.get(&hash.to_be_bytes())
+			.await?;
+
+		let meta = unpack(&stored)?;
+		let diff = compressor.get_statediff(hash).await?;
+
+		let added_len = diff.added.len();
+		let removed_len = diff.removed.len();
+
+		assert_eq!(meta[0], u64::try_from(expected!(added_len + removed_len))?);
+		let ancestors: Vec<_> = try_unfold(diff.parent, async |next| -> Result<_> {
+			let Some(parent) = next else { return Ok(None) };
+			let diff = compressor.get_statediff(parent).await?;
+
+			Ok(Some((parent, diff.parent)))
+		})
+		.try_collect()
+		.await?;
+
+		assert_eq!(&meta[1..], ancestors);
+		if diff.parent.is_none() {
+			assert!(diff.removed.is_empty());
+		}
+
+		match index {
+			| 3 => assert_eq!(meta.len(), 4),
+			| 4 => assert_ne!(diff.parent, previous, "fifth layer folds"),
+			| 5 | 8 => assert!(diff.parent.is_none(), "large delta folds into root"),
+			| _ => {},
+		}
+
+		if !append {
+			assert_eq!(services.short.get_shortstatehash(&digest).await?, hash);
+		}
+
+		assert_eq!(blob_fold(services, hash).await?, expected);
+		compare(services, hash, &expected).await?;
+		set_room_state(services, room, hash).await;
+	}
+
+	Ok(())
+}
+
+fn expected_state(keys: &[u64], index: u64, replacement: u64, shortevent: u64) -> State {
+	let base = if index < 5 { 10_000 } else { 30_000 };
+
+	keys.iter()
+		.copied()
+		.enumerate()
+		.filter(|&(offset, _)| index != 6 || offset != 0)
+		.map(|(offset, key)| {
+			let event_offset = u64::try_from(offset).expect("small fixture");
+			let short = match offset {
+				| 0 => replacement,
+				| 1 if index == 7 => shortevent,
+				| _ => expected!(base + event_offset),
+			};
+
+			(key, short)
+		})
+		.collect()
+}
+
+async fn write_state(
+	services: &Services,
+	room: &RoomId,
+	event: OwnedEventId,
+	compressed: CompressedState,
+	index: u64,
+) -> Result<u64> {
+	let via_event = matches!(index, 1..=4 | 7) || index >= 9 && index % 3 == 1;
+
+	match index {
+		| _ if via_event =>
+			services
+				.state
+				.set_event_state(&event, room, Arc::new(compressed))
+				.await,
+		| _ if index >= 9 && index.is_multiple_of(3) => {
+			let pdu = writer_pdu(event, room)?;
+
+			services.state.append_to_state(&pdu).await
+		},
+		| _ =>
+			services
+				.state_compressor
+				.save_state(room, Arc::new(compressed))
+				.map_ok(|saved| saved.shortstatehash)
+				.await,
+	}
+}
+
+async fn set_room_state(services: &Services, room: &RoomId, hash: u64) {
+	let guard = services.state.mutex.lock(room).await;
+
+	services.state.set_room_state(room, hash, &guard);
+}
+
+fn writer_pdu(event: OwnedEventId, room: &RoomId) -> Result<PduEvent> {
+	let pdu = PduEvent {
+		kind: TimelineEventType::RoomMember,
+		content: Raw::new(&CanonicalJsonObject::new())?,
+		event_id: event,
+		room_id: room.to_owned(),
+		sender: user_id!("@writer:localhost").to_owned(),
+		state_key: Some("0".into()),
+		redacts: None,
+		prev_events: Default::default(),
+		auth_events: Default::default(),
+		origin_server_ts: uint!(0),
+		depth: uint!(1),
+		hashes: Default::default(),
+		origin: None,
+		unsigned: None,
+	};
+
+	Ok(pdu)
+}
+
+/// Reads one state's delta row into its typed form.
+///
+/// Rows round-trip through [`save_statediff`], the pair being the only
+/// codec for the statediff encoding.
+///
+/// # Panics
+///
+/// Panics if a stored delta row is shorter than its eight-byte parent prefix.
+#[implement(Service)]
+#[tracing::instrument(skip(self), level = "debug", name = "get")]
+pub(crate) async fn get_statediff(&self, shortstatehash: ShortStateHash) -> Result<StateDiff> {
+	const BUFSIZE: usize = size_of::<ShortStateHash>();
+	const STRIDE: usize = size_of::<ShortStateHash>();
+
+	let value = self
+		.db
+		.shortstatehash_statediff
+		.aqry::<BUFSIZE, _>(&shortstatehash)
+		.await
+		.map_err(|e| {
+			err!(Database("Failed to find StateDiff from short {shortstatehash:?}: {e}"))
+		})?;
+
+	let parent = u64_from_bytes(&value[0..size_of::<u64>()])
+		.ok()
+		.take_if(|parent| *parent != 0);
+
+	debug_assert!(value.len().is_multiple_of(STRIDE), "value not aligned to stride");
+	let _num_values = value.len() / STRIDE;
+
+	let mut add_mode = true;
+	let mut added = CompressedState::new();
+	let mut removed = CompressedState::new();
+
+	let mut i = STRIDE;
+	while let Some(v) = value.get(i..expected!(i + 2 * STRIDE)) {
+		if add_mode && v.starts_with(&0_u64.to_be_bytes()) {
+			add_mode = false;
+			i = expected!(i + STRIDE);
+			continue;
+		}
+
+		if add_mode {
+			added.insert(v.try_into()?);
+		} else {
+			removed.insert(v.try_into()?);
+		}
+
+		i = expected!(i + 2 * STRIDE);
+	}
+
+	Ok(StateDiff {
+		parent,
+		added: Arc::new(added),
+		removed: Arc::new(removed),
+	})
 }
