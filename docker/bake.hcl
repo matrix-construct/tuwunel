@@ -862,6 +862,9 @@ target "integ-valgrind" {
         # bench pinning integ now grants
         sched_policy = ""
         sched_cpus = ""
+
+        # valgrind runs many times slower than the deadline integ sets
+        cargo_test_timeout = ""
     }
 }
 
@@ -884,6 +887,11 @@ target "integ" {
         cargo_args = (cargo_profile == "bench"?
             "--no-fail-fast --bench=*": "--no-fail-fast --test=*"
         )
+
+        # A hung test binary fails at this deadline instead of holding the
+        # runner until the job ceiling; the slowest take well under a minute.
+        # Benches have no measured baseline yet and stay uncapped.
+        cargo_test_timeout = (cargo_profile == "bench"? "": "10m")
 
         # The realtime class is for running the test and bench binaries, never
         # for compiling them: scope it to cargo's runner. Benches hold only the
@@ -1022,6 +1030,9 @@ target "unit-valgrind" {
         # bench pinning unit now grants
         sched_policy = ""
         sched_cpus = ""
+
+        # valgrind runs many times slower than the deadline unit sets
+        cargo_test_timeout = ""
     }
 }
 
@@ -1045,6 +1056,11 @@ target "unit" {
         cargo_args = (cargo_profile == "bench"?
             "--no-fail-fast --lib": "--no-fail-fast --lib --bins"
         )
+
+        # A hung test binary fails at this deadline instead of holding the
+        # runner until the job ceiling; the slowest take well under a minute.
+        # Benches have no measured baseline yet and stay uncapped.
+        cargo_test_timeout = (cargo_profile == "bench"? "": "10m")
 
         # The realtime class is for running the test and bench binaries, never
         # for compiling them: scope it to cargo's runner. Benches hold only the
