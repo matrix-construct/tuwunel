@@ -1,6 +1,6 @@
 use std::{iter::once, time::Duration};
 
-use futures::StreamExt;
+use futures::{StreamExt, TryStreamExt};
 use serde_json::{Value, json};
 use tokio::time::{sleep, timeout};
 use tuwunel_core::{
@@ -15,7 +15,7 @@ use tuwunel_core::{
 	},
 	utils::{BoolExt, result::NotFound, time::now_secs},
 };
-use tuwunel_database::Interfix;
+use tuwunel_database::{Interfix, map};
 use tuwunel_matrix::{
 	PduEvent,
 	pdu::{PduBuilder, into_outgoing_federation},
@@ -232,6 +232,16 @@ pub(super) async fn remove_short_row(services: &Services, map_name: &str, short:
 		.map_err(|error| err!("short-id row {map_name}[{short}] unavailable: {error}"))?;
 
 	map.remove(&key);
+	if map_name == "shortstatehash_statediff" {
+		services.db[map!("shortstatehash_statemeta")].remove(&key);
+		let rows = &services.db[map!("shortstatehash_statedelta")];
+
+		rows.keys_prefix_raw(&(short, Interfix))
+			.map_ok(|key| rows.remove(key))
+			.try_collect::<()>()
+			.await?;
+	}
+
 	services.clear_cache().await;
 
 	let absent = map.exists(&key).await.is_not_found();

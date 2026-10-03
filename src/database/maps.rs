@@ -522,9 +522,20 @@ pub(super) static MAPS: &[Descriptor] = &[
 		..descriptor::SEQUENTIAL
 	},
 	Descriptor {
+		name: "shortstatehash_statedelta", // derived from shortstatehash_statediff
+		val_size_hint: Some(9),
+		..descriptor::RANDOM_SMALL
+	},
+	Descriptor {
 		name: "shortstatehash_statediff",
 		key_size_hint: Some(8),
 		..descriptor::SEQUENTIAL_SMALL
+	},
+	Descriptor {
+		name: "shortstatehash_statemeta", // derived from shortstatehash_statediff
+		key_size_hint: Some(8),
+		val_size_hint: Some(32),
+		..descriptor::RANDOM_SMALL
 	},
 	Descriptor {
 		name: "shortstatekey_statekey",

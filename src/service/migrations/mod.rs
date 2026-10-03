@@ -17,7 +17,7 @@ use tuwunel_core::{
 	utils::{BoolExt, ReadyExt, TryReadyExt},
 	warn,
 };
-use tuwunel_database::Deserialized;
+use tuwunel_database::{Deserialized, map};
 
 use self::{
 	account_status::migrate_account_status,
@@ -131,10 +131,6 @@ pub(crate) async fn migrations(services: &Services) -> Result {
 	check_server_name(services).await?;
 
 	services.server.check_running()?;
-
-	// Repairs residue rather than the schema, so it sits behind the gates
-	// that can still refuse this database.
-	fix_injectivity(services).await;
 
 	let migrated = migrate(services, foreign_lineage).await;
 
@@ -278,6 +274,28 @@ async fn fresh(services: &Services) -> Result {
 /// Apply any migrations
 async fn migrate(services: &Services, foreign_lineage: bool) -> Result {
 	let db = &services.db;
+
+	let global = &db[map!("global")];
+
+	let before = global
+		.get(injectivity::MARKER)
+		.await
+		.optional()?
+		.map(|value| value.to_vec());
+
+	// Repairs residue rather than the schema, so it sits behind the gates
+	// that can still refuse this database.
+	fix_injectivity(services).await;
+
+	let after = global.get(injectivity::MARKER).await.optional()?;
+
+	// A repair can rewrite authoritative blobs, so any marker change, a
+	// settlement record included, rebuilds their derived rows.
+	if before.as_deref() != after.as_deref()
+		|| !marker_present(services, "populate_snapshot_rows").await?
+	{
+		clear_snapshot_rows(services).await;
+	}
 
 	services.server.check_running()?;
 
@@ -439,6 +457,16 @@ async fn migrate(services: &Services, foreign_lineage: bool) -> Result {
 	info!("Loaded RocksDB database with schema version {DATABASE_VERSION}");
 
 	Ok(())
+}
+
+async fn clear_snapshot_rows(services: &Services) {
+	services.db[map!("shortstatehash_statemeta")]
+		.clear()
+		.await;
+
+	services.db[map!("shortstatehash_statedelta")]
+		.clear()
+		.await;
 }
 
 /// Runs a pass whose work may wait on a condition outside the database.

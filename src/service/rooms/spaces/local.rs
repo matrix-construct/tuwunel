@@ -54,10 +54,14 @@ pub(super) async fn get_summary_and_children_local(
 		return Err!(Request(NotFound("Space room not found locally.")));
 	}
 
-	let children_state: Vec<_> = self
+	let children_state = self
 		.get_space_child_events(current_room)
 		.map(Event::into_format)
 		.collect()
+		.map(|mut children: Vec<Raw<HierarchySpaceChildEvent>>| {
+			children.sort_by_cached_key(|child| child.deserialize().ok());
+			children
+		})
 		.await;
 
 	let summary = self

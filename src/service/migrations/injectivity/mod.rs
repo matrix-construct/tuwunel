@@ -11,7 +11,8 @@ mod seen;
 use tuwunel_core::result::NotFound;
 use tuwunel_database::Database;
 
-use self::seen::{MARKER, repair, run, settle, stamp};
+pub(super) use self::seen::MARKER;
+use self::seen::{repair, run, settle, stamp};
 use crate::Services;
 
 const SUPERSEDED: &str = "fix_short_injectivity";
