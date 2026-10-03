@@ -12,14 +12,17 @@ use ruma::{
 use serde::Deserialize;
 use serde_json::json;
 use tuwunel_core::{
-	Event, Result, err,
-	matrix::pdu::{PduCount, PduEvent, PduId, RawPduId},
+	Result, err,
 	utils::{
 		ReadyExt,
 		stream::{TryIgnore, WidebandExt, automatic_width},
 	},
 };
 use tuwunel_database::{Deserialized, Map, Txn};
+use tuwunel_matrix::{
+	Event,
+	pdu::{PduCount, PduEvent, PduId, RawPduId},
+};
 
 #[cfg(test)]
 mod tests;

@@ -14,15 +14,14 @@ use ruma::{
 	},
 };
 use tuwunel_core::{
-	Result, error,
-	matrix::{Event, pdu::PduCount},
-	pair_of,
+	Result, error, pair_of,
 	utils::{
 		BoolExt, FutureBoolExt, IterStream, ReadyExt, TryFutureExtExt,
 		future::{OptionFutureExt, OptionStream, ReadyBoolExt},
 		stream::BroadbandExt,
 	},
 };
+use tuwunel_matrix::{Event, pdu::PduCount};
 use tuwunel_service::sync::Connection;
 
 use super::{SyncInfo, share_encrypted_room};

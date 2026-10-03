@@ -1,6 +1,7 @@
 use futures::TryStreamExt;
 use ruma::{OwnedRoomOrAliasId, events::AnyStateEvent, serde::Raw};
-use tuwunel_core::{Error, Result, matrix::Event, utils::stream::TryReadyExt};
+use tuwunel_core::{Error, Result, utils::stream::TryReadyExt};
+use tuwunel_matrix::Event;
 
 use crate::admin_command;
 

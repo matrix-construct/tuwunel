@@ -5,8 +5,9 @@ use ruma::{
 	serde::Raw,
 };
 use serde::Deserialize;
-use tuwunel_core::{Result, matrix::Pdu};
+use tuwunel_core::Result;
 use tuwunel_database::Map;
+use tuwunel_matrix::Pdu;
 
 mod bundling;
 mod purge;

@@ -26,7 +26,6 @@ use ruma::{
 };
 use tuwunel_core::{
 	Result, at, implement, is_not_empty,
-	matrix::PduCount,
 	utils::{
 		BoolExt, FutureBoolExt, ReadyExt,
 		future::ReadyBoolExt,
@@ -35,6 +34,7 @@ use tuwunel_core::{
 	warn,
 };
 use tuwunel_database::{Json, Txn, keyval::ValBuf, serialize_key, serialize_val};
+use tuwunel_matrix::PduCount;
 
 /// Optional stripped room state attached to invite and knock transitions.
 ///

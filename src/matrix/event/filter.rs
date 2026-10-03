@@ -7,9 +7,9 @@ use ruma::{
 };
 use serde_json::{Map, Value};
 use smallvec::SmallVec;
+use tuwunel_core::is_equal_to;
 
 use super::Event;
-use crate::is_equal_to;
 
 /// Segments of one `event_fields` entry; most paths are one or two deep.
 type FieldPath = SmallVec<[String; 2]>;

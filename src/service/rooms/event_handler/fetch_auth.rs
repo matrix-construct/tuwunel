@@ -9,12 +9,11 @@ use ruma::{
 	ServerName,
 };
 use tuwunel_core::{
-	debug, debug_error, debug_warn, expected, implement,
-	matrix::{PduEvent, pdu::MAX_AUTH_EVENTS},
-	trace,
+	debug, debug_error, debug_warn, expected, implement, trace,
 	utils::stream::{BroadbandExt, IterStream},
 	warn,
 };
+use tuwunel_matrix::{PduEvent, pdu::MAX_AUTH_EVENTS};
 
 use super::backoff::{Context, Disposition};
 use crate::fetcher::{Op, Opts};

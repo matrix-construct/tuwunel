@@ -1,8 +1,8 @@
 use serde::Deserialize;
 use serde_json::value::{RawValue as RawJsonValue, Value as JsonValue};
+use tuwunel_core::{Result, err, is_true};
 
 use super::Event;
-use crate::{Result, err, is_true};
 
 pub(super) fn contains_unsigned_property<F, E>(event: &E, property: &str, is_type: F) -> bool
 where

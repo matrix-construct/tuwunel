@@ -3,9 +3,9 @@ use ruma::{
 	room_version_rules::EventFormatRules,
 };
 use serde_json::to_string as to_json_string;
+use tuwunel_core::{Err, Result, err};
 
 use super::super::{MAX_AUTH_EVENTS, MAX_PDU_BYTES, MAX_PREV_EVENTS, Pdu};
-use crate::{Err, Result, err};
 
 /// Verifies that a parsed PDU belongs to the expected room.
 ///

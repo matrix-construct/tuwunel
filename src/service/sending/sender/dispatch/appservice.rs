@@ -15,7 +15,7 @@ use ruma::{
 };
 use serde::Deserialize;
 use tuwunel_core::{
-	Event, debug_warn, err, implement,
+	debug_warn, err, implement,
 	itertools::Itertools,
 	smallvec::SmallVec,
 	utils::{
@@ -23,6 +23,7 @@ use tuwunel_core::{
 		stream::{BroadbandExt, WidebandExt},
 	},
 };
+use tuwunel_matrix::Event;
 
 use super::SendingResult;
 use crate::{

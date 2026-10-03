@@ -2,7 +2,8 @@ use ruma::{
 	RoomId, UserId,
 	events::room::member::{MembershipState, RoomMemberEventContent},
 };
-use tuwunel_core::{Result, implement, pdu::PduBuilder};
+use tuwunel_core::{Result, implement};
+use tuwunel_matrix::pdu::PduBuilder;
 
 use super::Service;
 use crate::rooms::timeline::RoomMutexGuard;

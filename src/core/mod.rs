@@ -1,9 +1,8 @@
 //! Provides shared runtime foundations for Tuwunel.
 //!
-//! The crate centralizes configuration, errors, Matrix data types, logging,
-//! metrics, server lifecycle state, and reusable utilities. Higher-level
-//! workspace crates consume these APIs through a shared foundational
-//! dependency.
+//! The crate centralizes configuration, errors, logging, metrics,
+//! server lifecycle state, and reusable utilities. Higher-level
+//! workspace crates build on these APIs.
 #![deny(missing_docs)]
 
 pub mod alloc;
@@ -32,7 +31,6 @@ pub use ::tracing;
 pub use config::Config;
 pub use error::Error;
 pub use info::{rustc_flags_capture, version, version::version};
-pub use matrix::{Event, EventTypeExt, Pdu, PduCount, PduEvent, PduId, RoomVersion, pdu};
 pub use server::{Progress, Server};
 pub use utils::{async_noinline, ctor, dtor, implement, result, result::Result};
 

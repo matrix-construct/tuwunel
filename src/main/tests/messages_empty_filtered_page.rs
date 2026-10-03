@@ -5,7 +5,8 @@ use std::{fs::remove_dir_all, net::TcpListener};
 use futures::future::join;
 use serde_json::{Value, json};
 use tuwunel::{Args, Runtime, Server, async_run, async_start, async_stop};
-use tuwunel_core::{Event, Result, ruma::events::TimelineEventType};
+use tuwunel_core::{Result, ruma::events::TimelineEventType};
+use tuwunel_matrix::Event;
 use tuwunel_service::Services;
 
 use self::client::{Client, register, wait_until_ready};

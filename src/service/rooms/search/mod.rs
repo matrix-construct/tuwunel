@@ -3,17 +3,19 @@ use std::sync::Arc;
 use futures::{Stream, StreamExt};
 use ruma::{RoomId, UserId, api::client::search::search_events::v3::Criteria};
 use tuwunel_core::{
-	PduCount, Result,
+	Result,
 	arrayvec::ArrayVec,
-	implement,
-	matrix::event::{Event, Matches},
-	trace,
+	implement, trace,
 	utils::{
 		ArrayVecExt, IterStream, ReadyExt, set,
 		stream::{TryIgnore, WidebandExt},
 	},
 };
 use tuwunel_database::{Map, Txn, keyval::Val};
+use tuwunel_matrix::{
+	PduCount,
+	event::{Event, Matches},
+};
 
 use crate::rooms::{
 	short::ShortRoomId,

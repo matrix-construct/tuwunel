@@ -5404,6 +5404,7 @@ dependencies = [
  "tuwunel_core",
  "tuwunel_database",
  "tuwunel_macros",
+ "tuwunel_matrix",
  "tuwunel_router",
  "tuwunel_service",
 ]
@@ -5433,6 +5434,7 @@ dependencies = [
  "tuwunel_core",
  "tuwunel_database",
  "tuwunel_macros",
+ "tuwunel_matrix",
  "tuwunel_service",
  "url",
 ]
@@ -5469,6 +5471,7 @@ dependencies = [
  "tower-http",
  "tracing",
  "tuwunel_core",
+ "tuwunel_matrix",
  "tuwunel_service",
  "url",
 ]
@@ -5576,6 +5579,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "tuwunel_matrix"
+version = "1.9.3"
+dependencies = [
+ "arrayvec",
+ "base64 0.22.1",
+ "const-str",
+ "rand 0.10.3",
+ "ruma",
+ "serde",
+ "serde_json",
+ "smallstr",
+ "smallvec",
+ "tracing",
+ "tuwunel_core",
+]
+
+[[package]]
 name = "tuwunel_router"
 version = "1.9.3"
 dependencies = [
@@ -5658,6 +5678,7 @@ dependencies = [
  "tracing-subscriber",
  "tuwunel_core",
  "tuwunel_database",
+ "tuwunel_matrix",
  "tuwunel_service",
  "url",
  "webpage",

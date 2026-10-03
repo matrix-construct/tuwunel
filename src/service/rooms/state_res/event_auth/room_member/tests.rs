@@ -15,7 +15,8 @@ use ruma::{
 	third_party_invite::IdentityServerBase64PublicKey,
 };
 use serde_json::{json, value::to_raw_value as to_raw_json_value};
-use tuwunel_core::{Error, Result, matrix::PduEvent};
+use tuwunel_core::{Error, Result};
+use tuwunel_matrix::PduEvent;
 
 use super::{
 	super::events::{RoomMemberEvent, member::RoomMemberEventResultExt},

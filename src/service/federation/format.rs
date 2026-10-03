@@ -6,7 +6,8 @@
 use futures::future::OptionFuture;
 use ruma::{CanonicalJsonObject, CanonicalJsonValue, RoomId, RoomVersionId};
 use serde_json::value::{RawValue as RawJsonValue, to_raw_value};
-use tuwunel_core::{implement, matrix::pdu, utils::result::FlatOk};
+use tuwunel_core::{implement, utils::result::FlatOk};
+use tuwunel_matrix::pdu;
 
 /// Formats an event object for an outgoing federation response.
 ///

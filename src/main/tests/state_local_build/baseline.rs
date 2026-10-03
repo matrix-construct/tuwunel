@@ -1,10 +1,10 @@
 use futures::StreamExt;
 use tuwunel_core::{
 	Error, Result, err,
-	matrix::pdu::into_outgoing_federation,
 	ruma::{RoomId, RoomVersionId, UserId},
 	utils::result::NotFound,
 };
+use tuwunel_matrix::pdu::into_outgoing_federation;
 use tuwunel_service::{
 	Services,
 	rooms::event_handler::{PrevWalkMetrics, PrevWalkOutcome},

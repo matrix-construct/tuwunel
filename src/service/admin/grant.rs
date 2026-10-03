@@ -12,9 +12,9 @@ use ruma::{
 };
 use tuwunel_core::{
 	Err, Result, debug_info, debug_warn, error, implement,
-	matrix::pdu::PduBuilder,
 	utils::{FutureBoolExt, future::ReadyBoolExt, stream::ReadyExt},
 };
+use tuwunel_matrix::pdu::PduBuilder;
 
 use crate::rooms::state::RoomMutexGuard;
 

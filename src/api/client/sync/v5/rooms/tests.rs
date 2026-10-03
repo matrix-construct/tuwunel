@@ -6,7 +6,7 @@ use ruma::{
 	events::{StateEventType, room::member::MembershipState},
 	uint, user_id,
 };
-use tuwunel_core::matrix::pdu::PduCount;
+use tuwunel_matrix::pdu::PduCount;
 
 use super::{
 	StateMode, membership_allows_required_state, required_state_hash, room_config,

@@ -3,7 +3,8 @@ mod receipt;
 
 use futures::future::try_join;
 use ruma::{EventId, MilliSecondsSinceUnixEpoch, RoomId, UserId, events::receipt::ReceiptThread};
-use tuwunel_core::{Err, PduCount, PduId, Result, debug, err, utils::result::LogErr};
+use tuwunel_core::{Err, Result, debug, err, utils::result::LogErr};
+use tuwunel_matrix::{PduCount, PduId};
 use tuwunel_service::{Services, rooms::read_receipt::PrivateRead};
 
 pub(crate) use self::{read_markers::set_read_marker_route, receipt::create_receipt_route};

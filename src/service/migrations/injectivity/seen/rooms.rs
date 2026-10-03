@@ -9,10 +9,11 @@ use rows::{COLUMNS, SCANNED, decode, hints, word};
 use ruma::RoomId;
 use serde_json::from_slice;
 use tuwunel_core::{
-	PduEvent, Result, err,
+	Result, err,
 	utils::{BoolExt, IterStream, TryReadyExt, result::NotFound, stream::TryWidebandExt},
 };
 use tuwunel_database::{Database, Interfix};
+use tuwunel_matrix::PduEvent;
 
 use super::sweep;
 use crate::Services;

@@ -2,10 +2,11 @@ use axum::extract::State;
 use futures::{TryFutureExt, future::join, pin_mut};
 use ruma::api::client::room::get_room_event;
 use tuwunel_core::{
-	Err, Event, Pdu, Result, err,
+	Err, Result, err,
 	result::IsErrOr,
 	utils::{BoolExt, FutureBoolExt, TryFutureExtExt, future::OptionFutureExt},
 };
+use tuwunel_matrix::{Event, Pdu};
 
 use crate::{
 	Ruma,

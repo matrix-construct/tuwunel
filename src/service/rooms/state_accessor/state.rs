@@ -17,13 +17,13 @@ use serde::Deserialize;
 use tuwunel_core::{
 	Result, at, err, implement,
 	itertools::{EitherOrBoth, Itertools},
-	matrix::{Event, Pdu, StateKey},
 	pair_of,
 	utils::{
 		future::TryExtExt,
 		stream::{BroadbandExt, IterStream, ReadyExt, TryBroadbandExt, TryIgnore, TryTools},
 	},
 };
+use tuwunel_matrix::{Event, Pdu, StateKey};
 
 use crate::rooms::{
 	short::{ShortEventId, ShortStateHash, ShortStateKey},

@@ -17,10 +17,13 @@ use ruma::{
 };
 use tuwunel_core::{
 	Err, Error, Result, async_noinline, debug_info, debug_warn, err, implement,
-	matrix::{PduCount, pdu::check_rules, room_version},
-	pdu::PduBuilder,
 	utils::{self, FutureBoolExt, future::ReadyBoolExt},
 	warn,
+};
+use tuwunel_matrix::{
+	PduCount,
+	pdu::{PduBuilder, check_rules},
+	room_version,
 };
 
 use super::Service;

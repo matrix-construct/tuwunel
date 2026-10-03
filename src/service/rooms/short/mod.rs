@@ -9,14 +9,8 @@ use std::{borrow::Borrow, sync::Arc};
 use futures::{FutureExt, Stream, StreamExt, pin_mut};
 use ruma::{EventId, OwnedEventId, OwnedRoomId, RoomId, events::StateEventType};
 use serde::Deserialize;
-/// Numeric identifier types shared with Matrix data structures.
-///
-/// Aliases name the compact identifier contexts used by event, state-key, and room mappings.
-pub use tuwunel_core::matrix::{ShortEventId, ShortId, ShortRoomId, ShortStateKey};
 use tuwunel_core::{
-	Err, Result, err, implement,
-	matrix::StateKey,
-	utils,
+	Err, Result, err, implement, utils,
 	utils::{
 		IterStream, MutexMap,
 		hash::sha256::Digest,
@@ -24,6 +18,11 @@ use tuwunel_core::{
 	},
 };
 use tuwunel_database::{Deserialized, Get, Map, Qry, Txn};
+use tuwunel_matrix::StateKey;
+/// Numeric identifier types shared with Matrix data structures.
+///
+/// Aliases name the compact identifier contexts used by event, state-key, and room mappings.
+pub use tuwunel_matrix::{ShortEventId, ShortId, ShortRoomId, ShortStateKey};
 
 /// Allocates and resolves compact identifiers used by room storage.
 ///

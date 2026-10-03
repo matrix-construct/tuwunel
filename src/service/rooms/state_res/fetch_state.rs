@@ -5,11 +5,8 @@ use ruma::{
 	UserId,
 	events::{StateEventType, room::member::MembershipState},
 };
-use tuwunel_core::{
-	Error, Result, err,
-	matrix::{Event, PduEvent, StateKey, TypeStateKey},
-	result::NotFound,
-};
+use tuwunel_core::{Error, Result, err, result::NotFound};
+use tuwunel_matrix::{Event, PduEvent, StateKey, TypeStateKey};
 
 use super::{
 	StateMap,

@@ -14,13 +14,14 @@ use ruma::{
 };
 use serde_bytes::Bytes;
 use tuwunel_core::{
-	PduEvent, Result,
+	Result,
 	config::Figment,
 	err, expected, implement,
 	itertools::Itertools,
 	utils::{calculate_hash, u64_from_bytes},
 };
 use tuwunel_database::{deserialize_from_slice, map, serialize_to as ser, serialize_to_vec};
+use tuwunel_matrix::PduEvent;
 
 use super::{
 	CompressedState, Service, StateDiff, compress_state_event, parse_compressed_state_event,

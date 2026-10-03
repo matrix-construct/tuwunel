@@ -16,17 +16,16 @@ use ruma::{
 };
 use tracing::{Instrument, Span};
 use tuwunel_core::{
-	Result, debug, debug_warn, defer, err, implement,
-	matrix::{
-		Event, PduEvent,
-		pdu::PrevEvents,
-		room_version::{self, from_create_event},
-	},
-	trace,
+	Result, debug, debug_warn, defer, err, implement, trace,
 	utils::{
 		math::fetch_add_usize,
 		stream::{BroadbandExt, IterStream, ReadyExt, WidebandExt},
 	},
+};
+use tuwunel_matrix::{
+	Event, PduEvent,
+	pdu::PrevEvents,
+	room_version::{self, from_create_event},
 };
 
 use crate::rooms::{

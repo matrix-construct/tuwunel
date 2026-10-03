@@ -11,7 +11,6 @@ use futures::{
 use ruma::{EventId, OwnedEventId};
 use tuwunel_core::{
 	Result, implement, is_equal_to,
-	matrix::{event_id::RandomState, pdu::AuthEvents},
 	smallvec::SmallVec,
 	utils::{
 		BoolExt,
@@ -19,6 +18,7 @@ use tuwunel_core::{
 		stream::{IterStream, automatic_width},
 	},
 };
+use tuwunel_matrix::{event_id::RandomState, pdu::AuthEvents};
 
 use super::super::{FetchEvent, fetch_event::AuthRefs};
 

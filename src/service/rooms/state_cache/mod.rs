@@ -27,9 +27,7 @@ use ruma::{
 };
 use serde::de::DeserializeOwned;
 use tuwunel_core::{
-	Result, debug_warn, implement,
-	matrix::{Event, Pdu, event::Owned},
-	trace,
+	Result, debug_warn, implement, trace,
 	utils::{
 		self, BoolExt,
 		result::NotFound,
@@ -38,6 +36,7 @@ use tuwunel_core::{
 	warn,
 };
 use tuwunel_database::{Deserialized, Ignore, Interfix, Map};
+use tuwunel_matrix::{Event, Pdu, event::Owned};
 use update::EMPTY_INVITE_STATE;
 /// Input types for applying membership-cache transitions.
 ///

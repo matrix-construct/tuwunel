@@ -3,6 +3,7 @@
 //! The module exposes the shared event model, PDU storage types, and
 //! room-version rule lookup used throughout the server. Short identifiers are
 //! compact database surrogates for Matrix identifiers.
+#![deny(missing_docs)]
 
 pub mod event;
 pub mod event_id;

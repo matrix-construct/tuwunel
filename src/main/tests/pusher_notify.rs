@@ -14,7 +14,6 @@ use tokio::{
 use tuwunel::{Args, Runtime, Server, async_run, async_stop};
 use tuwunel_core::{
 	Err, Result, err,
-	matrix::{Pdu, PduCount, PduId, RawPduId},
 	ruma::{
 		DeviceId, EventId, OwnedEventId, OwnedRoomId, RoomId, UInt, UserId,
 		api::client::push::{
@@ -28,6 +27,7 @@ use tuwunel_core::{
 	utils::stream::ReadyExt,
 };
 use tuwunel_database::Json;
+use tuwunel_matrix::{Pdu, PduCount, PduId, RawPduId};
 use tuwunel_service::{
 	Services,
 	presence::Ping,

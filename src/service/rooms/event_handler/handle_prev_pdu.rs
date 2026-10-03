@@ -2,12 +2,8 @@ use futures::FutureExt;
 use ruma::{
 	CanonicalJsonObject, EventId, MilliSecondsSinceUnixEpoch, RoomId, RoomVersionId, ServerName,
 };
-use tuwunel_core::{
-	Err, Result, debug,
-	debug::INFO_SPAN_LEVEL,
-	debug_warn, implement,
-	matrix::{Event, PduEvent, pdu::RawPduId},
-};
+use tuwunel_core::{Err, Result, debug, debug::INFO_SPAN_LEVEL, debug_warn, implement};
+use tuwunel_matrix::{Event, PduEvent, pdu::RawPduId};
 
 use super::backoff::{Context, UPGRADE_RETRY};
 

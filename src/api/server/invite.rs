@@ -21,12 +21,8 @@ use ruma::{
 	serde::{JsonObject, Raw},
 };
 use serde::Deserialize;
-use tuwunel_core::{
-	Err, Error, Result, debug_warn, err,
-	matrix::{Event, PduCount, PduEvent, event::gen_event_id},
-	utils,
-	utils::hash::sha256,
-};
+use tuwunel_core::{Err, Error, Result, debug_warn, err, utils, utils::hash::sha256};
+use tuwunel_matrix::{Event, PduCount, PduEvent, event::gen_event_id};
 use tuwunel_service::{
 	Services,
 	membership::{

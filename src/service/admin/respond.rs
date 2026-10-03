@@ -13,11 +13,14 @@ use ruma::{
 };
 use serde::Deserialize;
 use tuwunel_core::{
-	Error, Event, Result, error,
+	Error, Result, error,
 	error::default_log,
 	implement,
-	pdu::{MAX_PDU_BYTES, PduBuilder},
 	utils::{json::serialized_len, stream::IterStream, string::chunk},
+};
+use tuwunel_matrix::{
+	Event,
+	pdu::{MAX_PDU_BYTES, PduBuilder},
 };
 
 use super::CommandOutput;

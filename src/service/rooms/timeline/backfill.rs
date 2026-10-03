@@ -19,11 +19,6 @@ use serde::Deserialize;
 use serde_json::value::RawValue as RawJsonValue;
 use tuwunel_core::{
 	Err, Result, at, debug, debug_warn, implement, is_false,
-	matrix::{
-		PduEvent,
-		event::Event,
-		pdu::{PduCount, PduId, RawPduId},
-	},
 	utils::{
 		BoolExt, IterStream, ReadyExt,
 		future::{BoolExt as FutureBoolExt, TryExtExt},
@@ -31,6 +26,11 @@ use tuwunel_core::{
 	validated, warn,
 };
 use tuwunel_database::Json;
+use tuwunel_matrix::{
+	PduEvent,
+	event::Event,
+	pdu::{PduCount, PduId, RawPduId},
+};
 
 use super::{ExtractBody, bias_count};
 use crate::{

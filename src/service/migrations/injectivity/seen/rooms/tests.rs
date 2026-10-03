@@ -4,12 +4,12 @@ use futures::TryStreamExt;
 use ruma::{EventId, RoomId, event_id, events::StateEventType, room_id, server_name, user_id};
 use serde_json::{Value, from_slice, from_value, json, to_vec};
 use tuwunel_core::{
-	PduEvent, Result,
+	Result,
 	config::Figment,
-	matrix::{PduCount, PduId, RawPduId},
 	utils::{BoolExt, IterStream, result::NotFound},
 };
 use tuwunel_database::{Database, KeyBuf, SEP, serialize_key, serialize_val};
+use tuwunel_matrix::{PduCount, PduEvent, PduId, RawPduId};
 
 use super::{inspect, repair};
 use crate::{Services, test_utils::fixture};

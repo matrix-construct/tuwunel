@@ -2,10 +2,10 @@ use futures::StreamExt;
 use ruma::events::room::member::MembershipState;
 use tuwunel_core::{
 	Result, debug_info, info,
-	matrix::PduCount,
 	utils::{ReadyExt, math::u64_from_usize_saturating, stream::BroadbandExt},
 	warn,
 };
+use tuwunel_matrix::PduCount;
 
 use crate::Services;
 

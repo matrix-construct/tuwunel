@@ -32,7 +32,8 @@ use ruma::{
 	uint,
 };
 use synapse_admin_api::rooms::list_rooms::v1::RoomDetails;
-use tuwunel_core::{Result, matrix::Event, utils::TryFutureExtExt};
+use tuwunel_core::{Result, utils::TryFutureExtExt};
+use tuwunel_matrix::Event;
 use tuwunel_service::Services;
 
 pub(crate) use self::{

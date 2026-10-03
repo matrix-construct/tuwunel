@@ -6,14 +6,13 @@ use futures::{
 };
 use ruma::{EventId, OwnedEventId, RoomId, RoomVersionId};
 use tuwunel_core::{
-	Error, Result, debug, debug_warn, err, implement,
-	matrix::Event,
-	ref_at, trace,
+	Error, Result, debug, debug_warn, err, implement, ref_at, trace,
 	utils::{
 		option::OptionExt,
 		stream::{BroadbandExt, IterStream, TryBroadbandExt, WidebandExt},
 	},
 };
+use tuwunel_matrix::Event;
 
 use crate::rooms::{
 	short::{ShortStateHash, ShortStateKey},

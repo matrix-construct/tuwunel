@@ -3,13 +3,14 @@ mod suppressed;
 use futures::{FutureExt, TryFutureExt, future::try_join3};
 use ruma::{OwnedUserId, api::error::ErrorKind};
 use tuwunel_core::{
-	Error, Event, debug, error,
+	Error, debug, error,
 	error::error_chain,
 	extract_variant, implement,
 	smallvec::SmallVec,
 	utils::{BoolExt, IterStream, ReadyExt, stream::WidebandExt},
 	warn,
 };
+use tuwunel_matrix::Event;
 
 use super::SendingResult;
 use crate::{

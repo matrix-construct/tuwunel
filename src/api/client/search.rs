@@ -17,7 +17,6 @@ use ruma::{
 use search_events::v3::{Request, Response};
 use tuwunel_core::{
 	Err, Result, at, is_true,
-	matrix::Event,
 	utils::{
 		IterStream,
 		math::usize_from_ruma_bounded,
@@ -25,6 +24,7 @@ use tuwunel_core::{
 		stream::{ReadyExt, TryIgnore, WidebandExt},
 	},
 };
+use tuwunel_matrix::Event;
 use tuwunel_service::{
 	Services,
 	rooms::{search::RoomQuery, timeline::PdusIterItem},

@@ -5,10 +5,8 @@ use serde_json::{
 	from_str as from_json_str, to_string as to_json_string, to_vec as to_json_vec,
 	value::RawValue as RawJsonValue,
 };
-use tuwunel_core::{
-	itertools::iproduct,
-	matrix::{Event, PduEvent},
-};
+use tuwunel_core::itertools::iproduct;
+use tuwunel_matrix::{Event, PduEvent};
 
 use super::{
 	super::super::events::is_power_event, alice, bob, event_id, is_power_event_id,

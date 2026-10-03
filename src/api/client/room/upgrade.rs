@@ -22,13 +22,13 @@ use serde_json::{Value as JsonValue, json, value::to_raw_value};
 use tuwunel_core::{
 	Err, Result, debug_info, err, error, implement, info, is_equal_to, is_less_than,
 	itertools::Itertools,
-	matrix::{Event, StateKey, pdu::PduBuilder, room_version},
 	utils::{
 		ReadyExt,
 		future::TryExtExt,
 		stream::{IterStream, TryIgnore, WidebandExt},
 	},
 };
+use tuwunel_matrix::{Event, StateKey, pdu::PduBuilder, room_version};
 use tuwunel_service::{Services, rooms::timeline::RoomMutexGuard};
 
 use crate::Ruma;

@@ -1,9 +1,9 @@
 use ruma::{EventId, OwnedEventId, OwnedRoomOrAliasId};
 use tuwunel_core::{
 	Result, debug_warn,
-	matrix::Event,
 	utils::{ReadyExt, stream::BroadbandExt},
 };
+use tuwunel_matrix::Event;
 use tuwunel_service::Services;
 
 use crate::admin_command;

@@ -1,10 +1,10 @@
 use futures::StreamExt;
 use tuwunel_core::{
 	Err, Error, Result,
-	matrix::pdu::into_outgoing_federation,
 	ruma::{EventId, RoomId, UserId, events::StateEventType},
 	utils::{ReadyExt, result::NotFound},
 };
+use tuwunel_matrix::pdu::into_outgoing_federation;
 use tuwunel_service::{Services, rooms::state_compressor::CompressedState};
 
 use super::helpers::{

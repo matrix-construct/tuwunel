@@ -26,12 +26,14 @@ use ruma::{
 use serde_json::value::{RawValue as RawJsonValue, to_raw_value};
 use tuwunel_core::{
 	Err, Result, async_noinline, at, debug, debug_error, debug_info, debug_warn, err, error,
-	implement, info,
-	matrix::{event::gen_event_id_canonical_json, room_version},
-	pdu::{Pdu, PduBuilder, check_rules},
-	trace,
+	implement, info, trace,
 	utils::{self, BoolExt, IterStream, ReadyExt, math::Expected, shuffle},
 	warn,
+};
+use tuwunel_matrix::{
+	event::gen_event_id_canonical_json,
+	pdu::{Pdu, PduBuilder, check_rules},
+	room_version,
 };
 
 use super::Service;

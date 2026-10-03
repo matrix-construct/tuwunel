@@ -13,7 +13,6 @@ use tuwunel_core::{
 	arrayvec::ArrayVec,
 	at, err, expected, implement, info,
 	itertools::{EitherOrBoth, Itertools},
-	matrix::StateKey,
 	smallvec::SmallVec,
 	utils::{
 		result::NotFound,
@@ -24,6 +23,7 @@ use tuwunel_core::{
 use tuwunel_database::{
 	Interfix, Map, Txn, deserialize_from_slice, keyval::KeyBuf, map, serialize_to,
 };
+use tuwunel_matrix::StateKey;
 
 use super::{
 	CompressedState, Service, StateDiff, compress_state_event, parse_compressed_state_event,

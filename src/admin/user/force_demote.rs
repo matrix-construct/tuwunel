@@ -5,10 +5,8 @@ use ruma::{
 		room::power_levels::{RoomPowerLevels, RoomPowerLevelsEventContent},
 	},
 };
-use tuwunel_core::{
-	Err, Result,
-	matrix::{Event, pdu::PduBuilder},
-};
+use tuwunel_core::{Err, Result};
+use tuwunel_matrix::{Event, pdu::PduBuilder};
 
 use crate::{admin_command, utils::parse_local_user_id};
 

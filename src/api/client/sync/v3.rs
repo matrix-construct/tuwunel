@@ -39,13 +39,7 @@ use tuwunel_core::{
 	debug::INFO_SPAN_LEVEL,
 	debug_error, err,
 	error::{inspect_debug_log, inspect_log},
-	extract_variant, is_equal_to, is_false, is_true,
-	matrix::{
-		Event,
-		event::{Matches, trim_event_fields},
-		pdu::{EventHash, PduCount, PduEvent},
-	},
-	pair_of, ref_at,
+	extract_variant, is_equal_to, is_false, is_true, pair_of, ref_at,
 	result::FlatOk,
 	smallvec::SmallVec,
 	trace,
@@ -58,6 +52,11 @@ use tuwunel_core::{
 		stream::{BroadbandExt, Tools, TryBroadbandExt, TryReadyExt, WidebandExt},
 	},
 	warn,
+};
+use tuwunel_matrix::{
+	Event,
+	event::{Matches, trim_event_fields},
+	pdu::{EventHash, PduCount, PduEvent},
 };
 use tuwunel_service::{
 	Services,

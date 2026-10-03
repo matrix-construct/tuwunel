@@ -2,10 +2,8 @@ use std::{borrow::Borrow, collections::HashMap, hash::Hash};
 
 use futures::{FutureExt, Stream};
 use ruma::EventId;
-use tuwunel_core::{
-	matrix::event_id::RandomState,
-	utils::stream::{IterStream, ReadyExt},
-};
+use tuwunel_core::utils::stream::{IterStream, ReadyExt};
+use tuwunel_matrix::event_id::RandomState;
 
 use super::AuthSet;
 

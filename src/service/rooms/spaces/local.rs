@@ -4,9 +4,10 @@ use ruma::{
 	events::space::child::HierarchySpaceChildEvent, room::RoomSummary, serde::Raw,
 };
 use tuwunel_core::{
-	Err, Error, Event, Result, debug, error, implement,
+	Err, Error, Result, debug, error, implement,
 	utils::{future::TryExtExt, timepoint_has_passed},
 };
+use tuwunel_matrix::Event;
 
 use super::{Accessibility, Cached, Identifier};
 

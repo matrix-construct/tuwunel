@@ -10,8 +10,8 @@ use serde::{Deserialize, de::IgnoredAny};
 use tuwunel_core::{
 	Error, Result, err,
 	itertools::{Either, Itertools},
-	matrix::Event,
 };
+use tuwunel_matrix::Event;
 
 /// A helper type for an [`Event`] of type `m.room.create`.
 ///

@@ -6,7 +6,8 @@ use ruma::{
 	api::client::alias::{create_alias, delete_alias, get_alias},
 	events::{StateEventType, room::canonical_alias::RoomCanonicalAliasEventContent},
 };
-use tuwunel_core::{Err, Result, debug, err, matrix::pdu::PduBuilder};
+use tuwunel_core::{Err, Result, debug, err};
+use tuwunel_matrix::pdu::PduBuilder;
 use tuwunel_service::Services;
 
 use crate::Ruma;

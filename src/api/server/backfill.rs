@@ -4,9 +4,10 @@ use axum::extract::State;
 use futures::{FutureExt, StreamExt, TryStreamExt};
 use ruma::{MilliSecondsSinceUnixEpoch, api::federation::backfill::get_backfill};
 use tuwunel_core::{
-	PduCount, Result,
+	Result,
 	utils::{IterStream, ReadyExt, math::usize_from_ruma_bounded},
 };
+use tuwunel_matrix::PduCount;
 
 use super::AccessCheck;
 use crate::Ruma;

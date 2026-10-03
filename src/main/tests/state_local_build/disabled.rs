@@ -1,10 +1,10 @@
 use tuwunel_core::{
 	Err, Result,
-	matrix::pdu::into_outgoing_federation,
 	ruma::{EventId, RoomId, UserId},
 	utils::{BoolExt, result::NotFound},
 };
 use tuwunel_database::Deserialized;
+use tuwunel_matrix::pdu::into_outgoing_federation;
 use tuwunel_service::{Services, rooms::short::ShortStateHash};
 
 use super::helpers::{

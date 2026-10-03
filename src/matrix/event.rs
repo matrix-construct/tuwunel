@@ -25,6 +25,7 @@ use ruma::{
 };
 use serde::Deserialize;
 use serde_json::{Value as JsonValue, value::RawValue as RawJsonValue};
+use tuwunel_core::{Result, utils, utils::BoolExt};
 
 pub use self::{
 	filter::{Matches, trim_event_fields},
@@ -37,7 +38,6 @@ pub use self::{
 };
 use self::{format::to_sync_message_like_without_unsigned, msgtype::content_msgtype};
 use super::pdu::Pdu;
-use crate::{Result, utils, utils::BoolExt};
 
 #[derive(Deserialize)]
 struct MemberContent {

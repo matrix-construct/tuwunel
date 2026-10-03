@@ -42,10 +42,9 @@ use ruma::{
 use serde::Deserialize;
 use serde_json::value::RawValue as RawJsonValue;
 use tuwunel_core::{
-	Event, PduEvent, Result, err,
+	Result, err,
 	error::inspect_debug_log,
 	implement,
-	matrix::{PduCount, RoomVersionRules, StateKey, TypeStateKey, room_version},
 	result::{AndThenRef, FlatOk, NotFound},
 	smallvec::SmallVec,
 	trace,
@@ -57,6 +56,9 @@ use tuwunel_core::{
 	warn,
 };
 use tuwunel_database::{Deserialized, Ignore, Interfix, Map, Txn};
+use tuwunel_matrix::{
+	Event, PduCount, PduEvent, RoomVersionRules, StateKey, TypeStateKey, room_version,
+};
 
 use crate::{
 	rooms::{

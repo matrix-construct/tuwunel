@@ -8,8 +8,7 @@ use ruma::{
 };
 use tokio::time::{Duration, Instant, timeout_at};
 use tuwunel_core::{
-	Err, Event, Result, err,
-	matrix::PduCount,
+	Err, Result, err,
 	utils::{
 		BoolExt, OptionExt,
 		future::OptionFutureExt,
@@ -17,6 +16,7 @@ use tuwunel_core::{
 		stream::{IterStream, ReadyExt, WidebandExt},
 	},
 };
+use tuwunel_matrix::{Event, PduCount};
 use tuwunel_service::{Services, rooms::timeline::PdusIterItem};
 
 use super::visibility_filter;

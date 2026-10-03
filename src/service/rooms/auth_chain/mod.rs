@@ -28,8 +28,6 @@ use serde::Deserialize;
 use tuwunel_core::{
 	Err, Result, at, debug, debug_error, err, implement,
 	itertools::Itertools,
-	matrix::room_version,
-	pdu::AuthEvents,
 	smallvec::SmallVec,
 	trace,
 	utils::{
@@ -39,6 +37,7 @@ use tuwunel_core::{
 	validated, warn,
 };
 use tuwunel_database::Map;
+use tuwunel_matrix::{pdu::AuthEvents, room_version};
 
 use crate::rooms::short::ShortEventId;
 

@@ -1,10 +1,8 @@
 use std::collections::HashMap;
 
 use ruma::{OwnedEventId, events::StateEventType};
-use tuwunel_core::{
-	Result, err,
-	matrix::{PduEvent, ShortStateKey, StateKey},
-};
+use tuwunel_core::{Result, err};
+use tuwunel_matrix::{PduEvent, ShortStateKey, StateKey};
 
 use crate::{Services, rooms::state_res::FetchState};
 

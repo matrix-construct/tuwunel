@@ -26,9 +26,9 @@ use ruma::{
 };
 use tokio::sync::mpsc::{Receiver, Sender, channel};
 use tuwunel_core::{
-	Err, Event, Result, debug, err, error::default_log, implement, matrix::event::MsgType,
-	utils::ReadyExt, warn,
+	Err, Result, debug, err, error::default_log, implement, utils::ReadyExt, warn,
 };
+use tuwunel_matrix::{Event, event::MsgType};
 
 use crate::rooms::state::RoomMutexGuard;
 

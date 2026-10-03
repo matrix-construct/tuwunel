@@ -19,7 +19,6 @@ use serde::Deserialize;
 use serde_json::Value;
 use tuwunel_core::{
 	Err, Result, err, extract_variant, implement,
-	matrix::PduBuilder,
 	smallvec::SmallVec,
 	utils::{
 		MutexMap, MutexMapGuard, ReadyExt,
@@ -32,6 +31,7 @@ use tuwunel_core::{
 use tuwunel_database::{
 	Deserialized, Ignore, Interfix, Json, KeyVal, Map, Txn, deserialize_from_slice, serialize_key,
 };
+use tuwunel_matrix::PduBuilder;
 
 type ProfileLock = MutexMapGuard<OwnedUserId, ()>;
 

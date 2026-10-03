@@ -8,10 +8,8 @@ use ruma::{
 	MilliSecondsSinceUnixEpoch, OwnedEventId, RoomVersionId, events::TimelineEventType, int, uint,
 };
 use serde_json::{json, value::to_raw_value as to_raw_json_value};
-use tuwunel_core::{
-	matrix::{Event, PduEvent, event::TypeExt},
-	utils::stream::IterStream,
-};
+use tuwunel_core::utils::stream::IterStream;
+use tuwunel_matrix::{Event, PduEvent, event::TypeExt};
 use tuwunel_service::rooms::state_res::{
 	AuthSet, StateMap, resolve,
 	test_utils::{
