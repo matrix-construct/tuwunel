@@ -249,7 +249,8 @@ fn get_cache(ctx: &Context, desc: &Descriptor) -> Option<Cache> {
 		.expected_add(desc.val_size_hint.unwrap_or_default());
 
 	let size = match cap {
-		| Some(cap) => cache_size(config, cap, ent_size),
+		// Whole MiB, so reported capacities stay round and divide evenly across the shards.
+		| Some(cap) => cache_size(config, cap, ent_size).next_multiple_of(1 << 20),
 		| _ => desc.cache_size,
 	};
 
