@@ -6,6 +6,7 @@ mod del;
 mod del_prefix;
 mod get;
 mod get_batch;
+mod id;
 mod insert;
 mod keys;
 mod keys_from;
@@ -41,6 +42,7 @@ use rocksdb::{
 };
 use tuwunel_core::Result;
 
+pub use self::id::MapId;
 pub(crate) use self::options::{
 	cache_iter_options_default, cache_read_options_default, iter_options_default,
 	read_options_default, write_options_default,
