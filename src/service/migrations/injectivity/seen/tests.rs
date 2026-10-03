@@ -1,6 +1,7 @@
 use std::{cell::Cell, fmt::Debug, iter::repeat_with, ops::RangeInclusive, sync::Arc};
 
 use futures::future::ready;
+use ruma::user_id;
 use tuwunel_core::{
 	Err, Result, Server,
 	config::{Config, Figment, Sources},
@@ -11,11 +12,12 @@ use tuwunel_database::{Database, Txn, TxnError};
 
 use super::{
 	Boundary, IDENTITY_LIMIT, MARKER, Outcome, Reason, SAMPLE_LIMIT, Sample, Shape, Status,
+	Uncertain,
 	identity::{Kind, census as identity_census, repair as repair_identities},
 	references::{References, entries},
-	run, stamp,
+	run, stamp, verify,
 };
-use crate::test_utils::fixture;
+use crate::{migrations::migrations, test_utils::fixture};
 
 const EVENTS: (&str, &str) = ("eventid_shorteventid", "shorteventid_eventid");
 const STATEKEYS: (&str, &str) = ("statekey_shortstatekey", "shortstatekey_statekey");
@@ -92,6 +94,13 @@ async fn runner_contains_errors_and_honors_only_its_marker() -> Result {
 	let readonly = Database::open(&readonly_server).await?;
 
 	assert!(Boundary::writable(&readonly).is_none());
+	let secondary_server = open_server(server, "rocksdb_secondary")?;
+	let secondary = Database::open(&secondary_server).await?;
+
+	assert!(secondary.engine.is_secondary());
+	assert!(run(&secondary, repair).await.is_none());
+	assert!(stamp(&secondary).is_none());
+	assert_eq!(Outcome::decode(&secondary["global"].get(MARKER).await?), Some(Outcome::clean()));
 	assert_eq!(calls.get(), 4);
 	let rejected =
 		Txn::insert(&readonly["global"], [(b"rejected_readonly", b"value")]).try_execute();
@@ -100,6 +109,162 @@ async fn runner_contains_errors_and_honors_only_its_marker() -> Result {
 	assert_absent(&readonly, "global", b"rejected_readonly", "read-only write was rejected")
 		.await;
 
+	Ok(())
+}
+
+#[tokio::test]
+#[tracing::instrument(level = "trace", skip_all)]
+async fn ordinary_ladder_repairs_independent_work_and_retains_ambiguity() -> Result {
+	let config = Figment::new().merge(("create_admin_room", false));
+	let Some(fixture) = fixture(config).await? else {
+		return Ok(());
+	};
+
+	let services = &fixture.services;
+	let db = &services.db;
+	let global = &db["global"];
+
+	migrations(services).await?;
+	assert_eq!(Outcome::decode(&global.get(MARKER).await?), Some(Outcome::clean()));
+	services
+		.users
+		.create(user_id!("@repair:localhost"), None, None)
+		.await?;
+
+	let retained = words(&[0, 201, 103]);
+
+	seed_identity(db, EVENTS, b"$retained:example.org", 103);
+	db["shortstatehash_statediff"].insert(&900_u64.to_be_bytes(), &retained);
+	db["statehash_shortstatehash"].insert(b"retained", 900_u64.to_be_bytes());
+
+	for old in [None, Some(b"".as_slice()), Some(b"declined".as_slice())] {
+		global.remove(MARKER);
+		global.remove("fix_short_injectivity");
+		if let Some(old) = old {
+			global.insert("fix_short_injectivity", old);
+		}
+
+		global.remove("clear_servername_status");
+		db["eventid_shorteventid"].insert(b"$safe:example.org", 101_u64.to_be_bytes());
+		db["shorteventid_eventid"].remove(&101_u64.to_be_bytes());
+		db["shorteventid_eventid"].insert(&102_u64.to_be_bytes(), b"$safe:example.org");
+		db["authchainkey_authchain"].insert(&102_u64.to_be_bytes(), 102_u64.to_be_bytes());
+		migrations(services).await?;
+		assert_stored(db, "shorteventid_eventid", &101_u64.to_be_bytes(), b"$safe:example.org")
+			.await?;
+
+		assert_absent(db, "shorteventid_eventid", &102_u64.to_be_bytes(), "alias deleted").await;
+		assert_stored(db, "shortstatehash_statediff", &900_u64.to_be_bytes(), &retained).await?;
+		assert_stored(db, "global", "clear_servername_status", []).await?;
+		let outcome =
+			Outcome::decode(&global.get(MARKER).await?).expect("recognized final marker");
+
+		assert_eq!(outcome.status, Status::Unfinished);
+		assert!(
+			count(&outcome, Shape::StatekeyOrphanEntry) > 0,
+			"unprovable statekey orphan entry remains"
+		);
+
+		assert_eq!(
+			count(&outcome, Shape::DeclinedMarker),
+			0,
+			"old markers do not become permanent residue"
+		);
+
+		assert!(outcome.valid());
+		let marker = global.get(MARKER).await?.to_vec();
+
+		db["eventid_shorteventid"].insert(b"$later:example.org", 104_u64.to_be_bytes());
+		migrations(services).await?;
+		assert_eq!(global.get(MARKER).await?.as_ref(), marker);
+		assert_absent(
+			db,
+			"shorteventid_eventid",
+			&104_u64.to_be_bytes(),
+			"recognized unfinished honestly skips a new population",
+		)
+		.await;
+
+		db["eventid_shorteventid"].remove(b"$later:example.org");
+	}
+
+	seed_identity(db, STATEKEYS, b"m.room.name\xff", 201);
+	global.remove(MARKER);
+	migrations(services).await?;
+	assert_eq!(
+		Outcome::decode(&global.get(MARKER).await?),
+		Some(Outcome::clean()),
+		"populated ordinary pipeline verifies clean"
+	);
+
+	assert_stored(db, "shortstatehash_statediff", &900_u64.to_be_bytes(), &retained).await?;
+
+	Ok(())
+}
+
+#[tokio::test]
+#[tracing::instrument(level = "trace", skip_all)]
+async fn final_verifier_reads_raw_state_and_preserves_uncertainty() -> Result {
+	let Some(fixture) = fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+
+	let services = &fixture.services;
+	let db = &services.db;
+
+	assert_eq!(verify(services, Uncertain::default()).await?, Outcome::clean());
+	seed_identity(db, EVENTS, b"$event:example.org", 101);
+	seed_identity(db, STATEKEYS, b"m.room.name\xff", 201);
+	db["shortstatehash_statediff"].insert(&900_u64.to_be_bytes(), words(&[0, 201, 101]));
+	db["statehash_shortstatehash"].insert(b"exposed", 900_u64.to_be_bytes());
+	services
+		.state_compressor
+		.load_shortstatehash_info(900)
+		.await?;
+
+	let exposed = words(&[0, 201, 101, 0, 201, 101]);
+
+	db["shortstatehash_statediff"].insert(&900_u64.to_be_bytes(), &exposed);
+	let outcome = verify(services, Uncertain::default()).await?;
+
+	assert_eq!(outcome.status, Status::Unfinished);
+	assert_eq!(
+		count(&outcome, Shape::DiffCollision),
+		1,
+		"raw diff collision survives a healthy stale compressor cache"
+	);
+
+	assert_stored(db, "shortstatehash_statediff", &900_u64.to_be_bytes(), &exposed).await?;
+
+	let cached = services
+		.state_compressor
+		.stateinfo_cache
+		.lock()
+		.expect("test cache lock")
+		.contains_key(&900);
+
+	assert!(cached, "read-only verification does not clear caches or repair");
+	db["shortstatehash_statediff"].remove(&900_u64.to_be_bytes());
+	db["statehash_shortstatehash"].remove(b"exposed");
+	assert_eq!(verify(services, Uncertain::default()).await?, Outcome::clean());
+	let uncertain = verify(services, Uncertain {
+		states: true,
+		collected: true,
+		rooms: true,
+	})
+	.await?;
+
+	assert_eq!(uncertain.status, Status::Unfinished);
+	let residual = [Shape::AffectedState, Shape::UnreachableState, Shape::PurgeResidue]
+		.into_iter()
+		.all(|shape| count(&uncertain, shape) > 0);
+
+	assert!(
+		residual,
+		"completed-pass uncertainty cannot be erased by a clean residual census"
+	);
+
+	assert!(uncertain.valid());
 	Ok(())
 }
 
@@ -493,6 +658,11 @@ fn words(values: &[u64]) -> Vec<u8> {
 		.collect()
 }
 
+fn seed_identity(db: &Database, (forward, reverse): (&str, &str), id: &[u8], short: u64) {
+	db[forward].insert(id, short.to_be_bytes());
+	db[reverse].insert(&short.to_be_bytes(), id);
+}
+
 async fn assert_stored<K>(
 	db: &Database,
 	map: &str,
@@ -506,6 +676,14 @@ where
 
 	assert_eq!(stored.as_ref(), expected.as_ref());
 	Ok(())
+}
+
+fn count(outcome: &Outcome, shape: Shape) -> u64 {
+	shape
+		.slot()
+		.and_then(|slot| outcome.counts.get(slot))
+		.copied()
+		.expect("every shape has a count slot")
 }
 
 fn seed_aliases<I>(

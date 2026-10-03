@@ -106,7 +106,7 @@ step, how far into it the server is, and how long it has been going, so
 `docker logs -f` shows work in progress rather than silence:
 
 ```
-Database migration in progress progress=fix_short_injectivity: event short ids / reverse rows, 1204833 done, 12.55 minutes
+Database migration in progress progress=repair_short_injectivity_seen / short ids, 1204833 done, 12.55 minutes
 ```
 
 A step reports a position without a total when it cannot count its remaining
