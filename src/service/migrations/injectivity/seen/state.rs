@@ -32,6 +32,7 @@ use crate::{
 	},
 };
 
+pub(super) mod gc;
 mod history;
 mod orphan;
 #[cfg(test)]

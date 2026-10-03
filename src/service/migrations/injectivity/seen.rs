@@ -1,9 +1,14 @@
 use serde::{Deserialize, Serialize};
-use tuwunel_core::{Err, Result, implement, result::NotFound, smallvec::SmallVec, warn};
+use tuwunel_core::{
+	Err, Result, implement, result::NotFound, smallvec::SmallVec, utils::TryReadyExt, warn,
+};
 use tuwunel_database::{Database, Json, Txn, keyval::ValBuf, serialize_key, serialize_val};
+
+use crate::Services;
 
 mod identity;
 mod references;
+mod rooms;
 mod state;
 #[cfg(test)]
 mod tests;
@@ -315,4 +320,21 @@ fn valid(&self) -> bool {
 			| Status::Clean =>
 				self.counts == [0; SHAPES.len()] && self.samples.is_empty() && !self.truncated,
 		}
+}
+
+#[tracing::instrument(level = "debug", skip(services, init, step))]
+async fn sweep<T: Send>(
+	services: &Services,
+	column: &str,
+	init: T,
+	step: impl Fn(T, &[u8], &[u8]) -> T + Sync,
+) -> Result<T> {
+	services.db[column]
+		.raw_stream()
+		.ready_try_fold(init, |acc, (key, value)| {
+			services.server.check_running()?;
+			services.server.progress.advance();
+			Ok(step(acc, key, value))
+		})
+		.await
 }
