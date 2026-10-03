@@ -13,6 +13,7 @@ use tuwunel_core::{
 	arrayvec::ArrayVec,
 	err, expected, implement,
 	itertools::{EitherOrBoth, Itertools},
+	smallvec::SmallVec,
 	utils::{
 		result::NotFound,
 		stream::{IterStream, ReadyExt, TryReadyExt, WidebandExt},
@@ -24,7 +25,9 @@ use tuwunel_database::{
 };
 use tuwunel_matrix::StateKey;
 
-use super::{Service, parse_compressed_state_event};
+use super::{
+	CompressedState, Service, StateDiff, compress_state_event, parse_compressed_state_event,
+};
 use crate::rooms::short::{ShortEventId, ShortStateHash, ShortStateKey};
 
 /// Layer difference length followed by up to three nearest-first ancestors.
@@ -32,6 +35,7 @@ use crate::rooms::short::{ShortEventId, ShortStateHash, ShortStateKey};
 /// The fixed capacity matches the compressor's four-layer bound.
 pub(crate) type Meta = ArrayVec<u64, 4>;
 
+pub(super) type Resolved = SmallVec<[(KeyBuf, [u8; 9]); 2]>;
 type Layers = ArrayVec<Vec<(Row, Tag, usize)>, 4>;
 
 #[derive(Clone, Copy)]
@@ -155,6 +159,46 @@ pub(super) async fn row_meta(&self, hash: ShortStateHash) -> Result<Meta> {
 
 	finish(txn, statemeta, hash, &packed);
 	Ok(meta)
+}
+
+#[implement(Service)]
+#[tracing::instrument(level = "trace", skip_all)]
+pub(super) async fn layer_diff(
+	&self,
+	hash: ShortStateHash,
+) -> Result<(CompressedState, CompressedState)> {
+	let prefix: KeyBuf = serialize_to((hash, Interfix))?;
+	let diff = self.services.db[map!("shortstatehash_statedelta")]
+		.raw_stream_prefix(&prefix)
+		.ready_and_then(|(key, value)| decode(key, value))
+		.map_ok(|(row, tag)| (compress_state_event(row.shortstatekey, row.shorteventid), tag))
+		.ready_try_fold(
+			(CompressedState::new(), CompressedState::new()),
+			|(mut added, mut removed), (record, tag)| {
+				if matches!(tag, Tag::Added | Tag::Both) {
+					added.insert(record);
+				}
+
+				if matches!(tag, Tag::Removed | Tag::Both) {
+					removed.insert(record);
+				}
+
+				Ok((added, removed))
+			},
+		)
+		.await?;
+
+	Ok(diff)
+}
+
+#[implement(Service)]
+#[tracing::instrument(level = "trace", skip_all)]
+pub(super) async fn resolve_rows(&self, diff: &StateDiff) -> Resolved {
+	tagged(diff.added.iter(), diff.removed.iter())
+		.stream()
+		.wide_filter_map(async |record| self.resolve_record(record).await)
+		.collect()
+		.await
 }
 
 impl Row {

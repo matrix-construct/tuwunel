@@ -942,22 +942,7 @@ fn transaction(
 	})
 }
 
-fn commit(services: &Services, txn: Txn) -> Result<(), TxnError> {
-	// Acquire before acceptance, then clear even on accepted-write sync failure.
-	let mut cache = services
-		.state_compressor
-		.stateinfo_cache
-		.lock()
-		.map_err(|_| TxnError::Write(err!("state cache lock poisoned")))?;
-
-	let written = txn.try_execute();
-
-	if !matches!(written, Err(TxnError::Write(_))) {
-		cache.clear();
-	}
-
-	written
-}
+fn commit(_services: &Services, txn: Txn) -> Result<(), TxnError> { txn.try_execute() }
 
 #[tracing::instrument(level = "trace", skip_all)]
 async fn holds(db: &Database, id: u64, bytes: &[u8]) -> Result<bool> {
