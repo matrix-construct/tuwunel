@@ -1,15 +1,24 @@
 use std::collections::HashMap;
 
+use futures::TryStreamExt;
 use ruma::{
-	CanonicalJsonValue, OwnedEventId, OwnedRoomId, OwnedServerName,
+	CanonicalJsonObject, EventId, OwnedEventId, OwnedRoomId, OwnedServerName, RoomId,
 	api::federation::event::get_room_state,
 };
 use tuwunel_core::{
-	Err, Result, debug_error, err, info,
-	matrix::{Event, pdu::PduEvent},
+	Err, Result, err, info,
+	matrix::{
+		Event, RoomVersionRules,
+		pdu::{PduEvent, from_incoming_federation},
+		room_version::rules as room_version_rules,
+	},
+	utils::{
+		IterStream, ReadyExt,
+		stream::{BroadbandExt, WidebandExt},
+	},
 	warn,
 };
-use tuwunel_service::rooms::state_compressor::HashSetCompressStateEvent;
+use tuwunel_service::{Services, rooms::state_compressor::HashSetCompressStateEvent};
 
 use crate::admin_command;
 
@@ -44,7 +53,7 @@ pub(super) async fn force_set_room_state_from_server(
 		.get_room_version(&room_id)
 		.await?;
 
-	let mut state: HashMap<u64, OwnedEventId> = HashMap::new();
+	let rules = room_version_rules(&room_version)?;
 
 	let remote_state_response = self
 		.services
@@ -70,66 +79,53 @@ pub(super) async fn force_set_room_state_from_server(
 		};
 	}
 
-	info!("Going through room_state response PDUs");
-	for result in remote_state_response.pdus.iter().map(|pdu| {
+	info!("Acquiring server signing keys for response events");
+	self.services
+		.server_keys
+		.acquire_events_pubkeys(
+			remote_state_response
+				.auth_chain
+				.iter()
+				.chain(remote_state_response.pdus.iter()),
+		)
+		.await;
+
+	let validate = |pdu| {
 		self.services
 			.server_keys
-			.validate_and_add_event_id(pdu, &room_version)
-	}) {
-		let Ok((event_id, mut value)) = result.await else {
-			continue;
-		};
+			.validate_and_add_event_id_no_fetch(pdu, &room_version)
+	};
 
-		let invalid_pdu_err = |e| {
-			debug_error!("Invalid PDU in fetching remote room state PDUs response: {value:#?}");
-			err!(BadServerResponse(debug_error!("Invalid PDU in send_join response: {e:?}")))
-		};
+	info!("Going through room_state response PDUs");
+	let state: HashMap<u64, OwnedEventId> = remote_state_response
+		.pdus
+		.iter()
+		.stream()
+		.wide_filter_map(async |pdu| {
+			let (event_id, value) = validate(pdu).await.ok()?;
 
-		let pdu = if value["type"] == "m.room.create" {
-			PduEvent::from_object_and_roomid_and_eventid(&room_id, &event_id, value.clone())
-				.map_err(invalid_pdu_err)?
-		} else {
-			PduEvent::from_object_and_eventid(&event_id, value.clone())
-				.map_err(invalid_pdu_err)?
-		};
-
-		if !value.contains_key("room_id") {
-			let room_id = CanonicalJsonValue::String(room_id.as_str().into());
-			value.insert("room_id".into(), room_id);
-		}
-
-		self.services
-			.timeline
-			.add_pdu_outlier(&event_id, &value);
-
-		if let Some(state_key) = &pdu.state_key {
-			let shortstatekey = self
-				.services
-				.short
-				.get_or_create_shortstatekey(&pdu.kind.to_string().into(), state_key)
-				.await;
-
-			state.insert(shortstatekey, pdu.event_id.clone());
-		}
-	}
+			ingest_state_pdu(self.services, &room_id, &event_id, value, &rules)
+				.await
+				.transpose()
+		})
+		.try_collect()
+		.await?;
 
 	info!("Going through auth_chain response");
-	for result in remote_state_response
+	remote_state_response
 		.auth_chain
 		.iter()
-		.map(|pdu| {
-			self.services
-				.server_keys
-				.validate_and_add_event_id(pdu, &room_version)
-		}) {
-		let Ok((event_id, value)) = result.await else {
-			continue;
-		};
+		.stream()
+		.broad_then(|pdu| validate(pdu))
+		.ready_filter_map(Result::ok)
+		.ready_for_each(|(event_id, value)| {
+			let value = from_incoming_federation(&room_id, &event_id, value, &rules);
 
-		self.services
-			.timeline
-			.add_pdu_outlier(&event_id, &value);
-	}
+			self.services
+				.timeline
+				.add_pdu_outlier(&event_id, &value);
+		})
+		.await;
 
 	let new_room_state = self
 		.services
@@ -166,4 +162,36 @@ pub(super) async fn force_set_room_state_from_server(
 
 	self.write_str("Successfully forced the room state from the requested remote server.")
 		.await
+}
+
+async fn ingest_state_pdu(
+	services: &Services,
+	room_id: &RoomId,
+	event_id: &EventId,
+	value: CanonicalJsonObject,
+	rules: &RoomVersionRules,
+) -> Result<Option<(u64, OwnedEventId)>> {
+	let invalid_pdu_err = |e| {
+		err!(BadServerResponse(debug_error!(
+			"Invalid PDU {event_id} in fetching remote room state PDUs response: {e:?}"
+		)))
+	};
+
+	let (pdu, value) = PduEvent::from_object_federation(room_id, event_id, value, rules)
+		.map_err(invalid_pdu_err)?;
+
+	services
+		.timeline
+		.add_pdu_outlier(event_id, &value);
+
+	let Some(state_key) = &pdu.state_key else {
+		return Ok(None);
+	};
+
+	let shortstatekey = services
+		.short
+		.get_or_create_shortstatekey(&pdu.kind.to_string().into(), state_key)
+		.await;
+
+	Ok(Some((shortstatekey, pdu.event_id)))
 }
