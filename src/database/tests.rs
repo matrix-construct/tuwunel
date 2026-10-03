@@ -1061,6 +1061,71 @@ fn serde_tuple_option_none_none_none() {
 }
 
 #[test]
+fn serde_u32_i32() -> Result {
+	for (value, expected) in [(0_u32, [0; 4]), (1, [0, 0, 0, 1]), (u32::MAX, [0xFF; 4])] {
+		let bytes = serialize_to_vec(&value)?;
+		let decoded: u32 = from_slice(&bytes)?;
+
+		assert_eq!(bytes, expected);
+		assert_eq!(decoded, value);
+	}
+
+	for (value, expected) in [
+		(i32::MIN, [0x80, 0, 0, 0]),
+		(-1, [0xFF; 4]),
+		(0, [0; 4]),
+		(i32::MAX, [0x7F, 0xFF, 0xFF, 0xFF]),
+	] {
+		let bytes = serialize_to_vec(&value)?;
+		let decoded: i32 = from_slice(&bytes)?;
+
+		assert_eq!(bytes, expected);
+		assert_eq!(decoded, value);
+	}
+
+	Ok(())
+}
+
+#[test]
+fn serde_tuple_u32() -> Result {
+	let value = (u32::MAX, "text");
+	let bytes = serialize_to_vec(&value)?;
+	let decoded: (u32, &str) = from_slice(&bytes)?;
+
+	assert_eq!(bytes, b"\xFF\xFF\xFF\xFF\xFFtext");
+	assert_eq!(decoded, value);
+
+	let value = ("text", u32::MAX);
+	let bytes = serialize_to_vec(&value)?;
+	let decoded: (&str, u32) = from_slice(&bytes)?;
+
+	assert_eq!(bytes, b"text\xFF\xFF\xFF\xFF\xFF");
+	assert_eq!(decoded, value);
+
+	let value = (1_u64, u32::MAX);
+	let bytes = serialize_to_vec(&value)?;
+	let decoded: (u64, u32) = from_slice(&bytes)?;
+
+	assert_eq!(bytes, b"\x00\x00\x00\x00\x00\x00\x00\x01\xFF\xFF\xFF\xFF\xFF");
+	assert_eq!(decoded, value);
+	Ok(())
+}
+
+#[test]
+fn de_u32_i32_underflow() {
+	let unsigned = from_slice::<u32>(&[0; 3])
+		.unwrap_err()
+		.to_string();
+
+	let signed = from_slice::<i32>(&[0; 3])
+		.unwrap_err()
+		.to_string();
+
+	assert!(unsigned.contains("u32 buffer underflow"));
+	assert!(signed.contains("i32 buffer underflow"));
+}
+
+#[test]
 fn serde_tuple_integer_string() {
 	let integer: u64 = 123_456;
 	let user_id: &UserId = "@user:example.com".try_into().unwrap();
