@@ -45,6 +45,7 @@ use tuwunel_core::{
 		stream::ReadyExt,
 		string::EMPTY,
 		timepoint_from_now, timepoint_has_passed,
+		url::redirect_allowlisted,
 	},
 	warn,
 };
@@ -62,10 +63,7 @@ use url::Url;
 
 pub(crate) use self::uiaa::{sso_complete_js_route, sso_css_route, sso_fallback_route};
 use super::TOKEN_LENGTH;
-use crate::{
-	ClientIp, Ruma, RumaResponse,
-	oidc::{account::ACCOUNT_HEAD, redirect_allowlisted},
-};
+use crate::{ClientIp, Ruma, RumaResponse, router::ACCOUNT_HEAD};
 
 /// Grant phase query string.
 #[derive(Debug, Serialize)]

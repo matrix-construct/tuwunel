@@ -2,9 +2,12 @@ use axum::{extract::State, response::IntoResponse};
 use http::header::{CACHE_CONTROL, CONTENT_TYPE};
 use ruma::api::client::uiaa::{AuthType, UiaaInfo, get_uiaa_fallback_page};
 use serde_json::Value as JsonValue;
-use tuwunel_core::{Err, Result, trace, utils::BoolExt};
+use tuwunel_core::{
+	Err, Result, trace,
+	utils::{BoolExt, url::url_encode},
+};
 
-use crate::{Ruma, oidc::url_encode};
+use crate::Ruma;
 
 /// # `GET /_matrix/client/v3/auth/m.login.sso/fallback/web?session={session_id}`
 ///

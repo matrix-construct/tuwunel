@@ -13,10 +13,10 @@ use tuwunel_core::{Error, Result, err, implement, utils::string::EMPTY};
 use tuwunel_service::{Services, appservice::RegistrationInfo};
 
 use super::{
-	auth::{Auth, AuthDispatch, auth},
+	auth::{Auth, AuthDispatch, admin::require_admin, auth},
 	request::{Request, from as request_from},
 };
-use crate::{State, client::admin::require_admin};
+use crate::State;
 
 /// Extracts a typed Ruma request and its authentication context.
 ///

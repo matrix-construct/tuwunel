@@ -22,12 +22,12 @@ use url::Url;
 
 use super::{
 	account::{
-		ACCOUNT_HEAD, account_error_response, account_html_response, account_redirect_response,
+		account_error_response, account_html_response, account_redirect_response,
 		account_sso_redirect, validate_account_action,
 	},
 	authorization_sso_url, device_sso_redirect, require_account_usable, url_encode,
 };
-use crate::ClientIp;
+use crate::{ClientIp, router::ACCOUNT_HEAD};
 
 type AccountAction = SmallString<[u8; 32]>;
 type DeviceId = SmallString<[u8; 24]>;

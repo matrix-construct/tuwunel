@@ -1,7 +1,8 @@
 mod args;
-mod auth;
+pub(crate) mod auth;
 mod client_ip;
 mod handler;
+mod html;
 mod request;
 mod response;
 pub mod state;
@@ -22,6 +23,7 @@ pub(super) use self::{
 	args::{Args as Ruma, ArgsAdmin as RumaAdmin},
 	auth::auth_uiaa,
 	client_ip::ClientIp,
+	html::ACCOUNT_HEAD,
 	response::RumaResponse,
 	state::State,
 };

@@ -10,10 +10,10 @@ use tuwunel_service::{Services, oauth::server::AuthRequest};
 use url::{Url, form_urlencoded::Serializer};
 
 use super::{
-	account::{ACCOUNT_HEAD, account_error_response, account_html_response},
+	account::{account_error_response, account_html_response},
 	consume_login_token, peek_login_token, redirect_allowlisted, require_account_usable,
 };
-use crate::ClientIp;
+use crate::{ClientIp, router::ACCOUNT_HEAD};
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct CompleteParams {

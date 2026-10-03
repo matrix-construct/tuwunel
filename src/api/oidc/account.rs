@@ -37,6 +37,7 @@ use self::{
 	session_view::session_view_html,
 };
 use super::{consume_login_token, peek_login_token, sso_redirect_url, url_encode};
+use crate::router::ACCOUNT_HEAD;
 
 pub(crate) static ACCOUNT_MANAGEMENT_ACTIONS_SUPPORTED: &[&str] = &[
 	"org.matrix.profile",
@@ -56,12 +57,6 @@ static ACCOUNT_JS: &str = include_str!("account/account.js");
 
 /// Shared stylesheet served at `/_tuwunel/oidc/account.css`.
 static ACCOUNT_CSS: &str = include_str!("account/account.css");
-
-pub(crate) static ACCOUNT_HEAD: &str = r#"
-	<meta charset="UTF-8">
-	<meta name="viewport" content="width=device-width, initial-scale=1">
-	<link rel="stylesheet" href="/_tuwunel/oidc/account.css">
-"#;
 
 static ACCOUNT_JS_INCLUDE: &str = r#"
 	<script src="/_tuwunel/oidc/account.js"></script>
