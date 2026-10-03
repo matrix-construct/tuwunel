@@ -1,5 +1,7 @@
+pub(crate) mod admin;
 mod appservice;
 mod dispatch;
+pub(crate) mod jwt;
 mod server;
 mod uiaa;
 

@@ -15,7 +15,8 @@ use tuwunel_core::{
 };
 use tuwunel_service::{Services, uiaa::SESSION_ID_LENGTH};
 
-use crate::{Ruma, client::jwt};
+use super::jwt::validate_user;
+use crate::Ruma;
 
 pub(crate) async fn auth_uiaa<T>(services: &Services, body: &Ruma<T>) -> Result<OwnedUserId>
 where
@@ -114,7 +115,8 @@ where
 		.transpose()?
 	{
 		| Some(AuthData::Jwt(Jwt { ref token, .. })) => {
-			let sender_user = jwt::validate_user(services, token)?;
+			let sender_user = validate_user(services, token)?;
+
 			if !services.users.exists(&sender_user).await {
 				return Err!(Request(NotFound("User {sender_user} is not registered.")));
 			}

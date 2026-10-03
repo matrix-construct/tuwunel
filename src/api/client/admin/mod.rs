@@ -16,13 +16,14 @@ pub(crate) mod users;
 
 use futures::future::join3;
 use ruma::UserId;
-use tuwunel_core::{Config, Err, Result, err};
+use tuwunel_core::{Config, Err, Result};
 
 pub(crate) use self::{
 	get_nonce::admin_register_nonce_route, is_user_locked::is_user_locked_route,
 	is_user_suspended::is_user_suspended_route, lock_user::lock_user_route,
 	register::admin_register_route, suspend_user::suspend_user_route,
 };
+pub(crate) use crate::router::auth::admin::require_admin;
 
 /// MSC4323: authorization is checked before account lookups
 /// (anti-enumeration) per spec.
@@ -57,21 +58,6 @@ async fn authorize(services: &crate::State, caller: &UserId, target: &UserId) ->
 	}
 
 	Ok(())
-}
-
-/// Assert the caller is a server administrator. Generic Synapse admin
-/// endpoints use this plain check, not the MSC4323 anti-enumeration
-/// `authorize()` guard whose self-target and admin-target ordering does not
-/// fit them.
-pub(crate) async fn require_admin(services: &crate::State, sender: &UserId) -> Result {
-	services
-		.admin
-		.user_is_admin(sender)
-		.await
-		.then_some(())
-		.ok_or_else(|| {
-			err!(Request(Forbidden("Only server administrators can use this endpoint")))
-		})
 }
 
 /// Refuses the server user as the target of a user endpoint.

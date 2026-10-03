@@ -1,5 +1,5 @@
 mod args;
-mod auth;
+pub(crate) mod auth;
 mod client_ip;
 mod handler;
 mod request;
