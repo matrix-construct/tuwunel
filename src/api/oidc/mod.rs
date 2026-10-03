@@ -14,12 +14,11 @@ pub(super) mod userinfo;
 #[cfg(test)]
 mod tests;
 
-use std::fmt::Write;
-
 use axum::{Json, body::Body, response::IntoResponse};
 use http::{Response, StatusCode};
 use ruma::{OwnedUserId, UserId};
 use serde_json::json;
+pub(crate) use tuwunel_core::utils::url::url_encode;
 use tuwunel_core::{Result, err};
 use tuwunel_service::Services;
 use url::Url;
@@ -35,19 +34,6 @@ const OIDC_REQ_ID_LENGTH: usize = 32;
 struct NativeChoice {
 	native_enabled: bool,
 	has_default_idp: bool,
-}
-
-pub(crate) fn url_encode(s: &str) -> String {
-	s.bytes()
-		.fold(String::with_capacity(s.len()), |mut out, b| {
-			if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~') {
-				out.push(b.into());
-			} else {
-				write!(&mut out, "%{b:02X}").ok();
-			}
-
-			out
-		})
 }
 
 fn oauth_error(status: StatusCode, error: &str, description: &str) -> Response<Body> {

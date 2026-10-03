@@ -3,9 +3,27 @@
 //! These helpers provide reusable matching rules that the URL parser does not
 //! expose directly.
 
-use std::fmt::{self, Display};
+use std::fmt::{self, Display, Write};
 
 use http::Uri;
+
+/// Percent-encodes a string for use in a URL component.
+///
+/// ASCII letters, digits and unreserved punctuation remain unchanged.
+/// Other UTF-8 bytes are encoded with uppercase hexadecimal digits.
+#[must_use]
+pub fn url_encode(s: &str) -> String {
+	s.bytes()
+		.fold(String::with_capacity(s.len()), |mut out, b| {
+			if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~') {
+				out.push(b.into());
+			} else {
+				write!(&mut out, "%{b:02X}").ok();
+			}
+
+			out
+		})
+}
 
 /// Reports whether a hostname is equal to or beneath a domain name.
 ///
