@@ -5,18 +5,18 @@
 
 use std::iter::once;
 
-use futures::{StreamExt, TryStreamExt};
+use futures::{Stream, StreamExt, TryStreamExt, stream::try_unfold};
 use ruma::events::StateEventType;
 use serde_bytes::Bytes;
 use tuwunel_core::{
 	Err, Error, Result,
 	arrayvec::ArrayVec,
-	err, expected, implement,
+	at, err, expected, implement, info,
 	itertools::{EitherOrBoth, Itertools},
 	smallvec::SmallVec,
 	utils::{
 		result::NotFound,
-		stream::{IterStream, ReadyExt, TryReadyExt, WidebandExt},
+		stream::{IterStream, ReadyExt, TryBroadbandExt, TryReadyExt, WidebandExt},
 		u64_from_bytes,
 	},
 };
@@ -36,6 +36,8 @@ use crate::rooms::short::{ShortEventId, ShortStateHash, ShortStateKey};
 pub(crate) type Meta = ArrayVec<u64, 4>;
 
 pub(super) type Resolved = SmallVec<[(KeyBuf, [u8; 9]); 2]>;
+type Dictionary = (Vec<u8>, Vec<(ShortStateKey, usize)>);
+type Ancestors = ArrayVec<ShortStateHash, 3>;
 type Layers = ArrayVec<Vec<(Row, Tag, usize)>, 4>;
 
 #[derive(Clone, Copy)]
@@ -217,6 +219,154 @@ impl Row {
 	pub(crate) fn shortids(self) -> (ShortStateKey, ShortEventId) {
 		(self.shortstatekey, self.shorteventid)
 	}
+}
+
+/// Populates derived snapshot rows from authoritative blobs.
+///
+/// The reverse dictionary uses one concatenated byte buffer and two words per key.
+/// Each snapshot's rows and metadata share a transaction; interrupted scans
+/// leave the migration marker absent so the next boot rebuilds them.
+#[implement(Service)]
+#[tracing::instrument(level = "debug", skip_all)]
+pub(crate) async fn populate_rows(&self) -> Result {
+	let db = &self.services.db;
+	let server = &self.services.server;
+	let cork = db.cork_and_sync();
+	let dictionary: Dictionary = db[map!("shortstatekey_statekey")]
+		.raw_stream()
+		.ready_and_then(|(key, value)| {
+			server.check_running()?;
+			server.progress.advance();
+			Ok(u64_from_bytes(key).ok().map(|key| (key, value)))
+		})
+		.ready_try_filter_map(Ok)
+		.ready_try_fold(
+			(Vec::new(), Vec::new()),
+			|(mut bytes, mut offsets), (key, value)| -> Result<_> {
+				bytes.extend_from_slice(value);
+				offsets.push((key, bytes.len()));
+				Ok((bytes, offsets))
+			},
+		)
+		.await?;
+
+	let (snapshots, skipped, damaged) = db[map!("shortstatehash_statediff")]
+		.raw_stream()
+		.map_ok(|(key, blob)| (u64_from_bytes(key), blob.to_vec()))
+		.broad_and_then(async |(hash, blob)| {
+			server.check_running()?;
+			server.progress.advance();
+			let result = self
+				.populate_snapshot(hash, &blob, &dictionary)
+				.await;
+
+			server.check_running()?;
+			Ok(match result {
+				| Ok(skipped) => (1_usize, skipped, 0_usize),
+				| Err(_) => (0, 0, 1),
+			})
+		})
+		.ready_try_fold(
+			(0_usize, 0_usize, 0_usize),
+			|(snapshots, skipped, damaged), (count, orphans, failed)| -> Result<_> {
+				Ok((
+					snapshots.saturating_add(count),
+					skipped.saturating_add(orphans),
+					damaged.saturating_add(failed),
+				))
+			},
+		)
+		.await?;
+
+	server.check_running()?;
+	drop(cork);
+	info!(snapshots, skipped, damaged, "Populated snapshot rows");
+	Ok(())
+}
+
+#[implement(Service)]
+#[tracing::instrument(level = "debug", skip_all)]
+async fn populate_snapshot(
+	&self,
+	hash: Result<ShortStateHash>,
+	blob: &[u8],
+	dictionary: &Dictionary,
+) -> Result<usize> {
+	let hash = hash?;
+	let ancestors: Ancestors = self
+		.blob_ancestors(parent(blob)?)
+		.try_collect()
+		.await?;
+
+	let (added, removed) = parts(blob)?;
+	let diff_len = u64::try_from(added.len().saturating_add(removed.len()) / 16)?;
+	let (_, packed) = metadata(diff_len, ancestors)?;
+	let (txn, skipped) = self.stage_rows(hash, dictionary, added, removed)?;
+
+	finish(txn, &self.services.db[map!("shortstatehash_statemeta")], hash, &packed);
+	Ok(skipped)
+}
+
+#[implement(Service)]
+#[tracing::instrument(level = "trace", skip(self))]
+fn blob_ancestors(
+	&self,
+	hash: ShortStateHash,
+) -> impl Stream<Item = Result<ShortStateHash>> + Send + '_ {
+	try_unfold(hash, async |hash| -> Result<_> {
+		if hash == 0 {
+			return Ok(None);
+		}
+
+		let blob = self.services.db[map!("shortstatehash_statediff")]
+			.get(&hash.to_be_bytes())
+			.await?;
+
+		let next = parent(&blob)?;
+
+		Ok(Some((hash, next)))
+	})
+	.take(Ancestors::new().capacity())
+}
+
+#[implement(Service)]
+fn stage_rows(
+	&self,
+	hash: ShortStateHash,
+	dictionary: &Dictionary,
+	added: &[u8],
+	removed: &[u8],
+) -> Result<(Txn, usize)> {
+	let db = &self.services.db;
+
+	records(added, removed)
+		.map(|(record, tag)| {
+			self.services.server.check_running()?;
+			let (shortstatekey, shorteventid) = parse_compressed_state_event(record);
+			let resolved = dictionary
+				.1
+				.binary_search_by_key(&shortstatekey, |entry| entry.0)
+				.ok()
+				.map(|index| {
+					let start = dictionary.1[..index].last().map_or(0, at!(1));
+					let key = &dictionary.0[start..dictionary.1[index].1];
+
+					((hash, Bytes::new(key), shorteventid), value(tag, shortstatekey))
+				});
+
+			let skipped = usize::from(resolved.is_none());
+
+			Ok((resolved, skipped))
+		})
+		.try_fold((db.txn(), 0_usize), |(mut txn, skipped), entry: Result<_>| {
+			let (resolved, orphans) = entry?;
+
+			if let Some((key, value)) = resolved {
+				txn.put_raw(&db[map!("shortstatehash_statedelta")], key, value);
+			}
+
+			Ok((txn, skipped.saturating_add(orphans)))
+		})
 }
 
 /// Decodes metadata and rejects lengths outside the four-layer format.

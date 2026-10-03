@@ -247,6 +247,7 @@ async fn fresh(services: &Services) -> Result {
 	db["global"].insert("upgrade_legacy_mediaid_user", []);
 	db["global"].insert("remove_remote_media_userid", []);
 	db["global"].insert("rebuild_roomid_tscount_pducount", []);
+	db["global"].insert("populate_snapshot_rows", []);
 	db["global"].insert("rebuild_relatesto_typed", []);
 	db["global"].insert("migrate_profile_keys_to_useridprofilekey", []);
 	db["global"].insert("rebuild_thread_activity", []);
@@ -274,7 +275,6 @@ async fn fresh(services: &Services) -> Result {
 /// Apply any migrations
 async fn migrate(services: &Services, foreign_lineage: bool) -> Result {
 	let db = &services.db;
-
 	let global = &db[map!("global")];
 
 	let before = global
@@ -291,9 +291,11 @@ async fn migrate(services: &Services, foreign_lineage: bool) -> Result {
 
 	// A repair can rewrite authoritative blobs, so any marker change, a
 	// settlement record included, rebuilds their derived rows.
-	if before.as_deref() != after.as_deref()
-		|| !marker_present(services, "populate_snapshot_rows").await?
-	{
+	if before.as_deref() != after.as_deref() {
+		global.remove("populate_snapshot_rows");
+	}
+
+	if !marker_present(services, "populate_snapshot_rows").await? {
 		clear_snapshot_rows(services).await;
 	}
 
@@ -365,6 +367,14 @@ async fn migrate(services: &Services, foreign_lineage: bool) -> Result {
 
 	if pending(services, "rebuild_roomid_tscount_pducount").await? {
 		rebuild_roomid_tscount_pducount(services).await?;
+	}
+
+	if pending(services, "populate_snapshot_rows").await? {
+		clear_snapshot_rows(services).await;
+
+		services.state_compressor.populate_rows().await?;
+		services.server.check_running()?;
+		global.insert("populate_snapshot_rows", []);
 	}
 
 	if pending(services, "rebuild_relatesto_typed").await? {

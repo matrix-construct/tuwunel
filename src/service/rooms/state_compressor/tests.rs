@@ -27,9 +27,12 @@ use super::{
 	CompressedState, Service, StateDiff, compress_state_event, parse_compressed_state_event,
 	rows::{pack, unpack},
 };
-use crate::{Services, rooms::short::ShortStateHash, test_utils::fixture};
+use crate::{
+	Services, migrations::migrations, rooms::short::ShortStateHash, test_utils::fixture,
+};
 
 type State = BTreeSet<(u64, u64)>;
+type StoredRows = Vec<(Vec<u8>, Vec<u8>)>;
 
 #[test]
 fn rows_codec_round_trip() -> Result {
@@ -458,6 +461,133 @@ fn writer_pdu(event: OwnedEventId, room: &RoomId) -> Result<PduEvent> {
 	};
 
 	Ok(pdu)
+}
+
+#[tokio::test]
+async fn population_matches_read_repair() -> Result {
+	let config = Figment::new().merge(("create_admin_room", false));
+	let Some(fixture) = fixture(config).await? else { return Ok(()) };
+	let services = &fixture.services;
+	let global = &services.db[map!("global")];
+	let marker = b"populate_snapshot_rows";
+	let repair_marker = b"repair_short_injectivity_seen";
+	let blobs = &services.db[map!("shortstatehash_statediff")];
+	let meta = &services.db[map!("shortstatehash_statemeta")];
+	let delta = &services.db[map!("shortstatehash_statedelta")];
+
+	migrate_rows(services).await?;
+	services
+		.users
+		.create(user_id!("@population:localhost"), None, None)
+		.await?;
+
+	let key = services
+		.short
+		.get_or_create_shortstatekey(&StateEventType::RoomName, "")
+		.await;
+
+	let event = services
+		.short
+		.get_or_create_shorteventid(event_id!("$population:localhost"))
+		.await;
+
+	write_blob(services, 900, 0, &[(key, event), (u64::MAX, event)], &[(key, event)]);
+	write_blob(services, 200, 900, &[(key, u64::MAX)], &[(key, u64::MAX)]);
+	write_blob(services, 300, 200, &[(key, event)], &[]);
+	write_blob(services, 400, 300, &[(key, u64::MAX)], &[]);
+	repair_by_reading(services, 400).await?;
+
+	let repaired = stored_rows(services).await?;
+	let damaged = 902_u64.to_be_bytes();
+
+	blobs.insert(&damaged, [0; 3]);
+
+	plant_stale_rows(services, event)?;
+	global.remove(marker);
+	migrate_rows(services).await?;
+	meta.get(&damaged)
+		.await
+		.expect_err("damaged snapshot has no meta");
+
+	assert!(
+		delta
+			.raw_stream_prefix(&damaged)
+			.boxed()
+			.try_next()
+			.await?
+			.is_none()
+	);
+
+	assert_eq!(stored_rows(services).await?, repaired);
+	migrate_rows(services).await?;
+	assert_eq!(stored_rows(services).await?, repaired, "completed rerun changes nothing");
+
+	blobs.clear().await;
+	write_blob(services, 900, 0, &[(key, event)], &[]);
+	services.db[map!("statehash_shortstatehash")].insert(b"retained", 900_u64.to_be_bytes());
+	meta.clear().await;
+	delta.clear().await;
+	repair_by_reading(services, 900).await?;
+
+	let healthy = stored_rows(services).await?;
+
+	assert!(
+		global.get(marker).await.is_ok(),
+		"rebuild cannot rely on missing population marker"
+	);
+
+	plant_stale_rows(services, event)?;
+	global.insert(repair_marker, b"unknown");
+	migrate_rows(services).await?;
+	assert_ne!(global.get(repair_marker).await?.as_ref(), b"unknown");
+
+	assert_eq!(stored_rows(services).await?, healthy);
+
+	Ok(())
+}
+
+async fn migrate_rows(services: &Services) -> Result {
+	migrations(services).await?;
+	services.db[map!("global")]
+		.get("populate_snapshot_rows")
+		.await
+		.expect("population stamped");
+
+	Ok(())
+}
+
+async fn repair_by_reading(services: &Services, hash: u64) -> Result {
+	services
+		.state_compressor
+		.rows(hash, None, None)
+		.await?
+		.count();
+
+	Ok(())
+}
+
+fn plant_stale_rows(services: &Services, event: u64) -> Result {
+	let stale = serialize_to_vec((901_u64, "m.room.name", "", event))?;
+
+	services.db[map!("shortstatehash_statemeta")].insert(&901_u64.to_be_bytes(), pack(&[1])?);
+	services.db[map!("shortstatehash_statedelta")].insert(&stale, [1_u8; 9]);
+	Ok(())
+}
+
+async fn stored_rows(services: &Services) -> Result<Vec<StoredRows>> {
+	try_join_all(
+		[
+			&services.db[map!("shortstatehash_statemeta")],
+			&services.db[map!("shortstatehash_statedelta")],
+		]
+		.map(async |map| {
+			map.raw_stream()
+				.map_ok(|(key, value)| (key.to_vec(), value.to_vec()))
+				.try_collect()
+				.await
+		}),
+	)
+	.await
 }
 
 /// Reads one state's delta row into its typed form.
