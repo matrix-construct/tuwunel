@@ -40,12 +40,12 @@ pub use self::{
 	engine::Engine,
 	handle::Handle,
 	keyval::{KeyBuf, KeyVal, Slice, serialize_key, serialize_val},
-	map::{Get, Map, Qry, compact},
+	map::{Get, Map, MapId, Qry, compact},
 	ser::{Cbor, Interfix, Json, SEP, Separator, serialize, serialize_to, serialize_to_vec},
 	txn::{Txn, TxnError},
 };
 pub(crate) use self::{engine::context::Context, util::or_else};
-use crate::maps::{Maps, MapsKey, MapsVal, open as open_maps};
+use crate::maps::{Indexed, Maps, MapsKey, MapsVal, open as open_maps};
 
 /// An open Tuwunel database and its configured maps.
 ///
@@ -54,6 +54,7 @@ use crate::maps::{Maps, MapsKey, MapsVal, open as open_maps};
 /// transactions.
 pub struct Database {
 	maps: Maps,
+	indexed: Indexed,
 	/// The RocksDB engine backing every map in this database.
 	///
 	/// Callers use the engine for database-wide operations such as backups and
@@ -72,7 +73,7 @@ impl Database {
 	pub async fn open(server: &Arc<Server>) -> Result<Arc<Self>> {
 		let ctx = Context::new(server)?;
 		let engine = Engine::open(ctx.clone(), maps::MAPS).await?;
-		let maps = open_maps(&engine)?;
+		let (maps, indexed) = open_maps(&engine)?;
 		let cf_index = maps
 			.values()
 			.map(|map| (map.cf_id(), Arc::downgrade(map)))
@@ -80,7 +81,7 @@ impl Database {
 
 		engine.set_cf_index(cf_index);
 
-		Ok(Arc::new(Self { maps, engine, _ctx: ctx }))
+		Ok(Arc::new(Self { maps, indexed, engine, _ctx: ctx }))
 	}
 
 	#[inline]
@@ -146,6 +147,17 @@ impl Database {
 	/// A secondary instance follows another database and does not act as its
 	/// primary writer. The value applies to every map owned by this database.
 	pub fn is_secondary(&self) -> bool { self.engine.is_secondary() }
+}
+
+impl Index<MapId> for Database {
+	type Output = Arc<Map>;
+
+	#[inline]
+	fn index(&self, id: MapId) -> &Self::Output {
+		self.indexed[id.0]
+			.as_ref()
+			.expect("column in database does not exist")
+	}
 }
 
 impl Index<&str> for Database {

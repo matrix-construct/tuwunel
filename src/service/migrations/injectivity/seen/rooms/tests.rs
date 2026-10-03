@@ -123,7 +123,11 @@ async fn move_rewrites_every_residence_and_normal_redaction_and_purge_use_the_wi
 	// Leave the search key destination absent so the move itself must write it.
 	relocated(&source, &expected)
 		.filter(|(_, (column, ..))| *column != "tokenids")
-		.for_each(|(_, (column, key, value))| db[column].insert(key, value));
+		.for_each(|(_, (column, key, value))| {
+			let column: &str = column;
+
+			db[column].insert(key, value);
+		});
 
 	let result = repair(services).await?;
 	let moved = packed(WINNER, PduCount::Normal(11));
@@ -257,6 +261,8 @@ async fn conflicting_destination_preserves_both_sides_then_recensus_observes_nor
 		.iter()
 		.find(|(column, ..)| *column == "threadid_userids")
 		.expect("thread fixture");
+
+	let column: &str = column;
 
 	db[column].insert(key, b"@other:localhost");
 	let before = snapshot(db, &COLUMNS).await?;
@@ -554,12 +560,16 @@ fn residences(short: u64, room: &RoomId) -> Result<Records> {
 
 fn store(db: &Database, records: &Records) {
 	for (column, key, value) in records {
+		let column: &str = column;
+
 		db[column].insert(key, value);
 	}
 }
 
 fn erase(db: &Database, records: &Records) {
 	for (column, key, _) in records {
+		let column: &str = column;
+
 		db[column].remove(key);
 	}
 }
@@ -585,7 +595,9 @@ async fn snapshot(db: &Database, columns: &[&'static str]) -> Result<Records> {
 	columns
 		.try_stream()
 		.try_fold(Records::new(), async |records, column| {
-			let rows: Records = db[column]
+			let name: &str = column;
+
+			let rows: Records = db[name]
 				.raw_stream()
 				.map_ok(|(key, value)| (*column, key.to_vec(), value.to_vec()))
 				.try_collect()
@@ -604,6 +616,8 @@ fn combine(mut records: Records, rows: Records) -> Records {
 #[tracing::instrument(level = "debug", skip_all)]
 async fn assert_records(db: &Database, records: &Records) -> Result {
 	for (column, key, value) in records {
+		let column: &str = column;
+
 		assert_eq!(db[column].get(key).await?.as_ref(), value, "{column}");
 	}
 

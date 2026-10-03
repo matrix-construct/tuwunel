@@ -20,6 +20,8 @@ use crate::{
 /// opened [`Map`] through an `Arc`. Dropped or unavailable families are absent.
 pub(super) type Maps = BTreeMap<MapsKey, MapsVal>;
 
+pub(super) type Indexed = Box<[Option<MapsVal>]>;
+
 /// Names a column family in the map catalog.
 ///
 /// Catalog names have static lifetime because descriptors are process-wide
@@ -36,19 +38,29 @@ pub(super) type MapsVal = Arc<Map>;
 ///
 /// The returned index contains only descriptors that are live and present in
 /// the opened database. Individual map handles share the supplied engine.
-pub(super) fn open(engine: &Arc<Engine>) -> Result<Maps> { open_list(engine, MAPS) }
+/// The second index follows `MAPS`, with `None` for dropped or absent families.
+pub(super) fn open(engine: &Arc<Engine>) -> Result<(Maps, Indexed)> { open_list(engine, MAPS) }
 
 /// Opens maps from an explicit descriptor list.
 ///
 /// Dropped descriptors and column families missing from the engine are skipped.
 /// Any failure to open a retained map aborts construction of the index.
+/// The second index follows `MAPS`, with `None` for dropped or absent families.
 #[tracing::instrument(name = "maps", level = "debug", skip_all)]
-pub(super) fn open_list(engine: &Arc<Engine>, maps: &[Descriptor]) -> Result<Maps> {
-	maps.iter()
+pub(super) fn open_list(engine: &Arc<Engine>, maps: &[Descriptor]) -> Result<(Maps, Indexed)> {
+	let maps: Maps = maps
+		.iter()
 		.filter(|desc| !desc.dropped)
 		.filter(|desc| engine.has_cf(desc.name))
 		.map(|desc| Ok((desc.name, Map::open(engine, desc.name)?)))
-		.collect()
+		.collect::<Result<_>>()?;
+
+	let indexed = MAPS
+		.iter()
+		.map(|desc| maps.get(desc.name).cloned())
+		.collect();
+
+	Ok((maps, indexed))
 }
 
 #[cfg(test)]

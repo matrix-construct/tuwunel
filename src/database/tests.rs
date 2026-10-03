@@ -27,14 +27,31 @@ use tuwunel_core::{
 };
 
 use crate::{
-	Cbor, Database, Ignore, Interfix, Map, Txn,
+	Cbor, Database, Ignore, Interfix, Map, MapId, Txn,
 	de::from_slice,
 	keyval::{serialize_key, serialize_val},
-	maps::descriptor,
+	map,
+	maps::{MAPS, descriptor},
 	ser,
 	ser::{Json, serialize_to_vec},
 	txn::next_record,
 };
+
+#[tokio::test]
+async fn catalog_handles_match_names() -> Result {
+	let db = open_database("catalog-handles").await?;
+
+	for (position, desc) in MAPS.iter().enumerate() {
+		let Ok(map) = db.get(desc.name) else { continue };
+		let id = MapId::named(desc.name);
+
+		assert_eq!(id.0, position);
+		assert!(Arc::ptr_eq(&db[id], map));
+	}
+
+	assert!(Arc::ptr_eq(&db[map!("pduid_pdu")], db.get("pduid_pdu")?));
+	Ok(())
+}
 
 #[test]
 #[cfg_attr(
