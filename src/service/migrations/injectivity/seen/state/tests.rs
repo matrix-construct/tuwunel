@@ -18,7 +18,6 @@ use super::{
 };
 use crate::{
 	Services,
-	rooms::state_compressor::ShortStateInfo,
 	test_utils::{fixture, pdu_id},
 };
 
@@ -116,7 +115,6 @@ async fn snapshots_preserve_original_logical_state_and_all_descendants() -> Resu
 
 	let services = &fixture.services;
 	let db = &services.db;
-	let cache = &services.state_compressor.stateinfo_cache;
 	let statehashes = &db["statehash_shortstatehash"];
 
 	identities(db);
@@ -134,11 +132,6 @@ async fn snapshots_preserve_original_logical_state_and_all_descendants() -> Resu
 	statehashes.insert(b"tailed", [words(&[1000]), vec![99]].concat());
 
 	db["roomid_spacehierarchy"].insert(b"!room:example.org", b"cached summary");
-
-	cache
-		.lock()
-		.expect("test cache lock")
-		.insert(1200, vec![ShortStateInfo::default()]);
 
 	let repaired = repair_identities(services).await?;
 	let (states, _) = repair(services, repaired).await?;
@@ -177,7 +170,14 @@ async fn snapshots_preserve_original_logical_state_and_all_descendants() -> Resu
 
 	assert_eq!(stored.as_ref(), words(&[2000]));
 
-	assert!(cache.lock().expect("test cache lock").is_empty());
+	let rows: BTreeSet<_> = services
+		.state_compressor
+		.rows(1200, None, None)
+		.await?
+		.map(|row| (row.shortstatekey, row.shorteventid))
+		.collect();
+
+	assert_eq!(rows, [(12, 101), (21, 102)].into());
 
 	let repeated = rerun(services).await?;
 

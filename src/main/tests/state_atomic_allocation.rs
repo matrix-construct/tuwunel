@@ -2,7 +2,7 @@
 
 use std::{fs::remove_dir_all, path::PathBuf, sync::Arc};
 
-use futures::StreamExt;
+use futures::{StreamExt, TryStreamExt};
 use tuwunel::{Args, Runtime, Server, async_run, async_start, async_stop};
 use tuwunel_core::{
 	Err, Result,
@@ -58,17 +58,17 @@ fn state_hash_allocation_persists_an_atomic_pair() -> Result {
 
 async fn exercise(services: &Services) -> Result {
 	let statediff = Arc::new(CompressedState::new());
+	let prepared = services
+		.state_compressor
+		.prepare_state_diff(statediff.clone(), statediff, 1, None)
+		.await?;
+
 	let (shortstatehash, already_existed) = services
 		.short
 		.get_or_create_shortstatehash(&SUCCESS_HASH, |txn, shortstatehash| {
-			services.state_compressor.save_state_from_diff(
-				txn,
-				shortstatehash,
-				statediff.clone(),
-				statediff.clone(),
-				1,
-				Vec::new(),
-			)
+			services
+				.state_compressor
+				.save_state_from_diff(txn, shortstatehash, prepared)
 		})
 		.await?;
 
@@ -85,12 +85,17 @@ async fn exercise(services: &Services) -> Result {
 		return Err!("state hash mapping did not resolve to its allocation");
 	}
 
-	let state = services
-		.state_compressor
-		.load_shortstatehash_info(shortstatehash)
+	let meta = services.db["shortstatehash_statemeta"]
+		.get(&shortstatehash.to_be_bytes())
 		.await?;
 
-	if state.len() != 1 || !state[0].full_state.is_empty() {
+	let state = services
+		.state_accessor
+		.state_full_shortids(shortstatehash)
+		.try_collect::<Vec<_>>()
+		.await?;
+
+	if meta.len() != 8 || !state.is_empty() {
 		return Err!("empty state diff did not load as one empty layer");
 	}
 
@@ -136,16 +141,17 @@ async fn exercise(services: &Services) -> Result {
 		.append_to_state(&state_pdu()?)
 		.await?;
 
-	let state = services
-		.state_compressor
-		.load_shortstatehash_info(appended)
+	services.db["shortstatehash_statemeta"]
+		.get(&appended.to_be_bytes())
 		.await?;
 
-	let Some(state) = state.last() else {
-		return Err!("appended state had no diff layer");
-	};
+	let state = services
+		.state_accessor
+		.state_full_shortids(appended)
+		.try_collect::<Vec<_>>()
+		.await?;
 
-	if state.shortstatehash != appended || state.full_state.len() != 1 {
+	if state.len() != 1 {
 		return Err!("appended state event was not loaded");
 	}
 
