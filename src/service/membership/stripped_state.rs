@@ -11,7 +11,8 @@ use ruma::{
 	serde::{JsonObject, Raw},
 };
 use serde::Deserialize;
-use tuwunel_core::{Event, PduEvent, Result, implement, matrix::event::gen_event_id};
+use tuwunel_core::{Result, implement};
+use tuwunel_matrix::{Event, PduEvent, event::gen_event_id};
 
 use super::Service;
 

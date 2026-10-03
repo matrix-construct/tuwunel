@@ -29,13 +29,14 @@ use futures::future::join;
 use serde_json::{Value, json};
 use tokio::{spawn, sync::Notify, time::timeout};
 use tuwunel_core::{
-	Err, PduCount, Result, err,
+	Err, Result, err,
 	ruma::{
 		OwnedRoomId, OwnedServerName, RoomId, ServerName, UInt, UserId,
 		events::room::member::{MembershipState, RoomMemberEventContent},
 	},
 };
 use tuwunel_database::Json as DbJson;
+use tuwunel_matrix::PduCount;
 use tuwunel_service::{
 	Services,
 	rooms::{

@@ -20,15 +20,15 @@ use ruma::{
 };
 use tuwunel_core::{
 	Result, debug_warn, err, error, implement,
-	matrix::{
-		event::Event,
-		pdu::{PduCount, PduEvent, PduId, RawPduId},
-		room_version,
-	},
 	smallvec::SmallVec,
 	utils::result::{LogErr, NotFound},
 };
 use tuwunel_database::Json;
+use tuwunel_matrix::{
+	event::Event,
+	pdu::{PduCount, PduEvent, PduId, RawPduId},
+	room_version,
+};
 
 use super::{ExtractBody, ExtractRelatesTo, ExtractRelatesToEventId, RoomMutexGuard, bias_count};
 use crate::{

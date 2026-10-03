@@ -9,11 +9,8 @@ use ruma::{
 	},
 	serde::JsonObject,
 };
-use tuwunel_core::{
-	Err, Result, at, err,
-	matrix::{event::gen_event_id_canonical_json, pdu::PduEvent, room_version},
-	warn,
-};
+use tuwunel_core::{Err, Result, at, err, warn};
+use tuwunel_matrix::{event::gen_event_id_canonical_json, pdu::PduEvent, room_version};
 
 use super::utils::require_known_room;
 use crate::Ruma;

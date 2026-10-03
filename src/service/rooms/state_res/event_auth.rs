@@ -17,11 +17,10 @@ use ruma::{
 	room_version_rules::{AuthorizationRules, RoomVersionRules},
 };
 use tuwunel_core::{
-	Err, Error, Result, err,
-	matrix::{Event, PduEvent},
-	trace,
+	Err, Error, Result, err, trace,
 	utils::stream::{IterStream, TryReadyExt},
 };
+use tuwunel_matrix::{Event, PduEvent};
 
 pub use self::auth_types::{AuthTypes, auth_types_for_event};
 use self::room_member::check_room_member;

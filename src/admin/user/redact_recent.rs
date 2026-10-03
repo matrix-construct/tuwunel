@@ -2,7 +2,8 @@ use std::num::NonZeroUsize;
 
 use futures::{StreamExt, TryStreamExt};
 use ruma::{OwnedRoomOrAliasId, events::TimelineEventType};
-use tuwunel_core::{Result, err, matrix::Event, utils::stream::TryReadyExt};
+use tuwunel_core::{Result, err, utils::stream::TryReadyExt};
+use tuwunel_matrix::Event;
 
 use super::redact_event::redact;
 use crate::{admin_command, utils::parse_existing_local_user_id};

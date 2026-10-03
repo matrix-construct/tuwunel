@@ -4,7 +4,6 @@ use std::time::Duration;
 
 use tuwunel_core::{
 	Result,
-	pdu::PduBuilder,
 	ruma::{
 		UserId,
 		events::room::{
@@ -13,6 +12,7 @@ use tuwunel_core::{
 		},
 	},
 };
+use tuwunel_matrix::pdu::PduBuilder;
 use tuwunel_service::Services;
 
 use self::{

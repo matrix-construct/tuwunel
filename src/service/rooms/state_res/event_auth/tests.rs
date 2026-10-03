@@ -19,10 +19,8 @@ use serde_json::{json, value::to_raw_value as to_raw_json_value};
 
 mod room_power_levels;
 
-use tuwunel_core::{
-	Error, err,
-	matrix::{Event, EventHash, PduEvent, StateKey},
-};
+use tuwunel_core::{Error, err};
+use tuwunel_matrix::{Event, EventHash, PduEvent, StateKey};
 
 use self::room_power_levels::default_room_power_levels;
 use super::{

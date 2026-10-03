@@ -27,11 +27,8 @@ use ruma::{
 };
 use serde_json::{json, value::to_raw_value as to_raw_json_value};
 use tokio::sync::{Notify, watch::channel as watch_channel};
-use tuwunel_core::{
-	Err, Error, Result, debug, err,
-	matrix::{Event, EventTypeExt, PduEvent},
-	utils::stream::IterStream,
-};
+use tuwunel_core::{Err, Error, Result, debug, err, utils::stream::IterStream};
+use tuwunel_matrix::{Event, EventTypeExt, PduEvent};
 
 use super::{
 	AuthSet, ConflictMap, ConflictedSet, StateMap,

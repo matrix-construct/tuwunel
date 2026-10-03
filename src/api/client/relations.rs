@@ -19,16 +19,16 @@ use ruma::{
 };
 use tuwunel_core::{
 	Err, Error, Result, at, err,
-	matrix::{
-		event::{Event, RelationTypeEqual},
-		pdu::{PduCount, PduId},
-	},
 	utils::{
 		BoolExt,
 		math::usize_from_ruma_bounded,
 		result::FlatOk,
 		stream::{ReadyExt, WidebandExt},
 	},
+};
+use tuwunel_matrix::{
+	event::{Event, RelationTypeEqual},
+	pdu::{PduCount, PduId},
 };
 use tuwunel_service::Services;
 

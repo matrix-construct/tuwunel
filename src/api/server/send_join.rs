@@ -15,7 +15,6 @@ use serde_json::value::RawValue as RawJsonValue;
 use tuwunel_core::{
 	Err, Result, at, debug_error, err,
 	itertools::Itertools,
-	matrix::{RoomVersionRules, event::gen_event_id_canonical_json, room_version},
 	utils::{
 		BoolExt,
 		future::{BoolExt as _, ReadyBoolExt},
@@ -23,6 +22,7 @@ use tuwunel_core::{
 	},
 	warn,
 };
+use tuwunel_matrix::{RoomVersionRules, event::gen_event_id_canonical_json, room_version};
 use tuwunel_service::Services;
 
 use super::utils::require_known_room;

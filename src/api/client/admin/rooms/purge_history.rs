@@ -10,7 +10,8 @@ use synapse_admin_api::purge_history::{
 	},
 	status::v1::{PurgeStatus, Request as StatusRequest, Response as StatusResponse},
 };
-use tuwunel_core::{Err, Result, err, matrix::pdu::PduCount};
+use tuwunel_core::{Err, Result, err};
+use tuwunel_matrix::pdu::PduCount;
 use tuwunel_service::tasks::Status;
 
 use crate::{Ruma, client::admin::require_admin};

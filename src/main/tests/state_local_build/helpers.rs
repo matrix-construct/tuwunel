@@ -5,8 +5,6 @@ use serde_json::{Value, json};
 use tokio::time::{sleep, timeout};
 use tuwunel_core::{
 	Err, Result, async_noinline, err,
-	matrix::{PduEvent, pdu::into_outgoing_federation},
-	pdu::PduBuilder,
 	ruma::{
 		CanonicalJsonObject, EventId, OwnedEventId, OwnedRoomId, RoomId, RoomVersionId, UserId,
 		events::room::{
@@ -18,6 +16,10 @@ use tuwunel_core::{
 	utils::{BoolExt, result::NotFound, time::now_secs},
 };
 use tuwunel_database::Interfix;
+use tuwunel_matrix::{
+	PduEvent,
+	pdu::{PduBuilder, into_outgoing_federation},
+};
 use tuwunel_service::{
 	Services,
 	rooms::{

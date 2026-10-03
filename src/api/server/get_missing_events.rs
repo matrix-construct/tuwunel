@@ -12,12 +12,12 @@ use ruma::{
 };
 use tuwunel_core::{
 	Error, Result, debug, err,
-	matrix::room_version::rules as room_version_rules,
 	utils::{
 		math::usize_from_ruma_bounded,
 		stream::{TryWidebandExt, automatic_width},
 	},
 };
+use tuwunel_matrix::room_version::rules as room_version_rules;
 
 use super::AccessCheck;
 use crate::Ruma;
@@ -214,7 +214,7 @@ mod tests {
 		api::federation::event::get_missing_events::v1::Request, room_id, server_name,
 	};
 	use serde_json::json;
-	use tuwunel_core::matrix::pdu::MAX_PREV_EVENTS;
+	use tuwunel_matrix::pdu::MAX_PREV_EVENTS;
 
 	use super::{EARLIEST_MAX, Ruma, WALK_MAX, err, next_missing_event, walk_seed};
 

@@ -2,7 +2,8 @@ use axum::extract::State;
 use futures::{StreamExt, TryStreamExt};
 use ruma::events::StateEventType;
 use synapse_admin_api::rooms::admin_state::v1::{Request, Response};
-use tuwunel_core::{Result, matrix::Event, utils::stream::TryBroadbandExt};
+use tuwunel_core::{Result, utils::stream::TryBroadbandExt};
+use tuwunel_matrix::Event;
 
 use crate::{
 	Ruma,

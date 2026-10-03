@@ -7,10 +7,8 @@ use ruma::{
 	},
 	events::room::member::{MembershipState, RoomMemberEventContent},
 };
-use tuwunel_core::{
-	Err, Error, Result, at, debug_warn,
-	matrix::{pdu::PduBuilder, room_version},
-};
+use tuwunel_core::{Err, Error, Result, at, debug_warn};
+use tuwunel_matrix::{pdu::PduBuilder, room_version};
 
 use super::utils::require_known_room;
 use crate::Ruma;

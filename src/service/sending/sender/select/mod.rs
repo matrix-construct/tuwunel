@@ -12,11 +12,10 @@ use std::{
 use futures::{StreamExt, future::join3};
 use ruma::{ServerName, api::federation::transactions::edu::Edu};
 use tuwunel_core::{
-	Result, implement,
-	matrix::ShortRoomId,
-	trace,
+	Result, implement, trace,
 	utils::{BoolExt, ReadyExt, time::now_secs},
 };
+use tuwunel_matrix::ShortRoomId;
 
 use super::{
 	DEQUEUE_LIMIT, EDU_LIMIT, NewEvents, RetryAction, TransactionStatus, TransactionStatuses,

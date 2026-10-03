@@ -7,10 +7,8 @@
 use futures::{Stream, StreamExt, TryFutureExt};
 use ruma::{OwnedEventId, RoomId, events::StateEventType};
 use serde::Deserialize;
-use tuwunel_core::{
-	Result, err, implement,
-	matrix::{Event, Pdu, StateKey},
-};
+use tuwunel_core::{Result, err, implement};
+use tuwunel_matrix::{Event, Pdu, StateKey};
 
 /// Deserializes one current state event's content.
 ///

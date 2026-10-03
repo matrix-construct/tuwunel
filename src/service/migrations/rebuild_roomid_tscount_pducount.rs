@@ -2,10 +2,10 @@ use ruma::{MilliSecondsSinceUnixEpoch, OwnedRoomId, RoomId};
 use serde::Deserialize;
 use tuwunel_core::{
 	Result, info,
-	matrix::pdu::RawPduId,
 	utils::{ReadyExt, stream::TryIgnore},
 	warn,
 };
+use tuwunel_matrix::pdu::RawPduId;
 
 use crate::{Services, rooms::timeline::bias_count};
 

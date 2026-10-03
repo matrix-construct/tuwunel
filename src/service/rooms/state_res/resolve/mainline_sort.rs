@@ -4,11 +4,11 @@ use futures::{Stream, StreamExt, TryFutureExt, TryStreamExt, stream::try_unfold}
 use ruma::{EventId, OwnedEventId, events::TimelineEventType};
 use tuwunel_core::{
 	Error, Result, at,
-	matrix::{Event, PduEvent, event_id::RandomState},
 	result::NotFound,
 	trace,
 	utils::stream::{BroadbandExt, TryReadyExt},
 };
+use tuwunel_matrix::{Event, PduEvent, event_id::RandomState};
 
 use super::super::FetchEvent;
 

@@ -10,11 +10,6 @@ use ruma::{EventId, OwnedEventId, OwnedRoomId, RoomId, api::error::ErrorKind};
 use serde::Deserialize;
 use tuwunel_core::{
 	Error, Result,
-	matrix::{
-		PduEvent,
-		pdu::AuthEvents,
-		room_version::{from_create_event, rules},
-	},
 	utils::{
 		IterStream, OptionExt, TryReadyExt,
 		result::NotFound,
@@ -22,6 +17,11 @@ use tuwunel_core::{
 	},
 };
 use tuwunel_database::{Database, keyval::KeyBuf};
+use tuwunel_matrix::{
+	PduEvent,
+	pdu::AuthEvents,
+	room_version::{from_create_event, rules},
+};
 
 use super::{
 	CompressedState, Diff, Identity, Mapping, Materialized, Projection, Services, apply, claim,

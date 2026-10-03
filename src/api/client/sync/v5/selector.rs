@@ -9,9 +9,7 @@ use ruma::{
 	events::room::member::MembershipState, uint,
 };
 use tuwunel_core::{
-	Result, apply, debug_error, is_true,
-	matrix::PduCount,
-	trace,
+	Result, apply, debug_error, is_true, trace,
 	utils::{
 		BoolExt,
 		math::usize_from_ruma,
@@ -19,6 +17,7 @@ use tuwunel_core::{
 		stream::{BroadbandExt, IterStream},
 	},
 };
+use tuwunel_matrix::PduCount;
 use tuwunel_service::{sync::Connection, users::InviteFilter};
 
 use super::{

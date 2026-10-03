@@ -1,4 +1,5 @@
-use tuwunel_core::{matrix::PduCount, utils::u64_from_u8};
+use tuwunel_core::utils::u64_from_u8;
+use tuwunel_matrix::PduCount;
 
 use super::typed_relations::{CHILD_COUNT_OFFSET, KEY_LEN, PREFIX_LEN, Tag, key, prefix};
 

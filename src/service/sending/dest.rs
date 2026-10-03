@@ -1,7 +1,8 @@
 use std::fmt::Debug;
 
 use ruma::{OwnedServerName, OwnedUserId, ServerName, UserId};
-use tuwunel_core::{implement, matrix::pdu::RawPduId};
+use tuwunel_core::implement;
+use tuwunel_matrix::pdu::RawPduId;
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Destination {

@@ -23,13 +23,14 @@ use ruma::{
 	serde::Raw,
 };
 use tuwunel_core::{
-	Err, Event, Result, implement,
+	Err, Result, implement,
 	utils::{
 		future::{BoolExt, TryExtExt},
 		stream::{BroadbandExt, IterStream, ReadyExt, TryReadyExt},
 	},
 };
 use tuwunel_database::Map;
+use tuwunel_matrix::Event;
 
 use self::cache::Cached;
 pub use self::pagination_token::PaginationToken;

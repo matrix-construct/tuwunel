@@ -62,7 +62,7 @@ use self::{
 };
 use crate::{
 	Err, Result, err, implement,
-	matrix::pdu::MAX_PREV_EVENTS,
+	matrix::MAX_PREV_EVENTS,
 	redacted_debug,
 	utils::{self, bytes::deserialize_bytesize_usize, hash::Cost, sys},
 };

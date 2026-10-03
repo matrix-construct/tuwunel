@@ -1,9 +1,9 @@
 use tuwunel_core::{
 	Result,
-	matrix::PduEvent,
 	ruma::{CanonicalJsonObject, EventId, RoomId, UserId},
 	utils::result::NotFound,
 };
+use tuwunel_matrix::PduEvent;
 use tuwunel_service::{Services, rooms::event_handler::PrevWalkMetrics};
 
 use super::helpers::{

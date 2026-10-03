@@ -5,9 +5,9 @@
 
 use tuwunel_core::{
 	Result,
-	pdu::PduBuilder,
 	ruma::{OwnedEventId, RoomId, UserId, events::room::message::RoomMessageEventContent},
 };
+use tuwunel_matrix::pdu::PduBuilder;
 use tuwunel_service::Services;
 
 /// Append a message to a room as `sender` and return its event id.

@@ -22,12 +22,7 @@ use ruma::{
 	serde::Raw,
 };
 use tuwunel_core::{
-	Error, Result, at, format_small_string, is_equal_to,
-	matrix::{
-		Event, StateKey,
-		pdu::{PduCount, PduEvent, RawPduId},
-	},
-	ref_at,
+	Error, Result, at, format_small_string, is_equal_to, ref_at,
 	smallstr::SmallString,
 	smallvec::SmallVec,
 	utils::{
@@ -39,6 +34,10 @@ use tuwunel_core::{
 		result::FlatOk,
 		stream::{BroadbandExt, WidebandExt},
 	},
+};
+use tuwunel_matrix::{
+	Event, StateKey,
+	pdu::{PduCount, PduEvent, RawPduId},
 };
 use tuwunel_service::{
 	Services,

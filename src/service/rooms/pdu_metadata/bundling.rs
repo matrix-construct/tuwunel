@@ -3,10 +3,8 @@ use std::collections::BTreeSet;
 use futures::{Stream, StreamExt, TryFutureExt, pin_mut};
 use ruma::{OwnedUserId, UserId, api::Direction, events::room::encrypted::Relation};
 use tuwunel_core::{
-	PduId,
 	arrayvec::ArrayVec,
 	implement,
-	matrix::{Event, Pdu, PduCount, RawPduId},
 	result::LogErr,
 	utils::{
 		BoolExt,
@@ -14,6 +12,7 @@ use tuwunel_core::{
 		u64_from_u8,
 	},
 };
+use tuwunel_matrix::{Event, Pdu, PduCount, PduId, RawPduId};
 
 use super::{
 	ExtractRelatesTo, IgnoredThreadView,

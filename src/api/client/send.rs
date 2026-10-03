@@ -17,12 +17,9 @@ use ruma::{
 use serde::Deserialize;
 use serde_json::from_str;
 use tuwunel_core::{
-	Err, PduEvent, Result, debug_warn, err,
-	matrix::{Event, pdu::PduBuilder},
-	result::NotFound,
-	utils::string_from_bytes,
-	warn,
+	Err, Result, debug_warn, err, result::NotFound, utils::string_from_bytes, warn,
 };
+use tuwunel_matrix::{Event, PduEvent, pdu::PduBuilder};
 use tuwunel_service::Services;
 
 use crate::{Ruma, client::utils::is_self_redaction};

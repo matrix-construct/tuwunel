@@ -1,8 +1,8 @@
 use serde::Deserialize;
 use serde_json::value::Value as JsonValue;
+use tuwunel_core::{Result, err};
 
 use super::Event;
-use crate::{Result, err};
 
 #[inline]
 #[must_use]

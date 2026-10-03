@@ -13,10 +13,10 @@ use tuwunel_core::{
 	config::{Config, Figment, Sources},
 	err,
 	log::{LogLevelReloadHandles, Logging, capture::State},
-	matrix::{PduCount, PduId, RawPduId},
 	metrics::Metrics,
 	utils::random_string,
 };
+use tuwunel_matrix::{PduCount, PduId, RawPduId};
 
 use crate::Services;
 

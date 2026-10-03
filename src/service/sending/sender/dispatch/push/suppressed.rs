@@ -4,15 +4,14 @@ use ruma::{
 	push::Ruleset,
 };
 use tuwunel_core::{
-	Event, debug, extract_variant, implement,
-	matrix::Pdu,
-	trace,
+	debug, extract_variant, implement, trace,
 	utils::{
 		IterStream, ReadyExt,
 		stream::{BroadbandExt, WidebandExt},
 	},
 	warn,
 };
+use tuwunel_matrix::{Event, Pdu};
 
 use super::PUSH_WIDTH;
 use crate::{

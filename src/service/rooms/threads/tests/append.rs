@@ -6,13 +6,9 @@ use std::{
 
 use ruma::{EventId, RoomId, UserId, event_id, room_id, user_id};
 use serde_json::{Value, json};
-use tuwunel_core::{
-	Result,
-	config::Figment,
-	matrix::pdu::{PduCount, PduEvent, PduId, RawPduId},
-	utils::result::NotFound,
-};
+use tuwunel_core::{Result, config::Figment, utils::result::NotFound};
 use tuwunel_database::Json;
+use tuwunel_matrix::pdu::{PduCount, PduEvent, PduId, RawPduId};
 
 use self::observation::Observation;
 use crate::{

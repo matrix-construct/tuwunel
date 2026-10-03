@@ -20,14 +20,11 @@ use ruma::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::value::to_raw_value;
-use tuwunel_core::{
-	Err, Result, at, debug, implement,
-	matrix::{Event, pdu::into_outgoing_federation, room_version::rules as room_version_rules},
-	trace,
-	utils::time::now_secs,
-	warn,
-};
+use tuwunel_core::{Err, Result, at, debug, implement, trace, utils::time::now_secs, warn};
 use tuwunel_database::{Cbor, Deserialized};
+use tuwunel_matrix::{
+	Event, pdu::into_outgoing_federation, room_version::rules as room_version_rules,
+};
 
 #[cfg(test)]
 mod tests;

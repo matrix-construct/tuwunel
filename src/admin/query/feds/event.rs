@@ -20,9 +20,9 @@ use ruma::{
 };
 use tuwunel_core::{
 	Err, Error, Result, err,
-	matrix::{event::gen_event_id, room_version::rules as room_version_rules},
 	utils::{stream::BroadbandExt, time::Elapsed},
 };
+use tuwunel_matrix::{event::gen_event_id, room_version::rules as room_version_rules};
 use tuwunel_service::federation::feds::{Fault, Outcome};
 
 use super::{SweepArgs, count_results, fault_message, markdown_cell, prepare, render_totals};

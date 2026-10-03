@@ -19,8 +19,9 @@ use ruma::{
 };
 use serde_json::{Value, json};
 use tokio::{sync::Notify, task_local, time::timeout};
-use tuwunel_core::{Err, PduCount, Result, config::Figment, err, utils::time::now};
+use tuwunel_core::{Err, Result, config::Figment, err, utils::time::now};
 use tuwunel_database::Json;
+use tuwunel_matrix::PduCount;
 
 use super::{Accessibility, Identifier, PaginationToken, get_parent_children_via};
 use crate::{

@@ -26,6 +26,7 @@ type StopFuncProto = fn(Arc<Services>) -> StopFuncResult;
 const RESTART_THRESH: &str = "tuwunel_service";
 const MODULE_NAMES: &[&str] = &[
 	//"tuwunel_core",
+	//"tuwunel_matrix",
 	"tuwunel_database",
 	"tuwunel_service",
 	"tuwunel_api",

@@ -8,7 +8,8 @@ use ruma::{
 		room::member::{MembershipState, RoomMemberEventContent},
 	},
 };
-use tuwunel_core::{Err, Result, at, err, matrix::event::gen_event_id_canonical_json};
+use tuwunel_core::{Err, Result, at, err};
+use tuwunel_matrix::event::gen_event_id_canonical_json;
 
 use super::utils::require_known_room;
 use crate::Ruma;

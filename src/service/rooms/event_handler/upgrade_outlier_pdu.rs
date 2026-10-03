@@ -6,15 +6,14 @@ use ruma::{
 	room_version_rules::RoomVersionRules,
 };
 use tuwunel_core::{
-	Result, debug, debug_info, debug_warn, implement, is_equal_to,
-	matrix::{Event, PduEvent, pdu::check_rules, room_version},
-	trace,
+	Result, debug, debug_info, debug_warn, implement, is_equal_to, trace,
 	utils::{
 		BoolExt,
 		stream::{BroadbandExt, ReadyExt},
 	},
 	warn,
 };
+use tuwunel_matrix::{Event, PduEvent, pdu::check_rules, room_version};
 
 use super::{
 	backoff::{Context, Disposition, UPGRADE_RETRY},

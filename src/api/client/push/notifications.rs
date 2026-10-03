@@ -3,12 +3,12 @@ use futures::StreamExt;
 use ruma::{MilliSecondsSinceUnixEpoch, api::client::push::get_notifications, push::Action};
 use tuwunel_core::{
 	Result, at, err,
-	matrix::{Event, PduId},
 	utils::{
 		stream::{ReadyExt, WidebandExt},
 		string::to_small_string,
 	},
 };
+use tuwunel_matrix::{Event, PduId};
 
 use crate::Ruma;
 

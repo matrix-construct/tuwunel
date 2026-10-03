@@ -19,7 +19,6 @@ use ruma::{OwnedEventId, events::StateEventType, room_version_rules::RoomVersion
 use tuwunel_core::{
 	Result, debug,
 	itertools::Itertools,
-	matrix::{TypeStateKey, event_id::RandomState},
 	smallvec::SmallVec,
 	trace,
 	utils::{
@@ -27,6 +26,7 @@ use tuwunel_core::{
 		stream::{BroadbandExt, IterStream, ReadyExt},
 	},
 };
+use tuwunel_matrix::{TypeStateKey, event_id::RandomState};
 
 use self::{
 	auth_difference::auth_difference, conflicted_subgraph::conflicted_subgraph_dfs,

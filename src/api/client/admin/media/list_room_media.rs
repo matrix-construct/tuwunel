@@ -7,9 +7,9 @@ use serde_json::Value as JsonValue;
 use synapse_admin_api::media::list_room_media::v1::{Request, Response};
 use tuwunel_core::{
 	Result,
-	matrix::Event,
 	utils::{ReadyExt, stream::TryIgnore},
 };
+use tuwunel_matrix::Event;
 
 use crate::{Ruma, client::admin::require_admin};
 

@@ -1,6 +1,7 @@
 use axum::extract::State;
 use ruma::{EventId, RoomId, UserId, api::client::room::report_content};
-use tuwunel_core::{Err, Result, debug_info, info, matrix::pdu::PduEvent, utils::ReadyExt};
+use tuwunel_core::{Err, Result, debug_info, info, utils::ReadyExt};
+use tuwunel_matrix::pdu::PduEvent;
 use tuwunel_service::Services;
 
 use super::REASON_MAX_LEN;

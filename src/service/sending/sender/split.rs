@@ -4,11 +4,11 @@ use futures::{StreamExt, future::OptionFuture};
 use ruma::ServerName;
 use tuwunel_core::{
 	Error, debug_info, extract_variant, implement,
-	matrix::ShortRoomId,
 	smallvec::SmallVec,
 	utils::{IterStream, ReadyExt},
 	warn,
 };
+use tuwunel_matrix::ShortRoomId;
 
 use super::PDU_LIMIT;
 use crate::{

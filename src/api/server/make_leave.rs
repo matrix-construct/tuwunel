@@ -4,7 +4,8 @@ use ruma::{
 	api::federation::membership::prepare_leave_event,
 	events::room::member::{MembershipState, RoomMemberEventContent},
 };
-use tuwunel_core::{Err, Result, at, matrix::pdu::PduBuilder};
+use tuwunel_core::{Err, Result, at};
+use tuwunel_matrix::pdu::PduBuilder;
 
 use super::utils::require_known_room;
 use crate::Ruma;

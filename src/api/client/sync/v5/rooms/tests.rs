@@ -10,7 +10,7 @@ use ruma::{
 	events::{StateEventType, room::member::MembershipState},
 	room_id, uint, user_id,
 };
-use tuwunel_core::matrix::pdu::PduCount;
+use tuwunel_matrix::pdu::PduCount;
 
 use super::{
 	Connection, ListIds, StateMode, TIMELINE_LIMIT_MAX, membership_allows_required_state,

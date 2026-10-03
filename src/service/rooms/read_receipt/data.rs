@@ -12,13 +12,13 @@ use ruma::{
 use serde::{Deserialize, de::IgnoredAny};
 use tuwunel_core::{
 	Result, error,
-	matrix::pdu::PduCount,
 	result::NotFound,
 	smallvec::SmallVec,
 	trace,
 	utils::{ReadyExt, TryReadyExt, stream::TryIgnore},
 };
 use tuwunel_database::{Deserialized, Interfix, Json, KeyBuf, Map, Txn, serialize_key};
+use tuwunel_matrix::pdu::PduCount;
 
 use super::{PrivateRead, ThreadKind};
 

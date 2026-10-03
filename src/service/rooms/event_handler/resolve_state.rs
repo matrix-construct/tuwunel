@@ -11,11 +11,10 @@ use futures::{FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt};
 use ruma::{EventId, OwnedEventId, RoomId, RoomVersionId};
 use serde::Deserialize;
 use tuwunel_core::{
-	Err, Result, err, error, implement,
-	matrix::room_version,
-	trace,
+	Err, Result, err, error, implement, trace,
 	utils::stream::{IterStream, ReadyExt, TryWidebandExt, WidebandExt},
 };
+use tuwunel_matrix::room_version;
 
 use crate::rooms::{
 	state_compressor::CompressedState,

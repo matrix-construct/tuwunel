@@ -3,10 +3,10 @@ use ruma::events::TimelineEventType;
 use serde::Deserialize;
 use tuwunel_core::{
 	Err, Result, err, info,
-	matrix::{event::Event, pdu::PduEvent, room_version::rules as room_rules},
 	utils::{TryReadyExt, stream::TryBroadbandExt},
 	warn,
 };
+use tuwunel_matrix::{event::Event, pdu::PduEvent, room_version::rules as room_rules};
 
 use super::{marker_present, rebuild_thread_summaries, scan::ScanExt};
 use crate::Services;

@@ -10,11 +10,8 @@ use ruma::{
 		room::member::{MembershipState, RoomMemberEventContent},
 	},
 };
-use tuwunel_core::{
-	Err, Result, at, err, is_equal_to, is_not_equal_to,
-	matrix::{Event, PduCount},
-	utils::stream::ReadyExt,
-};
+use tuwunel_core::{Err, Result, at, err, is_equal_to, is_not_equal_to, utils::stream::ReadyExt};
+use tuwunel_matrix::{Event, PduCount};
 
 use crate::Ruma;
 

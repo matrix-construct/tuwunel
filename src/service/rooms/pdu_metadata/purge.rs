@@ -4,15 +4,15 @@ use ruma::{
 	events::{relation::RelationType, room::encrypted::Relation},
 };
 use tuwunel_core::{
-	PduId, Result,
+	Result,
 	arrayvec::ArrayVec,
 	implement,
-	matrix::{Event, Pdu, PduCount, RawPduId},
 	utils::{
 		stream::{ReadyExt, TryIgnore, automatic_width},
 		u64_from_u8,
 	},
 };
+use tuwunel_matrix::{Event, Pdu, PduCount, PduId, RawPduId};
 
 use super::{ExtractRelatesTo, Service};
 use crate::rooms::short::ShortRoomId;

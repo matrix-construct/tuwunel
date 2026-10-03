@@ -2,13 +2,13 @@
 
 use tuwunel_core::{
 	Result,
-	pdu::PduBuilder,
 	ruma::{
 		UserId,
 		api::error::ErrorKind,
 		events::room::member::{MembershipState, RoomMemberEventContent},
 	},
 };
+use tuwunel_matrix::pdu::PduBuilder;
 use tuwunel_service::{Services, users::Register};
 
 use self::{fixture::boot, timeline::append_pdu};

@@ -11,12 +11,12 @@ use ruma::{
 };
 use tuwunel_core::{
 	implement,
-	matrix::{Event, Pdu},
 	utils::{
 		BoolExt,
 		result::{FlatOk, LogErr},
 	},
 };
+use tuwunel_matrix::{Event, Pdu};
 
 /// Applies MSC4025 pruning to an event served over federation.
 ///

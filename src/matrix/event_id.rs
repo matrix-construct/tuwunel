@@ -15,10 +15,9 @@ use std::{
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use rand::random;
 use ruma::{EventId, OwnedEventId};
-
 /// The sha256 reference hash encoded by a v3+ event ID.
-pub use crate::utils::hash::sha256::Digest as Sha256;
-use crate::utils::math::u64_from_usize_saturating;
+pub use tuwunel_core::utils::hash::sha256::Digest as Sha256;
+use tuwunel_core::utils::math::u64_from_usize_saturating;
 
 /// `BuildHasher` for event-ID-keyed maps and sets.
 ///
@@ -179,9 +178,9 @@ mod tests {
 	};
 
 	use base64::engine::general_purpose::STANDARD_NO_PAD;
+	use tuwunel_core::utils::rand::event_id as random_event_id;
 
 	use super::*;
-	use crate::utils::rand::event_id as random_event_id;
 
 	#[test]
 	fn roundtrip_random() {

@@ -17,15 +17,15 @@ use ruma::{
 use serde_json::value::to_raw_value;
 use tuwunel_core::{
 	Err, Error, Result, err, implement,
-	matrix::{
-		event::Event,
-		pdu::{EventHash, PduBuilder, PduEvent, PrevEvents, check_rules},
-		room_version,
-	},
 	utils::{
 		IterStream, ReadyExt, TryReadyExt, millis_since_unix_epoch, stream::TryIgnore,
 		to_canonical_object,
 	},
+};
+use tuwunel_matrix::{
+	event::Event,
+	pdu::{EventHash, PduBuilder, PduEvent, PrevEvents, check_rules},
+	room_version,
 };
 
 use super::RoomMutexGuard;

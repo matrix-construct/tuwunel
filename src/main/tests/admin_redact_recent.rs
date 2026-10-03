@@ -3,12 +3,12 @@
 use serde_json::{Value, from_str, from_value, json};
 use tuwunel_core::{
 	Result,
-	matrix::{Event, pdu::PduBuilder},
 	ruma::{
 		EventId, OwnedEventId, RoomId, UserId,
 		events::{TimelineEventType, room::message::RoomMessageEventContent},
 	},
 };
+use tuwunel_matrix::{Event, pdu::PduBuilder};
 use tuwunel_service::Services;
 
 use self::{

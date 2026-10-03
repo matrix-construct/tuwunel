@@ -1,6 +1,7 @@
 use futures::TryStreamExt;
 use ruma::OwnedRoomOrAliasId;
-use tuwunel_core::{PduCount, Result, utils::stream::TryTools};
+use tuwunel_core::{Result, utils::stream::TryTools};
+use tuwunel_matrix::PduCount;
 
 use crate::admin_command;
 

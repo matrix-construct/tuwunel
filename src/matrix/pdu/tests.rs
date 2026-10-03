@@ -2,7 +2,7 @@ use ruma::{RoomVersionId, event_id, events::AnySyncMessageLikeEvent, serde::Raw,
 use serde_json::{json, value::to_raw_value};
 
 use super::{Count, Pdu, Unsigned};
-use crate::matrix::Event;
+use crate::Event;
 
 fn message_pdu() -> Pdu {
 	serde_json::from_value(json!({

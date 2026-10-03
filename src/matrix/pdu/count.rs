@@ -7,8 +7,7 @@
 use std::{cmp::Ordering, fmt, fmt::Display, str::FromStr};
 
 use ruma::api::Direction;
-
-use crate::{Error, Result, err};
+use tuwunel_core::{Error, Result, err};
 
 /// Sequence number locating a PDU in a room timeline.
 ///

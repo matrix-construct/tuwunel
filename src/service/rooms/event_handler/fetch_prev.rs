@@ -12,15 +12,15 @@ use serde_json::value::RawValue as RawJsonValue;
 use tokio::time::{Instant, timeout_at};
 use tuwunel_core::{
 	Result, err, implement,
-	matrix::{
-		Event, PduEvent,
-		event::gen_event_id,
-		pdu::{MAX_PREV_EVENTS, check_room_id},
-	},
 	utils::{
 		BoolExt,
 		stream::{IterStream, automatic_width},
 	},
+};
+use tuwunel_matrix::{
+	Event, PduEvent,
+	event::gen_event_id,
+	pdu::{MAX_PREV_EVENTS, check_room_id},
 };
 
 use super::handle_prev_pdu::PrevUpgrade;

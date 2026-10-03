@@ -13,14 +13,14 @@ use ruma::{
 	},
 };
 use tuwunel_core::{
-	Event, Result, at, err, extract_variant,
-	matrix::{Pdu, PduCount},
+	Result, at, err, extract_variant,
 	utils::{
 		BoolExt, TryReadyExt,
 		result::NotFound,
 		stream::{TryTools, TryWidebandExt},
 	},
 };
+use tuwunel_matrix::{Event, Pdu, PduCount};
 use tuwunel_service::rooms::short::ShortStateHash;
 
 use crate::{Ruma, client::visibility_filter};

@@ -3,7 +3,8 @@ use ruma::{
 	RoomId, UserId,
 	events::{StateEventType, tag::TagName},
 };
-use tuwunel_core::{Result, matrix::Event, utils::BoolExt};
+use tuwunel_core::{Result, utils::BoolExt};
+use tuwunel_matrix::Event;
 use tuwunel_service::Services;
 
 /// Tests whether a room is the target user's server-notice room.

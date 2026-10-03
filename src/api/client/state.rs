@@ -23,12 +23,12 @@ use ruma::{
 use serde_json::{json, value::to_raw_value};
 use tuwunel_core::{
 	Err, Result, err, is_false,
-	matrix::{
-		Event,
-		pdu::{PduBuilder, PduEvent},
-	},
 	result::NotFound,
 	utils::{BoolExt, stream::TryBroadbandExt},
+};
+use tuwunel_matrix::{
+	Event,
+	pdu::{PduBuilder, PduEvent},
 };
 use tuwunel_service::Services;
 

@@ -4,13 +4,8 @@ use futures::StreamExt;
 use http::StatusCode;
 use ruma::{OwnedServerName, ServerName, api::error::ErrorBody};
 use serde_json::Value;
-use tuwunel_core::{
-	Err, Error, Result,
-	config::Figment,
-	err,
-	matrix::{PduCount, PduId},
-	utils::time::now_secs,
-};
+use tuwunel_core::{Err, Error, Result, config::Figment, err, utils::time::now_secs};
+use tuwunel_matrix::{PduCount, PduId};
 
 use super::{Rooms, Slice, Split};
 use crate::{

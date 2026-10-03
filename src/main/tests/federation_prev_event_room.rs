@@ -3,13 +3,15 @@
 use serde_json::{json, value::to_raw_value};
 use tuwunel_core::{
 	Err, Result,
-	matrix::{Event, pdu::into_outgoing_federation},
-	pdu::PduBuilder,
 	ruma::{
 		CanonicalJsonObject, CanonicalJsonValue, EventId, MilliSecondsSinceUnixEpoch,
 		OwnedEventId, RoomId, UInt, UserId,
 		events::{StateEventType, room::message::RoomMessageEventContent},
 	},
+};
+use tuwunel_matrix::{
+	Event,
+	pdu::{PduBuilder, into_outgoing_federation},
 };
 use tuwunel_service::Services;
 

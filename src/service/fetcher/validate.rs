@@ -8,7 +8,8 @@
 
 use ruma::{CanonicalJsonObject, RoomVersionId};
 use serde::de::IgnoredAny;
-use tuwunel_core::{Err, Result, err, implement, matrix::event::gen_event_id};
+use tuwunel_core::{Err, Result, err, implement};
+use tuwunel_matrix::event::gen_event_id;
 
 use super::{Op, Opts};
 

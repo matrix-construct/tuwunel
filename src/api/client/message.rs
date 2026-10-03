@@ -13,12 +13,7 @@ use ruma::{
 	serde::Raw,
 };
 use tuwunel_core::{
-	Err, PduId, Result, at, err,
-	matrix::{
-		event::{Event, Matches},
-		pdu::{PduCount, PduEvent},
-	},
-	ref_at,
+	Err, Result, at, err, ref_at,
 	smallvec::SmallVec,
 	utils::{
 		BoolExt, IterStream, ReadyExt,
@@ -26,6 +21,11 @@ use tuwunel_core::{
 		result::LogErr,
 		stream::{BroadbandExt, TryIgnore, WidebandExt},
 	},
+};
+use tuwunel_matrix::{
+	PduId,
+	event::{Event, Matches},
+	pdu::{PduCount, PduEvent},
 };
 use tuwunel_service::{
 	Services,

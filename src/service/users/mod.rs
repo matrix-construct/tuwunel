@@ -23,7 +23,6 @@ use ruma::{
 use serde::{Deserialize, Serialize};
 use tuwunel_core::{
 	Err, Result, debug_warn, err, implement, is_equal_to,
-	matrix::pdu::PduCount,
 	smallstr::SmallString,
 	trace,
 	utils::{
@@ -33,6 +32,7 @@ use tuwunel_core::{
 	warn,
 };
 use tuwunel_database::{Deserialized, Json, Map};
+use tuwunel_matrix::pdu::PduCount;
 
 pub type LoginProviderId = SmallString<[u8; 32]>;
 type LoginTokenId = SmallString<[u8; 48]>;

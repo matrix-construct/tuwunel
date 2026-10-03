@@ -26,8 +26,9 @@ use std::{fmt::Write, num::NonZeroUsize, sync::Arc};
 
 use async_trait::async_trait;
 use ruma::{EventId, OwnedRoomId, RoomVersionId, events::AnyStrippedStateEvent, serde::Raw};
-use tuwunel_core::{Result, implement, matrix::PduEvent, utils::MutexMap};
+use tuwunel_core::{Result, implement, utils::MutexMap};
 use tuwunel_database::Map;
+use tuwunel_matrix::PduEvent;
 
 use self::{
 	backoff::BackoffCounters,

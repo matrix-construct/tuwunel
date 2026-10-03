@@ -26,12 +26,8 @@ use serde_json::{
 	Value, json,
 	value::{RawValue as RawJsonValue, to_raw_value as to_raw_json_value},
 };
-use tuwunel_core::{
-	matrix::{Event, PduEvent, event::TypeExt},
-	smallstr::SmallString,
-	smallvec::SmallVec,
-	utils::stream::IterStream,
-};
+use tuwunel_core::{smallstr::SmallString, smallvec::SmallVec, utils::stream::IterStream};
+use tuwunel_matrix::{Event, PduEvent, event::TypeExt};
 use tuwunel_service::rooms::state_res::{
 	AuthSet, StateMap, resolve,
 	test_utils::{alice, bob, charlie, event_id, to_pdu_event},

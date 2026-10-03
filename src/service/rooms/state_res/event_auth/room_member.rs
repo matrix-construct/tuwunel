@@ -8,7 +8,8 @@ use ruma::{
 	serde::{Base64, base64::Standard},
 	signatures::verify_canonical_json_bytes,
 };
-use tuwunel_core::{Err, Result, err, matrix::Event};
+use tuwunel_core::{Err, Result, err};
+use tuwunel_matrix::Event;
 
 #[cfg(test)]
 mod tests;

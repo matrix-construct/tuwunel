@@ -1,7 +1,5 @@
 use tuwunel_core::{
 	Err, Result, async_noinline,
-	matrix::PduEvent,
-	pdu::PduBuilder,
 	ruma::{
 		CanonicalJsonObject, EventId, OwnedEventId, RoomId, UserId,
 		events::{
@@ -11,6 +9,7 @@ use tuwunel_core::{
 	},
 	utils::result::NotFound,
 };
+use tuwunel_matrix::{PduEvent, pdu::PduBuilder};
 use tuwunel_service::Services;
 
 use super::helpers::{

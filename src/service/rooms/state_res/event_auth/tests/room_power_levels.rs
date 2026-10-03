@@ -9,7 +9,8 @@ use serde_json::{
 	Value as JsonValue, json,
 	value::{Map as JsonMap, to_raw_value as to_raw_json_value},
 };
-use tuwunel_core::{extract_variant, info, matrix::PduEvent};
+use tuwunel_core::{extract_variant, info};
+use tuwunel_matrix::PduEvent;
 
 use super::super::{
 	check_room_power_levels,

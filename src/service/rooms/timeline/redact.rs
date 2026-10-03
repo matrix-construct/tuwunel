@@ -15,9 +15,9 @@ use ruma::{
 };
 use tuwunel_core::{
 	Result, err, implement,
-	matrix::event::Event,
 	utils::{BoolExt, OptionExt, result::NotFound, to_canonical_object},
 };
+use tuwunel_matrix::event::Event;
 
 use crate::rooms::{
 	short::ShortRoomId,

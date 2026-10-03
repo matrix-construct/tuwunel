@@ -8,9 +8,9 @@ use tokio::time::{sleep, timeout};
 use tuwunel::{Args, Runtime, Server, async_run, async_start, async_stop};
 use tuwunel_core::{
 	Err, Result, err,
-	pdu::PduBuilder,
 	ruma::{OwnedRoomId, UserId, events::room::message::RoomMessageEventContent},
 };
+use tuwunel_matrix::pdu::PduBuilder;
 use tuwunel_service::{Services, users::Register};
 
 #[test]

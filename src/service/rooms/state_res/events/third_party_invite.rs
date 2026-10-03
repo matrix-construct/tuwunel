@@ -4,7 +4,8 @@ use std::{collections::BTreeSet, ops::Deref};
 
 use ruma::{serde::from_raw_json_value, third_party_invite::IdentityServerBase64PublicKey};
 use serde::Deserialize;
-use tuwunel_core::{Error, Result, err, matrix::Event};
+use tuwunel_core::{Error, Result, err};
+use tuwunel_matrix::Event;
 
 /// A helper type for an [`Event`] of type `m.room.third_party_invite`.
 ///

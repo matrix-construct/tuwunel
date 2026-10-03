@@ -40,13 +40,13 @@ use serde_json::{
 };
 use tuwunel_core::{
 	Err, Result, debug_info, debug_warn, err, info,
-	matrix::{
-		StateKey,
-		pdu::{Content, PduBuilder},
-		room_version,
-	},
 	utils::{BoolExt, IterStream, ReadyExt, option::OptionExt, result::FlatOk},
 	warn,
+};
+use tuwunel_matrix::{
+	StateKey,
+	pdu::{Content, PduBuilder},
+	room_version,
 };
 use tuwunel_service::{Services, appservice::RegistrationInfo, rooms::state::RoomMutexGuard};
 
@@ -1079,7 +1079,7 @@ fn take_initial(
 
 #[cfg(test)]
 mod tests {
-	use tuwunel_core::matrix::room_version::rules;
+	use tuwunel_matrix::room_version::rules;
 
 	use super::*;
 

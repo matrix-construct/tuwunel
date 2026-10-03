@@ -23,7 +23,6 @@ use synapse_admin_api::server_notices::send::{
 };
 use tuwunel_core::{
 	Err, Result, err,
-	matrix::pdu::PduBuilder,
 	utils::{
 		BoolExt, FutureBoolExt,
 		future::ReadyBoolExt,
@@ -31,6 +30,7 @@ use tuwunel_core::{
 		stream::{IterStream, ReadyExt},
 	},
 };
+use tuwunel_matrix::pdu::PduBuilder;
 use tuwunel_service::Services;
 
 use crate::{

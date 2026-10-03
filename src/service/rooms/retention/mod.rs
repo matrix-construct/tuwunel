@@ -11,10 +11,10 @@ use futures::{Stream, TryStreamExt};
 use ruma::{CanonicalJsonObject, EventId};
 use tuwunel_core::{
 	Result, debug_info, expected, implement,
-	matrix::pdu::PduEvent,
 	utils::{TryReadyExt, time::now},
 };
 use tuwunel_database::{Deserialized, Json, Map};
+use tuwunel_matrix::pdu::PduEvent;
 
 use crate::rooms::timeline::RoomMutexGuard;
 

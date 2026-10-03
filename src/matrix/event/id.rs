@@ -1,7 +1,8 @@
 use ruma::{CanonicalJsonObject, CanonicalJsonValue, OwnedEventId, RoomVersionId};
 use serde_json::value::RawValue as RawJsonValue;
+use tuwunel_core::{Result, debug_error, err};
 
-use crate::{Result, debug_error, err, matrix::room_version};
+use crate::room_version;
 
 /// Generates a correct eventId for the incoming pdu.
 ///

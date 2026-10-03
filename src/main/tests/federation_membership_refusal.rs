@@ -11,7 +11,6 @@ use tokio::time::{sleep, timeout};
 use tuwunel::{Args, Runtime, Server, async_run, async_start, async_stop};
 use tuwunel_core::{
 	Result, err,
-	pdu::PduBuilder,
 	ruma::{
 		OwnedEventId, OwnedRoomId, OwnedUserId, RoomId, UserId,
 		api::{
@@ -32,6 +31,7 @@ use tuwunel_core::{
 		},
 	},
 };
+use tuwunel_matrix::pdu::PduBuilder;
 use tuwunel_service::{Services, membership::Join, users::Register};
 
 struct DatabasePath(PathBuf);

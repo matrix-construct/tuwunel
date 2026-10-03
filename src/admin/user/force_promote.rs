@@ -3,7 +3,8 @@ use ruma::{
 	Int, OwnedRoomOrAliasId,
 	events::room::power_levels::{RoomPowerLevelsEventContent, UserPowerLevel},
 };
-use tuwunel_core::{Err, Result, info, matrix::pdu::PduBuilder, utils::ReadyExt};
+use tuwunel_core::{Err, Result, info, utils::ReadyExt};
+use tuwunel_matrix::pdu::PduBuilder;
 
 use crate::{
 	admin_command,

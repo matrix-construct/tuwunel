@@ -10,15 +10,17 @@ use ruma::{
 	serde::Raw,
 };
 use tuwunel_core::{
-	Err, Event, Result, at, debug_warn, err,
-	matrix::pdu::{PduEvent, RawPduId},
-	ref_at,
+	Err, Result, at, debug_warn, err, ref_at,
 	utils::{
 		BoolExt, IterStream,
 		future::TryExtExt,
 		math::usize_from_ruma_bounded,
 		stream::{BroadbandExt, ReadyExt, TryIgnore, WidebandExt},
 	},
+};
+use tuwunel_matrix::{
+	Event,
+	pdu::{PduEvent, RawPduId},
 };
 use tuwunel_service::{
 	Services,

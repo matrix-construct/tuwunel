@@ -7,9 +7,7 @@
 use futures::{Stream, StreamExt, TryFutureExt, TryStreamExt};
 use ruma::{MilliSecondsSinceUnixEpoch, RoomId, UInt, UserId, api::Direction};
 use tuwunel_core::{
-	Result, at, err, implement,
-	matrix::pdu::{PduCount, PduEvent},
-	trace,
+	Result, at, err, implement, trace,
 	utils::{
 		result::LogErr,
 		stream::{TryIgnore, TryReadyExt, TryWidebandExt},
@@ -17,6 +15,7 @@ use tuwunel_core::{
 	warn,
 };
 use tuwunel_database::{KeyVal, keyval::Val};
+use tuwunel_matrix::pdu::{PduCount, PduEvent};
 
 use super::{PduId, RawPduId};
 

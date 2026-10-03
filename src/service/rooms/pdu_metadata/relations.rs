@@ -5,16 +5,16 @@ use ruma::{
 	events::{reaction::ReactionEventContent, relation::RelationType},
 };
 use tuwunel_core::{
-	PduId, Result,
+	Result,
 	arrayvec::ArrayVec,
 	implement, is_equal_to,
-	matrix::{Event, Pdu, PduCount, RawPduId, event::RelationTypeEqual},
 	utils::{
 		result::NotFound,
 		stream::{ReadyExt, TryIgnore, TryReadyExt, TryWidebandExt},
 		u64_from_u8,
 	},
 };
+use tuwunel_matrix::{Event, Pdu, PduCount, PduId, RawPduId, event::RelationTypeEqual};
 
 use super::Service;
 use crate::rooms::short::ShortRoomId;

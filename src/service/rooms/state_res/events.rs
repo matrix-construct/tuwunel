@@ -11,7 +11,7 @@ use std::borrow::Cow;
 use ruma::events::room::member::MembershipState;
 use serde::{Deserialize, Deserializer};
 use serde_json::value::RawValue as RawJsonValue;
-use tuwunel_core::matrix::StateKey;
+use tuwunel_matrix::StateKey;
 
 pub use self::{
 	create::RoomCreateEvent,
@@ -97,7 +97,7 @@ fn is_power_membership(content: &RawJsonValue) -> bool {
 #[cfg(test)]
 pub(super) fn is_power_event<Pdu>(event: &Pdu) -> bool
 where
-	Pdu: tuwunel_core::matrix::Event,
+	Pdu: tuwunel_matrix::Event,
 {
 	use ruma::events::TimelineEventType;
 

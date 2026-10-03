@@ -13,12 +13,12 @@ use ruma::{
 };
 use tuwunel_core::{
 	Err, Result, at,
-	matrix::{
-		Event,
-		pdu::{PduCount, PduEvent},
-	},
 	result::{FlatOk, LogErr},
 	utils::stream::TryWidebandExt,
+};
+use tuwunel_matrix::{
+	Event,
+	pdu::{PduCount, PduEvent},
 };
 use tuwunel_service::rooms::pdu_metadata::IgnoredThreadView;
 

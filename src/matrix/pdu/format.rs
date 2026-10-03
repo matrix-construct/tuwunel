@@ -4,8 +4,9 @@ use ruma::{
 	CanonicalJsonObject, CanonicalJsonValue, EventId, RoomId, RoomVersionId,
 	room_version_rules::{EventsReferenceFormatVersion, RoomVersionRules},
 };
+use tuwunel_core::{extract_variant, is_equal_to};
 
-use crate::{extract_variant, is_equal_to, matrix::room_version};
+use crate::room_version;
 
 /// Converts a stored PDU object to its federation wire representation.
 ///

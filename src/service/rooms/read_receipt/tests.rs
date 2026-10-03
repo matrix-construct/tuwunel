@@ -1,8 +1,8 @@
 #![cfg(test)]
 
 use ruma::{RoomId, UserId};
-use tuwunel_core::matrix::pdu::PduCount;
 use tuwunel_database::{Interfix, SEP, serialize_to_vec};
+use tuwunel_matrix::pdu::PduCount;
 
 use super::{data::position_advances, thread_kind_to_receipt};
 

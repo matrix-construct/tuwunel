@@ -7,14 +7,10 @@
 
 use futures::TryStreamExt;
 use ruma::{RoomId, api::Direction, events::TimelineEventType};
-use tuwunel_core::{
-	Result, implement,
-	matrix::{
-		Event,
-		pdu::{PduCount, PduEvent},
-	},
-	trace,
-	utils::stream::TryReadyExt,
+use tuwunel_core::{Result, implement, trace, utils::stream::TryReadyExt};
+use tuwunel_matrix::{
+	Event,
+	pdu::{PduCount, PduEvent},
 };
 
 use super::{ExtractBody, RawPduId, bias_count};

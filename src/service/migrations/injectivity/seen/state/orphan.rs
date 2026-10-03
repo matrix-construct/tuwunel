@@ -3,10 +3,11 @@ use std::collections::BTreeSet;
 use futures::{FutureExt, TryFutureExt, TryStreamExt};
 use serde_json::from_slice;
 use tuwunel_core::{
-	Err, PduEvent, Result, err,
+	Err, Result, err,
 	utils::{IterStream, TryReadyExt, result::NotFound, stream::TryBroadbandExt},
 };
 use tuwunel_database::{Database, Txn};
+use tuwunel_matrix::PduEvent;
 
 use super::{
 	Aliases, Census, Identity, Mapping, Services, claim, identity, lookup, present, short_of,
