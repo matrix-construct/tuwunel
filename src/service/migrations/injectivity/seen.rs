@@ -19,7 +19,7 @@ use self::{
 		inspect as inspect_states, repair as repair_states,
 	},
 };
-use crate::Services;
+use crate::{Services, migrations::scan::ScanExt};
 
 mod identity;
 mod references;
@@ -524,11 +524,8 @@ async fn sweep<T: Send>(
 ) -> Result<T> {
 	services.db[column]
 		.raw_stream()
-		.ready_try_fold(init, |acc, (key, value)| {
-			services.server.check_running()?;
-			services.server.progress.advance();
-			Ok(step(acc, key, value))
-		})
+		.scanned(&services.server)
+		.ready_try_fold(init, |acc, (key, value)| Ok(step(acc, key, value)))
 		.await
 }
 

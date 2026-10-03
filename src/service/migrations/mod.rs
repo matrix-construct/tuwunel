@@ -58,6 +58,7 @@ mod moderation;
 mod rebuild_roomid_tscount_pducount;
 mod remove_remote_media_userid;
 mod retroactively_fix_bad_data_from_roomuserid_joined;
+mod scan;
 mod split_conduit_highlight_counts;
 mod token_expiry;
 mod upgrade_legacy_mediaid_user;

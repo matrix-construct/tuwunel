@@ -28,11 +28,14 @@ use super::{
 	identity, layer, lookup, materialize, project, project_entry, row, short_of, statekey,
 	visit as visit_state,
 };
-use crate::rooms::{
-	state_compressor::{
-		CompressedStateEvent, compress_state_event, parse_compressed_state_event,
+use crate::{
+	migrations::scan::ScanExt,
+	rooms::{
+		state_compressor::{
+			CompressedStateEvent, compress_state_event, parse_compressed_state_event,
+		},
+		state_res::{AuthCheckOutcome, FetchEvent, StateMap, auth_check},
 	},
-	state_res::{AuthCheckOutcome, FetchEvent, StateMap, auth_check},
 };
 
 type Anchors = BTreeMap<u64, Vec<u64>>;
@@ -127,10 +130,8 @@ async fn scan(
 ) -> Result<References> {
 	services.db[column]
 		.raw_stream()
-		.ready_and_then(|item| services.server.check_running().map(|()| item))
+		.scanned(&services.server)
 		.ready_try_fold(references, |references, (key, value)| {
-			services.server.progress.advance();
-
 			Ok(reference(references, column, key, value))
 		})
 		.await
