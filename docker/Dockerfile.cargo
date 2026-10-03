@@ -126,6 +126,7 @@ ARG sched_policy="--batch"
 ARG sched_prio=0
 ARG sched_scope=""
 ARG sched_cpus=""
+ARG cargo_test_timeout=""
 
 WORKDIR /
 COPY --link --from=source /usr/src/tuwunel /usr/src/tuwunel
@@ -150,6 +151,15 @@ RUN \
 <<EOF
     set -eux
     ulimit -n 65535
+
+    # A deadline on each test binary turns a hang into a failure naming that
+    # binary, and --no-fail-fast still runs the rest. It goes in cargo's
+    # runner so it reaches only the executables cargo launches; sched_wrap.sh
+    # keeps a runner already set and runs it under its scheduling prefix.
+    if test -n "${cargo_test_timeout}"; then
+        runner="CARGO_TARGET_$(tr 'a-z.-' 'A-Z__' <<< "${CARGO_TARGET}")_RUNNER"
+        export "${runner}=timeout --signal=TERM --kill-after=30s ${cargo_test_timeout}"
+    fi
 
     example_sha=$(sha1sum tuwunel-example.toml)
 
