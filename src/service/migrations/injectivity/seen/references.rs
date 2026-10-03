@@ -1,13 +1,12 @@
 use std::{collections::BTreeSet, iter::repeat};
 
-use futures::TryStreamExt;
 use tuwunel_core::{Err, Result, err, implement, utils::TryReadyExt};
 
 use super::{
 	identity::{Family, Identities, Kind},
 	short_of,
 };
-use crate::Services;
+use crate::{Services, migrations::scan::ScanExt};
 
 pub(super) struct References {
 	pub(super) events: BTreeSet<u64>,
@@ -20,7 +19,6 @@ pub(super) struct References {
 #[tracing::instrument(level = "debug", skip_all)]
 pub(super) async fn census(services: &Services, identities: &Identities) -> Result<Self> {
 	let db = &services.db;
-	let progress = &services.server.progress;
 	let aliases = |family: &Family| {
 		family
 			.candidates
@@ -45,7 +43,7 @@ pub(super) async fn census(services: &Services, identities: &Identities) -> Resu
 
 	let references = db["shortstatehash_statediff"]
 		.raw_stream()
-		.inspect_ok(|_| progress.advance())
+		.scanned(&services.server)
 		.ready_try_fold(references, |mut references, (_, value)| {
 			references.retain_statediff(&event_aliases, &statekey_aliases, value);
 
@@ -59,7 +57,7 @@ pub(super) async fn census(services: &Services, identities: &Identities) -> Resu
 
 	let references = db["shorteventid_shortstatehash"]
 		.raw_keys()
-		.inspect_ok(|_| progress.advance())
+		.scanned(&services.server)
 		.ready_try_fold(references, |mut references, key| {
 			references.retain_event(&event_aliases, key);
 
@@ -69,7 +67,7 @@ pub(super) async fn census(services: &Services, identities: &Identities) -> Resu
 
 	let references = db["relatesto_typed"]
 		.raw_stream()
-		.inspect_ok(|_| progress.advance())
+		.scanned(&services.server)
 		.ready_try_fold(references, |mut references, (_, value)| {
 			references.retain_event(&event_aliases, value);
 
@@ -79,7 +77,7 @@ pub(super) async fn census(services: &Services, identities: &Identities) -> Resu
 
 	db["authchainkey_authchain"]
 		.raw_stream()
-		.inspect_ok(|_| progress.advance())
+		.scanned(&services.server)
 		.ready_try_fold(references, |mut references, (key, value)| {
 			references.event_complete &=
 				!key.is_empty() && key.len().is_multiple_of(8) && value.len().is_multiple_of(8);

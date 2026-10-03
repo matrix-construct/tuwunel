@@ -12,6 +12,7 @@ use super::{
 	Aliases, Census, Identity, Mapping, Services, claim, identity, lookup, present, short_of,
 	statekey,
 };
+use crate::migrations::scan::ScanExt;
 
 type Alias = (u64, (u64, Identity));
 
@@ -23,8 +24,7 @@ pub(super) async fn recover(services: &Services, census: &Census) -> Result<Alia
 
 	let claimed: BTreeSet<u64> = services.db["statekey_shortstatekey"]
 		.raw_stream()
-		.ready_and_then(|row| services.server.check_running().map(|()| row))
-		.inspect_ok(|_| services.server.progress.advance())
+		.scanned(&services.server)
 		.ready_try_filter_map(|(_, value)| {
 			Ok(claim(value).filter(|short| census.orphans.contains_key(short)))
 		})

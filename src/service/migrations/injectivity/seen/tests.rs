@@ -1,12 +1,12 @@
 use std::{cell::Cell, fmt::Debug, iter::repeat_with, ops::RangeInclusive, sync::Arc};
 
 use futures::future::ready;
-use ruma::user_id;
+use ruma::{RoomId, events::StateEventType, room_id, user_id};
 use tuwunel_core::{
 	Err, Result, Server,
 	config::{Config, Figment, Sources},
 	log::{LogLevelReloadHandles, Logging},
-	utils::result::NotFound,
+	utils::{TryReadyExt, result::NotFound},
 };
 use tuwunel_database::{Database, Txn, TxnError};
 
@@ -17,10 +17,15 @@ use super::{
 	references::{References, entries},
 	run, stamp, verify,
 };
-use crate::{migrations::migrations, test_utils::fixture};
+use crate::{Services, migrations::migrations, test_utils::fixture};
 
 const EVENTS: (&str, &str) = ("eventid_shorteventid", "shorteventid_eventid");
 const STATEKEYS: (&str, &str) = ("statekey_shortstatekey", "shortstatekey_statekey");
+
+// Spans several `CACHE_BATCH` deletion batches.
+const CACHED: RangeInclusive<u64> = 1000..=1199;
+
+const SPACE: &[u8] = b"!space:example.org";
 
 #[tokio::test]
 async fn runner_contains_errors_and_honors_only_its_marker() -> Result {
@@ -317,6 +322,10 @@ async fn identity_heals_and_cleanup_are_candidate_scoped() -> Result {
 	db["global"].insert("fix_short_injectivity", []);
 	db["global"].insert("clear_auth_chain_cache", []);
 	db["authchainkey_authchain"].insert(&104_u64.to_be_bytes(), 104_u64.to_be_bytes());
+	for short in CACHED {
+		db["authchainkey_authchain"].insert(&short.to_be_bytes(), short.to_be_bytes());
+	}
+
 	let retained_forward = db["statekey_shortstatekey"]
 		.get(b"invalid")
 		.await?
@@ -377,6 +386,16 @@ async fn identity_heals_and_cleanup_are_candidate_scoped() -> Result {
 		"old-stamped cache cleared",
 	)
 	.await;
+
+	for short in CACHED {
+		assert_absent(
+			db,
+			"authchainkey_authchain",
+			&short.to_be_bytes(),
+			"every deletion batch cleared",
+		)
+		.await;
+	}
 
 	assert_absent(db, "global", MARKER, "partial repair does not stamp").await;
 
@@ -570,7 +589,9 @@ async fn malformed_forward_value_prefixes_withhold_identity_writes() -> Result {
 		db["eventid_shorteventid"].insert(&hidden(short), [words(&[short]), vec![99]].concat());
 	}
 
+	db["roomid_spacehierarchy"].insert(SPACE, b"cached summary");
 	repair_identities(services).await?;
+	assert_stored(db, "roomid_spacehierarchy", SPACE, b"cached summary").await?;
 	assert_absent(
 		db,
 		"shorteventid_eventid",
@@ -596,6 +617,9 @@ async fn malformed_forward_value_prefixes_withhold_identity_writes() -> Result {
 	}
 
 	repair_identities(services).await?;
+	assert_absent(db, "roomid_spacehierarchy", SPACE, "admitted heals invalidate summaries")
+		.await;
+
 	assert_stored(db, "shorteventid_eventid", &601_u64.to_be_bytes(), b"$dangling:example.org")
 		.await?;
 
@@ -611,6 +635,71 @@ async fn malformed_forward_value_prefixes_withhold_identity_writes() -> Result {
 		)
 		.await;
 	}
+
+	Ok(())
+}
+
+#[tokio::test]
+#[tracing::instrument(level = "trace", skip_all)]
+async fn stop_request_interrupts_identity_and_reference_scans() -> Result {
+	let Some(fixture) = fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+
+	let services = &fixture.services;
+	let db = &services.db;
+	let event_id = |short: u64| format!("$stopped{short}:example.org");
+
+	seed_aliases(db, EVENTS, 801..=801, event_id);
+	db["shortstatehash_statediff"].insert(&701_u64.to_be_bytes(), words(&[0, 1, 2]));
+	let identities = identity_census(services).await?;
+
+	services.server.shutdown()?;
+	assert!(
+		interrupted(References::census(services, &identities).await),
+		"reference scan honors a stop request"
+	);
+
+	assert!(
+		interrupted(repair_identities(services).await),
+		"stopped repair reports interruption"
+	);
+
+	assert_stored(db, "shorteventid_eventid", &801_u64.to_be_bytes(), event_id(801)).await?;
+	// With the alias gone no claim scan runs, so only the row scan can observe the stop.
+	db["shorteventid_eventid"].remove(&801_u64.to_be_bytes());
+	assert!(
+		interrupted(identity_census(services).await),
+		"identity scan honors a stop request"
+	);
+
+	Ok(())
+}
+
+#[tokio::test]
+#[tracing::instrument(level = "trace", skip_all)]
+async fn identity_only_heal_invalidates_space_summaries() -> Result {
+	let Some(fixture) = fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+
+	let services = &fixture.services;
+	let db = &services.db;
+	let space = room_id!("!space:example.org");
+
+	seed_identity(db, STATEKEYS, b"m.space.child\xff!child:example.org", 21);
+	db["eventid_shorteventid"].insert(b"$child:example.org", 31_u64.to_be_bytes());
+	db["shortstatehash_statediff"].insert(&41_u64.to_be_bytes(), words(&[0, 21, 31]));
+	db["roomid_shortstatehash"].insert(space, 41_u64.to_be_bytes());
+	db["roomid_spacehierarchy"].insert(space, b"cached summary");
+	assert_eq!(space_child_count(services, space).await?, 0, "unresolvable child is omitted");
+
+	repair_identities(services).await?;
+	assert_absent(db, "roomid_spacehierarchy", space, "heal-only repair clears summaries").await;
+	assert_stored(db, "shorteventid_eventid", &31_u64.to_be_bytes(), b"$child:example.org")
+		.await?;
+
+	assert_eq!(space_child_count(services, space).await?, 1, "healed child is enumerated");
 
 	Ok(())
 }
@@ -706,3 +795,13 @@ fn seed_aliases<I>(
 }
 
 fn relation_key() -> Vec<u8> { [words(&[1, 2]), vec![1], words(&[3, 4])].concat() }
+
+fn interrupted<T>(result: Result<T>) -> bool { result.is_err_and(|error| error.is_interrupted()) }
+
+async fn space_child_count(services: &Services, space: &RoomId) -> Result<usize> {
+	services
+		.state_accessor
+		.room_state_keys_with_ids(space, &StateEventType::SpaceChild)
+		.ready_try_fold(0_usize, |count, _| Ok(count.saturating_add(1)))
+		.await
+}

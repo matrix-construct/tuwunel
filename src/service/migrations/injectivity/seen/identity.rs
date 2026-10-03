@@ -10,10 +10,10 @@ use tuwunel_core::{
 	Result, err,
 	utils::{IterStream, TryReadyExt, result::NotFound, stream::TryWidebandExt},
 };
-use tuwunel_database::{Database, KeyBuf, Map, SEP, Txn, serialize_key, serialize_val};
+use tuwunel_database::{Database, KeyBuf, Map, SEP, Slice, Txn, serialize_key, serialize_val};
 
 use super::{Identity, references::References, short_of};
-use crate::Services;
+use crate::{Services, migrations::scan::ScanExt};
 
 pub(super) struct Identities {
 	pub(super) events: Family,
@@ -66,9 +66,7 @@ const CACHE_BATCH: usize = 64;
 pub(super) async fn repair(services: &Services) -> Result<Identities> {
 	clear_cache(services, "authchainkey_authchain").await?;
 	let identities = census(services).await?;
-	let events_healed = heal(services, &identities.events).await?;
-	let statekeys_healed = heal(services, &identities.statekeys).await?;
-	let identities = match events_healed || statekeys_healed {
+	let identities = match heal(services, &identities).await? {
 		| false => identities,
 		| true => census(services).await?,
 	};
@@ -94,25 +92,22 @@ pub(super) async fn clear_cache(services: &Services, column: &str) -> Result {
 	let map = &db[column];
 
 	map.raw_keys()
+		.scanned(&services.server)
 		.map_ok(KeyBuf::from_slice)
-		.inspect_ok(|_| services.server.progress.advance())
 		.try_chunks(CACHE_BATCH)
 		.map_err(|error| error.1)
-		.ready_try_for_each(|keys| delete(services, map, keys))
+		.ready_try_for_each(|keys| deletion(db, map, keys).try_write())
 		.await?;
 
+	// One barrier covers every batch; a cache left partly cleared is cleared again on retry.
 	db.engine.sync()
 }
 
-fn delete(services: &Services, map: &Map, keys: impl IntoIterator<Item = KeyBuf>) -> Result {
-	services.server.check_running()?;
-	let db = &services.db;
-	let txn = keys.into_iter().fold(db.txn(), |mut txn, key| {
+fn deletion(db: &Database, map: &Map, keys: impl IntoIterator<Item = impl AsRef<Slice>>) -> Txn {
+	keys.into_iter().fold(db.txn(), |mut txn, key| {
 		txn.del_raw(map, key);
 		txn
-	});
-
-	txn.try_execute().map_err(Into::into)
+	})
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -130,10 +125,9 @@ async fn family(
 	reverse: &'static str,
 ) -> Result<Family> {
 	let db = &services.db;
-	let progress = &services.server.progress;
 	let dangling = db[forward]
 		.raw_stream()
-		.inspect_ok(|_| progress.advance())
+		.scanned(&services.server)
 		.map_ok(|(identity, short)| decode(short, identity))
 		.wide_and_then(async |(short, identity)| {
 			let kind = match malformed(forward, short, &identity) {
@@ -147,7 +141,7 @@ async fn family(
 	// Construction opens a cursor, so the reverse one is deferred until the forward scan ends.
 	let unpointed = lazy(|_| db[reverse].raw_stream())
 		.flatten_stream()
-		.inspect_ok(|_| progress.advance())
+		.scanned(&services.server)
 		.map_ok(|(short, identity)| decode(short, identity))
 		.wide_and_then(async |(short, identity)| {
 			let kind = match malformed(forward, short, &identity) {
@@ -266,7 +260,7 @@ async fn count_claims(
 
 	services.db[forward]
 		.raw_stream()
-		.inspect_ok(|_| services.server.progress.advance())
+		.scanned(&services.server)
 		.ready_try_fold(claims, |mut claims: BTreeMap<u64, u64>, (_, value)| {
 			// Prefix width counts an overlong value as a claim, which can only block a repair.
 			if let Some(count) = value
@@ -294,7 +288,7 @@ async fn count_reverse_claims(
 
 	services.db[reverse]
 		.raw_stream()
-		.inspect_ok(|_| services.server.progress.advance())
+		.scanned(&services.server)
 		.ready_try_fold(claims, |mut claims: BTreeMap<Identity, u64>, (_, identity)| {
 			if let Some(count) = claims.get_mut(identity) {
 				*count = count.saturating_add(1);
@@ -306,15 +300,31 @@ async fn count_reverse_claims(
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
-async fn heal(services: &Services, family: &Family) -> Result<bool> {
+async fn heal(services: &Services, identities: &Identities) -> Result<bool> {
 	let db = &services.db;
+	let Identities { events, statekeys } = identities;
+	let event_heals = admissible(db, events, healable).await?;
+	let statekey_heals = admissible(db, statekeys, healable).await?;
 
-	admissible(db, family, |candidate| matches!(candidate.kind, Kind::Reverse | Kind::Forward))
-		.await?
-		.try_fold(false, |_, candidate| {
+	if event_heals.len() == 0 && statekey_heals.len() == 0 {
+		return Ok(false);
+	}
+
+	// A persisted summary omits entries a heal makes resolvable, so it clears before any write.
+	clear_cache(services, "roomid_spacehierarchy").await?;
+
+	event_heals
+		.map(|candidate| (events, candidate))
+		.chain(statekey_heals.map(|candidate| (statekeys, candidate)))
+		.try_for_each(|(family, candidate)| {
 			services.server.check_running()?;
-			write(db, family, candidate).map(|()| true)
+			write(db, family, candidate)
 		})
+		.map(|()| true)
+}
+
+fn healable(candidate: &Candidate) -> bool {
+	matches!(candidate.kind, Kind::Reverse | Kind::Forward)
 }
 
 fn write(db: &Database, family: &Family, candidate: &Candidate) -> Result {
@@ -346,16 +356,19 @@ pub(super) async fn cleanup(
 
 	let keys = admissible(db, family, eligible)
 		.await?
-		.map(|candidate| KeyBuf::from_slice(&candidate.short.to_be_bytes()));
+		.map(|candidate| candidate.short.to_be_bytes());
 
-	delete(services, &db[family.reverse], keys)
+	services.server.check_running()?;
+	deletion(db, &db[family.reverse], keys)
+		.try_execute()
+		.map_err(Into::into)
 }
 
 async fn admissible<'a, F>(
 	db: &Database,
 	family: &'a Family,
 	eligible: F,
-) -> Result<impl Iterator<Item = &'a Candidate>>
+) -> Result<impl ExactSizeIterator<Item = &'a Candidate>>
 where
 	F: Fn(&Candidate) -> bool + Send + Sync,
 {

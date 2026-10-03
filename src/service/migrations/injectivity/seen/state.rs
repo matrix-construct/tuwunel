@@ -27,6 +27,7 @@ use super::{
 };
 use crate::{
 	Services,
+	migrations::scan::ScanExt,
 	rooms::state_compressor::{
 		CompressedState, CompressedStateEvent, compress_state_event, parse_compressed_state_event,
 	},
@@ -360,16 +361,12 @@ async fn census(services: &Services, projection: Projection) -> Result<Census> {
 
 	services.db["shortstatehash_statediff"]
 		.raw_stream()
-		.ready_and_then(|(key, value)| {
-			services.server.check_running()?;
-			services.server.progress.advance();
-
-			Ok(Scanned {
-				id: short_of(key),
-				parent: value.get(..8).and_then(short_of),
-				diff: decode(value),
-				absences: Absences::new(),
-			})
+		.scanned(&services.server)
+		.map_ok(|(key, value)| Scanned {
+			id: short_of(key),
+			parent: value.get(..8).and_then(short_of),
+			diff: decode(value),
+			absences: Absences::new(),
 		})
 		// Serial: a row's entries already fan out, and that fan-out is the concurrency budget.
 		.try_fold(initial, async |census, scanned| {
@@ -534,8 +531,7 @@ async fn digests(services: &Services, affected: &BTreeSet<u64>) -> Result<Claime
 
 	services.db["statehash_shortstatehash"]
 		.raw_stream()
-		.ready_and_then(|row| services.server.check_running().map(|()| row))
-		.inspect_ok(|_| services.server.progress.advance())
+		.scanned(&services.server)
 		.ready_try_fold(Claimed::new(), gather)
 		.await
 }
