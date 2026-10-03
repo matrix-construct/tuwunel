@@ -10,7 +10,7 @@ use std::{net::TcpListener, time::Duration};
 
 use futures::future::{join, try_join};
 use reqwest::{Client, Response, StatusCode, Url, redirect::Policy};
-use serde_json::{from_value, json};
+use serde_json::{Value, from_value, json};
 use serde_urlencoded::from_str;
 use tuwunel::{Args, Runtime, Server, async_run, async_start, async_stop};
 use tuwunel_core::{Result, ruma::UserId};
@@ -45,6 +45,7 @@ fn native_completion_ends_form_navigation() -> Result {
 		.with_option("oidc_require_pkce=false")
 		.with_option("oidc_require_client_approval=true")
 		.with_option("oidc_rc_per_second=0")
+		.with_option("refresh_token_reuse_grace=3600")
 		.with_option("rate_limiting.login.account.burst_count=1000")
 		.with_option(
 			"oidc_registration_allowed_redirect_hosts=[\"trusted.example\",\"127.0.0.1\"]",
@@ -115,6 +116,7 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	check_registration_claim(services, &client, base).await?;
 	concurrent_completion_only_once(services, &client, base).await?;
 	stale_refusal_burns_token(services, &client, base).await?;
+	account_state(services, &client, base, &user).await?;
 
 	for (redirect, native, waived, automatic) in [
 		("https://trusted.example/callback?existing=a%26b", false, true, true),
@@ -208,6 +210,201 @@ async fn exercise(services: &Services, base: &str) -> Result {
 			user
 		);
 	}
+
+	Ok(())
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+async fn account_state(
+	services: &Services,
+	client: &Client,
+	base: &str,
+	user: &UserId,
+) -> Result {
+	let redirect = "https://trusted.example/account-state";
+	let client_id = register_client(services, redirect).await?;
+	let req_id = new_native_request(client, base, &client_id, redirect).await?;
+
+	services.users.set_locked(user, user);
+
+	let wrong = [("oidc_req_id", req_id.as_str()), ("username", USERNAME), ("password", "wrong")];
+	let response = post_form(client, base, "native", &wrong).await?;
+
+	account_error(response, StatusCode::FORBIDDEN, "Invalid username or password").await?;
+
+	let response = submit_password(client, base, &req_id).await?;
+
+	account_error(response, StatusCode::UNAUTHORIZED, "This account has been locked").await?;
+
+	services.users.clear_locked(user);
+
+	let completion = login(client, base, &client_id, redirect, "query").await?;
+
+	services.users.set_locked(user, user);
+
+	let response = approve(client, base, &completion, "approve").await?;
+
+	assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+	services.users.clear_locked(user);
+	device_account_state(services, client, base, user, &client_id).await?;
+
+	let code = account_code(client, base, &client_id, redirect).await?;
+
+	services.users.set_locked(user, user);
+
+	let response = exchange(client, base, &client_id, redirect, &code).await?;
+
+	invalid_grant(response).await?;
+	services.users.clear_locked(user);
+	services.users.set_suspended(user, user);
+
+	let code = account_code(client, base, &client_id, redirect).await?;
+	let response = exchange(client, base, &client_id, redirect, &code).await?;
+	let tokens: Value = response.error_for_status()?.json().await?;
+	let refresh = tokens["refresh_token"]
+		.as_str()
+		.expect("refresh token");
+
+	services.users.set_locked(user, user);
+
+	let fields = [("grant_type", "refresh_token"), ("refresh_token", refresh)];
+	let response = post_form(client, base, "token", &fields).await?;
+	let rotated: Value = response.error_for_status()?.json().await?;
+	let response = client
+		.get(format!("{base}/_matrix/client/v3/account/whoami"))
+		.bearer_auth(
+			rotated["access_token"]
+				.as_str()
+				.expect("access token"),
+		)
+		.send()
+		.await?;
+
+	assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+	let error: Value = response.json().await?;
+
+	assert_eq!(error["errcode"], "M_USER_LOCKED");
+	assert_eq!(error["soft_logout"], true);
+
+	let replay = post_form(client, base, "token", &fields).await?;
+
+	assert_eq!(replay.status(), StatusCode::OK);
+	services.users.clear_locked(user);
+	services.users.clear_suspended(user);
+
+	let completion = login(client, base, &client_id, redirect, "query").await?;
+
+	// Preserve refresh rows to exercise the gate independently of device removal.
+	services.users.set_password(user, None).await?;
+
+	let response = approve(client, base, &completion, "approve").await?;
+
+	account_error(response, StatusCode::FORBIDDEN, "This user has been deactivated").await?;
+
+	let current = rotated["refresh_token"]
+		.as_str()
+		.expect("rotated refresh token");
+
+	let current_fields = [("grant_type", "refresh_token"), ("refresh_token", current)];
+
+	invalid_grant(post_form(client, base, "token", &current_fields).await?).await?;
+	invalid_grant(post_form(client, base, "token", &fields).await?).await?;
+	services
+		.users
+		.set_password(user, Some(PASSWORD))
+		.await?;
+
+	Ok(())
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+async fn account_error(response: Response, status: StatusCode, message: &str) -> Result {
+	assert_eq!(response.status(), status);
+	assert!(response.text().await?.contains(message));
+
+	Ok(())
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+async fn device_account_state(
+	services: &Services,
+	client: &Client,
+	base: &str,
+	user: &UserId,
+	client_id: &str,
+) -> Result {
+	let grant = services
+		.oauth
+		.get_server()?
+		.create_device_grant(client_id, "openid");
+
+	let token = "account-state-device-login";
+	let fields = [
+		("user_code", grant.user_code.as_str()),
+		("loginToken", token),
+		("action", "approve"),
+	];
+
+	let _expires_in = services.users.create_login_token(user, token);
+
+	services.users.set_locked(user, user);
+
+	let response = post_form(client, base, "device_callback", &fields).await?;
+
+	account_error(response, StatusCode::UNAUTHORIZED, "This account has been locked").await?;
+
+	services.users.clear_locked(user);
+
+	Ok(())
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+async fn account_code(
+	client: &Client,
+	base: &str,
+	client_id: &str,
+	redirect: &str,
+) -> Result<String> {
+	let completion = login(client, base, client_id, redirect, "query").await?;
+	let response = approve(client, base, &completion, "approve").await?;
+	let html = response.error_for_status()?.text().await?;
+	let destination = html
+		.split("href=\"")
+		.filter_map(|part| part.split('"').next())
+		.find(|candidate| candidate.starts_with(redirect))
+		.expect("callback link");
+
+	let destination = Url::parse(&destination.replace("&amp;", "&"))?;
+
+	Ok(parameter(&destination, "code"))
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+async fn exchange(
+	client: &Client,
+	base: &str,
+	client_id: &str,
+	redirect: &str,
+	code: &str,
+) -> Result<Response> {
+	let fields = [
+		("grant_type", "authorization_code"),
+		("client_id", client_id),
+		("redirect_uri", redirect),
+		("code", code),
+	];
+
+	post_form(client, base, "token", &fields).await
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+async fn invalid_grant(response: Response) -> Result {
+	assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+	let body: Value = response.json().await?;
+
+	assert_eq!(body["error"], "invalid_grant");
 
 	Ok(())
 }

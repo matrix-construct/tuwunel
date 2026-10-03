@@ -11,7 +11,7 @@ use url::{Url, form_urlencoded::Serializer};
 
 use super::{
 	account::{ACCOUNT_HEAD, account_error_response, account_html_response},
-	consume_login_token, peek_login_token, redirect_allowlisted,
+	consume_login_token, peek_login_token, redirect_allowlisted, require_account_usable,
 };
 use crate::ClientIp;
 
@@ -255,6 +255,10 @@ async fn release_code(
 		.await?;
 
 	let user_id = consume_login_token(services, Some(&params.login_token)).await?;
+
+	// Account-state refusal also retires the request and spends the login token.
+	require_account_usable(services, &user_id).await?;
+
 	let code = oidc.create_auth_code(&auth_req, user_id);
 	let redirect_url = code_redirect(redirect_url, &auth_req, &code);
 	let html = if needs_interstitial(&redirect_url, native) {

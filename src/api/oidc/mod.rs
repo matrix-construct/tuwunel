@@ -18,7 +18,7 @@ use std::fmt::Write;
 
 use axum::{Json, body::Body, response::IntoResponse};
 use http::{Response, StatusCode};
-use ruma::OwnedUserId;
+use ruma::{OwnedUserId, UserId};
 use serde_json::json;
 use tuwunel_core::{Result, err};
 use tuwunel_service::Services;
@@ -57,6 +57,12 @@ fn oauth_error(status: StatusCode, error: &str, description: &str) -> Response<B
 	});
 
 	(status, Json(body)).into_response()
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+async fn require_account_usable(services: &Services, user_id: &UserId) -> Result {
+	services.users.deactivated_check(user_id).await?;
+	services.users.locked_check(user_id).await
 }
 
 async fn consume_login_token(services: &Services, token: Option<&str>) -> Result<OwnedUserId> {

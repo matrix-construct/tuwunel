@@ -28,7 +28,7 @@ use tuwunel_service::{
 	users::device::{RefreshToken, generate_refresh_token},
 };
 
-use super::oauth_error;
+use super::{oauth_error, require_account_usable};
 use crate::ClientIp;
 
 #[derive(Debug, Deserialize)]
@@ -186,6 +186,8 @@ async fn token_device_code(services: &Services, body: &TokenRequest) -> Result<R
 async fn issue_tokens(services: &Services, grant: ApprovedGrant<'_>) -> Result<Response<Body>> {
 	let ApprovedGrant { client_id, scope, user_id, nonce, idp_id } = grant;
 
+	require_account_usable(services, user_id).await?;
+
 	let (granted_scope, requested_device_id) =
 		narrow_scope(scope, services.server.config.oidc_strict_scope)?;
 
@@ -314,6 +316,8 @@ async fn token_refresh(services: &Services, body: &TokenRequest) -> Result<Respo
 				return Err!(Request(Forbidden("Refresh token has expired")));
 			}
 
+			services.users.deactivated_check(&user_id).await?;
+
 			let (access_token, expires_in) = services.users.generate_access_token(true);
 			let refresh_token = generate_refresh_token();
 			services
@@ -331,6 +335,8 @@ async fn token_refresh(services: &Services, body: &TokenRequest) -> Result<Respo
 		},
 
 		| RefreshToken::Replayed { user_id, device_id, current, grace } if grace => {
+			services.users.deactivated_check(&user_id).await?;
+
 			// Benign double-submit: re-issue an access token for the unchanged
 			// refresh token rather than rotating it.
 			let (access_token, expires_in) = services.users.generate_access_token(true);
