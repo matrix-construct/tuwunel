@@ -31,7 +31,7 @@ mod tests;
 type Samples = SmallVec<[Sample; 1]>;
 type Identity = SmallVec<[u8; 48]>;
 
-pub(super) const MARKER: &str = "repair_short_injectivity_seen";
+pub(in super::super) const MARKER: &str = "repair_short_injectivity_seen";
 const VERSION: u8 = 1;
 const SAMPLE_LIMIT: usize = 4;
 const IDENTITY_LIMIT: usize = 128;

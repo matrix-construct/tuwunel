@@ -3,8 +3,6 @@
 //! Strict streams preserve snapshot and reverse-mapping errors. The remaining
 //! collection streams are intentionally best effort and omit unresolved entries.
 
-use std::{ops::Deref, sync::Arc};
-
 use futures::{
 	FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt, future::try_join, pin_mut,
 };
@@ -18,17 +16,18 @@ use ruma::{
 use serde::Deserialize;
 use tuwunel_core::{
 	Result, at, err, implement,
+	itertools::{EitherOrBoth, Itertools},
 	matrix::{Event, Pdu, StateKey},
 	pair_of,
 	utils::{
-		result::FlatOk,
+		future::TryExtExt,
 		stream::{BroadbandExt, IterStream, ReadyExt, TryBroadbandExt, TryIgnore, TryTools},
 	},
 };
 
 use crate::rooms::{
 	short::{ShortEventId, ShortStateHash, ShortStateKey},
-	state_compressor::{CompressedState, compress_state_event, parse_compressed_state_event},
+	state_compressor::rows::Row,
 };
 
 /// Reports whether a user was joined in a selected state snapshot.
@@ -117,10 +116,32 @@ where
 		.and_then(|event| event.get_content())
 }
 
+/// Reports whether a snapshot contains a short state key.
+///
+/// The reverse dictionary resolves the tuple before its rows are searched.
+/// Failure to resolve the key or load the snapshot is treated as absence.
+#[implement(super::Service)]
+pub async fn state_contains_shortstatekey(
+	&self,
+	shortstatehash: ShortStateHash,
+	shortstatekey: ShortStateKey,
+) -> bool {
+	let Ok((event_type, state_key)) = self
+		.services
+		.short
+		.get_statekey_from_short(shortstatekey)
+		.await
+	else {
+		return false;
+	};
+
+	self.state_contains(shortstatehash, &event_type, &state_key)
+		.await
+}
+
 /// Reports whether a state snapshot contains one state tuple.
 ///
-/// Failure to resolve the tuple's short state key or load the snapshot is
-/// treated as absence.
+/// Failure to load the snapshot is treated as absence.
 #[implement(super::Service)]
 pub async fn state_contains(
 	&self,
@@ -128,16 +149,8 @@ pub async fn state_contains(
 	event_type: &StateEventType,
 	state_key: &str,
 ) -> bool {
-	let Ok(shortstatekey) = self
-		.services
-		.short
-		.get_shortstatekey(event_type, state_key)
-		.await
-	else {
-		return false;
-	};
-
-	self.state_contains_shortstatekey(shortstatehash, shortstatekey)
+	self.state_get_shortid(shortstatehash, event_type, state_key)
+		.is_ok()
 		.await
 }
 
@@ -155,26 +168,6 @@ pub async fn state_contains_type(
 
 	pin_mut!(state_keys);
 	state_keys.next().await.is_some()
-}
-
-/// Reports whether a snapshot contains a short state key.
-///
-/// The compressed snapshot is searched across every short event ID for the
-/// key. Failure to load the snapshot is treated as absence.
-#[implement(super::Service)]
-pub async fn state_contains_shortstatekey(
-	&self,
-	shortstatehash: ShortStateHash,
-	shortstatekey: ShortStateKey,
-) -> bool {
-	let start = compress_state_event(shortstatekey, 0);
-	let end = compress_state_event(shortstatekey, u64::MAX);
-
-	self.load_full_state(shortstatehash)
-		.map_ok(|full_state| full_state.range(start..=end).next().copied())
-		.await
-		.flat_ok()
-		.is_some()
 }
 
 /// Returns one PDU from a selected state snapshot.
@@ -217,8 +210,8 @@ pub async fn state_get_id(
 
 /// Returns one short event ID from a selected state snapshot.
 ///
-/// The method resolves `(event_type, state_key)` to a short state key and
-/// searches the compressed snapshot. An absent tuple is returned as not found.
+/// Rows are searched by `(event_type, state_key)` without dictionary lookups.
+/// An absent tuple is returned as not found.
 #[implement(super::Service)]
 pub async fn state_get_shortid(
 	&self,
@@ -226,25 +219,13 @@ pub async fn state_get_shortid(
 	event_type: &StateEventType,
 	state_key: &str,
 ) -> Result<ShortEventId> {
-	let shortstatekey = self
-		.services
-		.short
-		.get_shortstatekey(event_type, state_key)
-		.await?;
-
-	let start = compress_state_event(shortstatekey, 0);
-	let end = compress_state_event(shortstatekey, u64::MAX);
-	self.load_full_state(shortstatehash)
-		.map_ok(|full_state| {
-			full_state
-				.range(start..=end)
-				.next()
-				.copied()
-				.map(parse_compressed_state_event)
-				.map(at!(1))
-				.ok_or(err!(Request(NotFound("Not found in room state"))))
-		})
+	self.services
+		.state_compressor
+		.rows(shortstatehash, Some(event_type), Some(state_key))
 		.await?
+		.next()
+		.map(|row| row.shorteventid)
+		.ok_or_else(|| err!(Request(NotFound("Not found in room state"))))
 }
 
 /// Streams resolvable events of one type from a state snapshot.
@@ -292,54 +273,38 @@ pub fn state_keys_with_ids<'a>(
 
 /// Streams state keys and short event IDs for one type in a snapshot.
 ///
-/// Snapshot and short-state-key mapping failures are skipped. The full
-/// compressed snapshot is buffered before filtering by event type.
+/// Snapshot and row-decoding failures are skipped. Each layer is scanned by event type,
+/// with state keys decoded directly from the merged rows.
 #[implement(super::Service)]
 pub fn state_keys_with_shortids<'a>(
 	&'a self,
 	shortstatehash: ShortStateHash,
 	event_type: &'a StateEventType,
 ) -> impl Stream<Item = (StateKey, ShortEventId)> + Send + 'a {
-	self.state_full_shortids(shortstatehash)
+	self.services
+		.state_compressor
+		.rows(shortstatehash, Some(event_type), None)
+		.map_ok(IterStream::try_stream)
+		.try_flatten_stream()
 		.ignore_err()
-		.unzip()
-		.map(move |(shortstatekeys, shorteventids): (Vec<_>, Vec<_>)| {
-			self.services
-				.short
-				.multi_get_statekey_from_short(shortstatekeys.into_iter().stream())
-				.zip(shorteventids.into_iter().stream())
-				.ready_filter_map(|(res, id)| res.map(|res| (res, id)).ok())
-				.ready_filter_map(move |((event_type_, state_key), event_id)| {
-					event_type_
-						.eq(event_type)
-						.then_some((state_key, event_id))
-				})
+		.ready_filter_map(|row| {
+			row.state_key()
+				.ok()
+				.map(|key| (key, row.shorteventid))
 		})
-		.flatten_stream()
 }
 
 /// Streams state keys for one event type in a snapshot.
 ///
-/// Snapshot and short-state-key mapping failures are skipped, so the stream is
-/// best effort.
+/// Snapshot and row-decoding failures are skipped, so the stream is best effort.
 #[implement(super::Service)]
 pub fn state_keys<'a>(
 	&'a self,
 	shortstatehash: ShortStateHash,
 	event_type: &'a StateEventType,
 ) -> impl Stream<Item = StateKey> + Send + 'a {
-	let short_ids = self
-		.state_full_shortids(shortstatehash)
-		.ignore_err()
-		.map(at!(0));
-
-	self.services
-		.short
-		.multi_get_statekey_from_short(short_ids)
-		.ready_filter_map(Result::ok)
-		.ready_filter_map(move |(event_type_, state_key)| {
-			event_type_.eq(event_type).then_some(state_key)
-		})
+	self.state_keys_with_shortids(shortstatehash, event_type)
+		.map(at!(0))
 }
 
 /// Streams state entries removed between two snapshots.
@@ -366,12 +331,16 @@ pub fn state_added(
 ) -> impl Stream<Item = (ShortStateKey, ShortEventId)> + Send + '_ {
 	let a = self.load_full_state(shortstatehash.0);
 	let b = self.load_full_state(shortstatehash.1);
+
 	try_join(a, b)
-		.map_ok(|(a, b)| b.difference(&a).copied().collect::<Vec<_>>())
+		.map_ok(|(a, b)| {
+			b.merge_join_by(a, |new, old| new.tail.cmp(&old.tail))
+				.filter_map(EitherOrBoth::just_left)
+				.map(Row::shortids)
+		})
 		.map_ok(IterStream::try_stream)
 		.try_flatten_stream()
 		.ignore_err()
-		.map(parse_compressed_state_event)
 }
 
 /// Streams resolvable keyed events from a state snapshot.
@@ -480,39 +449,28 @@ pub fn state_full_ids_strict(
 
 /// Streams every compressed `(short state key, short event ID)` pair.
 ///
-/// A snapshot-load failure is yielded as an error. Once loaded, the immutable
-/// compressed state is copied into the stream without further lookups.
+/// A snapshot-load failure is yielded as an error. Layer rows are merged
+/// without dictionary lookups.
 #[implement(super::Service)]
 pub fn state_full_shortids(
 	&self,
 	shortstatehash: ShortStateHash,
 ) -> impl Stream<Item = Result<(ShortStateKey, ShortEventId)>> + Send + '_ {
 	self.load_full_state(shortstatehash)
-		.map_ok(|full_state| {
-			full_state
-				.deref()
-				.iter()
-				.copied()
-				.map(parse_compressed_state_event)
-				.collect()
-		})
-		.map_ok(Vec::into_iter)
+		.map_ok(|rows| rows.map(Row::shortids))
 		.map_ok(IterStream::try_stream)
 		.try_flatten_stream()
 }
 
 #[implement(super::Service)]
 #[tracing::instrument(name = "load", level = "debug", skip(self))]
-async fn load_full_state(&self, shortstatehash: ShortStateHash) -> Result<Arc<CompressedState>> {
+async fn load_full_state(
+	&self,
+	shortstatehash: ShortStateHash,
+) -> Result<impl Iterator<Item = Row> + Send> {
 	self.services
 		.state_compressor
-		.load_shortstatehash_info(shortstatehash)
+		.rows(shortstatehash, None, None)
 		.map_err(|e| err!(Database("Missing state IDs: {e}")))
-		.map_ok(|vec| {
-			vec.last()
-				.expect("at least one layer")
-				.full_state
-				.clone()
-		})
 		.await
 }

@@ -8,7 +8,8 @@ mod seen;
 
 use tuwunel_core::result::NotFound;
 
-use self::seen::{MARKER, repair, run, stamp};
+pub(super) use self::seen::MARKER;
+use self::seen::{repair, run, stamp};
 use crate::Services;
 
 const LEGACY: [&str; 2] = ["fix_short_injectivity", "clear_auth_chain_cache"];
