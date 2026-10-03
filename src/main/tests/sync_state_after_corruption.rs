@@ -2,6 +2,7 @@
 
 use std::{fs::remove_dir_all, net::TcpListener, time::Duration};
 
+use futures::TryStreamExt;
 use serde_json::{Value, json};
 use tokio::time::{sleep, timeout};
 use tuwunel::{Args, Runtime, Server, async_run, async_start, async_stop};
@@ -9,6 +10,7 @@ use tuwunel_core::{
 	Err, Result, err,
 	ruma::{OwnedRoomId, UserId},
 };
+use tuwunel_database::{Interfix, map};
 use tuwunel_service::{Services, users::Register};
 
 const STABLE_REQUEST: &str = "use_state_after";
@@ -137,9 +139,7 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	assert_empty_requested_field(&unstable_empty, &healthy_room, UNSTABLE_RESPONSE)?;
 	drop(unstable_empty);
 
-	let statediffs = services.db.get("shortstatehash_statediff")?;
-
-	statediffs.remove(&after_shortstatehash.to_be_bytes());
+	remove_snapshot(services, after_shortstatehash).await?;
 	services.clear_cache().await;
 
 	let fallback = sync(services, base, token, Some(&since), true, Some(STABLE_REQUEST)).await?;
@@ -166,7 +166,7 @@ async fn exercise(services: &Services, base: &str) -> Result {
 
 	drop(fallback);
 
-	statediffs.remove(&legacy_shortstatehash.to_be_bytes());
+	remove_snapshot(services, legacy_shortstatehash).await?;
 	services.clear_cache().await;
 
 	let omitted = sync(services, base, token, Some(&since), true, Some(STABLE_REQUEST)).await?;
@@ -367,4 +367,15 @@ fn joined_room<'a>(response: &'a Value, room_id: &OwnedRoomId) -> Result<&'a Val
 	response["rooms"]["join"]
 		.get(room_id.as_str())
 		.ok_or_else(|| err!("sync response omitted joined room {room_id}"))
+}
+
+async fn remove_snapshot(services: &Services, hash: u64) -> Result {
+	services.db[map!("shortstatehash_statediff")].remove(&hash.to_be_bytes());
+	services.db[map!("shortstatehash_statemeta")].remove(&hash.to_be_bytes());
+	let rows = &services.db[map!("shortstatehash_statedelta")];
+
+	rows.keys_prefix_raw(&(hash, Interfix))
+		.map_ok(|key| rows.remove(key))
+		.try_collect::<()>()
+		.await
 }

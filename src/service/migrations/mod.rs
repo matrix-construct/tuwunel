@@ -10,14 +10,14 @@ use futures::{FutureExt, StreamExt, TryStreamExt};
 use ruma::{OwnedUserId, ServerName, UserId};
 use tokio::time::sleep;
 use tuwunel_core::{
-	Err, Result, err, format_small_string, info,
+	Err, Result, async_noinline, err, format_small_string, info,
 	itertools::Itertools,
 	result::NotFound,
 	smallstr::SmallString,
 	utils::{BoolExt, ReadyExt, TryReadyExt},
 	warn,
 };
-use tuwunel_database::Deserialized;
+use tuwunel_database::{Deserialized, map};
 
 use self::{
 	account_status::migrate_account_status,
@@ -133,10 +133,6 @@ pub(crate) async fn migrations(services: &Services) -> Result {
 	check_server_name(services).await?;
 
 	services.server.check_running()?;
-
-	// Repairs residue rather than the schema, so it sits behind the gates
-	// that can still refuse this database.
-	fix_injectivity(services).await;
 
 	let migrated = migrate(services, foreign_lineage).await;
 
@@ -281,6 +277,10 @@ async fn fresh(services: &Services) -> Result {
 /// Apply any migrations
 async fn migrate(services: &Services, foreign_lineage: bool) -> Result {
 	let db = &services.db;
+
+	// Repairs residue rather than the schema, so it sits behind the gates
+	// that can still refuse this database.
+	repair_injectivity(services).await?;
 
 	services.server.check_running()?;
 
@@ -441,6 +441,32 @@ async fn migrate(services: &Services, foreign_lineage: bool) -> Result {
 	Ok(())
 }
 
+// size firewall
+#[async_noinline]
+async fn repair_injectivity(services: &Services) -> Result {
+	let global = &services.db[map!("global")];
+
+	let before = global
+		.get(injectivity::MARKER)
+		.await
+		.optional()?
+		.map(|value| value.to_vec());
+
+	fix_injectivity(services).await;
+
+	let after = global.get(injectivity::MARKER).await.optional()?;
+
+	// A repair can rewrite authoritative blobs, so any marker change, a
+	// settlement record included, rebuilds their derived rows.
+	if before.as_deref() != after.as_deref()
+		|| !marker_present(services, "populate_snapshot_rows").await?
+	{
+		clear_snapshot_rows(services).await;
+	}
+
+	Ok(())
+}
+
 /// Rebuilds every stored thread summary, logging how many roots changed.
 ///
 /// Failed roots are logged rather than returned, so a caller stamps its marker
@@ -453,6 +479,16 @@ async fn rebuild_thread_summaries(services: &Services) {
 	} else {
 		warn!(roots = changed, failed, "Rebuilt thread summaries with failed roots.");
 	}
+}
+
+async fn clear_snapshot_rows(services: &Services) {
+	services.db[map!("shortstatehash_statemeta")]
+		.clear()
+		.await;
+
+	services.db[map!("shortstatehash_statedelta")]
+		.clear()
+		.await;
 }
 
 /// Runs a pass whose work may wait on a condition outside the database.

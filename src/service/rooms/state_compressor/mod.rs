@@ -4,6 +4,11 @@
 //! fixed-width record. Reconstructed parent chains are cached to make repeated
 //! state resolution inexpensive while bounding persistent diff depth.
 
+pub(crate) mod rows;
+
+#[cfg(test)]
+mod tests;
+
 use std::{
 	collections::{BTreeSet, HashMap},
 	fmt::{Debug, Write},
