@@ -7,7 +7,7 @@ use std::{
 	task::{Context, Wake, Waker},
 };
 
-use ruma::{EventId, OwnedEventId, RoomId, event_id, events::StateEventType, room_id};
+use ruma::{EventId, OwnedEventId, RoomId, event_id, events::StateEventType, room_id, user_id};
 use serde_json::{Value, json};
 use tuwunel_core::{
 	Event, Result,
@@ -44,7 +44,10 @@ async fn redaction_takes_each_thread_reply_off_once() -> Result {
 	room.append(4, &note, text()).await?;
 	room.append(5, &fix, edit(&first)).await?;
 
-	for (event, count) in [(&note, 2), (&fix, 2), (&first, 1), (&first, 1), (&legacy, 0)] {
+	// Redacting the last reply drops the summary, count included.
+	let counts = [(&note, json!(2)), (&fix, json!(2)), (&first, json!(1)), (&first, json!(1))];
+
+	for (event, count) in counts.into_iter().chain([(&legacy, Value::Null)]) {
 		room.redact(event).await?;
 
 		assert_eq!(room.count(&root).await?, count, "redacting {event}");
@@ -61,9 +64,11 @@ async fn redacted_reply_and_root_count_are_written_together() -> Result {
 
 	let services = &fixture.services;
 	let room = Room::new(services).await?;
-	let [root, first] = ["root", "first"].map(id);
+	let [root, first, second] = ["root", "first", "second"].map(id);
 	let root_id = room.append(1, &root, text()).await?;
 	let first_id = room.append(2, &first, thread(&root)).await?;
+
+	room.append(3, &second, thread(&root)).await?;
 
 	let observed = Arc::new(CountAtReplyWrite(services.clone(), root_id, Mutex::default()));
 	let waker = Waker::from(observed.clone());
@@ -74,7 +79,7 @@ async fn redacted_reply_and_root_count_are_written_together() -> Result {
 
 	room.redact(&first).await?;
 
-	assert_eq!(*observed.2.lock().expect("locked"), 0);
+	assert_eq!(*observed.2.lock().expect("locked"), 1);
 
 	Ok(())
 }
@@ -200,6 +205,48 @@ async fn redacted_self_rooted_reply_keeps_no_summary() -> Result {
 	Ok(())
 }
 
+#[tokio::test]
+async fn redacting_the_latest_reply_shows_the_newest_remaining_one() -> Result {
+	let Some(fixture) = fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+
+	let services = &fixture.services;
+	let room = Room::new(services).await?;
+	let [root, first, second, third] = ["root", "first", "second", "third"].map(id);
+	let mut secret = thread(&root);
+
+	secret["body"] = json!("secret");
+	room.append(1, &root, text()).await?;
+	room.append(2, &first, thread(&root)).await?;
+	room.append(3, &second, thread(&root)).await?;
+	room.append(4, &third, secret).await?;
+	room.redact(&first).await?;
+
+	assert_eq!(room.latest(&root).await?, json!(third));
+
+	room.redact(&third).await?;
+
+	let served = services.timeline.get_pdu(&root).await?;
+	let served = services
+		.pdu_metadata
+		.bundle_aggregations(user_id!("@alice:localhost"), served);
+
+	assert!(!serde_json::to_string(&served.await)?.contains("secret"));
+	assert_eq!(room.latest(&root).await?, json!(second));
+
+	room.redact(&second).await?;
+
+	// With no reply left, the summary goes, as on Synapse.
+	assert!(
+		room.stored(&root).await?.1["unsigned"]
+			.get("m.relations")
+			.is_none()
+	);
+
+	Ok(())
+}
+
 impl<'a> Room<'a> {
 	async fn new(services: &'a Services) -> Result<Self> {
 		Self::create(services, room_id!("!thread:localhost")).await
@@ -275,6 +322,12 @@ impl<'a> Room<'a> {
 			.redact_pdu(target, &reason, *shortroomid, &lock);
 
 		redacted.await
+	}
+
+	async fn latest(&self, root: &EventId) -> Result<Value> {
+		let thread = &self.stored(root).await?.1["unsigned"]["m.relations"]["m.thread"];
+
+		Ok(thread["latest_event"]["event_id"].clone())
 	}
 
 	async fn count(&self, root: &EventId) -> Result<Value> {

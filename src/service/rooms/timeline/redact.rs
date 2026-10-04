@@ -21,9 +21,9 @@ use crate::rooms::{
 /// Failure to resolve the event's accepted PDU ID is treated as a successful
 /// no-op. Original retention, search removal, and relation deletion occur
 /// before the accepted row is replaced, so the operation is not atomic if a
-/// later step fails. A thread reply's root loses the reply from its bundled
-/// `m.thread.count` in the same write as the accepted row, and a redacted
-/// thread root keeps that `m.thread` summary.
+/// later step fails. A redacted thread reply leaves its root's `m.thread`
+/// summary (its count, and its latest event if it was that) in the same
+/// write as the accepted row, and a redacted thread root keeps the summary.
 #[implement(super::Service)]
 #[tracing::instrument(name = "redact", level = "debug", skip(self))]
 pub async fn redact_pdu<Pdu: Event + Send + Sync>(
@@ -116,7 +116,7 @@ pub async fn redact_pdu<Pdu: Event + Send + Sync>(
 	if let Some(root_event_id) = root_event_id {
 		self.services
 			.threads
-			.stage_redacted_reply(&mut txn, &root_event_id, &pdu_id)
+			.stage_redacted_reply(&mut txn, &root_event_id, &pdu_id, event_id)
 			.await;
 	}
 
