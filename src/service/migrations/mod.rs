@@ -253,6 +253,7 @@ async fn fresh(services: &Services) -> Result {
 	db["global"].insert("rebuild_relatesto_typed", []);
 	db["global"].insert("migrate_profile_keys_to_useridprofilekey", []);
 	db["global"].insert("rebuild_thread_activity", []);
+	db["global"].insert("recount_thread_replies", []);
 	db["global"].insert("clear_servername_status", []);
 	db["global"].insert(CLEAR_STATE_LOCAL_ERROR_MEMOS, []);
 	db["global"].insert("adopt_foreign_account_status", []);
@@ -364,6 +365,13 @@ async fn migrate(services: &Services, foreign_lineage: bool) -> Result {
 		services.threads.rebuild_thread_activity().await?;
 
 		db["global"].insert("rebuild_thread_activity", []);
+	}
+
+	if pending(services, "recount_thread_replies").await? {
+		let changed = services.threads.recount_thread_replies().await;
+
+		db["global"].insert("recount_thread_replies", []);
+		info!("Recounted thread replies, correcting {changed} thread roots.");
 	}
 
 	if pending(services, "clear_servername_status").await? {

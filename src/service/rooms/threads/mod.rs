@@ -5,7 +5,10 @@ use ruma::{
 	CanonicalJsonObject, CanonicalJsonValue, EventId, OwnedEventId, OwnedUserId, RoomId, UInt,
 	UserId,
 	api::{Direction, client::threads::get_threads::v1::IncludeThreads},
-	events::{AnySyncMessageLikeEvent, TimelineEventType, relation::RelationType},
+	events::{
+		AnySyncMessageLikeEvent, TimelineEventType, relation::RelationType,
+		room::encrypted::Relation,
+	},
 	serde::Raw,
 	uint,
 };
@@ -38,6 +41,22 @@ struct ExtractThreadRelation {
 struct ThreadRelation {
 	rel_type: RelationType,
 	event_id: OwnedEventId,
+}
+
+#[derive(Deserialize)]
+struct ExtractRelatesTo {
+	#[serde(rename = "m.relates_to")]
+	relates_to: Relation,
+}
+
+/// The root a thread reply's content names, read as for `add_to_thread`.
+pub(crate) fn thread_root(content: serde_json::Value) -> Option<OwnedEventId> {
+	let content: ExtractRelatesTo = serde_json::from_value(content).ok()?;
+
+	match content.relates_to {
+		| Relation::Thread(thread) => Some(thread.event_id),
+		| _ => None,
+	}
 }
 
 fn canonical_object_field<'a>(
@@ -91,6 +110,29 @@ fn update_thread_bundle_raw(
 	if !matches!(thread.get("current_user_participated"), Some(CanonicalJsonValue::Bool(_))) {
 		thread.insert("current_user_participated".into(), CanonicalJsonValue::Bool(true));
 	}
+}
+
+/// Update a root's bundled `m.thread.count`; `None` without a bundle or change.
+fn set_thread_count<F>(root: &mut CanonicalJsonObject, count: F) -> Option<()>
+where
+	F: FnOnce(Option<UInt>) -> Option<UInt>,
+{
+	let thread = ["unsigned", "m.relations", "m.thread"]
+		.into_iter()
+		.try_fold(root, |object, field| match object.get_mut(field) {
+			| Some(CanonicalJsonValue::Object(child)) => Some(child),
+			| _ => None,
+		})?;
+
+	let stored = thread
+		.get("count")
+		.and_then(|count| serde_json::from_value(count.clone().into()).ok());
+
+	let count = count(stored).filter(|&count| Some(count) != stored)?;
+
+	thread.insert("count".into(), CanonicalJsonValue::Integer(count.into()));
+
+	Some(())
 }
 
 pub struct Service {
@@ -265,6 +307,28 @@ impl Service {
 
 		txn.execute();
 		Ok(())
+	}
+
+	/// Stage the root's `m.thread.count` minus one (not below zero) beside the
+	/// redaction of a reply `add_to_thread` counted, under the room's lock.
+	pub async fn stage_redacted_reply(
+		&self,
+		txn: &mut Txn,
+		root_event_id: &EventId,
+		reply_id: &RawPduId,
+	) -> Option<()> {
+		let timeline = &self.services.timeline;
+		let root = timeline.get_pdu_id(root_event_id).await.ok()?;
+		let counted = matches!(reply_id.pdu_count(), PduCount::Normal(_));
+
+		(counted && root.shortroomid() == reply_id.shortroomid()).then_some(())?;
+
+		let mut json = timeline.get_pdu_json_from_id(&root).await.ok()?;
+
+		set_thread_count(&mut json, |count| count?.checked_sub(uint!(1)))?;
+		timeline.stage_replace_pdu(txn, &root, &json);
+
+		Some(())
 	}
 
 	pub fn threads_until<'a>(
@@ -474,5 +538,49 @@ impl Service {
 		txn.insert_raw(&self.db.threadactivityid_rootid, activity_id, root_id);
 		txn.insert_raw(&self.db.threadrootid_latestcount, root_id, latest.to_be_bytes());
 		txn.execute();
+	}
+
+	/// Recount each thread root's `m.thread.count` from its servable (thus
+	/// unredacted) thread replies, returning how many roots changed.
+	pub async fn recount_thread_replies(&self) -> usize {
+		self.db
+			.threadid_userids
+			.raw_keys()
+			.ignore_err()
+			.map(RawPduId::from)
+			.wide_filter_map(async |root_id| self.recount_thread(root_id).await)
+			.count()
+			.await
+	}
+
+	async fn recount_thread(&self, root: RawPduId) -> Option<()> {
+		let PduId { shortroomid, count } = root.into();
+		let (timeline, mutex) = (&self.services.timeline, &self.services.state.mutex);
+
+		// Replies to a backfilled root are not in the relation index.
+		matches!(count, PduCount::Normal(_)).then_some(())?;
+
+		let pdu = timeline.get_pdu_json_from_id(&root).await.ok()?;
+		let room_id: &RoomId = pdu.get("room_id").try_into().ok()?;
+
+		// Appends and redactions rewrite the root under this lock too.
+		let _lock = mutex.lock(room_id).await;
+		let mut json = timeline.get_pdu_json_from_id(&root).await.ok()?;
+		let replies = self
+			.services
+			.pdu_metadata
+			.get_relations(shortroomid, count, None, Direction::Forward, None)
+			.ready_filter(|(_, pdu)| thread_root(pdu.get_content_as_value()).is_some())
+			.count()
+			.await;
+
+		set_thread_count(&mut json, |_| replies.try_into().ok())?;
+
+		let mut txn = self.services.db.txn();
+
+		timeline.stage_replace_pdu(&mut txn, &root, &json);
+		txn.execute();
+
+		Some(())
 	}
 }
