@@ -1,7 +1,7 @@
 use ruma::api::client::sync::sync_events::v5::response::Receipts;
 
 use super::{Connection, Window, selector};
-use crate::client::sync::v5::range::Results;
+use crate::sync::v5::range::Results;
 
 pub(super) fn collect_ranges(
 	conn: &Connection,

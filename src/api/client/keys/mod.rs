@@ -7,9 +7,11 @@ mod upload_signing_keys;
 
 use std::{collections::BTreeMap, num::NonZeroUsize, time::Duration};
 
-pub(crate) use claim_keys::{claim_keys_helper, claim_keys_route};
+pub use claim_keys::claim_keys_helper;
+pub(crate) use claim_keys::claim_keys_route;
 pub(crate) use get_key_changes::get_key_changes_route;
-pub(crate) use get_keys::{get_keys_helper, get_keys_route};
+pub use get_keys::get_keys_helper;
+pub(crate) use get_keys::get_keys_route;
 use serde_json::{Value as JsonValue, json};
 use tuwunel_core::debug_warn;
 use tuwunel_service::{

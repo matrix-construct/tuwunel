@@ -152,6 +152,7 @@ jemalloc_stats = [
 ]
 ldap = [
 	"tuwunel-api/ldap",
+	"tuwunel-api-client/ldap",
 	"tuwunel-service/ldap",
 ]
 lz4_compression = [
@@ -222,6 +223,9 @@ zstd_compression = [
 [dependencies]
 tuwunel-admin.workspace = true
 tuwunel-api.workspace = true
+tuwunel-api-admin.workspace = true
+tuwunel-api-client.workspace = true
+tuwunel-api-federation.workspace = true
 tuwunel-api-mas.workspace = true
 tuwunel-api-oidc.workspace = true
 tuwunel-core.workspace = true

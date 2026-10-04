@@ -32,7 +32,7 @@ use tuwunel_matrix::{
 };
 use tuwunel_service::Services;
 
-use crate::{Ruma, client::is_ignored_pdu};
+use crate::{Ruma, is_ignored_pdu};
 
 /// # `GET /_matrix/client/r0/rooms/{roomId}/relations/{eventId}/{relType}/{eventType}`
 pub(crate) async fn get_relating_events_with_rel_type_and_event_type_route(

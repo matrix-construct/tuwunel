@@ -5401,6 +5401,9 @@ dependencies = [
  "tracing-subscriber",
  "tuwunel_admin",
  "tuwunel_api",
+ "tuwunel_api_admin",
+ "tuwunel_api_client",
+ "tuwunel_api_federation",
  "tuwunel_api_mas",
  "tuwunel_api_oidc",
  "tuwunel_core",
@@ -5476,6 +5479,87 @@ dependencies = [
  "tuwunel_matrix",
  "tuwunel_service",
  "url",
+]
+
+[[package]]
+name = "tuwunel_api_admin"
+version = "1.9.3"
+dependencies = [
+ "axum",
+ "const-str",
+ "ctor",
+ "dtor",
+ "futures",
+ "hmac",
+ "itertools 0.15.0",
+ "ruma",
+ "serde",
+ "serde_json",
+ "sha1",
+ "synapse-admin-api",
+ "tracing",
+ "tuwunel_api",
+ "tuwunel_api_client",
+ "tuwunel_core",
+ "tuwunel_matrix",
+ "tuwunel_service",
+]
+
+[[package]]
+name = "tuwunel_api_client"
+version = "1.9.3"
+dependencies = [
+ "axum",
+ "axum-extra",
+ "base64 0.22.1",
+ "bytes",
+ "const-str",
+ "ctor",
+ "dtor",
+ "futures",
+ "hmac",
+ "http",
+ "itertools 0.15.0",
+ "rand 0.10.3",
+ "reqwest",
+ "ruma",
+ "serde",
+ "serde_html_form",
+ "serde_json",
+ "sha1",
+ "tokio",
+ "tower-http",
+ "tracing",
+ "tuwunel_api",
+ "tuwunel_core",
+ "tuwunel_matrix",
+ "tuwunel_service",
+ "url",
+]
+
+[[package]]
+name = "tuwunel_api_federation"
+version = "1.9.3"
+dependencies = [
+ "axum",
+ "axum-extra",
+ "base64 0.22.1",
+ "const-str",
+ "ctor",
+ "dtor",
+ "futures",
+ "itertools 0.15.0",
+ "rand 0.10.3",
+ "ruma",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tuwunel_api",
+ "tuwunel_api_client",
+ "tuwunel_core",
+ "tuwunel_matrix",
+ "tuwunel_service",
 ]
 
 [[package]]
@@ -5678,6 +5762,9 @@ dependencies = [
  "tracing",
  "tuwunel_admin",
  "tuwunel_api",
+ "tuwunel_api_admin",
+ "tuwunel_api_client",
+ "tuwunel_api_federation",
  "tuwunel_api_mas",
  "tuwunel_api_oidc",
  "tuwunel_core",

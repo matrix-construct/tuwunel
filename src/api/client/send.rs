@@ -22,7 +22,7 @@ use tuwunel_core::{
 use tuwunel_matrix::{Event, PduEvent, pdu::PduBuilder};
 use tuwunel_service::Services;
 
-use crate::{Ruma, client::utils::is_self_redaction};
+use crate::{Ruma, utils::is_self_redaction};
 
 #[derive(Deserialize)]
 struct ExtractRelatesTo {

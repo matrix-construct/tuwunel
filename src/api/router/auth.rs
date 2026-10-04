@@ -36,7 +36,7 @@ use tuwunel_service::{Services, appservice::RegistrationInfo};
 
 pub(super) use self::dispatch::AuthDispatch;
 use self::dispatch::Scheme;
-pub(crate) use self::uiaa::auth_uiaa;
+pub use self::uiaa::auth_uiaa;
 use super::request::Request;
 
 type AccessToken = SmallString<[u8; 32]>;

@@ -30,8 +30,11 @@ const MODULE_NAMES: &[&str] = &[
 	"tuwunel_database",
 	"tuwunel_service",
 	"tuwunel_api",
+	"tuwunel_api_client",
 	"tuwunel_api_oidc",
 	"tuwunel_api_mas",
+	"tuwunel_api_federation",
+	"tuwunel_api_admin",
 	"tuwunel_admin",
 	"tuwunel_router",
 ];

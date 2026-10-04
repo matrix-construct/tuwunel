@@ -10,7 +10,7 @@ use ruma::{
 use tuwunel_core::{Err, Result};
 
 use super::banned_room_check;
-use crate::{ClientIp, Ruma, client::utils::invite_check};
+use crate::{ClientIp, Ruma, utils::invite_check};
 
 /// # `POST /_matrix/client/r0/rooms/{roomId}/invite`
 ///

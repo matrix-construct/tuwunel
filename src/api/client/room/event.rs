@@ -8,10 +8,7 @@ use tuwunel_core::{
 };
 use tuwunel_matrix::{Event, Pdu};
 
-use crate::{
-	Ruma,
-	client::{annotate_membership, is_ignored_pdu},
-};
+use crate::{Ruma, annotate_membership, is_ignored_pdu};
 
 /// # `GET /_matrix/client/r0/rooms/{roomId}/event/{eventId}`
 ///

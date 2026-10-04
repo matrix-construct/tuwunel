@@ -5,7 +5,7 @@ use ruma::{
 use tuwunel_core::{Err, Result};
 use tuwunel_service::Services;
 
-use crate::{Ruma, router::auth::jwt::validate_user};
+use crate::{Ruma, router::validate_user};
 
 pub(super) async fn handle_login(
 	services: &Services,

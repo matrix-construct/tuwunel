@@ -1,0 +1,52 @@
+[package]
+name = "tuwunel_api_client"
+categories.workspace = true
+description.workspace = true
+edition.workspace = true
+keywords.workspace = true
+license.workspace = true
+readme.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[lib]
+path = "mod.rs"
+bench = false
+crate-type = [
+	"rlib",
+#	"dylib",
+]
+
+[features]
+ldap = ["tuwunel-api/ldap", "tuwunel-service/ldap"]
+
+[dependencies]
+axum.workspace = true
+axum-extra.workspace = true
+base64.workspace = true
+bytes.workspace = true
+const-str.workspace = true
+ctor.workspace = true
+dtor.workspace = true
+futures.workspace = true
+hmac.workspace = true
+http.workspace = true
+itertools.workspace = true
+rand.workspace = true
+reqwest.workspace = true
+ruma.workspace = true
+serde.workspace = true
+serde_html_form.workspace = true
+serde_json.workspace = true
+sha1.workspace = true
+tokio.workspace = true
+tower-http.workspace = true
+tracing.workspace = true
+tuwunel-api.workspace = true
+tuwunel-core.workspace = true
+tuwunel-matrix.workspace = true
+tuwunel-service.workspace = true
+url.workspace = true
+
+[lints]
+workspace = true

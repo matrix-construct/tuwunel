@@ -1,6 +1,6 @@
 //! Synapse-compatible shared-secret registration backend.
 //!
-//! Pairs with the HTTP handlers in `tuwunel_api::client::admin` that serve
+//! Pairs with the HTTP handlers in `tuwunel_api_admin` that serve
 //! `/_synapse/admin/v1/register`. Owns:
 //!
 //! 1. resolution of the shared secret (from `registration_shared_secret` or its

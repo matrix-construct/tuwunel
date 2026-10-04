@@ -18,7 +18,10 @@ use tuwunel_service::{Services, uiaa::SESSION_ID_LENGTH};
 use super::jwt::validate_user;
 use crate::Ruma;
 
-pub(crate) async fn auth_uiaa<T>(services: &Services, body: &Ruma<T>) -> Result<OwnedUserId>
+/// Authenticates a user through the request's UIAA flow.
+///
+/// The configured authentication stages determine whether the flow is complete.
+pub async fn auth_uiaa<T>(services: &Services, body: &Ruma<T>) -> Result<OwnedUserId>
 where
 	T: IncomingRequest + Send + Sync,
 {

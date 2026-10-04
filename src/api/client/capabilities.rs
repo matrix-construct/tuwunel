@@ -17,7 +17,7 @@ use serde_json::json;
 use tuwunel_core::{Result, utils::BoolExt};
 use tuwunel_service::Services;
 
-use crate::{Ruma, client::utils::may_set_displayname};
+use crate::{Ruma, utils::may_set_displayname};
 
 /// # `GET /_matrix/client/v3/capabilities`
 ///

@@ -21,7 +21,7 @@ use super::{
 	super::{range::Results, rooms::merged_room_details},
 	SyncInfo, Window, selector,
 };
-use crate::client::sync::profiles::{Changes, Fields, fold_change, read_field, visible};
+use crate::sync::profiles::{Changes, Fields, fold_change, read_field, visible};
 
 /// Collects the MSC4262 profiles extension payload.
 ///

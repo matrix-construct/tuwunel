@@ -20,10 +20,8 @@ use tuwunel_core::{
 use tuwunel_matrix::{Event, PduCount, pdu::PduEvent};
 use tuwunel_service::{Services, users::InviteFilter};
 
-pub(crate) use self::{
-	v3::{calculate_heroes, sync_events_route},
-	v5::sync_events_v5_route,
-};
+pub use self::v3::calculate_heroes;
+pub(crate) use self::{v3::sync_events_route, v5::sync_events_v5_route};
 
 #[derive(Clone, Copy)]
 enum TimelineErrors {

@@ -3,11 +3,10 @@ use std::sync::Arc;
 use axum::{Router, response::IntoResponse, routing::get};
 use http::{StatusCode, Uri};
 use ruma::api::error::ErrorKind;
-use tuwunel_api::{
-	client::{admin::routes::build as admin_routes, routes::build as client_routes},
-	router::{state, state::Guard},
-	server::routes::build as server_routes,
-};
+use tuwunel_api::router::{state, state::Guard};
+use tuwunel_api_admin::routes::build as admin_routes;
+use tuwunel_api_client::routes::build as client_routes;
+use tuwunel_api_federation::routes::build as server_routes;
 use tuwunel_api_mas::routes::build as mas_routes;
 use tuwunel_api_oidc::routes::build as oidc_routes;
 use tuwunel_core::Error;

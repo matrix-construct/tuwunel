@@ -9,9 +9,10 @@ pub mod state;
 pub use client_ip::{ConfiguredIpSource, TrustedPeerSubnets};
 
 pub use self::{
-	args::Args as Ruma,
+	args::{Args as Ruma, ArgsAdmin as RumaAdmin},
+	auth::{admin::require_admin, auth_uiaa, jwt::validate_user},
 	client_ip::ClientIp,
 	handler::{RouterExt, RumaHandler},
+	response::RumaResponse,
 	state::State,
 };
-pub(super) use self::{args::ArgsAdmin as RumaAdmin, auth::auth_uiaa, response::RumaResponse};

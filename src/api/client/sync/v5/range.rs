@@ -31,7 +31,7 @@ use super::{
 		room_config,
 	},
 };
-use crate::client::is_empty_account_data_event;
+use crate::is_empty_account_data_event;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Domain {

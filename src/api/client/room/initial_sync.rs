@@ -23,7 +23,7 @@ use tuwunel_core::{
 use tuwunel_matrix::{Event, Pdu, PduCount};
 use tuwunel_service::rooms::short::ShortStateHash;
 
-use crate::{Ruma, client::visibility_filter};
+use crate::{Ruma, visibility_filter};
 
 const LIMIT_MAX: usize = 50;
 

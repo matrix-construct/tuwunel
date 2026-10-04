@@ -25,31 +25,31 @@ use crate::State;
 #[derive(Debug)]
 pub struct Args<T, const ADMIN: bool = false> {
 	/// Request struct body
-	pub(crate) body: T,
+	pub body: T,
 
 	/// Cookies received from the useragent.
-	pub(crate) cookie: CookieJar,
+	pub cookie: CookieJar,
 
 	/// Authenticated X-Matrix origin, absent for non-federation requests.
-	pub(crate) origin: Option<OwnedServerName>,
+	pub origin: Option<OwnedServerName>,
 
 	/// Authenticated local user, absent when no local user is identified.
-	pub(crate) sender_user: Option<OwnedUserId>,
+	pub sender_user: Option<OwnedUserId>,
 
 	/// Authenticated local device, absent for device-less authentication.
-	pub(crate) sender_device: Option<OwnedDeviceId>,
+	pub sender_device: Option<OwnedDeviceId>,
 
 	/// Authenticated appservice registration, absent for other callers.
-	pub(crate) appservice_info: Option<RegistrationInfo>,
+	pub appservice_info: Option<RegistrationInfo>,
 
 	/// Parsed canonical JSON, absent for raw or noncanonical request bodies.
-	pub(crate) json_body: Option<CanonicalJsonValue>,
+	pub json_body: Option<CanonicalJsonValue>,
 }
 
 /// Requires administrator authorization before returning request body errors.
 ///
 /// Routes opt in through this alias; the default extractor retains its ordering.
-pub(crate) type ArgsAdmin<T> = Args<T, true>;
+pub type ArgsAdmin<T> = Args<T, true>;
 
 /// Returns the user authenticated for a route requiring a user identity.
 ///
@@ -60,7 +60,7 @@ pub(crate) type ArgsAdmin<T> = Args<T, true>;
 	params = "<T, ADMIN>"
 )]
 #[inline]
-pub(crate) fn sender_user(&self) -> &UserId {
+pub fn sender_user(&self) -> &UserId {
 	self.sender_user
 		.as_deref()
 		.expect("user must be authenticated for this handler")
@@ -75,7 +75,7 @@ pub(crate) fn sender_user(&self) -> &UserId {
 	params = "<T, ADMIN>"
 )]
 #[inline]
-pub(crate) fn origin(&self) -> &ServerName {
+pub fn origin(&self) -> &ServerName {
 	self.origin
 		.as_deref()
 		.expect("server must be authenticated for this handler")
@@ -90,7 +90,7 @@ pub(crate) fn origin(&self) -> &ServerName {
 	params = "<T, ADMIN>"
 )]
 #[inline]
-pub(crate) fn sender_device(&self) -> Result<&DeviceId> {
+pub fn sender_device(&self) -> Result<&DeviceId> {
 	self.sender_device
 		.as_deref()
 		.ok_or(err!(Request(Forbidden("user must be authenticated and device identified"))))

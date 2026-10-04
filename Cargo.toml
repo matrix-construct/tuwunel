@@ -2,8 +2,8 @@
 
 [workspace]
 resolver = "2"
-members = ["src/*", "src/api/mas", "src/api/oidc"]
-default-members = ["src/*", "src/api/mas", "src/api/oidc"]
+members = ["src/*", "src/api/admin", "src/api/client", "src/api/federation", "src/api/mas", "src/api/oidc"]
+default-members = ["src/*", "src/api/admin", "src/api/client", "src/api/federation", "src/api/mas", "src/api/oidc"]
 
 [workspace.package]
 authors = [
@@ -702,6 +702,21 @@ default-features = false
 [workspace.dependencies.tuwunel-api]
 package = "tuwunel_api"
 path = "src/api"
+default-features = false
+
+[workspace.dependencies.tuwunel-api-admin]
+package = "tuwunel_api_admin"
+path = "src/api/admin"
+default-features = false
+
+[workspace.dependencies.tuwunel-api-client]
+package = "tuwunel_api_client"
+path = "src/api/client"
+default-features = false
+
+[workspace.dependencies.tuwunel-api-federation]
+package = "tuwunel_api_federation"
+path = "src/api/federation"
 default-features = false
 
 [workspace.dependencies.tuwunel-api-mas]

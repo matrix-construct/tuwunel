@@ -5,7 +5,13 @@ use http_body_util::Full;
 use ruma::api::{OutgoingResponse, client::uiaa::UiaaResponse};
 use tuwunel_core::{Error, error};
 
-pub(crate) struct RumaResponse<T>(pub(crate) T)
+/// Converts a typed Ruma response into an HTTP response.
+///
+/// Conversion failures produce an internal server error response.
+pub struct RumaResponse<T>(
+	/// Typed response to serialize.
+	pub T,
+)
 where
 	T: OutgoingResponse;
 

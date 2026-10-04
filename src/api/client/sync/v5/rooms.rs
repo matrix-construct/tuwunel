@@ -49,7 +49,7 @@ use super::{
 	super::{load_timeline_fallible, strip_prev_state},
 	Connection, ListIds, SyncInfo, WindowRoom,
 };
-use crate::client::{annotate_membership, ignored_filter, with_membership};
+use crate::{annotate_membership, ignored_filter, with_membership};
 
 #[derive(Debug)]
 pub(super) enum Failure {

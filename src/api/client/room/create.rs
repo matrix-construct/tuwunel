@@ -50,7 +50,7 @@ use tuwunel_matrix::{
 };
 use tuwunel_service::{Services, appservice::RegistrationInfo, rooms::state::RoomMutexGuard};
 
-use crate::{Ruma, client::utils::invite_check};
+use crate::{Ruma, utils::invite_check};
 
 pub(crate) async fn create_room_route(
 	State(services): State<crate::State>,
