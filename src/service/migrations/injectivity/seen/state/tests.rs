@@ -7,6 +7,7 @@ use std::{
 use serde_json::{Value, json};
 use tuwunel_core::{Error, Result, config::Figment, err, smallvec::SmallVec, utils::BoolExt};
 use tuwunel_database::Database;
+use tuwunel_matrix::room::state::resolution::AuthCheckOutcome;
 
 use super::{
 	super::identity::{census as census_identities, repair as repair_identities},
@@ -17,7 +18,7 @@ use super::{
 };
 use crate::{
 	Services,
-	rooms::{state_compressor::ShortStateInfo, state_res::AuthCheckOutcome},
+	rooms::state_compressor::ShortStateInfo,
 	test_utils::{fixture, pdu_id},
 };
 

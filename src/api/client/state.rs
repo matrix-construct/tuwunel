@@ -252,7 +252,7 @@ fn state_dedup_eligible(
 /// Whether an incoming state event is a content-identical resend by its own
 /// author.
 ///
-/// The caller's guard returns before `state_res::auth_check` runs, so every
+/// The caller's guard returns before `tuwunel_matrix::room::state::resolution::auth_check` runs, so every
 /// conjunct gating that early return must be a version-invariant fact that can
 /// only suppress a dedup, never permit one. Membership class qualifies; power
 /// levels and per-type rules do not, and wanting an exact status code there is

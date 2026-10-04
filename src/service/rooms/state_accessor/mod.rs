@@ -34,9 +34,7 @@ use ruma::{
 	room::RoomType,
 };
 use tuwunel_core::{Result, err, implement, utils::BoolExt};
-use tuwunel_matrix::{Pdu, room_version};
-
-use crate::rooms::state_res::events::RoomCreateEvent;
+use tuwunel_matrix::{Pdu, room::state::resolution::events::RoomCreateEvent, room_version};
 
 /// Resolves room state and answers state-based authorization questions.
 ///

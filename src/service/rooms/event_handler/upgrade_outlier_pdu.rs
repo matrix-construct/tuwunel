@@ -13,7 +13,12 @@ use tuwunel_core::{
 	},
 	warn,
 };
-use tuwunel_matrix::{Event, PduEvent, pdu::check_rules, room_version};
+use tuwunel_matrix::{
+	Event, PduEvent,
+	pdu::check_rules,
+	room::state::resolution::{AuthCheckOutcome, auth_check},
+	room_version,
+};
 
 use super::{
 	backoff::{Context, Disposition, UPGRADE_RETRY},
@@ -24,7 +29,6 @@ use super::{
 use crate::rooms::{
 	state::{IdMapState, RoomMutexGuard, Trigger, prune_goal},
 	state_compressor::{CompressedState, HashSetCompressStateEvent},
-	state_res::{AuthCheckOutcome, auth_check},
 	timeline::RawPduId,
 };
 

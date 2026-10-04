@@ -46,16 +46,14 @@ pub use tuwunel_matrix::pdu::{PduId, RawPduId};
 use tuwunel_matrix::{
 	ShortEventId,
 	pdu::{PduCount, PduEvent},
+	room::state::resolution::FetchEvent,
 };
 
 /// Re-exports the standard timeline item and count-key transformation.
 ///
 /// Timeline consumers use these alongside the service's directional streams.
 pub use self::pdus::{PdusIterItem, bias_count};
-use crate::rooms::{
-	short::{ShortRoomId, ShortStateHash},
-	state_res::FetchEvent,
-};
+use crate::rooms::short::{ShortRoomId, ShortStateHash};
 
 /// Provides persistent event lookup, insertion, and room timeline traversal.
 ///

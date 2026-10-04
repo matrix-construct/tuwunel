@@ -7,9 +7,9 @@ use tuwunel_core::{
 	utils::{ReadyExt, future::TryExtExt, stream::IterStream},
 	warn,
 };
-use tuwunel_matrix::{Event, PduEvent, event::TypeExt, room_version};
-
-use crate::rooms::state_res::auth_check;
+use tuwunel_matrix::{
+	Event, PduEvent, event::TypeExt, room::state::resolution::auth_check, room_version,
+};
 
 #[implement(super::Service)]
 #[cfg_attr(unabridged, tracing::instrument(

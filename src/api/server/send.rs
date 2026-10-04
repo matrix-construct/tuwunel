@@ -44,9 +44,11 @@ use tuwunel_core::{
 	},
 	warn,
 };
+use tuwunel_matrix::room::state::resolution::{
+	is_topologically_sorted_in_place, topological_sort,
+};
 use tuwunel_service::{
 	Services,
-	rooms::state_res::{is_topologically_sorted_in_place, topological_sort},
 	sending::{EDU_LIMIT, PDU_LIMIT},
 	users::DeviceListChange,
 };

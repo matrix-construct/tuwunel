@@ -25,6 +25,7 @@ use tuwunel_core::{
 use tuwunel_matrix::{
 	Event, PduEvent,
 	pdu::PrevEvents,
+	room::state::resolution::{AuthCheckOutcome, auth_check},
 	room_version::{self, from_create_event},
 };
 
@@ -32,7 +33,6 @@ use crate::rooms::{
 	short::{ShortStateHash, ShortStateKey},
 	state::IdMapState,
 	state_compressor::CompressedState,
-	state_res::{AuthCheckOutcome, auth_check},
 };
 
 #[cfg(test)]

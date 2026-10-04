@@ -17,6 +17,9 @@ crate-type = [
 #	"dylib",
 ]
 
+[features]
+test_utils = []
+
 [dependencies]
 tuwunel-core.workspace = true
 arrayvec.workspace = true
@@ -24,6 +27,7 @@ base64.workspace = true
 const-str.workspace = true
 ctor.workspace = true
 dtor.workspace = true
+futures.workspace = true
 rand.workspace = true
 ruma.workspace = true
 serde.workspace = true
@@ -32,5 +36,22 @@ smallstr.workspace = true
 smallvec.workspace = true
 tracing.workspace = true
 
+[dev-dependencies]
+tuwunel_matrix = { path = ".", features = ["test_utils"] }
+criterion.workspace = true
+insta.workspace = true
+maplit.workspace = true
+similar.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
+tracing-subscriber.workspace = true
+
 [lints]
 workspace = true
+
+[[bench]]
+name = "state_res"
+harness = false
+
+[[bench]]
+name = "state_res_msc4297"
+harness = false

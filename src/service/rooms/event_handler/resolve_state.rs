@@ -14,13 +14,12 @@ use tuwunel_core::{
 	Err, Result, err, error, implement, trace,
 	utils::stream::{IterStream, ReadyExt, TryWidebandExt, WidebandExt},
 };
-use tuwunel_matrix::room_version;
-
-use crate::rooms::{
-	state_compressor::CompressedState,
-	state_res::{self, AuthSet, FetchEvent, StateMap},
-	timeline,
+use tuwunel_matrix::{
+	room::state::resolution::{self as state_res, AuthSet, FetchEvent, StateMap},
+	room_version,
 };
+
+use crate::rooms::{state_compressor::CompressedState, timeline};
 
 #[derive(Clone, Copy)]
 struct Strict<'a> {
