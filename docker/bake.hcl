@@ -30,11 +30,11 @@ variable "git_ref_name" {
 cargo_feat_sets = {
     none = ""
     # Default features
-    default = "brotli_compression,element_hacks,gzip_compression,io_uring,jemalloc,jemalloc_conf,media_thumbnail,release_max_log_level,systemd,url_preview,zstd_compression"
-    # All features sans release_max_log_level
-    logging = "brotli_compression,bzip2_compression,console,direct_tls,element_hacks,gzip_compression,io_uring,jemalloc,jemalloc_conf,jemalloc_prof,jemalloc_stats,ldap,lz4_compression,media_thumbnail,perf_measurements,sentry_telemetry,systemd,tokio_console,tuwunel_mods,url_preview,zstd_compression"
+    default = "brotli_compression,bzip2_compression,console,direct_tls,element_hacks,gzip_compression,io_uring,jemalloc,jemalloc_conf,ldap,lz4_compression,mas,media_thumbnail,oidc,release_max_log_level,sentry_telemetry,synapse_admin,systemd,url_preview,zstd_compression"
+    # Default features sans release_max_log_level
+    logging = "brotli_compression,bzip2_compression,console,direct_tls,element_hacks,gzip_compression,io_uring,jemalloc,jemalloc_conf,ldap,lz4_compression,mas,media_thumbnail,oidc,sentry_telemetry,synapse_admin,systemd,url_preview,zstd_compression"
     # All features
-    all = "brotli_compression,bzip2_compression,console,direct_tls,element_hacks,gzip_compression,io_uring,jemalloc,jemalloc_conf,jemalloc_prof,jemalloc_stats,ldap,lz4_compression,media_thumbnail,perf_measurements,release_max_log_level,sentry_telemetry,systemd,tokio_console,tuwunel_mods,url_preview,zstd_compression"
+    all = "brotli_compression,bzip2_compression,console,direct_tls,element_hacks,gzip_compression,io_uring,jemalloc,jemalloc_conf,jemalloc_prof,jemalloc_stats,ldap,lz4_compression,mas,media_thumbnail,oidc,perf_measurements,release_max_log_level,sentry_telemetry,synapse_admin,systemd,tokio_console,tuwunel_mods,url_preview,zstd_compression"
 }
 variable "cargo_features_always" {
     default = "direct_tls"
