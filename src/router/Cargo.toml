@@ -76,6 +76,12 @@ lz4_compression = [
 	"tuwunel-api/lz4_compression",
 	"tuwunel-service/lz4_compression",
 ]
+mas = [
+	"dep:tuwunel-api-mas",
+]
+oidc = [
+	"dep:tuwunel-api-oidc",
+]
 release_max_log_level = [
 	"log/max_level_trace",
 	"log/release_max_level_info",
@@ -91,6 +97,9 @@ sentry_telemetry = [
 	"dep:sentry-tower",
 	"dep:sentry-tracing",
 	"tuwunel-core/sentry_telemetry",
+]
+synapse_admin = [
+	"dep:tuwunel-api-admin",
 ]
 systemd = [
 	"dep:sd-notify",
@@ -132,10 +141,13 @@ tower-http.workspace = true
 tracing.workspace = true
 tuwunel-admin.workspace = true
 tuwunel-api.workspace = true
+tuwunel-api-admin.optional = true
 tuwunel-api-admin.workspace = true
 tuwunel-api-client.workspace = true
 tuwunel-api-federation.workspace = true
+tuwunel-api-mas.optional = true
 tuwunel-api-mas.workspace = true
+tuwunel-api-oidc.optional = true
 tuwunel-api-oidc.workspace = true
 tuwunel-core.workspace = true
 tuwunel-service.workspace = true
