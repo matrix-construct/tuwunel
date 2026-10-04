@@ -48,7 +48,10 @@ pub(crate) async fn claim_keys_route(
 	claim_keys_helper(&services, &body.one_time_keys).await
 }
 
-pub(crate) async fn claim_keys_helper(
+/// Claims one-time keys for the requested users and devices.
+///
+/// Local claims and federated claims are combined into one response.
+pub async fn claim_keys_helper(
 	services: &Services,
 	one_time_keys_input: &RequestClaims,
 ) -> Result<claim_keys::v3::Response> {

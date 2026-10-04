@@ -2,7 +2,7 @@ use axum::extract::State;
 use ruma::api::client::filter::{create_filter, get_filter};
 use tuwunel_core::{Result, err};
 
-use crate::{Ruma, client::utils::normalize_profile_fields};
+use crate::{Ruma, utils::normalize_profile_fields};
 
 /// # `GET /_matrix/client/r0/user/{userId}/filter/{filterId}`
 ///

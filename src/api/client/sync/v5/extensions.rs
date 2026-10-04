@@ -226,7 +226,7 @@ mod tests {
 	use ruma::room_id;
 
 	use super::*;
-	use crate::client::sync::v5::ListIds;
+	use crate::sync::v5::ListIds;
 
 	#[test]
 	fn explicit_room_outside_the_window_is_rejected() {

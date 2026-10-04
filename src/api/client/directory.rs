@@ -206,7 +206,10 @@ pub(crate) async fn get_room_visibility_route(
 	})
 }
 
-pub(crate) async fn get_public_rooms_filtered_helper(
+/// Lists public rooms matching the requested filter.
+///
+/// A remote server is queried when specified; otherwise the local directory is used.
+pub async fn get_public_rooms_filtered_helper(
 	services: &Services,
 	server: Option<&ServerName>,
 	limit: Option<UInt>,

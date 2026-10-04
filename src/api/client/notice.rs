@@ -36,7 +36,7 @@ pub(crate) async fn is_notice_room(
 ///
 /// An absent tag is an ordinary non-notice room; other lookup failures propagate.
 #[tracing::instrument(level = "trace", skip_all)]
-pub(crate) async fn room_is_notice(
+pub async fn room_is_notice(
 	services: &Services,
 	server_user: &UserId,
 	target: &UserId,
@@ -72,7 +72,7 @@ pub(crate) async fn room_is_notice(
 /// Selects the configured notice tag, falling back when it is empty.
 ///
 /// The fallback matches the tag used when creating server-notice rooms.
-pub(crate) fn notice_tag(tag: &str) -> TagName {
+pub fn notice_tag(tag: &str) -> TagName {
 	Some(tag)
 		.filter(|tag| !tag.is_empty())
 		.map_or(TagName::ServerNotice, Into::into)

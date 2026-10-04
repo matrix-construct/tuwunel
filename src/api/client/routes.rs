@@ -6,13 +6,10 @@ use axum::{
 use const_str::{concat, join, replace};
 use http::{HeaderValue, header};
 use tower_http::set_header::SetResponseHeaderLayer;
+use tuwunel_api::router::RouterExt;
 use tuwunel_core::{Server, err};
 
-use crate::{
-	State,
-	client::{self, sso_callback_route},
-	router::RouterExt,
-};
+use crate::{self as client, State, sso_callback_route};
 
 /// Builds the client endpoint routes.
 ///

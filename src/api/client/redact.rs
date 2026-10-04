@@ -5,7 +5,7 @@ use ruma::{
 use tuwunel_core::{Err, Result, warn};
 use tuwunel_matrix::pdu::PduBuilder;
 
-use crate::{Ruma, client::utils::is_self_redaction};
+use crate::{Ruma, utils::is_self_redaction};
 
 /// # `PUT /_matrix/client/r0/rooms/{roomId}/redact/{eventId}/{txnId}`
 ///

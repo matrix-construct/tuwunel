@@ -37,12 +37,23 @@ use crate::Ruma;
 
 /// Inputs for [`get_client_hierarchy`], shared by the client-server
 /// `/hierarchy` route and the admin room-hierarchy endpoint.
-pub(crate) struct HierarchyArgs<'a> {
+pub struct HierarchyArgs<'a> {
+	/// User requesting the room hierarchy.
 	pub sender_user: &'a UserId,
+
+	/// Root room of the hierarchy traversal.
 	pub room_id: &'a RoomId,
+
+	/// Maximum number of rooms returned on the page.
 	pub limit: usize,
+
+	/// Maximum depth to traverse below the root room.
 	pub max_depth: usize,
+
+	/// Whether traversal follows only suggested child links.
 	pub suggested_only: bool,
+
+	/// Short room IDs omitted from the returned page.
 	pub skip_room_ids: &'a [ShortRoomId],
 
 	/// Traverse from the server's perspective without federating and skip the
@@ -97,7 +108,10 @@ pub(crate) async fn get_hierarchy_route(
 	.await
 }
 
-pub(crate) async fn get_client_hierarchy(
+/// Traverses a room hierarchy with the supplied visibility policy.
+///
+/// Administrator visibility bypass uses the server's perspective without federating.
+pub async fn get_client_hierarchy(
 	services: &Services,
 	args: HierarchyArgs<'_>,
 ) -> Result<get_hierarchy::v1::Response> {

@@ -10,7 +10,10 @@ struct Claim {
 	sub: String,
 }
 
-pub(crate) fn validate_user(services: &Services, token: &str) -> Result<OwnedUserId> {
+/// Validates a login token and resolves its local user identity.
+///
+/// The configured JWT rules validate the token before its subject becomes a user ID.
+pub fn validate_user(services: &Services, token: &str) -> Result<OwnedUserId> {
 	let config = &services.config.jwt;
 
 	if !config.enable {

@@ -12,7 +12,7 @@ use ruma::{
 use tuwunel_core::{Err, Result, err, utils::BoolExt};
 use tuwunel_service::{Services, presence::Ping, profile::Propagation};
 
-use crate::{ClientIp, Ruma, client::utils::may_set_displayname};
+use crate::{ClientIp, Ruma, utils::may_set_displayname};
 
 /// Resolve a `PropagateTo` request value against the server default.
 ///

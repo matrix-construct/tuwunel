@@ -33,13 +33,10 @@ use tuwunel_service::{
 };
 
 use crate::{
-	Ruma,
-	client::{
-		is_ignored_pdu,
-		message::{
-			add_membership_unsigned, event_filter, event_filters, ignored_filter,
-			lazy_loading_witness, related_by_filter, with_membership,
-		},
+	Ruma, is_ignored_pdu,
+	message::{
+		add_membership_unsigned, event_filter, event_filters, ignored_filter,
+		lazy_loading_witness, related_by_filter, with_membership,
 	},
 };
 
@@ -70,12 +67,23 @@ pub(crate) async fn get_context_route(
 
 /// Shared inputs for [`event_context`], the core behind both the client-server
 /// `/context` route and the admin room-context endpoint.
-pub(crate) struct ContextArgs<'a> {
+pub struct ContextArgs<'a> {
+	/// Room containing the requested event.
 	pub room_id: &'a RoomId,
+
+	/// Event at the center of the timeline window.
 	pub event_id: &'a EventId,
+
+	/// User requesting the event context.
 	pub sender_user: &'a UserId,
+
+	/// Requesting device used for lazy-loading membership state.
 	pub sender_device: Option<&'a DeviceId>,
+
+	/// Filter for timeline events and membership state.
 	pub filter: &'a RoomEventFilter,
+
+	/// Requested maximum number of surrounding timeline events.
 	pub limit: Option<UInt>,
 
 	/// Skip the base-event visibility and ignore checks and the surrounding
@@ -85,8 +93,10 @@ pub(crate) struct ContextArgs<'a> {
 
 /// Loads the timeline window around an event with its state and aggregations,
 /// applying (unless `bypass_visibility`) the per-user visibility and ignore
-/// checks. Powers the client-server `/context` route and its admin bypass twin.
-pub(crate) async fn event_context(
+/// checks.
+///
+/// Powers the client-server `/context` route and its admin bypass twin.
+pub async fn event_context(
 	services: &Services,
 	args: ContextArgs<'_>,
 ) -> Result<get_context::v3::Response> {

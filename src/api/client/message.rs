@@ -42,14 +42,29 @@ use crate::Ruma;
 
 /// Shared inputs for [`get_messages`], the pagination core behind both the
 /// client-server `/messages` route and the admin room-messages endpoint.
-pub(crate) struct MessagesArgs<'a> {
+pub struct MessagesArgs<'a> {
+	/// Room whose timeline is paginated.
 	pub room_id: &'a RoomId,
+
+	/// User requesting the timeline page.
 	pub sender_user: &'a UserId,
+
+	/// Requesting device used for lazy-loading membership state.
 	pub sender_device: Option<&'a DeviceId>,
+
+	/// Optional starting pagination token.
 	pub from: Option<&'a str>,
+
+	/// Optional stopping pagination token.
 	pub to: Option<&'a str>,
+
+	/// Direction in which to paginate the timeline.
 	pub dir: Direction,
+
+	/// Requested maximum number of returned timeline events.
 	pub limit: Option<UInt>,
+
+	/// Filter for timeline events and membership state.
 	pub filter: &'a RoomEventFilter,
 
 	/// Skip the room-visibility gate and the per-event visibility and ignore
@@ -110,9 +125,10 @@ pub(crate) async fn get_message_events_route(
 }
 
 /// Paginates a room's timeline, applying the request filter and (unless
-/// `bypass_visibility`) the per-user visibility and ignore filters. Powers the
-/// client-server `/messages` route and its admin bypass twin.
-pub(crate) async fn get_messages(
+/// `bypass_visibility`) the per-user visibility and ignore filters.
+///
+/// Powers the client-server `/messages` route and its admin bypass twin.
+pub async fn get_messages(
 	services: &Services,
 	args: MessagesArgs<'_>,
 ) -> Result<get_message_events::v3::Response> {
@@ -443,7 +459,7 @@ pub(crate) async fn annotate_membership(
 
 /// `annotate_membership` consume-and-return adapter for stream chains.
 #[inline]
-pub(crate) async fn with_membership(
+pub async fn with_membership(
 	services: &Services,
 	mut pdu: PduEvent,
 	user_id: &UserId,

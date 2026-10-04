@@ -10,7 +10,7 @@ use ruma::{
 use tuwunel_core::{Result, extract_variant, utils::TryReadyExt};
 
 use super::{Connection, SyncInfo, Window, selector};
-use crate::client::{is_empty_account_data_event, sync::v5::range::Results};
+use crate::{is_empty_account_data_event, sync::v5::range::Results};
 
 #[tracing::instrument(name = "account_data", level = "trace", skip_all)]
 pub(super) async fn collect(

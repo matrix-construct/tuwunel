@@ -74,11 +74,8 @@ use super::{
 	strip_prev_state, timeline_prev_batch,
 };
 use crate::{
-	ClientIp, Ruma,
-	client::{
-		ignored_filter, is_empty_account_data_event, utils::normalize_profile_fields,
-		with_membership,
-	},
+	ClientIp, Ruma, ignored_filter, is_empty_account_data_event, utils::normalize_profile_fields,
+	with_membership,
 };
 
 struct SyncParams<'a> {
@@ -2391,7 +2388,10 @@ async fn calculate_counts(
 	(Some(joined_member_count), Some(invited_member_count), heroes.await)
 }
 
-pub(crate) async fn calculate_heroes(
+/// Selects up to five room members for the room summary.
+///
+/// The requesting user and members excluded by the hero filter are omitted.
+pub async fn calculate_heroes(
 	services: &Services,
 	room_id: &RoomId,
 	sender_user: &UserId,

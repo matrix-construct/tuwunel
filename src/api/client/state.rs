@@ -32,7 +32,7 @@ use tuwunel_matrix::{
 };
 use tuwunel_service::Services;
 
-use crate::{Ruma, RumaResponse, client::with_membership};
+use crate::{Ruma, RumaResponse, with_membership};
 
 /// # `PUT /_matrix/client/*/rooms/{roomId}/state/{eventType}/{stateKey}`
 ///

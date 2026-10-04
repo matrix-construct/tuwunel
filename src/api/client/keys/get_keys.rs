@@ -75,7 +75,11 @@ pub(crate) async fn get_keys_route(
 	.await
 }
 
-pub(crate) async fn get_keys_helper<F>(
+/// Queries device and cross-signing keys for the requested users.
+///
+/// The signature predicate filters returned signatures, and the display-name
+/// switch selects configured device names rather than device IDs.
+pub async fn get_keys_helper<F>(
 	services: &Services,
 	sender_user: Option<&UserId>,
 	device_keys_input: &DeviceLists,
