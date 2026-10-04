@@ -27,7 +27,10 @@ use tuwunel_core::config::IpSource;
 
 /// Tuwunel client-IP extractor. See module docs.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct ClientIp(pub(crate) IpAddr);
+pub struct ClientIp(
+	/// Client IP address resolved from the request.
+	pub IpAddr,
+);
 
 /// Marker wrapper around [`IpSource`] placed into request extensions
 /// only when an operator has explicitly configured `ip_source`.

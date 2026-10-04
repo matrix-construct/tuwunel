@@ -19,6 +19,7 @@ use http::{
 	header::{CACHE_CONTROL, CONTENT_TYPE, REFERRER_POLICY},
 };
 use ruma::OwnedDeviceId;
+use tuwunel_api::router::ACCOUNT_HEAD;
 use tuwunel_core::{
 	Err, Error, Result, err,
 	utils::{BoolExt, html::escape as html_escape},
@@ -37,7 +38,6 @@ use self::{
 	session_view::session_view_html,
 };
 use super::{consume_login_token, peek_login_token, sso_redirect_url, url_encode};
-use crate::router::ACCOUNT_HEAD;
 
 pub(crate) static ACCOUNT_MANAGEMENT_ACTIONS_SUPPORTED: &[&str] = &[
 	"org.matrix.profile",

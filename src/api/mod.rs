@@ -1,5 +1,4 @@
 pub mod client;
-pub mod oidc;
 pub mod router;
 pub mod server;
 

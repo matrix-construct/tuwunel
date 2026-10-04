@@ -132,6 +132,8 @@ tower-http.workspace = true
 tracing.workspace = true
 tuwunel-admin.workspace = true
 tuwunel-api.workspace = true
+tuwunel-api-mas.workspace = true
+tuwunel-api-oidc.workspace = true
 tuwunel-core.workspace = true
 tuwunel-service.workspace = true
 

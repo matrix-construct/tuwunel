@@ -5,6 +5,7 @@ use const_str::format as const_format;
 use http::StatusCode;
 use ruma::UserId;
 use serde::Deserialize;
+use tuwunel_api::router::ACCOUNT_HEAD;
 use tuwunel_core::{Err, Result, err, utils::html::escape as html_escape};
 use tuwunel_service::{Services, oauth::server::AuthRequest};
 use url::{Url, form_urlencoded::Serializer};
@@ -13,7 +14,7 @@ use super::{
 	account::{account_error_response, account_html_response},
 	consume_login_token, peek_login_token, redirect_allowlisted, require_account_usable,
 };
-use crate::{ClientIp, router::ACCOUNT_HEAD};
+use crate::ClientIp;
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct CompleteParams {

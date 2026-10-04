@@ -10,6 +10,7 @@ use itertools::Either::{Left, Right};
 use ruma::{OwnedUserId, UserId};
 use serde::Deserialize;
 use serde_json::json;
+use tuwunel_api::router::ACCOUNT_HEAD;
 use tuwunel_core::{
 	Err, Error, Result,
 	config::IdentityProvider,
@@ -25,9 +26,11 @@ use super::{
 		account_error_response, account_html_response, account_redirect_response,
 		account_sso_redirect, validate_account_action,
 	},
-	authorization_sso_url, device_sso_redirect, require_account_usable, url_encode,
+	authorization_sso_url,
+	device::device_sso_redirect,
+	require_account_usable, url_encode,
 };
-use crate::{ClientIp, router::ACCOUNT_HEAD};
+use crate::ClientIp;
 
 type AccountAction = SmallString<[u8; 32]>;
 type DeviceId = SmallString<[u8; 24]>;

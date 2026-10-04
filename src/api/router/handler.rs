@@ -14,11 +14,23 @@ use tuwunel_core::Result;
 
 use super::{Ruma, RumaResponse, State, auth::AuthDispatch};
 
-pub(in super::super) trait RumaHandler<T> {
+/// Registers Matrix request handlers with a router.
+///
+/// Implementations convert incoming requests and dispatch them to endpoint handlers.
+pub trait RumaHandler<T> {
+	/// Registers every path declared by the request type.
+	///
+	/// Each path dispatches requests to this handler.
 	fn add_routes(&'static self, router: Router<State>) -> Router<State>;
 
+	/// Registers the handler at one endpoint path.
+	///
+	/// The returned router dispatches matching requests to this handler.
 	fn add_route(&'static self, router: Router<State>, path: &str) -> Router<State>;
 
+	/// Dispatches an incoming request to the endpoint handler.
+	///
+	/// The returned future resolves to the HTTP response.
 	fn call_route(
 		handler: RouteHandler,
 		state: State,
@@ -26,7 +38,14 @@ pub(in super::super) trait RumaHandler<T> {
 	) -> impl Future<Output = Response> + Send + 'static;
 }
 
-pub(in super::super) trait RouterExt {
+/// Extends routers with Matrix endpoint registration.
+///
+/// Each handler registers the paths declared by its request type.
+pub trait RouterExt {
+	/// Registers a Matrix endpoint handler with this router.
+	///
+	/// The handler supplies the paths declared by its request type.
+	#[must_use]
 	fn ruma_route<H: RumaHandler<T>, T>(self, handler: &'static H) -> Self;
 }
 
