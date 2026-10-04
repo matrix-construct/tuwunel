@@ -84,14 +84,14 @@ jobs:
         name: Fetch Book
         uses: actions/download-artifact@v8
         with:
-          name: release-all-x86_64-v1-linux-gnu-book
+          name: release-default-x86_64-v1-linux-gnu-book
           path: pages
 
       - id: docs
         name: Fetch Docs
         uses: actions/download-artifact@v8
         with:
-          name: release-all-x86_64-v1-linux-gnu-docs
+          name: release-default-x86_64-v1-linux-gnu-docs
           path: pages/book
 
       - id: store
@@ -179,7 +179,7 @@ jobs:
       && inputs.machines
       && inputs.docker_repo != ''
       && contains(fromJSON(inputs.cargo_profiles), fromJSON('["release"]')[0])
-      && contains(fromJSON(inputs.feat_sets), fromJSON('["all"]')[0])
+      && contains(fromJSON(inputs.feat_sets), fromJSON('["default"]')[0])
       && contains(fromJSON(inputs.rust_toolchains), fromJSON('["stable"]')[0])
       && (github.ref == 'refs/heads/main' || contains(github.ref, 'refs/tags/v'))
 
@@ -192,7 +192,7 @@ jobs:
       matrix:
         bake_target: ${{fromJSON('["docker_io", "ghcr_io"]')}}
         cargo_profile: ${{fromJSON('["release"]')}}
-        feat_set: ${{fromJSON('["all"]')}}
+        feat_set: ${{fromJSON('["default"]')}}
         rust_toolchain: ${{fromJSON('["stable"]')}}
         sys_name: ${{fromJSON(inputs.sys_names)}}
         sys_version: ${{fromJSON(inputs.sys_versions)}}
