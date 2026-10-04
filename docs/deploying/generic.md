@@ -46,8 +46,8 @@ Nix to build tuwunel as this has the most
 guaranteed reproducibiltiy and easiest to get a build environment and output
 going. This also allows easy cross-compilation.
 
-You can run the `nix build -L .#static-x86_64-linux-musl-all-features` or
-`nix build -L .#static-aarch64-linux-musl-all-features` commands based
+You can run the `nix build -L .#static-x86_64-linux-musl` or
+`nix build -L .#static-aarch64-linux-musl` commands based
 on architecture to cross-compile the necessary static binary located at
 `result/bin/tuwunel`. This is reproducible with the static binaries produced
 in our CI.
@@ -56,7 +56,9 @@ If wanting to build using standard Rust toolchains, make sure you install:
 - `liburing-dev` on the compiling machine, and `liburing` on the target host
 - LLVM and libclang for RocksDB
 
-You can build Tuwunel using `cargo build --release --all-features`
+You can build Tuwunel using `cargo build --release`. See
+[Build Features](../development/build-features.md) for the features a plain
+build includes and how to change them.
 
 A plain build targets the baseline architecture, which is the `-v1-` equivalent
 and gets RocksDB's software CRC32C. Pass `-C target-cpu=` to get the hardware
@@ -65,7 +67,7 @@ stays on the machine that built it, or a named architecture such as `broadwell`
 when it does not.
 
 ```bash
-RUSTFLAGS="-C target-cpu=native" cargo build --release --all-features
+RUSTFLAGS="-C target-cpu=native" cargo build --release
 ```
 
 Add `--locked` to build against the committed `Cargo.lock`. Without it Cargo

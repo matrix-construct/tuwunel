@@ -206,17 +206,27 @@ name its features explicitly:
 
 ```
 brotli_compression
+bzip2_compression
+console
+direct_tls
 element_hacks
 gzip_compression
 jemalloc
 jemalloc_conf
+ldap
+lz4_compression
+mas
 media_thumbnail
+oidc
 release_max_log_level
+sentry_telemetry
+synapse_admin
 url_preview
 zstd_compression
 ```
 
-That is the default set with `io_uring` and `systemd` removed.
+That is the default set with `io_uring` and `systemd` removed. The features
+added to the default set in 2.0 have not yet been tested on OpenBSD.
 
 Tuwunel 1.9.1 and earlier cannot use `jemalloc` here: a binary built with it
 aborts before it starts. Build those releases without `jemalloc` and
@@ -243,7 +253,7 @@ export LIBCLANG_PATH=/usr/local/llvm21/lib
 export CARGO_TARGET_DIR=/home/build/target
 
 cargo build --release -p tuwunel --no-default-features \
-    --features brotli_compression,element_hacks,gzip_compression,jemalloc,jemalloc_conf,media_thumbnail,release_max_log_level,url_preview,zstd_compression
+    --features brotli_compression,bzip2_compression,console,direct_tls,element_hacks,gzip_compression,jemalloc,jemalloc_conf,ldap,lz4_compression,mas,media_thumbnail,oidc,release_max_log_level,sentry_telemetry,synapse_admin,url_preview,zstd_compression
 ```
 
 Building the 1.8.3 release rather than the current tree needs one more change.
