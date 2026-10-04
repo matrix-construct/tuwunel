@@ -111,10 +111,11 @@ fn set_table_options(opts: &mut Options, desc: &Descriptor, cache: Option<&Cache
 		prepopulate,
 	);
 
+	// The options string amends the installed table factory, so install it first.
+	opts.set_block_based_table_factory(&table);
+
 	opts.set_options_from_string(&string)
 		.map_err(map_err)?;
-
-	opts.set_block_based_table_factory(&table);
 
 	Ok(())
 }
