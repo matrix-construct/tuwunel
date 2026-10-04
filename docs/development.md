@@ -99,6 +99,9 @@ So, if this is adding a feature to the API such as `woof`, you define the featur
 in the `api` crate's `Cargo.toml` as `woof = []`. The feature definition in `main`'s
 `Cargo.toml` will be `woof = ["tuwunel-api/woof"]`.
 
+Then add a row for the feature to [Build Features](development/build-features.md),
+with its default membership and any runtime requirement.
+
 The rationale for this is due to Rust / Cargo not supporting
 ["workspace level features"][9], we must make a choice of; either scattering
 features all over the workspace crates, making it difficult for anyone to add
