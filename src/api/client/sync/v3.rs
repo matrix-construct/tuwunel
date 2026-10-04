@@ -2003,7 +2003,7 @@ fn compute_notification_gates<F: Fn(u64) -> bool>(
 
 	// A cursor newer than since means the client may still cache the pre-reset
 	// count, so allow an explicit zero to reconcile it.
-	let send_notification_resets = last_notification_read.is_some_and(&after_since)
+	let send_notification_resets = last_notification_read.is_some_and(after_since)
 		|| thread_last_reads
 			.values()
 			.copied()

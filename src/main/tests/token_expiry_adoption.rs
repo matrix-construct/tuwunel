@@ -153,8 +153,8 @@ where
 		.port();
 
 	let args = phase_args(database, port, phase);
-	let runtime = Runtime::new(Some(&args)).map_err(&phase_error)?;
-	let server = Server::new(Some(&args), Some(&runtime)).map_err(&phase_error)?;
+	let runtime = Runtime::new(Some(&args)).map_err(phase_error)?;
+	let server = Server::new(Some(&args), Some(&runtime)).map_err(phase_error)?;
 	let result = runtime.block_on(async {
 		let services = async_start(&server).await?;
 		let base = format!("http://127.0.0.1:{port}");

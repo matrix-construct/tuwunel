@@ -119,8 +119,8 @@ fn run_case(case: Case) -> Result {
 		| _ => args,
 	};
 
-	let runtime = Runtime::new(Some(&args)).map_err(&case_error)?;
-	let server = Server::new(Some(&args), Some(&runtime)).map_err(&case_error)?;
+	let runtime = Runtime::new(Some(&args)).map_err(case_error)?;
+	let server = Server::new(Some(&args), Some(&runtime)).map_err(case_error)?;
 	let result = runtime.block_on(async {
 		let services = async_start(&server).await?;
 		let base = format!("http://127.0.0.1:{port}");

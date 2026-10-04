@@ -138,8 +138,14 @@ fn register_synapse_admin_users_routes(router: Router<State>, mas_active: bool) 
 		// whois is served at the /_synapse admin path and the client-server admin
 		// aliases where Synapse also mounts it.
 		.route("/_synapse/admin/v1/whois/{user_id}", get(client::users::admin_whois_route))
-		.route("/_matrix/client/v3/admin/whois/{user_id}", get(client::users::admin_whois_route))
-		.route("/_matrix/client/r0/admin/whois/{user_id}", get(client::users::admin_whois_route))
+		.route(
+			"/_matrix/client/v3/admin/whois/{user_id}",
+			get(client::users::admin_whois_route),
+		)
+		.route(
+			"/_matrix/client/r0/admin/whois/{user_id}",
+			get(client::users::admin_whois_route),
+		)
 		.route(
 			"/_matrix/client/unstable/admin/whois/{user_id}",
 			get(client::users::admin_whois_route),
