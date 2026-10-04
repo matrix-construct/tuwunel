@@ -83,6 +83,7 @@ default = [
 	"jemalloc_conf",
 	"media_thumbnail",
 	"release_max_log_level",
+	"sentry_telemetry",
 	"systemd",
 	"url_preview",
 	"zstd_compression",
