@@ -20,6 +20,7 @@ use tuwunel_database::{Database, keyval::KeyBuf};
 use tuwunel_matrix::{
 	PduEvent,
 	pdu::AuthEvents,
+	room::state::resolution::{AuthCheckOutcome, FetchEvent, StateMap, auth_check},
 	room_version::{from_create_event, rules},
 };
 
@@ -30,11 +31,8 @@ use super::{
 };
 use crate::{
 	migrations::scan::ScanExt,
-	rooms::{
-		state_compressor::{
-			CompressedStateEvent, compress_state_event, parse_compressed_state_event,
-		},
-		state_res::{AuthCheckOutcome, FetchEvent, StateMap, auth_check},
+	rooms::state_compressor::{
+		CompressedStateEvent, compress_state_event, parse_compressed_state_event,
 	},
 };
 

@@ -10,6 +10,12 @@ tuwunel_core::rustc_flags_capture! {}
 pub mod event;
 pub mod event_id;
 pub mod pdu;
+
+/// Matrix room types and state operations.
+///
+/// Room state resolution is available through the state module.
+pub mod room;
+
 pub mod room_version;
 
 pub use event::{Event, StateKey, TypeExt as EventTypeExt, TypeStateKey, state_key};

@@ -14,12 +14,13 @@ use tuwunel_core::{
 		stream::{BroadbandExt, IterStream, ReadyExt, TryBroadbandExt, WidebandExt},
 	},
 };
-use tuwunel_matrix::{Event, pdu::check_room_id};
-
-use crate::rooms::{
-	short::{ShortStateHash, ShortStateKey},
-	state_res::{AuthSet, StateMap},
+use tuwunel_matrix::{
+	Event,
+	pdu::check_room_id,
+	room::state::resolution::{AuthSet, StateMap},
 };
+
+use crate::rooms::short::{ShortStateHash, ShortStateKey};
 
 enum ForkError {
 	State(Error),

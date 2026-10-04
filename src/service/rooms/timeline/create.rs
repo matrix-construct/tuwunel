@@ -25,11 +25,11 @@ use tuwunel_core::{
 use tuwunel_matrix::{
 	event::Event,
 	pdu::{EventHash, PduBuilder, PduEvent, PrevEvents, check_rules},
+	room::state::resolution::auth_check,
 	room_version,
 };
 
 use super::RoomMutexGuard;
-use crate::rooms::state_res::auth_check;
 
 /// Builds a canonical signed PDU and its structured representation.
 ///

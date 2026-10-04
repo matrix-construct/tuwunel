@@ -33,6 +33,7 @@ use tuwunel_core::{
 use tuwunel_matrix::{
 	event::gen_event_id_canonical_json,
 	pdu::{Pdu, PduBuilder, check_rules},
+	room::state::resolution as state_res,
 	room_version,
 };
 
@@ -43,7 +44,6 @@ use crate::{
 	rooms::{
 		state::{IdMapState, RoomMutexGuard},
 		state_compressor::{CompressedState, HashSetCompressStateEvent},
-		state_res,
 	},
 };
 

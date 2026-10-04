@@ -54,7 +54,9 @@ use tuwunel_core::{
 };
 use tuwunel_database::{Deserialized, Ignore, Interfix, Map, Txn};
 use tuwunel_matrix::{
-	Event, PduCount, PduEvent, RoomVersionRules, StateKey, TypeStateKey, room_version,
+	Event, PduCount, PduEvent, RoomVersionRules, StateKey, TypeStateKey,
+	room::state::resolution::{StateMap, auth_types_for_event},
+	room_version,
 };
 
 use crate::{
@@ -62,7 +64,6 @@ use crate::{
 		short::{ShortEventId, ShortStateHash, ShortStateKey},
 		state_cache::{MembershipUpdate, StrippedRoomState},
 		state_compressor::{CompressedState, parse_compressed_state_event},
-		state_res::{StateMap, auth_types_for_event},
 	},
 	services::OnceServices,
 };
