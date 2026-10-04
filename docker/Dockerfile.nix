@@ -109,7 +109,7 @@ RUN \
         --cores 0 \
         --max-jobs $(nproc) \
         --log-format raw \
-        .#all-features \
+        .#default \
             -- \
             -Otest='["smoke", "fresh"]' \
             -Oserver_name=\"localhost\" \
@@ -119,7 +119,7 @@ RUN \
     nix \
         --extra-experimental-features nix-command \
         --extra-experimental-features flakes \
-        build --no-link --print-out-paths .#all-features > /tmp/smoke-out
+        build --no-link --print-out-paths .#default > /tmp/smoke-out
 
     nix_cache_push.sh $(cat /tmp/smoke-out)
 EOF
