@@ -2,10 +2,6 @@ mod get_nonce;
 mod is_user_locked;
 mod is_user_suspended;
 mod lock_user;
-/// Provides Matrix Authentication Service endpoint handlers.
-///
-/// The route builder groups its account and device integration endpoints.
-pub mod mas;
 mod register;
 mod suspend_user;
 

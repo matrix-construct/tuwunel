@@ -22,7 +22,8 @@ use axum_extra::{
 };
 use http::request::Parts;
 use ruma::{OwnedUserId, UserId};
-use tuwunel_core::{Err, Error, Result, err};
+use tuwunel_api::router::{Ruma, State};
+use tuwunel_core::{Err, Error, Result, err, mod_ctor, mod_dtor};
 
 pub(crate) use self::{
 	allow_cross_signing_reset::allow_cross_signing_reset_route,
@@ -40,12 +41,12 @@ pub(crate) use self::{
 /// `assert_request_is_from_mas`. Rejects with 403 on mismatch or no secret.
 pub(crate) struct Mas;
 
-impl FromRequestParts<crate::State> for Mas {
+impl FromRequestParts<State> for Mas {
 	type Rejection = Error;
 
 	async fn from_request_parts(
 		parts: &mut Parts,
-		services: &crate::State,
+		services: &State,
 	) -> Result<Self, Self::Rejection> {
 		let secret = services
 			.config
@@ -71,17 +72,14 @@ impl FromRequestParts<crate::State> for Mas {
 
 /// Parses a MAS `localpart` into a local user id, rejecting a malformed one
 /// with `400`.
-pub(super) fn local_user(services: crate::State, localpart: &str) -> Result<OwnedUserId> {
+pub(crate) fn local_user(services: State, localpart: &str) -> Result<OwnedUserId> {
 	UserId::parse_with_server_name(localpart, services.globals.server_name())
 		.map_err(|_| err!(Request(InvalidParam("Invalid localpart"))))
 }
 
 /// Resolves a MAS `localpart` to an existing local user, rejecting an absent
 /// one with `404`.
-pub(super) async fn existing_user(
-	services: crate::State,
-	localpart: &str,
-) -> Result<OwnedUserId> {
+pub(crate) async fn existing_user(services: State, localpart: &str) -> Result<OwnedUserId> {
 	let user_id = local_user(services, localpart)?;
 
 	services
@@ -91,3 +89,6 @@ pub(super) async fn existing_user(
 		.then_some(user_id)
 		.ok_or_else(|| err!(Request(NotFound("User does not exist"))))
 }
+
+mod_ctor! {}
+mod_dtor! {}

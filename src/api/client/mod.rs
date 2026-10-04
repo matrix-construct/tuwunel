@@ -5,7 +5,7 @@ pub(super) mod account;
 pub(super) mod account_data;
 /// Provides administrator endpoint handlers.
 ///
-/// Its public modules expose the administrator and Matrix Authentication Service route builders.
+/// Its public modules expose the administrator route builder.
 pub mod admin;
 pub(super) mod alias;
 pub(super) mod appservice;

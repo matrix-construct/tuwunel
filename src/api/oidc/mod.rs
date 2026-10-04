@@ -1,15 +1,20 @@
-pub(super) mod account;
-pub(super) mod auth_issuer;
-pub(super) mod auth_metadata;
-pub(super) mod authorize;
-pub(super) mod complete;
-pub(super) mod device;
-pub(super) mod jwks;
-pub(super) mod native;
-pub(super) mod registration;
-pub(super) mod revoke;
-pub(super) mod token;
-pub(super) mod userinfo;
+pub(crate) mod account;
+pub(crate) mod auth_issuer;
+pub(crate) mod auth_metadata;
+pub(crate) mod authorize;
+pub(crate) mod complete;
+pub(crate) mod device;
+pub(crate) mod jwks;
+pub(crate) mod native;
+pub(crate) mod registration;
+pub(crate) mod revoke;
+pub(crate) mod token;
+pub(crate) mod userinfo;
+
+/// Provides the OpenID Connect route builder.
+///
+/// It groups discovery, authorization and callback endpoints.
+pub mod routes;
 
 #[cfg(test)]
 mod tests;
@@ -18,14 +23,31 @@ use axum::{Json, body::Body, response::IntoResponse};
 use http::{Response, StatusCode};
 use ruma::{OwnedUserId, UserId};
 use serde_json::json;
+use tuwunel_api::router::{ClientIp, State};
 pub(crate) use tuwunel_core::utils::url::url_encode;
-use tuwunel_core::{Result, err};
+use tuwunel_core::{Result, err, mod_ctor, mod_dtor};
 use tuwunel_service::Services;
 use url::Url;
 
-pub(super) use self::{
-	account::*, auth_issuer::*, auth_metadata::*, authorize::*, complete::*, device::*, jwks::*,
-	native::*, registration::*, revoke::*, token::*, userinfo::*,
+pub(crate) use self::{
+	account::{
+		ACCOUNT_MANAGEMENT_ACTIONS_SUPPORTED, account_css_route, account_js_route,
+		get_account_callback_route, get_account_route, post_account_callback_route,
+	},
+	auth_issuer::auth_issuer_route,
+	auth_metadata::openid_configuration_route,
+	authorize::authorize_route,
+	complete::{complete_route, post_complete_route},
+	device::{
+		device_authorization_route, get_device_callback_route, get_device_route,
+		post_device_callback_route,
+	},
+	jwks::jwks_route,
+	native::{native_get_route, native_submit_route},
+	registration::registration_route,
+	revoke::revoke_route,
+	token::token_route,
+	userinfo::userinfo_route,
 };
 
 const OIDC_REQ_ID_LENGTH: usize = 32;
@@ -124,3 +146,6 @@ fn sso_redirect_url(base: &str, idp_id: &str, callback: &Url) -> Result<Url> {
 
 	Ok(sso_url)
 }
+
+mod_ctor! {}
+mod_dtor! {}

@@ -1,0 +1,40 @@
+[package]
+name = "tuwunel_api_oidc"
+categories.workspace = true
+description.workspace = true
+edition.workspace = true
+keywords.workspace = true
+license.workspace = true
+readme.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[lib]
+path = "mod.rs"
+bench = false
+crate-type = [
+	"rlib",
+#	"dylib",
+]
+
+[dependencies]
+axum.workspace = true
+axum-extra.workspace = true
+const-str.workspace = true
+ctor.workspace = true
+dtor.workspace = true
+futures.workspace = true
+http.workspace = true
+itertools.workspace = true
+ruma.workspace = true
+serde.workspace = true
+serde_html_form.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tuwunel-api.workspace = true
+tuwunel-core.workspace = true
+tuwunel-service.workspace = true
+url.workspace = true
+
+[lints]
+workspace = true

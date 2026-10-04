@@ -23,7 +23,7 @@ use crate::State;
 /// Administrator-only routes defer JSON errors until authorization succeeds.
 /// Ordinary routes reject malformed JSON before authentication.
 #[derive(Debug)]
-pub(crate) struct Args<T, const ADMIN: bool = false> {
+pub struct Args<T, const ADMIN: bool = false> {
 	/// Request struct body
 	pub(crate) body: T,
 

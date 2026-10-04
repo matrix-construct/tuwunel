@@ -5401,6 +5401,8 @@ dependencies = [
  "tracing-subscriber",
  "tuwunel_admin",
  "tuwunel_api",
+ "tuwunel_api_mas",
+ "tuwunel_api_oidc",
  "tuwunel_core",
  "tuwunel_database",
  "tuwunel_macros",
@@ -5472,6 +5474,48 @@ dependencies = [
  "tracing",
  "tuwunel_core",
  "tuwunel_matrix",
+ "tuwunel_service",
+ "url",
+]
+
+[[package]]
+name = "tuwunel_api_mas"
+version = "1.9.3"
+dependencies = [
+ "axum",
+ "axum-extra",
+ "const-str",
+ "ctor",
+ "dtor",
+ "futures",
+ "http",
+ "ruma",
+ "synapse-admin-api",
+ "tracing",
+ "tuwunel_api",
+ "tuwunel_core",
+ "tuwunel_service",
+]
+
+[[package]]
+name = "tuwunel_api_oidc"
+version = "1.9.3"
+dependencies = [
+ "axum",
+ "axum-extra",
+ "const-str",
+ "ctor",
+ "dtor",
+ "futures",
+ "http",
+ "itertools 0.15.0",
+ "ruma",
+ "serde",
+ "serde_html_form",
+ "serde_json",
+ "tracing",
+ "tuwunel_api",
+ "tuwunel_core",
  "tuwunel_service",
  "url",
 ]
@@ -5626,6 +5670,8 @@ dependencies = [
  "tracing",
  "tuwunel_admin",
  "tuwunel_api",
+ "tuwunel_api_mas",
+ "tuwunel_api_oidc",
  "tuwunel_core",
  "tuwunel_service",
 ]
