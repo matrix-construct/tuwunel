@@ -76,11 +76,16 @@ pkgdesc = "High performance Matrix homeserver written in Rust"
 [features]
 default = [
 	"brotli_compression",
+	"bzip2_compression",
+	"console",
+	"direct_tls",
 	"element_hacks",
 	"gzip_compression",
 	"io_uring",
 	"jemalloc",
 	"jemalloc_conf",
+	"ldap",
+	"lz4_compression",
 	"media_thumbnail",
 	"release_max_log_level",
 	"sentry_telemetry",
