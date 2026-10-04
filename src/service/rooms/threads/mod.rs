@@ -112,17 +112,22 @@ fn update_thread_bundle_raw(
 	}
 }
 
+/// A thread root's stored `unsigned.m.relations.m.thread` bundle.
+pub(crate) fn thread_bundle(root: &mut CanonicalJsonObject) -> Option<&mut CanonicalJsonObject> {
+	["unsigned", "m.relations", "m.thread"]
+		.into_iter()
+		.try_fold(root, |object, field| match object.get_mut(field) {
+			| Some(CanonicalJsonValue::Object(child)) => Some(child),
+			| _ => None,
+		})
+}
+
 /// Update a root's bundled `m.thread.count`; `None` without a bundle or change.
 fn set_thread_count<F>(root: &mut CanonicalJsonObject, count: F) -> Option<()>
 where
 	F: FnOnce(Option<UInt>) -> Option<UInt>,
 {
-	let thread = ["unsigned", "m.relations", "m.thread"]
-		.into_iter()
-		.try_fold(root, |object, field| match object.get_mut(field) {
-			| Some(CanonicalJsonValue::Object(child)) => Some(child),
-			| _ => None,
-		})?;
+	let thread = thread_bundle(root)?;
 
 	let stored = thread
 		.get("count")
