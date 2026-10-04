@@ -59,17 +59,27 @@ its features explicitly:
 
 ```
 brotli_compression
+bzip2_compression
+console
+direct_tls
 element_hacks
 gzip_compression
 jemalloc
 jemalloc_conf
+ldap
+lz4_compression
+mas
 media_thumbnail
+oidc
 release_max_log_level
+sentry_telemetry
+synapse_admin
 url_preview
 zstd_compression
 ```
 
-That is the default set with `io_uring` and `systemd` removed.
+That is the default set with `io_uring` and `systemd` removed. The features
+added to the default set in 2.0 have not yet been tested on NetBSD.
 
 
 ## Building
@@ -79,7 +89,7 @@ export PATH=/usr/pkg/bin:/usr/pkg/sbin:$PATH
 export LIBCLANG_PATH=/usr/pkg/lib
 
 cargo build --release -p tuwunel --no-default-features \
-    --features brotli_compression,element_hacks,gzip_compression,jemalloc,jemalloc_conf,media_thumbnail,release_max_log_level,url_preview,zstd_compression
+    --features brotli_compression,bzip2_compression,console,direct_tls,element_hacks,gzip_compression,jemalloc,jemalloc_conf,ldap,lz4_compression,mas,media_thumbnail,oidc,release_max_log_level,sentry_telemetry,synapse_admin,url_preview,zstd_compression
 ```
 
 No source changes or compiler flag workarounds are needed. The pinned RocksDB
