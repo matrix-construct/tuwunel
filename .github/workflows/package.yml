@@ -80,7 +80,7 @@ jobs:
       !failure() && !cancelled()
       && fromJSON(inputs.enable_docs)
       && contains(fromJSON(inputs.cargo_profiles), fromJSON('["release"]')[0])
-      && contains(fromJSON(inputs.feat_sets), fromJSON('["all"]')[0])
+      && contains(fromJSON(inputs.feat_sets), fromJSON('["default"]')[0])
       && contains(fromJSON(inputs.rust_toolchains), fromJSON('["nightly"]')[0])
       && contains(fromJSON(inputs.sys_targets), fromJSON('["x86_64-v1-linux-gnu"]')[0])
 
@@ -89,7 +89,7 @@ jobs:
     with:
       bake_targets: '["docs"]'
       cargo_profiles: '["release"]'
-      feat_sets: '["all"]'
+      feat_sets: '["default"]'
       rust_toolchains: '["nightly"]'
       rust_targets: '["x86_64-unknown-linux-gnu"]'
       sys_names: '["debian"]'
@@ -115,7 +115,7 @@ jobs:
       !failure() && !cancelled()
       && fromJSON(inputs.enable_book)
       && contains(fromJSON(inputs.cargo_profiles), fromJSON('["release"]')[0])
-      && contains(fromJSON(inputs.feat_sets), fromJSON('["all"]')[0])
+      && contains(fromJSON(inputs.feat_sets), fromJSON('["default"]')[0])
       && contains(fromJSON(inputs.rust_toolchains), fromJSON('["stable"]')[0])
       && contains(fromJSON(inputs.sys_targets), fromJSON('["x86_64-v1-linux-gnu"]')[0])
 
@@ -124,7 +124,7 @@ jobs:
     with:
       bake_targets: '["book"]'
       cargo_profiles: '["release"]'
-      feat_sets: '["all"]'
+      feat_sets: '["default"]'
       rust_toolchains: '["stable"]'
       rust_targets: ${{inputs.rust_targets}}
       sys_names: ${{inputs.sys_names}}
@@ -217,7 +217,7 @@ jobs:
     if: >
       !failure() && !cancelled()
       && fromJSON(inputs.enable_distro)
-      && contains(fromJSON(inputs.feat_sets), fromJSON('["all"]')[0])
+      && contains(fromJSON(inputs.feat_sets), fromJSON('["default"]')[0])
       && contains(fromJSON(inputs.cargo_profiles), fromJSON('["release"]')[0])
       && contains(fromJSON(inputs.rust_toolchains), fromJSON('["stable"]')[0])
 
@@ -226,7 +226,7 @@ jobs:
     with:
       bake_targets: ${{inputs.distros}}
       cargo_profiles: '["release"]'
-      feat_sets: '["all"]'
+      feat_sets: '["default"]'
       rust_toolchains: '["stable"]'
       sys_names: ${{inputs.sys_names}}
       sys_versions: ${{inputs.sys_versions}}
@@ -262,7 +262,7 @@ jobs:
     if: >
       !failure() && !cancelled()
       && fromJSON(inputs.enable_checks)
-      && contains(fromJSON(inputs.feat_sets), fromJSON('["all"]')[0])
+      && contains(fromJSON(inputs.feat_sets), fromJSON('["default"]')[0])
       && contains(fromJSON(inputs.cargo_profiles), fromJSON('["release"]')[0])
       && contains(fromJSON(inputs.rust_toolchains), fromJSON('["stable"]')[0])
 
@@ -272,7 +272,7 @@ jobs:
     with:
       bake_targets: '["deb-install", "rpm-install"]'
       cargo_profiles: '["release"]'
-      feat_sets: '["all"]'
+      feat_sets: '["default"]'
       rust_toolchains: '["stable"]'
       sys_names: ${{inputs.sys_names}}
       sys_versions: ${{inputs.sys_versions}}
@@ -287,7 +287,7 @@ jobs:
     if: >
       !failure() && !cancelled()
       && fromJSON(inputs.enable_checks)
-      && contains(fromJSON(inputs.feat_sets), fromJSON('["all"]')[0])
+      && contains(fromJSON(inputs.feat_sets), fromJSON('["default"]')[0])
       && contains(fromJSON(inputs.cargo_profiles), fromJSON('["release"]')[0])
       && contains(fromJSON(inputs.rust_toolchains), fromJSON('["stable"]')[0])
 
@@ -296,7 +296,7 @@ jobs:
     with:
       bake_targets: '["apt-repo-install"]'
       cargo_profiles: '["release"]'
-      feat_sets: '["all"]'
+      feat_sets: '["default"]'
       rust_toolchains: '["stable"]'
       sys_names: '["debian", "ubuntu"]'
       sys_versions: '["stable-slim", "noble"]'
