@@ -72,6 +72,7 @@
     - [Complement Interoperability](development/compliance/complement-interop.md)
     - [Complemau Results](development/compliance/complemau.md)
     - [Synapse Admin API](development/compliance/synapse-admin.md)
+  - [Build Features](development/build-features.md)
   - [Testing and Delivery](development/testing.md)
     - [Docker Builder](development/testing/bake.md)
     - [Matrix Selectors](development/testing/matrix.md)
