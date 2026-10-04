@@ -29,6 +29,10 @@ logging and error handling macros, and [syn][syn] and
 - [`tuwunel_core`][tuwunel-core] is core Tuwunel functionality like config
 loading, error definitions, global utilities, logging infrastructure, etc.
 
+- [`tuwunel_matrix`][tuwunel-matrix] is the Matrix data model shared by the
+crates below it: the event and PDU types, room version rules, and the state
+resolution algorithm. It depends only on `tuwunel_core`.
+
 - [`tuwunel_database`][tuwunel-database] is RocksDB encapsulation, interface
 wrappers, configurations, and our opinionated asynchronous database frontend.
 
@@ -39,8 +43,18 @@ tasks of sending messages and notifications, etc. Each service attempts to
 encapsulate any database tables it requires for its persistent state.
 Services call other services and they do not form an acyclic graph, for now.
 
-- [`tuwunel_api`][tuwunel-api] is the stateless runtime functionality which
-implements the Matrix C-S and S-S API's in a broad set of http handlers. These
+- [`tuwunel_api`][tuwunel-api] is the contract shared by the HTTP API crates
+below it: the `Ruma` request extractor, request authentication, and the
+response types. It holds no endpoint handlers itself.
+
+- [`tuwunel_api_client`][tuwunel-api-client],
+[`tuwunel_api_federation`][tuwunel-api-federation],
+[`tuwunel_api_admin`][tuwunel-api-admin], [`tuwunel_api_oidc`][tuwunel-api-oidc]
+and [`tuwunel_api_mas`][tuwunel-api-mas] are the stateless runtime
+functionality, one crate per API surface: the Matrix Client-Server API, the
+Server-Server (federation) API, the administration endpoints (the
+Synapse-compatible admin API and the client admin endpoints), the native OpenID
+Connect provider, and the Matrix Authentication Service integration. Their http
 handlers call various services to query or update their state as necessary.
 They do not interface with raw data or database functions except through a
 service.
@@ -48,12 +62,12 @@ service.
 - [`tuwunel_admin`][tuwunel-admin] is a module that implements the admin
 room as a broad set of command API handlers. Similar to `tuwunel_api` these
 handlers also interface with various services as necessary. Currently the
-admin crate does not call into `tuwunel_api` as a dependency, but this is
+admin crate does not call into the API crates as a dependency, but this is
 not intentional and subject to change.
 
 - [`tuwunel_router`][tuwunel-router] is the webserver and request handling bits,
 using axum, tower, tower-http, hyper, etc, and the [server state][state] to
-drive the `tuwunel_api` handlers.
+drive the handlers of the API crates.
 
 - [`main`][tuwunel-main] is the binary executable. This is where the `main()`
 function lives, tokio worker and async initialisation, Sentry initialisation,
@@ -163,9 +177,15 @@ if left enabled.
 [rustdocs]: https://matrix-construct.github.io/tuwunel/docs/tuwunel
 [tuwunel-macros]: https://matrix-construct.github.io/tuwunel/docs/tuwunel_macros
 [tuwunel-core]: https://matrix-construct.github.io/tuwunel/docs/tuwunel_core
+[tuwunel-matrix]: https://matrix-construct.github.io/tuwunel/docs/tuwunel_matrix
 [tuwunel-database]: https://matrix-construct.github.io/tuwunel/docs/tuwunel_database
 [tuwunel-service]: https://matrix-construct.github.io/tuwunel/docs/tuwunel_service
 [tuwunel-api]: https://matrix-construct.github.io/tuwunel/docs/tuwunel_api
+[tuwunel-api-client]: https://matrix-construct.github.io/tuwunel/docs/tuwunel_api_client
+[tuwunel-api-federation]: https://matrix-construct.github.io/tuwunel/docs/tuwunel_api_federation
+[tuwunel-api-admin]: https://matrix-construct.github.io/tuwunel/docs/tuwunel_api_admin
+[tuwunel-api-oidc]: https://matrix-construct.github.io/tuwunel/docs/tuwunel_api_oidc
+[tuwunel-api-mas]: https://matrix-construct.github.io/tuwunel/docs/tuwunel_api_mas
 [tuwunel-admin]: https://matrix-construct.github.io/tuwunel/docs/tuwunel_admin
 [tuwunel-router]: https://matrix-construct.github.io/tuwunel/docs/tuwunel_router
 [tuwunel-main]: https://matrix-construct.github.io/tuwunel/docs/tuwunel
