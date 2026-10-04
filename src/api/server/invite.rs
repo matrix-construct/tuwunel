@@ -135,10 +135,13 @@ async fn enforce_stripped_state(
 	body: &Ruma<create_invite::v2::Request>,
 	stripped_state: &[RawStrippedState],
 ) -> Result {
-	let verdict = services
-		.membership
-		.validate_stripped_create(stripped_state, &body.room_id, &body.room_version)
-		.await?;
+	// query-depth firewall
+	let verdict = Box::pin(services.membership.validate_stripped_create(
+		stripped_state,
+		&body.room_id,
+		&body.room_version,
+	))
+	.await?;
 
 	if verdict != StrippedCreateVerdict::Valid {
 		debug_warn!(
