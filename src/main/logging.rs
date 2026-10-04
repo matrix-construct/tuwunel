@@ -48,7 +48,13 @@ pub(crate) fn init(config: &Config) -> Result<(TracingFlameGuard, Logging)> {
 		.with(cap_layer);
 
 	#[cfg(feature = "sentry_telemetry")]
-	let subscriber = subscriber.with(sentry_layer(config, &reload_handles)?);
+	let sentry = config
+		.sentry
+		.then(|| sentry_layer(config, &reload_handles))
+		.transpose()?;
+
+	#[cfg(feature = "sentry_telemetry")]
+	let subscriber = subscriber.with(sentry);
 
 	#[cfg(feature = "perf_measurements")]
 	let (subscriber, flame_guard) = {

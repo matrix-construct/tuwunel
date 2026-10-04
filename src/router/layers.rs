@@ -24,6 +24,8 @@ use http::{
 	},
 };
 use ipnet::IpNet;
+#[cfg(feature = "sentry_telemetry")]
+use sentry_tower::NewSentryLayer;
 use tower::{
 	Layer, Service, ServiceBuilder,
 	layer::util::Identity,
@@ -77,7 +79,13 @@ pub(crate) fn build(services: &Arc<Services>) -> Result<(Router, Guard)> {
 	let layers = ServiceBuilder::new();
 
 	#[cfg(feature = "sentry_telemetry")]
-	let layers = layers.layer(sentry_tower::NewSentryLayer::<http::Request<_>>::new_from_top());
+	let sentry = server
+		.config
+		.sentry
+		.then(NewSentryLayer::<Request>::new_from_top);
+
+	#[cfg(feature = "sentry_telemetry")]
+	let layers = layers.option_layer(sentry);
 
 	#[cfg(any(
 		feature = "zstd_compression",
