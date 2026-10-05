@@ -1,5 +1,6 @@
 use std::{
 	collections::{BTreeMap, BTreeSet},
+	hash::{BuildHasher, RandomState},
 	str::from_utf8,
 	sync::Arc,
 };
@@ -60,7 +61,38 @@ pub(super) enum Kind {
 	Unresolved,
 }
 
+/// The forward and reverse columns of one short-id family.
+///
+/// The forward column maps each identity to its short id, and the reverse column
+/// maps the short id back.
+#[derive(Clone, Copy)]
+struct Columns {
+	forward: &'static str,
+	reverse: &'static str,
+}
+
+/// Row count, malformed count and order-free digest of one column's pairs.
+///
+/// The digest sums a hash of each `(short, identity)` pair, so row order does
+/// not change it.
+#[derive(Default, Eq, PartialEq)]
+struct Tally {
+	rows: u64,
+	malformed: u64,
+	digest: u64,
+}
+
 const CACHE_BATCH: usize = 64;
+
+const EVENTS: Columns = Columns {
+	forward: "eventid_shorteventid",
+	reverse: "shorteventid_eventid",
+};
+
+const STATEKEYS: Columns = Columns {
+	forward: "statekey_shortstatekey",
+	reverse: "shortstatekey_statekey",
+};
 
 #[tracing::instrument(level = "debug", skip_all)]
 pub(super) async fn repair(services: &Services) -> Result<Identities> {
@@ -112,18 +144,14 @@ fn deletion(db: &Database, map: &Map, keys: impl IntoIterator<Item = impl AsRef<
 
 #[tracing::instrument(level = "debug", skip_all)]
 pub(super) async fn census(services: &Services) -> Result<Identities> {
-	let events = family(services, "eventid_shorteventid", "shorteventid_eventid").await?;
-	let statekeys = family(services, "statekey_shortstatekey", "shortstatekey_statekey").await?;
+	let events = family(services, EVENTS).await?;
+	let statekeys = family(services, STATEKEYS).await?;
 
 	Ok(Identities { events, statekeys })
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
-async fn family(
-	services: &Services,
-	forward: &'static str,
-	reverse: &'static str,
-) -> Result<Family> {
+async fn family(services: &Services, Columns { forward, reverse }: Columns) -> Result<Family> {
 	let db = &services.db;
 	let dangling = db[forward]
 		.raw_stream()
@@ -205,7 +233,7 @@ fn decode(short: &[u8], identity: &[u8]) -> (u64, Identity) {
 }
 
 fn malformed(forward: &str, short: u64, identity: &[u8]) -> bool {
-	short == 0 || !valid(identity, forward == "eventid_shorteventid")
+	short == 0 || !valid(identity, forward == EVENTS.forward)
 }
 
 fn valid(identity: &[u8], event: bool) -> bool {
@@ -457,4 +485,70 @@ async fn names(map: &Arc<Map>, short: u64, identity: &[u8]) -> Result<bool> {
 		.map(NotFound::present)
 		.await
 		.map(|value| value.as_deref() == Some(identity))
+}
+
+/// Whether each short-id family pairs its forward and reverse rows one to one.
+///
+/// It agrees with a census that finds no candidates, reading every row once in
+/// key order and never looking up its counterpart. Columns holding the same
+/// pairs tally equal row counts and digests. Only forward rows are validated,
+/// since a reverse column holding the same pairs holds no others.
+#[tracing::instrument(level = "debug", skip_all)]
+pub(super) async fn consistent(services: &Services) -> Result<bool> {
+	let hasher = RandomState::new();
+
+	Ok(paired(services, &hasher, EVENTS).await? && paired(services, &hasher, STATEKEYS).await?)
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+async fn paired(services: &Services, hasher: &RandomState, columns: Columns) -> Result<bool> {
+	let forward = tally(services, hasher, columns, columns.forward).await?;
+	let agree = forward.malformed == 0
+		&& tally(services, hasher, columns, columns.reverse).await? == forward;
+
+	Ok(agree)
+}
+
+#[tracing::instrument(
+	level = "debug",
+	skip_all,
+	fields(
+		%column,
+	),
+)]
+async fn tally(
+	services: &Services,
+	hasher: &RandomState,
+	columns: Columns,
+	column: &str,
+) -> Result<Tally> {
+	let forward = column == columns.forward;
+
+	services.db[column]
+		.raw_stream()
+		.scanned(&services.server)
+		.ready_try_fold(Tally::default(), |tally, (key, value)| {
+			let (short, identity) = match forward {
+				| true => (value, key),
+				| false => (key, value),
+			};
+
+			let short = short_of(short).unwrap_or_default();
+			let invalid = forward && malformed(columns.forward, short, identity);
+
+			Ok(tally.add(hasher, short, identity, invalid))
+		})
+		.await
+}
+
+impl Tally {
+	fn add(self, hasher: &RandomState, short: u64, identity: &[u8], invalid: bool) -> Self {
+		let digest = hasher.hash_one((short, identity));
+
+		Self {
+			rows: self.rows.saturating_add(1),
+			malformed: self.malformed.saturating_add(invalid.into()),
+			digest: self.digest.wrapping_add(digest),
+		}
+	}
 }

@@ -13,14 +13,14 @@ use tuwunel_database::{Database, Txn, TxnError};
 use super::{
 	Boundary, IDENTITY_LIMIT, MARKER, Outcome, Reason, SAMPLE_LIMIT, Sample, Shape, Status,
 	Uncertain,
-	identity::{Kind, census as identity_census, repair as repair_identities},
+	identity::{Kind, census as identity_census, consistent, repair as repair_identities},
 	references::{References, entries},
-	run, stamp, verify,
+	run, stamp, stands, verify,
 };
 use crate::{
 	Services,
 	migrations::{
-		injectivity::{SUPERSEDED, fix},
+		injectivity::{CACHE_CLEARED, SUPERSEDED, fix},
 		migrations,
 	},
 	test_utils::fixture,
@@ -101,11 +101,18 @@ async fn runner_contains_errors_and_honors_only_its_marker() -> Result {
 	assert_eq!(Outcome::decode(&global.get(MARKER).await?), Some(Outcome::clean()));
 	global.remove(MARKER);
 
+	assert!(!stands(db, || ready(Err!("family check failure"))).await);
+	assert!(!stands(db, || ready(Ok(false))).await);
+	assert_absent(db, "global", MARKER, "an unsettled check records nothing").await;
+	assert!(stands(db, || ready(Ok(true))).await);
+	assert_eq!(Outcome::decode(&global.get(MARKER).await?), Some(settled()));
+
 	global.insert(MARKER, Outcome::clean().encode()?);
 	let readonly_server = readonly_server(server)?;
 	let readonly = Database::open(&readonly_server).await?;
 
 	assert!(Boundary::writable(&readonly).is_none());
+	assert!(stands(&readonly, || ready(Ok(false))).await, "a read-only open skips unchecked");
 	let secondary_server = open_server(server, "rocksdb_secondary")?;
 	let secondary = Database::open(&secondary_server).await?;
 
@@ -217,7 +224,7 @@ async fn ordinary_ladder_repairs_independent_work_and_retains_ambiguity() -> Res
 
 #[tokio::test]
 #[tracing::instrument(level = "trace", skip_all)]
-async fn settled_databases_skip_and_legacy_markers_follow_the_record() -> Result {
+async fn settled_databases_are_checked_once_and_legacy_markers_follow_the_record() -> Result {
 	let Some(fixture) = fixture(Figment::new()).await? else {
 		return Ok(());
 	};
@@ -225,28 +232,41 @@ async fn settled_databases_skip_and_legacy_markers_follow_the_record() -> Result
 	let services = &fixture.services;
 	let db = &services.db;
 	let global = &db["global"];
+	let auth_chains = &db["authchainkey_authchain"];
 	let event_id = b"$settled:example.org";
 	let alias = 102_u64.to_be_bytes();
-	let cleared = "clear_auth_chain_cache";
 
 	seed_identity(db, EVENTS, event_id, 101);
-	db["shorteventid_eventid"].insert(&alias, event_id);
+	auth_chains.insert(&alias, alias);
 	global.remove(MARKER);
-	global.remove(cleared);
 	global.insert(SUPERSEDED, []);
+	global.insert(CACHE_CLEARED, []);
 	fix(services).await;
-	assert_absent(db, "global", MARKER, "a settled database records no outcome").await;
-	assert_absent(db, "global", cleared, "a settled database stamps nothing").await;
-	assert_stored(db, "shorteventid_eventid", &alias, event_id).await?;
-	assert_stored(db, "global", SUPERSEDED, []).await?;
+	assert_eq!(recorded(db).await, Some(settled()));
+	assert_stored(db, "authchainkey_authchain", &alias, alias).await?;
 
-	global.insert(MARKER, Outcome::clean().encode()?);
+	db["shorteventid_eventid"].insert(&alias, event_id);
 	fix(services).await;
-	assert_stored(db, "global", cleared, []).await?;
+	assert_eq!(recorded(db).await, Some(settled()));
+	assert_stored(db, "shorteventid_eventid", &alias, event_id).await?;
+
+	global.remove(MARKER);
+	fix(services).await;
+	assert_eq!(recorded(db).await, Some(Outcome::clean()));
+	assert_absent(db, "shorteventid_eventid", &alias, "a disagreeing family is repaired").await;
+	assert_absent(db, "authchainkey_authchain", &alias, "the full repair clears the cache").await;
+
+	auth_chains.insert(&alias, alias);
+	global.remove(MARKER);
+	global.remove(CACHE_CLEARED);
+	fix(services).await;
+	assert_eq!(recorded(db).await, Some(Outcome::clean()));
+	assert_absent(db, "authchainkey_authchain", &alias, "an uncleared cache is repaired").await;
+	assert_stored(db, "global", CACHE_CLEARED, []).await?;
+
 	global.remove(SUPERSEDED);
 	fix(services).await;
 	assert_stored(db, "global", SUPERSEDED, []).await?;
-	assert_stored(db, "shorteventid_eventid", &alias, event_id).await?;
 
 	global.remove(MARKER);
 	global.remove(SUPERSEDED);
@@ -254,6 +274,44 @@ async fn settled_databases_skip_and_legacy_markers_follow_the_record() -> Result
 	fix(services).await;
 	assert_absent(db, "global", MARKER, "an interrupted repair records no outcome").await;
 	assert_absent(db, "global", SUPERSEDED, "an interrupted repair stays eligible").await;
+
+	global.insert(SUPERSEDED, []);
+	fix(services).await;
+	assert_absent(db, "global", MARKER, "an interrupted check records no outcome").await;
+
+	Ok(())
+}
+
+#[tokio::test]
+#[tracing::instrument(level = "trace", skip_all)]
+async fn family_check_rejects_malformed_mismatched_and_statekey_pairs() -> Result {
+	let Some(fixture) = fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+
+	let services = &fixture.services;
+	let db = &services.db;
+	let forward = &db["eventid_shorteventid"];
+	let reverse = &db["shorteventid_eventid"];
+	let malformed = b"not an event id";
+	let event_id = b"$forward:example.org";
+	let short = 105_u64.to_be_bytes();
+
+	assert!(consistent(services).await?, "a fresh database agrees");
+	seed_identity(db, EVENTS, malformed, 105);
+	assert!(!consistent(services).await?, "a malformed pair fails its family");
+
+	forward.remove(malformed);
+	forward.insert(event_id, short);
+	reverse.insert(&short, b"$reverse:example.org");
+	assert!(!consistent(services).await?, "equal counts with different pairs disagree");
+
+	forward.remove(event_id);
+	reverse.remove(&short);
+	seed_identity(db, STATEKEYS, b"m.room.name\xff", 201);
+	assert!(consistent(services).await?, "paired rows agree");
+	db["shortstatekey_statekey"].insert(&202_u64.to_be_bytes(), b"m.room.topic\xff");
+	assert!(!consistent(services).await?, "a statekey disagreement fails");
 
 	Ok(())
 }
@@ -563,6 +621,16 @@ fn marker_decode_contract() -> Result {
 	let bytes = clean.encode()?;
 
 	assert_eq!(Outcome::decode(&bytes), Some(clean));
+
+	let bytes = settled().encode()?;
+	let residue = br#"{"version":1,"status":"superseded","counts":[1,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"samples":[],"truncated":false}"#;
+
+	assert_eq!(Outcome::decode(&bytes), Some(settled()));
+	assert!(Outcome::decode(residue).is_none());
+	Outcome { truncated: true, ..settled() }
+		.encode()
+		.expect_err("a settlement carries no residue");
+
 	// A legacy decline record must never read as this repair's completion.
 	assert_ne!(MARKER, "fix_short_injectivity");
 	assert!(Outcome::decode(b"").is_none());
@@ -824,6 +892,22 @@ fn count(outcome: &Outcome, shape: Shape) -> u64 {
 		.and_then(|slot| outcome.counts.get(slot))
 		.copied()
 		.expect("every shape has a count slot")
+}
+
+async fn recorded(db: &Database) -> Option<Outcome> {
+	db["global"]
+		.get(MARKER)
+		.await
+		.ok()
+		.as_deref()
+		.and_then(Outcome::decode)
+}
+
+fn settled() -> Outcome {
+	Outcome {
+		status: Status::Superseded,
+		..Outcome::clean()
+	}
 }
 
 fn seed_aliases<I>(

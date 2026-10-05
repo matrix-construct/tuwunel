@@ -11,7 +11,10 @@ use tuwunel_core::{
 use tuwunel_database::{Database, Json, Txn, keyval::ValBuf, serialize_key, serialize_val};
 
 use self::{
-	identity::{Family, Kind, census as census_identities, cleanup, repair as repair_identities},
+	identity::{
+		Family, Kind, census as census_identities, cleanup, consistent,
+		repair as repair_identities,
+	},
 	references::References,
 	rooms::{inspect as inspect_rooms, repair as repair_rooms},
 	state::{
@@ -71,8 +74,14 @@ pub(super) struct Outcome {
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 enum Status {
+	/// The repair verified that no residue remains.
 	Clean,
+
+	/// The repair left residue, which the counts and samples describe.
 	Unfinished,
+
+	/// The superseded repair settled the database and its short-id families agree.
+	Superseded,
 }
 
 /// Residue a completed repair leaves behind, as its outcome records it.
@@ -203,6 +212,54 @@ impl TryFrom<u8> for Shape {
 	}
 }
 
+/// Records the superseded repair's settlement when the short-id families agree.
+///
+/// Returns whether the settlement stands; disagreement or a failed check leaves
+/// the full repair to run.
+#[tracing::instrument(level = "debug", skip_all)]
+pub(super) async fn settle(services: &Services) -> bool {
+	stands(&services.db, async || {
+		services.server.progress.begin(MARKER);
+		consistent(services).await
+	})
+	.await
+}
+
+/// Runs the repair unless a recognized outcome is already recorded.
+///
+/// The repair must finish its durability barriers and uncached verification
+/// before returning, and its outcome is recorded only after another sync. A
+/// read-only open or any error leaves completion unestablished without failing
+/// startup.
+#[tracing::instrument(level = "debug", skip_all)]
+pub(super) async fn run(
+	db: &Database,
+	repair: impl AsyncFnOnce() -> Result<Outcome>,
+) -> Option<Outcome> {
+	Boundary::writable(db)?
+		.attempt(repair)
+		.await
+		.inspect_err(|error| {
+			warn!(%error, "Injectivity repair interrupted; completion remains unestablished.");
+		})
+		.ok()
+		.flatten()
+}
+
+/// Records a clean outcome for a fresh database without scanning it.
+///
+/// The record is written and synced before it counts. A read-only open or a
+/// failed write or sync returns `None` and leaves completion unestablished.
+#[tracing::instrument(level = "debug", skip_all)]
+pub(super) fn stamp(db: &Database) -> Option<Outcome> {
+	Boundary::writable(db)?
+		.stamp(Status::Clean)
+		.inspect_err(|error| {
+			warn!(%error, "Injectivity clean stamp failed; completion remains unestablished.");
+		})
+		.ok()
+}
+
 /// Completes independent repair passes and verifies their residual populations.
 ///
 /// Fresh identity and reference censuses precede final alias reclamation. Every
@@ -330,39 +387,40 @@ fn uncertain(self, shape: Shape, unknown: bool, reason: Reason) -> Result<Self> 
 	self.residue(shape, u64::from(unknown), &[], reason)
 }
 
-/// Runs the repair unless a recognized outcome is already recorded.
+/// Whether the settlement stands, recording it when the check agrees.
 ///
-/// The repair must finish its durability barriers and uncached verification
-/// before returning, and its outcome is recorded only after another sync. A
-/// read-only open or any error leaves completion unestablished without failing
-/// startup.
+/// The record claims only that agreement. A read-only open is left unchecked,
+/// and a failed record leaves the check to the next start.
 #[tracing::instrument(level = "debug", skip_all)]
-pub(super) async fn run(
-	db: &Database,
-	repair: impl AsyncFnOnce() -> Result<Outcome>,
-) -> Option<Outcome> {
-	Boundary::writable(db)?
-		.attempt(repair)
-		.await
-		.inspect_err(|error| {
-			warn!(%error, "Injectivity repair interrupted; completion remains unestablished.");
-		})
-		.ok()
-		.flatten()
-}
+async fn stands(db: &Database, check: impl AsyncFnOnce() -> Result<bool>) -> bool {
+	let Some(boundary) = Boundary::writable(db) else {
+		return true;
+	};
 
-/// Records a clean outcome for a fresh database without scanning it.
-///
-/// The record is written and synced before it counts. A read-only open or a
-/// failed write or sync returns `None` and leaves completion unestablished.
-#[tracing::instrument(level = "debug", skip_all)]
-pub(super) fn stamp(db: &Database) -> Option<Outcome> {
-	Boundary::writable(db)?
-		.stamp()
-		.inspect_err(|error| {
-			warn!(%error, "Injectivity clean stamp failed; completion remains unestablished.");
+	let Ok(agree) = check().await.inspect_err(|error| {
+		if !error.is_interrupted() {
+			warn!(%error, "Short id family check failed; running the full repair.");
+		}
+	}) else {
+		return false;
+	};
+
+	if !agree {
+		warn!("Short id families disagree after the superseded repair; running the full repair.");
+		return false;
+	}
+
+	boundary
+		.stamp(Status::Superseded)
+		.inspect(|_| {
+			info!("Short id families verified; the superseded repair's settlement stands.");
 		})
-		.ok()
+		.inspect_err(|error| {
+			warn!(%error, "Injectivity settlement record failed; the check repeats on the next start.");
+		})
+		.ok();
+
+	true
 }
 
 #[implement(Boundary, generics = "<'a>", params = "<'a>")]
@@ -421,8 +479,8 @@ async fn attempt(
 
 #[implement(Boundary, params = "<'_>")]
 #[tracing::instrument(level = "debug", skip_all)]
-fn stamp(&self) -> Result<Outcome> {
-	let outcome = Outcome::clean();
+fn stamp(&self, status: Status) -> Result<Outcome> {
+	let outcome = Outcome { status, ..Outcome::clean() };
 
 	self.record(outcome.encode()?)?;
 
@@ -510,7 +568,7 @@ fn valid(&self) -> bool {
 			.all(|sample| sample.identity.len() <= IDENTITY_LIMIT)
 		&& match self.status {
 			| Status::Unfinished => self.counts.iter().any(|count| *count > 0),
-			| Status::Clean =>
+			| Status::Clean | Status::Superseded =>
 				self.counts == [0; SHAPES.len()] && self.samples.is_empty() && !self.truncated,
 		}
 }
