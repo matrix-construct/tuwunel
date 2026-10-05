@@ -5,6 +5,7 @@
 
 use std::sync::Arc;
 
+use futures::StreamExt;
 use ruma::{EventId, RoomId, UserId, event_id, events::StateEventType, room_id, user_id};
 use serde_json::{Value, json};
 use tuwunel_core::{Result, config::Figment};
@@ -69,6 +70,30 @@ async fn redaction_authority_does_not_cross_room_boundaries() -> Result {
 				.expect_err("protected state event");
 		}
 	}
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn equal_hash_state_delta_is_empty() -> Result {
+	let Some(fixture) = fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+
+	let services = &fixture.services;
+	let ids = seed(services).await?;
+	let hash = services
+		.state
+		.get_room_shortstatehash(ids.room)
+		.await?;
+
+	let added: Vec<_> = services
+		.state_accessor
+		.state_added((hash, hash))
+		.collect()
+		.await;
+
+	assert_eq!(added, []);
 
 	Ok(())
 }

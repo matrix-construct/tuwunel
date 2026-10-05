@@ -7,6 +7,7 @@ use std::{ops::Deref, sync::Arc};
 
 use futures::{
 	FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt, future::try_join, pin_mut,
+	stream::empty,
 };
 use ruma::{
 	OwnedEventId, UserId,
@@ -364,6 +365,10 @@ pub fn state_added(
 	&self,
 	shortstatehash: pair_of!(ShortStateHash),
 ) -> impl Stream<Item = (ShortStateKey, ShortEventId)> + Send + '_ {
+	if shortstatehash.0 == shortstatehash.1 {
+		return empty().left_stream();
+	}
+
 	let a = self.load_full_state(shortstatehash.0);
 	let b = self.load_full_state(shortstatehash.1);
 	try_join(a, b)
@@ -372,6 +377,7 @@ pub fn state_added(
 		.try_flatten_stream()
 		.ignore_err()
 		.map(parse_compressed_state_event)
+		.right_stream()
 }
 
 /// Streams resolvable keyed events from a state snapshot.
