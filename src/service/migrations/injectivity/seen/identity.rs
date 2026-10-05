@@ -5,7 +5,10 @@ use std::{
 	sync::Arc,
 };
 
-use futures::{FutureExt, StreamExt, TryStreamExt, future::lazy};
+use futures::{
+	FutureExt, StreamExt, TryStreamExt,
+	future::{lazy, try_join},
+};
 use ruma::EventId;
 use tuwunel_core::{
 	Result, err,
@@ -105,9 +108,11 @@ pub(super) async fn repair(services: &Services) -> Result<Identities> {
 
 	let references = References::census(services, &identities).await?;
 
-	cleanup(services, &identities.events, &references.events, references.event_complete).await?;
+	let events =
+		cleanup(services, &identities.events, &references.events, references.event_complete)
+			.await?;
 
-	cleanup(
+	let statekeys = cleanup(
 		services,
 		&identities.statekeys,
 		&references.statekeys,
@@ -115,7 +120,10 @@ pub(super) async fn repair(services: &Services) -> Result<Identities> {
 	)
 	.await?;
 
-	census(services).await
+	match events || statekeys {
+		| false => Ok(identities),
+		| true => census(services).await,
+	}
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -331,8 +339,8 @@ async fn count_reverse_claims(
 async fn heal(services: &Services, identities: &Identities) -> Result<bool> {
 	let db = &services.db;
 	let Identities { events, statekeys } = identities;
-	let event_heals = admissible(db, events, healable).await?;
-	let statekey_heals = admissible(db, statekeys, healable).await?;
+	let (event_heals, statekey_heals) =
+		try_join(admissible(db, events, healable), admissible(db, statekeys, healable)).await?;
 
 	if event_heals.len() == 0 && statekey_heals.len() == 0 {
 		return Ok(false);
@@ -372,9 +380,9 @@ pub(super) async fn cleanup(
 	family: &Family,
 	references: &BTreeSet<u64>,
 	complete: bool,
-) -> Result {
+) -> Result<bool> {
 	if !complete {
-		return Ok(());
+		return Ok(false);
 	}
 
 	let db = &services.db;
@@ -386,9 +394,12 @@ pub(super) async fn cleanup(
 		.await?
 		.map(|candidate| candidate.short.to_be_bytes());
 
+	let changed = keys.len() != 0;
+
 	services.server.check_running()?;
 	deletion(db, &db[family.reverse], keys)
 		.try_execute()
+		.map(|()| changed)
 		.map_err(Into::into)
 }
 

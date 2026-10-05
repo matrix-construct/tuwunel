@@ -121,8 +121,11 @@ struct Diff {
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
-pub(super) async fn repair(services: &Services, identities: &Identities) -> Result<States> {
-	let census = survey(services, identities).await?;
+pub(super) async fn repair(
+	services: &Services,
+	identities: Identities,
+) -> Result<(States, Identities)> {
+	let census = survey(services, &identities).await?;
 	let affected = descendants(&census.parents, &census.seeds);
 	let uncertain = census.unknown || !census.held.is_empty();
 	let pending = |unfinished| States {
@@ -135,7 +138,7 @@ pub(super) async fn repair(services: &Services, identities: &Identities) -> Resu
 	};
 
 	if census.unknown {
-		return Ok(pending(affected));
+		return Ok((pending(affected), identities));
 	}
 
 	// The summaries clear before any snapshot or reinstated reverse row is written.
@@ -144,11 +147,14 @@ pub(super) async fn repair(services: &Services, identities: &Identities) -> Resu
 	}
 
 	let recovered = recover(services, &census).await?;
+	let identities = match recovered.is_empty() {
+		| true => identities,
+		| false => census_identities(services).await?,
+	};
 
 	let projection = match recovered.is_empty() {
 		| true => census.projection,
 		| false => {
-			let identities = census_identities(services).await?;
 			let statekeys = mapping(services, &identities.statekeys).await?;
 
 			with_recovered(census.projection, &recovered, statekeys)
@@ -216,7 +222,7 @@ pub(super) async fn repair(services: &Services, identities: &Identities) -> Resu
 	order
 		.try_stream()
 		.try_fold((pending(affected), blocked), publish_next)
-		.map_ok(|(states, _)| states)
+		.map_ok(|(states, _)| (states, identities))
 		.await
 }
 
@@ -340,14 +346,17 @@ async fn inspect_half(
 
 #[tracing::instrument(level = "trace", skip_all)]
 async fn survey(services: &Services, identities: &Identities) -> Result<Census> {
-	let statekeys = mapping(services, &identities.statekeys).await?;
-	let events = mapping(services, &identities.events).await?;
+	let (statekeys, events) =
+		try_join(mapping(services, &identities.statekeys), mapping(services, &identities.events))
+			.await?;
 
 	census(services, Projection { statekeys, events }).await
 }
 
 #[tracing::instrument(level = "trace", skip_all)]
 async fn census(services: &Services, projection: Projection) -> Result<Census> {
+	let statekeys = presence(services, "shortstatekey_statekey").await?;
+	let events = presence(services, "shorteventid_eventid").await?;
 	let initial = Census {
 		parents: Parents::new(),
 		seeds: BTreeSet::new(),
@@ -368,17 +377,27 @@ async fn census(services: &Services, projection: Projection) -> Result<Census> {
 			diff: decode(value),
 			absences: Absences::new(),
 		})
-		// Serial: a row's entries already fan out, and that fan-out is the concurrency budget.
-		.try_fold(initial, async |census, scanned| {
-			tally(census, scan(&services.db, scanned).await?)
+		.ready_try_fold(initial, |census, scanned| {
+			tally(census, scan(&statekeys, &events, scanned))
 		})
 		.await
 }
 
 #[tracing::instrument(level = "trace", skip_all)]
-async fn scan(db: &Database, scanned: Scanned) -> Result<Scanned> {
+async fn presence(services: &Services, column: &str) -> Result<Vec<u64>> {
+	// Exact big-endian keys retain numeric order, regardless of their values' validity.
+	services.db[column]
+		.raw_keys()
+		.scanned(&services.server)
+		.ready_try_filter_map(|key| Ok(short_of(key)))
+		.try_collect()
+		.await
+}
+
+#[tracing::instrument(level = "trace", skip_all)]
+fn scan(statekeys: &[u64], events: &[u64], scanned: Scanned) -> Scanned {
 	let Some(diff) = scanned.diff.as_ref() else {
-		return Ok(scanned);
+		return scanned;
 	};
 
 	let absences = diff
@@ -386,25 +405,20 @@ async fn scan(db: &Database, scanned: Scanned) -> Result<Scanned> {
 		.iter()
 		.chain(&diff.removed)
 		.copied()
-		.try_stream()
-		.broad_and_then(|entry| absence(db, entry))
-		.ready_try_filter(|(_, _, key_missing, event_missing)| *key_missing || *event_missing)
-		.try_collect()
-		.await?;
+		.map(|entry| absence(statekeys, events, entry))
+		.filter(|(_, _, key_missing, event_missing)| *key_missing || *event_missing)
+		.collect();
 
-	Ok(Scanned { absences, ..scanned })
+	Scanned { absences, ..scanned }
 }
 
 #[tracing::instrument(level = "trace", skip_all)]
-async fn absence(db: &Database, entry: CompressedStateEvent) -> Result<Absence> {
+fn absence(statekeys: &[u64], events: &[u64], entry: CompressedStateEvent) -> Absence {
 	let (key, event) = parse_compressed_state_event(entry);
-	let (key_present, event_present) = try_join(
-		present(db, "shortstatekey_statekey", &key.to_be_bytes()),
-		present(db, "shorteventid_eventid", &event.to_be_bytes()),
-	)
-	.await?;
+	let key_missing = statekeys.binary_search(&key).is_err();
+	let event_missing = events.binary_search(&event).is_err();
 
-	Ok((key, event, !key_present, !event_present))
+	(key, event, key_missing, event_missing)
 }
 
 fn tally(census: Census, Scanned { id, parent, diff, absences }: Scanned) -> Result<Census> {
@@ -479,6 +493,10 @@ fn index(mut census: Census, id: Option<u64>, parent: Option<u64>, seed: bool) -
 }
 
 fn descendants(parents: &Parents, seeds: &BTreeSet<u64>) -> BTreeSet<u64> {
+	if seeds.is_empty() {
+		return BTreeSet::new();
+	}
+
 	parents
 		.keys()
 		.copied()
@@ -516,6 +534,10 @@ fn block(mut blocked: BTreeSet<u64>, parents: &Parents, id: u64) -> BTreeSet<u64
 
 #[tracing::instrument(level = "trace", skip_all)]
 async fn digests(services: &Services, affected: &BTreeSet<u64>) -> Result<Claimed> {
+	if affected.is_empty() {
+		return Ok(Claimed::new());
+	}
+
 	let gather = |mut digests: Claimed, (key, value): (&[u8], &[u8])| {
 		let Some(id) = claim(value).filter(|id| affected.contains(id)) else {
 			return Ok(digests);

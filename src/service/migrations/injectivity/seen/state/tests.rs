@@ -10,10 +10,10 @@ use tuwunel_database::Database;
 
 use super::{
 	super::identity::{census as census_identities, repair as repair_identities},
-	Census, CompressedState, Mapping, Parents, Projection, States, apply, census, decode, depth,
-	digests,
+	Absences, Census, CompressedState, Mapping, Parents, Projection, Scanned, States, apply,
+	census, decode, depth, digests,
 	history::{allowed, read_error, references as history_references},
-	index, mapping, materialize, publish, repair, target,
+	index, mapping, materialize, presence, publish, repair, scan, target,
 };
 use crate::{
 	Services,
@@ -62,6 +62,52 @@ fn strict_framing_and_actual_parentless_semantics() {
 
 #[tokio::test]
 #[tracing::instrument(level = "trace", skip_all)]
+async fn reverse_presence_uses_exact_keys_and_refreshes_after_writes() -> Result {
+	let Some(fixture) = fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+
+	let services = &fixture.services;
+	let db = &services.db;
+	let keys = &db["shortstatekey_statekey"];
+	let events = &db["shorteventid_eventid"];
+
+	keys.insert(&10_u64.to_be_bytes(), b"");
+	keys.insert(&[words(&[11]), vec![99]].concat(), b"malformed tail");
+	events.insert(&20_u64.to_be_bytes(), b"invalid identity");
+
+	let key_presence = presence(services, "shortstatekey_statekey").await?;
+	let event_presence = presence(services, "shorteventid_eventid").await?;
+
+	assert_eq!(key_presence, [10]);
+	assert_eq!(event_presence, [20]);
+
+	let row = || Scanned {
+		id: Some(1000),
+		parent: Some(0),
+		diff: decode(&diff(0, &[(10, 20), (11, 20)], &[(10, 21)])),
+		absences: Absences::new(),
+	};
+
+	let scanned = scan(&key_presence, &event_presence, row());
+
+	assert_eq!(scanned.absences, [(11, 20, true, false), (10, 21, false, true)]);
+
+	keys.insert(&11_u64.to_be_bytes(), b"");
+	events.remove(&20_u64.to_be_bytes());
+	events.insert(&21_u64.to_be_bytes(), b"");
+
+	let key_presence = presence(services, "shortstatekey_statekey").await?;
+	let event_presence = presence(services, "shorteventid_eventid").await?;
+	let scanned = scan(&key_presence, &event_presence, row());
+
+	assert_eq!(scanned.absences, [(10, 20, false, true), (11, 20, false, true)]);
+
+	Ok(())
+}
+
+#[tokio::test]
+#[tracing::instrument(level = "trace", skip_all)]
 async fn snapshots_preserve_original_logical_state_and_all_descendants() -> Result {
 	let Some(fixture) = fixture(Figment::new()).await? else {
 		return Ok(());
@@ -94,7 +140,7 @@ async fn snapshots_preserve_original_logical_state_and_all_descendants() -> Resu
 		.insert(1200, vec![ShortStateInfo::default()]);
 
 	let repaired = repair_identities(services).await?;
-	let states = repair(services, &repaired).await?;
+	let (states, _) = repair(services, repaired).await?;
 
 	assert!(states.unfinished.is_empty());
 	assert!(!states.uncertain);
@@ -167,7 +213,7 @@ async fn uncertain_branches_retain_ancestors_while_proven_children_detach() -> R
 		insert_diff(db, *id, row);
 	}
 
-	let states = repair(services, &repair_identities(services).await?).await?;
+	let (states, _) = repair(services, repair_identities(services).await?).await?;
 
 	assert_eq!(states.rewritten, 2, "safe child and disjoint row repair independently");
 
@@ -269,7 +315,15 @@ async fn recoverable_key_orphans_keep_durable_identity_and_ambiguous_orphans_sta
 		insert_diff(db, *id, row);
 	}
 
-	let states = repair(services, &repair_identities(services).await?).await?;
+	let (states, identities) = repair(services, repair_identities(services).await?).await?;
+
+	assert!(
+		identities
+			.statekeys
+			.candidates
+			.iter()
+			.any(|candidate| candidate.short == 30)
+	);
 
 	assert_eq!(states.rewritten, 2);
 	let stored = db["shortstatekey_statekey"]
@@ -318,7 +372,7 @@ async fn recoverable_key_orphans_keep_durable_identity_and_ambiguous_orphans_sta
 	let orphan = words(&[0, 33, 101]);
 
 	db["shortstatehash_statediff"].insert(&5000_u64.to_be_bytes(), &orphan);
-	let held = repair(services, &census_identities(services).await?).await?;
+	let (held, _) = repair(services, census_identities(services).await?).await?;
 
 	assert_eq!(held.rewritten, 0, "new alias admission checks its winner's hidden claimant");
 	assert!(held.unfinished.contains(&5000));
@@ -741,7 +795,9 @@ fn entries(pairs: &[(u64, u64)]) -> impl Iterator<Item = u64> + '_ {
 
 #[tracing::instrument(level = "trace", skip_all)]
 async fn rerun(services: &Services) -> Result<States> {
-	repair(services, &census_identities(services).await?).await
+	let (states, _) = repair(services, census_identities(services).await?).await?;
+
+	Ok(states)
 }
 
 fn accepted_pdu(db: &Database, short: u64, kind: &str) {

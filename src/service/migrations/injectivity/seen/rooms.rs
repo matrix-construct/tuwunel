@@ -3,7 +3,10 @@ use std::{
 	str::from_utf8,
 };
 
-use futures::{Stream, StreamExt, TryStreamExt, future::ready};
+use futures::{
+	Stream, StreamExt, TryStreamExt,
+	future::{ready, try_join},
+};
 use publication::{Applied, apply};
 use rows::{COLUMNS, SCANNED, decode, hints, word};
 use ruma::RoomId;
@@ -290,13 +293,13 @@ async fn classify(
 	}
 
 	let forward =
-		lookup(&services.db, "roomid_shortroomid", room.as_bytes(), |forward| forward.map(word))
-			.await?;
+		lookup(&services.db, "roomid_shortroomid", room.as_bytes(), |forward| forward.map(word));
 
 	let pointer = lookup(&services.db, "roomid_shortstatehash", room.as_bytes(), |pointer| {
 		pointer.is_some()
-	})
-	.await?;
+	});
+
+	let (forward, pointer) = try_join(forward, pointer).await?;
 
 	let movable = |id: &u64| {
 		*id != 0

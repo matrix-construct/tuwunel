@@ -262,8 +262,8 @@ pub(super) fn stamp(db: &Database) -> Option<Outcome> {
 
 /// Completes independent repair passes and verifies their residual populations.
 ///
-/// Fresh identity and reference censuses precede final alias reclamation. Every
-/// final inspection is read-only and uses committed raw rows.
+/// Identity mutations refresh the census before final alias reclamation. Every
+/// final inspection is read-only and uses freshly scanned committed raw rows.
 // query-depth firewall
 #[async_noinline]
 #[tracing::instrument(level = "debug", skip_all)]
@@ -274,7 +274,7 @@ pub(super) async fn repair(services: &Services) -> Result<Outcome> {
 	let identities = repair_identities(services).await?;
 
 	progress.enter("state snapshots");
-	let states = repair_states(services, &identities).await?;
+	let (states, identities) = repair_states(services, identities).await?;
 
 	progress.enter("unreachable states");
 	let collected = collect(services).await?;
@@ -283,7 +283,6 @@ pub(super) async fn repair(services: &Services) -> Result<Outcome> {
 	let rooms = repair_rooms(services).await?;
 
 	progress.enter("references");
-	let identities = census_identities(services).await?;
 	let references = References::census(services, &identities).await?;
 
 	cleanup(services, &identities.events, &references.events, references.event_complete).await?;
