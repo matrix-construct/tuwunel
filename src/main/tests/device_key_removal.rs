@@ -2,14 +2,15 @@
 
 use std::{fs::remove_dir_all, net::TcpListener};
 
-use futures::future::join;
+use futures::{future::join, pin_mut, poll};
 use reqwest::{Method, RequestBuilder, Response, StatusCode};
 use serde_json::{Value, from_value, json};
+use tokio::task::{JoinSet, consume_budget, coop::has_budget_remaining};
 use tuwunel::{Args, Runtime, Server, async_run, async_start, async_stop};
 use tuwunel_core::{
 	Result,
 	ruma::{
-		UserId, device_id,
+		OneTimeKeyAlgorithm, UserId, device_id,
 		serde::{Base64, base64::Standard},
 	},
 };
@@ -102,6 +103,9 @@ async fn exercise(services: &Services, base: &str) -> Result {
 		.await?;
 
 	let client = Client { services, base, token: ACCESS_TOKEN };
+
+	concurrent_claims_consume_one_otk_once(&client, &user_id).await?;
+
 	let original = device_keys(&user_id, 1);
 	let uploaded = upload(&client, &original).await?;
 
@@ -152,6 +156,63 @@ async fn exercise(services: &Services, base: &str) -> Result {
 		StatusCode::FORBIDDEN,
 		"a device ID naming a cross-signing key must be refused",
 	);
+
+	Ok(())
+}
+
+async fn concurrent_claims_consume_one_otk_once(client: &Client<'_>, user_id: &UserId) -> Result {
+	let key = encoded(4, 32);
+	let body = json!({"one_time_keys": {"curve25519:only": key}});
+
+	request(client, Some(client.token), Method::POST, "keys/upload", &body)
+		.await?
+		.error_for_status()?;
+
+	let users = client.services.users.clone();
+	let claimant = user_id.to_owned();
+	let mut claims = JoinSet::new();
+
+	claims.spawn_on(
+		async move {
+			let algorithm = OneTimeKeyAlgorithm::from("curve25519");
+			let claim = || users.take_one_time_key(&claimant, device_id!(DEVICE), &algorithm);
+			let first = claim();
+			let second = claim();
+
+			pin_mut!(first, second);
+
+			// Drained budget models a blocking-pool seek, positioning both claims before deletion.
+			while has_budget_remaining() {
+				consume_budget().await;
+			}
+
+			assert!(poll!(first.as_mut()).is_pending());
+			assert!(poll!(second.as_mut()).is_pending());
+
+			join(first, second).await
+		},
+		client.services.server.runtime(),
+	);
+
+	let (first, second) = claims
+		.join_next()
+		.await
+		.expect("claims")
+		.expect("claim task");
+
+	assert_ne!(first.is_ok(), second.is_ok(), "exactly one claim consumes the row");
+
+	let (id, claimed) = first.or(second)?;
+
+	assert_eq!(id.as_str(), "curve25519:only");
+	assert_eq!(claimed.json().get(), json!(key).to_string());
+	let remaining = client
+		.services
+		.users
+		.take_one_time_key(user_id, device_id!(DEVICE), &OneTimeKeyAlgorithm::from("curve25519"))
+		.await;
+
+	assert!(remaining.is_err(), "the one-time key pool is depleted");
 
 	Ok(())
 }

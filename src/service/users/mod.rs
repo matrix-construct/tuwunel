@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use futures::{Stream, StreamExt, TryFutureExt};
 use ruma::{
-	MilliSecondsSinceUnixEpoch, OwnedUserId, UserId,
+	MilliSecondsSinceUnixEpoch, OwnedDeviceId, OwnedUserId, UserId,
 	api::client::filter::FilterDefinition,
 	events::{
 		GlobalAccountDataEventType,
@@ -55,6 +55,8 @@ pub struct Service {
 	services: Arc<crate::services::OnceServices>,
 	db: Data,
 	device_list_mutex: MutexMap<OwnedUserId, ()>,
+	// Entries live only while claims for a user/device hold or await the lock.
+	claiming_one_time_keys: MutexMap<(OwnedUserId, OwnedDeviceId), ()>,
 }
 
 struct Data {
@@ -94,6 +96,7 @@ impl crate::Service for Service {
 		Ok(Arc::new(Self {
 			services: args.services.clone(),
 			device_list_mutex: MutexMap::new(),
+			claiming_one_time_keys: MutexMap::new(),
 			db: Data {
 				keychangeid_devicechange: args.db["keychangeid_devicechange"].clone(),
 				keychangeid_userid: args.db["keychangeid_userid"].clone(),

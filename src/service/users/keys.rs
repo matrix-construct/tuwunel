@@ -355,6 +355,11 @@ pub async fn take_one_time_key(
 		.insert(user_id, update_count.to_be_bytes());
 
 	let prefix = (user_id, device_id, Interfix);
+	let _guard = self
+		.claiming_one_time_keys
+		.lock(&(user_id.to_owned(), device_id.to_owned()))
+		.await;
+
 	let one_time_keys = otk
 		.stream_prefix(&prefix)
 		.ignore_err()
