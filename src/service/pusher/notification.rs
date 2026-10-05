@@ -279,6 +279,26 @@ pub async fn last_notification_read(&self, user_id: &UserId, room_id: &RoomId) -
 		.deserialized()
 }
 
+/// Read the last notification watermark for one thread.
+///
+/// Uses the same room, user and thread key as thread count resets.
+#[implement(super::Service)]
+#[tracing::instrument(level = "debug", skip(self), ret(level = "trace"))]
+pub async fn last_thread_notification_read(
+	&self,
+	user_id: &UserId,
+	room_id: &RoomId,
+	thread_root: &EventId,
+) -> Result<u64> {
+	let key = (room_id, user_id, thread_root);
+
+	self.db
+		.roomuserid_lastnotificationread
+		.qry(&key)
+		.await
+		.deserialized()
+}
+
 /// Per-thread last-read counts for one room and user. `Interfix` keeps the
 /// scan to 3-tuple `(room, user, root)` rows; the legacy 2-tuple main row
 /// is excluded by construction and lives behind `last_notification_read`.

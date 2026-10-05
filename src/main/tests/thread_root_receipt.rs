@@ -91,11 +91,11 @@ async fn exercise(services: &Services, base: &str) -> Result {
 		.reply(&room, "reply-a", &root_a, &reader_id)
 		.await?;
 
-	let _reply_b = sender
+	let reply_b = sender
 		.reply(&room, "reply-b", &root_b, &reader_id)
 		.await?;
 
-	let _main = sender
+	let main = sender
 		.message(&room, "main", "main unread")
 		.await?;
 
@@ -155,9 +155,10 @@ async fn exercise(services: &Services, base: &str) -> Result {
 		return Err!("the advancing thread-root receipt was not stored");
 	}
 
-	reader
-		.receipt(&room, &reply_a, Some(&root_a))
-		.await?;
+	thread_receipt_marks_only_its_notifications_read(
+		&reader, &room, &root_a, &reply_a, &reply_b, &main,
+	)
+	.await?;
 
 	let threads_after = services
 		.pusher
@@ -183,6 +184,75 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	}
 
 	Ok(())
+}
+
+#[tracing::instrument(level = "trace", skip_all)]
+async fn thread_receipt_marks_only_its_notifications_read(
+	reader: &Client<'_>,
+	room: &RoomId,
+	root_a: &EventId,
+	reply_a: &EventId,
+	reply_b: &EventId,
+	main: &EventId,
+) -> Result {
+	let before = reader.notifications().await?;
+
+	if notification_read(&before, reply_a)? {
+		return Err!("thread A notification was already read before its receipt");
+	}
+
+	reader
+		.receipt(room, reply_a, Some(root_a))
+		.await?;
+
+	let after = reader.notifications().await?;
+
+	if !notification_read(&after, reply_a)? {
+		return Err!("thread A notification was not read after its receipt");
+	}
+
+	for event in [reply_b, main] {
+		if notification_read(&after, event)? != notification_read(&before, event)? {
+			return Err!("thread A receipt changed an unrelated notification: {event}");
+		}
+	}
+
+	Ok(())
+}
+
+fn notification_read(response: &Value, event_id: &EventId) -> Result<bool> {
+	let matches_event = |notification: &&Value| {
+		notification
+			.get("event")
+			.and_then(|event| event.get("event_id"))
+			.and_then(Value::as_str)
+			.eq(&Some(event_id.as_str()))
+	};
+
+	response
+		.get("notifications")
+		.and_then(Value::as_array)
+		.and_then(|notifications| notifications.iter().find(matches_event))
+		.and_then(|notification| notification.get("read"))
+		.and_then(Value::as_bool)
+		.ok_or_else(|| err!("notification missing for {event_id}"))
+}
+
+#[implement(Client, params = "<'_>")]
+#[tracing::instrument(level = "trace", skip_all)]
+async fn notifications(&self) -> Result<Value> {
+	self.services
+		.client
+		.clients
+		.default
+		.get(self.url("notifications?limit=100"))
+		.bearer_auth(self.token)
+		.send()
+		.await?
+		.error_for_status()?
+		.json()
+		.await
+		.map_err(Into::into)
 }
 
 #[implement(Client, params = "<'_>")]
