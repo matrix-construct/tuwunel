@@ -3,8 +3,16 @@
 use std::net::TcpListener;
 
 use insta::{assert_debug_snapshot, with_settings};
+use reqwest::StatusCode;
+use serde_json::Value;
 use tuwunel::{Args, Runtime, Server};
 use tuwunel_core::Result;
+
+use self::fixture::boot;
+
+#[expect(dead_code)] // Only the readiness probe is used from the client harness.
+mod client;
+mod fixture;
 
 #[test]
 fn dummy() {}
@@ -36,4 +44,29 @@ fn smoke() -> Result {
 		assert_debug_snapshot!(result);
 		result
 	})
+}
+
+#[test]
+fn boots_with_federation_disabled() -> Result {
+	boot(
+		"federation-disabled",
+		["allow_federation=false", "log_enable=false"],
+		async |services, base| {
+			let response = services
+				.client
+				.clients
+				.default
+				.get(format!("{base}/_matrix/federation/v1/version"))
+				.send()
+				.await?;
+
+			assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+			let body: Value = response.json().await?;
+
+			assert_eq!(body["errcode"], "M_FORBIDDEN");
+			assert_eq!(body["error"], "M_FORBIDDEN: Federation is disabled.");
+			Ok(())
+		},
+	)
 }
