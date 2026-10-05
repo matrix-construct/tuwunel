@@ -837,9 +837,8 @@ pub fn get_forward_extremities<'a>(
 )]
 /// Replaces all stored forward extremities for a room.
 ///
-/// Existing rows are removed before the supplied IDs are inserted while the
-/// caller holds the state guard. The wipe and reinsertion are not transactional,
-/// and errors encountered while scanning old rows are ignored.
+/// Deletions and insertions commit in one write batch while the caller holds
+/// the state guard. Errors encountered while scanning old rows are ignored.
 pub async fn set_forward_extremities<'a, I>(
 	&'a self,
 	room_id: &'a RoomId,
@@ -849,17 +848,22 @@ pub async fn set_forward_extremities<'a, I>(
 	I: Iterator<Item = &'a EventId> + Send + 'a,
 {
 	let prefix = (room_id, Interfix);
-	self.db
-		.roomid_pduleaves
+	let leaves = &self.db.roomid_pduleaves;
+	let txn = leaves
 		.keys_prefix_raw(&prefix)
 		.ignore_err()
-		.ready_for_each(|key| self.db.roomid_pduleaves.remove(key))
+		.ready_fold(self.services.db.txn(), |mut txn, key| {
+			txn.del_raw(leaves, key);
+			txn
+		})
 		.await;
 
-	for event_id in event_ids {
-		let key = (room_id, event_id);
-		self.db.roomid_pduleaves.put_raw(key, event_id);
-	}
+	event_ids
+		.fold(txn, |mut txn, event_id| {
+			txn.put_raw(leaves, (room_id, event_id), event_id);
+			txn
+		})
+		.execute();
 }
 
 /// Deletes every stored forward extremity for a room.

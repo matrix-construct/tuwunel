@@ -2,6 +2,7 @@
 
 use std::{fs::remove_dir_all, path::PathBuf, sync::Arc};
 
+use futures::StreamExt;
 use tuwunel::{Args, Runtime, Server, async_run, async_start, async_stop};
 use tuwunel_core::{
 	Err, PduEvent, Result,
@@ -145,6 +146,49 @@ async fn exercise(services: &Services) -> Result {
 
 	if state.shortstatehash != appended || state.full_state.len() != 1 {
 		return Err!("appended state event was not loaded");
+	}
+
+	forward_extremities_replace_exact_set(services).await
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+async fn forward_extremities_replace_exact_set(services: &Services) -> Result {
+	let room = room_id!("!extremities:localhost");
+	let other = room_id!("!extremities:localhost2");
+	let a = event_id!("$a:localhost");
+	let b = event_id!("$b:localhost");
+	let c = event_id!("$c:localhost");
+	let guard = services.state.mutex.lock(room).await;
+	let other_guard = services.state.mutex.lock(other).await;
+
+	services
+		.state
+		.set_forward_extremities(other, [a, c].into_iter(), &other_guard)
+		.await;
+
+	for expected in [&[a, b][..], &[b, c][..], &[][..]] {
+		services
+			.state
+			.set_forward_extremities(room, expected.iter().copied(), &guard)
+			.await;
+
+		let actual = services
+			.state
+			.get_forward_extremities(room)
+			.map(ToOwned::to_owned)
+			.collect::<Vec<_>>()
+			.await;
+
+		assert_eq!(actual, expected);
+
+		let unchanged = services
+			.state
+			.get_forward_extremities(other)
+			.map(ToOwned::to_owned)
+			.collect::<Vec<_>>()
+			.await;
+
+		assert_eq!(unchanged, [a, c]);
 	}
 
 	Ok(())
