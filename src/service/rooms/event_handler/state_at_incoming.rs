@@ -12,7 +12,7 @@ use tuwunel_core::{
 	ref_at, trace,
 	utils::{
 		option::OptionExt,
-		stream::{BroadbandExt, IterStream, TryBroadbandExt, WidebandExt},
+		stream::{BroadbandExt, IterStream, ReadyExt, TryBroadbandExt, WidebandExt},
 	},
 };
 
@@ -274,14 +274,20 @@ where
 			(shortstatekey, event_id.to_owned())
 		});
 
-	let leaf_state_after_event: Vec<_> = self
+	let snapshot = self
 		.services
 		.state_accessor
-		.state_full_ids_strict(sstatehash)
-		.chain(leaf.map(Ok))
-		.try_collect()
-		.await
-		.map_err(ForkError::State)?;
+		.state_full_ids_complete(sstatehash)
+		.map_err(ForkError::State)
+		.await?;
+
+	// The leaf goes last so `fork_state` lets it replace the snapshot's entry.
+	let leaf_state_after_event = leaf
+		.ready_fold(snapshot, |mut state, entry| {
+			state.push(entry);
+			state
+		})
+		.await;
 
 	trace!(
 		prev_event = ?prev_event.event_id(),

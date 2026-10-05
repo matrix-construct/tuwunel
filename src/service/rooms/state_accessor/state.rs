@@ -466,9 +466,25 @@ pub fn state_full_ids_strict(
 	&self,
 	shortstatehash: ShortStateHash,
 ) -> impl Stream<Item = Result<(ShortStateKey, OwnedEventId)>> + Send + '_ {
+	self.state_full_ids_complete(shortstatehash)
+		.map_ok(Vec::into_iter)
+		.map_ok(IterStream::try_stream)
+		.try_flatten_stream()
+}
+
+/// Loads a complete short-state-key to event-ID map for a snapshot.
+///
+/// Snapshot and reverse-mapping failures are returned instead of a partial
+/// map. Pairs keep the snapshot's order; [`Self::state_full_ids_strict`]
+/// streams the same pairs.
+#[implement(super::Service)]
+pub async fn state_full_ids_complete(
+	&self,
+	shortstatehash: ShortStateHash,
+) -> Result<Vec<(ShortStateKey, OwnedEventId)>> {
 	self.state_full_shortids(shortstatehash)
-		.try_unzip::<Vec<_>, Vec<_>>()
-		.and_then(async move |(shortstatekeys, shorteventids)| {
+		.try_unzip()
+		.and_then(async move |(shortstatekeys, shorteventids): (Vec<_>, Vec<_>)| {
 			self.services
 				.short
 				.multi_get_eventid_from_short(shorteventids.into_iter().stream())
@@ -476,12 +492,10 @@ pub fn state_full_ids_strict(
 				.map(|(event_id, shortstatekey)| {
 					event_id.map(|event_id| (shortstatekey, event_id))
 				})
-				.try_collect::<Vec<_>>()
+				.try_collect()
 				.await
 		})
-		.map_ok(Vec::into_iter)
-		.map_ok(IterStream::try_stream)
-		.try_flatten_stream()
+		.await
 }
 
 /// Streams every compressed `(short state key, short event ID)` pair.
