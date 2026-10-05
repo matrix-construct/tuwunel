@@ -51,6 +51,39 @@ impl<'a> MakeWriter<'a> for ThreadLocalWriter {
 	fn make_writer(&'a self) -> Self::Writer { Self }
 }
 
+#[test]
+fn smtp_display_redacts_userinfo() {
+	for (value, expected) in [
+		(
+			Some("smtps://user:secret@mail.example.com:465"),
+			"Some(\"smtps://***********@mail.example.com:465\")",
+		),
+		(
+			Some("smtp://bot%40example.com:p%40ss@mail.example.com:587"),
+			"Some(\"smtp://***********@mail.example.com:587\")",
+		),
+		(Some("smtp://mail.example.com:25"), "Some(\"smtp://mail.example.com:25\")"),
+		(Some("smtps://user:secret@[::1]:465"), "Some(\"smtps://***********@[::1]:465\")"),
+		(Some("smtps://user:secret@[invalid"), "***********"),
+		(Some("smtp:user:secret"), "***********"),
+		(None, "None"),
+	] {
+		let smtp = SmtpConfig {
+			connection_uri: value.map(str::to_owned),
+			..SmtpConfig::default()
+		};
+
+		let rendered = smtp.to_string();
+		let row = rendered
+			.lines()
+			.find(|line| line.contains("connection_uri"))
+			.expect("SMTP URI row present");
+
+		assert_eq!(row, format!("| connection_uri | {expected} |"));
+		assert_eq!(smtp.connection_uri.as_deref(), value);
+	}
+}
+
 fn config_from_toml(toml: &str) -> Result<Config> {
 	Config::new(&Figment::new().merge(Data::nested(Toml::string(toml))))
 }

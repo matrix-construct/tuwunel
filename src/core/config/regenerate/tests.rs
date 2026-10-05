@@ -73,6 +73,8 @@ fn regenerated_configuration_round_trips_and_is_idempotent() {
 		"server_name = \"round-trip.example\"\n",
 		"port = 10443\n",
 		"trusted_servers = [\"one.example\", \"two.example\"]\n",
+		"[global.smtp]\n",
+		"connection_uri = \"smtps://user:secret@mail.example.com:465\"\n",
 	);
 
 	write(&input, document).expect("input configuration written");

@@ -8,7 +8,7 @@ use std::{
 };
 
 use proc_macro::TokenStream;
-use proc_macro2::TokenStream as TokenStream2;
+use proc_macro2::{Ident, TokenStream as TokenStream2};
 use quote::{ToTokens, format_ident, quote};
 use syn::{
 	Error, Expr, ExprLit, Field, Fields, FieldsNamed, ItemStruct, Lit, LitStr, Meta, MetaList,
@@ -169,7 +169,7 @@ fn generate_example(input: &ItemStruct, args: &[Meta], emit: bool) -> Result<Tok
 						.expect("written to section buffer");
 
 					let display = get_doc_comment_line(field, "display");
-					let display_directive = |key| {
+					let display_directive = |key: &str| {
 						display
 							.as_ref()
 							.into_iter()
@@ -178,11 +178,7 @@ fn generate_example(input: &ItemStruct, args: &[Meta], emit: bool) -> Result<Tok
 					};
 
 					if !display_directive("hidden") {
-						let value = if display_directive("sensitive") {
-							quote! { "***********" }
-						} else {
-							quote! { format_args!("{:?}", self.#ident) }
-						};
+						let value = display_value(ident, display_directive);
 
 						let display = quote! {
 							writeln!(out, "| {} | {} |", #name, #value)?;
@@ -229,6 +225,15 @@ fn generate_example(input: &ItemStruct, args: &[Meta], emit: bool) -> Result<Tok
 	};
 
 	Ok(generated)
+}
+
+fn display_value(ident: &Ident, directive: impl Fn(&str) -> bool) -> TokenStream2 {
+	match () {
+		| () if directive("sensitive") => quote! { "***********" },
+		| () if directive("uri-userinfo") =>
+			quote! { crate::config::format::UriUserinfo(self.#ident.as_deref()) },
+		| () => quote! { format_args!("{:?}", self.#ident) },
+	}
 }
 
 fn cfg_attrs(input: &ItemStruct) -> Result<Vec<TokenStream2>> {

@@ -4780,6 +4780,7 @@ pub struct SmtpConfig {
 	/// characters in the username or password are percent-encoded the same
 	/// way.
 	///
+	/// display: uri-userinfo
 	/// example: "smtps://user:pass@mail.example.com:465"
 	pub connection_uri: Option<String>,
 
