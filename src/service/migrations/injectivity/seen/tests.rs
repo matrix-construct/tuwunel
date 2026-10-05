@@ -17,7 +17,14 @@ use super::{
 	references::{References, entries},
 	run, stamp, verify,
 };
-use crate::{Services, migrations::migrations, test_utils::fixture};
+use crate::{
+	Services,
+	migrations::{
+		injectivity::{SUPERSEDED, fix},
+		migrations,
+	},
+	test_utils::fixture,
+};
 
 const EVENTS: (&str, &str) = ("eventid_shorteventid", "shorteventid_eventid");
 const STATEKEYS: (&str, &str) = ("statekey_shortstatekey", "shortstatekey_statekey");
@@ -142,11 +149,11 @@ async fn ordinary_ladder_repairs_independent_work_and_retains_ambiguity() -> Res
 	db["shortstatehash_statediff"].insert(&900_u64.to_be_bytes(), &retained);
 	db["statehash_shortstatehash"].insert(b"retained", 900_u64.to_be_bytes());
 
-	for old in [None, Some(b"".as_slice()), Some(b"declined".as_slice())] {
+	for old in [None, Some(b"declined".as_slice())] {
 		global.remove(MARKER);
-		global.remove("fix_short_injectivity");
+		global.remove(SUPERSEDED);
 		if let Some(old) = old {
-			global.insert("fix_short_injectivity", old);
+			global.insert(SUPERSEDED, old);
 		}
 
 		global.remove("clear_servername_status");
@@ -155,6 +162,7 @@ async fn ordinary_ladder_repairs_independent_work_and_retains_ambiguity() -> Res
 		db["shorteventid_eventid"].insert(&102_u64.to_be_bytes(), b"$safe:example.org");
 		db["authchainkey_authchain"].insert(&102_u64.to_be_bytes(), 102_u64.to_be_bytes());
 		migrations(services).await?;
+		assert_stored(db, "global", SUPERSEDED, old.unwrap_or_default()).await?;
 		assert_stored(db, "shorteventid_eventid", &101_u64.to_be_bytes(), b"$safe:example.org")
 			.await?;
 
@@ -203,6 +211,49 @@ async fn ordinary_ladder_repairs_independent_work_and_retains_ambiguity() -> Res
 	);
 
 	assert_stored(db, "shortstatehash_statediff", &900_u64.to_be_bytes(), &retained).await?;
+
+	Ok(())
+}
+
+#[tokio::test]
+#[tracing::instrument(level = "trace", skip_all)]
+async fn settled_databases_skip_and_legacy_markers_follow_the_record() -> Result {
+	let Some(fixture) = fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+
+	let services = &fixture.services;
+	let db = &services.db;
+	let global = &db["global"];
+	let event_id = b"$settled:example.org";
+	let alias = 102_u64.to_be_bytes();
+	let cleared = "clear_auth_chain_cache";
+
+	seed_identity(db, EVENTS, event_id, 101);
+	db["shorteventid_eventid"].insert(&alias, event_id);
+	global.remove(MARKER);
+	global.remove(cleared);
+	global.insert(SUPERSEDED, []);
+	fix(services).await;
+	assert_absent(db, "global", MARKER, "a settled database records no outcome").await;
+	assert_absent(db, "global", cleared, "a settled database stamps nothing").await;
+	assert_stored(db, "shorteventid_eventid", &alias, event_id).await?;
+	assert_stored(db, "global", SUPERSEDED, []).await?;
+
+	global.insert(MARKER, Outcome::clean().encode()?);
+	fix(services).await;
+	assert_stored(db, "global", cleared, []).await?;
+	global.remove(SUPERSEDED);
+	fix(services).await;
+	assert_stored(db, "global", SUPERSEDED, []).await?;
+	assert_stored(db, "shorteventid_eventid", &alias, event_id).await?;
+
+	global.remove(MARKER);
+	global.remove(SUPERSEDED);
+	services.server.shutdown()?;
+	fix(services).await;
+	assert_absent(db, "global", MARKER, "an interrupted repair records no outcome").await;
+	assert_absent(db, "global", SUPERSEDED, "an interrupted repair stays eligible").await;
 
 	Ok(())
 }
