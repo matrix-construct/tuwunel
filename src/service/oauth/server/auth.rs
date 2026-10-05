@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 use tuwunel_core::{Err, Result, err, implement, utils, utils::hash::sha256};
 use tuwunel_database::{Cbor, Deserialized};
 
+use super::AuthCode;
+
 /// A pending authorization request, kept from the authorize redirect until the
 /// completion that mints its code.
 ///
@@ -225,6 +227,11 @@ pub async fn retire_auth_request(&self, req_id: &str) {
 #[implement(super::Server)]
 pub fn remove_auth_request(&self, req_id: &str) { self.db.oidcreqid_authrequest.remove(req_id); }
 
+/// Consumes an authorization code at most once within this server.
+///
+/// Reading and removing a code are serialized independently of authorization
+/// request selection. A decoded code is removed before validating its expiry,
+/// client, redirect URI, or PKCE verifier.
 #[implement(super::Server)]
 pub async fn exchange_auth_code(
 	&self,
@@ -234,6 +241,8 @@ pub async fn exchange_auth_code(
 	code_verifier: Option<&str>,
 	require_pkce: bool,
 ) -> Result<AuthCodeSession> {
+	let key = AuthCode(code.to_owned());
+	let lock = self.auth_code_locks.lock(&key).await;
 	let session: AuthCodeSession = self
 		.db
 		.oidccode_authsession
@@ -244,6 +253,7 @@ pub async fn exchange_auth_code(
 		.map_err(|_| err!(Request(Forbidden("Invalid or expired authorization code"))))?;
 
 	self.db.oidccode_authsession.remove(code);
+	drop(lock);
 
 	if SystemTime::now() > session.expires_at {
 		return Err!(Request(Forbidden("Authorization code has expired")));

@@ -8,10 +8,14 @@ mod client;
 
 use std::{net::TcpListener, time::Duration};
 
-use futures::future::{join, try_join};
+use futures::{
+	future::{join, try_join},
+	pin_mut, poll,
+};
 use reqwest::{Client, Response, StatusCode, Url, redirect::Policy};
 use serde_json::{Value, from_value, json};
 use serde_urlencoded::from_str;
+use tokio::task::{JoinSet, consume_budget, coop::has_budget_remaining};
 use tuwunel::{Args, Runtime, Server, async_run, async_start, async_stop};
 use tuwunel_core::{Result, ruma::UserId};
 use tuwunel_service::{Services, oauth::server::AuthRequest, users::Register};
@@ -115,6 +119,7 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	check_branch_race(services, &client, base).await?;
 	check_registration_claim(services, &client, base).await?;
 	concurrent_completion_only_once(services, &client, base).await?;
+	concurrent_authorization_code_exchange_is_single_use(services, &client, base, &user).await?;
 	stale_refusal_burns_token(services, &client, base).await?;
 	account_state(services, &client, base, &user).await?;
 
@@ -212,6 +217,55 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	}
 
 	Ok(())
+}
+
+async fn concurrent_authorization_code_exchange_is_single_use(
+	services: &Services,
+	client: &Client,
+	base: &str,
+	user: &UserId,
+) -> Result {
+	let redirect = "https://trusted.example/code-once";
+	let client_id = register_client(services, redirect).await?;
+	let req_id = new_native_request(client, base, &client_id, redirect).await?;
+	let request = peek_request(services, &req_id).await?;
+	let oauth = services.oauth.clone();
+	let code = oauth
+		.get_server()?
+		.create_auth_code(&request, user.to_owned());
+
+	let mut tasks = JoinSet::new();
+
+	tasks.spawn_on(
+		async move {
+			let oidc = oauth.get_server()?;
+			let exchange = || oidc.exchange_auth_code(&code, &client_id, redirect, None, false);
+			let first = exchange();
+			let second = exchange();
+
+			pin_mut!(first, second);
+
+			// Exhaust the task budget so cached reads yield before consuming the code.
+			while has_budget_remaining() {
+				consume_budget().await;
+			}
+
+			assert!(poll!(first.as_mut()).is_pending());
+			assert!(poll!(second.as_mut()).is_pending());
+
+			let (first, second) = join(first, second).await;
+
+			assert_ne!(first.is_ok(), second.is_ok(), "exactly one exchange succeeds");
+			exchange()
+				.await
+				.expect_err("authorization code is single use");
+
+			Ok(())
+		},
+		services.server.runtime(),
+	);
+
+	tasks.join_next().await.expect("exchange task")?
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
