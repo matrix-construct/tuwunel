@@ -51,7 +51,7 @@ where
 		.services
 		.state
 		.pdu_shortstatehash(prev_event_id)
-		.inspect_err(|e| debug_warn!(?prev_event_id, "Missing state at prev_event: {e}"))
+		.inspect_err(|e| debug_warn!(?prev_event_id, %e, "Missing state at prev_event."))
 		.await
 	else {
 		return Ok(None);
@@ -155,7 +155,7 @@ where
 			let prev_event = self.services.timeline.get_pdu(prev_event_id);
 
 			try_join(sstatehash, prev_event).inspect_err(move |e| {
-				debug_warn!(?prev_event_id, "Missing state at prev_event: {e}");
+				debug_warn!(?prev_event_id, %e, "Missing state at prev_event.");
 			})
 		})
 		.try_collect::<Vec<_>>()
