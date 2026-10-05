@@ -30,6 +30,10 @@ RUN \
 --mount=type=bind,from=source,source=/usr/src/tuwunel/LICENSE,target=/usr/src/tuwunel/LICENSE \
 <<EOF
     set -eux
+    for script in debian/postinst debian/postrm; do
+        test "$(grep -o DEBHELPER "$script" | wc -l)" -eq 1
+        grep -qx '#DEBHELPER#' "$script"
+    done
     mkdir -p "${pkg_dir}"
     # Every warning cargo-deb prints is a defect in the package it went on to
     # write anyway, so the log is kept and the build refuses to carry one
