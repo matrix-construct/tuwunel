@@ -360,32 +360,38 @@ fn check_registration(config: &Config) -> Result {
 	let no_token =
 		config.registration_token.is_none() && config.registration_token_file.is_none();
 
+	let email_required =
+		config.smtp.connection_uri.is_some() && config.smtp.require_email_for_registration;
+
 	if config.allow_registration
 		&& no_token
+		&& !email_required
 		&& !config.yes_i_am_very_very_sure_i_want_an_open_registration_server_prone_to_abuse
 	{
 		return Err!(Config(
 			"registration_token",
-			"!! You have `allow_registration` enabled without a token configured in your config \
-			 which means you are allowing ANYONE to register on your tuwunel instance without \
-			 any 2nd-step (e.g. registration token). If this is not the intended behaviour, \
-			 please set a registration token. For security and safety reasons, tuwunel will \
-			 shut down. If you are extra sure this is the desired behaviour you want, please \
-			 set the following config option to true:
+			"!! You have `allow_registration` enabled without a registration token or a \
+			 required email stage (`smtp.require_email_for_registration` with \
+			 `smtp.connection_uri`). This allows ANYONE to register without any 2nd-step. \
+			 Please set a registration token or require an email stage. For security and safety \
+			 reasons, tuwunel will shut down. If you are extra sure this is the desired \
+			 behaviour you want, please set the following config option to true:
 `yes_i_am_very_very_sure_i_want_an_open_registration_server_prone_to_abuse`"
 		));
 	}
 
 	if config.allow_registration
 		&& no_token
+		&& !email_required
 		&& config.yes_i_am_very_very_sure_i_want_an_open_registration_server_prone_to_abuse
 	{
 		warn!(
 			"Open registration is enabled via setting \
 			 `yes_i_am_very_very_sure_i_want_an_open_registration_server_prone_to_abuse` and \
-			 `allow_registration` to true without a registration token configured. You are \
+			 `allow_registration` to true without a registration token or a required email \
+			 stage (`smtp.require_email_for_registration` with `smtp.connection_uri`). You are \
 			 expected to be aware of the risks now. If this is not the desired behaviour, \
-			 please set a registration token."
+			 please set a registration token or require an email stage."
 		);
 	}
 

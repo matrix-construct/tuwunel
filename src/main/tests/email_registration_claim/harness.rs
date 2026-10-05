@@ -120,8 +120,6 @@ fn server_args(
 		"smtp.sender=\"Tests <test@example.test>\"".to_owned(),
 		"smtp.require_email_for_registration=true".to_owned(),
 		"allow_registration=true".to_owned(),
-		"yes_i_am_very_very_sure_i_want_an_open_registration_server_prone_to_abuse=true"
-			.to_owned(),
 	]);
 
 	if config.terms {
