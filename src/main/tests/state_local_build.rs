@@ -7,7 +7,7 @@ use futures::future::{BoxFuture, join};
 use tokio::time::{sleep, timeout};
 use tuwunel::{Args, Runtime, Server, async_run, async_start, async_stop};
 use tuwunel_core::{Err, Error, Result, async_noinline, err, ruma::UserId};
-use tuwunel_service::{Services, users::Register};
+use tuwunel_service::Services;
 
 use self::{
 	auth_chain::{
@@ -15,6 +15,7 @@ use self::{
 		current_state_auth_failure, unpolled_chain_stays_clear,
 	},
 	baseline::enabled_baseline,
+	client::register,
 	disabled::ignores_planted_memo,
 	helpers::{create_room, walks_in_flight},
 	memo::{direct_memo_failure_is_miss, walk_memo_failure_is_unevaluable},
@@ -28,6 +29,10 @@ use self::{
 mod auth_chain;
 #[path = "state_local_build/baseline.rs"]
 mod baseline;
+#[expect(dead_code)] // This fixture uses only registration.
+mod client;
+#[path = "state_local_build/derived.rs"]
+mod derived;
 #[path = "state_local_build/disabled.rs"]
 mod disabled;
 #[path = "state_local_build/helpers.rs"]
@@ -178,22 +183,8 @@ fn case_name(case: Case) -> &'static str {
 async fn exercise<'a>(services: &'a Services, base: &'a str, case: Case) -> Result {
 	wait_until_ready(services, base).await?;
 
-	let user_id = UserId::parse_with_server_name("localbuild", services.globals.server_name())?;
 	let token = "state-local-build-access-token-0001";
-
-	services
-		.users
-		.full_register(Register {
-			user_id: Some(&user_id),
-			password: Some("state-local-build-password"),
-			..Default::default()
-		})
-		.await?;
-
-	services
-		.users
-		.create_device(&user_id, None, (Some(token), None), None, None, None)
-		.await?;
+	let user_id = register(services, "localbuild", token).await?;
 
 	exercise_case(services, base, token, &user_id, case).await?;
 
@@ -205,6 +196,7 @@ async fn exercise<'a>(services: &'a Services, base: &'a str, case: Case) -> Resu
 	}
 }
 
+// The client harness's probe is not Send, and the noinline exercise boxes a Send future.
 async fn wait_until_ready(services: &Services, base: &str) -> Result {
 	let url = format!("{base}/_matrix/client/versions");
 	let probe = || services.client.clients.default.get(&url).send();

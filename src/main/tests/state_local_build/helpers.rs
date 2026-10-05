@@ -9,7 +9,11 @@ use tuwunel_core::{
 	pdu::PduBuilder,
 	ruma::{
 		CanonicalJsonObject, EventId, OwnedEventId, OwnedRoomId, RoomId, RoomVersionId, UserId,
-		events::room::{message::RoomMessageEventContent, name::RoomNameEventContent},
+		events::room::{
+			member::{MembershipState, RoomMemberEventContent},
+			message::RoomMessageEventContent,
+			name::RoomNameEventContent,
+		},
 	},
 	utils::{BoolExt, result::NotFound, time::now_secs},
 };
@@ -169,13 +173,19 @@ pub(super) async fn append_state(
 	room_id: &RoomId,
 	name: &str,
 ) -> Result<OwnedEventId> {
-	let builder = room_name(name);
-	let state_lock = services.state.mutex.lock(room_id).await;
+	append_pdu(services, room_name(name), user_id, room_id).await
+}
 
-	services
-		.timeline
-		.build_and_append_pdu(builder, user_id, room_id, &state_lock)
-		.await
+pub(super) async fn append_membership(
+	services: &Services,
+	sender: &UserId,
+	room_id: &RoomId,
+	member: &UserId,
+	membership: MembershipState,
+) -> Result<OwnedEventId> {
+	let builder = PduBuilder::state(member.as_str(), &RoomMemberEventContent::new(membership));
+
+	append_pdu(services, builder, sender, room_id).await
 }
 
 pub(super) async fn append_message(
@@ -185,11 +195,21 @@ pub(super) async fn append_message(
 	body: &str,
 ) -> Result<OwnedEventId> {
 	let builder = PduBuilder::timeline(&RoomMessageEventContent::text_plain(body));
+
+	append_pdu(services, builder, user_id, room_id).await
+}
+
+async fn append_pdu(
+	services: &Services,
+	builder: PduBuilder,
+	sender: &UserId,
+	room_id: &RoomId,
+) -> Result<OwnedEventId> {
 	let state_lock = services.state.mutex.lock(room_id).await;
 
 	services
 		.timeline
-		.build_and_append_pdu(builder, user_id, room_id, &state_lock)
+		.build_and_append_pdu(builder, sender, room_id, &state_lock)
 		.await
 }
 
@@ -577,6 +597,24 @@ pub(super) async fn assert_recorded<'a>(
 		.collect();
 
 	assert_eq!(recorded, expected, "{context} recorded the wrong passes");
+}
+
+pub(super) async fn assert_accepts_derived(
+	services: &Services,
+	room_id: &RoomId,
+	incoming: &PduEvent,
+	incoming_json: CanonicalJsonObject,
+	context: &str,
+) -> Result {
+	let before = services.event_handler.state_local_metrics();
+
+	assert_accepts(services, room_id, incoming, incoming_json, context).await?;
+
+	let after = services.event_handler.state_local_metrics();
+
+	assert_eq!(after, before, "{context} left the derived path");
+
+	assert_no_memo(services, &incoming.event_id).await
 }
 
 pub(super) async fn assert_accepts(

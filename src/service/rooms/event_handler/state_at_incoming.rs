@@ -7,6 +7,7 @@ use futures::{
 use ruma::{EventId, OwnedEventId, RoomId, RoomVersionId};
 use tuwunel_core::{
 	Error, Result, debug, debug_warn, err, implement,
+	itertools::Itertools,
 	matrix::Event,
 	ref_at, trace,
 	utils::{
@@ -142,7 +143,7 @@ where
 	);
 
 	trace!("Calculating extremity statehashes...");
-	let Ok(extremity_sstatehashes) = incoming_pdu
+	let Ok(prevs) = incoming_pdu
 		.prev_events()
 		.try_stream()
 		.broad_and_then(|prev_event_id| {
@@ -157,15 +158,17 @@ where
 				debug_warn!(?prev_event_id, "Missing state at prev_event: {e}");
 			})
 		})
-		.try_collect::<HashMap<_, _>>()
+		.try_collect::<Vec<_>>()
 		.await
 	else {
 		return Ok(None);
 	};
 
 	trace!("Calculating fork states...");
-	let forks = extremity_sstatehashes
+	let forks = prevs
 		.into_iter()
+		.sorted_unstable_by(|a, b| fork_identity(a).cmp(&fork_identity(b)))
+		.dedup_by(|a, b| fork_identity(a) == fork_identity(b))
 		.stream()
 		.wide_then(|(sstatehash, prev_event)| {
 			self.state_at_incoming_fork(room_id, room_version, sstatehash, prev_event)
@@ -222,6 +225,24 @@ where
 		.map(Some)
 		.map(Ok)
 		.await
+}
+
+/// The fork a prev event contributes to resolution.
+///
+/// A prev's snapshot is the state before it, so a state prev also carries its
+/// own event; siblings sharing a snapshot share a fork only when neither sets
+/// state.
+fn fork_identity<Pdu>(
+	(sstatehash, prev_event): &(ShortStateHash, Pdu),
+) -> (ShortStateHash, Option<&EventId>)
+where
+	Pdu: Event,
+{
+	let leaf = prev_event
+		.state_key()
+		.map(|_| prev_event.event_id());
+
+	(*sstatehash, leaf)
 }
 
 #[implement(super::Service)]

@@ -11,6 +11,7 @@ use tuwunel_service::{
 };
 
 use super::{
+	derived::sibling_state_prevs_both_resolve,
 	helpers::{
 		ExpectedPass, ExpectedWalkOutcome, assert_one_settled_walk, assert_prev_walk,
 		assert_recorded, counter_delta, create_room, create_room_version, held_fork,
@@ -81,6 +82,15 @@ pub(super) async fn enabled_baseline(
 		.map_err(step(label))?;
 
 	gapped_redelivery_backs_off(services, user_id, &redelivery_room)
+		.await
+		.map_err(step(label))?;
+
+	let label = "sibling state prevs";
+	let sibling_room = create_room(services, base, token)
+		.await
+		.map_err(step(label))?;
+
+	sibling_state_prevs_both_resolve(services, user_id, &sibling_room)
 		.await
 		.map_err(step(label))?;
 
