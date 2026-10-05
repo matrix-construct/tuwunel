@@ -18,11 +18,23 @@ pub struct Cache {
 	overrides: Arc<Map>,
 }
 
+/// A server name's discovered federation destination, cached until `expire`.
+///
+/// The route kind (`srv`) has no serde default on purpose: rows written before
+/// it fail to decode, so their destination is rediscovered rather than guessed.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct CachedDest {
+	/// Authority federation requests are addressed to, with its port.
 	pub dest: FedDest,
+
+	/// The server name or its well-known delegate, with port.
 	pub host: DestString,
+
+	/// When the entry lapses and the destination is discovered again.
 	pub expire: SystemTime,
+
+	/// Whether destination discovery selected an SRV route.
+	pub srv: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -76,13 +88,26 @@ pub async fn has_destination(&self, destination: &ServerName) -> bool {
 	self.get_destination(destination).await.is_ok()
 }
 
+/// Whether a valid override for `name` already points at `hostname`.
+///
+/// Only SRV routes write overrides, so a row that does not match is replaced
+/// rather than reused.
 #[implement(Cache)]
 #[must_use]
-pub async fn has_override(&self, destination: &str) -> bool {
-	self.get_override(destination)
+pub async fn has_override(&self, name: &str, hostname: &str) -> bool {
+	self.get_override(name)
 		.await
-		.iter()
-		.any(CachedOverride::valid)
+		.is_ok_and(|cached| cached.covers(hostname))
+}
+
+/// Whether this override is valid and points at `hostname`.
+///
+/// A plain row (no `overriding`) is left by an older release and never matches.
+#[implement(CachedOverride)]
+#[inline]
+#[must_use]
+pub fn covers(&self, hostname: &str) -> bool {
+	self.valid() && self.overriding.as_deref() == Some(hostname)
 }
 
 #[implement(Cache)]
@@ -139,6 +164,7 @@ impl CachedDest {
 			.size()
 			.expected_add(self.host.len())
 			.expected_add(size_of_val(&self.expire))
+			.expected_add(size_of_val(&self.srv))
 	}
 }
 

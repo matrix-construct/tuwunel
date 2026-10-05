@@ -387,9 +387,14 @@ where
 	Request::Authentication: FedAuth,
 	Request::PathBuilder: FedPath,
 {
-	self.services
-		.federation
-		.execute(server.unwrap_or(mxc.server_name), request)
+	// query-depth firewall
+	let fetch = Box::pin(
+		self.services
+			.federation
+			.execute(server.unwrap_or(mxc.server_name), request),
+	);
+
+	fetch
 		.await
 		.map_err(|error| handle_federation_error(mxc, server, error))
 }

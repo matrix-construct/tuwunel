@@ -1,6 +1,9 @@
-use futures::StreamExt;
+use futures::{StreamExt, TryStreamExt};
 use ruma::OwnedServerName;
-use tuwunel_core::{Result, utils::time};
+use tuwunel_core::{
+	Result,
+	utils::{stream::ReadyExt, time::format as format_time},
+};
 use tuwunel_service::resolver::cache::CachedDest;
 
 use crate::admin_command;
@@ -10,23 +13,20 @@ pub(super) async fn destinations_cache(&self, server_name: Option<OwnedServerNam
 	writeln!(self, "| Server Name | Destination | Hostname | Expires |").await?;
 	writeln!(self, "| ----------- | ----------- | -------- | ------- |").await?;
 
-	let mut destinations = self
-		.services
+	self.services
 		.resolver
 		.cache
 		.destinations()
-		.boxed();
+		.ready_filter(|(name, _)| {
+			server_name
+				.as_deref()
+				.is_none_or(|wanted| *name == wanted)
+		})
+		.map(|(name, CachedDest { dest, host, expire, .. })| {
+			let expire = format_time(expire, "%+");
 
-	while let Some((name, CachedDest { dest, host, expire })) = destinations.next().await {
-		if let Some(server_name) = server_name.as_ref()
-			&& name != server_name
-		{
-			continue;
-		}
-
-		let expire = time::format(expire, "%+");
-		write!(self, "| {name} | {dest} | {host} | {expire} |\n").await?;
-	}
-
-	Ok(())
+			Ok(format!("| {name} | {dest} | {host} | {expire} |\n"))
+		})
+		.try_for_each(async |row: String| self.write_str(&row).await)
+		.await
 }

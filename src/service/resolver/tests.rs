@@ -3,16 +3,25 @@ use std::{
 	iter::once,
 	net::{IpAddr, SocketAddr},
 	sync::Arc,
+	time::SystemTime,
 };
 
 use ipaddress::IPAddress;
+use minicbor_serde::{from_slice, to_vec};
 use reqwest::dns::{Addrs, Name, Resolve, Resolving};
 use tuwunel_core::config::proxy::ProxyHosts;
 
 use super::{
+	cache::{CachedDest, CachedOverride, IpAddrs},
 	dns::{Resolver, Validating},
 	fed::{FedDest, add_port_to_hostname, get_ip_with_port},
 };
+
+const SRV_TARGET: &str = "target.example";
+
+// A `CachedDest` row written before `srv`: destination and host `x:8448`, expiring
+// at the epoch.
+const LEGACY_DEST: &[u8] = b"\xa3\x64dest\xa1\x65Named\x82\x61x\x65:8448\x64host\x66x:8448\x66expire\xa2\x70secs_since_epoch\x00\x71nanos_since_epoch\x00";
 
 #[derive(Debug)]
 struct FixedResolver(SocketAddr);
@@ -86,6 +95,66 @@ fn eviction_key_matches_delegated_override_key() {
 	assert_eq!(delegated.hostname().as_str(), "delegated.example");
 	assert_eq!(with_port.hostname().as_str(), "delegated.example");
 	assert_ne!(delegated.hostname().as_str(), "origin.example");
+}
+
+#[test]
+fn srv_target_replaces_an_override_not_pointing_at_it() {
+	assert!(!cached_override(None).covers(SRV_TARGET));
+	assert!(!cached_override(Some("other.example")).covers(SRV_TARGET));
+	assert!(cached_override(Some(SRV_TARGET)).covers(SRV_TARGET));
+}
+
+fn cached_override(overriding: Option<&str>) -> CachedOverride {
+	CachedOverride {
+		ips: IpAddrs::new(),
+		port: 8448,
+		expire: CachedOverride::default_expire(),
+		overriding: overriding.map(Into::into),
+	}
+}
+
+#[test]
+fn expired_override_covers_nothing() {
+	let expired = CachedOverride {
+		expire: SystemTime::UNIX_EPOCH,
+		..cached_override(Some(SRV_TARGET))
+	};
+
+	assert!(!expired.covers(SRV_TARGET));
+}
+
+#[test]
+fn destinations_without_route_metadata_require_rediscovery() {
+	let error = from_slice::<CachedDest>(LEGACY_DEST).unwrap_err();
+
+	assert!(error.to_string().contains("srv"), "{error}");
+}
+
+#[test]
+fn destination_route_metadata_roundtrips() {
+	for srv in [false, true] {
+		let bytes = destination_bytes(srv);
+		let cached = from_slice::<CachedDest>(&bytes).unwrap();
+
+		assert_eq!(cached.dest, add_port_to_hostname("x"));
+		assert_eq!(cached.host.as_str(), "x:8448");
+		assert_eq!(cached.expire, SystemTime::UNIX_EPOCH);
+		assert_eq!(cached.srv, srv);
+
+		let encoded = to_vec(&cached).unwrap();
+		let decoded = from_slice::<CachedDest>(&encoded).unwrap();
+
+		assert_eq!(decoded.dest, cached.dest);
+		assert_eq!(decoded.host, cached.host);
+		assert_eq!(decoded.expire, cached.expire);
+		assert_eq!(decoded.srv, srv);
+	}
+}
+
+fn destination_bytes(srv: bool) -> Vec<u8> {
+	let flag = if srv { 0xF5 } else { 0xF4 };
+
+	[&[0xA4][..], &LEGACY_DEST[1..], b"\x63srv", &[flag]].concat()
 }
 
 #[test]

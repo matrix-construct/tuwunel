@@ -7,7 +7,7 @@ use std::{fmt::Debug, mem, time::Duration};
 
 use bytes::Bytes;
 use ipaddress::IPAddress;
-use reqwest::{Client, Method, Request, Response, Url};
+use reqwest::{Method, Request, Response, Url};
 use ruma::{
 	ServerName,
 	api::{
@@ -27,7 +27,10 @@ use super::{
 	peer::classify_error,
 	scheme::{FedAuth, FedPath},
 };
-use crate::{client::read_response_capped, resolver::actual::ActualDest};
+use crate::{
+	client::{Federation, read_response_capped},
+	resolver::actual::ActualDest,
+};
 
 /// Sends a federation request with the standard federation client.
 ///
@@ -101,13 +104,14 @@ where
 
 /// Sends through a supplied client and records the peer outcome.
 ///
+/// The destination's resolved route picks the direct or SRV half of the client.
 /// A successful response clears every stored failure row for the destination.
 /// Only errors classified as peer failures are recorded, and no backoff gate is
 /// consulted before sending.
 #[implement(super::Service)]
 pub async fn execute_on<T>(
 	&self,
-	client: &Client,
+	client: &Federation,
 	dest: &ServerName,
 	request: T,
 ) -> Result<T::IncomingResponse>
@@ -138,7 +142,7 @@ where
 #[implement(super::Service)]
 pub(super) async fn execute_on_allow_self<T>(
 	&self,
-	client: &Client,
+	client: &Federation,
 	dest: &ServerName,
 	request: T,
 ) -> Result<T::IncomingResponse>
@@ -174,7 +178,7 @@ where
 )]
 pub(super) async fn execute_uncounted<T>(
 	&self,
-	client: &Client,
+	client: &Federation,
 	dest: &ServerName,
 	request: T,
 ) -> Result<T::IncomingResponse>
@@ -203,7 +207,7 @@ where
 #[tracing::instrument(name = "fed", level = "debug", skip(self, client, request))]
 pub(super) async fn execute_uncounted_allow_self<T>(
 	&self,
-	client: &Client,
+	client: &Federation,
 	dest: &ServerName,
 	request: T,
 ) -> Result<T::IncomingResponse>
@@ -248,7 +252,7 @@ async fn perform<T>(
 	actual: &ActualDest,
 	dest: &ServerName,
 	request: Request,
-	client: &Client,
+	client: &Federation,
 ) -> Result<T::IncomingResponse>
 where
 	T: OutgoingRequest + Send,
@@ -261,7 +265,7 @@ where
 	debug!(?method, ?url, "Sending request");
 	let limit = self.services.server.config.max_response_size;
 
-	match client.execute(request).await {
+	match client.for_srv(actual.srv).execute(request).await {
 		| Ok(response) => handle_response::<T>(actual, dest, &method, &url, response, limit)
 			.await
 			.inspect_err(|error| self.evict_misrouted(dest, actual, error)),
@@ -407,15 +411,16 @@ fn evict_misrouted(&self, dest: &ServerName, actual: &ActualDest, error: &Error)
 	}
 }
 
-// Overrides are keyed by the resolved (delegated/SRV) hostname, so evict under
-// the key resolution wrote (`actual.dest.hostname()`), not the origin name.
+// Only an SRV route resolves through an override, keyed by the hostname it was
+// written under (`actual.dest.hostname()`), not the origin name.
 #[implement(super::Service)]
 fn evict_route(&self, dest: &ServerName, actual: &ActualDest) {
-	self.services.resolver.cache.del_destination(dest);
-	self.services
-		.resolver
-		.cache
-		.del_override(&actual.dest.hostname());
+	let cache = &self.services.resolver.cache;
+
+	cache.del_destination(dest);
+	if actual.srv {
+		cache.del_override(&actual.dest.hostname());
+	}
 }
 
 #[implement(super::Service)]
