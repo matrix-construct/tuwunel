@@ -181,23 +181,14 @@ where
 		.try_collect::<Vec<_>>()
 		.await?;
 
-	let mut state_error = None;
-	let mut complete_forks = Vec::with_capacity(forks.len());
-	for fork in forks {
-		match fork {
-			| Ok(fork) => complete_forks.push(fork),
-			| Err(error) => {
-				state_error.get_or_insert(error);
-			},
-		}
-	}
-
-	if let Some(error) = state_error {
-		debug_warn!(%error, "Failed to materialize sibling fork state.");
+	let Ok((fork_states, auth_chain_sets)): Result<(Vec<_>, Vec<_>)> = forks
+		.into_iter()
+		.process_results(|complete| complete.unzip())
+		.inspect_err(|error| debug_warn!(%error, "Failed to materialize sibling fork state."))
+	else {
 		return Ok(None);
-	}
+	};
 
-	let (fork_states, auth_chain_sets): (Vec<_>, Vec<_>) = complete_forks.into_iter().unzip();
 	let fork_states = fork_states.into_iter().stream();
 	let auth_chain_sets = auth_chain_sets.into_iter().stream();
 
