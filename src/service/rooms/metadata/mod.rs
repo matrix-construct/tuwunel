@@ -118,7 +118,6 @@ pub async fn is_public(&self, room_id: &RoomId) -> bool {
 		.get_join_rules(room_id)
 		.map(|rule| matches!(rule, JoinRule::Public));
 
-	pin_mut!(listed_public, join_rule_public);
 	listed_public.or(join_rule_public).await
 }
 

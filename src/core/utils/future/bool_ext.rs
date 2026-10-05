@@ -11,11 +11,15 @@
 #![expect(clippy::many_single_char_names, clippy::impl_trait_in_params)]
 
 use futures::{
-	FutureExt,
-	future::{select_ok, try_join, try_join_all, try_join3, try_join4},
+	FutureExt, StreamExt,
+	future::{ready, try_join, try_join3, try_join4},
+	stream::FuturesUnordered,
 };
 
 use crate::utils::BoolExt as _;
+
+#[cfg(test)]
+mod tests;
 
 /// Combines Boolean futures with concurrent short-circuit logic.
 ///
@@ -29,13 +33,11 @@ where
 	/// Computes the disjunction of two Boolean futures.
 	///
 	/// Both futures are polled concurrently. The returned future resolves true
-	/// on the first true output or false after both produce false. Unlike the
-	/// conjunctions, this collects its inputs into a heap `Vec`, so a chain of
-	/// `or` allocates once per link.
+	/// on the first true output or false after both produce false.
 	fn or<B>(self, b: B) -> impl Future<Output = bool> + Send
 	where
-		B: Future<Output = bool> + Send + Unpin,
-		Self: Sized + Unpin;
+		B: Future<Output = bool> + Send,
+		Self: Sized;
 
 	/// Computes the conjunction of two Boolean futures.
 	///
@@ -56,11 +58,32 @@ where
 		C: Future<Output = bool> + Send,
 		Self: Sized;
 
+	/// Computes the disjunction of three Boolean futures.
+	///
+	/// The receiver and both arguments are polled concurrently. The result is
+	/// true when any of the three futures produces true.
+	fn or2<B, C>(self, b: B, c: C) -> impl Future<Output = bool> + Send
+	where
+		B: Future<Output = bool> + Send,
+		C: Future<Output = bool> + Send,
+		Self: Sized;
+
 	/// Computes the conjunction of four Boolean futures.
 	///
 	/// The receiver and all three arguments are polled concurrently. The result
 	/// is true only when every future produces true.
 	fn and3<B, C, D>(self, b: B, c: C, d: D) -> impl Future<Output = bool> + Send
+	where
+		B: Future<Output = bool> + Send,
+		C: Future<Output = bool> + Send,
+		D: Future<Output = bool> + Send,
+		Self: Sized;
+
+	/// Computes the disjunction of four Boolean futures.
+	///
+	/// The receiver and all three arguments are polled concurrently. The result
+	/// is true when any future produces true.
+	fn or3<B, C, D>(self, b: B, c: C, d: D) -> impl Future<Output = bool> + Send
 	where
 		B: Future<Output = bool> + Send,
 		C: Future<Output = bool> + Send,
@@ -74,11 +97,10 @@ where
 {
 	fn or<B>(self, b: B) -> impl Future<Output = bool> + Send
 	where
-		B: Future<Output = bool> + Send + Unpin,
-		Self: Sized + Unpin,
+		B: Future<Output = bool> + Send,
+		Self: Sized,
 	{
-		select_ok([self.map(test).left_future(), b.map(test).right_future()])
-			.map(|res| res.is_ok())
+		try_join(self.map(test_not), b.map(test_not)).map(|res| res.is_err())
 	}
 
 	fn and<B>(self, b: B) -> impl Future<Output = bool> + Send
@@ -98,6 +120,15 @@ where
 		try_join3(self.map(test), b.map(test), c.map(test)).map(|res| res.is_ok())
 	}
 
+	fn or2<B, C>(self, b: B, c: C) -> impl Future<Output = bool> + Send
+	where
+		B: Future<Output = bool> + Send,
+		C: Future<Output = bool> + Send,
+		Self: Sized,
+	{
+		try_join3(self.map(test_not), b.map(test_not), c.map(test_not)).map(|res| res.is_err())
+	}
+
 	fn and3<B, C, D>(self, b: B, c: C, d: D) -> impl Future<Output = bool> + Send
 	where
 		B: Future<Output = bool> + Send,
@@ -107,40 +138,43 @@ where
 	{
 		try_join4(self.map(test), b.map(test), c.map(test), d.map(test)).map(|res| res.is_ok())
 	}
+
+	fn or3<B, C, D>(self, b: B, c: C, d: D) -> impl Future<Output = bool> + Send
+	where
+		B: Future<Output = bool> + Send,
+		C: Future<Output = bool> + Send,
+		D: Future<Output = bool> + Send,
+		Self: Sized,
+	{
+		try_join4(self.map(test_not), b.map(test_not), c.map(test_not), d.map(test_not))
+			.map(|res| res.is_err())
+	}
 }
 
 /// Computes the conjunction of an iterator of Boolean futures.
 ///
-/// All inputs are polled concurrently and false short-circuits the operation.
-/// An empty iterator resolves to true. An exact upper size hint of thirty or
-/// fewer keeps a stack-resident boxed slice polled in order; anything else, an
-/// absent hint included, builds a `FuturesOrdered` polled by readiness.
+/// The first ready false output wins at any position in the iterator.
+/// Polling all inputs concurrently costs one allocation per input.
+/// An empty iterator resolves to true.
 pub fn and<I, F>(args: I) -> impl Future<Output = bool> + Send
 where
 	I: Iterator<Item = F> + Send,
 	F: Future<Output = bool> + Send,
 {
-	let args = args.map(|a| a.map(test));
-
-	try_join_all(args).map(|res| res.is_ok())
+	args.collect::<FuturesUnordered<_>>().all(ready)
 }
 
 /// Computes the disjunction of an iterator of Boolean futures.
 ///
-/// All inputs are polled concurrently and true short-circuits the operation.
-/// False is returned only after every input resolves to false.
-///
-/// # Panics
-///
-/// Panics when the iterator contains no futures.
+/// The first ready true output wins at any position in the iterator.
+/// Polling all inputs concurrently costs one allocation per input.
+/// An empty iterator resolves to false.
 pub fn or<I, F>(args: I) -> impl Future<Output = bool> + Send
 where
 	I: Iterator<Item = F> + Send,
-	F: Future<Output = bool> + Send + Unpin,
+	F: Future<Output = bool> + Send,
 {
-	let args = args.map(|a| a.map(test));
-
-	select_ok(args).map(|res| res.is_ok())
+	args.collect::<FuturesUnordered<_>>().any(ready)
 }
 
 /// Computes the conjunction of four Boolean futures.
@@ -202,3 +236,5 @@ pub fn and7(
 }
 
 fn test(test: bool) -> crate::Result<(), ()> { test.into_result() }
+
+fn test_not(test: bool) -> crate::Result<(), ()> { test.is_false().into_result() }

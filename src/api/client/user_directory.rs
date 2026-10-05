@@ -111,6 +111,5 @@ async fn should_show_user(
 		.state_cache
 		.user_sees_user(sender_user, target_user);
 
-	pin_mut!(user_in_public_room, user_sees_user);
 	user_in_public_room.or(user_sees_user).await
 }

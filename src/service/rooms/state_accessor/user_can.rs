@@ -4,7 +4,6 @@
 //! membership metadata. Invite and tombstone checks use the normal event-build
 //! pipeline as non-persisting authorization probes.
 
-use futures::pin_mut;
 use ruma::{
 	EventId, RoomId, UserId,
 	events::{
@@ -267,12 +266,7 @@ pub async fn user_can_see_room(&self, user_id: &UserId, room_id: &RoomId) -> boo
 	let left = state_cache.is_left(user_id, room_id);
 	let world_readable = self.is_world_readable(room_id);
 
-	pin_mut!(joined, invited, left, world_readable);
-	joined
-		.or(invited)
-		.or(left)
-		.or(world_readable)
-		.await
+	joined.or3(invited, left, world_readable).await
 }
 
 /// Reports whether a user may peek into a room, as a room preview does.

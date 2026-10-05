@@ -7,7 +7,6 @@ use axum::extract::State;
 use futures::{
 	FutureExt, StreamExt, TryFutureExt, TryStreamExt,
 	future::{join, join3, join4, join5, try_join},
-	pin_mut,
 };
 use ruma::{
 	DeviceId, EventId, OwnedEventId, OwnedRoomId, OwnedUserId, RoomId, UInt, UserId,
@@ -831,8 +830,7 @@ async fn handle_left_room(
 
 	let is_banned = services.metadata.is_banned(room_id);
 
-	pin_mut!(is_not_found, is_disabled, is_banned);
-	if is_not_found.or(is_disabled).or(is_banned).await {
+	if is_not_found.or2(is_disabled, is_banned).await {
 		// For rejected invites, deleted, missing, or broken room state this is the last
 		// resort to convey a the minimum of information to the client.
 		let event = PduEvent {

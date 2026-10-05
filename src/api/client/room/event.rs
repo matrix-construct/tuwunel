@@ -1,5 +1,5 @@
 use axum::extract::State;
-use futures::{TryFutureExt, future::join, pin_mut};
+use futures::{TryFutureExt, future::join};
 use ruma::api::client::room::get_room_event;
 use tuwunel_core::{
 	Err, Event, Pdu, Result, err,
@@ -45,8 +45,6 @@ pub(crate) async fn get_room_event_route(
 						})
 				})
 				.unwrap_or(false);
-
-			pin_mut!(is_admin, can_redact);
 
 			if is_admin.or(can_redact).await {
 				services

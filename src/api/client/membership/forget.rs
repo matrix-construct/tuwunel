@@ -1,5 +1,5 @@
 use axum::extract::State;
-use futures::{TryFutureExt, pin_mut};
+use futures::TryFutureExt;
 use ruma::{api::client::membership::forget_room, events::room::member::MembershipState};
 use tuwunel_core::{
 	Err, Result, is_matching,
@@ -29,8 +29,7 @@ pub(crate) async fn forget_room_route(
 	let knocked = services.state_cache.is_knocked(user_id, room_id);
 	let invited = services.state_cache.is_invited(user_id, room_id);
 
-	pin_mut!(joined, knocked, invited);
-	if joined.or(knocked).or(invited).await {
+	if joined.or2(knocked, invited).await {
 		return Err!(Request(Unknown("You must leave the room before forgetting it")));
 	}
 
@@ -41,7 +40,6 @@ pub(crate) async fn forget_room_route(
 		.map_ok(|member| member.membership)
 		.map_ok_or(false, is_matching!(MembershipState::Leave | MembershipState::Ban));
 
-	pin_mut!(left, left_or_banned);
 	if left.or(left_or_banned).await {
 		services.state_cache.forget(room_id, user_id);
 	}

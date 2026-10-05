@@ -8,7 +8,7 @@ mod tests;
 use std::{fmt::Debug, sync::Arc};
 
 use async_trait::async_trait;
-use futures::{FutureExt, Stream, StreamExt, TryFutureExt, pin_mut};
+use futures::{FutureExt, Stream, StreamExt, TryFutureExt};
 use ruma::{
 	OwnedEventId, OwnedRoomId, OwnedServerName, RoomId, ServerName, UserId,
 	api::{
@@ -204,7 +204,6 @@ async fn is_accessible_child(
 			.state_cache
 			.is_invited(user_id, current_room);
 
-		pin_mut!(is_joined, is_invited);
 		if is_joined.or(is_invited).await {
 			return true;
 		}

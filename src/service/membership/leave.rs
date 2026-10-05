@@ -3,7 +3,6 @@ use std::collections::HashSet;
 use futures::{
 	FutureExt, StreamExt, TryFutureExt,
 	future::{join, ready},
-	pin_mut,
 };
 use ruma::{
 	CanonicalJsonObject, CanonicalJsonValue, OwnedServerName, RoomId, UserId,
@@ -55,7 +54,7 @@ pub async fn leave<'a>(
 
 	let is_banned = self.services.metadata.is_banned(room_id);
 	let is_disabled = self.services.metadata.is_disabled(room_id);
-	pin_mut!(is_banned, is_disabled);
+
 	if is_banned.or(is_disabled).await {
 		return self
 			.clear_local_leave(user_id, room_id, leave_content, None)
