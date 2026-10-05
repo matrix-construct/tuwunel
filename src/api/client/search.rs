@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 
 use axum::extract::State;
 use futures::{FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt, future::join};
+use itertools::Itertools;
 use ruma::{
 	OwnedRoomId, RoomId, UInt, UserId,
 	api::client::search::search_events::{
@@ -16,7 +17,7 @@ use ruma::{
 };
 use search_events::v3::{Request, Response};
 use tuwunel_core::{
-	Err, Result, at, is_true,
+	Err, PduCount, Result, at, is_true,
 	matrix::Event,
 	utils::{
 		IterStream,
@@ -39,7 +40,6 @@ type RoomState = Vec<Raw<AnyStateEvent>>;
 const LIMIT_DEFAULT: usize = 10;
 const LIMIT_MAX: usize = 100;
 const CONTEXT_MAX: usize = 20;
-const BATCH_MAX: usize = 20;
 
 /// # `POST /_matrix/client/r0/search`
 ///
@@ -81,11 +81,7 @@ async fn category_room_events(
 		.limit
 		.map_or(LIMIT_DEFAULT, |limit| usize_from_ruma_bounded(limit, LIMIT_DEFAULT, LIMIT_MAX));
 
-	let next_batch: usize = next_batch
-		.map(str::parse)
-		.transpose()?
-		.unwrap_or(0)
-		.min(limit.saturating_mul(BATCH_MAX));
+	let before: Option<PduCount> = next_batch.map(str::parse).transpose()?;
 
 	let rooms = filter
 		.rooms
@@ -113,7 +109,7 @@ async fn category_room_events(
 				room_id: &room_id,
 				user_id: Some(sender_user),
 				criteria,
-				skip: next_batch,
+				before,
 				limit,
 			};
 
@@ -146,10 +142,21 @@ async fn category_room_events(
 		.collect()
 		.await;
 
-	let results: Vec<SearchResult> = results
+	let page: Vec<_> = results
 		.into_iter()
 		.map(at!(2))
-		.flatten()
+		.kmerge_by(|(a, _), (b, _)| a > b)
+		.take(limit)
+		.collect();
+
+	let next_batch = page
+		.last()
+		.filter(|_| page.len() >= limit)
+		.map(|(count, _)| count.to_string());
+
+	let results: Vec<SearchResult> = page
+		.into_iter()
+		.map(at!(1))
 		.stream()
 		.map(Event::into_pdu)
 		.wide_then(async |pdu| {
@@ -175,11 +182,6 @@ async fn category_room_events(
 		.split_terminator(|c: char| !c.is_alphanumeric())
 		.map(str::to_lowercase)
 		.collect();
-
-	let next_batch = (results.len() >= limit)
-		.then_some(next_batch.saturating_add(results.len()))
-		.as_ref()
-		.map(ToString::to_string);
 
 	Ok(ResultRoomEvents {
 		count: Some(total),

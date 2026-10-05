@@ -35,7 +35,8 @@ pub struct RoomQuery<'a> {
 	pub user_id: Option<&'a UserId>,
 	pub criteria: &'a Criteria,
 	pub limit: usize,
-	pub skip: usize,
+	/// Exclusive upper count bound for the returned page.
+	pub before: Option<PduCount>,
 }
 
 type TokenId = ArrayVec<u8, TOKEN_ID_MAX_LEN>;
@@ -84,11 +85,15 @@ pub fn deindex_pdu(&self, shortroomid: ShortRoomId, pdu_id: &RawPduId, message_b
 	}
 }
 
+/// Searches a room and returns its total hit count and a page of counted events.
+///
+/// The total is computed before the cursor and event filters. The stream yields
+/// visible matches in descending count order, up to the requested room limit.
 #[implement(Service)]
 pub async fn search_pdus<'a>(
 	&'a self,
 	query: &'a RoomQuery<'a>,
-) -> Result<(usize, impl Stream<Item = impl Event + use<>> + Send + '_)> {
+) -> Result<(usize, impl Stream<Item = (PduCount, impl Event + use<>)> + Send + '_)> {
 	let pdu_ids: Vec<_> = self.search_pdu_ids(query).await?.collect().await;
 
 	let filter = &query.criteria.filter;
@@ -96,23 +101,28 @@ pub async fn search_pdus<'a>(
 	let pdus = pdu_ids
 		.into_iter()
 		.stream()
+		.ready_filter(|id| {
+			query
+				.before
+				.is_none_or(|before| id.pdu_count().lt(&before))
+		})
 		.wide_filter_map(async |result_pdu_id: RawPduId| {
 			self.services
 				.timeline
 				.get_pdu_from_id(&result_pdu_id)
 				.await
 				.ok()
+				.map(|pdu| (result_pdu_id.pdu_count(), pdu))
 		})
-		.ready_filter(|pdu| !pdu.is_redacted())
-		.ready_filter(move |pdu| filter.matches(pdu))
-		.wide_filter_map(async |pdu| {
+		.ready_filter(|(_, pdu)| !pdu.is_redacted())
+		.ready_filter(move |(_, pdu)| filter.matches(pdu))
+		.wide_filter_map(async |(count, pdu)| {
 			self.services
 				.state_accessor
 				.user_can_see_event(query.user_id?, &pdu)
 				.await
-				.then_some(pdu)
+				.then_some((count, pdu))
 		})
-		.skip(query.skip)
 		.take(query.limit);
 
 	Ok((count, pdus))
