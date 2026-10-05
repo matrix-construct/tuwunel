@@ -8,6 +8,7 @@ use tuwunel_core::{
 use super::update_thread_bundle_raw;
 
 mod append;
+mod redact;
 
 #[test]
 fn backfilled_activity_key_sorts_before_normal() {
