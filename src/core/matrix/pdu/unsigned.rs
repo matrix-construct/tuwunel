@@ -86,6 +86,17 @@ pub fn remove_transaction_id_unless_sender(&mut self, user_id: Option<&UserId>) 
 		.unwrap_or(Ok(()))
 }
 
+/// Returns the event without its transaction ID unless served to its sender.
+///
+/// The by-value form of [`Pdu::remove_transaction_id_unless_sender`], for
+/// chains that own the event.
+#[implement(Pdu)]
+pub fn without_transaction_id_unless_sender(mut self, user_id: Option<&UserId>) -> Result<Self> {
+	self.remove_transaction_id_unless_sender(user_id)?;
+
+	Ok(self)
+}
+
 /// Removes the local transaction ID from unsigned event metadata.
 ///
 /// Other unsigned properties are retained and the object is re-encoded. An

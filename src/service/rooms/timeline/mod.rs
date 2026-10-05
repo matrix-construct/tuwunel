@@ -80,11 +80,14 @@ struct Data {
 	db: Arc<Database>,
 }
 
-// Update Relationships
+/// Extracts the relation carried by event content.
+///
+/// Shared by timeline appends and thread summary maintenance.
 #[derive(Deserialize)]
-struct ExtractRelatesTo {
+pub(crate) struct ExtractRelatesTo {
 	#[serde(rename = "m.relates_to")]
-	relates_to: Relation,
+	/// The event's typed relation.
+	pub(crate) relates_to: Relation,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -142,11 +145,45 @@ impl crate::Service for Service {
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "debug")]
 pub async fn replace_pdu(&self, pdu_id: &RawPduId, pdu_json: &CanonicalJsonObject) -> Result {
+	self.require_pdu(pdu_id).await?;
+
+	self.db.pduid_pdu.raw_put(pdu_id, Json(pdu_json));
+
+	Ok(())
+}
+
+/// Replaces a redacted event and its optional thread root in one batch.
+///
+/// The caller retains the room guard through this write. The redacted row is
+/// staged last so it wins when a reply names itself as its root.
+#[implement(Service)]
+#[tracing::instrument(skip(self, pdu, root), level = "debug")]
+pub(super) async fn replace_redacted_pdu(
+	&self,
+	pdu_id: &RawPduId,
+	pdu: &CanonicalJsonObject,
+	root: Option<(RawPduId, CanonicalJsonObject)>,
+) -> Result {
+	self.require_pdu(pdu_id).await?;
+	root.as_ref()
+		.map(|(id, json)| (id, json))
+		.into_iter()
+		.chain([(pdu_id, pdu)])
+		.fold(self.db.db.txn(), |mut txn, (id, json)| {
+			self.stage_replace_pdu(&mut txn, id, json);
+			txn
+		})
+		.execute();
+
+	Ok(())
+}
+
+#[implement(Service)]
+#[tracing::instrument(skip(self), level = "debug")]
+async fn require_pdu(&self, pdu_id: &RawPduId) -> Result {
 	if self.db.pduid_pdu.get(pdu_id).await.is_not_found() {
 		return Err!(Request(NotFound("PDU does not exist.")));
 	}
-
-	self.db.pduid_pdu.raw_put(pdu_id, Json(pdu_json));
 
 	Ok(())
 }

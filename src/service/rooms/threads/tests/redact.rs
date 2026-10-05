@@ -107,9 +107,60 @@ async fn recount_fixes_a_stale_root_and_leaves_a_correct_one() -> Result {
 
 	let threads = &fixture.services.threads;
 
-	assert_eq!(threads.recount_thread_replies().await, 1);
+	assert_eq!(threads.rebuild_thread_summaries().await, (1, 0));
 	assert_eq!(room.count(&stale).await?, 1);
 	assert_eq!(room.count(&kept).await?, 1);
+
+	// A second pass finds nothing left to change.
+	assert_eq!(threads.rebuild_thread_summaries().await, (0, 0));
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn rebuild_keeps_the_count_when_a_reply_cannot_be_decoded() -> Result {
+	let Some(fixture) = fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+
+	let room = Room::new(&fixture.services).await?;
+	let [root, first, second] = ["root", "first", "second"].map(id);
+
+	room.append(1, &root, text()).await?;
+	let first_id = room.append(2, &first, thread(&root)).await?;
+
+	room.append(3, &second, thread(&root)).await?;
+
+	assert_eq!(room.count(&root).await?, 2);
+	fixture.services.db["pduid_pdu"].insert(first_id.as_bytes(), b"invalid PDU");
+
+	let threads = &fixture.services.threads;
+
+	assert_eq!(threads.rebuild_thread_summaries().await, (0, 1));
+
+	assert_eq!(room.count(&root).await?, 2);
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn rebuild_drops_a_backfilled_roots_unloadable_latest() -> Result {
+	let Some(fixture) = fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+
+	let room = Room::new(&fixture.services).await?;
+	let [root, gone] = ["root", "gone"].map(id);
+
+	room.store(PduCount::Backfilled(-1), &root, text())?;
+	room.append(1, &gone, thread(&root)).await?;
+	fixture.services.db["eventid_pduid"].remove(gone.as_bytes());
+
+	let threads = &fixture.services.threads;
+
+	assert_eq!(threads.rebuild_thread_summaries().await, (1, 0));
+	assert_eq!(room.count(&root).await?, Value::Null);
+	assert_eq!(threads.rebuild_thread_summaries().await, (0, 0));
 
 	Ok(())
 }
@@ -285,7 +336,7 @@ impl<'a> Room<'a> {
 			services.pdu_metadata.add_relation(count, target);
 		}
 
-		if let Some(root) = thread_root(pdu.get_content_as_value()) {
+		if let Some(root) = thread_root(&pdu.get_content_as_value().try_into()?) {
 			threads.add_to_thread(&root, pdu_id, &pdu).await?;
 		}
 

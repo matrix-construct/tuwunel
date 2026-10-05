@@ -1,16 +1,17 @@
-use futures::{Stream, StreamExt};
+use futures::{Stream, StreamExt, TryStreamExt};
 use ruma::{
 	EventId, OwnedUserId, UserId,
 	api::Direction,
 	events::{reaction::ReactionEventContent, relation::RelationType},
 };
 use tuwunel_core::{
-	PduId,
+	PduId, Result,
 	arrayvec::ArrayVec,
 	implement, is_equal_to,
 	matrix::{Event, Pdu, PduCount, RawPduId, event::RelationTypeEqual},
 	utils::{
-		stream::{ReadyExt, TryIgnore, WidebandExt},
+		result::NotFound,
+		stream::{ReadyExt, TryIgnore, TryReadyExt, TryWidebandExt},
 		u64_from_u8,
 	},
 };
@@ -124,6 +125,22 @@ pub fn get_relations<'a>(
 	dir: Direction,
 	user_id: Option<&'a UserId>,
 ) -> impl Stream<Item = (PduCount, Pdu)> + Send + '_ {
+	self.try_get_relations(shortroomid, target, from, dir, user_id)
+		.ignore_err()
+}
+
+/// Walks related events in the requested direction, preserving read failures.
+///
+/// Missing children are skipped; other load and transaction-ID errors are yielded.
+#[implement(Service)]
+pub fn try_get_relations<'a>(
+	&'a self,
+	shortroomid: ShortRoomId,
+	target: PduCount,
+	from: Option<PduCount>,
+	dir: Direction,
+	user_id: Option<&'a UserId>,
+) -> impl Stream<Item = Result<(PduCount, Pdu)>> + Send + '_ {
 	let target = target.to_be_bytes();
 	let from = from
 		.map(|from| from.saturating_inc(dir))
@@ -153,23 +170,23 @@ pub fn get_relations<'a>(
 			.raw_keys_from(start)
 			.right_stream(),
 	}
-	.ignore_err()
-	.ready_take_while(move |key| key.starts_with(&target))
-	.map(|to_from| u64_from_u8(&to_from[8..16]))
-	.map(PduCount::from_unsigned)
-	.map(move |count| (user_id, shortroomid, count))
-	.wide_filter_map(async |(user_id, shortroomid, count)| {
+	.ready_try_take_while(move |key| Ok(key.starts_with(&target)))
+	.map_ok(|to_from| u64_from_u8(&to_from[8..16]))
+	.map_ok(PduCount::from_unsigned)
+	.map_ok(move |count| (user_id, shortroomid, count))
+	.wide_and_then(async |(user_id, shortroomid, count)| {
 		let pdu_id: RawPduId = PduId { shortroomid, count }.into();
-		let mut pdu = self
-			.services
+
+		self.services
 			.timeline
 			.get_pdu_from_id(&pdu_id)
 			.await
-			.ok()?;
-
-		pdu.remove_transaction_id_unless_sender(user_id)
-			.ok()?;
-
-		Some((count, pdu))
+			.optional()?
+			.map(|pdu| {
+				pdu.without_transaction_id_unless_sender(user_id)
+					.map(|pdu| (count, pdu))
+			})
+			.transpose()
 	})
+	.ready_try_filter_map(Ok)
 }

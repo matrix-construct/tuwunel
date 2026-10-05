@@ -39,7 +39,7 @@ async fn thread_reply_recount_runs_once() -> Result {
 	};
 
 	let services = &fixture.services;
-	let marker = "recount_thread_replies";
+	let marker = "rebuild_thread_summaries";
 
 	// A new database has no counts to correct.
 	fresh(services).await?;
@@ -70,7 +70,7 @@ async fn redacted_thread_latest_scrub_runs_once() -> Result {
 	};
 
 	let services = &fixture.services;
-	let marker = "scrub_redacted_thread_latest";
+	let marker = "rebuild_thread_summaries";
 
 	fresh(services).await?;
 

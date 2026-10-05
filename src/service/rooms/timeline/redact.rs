@@ -4,15 +4,22 @@
 //! or relational content before overwriting the accepted row. These side
 //! effects are coordinated under the caller's room timeline guard.
 
+use std::mem::take;
+
 use ruma::{
-	CanonicalJsonValue, EventId, RoomId,
+	CanonicalJsonObject, CanonicalJsonValue, EventId, RoomId,
 	canonical_json::{RedactedBecause, redact_in_place},
+	room_version_rules::RedactionRules,
 };
-use tuwunel_core::{Err, Result, err, implement, matrix::event::Event, utils::result::NotFound};
+use tuwunel_core::{
+	Result, err, implement,
+	matrix::event::Event,
+	utils::{BoolExt, OptionExt},
+};
 
 use crate::rooms::{
 	short::ShortRoomId,
-	threads::{thread_bundle, thread_root},
+	threads::{thread_bundle_mut, thread_root},
 	timeline::RoomMutexGuard,
 };
 
@@ -21,9 +28,9 @@ use crate::rooms::{
 /// Failure to resolve the event's accepted PDU ID is treated as a successful
 /// no-op. Original retention, search removal, and relation deletion occur
 /// before the accepted row is replaced, so the operation is not atomic if a
-/// later step fails. A redacted thread reply leaves its root's `m.thread`
-/// summary (its count, and its latest event if it was that) in the same
-/// write as the accepted row, and a redacted thread root keeps the summary.
+/// later step fails. A redacted thread reply is removed from its root's
+/// `m.thread` summary (the count, and the latest event when it was the latest)
+/// in the same write as the accepted row; a redacted thread root keeps its summary.
 #[implement(super::Service)]
 #[tracing::instrument(name = "redact", level = "debug", skip(self))]
 pub async fn redact_pdu<Pdu: Event + Send + Sync>(
@@ -39,7 +46,7 @@ pub async fn redact_pdu<Pdu: Event + Send + Sync>(
 		return Ok(());
 	};
 
-	let mut pdu = self
+	let pdu = self
 		.get_pdu_json_from_id(&pdu_id)
 		.await
 		.map_err(|e| {
@@ -82,47 +89,48 @@ pub async fn redact_pdu<Pdu: Event + Send + Sync>(
 		.await;
 
 	// Read before redaction strips `m.relates_to`.
-	let content = pdu.get("content").cloned();
-	let root_event_id = content.and_then(|content| thread_root(content.into()));
+	let root_event_id = pdu.get("content").and_then(thread_root);
+	let keep_thread = root_event_id.as_deref() != Some(event_id);
+	let pdu = redact_keeping_thread(
+		pdu,
+		keep_thread,
+		&room_version_rules.redaction,
+		RedactedBecause::from_json(reason.to_canonical_object()),
+	)?;
 
-	// Redaction replaces `unsigned`; a thread root keeps its thread summary,
-	// unless it names itself as root and its summary quotes its own content.
-	let thread = (root_event_id.as_deref() != Some(event_id))
-		.then(|| thread_bundle(&mut pdu).map(|thread| thread.clone()))
+	let root = root_event_id
+		.as_deref()
+		.map_async(|root| {
+			self.services
+				.threads
+				.redacted_reply_root(root, &pdu_id, event_id)
+		})
+		.await
 		.flatten();
 
-	redact_in_place(
-		&mut pdu,
-		&room_version_rules.redaction,
-		Some(RedactedBecause::from_json(reason.to_canonical_object())),
-	)
-	.map_err(|err| err!("invalid event: {err}"))?;
+	self.replace_redacted_pdu(&pdu_id, &pdu, root)
+		.await
+}
 
-	if let (Some(thread), Some(CanonicalJsonValue::Object(unsigned))) =
-		(thread, pdu.get_mut("unsigned"))
-	{
+fn redact_keeping_thread(
+	mut pdu: CanonicalJsonObject,
+	keep_thread: bool,
+	rules: &RedactionRules,
+	because: RedactedBecause,
+) -> Result<CanonicalJsonObject> {
+	let thread = keep_thread.and_then(|| thread_bundle_mut(&mut pdu).map(take));
+
+	redact_in_place(&mut pdu, rules, Some(because))
+		.map_err(|err| err!("invalid event: {err}"))?;
+
+	if let Some((thread, unsigned)) = thread.zip(
+		pdu.get_mut("unsigned")
+			.and_then(CanonicalJsonValue::as_object_mut),
+	) {
 		let relations = [("m.thread".into(), CanonicalJsonValue::Object(thread))].into();
 
 		unsigned.insert("m.relations".into(), CanonicalJsonValue::Object(relations));
 	}
 
-	// `replace_pdu`'s check; the reply and its root's count land together.
-	let (pduid_pdu, mut txn) = (&self.db.pduid_pdu, self.db.db.txn());
-
-	if pduid_pdu.get(&pdu_id).await.is_not_found() {
-		return Err!(Request(NotFound("PDU does not exist.")));
-	}
-
-	if let Some(root_event_id) = root_event_id {
-		self.services
-			.threads
-			.stage_redacted_reply(&mut txn, &root_event_id, &pdu_id, event_id)
-			.await;
-	}
-
-	// Staged last, so the redacted form wins if the reply names itself as root.
-	self.stage_replace_pdu(&mut txn, &pdu_id, &pdu);
-	txn.execute();
-
-	Ok(())
+	Ok(pdu)
 }
