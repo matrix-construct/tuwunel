@@ -182,17 +182,16 @@ pub(super) async fn upgrade_outlier_to_timeline_pdu(
 
 	// A soft-failed event is not a forward extremity, so it never drives the
 	// room's current state; only an accepted state event resolves forward.
-	if incoming_pdu.state_key().is_some() && !soft_fail {
-		self.resolve_and_force_state_after(
+	let shortstatehash = self
+		.prepare_accepted_state_after(
 			room_id,
 			room_version,
 			&incoming_pdu,
 			&state_at_incoming_event,
+			soft_fail,
 			&state_lock,
 		)
-		.boxed() // cold arm: state event
 		.await?;
-	}
 
 	// We use the `state_at_event` instead of `state_after` so we accurately
 	// represent the state for this event.
@@ -218,6 +217,13 @@ pub(super) async fn upgrade_outlier_to_timeline_pdu(
 			&state_lock,
 		)
 		.await?;
+
+	// Current state must not reference the incoming event before its timeline row exists.
+	if let Some(shortstatehash) = shortstatehash {
+		self.services
+			.state
+			.install_force_state(room_id, shortstatehash, &state_lock);
+	}
 
 	debug_assert!(
 		pdu_id.is_some() || soft_fail,
@@ -565,14 +571,42 @@ async fn compute_remaining_extremities(
 }
 
 #[implement(super::Service)]
-async fn resolve_and_force_state_after(
+async fn prepare_accepted_state_after(
+	&self,
+	room_id: &RoomId,
+	room_version: &RoomVersionId,
+	incoming_pdu: &PduEvent,
+	state_at_incoming_event: &HashMap<u64, OwnedEventId>,
+	soft_fail: bool,
+	state_lock: &RoomMutexGuard,
+) -> Result<Option<u64>> {
+	incoming_pdu
+		.state_key()
+		.is_some()
+		.and_is(!soft_fail)
+		.then_async(|| {
+			self.resolve_and_prepare_state_after(
+				room_id,
+				room_version,
+				incoming_pdu,
+				state_at_incoming_event,
+				state_lock,
+			)
+			.boxed() // cold arm: state event
+		})
+		.map(Option::transpose)
+		.await
+}
+
+#[implement(super::Service)]
+async fn resolve_and_prepare_state_after(
 	&self,
 	room_id: &RoomId,
 	room_version: &RoomVersionId,
 	incoming_pdu: &PduEvent,
 	state_at_incoming_event: &HashMap<u64, OwnedEventId>,
 	state_lock: &RoomMutexGuard,
-) -> Result {
+) -> Result<u64> {
 	// We also add state after incoming event to the fork states
 	let mut state_after = state_at_incoming_event.clone();
 	if let Some(state_key) = incoming_pdu.state_key() {
@@ -602,7 +636,6 @@ async fn resolve_and_force_state_after(
 		.boxed() // size firewall
 		.await?;
 
-	// Set the new room state to the resolved state
 	trace!("Saving resolved state.");
 	let HashSetCompressStateEvent { shortstatehash, added, removed } = self
 		.services
@@ -614,12 +647,12 @@ async fn resolve_and_force_state_after(
 		?shortstatehash,
 		added = added.len(),
 		removed = removed.len(),
-		"Forcing new room state."
+		"Preparing new room state."
 	);
 	self.services
 		.state
-		.force_state(room_id, shortstatehash, added, removed, state_lock)
+		.prepare_force_state(room_id, &added, state_lock)
 		.await?;
 
-	Ok(())
+	Ok(shortstatehash)
 }

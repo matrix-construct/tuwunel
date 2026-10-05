@@ -149,6 +149,27 @@ pub async fn force_state(
 	_statediffremoved: Arc<CompressedState>,
 	state_lock: &RoomMutexGuard,
 ) -> Result {
+	self.prepare_force_state(room_id, &statediffnew, state_lock)
+		.await?;
+
+	self.install_force_state(room_id, shortstatehash, state_lock);
+
+	Ok(())
+}
+
+/// Replays membership additions before installing a forced state snapshot.
+///
+/// Lookup failures are skipped; membership-effect errors propagate before
+/// joined counts are refreshed. The caller retains the room state guard
+/// through preparation and installation.
+#[implement(Service)]
+#[tracing::instrument(level = "debug", skip_all)]
+pub(crate) async fn prepare_force_state(
+	&self,
+	room_id: &RoomId,
+	statediffnew: &CompressedState,
+	_state_lock: &RoomMutexGuard,
+) -> Result {
 	statediffnew
 		.iter()
 		.stream()
@@ -181,12 +202,22 @@ pub async fn force_state(
 		.update_joined_count(room_id)
 		.await;
 
-	self.set_room_state(room_id, shortstatehash, state_lock);
-
-	// Forced state may change this room's cached hierarchy summary.
-	self.services.spaces.cache_evict(room_id);
-
 	Ok(())
+}
+
+/// Installs a prepared state snapshot and invalidates its hierarchy summary.
+///
+/// Preparation and any required timeline append must have succeeded under
+/// the same room state guard before installation.
+#[implement(Service)]
+pub(crate) fn install_force_state(
+	&self,
+	room_id: &RoomId,
+	shortstatehash: u64,
+	state_lock: &RoomMutexGuard,
+) {
+	self.set_room_state(room_id, shortstatehash, state_lock);
+	self.services.spaces.cache_evict(room_id);
 }
 
 /// Record the membership transition a replayed `m.room.member` event carries.
