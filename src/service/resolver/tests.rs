@@ -6,6 +6,7 @@ use std::{
 	time::SystemTime,
 };
 
+use hickory_resolver::proto::rr::{IntoName, Name as DnsName};
 use ipaddress::IPAddress;
 use minicbor_serde::{from_slice, to_vec};
 use reqwest::dns::{Addrs, Name, Resolve, Resolving};
@@ -18,6 +19,8 @@ use super::{
 };
 
 const SRV_TARGET: &str = "target.example";
+
+const INVALID_SRV_TARGET: &str = "://target.example";
 
 // A `CachedDest` row written before `srv`: destination and host `x:8448`, expiring
 // at the epoch.
@@ -197,6 +200,22 @@ fn nameservers_keep_custom_ports() {
 fn nameservers_reject_hostnames() {
 	Resolver::parse_nameserver("dns.example.com").unwrap_err();
 	Resolver::parse_nameserver("").unwrap_err();
+}
+
+#[test]
+fn lookups_parse_hosts_like_the_invalid_name_guard() {
+	// `handle_resolve_error` demotes a lookup error only when `DnsName::from_utf8` rejects the host.
+	let hosts = [INVALID_SRV_TARGET, "[2001", SRV_TARGET, "_matrix-fed._tcp.example", "1.1.1.1"];
+
+	for host in hosts {
+		let invalid = DnsName::from_utf8(host).is_err();
+
+		assert_eq!(host.into_name().is_err(), invalid, "{host}");
+		assert_eq!(host.to_owned().into_name().is_err(), invalid, "{host}");
+	}
+
+	DnsName::from_utf8(INVALID_SRV_TARGET).unwrap_err();
+	DnsName::from_utf8(SRV_TARGET).unwrap();
 }
 
 #[tokio::test]

@@ -3,7 +3,7 @@ use std::{fmt::Debug, net::IpAddr};
 use futures::{FutureExt, TryFutureExt, future::ready};
 use hickory_resolver::{
 	net::{DnsError, NetError},
-	proto::rr::{RData, rdata::SRV},
+	proto::rr::{Name, RData, rdata::SRV},
 };
 use ipaddress::IPAddress;
 use ruma::ServerName;
@@ -401,6 +401,9 @@ fn handle_resolve_error(e: &NetError, host: &'_ str) -> Result {
 			debug_warn!(%host, "DNS response error: {e}");
 			Ok(())
 		},
+		// Remote-supplied name (server name, delegation or SRV target), not a local fault.
+		| NetError::Proto(_) if Name::from_utf8(host).is_err() =>
+			Err!(debug_error!(%host, error = %e, "Invalid DNS name")),
 		| NetError::Timeout => Err!(warn!(%host, "DNS {e}")),
 		| NetError::NoConnections => {
 			error!(
