@@ -274,6 +274,10 @@ pub(super) async fn record_completion(
 
 #[implement(super::Service)]
 pub(super) fn record_outcome(&self, ctx: Context, event_id: &EventId, disposition: Disposition) {
+	if self.services.server.is_stopping() {
+		return;
+	}
+
 	self.record_outcome_at(ctx, event_id, current_bucket(), disposition);
 }
 
