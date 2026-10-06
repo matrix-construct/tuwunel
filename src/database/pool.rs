@@ -64,8 +64,8 @@ pub(crate) struct Get {
 /// to keep later cursor movements nonblocking. The worker returns the
 /// positioned iterator state through the response sender.
 pub(crate) struct Seek {
-	pub(crate) map: Arc<Map>,
 	pub(crate) state: stream::State<'static>,
+	pub(crate) map: Arc<Map>,
 	pub(crate) dir: Direction,
 	pub(crate) key: Option<KeyBuf>,
 	pub(crate) res: Option<ResultSender<stream::State<'static>>>,
