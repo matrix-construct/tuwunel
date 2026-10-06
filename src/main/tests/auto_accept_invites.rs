@@ -106,18 +106,14 @@ async fn exercise(services: &Services, base: &str) -> Result {
 		.await
 		.ok_or_else(|| err!("the direct invitation was never accepted"))?;
 
+	marked_direct(services, &invitee_id, &direct)
+		.await
+		.ok_or_else(|| err!("the server does not read the accepted room back as direct"))?;
+
 	invitee
 		.marks_direct(&invitee_id, &inviter_id, &direct)
 		.await?
 		.ok_or_else(|| err!("the accepted room is missing from the invitee's m.direct"))?;
-
-	services
-		.account_data
-		.direct_rooms(&invitee_id)
-		.await
-		.contains(&direct)
-		.into_option()
-		.ok_or_else(|| err!("the server does not read the accepted room back as direct"))?;
 
 	joined(services, &invitee_id, &plain)
 		.await
@@ -183,6 +179,20 @@ async fn joined(services: &Services, user_id: &UserId, room_id: &RoomId) -> bool
 			.state_cache
 			.is_joined(user_id, room_id)
 			.await
+	})
+	.await
+}
+
+/// Whether the server reads the room back as direct before the deadline.
+///
+/// The `m.direct` write trails the join, so it is polled like the membership.
+async fn marked_direct(services: &Services, user_id: &UserId, room_id: &RoomId) -> bool {
+	poll_until(ACCEPT_DEADLINE, async || {
+		services
+			.account_data
+			.direct_rooms(user_id)
+			.await
+			.contains(room_id)
 	})
 	.await
 }
