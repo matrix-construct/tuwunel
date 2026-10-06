@@ -95,7 +95,7 @@ pub async fn redact_pdu<Pdu: Event + Send + Sync>(
 		pdu,
 		keep_thread,
 		&room_version_rules.redaction,
-		RedactedBecause::from_json(reason.to_canonical_object()),
+		redacted_because(reason.to_canonical_object()),
 	)?;
 
 	let root = root_event_id
@@ -133,4 +133,65 @@ fn redact_keeping_thread(
 	}
 
 	Ok(pdu)
+}
+
+/// The redaction as recorded on the event it redacts, without its own `unsigned`.
+///
+/// That field holds what the server knows about the redaction, such as the
+/// sender's transaction id, which is not for the readers of the redacted event.
+fn redacted_because(mut reason: CanonicalJsonObject) -> RedactedBecause {
+	reason.remove("unsigned");
+	RedactedBecause::from_json(reason)
+}
+
+#[cfg(test)]
+mod tests {
+	use ruma::RoomVersionId;
+	use serde_json::{from_value, json};
+
+	use super::*;
+
+	#[test]
+	fn recorded_redaction_drops_its_unsigned() {
+		let target = object(json!({
+			"type": "m.room.message",
+			"content": { "body": "hello", "msgtype": "m.text" },
+			"unsigned": { "transaction_id": "target-txn" },
+		}));
+
+		let reason = object(json!({
+			"type": "m.room.redaction",
+			"content": { "redacts": "$target" },
+			"unsigned": { "transaction_id": "redactor-txn" },
+		}));
+
+		let redacted = redact_keeping_thread(target, true, &rules(), redacted_because(reason))
+			.expect("redactable event");
+
+		let expected = object(json!({
+			"redacted_because": {
+				"type": "m.room.redaction",
+				"content": { "redacts": "$target" },
+			},
+		}));
+
+		assert_eq!(unsigned(&redacted), &expected);
+	}
+
+	fn object(value: serde_json::Value) -> CanonicalJsonObject {
+		from_value(value).expect("canonical JSON object")
+	}
+
+	fn unsigned(pdu: &CanonicalJsonObject) -> &CanonicalJsonObject {
+		pdu.get("unsigned")
+			.and_then(CanonicalJsonValue::as_object)
+			.expect("unsigned object")
+	}
+
+	fn rules() -> RedactionRules {
+		RoomVersionId::V11
+			.rules()
+			.expect("known room version")
+			.redaction
+	}
 }
