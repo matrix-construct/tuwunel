@@ -11,8 +11,8 @@ use crate::Ruma;
 /// Retrieves a single event from the server.
 ///
 /// The requesting server must be joined to the room, unless the room is
-/// world-readable or carries a pending knock. The room's ACL and the event's
-/// history visibility are checked independently; either can refuse.
+/// world-readable. The room's ACL and the event's history visibility are
+/// checked independently; either can refuse.
 pub(crate) async fn get_event_route(
 	State(services): State<crate::State>,
 	body: Ruma<get_event::v1::Request>,
