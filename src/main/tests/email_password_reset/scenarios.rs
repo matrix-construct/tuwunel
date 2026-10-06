@@ -33,6 +33,7 @@ const A_WRONG_SECRET_PASSWORD: &str = "email-reset-a-wrong-secret-password";
 const A_UNBOUND_PASSWORD: &str = "email-reset-a-unbound-password";
 const A_KEEP_DEVICES_PASSWORD: &str = "email-reset-a-keep-devices-password";
 const A_REPLAY_PASSWORD: &str = "email-reset-a-replay-password";
+const A_DEACTIVATED_PASSWORD: &str = "email-reset-a-deactivated-password";
 const A_EMAIL: &str = "strass-reset@example.org";
 const A_EMAIL_VARIANT: &str = "Straß-Reset@Example.Org";
 const A_INITIAL_TOKENS: [&str; 2] = [
@@ -280,7 +281,9 @@ pub(super) async fn second_phase(
 
 	verify_device_modes(phase).await?;
 
-	verify_authenticated_changes(phase).await
+	verify_authenticated_changes(phase).await?;
+
+	reject_deactivated_reset(phase).await
 }
 
 async fn verify_restart_state(phase: Phase<'_>) -> Result {
@@ -715,6 +718,57 @@ async fn verify_authenticated_changes(phase: Phase<'_>) -> Result {
 
 	assert_eq!(token_user.as_str(), phase.user_b.as_str());
 	assert_eq!(token_device.as_str(), phase.state.b_device);
+
+	Ok(())
+}
+
+async fn reject_deactivated_reset(phase: Phase<'_>) -> Result {
+	let secret = "email-reset-deactivated-secret";
+
+	phase
+		.services
+		.users
+		.deactivate_account(phase.user_a)
+		.await?;
+
+	let pending = phase
+		.services
+		.threepid
+		.create_or_reuse_pending(secret, Medium::Email, A_EMAIL, 1, Duration::from_mins(5))
+		.await?;
+
+	let token = pending
+		.freshly_minted_token
+		.as_deref()
+		.ok_or_else(|| err!("deactivated password-reset proof did not mint a token"))?;
+
+	phase
+		.services
+		.threepid
+		.validate_pending_token(&pending.sid, secret, token)
+		.await?;
+
+	let reset = Reset {
+		sid: &pending.sid,
+		client_secret: secret,
+		new_password: A_DEACTIVATED_PASSWORD,
+		logout_devices: Some(true),
+		substitution: phase.substitution,
+	};
+
+	let response = reset_password(phase.client, phase.base, reset).await?;
+	let body = serde_json::from_str::<Value>(&response.1)?;
+
+	assert_eq!(response.0, 403, "deactivated account password reset: {}", response.1);
+	assert_eq!(body.get("errcode").and_then(Value::as_str), Some("M_USER_DEACTIVATED"));
+	assert!(
+		phase
+			.services
+			.users
+			.is_deactivated(phase.user_a)
+			.await?,
+		"password reset reactivated a deactivated account"
+	);
 
 	Ok(())
 }
