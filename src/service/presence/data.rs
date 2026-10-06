@@ -146,8 +146,12 @@ impl Data {
 		since: u64,
 		to: Option<u64>,
 	) -> impl Stream<Item = (&UserId, u64, &[u8])> + Send + '_ {
+		let upper = to
+			.and_then(|to| to.checked_add(1))
+			.map(u64::to_be_bytes);
+
 		self.presenceid_presence
-			.raw_stream_from(&since.to_be_bytes())
+			.raw_stream_range(&since.to_be_bytes(), upper.as_ref().map(AsRef::as_ref))
 			.ignore_err()
 			.ready_filter_map(|(key, presence)| {
 				let (count, user_id) = key.split_at_checked(size_of::<u64>())?;

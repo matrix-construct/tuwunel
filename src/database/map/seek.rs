@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use futures::{FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt};
-use rocksdb::Direction;
+use rocksdb::{Direction, ReadOptions};
 use tokio::task::consume_budget;
 use tuwunel_core::Result;
 
@@ -25,9 +25,25 @@ pub(super) fn seek_stream<'a, C, T>(
 where
 	C: From<stream::State<'a>> + Stream<Item = Result<T>> + Send,
 {
-	let opts = iter_options_default(&map.engine);
+	seek_stream_bounded::<C, T>(map, dir, from, None)
+}
+
+/// Builds a map stream with an optional exclusive upper bound.
+///
+/// Both the cache probe and the real iterator own their bound bytes. The
+/// direction and starting position retain the unbounded seek behavior.
+pub(super) fn seek_stream_bounded<'a, C, T>(
+	map: &'a Arc<Map>,
+	dir: Direction,
+	from: Option<&[u8]>,
+	to: Option<&[u8]>,
+) -> impl Stream<Item = Result<T>> + Send + use<'a, C, T>
+where
+	C: From<stream::State<'a>> + Stream<Item = Result<T>> + Send,
+{
+	let opts = bounded_options(iter_options_default(&map.engine), to);
 	let state = stream::State::new(map, opts);
-	if is_cached(map, dir, from) {
+	if is_cached(map, dir, from, to) {
 		let state = init(state, dir, from);
 		return consume_budget()
 			.map(move |()| C::from(state))
@@ -63,11 +79,19 @@ where
     skip_all,
     fields(%map),
 )]
-fn is_cached(map: &Arc<Map>, dir: Direction, from: Option<&[u8]>) -> bool {
-	let opts = cache_iter_options_default(&map.engine);
+fn is_cached(map: &Arc<Map>, dir: Direction, from: Option<&[u8]>, to: Option<&[u8]>) -> bool {
+	let opts = bounded_options(cache_iter_options_default(&map.engine), to);
 	let state = init(stream::State::new(map, opts), dir, from);
 
 	!state.is_incomplete()
+}
+
+fn bounded_options(mut opts: ReadOptions, to: Option<&[u8]>) -> ReadOptions {
+	if let Some(to) = to {
+		opts.set_iterate_upper_bound(to);
+	}
+
+	opts
 }
 
 /// Initializes iterator state for the requested seek direction.

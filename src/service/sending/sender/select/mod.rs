@@ -146,6 +146,14 @@ async fn select_events_current(
 	statuses: &mut TransactionStatuses,
 	retry_action: RetryAction,
 ) -> Current {
+	if matches!(dest, Destination::Federation(_))
+		&& matches!(
+			statuses.get(dest),
+			Some(TransactionStatus::Running { .. } | TransactionStatus::RunningForceRetry { .. })
+		) {
+		return Current::Busy;
+	}
+
 	// peer_status gates federation only; appservice and push fall through.
 	if let Destination::Federation(server) = dest
 		&& let ShouldAttempt::No { earliest_retry } = self

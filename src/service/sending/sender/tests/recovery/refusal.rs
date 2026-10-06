@@ -4,10 +4,12 @@ use std::{
 };
 
 use tokio::time::Instant;
-use tuwunel_core::Result;
+use tuwunel_core::{Result, err};
 
 use super::{
-	SendingFutures, TransactionStatus, TransactionStatuses, WakeQueue, enqueue, fixture, pdu_id,
+	super::{NewEvents, Selection},
+	SendingFutures, TransactionStatus, TransactionStatuses, WakeQueue, completion, enqueue,
+	fixture, pdu_id,
 };
 use crate::{
 	federation::{Classification, ShouldAttempt},
@@ -42,6 +44,31 @@ async fn refused_traffic_arms_one_wake_and_preserves_status() -> Result {
 	let mut futures = SendingFutures::new(); // request state out-param
 	let mut statuses = TransactionStatuses::new(); // request state out-param
 	let mut wakes = WakeQueue::new(); // request state out-param
+
+	for status in
+		[TransactionStatus::Running { tries: 2 }, TransactionStatus::RunningForceRetry {
+			tries: 2,
+		}] {
+		statuses.insert(dest.clone(), status);
+
+		let selection = sending
+			.select_events(&dest, NewEvents::new(), &mut statuses)
+			.await?;
+
+		assert!(matches!(selection, Selection::Busy));
+		assert!(matches!(
+			statuses.get(&dest),
+			Some(
+				TransactionStatus::Running { tries: 2 }
+					| TransactionStatus::RunningForceRetry { tries: 2 }
+			)
+		));
+
+		assert!(futures.is_empty());
+		assert!(wakes.is_empty());
+	}
+
+	statuses.remove(&dest);
 
 	for count in 1..=3 {
 		let (queue_id, event) = enqueue(sending, &dest, SendingEvent::Pdu(pdu_id(count)));
@@ -84,6 +111,27 @@ async fn refused_traffic_arms_one_wake_and_preserves_status() -> Result {
 	assert_eq!(wakes.len(), 1);
 	assert!(futures.is_empty());
 	assert!(matches!(statuses.get(&dest), Some(TransactionStatus::Retrying { tries: 2 })));
+
+	peer.record_success(server).await;
+	statuses.insert(dest.clone(), TransactionStatus::Running { tries: 2 });
+	wakes.clear();
+
+	sending
+		.handle_response(completion(Ok(dest.clone())), &mut futures, &mut statuses, &mut wakes)
+		.await;
+
+	assert_eq!(futures.len(), 1);
+	assert!(matches!(statuses.get(&dest), Some(TransactionStatus::Running { tries: 0 })));
+
+	futures.clear();
+	let failed = completion(Err((dest.clone(), err!("simulated delivery failure"))));
+
+	sending
+		.handle_response(failed, &mut futures, &mut statuses, &mut wakes)
+		.await;
+
+	assert!(matches!(statuses.get(&dest), Some(TransactionStatus::Retrying { tries: 1 })));
+	assert_eq!(wakes.len(), 1);
 
 	Ok(())
 }

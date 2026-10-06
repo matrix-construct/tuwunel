@@ -5,7 +5,7 @@ use rocksdb::Direction;
 use serde::{Deserialize, Serialize};
 use tuwunel_core::{Result, implement};
 
-use super::seek::seek_stream;
+use super::seek::{seek_stream, seek_stream_bounded};
 use crate::{
 	keyval::{KeyVal, result_deserialize, serialize_key},
 	stream,
@@ -88,4 +88,27 @@ where
 	P: AsRef<[u8]> + ?Sized + Debug,
 {
 	seek_stream::<stream::Items<'_>, _>(self, Direction::Forward, Some(from.as_ref()))
+}
+
+/// Streams raw entries from an inclusive lower bound to an optional exclusive upper bound.
+///
+/// The upper bound is owned by the RocksDB iterator. Yielded keys and values
+/// borrow cursor storage and must not be retained across another poll.
+#[implement(super::Map)]
+#[tracing::instrument(
+    skip(self, from, to),
+    fields(
+        %self,
+    ),
+    level = "trace",
+)]
+pub fn raw_stream_range<P>(
+	self: &Arc<Self>,
+	from: &P,
+	to: Option<&[u8]>,
+) -> impl Stream<Item = Result<KeyVal<'_>>> + Send + use<'_, P>
+where
+	P: AsRef<[u8]> + ?Sized + Debug,
+{
+	seek_stream_bounded::<stream::Items<'_>, _>(self, Direction::Forward, Some(from.as_ref()), to)
 }

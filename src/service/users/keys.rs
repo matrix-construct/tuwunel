@@ -1097,6 +1097,9 @@ pub async fn mark_device_key_update(
 		.log_err()
 		.ok();
 
+	// Retire this change before discovering and waking federation peers.
+	drop(count);
+
 	if !local {
 		return;
 	}

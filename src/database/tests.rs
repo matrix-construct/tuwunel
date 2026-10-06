@@ -13,6 +13,7 @@ use std::{
 	sync::Arc,
 };
 
+use futures::{StreamExt, TryStreamExt};
 use rocksdb::WriteBatch;
 use serde::{Deserialize, Serialize};
 use tokio::runtime::Handle;
@@ -1338,6 +1339,88 @@ async fn txn_insert_raw_preserves_bytes() -> Result {
 	);
 
 	drop(database);
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn raw_stream_range_bounds() -> Result {
+	let database = open_database("raw-stream-range").await?;
+	let map = database.get("presenceid_presence")?;
+	let rows = [
+		(0_u64, "zero"),
+		(1, "one"),
+		(2, "two-a"),
+		(2, "two-b"),
+		(3, "three"),
+		(u64::MAX, "last"),
+	];
+
+	for row in rows {
+		let key = serialize_key(row)?;
+
+		map.insert(&key, b"value");
+	}
+
+	for count in 4_u64..10 {
+		let key = serialize_key((count, "deleted"))?;
+
+		map.insert(&key, b"value");
+	}
+
+	database.engine.sort()?;
+
+	for count in 4_u64..10 {
+		let key = serialize_key((count, "deleted"))?;
+
+		map.remove(&key);
+	}
+
+	for _ in 0..2 {
+		let stream = {
+			let upper = 3_u64.to_be_bytes();
+
+			map.raw_stream_range(&1_u64.to_be_bytes(), Some(&upper))
+		};
+
+		let keys: Vec<_> = stream
+			.map_ok(|(key, _)| key.to_owned())
+			.try_collect()
+			.await?;
+
+		let expected: Vec<_> = rows[1..4]
+			.iter()
+			.copied()
+			.map(|row| serialize_key(row).map(|key| key.as_ref().to_owned()))
+			.collect::<Result<Vec<_>>>()?;
+
+		assert_eq!(keys, expected);
+
+		assert_eq!(
+			map.raw_stream_range(&3_u64.to_be_bytes(), Some(&3_u64.to_be_bytes()))
+				.take(1)
+				.count()
+				.await,
+			0
+		);
+
+		assert_eq!(
+			map.raw_stream_range(&4_u64.to_be_bytes(), Some(&10_u64.to_be_bytes()))
+				.take(1)
+				.count()
+				.await,
+			0
+		);
+
+		let last: Vec<_> = map
+			.raw_stream_range(&u64::MAX.to_be_bytes(), None)
+			.map_ok(|(key, _)| key.to_owned())
+			.try_collect()
+			.await?;
+
+		assert_eq!(last, [serialize_key(rows[5])?.as_ref().to_owned()]);
+		database.engine.sort()?;
+	}
 
 	Ok(())
 }
