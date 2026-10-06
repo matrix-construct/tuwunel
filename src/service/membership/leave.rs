@@ -233,6 +233,20 @@ async fn clear_local_leave(
 	leave_content: RoomMemberEventContent,
 	last_state: Option<Vec<Raw<AnyStrippedStateEvent>>>,
 ) -> Result {
+	// Only a cached invite, join or knock needs clearing. A leave row written for
+	// anyone else would record a departure from a room never entered, or move an
+	// earlier one forward, and history visibility is judged from that point.
+	if !self
+		.services
+		.state_cache
+		.user_membership(user_id, room_id)
+		.await
+		.as_ref()
+		.is_some_and(is_leaveable)
+	{
+		return Ok(());
+	}
+
 	let count = self.services.globals.next_count();
 	self.services
 		.state_cache
