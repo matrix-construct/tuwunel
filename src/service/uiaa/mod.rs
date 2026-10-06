@@ -1,10 +1,10 @@
 use std::{
-	collections::BTreeMap,
 	ops::ControlFlow,
-	sync::{Arc, RwLock},
+	sync::{Arc, Mutex},
 };
 
 use futures::{TryStreamExt, pin_mut};
+use lru_cache::LruCache;
 use ruma::{
 	CanonicalJsonValue, DeviceId, OwnedDeviceId, OwnedUserId, UserId,
 	api::{
@@ -17,14 +17,14 @@ use ruma::{
 };
 use tuwunel_core::{
 	Err, Result, err, error, extract, implement,
-	utils::{self, BoolExt, hash::verify_password, string::EMPTY},
+	utils::{self, BoolExt, hash::verify_password, json::serialized_len, string::EMPTY},
 };
 use tuwunel_database::{Deserialized, Json, Map};
 
 use crate::users::is_password_hash;
 
 pub struct Service {
-	userdevicesessionid_uiaarequest: RwLock<RequestMap>,
+	userdevicesessionid_uiaarequest: Mutex<RequestMap>,
 	db: Data,
 	services: Arc<crate::services::OnceServices>,
 }
@@ -33,10 +33,22 @@ struct Data {
 	userdevicesessionid_uiaainfo: Arc<Map>,
 }
 
-type RequestMap = BTreeMap<RequestKey, CanonicalJsonValue>;
+type RequestMap = LruCache<RequestKey, CanonicalJsonValue>;
 type RequestKey = (OwnedUserId, OwnedDeviceId, String);
 
 pub const SESSION_ID_LENGTH: usize = 32;
+
+/// Most sessions whose request bodies are kept; the least recently used is
+/// dropped first.
+const MAX_REQUESTS: usize = 1024;
+
+/// Larger request bodies are not kept, so the client must resend them whole.
+/// A kept body is parsed JSON, which can take over 100 times its serialized
+/// size in memory.
+const MAX_REQUEST_BYTES: usize = 4_096;
+
+#[cfg(test)]
+mod tests;
 
 #[derive(Clone, Copy)]
 enum EmailIdentityMode {
@@ -47,7 +59,7 @@ enum EmailIdentityMode {
 impl crate::Service for Service {
 	fn build(args: &crate::Args<'_>) -> Result<Arc<Self>> {
 		Ok(Arc::new(Self {
-			userdevicesessionid_uiaarequest: RwLock::new(RequestMap::new()),
+			userdevicesessionid_uiaarequest: RequestMap::new(MAX_REQUESTS).into(),
 			db: Data {
 				userdevicesessionid_uiaainfo: args.db["userdevicesessionid_uiaainfo"].clone(),
 			},
@@ -412,11 +424,15 @@ fn set_uiaa_request(
 	session: &str,
 	request: &CanonicalJsonValue,
 ) {
+	if !serialized_len(request).is_ok_and(|len| len <= MAX_REQUEST_BYTES) {
+		return;
+	}
+
 	let key = (user_id.to_owned(), device_id.to_owned(), session.to_owned());
 
 	self.userdevicesessionid_uiaarequest
-		.write()
-		.expect("locked for writing")
+		.lock()
+		.expect("locked")
 		.insert(key, request.to_owned());
 }
 
@@ -431,9 +447,9 @@ pub fn get_uiaa_request(
 	let key = (user_id.to_owned(), device_id.to_owned(), session.to_owned());
 
 	self.userdevicesessionid_uiaarequest
-		.read()
-		.expect("locked for reading")
-		.get(&key)
+		.lock()
+		.expect("locked")
+		.get_mut(&key)
 		.cloned()
 }
 
@@ -453,6 +469,13 @@ pub fn update_uiaa_session(
 			.put(key, Json(uiaainfo));
 	} else {
 		self.db.userdevicesessionid_uiaainfo.del(key);
+
+		let key = (user_id.to_owned(), device_id.to_owned(), session.to_owned());
+
+		self.userdevicesessionid_uiaarequest
+			.lock()
+			.expect("locked")
+			.remove(&key);
 	}
 }
 
