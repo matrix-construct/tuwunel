@@ -14,6 +14,7 @@ use futures::{
 use loole::{Receiver, Sender};
 use ruma::{
 	DeviceId, OwnedUserId, UInt, UserId,
+	api::federation::transactions::edu::PresenceUpdate,
 	events::presence::{PresenceEvent, PresenceEventContent},
 	presence::PresenceState,
 };
@@ -23,7 +24,7 @@ use tuwunel_core::{
 	Result, checked, debug, debug_warn, err, implement,
 	result::LogErr,
 	trace,
-	utils::{self, TryFutureExtExt},
+	utils::{TryFutureExtExt, millis_since_unix_epoch},
 };
 
 use self::{aggregate::PresenceAggregator, data::Data};
@@ -168,7 +169,7 @@ impl Service {
 			return;
 		}
 
-		let now = utils::millis_since_unix_epoch();
+		let now = millis_since_unix_epoch();
 		self.last_sync_seen
 			.write()
 			.await
@@ -177,7 +178,7 @@ impl Service {
 
 	/// Returns milliseconds since last observed sync for user (if any)
 	pub async fn last_sync_gap_ms(&self, user_id: &UserId) -> Option<u64> {
-		let now = utils::millis_since_unix_epoch();
+		let now = millis_since_unix_epoch();
 		self.last_sync_seen
 			.read()
 			.await
@@ -276,7 +277,7 @@ impl Service {
 
 	/// Creates a PresenceEvent from available data.
 	async fn to_presence_event(&self, presence: Presence, user_id: &UserId) -> PresenceEvent {
-		let now = utils::millis_since_unix_epoch();
+		let now = millis_since_unix_epoch();
 		let last_active_ago = now.saturating_sub(presence.last_active_ts);
 
 		let avatar_url = self.services.profile.avatar_url(user_id).ok();
@@ -295,6 +296,29 @@ impl Service {
 			},
 		}
 	}
+}
+
+/// Decode stored presence for a federation update.
+///
+/// Activity age saturates at the protocol integer limit and at zero for future
+/// timestamps. Federation updates omit profile fields and require no profile reads.
+#[implement(Service)]
+pub fn from_json_bytes_to_update(
+	&self,
+	bytes: &[u8],
+	user_id: &UserId,
+) -> Result<PresenceUpdate> {
+	let presence = Presence::from_json_bytes(bytes)?;
+	let now = millis_since_unix_epoch();
+	let last_active_ago = now.saturating_sub(presence.last_active_ts);
+
+	Ok(PresenceUpdate {
+		user_id: user_id.to_owned(),
+		presence: presence.state,
+		currently_active: presence.currently_active,
+		status_msg: presence.status_msg,
+		last_active_ago: UInt::new_saturating(last_active_ago),
+	})
 }
 
 /// Returns the latest optional presence event.

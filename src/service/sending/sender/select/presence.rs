@@ -8,8 +8,6 @@ use futures::StreamExt;
 use ruma::{
 	OwnedUserId, ServerName, UserId,
 	api::federation::transactions::edu::{Edu, PresenceContent, PresenceUpdate},
-	events::presence::PresenceEventContent,
-	uint,
 };
 use tuwunel_core::{
 	implement,
@@ -100,28 +98,12 @@ async fn presence_update(
 		return None;
 	}
 
-	let PresenceEventContent {
-		presence,
-		currently_active,
-		status_msg,
-		last_active_ago,
-		..
-	} = self
+	let update = self
 		.services
 		.presence
-		.from_json_bytes_to_event(presence_bytes, user_id)
-		.await
+		.from_json_bytes_to_update(presence_bytes, user_id)
 		.log_err()
-		.ok()?
-		.content;
-
-	let update = PresenceUpdate {
-		user_id: user_id.to_owned(),
-		presence,
-		currently_active: currently_active.unwrap_or(false),
-		status_msg,
-		last_active_ago: last_active_ago.unwrap_or_else(|| uint!(0)),
-	};
+		.ok()?;
 
 	Some((user_id.to_owned(), update))
 }
