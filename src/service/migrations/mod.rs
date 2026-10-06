@@ -33,6 +33,7 @@ use self::{
 	migrate_media::migrate_media,
 	migrate_profile_keys::migrate_profile_keys,
 	rebuild_roomid_tscount_pducount::rebuild_roomid_tscount_pducount,
+	redactions::restore_redactions,
 	remove_remote_media_userid::remove_remote_media_userid,
 	retroactively_fix_bad_data_from_roomuserid_joined::retroactively_fix_bad_data_from_roomuserid_joined,
 	split_conduit_highlight_counts::split_conduit_highlight_counts,
@@ -56,6 +57,7 @@ mod migrate_media;
 mod migrate_profile_keys;
 mod moderation;
 mod rebuild_roomid_tscount_pducount;
+mod redactions;
 mod remove_remote_media_userid;
 mod retroactively_fix_bad_data_from_roomuserid_joined;
 mod scan;
@@ -261,6 +263,7 @@ async fn fresh(services: &Services) -> Result {
 	db["global"].insert("adopt_foreign_email_bindings", []);
 	db["global"].insert(token_expiry::RESTORE_MARKER, []);
 	db["global"].insert(token_expiry::ADOPT_MARKER, []);
+	db["global"].insert(redactions::MARKER, []);
 	mark_clean_injectivity(services);
 
 	// Create the admin room and server user on first run
@@ -369,14 +372,9 @@ async fn migrate(services: &Services, foreign_lineage: bool) -> Result {
 	}
 
 	if pending(services, "rebuild_thread_summaries").await? {
-		let (changed, failed) = services.threads.rebuild_thread_summaries().await;
+		rebuild_thread_summaries(services).await;
 
 		db["global"].insert("rebuild_thread_summaries", []);
-		if failed == 0 {
-			info!(roots = changed, "Rebuilt thread summaries.");
-		} else {
-			warn!(roots = changed, failed, "Rebuilt thread summaries with failed roots.");
-		}
 	}
 
 	if pending(services, "clear_servername_status").await? {
@@ -414,6 +412,8 @@ async fn migrate(services: &Services, foreign_lineage: bool) -> Result {
 	until_finished(services, token_expiry::RESTORE_MARKER, restore_token_expiry).await?;
 	until_finished(services, token_expiry::ADOPT_MARKER, migrate_token_expiry).await?;
 
+	run_once(services, redactions::MARKER, restore_redactions).await?;
+
 	services.server.check_running()?;
 
 	// A newer same-lineage database was already refused; stamping ours is safe. A
@@ -441,6 +441,20 @@ async fn migrate(services: &Services, foreign_lineage: bool) -> Result {
 	Ok(())
 }
 
+/// Rebuilds every stored thread summary, logging how many roots changed.
+///
+/// Failed roots are logged rather than returned, so a caller stamps its marker
+/// either way.
+async fn rebuild_thread_summaries(services: &Services) {
+	let (changed, failed) = services.threads.rebuild_thread_summaries().await;
+
+	if failed == 0 {
+		info!(roots = changed, "Rebuilt thread summaries.");
+	} else {
+		warn!(roots = changed, failed, "Rebuilt thread summaries with failed roots.");
+	}
+}
+
 /// Runs a pass whose work may wait on a condition outside the database.
 ///
 /// The marker is stamped only once the pass reports it finished, so a pass that
@@ -455,6 +469,22 @@ where
 		if finished {
 			services.db["global"].insert(marker, []);
 		}
+	}
+
+	Ok(())
+}
+
+/// Runs a pass that finishes whenever it succeeds, stamping its marker.
+///
+/// A pass that fails leaves the marker unstamped, so the next boot runs it again.
+async fn run_once<F>(services: &Services, marker: &'static str, pass: F) -> Result
+where
+	F: AsyncFnOnce(&Services) -> Result,
+{
+	if pending(services, marker).await? {
+		pass(services).await?;
+
+		services.db["global"].insert(marker, []);
 	}
 
 	Ok(())

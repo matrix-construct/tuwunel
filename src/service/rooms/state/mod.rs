@@ -39,7 +39,7 @@ use ruma::{
 use serde::Deserialize;
 use serde_json::value::RawValue as RawJsonValue;
 use tuwunel_core::{
-	Event, PduEvent, Result, err,
+	Error, Event, PduEvent, Result, err,
 	error::inspect_debug_log,
 	implement,
 	matrix::{PduCount, RoomVersionRules, StateKey, TypeStateKey, room_version},
@@ -711,15 +711,36 @@ pub async fn get_room_version_rules(&self, room_id: &RoomId) -> Result<RoomVersi
 /// Returns the room version declared by the room's create event.
 ///
 /// Only the event's content is decoded, so a create event stored without its
-/// room ID still yields the version. Missing or malformed create-event content
-/// is reported to the caller.
+/// room ID still yields the version. An unreadable accepted event falls back
+/// to outlier storage. Transient storage errors are preserved when neither
+/// copy can be read.
 pub async fn get_room_version(&self, room_id: &RoomId) -> Result<RoomVersionId> {
 	self.services
 		.state_accessor
 		.room_state_get_id(room_id, &StateEventType::RoomCreate, "")
-		.and_then(async |create_id| self.services.timeline.get(&create_id).await)
+		.and_then(async |create_id| {
+			let outlier = async |accepted: Error| {
+				self.services
+					.timeline
+					.get_outlier(&create_id)
+					.map_err(|outlier| match accepted {
+						| error if error.is_transient_io() => error,
+						| _ => outlier,
+					})
+					.await
+			};
+
+			self.services
+				.timeline
+				.get_non_outlier(&create_id)
+				.or_else(outlier)
+				.await
+		})
 		.map_ok(|create: CreateEvent| create.content.room_version)
-		.map_err(|e| err!(Request(NotFound("No create event found: {e:?}"))))
+		.map_err(|error| match error {
+			| Error::Io(_) if !error.is_not_found() => error,
+			| error => err!(Request(NotFound("No create event found: {error:?}"))),
+		})
 		.await
 }
 

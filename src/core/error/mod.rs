@@ -624,6 +624,26 @@ impl Error {
 	#[inline]
 	pub fn is_not_found(&self) -> bool { self.status_code() == http::StatusCode::NOT_FOUND }
 
+	/// Tests whether this is a potentially transient I/O failure.
+	///
+	/// Interrupted, busy, timed-out, incomplete, and unclassified I/O failures
+	/// may succeed on retry. Missing data, corruption, and invalid input do not
+	/// qualify.
+	#[inline]
+	pub fn is_transient_io(&self) -> bool {
+		matches!(
+			self,
+			Self::Io(error) if matches!(
+				error.kind(),
+				IoErrorKind::Interrupted
+					| IoErrorKind::ResourceBusy
+					| IoErrorKind::TimedOut
+					| IoErrorKind::WouldBlock
+					| IoErrorKind::Other
+			)
+		)
+	}
+
 	/// Tests whether this error is a missing record rather than any 404.
 	///
 	/// Only `Request` with the `NotFound` kind matches, which is what the
