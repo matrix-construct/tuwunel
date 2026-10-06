@@ -915,6 +915,9 @@ opt-level = 'z'
 # Linting
 #
 
+[workspace.lints.cargo]
+unused_dependencies = "allow"
+
 [workspace.lints.rust]
 absolute_paths_not_starting_with_crate = "warn"
 ambiguous_negative_literals = "warn"
