@@ -272,7 +272,7 @@ pub async fn request_url_preview(&self, url: &Url) -> Result<UrlPreviewData> {
 		},
 		| img if img.starts_with("image/") => {
 			let response = self
-				.media_refetch(url, response, via_media_client)
+				.media_refetch(response, via_media_client)
 				.await?;
 
 			require_media_type(&response, "image/")?;
@@ -280,7 +280,7 @@ pub async fn request_url_preview(&self, url: &Url) -> Result<UrlPreviewData> {
 		},
 		| video if video.starts_with("video/") => {
 			let response = self
-				.media_refetch(url, response, via_media_client)
+				.media_refetch(response, via_media_client)
 				.await?;
 
 			require_media_type(&response, "video/")?;
@@ -288,7 +288,7 @@ pub async fn request_url_preview(&self, url: &Url) -> Result<UrlPreviewData> {
 		},
 		| audio if audio.starts_with("audio/") => {
 			let response = self
-				.media_refetch(url, response, via_media_client)
+				.media_refetch(response, via_media_client)
 				.await?;
 
 			require_media_type(&response, "audio/")?;
@@ -654,10 +654,15 @@ async fn media_response(&self, _url: &Url) -> Result<reqwest::Response> {
 /// URL. When no distinct media agent is configured the two clients are
 /// identical and the original response is used as-is, avoiding a second
 /// request.
+///
+/// The media client fetches the URL the page client's redirects ended at, not
+/// the one the preview was requested for. Origins that redirect link-preview
+/// crawlers to the media itself (and everyone else to a landing page) would
+/// otherwise answer the media agent with the landing page, and the preview
+/// would fail on its content type.
 #[implement(Service)]
 async fn media_refetch(
 	&self,
-	url: &Url,
 	response: reqwest::Response,
 	via_media_client: bool,
 ) -> Result<reqwest::Response> {
@@ -671,7 +676,9 @@ async fn media_refetch(
 		return Ok(response);
 	}
 
-	self.media_response(url).await
+	let url = response.url().clone();
+	self.check_url_host(&url)?;
+	self.media_response(&url).await
 }
 
 /// Verify a possibly-refetched preview response still carries the content type
