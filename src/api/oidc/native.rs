@@ -23,6 +23,7 @@ use url::Url;
 use super::{
 	account::{
 		ACCOUNT_HEAD, account_error_response, account_html_response, account_redirect_response,
+		account_sso_redirect, validate_account_action,
 	},
 	authorization_sso_url, require_account_usable, url_encode,
 };
@@ -109,7 +110,7 @@ pub(crate) async fn native_get_route(
 	if let Some(idp_id) = params.idp_id.as_deref() {
 		return provider_redirect(&services, client, context, idp_id)
 			.await
-			.map_or_else(|e| account_error_response(&e), account_redirect_response);
+			.unwrap_or_else(|e| account_error_response(&e));
 	}
 
 	let view = params.view.as_deref().unwrap_or("login");
@@ -145,21 +146,14 @@ fn parse_flow<'a>(
 
 /// Send the browser to the provider chosen on the login page.
 ///
-/// The pending request is bound to that provider only once its URL is built, and
-/// the binding is final, so the request cannot also complete with a local
-/// password or another provider.
+/// Authorization requests bind to the provider before redirecting. Account
+/// management returns to its existing callback with the action and device.
 async fn provider_redirect(
 	services: &Services,
 	client: IpAddr,
 	context: Flow<'_>,
 	idp_id: &str,
-) -> Result<Redirect> {
-	let Flow::Authorization(req_id) = context else {
-		return Err!(Request(InvalidParam(
-			"Provider selection requires an authorization request"
-		)));
-	};
-
+) -> Result<Response> {
 	services.oauth.check_rate_limit(client)?;
 
 	let oidc = services.oauth.get_server()?;
@@ -170,12 +164,25 @@ async fn provider_redirect(
 		.map_err(|_| err!(Request(InvalidParam("Unrecognized identity provider"))))?
 		.id();
 
+	let req_id = match context {
+		| Flow::Authorization(req_id) => req_id,
+		| Flow::Device(_) =>
+			return Err!(Request(InvalidParam(
+				"Provider selection requires an authorization request or account action"
+			))),
+		| Flow::Account { action, device_id } => {
+			validate_account_action(action)?;
+
+			return account_sso_redirect(services, action, device_id, Some(provider_id));
+		},
+	};
+
 	let sso_url = authorization_sso_url(&oidc.issuer_url()?, provider_id, req_id)?;
 
 	oidc.bind_auth_request_to_provider(req_id, provider_id)
 		.await?;
 
-	Ok(Redirect::temporary(sso_url.as_str()))
+	Ok(account_redirect_response(Redirect::temporary(sso_url.as_str())))
 }
 
 /// Authenticates submitted credentials and sends the login token to the
@@ -536,7 +543,13 @@ async fn render_page(
 ) -> Result<String> {
 	let registration_enabled = services.config.allow_registration;
 	let Flow::Authorization(req_id) = context else {
-		return Ok(render_login(context, error, registration_enabled, ""));
+		let sso_options = match context {
+			| Flow::Account { .. } =>
+				render_sso_options("Or sign in with", context, sso_choices(services)),
+			| _ => String::new(),
+		};
+
+		return Ok(render_login(context, error, registration_enabled, &sso_options));
 	};
 
 	let bound = services
@@ -558,7 +571,7 @@ async fn render_page(
 
 		| None => {
 			let sso_options =
-				render_sso_options("Or sign in with", req_id, sso_choices(services));
+				render_sso_options("Or sign in with", context, sso_choices(services));
 
 			render_login(context, error, registration_enabled, &sso_options)
 		},
@@ -648,7 +661,8 @@ fn provider_choice(provider: &IdentityProvider) -> ProviderChoice<'_> {
 /// A user who leaves that provider before finishing returns here, and the
 /// request can complete only through it.
 fn render_bound(req_id: &str, provider: ProviderChoice<'_>, error: Option<&str>) -> String {
-	let sso_options = render_sso_options("Continue with", req_id, [provider]);
+	let sso_options =
+		render_sso_options("Continue with", Flow::Authorization(req_id), [provider]);
 
 	BOUND_HTML
 		.replace("{sso_options}", &sso_options)
@@ -678,15 +692,21 @@ fn sso_choices(services: &Services) -> impl Iterator<Item = ProviderChoice<'_>> 
 	}
 }
 
-/// List each provider as a link that binds the pending request to it.
+/// List each provider as a link that preserves the authentication flow.
 ///
 /// Names are HTML-escaped with braces encoded too, since the result is filled in
 /// before the error and context placeholders.
-fn render_sso_options<'a, I>(heading: &str, req_id: &str, providers: I) -> String
+fn render_sso_options<'a, I>(heading: &str, context: Flow<'_>, providers: I) -> String
 where
 	I: IntoIterator<Item = ProviderChoice<'a>>,
 {
-	let req_id = url_encode(req_id);
+	let query = match context {
+		| Flow::Authorization(req_id) => format!("oidc_req_id={}", url_encode(req_id)),
+		| Flow::Account { action, device_id } =>
+			format!("action={}&amp;device_id={}", url_encode(action), url_encode(device_id)),
+		| Flow::Device(_) => return String::new(),
+	};
+
 	let options = providers
 		.into_iter()
 		.map(|(id, name)| {
@@ -699,7 +719,7 @@ where
 		.fold(String::new(), |mut out, (id, name)| {
 			write!(
 				out,
-				r#"<li><a href="/_tuwunel/oidc/native?oidc_req_id={req_id}&amp;idp_id={id}">{name}</a></li>"#,
+				r#"<li><a href="/_tuwunel/oidc/native?{query}&amp;idp_id={id}">{name}</a></li>"#,
 			)
 			.ok();
 
@@ -837,7 +857,12 @@ static TOKEN_FIELD: &str = r#"<label for="auth-token">Registration token</label>
 
 #[cfg(test)]
 mod tests {
-	use super::{Flow, error_block, parse_flow, render_bound, render_login, render_sso_options};
+	use serde_html_form::from_str;
+
+	use super::{
+		Flow, NativeQuery, error_block, parse_flow, render_bound, render_login,
+		render_sso_options,
+	};
 
 	#[test]
 	fn login_page_has_form_and_hidden_req_id() {
@@ -862,7 +887,9 @@ mod tests {
 		let providers =
 			[("first/provider", "First provider"), ("second", "Second {error} <provider>")];
 
-		let options = render_sso_options("Or sign in with", "REQ123", providers);
+		let options =
+			render_sso_options("Or sign in with", Flow::Authorization("REQ123"), providers);
+
 		let html = render_login(Flow::Authorization("REQ123"), None, false, &options);
 
 		assert!(html.contains("oidc_req_id=REQ123&amp;idp_id=first%2Fprovider"));
@@ -938,6 +965,44 @@ mod tests {
 		assert!(html.contains(r#"name="device_id" value="""#));
 		assert!(!html.contains(r#"name="oidc_req_id""#));
 		assert!(!html.contains(r#"name="user_code""#));
+		assert!(!html.contains("view=register"));
+	}
+
+	#[test]
+	fn account_provider_link_preserves_flow_and_local_login() {
+		let action = "org.matrix.session_end";
+		let device_id = "device&{error}/?";
+		let context = Flow::Account { action, device_id };
+		let providers = [("google/provider", "Google {error} <SSO>")];
+		let options = render_sso_options("Or sign in with", context, providers);
+
+		let html = render_login(context, None, true, &options);
+		let link = html
+			.split(r#"href="/_tuwunel/oidc/native?"#)
+			.nth(1)
+			.expect("provider link")
+			.split('"')
+			.next()
+			.expect("provider query")
+			.replace("&amp;", "&");
+
+		let params: NativeQuery = from_str(&link).expect("provider query");
+		let flow = parse_flow(
+			params.oidc_req_id.as_deref(),
+			params.user_code.as_deref(),
+			params.action.as_deref(),
+			params.device_id.as_deref(),
+		)
+		.expect("account flow");
+
+		assert!(matches!(flow, Flow::Account {
+			action: selected_action,
+			device_id: selected_device,
+		} if selected_action == action && selected_device == device_id));
+
+		assert_eq!(params.idp_id.as_deref(), Some("google/provider"));
+		assert!(html.contains("Google &#123;error&#125; &lt;SSO&gt;"));
+		assert!(html.contains(r#"name="password""#));
 		assert!(!html.contains("view=register"));
 	}
 
