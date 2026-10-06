@@ -1,7 +1,7 @@
 use std::{collections::HashMap, iter::once, time::Duration};
 
 use futures::{
-	FutureExt, StreamExt,
+	FutureExt, StreamExt, TryStreamExt,
 	stream::{FuturesOrdered, FuturesUnordered},
 };
 use ruma::{
@@ -102,17 +102,22 @@ where
 		.await;
 
 	let mut todo_outlier_stack: FuturesOrdered<_> = initial_set
-		.stream()
-		.map(ToOwned::to_owned)
-		.filter_map(async |event_id| {
-			self.services
+		.try_stream()
+		.map_ok(ToOwned::to_owned)
+		.try_filter_map(async |event_id| {
+			// A prev event already in the timeline is not walked below, so its room is
+			// checked here instead.
+			match self
+				.services
 				.timeline
-				.non_outlier_pdu_exists(&event_id)
+				.get_non_outlier_pdu(&event_id)
 				.await
-				.is_err()
-				.then_some(event_id)
+			{
+				| Ok(pdu) => check_room_id(&pdu, room_id).map(|()| None),
+				| Err(_) => Ok(Some(event_id)),
+			}
 		})
-		.map(async |event_id| {
+		.map_ok(async |event_id| {
 			let events = once(event_id.as_ref());
 			let auth = self
 				.fetch_auth(origin, room_id, events, room_version, recursion_level)
@@ -120,9 +125,9 @@ where
 
 			(event_id, auth)
 		})
-		.map(FutureExt::boxed) // heterogeneous FuturesOrdered
-		.collect()
-		.await;
+		.map_ok(FutureExt::boxed) // heterogeneous FuturesOrdered
+		.try_collect()
+		.await?;
 
 	let limit = usize::from(self.services.server.config.max_fetch_prev_events);
 	let mut amount = 0_usize;
