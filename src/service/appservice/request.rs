@@ -59,6 +59,8 @@ where
 		.execute(reqwest_request)
 		.await
 		.map_err(|e| {
+			// The URL carries the hs_token in its access_token query.
+			let e = e.without_url();
 			warn!(
 				"Could not send request to appservice \"{}\" at {dest}: {e:?}",
 				registration.id
