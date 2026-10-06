@@ -167,7 +167,9 @@ where
 			continue;
 		};
 
-		if pdu.origin_server_ts() > first_ts_in_room {
+		// handle_prev_pdu upgrades events this old too, so their prev events must be
+		// walked and room-checked as well.
+		if pdu.origin_server_ts() >= first_ts_in_room {
 			amount = amount.saturating_add(1);
 			debug_assert!(
 				pdu.prev_events().count() <= MAX_PREV_EVENTS,
