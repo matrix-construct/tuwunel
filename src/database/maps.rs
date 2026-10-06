@@ -313,6 +313,10 @@ pub(super) static MAPS: &[Descriptor] = &[
 	},
 	Descriptor {
 		name: "presenceid_presence",
+		cache_disp: CacheDisp::Unique,
+		key_size_hint: Some(32),
+		val_size_hint: Some(96),
+		block_size: 1024 * 4,
 		..descriptor::SEQUENTIAL_SMALL
 	},
 	Descriptor {
