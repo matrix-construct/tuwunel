@@ -92,6 +92,9 @@ fn resolve_device_id(device_id: Option<&DeviceId>) -> OwnedDeviceId {
 #[implement(super::Service)]
 #[tracing::instrument(level = "info", skip(self))]
 pub async fn remove_device(&self, user_id: &UserId, device_id: &DeviceId) {
+	let mutex_key = (user_id.to_owned(), device_id.to_owned());
+	let _guard = self.device_mutex.lock(&mutex_key).await;
+
 	// Remove access tokens
 	self.remove_tokens(user_id, device_id).await;
 
@@ -213,6 +216,15 @@ pub async fn set_access_token(
 		access_token.len() >= TOKEN_LENGTH,
 		"Caller must supply an access_token >= {TOKEN_LENGTH} chars."
 	);
+
+	// Concurrent refreshes rotate one after another, so the device keeps a
+	// single refresh token, and a device removed meanwhile gets none.
+	let mutex_key = (user_id.to_owned(), device_id.to_owned());
+	let _guard = self.device_mutex.lock(&mutex_key).await;
+
+	if !self.device_exists(user_id, device_id).await {
+		return Err!(Request(Forbidden("Cannot issue tokens for a removed device.")));
+	}
 
 	if let Some(refresh_token) = refresh_token {
 		self.set_refresh_token(user_id, device_id, refresh_token)
