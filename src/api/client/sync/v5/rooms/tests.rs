@@ -2,16 +2,17 @@ use std::{collections::HashSet, iter::once};
 
 use ruma::{
 	UInt,
-	api::client::sync::sync_events::v5::response::Room as ResponseRoom,
+	api::client::sync::sync_events::v5::{ListId, response::Room as ResponseRoom},
 	events::{StateEventType, room::member::MembershipState},
-	uint, user_id,
+	room_id, uint, user_id,
 };
 use tuwunel_core::matrix::pdu::PduCount;
 
 use super::{
-	StateMode, membership_allows_required_state, required_state_hash, room_config,
-	room_timeline_limited, room_timeline_metadata, state_is_required, state_may_have_changed,
-	state_mode, state_was_requested,
+	Connection, ListIds, StateMode, TIMELINE_LIMIT_MAX, membership_allows_required_state,
+	merged_room_details, required_state_hash, room_config, room_timeline_limited,
+	room_timeline_metadata, state_is_required, state_may_have_changed, state_mode,
+	state_was_requested,
 };
 
 #[test]
@@ -136,6 +137,29 @@ fn zero_timeline_limit_is_not_limited() {
 	assert!(!room_timeline_limited(0, true));
 	assert!(room_timeline_limited(1, true));
 	assert!(!room_timeline_limited(1, false));
+}
+
+#[test]
+fn timeline_limit_is_capped() {
+	let room_id = room_id!("!room:example.com");
+	let list = ListId::from("main");
+	let mut conn = Connection::default();
+
+	conn.lists
+		.entry(list.clone())
+		.or_default()
+		.room_details
+		.timeline_limit = UInt::MAX;
+
+	conn.subscriptions
+		.entry(room_id.to_owned())
+		.or_default()
+		.timeline_limit = UInt::MAX;
+
+	let lists: ListIds = once(list).collect();
+	let (timeline_limit, _) = merged_room_details(&conn, &lists, room_id);
+
+	assert_eq!(timeline_limit, TIMELINE_LIMIT_MAX);
 }
 
 #[test]
