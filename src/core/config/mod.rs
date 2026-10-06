@@ -3123,11 +3123,11 @@ pub struct Config {
 	/// To disable, set this to be an empty vector (`[]`).
 	///
 	/// Defaults to:
-	/// ["127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12",
+	/// ["127.0.0.0/8", "0.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12",
 	/// "192.168.0.0/16", "100.64.0.0/10", "192.0.0.0/24", "169.254.0.0/16",
 	/// "192.88.99.0/24", "198.18.0.0/15", "192.0.2.0/24", "198.51.100.0/24",
-	/// "203.0.113.0/24", "224.0.0.0/4", "::1/128", "fe80::/10", "fc00::/7",
-	/// "2001:db8::/32", "ff00::/8", "fec0::/10"]
+	/// "203.0.113.0/24", "224.0.0.0/4", "::1/128", "::/128", "fe80::/10",
+	/// "fc00::/7", "2001:db8::/32", "ff00::/8", "fec0::/10"]
 	#[serde(default = "default_ip_range_denylist")]
 	pub ip_range_denylist: Vec<String>,
 
@@ -5956,6 +5956,7 @@ pub fn default_default_room_version() -> RoomVersionId { RoomVersionId::V12 }
 fn default_ip_range_denylist() -> Vec<String> {
 	vec![
 		"127.0.0.0/8".to_owned(),
+		"0.0.0.0/8".to_owned(),
 		"10.0.0.0/8".to_owned(),
 		"172.16.0.0/12".to_owned(),
 		"192.168.0.0/16".to_owned(),
@@ -5969,6 +5970,7 @@ fn default_ip_range_denylist() -> Vec<String> {
 		"203.0.113.0/24".to_owned(),
 		"224.0.0.0/4".to_owned(),
 		"::1/128".to_owned(),
+		"::/128".to_owned(),
 		"fe80::/10".to_owned(),
 		"fc00::/7".to_owned(),
 		"2001:db8::/32".to_owned(),

@@ -8,6 +8,7 @@ use std::{
 
 use argon2::Params;
 use figment::providers::Data;
+use ipaddress::IPAddress;
 use tracing::{level_filters::LevelFilter, subscriber::set_global_default};
 use tracing_subscriber::fmt::{MakeWriter, fmt};
 
@@ -1124,6 +1125,22 @@ fn proxy_snapshots_own_their_configured_and_environment_generations() {
 	assert_eq!(environment_snapshot.hosts().collect::<Vec<_>>(), ["environment.internal"]);
 	assert!(environment_snapshot.intercepts(&environment_url));
 	assert!(environment_snapshot.resolver_alias(&environment_url));
+}
+
+/// On Linux a connection to `0.0.0.0` or `::` reaches the local host, so the
+/// default denylist has to cover them along with the loopback ranges.
+#[test]
+fn default_ip_range_denylist_covers_the_unspecified_addresses() {
+	let denylist: Vec<IPAddress> = default_ip_range_denylist()
+		.iter()
+		.map(|cidr| IPAddress::parse(cidr).expect("default denylist range parses"))
+		.collect();
+
+	for address in ["0.0.0.0", "::"] {
+		let ip = IPAddress::parse(address).expect("test address parses");
+
+		assert!(denylist.iter().any(|cidr| cidr.includes(&ip)), "{address} is not denied");
+	}
 }
 
 /// The shipped Argon2id cost is the OWASP recommendation the argon2 crate
