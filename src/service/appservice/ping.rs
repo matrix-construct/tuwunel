@@ -54,6 +54,9 @@ pub async fn ping(
 		.execute(reqwest_request)
 		.await
 		.map_err(|e| {
+			// The URL carries the hs_token in its access_token query.
+			let e = e.without_url();
+
 			if e.is_timeout() {
 				err!(Request(ConnectionTimeout(warn!(
 					appservice = %registration.id,
