@@ -233,6 +233,18 @@ async fn clear_local_leave(
 	leave_content: RoomMemberEventContent,
 	last_state: Option<Vec<Raw<AnyStrippedStateEvent>>>,
 ) -> Result {
+	// Preserve the departure position used for history visibility.
+	if self
+		.services
+		.state_cache
+		.user_membership(user_id, room_id)
+		.map(|membership| membership.as_ref().is_some_and(is_leaveable))
+		.is_false()
+		.await
+	{
+		return Ok(());
+	}
+
 	let count = self.services.globals.next_count();
 	self.services
 		.state_cache
