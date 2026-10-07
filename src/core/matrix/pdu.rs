@@ -41,7 +41,7 @@ pub use self::{
 	raw_id::*,
 };
 use super::{Event, ShortRoomId, StateKey};
-use crate::{Result, err};
+use crate::{Err, Result, err};
 
 /// Stores a Matrix persistent data unit in typed form.
 ///
@@ -229,6 +229,18 @@ impl Pdu {
 		let json = from_incoming_federation(room_id, event_id, json, rules);
 		let pdu = Self::from_object_checked(json.clone(), rules)?;
 		check_room_id(&pdu, room_id)?;
+
+		if rules
+			.authorization
+			.room_create_event_id_as_room_id
+			&& pdu.kind == TimelineEventType::RoomCreate
+			&& room_id.as_event_id().ok().as_deref() != Some(event_id)
+		{
+			return Err!(Request(InvalidParam(
+				"Create event {event_id} is not the create event of {room_id}"
+			)));
+		}
+
 		Ok((pdu, json))
 	}
 

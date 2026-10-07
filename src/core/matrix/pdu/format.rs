@@ -97,7 +97,9 @@ pub fn from_incoming_federation(
 		.require_room_create_room_id
 		&& pdu_json["type"] == "m.room.create"
 	{
-		pdu_json.insert("room_id".into(), CanonicalJsonValue::String(room_id.as_str().into()));
+		pdu_json
+			.entry("room_id".into())
+			.or_insert_with(|| CanonicalJsonValue::String(room_id.as_str().into()));
 	}
 
 	if !room_rules.event_format.require_event_id {
