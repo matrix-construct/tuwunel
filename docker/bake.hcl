@@ -64,6 +64,19 @@ variable "rust_targets" {
     default = "[\"x86_64-unknown-linux-gnu\"]"
 }
 
+variable "llvm_cc" {
+    default = "/usr/bin/clang"
+}
+variable "llvm_cxx" {
+    default = "/usr/bin/clang++"
+}
+variable "llvm_ar" {
+    default = "/usr/bin/llvm-ar"
+}
+variable "llvm_ranlib" {
+    default = "/usr/bin/llvm-ranlib"
+}
+
 variable "sys_names" {
     default = "[\"debian\"]"
 }
@@ -1772,6 +1785,11 @@ variable "cargo_tgt_dir_base" {
     default = "/usr/src/tuwunel/target"
 }
 
+function "interprocedural_rustflags" {
+    params = [profile]
+    result = contains(["release-native", "release", "bench"], profile)? "-C linker-plugin-lto -C linker=${llvm_cc} -C link-arg=-fuse-ld=lld": ""
+}
+
 target "deps-base" {
     name = elem("deps-base", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target])
     tags = [
@@ -1818,6 +1836,12 @@ target "deps-base" {
         CARGO_PROFILE_RELEASE_LTO = "thin"
         CARGO_PROFILE_RELEASE_DEBUGINFO_DEBUG = "limited"
         CARGO_PROFILE_RELEASE_DEBUGINFO_LTO = "off"
+        CARGO_PROFILE_RELEASE_NATIVE_LTO = "thin"
+
+        CC = llvm_cc
+        CXX = llvm_cxx
+        AR = llvm_ar
+        RANLIB = llvm_ranlib
 
         CARGO_BUILD_RUSTFLAGS = (
             cargo_profile == "release-native"?
@@ -1827,6 +1851,7 @@ target "deps-base" {
                     join(" ", static_rustflags),
                     join(" ", static_nightly_rustflags),
                     join(" ", native_rustflags),
+                    interprocedural_rustflags(cargo_profile),
                     "-C link-arg=-L/usr/lib/gcc/${sys_target_triple(sys_target)}/15", #FIXME
                     contains(split(",", cargo_feat_sets[feat_set]), "bzip2_compression")?
                         "-C link-arg=-l:libbz2.a": "",
@@ -1847,6 +1872,7 @@ target "deps-base" {
                     join(" ", nightly_rustflags),
                     join(" ", static_rustflags),
                     join(" ", static_nightly_rustflags),
+                    interprocedural_rustflags(cargo_profile),
                     sys_target_triple(sys_target) == "x86_64-linux-gnu"?
                         "-C target-cpu=${sys_target_isa(sys_target)}": "",
                     "-C link-arg=-L/usr/lib/gcc/${sys_target_triple(sys_target)}/15", #FIXME
@@ -1867,6 +1893,7 @@ target "deps-base" {
                 join(" ", [
                     join(" ", rustflags),
                     join(" ", static_rustflags),
+                    interprocedural_rustflags(cargo_profile),
                     sys_target_triple(sys_target) == "x86_64-linux-gnu"?
                         "-C target-cpu=${sys_target_isa(sys_target)}": "",
                     "-C link-arg=-L/usr/lib/gcc/${sys_target_triple(sys_target)}/15", #FIXME
@@ -1887,6 +1914,7 @@ target "deps-base" {
                 join(" ", [
                     join(" ", rustflags),
                     join(" ", static_rustflags),
+                    interprocedural_rustflags(cargo_profile),
                     sys_target_triple(sys_target) == "x86_64-linux-gnu"?
                         "-C target-cpu=${sys_target_isa(sys_target)}": "",
                     "-C link-arg=-L/usr/lib/gcc/${sys_target_triple(sys_target)}/15", #FIXME
@@ -1962,6 +1990,10 @@ target "rocksdb-build" {
         input = elem("target:kitchen", [feat_set, sys_name, sys_version, sys_target])
     }
     args = {
+        CC = llvm_cc
+        CXX = llvm_cxx
+        AR = llvm_ar
+        RANLIB = llvm_ranlib
         rocksdb_bz2 = contains(split(",", cargo_feat_sets[feat_set]), "bzip2_compression")? 1: 0
         rocksdb_lz4 = contains(split(",", cargo_feat_sets[feat_set]), "lz4_compression")? 1: 0
         rocksdb_zstd = contains(split(",", cargo_feat_sets[feat_set]), "zstd_compression")? 1: 0
@@ -2250,6 +2282,7 @@ kitchen_packages = [
     "libnuma-dev",
     "libssl-dev",
     "libsqlite3-dev",
+    "llvm",
     "make",
     "nix-bin",
     "openssl",

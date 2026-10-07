@@ -27,7 +27,7 @@ FROM input AS rocksdb-build
 ARG rocksdb_shared=0
 ARG rocksdb_portable="1"
 ARG rocksdb_opt_level="3"
-ARG rocksdb_lto="-flto -ffat-lto-objects"
+ARG rocksdb_lto="-flto=thin"
 ARG rocksdb_build_type="Release"
 ARG rocksdb_cxx_flags="-ftls-model=initial-exec"
 ARG rocksdb_make_verbose="ON"
@@ -43,13 +43,20 @@ ARG rocksdb_snappy=0
 ARG nprocs
 ARG sched_policy="--batch"
 ARG sched_prio=0
+ARG rust_target
+ARG CC
+ARG CXX
+ARG AR
+ARG RANLIB
 
 WORKDIR /
 COPY --link --from=rocksdb-fetch /usr/src/rocksdb /usr/src/rocksdb
 
 WORKDIR /usr/src/rocksdb/librocksdb-sys/rocksdb
-ENV CC="clang"
-ENV CXX="clang++"
+ENV CC="${CC}"
+ENV CXX="${CXX}"
+ENV AR="${AR}"
+ENV RANLIB="${RANLIB}"
 ENV nprocs=${nprocs}
 ENV sched_policy=${sched_policy}
 ENV sched_prio=${sched_prio}
@@ -62,7 +69,8 @@ RUN <<EOF
         "-DCMAKE_BUILD_TYPE=${rocksdb_build_type}" \
         "-DBUILD_SHARED_LIBS=${rocksdb_shared}" \
         "-DROCKSDB_BUILD_SHARED=${rocksdb_shared}" \
-        "-DCMAKE_CXX_FLAGS:STRING=${rocksdb_cxx_flags}" \
+        "-DCMAKE_C_FLAGS:STRING=-target ${rust_target}" \
+        "-DCMAKE_CXX_FLAGS:STRING=-target ${rust_target} ${rocksdb_cxx_flags}" \
         "-DCMAKE_CXX_FLAGS_RELEASE:STRING=-g0 -O${rocksdb_opt_level} -DNDEBUG ${rocksdb_lto}" \
         "-DPORTABLE=${rocksdb_portable}" \
         "-DFAIL_ON_WARNINGS=0" \
