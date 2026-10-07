@@ -491,6 +491,13 @@ async fn validate_member(
 		return Err!(Request(UserSuspended("Account is suspended.")));
 	}
 
+	if !matches!(membership_content.membership, MembershipState::Leave | MembershipState::Ban)
+		&& services.metadata.is_banned(room_id).await
+		&& !services.admin.user_is_admin(sender).await
+	{
+		return Err!(Request(Forbidden("This room is banned on this homeserver.")));
+	}
+
 	if membership_content.membership == MembershipState::Invite
 		&& services.globals.user_is_local(&target_user)
 		&& services
