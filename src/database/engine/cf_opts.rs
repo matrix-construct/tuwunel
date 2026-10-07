@@ -7,7 +7,7 @@ use tuwunel_core::{Config, Result, err, utils::math::Expected};
 
 use super::{
 	context::{ColCache, ColCaches, SHARED_POOL},
-	descriptor::{CacheDisp, Descriptor},
+	descriptor::{AccessPattern, CacheDisp, Descriptor},
 };
 use crate::{Context, util::map_err};
 
@@ -205,12 +205,21 @@ fn table_options(desc: &Descriptor, has_cache: bool) -> BlockBasedOptions {
 
 	opts.set_partition_filters(true);
 	opts.set_use_delta_encoding(false);
-	opts.set_index_type(BlockBasedIndexType::TwoLevelIndexSearch);
 
-	opts.set_data_block_index_type(match desc.block_index_hashing {
-		| None if desc.index_size > 512 => DataBlockIndexType::BinaryAndHash,
-		| Some(enable) if enable => DataBlockIndexType::BinaryAndHash,
-		| Some(_) | None => DataBlockIndexType::BinarySearch,
+	opts.set_index_type(match desc.access_pattern {
+		| AccessPattern::ShortScan | AccessPattern::FromScan =>
+			BlockBasedIndexType::TwoLevelIndexSearch,
+		| AccessPattern::RandomScan | AccessPattern::FastScan =>
+			BlockBasedIndexType::BinarySearch,
+		| AccessPattern::PointQuery | AccessPattern::PrefixScan =>
+			BlockBasedIndexType::HashSearch,
+	});
+
+	opts.set_data_block_index_type(match desc.access_pattern {
+		| AccessPattern::PrefixScan | AccessPattern::FromScan | AccessPattern::FastScan =>
+			DataBlockIndexType::BinarySearch,
+		| AccessPattern::PointQuery | AccessPattern::ShortScan | AccessPattern::RandomScan =>
+			DataBlockIndexType::BinaryAndHash,
 	});
 
 	opts

@@ -57,7 +57,7 @@ pub(crate) struct Descriptor {
 	pub(crate) compression_shape: [i32; 7],
 	pub(crate) compression_level: i32,
 	pub(crate) bottommost_level: Option<i32>,
-	pub(crate) block_index_hashing: Option<bool>,
+	pub(crate) access_pattern: AccessPattern,
 	pub(crate) cache_shards: u32,
 	pub(crate) write_to_cache: bool,
 	pub(crate) auto_readahead_thresh: u32,
@@ -74,6 +74,17 @@ pub(crate) enum CacheDisp {
 	Unique,
 	Shared,
 	SharedWith(&'static str),
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+pub(crate) enum AccessPattern {
+	#[default]
+	RandomScan, // binary + hash
+	FastScan,   // binary + binary
+	FromScan,   // twolev + binary
+	ShortScan,  // twolev + hash
+	PrefixScan, // hash + binary
+	PointQuery, // hash + hash
 }
 
 /// Base descriptor supplying common defaults to all derived descriptors.
@@ -104,7 +115,7 @@ static BASE: Descriptor = Descriptor {
 	compression_shape: [0, 0, 0, 1, 1, 1, 1],
 	compression_level: SENTINEL_COMPRESSION_LEVEL,
 	bottommost_level: Some(SENTINEL_COMPRESSION_LEVEL),
-	block_index_hashing: None,
+	access_pattern: AccessPattern::RandomScan,
 	cache_shards: 32,
 	write_to_cache: false,
 	auto_readahead_thresh: 0,
@@ -146,6 +157,7 @@ pub(crate) static SEQUENTIAL: Descriptor = Descriptor {
 	bottommost_level: Some(2),
 	compression_shape: [0, 0, 1, 1, 1, 1, 1],
 	compressed_index: false,
+	access_pattern: AccessPattern::FromScan,
 	..BASE
 };
 
@@ -176,11 +188,11 @@ pub(crate) static SEQUENTIAL_SMALL: Descriptor = Descriptor {
 	file_size: 1024 * 512,
 	file_shape: 3,
 	block_size: 512,
-	block_index_hashing: Some(false),
 	compression_level: -4,
 	bottommost_level: Some(-2),
 	compression_shape: [0, 0, 0, 0, 1, 1, 1],
 	compressed_index: false,
+	access_pattern: AccessPattern::FastScan,
 	..SEQUENTIAL
 };
 
