@@ -1,7 +1,8 @@
 use rocksdb::{
 	BlockBasedIndexType, BlockBasedOptions, BlockBasedPinningTier, Cache,
 	DBCompressionType as CompressionType, DataBlockIndexType, FifoCompactOptions,
-	LruCacheOptions, Options, UniversalCompactOptions, UniversalCompactionStopStyle,
+	LruCacheOptions, Options, SliceTransform, UniversalCompactOptions,
+	UniversalCompactionStopStyle,
 };
 use tuwunel_core::{Config, Result, err, utils::math::Expected};
 
@@ -74,6 +75,10 @@ fn descriptor_cf_options(
 			0,
 			true,
 		);
+	}
+
+	if desc.prefix_size > 0 {
+		opts.set_prefix_extractor(SliceTransform::create_fixed_prefix(desc.prefix_size));
 	}
 
 	opts.set_options_from_string("{{arena_block_size=2097152;}}")
