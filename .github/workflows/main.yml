@@ -364,7 +364,7 @@ jobs:
 
   package:
     if: >
-      !cancelled() && needs.init.result == 'success'
+      !failure() && !cancelled() && needs.init.result == 'success'
       && fromJSON(needs.init.outputs.enable_package)
       && !contains(needs.init.outputs.pipeline, '[ci only it]')
       && !contains(needs.init.outputs.pipeline, '[ci no build]')
