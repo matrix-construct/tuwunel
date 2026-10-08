@@ -1,6 +1,4 @@
-use std::pin::pin;
-
-use futures::{FutureExt, StreamExt, future::join3};
+use futures::{FutureExt, future::join3};
 use ruma::{EventId, OwnedRoomId, RoomId, ServerName};
 use serde::Deserialize;
 use tuwunel_core::{
@@ -34,28 +32,16 @@ pub(super) async fn check(&self) -> Result {
 		.state_accessor
 		.is_world_readable(self.room_id);
 
-	// if any user on our homeserver is trying to knock this room, we'll need to
-	// acknowledge bans or leaves
-	let user_is_knocking = async {
-		let knocked = self
-			.services
-			.state_cache
-			.room_members_knocked(self.room_id);
-		let mut knocked = pin!(knocked);
-
-		knocked.next().await.is_some()
-	};
-
 	let server_can_see = self.event_id.map_async(|event_id| {
 		self.services
 			.state_accessor
 			.server_can_see_event(self.origin, self.room_id, event_id)
 	});
 
-	// The cheap membership probe leads; a hit there elides the other reads.
+	// The cheap membership probe leads; a hit there elides the other read.
 	let room_unreachable = server_in_room
 		.is_false()
-		.and2(world_readable.is_false(), user_is_knocking.is_false());
+		.and(world_readable.is_false());
 
 	let (acl_check, room_unreachable, server_can_see) =
 		join3(acl_check, room_unreachable, server_can_see).await;

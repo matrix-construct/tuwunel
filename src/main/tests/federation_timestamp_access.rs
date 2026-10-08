@@ -96,11 +96,34 @@ async fn exercise(services: &Services, base: &str) -> Result {
 
 	assert_eq!(response.0, 200, "joined room: {}", response.1);
 
-	leave_room(services, base, token, &room_id).await?;
+	// A knock is only a request to join, so a pending one must not keep the
+	// room open to this server once none of its users is joined.
+	let knocker = UserId::parse_with_server_name("knocker", services.globals.server_name())?;
+	let knocker_token = "timestamp-access-knocker-access-token";
+
+	services
+		.users
+		.full_register(Register {
+			user_id: Some(&knocker),
+			..Default::default()
+		})
+		.await?;
+
+	services
+		.users
+		.create_device(&knocker, None, (Some(knocker_token), None), None, None, None)
+		.await?;
+
+	let knock_url = format!("{base}/_matrix/client/v3/knock/{room_id}");
+
+	post(services, &knock_url, knocker_token).await?;
+	let leave_url = format!("{base}/_matrix/client/v3/rooms/{room_id}/leave");
+
+	post(services, &leave_url, token).await?;
 
 	let response = timestamp(services, base, &room_id).await?;
 
-	assert_eq!(response.0, 403, "left room: {}", response.1);
+	assert_eq!(response.0, 403, "left room with a pending knock: {}", response.1);
 
 	let body: Value = serde_json::from_str(&response.1)?;
 
@@ -177,7 +200,13 @@ async fn create_room(services: &Services, base: &str, token: &str) -> Result<Own
 		.default
 		.post(format!("{base}/_matrix/client/v3/createRoom"))
 		.bearer_auth(token)
-		.json(&json!({}))
+		.json(&json!({
+			"initial_state": [{
+				"type": "m.room.join_rules",
+				"state_key": "",
+				"content": { "join_rule": "knock" },
+			}],
+		}))
 		.send()
 		.await?
 		.error_for_status()?
@@ -192,12 +221,12 @@ async fn create_room(services: &Services, base: &str, token: &str) -> Result<Own
 	Ok(room_id.try_into()?)
 }
 
-async fn leave_room(services: &Services, base: &str, token: &str, room_id: &RoomId) -> Result {
+async fn post(services: &Services, url: &str, token: &str) -> Result {
 	services
 		.client
 		.clients
 		.default
-		.post(format!("{base}/_matrix/client/v3/rooms/{room_id}/leave"))
+		.post(url)
 		.bearer_auth(token)
 		.json(&json!({}))
 		.send()
