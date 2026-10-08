@@ -12,8 +12,10 @@ use tuwunel_core::{
 	Result,
 	utils::{
 		BoolExt, IterStream,
-		stream::{BroadbandExt, TryReadyExt},
+		result::NotFound,
+		stream::{BroadbandExt, TryReadyExt, WidebandExt},
 	},
+	warn,
 };
 use tuwunel_service::{Services, sync::Connection};
 
@@ -65,7 +67,23 @@ pub(super) async fn collect(
 		.merge(conn.rooms.keys())
 		.dedup()
 		.filter(|_| conn.globalsince != 0)
-		.try_stream()
+		.stream()
+		.wide_filter_map(async |room_id| {
+			let joined = services
+				.state_cache
+				.get_joined_count(room_id, sender_user)
+				.await
+				.optional()
+				.inspect_err(
+					|error| warn!(%sender_user, %room_id, %error, "Profile room admission failed"),
+				)
+				.ok()
+				.flatten()
+				.is_some();
+
+			joined.then_some(room_id)
+		})
+		.map(Result::Ok)
 		.try_fold(changes, async |changes, room_id| {
 			fold_room(changes, services, conn, room_id, requested).await
 		})

@@ -146,6 +146,7 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	membership_failures(&owner, &owner_id, &peer_id, room.as_str()).await?;
 	cleared_fields(&owner, &peer_id, room.as_str()).await?;
 	departed_profile(&owner, &peer, &peer_id, room.as_str()).await?;
+	room_admission(&owner, &peer, &owner_id, &peer_id).await?;
 	selector_limits(&owner, &owner_id).await
 }
 
@@ -499,6 +500,97 @@ async fn departed_profile(
 
 		assert!(update(&response, peer_id).is_null(), "a departed peer leaked its profile");
 	}
+
+	Ok(())
+}
+
+#[tracing::instrument(level = "trace", skip_all)]
+async fn room_admission(
+	owner: &Client<'_>,
+	peer: &Client<'_>,
+	owner_id: &UserId,
+	peer_id: &UserId,
+) -> Result {
+	let shared = owner
+		.create_room(&json!({ "preset": "public_chat" }))
+		.await?;
+
+	let denied = peer
+		.create_room(&json!({
+			"preset": "public_chat",
+			"initial_state": [{
+				"type": "m.room.join_rules", "state_key": "",
+				"content": { "join_rule": "knock" }
+			}],
+		}))
+		.await?;
+
+	peer.post(&format!("rooms/{shared}/join"), &json!({}))
+		.await?;
+
+	peer.post(&format!("rooms/{denied}/invite"), &json!({ "user_id": owner_id }))
+		.await?;
+
+	owner
+		.post(&format!("rooms/{denied}/join"), &json!({}))
+		.await?;
+
+	let opening = owner
+		.sync_profiles("room-admission", denied.as_str(), None)
+		.await?;
+
+	let pos = field(&opening, "pos")?;
+
+	owner
+		.post(&format!("rooms/{denied}/leave"), &json!({}))
+		.await?;
+
+	set_status(owner.services, peer_id, "not joined").await?;
+
+	let departed = owner
+		.sync_profiles("room-admission", denied.as_str(), Some(pos))
+		.await?;
+
+	assert!(update(&departed, peer_id).is_null());
+
+	peer.post(&format!("rooms/{denied}/invite"), &json!({ "user_id": owner_id }))
+		.await?;
+
+	denied_room_change(owner, peer_id, denied.as_str(), "invited").await?;
+	owner
+		.post(&format!("rooms/{denied}/leave"), &json!({}))
+		.await?;
+
+	owner
+		.post(&format!("knock/{denied}"), &json!({}))
+		.await?;
+
+	denied_room_change(owner, peer_id, denied.as_str(), "knocking").await?;
+
+	let joined = owner
+		.sync_profiles("joined-control", shared.as_str(), None)
+		.await?;
+
+	assert_eq!(update(&joined, peer_id)[STATUS]["text"], "knocking");
+
+	Ok(())
+}
+
+#[tracing::instrument(level = "trace", skip_all)]
+async fn denied_room_change(
+	owner: &Client<'_>,
+	peer_id: &UserId,
+	room: &str,
+	conn: &str,
+) -> Result {
+	let opening = owner.sync_profiles(conn, room, None).await?;
+	let pos = field(&opening, "pos")?;
+
+	set_status(owner.services, peer_id, conn).await?;
+
+	let response = owner.sync_profiles(conn, room, Some(pos)).await?;
+
+	assert!(update(&response, peer_id).is_null());
 
 	Ok(())
 }
