@@ -134,10 +134,13 @@ async fn collect_federation_one_time_keys(
 	let outcomes = fanout_with(
 		requests,
 		async |server, request| {
-			services
+			let mut response = services
 				.federation
 				.execute_keys(&server, request)
-				.await
+				.await?;
+
+			retain_origin_users(&server, &mut response);
+			Ok(response)
 		},
 		federation_opts(services),
 	);
@@ -158,10 +161,40 @@ async fn collect_federation_one_time_keys(
 	}
 }
 
+/// Drops the one-time keys of users who do not belong to the server that
+/// answered.
+///
+/// A server is only authoritative for its own users; any other entry, local
+/// users included, would otherwise replace that user's keys in the response.
+fn retain_origin_users(origin: &ServerName, response: &mut FederationResponse) {
+	response
+		.one_time_keys
+		.retain(|user, _| user.server_name() == origin);
+}
+
 impl Claims {
 	fn merge(mut self, other: Self) -> Self {
 		self.one_time_keys.extend(other.one_time_keys);
 		self.failures.extend(other.failures);
 		self
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use ruma::{server_name, user_id};
+
+	use super::*;
+
+	#[test]
+	fn drops_one_time_keys_of_users_on_other_servers() {
+		let remote = user_id!("@bob:remote.example");
+		let users = [remote, user_id!("@alice:local.example"), user_id!("@carol:third.example")];
+		let one_time_keys = users.map(|user| (user.to_owned(), BTreeMap::new()));
+		let mut response = FederationResponse::new(one_time_keys.into());
+
+		retain_origin_users(server_name!("remote.example"), &mut response);
+
+		assert_eq!(response.one_time_keys.keys().collect::<Vec<_>>(), [remote]);
 	}
 }
