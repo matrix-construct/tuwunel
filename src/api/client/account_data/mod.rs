@@ -4,6 +4,8 @@ mod get_global_account_data;
 mod get_room_account_data;
 mod set_global_account_data;
 mod set_room_account_data;
+#[cfg(test)]
+mod tests;
 
 use ruma::{
 	RoomId, UserId,
@@ -30,7 +32,9 @@ fn assert_account_data_owner(
 	appservice_info: Option<&RegistrationInfo>,
 	message: &str,
 ) -> Result {
-	if sender_user != user_id && appservice_info.is_none() {
+	if sender_user != user_id
+		&& !appservice_info.is_some_and(|registration| registration.is_user_match(user_id))
+	{
 		return Err!(Request(Forbidden("{message}")));
 	}
 
