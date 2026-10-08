@@ -48,18 +48,7 @@ async fn set_account_data(
 	event_type_s: &str,
 	data: &RawJsonValue,
 ) -> Result {
-	if event_type_s == RoomAccountDataEventType::FullyRead.to_cow_str() {
-		return Err!(Request(BadJson(
-			"This endpoint cannot be used for marking a room as fully read (setting \
-			 m.fully_read)"
-		)));
-	}
-
-	if event_type_s == GlobalAccountDataEventType::PushRules.to_cow_str() {
-		return Err!(Request(BadJson(
-			"This endpoint cannot be used for setting/configuring push rules."
-		)));
-	}
+	validate_event_type(event_type_s)?;
 
 	let data: serde_json::Value = serde_json::from_str(data.get())
 		.map_err(|e| err!(Request(BadJson(warn!("Invalid JSON provided: {e}")))))?;
@@ -76,6 +65,23 @@ async fn set_account_data(
 			}),
 		)
 		.await
+}
+
+fn validate_event_type(event_type: &str) -> Result {
+	if event_type == RoomAccountDataEventType::FullyRead.to_cow_str() {
+		return Err!(Request(BadJson(
+			"This endpoint cannot be used for marking a room as fully read (setting \
+			 m.fully_read)"
+		)));
+	}
+
+	if event_type == GlobalAccountDataEventType::PushRules.to_cow_str() {
+		return Err!(Request(BadJson(
+			"This endpoint cannot be used for setting/configuring push rules."
+		)));
+	}
+
+	Ok(())
 }
 
 /// MSC3391: tombstoned account data carries `content: {}`. Sync delta

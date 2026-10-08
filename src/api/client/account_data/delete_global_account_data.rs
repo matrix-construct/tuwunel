@@ -2,7 +2,7 @@ use axum::extract::State;
 use ruma::api::client::config::delete_global_account_data;
 use tuwunel_core::Result;
 
-use super::assert_account_data_owner;
+use super::{assert_account_data_owner, validate_event_type};
 use crate::Ruma;
 
 /// # `DELETE /_matrix/client/unstable/org.matrix.msc3391/user/{userId}/account_data/{type}`
@@ -20,6 +20,8 @@ pub(crate) async fn delete_global_account_data_route(
 		body.appservice_info.as_ref(),
 		"You cannot delete account data for other users.",
 	)?;
+
+	validate_event_type(&body.event_type.to_cow_str())?;
 
 	services
 		.account_data

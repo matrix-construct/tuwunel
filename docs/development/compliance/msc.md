@@ -776,7 +776,7 @@ in the [Out of scope](#out-of-scope) section.
 | MSC3572 | ❌ ◐ | 0/0 | Relation aggregation cleanup | no relations rename; m.relations only |
 | MSC3523 | ❌ ● | 0/0 | Timeboxed/ranged relations endpoint | no from_target/to_target query params on /relations |
 | MSC3429 | ❌ ● | 0/0 | Individual room preview API | no /rooms/{id}/preview endpoint |
-| MSC3391 | ✅ ● | 100/100 | API to delete account data | src/api/client/account_data.rs:126; both DELETE routes via Ruma&lt;R&gt;; tombstone... |
+| MSC3391 | ✅ ● | 100/100 | API to delete account data | Both DELETE routes reject protected keys before mutation |
 | MSC3306 | ❌ ● | 0/0 | How to count unread messages | notification_count uses push-rule Notify actions, not MSC3306 algo |
 | MSC3302 | ✅ ● | 100/100 | Stories via To-Device-Messaging | m.stories.blocklist and m.stories.ignore ride the generic account-data path |
 | MSC3244 | ❌ ● | 0/10 | Room version capabilities | capabilities lacks room_capabilities knock/restricted info |
