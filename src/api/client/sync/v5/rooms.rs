@@ -35,7 +35,7 @@ use tuwunel_core::{
 		hash::sha256::{
 			Digest as Sha256Digest, delimited as sha256_delimited, hash as sha256_hash,
 		},
-		math::usize_from_ruma,
+		math::usize_from_ruma_bounded,
 		result::FlatOk,
 		stream::{BroadbandExt, WidebandExt},
 	},
@@ -65,6 +65,9 @@ type ThreadCounts = BTreeMap<OwnedEventId, (u64, u64)>;
 type EventTypeString = SmallString<[u8; 32]>;
 type TimelineMembers<'a> = SmallVec<[&'a str; 2]>;
 pub(super) type RoomDetails = (usize, HashSet<(StateEventType, StateKey)>);
+
+/// Most timeline events one room returns per response, as legacy sync allows.
+const TIMELINE_LIMIT_MAX: usize = 100;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum StateMode {
@@ -299,9 +302,18 @@ pub(super) fn merged_room_details(
 		.filter_map(|list_id| conn.lists.get(list_id))
 		.map(|list| &list.room_details)
 		.chain(conn.subscriptions.get(room_id))
-		.fold((0_usize, HashSet::new()), |(timeline_limit, mut required_state), config| {
-			required_state.extend(config.required_state.iter().cloned());
-			(timeline_limit.max(usize_from_ruma(config.timeline_limit)), required_state)
+		.fold((0_usize, HashSet::new()), |mut details, config| {
+			details.0 = details.0.max(usize_from_ruma_bounded(
+				config.timeline_limit,
+				TIMELINE_LIMIT_MAX,
+				TIMELINE_LIMIT_MAX,
+			));
+
+			details
+				.1
+				.extend(config.required_state.iter().cloned());
+
+			details
 		})
 }
 

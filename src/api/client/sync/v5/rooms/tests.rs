@@ -2,16 +2,21 @@ use std::{collections::HashSet, iter::once};
 
 use ruma::{
 	UInt,
-	api::client::sync::sync_events::v5::response::Room as ResponseRoom,
+	api::client::sync::sync_events::v5::{
+		ListId,
+		request::{List, ListConfig},
+		response::Room as ResponseRoom,
+	},
 	events::{StateEventType, room::member::MembershipState},
-	uint, user_id,
+	room_id, uint, user_id,
 };
 use tuwunel_core::matrix::pdu::PduCount;
 
 use super::{
-	StateMode, membership_allows_required_state, required_state_hash, room_config,
-	room_timeline_limited, room_timeline_metadata, state_is_required, state_may_have_changed,
-	state_mode, state_was_requested,
+	Connection, ListIds, StateMode, TIMELINE_LIMIT_MAX, membership_allows_required_state,
+	merged_room_details, required_state_hash, room_config, room_timeline_limited,
+	room_timeline_metadata, state_is_required, state_may_have_changed, state_mode,
+	state_was_requested,
 };
 
 #[test]
@@ -136,6 +141,54 @@ fn zero_timeline_limit_is_not_limited() {
 	assert!(!room_timeline_limited(0, true));
 	assert!(room_timeline_limited(1, true));
 	assert!(!room_timeline_limited(1, false));
+}
+
+#[test]
+fn timeline_limit_is_capped() {
+	for (list_limit, subscription_limit, expected) in [
+		(uint!(0), uint!(0), 0),
+		(uint!(1), uint!(0), 1),
+		(uint!(0), uint!(99), 99),
+		(uint!(100), uint!(0), TIMELINE_LIMIT_MAX),
+		(uint!(0), uint!(100), TIMELINE_LIMIT_MAX),
+		(uint!(101), uint!(0), TIMELINE_LIMIT_MAX),
+		(uint!(0), uint!(101), TIMELINE_LIMIT_MAX),
+		(UInt::MAX, uint!(1), TIMELINE_LIMIT_MAX),
+		(uint!(1), UInt::MAX, TIMELINE_LIMIT_MAX),
+		(UInt::MAX, UInt::MAX, TIMELINE_LIMIT_MAX),
+	] {
+		let room_id = room_id!("!room:example.com");
+		let list = ListId::from("main");
+		let room_details = ListConfig {
+			timeline_limit: list_limit,
+			required_state: vec![(StateEventType::RoomName, "".into())],
+		};
+
+		let list_config = List { room_details, ..Default::default() };
+		let required_state =
+			vec![(StateEventType::RoomName, "".into()), (StateEventType::RoomTopic, "".into())];
+
+		let subscription = ListConfig {
+			timeline_limit: subscription_limit,
+			required_state,
+		};
+
+		let conn = Connection {
+			lists: [(list.clone(), list_config)].into(),
+			subscriptions: [(room_id.to_owned(), subscription)].into(),
+			..Default::default()
+		};
+
+		let lists: ListIds = once(list).collect();
+		let (timeline_limit, required_state) = merged_room_details(&conn, &lists, room_id);
+		let expected_state = HashSet::from([
+			(StateEventType::RoomName, "".into()),
+			(StateEventType::RoomTopic, "".into()),
+		]);
+
+		assert_eq!(timeline_limit, expected);
+		assert_eq!(required_state, expected_state);
+	}
 }
 
 #[test]
