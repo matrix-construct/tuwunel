@@ -1260,8 +1260,8 @@ pub struct Config {
 
 	/// Sets the default `m.federate` property for newly created rooms when the
 	/// client does not request one. If `allow_federation` is set to false at
-	/// the same this value is set to false it then always overrides the client
-	/// requested `m.federate` value to false.
+	/// the same time this value is set to false, it then always overrides the
+	/// client-requested `m.federate` value to false.
 	///
 	/// Rooms are fixed to the setting at the time of their creation and can
 	/// never be changed; changing this value only affects new rooms.
