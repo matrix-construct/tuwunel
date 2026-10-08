@@ -134,13 +134,12 @@ async fn collect_federation_one_time_keys(
 	let outcomes = fanout_with(
 		requests,
 		async |server, request| {
-			let mut response = services
+			let response = services
 				.federation
 				.execute_keys(&server, request)
 				.await?;
 
-			retain_origin_users(&server, &mut response);
-			Ok(response)
+			Ok(retain_origin_users(&server, response))
 		},
 		federation_opts(services),
 	);
@@ -166,10 +165,15 @@ async fn collect_federation_one_time_keys(
 ///
 /// A server is only authoritative for its own users; any other entry, local
 /// users included, would otherwise replace that user's keys in the response.
-fn retain_origin_users(origin: &ServerName, response: &mut FederationResponse) {
+fn retain_origin_users(
+	origin: &ServerName,
+	mut response: FederationResponse,
+) -> FederationResponse {
 	response
 		.one_time_keys
-		.retain(|user, _| user.server_name() == origin);
+		.retain(|user, _| user.server_name().eq(origin));
+
+	response
 }
 
 impl Claims {
@@ -191,10 +195,9 @@ mod tests {
 		let remote = user_id!("@bob:remote.example");
 		let users = [remote, user_id!("@alice:local.example"), user_id!("@carol:third.example")];
 		let one_time_keys = users.map(|user| (user.to_owned(), BTreeMap::new()));
-		let mut response = FederationResponse::new(one_time_keys.into());
+		let response = FederationResponse::new(one_time_keys.into());
+		let response = retain_origin_users(server_name!("remote.example"), response);
 
-		retain_origin_users(server_name!("remote.example"), &mut response);
-
-		assert_eq!(response.one_time_keys.keys().collect::<Vec<_>>(), [remote]);
+		assert!(response.one_time_keys.keys().eq([remote]));
 	}
 }
