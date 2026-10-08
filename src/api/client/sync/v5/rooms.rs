@@ -113,7 +113,7 @@ pub(super) async fn handle_room(
 
 	let (timeline_limit, required_state) = room_details;
 
-	let timeline = is_invite.is_false().then_async(|| {
+	let timeline = membership_allows_required_state(membership.as_ref()).then_async(|| {
 		load_timeline_fallible(
 			services,
 			sender_user,
