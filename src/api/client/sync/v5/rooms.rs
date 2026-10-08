@@ -45,7 +45,10 @@ use tuwunel_service::{
 	sync::{RequiredState, Room, RoomConfig},
 };
 
-use self::{bump_stamp::room_bump_stamp, heroes::calculate_heroes};
+use self::{
+	bump_stamp::{knock_bump_stamp, room_bump_stamp},
+	heroes::calculate_heroes,
+};
 use super::{
 	super::{load_timeline_fallible, strip_prev_state},
 	Connection, ListIds, SyncInfo, WindowRoom,
@@ -143,16 +146,23 @@ pub(super) async fn handle_room(
 		.as_ref()
 		.map(ToString::to_string);
 
-	let bump_stamp = room_bump_stamp(
-		services,
-		sender_user,
-		room_id,
-		PduCount::Normal(roomsince),
-		PduCount::from(conn.next_batch),
-		last_timeline_count,
-	)
-	.map_err(Failure::Timeline)
-	.await?;
+	let bump_stamp = match membership {
+		| Some(MembershipState::Knock) => {
+			// Redelivered rooms retain their own membership baseline even before roomsince.
+			knock_bump_stamp(window_room.event_count, conn.next_batch)
+		},
+		| _ =>
+			room_bump_stamp(
+				services,
+				sender_user,
+				room_id,
+				PduCount::Normal(roomsince),
+				PduCount::from(conn.next_batch),
+				last_timeline_count,
+			)
+			.map_err(Failure::Timeline)
+			.await?,
+	};
 
 	let mode = state_mode(roomsince, room.required_state.is_empty());
 	let state = StateSelection {

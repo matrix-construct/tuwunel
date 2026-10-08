@@ -25,6 +25,15 @@ static DEFAULT_BUMP_TYPES: [TimelineEventType; 6] = [
 	Beacon,        // org.matrix.msc3672.beacon
 ];
 
+pub(super) fn knock_bump_stamp(count: u64, next_batch: u64) -> Option<UInt> {
+	let valid = 1..=next_batch;
+
+	valid
+		.contains(&count)
+		.then(|| count.try_into().ok())
+		.flatten()
+}
+
 pub(super) async fn room_bump_stamp(
 	services: &Services,
 	sender_user: &UserId,
@@ -78,13 +87,25 @@ fn _is_sorted() {
 #[cfg(test)]
 mod tests {
 	use ruma::{
-		CanonicalJsonObject, event_id, events::TimelineEventType, room_id, serde::Raw, uint,
-		user_id,
+		CanonicalJsonObject, UInt, event_id, events::TimelineEventType, room_id, serde::Raw,
+		uint, user_id,
 	};
 	use serde_json::{json, value::to_raw_value};
 	use tuwunel_core::matrix::{StateKey, pdu::PduEvent};
 
-	use super::{DEFAULT_BUMP_TYPES, is_bumpable_pdu};
+	use super::{DEFAULT_BUMP_TYPES, is_bumpable_pdu, knock_bump_stamp};
+
+	#[test]
+	fn knock_baseline_is_positive_bounded_and_representable() {
+		assert_eq!(knock_bump_stamp(1, 10), Some(uint!(1)));
+		assert_eq!(knock_bump_stamp(10, 10), Some(uint!(10)));
+		assert_eq!(knock_bump_stamp(0, 10), None);
+		assert_eq!(knock_bump_stamp(1, 0), None);
+		assert_eq!(knock_bump_stamp(11, 10), None);
+		assert_eq!(knock_bump_stamp(UInt::MAX.into(), u64::MAX), Some(UInt::MAX));
+		assert_eq!(knock_bump_stamp(u64::from(UInt::MAX) + 1, u64::MAX), None);
+		assert_eq!(knock_bump_stamp(u64::MAX, u64::MAX), None);
+	}
 
 	fn pdu(kind: TimelineEventType, state_key: Option<StateKey>, redacted: bool) -> PduEvent {
 		let unsigned = redacted.then(|| {
