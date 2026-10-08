@@ -13,7 +13,7 @@ use ruma::{
 use tuwunel_core::{Err, Result};
 use tuwunel_service::presence::Ping;
 
-use super::{reset_and_refresh_badge, set_private_marker};
+use super::{ensure_receipt_visible, reset_and_refresh_badge, set_private_marker};
 use crate::{ClientIp, Ruma};
 
 /// # `POST /_matrix/client/r0/rooms/{roomId}/receipt/{receiptType}/{eventId}`
@@ -68,6 +68,10 @@ pub(crate) async fn create_receipt_route(
 		if !in_thread {
 			return Err!(Request(InvalidParam("event_id is not related to the given thread_id")));
 		}
+	}
+
+	if matches!(body.receipt_type, CreateReceiptType::Read | CreateReceiptType::ReadPrivate) {
+		ensure_receipt_visible(&services, &body.room_id, sender_user, &body.event_id).await?;
 	}
 
 	let advanced = match body.receipt_type {

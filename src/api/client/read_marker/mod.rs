@@ -3,10 +3,35 @@ mod receipt;
 
 use futures::future::try_join;
 use ruma::{EventId, MilliSecondsSinceUnixEpoch, RoomId, UserId, events::receipt::ReceiptThread};
-use tuwunel_core::{Err, PduCount, PduId, Result, debug, err, utils::result::LogErr};
+use tuwunel_core::{Err, Event, PduCount, PduId, Result, debug, err, utils::result::LogErr};
 use tuwunel_service::{Services, rooms::read_receipt::PrivateRead};
 
 pub(crate) use self::{read_markers::set_read_marker_route, receipt::create_receipt_route};
+
+#[tracing::instrument(level = "trace", skip_all)]
+async fn ensure_receipt_visible(
+	services: &Services,
+	room_id: &RoomId,
+	user_id: &UserId,
+	event_id: &EventId,
+) -> Result {
+	let event = services
+		.timeline
+		.get_pdu(event_id)
+		.await
+		.map_err(|_| err!(Request(NotFound("Event not found."))))?;
+
+	if event.room_id() != room_id
+		|| !services
+			.state_accessor
+			.user_can_see_event(user_id, &event)
+			.await
+	{
+		return Err!(Request(NotFound("Event not found.")));
+	}
+
+	Ok(())
+}
 
 /// Resolves `event` to its timeline position and stores the private read
 /// marker for `thread` there.
