@@ -107,6 +107,11 @@ pub(crate) async fn sync_events_v5_route(
 	let sender_user = body.sender_user();
 	let sender_device = body.sender_device.as_deref();
 	let request = &body.body;
+
+	if let Some(fields) = request.extensions.profiles.fields.as_deref() {
+		services.profile.check_requested_fields(fields)?;
+	}
+
 	let since = request
 		.pos
 		.as_ref()
@@ -143,6 +148,10 @@ pub(crate) async fn sync_events_v5_route(
 		.ok();
 
 	let (mut conn, _) = join(conn, ping_presence).await;
+
+	if since != 0 {
+		check_profile_selection(services, request, &conn)?;
+	}
 
 	if since != 0 && conn.next_batch == 0 {
 		return Err!(Request(UnknownPos(warn!("Connection lost; restarting sync stream."))));
@@ -271,6 +280,21 @@ pub(crate) async fn sync_events_v5_route(
 
 		conn.globalsince = conn.next_batch;
 	}
+}
+
+fn check_profile_selection(services: &Services, request: &Request, conn: &Connection) -> Result {
+	let fields = request
+		.extensions
+		.profiles
+		.fields
+		.as_deref()
+		.or(conn.extensions.profiles.fields.as_deref());
+
+	if let Some(fields) = fields {
+		services.profile.check_requested_fields(fields)?;
+	}
+
+	Ok(())
 }
 
 fn config_change_needs_position(

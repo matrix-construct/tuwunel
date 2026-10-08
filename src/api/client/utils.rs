@@ -1,8 +1,14 @@
-use ruma::{EventId, RoomId, UserId};
+use ruma::{EventId, RoomId, UserId, api::client::filter::FilterDefinition};
 use tuwunel_core::{Err, Event, Result, warn};
 use tuwunel_service::Services;
 
 use crate::Ruma;
+
+pub(crate) fn normalize_profile_fields(mut filter: FilterDefinition) -> FilterDefinition {
+	filter.profile_fields.ids.sort_unstable();
+	filter.profile_fields.ids.dedup();
+	filter
+}
 
 pub(crate) async fn invite_check(
 	services: &Services,

@@ -468,6 +468,66 @@ fn narrowing_the_fields_owes_nothing() {
 }
 
 #[test]
+fn retained_profile_fields_are_normalized_without_widening() {
+	let mut conn = Connection {
+		globalsince: 7,
+		own_profile_since: 7,
+		..Default::default()
+	};
+
+	let fields = [
+		ProfileFieldName::DisplayName,
+		ProfileFieldName::AvatarUrl,
+		ProfileFieldName::DisplayName,
+	];
+
+	conn.update_cache(&request_with_fields(&fields));
+	conn.update_cache(&request_with_fields(&[
+		ProfileFieldName::AvatarUrl,
+		ProfileFieldName::DisplayName,
+	]));
+
+	assert_eq!(
+		conn.extensions
+			.profiles
+			.fields
+			.as_ref()
+			.unwrap()
+			.len(),
+		2
+	);
+
+	assert!(!conn.profiles_fields_owed());
+
+	let bytes = to_vec(&conn).expect("normalized connection must encode");
+	let restored: Connection = from_slice(&bytes).expect("normalized connection must decode");
+
+	assert_eq!(restored.extensions.profiles.fields, conn.extensions.profiles.fields);
+
+	conn.update_cache(&Request::new());
+	assert_eq!(
+		conn.extensions
+			.profiles
+			.fields
+			.as_ref()
+			.unwrap()
+			.len(),
+		2
+	);
+
+	conn.update_cache(&request_with_fields(&[]));
+	assert_eq!(
+		conn.extensions
+			.profiles
+			.fields
+			.as_ref()
+			.unwrap()
+			.as_slice(),
+		[]
+	);
+}
+
+#[test]
 fn an_unfiltered_connection_cannot_widen() {
 	let mut conn = Connection {
 		globalsince: 7,

@@ -122,6 +122,14 @@ fn check_observability(config: &Config) -> Result {
 }
 
 fn check_profile_requests(config: &Config) -> Result {
+	if config.max_remote_profile_fields == 0 {
+		return Err!(Config("max_remote_profile_fields", "Must be greater than zero"));
+	}
+
+	if config.max_profile_fields_per_request == 0 {
+		return Err!(Config("max_profile_fields_per_request", "Must be greater than zero"));
+	}
+
 	if config.limit_profile_requests_to_users_who_share_rooms
 		&& !config.require_auth_for_profile_requests
 	{

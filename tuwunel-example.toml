@@ -1020,6 +1020,31 @@
 #
 #require_auth_for_profile_requests = false
 
+# Maximum fields retained in a remote user's cached profile.
+#
+# Includes displayname and avatar_url and must be greater than zero.
+# A refresh exceeding this count is rejected without changing the cache.
+# Lowering it leaves existing profiles intact; their refreshes must fit
+# the new limit.
+#
+# reloadable: yes
+#
+#max_remote_profile_fields = 100
+
+# Maximum selected profile fields in a sync request or stored filter.
+#
+# Counts raw selectors before duplicate removal for sliding and legacy sync
+# and must be greater than zero.
+# Requests exceeding this count or the 255-byte name limit are rejected.
+# Sliding sync retains normalized selections across omitted selectors;
+# after lowering the limit, an oversized selection requires replacement
+# or a restarted connection.
+# Unfiltered sliding sync profiles are not limited by this count.
+#
+# reloadable: yes
+#
+#max_profile_fields_per_request = 64
+
 # Allow standard users to set or clear their display names through the
 # client profile API.
 #

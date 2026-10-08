@@ -2,7 +2,7 @@ use axum::extract::State;
 use ruma::api::client::filter::{create_filter, get_filter};
 use tuwunel_core::{Result, err};
 
-use crate::Ruma;
+use crate::{Ruma, client::utils::normalize_profile_fields};
 
 /// # `GET /_matrix/client/r0/user/{userId}/filter/{filterId}`
 ///
@@ -28,9 +28,15 @@ pub(crate) async fn create_filter_route(
 	State(services): State<crate::State>,
 	body: Ruma<create_filter::v3::Request>,
 ) -> Result<create_filter::v3::Response> {
+	services
+		.profile
+		.check_requested_fields(&body.filter.profile_fields.ids)?;
+
+	let sender_user = body.sender_user().to_owned();
+	let filter = normalize_profile_fields(body.body.filter);
 	let filter_id = services
 		.users
-		.create_filter(body.sender_user(), &body.filter);
+		.create_filter(&sender_user, &filter);
 
 	Ok(create_filter::v3::Response::new(filter_id))
 }

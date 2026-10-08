@@ -81,7 +81,9 @@ type ChangedFields<'a> = SmallVec<[&'a str; 1]>;
 /// inline budget.
 type ClearedFields = SmallVec<[ProfileFieldName; 2]>;
 
-/// The stored profile as it would read after one candidate field is written.
+/// The stored profile as it would read after candidate fields are written.
+///
+/// Candidate values overlay retained fields before whole-profile admission.
 type ProspectiveProfile<'a> = BTreeMap<ProfileFieldName, Cow<'a, Value>>;
 
 /// MSC4426 maximum `m.status` text length, in bytes.
@@ -806,21 +808,7 @@ pub async fn fetch_remote_profile(&self, user_id: &UserId) -> Result {
 		})
 		.await
 	{
-		if !self.services.users.exists(user_id).await {
-			self.services
-				.users
-				.create(user_id, None, None)
-				.await?;
-		}
-
-		for (key, value) in response.iter() {
-			self.set_profile_keys(
-				user_id,
-				&[(key.as_str().into(), Some(value.clone()))],
-				Some(Propagation::None),
-			)
-			.await?;
-		}
+		self.merge_profile(user_id, response).await?;
 	}
 
 	Ok(())
@@ -863,6 +851,30 @@ async fn enforce_profile_size(&self, user_id: &UserId, key: &str, value: &Value)
 
 /// MSC4133 maximum profile field-name length, in bytes.
 const MAX_KEY_LENGTH: usize = 255;
+
+/// Checks raw sync selectors before normalization or connection mutation.
+///
+/// Duplicate selectors count toward admission, and names are checked by byte length.
+#[implement(Service)]
+pub fn check_requested_fields(&self, fields: &[ProfileFieldName]) -> Result {
+	if fields.len()
+		> self
+			.services
+			.config
+			.max_profile_fields_per_request
+	{
+		return Err!(Request(InvalidParam("Too many selected profile fields.")));
+	}
+
+	if fields
+		.iter()
+		.any(|name| name.as_str().len() > MAX_KEY_LENGTH)
+	{
+		return Err!(Request(KeyTooLarge("Profile key names cannot be longer than 255 bytes.")));
+	}
+
+	Ok(())
+}
 
 /// Validate a profile field name against the Common Namespaced Identifier
 /// Grammar: a lowercase-leading identifier over `[a-z0-9_.-]`, matching the

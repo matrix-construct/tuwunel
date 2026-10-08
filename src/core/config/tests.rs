@@ -605,6 +605,33 @@ fn check_bounds_the_animated_thumbnail_concurrency() {
 }
 
 #[test]
+fn profile_count_limits_are_positive_and_reloadable() {
+	let default = default_config();
+
+	assert_eq!(default.max_remote_profile_fields, 100);
+	assert_eq!(default.max_profile_fields_per_request, 64);
+
+	let changed = config_from_toml(
+		"[global]
+max_remote_profile_fields = 2
+max_profile_fields_per_request = 3
+",
+	)
+	.unwrap();
+
+	check(&changed).expect("positive overrides should load");
+	reload(&default, &changed).expect("positive overrides should reload");
+
+	for name in ["max_remote_profile_fields", "max_profile_fields_per_request"] {
+		let config = config_from_toml(&format!("[global]\n{name} = 0\n")).unwrap();
+		let error = check(&config).expect_err("zero must not disable a count limit");
+
+		assert!(error.to_string().contains(name));
+		assert!(reload(&default, &config).is_err());
+	}
+}
+
+#[test]
 fn reload_rejects_none_to_some_and_some_to_none() {
 	let none = default_config();
 	let some = config_from_toml(

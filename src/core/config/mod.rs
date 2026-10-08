@@ -1293,6 +1293,33 @@ pub struct Config {
 	#[serde(default)]
 	pub require_auth_for_profile_requests: bool,
 
+	/// Maximum fields retained in a remote user's cached profile.
+	///
+	/// Includes displayname and avatar_url and must be greater than zero.
+	/// A refresh exceeding this count is rejected without changing the cache.
+	/// Lowering it leaves existing profiles intact; their refreshes must fit
+	/// the new limit.
+	///
+	/// reloadable: yes
+	/// default: 100
+	#[serde(default = "default_max_remote_profile_fields")]
+	pub max_remote_profile_fields: usize,
+
+	/// Maximum selected profile fields in a sync request or stored filter.
+	///
+	/// Counts raw selectors before duplicate removal for sliding and legacy sync
+	/// and must be greater than zero.
+	/// Requests exceeding this count or the 255-byte name limit are rejected.
+	/// Sliding sync retains normalized selections across omitted selectors;
+	/// after lowering the limit, an oversized selection requires replacement
+	/// or a restarted connection.
+	/// Unfiltered sliding sync profiles are not limited by this count.
+	///
+	/// reloadable: yes
+	/// default: 64
+	#[serde(default = "default_max_profile_fields_per_request")]
+	pub max_profile_fields_per_request: usize,
+
 	/// Allow standard users to set or clear their display names through the
 	/// client profile API.
 	///
@@ -5777,6 +5804,10 @@ fn default_ip_lookup_strategy() -> u8 { 5 }
 fn default_max_request_size() -> usize { 24 * 1024 * 1024 }
 
 fn default_max_response_size() -> usize { 256 * 1024 * 1024 }
+
+fn default_max_remote_profile_fields() -> usize { 100 }
+
+fn default_max_profile_fields_per_request() -> usize { 64 }
 
 fn default_max_pending_media_uploads() -> usize { 5 }
 

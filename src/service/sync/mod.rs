@@ -533,12 +533,34 @@ fn update_cache_profiles(request: &Profiles, cached: &mut Profiles) -> bool {
 	some_or_sticky(request.rooms.as_ref(), &mut cached.rooms);
 	some_or_sticky(request.lists.as_ref(), &mut cached.lists);
 
-	// Compare against the cached filter before the merge below overwrites it.
-	let widened = fields_widened(request.fields.as_deref(), cached.fields.as_deref());
+	let Some(fields) = request.fields.as_ref() else {
+		return false;
+	};
 
-	some_or_sticky(request.fields.as_ref(), &mut cached.fields);
+	if let Some(cached) = cached.fields.as_mut() {
+		normalize_profile_fields(cached);
+	}
+
+	let widened = fields_widened(Some(fields), cached.fields.as_deref());
+
+	retain_profile_fields(&mut cached.fields, fields);
 
 	widened
+}
+
+fn retain_profile_fields(
+	cached: &mut Option<Vec<ProfileFieldName>>,
+	fields: &[ProfileFieldName],
+) {
+	let retained = cached.get_or_insert_default();
+
+	fields.clone_into(retained);
+	normalize_profile_fields(retained);
+}
+
+fn normalize_profile_fields(fields: &mut Vec<ProfileFieldName>) {
+	fields.sort_unstable();
+	fields.dedup();
 }
 
 /// Whether the request names a profile field the connection did not ask for.
@@ -551,7 +573,11 @@ fn fields_widened(
 ) -> bool {
 	request
 		.zip(cached)
-		.is_some_and(|(request, cached)| request.iter().any(|name| !cached.contains(name)))
+		.is_some_and(|(request, cached)| {
+			request
+				.iter()
+				.any(|name| cached.binary_search(name).is_err())
+		})
 }
 
 #[implement(Connection)]

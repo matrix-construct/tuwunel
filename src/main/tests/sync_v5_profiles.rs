@@ -7,7 +7,9 @@ use reqwest::{Response, StatusCode};
 use serde_json::{Value, json};
 use tuwunel::{Args, Runtime, Server, async_run, async_start, async_stop};
 use tuwunel_core::{
-	Result, implement,
+	Result,
+	config::check::reload,
+	implement,
 	ruma::{UserId, profile::ProfileFieldName},
 };
 use tuwunel_service::Services;
@@ -39,7 +41,8 @@ fn serves_visible_profiles_without_acknowledging_failures() -> Result {
 		.with_option(format!("port={port}"))
 		.with_option("listening=true")
 		.with_option("allow_local_presence=false")
-		.with_option("allow_outgoing_presence=false");
+		.with_option("allow_outgoing_presence=false")
+		.with_option("max_profile_fields_per_request=2");
 
 	let runtime = Runtime::new(Some(&args))?;
 	let server = Server::new(Some(&args), Some(&runtime))?;
@@ -142,7 +145,112 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	read_failures(&owner, &peer_id, room.as_str()).await?;
 	membership_failures(&owner, &owner_id, &peer_id, room.as_str()).await?;
 	cleared_fields(&owner, &peer_id, room.as_str()).await?;
-	departed_profile(&owner, &peer, &peer_id, room.as_str()).await
+	departed_profile(&owner, &peer, &peer_id, room.as_str()).await?;
+	selector_limits(&owner, &owner_id).await
+}
+
+#[tracing::instrument(level = "trace", skip_all)]
+async fn selector_limits(owner: &Client<'_>, owner_id: &UserId) -> Result {
+	for fields in [json!([STATUS, STATUS, STATUS]), json!(["a".repeat(256)])] {
+		let response = owner
+			.sync_field_selection("rejected", None, Some(&fields))
+			.await?;
+
+		assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+	}
+
+	let boundary = json!(["a".repeat(255), STATUS]);
+
+	owner
+		.sync_field_selection("boundary", None, Some(&boundary))
+		.await?
+		.error_for_status()?;
+
+	let duplicate = json!([STATUS, STATUS]);
+
+	owner
+		.sync_field_selection("duplicate", None, Some(&duplicate))
+		.await?
+		.error_for_status()?;
+
+	let selected = json!([STATUS, "displayname"]);
+	let opening: Value = owner
+		.sync_field_selection("tightened", None, Some(&selected))
+		.await?
+		.error_for_status()?
+		.json()
+		.await?;
+
+	let pos = field(&opening, "pos")?;
+	let mut config = (*owner.services.server.config.clone()).clone();
+
+	config.max_profile_fields_per_request = 1;
+	reload(&owner.services.config, &config)?;
+	owner.services.server.config.update(config)?;
+
+	let response = owner
+		.sync_field_selection("tightened", Some(pos), None)
+		.await?;
+
+	assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+	let selected = json!([STATUS]);
+
+	owner
+		.sync_field_selection("tightened", Some(pos), Some(&selected))
+		.await?
+		.error_for_status()?;
+
+	set_status(owner.services, owner_id, "selected").await?;
+
+	let unfiltered: Value = owner
+		.sync_field_selection("all-fields", None, None)
+		.await?
+		.error_for_status()?
+		.json()
+		.await?;
+
+	assert_eq!(update(&unfiltered, owner_id)[STATUS]["text"], "selected");
+
+	let empty: Value = owner
+		.sync_field_selection("no-fields", None, Some(&json!([])))
+		.await?
+		.error_for_status()?
+		.json()
+		.await?;
+
+	assert!(update(&empty, owner_id).is_null());
+
+	Ok(())
+}
+
+#[implement(Client, params = "<'_>")]
+#[tracing::instrument(level = "trace", skip_all)]
+async fn sync_field_selection(
+	&self,
+	conn: &str,
+	pos: Option<&str>,
+	fields: Option<&Value>,
+) -> Result<Response> {
+	let mut body = json!({
+		"conn_id": conn,
+		"extensions": { PROFILES: { "enabled": true } },
+	});
+
+	if let Some(fields) = fields {
+		body["extensions"][PROFILES]["fields"] = fields.clone();
+	}
+
+	let query = pos
+		.map(|pos| format!("?pos={pos}&timeout=0"))
+		.unwrap_or_default();
+
+	let url = format!(
+		"{}/_matrix/client/unstable/org.matrix.simplified_msc3575/sync{query}",
+		self.base
+	);
+
+	self.post_url(&url, &body).await
 }
 
 #[tracing::instrument(level = "trace", skip_all)]

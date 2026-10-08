@@ -76,7 +76,10 @@ use super::{
 };
 use crate::{
 	ClientIp, Ruma,
-	client::{ignored_filter, is_empty_account_data_event, with_membership},
+	client::{
+		ignored_filter, is_empty_account_data_event, utils::normalize_profile_fields,
+		with_membership,
+	},
 };
 
 struct SyncParams<'a> {
@@ -285,6 +288,12 @@ pub(crate) async fn sync_events_route(
 		.note_sync(sender_user, body.appservice_info.as_ref());
 
 	let (filter, ..) = join3(filter, ping_presence, note_sync).await;
+
+	services
+		.profile
+		.check_requested_fields(&filter.profile_fields.ids)?;
+
+	let filter = normalize_profile_fields(filter);
 
 	let mut since = body
 		.body
