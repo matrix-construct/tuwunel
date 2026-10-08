@@ -47,10 +47,21 @@ async fn exercise(services: &Services, base: &str) -> Result {
 		.room_state_get_id(&other_room_id, &StateEventType::RoomMember, user_id.as_str())
 		.await?;
 
-	let (event_id, pdu) =
-		sign_message(services, &user_id, &room_id, &other_event_id, None).await?;
+	let local_event_id = services
+		.state_accessor
+		.room_state_get_id(&room_id, &StateEventType::RoomMember, user_id.as_str())
+		.await?;
 
-	assert_rejected(services, &room_id, &event_id, pdu).await?;
+	let (event_id, pdu) =
+		sign_message(services, &user_id, &room_id, &[&other_event_id], None).await?;
+
+	assert_rejected(services, &room_id, &event_id, pdu, "single").await?;
+
+	let (event_id, pdu) =
+		sign_message(services, &user_id, &room_id, &[&local_event_id, &other_event_id], None)
+			.await?;
+
+	assert_rejected(services, &room_id, &event_id, pdu, "multiple").await?;
 
 	let first_ts = services
 		.timeline
@@ -59,16 +70,16 @@ async fn exercise(services: &Services, base: &str) -> Result {
 		.origin_server_ts();
 
 	let (prev_id, prev) =
-		sign_message(services, &user_id, &room_id, &other_event_id, Some(first_ts)).await?;
+		sign_message(services, &user_id, &room_id, &[&other_event_id], Some(first_ts)).await?;
 
 	services
 		.event_handler
 		.handle_incoming_pdu(services.globals.server_name(), &room_id, &prev_id, prev, false)
 		.await?;
 
-	let (event_id, pdu) = sign_message(services, &user_id, &room_id, &prev_id, None).await?;
+	let (event_id, pdu) = sign_message(services, &user_id, &room_id, &[&prev_id], None).await?;
 
-	assert_rejected(services, &room_id, &event_id, pdu).await?;
+	assert_rejected(services, &room_id, &event_id, pdu, "boundary").await?;
 	assert!(
 		services
 			.timeline
@@ -78,15 +89,62 @@ async fn exercise(services: &Services, base: &str) -> Result {
 		"the stored prev event reached the timeline"
 	);
 
+	assert!(
+		services
+			.state
+			.pdu_shortstatehash(&prev_id)
+			.await
+			.is_err(),
+		"the rejected predecessor acquired a state association"
+	);
+
+	let (event_id, pdu) =
+		sign_message(services, &user_id, &room_id, &[&local_event_id], None).await?;
+
+	assert_accepted(services, &room_id, &event_id, pdu).await?;
+
+	let (event_id, pdu) =
+		sign_message(services, &user_id, &room_id, &[&local_event_id, &event_id], None).await?;
+
+	assert_accepted(services, &room_id, &event_id, pdu).await?;
+
+	let (prev_id, prev) =
+		sign_message(services, &user_id, &room_id, &[&local_event_id], Some(first_ts)).await?;
+
+	services
+		.event_handler
+		.handle_incoming_pdu(services.globals.server_name(), &room_id, &prev_id, prev, false)
+		.await?;
+
+	let (event_id, pdu) = sign_message(services, &user_id, &room_id, &[&prev_id], None).await?;
+
+	assert_accepted(services, &room_id, &event_id, pdu).await?;
+	assert!(
+		services
+			.timeline
+			.non_outlier_pdu_exists(&prev_id)
+			.await
+			.is_ok(),
+		"the same-room predecessor did not reach the timeline"
+	);
+
+	assert!(
+		services
+			.state
+			.pdu_shortstatehash(&prev_id)
+			.await
+			.is_ok(),
+		"the same-room predecessor has no state association"
+	);
+
 	Ok(())
 }
 
-/// Sign a message for `room_id` whose only prev event is `prev_event_id`.
 async fn sign_message(
 	services: &Services,
 	user_id: &UserId,
 	room_id: &RoomId,
-	prev_event_id: &EventId,
+	prev_event_ids: &[&EventId],
 	timestamp: Option<MilliSecondsSinceUnixEpoch>,
 ) -> Result<(OwnedEventId, CanonicalJsonObject)> {
 	let room_version = services.state.get_room_version(room_id).await?;
@@ -104,7 +162,10 @@ async fn sign_message(
 			.await?
 	};
 
-	let prev_events = vec![CanonicalJsonValue::String(prev_event_id.into())];
+	let prev_events = prev_event_ids
+		.iter()
+		.map(|event_id| CanonicalJsonValue::String((*event_id).into()))
+		.collect();
 
 	pdu.insert("prev_events".into(), CanonicalJsonValue::Array(prev_events));
 
@@ -115,21 +176,25 @@ async fn sign_message(
 	Ok((event_id, into_outgoing_federation(pdu, &room_version)))
 }
 
-/// Hand `pdu` over as an incoming timeline event, which must be rejected for
-/// its prev event's room and kept out of the timeline.
 async fn assert_rejected(
 	services: &Services,
 	room_id: &RoomId,
 	event_id: &EventId,
 	pdu: CanonicalJsonObject,
+	case: &str,
 ) -> Result {
+	let state = services
+		.state
+		.get_room_shortstatehash(room_id)
+		.await?;
+
 	let result = services
 		.event_handler
 		.handle_incoming_pdu(services.globals.server_name(), room_id, event_id, pdu, true)
 		.await;
 
 	let Err(error) = result else {
-		return Err!("an event with another room's prev event was accepted");
+		return Err!("{case}: an event with another room's prev event was accepted");
 	};
 
 	assert!(error.to_string().contains("wrong room"), "rejected for another reason: {error}");
@@ -140,6 +205,55 @@ async fn assert_rejected(
 			.await
 			.is_err(),
 		"the rejected event reached the timeline"
+	);
+
+	assert!(
+		services
+			.state
+			.pdu_shortstatehash(event_id)
+			.await
+			.is_err(),
+		"the rejected event acquired a state association"
+	);
+
+	let current_state = services
+		.state
+		.get_room_shortstatehash(room_id)
+		.await?;
+
+	assert_eq!(state, current_state);
+
+	Ok(())
+}
+
+async fn assert_accepted(
+	services: &Services,
+	room_id: &RoomId,
+	event_id: &EventId,
+	pdu: CanonicalJsonObject,
+) -> Result {
+	let result = services
+		.event_handler
+		.handle_incoming_pdu(services.globals.server_name(), room_id, event_id, pdu, true)
+		.await?;
+
+	assert!(result.is_some(), "same-room event was not accepted");
+	assert!(
+		services
+			.timeline
+			.non_outlier_pdu_exists(event_id)
+			.await
+			.is_ok(),
+		"the same-room event did not reach the timeline"
+	);
+
+	assert!(
+		services
+			.state
+			.pdu_shortstatehash(event_id)
+			.await
+			.is_ok(),
+		"the same-room event has no state association"
 	);
 
 	Ok(())

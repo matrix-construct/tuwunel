@@ -9,6 +9,7 @@ use tuwunel_core::{
 	Error, Result, debug, debug_warn, err, implement,
 	itertools::Itertools,
 	matrix::Event,
+	pdu::check_room_id,
 	ref_at, trace,
 	utils::{
 		option::OptionExt,
@@ -85,6 +86,9 @@ where
 		.map(Ok);
 
 	let (prev_event, state) = try_join(prev_event, state).await?;
+
+	check_room_id(&prev_event, incoming_pdu.room_id())?;
+
 	let Some(mut state) = state else {
 		return Ok(None);
 	};
@@ -165,6 +169,10 @@ where
 	};
 
 	trace!("Calculating fork states...");
+	prevs
+		.iter()
+		.try_for_each(|(_, pdu)| check_room_id(pdu, room_id))?;
+
 	let forks = prevs
 		.into_iter()
 		.sorted_unstable_by(|a, b| fork_identity(a).cmp(&fork_identity(b)))
