@@ -4967,6 +4967,16 @@ pub enum StorageProvider {
 	#[serde(rename = "s3", alias = "S3")]
 	s3(Box<StorageProviderS3>),
 
+	/// Selects a Google Cloud Storage backend.
+	///
+	/// The boxed settings configure the bucket and object prefix. Credentials
+	/// are resolved by the object-store client, which falls back to the
+	/// instance metadata server when none are configured; that is what allows
+	/// use from GKE Workload Identity without any exported key material.
+	#[expect(non_camel_case_types)]
+	#[serde(rename = "gcs", alias = "GCS")]
+	gcs(Box<StorageProviderGcs>),
+
 	/// Disables this storage provider entry.
 	///
 	/// This is the default when no backend variant is selected. It carries no
@@ -5128,6 +5138,82 @@ pub struct StorageProviderS3 {
 	/// Only set this to false if you expect a provider to be down at startup or
 	/// for development/testing purposes; checks are disabled when the server
 	/// is started in '--maintenance' mode.
+	///
+	/// default: true
+	#[serde(default = "true_fn")]
+	pub startup_check: bool,
+}
+
+/// Configures a Google Cloud Storage provider.
+///
+/// Only the bucket and an optional object prefix are required. Credentials are
+/// resolved by the object-store client in this order: an explicit service
+/// account key, an application-credentials file, then the instance metadata
+/// server. On GKE the metadata-server fallback means Workload Identity works
+/// with no credential settings at all and no exported key material.
+#[derive(Clone, Debug, Default, Deserialize)]
+#[config_example_generator(
+	filename = "tuwunel-example.toml",
+	section = "global.storage_provider.<ID>.gcs",
+	section_aliases = "GCS"
+)]
+pub struct StorageProviderGcs {
+	/// The name of the GCS bucket, e.g. "my-media-bucket". Required; an unset
+	/// bucket disables this provider.
+	///
+	/// Note a `gs://bucket/path` URL is intentionally not accepted here: the
+	/// path component would not be applied as an object prefix. Set `bucket`
+	/// and `base_path` separately instead.
+	pub bucket: Option<String>,
+
+	/// Optional path prefix within the bucket where all our operations will
+	/// take place.
+	#[serde(alias = "path")]
+	pub base_path: Option<String>,
+
+	/// (expert use) Path to a Google service account key file. Leave unset to
+	/// resolve credentials from the environment, which on GCE/GKE ends at the
+	/// instance metadata server; that is the keyless path and the recommended
+	/// configuration. Setting this requires exported key material.
+	pub service_account_path: Option<String>,
+
+	/// (expert use) Path to an application default credentials file. Leave
+	/// unset to resolve credentials from the environment. Note only
+	/// service-account and authorized-user documents are recognised, not every
+	/// external-account/workload-identity-federation file format.
+	pub application_credentials_path: Option<String>,
+
+	/// (expert use) Threshold size for switching to multi-part uploads. This
+	/// value determines what a "large" upload is. The value is a parsed string
+	/// allowing SI or IEC units for convenience.
+	///
+	/// default: 100 MiB
+	#[serde(default = "default_multipart_threshold")]
+	pub multipart_threshold: ByteSize,
+
+	/// (expert use) Size of each individual part within a multi-part upload.
+	/// Once an upload exceeds `multipart_threshold` the payload is split into
+	/// parts of this size, each sent as a separate request. The value is a
+	/// parsed string allowing SI or IEC units for convenience.
+	///
+	/// default: 10 MiB
+	#[serde(default = "default_multipart_part_size")]
+	pub multipart_part_size: ByteSize,
+
+	/// (developer use) Allows skipping request signatures.
+	///
+	/// default: true
+	#[serde(default = "some_true_fn")]
+	pub use_signatures: Option<bool>,
+
+	/// (developer use) Enables checks performed at startup such as pinging the
+	/// provider. Failures are considered critical startup errors which abort
+	/// startup. When set to false, faulty providers are only discovered with
+	/// first use and will not be fatal errors.
+	///
+	/// Note the check is a listing probe: it requires `storage.objects.list`
+	/// and proves neither write nor delete permission, and an empty bucket
+	/// passes.
 	///
 	/// default: true
 	#[serde(default = "true_fn")]

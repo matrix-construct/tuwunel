@@ -110,6 +110,7 @@ fn build_providers(args: &crate::Args<'_>) -> Result<Providers> {
 		.filter_map(|(name, conf)| match conf {
 			| StorageProvider::local(conf) => provider::local::new(args, name, conf).transpose(),
 			| StorageProvider::s3(conf) => provider::s3::new(args, name, conf).transpose(),
+			| StorageProvider::gcs(conf) => provider::gcs::new(args, name, conf).transpose(),
 			| _ => None,
 		})
 		.collect::<Result<_>>()

@@ -324,6 +324,7 @@ default-features = false
 features = [
 	"aws",
 	"fs",
+	"gcp",
 ]
 
 [workspace.dependencies.opentelemetry]
