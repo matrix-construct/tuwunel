@@ -24,7 +24,7 @@ use tuwunel_database::{Deserialized, Json, Map};
 use crate::users::is_password_hash;
 
 pub struct Service {
-	userdevicesessionid_uiaarequest: Mutex<RequestMap>,
+	userdevicesessionid_uiaarequest: Mutex<Requests>,
 	db: Data,
 	services: Arc<crate::services::OnceServices>,
 }
@@ -33,18 +33,20 @@ struct Data {
 	userdevicesessionid_uiaainfo: Arc<Map>,
 }
 
-type RequestMap = LruCache<RequestKey, CanonicalJsonValue>;
+type Requests = LruCache<RequestKey, CanonicalJsonValue>;
 type RequestKey = (OwnedUserId, OwnedDeviceId, String);
 
 pub const SESSION_ID_LENGTH: usize = 32;
 
-/// Most sessions whose request bodies are kept; the least recently used is
-/// dropped first.
+/// Maximum number of retained UIAA request bodies.
+///
+/// Inserting another session evicts the least recently used entry.
 const MAX_REQUESTS: usize = 1024;
 
-/// Larger request bodies are not kept, so the client must resend them whole.
-/// A kept body is parsed JSON, which can take over 100 times its serialized
-/// size in memory.
+/// Maximum serialized body and owned key bytes per retained request.
+///
+/// Parsed JSON adds container overhead to this payload budget. Larger entries
+/// are not retained, so the client must resend the request fields.
 const MAX_REQUEST_BYTES: usize = 4_096;
 
 #[cfg(test)]
@@ -59,7 +61,7 @@ enum EmailIdentityMode {
 impl crate::Service for Service {
 	fn build(args: &crate::Args<'_>) -> Result<Arc<Self>> {
 		Ok(Arc::new(Self {
-			userdevicesessionid_uiaarequest: RequestMap::new(MAX_REQUESTS).into(),
+			userdevicesessionid_uiaarequest: Requests::new(MAX_REQUESTS).into(),
 			db: Data {
 				userdevicesessionid_uiaainfo: args.db["userdevicesessionid_uiaainfo"].clone(),
 			},
@@ -424,7 +426,12 @@ fn set_uiaa_request(
 	session: &str,
 	request: &CanonicalJsonValue,
 ) {
-	if !serialized_len(request).is_ok_and(|len| len <= MAX_REQUEST_BYTES) {
+	let available = MAX_REQUEST_BYTES
+		.saturating_sub(user_id.as_str().len())
+		.saturating_sub(device_id.as_str().len())
+		.saturating_sub(session.len());
+
+	if !serialized_len(request).is_ok_and(|len| len <= available) {
 		return;
 	}
 
