@@ -290,9 +290,21 @@ fn valid_cidr_range_url(denylist: &[IPAddress], url: &Url) -> bool {
 		| Some(Host::Domain(_)) | None => return true,
 	};
 
-	let ip = ipaddress_from_std(ip);
+	valid_cidr_range_ip(denylist, ip)
+}
 
-	denylist.iter().all(|cidr| !cidr.includes(&ip))
+/// Checks an address against a CIDR denylist.
+///
+/// An IPv4-mapped IPv6 address (`::ffff:a.b.c.d`) connects to its embedded
+/// IPv4 address, so it must pass the IPv4 ranges as well as the IPv6 ones.
+pub(crate) fn valid_cidr_range_ip(denylist: &[IPAddress], ip: IpAddr) -> bool {
+	let allowed = |ip: IpAddr| {
+		let ip = ipaddress_from_std(ip);
+		denylist.iter().all(|cidr| !cidr.includes(&ip))
+	};
+
+	let canonical = ip.to_canonical();
+	allowed(ip) && (canonical == ip || allowed(canonical))
 }
 
 fn base(config: &Config, proxy: &ProxySnapshot, name: Option<&str>) -> Result<ClientBuilder> {
@@ -423,10 +435,7 @@ pub fn valid_cidr_range(&self, ip: &IPAddress) -> bool {
 #[must_use]
 #[implement(Service)]
 pub fn valid_cidr_range_ip(&self, ip: IpAddr) -> bool {
-	let addr = ipaddress_from_std(ip);
-	self.cidr_range_denylist
-		.iter()
-		.all(|cidr| !cidr.includes(&addr))
+	valid_cidr_range_ip(&self.cidr_range_denylist, ip)
 }
 
 /// Checks an HTTP URL against the CIDR denylist when its host is an IP literal.

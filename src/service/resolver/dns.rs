@@ -19,7 +19,7 @@ use reqwest::dns::{Addrs, Name, Resolve, Resolving};
 use tuwunel_core::{Result, Server, config::proxy::ProxyHosts, err, trace};
 
 use super::cache::{Cache, CachedOverride};
-use crate::client::ipaddress_from_std;
+use crate::client::valid_cidr_range_ip;
 
 pub struct Resolver {
 	pub(crate) resolver: Arc<TokioResolver>,
@@ -237,10 +237,7 @@ async fn validate_addrs<R: Resolve + 'static>(
 	let addrs = inner.resolve(name).await?;
 
 	let mut filtered = addrs
-		.filter(move |sa| {
-			let ip = ipaddress_from_std(sa.ip());
-			!denylist.iter().any(|cidr| cidr.includes(&ip))
-		})
+		.filter(move |sa| valid_cidr_range_ip(&denylist, sa.ip()))
 		.peekable();
 
 	if filtered.peek().is_none() {
