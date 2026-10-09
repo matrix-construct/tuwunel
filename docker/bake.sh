@@ -146,6 +146,8 @@ else
     :
 fi
 
+export valgrind_build_jobs="${valgrind_build_jobs:-$(( (nprocs + 3) / 4 ))}"
+
 if test "$CI_SILENT_BAKE" = "true"; then
 	args="$args --progress=quiet"
 fi

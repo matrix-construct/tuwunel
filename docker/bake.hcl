@@ -778,6 +778,14 @@ variable "valgrind_max_workers" {
     default = 16
 }
 
+variable "valgrind_worker_threads" {
+    default = 8
+}
+
+variable "valgrind_build_jobs" {
+    default = "default"
+}
+
 variable "valgrind_flags" {
     default = "--error-exitcode=1 --exit-on-first-error=yes --undef-value-errors=no --leak-check=no"
 }
@@ -869,6 +877,7 @@ target "integ-valgrind" {
         VALGRIND_MAX_WORKERS = "${valgrind_max_workers}"
         VALGRINDFLAGS = "${valgrind_flags}"
         cargo_cmd = "valgrind test"
+        cargo_flags = "-j ${valgrind_build_jobs}"
         cargo_args = "--test=*"
 
         # valgrind already serializes; keep it off the realtime class and the
@@ -878,6 +887,9 @@ target "integ-valgrind" {
 
         # valgrind runs many times slower than the deadline integ sets
         cargo_test_timeout = ""
+
+        # tokio workers per server boot, independent of the host's cores
+        tokio_worker_threads = "${valgrind_worker_threads}"
     }
 }
 

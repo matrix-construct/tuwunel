@@ -142,6 +142,7 @@ ARG sched_prio=0
 ARG sched_scope=""
 ARG sched_cpus=""
 ARG cargo_test_timeout=""
+ARG tokio_worker_threads=""
 
 WORKDIR /
 COPY --link --from=source /usr/src/tuwunel /usr/src/tuwunel
@@ -174,6 +175,14 @@ RUN \
     if test -n "${cargo_test_timeout}"; then
         runner="CARGO_TARGET_$(tr 'a-z.-' 'A-Z__' <<< "${CARGO_TARGET}")_RUNNER"
         export "${runner}=timeout --signal=TERM --kill-after=30s ${cargo_test_timeout}"
+    fi
+
+    # Every server boot sizes tokio to the host's cores, and a test that boots
+    # repeatedly can leave earlier workers running; valgrind aborts a process
+    # past 500 threads, so a target testing under it pins the count. Exported
+    # only when set: an empty value fails argument parsing.
+    if test -n "${tokio_worker_threads}"; then
+        export TOKIO_WORKER_THREADS="${tokio_worker_threads}"
     fi
 
     example_sha=$(sha1sum tuwunel-example.toml)
