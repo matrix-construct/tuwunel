@@ -50,7 +50,17 @@ pub(crate) enum RoomModerationCommand {
 }
 
 async fn do_ban_room(services: &Services, room_id: &RoomId) {
+	let federation_lock = services
+		.event_handler
+		.mutex_federation
+		.lock(room_id)
+		.await;
+
+	let state_lock = services.state.mutex.lock(room_id).await;
+
 	services.metadata.ban_room(room_id);
+	drop(state_lock);
+	drop(federation_lock);
 
 	debug!("Banned {room_id} successfully");
 

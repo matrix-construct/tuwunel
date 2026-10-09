@@ -52,15 +52,6 @@ pub async fn leave<'a>(
 		blurhash: None,
 	};
 
-	let is_banned = self.services.metadata.is_banned(room_id);
-	let is_disabled = self.services.metadata.is_disabled(room_id);
-
-	if is_banned.or(is_disabled).await {
-		return self
-			.clear_local_leave(user_id, room_id, leave_content, None)
-			.await;
-	}
-
 	let member_event = self
 		.services
 		.state_accessor
@@ -101,6 +92,15 @@ async fn leave_via_remote(
 	reason: Option<String>,
 	leave_content: RoomMemberEventContent,
 ) -> Result {
+	let is_banned = self.services.metadata.is_banned(room_id);
+	let is_disabled = self.services.metadata.is_disabled(room_id);
+
+	if is_banned.or(is_disabled).await {
+		return self
+			.clear_local_leave(user_id, room_id, leave_content, None)
+			.await;
+	}
+
 	if let Err(e) = self
 		.remote_leave(user_id, room_id, reason)
 		.boxed()
