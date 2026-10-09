@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, pin::pin, sync::Arc};
 
-use futures::{Stream, StreamExt, TryFutureExt, future::join3};
+use futures::{Stream, StreamExt, TryFutureExt, TryStreamExt, future::join3};
 use ruma::{
 	CanonicalJsonObject, CanonicalJsonValue, EventId, OwnedEventId, OwnedUserId, RoomId, UInt,
 	UserId,
@@ -28,7 +28,7 @@ use tuwunel_core::{
 };
 use tuwunel_database::{Deserialized, Map, Txn};
 
-use crate::rooms::timeline::ExtractRelatesTo;
+use crate::rooms::{pdu_metadata::RelationQuery, timeline::ExtractRelatesTo};
 
 #[cfg(test)]
 mod tests;
@@ -279,7 +279,8 @@ impl Service {
 	/// Returns the root row changed by redacting a counted thread reply.
 	///
 	/// The caller holds the room lock while the count decreases and the latest
-	/// reply is replaced, or the whole bundle removed when no reply remains.
+	/// reply is replaced. A bounded miss omits the latest event while preserving
+	/// the count; the whole bundle is removed when no reply remains.
 	/// Missing roots and unchanged summaries return `None`; storage errors are logged.
 	pub async fn redacted_reply_root(
 		&self,
@@ -312,14 +313,21 @@ impl Service {
 			.then_async(|| self.latest_thread_reply(root_id, reply_event_id))
 			.await;
 
+		let latest = match latest {
+			| None => None,
+			| Some(latest) => Some(latest.log_err().ok()?),
+		};
+
 		let changed = count.is_some() || latest.is_some();
 
 		changed.into_option()?;
 
 		let root = set_thread_count(root, count);
-		let root = match latest {
-			| None => root,
-			| Some(latest) => set_thread_latest(root, latest),
+		let root = match (count, latest) {
+			| (Some(count), _) if count == uint!(0) => set_thread_latest(root, None),
+			| (_, None) => root,
+			| (_, Some(None)) => omit_thread_latest(root),
+			| (_, Some(Some(latest))) => set_thread_latest(root, Some(latest)),
 		};
 
 		Some((root_id, root))
@@ -582,29 +590,41 @@ async fn latest_thread_reply(
 	&self,
 	root_id: RawPduId,
 	excluding: &EventId,
-) -> Option<CanonicalJsonValue> {
-	// An unreadable reply is skipped, so the newest readable one keeps the summary.
+) -> Result<Option<CanonicalJsonValue>> {
+	let limit = self
+		.services
+		.server
+		.config
+		.thread_latest_reply_search_limit;
+
 	let replies = self
-		.thread_replies(root_id)
-		.ready_filter_map(|reply| reply.log_err().ok())
-		.ready_filter(|(_, pdu)| pdu.event_id != excluding);
+		.thread_replies(root_id, limit)
+		.ready_try_filter(|(_, pdu)| pdu.event_id != excluding);
 
 	pin!(replies)
-		.next()
+		.try_next()
 		.await
-		.and_then(|(_, pdu)| thread_reply_json(&pdu))
+		.map(|reply| reply.and_then(|(_, pdu)| thread_reply_json(&pdu)))
 }
 
 #[implement(Service)]
 fn thread_replies(
 	&self,
 	root_id: RawPduId,
+	limit: usize,
 ) -> impl Stream<Item = Result<(PduCount, Pdu)>> + Send + '_ {
 	let PduId { shortroomid, count } = root_id.into();
 
 	self.services
 		.pdu_metadata
-		.try_get_relations(shortroomid, count, None, Direction::Backward, None)
+		.try_get_relations_limited(RelationQuery {
+			shortroomid,
+			target: count,
+			from: None,
+			dir: Direction::Backward,
+			user_id: None,
+			limit,
+		})
 		.ready_try_filter(|(_, pdu)| !pdu.is_redacted())
 		.ready_try_filter(|(_, pdu)| is_thread_reply(pdu))
 }
@@ -626,7 +646,7 @@ async fn rebuild_thread_summary(&self, root_id: RawPduId) -> Result<bool> {
 	let Some(_) = thread_bundle(&root) else { return Ok(false) };
 
 	let (count, latest) = self
-		.thread_replies(root_id)
+		.thread_replies(root_id, usize::MAX)
 		.ready_try_fold((0_usize, None), |(count, latest), (_, pdu)| {
 			Ok((count.saturating_add(1), latest.or(Some(pdu))))
 		})
@@ -716,6 +736,18 @@ fn set_thread_latest(
 
 	if let Some(thread) = thread_bundle_mut(&mut root) {
 		thread.insert("latest_event".into(), latest);
+	}
+
+	root
+}
+
+fn omit_thread_latest(mut root: CanonicalJsonObject) -> CanonicalJsonObject {
+	if thread_count(&root).is_none_or(|count| count == uint!(0)) {
+		return remove_thread_bundle(root);
+	}
+
+	if let Some(thread) = thread_bundle_mut(&mut root) {
+		thread.remove("latest_event");
 	}
 
 	root

@@ -298,6 +298,100 @@ async fn redacting_the_latest_reply_shows_the_newest_remaining_one() -> Result {
 	Ok(())
 }
 
+#[tokio::test]
+async fn replacement_search_counts_missing_relation_rows() -> Result {
+	let config = Figment::new().merge(("thread_latest_reply_search_limit", 3));
+	let Some(fixture) = fixture(config).await? else {
+		return Ok(());
+	};
+
+	let room = Room::new(&fixture.services).await?;
+	let [root, old, newest, later] = ["root", "old", "newest", "later"].map(id);
+
+	room.append(1, &root, text()).await?;
+	room.append(2, &old, thread(&root)).await?;
+	fixture
+		.services
+		.pdu_metadata
+		.add_relation(PduCount::Normal(3), PduCount::Normal(1));
+
+	fixture
+		.services
+		.pdu_metadata
+		.add_relation(PduCount::Normal(4), PduCount::Normal(1));
+
+	room.append(5, &newest, thread(&root)).await?;
+	let before = room.stored(&root).await?.1["unsigned"]["m.relations"]["m.thread"]
+		["current_user_participated"]
+		.clone();
+
+	room.redact(&newest).await?;
+
+	assert_eq!(room.latest(&root).await?, Value::Null);
+	assert_eq!(room.count(&root).await?, json!(1));
+	assert_eq!(
+		room.stored(&root).await?.1["unsigned"]["m.relations"]["m.thread"]
+			["current_user_participated"],
+		before
+	);
+
+	let served = fixture.services.timeline.get_pdu(&root).await?;
+	let served = fixture
+		.services
+		.pdu_metadata
+		.bundle_aggregations(user_id!("@alice:localhost"), served)
+		.await;
+
+	assert!(
+		serde_json::to_value(served)?["unsigned"]
+			.get("m.relations")
+			.is_none()
+	);
+
+	room.append(6, &later, thread(&root)).await?;
+
+	assert_eq!(room.latest(&root).await?, json!(later));
+	assert_eq!(room.count(&root).await?, json!(2));
+
+	room.redact(&later).await?;
+	room.redact(&old).await?;
+
+	assert!(
+		room.stored(&root).await?.1["unsigned"]
+			.get("m.relations")
+			.is_none()
+	);
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn replacement_search_keeps_a_reply_at_the_limit() -> Result {
+	let config = Figment::new().merge(("thread_latest_reply_search_limit", 3));
+	let Some(fixture) = fixture(config).await? else {
+		return Ok(());
+	};
+
+	let room = Room::new(&fixture.services).await?;
+	let [root, old, newest] = ["root", "old", "newest"].map(id);
+
+	room.append(1, &root, text()).await?;
+	room.append(2, &old, thread(&root)).await?;
+	fixture
+		.services
+		.pdu_metadata
+		.add_relation(PduCount::Normal(3), PduCount::Normal(1));
+
+	room.append(4, &newest, thread(&root)).await?;
+
+	room.redact(&newest).await?;
+
+	assert_eq!(room.latest(&root).await?, json!(old));
+	assert_eq!(room.count(&root).await?, json!(1));
+
+	Ok(())
+}
+
 impl<'a> Room<'a> {
 	async fn new(services: &'a Services) -> Result<Self> {
 		Self::create(services, room_id!("!thread:localhost")).await

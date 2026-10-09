@@ -52,9 +52,15 @@ pub async fn bundle_aggregations(&self, sender_user: &UserId, mut pdu: Pdu) -> P
 
 	if has_thread {
 		if pdu
-			.remove_thread_latest_transaction_id_unless_sender(sender_user)
+			.thread_latest_event()
 			.log_err()
-			.is_err()
+			.ok()
+			.flatten()
+			.is_none()
+			|| pdu
+				.remove_thread_latest_transaction_id_unless_sender(sender_user)
+				.log_err()
+				.is_err()
 		{
 			drop_thread_bundle(&mut pdu);
 		} else {

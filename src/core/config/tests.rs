@@ -633,6 +633,29 @@ max_profile_fields_per_request = 3
 }
 
 #[test]
+fn thread_latest_reply_search_limit_is_positive_and_reloadable() {
+	let default = default_config();
+
+	assert_eq!(default.thread_latest_reply_search_limit, 1024);
+
+	let changed = config_from_toml("[global]\nthread_latest_reply_search_limit = 3\n").unwrap();
+
+	check(&changed).expect("a positive search limit should load");
+	reload(&default, &changed).expect("a positive search limit should reload");
+
+	let zero = config_from_toml("[global]\nthread_latest_reply_search_limit = 0\n").unwrap();
+	let error = check(&zero).expect_err("zero must not disable the search limit");
+
+	assert!(
+		error
+			.to_string()
+			.contains("thread_latest_reply_search_limit")
+	);
+
+	assert!(reload(&default, &zero).is_err());
+}
+
+#[test]
 fn reload_rejects_none_to_some_and_some_to_none() {
 	let none = default_config();
 	let some = config_from_toml(

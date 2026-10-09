@@ -79,6 +79,7 @@ pub fn check(config: &Config) -> Result {
 	check_registration(config)?;
 	check_registration_terms(config)?;
 	check_profile_requests(config)?;
+	check_relation_limits(config)?;
 	check_password_hashing(config)?;
 	check_jwt(config)?;
 	check_turn_and_media_misc(config)?;
@@ -138,6 +139,14 @@ fn check_profile_requests(config: &Config) -> Result {
 			"limit_profile_requests_to_users_who_share_rooms requires \
 			 require_auth_for_profile_requests to be enabled"
 		));
+	}
+
+	Ok(())
+}
+
+fn check_relation_limits(config: &Config) -> Result {
+	if config.thread_latest_reply_search_limit == 0 {
+		return Err!(Config("thread_latest_reply_search_limit", "Must be greater than zero"));
 	}
 
 	Ok(())

@@ -678,6 +678,18 @@ pub struct Config {
 	#[serde(default = "default_max_fetch_prev_events")]
 	pub max_fetch_prev_events: u16,
 
+	/// Maximum relation rows examined while replacing a redacted latest thread
+	/// reply.
+	///
+	/// Missing, malformed, unrelated, and redacted events consume the
+	/// budget before event filtering. If no replacement is found, the thread
+	/// summary is omitted.
+	///
+	/// reloadable: yes
+	/// default: 1024
+	#[serde(default = "default_thread_latest_reply_search_limit")]
+	pub thread_latest_reply_search_limit: usize,
+
 	/// Simultaneous backward-extremity upgrades during incoming-event recovery.
 	///
 	/// Lower values reduce recovery load at the cost of latency. This does not
@@ -5870,6 +5882,8 @@ fn default_appservice_idle_timeout() -> u64 { 300 }
 fn default_pusher_idle_timeout() -> u64 { 15 }
 
 fn default_max_fetch_prev_events() -> u16 { 1024_u16 }
+
+fn default_thread_latest_reply_search_limit() -> usize { 1024 }
 
 fn default_prev_events_concurrency() -> u16 {
 	u16::try_from(MAX_PREV_EVENTS).expect("MAX_PREV_EVENTS exceeds u16")

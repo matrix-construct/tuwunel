@@ -494,6 +494,17 @@
 #
 #max_fetch_prev_events = 1024
 
+# Maximum relation rows examined while replacing a redacted latest thread
+# reply.
+#
+# Missing, malformed, unrelated, and redacted events consume the
+# budget before event filtering. If no replacement is found, the thread
+# summary is omitted.
+#
+# reloadable: yes
+#
+#thread_latest_reply_search_limit = 1024
+
 # Simultaneous backward-extremity upgrades during incoming-event recovery.
 #
 # Lower values reduce recovery load at the cost of latency. This does not

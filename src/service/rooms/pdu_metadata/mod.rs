@@ -12,6 +12,7 @@ mod bundling;
 mod purge;
 mod references;
 mod relations;
+pub use relations::RelationQuery;
 pub(crate) mod typed_relations;
 
 #[cfg(test)]

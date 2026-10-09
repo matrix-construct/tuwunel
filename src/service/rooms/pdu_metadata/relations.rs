@@ -21,6 +21,29 @@ use crate::rooms::short::ShortRoomId;
 
 type StartKey = ArrayVec<u8, 16>;
 
+/// Parameters controlling a relation-row query.
+///
+/// The row limit applies before event loading and filtering.
+pub struct RelationQuery<'a> {
+	/// Numeric room identifier containing the relation rows.
+	pub(crate) shortroomid: ShortRoomId,
+
+	/// Event position targeted by each relation row.
+	pub(crate) target: PduCount,
+
+	/// Optional exclusive cursor for the first relation row.
+	pub(crate) from: Option<PduCount>,
+
+	/// Direction in which relation rows are visited.
+	pub(crate) dir: Direction,
+
+	/// Requesting user used to filter transaction identifiers.
+	pub(crate) user_id: Option<&'a UserId>,
+
+	/// Maximum number of raw relation rows to visit.
+	pub(crate) limit: usize,
+}
+
 #[implement(Service)]
 #[tracing::instrument(skip(self, from, to), level = "debug")]
 pub fn add_relation(&self, from: PduCount, to: PduCount) {
@@ -141,6 +164,31 @@ pub fn try_get_relations<'a>(
 	dir: Direction,
 	user_id: Option<&'a UserId>,
 ) -> impl Stream<Item = Result<(PduCount, Pdu)>> + Send + '_ {
+	self.try_get_relations_limited(RelationQuery {
+		shortroomid,
+		target,
+		from,
+		dir,
+		user_id,
+		limit: usize::MAX,
+	})
+}
+
+/// Walks at most `limit` relation rows, preserving read failures.
+///
+/// The limit counts missing children before event loading and filtering.
+#[implement(Service)]
+pub fn try_get_relations_limited<'a>(
+	&'a self,
+	RelationQuery {
+		shortroomid,
+		target,
+		from,
+		dir,
+		user_id,
+		limit,
+	}: RelationQuery<'a>,
+) -> impl Stream<Item = Result<(PduCount, Pdu)>> + Send + '_ {
 	let target = target.to_be_bytes();
 	let from = from
 		.map(|from| from.saturating_inc(dir))
@@ -171,6 +219,7 @@ pub fn try_get_relations<'a>(
 			.right_stream(),
 	}
 	.ready_try_take_while(move |key| Ok(key.starts_with(&target)))
+	.take(limit)
 	.map_ok(|to_from| u64_from_u8(&to_from[8..16]))
 	.map_ok(PduCount::from_unsigned)
 	.map_ok(move |count| (user_id, shortroomid, count))
