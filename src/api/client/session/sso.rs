@@ -2,16 +2,27 @@ mod uiaa;
 
 use std::{borrow::Cow, collections::BTreeMap, net::IpAddr, time::Duration};
 
-use axum::extract::State;
+use axum::{
+	extract::State,
+	response::{Html, IntoResponse, Response},
+};
 use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD as b64};
-use futures::{FutureExt, TryFutureExt, future::try_join};
-use reqwest::header::{CONTENT_TYPE, HeaderValue};
+use const_str::format as const_format;
+use futures::{TryFutureExt, future::try_join};
+use reqwest::header::{
+	CACHE_CONTROL, CONTENT_SECURITY_POLICY, CONTENT_TYPE, HeaderValue, REFERRER_POLICY,
+	SET_COOKIE,
+};
 use ruma::{
 	Mxc, OwnedMxcUri, OwnedUserId, ServerName, UserId,
 	api::{
 		client::{
-			session::{SsoRedirectAction, sso_callback, sso_login, sso_login_with_provider},
+			session::{
+				SsoRedirectAction,
+				sso_callback::{self, unstable::Response as SsoCallbackResponse},
+				sso_login, sso_login_with_provider,
+			},
 			uiaa::AuthType,
 		},
 		error::ErrorKind,
@@ -27,9 +38,9 @@ use tuwunel_core::{
 	itertools::Itertools,
 	utils,
 	utils::{
-		OptionExt,
 		content_disposition::make_content_disposition,
 		hash::sha256,
+		html::escape as html_escape,
 		result::{FlatOk, LogErr},
 		string::{EMPTY, truncate_deterministic},
 		timepoint_from_now, timepoint_has_passed,
@@ -50,7 +61,10 @@ use url::Url;
 
 pub(crate) use self::uiaa::{sso_complete_js_route, sso_css_route, sso_fallback_route};
 use super::TOKEN_LENGTH;
-use crate::{ClientIp, Ruma};
+use crate::{
+	ClientIp, Ruma, RumaResponse,
+	oidc::{account::ACCOUNT_HEAD, redirect_allowlisted},
+};
 
 /// Grant phase query string.
 #[derive(Debug, Serialize)]
@@ -77,6 +91,27 @@ struct GrantCookie<'a> {
 }
 
 static GRANT_SESSION_COOKIE: &str = "tuwunel_grant_session";
+
+static CONFIRM_HTML: &str = const_format!(
+	r#"
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		{ACCOUNT_HEAD}
+		<title>Continue sign-in · Tuwunel</title>
+	</head>
+	<body class="auth-page">
+		<main class="auth-card auth-complete" aria-labelledby="auth-title">
+			<h1 id="auth-title">Continue sign-in</h1>
+			<p class="auth-description">
+				You are signing in as <strong>{{user}}</strong> to <strong>{{target}}</strong>.
+			</p>
+			<p class="auth-description">Continue only if you started this sign-in.</p>
+			<a class="auth-continue-link" href="{{location}}">Continue</a>
+		</main>
+	</body>
+</html>"#
+);
 
 /// Path attribute for the grant-session cookie. The set and removal cookies
 /// must use the same value: a cookie is only replaced (and thus removed) when
@@ -204,10 +239,9 @@ pub(crate) async fn sso_login_with_provider_route(
 ) -> Result<sso_login_with_provider::v3::Response> {
 	let idp_id = body.body.idp_id;
 	let redirect_url = body.body.redirect_url;
-	let login_token = body.body.login_token;
 	let action = body.body.action;
 
-	handle_sso_login(&services, &client, idp_id, redirect_url, login_token, action).await
+	handle_sso_login(&services, &client, idp_id, redirect_url, None, action).await
 }
 
 async fn handle_sso_login(
@@ -215,7 +249,7 @@ async fn handle_sso_login(
 	_client: &IpAddr,
 	idp_id: String,
 	redirect_url: String,
-	login_token: Option<String>,
+	user_id: Option<OwnedUserId>,
 	action: Option<SsoRedirectAction>,
 ) -> Result<sso_login_with_provider::v3::Response> {
 	let redirect_url: Url = redirect_url.parse().map_err(|e| {
@@ -225,6 +259,8 @@ async fn handle_sso_login(
 			"Failed to parse redirect_url.",
 		))))
 	})?;
+
+	validate_redirect_url(&redirect_url)?;
 
 	let provider = services.oauth.providers.get(&idp_id).await?;
 	let sess_id = utils::random_string(SESSION_ID_LENGTH);
@@ -321,12 +357,7 @@ async fn handle_sso_login(
 			.map(timepoint_from_now)
 			.transpose()?,
 
-		user_id: login_token
-			.as_deref()
-			.map_async(|token| services.users.find_from_login_token(token))
-			.map(FlatOk::flat_ok)
-			.await,
-
+		user_id,
 		..Default::default()
 	};
 
@@ -352,7 +383,7 @@ pub(crate) async fn sso_callback_route(
 	State(services): State<crate::State>,
 	ClientIp(client): ClientIp,
 	body: Ruma<sso_callback::unstable::Request>,
-) -> Result<sso_callback::unstable::Response> {
+) -> Result<Response> {
 	let sess_id = body
 		.body
 		.state
@@ -378,6 +409,7 @@ pub(crate) async fn sso_callback_route(
 
 	let (provider, session) = try_join(provider, session).await.log_err()?;
 	let idp_id = provider.id();
+	let next_idp_id = chain_next_idp_id(&services, idp_id);
 
 	if session.sess_id.as_deref() != Some(sess_id) {
 		return Err!(Request(Unauthorized("Session ID {sess_id:?} not recognized.")));
@@ -396,7 +428,7 @@ pub(crate) async fn sso_callback_route(
 		return Err!(Request(Unauthorized("Authorization grant session has expired.")));
 	}
 
-	if provider.check_cookie {
+	if provider.check_cookie || session.user_id.is_some() || next_idp_id.is_some() {
 		validate_session_cookie(&body.cookie, &provider, &session, sess_id)?;
 	}
 
@@ -498,14 +530,39 @@ pub(crate) async fn sso_callback_route(
 		.as_ref()
 		.filter(|url| url.scheme() == "uiaa")
 	{
-		return handle_uiaa(&services, &user_id, cookie, redirect_url).await;
+		return handle_uiaa(&services, &user_id, cookie, redirect_url)
+			.map_ok(|response| RumaResponse(response).into_response())
+			.await;
 	}
 
-	let next_idp_url = chain_next_idp_url(&services, &provider, &session, idp_id);
+	let redirect_url = session
+		.redirect_url
+		.ok_or_else(|| err!(Request(InvalidParam("Missing redirect URL in session data"))))?;
 
-	let location = finalize_login_redirect(&services, &session, next_idp_url, &user_id)?;
+	validate_redirect_url(&redirect_url)?;
 
-	Ok(sso_callback::unstable::Response { location, cookie: Some(cookie) })
+	if let Some(next_idp_id) = next_idp_id {
+		let next = handle_sso_login(
+			&services,
+			&client,
+			next_idp_id,
+			redirect_url.into(),
+			Some(user_id),
+			None,
+		)
+		.await?;
+
+		return Ok(RumaResponse(next).into_response());
+	}
+
+	if redirect_trusted(&services, &redirect_url) {
+		let location = finalize_login_redirect(&services, redirect_url, &user_id, Some(idp_id));
+		let response = SsoCallbackResponse { location, cookie: Some(cookie) };
+
+		return Ok(RumaResponse(response).into_response());
+	}
+
+	confirm_login_redirect(&services, redirect_url, &user_id, &cookie, idp_id)
 }
 
 fn validate_session_cookie(
@@ -562,12 +619,7 @@ fn apply_token_response(session: Session, token: TokenResponse) -> Result<Sessio
 	})
 }
 
-fn chain_next_idp_url(
-	services: &Services,
-	provider: &Provider,
-	session: &Session,
-	idp_id: &str,
-) -> Option<Url> {
+fn chain_next_idp_id(services: &Services, idp_id: &str) -> Option<String> {
 	services
 		.config
 		.identity_provider
@@ -576,43 +628,106 @@ fn chain_next_idp_url(
 		.skip_while(|idp| idp.id() != idp_id)
 		.nth(1)
 		.map(IdentityProvider::id)
-		.and_then(|next_idp| {
-			provider.callback_url.clone().map(|mut url| {
-				let path = format!("/_matrix/client/v3/login/sso/redirect/{next_idp}");
-				url.set_path(&path);
-
-				if let Some(redirect_url) = session.redirect_url.as_ref() {
-					url.query_pairs_mut()
-						.append_pair("redirectUrl", redirect_url.as_str());
-				}
-
-				url
-			})
-		})
+		.map(ToOwned::to_owned)
 }
 
 fn finalize_login_redirect(
 	services: &Services,
-	session: &Session,
-	next_idp_url: Option<Url>,
+	redirect_url: Url,
 	user_id: &UserId,
-) -> Result<String> {
+	provider_id: Option<&str>,
+) -> String {
 	let login_token = utils::random_string(TOKEN_LENGTH);
-	let _login_token_expires_in = services.users.create_login_token_with_provider(
-		user_id,
-		&login_token,
-		session.idp_id.as_deref(),
-	);
+	let _login_token_expires_in =
+		services
+			.users
+			.create_login_token_with_provider(user_id, &login_token, provider_id);
 
-	let location = next_idp_url
-		.or_else(|| session.redirect_url.clone())
-		.ok_or_else(|| err!(Request(InvalidParam("Missing redirect URL in session data"))))?
+	append_login_token(redirect_url, &login_token)
+}
+
+fn append_login_token(mut redirect_url: Url, login_token: &str) -> String {
+	redirect_url
 		.query_pairs_mut()
-		.append_pair("loginToken", &login_token)
-		.finish()
-		.to_string();
+		.append_pair("loginToken", login_token)
+		.finish();
 
-	Ok(location)
+	redirect_url.into()
+}
+
+fn validate_redirect_url(redirect_url: &Url) -> Result {
+	if !redirect_url.username().is_empty() || redirect_url.password().is_some() {
+		return Err!(Request(InvalidParam("redirect_url must not contain userinfo.")));
+	}
+
+	if matches!(
+		redirect_url.scheme(),
+		"javascript" | "vbscript" | "data" | "blob" | "file" | "about"
+	) {
+		return Err!(Request(InvalidParam("Unsupported redirect_url scheme.")));
+	}
+
+	Ok(())
+}
+
+fn redirect_trusted(services: &Services, redirect_url: &Url) -> bool {
+	let allowed = &services
+		.config
+		.oidc_registration_allowed_redirect_hosts;
+
+	let own_origin = services
+		.config
+		.well_known
+		.client
+		.as_ref()
+		.filter(|client| matches!(client.scheme(), "http" | "https"))
+		.is_some_and(|client| client.origin() == redirect_url.origin());
+
+	own_origin || redirect_allowlisted(allowed, redirect_url.as_str())
+}
+
+fn confirm_login_redirect(
+	services: &Services,
+	redirect_url: Url,
+	user_id: &UserId,
+	cookie: &str,
+	provider_id: &str,
+) -> Result<Response> {
+	let escape = |value: &str| {
+		html_escape(value)
+			.replace('{', "&#123;")
+			.replace('}', "&#125;")
+	};
+
+	let user = escape(user_id.as_str());
+	let target = escape(&display_login_target(redirect_url.clone()));
+	let location = finalize_login_redirect(services, redirect_url, user_id, Some(provider_id));
+	let location = html_escape(&location);
+	let html = CONFIRM_HTML
+		.replace("{user}", &user)
+		.replace("{target}", &target)
+		.replace("{location}", &location);
+
+	let cookie = HeaderValue::from_str(cookie)?;
+	let headers = [
+		(SET_COOKIE, cookie),
+		(CACHE_CONTROL, HeaderValue::from_static("no-store")),
+		(REFERRER_POLICY, HeaderValue::from_static("no-referrer")),
+		(
+			CONTENT_SECURITY_POLICY,
+			HeaderValue::from_static(
+				"default-src 'none'; style-src 'self'; frame-ancestors 'none'; base-uri 'none'",
+			),
+		),
+	];
+
+	Ok((headers, Html(html)).into_response())
+}
+
+fn display_login_target(mut target: Url) -> String {
+	target.set_query(None);
+	target.set_fragment(None);
+	target.into()
 }
 
 async fn handle_uiaa(

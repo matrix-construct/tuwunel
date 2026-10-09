@@ -400,4 +400,12 @@ These admin room commands help manage OAuth state:
 4. The provider authenticates the user and redirects back to
    `/_matrix/client/unstable/login/sso/callback/<client_id>`.
 5. Tuwunel exchanges the code for tokens, fetches user claims, maps them to a
-   Matrix user ID, and issues a login token back to the client.
+   Matrix user ID, and issues a login token back to the client. Redirects on
+   the configured client origin or the OIDC redirect allowlist continue
+   directly. Other web and native clients require the user to confirm the
+   destination first.
+
+The public SSO redirect endpoint ignores `loginToken`. Provider chains carry
+the authenticated account internally and require the browser grant cookie at
+every chained step, even when ordinary single-provider cookie checks are
+disabled for that provider.

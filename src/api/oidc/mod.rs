@@ -111,7 +111,7 @@ async fn peek_login_token_with_provider(
 /// `io.element.android:/callback`), so it matches an entry naming the scheme
 /// instead, which is what lets one list cover both a web and a mobile client.
 /// Either way the comparison ignores case.
-fn redirect_allowlisted(allowed: &[String], uri: &str) -> bool {
+pub(crate) fn redirect_allowlisted(allowed: &[String], uri: &str) -> bool {
 	Url::parse(uri).is_ok_and(|url| {
 		let name = url.host_str().unwrap_or_else(|| url.scheme());
 

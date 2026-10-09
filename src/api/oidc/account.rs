@@ -57,7 +57,7 @@ static ACCOUNT_JS: &str = include_str!("account/account.js");
 /// Shared stylesheet served at `/_tuwunel/oidc/account.css`.
 static ACCOUNT_CSS: &str = include_str!("account/account.css");
 
-pub(super) static ACCOUNT_HEAD: &str = r#"
+pub(crate) static ACCOUNT_HEAD: &str = r#"
 	<meta charset="UTF-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<link rel="stylesheet" href="/_tuwunel/oidc/account.css">
