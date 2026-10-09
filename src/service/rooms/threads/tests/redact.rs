@@ -8,11 +8,12 @@ use std::{
 };
 
 use ruma::{EventId, OwnedEventId, RoomId, event_id, events::StateEventType, room_id, user_id};
-use serde_json::{Value, json};
+use serde_json::{Value, json, to_string, to_value};
 use tuwunel_core::{
 	Event, Result,
 	config::Figment,
 	matrix::pdu::{PduCount, PduEvent, PduId, RawPduId},
+	utils::BoolExt,
 };
 use tuwunel_database::Json;
 
@@ -283,7 +284,7 @@ async fn redacting_the_latest_reply_shows_the_newest_remaining_one() -> Result {
 		.pdu_metadata
 		.bundle_aggregations(user_id!("@alice:localhost"), served);
 
-	assert!(!serde_json::to_string(&served.await)?.contains("secret"));
+	assert!(!to_string(&served.await)?.contains("secret"));
 	assert_eq!(room.latest(&root).await?, json!(second));
 
 	room.redact(&second).await?;
@@ -294,6 +295,71 @@ async fn redacting_the_latest_reply_shows_the_newest_remaining_one() -> Result {
 			.get("m.relations")
 			.is_none()
 	);
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn replacement_error_omits_the_redacted_latest_and_decrements_count() -> Result {
+	let Some(fixture) = fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+
+	let services = &fixture.services;
+	let room = Room::new(services).await?;
+	let [root, older, faulty, newest] = ["root", "older", "faulty", "newest"].map(id);
+	let secret = json!({
+		"msgtype": "m.text", "body": "redacted thread preview secret",
+		"m.relates_to": { "rel_type": "m.thread", "event_id": root },
+	});
+
+	room.append(1, &root, text()).await?;
+	room.append(2, &older, thread(&root)).await?;
+	let faulty_id = room.append(3, &faulty, thread(&root)).await?;
+
+	room.append(4, &newest, secret).await?;
+	assert_eq!(room.latest(&root).await?, json!(newest));
+	assert_eq!(room.count(&root).await?, json!(3));
+	services.db["pduid_pdu"].insert(faulty_id.as_bytes(), b"invalid PDU");
+
+	let error = services
+		.timeline
+		.get_pdu_from_id(&faulty_id)
+		.await
+		.expect_err("replacement child must fail decoding");
+
+	assert!(error.is_not_found().is_false());
+	room.redact(&newest).await?;
+
+	let (_, redacted) = room.stored(&newest).await?;
+
+	assert_eq!(redacted["content"], json!({}));
+	assert!(
+		redacted["unsigned"]
+			.get("redacted_because")
+			.is_some()
+	);
+
+	let served = services.timeline.get_pdu(&root).await?;
+	let served = services
+		.pdu_metadata
+		.bundle_aggregations(user_id!("@alice:localhost"), served)
+		.await;
+
+	assert!(
+		to_string(&served)?
+			.contains("redacted thread preview secret")
+			.is_false()
+	);
+
+	assert!(
+		to_value(served)?["unsigned"]
+			.get("m.relations")
+			.is_none()
+	);
+
+	assert_eq!(room.latest(&root).await?, Value::Null);
+	assert_eq!(room.count(&root).await?, json!(2));
 
 	Ok(())
 }
@@ -343,7 +409,7 @@ async fn replacement_search_counts_missing_relation_rows() -> Result {
 		.await;
 
 	assert!(
-		serde_json::to_value(served)?["unsigned"]
+		to_value(served)?["unsigned"]
 			.get("m.relations")
 			.is_none()
 	);
@@ -493,7 +559,7 @@ impl<'a> Room<'a> {
 		let pdu_id = self.0.timeline.get_pdu_id(event_id).await?;
 		let pdu = self.0.timeline.get_pdu_json_from_id(&pdu_id);
 
-		Ok((pdu_id, serde_json::to_value(pdu.await?)?))
+		Ok((pdu_id, to_value(pdu.await?)?))
 	}
 }
 

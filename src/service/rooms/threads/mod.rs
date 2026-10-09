@@ -313,10 +313,7 @@ impl Service {
 			.then_async(|| self.latest_thread_reply(root_id, reply_event_id))
 			.await;
 
-		let latest = match latest {
-			| None => None,
-			| Some(latest) => Some(latest.log_err().ok()?),
-		};
+		let latest = latest.map(|latest| latest.log_err().ok().flatten());
 
 		let changed = count.is_some() || latest.is_some();
 
