@@ -278,7 +278,7 @@ pub(super) enum UserCommand {
 		event_id: OwnedEventId,
 	},
 
-	/// Redact a local user's most recent unredacted messages in a room.
+	/// - Redact a local user's most recent unredacted messages in a room.
 	///
 	/// Counts plaintext and encrypted messages, excluding state events.
 	/// Redactions are sent as the original sender, newest first.
