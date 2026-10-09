@@ -130,8 +130,6 @@ impl crate::Service for Service {
 	async fn interrupt(&self) { self.close(); }
 
 	fn name(&self) -> &str { crate::service::make_name(std::module_path!()) }
-
-	fn unconstrained(&self) -> bool { true }
 }
 
 /// Queue a PDU for delivery to one of a user's pushers.

@@ -7,16 +7,15 @@ use std::{
 	sync::Arc,
 };
 
-use futures::FutureExt;
 use ruma::ServerName;
-use tokio::task::{JoinError, JoinSet, unconstrained};
+use tokio::task::{JoinError, JoinSet};
 use tuwunel_core::{
 	Result, debug, err, error, implement,
 	utils::{available_parallelism, math::usize_from_u64_truncated},
 };
 
 use super::{Destination, Msg, Service, dest::DestinationRef};
-use crate::{Args, Service as _};
+use crate::Args;
 
 /// Run the sender workers to completion.
 ///
@@ -31,11 +30,6 @@ pub(super) async fn run(self: Arc<Self>) -> Result {
 			.enumerate()
 			.fold(JoinSet::new(), |mut senders, (id, _)| {
 				let worker = self.clone().sender(id);
-				let worker = if self.unconstrained() {
-					unconstrained(worker).left_future()
-				} else {
-					worker.right_future()
-				};
 
 				senders.spawn_on(worker, self.server.runtime());
 				senders
