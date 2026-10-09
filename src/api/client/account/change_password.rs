@@ -47,7 +47,7 @@ pub(crate) async fn change_password_route(
 
 	services
 		.users
-		.set_password(&sender_user, Some(&body.new_password))
+		.set_password_if_active(&sender_user, Some(&body.new_password))
 		.await?;
 
 	if body.logout_devices {

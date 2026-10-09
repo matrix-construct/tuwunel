@@ -22,6 +22,7 @@ struct RestartState {
 	a_password_hash: String,
 	b_password_hash: String,
 	masked: (u16, String),
+	deactivated_sid: String,
 }
 
 #[derive(Clone, Copy)]

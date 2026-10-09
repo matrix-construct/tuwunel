@@ -15,7 +15,7 @@ use tuwunel_service::Services;
 
 use super::{
 	RestartState,
-	scenarios::{JWT_SECRET, first_phase, second_phase},
+	scenarios::{JWT_SECRET, first_phase, second_phase, verify_spent_after_restart},
 };
 
 struct TestPaths {
@@ -43,6 +43,7 @@ pub(super) fn run() -> Result {
 	match var(TEST_PHASE_ENV).ok().as_deref() {
 		| Some("prepare") => prepare_restart_state(),
 		| Some("redeem") => redeem_after_restart(),
+		| Some("verify") => verify_after_second_restart(),
 		| _ => run_restart_pair(),
 	}
 }
@@ -54,7 +55,7 @@ fn run_restart_pair() -> Result {
 
 	let executable = current_exe()?;
 
-	for phase in ["prepare", "redeem"] {
+	for phase in ["prepare", "redeem", "verify"] {
 		let status = Command::new(&executable)
 			.env(TEST_PHASE_ENV, phase)
 			.env(TEST_DATABASE_ENV, &paths.database)
@@ -90,11 +91,27 @@ fn redeem_after_restart() -> Result {
 	let smtp_port = smtp_listener.local_addr()?.port();
 	let database = child_path(TEST_DATABASE_ENV)?;
 	let state_path = child_path(TEST_STATE_ENV)?;
+	let state = serde_json::from_slice::<RestartState>(&read(&state_path)?)?;
+	let config = ServerConfig { smtp_port };
+
+	let state = run_server(&database, &[], config, move |services, client, base| {
+		second_phase(services, client, base, state)
+	})?;
+
+	write(state_path, serde_json::to_vec(&state)?)?;
+	Ok(())
+}
+
+fn verify_after_second_restart() -> Result {
+	let smtp_listener = TcpListener::bind(("127.0.0.1", 0))?;
+	let smtp_port = smtp_listener.local_addr()?.port();
+	let database = child_path(TEST_DATABASE_ENV)?;
+	let state_path = child_path(TEST_STATE_ENV)?;
 	let state = serde_json::from_slice::<RestartState>(&read(state_path)?)?;
 	let config = ServerConfig { smtp_port };
 
 	run_server(&database, &[], config, move |services, client, base| {
-		second_phase(services, client, base, state)
+		verify_spent_after_restart(services, client, base, state)
 	})
 }
 

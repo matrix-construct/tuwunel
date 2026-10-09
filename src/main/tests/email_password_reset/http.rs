@@ -432,6 +432,34 @@ pub(super) async fn jwt_password_change(
 	Ok((status, body))
 }
 
+pub(super) async fn password_login(
+	client: &Client,
+	base: &str,
+	user_id: &UserId,
+	password: &str,
+) -> Result<(u16, String)> {
+	let body = json!({
+		"type": "m.login.password",
+		"identifier": {
+			"type": "m.id.user",
+			"user": user_id.as_str(),
+		},
+		"password": password,
+	});
+
+	let response = client
+		.post(format!("{base}/_matrix/client/v3/login"))
+		.header("connection", "close")
+		.json(&body)
+		.send()
+		.await?;
+
+	let status = response.status().as_u16();
+	let body = response.text().await?;
+
+	Ok((status, body))
+}
+
 pub(super) async fn reset_password(
 	client: &Client,
 	base: &str,

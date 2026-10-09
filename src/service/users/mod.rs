@@ -6,8 +6,10 @@ mod keys;
 mod ldap;
 mod register;
 mod server_user;
+#[cfg(test)]
+mod tests;
 
-use std::sync::Arc;
+use std::{future::ready, sync::Arc};
 
 use futures::{Stream, StreamExt, TryFutureExt};
 use ruma::{
@@ -20,7 +22,7 @@ use ruma::{
 };
 use serde::{Deserialize, Serialize};
 use tuwunel_core::{
-	Err, Result, debug_warn, err, is_equal_to,
+	Err, Result, debug_warn, err, implement, is_equal_to,
 	matrix::pdu::PduCount,
 	smallstr::SmallString,
 	trace,
@@ -71,6 +73,7 @@ pub struct Service {
 	db: Data,
 	device_list_mutex: MutexMap<OwnedUserId, ()>,
 	login_token_mutex: MutexMap<LoginTokenId, ()>,
+	changing_password: MutexMap<OwnedUserId, ()>,
 	// Entries live only while claims for a user/device hold or await the lock.
 	claiming_one_time_keys: MutexMap<(OwnedUserId, OwnedDeviceId), ()>,
 }
@@ -113,6 +116,7 @@ impl crate::Service for Service {
 			services: args.services.clone(),
 			device_list_mutex: MutexMap::new(),
 			login_token_mutex: MutexMap::new(),
+			changing_password: MutexMap::new(),
 			claiming_one_time_keys: MutexMap::new(),
 			db: Data {
 				keychangeid_devicechange: args.db["keychangeid_devicechange"].clone(),
@@ -190,6 +194,8 @@ impl Service {
 		password: Option<&str>,
 		origin: Option<&str>,
 	) -> Result {
+		let _password_guard = self.changing_password.lock(user_id).await;
+
 		self.check_creation(user_id).await?;
 
 		let origin = origin.unwrap_or("password");
@@ -200,7 +206,7 @@ impl Service {
 		}
 
 		self.db.userid_origin.insert(user_id, origin);
-		self.set_password(user_id, password).await
+		self.set_password_locked(user_id, password).await
 	}
 
 	/// Refuses a local user ID that once joined the admin room but has no account.
@@ -501,48 +507,22 @@ impl Service {
 	/// sentinel is stored verbatim; neither is hashed. Changing the password of
 	/// an account whose origin is neither password nor SSO is rejected.
 	pub async fn set_password(&self, user_id: &UserId, password: Option<&str>) -> Result {
-		// Cannot change the password of a LDAP user. There are two special cases :
-		// - a `None` password can be used to deactivate a LDAP user
-		// - a "*" password is used as the default password of an active LDAP user
-		//
-		// The above now applies to all non-password origin users by default unless an
-		// exception is made for that origin in the condition below. Note that users
-		// with no origin are also password-origin users.
-		let allowed_origins = ["password", "sso"];
-		if password.is_some() && password != Some(PASSWORD_SENTINEL) {
-			let origin = self.origin(user_id).await;
-			let origin = origin.as_deref().unwrap_or("password");
+		let _password_guard = self.changing_password.lock(user_id).await;
 
-			if !allowed_origins.iter().any(is_equal_to!(&origin)) {
-				return Err!(Request(InvalidParam(
-					"Cannot change password of an {origin:?} user."
-				)));
-			}
-		}
+		self.set_password_locked(user_id, password).await
+	}
 
-		match password {
-			| None => {
-				self.db
-					.userid_password
-					.insert(user_id, PASSWORD_DISABLED);
-			},
-			| Some(PASSWORD_SENTINEL) => {
-				self.db
-					.userid_password
-					.insert(user_id, PASSWORD_SENTINEL);
-			},
-			| Some(password) => {
-				let cost = self.services.config.password_hash_cost();
-				let hash = hash_password(password, cost).map_err(|e| {
-					err!(Request(InvalidParam("Password does not meet the requirements: {e}")))
-				})?;
-
-				self.db.userid_password.insert(user_id, hash);
-				self.db.userid_origin.insert(user_id, "password");
-			},
-		}
-
-		Ok(())
+	/// Changes the password only while the account is active.
+	///
+	/// The active-state check and password write are serialized with account
+	/// deactivation for this user.
+	pub async fn set_password_if_active(
+		&self,
+		user_id: &UserId,
+		password: Option<&str>,
+	) -> Result {
+		self.set_password_if_active_after(user_id, password, ready(()))
+			.await
 	}
 
 	/// Creates a new sync filter. Returns the filter id.
@@ -741,6 +721,59 @@ impl Service {
 	#[cfg(not(feature = "ldap"))]
 	#[must_use]
 	pub fn ldap_bind_dn(&self, _localpart: &str) -> Option<String> { None }
+}
+
+#[implement(Service)]
+async fn set_password_if_active_after(
+	&self,
+	user_id: &UserId,
+	password: Option<&str>,
+	after_check: impl Future<Output = ()>,
+) -> Result {
+	let _password_guard = self.changing_password.lock(user_id).await;
+
+	self.deactivated_check(user_id).await?;
+	after_check.await;
+	self.set_password_locked(user_id, password).await
+}
+
+#[implement(Service)]
+async fn set_password_locked(&self, user_id: &UserId, password: Option<&str>) -> Result {
+	// Non-password origins may only be disabled or assigned the active sentinel.
+	let allowed_origins = ["password", "sso"];
+
+	if password.is_some() && password != Some(PASSWORD_SENTINEL) {
+		let origin = self.origin(user_id).await;
+		let origin = origin.as_deref().unwrap_or("password");
+
+		if !allowed_origins.iter().any(is_equal_to!(&origin)) {
+			return Err!(Request(InvalidParam("Cannot change password of an {origin:?} user.")));
+		}
+	}
+
+	match password {
+		| None => {
+			self.db
+				.userid_password
+				.insert(user_id, PASSWORD_DISABLED);
+		},
+		| Some(PASSWORD_SENTINEL) => {
+			self.db
+				.userid_password
+				.insert(user_id, PASSWORD_SENTINEL);
+		},
+		| Some(password) => {
+			let cost = self.services.config.password_hash_cost();
+			let hash = hash_password(password, cost).map_err(|e| {
+				err!(Request(InvalidParam("Password does not meet the requirements: {e}")))
+			})?;
+
+			self.db.userid_password.insert(user_id, hash);
+			self.db.userid_origin.insert(user_id, "password");
+		},
+	}
+
+	Ok(())
 }
 
 /// Whether a stored password value is a real hash rather than a marker.
