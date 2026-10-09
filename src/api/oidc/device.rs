@@ -18,13 +18,14 @@ use tuwunel_core::{Err, Error, Result, err};
 use tuwunel_service::{
 	Services,
 	oauth::server::{DEVICE_GRANT_INTERVAL_SECS, DEVICE_GRANT_LIFETIME, format_user_code},
+	users::LoginProviderId,
 };
 use url::Url;
 
 use self::{consent::consent_html, entry::entry_html, error::error_html, result::result_html};
 use super::{
-	NativeChoice, consume_login_token, oauth_error, peek_login_token, require_account_usable,
-	should_serve_native, sso_redirect_url, url_encode,
+	consume_login_token_with_provider, oauth_error, peek_login_token_with_provider,
+	require_account_usable, sso_redirect_url, url_encode,
 };
 use crate::ClientIp;
 
@@ -159,15 +160,13 @@ fn handle_device_verify(services: &Services, user_code: Option<&str>) -> Result<
 
 	// Validating the code before authentication exposes the RFC 8628 §5.1
 	// brute-force oracle, so defer it to the authenticated callback.
-	let idp_id = services.oauth.providers.get_default_id();
-	let serve_native = should_serve_native(NativeChoice {
-		native_enabled: services.config.oidc_native_auth,
-		has_default_idp: idp_id.is_some(),
-	});
-
-	match serve_native {
+	match services.config.oidc_native_auth {
 		| true => device_native_redirect(services, user_code),
-		| false => device_sso_redirect(services, user_code, idp_id.as_deref()),
+		| false => {
+			let idp_id = services.oauth.providers.get_default_id();
+
+			device_sso_redirect(services, user_code, idp_id.as_deref())
+		},
 	}
 }
 
@@ -186,7 +185,7 @@ fn device_native_redirect(services: &Services, user_code: &str) -> Result<Respon
 	Ok(device_redirect_response(Redirect::temporary(native_url.as_str())))
 }
 
-fn device_sso_redirect(
+pub(super) fn device_sso_redirect(
 	services: &Services,
 	user_code: &str,
 	idp_id: Option<&str>,
@@ -244,17 +243,23 @@ async fn handle_device_callback_get(
 	params: DeviceCallbackParams,
 ) -> Result<String> {
 	let token = params.login_token.as_deref();
-	let user_id = peek_login_token(services, token).await?;
+	let login = peek_login_token_with_provider(services, token).await?;
+	let user_id = login.user_id;
 
 	let user_code = params.user_code.as_deref().unwrap_or_default();
 	let server = services.oauth.get_server()?;
 
 	// A failed guess burns the login token (RFC 8628 §5.1; see
 	// verify_device_grant).
-	let grant = match server.verify_device_grant(user_code).await {
+	let grant = match server
+		.verify_device_grant(user_code, &user_id, login.idp_id.as_deref())
+		.await
+	{
 		| Ok(grant) => grant,
 		| Err(e) => {
-			consume_login_token(services, token).await.ok();
+			consume_login_token_with_provider(services, token)
+				.await
+				.ok();
 
 			return Err(e);
 		},
@@ -305,14 +310,15 @@ async fn handle_device_callback_post(
 ) -> Result<String> {
 	let user_code = body.user_code.as_deref().unwrap_or_default();
 	let action = body.action.as_deref().unwrap_or_default();
-	let user_id = consume_login_token(services, body.login_token.as_deref()).await?;
+	let login = consume_login_token_with_provider(services, body.login_token.as_deref()).await?;
+	let user_id = login.user_id;
+	let idp_id = login.idp_id.map(LoginProviderId::into_string);
 	let server = services.oauth.get_server()?;
 
 	match action {
 		| "approve" => {
 			require_account_usable(services, &user_id).await?;
 
-			let idp_id = services.oauth.providers.get_default_id();
 			server
 				.approve_device_grant(user_code, user_id, idp_id)
 				.await?;
@@ -324,7 +330,9 @@ async fn handle_device_callback_post(
 		},
 
 		| "deny" => {
-			server.deny_device_grant(user_code).await?;
+			server
+				.deny_device_grant(user_code, user_id, idp_id)
+				.await?;
 
 			Ok(result_html(
 				"Sign-in denied",

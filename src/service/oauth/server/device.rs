@@ -1,8 +1,8 @@
 use std::time::{Duration, SystemTime};
 
-use ruma::OwnedUserId;
+use ruma::{OwnedUserId, UserId};
 use serde::{Deserialize, Serialize};
-use tuwunel_core::{Err, Result, err, implement, utils};
+use tuwunel_core::{Err, Result, err, implement, smallstr::SmallString, utils};
 use tuwunel_database::{Cbor, Deserialized};
 
 /// A pending RFC 8628 device authorization grant, keyed in the store by its
@@ -18,10 +18,20 @@ pub struct DeviceGrant {
 
 	pub client_id: String,
 	pub scope: String,
+
+	#[serde(default)]
+	authentication: Option<Authentication>,
+
 	pub status: DeviceGrantStatus,
 	pub attempts: u32,
 	pub created_at: SystemTime,
 	pub expires_at: SystemTime,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+struct Authentication {
+	user_id: OwnedUserId,
+	idp_id: Option<ProviderId>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -68,6 +78,7 @@ const USER_CODE_CHARSET: &[u8] = b"BCDFGHJKLMNPQRSTVWXZ";
 /// step before it self-invalidates (RFC 8628 §5.1 per-code attempt cap / §5.4
 /// possession limit), generous enough for a page reload.
 const MAX_VERIFY_ATTEMPTS: u32 = 10;
+type ProviderId = SmallString<[u8; 32]>;
 
 pub const DEVICE_GRANT_LIFETIME: Duration = Duration::from_mins(30);
 pub const DEVICE_GRANT_INTERVAL_SECS: u64 = 5;
@@ -83,6 +94,7 @@ pub fn create_device_grant(&self, client_id: &str, scope: &str) -> DeviceGrant {
 		user_code: user_code.clone(),
 		client_id: client_id.to_owned(),
 		scope: scope.to_owned(),
+		authentication: None,
 		status: DeviceGrantStatus::Pending,
 		attempts: 0,
 		created_at: now,
@@ -117,15 +129,8 @@ async fn resolve_device_code(&self, user_code: &str) -> Result<String> {
 		.map_err(|_| err!(Request(NotFound("Unknown or expired user code"))))
 }
 
-/// Look up a pending grant for the browser consent step, counting the attempt
-/// and self-invalidating the grant past `MAX_VERIFY_ATTEMPTS` (RFC 8628 §5.1).
 #[implement(super::Server)]
-pub async fn verify_device_grant(&self, user_code: &str) -> Result<DeviceGrant> {
-	let device_code = self.resolve_device_code(user_code).await?;
-	let _lock = self.device_locks.lock(&device_code).await;
-
-	let mut grant = self.get_device_grant(&device_code).await?;
-
+fn ensure_pending_device_grant(&self, grant: &DeviceGrant) -> Result {
 	if SystemTime::now() > grant.expires_at {
 		self.remove_device_grant(&grant.device_code, &grant.user_code);
 
@@ -136,6 +141,38 @@ pub async fn verify_device_grant(&self, user_code: &str) -> Result<DeviceGrant> 
 		return Err!(Request(Forbidden("The device authorization was already resolved")));
 	}
 
+	Ok(())
+}
+
+fn device_authentication_matches(
+	grant: &DeviceGrant,
+	user_id: &UserId,
+	idp_id: Option<&str>,
+) -> bool {
+	grant
+		.authentication
+		.as_ref()
+		.is_some_and(|authentication| {
+			authentication.user_id == user_id && authentication.idp_id.as_deref() == idp_id
+		})
+}
+
+#[implement(super::Server)]
+fn bind_device_authentication(
+	&self,
+	mut grant: DeviceGrant,
+	authentication: Authentication,
+) -> Result<DeviceGrant> {
+	if grant
+		.authentication
+		.as_ref()
+		.is_some_and(|bound| bound != &authentication)
+	{
+		return Err!(Request(Forbidden(
+			"The device authorization was authenticated by another user or provider"
+		)));
+	}
+
 	grant.attempts = grant.attempts.saturating_add(1);
 	if grant.attempts > MAX_VERIFY_ATTEMPTS {
 		self.remove_device_grant(&grant.device_code, &grant.user_code);
@@ -143,6 +180,33 @@ pub async fn verify_device_grant(&self, user_code: &str) -> Result<DeviceGrant> 
 		return Err!(Request(Forbidden("Too many attempts; request a new code")));
 	}
 
+	grant.authentication = Some(authentication);
+	Ok(grant)
+}
+
+/// Look up a pending grant for the browser consent step, counting the attempt
+/// and self-invalidating the grant past `MAX_VERIFY_ATTEMPTS` (RFC 8628 §5.1).
+///
+/// The first successful lookup binds the grant to its authenticated user and
+/// provider. Later lookups must present the same authentication.
+#[implement(super::Server)]
+pub async fn verify_device_grant(
+	&self,
+	user_code: &str,
+	user_id: &UserId,
+	idp_id: Option<&str>,
+) -> Result<DeviceGrant> {
+	let device_code = self.resolve_device_code(user_code).await?;
+	let _lock = self.device_locks.lock(&device_code).await;
+
+	let grant = self.get_device_grant(&device_code).await?;
+	let authentication = Authentication {
+		user_id: user_id.to_owned(),
+		idp_id: idp_id.map(Into::into),
+	};
+
+	self.ensure_pending_device_grant(&grant)?;
+	let grant = self.bind_device_authentication(grant, authentication)?;
 	self.db
 		.oidcdevicecode_devicegrant
 		.raw_put(&*grant.device_code, Cbor(&grant));
@@ -157,14 +221,59 @@ pub async fn approve_device_grant(
 	user_id: OwnedUserId,
 	idp_id: Option<String>,
 ) -> Result {
-	self.set_device_grant_status(user_code, DeviceGrantStatus::Approved { user_id, idp_id })
-		.await
+	let device_code = self.resolve_device_code(user_code).await?;
+	let _lock = self.device_locks.lock(&device_code).await;
+	let grant = self.get_device_grant(&device_code).await?;
+
+	self.ensure_pending_device_grant(&grant)?;
+
+	if !device_authentication_matches(&grant, &user_id, idp_id.as_deref()) {
+		return Err!(Request(Forbidden(
+			"The device authorization consent does not match its authenticated session"
+		)));
+	}
+
+	let grant = DeviceGrant {
+		status: DeviceGrantStatus::Approved { user_id, idp_id },
+		..grant
+	};
+
+	self.db
+		.oidcdevicecode_devicegrant
+		.raw_put(&*grant.device_code, Cbor(&grant));
+
+	Ok(())
 }
 
 #[implement(super::Server)]
-pub async fn deny_device_grant(&self, user_code: &str) -> Result {
-	self.set_device_grant_status(user_code, DeviceGrantStatus::Denied)
-		.await
+pub async fn deny_device_grant(
+	&self,
+	user_code: &str,
+	user_id: OwnedUserId,
+	idp_id: Option<String>,
+) -> Result {
+	let device_code = self.resolve_device_code(user_code).await?;
+	let _lock = self.device_locks.lock(&device_code).await;
+	let grant = self.get_device_grant(&device_code).await?;
+
+	self.ensure_pending_device_grant(&grant)?;
+
+	if !device_authentication_matches(&grant, &user_id, idp_id.as_deref()) {
+		return Err!(Request(Forbidden(
+			"The device authorization consent does not match its authenticated session"
+		)));
+	}
+
+	let grant = DeviceGrant {
+		status: DeviceGrantStatus::Denied,
+		..grant
+	};
+
+	self.db
+		.oidcdevicecode_devicegrant
+		.raw_put(&*grant.device_code, Cbor(&grant));
+
+	Ok(())
 }
 
 /// Poll a device grant by its `device_code` (RFC 8628 §3.4). A terminal outcome
@@ -223,31 +332,6 @@ async fn get_device_grant(&self, device_code: &str) -> Result<DeviceGrant> {
 }
 
 #[implement(super::Server)]
-async fn set_device_grant_status(&self, user_code: &str, status: DeviceGrantStatus) -> Result {
-	let device_code = self.resolve_device_code(user_code).await?;
-	let _lock = self.device_locks.lock(&device_code).await;
-
-	let mut grant = self.get_device_grant(&device_code).await?;
-
-	if SystemTime::now() > grant.expires_at {
-		self.remove_device_grant(&grant.device_code, &grant.user_code);
-
-		return Err!(Request(NotFound("The device authorization has expired")));
-	}
-
-	if !matches!(grant.status, DeviceGrantStatus::Pending) {
-		return Err!(Request(Forbidden("The device authorization was already resolved")));
-	}
-
-	grant.status = status;
-	self.db
-		.oidcdevicecode_devicegrant
-		.raw_put(&*grant.device_code, Cbor(&grant));
-
-	Ok(())
-}
-
-#[implement(super::Server)]
 fn remove_device_grant(&self, device_code: &str, user_code: &str) {
 	self.db
 		.oidcdevicecode_devicegrant
@@ -277,7 +361,48 @@ pub fn format_user_code(code: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-	use super::{USER_CODE_CHARSET, USER_CODE_LENGTH, format_user_code, normalize_user_code};
+	use std::time::{Duration, SystemTime};
+
+	use serde::Serialize;
+	use tuwunel_database::{Cbor, deserialize_from_slice, serialize_to_vec};
+
+	use super::{
+		DeviceGrant, DeviceGrantStatus, USER_CODE_CHARSET, USER_CODE_LENGTH, format_user_code,
+		normalize_user_code,
+	};
+
+	#[derive(Serialize)]
+	struct LegacyDeviceGrant<'a> {
+		device_code: &'a str,
+		user_code: &'a str,
+		client_id: &'a str,
+		scope: &'a str,
+		status: DeviceGrantStatus,
+		attempts: u32,
+		created_at: SystemTime,
+		expires_at: SystemTime,
+	}
+
+	#[test]
+	fn legacy_grant_defaults_to_no_authentication() {
+		let created_at = SystemTime::UNIX_EPOCH + Duration::from_secs(1);
+		let legacy = LegacyDeviceGrant {
+			device_code: "device",
+			user_code: "BCDFGHJKLM",
+			client_id: "client",
+			scope: "openid",
+			status: DeviceGrantStatus::Pending,
+			attempts: 0,
+			created_at,
+			expires_at: created_at + Duration::from_secs(30),
+		};
+
+		let bytes = serialize_to_vec(Cbor(&legacy)).expect("serialize legacy grant");
+		let Cbor(grant): Cbor<DeviceGrant> =
+			deserialize_from_slice(&bytes).expect("deserialize legacy grant");
+
+		assert!(grant.authentication.is_none());
+	}
 
 	#[test]
 	fn format_then_normalize_round_trips() {

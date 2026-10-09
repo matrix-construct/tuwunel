@@ -2,9 +2,10 @@
 
 use std::fs::remove_dir_all;
 
+use tokio::join;
 use tuwunel::{Args, Runtime, Server, async_run, async_start, async_stop};
 use tuwunel_core::{Err, Result, err, ruma::UserId, utils::BoolExt};
-use tuwunel_service::{Services, oauth::server::DeviceGrantPoll};
+use tuwunel_service::{Services, oauth::server::DeviceGrantPoll, users::LoginProviderId};
 
 #[test]
 fn native_device_grant_approves_without_idp() -> Result {
@@ -54,9 +55,50 @@ async fn round_trip(services: &Services) -> Result {
 	let client_id = "native-device-client";
 	let grant = oidc.create_device_grant(client_id, "openid");
 	let user_id = UserId::parse_with_server_name("nativealice", services.globals.server_name())?;
-
-	oidc.approve_device_grant(&grant.user_code, user_id.clone(), None)
+	let token = "native-device-login-token";
+	let _expires_in = services.users.create_login_token(&user_id, token);
+	let login = services
+		.users
+		.peek_login_token_with_provider(token)
 		.await?;
+
+	oidc.verify_device_grant(&grant.user_code, &login.user_id, login.idp_id.as_deref())
+		.await?;
+
+	let other_user = UserId::parse_with_server_name("nativebob", services.globals.server_name())?;
+	let cross_user_denied = oidc
+		.deny_device_grant(&grant.user_code, other_user, None)
+		.await
+		.is_err();
+
+	BoolExt::ok_or_else(cross_user_denied, || {
+		err!("device grant accepted consent from another user")
+	})?;
+
+	let altered_provider_rejected = oidc
+		.approve_device_grant(
+			&grant.user_code,
+			login.user_id.clone(),
+			Some("tampered-provider".into()),
+		)
+		.await
+		.is_err();
+
+	BoolExt::ok_or_else(altered_provider_rejected, || {
+		err!("device grant accepted tampered provider attribution")
+	})?;
+
+	let login = services
+		.users
+		.find_login_token_with_provider(token)
+		.await?;
+
+	oidc.approve_device_grant(
+		&grant.user_code,
+		login.user_id,
+		login.idp_id.map(LoginProviderId::into_string),
+	)
+	.await?;
 
 	let DeviceGrantPoll::Approved(approved) = oidc
 		.poll_device_grant(&grant.device_code, client_id)
@@ -71,5 +113,72 @@ async fn round_trip(services: &Services) -> Result {
 
 	BoolExt::ok_or_else(approved.idp_id.is_none(), || {
 		err!("native device grant unexpectedly carried an identity provider")
+	})?;
+
+	let grant = oidc.create_device_grant(client_id, "openid");
+	let token = "sso-device-login-token";
+	let provider = "selected-provider";
+	let _expires_in =
+		services
+			.users
+			.create_login_token_with_provider(&user_id, token, Some(provider));
+
+	let login = services
+		.users
+		.peek_login_token_with_provider(token)
+		.await?;
+
+	BoolExt::ok_or_else(login.idp_id.as_deref() == Some(provider), || {
+		err!("SSO login token lost its provider")
+	})?;
+
+	oidc.verify_device_grant(&grant.user_code, &login.user_id, login.idp_id.as_deref())
+		.await?;
+
+	let login = services
+		.users
+		.find_login_token_with_provider(token)
+		.await?;
+
+	oidc.approve_device_grant(
+		&grant.user_code,
+		login.user_id,
+		login.idp_id.map(LoginProviderId::into_string),
+	)
+	.await?;
+
+	let DeviceGrantPoll::Approved(approved) = oidc
+		.poll_device_grant(&grant.device_code, client_id)
+		.await?
+	else {
+		return Err!("SSO device grant was not approved");
+	};
+
+	BoolExt::ok_or_else(approved.idp_id.as_deref() == Some(provider), || {
+		err!("SSO device grant carried the wrong identity provider")
+	})?;
+
+	let token_rejected = services
+		.users
+		.find_login_token_with_provider(token)
+		.await
+		.is_err();
+
+	BoolExt::ok_or_else(token_rejected, || err!("SSO login token was reusable"))?;
+
+	let token = "concurrent-device-login-token";
+	let _expires_in = services.users.create_login_token(&user_id, token);
+	let first = services
+		.users
+		.find_login_token_with_provider(token);
+
+	let second = services
+		.users
+		.find_login_token_with_provider(token);
+
+	let (first, second) = join!(first, second);
+
+	BoolExt::ok_or_else(first.is_ok() != second.is_ok(), || {
+		err!("concurrent login token redemption was not single-use")
 	})
 }

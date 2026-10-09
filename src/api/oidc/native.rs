@@ -25,7 +25,7 @@ use super::{
 		ACCOUNT_HEAD, account_error_response, account_html_response, account_redirect_response,
 		account_sso_redirect, validate_account_action,
 	},
-	authorization_sso_url, require_account_usable, url_encode,
+	authorization_sso_url, device_sso_redirect, require_account_usable, url_encode,
 };
 use crate::ClientIp;
 
@@ -166,10 +166,8 @@ async fn provider_redirect(
 
 	let req_id = match context {
 		| Flow::Authorization(req_id) => req_id,
-		| Flow::Device(_) =>
-			return Err!(Request(InvalidParam(
-				"Provider selection requires an authorization request or account action"
-			))),
+		| Flow::Device(user_code) =>
+			return device_sso_redirect(services, user_code, Some(provider_id)),
 		| Flow::Account { action, device_id } => {
 			validate_account_action(action)?;
 
@@ -544,7 +542,7 @@ async fn render_page(
 	let registration_enabled = services.config.allow_registration;
 	let Flow::Authorization(req_id) = context else {
 		let sso_options = match context {
-			| Flow::Account { .. } =>
+			| Flow::Account { .. } | Flow::Device(_) =>
 				render_sso_options("Or sign in with", context, sso_choices(services)),
 			| _ => String::new(),
 		};
@@ -704,7 +702,7 @@ where
 		| Flow::Authorization(req_id) => format!("oidc_req_id={}", url_encode(req_id)),
 		| Flow::Account { action, device_id } =>
 			format!("action={}&amp;device_id={}", url_encode(action), url_encode(device_id)),
-		| Flow::Device(_) => return String::new(),
+		| Flow::Device(user_code) => format!("user_code={}", url_encode(user_code)),
 	};
 
 	let options = providers
@@ -940,6 +938,18 @@ mod tests {
 
 		assert!(html.contains(r#"name="user_code" value="BCDF-GHJK""#));
 		assert!(!html.contains(r#"name="oidc_req_id""#));
+		assert!(!html.contains("view=register"));
+	}
+
+	#[test]
+	fn device_login_page_preserves_code_in_provider_links() {
+		let context = Flow::Device("BCDF/GHJK");
+		let providers = [("first/provider", "First provider")];
+		let options = render_sso_options("Or sign in with", context, providers);
+		let html = render_login(context, None, true, &options);
+
+		assert!(html.contains("user_code=BCDF%2FGHJK&amp;idp_id=first%2Fprovider"));
+		assert!(html.contains(r#"name="user_code" value="BCDF/GHJK""#));
 		assert!(!html.contains("view=register"));
 	}
 

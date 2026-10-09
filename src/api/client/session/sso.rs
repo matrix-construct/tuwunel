@@ -598,9 +598,11 @@ fn finalize_login_redirect(
 	user_id: &UserId,
 ) -> Result<String> {
 	let login_token = utils::random_string(TOKEN_LENGTH);
-	let _login_token_expires_in = services
-		.users
-		.create_login_token(user_id, &login_token);
+	let _login_token_expires_in = services.users.create_login_token_with_provider(
+		user_id,
+		&login_token,
+		session.idp_id.as_deref(),
+	);
 
 	let location = next_idp_url
 		.or_else(|| session.redirect_url.clone())

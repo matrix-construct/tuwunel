@@ -11,9 +11,6 @@ pub(super) mod revoke;
 pub(super) mod token;
 pub(super) mod userinfo;
 
-#[cfg(test)]
-mod tests;
-
 use std::fmt::Write;
 
 use axum::{Json, body::Body, response::IntoResponse};
@@ -21,7 +18,7 @@ use http::{Response, StatusCode};
 use ruma::{OwnedUserId, UserId};
 use serde_json::json;
 use tuwunel_core::{Result, err};
-use tuwunel_service::Services;
+use tuwunel_service::{Services, users::LoginToken};
 use url::Url;
 
 pub(super) use self::{
@@ -30,12 +27,6 @@ pub(super) use self::{
 };
 
 const OIDC_REQ_ID_LENGTH: usize = 32;
-
-#[derive(Clone, Copy)]
-struct NativeChoice {
-	native_enabled: bool,
-	has_default_idp: bool,
-}
 
 pub(crate) fn url_encode(s: &str) -> String {
 	s.bytes()
@@ -75,6 +66,19 @@ async fn consume_login_token(services: &Services, token: Option<&str>) -> Result
 		.map_err(|_| err!(Request(Forbidden("Invalid or expired login token"))))
 }
 
+async fn consume_login_token_with_provider(
+	services: &Services,
+	token: Option<&str>,
+) -> Result<LoginToken> {
+	let token = token.ok_or_else(|| err!(Request(Forbidden("Missing login token"))))?;
+
+	services
+		.users
+		.find_login_token_with_provider(token)
+		.await
+		.map_err(|_| err!(Request(Forbidden("Invalid or expired login token"))))
+}
+
 /// Verify a login token without consuming it; it is consumed later when the
 /// confirmation form is submitted.
 async fn peek_login_token(services: &Services, token: Option<&str>) -> Result<OwnedUserId> {
@@ -83,6 +87,19 @@ async fn peek_login_token(services: &Services, token: Option<&str>) -> Result<Ow
 	services
 		.users
 		.peek_login_token(token)
+		.await
+		.map_err(|_| err!(Request(Forbidden("Invalid or expired login token"))))
+}
+
+async fn peek_login_token_with_provider(
+	services: &Services,
+	token: Option<&str>,
+) -> Result<LoginToken> {
+	let token = token.ok_or_else(|| err!(Request(Forbidden("Missing login token"))))?;
+
+	services
+		.users
+		.peek_login_token_with_provider(token)
 		.await
 		.map_err(|_| err!(Request(Forbidden("Invalid or expired login token"))))
 }
@@ -102,14 +119,6 @@ fn redirect_allowlisted(allowed: &[String], uri: &str) -> bool {
 			.iter()
 			.any(|entry| entry.eq_ignore_ascii_case(name))
 	})
-}
-
-/// Whether a flow with no provider chooser serves the native page.
-///
-/// Native applies only when native auth is enabled and no default provider is
-/// configured; every other flow goes through single sign-on.
-fn should_serve_native(NativeChoice { native_enabled, has_default_idp }: NativeChoice) -> bool {
-	native_enabled && !has_default_idp
 }
 
 /// Build the upstream SSO redirect URL for a pending authorization request.

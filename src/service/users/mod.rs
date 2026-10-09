@@ -22,6 +22,7 @@ use serde::{Deserialize, Serialize};
 use tuwunel_core::{
 	Err, Result, debug_warn, err, is_equal_to,
 	matrix::pdu::PduCount,
+	smallstr::SmallString,
 	trace,
 	utils::{
 		self, BoolExt, MutexMap, ReadyExt, hash::password as hash_password, result::NotFound,
@@ -30,6 +31,9 @@ use tuwunel_core::{
 	warn,
 };
 use tuwunel_database::{Deserialized, Json, Map};
+
+pub type LoginProviderId = SmallString<[u8; 32]>;
+type LoginTokenId = SmallString<[u8; 48]>;
 
 pub use self::{
 	dehydrated_device::DehydratedDevice,
@@ -51,10 +55,22 @@ pub struct Moderation {
 	pub by: OwnedUserId,
 }
 
+/// An authenticated login-token owner and the provider that authenticated it.
+///
+/// Native and password authentication carry no provider. SSO tokens preserve
+/// the provider verified by the server-side SSO session.
+pub struct LoginToken {
+	/// The local user authenticated by the token.
+	pub user_id: OwnedUserId,
+	/// The SSO provider that authenticated the user, if any.
+	pub idp_id: Option<LoginProviderId>,
+}
+
 pub struct Service {
 	services: Arc<crate::services::OnceServices>,
 	db: Data,
 	device_list_mutex: MutexMap<OwnedUserId, ()>,
+	login_token_mutex: MutexMap<LoginTokenId, ()>,
 	// Entries live only while claims for a user/device hold or await the lock.
 	claiming_one_time_keys: MutexMap<(OwnedUserId, OwnedDeviceId), ()>,
 }
@@ -96,6 +112,7 @@ impl crate::Service for Service {
 		Ok(Arc::new(Self {
 			services: args.services.clone(),
 			device_list_mutex: MutexMap::new(),
+			login_token_mutex: MutexMap::new(),
 			claiming_one_time_keys: MutexMap::new(),
 			db: Data {
 				keychangeid_devicechange: args.db["keychangeid_devicechange"].clone(),
@@ -607,12 +624,27 @@ impl Service {
 	/// `m.login.token` mechanism.
 	#[must_use]
 	pub fn create_login_token(&self, user_id: &UserId, token: &str) -> u64 {
+		self.create_login_token_with_provider(user_id, token, None)
+	}
+
+	/// Creates a short-lived login token carrying authenticated SSO provenance.
+	///
+	/// Native authentication passes no provider. SSO callers preserve the
+	/// provider selected in the server-side SSO session.
+	#[must_use]
+	pub fn create_login_token_with_provider(
+		&self,
+		user_id: &UserId,
+		token: &str,
+		idp_id: Option<&str>,
+	) -> u64 {
 		use std::num::Saturating as Sat;
 
 		let expires_in = self.services.server.config.login_token_ttl;
 		let expires_at = Sat(utils::millis_since_unix_epoch()) + Sat(expires_in);
 
-		let value = (expires_at.0, user_id);
+		// A trailing Option is additive under the workspace KV codec evolution rule.
+		let value = (expires_at.0, user_id, idp_id);
 		self.db
 			.logintoken_expiresatuserid
 			.raw_put(token, value);
@@ -624,6 +656,15 @@ impl Service {
 	/// Unlike `find_from_login_token`, the token remains in the database
 	/// after this call and can still be consumed later.
 	pub async fn peek_login_token(&self, token: &str) -> Result<OwnedUserId> {
+		self.peek_login_token_with_provider(token)
+			.map_ok(|login| login.user_id)
+			.await
+	}
+
+	/// Verify a login token and its provider without consuming it.
+	///
+	/// The token remains available for the later consent submission.
+	pub async fn peek_login_token_with_provider(&self, token: &str) -> Result<LoginToken> {
 		let Ok(value) = self
 			.db
 			.logintoken_expiresatuserid
@@ -632,7 +673,9 @@ impl Service {
 		else {
 			return Err!(Request(Forbidden("Login token is unrecognised")));
 		};
-		let (expires_at, user_id): (u64, OwnedUserId) = value.deserialized()?;
+
+		let (expires_at, user_id, idp_id): (u64, OwnedUserId, Option<LoginProviderId>) =
+			value.deserialized()?;
 
 		if expires_at < utils::millis_since_unix_epoch() {
 			trace!(?user_id, ?token, "Removing expired login token");
@@ -640,12 +683,24 @@ impl Service {
 			return Err!(Request(Forbidden("Login token is expired")));
 		}
 
-		Ok(user_id)
+		Ok(LoginToken { user_id, idp_id })
 	}
 
 	/// Find out which user a login token belongs to.
 	/// Removes the token to prevent double-use attacks.
 	pub async fn find_from_login_token(&self, token: &str) -> Result<OwnedUserId> {
+		self.find_login_token_with_provider(token)
+			.map_ok(|login| login.user_id)
+			.await
+	}
+
+	/// Consume a login token and return its owner and authenticated provider.
+	///
+	/// The token is removed before its authenticated identity is returned.
+	pub async fn find_login_token_with_provider(&self, token: &str) -> Result<LoginToken> {
+		let token_id: LoginTokenId = token.into();
+		let _lock = self.login_token_mutex.lock(&token_id).await;
+
 		let Ok(value) = self
 			.db
 			.logintoken_expiresatuserid
@@ -654,7 +709,9 @@ impl Service {
 		else {
 			return Err!(Request(Forbidden("Login token is unrecognised")));
 		};
-		let (expires_at, user_id): (u64, OwnedUserId) = value.deserialized()?;
+
+		let (expires_at, user_id, idp_id): (u64, OwnedUserId, Option<LoginProviderId>) =
+			value.deserialized()?;
 
 		if expires_at < utils::millis_since_unix_epoch() {
 			trace!(?user_id, ?token, "Removing expired login token");
@@ -666,7 +723,7 @@ impl Service {
 
 		self.db.logintoken_expiresatuserid.remove(token);
 
-		Ok(user_id)
+		Ok(LoginToken { user_id, idp_id })
 	}
 
 	#[cfg(not(feature = "ldap"))]
