@@ -76,6 +76,9 @@ pub(crate) const ENV_PREFIXES: [&str; 3] = ["CONDUIT_", "CONDUWUIT_", "TUWUNEL_"
 /// allocation. Longer valid localparts spill transparently.
 pub type ServerUserLocalpart = SmallString<[u8; 32]>;
 
+/// Stores an object-storage bucket name inline in the common case.
+pub type StorageBucketName = SmallString<[u8; 64]>;
+
 /// All the config options for tuwunel.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 #[derive(Clone, Deserialize)]
@@ -5380,13 +5383,13 @@ pub struct StorageProviderGcs {
 	/// The name of the GCS bucket, e.g. "my-media-bucket". Required; an unset
 	/// bucket disables this provider.
 	///
-	/// Note a `gs://bucket/path` URL is intentionally not accepted here: the
-	/// path component would not be applied as an object prefix. Set `bucket`
-	/// and `base_path` separately instead.
-	pub bucket: Option<String>,
+	/// A `gs://bucket/path` URL is intentionally not accepted here: the path
+	/// component would not be applied as an object prefix. Set `bucket` and
+	/// `base_path` separately instead.
+	pub bucket: Option<StorageBucketName>,
 
-	/// Optional path prefix within the bucket where all our operations will
-	/// take place.
+	/// Optional path prefix within the bucket where all our operations will take
+	/// place.
 	#[serde(alias = "path")]
 	pub base_path: Option<String>,
 
@@ -5396,24 +5399,24 @@ pub struct StorageProviderGcs {
 	/// configuration. Setting this requires exported key material.
 	pub service_account_path: Option<String>,
 
-	/// (expert use) Path to an application default credentials file. Leave
-	/// unset to resolve credentials from the environment. Note only
-	/// service-account and authorized-user documents are recognised, not every
+	/// (expert use) Path to an application default credentials file. Leave unset
+	/// to resolve credentials from the environment. Only service-account and
+	/// authorized-user documents are recognised, not every
 	/// external-account/workload-identity-federation file format.
 	pub application_credentials_path: Option<String>,
 
-	/// (expert use) Threshold size for switching to multi-part uploads. This
-	/// value determines what a "large" upload is. The value is a parsed string
-	/// allowing SI or IEC units for convenience.
+	/// (expert use) Threshold size for switching to multi-part uploads. This value
+	/// determines what a "large" upload is. The value is a parsed string allowing
+	/// SI or IEC units for convenience.
 	///
 	/// default: 100 MiB
 	#[serde(default = "default_multipart_threshold")]
 	pub multipart_threshold: ByteSize,
 
-	/// (expert use) Size of each individual part within a multi-part upload.
-	/// Once an upload exceeds `multipart_threshold` the payload is split into
-	/// parts of this size, each sent as a separate request. The value is a
-	/// parsed string allowing SI or IEC units for convenience.
+	/// (expert use) Size of each individual part within a multi-part upload. Once
+	/// an upload exceeds `multipart_threshold` the payload is split into parts of
+	/// this size, each sent as a separate request. The value is a parsed string
+	/// allowing SI or IEC units for convenience.
 	///
 	/// default: 10 MiB
 	#[serde(default = "default_multipart_part_size")]
@@ -5425,14 +5428,13 @@ pub struct StorageProviderGcs {
 	#[serde(default = "some_true_fn")]
 	pub use_signatures: Option<bool>,
 
-	/// (developer use) Enables checks performed at startup such as pinging the
-	/// provider. Failures are considered critical startup errors which abort
-	/// startup. When set to false, faulty providers are only discovered with
-	/// first use and will not be fatal errors.
+	/// (developer use) Enables checks performed at startup, such as probing the
+	/// provider. Failures are considered critical startup errors and abort
+	/// startup. When set to false, faulty providers are only discovered on first
+	/// use and will not be fatal errors.
 	///
-	/// Note the check is a listing probe: it requires `storage.objects.list`
-	/// and proves neither write nor delete permission, and an empty bucket
-	/// passes.
+	/// The check is a listing probe: it requires `storage.objects.list`, proves
+	/// neither write nor delete permission, and passes on an empty bucket.
 	///
 	/// default: true
 	#[serde(default = "true_fn")]

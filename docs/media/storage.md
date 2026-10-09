@@ -88,21 +88,24 @@ secret = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
 ### Google Cloud Storage
 
 ```toml
+[global]
+media_storage_providers = ["media_on_gcs"]
+
 [global.storage_provider.media_on_gcs.gcs]
 bucket = "my-matrix-media"
 ```
 
-That is the whole configuration. Credentials are resolved from the environment
-and fall back to the instance metadata server, so on Google Kubernetes Engine or
-Compute Engine the server authenticates as the attached service account and no
-key material is involved. Grant that service account `roles/storage.objectAdmin`
-on the bucket (or equivalent object read/write/delete permissions).
+This selects GCS for media storage. Credentials resolve from the environment and
+fall back to the instance metadata server, so on Google Kubernetes Engine or
+Compute Engine the server can authenticate as the attached service account with
+no exported key material. Grant that service account
+`roles/storage.objectAdmin` on the bucket, or equivalent object permissions.
 
 Use this rather than pointing the `s3` provider at
 `https://storage.googleapis.com`. The S3-interoperability endpoint accepts only
 HMAC keys, which are service-account keys, so it cannot use an attached service
-account and is blocked outright wherever
-`constraints/iam.disableServiceAccountKeyCreation` is enforced.
+account. The `constraints/iam.disableServiceAccountKeyCreation` policy prevents
+creating the new service-account keys that this setup would require.
 
 An object prefix is set separately, with `base_path`:
 
@@ -119,13 +122,19 @@ not be applied as a prefix.
 
 | Option | Default | Description |
 |---|---|---|
-| `bucket` | — | Bucket name. Required; an unset bucket disables the provider. |
-| `base_path` | — | Object prefix within the bucket. Alias: `path`. |
-| `service_account_path` | — | Path to a service account key file. Leave unset to use the environment, which on GCE/GKE ends at the metadata server — the keyless path, and the recommended configuration. |
-| `application_credentials_path` | — | Path to an application default credentials file. Only service-account and authorized-user documents are recognised. |
+| `bucket` | None | Bucket name. Required; an unset bucket disables the provider. |
+| `base_path` | None | Object prefix within the bucket. Alias: `path`. |
+| `service_account_path` | None | Path to a service account key file. Leave unset to use the environment, which on GCE/GKE ends at the metadata server, the keyless and recommended configuration. |
+| `application_credentials_path` | None | Path to an application default credentials file. Only service-account and authorized-user documents are recognised. |
 | `multipart_threshold` | 100 MiB | Upload size above which multipart upload is used. |
 | `multipart_part_size` | 10 MiB | Size of each part within a multipart upload. |
 | `startup_check` | true | Ping the provider at startup; failures abort startup. The probe is a listing operation, so it requires `storage.objects.list`, passes on an empty bucket, and proves neither write nor delete. |
+
+Credential file settings are applied to the environment-derived builder. Do not
+combine `service_account_path` with `GOOGLE_SERVICE_ACCOUNT_KEY`; the underlying
+client rejects simultaneous service-account path and inline-key credentials.
+Environment service-account credentials take priority over
+`application_credentials_path`.
 
 Media redirects (`media_allow_redirect`) work without a key as well: with no
 private key configured, signing goes through the IAM `signBlob` API, where

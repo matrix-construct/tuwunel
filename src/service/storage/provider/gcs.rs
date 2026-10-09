@@ -1,15 +1,10 @@
 //! Google Cloud Storage storage-provider construction.
 //!
 //! Configuration and environment values feed the object-store GCS builder.
-//! Providers without a bucket are treated as disabled, while enabled providers
-//! expose signing through the common interface.
-//!
-//! Credentials are resolved by the object-store builder. With no service
-//! account key, application-credentials file or bearer token configured it
-//! falls back to the instance metadata server, which is what makes this usable
-//! from GKE Workload Identity without any exported key material. URL signing
-//! follows the same rule: lacking a private key it uses the IAM `signBlob` API,
-//! where Google holds the signing key.
+//! Providers without a bucket are disabled, while enabled providers expose
+//! signing through the common interface. Without configured credentials, the
+//! builder supports GKE Workload Identity through the instance metadata server.
+//! URL signing can use the IAM `signBlob` API when no private key is available.
 
 use std::{sync::Arc, time::Duration};
 
@@ -29,58 +24,55 @@ use tuwunel_core::{
 
 use super::Provider;
 
+type Registration = (String, Arc<Provider>);
+
 /// Builds an enabled Google Cloud Storage provider.
 ///
-/// A configuration without a bucket returns `None`. Other settings override the
-/// environment-derived builder before the client and its URL signer are
-/// retained by the provider.
+/// A configuration without a bucket returns `None`. Other settings are applied
+/// to the environment-derived builder before retaining the client and signer.
 #[tracing::instrument(name = "new", level = "info", skip_all, err)]
 pub(in super::super) fn new(
 	args: &crate::Args<'_>,
 	name: &str,
 	config: &StorageProviderGcs,
-) -> Result<Option<(String, Arc<Provider>)>> {
-	// Fail successfully if this provider is disabled by the configuration..
-	if config.bucket.is_none() {
+) -> Result<Option<Registration>> {
+	let Some(bucket) = config.bucket.as_deref() else {
 		debug!(?name, "gcs_provider.bucket not set. This configuration will be skipped");
 		return Ok(None);
-	}
+	};
 
-	// Seeded from the environment first so GOOGLE_* variables and the instance
-	// metadata server keep working; explicit settings below take precedence.
-	let mut builder = GoogleCloudStorageBuilder::from_env().with_client_options(
-		ClientOptions::new()
-			.with_user_agent(user_agent().try_into()?)
-			.with_pool_max_idle_per_host(args.server.config.request_idle_per_host.into())
-			.with_pool_idle_timeout(Duration::from_secs(args.server.config.request_idle_timeout)),
-	);
+	// Seed from the environment so GOOGLE_* variables and the instance metadata
+	// server remain available alongside configured file paths.
+	let options = ClientOptions::new()
+		.with_user_agent(user_agent().try_into()?)
+		.with_pool_max_idle_per_host(args.server.config.request_idle_per_host.into())
+		.with_pool_idle_timeout(Duration::from_secs(args.server.config.request_idle_timeout));
 
-	if let Some(bucket) = config.bucket.clone() {
-		builder = builder.with_bucket_name(bucket);
-	}
+	let builder = GoogleCloudStorageBuilder::from_env()
+		.with_client_options(options)
+		.with_bucket_name(bucket);
 
-	// Deliberately not `with_url`: in this crate version a `gs://bucket/path`
-	// URL selects the bucket but does not apply the path as an object prefix.
-	// Tuwunel's own `base_path` owns prefixing (see Provider::to_abs_path), so
-	// accepting a path here would silently drop it.
+	// `with_url` discards its object prefix; `base_path` owns prefixing.
+	let builder = match config.service_account_path.as_deref() {
+		| Some(path) => builder.with_service_account_path(path),
+		| None => builder,
+	};
 
-	if let Some(service_account_path) = config.service_account_path.clone() {
-		builder = builder.with_service_account_path(service_account_path);
-	}
+	let builder = match config.application_credentials_path.as_deref() {
+		| Some(path) => builder.with_application_credentials(path),
+		| None => builder,
+	};
 
-	if let Some(application_credentials_path) = config.application_credentials_path.clone() {
-		builder = builder.with_application_credentials(application_credentials_path);
-	}
-
-	if let Some(skip_signature) = config.use_signatures {
-		builder = builder.with_skip_signature(!skip_signature);
-	}
+	let builder = match config.use_signatures {
+		| Some(use_signatures) => builder.with_skip_signature(!use_signatures),
+		| None => builder,
+	};
 
 	trace!(?name, ?config, "Initializing GCS...");
 
 	let client = builder
 		.build()
-		.inspect_err(|e| error!("Failed to configure GCS storage client: {e}"))?;
+		.inspect_err(|e| error!(%e, "Failed to configure GCS storage client"))?;
 
 	debug_info!(name = %name, "Started GCS storage client.");
 
