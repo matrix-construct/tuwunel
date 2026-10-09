@@ -5874,7 +5874,7 @@ fn default_servernameevent_data_cache_capacity() -> u32 {
 }
 
 fn default_servername_status_cache_capacity() -> u32 {
-	parallelism_scaled_u32(10_000).saturating_add(100_000)
+	parallelism_scaled_u32(15_000).saturating_add(200_000)
 }
 
 fn default_resolver_cache_capacity() -> u32 {
