@@ -67,6 +67,7 @@ safety_free_space=$(echo -n "$safety_free_space" | jq -r ".$runner")
 reap_idle_hours=$(echo -n "$reap_idle_hours" | jq -r ".$runner")
 reap_min_free=$(echo -n "$reap_min_free" | jq -r ".$runner")
 seed_budget=$(echo -n "$seed_budget" | jq -r ".$runner")
+builder_memory=$(echo -n "$builder_memory" | jq -r ".$runner")
 
 # Daemon-store sweep. buildkit's GC governs only the cache inside each builder;
 # what bake loads into the docker daemon has no owner at all. Every rebuild of
@@ -178,6 +179,16 @@ fi
 
 docker buildx inspect "$builder"
 if test x"$?" = x"0"; then
+	# An existing builder keeps the limits it was created with; apply the
+	# current builder_memory to its container so a change takes effect
+	# without discarding the builder.
+	if test -n "$builder_memory"; then
+		docker update \
+			--memory "$builder_memory" \
+			--memory-swap "$builder_memory" \
+			"buildx_buildkit_${builder}0"
+	fi
+
 	exit 0
 fi
 
@@ -286,9 +297,20 @@ fi
 flock -u 200 || true
 
 create_builder() {
+	local resource_opts=()
+	if test -n "$builder_memory"; then
+		# Equal memory and memory-swap values keep builder pressure out of
+		# host swap, preserving enough memory for the runner and Docker.
+		resource_opts+=(
+			--driver-opt "memory=$builder_memory"
+			--driver-opt "memory-swap=$builder_memory"
+		)
+	fi
+
 	docker buildx create \
 		--bootstrap \
 		--driver docker-container \
+		"${resource_opts[@]}" \
 		--buildkitd-config ./buildkitd.toml \
 		--name "$builder" \
 		--buildkitd-flags "--allow-insecure-entitlement network.host"

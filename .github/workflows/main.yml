@@ -211,6 +211,7 @@ jobs:
         reap_idle_hours:   '{"het": "24",    "aws": "24"}'
         reap_min_free:     '{"het": "500GB", "aws": "40GB"}'
         seed_budget:       '{"het": "300GB", "aws": "0GB"}'
+        builder_memory:    '{"het": "76GB",  "aws": ""}'
       run: |
         .github/workflows/init.sh
 
