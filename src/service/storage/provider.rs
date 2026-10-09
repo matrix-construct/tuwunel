@@ -11,6 +11,14 @@
 /// Disabled local configurations return no provider.
 pub mod local;
 
+/// Google Cloud Storage storage-provider construction.
+///
+/// The constructor applies bucket and prefix options before wrapping the
+/// object-store client as a provider. Credentials come from the environment,
+/// ending at the instance metadata server, so GKE Workload Identity needs no
+/// credential settings. Configurations without a bucket return no provider.
+pub mod gcs;
+
 /// S3-compatible storage-provider construction.
 ///
 /// The constructor applies endpoint, credential, transport, and signing
@@ -653,6 +661,10 @@ fn strip_base_path(&self, location: Path) -> Path {
 fn multipart_threshold(&self) -> usize {
 	extract_variant!(&self.config, StorageProvider::s3)
 		.map(|config| config.multipart_threshold.as_u64())
+		.or_else(|| {
+			extract_variant!(&self.config, StorageProvider::gcs)
+				.map(|config| config.multipart_threshold.as_u64())
+		})
 		.map(TryInto::try_into)
 		.flat_ok()
 		.unwrap_or(usize::MAX)
@@ -662,6 +674,10 @@ fn multipart_threshold(&self) -> usize {
 fn multipart_part_size(&self) -> usize {
 	extract_variant!(&self.config, StorageProvider::s3)
 		.map(|config| config.multipart_part_size.as_u64())
+		.or_else(|| {
+			extract_variant!(&self.config, StorageProvider::gcs)
+				.map(|config| config.multipart_part_size.as_u64())
+		})
 		.map(TryInto::try_into)
 		.flat_ok()
 		.unwrap_or(usize::MAX)
