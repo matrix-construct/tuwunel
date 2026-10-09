@@ -12,14 +12,391 @@ use std::{
 
 use bytes::Bytes;
 use http::StatusCode;
-use ruma::{OwnedServerName, api::error::ErrorBody};
+use reqwest::{Request, Url};
+use ruma::{
+	OwnedEventId, OwnedServerName,
+	api::{
+		error::ErrorBody,
+		federation::{
+			discovery::get_server_version::v1::Request as VersionRequest,
+			event::get_event::v1::Request as EventRequest,
+		},
+	},
+};
 use serde_json::Value;
-use tuwunel_core::{Error, err};
+use tuwunel_core::{Error, Result, config::Figment, err};
 
 use super::peer::{
 	Backoff, Classification, MAX_BACKOFF, ShouldAttempt, attempt_verdict, classify,
 	classify_error, failure_secs, fold_streak, is_content_rejection,
 };
+use crate::{
+	resolver::{cache::CachedDest, fed::FedDest},
+	test_utils::fixture,
+};
+
+#[tokio::test]
+async fn final_url_guard_checks_typed_ipv4_and_ipv6_literals() -> Result {
+	let Some(fixture) = fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+
+	for url in [
+		"https://0.0.0.0:8448/_matrix/federation/v1/version",
+		"https://[::]:8448/_matrix/federation/v1/version",
+		"https://[::ffff:127.0.0.1]:8448/_matrix/federation/v1/version",
+	] {
+		let url = Url::parse(url).expect("test URL parses");
+		let error = fixture
+			.services
+			.federation
+			.validate_url(&url)
+			.expect_err("default-denied literal is rejected");
+
+		assert!(
+			error
+				.to_string()
+				.contains("Not allowed to send requests to this IP")
+		);
+	}
+
+	for url in [
+		"https://8.8.8.8:8448/_matrix/federation/v1/version",
+		"https://[2001:4860:4860::8888]:8448/_matrix/federation/v1/version",
+		"https://remote.example:8448/_matrix/federation/v1/version",
+	] {
+		let url = Url::parse(url).expect("test URL parses");
+
+		fixture.services.federation.validate_url(&url)?;
+	}
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn cached_literal_routes_are_checked_during_request_preparation() -> Result {
+	let Some(fixture) = fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+
+	let logical = OwnedServerName::try_from("logical.example").expect("test server name parses");
+
+	for socket in ["0.0.0.0:8448", "[::]:8448", "[::ffff:127.0.0.1]:8448"] {
+		let cached = CachedDest {
+			dest: FedDest::Literal(socket.parse().expect("test socket parses")),
+			host: logical.as_str().into(),
+			expire: CachedDest::default_expire(),
+			srv: false,
+		};
+
+		fixture
+			.services
+			.resolver
+			.cache
+			.set_destination(&logical, &cached);
+
+		let actual = fixture
+			.services
+			.resolver
+			.get_actual_dest(&logical)
+			.await?;
+
+		let error = fixture
+			.services
+			.federation
+			.prepare(&actual, &logical, VersionRequest {})
+			.expect_err("cached denied literal is rejected before send");
+
+		assert!(
+			error
+				.to_string()
+				.contains("Not allowed to send requests to this IP")
+		);
+	}
+
+	let socket = "[2001:4860:4860::8888]:9448"
+		.parse()
+		.expect("test socket parses");
+
+	let cached = CachedDest {
+		dest: FedDest::Literal(socket),
+		host: logical.as_str().into(),
+		expire: CachedDest::default_expire(),
+		srv: false,
+	};
+
+	fixture
+		.services
+		.resolver
+		.cache
+		.set_destination(&logical, &cached);
+
+	let actual = fixture
+		.services
+		.resolver
+		.get_actual_dest(&logical)
+		.await?;
+
+	let event_id =
+		OwnedEventId::try_from("$event:logical.example").expect("test event ID parses");
+
+	let request = fixture
+		.services
+		.federation
+		.prepare(&actual, &logical, EventRequest { event_id })?;
+
+	assert_eq!(request.url().host_str(), Some("[2001:4860:4860::8888]"));
+	assert_eq!(request.url().port(), Some(9448));
+	let authorization = request_authorization(&request);
+
+	assert!(authorization.contains(logical.as_str()), "{authorization}");
+
+	Ok(())
+}
+
+fn request_authorization(request: &Request) -> &str {
+	request
+		.headers()
+		.get(http::header::AUTHORIZATION)
+		.and_then(|value| value.to_str().ok())
+		.expect("signed federation request has an authorization header")
+}
+
+#[tokio::test]
+async fn configured_ipv6_mapped_range_remains_load_bearing() -> Result {
+	let config = Figment::new().merge(("ip_range_denylist", ["::ffff:0:0/96"]));
+	let Some(fixture) = fixture(config).await? else {
+		return Ok(());
+	};
+
+	let mapped = Url::parse("https://[::ffff:8.8.8.8]:8448/").expect("test URL parses");
+	let native = Url::parse("https://[2001:4860:4860::8888]:8448/").expect("test URL parses");
+	let ipv4 = Url::parse("https://8.8.8.8:8448/").expect("test URL parses");
+
+	assert!(
+		fixture
+			.services
+			.federation
+			.validate_url(&mapped)
+			.is_err()
+	);
+
+	fixture
+		.services
+		.federation
+		.validate_url(&native)?;
+
+	fixture.services.federation.validate_url(&ipv4)?;
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn configured_ipv4_range_checks_mapped_addresses_only() -> Result {
+	let config = Figment::new().merge(("ip_range_denylist", ["127.0.0.0/8"]));
+	let Some(fixture) = fixture(config).await? else {
+		return Ok(());
+	};
+
+	let mapped = Url::parse("https://[::ffff:127.0.0.1]:8448/").expect("test URL parses");
+	let native = Url::parse("https://[::1]:8448/").expect("test URL parses");
+
+	assert!(
+		fixture
+			.services
+			.federation
+			.validate_url(&mapped)
+			.is_err()
+	);
+
+	fixture
+		.services
+		.federation
+		.validate_url(&native)?;
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn direct_and_delegated_routes_prepare_exact_authorities() -> Result {
+	let Some(fixture) = fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+
+	let event_id =
+		OwnedEventId::try_from("$event:logical.example").expect("test event ID parses");
+
+	let direct =
+		OwnedServerName::try_from("[2001:4860:4860::8888]").expect("test server name parses");
+
+	let actual = fixture
+		.services
+		.resolver
+		.get_actual_dest(&direct)
+		.await?;
+
+	let request = fixture
+		.services
+		.federation
+		.prepare(&actual, &direct, EventRequest { event_id: event_id.clone() })?;
+
+	assert_eq!(request.url().host_str(), Some("[2001:4860:4860::8888]"));
+	assert_eq!(request.url().port(), Some(8448));
+	let authorization = request_authorization(&request);
+
+	assert!(authorization.contains("destination=\"[2001:4860:4860::8888]\""));
+	for (name, host, port, signed_destination) in [
+		("8.8.8.8", "8.8.8.8", 8448, "destination=8.8.8.8"),
+		("8.8.8.8:9448", "8.8.8.8", 9448, "destination=\"8.8.8.8:9448\""),
+		("[::ffff:8.8.8.8]", "[::ffff:808:808]", 8448, "destination=\"[::ffff:8.8.8.8]\""),
+		(
+			"[::ffff:8.8.8.8]:9448",
+			"[::ffff:808:808]",
+			9448,
+			"destination=\"[::ffff:8.8.8.8]:9448\"",
+		),
+		(
+			"[2001:4860:4860::8888]:9448",
+			"[2001:4860:4860::8888]",
+			9448,
+			"destination=\"[2001:4860:4860::8888]:9448\"",
+		),
+	] {
+		let direct = OwnedServerName::try_from(name).expect("test server name parses");
+		let actual = fixture
+			.services
+			.resolver
+			.get_actual_dest(&direct)
+			.await?;
+
+		let request = fixture
+			.services
+			.federation
+			.prepare(&actual, &direct, EventRequest { event_id: event_id.clone() })?;
+
+		assert_eq!(request.url().host_str(), Some(host));
+		assert_eq!(request.url().port(), Some(port));
+		let authorization = request_authorization(&request);
+
+		assert!(authorization.contains(signed_destination));
+	}
+
+	let logical = OwnedServerName::try_from("logical.example").expect("test server name parses");
+
+	let denied = fixture
+		.services
+		.resolver
+		.test_delegated_dest("[::1]")
+		.await?;
+
+	let error = fixture
+		.services
+		.federation
+		.prepare(&denied, &logical, EventRequest { event_id: event_id.clone() })
+		.expect_err("delegated denied literal is rejected before send");
+
+	assert!(
+		error
+			.to_string()
+			.contains("Not allowed to send requests to this IP")
+	);
+
+	let delegated = fixture
+		.services
+		.resolver
+		.test_delegated_dest("[2001:4860:4860:0:0:0:0:8888]:9448")
+		.await?;
+
+	let request = fixture
+		.services
+		.federation
+		.prepare(&delegated, &logical, EventRequest { event_id })?;
+
+	assert_eq!(request.url().host_str(), Some("[2001:4860:4860::8888]"));
+	assert_eq!(request.url().port(), Some(9448));
+	let authorization = request_authorization(&request);
+
+	assert!(authorization.contains("destination=logical.example"));
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn empty_denylist_allows_final_private_literal_preparation() -> Result {
+	let config = Figment::new().merge(("ip_range_denylist", Vec::<String>::new()));
+	let Some(fixture) = fixture(config).await? else {
+		return Ok(());
+	};
+
+	let logical = OwnedServerName::try_from("logical.example").expect("test server name parses");
+	let direct = OwnedServerName::try_from("[::1]").expect("test server name parses");
+	let event_id =
+		OwnedEventId::try_from("$event:logical.example").expect("test event ID parses");
+
+	let actual = fixture
+		.services
+		.resolver
+		.get_actual_dest(&direct)
+		.await?;
+
+	let request = fixture
+		.services
+		.federation
+		.prepare(&actual, &logical, EventRequest { event_id })?;
+
+	assert_eq!(request.url().host_str(), Some("[::1]"));
+	assert_eq!(request.url().port(), Some(8448));
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn configured_proxy_keeps_literal_destination_policy() -> Result {
+	let proxy = serde_json::json!({
+		"global": { "url": "socks5h://proxy.internal:1080" },
+	});
+
+	let config = Figment::new().merge(("proxy", proxy));
+	let Some(fixture) = fixture(config).await? else {
+		return Ok(());
+	};
+
+	let denied = OwnedServerName::try_from("[::1]").expect("test server name parses");
+	let error = fixture
+		.services
+		.resolver
+		.get_actual_dest(&denied)
+		.await
+		.expect_err("proxied denied literal is rejected before preparation");
+
+	assert!(
+		error
+			.to_string()
+			.contains("Not allowed to send requests to this IP")
+	);
+
+	let allowed =
+		OwnedServerName::try_from("[2001:4860:4860::8888]").expect("test server name parses");
+
+	let event_id =
+		OwnedEventId::try_from("$event:logical.example").expect("test event ID parses");
+
+	let actual = fixture
+		.services
+		.resolver
+		.get_actual_dest(&allowed)
+		.await?;
+
+	let request = fixture
+		.services
+		.federation
+		.prepare(&actual, &allowed, EventRequest { event_id })?;
+
+	assert_eq!(request.url().host_str(), Some("[2001:4860:4860::8888]"));
+	assert_eq!(request.url().port(), Some(8448));
+
+	Ok(())
+}
 
 fn federation_error(status: StatusCode) -> Error {
 	let server = OwnedServerName::try_from("remote.example").expect("valid server name");

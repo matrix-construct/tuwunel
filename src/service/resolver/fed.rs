@@ -27,11 +27,18 @@ pub(crate) fn get_ip_with_port(dest_str: &str) -> Option<FedDest> {
 		.parse()
 		.map(FedDest::Literal)
 		.or_else(|_| {
-			dest_str
+			unbracket(dest_str)
 				.parse()
 				.map(|ip_addr: IpAddr| FedDest::Literal(SocketAddr::new(ip_addr, 8448)))
 		})
 		.ok()
+}
+
+#[inline]
+pub(super) fn unbracket(host: &str) -> &str {
+	host.strip_prefix('[')
+		.and_then(|host| host.strip_suffix(']'))
+		.unwrap_or(host)
 }
 
 pub(crate) fn add_port_to_hostname(dest: &str) -> FedDest {

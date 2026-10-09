@@ -300,10 +300,12 @@ fn valid_cidr_range_url(denylist: &[IPAddress], url: &Url) -> bool {
 pub(crate) fn valid_cidr_range_ip(denylist: &[IPAddress], ip: IpAddr) -> bool {
 	let allowed = |ip: IpAddr| {
 		let ip = ipaddress_from_std(ip);
+
 		denylist.iter().all(|cidr| !cidr.includes(&ip))
 	};
 
 	let canonical = ip.to_canonical();
+
 	allowed(ip) && (canonical == ip || allowed(canonical))
 }
 
@@ -431,17 +433,17 @@ pub fn valid_cidr_range(&self, ip: &IPAddress) -> bool {
 		.all(|cidr| !cidr.includes(ip))
 }
 
+#[implement(Service)]
 #[inline]
 #[must_use]
-#[implement(Service)]
 pub fn valid_cidr_range_ip(&self, ip: IpAddr) -> bool {
 	valid_cidr_range_ip(&self.cidr_range_denylist, ip)
 }
 
 /// Checks an HTTP URL against the CIDR denylist when its host is an IP literal.
 ///
-/// Domain names pass here because the validating resolver screens their
-/// addresses later, immediately before connection.
+/// Domain names pass here and remain subject to each consumer's resolution
+/// policy.
 #[implement(Service)]
 #[inline]
 #[must_use]

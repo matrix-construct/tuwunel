@@ -5,7 +5,6 @@ use hickory_resolver::{
 	net::{DnsError, NetError},
 	proto::rr::{Name, RData, rdata::SRV},
 };
-use ipaddress::IPAddress;
 use ruma::ServerName;
 use tuwunel_core::{
 	Err, Result, debug, debug_info, debug_warn, err, error, format_array_string, implement,
@@ -15,7 +14,7 @@ use tuwunel_core::{
 use super::{
 	DestString, FedDest,
 	cache::{CachedDest, CachedOverride, MAX_IPS},
-	fed::{HostString, PortString, add_port_to_hostname, get_ip_with_port},
+	fed::{HostString, PortString, add_port_to_hostname, get_ip_with_port, unbracket},
 };
 
 #[derive(Clone, Debug)]
@@ -48,15 +47,7 @@ fn via_srv(dest: FedDest, host: &str) -> Self { Self { srv: true, ..Self::direct
 
 #[implement(ActualDest)]
 fn dest_host(host: &str) -> FedDest {
-	// Preserve an unspecified port on an IP address.
-	host.parse()
-		.map(FedDest::Literal)
-		.or_else(|_| {
-			host.parse().map(|addr: IpAddr| {
-				FedDest::Named(addr.to_string().into(), FedDest::default_port())
-			})
-		})
-		.unwrap_or_else(|_| add_port_to_hostname(host))
+	get_ip_with_port(host).unwrap_or_else(|| add_port_to_hostname(host))
 }
 
 #[implement(super::Service)]
@@ -181,10 +172,9 @@ async fn actual_dest_named(&self, dest: &ServerName, cache: bool) -> Result<Actu
 }
 
 #[implement(super::Service)]
-async fn actual_dest_3(&self, cache: bool, delegated: &str) -> Result<ActualDest> {
+pub(super) async fn actual_dest_3(&self, cache: bool, delegated: &str) -> Result<ActualDest> {
 	debug!("3: A .well-known file is available");
-	let host = add_port_to_hostname(delegated).uri_string();
-	let direct = |actual| ActualDest::direct(actual, &host);
+	let direct = |actual| ActualDest::direct(actual, delegated);
 
 	match get_ip_with_port(delegated) {
 		| Some(host_and_port) => Self::actual_dest_3_1(host_and_port).map(direct),
@@ -195,7 +185,7 @@ async fn actual_dest_3(&self, cache: bool, delegated: &str) -> Result<ActualDest
 		| None => match self.query_srv_record(delegated).await? {
 			| Some(overrider) =>
 				self.actual_dest_3_3(cache, delegated, overrider)
-					.map_ok(|actual| ActualDest::via_srv(actual, &host))
+					.map_ok(|actual| ActualDest::via_srv(actual, delegated))
 					.await,
 			| None =>
 				self.actual_dest_3_4(cache, delegated)
@@ -203,6 +193,12 @@ async fn actual_dest_3(&self, cache: bool, delegated: &str) -> Result<ActualDest
 					.await,
 		},
 	}
+}
+
+#[cfg(test)]
+#[implement(super::Service)]
+pub(crate) async fn test_delegated_dest(&self, delegated: &str) -> Result<ActualDest> {
+	self.actual_dest_3(false, delegated).await
 }
 
 #[implement(super::Service)]
@@ -437,7 +433,7 @@ fn validate_self_destination(&self, dest: &ServerName, allow_self: bool) -> Resu
 
 #[implement(super::Service)]
 fn validate_dest_address(&self, dest: &ServerName) -> Result {
-	if dest.is_ip_literal() || IPAddress::is_valid(dest.host()) {
+	if dest.is_ip_literal() || unbracket(dest.host()).parse::<IpAddr>().is_ok() {
 		self.validate_dest_ip_literal(dest)?;
 	}
 
@@ -447,22 +443,11 @@ fn validate_dest_address(&self, dest: &ServerName) -> Result {
 #[implement(super::Service)]
 fn validate_dest_ip_literal(&self, dest: &ServerName) -> Result {
 	trace!("Destination is an IP literal, checking against IP range denylist.",);
-	debug_assert!(
-		dest.is_ip_literal() || !IPAddress::is_valid(dest.host()),
-		"Destination is not an IP literal."
-	);
-	let ip = IPAddress::parse(dest.host()).map_err(|e| {
+	let ip = unbracket(dest.host()).parse().map_err(|e| {
 		err!(BadServerResponse(debug_error!("Failed to parse IP literal from string: {e}")))
 	})?;
 
-	self.validate_ip(&ip)?;
-
-	Ok(())
-}
-
-#[implement(super::Service)]
-pub(crate) fn validate_ip(&self, ip: &IPAddress) -> Result {
-	if !self.services.client.valid_cidr_range(ip) {
+	if !self.services.client.valid_cidr_range_ip(ip) {
 		return Err!(BadServerResponse("Not allowed to send requests to this IP"));
 	}
 

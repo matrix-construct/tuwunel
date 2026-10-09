@@ -1154,8 +1154,6 @@ fn proxy_snapshots_own_their_configured_and_environment_generations() {
 	assert!(environment_snapshot.resolver_alias(&environment_url));
 }
 
-/// On Linux a connection to `0.0.0.0` or `::` reaches the local host, so the
-/// default denylist has to cover them along with the loopback ranges.
 #[test]
 fn default_ip_range_denylist_covers_the_unspecified_addresses() {
 	let denylist: Vec<IPAddress> = default_ip_range_denylist()

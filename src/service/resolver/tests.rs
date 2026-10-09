@@ -9,14 +9,22 @@ use std::{
 use hickory_resolver::proto::rr::{IntoName, Name as DnsName};
 use ipaddress::IPAddress;
 use minicbor_serde::{from_slice, to_vec};
-use reqwest::dns::{Addrs, Name, Resolve, Resolving};
-use tuwunel_core::config::proxy::ProxyHosts;
+use reqwest::{
+	Url,
+	dns::{Addrs, Name, Resolve, Resolving},
+};
+use ruma::OwnedServerName;
+use tuwunel_core::{
+	Result,
+	config::{Figment, proxy::ProxyHosts},
+};
 
 use super::{
 	cache::{CachedDest, CachedOverride, IpAddrs},
 	dns::{Resolver, Validating},
-	fed::{FedDest, add_port_to_hostname, get_ip_with_port},
+	fed::{FedDest, add_port_to_hostname, get_ip_with_port, unbracket},
 };
+use crate::test_utils::fixture;
 
 const SRV_TARGET: &str = "target.example";
 
@@ -29,11 +37,23 @@ const LEGACY_DEST: &[u8] = b"\xa3\x64dest\xa1\x65Named\x82\x61x\x65:8448\x64host
 #[derive(Debug)]
 struct FixedResolver(SocketAddr);
 
+#[derive(Debug)]
+struct SequenceResolver(Vec<SocketAddr>);
+
 impl Resolve for FixedResolver {
 	fn resolve(&self, _name: Name) -> Resolving {
 		let addr = self.0;
 		let addrs: Addrs = Box::new(once(addr));
 
+		Box::pin(async move { Ok(addrs) })
+	}
+}
+
+impl Resolve for SequenceResolver {
+	fn resolve(&self, _name: Name) -> Resolving {
+		let addrs: Addrs = Box::new(self.0.clone().into_iter());
+
+		// Resolve requires a boxed Resolving future.
 		Box::pin(async move { Ok(addrs) })
 	}
 }
@@ -58,6 +78,129 @@ fn ips_get_default_ports() {
 		get_ip_with_port("dead:beef::"),
 		Some(FedDest::Literal("[dead:beef::]:8448".parse().unwrap()))
 	);
+
+	assert_eq!(
+		get_ip_with_port("[dead:beef::]"),
+		Some(FedDest::Literal("[dead:beef::]:8448".parse().unwrap()))
+	);
+}
+
+#[test]
+fn unbracket_requires_matching_outer_brackets() {
+	assert_eq!(unbracket("[::1]"), "::1");
+	assert_eq!(unbracket("[::1"), "[::1");
+	assert_eq!(unbracket("::1]"), "::1]");
+	assert_eq!(unbracket("[[::1]]"), "[::1]");
+	assert!(get_ip_with_port("[::1").is_none());
+	assert!(get_ip_with_port("::1]").is_none());
+	assert!(get_ip_with_port("[[::1]]").is_none());
+	assert!(get_ip_with_port("[::1]:65536").is_none());
+	OwnedServerName::try_from("[::1").unwrap_err();
+	OwnedServerName::try_from("[[::1]]").unwrap_err();
+	OwnedServerName::try_from("[::1]:65536").unwrap_err();
+	Url::parse("https://[[::1]]/").unwrap_err();
+}
+
+#[tokio::test]
+async fn literal_routes_apply_default_policy_and_preserve_authority() -> Result {
+	let Some(fixture) = fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+
+	let denied = ["0.0.0.0", "[::]", "[::1]", "[::ffff:127.0.0.1]"];
+
+	for name in denied {
+		let name = OwnedServerName::try_from(name).expect("test server name parses");
+		let error = fixture
+			.services
+			.resolver
+			.get_actual_dest(&name)
+			.await
+			.expect_err("default-denied literal is rejected");
+
+		assert!(
+			error
+				.to_string()
+				.contains("Not allowed to send requests to this IP")
+		);
+	}
+
+	for (name, socket, authority) in [
+		("8.8.8.8", "8.8.8.8:8448", "8.8.8.8:8448"),
+		(
+			"[2001:4860:4860::8888]",
+			"[2001:4860:4860::8888]:8448",
+			"[2001:4860:4860::8888]:8448",
+		),
+		(
+			"[2001:4860:4860::8888]:9448",
+			"[2001:4860:4860::8888]:9448",
+			"[2001:4860:4860::8888]:9448",
+		),
+		("[::ffff:8.8.8.8]", "[::ffff:8.8.8.8]:8448", "[::ffff:8.8.8.8]:8448"),
+	] {
+		let name = OwnedServerName::try_from(name).expect("test server name parses");
+		let actual = fixture
+			.services
+			.resolver
+			.get_actual_dest(&name)
+			.await?;
+
+		assert_eq!(actual.dest, FedDest::Literal(socket.parse().expect("test socket parses")));
+		assert_eq!(actual.host.as_str(), authority);
+	}
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn empty_literal_denylist_allows_private_and_unspecified_routes() -> Result {
+	let config = Figment::new().merge(("ip_range_denylist", Vec::<String>::new()));
+	let Some(fixture) = fixture(config).await? else {
+		return Ok(());
+	};
+
+	for name in ["0.0.0.0", "[::]", "[::1]", "[::ffff:127.0.0.1]"] {
+		let name = OwnedServerName::try_from(name).expect("test server name parses");
+
+		fixture
+			.services
+			.resolver
+			.get_actual_dest(&name)
+			.await?;
+	}
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn delegated_ipv6_routes_preserve_their_authority() -> Result {
+	let Some(fixture) = fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+
+	for (delegated, socket, authority) in [
+		("[::1]", "[::1]:8448", "[::1]:8448"),
+		("[::1]:9448", "[::1]:9448", "[::1]:9448"),
+		(
+			"[2001:4860:4860:0:0:0:0:8888]",
+			"[2001:4860:4860::8888]:8448",
+			"[2001:4860:4860::8888]:8448",
+		),
+		("[::ffff:127.0.0.1]", "[::ffff:127.0.0.1]:8448", "[::ffff:127.0.0.1]:8448"),
+	] {
+		let actual = fixture
+			.services
+			.resolver
+			.actual_dest_3(false, delegated)
+			.await?;
+
+		assert_eq!(actual.dest, FedDest::Literal(socket.parse().expect("test socket parses")));
+		assert_eq!(actual.host.as_str(), authority);
+		assert!(!actual.srv);
+	}
+
+	Ok(())
 }
 
 #[test]
@@ -259,4 +402,44 @@ async fn validating_resolver_still_denies_a_destination_host() {
 
 	assert_eq!(error.kind(), PermissionDenied);
 	assert_eq!(error.to_string(), "All resolved addresses are denied by ip_range_denylist");
+}
+
+#[tokio::test]
+async fn validating_resolver_filters_mapped_and_unspecified_addresses_in_order() {
+	let denied_mapped = "[::ffff:10.1.2.3]:443"
+		.parse()
+		.expect("test address parses");
+
+	let denied_unspecified = "[::]:443".parse().expect("test address parses");
+	let allowed_ipv6 = "[2001:4860:4860::8888]:443"
+		.parse()
+		.expect("test address parses");
+
+	let allowed_ipv4 = "8.8.8.8:443"
+		.parse()
+		.expect("test address parses");
+
+	let inner = Arc::new(SequenceResolver(vec![
+		denied_mapped,
+		allowed_ipv6,
+		denied_unspecified,
+		allowed_ipv4,
+	]));
+
+	let denylist = Arc::from([
+		IPAddress::parse("10.0.0.0/8").expect("test denylist range parses"),
+		IPAddress::parse("::/128").expect("test denylist range parses"),
+	]);
+
+	let resolver = Validating::new(inner, denylist, Arc::from([]));
+	let name = "destination.example"
+		.parse()
+		.expect("test hostname parses");
+
+	let resolved = resolver
+		.resolve(name)
+		.await
+		.expect("allowed addresses remain");
+
+	assert_eq!(resolved.collect::<Vec<_>>(), [allowed_ipv6, allowed_ipv4]);
 }

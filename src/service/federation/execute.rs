@@ -6,7 +6,6 @@
 use std::{fmt::Debug, mem, time::Duration};
 
 use bytes::Bytes;
-use ipaddress::IPAddress;
 use reqwest::{Method, Request, Response, Url};
 use ruma::{
 	ServerName,
@@ -276,7 +275,12 @@ where
 }
 
 #[implement(super::Service)]
-fn prepare<T>(&self, actual: &ActualDest, dest: &ServerName, request: T) -> Result<Request>
+pub(super) fn prepare<T>(
+	&self,
+	actual: &ActualDest,
+	dest: &ServerName,
+	request: T,
+) -> Result<Request>
 where
 	T: OutgoingRequest + Send,
 	T::Authentication: FedAuth,
@@ -291,12 +295,9 @@ where
 }
 
 #[implement(super::Service)]
-fn validate_url(&self, url: &Url) -> Result {
-	if let Some(url_host) = url.host_str()
-		&& let Ok(ip) = IPAddress::parse(url_host)
-	{
-		trace!("Checking request URL IP {ip:?}");
-		self.services.resolver.validate_ip(&ip)?;
+pub(super) fn validate_url(&self, url: &Url) -> Result {
+	if !self.services.client.valid_cidr_range_url(url) {
+		return Err!(BadServerResponse("Not allowed to send requests to this IP"));
 	}
 
 	Ok(())
