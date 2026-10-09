@@ -15,6 +15,7 @@ use tuwunel_core::{
 		stream::{IterStream, TryReadyExt},
 	},
 };
+use tuwunel_database::{Ignore, Interfix, Json};
 
 use super::{MAX_PROFILE_SIZE, Propagation, ProspectiveProfile, Service, check_profile_key};
 
@@ -40,8 +41,11 @@ pub(super) async fn merge_profile(&self, user_id: &UserId, response: Response) -
 		.try_stream();
 
 	let prospective: ProspectiveProfile<'_> = self
-		.try_all_profile_keys(user_id)
-		.map_ok(|field| (field.field_name(), Cow::Owned(field.value().into_owned())))
+		.useridprofilekey_value
+		.stream_prefix(&(user_id, Interfix))
+		.map_ok(|((_, name), Json(value)): ((Ignore, &str), Json<Value>)| {
+			(name.into(), Cow::Owned(value))
+		})
 		.chain(incoming)
 		.try_collect()
 		.await?;

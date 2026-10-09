@@ -1,8 +1,12 @@
+mod nullable;
+
 use std::iter::once;
 
 use ruma::{
-	UserId, api::federation::query::get_profile_information::v1::Response,
-	profile::ProfileFieldName, room_id, user_id,
+	UserId,
+	api::{error::ErrorKind, federation::query::get_profile_information::v1::Response},
+	profile::ProfileFieldName,
+	room_id, user_id,
 };
 use serde_json::{Value, json};
 use tuwunel_core::{Result, config::Figment, utils::stream::ReadyExt};
@@ -53,7 +57,7 @@ async fn merge_counts_canonical_fields_at_the_default_boundary() -> Result {
 		.map(|index| (format!("com.example.field{index}"), json!(null)))
 		.chain([
 			("displayname".to_owned(), json!("Remote")),
-			("avatar_url".to_owned(), json!(null)),
+			("avatar_url".to_owned(), json!("mxc://remote.example/avatar")),
 		])
 		.collect();
 
@@ -65,11 +69,13 @@ async fn merge_counts_canonical_fields_at_the_default_boundary() -> Result {
 	let before = services.globals.current_count();
 	let extra: Response = once((KEPT.to_owned(), json!("excess"))).collect();
 
-	services
+	let error = services
 		.profile
 		.merge_profile(user, extra)
 		.await
 		.expect_err("canonical fields count toward the retained limit");
+
+	assert_eq!(error.kind(), ErrorKind::ProfileTooLarge);
 
 	assert!(
 		field(&services.profile, user, KEPT)
