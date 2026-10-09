@@ -690,16 +690,15 @@ async fn ingest_send_join_auth_chain(
 		})
 		.inspect_err(|e| debug_error!("Invalid send_join auth_chain event: {e:?}"))
 		.ready_filter_map(Result::ok)
-		.ready_for_each(|(event_id, mut value)| {
-			if !room_version_rules
-				.event_format
-				.require_room_create_room_id
-				&& value["type"] == "m.room.create"
-			{
-				let room_id = CanonicalJsonValue::String(room_id.as_str().into());
-				value.insert("room_id".into(), room_id);
-			}
-
+		.ready_filter_map(|(event_id, value)| {
+			Pdu::from_object_federation(room_id, &event_id, value, room_version_rules)
+				.inspect_err(|error| {
+					debug_warn!(?event_id, %error, "Invalid PDU in the join response.");
+				})
+				.map(move |(_, value)| (event_id, value))
+				.ok()
+		})
+		.ready_for_each(|(event_id, value)| {
 			self.services
 				.timeline
 				.add_pdu_outlier(&event_id, &value);
