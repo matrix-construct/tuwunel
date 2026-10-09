@@ -13,10 +13,21 @@ use tuwunel_database::{Deserialized, Json};
 
 use super::is_summary_serializable;
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum Provenance {
+	#[default]
+	Unknown,
+	Local,
+	Remote,
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 pub(super) struct Cached {
 	pub(super) expires: SystemTime,
 	pub(super) summary: Option<ParentSummary>,
+	#[serde(default)]
+	pub(super) provenance: Provenance,
 }
 
 /// Remove the entry for `room_id` from the cache.
@@ -31,13 +42,19 @@ pub fn cache_evict(&self, room_id: &RoomId) { self.db.roomid_spacehierarchy.remo
 	skip(self, summary),
 	fields(summary = summary.is_some())
 )]
-pub(super) fn cache_put(&self, room_id: &RoomId, summary: Option<&ParentSummary>) {
+pub(super) fn cache_put(
+	&self,
+	room_id: &RoomId,
+	summary: Option<&ParentSummary>,
+	provenance: Provenance,
+) {
 	debug!(?room_id, "cache put");
 	self.db.roomid_spacehierarchy.raw_put(
 		room_id,
 		Json(Cached {
 			expires: self.generate_ttl(),
 			summary: summary.cloned().filter(is_summary_serializable),
+			provenance,
 		}),
 	);
 }

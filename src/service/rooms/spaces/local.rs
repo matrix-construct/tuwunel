@@ -8,7 +8,7 @@ use tuwunel_core::{
 	utils::{future::TryExtExt, timepoint_has_passed},
 };
 
-use super::{Accessibility, Cached, Identifier};
+use super::{Accessibility, Cached, Identifier, cache::Provenance};
 
 /// Gets the summary of a space using solely local information.
 #[implement(super::Service)]
@@ -20,20 +20,53 @@ pub(super) async fn get_summary_and_children_local(
 ) -> Result<Accessibility> {
 	use Accessibility::{Accessible, Inaccessible};
 
+	let local = self
+		.services
+		.state_cache
+		.server_in_room_result(self.services.server.name.as_ref(), current_room)
+		.await?;
+
 	match self.cache_get(current_room).await {
 		| Err(e) if !e.is_not_found() => {
 			error!(?current_room, "cache error: {e}");
 			return Err(e);
 		},
-		| Ok(Cached { expires, summary: Some(cached) }) if !timepoint_has_passed(expires) => {
+		| Ok(Cached {
+			expires,
+			summary: Some(cached),
+			provenance,
+		}) if !timepoint_has_passed(expires)
+			&& cached.summary.room_id == current_room
+			&& matches!(
+				(local, provenance),
+				(true, Provenance::Local) | (false, Provenance::Remote)
+			) =>
+		{
 			debug!(?current_room, ?expires, "cache hit");
-			return self
+			let accessible = self
 				.is_accessible_child(current_room, &cached.summary.join_rule, sender)
-				.await
-				.then(|| Ok(Accessible(cached)))
-				.unwrap_or(Ok(Inaccessible));
+				.await;
+
+			#[cfg(test)]
+			let accessible = super::tests::after_cached_access(accessible).await;
+
+			let still_local = self
+				.services
+				.state_cache
+				.server_in_room_result(self.services.server.name.as_ref(), current_room)
+				.await?;
+
+			if local == still_local {
+				return Ok(accessible
+					.then_some(Accessible(cached))
+					.unwrap_or(Inaccessible));
+			}
+
+			if !still_local {
+				return Err!(Request(NotFound("Space room not found locally.")));
+			}
 		},
-		| Ok(Cached { expires, summary: None }) if !timepoint_has_passed(expires) => {
+		| Ok(Cached { expires, summary: None, .. }) if !timepoint_has_passed(expires) => {
 			// Cache negative: try local computation below.
 			debug!(?current_room, ?expires, "negative cache hit");
 		},
@@ -43,12 +76,13 @@ pub(super) async fn get_summary_and_children_local(
 		},
 	}
 
-	if !self
+	let local = self
 		.services
 		.state_cache
-		.server_in_room(self.services.server.name.as_ref(), current_room)
-		.await
-	{
+		.server_in_room_result(self.services.server.name.as_ref(), current_room)
+		.await?;
+
+	if !local {
 		debug!(?current_room, "no local membership; defer to federation");
 		return Err!(Request(NotFound("Space room not found locally.")));
 	}
@@ -65,8 +99,9 @@ pub(super) async fn get_summary_and_children_local(
 		.await;
 
 	match summary {
-		| Ok(Inaccessible) => self.cache_put(current_room, None),
-		| Ok(Accessible(ref summary)) => self.cache_put(current_room, Some(summary)),
+		| Ok(Inaccessible) => self.cache_put(current_room, None, Provenance::Local),
+		| Ok(Accessible(ref summary)) =>
+			self.cache_put(current_room, Some(summary), Provenance::Local),
 		| _ => (),
 	}
 

@@ -219,8 +219,29 @@ pub fn room_servers<'a>(
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "trace")]
 pub async fn server_in_room<'a>(&'a self, server: &'a ServerName, room_id: &'a RoomId) -> bool {
+	self.server_in_room_result(server, room_id)
+		.await
+		.unwrap_or(false)
+}
+
+/// Tests whether a server is recorded as participating in a room.
+///
+/// Missing rows return `false`; storage failures are preserved for callers
+/// whose authority decision depends on the result.
+#[implement(Service)]
+#[tracing::instrument(skip(self), level = "trace")]
+pub async fn server_in_room_result<'a>(
+	&'a self,
+	server: &'a ServerName,
+	room_id: &'a RoomId,
+) -> Result<bool> {
 	let key = (server, room_id);
-	self.db.serverroomids.qry(&key).await.is_ok()
+
+	match self.db.serverroomids.qry(&key).await {
+		| Ok(_) => Ok(true),
+		| Err(error) if error.is_not_found() => Ok(false),
+		| Err(error) => Err(error),
+	}
 }
 
 /// Streams all rooms recorded for a participating server.

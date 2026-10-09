@@ -1,4 +1,4 @@
-use futures::StreamExt;
+use futures::{StreamExt, TryStreamExt};
 use ruma::{
 	OwnedServerName, RoomId,
 	api::federation::space::{
@@ -7,12 +7,16 @@ use ruma::{
 	},
 	room::RoomType,
 };
-use tuwunel_core::{Err, Result, debug, implement, utils::IterStream};
+use tuwunel_core::{
+	Err, Error, Result, debug, implement,
+	utils::{IterStream, stream::WidebandExt},
+};
 
 use super::{
 	Accessibility,
 	Accessibility::{Accessible, Inaccessible},
 	Identifier,
+	cache::Provenance,
 };
 use crate::federation::feds::{Fault, Opts, OutcomeExt, Record};
 
@@ -57,36 +61,119 @@ pub(super) async fn get_summary_and_children_federation(
 			| Err(Fault::Error(error)) => debug!(?error, "federation error"),
 			| Err(fault) => debug!(?fault, "federation error"),
 		})
-		.first_acceptable(|_| true)
+		.first_acceptable(|response| summary_matches_room(&response.room, current_room))
 		.await
 		.map(|(_, response)| response);
 
 	let Some(Response { room, children, inaccessible_children }) = response else {
-		self.cache_put(current_room, None);
+		if self
+			.services
+			.state_cache
+			.server_in_room_result(self.services.server.name.as_ref(), current_room)
+			.await?
+		{
+			return self
+				.get_summary_and_children_local(current_room, sender)
+				.await;
+		}
+
+		self.cache_put(current_room, None, Provenance::Remote);
 		return Err!(Request(NotFound("Space room not found over federation.")));
 	};
 
-	for room_id in &inaccessible_children {
-		self.cache_put(room_id, None);
+	if self
+		.services
+		.state_cache
+		.server_in_room_result(self.services.server.name.as_ref(), current_room)
+		.await?
+	{
+		return self
+			.get_summary_and_children_local(current_room, sender)
+			.await;
 	}
 
-	for summary in children
+	let accessible = self
+		.is_accessible_child(current_room, &room.summary.join_rule, sender)
+		.await;
+
+	let inaccessible_children: Vec<_> = inaccessible_children
+		.into_iter()
+		.stream()
+		.wide_then(async |room_id| {
+			Ok::<_, Error>(
+				self.remote_room(&room_id)
+					.await?
+					.then_some(room_id),
+			)
+		})
+		.try_collect()
+		.await?;
+
+	let children: Vec<_> = children
 		.into_iter()
 		.filter(|child| child.room_type.ne(&Some(RoomType::Space)))
-	{
-		let room_id = summary.room_id.clone();
-		let summary = ParentSummary {
-			summary,
-			children_state: Default::default(),
-		};
+		.stream()
+		.wide_then(async |summary| {
+			Ok::<_, Error>(
+				self.remote_room(&summary.room_id)
+					.await?
+					.then_some(summary),
+			)
+		})
+		.try_collect()
+		.await?;
 
-		self.cache_put(&room_id, Some(&summary));
+	if self
+		.services
+		.state_cache
+		.server_in_room_result(self.services.server.name.as_ref(), current_room)
+		.await?
+	{
+		return self
+			.get_summary_and_children_local(current_room, sender)
+			.await;
 	}
 
-	self.cache_put(current_room, Some(&room));
+	inaccessible_children
+		.into_iter()
+		.flatten()
+		.for_each(|room_id| self.cache_put(&room_id, None, Provenance::Remote));
 
-	self.is_accessible_child(current_room, &room.summary.join_rule.clone(), sender)
-		.await
+	children
+		.into_iter()
+		.flatten()
+		.for_each(|summary| {
+			let summary = ParentSummary {
+				summary,
+				children_state: Default::default(),
+			};
+
+			self.cache_put(&summary.summary.room_id, Some(&summary), Provenance::Remote);
+		});
+
+	self.cache_put(current_room, Some(&room), Provenance::Remote);
+
+	accessible
 		.then(|| Ok(Accessible(room)))
 		.unwrap_or(Ok(Inaccessible))
+}
+
+#[implement(super::Service)]
+#[tracing::instrument(level = "trace", skip(self))]
+pub(super) async fn remote_room(&self, room_id: &RoomId) -> Result<bool> {
+	let remote = !self
+		.services
+		.state_cache
+		.server_in_room_result(self.services.server.name.as_ref(), room_id)
+		.await?;
+
+	#[cfg(test)]
+	let remote = super::tests::after_remote_room(remote).await;
+
+	Ok(remote)
+}
+
+#[inline]
+pub(super) fn summary_matches_room(summary: &ParentSummary, room_id: &RoomId) -> bool {
+	summary.summary.room_id == room_id
 }
