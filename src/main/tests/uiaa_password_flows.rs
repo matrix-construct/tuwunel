@@ -9,13 +9,14 @@ use tuwunel::{Args, Runtime, Server, async_run, async_start, async_stop};
 use tuwunel_core::{Err, Result, ruma::UserId, utils::BoolExt};
 use tuwunel_service::{Services, users::PASSWORD_SENTINEL};
 
-use self::client::wait_until_ready;
+use self::{client::wait_until_ready, uiaa_signing::exercise as exercise_signing};
 
 #[expect(
 	dead_code,
 	reason = "Only listener readiness is shared with the client API harness."
 )]
 mod client;
+mod uiaa_signing;
 
 /// LDAP may supply password UIAA only for LDAP-origin accounts. A real local
 /// password remains usable regardless of origin or whether LDAP is enabled.
@@ -148,7 +149,9 @@ async fn exercise(services: &Services, base: &str, ldap_enabled: bool) -> Result
 		}
 	}
 
-	exercise_retention(services, base).await
+	exercise_retention(services, base).await?;
+
+	exercise_signing(services, base).await
 }
 
 #[tracing::instrument(level = "debug", skip_all)]

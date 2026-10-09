@@ -42,6 +42,19 @@ pub(crate) async fn upload_signing_keys_route(
 ) -> Result<upload_signing_keys::v3::Response> {
 	let sender_user = body.sender_user();
 
+	if body
+		.auth
+		.as_ref()
+		.is_some_and(|auth| auth.session().is_some())
+		&& body.master_key.is_none()
+		&& body.self_signing_key.is_none()
+		&& body.user_signing_key.is_none()
+	{
+		return Err!(Request(MissingParam(
+			"Signing keys are unavailable. Retry with the full request body."
+		)));
+	}
+
 	let keys = validate_keys(Keys {
 		user_id: sender_user,
 		master_key: &body.master_key,
