@@ -77,23 +77,81 @@ ARG pkg_dir
 
 WORKDIR ${pkg_dir}
 COPY --from=deb . .
-# apt resolves the Depends the package declares, where dpkg only asserts they
-# are installed already. The runtime image carries no more than base_pkgs, so
-# a bare dpkg --install failed on each dependency the package gained until
-# that list was edited to match it.
+# Install into a clean base so apt must resolve the package's dependencies.
 RUN <<EOF
 	set -eux
 	dpkg --info tuwunel.deb
 	dpkg --contents tuwunel.deb
 	apt-get -y update
-	apt-get -y install --no-install-recommends ./tuwunel.deb
+	apt-get -y install --no-install-recommends ./tuwunel.deb curl libnss-myhostname
+	ldd /usr/sbin/tuwunel | grep -q 'libc\.so\.6'
+
 	# Every program the unit runs comes from the package or from something it
 	# depends on, so hold them against the filesystem the install produced.
 	sed -nE 's/^Exec[A-Za-z]+=[-+!@]*(\/[^ ]+).*/\1/p' \
 		/usr/lib/systemd/system/tuwunel.service | xargs -rt -n1 test -x
+
 	# Both units belong in the directory systemd searches, and the socket is
 	# the operator's choice to make, so it arrives installed and unenabled.
 	test -f /usr/lib/systemd/system/tuwunel.socket
 	test -L /etc/systemd/system/multi-user.target.wants/tuwunel.service
 	test ! -e /etc/systemd/system/sockets.target.wants/tuwunel.socket
+
+	install -d -o tuwunel -g tuwunel /var/lib/tuwunel/package-test
+	cat > /var/lib/tuwunel/package-test.toml <<'CONFIG'
+[global]
+server_name = "package.test"
+database_path = "/var/lib/tuwunel/package-test"
+address = "127.0.0.1"
+port = 8008
+allow_registration = true
+registration_token = "package-test-token"
+db_pool_affinity = false
+db_pool_workers = 32
+
+[global.well_known]
+client = "https://package.test"
+
+[global.smtp]
+connection_uri = "smtp://smtp-package-test.invalid:2525"
+sender = "package-test@example.test"
+CONFIG
+
+	chown tuwunel:tuwunel /var/lib/tuwunel/package-test.toml
+	runuser -u tuwunel env TUWUNEL_CONFIG=/var/lib/tuwunel/package-test.toml /usr/sbin/tuwunel \
+		> /var/lib/tuwunel/package-test.log 2>&1 &
+
+	server_pid=$!
+	cleanup() {
+		status=$?
+		kill "$server_pid" 2>/dev/null || true
+		wait "$server_pid" || true
+		if [ "$status" -ne 0 ]; then
+			cat /var/lib/tuwunel/package-test.log
+		fi
+		exit "$status"
+	}
+
+	trap cleanup EXIT
+	for attempt in $(seq 1 60); do
+		curl -fsS -m 2 http://127.0.0.1:8008/_matrix/client/versions >/dev/null && break
+		kill -0 "$server_pid"
+		if [ "$attempt" -eq 60 ]; then
+			echo "Package test server did not become ready" >&2
+			exit 1
+		fi
+		sleep 1
+	done
+
+	# The invalid SMTP hostname must reach delivery and fail without crashing.
+	status=$(curl -sS -m 30 -w '%{http_code}' -o /var/lib/tuwunel/package-test-response.json \
+		-H 'Content-Type: application/json' \
+		-d '{"client_secret":"0123456789abcdef","email":"repro@example.test","send_attempt":1}' \
+		http://127.0.0.1:8008/_matrix/client/v3/register/email/requestToken)
+
+	cat /var/lib/tuwunel/package-test-response.json
+	test "$status" = 400
+	grep -q '"errcode":"M_UNKNOWN"' /var/lib/tuwunel/package-test-response.json
+	grep -q 'Failed to send email:' /var/lib/tuwunel/package-test-response.json
+	kill -0 "$server_pid"
 EOF

@@ -19,12 +19,11 @@ name = "tuwunel"
 maintainer = "Jason Volk <jason@zemos.net>"
 copyright = "2025, Tuwunel Contributors"
 license-file = ["../../LICENSE", "3"]
-# The release binary is statically linked, so $auto has no shared library to
-# discover and only sends cargo-deb looking for a dpkg-shlibdeps that the build
-# image does not carry. procps owns /usr/bin/kill, which the unit's ExecReload=
+# Let dpkg-shlibdeps derive the Debian baseline required by the dynamically
+# linked package. procps owns /usr/bin/kill, which the unit's ExecReload=
 # invokes; it is only Priority: important, so a trimmed install would not
 # otherwise carry it.
-depends = "ca-certificates, adduser, procps"
+depends = "$auto, ca-certificates, adduser, procps"
 recommends = "apparmor"
 conflicts = "conduwuit, matrix-conduit"
 extended-description = """\

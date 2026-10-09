@@ -21,6 +21,18 @@ default_sys_names='["debian"]'
 default_sys_versions='["testing-slim"]'
 default_sys_targets='["x86_64-v1-linux-gnu"]'
 
+# Package defaults are shared with CI; explicit system selections still win.
+for target in ${bake_target:-$*}; do
+    case "$target" in
+        pkg|deb|deb-install|build-deb|build-bins-deb|deps-build-bins-deb|rpm|rpm-install|build-rpm|nix|build-nix)
+            # shellcheck source=docker/package.env
+            source "$BASEDIR/package.env"
+            default_sys_versions="$package_sys_versions"
+            break
+            ;;
+    esac
+done
+
 if test ! -z "$cargo_profile"; then
     env_cargo_profiles="[\"${cargo_profile}\"]"
 fi

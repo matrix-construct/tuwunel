@@ -75,6 +75,30 @@ on:
         description: Write token for the self-hosted binary cache.
 
 jobs:
+  base:
+    if: >
+      !failure() && !cancelled()
+      && (fromJSON(inputs.enable_distro) || fromJSON(inputs.enable_checks))
+      && contains(fromJSON(inputs.feat_sets), fromJSON('["all"]')[0])
+      && contains(fromJSON(inputs.cargo_profiles), fromJSON('["release"]')[0])
+      && contains(fromJSON(inputs.rust_toolchains), fromJSON('["stable"]')[0])
+      && inputs.machines
+      && fromJSON(inputs.machines)[0] != null
+
+    name: Base
+    runs-on: ["${{fromJSON(inputs.machines)[0]}}", "self-hosted"]
+    outputs:
+      sys_versions: ${{steps.base.outputs.sys_versions}}
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        ref: ${{inputs.checkout}}
+    - id: base
+      shell: bash
+      run: |
+        source docker/package.env
+        echo "sys_versions=$package_sys_versions" >> "$GITHUB_OUTPUT"
+
   docs:
     if: >
       !failure() && !cancelled()
@@ -222,14 +246,15 @@ jobs:
       && contains(fromJSON(inputs.rust_toolchains), fromJSON('["stable"]')[0])
 
     name: Distro Packages
+    needs: [base]
     uses: ./.github/workflows/bake.yml
     with:
       bake_targets: ${{inputs.distros}}
       cargo_profiles: '["release"]'
       feat_sets: '["all"]'
       rust_toolchains: '["stable"]'
-      sys_names: ${{inputs.sys_names}}
-      sys_versions: ${{inputs.sys_versions}}
+      sys_names: '["debian"]'
+      sys_versions: ${{needs.base.outputs.sys_versions}}
       rust_targets: ${{inputs.rust_targets}}
       sys_targets: ${{inputs.sys_targets}}
       machines: ${{inputs.machines}}
@@ -267,15 +292,15 @@ jobs:
       && contains(fromJSON(inputs.rust_toolchains), fromJSON('["stable"]')[0])
 
     name: Check Packages
-    needs: [distro]
+    needs: [base, distro]
     uses: ./.github/workflows/bake.yml
     with:
       bake_targets: '["deb-install", "rpm-install"]'
       cargo_profiles: '["release"]'
       feat_sets: '["all"]'
       rust_toolchains: '["stable"]'
-      sys_names: ${{inputs.sys_names}}
-      sys_versions: ${{inputs.sys_versions}}
+      sys_names: '["debian"]'
+      sys_versions: ${{needs.base.outputs.sys_versions}}
       rust_targets: ${{inputs.rust_targets}}
       sys_targets: ${{inputs.sys_targets}}
       machines: ${{inputs.machines}}

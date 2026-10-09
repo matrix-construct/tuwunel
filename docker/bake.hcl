@@ -1374,7 +1374,7 @@ target "deb-install" {
         elem("deb", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target]),
     ]
     contexts = {
-        input = elem("target:runtime", [feat_set, sys_name, sys_version, sys_target])
+        input = elem("target:base", [sys_name, sys_version, sys_target])
         deb = elem("target:deb", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target]),
     }
 }
@@ -1404,10 +1404,10 @@ target "build-deb" {
     dockerfile = "${docker_dir}/Dockerfile.cargo.deb"
     matrix = cargo_rust_feat_sys
     inherits = [
-        elem("build-bins", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target]),
+        elem("build-bins-deb", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target]),
     ]
     contexts = {
-        input = elem("target:build-bins", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target]),
+        input = elem("target:build-bins-deb", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target]),
         source = elem("target:source", [sys_name, sys_version, sys_target]),
     }
     args = {
@@ -1523,6 +1523,23 @@ target "build-bins" {
         cargo_cmd = "build"
         cargo_args = "--bins"
         cargo_target_prune = "bins"
+    }
+}
+
+target "build-bins-deb" {
+    name = elem("build-bins-deb", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target])
+    tags = [
+        elem_tag("build-bins-deb", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target], "latest"),
+    ]
+    matrix = cargo_rust_feat_sys
+    inherits = [
+        elem("build-bins", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target]),
+    ]
+    contexts = {
+        input = elem("target:deps-build-bins-deb", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target])
+    }
+    args = {
+        CARGO_BUILD_RUSTFLAGS = debian_package_rustflags(cargo_profile, rust_toolchain, feat_set, sys_target)
     }
 }
 
@@ -1725,6 +1742,20 @@ target "deps-build-bins" {
     }
 }
 
+target "deps-build-bins-deb" {
+    name = elem("deps-build-bins-deb", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target])
+    tags = [
+        elem_tag("deps-build-bins-deb", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target], "latest"),
+    ]
+    matrix = cargo_rust_feat_sys
+    inherits = [
+        elem("deps-build-bins", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target])
+    ]
+    args = {
+        CARGO_BUILD_RUSTFLAGS = debian_package_rustflags(cargo_profile, rust_toolchain, feat_set, sys_target)
+    }
+}
+
 target "deps-build-tests" {
     name = elem("deps-build-tests", [cargo_profile, rust_toolchain, rust_target, feat_set, sys_name, sys_version, sys_target])
     tags = [
@@ -1783,11 +1814,6 @@ target "deps-check" {
 
 variable "cargo_tgt_dir_base" {
     default = "/usr/src/tuwunel/target"
-}
-
-function "interprocedural_rustflags" {
-    params = [profile]
-    result = contains(["release-native", "release", "bench"], profile)? "-C linker-plugin-lto -C linker=${llvm_cc} -C link-arg=-fuse-ld=lld": ""
 }
 
 target "deps-base" {
@@ -1852,15 +1878,7 @@ target "deps-base" {
                     join(" ", static_nightly_rustflags),
                     join(" ", native_rustflags),
                     interprocedural_rustflags(cargo_profile),
-                    "-C link-arg=-L/usr/lib/gcc/${sys_target_triple(sys_target)}/15", #FIXME
-                    contains(split(",", cargo_feat_sets[feat_set]), "bzip2_compression")?
-                        "-C link-arg=-l:libbz2.a": "",
-                    contains(split(",", cargo_feat_sets[feat_set]), "lz4_compression")?
-                        "-C link-arg=-l:liblz4.a": "",
-                    contains(split(",", cargo_feat_sets[feat_set]), "zstd_compression")?
-                        "-C link-arg=-l:libzstd.a": "",
-                    contains(split(",", cargo_feat_sets[feat_set]), "io_uring")?
-                        "-C link-arg=-l:liburing.a": "",
+                    static_library_rustflags(feat_set, sys_target),
                     join(" ", static_libs),
                     sys_target_triple(sys_target) == "aarch64-linux-gnu"?
                         "-C link-arg=-l:libgcc.a": "",
@@ -1875,15 +1893,7 @@ target "deps-base" {
                     interprocedural_rustflags(cargo_profile),
                     sys_target_triple(sys_target) == "x86_64-linux-gnu"?
                         "-C target-cpu=${sys_target_isa(sys_target)}": "",
-                    "-C link-arg=-L/usr/lib/gcc/${sys_target_triple(sys_target)}/15", #FIXME
-                    contains(split(",", cargo_feat_sets[feat_set]), "bzip2_compression")?
-                        "-C link-arg=-l:libbz2.a": "",
-                    contains(split(",", cargo_feat_sets[feat_set]), "lz4_compression")?
-                        "-C link-arg=-l:liblz4.a": "",
-                    contains(split(",", cargo_feat_sets[feat_set]), "zstd_compression")?
-                        "-C link-arg=-l:libzstd.a": "",
-                    contains(split(",", cargo_feat_sets[feat_set]), "io_uring")?
-                        "-C link-arg=-l:liburing.a": "",
+                    static_library_rustflags(feat_set, sys_target),
                     join(" ", static_libs),
                     sys_target_triple(sys_target) == "aarch64-linux-gnu"?
                         "-C link-arg=-l:libgcc.a": "",
@@ -1896,15 +1906,7 @@ target "deps-base" {
                     interprocedural_rustflags(cargo_profile),
                     sys_target_triple(sys_target) == "x86_64-linux-gnu"?
                         "-C target-cpu=${sys_target_isa(sys_target)}": "",
-                    "-C link-arg=-L/usr/lib/gcc/${sys_target_triple(sys_target)}/15", #FIXME
-                    contains(split(",", cargo_feat_sets[feat_set]), "bzip2_compression")?
-                        "-C link-arg=-l:libbz2.a": "",
-                    contains(split(",", cargo_feat_sets[feat_set]), "lz4_compression")?
-                        "-C link-arg=-l:liblz4.a": "",
-                    contains(split(",", cargo_feat_sets[feat_set]), "zstd_compression")?
-                        "-C link-arg=-l:libzstd.a": "",
-                    contains(split(",", cargo_feat_sets[feat_set]), "io_uring")?
-                        "-C link-arg=-l:liburing.a": "",
+                    static_library_rustflags(feat_set, sys_target),
                     join(" ", static_libs),
                     sys_target_triple(sys_target) == "aarch64-linux-gnu"?
                         "-C link-arg=-l:libgcc.a": "",
@@ -1917,15 +1919,7 @@ target "deps-base" {
                     interprocedural_rustflags(cargo_profile),
                     sys_target_triple(sys_target) == "x86_64-linux-gnu"?
                         "-C target-cpu=${sys_target_isa(sys_target)}": "",
-                    "-C link-arg=-L/usr/lib/gcc/${sys_target_triple(sys_target)}/15", #FIXME
-                    contains(split(",", cargo_feat_sets[feat_set]), "bzip2_compression")?
-                        "-C link-arg=-l:libbz2.a": "",
-                    contains(split(",", cargo_feat_sets[feat_set]), "lz4_compression")?
-                        "-C link-arg=-l:liblz4.a": "",
-                    contains(split(",", cargo_feat_sets[feat_set]), "zstd_compression")?
-                        "-C link-arg=-l:libzstd.a": "",
-                    contains(split(",", cargo_feat_sets[feat_set]), "io_uring")?
-                        "-C link-arg=-l:liburing.a": "",
+                    static_library_rustflags(feat_set, sys_target),
                     join(" ", static_libs),
                     sys_target_triple(sys_target) == "aarch64-linux-gnu"?
                         "-C link-arg=-l:libgcc.a": "",
@@ -1956,6 +1950,48 @@ target "deps-base" {
             ])
         )
     }
+}
+
+function "static_library_rustflags" {
+    params = [features, target]
+    result = join(" ", [
+        "-C link-arg=-L/usr/lib/gcc/${sys_target_triple(target)}/15", #FIXME
+        contains(split(",", cargo_feat_sets[features]), "bzip2_compression")?
+            "-C link-arg=-l:libbz2.a": "",
+        contains(split(",", cargo_feat_sets[features]), "lz4_compression")?
+            "-C link-arg=-l:liblz4.a": "",
+        contains(split(",", cargo_feat_sets[features]), "zstd_compression")?
+            "-C link-arg=-l:libzstd.a": "",
+        contains(split(",", cargo_feat_sets[features]), "io_uring")?
+            "-C link-arg=-l:liburing.a": "",
+    ])
+}
+
+function "debian_package_rustflags" {
+    params = [profile, toolchain, features, target]
+    result = join(" ", [
+        join(" ", rustflags),
+        substr(toolchain, 0, 7) == "nightly"? join(" ", nightly_rustflags): "",
+        join(" ", dynamic_rustflags),
+        substr(toolchain, 0, 7) == "nightly"? join(" ", dynamic_nightly_rustflags): "",
+        interprocedural_rustflags(profile),
+        sys_target_triple(target) == "x86_64-linux-gnu"?
+            "-C target-cpu=${sys_target_isa(target)}": "",
+        static_library_rustflags(features, target),
+        "-C link-arg=-l:libstdc++.a",
+        "-C link-arg=-lc",
+        "-C link-arg=-lm",
+        sys_target_triple(target) == "aarch64-linux-gnu"?
+            "-C link-arg=-l:libgcc.a": "",
+    ])
+}
+
+function "interprocedural_rustflags" {
+    params = [profile]
+    result = (
+        contains(["release-native", "release", "bench"], profile)?
+            "-C linker-plugin-lto -C linker=${llvm_cc} -C link-arg=-fuse-ld=lld": ""
+    )
 }
 
 #
@@ -2272,6 +2308,7 @@ kitchen_packages = [
     "clang",
     "cmake",
     "curl",
+    "dpkg-dev",
     "gawk",
     "git",
     "golang-go",
