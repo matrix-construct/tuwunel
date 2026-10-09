@@ -13,6 +13,7 @@ ARG RUSTUP_HOME
 ARG CARGO_HOME
 ARG CARGO_TARGET
 ARG CARGO_TARGET_DIR
+ARG LTO_CACHE_DIR
 ARG CARGO_TERM_VERBOSE=0
 ARG RUST_BACKTRACE
 ARG JEMALLOC_OVERRIDE
@@ -90,6 +91,7 @@ RUN \
 --mount=type=cache,dst=${RUSTUP_HOME}/downloads,sharing=locked \
 --mount=type=cache,dst=${CARGO_HOME}/registry,sharing=locked \
 --mount=type=cache,dst=${CARGO_HOME}/git,sharing=locked \
+--mount=type=cache,id=tuwunel-lto-${rust_toolchain}-${CARGO_TARGET}-${cargo_profile},dst=${LTO_CACHE_DIR},sharing=shared \
 <<EOF
     set -eux
     ulimit -n 65535
@@ -125,6 +127,7 @@ ARG RUSTUP_HOME
 ARG CARGO_HOME
 ARG CARGO_TARGET
 ARG CARGO_TARGET_DIR
+ARG LTO_CACHE_DIR
 ARG cargo_profile
 ARG cargo_target_profile
 ARG cargo_target_prune=""
@@ -164,6 +167,7 @@ RUN \
 --mount=type=cache,dst=${RUSTUP_HOME}/downloads,sharing=locked \
 --mount=type=cache,dst=${CARGO_HOME}/registry,sharing=locked \
 --mount=type=cache,dst=${CARGO_HOME}/git,sharing=locked \
+--mount=type=cache,id=tuwunel-lto-${rust_toolchain}-${CARGO_TARGET}-${cargo_profile},dst=${LTO_CACHE_DIR},sharing=shared \
 <<EOF
     set -eux
     ulimit -n 65535

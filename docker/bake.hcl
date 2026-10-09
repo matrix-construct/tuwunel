@@ -76,6 +76,18 @@ variable "llvm_ar" {
 variable "llvm_ranlib" {
     default = "/usr/bin/llvm-ranlib"
 }
+variable "lld_threads" {
+    default = 2
+}
+variable "lto_jobs" {
+    default = 2
+}
+variable "lto_cache_dir" {
+    default = "/var/cache/tuwunel/thinlto"
+}
+variable "lto_cache_policy" {
+    default = "cache_size=0%:cache_size_bytes=10g:prune_after=168h"
+}
 
 variable "sys_names" {
     default = "[\"debian\"]"
@@ -1860,6 +1872,7 @@ target "deps-base" {
 
         # Base path
         CARGO_TARGET_DIR = "${cargo_tgt_dir_base}"
+        LTO_CACHE_DIR = lto_cache_dir
         # cased name of profile subdir within target complex
         cargo_target_profile = (
             (cargo_profile == "dev" || cargo_profile == "test")? "debug":
@@ -2002,7 +2015,15 @@ function "interprocedural_rustflags" {
     params = [profile]
     result = (
         contains(["release-native", "release", "bench"], profile)?
-            "-C linker-plugin-lto -C linker=${llvm_cc} -C link-arg=-fuse-ld=lld": ""
+            join(" ", [
+                "-C linker=${llvm_cc}",
+                "-C linker-plugin-lto",
+                "-C link-arg=-fuse-ld=lld",
+                "-C link-arg=-Wl,--threads=${lld_threads}",
+                "-C link-arg=-Wl,--thinlto-jobs=${lto_jobs}",
+                "-C link-arg=-Wl,--thinlto-cache-dir=${lto_cache_dir}",
+                "-C link-arg=-Wl,--thinlto-cache-policy=${lto_cache_policy}",
+            ]): ""
     )
 }
 
