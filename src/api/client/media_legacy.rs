@@ -135,7 +135,7 @@ pub(crate) async fn get_content_legacy_route(
 			if !services.globals.server_is_ours(&body.server_name) && body.allow_remote {
 				let response = services
 					.media
-					.fetch_remote_content_legacy(&mxc, body.allow_redirect, body.timeout_ms)
+					.fetch_remote_content_legacy(&mxc, body.timeout_ms)
 					.await
 					.map_err(|e| {
 						err!(Request(NotFound(debug_warn!(%mxc, "Fetching media failed: {e:?}"))))
@@ -221,7 +221,7 @@ pub(crate) async fn get_content_as_filename_legacy_route(
 			if !services.globals.server_is_ours(&body.server_name) && body.allow_remote {
 				let response = services
 					.media
-					.fetch_remote_content_legacy(&mxc, body.allow_redirect, body.timeout_ms)
+					.fetch_remote_content_legacy(&mxc, body.timeout_ms)
 					.await
 					.map_err(|e| {
 						err!(Request(NotFound(debug_warn!(%mxc, "Fetching media failed: {e:?}"))))
