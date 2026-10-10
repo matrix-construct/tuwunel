@@ -96,7 +96,13 @@ RUN <<EOF
 	test -f /usr/lib/systemd/system/tuwunel.socket
 	test -L /etc/systemd/system/multi-user.target.wants/tuwunel.service
 	test ! -e /etc/systemd/system/sockets.target.wants/tuwunel.socket
+EOF
 
+# The server test runs in a network namespace of its own. The builder's default
+# network is shared by every concurrent step, so two package variants testing
+# at once would bind the same loopback port and answer each other's requests.
+RUN --network=none <<EOF
+	set -eux
 	install -d -o tuwunel -g tuwunel /var/lib/tuwunel/package-test
 	cat > /var/lib/tuwunel/package-test.toml <<'CONFIG'
 [global]
