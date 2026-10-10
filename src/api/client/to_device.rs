@@ -3,26 +3,35 @@ use std::{collections::BTreeMap, iter::once};
 use axum::extract::State;
 use futures::StreamExt;
 use ruma::{
-	OwnedDeviceId,
+	DeviceId, OwnedDeviceId,
 	api::{
 		client::to_device::send_event_to_device,
 		error::ErrorKind,
 		federation::{self, transactions::edu::DirectDeviceContent},
 	},
+	events::AnyToDeviceEventContent,
+	serde::Raw,
 	to_device::DeviceIdOrAllDevices,
 };
 use tuwunel_core::{
-	Error, Result,
+	Err, Error, Result,
 	smallvec::SmallVec,
 	utils::{ReadyExt, result::LogErr},
 };
-use tuwunel_service::sending::EduBuf;
+use tuwunel_service::{sending::EduBuf, users::device::MAX_DEVICE_ID_LENGTH};
 
 use crate::Ruma;
 
 /// Recipient devices of one `AllDevices` to-device send paired with their
 /// inbox counts.
 type Deliveries = SmallVec<[(OwnedDeviceId, u64); 1]>;
+
+/// Largest serialized content of one to-device message.
+///
+/// Synapse refuses larger content with the same limit, measured the same way on
+/// canonical JSON. Together with the cap on recipient device IDs it keeps the
+/// EDU carrying a message for a remote device far inside a peer's request limit.
+const MAX_CONTENT_BYTES: usize = 65_536;
 
 /// # `PUT /_matrix/client/r0/sendToDevice/{eventType}/{txnId}`
 ///
@@ -42,6 +51,16 @@ pub(crate) async fn send_event_to_device_route(
 		.is_ok()
 	{
 		return Ok(send_event_to_device::v3::Response {});
+	}
+
+	// Checked before any delivery, so a refused request queues nothing.
+	if body
+		.messages
+		.values()
+		.flat_map(BTreeMap::iter)
+		.any(too_large)
+	{
+		return Err!(Request(TooLarge("To-device message is too large.")));
 	}
 
 	for (target_user_id, map) in &body.messages {
@@ -154,4 +173,15 @@ pub(crate) async fn send_event_to_device_route(
 		.add_txnid(sender_user, sender_device, &body.txn_id, &[]);
 
 	Ok(send_event_to_device::v3::Response {})
+}
+
+/// Whether one message is too large to queue.
+///
+/// Its content may not pass `MAX_CONTENT_BYTES`. No device can have an ID past
+/// `MAX_DEVICE_ID_LENGTH`, so neither may its recipient.
+fn too_large((target, event): (&DeviceIdOrAllDevices, &Raw<AnyToDeviceEventContent>)) -> bool {
+	let long_id = |device_id: &DeviceId| device_id.as_str().len() > MAX_DEVICE_ID_LENGTH;
+
+	event.json().get().len() > MAX_CONTENT_BYTES
+		|| matches!(target, DeviceIdOrAllDevices::DeviceId(device_id) if long_id(device_id))
 }

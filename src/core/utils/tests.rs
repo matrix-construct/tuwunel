@@ -20,7 +20,7 @@ use tokio::{spawn, sync::Barrier};
 use crate::{
 	Error, Result, checked,
 	utils::{
-		IterStream, MutexMap,
+		IterStream, MutexMap, budget,
 		debug::str_truncated,
 		future::OptionFutureExt,
 		increment,
@@ -519,4 +519,13 @@ async fn option_future_unwrap_or_else_async() {
 	let absent: OptionFuture<_> = None::<Ready<i32>>.into();
 
 	assert_eq!(absent.unwrap_or_else_async(|| ready(2)).await, 2);
+}
+
+#[test]
+fn budget_skips_items_past_the_limit() {
+	let kept: Vec<_> = budget([11, 4, 7, 6], 10, |&size| size)
+		.filter_map(Result::ok)
+		.collect();
+
+	assert_eq!(kept, [4, 6]);
 }

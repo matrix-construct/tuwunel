@@ -68,6 +68,17 @@ pub(crate) async fn register_route(
 
 	check_appservice_namespace(services, &body, &user_id, emergency_mode_enabled).await?;
 
+	let device_id = body
+		.device_id
+		.as_deref()
+		.filter(|_| !is_guest && !body.inhibit_login);
+
+	// Checked before anything is stored, so a refused ID leaves the name free.
+	services
+		.users
+		.check_device_id(&user_id, device_id)
+		.await?;
+
 	let email_association = enforce_uiaa(services, &body, is_guest).await?;
 
 	let password = if is_guest { None } else { body.password.as_deref() };
@@ -102,8 +113,6 @@ pub(crate) async fn register_route(
 			expires_in: None,
 		});
 	}
-
-	let device_id = if is_guest { None } else { body.device_id.as_deref() };
 
 	// Generate new token for the device
 	let (access_token, expires_in) = services

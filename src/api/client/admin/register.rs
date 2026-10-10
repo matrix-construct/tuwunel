@@ -42,6 +42,17 @@ pub(crate) async fn admin_register_route(
 		return Err!(Request(UserInUse("User ID is not available")));
 	}
 
+	let device_id = body
+		.device_id
+		.as_deref()
+		.filter(|_| !body.inhibit_login);
+
+	// Checked before anything is stored, so a refused ID leaves the name free.
+	services
+		.users
+		.check_device_id(&user_id, device_id)
+		.await?;
+
 	services
 		.users
 		.full_register(Register {
@@ -73,7 +84,7 @@ pub(crate) async fn admin_register_route(
 		.users
 		.create_device(
 			&user_id,
-			body.device_id.as_deref(),
+			device_id,
 			(Some(&access_token), expires_in),
 			refresh_token.as_deref(),
 			body.initial_device_display_name.as_deref(),

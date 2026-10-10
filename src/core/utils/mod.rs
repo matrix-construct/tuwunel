@@ -6,6 +6,7 @@
 
 pub mod arrayvec;
 pub mod bool;
+pub mod budget;
 pub mod bytes;
 pub mod content_disposition;
 pub mod debug;
@@ -39,6 +40,7 @@ pub use ::tuwunel_macros::{async_noinline, implement};
 pub use self::{
 	arrayvec::ArrayVecExt,
 	bool::BoolExt,
+	budget::budget,
 	bytes::{increment, u64_from_bytes, u64_from_u8},
 	debug::slice_truncated as debug_slice_truncated,
 	future::{BoolExt as FutureBoolExt, OptionStream, TryExtExt as TryFutureExtExt},

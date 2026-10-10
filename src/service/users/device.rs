@@ -27,13 +27,20 @@ use super::DeviceListChange;
 /// generated device ID length
 const DEVICE_ID_LENGTH: usize = 10;
 
+/// Longest device ID a client may choose, in bytes.
+///
+/// Synapse refuses one longer than 512 characters at login. Other servers
+/// receive the ID in every device list update.
+pub const MAX_DEVICE_ID_LENGTH: usize = 512;
+
 /// generated user access token length
 pub const TOKEN_LENGTH: usize = 32;
 
 /// Adds a new device to a user.
 ///
-/// A device ID coinciding with one of the user's cross-signing key IDs is
-/// refused, since both share the device key row space.
+/// Without a device ID one is generated. A chosen ID is refused when longer
+/// than `MAX_DEVICE_ID_LENGTH` bytes or when it matches one of the user's
+/// cross-signing key IDs.
 #[implement(super::Service)]
 #[tracing::instrument(level = "info", skip(self, access_token))]
 pub async fn create_device(
@@ -53,12 +60,8 @@ pub async fn create_device(
 		))));
 	}
 
-	if self
-		.is_cross_signing_key_id(user_id, device_id.as_str())
-		.await?
-	{
-		return Err!(Request(Forbidden("Device ID matches a cross-signing key ID.")));
-	}
+	self.check_device_id(user_id, Some(&device_id))
+		.await?;
 
 	let notify = true;
 	self.put_device_metadata(user_id, notify, &Device {
@@ -83,6 +86,31 @@ fn resolve_device_id(device_id: Option<&DeviceId>) -> OwnedDeviceId {
 		.filter(|device_id| !device_id.as_str().is_empty())
 		.map(ToOwned::to_owned)
 		.unwrap_or_else(|| OwnedDeviceId::from(random_string(DEVICE_ID_LENGTH)))
+}
+
+/// Refuses a device ID the user may not take.
+///
+/// An ID longer than `MAX_DEVICE_ID_LENGTH` bytes is refused. So is one
+/// coinciding with one of the user's cross-signing key IDs, since both share
+/// the device key row space. Without an ID nothing is refused.
+#[implement(super::Service)]
+pub async fn check_device_id(&self, user_id: &UserId, device_id: Option<&DeviceId>) -> Result {
+	let Some(device_id) = device_id.map(DeviceId::as_str) else {
+		return Ok(());
+	};
+
+	if device_id.len() > MAX_DEVICE_ID_LENGTH {
+		return Err!(Request(InvalidParam("Device ID is too long.")));
+	}
+
+	if self
+		.is_cross_signing_key_id(user_id, device_id)
+		.await?
+	{
+		return Err!(Request(Forbidden("Device ID matches a cross-signing key ID.")));
+	}
+
+	Ok(())
 }
 
 /// Removes a device from a user.

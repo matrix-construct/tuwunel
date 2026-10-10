@@ -25,6 +25,24 @@ pub(crate) async fn sync_devices_route(
 		.collect()
 		.await;
 
+	let added = || {
+		body.devices
+			.iter()
+			.filter(|device_id| !current.contains(*device_id))
+	};
+
+	// Checked before any removal, so a refused addition leaves every device.
+	added()
+		.try_stream()
+		.broad_and_then(async |device_id| {
+			services
+				.users
+				.check_device_id(&user_id, Some(device_id.as_ref()))
+				.await
+		})
+		.try_collect::<()>()
+		.await?;
+
 	current
 		.iter()
 		.filter(|device_id| !body.devices.contains(*device_id))
@@ -37,9 +55,7 @@ pub(crate) async fn sync_devices_route(
 		})
 		.await;
 
-	body.devices
-		.iter()
-		.filter(|device_id| !current.contains(*device_id))
+	added()
 		.try_stream()
 		.broad_and_then(async |device_id| {
 			services

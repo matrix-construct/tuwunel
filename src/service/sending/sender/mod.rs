@@ -109,6 +109,14 @@ pub const PDU_LIMIT: usize = 50;
 /// rejected and outbound composition stays under it.
 pub const EDU_LIMIT: usize = 100;
 
+/// Most bytes of serialized EDUs one federation transaction may carry.
+///
+/// A peer refuses a body past its request limit, and refused EDU rows ride along
+/// with every later transaction to it, so EDUs past this are dropped instead.
+/// The smallest limit Synapse accepts is 200 units of 64 KiB; each PDU fits in
+/// one unit and the envelope gets one, leaving the rest for EDUs.
+pub(super) const EDU_BYTES_LIMIT: usize = (200 - PDU_LIMIT - 1) * 65_536;
+
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "debug")]
 pub(super) async fn sender(self: Arc<Self>, id: usize) -> Result {
