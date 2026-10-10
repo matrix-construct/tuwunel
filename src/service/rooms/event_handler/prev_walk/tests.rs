@@ -277,7 +277,7 @@ fn prev_upgrade(room_version: &RoomVersionId) -> PrevUpgrade<'_> {
 		event_id: event_id!("$incoming"),
 		room_version,
 		recursion_level: 0,
-		first_ts_in_room: MilliSecondsSinceUnixEpoch(uint!(0)),
+		first_normal_ts: MilliSecondsSinceUnixEpoch(uint!(0)),
 		create_event_id: event_id!("$create"),
 	}
 }

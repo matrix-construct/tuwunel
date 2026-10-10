@@ -1,13 +1,13 @@
 #![cfg(test)]
 
-use serde_json::json;
+use serde_json::{json, value::to_raw_value};
 use tuwunel_core::{
 	Err, Result,
 	matrix::{Event, pdu::into_outgoing_federation},
 	pdu::PduBuilder,
 	ruma::{
 		CanonicalJsonObject, CanonicalJsonValue, EventId, MilliSecondsSinceUnixEpoch,
-		OwnedEventId, RoomId, UserId,
+		OwnedEventId, RoomId, UInt, UserId,
 		events::{StateEventType, room::message::RoomMessageEventContent},
 	},
 };
@@ -29,7 +29,8 @@ const TOKEN: &str = "federation-prev-event-room-access-token";
 /// again; it is still checked for its room, as a fetched prev event is.
 /// Otherwise the state before the incoming event would be the other room's.
 /// The same holds when a stored prev event as old as the room's first event
-/// names the other room's event.
+/// names the other room's event. A backfilled event dated in the future must
+/// not then make a later live event look old.
 #[test]
 fn prev_event_in_another_room_is_rejected() -> Result {
 	let options: [&str; 0] = [];
@@ -137,7 +138,40 @@ async fn exercise(services: &Services, base: &str) -> Result {
 		"the same-room predecessor has no state association"
 	);
 
-	Ok(())
+	assert_backfill_keeps_cutoff(services, &user_id, &room_id, &local_event_id).await
+}
+
+/// A backfilled event dated in the future does not make later live events
+/// look old.
+///
+/// Backfilled events sort before the rest of the timeline, but the servers
+/// that supplied them chose their timestamps.
+async fn assert_backfill_keeps_cutoff(
+	services: &Services,
+	user_id: &UserId,
+	room_id: &RoomId,
+	prev_id: &EventId,
+) -> Result {
+	let future_ts = MilliSecondsSinceUnixEpoch(UInt::new_saturating(8_000_000_000_000));
+	let (backfill_id, backfill) =
+		sign_message(services, user_id, room_id, &[prev_id], Some(future_ts)).await?;
+
+	services
+		.timeline
+		.backfill_pdu(room_id, services.globals.server_name(), to_raw_value(&backfill)?)
+		.await?;
+
+	let first_id = services
+		.timeline
+		.first_pdu_in_room(room_id)
+		.await?
+		.event_id;
+
+	assert_eq!(first_id, backfill_id, "the backfilled event is not the room's first");
+
+	let (event_id, pdu) = sign_message(services, user_id, room_id, &[prev_id], None).await?;
+
+	assert_accepted(services, room_id, &event_id, pdu).await
 }
 
 async fn sign_message(

@@ -23,7 +23,7 @@ pub(super) struct PrevUpgrade<'a> {
 	pub(super) event_id: &'a EventId,
 	pub(super) room_version: &'a RoomVersionId,
 	pub(super) recursion_level: usize,
-	pub(super) first_ts_in_room: MilliSecondsSinceUnixEpoch,
+	pub(super) first_normal_ts: MilliSecondsSinceUnixEpoch,
 	pub(super) create_event_id: &'a EventId,
 }
 
@@ -63,7 +63,7 @@ pub(super) async fn handle_prev_pdu(
 	};
 
 	// Skip old events
-	if pdu.origin_server_ts() < upgrade.first_ts_in_room {
+	if pdu.origin_server_ts() < upgrade.first_normal_ts {
 		debug_warn!(?prev_id, "origin_server_ts older than room");
 		return Ok(None);
 	}

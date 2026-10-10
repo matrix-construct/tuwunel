@@ -213,13 +213,26 @@ pub fn add_pdu_outlier(&self, event_id: &EventId, pdu: &CanonicalJsonObject) {
 		.raw_put(event_id, Json(pdu));
 }
 
-/// Returns the earliest accepted PDU in a room.
+/// Returns the earliest accepted PDU in a room, backfilled ones included.
 ///
 /// Unknown or empty rooms report the underlying stream's not-found result.
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "debug")]
 pub async fn first_pdu_in_room(&self, room_id: &RoomId) -> Result<PduEvent> {
 	self.first_item_in_room(room_id).await.map(at!(1))
+}
+
+/// Returns the earliest PDU in a room's normal timeline.
+///
+/// Backfilled PDUs sort before it but are skipped, because backfill admits
+/// events with whatever timestamp their origin claims. Rooms without a normal
+/// PDU report not found.
+#[implement(Service)]
+#[tracing::instrument(skip(self), level = "debug")]
+pub async fn first_normal_pdu_in_room(&self, room_id: &RoomId) -> Result<PduEvent> {
+	self.first_item_after(room_id, Some(PduCount::Normal(0)))
+		.map_ok(at!(1))
+		.await
 }
 
 /// Returns the latest accepted PDU in a room.
@@ -240,7 +253,19 @@ pub async fn latest_pdu_in_room(&self, room_id: &RoomId) -> Result<PduEvent> {
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "debug")]
 pub async fn first_item_in_room(&self, room_id: &RoomId) -> Result<(PduCount, PduEvent)> {
-	let pdus = self.pdus(None, room_id, None);
+	self.first_item_after(room_id, None).await
+}
+
+/// Returns the first accepted PDU after an exclusive `from` count.
+///
+/// Without a count the room's backfilled PDUs come first.
+#[implement(Service)]
+async fn first_item_after(
+	&self,
+	room_id: &RoomId,
+	from: Option<PduCount>,
+) -> Result<(PduCount, PduEvent)> {
+	let pdus = self.pdus(None, room_id, from);
 
 	pin_mut!(pdus);
 	pdus.try_next()

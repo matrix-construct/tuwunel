@@ -163,17 +163,17 @@ pub async fn handle_incoming_pdu<'a>(
 	}
 
 	// Skip old events
-	let first_ts_in_room = self
+	let first_normal_ts = self
 		.services
 		.timeline
-		.first_pdu_in_room(room_id)
+		.first_normal_pdu_in_room(room_id)
 		.await?
 		.origin_server_ts();
 
-	if incoming_pdu.origin_server_ts() < first_ts_in_room {
+	if incoming_pdu.origin_server_ts() < first_normal_ts {
 		debug!(
 			origin_server_ts = ?incoming_pdu.origin_server_ts(),
-			?first_ts_in_room,
+			?first_normal_ts,
 			"Skipping old event."
 		);
 		return Ok(None);
@@ -195,7 +195,7 @@ pub async fn handle_incoming_pdu<'a>(
 		event_id,
 		room_version: &room_version,
 		recursion_level,
-		first_ts_in_room,
+		first_normal_ts,
 		create_event_id,
 	};
 

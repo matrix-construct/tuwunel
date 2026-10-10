@@ -69,7 +69,7 @@ pub(super) async fn fetch_prev<'a, Events>(
 		event_id: incoming_event_id,
 		room_version,
 		recursion_level,
-		first_ts_in_room,
+		first_normal_ts,
 		..
 	}: PrevUpgrade<'_>,
 	initial_set: Events,
@@ -169,7 +169,7 @@ where
 
 		// handle_prev_pdu upgrades events this old too, so their prev events must be
 		// walked and room-checked as well.
-		if pdu.origin_server_ts() >= first_ts_in_room {
+		if pdu.origin_server_ts() >= first_normal_ts {
 			amount = amount.saturating_add(1);
 			debug_assert!(
 				pdu.prev_events().count() <= MAX_PREV_EVENTS,
