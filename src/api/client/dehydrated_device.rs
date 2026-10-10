@@ -1,11 +1,18 @@
 use axum::extract::State;
 use futures::StreamExt;
-use ruma::api::client::dehydrated_device::{
-	delete_dehydrated_device::unstable as delete_dehydrated_device,
-	get_dehydrated_device::unstable as get_dehydrated_device, get_events::unstable as get_events,
-	put_dehydrated_device::unstable as put_dehydrated_device,
+use ruma::{
+	DeviceId, UserId,
+	api::client::dehydrated_device::{
+		delete_dehydrated_device::unstable as delete_dehydrated_device,
+		get_dehydrated_device::unstable as get_dehydrated_device,
+		get_events::{unstable as get_events, unstable_v1 as get_events_v1},
+		put_dehydrated_device::unstable as put_dehydrated_device,
+	},
+	events::AnyToDeviceEvent,
+	serde::Raw,
 };
 use tuwunel_core::{Err, Result, at, utils::result::IsErrOr};
+use tuwunel_service::Services;
 
 use crate::{ClientIp, Ruma};
 
@@ -81,9 +88,10 @@ pub(crate) async fn get_dehydrated_device_route(
 	})
 }
 
-/// # `POST /_matrix/client/../dehydrated_device/{device_id}/events`
+/// # `GET /_matrix/client/../dehydrated_device/{device_id}/events`
 ///
-/// Paginates the events of the dehydrated device.
+/// Paginates the events of the dehydrated device. The `next_batch` token is
+/// omitted once there are no more events to retrieve.
 #[tracing::instrument(skip_all, fields(%client))]
 pub(crate) async fn get_dehydrated_events_route(
 	State(services): State<crate::State>,
@@ -91,8 +99,52 @@ pub(crate) async fn get_dehydrated_events_route(
 	body: Ruma<get_events::Request>,
 ) -> Result<get_events::Response> {
 	let sender_user = body.sender_user();
-
 	let device_id = &body.body.device_id;
+	let since = body.body.from.as_deref();
+
+	let (events, next_batch) =
+		get_dehydrated_events(&services, sender_user, device_id, since).await?;
+
+	let limited = events.len() >= MAX_BATCH_EVENTS;
+
+	Ok(get_events::Response {
+		next_batch: next_batch
+			.filter(|_| limited)
+			.as_ref()
+			.map(ToString::to_string),
+		events,
+	})
+}
+
+/// # `POST /_matrix/client/../dehydrated_device/{device_id}/events`
+///
+/// Paginates the events of the dehydrated device. Earlier revision of MSC3814
+/// still used by older clients; the empty batch signals the end.
+#[tracing::instrument(skip_all, fields(%client))]
+pub(crate) async fn get_dehydrated_events_v1_route(
+	State(services): State<crate::State>,
+	ClientIp(client): ClientIp,
+	body: Ruma<get_events_v1::Request>,
+) -> Result<get_events_v1::Response> {
+	let sender_user = body.sender_user();
+	let device_id = &body.body.device_id;
+	let since = body.body.next_batch.as_deref();
+
+	let (events, next_batch) =
+		get_dehydrated_events(&services, sender_user, device_id, since).await?;
+
+	Ok(get_events_v1::Response {
+		events,
+		next_batch: next_batch.as_ref().map(ToString::to_string),
+	})
+}
+
+async fn get_dehydrated_events(
+	services: &Services,
+	sender_user: &UserId,
+	device_id: &DeviceId,
+	since: Option<&str>,
+) -> Result<(Vec<Raw<AnyToDeviceEvent>>, Option<u64>)> {
 	let existing_id = services
 		.users
 		.get_dehydrated_device_id(sender_user)
@@ -105,12 +157,7 @@ pub(crate) async fn get_dehydrated_events_route(
 		return Err!(Request(Forbidden("Not the dehydrated device_id.")));
 	}
 
-	let since: Option<u64> = body
-		.body
-		.next_batch
-		.as_deref()
-		.map(str::parse)
-		.transpose()?;
+	let since: Option<u64> = since.map(str::parse).transpose()?;
 
 	let mut next_batch: Option<u64> = None;
 	let events = services
@@ -124,8 +171,5 @@ pub(crate) async fn get_dehydrated_events_route(
 		.collect()
 		.await;
 
-	Ok(get_events::Response {
-		events,
-		next_batch: next_batch.as_ref().map(ToString::to_string),
-	})
+	Ok((events, next_batch))
 }

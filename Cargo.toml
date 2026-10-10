@@ -1096,3 +1096,17 @@ suspicious = { level = "warn", priority = -1 }
 
 # rust doesnt understand tuwunel's custom log macros
 literal_string_with_formatting_args = { level = "allow", priority = 1 }
+
+# Testing only: ruma with the MSC3814 GET events definition.
+[patch."https://github.com/matrix-construct/ruma"]
+ruma = { git = "https://github.com/livenson/ruma", rev = "f9696d2d2fd6c99b9b0808a92c77c0f285d9ad30" }
+ruma-appservice-api = { git = "https://github.com/livenson/ruma", rev = "f9696d2d2fd6c99b9b0808a92c77c0f285d9ad30" }
+ruma-client-api = { git = "https://github.com/livenson/ruma", rev = "f9696d2d2fd6c99b9b0808a92c77c0f285d9ad30" }
+ruma-common = { git = "https://github.com/livenson/ruma", rev = "f9696d2d2fd6c99b9b0808a92c77c0f285d9ad30" }
+ruma-events = { git = "https://github.com/livenson/ruma", rev = "f9696d2d2fd6c99b9b0808a92c77c0f285d9ad30" }
+ruma-federation-api = { git = "https://github.com/livenson/ruma", rev = "f9696d2d2fd6c99b9b0808a92c77c0f285d9ad30" }
+ruma-identifiers-validation = { git = "https://github.com/livenson/ruma", rev = "f9696d2d2fd6c99b9b0808a92c77c0f285d9ad30" }
+ruma-identity-service-api = { git = "https://github.com/livenson/ruma", rev = "f9696d2d2fd6c99b9b0808a92c77c0f285d9ad30" }
+ruma-macros = { git = "https://github.com/livenson/ruma", rev = "f9696d2d2fd6c99b9b0808a92c77c0f285d9ad30" }
+ruma-push-gateway-api = { git = "https://github.com/livenson/ruma", rev = "f9696d2d2fd6c99b9b0808a92c77c0f285d9ad30" }
+ruma-signatures = { git = "https://github.com/livenson/ruma", rev = "f9696d2d2fd6c99b9b0808a92c77c0f285d9ad30" }
