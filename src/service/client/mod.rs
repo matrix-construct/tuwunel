@@ -195,7 +195,9 @@ fn make_clients(services: &Services) -> Result<Clients> {
 			.read_timeout(Duration::from_secs(services.config.well_known_timeout))
 			.timeout(Duration::from_secs(services.config.well_known_timeout))
 			.pool_max_idle_per_host(0)
-			.redirect(Policy::limited(4))),
+			// Discovery always starts over HTTPS; this refuses redirects to plain HTTP.
+			.https_only(true)
+			.redirect(guarded_redirect(services, 4))),
 
 		federation,
 		synapse,
