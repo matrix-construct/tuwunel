@@ -203,15 +203,15 @@ jobs:
         runner: ${{matrix.runner}}
         pipeline: ${{inputs.pipeline || github.event.head_commit.message || github.event.workflow_run.head_commit.message}}
         seed_builder: ${{vars.SEED_BUILDER || 'jevolk'}}
-        reserved_space:    '{"het": "60GB",  "aws": "12GB"}'
-        max_used_space:    '{"het": "250GB", "aws": "32GB"}'
-        cachemount_max:    '{"het": "80GB",  "aws": "12GB"}'
-        min_free_space:    '{"het": "200GB", "aws": "16GB"}'
-        safety_free_space: '{"het": "64GB",  "aws": "8GB"}'
-        reap_idle_hours:   '{"het": "24",    "aws": "24"}'
-        reap_min_free:     '{"het": "500GB", "aws": "40GB"}'
-        seed_budget:       '{"het": "300GB", "aws": "0GB"}'
-        builder_memory:    '{"het": "76GB",  "aws": ""}'
+        reserved_space:    '{"het": "60GB",  "aws": "12GB", "ec2": "120GB"}'
+        max_used_space:    '{"het": "250GB", "aws": "32GB", "ec2": "1000GB"}'
+        cachemount_max:    '{"het": "80GB",  "aws": "12GB", "ec2": "160GB"}'
+        min_free_space:    '{"het": "200GB", "aws": "16GB", "ec2": "400GB"}'
+        safety_free_space: '{"het": "64GB",  "aws": "8GB",  "ec2": "128GB"}'
+        reap_idle_hours:   '{"het": "24",    "aws": "24",   "ec2": "24"}'
+        reap_min_free:     '{"het": "500GB", "aws": "40GB", "ec2": "1000GB"}'
+        seed_budget:       '{"het": "300GB", "aws": "0GB",  "ec2": "600GB"}'
+        builder_memory:    '{"het": "76GB",  "aws": "",     "ec2": "224GB"}'
       run: |
         .github/workflows/init.sh
 

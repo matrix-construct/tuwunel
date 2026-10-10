@@ -58,16 +58,28 @@ mark_seen() {
 
 mark_seen "$builder"
 
-# Runner-keyed knobs (JSON maps of runner -> value, selected by $runner).
-reserved_space=$(echo -n "$reserved_space" | jq -r ".$runner")
-max_used_space=$(echo -n "$max_used_space" | jq -r ".$runner")
-cachemount_max=$(echo -n "$cachemount_max" | jq -r ".$runner")
-min_free_space=$(echo -n "$min_free_space" | jq -r ".$runner")
-safety_free_space=$(echo -n "$safety_free_space" | jq -r ".$runner")
-reap_idle_hours=$(echo -n "$reap_idle_hours" | jq -r ".$runner")
-reap_min_free=$(echo -n "$reap_min_free" | jq -r ".$runner")
-seed_budget=$(echo -n "$seed_budget" | jq -r ".$runner")
-builder_memory=$(echo -n "$builder_memory" | jq -r ".$runner")
+# Host-keyed knobs (JSON maps of host -> value). The host is the matrix runner
+# label unless the runner host names itself in /etc/tuwunel-ci/host, so hosts
+# sharing a label can carry their own sizing. A map without the host's key
+# falls back to the label's value.
+host="$runner"
+if test -r /etc/tuwunel-ci/host; then
+	host=$(cat /etc/tuwunel-ci/host)
+fi
+
+knob() {
+	echo -n "$1" | jq -r --arg host "$host" --arg runner "$runner" '.[$host] // .[$runner]'
+}
+
+reserved_space=$(knob "$reserved_space")
+max_used_space=$(knob "$max_used_space")
+cachemount_max=$(knob "$cachemount_max")
+min_free_space=$(knob "$min_free_space")
+safety_free_space=$(knob "$safety_free_space")
+reap_idle_hours=$(knob "$reap_idle_hours")
+reap_min_free=$(knob "$reap_min_free")
+seed_budget=$(knob "$seed_budget")
+builder_memory=$(knob "$builder_memory")
 
 # Daemon-store sweep. buildkit's GC governs only the cache inside each builder;
 # what bake loads into the docker daemon has no owner at all. Every rebuild of
