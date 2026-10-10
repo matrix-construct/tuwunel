@@ -319,16 +319,9 @@ async fn token_refresh(services: &Services, body: &TokenRequest) -> Result<Respo
 			services.users.deactivated_check(&user_id).await?;
 
 			let (access_token, expires_in) = services.users.generate_access_token(true);
-			let refresh_token = generate_refresh_token();
-			services
+			let refresh_token = services
 				.users
-				.set_access_token(
-					&user_id,
-					&device_id,
-					&access_token,
-					expires_in,
-					Some(&refresh_token),
-				)
+				.rotate_refresh_token(&user_id, &device_id, presented, &access_token, expires_in)
 				.await?;
 
 			token_refresh_response(&access_token, &refresh_token, expires_in)

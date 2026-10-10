@@ -7,7 +7,7 @@ use tuwunel_core::{
 	Err, Error, Result, debug_info,
 	utils::{BoolExt, future::OptionFutureExt, time::timepoint_has_passed},
 };
-use tuwunel_service::users::device::{RefreshToken, generate_refresh_token};
+use tuwunel_service::users::device::RefreshToken;
 
 use crate::{ClientIp, Ruma};
 
@@ -54,17 +54,15 @@ pub(crate) async fn refresh_token_route(
 
 			services.users.locked_check(&user_id).await?;
 
-			let refresh_token = Some(generate_refresh_token());
 			let (access_token, expires_in_ms) = services.users.generate_access_token(true);
-
-			services
+			let refresh_token = services
 				.users
-				.set_access_token(
+				.rotate_refresh_token(
 					&user_id,
 					&device_id,
+					&refresh_token_claim,
 					&access_token,
 					expires_in_ms,
-					refresh_token.as_deref(),
 				)
 				.await?;
 
@@ -72,7 +70,7 @@ pub(crate) async fn refresh_token_route(
 
 			Ok(Response {
 				access_token,
-				refresh_token,
+				refresh_token: Some(refresh_token),
 				expires_in_ms,
 			})
 		},
