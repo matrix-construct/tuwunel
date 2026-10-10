@@ -134,7 +134,8 @@ jobs:
     # work and is allowed to take as long as it needs.
     strategy:
       fail-fast: false
-      max-parallel: ${{inputs.max-parallel || 2}}
+      # A dispatched input arrives as a string, which max-parallel rejects.
+      max-parallel: ${{inputs.max-parallel && fromJSON(inputs.max-parallel) || 2}}
       matrix:
         attr: ${{fromJSON(needs.discover.outputs.attrs)}}
 
