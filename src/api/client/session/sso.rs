@@ -42,7 +42,8 @@ use tuwunel_core::{
 		hash::sha256,
 		html::escape as html_escape,
 		result::{FlatOk, LogErr},
-		string::{EMPTY, truncate_deterministic},
+		stream::ReadyExt,
+		string::EMPTY,
 		timepoint_from_now, timepoint_has_passed,
 	},
 	warn,
@@ -53,7 +54,7 @@ use tuwunel_service::{
 	media::MXC_LENGTH,
 	oauth::{
 		CODE_VERIFIER_LENGTH, Provider, SESSION_ID_LENGTH, Session, TokenResponse, UserInfo,
-		unique_id_sub,
+		fallback_localpart, unique_id_sub,
 	},
 	users::{PASSWORD_SENTINEL, Register},
 };
@@ -968,9 +969,8 @@ async fn decide_user_id(
 		}
 	}
 
-	let length = Some(15..23);
-	let unique_id = truncate_deterministic(unique_id, length).to_lowercase();
-	if let Some(user_id) = try_user_id(services, provider, &unique_id, true).await {
+	let localpart = fallback_localpart(unique_id);
+	if let Some(user_id) = try_user_id(services, provider, &localpart, true).await {
 		return Ok(user_id);
 	}
 
@@ -1022,6 +1022,26 @@ async fn try_user_id(
 
 		if !unique_id {
 			debug_warn!(?username, "Username exists.");
+			return None;
+		}
+
+		// Only an identity without an account reaches its fallback, so an account
+		// linked to any identity belongs to another one. An unreadable link counts.
+		if services
+			.oauth
+			.sessions
+			.get_sess_id_by_user(&user_id)
+			.ready_any(|sess_id| match sess_id {
+				| Ok(_) => true,
+				| Err(e) if e.is_missing() => false,
+				| Err(e) => {
+					warn!(?username, error = %e, "Unreadable identity links.");
+					true
+				},
+			})
+			.await
+		{
+			debug_warn!(?username, "Existing username is linked to another identity.");
 			return None;
 		}
 	} else {

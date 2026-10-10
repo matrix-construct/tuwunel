@@ -26,7 +26,8 @@ use serde::Serialize;
 use serde_json::Value as JsonValue;
 use tuwunel_core::{
 	Err, Error, Result, err, implement,
-	utils::{hash::sha256, result::LogErr, stream::ReadyExt},
+	smallstr::SmallString,
+	utils::{hash::sha256, result::LogErr, stream::ReadyExt, string::truncate_deterministic},
 	warn,
 };
 use url::Url;
@@ -40,6 +41,9 @@ pub use self::{
 	user_info::UserInfo,
 };
 use crate::{SelfServices, client::read_response_capped};
+
+/// Fallback localpart derived from an identity's unique-id string.
+pub type Localpart = SmallString<[u8; 23]>;
 
 /// Per-client-IP token-bucket table: last-refill instant and remaining tokens.
 type Ratelimiter = Mutex<HashMap<IpAddr, (Instant, f64)>>;
@@ -427,6 +431,19 @@ pub fn unique_id_iss_sub((iss, sub): (&str, &str)) -> Result<String> {
 	let b64 = b64encode.encode(hash);
 
 	Ok(b64)
+}
+
+/// Derive the fallback localpart of an identity from its unique-id string.
+///
+/// The localpart is a lowercase prefix of 15 to 23 characters selected from the
+/// string's contents. An identity whose claimed usernames are unavailable
+/// therefore falls back to the same localpart on every sign-in.
+#[must_use]
+pub fn fallback_localpart(unique_id: &str) -> Localpart {
+	truncate_deterministic(unique_id, Some(15..23))
+		.chars()
+		.flat_map(char::to_lowercase)
+		.collect()
 }
 
 fn unique_id_parts<'a>(
