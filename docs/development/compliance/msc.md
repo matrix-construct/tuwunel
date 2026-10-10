@@ -580,7 +580,7 @@ in the [Out of scope](#out-of-scope) section.
 | MSC3839 | ❌ ● | 0/0 | primary-identity-as-key | No public-key identity or challenge login; five login types, none key-based |
 | MSC3837 | ❌ ● | 0/0 | Cascading profile tags for push rules | no profile_tags array; only single profile_tag handled |
 | MSC3834 | ❌ ● | 0/0 | Opportunistic user key pinning (TOFU) | TOFU signing key is client-side; no server hooks |
-| MSC3814 | 🟨 ● | 75/90 | Dehydrated devices with SSSS | All four routes wired; events endpoint is the deprecated POST, not the GET |
+| MSC3814 | 🟨 ● | 90/90 | Dehydrated devices with SSSS | All four routes wired; events served over GET with `from` paging, deprecated POST kept for older clients |
 | MSC3767 | ❌ ● | 0/0 | Time based notification filtering | time_and_day push condition not present |
 | MSC3759 | ❌ ● | 0/0 | Leave event metadata for deactivated users | deactivation leaves omit m.deactivated metadata |
 | MSC3744 | ❌ ● | 0/0 | Support for flexible authentication | no flexible-auth /register or /account/authenticator endpoints |

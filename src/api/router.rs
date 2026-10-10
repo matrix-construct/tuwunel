@@ -433,6 +433,7 @@ fn register_client_media_and_device_routes(
 		.ruma_route(&client::delete_dehydrated_device_route)
 		.ruma_route(&client::get_dehydrated_device_route)
 		.ruma_route(&client::get_dehydrated_events_route)
+		.ruma_route(&client::get_dehydrated_events_v1_route)
 		.ruma_route(&client::send_event_to_device_route)
 		.merge(media_content_router)
 }
