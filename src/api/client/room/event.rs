@@ -81,6 +81,9 @@ pub(crate) async fn get_room_event_route(
 			"sender": event.sender().as_str(),
 		}));
 	}
+	if event.sender() != sender_user {
+		event.remove_transaction_id().ok();
+	}
 
 	debug_assert!(event.event_id() == event_id, "Fetched PDU must match requested");
 
