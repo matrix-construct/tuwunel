@@ -296,6 +296,103 @@ pub fn filesystem_from_path(_path: &Path) -> Result<Option<Filesystem>> {
 	Err(Error::new(Unsupported, "Filesystem discovery requires statfs.").into())
 }
 
+/// Get the space in bytes a non-privileged process may still write to the
+/// filesystem on which Path is mounted.
+///
+/// Quotas and reserved blocks make this smaller than the space that is free,
+/// and it is the figure a write is refused against.
+///
+/// Apple's `statvfs(3)` counts blocks in 32 bits, which ends at 16 TiB of
+/// 4 KiB blocks, so `statfs(2)` and its 64-bit count are read there instead.
+#[cfg(target_vendor = "apple")]
+pub fn available_space(path: &Path) -> Result<u64> {
+	use nix::sys::statfs::statfs;
+
+	let stat = statfs(path)?;
+
+	Ok(stat
+		.blocks_available()
+		.saturating_mul(stat.block_size().into()))
+}
+
+/// Get the space in bytes a non-privileged process may still write to the
+/// filesystem on which Path is mounted.
+///
+/// Quotas and reserved blocks make this smaller than the space that is free,
+/// and it is the figure a write is refused against.
+///
+/// `statvfs(3)` counts blocks in units of the fragment size. Both are widened
+/// before they are multiplied, as neither has the same width on every target.
+#[cfg(all(unix, not(target_vendor = "apple")))]
+pub fn available_space(path: &Path) -> Result<u64> {
+	use nix::sys::statvfs::statvfs;
+
+	let stat = statvfs(path)?;
+	let available =
+		u128::from(stat.blocks_available()).saturating_mul(u128::from(stat.fragment_size()));
+
+	Ok(u64::try_from(available).unwrap_or(u64::MAX))
+}
+
+/// Get the space in bytes the calling user may still write to the volume on
+/// which Path resides.
+///
+/// Per-user quotas make this smaller than the space that is free, and it is
+/// the figure a write is refused against. Path may be any directory on the
+/// volume.
+#[cfg(windows)]
+pub fn available_space(path: &Path) -> Result<u64> {
+	use std::{
+		io::{Error, ErrorKind::InvalidInput},
+		os::windows::ffi::OsStrExt,
+		ptr::null_mut,
+	};
+
+	// <https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-getdiskfreespaceexw>
+	#[link(name = "kernel32")]
+	unsafe extern "system" {
+		fn GetDiskFreeSpaceExW(
+			directory_name: *const u16,
+			free_bytes_available_to_caller: *mut u64,
+			total_number_of_bytes: *mut u64,
+			total_number_of_free_bytes: *mut u64,
+		) -> i32;
+	}
+
+	let mut directory_name: Vec<u16> = path.as_os_str().encode_wide().collect();
+	if directory_name.contains(&0) {
+		return Err(Error::new(InvalidInput, "Path contains a NUL.").into());
+	}
+
+	directory_name.push(0);
+
+	let mut available = 0_u64;
+
+	// SAFETY: directory_name is NUL-terminated and outlives the call, available
+	// is a writable u64, and the two values not asked for may be null.
+	let succeeded = unsafe {
+		GetDiskFreeSpaceExW(directory_name.as_ptr(), &raw mut available, null_mut(), null_mut())
+	};
+
+	if succeeded == 0 {
+		return Err(Error::last_os_error().into());
+	}
+
+	Ok(available)
+}
+
+/// Get the space in bytes a non-privileged process may still write to the
+/// filesystem on which Path is mounted.
+///
+/// No interface for this is known for the target, so this always returns an
+/// unsupported error.
+#[cfg(not(any(unix, windows)))]
+pub fn available_space(_path: &Path) -> Result<u64> {
+	use std::io::{Error, ErrorKind::Unsupported};
+
+	Err(Error::new(Unsupported, "Available space discovery is not implemented.").into())
+}
+
 /// Get the (major, minor) of the block device on which Path is mounted.
 #[cfg(unix)]
 fn dev_from_path(path: &Path) -> Result<(dev_t, dev_t)> {
