@@ -55,6 +55,8 @@ pub(crate) async fn create_content_route(
 ) -> Result<create_content::v3::Response> {
 	let user = body.sender_user();
 
+	services.media.check_upload_space().await?;
+
 	let filename = body.filename.as_deref();
 	let content_type = body.content_type.as_deref();
 	let content_disposition = make_content_disposition(None, content_type, filename);
@@ -89,6 +91,9 @@ pub(crate) async fn create_mxc_uri_route(
 	body: Ruma<create_mxc_uri::v1::Request>,
 ) -> Result<create_mxc_uri::v1::Response> {
 	let user = body.sender_user();
+
+	services.media.check_upload_space().await?;
+
 	let mxc = Mxc {
 		server_name: services.globals.server_name(),
 		media_id: &utils::random_string(MXC_LENGTH),
@@ -129,6 +134,9 @@ pub(crate) async fn create_content_async_route(
 	body: Ruma<create_content_async::v3::Request>,
 ) -> Result<create_content_async::v3::Response> {
 	let user = body.sender_user();
+
+	services.media.check_upload_space().await?;
+
 	let mxc = Mxc {
 		server_name: &body.server_name,
 		media_id: &body.media_id,

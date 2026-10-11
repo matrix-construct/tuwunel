@@ -845,3 +845,16 @@ async fn long_file_names_works() {
 		r.to_str().unwrap().len()
 	);
 }
+
+/// An upload is refused strictly below the minimum and taken at it, and a
+/// minimum of zero refuses nothing however little space is left.
+#[test]
+fn short_of_space_is_strictly_below_the_minimum() {
+	use super::is_short_of_space;
+
+	assert!(is_short_of_space(9, 10));
+	assert!(!is_short_of_space(10, 10));
+	assert!(!is_short_of_space(11, 10));
+	assert!(!is_short_of_space(0, 0));
+	assert!(is_short_of_space(u64::MAX - 1, u64::MAX));
+}
