@@ -285,7 +285,7 @@ version = "0.4"
 default-features = false
 
 [workspace.dependencies.loole]
-version = "0.4"
+version = "0.5"
 
 [workspace.dependencies.lru-cache]
 version = "0.1"
