@@ -27,11 +27,7 @@ pub(crate) async fn turn_server_route(
 
 	if !services.config.turn_allow_guests
 		&& body.appservice_info.is_none()
-		&& services
-			.users
-			.is_deactivated(user)
-			.await
-			.unwrap_or(false)
+		&& services.users.is_guest(user).await
 	{
 		return Err!(Request(Forbidden("Guest users are not allowed to get TURN credentials")));
 	}
