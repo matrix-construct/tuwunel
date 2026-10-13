@@ -16,9 +16,9 @@ use ruma::{
 };
 use serde_json::value::to_raw_value;
 use tuwunel_core::{
-	Err, Result, implement,
-	matrix::{event::Event, pdu::PduBuilder, room_version},
-	utils::IterStream,
+	Err, Result, err, implement,
+	matrix::{event::Event, pdu::PduBuilder},
+	utils::{BoolExt, IterStream},
 };
 
 use super::RoomMutexGuard;
@@ -74,27 +74,10 @@ pub async fn build_and_append_pdu(
 			.await?;
 	}
 
-	// If redaction event is not authorized, do not append it to the timeline
 	if *pdu.kind() == TimelineEventType::RoomRedaction {
-		let room_version = self
-			.services
-			.state
-			.get_room_version(pdu.room_id())
+		self.check_redaction_authorized(&pdu)
+			.boxed() // query-depth firewall
 			.await?;
-
-		let room_rules = room_version::rules(&room_version)?;
-
-		let redacts_id = pdu.redacts_id(&room_rules);
-
-		if let Some(redacts_id) = &redacts_id
-			&& !self
-				.services
-				.state_accessor
-				.user_can_redact(redacts_id, pdu.sender(), pdu.room_id(), false)
-				.await?
-		{
-			return Err!(Request(Forbidden("User cannot redact this event.")));
-		}
 	}
 
 	// MSC4284: ask the room's policy server (if any) to sign this event before
@@ -277,4 +260,28 @@ where
 	}
 
 	Ok(())
+}
+
+#[implement(super::Service)]
+#[tracing::instrument(skip_all, level = "debug")]
+async fn check_redaction_authorized<Pdu>(&self, pdu: &Pdu) -> Result
+where
+	Pdu: Event,
+{
+	let room_rules = self
+		.services
+		.state
+		.get_room_version_rules(pdu.room_id())
+		.await?;
+
+	let Some(redacts_id) = pdu.redacts_id(&room_rules) else {
+		return Ok(());
+	};
+
+	self.services
+		.state_accessor
+		.user_can_redact(&redacts_id, pdu.sender(), pdu.room_id(), false)
+		.await?
+		.into_option()
+		.ok_or_else(|| err!(Request(Forbidden("User cannot redact this event."))))
 }

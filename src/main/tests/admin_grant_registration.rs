@@ -1,5 +1,4 @@
 #![cfg(test)]
-#![recursion_limit = "256"]
 
 use tuwunel_core::{
 	Result,
