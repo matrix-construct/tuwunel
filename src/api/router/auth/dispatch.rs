@@ -7,7 +7,9 @@ use ruma::{
 			AccessToken, AccessTokenOptional, AppserviceToken, AppserviceTokenOptional,
 			AuthScheme, NoAccessToken, NoAuthentication,
 		},
-		client::{account::change_password, rtc::transports},
+		client::{
+			account::change_password, delayed_events::update_delayed_event, rtc::transports,
+		},
 		error::{ErrorKind, UnknownTokenErrorData},
 		federation::authentication::ServerSignatures,
 	},
@@ -127,9 +129,12 @@ impl AuthDispatch for AccessToken {
 ///
 /// Transport discovery exposes only configured public metadata. Password reset
 /// derives its target from a validated and bound email proof in the route.
+/// Delayed event updates without a token are delegated ones, which the route
+/// limits to the unstable path and rate-limits by client address.
 fn allows_missing_access_token(route: TypeId) -> bool {
 	route == TypeId::of::<transports::v1::Request>()
 		|| route == TypeId::of::<change_password::v3::Request>()
+		|| route == TypeId::of::<update_delayed_event::v1::Request>()
 }
 
 impl AuthDispatch for AccessTokenOptional {

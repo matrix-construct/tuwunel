@@ -108,6 +108,12 @@ fn capabilities(
 		capabilities.set("im.nheko.msc3664.related_event_match", json!({"enabled": true}))?;
 	}
 
+	// MSC4140: absent when disabled, as clients must then treat it.
+	if let Some(limits) = services.delayed_events.capability() {
+		capabilities.delayed_events = Some(limits);
+		capabilities.unstable_delayed_events = Some(limits);
+	}
+
 	if account_moderation {
 		capabilities.account_moderation = AccountModerationCapability::new(true, true);
 	}

@@ -5,6 +5,7 @@ use ruma::{
 	room_version_rules::{EventsReferenceFormatVersion, RoomVersionRules},
 };
 
+use super::unsigned::SENDER_PRIVATE_KEYS;
 use crate::{extract_variant, is_equal_to, matrix::room_version};
 
 /// Converts a stored PDU object to its federation wire representation.
@@ -21,7 +22,9 @@ pub fn into_outgoing_federation(
 		.get_mut("unsigned")
 		.and_then(|val| val.as_object_mut())
 	{
-		unsigned.remove("transaction_id");
+		for key in SENDER_PRIVATE_KEYS {
+			unsigned.remove(key);
+		}
 	}
 
 	let Ok(room_rules) = room_version::rules(room_version) else {
