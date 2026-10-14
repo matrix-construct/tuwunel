@@ -185,6 +185,11 @@ fn validate_redirect_uri(uri: &str, native: bool, base: Option<&str>) -> Result<
 	}
 
 	match url.scheme() {
+		// MSC2966 host-sharing is a rule for `web` clients. A native client
+		// (RFC 8252) may legitimately send an https redirect_uri on a host
+		// unrelated to its client_uri (e.g. a universal link), so only the
+		// general https shape is enforced here.
+		| "https" if native => validate_native_redirect(&url),
 		| "https" => validate_web_redirect(&url, base),
 		// RFC 8252 §7.3: native loopback http with no registered port.
 		| "http" if native && is_loopback(&url) && url.port().is_none() => Ok(()),
@@ -194,6 +199,18 @@ fn validate_redirect_uri(uri: &str, native: bool, base: Option<&str>) -> Result<
 			"redirect_uri scheme is not permitted for this application_type",
 		)),
 	}
+}
+
+fn validate_native_redirect(url: &Url) -> Result<(), DcrError> {
+	if !url.username().is_empty() || url.password().is_some() {
+		return Err(DcrError::RedirectUri("redirect_uri must not contain userinfo"));
+	}
+
+	if url.host_str().is_none() {
+		return Err(DcrError::RedirectUri("redirect_uri must have a host"));
+	}
+
+	Ok(())
 }
 
 fn validate_web_redirect(url: &Url, base: Option<&str>) -> Result<(), DcrError> {
@@ -346,6 +363,19 @@ mod tests {
 
 		let claimed = native(request(Some("https://example.com"), &["https://example.com/cb"]));
 		validate_client_metadata(&claimed, true).unwrap();
+
+		// Issue #638: a native client may register an https redirect_uri on a
+		// host that differs from its client_uri; host-sharing is a web rule.
+		let foreign_https =
+			native(request(Some("https://fluffychat.im"), &["https://fluffy.example.org/"]));
+		validate_client_metadata(&foreign_https, true).unwrap();
+
+		// A web client is still held to the host-sharing requirement.
+		let web_foreign = request(Some("https://fluffychat.im"), &["https://fluffy.example.org/"]);
+		assert!(matches!(
+			validate_client_metadata(&web_foreign, true),
+			Err(DcrError::RedirectUri(_))
+		));
 
 		let web_http = request(Some("https://example.com"), &["http://127.0.0.1/cb"]);
 		assert!(matches!(
