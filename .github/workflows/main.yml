@@ -190,7 +190,9 @@ jobs:
       fail-fast: true
       matrix:
         runner: ${{fromJSON(inputs.runners || vars.RUNNERS || '["het"]')}}
-        machine: ${{fromJSON(inputs.machines || vars.MACHINES || '["X64"]')}}
+        # Mirrors the machines output (strategy cannot read env.is_fat), so a
+        # lean run never waits on a host none of its jobs will use.
+        machine: ${{fromJSON(inputs.machines || ((contains(github.ref, 'tags/v') || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/test') && vars.MACHINES) || '["X64"]')}}
         exclude: ${{fromJSON(vars.RUNNERS_EXCLUDES || '[]')}}
 
     steps:
