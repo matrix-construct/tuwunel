@@ -17,9 +17,10 @@ use tuwunel_database::{
 /// Per-thread unread counts: `(notification, highlight)` keyed by thread root.
 type ThreadCounts = BTreeMap<OwnedEventId, (u64, u64)>;
 
-/// Per-thread last-read counts keyed by thread root. Used by sync v3 to
-/// gate emission of `unread_thread_notifications` to threads whose read
-/// cursor advanced within the sync window.
+/// Per-thread last-read counts keyed by thread root.
+///
+/// Sync compares each count against its window to tell whether a thread's zero
+/// is news to the client.
 type ThreadLastReads = BTreeMap<OwnedEventId, u64>;
 
 /// Reset the room's main-timeline notification counts.
