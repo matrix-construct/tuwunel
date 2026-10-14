@@ -1,4 +1,4 @@
-use std::{net::IpAddr, time::SystemTime};
+use std::time::SystemTime;
 
 use axum::{
 	extract::State,
@@ -7,7 +7,7 @@ use axum::{
 use serde::Deserialize;
 use tuwunel_core::{
 	Err, Result, err, utils,
-	utils::{BoolExt, result::FlatOk},
+	utils::{BoolExt, url::is_loopback},
 };
 use tuwunel_service::{
 	Services,
@@ -157,8 +157,11 @@ async fn validate_redirect_uri(services: &Services, params: &AuthorizeParams) ->
 fn redirect_uri_matches(registered: &str, requested: &str) -> bool {
 	match (Url::parse(registered), Url::parse(requested)) {
 		| (..) if registered == requested => true,
+		// MSC2966, RFC 8252 §7.3 and §8.3: a loopback redirect may use any port.
 		| (Ok(reg), Ok(req)) if is_loopback_redirect(&reg) && is_loopback_redirect(&req) =>
 			reg.scheme() == req.scheme()
+				&& reg.username() == req.username()
+				&& reg.password() == req.password()
 				&& reg.host_str() == req.host_str()
 				&& reg.path() == req.path()
 				&& reg.query() == req.query()
@@ -168,8 +171,36 @@ fn redirect_uri_matches(registered: &str, requested: &str) -> bool {
 	}
 }
 
-fn is_loopback_redirect(uri: &Url) -> bool {
-	let addr = || uri.host_str().map(str::parse::<IpAddr>).flat_ok();
+fn is_loopback_redirect(uri: &Url) -> bool { uri.scheme() == "http" && is_loopback(uri) }
 
-	uri.scheme() == "http" && matches!(addr(), Some(ip) if ip.is_loopback())
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn redirect_match_accepted() {
+		for (registered, requested) in [
+			("http://localhost/login", "http://localhost:3001/login"),
+			("http://127.0.0.1/cb", "http://127.0.0.1:8080/cb"),
+			("http://[::1]/cb", "http://[::1]:3001/cb"),
+			("https://example.com/cb", "https://example.com/cb"),
+		] {
+			assert!(redirect_uri_matches(registered, requested), "{registered} {requested}");
+		}
+	}
+
+	#[test]
+	fn redirect_mismatch_rejected() {
+		for (registered, requested) in [
+			("http://localhost/login", "http://localhost:3001/other"),
+			("http://localhost/login", "http://127.0.0.1:3001/login"),
+			("http://localhost/login", "http://localhost:3001/login?x=1"),
+			("http://localhost/login", "http://user@localhost:3001/login"),
+			("http://example.com/cb", "http://example.com:3001/cb"),
+			("https://localhost/login", "https://localhost:3001/login"),
+			("https://example.com/cb", "https://example.com:8443/cb"),
+		] {
+			assert!(!redirect_uri_matches(registered, requested), "{registered} {requested}");
+		}
+	}
 }

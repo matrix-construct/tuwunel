@@ -6,7 +6,7 @@
 use std::fmt::{self, Display, Write};
 
 use http::Uri;
-use url::Url;
+use url::{Host, Url};
 
 /// Percent-encodes a string for use in a URL component.
 ///
@@ -79,6 +79,20 @@ pub fn hostname_matches_domain(hostname: &str, domain: &str) -> bool {
 		&& hostname
 			.get(suffix_start..)
 			.is_some_and(|suffix| suffix.eq_ignore_ascii_case(domain))
+}
+
+/// Whether a URL's host names the loopback interface.
+///
+/// That is any IPv4 or IPv6 loopback address (RFC 8252 §7.3) or the domain
+/// `localhost` (§8.3), compared without regard to case.
+#[must_use]
+pub fn is_loopback(url: &Url) -> bool {
+	match url.host() {
+		| Some(Host::Domain(domain)) => domain.eq_ignore_ascii_case("localhost"),
+		| Some(Host::Ipv4(ip)) => ip.is_loopback(),
+		| Some(Host::Ipv6(ip)) => ip.is_loopback(),
+		| None => false,
+	}
 }
 
 /// Formats a request URI without exposing sensitive components.

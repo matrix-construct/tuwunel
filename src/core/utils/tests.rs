@@ -16,6 +16,7 @@ use futures::{
 };
 use itertools::Itertools;
 use tokio::{spawn, sync::Barrier};
+use url::Url;
 
 use crate::{
 	Error, Result, checked,
@@ -32,7 +33,7 @@ use crate::{
 		sys::page_size,
 		time::pretty,
 		two_phase_counter::Counter,
-		url::hostname_matches_domain,
+		url::{hostname_matches_domain, is_loopback},
 	},
 };
 
@@ -507,6 +508,28 @@ fn hostname_domain_matching_is_case_insensitive_and_label_bounded() {
 			expected,
 			"hostname {hostname}, domain {domain}",
 		);
+	}
+}
+
+#[test]
+fn loopback_hosts_are_localhost_and_loopback_addresses() {
+	for (url, expected) in [
+		("http://localhost/cb", true),
+		("http://LOCALHOST:3001/cb", true),
+		("http://127.0.0.1/cb", true),
+		("http://127.0.0.2:8080/cb", true),
+		("http://[::1]/cb", true),
+		("http://[::1]:3001/cb", true),
+		("custom://LocalHost/cb", true),
+		("http://localhost.example.com/cb", false),
+		("http://example.com/cb", false),
+		("http://10.0.0.1/cb", false),
+		("http://[::2]/cb", false),
+		("com.example.app:/cb", false),
+	] {
+		let url = Url::parse(url).expect("valid url");
+
+		assert_eq!(is_loopback(&url), expected, "url {url}");
 	}
 }
 

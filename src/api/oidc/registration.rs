@@ -1,9 +1,9 @@
 use axum::{Json, body::Body, extract::State, response::IntoResponse};
 use http::{HeaderMap, Response, StatusCode, header::AUTHORIZATION};
 use serde_json::json;
-use tuwunel_core::{Err, Result, info};
+use tuwunel_core::{Err, Result, info, utils::url::is_loopback};
 use tuwunel_service::oauth::server::DcrRequest;
-use url::{Host, Url};
+use url::Url;
 
 use super::{oauth_error, redirect_allowlisted};
 use crate::ClientIp;
@@ -206,15 +206,6 @@ fn validate_web_redirect(url: &Url, base: Option<&str>) -> Result<(), DcrError> 
 		| Some(_) =>
 			Err(DcrError::RedirectUri("redirect_uri host must share the client_uri host")),
 		| None => Err(DcrError::RedirectUri("redirect_uri must have a host")),
-	}
-}
-
-fn is_loopback(url: &Url) -> bool {
-	match url.host() {
-		| Some(Host::Domain(domain)) => domain == "localhost",
-		| Some(Host::Ipv4(ip)) => ip.is_loopback(),
-		| Some(Host::Ipv6(ip)) => ip.is_loopback(),
-		| _ => false,
 	}
 }
 
