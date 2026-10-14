@@ -88,6 +88,20 @@ variable "lto_cache_dir" {
 variable "lto_cache_policy" {
     default = "cache_size=0%:cache_size_bytes=10g:prune_after=168h"
 }
+# Concurrent links per builder, counted across every build step at once; the
+# LTO profiles take at most lto_linker_jobs of the same slots.
+variable "linker_jobs" {
+    default = 24
+}
+variable "lto_linker_jobs" {
+    default = 6
+}
+variable "linker_lock_dir" {
+    default = "/var/cache/tuwunel/linker"
+}
+variable "linker_wrap_dir" {
+    default = "/usr/local/libexec/tuwunel/linker"
+}
 
 variable "sys_names" {
     default = "[\"debian\"]"
@@ -1873,6 +1887,9 @@ target "deps-base" {
         # Base path
         CARGO_TARGET_DIR = "${cargo_tgt_dir_base}"
         LTO_CACHE_DIR = lto_cache_dir
+        LINKER_JOBS = lto_profile(cargo_profile)? lto_linker_jobs: linker_jobs
+        LINKER_LOCK_DIR = linker_lock_dir
+        LINKER_WRAP_DIR = linker_wrap_dir
         # cased name of profile subdir within target complex
         cargo_target_profile = (
             (cargo_profile == "dev" || cargo_profile == "test")? "debug":
@@ -1902,6 +1919,7 @@ target "deps-base" {
                     join(" ", static_rustflags),
                     join(" ", static_nightly_rustflags),
                     join(" ", native_rustflags),
+                    linker_rustflags(cargo_profile),
                     interprocedural_rustflags(cargo_profile),
                     static_library_rustflags(feat_set, sys_target),
                     join(" ", static_libs),
@@ -1915,6 +1933,7 @@ target "deps-base" {
                     join(" ", nightly_rustflags),
                     join(" ", static_rustflags),
                     join(" ", static_nightly_rustflags),
+                    linker_rustflags(cargo_profile),
                     interprocedural_rustflags(cargo_profile),
                     sys_target_triple(sys_target) == "x86_64-linux-gnu"?
                         "-C target-cpu=${sys_target_isa(sys_target)}": "",
@@ -1928,6 +1947,7 @@ target "deps-base" {
                 join(" ", [
                     join(" ", rustflags),
                     join(" ", static_rustflags),
+                    linker_rustflags(cargo_profile),
                     interprocedural_rustflags(cargo_profile),
                     sys_target_triple(sys_target) == "x86_64-linux-gnu"?
                         "-C target-cpu=${sys_target_isa(sys_target)}": "",
@@ -1941,6 +1961,7 @@ target "deps-base" {
                 join(" ", [
                     join(" ", rustflags),
                     join(" ", static_rustflags),
+                    linker_rustflags(cargo_profile),
                     interprocedural_rustflags(cargo_profile),
                     sys_target_triple(sys_target) == "x86_64-linux-gnu"?
                         "-C target-cpu=${sys_target_isa(sys_target)}": "",
@@ -1957,6 +1978,7 @@ target "deps-base" {
                     join(" ", nightly_rustflags),
                     join(" ", dynamic_rustflags),
                     join(" ", dynamic_nightly_rustflags),
+                    linker_rustflags(cargo_profile),
                     sys_target_triple(sys_target) == "x86_64-linux-gnu"?
                         "-C target-cpu=${sys_target_isa(sys_target)}": "",
                     contains(split(",", cargo_feat_sets[feat_set]), "bzip2_compression")?
@@ -1972,6 +1994,7 @@ target "deps-base" {
 
             join(" ", [
                 join(" ", rustflags),
+                linker_rustflags(cargo_profile),
             ])
         )
     }
@@ -1999,6 +2022,7 @@ function "debian_package_rustflags" {
         substr(toolchain, 0, 7) == "nightly"? join(" ", nightly_rustflags): "",
         join(" ", dynamic_rustflags),
         substr(toolchain, 0, 7) == "nightly"? join(" ", dynamic_nightly_rustflags): "",
+        linker_rustflags(profile),
         interprocedural_rustflags(profile),
         sys_target_triple(target) == "x86_64-linux-gnu"?
             "-C target-cpu=${sys_target_isa(target)}": "",
@@ -2011,12 +2035,23 @@ function "debian_package_rustflags" {
     ])
 }
 
+function "lto_profile" {
+    params = [profile]
+    result = contains(["release-native", "release", "bench"], profile)
+}
+
+# Every link goes through linker_wrap.sh, reached by the real linker's name so
+# rustc infers the same flavor it would for that linker.
+function "linker_rustflags" {
+    params = [profile]
+    result = "-C linker=${linker_wrap_dir}/${lto_profile(profile)? basename(llvm_cc): "cc"}"
+}
+
 function "interprocedural_rustflags" {
     params = [profile]
     result = (
-        contains(["release-native", "release", "bench"], profile)?
+        lto_profile(profile)?
             join(" ", [
-                "-C linker=${llvm_cc}",
                 "-C linker-plugin-lto",
                 "-C link-arg=-fuse-ld=lld",
                 "-C link-arg=-Wl,--threads=${lld_threads}",

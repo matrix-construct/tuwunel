@@ -27,13 +27,15 @@ RUN \
     apt-get -y -U install --no-install-recommends ${packages}
 EOF
 
-# Scheduling and perf wrappers live in the root of every layer so no downstream
-# stage has to copy them. Both build stages (cargo, rocksdb, nix) and runtime
-# testees (complement) reach this stage, so a single placement here serves the
-# whole tree; each is a transparent exec until its environment knobs are set.
+# Scheduling, perf and linker wrappers live in the root of every layer so no
+# downstream stage has to copy them. Both build stages (cargo, rocksdb, nix) and
+# runtime testees (complement) reach this stage, so a single placement here
+# serves the whole tree; each is a transparent exec until its environment knobs
+# are set.
 # The binary cache uploader follows the same rule: every nix stage calls it and
 # it stays a no-op until a token is mounted.
 COPY --link --chmod=0755 \
+    docker/lib/linker_wrap.sh \
     docker/lib/sched_wrap.sh \
     docker/lib/perf_wrap.sh \
     docker/lib/nix_cache_push.sh \

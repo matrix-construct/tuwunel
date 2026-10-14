@@ -14,6 +14,9 @@ ARG CARGO_HOME
 ARG CARGO_TARGET
 ARG CARGO_TARGET_DIR
 ARG LTO_CACHE_DIR
+ARG LINKER_JOBS
+ARG LINKER_LOCK_DIR
+ARG LINKER_WRAP_DIR
 ARG CARGO_TERM_VERBOSE=0
 ARG RUST_BACKTRACE
 ARG JEMALLOC_OVERRIDE
@@ -82,16 +85,24 @@ ENV CARGO_PROFILE_RELEASE_DEBUGINFO_DEBUG="${CARGO_PROFILE_RELEASE_DEBUGINFO_DEB
 ENV CARGO_PROFILE_RELEASE_DEBUGINFO_LTO="${CARGO_PROFILE_RELEASE_DEBUGINFO_LTO}"
 ENV CARGO_BUILD_RUSTFLAGS="${CARGO_BUILD_RUSTFLAGS}"
 ENV CARGO_TARGET_DIR="${CARGO_TARGET_DIR}"
+ENV LINKER_JOBS="${LINKER_JOBS}"
+ENV LINKER_LOCK_DIR="${LINKER_LOCK_DIR}"
 ENV sched_policy=${sched_policy}
 ENV sched_prio=${sched_prio}
 RUN ln -s \
     "$(rustc --print sysroot)/lib/rustlib/${CARGO_TARGET}/bin/rust-lld" \
     /usr/local/bin/ld.lld
+# linker_wrap.sh under each linker's own name, outside PATH: rustflags select
+# the linker by its path here, and the wrapper runs the same name from PATH.
+RUN mkdir -p "${LINKER_WRAP_DIR}" \
+    && ln -sf /usr/local/bin/linker_wrap.sh "${LINKER_WRAP_DIR}/cc" \
+    && ln -sf /usr/local/bin/linker_wrap.sh "${LINKER_WRAP_DIR}/${CC##*/}"
 RUN \
 --mount=type=cache,dst=${RUSTUP_HOME}/downloads,sharing=locked \
 --mount=type=cache,dst=${CARGO_HOME}/registry,sharing=locked \
 --mount=type=cache,dst=${CARGO_HOME}/git,sharing=locked \
 --mount=type=cache,id=tuwunel-lto-${rust_toolchain}-${CARGO_TARGET}-${cargo_profile},dst=${LTO_CACHE_DIR},sharing=shared \
+--mount=type=cache,id=tuwunel-linker-slots,dst=${LINKER_LOCK_DIR},sharing=shared \
 <<EOF
     set -eux
     ulimit -n 65535
@@ -128,6 +139,7 @@ ARG CARGO_HOME
 ARG CARGO_TARGET
 ARG CARGO_TARGET_DIR
 ARG LTO_CACHE_DIR
+ARG LINKER_LOCK_DIR
 ARG cargo_profile
 ARG cargo_target_profile
 ARG cargo_target_prune=""
@@ -168,6 +180,7 @@ RUN \
 --mount=type=cache,dst=${CARGO_HOME}/registry,sharing=locked \
 --mount=type=cache,dst=${CARGO_HOME}/git,sharing=locked \
 --mount=type=cache,id=tuwunel-lto-${rust_toolchain}-${CARGO_TARGET}-${cargo_profile},dst=${LTO_CACHE_DIR},sharing=shared \
+--mount=type=cache,id=tuwunel-linker-slots,dst=${LINKER_LOCK_DIR},sharing=shared \
 <<EOF
     set -eux
     ulimit -n 65535
