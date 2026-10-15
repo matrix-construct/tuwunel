@@ -52,8 +52,6 @@ settings/room-settings/room-security-tab.spec.ts :: should disallow changing fro
 sliding-sync/sliding-sync.spec.ts :: should show and be able to accept/reject/rescind invites
 spaces/threads-activity-centre/threadsActivityCentre.spec.ts :: should order by recency after notification level
 spaces/threads-activity-centre/threadsActivityCentre.spec.ts :: should show a highlight indicator when there is a mention in a thread
-spaces/threads-activity-centre/threadsActivityCentre.spec.ts :: should show a notification indicator when there is a message in a thread
-spaces/threads-activity-centre/threadsActivityCentre.spec.ts :: should show the rooms with unread threads
 spaces/threads-activity-centre/threadsActivityCentre.spec.ts :: should update with a thread is read
 timeline/timeline.spec.ts :: should show historical profiles if disabled
 widgets/widget-pip-close.spec.ts :: should be closed on ban
