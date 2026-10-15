@@ -16,28 +16,20 @@ crypto/user-verification.spec.ts :: can abort emoji verification when emoji mism
 crypto/user-verification.spec.ts :: can receive a verification request when there is no existing DM
 integration-manager/kick.spec.ts :: should not kick the target if lacking permissions
 lazy-loading/lazy-loading.spec.ts :: should handle lazy loading properly even when offline
-read-receipts/editing-messages-in-threads.spec.ts :: A room with an edited threaded message is still read after restart
 read-receipts/editing-messages-in-threads.spec.ts :: An edit of a threaded message makes the room unread
-read-receipts/editing-messages-main-timeline.spec.ts :: A room where all edits are read is still read after restart
-read-receipts/editing-messages-main-timeline.spec.ts :: A room with an edit is still read after restart
 read-receipts/editing-messages-thread-roots.spec.ts :: An edit of a thread root leaves the room read
 read-receipts/new-messages-in-threads.spec.ts :: Reading only one thread's message makes that thread read but not others
-read-receipts/new-messages-main-timeline.spec.ts :: A room that was marked as read is still read after restart
-read-receipts/new-messages-main-timeline.spec.ts :: A room where all messages are read is still read after restart
-read-receipts/new-messages-main-timeline.spec.ts :: A room with a new message is still unread after restart
 read-receipts/new-messages-thread-roots.spec.ts :: Reading a thread root within the thread view marks it as read in the main timeline
 read-receipts/new-messages-thread-roots.spec.ts :: Reading a thread whose root is a reply makes the thread read
 read-receipts/reactions-in-threads.spec.ts :: A room where all reactions in threads are read is still read after restart
 read-receipts/read-receipts.spec.ts :: Recognises unread messages on main after receiving a unthreaded receipt for a thread message
 read-receipts/read-receipts.spec.ts :: Recognises unread messages on main thread after receiving a receipt for earlier ones
 read-receipts/read-receipts.spec.ts :: Should send the correct receipts
-read-receipts/redactions-in-threads.spec.ts :: A thread with a redacted unread is still read after restart
 read-receipts/redactions-in-threads.spec.ts :: Editing a redacted message leaves the thread read
 read-receipts/redactions-in-threads.spec.ts :: Reacting to a redacted message leaves the thread read
 read-receipts/redactions-in-threads.spec.ts :: Reading an unread thread after a redaction of an older message makes it read
 read-receipts/redactions-in-threads.spec.ts :: Reading an unread thread after a redaction of the latest message makes it read
 read-receipts/redactions-in-threads.spec.ts :: Reading an unread thread after a redaction of the latest message makes it read after restart
-read-receipts/redactions-in-threads.spec.ts :: Redacting the threaded message pointed to by my receipt leaves the room read
 read-receipts/redactions-main-timeline.spec.ts :: Redacting all unread messages makes the room read
 read-receipts/redactions-main-timeline.spec.ts :: Redacting all unread messages makes the room read after restart
 read-receipts/redactions-main-timeline.spec.ts :: Sending and redacting a message after marking the room as read makes it read
@@ -50,9 +42,6 @@ settings/encryption-user-tab/recovery.spec.ts :: should setup the recovery key
 settings/room-settings/roles-permissions-room-settings-tab.spec.ts :: should be able to change the role of a user
 settings/room-settings/room-security-tab.spec.ts :: should disallow changing from public to private if the user cannot alter history
 sliding-sync/sliding-sync.spec.ts :: should show and be able to accept/reject/rescind invites
-spaces/threads-activity-centre/threadsActivityCentre.spec.ts :: should order by recency after notification level
-spaces/threads-activity-centre/threadsActivityCentre.spec.ts :: should show a highlight indicator when there is a mention in a thread
-spaces/threads-activity-centre/threadsActivityCentre.spec.ts :: should update with a thread is read
 timeline/timeline.spec.ts :: should show historical profiles if disabled
 widgets/widget-pip-close.spec.ts :: should be closed on ban
 widgets/widget-pip-close.spec.ts :: should be closed on kick
