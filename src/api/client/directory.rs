@@ -25,7 +25,7 @@ use tuwunel_core::{
 	Err, Error, Result, err, info,
 	utils::{
 		TryFutureExtExt,
-		math::Expected,
+		math::{Expected, usize_from_ruma_bounded},
 		stream::{IterStream, ReadyExt, WidebandExt},
 	},
 	warn,
@@ -34,6 +34,8 @@ use tuwunel_matrix::Event;
 use tuwunel_service::Services;
 
 use crate::{ClientIp, Ruma};
+
+const DEFAULT_LIMIT: usize = 100;
 
 /// # `POST /_matrix/client/v3/publicRooms`
 ///
@@ -208,7 +210,9 @@ pub(crate) async fn get_room_visibility_route(
 
 /// Lists public rooms matching the requested filter.
 ///
-/// A remote server is queried when specified; otherwise the local directory is used.
+/// A remote server is queried when specified; otherwise the local directory is
+/// used. A local query with a zero or absent `limit` takes a page of 100, as
+/// Synapse does.
 pub async fn get_public_rooms_filtered_helper(
 	services: &Services,
 	server: Option<&ServerName>,
@@ -242,8 +246,10 @@ pub async fn get_public_rooms_filtered_helper(
 		});
 	}
 
-	// Use limit or else 10, with maximum 100
-	let limit: usize = limit.map_or(10_u64, u64::from).try_into()?;
+	let limit = limit
+		.filter(|&limit| limit > uint!(0))
+		.map_or(DEFAULT_LIMIT, |limit| usize_from_ruma_bounded(limit, usize::MAX, usize::MAX));
+
 	let mut num_since: usize = 0;
 
 	if let Some(s) = &since {
@@ -350,14 +356,12 @@ pub async fn get_public_rooms_filtered_helper(
 		.take(limit)
 		.collect();
 
-	let prev_batch = num_since
-		.ne(&0)
-		.then_some(format!("p{num_since}"));
+	let prev_batch = num_since.ne(&0).then(|| format!("p{num_since}"));
 
 	let next_batch = chunk
 		.len()
 		.ge(&limit)
-		.then_some(format!("n{}", num_since.expected_add(limit)));
+		.then(|| format!("n{}", num_since.expected_add(limit)));
 
 	Ok(get_public_rooms_filtered::v3::Response {
 		chunk,
