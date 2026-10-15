@@ -1,6 +1,7 @@
 mod append;
 mod badge;
 mod notification;
+mod redact;
 mod request;
 mod send;
 mod suppressed;
@@ -48,6 +49,12 @@ pub use self::{
 /// The events an event relates to, keyed by relation type, for MSC3664.
 type RelatedEvents = BTreeMap<String, FlattenedJson>;
 
+/// Guards one user's counter in one room across a read-modify-write.
+///
+/// It holds one entry per (room, user) with an increment (append), decrement
+/// (redaction) or reset (receipt, local send) in flight.
+type CountMutex = MutexMap<(OwnedRoomId, OwnedUserId), ()>;
+
 /// The inputs for evaluating one user's push rules against one event.
 pub struct Evaluate<'a, 'b> {
 	/// The user whose rules are evaluated, and who is notified.
@@ -94,8 +101,8 @@ struct InReplyTo {
 
 pub struct Service {
 	services: Arc<crate::services::OnceServices>,
-	notification_increment_mutex: MutexMap<(OwnedRoomId, OwnedUserId), ()>,
-	highlight_increment_mutex: MutexMap<(OwnedRoomId, OwnedUserId), ()>,
+	notification_increment_mutex: CountMutex,
+	highlight_increment_mutex: CountMutex,
 	db: Data,
 	suppressed: suppressed::SuppressedQueue,
 	sent_badges: SentBadges,

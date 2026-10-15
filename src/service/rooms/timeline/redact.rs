@@ -28,11 +28,12 @@ use crate::rooms::{
 /// Replaces an accepted PDU with its room-version redacted form.
 ///
 /// Failure to resolve the event's accepted PDU ID is treated as a successful
-/// no-op. Original retention, search removal, and relation deletion occur
-/// before the accepted row is replaced, so the operation is not atomic if a
-/// later step fails. A redacted thread reply is removed from its root's
-/// `m.thread` summary (the count, and the latest event when it was the latest)
-/// in the same write as the accepted row; a redacted thread root keeps its summary.
+/// no-op. Original retention, search removal, relation deletion, and removal
+/// from unread counts occur before the accepted row is replaced, so the
+/// operation is not atomic if a later step fails. A redacted thread reply is
+/// removed from its root's `m.thread` summary (the count, and the latest event
+/// when it was the latest) in the same write as the accepted row; a redacted
+/// thread root keeps its summary.
 #[implement(super::Service)]
 #[tracing::instrument(name = "redact", level = "debug", skip(self))]
 pub async fn redact_pdu<Pdu: Event + Send + Sync>(
@@ -88,6 +89,11 @@ pub async fn redact_pdu<Pdu: Event + Send + Sync>(
 	self.services
 		.pdu_metadata
 		.delete_typed_relation(&pdu_id, &pdu)
+		.await;
+
+	self.services
+		.pusher
+		.redact_pdu(&pdu_id, event_id, &pdu)
 		.await;
 
 	// Read before redaction strips `m.relates_to`.
