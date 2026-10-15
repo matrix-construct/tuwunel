@@ -31,9 +31,10 @@ use tuwunel_core::{
 			Digest as Sha256Digest, delimited as sha256_delimited, hash as sha256_hash,
 		},
 		math::usize_from_ruma_bounded,
-		result::FlatOk,
+		result::{FlatOk, NotFound},
 		stream::{BroadbandExt, WidebandExt},
 	},
+	warn,
 };
 use tuwunel_matrix::{
 	Event, StateKey,
@@ -49,7 +50,7 @@ use self::{
 	heroes::calculate_heroes,
 };
 use super::{
-	super::{load_timeline_fallible, strip_prev_state},
+	super::{load_timeline_fallible, stand_in_leave, strip_prev_state},
 	Connection, ListIds, SyncInfo, WindowRoom,
 };
 use crate::{annotate_membership, ignored_filter, with_membership};
@@ -271,14 +272,21 @@ async fn leave_or_ban_response(
 	WindowRoom { lists, membership, room_id, .. }: &WindowRoom,
 	roomsince: u64,
 ) -> Result<response::Room> {
-	// A rejected federated invite has no resolved state; the retraction still
-	// delivers on the membership alone.
+	// Clients read the departure from this event, not `membership`.
 	let member_event = services
 		.state_accessor
 		.room_state_get(room_id, &StateEventType::RoomMember, sender_user.as_str())
 		.map_ok(Event::into_format)
 		.await
-		.ok();
+		.optional()
+		.inspect_err(|error| warn!(%room_id, %error, "Unreadable own departure event"))
+		.ok()
+		.flatten()
+		.or_else(|| {
+			matches!(membership, Some(MembershipState::Leave))
+				.then(|| stand_in_leave(services, room_id, sender_user))
+				.and_then(Result::ok)
+		});
 
 	Ok(response::Room {
 		initial: roomsince.eq(&0).then_some(true),

@@ -9,7 +9,7 @@ use futures::{
 	future::{join, join3, join4, join5, try_join},
 };
 use ruma::{
-	DeviceId, EventId, OwnedEventId, OwnedRoomId, OwnedUserId, RoomId, UInt, UserId,
+	DeviceId, OwnedEventId, OwnedRoomId, OwnedUserId, RoomId, UInt, UserId,
 	api::client::{
 		filter::FilterDefinition,
 		sync::sync_events::{
@@ -43,7 +43,7 @@ use tuwunel_core::{
 	smallvec::SmallVec,
 	trace,
 	utils::{
-		self, BoolExt, FutureBoolExt, IterStream, ReadyExt, TryFutureExtExt,
+		BoolExt, FutureBoolExt, IterStream, ReadyExt, TryFutureExtExt,
 		future::{OptionStream, ReadyBoolExt},
 		math::ruma_from_u64,
 		option::OptionExt,
@@ -55,7 +55,7 @@ use tuwunel_core::{
 use tuwunel_matrix::{
 	Event,
 	event::{Matches, trim_event_fields},
-	pdu::{EventHash, PduCount, PduEvent},
+	pdu::{PduCount, PduEvent},
 };
 use tuwunel_service::{
 	Services,
@@ -71,7 +71,7 @@ use tuwunel_service::{
 
 use super::{
 	invite_permitted, load_timeline, profiles::collect as collect_profiles, share_encrypted_room,
-	strip_prev_state, timeline_prev_batch,
+	stand_in_leave, strip_prev_state, timeline_prev_batch,
 };
 use crate::{
 	ClientIp, Ruma, ignored_filter, is_empty_account_data_event, utils::normalize_profile_fields,
@@ -854,28 +854,9 @@ async fn handle_left_room(
 	let is_banned = services.metadata.is_banned(room_id);
 
 	if is_not_found.or2(is_disabled, is_banned).await {
-		// For rejected invites, deleted, missing, or broken room state this is the last
-		// resort to convey a the minimum of information to the client.
-		let event = PduEvent {
-			event_id: EventId::new_v1(services.globals.server_name()),
-			origin_server_ts: utils::millis_since_unix_epoch().try_into()?,
-			kind: RoomMember,
-			state_key: Some(sender_user.as_str().into()),
-			sender: sender_user.to_owned(),
-			content: serde_json::from_str(r#"{"membership":"leave"}"#)?,
-			// The following keys are dropped on conversion
-			room_id: room_id.clone(),
-			depth: uint!(1),
-			origin: None,
-			unsigned: None,
-			redacts: None,
-			hashes: EventHash::default(),
-			auth_events: Default::default(),
-			prev_events: Default::default(),
-		};
-
+		let event = stand_in_leave(services, room_id, sender_user)?;
 		let state = state_after.wrap(StateEvents {
-			events: vec![trim_event_fields(event.into_format(), filter.event_fields.as_deref())],
+			events: vec![trim_event_fields(event, filter.event_fields.as_deref())],
 		});
 
 		return Ok(Some(LeftRoom {
@@ -2519,6 +2500,8 @@ async fn typings_event_for_user(
 
 #[cfg(test)]
 mod tests {
+	use ruma::EventId;
+
 	use super::*;
 
 	const SINCE: u64 = 100;
