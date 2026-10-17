@@ -7,6 +7,7 @@ mod selector;
 use std::{
 	collections::{BTreeMap, BTreeSet},
 	fmt::Debug,
+	iter::{once, repeat},
 	sync::Arc,
 	time::Duration,
 };
@@ -204,7 +205,7 @@ pub(crate) async fn sync_events_v5_route(
 		.checked_add(Duration::from_millis(timeout))
 		.expect("configuration must limit maximum timeout");
 
-	loop {
+	for woken in once(false).chain(repeat(true)) {
 		debug_assert!(
 			conn.globalsince <= conn.next_batch,
 			"since should not be greater than next_batch."
@@ -248,7 +249,7 @@ pub(crate) async fn sync_events_v5_route(
 			response.rooms = ranges.into_payloads();
 			response.extensions = extensions.into_response(&response.rooms);
 
-			if !is_empty_response(&response) {
+			if !is_empty_response(&mut response, woken) {
 				response.pos = conn.next_batch.to_string().into();
 				trace!(conn.globalsince, conn.next_batch, "response {response:?}");
 				conn.store(&services.sync, &conn_key);
@@ -280,6 +281,8 @@ pub(crate) async fn sync_events_v5_route(
 
 		conn.globalsince = conn.next_batch;
 	}
+
+	unreachable!("a long poll has no last pass")
 }
 
 fn check_profile_selection(services: &Services, request: &Request, conn: &Connection) -> Result {
@@ -306,13 +309,108 @@ fn config_change_needs_position(
 	config_changed && advancing && caught_up && since != 0
 }
 
-fn is_empty_response(response: &Response) -> bool {
-	response.extensions.is_empty() && response.rooms.is_empty()
+/// Whether a pass has nothing to answer the client with.
+///
+/// The e2ee extension reports the device's unused fallback key types on every
+/// pass. They are current state, and any activity on the server moves the
+/// global count that admits a first pass, so they never end one. A pass the
+/// user's watchers woke, on activity in their rooms or on their account, does
+/// answer with them, since matrix-rust-sdk backs up the room keys it has just
+/// made on that answer. The response is left as it was, so the types are still
+/// delivered.
+fn is_empty_response(response: &mut Response, woken: bool) -> bool {
+	let fallback_key_types = response
+		.extensions
+		.e2ee
+		.device_unused_fallback_key_types
+		.take(); // Extensions::is_empty cannot skip one field
+
+	let empty = response.extensions.is_empty()
+		&& response.rooms.is_empty()
+		&& (!woken || fallback_key_types.is_none());
+
+	response
+		.extensions
+		.e2ee
+		.device_unused_fallback_key_types = fallback_key_types;
+
+	empty
 }
 
 #[cfg(test)]
 mod tests {
-	use super::config_change_needs_position;
+	use ruma::{OneTimeKeyAlgorithm, api::client::sync::sync_events::DeviceLists, owned_user_id};
+
+	use super::{
+		Response, config_change_needs_position, is_empty_response,
+		response::{E2EE, Extensions},
+	};
+
+	#[test]
+	fn unused_fallback_key_types_alone_are_empty() {
+		for types in [vec![], vec![OneTimeKeyAlgorithm::SignedCurve25519]] {
+			let alone = E2EE {
+				device_unused_fallback_key_types: Some(types.clone()),
+				..Default::default()
+			};
+
+			assert!(is_empty_keeping_types(alone, false));
+
+			let device_lists = DeviceLists {
+				changed: vec![owned_user_id!("@changed:example.org")],
+				..Default::default()
+			};
+
+			let changed = E2EE {
+				device_unused_fallback_key_types: Some(types),
+				device_lists,
+				..Default::default()
+			};
+
+			assert!(!is_empty_keeping_types(changed, false));
+		}
+	}
+
+	#[test]
+	fn unused_fallback_key_types_answer_a_woken_pass() {
+		for types in [vec![], vec![OneTimeKeyAlgorithm::SignedCurve25519]] {
+			let alone = E2EE {
+				device_unused_fallback_key_types: Some(types),
+				..Default::default()
+			};
+
+			assert!(!is_empty_keeping_types(alone, true));
+		}
+
+		assert!(
+			is_empty_keeping_types(E2EE::default(), true),
+			"a woken pass without news is empty"
+		);
+	}
+
+	fn is_empty_keeping_types(e2ee: E2EE, woken: bool) -> bool {
+		let types = e2ee.device_unused_fallback_key_types.clone();
+		let mut response = e2ee_response(e2ee);
+		let empty = is_empty_response(&mut response, woken);
+
+		assert_eq!(
+			response
+				.extensions
+				.e2ee
+				.device_unused_fallback_key_types,
+			types,
+			"the types are still delivered",
+		);
+
+		empty
+	}
+
+	fn e2ee_response(e2ee: E2EE) -> Response {
+		Response {
+			extensions: Extensions { e2ee, ..Default::default() },
+			..Response::new(Default::default())
+		}
+	}
 
 	#[test]
 	fn caught_up_advancing_config_change_needs_position() {
