@@ -248,7 +248,7 @@ pub(crate) async fn sync_events_v5_route(
 			response.rooms = ranges.into_payloads();
 			response.extensions = extensions.into_response(&response.rooms);
 
-			if !is_empty_response(&response) {
+			if !is_empty_response(&mut response) {
 				response.pos = conn.next_batch.to_string().into();
 				trace!(conn.globalsince, conn.next_batch, "response {response:?}");
 				conn.store(&services.sync, &conn_key);
@@ -306,13 +306,85 @@ fn config_change_needs_position(
 	config_changed && advancing && caught_up && since != 0
 }
 
-fn is_empty_response(response: &Response) -> bool {
-	response.extensions.is_empty() && response.rooms.is_empty()
+/// Whether a pass found nothing new for the client.
+///
+/// The e2ee extension reports the device's unused fallback key types on every
+/// pass. They are current state, not a change, so on their own they must not
+/// end a long poll. The response is left as it was, so the types are still
+/// delivered.
+fn is_empty_response(response: &mut Response) -> bool {
+	let fallback_key_types = response
+		.extensions
+		.e2ee
+		.device_unused_fallback_key_types
+		.take(); // Extensions::is_empty cannot skip one field
+
+	let empty = response.extensions.is_empty() && response.rooms.is_empty();
+
+	response
+		.extensions
+		.e2ee
+		.device_unused_fallback_key_types = fallback_key_types;
+
+	empty
 }
 
 #[cfg(test)]
 mod tests {
-	use super::config_change_needs_position;
+	use ruma::{OneTimeKeyAlgorithm, api::client::sync::sync_events::DeviceLists, owned_user_id};
+
+	use super::{
+		Response, config_change_needs_position, is_empty_response,
+		response::{E2EE, Extensions},
+	};
+
+	#[test]
+	fn unused_fallback_key_types_alone_are_empty() {
+		for types in [vec![], vec![OneTimeKeyAlgorithm::SignedCurve25519]] {
+			let mut alone = e2ee_response(E2EE {
+				device_unused_fallback_key_types: Some(types.clone()),
+				..Default::default()
+			});
+
+			assert!(is_empty_response(&mut alone));
+
+			let e2ee = alone.extensions.e2ee;
+
+			assert_eq!(
+				e2ee.device_unused_fallback_key_types,
+				Some(types.clone()),
+				"the types are still delivered with the response",
+			);
+
+			let device_lists = DeviceLists {
+				changed: vec![owned_user_id!("@changed:example.org")],
+				..Default::default()
+			};
+
+			let mut changed = e2ee_response(E2EE {
+				device_unused_fallback_key_types: Some(types.clone()),
+				device_lists,
+				..Default::default()
+			});
+
+			assert!(!is_empty_response(&mut changed));
+
+			let e2ee = changed.extensions.e2ee;
+
+			assert_eq!(
+				e2ee.device_unused_fallback_key_types,
+				Some(types),
+				"the types are still delivered with news",
+			);
+		}
+	}
+
+	fn e2ee_response(e2ee: E2EE) -> Response {
+		Response {
+			extensions: Extensions { e2ee, ..Default::default() },
+			..Response::new(Default::default())
+		}
+	}
 
 	#[test]
 	fn caught_up_advancing_config_change_needs_position() {
