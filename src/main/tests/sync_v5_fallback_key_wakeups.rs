@@ -1,9 +1,12 @@
 #![cfg(test)]
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use serde_json::json;
-use tuwunel_core::{Result, err, utils::BoolExt};
+use tuwunel_core::{
+	Result, err,
+	utils::{BoolExt, future::ExtExt},
+};
 use tuwunel_service::Services;
 
 use self::{
@@ -80,12 +83,12 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	// A room the reader is not in: it moves the global count and nothing else.
 	other.create_room(&private_chat).await?;
 
-	let started = Instant::now();
-	let idle = reader
+	let (idle, waited) = reader
 		.sliding_sync(Some(pos), IDLE_POLL_TIMEOUT, &body)
-		.await?;
+		.timed()
+		.await;
 
-	let waited = started.elapsed();
+	let idle = idle?;
 
 	idle["extensions"]["e2ee"]["device_unused_fallback_key_types"]
 		.is_array()
@@ -102,12 +105,12 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	let pos = field(&idle, "pos")?;
 	let room = reader.create_room(&private_chat).await?;
 
-	let started = Instant::now();
-	let news = reader
+	let (news, waited) = reader
 		.sliding_sync(Some(pos), NEWS_POLL_TIMEOUT, &body)
-		.await?;
+		.timed()
+		.await;
 
-	let waited = started.elapsed();
+	let news = news?;
 
 	news["rooms"][room.as_str()]
 		.is_object()
