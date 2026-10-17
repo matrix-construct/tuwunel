@@ -12,7 +12,7 @@ use serde_json::json;
 use tuwunel_core::{
 	Err, Error, Result, async_noinline, at, debug_warn, implement, trace,
 	utils::{
-		BoolExt, MutexMapGuard, ReadyExt,
+		BoolExt, MutexMapGuard, OptionExt, ReadyExt,
 		future::OptionFutureExt,
 		random_string,
 		stream::{IterStream, TryIgnore},
@@ -588,7 +588,11 @@ pub fn generate_access_token(&self, expires: bool) -> (String, Option<Duration>)
 	(access_token, expires_in)
 }
 
-/// Replaces the refresh token of one device.
+/// Replaces the refresh token of one device in a single write.
+///
+/// The outgoing token is retired in the same batch that stores its successor,
+/// so a token presented meanwhile classifies as current or as spent, never as
+/// unknown. Absolute expiry carries the prior deadline forward.
 #[implement(super::Service)]
 #[tracing::instrument(level = "debug", skip(self, _lock, refresh_token))]
 async fn set_refresh_token(
@@ -603,27 +607,21 @@ async fn set_refresh_token(
 	let config = &self.services.server.config;
 	let ttl = config.refresh_token_ttl;
 	let idle_only = config.refresh_token_idle_only;
-
-	// Absolute mode carries the prior deadline forward instead of sliding it.
-	let prior_expires_at: Option<SystemTime> = (ttl != 0 && !idle_only)
-		.then_async(|| self.find_refresh_token_expires_at(user_id, device_id))
-		.await
-		.flatten();
-
-	// Capture the outgoing token before removal so it can be retained for one
-	// generation, making a later replay detectable.
-	let spent: Option<String> = self
+	let userdeviceid = (user_id, device_id);
+	let outgoing = self
 		.db
 		.userdeviceid_refresh
-		.qry(&(user_id, device_id))
+		.qry(&userdeviceid)
 		.await
-		.deserialized()
 		.ok();
 
-	// Also drops the prior spent entry.
-	self.remove_refresh_token(user_id, device_id)
+	// Absolute mode carries the prior deadline forward instead of sliding it.
+	let prior_expires_at = outgoing
+		.as_deref()
+		.filter(|_| ttl != 0 && !idle_only)
+		.map_async(|outgoing| self.find_refresh_token_expires_at(outgoing))
 		.await
-		.ok();
+		.flatten();
 
 	let expires_at = match (ttl, prior_expires_at) {
 		| (0, _) => None,
@@ -636,21 +634,28 @@ async fn set_refresh_token(
 		.as_ref()
 		.map(Duration::as_secs);
 
-	let userdeviceid = (user_id, device_id);
 	let value = (user_id, device_id, expires_at_secs);
 	let mut txn = self.services.db.txn();
+
+	if let Some(outgoing) = outgoing.as_deref() {
+		txn.del_raw(&self.db.token_userdeviceid, outgoing);
+	}
+
+	// Queued before the spent pointer below is rewritten; the batch applies in order.
+	self.forget_spent_refresh_token(user_id, device_id, &mut txn)
+		.await;
 
 	txn.raw_put(&self.db.token_userdeviceid, refresh_token, value);
 	txn.put_raw(&self.db.userdeviceid_refresh, userdeviceid, refresh_token);
 
 	// Retain the outgoing token as the device's spent token, pointing at its
 	// successor so a double-submit can be distinguished from a replay.
-	if let Some(spent) = spent {
+	if let Some(spent) = outgoing.as_deref() {
 		let spent_at = duration_since_epoch(SystemTime::now()).as_secs();
 		let value = (user_id, device_id, refresh_token, spent_at);
 
-		txn.raw_put(&self.db.spentrefresh_userdeviceid, &*spent, value);
-		txn.put_raw(&self.db.userdeviceid_spentrefresh, userdeviceid, &*spent);
+		txn.raw_put(&self.db.spentrefresh_userdeviceid, spent, value);
+		txn.put_raw(&self.db.userdeviceid_spentrefresh, userdeviceid, spent);
 	}
 
 	txn.execute();
@@ -658,28 +663,15 @@ async fn set_refresh_token(
 	Ok(())
 }
 
-/// Look up the expiry stored alongside the current refresh token for this
-/// device, if one is recorded. Pre-rotation entries carry no expiry and
-/// return `None`.
+/// Looks up the expiry stored alongside a refresh token.
+///
+/// Pre-rotation entries carry no expiry and return `None`.
 #[implement(super::Service)]
-async fn find_refresh_token_expires_at(
-	&self,
-	user_id: &UserId,
-	device_id: &DeviceId,
-) -> Option<SystemTime> {
-	let userdeviceid = (user_id, device_id);
-	let old_token: String = self
-		.db
-		.userdeviceid_refresh
-		.qry(&userdeviceid)
-		.await
-		.deserialized()
-		.ok()?;
-
+async fn find_refresh_token_expires_at(&self, token: &[u8]) -> Option<SystemTime> {
 	let (_, _, expires_at_secs): (Ignore, Ignore, Option<u64>) = self
 		.db
 		.token_userdeviceid
-		.get(&old_token)
+		.get(token)
 		.await
 		.deserialized()
 		.ok()?;
