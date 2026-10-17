@@ -5,13 +5,16 @@ use std::net::TcpListener;
 use futures::future::join;
 use serde_json::{Value, json};
 use tuwunel::{Args, Runtime, Server, async_run, async_start, async_stop};
-use tuwunel_core::{Result, err, implement, ruma::RoomId, utils::BoolExt};
+use tuwunel_core::{Result, err, ruma::RoomId, utils::BoolExt};
 use tuwunel_service::Services;
 
 use self::client::{Client, field, register, wait_until_ready};
 
 mod client;
 mod sliding_sync;
+
+#[path = "client/put.rs"]
+mod put;
 
 #[path = "sliding_sync/resume.rs"]
 mod resume;
@@ -158,24 +161,6 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	let wildcard = client.sync(Some(&consumed), &opened).await?;
 
 	expect_state(&wildcard, &room, &[field(&other, "event_id")?], "exact key widened to wildcard")
-}
-
-#[implement(Client, params = "<'_>")]
-#[tracing::instrument(level = "debug", skip_all)]
-async fn put(&self, path: &str, body: &Value) -> Result<Value> {
-	self.services
-		.client
-		.clients
-		.default
-		.put(self.url(path))
-		.bearer_auth(self.token)
-		.json(body)
-		.send()
-		.await?
-		.error_for_status()?
-		.json()
-		.await
-		.map_err(Into::into)
 }
 
 fn config(room: &RoomId, limit: u64, key: &str, subscribed: bool) -> Value {
