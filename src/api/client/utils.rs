@@ -1,5 +1,8 @@
+use std::time::Duration;
+
 use ruma::{EventId, RoomId, UserId, api::client::filter::FilterDefinition};
-use tuwunel_core::{Err, Result, warn};
+use tokio::time::Instant;
+use tuwunel_core::{Err, Result, utils::time::millis, warn};
 use tuwunel_matrix::Event;
 use tuwunel_service::Services;
 
@@ -51,4 +54,28 @@ where
 	T: Sync,
 {
 	services.config.enable_set_displayname || body.appservice_info.is_some() || is_admin().await
+}
+
+/// When the long poll of a sync-like request gives up.
+///
+/// A request without a timeout takes the configured default, and every
+/// timeout is held between the configured minimum and maximum.
+pub(crate) fn sync_deadline(services: &Services, timeout: Option<Duration>) -> Instant {
+	let config = &services.config;
+	let timeout = timeout
+		.and_then(millis)
+		.unwrap_or(config.client_sync_timeout_default)
+		.max(config.client_sync_timeout_min)
+		.min(config.client_sync_timeout_max);
+
+	poll_deadline(timeout)
+}
+
+/// When a long poll of `timeout` milliseconds starting now gives up.
+///
+/// The configured maximum keeps every timeout small enough to add to now.
+pub(crate) fn poll_deadline(timeout: u64) -> Instant {
+	Instant::now()
+		.checked_add(Duration::from_millis(timeout))
+		.expect("configuration must limit maximum timeout")
 }

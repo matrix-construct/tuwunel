@@ -1,7 +1,4 @@
-use std::{
-	collections::{BTreeMap, HashMap, HashSet},
-	time::Duration,
-};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use axum::extract::State;
 use futures::{
@@ -74,7 +71,8 @@ use super::{
 	stand_in_leave, strip_prev_state, timeline_prev_batch,
 };
 use crate::{
-	ClientIp, Ruma, ignored_filter, is_empty_account_data_event, utils::normalize_profile_fields,
+	ClientIp, Ruma, ignored_filter, is_empty_account_data_event,
+	utils::{normalize_profile_fields, sync_deadline},
 	with_membership,
 };
 
@@ -315,20 +313,7 @@ pub(crate) async fn sync_events_route(
 		.as_deref()
 		.map(|since| since.parse().unwrap_or(0));
 
-	let timeout = body
-		.body
-		.timeout
-		.as_ref()
-		.map(Duration::as_millis)
-		.map(TryInto::try_into)
-		.flat_ok()
-		.unwrap_or(services.config.client_sync_timeout_default)
-		.max(services.config.client_sync_timeout_min)
-		.min(services.config.client_sync_timeout_max);
-
-	let stop_at = time::Instant::now()
-		.checked_add(Duration::from_millis(timeout))
-		.expect("configuration must limit maximum timeout");
+	let stop_at = sync_deadline(&services, body.body.timeout);
 
 	loop {
 		let watch_rooms = services
