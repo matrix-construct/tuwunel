@@ -1,7 +1,9 @@
+use std::time::Duration;
+
 use ruma::{OneTimeKeyAlgorithm, api::client::sync::sync_events::DeviceLists, owned_user_id};
 
 use super::{
-	Response, config_change_needs_position, is_empty_response,
+	Request, Response, config_change_needs_position, is_empty_response, poll_timeout,
 	response::{E2EE, Extensions},
 };
 
@@ -60,4 +62,17 @@ fn caught_up_advancing_config_change_needs_position() {
 	assert!(!config_change_needs_position(true, false, true, 1));
 	assert!(!config_change_needs_position(true, true, false, 1));
 	assert!(!config_change_needs_position(true, true, true, 0));
+}
+
+#[test]
+fn opening_request_ignores_timeout() {
+	let request = |pos: Option<&str>| Request {
+		pos: pos.map(Into::into),
+		timeout: Some(Duration::from_secs(30)),
+		..Request::new()
+	};
+
+	assert_eq!(poll_timeout(&request(None), 90_000), 0);
+	assert_eq!(poll_timeout(&request(Some("1")), 90_000), 30_000);
+	assert_eq!(poll_timeout(&request(Some("1")), 10_000), 10_000);
 }
