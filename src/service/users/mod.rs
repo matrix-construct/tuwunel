@@ -76,8 +76,9 @@ pub struct Service {
 	changing_password: MutexMap<OwnedUserId, ()>,
 	// Entries live only while claims for a user/device hold or await the lock.
 	claiming_one_time_keys: MutexMap<(OwnedUserId, OwnedDeviceId), ()>,
-	// Serializes a device's token issuance with its removal.
-	device_mutex: MutexMap<(OwnedUserId, OwnedDeviceId), ()>,
+	// Entries live only while a device's creation, token issuance or removal
+	// holds or awaits it.
+	updating_device: MutexMap<(OwnedUserId, OwnedDeviceId), ()>,
 }
 
 struct Data {
@@ -120,7 +121,7 @@ impl crate::Service for Service {
 			login_token_mutex: MutexMap::new(),
 			changing_password: MutexMap::new(),
 			claiming_one_time_keys: MutexMap::new(),
-			device_mutex: MutexMap::new(),
+			updating_device: MutexMap::new(),
 			db: Data {
 				keychangeid_devicechange: args.db["keychangeid_devicechange"].clone(),
 				keychangeid_userid: args.db["keychangeid_userid"].clone(),
