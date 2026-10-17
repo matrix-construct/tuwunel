@@ -8,7 +8,6 @@ use ruma::{
 			AuthScheme, NoAccessToken, NoAuthentication,
 		},
 		client::{account::change_password, rtc::transports},
-		error::{ErrorKind, UnknownTokenErrorData},
 		federation::authentication::ServerSignatures,
 	},
 };
@@ -233,10 +232,9 @@ impl AuthDispatch for ServerSignatures {
 }
 
 fn unknown_token() -> Result<Auth> {
-	Err(Error::BadRequest(
-		ErrorKind::UnknownToken(UnknownTokenErrorData::new()),
-		"Unknown access token.",
-	))
+	let soft_logout = false;
+
+	Err(Error::unknown_token(soft_logout, "Unknown access token."))
 }
 
 async fn expired_token(services: &Services, access_token: &str) -> Result<Auth> {
@@ -245,10 +243,9 @@ async fn expired_token(services: &Services, access_token: &str) -> Result<Auth> 
 		.remove_access_token_value(access_token)
 		.await;
 
-	Err(Error::BadRequest(
-		ErrorKind::UnknownToken(UnknownTokenErrorData { soft_logout: true }),
-		"Expired access token.",
-	))
+	let soft_logout = true;
+
+	Err(Error::unknown_token(soft_logout, "Expired access token."))
 }
 
 #[cfg(test)]

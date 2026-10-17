@@ -41,7 +41,7 @@ fn a_remote_unknown_token_is_withheld() {
 #[test]
 fn our_own_unknown_token_still_reaches_the_client() {
 	let ours = [
-		Error::BadRequest(unknown_token(), "Unknown access token."),
+		Error::unknown_token(false, "Unknown access token."),
 		Error::Request(unknown_token(), Cow::Borrowed(""), StatusCode::UNAUTHORIZED),
 	];
 

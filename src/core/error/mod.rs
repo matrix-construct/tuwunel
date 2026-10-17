@@ -21,7 +21,7 @@ use std::{
 
 // Aliased so the variants already spelling this path qualified stay clean
 // under unused_qualifications.
-use ruma::api::error::ErrorKind as MatrixErrorKind;
+use ruma::api::error::{ErrorKind as MatrixErrorKind, UnknownTokenErrorData};
 
 pub use self::{err::visit, log::*};
 use crate::utils::{assert_ref_unwind_safe, assert_send, assert_sync, assert_unwind_safe};
@@ -537,6 +537,18 @@ impl Error {
 	//#[deprecated]
 	pub fn bad_database(message: &'static str) -> Self {
 		crate::err!(Database(error!("{message}")))
+	}
+
+	/// Constructs the `M_UNKNOWN_TOKEN` error refusing an access or refresh
+	/// token.
+	///
+	/// `soft_logout` tells the client it may log in again on the same device,
+	/// keeping its session, rather than starting over.
+	#[must_use]
+	pub fn unknown_token(soft_logout: bool, message: &'static str) -> Self {
+		let kind = MatrixErrorKind::UnknownToken(UnknownTokenErrorData { soft_logout });
+
+		Self::BadRequest(kind, message)
 	}
 
 	/// Produces an error message safe for public responses.
