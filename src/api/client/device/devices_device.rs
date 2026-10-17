@@ -40,9 +40,15 @@ pub(crate) async fn update_device_route(
 	let sender_user = body.sender_user();
 	let appservice = body.appservice_info.as_ref();
 	let update = |device: Device| {
-		let notify = device.display_name != body.display_name;
+		// An omitted name leaves the device's own in place.
+		let renamed = body
+			.display_name
+			.clone()
+			.filter(|name| device.display_name.as_ref() != Some(name));
+
+		let notify = renamed.is_some();
 		let device = Device {
-			display_name: body.display_name.clone(),
+			display_name: renamed.or(device.display_name),
 			last_seen_ip: Some(to_small_string(client)),
 			last_seen_ts: Some(MilliSecondsSinceUnixEpoch::now()),
 			..device
