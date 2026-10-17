@@ -6,7 +6,7 @@
 
 use std::time::Duration;
 
-use reqwest::Response;
+use reqwest::{Method, Response};
 use serde_json::Value;
 use tokio::time::{sleep, timeout};
 use tuwunel_core::{
@@ -78,12 +78,22 @@ pub(crate) fn url(&self, path: &str) -> String {
 /// readily as a success, on any API the server hosts.
 #[implement(Client, params = "<'_>")]
 pub(crate) async fn post_url(&self, url: &str, body: &Value) -> Result<Response> {
+	self.request(Method::POST, url, body).await
+}
+
+/// Send a JSON body to an absolute URL with any method as this user and keep
+/// the raw reply.
+///
+/// The status stays the caller's to judge, and every method carries the same
+/// bearer token and JSON body encoding.
+#[implement(Client, params = "<'_>")]
+pub(crate) async fn request(&self, method: Method, url: &str, body: &Value) -> Result<Response> {
 	let response = self
 		.services
 		.client
 		.clients
 		.default
-		.post(url)
+		.request(method, url)
 		.bearer_auth(self.token)
 		.json(body)
 		.send()

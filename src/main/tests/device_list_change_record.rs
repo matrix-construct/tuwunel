@@ -147,14 +147,7 @@ async fn exercise(services: &Services, base: &str) -> Result {
 #[tracing::instrument(level = "debug", skip_all)]
 async fn request(client: &Client<'_>, method: Method, body: &Value) -> Result {
 	client
-		.services
-		.client
-		.clients
-		.default
-		.request(method, client.url("devices/RECORD"))
-		.bearer_auth(client.token)
-		.json(body)
-		.send()
+		.request(method, &client.url("devices/RECORD"), body)
 		.await?
 		.error_for_status()?;
 
