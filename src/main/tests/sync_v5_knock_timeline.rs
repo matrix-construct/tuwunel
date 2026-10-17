@@ -16,6 +16,9 @@ mod client;
 mod fixture;
 mod sliding_sync;
 
+#[path = "client/put.rs"]
+mod put;
+
 #[path = "sliding_sync/resume.rs"]
 mod resume;
 
@@ -219,23 +222,4 @@ async fn message(&self, room: &RoomId, transaction: &str) -> Result<Value> {
 		&json!({ "msgtype": "m.text", "body": transaction }),
 	)
 	.await
-}
-
-#[implement(Client, params = "<'_>")]
-async fn put(&self, path: &str, body: &Value) -> Result<Value> {
-	let response = self
-		.services
-		.client
-		.clients
-		.default
-		.put(self.url(path))
-		.bearer_auth(self.token)
-		.json(body)
-		.send()
-		.await?
-		.error_for_status()?
-		.json()
-		.await?;
-
-	Ok(response)
 }
