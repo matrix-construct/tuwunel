@@ -82,6 +82,14 @@ async fn exercise(services: &Services, base: &str) -> Result {
 
 	client.post("keys/upload", &upload).await?;
 	request(&client, Method::PUT, &json!({"display_name": "renamed"})).await?;
+	request(&client, Method::PUT, &json!({})).await?;
+
+	let renamed = services
+		.users
+		.get_device_metadata(&user, device_id!("RECORD"))
+		.await?;
+
+	assert_eq!(renamed.display_name.as_deref(), Some("renamed"), "an omitted name is kept");
 
 	let key = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 	let signing = json!({"master_key": {"user_id": user, "usage": ["master"],
