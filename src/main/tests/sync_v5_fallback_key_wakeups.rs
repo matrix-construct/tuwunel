@@ -1,11 +1,14 @@
 #![cfg(test)]
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use futures::future::join;
 use serde_json::json;
 use tokio::time::sleep;
-use tuwunel_core::{Result, err, utils::BoolExt};
+use tuwunel_core::{
+	Result, err,
+	utils::{BoolExt, future::ExtExt},
+};
 use tuwunel_service::Services;
 
 use self::{
@@ -91,12 +94,12 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	// A room the reader is not in: it moves the global count and nothing else.
 	other.create_room(&private_chat).await?;
 
-	let started = Instant::now();
-	let idle = reader
+	let (idle, waited) = reader
 		.sliding_sync(Some(pos), IDLE_POLL_TIMEOUT, &body)
-		.await?;
+		.timed()
+		.await;
 
-	let waited = started.elapsed();
+	let idle = idle?;
 
 	idle["extensions"]["e2ee"]["device_unused_fallback_key_types"]
 		.is_array()
@@ -113,12 +116,12 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	let pos = field(&idle, "pos")?;
 	let room = reader.create_room(&private_chat).await?;
 
-	let started = Instant::now();
-	let news = reader
+	let (news, waited) = reader
 		.sliding_sync(Some(pos), NEWS_POLL_TIMEOUT, &body)
-		.await?;
+		.timed()
+		.await;
 
-	let waited = started.elapsed();
+	let news = news?;
 
 	news["rooms"][room.as_str()]
 		.is_object()
@@ -140,16 +143,16 @@ async fn exercise(services: &Services, base: &str) -> Result {
 
 	let pos = field(&opening, "pos")?;
 
-	let started = Instant::now();
-	let poll = reader.sliding_sync(Some(pos), NEWS_POLL_TIMEOUT, &extension_only);
+	let poll = reader
+		.sliding_sync(Some(pos), NEWS_POLL_TIMEOUT, &extension_only)
+		.timed();
 
 	let own_activity = async {
 		sleep(OWN_ACTIVITY_DELAY).await;
 		reader.create_room(&private_chat).await
 	};
 
-	let (woken, own_activity) = join(poll, own_activity).await;
-	let waited = started.elapsed();
+	let ((woken, waited), own_activity) = join(poll, own_activity).await;
 
 	own_activity?;
 	let woken = woken?;
