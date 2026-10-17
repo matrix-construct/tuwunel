@@ -16,6 +16,7 @@ use tuwunel_service::Services;
 use self::client::{Client, field, register, wait_until_ready};
 
 mod client;
+mod sliding_sync;
 
 const ALICE_TOKEN: &str = "sync-v5-list-filters-alice-access-token";
 const BOB_TOKEN: &str = "sync-v5-list-filters-bob-access-token";
@@ -279,29 +280,8 @@ async fn sync_lists(&self, since: Option<&str>) -> Result<Value> {
 		},
 	});
 
-	let query =
-		since.map_or_else(String::new, |since| format!("?pos={since}&timeout={POLL_TIMEOUT}"));
-
-	let url = format!(
-		"{}/_matrix/client/unstable/org.matrix.simplified_msc3575/sync{query}",
-		self.base
-	);
-
-	let response: Value = self
-		.services
-		.client
-		.clients
-		.default
-		.post(url)
-		.bearer_auth(self.token)
-		.json(&body)
-		.send()
-		.await?
-		.error_for_status()?
-		.json()
-		.await?;
-
-	Ok(response)
+	self.sliding_sync(since, POLL_TIMEOUT, &body)
+		.await
 }
 
 /// The number of rooms a list reported matching.

@@ -21,6 +21,8 @@ use self::client::{Client, field, register, wait_until_ready};
 )]
 mod client;
 
+mod sliding_sync;
+
 const TOKEN: &str = "sync-v5-profiles-own-base-test-access-token";
 
 const STATUS: &str = "org.matrix.msc4426.status";
@@ -269,28 +271,7 @@ async fn sync_profiles(
 		},
 	});
 
-	let query = pos
-		.map(|pos| format!("?pos={pos}&timeout={POLL_TIMEOUT}"))
-		.unwrap_or_default();
-
-	let url = format!(
-		"{}/_matrix/client/unstable/org.matrix.simplified_msc3575/sync{query}",
-		self.base
-	);
-
-	self.services
-		.client
-		.clients
-		.default
-		.post(url)
-		.bearer_auth(self.token)
-		.json(&body)
-		.send()
-		.await?
-		.error_for_status()?
-		.json()
-		.await
-		.map_err(Into::into)
+	self.sliding_sync(pos, POLL_TIMEOUT, &body).await
 }
 
 /// Checks that a round carried the whole own profile, the status included.
