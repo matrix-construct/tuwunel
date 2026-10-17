@@ -2,8 +2,8 @@
 
 use std::time::{Duration, Instant};
 
-use serde_json::{Value, json};
-use tuwunel_core::{Result, err, implement, utils::BoolExt};
+use serde_json::json;
+use tuwunel_core::{Result, err, utils::BoolExt};
 use tuwunel_service::Services;
 
 use self::{
@@ -13,6 +13,7 @@ use self::{
 
 mod client;
 mod fixture;
+mod sliding_sync;
 
 const READER_TOKEN: &str = "sync-v5-fallback-key-wakeups-reader-token";
 const OTHER_TOKEN: &str = "sync-v5-fallback-key-wakeups-other-token";
@@ -59,7 +60,19 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	let reader = Client { services, base, token: READER_TOKEN };
 	let other = Client { token: OTHER_TOKEN, ..reader };
 
-	let opening = reader.sync_e2ee(None).await?;
+	let body = json!({
+		"lists": {
+			"all": {
+				"ranges": [[0, 9]],
+				"timeline_limit": 0,
+			},
+		},
+		"extensions": {
+			"e2ee": { "enabled": true },
+		},
+	});
+
+	let opening = reader.sliding_sync(None, 0, &body).await?;
 	let pos = field(&opening, "pos")?;
 
 	let private_chat = json!({ "preset": "private_chat" });
@@ -69,7 +82,7 @@ async fn exercise(services: &Services, base: &str) -> Result {
 
 	let started = Instant::now();
 	let idle = reader
-		.sync_e2ee(Some((pos, IDLE_POLL_TIMEOUT)))
+		.sliding_sync(Some(pos), IDLE_POLL_TIMEOUT, &body)
 		.await?;
 
 	let waited = started.elapsed();
@@ -91,7 +104,7 @@ async fn exercise(services: &Services, base: &str) -> Result {
 
 	let started = Instant::now();
 	let news = reader
-		.sync_e2ee(Some((pos, NEWS_POLL_TIMEOUT)))
+		.sliding_sync(Some(pos), NEWS_POLL_TIMEOUT, &body)
 		.await?;
 
 	let waited = started.elapsed();
@@ -107,40 +120,4 @@ async fn exercise(services: &Services, base: &str) -> Result {
 		.ok_or_else(|| err!("a round with news waited for the poll ({waited:?})"))?;
 
 	Ok(())
-}
-
-/// One sliding sync carrying the e2ee extension.
-///
-/// Without a resume position it opens the connection and answers at once;
-/// with one it long-polls for the given number of milliseconds.
-#[implement(Client, params = "<'_>")]
-async fn sync_e2ee(&self, resume: Option<(&str, u64)>) -> Result<Value> {
-	let body = json!({
-		"lists": {
-			"all": {
-				"ranges": [[0, 9]],
-				"timeline_limit": 0,
-			},
-		},
-		"extensions": {
-			"e2ee": { "enabled": true },
-		},
-	});
-
-	let query =
-		resume.map_or_else(String::new, |(pos, timeout)| format!("?pos={pos}&timeout={timeout}"));
-
-	let url = format!(
-		"{}/_matrix/client/unstable/org.matrix.simplified_msc3575/sync{query}",
-		self.base
-	);
-
-	let response = self
-		.post_url(&url, &body)
-		.await?
-		.error_for_status()?
-		.json()
-		.await?;
-
-	Ok(response)
 }

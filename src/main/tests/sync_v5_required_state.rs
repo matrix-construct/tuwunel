@@ -11,6 +11,10 @@ use tuwunel_service::Services;
 use self::client::{Client, field, register, wait_until_ready};
 
 mod client;
+mod sliding_sync;
+
+#[path = "sliding_sync/resume.rs"]
+mod resume;
 
 const TOKEN: &str = "sync-v5-required-state-test-access-token";
 const BEACON: &str = "org.matrix.msc3672.beacon_info";
@@ -164,37 +168,6 @@ async fn put(&self, path: &str, body: &Value) -> Result<Value> {
 		.clients
 		.default
 		.put(self.url(path))
-		.bearer_auth(self.token)
-		.json(body)
-		.send()
-		.await?
-		.error_for_status()?
-		.json()
-		.await
-		.map_err(Into::into)
-}
-
-#[implement(Client, params = "<'_>")]
-#[tracing::instrument(level = "debug", skip_all)]
-async fn sync(&self, previous: Option<&Value>, body: &Value) -> Result<Value> {
-	let pos = previous
-		.map(|response| field(response, "pos"))
-		.transpose()?;
-
-	let query = pos
-		.map(|pos| format!("&pos={pos}"))
-		.unwrap_or_default();
-
-	let url = format!(
-		"{}/_matrix/client/unstable/org.matrix.simplified_msc3575/sync?timeout=100{query}",
-		self.base
-	);
-
-	self.services
-		.client
-		.clients
-		.default
-		.post(url)
 		.bearer_auth(self.token)
 		.json(body)
 		.send()

@@ -53,23 +53,34 @@ pub(crate) async fn create_room(&self, body: &Value) -> Result<OwnedRoomId> {
 /// an accepted request.
 #[implement(Client, params = "<'_>")]
 pub(crate) async fn post(&self, path: &str, body: &Value) -> Result<Value> {
-	let response = self
-		.post_url(&self.url(path), body)
-		.await?
-		.error_for_status()?
-		.json()
-		.await?;
-
-	Ok(response)
+	self.post_json(&self.url(path), body).await
 }
 
 /// The versioned client-API URL for one endpoint path.
 ///
 /// Every versioned client-API request in the harness is addressed through
-/// here, so the base and the version prefix are stated once.
+/// here, so the version prefix is stated once.
 #[implement(Client, params = "<'_>")]
-pub(crate) fn url(&self, path: &str) -> String {
-	format!("{}/_matrix/client/v3/{path}", self.base)
+pub(crate) fn url(&self, path: &str) -> String { self.client_url("v3/", path) }
+
+/// A URL under the client-API root, from a prefix and what follows it.
+///
+/// The base and the root are stated here once, for versioned endpoints and
+/// unstable ones alike.
+#[implement(Client, params = "<'_>")]
+pub(crate) fn client_url(&self, prefix: &str, rest: &str) -> String {
+	format!("{}/_matrix/client/{prefix}{rest}", self.base)
+}
+
+/// Post a JSON body to an absolute URL as this user and parse the reply.
+///
+/// Where `post` takes a versioned endpoint path, this takes any URL; a
+/// non-success status is the error.
+#[implement(Client, params = "<'_>")]
+pub(crate) async fn post_json(&self, url: &str, body: &Value) -> Result<Value> {
+	let response = self.post_url(url, body).await?;
+
+	accepted(response).await
 }
 
 /// Post a JSON body to an absolute URL as this user and keep the raw reply.
@@ -100,6 +111,16 @@ pub(crate) async fn request(&self, method: Method, url: &str, body: &Value) -> R
 		.await?;
 
 	Ok(response)
+}
+
+/// Parse the JSON body of a reply the server accepted.
+///
+/// A non-success status is the error, so a caller only ever sees the body of
+/// an accepted request.
+pub(crate) async fn accepted(response: Response) -> Result<Value> {
+	let body = response.error_for_status()?.json().await?;
+
+	Ok(body)
 }
 
 /// Wait for the listener to answer, which the boot does not itself await.

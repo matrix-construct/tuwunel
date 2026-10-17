@@ -24,6 +24,10 @@ use self::{
 #[expect(dead_code)] // This test creates no rooms through the client API.
 mod client;
 mod fixture;
+mod sliding_sync;
+
+#[path = "sliding_sync/resume.rs"]
+mod resume;
 
 const INVITER_TOKEN: &str = "sync-v5-rescinded-invite-inviter-access-token";
 const INVITEE_TOKEN: &str = "sync-v5-rescinded-invite-invitee-access-token";
@@ -138,29 +142,6 @@ async fn plant_invite(
 			count: PduCount::Normal(*services.globals.next_count()),
 		})
 		.await
-}
-
-#[implement(Client, params = "<'_>")]
-async fn sync(&self, previous: Option<&Value>, body: &Value) -> Result<Value> {
-	let pos = previous
-		.map(|response| field(response, "pos"))
-		.transpose()?
-		.map(|pos| format!("&pos={pos}"))
-		.unwrap_or_default();
-
-	let url = format!(
-		"{}/_matrix/client/unstable/org.matrix.simplified_msc3575/sync?timeout=100{pos}",
-		self.base
-	);
-
-	let response = self
-		.post_url(&url, body)
-		.await?
-		.error_for_status()?
-		.json()
-		.await?;
-
-	Ok(response)
 }
 
 #[implement(Client, params = "<'_>")]

@@ -15,6 +15,7 @@ use tuwunel_service::Services;
 use self::client::{Client, field, register, wait_until_ready};
 
 mod client;
+mod sliding_sync;
 
 const READER_TOKEN: &str = "sync-v5-plaintext-device-lists-reader-token";
 const SENDER_TOKEN: &str = "sync-v5-plaintext-device-lists-sender-token";
@@ -154,26 +155,7 @@ async fn sync_e2ee(&self, pos: Option<&str>) -> Result<Value> {
 		},
 	});
 
-	let query = pos.map_or_else(String::new, |pos| format!("?pos={pos}&timeout={POLL_TIMEOUT}"));
-
-	let url = format!(
-		"{}/_matrix/client/unstable/org.matrix.simplified_msc3575/sync{query}",
-		self.base
-	);
-
-	self.services
-		.client
-		.clients
-		.default
-		.post(url)
-		.bearer_auth(self.token)
-		.json(&body)
-		.send()
-		.await?
-		.error_for_status()?
-		.json()
-		.await
-		.map_err(Into::into)
+	self.sliding_sync(pos, POLL_TIMEOUT, &body).await
 }
 
 fn next_pos(response: &Value) -> Result<&str> { field(response, "pos") }

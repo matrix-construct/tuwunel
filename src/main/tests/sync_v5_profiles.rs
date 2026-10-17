@@ -17,6 +17,7 @@ use tuwunel_service::Services;
 use self::client::{Client, field, register, wait_until_ready};
 
 mod client;
+mod sliding_sync;
 
 const OWNER_TOKEN: &str = "sync-v5-profiles-owner-access-token";
 const PEER_TOKEN: &str = "sync-v5-profiles-peer-access-token";
@@ -242,16 +243,14 @@ async fn sync_field_selection(
 		body["extensions"][PROFILES]["fields"] = fields.clone();
 	}
 
-	let query = pos
-		.map(|pos| format!("?pos={pos}&timeout=0"))
-		.unwrap_or_default();
+	self.sync_raw(pos, &body).await
+}
 
-	let url = format!(
-		"{}/_matrix/client/unstable/org.matrix.simplified_msc3575/sync{query}",
-		self.base
-	);
-
-	self.post_url(&url, &body).await
+#[implement(Client, params = "<'_>")]
+#[tracing::instrument(level = "trace", skip_all)]
+async fn sync_raw(&self, pos: Option<&str>, body: &Value) -> Result<Response> {
+	self.post_url(&self.sliding_sync_url(pos, 0), body)
+		.await
 }
 
 #[tracing::instrument(level = "trace", skip_all)]
@@ -626,12 +625,30 @@ async fn fails_without_token(
 #[implement(Client, params = "<'_>")]
 #[tracing::instrument(level = "trace", skip_all)]
 async fn sync_profiles(&self, conn: &str, room: &str, pos: Option<&str>) -> Result<Value> {
-	self.sync_response(conn, room, pos)
-		.await?
-		.error_for_status()?
-		.json()
-		.await
-		.map_err(Into::into)
+	let body = selected_body(conn, room, Selection::NonLazy);
+
+	self.sliding_sync(pos, 0, &body).await
+}
+
+fn selected_body(conn: &str, room: &str, selection: Selection) -> Value {
+	let required = match selection {
+		| Selection::Lazy => json!([["m.room.member", "$LAZY"]]),
+		| _ => json!([]),
+	};
+
+	let fields = match selection {
+		| Selection::Empty => json!([]),
+		| _ => json!([STATUS]),
+	};
+
+	let timeline_limit = u32::from(matches!(selection, Selection::Timeline));
+
+	json!({
+		"conn_id": conn,
+		"lists": {},
+		"room_subscriptions": { room: { "required_state": required, "timeline_limit": timeline_limit } },
+		"extensions": { PROFILES: { "enabled": !matches!(selection, Selection::Disabled), "fields": fields } },
+	})
 }
 
 #[implement(Client, params = "<'_>")]
@@ -650,43 +667,9 @@ async fn sync_selected(
 	pos: Option<&str>,
 	selection: Selection,
 ) -> Result<Response> {
-	let required = match selection {
-		| Selection::Lazy => json!([["m.room.member", "$LAZY"]]),
-		| _ => json!([]),
-	};
+	let body = selected_body(conn, room, selection);
 
-	let fields = match selection {
-		| Selection::Empty => json!([]),
-		| _ => json!([STATUS]),
-	};
-
-	let timeline_limit = u32::from(matches!(selection, Selection::Timeline));
-	let body = json!({
-		"conn_id": conn,
-		"lists": {},
-		"room_subscriptions": { room: { "required_state": required, "timeline_limit": timeline_limit } },
-		"extensions": { PROFILES: { "enabled": !matches!(selection, Selection::Disabled), "fields": fields } },
-	});
-
-	let query = pos
-		.map(|pos| format!("?pos={pos}&timeout=0"))
-		.unwrap_or_default();
-
-	let url = format!(
-		"{}/_matrix/client/unstable/org.matrix.simplified_msc3575/sync{query}",
-		self.base
-	);
-
-	self.services
-		.client
-		.clients
-		.default
-		.post(url)
-		.bearer_auth(self.token)
-		.json(&body)
-		.send()
-		.await
-		.map_err(Into::into)
+	self.sync_raw(pos, &body).await
 }
 
 fn update<'a>(response: &'a Value, user_id: &UserId) -> &'a Value {

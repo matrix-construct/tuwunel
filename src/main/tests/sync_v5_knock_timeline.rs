@@ -14,6 +14,10 @@ use self::{
 
 mod client;
 mod fixture;
+mod sliding_sync;
+
+#[path = "sliding_sync/resume.rs"]
+mod resume;
 
 const OWNER_TOKEN: &str = "sync-v5-knock-timeline-owner-access-token";
 const KNOCKER_TOKEN: &str = "sync-v5-knock-timeline-knocker-access-token";
@@ -191,33 +195,6 @@ fn request(connection: &str, limit: u64) -> Value {
 			"ranges": [[0, 9]], "timeline_limit": limit, "required_state": [["*", "*"]]
 		} },
 	})
-}
-
-#[implement(Client, params = "<'_>")]
-async fn sync(&self, previous: Option<&Value>, body: &Value) -> Result<Value> {
-	let pos = previous
-		.map(|response| field(response, "pos"))
-		.transpose()?;
-
-	let url = match pos {
-		| None => format!(
-			"{}/_matrix/client/unstable/org.matrix.simplified_msc3575/sync?timeout=100",
-			self.base
-		),
-		| Some(pos) => format!(
-			"{}/_matrix/client/unstable/org.matrix.simplified_msc3575/sync?timeout=100&pos={pos}",
-			self.base
-		),
-	};
-
-	let response = self
-		.post_url(&url, body)
-		.await?
-		.error_for_status()?
-		.json()
-		.await?;
-
-	Ok(response)
 }
 
 fn assert_knock(response: &Value, room_id: &RoomId, count: u64) {
