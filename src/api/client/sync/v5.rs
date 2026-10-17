@@ -11,7 +11,6 @@ use std::{
 	collections::{BTreeMap, BTreeSet},
 	fmt::Debug,
 	sync::Arc,
-	time::Duration,
 };
 
 use axum::extract::{Extension, State};
@@ -21,10 +20,7 @@ use ruma::{
 	api::client::sync::sync_events::v5::{ListId, Request, Response, response},
 	events::room::member::MembershipState,
 };
-use tokio::{
-	sync::Notify,
-	time::{Instant, timeout_at},
-};
+use tokio::{sync::Notify, time::timeout_at};
 use tuwunel_core::{
 	Err, Result, debug,
 	debug::INFO_SPAN_LEVEL,
@@ -32,7 +28,7 @@ use tuwunel_core::{
 	error::inspect_log,
 	smallvec::SmallVec,
 	trace,
-	utils::{TryFutureExtExt, result::FlatOk},
+	utils::{TryFutureExtExt, time::millis},
 };
 use tuwunel_service::{
 	Services,
@@ -45,7 +41,7 @@ use self::{
 	range::collect as collect_ranges,
 };
 use super::share_encrypted_room;
-use crate::{ClientIp, Ruma};
+use crate::{ClientIp, Ruma, utils::poll_deadline};
 
 #[derive(Copy, Clone)]
 struct SyncInfo<'a> {
@@ -196,9 +192,7 @@ pub(crate) async fn sync_events_v5_route(
 		extensions: Default::default(),
 	};
 
-	let stop_at = Instant::now()
-		.checked_add(Duration::from_millis(timeout))
-		.expect("configuration must limit maximum timeout");
+	let stop_at = poll_deadline(timeout);
 
 	loop {
 		debug_assert!(
@@ -285,12 +279,9 @@ pub(crate) async fn sync_events_v5_route(
 fn poll_timeout(request: &Request, max: u64) -> u64 {
 	request
 		.timeout
-		.as_ref()
 		.filter(|_| request.pos.is_some())
-		.map(Duration::as_millis)
-		.map(TryInto::try_into)
-		.flat_ok()
-		.map(|timeout: u64| timeout.min(max))
+		.and_then(millis)
+		.map(|timeout| timeout.min(max))
 		.unwrap_or(0)
 }
 

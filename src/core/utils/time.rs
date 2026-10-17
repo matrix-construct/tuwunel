@@ -56,6 +56,14 @@ pub fn duration_since_epoch(timepoint: SystemTime) -> Duration {
 		.unwrap_or(Duration::ZERO)
 }
 
+/// Converts a duration to whole milliseconds when they fit in a `u64`.
+///
+/// The submillisecond remainder is discarded; a count past `u64::MAX` gives
+/// `None` rather than truncating.
+#[inline]
+#[must_use]
+pub fn millis(duration: Duration) -> Option<u64> { duration.as_millis().try_into().ok() }
+
 /// Adds a duration to the Unix epoch using checked arithmetic.
 ///
 /// The resulting system time is returned when representable. An arithmetic

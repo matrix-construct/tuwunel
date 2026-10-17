@@ -6,13 +6,12 @@ use ruma::{
 	UserId,
 	api::client::peeking::listen_to_new_events::v3::{Request, Response},
 };
-use tokio::time::{Duration, Instant, timeout_at};
+use tokio::time::timeout_at;
 use tuwunel_core::{
 	Err, Result, err,
 	utils::{
 		BoolExt, OptionExt,
 		future::OptionFutureExt,
-		result::FlatOk,
 		stream::{IterStream, ReadyExt, WidebandExt},
 	},
 };
@@ -20,7 +19,7 @@ use tuwunel_matrix::{Event, PduCount};
 use tuwunel_service::{Services, rooms::timeline::PdusIterItem};
 
 use super::visibility_filter;
-use crate::Ruma;
+use crate::{Ruma, utils::sync_deadline};
 
 const EVENT_LIMIT: usize = 50;
 
@@ -40,17 +39,6 @@ pub(crate) async fn events_route(
 	body: Ruma<Request>,
 ) -> Result<Response> {
 	let sender_user = body.sender_user();
-
-	let timeout = body
-		.body
-		.timeout
-		.as_ref()
-		.map(Duration::as_millis)
-		.map(TryInto::try_into)
-		.flat_ok()
-		.unwrap_or(services.config.client_sync_timeout_default)
-		.max(services.config.client_sync_timeout_min)
-		.min(services.config.client_sync_timeout_max);
 
 	let room_id = body.room_id.as_ref();
 
@@ -94,9 +82,7 @@ pub(crate) async fn events_route(
 		peeking,
 	};
 
-	let stop_at = Instant::now()
-		.checked_add(Duration::from_millis(timeout))
-		.expect("configuration must limit maximum timeout");
+	let stop_at = sync_deadline(&services, body.body.timeout);
 
 	loop {
 		let watchers = services
