@@ -42,7 +42,7 @@ pub const TOKEN_LENGTH: usize = 32;
 /// than `MAX_DEVICE_ID_LENGTH` bytes or when it matches one of the user's
 /// cross-signing key IDs.
 #[implement(super::Service)]
-#[tracing::instrument(level = "info", skip(self, access_token))]
+#[tracing::instrument(level = "debug", skip(self, access_token, refresh_token))]
 pub async fn create_device(
 	&self,
 	user_id: &UserId,
@@ -118,7 +118,7 @@ pub async fn check_device_id(&self, user_id: &UserId, device_id: Option<&DeviceI
 /// Everything keyed by the device goes with it, its identity keys included,
 /// so a later session under the same ID starts with none.
 #[implement(super::Service)]
-#[tracing::instrument(level = "info", skip(self))]
+#[tracing::instrument(level = "debug", skip(self))]
 pub async fn remove_device(&self, user_id: &UserId, device_id: &DeviceId) {
 	let mutex_key = (user_id.to_owned(), device_id.to_owned());
 	let _guard = self.device_mutex.lock(&mutex_key).await;
@@ -231,7 +231,7 @@ pub async fn remove_tokens(&self, user_id: &UserId, device_id: &DeviceId) {
 
 /// Replaces the access token of one device.
 #[implement(super::Service)]
-#[tracing::instrument(level = "debug", skip(self))]
+#[tracing::instrument(level = "debug", skip(self, access_token, refresh_token))]
 pub async fn set_access_token(
 	&self,
 	user_id: &UserId,
@@ -419,7 +419,7 @@ pub fn generate_access_token(&self, expires: bool) -> (String, Option<Duration>)
 
 /// Replaces the refresh token of one device.
 #[implement(super::Service)]
-#[tracing::instrument(level = "debug", skip(self))]
+#[tracing::instrument(level = "debug", skip(self, refresh_token))]
 pub async fn set_refresh_token(
 	&self,
 	user_id: &UserId,
