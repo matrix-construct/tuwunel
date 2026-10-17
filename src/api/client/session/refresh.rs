@@ -1,13 +1,6 @@
 use axum::extract::State;
-use ruma::api::{
-	client::session::refresh_token::v3::{Request, Response},
-	error::{ErrorKind, UnknownTokenErrorData},
-};
-use tuwunel_core::{
-	Err, Error, Result, debug_info,
-	utils::{BoolExt, future::OptionFutureExt, time::timepoint_has_passed},
-};
-use tuwunel_service::users::device::RefreshToken;
+use ruma::api::client::session::refresh_token::v3::{Request, Response};
+use tuwunel_core::{Err, Result, debug_info, err};
 
 use crate::{ClientIp, Ruma};
 
@@ -28,89 +21,31 @@ pub(crate) async fn refresh_token_route(
 		return Err!(Request(Forbidden("Refresh token is malformed.")));
 	}
 
-	match services
+	let token = services
 		.users
 		.classify_refresh_token(&refresh_token_claim)
-		.await
-	{
-		| RefreshToken::Current { user_id, device_id, expires_at } => {
-			if expires_at.is_some_and(timepoint_has_passed) {
-				let hard = services.server.config.refresh_token_hard_logout;
-				hard.then_async(|| services.users.remove_device(&user_id, &device_id))
-					.unwrap_or_else_async(async || {
-						services
-							.users
-							.remove_refresh_token(&user_id, &device_id)
-							.await
-							.ok();
-					})
-					.await;
+		.await;
 
-				return Err(Error::BadRequest(
-					ErrorKind::UnknownToken(UnknownTokenErrorData { soft_logout: !hard }),
-					"Refresh token has expired.",
-				));
-			}
+	let (user_id, device_id) = token
+		.owner()
+		.ok_or_else(|| err!(Request(Forbidden("Refresh token is unrecognized."))))?;
 
-			services.users.locked_check(&user_id).await?;
+	let (access_token, expires_in_ms) = services.users.generate_access_token(true);
+	let refresh_token = services
+		.users
+		.rotate_refresh_token(
+			&token,
+			&refresh_token_claim,
+			(&access_token, expires_in_ms),
+			services.users.locked_check(user_id),
+		)
+		.await?;
 
-			let (access_token, expires_in_ms) = services.users.generate_access_token(true);
-			let refresh_token = services
-				.users
-				.rotate_refresh_token(
-					&user_id,
-					&device_id,
-					&refresh_token_claim,
-					&access_token,
-					expires_in_ms,
-				)
-				.await?;
+	debug_info!(?user_id, ?device_id, ?expires_in_ms, "refreshed their access_token");
 
-			debug_info!(?user_id, ?device_id, ?expires_in_ms, "refreshed their access_token",);
-
-			Ok(Response {
-				access_token,
-				refresh_token: Some(refresh_token),
-				expires_in_ms,
-			})
-		},
-
-		| RefreshToken::Replayed { user_id, device_id, current, grace } if grace => {
-			services.users.locked_check(&user_id).await?;
-
-			// Benign double-submit: re-issue an access token for the unchanged
-			// refresh token rather than rotating it.
-			let (access_token, expires_in_ms) = services.users.generate_access_token(true);
-
-			services
-				.users
-				.set_access_token(&user_id, &device_id, &access_token, expires_in_ms, None)
-				.await?;
-
-			Ok(Response {
-				access_token,
-				refresh_token: Some(current),
-				expires_in_ms,
-			})
-		},
-
-		| RefreshToken::Replayed { user_id, device_id, .. } => {
-			let revoke = services.server.config.refresh_token_reuse_revoke;
-			debug_info!(?user_id, ?device_id, revoke, "refresh token reused after rotation");
-
-			if revoke {
-				services
-					.users
-					.remove_device(&user_id, &device_id)
-					.await;
-			}
-
-			Err(Error::BadRequest(
-				ErrorKind::UnknownToken(UnknownTokenErrorData { soft_logout: !revoke }),
-				"Refresh token has already been used.",
-			))
-		},
-
-		| RefreshToken::Unknown => Err!(Request(Forbidden("Refresh token is unrecognized."))),
-	}
+	Ok(Response {
+		access_token,
+		refresh_token: Some(refresh_token),
+		expires_in_ms,
+	})
 }

@@ -10,19 +10,24 @@ use ruma::{
 };
 use serde_json::json;
 use tuwunel_core::{
-	Err, Result, at, implement, trace,
+	Err, Error, Result, async_noinline, at, debug_warn, implement, trace,
 	utils::{
-		BoolExt, ReadyExt, random_string,
+		BoolExt, MutexMapGuard, ReadyExt,
+		future::OptionFutureExt,
+		random_string,
 		stream::{IterStream, TryIgnore},
 		string::to_small_string,
 		time::{
 			duration_since_epoch, timepoint_from_epoch, timepoint_from_now, timepoint_has_passed,
 		},
 	},
+	warn,
 };
 use tuwunel_database::{Cbor, Deserialized, Ignore, Interfix, Json, Txn};
 
 use super::DeviceListChange;
+
+type DeviceLock = MutexMapGuard<(OwnedUserId, OwnedDeviceId), ()>;
 
 /// generated device ID length
 const DEVICE_ID_LENGTH: usize = 10;
@@ -40,7 +45,8 @@ pub const TOKEN_LENGTH: usize = 32;
 ///
 /// Without a device ID one is generated. A chosen ID is refused when longer
 /// than `MAX_DEVICE_ID_LENGTH` bytes or when it matches one of the user's
-/// cross-signing key IDs.
+/// cross-signing key IDs. The device is written and given its tokens under the
+/// device lock.
 #[implement(super::Service)]
 #[tracing::instrument(level = "debug", skip(self, access_token, refresh_token))]
 pub async fn create_device(
@@ -63,7 +69,10 @@ pub async fn create_device(
 	self.check_device_id(user_id, Some(&device_id))
 		.await?;
 
+	let lock = self.lock_device(user_id, &device_id).await;
+
 	let notify = true;
+
 	self.put_device_metadata(user_id, notify, &Device {
 		device_id: device_id.clone(),
 		display_name: initial_device_display_name.map(Into::into),
@@ -73,7 +82,7 @@ pub async fn create_device(
 	.await;
 
 	if let Some(access_token) = access_token {
-		self.set_access_token(user_id, &device_id, access_token, expires_in, refresh_token)
+		self.issue_tokens(&lock, user_id, &device_id, (access_token, expires_in), refresh_token)
 			.await?;
 	}
 
@@ -113,6 +122,19 @@ pub async fn check_device_id(&self, user_id: &UserId, device_id: Option<&DeviceI
 	Ok(())
 }
 
+/// Locks one device against concurrent creation, token issuance and removal.
+///
+/// A refresh token is rotated by reading the one the device points at and
+/// replacing it, so issuers run one after another to leave the device a single
+/// refresh token. An issuer that runs after removal finds no device rather than
+/// issuing to one already gone.
+#[implement(super::Service)]
+async fn lock_device(&self, user_id: &UserId, device_id: &DeviceId) -> DeviceLock {
+	let key = (user_id.to_owned(), device_id.to_owned());
+
+	self.updating_device.lock(&key).await
+}
+
 /// Removes a device from a user.
 ///
 /// Everything keyed by the device goes with it, its identity keys included,
@@ -120,10 +142,21 @@ pub async fn check_device_id(&self, user_id: &UserId, device_id: Option<&DeviceI
 #[implement(super::Service)]
 #[tracing::instrument(level = "debug", skip(self))]
 pub async fn remove_device(&self, user_id: &UserId, device_id: &DeviceId) {
-	let mutex_key = (user_id.to_owned(), device_id.to_owned());
-	let _guard = self.device_mutex.lock(&mutex_key).await;
+	let lock = self.lock_device(user_id, device_id).await;
 
-	// Remove access tokens
+	self.remove_device_locked(&lock, user_id, device_id)
+		.await;
+}
+
+#[implement(super::Service)]
+// query-depth firewall
+#[async_noinline]
+async fn remove_device_locked<'a>(
+	&'a self,
+	_lock: &'a DeviceLock,
+	user_id: &'a UserId,
+	device_id: &'a DeviceId,
+) {
 	self.remove_tokens(user_id, device_id).await;
 
 	// Remove todevice events
@@ -229,7 +262,11 @@ pub async fn remove_tokens(&self, user_id: &UserId, device_id: &DeviceId) {
 	join(remove_access, remove_refresh).await;
 }
 
-/// Replaces the access token of one device.
+/// Replaces the access token of one device, and its refresh token when one is
+/// given.
+///
+/// The tokens are issued under the device lock, and refused when the device no
+/// longer exists.
 #[implement(super::Service)]
 #[tracing::instrument(level = "debug", skip(self, access_token, refresh_token))]
 pub async fn set_access_token(
@@ -240,55 +277,189 @@ pub async fn set_access_token(
 	expires_in: Option<Duration>,
 	refresh_token: Option<&str>,
 ) -> Result {
-	// Tokens are issued one after another, so the device keeps a single
-	// refresh token, and a device removed meanwhile gets none.
-	let mutex_key = (user_id.to_owned(), device_id.to_owned());
-	let _guard = self.device_mutex.lock(&mutex_key).await;
+	let lock = self.lock_device(user_id, device_id).await;
 
-	self.issue_tokens(user_id, device_id, access_token, expires_in, refresh_token)
+	self.issue_tokens(&lock, user_id, device_id, (access_token, expires_in), refresh_token)
 		.await
 }
 
-/// Rotates a refresh token presented as current and replaces the access token
-/// of its device, returning the refresh token for the client to keep.
+/// Exchanges a presented refresh token for a new access token of its device,
+/// returning the refresh token for the client to keep.
 ///
-/// A concurrent refresh may have rotated the token since it was classified, so
-/// it is classified again under the device lock; inside the reuse grace window
-/// its successor is kept, as for any double-submit.
+/// Reuse is judged by `seen`, the caller's classification when the request
+/// arrived: a token already spent outside the reuse grace window is refused,
+/// and its device revoked when so configured. Otherwise the token is classified
+/// again under the device lock, where a current one rotates and a spent one
+/// inside the grace window keeps its successor, each once `gate`, the caller's
+/// account check, passes. One that expired meanwhile is refused with the
+/// configured logout, and one spent meanwhile by a concurrent exchange is
+/// refused alone.
 #[implement(super::Service)]
-#[tracing::instrument(level = "debug", skip(self, presented, access_token))]
-pub async fn rotate_refresh_token(
+#[tracing::instrument(level = "debug", skip_all)]
+pub async fn rotate_refresh_token<Gate>(
 	&self,
-	user_id: &UserId,
-	device_id: &DeviceId,
+	seen: &RefreshToken,
 	presented: &str,
-	access_token: &str,
-	expires_in: Option<Duration>,
-) -> Result<String> {
-	let mutex_key = (user_id.to_owned(), device_id.to_owned());
-	let _guard = self.device_mutex.lock(&mutex_key).await;
-
-	let (refresh_token, rotate) = match self.classify_refresh_token(presented).await {
-		| RefreshToken::Current { .. } => (generate_refresh_token(), true),
-		| RefreshToken::Replayed { current, grace: true, .. } => (current, false),
-		| _ => return Err!(Request(Forbidden("Refresh token has already been used."))),
+	access: (&str, Option<Duration>),
+	gate: Gate,
+) -> Result<String>
+where
+	Gate: Future<Output = Result> + Send,
+{
+	let Some((user_id, device_id)) = seen.owner() else {
+		return Err!(Request(Forbidden("Refresh token is unrecognized.")));
 	};
 
-	let rotated = rotate.then_some(refresh_token.as_str());
-	self.issue_tokens(user_id, device_id, access_token, expires_in, rotated)
+	let lock = self.lock_device(user_id, device_id).await;
+
+	if seen.reused() {
+		return self
+			.revoke_reused_refresh_token(&lock, user_id, device_id)
+			.map(Err)
+			.await;
+	}
+
+	let token = self
+		.classify_refresh_token(presented)
+		.map(|token| token.owned_by(user_id, device_id))
+		.await;
+
+	let exchangeable = token.exchangeable();
+	let kept = match token {
+		| RefreshToken::Unknown =>
+			return Err!(Request(Forbidden("Refresh token is unrecognized."))),
+
+		| RefreshToken::Current { .. } if !exchangeable =>
+			return self
+				.expire_refresh_token(&lock, user_id, device_id)
+				.map(Err)
+				.await,
+
+		| RefreshToken::Replayed { .. } if !exchangeable =>
+			return Err!(Request(Forbidden("Refresh token has already been used."))),
+
+		| RefreshToken::Current { .. } => None,
+		| RefreshToken::Replayed { current, .. } => Some(current),
+	};
+
+	gate.await?;
+
+	let rotated = kept.is_none();
+	let refresh_token = kept.unwrap_or_else(generate_refresh_token);
+
+	let rotated = rotated.then_some(refresh_token.as_str());
+
+	self.issue_tokens(&lock, user_id, device_id, access, rotated)
 		.await?;
 
 	Ok(refresh_token)
 }
 
-/// Issues tokens to one device; the caller holds its lock.
+/// The user and device a recognized refresh token belongs to.
+///
+/// A spent token keeps naming its device, so a reuse can still be traced to
+/// it, while an unrecognized token has no owner.
+#[implement(RefreshToken)]
+#[must_use]
+pub fn owner(&self) -> Option<(&UserId, &DeviceId)> {
+	match self {
+		| Self::Current { user_id, device_id, .. }
+		| Self::Replayed { user_id, device_id, .. } => Some((user_id, device_id)),
+		| Self::Unknown => None,
+	}
+}
+
+/// Whether the token was presented again after its rotation, outside the reuse
+/// grace window.
+#[implement(RefreshToken)]
+#[must_use]
+pub fn reused(&self) -> bool { matches!(self, Self::Replayed { grace: false, .. }) }
+
+/// Narrows the classification to one device.
+///
+/// A token belonging to any other device is unknown to it.
+#[implement(RefreshToken)]
+fn owned_by(self, user_id: &UserId, device_id: &DeviceId) -> Self {
+	let owned = self.owner() == Some((user_id, device_id));
+
+	owned.then_some(self).unwrap_or(Self::Unknown)
+}
+
+/// Whether the token may be exchanged for new tokens as classified.
+///
+/// A current token qualifies until it expires, and a spent one only inside the
+/// reuse grace window.
+#[implement(RefreshToken)]
+#[must_use]
+pub fn exchangeable(&self) -> bool {
+	match self {
+		| Self::Current { expires_at, .. } => !expires_at.is_some_and(timepoint_has_passed),
+		| Self::Replayed { grace, .. } => *grace,
+		| Self::Unknown => false,
+	}
+}
+
+/// Refuses an expired refresh token, retiring it first.
+///
+/// With hard logout the whole device is removed, otherwise only its refresh
+/// token, leaving the session to log in again on the same device.
+#[implement(super::Service)]
+async fn expire_refresh_token(
+	&self,
+	lock: &DeviceLock,
+	user_id: &UserId,
+	device_id: &DeviceId,
+) -> Error {
+	let config = &self.services.server.config;
+	let hard = config.refresh_token_hard_logout;
+
+	hard.then_async(|| self.remove_device_locked(lock, user_id, device_id))
+		.unwrap_or_else_async(async || {
+			self.remove_refresh_token(user_id, device_id)
+				.await
+				.ok();
+		})
+		.await;
+
+	Error::unknown_token(!hard, "Refresh token has expired.")
+}
+
+/// Refuses a refresh token presented again after its rotation.
+///
+/// Reuse outside the grace window suggests the token was copied, so the device
+/// is removed when `refresh_token_reuse_revoke` is set.
+#[implement(super::Service)]
+async fn revoke_reused_refresh_token(
+	&self,
+	lock: &DeviceLock,
+	user_id: &UserId,
+	device_id: &DeviceId,
+) -> Error {
+	let config = &self.services.server.config;
+	let revoke = config.refresh_token_reuse_revoke;
+
+	if revoke {
+		warn!(%user_id, %device_id, "Revoking a device whose refresh token was reused.");
+		self.remove_device_locked(lock, user_id, device_id)
+			.await;
+	} else {
+		debug_warn!(%user_id, %device_id, "Refresh token reused after rotation.");
+	}
+
+	Error::unknown_token(!revoke, "Refresh token has already been used.")
+}
+
+/// Issues an access token, and a refresh token when one is given, to one
+/// device.
+///
+/// A device removed before its lock was taken gets none.
 #[implement(super::Service)]
 async fn issue_tokens(
 	&self,
+	lock: &DeviceLock,
 	user_id: &UserId,
 	device_id: &DeviceId,
-	access_token: &str,
-	expires_in: Option<Duration>,
+	(access_token, expires_in): (&str, Option<Duration>),
 	refresh_token: Option<&str>,
 ) -> Result {
 	assert!(
@@ -301,7 +472,7 @@ async fn issue_tokens(
 	}
 
 	if let Some(refresh_token) = refresh_token {
-		self.set_refresh_token(user_id, device_id, refresh_token)
+		self.set_refresh_token(lock, user_id, device_id, refresh_token)
 			.await?;
 	}
 
@@ -419,9 +590,10 @@ pub fn generate_access_token(&self, expires: bool) -> (String, Option<Duration>)
 
 /// Replaces the refresh token of one device.
 #[implement(super::Service)]
-#[tracing::instrument(level = "debug", skip(self, refresh_token))]
-pub async fn set_refresh_token(
+#[tracing::instrument(level = "debug", skip(self, _lock, refresh_token))]
+async fn set_refresh_token(
 	&self,
+	_lock: &DeviceLock,
 	user_id: &UserId,
 	device_id: &DeviceId,
 	refresh_token: &str,

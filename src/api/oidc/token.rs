@@ -13,19 +13,11 @@ use http::{
 use ruma::{OwnedDeviceId, UserId};
 use serde::Deserialize;
 use serde_json::json;
-use tuwunel_core::{
-	Err, Error, Result, err, info,
-	utils::{
-		BoolExt,
-		future::OptionFutureExt,
-		time::{now, timepoint_has_passed},
-	},
-	warn,
-};
+use tuwunel_core::{Err, Error, Result, err, info, utils::time::now, warn};
 use tuwunel_service::{
 	Services,
 	oauth::server::{DeviceGrantPoll, IdTokenClaims, Server, narrow_scope},
-	users::device::{RefreshToken, generate_refresh_token},
+	users::device::generate_refresh_token,
 };
 
 use super::{oauth_error, require_account_usable};
@@ -292,71 +284,27 @@ async fn token_refresh(services: &Services, body: &TokenRequest) -> Result<Respo
 		.as_deref()
 		.ok_or_else(|| err!(Request(InvalidParam("refresh_token is required"))))?;
 
-	match services
+	let token = services
 		.users
 		.classify_refresh_token(presented)
-		.await
-	{
-		| RefreshToken::Current { user_id, device_id, expires_at } => {
-			if expires_at.is_some_and(timepoint_has_passed) {
-				services
-					.server
-					.config
-					.refresh_token_hard_logout
-					.then_async(|| services.users.remove_device(&user_id, &device_id))
-					.unwrap_or_else_async(async || {
-						services
-							.users
-							.remove_refresh_token(&user_id, &device_id)
-							.await
-							.ok();
-					})
-					.await;
+		.await;
 
-				return Err!(Request(Forbidden("Refresh token has expired")));
-			}
+	let (user_id, _) = token
+		.owner()
+		.ok_or_else(|| err!(Request(Forbidden("Invalid refresh token"))))?;
 
-			services.users.deactivated_check(&user_id).await?;
+	let (access_token, expires_in) = services.users.generate_access_token(true);
+	let refresh_token = services
+		.users
+		.rotate_refresh_token(
+			&token,
+			presented,
+			(&access_token, expires_in),
+			services.users.deactivated_check(user_id),
+		)
+		.await?;
 
-			let (access_token, expires_in) = services.users.generate_access_token(true);
-			let refresh_token = services
-				.users
-				.rotate_refresh_token(&user_id, &device_id, presented, &access_token, expires_in)
-				.await?;
-
-			token_refresh_response(&access_token, &refresh_token, expires_in)
-		},
-
-		| RefreshToken::Replayed { user_id, device_id, current, grace } if grace => {
-			services.users.deactivated_check(&user_id).await?;
-
-			// Benign double-submit: re-issue an access token for the unchanged
-			// refresh token rather than rotating it.
-			let (access_token, expires_in) = services.users.generate_access_token(true);
-			services
-				.users
-				.set_access_token(&user_id, &device_id, &access_token, expires_in, None)
-				.await?;
-
-			token_refresh_response(&access_token, &current, expires_in)
-		},
-
-		| RefreshToken::Replayed { user_id, device_id, .. } => {
-			let revoke = services.server.config.refresh_token_reuse_revoke;
-			warn!(%user_id, %device_id, revoke, "OIDC refresh token reused after rotation");
-
-			if revoke {
-				services
-					.users
-					.remove_device(&user_id, &device_id)
-					.await;
-			}
-
-			Err!(Request(Forbidden("Refresh token has already been used")))
-		},
-
-		| RefreshToken::Unknown => Err!(Request(Forbidden("Invalid refresh token"))),
-	}
+	token_refresh_response(&access_token, &refresh_token, expires_in)
 }
 
 fn token_refresh_response(
