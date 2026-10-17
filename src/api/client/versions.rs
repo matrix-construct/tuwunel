@@ -81,7 +81,7 @@ static VERSIONS: [&str; 27] = [
 	"v1.19",  /* mutual rooms (MSC2666) */
 ];
 
-static UNSTABLE_FEATURES: [&str; 41] = [
+static UNSTABLE_FEATURES: [&str; 42] = [
 	"org.matrix.e2e_cross_signing",
 	// private read receipts (https://github.com/matrix-org/matrix-spec-proposals/pull/2285)
 	"org.matrix.msc2285.stable",
@@ -159,4 +159,6 @@ static UNSTABLE_FEATURES: [&str; 41] = [
 	"org.matrix.msc3440.stable",
 	// state_after on /sync (https://github.com/matrix-org/matrix-spec-proposals/pull/4222)
 	"org.matrix.msc4222",
+	// Backward fully-read moves on request (https://github.com/matrix-org/matrix-spec-proposals/pull/4446)
+	"com.beeper.msc4446",
 ];

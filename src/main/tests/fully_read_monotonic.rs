@@ -1,260 +1,166 @@
 #![cfg(test)]
 
-use std::{
-	env::var, fs::remove_dir_all, net::TcpListener, path::PathBuf, process::id as process_id,
-	time::Duration,
+use futures::TryFutureExt;
+use reqwest::{Method, StatusCode};
+use serde_json::{Value, json};
+use tuwunel_core::{
+	Result,
+	ruma::{
+		EventId, OwnedEventId, RoomId, UserId, event_id,
+		events::{RoomAccountDataEventType, fully_read::FullyReadEvent},
+	},
+};
+use tuwunel_service::Services;
+
+use self::{
+	client::{Client, field, register},
+	fixture::boot,
 };
 
-use futures::future::join;
-use serde_json::{Value, json};
-use tokio::time::{sleep, timeout};
-use tuwunel::{Args, Runtime, Server, async_run, async_start, async_stop};
-use tuwunel_core::{Result, err, ruma::UserId};
-use tuwunel_service::{Services, users::Register};
+mod client;
+mod fixture;
 
-struct DatabasePath(PathBuf);
+const TOKEN: &str = "fully-read-monotonic-reader-token-0";
 
-impl Drop for DatabasePath {
-	fn drop(&mut self) { remove_dir_all(&self.0).ok(); }
-}
-
-/// A stale device posting an older `m.fully_read` must not regress the marker
-/// that a newer one already advanced.
 #[test]
-fn fully_read_marker_is_monotonic() -> Result {
-	let listener = TcpListener::bind(("127.0.0.1", 0))?;
-	let port = listener.local_addr()?.port();
-
-	let root = var("TMPDIR").unwrap_or_else(|_| "/nvme/target/tmp".into());
-	let db_path = DatabasePath(
-		PathBuf::from(root).join(format!("tuwunel-fully-read-monotonic-{}", process_id())),
-	);
-	let mut args = Args::default_test(&["fresh", "cleanup"]);
-
-	args.option.extend([
-		format!("database_path={:?}", db_path.0),
-		"address=[\"127.0.0.1\"]".to_owned(),
-		format!("port={port}"),
-		"listening=true".to_owned(),
-	]);
-
-	let runtime = Runtime::new(Some(&args))?;
-	let server = Server::new(Some(&args), Some(&runtime))?;
-	let result = runtime.block_on(async {
-		let services = async_start(&server).await?;
-		let base = format!("http://127.0.0.1:{port}");
-
-		drop(listener);
-
-		let exercise = async {
-			let outcome = exercise(&services, &base).await;
-			let shutdown = server.server.shutdown();
-
-			outcome.and(shutdown)
-		};
-
-		let (run_result, outcome) = join(async_run(&server), exercise).await;
-
-		drop(services);
-		async_stop(&server).await?;
-		run_result?;
-
-		outcome
-	});
-
-	drop(runtime);
-	result
+fn fully_read_moves_back_only_on_request() -> Result {
+	boot("fully-read-monotonic", ["log_enable=false"], exercise)
 }
 
 async fn exercise(services: &Services, base: &str) -> Result {
-	wait_until_ready(services, base).await?;
+	let user = register(services, "reader", TOKEN).await?;
+	let client = Client { services, base, token: TOKEN };
+	let room = client.create_room(&json!({})).await?;
+	let first = message(&client, &room, "first").await?;
+	let second = message(&client, &room, "second").await?;
+	let third = message(&client, &room, "third").await?;
+	let markers = format!("rooms/{room}/read_markers");
+	let receipt = |kind: &str, event: &EventId| format!("rooms/{room}/receipt/{kind}/{event}");
+	let backward = json!({ "com.beeper.allow_backward": true });
+	let marker = || fully_read(services, &user, &room);
+	let written = || last_count(services, &user, &room);
+	let private = || private_count(services, &user, &room);
 
-	let user_id = UserId::parse_with_server_name("fully-read", services.globals.server_name())?;
-	let token = "fully-read-monotonic-regression-token";
+	client
+		.post(&markers, &json!({ "m.fully_read": first }))
+		.await?;
 
+	assert_eq!(marker().await?, first, "first marker");
+
+	client
+		.post(&receipt("m.fully_read", &third), &json!({}))
+		.await?;
+
+	assert_eq!(marker().await?, third, "forward marker");
+
+	let count = written().await?;
+	let behind = json!({
+		"m.fully_read": second,
+		"m.read": second,
+		"m.read.private": second,
+	});
+
+	client.post(&markers, &behind).await?;
+
+	assert_eq!(marker().await?, third, "backward read_markers");
+
+	client
+		.post(&receipt("m.fully_read", &first), &json!({}))
+		.await?;
+
+	assert_eq!(marker().await?, third, "backward receipt");
+	assert_eq!(written().await?, count, "backward writes");
+
+	client
+		.post(&receipt("m.fully_read", &second), &backward)
+		.await?;
+
+	assert_eq!(marker().await?, second, "requested receipt");
+
+	let position = private().await?;
+	let behind = json!({
+		"m.fully_read": first,
+		"m.read.private": first,
+		"com.beeper.allow_backward": true,
+	});
+
+	client.post(&markers, &behind).await?;
+
+	assert_eq!(marker().await?, first, "requested read_markers");
+	assert_eq!(private().await?, position, "private receipt");
+
+	let refused = client
+		.post_url(&client.url(&receipt("m.read", &third)), &backward)
+		.await?;
+
+	let status = refused.status();
+	let body: Value = refused.json().await?;
+
+	assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+	assert_eq!(body["errcode"], "M_INVALID_PARAM", "{body}");
+
+	let unknown = event_id!("$unknown:localhost");
+
+	client
+		.post(&markers, &json!({ "m.fully_read": unknown }))
+		.await?;
+
+	assert_eq!(marker().await?, unknown, "unresolvable marker");
+
+	let count = written().await?;
+
+	client
+		.post(&markers, &json!({ "m.fully_read": unknown }))
+		.await?;
+
+	assert_eq!(written().await?, count, "identical marker");
+
+	let versions: Value = services
+		.client
+		.clients
+		.default
+		.get(format!("{base}/_matrix/client/versions"))
+		.send()
+		.await?
+		.json()
+		.await?;
+
+	assert_eq!(versions["unstable_features"]["com.beeper.msc4446"], true, "{versions}");
+
+	Ok(())
+}
+
+async fn message(client: &Client<'_>, room: &RoomId, body: &str) -> Result<OwnedEventId> {
+	let url = client.url(&format!("rooms/{room}/send/m.room.message/{body}"));
+	let response: Value = client
+		.request(Method::PUT, &url, &json!({ "msgtype": "m.text", "body": body }))
+		.await?
+		.error_for_status()?
+		.json()
+		.await?;
+
+	Ok(field(&response, "event_id")?.try_into()?)
+}
+
+async fn fully_read(services: &Services, user: &UserId, room: &RoomId) -> Result<OwnedEventId> {
 	services
-		.users
-		.full_register(Register {
-			user_id: Some(&user_id),
-			password: Some("fully-read-password"),
-			..Default::default()
-		})
-		.await?;
+		.account_data
+		.get_room(room, user, RoomAccountDataEventType::FullyRead)
+		.map_ok(|event: FullyReadEvent| event.content.event_id)
+		.await
+}
 
+async fn last_count(services: &Services, user: &UserId, room: &RoomId) -> Result<u64> {
 	services
-		.users
-		.create_device(&user_id, None, (Some(token), None), None, None, None)
-		.await?;
-
-	let room = create_room(services, base, token).await?;
-	let first = send_message(services, base, token, &room, "first", "txn-first").await?;
-	let second = send_message(services, base, token, &room, "second", "txn-second").await?;
-
-	// A forward write stores.
-	read_markers(services, base, token, &room, &second).await?;
-
-	assert_eq!(fully_read_event(services, base, token, &user_id, &room).await?, second);
-
-	// A backwards write is accepted but must not move the marker.
-	read_markers(services, base, token, &room, &first).await?;
-
-	assert_eq!(fully_read_event(services, base, token, &user_id, &room).await?, second);
-
-	// The /receipt endpoint must not move it backwards either.
-	fully_read_receipt(services, base, token, &room, &first).await?;
-
-	assert_eq!(fully_read_event(services, base, token, &user_id, &room).await?, second);
-
-	Ok(())
+		.account_data
+		.last_count(Some(room), user, None)
+		.await
 }
 
-async fn read_markers(
-	services: &Services,
-	base: &str,
-	token: &str,
-	room: &str,
-	event: &str,
-) -> Result {
-	let response = services
-		.client
-		.clients
-		.default
-		.post(format!("{base}/_matrix/client/v3/rooms/{room}/read_markers"))
-		.bearer_auth(token)
-		.json(&json!({
-			"m.fully_read": event,
-			"m.read": event,
-			"m.read.private": event,
-		}))
-		.send()
-		.await?;
-
-	assert_eq!(response.status().as_u16(), 200, "read_markers: {}", response.text().await?);
-
-	Ok(())
-}
-
-async fn fully_read_receipt(
-	services: &Services,
-	base: &str,
-	token: &str,
-	room: &str,
-	event: &str,
-) -> Result {
-	let response = services
-		.client
-		.clients
-		.default
-		.post(format!("{base}/_matrix/client/v3/rooms/{room}/receipt/m.fully_read/{event}"))
-		.bearer_auth(token)
-		.json(&json!({}))
-		.send()
-		.await?;
-
-	assert_eq!(response.status().as_u16(), 200, "receipt: {}", response.text().await?);
-
-	Ok(())
-}
-
-async fn fully_read_event(
-	services: &Services,
-	base: &str,
-	token: &str,
-	user_id: &UserId,
-	room: &str,
-) -> Result<String> {
-	let response: Value = services
-		.client
-		.clients
-		.default
-		.get(format!(
-			"{base}/_matrix/client/v3/user/{user_id}/rooms/{room}/account_data/m.fully_read"
-		))
-		.bearer_auth(token)
-		.send()
-		.await?
-		.error_for_status()?
-		.json()
-		.await?;
-
-	response
-		.get("event_id")
-		.and_then(Value::as_str)
-		.map(str::to_owned)
-		.ok_or_else(|| err!("m.fully_read response omitted event_id"))
-}
-
-async fn send_message(
-	services: &Services,
-	base: &str,
-	token: &str,
-	room: &str,
-	body: &str,
-	txn: &str,
-) -> Result<String> {
-	let response: Value = services
-		.client
-		.clients
-		.default
-		.put(format!("{base}/_matrix/client/v3/rooms/{room}/send/m.room.message/{txn}"))
-		.bearer_auth(token)
-		.json(&json!({"msgtype": "m.text", "body": body}))
-		.send()
-		.await?
-		.error_for_status()?
-		.json()
-		.await?;
-
-	response
-		.get("event_id")
-		.and_then(Value::as_str)
-		.map(str::to_owned)
-		.ok_or_else(|| err!("send response omitted event_id"))
-}
-
-async fn create_room(services: &Services, base: &str, token: &str) -> Result<String> {
-	let response: Value = services
-		.client
-		.clients
-		.default
-		.post(format!("{base}/_matrix/client/v3/createRoom"))
-		.bearer_auth(token)
-		.json(&json!({}))
-		.send()
-		.await?
-		.error_for_status()?
-		.json()
-		.await?;
-
-	response
-		.get("room_id")
-		.and_then(Value::as_str)
-		.map(str::to_owned)
-		.ok_or_else(|| err!("createRoom response omitted room_id"))
-}
-
-async fn wait_until_ready(services: &Services, base: &str) -> Result {
-	let url = format!("{base}/_matrix/client/versions");
-
-	timeout(Duration::from_secs(10), async {
-		loop {
-			if services
-				.client
-				.clients
-				.default
-				.get(&url)
-				.send()
-				.await
-				.is_ok()
-			{
-				break;
-			}
-
-			sleep(Duration::from_millis(20)).await;
-		}
-	})
-	.await
-	.map_err(|_| err!("server listener did not become ready"))?;
-
-	Ok(())
+async fn private_count(services: &Services, user: &UserId, room: &RoomId) -> Result<u64> {
+	services
+		.read_receipt
+		.private_read_get_count(room, user)
+		.map_ok(|(count, _)| count)
+		.await
 }

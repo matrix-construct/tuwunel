@@ -3,14 +3,18 @@ mod receipt;
 
 use futures::future::try_join;
 use ruma::{
-	EventId, MilliSecondsSinceUnixEpoch, OwnedEventId, RoomId, UserId,
+	EventId, MilliSecondsSinceUnixEpoch, RoomId, UserId,
 	events::{
 		RoomAccountDataEventType,
 		fully_read::{FullyReadEvent, FullyReadEventContent},
 		receipt::ReceiptThread,
 	},
 };
-use tuwunel_core::{Err, Result, debug, err, utils::result::LogErr};
+use serde_json::to_value;
+use tuwunel_core::{
+	Err, Result, debug, debug_warn, err,
+	utils::result::{LogErr, NotFound},
+};
 use tuwunel_matrix::{Event, PduCount, PduId};
 use tuwunel_service::{Services, rooms::read_receipt::PrivateRead};
 
@@ -41,46 +45,47 @@ async fn ensure_receipt_visible(
 	Ok(())
 }
 
-/// Stores the fully-read marker unless it would move the position backwards:
-/// a stale device must not regress the marker another one already advanced.
-/// An unresolvable position on either side accepts the write, as for public
-/// receipts.
+/// Stores `event` as the user's fully-read marker unless that would move the
+/// marker backwards.
+///
+/// The marker moves only when `event` sits strictly after the stored one or
+/// either position does not resolve, so writes that arrive one after another
+/// never move it back; two in flight at once are not ordered against each
+/// other. MSC4446's `allow_backward` skips the comparison. Positions compare on
+/// the global counter, whichever room the event belongs to.
+#[tracing::instrument(level = "trace", skip_all)]
 async fn set_fully_read(
 	services: &Services,
 	room_id: &RoomId,
 	user_id: &UserId,
 	event: &EventId,
-) -> Result<()> {
-	let current: Option<OwnedEventId> = services
-		.account_data
-		.get_room::<serde_json::Value>(room_id, user_id, RoomAccountDataEventType::FullyRead)
-		.await
-		.ok()
-		.and_then(|value| {
-			let event_id = value.pointer("/content/event_id")?.as_str()?;
+	allow_backward: bool,
+) -> Result {
+	if !allow_backward {
+		let stored = services
+			.account_data
+			.get_room(room_id, user_id, RoomAccountDataEventType::FullyRead)
+			.await
+			.optional()
+			.inspect_err(
+				|error| debug_warn!(%user_id, %room_id, %error, "Unreadable fully-read marker, replacing it"),
+			)
+			.ok()
+			.flatten()
+			.map(|stored: FullyReadEvent| stored.content.event_id);
 
-			EventId::parse(event_id).ok()
-		});
-
-	let advances = match current {
-		| Some(current) => {
-			let current = services
-				.timeline
-				.get_pdu_count(&current)
-				.await
-				.ok();
-			let incoming = services.timeline.get_pdu_count(event).await.ok();
-
-			current
-				.zip(incoming)
-				.is_none_or(|(current, incoming)| incoming > current)
-		},
-		| None => true,
-	};
-
-	if !advances {
-		return Ok(());
+		if !services
+			.read_receipt
+			.receipt_advanced(stored.as_deref(), event)
+			.await
+		{
+			return Ok(());
+		}
 	}
+
+	let fully_read = FullyReadEvent {
+		content: FullyReadEventContent { event_id: event.to_owned() },
+	};
 
 	services
 		.account_data
@@ -88,9 +93,7 @@ async fn set_fully_read(
 			Some(room_id),
 			user_id,
 			RoomAccountDataEventType::FullyRead,
-			&serde_json::to_value(FullyReadEvent {
-				content: FullyReadEventContent { event_id: event.to_owned() },
-			})?,
+			&to_value(fully_read)?,
 		)
 		.await
 }

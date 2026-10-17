@@ -37,7 +37,7 @@ pub(crate) async fn set_read_marker_route(
 	}
 
 	if let Some(event) = &body.fully_read {
-		set_fully_read(&services, &body.room_id, sender_user, event).await?;
+		set_fully_read(&services, &body.room_id, sender_user, event, body.allow_backward).await?;
 	}
 
 	let private_advanced = match &body.private_read_receipt {

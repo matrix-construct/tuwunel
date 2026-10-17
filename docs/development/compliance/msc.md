@@ -29,14 +29,14 @@
 
 | ✅ `yes` | 🟨 `part` | ❌ `no` | ⬛ `n/a` | total |
 |---:|---:|---:|---:|---:|
-| 255 | 54 | 436 | 330 | 1075 |
+| 256 | 54 | 435 | 330 | 1075 |
 
 ### Status by inventory bucket
 
 | Inv | yes | part | no | n/a | total |
 |---|---|---|---|---|---|
 | merged | 182 | 15 | 12 | 60 | 269 |
-| open | 42 | 27 | 337 | 198 | 604 |
+| open | 43 | 27 | 336 | 198 | 604 |
 | closed | 31 | 12 | 87 | 72 | 202 |
 
 ## Merged
@@ -351,7 +351,7 @@ in the [Out of scope](#out-of-scope) section.
 | MSC4449 | ❌ ● | 0/0 | Updated /members filtering | Single membership filter only; no array support, no mutual-exclusion error |
 | MSC4448 | ❌ ● | 0/0 | Preview URL Site Logos | No matrix:site_logo or msc4448:site_logo in preview_url response |
 | MSC4447 | ❌ ● | 0/0 | Move OpenID userinfo endpoint out of `/_matrix/federation` | Old /federation/v1/openid/userinfo present; new /_matrix/openid/v1/userinfo n... |
-| MSC4446 | ❌ ● | 0/0 | Allow moving the fully read marker to older events | No allow_backward parsing; m.fully_read written with no order check |
+| MSC4446 | ✅ ● | 90/100 | Allow moving the fully read marker to older events | Fully-read gated; allow_backward on both routes; racing writes unordered |
 | MSC4445 | ❌ ◐ | 0/0 | Clarify `/sync` timeline order | No msc4445 unstable_features flags advertised |
 | MSC4440 | ❌ ● | 0/0 | Profile Biography via Global Profiles | Generic MSC4133 passthrough only; no m.biography validation |
 | MSC4439 | 🟨 ● | 70/85 | Encryption key URIs in `/.well-known/matrix/support` | check.rs:780 validates URI and rejects raw keys; new https MUST unenforced |

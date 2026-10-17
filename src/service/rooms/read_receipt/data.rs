@@ -154,7 +154,11 @@ impl Data {
 	/// An identical event id never advances. A position that does not resolve
 	/// to a known PDU falls through to acceptance, so a receipt this server
 	/// cannot order is never silently dropped.
-	async fn receipt_advanced(&self, current: Option<&EventId>, incoming: &EventId) -> bool {
+	pub(super) async fn receipt_advanced(
+		&self,
+		current: Option<&EventId>,
+		incoming: &EventId,
+	) -> bool {
 		match current {
 			| None => true,
 			| Some(current) if current == incoming => false,

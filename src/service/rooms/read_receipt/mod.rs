@@ -6,7 +6,7 @@ use std::{collections::BTreeMap, sync::Arc};
 
 use futures::{Stream, StreamExt, TryStreamExt};
 use ruma::{
-	MilliSecondsSinceUnixEpoch, OwnedEventId, OwnedUserId, RoomId, UInt, UserId,
+	EventId, MilliSecondsSinceUnixEpoch, OwnedEventId, OwnedUserId, RoomId, UInt, UserId,
 	api::appservice::event::push_events::v1::EphemeralData,
 	events::{
 		AnySyncEphemeralRoomEvent, SyncEphemeralRoomEvent,
@@ -129,6 +129,16 @@ impl Service {
 		}
 
 		true
+	}
+
+	/// Whether a marker at `incoming` supersedes one stored at `current`, by
+	/// the ordering read receipts are gated on.
+	///
+	/// An identical event id never advances, and an id that does not resolve
+	/// to a known PDU on either side counts as an advance.
+	#[tracing::instrument(level = "debug", skip(self), ret(level = "trace"))]
+	pub async fn receipt_advanced(&self, current: Option<&EventId>, incoming: &EventId) -> bool {
+		self.db.receipt_advanced(current, incoming).await
 	}
 
 	/// Gets every stored private read receipt for `(room, user)`. Returns
