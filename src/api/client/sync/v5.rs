@@ -248,7 +248,7 @@ pub(crate) async fn sync_events_v5_route(
 			response.rooms = ranges.into_payloads();
 			response.extensions = extensions.into_response(&response.rooms);
 
-			if !is_empty_response(&response) {
+			if !is_empty_response(&mut response) {
 				response.pos = conn.next_batch.to_string().into();
 				trace!(conn.globalsince, conn.next_batch, "response {response:?}");
 				conn.store(&services.sync, &conn_key);
@@ -306,13 +306,65 @@ fn config_change_needs_position(
 	config_changed && advancing && caught_up && since != 0
 }
 
-fn is_empty_response(response: &Response) -> bool {
-	response.extensions.is_empty() && response.rooms.is_empty()
+/// Whether a pass found nothing new for the client.
+///
+/// The e2ee extension reports the device's unused fallback key types on every
+/// pass. They are current state, not a change, so on their own they must not
+/// end a long poll. Types already collected stay in the response, including
+/// when the poll times out.
+fn is_empty_response(response: &mut Response) -> bool {
+	let fallback_key_types = response
+		.extensions
+		.e2ee
+		.device_unused_fallback_key_types
+		.take();
+
+	let empty = response.extensions.is_empty() && response.rooms.is_empty();
+	response
+		.extensions
+		.e2ee
+		.device_unused_fallback_key_types = fallback_key_types;
+
+	empty
 }
 
 #[cfg(test)]
 mod tests {
-	use super::config_change_needs_position;
+	use ruma::{
+		OneTimeKeyAlgorithm, api::client::sync::sync_events::v5::Response, owned_user_id,
+	};
+
+	use super::{config_change_needs_position, is_empty_response};
+
+	#[test]
+	fn unused_fallback_key_types_alone_are_empty() {
+		for types in [vec![], vec![OneTimeKeyAlgorithm::SignedCurve25519]] {
+			let mut response = Response::new(Default::default());
+			response
+				.extensions
+				.e2ee
+				.device_unused_fallback_key_types = Some(types.clone());
+
+			assert!(is_empty_response(&mut response));
+			assert_eq!(
+				response
+					.extensions
+					.e2ee
+					.device_unused_fallback_key_types,
+				Some(types),
+				"the types are still delivered with the response",
+			);
+
+			response
+				.extensions
+				.e2ee
+				.device_lists
+				.changed
+				.push(owned_user_id!("@changed:example.org"));
+
+			assert!(!is_empty_response(&mut response));
+		}
+	}
 
 	#[test]
 	fn caught_up_advancing_config_change_needs_position() {
