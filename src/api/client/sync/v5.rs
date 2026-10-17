@@ -122,14 +122,7 @@ pub(crate) async fn sync_events_v5_route(
 		.and_then(|string| string.parse().ok())
 		.unwrap_or(0);
 
-	let timeout = request
-		.timeout
-		.as_ref()
-		.map(Duration::as_millis)
-		.map(TryInto::try_into)
-		.flat_ok()
-		.map(|timeout: u64| timeout.min(services.config.client_sync_timeout_max))
-		.unwrap_or(0);
+	let timeout = poll_timeout(request, services.config.client_sync_timeout_max);
 
 	let conn_key = into_connection_key(sender_user, sender_device, request.conn_id.as_deref());
 	let conn_val = services
@@ -286,6 +279,22 @@ pub(crate) async fn sync_events_v5_route(
 	}
 
 	unreachable!("a long poll has no last pass")
+}
+
+/// How long a request may long-poll, in milliseconds.
+///
+/// Per MSC4186 the timeout of a request without `pos` is ignored, so opening
+/// a connection answers after its first pass.
+fn poll_timeout(request: &Request, max: u64) -> u64 {
+	request
+		.timeout
+		.as_ref()
+		.filter(|_| request.pos.is_some())
+		.map(Duration::as_millis)
+		.map(TryInto::try_into)
+		.flat_ok()
+		.map(|timeout: u64| timeout.min(max))
+		.unwrap_or(0)
 }
 
 fn check_profile_selection(services: &Services, request: &Request, conn: &Connection) -> Result {
