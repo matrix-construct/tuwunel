@@ -21,16 +21,10 @@ pub(crate) async fn update_device_display_name_route(
 		return Err!(Request(NotFound("Device does not exist")));
 	}
 
-	let mut device = services
-		.users
-		.get_device_metadata(&user_id, &body.device_id)
-		.await?;
-
-	device.display_name = Some(body.display_name.as_str().into());
 	services
 		.users
-		.put_device_metadata(&user_id, true, &device)
-		.await;
+		.rename_device(&user_id, &body.device_id, &body.display_name)
+		.await?;
 
 	Ok(Response::new())
 }

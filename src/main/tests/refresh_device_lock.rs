@@ -1,7 +1,11 @@
 #![cfg(test)]
 
-use std::{future::ready, time::Duration};
+use std::{future::ready, pin::pin, time::Duration};
 
+use futures::{
+	channel::oneshot::channel,
+	future::{Either, join, select},
+};
 use tokio::time::{sleep, timeout};
 use tuwunel_core::{
 	Err, Result, err,
@@ -21,6 +25,10 @@ use self::fixture::boot;
 mod client;
 
 mod fixture;
+
+/// How long a request contending for a held device lock is watched for
+/// finishing early.
+const CONTENTION: Duration = Duration::from_millis(500);
 
 /// The access token an exchange offered, and the refresh token it returned.
 ///
@@ -46,7 +54,9 @@ async fn with_grace(services: &Services, _base: &str) -> Result {
 	removed_device_is_issued_no_tokens(services).await?;
 	concurrent_refreshes_keep_one_successor(services).await?;
 	stale_grace_is_refused(services).await?;
-	refused_gate_spends_nothing(services).await
+	refused_gate_spends_nothing(services).await?;
+	contenders_wait_for_the_device_lock(services).await?;
+	metadata_updates_keep_removal(services).await
 }
 
 /// A refresh or login still in flight when its device is removed must not
@@ -163,6 +173,137 @@ async fn locked_out(services: &Services, presented: &str, current: &str) -> Resu
 	Ok(refused_with(&gated, &ErrorKind::UserLocked)
 		&& !resolves(services, &access).await
 		&& is_current(services, current).await)
+}
+
+/// A metadata update and a removal arriving while a refresh holds the device
+/// lock both wait for it, and the removal then takes the refresh's tokens.
+///
+/// The refresh holds the lock through its account check, which is released
+/// only after both have been watched for `CONTENTION`.
+async fn contenders_wait_for_the_device_lock(services: &Services) -> Result {
+	let device = device_id!("HELDDEVICE");
+	let (user, original) = session(services, "held", device).await?;
+	let seen = classify(services, &original).await;
+	let (at_gate, reached_gate) = channel();
+	let (release, released) = channel();
+	let gate = async move {
+		at_gate
+			.send(())
+			.expect("the contenders stopped watching the account check");
+
+		released
+			.await
+			.map_err(|_| err!("the account check was never released"))
+	};
+
+	let refresh = exchange_gated(services, &seen, &original, gate);
+	let contenders = async {
+		let reached = reached_gate.await.is_ok();
+		let update = pin!(
+			services
+				.users
+				.update_device_last_seen(&user, device, None, None)
+		);
+
+		let removal = pin!(services.users.remove_device(&user, device));
+		let (update_waited, update) = contend(update, CONTENTION).await;
+		let (removal_waited, removal) = contend(removal, CONTENTION).await;
+
+		release.send(()).ok();
+
+		let updated = update.await;
+
+		removal.await;
+
+		(reached && update_waited && removal_waited, updated)
+	};
+
+	let (exchanged, (waited, updated)) = join(refresh, contenders).await;
+	let (access, refreshed) = exchanged?;
+
+	if !waited || refreshed.is_err() || updated.is_err() {
+		return Err!("an update or removal did not wait for the refresh holding the device lock");
+	}
+
+	if resolves(services, &access).await || services.users.device_exists(&user, device).await {
+		return Err!("the removal waiting behind a refresh left its tokens or its device");
+	}
+
+	Ok(())
+}
+
+/// Watches a request contending for a lock for `window`.
+///
+/// Returns whether it was still waiting by then, and a future finishing it
+/// either way, so one that skipped the lock is reported rather than polled
+/// again after completing.
+async fn contend<Contender>(
+	contender: Contender,
+	window: Duration,
+) -> (bool, impl Future<Output = Contender::Output>)
+where
+	Contender: Future + Unpin,
+{
+	match select(contender, pin!(sleep(window))).await {
+		| Either::Left((output, _)) => (false, Either::Left(ready(output))),
+		| Either::Right(((), contender)) => (true, Either::Right(contender)),
+	}
+}
+
+/// A rename is announced to the device list only when the name changes, and no
+/// metadata update writes a removed device back.
+///
+/// Updates read and write the device under its lock, so one arriving after the
+/// removal finds no device and fails.
+async fn metadata_updates_keep_removal(services: &Services) -> Result {
+	let device = device_id!("RENAMEDDEVICE");
+	let (user, _) = session(services, "renamed", device).await?;
+	let created = services
+		.users
+		.get_devicelist_version(&user)
+		.await?;
+
+	services
+		.users
+		.rename_device(&user, device, "phone")
+		.await?;
+
+	let renamed = services
+		.users
+		.get_devicelist_version(&user)
+		.await?;
+
+	services
+		.users
+		.rename_device(&user, device, "phone")
+		.await?;
+
+	let repeated = services
+		.users
+		.get_devicelist_version(&user)
+		.await?;
+
+	if renamed == created || repeated != renamed {
+		return Err!("a rename was announced without changing the name, or not at all");
+	}
+
+	services.users.remove_device(&user, device).await;
+
+	let seen = services
+		.users
+		.update_device_last_seen(&user, device, None, None)
+		.await;
+
+	let renamed = services
+		.users
+		.rename_device(&user, device, "tablet")
+		.await;
+
+	if seen.is_ok() || renamed.is_ok() || services.users.device_exists(&user, device).await {
+		return Err!("a metadata update wrote a removed device back");
+	}
+
+	Ok(())
 }
 
 /// Without a grace window, a token already spent when its request arrived is

@@ -122,12 +122,13 @@ pub async fn check_device_id(&self, user_id: &UserId, device_id: Option<&DeviceI
 	Ok(())
 }
 
-/// Locks one device against concurrent creation, token issuance and removal.
+/// Locks one device against concurrent creation, token issuance, metadata
+/// updates and removal.
 ///
 /// A refresh token is rotated by reading the one the device points at and
 /// replacing it, so issuers run one after another to leave the device a single
-/// refresh token. An issuer that runs after removal finds no device rather than
-/// issuing to one already gone.
+/// refresh token. An issuer or metadata update that runs after removal finds
+/// no device rather than writing for one already gone.
 #[implement(super::Service)]
 async fn lock_device(&self, user_id: &UserId, device_id: &DeviceId) -> DeviceLock {
 	let key = (user_id.to_owned(), device_id.to_owned());
@@ -901,6 +902,10 @@ pub async fn remove_to_device_events<Until>(
 		.await;
 }
 
+/// Records when and from where a device was last seen.
+///
+/// An address is kept from an earlier sighting when none is given, and the
+/// time defaults to now. The device list is not notified.
 #[implement(super::Service)]
 pub async fn update_device_last_seen(
 	&self,
@@ -909,19 +914,74 @@ pub async fn update_device_last_seen(
 	last_seen_ip: Option<IpAddr>,
 	last_seen_ts: Option<MilliSecondsSinceUnixEpoch>,
 ) -> Result {
-	let mut device = self
+	self.update_device_metadata(user_id, device_id, |device| {
+		let last_seen_ip = last_seen_ip
+			.map(to_small_string)
+			.or(device.last_seen_ip);
+
+		let last_seen_ts = last_seen_ts
+			.unwrap_or_else(MilliSecondsSinceUnixEpoch::now)
+			.into();
+
+		let device = Device { last_seen_ip, last_seen_ts, ..device };
+		let notify = false;
+
+		(device, notify)
+	})
+	.await
+}
+
+/// Renames an existing device, notifying its device list only when the name
+/// changes.
+///
+/// The rename holds the device lock like any other metadata update.
+#[implement(super::Service)]
+pub async fn rename_device(
+	&self,
+	user_id: &UserId,
+	device_id: &DeviceId,
+	display_name: &str,
+) -> Result {
+	self.update_device_metadata(user_id, device_id, |device| {
+		let notify = device.display_name.as_deref() != Some(display_name);
+		let device = Device {
+			display_name: Some(display_name.into()),
+			..device
+		};
+
+		(device, notify)
+	})
+	.await
+}
+
+/// Rewrites the metadata of an existing device, notifying its device list when
+/// `update` says so.
+///
+/// The read and the write hold the device lock, so a device removed in between
+/// is not written back, and two updates never lose one another's fields. A
+/// missing device is an error and `update` does not run. `update` must keep the
+/// device ID; changing it panics.
+#[implement(super::Service)]
+#[tracing::instrument(level = "trace", skip(self, update))]
+pub async fn update_device_metadata<Update>(
+	&self,
+	user_id: &UserId,
+	device_id: &DeviceId,
+	update: Update,
+) -> Result
+where
+	Update: FnOnce(Device) -> (Device, bool) + Send,
+{
+	let _lock = self.lock_device(user_id, device_id).await;
+
+	let device = self
 		.get_device_metadata(user_id, device_id)
 		.await?;
 
-	if let Some(last_seen_ip) = last_seen_ip.map(to_small_string) {
-		device.last_seen_ip.replace(last_seen_ip);
-	}
+	let (device, notify) = update(device);
 
-	device
-		.last_seen_ts
-		.replace(last_seen_ts.unwrap_or_else(MilliSecondsSinceUnixEpoch::now));
-
-	self.put_device_metadata(user_id, false, &device)
+	assert_eq!(&device.device_id, device_id, "update must keep the device ID");
+	self.put_device_metadata(user_id, notify, &device)
 		.await;
 
 	Ok(())
@@ -932,7 +992,7 @@ pub async fn update_device_last_seen(
 /// Silent updates leave the device-list version and notification rows unchanged.
 #[implement(super::Service)]
 #[tracing::instrument(level = "trace", skip(self, device))]
-pub async fn put_device_metadata(&self, user_id: &UserId, notify: bool, device: &Device) {
+async fn put_device_metadata(&self, user_id: &UserId, notify: bool, device: &Device) {
 	let key = (user_id, &device.device_id);
 	self.db
 		.userdeviceid_metadata

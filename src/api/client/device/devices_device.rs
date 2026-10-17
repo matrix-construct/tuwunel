@@ -1,7 +1,10 @@
 use axum::extract::State;
 use ruma::{
 	MilliSecondsSinceUnixEpoch,
-	api::client::device::{delete_device, get_device, update_device},
+	api::client::device::{
+		Device, delete_device, get_device,
+		update_device::{self, v3::Response as UpdateDeviceResponse},
+	},
 };
 use tuwunel_core::{Err, Result, debug, err, utils::string::to_small_string};
 
@@ -33,35 +36,27 @@ pub(crate) async fn update_device_route(
 	State(services): State<crate::State>,
 	ClientIp(client): ClientIp,
 	body: Ruma<update_device::v3::Request>,
-) -> Result<update_device::v3::Response> {
+) -> Result<UpdateDeviceResponse> {
 	let sender_user = body.sender_user();
 	let appservice = body.appservice_info.as_ref();
+	let update = |device: Device| {
+		let notify = device.display_name != body.display_name;
+		let device = Device {
+			display_name: body.display_name.clone(),
+			last_seen_ip: Some(to_small_string(client)),
+			last_seen_ts: Some(MilliSecondsSinceUnixEpoch::now()),
+			..device
+		};
+
+		(device, notify)
+	};
 
 	match services
 		.users
-		.get_device_metadata(sender_user, &body.device_id)
+		.update_device_metadata(sender_user, &body.device_id, update)
 		.await
 	{
-		| Ok(mut device) => {
-			let notify = device.display_name != body.display_name;
-			device.display_name.clone_from(&body.display_name);
-
-			device
-				.last_seen_ip
-				.clone_from(&Some(to_small_string(client)));
-
-			device
-				.last_seen_ts
-				.clone_from(&Some(MilliSecondsSinceUnixEpoch::now()));
-
-			assert_eq!(device.device_id, body.device_id, "device_id mismatch");
-			services
-				.users
-				.put_device_metadata(sender_user, notify, &device)
-				.await;
-
-			Ok(update_device::v3::Response::new())
-		},
+		| Ok(()) => Ok(UpdateDeviceResponse::new()),
 		| Err(_) => {
 			let Some(appservice) = appservice else {
 				return Err!(Request(NotFound("Device not found.")));
@@ -89,7 +84,7 @@ pub(crate) async fn update_device_route(
 				)
 				.await?;
 
-			Ok(update_device::v3::Response::created())
+			Ok(UpdateDeviceResponse::created())
 		},
 	}
 }

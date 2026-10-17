@@ -3,7 +3,6 @@ use tuwunel_core::{
 	Result, implement,
 	ruma::{
 		DeviceId, OwnedUserId, UserId,
-		api::client::device::Device,
 		serde::{Base64, base64::Standard},
 		signatures::{Ed25519KeyPair, KeyPair, to_canonical_json_string_for_signing},
 	},
@@ -88,8 +87,13 @@ pub(super) async fn store_device_signer(&self, services: &Services, device: &Dev
 	self.store(services)?;
 	services
 		.users
-		.put_device_metadata(&self.sender, false, &Device::new(device.to_owned()))
-		.await;
+		.create(&self.sender, None, None)
+		.await?;
+
+	services
+		.users
+		.create_device(&self.sender, Some(device), (None, None), None, None, None)
+		.await?;
 
 	let key = json!({"user_id": self.sender, "device_id": device,
 		"keys": {"ed25519:SIGNER": self.signer_key}});

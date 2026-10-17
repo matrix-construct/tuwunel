@@ -19,16 +19,10 @@ pub(crate) async fn upsert_device_route(
 		.await
 	{
 		if let Some(display_name) = body.display_name.as_deref() {
-			let mut device = services
-				.users
-				.get_device_metadata(&user_id, &body.device_id)
-				.await?;
-
-			device.display_name = Some(display_name.into());
 			services
 				.users
-				.put_device_metadata(&user_id, true, &device)
-				.await;
+				.rename_device(&user_id, &body.device_id, display_name)
+				.await?;
 		}
 
 		false

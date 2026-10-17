@@ -76,8 +76,8 @@ pub struct Service {
 	changing_password: MutexMap<OwnedUserId, ()>,
 	// Entries live only while claims for a user/device hold or await the lock.
 	claiming_one_time_keys: MutexMap<(OwnedUserId, OwnedDeviceId), ()>,
-	// Entries live only while a device's creation, token issuance or removal
-	// holds or awaits it.
+	// Entries live only while a device's creation, token issuance, metadata
+	// update (each presence ping's last-seen) or removal holds or awaits it.
 	updating_device: MutexMap<(OwnedUserId, OwnedDeviceId), ()>,
 }
 

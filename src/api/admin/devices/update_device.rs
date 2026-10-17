@@ -1,7 +1,6 @@
 use axum::extract::State;
-use ruma::api::client::device::{Device, DisplayName};
 use synapse_admin_api::devices::update_device::v1 as update_device;
-use tuwunel_core::{Err, Result};
+use tuwunel_core::{Err, Result, err};
 
 use super::require_local_user;
 use crate::{Ruma, require_admin};
@@ -22,13 +21,14 @@ pub(crate) async fn admin_update_device_route(
 
 	require_local_user(&services, user_id).await?;
 
-	let Ok(device) = services
+	if services
 		.users
 		.get_device_metadata(user_id, &body.device_id)
 		.await
-	else {
+		.is_err()
+	{
 		return Err!(Request(NotFound("No device found")));
-	};
+	}
 
 	let Some(display_name) = &body.display_name else {
 		return Ok(update_device::Response {});
@@ -38,17 +38,11 @@ pub(crate) async fn admin_update_device_route(
 		return Err!(Request(InvalidParam("Device display name is too long")));
 	}
 
-	let display_name = DisplayName::from(display_name.as_str());
-	let notify = device.display_name.as_ref() != Some(&display_name);
-	let device = Device {
-		display_name: Some(display_name),
-		..device
-	};
-
 	services
 		.users
-		.put_device_metadata(user_id, notify, &device)
-		.await;
+		.rename_device(user_id, &body.device_id, display_name)
+		.await
+		.map_err(|_| err!(Request(NotFound("No device found"))))?;
 
 	Ok(update_device::Response {})
 }
