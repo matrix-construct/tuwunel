@@ -7,7 +7,7 @@ use ruma::{SecondsSinceUnixEpoch, api::client::voip::get_turn_server_info};
 use sha1::Sha1;
 use tuwunel_core::{Err, Result};
 
-use crate::Ruma;
+use crate::{Ruma, utils::sender_is_guest};
 
 type HmacSha1 = Hmac<Sha1>;
 
@@ -25,14 +25,7 @@ pub(crate) async fn turn_server_route(
 
 	let user = body.sender_user();
 
-	if !services.config.turn_allow_guests
-		&& body.appservice_info.is_none()
-		&& services
-			.users
-			.is_deactivated(user)
-			.await
-			.unwrap_or(false)
-	{
+	if !services.config.turn_allow_guests && sender_is_guest(&services, &body).await {
 		return Err!(Request(Forbidden("Guest users are not allowed to get TURN credentials")));
 	}
 

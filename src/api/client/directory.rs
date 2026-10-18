@@ -33,7 +33,7 @@ use tuwunel_core::{
 use tuwunel_matrix::Event;
 use tuwunel_service::Services;
 
-use crate::{ClientIp, Ruma};
+use crate::{ClientIp, Ruma, utils::sender_is_guest};
 
 const DEFAULT_LIMIT: usize = 100;
 
@@ -110,13 +110,7 @@ pub(crate) async fn set_room_visibility_route(
 		return Err!(Request(NotFound("Room not found")));
 	}
 
-	if services
-		.users
-		.is_deactivated(sender_user)
-		.await
-		.unwrap_or(false)
-		&& body.appservice_info.is_none()
-	{
+	if sender_is_guest(&services, &body).await {
 		return Err!(Request(Forbidden("Guests cannot publish to room directories")));
 	}
 

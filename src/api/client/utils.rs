@@ -56,6 +56,17 @@ where
 	services.config.enable_set_displayname || body.appservice_info.is_some() || is_admin().await
 }
 
+/// Whether the sender of a request is a guest.
+///
+/// A request on an appservice's own token is never a guest's, whichever user
+/// it acts as.
+pub(crate) async fn sender_is_guest<T>(services: &Services, body: &Ruma<T>) -> bool
+where
+	T: Sync,
+{
+	body.appservice_info.is_none() && services.users.is_guest(body.sender_user()).await
+}
+
 /// When the long poll of a sync-like request gives up.
 ///
 /// A request without a timeout takes the configured default, and every

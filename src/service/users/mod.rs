@@ -309,6 +309,24 @@ impl Service {
 		self.services.globals.user_is_local(user_id) && self.is_active(user_id).await
 	}
 
+	/// Whether the account is a guest; a missing or unreadable one is not.
+	///
+	/// Guests share the empty password marker with the passwordless users an
+	/// appservice registers. A user in an appservice's exclusive namespace, or
+	/// the appservice's own sender, belongs to that appservice and is never a
+	/// guest, whatever token it acts with.
+	pub async fn is_guest(&self, user_id: &UserId) -> bool {
+		self.is_deactivated(user_id)
+			.await
+			.unwrap_or(false)
+			&& self
+				.services
+				.appservice
+				.is_exclusive_user_id(user_id)
+				.await
+				.is_false()
+	}
+
 	/// Gate an LDAP-authenticated login into an existing local account.
 	///
 	/// Only a deactivated account is rejected. A password-origin account

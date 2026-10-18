@@ -86,13 +86,7 @@ pub async fn join<'a>(
 
 	self.check_room_ban(sender_user, room_id).await?;
 
-	let user_is_guest = !is_appservice
-		&& self
-			.services
-			.users
-			.is_deactivated(sender_user)
-			.await
-			.unwrap_or(false);
+	let user_is_guest = !is_appservice && self.services.users.is_guest(sender_user).await;
 
 	if user_is_guest
 		&& !self
