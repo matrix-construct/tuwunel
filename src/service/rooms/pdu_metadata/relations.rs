@@ -189,6 +189,24 @@ pub fn try_get_relations_limited<'a>(
 		limit,
 	}: RelationQuery<'a>,
 ) -> impl Stream<Item = Result<(PduCount, Pdu)>> + Send + '_ {
+	self.relation_counts(target, from, dir, limit)
+		.wide_and_then(move |count| self.related_pdu(user_id, shortroomid, count))
+		.ready_try_filter_map(Ok)
+}
+
+/// Walks the positions of at most `limit` events related to a target.
+///
+/// `from` is exclusive, and without one the walk starts at the end `dir` leads
+/// away from. A position is yielded whether or not its event is still stored,
+/// so `limit` counts index rows rather than loaded events.
+#[implement(Service)]
+pub fn relation_counts(
+	&self,
+	target: PduCount,
+	from: Option<PduCount>,
+	dir: Direction,
+	limit: usize,
+) -> impl Stream<Item = Result<PduCount>> + Send + '_ {
 	let target = target.to_be_bytes();
 	let from = from
 		.map(|from| from.saturating_inc(dir))
@@ -198,12 +216,8 @@ pub fn try_get_relations_limited<'a>(
 		})
 		.to_be_bytes();
 
-	let mut buf = StartKey::new();
-	let start = {
-		buf.extend(target);
-		buf.extend(from);
-		buf.as_slice()
-	};
+	let start: StartKey = target.into_iter().chain(from).collect();
+	let start = start.as_slice();
 
 	match dir {
 		| Direction::Backward => self
@@ -222,20 +236,25 @@ pub fn try_get_relations_limited<'a>(
 	.take(limit)
 	.map_ok(|to_from| u64_from_u8(&to_from[8..16]))
 	.map_ok(PduCount::from_unsigned)
-	.map_ok(move |count| (user_id, shortroomid, count))
-	.wide_and_then(async |(user_id, shortroomid, count)| {
-		let pdu_id: RawPduId = PduId { shortroomid, count }.into();
+}
 
-		self.services
-			.timeline
-			.get_pdu_from_id(&pdu_id)
-			.await
-			.optional()?
-			.map(|pdu| {
-				pdu.without_transaction_id_unless_sender(user_id)
-					.map(|pdu| (count, pdu))
-			})
-			.transpose()
-	})
-	.ready_try_filter_map(Ok)
+#[implement(Service)]
+async fn related_pdu(
+	&self,
+	user_id: Option<&UserId>,
+	shortroomid: ShortRoomId,
+	count: PduCount,
+) -> Result<Option<(PduCount, Pdu)>> {
+	let pdu_id: RawPduId = PduId { shortroomid, count }.into();
+
+	self.services
+		.timeline
+		.get_pdu_from_id(&pdu_id)
+		.await
+		.optional()?
+		.map(|pdu| {
+			pdu.without_transaction_id_unless_sender(user_id)
+				.map(|pdu| (count, pdu))
+		})
+		.transpose()
 }

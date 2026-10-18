@@ -5,7 +5,7 @@
 
 use std::{fmt::Debug, sync::Arc};
 
-use futures::{StreamExt, future::join};
+use futures::{StreamExt, TryStreamExt, future::join};
 use ruma::{
 	CanonicalJsonObject, EventId, RoomId, UserId, api::Direction, events::relation::RelationType,
 	push::Action,
@@ -15,7 +15,7 @@ use tuwunel_core::{
 	debug_warn, implement,
 	utils::{
 		BoolExt,
-		stream::{ReadyExt, automatic_width},
+		stream::{TryReadyExt, automatic_width},
 	},
 };
 use tuwunel_database::{Deserialized, Map};
@@ -234,12 +234,12 @@ async fn still_counted(
 ///
 /// The counter holds the thread's latest notifying events, so the redacted
 /// reply is among them exactly while fewer than `value` later replies raised
-/// it for the user. Only replies the relation index holds as direct thread
-/// replies are seen, while the thread bucket takes any event within three
-/// relation hops of the root, so a notifying event that joins it by such a
-/// hop can leave the count one low. The index holds no relation to a
-/// backfilled root, so such a root, like an unknown one, leaves the count as
-/// it is.
+/// it for the user. At most `thread_latest_reply_search_limit` relation rows
+/// are read; a walk that uses them all, or fails to read one, returns false,
+/// as does an unknown or backfilled root, which holds no relations. Only
+/// direct thread replies are seen, while the thread bucket takes any event
+/// within three relation hops of the root, so a notifying event that joins it
+/// by such a hop can leave the count one low.
 #[implement(super::Service)]
 #[tracing::instrument(level = "trace", skip_all)]
 async fn counted_by_replies(
@@ -255,30 +255,75 @@ async fn counted_by_replies(
 	};
 
 	let limit = usize::try_from(value).unwrap_or(usize::MAX);
-	let later = self
+	let budget = self
+		.services
+		.server
+		.config
+		.thread_latest_reply_search_limit;
+
+	// Err ends the walk: the limit was reached or a row failed to read.
+	let walk = self
 		.services
 		.pdu_metadata
-		.get_relations(shortroomid, root, Some(Count::Normal(count)), Direction::Forward, None)
-		.ready_filter(|(_, reply)| RelationType::Thread.relation_type_equal(reply))
-		.filter_map(async |(reply_count, _)| {
-			self.db
-				.useridcount_notification
-				.qry(&(user, reply_count.into_unsigned()))
-				.await
-				.deserialized()
-				.ok()
+		.relation_counts(root, Some(Count::Normal(count)), Direction::Forward, budget)
+		.inspect_err(|error| debug_warn!(%error, "Relation read failed, count kept"))
+		.map_err(drop)
+		.and_then(async |reply| {
+			let raised = self
+				.raised_by_reply(counter, user, shortroomid, reply)
+				.await;
+
+			Ok(raised)
 		})
-		.ready_filter(|notified: &Notified| notified.actions.iter().any(counter.raises))
-		.take(limit)
-		.count()
+		.ready_try_fold((0_usize, 0_usize), |(seen, later), raised: bool| {
+			let later = later.saturating_add(usize::from(raised));
+
+			later
+				.lt(&limit)
+				.then_some((seen.saturating_add(1), later))
+				.ok_or(())
+		})
 		.await;
 
-	later < limit
+	// A walk the budget ended may have missed the replies that settle it.
+	walk.is_ok_and(|(seen, later)| seen < budget && later < limit)
+}
+
+/// Whether a reply raised the counter for the user as a direct thread reply.
+///
+/// The user's notification record decides first, so a reply that never
+/// notified them costs no event load.
+#[implement(super::Service)]
+#[tracing::instrument(level = "trace", skip_all)]
+async fn raised_by_reply(
+	&self,
+	counter: Counter<'_>,
+	user: &UserId,
+	shortroomid: ShortRoomId,
+	count: Count,
+) -> bool {
+	let raised = self
+		.db
+		.useridcount_notification
+		.qry(&(user, count.into_unsigned()))
+		.await
+		.deserialized()
+		.is_ok_and(|notified: Notified| notified.actions.iter().any(counter.raises));
+
+	let pdu_id: RawPduId = PduId { shortroomid, count }.into();
+
+	raised
+		&& self
+			.services
+			.timeline
+			.get_pdu_from_id(&pdu_id)
+			.await
+			.is_ok_and(|reply| RelationType::Thread.relation_type_equal(&reply))
 }
 
 #[cfg(test)]
 mod tests {
-	use std::{fmt::Debug, sync::Arc};
+	use std::{fmt::Debug, iter::once, sync::Arc};
 
 	use ruma::{
 		EventId, RoomId, UserId, event_id,
@@ -423,17 +468,7 @@ mod tests {
 		store_pdu(services, room_id, root_count, root, &text);
 
 		for (count, event_id, rel_type, actions) in relations {
-			let content = json!({
-				"msgtype": "m.text", "body": "reply",
-				"m.relates_to": { "rel_type": rel_type, "event_id": root },
-			});
-
-			store_pdu(services, room_id, count, event_id, &content);
-			services
-				.pdu_metadata
-				.add_relation(Count::Normal(count), Count::Normal(root_count));
-
-			notify(notified, user, count, actions);
+			store_reply(services, (root, root_count), (event_id, count), rel_type, actions);
 		}
 
 		notify(notified, user, 45, &[Action::Notify]);
@@ -446,6 +481,79 @@ mod tests {
 				.await;
 
 			assert_eq!(stored(notifications, thread).await?, expected, "after {count}");
+		}
+
+		Ok(())
+	}
+
+	/// A reply walk cut short by the row budget keeps the count it could not settle.
+	///
+	/// With a three-row budget, a highlighted reply followed by four or by
+	/// exactly three notifying but unhighlighted replies keeps its highlight,
+	/// since the rows read reach no verdict. One followed by two is settled
+	/// and comes off.
+	#[tokio::test]
+	async fn redaction_keeps_a_count_the_reply_budget_cannot_settle() -> Result {
+		let config = Figment::new().merge(("thread_latest_reply_search_limit", 3));
+		let Some(fixture) = fixture(config).await? else {
+			return Ok(());
+		};
+
+		let services = &fixture.services;
+		let pusher = &services.pusher;
+		let Data {
+			userroomid_highlightcount: highlights,
+			roomuserid_lastnotificationread: last_reads,
+			..
+		} = &pusher.db;
+
+		let (user, room_id, long_root) = ids();
+		let exact_root = event_id!("$exact:localhost");
+		let short_root = event_id!("$short:localhost");
+		let notifies = [Action::Notify];
+		let highlight =
+			[Action::Notify, Action::SetTweak(Tweak::Highlight(HighlightTweakValue::Yes))];
+
+		// (root, root count, highlighted reply, later replies, highlights left)
+		let text = json!({ "msgtype": "m.text", "body": "root" });
+		let threads = [
+			(long_root, 10, 20, [30, 31, 32, 33].as_slice(), 1),
+			(exact_root, 50, 60, [70, 71, 72].as_slice(), 1),
+			(short_root, 80, 90, [100, 101].as_slice(), 0),
+		];
+
+		for (root, root_count, highlighted, later, _) in threads {
+			store_pdu(services, room_id, root_count, root, &text);
+			highlights.put((user, room_id, root), 1_u64);
+
+			let later = later
+				.iter()
+				.map(|&count| (count, notifies.as_slice()));
+
+			for (count, actions) in once((highlighted, highlight.as_slice())).chain(later) {
+				let event_id =
+					EventId::parse(format!("$reply{count}:localhost")).expect("reply id");
+
+				store_reply(
+					services,
+					(root, root_count),
+					(&event_id, count),
+					"m.thread",
+					actions,
+				);
+			}
+		}
+
+		last_reads.put((room_id, user), 200_u64);
+
+		for (root, _, highlighted, _, expected) in threads {
+			pusher
+				.redact_pdu_for_user(user, redacted(room_id, highlighted, Some(root)))
+				.await;
+
+			let count = stored(highlights, (user, room_id, root)).await?;
+
+			assert_eq!(count, expected, "after {highlighted}");
 		}
 
 		Ok(())
@@ -496,6 +604,30 @@ mod tests {
 			.deserialized()
 			.optional()
 			.map(Option::unwrap_or_default)
+	}
+
+	/// Store a reply to a root where the relation walk reads it.
+	///
+	/// The relation row and the user's notification record are written with it.
+	fn store_reply(
+		services: &Services,
+		(root, root_count): (&EventId, u64),
+		(event_id, count): (&EventId, u64),
+		rel_type: &str,
+		actions: &[Action],
+	) {
+		let (user, room_id, _) = ids();
+		let content = json!({
+			"msgtype": "m.text", "body": "reply",
+			"m.relates_to": { "rel_type": rel_type, "event_id": root },
+		});
+
+		store_pdu(services, room_id, count, event_id, &content);
+		services
+			.pdu_metadata
+			.add_relation(Count::Normal(count), Count::Normal(root_count));
+
+		notify(&services.pusher.db.useridcount_notification, user, count, actions);
 	}
 
 	/// Store an event where the timeline and the relation walk read it.
