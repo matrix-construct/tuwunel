@@ -1,6 +1,6 @@
 # Tuwunel<sup>💕</sup>
 
-![GitHub License](https://img.shields.io/github/license/matrix-construct/tuwunel?style=flat%2Dsquare&color=%238A2BE2)
+![License](https://img.shields.io/badge/license-Apache--2.0-8A2BE2?style=flat-square)
 ![GitHub Created At](https://img.shields.io/github/created-at/matrix-construct/tuwunel?style=flat%2Dsquare&color=%238A2BE2)
 ![GitHub Commit Activity](https://img.shields.io/github/commit-activity/m/matrix-construct/tuwunel?style=flat%2Dsquare&link=https%3A%2F%2Fgithub.com%2Fmatrix-construct%2Ftuwunel%2Fpulse%2Fmonthly&color=%238A2BE2)
 ![Docker Pulls](https://img.shields.io/docker/pulls/jevolk/tuwunel?style=flat%2Dsquare&color=8A2BE2)
