@@ -29,6 +29,7 @@ use ruma::{
 	},
 };
 use serde::{Deserialize, Serialize};
+use serde_html_form::{from_str as from_form_str, to_string as to_form_string};
 use serde_json::Value as JsonValue;
 use tuwunel_core::{
 	Err, Result, at,
@@ -111,14 +112,6 @@ static CONFIRM_HTML: &str = const_format!(
 	</body>
 </html>"#
 );
-
-/// Path attribute for the grant-session cookie. The set and removal cookies
-/// must use the same value: a cookie is only replaced (and thus removed) when
-/// its name, domain and path all match (RFC 6265 5.3), and a Set-Cookie
-/// without an explicit path defaults to the request-URI's directory.
-fn grant_session_cookie_path(callback_url: Option<&Url>) -> &str {
-	callback_url.map(Url::path).unwrap_or("/")
-}
 
 fn decode_apple_userinfo_from_id_token(session: &Session) -> Result<UserInfo> {
 	let id_token = session.id_token.as_deref().ok_or_else(|| {
@@ -293,8 +286,7 @@ async fn handle_sso_login(
 		.authorization_url
 		.clone()
 		.map(|mut location| {
-			let query = serde_html_form::to_string(&query).ok();
-			location.set_query(query.as_deref());
+			location.set_query(to_form_string(&query).ok().as_deref());
 			if !provider.extra_authorization_parameters.is_empty() {
 				// Base wins on key collision so extras cannot disable CSRF/PKCE.
 				let merged: BTreeMap<String, String> = provider
@@ -324,24 +316,7 @@ async fn handle_sso_login(
 		redirect_uri: redirect_url.as_str().into(),
 	};
 
-	let cookie_path = grant_session_cookie_path(provider.callback_url.as_ref());
-
-	let cookie_max_age = provider
-		.grant_session_duration
-		.map(Duration::from_secs)
-		.expect("Defaulted to Some value during configure_idp()")
-		.try_into()
-		.expect("std::time::Duration to time::Duration conversion failure");
-
-	let cookie = Cookie::build((GRANT_SESSION_COOKIE, serde_html_form::to_string(&cookie_val)?))
-		.path(cookie_path)
-		.max_age(cookie_max_age)
-		.same_site(SameSite::None)
-		.secure(true)
-		.http_only(true)
-		.build()
-		.to_string()
-		.into();
+	let cookie = grant_session_cookie(&cookie_val, &provider)?;
 
 	let session = Session {
 		idp_id: Some(idp_id),
@@ -364,8 +339,38 @@ async fn handle_sso_login(
 
 	Ok(sso_login_with_provider::v3::Response {
 		location: location.into(),
-		cookie: Some(cookie),
+		cookie: Some(cookie.into()),
 	})
+}
+
+fn grant_session_cookie(value: &GrantCookie<'_>, provider: &Provider) -> Result<String> {
+	let max_age = provider
+		.grant_session_duration
+		.map(Duration::from_secs)
+		.expect("Defaulted to Some value during configure_idp()")
+		.try_into()
+		.expect("std::time::Duration to time::Duration conversion failure");
+
+	// CookieJar percent-decodes the value on read; encode it so the form survives.
+	let cookie = Cookie::build((GRANT_SESSION_COOKIE, to_form_string(value)?))
+		.path(grant_session_cookie_path(provider.callback_url.as_ref()))
+		.max_age(max_age)
+		.same_site(SameSite::None)
+		.secure(true)
+		.http_only(true)
+		.build()
+		.encoded()
+		.to_string();
+
+	Ok(cookie)
+}
+
+/// Path attribute for the grant-session cookie. The set and removal cookies
+/// must use the same value: a cookie is only replaced (and thus removed) when
+/// its name, domain and path all match (RFC 6265 5.3), and a Set-Cookie
+/// without an explicit path defaults to the request-URI's directory.
+fn grant_session_cookie_path(callback_url: Option<&Url>) -> &str {
+	callback_url.map(Url::path).unwrap_or("/")
 }
 
 #[tracing::instrument(
@@ -571,10 +576,10 @@ fn validate_session_cookie(
 	sess_id: &str,
 ) -> Result {
 	let client_id = &provider.client_id;
-	let cookie = cookies
+	let cookie: GrantCookie<'_> = cookies
 		.get(GRANT_SESSION_COOKIE)
 		.map(Cookie::value)
-		.map(serde_html_form::from_str::<GrantCookie<'_>>)
+		.map(from_form_str)
 		.transpose()?
 		.ok_or_else(|| err!(Request(Unauthorized("Missing cookie {GRANT_SESSION_COOKIE:?}"))))?;
 
@@ -1083,9 +1088,13 @@ fn parse_user_id(server_name: &ServerName, username: &str) -> Result<OwnedUserId
 
 #[cfg(test)]
 mod tests {
+	use reqwest::header::{COOKIE, HeaderMap};
 	use serde_json::json;
 
 	use super::*;
+
+	const STATE: &str = "sess";
+	const NONCE: &str = "nonce";
 
 	fn apple_session_with_claims(claims: &serde_json::Value) -> Session {
 		let payload = b64.encode(serde_json::to_vec(claims).expect("serialize claims"));
@@ -1172,26 +1181,72 @@ mod tests {
 
 	#[test]
 	fn grant_session_removal_cookie_path_matches_the_set_cookie_path() {
-		let callback = Url::parse(
-			"https://matrix.example/_matrix/client/unstable/login/sso/callback/tuwunel_abc",
-		)
-		.expect("valid URL");
-
-		let set = Cookie::build((GRANT_SESSION_COOKIE, "grant"))
-			.path(grant_session_cookie_path(Some(&callback)))
-			.build();
-
+		let provider = authentik_provider();
+		let grant = grant_cookie(&provider, "https://client.example/return");
+		let set_cookie = grant_session_cookie(&grant, &provider).expect("grant session cookie");
+		let set = Cookie::parse_encoded(set_cookie.as_str()).expect("valid set cookie");
 		let removal = Cookie::build((GRANT_SESSION_COOKIE, EMPTY))
-			.path(grant_session_cookie_path(Some(&callback)))
+			.path(grant_session_cookie_path(provider.callback_url.as_ref()))
 			.removal()
 			.build();
 
 		assert_eq!(set.path(), removal.path());
+		assert_eq!(
+			(set.secure(), set.http_only(), set.same_site()),
+			(Some(true), Some(true), Some(SameSite::None))
+		);
+
 		assert!(
 			removal
 				.to_string()
 				.contains("Path=/_matrix/client/unstable/login/sso/callback/tuwunel_abc"),
 			"unexpected removal cookie: {removal}"
 		);
+	}
+
+	fn authentik_provider() -> Provider {
+		serde_json::from_value(json!({
+			"brand": "authentik",
+			"client_id": "tuwunel_abc",
+			"callback_url": "https://matrix.example/_matrix/client/unstable/login/sso/callback/tuwunel_abc",
+		}))
+		.expect("valid provider")
+	}
+
+	fn grant_cookie<'a>(provider: &'a Provider, redirect_uri: &'a str) -> GrantCookie<'a> {
+		GrantCookie {
+			client_id: provider.client_id.as_str().into(),
+			state: STATE.into(),
+			nonce: NONCE.into(),
+			redirect_uri: redirect_uri.into(),
+		}
+	}
+
+	#[test]
+	fn grant_session_cookie_survives_a_redirect_url_repeating_its_keys() {
+		let redirect_uri = "https://client.example/return?next=%2Froom%2B1&state=abc&client_id=x&nonce=y&redirect_uri=z";
+		let provider = authentik_provider();
+		let grant = grant_cookie(&provider, redirect_uri);
+		let session = Session {
+			cookie_nonce: Some(NONCE.to_owned()),
+			..Default::default()
+		};
+
+		let set_cookie = grant_session_cookie(&grant, &provider).expect("grant session cookie");
+		let (pair, _) = set_cookie
+			.split_once(';')
+			.expect("cookie attributes");
+
+		let header = HeaderValue::from_str(pair).expect("valid header value");
+		let cookies = CookieJar::from_headers(&HeaderMap::from_iter([(COOKIE, header)]));
+
+		let expected = to_form_string(&grant).expect("serialize");
+		let echoed = cookies
+			.get(GRANT_SESSION_COOKIE)
+			.map(Cookie::value);
+
+		assert_eq!(echoed, Some(expected.as_str()));
+
+		validate_session_cookie(&cookies, &provider, &session, STATE).expect("cookie validates");
 	}
 }
