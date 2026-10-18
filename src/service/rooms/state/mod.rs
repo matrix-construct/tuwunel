@@ -7,7 +7,13 @@
 mod fetch_state;
 mod prune;
 
-use std::{collections::HashMap, fmt::Write, iter::once, sync::Arc};
+use std::{
+	collections::HashMap,
+	fmt::Write,
+	iter::once,
+	ops::Bound::{Excluded, Unbounded},
+	sync::Arc,
+};
 
 use async_trait::async_trait;
 /// Fetches state events through a held map of short state keys.
@@ -47,6 +53,7 @@ use tuwunel_core::{
 	trace,
 	utils::{
 		BoolExt, IterStream, MutexMap, MutexMapGuard, ReadyExt, TryReadyExt, calculate_hash,
+		hash::sha256::Digest,
 		mutex_map::Guard,
 		stream::{TryBroadbandExt, TryIgnore, WidebandExt},
 	},
@@ -63,7 +70,10 @@ use crate::{
 	rooms::{
 		short::{ShortEventId, ShortStateHash, ShortStateKey},
 		state_cache::{MembershipUpdate, StrippedRoomState},
-		state_compressor::{CompressedState, parse_compressed_state_event},
+		state_compressor::{
+			CompressedState, CompressedStateEvent, ShortStateInfo, compress_state_event,
+			parse_compressed_state_event,
+		},
 	},
 	services::OnceServices,
 };
@@ -363,23 +373,8 @@ pub async fn set_event_state(
 		(state_ids_compressed, Arc::new(CompressedState::new()))
 	};
 
-	let save_statediff = |txn: &mut Txn, shortstatehash| {
-		self.services
-			.state_compressor
-			.save_state_from_diff(
-				txn,
-				shortstatehash,
-				statediffnew,
-				statediffremoved,
-				1_000_000, // high number because no state will be based on this one
-				states_parents,
-			)
-	};
-
-	let (shortstatehash, _) = self
-		.services
-		.short
-		.get_or_create_shortstatehash(&state_hash, save_statediff)
+	let shortstatehash = self
+		.store_snapshot(&state_hash, states_parents, || (statediffnew, statediffremoved))
 		.await?;
 
 	self.db
@@ -387,6 +382,123 @@ pub async fn set_event_state(
 		.aput::<KEY_LEN, VAL_LEN, _, _>(shorteventid, shortstatehash);
 
 	Ok(shortstatehash)
+}
+
+/// Returns the snapshot after an event: its own snapshot with the event applied.
+///
+/// An event's recorded snapshot precedes it. A state event replaces the entry
+/// under its state key, and the result is stored by hash as a delta from that
+/// snapshot, so a repeated call reuses it. Any other event returns its snapshot
+/// unchanged.
+#[implement(Service)]
+#[tracing::instrument(level = "debug", skip_all)]
+pub async fn shortstatehash_after_event<Pdu: Event>(&self, pdu: &Pdu) -> Result<ShortStateHash> {
+	let before = self.pdu_shortstatehash(pdu.event_id()).await?;
+	let Some(state_key) = pdu.state_key() else {
+		return Ok(before);
+	};
+
+	let layers = self
+		.services
+		.state_compressor
+		.load_shortstatehash_info(before)
+		.await?;
+
+	let parent = layers
+		.last()
+		.ok_or_else(|| err!(Database("Snapshot {before} has no layers")))?;
+
+	let (applied, replaced) = self
+		.state_entry_change(pdu, state_key, Some(parent.full_state.as_ref()))
+		.await;
+
+	if replaced == Some(applied) {
+		return Ok(before);
+	}
+
+	// Hashed in the set's sorted order, with the event's entry in place of the one it replaces.
+	let state = parent
+		.full_state
+		.range(..applied)
+		.chain(once(&applied))
+		.chain(
+			parent
+				.full_state
+				.range((Excluded(applied), Unbounded)),
+		)
+		.filter(|event| replaced.as_ref() != Some(*event));
+
+	let state_hash = calculate_hash(state.map(|event| &event[..]));
+
+	self.store_snapshot(&state_hash, layers, || {
+		(Arc::new([applied].into()), Arc::new(replaced.into_iter().collect()))
+	})
+	.await
+}
+
+/// Compresses a state event and finds the entry under its key in a snapshot.
+///
+/// The event's short IDs are allocated when absent, so the compressed entry is
+/// ready to store; a snapshot holds at most one entry under a key.
+#[implement(Service)]
+async fn state_entry_change<Pdu: Event>(
+	&self,
+	pdu: &Pdu,
+	state_key: &str,
+	full_state: Option<&CompressedState>,
+) -> (CompressedStateEvent, Option<CompressedStateEvent>) {
+	let event_type: StateEventType = pdu.event_type().to_cow_str().into();
+	let shortstatekey = self
+		.services
+		.short
+		.get_or_create_shortstatekey(&event_type, state_key)
+		.await;
+
+	let applied = self
+		.services
+		.state_compressor
+		.compress_state_event(shortstatekey, pdu.event_id())
+		.await;
+
+	let start = compress_state_event(shortstatekey, 0);
+	let end = compress_state_event(shortstatekey, u64::MAX);
+	let replaced =
+		full_state.and_then(|full_state| full_state.range(start..=end).next().copied());
+
+	(applied, replaced)
+}
+
+/// Stores a snapshot under its hash as a delta from its parents, unless known.
+///
+/// The delta is built only when the snapshot is new. Nothing is based on it in
+/// turn, so it never becomes a parent itself.
+#[implement(Service)]
+async fn store_snapshot(
+	&self,
+	state_hash: &Digest,
+	parents: Vec<ShortStateInfo>,
+	delta: impl FnOnce() -> (Arc<CompressedState>, Arc<CompressedState>) + Send,
+) -> Result<ShortStateHash> {
+	let save_statediff = |txn: &mut Txn, shortstatehash| {
+		let (added, removed) = delta();
+
+		self.services
+			.state_compressor
+			.save_state_from_diff(
+				txn,
+				shortstatehash,
+				added,
+				removed,
+				1_000_000, // high number because no state will be based on this one
+				parents,
+			)
+	};
+
+	self.services
+		.short
+		.get_or_create_shortstatehash(state_hash, save_statediff)
+		.map_ok(|(shortstatehash, _)| shortstatehash)
+		.await
 }
 
 /// Derives the state snapshot produced by appending a local PDU.
@@ -441,28 +553,15 @@ pub async fn append_to_state(&self, new_pdu: &PduEvent) -> Result<u64> {
 				| _ => Vec::new(),
 			};
 
-			let shortstatekey = self
-				.services
-				.short
-				.get_or_create_shortstatekey(&new_pdu.kind.to_string().into(), state_key)
-				.await;
-
-			let new = self
-				.services
-				.state_compressor
-				.compress_state_event(shortstatekey, &new_pdu.event_id)
-				.await;
-
-			let replaces = states_parents
+			let full_state = states_parents
 				.last()
-				.map(|info| {
-					info.full_state
-						.iter()
-						.find(|bytes| bytes.starts_with(&shortstatekey.to_be_bytes()))
-				})
-				.unwrap_or_default();
+				.map(|info| info.full_state.as_ref());
 
-			if Some(&new) == replaces {
+			let (new, replaces) = self
+				.state_entry_change(new_pdu, state_key, full_state)
+				.await;
+
+			if Some(new) == replaces {
 				return Ok(previous_shortstatehash.expect("must exist"));
 			}
 
@@ -470,21 +569,13 @@ pub async fn append_to_state(&self, new_pdu: &PduEvent) -> Result<u64> {
 			let shortstatehash = self.services.globals.next_count();
 			let mut txn = self.services.db.txn();
 
-			let mut statediffnew = CompressedState::new();
-			statediffnew.insert(new);
-
-			let mut statediffremoved = CompressedState::new();
-			if let Some(replaces) = replaces {
-				statediffremoved.insert(*replaces);
-			}
-
 			self.services
 				.state_compressor
 				.save_state_from_diff(
 					&mut txn,
 					*shortstatehash,
-					Arc::new(statediffnew),
-					Arc::new(statediffremoved),
+					Arc::new([new].into()),
+					Arc::new(replaces.into_iter().collect()),
 					2,
 					states_parents,
 				)?;

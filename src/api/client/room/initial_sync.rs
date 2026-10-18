@@ -60,8 +60,8 @@ pub(crate) async fn room_initial_sync_route(
 	let shortstatehash = departure
 		.map_async(|count| {
 			services
-				.timeline
-				.shortstatehash_after(room_id, count)
+				.state_accessor
+				.departure_shortstatehash(room_id, count)
 		})
 		.await
 		.transpose()?

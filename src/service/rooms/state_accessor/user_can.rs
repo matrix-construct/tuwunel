@@ -18,7 +18,7 @@ use ruma::{
 };
 use tuwunel_core::{
 	Err, Result, err, implement,
-	utils::{FutureBoolExt, future::TryExtExt, result::NotFound},
+	utils::{BoolExt, FutureBoolExt, future::TryExtExt, result::NotFound},
 };
 use tuwunel_matrix::{Event, PduCount, StateKey, pdu::PduBuilder};
 
@@ -267,9 +267,9 @@ async fn is_departed_member(&self, user_id: &UserId, room_id: &RoomId) -> bool {
 
 /// Selects the snapshot a user admitted by `user_can_see_state_events` reads.
 ///
-/// A departed member reads the state after the earlier of their departure and
-/// `at`. Anyone else reads the state after `at`, or the current state without
-/// one.
+/// A departed member reads the state after their departure, or after an
+/// earlier `at`. Anyone else reads the state after `at`, or the current state
+/// without one.
 #[implement(super::Service)]
 #[tracing::instrument(skip(self), level = "debug")]
 pub async fn user_visible_shortstatehash(
@@ -278,20 +278,27 @@ pub async fn user_visible_shortstatehash(
 	room_id: &RoomId,
 	at: Option<PduCount>,
 ) -> Result<ShortStateHash> {
-	let departure = self.departure_count(user_id, room_id).await?;
+	let departure = self
+		.departure_count(user_id, room_id)
+		.await?
+		.filter(|departure| at.is_none_or(|at| *departure <= at));
 
-	match at.into_iter().chain(departure).min() {
-		| Some(count) =>
-			self.services
-				.timeline
-				.shortstatehash_after(room_id, count)
-				.await,
-
-		| None =>
+	match (departure, at) {
+		| (None, None) =>
 			self.services
 				.state
 				.get_room_shortstatehash(room_id)
 				.map_err(|e| err!(Database("Missing state for {room_id:?}: {e:?}")))
+				.await,
+
+		| (None, Some(at)) =>
+			self.services
+				.timeline
+				.shortstatehash_after(room_id, at)
+				.await,
+
+		| (Some(departure), _) =>
+			self.departure_shortstatehash(room_id, departure)
 				.await,
 	}
 }
@@ -363,6 +370,55 @@ async fn departure_event_count(
 		.get_pdu_count(member.event_id())
 		.await
 		.optional()
+}
+
+/// Returns the snapshot after a departed member's departure.
+///
+/// The departure is the member event at the count, and the snapshot after it
+/// is the state at that event with the event applied, rather than the next
+/// timeline event's snapshot: a remote event's snapshot follows its position
+/// in the event graph, not in this timeline, so it can miss the departure or
+/// include later state. A count holding no event, such as a departure
+/// recorded by a state reset, an event without a snapshot, or a read-only
+/// database, which cannot store the derived snapshot, falls back to the
+/// snapshot preceding the next timeline event.
+#[implement(super::Service)]
+#[tracing::instrument(skip(self), level = "debug")]
+pub async fn departure_shortstatehash(
+	&self,
+	room_id: &RoomId,
+	departure: PduCount,
+) -> Result<ShortStateHash> {
+	let after_event = self
+		.services
+		.db
+		.is_read_only()
+		.is_false()
+		.then_async(|| {
+			self.services
+				.timeline
+				.get_pdu_at(room_id, departure)
+				.and_then(async |pdu| {
+					self.services
+						.state
+						.shortstatehash_after_event(&pdu)
+						.await
+				})
+		})
+		.await
+		.transpose()
+		.optional()?
+		.flatten();
+
+	let Some(shortstatehash) = after_event else {
+		return self
+			.services
+			.timeline
+			.shortstatehash_after(room_id, departure)
+			.await;
+	};
+
+	Ok(shortstatehash)
 }
 
 /// Reports whether a user may discover or inspect a room.

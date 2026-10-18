@@ -336,13 +336,7 @@ pub async fn next_shortstatehash(
 	room_id: &RoomId,
 	after: PduCount,
 ) -> Result<ShortStateHash> {
-	let shortroomid: ShortRoomId = self
-		.services
-		.short
-		.get_shortroomid(room_id)
-		.await
-		.map_err(|e| err!(Request(NotFound("Room {room_id:?} not found: {e:?}"))))?;
-
+	let shortroomid = self.shortroomid(room_id).await?;
 	let after = PduId { shortroomid, count: after };
 
 	let next = PduId {
@@ -358,13 +352,27 @@ pub async fn next_shortstatehash(
 		.await
 }
 
-/// Returns the state snapshot after every room event at or before a count.
+/// Resolves a room's short ID.
 ///
-/// The boundary is inclusive because a client's sync position is often the
-/// count of the newest event it received, and need not belong to this room.
-/// The snapshot precedes the first event strictly after the count, falling
-/// back to current state only when no event follows; a count before the room's
-/// first recorded snapshot is not found.
+/// An unknown room is reported as not found rather than as a storage error.
+#[implement(Service)]
+async fn shortroomid(&self, room_id: &RoomId) -> Result<ShortRoomId> {
+	self.services
+		.short
+		.get_shortroomid(room_id)
+		.map_err(|e| err!(Request(NotFound("Room {room_id:?} not found: {e:?}"))))
+		.await
+}
+
+/// Returns the snapshot preceding the first room event after a count.
+///
+/// An event at the count is treated as already received, because a client's
+/// sync position is often the count of the newest event it received, and need
+/// not belong to this room. Current state stands in when no event follows, and
+/// a count before the room's first recorded snapshot is not found. A remote
+/// event's snapshot precedes it in the event graph rather than in this
+/// timeline, so the boundary suits a client's position, not a point in the
+/// room's own history.
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "debug")]
 pub async fn shortstatehash_after(
@@ -372,13 +380,7 @@ pub async fn shortstatehash_after(
 	room_id: &RoomId,
 	count: PduCount,
 ) -> Result<ShortStateHash> {
-	let shortroomid: ShortRoomId = self
-		.services
-		.short
-		.get_shortroomid(room_id)
-		.map_err(|e| err!(Request(NotFound("Room {room_id:?} not found: {e:?}"))))
-		.await?;
-
+	let shortroomid = self.shortroomid(room_id).await?;
 	let after = PduId { shortroomid, count };
 	let count = match self.next_timeline_count(&after).await {
 		| Ok(count) => count,
@@ -644,6 +646,18 @@ pub async fn get_outlier_pdu(&self, event_id: &EventId) -> Result<PduEvent> {
 #[implement(Service)]
 pub async fn get_non_outlier_pdu(&self, event_id: &EventId) -> Result<PduEvent> {
 	self.get_non_outlier(event_id).await
+}
+
+/// Returns the accepted PDU at a room's timeline count.
+///
+/// A count holding no accepted event in the room is not found.
+#[implement(Service)]
+#[tracing::instrument(skip(self), level = "trace")]
+pub async fn get_pdu_at(&self, room_id: &RoomId, count: PduCount) -> Result<PduEvent> {
+	let shortroomid = self.shortroomid(room_id).await?;
+	let pdu_id: RawPduId = PduId { shortroomid, count }.into();
+
+	self.get_pdu_from_id(&pdu_id).await
 }
 
 /// Returns a decoded PDU by its accepted timeline ID.
