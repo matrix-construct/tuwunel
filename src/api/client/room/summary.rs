@@ -2,7 +2,10 @@ use axum::extract::State;
 use futures::{FutureExt, StreamExt, TryFutureExt, future::join3};
 use ruma::{
 	OwnedServerName, RoomId, UserId,
-	api::{client::room::get_summary, federation::space::get_hierarchy},
+	api::{
+		client::room::get_summary::{self, v1::Response},
+		federation::space::get_hierarchy,
+	},
 	events::room::member::MembershipState,
 	room::{JoinRuleSummary, RoomSummary},
 };
@@ -10,7 +13,7 @@ use tuwunel_core::{
 	Err, Result, debug_warn, err, trace,
 	utils::{
 		BoolExt, FutureBoolExt, IterStream,
-		future::{OptionFutureExt, ReadyBoolExt, TryExtExt},
+		future::{OptionFutureExt, TryExtExt},
 		option::OptionExt,
 	},
 };
@@ -34,7 +37,7 @@ pub(crate) async fn get_room_summary_legacy(
 	State(services): State<crate::State>,
 	ClientIp(client): ClientIp,
 	body: Ruma<get_summary::v1::Request>,
-) -> Result<RumaResponse<get_summary::v1::Response>> {
+) -> Result<RumaResponse<Response>> {
 	get_room_summary(State(services), ClientIp(client), body)
 		.boxed()
 		.await
@@ -51,7 +54,7 @@ pub(crate) async fn get_room_summary(
 	State(services): State<crate::State>,
 	ClientIp(client): ClientIp,
 	body: Ruma<get_summary::v1::Request>,
-) -> Result<get_summary::v1::Response> {
+) -> Result<Response> {
 	let (room_id, servers) = services
 		.alias
 		.maybe_resolve_with_servers(&body.room_id_or_alias, Some(&body.via))
@@ -71,7 +74,7 @@ async fn room_summary_response(
 	room_id: &RoomId,
 	servers: &[OwnedServerName],
 	sender_user: Option<&UserId>,
-) -> Result<get_summary::v1::Response> {
+) -> Result<Response> {
 	if services
 		.state_cache
 		.server_in_room(services.globals.server_name(), room_id)
@@ -85,20 +88,24 @@ async fn room_summary_response(
 	let summary =
 		remote_room_summary_hierarchy_response(services, room_id, servers, sender_user).await?;
 
-	Ok(get_summary::v1::Response {
-		summary,
-		membership: sender_user
-			.is_some()
-			.then_some(MembershipState::Leave),
-	})
+	let membership = sender_user
+		.map_async(|sender_user| {
+			services
+				.state_cache
+				.is_invited(sender_user, room_id)
+				.map(|invited| invited.map_or(MembershipState::Leave, || MembershipState::Invite))
+		})
+		.await;
+
+	Ok(Response { summary, membership })
 }
 
 async fn local_room_summary_response(
 	services: &Services,
 	room_id: &RoomId,
 	sender_user: Option<&UserId>,
-) -> Result<get_summary::v1::Response> {
-	trace!(?sender_user, "Sending local room summary response for {room_id:?}");
+) -> Result<Response> {
+	trace!(?sender_user, ?room_id, "Sending local room summary response");
 	let join_rule = services.state_accessor.get_join_rules(room_id);
 
 	let world_readable = services.state_accessor.is_world_readable(room_id);
@@ -108,7 +115,7 @@ async fn local_room_summary_response(
 	let (join_rule, world_readable, guest_can_join) =
 		join3(join_rule, world_readable, guest_can_join).await;
 
-	trace!("{join_rule:?}, {world_readable:?}, {guest_can_join:?}");
+	trace!(?join_rule, world_readable, guest_can_join, "Room summary access");
 	user_can_see_summary(
 		services,
 		room_id,
@@ -185,7 +192,7 @@ async fn local_room_summary_response(
 		membership,
 	);
 
-	Ok(get_summary::v1::Response {
+	Ok(Response {
 		summary: RoomSummary {
 			room_id: room_id.to_owned(),
 			canonical_alias,
@@ -211,7 +218,7 @@ async fn remote_room_summary_hierarchy_response(
 	servers: &[OwnedServerName],
 	sender_user: Option<&UserId>,
 ) -> Result<RoomSummary> {
-	trace!(?sender_user, ?servers, "Sending remote room summary response for {room_id:?}");
+	trace!(?sender_user, ?servers, ?room_id, "Sending remote room summary response");
 	if !services.config.allow_federation {
 		return Err!(Request(Forbidden("Federation is disabled.")));
 	}
@@ -310,7 +317,7 @@ where
 	}
 
 	let Some(sender_user) = sender_user else {
-		return world_readable.ok_or_else(|| {
+		return BoolExt::ok_or_else(world_readable, || {
 			err!(Request(Forbidden(
 				"Room is not world readable or publicly accessible/joinable, authentication is \
 				 required"
@@ -318,9 +325,14 @@ where
 		});
 	};
 
-	let user_can_see_state_events = services
+	// The summary shows the room as it is now, which a former member may not see.
+	let is_invited = services
+		.state_cache
+		.is_invited(sender_user, room_id);
+
+	let user_can_peek = services
 		.state_accessor
-		.user_can_see_state_events(sender_user, room_id);
+		.user_can_peek(sender_user, room_id);
 
 	let guest_admitted = guest_can_join
 		.then_async(|| {
@@ -335,13 +347,10 @@ where
 		.state_cache
 		.is_joined_any(sender_user, allowed_room_ids);
 
-	// The allowed-room scan trails; either cheap check can admit first.
-	let can_see = user_can_see_state_events
-		.is_false()
-		.and2(guest_admitted.is_false(), user_in_allowed_restricted_room.is_false())
-		.is_false();
+	// The allowed-room scan trails; any cheaper check can admit first.
+	let can_see = is_invited.or3(user_can_peek, guest_admitted, user_in_allowed_restricted_room);
 
-	can_see.boxed().await.ok_or_else(|| {
+	BoolExt::ok_or_else(can_see.await, || {
 		err!(Request(Forbidden(
 			"Room is not world readable, not publicly accessible/joinable, restricted room \
 			 conditions not met, and guest access is forbidden. Not allowed to see details of \
