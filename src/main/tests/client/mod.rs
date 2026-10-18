@@ -56,10 +56,10 @@ pub(crate) async fn post(&self, path: &str, body: &Value) -> Result<Value> {
 	self.post_json(&self.url(path), body).await
 }
 
-/// The versioned client-API URL for one endpoint path.
+/// The v3 client-API URL for one endpoint path.
 ///
-/// Every versioned client-API request in the harness is addressed through
-/// here, so the version prefix is stated once.
+/// Every v3 request in the harness is addressed through here, so that prefix
+/// is stated once; other versions name theirs through `client_url`.
 #[implement(Client, params = "<'_>")]
 pub(crate) fn url(&self, path: &str) -> String { self.client_url("v3/", path) }
 
@@ -74,7 +74,7 @@ pub(crate) fn client_url(&self, prefix: &str, rest: &str) -> String {
 
 /// Post a JSON body to an absolute URL as this user and parse the reply.
 ///
-/// Where `post` takes a versioned endpoint path, this takes any URL; a
+/// Where `post` takes a v3 endpoint path, this takes any URL; a
 /// non-success status is the error.
 #[implement(Client, params = "<'_>")]
 pub(crate) async fn post_json(&self, url: &str, body: &Value) -> Result<Value> {

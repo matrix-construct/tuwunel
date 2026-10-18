@@ -1,6 +1,5 @@
 #![cfg(test)]
 
-use reqwest::Method;
 use serde_json::{Value, json};
 use tuwunel_core::{
 	Result, err,
@@ -17,6 +16,9 @@ use self::{
 mod appservice;
 mod client;
 mod fixture;
+
+#[path = "client/get.rs"]
+mod get;
 
 const OWNER_TOKEN: &str = "appservice-user-join-owner-token";
 const GUEST_TOKEN: &str = "appservice-user-join-guest-token";
@@ -132,10 +134,7 @@ fn expect_status(status: u16, expected: u16) -> Result {
 
 async fn is_guest(client: &Client<'_>) -> Result<bool> {
 	let url = client.url("account/whoami");
-	let response = client
-		.request(Method::GET, &url, &json!({}))
-		.await?;
-
+	let response = client.get_url(&url).await?;
 	let whoami = accepted(response).await?;
 
 	// The field is left out when false.
