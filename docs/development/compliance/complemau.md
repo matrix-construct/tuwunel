@@ -4,10 +4,10 @@ Tuwunel runs [Complemau](https://github.com/matrix-construct/complement/tree/tuw
 
 ## Counts
 
-- Test groups: 34. Passing: **94.1%**
-  - ✅ `pass`: 32
+- Test groups: 34. Passing: **85.3%**
+  - ✅ `pass`: 29
   - 🟨 `some`: 0
-  - ❌ `fail`: 2
+  - ❌ `fail`: 5
   - ⬛ `skip`: 0
 
 - Subtests: 63. Passing: **96.8%**
@@ -29,9 +29,9 @@ Tuwunel runs [Complemau](https://github.com/matrix-construct/complement/tree/tuw
 | ✅ | 15/0/0 | `ComplemauAppserviceRegistrationLoginAndMSC4190Devices` |
 | ✅ | – | `ComplemauAppserviceRoomAliasQuery` |
 | ✅ | – | `ComplemauAppserviceScopesTypingByInterest` |
-| ✅ | – | `ComplemauAppserviceServesDeviceKeys` |
-| ✅ | – | `ComplemauAppserviceServesDeviceKeysOverFederation` |
-| ✅ | – | `ComplemauAppserviceServesOneTimeKeys` |
+| ❌ | – | `ComplemauAppserviceServesDeviceKeys` |
+| ❌ | – | `ComplemauAppserviceServesDeviceKeysOverFederation` |
+| ❌ | – | `ComplemauAppserviceServesOneTimeKeys` |
 | ✅ | 3/0/0 | `ComplemauAppserviceThirdPartyEdges` |
 | ✅ | 2/0/0 | `ComplemauAppserviceThirdPartyLookups` |
 | ✅ | 2/0/0 | `ComplemauAppserviceThirdPartyProtocols` |
