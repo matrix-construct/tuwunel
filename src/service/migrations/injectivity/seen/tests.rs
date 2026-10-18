@@ -310,6 +310,8 @@ async fn family_check_rejects_malformed_mismatched_and_statekey_pairs() -> Resul
 	reverse.remove(&short);
 	seed_identity(db, STATEKEYS, b"m.room.name\xff", 201);
 	assert!(consistent(services).await?, "paired rows agree");
+	seed_identity(db, STATEKEYS, b"\xff", 203);
+	assert!(consistent(services).await?, "an empty event type is a valid statekey");
 	db["shortstatekey_statekey"].insert(&202_u64.to_be_bytes(), b"m.room.topic\xff");
 	assert!(!consistent(services).await?, "a statekey disagreement fails");
 

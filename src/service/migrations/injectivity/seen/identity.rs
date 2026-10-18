@@ -255,7 +255,8 @@ fn valid(identity: &[u8], event: bool) -> bool {
 
 	let (event_type, key) = identity.split_at(separator);
 
-	!event_type.is_empty() && from_utf8(event_type).is_ok() && from_utf8(&key[1..]).is_ok()
+	// The spec bounds only an event type's length, so an empty type is well formed.
+	from_utf8(event_type).is_ok() && from_utf8(&key[1..]).is_ok()
 }
 
 #[tracing::instrument(level = "trace", skip_all)]
