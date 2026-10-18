@@ -2107,6 +2107,9 @@ target "rocksdb-build" {
         rocksdb_shared = 0
         rocksdb_opt_level = rocksdb_opt_level
         rocksdb_build_type = rocksdb_build_type
+        # Bitcode only where the Rust side links with linker-plugin-lto; any
+        # other link would run ThinLTO over all of RocksDB, every test binary.
+        rocksdb_lto = lto_profile(cargo_profile)? "-flto=thin": ""
         rocksdb_cxx_flags = (
             cargo_profile == "release-native" && sys_target_triple(sys_target) == "aarch64-linux-gnu"?
                 "-ftls-model=local-exec -mno-outline-atomics":
