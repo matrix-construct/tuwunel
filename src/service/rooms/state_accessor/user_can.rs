@@ -4,6 +4,7 @@
 //! membership metadata. Invite and tombstone checks use the normal event-build
 //! pipeline as non-persisting authorization probes.
 
+use futures::TryFutureExt;
 use ruma::{
 	EventId, RoomId, UserId,
 	events::{
@@ -15,7 +16,10 @@ use ruma::{
 		},
 	},
 };
-use tuwunel_core::{Err, Result, implement, utils::FutureBoolExt};
+use tuwunel_core::{
+	Err, Result, err, implement,
+	utils::{FutureBoolExt, future::TryExtExt, result::NotFound},
+};
 use tuwunel_matrix::{Event, PduCount, StateKey, pdu::PduBuilder};
 
 use crate::rooms::{short::ShortStateHash, state::RoomMutexGuard};
@@ -205,12 +209,12 @@ async fn user_shared_history(
 	event_count <= PduCount::from_unsigned(left_count)
 }
 
-/// Reports whether a user may read the room's current state events.
+/// Reports whether a user may read the room's state events.
 ///
-/// Current membership grants immediate access. Otherwise world-readable
-/// history grants access; invited and shared visibility consult current
-/// invitation or retained once-joined metadata. Missing visibility defaults
-/// to `shared`.
+/// Current membership grants immediate access, and world-readable history
+/// grants anyone access. Otherwise a departed member is admitted, as is a
+/// pending invitee under invited visibility; `user_visible_shortstatehash`
+/// selects the snapshot each of them reads.
 #[implement(super::Service)]
 #[tracing::instrument(skip_all, level = "trace")]
 pub async fn user_can_see_state_events(&self, user_id: &UserId, room_id: &RoomId) -> bool {
@@ -237,16 +241,128 @@ pub async fn user_can_see_state_events(&self, user_id: &UserId, room_id: &RoomId
 			self.services
 				.state_cache
 				.is_invited(user_id, room_id)
+				.or(self.is_departed_member(user_id, room_id))
 				.await,
 
-		| HistoryVisibility::Shared =>
-			self.services
-				.state_cache
-				.once_joined(user_id, room_id)
-				.await,
-
-		| _ => false,
+		// `joined`, `shared`, and any value not understood, which the spec reads as `shared`.
+		| _ => self.is_departed_member(user_id, room_id).await,
 	}
+}
+
+/// Reports whether a user once joined a room and keeps a departure count there.
+///
+/// This is the count `departure_count` selects the snapshot by. A leave or ban
+/// that ended only an invite or a knock, or banned a user who never joined,
+/// marks no departed member, and forgetting the room drops the count.
+#[implement(super::Service)]
+async fn is_departed_member(&self, user_id: &UserId, room_id: &RoomId) -> bool {
+	let state_cache = &self.services.state_cache;
+
+	state_cache
+		.get_left_count(room_id, user_id)
+		.is_ok()
+		.and(state_cache.once_joined(user_id, room_id))
+		.await
+}
+
+/// Selects the snapshot a user admitted by `user_can_see_state_events` reads.
+///
+/// A departed member reads the state after the earlier of their departure and
+/// `at`. Anyone else reads the state after `at`, or the current state without
+/// one.
+#[implement(super::Service)]
+#[tracing::instrument(skip(self), level = "debug")]
+pub async fn user_visible_shortstatehash(
+	&self,
+	user_id: &UserId,
+	room_id: &RoomId,
+	at: Option<PduCount>,
+) -> Result<ShortStateHash> {
+	let departure = self.departure_count(user_id, room_id).await?;
+
+	match at.into_iter().chain(departure).min() {
+		| Some(count) =>
+			self.services
+				.timeline
+				.shortstatehash_after(room_id, count)
+				.await,
+
+		| None =>
+			self.services
+				.state
+				.get_room_shortstatehash(room_id)
+				.map_err(|e| err!(Database("Missing state for {room_id:?}: {e:?}")))
+				.await,
+	}
+}
+
+/// Returns the timeline count at which a departed member left a room.
+///
+/// A user who once joined and keeps a leave or ban count is a departed member.
+/// The count is bounded by the leave or ban in current state, so one
+/// overwritten by a later count never reaches past the real departure. A
+/// joined user, one who never joined, or one whose count is gone because they
+/// forgot the room or were invited back, has none.
+#[implement(super::Service)]
+#[tracing::instrument(skip(self), level = "debug")]
+pub async fn departure_count(
+	&self,
+	user_id: &UserId,
+	room_id: &RoomId,
+) -> Result<Option<PduCount>> {
+	let state_cache = &self.services.state_cache;
+
+	if state_cache.is_joined(user_id, room_id).await
+		|| !state_cache.once_joined(user_id, room_id).await
+	{
+		return Ok(None);
+	}
+
+	// Sequenced, so a user whose left count is gone skips the member event read.
+	let Some(left_count) = state_cache
+		.get_left_count(room_id, user_id)
+		.map_ok(PduCount::from_unsigned)
+		.await
+		.optional()?
+	else {
+		return Ok(None);
+	};
+
+	self.departure_event_count(user_id, room_id)
+		.map_ok(|event_count| event_count.into_iter().chain([left_count]).min())
+		.await
+}
+
+/// Returns the timeline count of the user's leave or ban in current state.
+///
+/// There is none when the member event is absent or sets any other
+/// membership, or when the event has no timeline count.
+#[implement(super::Service)]
+#[tracing::instrument(skip(self), level = "debug")]
+async fn departure_event_count(
+	&self,
+	user_id: &UserId,
+	room_id: &RoomId,
+) -> Result<Option<PduCount>> {
+	let Some(member) = self
+		.room_state_get(room_id, &StateEventType::RoomMember, user_id.as_str())
+		.await
+		.optional()?
+	else {
+		return Ok(None);
+	};
+
+	let content: RoomMemberEventContent = member.get_content()?;
+
+	if !matches!(content.membership, MembershipState::Leave | MembershipState::Ban) {
+		return Ok(None);
+	}
+
+	self.services
+		.timeline
+		.get_pdu_count(member.event_id())
+		.await
+		.optional()
 }
 
 /// Reports whether a user may discover or inspect a room.

@@ -1,27 +1,20 @@
 use axum::extract::State;
-use futures::{
-	FutureExt, TryFutureExt, TryStreamExt,
-	future::{ok, try_join, try_join4},
-};
+use futures::{FutureExt, TryFutureExt, TryStreamExt, future::try_join4};
 use ruma::{
-	RoomId,
 	api::client::room::initial_sync::v3::{PaginationChunk, Request, Response},
 	events::{
-		AnyRawAccountDataEvent,
-		StateEventType::RoomMember,
-		room::member::{MembershipState, RoomMemberEventContent},
+		AnyRawAccountDataEvent, StateEventType::RoomMember, room::member::RoomMemberEventContent,
 	},
 };
 use tuwunel_core::{
 	Result, at, err, extract_variant,
 	utils::{
-		BoolExt, TryReadyExt,
+		BoolExt, OptionExt, TryReadyExt,
 		result::NotFound,
 		stream::{TryTools, TryWidebandExt},
 	},
 };
-use tuwunel_matrix::{Event, Pdu, PduCount};
-use tuwunel_service::rooms::short::ShortStateHash;
+use tuwunel_matrix::{Event, PduCount};
 
 use crate::{Ruma, visibility_filter};
 
@@ -35,20 +28,11 @@ pub(crate) async fn room_initial_sync_route(
 	let room_id = &body.room_id;
 	let sender_user = body.sender_user();
 
-	// `user_membership` uses `Ban` when a once-joined user's left row was forgotten.
-	let cached_membership = services
-		.state_cache
-		.user_membership(sender_user, room_id)
-		.await;
-
-	matches!(cached_membership.as_ref(), Some(MembershipState::Ban))
-		.is_false()
-		.ok_or_else(|| err!(Request(Forbidden("No room preview available."))))?;
-
 	services
 		.state_accessor
 		.user_can_see_state_events(sender_user, room_id)
 		.await
+		.into_option()
 		.ok_or_else(|| err!(Request(Forbidden("No room preview available."))))?;
 
 	let current_shortstatehash = services
@@ -56,38 +40,32 @@ pub(crate) async fn room_initial_sync_route(
 		.get_room_shortstatehash(room_id)
 		.await?;
 
-	let member = services
+	let membership = services
 		.state_accessor
 		.state_get(current_shortstatehash, &RoomMember, sender_user.as_str())
 		.await
-		.optional()?;
-
-	let membership = member
+		.optional()?
 		.as_ref()
 		.map(Event::get_content)
 		.transpose()?
 		.map(|content: RoomMemberEventContent| content.membership);
 
-	let next_batch = services.globals.current_count();
-	let departure = membership
-		.as_ref()
-		.filter(|membership| matches!(membership, MembershipState::Leave | MembershipState::Ban))
-		.zip(member.as_ref())
-		.map(|(membership, pdu)| {
-			departure_snapshot(
-				&services,
-				room_id,
-				pdu,
-				membership.to_owned(),
-				current_shortstatehash,
-			)
-			.left_future()
-		});
-
-	let current_snapshot = ok((PduCount::Normal(next_batch), current_shortstatehash, membership));
-	let (timeline_end, shortstatehash, membership) = departure
-		.unwrap_or_else(|| current_snapshot.right_future())
+	let departure = services
+		.state_accessor
+		.departure_count(sender_user, room_id)
 		.await?;
+
+	let next_batch = services.globals.current_count();
+	let timeline_end = departure.unwrap_or(PduCount::Normal(next_batch));
+	let shortstatehash = departure
+		.map_async(|count| {
+			services
+				.timeline
+				.shortstatehash_after(room_id, count)
+		})
+		.await
+		.transpose()?
+		.unwrap_or(current_shortstatehash);
 
 	let visibility = services.directory.visibility(room_id).map(Ok);
 	let limit = body.limit.unwrap_or(LIMIT_MAX).min(LIMIT_MAX);
@@ -152,31 +130,4 @@ pub(crate) async fn room_initial_sync_route(
 		}
 		.into(),
 	})
-}
-
-async fn departure_snapshot(
-	services: &crate::State,
-	room_id: &RoomId,
-	pdu: &Pdu,
-	membership: MembershipState,
-	current_shortstatehash: ShortStateHash,
-) -> Result<(PduCount, ShortStateHash, Option<MembershipState>)> {
-	let timeline_end = services.timeline.get_pdu_count(pdu.event_id());
-	let latest_count = services
-		.timeline
-		.last_timeline_count(None, room_id, None);
-
-	let (timeline_end, latest_count) = try_join(timeline_end, latest_count).await?;
-
-	let shortstatehash = (latest_count == timeline_end)
-		.then(|| ok(current_shortstatehash).left_future())
-		.unwrap_or_else(|| {
-			services
-				.timeline
-				.next_shortstatehash(room_id, timeline_end)
-				.right_future()
-		})
-		.await?;
-
-	Ok((timeline_end, shortstatehash, Some(membership)))
 }

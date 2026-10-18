@@ -19,7 +19,8 @@ use crate::Ruma;
 ///
 /// Accepts sync `prev_batch`/`next_batch` and `/messages` tokens.
 /// Visibility is decided from the caller's current membership; Synapse
-/// decides it from the state at the token.
+/// decides it from the state at the token. A former member's snapshot never
+/// extends past their departure.
 pub(crate) async fn get_member_events_route(
 	State(services): State<crate::State>,
 	body: Ruma<get_member_events::v3::Request>,
@@ -41,19 +42,10 @@ pub(crate) async fn get_member_events_route(
 		.transpose()
 		.map_err(|_| err!(Request(InvalidParam("Invalid `at` token."))))?;
 
-	let shortstatehash = match at {
-		| None => services
-			.state
-			.get_room_shortstatehash(&body.room_id)
-			.await
-			.map_err(|e| err!(Database("Missing state for {:?}: {e:?}", body.room_id)))?,
-
-		| Some(at) =>
-			services
-				.timeline
-				.shortstatehash_after(&body.room_id, at)
-				.await?,
-	};
+	let shortstatehash = services
+		.state_accessor
+		.user_visible_shortstatehash(body.sender_user(), &body.room_id, at)
+		.await?;
 
 	let membership = body.membership.as_ref();
 	let not_membership = body.not_membership.as_ref();

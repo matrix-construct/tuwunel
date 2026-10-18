@@ -4,15 +4,15 @@ Tuwunel runs the [Complement](https://github.com/matrix-org/complement) Matrix h
 
 ## Counts
 
-- Test groups: 218. Passing: **86.7%**
-  - ✅ `pass`: 189
-  - 🟨 `some`: 12
+- Test groups: 218. Passing: **87.2%**
+  - ✅ `pass`: 190
+  - 🟨 `some`: 11
   - ❌ `fail`: 17
   - ⬛ `skip`: 0
 
-- Subtests: 606. Passing: **81.2%**
-  - ✅ `pass`: 492
-  - ❌ `fail`: 106
+- Subtests: 606. Passing: **81.7%**
+  - ✅ `pass`: 495
+  - ❌ `fail`: 103
   - ⬛ `skip`: 8
 
 ## All Top-Level Tests
@@ -112,7 +112,7 @@ Tuwunel runs the [Complement](https://github.com/matrix-org/complement) Matrix h
 | ✅ | – | `LeakyTyping` |
 | ✅ | – | `LeaveEventInviteRejection` |
 | ✅ | – | `LeaveEventVisibility` |
-| 🟨 | 2/3/0 | `LeftRoomFixture` |
+| ✅ | 5/0/0 | `LeftRoomFixture` |
 | ✅ | 2/0/0 | `LocalPngThumbnail` |
 | ✅ | 8/0/0 | `Login` |
 | ✅ | 4/0/0 | `Logout` |

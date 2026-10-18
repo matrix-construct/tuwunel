@@ -1,5 +1,5 @@
 use axum::extract::State;
-use futures::{FutureExt, TryFutureExt, TryStreamExt};
+use futures::{FutureExt, StreamExt, TryFutureExt};
 use ruma::{
 	CanonicalJsonObject, MilliSecondsSinceUnixEpoch, OwnedEventId, OwnedRoomAliasId, RoomId,
 	UserId,
@@ -24,7 +24,7 @@ use serde_json::{json, value::to_raw_value};
 use tuwunel_core::{
 	Err, Result, err, is_false,
 	result::NotFound,
-	utils::{BoolExt, stream::TryBroadbandExt},
+	utils::{BoolExt, stream::BroadbandExt},
 };
 use tuwunel_matrix::{
 	Event,
@@ -78,8 +78,8 @@ pub(crate) async fn send_state_event_for_empty_key_route(
 ///
 /// Get all state events for a room.
 ///
-/// - If not joined: Only works if current room history visibility is world
-///   readable
+/// A caller who is not joined reads the state as of their departure if they
+/// left the room, and otherwise only while its history visibility admits them.
 pub(crate) async fn get_state_events_route(
 	State(services): State<crate::State>,
 	body: Ruma<get_state_events::v3::Request>,
@@ -99,16 +99,19 @@ pub(crate) async fn get_state_events_route(
 		.is_encrypted_room(&body.room_id)
 		.await;
 
+	let shortstatehash = services
+		.state_accessor
+		.user_visible_shortstatehash(sender_user, &body.room_id, None)
+		.await?;
+
 	let room_state = services
 		.state_accessor
-		.room_state_full_pdus(&body.room_id)
-		.map_ok(Event::into_pdu)
-		.broad_and_then(async |pdu| {
-			Ok(with_membership(&services, pdu, sender_user, encrypted).await)
-		})
-		.map_ok(Event::into_format)
-		.try_collect()
-		.await?;
+		.state_full_pdus(shortstatehash)
+		.map(Event::into_pdu)
+		.broad_then(async |pdu| with_membership(&services, pdu, sender_user, encrypted).await)
+		.map(Event::into_format)
+		.collect()
+		.await;
 
 	Ok(get_state_events::v3::Response { room_state })
 }
@@ -116,11 +119,11 @@ pub(crate) async fn get_state_events_route(
 /// # `GET /_matrix/client/v3/rooms/{roomid}/state/{eventType}/{stateKey}`
 ///
 /// Get single state event of a room with the specified state key.
-/// The optional query parameter `?format=event|content` allows returning the
-/// full room state event or just the state event's content (default behaviour)
 ///
-/// - If not joined: Only works if current room history visibility is world
-///   readable
+/// The optional query parameter `?format=event|content` allows returning the
+/// full room state event or just the state event's content (default behaviour).
+/// A caller who is not joined reads the state as of their departure if they
+/// left the room, and otherwise only while its history visibility admits them.
 pub(crate) async fn get_state_events_for_key_route(
 	State(services): State<crate::State>,
 	body: Ruma<get_state_event_for_key::v3::Request>,
@@ -139,7 +142,12 @@ pub(crate) async fn get_state_events_for_key_route(
 
 	let event = services
 		.state_accessor
-		.room_state_get(&body.room_id, &body.event_type, &body.state_key)
+		.user_visible_shortstatehash(sender_user, &body.room_id, None)
+		.and_then(|shortstatehash| {
+			services
+				.state_accessor
+				.state_get(shortstatehash, &body.event_type, &body.state_key)
+		})
 		.await
 		.map_err(|e| {
 			err!(Request(NotFound(debug_warn!(
@@ -172,11 +180,11 @@ pub(crate) async fn get_state_events_for_key_route(
 /// # `GET /_matrix/client/v3/rooms/{roomid}/state/{eventType}`
 ///
 /// Get single state event of a room.
-/// The optional query parameter `?format=event|content` allows returning the
-/// full room state event or just the state event's content (default behaviour)
 ///
-/// - If not joined: Only works if current room history visibility is world
-///   readable
+/// The optional query parameter `?format=event|content` allows returning the
+/// full room state event or just the state event's content (default behaviour).
+/// A caller who is not joined reads the state as of their departure if they
+/// left the room, and otherwise only while its history visibility admits them.
 pub(crate) async fn get_state_events_for_empty_key_route(
 	State(services): State<crate::State>,
 	body: Ruma<get_state_event_for_key::v3::Request>,

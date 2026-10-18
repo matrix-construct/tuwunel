@@ -9,7 +9,7 @@ use tuwunel_service::{Services, users::Register};
 
 use self::{
 	appservice::{Bridge, register_appservice},
-	client::{Client, accepted, field, register},
+	client::{Client, field, register},
 	fixture::boot,
 };
 
@@ -133,9 +133,7 @@ fn expect_status(status: u16, expected: u16) -> Result {
 }
 
 async fn is_guest(client: &Client<'_>) -> Result<bool> {
-	let url = client.url("account/whoami");
-	let response = client.get_url(&url).await?;
-	let whoami = accepted(response).await?;
+	let whoami = client.get("account/whoami").await?;
 
 	// The field is left out when false.
 	let is_guest = whoami
