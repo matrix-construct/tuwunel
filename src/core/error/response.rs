@@ -127,6 +127,7 @@ pub(super) fn bad_request_code(kind: &ErrorKind) -> StatusCode {
 		| InviteBlocked
 		| CannotLeaveServerNoticeRoom
 		| WrongRoomKeysVersion { .. }
+		| ResourceLimitExceeded { .. }
 		| Forbidden => StatusCode::FORBIDDEN,
 
 		// 401

@@ -380,7 +380,7 @@ in the [Out of scope](#out-of-scope) section.
 | MSC4371 | ❌ ● | 0/0 | On the elimination of federation transactions. | No PUT /_matrix/federation/v2/send/{eventId\|eduId} endpoint |
 | MSC4370 | ❌ ● | 0/0 | Federation endpoint for retrieving current extremities | No /_matrix/federation/v1/extremities endpoint |
 | MSC4369 | ❌ ● | 0/10 | M_CAPABILITY_NOT_ENABLED error code for when capability is not enabled on an ... | Endpoints exist but return M_FORBIDDEN/Unknown not M_CAPABILITY_NOT_ENABLED |
-| MSC4368 | ❌ ● | 0/0 | Combine definitions of M_RESOURCE_LIMIT_EXCEEDED error code and m.server_noti... | M_RESOURCE_LIMIT_EXCEEDED unused; no limit_type field |
+| MSC4368 | ❌ ● | 0/0 | Combine definitions of M_RESOURCE_LIMIT_EXCEEDED error code and m.server_noti... | M_RESOURCE_LIMIT_EXCEEDED on upload refusal: no limit_type, admin_contact empty |
 | MSC4367 | ❌ ● | 0/0 | via routes in the published room directory | PublishedRoomsChunk has no via field |
 | MSC4366 | ❌ ● | 0/0 | Resident servers in and around the room directory | publicRooms not filtered to rooms with joined members |
 | MSC4365 | ❌ ● | 0/0 | Canonical ignore list rooms | No ignored_user_list_rooms server-side filtering |
