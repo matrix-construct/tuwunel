@@ -297,10 +297,10 @@ pub fn filesystem_from_path(_path: &Path) -> Result<Option<Filesystem>> {
 }
 
 /// Get the space in bytes a non-privileged process may still write to the
-/// filesystem on which Path is mounted.
+/// filesystem holding `path`.
 ///
-/// Quotas and reserved blocks make this smaller than the space that is free,
-/// and it is the figure a write is refused against.
+/// Blocks reserved for privileged processes make this smaller than the space
+/// that is free. Per-user quotas are not counted.
 ///
 /// Apple's `statvfs(3)` counts blocks in 32 bits, which ends at 16 TiB of
 /// 4 KiB blocks, so `statfs(2)` and its 64-bit count are read there instead.
@@ -316,13 +316,12 @@ pub fn available_space(path: &Path) -> Result<u64> {
 }
 
 /// Get the space in bytes a non-privileged process may still write to the
-/// filesystem on which Path is mounted.
+/// filesystem holding `path`.
 ///
-/// Quotas and reserved blocks make this smaller than the space that is free,
-/// and it is the figure a write is refused against.
+/// Blocks reserved for privileged processes make this smaller than the space
+/// that is free. Per-user quotas are not counted.
 ///
-/// `statvfs(3)` counts blocks in units of the fragment size. Both are widened
-/// before they are multiplied, as neither has the same width on every target.
+/// `statvfs(3)` counts blocks in units of the fragment size.
 #[cfg(all(unix, not(target_vendor = "apple")))]
 pub fn available_space(path: &Path) -> Result<u64> {
 	use nix::sys::statvfs::statvfs;
@@ -334,11 +333,11 @@ pub fn available_space(path: &Path) -> Result<u64> {
 	Ok(u64::try_from(available).unwrap_or(u64::MAX))
 }
 
-/// Get the space in bytes the calling user may still write to the volume on
-/// which Path resides.
+/// Get the space in bytes the calling user may still write to the volume
+/// holding `path`.
 ///
 /// Per-user quotas make this smaller than the space that is free, and it is
-/// the figure a write is refused against. Path may be any directory on the
+/// the figure a write is refused against. `path` may be any directory on the
 /// volume.
 #[cfg(windows)]
 pub fn available_space(path: &Path) -> Result<u64> {
@@ -380,7 +379,7 @@ pub fn available_space(path: &Path) -> Result<u64> {
 }
 
 /// Get the space in bytes a non-privileged process may still write to the
-/// filesystem on which Path is mounted.
+/// filesystem holding `path`.
 ///
 /// No interface for this is known for the target, so this always returns an
 /// unsupported error.
