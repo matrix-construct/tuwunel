@@ -121,6 +121,9 @@ workspace = true
 [target.'cfg(unix)'.dependencies]
 nix.workspace = true
 
+[target.'cfg(windows)'.dependencies]
+windows-sys.workspace = true
+
 [target.'cfg(target_os = "openbsd")'.dependencies]
 num_cpus.workspace = true
 

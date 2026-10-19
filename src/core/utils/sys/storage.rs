@@ -344,29 +344,27 @@ pub fn available_space(path: &Path) -> Result<u64> {
 pub fn available_space(path: &Path) -> Result<u64> {
 	use std::{
 		io::{Error, ErrorKind::InvalidInput},
+		iter::once,
 		os::windows::ffi::OsStrExt,
 		ptr::null_mut,
 	};
 
-	// <https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-getdiskfreespaceexw>
-	#[link(name = "kernel32")]
-	unsafe extern "system" {
-		fn GetDiskFreeSpaceExW(
-			directory_name: *const u16,
-			free_bytes_available_to_caller: *mut u64,
-			total_number_of_bytes: *mut u64,
-			total_number_of_free_bytes: *mut u64,
-		) -> i32;
-	}
+	use windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
 
-	let mut directory_name: Vec<u16> = path.as_os_str().encode_wide().collect();
-	if directory_name.contains(&0) {
+	let directory_name: Vec<u16> = path
+		.as_os_str()
+		.encode_wide()
+		.chain(once(0))
+		.collect();
+
+	if directory_name
+		.split_last()
+		.is_some_and(|(_, units)| units.contains(&0))
+	{
 		return Err(Error::new(InvalidInput, "Path contains a NUL.").into());
 	}
 
-	directory_name.push(0);
-
-	let mut available = 0_u64;
+	let mut available = 0_u64; // GetDiskFreeSpaceExW out-param
 
 	// SAFETY: directory_name is NUL-terminated and outlives the call, available
 	// is a writable u64, and the two values not asked for may be null.

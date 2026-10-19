@@ -646,6 +646,11 @@ features = ["serde"]
 version = "2.0"
 default-features = false
 
+[workspace.dependencies.windows-sys]
+version = "0.61"
+default-features = false
+features = ["Win32_Storage_FileSystem"]
+
 #
 # Patches
 #
