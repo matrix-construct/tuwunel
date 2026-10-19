@@ -678,19 +678,23 @@ pub struct Config {
 	#[serde(default = "default_media_rc_create_burst_count")]
 	pub media_rc_create_burst_count: u32,
 
-	/// Free space below which media uploads are refused, measured on the
-	/// filesystem of each local storage provider an upload would be written
-	/// to. Accepts an integer byte count or a string with SI/IEC suffix such
-	/// as "10 GiB". Zero disables the check.
+	/// Writable space below which media uploads are refused, on the filesystem
+	/// of each local storage provider an upload would be written to.
 	///
-	/// A refused upload is answered with M_RESOURCE_LIMIT_EXCEEDED before
-	/// anything is written, and uploads resume as soon as the space is back.
-	/// Nothing else is refused: media fetched from other servers, URL previews
-	/// and thumbnails are not subject to this.
+	/// Blocks a filesystem reserves for privileged processes are not counted.
+	/// Media is stored beside the database by default, and the database cannot
+	/// be written once the disk fills, so uploads stop first with
+	/// M_RESOURCE_LIMIT_EXCEEDED and resume once space returns. Remote media,
+	/// URL previews and thumbnails are never refused. Accepts an integer byte
+	/// count or a string with SI/IEC suffix such as "10 GiB"; 0 disables the
+	/// check, which a network mount reporting no free space needs.
 	///
 	/// reloadable: yes
-	/// default: 0
-	#[serde(default, deserialize_with = "deserialize_bytesize_u64")]
+	/// default: 1 GiB
+	#[serde(
+		default = "default_media_upload_min_free_space",
+		deserialize_with = "deserialize_bytesize_u64"
+	)]
 	pub media_upload_min_free_space: u64,
 
 	/// reloadable: yes
@@ -5938,6 +5942,8 @@ fn default_media_create_unused_expiration_time() -> u64 { 86400 }
 fn default_media_rc_create_per_second() -> u32 { 10 }
 
 fn default_media_rc_create_burst_count() -> u32 { 50 }
+
+fn default_media_upload_min_free_space() -> u64 { 1024 * 1024 * 1024 }
 
 fn default_media_thumbnail_max_pixels() -> u64 { 50_000_000 }
 

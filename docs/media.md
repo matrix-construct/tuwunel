@@ -19,30 +19,33 @@ all of these features, as well as the storage backends that back them.
 | `media_create_unused_expiration_time` | `86400` | Seconds before an unused pending MXC URI is expired and removed (default: 24 hours). |
 | `media_rc_create_per_second` | `10` | Maximum media-create requests per second from a single user before rate limiting applies. |
 | `media_rc_create_burst_count` | `50` | Maximum burst size for media-create rate limiting per user. |
-| `media_upload_min_free_space` | `0` | Free space below which uploads are refused. Accepts SI/IEC units, e.g. `"10 GiB"`. Zero disables the check. |
+| `media_upload_min_free_space` | `1 GiB` | Writable space below which uploads are refused. Accepts SI/IEC units, e.g. `"10 GiB"`. `0` disables the check. |
 
 ### Refusing uploads when storage is short of space
 
-Media is what fills a disk, and a server that shares its disk with anything
-else is better off refusing an upload than running out of space. With
-`media_upload_min_free_space` set, an upload is refused while the filesystem
-of any [local storage provider](media/storage.md) it would be written to has
-less space available than the option names. The space counted is what the
-server's own user may still write, which quotas and reserved blocks make
-smaller than what is free. The size of the upload itself is not counted: an
-upload is taken whenever the space available is at least the option's value,
-so set it well above `max_request_size`.
+Media is what fills a disk, and by default it is stored beside the database,
+which cannot be written once the disk is full. So an upload is refused while
+the filesystem of any [local storage provider](media/storage.md) it would be
+written to has less space available than `media_upload_min_free_space`. The
+space counted is what an unprivileged process may still write, which leaves
+out the blocks a filesystem reserves for privileged ones; on Unix, per-user
+quotas are not counted. The size of the upload itself is not counted either:
+an upload is taken whenever the space available is at least the option's
+value, so keep it well above `max_request_size`.
 
 A refused upload is answered `403` with `M_RESOURCE_LIMIT_EXCEEDED` before
-anything is written. The `admin_contact` the specification requires that error
-to carry is empty; clients find the server's contacts through
+anything is written, and the server logs a warning naming the storage path
+and the space left on it. The `admin_contact` the specification requires that
+error to carry is empty; clients find the server's contacts through
 [support discovery](https://spec.matrix.org/latest/client-server-api/#getwell-knownmatrixsupport).
 
 Nothing else is refused. Messages are sent and read as before, existing media
 is served, and media fetched from other servers, URL previews and thumbnails
 are still stored. Uploads resume as soon as the space is back, with nothing
 restarted. A storage provider that is not a directory is never the reason for
-a refusal, and neither is a filesystem whose available space cannot be read.
+a refusal, and neither is a filesystem whose available space cannot be read,
+though the server logs a warning when it cannot read one. Set the option to `0` to turn the check off, for instance on a network mount
+that reports no free space.
 
 ## Legacy media endpoints
 

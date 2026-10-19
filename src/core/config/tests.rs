@@ -133,14 +133,15 @@ fn default_config() -> Config {
 }
 
 #[test]
-fn media_upload_min_free_space_is_off_by_default_and_takes_either_form() {
+fn media_upload_min_free_space_defaults_to_one_gib_and_takes_either_form() {
 	let default = default_config();
 	let integer = config_from_toml("[global]\nmedia_upload_min_free_space = 10737418240\n")
 		.expect("an integer byte count should parse");
+
 	let suffixed = config_from_toml("[global]\nmedia_upload_min_free_space = \"10 GiB\"\n")
 		.expect("a size with a suffix should parse");
 
-	assert_eq!(default.media_upload_min_free_space, 0);
+	assert_eq!(default.media_upload_min_free_space, 1_073_741_824);
 	assert_eq!(integer.media_upload_min_free_space, 10_737_418_240);
 	assert_eq!(suffixed.media_upload_min_free_space, 10_737_418_240);
 }
