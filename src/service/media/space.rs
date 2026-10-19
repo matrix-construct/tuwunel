@@ -3,11 +3,8 @@ use std::{path::Path, sync::Arc};
 use http::StatusCode;
 use ruma::api::error::{ErrorKind, ResourceLimitExceededErrorData};
 use tuwunel_core::{
-	Error, Result,
-	config::StorageProvider,
-	defer, extract_variant, implement,
-	smallvec::SmallVec,
-	utils::{result::LogDebugErr, sys::storage::available_space},
+	Error, Result, config::StorageProvider, defer, extract_variant, implement,
+	smallvec::SmallVec, utils::sys::storage::available_space, warn,
 };
 
 use crate::storage::Provider;
@@ -65,7 +62,9 @@ pub async fn check_upload_space(&self) -> Result {
 
 /// Whether any local provider's filesystem is short of space.
 ///
-/// A filesystem that cannot be read is passed over.
+/// The first one found is logged with the space it has left. A filesystem that
+/// cannot be read is passed over with a warning, so a check that never runs is
+/// visible.
 fn any_short_of_space<'a, I>(providers: I, min_free_space: u64) -> bool
 where
 	I: IntoIterator<Item = &'a Arc<Provider>>,
@@ -73,12 +72,23 @@ where
 	providers
 		.into_iter()
 		.filter_map(|provider| extract_variant!(&provider.config, StorageProvider::local))
-		.filter_map(|local| {
-			available_space(Path::new(&local.base_path))
-				.log_debug_err()
+		.any(|local| {
+			let path = &local.base_path;
+
+			available_space(Path::new(path))
+				.inspect_err(|error| {
+					warn!(%path, %error, "Cannot read the space left for uploads.");
+				})
 				.ok()
+				.filter(|&available| is_short_of_space(available, min_free_space))
+				.inspect(|available| {
+					warn!(
+						%path, available, min_free_space,
+						"Refusing uploads while storage is short of space."
+					);
+				})
+				.is_some()
 		})
-		.any(|available| is_short_of_space(available, min_free_space))
 }
 
 /// Whether this much available space refuses an upload.
