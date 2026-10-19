@@ -2,6 +2,7 @@ mod data;
 pub(super) mod migrations;
 mod preview;
 mod remote;
+mod space;
 mod tests;
 mod thumbnail;
 #[cfg(feature = "media_thumbnail")]
@@ -20,21 +21,18 @@ use http::StatusCode;
 use object_store::ObjectMeta;
 use ruma::{
 	Mxc, OwnedMxcUri, OwnedUserId, UserId,
-	api::error::{ErrorKind, ResourceLimitExceededErrorData, RetryAfter},
+	api::error::{ErrorKind, RetryAfter},
 	http_headers::ContentDisposition,
 };
 #[cfg(feature = "media_thumbnail")]
 use tokio::sync::Semaphore;
 use tokio::{fs, sync::Notify};
 use tuwunel_core::{
-	Err, Error, Result,
-	config::StorageProvider,
-	debug, debug_error, debug_info, debug_warn, defer, err, extract_variant, trace,
+	Err, Error, Result, debug, debug_error, debug_info, debug_warn, err, trace,
 	utils::{
 		self, BoolExt, MutexMap,
 		result::LogDebugErr,
 		stream::{BroadbandExt, IterStream, ReadyExt, TryReadyExt},
-		sys::storage::available_space,
 		time::now_millis,
 	},
 	warn,
@@ -957,59 +955,6 @@ impl Service {
 			.await
 	}
 
-	/// Refuses an upload while storage it would be written to is short of
-	/// space.
-	///
-	/// Each local storage provider an upload is written to is asked for the
-	/// space available on its filesystem, and the upload is refused while any
-	/// of them has less than `media_upload_min_free_space`. A provider that is
-	/// not a directory has no such figure, and one that cannot be read refuses
-	/// nothing.
-	#[tracing::instrument(level = "debug", skip(self))]
-	pub async fn check_upload_space(&self) -> Result {
-		let config = &self.services.config;
-		let min_free_space = config.media_upload_min_free_space;
-		if min_free_space == 0 {
-			return Ok(());
-		}
-
-		let base_paths: Vec<PathBuf> = self
-			.upload_providers()
-			.filter_map(|provider| extract_variant!(&provider.config, StorageProvider::local))
-			.map(|local| PathBuf::from(&local.base_path))
-			.collect();
-
-		let task = self
-			.services
-			.server
-			.runtime()
-			.spawn_blocking(move || {
-				base_paths
-					.iter()
-					.filter_map(|path| available_space(path).log_debug_err().ok())
-					.any(|available| is_short_of_space(available, min_free_space))
-			});
-
-		// on cancellation, drop a read still queued for the blocking pool
-		let abort = task.abort_handle();
-
-		defer! {{ abort.abort(); }}
-
-		let short_of_space = task.await?;
-
-		if !short_of_space {
-			return Ok(());
-		}
-
-		Err(Error::Request(
-			// the specification requires the field; clients find a contact
-			// through support discovery
-			ErrorKind::ResourceLimitExceeded(ResourceLimitExceededErrorData::new(String::new())),
-			"The server is short of storage space and is not accepting uploads.".into(),
-			StatusCode::FORBIDDEN,
-		))
-	}
-
 	async fn create_media_file(&self, key: &[u8], file: &[u8]) -> Result {
 		self.upload_providers()
 			.try_stream()
@@ -1042,6 +987,8 @@ impl Service {
 	}
 
 	/// Storage providers a new media file is written to.
+	///
+	/// An empty `store_media_on_providers` selects every media provider.
 	fn upload_providers(&self) -> impl Iterator<Item = &Arc<Provider>> + Send + '_ {
 		let store_media_on_providers = &self.services.config.store_media_on_providers;
 
@@ -1114,14 +1061,6 @@ impl Service {
 #[inline]
 #[must_use]
 pub fn encode_key(key: &[u8]) -> String { general_purpose::URL_SAFE_NO_PAD.encode(key) }
-
-/// Whether the space available is less than an upload has to leave.
-///
-/// An upload is refused strictly below the minimum and taken at it, so the one
-/// that follows space coming back is judged like any other.
-#[inline]
-#[must_use]
-fn is_short_of_space(available: u64, min_free_space: u64) -> bool { available < min_free_space }
 
 fn mtime_millis(object: &ObjectMeta) -> u64 {
 	u64::try_from(object.last_modified.timestamp_millis()).unwrap_or(0)

@@ -2,7 +2,7 @@
 
 use ruma::media::Method;
 
-use super::Dim;
+use super::{Dim, space::is_short_of_space};
 
 fn scale(width: u32, height: u32) -> Dim { Dim::new(width, height, Some(Method::Scale)) }
 fn crop(width: u32, height: u32) -> Dim { Dim::new(width, height, Some(Method::Crop)) }
@@ -846,12 +846,8 @@ async fn long_file_names_works() {
 	);
 }
 
-/// An upload is refused strictly below the minimum and taken at it, and a
-/// minimum of zero refuses nothing however little space is left.
 #[test]
 fn short_of_space_is_strictly_below_the_minimum() {
-	use super::is_short_of_space;
-
 	assert!(is_short_of_space(9, 10));
 	assert!(!is_short_of_space(10, 10));
 	assert!(!is_short_of_space(11, 10));
