@@ -228,6 +228,7 @@ OIDC server was not already running takes effect on the next restart.
 |---|---|---|
 | `oidc_registration_access_token` | (unset) | When set, the registration endpoint requires callers to present this value as an `Authorization: Bearer` credential. Matrix clients have no way to supply one, so any value here blocks next-gen auth for every ordinary client. Leave it unset unless the only callers are ones you register yourself. |
 | `oidc_registration_allowed_redirect_hosts` | `[]` | When non-empty, every `redirect_uri` presented at registration must match this list, otherwise the registration is rejected. A `redirect_uri` with a host matches an entry naming that host; a private-use scheme carries no host (RFC 8252, as in `io.element.android:/`) and matches an entry naming the scheme. Matching ignores case. Empty imposes no restriction at registration, and vouches for no client. |
+| `oidc_registration_require_client_uri` | `false` | Refuse a registration that carries no `client_uri`, so every client is held to the host rules in [Accepted redirect URIs](#accepted-redirect-uris). When false, a client may omit it, and one that supplies it is still held to those rules. |
 | `oidc_require_client_approval` | `true` | Show the user an approve/deny page naming the client before an authorization code is issued to a client the operator has not vetted. A client is vetted when its redirect host or private-use scheme appears in `oidc_registration_allowed_redirect_hosts`. |
 
 ### Rate limiting
@@ -260,6 +261,40 @@ private-use scheme, so a deployment serving Element X on both platforms reads:
 ```toml
 oidc_registration_allowed_redirect_hosts = ["element.io", "io.element.android"]
 ```
+
+### Accepted redirect URIs
+
+Registration applies the redirect URI rules of the Matrix specification
+(MSC2966, after RFC 8252 §7), which tie each `redirect_uri` to the host of the
+client's `client_uri`. The binding keeps the website a client names consistent
+with where it receives the sign-in. A request that breaks a rule is refused
+with HTTP 400 and an `invalid_redirect_uri` or `invalid_client_metadata` error
+whose description names the rule.
+
+No `redirect_uri` may carry a fragment. Beyond that, what a client may register
+depends on its `application_type`:
+
+| `application_type` | Redirect URI | Rule |
+|---|---|---|
+| `web` (or absent) | `https` | No userinfo; the host is the `client_uri` host or a subdomain of it. |
+| `native` | Claimed `https` (a universal or app link) | The same rule as `web`. |
+| `native` | `http` on the loopback interface | The host is `localhost`, an IPv4 loopback address such as `127.0.0.1`, or `[::1]`. No port is registered, and any port is accepted at sign-in. |
+| `native` | Private-use scheme | No authority (`com.example.app:/callback`, not `com.example.app://callback`), and the scheme begins with the `client_uri` host in reverse-DNS order (`com.example` or `com.example.app` for `https://example.com`). |
+
+`client_uri` is optional unless `oidc_registration_require_client_uri` is set.
+When present it must be an `https` URL with a host and no userinfo, and
+`logo_uri`, `tos_uri` and `policy_uri` must sit on its host or a subdomain, as
+redirects do. A client that sends no `client_uri` has no host to share, so its
+`https` redirects may name any host and any private-use scheme containing a dot
+is accepted; the approval page then shows the redirect target as the client's
+website.
+
+A web client served from your own domain registers that domain as its
+`client_uri`. One that keeps its vendor's homepage there while redirecting to
+your domain is refused with `redirect_uri host must share the client_uri host`,
+whichever `application_type` it sends. Configure the client with its own
+origin: for FluffyChat Web, set `website`, `logoUrl`, `tos` and `privacyPolicy`
+in its `config.json` to URLs on the domain serving it.
 
 ### Approving an unvetted client
 
