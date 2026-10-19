@@ -12,6 +12,9 @@ pub mod storage;
 
 pub mod usage;
 
+#[cfg(all(test, any(unix, windows)))]
+mod tests;
+
 #[cfg(unix)]
 use std::os::fd::AsFd;
 use std::path::PathBuf;
