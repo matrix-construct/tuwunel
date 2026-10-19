@@ -309,10 +309,11 @@ pub fn available_space(path: &Path) -> Result<u64> {
 	use nix::sys::statfs::statfs;
 
 	let stat = statfs(path)?;
-
-	Ok(stat
+	let available = stat
 		.blocks_available()
-		.saturating_mul(stat.block_size().into()))
+		.saturating_mul(stat.block_size().into());
+
+	Ok(available)
 }
 
 /// Get the space in bytes a non-privileged process may still write to the
@@ -326,11 +327,13 @@ pub fn available_space(path: &Path) -> Result<u64> {
 pub fn available_space(path: &Path) -> Result<u64> {
 	use nix::sys::statvfs::statvfs;
 
-	let stat = statvfs(path)?;
-	let available =
-		u128::from(stat.blocks_available()).saturating_mul(u128::from(stat.fragment_size()));
+	use crate::utils::math::u64_from_u128_saturating;
 
-	Ok(u64::try_from(available).unwrap_or(u64::MAX))
+	let stat = statvfs(path)?;
+	let blocks = u128::from(stat.blocks_available());
+	let available = u64_from_u128_saturating(blocks.saturating_mul(stat.fragment_size().into()));
+
+	Ok(available)
 }
 
 /// Get the space in bytes the calling user may still write to the volume
