@@ -29,7 +29,7 @@ use tokio::{fs, sync::Notify};
 use tuwunel_core::{
 	Err, Error, Result,
 	config::StorageProvider,
-	debug, debug_error, debug_info, debug_warn, err, extract_variant, trace,
+	debug, debug_error, debug_info, debug_warn, defer, err, extract_variant, trace,
 	utils::{
 		self, BoolExt, MutexMap,
 		result::LogDebugErr,
@@ -979,7 +979,7 @@ impl Service {
 			.map(|local| PathBuf::from(&local.base_path))
 			.collect();
 
-		let short_of_space = self
+		let task = self
 			.services
 			.server
 			.runtime()
@@ -988,8 +988,14 @@ impl Service {
 					.iter()
 					.filter_map(|path| available_space(path).log_debug_err().ok())
 					.any(|available| is_short_of_space(available, min_free_space))
-			})
-			.await?;
+			});
+
+		// on cancellation, drop a read still queued for the blocking pool
+		let abort = task.abort_handle();
+
+		defer! {{ abort.abort(); }}
+
+		let short_of_space = task.await?;
 
 		if !short_of_space {
 			return Ok(());
