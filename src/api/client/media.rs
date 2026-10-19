@@ -91,9 +91,6 @@ pub(crate) async fn create_mxc_uri_route(
 	body: Ruma<create_mxc_uri::v1::Request>,
 ) -> Result<create_mxc_uri::v1::Response> {
 	let user = body.sender_user();
-
-	services.media.check_upload_space().await?;
-
 	let mxc = Mxc {
 		server_name: services.globals.server_name(),
 		media_id: &utils::random_string(MXC_LENGTH),

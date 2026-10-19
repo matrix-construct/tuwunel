@@ -172,6 +172,11 @@ impl crate::Service for Service {
 
 impl Service {
 	/// Create a pending media upload ID.
+	///
+	/// The ID is refused past the user's create rate or pending-upload cap, or
+	/// while storage is short of space, and expires unused at
+	/// `unused_expires_at`. The space check runs after the create rate is
+	/// charged, so a client retrying a refusal is still rate limited.
 	#[tracing::instrument(level = "debug", skip(self))]
 	pub async fn create_pending(
 		&self,
@@ -210,6 +215,8 @@ impl Service {
 				));
 			}
 		}
+
+		self.check_upload_space().await?;
 
 		let max_uploads = config.max_pending_media_uploads;
 		let (current_uploads, earliest_expiration) =
