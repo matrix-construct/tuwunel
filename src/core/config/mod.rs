@@ -64,7 +64,12 @@ use crate::{
 	Err, Result, err, implement,
 	matrix::MAX_PREV_EVENTS,
 	redacted_debug,
-	utils::{self, bytes::deserialize_bytesize_usize, hash::Cost, sys},
+	utils::{
+		self,
+		bytes::{deserialize_bytesize_u64, deserialize_bytesize_usize},
+		hash::Cost,
+		sys,
+	},
 };
 
 // Later prefixes override earlier ones.
@@ -672,6 +677,21 @@ pub struct Config {
 	/// default: 50
 	#[serde(default = "default_media_rc_create_burst_count")]
 	pub media_rc_create_burst_count: u32,
+
+	/// Free space below which media uploads are refused, measured on the
+	/// filesystem of each local storage provider an upload would be written
+	/// to. Accepts an integer byte count or a string with SI/IEC suffix such
+	/// as "10 GiB". Zero disables the check.
+	///
+	/// A refused upload is answered with M_RESOURCE_LIMIT_EXCEEDED before
+	/// anything is written, and uploads resume as soon as the space is back.
+	/// Nothing else is refused: media fetched from other servers, URL previews
+	/// and thumbnails are not subject to this.
+	///
+	/// reloadable: yes
+	/// default: 0
+	#[serde(default, deserialize_with = "deserialize_bytesize_u64")]
+	pub media_upload_min_free_space: u64,
 
 	/// reloadable: yes
 	/// default: 1024

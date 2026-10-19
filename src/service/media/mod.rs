@@ -20,18 +20,21 @@ use http::StatusCode;
 use object_store::ObjectMeta;
 use ruma::{
 	Mxc, OwnedMxcUri, OwnedUserId, UserId,
-	api::error::{ErrorKind, RetryAfter},
+	api::error::{ErrorKind, ResourceLimitExceededErrorData, RetryAfter},
 	http_headers::ContentDisposition,
 };
 #[cfg(feature = "media_thumbnail")]
 use tokio::sync::Semaphore;
 use tokio::{fs, sync::Notify};
 use tuwunel_core::{
-	Err, Error, Result, debug, debug_error, debug_info, debug_warn, err, trace,
+	Err, Error, Result,
+	config::StorageProvider,
+	debug, debug_error, debug_info, debug_warn, err, extract_variant, trace,
 	utils::{
 		self, BoolExt, MutexMap,
 		result::LogDebugErr,
 		stream::{BroadbandExt, IterStream, ReadyExt, TryReadyExt},
+		sys::storage::available_space,
 		time::now_millis,
 	},
 	warn,
@@ -954,15 +957,56 @@ impl Service {
 			.await
 	}
 
-	async fn create_media_file(&self, key: &[u8], file: &[u8]) -> Result {
-		self.storage_providers()
-			.try_stream()
-			.ready_try_filter(|provider| {
-				let store_media_on_providers = &self.services.config.store_media_on_providers;
+	/// Refuses an upload while storage it would be written to is short of
+	/// space.
+	///
+	/// Each local storage provider an upload is written to is asked for the
+	/// space available on its filesystem, and the upload is refused while any
+	/// of them has less than `media_upload_min_free_space`. A provider that is
+	/// not a directory has no such figure, and one that cannot be read refuses
+	/// nothing.
+	#[tracing::instrument(level = "debug", skip(self))]
+	pub async fn check_upload_space(&self) -> Result {
+		let config = &self.services.config;
+		let min_free_space = config.media_upload_min_free_space;
+		if min_free_space == 0 {
+			return Ok(());
+		}
 
-				store_media_on_providers.is_empty()
-					|| store_media_on_providers.contains(&provider.name)
+		let base_paths: Vec<PathBuf> = self
+			.upload_providers()
+			.filter_map(|provider| extract_variant!(&provider.config, StorageProvider::local))
+			.map(|local| PathBuf::from(&local.base_path))
+			.collect();
+
+		let short_of_space = self
+			.services
+			.server
+			.runtime()
+			.spawn_blocking(move || {
+				base_paths
+					.iter()
+					.filter_map(|path| available_space(path).log_debug_err().ok())
+					.any(|available| is_short_of_space(available, min_free_space))
 			})
+			.await?;
+
+		if !short_of_space {
+			return Ok(());
+		}
+
+		Err(Error::Request(
+			// the specification requires the field; clients find a contact
+			// through support discovery
+			ErrorKind::ResourceLimitExceeded(ResourceLimitExceededErrorData::new(String::new())),
+			"The server is short of storage space and is not accepting uploads.".into(),
+			StatusCode::FORBIDDEN,
+		))
+	}
+
+	async fn create_media_file(&self, key: &[u8], file: &[u8]) -> Result {
+		self.upload_providers()
+			.try_stream()
 			.and_then(async |provider| {
 				let path = self.get_media_name_sha256(key);
 				debug!(
@@ -989,6 +1033,16 @@ impl Service {
 			.inspect_ok(|&uploads| assert!(uploads > 0, "Successfully saved to nowhere."))
 			.map_ok(|_| ())
 			.await
+	}
+
+	/// Storage providers a new media file is written to.
+	fn upload_providers(&self) -> impl Iterator<Item = &Arc<Provider>> + Send + '_ {
+		let store_media_on_providers = &self.services.config.store_media_on_providers;
+
+		self.storage_providers().filter(move |provider| {
+			store_media_on_providers.is_empty()
+				|| store_media_on_providers.contains(&provider.name)
+		})
 	}
 
 	fn storage_providers(&self) -> impl Iterator<Item = &Arc<Provider>> + Send + '_ {
@@ -1054,6 +1108,14 @@ impl Service {
 #[inline]
 #[must_use]
 pub fn encode_key(key: &[u8]) -> String { general_purpose::URL_SAFE_NO_PAD.encode(key) }
+
+/// Whether the space available is less than an upload has to leave.
+///
+/// An upload is refused strictly below the minimum and taken at it, so the one
+/// that follows space coming back is judged like any other.
+#[inline]
+#[must_use]
+fn is_short_of_space(available: u64, min_free_space: u64) -> bool { available < min_free_space }
 
 fn mtime_millis(object: &ObjectMeta) -> u64 {
 	u64::try_from(object.last_modified.timestamp_millis()).unwrap_or(0)

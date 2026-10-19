@@ -552,3 +552,15 @@ fn budget_skips_items_past_the_limit() {
 
 	assert_eq!(kept, [4, 6]);
 }
+
+#[cfg(any(unix, windows))]
+#[test]
+fn available_space_reads_a_directory_and_fails_on_a_missing_one() {
+	use crate::utils::sys::storage::available_space;
+
+	let here = std::env::current_dir().expect("current directory");
+	let missing = here.join("no-such-directory-for-available-space");
+
+	assert!(available_space(&here).expect("available space of the current directory") > 0);
+	available_space(&missing).unwrap_err();
+}

@@ -487,6 +487,20 @@
 #
 #media_rc_create_burst_count = 50
 
+# Free space below which media uploads are refused, measured on the
+# filesystem of each local storage provider an upload would be written
+# to. Accepts an integer byte count or a string with SI/IEC suffix such
+# as "10 GiB". Zero disables the check.
+#
+# A refused upload is answered with M_RESOURCE_LIMIT_EXCEEDED before
+# anything is written, and uploads resume as soon as the space is back.
+# Nothing else is refused: media fetched from other servers, URL previews
+# and thumbnails are not subject to this.
+#
+# reloadable: yes
+#
+#media_upload_min_free_space = 0
+
 # reloadable: yes
 #
 # This limits how many prior events one recovery traversal visits. Raising
