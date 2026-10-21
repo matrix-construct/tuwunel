@@ -15,6 +15,11 @@ impl OnceServices {
 		self.lock.get_or_init(move || services).clone()
 	}
 
+	/// `get` without the panic, for callers that may run before startup has
+	/// installed the services (a database hook fired by an early write).
+	#[inline]
+	pub(crate) fn try_get(&self) -> Option<&Arc<Services>> { self.lock.get() }
+
 	#[inline]
 	pub(crate) fn get(&self) -> &Arc<Services> {
 		self.lock

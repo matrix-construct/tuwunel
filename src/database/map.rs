@@ -31,7 +31,7 @@ use std::{
 	ffi::CStr,
 	fmt,
 	fmt::{Debug, Display},
-	sync::Arc,
+	sync::{Arc, OnceLock},
 };
 
 use rocksdb::{AsColumnFamilyRef, ColumnFamily, ReadOptions, WriteOptions};
@@ -45,9 +45,15 @@ use self::watch::Watch;
 pub use self::{get_batch::Get, qry_batch::Qry};
 use crate::Engine;
 
+/// Called with the key of every write (insert or remove) to a map, at the same
+/// point the map wakes its watchers and before it does so. See
+/// `Map::set_change_hook`.
+pub type ChangeHook = Box<dyn Fn(&[u8]) + Send + Sync>;
+
 pub struct Map {
 	name: &'static str,
 	watch: Watch,
+	change_hook: OnceLock<ChangeHook>,
 	cf: Arc<ColumnFamily>,
 	engine: Arc<Engine>,
 	read_options: ReadOptions,
@@ -60,6 +66,7 @@ impl Map {
 		Ok(Arc::new(Self {
 			name,
 			watch: Watch::default(),
+			change_hook: OnceLock::new(),
 			cf: open::open(engine, name),
 			engine: engine.clone(),
 			read_options: read_options_default(engine),
@@ -80,6 +87,14 @@ impl Map {
 
 	#[inline]
 	pub fn name(&self) -> &str { self.name }
+
+	/// Install a hook called with the key of every subsequent write to this map
+	/// that also notifies watchers (`insert` / `remove` and everything built on
+	/// them; not `insert_batch`, and not a replica's raw WAL apply). It runs
+	/// synchronously inside the write, before any watcher is woken, so a reader
+	/// woken by a watcher can rely on the hook having seen the write. At most
+	/// one hook per map; returns false if one was already installed.
+	pub fn set_change_hook(&self, hook: ChangeHook) -> bool { self.change_hook.set(hook).is_ok() }
 
 	#[inline]
 	pub(crate) fn engine(&self) -> &Arc<Engine> { &self.engine }

@@ -197,7 +197,20 @@ pub(crate) async fn sync_events_route(
 			since = next_batch;
 		}
 
-		if since < next_batch || full_state {
+		// The global counter moving says only that something, somewhere, was
+		// written. When none of it is this user's (sync::changed_since), the
+		// rebuild would come back empty: skip it and wait on the watchers. On a
+		// busy server that is most polls, and each rebuild walks every room the
+		// user is in. Initial and full-state syncs always build.
+		let nothing_for_us = since > 0
+			&& !full_state
+			&& since < next_batch
+			&& !services
+				.sync
+				.changed_since(sender_user, since)
+				.await;
+
+		if (since < next_batch || full_state) && !nothing_for_us {
 			let response = build_sync_events(
 				&services,
 				sender_user,

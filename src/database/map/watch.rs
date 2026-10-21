@@ -70,6 +70,11 @@ pub(crate) fn notify<K>(&self, key: &K)
 where
 	K: AsRef<[u8]> + Ord + ?Sized,
 {
+	// Before the watchers: whoever they wake may consult what the hook recorded.
+	if let Some(hook) = self.change_hook.get() {
+		hook(key.as_ref());
+	}
+
 	let range = RangeToInclusive::<KeyBuf> { end: key.as_ref().into() };
 
 	let mut watchers = self.watch.watchers.lock().expect("locked");
