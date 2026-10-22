@@ -1335,7 +1335,7 @@ dependencies = [
  "curve25519-dalek",
  "ed25519",
  "serde",
- "sha2",
+ "sha2 0.10.9",
  "subtle",
  "zeroize",
 ]
@@ -3855,6 +3855,15 @@ version = "0.7.6"
 source = "git+https://github.com/matrix-construct/resolv-conf?rev=ab5c3e44016bc76b8798ec837a5a9cf9d88bf233#ab5c3e44016bc76b8798ec837a5a9cf9d88bf233"
 
 [[package]]
+name = "rezzy-recon"
+version = "0.6.0-rc.1"
+source = "git+https://gitlab.com/wombat-foundation/rezzy.git?branch=dev#87996819b463f94784069a96e4d35bddef5ada54"
+dependencies = [
+ "base64 0.23.1",
+ "sha2 0.11.1",
+]
+
+[[package]]
 name = "ring"
 version = "0.17.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4068,7 +4077,7 @@ dependencies = [
  "ruma-common",
  "ruma-events",
  "serde_json",
- "sha2",
+ "sha2 0.10.9",
  "thiserror",
 ]
 
@@ -4602,6 +4611,17 @@ dependencies = [
  "cfg-if",
  "cpufeatures 0.2.17",
  "digest 0.10.7",
+]
+
+[[package]]
+name = "sha2"
+version = "0.11.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "47d7069beb7d6ac7b9acd1039986e73443f24234f41074da099d6f994ac9ad19"
+dependencies = [
+ "cfg-if",
+ "cpufeatures 0.3.1",
+ "digest 0.11.3",
 ]
 
 [[package]]
@@ -5800,6 +5820,7 @@ dependencies = [
  "rand 0.10.3",
  "regex",
  "reqwest",
+ "rezzy-recon",
  "ruma",
  "rustls",
  "rustyline-async",
@@ -5809,7 +5830,7 @@ dependencies = [
  "serde_html_form",
  "serde_json",
  "serde_yaml",
- "sha2",
+ "sha2 0.10.9",
  "subtle",
  "termimad",
  "tokio",

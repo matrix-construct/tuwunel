@@ -108,6 +108,7 @@ lru-cache.workspace = true
 object_store.workspace = true
 rand.workspace = true
 regex.workspace = true
+rezzy-recon.workspace = true
 reqwest.workspace = true
 ruma.workspace = true
 rustls.workspace = true
