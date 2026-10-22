@@ -116,6 +116,7 @@ impl Service {
 			let frame_before = self.forward_extremities_sorted(room_id).await;
 			let mut builder = Builder::default();
 			let mut pdus = self.pdus(None, room_id, None);
+			futures::pin_mut!(pdus);
 			while let Some((_, pdu)) = pdus.try_next().await? {
 				builder
 					.push(pdu.event_id, pdu.depth.get(), pdu.origin_server_ts.get(), format)
