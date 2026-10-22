@@ -119,7 +119,12 @@ impl Service {
 			futures::pin_mut!(pdus);
 			while let Some((_, pdu)) = pdus.try_next().await? {
 				builder
-					.push(pdu.event_id, pdu.depth.get(), pdu.origin_server_ts.get(), format)
+					.push(
+						pdu.event_id,
+						u64::from(pdu.depth),
+						u64::from(pdu.origin_server_ts),
+						format,
+					)
 					.map_err(|e| err!(Database("building reconciliation snapshot: {e:?}")))?;
 			}
 
