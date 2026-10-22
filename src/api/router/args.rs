@@ -166,9 +166,18 @@ fn record_auth_context(span: &tracing::Span, auth: &Auth) {
 
 /// Parses canonical JSON while retaining ordinary JSON for typed deserialization.
 ///
-/// Empty POST and DELETE bodies become objects for UIA. Other methods and media
-/// uploads preserve their existing body handling.
+/// Media namespace bodies are not parsed and pass through unchanged.
+/// Empty POST and DELETE bodies on JSON endpoints become objects for UIA.
 fn parse_json(request: &Request) -> Result<Option<CanonicalJsonValue>> {
+	if request
+		.parts
+		.uri
+		.path()
+		.starts_with("/_matrix/media/")
+	{
+		return Ok(None);
+	}
+
 	let json_body = from_slice(&request.body).ok();
 	let json_endpoint = matches!(
 		request.parts.method,
