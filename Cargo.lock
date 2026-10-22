@@ -5570,6 +5570,7 @@ dependencies = [
  "futures",
  "itertools 0.15.0",
  "rand 0.10.3",
+ "rezzy-recon",
  "ruma",
  "serde",
  "serde_json",

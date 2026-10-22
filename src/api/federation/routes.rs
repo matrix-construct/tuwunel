@@ -15,7 +15,7 @@ pub fn build(server: &Server) -> Router<State> {
 	let router = Router::new();
 	let router = register_server_misc_routes(router);
 
-	register_federation_routes(router, server.config.allow_federation)
+	register_federation_routes(router, server)
 }
 
 fn register_server_misc_routes(router: Router<State>) -> Router<State> {
@@ -25,9 +25,9 @@ fn register_server_misc_routes(router: Router<State>) -> Router<State> {
 		.ruma_route(&federation::get_openid_userinfo_route)
 }
 
-fn register_federation_routes(router: Router<State>, allow_federation: bool) -> Router<State> {
-	if allow_federation {
-		router
+fn register_federation_routes(router: Router<State>, server: &Server) -> Router<State> {
+	if server.config.allow_federation {
+		let router = router
 			.ruma_route(&federation::get_server_version_route)
 			.route("/_matrix/key/v2/server", get(federation::get_server_keys_route))
 			.ruma_route(&federation::get_public_rooms_route)
@@ -54,7 +54,16 @@ fn register_federation_routes(router: Router<State>, allow_federation: bool) -> 
 			.ruma_route(&federation::claim_keys_route)
 			.ruma_route(&federation::get_hierarchy_route)
 			.ruma_route(&federation::get_content_route)
-			.ruma_route(&federation::get_content_thumbnail_route)
+			.ruma_route(&federation::get_content_thumbnail_route);
+
+		if server.config.msc4521_enabled {
+			router
+				.ruma_route(&federation::get_room_reconciliation_digest_route)
+				.ruma_route(&federation::get_room_reconciliation_strata_route)
+				.ruma_route(&federation::post_room_reconciliation_diff_route)
+		} else {
+			router
+		}
 	} else {
 		router
 			.route("/_matrix/federation/{*path}", any(federation_disabled))
