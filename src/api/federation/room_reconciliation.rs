@@ -145,8 +145,12 @@ fn validate_diff(body: &post_room_diff::Request) -> Result<ValidatedDiff> {
 		.iter()
 		.map(|bucket| {
 			let depth = u8::try_from(bucket.depth).map_err(|_| bad_param("requests"))?;
+			let prefix = bucket
+				.prefix
+				.parse()
+				.map_err(|_| bad_param("requests"))?;
 			let capacity = usize::try_from(bucket.capacity).map_err(|_| bad_param("requests"))?;
-			Ok(BucketRequest::new(depth, bucket.prefix, capacity))
+			Ok(BucketRequest::new(depth, prefix, capacity))
 		})
 		.collect::<Result<Vec<_>>>()?;
 	validate_bucket_requests(&buckets).map_err(|_| bad_param("requests"))?;

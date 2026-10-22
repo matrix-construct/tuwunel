@@ -74,7 +74,9 @@ pub(crate) mod post_room_diff {
 	#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 	pub struct SketchBucket {
 		pub depth: u64,
-		pub prefix: u64,
+		/// The wire format uses a decimal string so all 64-bit prefixes survive
+		/// JSON implementations whose number type is only IEEE-754.
+		pub prefix: String,
 		pub capacity: u64,
 	}
 
@@ -97,6 +99,7 @@ pub(crate) mod post_room_diff {
 		pub local_known_event_count: u64,
 		pub frame_id: String,
 		pub frame_event_ids: Vec<OwnedEventId>,
+		#[serde(default)]
 		pub frame_negotiation: bool,
 		pub scope: Option<String>,
 		pub state_at: Option<OwnedEventId>,
