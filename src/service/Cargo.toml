@@ -18,7 +18,9 @@ crate-type = [
 ]
 
 [features]
+default = ["client", "server"]
 client = []
+server = []
 brotli_compression = [
 	"reqwest/brotli",
 	"tuwunel-core/brotli_compression",

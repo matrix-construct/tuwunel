@@ -3,7 +3,7 @@
 use std::{
 	collections::{HashMap, HashSet},
 	sync::{
-		Arc,
+		Arc, Mutex, PoisonError,
 		atomic::{AtomicUsize, Ordering},
 	},
 	time::{Duration, Instant},
@@ -32,8 +32,8 @@ use crate::{
 
 pub mod api {
 	use ruma::{
-		OwnedEventId, OwnedRoomId,
-		api::{auth_scheme::ServerSignatures, metadata, request, response},
+		OwnedEventId, OwnedRoomId, ServerSignatures,
+		api::{metadata, request, response},
 	};
 
 	pub mod digest {
@@ -138,14 +138,20 @@ const MIN_EXCHANGE_SPACING: Duration = Duration::from_millis(250);
 const SAMPLE_FETCHES: usize = 16;
 const MAX_SAMPLE_FAILURE_PERCENT: usize = 25;
 
+fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+	mutex
+		.lock()
+		.unwrap_or_else(PoisonError::into_inner)
+}
+
 pub struct Reconcile {
 	server: Arc<Server>,
 	services: Arc<OnceServices>,
-	last_done: parking_lot::Mutex<HashMap<(OwnedRoomId, ruma::OwnedServerName), Instant>>,
-	unusable: parking_lot::Mutex<HashMap<(ruma::OwnedServerName, OwnedEventId), Instant>>,
+	last_done: Mutex<HashMap<(OwnedRoomId, OwnedServerName), Instant>>,
+	unusable: Mutex<HashMap<(OwnedServerName, OwnedEventId), Instant>>,
 	room_cursor: AtomicUsize,
 	wake: Notify,
-	pending_rooms: parking_lot::Mutex<HashSet<OwnedRoomId>>,
+	pending_rooms: Mutex<HashSet<OwnedRoomId>>,
 }
 
 #[async_trait]
@@ -176,9 +182,7 @@ impl ServiceTrait for Reconcile {
 				continue;
 			}
 			let now = Instant::now();
-			self.last_done
-				.lock()
-				.retain(|_, until| *until > now);
+			lock(&self.last_done).retain(|_, until| *until > now);
 			let ours = self.services.globals.server_name().to_owned();
 			let mut rooms: Vec<OwnedRoomId> = self
 				.services
@@ -195,7 +199,7 @@ impl ServiceTrait for Reconcile {
 				rooms.rotate_left(offset);
 			}
 			let mut selected: Vec<OwnedRoomId> = {
-				let mut pending = self.pending_rooms.lock();
+				let mut pending = lock(&self.pending_rooms);
 				let urgent: Vec<_> = pending
 					.iter()
 					.take(MAX_ROOMS_PER_SWEEP)
@@ -228,9 +232,7 @@ impl ServiceTrait for Reconcile {
 						continue;
 					}
 					let key = (room.clone(), peer.to_owned());
-					if self
-						.last_done
-						.lock()
+					if lock(&self.last_done)
 						.get(&key)
 						.is_some_and(|until| *until > Instant::now())
 					{
@@ -244,7 +246,7 @@ impl ServiceTrait for Reconcile {
 					}
 					last_exchange = Some(Instant::now());
 					if let Ok(supported) = self.exchange(&room, &peer).await {
-						self.last_done.lock().insert(
+						lock(&self.last_done).insert(
 							key,
 							Instant::now()
 								+ if supported {
@@ -265,10 +267,8 @@ impl ServiceTrait for Reconcile {
 impl Reconcile {
 	/// Drops the room's synchronized cooldown and schedules an early sweep.
 	pub fn room_activity(&self, room_id: &RoomId) {
-		self.last_done
-			.lock()
-			.retain(|(room, _), _| room != room_id);
-		let mut pending = self.pending_rooms.lock();
+		lock(&self.last_done).retain(|(room, _), _| room != room_id);
+		let mut pending = lock(&self.pending_rooms);
 		if pending.len() < MAX_PENDING_ROOMS {
 			pending.insert(room_id.to_owned());
 		}
@@ -451,9 +451,7 @@ impl Reconcile {
 		let mut event_ids = Vec::new();
 		for event_id in offered {
 			let key = (peer.to_owned(), event_id.clone());
-			let unusable = self
-				.unusable
-				.lock()
+			let unusable = lock(&self.unusable)
 				.get(&key)
 				.is_some_and(|until| *until > Instant::now());
 			if unusable
@@ -462,6 +460,7 @@ impl Reconcile {
 					.timeline
 					.non_outlier_pdu_exists(&event_id)
 					.await
+					.is_ok()
 			{
 				continue;
 			}
@@ -571,7 +570,7 @@ impl Reconcile {
 
 	fn remember_unusable(&self, key: (ruma::OwnedServerName, OwnedEventId)) {
 		let now = Instant::now();
-		let mut unusable = self.unusable.lock();
+		let mut unusable = lock(&self.unusable);
 		unusable.retain(|_, until| *until > now);
 		if unusable.len() < MAX_REMEMBERED_EVENTS {
 			unusable.insert(key, now + REMEMBER_FOR);
