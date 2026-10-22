@@ -327,13 +327,20 @@ pub fn available_space(path: &Path) -> Result<u64> {
 pub fn available_space(path: &Path) -> Result<u64> {
 	use nix::sys::statvfs::statvfs;
 
+	#[cfg(any(target_os = "freebsd", target_os = "dragonfly"))]
+	use crate::utils::math::u64_from_i64_saturating;
 	use crate::utils::math::u64_from_u128_saturating;
 
 	let stat = statvfs(path)?;
-	let blocks = u128::from(stat.blocks_available());
-	let available = u64_from_u128_saturating(blocks.saturating_mul(stat.fragment_size().into()));
+	let blocks = stat.blocks_available();
 
-	Ok(available)
+	// FreeBSD and DragonFly wrap the count once privileged writers overdraw the reserve
+	#[cfg(any(target_os = "freebsd", target_os = "dragonfly"))]
+	let blocks = u64_from_i64_saturating(blocks.cast_signed());
+
+	let available = u128::from(blocks).saturating_mul(stat.fragment_size().into());
+
+	Ok(u64_from_u128_saturating(available))
 }
 
 /// Get the space in bytes the calling user may still write to the volume

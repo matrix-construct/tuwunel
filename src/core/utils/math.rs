@@ -224,6 +224,15 @@ pub fn u64_from_usize_saturating(val: usize) -> u64 { val.try_into().unwrap_or(u
 #[must_use]
 pub fn u64_from_u128_saturating(val: u128) -> u64 { val.try_into().unwrap_or(u64::MAX) }
 
+/// Converts an `i64` to `u64`, saturating at zero.
+///
+/// Suits a signed count where a negative value means nothing is left, such as
+/// an available-block count that goes negative once a filesystem reserve is
+/// overdrawn.
+#[inline]
+#[must_use]
+pub fn u64_from_i64_saturating(val: i64) -> u64 { val.try_into().unwrap_or(0) }
+
 /// Adds a `usize` count to an atomic `u64` counter, saturating the count at
 /// `u64::MAX`.
 ///

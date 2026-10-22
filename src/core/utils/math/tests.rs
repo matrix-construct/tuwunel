@@ -5,8 +5,8 @@ use std::num::NonZeroUsize;
 use ruma::UInt;
 
 use super::{
-	effective_cap, ruma_from_usize_saturating, u64_from_u128_saturating, usize_from_ruma,
-	usize_from_ruma_bounded,
+	effective_cap, ruma_from_usize_saturating, u64_from_i64_saturating, u64_from_u128_saturating,
+	usize_from_ruma, usize_from_ruma_bounded,
 };
 
 #[test]
@@ -57,6 +57,13 @@ fn u64_from_u128_saturating_clamps_past_the_range() {
 		[0, 1_500, max, max.saturating_add(1), u128::MAX].map(u64_from_u128_saturating);
 
 	assert_eq!(narrowed, [0, 1_500, u64::MAX, u64::MAX, u64::MAX]);
+}
+
+#[test]
+fn u64_from_i64_saturating_clamps_below_zero() {
+	let clamped = [i64::MIN, -1, 0, 1_500, i64::MAX].map(u64_from_i64_saturating);
+
+	assert_eq!(clamped, [0, 0, 0, 1_500, i64::MAX.cast_unsigned()]);
 }
 
 fn nz(value: usize) -> NonZeroUsize { NonZeroUsize::new(value).expect("value must be nonzero") }
