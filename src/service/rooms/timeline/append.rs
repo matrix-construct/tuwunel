@@ -194,6 +194,9 @@ where
 
 	// Insert pdu
 	self.append_pdu_json(&pdu_id, pdu, &pdu_json);
+	if let Some(services) = self.services.try_get() {
+		services.reconcile.room_activity(pdu.room_id());
+	}
 
 	drop(insert_lock);
 
