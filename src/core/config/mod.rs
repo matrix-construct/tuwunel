@@ -625,7 +625,7 @@ pub struct Config {
 	/// Max request size for file uploads. Accepts an integer byte count or a
 	/// string with SI/IEC suffix such as "24 MiB".
 	///
-	/// default: 24 MiB
+	/// default: "24 MiB"
 	#[serde(
 		default = "default_max_request_size",
 		deserialize_with = "deserialize_bytesize_usize"
@@ -640,7 +640,7 @@ pub struct Config {
 	/// memory. Accepts an integer byte count or a string with SI/IEC suffix
 	/// such as "256 MiB".
 	///
-	/// default: 256 MiB
+	/// default: "256 MiB"
 	#[serde(
 		default = "default_max_response_size",
 		deserialize_with = "deserialize_bytesize_usize"
@@ -690,7 +690,7 @@ pub struct Config {
 	/// check, which a network mount reporting no free space needs.
 	///
 	/// reloadable: yes
-	/// default: 1 GiB
+	/// default: "1 GiB"
 	#[serde(
 		default = "default_media_upload_min_free_space",
 		deserialize_with = "deserialize_bytesize_u64"
@@ -3033,7 +3033,7 @@ pub struct Config {
 	/// Extraction requires a nonempty `media_video_thumbnail_command`.
 	///
 	/// reloadable: yes
-	/// default: 128 MiB
+	/// default: "128 MiB"
 	#[serde(
 		default = "default_media_video_thumbnail_max_size",
 		deserialize_with = "deserialize_bytesize_usize"
@@ -3292,7 +3292,7 @@ pub struct Config {
 	/// or a string with SI/IEC suffix such as "50 MiB".
 	///
 	/// reloadable: yes
-	/// default: 50 MiB
+	/// default: "50 MiB"
 	#[serde(
 		default = "default_url_preview_max_media_size",
 		deserialize_with = "deserialize_bytesize_usize"
@@ -5343,7 +5343,7 @@ pub struct StorageProviderS3 {
 	/// default value should be sufficient for most providers. The value is a
 	/// parsed string allowing SI or IEC units for convenience.
 	///
-	/// default: 100 MiB
+	/// default: "100 MiB"
 	#[serde(default = "default_multipart_threshold")]
 	pub multipart_threshold: ByteSize,
 
@@ -5355,7 +5355,7 @@ pub struct StorageProviderS3 {
 	/// to be at least 5 MiB. The value is a parsed string allowing SI or IEC
 	/// units for convenience.
 	///
-	/// default: 10 MiB
+	/// default: "10 MiB"
 	#[serde(default = "default_multipart_part_size")]
 	pub multipart_part_size: ByteSize,
 
@@ -5435,7 +5435,7 @@ pub struct StorageProviderGcs {
 	/// determines what a "large" upload is. The value is a parsed string allowing
 	/// SI or IEC units for convenience.
 	///
-	/// default: 100 MiB
+	/// default: "100 MiB"
 	#[serde(default = "default_multipart_threshold")]
 	pub multipart_threshold: ByteSize,
 
@@ -5444,7 +5444,7 @@ pub struct StorageProviderGcs {
 	/// this size, each sent as a separate request. The value is a parsed string
 	/// allowing SI or IEC units for convenience.
 	///
-	/// default: 10 MiB
+	/// default: "10 MiB"
 	#[serde(default = "default_multipart_part_size")]
 	pub multipart_part_size: ByteSize,
 

@@ -448,7 +448,7 @@
 # Max request size for file uploads. Accepts an integer byte count or a
 # string with SI/IEC suffix such as "24 MiB".
 #
-#max_request_size = 24 MiB
+#max_request_size = "24 MiB"
 
 # Maximum size of a response body buffered from a remote server. Applies
 # to federation requests, push gateway and appservice transactions, and
@@ -458,7 +458,7 @@
 # memory. Accepts an integer byte count or a string with SI/IEC suffix
 # such as "256 MiB".
 #
-#max_response_size = 256 MiB
+#max_response_size = "256 MiB"
 
 # Maximum number of concurrently pending (asynchronous) media uploads a
 # user can have.
@@ -500,7 +500,7 @@
 #
 # reloadable: yes
 #
-#media_upload_min_free_space = 1 GiB
+#media_upload_min_free_space = "1 GiB"
 
 # reloadable: yes
 #
@@ -2605,7 +2605,7 @@
 #
 # reloadable: yes
 #
-#media_video_thumbnail_max_size = 128 MiB
+#media_video_thumbnail_max_size = "128 MiB"
 
 # Directory a video is staged in for the thumbnail program to read, one
 # file per running program, removed as soon as it exits. Leave unset to
@@ -2839,7 +2839,7 @@
 #
 # reloadable: yes
 #
-#url_preview_max_media_size = 50 MiB
+#url_preview_max_media_size = "50 MiB"
 
 # Lifetime in seconds of a cached URL preview, including an empty one.
 #
@@ -4376,7 +4376,7 @@
 # default value should be sufficient for most providers. The value is a
 # parsed string allowing SI or IEC units for convenience.
 #
-#multipart_threshold = 100 MiB
+#multipart_threshold = "100 MiB"
 
 # (expert use) Size of each individual part within a Multi-part upload.
 # Once an upload exceeds `multipart_threshold` the payload is split into
@@ -4386,7 +4386,7 @@
 # to be at least 5 MiB. The value is a parsed string allowing SI or IEC
 # units for convenience.
 #
-#multipart_part_size = 10 MiB
+#multipart_part_size = "10 MiB"
 
 # (developer use) Allows relaxing default requirement forcing HTTPS.
 #
@@ -4448,14 +4448,14 @@
 # determines what a "large" upload is. The value is a parsed string allowing
 # SI or IEC units for convenience.
 #
-#multipart_threshold = 100 MiB
+#multipart_threshold = "100 MiB"
 
 # (expert use) Size of each individual part within a multi-part upload. Once
 # an upload exceeds `multipart_threshold` the payload is split into parts of
 # this size, each sent as a separate request. The value is a parsed string
 # allowing SI or IEC units for convenience.
 #
-#multipart_part_size = 10 MiB
+#multipart_part_size = "10 MiB"
 
 # (developer use) Allows skipping request signatures.
 #
