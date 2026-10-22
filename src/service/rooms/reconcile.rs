@@ -128,6 +128,7 @@ const DIGEST_FEATURE: &str = "tk.nutra.msc4521.digest.algebraic_v1";
 const DIGEST_INTERVAL: Duration = Duration::from_secs(2);
 const PEER_COOLDOWN: Duration = Duration::from_secs(2);
 const MAX_ROOMS_PER_SWEEP: usize = 8;
+const MAX_PENDING_ROOMS: usize = 16_384;
 const MAX_PEERS_PER_ROOM: usize = 4;
 const MAX_EVENT_FETCHES: usize = 100;
 const REMEMBER_FOR: Duration = Duration::from_secs(3600);
@@ -266,9 +267,11 @@ impl Reconcile {
 		self.last_done
 			.lock()
 			.retain(|(room, _), _| room != room_id);
-		self.pending_rooms
-			.lock()
-			.insert(room_id.to_owned());
+		let mut pending = self.pending_rooms.lock();
+		if pending.len() < MAX_PENDING_ROOMS {
+			pending.insert(room_id.to_owned());
+		}
+		drop(pending);
 		self.wake.notify_one();
 	}
 
@@ -445,7 +448,25 @@ impl Reconcile {
 		peer: &ServerName,
 		offered: std::collections::BTreeSet<OwnedEventId>,
 	) {
-		let mut event_ids: Vec<_> = offered.into_iter().collect();
+		let mut event_ids = Vec::new();
+		for event_id in offered {
+			let key = (peer.to_owned(), event_id.clone());
+			let unusable = self
+				.unusable
+				.lock()
+				.get(&key)
+				.is_some_and(|until| *until > Instant::now());
+			if unusable
+				|| self
+					.services
+					.timeline
+					.non_outlier_pdu_exists(&event_id)
+					.await
+			{
+				continue;
+			}
+			event_ids.push(event_id);
+		}
 		event_ids.shuffle(&mut rand::rng());
 		event_ids.truncate(MAX_EVENT_FETCHES);
 		let sample_count = event_ids.len().min(SAMPLE_FETCHES);
@@ -453,14 +474,6 @@ impl Reconcile {
 		let mut fetched = Vec::new();
 		for (index, event_id) in event_ids.into_iter().enumerate() {
 			let key = (peer.to_owned(), event_id.clone());
-			if self
-				.unusable
-				.lock()
-				.get(&key)
-				.is_some_and(|until| *until > Instant::now())
-			{
-				continue;
-			}
 			let response = self
 				.services
 				.federation
@@ -471,12 +484,12 @@ impl Reconcile {
 				| Err(error) => {
 					if error.is_not_found() {
 						self.remember_unusable(key);
-						if index < sample_count {
-							failed_sample += 1;
-						}
+					}
+					if index < sample_count {
+						failed_sample += 1;
 					}
 					if index + 1 >= sample_count
-						&& failed_sample * 100 >= sample_count * MAX_SAMPLE_FAILURE_PERCENT
+						&& failed_sample * 100 > sample_count * MAX_SAMPLE_FAILURE_PERCENT
 					{
 						break;
 					}
@@ -489,7 +502,7 @@ impl Reconcile {
 					failed_sample += 1;
 				}
 				if index + 1 >= sample_count
-					&& failed_sample * 100 >= sample_count * MAX_SAMPLE_FAILURE_PERCENT
+					&& failed_sample * 100 > sample_count * MAX_SAMPLE_FAILURE_PERCENT
 				{
 					break;
 				}
@@ -506,7 +519,7 @@ impl Reconcile {
 					failed_sample += 1;
 				}
 				if index + 1 >= sample_count
-					&& failed_sample * 100 >= sample_count * MAX_SAMPLE_FAILURE_PERCENT
+					&& failed_sample * 100 > sample_count * MAX_SAMPLE_FAILURE_PERCENT
 				{
 					break;
 				}
@@ -523,7 +536,7 @@ impl Reconcile {
 					failed_sample += 1;
 				}
 				if index + 1 >= sample_count
-					&& failed_sample * 100 >= sample_count * MAX_SAMPLE_FAILURE_PERCENT
+					&& failed_sample * 100 > sample_count * MAX_SAMPLE_FAILURE_PERCENT
 				{
 					break;
 				}
@@ -538,7 +551,7 @@ impl Reconcile {
 				}
 			}
 			if index + 1 >= sample_count
-				&& failed_sample * 100 >= sample_count * MAX_SAMPLE_FAILURE_PERCENT
+				&& failed_sample * 100 > sample_count * MAX_SAMPLE_FAILURE_PERCENT
 			{
 				break;
 			}
