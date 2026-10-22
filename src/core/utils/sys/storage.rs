@@ -363,6 +363,7 @@ pub fn available_space(path: &Path) -> Result<u64> {
 	let directory_name: Vec<u16> = path
 		.as_os_str()
 		.encode_wide()
+		.chain(unc_terminator(path))
 		.chain(once(0))
 		.collect();
 
@@ -386,6 +387,28 @@ pub fn available_space(path: &Path) -> Result<u64> {
 	}
 
 	Ok(available)
+}
+
+/// Get the backslash a UNC `path` lacks at its end.
+///
+/// `GetDiskFreeSpaceExW` documents that a UNC name must end in one, as in
+/// `\\server\share\`, so it is returned when the path has none. Any other
+/// path gets `None`, since a separator would turn the drive-relative `C:`
+/// into the root `C:\`.
+#[cfg(windows)]
+fn unc_terminator(path: &Path) -> Option<u16> {
+	use std::path::{Component, Prefix};
+
+	let separator = b'\\';
+	let unc = matches!(
+		path.components().next(),
+		Some(Component::Prefix(prefix))
+			if matches!(prefix.kind(), Prefix::UNC(..) | Prefix::VerbatimUNC(..))
+	);
+
+	let missing = unc && path.as_os_str().as_encoded_bytes().last() != Some(&separator);
+
+	missing.then_some(separator.into())
 }
 
 /// Get the space in bytes a non-privileged process may still write to the
