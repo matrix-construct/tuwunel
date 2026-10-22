@@ -115,7 +115,7 @@ impl Service {
 		for attempt in 0..3 {
 			let frame_before = self.forward_extremities_sorted(room_id).await;
 			let mut builder = Builder::default();
-			let mut pdus = self.pdus(None, room_id, None);
+			let pdus = self.pdus(None, room_id, None);
 			futures::pin_mut!(pdus);
 			while let Some((_, pdu)) = pdus.try_next().await? {
 				builder
