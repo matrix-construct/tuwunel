@@ -2,8 +2,10 @@
 
 use std::{
 	collections::{HashMap, HashSet},
-	sync::Arc,
-	sync::atomic::{AtomicUsize, Ordering},
+	sync::{
+		Arc,
+		atomic::{AtomicUsize, Ordering},
+	},
 	time::{Duration, Instant},
 };
 
@@ -20,8 +22,7 @@ use ruma::{
 	OwnedEventId, OwnedRoomId, OwnedServerName, RoomId, ServerName,
 	api::federation::{discovery::get_server_version, event::get_event},
 };
-use tokio::sync::Notify;
-use tokio::time::MissedTickBehavior;
+use tokio::{sync::Notify, time::MissedTickBehavior};
 use tuwunel_core::{Result, Server};
 
 use crate::{
@@ -38,7 +39,7 @@ pub mod api {
 	pub mod digest {
 		use super::*;
 		metadata! { method: GET, rate_limited: false, authentication: ServerSignatures,
-		history: { unstable => "/_matrix/federation/unstable/tk.nutra.msc0501/room_digest/{room_id}" } }
+		history: { unstable => "/_matrix/federation/unstable/tk.nutra.msc0501/room_digest/{room_id}", } }
 		#[request]
 		pub struct Request {
 			#[ruma_api(path)]
@@ -59,7 +60,7 @@ pub mod api {
 	pub mod strata {
 		use super::*;
 		metadata! { method: GET, rate_limited: false, authentication: ServerSignatures,
-		history: { unstable => "/_matrix/federation/unstable/tk.nutra.msc0501/room_digest/{room_id}/strata" } }
+		history: { unstable => "/_matrix/federation/unstable/tk.nutra.msc0501/room_digest/{room_id}/strata", } }
 		#[request]
 		pub struct Request {
 			#[ruma_api(path)]
@@ -87,7 +88,7 @@ pub mod api {
 			pub capacity: u64,
 		}
 		metadata! { method: POST, rate_limited: false, authentication: ServerSignatures,
-		history: { unstable => "/_matrix/federation/unstable/tk.nutra.msc0501/room_diff/{room_id}" } }
+		history: { unstable => "/_matrix/federation/unstable/tk.nutra.msc0501/room_diff/{room_id}", } }
 		#[request]
 		pub struct Request {
 			#[ruma_api(path)]
@@ -160,6 +161,7 @@ impl ServiceTrait for Reconcile {
 			pending_rooms: Default::default(),
 		}))
 	}
+
 	async fn worker(self: Arc<Self>) -> Result {
 		let mut tick = tokio::time::interval(DIGEST_INTERVAL);
 		tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
@@ -256,9 +258,8 @@ impl ServiceTrait for Reconcile {
 			}
 		}
 	}
-	fn name(&self) -> &str {
-		crate::service::make_name(module_path!())
-	}
+
+	fn name(&self) -> &str { crate::service::make_name(module_path!()) }
 }
 
 impl Reconcile {
@@ -280,16 +281,18 @@ impl Reconcile {
 			.services
 			.state_cache
 			.server_in_room(self.services.globals.server_name(), room)
-			.await || !self
-			.services
-			.state_cache
-			.server_in_room(peer, room)
-			.await || self
-			.services
-			.event_handler
-			.acl_check(peer, room)
 			.await
-			.is_err()
+			|| !self
+				.services
+				.state_cache
+				.server_in_room(peer, room)
+				.await
+			|| self
+				.services
+				.event_handler
+				.acl_check(peer, room)
+				.await
+				.is_err()
 		{
 			return Ok(true);
 		}
@@ -345,33 +348,30 @@ impl Reconcile {
 					let response = self
 						.services
 						.federation
-						.execute(
-							peer,
-							api::diff::Request {
-								room_id: room.to_owned(),
-								mode: "sketch".into(),
-								digest_type: "algebraic_v1".into(),
-								local_digest: local.resident.accumulator().encode_digest(),
-								local_known_event_count: local
-									.resident
-									.accumulator()
-									.known_event_count(),
-								frame_id: remote.frame_id.clone(),
-								frame_event_ids: remote.frame_event_ids.clone(),
-								frame_negotiation: false,
-								scope: Some("event_set".into()),
-								state_at: None,
-								requests: requests
-									.iter()
-									.map(|r| api::diff::SketchBucket {
-										depth: u64::from(r.depth),
-										prefix: r.prefix.to_string(),
-										capacity: r.capacity as u64,
-									})
-									.collect(),
-								local_sketches: sketches.iter().map(|s| s.encode()).collect(),
-							},
-						)
+						.execute(peer, api::diff::Request {
+							room_id: room.to_owned(),
+							mode: "sketch".into(),
+							digest_type: "algebraic_v1".into(),
+							local_digest: local.resident.accumulator().encode_digest(),
+							local_known_event_count: local
+								.resident
+								.accumulator()
+								.known_event_count(),
+							frame_id: remote.frame_id.clone(),
+							frame_event_ids: remote.frame_event_ids.clone(),
+							frame_negotiation: false,
+							scope: Some("event_set".into()),
+							state_at: None,
+							requests: requests
+								.iter()
+								.map(|r| api::diff::SketchBucket {
+									depth: u64::from(r.depth),
+									prefix: r.prefix.to_string(),
+									capacity: r.capacity as u64,
+								})
+								.collect(),
+							local_sketches: sketches.iter().map(|s| s.encode()).collect(),
+						})
 						.await?;
 					if response.sketch_status == "capacity_exceeded" {
 						let batch = BucketDecodeBatch {
@@ -556,7 +556,7 @@ impl Reconcile {
 				break;
 			}
 		}
-		fetched.sort_by_key(|(depth, _, _)| *depth);
+		fetched.sort_by_key(|(depth, ..)| *depth);
 		for (_, event_id, pdu) in fetched {
 			let result = self
 				.services

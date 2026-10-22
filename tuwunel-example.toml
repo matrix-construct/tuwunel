@@ -899,7 +899,9 @@
 #allow_federation = true
 
 # MSC4521: serve algebraic room digests and sketch-based set differences.
-# Automatic outbound reconciliation is not implemented yet.
+#
+# This only enables the federation endpoints. Automatic outbound
+# reconciliation is not implemented yet.
 #
 #msc4521_enabled = false
 
