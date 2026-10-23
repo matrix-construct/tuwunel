@@ -2,7 +2,7 @@ use std::borrow::Borrow;
 
 use axum::extract::State;
 use futures::{FutureExt, StreamExt, TryFutureExt, TryStreamExt, future::try_join};
-use ruma::{EventId, OwnedEventId, api::federation::event::get_room_state};
+use ruma::{OwnedEventId, api::federation::event::get_room_state};
 use tuwunel_core::{
 	Result, at, err,
 	result::NotFound,
@@ -51,28 +51,15 @@ pub(crate) async fn get_room_state_route(
 
 	let (room_version, state_ids) = try_join(room_version, state_ids).await?;
 
-	let into_federation_format = |pdu| {
-		services
-			.federation
-			.format_pdu_into(pdu, Some(&room_version))
-			.map(Ok)
-	};
-
-	let federation_pdu = async |id: &EventId| {
-		services
-			.timeline
-			.get_pdu_json(id)
-			.and_then(into_federation_format)
-			.await
-	};
-
 	let auth_heads = state_ids.iter().map(Borrow::borrow);
 
 	let auth_chain = services
 		.auth_chain
 		.event_ids_iter(&body.room_id, &room_version, auth_heads)
 		.broad_and_then(async |id| {
-			federation_pdu(&id)
+			services
+				.federation
+				.get_pdu_into(&id, Some(&room_version))
 				.map(NotFound::optional)
 				.inspect_err(|error| warn!(?id, %error, "Omitting unreadable auth event."))
 				.ok()
@@ -86,7 +73,11 @@ pub(crate) async fn get_room_state_route(
 	let pdus = state_ids
 		.iter()
 		.try_stream()
-		.broad_and_then(|id| federation_pdu(id))
+		.broad_and_then(|id| {
+			services
+				.federation
+				.get_pdu_into(id, Some(&room_version))
+		})
 		.try_collect();
 
 	let (auth_chain, pdus) = try_join(auth_chain, pdus).await?;

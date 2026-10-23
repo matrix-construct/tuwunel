@@ -1,13 +1,33 @@
 //! Outgoing federation event formatting.
 //!
-//! The formatter converts a canonical event object into the room-version shape
-//! expected by ruma's outgoing federation response types.
+//! The formatter converts a canonical event object, or a stored event read by
+//! its ID, into the room-version shape expected by ruma's outgoing federation
+//! response types.
 
 use futures::future::OptionFuture;
-use ruma::{CanonicalJsonObject, CanonicalJsonValue, RoomId, RoomVersionId};
+use ruma::{CanonicalJsonObject, CanonicalJsonValue, EventId, RoomId, RoomVersionId};
 use serde_json::value::{RawValue as RawJsonValue, to_raw_value};
-use tuwunel_core::{implement, utils::result::FlatOk};
+use tuwunel_core::{Result, implement, utils::result::FlatOk};
 use tuwunel_matrix::pdu;
+
+/// Reads a stored event and formats it for an outgoing federation response.
+///
+/// The read's error is returned unchanged, so each caller keeps its own policy
+/// for an event it cannot serve; the formatting itself cannot fail.
+#[implement(super::Service)]
+pub async fn get_pdu_into(
+	&self,
+	event_id: &EventId,
+	room_version: Option<&RoomVersionId>,
+) -> Result<Box<RawJsonValue>> {
+	let pdu_json = self
+		.services
+		.timeline
+		.get_pdu_json(event_id)
+		.await?;
+
+	Ok(self.format_pdu_into(pdu_json, room_version).await)
+}
 
 /// Formats an event object for an outgoing federation response.
 ///

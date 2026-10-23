@@ -41,14 +41,11 @@ pub(crate) async fn get_event_authorization_route(
 		.event_ids_iter(&body.room_id, &room_version, once(body.event_id.borrow()))
 		.ready_filter_map(Result::ok)
 		.broad_filter_map(async |id| {
-			let pdu = services.timeline.get_pdu_json(&id).await.ok()?;
-
-			let pdu = services
+			services
 				.federation
-				.format_pdu_into(pdu, Some(&room_version))
-				.await;
-
-			Some(pdu)
+				.get_pdu_into(&id, Some(&room_version))
+				.await
+				.ok()
 		})
 		.collect()
 		.await;

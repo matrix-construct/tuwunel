@@ -3,8 +3,8 @@ use std::borrow::Borrow;
 use axum::extract::State;
 use futures::{FutureExt, StreamExt, TryFutureExt, TryStreamExt, future::try_join4};
 use ruma::{
-	CanonicalJsonObject, OwnedEventId, OwnedRoomId, OwnedServerName, OwnedUserId, RoomId,
-	ServerName, UserId,
+	CanonicalJsonObject, EventId, OwnedEventId, OwnedRoomId, OwnedServerName, OwnedUserId,
+	RoomId, ServerName, UserId,
 	api::federation::membership::create_join_event,
 	events::{
 		StateEventType,
@@ -204,16 +204,17 @@ async fn create_join_event(
 		.sorted_unstable()
 		.collect::<Vec<_>>();
 
-	let into_federation_format = |pdu: CanonicalJsonObject| {
-		services
-			.federation
-			.format_pdu_into(pdu, Some(&room_version_id))
-			.map(Ok)
-	};
-
 	// MSC3706: Any events returned within state can be omitted from auth_chain.
 	let include_auth_event =
 		|event_id: &OwnedEventId| !omit_members || state_ids.binary_search(event_id).is_err();
+
+	let federation_pdu = async |event_id: &EventId, part: &str| {
+		services
+			.federation
+			.get_pdu_into(event_id, Some(&room_version_id))
+			.inspect_err(|e| debug_error!(?event_id, %part, error = %e, "event not found"))
+			.await
+	};
 
 	let auth_heads = state_ids.iter().map(Borrow::borrow);
 
@@ -221,27 +222,13 @@ async fn create_join_event(
 		.auth_chain
 		.event_ids_iter(room_id, &room_version_id, auth_heads)
 		.ready_try_filter(include_auth_event)
-		.broad_and_then(async |event_id| {
-			services
-				.timeline
-				.get_pdu_json(&event_id)
-				.and_then(into_federation_format)
-				.inspect_err(|e| debug_error!(?event_id, "auth_chain event not found: {e}"))
-				.await
-		})
+		.broad_and_then(async |event_id| federation_pdu(&event_id, "auth_chain").await)
 		.try_collect();
 
 	let state = state_ids
 		.iter()
 		.try_stream()
-		.broad_and_then(async |event_id| {
-			services
-				.timeline
-				.get_pdu_json(event_id)
-				.and_then(into_federation_format)
-				.inspect_err(|e| debug_error!(?event_id, "state event not found: {e}"))
-				.await
-		})
+		.broad_and_then(|event_id| federation_pdu(event_id, "state"))
 		.try_collect();
 
 	// Join event for new server.

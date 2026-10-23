@@ -766,19 +766,11 @@ pub async fn summary_pdus<Pdu: Event>(
 				.await
 				.ok()?;
 
-			let pdu_json = self
-				.services
-				.timeline
-				.get_pdu_json(pdu.event_id())
+			self.services
+				.federation
+				.get_pdu_into(pdu.event_id(), Some(room_version))
 				.await
-				.ok()?;
-
-			Some(
-				self.services
-					.federation
-					.format_pdu_into(pdu_json, Some(room_version))
-					.await,
-			)
+				.ok()
 		})
 		.chain(once(membership).stream())
 		.collect()
