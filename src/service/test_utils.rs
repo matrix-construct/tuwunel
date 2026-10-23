@@ -2,29 +2,54 @@ use std::{
 	env::{current_exe, temp_dir, var_os},
 	fs::remove_dir_all,
 	path::{Path, PathBuf},
-	sync::Arc,
+	sync::{Arc, Mutex},
 	thread::current as current_thread,
 };
 
+use ruma::{CanonicalJsonObject, EventId, RoomId, UserId, events::StateEventType};
+use serde::Serialize;
+use serde_json::{Value as JsonValue, from_value, json};
 use tokio::{process::Command, runtime::Handle};
-use tracing::subscriber::NoSubscriber;
+use tracing::{
+	Level,
+	dispatcher::DefaultGuard,
+	subscriber::{NoSubscriber, set_default},
+};
+use tracing_subscriber::{layer::SubscriberExt, registry};
 use tuwunel_core::{
 	Err, Result, Server,
 	config::{Config, Figment, Sources},
-	err,
-	log::{LogLevelReloadHandles, Logging, capture::State},
+	err, implement,
+	log::{
+		LogLevelReloadHandles, Logging,
+		capture::{Capture, Data, Guard, Layer, State, Value},
+	},
 	metrics::Metrics,
 	utils::random_string,
 };
 use tuwunel_matrix::{PduCount, PduId, RawPduId};
 
-use crate::Services;
+use crate::{Services, rooms::state_compressor::CompressedStateEvent};
 
 pub(crate) struct Fixture {
 	pub services: Arc<Services>,
 }
 
 struct DatabasePath(PathBuf);
+
+type Fields = Vec<Value>;
+
+type Recorded = Arc<Mutex<Vec<Fields>>>;
+
+/// Records the fields of every warning the calling thread emits.
+///
+/// Recording lasts while the value lives; events at other levels, ERROR
+/// included, are not recorded.
+pub(crate) struct Warnings {
+	recorded: Recorded,
+	_capture: Guard,
+	_subscriber: DefaultGuard,
+}
 
 const CHILD_TEST_ENV: &str = "SERVICE_TEST_CHILD";
 const CHILD_DATABASE_ENV: &str = "SERVICE_TEST_DATABASE";
@@ -107,6 +132,115 @@ pub(crate) fn pdu_id(count: u64) -> RawPduId {
 		count: PduCount::Normal(count),
 	}
 	.into()
+}
+
+/// Builds a minimal PDU as JSON for seeding storage.
+///
+/// The event carries a placeholder hash and no signatures or references, so it
+/// deserializes as a PDU without passing authorization.
+pub(crate) fn pdu_json<Kind>(
+	event_id: &EventId,
+	room_id: &RoomId,
+	sender: &UserId,
+	kind: &Kind,
+	content: &JsonValue,
+) -> JsonValue
+where
+	Kind: Serialize + ?Sized,
+{
+	json!({
+		"event_id": event_id, "room_id": room_id, "sender": sender, "type": kind,
+		"content": content, "origin": "localhost", "origin_server_ts": 1, "depth": 1,
+		"prev_events": [], "auth_events": [], "signatures": {},
+		"hashes": {"sha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"},
+	})
+}
+
+/// Sets the state key of an event built by [`pdu_json`].
+///
+/// Panics if the event is neither a JSON object nor null.
+pub(crate) fn with_state_key(mut pdu: JsonValue, state_key: &str) -> JsonValue {
+	pdu["state_key"] = json!(state_key);
+	pdu
+}
+
+/// Stores a JSON event as an outlier and compresses its state entry.
+///
+/// The event need not parse as a PDU, as with the stripped state a knock stores.
+pub(crate) async fn store_outlier(
+	services: &Services,
+	event_type: &StateEventType,
+	state_key: &str,
+	event_id: &EventId,
+	pdu: JsonValue,
+) -> Result<CompressedStateEvent> {
+	let pdu: CanonicalJsonObject = from_value(pdu)?;
+
+	services.timeline.add_pdu_outlier(event_id, &pdu);
+
+	Ok(compress_state(services, event_type, state_key, event_id).await)
+}
+
+/// Compresses one state entry, creating its short IDs when missing.
+///
+/// The entry pairs the interned state key with the event's short ID.
+pub(crate) async fn compress_state(
+	services: &Services,
+	event_type: &StateEventType,
+	state_key: &str,
+	event_id: &EventId,
+) -> CompressedStateEvent {
+	let shortstatekey = services
+		.short
+		.get_or_create_shortstatekey(event_type, state_key)
+		.await;
+
+	services
+		.state_compressor
+		.compress_state_event(shortstatekey, event_id)
+		.await
+}
+
+/// Starts recording warnings on the calling thread.
+///
+/// The capture layer replaces the calling thread's default subscriber until the
+/// value is dropped.
+#[implement(Warnings)]
+pub(crate) fn capture() -> Self {
+	let logs = Arc::new(State::new());
+	let recorded: Recorded = Arc::default();
+	let sink = recorded.clone();
+	let is_warning = |data: Data<'_>| data.level() == Level::WARN;
+	let capture = Capture::new(&logs, Some(is_warning), move |data: Data<'_>| {
+		sink.lock()
+			.expect("locked")
+			.push(data.values.to_vec());
+	});
+
+	Self {
+		recorded,
+		_capture: capture.start(),
+		_subscriber: set_default(registry().with(Layer::new(&logs))),
+	}
+}
+
+#[implement(Warnings)]
+#[inline]
+pub(crate) fn count(&self) -> usize { self.recorded.lock().expect("locked").len() }
+
+/// Reports whether any recorded warning carries the named field with the given
+/// value.
+///
+/// The value is compared with the field's formatted text, and an event's
+/// message is recorded under the `message` field name.
+#[implement(Warnings)]
+pub(crate) fn warned(&self, name: &str, value: &str) -> bool {
+	self.recorded
+		.lock()
+		.expect("locked")
+		.iter()
+		.flatten()
+		.any(|(field, text)| *field == name && text == value)
 }
 
 impl Drop for DatabasePath {

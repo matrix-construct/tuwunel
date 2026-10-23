@@ -21,10 +21,8 @@ use tuwunel_matrix::{PduCount, PduId, RawPduId};
 
 use crate::{
 	Services,
-	rooms::{
-		short::ShortRoomId, state_cache::MembershipUpdate, state_compressor::CompressedStateEvent,
-	},
-	test_utils::fixture,
+	rooms::{short::ShortRoomId, state_cache::MembershipUpdate},
+	test_utils::{compress_state, fixture, pdu_json, with_state_key},
 };
 
 struct Ids {
@@ -152,27 +150,27 @@ async fn departed_member_reads_the_state_after_their_leave_event() -> Result {
 	];
 
 	for (count, id, kind, state_key, content) in &state_events {
-		let pdu = state_event(event(id, room, owner, kind, content), state_key);
+		let pdu = with_state_key(pdu_json(id, room, owner, kind, content), state_key);
 
 		store(services, shortroomid, *count, id, &pdu);
 	}
 
 	let content = json!({ "msgtype": "m.text", "body": "later" });
-	let pdu = event(next, room, owner, "m.room.message", &content);
+	let pdu = pdu_json(next, room, owner, "m.room.message", &content);
 
 	store(services, shortroomid, 5, next, &pdu);
 
 	let content = json!({ "topic": "after" });
-	let pdu = state_event(event(retopic, room, owner, "m.room.topic", &content), "");
+	let pdu = with_state_key(pdu_json(retopic, room, owner, "m.room.topic", &content), "");
 
 	outlier(services, retopic, &pdu);
 
-	let created = compress(services, &StateEventType::RoomCreate, "", create).await;
-	let topic_before = compress(services, &StateEventType::RoomTopic, "", topic).await;
-	let topic_after = compress(services, &StateEventType::RoomTopic, "", retopic).await;
-	let joined = compress(services, &StateEventType::RoomMember, member_key, join).await;
-	let kicked = compress(services, &StateEventType::RoomMember, member_key, kick).await;
-	let named = compress(services, &StateEventType::RoomName, "", name).await;
+	let created = compress_state(services, &StateEventType::RoomCreate, "", create).await;
+	let topic_before = compress_state(services, &StateEventType::RoomTopic, "", topic).await;
+	let topic_after = compress_state(services, &StateEventType::RoomTopic, "", retopic).await;
+	let joined = compress_state(services, &StateEventType::RoomMember, member_key, join).await;
+	let kicked = compress_state(services, &StateEventType::RoomMember, member_key, kick).await;
+	let named = compress_state(services, &StateEventType::RoomName, "", name).await;
 
 	let at_kick = services
 		.state
@@ -266,14 +264,15 @@ async fn seed(services: &Services) -> Result<Ids> {
 	});
 
 	let create =
-		state_event(event(ids.create, ids.room, ids.owner, "m.room.create", &content), "");
+		with_state_key(pdu_json(ids.create, ids.room, ids.owner, "m.room.create", &content), "");
 
 	services.db["eventid_outlierpdu"].raw_put(ids.create, Json(create));
 	let content = json!({
 		"allow": ["*"], "deny": [], "allow_ip_literals": false,
 	});
 
-	let acl = state_event(event(ids.acl, ids.room, ids.owner, "m.room.server_acl", &content), "");
+	let acl =
+		with_state_key(pdu_json(ids.acl, ids.room, ids.owner, "m.room.server_acl", &content), "");
 
 	services.db["eventid_outlierpdu"].raw_put(ids.acl, Json(acl));
 
@@ -282,12 +281,12 @@ async fn seed(services: &Services) -> Result<Ids> {
 			"msgtype": "m.text", "body": "preserve this message",
 		});
 
-		let pdu = event(id, room, ids.author, "m.room.message", &content);
+		let pdu = pdu_json(id, room, ids.author, "m.room.message", &content);
 
 		outlier(services, id, &pdu);
 	}
 
-	let create = compress(services, &StateEventType::RoomCreate, "", ids.create).await;
+	let create = compress_state(services, &StateEventType::RoomCreate, "", ids.create).await;
 	let state = Arc::new([create].into());
 	let state = services
 		.state
@@ -303,20 +302,6 @@ async fn seed(services: &Services) -> Result<Ids> {
 	Ok(ids)
 }
 
-fn state_event(mut pdu: Value, state_key: &str) -> Value {
-	pdu["state_key"] = json!(state_key);
-	pdu
-}
-
-fn event(id: &EventId, room: &RoomId, sender: &UserId, kind: &str, content: &Value) -> Value {
-	json!({
-		"event_id": id, "room_id": room, "sender": sender, "type": kind, "content": content,
-		"origin": "localhost", "origin_server_ts": 1, "depth": 1,
-		"prev_events": [], "auth_events": [], "signatures": {},
-		"hashes": {"sha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"},
-	})
-}
-
 fn store(services: &Services, shortroomid: ShortRoomId, count: u64, id: &EventId, pdu: &Value) {
 	let pdu_id: RawPduId = PduId {
 		shortroomid,
@@ -330,21 +315,4 @@ fn store(services: &Services, shortroomid: ShortRoomId, count: u64, id: &EventId
 
 fn outlier(services: &Services, id: &EventId, pdu: &Value) {
 	services.db["eventid_outlierpdu"].raw_put(id, Json(pdu));
-}
-
-async fn compress(
-	services: &Services,
-	event_type: &StateEventType,
-	state_key: &str,
-	event_id: &EventId,
-) -> CompressedStateEvent {
-	let key = services
-		.short
-		.get_or_create_shortstatekey(event_type, state_key)
-		.await;
-
-	services
-		.state_compressor
-		.compress_state_event(key, event_id)
-		.await
 }

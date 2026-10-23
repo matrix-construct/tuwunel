@@ -6,6 +6,8 @@
 
 mod fetch_state;
 mod prune;
+#[cfg(test)]
+mod tests;
 
 use std::{
 	collections::HashMap,
@@ -52,7 +54,8 @@ use tuwunel_core::{
 	smallvec::SmallVec,
 	trace,
 	utils::{
-		BoolExt, IterStream, MutexMap, MutexMapGuard, ReadyExt, TryReadyExt, calculate_hash,
+		BoolExt, IterStream, MutexMap, MutexMapGuard, ReadyExt, TryFutureExtExt, TryReadyExt,
+		calculate_hash,
 		hash::sha256::Digest,
 		mutex_map::Guard,
 		stream::{TryBroadbandExt, TryIgnore, WidebandExt},
@@ -727,8 +730,10 @@ pub async fn summary_stripped<Pdu: Event>(&self, event: &Pdu) -> Vec<Raw<AnyStri
 /// Builds full-PDU invite-state context for a membership event.
 ///
 /// Recommended stored state and the supplied event are formatted for the given
-/// room version as required by MSC4311. Failed state or JSON lookups are
-/// omitted, and the supplied membership event is appended last.
+/// room version as required by MSC4311. A recommended event absent from the
+/// current state is skipped; any other failed lookup, including an event the
+/// state references but storage cannot read as a PDU, is logged and omitted.
+/// The supplied membership event is appended last.
 #[implement(Service)]
 #[tracing::instrument(skip_all, level = "debug")]
 pub async fn summary_pdus<Pdu: Event>(
@@ -737,6 +742,7 @@ pub async fn summary_pdus<Pdu: Event>(
 	event_json: &CanonicalJsonObject,
 	room_version: &RoomVersionId,
 ) -> Vec<Box<RawJsonValue>> {
+	let room_id = event.room_id();
 	let cells = [
 		(&StateEventType::RoomCreate, ""),
 		(&StateEventType::RoomJoinRules, ""),
@@ -755,25 +761,67 @@ pub async fn summary_pdus<Pdu: Event>(
 		.boxed() // query-depth firewall
 		.await;
 
-	cells
-		.into_iter()
-		.stream()
-		.wide_filter_map(async |(event_type, state_key)| {
-			let pdu = self
-				.services
-				.state_accessor
-				.room_state_get(event.room_id(), event_type, state_key)
-				.await
-				.ok()?;
+	// A room with a membership event to summarize has a snapshot; a failed read is a fault.
+	let shortstatehash = self
+		.get_room_shortstatehash(room_id)
+		.inspect_err(|error| {
+			warn!(%room_id, %error, "Omitting summary state of an unreadable snapshot.");
+		})
+		.ok()
+		.await;
 
-			self.services
-				.federation
-				.get_pdu_into(pdu.event_id(), Some(room_version))
-				.await
-				.ok()
+	shortstatehash
+		.into_iter()
+		.cycle()
+		.zip(cells)
+		.stream()
+		.wide_filter_map(|(shortstatehash, cell)| {
+			self.summary_state_pdu(room_id, shortstatehash, cell, room_version)
 		})
 		.chain(once(membership).stream())
 		.collect()
+		.await
+}
+
+#[implement(Service)]
+#[tracing::instrument(level = "trace", skip_all)]
+async fn summary_state_pdu(
+	&self,
+	room_id: &RoomId,
+	shortstatehash: ShortStateHash,
+	(event_type, state_key): (&StateEventType, &str),
+	room_version: &RoomVersionId,
+) -> Option<Box<RawJsonValue>> {
+	let event_id = self
+		.services
+		.state_accessor
+		.state_get_id(shortstatehash, event_type, state_key)
+		.map(NotFound::present)
+		.inspect_err(|error| {
+			warn!(
+				%room_id,
+				%event_type,
+				%state_key,
+				%error,
+				"Omitting unreadable summary state."
+			);
+		})
+		.map(FlatOk::flat_ok)
+		.await?;
+
+	// MSC4311 serves PDUs only, so the row must parse as one before it is formatted.
+	self.services
+		.timeline
+		.get_pdu(&event_id)
+		.and_then(|_| {
+			self.services
+				.federation
+				.get_pdu_into(&event_id, Some(room_version))
+		})
+		.inspect_err(|error| {
+			warn!(%room_id, %event_id, %error, "Omitting unreadable summary event.");
+		})
+		.ok()
 		.await
 }
 
