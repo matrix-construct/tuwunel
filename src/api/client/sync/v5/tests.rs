@@ -3,7 +3,7 @@ use std::time::Duration;
 use ruma::{OneTimeKeyAlgorithm, api::client::sync::sync_events::DeviceLists, owned_user_id};
 
 use super::{
-	Request, Response, config_change_needs_position, is_empty_response, poll_timeout,
+	ListId, Request, Response, config_change_needs_position, is_empty_response, poll_timeout,
 	response::{E2EE, Extensions},
 };
 
@@ -47,6 +47,17 @@ fn unused_fallback_key_types_answer_a_woken_pass() {
 		is_empty_keeping_types(E2EE::default(), true),
 		"a woken pass without news is empty"
 	);
+}
+
+#[test]
+fn list_counts_alone_are_empty() {
+	let counts_only = || Response {
+		lists: [(ListId::from("all_rooms"), Default::default())].into(),
+		..Response::new(Default::default())
+	};
+
+	assert!(is_empty_response(&mut counts_only(), false));
+	assert!(is_empty_response(&mut counts_only(), true));
 }
 
 fn is_empty_keeping_types(e2ee: E2EE, woken: bool) -> bool {

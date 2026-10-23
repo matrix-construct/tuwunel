@@ -13,10 +13,16 @@ use tuwunel_core::{
 };
 use tuwunel_service::Services;
 
-use self::client::{Client, field, register, wait_until_ready};
+use self::{
+	client::{Client, field, register, wait_until_ready},
+	lists::{expect_count, list},
+};
 
 mod client;
 mod sliding_sync;
+
+#[path = "sliding_sync/lists.rs"]
+mod lists;
 
 const ALICE_TOKEN: &str = "sync-v5-list-filters-alice-access-token";
 const BOB_TOKEN: &str = "sync-v5-list-filters-bob-access-token";
@@ -178,14 +184,10 @@ async fn woken_poll_sees_the_change(
 	};
 
 	let (polled, flipped) = join(polling, flipping).await;
+
 	flipped?;
 
-	let count = list_count(&polled?, "directs");
-
-	count
-		.eq(&2)
-		.into_option()
-		.ok_or_else(|| err!("the woken poll reported {count} direct rooms rather than two"))
+	expect_count(&polled?, "directs", 2, "the woken poll")
 }
 
 #[implement(Client, params = "<'_>")]
@@ -256,15 +258,6 @@ async fn tag_room(&self, user_id: &UserId, room_id: &RoomId, tag: &str) -> Resul
 /// the proposal resolves in favour of `not_tags`.
 #[implement(Client, params = "<'_>")]
 async fn sync_lists(&self, since: Option<&str>) -> Result<Value> {
-	let list = |filters: Value| {
-		json!({
-			"ranges": [[0, 99]],
-			"required_state": [],
-			"timeline_limit": 0,
-			"filters": filters,
-		})
-	};
-
 	let priority = json!({
 		"tags": [FAVOURITE, LOW_PRIORITY],
 		"not_tags": [LOW_PRIORITY],
@@ -272,29 +265,16 @@ async fn sync_lists(&self, since: Option<&str>) -> Result<Value> {
 
 	let body = json!({
 		"lists": {
-			"directs": list(json!({ "is_dm": true })),
-			"others": list(json!({ "is_dm": false })),
-			"favourites": list(json!({ "tags": [FAVOURITE] })),
-			"untagged": list(json!({ "not_tags": [FAVOURITE] })),
-			"priority": list(priority),
+			"directs": list(&json!({ "is_dm": true })),
+			"others": list(&json!({ "is_dm": false })),
+			"favourites": list(&json!({ "tags": [FAVOURITE] })),
+			"untagged": list(&json!({ "not_tags": [FAVOURITE] })),
+			"priority": list(&priority),
 		},
 	});
 
 	self.sliding_sync(since, POLL_TIMEOUT, &body)
 		.await
-}
-
-/// The number of rooms a list reported matching.
-///
-/// The count is recomputed on every pass from the rooms the filters admitted,
-/// so it moves with `m.direct` even on a pass that re-sends no room payload.
-fn list_count(response: &Value, list: &str) -> u64 {
-	response
-		.get("lists")
-		.and_then(|lists| lists.get(list))
-		.and_then(|list| list.get("count"))
-		.and_then(Value::as_u64)
-		.unwrap_or_default()
 }
 
 /// The lists the room came back naming.

@@ -88,10 +88,10 @@ pub(super) async fn selector(
 	}
 
 	trace!(?rooms);
-	let lists = response_lists(rooms.iter());
+	let lists = response_lists(conn.lists.keys(), rooms.iter());
 
 	trace!(?lists);
-	let window = window(sync_info, conn, rooms.iter(), &lists, &invite_filter).await;
+	let window = window(sync_info, conn, rooms.iter(), &invite_filter).await;
 
 	trace!(?window);
 	(window, lists)
@@ -299,6 +299,39 @@ fn bounded_count(next_batch: u64, count: Option<u64>) -> u64 {
 		.unwrap_or_default()
 }
 
+fn room_sort(a: &WindowRoom, b: &WindowRoom) -> Ordering {
+	b.event_count
+		.cmp(&a.event_count)
+		.then_with(|| a.room_id.cmp(&b.room_id))
+}
+
+fn response_lists<'a, Ids, Rooms>(ids: Ids, rooms: Rooms) -> ResponseLists
+where
+	Ids: Iterator<Item = &'a ListId>,
+	Rooms: Iterator<Item = &'a WindowRoom>,
+{
+	// matrix-rust-sdk polls with `timeout=0` until a list reports its count.
+	let lists: ResponseLists = ids
+		.map(|id| (id.clone(), Default::default()))
+		.collect();
+
+	rooms
+		.filter(|room| {
+			!matches!(room.membership, Some(MembershipState::Leave | MembershipState::Ban))
+		})
+		.flat_map(|room| room.lists.iter())
+		.fold(lists, |mut lists, id| {
+			let list = lists.entry(id.clone()).or_default();
+
+			list.count = list
+				.count
+				.checked_add(uint!(1))
+				.expect("list count must not overflow JsInt");
+
+			lists
+		})
+}
+
 #[tracing::instrument(
 	level = "debug",
 	skip_all,
@@ -308,7 +341,6 @@ async fn window<'a, Rooms>(
 	sync_info: SyncInfo<'_>,
 	conn: &Connection,
 	rooms: Rooms,
-	lists: &ResponseLists,
 	invite_filter: &InviteFilter,
 ) -> Window
 where
@@ -318,9 +350,9 @@ where
 
 	let SyncInfo { services, sender_user, .. } = sync_info;
 
-	let selections = lists
-		.keys()
-		.filter_map(|id| conn.lists.get(id).map(|list| (id, list)))
+	let selections = conn
+		.lists
+		.iter()
 		.flat_map(|(id, list)| {
 			let full_range = list
 				.ranges
@@ -440,42 +472,16 @@ where
 		.take(end.saturating_add(1).saturating_sub(start))
 }
 
-fn response_lists<'a, Rooms>(rooms: Rooms) -> ResponseLists
-where
-	Rooms: Iterator<Item = &'a WindowRoom>,
-{
-	rooms
-		.filter(|room| {
-			!matches!(room.membership, Some(MembershipState::Leave | MembershipState::Ban))
-		})
-		.flat_map(|room| room.lists.iter())
-		.fold(ResponseLists::default(), |mut lists, id| {
-			let list = lists.entry(id.clone()).or_default();
-			list.count = list
-				.count
-				.checked_add(uint!(1))
-				.expect("list count must not overflow JsInt");
-
-			lists
-		})
-}
-
-fn room_sort(a: &WindowRoom, b: &WindowRoom) -> Ordering {
-	b.event_count
-		.cmp(&a.event_count)
-		.then_with(|| a.room_id.cmp(&b.room_id))
-}
-
 #[cfg(test)]
 mod tests {
 	use ruma::{
 		OwnedRoomId, api::client::sync::sync_events::v5::ListId,
-		events::room::member::MembershipState, room_id,
+		events::room::member::MembershipState, room_id, uint,
 	};
 
 	use super::{
-		ActivityCounts, ListIds, WindowRoom, activity_counts, detached_room, room_sort,
-		select_list_range,
+		ActivityCounts, ListIds, WindowRoom, activity_counts, detached_room, response_lists,
+		room_sort, select_list_range,
 	};
 
 	const NEXT_BATCH: u64 = 10;
@@ -608,6 +614,22 @@ mod tests {
 
 		assert!(room.lists.is_empty());
 		assert_eq!(room.membership, Some(MembershipState::Leave));
+	}
+
+	#[test]
+	fn unmatched_list_reports_zero() {
+		let all = ListId::from("all");
+		let invites = ListId::from("invites");
+		let joined = WindowRoom {
+			lists: [all.clone()].into(),
+			..room(room_id!("!joined:example.com").to_owned(), 1, 1, Some(MembershipState::Join))
+		};
+
+		let lists = response_lists([&all, &invites].into_iter(), [joined].iter());
+
+		assert_eq!(lists.len(), 2);
+		assert_eq!(lists[&all].count, uint!(1));
+		assert_eq!(lists[&invites].count, uint!(0));
 	}
 
 	fn room(
