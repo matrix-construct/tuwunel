@@ -1,10 +1,10 @@
 use std::collections::BTreeMap;
 
 use axum::extract::State;
-use ruma::api::federation::discovery::get_server_version;
 use tuwunel_core::Result;
+use tuwunel_service::rooms::reconcile::api;
 
-use crate::{Ruma, rooms::reconcile::api};
+use crate::Ruma;
 
 /// # `GET /_matrix/federation/v1/version`
 ///
@@ -22,7 +22,7 @@ pub(crate) async fn get_server_version_route(
 		])
 	});
 	Ok(api::version::Response {
-		server: Some(get_server_version::v1::Server {
+		server: Some(ruma::api::federation::discovery::get_server_version::v1::Server {
 			name: Some(tuwunel_core::version::name().into()),
 			version: Some(tuwunel_core::version::version().into()),
 			compiler: tuwunel_core::info::rustc::version().map(Into::into),

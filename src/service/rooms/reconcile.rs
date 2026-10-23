@@ -20,7 +20,7 @@ use rezzy_recon::{
 };
 use ruma::{
 	OwnedEventId, OwnedRoomId, OwnedServerName, RoomId, RoomVersionId, ServerName,
-	api::federation::{discovery::get_server_version, event::get_event},
+	api::federation::event::get_event,
 };
 use tokio::{sync::Notify, time::MissedTickBehavior};
 use tuwunel_core::{Result, Server};
@@ -46,6 +46,7 @@ pub mod api {
 		metadata! { method: GET, rate_limited: false, authentication: NoAuthentication,
 		path: "/_matrix/federation/v1/version", }
 		#[request]
+		#[allow(missing_copy_implementations)]
 		pub struct Request {}
 		#[response]
 		pub struct Response {
@@ -271,11 +272,7 @@ impl ServiceTrait for Reconcile {
 						lock(&self.last_done).insert(
 							key,
 							Instant::now()
-								+ if supported {
-									PEER_COOLDOWN
-								} else {
-									UNSUPPORTED_COOLDOWN
-								},
+								+ if supported { PEER_COOLDOWN } else { UNSUPPORTED_COOLDOWN },
 						);
 					}
 				}
@@ -342,8 +339,7 @@ impl Reconcile {
 				[DIGEST_FEATURE, BINDING_FEATURE, STRATA_FEATURE]
 					.iter()
 					.all(|name| features.get(*name) == Some(&true))
-			})
-		{
+			}) {
 			return Ok(false);
 		}
 		let remote = match self

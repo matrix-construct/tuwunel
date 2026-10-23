@@ -9,7 +9,7 @@ use rezzy_recon::{
 	build_bucket_sketches, encode_strata, triage::validate_bucket_requests,
 };
 use ruma::{OwnedEventId, RoomId, ServerName};
-use tuwunel_core::{Result, err, utils::hash::sha256};
+use tuwunel_core::{Err, Result, err, utils::hash::sha256};
 use tuwunel_service::rooms::timeline::reconciliation::RoomReconciliationState;
 
 use super::{
@@ -40,7 +40,6 @@ async fn room_snapshot(
 	.check()
 	.await?;
 	services
-		.rooms
 		.timeline
 		.reconciliation_state(room_id)
 		.await
