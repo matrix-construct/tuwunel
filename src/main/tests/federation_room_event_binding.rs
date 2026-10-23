@@ -17,12 +17,22 @@ use tuwunel_core::{
 			},
 			membership::create_join_event::v2::Request as JoinRequest,
 		},
-		events::{StateEventType, room::member::MembershipState},
+		events::{
+			StateEventType,
+			room::{
+				member::{MembershipState, RoomMemberEventContent},
+				message::RoomMessageEventContent,
+			},
+		},
 		exports::serde::Deserialize,
 	},
 	utils::stream::{IterStream, TryBroadbandExt},
 };
-use tuwunel_matrix::{Event, event::gen_event_id};
+use tuwunel_matrix::{
+	Event, PduEvent,
+	event::gen_event_id,
+	pdu::{PduBuilder, into_outgoing_federation},
+};
 use tuwunel_service::Services;
 
 use self::{
@@ -63,6 +73,8 @@ type ServedEvent = (OwnedEventId, AuthEvents);
 
 type AuthEvents = Vec<OwnedEventId>;
 
+type SignedEvent = (OwnedEventId, CanonicalJsonObject);
+
 type Fields<'a, T> = BTreeMap<&'a str, Vec<T>>;
 
 #[derive(Clone, Copy, Debug)]
@@ -87,8 +99,9 @@ struct JoinState {
 /// the requested room alone.
 ///
 /// An event from another room is as unknown as one that does not exist. The
-/// auth chain beside a room's state carries every auth event that state
-/// names, so a peer holding nothing else can authorise each state event.
+/// auth chain beside a room's state carries every auth event that state names,
+/// and on `/state` and `/state_ids` every one the requested event names, so a
+/// peer holding nothing else can authorise each of them.
 ///
 /// An event that storage cannot read drops out of a `/state` or `send_join`
 /// response rather than failing it. An auth chain that cannot be walked drops
@@ -140,6 +153,7 @@ async fn exercise(services: &Services, base: &str) -> Result {
 
 	for version in ["11", "12"] {
 		auth_chain_closes_over_state(&owner, &member, &member_id, version).await?;
+		auth_chain_closes_over_the_requested_event(&owner, &member, &member_id, version).await?;
 	}
 
 	let joiner_id = register(services, "bindingjoiner", JOINER_TOKEN).await?;
@@ -253,6 +267,174 @@ async fn rename_member(
 	let path = format!("rooms/{room_id}/state/m.room.member/{member_id}");
 
 	member.put_event(&path, &rename).await
+}
+
+/// The auth chain served with a room's state also carries the requested
+/// event's own auth events.
+///
+/// Two renames of the member fork the room, and a later message names the
+/// rename that the state at the message does not select. No state event names
+/// that rename, so only the message's own auth chain carries it to a peer.
+async fn auth_chain_closes_over_the_requested_event(
+	owner: &Client<'_>,
+	member: &Client<'_>,
+	member_id: &UserId,
+	version: &str,
+) -> Result {
+	let services = owner.services;
+	let room_id = owner
+		.create_room(&json!({ "preset": "public_chat", "room_version": version }))
+		.await?;
+
+	member
+		.post(&format!("rooms/{room_id}/join"), &json!({}))
+		.await?;
+
+	let first = sign_rename(services, member_id, &room_id, "First fork").await?;
+	let second = sign_rename(services, member_id, &room_id, "Second fork").await?;
+	let first = accept(services, &room_id, first).await?;
+	let second = accept(services, &room_id, second).await?;
+	let selected =
+		state_id(services, &room_id, &StateEventType::RoomMember, member_id.as_str()).await?;
+
+	let named = if selected == first { second } else { first };
+	let sent = sign_forked_message(services, member_id, &room_id, &selected, &named).await?;
+	let sent = accept(services, &room_id, sent).await?;
+	let (_, auth_events) = served_id(services, sent.clone()).await?;
+	let member_at_sent = member_at(services, &sent, member_id).await?;
+
+	assert!(auth_events.contains(&named), "the message does not name the unselected rename");
+	assert_ne!(member_at_sent, named, "the state at the message selects the rename it names");
+
+	let room_version = services.state.get_room_version(&room_id).await?;
+
+	for route in [Route::State, Route::StateIds] {
+		let body = route
+			.get_ok(services, owner.base, &room_id, &sent)
+			.await?;
+
+		let served = route
+			.served(services, &room_version, &body)
+			.await?;
+
+		let missing: Vec<_> = auth_events
+			.iter()
+			.filter(|auth_event| !served.contains_key(*auth_event))
+			.collect();
+
+		assert!(
+			missing.is_empty(),
+			"{route:?} in v{version} omits requested auth events {missing:?}"
+		);
+	}
+
+	Ok(())
+}
+
+/// Sign a rename of the member as a peer would send it, without handling it.
+///
+/// Renames signed before either is handled share their predecessors, so
+/// handling both forks the room.
+async fn sign_rename(
+	services: &Services,
+	member_id: &UserId,
+	room_id: &RoomId,
+	displayname: &str,
+) -> Result<SignedEvent> {
+	let room_version = services.state.get_room_version(room_id).await?;
+	let content = RoomMemberEventContent {
+		displayname: Some(displayname.to_owned()),
+		..RoomMemberEventContent::new(MembershipState::Join)
+	};
+
+	let builder = PduBuilder::state(member_id.as_str(), &content);
+	let (pdu, pdu_json) = sign(services, member_id, room_id, builder).await?;
+
+	Ok((pdu.event_id, into_outgoing_federation(pdu_json, &room_version)))
+}
+
+async fn sign(
+	services: &Services,
+	user_id: &UserId,
+	room_id: &RoomId,
+	builder: PduBuilder,
+) -> Result<(PduEvent, CanonicalJsonObject)> {
+	let state_lock = services.state.mutex.lock(room_id).await;
+
+	services
+		.timeline
+		.create_hash_and_sign_event(builder, user_id, room_id, &state_lock)
+		.await
+}
+
+async fn accept(
+	services: &Services,
+	room_id: &RoomId,
+	(event_id, pdu): SignedEvent,
+) -> Result<OwnedEventId> {
+	let accepted = services
+		.event_handler
+		.handle_incoming_pdu(services.globals.server_name(), room_id, &event_id, pdu, true)
+		.await?;
+
+	assert!(accepted.is_some(), "{event_id} was not accepted");
+
+	Ok(event_id)
+}
+
+/// Sign the member's message as a peer would send it, without handling it.
+///
+/// Among its auth events, `named` takes the place of `selected`, the member
+/// event the room's state holds.
+async fn sign_forked_message(
+	services: &Services,
+	member_id: &UserId,
+	room_id: &RoomId,
+	selected: &EventId,
+	named: &EventId,
+) -> Result<SignedEvent> {
+	let room_version = services.state.get_room_version(room_id).await?;
+	let builder = PduBuilder::timeline(&RoomMessageEventContent::text_plain("After the fork"));
+	let (pdu, pdu_json) = sign(services, member_id, room_id, builder).await?;
+	let auth_events = pdu
+		.auth_events()
+		.map(|auth_event| if auth_event == selected { named } else { auth_event })
+		.map(Into::into)
+		.map(CanonicalJsonValue::String)
+		.collect();
+
+	resign(services, pdu_json, CanonicalJsonValue::Array(auth_events), &room_version)
+}
+
+fn resign(
+	services: &Services,
+	mut pdu: CanonicalJsonObject,
+	auth_events: CanonicalJsonValue,
+	room_version: &RoomVersionId,
+) -> Result<SignedEvent> {
+	pdu.insert("auth_events".into(), auth_events);
+
+	let event_id = services
+		.server_keys
+		.gen_id_hash_and_sign_event(&mut pdu, room_version)?;
+
+	Ok((event_id, into_outgoing_federation(pdu, room_version)))
+}
+
+async fn member_at(
+	services: &Services,
+	event_id: &EventId,
+	user_id: &UserId,
+) -> Result<OwnedEventId> {
+	let shortstatehash = services
+		.state
+		.pdu_shortstatehash(event_id)
+		.await?;
+
+	services
+		.state_accessor
+		.state_get_id(shortstatehash, &StateEventType::RoomMember, user_id.as_str())
+		.await
 }
 
 /// An event that storage cannot read drops out of each response that serves it.
