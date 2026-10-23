@@ -155,7 +155,7 @@ const MAX_REMEMBERED_EVENTS: usize = 20_000;
 const MIN_EXCHANGE_SPACING: Duration = Duration::from_millis(250);
 const SAMPLE_FETCHES: usize = 16;
 const MAX_SAMPLE_FAILURE_PERCENT: usize = 25;
-const DIGEST_FEATURE: &str = "tk.nutra.msc4521.digest.algebraic_v1";
+const DIGEST_FEATURE: &str = "tk.nutra.msc4521.digest.algebraic_v1.0.0";
 
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 	mutex
@@ -342,7 +342,7 @@ impl Reconcile {
 			| Err(error) if error.is_not_found() => return Ok(false),
 			| Err(error) => return Err(error),
 		};
-		if remote.digest_type != "algebraic_v1" {
+		if remote.digest_type != "algebraic_v1.0.0" {
 			return Ok(false);
 		}
 		let remote_digest = RemoteDigest::from_wire(
@@ -375,7 +375,7 @@ impl Reconcile {
 						.execute(peer, api::diff::Request {
 							room_id: room.to_owned(),
 							mode: "sketch".into(),
-							digest_type: "algebraic_v1".into(),
+							digest_type: "algebraic_v1.0.0".into(),
 							local_digest: local.resident.accumulator().encode_digest(),
 							local_known_event_count: local
 								.resident

@@ -18,7 +18,7 @@ use super::{
 };
 use crate::Ruma;
 
-const DIGEST_TYPE: &str = "algebraic_v1";
+const DIGEST_TYPE: &str = "algebraic_v1.0.0";
 
 fn frame_id_for(event_ids: &[OwnedEventId]) -> String {
 	let ids: BTreeSet<&OwnedEventId> = event_ids.iter().collect();

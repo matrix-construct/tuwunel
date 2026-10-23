@@ -16,7 +16,7 @@ pub(crate) async fn get_server_version_route(
 	let unstable_features = services.server.config.msc4521_enabled.then(|| {
 		BTreeMap::from([
 			("tk.nutra.msc0501.reconciliation".to_owned(), true),
-			("tk.nutra.msc4521.digest.algebraic_v1".to_owned(), true),
+			("tk.nutra.msc4521.digest.algebraic_v1.0.0".to_owned(), true),
 		])
 	});
 	Ok(api::version::Response {
