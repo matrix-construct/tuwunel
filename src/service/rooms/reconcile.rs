@@ -31,10 +31,29 @@ use crate::{
 };
 
 pub mod api {
+	use std::collections::BTreeMap;
+
 	use ruma::{
-		OwnedEventId, OwnedRoomId, ServerSignatures,
-		api::{metadata, request, response},
+		OwnedEventId, OwnedRoomId,
+		api::{
+			auth_scheme::NoAuthentication, federation::authentication::ServerSignatures,
+			metadata, request, response,
+		},
 	};
+
+	pub mod version {
+		use super::*;
+		metadata! { method: GET, rate_limited: false, authentication: NoAuthentication,
+		path: "/_matrix/federation/v1/version", }
+		#[request]
+		pub struct Request {}
+		#[response]
+		pub struct Response {
+			pub server: Option<ruma::api::federation::discovery::get_server_version::v1::Server>,
+			#[serde(default)]
+			pub unstable_features: Option<BTreeMap<String, bool>>,
+		}
+	}
 
 	pub mod digest {
 		use super::*;
@@ -125,7 +144,6 @@ pub mod api {
 	}
 }
 
-const DIGEST_FEATURE: &str = "tk.nutra.msc4521.digest.algebraic_v1";
 const DIGEST_INTERVAL: Duration = Duration::from_secs(2);
 const PEER_COOLDOWN: Duration = Duration::from_secs(2);
 const MAX_ROOMS_PER_SWEEP: usize = 8;
@@ -137,6 +155,7 @@ const MAX_REMEMBERED_EVENTS: usize = 20_000;
 const MIN_EXCHANGE_SPACING: Duration = Duration::from_millis(250);
 const SAMPLE_FETCHES: usize = 16;
 const MAX_SAMPLE_FAILURE_PERCENT: usize = 25;
+const DIGEST_FEATURE: &str = "tk.nutra.msc4521.digest.algebraic_v1";
 
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 	mutex
@@ -304,20 +323,25 @@ impl Reconcile {
 		let version = self
 			.services
 			.federation
-			.execute(peer, get_server_version::v1::Request {})
+			.execute(peer, api::version::Request {})
 			.await?;
 		if !version
 			.unstable_features
 			.as_ref()
-			.is_some_and(|f| f.get(DIGEST_FEATURE) == Some(&true))
+			.is_some_and(|features| features.get(DIGEST_FEATURE) == Some(&true))
 		{
 			return Ok(false);
 		}
-		let remote = self
+		let remote = match self
 			.services
 			.federation
 			.execute(peer, api::strata::Request { room_id: room.to_owned() })
-			.await?;
+			.await
+		{
+			| Ok(response) => response,
+			| Err(error) if error.is_not_found() => return Ok(false),
+			| Err(error) => return Err(error),
+		};
 		if remote.digest_type != "algebraic_v1" {
 			return Ok(false);
 		}
@@ -568,7 +592,7 @@ impl Reconcile {
 		}
 	}
 
-	fn remember_unusable(&self, key: (ruma::OwnedServerName, OwnedEventId)) {
+	fn remember_unusable(&self, key: (OwnedServerName, OwnedEventId)) {
 		let now = Instant::now();
 		let mut unusable = lock(&self.unusable);
 		unusable.retain(|_, until| *until > now);

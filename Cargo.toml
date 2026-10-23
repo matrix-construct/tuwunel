@@ -973,6 +973,7 @@ unexpected_cfgs = { level = "warn", check-cfg = [
 	'cfg(core_intrinsics)',
 	'cfg(disable)',
 	'cfg(panic_trap)',
+	'cfg(ruma_unstable_exhaustive_types)',
 	'cfg(tokio_unstable)',
 	'cfg(tuwunel_always_prove_sendness)',
 	'cfg(tuwunel_always_prove_syncness)',
