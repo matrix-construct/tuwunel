@@ -9,9 +9,7 @@ pub(super) async fn resolve_true_destination(
 	server_name: OwnedServerName,
 	no_cache: bool,
 ) -> Result {
-	if !self.services.server.config.allow_federation {
-		return Err!("Federation is disabled on this homeserver.",);
-	}
+	self.services.server.config.require_federation()?;
 
 	if server_name == self.services.server.name {
 		return Err!(

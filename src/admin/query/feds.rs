@@ -225,9 +225,11 @@ pub(super) async fn prepare(
 	sweep: SweepArgs,
 	default_width: NonZeroUsize,
 ) -> Result<Prepared> {
-	if !context.services.server.config.allow_federation {
-		return Err!("Federation is disabled on this homeserver.");
-	}
+	context
+		.services
+		.server
+		.config
+		.require_federation()?;
 
 	let room_id = context.services.alias.maybe_resolve(room).await?;
 	let destinations = context

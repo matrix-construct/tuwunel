@@ -9,7 +9,7 @@ use std::num::NonZeroUsize;
 use clap::Subcommand;
 use ruma::{OwnedEventId, OwnedRoomId, OwnedServerName};
 use tokio::time::Instant;
-use tuwunel_core::{Err, Result};
+use tuwunel_core::Result;
 use tuwunel_service::fetcher::{Op, Opts};
 
 use crate::{Context, admin_command_dispatch};
@@ -141,9 +141,11 @@ pub(super) fn base_opts(
 /// Prints the response as pretty JSON, falling back to lossy UTF-8 on parse
 /// failure.
 pub(super) async fn run(context: &Context<'_>, opts: Opts) -> Result {
-	if !context.services.server.config.allow_federation {
-		return Err!("Federation is disabled on this homeserver.");
-	}
+	context
+		.services
+		.server
+		.config
+		.require_federation()?;
 
 	let timer = Instant::now();
 	let outcome = context.services.fetcher.fetch(opts).await?;

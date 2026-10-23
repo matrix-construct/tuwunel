@@ -229,20 +229,10 @@ where
 
 #[implement(super::Service)]
 fn validate_request_destination(&self, dest: &ServerName) -> Result {
-	if !self.services.server.config.allow_federation {
-		return Err!(Config("allow_federation", "Federation is disabled."));
-	}
-
-	if self
-		.services
+	self.services
 		.server
 		.config
-		.is_forbidden_remote_server_name(dest)
-	{
-		return Err!(Request(Forbidden(debug_warn!("Federation with {dest} is not allowed."))));
-	}
-
-	Ok(())
+		.require_remote_permitted(dest)
 }
 
 #[implement(super::Service)]

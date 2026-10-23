@@ -7,7 +7,7 @@ use either::{
 use ruma::ServerName;
 use serde::Deserialize;
 
-use crate::{Result, err, implement, utils::BoolExt};
+use crate::{Err, Result, err, implement, utils::BoolExt};
 
 #[derive(Deserialize, Clone, Debug)]
 #[serde(transparent)]
@@ -91,6 +91,37 @@ fn get_bind_ports(&self) -> Vec<u16> {
 #[inline]
 #[must_use]
 pub fn is_address_defaulted(&self) -> bool { self.address.is_none() }
+
+/// Refuses a request that needs federation while federation is disabled.
+///
+/// Inbound and outbound requests fail with the same 403 `M_FORBIDDEN`, since
+/// the refusal enforces the operator's setting rather than reporting a fault.
+#[implement(super::Config)]
+#[inline]
+pub fn require_federation(&self) -> Result {
+	self.allow_federation
+		.into_option()
+		.ok_or_else(|| err!(Request(Forbidden("Federation is disabled."))))
+}
+
+/// Refuses federation with a remote server while federation is disabled or
+/// the configuration forbids that server.
+///
+/// The forbidden-server check always permits the local server name. Either
+/// refusal fails with the same 403 `M_FORBIDDEN` for inbound and outbound
+/// requests.
+#[implement(super::Config)]
+pub fn require_remote_permitted(&self, server_name: &ServerName) -> Result {
+	self.require_federation()?;
+
+	if self.is_forbidden_remote_server_name(server_name) {
+		return Err!(Request(Forbidden(debug_warn!(
+			"Federation with {server_name} is not allowed."
+		))));
+	}
+
+	Ok(())
+}
 
 /// Determines whether a remote server name is forbidden.
 ///

@@ -91,27 +91,18 @@ pub(super) async fn auth_server(
 }
 
 fn auth_server_checks(services: &Services, x_matrix: &XMatrix) -> Result {
-	if !services.server.config.allow_federation {
-		return Err!(Config("allow_federation", "Federation is disabled."));
-	}
+	services.config.require_federation()?;
 
 	let destination = services.globals.server_name();
 	let claimed = x_matrix.destination.as_deref();
+
 	if claimed.is_some_and(|claimed| claimed != destination) {
 		return Err!(Request(Unauthorized("Invalid destination.")));
 	}
 
-	let origin = &x_matrix.origin;
-	if services
+	services
 		.config
-		.is_forbidden_remote_server_name(origin)
-	{
-		return Err!(Request(Forbidden(debug_warn!(
-			"Federation requests from {origin} denied."
-		))));
-	}
-
-	Ok(())
+		.require_remote_permitted(&x_matrix.origin)
 }
 
 async fn parse_x_matrix(request: &mut Request) -> Result<XMatrix> {

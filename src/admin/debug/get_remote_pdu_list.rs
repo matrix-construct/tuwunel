@@ -5,9 +5,7 @@ use crate::admin_command;
 
 #[admin_command]
 pub(super) async fn get_remote_pdu_list(&self, server: OwnedServerName, force: bool) -> Result {
-	if !self.services.server.config.allow_federation {
-		return Err!("Federation is disabled on this homeserver.",);
-	}
+	self.services.server.config.require_federation()?;
 
 	if server == self.services.globals.server_name() {
 		return Err!(

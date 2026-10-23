@@ -7,6 +7,7 @@ use reqwest::StatusCode;
 use serde_json::Value;
 use tuwunel::{Args, Runtime, Server};
 use tuwunel_core::Result;
+use tuwunel_service::Services;
 
 use self::fixture::boot;
 
@@ -46,27 +47,41 @@ fn smoke() -> Result {
 	})
 }
 
+/// An inbound federation request and a client request needing outbound
+/// federation both answer 403 while federation is disabled.
+///
+/// The room summary request names a remote alias, so answering it needs a
+/// federation query the server must refuse before any lookup or connection.
 #[test]
 fn boots_with_federation_disabled() -> Result {
 	boot(
 		"federation-disabled",
 		["allow_federation=false", "log_enable=false"],
 		async |services, base| {
-			let response = services
-				.client
-				.clients
-				.default
-				.get(format!("{base}/_matrix/federation/v1/version"))
-				.send()
-				.await?;
+			let inbound = format!("{base}/_matrix/federation/v1/version");
+			let outbound =
+				format!("{base}/_matrix/client/v1/room_summary/%23room:remote.example");
 
-			assert_eq!(response.status(), StatusCode::FORBIDDEN);
-
-			let body: Value = response.json().await?;
-
-			assert_eq!(body["errcode"], "M_FORBIDDEN");
-			assert_eq!(body["error"], "M_FORBIDDEN: Federation is disabled.");
-			Ok(())
+			expect_federation_disabled(services, &inbound).await?;
+			expect_federation_disabled(services, &outbound).await
 		},
 	)
+}
+
+async fn expect_federation_disabled(services: &Services, url: &str) -> Result {
+	let response = services
+		.client
+		.clients
+		.default
+		.get(url)
+		.send()
+		.await?;
+
+	assert_eq!(response.status(), StatusCode::FORBIDDEN, "{url}");
+
+	let body: Value = response.json().await?;
+
+	assert_eq!(body["errcode"], "M_FORBIDDEN", "{url}");
+	assert_eq!(body["error"], "M_FORBIDDEN: Federation is disabled.", "{url}");
+	Ok(())
 }

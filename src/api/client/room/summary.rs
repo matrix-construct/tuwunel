@@ -219,9 +219,7 @@ async fn remote_room_summary_hierarchy_response(
 	sender_user: Option<&UserId>,
 ) -> Result<RoomSummary> {
 	trace!(?sender_user, ?servers, ?room_id, "Sending remote room summary response");
-	if !services.config.allow_federation {
-		return Err!(Request(Forbidden("Federation is disabled.")));
-	}
+	services.config.require_federation()?;
 
 	if services.metadata.is_disabled(room_id).await {
 		return Err!(Request(Forbidden(
