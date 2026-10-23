@@ -139,9 +139,7 @@ async fn exercise(services: &Services, base: &str) -> Result {
 
 	let replayed = client.sync(Some(&consumed), &opened).await?;
 
-	let lost = [beacon_id.as_str(), pinned_id.as_str()];
-
-	expect_state(&replayed, &room, &lost, "lost response replay")?;
+	expect_state(&replayed, &room, &[pinned_id.as_str()], "lost response replay")?;
 
 	let stopped_id = client
 		.put_state(&room, BEACON, user.as_str(), &json!({ "live": false }))

@@ -234,7 +234,7 @@ pub(crate) async fn sync_events_v5_route(
 
 			apply_profiles(sync_info, &conn, &window, &ranges, &mut extensions).await?;
 			apply_ranges(&conn, &window, &mut ranges, &mut extensions);
-			conn.update_rooms_epilogue(ranges.room_updates());
+			conn.update_rooms_epilogue(since, ranges.room_updates());
 			conn.update_profiles_epilogue();
 			response.rooms = ranges.into_payloads();
 			response.extensions = extensions.into_response(&response.rooms);

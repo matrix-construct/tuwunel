@@ -5,6 +5,7 @@ mod tests;
 
 use std::{
 	collections::{BTreeMap, btree_map::Entry},
+	mem::replace,
 	sync::Arc,
 };
 
@@ -104,6 +105,29 @@ pub struct Room {
 	/// compare against the cursor and resend outliers until a delivery records one.
 	#[serde(default)]
 	pub shortstatehash: ShortStateHash,
+
+	/// The room's delivery progress before the last request advanced it, kept in
+	/// memory for a retry of that request's position.
+	#[serde(skip)]
+	pub checkpoint: Option<Checkpoint>,
+}
+
+/// A room's delivery progress as a request resuming from `pos` found it.
+///
+/// A retry of that position restores it, so the retry repeats the delta a lost
+/// response carried instead of resending the room's whole state. A restart
+/// forgets it, and a retry then rewinds the room to that position and forgets
+/// its delivered configuration.
+#[derive(Clone, Debug)]
+pub struct Checkpoint {
+	/// The position the request resumed from.
+	pos: u64,
+
+	/// The room's cursor before the request advanced it.
+	roomsince: u64,
+
+	/// The delivered configuration the request replaced, boxed since most hold none.
+	config: Option<Box<DeliveredConfig>>,
 }
 
 /// Fingerprints of delivered required-state selectors.
@@ -315,48 +339,106 @@ pub fn store(&self, service: &Service, key: &ConnectionKey) {
 	);
 }
 
+/// Rewind each room past a retried position to where that position left it.
+///
+/// A room checkpointed at the retried position is restored as the client last
+/// saw it. Any other room past the position rewinds to it and forgets its
+/// delivered configuration.
 #[implement(Connection)]
 #[tracing::instrument(level = "debug", skip(self))]
-pub fn update_rooms_prologue(&mut self, retard_since: Option<u64>) {
-	self.rooms.values_mut().for_each(|room| {
-		if let Some(retard_since) = retard_since
-			&& room.roomsince > retard_since
-		{
-			room.roomsince = retard_since;
-			room.set_config(DeliveredConfig::default());
-		}
-	});
+pub fn update_rooms_prologue(&mut self, retry_since: Option<u64>) {
+	let Some(retry_since) = retry_since else {
+		return;
+	};
+
+	self.rooms
+		.values_mut()
+		.filter(|room| room.roomsince > retry_since)
+		.for_each(|room| room.rewind(retry_since));
+}
+
+#[implement(Room)]
+fn rewind(&mut self, since: u64) {
+	let (roomsince, config) = self.take_checkpoint(since).map_or_else(
+		|| (since, Some(DeliveredConfig::default())),
+		|Checkpoint { roomsince, config, .. }| (roomsince, config.map(|config| *config)),
+	);
+
+	self.roomsince = roomsince;
+	if let Some(config) = config {
+		self.replace_config(config);
+	}
+}
+
+#[implement(Room)]
+fn take_checkpoint(&mut self, pos: u64) -> Option<Checkpoint> {
+	self.checkpoint
+		.take()
+		.filter(|checkpoint| checkpoint.pos == pos)
+}
+
+#[implement(Room)]
+fn replace_config(
+	&mut self,
+	(config_hash, required_state, shortstatehash): DeliveredConfig,
+) -> DeliveredConfig {
+	(
+		replace(&mut self.config_hash, config_hash),
+		replace(&mut self.required_state, required_state),
+		replace(&mut self.shortstatehash, shortstatehash),
+	)
 }
 
 /// Advance the per-room cursor for each complete bounded room range.
 ///
-/// `roomsince` is the lower bound of every content query for its room. Only
-/// rooms whose complete range was safely assembled may advance. A failed room
-/// keeps its cursor and retries the same range after a later wake.
+/// `roomsince` is the lower bound of every content query for its room. A failed
+/// room keeps its cursor and retries the same range after a later wake. An
+/// advanced room is checkpointed at `since`, the position the request resumed from.
 #[implement(Connection)]
 #[tracing::instrument(level = "debug", skip_all)]
-pub fn update_rooms_epilogue<'a, Complete>(&mut self, complete: Complete)
+pub fn update_rooms_epilogue<'a, Complete>(&mut self, since: u64, complete: Complete)
 where
 	Complete: Iterator<Item = RoomUpdate<'a>> + Send + 'a,
 {
 	let next_batch = self.next_batch;
 
 	complete.for_each(|(room_id, config)| {
-		let room = self.rooms.entry(room_id.into()).or_default();
-
-		room.roomsince = next_batch;
-		if let Some(config) = config {
-			room.set_config(config);
-		}
+		self.rooms
+			.entry(room_id.into())
+			.or_default()
+			.advance(since, next_batch, config);
 	});
 }
 
-impl Room {
-	fn set_config(&mut self, (config_hash, required_state, shortstatehash): DeliveredConfig) {
-		self.config_hash = config_hash;
-		self.required_state = required_state;
-		self.shortstatehash = shortstatehash;
-	}
+/// Advance the room for a request that resumed from `since`.
+///
+/// A checkpoint taken at `since` is kept; one from another position gives way to
+/// the room as this request found it. The checkpoint keeps the first configuration
+/// replaced at `since` that the delivery changed, so a retry restores what the
+/// client last saw.
+#[implement(Room)]
+fn advance(&mut self, since: u64, next_batch: u64, config: Option<DeliveredConfig>) {
+	let found = self.take_checkpoint(since).unwrap_or(Checkpoint {
+		pos: since,
+		roomsince: self.roomsince,
+		config: None,
+	});
+
+	// An unchanged configuration needs no copy; the room still holds it.
+	let replaced = config
+		.map(|config| self.replace_config(config))
+		.filter(|(config_hash, required_state, shortstatehash)| {
+			(*config_hash, required_state, *shortstatehash)
+				!= (self.config_hash, &self.required_state, self.shortstatehash)
+		});
+
+	let checkpoint = Checkpoint {
+		config: found.config.or_else(|| replaced.map(Box::new)),
+		..found
+	};
+
+	self.roomsince = next_batch;
+	self.checkpoint = Some(checkpoint);
 }
 
 /// Records that this pass carried the syncing user's whole profile.

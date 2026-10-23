@@ -1,9 +1,10 @@
 #![cfg(test)]
 
-use serde_json::{Value, json, value::to_raw_value};
+use serde_json::{Map, Value, json, value::to_raw_value};
 use tuwunel_core::{
-	Result,
-	ruma::{OwnedEventId, RoomId, UserId},
+	Result, err,
+	ruma::{OwnedEventId, OwnedRoomId, RoomId, UserId},
+	utils::BoolExt,
 };
 use tuwunel_matrix::pdu::PduBuilder;
 use tuwunel_service::Services;
@@ -34,6 +35,7 @@ mod resume;
 mod state;
 
 const TOKEN: &str = "sync-v5-state-resend-test-access-token";
+const BYSTANDER_TOKEN: &str = "sync-v5-state-resend-bystander-access-token";
 const CALL_MEMBER: &str = "org.matrix.msc3401.call.member";
 const TOPIC: &str = "m.room.topic";
 const COUNTED_KEY: &str = "counted";
@@ -188,4 +190,108 @@ async fn forget_delivered_snapshots(services: &Services) -> Result {
 	}
 
 	Ok(())
+}
+
+/// Answers a retried position with what the lost response carried.
+///
+/// matrix-rust-sdk resends its last position whenever it abandons a request,
+/// and a request that ran a pass before it was abandoned has already advanced
+/// every room in its window. A retry returns those rooms to where the client
+/// left them, so a quiet room stays out of the reply and a busy room repeats
+/// only its new events.
+#[test]
+fn retried_position_repeats_only_the_lost_delta() -> Result {
+	boot("sync-v5-retried-position", ["log_enable=false"], retries)
+}
+
+async fn retries(services: &Services, base: &str) -> Result {
+	register(services, "retries", TOKEN).await?;
+	register(services, "bystander", BYSTANDER_TOKEN).await?;
+
+	let client = Client { services, base, token: TOKEN };
+	let bystander = Client { services, base, token: BYSTANDER_TOKEN };
+	let busy = room_with_call_member(&client).await?;
+	let quiet = room_with_call_member(&client).await?;
+	let request = sync_request();
+	let initial = client.sync(None, &request).await?;
+	let message_id = client.send_text(&busy, "news", "news").await?;
+	let answered = client.sync(Some(&initial), &request).await?;
+	let retried = client.sync(Some(&initial), &request).await?;
+
+	for (response, context) in [(&answered, "answered"), (&retried, "retried")] {
+		expect_state(response, &busy, &[], context)?;
+		expect_timeline(response, &busy, message_id.as_str(), context)?;
+		expect_absent(response, &quiet, context)?;
+	}
+
+	assert_eq!(
+		rooms_without_ages(&retried),
+		rooms_without_ages(&answered),
+		"retry changed room payloads"
+	);
+
+	bystander.create_room(&json!({})).await?;
+
+	let idle = client.sync(Some(&retried), &request).await?;
+	let idle_retried = client.sync(Some(&retried), &request).await?;
+
+	for (response, context) in [(&idle, "idle"), (&idle_retried, "idle retried")] {
+		expect_absent(response, &busy, context)?;
+		expect_absent(response, &quiet, context)?;
+	}
+
+	Ok(())
+}
+
+async fn room_with_call_member(client: &Client<'_>) -> Result<OwnedRoomId> {
+	let room = client
+		.create_room(&json!({ "preset": "public_chat" }))
+		.await?;
+
+	client
+		.put_state(&room, CALL_MEMBER, COUNTED_KEY, &json!({ "revision": 1 }))
+		.await?;
+
+	Ok(room)
+}
+
+fn expect_timeline(response: &Value, room: &RoomId, event_id: &str, context: &str) -> Result {
+	let carried = response["rooms"][room.as_str()]["timeline"]
+		.as_array()
+		.into_iter()
+		.flatten()
+		.any(|event| event["event_id"] == event_id);
+
+	BoolExt::ok_or_else(carried, || err!("{context}: timeline lacks {event_id}"))
+}
+
+fn expect_absent(response: &Value, room: &RoomId, context: &str) -> Result {
+	let payload = &response["rooms"][room.as_str()];
+
+	BoolExt::ok_or_else(payload.is_null(), || err!("{context}: unexpected {payload}"))
+}
+
+// Event ages vary with the moment each reply was built.
+fn rooms_without_ages(response: &Value) -> Value {
+	let mut rooms = response["rooms"].clone();
+
+	rooms
+		.as_object_mut()
+		.into_iter()
+		.flat_map(Map::values_mut)
+		.filter_map(|room| {
+			room.get_mut("timeline")
+				.and_then(Value::as_array_mut)
+		})
+		.flatten()
+		.filter_map(|event| {
+			event
+				.get_mut("unsigned")
+				.and_then(Value::as_object_mut)
+		})
+		.for_each(|unsigned| {
+			unsigned.remove("age");
+		});
+
+	rooms
 }

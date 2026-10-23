@@ -1,4 +1,7 @@
-use std::{collections::BTreeMap, iter::once};
+use std::{
+	collections::BTreeMap,
+	iter::{Once, once},
+};
 
 use minicbor_serde::{from_slice, to_vec};
 use ruma::{
@@ -14,7 +17,7 @@ use ruma::{
 };
 use serde::{Deserialize, Serialize};
 
-use super::{Connection, Lists, RequiredState, Room, Subscriptions};
+use super::{Connection, Lists, RequiredState, Room, RoomUpdate, Subscriptions};
 
 const LIST_ID: &str = "main";
 
@@ -142,6 +145,7 @@ fn epilogue_advances_only_complete_ranges() {
 		config_hash: 11,
 		required_state: [2, 4].into_iter().collect(),
 		shortstatehash: 29,
+		..Default::default()
 	};
 
 	let incomplete_room = Room {
@@ -149,6 +153,7 @@ fn epilogue_advances_only_complete_ranges() {
 		config_hash: 12,
 		required_state: [3, 5].into_iter().collect(),
 		shortstatehash: 29,
+		..Default::default()
 	};
 
 	let mut conn = Connection {
@@ -158,7 +163,7 @@ fn epilogue_advances_only_complete_ranges() {
 		..Default::default()
 	};
 
-	conn.update_rooms_epilogue(once((complete, Some((23, once(4).collect(), 31)))));
+	conn.update_rooms_epilogue(3, delivery(complete, (23, &[4], 31)));
 
 	assert_eq!(conn.rooms[complete].roomsince, 5);
 	assert_eq!(conn.rooms[complete].config_hash, 23);
@@ -175,7 +180,7 @@ fn epilogue_tracks_a_first_complete_range() {
 	let complete = room_id!("!new:example.com");
 	let mut conn = Connection { next_batch: 7, ..Default::default() };
 
-	conn.update_rooms_epilogue(once((complete, None)));
+	conn.update_rooms_epilogue(3, once((complete, None)));
 
 	assert_eq!(conn.rooms[complete].roomsince, 7);
 	assert_eq!(conn.rooms[complete].config_hash, 0);
@@ -191,6 +196,7 @@ fn prologue_rewinds_a_complete_range_for_replay() {
 		config_hash: 17,
 		required_state: [2, 4].into_iter().collect(),
 		shortstatehash: 29,
+		..Default::default()
 	};
 
 	let retained_room = Room {
@@ -198,6 +204,7 @@ fn prologue_rewinds_a_complete_range_for_replay() {
 		config_hash: 18,
 		required_state: [3, 5].into_iter().collect(),
 		shortstatehash: 31,
+		..Default::default()
 	};
 
 	let mut conn = Connection {
@@ -215,6 +222,76 @@ fn prologue_rewinds_a_complete_range_for_replay() {
 	assert_eq!(conn.rooms[retained].config_hash, 18);
 	assert_eq!(conn.rooms[retained].required_state.as_slice(), &[3, 5]);
 	assert_eq!(conn.rooms[retained].shortstatehash, 31);
+}
+
+#[test]
+fn retry_restores_the_room_as_the_lost_request_found_it() {
+	let room_id = room_id!("!retried:example.com");
+	let mut conn = connection_with_room(room_id);
+
+	conn.update_rooms_epilogue(5, delivery(room_id, (23, &[4, 6], 31)));
+	conn.next_batch = 12;
+	conn.update_rooms_epilogue(5, delivery(room_id, (37, &[6], 41)));
+	conn.update_rooms_prologue(Some(5));
+
+	let room = &conn.rooms[room_id];
+
+	assert_delivery(room, 5, (19, &[4], 29));
+	assert!(room.checkpoint.is_none());
+}
+
+#[test]
+fn checkpoint_holds_no_copy_of_an_unchanged_configuration() {
+	let room_id = room_id!("!unchanged:example.com");
+	let mut conn = connection_with_room(room_id);
+
+	conn.update_rooms_epilogue(5, delivery(room_id, (19, &[4], 29)));
+
+	let checkpoint = conn.rooms[room_id].checkpoint.as_ref();
+
+	assert!(checkpoint.is_some_and(|checkpoint| checkpoint.config.is_none()));
+
+	conn.update_rooms_prologue(Some(5));
+
+	assert_delivery(&conn.rooms[room_id], 5, (19, &[4], 29));
+}
+
+#[test]
+fn retry_restores_the_cursor_of_a_room_without_payload() {
+	let room_id = room_id!("!quiet:example.com");
+	let mut conn = connection_with_room(room_id);
+
+	conn.update_rooms_epilogue(5, once((room_id, None)));
+	conn.update_rooms_prologue(Some(5));
+
+	assert_delivery(&conn.rooms[room_id], 5, (19, &[4], 29));
+}
+
+#[test]
+fn retry_returns_a_room_first_delivered_by_the_lost_request_to_initial() {
+	let room_id = room_id!("!first:example.com");
+	let mut conn = Connection { next_batch: 9, ..Default::default() };
+
+	conn.update_rooms_epilogue(5, delivery(room_id, (23, &[4], 31)));
+	conn.update_rooms_prologue(Some(5));
+
+	assert_delivery(&conn.rooms[room_id], 0, (0, &[], 0));
+}
+
+#[test]
+fn replay_of_an_older_position_forgets_the_configuration() {
+	let room_id = room_id!("!older:example.com");
+	let mut conn = connection_with_room(room_id);
+
+	conn.update_rooms_epilogue(5, once((room_id, None)));
+	conn.next_batch = 12;
+	conn.update_rooms_epilogue(9, once((room_id, None)));
+	conn.update_rooms_prologue(Some(5));
+
+	let room = &conn.rooms[room_id];
+
+	assert_delivery(room, 5, (0, &[], 0));
+	assert!(room.checkpoint.is_none());
 }
 
 #[test]
@@ -339,6 +416,7 @@ fn epilogue_leaves_configuration_for_extension_only_range() {
 		config_hash: 19,
 		required_state: [2, 4].into_iter().collect(),
 		shortstatehash: 29,
+		..Default::default()
 	};
 
 	let mut conn = Connection {
@@ -347,7 +425,7 @@ fn epilogue_leaves_configuration_for_extension_only_range() {
 		..Default::default()
 	};
 
-	conn.update_rooms_epilogue(once((room_id, None)));
+	conn.update_rooms_epilogue(3, once((room_id, None)));
 
 	assert_eq!(conn.rooms[room_id].roomsince, 7);
 	assert_eq!(conn.rooms[room_id].config_hash, 19);
@@ -669,6 +747,7 @@ fn connection_cbor_preserves_required_state_and_allows_downgrade() {
 		config_hash: 19,
 		required_state: (1..=32).collect(),
 		shortstatehash: 23,
+		..Default::default()
 	};
 
 	let conn = Connection {
@@ -720,6 +799,25 @@ fn room_cbor_defaults_snapshot_and_allows_downgrade() {
 	assert_eq!(downgraded.roomsince, 7);
 	assert_eq!(downgraded.config_hash, 19);
 	assert_eq!(downgraded.required_state, previous.required_state);
+}
+
+#[test]
+fn room_cbor_leaves_out_the_checkpoint() {
+	let room_id = room_id!("!checkpointed:example.com");
+	let mut conn = Connection { next_batch: 9, ..Default::default() };
+
+	conn.update_rooms_epilogue(5, delivery(room_id, (23, &[4], 31)));
+
+	let room = &conn.rooms[room_id];
+	let bytes = to_vec(room).expect("room must encode");
+	let decoded: Room = from_slice(&bytes).expect("room must decode");
+	let without_checkpoint = Room { checkpoint: None, ..room.clone() };
+
+	assert!(room.checkpoint.is_some());
+	assert!(decoded.checkpoint.is_none());
+	assert_eq!(bytes, to_vec(&without_checkpoint).expect("room must encode"));
+	assert_eq!(decoded.roomsince, 9);
+	assert_eq!(decoded.config_hash, 23);
 }
 
 fn request_with_list(list: List) -> Request {
@@ -809,6 +907,43 @@ fn ranges_from_u64(ranges: &[(u64, u64)]) -> Ranges {
 		.iter()
 		.map(|&(start, end)| (uint(start), uint(end)))
 		.collect()
+}
+
+fn delivery<'a>(
+	room_id: &'a RoomId,
+	(config_hash, required_state, shortstatehash): (u64, &[u64], u64),
+) -> Once<RoomUpdate<'a>> {
+	let config = (config_hash, required_state.iter().copied().collect(), shortstatehash);
+
+	once((room_id, Some(config)))
+}
+
+fn connection_with_room(room_id: &RoomId) -> Connection {
+	let room = Room {
+		roomsince: 5,
+		config_hash: 19,
+		required_state: once(4).collect(),
+		shortstatehash: 29,
+		..Default::default()
+	};
+
+	Connection {
+		next_batch: 9,
+		rooms: [(room_id.to_owned(), room)].into(),
+		..Default::default()
+	}
+}
+
+#[track_caller]
+fn assert_delivery(
+	room: &Room,
+	roomsince: u64,
+	(config_hash, required_state, shortstatehash): (u64, &[u64], u64),
+) {
+	assert_eq!(room.roomsince, roomsince);
+	assert_eq!(room.config_hash, config_hash);
+	assert_eq!(room.required_state.as_slice(), required_state);
+	assert_eq!(room.shortstatehash, shortstatehash);
 }
 
 fn uint(value: u64) -> UInt { UInt::new(value).expect("range value must fit UInt") }
