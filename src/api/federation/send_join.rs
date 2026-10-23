@@ -1,10 +1,10 @@
 use std::borrow::Borrow;
 
 use axum::extract::State;
-use futures::{FutureExt, StreamExt, TryFutureExt, TryStreamExt, future::try_join4};
+use futures::{FutureExt, StreamExt, future::try_join4};
 use ruma::{
-	CanonicalJsonObject, EventId, OwnedEventId, OwnedRoomId, OwnedServerName, OwnedUserId,
-	RoomId, ServerName, UserId,
+	CanonicalJsonObject, OwnedEventId, OwnedRoomId, OwnedServerName, OwnedUserId, RoomId,
+	ServerName, UserId,
 	api::federation::membership::create_join_event,
 	events::{
 		StateEventType,
@@ -14,19 +14,19 @@ use ruma::{
 use serde_json::value::RawValue as RawJsonValue;
 use tuwunel_api_client::calculate_heroes;
 use tuwunel_core::{
-	Err, Result, at, debug_error, err,
+	Err, Result, at, err,
 	itertools::Itertools,
 	utils::{
 		BoolExt,
 		future::{BoolExt as _, ReadyBoolExt},
-		stream::{BroadbandExt, IterStream, TryBroadbandExt, TryReadyExt},
+		stream::{BroadbandExt, IterStream, ReadyExt},
 	},
 	warn,
 };
 use tuwunel_matrix::{RoomVersionRules, event::gen_event_id_canonical_json, room_version};
 use tuwunel_service::Services;
 
-use super::utils::require_known_room;
+use super::utils::{auth_chain_pdu, require_known_room, state_pdu, walk_auth_chain};
 use crate::Ruma;
 
 /// # `PUT /_matrix/federation/v2/send_join/{roomId}/{eventId}`
@@ -208,28 +208,22 @@ async fn create_join_event(
 	let include_auth_event =
 		|event_id: &OwnedEventId| !omit_members || state_ids.binary_search(event_id).is_err();
 
-	let federation_pdu = async |event_id: &EventId, part: &str| {
-		services
-			.federation
-			.get_pdu_into(event_id, Some(&room_version_id))
-			.inspect_err(|e| debug_error!(?event_id, %part, error = %e, "event not found"))
-			.await
-	};
-
 	let auth_heads = state_ids.iter().map(Borrow::borrow);
 
-	let auth_chain = services
-		.auth_chain
-		.event_ids_iter(room_id, &room_version_id, auth_heads)
-		.ready_try_filter(include_auth_event)
-		.broad_and_then(async |event_id| federation_pdu(&event_id, "auth_chain").await)
-		.try_collect();
+	let auth_chain = walk_auth_chain(services, room_id, &room_version_id, auth_heads)
+		.ready_filter(include_auth_event)
+		.broad_filter_map(async |event_id| {
+			auth_chain_pdu(services, &event_id, &room_version_id).await
+		})
+		.collect()
+		.map(Ok);
 
 	let state = state_ids
 		.iter()
-		.try_stream()
-		.broad_and_then(|event_id| federation_pdu(event_id, "state"))
-		.try_collect();
+		.stream()
+		.broad_filter_map(|event_id| state_pdu(services, event_id, &room_version_id))
+		.collect()
+		.map(Ok);
 
 	// Join event for new server.
 	let event = services

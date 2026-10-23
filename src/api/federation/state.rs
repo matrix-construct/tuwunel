@@ -1,19 +1,20 @@
 use std::borrow::Borrow;
 
 use axum::extract::State;
-use futures::{FutureExt, StreamExt, TryFutureExt, TryStreamExt, future::try_join};
+use futures::{
+	FutureExt, StreamExt,
+	future::{join, try_join},
+};
 use ruma::{OwnedEventId, api::federation::event::get_room_state};
 use tuwunel_core::{
 	Result, at, err,
-	result::NotFound,
-	utils::{
-		future::TryExtExt,
-		stream::{IterStream, TryBroadbandExt, TryReadyExt},
-	},
-	warn,
+	utils::stream::{BroadbandExt, IterStream},
 };
 
-use super::{AccessCheck, utils::require_event_in_room};
+use super::{
+	AccessCheck,
+	utils::{auth_chain_pdu, require_event_in_room, state_pdu, walk_auth_chain},
+};
 use crate::Ruma;
 
 /// # `GET /_matrix/federation/v1/state/{roomId}`
@@ -53,34 +54,17 @@ pub(crate) async fn get_room_state_route(
 
 	let auth_heads = state_ids.iter().map(Borrow::borrow);
 
-	let auth_chain = services
-		.auth_chain
-		.event_ids_iter(&body.room_id, &room_version, auth_heads)
-		.broad_and_then(async |id| {
-			services
-				.federation
-				.get_pdu_into(&id, Some(&room_version))
-				.map(NotFound::optional)
-				.inspect_err(|error| warn!(?id, %error, "Omitting unreadable auth event."))
-				.ok()
-				.map(Option::flatten)
-				.map(Ok)
-				.await
-		})
-		.ready_try_filter_map(Ok)
-		.try_collect();
+	let auth_chain = walk_auth_chain(&services, &body.room_id, &room_version, auth_heads)
+		.broad_filter_map(async |id| auth_chain_pdu(&services, &id, &room_version).await)
+		.collect();
 
 	let pdus = state_ids
 		.iter()
-		.try_stream()
-		.broad_and_then(|id| {
-			services
-				.federation
-				.get_pdu_into(id, Some(&room_version))
-		})
-		.try_collect();
+		.stream()
+		.broad_filter_map(|id| state_pdu(&services, id, &room_version))
+		.collect();
 
-	let (auth_chain, pdus) = try_join(auth_chain, pdus).await?;
+	let (auth_chain, pdus) = join(auth_chain, pdus).await;
 
 	Ok(get_room_state::v1::Response { auth_chain, pdus })
 }

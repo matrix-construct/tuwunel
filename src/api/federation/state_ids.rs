@@ -1,11 +1,14 @@
 use std::borrow::Borrow;
 
 use axum::extract::State;
-use futures::{StreamExt, TryFutureExt, TryStreamExt, future::try_join};
+use futures::{StreamExt, TryFutureExt, future::try_join};
 use ruma::{OwnedEventId, api::federation::event::get_room_state_ids};
 use tuwunel_core::{Result, at, err};
 
-use super::{AccessCheck, utils::require_event_in_room};
+use super::{
+	AccessCheck,
+	utils::{require_event_in_room, walk_auth_chain},
+};
 use crate::Ruma;
 
 /// # `GET /_matrix/federation/v1/state_ids/{roomId}`
@@ -45,11 +48,9 @@ pub(crate) async fn get_room_state_ids_route(
 
 	let auth_heads = pdu_ids.iter().map(Borrow::borrow);
 
-	let auth_chain_ids = services
-		.auth_chain
-		.event_ids_iter(&body.room_id, &room_version, auth_heads)
-		.try_collect()
-		.await?;
+	let auth_chain_ids = walk_auth_chain(&services, &body.room_id, &room_version, auth_heads)
+		.collect()
+		.await;
 
 	Ok(get_room_state_ids::v1::Response { auth_chain_ids, pdu_ids })
 }

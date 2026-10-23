@@ -1,9 +1,12 @@
-use futures::{FutureExt, future::join3};
-use ruma::{EventId, OwnedRoomId, RoomId, ServerName};
+use futures::{FutureExt, Stream, TryStreamExt, future::join3};
+use ruma::{EventId, OwnedEventId, OwnedRoomId, RoomId, RoomVersionId, ServerName};
 use serde::Deserialize;
+use serde_json::value::RawValue as RawJsonValue;
 use tuwunel_core::{
 	Err, Result, err, implement, is_false,
-	utils::{FutureBoolExt, future::ReadyBoolExt, option::OptionExt},
+	result::NotFound,
+	utils::{FutureBoolExt, ReadyExt, future::ReadyBoolExt, option::OptionExt},
+	warn,
 };
 use tuwunel_service::Services;
 
@@ -93,4 +96,64 @@ pub(super) async fn require_event_in_room(
 		.is_ok_and(|pdu| pdu.room_id == room_id)
 		.then_some(())
 		.ok_or_else(|| err!(Request(NotFound("Event not found."))))
+}
+
+/// Streams the auth chain of the state a federation response serves.
+///
+/// A walk that fails is logged and yields no events, so the response goes out
+/// without the chain rather than failing whole.
+pub(super) fn walk_auth_chain<'a, I>(
+	services: &'a Services,
+	room_id: &'a RoomId,
+	room_version: &'a RoomVersionId,
+	heads: I,
+) -> impl Stream<Item = OwnedEventId> + Send + 'a
+where
+	I: Iterator<Item = &'a EventId> + Clone + ExactSizeIterator + Send + 'a,
+{
+	services
+		.auth_chain
+		.event_ids_iter(room_id, room_version, heads)
+		.inspect_err(move |error| {
+			warn!(%room_id, %error, "Omitting the auth chain of a failed walk.");
+		})
+		.ready_filter_map(Result::ok)
+}
+
+/// Reads an auth chain event for a federation response, or omits it.
+///
+/// An ancestor missing from storage is a normal backfill gap and is omitted
+/// quietly, while any other read error is logged first. The rest of the chain
+/// still goes out, so one unreadable event never fails the response.
+pub(super) async fn auth_chain_pdu(
+	services: &Services,
+	event_id: &EventId,
+	room_version: &RoomVersionId,
+) -> Option<Box<RawJsonValue>> {
+	services
+		.federation
+		.get_pdu_into(event_id, Some(room_version))
+		.await
+		.present()
+		.inspect_err(|error| warn!(%event_id, %error, "Omitting unreadable auth event."))
+		.ok()
+		.flatten()
+}
+
+/// Reads a state event for a federation response, or omits it.
+///
+/// Every event the state names is expected in storage, so any read error, a
+/// missing event included, is logged before the event is omitted. The rest of
+/// the state still goes out, so one unreadable event never fails the response.
+pub(super) async fn state_pdu(
+	services: &Services,
+	event_id: &EventId,
+	room_version: &RoomVersionId,
+) -> Option<Box<RawJsonValue>> {
+	services
+		.federation
+		.get_pdu_into(event_id, Some(room_version))
+		.await
+		.inspect_err(|error| warn!(%event_id, %error, "Omitting unreadable state event."))
+		.ok()
 }
