@@ -9,10 +9,9 @@ use futures::{StreamExt, stream};
 use ruma::OwnedMxcUri;
 use serde::Serialize;
 use tokio::time::{Instant, timeout_at};
-use tuwunel_core::{Error, Result, err, implement};
+use tuwunel_core::{Error, Result, config::StorageProvider, err, implement};
 
 use super::Service;
-use crate::storage::provider::ExportLocation;
 
 /// The result for one requested media URI.
 #[derive(Debug, Serialize)]
@@ -52,9 +51,9 @@ pub enum MediaObjectStatus {
 pub struct ProviderObjectLocation {
 	/// Exact configured provider identifier.
 	pub provider: String,
-	/// Object-store address; absent for local, disabled, or absent remote media.
-	#[serde(flatten)]
-	pub location: Option<ExportLocation>,
+	/// Logical object name without the provider's configured prefix.
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub object_key_name: Option<String>,
 	/// Verification outcome for this provider.
 	pub presence: ObjectPresence,
 	/// Byte length returned by HEAD, omitted for unverified or absent objects.
@@ -183,15 +182,15 @@ async fn object_locations_one(
 	for id in providers {
 		let mut object = ProviderObjectLocation {
 			provider: id.clone(),
-			location: None,
+			object_key_name: None,
 			presence: ObjectPresence::ProviderUnavailable,
 			size: None,
 		};
 
-		if let Ok(provider) = self.services.storage.provider(id)
-			&& let Ok(location) = provider.export_location(&path)
-		{
-			if location.is_none() {
+		if let Ok(provider) = self.services.storage.provider(id) {
+			let supported =
+				matches!(&provider.config, StorageProvider::s3(_) | StorageProvider::gcs(_));
+			if !supported {
 				object.presence = ObjectPresence::UnsupportedBackend;
 			} else if verify || remote {
 				let now = Instant::now();
@@ -223,8 +222,8 @@ async fn object_locations_one(
 				object.presence = ObjectPresence::Unverified;
 			}
 
-			if !remote || object.presence == ObjectPresence::Present {
-				object.location = location;
+			if supported && (!remote || object.presence == ObjectPresence::Present) {
+				object.object_key_name = Some(path.clone());
 			}
 		}
 

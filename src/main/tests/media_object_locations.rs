@@ -167,12 +167,6 @@ async fn verified_providers(admin: &Client<'_>, uri: &str, requests: &Requests) 
 			.find(|o| o["provider"] == id)
 			.expect("selected provider result")
 	};
-	assert_eq!(
-		object("source")["bucket"],
-		"resolved-source",
-		"the built S3 client's URL bucket must override raw bucket settings"
-	);
-	assert_eq!(object("source")["size"], 37, "verified size must come from HEAD metadata");
 	assert_eq!(object("replica")["presence"], "present", "a second replica must remain visible");
 	assert_eq!(
 		object("missing")["presence"],
@@ -190,34 +184,28 @@ async fn verified_providers(admin: &Client<'_>, uri: &str, requests: &Requests) 
 		"disabled providers must remain visible"
 	);
 	assert_eq!(
-		object("media")["presence"],
-		"unsupported_backend",
-		"local storage cannot supply an object-store transfer locator"
+		object("media"),
+		&json!({ "provider": "media", "presence": "unsupported_backend" }),
+		"local storage must not expose a filesystem path"
 	);
-	assert!(
-		object("media").get("object_key").is_none(),
-		"local filesystem object keys must not be exposed"
-	);
-	assert!(
-		object("media").get("bucket").is_none(),
-		"local filesystem roots must not be exposed"
-	);
-	let key = object("source")["object_key"]
+	let key = object("source")["object_key_name"]
 		.as_str()
 		.expect("response string");
-	let logical = key
-		.strip_prefix("media/prefix/")
-		.expect("configured object prefix");
-	assert_eq!(logical.len(), 43, "the opaque logical key must match Tuwunel's SHA-256 name");
+	assert_eq!(
+		object("source"),
+		&json!({ "provider": "source", "object_key_name": key, "presence": "present", "size": 37 }),
+		"verified results must contain only the provider, key name, presence and HEAD size"
+	);
+	assert_eq!(key.len(), 43, "the key name must omit the provider prefix");
 	assert_eq!(
 		services
 			.storage
 			.provider("media")?
-			.head(logical)
+			.head(key)
 			.await?
 			.size,
 		8,
-		"the exported key must address the existing original"
+		"the key name must address the existing original"
 	);
 	assert!(
 		requests
@@ -225,8 +213,8 @@ async fn verified_providers(admin: &Client<'_>, uri: &str, requests: &Requests) 
 			.lock()
 			.expect("request log must not be poisoned")
 			.iter()
-			.any(|path| path == &format!("/resolved-source/{key}")),
-		"HEAD must use exactly the exported bucket and object key"
+			.any(|path| path == &format!("/source/media/prefix/{key}")),
+		"HEAD must still apply the provider prefix to the key name"
 	);
 
 	Ok(())
@@ -267,19 +255,15 @@ async fn provider_selection(admin: &Client<'_>, uri: &str, requests: &Requests) 
 		"duplicate provider IDs must collapse without dropping other providers"
 	);
 	assert_eq!(
-		unverified["locations"][0]["objects"][1]["backend"], "gcs",
-		"GCS candidates must identify their backend"
+		unverified["locations"][0]["objects"][1]["provider"], "gcs",
+		"provider selection must preserve first-occurrence order"
 	);
+	let key = unverified["locations"][0]["objects"][0]["object_key_name"]
+		.as_str()
+		.expect("unverified source object name");
 	assert_eq!(
-		unverified["locations"][0]["objects"][1]["bucket"], "gcs-media",
-		"GCS candidates must identify their configured bucket"
-	);
-	assert!(
-		unverified["locations"][0]["objects"][1]["object_key"]
-			.as_str()
-			.expect("response string")
-			.starts_with("gcs-prefix/"),
-		"GCS candidates must include the normalized prefix"
+		unverified["locations"][0]["objects"][1]["object_key_name"], key,
+		"different S3 and GCS prefixes must not affect the returned key name"
 	);
 
 	for (providers, status) in [
@@ -320,7 +304,7 @@ async fn cached_remote(admin: &Client<'_>) -> Result {
 	);
 	assert!(
 		reply["locations"][0]["objects"][1]
-			.get("object_key")
+			.get("object_key_name")
 			.is_none(),
 		"absent remote copies must not expose speculative locators"
 	);
@@ -490,11 +474,6 @@ mod tests {
 				format!("storage_provider.{id}.s3.startup_check=false"),
 			]);
 		}
-		// The built client's URL overrides its bucket setting; the URL path is
-		// ignored by object_store, while base_path supplies the actual prefix.
-		options
-			.push("storage_provider.source.s3.url=\"s3://resolved-source/ignored\"".to_owned());
-
 		boot("media-object-locations", options, async move |services, base| {
 			let requests = Arc::new(Requests::default());
 			let router = Router::new()

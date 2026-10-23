@@ -6,7 +6,7 @@ media. All commands are invoked in the admin room and prefixed with
 
 For storage-native archival and migration integrations, the authenticated
 [Media Object Locations API](#media-object-locations-api) resolves original MXC media
-to bucket names and object keys across selected providers.
+to object key names across selected providers.
 
 ## Inspecting media
 
@@ -145,8 +145,8 @@ progress.
 ## Media Object Locations API
 
 `POST /_tuwunel/admin/v1/media/object-locations` resolves original media to
-S3-compatible or Google Cloud Storage bucket names and object keys. An archive,
-backup or migration integration can then use the provider's native copy API.
+S3-compatible or Google Cloud Storage object key names. An archive, backup or
+migration integration can then use the provider's native copy API.
 Tuwunel does not copy objects through this endpoint.
 
 ### Request
@@ -191,9 +191,7 @@ remote metadata row from being reported as a locally cached object.
       "objects": [
         {
           "provider": "media_on_s3",
-          "backend": "s3",
-          "bucket": "matrix-media",
-          "object_key": "media/provider-resolved-object-name",
+          "object_key_name": "provider-resolved-object-name",
           "presence": "present",
           "size": 428112
         }
@@ -209,10 +207,10 @@ remote metadata row from being reported as a locally cached object.
 ```
 
 For media with original-file metadata, `objects` contains one entry for every
-selected provider. Each S3/GCS locator includes the fully resolved key, with the
-same prefix normalization as provider reads and writes. `backend` is `s3` or
-`gcs`. The bucket is the one used by the runtime client, including S3 URL
-overrides. Consumers must treat keys as opaque and must not derive them from MXCs.
+selected provider. `object_key_name` is the original's logical object name,
+without a provider prefix, and is identical across S3/GCS providers. Consumers
+use `provider` to identify the backend, bucket and optional `base_path` in their
+own configuration, then apply that prefix to resolve the full bucket key.
 
 | `presence` | Meaning |
 | --- | --- |
@@ -222,10 +220,10 @@ overrides. Consumers must treat keys as opaque and must not derive them from MXC
 | `provider_unavailable` | The provider is unknown, disabled, denied access, or failed its metadata lookup. |
 | `unsupported_backend` | A local filesystem provider cannot supply an object-store transfer address. |
 
-Local filesystem, unknown and disabled providers have no `backend`, `bucket`, or
-`object_key` fields. A known S3/GCS provider can still supply a local-MXC
-candidate locator when HEAD reports absence or failure. For remote MXCs, these
-fields are omitted unless presence is confirmed in that provider.
+Local filesystem, unknown and disabled providers have no `object_key_name` field.
+A known S3/GCS provider can still supply a local-MXC candidate key when HEAD
+reports absence or failure. For remote MXCs, the key is omitted unless presence
+is confirmed in that provider.
 
 The per-MXC `status` summarizes the results in this precedence:
 `found` if any object is present, then `unverified`, `provider_unavailable`,
