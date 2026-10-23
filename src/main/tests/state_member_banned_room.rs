@@ -20,11 +20,7 @@ const USER_TOKEN: &str = "state-member-banned-room-user-token";
 /// `/join` refuses a room the server banned, so the same membership sent
 /// through the state endpoint must not let a non-admin in either.
 #[test]
-fn join_refused() -> Result {
-	let options: [&str; 0] = [];
-
-	boot("state-member-banned-room", options, exercise)
-}
+fn join_refused() -> Result { boot("state-member-banned-room", [], exercise) }
 
 #[tracing::instrument(level = "debug", skip_all)]
 async fn exercise(services: &Services, base: &str) -> Result {

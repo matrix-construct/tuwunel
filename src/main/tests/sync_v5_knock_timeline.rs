@@ -26,11 +26,7 @@ const OWNER_TOKEN: &str = "sync-v5-knock-timeline-owner-access-token";
 const KNOCKER_TOKEN: &str = "sync-v5-knock-timeline-knocker-access-token";
 
 #[test]
-fn knocked_room_carries_no_timeline() -> Result {
-	let options: [&str; 0] = [];
-
-	boot("sync-v5-knock-timeline", options, exercise)
-}
+fn knocked_room_carries_no_timeline() -> Result { boot("sync-v5-knock-timeline", [], exercise) }
 
 async fn exercise(services: &Services, base: &str) -> Result {
 	register(services, "knockowner", OWNER_TOKEN).await?;

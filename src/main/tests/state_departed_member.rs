@@ -51,9 +51,7 @@ const MARKER_PATH: &str = "state/org.example.marker/";
 /// which show the room as it is now.
 #[test]
 fn departed_member_reads_state_at_departure() -> Result {
-	let options: [&str; 0] = [];
-
-	boot("state-departed-member", options, exercise)
+	boot("state-departed-member", [], exercise)
 }
 
 #[tracing::instrument(level = "debug", skip_all)]

@@ -20,9 +20,13 @@ use super::client::wait_until_ready;
 /// apply after, so they can override, the settings every test shares. The
 /// exercise starts once the listener answers, and the server shuts down
 /// whatever it returns.
-pub(crate) fn boot<Options, Exercise>(name: &str, options: Options, exercise: Exercise) -> Result
+pub(crate) fn boot<'a, Options, Exercise>(
+	name: &str,
+	options: Options,
+	exercise: Exercise,
+) -> Result
 where
-	Options: IntoIterator<Item: Into<String>>,
+	Options: IntoIterator<Item = &'a str>,
 	Exercise: AsyncFnOnce(&Services, &str) -> Result,
 {
 	let listener = TcpListener::bind(("127.0.0.1", 0))?;

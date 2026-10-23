@@ -35,9 +35,7 @@ const TOKEN: &str = "federation-prev-event-room-access-token";
 /// not then make a later live event look old.
 #[test]
 fn prev_event_in_another_room_is_rejected() -> Result {
-	let options: [&str; 0] = [];
-
-	boot("federation-prev-event-room", options, exercise)
+	boot("federation-prev-event-room", [], exercise)
 }
 
 async fn exercise(services: &Services, base: &str) -> Result {

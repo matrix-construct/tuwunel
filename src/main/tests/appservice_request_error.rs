@@ -20,7 +20,7 @@ const HS_TOKEN: &str = "appservice-request-error-hs-token";
 
 #[test]
 fn unreachable_appservice_errors_omit_hs_token() -> Result {
-	boot("appservice-request-error", None::<&str>, exercise)
+	boot("appservice-request-error", [], exercise)
 }
 
 #[tracing::instrument(level = "debug", skip_all)]

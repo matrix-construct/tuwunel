@@ -65,11 +65,7 @@ enum Route {
 /// auth chain beside a room's state carries every auth event that state
 /// names, so a peer holding nothing else can authorise each state event.
 #[test]
-fn federation_routes_bind_events_to_rooms() -> Result {
-	let options: [&str; 0] = [];
-
-	boot("room-event-binding", options, exercise)
-}
+fn federation_routes_bind_events_to_rooms() -> Result { boot("room-event-binding", [], exercise) }
 
 async fn exercise(services: &Services, base: &str) -> Result {
 	register(services, "binding", OWNER_TOKEN).await?;

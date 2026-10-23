@@ -47,13 +47,13 @@ fn sso_fallback_account() -> Result {
 	let provider = TcpListener::bind(("127.0.0.1", 0))?;
 	let issuer = format!("http://{}", provider.local_addr()?);
 
-	let option = |key: &str, value: &str| format!("identity_provider.{IDP}.{key}={value}");
+	let option = |key: &str, value: &str| format!("identity_provider.{IDP}.{key}=\"{value}\"");
 	let options = [
-		"oidc_registration_allowed_redirect_hosts=[\"client.example\"]".to_owned(),
-		option("client_id", &format!("\"{IDP}\"")),
-		option("client_secret", "\"test-secret\""),
-		option("brand", "\"test\""),
-		option("issuer_url", &format!("\"{issuer}\"")),
+		"oidc_registration_allowed_redirect_hosts=[\"client.example\"]",
+		&option("client_id", IDP),
+		&option("client_secret", "test-secret"),
+		&option("brand", "test"),
+		&option("issuer_url", &issuer),
 	];
 
 	provider.set_nonblocking(true)?;

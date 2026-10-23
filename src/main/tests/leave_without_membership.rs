@@ -21,11 +21,7 @@ const STRANGER_TOKEN: &str = "leave-without-membership-stranger-access-token";
 /// A stranger must not get the room as a left room, and a kicked member's
 /// departure, which bounds the history it may read, must stay at the kick.
 #[test]
-fn records_no_departure() -> Result {
-	let options: [&str; 0] = [];
-
-	boot("leave-without-membership", options, exercise)
-}
+fn records_no_departure() -> Result { boot("leave-without-membership", [], exercise) }
 
 #[tracing::instrument(level = "debug", skip_all)]
 async fn exercise(services: &Services, base: &str) -> Result {

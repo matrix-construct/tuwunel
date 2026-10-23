@@ -38,7 +38,7 @@ const QUIET: &str = "log_enable=false";
 /// message is still sent. With the check off the same uploads are stored.
 #[test]
 fn uploads_are_refused_while_storage_is_short_of_space() -> Result {
-	let short = [QUIET.to_owned(), format!("media_upload_min_free_space={}", i64::MAX)];
+	let short = [QUIET, &format!("media_upload_min_free_space={}", i64::MAX)];
 	let off = [QUIET, "media_upload_min_free_space=0"];
 
 	boot("media-upload-free-space-short", short, uploads_are_refused)?;

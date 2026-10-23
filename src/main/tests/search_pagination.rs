@@ -23,11 +23,7 @@ const HITS: usize = 15;
 ///
 /// Interleaved hits are paged at several limits and compared with send order.
 #[test]
-fn search_pagination_visits_each_hit_once() -> Result {
-	let options: [&str; 0] = [];
-
-	boot("search-pagination", options, exercise)
-}
+fn search_pagination_visits_each_hit_once() -> Result { boot("search-pagination", [], exercise) }
 
 async fn exercise(services: &Services, base: &str) -> Result {
 	register(services, "searcher", TOKEN).await?;

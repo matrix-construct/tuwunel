@@ -41,9 +41,7 @@ const ROOM_VERSION: RoomVersionId = RoomVersionId::V11;
 /// as the legacy left room already does.
 #[test]
 fn rescinded_invite_carries_leave_member() -> Result {
-	let options: [&str; 0] = [];
-
-	boot("sync-v5-rescinded-invite", options, exercise)
+	boot("sync-v5-rescinded-invite", [], exercise)
 }
 
 async fn exercise(services: &Services, base: &str) -> Result {
