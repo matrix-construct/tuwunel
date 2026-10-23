@@ -46,7 +46,7 @@ pub mod api {
 		metadata! { method: GET, rate_limited: false, authentication: NoAuthentication,
 		path: "/_matrix/federation/v1/version", }
 		#[request]
-		#[allow(missing_copy_implementations)]
+		#[derive(Copy)]
 		pub struct Request {}
 		#[response]
 		pub struct Response {
