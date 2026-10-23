@@ -1,15 +1,13 @@
 #![cfg(test)]
 
-use std::{fs::remove_dir_all, net::TcpListener, time::Duration};
+use std::collections::BTreeMap;
 
-use futures::future::join;
-use serde_json::{Value, json};
-use tokio::time::{sleep, timeout};
-use tuwunel::{Args, Runtime, Server, async_run, async_start, async_stop};
+use futures::TryStreamExt;
+use serde_json::json;
 use tuwunel_core::{
-	Result, err,
+	Result, err, implement,
 	ruma::{
-		EventId, OwnedEventId, OwnedRoomId, RoomId, UserId,
+		CanonicalJsonObject, EventId, OwnedEventId, RoomId, RoomVersionId, UserId,
 		api::{
 			OutgoingRequest, OutgoingRequestExt,
 			federation::{
@@ -24,10 +22,34 @@ use tuwunel_core::{
 		},
 		events::StateEventType,
 	},
+	utils::stream::{IterStream, TryBroadbandExt},
 };
-use tuwunel_service::{Services, users::Register};
+use tuwunel_matrix::{Event, event::gen_event_id};
+use tuwunel_service::Services;
+
+use self::{
+	client::{Client, field, register},
+	fixture::boot,
+};
+
+mod client;
+mod fixture;
+
+#[path = "client/put.rs"]
+mod put;
 
 const ROUTES: [Route; 3] = [Route::State, Route::StateIds, Route::EventAuth];
+
+const OWNER_TOKEN: &str = "room-event-binding-owner-access-token";
+const MEMBER_TOKEN: &str = "room-event-binding-member-access-token";
+
+type Served = BTreeMap<OwnedEventId, AuthEvents>;
+
+type ServedEvent = (OwnedEventId, AuthEvents);
+
+type AuthEvents = Vec<OwnedEventId>;
+
+type Fields<'a, T> = BTreeMap<&'a str, Vec<T>>;
 
 #[derive(Clone, Copy, Debug)]
 enum Route {
@@ -36,76 +58,34 @@ enum Route {
 	EventAuth,
 }
 
+/// The federation `/state`, `/state_ids` and `/event_auth` routes answer for
+/// the requested room alone.
+///
+/// An event from another room is as unknown as one that does not exist. The
+/// auth chain beside a room's state carries every auth event that state
+/// names, so a peer holding nothing else can authorise each state event.
 #[test]
 fn federation_routes_bind_events_to_rooms() -> Result {
-	let listener = TcpListener::bind(("127.0.0.1", 0))?;
-	let port = listener.local_addr()?.port();
+	let options: [&str; 0] = [];
 
-	let db_path = Args::test_database_path("room-event-binding");
-	let mut args = Args::default_test(&["fresh", "cleanup"]);
-
-	args.option.extend([
-		format!("database_path={db_path:?}"),
-		"address=[\"127.0.0.1\"]".to_owned(),
-		format!("port={port}"),
-		"listening=true".to_owned(),
-	]);
-
-	let runtime = Runtime::new(Some(&args))?;
-	let server = Server::new(Some(&args), Some(&runtime))?;
-	let result = runtime.block_on(async {
-		let services = async_start(&server).await?;
-		let base = format!("http://127.0.0.1:{port}");
-
-		drop(listener);
-
-		let exercise = async {
-			let outcome = exercise(&services, &base).await;
-			let shutdown = server.server.shutdown();
-
-			outcome.and(shutdown)
-		};
-
-		let (run_result, outcome) = join(async_run(&server), exercise).await;
-
-		drop(services);
-		async_stop(&server).await?;
-		run_result?;
-
-		outcome
-	});
-
-	drop(runtime);
-	remove_dir_all(&db_path).ok();
-
-	result
+	boot("room-event-binding", options, exercise)
 }
 
 async fn exercise(services: &Services, base: &str) -> Result {
-	wait_until_ready(services, base).await?;
+	register(services, "binding", OWNER_TOKEN).await?;
 
-	let user_id = UserId::parse_with_server_name("binding", services.globals.server_name())?;
-	let token = "room-event-binding-regression-token";
+	let member_id = register(services, "bindingmember", MEMBER_TOKEN).await?;
+	let owner = Client { services, base, token: OWNER_TOKEN };
+	let member = Client { services, base, token: MEMBER_TOKEN };
 
-	services
-		.users
-		.full_register(Register {
-			user_id: Some(&user_id),
-			password: Some("room-event-binding-password"),
-			..Default::default()
-		})
+	let room = owner.create_room(&json!({})).await?;
+	let event = state_id(services, &room, &StateEventType::RoomGuestAccess).await?;
+	let room_v12 = owner
+		.create_room(&json!({ "room_version": "12" }))
 		.await?;
 
-	services
-		.users
-		.create_device(&user_id, None, (Some(token), None), None, None, None)
-		.await?;
-
-	let room = create_room(services, base, token, None).await?;
-	let event = state_event_id(services, &room).await?;
-	let room_v12 = create_room(services, base, token, Some("12")).await?;
-	let event_v12 = state_event_id(services, &room_v12).await?;
-	let create_v12 = create_event_id(services, &room_v12).await?;
+	let event_v12 = state_id(services, &room_v12, &StateEventType::RoomGuestAccess).await?;
+	let create_v12 = state_id(services, &room_v12, &StateEventType::RoomCreate).await?;
 	let unknown = EventId::parse("$room-event-binding-unknown")?;
 
 	for route in ROUTES {
@@ -135,34 +115,37 @@ async fn exercise(services: &Services, base: &str) -> Result {
 
 	assert_eq!(create_response.0, 200, "v12 create event: {}", create_response.1);
 
+	for version in ["11", "12"] {
+		auth_chain_closes_over_state(&owner, &member, &member_id, version).await?;
+	}
+
 	Ok(())
 }
 
-impl Route {
-	async fn get(
-		self,
-		services: &Services,
-		base: &str,
-		room_id: &RoomId,
-		event_id: &EventId,
-	) -> Result<(u16, String)> {
-		match self {
-			| Self::State => {
-				let request = StateRequest::new(event_id.to_owned(), room_id.to_owned());
+#[implement(Route)]
+async fn get(
+	self,
+	services: &Services,
+	base: &str,
+	room_id: &RoomId,
+	event_id: &EventId,
+) -> Result<(u16, String)> {
+	match self {
+		| Self::State => {
+			let request = StateRequest::new(event_id.to_owned(), room_id.to_owned());
 
-				send(services, base, request).await
-			},
-			| Self::StateIds => {
-				let request = StateIdsRequest::new(event_id.to_owned(), room_id.to_owned());
+			send(services, base, request).await
+		},
+		| Self::StateIds => {
+			let request = StateIdsRequest::new(event_id.to_owned(), room_id.to_owned());
 
-				send(services, base, request).await
-			},
-			| Self::EventAuth => {
-				let request = EventAuthRequest::new(room_id.to_owned(), event_id.to_owned());
+			send(services, base, request).await
+		},
+		| Self::EventAuth => {
+			let request = EventAuthRequest::new(room_id.to_owned(), event_id.to_owned());
 
-				send(services, base, request).await
-			},
-		}
+			send(services, base, request).await
+		},
 	}
 }
 
@@ -190,69 +173,129 @@ where
 	Ok((status, body))
 }
 
-async fn wait_until_ready(services: &Services, base: &str) -> Result {
-	let url = format!("{base}/_matrix/client/versions");
+/// The auth chain served with a room's state carries what that state names.
+///
+/// A rename replaces the member's join in the state, while the rename still
+/// names that join among its auth events; only the auth chain can carry the
+/// join to a peer. The requested event is the owner's, so its own auth chain
+/// never reaches the member's join.
+async fn auth_chain_closes_over_state(
+	owner: &Client<'_>,
+	member: &Client<'_>,
+	member_id: &UserId,
+	version: &str,
+) -> Result {
+	let services = owner.services;
+	let room_id = owner
+		.create_room(&json!({ "preset": "public_chat", "room_version": version }))
+		.await?;
 
-	timeout(Duration::from_secs(10), async {
-		loop {
-			if services
-				.client
-				.clients
-				.default
-				.get(&url)
-				.send()
-				.await
-				.is_ok()
-			{
-				break;
-			}
+	member
+		.post(&format!("rooms/{room_id}/join"), &json!({}))
+		.await?;
 
-			sleep(Duration::from_millis(20)).await;
-		}
-	})
-	.await
-	.map_err(|_| err!("server listener did not become ready"))?;
+	let rename = json!({ "membership": "join", "displayname": "Renamed member" });
+	let renamed = member
+		.put(&format!("rooms/{room_id}/state/m.room.member/{member_id}"), &rename)
+		.await?;
+
+	let message = json!({ "msgtype": "m.text", "body": "After the rename" });
+	let sent = owner
+		.put(&format!("rooms/{room_id}/send/m.room.message/closure-{version}"), &message)
+		.await?;
+
+	let renamed = EventId::parse(field(&renamed, "event_id")?)?;
+	let sent = EventId::parse(field(&sent, "event_id")?)?;
+	let room_version = services.state.get_room_version(&room_id).await?;
+
+	for route in [Route::State, Route::StateIds] {
+		let (status, body) = route
+			.get(services, owner.base, &room_id, &sent)
+			.await?;
+
+		assert_eq!(status, 200, "{route:?} in v{version}: {body}");
+
+		let served = route
+			.served(services, &room_version, &body)
+			.await?;
+
+		let missing: Vec<_> = unserved(&served).collect();
+
+		assert!(served.contains_key(&renamed), "{route:?} in v{version} omits the rename");
+		assert!(missing.is_empty(), "{route:?} in v{version} omits auth events {missing:?}");
+	}
 
 	Ok(())
 }
 
-async fn create_room(
+/// The events a response body serves, each with the auth events it names.
+///
+/// A served PDU's id is derived as a peer derives it; a served id has its
+/// event read back from the timeline.
+#[implement(Route)]
+async fn served(
+	self,
 	services: &Services,
-	base: &str,
-	token: &str,
-	room_version: Option<&str>,
-) -> Result<OwnedRoomId> {
-	let response = services
-		.client
-		.clients
-		.default
-		.post(format!("{base}/_matrix/client/v3/createRoom"))
-		.bearer_auth(token)
-		.json(&json!({ "room_version": room_version }))
-		.send()
-		.await?
-		.error_for_status()?
-		.json::<Value>()
-		.await?;
-
-	let room_id = response
-		.get("room_id")
-		.and_then(Value::as_str)
-		.ok_or_else(|| err!("createRoom response omitted room_id"))?;
-
-	Ok(room_id.try_into()?)
+	room_version: &RoomVersionId,
+	body: &str,
+) -> Result<Served> {
+	match self {
+		| Self::State | Self::EventAuth =>
+			serde_json::from_str::<Fields<'_, CanonicalJsonObject>>(body)?
+				.into_values()
+				.flatten()
+				.map(|pdu| served_pdu(pdu, room_version))
+				.collect(),
+		| Self::StateIds =>
+			serde_json::from_str::<Fields<'_, OwnedEventId>>(body)?
+				.into_values()
+				.flatten()
+				.try_stream()
+				.broad_and_then(|event_id| served_id(services, event_id))
+				.try_collect()
+				.await,
+	}
 }
 
-async fn state_event_id(services: &Services, room_id: &RoomId) -> Result<OwnedEventId> {
-	services
-		.state_accessor
-		.room_state_get_id(room_id, &StateEventType::RoomGuestAccess, "")
-		.await
+fn served_pdu(pdu: CanonicalJsonObject, room_version: &RoomVersionId) -> Result<ServedEvent> {
+	let event_id = gen_event_id(&pdu, room_version)?;
+	let auth_events = pdu
+		.into_iter()
+		.find_map(|(key, value)| key.eq("auth_events").then_some(value))
+		.ok_or_else(|| err!("served PDU {event_id} omitted auth_events"))?;
+
+	Ok((event_id, serde_json::from_value(auth_events.into())?))
 }
 
-async fn create_event_id(services: &Services, room_id: &RoomId) -> Result<OwnedEventId> {
+async fn served_id(services: &Services, event_id: OwnedEventId) -> Result<ServedEvent> {
+	let pdu = services.timeline.get_pdu(&event_id).await?;
+	let auth_events = pdu.auth_events().map(ToOwned::to_owned).collect();
+
+	Ok((event_id, auth_events))
+}
+
+/// Each auth event a response names without serving it.
+///
+/// A pair holds the served event that names the auth event, then the auth
+/// event itself.
+fn unserved(served: &Served) -> impl Iterator<Item = (&OwnedEventId, &OwnedEventId)> {
+	served
+		.iter()
+		.flat_map(move |(event_id, auth_events)| {
+			auth_events
+				.iter()
+				.filter(move |auth_event| !served.contains_key(*auth_event))
+				.map(move |auth_event| (event_id, auth_event))
+		})
+}
+
+async fn state_id(
+	services: &Services,
+	room_id: &RoomId,
+	event_type: &StateEventType,
+) -> Result<OwnedEventId> {
 	services
 		.state_accessor
-		.room_state_get_id(room_id, &StateEventType::RoomCreate, "")
+		.room_state_get_id(room_id, event_type, "")
 		.await
 }
