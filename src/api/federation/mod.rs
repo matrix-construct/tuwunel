@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 use tuwunel_api::router::{self, ClientIp, Ruma, State};
 
 pub(crate) mod backfill;
