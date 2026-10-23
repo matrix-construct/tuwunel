@@ -11,7 +11,7 @@ use serde::Serialize;
 use tokio::time::{Instant, timeout_at};
 use tuwunel_core::{Error, Result, config::StorageProvider, err, implement};
 
-use super::Service;
+use super::{Animate, Dim, Service};
 
 /// The result for one requested media URI.
 #[derive(Debug, Serialize)]
@@ -165,7 +165,11 @@ async fn object_locations_one(
 		result.status = MediaObjectStatus::InvalidMxc;
 		return result;
 	};
-	let metadata = match self.original_metadata(&parts).await {
+	let metadata = match self
+		.db
+		.search_file_metadata(&parts, &Dim::default(), Animate::Allowed)
+		.await
+	{
 		| Ok(metadata) => metadata,
 		| Err(error) if error.is_missing() => return result,
 		| Err(_) => {
