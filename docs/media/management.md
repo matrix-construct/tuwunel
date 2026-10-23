@@ -149,12 +149,6 @@ S3-compatible or Google Cloud Storage bucket names and object keys. An archive,
 backup or migration integration can then use the provider's native copy API.
 Tuwunel does not copy objects through this endpoint.
 
-The endpoint requires a server administrator's Matrix access token, following
-the same authorization model as the admin media endpoints. It is available
-with the `synapse_admin` build feature, which is enabled by default. The native
-`/_tuwunel` namespace keeps this extension separate from Synapse compatibility.
-Ensure your reverse proxy forwards `/_tuwunel/admin/` to Tuwunel.
-
 ### Request
 
 ```http
@@ -171,7 +165,7 @@ Content-Type: application/json
 
 | Field | Meaning |
 | --- | --- |
-| `mxc_uris` | Required array of 1 to 1,000 strings. The limit applies before deduplication. Results retain first-occurrence order. |
+| `mxc_uris` | Required array of 1 to 1,000 strings.|
 | `providers` | Optional array of 1 to 100 exact provider IDs. Duplicates are removed in first-occurrence order. Omission selects `media_storage_providers`; when that setting is empty, all active providers are selected, matching media reads. |
 | `verify` | Optional boolean, default `true`. Check presence and size through provider metadata requests, without reading payloads. |
 
@@ -266,17 +260,3 @@ authenticated non-administrator receives HTTP 403.
 - Sends `Cache-Control: no-store`. Locations describe a point in time; objects
   can subsequently be deleted or moved. Lookup does not establish a legal hold.
 
-### Implementation rationale
-
-The design follows the [development guide](../development.md): the HTTP
-handler performs authorization and dispatch, the media service resolves the
-original metadata and existing logical object name, and each provider supplies
-its own typed export address. No new workspace crate or storage schema is
-required. See [storage providers](storage.md) for migration and prefix semantics
-and the [contributing guide](../contributing.md) for formatting and verification.
-
-The `object_store` 0.14 S3 client has no public resolved-bucket accessor. The provider
-reads its bucket-only display identity after the client has normalized
-configuration. An unexpected format fails only the location lookup and is
-covered by a URL-versus-bucket regression test. It does not parse raw settings or
-duplicate the client's URL resolution rules.
