@@ -285,11 +285,11 @@ async fn overtaken_deactivation_is_refused(
 	expect_intact_admin(services, target).await
 }
 
-fn expect_forbidden(result: Result, path: &str) -> Result {
+fn expect_forbidden<T>(result: Result<T>, path: &str) -> Result {
 	match result {
 		| Err(e) if matches!(e.kind(), ErrorKind::Forbidden) => Ok(()),
 		| Err(e) => Err!("{path}: unexpected refusal of the last admin: {e}"),
-		| Ok(()) => Err!("{path}: the last admin must not be deactivatable"),
+		| Ok(_) => Err!("{path}: the last admin must not be deactivatable"),
 	}
 }
 

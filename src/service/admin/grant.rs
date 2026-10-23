@@ -11,7 +11,8 @@ use ruma::{
 	},
 };
 use tuwunel_core::{
-	Err, Result, debug_info, debug_warn, error, implement,
+	Err, Result, debug_info, debug_warn, err, error, implement,
+	result::NotFound,
 	utils::{FutureBoolExt, future::ReadyBoolExt, stream::ReadyExt},
 };
 use tuwunel_matrix::pdu::PduBuilder;
@@ -289,44 +290,35 @@ async fn invite_new_admin(
 
 /// Demote an admin, removing its rights.
 ///
-/// The server user is refused, since the admin room exists only while the
-/// server user stays joined.
+/// Returns whether there was a grant to revoke. A user holding no invite, knock
+/// or join in the admin room has none, nor does anyone while there is no admin
+/// room, so the demotion is already done and nothing is written. The server
+/// user is refused, since the admin room exists only while the server user
+/// stays joined.
 #[implement(super::Service)]
-pub async fn revoke_admin(&self, user_id: &UserId) -> Result {
+pub async fn revoke_admin(&self, user_id: &UserId) -> Result<bool> {
 	use MembershipState::{Invite, Join, Knock, Leave};
 
 	if user_id == self.services.globals.server_user {
 		return Err!(Request(InvalidParam("The server user's admin rights cannot be revoked.")));
 	}
 
-	let Ok(room_id) = self.get_admin_room().await else {
-		return Err!(error!("No admin room available or created."));
+	let Some(room_id) = self.get_admin_room().await.present()? else {
+		return Ok(false);
 	};
 
 	let state_lock = self.services.state.mutex.lock(&room_id).await;
 
-	let event = match self
+	let Some(event) = self
 		.services
 		.state_accessor
 		.get_member(&room_id, user_id)
 		.await
-	{
-		| Err(e) if e.is_not_found() => return Err!("{user_id} was never an admin."),
-
-		| Err(e) => return Err!(error!(?e, "Failure occurred while attempting revoke.")),
-
-		| Ok(event) if !matches!(event.membership, Invite | Knock | Join) => {
-			return Err!("Cannot revoke {user_id} in membership state {:?}.", event.membership);
-		},
-
-		| Ok(event) => {
-			assert!(
-				matches!(event.membership, Invite | Knock | Join),
-				"Incorrect membership state to remove user."
-			);
-
-			event
-		},
+		.present()
+		.map_err(|e| err!(error!(?e, "Failure occurred while attempting revoke.")))?
+		.filter(|event| matches!(event.membership, Invite | Knock | Join))
+	else {
+		return Ok(false);
 	};
 
 	self.services
@@ -344,7 +336,7 @@ pub async fn revoke_admin(&self, user_id: &UserId) -> Result {
 			&room_id,
 			&state_lock,
 		)
-		.boxed()
+		.boxed() // size firewall
 		.await
-		.map(|_| ())
+		.map(|_| true)
 }

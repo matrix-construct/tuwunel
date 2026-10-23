@@ -3,15 +3,19 @@ use std::collections::BTreeSet;
 use axum::extract::State;
 use futures::StreamExt;
 use ruma::{MilliSecondsSinceUnixEpoch, MxcUri, UserId, thirdparty::Medium};
-use synapse_admin_api::users::create_or_modify::v2 as create_or_modify;
+use synapse_admin_api::users::create_or_modify::v2::{
+	self as create_or_modify, ThirdPartyIdentifier,
+};
 use tuwunel_core::{
 	Err, Result,
-	utils::{IterStream, ReadyExt, stream::automatic_width},
+	utils::{BoolExt, IterStream, ReadyExt, stream::automatic_width},
 };
 use tuwunel_service::{threepid::canonicalize_email, users::PASSWORD_SENTINEL};
 
 use super::user_details;
 use crate::{Ruma, refuse_server_user, require_admin};
+
+type Emails = BTreeSet<String>;
 
 /// # `PUT /_synapse/admin/v2/users/{user_id}`
 ///
@@ -38,6 +42,13 @@ pub(crate) async fn admin_create_or_modify_route(
 	if body.admin == Some(false) && sender_user == body.user_id {
 		return Err!(Request(InvalidParam("You may not demote yourself.")));
 	}
+
+	// A malformed address is refused before any field is written.
+	let emails = body
+		.threepids
+		.as_deref()
+		.map(canonical_emails)
+		.transpose()?;
 
 	let created = !services.users.exists(user_id).await;
 
@@ -73,7 +84,7 @@ pub(crate) async fn admin_create_or_modify_route(
 	}
 
 	if let Some(displayname) = body.displayname.as_deref() {
-		let displayname = (!displayname.is_empty()).then_some(displayname);
+		let displayname = displayname.is_empty().or_some(displayname);
 
 		services
 			.profile
@@ -82,7 +93,9 @@ pub(crate) async fn admin_create_or_modify_route(
 	}
 
 	if let Some(avatar_url) = body.avatar_url.as_deref() {
-		let avatar_url = (!avatar_url.is_empty()).then(|| <&MxcUri>::from(avatar_url));
+		let avatar_url = avatar_url
+			.is_empty()
+			.or_some(<&MxcUri>::from(avatar_url));
 
 		services
 			.profile
@@ -91,9 +104,11 @@ pub(crate) async fn admin_create_or_modify_route(
 	}
 
 	match body.admin {
-		| Some(true) => services.admin.make_user_admin(user_id).await?,
-		| Some(false) => services.admin.revoke_admin(user_id).await?,
 		| None => {},
+		| Some(true) => services.admin.make_user_admin(user_id).await?,
+		| Some(false) => {
+			services.admin.revoke_admin(user_id).await?;
+		},
 	}
 
 	match body.deactivated {
@@ -127,13 +142,24 @@ pub(crate) async fn admin_create_or_modify_route(
 		| None => {},
 	}
 
-	if let Some(threepids) = body.threepids.as_deref() {
-		replace_emails(services, user_id, threepids).await?;
+	if let Some(emails) = emails {
+		replace_emails(services, user_id, &emails).await;
 	}
 
 	let details = user_details(services, user_id).await;
 
 	Ok(create_or_modify::Response::new(details))
+}
+
+/// Canonicalizes the email addresses among `threepids`.
+///
+/// Other media are dropped, since nothing stores them.
+fn canonical_emails(threepids: &[ThirdPartyIdentifier]) -> Result<Emails> {
+	threepids
+		.iter()
+		.filter(|tpid| tpid.medium == Medium::Email)
+		.map(|tpid| canonicalize_email(&tpid.address))
+		.collect()
 }
 
 fn changes_access(body: &create_or_modify::Request) -> bool {
@@ -144,28 +170,20 @@ fn changes_access(body: &create_or_modify::Request) -> bool {
 		|| body.threepids.is_some()
 }
 
-/// Replaces the user's email bindings with exactly the email threepids in
-/// `threepids`, canonicalizing each. Non-email media are ignored (no store).
-async fn replace_emails(
-	services: crate::State,
-	user_id: &UserId,
-	threepids: &[create_or_modify::ThirdPartyIdentifier],
-) -> Result {
-	let desired: BTreeSet<String> = threepids
-		.iter()
-		.filter(|tpid| tpid.medium == Medium::Email)
-		.map(|tpid| canonicalize_email(&tpid.address))
-		.collect::<Result<_>>()?;
-
-	let current: BTreeSet<String> = services
+/// Replaces the user's email bindings with exactly the addresses in `desired`.
+///
+/// The addresses must already be canonical emails.
+async fn replace_emails(services: crate::State, user_id: &UserId, desired: &Emails) {
+	let current: Emails = services
 		.threepid
 		.get_bindings(user_id)
-		.ready_filter_map(|tpid| (tpid.medium == Medium::Email).then_some(tpid.address))
+		.ready_filter(|tpid| tpid.medium == Medium::Email)
+		.map(|tpid| tpid.address)
 		.collect()
 		.await;
 
 	current
-		.difference(&desired)
+		.difference(desired)
 		.stream()
 		.for_each_concurrent(automatic_width(), |address| {
 			services.threepid.del_binding(user_id, address)
@@ -183,6 +201,4 @@ async fn replace_emails(
 				.put_binding(user_id, address, Medium::Email, now, now)
 		})
 		.await;
-
-	Ok(())
 }

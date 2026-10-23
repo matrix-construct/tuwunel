@@ -13,7 +13,9 @@ pub(super) async fn revoke_admin(&self, user_id: String) -> Result {
 		return Err!("You may not revoke your own admin privileges.");
 	}
 
-	self.services.admin.revoke_admin(&user_id).await?;
+	if !self.services.admin.revoke_admin(&user_id).await? {
+		return Err!("{user_id} is not an admin.");
+	}
 
 	write!(self, "{user_id} is no longer an admin.").await
 }
