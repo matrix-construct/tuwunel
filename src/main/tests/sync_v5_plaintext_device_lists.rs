@@ -17,6 +17,12 @@ use self::client::{Client, field, register, wait_until_ready};
 mod client;
 mod sliding_sync;
 
+#[path = "client/put.rs"]
+mod put;
+
+#[path = "client/state.rs"]
+mod state;
+
 const READER_TOKEN: &str = "sync-v5-plaintext-device-lists-reader-token";
 const SENDER_TOKEN: &str = "sync-v5-plaintext-device-lists-sender-token";
 
@@ -89,7 +95,7 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	let topic = json!({ "topic": "still plaintext" });
 
 	sender
-		.put_state(&room, "m.room.topic", &topic)
+		.put_state(&room, "m.room.topic", "", &topic)
 		.await?;
 
 	let retitled = reader.sync_e2ee(Some(pos)).await?;
@@ -107,7 +113,7 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	let encryption = json!({ "algorithm": "m.megolm.v1.aes-sha2" });
 
 	sender
-		.put_state(&room, "m.room.encryption", &encryption)
+		.put_state(&room, "m.room.encryption", "", &encryption)
 		.await?;
 
 	let encrypted = reader.sync_e2ee(Some(pos)).await?;
@@ -159,22 +165,6 @@ async fn sync_e2ee(&self, pos: Option<&str>) -> Result<Value> {
 }
 
 fn next_pos(response: &Value) -> Result<&str> { field(response, "pos") }
-
-#[implement(Client, params = "<'_>")]
-async fn put_state(&self, room_id: &RoomId, event_type: &str, content: &Value) -> Result {
-	self.services
-		.client
-		.clients
-		.default
-		.put(self.url(&format!("rooms/{room_id}/state/{event_type}")))
-		.bearer_auth(self.token)
-		.json(content)
-		.send()
-		.await?
-		.error_for_status()?;
-
-	Ok(())
-}
 
 fn state_delivered(response: &Value, room_id: &RoomId, event_type: &str) -> bool {
 	response["rooms"][room_id.as_str()]["required_state"]

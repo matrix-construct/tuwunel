@@ -14,7 +14,10 @@ use ruma::{
 	JsOption, MxcUri, OwnedEventId, OwnedMxcUri, RoomId, UInt, UserId,
 	api::client::sync::sync_events::{
 		UnreadNotificationsCount,
-		v5::{DisplayName, response, response::Heroes},
+		v5::{
+			DisplayName,
+			response::{Heroes, Room as ResponseRoom},
+		},
 	},
 	events::{
 		AnySyncStateEvent, StateEventType, TimelineEventType, room::member::MembershipState,
@@ -42,6 +45,7 @@ use tuwunel_matrix::{
 };
 use tuwunel_service::{
 	Services,
+	rooms::short::ShortStateHash,
 	sync::{RequiredState, Room, RoomConfig},
 };
 
@@ -65,6 +69,9 @@ type ThreadCounts = BTreeMap<OwnedEventId, (u64, u64)>;
 type EventTypeString = SmallString<[u8; 32]>;
 type TimelineMembers<'a> = SmallVec<[&'a str; 2]>;
 pub(super) type RoomDetails = (usize, HashSet<(StateEventType, StateKey)>);
+pub(super) type Delivery = (ResponseRoom, Option<ShortStateHash>);
+type CollectedState = (Vec<Raw<AnySyncStateEvent>>, Option<ShortStateHash>);
+type Snapshots = (Option<ShortStateHash>, Option<(PduCount, ShortStateHash)>);
 
 /// Most timeline events one room returns per response, as legacy sync allows.
 const TIMELINE_LIMIT_MAX: usize = 100;
@@ -80,6 +87,23 @@ struct StateSelection<'a> {
 	mode: StateMode,
 	previous: Option<&'a [u64]>,
 	changed: bool,
+	delivered: ShortStateHash,
+}
+
+/// What decides whether a delta sends one requested state event.
+///
+/// The event is sent when it is newer than the delta's base, when the room held
+/// a different event at the base, or when it is a lazily loaded member.
+#[derive(Clone, Copy, Debug, Default)]
+struct Candidate {
+	/// The event's timeline position, absent for an outlier.
+	count: Option<PduCount>,
+
+	/// Whether it was selected as a lazily loaded member.
+	lazy: bool,
+
+	/// Whether the room held the same event at the delta's base.
+	same_at_since: bool,
 }
 
 #[tracing::instrument(
@@ -95,7 +119,7 @@ pub(super) async fn handle_room(
 	room: &Room,
 	config_changed: bool,
 	room_details: RoomDetails,
-) -> Result<response::Room, Failure> {
+) -> Result<Delivery, Failure> {
 	let SyncInfo {
 		services,
 		sender_user,
@@ -109,6 +133,7 @@ pub(super) async fn handle_room(
 
 	if matches!(*membership, Some(MembershipState::Leave | MembershipState::Ban)) {
 		return leave_or_ban_response(sync_info, conn, window_room, roomsince)
+			.map_ok(|payload| (payload, None))
 			.map_err(Failure::Payload)
 			.await;
 	}
@@ -118,8 +143,9 @@ pub(super) async fn handle_room(
 	let encrypted = services.state_accessor.is_encrypted_room(room_id);
 
 	let (timeline_limit, required_state) = room_details;
+	let allowed = membership_allows_required_state(membership.as_ref());
 
-	let timeline = membership_allows_required_state(membership.as_ref()).then_async(|| {
+	let timeline = allowed.then_async(|| {
 		load_timeline_fallible(
 			services,
 			sender_user,
@@ -171,10 +197,11 @@ pub(super) async fn handle_room(
 	let state = StateSelection {
 		mode,
 		previous: config_changed.then_some(room.required_state.as_slice()),
-		changed: state_may_have_changed(mode, last_timeline_count),
+		changed: allowed && state_may_have_changed(mode, last_timeline_count),
+		delivered: room.shortstatehash,
 	};
 
-	let required_state = membership_allows_required_state(membership.as_ref())
+	let required_state = allowed
 		.and_is(state.changed || state.previous.is_some())
 		.then_some(required_state)
 		.unwrap_or_default();
@@ -219,7 +246,7 @@ pub(super) async fn handle_room(
 	let notification_counts = notification_counts_future(services, sender_user, room_id);
 	let (
 		(room_name, room_avatar),
-		(timeline, required_state, invite_state),
+		(timeline, (required_state, shortstatehash), invite_state),
 		(joined_count, invited_count),
 		(highlight_count, notification_count, _last_notification_read, thread_counts),
 	) = join4(meta, events, member_counts, notification_counts)
@@ -240,8 +267,10 @@ pub(super) async fn handle_room(
 		room_timeline_metadata(roomsince, previous_connection_pos, &timeline);
 
 	let timeline = timeline.into_iter().map(at!(1)).collect();
+	let unread_notifications =
+		merge_unread_notifications(highlight_count, notification_count, &thread_counts);
 
-	Ok(response::Room {
+	let payload = ResponseRoom {
 		initial,
 		lists: lists.clone(),
 		membership: membership.clone(),
@@ -258,12 +287,10 @@ pub(super) async fn handle_room(
 		bump_stamp,
 		joined_count,
 		invited_count,
-		unread_notifications: merge_unread_notifications(
-			highlight_count,
-			notification_count,
-			&thread_counts,
-		),
-	})
+		unread_notifications,
+	};
+
+	Ok((payload, shortstatehash))
 }
 
 async fn leave_or_ban_response(
@@ -271,7 +298,7 @@ async fn leave_or_ban_response(
 	conn: &Connection,
 	WindowRoom { lists, membership, room_id, .. }: &WindowRoom,
 	roomsince: u64,
-) -> Result<response::Room> {
+) -> Result<ResponseRoom> {
 	// Clients read the departure from this event, not `membership`.
 	let member_event = services
 		.state_accessor
@@ -288,7 +315,7 @@ async fn leave_or_ban_response(
 				.and_then(Result::ok)
 		});
 
-	Ok(response::Room {
+	Ok(ResponseRoom {
 		initial: roomsince.eq(&0).then_some(true),
 		lists: lists.clone(),
 		membership: membership.clone(),
@@ -517,39 +544,32 @@ async fn collect_required_state(
 	required_state: &HashSet<(StateEventType, StateKey)>,
 	timeline_pdus: &[(PduCount, PduEvent)],
 	encrypted: bool,
-) -> Vec<Raw<AnySyncStateEvent>> {
-	let StateSelection { mode: state_mode, previous, changed } = selection;
+) -> CollectedState {
+	let StateSelection {
+		mode: state_mode,
+		previous,
+		changed,
+		delivered,
+	} = selection;
+
 	let lazy = required_state
 		.iter()
 		.any(is_equal_to!(&(StateEventType::RoomMember, "$LAZY".into())));
 
-	let needs_since_state = required_state
-		.iter()
-		.any(|(_, state_key)| state_key != "$LAZY");
+	let compared = changed
+		&& required_state
+			.iter()
+			.any(|(_, state_key)| state_key != "$LAZY");
 
-	// Falling back to current state would match every entry against itself.
-	let since_state = match state_mode {
-		| StateMode::Delta(since) if changed && needs_since_state => services
-			.timeline
-			.next_shortstatehash(room_id, since)
-			.ok()
-			.await
-			.map(|shortstatehash| (since, shortstatehash)),
-		| _ => None,
-	};
+	let (current, since_state) = state_snapshots(services, room_id, selection, compared).await;
 
 	// Equal hashes exclude changes, but newly requested keys may still be due.
 	let state_unchanged = !changed
 		|| since_state
-			.map_async(|(_, since_shortstatehash)| {
-				services
-					.state
-					.get_room_shortstatehash(room_id)
-					.ok()
-					.map(move |current| current == Some(since_shortstatehash))
-			})
-			.await
-			.unwrap_or(false);
+			.is_some_and(|(_, since_shortstatehash)| current == Some(since_shortstatehash));
+
+	// Keys skipped as unchanged vouch for no snapshot, so the room keeps its last one.
+	let snapshot = current.filter(|_| !state_unchanged);
 
 	let timeline_senders = timeline_pdus
 		.iter()
@@ -641,8 +661,15 @@ async fn collect_required_state(
 
 			let pdu_id = services.timeline.get_pdu_id(&event_id).await.ok();
 			let count = pdu_id.map(RawPduId::pdu_count);
+
+			// Only a delivered snapshot vouches for an outlier; the cursor's snapshot
+			// may already hold one the client was never sent.
 			let same_at_since = since_state
-				.filter(|(since, _)| !lazy && count.is_some_and(|count| count <= *since))
+				.filter(|(since, _)| {
+					!lazy
+						&& state_mode != StateMode::Full
+						&& count.map_or(delivered != 0, |count| count <= *since)
+				})
 				.map_async(|(_, shortstatehash)| {
 					services
 						.state_accessor
@@ -653,8 +680,8 @@ async fn collect_required_state(
 				.flatten()
 				.is_some_and(|previous_event_id| previous_event_id == event_id);
 
-			let pdu_id =
-				state_is_required(state_mode, count, lazy, same_at_since).then_some(pdu_id)?;
+			let pdu_id = state_is_required(state_mode, Candidate { count, lazy, same_at_since })
+				.then_some(pdu_id)?;
 
 			let mut pdu = match pdu_id {
 				| None => services
@@ -677,7 +704,48 @@ async fn collect_required_state(
 			Some(Event::into_format(pdu))
 		})
 		.collect()
+		.map(|events| (events, snapshot))
 		.await
+}
+
+/// The room's current snapshot and the base a delta compares requested state with.
+///
+/// The current snapshot is read before any state key, so a change racing the
+/// read is sent again rather than lost. The base is the snapshot the room's
+/// required state was last delivered from, or without one, the snapshot before
+/// the first event past the cursor.
+async fn state_snapshots(
+	services: &Services,
+	room_id: &RoomId,
+	StateSelection { mode, changed, delivered, .. }: StateSelection<'_>,
+	compared: bool,
+) -> Snapshots {
+	let current = changed
+		.then_async(|| {
+			services
+				.state
+				.get_room_shortstatehash(room_id)
+				.inspect_err(|error| warn!(%room_id, %error, "Unreadable room state snapshot"))
+				.ok()
+		})
+		.await
+		.flatten();
+
+	// Falling back to current state would match every entry against itself.
+	let since_state = match mode {
+		| StateMode::Delta(since) if compared && delivered != 0 => Some((since, delivered)),
+		| StateMode::Delta(since) if compared =>
+			services
+				.timeline
+				.next_shortstatehash(room_id, since)
+				.map_ok(|shortstatehash| (since, shortstatehash))
+				.inspect_err(|error| warn!(%room_id, %error, "Unreadable state past the cursor"))
+				.ok()
+				.await,
+		| _ => None,
+	};
+
+	(current, since_state)
 }
 
 fn state_was_requested(
@@ -693,12 +761,10 @@ fn state_was_requested(
 
 fn state_is_required(
 	state_mode: StateMode,
-	count: Option<PduCount>,
-	lazy: bool,
-	same_at_since: bool,
+	Candidate { count, lazy, same_at_since }: Candidate,
 ) -> bool {
 	lazy || match state_mode {
 		| StateMode::Full => true,
-		| StateMode::Delta(since) => count.is_none_or(|count| count > since) || !same_at_since,
+		| StateMode::Delta(since) => count.is_some_and(|count| count > since) || !same_at_since,
 	}
 }

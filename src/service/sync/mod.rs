@@ -24,6 +24,8 @@ use tuwunel_core::{
 };
 use tuwunel_database::{Cbor, Deserialized, Map};
 
+use crate::rooms::short::ShortStateHash;
+
 pub struct Service {
 	services: Arc<crate::services::OnceServices>,
 	connections: Connections,
@@ -85,12 +87,23 @@ pub struct Connection {
 /// The cursor advances with complete ranges; configuration tracks room payloads.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct Room {
+	/// Position the room's content was last delivered up to.
 	pub roomsince: u64,
+
+	/// Hash of the room configuration last delivered.
 	#[serde(default)]
 	pub config_hash: u64,
+
 	/// Fingerprints of the required-state selectors last delivered for this room.
 	#[serde(default)]
 	pub required_state: RequiredState,
+
+	/// Snapshot the delivered required state was read against.
+	///
+	/// Zero when unknown, as for a room recorded by an older build: its deltas
+	/// compare against the cursor and resend outliers until a delivery records one.
+	#[serde(default)]
+	pub shortstatehash: ShortStateHash,
 }
 
 /// Fingerprints of delivered required-state selectors.
@@ -98,10 +111,17 @@ pub struct Room {
 /// The inline capacity covers common room-list and open-room selections.
 pub type RequiredState = SmallVec<[u64; 18]>;
 
-/// A delivered room configuration and its required-state coverage.
+/// A room configuration's hash and its required-state coverage.
 ///
-/// Both values advance together only after a room payload is assembled.
+/// The merged request configuration yields one per room. A delivered payload
+/// records it with the snapshot its coverage was read against.
 pub type RoomConfig = (u64, RequiredState);
+
+/// A delivered room configuration's hash, its required-state coverage, and
+/// the snapshot that coverage was read against.
+///
+/// All three advance together only after a room payload is assembled.
+pub type DeliveredConfig = (u64, RequiredState, ShortStateHash);
 
 type Connections = TokioMutex<BTreeMap<ConnectionKey, ConnectionVal>>;
 pub type ConnectionVal = Arc<TokioMutex<Connection>>;
@@ -110,7 +130,11 @@ pub type ConnectionKey = (OwnedUserId, Option<OwnedDeviceId>, Option<ConnectionI
 pub type Subscriptions = BTreeMap<OwnedRoomId, request::ListConfig>;
 pub type Lists = BTreeMap<ListId, request::List>;
 pub type Rooms = BTreeMap<OwnedRoomId, Room>;
-type RoomUpdate<'a> = (&'a RoomId, Option<RoomConfig>);
+
+/// A completed room range, with the configuration its payload delivered, if any.
+///
+/// Without a configuration, completing the range advances only the room's cursor.
+pub type RoomUpdate<'a> = (&'a RoomId, Option<DeliveredConfig>);
 
 impl crate::Service for Service {
 	fn build(args: &crate::Args<'_>) -> Result<Arc<Self>> {
@@ -299,8 +323,7 @@ pub fn update_rooms_prologue(&mut self, retard_since: Option<u64>) {
 			&& room.roomsince > retard_since
 		{
 			room.roomsince = retard_since;
-			room.config_hash = 0;
-			room.required_state.clear();
+			room.set_config(DeliveredConfig::default());
 		}
 	});
 }
@@ -317,15 +340,23 @@ where
 	Complete: Iterator<Item = RoomUpdate<'a>> + Send + 'a,
 {
 	let next_batch = self.next_batch;
+
 	complete.for_each(|(room_id, config)| {
 		let room = self.rooms.entry(room_id.into()).or_default();
 
 		room.roomsince = next_batch;
-		if let Some((config_hash, required_state)) = config {
-			room.config_hash = config_hash;
-			room.required_state = required_state;
+		if let Some(config) = config {
+			room.set_config(config);
 		}
 	});
+}
+
+impl Room {
+	fn set_config(&mut self, (config_hash, required_state, shortstatehash): DeliveredConfig) {
+		self.config_hash = config_hash;
+		self.required_state = required_state;
+		self.shortstatehash = shortstatehash;
+	}
 }
 
 /// Records that this pass carried the syncing user's whole profile.

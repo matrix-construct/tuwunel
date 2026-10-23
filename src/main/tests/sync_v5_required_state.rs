@@ -5,10 +5,13 @@ use std::net::TcpListener;
 use futures::future::join;
 use serde_json::{Value, json};
 use tuwunel::{Args, Runtime, Server, async_run, async_start, async_stop};
-use tuwunel_core::{Result, err, ruma::RoomId, utils::BoolExt};
+use tuwunel_core::{Result, ruma::RoomId};
 use tuwunel_service::Services;
 
-use self::client::{Client, field, register, wait_until_ready};
+use self::{
+	client::{Client, register, wait_until_ready},
+	required_state::expect_state,
+};
 
 mod client;
 mod sliding_sync;
@@ -16,8 +19,14 @@ mod sliding_sync;
 #[path = "client/put.rs"]
 mod put;
 
+#[path = "sliding_sync/required_state.rs"]
+mod required_state;
+
 #[path = "sliding_sync/resume.rs"]
 mod resume;
+
+#[path = "client/state.rs"]
+mod state;
 
 const TOKEN: &str = "sync-v5-required-state-test-access-token";
 const BEACON: &str = "org.matrix.msc3672.beacon_info";
@@ -72,23 +81,19 @@ async fn exercise(services: &Services, base: &str) -> Result {
 		.create_room(&json!({ "preset": "public_chat" }))
 		.await?;
 
-	let beacon_path = format!("rooms/{room}/state/{BEACON}/{user}");
-	let pinned_path = format!("rooms/{room}/state/{PINNED}");
-	let beacon = client
-		.put(&beacon_path, &json!({ "live": true }))
+	let beacon_id = client
+		.put_state(&room, BEACON, user.as_str(), &json!({ "live": true }))
 		.await?;
 
-	let beacon_id = field(&beacon, "event_id")?;
-	let pinned = client
-		.put(&pinned_path, &json!({ "pinned": [] }))
+	let pinned_id = client
+		.put_state(&room, PINNED, "", &json!({ "pinned": [] }))
 		.await?;
 
-	let pinned_id = field(&pinned, "event_id")?;
 	let listed = config(&room, 1, "*", false);
 	let opened = config(&room, 20, "*", true);
 	let initial = client.sync(None, &listed).await?;
 
-	expect_state(&initial, &room, &[beacon_id], "initial")?;
+	expect_state(&initial, &room, &[beacon_id.as_str()], "initial")?;
 
 	let location_path = format!("rooms/{room}/send/org.matrix.msc3672.beacon/location");
 	let location = json!({
@@ -114,44 +119,45 @@ async fn exercise(services: &Services, base: &str) -> Result {
 
 	let subscribed = client.sync(Some(&lowered), &opened).await?;
 
-	expect_state(&subscribed, &room, &[pinned_id], "added subscription")?;
+	expect_state(&subscribed, &room, &[pinned_id.as_str()], "added subscription")?;
 
 	let narrowed = client.sync(Some(&subscribed), &listed).await?;
 
 	expect_state(&narrowed, &room, &[], "removed subscription")?;
 
-	let pinned = client
-		.put(&pinned_path, &json!({ "pinned": [beacon_id] }))
+	let pinned_id = client
+		.put_state(&room, PINNED, "", &json!({ "pinned": [beacon_id] }))
 		.await?;
 
-	let pinned_id = field(&pinned, "event_id")?;
 	let consumed = client.sync(Some(&narrowed), &listed).await?;
 
 	expect_state(&consumed, &room, &[], "unrequested pinned update")?;
 
 	let reopened = client.sync(Some(&consumed), &opened).await?;
 
-	expect_state(&reopened, &room, &[pinned_id], "restored subscription")?;
+	expect_state(&reopened, &room, &[pinned_id.as_str()], "restored subscription")?;
 
 	let replayed = client.sync(Some(&consumed), &opened).await?;
 
-	expect_state(&replayed, &room, &[beacon_id, pinned_id], "lost response replay")?;
+	let lost = [beacon_id.as_str(), pinned_id.as_str()];
 
-	let beacon = client
-		.put(&beacon_path, &json!({ "live": false }))
+	expect_state(&replayed, &room, &lost, "lost response replay")?;
+
+	let stopped_id = client
+		.put_state(&room, BEACON, user.as_str(), &json!({ "live": false }))
 		.await?;
 
 	let changed = client.sync(Some(&replayed), &opened).await?;
 
-	expect_state(&changed, &room, &[field(&beacon, "event_id")?], "changed beacon")?;
+	expect_state(&changed, &room, &[stopped_id.as_str()], "changed beacon")?;
 
 	let selected = config(&room, 20, user.as_str(), true);
 	let exact = client.sync(Some(&changed), &selected).await?;
 
 	expect_state(&exact, &room, &[], "wildcard narrowed to exact key")?;
 
-	let other = client
-		.put(&format!("rooms/{room}/state/{BEACON}/other"), &json!({ "live": true }))
+	let other_id = client
+		.put_state(&room, BEACON, "other", &json!({ "live": true }))
 		.await?;
 
 	let consumed = client.sync(Some(&exact), &selected).await?;
@@ -160,7 +166,7 @@ async fn exercise(services: &Services, base: &str) -> Result {
 
 	let wildcard = client.sync(Some(&consumed), &opened).await?;
 
-	expect_state(&wildcard, &room, &[field(&other, "event_id")?], "exact key widened to wildcard")
+	expect_state(&wildcard, &room, &[other_id.as_str()], "exact key widened to wildcard")
 }
 
 fn config(room: &RoomId, limit: u64, key: &str, subscribed: bool) -> Value {
@@ -177,20 +183,4 @@ fn config(room: &RoomId, limit: u64, key: &str, subscribed: bool) -> Value {
 		} },
 		"room_subscriptions": subscriptions,
 	})
-}
-
-fn expect_state(response: &Value, room: &RoomId, expected: &[&str], context: &str) -> Result {
-	let payload = &response["rooms"][room.as_str()];
-	let state = payload["required_state"]
-		.as_array()
-		.map(Vec::as_slice)
-		.unwrap_or_default();
-
-	let matches = payload.is_object()
-		&& state.len() == expected.len()
-		&& expected
-			.iter()
-			.all(|id| state.iter().any(|event| event["event_id"] == *id));
-
-	BoolExt::ok_or_else(matches, || err!("{context}: expected {expected:?}, received {payload}"))
 }

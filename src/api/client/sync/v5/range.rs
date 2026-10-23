@@ -19,7 +19,7 @@ use tuwunel_core::{
 };
 use tuwunel_service::{
 	rooms::read_receipt::{PrivateReadEvents, pack_receipts_fallible},
-	sync::{Connection, Room, RoomConfig},
+	sync::{Connection, DeliveredConfig, Room, RoomUpdate},
 };
 
 use super::{
@@ -65,7 +65,7 @@ impl From<RoomFailure> for Failure {
 #[derive(Debug)]
 struct CompleteRange {
 	payload: Option<response::Room>,
-	config: Option<RoomConfig>,
+	config: Option<DeliveredConfig>,
 	receipts: Option<Raw<SyncReceiptEvent>>,
 	account_data: Vec<Raw<AnyRoomAccountDataEvent>>,
 }
@@ -76,7 +76,7 @@ pub(super) struct Results {
 }
 
 #[implement(Results)]
-pub(super) fn room_updates(&mut self) -> impl Iterator<Item = (&RoomId, Option<RoomConfig>)> {
+pub(super) fn room_updates(&mut self) -> impl Iterator<Item = RoomUpdate<'_>> {
 	self.ranges
 		.iter_mut()
 		.map(|(room_id, range)| (room_id.as_ref(), range.config.take()))
@@ -173,7 +173,7 @@ async fn collect_room(
 	let config_changed = room.config_hash != config_hash;
 	let payload_is_fresh = window_room.payload_is_fresh(room.roomsince) || config_changed;
 
-	let payload = payload_is_fresh
+	let delivery = payload_is_fresh
 		.then_async(|| {
 			handle_room(sync_info, conn, window_room, room, config_changed, room_details)
 		})
@@ -189,19 +189,25 @@ async fn collect_room(
 	let account_data = room_account_data(sync_info, conn, room_id, room.roomsince)
 		.map_err(|error| Failure::new(Domain::RoomAccountData, error));
 
-	let (payload, public_receipts, private_receipts, account_data) =
-		try_join4(payload, public_receipts, private_receipts, account_data).await?;
+	let (delivery, public_receipts, private_receipts, account_data) =
+		try_join4(delivery, public_receipts, private_receipts, account_data).await?;
 
 	let required_state = membership_allows_required_state(window_room.membership.as_ref())
 		.then_some(required_state)
 		.unwrap_or_default();
+
+	// Without freshly read state, the range keeps the snapshot recorded at its last delivery.
+	let (payload, shortstatehash) = delivery.unzip();
+	let shortstatehash = shortstatehash
+		.flatten()
+		.unwrap_or(room.shortstatehash);
 
 	assemble(
 		payload,
 		public_receipts,
 		private_receipts,
 		account_data,
-		(config_hash, required_state),
+		(config_hash, required_state, shortstatehash),
 	)
 }
 
@@ -286,7 +292,7 @@ fn assemble<PublicReceipts>(
 	public_receipts: PublicReceipts,
 	private_receipts: PrivateReadEvents,
 	account_data: Vec<Raw<AnyRoomAccountDataEvent>>,
-	config: RoomConfig,
+	config: DeliveredConfig,
 ) -> Result<CompleteRange, Failure>
 where
 	PublicReceipts: Iterator<Item = Raw<AnySyncEphemeralRoomEvent>>,
@@ -325,7 +331,7 @@ mod tests {
 			vec![malformed].into_iter(),
 			PrivateReadEvents::new(),
 			Vec::new(),
-			(7, once(11).collect()),
+			(7, once(11).collect(), 13),
 		);
 
 		let error = range.expect_err("malformed receipt must fail the complete range");
@@ -346,7 +352,7 @@ mod tests {
 			Vec::new().into_iter(),
 			PrivateReadEvents::new(),
 			Vec::new(),
-			(7, once(11).collect()),
+			(7, once(11).collect(), 13),
 		);
 
 		let mut range = publish(room_id, range); // room_updates consumes the configuration.

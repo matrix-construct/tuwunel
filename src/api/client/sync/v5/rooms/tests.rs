@@ -13,10 +13,10 @@ use ruma::{
 use tuwunel_matrix::pdu::PduCount;
 
 use super::{
-	Connection, ListIds, StateMode, TIMELINE_LIMIT_MAX, membership_allows_required_state,
-	merged_room_details, required_state_hash, room_config, room_timeline_limited,
-	room_timeline_metadata, state_is_required, state_may_have_changed, state_mode,
-	state_was_requested,
+	Candidate, Connection, ListIds, StateMode, TIMELINE_LIMIT_MAX,
+	membership_allows_required_state, merged_room_details, required_state_hash, room_config,
+	room_timeline_limited, room_timeline_metadata, state_is_required, state_may_have_changed,
+	state_mode, state_was_requested,
 };
 
 #[test]
@@ -77,15 +77,15 @@ fn required_state_is_full_initially_and_without_coverage() {
 	assert_eq!(state_mode(0, false), StateMode::Full);
 	assert_eq!(state_mode(7, true), StateMode::Full);
 	assert_eq!(state_mode(7, false), StateMode::Delta(PduCount::Normal(7)));
-	assert!(state_is_required(StateMode::Full, Some(PduCount::Normal(1)), false, true));
+	assert!(state_is_required(StateMode::Full, unchanged(Some(PduCount::Normal(1)))));
 }
 
 #[test]
 fn incremental_required_state_omits_unchanged_events() {
 	let mode = StateMode::Delta(PduCount::Normal(7));
 
-	assert!(!state_is_required(mode, Some(PduCount::Normal(7)), false, true));
-	assert!(!state_is_required(mode, Some(PduCount::Normal(6)), false, true));
+	assert!(!state_is_required(mode, unchanged(Some(PduCount::Normal(7)))));
+	assert!(!state_is_required(mode, unchanged(Some(PduCount::Normal(6)))));
 }
 
 #[test]
@@ -93,7 +93,7 @@ fn incremental_required_state_includes_only_changes() {
 	let mode = StateMode::Delta(PduCount::Normal(7));
 	let included = [PduCount::Normal(6), PduCount::Normal(8)]
 		.into_iter()
-		.filter(|count| state_is_required(mode, Some(*count), false, true))
+		.filter(|count| state_is_required(mode, unchanged(Some(*count))))
 		.count();
 
 	assert_eq!(included, 1);
@@ -103,14 +103,24 @@ fn incremental_required_state_includes_only_changes() {
 fn incremental_required_state_keeps_reselected_old_event() {
 	let mode = StateMode::Delta(PduCount::Normal(7));
 
-	assert!(state_is_required(mode, Some(PduCount::Normal(6)), false, false));
+	assert!(state_is_required(mode, Candidate {
+		count: Some(PduCount::Normal(6)),
+		..Default::default()
+	}));
 }
 
 #[test]
 fn incremental_required_state_keeps_uncounted_events() {
 	let mode = StateMode::Delta(PduCount::Normal(7));
 
-	assert!(state_is_required(mode, None, false, false));
+	assert!(state_is_required(mode, Candidate::default()));
+}
+
+#[test]
+fn incremental_required_state_omits_unchanged_uncounted_events() {
+	let mode = StateMode::Delta(PduCount::Normal(7));
+
+	assert!(!state_is_required(mode, unchanged(None)));
 }
 
 #[test]
@@ -126,7 +136,12 @@ fn incremental_required_state_needs_a_newer_timeline_event() {
 fn incremental_required_state_keeps_lazy_members() {
 	let mode = StateMode::Delta(PduCount::Normal(7));
 
-	assert!(state_is_required(mode, Some(PduCount::Normal(1)), true, true));
+	let candidate = Candidate {
+		lazy: true,
+		..unchanged(Some(PduCount::Normal(1)))
+	};
+
+	assert!(state_is_required(mode, candidate));
 }
 
 #[test]
@@ -261,4 +276,12 @@ fn timeline(positions: &[u64]) -> Vec<(PduCount, ())> {
 		.copied()
 		.map(|position| (PduCount::Normal(position), ()))
 		.collect()
+}
+
+fn unchanged(count: Option<PduCount>) -> Candidate {
+	Candidate {
+		count,
+		same_at_since: true,
+		..Default::default()
+	}
 }
