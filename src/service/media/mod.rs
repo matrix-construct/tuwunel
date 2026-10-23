@@ -1,5 +1,6 @@
 mod data;
 pub(super) mod migrations;
+mod object_locations;
 mod preview;
 mod remote;
 mod space;
@@ -24,9 +25,10 @@ use ruma::{
 	api::error::{ErrorKind, RetryAfter},
 	http_headers::ContentDisposition,
 };
-#[cfg(feature = "media_thumbnail")]
-use tokio::sync::Semaphore;
-use tokio::{fs, sync::Notify};
+use tokio::{
+	fs,
+	sync::{Notify, Semaphore},
+};
 use tuwunel_core::{
 	Err, Error, Result, debug, debug_error, debug_info, debug_warn, err, trace,
 	utils::{
@@ -44,6 +46,9 @@ use self::video::{FAILURES, Failures, sweep_staging_dir};
 use self::{data::Data, preview::Agent, remote::Fetch, thumbnail::sequence};
 pub use self::{
 	data::Metadata,
+	object_locations::{
+		MediaObjectLocations, MediaObjectStatus, ObjectPresence, ProviderObjectLocation,
+	},
 	preview::UrlPreviewData,
 	thumbnail::{Animate, Dim},
 };
@@ -108,6 +113,7 @@ pub struct Service {
 	url_preview_mutex: MutexMap<String, ()>,
 	federation_mutex: MutexMap<String, ()>,
 	mxc_state: MXCState,
+	object_location_slots: Semaphore,
 	#[cfg(feature = "media_thumbnail")]
 	animated_thumbnail_slots: Arc<Semaphore>,
 	#[cfg(feature = "media_thumbnail")]
@@ -150,6 +156,7 @@ impl crate::Service for Service {
 			},
 			#[cfg(feature = "media_thumbnail")]
 			video_thumbnail_failures: Failures::new(FAILURES).into(),
+			object_location_slots: Semaphore::new(16),
 			#[cfg(feature = "media_thumbnail")]
 			animated_thumbnail_slots,
 			#[cfg(feature = "media_thumbnail")]

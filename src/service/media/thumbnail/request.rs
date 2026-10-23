@@ -280,7 +280,7 @@ async fn answer_original(&self, mxc: &Mxc<'_>, animate: Animate) -> Result<Media
 /// Its row is keyed at the sentinel dimension, and nothing is withheld from
 /// this lookup: the row is the original rather than a variant of it.
 #[implement(super::super::Service)]
-pub(super) async fn original_metadata(&self, mxc: &Mxc<'_>) -> Result<Metadata> {
+pub(in crate::media) async fn original_metadata(&self, mxc: &Mxc<'_>) -> Result<Metadata> {
 	self.db
 		.search_file_metadata(mxc, &Dim::default(), Animate::Allowed)
 		.await

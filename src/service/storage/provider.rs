@@ -44,6 +44,7 @@ use object_store::{
 	Attributes, CopyMode, DynObjectStore, GetResult, MultipartUpload, ObjectMeta, ObjectStore,
 	ObjectStoreExt, PutPayload, PutResult, path::Path, signer::Signer,
 };
+use serde::Serialize;
 use tuwunel_core::{
 	Error, Result,
 	config::StorageProvider,
@@ -101,6 +102,49 @@ pub type FetchItem = (Bytes, (Range<u64>, u64));
 /// fetch, avoiding a per-chunk clone of the backend response details.
 /// Stream and backend failures are represented separately as error items.
 pub type FetchMetaItem = (Bytes, Arc<(Range<u64>, ObjectMeta, Attributes)>);
+
+/// A resolved object-store address. Local filesystem paths are never exported.
+#[derive(Debug, Serialize)]
+#[serde(tag = "backend", rename_all = "snake_case")]
+pub enum ExportLocation {
+	/// An S3-compatible bucket and key, including the provider's prefix.
+	S3 {
+		bucket: String,
+		object_key: String,
+	},
+	/// A Google Cloud Storage bucket and key, including the provider's prefix.
+	Gcs {
+		bucket: String,
+		object_key: String,
+	},
+}
+
+/// Resolves a transfer address using the same prefixing as reads and writes.
+#[implement(Provider)]
+pub fn export_location(&self, path: &str) -> Result<Option<ExportLocation>> {
+	let object_key = self.to_abs_path(path)?.to_string();
+
+	Ok(match &self.config {
+		| StorageProvider::s3(_) => {
+			// object_store 0.14 has no resolved-bucket accessor. Its Display
+			// identity exposes the runtime bucket after URL/environment overrides.
+			// Fail this lookup if the format changes, without affecting startup.
+			let identity = self.provider.to_string();
+			let bucket = identity
+				.strip_prefix("AmazonS3(")
+				.and_then(|bucket| bucket.strip_suffix(')'))
+				.filter(|bucket| !bucket.is_empty())
+				.ok_or_else(|| err!("S3 client did not expose a resolved bucket identity"))?;
+			Some(ExportLocation::S3 { bucket: bucket.to_owned(), object_key })
+		},
+		// GCS construction explicitly sets this bucket after environment settings.
+		| StorageProvider::gcs(config) => config
+			.bucket
+			.as_ref()
+			.map(|bucket| ExportLocation::Gcs { bucket: bucket.to_string(), object_key }),
+		| _ => None,
+	})
+}
 
 /// Starts this provider and performs its configured connectivity check.
 ///
