@@ -17,6 +17,8 @@ pub(crate) async fn get_server_version_route(
 		BTreeMap::from([
 			("tk.nutra.msc0501.reconciliation".to_owned(), true),
 			("tk.nutra.msc4521.digest.algebraic_v1.0.0".to_owned(), true),
+			("tk.nutra.msc4521.binding.event_id_v1".to_owned(), true),
+			("tk.nutra.msc0501.strata".to_owned(), true),
 		])
 	});
 	Ok(api::version::Response {

@@ -19,7 +19,7 @@ use rezzy_recon::{
 	ReconciliationClient, RemoteDigest, build_bucket_sketches,
 };
 use ruma::{
-	OwnedEventId, OwnedRoomId, OwnedServerName, RoomId, ServerName,
+	OwnedEventId, OwnedRoomId, OwnedServerName, RoomId, RoomVersionId, ServerName,
 	api::federation::{discovery::get_server_version, event::get_event},
 };
 use tokio::{sync::Notify, time::MissedTickBehavior};
@@ -156,6 +156,9 @@ const MIN_EXCHANGE_SPACING: Duration = Duration::from_millis(250);
 const SAMPLE_FETCHES: usize = 16;
 const MAX_SAMPLE_FAILURE_PERCENT: usize = 25;
 const DIGEST_FEATURE: &str = "tk.nutra.msc4521.digest.algebraic_v1.0.0";
+const BINDING_FEATURE: &str = "tk.nutra.msc4521.binding.event_id_v1";
+const STRATA_FEATURE: &str = "tk.nutra.msc0501.strata";
+const UNSUPPORTED_COOLDOWN: Duration = Duration::from_secs(24 * 3600);
 
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 	mutex
@@ -271,7 +274,7 @@ impl ServiceTrait for Reconcile {
 								+ if supported {
 									PEER_COOLDOWN
 								} else {
-									Duration::from_secs(3600)
+									UNSUPPORTED_COOLDOWN
 								},
 						);
 					}
@@ -315,6 +318,13 @@ impl Reconcile {
 		{
 			return Ok(true);
 		}
+		// MSC4521: the event_ids binding MUST NOT be used in room versions 1 and 2.
+		if matches!(
+			self.services.state.get_room_version(room).await?,
+			RoomVersionId::V1 | RoomVersionId::V2
+		) {
+			return Ok(false);
+		}
 		let local = self
 			.services
 			.timeline
@@ -328,7 +338,11 @@ impl Reconcile {
 		if !version
 			.unstable_features
 			.as_ref()
-			.is_some_and(|features| features.get(DIGEST_FEATURE) == Some(&true))
+			.is_some_and(|features| {
+				[DIGEST_FEATURE, BINDING_FEATURE, STRATA_FEATURE]
+					.iter()
+					.all(|name| features.get(*name) == Some(&true))
+			})
 		{
 			return Ok(false);
 		}
