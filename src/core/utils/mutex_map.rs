@@ -10,9 +10,11 @@ use std::{
 	sync::{Arc, TryLockError::WouldBlock},
 };
 
+use futures::StreamExt;
+use itertools::Itertools;
 use tokio::sync::OwnedMutexGuard as Omg;
 
-use crate::{Result, err};
+use crate::{Result, err, utils::IterStream};
 
 /// Provides independent asynchronous mutexes keyed by owned values.
 ///
@@ -69,6 +71,29 @@ where
 		K: Debug + Send + ?Sized + Sync + ToOwned<Owned = Key>,
 	{
 		self.entry(k).lock().await
+	}
+
+	/// Acquires the asynchronous mutexes of several keys, one after another in
+	/// key order.
+	///
+	/// A key given more than once is locked once. Callers locking overlapping
+	/// sets this way wait for one another and never deadlock, since each takes
+	/// the keys they share in the same order.
+	#[tracing::instrument(level = "trace", skip_all)]
+	pub async fn lock_all<Keys, Guards>(&self, keys: Keys) -> Guards
+	where
+		Key: Debug + Ord + Sync,
+		Keys: IntoIterator<Item = Key>,
+		Keys::IntoIter: Send,
+		Guards: Default + Extend<Guard<Key, Val>> + Send,
+	{
+		keys.into_iter()
+			.sorted_unstable()
+			.dedup()
+			.stream()
+			.then(async move |key| self.lock(&key).await)
+			.collect()
+			.await
 	}
 
 	/// Attempts to acquire a key without waiting for its asynchronous mutex.

@@ -238,6 +238,42 @@ async fn mutex_map_keys() {
 }
 
 #[tokio::test]
+async fn mutex_map_lock_all_locks_each_key_once() {
+	let map = MutexMap::<String, ()>::new();
+	let keys = ["foo", "bar", "foo"].map(str::to_owned);
+
+	let all = poll_pending(map.lock_all::<_, Vec<_>>(keys));
+
+	assert!(all.is_none(), "a repeated key must not wait for itself");
+
+	let guards: Vec<_> = map
+		.lock_all(["foo", "bar"].map(str::to_owned))
+		.await;
+
+	assert_eq!(guards.len(), 2, "each key must be locked once");
+	assert!(map.try_lock("foo").is_err(), "foo must be held");
+	assert!(map.try_lock("bar").is_err(), "bar must be held");
+
+	drop(guards);
+	assert!(map.is_empty(), "map must be empty");
+}
+
+#[tokio::test]
+async fn mutex_map_lock_all_takes_keys_in_order() {
+	let map = MutexMap::<String, ()>::new();
+
+	let foo = map.lock("foo").await;
+	let all = poll_pending(map.lock_all::<_, Vec<_>>(["foo", "bar"].map(str::to_owned)))
+		.expect("must wait for foo");
+
+	assert!(map.try_lock("bar").is_err(), "bar must be taken before foo");
+
+	drop(foo);
+	assert_eq!(all.await.len(), 2, "both keys must be locked");
+	assert!(map.is_empty(), "map must be empty");
+}
+
+#[tokio::test]
 async fn mutex_map_try_cleanup() {
 	let map = MutexMap::<String, ()>::new();
 
