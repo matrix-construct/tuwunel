@@ -9,7 +9,7 @@ use std::{
 		Arc,
 		atomic::{AtomicU64, Ordering},
 	},
-	task::{Context, Wake, Waker},
+	task::{Wake, Waker},
 };
 
 use futures::{TryStreamExt, pin_mut};
@@ -18,7 +18,7 @@ use serde_json::{from_value, json};
 use tuwunel_core::{Result, config::Figment};
 use tuwunel_database::Engine;
 
-use crate::test_utils::fixture;
+use crate::test_utils::{fixture, poll_once};
 
 struct Sequence {
 	engine: Arc<Engine>,
@@ -47,24 +47,14 @@ async fn original_and_expiry_are_visible_before_notification() -> Result {
 
 	pin_mut!(notified);
 
-	assert!(
-		notified
-			.as_mut()
-			.poll(&mut Context::from_waker(&waker))
-			.is_pending()
-	);
+	assert!(poll_once(notified.as_mut(), &waker).is_pending());
 
 	services
 		.retention
 		.save_original_pdu(event, &original, &lock)
 		.await;
 
-	assert!(
-		notified
-			.as_mut()
-			.poll(&mut Context::from_waker(&waker))
-			.is_ready()
-	);
+	assert!(poll_once(notified.as_mut(), &waker).is_ready());
 
 	assert_eq!(observed.observed.load(Ordering::SeqCst), services.db.engine.current_sequence());
 	let retained = services

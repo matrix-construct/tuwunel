@@ -4,7 +4,7 @@
 use std::{
 	pin::pin,
 	sync::{Arc, Mutex},
-	task::{Context, Wake, Waker},
+	task::{Wake, Waker},
 };
 
 use ruma::{EventId, OwnedEventId, RoomId, event_id, events::StateEventType, room_id, user_id};
@@ -19,7 +19,7 @@ use tuwunel_matrix::{
 use crate::{
 	Services,
 	rooms::{short::ShortRoomId, threads::thread_root},
-	test_utils::fixture,
+	test_utils::{fixture, poll_once},
 };
 
 /// A room with just its create event, so redaction can read its version.
@@ -73,9 +73,8 @@ async fn redacted_reply_and_root_count_are_written_together() -> Result {
 	let observed = Arc::new(CountAtReplyWrite(services.clone(), root_id, Mutex::default()));
 	let waker = Waker::from(observed.clone());
 	let mut watcher = pin!(services.db["pduid_pdu"].watch_raw_prefix_once(first_id));
-	let mut context = Context::from_waker(&waker);
 
-	assert!(watcher.as_mut().poll(&mut context).is_pending());
+	assert!(poll_once(watcher.as_mut(), &waker).is_pending());
 
 	room.redact(&first).await?;
 

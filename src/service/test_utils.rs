@@ -2,7 +2,9 @@ use std::{
 	env::{current_exe, temp_dir, var_os},
 	fs::remove_dir_all,
 	path::{Path, PathBuf},
+	pin::Pin,
 	sync::{Arc, Mutex},
+	task::{Context, Poll, Waker},
 	thread::current as current_thread,
 };
 
@@ -199,6 +201,14 @@ pub(crate) async fn compress_state(
 		.state_compressor
 		.compress_state_event(shortstatekey, event_id)
 		.await
+}
+
+/// Polls a pinned future once with `waker` and returns the result.
+///
+/// Watch tests poll a subscriber before and after a write to see whether the
+/// write woke it.
+pub(crate) fn poll_once<F: Future>(future: Pin<&mut F>, waker: &Waker) -> Poll<F::Output> {
+	future.poll(&mut Context::from_waker(waker))
 }
 
 /// Starts recording warnings on the calling thread.

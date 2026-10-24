@@ -1,8 +1,4 @@
-use std::{
-	pin::pin,
-	sync::Arc,
-	task::{Context, Waker},
-};
+use std::{pin::pin, sync::Arc, task::Waker};
 
 use ruma::{EventId, RoomId, UserId, event_id, room_id, user_id};
 use serde_json::{Value, json};
@@ -13,7 +9,7 @@ use tuwunel_matrix::pdu::{PduCount, PduEvent, PduId, RawPduId};
 use self::observation::Observation;
 use crate::{
 	Services,
-	test_utils::{fixture, pdu_id},
+	test_utils::{fixture, pdu_id, poll_once},
 };
 
 mod observation;
@@ -38,12 +34,7 @@ async fn participant_notification_observes_activity_and_bundle() -> Result {
 	let waker = Waker::from(observation.clone());
 	let mut watcher = pin!(services.db["threadid_userids"].watch_raw_prefix_once(root_id)); // Future::poll requires mutable access.
 
-	assert!(
-		watcher
-			.as_mut()
-			.poll(&mut Context::from_waker(&waker))
-			.is_pending()
-	);
+	assert!(poll_once(watcher.as_mut(), &waker).is_pending());
 
 	services
 		.threads

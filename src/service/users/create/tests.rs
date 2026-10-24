@@ -3,7 +3,7 @@ use std::{
 		Arc,
 		atomic::{AtomicU64, Ordering},
 	},
-	task::{Context, Wake, Waker},
+	task::{Wake, Waker},
 };
 
 use futures::pin_mut;
@@ -11,7 +11,11 @@ use ruma::{UserId, user_id};
 use tuwunel_core::{Result, config::Figment};
 use tuwunel_database::Engine;
 
-use crate::{Services, test_utils::fixture, users::PASSWORD_SENTINEL};
+use crate::{
+	Services,
+	test_utils::{fixture, poll_once},
+	users::PASSWORD_SENTINEL,
+};
 
 struct Sequence {
 	engine: Arc<Engine>,
@@ -51,12 +55,7 @@ async fn assert_atomic_creation(
 
 	pin_mut!(origin_changed);
 
-	assert!(
-		origin_changed
-			.as_mut()
-			.poll(&mut Context::from_waker(&waker))
-			.is_pending()
-	);
+	assert!(poll_once(origin_changed.as_mut(), &waker).is_pending());
 
 	let before = services.db.engine.current_sequence();
 
@@ -65,12 +64,7 @@ async fn assert_atomic_creation(
 
 	assert_eq!(after, before.saturating_add(2));
 	assert_eq!(observed.sequence.load(Ordering::SeqCst), after);
-	assert!(
-		origin_changed
-			.as_mut()
-			.poll(&mut Context::from_waker(&waker))
-			.is_ready()
-	);
+	assert!(poll_once(origin_changed.as_mut(), &waker).is_ready());
 
 	assert_eq!(services.users.origin(user).await?, origin.unwrap_or("password"));
 	assert!(services.users.exists(user).await);
