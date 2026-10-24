@@ -2853,16 +2853,15 @@ pub struct Config {
 	pub media_deny_inline_styles: bool,
 
 	/// Enable the legacy unauthenticated Matrix media repository endpoints.
+	///
 	/// These endpoints consist of:
 	/// - /_matrix/media/*/config
-	/// - /_matrix/media/*/upload
 	/// - /_matrix/media/*/preview_url
 	/// - /_matrix/media/*/download/*
 	/// - /_matrix/media/*/thumbnail/*
 	///
-	/// The authenticated equivalent endpoints are always enabled.
-	///
-	/// Defaults to false.
+	/// The authenticated equivalent endpoints are always enabled. Defaults to
+	/// false.
 	#[serde(default)]
 	pub allow_legacy_media: bool,
 
