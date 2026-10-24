@@ -23,7 +23,7 @@ use ruma::{
 			create::RoomCreateEventContent,
 			encryption::RoomEncryptionEventContent,
 			guest_access::{GuestAccess, RoomGuestAccessEventContent},
-			history_visibility::{HistoryVisibility, RoomHistoryVisibilityEventContent},
+			history_visibility::HistoryVisibility,
 			join_rules::{JoinRule, RoomJoinRulesEventContent},
 			member::RoomMemberEventContent,
 			name::RoomNameEventContent,
@@ -33,7 +33,10 @@ use ruma::{
 	},
 	room::RoomType,
 };
-use tuwunel_core::{Result, err, implement, utils::BoolExt};
+use tuwunel_core::{
+	Result, err, implement,
+	utils::{BoolExt, OptionExt},
+};
 use tuwunel_matrix::{Pdu, room::state::resolution::events::RoomCreateEvent, room_version};
 
 /// Resolves room state and answers state-based authorization questions.
@@ -126,12 +129,22 @@ impl Service {
 	/// Missing, unreadable, or invalid history-visibility state is treated as not
 	/// world-readable.
 	pub async fn is_world_readable(&self, room_id: &RoomId) -> bool {
-		self.room_state_get_content(room_id, &StateEventType::RoomHistoryVisibility, "")
+		self.get_history_visibility(room_id).await == HistoryVisibility::WorldReadable
+	}
+
+	/// Returns the room's current history visibility.
+	///
+	/// Falls back to [`HistoryVisibility::Shared`] when the room has no current
+	/// state or its history-visibility state is missing, unreadable, or invalid.
+	pub async fn get_history_visibility(&self, room_id: &RoomId) -> HistoryVisibility {
+		self.services
+			.state
+			.get_room_shortstatehash(room_id)
 			.await
-			.map(|c: RoomHistoryVisibilityEventContent| {
-				c.history_visibility == HistoryVisibility::WorldReadable
-			})
-			.unwrap_or(false)
+			.ok()
+			.map_async(|shortstatehash| self.history_visibility(shortstatehash))
+			.await
+			.unwrap_or(HistoryVisibility::Shared)
 	}
 
 	/// Reports whether guest users may join the room.

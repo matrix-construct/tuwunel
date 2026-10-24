@@ -27,7 +27,7 @@ use tuwunel_service::{
 	rooms::{
 		lazy_loading,
 		lazy_loading::{Options, Witness},
-		short::{ShortRoomId, ShortStateKey},
+		short::{ShortRoomId, ShortStateHash, ShortStateKey},
 		timeline::PdusIterItem,
 	},
 };
@@ -86,8 +86,8 @@ pub struct ContextArgs<'a> {
 	/// Requested maximum number of surrounding timeline events.
 	pub limit: Option<UInt>,
 
-	/// Skip the base-event visibility and ignore checks and the surrounding
-	/// halves' visibility and ignore filters, for admin callers.
+	/// Skip the visibility and ignore checks on the base event and both halves,
+	/// and the room-state check on an anchor without state, for admin callers.
 	pub bypass_visibility: bool,
 }
 
@@ -195,8 +195,9 @@ pub async fn event_context(
 		.map(ref_at!(1))
 		.map_or_else(|| event_id, |pdu| pdu.event_id.as_ref());
 
-	let (lazy_loading_witnessed, state_ids) =
-		join(lazy_loading_witnessed, load_state_ids(services, room_id, state_at)).await;
+	let state_ids = load_state_ids(services, room_id, state_at, sender_user, bypass_visibility);
+
+	let (lazy_loading_witnessed, state_ids) = join(lazy_loading_witnessed, state_ids).await;
 
 	let state = build_state_response(
 		services,
@@ -367,26 +368,78 @@ where
 		.await
 }
 
+/// Loads the room state at the event that anchors the response's state.
+///
+/// An anchor without recorded state, such as a room's create event or a
+/// backfilled event, falls back to the state `fallback_shortstatehash` selects
+/// for the requester, which may be none.
 async fn load_state_ids(
 	services: &Services,
 	room_id: &RoomId,
 	state_at: &EventId,
+	sender_user: &UserId,
+	bypass_visibility: bool,
 ) -> Result<Vec<(ShortStateKey, OwnedEventId)>> {
+	let state_full_ids = |shortstatehash| {
+		services
+			.state_accessor
+			.state_full_ids(shortstatehash)
+	};
+
 	services
 		.state
 		.pdu_shortstatehash(state_at)
-		.or_else(|_| services.state.get_room_shortstatehash(room_id))
+		.map_ok(Some)
+		.or_else(|_| fallback_shortstatehash(services, room_id, sender_user, bypass_visibility))
 		.map_ok(|shortstatehash| {
-			services
-				.state_accessor
-				.state_full_ids(shortstatehash)
+			shortstatehash
+				.into_iter()
+				.stream()
+				.flat_map(state_full_ids)
 				.map(Ok)
 		})
 		.map_err(|e| err!(Database("State not found: {e}")))
 		.try_flatten_stream()
 		.try_collect()
-		.boxed()
+		.boxed() // Send generality
 		.await
+}
+
+/// Selects the state a requester reads in place of an event's missing state.
+///
+/// Admitted requesters reach the selection, which checks access again; departed
+/// members read their departure snapshot, admins included. Only an admin may
+/// read current state when the selection admits none.
+async fn fallback_shortstatehash(
+	services: &Services,
+	room_id: &RoomId,
+	sender_user: &UserId,
+	bypass_visibility: bool,
+) -> Result<Option<ShortStateHash>> {
+	let admitted = bypass_visibility
+		|| services
+			.state_accessor
+			.user_can_see_state_events(sender_user, room_id)
+			.await;
+
+	match admitted
+		.then_async(|| {
+			services
+				.state_accessor
+				.user_visible_shortstatehash(sender_user, room_id, None)
+		})
+		.await
+		.transpose()?
+		.flatten()
+	{
+		| None if bypass_visibility =>
+			services
+				.state
+				.get_room_shortstatehash(room_id)
+				.map_ok(Some)
+				.await,
+		| shortstatehash => Ok(shortstatehash),
+	}
 }
 
 async fn build_state_response(

@@ -102,6 +102,11 @@ pub(crate) async fn get_state_events_route(
 	let shortstatehash = services
 		.state_accessor
 		.user_visible_shortstatehash(sender_user, &body.room_id, None)
+		.map(|result| {
+			result?.ok_or_else(|| {
+				err!(Request(Forbidden("You don't have permission to view the room state.")))
+			})
+		})
 		.await?;
 
 	let room_state = services
@@ -140,22 +145,32 @@ pub(crate) async fn get_state_events_for_key_route(
 		))));
 	}
 
-	let event = services
+	let failed = |e| {
+		err!(Request(NotFound(debug_warn!(
+			room_id = ?body.room_id,
+			event_type = ?body.event_type,
+			"Failed to get state event: {e}.",
+		))))
+	};
+
+	let shortstatehash = services
 		.state_accessor
 		.user_visible_shortstatehash(sender_user, &body.room_id, None)
-		.and_then(|shortstatehash| {
-			services
-				.state_accessor
-				.state_get(shortstatehash, &body.event_type, &body.state_key)
+		.map_err(failed)
+		.map(|result| {
+			result?.ok_or_else(|| {
+				err!(Request(NotFound(debug_warn!(
+					"You don't have permission to view the room state."
+				))))
+			})
 		})
-		.await
-		.map_err(|e| {
-			err!(Request(NotFound(debug_warn!(
-				room_id = ?body.room_id,
-				event_type = ?body.event_type,
-				"Failed to get state event: {e}.",
-			))))
-		})?;
+		.await?;
+
+	let event = services
+		.state_accessor
+		.state_get(shortstatehash, &body.event_type, &body.state_key)
+		.map_err(failed)
+		.await?;
 
 	let event_or_content = match body.format {
 		| StateEventFormat::Event => json!({

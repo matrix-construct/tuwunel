@@ -25,14 +25,14 @@ pub(crate) async fn get_member_events_route(
 	State(services): State<crate::State>,
 	body: Ruma<get_member_events::v3::Request>,
 ) -> Result<get_member_events::v3::Response> {
+	let denied = "You aren't a member of the room and weren't previously a member of the room.";
+
 	if !services
 		.state_accessor
 		.user_can_see_state_events(body.sender_user(), &body.room_id)
 		.await
 	{
-		return Err!(Request(Forbidden(
-			"You aren't a member of the room and weren't previously a member of the room."
-		)));
+		return Err!(Request(Forbidden("{denied}")));
 	}
 
 	let at: Option<PduCount> = body
@@ -45,6 +45,7 @@ pub(crate) async fn get_member_events_route(
 	let shortstatehash = services
 		.state_accessor
 		.user_visible_shortstatehash(body.sender_user(), &body.room_id, at)
+		.map(|result| result?.ok_or_else(|| err!(Request(Forbidden("{denied}")))))
 		.await?;
 
 	let membership = body.membership.as_ref();

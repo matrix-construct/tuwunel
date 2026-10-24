@@ -43,8 +43,9 @@ use tuwunel_matrix::{PduCount, PduId, RawPduId, event::gen_event_id};
 use crate::{
 	Services,
 	rooms::{
-		short::ShortStateHash, state_cache::MembershipUpdate,
-		state_compressor::CompressedStateEvent,
+		short::ShortStateHash,
+		state_cache::MembershipUpdate,
+		state_compressor::{CompressedState, CompressedStateEvent},
 	},
 	users,
 };
@@ -327,6 +328,26 @@ pub(crate) async fn create_devices(
 	}
 
 	Ok(())
+}
+
+/// Saves a full state as a snapshot and makes it the room's current state.
+///
+/// The snapshot is stored like any other before the room's pointer moves to it,
+/// and its short state hash comes back.
+pub(crate) async fn save_room_state(
+	services: &Services,
+	room_id: &RoomId,
+	state: Arc<CompressedState>,
+) -> Result<ShortStateHash> {
+	let shortstatehash = services
+		.state_compressor
+		.save_state(room_id, state)
+		.await?
+		.shortstatehash;
+
+	set_room_state(services, room_id, shortstatehash).await;
+
+	Ok(shortstatehash)
 }
 
 /// Points the room's current state at a snapshot, under the room's state lock.

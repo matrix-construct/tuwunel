@@ -9,7 +9,7 @@ use ruma::{
 use tuwunel_core::{
 	Result, at, err, extract_variant,
 	utils::{
-		BoolExt, OptionExt, TryReadyExt,
+		BoolExt, TryReadyExt,
 		result::NotFound,
 		stream::{TryTools, TryWidebandExt},
 	},
@@ -57,15 +57,13 @@ pub(crate) async fn room_initial_sync_route(
 
 	let next_batch = services.globals.current_count();
 	let timeline_end = departure.unwrap_or(PduCount::Normal(next_batch));
-	let shortstatehash = departure
-		.map_async(|count| {
-			services
-				.state_accessor
-				.departure_shortstatehash(room_id, count)
+	let shortstatehash = services
+		.state_accessor
+		.user_visible_shortstatehash(sender_user, room_id, None)
+		.map(|result| {
+			result?.ok_or_else(|| err!(Request(Forbidden("No room preview available."))))
 		})
-		.await
-		.transpose()?
-		.unwrap_or(current_shortstatehash);
+		.await?;
 
 	let visibility = services.directory.visibility(room_id).map(Ok);
 	let limit = body.limit.unwrap_or(LIMIT_MAX).min(LIMIT_MAX);

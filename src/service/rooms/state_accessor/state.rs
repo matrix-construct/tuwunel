@@ -15,7 +15,10 @@ use ruma::{
 	OwnedEventId, UserId,
 	events::{
 		StateEventType,
-		room::member::{MembershipState, RoomMemberEventContent},
+		room::{
+			history_visibility::{HistoryVisibility, RoomHistoryVisibilityEventContent},
+			member::{MembershipState, RoomMemberEventContent},
+		},
 	},
 };
 use serde::Deserialize;
@@ -102,6 +105,19 @@ pub async fn user_membership_at_pdu(&self, user_id: &UserId, pdu: &Pdu) -> Membe
 
 	self.user_membership(shortstatehash, user_id)
 		.await
+}
+
+/// Returns the room's history visibility in a selected state snapshot.
+///
+/// Missing, unreadable, or invalid history-visibility state falls back to
+/// [`HistoryVisibility::Shared`], as the spec directs.
+#[implement(super::Service)]
+pub async fn history_visibility(&self, shortstatehash: ShortStateHash) -> HistoryVisibility {
+	self.state_get_content(shortstatehash, &StateEventType::RoomHistoryVisibility, "")
+		.await
+		.map_or(HistoryVisibility::Shared, |c: RoomHistoryVisibilityEventContent| {
+			c.history_visibility
+		})
 }
 
 /// Deserializes one event's content from a selected state snapshot.

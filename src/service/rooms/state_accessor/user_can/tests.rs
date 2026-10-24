@@ -8,22 +8,34 @@ use std::sync::Arc;
 use futures::StreamExt;
 use ruma::{
 	EventId, RoomId, UserId, event_id,
-	events::{
-		StateEventType,
-		room::member::{MembershipState, RoomMemberEventContent},
-	},
+	events::{StateEventType, room::member::MembershipState},
 	room_id, user_id,
 };
 use serde_json::{Value, json};
-use tuwunel_core::{Result, config::Figment, utils::result::NotFound};
+use tuwunel_core::{
+	Result,
+	config::Figment,
+	utils::{IterStream, result::NotFound},
+};
 use tuwunel_database::Json;
 use tuwunel_matrix::{PduCount, PduId, RawPduId};
 
 use crate::{
 	Services,
-	rooms::{short::ShortRoomId, state_cache::MembershipUpdate},
-	test_utils::{compress_state, fixture, pdu_json, with_state_key},
+	rooms::{
+		short::ShortRoomId, state_cache::MembershipUpdate, state_compressor::CompressedState,
+	},
+	test_utils::{
+		compress_state, fixture, membership_update, pdu_json, save_room_state, set_room_state,
+		with_state_key,
+	},
 };
+
+type StateEvent<'a> = (u64, &'a EventId, &'a str, &'a str, Value);
+
+type Message<'a> = (ShortRoomId, &'a RoomId, u64, &'a EventId);
+
+type Membership<'a> = (&'a RoomId, &'a UserId, MembershipState, u64);
 
 struct Ids {
 	room: &'static RoomId,
@@ -117,6 +129,9 @@ async fn equal_hash_state_delta_is_empty() -> Result {
 /// joined plus a later topic, and the room is renamed afterwards. The member
 /// reads the kick itself, the earlier topic and no name, and a token from
 /// before the kick still reads the state at that position.
+///
+/// Once the member forgets the room after being admitted, they read neither
+/// the current state nor the state after a later token.
 #[tokio::test]
 async fn departed_member_reads_the_state_after_their_leave_event() -> Result {
 	let Some(fixture) = fixture(Figment::new()).await? else {
@@ -149,16 +164,11 @@ async fn departed_member_reads_the_state_after_their_leave_event() -> Result {
 		(6, name, "m.room.name", "", json!({ "name": "after" })),
 	];
 
-	for (count, id, kind, state_key, content) in &state_events {
-		let pdu = with_state_key(pdu_json(id, room, owner, kind, content), state_key);
-
-		store(services, shortroomid, *count, id, &pdu);
-	}
+	store_state(services, shortroomid, room, owner, &state_events);
 
 	let content = json!({ "msgtype": "m.text", "body": "later" });
-	let pdu = pdu_json(next, room, owner, "m.room.message", &content);
 
-	store(services, shortroomid, 5, next, &pdu);
+	store_messages(services, owner, &content, &[(shortroomid, room, 5, next)]);
 
 	let content = json!({ "topic": "after" });
 	let pdu = with_state_key(pdu_json(retopic, room, owner, "m.room.topic", &content), "");
@@ -182,36 +192,21 @@ async fn departed_member_reads_the_state_after_their_leave_event() -> Result {
 		.set_event_state(next, room, Arc::new([created, topic_after, joined].into()))
 		.await?;
 
-	let current = services
-		.state_compressor
-		.save_state(room, Arc::new([created, topic_before, kicked, named].into()))
-		.await?
-		.shortstatehash;
+	let state = Arc::new([created, topic_before, kicked, named].into());
+	let current = save_room_state(services, room, state).await?;
 
-	services
-		.state
-		.set_room_state(room, current, &services.state.mutex.lock(room).await);
+	let memberships = [
+		(room, member, MembershipState::Join, 3),
+		(room, member, MembershipState::Leave, 4),
+	];
 
-	for (membership, count) in [(MembershipState::Join, 3), (MembershipState::Leave, 4)] {
-		services
-			.state_cache
-			.update_membership(MembershipUpdate {
-				room_id: room,
-				user_id: member,
-				membership_event: RoomMemberEventContent::new(membership),
-				sender: owner,
-				last_state: None,
-				invite_via: None,
-				update_joined_count: false,
-				count: PduCount::Normal(count),
-			})
-			.await?;
-	}
+	set_memberships(services, owner, memberships).await?;
 
 	let accessor = &services.state_accessor;
 	let visible = accessor
 		.user_visible_shortstatehash(member, room, None)
-		.await?;
+		.await?
+		.expect("departed member may read state");
 
 	let membership = accessor
 		.state_get_id(visible, &StateEventType::RoomMember, member_key)
@@ -233,14 +228,144 @@ async fn departed_member_reads_the_state_after_their_leave_event() -> Result {
 
 	let later = accessor
 		.user_visible_shortstatehash(member, room, Some(PduCount::Normal(6)))
-		.await?;
+		.await?
+		.expect("departed member may read state");
 
 	let earlier = accessor
 		.user_visible_shortstatehash(member, room, Some(PduCount::Normal(3)))
-		.await?;
+		.await?
+		.expect("departed member may read state");
 
 	assert_eq!(later, visible, "a later token reads past the kick");
 	assert_eq!(earlier, at_kick, "an earlier token reads past its position");
+
+	assert!(
+		accessor
+			.user_can_see_state_events(member, room)
+			.await
+	);
+
+	services.state_cache.forget(room, member);
+
+	let forgotten = accessor
+		.user_visible_shortstatehash(member, room, None)
+		.await?;
+
+	let later = accessor
+		.user_visible_shortstatehash(member, room, Some(PduCount::Normal(6)))
+		.await?;
+
+	assert_eq!(forgotten, None, "a forgotten member reads current state");
+	assert_eq!(later, None, "a forgotten member reads state after a later token");
+
+	Ok(())
+}
+
+/// An event without recorded state is judged by the room's current state, and
+/// one whose recorded state cannot be read is hidden.
+///
+/// A message stored without a snapshot, as a backfilled event is, sits in a
+/// room that sets no history visibility, so history defaults to `shared`. The
+/// owner and a member who left after it see it and a never-member does not,
+/// while in a room with no state at all nobody does.
+#[tokio::test]
+async fn snapshotless_event_is_judged_by_current_state() -> Result {
+	let Some(fixture) = fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+
+	let services = &fixture.services;
+	let room = room_id!("!snapshotless:localhost");
+	let stateless = room_id!("!stateless:localhost");
+	let owner = user_id!("@owner:localhost");
+	let member = user_id!("@member:localhost");
+	let stranger = user_id!("@stranger:localhost");
+	let create = event_id!("$create:localhost");
+	let join = event_id!("$join:localhost");
+	let leave = event_id!("$leave:localhost");
+	let message = event_id!("$message:localhost");
+	let orphan = event_id!("$orphan:localhost");
+	let unreadable = event_id!("$unreadable:localhost");
+	let shortroomid = services
+		.short
+		.get_or_create_shortroomid(room)
+		.await;
+
+	let stateless_shortroomid = services
+		.short
+		.get_or_create_shortroomid(stateless)
+		.await;
+
+	let owner_key = owner.as_str();
+	let member_key = member.as_str();
+	let create_content = json!({ "creator": owner, "room_version": "10" });
+	let state_events = [
+		(1, create, "m.room.create", "", create_content),
+		(2, join, "m.room.member", owner_key, json!({ "membership": "join" })),
+		(4, leave, "m.room.member", member_key, json!({ "membership": "leave" })),
+	];
+
+	store_state(services, shortroomid, room, owner, &state_events);
+
+	let content = json!({ "msgtype": "m.text", "body": "no snapshot" });
+	let messages = [
+		(shortroomid, room, 3, message),
+		(stateless_shortroomid, stateless, 1, orphan),
+		(shortroomid, room, 5, unreadable),
+	];
+
+	store_messages(services, owner, &content, &messages);
+
+	let shorteventid = services
+		.short
+		.get_or_create_shorteventid(unreadable)
+		.await;
+
+	services.db["shorteventid_shortstatehash"].insert(&shorteventid.to_be_bytes(), [0xFF_u8]);
+
+	let state = compress_states(services, &state_events).await;
+
+	save_room_state(services, room, Arc::new(state)).await?;
+
+	let memberships = [
+		(room, member, MembershipState::Join, 2),
+		(room, member, MembershipState::Leave, 4),
+		(stateless, owner, MembershipState::Join, 1),
+	];
+
+	set_memberships(services, owner, memberships).await?;
+
+	let accessor = &services.state_accessor;
+	let message = services.timeline.get_pdu(message).await?;
+	let orphan = services.timeline.get_pdu(orphan).await?;
+	let unreadable = services.timeline.get_pdu(unreadable).await?;
+
+	assert!(accessor.user_can_see_event(owner, &message).await, "a member loses the event");
+	assert!(
+		accessor
+			.user_can_see_event(member, &message)
+			.await,
+		"a departed member loses history from before they left"
+	);
+
+	assert!(
+		!accessor
+			.user_can_see_event(stranger, &message)
+			.await,
+		"a never-member sees the event"
+	);
+
+	assert!(
+		!accessor.user_can_see_event(owner, &orphan).await,
+		"an event in a room without state is visible"
+	);
+
+	assert!(
+		!accessor
+			.user_can_see_event(owner, &unreadable)
+			.await,
+		"an event whose state cannot be read is judged by later state"
+	);
 
 	Ok(())
 }
@@ -293,13 +418,71 @@ async fn seed(services: &Services) -> Result<Ids> {
 		.set_event_state(ids.create, ids.room, state)
 		.await?;
 
-	let lock = services.state.mutex.lock(ids.room).await;
-
-	services
-		.state
-		.set_room_state(ids.room, state, &lock);
+	set_room_state(services, ids.room, state).await;
 
 	Ok(ids)
+}
+
+fn store_state(
+	services: &Services,
+	shortroomid: ShortRoomId,
+	room_id: &RoomId,
+	sender: &UserId,
+	events: &[StateEvent<'_>],
+) {
+	for (count, id, kind, state_key, content) in events {
+		let pdu = with_state_key(pdu_json(id, room_id, sender, kind, content), state_key);
+
+		store(services, shortroomid, *count, id, &pdu);
+	}
+}
+
+fn store_messages(
+	services: &Services,
+	sender: &UserId,
+	content: &Value,
+	messages: &[Message<'_>],
+) {
+	for &(shortroomid, room_id, count, id) in messages {
+		let pdu = pdu_json(id, room_id, sender, "m.room.message", content);
+
+		store(services, shortroomid, count, id, &pdu);
+	}
+}
+
+async fn compress_states(services: &Services, events: &[StateEvent<'_>]) -> CompressedState {
+	events
+		.iter()
+		.stream()
+		.then(async |&(_, id, kind, state_key, _)| {
+			compress_state(services, &StateEventType::from(kind), state_key, id).await
+		})
+		.collect()
+		.await
+}
+
+async fn set_memberships<'a, Memberships>(
+	services: &Services,
+	sender: &UserId,
+	memberships: Memberships,
+) -> Result
+where
+	Memberships: IntoIterator<Item = Membership<'a>>,
+{
+	for (room_id, user_id, membership, count) in memberships {
+		let update = MembershipUpdate {
+			sender,
+			update_joined_count: false,
+			..membership_update(room_id, user_id, membership, PduCount::Normal(count))
+		};
+
+		services
+			.state_cache
+			.update_membership(update)
+			.await?;
+	}
+
+	Ok(())
 }
 
 fn store(services: &Services, shortroomid: ShortRoomId, count: u64, id: &EventId, pdu: &Value) {

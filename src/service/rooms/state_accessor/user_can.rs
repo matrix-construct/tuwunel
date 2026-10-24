@@ -18,7 +18,7 @@ use ruma::{
 };
 use tuwunel_core::{
 	Err, Result, err, implement,
-	utils::{BoolExt, FutureBoolExt, future::TryExtExt, result::NotFound},
+	utils::{BoolExt, FutureBoolExt, OptionExt, future::TryExtExt, result::NotFound},
 };
 use tuwunel_matrix::{Event, PduCount, StateKey, pdu::PduBuilder};
 
@@ -96,24 +96,42 @@ pub async fn user_can_redact(
 
 /// Reports whether a user may see an event under its historical visibility.
 ///
-/// Missing event state is allowed, and missing or invalid history visibility
-/// defaults to `shared`. The `shared` decision also accounts for the user's
-/// membership intervals around the event. Under `joined` and `invited`, the
-/// user's own membership event is visible when the membership it sets
-/// qualifies, per the spec's before-or-after rule.
+/// An event without recorded state, such as a room's create event or a
+/// backfilled event, is judged by the room's current state instead; it is
+/// hidden when the room has none, as it is when the event's state cannot be
+/// read. Missing or invalid history visibility defaults to `shared`, whose
+/// decision also accounts for the user's membership intervals around the
+/// event. Under `joined` and `invited`, the user's own membership event is
+/// visible when the membership it sets qualifies, per the spec's
+/// before-or-after rule.
 #[implement(super::Service)]
 #[tracing::instrument(skip_all, level = "trace")]
 pub async fn user_can_see_event<Pdu>(&self, user_id: &UserId, pdu: &Pdu) -> bool
 where
 	Pdu: Event,
 {
-	let Some((shortstatehash, history_visibility)) =
-		self.history_visibility_at(pdu.event_id()).await
+	let room_id = pdu.room_id();
+	let Ok(shortstatehash) = self
+		.services
+		.state
+		.pdu_shortstatehash(pdu.event_id())
+		.or_else(async |error| {
+			// Only a missing snapshot falls back, so a failed read cannot widen access.
+			if !error.is_not_found() {
+				return Err(error);
+			}
+
+			self.services
+				.state
+				.get_room_shortstatehash(room_id)
+				.await
+		})
+		.await
 	else {
-		return true;
+		return false;
 	};
 
-	match history_visibility {
+	match self.history_visibility(shortstatehash).await {
 		| HistoryVisibility::WorldReadable => true,
 
 		// Allow the user's own invite or join, or a user at least invited at the event
@@ -134,36 +152,9 @@ where
 
 		// An unrecognized value is treated as shared.
 		| HistoryVisibility::Shared | _ =>
-			self.user_shared_history(shortstatehash, pdu.room_id(), pdu.event_id(), user_id)
+			self.user_shared_history(shortstatehash, room_id, pdu.event_id(), user_id)
 				.await,
 	}
-}
-
-/// The room state an event was sent in and the history visibility it carried.
-///
-/// Missing or invalid history visibility reads as `shared`, and `None` means
-/// the event has no recorded state.
-#[implement(super::Service)]
-#[tracing::instrument(skip_all, level = "trace")]
-async fn history_visibility_at(
-	&self,
-	event_id: &EventId,
-) -> Option<(ShortStateHash, HistoryVisibility)> {
-	let shortstatehash = self
-		.services
-		.state
-		.pdu_shortstatehash(event_id)
-		.await
-		.ok()?;
-
-	let history_visibility = self
-		.state_get_content(shortstatehash, &StateEventType::RoomHistoryVisibility, "")
-		.await
-		.map_or(HistoryVisibility::Shared, |c: RoomHistoryVisibilityEventContent| {
-			c.history_visibility
-		});
-
-	Some((shortstatehash, history_visibility))
 }
 
 /// Whether a user may see an event under `shared` history visibility.
@@ -211,13 +202,24 @@ async fn user_shared_history(
 
 /// Reports whether a user may read the room's state events.
 ///
-/// Current membership grants immediate access, and world-readable history
-/// grants anyone access. Otherwise a departed member is admitted, as is a
-/// pending invitee under invited visibility; `user_visible_shortstatehash`
-/// selects the snapshot each of them reads.
+/// Whoever may read the current state (see `user_can_see_current_state`) is
+/// admitted, as is a departed member, who reads their departure snapshot.
+/// `user_visible_shortstatehash` makes the same decision when selecting a snapshot.
 #[implement(super::Service)]
 #[tracing::instrument(skip_all, level = "trace")]
 pub async fn user_can_see_state_events(&self, user_id: &UserId, room_id: &RoomId) -> bool {
+	self.user_can_see_current_state(user_id, room_id)
+		.await
+		|| self.is_departed_member(user_id, room_id).await
+}
+
+/// Reports whether a user may read the room's current state.
+///
+/// A joined user may read it, as may anyone under world-readable history and a
+/// pending invitee under invited history. Under `joined`, `shared` and any
+/// value not understood (treated as `shared` by the spec), nobody else may.
+#[implement(super::Service)]
+async fn user_can_see_current_state(&self, user_id: &UserId, room_id: &RoomId) -> bool {
 	if self
 		.services
 		.state_cache
@@ -227,25 +229,14 @@ pub async fn user_can_see_state_events(&self, user_id: &UserId, room_id: &RoomId
 		return true;
 	}
 
-	let history_visibility = self
-		.room_state_get_content(room_id, &StateEventType::RoomHistoryVisibility, "")
-		.await
-		.map_or(HistoryVisibility::Shared, |c: RoomHistoryVisibilityEventContent| {
-			c.history_visibility
-		});
-
-	match history_visibility {
+	match self.get_history_visibility(room_id).await {
 		| HistoryVisibility::WorldReadable => true,
-
 		| HistoryVisibility::Invited =>
 			self.services
 				.state_cache
 				.is_invited(user_id, room_id)
-				.or(self.is_departed_member(user_id, room_id))
 				.await,
-
-		// `joined`, `shared`, and any value not understood, which the spec reads as `shared`.
-		| _ => self.is_departed_member(user_id, room_id).await,
+		| _ => false,
 	}
 }
 
@@ -265,11 +256,12 @@ async fn is_departed_member(&self, user_id: &UserId, room_id: &RoomId) -> bool {
 		.await
 }
 
-/// Selects the snapshot a user admitted by `user_can_see_state_events` reads.
+/// Selects the state snapshot a user may read.
 ///
-/// A departed member reads the state after their departure, or after an
-/// earlier `at`. Anyone else reads the state after `at`, or the current state
-/// without one.
+/// A departed member reads the state after their departure, or after an earlier
+/// `at`; a user allowed the current state reads it, or the state after `at`.
+/// Anyone else, including a member whose departure was forgotten, reads none.
+/// Callers check access first; selection rechecks it so lapsed admission cannot widen reads.
 #[implement(super::Service)]
 #[tracing::instrument(skip(self), level = "debug")]
 pub async fn user_visible_shortstatehash(
@@ -277,28 +269,34 @@ pub async fn user_visible_shortstatehash(
 	user_id: &UserId,
 	room_id: &RoomId,
 	at: Option<PduCount>,
-) -> Result<ShortStateHash> {
-	let departure = self
-		.departure_count(user_id, room_id)
-		.await?
-		.filter(|departure| at.is_none_or(|at| *departure <= at));
+) -> Result<Option<ShortStateHash>> {
+	let departure = self.departure_count(user_id, room_id).await?;
 
 	match (departure, at) {
-		| (None, None) =>
-			self.services
-				.state
-				.get_room_shortstatehash(room_id)
-				.map_err(|e| err!(Database("Missing state for {room_id:?}: {e:?}")))
+		| (Some(departure), _) if at.is_none_or(|at| departure <= at) =>
+			self.departure_shortstatehash(room_id, departure)
+				.map_ok(Some)
 				.await,
 
-		| (None, Some(at)) =>
+		| (None, _)
+			if !self
+				.user_can_see_current_state(user_id, room_id)
+				.await =>
+			Ok(None),
+
+		| (_, Some(at)) =>
 			self.services
 				.timeline
 				.shortstatehash_after(room_id, at)
+				.map_ok(Some)
 				.await,
 
-		| (Some(departure), _) =>
-			self.departure_shortstatehash(room_id, departure)
+		| (_, None) =>
+			self.services
+				.state
+				.get_room_shortstatehash(room_id)
+				.map_ok(Some)
+				.map_err(|e| err!(Database("Missing state for {room_id:?}: {e:?}")))
 				.await,
 	}
 }
@@ -472,12 +470,24 @@ where
 			});
 
 	opens_history
-		|| self
-			.history_visibility_at(pdu.event_id())
-			.await
-			.is_some_and(|(_, history_visibility)| {
-				history_visibility == HistoryVisibility::WorldReadable
-			})
+		|| self.history_visibility_at(pdu.event_id()).await
+			== Some(HistoryVisibility::WorldReadable)
+}
+
+/// Returns the history visibility in the state an event was sent in.
+///
+/// Missing or invalid history visibility reads as `shared`, and `None` means
+/// the event's state is unrecorded or unreadable.
+#[implement(super::Service)]
+#[tracing::instrument(skip_all, level = "trace")]
+async fn history_visibility_at(&self, event_id: &EventId) -> Option<HistoryVisibility> {
+	self.services
+		.state
+		.pdu_shortstatehash(event_id)
+		.await
+		.ok()
+		.map_async(|shortstatehash| self.history_visibility(shortstatehash))
+		.await
 }
 
 /// Probes whether a sender may invite a target user.
