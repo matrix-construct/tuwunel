@@ -16,6 +16,10 @@ use self::client::{Client, field, register, wait_until_ready};
 
 mod client;
 
+#[expect(dead_code)] // Only the self-membership action is used from the add-on.
+#[path = "client/membership.rs"]
+mod membership;
+
 const IGNORED_TOKEN: &str = "threads-ignored-replies-ignored-token";
 const READER_TOKEN: &str = "threads-ignored-replies-reader-token";
 const VISIBLE_TOKEN: &str = "threads-ignored-replies-visible-token";
@@ -74,8 +78,8 @@ async fn exercise(services: &Services, base: &str) -> Result {
 		.create_room(&json!({ "preset": "public_chat" }))
 		.await?;
 
-	ignored.join(&room).await?;
-	visible.join(&room).await?;
+	ignored.act(&room, "join").await?;
+	visible.act(&room, "join").await?;
 
 	let root_visible = visible
 		.message(&room, "root-visible", "visible root")
@@ -214,22 +218,6 @@ fn event<'a>(pages: &'a [&Value], event_id: &EventId) -> Result<&'a Value> {
 
 fn thread_summary(event: &Value) -> Option<&Value> {
 	event.pointer("/unsigned/m.relations/m.thread")
-}
-
-#[implement(Client, params = "<'_>")]
-async fn join(&self, room_id: &RoomId) -> Result {
-	self.services
-		.client
-		.clients
-		.default
-		.post(self.url(&format!("rooms/{room_id}/join")))
-		.bearer_auth(self.token)
-		.json(&json!({}))
-		.send()
-		.await?
-		.error_for_status()?;
-
-	Ok(())
 }
 
 #[implement(Client, params = "<'_>")]

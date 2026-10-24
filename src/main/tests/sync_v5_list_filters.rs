@@ -24,6 +24,13 @@ mod sliding_sync;
 #[path = "sliding_sync/lists.rs"]
 mod lists;
 
+#[expect(dead_code)] // Only the self-membership action is used from the add-on.
+#[path = "client/membership.rs"]
+mod membership;
+
+#[path = "client/put.rs"]
+mod put;
+
 const ALICE_TOKEN: &str = "sync-v5-list-filters-alice-access-token";
 const BOB_TOKEN: &str = "sync-v5-list-filters-bob-access-token";
 
@@ -121,8 +128,8 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	let direct = alice.create_room(&direct_body).await?;
 	let plain = alice.create_room(&plain_body).await?;
 
-	bob.join(&direct).await?;
-	bob.join(&plain).await?;
+	bob.act(&direct, "join").await?;
+	bob.act(&plain, "join").await?;
 
 	// The join erases the invite's `is_direct`, so account data is all that is
 	// left.
@@ -190,22 +197,6 @@ async fn woken_poll_sees_the_change(
 	expect_count(&polled?, "directs", 2, "the woken poll")
 }
 
-#[implement(Client, params = "<'_>")]
-async fn join(&self, room_id: &RoomId) -> Result {
-	self.services
-		.client
-		.clients
-		.default
-		.post(self.url(&format!("rooms/{room_id}/join")))
-		.bearer_auth(self.token)
-		.json(&json!({}))
-		.send()
-		.await?
-		.error_for_status()?;
-
-	Ok(())
-}
-
 /// Record the room as a direct chat with `counterparty`.
 ///
 /// A real client writes `m.direct` itself when it accepts a DM invite, and
@@ -219,16 +210,8 @@ async fn mark_direct(
 ) -> Result {
 	let path = format!("user/{user_id}/account_data/m.direct");
 
-	self.services
-		.client
-		.clients
-		.default
-		.put(self.url(&path))
-		.bearer_auth(self.token)
-		.json(&json!({ counterparty: rooms }))
-		.send()
-		.await?
-		.error_for_status()?;
+	self.put(&path, &json!({ counterparty: rooms }))
+		.await?;
 
 	Ok(())
 }
@@ -237,16 +220,7 @@ async fn mark_direct(
 async fn tag_room(&self, user_id: &UserId, room_id: &RoomId, tag: &str) -> Result {
 	let path = format!("user/{user_id}/rooms/{room_id}/tags/{tag}");
 
-	self.services
-		.client
-		.clients
-		.default
-		.put(self.url(&path))
-		.bearer_auth(self.token)
-		.json(&json!({}))
-		.send()
-		.await?
-		.error_for_status()?;
+	self.put(&path, &json!({})).await?;
 
 	Ok(())
 }

@@ -16,6 +16,10 @@ use self::client::{Client, field, poll_until, register, wait_until_ready};
 
 mod client;
 
+#[expect(dead_code)] // Only the self-membership action is used from the add-on.
+#[path = "client/membership.rs"]
+mod membership;
+
 /// How long a notification count is polled for before the case gives up.
 const COUNT_DEADLINE: Duration = Duration::from_secs(5);
 
@@ -84,7 +88,7 @@ async fn exercise(services: &Services, base: &str) -> Result {
 		.create_room(&json!({ "preset": "public_chat" }))
 		.await?;
 
-	reader.join(&room).await?;
+	reader.act(&room, "join").await?;
 
 	let opening = reader.sync(None).await?;
 	let since = next_batch(&opening)?;
@@ -135,22 +139,6 @@ async fn exercise(services: &Services, base: &str) -> Result {
 		.eq(&0)
 		.into_option()
 		.ok_or_else(|| err!("the busy reset round withheld the zeroed notification count"))?;
-
-	Ok(())
-}
-
-#[implement(Client, params = "<'_>")]
-async fn join(&self, room_id: &RoomId) -> Result {
-	self.services
-		.client
-		.clients
-		.default
-		.post(self.url(&format!("rooms/{room_id}/join")))
-		.bearer_auth(self.token)
-		.json(&json!({}))
-		.send()
-		.await?
-		.error_for_status()?;
 
 	Ok(())
 }

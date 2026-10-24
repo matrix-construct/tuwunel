@@ -15,6 +15,20 @@ use self::{
 mod client;
 mod msc3664;
 
+#[expect(dead_code)] // Only the event PUT is used from the event add-on.
+#[path = "client/event.rs"]
+mod event;
+
+#[path = "client/get.rs"]
+mod get;
+
+#[expect(dead_code)] // Only the self-membership action is used from the add-on.
+#[path = "client/membership.rs"]
+mod membership;
+
+#[path = "client/put.rs"]
+mod put;
+
 const AUTHOR_TOKEN: &str = "msc3664-disabled-author-access-token";
 const READER_TOKEN: &str = "msc3664-disabled-reader-access-token";
 
@@ -89,7 +103,7 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	let reader = Client { services, base, token: READER_TOKEN };
 	let room = writer.create_room(&public_room()).await?;
 
-	reader.join(&room).await?;
+	reader.act(&room, "join").await?;
 
 	if writer.condition_capability().await?.is_some() {
 		return Err!("the condition is not evaluated but its capability is advertised");

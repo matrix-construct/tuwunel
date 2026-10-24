@@ -8,97 +8,50 @@ use std::time::Duration;
 
 use serde_json::{Value, json};
 use tuwunel_core::{
-	Result,
+	Result, implement,
 	ruma::{OwnedEventId, RoomId, UserId},
 };
 use tuwunel_service::Services;
 
-use crate::client::{Client, field, poll_until};
+use crate::client::{Client, poll_until};
 
 /// The unstable kind of the push condition under test.
 pub(crate) const CONDITION_KIND: &str = "im.nheko.msc3664.related_event_match";
 
 const PUSH_DEADLINE: Duration = Duration::from_secs(5);
 
-impl Client<'_> {
-	pub(crate) async fn join(&self, room_id: &RoomId) -> Result {
-		self.services
-			.client
-			.clients
-			.default
-			.post(self.url(&format!("rooms/{room_id}/join")))
-			.bearer_auth(self.token)
-			.json(&json!({}))
-			.send()
-			.await?
-			.error_for_status()?;
+#[implement(Client, params = "<'_>")]
+pub(crate) async fn set_push_rule(&self, rule_id: &str, rule: &Value) -> Result {
+	self.put(&format!("pushrules/global/override/{rule_id}"), rule)
+		.await?;
 
-		Ok(())
-	}
+	Ok(())
+}
 
-	pub(crate) async fn set_push_rule(&self, rule_id: &str, rule: &Value) -> Result {
-		self.services
-			.client
-			.clients
-			.default
-			.put(self.url(&format!("pushrules/global/override/{rule_id}")))
-			.bearer_auth(self.token)
-			.json(rule)
-			.send()
-			.await?
-			.error_for_status()?;
+#[implement(Client, params = "<'_>")]
+pub(crate) async fn send(
+	&self,
+	room_id: &RoomId,
+	event_type: &str,
+	txn_id: &str,
+	content: &Value,
+) -> Result<OwnedEventId> {
+	let path = format!("rooms/{room_id}/send/{event_type}/msc3664-{txn_id}");
 
-		Ok(())
-	}
+	self.put_event(&path, content).await
+}
 
-	pub(crate) async fn send(
-		&self,
-		room_id: &RoomId,
-		event_type: &str,
-		txn_id: &str,
-		content: &Value,
-	) -> Result<OwnedEventId> {
-		let path = format!("rooms/{room_id}/send/{event_type}/msc3664-{txn_id}");
-		let response = self
-			.services
-			.client
-			.clients
-			.default
-			.put(self.url(&path))
-			.bearer_auth(self.token)
-			.json(content)
-			.send()
-			.await?
-			.error_for_status()?
-			.json::<Value>()
-			.await?;
+/// The server's advertised capability for the condition, absent when the
+/// server does not evaluate it.
+#[implement(Client, params = "<'_>")]
+pub(crate) async fn condition_capability(&self) -> Result<Option<Value>> {
+	let response = self.get("capabilities").await?;
+	let capability = response
+		.get("capabilities")
+		.and_then(|capabilities| capabilities.get(CONDITION_KIND))
+		.cloned();
 
-		Ok(field(&response, "event_id")?.try_into()?)
-	}
-
-	/// The server's advertised capability for the condition, absent when the
-	/// server does not evaluate it.
-	pub(crate) async fn condition_capability(&self) -> Result<Option<Value>> {
-		let response = self
-			.services
-			.client
-			.clients
-			.default
-			.get(self.url("capabilities"))
-			.bearer_auth(self.token)
-			.send()
-			.await?
-			.error_for_status()?
-			.json::<Value>()
-			.await?;
-
-		let capability = response
-			.get("capabilities")
-			.and_then(|capabilities| capabilities.get(CONDITION_KIND))
-			.cloned();
-
-		Ok(capability)
-	}
+	Ok(capability)
 }
 
 /// The body every room in these tests is created from.

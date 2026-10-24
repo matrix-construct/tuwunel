@@ -11,7 +11,10 @@ use std::{
 use futures::future::ready;
 use ruma::{
 	CanonicalJsonObject, DeviceId, EventId, OwnedEventId, RoomId, RoomVersionId, UInt, UserId,
-	events::{AnyStrippedStateEvent, StateEventType},
+	events::{
+		AnyStrippedStateEvent, StateEventType,
+		room::member::{MembershipState, RoomMemberEventContent},
+	},
 	serde::Raw,
 };
 use serde::Serialize;
@@ -37,7 +40,14 @@ use tuwunel_core::{
 use tuwunel_database::Json;
 use tuwunel_matrix::{PduCount, PduId, RawPduId, event::gen_event_id};
 
-use crate::{Services, rooms::state_compressor::CompressedStateEvent, users};
+use crate::{
+	Services,
+	rooms::{
+		short::ShortStateHash, state_cache::MembershipUpdate,
+		state_compressor::CompressedStateEvent,
+	},
+	users,
+};
 
 pub(crate) struct Fixture {
 	pub services: Arc<Services>,
@@ -317,6 +327,46 @@ pub(crate) async fn create_devices(
 	}
 
 	Ok(())
+}
+
+/// Points the room's current state at a snapshot, under the room's state lock.
+///
+/// The guard drops once the pointer is written, so the caller holds no lock
+/// afterwards.
+pub(crate) async fn set_room_state(
+	services: &Services,
+	room_id: &RoomId,
+	shortstatehash: ShortStateHash,
+) {
+	let lock = services.state.mutex.lock(room_id).await;
+
+	services
+		.state
+		.set_room_state(room_id, shortstatehash, &lock);
+}
+
+/// Builds a state-cache membership update with no event behind it.
+///
+/// The user sends it themselves, it carries no prior state or invite routing,
+/// and it updates the joined counts; a caller changes any of these by struct
+/// update. A count taken from `next_count` keeps its permit alive until the
+/// update is awaited, so the row lands before the count retires.
+pub(crate) fn membership_update<'a>(
+	room_id: &'a RoomId,
+	user_id: &'a UserId,
+	membership: MembershipState,
+	count: PduCount,
+) -> MembershipUpdate<'a> {
+	MembershipUpdate {
+		room_id,
+		user_id,
+		membership_event: RoomMemberEventContent::new(membership),
+		sender: user_id,
+		last_state: None,
+		invite_via: None,
+		update_joined_count: true,
+		count,
+	}
 }
 
 /// Polls a pinned future once with `waker` and returns the result.

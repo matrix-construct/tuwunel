@@ -2,16 +2,13 @@
 
 use reqwest::StatusCode;
 use serde_json::{Value, json};
-use tuwunel_core::{
-	Result, implement,
-	itertools::Itertools,
-	ruma::{RoomId, UserId},
-};
+use tuwunel_core::{Result, implement, itertools::Itertools, ruma::UserId};
 use tuwunel_service::Services;
 
 use self::{
 	client::{Client, accepted, register},
 	fixture::boot,
+	membership::room_path,
 };
 
 mod client;
@@ -84,9 +81,11 @@ async fn exercise(services: &Services, base: &str) -> Result {
 		.put(&path(MARKER_PATH), &json!({ "body": "before" }))
 		.await?;
 
-	admit(&owner, &kicked, &kicked_id, &room_id).await?;
-	admit(&owner, &banned, &banned_id, &room_id).await?;
-	admit(&owner, &forgetter, &forgetter_id, &room_id).await?;
+	owner.admit(&room_id, &kicked, &kicked_id).await?;
+	owner.admit(&room_id, &banned, &banned_id).await?;
+	owner
+		.admit(&room_id, &forgetter, &forgetter_id)
+		.await?;
 
 	let joined_at = services.globals.current_count();
 
@@ -96,10 +95,8 @@ async fn exercise(services: &Services, base: &str) -> Result {
 		.act_on(&room_id, "ban", &prebanned_id)
 		.await?;
 
-	forgetter.post(&path("leave"), &json!({})).await?;
-	forgetter
-		.post(&path("forget"), &json!({}))
-		.await?;
+	forgetter.act(&room_id, "leave").await?;
+	forgetter.act(&room_id, "forget").await?;
 
 	owner
 		.put(&path(NAME_PATH), &json!({ "name": "after" }))
@@ -215,14 +212,14 @@ async fn world_readable(
 
 	let path = |endpoint: &str| room_path(&room_id, endpoint);
 
-	admit(owner, kicked, kicked_id, &room_id).await?;
-	admit(owner, forgetter, forgetter_id, &room_id).await?;
+	owner.admit(&room_id, kicked, kicked_id).await?;
+	owner
+		.admit(&room_id, forgetter, forgetter_id)
+		.await?;
 
 	owner.act_on(&room_id, "kick", kicked_id).await?;
-	forgetter.post(&path("leave"), &json!({})).await?;
-	forgetter
-		.post(&path("forget"), &json!({}))
-		.await?;
+	forgetter.act(&room_id, "leave").await?;
+	forgetter.act(&room_id, "forget").await?;
 
 	owner
 		.put(&path(NAME_PATH), &json!({ "name": "after" }))
@@ -238,22 +235,6 @@ async fn world_readable(
 
 	Ok(())
 }
-
-async fn admit(
-	owner: &Client<'_>,
-	invitee: &Client<'_>,
-	user_id: &UserId,
-	room_id: &RoomId,
-) -> Result {
-	owner.act_on(room_id, "invite", user_id).await?;
-	invitee
-		.post(&room_path(room_id, "join"), &json!({}))
-		.await?;
-
-	Ok(())
-}
-
-fn room_path(room_id: &RoomId, endpoint: &str) -> String { format!("rooms/{room_id}/{endpoint}") }
 
 fn membership<'a>(members: &'a Value, user_id: &UserId) -> Option<&'a str> {
 	events(&members["chunk"])

@@ -39,11 +39,13 @@ use self::{
 	client::{Client, register},
 	federation::{prepare, send, submit},
 	fixture::boot,
+	room_state::state_id,
 };
 
 mod client;
 mod federation;
 mod fixture;
+mod room_state;
 
 #[path = "client/event.rs"]
 mod event;
@@ -653,16 +655,4 @@ fn unserved(served: &Served) -> impl Iterator<Item = (&OwnedEventId, &OwnedEvent
 				.filter(move |auth_event| !served.contains_key(*auth_event))
 				.map(move |auth_event| (event_id, auth_event))
 		})
-}
-
-async fn state_id(
-	services: &Services,
-	room_id: &RoomId,
-	event_type: &StateEventType,
-	state_key: &str,
-) -> Result<OwnedEventId> {
-	services
-		.state_accessor
-		.room_state_get_id(room_id, event_type, state_key)
-		.await
 }

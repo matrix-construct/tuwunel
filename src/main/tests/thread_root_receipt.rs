@@ -16,6 +16,10 @@ use self::client::{Client, field, poll_until, register, wait_until_ready};
 
 mod client;
 
+#[expect(dead_code)] // Only the self-membership action is used from the add-on.
+#[path = "client/membership.rs"]
+mod membership;
+
 const COUNT_DEADLINE: Duration = Duration::from_secs(5);
 const READER_TOKEN: &str = "thread-root-receipt-reader-token";
 const SENDER_TOKEN: &str = "thread-root-receipt-sender-token";
@@ -80,7 +84,7 @@ async fn exercise(services: &Services, base: &str) -> Result {
 		.create_room(&json!({ "preset": "public_chat" }))
 		.await?;
 
-	reader.join(&room).await?;
+	reader.act(&room, "join").await?;
 
 	let root_a = sender.message(&room, "root-a", "root a").await?;
 	let root_b = sender.message(&room, "root-b", "root b").await?;
@@ -253,23 +257,6 @@ async fn notifications(&self) -> Result<Value> {
 		.json()
 		.await
 		.map_err(Into::into)
-}
-
-#[implement(Client, params = "<'_>")]
-#[tracing::instrument(level = "trace", skip_all)]
-async fn join(&self, room_id: &RoomId) -> Result {
-	self.services
-		.client
-		.clients
-		.default
-		.post(self.url(&format!("rooms/{room_id}/join")))
-		.bearer_auth(self.token)
-		.json(&json!({}))
-		.send()
-		.await?
-		.error_for_status()?;
-
-	Ok(())
 }
 
 #[implement(Client, params = "<'_>")]

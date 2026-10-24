@@ -12,6 +12,7 @@ use self::{
 	client::{Client, field, register},
 	fixture::boot,
 	member_event::is_member_event,
+	membership::room_path,
 };
 
 mod client;
@@ -20,6 +21,8 @@ mod fixture;
 #[path = "client/member_event.rs"]
 #[expect(dead_code)]
 mod member_event;
+#[path = "client/membership.rs"]
+mod membership;
 
 const OWNER_TOKEN: &str = "peek-events-visibility-owner-access-token";
 const MEMBER_TOKEN: &str = "peek-events-visibility-member-access-token";
@@ -139,11 +142,7 @@ async fn member_sees_its_own_join(
 		.put(&format!("rooms/{room_id}/state/m.room.member/{owner_id}"), &rename)
 		.await?;
 
-	owner
-		.act_on(&room_id, "invite", member_id)
-		.await?;
-
-	member.act(&room_id, "join").await?;
+	owner.admit(&room_id, member, member_id).await?;
 
 	let replay = member.page(&room_id, Some("0")).await?;
 
@@ -217,11 +216,7 @@ async fn banned_member_is_refused(
 		.create_room(&json!({ "preset": "private_chat" }))
 		.await?;
 
-	owner
-		.act_on(&room_id, "invite", member_id)
-		.await?;
-
-	member.act(&room_id, "join").await?;
+	owner.admit(&room_id, member, member_id).await?;
 	owner.act_on(&room_id, "ban", member_id).await?;
 
 	let refused = member.events(&room_id, None).await?;
@@ -253,7 +248,7 @@ async fn peek_skips_history_before_world_readable(
 
 	member.act(&room_id, "leave").await?;
 
-	let path = format!("rooms/{room_id}/state/m.room.history_visibility");
+	let path = room_path(&room_id, "state/m.room.history_visibility");
 
 	owner
 		.put(&path, &json!({ "history_visibility": "world_readable" }))
@@ -345,30 +340,6 @@ async fn put(&self, path: &str, body: &Value) -> Result {
 		.error_for_status()?;
 
 	Ok(())
-}
-
-/// Apply a membership action naming another user, such as an invite or a ban.
-///
-/// The membership is written before the response returns, so a request that
-/// depends on it can follow directly.
-#[implement(Client, params = "<'_>")]
-async fn act_on(&self, room_id: &RoomId, action: &str, user_id: &UserId) -> Result {
-	let path = format!("rooms/{room_id}/{action}");
-
-	self.post(&path, &json!({ "user_id": user_id }))
-		.await
-		.map(drop)
-}
-
-/// Apply a membership action to this user, such as a join or a leave.
-///
-/// The membership is written before the response returns, so every request
-/// that follows sees it.
-#[implement(Client, params = "<'_>")]
-async fn act(&self, room_id: &RoomId, action: &str) -> Result {
-	let path = format!("rooms/{room_id}/{action}");
-
-	self.post(&path, &json!({})).await.map(drop)
 }
 
 /// Read one page of the room's event stream as this user.

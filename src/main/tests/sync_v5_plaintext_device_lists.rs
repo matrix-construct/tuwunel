@@ -26,6 +26,10 @@ mod state;
 #[path = "client/topic.rs"]
 mod topic;
 
+#[expect(dead_code)] // Only the self-membership action is used from the add-on.
+#[path = "client/membership.rs"]
+mod membership;
+
 const READER_TOKEN: &str = "sync-v5-plaintext-device-lists-reader-token";
 const SENDER_TOKEN: &str = "sync-v5-plaintext-device-lists-sender-token";
 
@@ -91,7 +95,7 @@ async fn exercise(services: &Services, base: &str) -> Result {
 		.create_room(&json!({ "preset": "public_chat" }))
 		.await?;
 
-	reader.join(&room).await?;
+	reader.act(&room, "join").await?;
 
 	let opening = reader.sync_e2ee(None).await?;
 	let pos = next_pos(&opening)?;
@@ -121,22 +125,6 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	device_list_changed(&encrypted, &sender_id).ok_or_else(|| {
 		err!("turning on encryption withheld the members from the device lists")
 	})?;
-
-	Ok(())
-}
-
-#[implement(Client, params = "<'_>")]
-async fn join(&self, room_id: &RoomId) -> Result {
-	self.services
-		.client
-		.clients
-		.default
-		.post(self.url(&format!("rooms/{room_id}/join")))
-		.bearer_auth(self.token)
-		.json(&json!({}))
-		.send()
-		.await?
-		.error_for_status()?;
 
 	Ok(())
 }

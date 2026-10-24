@@ -9,10 +9,7 @@ use ruma::{
 	EventId, RoomId, UInt, UserId,
 	api::federation::space::SpaceHierarchyParentSummary,
 	event_id,
-	events::{
-		StateEventType,
-		room::member::{MembershipState, RoomMemberEventContent},
-	},
+	events::{StateEventType, room::member::MembershipState},
 	owned_room_id, owned_server_name,
 	room::{JoinRuleSummary, RestrictedSummary, RoomSummary},
 	room_id, server_name, user_id,
@@ -26,14 +23,11 @@ use tuwunel_matrix::PduCount;
 use super::{Accessibility, Identifier, PaginationToken, get_parent_children_via};
 use crate::{
 	Services,
-	rooms::{
-		spaces::{
-			cache::{Cached, Provenance},
-			federation::summary_matches_room,
-		},
-		state_cache::MembershipUpdate,
+	rooms::spaces::{
+		cache::{Cached, Provenance},
+		federation::summary_matches_room,
 	},
-	test_utils::fixture,
+	test_utils::{fixture, membership_update, set_room_state},
 };
 
 struct AccessControl {
@@ -166,18 +160,12 @@ async fn transition(
 	user_id: &UserId,
 	membership: MembershipState,
 ) -> Result {
+	let count = services.globals.next_count();
+	let update = membership_update(room_id, user_id, membership, PduCount::Normal(*count));
+
 	services
 		.state_cache
-		.update_membership(MembershipUpdate {
-			room_id,
-			user_id,
-			membership_event: RoomMemberEventContent::new(membership),
-			sender: user_id,
-			last_state: None,
-			invite_via: None,
-			update_joined_count: true,
-			count: PduCount::Normal(*services.globals.next_count()),
-		})
+		.update_membership(update)
 		.await
 }
 
@@ -234,9 +222,8 @@ async fn seed_local_summary(services: &Services, room: &RoomId, sender: &UserId)
 		.set_event_state(name_id, room, state)
 		.await?;
 
-	let lock = services.state.mutex.lock(room).await;
+	set_room_state(services, room, hash).await;
 
-	services.state.set_room_state(room, hash, &lock);
 	Ok(())
 }
 

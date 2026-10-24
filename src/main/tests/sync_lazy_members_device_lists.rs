@@ -16,6 +16,17 @@ use self::client::{Client, field, register, wait_until_ready};
 
 mod client;
 
+#[expect(dead_code)] // Only the event PUT is used from the event add-on.
+#[path = "client/event.rs"]
+mod event;
+
+#[expect(dead_code)] // Only the self-membership action is used from the add-on.
+#[path = "client/membership.rs"]
+mod membership;
+
+#[path = "client/put.rs"]
+mod put;
+
 const READER_TOKEN: &str = "sync-lazy-members-device-lists-reader-token";
 const SENDER_TOKEN: &str = "sync-lazy-members-device-lists-sender-token";
 
@@ -80,7 +91,7 @@ async fn exercise(services: &Services, base: &str) -> Result {
 		.create_room(&json!({ "preset": "public_chat" }))
 		.await?;
 
-	reader.join(&room).await?;
+	reader.act(&room, "join").await?;
 
 	let opening = reader.sync(None).await?;
 	let since = next_batch(&opening)?;
@@ -109,22 +120,6 @@ async fn exercise(services: &Services, base: &str) -> Result {
 
 	device_list_changed(&rekeyed, &sender_id)
 		.ok_or_else(|| err!("the rekeyed round withheld the sender's device-list change"))?;
-
-	Ok(())
-}
-
-#[implement(Client, params = "<'_>")]
-async fn join(&self, room_id: &RoomId) -> Result {
-	self.services
-		.client
-		.clients
-		.default
-		.post(self.url(&format!("rooms/{room_id}/join")))
-		.bearer_auth(self.token)
-		.json(&json!({}))
-		.send()
-		.await?
-		.error_for_status()?;
 
 	Ok(())
 }
@@ -164,23 +159,8 @@ async fn send(
 	content: &Value,
 ) -> Result<OwnedEventId> {
 	let path = format!("rooms/{room_id}/send/{event_type}/lazy-members-{txn_id}");
-	let response: Value = self
-		.services
-		.client
-		.clients
-		.default
-		.put(self.url(&path))
-		.bearer_auth(self.token)
-		.json(content)
-		.send()
-		.await?
-		.error_for_status()?
-		.json()
-		.await?;
 
-	field(&response, "event_id")?
-		.try_into()
-		.map_err(Into::into)
+	self.put_event(&path, content).await
 }
 
 fn lazily_loaded(response: &Value, room_id: &RoomId, user_id: &UserId) -> bool {
