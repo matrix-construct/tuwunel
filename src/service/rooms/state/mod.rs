@@ -701,18 +701,7 @@ where
 #[implement(Service)]
 #[tracing::instrument(skip_all, level = "debug")]
 pub async fn summary_stripped<Pdu: Event>(&self, event: &Pdu) -> Vec<Raw<AnyStrippedStateEvent>> {
-	let cells = [
-		(&StateEventType::RoomCreate, ""),
-		(&StateEventType::RoomJoinRules, ""),
-		(&StateEventType::RoomCanonicalAlias, ""),
-		(&StateEventType::RoomName, ""),
-		(&StateEventType::RoomAvatar, ""),
-		(&StateEventType::RoomMember, event.sender().as_str()), // Add recommended events
-		(&StateEventType::RoomEncryption, ""),
-		(&StateEventType::RoomTopic, ""),
-	];
-
-	let fetches = cells.into_iter().map(|(event_type, state_key)| {
+	let fetches = summary_cells(event).map(|(event_type, state_key)| {
 		self.services
 			.state_accessor
 			.room_state_get(event.room_id(), event_type, state_key)
@@ -725,6 +714,30 @@ pub async fn summary_stripped<Pdu: Event>(&self, event: &Pdu) -> Vec<Raw<AnyStri
 		.map(Event::into_format)
 		.chain(once(event.to_format()))
 		.collect()
+}
+
+/// The room state cells a membership event's summary recommends.
+///
+/// The sender's member event is recommended only when the event is about
+/// another user, so an invite carries its inviter's (MSC4319). A knock's
+/// sender is its subject, whose earlier membership would precede the knock.
+fn summary_cells<Pdu: Event>(event: &Pdu) -> impl Iterator<Item = (&StateEventType, &str)> {
+	let sender = event.sender().as_str();
+	let inviter = event
+		.state_key()
+		.ne(&Some(sender))
+		.then_some((&StateEventType::RoomMember, sender));
+
+	[
+		(&StateEventType::RoomCreate, ""),
+		(&StateEventType::RoomJoinRules, ""),
+		(&StateEventType::RoomCanonicalAlias, ""),
+		(&StateEventType::RoomName, ""),
+		(&StateEventType::RoomAvatar, ""),
+	]
+	.into_iter()
+	.chain(inviter)
+	.chain([(&StateEventType::RoomEncryption, ""), (&StateEventType::RoomTopic, "")])
 }
 
 /// Builds full-PDU invite-state context for a membership event.
@@ -743,17 +756,6 @@ pub async fn summary_pdus<Pdu: Event>(
 	room_version: &RoomVersionId,
 ) -> Vec<Box<RawJsonValue>> {
 	let room_id = event.room_id();
-	let cells = [
-		(&StateEventType::RoomCreate, ""),
-		(&StateEventType::RoomJoinRules, ""),
-		(&StateEventType::RoomCanonicalAlias, ""),
-		(&StateEventType::RoomName, ""),
-		(&StateEventType::RoomAvatar, ""),
-		(&StateEventType::RoomMember, event.sender().as_str()),
-		(&StateEventType::RoomEncryption, ""),
-		(&StateEventType::RoomTopic, ""),
-	];
-
 	let membership = self
 		.services
 		.federation
@@ -773,7 +775,7 @@ pub async fn summary_pdus<Pdu: Event>(
 	shortstatehash
 		.into_iter()
 		.cycle()
-		.zip(cells)
+		.zip(summary_cells(event))
 		.stream()
 		.wide_filter_map(|(shortstatehash, cell)| {
 			self.summary_state_pdu(room_id, shortstatehash, cell, room_version)
