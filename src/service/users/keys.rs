@@ -1346,6 +1346,7 @@ where
 #[cfg(test)]
 mod tests {
 	use ruma::{
+		OwnedDeviceKeyId,
 		signatures::{Ed25519KeyPair, KeyPair},
 		user_id,
 	};
@@ -1677,6 +1678,53 @@ mod tests {
 
 		assert_eq!(key, expected);
 	}
+
+	#[test]
+	fn device_key_id_with_long_multibyte_algorithm_parses() {
+		let key_id = long_multibyte_key_id();
+		let device_key_id: OwnedDeviceKeyId = key_id
+			.parse()
+			.expect("device key ID should parse");
+
+		assert_eq!(device_key_id.algorithm().as_str(), long_multibyte_algorithm());
+		assert_eq!(device_key_id.key_name().as_str(), "AAAA");
+
+		let keys = serde_json::json!({ &key_id: "public-key" }).to_string();
+		let keys: BTreeMap<OwnedDeviceKeyId, String> =
+			serde_json::from_str(&keys).expect("device key ID map key should deserialize");
+
+		assert!(keys.contains_key(&device_key_id));
+	}
+
+	#[test]
+	fn master_key_with_long_multibyte_key_id_parses() {
+		let user_id = user_id!("@alice:example.com");
+		let key_id = long_multibyte_key_id();
+		let master_key = serde_json::json!({
+			"user_id": user_id,
+			"usage": ["master"],
+			"keys": { &key_id: "public-key" },
+		});
+
+		let master_key: Raw<CrossSigningKey> = serde_json::from_str(&master_key.to_string())
+			.expect("master key should be valid JSON");
+
+		let (storage_key, master_key) =
+			parse_master_key(user_id, &master_key).expect("master key should parse");
+
+		let (parsed_key_id, _) = master_key
+			.keys
+			.first_key_value()
+			.expect("master key should keep its key");
+
+		assert_eq!(parsed_key_id.as_str(), key_id);
+		assert!(storage_key.ends_with(b"public-key"));
+	}
+
+	fn long_multibyte_key_id() -> String { format!("{}:AAAA", long_multibyte_algorithm()) }
+
+	// 129 two-byte characters make a 258-byte algorithm.
+	fn long_multibyte_algorithm() -> String { "é".repeat(129) }
 
 	#[test]
 	fn empty_one_time_key_counts_include_signed_zero() {
