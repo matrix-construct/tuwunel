@@ -2,7 +2,7 @@ use std::iter::once;
 
 use futures::{StreamExt, future::join, pin_mut, poll};
 use ruma::{
-	DeviceId, OneTimeKeyAlgorithm, OneTimeKeyId, UserId, device_id,
+	OneTimeKeyAlgorithm, OneTimeKeyId, UserId, device_id,
 	encryption::OneTimeKey,
 	serde::{Base64, Raw, base64::Standard},
 	signatures::{Ed25519KeyPair, KeyPair, to_canonical_json_string_for_signing},
@@ -16,7 +16,7 @@ use tuwunel_database::{Cbor, Deserialized, Json, serialize_key};
 use super::{PASSWORD_SENTINEL, Service, device::DeviceLock};
 use crate::{
 	sync::{Connection, into_connection_key},
-	test_utils::{fixture, released_after, released_by},
+	test_utils::{create_devices, fixture, released_after, released_by},
 };
 
 const OLD_PASSWORD: &str = "old password";
@@ -420,18 +420,6 @@ async fn device_removal_keeps_its_connections() -> Result {
 		.deserialized()?;
 
 	assert_eq!(stored.next_batch, next_batch);
-
-	Ok(())
-}
-
-async fn create_devices(users: &Service, user_id: &UserId, device_ids: &[&DeviceId]) -> Result {
-	users.create(user_id, None, None).await?;
-
-	for &device_id in device_ids {
-		users
-			.create_device(user_id, Some(device_id), (None, None), None, None, None)
-			.await?;
-	}
 
 	Ok(())
 }

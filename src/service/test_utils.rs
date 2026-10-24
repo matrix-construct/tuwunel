@@ -9,7 +9,7 @@ use std::{
 };
 
 use futures::future::ready;
-use ruma::{CanonicalJsonObject, EventId, RoomId, UserId, events::StateEventType};
+use ruma::{CanonicalJsonObject, DeviceId, EventId, RoomId, UserId, events::StateEventType};
 use serde::Serialize;
 use serde_json::{Value as JsonValue, from_value, json};
 use tokio::{process::Command, runtime::Handle};
@@ -32,7 +32,7 @@ use tuwunel_core::{
 };
 use tuwunel_matrix::{PduCount, PduId, RawPduId};
 
-use crate::{Services, rooms::state_compressor::CompressedStateEvent};
+use crate::{Services, rooms::state_compressor::CompressedStateEvent, users};
 
 pub(crate) struct Fixture {
 	pub services: Arc<Services>,
@@ -202,6 +202,27 @@ pub(crate) async fn compress_state(
 		.state_compressor
 		.compress_state_event(shortstatekey, event_id)
 		.await
+}
+
+/// Creates a user with one device for each ID given.
+///
+/// Key and connection writes are skipped for a device that does not exist, so
+/// tests of them start from devices created here. Tests pass a few IDs, so the
+/// devices are created in turn.
+pub(crate) async fn create_devices(
+	users: &users::Service,
+	user_id: &UserId,
+	device_ids: &[&DeviceId],
+) -> Result {
+	users.create(user_id, None, None).await?;
+
+	for &device_id in device_ids {
+		users
+			.create_device(user_id, Some(device_id), (None, None), None, None, None)
+			.await?;
+	}
+
+	Ok(())
 }
 
 /// Polls a pinned future once with `waker` and returns the result.

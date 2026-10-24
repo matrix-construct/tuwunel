@@ -10,7 +10,8 @@ pub(super) async fn drop_connections(
 	device_id: Option<OwnedDeviceId>,
 	conn_id: Option<String>,
 ) -> Result {
-	self.services
+	let dropped = self
+		.services
 		.sync
 		.clear_connections(
 			user_id.as_deref(),
@@ -19,5 +20,5 @@ pub(super) async fn drop_connections(
 		)
 		.await;
 
-	Ok(())
+	write!(self, "Dropped {dropped} connections.").await
 }

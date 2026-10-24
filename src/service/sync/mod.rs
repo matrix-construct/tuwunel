@@ -207,6 +207,12 @@ impl crate::Service for Service {
 	fn name(&self) -> &str { crate::service::make_name(std::module_path!()) }
 }
 
+/// Drops the loaded connections that match every filter given, returning how
+/// many were dropped.
+///
+/// A filter left out matches any value, so giving none drops every loaded
+/// connection. A dropped connection is deleted from the cache and from
+/// storage; one only in storage is kept.
 #[implement(Service)]
 #[tracing::instrument(level = "debug", skip(self))]
 pub async fn clear_connections(
@@ -214,23 +220,24 @@ pub async fn clear_connections(
 	user_id: Option<&UserId>,
 	device_id: Option<&DeviceId>,
 	conn_id: Option<&ConnectionId>,
-) {
+) -> usize {
 	self.connections
 		.lock()
 		.await
-		.retain(|(conn_user_id, conn_device_id, conn_conn_id), _| {
-			let retain = user_id.is_none_or(is_equal_to!(conn_user_id))
-				&& (device_id.is_none() || device_id == conn_device_id.as_deref())
-				&& (conn_id.is_none() || conn_id == conn_conn_id.as_ref());
+		.extract_if(.., |key, _| connection_matches(key, user_id, device_id, conn_id))
+		.inspect(|(key, _)| self.db.userdeviceconnid_conn.del(key))
+		.count()
+}
 
-			if !retain {
-				self.db
-					.userdeviceconnid_conn
-					.del((conn_user_id, conn_device_id, conn_conn_id));
-			}
-
-			retain
-		});
+fn connection_matches(
+	(conn_user_id, conn_device_id, conn_conn_id): &ConnectionKey,
+	user_id: Option<&UserId>,
+	device_id: Option<&DeviceId>,
+	conn_id: Option<&ConnectionId>,
+) -> bool {
+	user_id.is_none_or(is_equal_to!(conn_user_id))
+		&& device_id.is_none_or(|device_id| conn_device_id.as_deref() == Some(device_id))
+		&& conn_id.is_none_or(|conn_id| conn_conn_id.as_ref() == Some(conn_id))
 }
 
 #[implement(Service)]

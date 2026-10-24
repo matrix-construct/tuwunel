@@ -5,23 +5,27 @@ use std::{
 
 use minicbor_serde::{from_slice, to_vec};
 use ruma::{
-	OwnedRoomId, RoomId, UInt,
+	DeviceId, OwnedRoomId, RoomId, UInt, UserId,
 	api::client::sync::sync_events::v5::{
 		ListId, Ranges, Request,
 		request::{self, List, ListConfig, ListFilters},
 	},
+	device_id,
 	directory::RoomTypeFilter,
 	events::StateEventType,
 	profile::ProfileFieldName,
-	room_id,
+	room_id, user_id,
 };
 use serde::{Deserialize, Serialize};
-use tuwunel_core::Err;
+use tuwunel_core::{Err, Result, config::Figment};
 
 use super::{
-	Connection, Lists, RequiredState, Room, RoomUpdate, Subscriptions, UnreadState,
-	confirmed_removed,
+	Connection, ConnectionId, ConnectionKey, Lists, RequiredState, Room, RoomUpdate,
+	Subscriptions, UnreadState, confirmed_removed, connection_matches, into_connection_key,
 };
+use crate::test_utils::{create_devices, fixture};
+
+type Filters<'a> = (Option<&'a UserId>, Option<&'a DeviceId>, Option<&'a str>);
 
 const LIST_ID: &str = "main";
 
@@ -892,6 +896,90 @@ fn room_cbor_leaves_out_the_checkpoint() {
 }
 
 #[test]
+fn dropping_one_connection_keeps_the_rest() {
+	let filters =
+		(Some(user_id!("@alice:localhost")), Some(device_id!("PHONE")), Some("room-list"));
+
+	assert_eq!(dropped(filters), [true, false, false, false]);
+}
+
+#[test]
+fn dropping_a_user_keeps_other_users() {
+	let filters = (Some(user_id!("@alice:localhost")), None, None);
+
+	assert_eq!(dropped(filters), [true, true, true, false]);
+}
+
+#[test]
+fn dropping_a_device_keeps_other_devices() {
+	let filters = (Some(user_id!("@alice:localhost")), Some(device_id!("PHONE")), None);
+
+	assert_eq!(dropped(filters), [true, true, false, false]);
+}
+
+#[test]
+fn dropping_without_filters_drops_everything() {
+	assert_eq!(dropped((None, None, None)), [true; 4]);
+}
+
+#[tokio::test]
+async fn dropping_connections_deletes_only_the_matches() -> Result {
+	let Some(fixture) = fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+
+	let (users, sync) = (&fixture.services.users, &fixture.services.sync);
+	let (alice, bob) = (user_id!("@alice:localhost"), user_id!("@bob:localhost"));
+	let (phone, laptop) = (device_id!("PHONE"), device_id!("LAPTOP"));
+	let keys = connection_keys();
+
+	create_devices(users, alice, &[phone, laptop]).await?;
+	create_devices(users, bob, &[phone]).await?;
+
+	let presence = async |key: &ConnectionKey| {
+		(sync.is_connection_loaded(key).await, sync.is_connection_stored(key).await)
+	};
+
+	for key in &keys {
+		let conn = sync.load_or_init_connection(key).await?;
+
+		sync.store_connection(key, &conn, &*conn.lock().await)
+			.await?;
+
+		assert_eq!(presence(key).await, (true, true), "{key:?}");
+	}
+
+	let room_list = ConnectionId::from("room-list");
+	let one = sync
+		.clear_connections(Some(alice), Some(phone), Some(&room_list))
+		.await;
+
+	assert_eq!(one, 1);
+
+	for (key, kept) in keys.iter().zip([false, true, true, true]) {
+		assert_eq!(presence(key).await, (kept, kept), "{key:?}");
+	}
+
+	let rest = sync
+		.clear_connections(Some(alice), None, None)
+		.await;
+
+	assert_eq!(rest, 2);
+
+	for (key, kept) in keys.iter().zip([false, false, false, true]) {
+		assert_eq!(presence(key).await, (kept, kept), "{key:?}");
+	}
+
+	assert_eq!(sync.clear_connections(None, None, None).await, 1);
+
+	for key in &keys {
+		assert_eq!(presence(key).await, (false, false), "{key:?}");
+	}
+
+	Ok(())
+}
+
+#[test]
 fn device_removal_needs_a_confirmed_absence() {
 	assert!(matches!(confirmed_removed(None), Ok(false)));
 	assert!(matches!(confirmed_removed(Some(Ok(true))), Ok(false)));
@@ -1036,3 +1124,28 @@ fn assert_delivery(
 fn uint(value: u64) -> UInt { UInt::new(value).expect("range value must fit UInt") }
 
 fn list_id() -> ListId { LIST_ID.into() }
+
+/// Reports which of the [`connection_keys`] a drop with these filters matches.
+///
+/// Entry `i` is true when the drop removes the `i`th key.
+fn dropped((user_id, device_id, conn_id): Filters<'_>) -> [bool; 4] {
+	let conn_id = conn_id.map(ConnectionId::from);
+
+	connection_keys().map(|key| connection_matches(&key, user_id, device_id, conn_id.as_ref()))
+}
+
+/// Builds four connections across two users and two devices.
+///
+/// In order: two on Alice's phone, one on her laptop, and one on Bob's phone.
+fn connection_keys() -> [ConnectionKey; 4] {
+	let (alice, bob) = (user_id!("@alice:localhost"), user_id!("@bob:localhost"));
+	let (phone, laptop) = (device_id!("PHONE"), device_id!("LAPTOP"));
+
+	[
+		(alice, phone, "room-list"),
+		(alice, phone, "encryption"),
+		(alice, laptop, "room-list"),
+		(bob, phone, "room-list"),
+	]
+	.map(|(user, device, conn)| into_connection_key(user, Some(device), Some(conn)))
+}
