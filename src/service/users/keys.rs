@@ -310,6 +310,10 @@ pub async fn take_fallback_key(
 	Ok((updated.key_id, updated.key))
 }
 
+/// Streams the algorithms of a device's fallback keys that no claim has used.
+///
+/// The scan ends at the device's own rows, so a device whose ID extends this
+/// one's contributes none.
 #[implement(super::Service)]
 pub fn unused_fallback_key_algorithms<'a>(
 	&'a self,
@@ -318,7 +322,8 @@ pub fn unused_fallback_key_algorithms<'a>(
 ) -> impl Stream<Item = OneTimeKeyAlgorithm> + Send + 'a {
 	type KeyVal = ((Ignore, Ignore, OneTimeKeyAlgorithm), Json<FallbackEntry>);
 
-	let prefix = (user_id, device_id);
+	let prefix = (user_id, device_id, Interfix);
+
 	self.db
 		.userdeviceidalgorithm_fallback
 		.stream_prefix(&prefix)

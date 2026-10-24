@@ -1,9 +1,15 @@
-use futures::{future::join, pin_mut, poll};
-use ruma::user_id;
+use std::iter::once;
+
+use futures::{StreamExt, future::join, pin_mut, poll};
+use ruma::{
+	DeviceId, OneTimeKeyAlgorithm, OneTimeKeyId, UserId, device_id, encryption::OneTimeKey,
+	serde::Raw, user_id,
+};
+use serde_json::{from_value, json};
 use tokio::sync::Notify;
 use tuwunel_core::{Result, config::Figment};
 
-use super::PASSWORD_SENTINEL;
+use super::{PASSWORD_SENTINEL, Service};
 use crate::test_utils::fixture;
 
 const OLD_PASSWORD: &str = "old password";
@@ -144,6 +150,57 @@ async fn rejected_password_change_releases_lock() -> Result {
 
 	users.set_password(user_id, None).await?;
 	assert!(users.is_deactivated(user_id).await?);
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn unused_fallback_keys_stay_with_their_device() -> Result {
+	let Some(fixture) = fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+
+	let users = &fixture.services.users;
+	let user_id = user_id!("@fallback:localhost");
+	let device_id = device_id!("FALLBACK");
+	let longer_id = device_id!("FALLBACK2");
+
+	create_devices(users, user_id, &[device_id, longer_id]).await?;
+
+	let key_id = <&OneTimeKeyId>::try_from("signed_curve25519:AAAAAQ")?;
+	let key: Raw<OneTimeKey> = from_value(json!("fallback key"))?;
+
+	users
+		.add_fallback_keys(user_id, longer_id, once((key_id, &key)))
+		.await?;
+
+	let unused = async |device_id| {
+		users
+			.unused_fallback_key_algorithms(user_id, device_id)
+			.collect::<Vec<_>>()
+			.await
+	};
+
+	assert_eq!(unused(device_id).await, []);
+	assert_eq!(unused(longer_id).await, [OneTimeKeyAlgorithm::SignedCurve25519]);
+
+	users
+		.take_fallback_key(user_id, longer_id, &OneTimeKeyAlgorithm::SignedCurve25519)
+		.await?;
+
+	assert_eq!(unused(longer_id).await, []);
+
+	Ok(())
+}
+
+async fn create_devices(users: &Service, user_id: &UserId, device_ids: &[&DeviceId]) -> Result {
+	users.create(user_id, None, None).await?;
+
+	for &device_id in device_ids {
+		users
+			.create_device(user_id, Some(device_id), (None, None), None, None, None)
+			.await?;
+	}
 
 	Ok(())
 }
