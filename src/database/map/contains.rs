@@ -6,10 +6,16 @@ use tuwunel_core::{
 	Result,
 	arrayvec::ArrayVec,
 	err, implement,
-	utils::{future::TryExtExt, result::FlatOk},
+	utils::{
+		future::TryExtExt,
+		result::{FlatOk, NotFound},
+	},
 };
 
-use crate::{keyval::KeyBuf, ser};
+use crate::{
+	keyval::{KeyBuf, serialize_key},
+	ser,
+};
 
 /// Checks whether a serialized key exists.
 ///
@@ -30,6 +36,28 @@ where
 {
 	let mut buf = KeyBuf::new();
 	self.bcontains(key, &mut buf)
+}
+
+/// Checks whether a serialized key exists, returning a failed read as an error.
+///
+/// Unlike [`contains`](Self::contains), only a missing record reads as absent.
+///
+/// # Panics
+///
+/// Panics if the key cannot be serialized.
+#[inline]
+#[implement(super::Map)]
+pub fn try_contains<K>(
+	self: &Arc<Self>,
+	key: &K,
+) -> impl Future<Output = Result<bool>> + Send + '_ + use<'_, K>
+where
+	K: Serialize + ?Sized + Debug,
+{
+	let key = serialize_key(key).expect("failed to serialize query key");
+
+	self.exists(&key)
+		.map(|result| result.present().map(|found| found.is_some()))
 }
 
 /// Checks whether a serialized key exists using fixed-capacity storage.

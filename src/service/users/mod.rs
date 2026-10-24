@@ -76,8 +76,12 @@ pub struct Service {
 	changing_password: MutexMap<OwnedUserId, ()>,
 	// Entries live only while claims for a user/device hold or await the lock.
 	claiming_one_time_keys: MutexMap<(OwnedUserId, OwnedDeviceId), ()>,
-	// Entries live only while a device's creation, token issuance, metadata
-	// update (each presence ping's last-seen) or removal holds or awaits it.
+	/// Serializes the writers of one device and of each of a user's key rows.
+	///
+	/// Entries live only while held or awaited: by a device's creation, token
+	/// issuance, metadata update (each presence ping's last-seen) or removal,
+	/// a device key upload, a signature merge, or a cross-signing key write (one
+	/// per key row).
 	updating_device: MutexMap<(OwnedUserId, OwnedDeviceId), ()>,
 }
 

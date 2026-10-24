@@ -27,7 +27,7 @@ use tuwunel_database::{Cbor, Deserialized, Ignore, Interfix, Json, Txn};
 
 use super::DeviceListChange;
 
-type DeviceLock = MutexMapGuard<(OwnedUserId, OwnedDeviceId), ()>;
+pub(super) type DeviceLock = MutexMapGuard<(OwnedUserId, OwnedDeviceId), ()>;
 
 /// generated device ID length
 const DEVICE_ID_LENGTH: usize = 10;
@@ -123,14 +123,14 @@ pub async fn check_device_id(&self, user_id: &UserId, device_id: Option<&DeviceI
 }
 
 /// Locks one device against concurrent creation, token issuance, metadata
-/// updates and removal.
+/// and key updates, and removal.
 ///
 /// A refresh token is rotated by reading the one the device points at and
 /// replacing it, so issuers run one after another to leave the device a single
-/// refresh token. An issuer or metadata update that runs after removal finds
-/// no device rather than writing for one already gone.
+/// refresh token. An issuer, or a metadata or key update, that runs after
+/// removal finds no device rather than writing for one already gone.
 #[implement(super::Service)]
-async fn lock_device(&self, user_id: &UserId, device_id: &DeviceId) -> DeviceLock {
+pub(super) async fn lock_device(&self, user_id: &UserId, device_id: &DeviceId) -> DeviceLock {
 	let key = (user_id.to_owned(), device_id.to_owned());
 
 	self.updating_device.lock(&key).await
@@ -1061,6 +1061,19 @@ pub async fn device_exists(&self, user_id: &UserId, device_id: &DeviceId) -> boo
 	self.db
 		.userdeviceid_metadata
 		.contains(&(user_id, device_id))
+		.await
+}
+
+/// Whether a device exists, returning a failed read instead of taking it for
+/// absence.
+///
+/// Callers that act on a device's absence use this, since `device_exists`
+/// reports a device it cannot read as absent.
+#[implement(super::Service)]
+pub async fn try_device_exists(&self, user_id: &UserId, device_id: &DeviceId) -> Result<bool> {
+	self.db
+		.userdeviceid_metadata
+		.try_contains(&(user_id, device_id))
 		.await
 }
 

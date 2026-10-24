@@ -26,6 +26,7 @@ use tuwunel_core::{
 		json,
 		stream::{BroadbandExt, ReadyExt},
 	},
+	warn,
 };
 use tuwunel_service::{
 	Services,
@@ -373,9 +374,11 @@ where
 	}
 }
 
-/// Merges signatures from our cached copy of the user's master key (if any)
-/// onto the remote-supplied master key, persists the merged copy to our
-/// database, and returns the merged Raw value for the response.
+/// Merges our cached signatures onto a remote-supplied master key.
+///
+/// The returned copy carries only the cached signatures the requester may see,
+/// while the stored copy carries every signature of our cached key. A failed
+/// store is logged and leaves the returned copy as it is.
 async fn merge_remote_master_key<F>(
 	services: &Services,
 	sender_user: Option<&UserId>,
@@ -400,12 +403,12 @@ where
 
 	let raw = json::to_raw(&master_key)?;
 
-	// Don't notify: a notification would trigger another key request resulting
-	// in an endless loop.
 	services
 		.users
-		.add_cross_signing_keys(user, &Some(raw.clone()), &None, &None, false)
-		.await?;
+		.store_remote_master_key(user, &master_key_raw)
+		.await
+		.inspect_err(|error| warn!(%user, %error, "Not storing a master key from federation."))
+		.ok();
 
 	Ok(raw)
 }

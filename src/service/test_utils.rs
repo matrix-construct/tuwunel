@@ -2,12 +2,13 @@ use std::{
 	env::{current_exe, temp_dir, var_os},
 	fs::remove_dir_all,
 	path::{Path, PathBuf},
-	pin::Pin,
+	pin::{Pin, pin},
 	sync::{Arc, Mutex},
 	task::{Context, Poll, Waker},
 	thread::current as current_thread,
 };
 
+use futures::future::ready;
 use ruma::{CanonicalJsonObject, EventId, RoomId, UserId, events::StateEventType};
 use serde::Serialize;
 use serde_json::{Value as JsonValue, from_value, json};
@@ -209,6 +210,46 @@ pub(crate) async fn compress_state(
 /// write woke it.
 pub(crate) fn poll_once<F: Future>(future: Pin<&mut F>, waker: &Waker) -> Poll<F::Output> {
 	future.poll(&mut Context::from_waker(waker))
+}
+
+/// Asserts that a future waits while a guard is held, then releases the guard
+/// and awaits the future.
+///
+/// Lock tests start a writer while holding the lock it needs, and expect it to
+/// finish once the lock is free.
+pub(crate) async fn released_by<Guard, F: Future>(guard: Guard, future: F) -> F::Output {
+	released_after(guard, ready(()), future).await
+}
+
+/// Asserts that a future waits while a guard is held, runs `meanwhile` as the
+/// guard's holder, then releases the guard and awaits the future.
+///
+/// Lock tests change or check the guarded state in `meanwhile`, so a writer
+/// that read or wrote it before taking the lock is caught.
+pub(crate) async fn released_after<Guard, M, F>(
+	guard: Guard,
+	meanwhile: M,
+	future: F,
+) -> F::Output
+where
+	M: Future<Output = ()>,
+	F: Future,
+{
+	let future = pin!(future);
+	let future = assert_pending(future);
+
+	meanwhile.await;
+	drop(guard);
+	future.await
+}
+
+fn assert_pending<F: Future>(mut future: Pin<&mut F>) -> Pin<&mut F> {
+	assert!(
+		poll_once(future.as_mut(), Waker::noop()).is_pending(),
+		"must wait for the guard"
+	);
+
+	future
 }
 
 /// Starts recording warnings on the calling thread.
