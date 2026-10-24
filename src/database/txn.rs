@@ -369,12 +369,12 @@ where
 /// watchers.
 ///
 /// An empty transaction returns without touching the engine. For a nonempty
-/// batch, notifications occur only after the write.
+/// batch, notifications occur only after the write, and a failed flush is
+/// logged instead of panicking.
 ///
 /// # Panics
 ///
-/// Panics when RocksDB rejects the batch write or when the required database
-/// flush fails.
+/// Panics when RocksDB rejects the batch write.
 #[implement(Txn)]
 #[inline]
 pub fn execute(self) {
@@ -435,12 +435,12 @@ fn sync(&self) -> Result { self.engine.sync() }
 
 /// Commits the batch atomically, flushes unless corked, and notifies matchers.
 ///
-/// Batch must not be empty. Notifications occur only after the write.
+/// Batch must not be empty. Notifications occur only after the write, and a
+/// failed flush is logged instead of panicking.
 ///
 /// # Panics
 ///
-/// Panics when RocksDB rejects the batch write or when the required database
-/// flush fails.
+/// Panics when RocksDB rejects the batch write.
 #[implement(Txn)]
 #[tracing::instrument(
 	level = "trace",
