@@ -141,17 +141,17 @@ impl super::super::Service {
 			return Err!(Request(NotFound("Media thumbnail not found.")));
 		};
 
-		let Ok(_pending) = self.db.search_pending_mxc(mxc).await else {
+		if self.db.search_pending_mxc(mxc).await.is_err() {
 			return Err!(Request(NotFound("Media thumbnail not found.")));
-		};
+		}
 
-		let notifier = self
-			.mxc_state
-			.notifiers
-			.lock()?
-			.entry(mxc.to_string().into())
-			.or_insert_with(|| Arc::new(Notify::new()))
-			.clone();
+		let notifier = {
+			let mut notifiers = self.mxc_state.notifiers.lock()?;
+			notifiers
+				.entry(mxc.to_string().into())
+				.or_insert_with(|| Arc::new(Notify::new()))
+				.clone()
+		};
 
 		if timeout(timeout_duration, notifier.notified())
 			.await
