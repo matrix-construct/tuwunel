@@ -522,10 +522,11 @@ pub fn room_members_knocked<'a>(
 		.map(|(_, user_id): (Ignore, &UserId)| user_id)
 }
 
-/// Returns the stream position associated with a user's current invite.
+/// Returns the stream position last recorded for a user's current invite.
 ///
-/// This value identifies the membership transition rather than counting
-/// invitations. Missing or malformed index rows return an error.
+/// Each invite event for the user rewrites it, as does a forced state replay,
+/// so it neither counts invites nor marks the first. Missing or malformed
+/// index rows return an error.
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "trace")]
 pub async fn get_invite_count(&self, room_id: &RoomId, user_id: &UserId) -> Result<u64> {
@@ -537,10 +538,11 @@ pub async fn get_invite_count(&self, room_id: &RoomId, user_id: &UserId) -> Resu
 		.deserialized()
 }
 
-/// Returns the stream position associated with a user's current knock.
+/// Returns the stream position last recorded for a user's current knock.
 ///
-/// This value identifies the membership transition rather than counting
-/// knocks. Missing or malformed index rows return an error.
+/// Each knock event for the user rewrites it, as does a forced state replay,
+/// so it neither counts knocks nor marks the first. Missing or malformed index
+/// rows return an error.
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "trace")]
 pub async fn get_knock_count(&self, room_id: &RoomId, user_id: &UserId) -> Result<u64> {
@@ -552,10 +554,11 @@ pub async fn get_knock_count(&self, room_id: &RoomId, user_id: &UserId) -> Resul
 		.deserialized()
 }
 
-/// Returns the stream position associated with a user's current leave row.
+/// Returns the stream position last recorded for a user's current leave or ban.
 ///
-/// This value identifies the membership transition rather than counting
-/// leaves. Missing or malformed index rows return an error.
+/// Each leave or ban event for the user rewrites it, as does a forced state
+/// replay, so it neither counts departures nor marks the first. Missing or
+/// malformed index rows return an error.
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "trace")]
 pub async fn get_left_count(&self, room_id: &RoomId, user_id: &UserId) -> Result<u64> {
@@ -567,11 +570,13 @@ pub async fn get_left_count(&self, room_id: &RoomId, user_id: &UserId) -> Result
 		.deserialized()
 }
 
-/// Returns the stream position associated with a user's current join.
+/// Returns the stream position last recorded for a user's current join.
 ///
-/// This value identifies the membership transition rather than counting
-/// joins. A join recorded before positions were stored holds an empty value
-/// and reads as zero. Missing or malformed index rows return an error.
+/// Each join event for the user, a profile change while joined included,
+/// rewrites it, as does a forced state replay, so it neither counts joins nor
+/// marks the join transition. A join recorded before positions were stored
+/// holds an empty value and reads as zero. Missing or malformed index rows
+/// return an error.
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "trace")]
 pub async fn get_joined_count(&self, room_id: &RoomId, user_id: &UserId) -> Result<u64> {
