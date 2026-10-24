@@ -197,17 +197,16 @@ async fn collect_room(
 		.unwrap_or_default();
 
 	// Without freshly read state, the range keeps the snapshot recorded at its last delivery.
-	let (payload, shortstatehash) = delivery.unzip();
-	let shortstatehash = shortstatehash
-		.flatten()
-		.unwrap_or(room.shortstatehash);
+	let (payload, state_read) = delivery.unzip();
+	let (shortstatehash, unread_state) = state_read.unwrap_or_default();
+	let shortstatehash = shortstatehash.unwrap_or(room.shortstatehash);
 
 	assemble(
 		payload,
 		public_receipts,
 		private_receipts,
 		account_data,
-		(config_hash, required_state, shortstatehash),
+		(config_hash, required_state, shortstatehash, unread_state),
 	)
 }
 
@@ -331,7 +330,7 @@ mod tests {
 			vec![malformed].into_iter(),
 			PrivateReadEvents::new(),
 			Vec::new(),
-			(7, once(11).collect(), 13),
+			(7, once(11).collect(), 13, Default::default()),
 		);
 
 		let error = range.expect_err("malformed receipt must fail the complete range");
@@ -352,7 +351,7 @@ mod tests {
 			Vec::new().into_iter(),
 			PrivateReadEvents::new(),
 			Vec::new(),
-			(7, once(11).collect(), 13),
+			(7, once(11).collect(), 13, Default::default()),
 		);
 
 		let mut range = publish(room_id, range); // room_updates consumes the configuration.

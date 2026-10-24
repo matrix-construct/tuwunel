@@ -2,7 +2,7 @@
 
 use serde_json::{Map, Value, json, value::to_raw_value};
 use tuwunel_core::{
-	Result, err,
+	Result, err, implement,
 	ruma::{CanonicalJsonObject, OwnedEventId, OwnedRoomId, RoomId, UserId},
 	utils::BoolExt,
 };
@@ -45,6 +45,8 @@ const COUNTED_KEY: &str = "counted";
 const OUTLIER_KEY: &str = "outlier";
 const EVENT_IDS: &str = "shorteventid_eventid";
 const STATE_KEYS: &str = "shortstatekey_statekey";
+const PDUS: &str = "pduid_pdu";
+const UNREADABLE: &[u8] = b"unreadable";
 
 /// One room's sliding sync replies, each checked for its required state.
 ///
@@ -134,30 +136,41 @@ async fn outliers(services: &Services, base: &str) -> Result {
 		)
 		.await?;
 
-	client.set_topic(&room, "recorded again").await?;
-
 	replies
-		.expect_next(Some(&legacy), &request, &[], "snapshot recorded again")
+		.expect_recorded(&legacy, &request)
 		.await
 		.map(drop)
 }
 
-impl Replies<'_> {
-	/// Sync once and fail unless the room came back with exactly the expected
-	/// required state.
-	///
-	/// The reply is returned, so the next step resumes from its position.
-	async fn expect_next(
-		&self,
-		since: Option<&Value>,
-		request: &Value,
-		expected: &[&str],
-		context: &str,
-	) -> Result<Value> {
-		let reply = self.client.sync(since, request).await?;
+/// Sync once and fail unless the room came back with exactly the expected
+/// required state.
+///
+/// The reply is returned, so the next step resumes from its position.
+#[implement(Replies, params = "<'_>")]
+async fn expect_next(
+	&self,
+	since: Option<&Value>,
+	request: &Value,
+	expected: &[&str],
+	context: &str,
+) -> Result<Value> {
+	let reply = self.client.sync(since, request).await?;
 
-		expect_state(&reply, self.room, expected, context).map(|()| reply)
-	}
+	expect_state(&reply, self.room, expected, context).map(|()| reply)
+}
+
+/// Change the topic and fail unless the room's next reply carries no state.
+///
+/// A delivery that read every requested event vouches for all of them, so an
+/// unrelated state change after it resends none.
+#[implement(Replies, params = "<'_>")]
+async fn expect_recorded(&self, since: &Value, request: &Value) -> Result<Value> {
+	self.client
+		.set_topic(self.room, "recorded again")
+		.await?;
+
+	self.expect_next(Some(since), request, &[], "snapshot recorded again")
+		.await
 }
 
 /// Sends state whose event could not be read, on the first state change after
@@ -192,11 +205,7 @@ async fn unreadable(services: &Services, base: &str) -> Result {
 		.expect_next(Some(&initial), &wide, &[missing.as_str()], "outlier stored")
 		.await?;
 
-	client.set_topic(&room, "read in full").await?;
-
-	let recorded = replies
-		.expect_next(Some(&stored), &wide, &[], "snapshot recorded again")
-		.await?;
+	let recorded = replies.expect_recorded(&stored, &wide).await?;
 
 	let narrow = sync_request(COUNTED_KEY);
 	let narrowed = replies
@@ -226,6 +235,78 @@ async fn unreadable(services: &Services, base: &str) -> Result {
 		.map(drop)
 }
 
+/// Sends counted state whose event could not be read, once it reads again.
+///
+/// State with a timeline position is compared with the snapshot the client was
+/// last sent, and that snapshot holds the event the reply left out because it
+/// could not be read. The event arrives on the first state change after it
+/// reads again.
+#[test]
+fn unreadable_counted_state_is_sent_once_readable() -> Result {
+	boot("sync-v5-unreadable-counted-state", ["log_enable=false"], unreadable_counted)
+}
+
+async fn unreadable_counted(services: &Services, base: &str) -> Result {
+	register(services, "counted", TOKEN).await?;
+
+	let client = Client { services, base, token: TOKEN };
+	let room = client
+		.create_room(&json!({ "preset": "public_chat" }))
+		.await?;
+
+	let counted = client
+		.put_state(&room, CALL_MEMBER, COUNTED_KEY, &json!({ "revision": 1 }))
+		.await?;
+
+	// Two later events keep it out of the one-event timeline and the event read to see
+	// whether that timeline is limited.
+	client.send_text(&room, "first", "first").await?;
+	client
+		.send_text(&room, "second", "second")
+		.await?;
+
+	let pdu_id = services.timeline.get_pdu_id(&counted).await?;
+	let stored = replace_row(services, PDUS, pdu_id.as_bytes(), Some(UNREADABLE)).await?;
+
+	let request = sync_request("*");
+	let replies = Replies { client: &client, room: &room };
+	let initial = replies
+		.expect_next(None, &request, &[], "unreadable counted event")
+		.await?;
+
+	services.db[PDUS].insert(&pdu_id, stored);
+	client.set_topic(&room, "unrelated").await?;
+
+	let read = replies
+		.expect_next(Some(&initial), &request, &[counted.as_str()], "counted event readable")
+		.await?;
+
+	replies
+		.expect_recorded(&read, &request)
+		.await
+		.map(drop)
+}
+
+/// Overwrite one database row, or remove it, returning the value it held.
+///
+/// Writing the returned value back under the same key restores the row.
+async fn replace_row(
+	services: &Services,
+	name: &str,
+	key: &[u8],
+	value: Option<&[u8]>,
+) -> Result<Vec<u8>> {
+	let map = &services.db[name];
+	let stored = map.get(key).await?.to_vec();
+
+	match value {
+		| Some(value) => map.insert(key, value),
+		| None => map.remove(key),
+	}
+
+	Ok(stored)
+}
+
 /// Sends state whose short ID mapping could not be read, once it reads again.
 ///
 /// A wildcard selector lists a type's state through its short ID mappings, and
@@ -251,7 +332,7 @@ async fn unmapped(services: &Services, base: &str) -> Result {
 		.await?
 		.to_be_bytes();
 
-	let event_id = unmap(services, EVENT_IDS, &short_event_id).await?;
+	let event_id = replace_row(services, EVENT_IDS, &short_event_id, None).await?;
 	let request = sync_request("*");
 	let replies = Replies { client: &client, room: &room };
 	let initial = replies
@@ -272,7 +353,7 @@ async fn unmapped(services: &Services, base: &str) -> Result {
 		.await?
 		.to_be_bytes();
 
-	let type_and_key = unmap(services, STATE_KEYS, &short_state_key).await?;
+	let type_and_key = replace_row(services, STATE_KEYS, &short_state_key, None).await?;
 
 	client
 		.set_topic(&room, "beside an unmapped state key")
@@ -291,24 +372,10 @@ async fn unmapped(services: &Services, base: &str) -> Result {
 		.expect_next(Some(&hidden), &request, &[replaced.as_str()], "state key mapped")
 		.await?;
 
-	client.set_topic(&room, "read in full").await?;
-
 	replies
-		.expect_next(Some(&remapped), &request, &[], "snapshot recorded again")
+		.expect_recorded(&remapped, &request)
 		.await
 		.map(drop)
-}
-
-/// Remove one row of a short ID reverse mapping, returning its value.
-///
-/// Writing the value back under the same key restores the mapping.
-async fn unmap(services: &Services, name: &str, key: &[u8]) -> Result<Vec<u8>> {
-	let map = &services.db[name];
-	let value = map.get(key).await?.to_vec();
-
-	map.remove(key);
-
-	Ok(value)
 }
 
 /// Sign a state event and install it as current state without a timeline

@@ -1,4 +1,5 @@
 mod bump_stamp;
+mod collected;
 mod heroes;
 
 #[cfg(test)]
@@ -7,7 +8,7 @@ mod tests;
 use std::collections::{BTreeMap, HashSet};
 
 use futures::{
-	FutureExt, StreamExt, TryFutureExt, TryStreamExt,
+	FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt,
 	future::{join, join3, join4},
 };
 use ruma::{
@@ -46,11 +47,12 @@ use tuwunel_matrix::{
 use tuwunel_service::{
 	Services,
 	rooms::short::ShortStateHash,
-	sync::{RequiredState, Room, RoomConfig},
+	sync::{RequiredState, Room, RoomConfig, UnreadState},
 };
 
 use self::{
 	bump_stamp::{knock_bump_stamp, room_bump_stamp},
+	collected::{Collected, Outcome, Unread},
 	heroes::calculate_heroes,
 };
 use super::{
@@ -69,9 +71,11 @@ type ThreadCounts = BTreeMap<OwnedEventId, (u64, u64)>;
 type EventTypeString = SmallString<[u8; 32]>;
 type TimelineMembers<'a> = SmallVec<[&'a str; 2]>;
 pub(super) type RoomDetails = (usize, HashSet<(StateEventType, StateKey)>);
-pub(super) type Delivery = (ResponseRoom, Option<ShortStateHash>);
+pub(super) type Delivery = (ResponseRoom, StateRead);
+type StateRead = (Option<ShortStateHash>, UnreadState);
 type StateEvent = Raw<AnySyncStateEvent>;
-type CollectedState = (Vec<StateEvent>, Option<ShortStateHash>);
+type Selected = ((StateEventType, StateKey), Option<OwnedEventId>, bool);
+type CollectedState = (Vec<StateEvent>, StateRead);
 type Snapshots = (Option<ShortStateHash>, Option<(PduCount, ShortStateHash)>);
 
 /// Most timeline events one room returns per response, as legacy sync allows.
@@ -89,12 +93,14 @@ struct StateSelection<'a> {
 	previous: Option<&'a [u64]>,
 	changed: bool,
 	delivered: ShortStateHash,
+	unread: &'a [u64],
 }
 
 /// What decides whether a delta sends one requested state event.
 ///
 /// The event is sent when it is newer than the delta's base, when the room held
-/// a different event at the base, or when it is a lazily loaded member.
+/// a different event at the base, when the last delivery could not read it, or
+/// when it is a lazily loaded member.
 #[derive(Clone, Copy, Debug, Default)]
 struct Candidate {
 	/// The event's timeline position, absent for an outlier.
@@ -102,6 +108,9 @@ struct Candidate {
 
 	/// Whether it was selected as a lazily loaded member.
 	lazy: bool,
+
+	/// Whether the last delivery found its event due but could not read it.
+	left_unread: bool,
 
 	/// Whether the room held the same event at the delta's base.
 	same_at_since: bool,
@@ -134,7 +143,7 @@ pub(super) async fn handle_room(
 
 	if matches!(*membership, Some(MembershipState::Leave | MembershipState::Ban)) {
 		return leave_or_ban_response(sync_info, conn, window_room, roomsince)
-			.map_ok(|payload| (payload, None))
+			.map_ok(|payload| (payload, (None, room.unread_state.clone())))
 			.map_err(Failure::Payload)
 			.await;
 	}
@@ -200,6 +209,7 @@ pub(super) async fn handle_room(
 		previous: config_changed.then_some(room.required_state.as_slice()),
 		changed: allowed && state_may_have_changed(mode, last_timeline_count),
 		delivered: room.shortstatehash,
+		unread: &room.unread_state,
 	};
 
 	let required_state = allowed
@@ -247,7 +257,7 @@ pub(super) async fn handle_room(
 	let notification_counts = notification_counts_future(services, sender_user, room_id);
 	let (
 		(room_name, room_avatar),
-		(timeline, (required_state, shortstatehash), invite_state),
+		(timeline, (required_state, state_read), invite_state),
 		(joined_count, invited_count),
 		(highlight_count, notification_count, _last_notification_read, thread_counts),
 	) = join4(meta, events, member_counts, notification_counts)
@@ -291,7 +301,7 @@ pub(super) async fn handle_room(
 		unread_notifications,
 	};
 
-	Ok((payload, shortstatehash))
+	Ok((payload, state_read))
 }
 
 async fn leave_or_ban_response(
@@ -551,6 +561,7 @@ async fn collect_required_state(
 		previous,
 		changed,
 		delivered,
+		unread: unread_keys,
 	} = selection;
 
 	let lazy = required_state
@@ -586,22 +597,6 @@ async fn collect_required_state(
 		.filter(|event| *event.event_type() == TimelineEventType::RoomMember)
 		.filter_map(Event::state_key);
 
-	let wildcard_state = required_state
-		.iter()
-		.filter(|(_, state_key)| (!state_unchanged || previous.is_some()) && state_key == "*")
-		.stream()
-		.flat_map(|(event_type, _)| {
-			services
-				.state_accessor
-				.room_state_keys_with_ids(room_id, event_type)
-				.inspect_err(move |error| {
-					warn!(%room_id, %event_type, %error, "Unreadable required state keys");
-				})
-				.map_ok(move |(state_key, event_id)| {
-					((event_type.clone(), state_key), Some(event_id), false)
-				})
-		});
-
 	let mut timeline_members: TimelineMembers<'_> = timeline_senders
 		.chain(timeline_member_targets)
 		.collect();
@@ -621,19 +616,21 @@ async fn collect_required_state(
 			.any(is_equal_to!(event.event_id()))
 	};
 
+	let evaluated = !state_unchanged || previous.is_some();
+
 	required_state
 		.iter()
-		.filter(|_| !state_unchanged || previous.is_some())
+		.filter(|_| evaluated)
 		.cloned()
 		.map(|state| Ok((state, None, false)))
 		.stream()
-		.chain(wildcard_state)
+		.chain(wildcard_state(services, room_id, required_state, evaluated))
 		.chain(
 			timeline_members
 				.map(|state| Ok((state, None, true)))
 				.stream(),
 		)
-		.broad_then(async |selected| -> Result<Option<StateEvent>> {
+		.broad_then(async |selected| -> Outcome {
 			let ((event_type, state_key), event_id, lazy) = selected?;
 			let state_key: StateKey = match state_key.as_str() {
 				| "$LAZY" | "*" => return Ok(None),
@@ -643,7 +640,7 @@ async fn collect_required_state(
 
 			let state_mode = previous
 				.filter(|previous| {
-					!state_was_requested(previous, &event_type, state_key.as_str(), sender_user)
+					!fingerprints_cover(previous, &event_type, state_key.as_str(), sender_user)
 				})
 				.map(|_| StateMode::Full)
 				.unwrap_or(state_mode);
@@ -652,9 +649,13 @@ async fn collect_required_state(
 				return Ok(None);
 			}
 
+			// A key that cannot be resolved is not yet known to be due, so it records zero.
 			let event_id = match event_id {
 				| Some(event_id) => Some(event_id),
-				| None => current_state_id(services, room_id, &event_type, &state_key).await?,
+				| None =>
+					current_state_id(services, room_id, &event_type, &state_key)
+						.map_err(|_| Unread::Unresolved)
+						.await?,
 			};
 
 			let Some(event_id) = event_id else {
@@ -663,14 +664,16 @@ async fn collect_required_state(
 
 			let pdu_id = services.timeline.get_pdu_id(&event_id).await.ok();
 			let count = pdu_id.map(RawPduId::pdu_count);
+			let left_unread =
+				fingerprints_cover(unread_keys, &event_type, state_key.as_str(), sender_user);
+
+			let comparable = !lazy && !left_unread && state_mode != StateMode::Full;
 
 			// Only a delivered snapshot vouches for an outlier; the cursor's snapshot
 			// may already hold one the client was never sent.
 			let same_at_since = since_state
 				.filter(|(since, _)| {
-					!lazy
-						&& state_mode != StateMode::Full
-						&& count.map_or(delivered != 0, |count| count <= *since)
+					comparable && count.map_or(delivered != 0, |count| count <= *since)
 				})
 				.map_async(|(_, shortstatehash)| {
 					services
@@ -682,7 +685,9 @@ async fn collect_required_state(
 				.flatten()
 				.is_some_and(|previous_event_id| previous_event_id == event_id);
 
-			if !state_is_required(state_mode, Candidate { count, lazy, same_at_since }) {
+			let candidate = Candidate { count, lazy, left_unread, same_at_since };
+
+			if !state_is_required(state_mode, candidate) {
 				return Ok(None);
 			}
 
@@ -696,23 +701,25 @@ async fn collect_required_state(
 						.await,
 			};
 
-			let pdu = pdu.inspect_err(|error| {
-				warn!(%room_id, %event_id, %error, "Unreadable required state event");
-			})?;
+			// A due event that cannot be read leaves its key for the next delivery to send.
+			let unread_key =
+				|_: Error| Unread::Unreadable(required_state_hash(&event_type, &state_key));
+
+			let pdu = pdu
+				.inspect_err(|error| {
+					warn!(%room_id, %event_id, %error, "Unreadable required state event");
+				})
+				.map_err(unread_key)?;
 
 			let pdu = with_membership(services, pdu, sender_user, encrypted).await;
 			let pdu = strip_prev_state(pdu, sender_user, in_timeline);
 
-			Ok(Some(Event::into_format(pdu)))
-		})
-		.ready_fold((Vec::new(), true), |(mut events, read), event| {
-			let read = read && event.is_ok();
+			let settled = left_unread.then(|| required_state_hash(&event_type, &state_key));
 
-			events.extend(event.ok().flatten());
-
-			(events, read)
+			Ok(Some((Event::into_format(pdu), settled)))
 		})
-		.map(|(events, read)| (events, recorded_snapshot(snapshot, read)))
+		.ready_fold_default(Collected::push)
+		.map(|collected| collected.finish(snapshot, unread_keys))
 		.await
 }
 
@@ -756,15 +763,50 @@ async fn state_snapshots(
 	(current, since_state)
 }
 
-fn state_was_requested(
-	previous: &[u64],
+/// The current state listed under each wildcard selector a delivery evaluates.
+///
+/// A listing that cannot be read is logged and yielded as an unresolved key: it
+/// may hide an event that was due, so the delivery records zero.
+fn wildcard_state<'a>(
+	services: &'a Services,
+	room_id: &'a RoomId,
+	required_state: &'a HashSet<(StateEventType, StateKey)>,
+	evaluated: bool,
+) -> impl Stream<Item = Result<Selected, Unread>> + Send + 'a {
+	required_state
+		.iter()
+		.filter(move |(_, state_key)| evaluated && state_key == "*")
+		.stream()
+		.flat_map(move |(event_type, _)| {
+			services
+				.state_accessor
+				.room_state_keys_with_ids(room_id, event_type)
+				.inspect_err(move |error| {
+					warn!(%room_id, %event_type, %error, "Unreadable required state keys");
+				})
+				.map_err(|_| Unread::Unresolved)
+				.map_ok(move |(state_key, event_id)| {
+					((event_type.clone(), state_key), Some(event_id), false)
+				})
+		})
+}
+
+/// Whether a set of key fingerprints covers one state key.
+///
+/// A fingerprint covers its own key, every key of its type when it is a wildcard,
+/// and the syncing user's key when it is `$ME`.
+fn fingerprints_cover(
+	fingerprints: &[u64],
 	event_type: &StateEventType,
 	state_key: &str,
 	sender_user: &UserId,
 ) -> bool {
-	let contains = |key| previous.contains(&required_state_hash(event_type, key));
+	let contains = |key| fingerprints.contains(&required_state_hash(event_type, key));
 
-	contains("*") || contains(state_key) || (state_key == sender_user.as_str() && contains("$ME"))
+	!fingerprints.is_empty()
+		&& (contains("*")
+			|| contains(state_key)
+			|| (state_key == sender_user.as_str() && contains("$ME")))
 }
 
 /// The ID of the event the room's current state holds under one requested key.
@@ -789,19 +831,12 @@ async fn current_state_id(
 
 fn state_is_required(
 	state_mode: StateMode,
-	Candidate { count, lazy, same_at_since }: Candidate,
+	Candidate { count, lazy, left_unread, same_at_since }: Candidate,
 ) -> bool {
-	lazy || match state_mode {
-		| StateMode::Full => true,
-		| StateMode::Delta(since) => count.is_some_and(|count| count > since) || !same_at_since,
-	}
-}
-
-/// The snapshot a delivery records, given whether it read every requested event.
-///
-/// When a requested event could not be read, no snapshot vouches for what the
-/// client holds, so the delivery records zero and the next delta compares
-/// against the cursor and resends outliers.
-fn recorded_snapshot(snapshot: Option<ShortStateHash>, read: bool) -> Option<ShortStateHash> {
-	read.copy_or(Some(0), snapshot)
+	lazy || left_unread
+		|| match state_mode {
+			| StateMode::Full => true,
+			| StateMode::Delta(since) =>
+				count.is_some_and(|count| count > since) || !same_at_since,
+		}
 }

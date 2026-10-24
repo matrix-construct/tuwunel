@@ -17,7 +17,7 @@ use ruma::{
 };
 use serde::{Deserialize, Serialize};
 
-use super::{Connection, Lists, RequiredState, Room, RoomUpdate, Subscriptions};
+use super::{Connection, Lists, RequiredState, Room, RoomUpdate, Subscriptions, UnreadState};
 
 const LIST_ID: &str = "main";
 
@@ -38,6 +38,18 @@ struct RoomV2 {
 	roomsince: u64,
 	config_hash: u64,
 	required_state: RequiredState,
+}
+
+/// A room as stored before rooms recorded the keys a delivery could not read.
+///
+/// `room_cbor_writes_unread_state_only_after_a_failed_read` checks a room with
+/// no unread keys still encodes to this shape.
+#[derive(Deserialize, Serialize)]
+struct RoomV3 {
+	roomsince: u64,
+	config_hash: u64,
+	required_state: RequiredState,
+	shortstatehash: u64,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -238,6 +250,28 @@ fn retry_restores_the_room_as_the_lost_request_found_it() {
 
 	assert_delivery(room, 5, (19, &[4], 29));
 	assert!(room.checkpoint.is_none());
+}
+
+#[test]
+fn retry_restores_the_keys_the_lost_request_read() {
+	let room_id = room_id!("!unread:example.com");
+	let room = Room {
+		unread_state: once(7).collect(),
+		..delivered_room()
+	};
+
+	let mut conn = connection_with(room_id, room);
+
+	conn.update_rooms_epilogue(5, delivery(room_id, (19, &[4], 29)));
+
+	assert!(conn.rooms[room_id].unread_state.is_empty());
+
+	conn.update_rooms_prologue(Some(5));
+
+	let room = &conn.rooms[room_id];
+
+	assert_delivery(room, 5, (19, &[4], 29));
+	assert_eq!(room.unread_state.as_slice(), &[7]);
 }
 
 #[test]
@@ -802,6 +836,39 @@ fn room_cbor_defaults_snapshot_and_allows_downgrade() {
 }
 
 #[test]
+fn room_cbor_writes_unread_state_only_after_a_failed_read() {
+	let room = Room {
+		roomsince: 7,
+		config_hash: 19,
+		required_state: (1..=4).collect(),
+		shortstatehash: 23,
+		..Default::default()
+	};
+
+	let previous = RoomV3 {
+		roomsince: 7,
+		config_hash: 19,
+		required_state: (1..=4).collect(),
+		shortstatehash: 23,
+	};
+
+	let bytes = to_vec(&room).expect("room must encode");
+
+	assert_eq!(bytes, to_vec(&previous).expect("previous room must encode"));
+
+	let unread = Room { unread_state: [5, 6].into(), ..room };
+
+	let bytes = to_vec(&unread).expect("room must encode");
+	let decoded: Room = from_slice(&bytes).expect("room must decode");
+	let downgraded: RoomV3 = from_slice(&bytes).expect("previous reader must decode");
+
+	assert_eq!(decoded.unread_state, unread.unread_state);
+	assert_eq!(decoded.shortstatehash, 23);
+	assert_eq!(downgraded.shortstatehash, 23);
+	assert_eq!(downgraded.required_state, previous.required_state);
+}
+
+#[test]
 fn room_cbor_leaves_out_the_checkpoint() {
 	let room_id = room_id!("!checkpointed:example.com");
 	let mut conn = Connection { next_batch: 9, ..Default::default() };
@@ -913,23 +980,30 @@ fn delivery<'a>(
 	room_id: &'a RoomId,
 	(config_hash, required_state, shortstatehash): (u64, &[u64], u64),
 ) -> Once<RoomUpdate<'a>> {
-	let config = (config_hash, required_state.iter().copied().collect(), shortstatehash);
+	let required_state = required_state.iter().copied().collect();
+	let config = (config_hash, required_state, shortstatehash, UnreadState::new());
 
 	once((room_id, Some(config)))
 }
 
 fn connection_with_room(room_id: &RoomId) -> Connection {
-	let room = Room {
+	connection_with(room_id, delivered_room())
+}
+
+fn connection_with(room_id: &RoomId, room: Room) -> Connection {
+	Connection {
+		next_batch: 9,
+		rooms: [(room_id.to_owned(), room)].into(),
+		..Default::default()
+	}
+}
+
+fn delivered_room() -> Room {
+	Room {
 		roomsince: 5,
 		config_hash: 19,
 		required_state: once(4).collect(),
 		shortstatehash: 29,
-		..Default::default()
-	};
-
-	Connection {
-		next_batch: 9,
-		rooms: [(room_id.to_owned(), room)].into(),
 		..Default::default()
 	}
 }

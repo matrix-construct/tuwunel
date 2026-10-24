@@ -102,10 +102,18 @@ pub struct Room {
 	/// Snapshot the delivered required state was read against.
 	///
 	/// Zero when unknown, as for a room recorded by an older build or delivered
-	/// without reading every event its required state named: its deltas compare
+	/// without resolving every key its required state named: its deltas compare
 	/// against the cursor and resend outliers until a delivery records one.
 	#[serde(default)]
 	pub shortstatehash: ShortStateHash,
+
+	/// Fingerprints of the requested state keys whose events the last delivery
+	/// found due but could not read.
+	///
+	/// The snapshot does not vouch for these keys, so the next delivery that
+	/// compares state sends their events whatever the snapshot holds.
+	#[serde(default, skip_serializing_if = "UnreadState::is_empty")]
+	pub unread_state: UnreadState,
 
 	/// The room's delivery progress before the last request advanced it, kept in
 	/// memory for a retry of that request's position.
@@ -142,11 +150,17 @@ pub type RequiredState = SmallVec<[u64; 18]>;
 /// records it with the snapshot its coverage was read against.
 pub type RoomConfig = (u64, RequiredState);
 
-/// A delivered room configuration's hash, its required-state coverage, and
-/// the snapshot that coverage was read against.
+/// Fingerprints of requested state keys whose due events a delivery could not read.
 ///
-/// All three advance together only after a room payload is assembled.
-pub type DeliveredConfig = (u64, RequiredState, ShortStateHash);
+/// Only a read fault leaves any; two fit inline at the size of an empty `Vec`.
+pub type UnreadState = SmallVec<[u64; 2]>;
+
+/// A delivered room configuration's hash, its required-state coverage, the
+/// snapshot that coverage was read against, and the keys whose events the
+/// delivery could not read.
+///
+/// All four advance together only after a room payload is assembled.
+pub type DeliveredConfig = (u64, RequiredState, ShortStateHash, UnreadState);
 
 type Connections = TokioMutex<BTreeMap<ConnectionKey, ConnectionVal>>;
 pub type ConnectionVal = Arc<TokioMutex<Connection>>;
@@ -381,12 +395,13 @@ fn take_checkpoint(&mut self, pos: u64) -> Option<Checkpoint> {
 #[implement(Room)]
 fn replace_config(
 	&mut self,
-	(config_hash, required_state, shortstatehash): DeliveredConfig,
+	(config_hash, required_state, shortstatehash, unread_state): DeliveredConfig,
 ) -> DeliveredConfig {
 	(
 		replace(&mut self.config_hash, config_hash),
 		replace(&mut self.required_state, required_state),
 		replace(&mut self.shortstatehash, shortstatehash),
+		replace(&mut self.unread_state, unread_state),
 	)
 }
 
@@ -428,9 +443,8 @@ fn advance(&mut self, since: u64, next_batch: u64, config: Option<DeliveredConfi
 	// An unchanged configuration needs no copy; the room still holds it.
 	let replaced = config
 		.map(|config| self.replace_config(config))
-		.filter(|(config_hash, required_state, shortstatehash)| {
-			(*config_hash, required_state, *shortstatehash)
-				!= (self.config_hash, &self.required_state, self.shortstatehash)
+		.filter(|(config_hash, required_state, shortstatehash, unread_state)| {
+			(*config_hash, required_state, *shortstatehash, unread_state) != self.delivered()
 		});
 
 	let checkpoint = Checkpoint {
@@ -440,6 +454,12 @@ fn advance(&mut self, since: u64, next_batch: u64, config: Option<DeliveredConfi
 
 	self.roomsince = next_batch;
 	self.checkpoint = Some(checkpoint);
+}
+
+#[implement(Room)]
+#[inline]
+fn delivered(&self) -> (u64, &RequiredState, ShortStateHash, &UnreadState) {
+	(self.config_hash, &self.required_state, self.shortstatehash, &self.unread_state)
 }
 
 /// Records that this pass carried the syncing user's whole profile.
