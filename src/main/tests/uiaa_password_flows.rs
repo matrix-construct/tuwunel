@@ -6,7 +6,7 @@ use futures::future::join;
 use reqwest::StatusCode;
 use serde_json::{Value, json};
 use tuwunel::{Args, Runtime, Server, async_run, async_start, async_stop};
-use tuwunel_core::{Err, Result, ruma::UserId, utils::BoolExt};
+use tuwunel_core::{Err, Result, ruma::UserId};
 use tuwunel_service::{Services, users::PASSWORD_SENTINEL};
 
 use self::{client::wait_until_ready, uiaa_signing::exercise as exercise_signing};
@@ -173,7 +173,8 @@ async fn exercise_retention(services: &Services, base: &str) -> Result {
 	let client = &services.client.clients.default;
 	let url = format!("{base}/_matrix/client/v3/delete_devices");
 
-	for padding in [0, 8192] {
+	// An auth-only retry, a body too large to retain, and an emptied list.
+	for (padding, emptied) in [(0, false), (8192, false), (0, true)] {
 		let target = services
 			.users
 			.create_device(&user_id, None, (None, None), None, None, None)
@@ -213,8 +214,9 @@ async fn exercise_retention(services: &Services, base: &str) -> Result {
 			"session": session
 		});
 
-		let retry = match padding {
-			| 0 => json!({"auth": auth}),
+		let retry = match (padding, emptied) {
+			| (_, true) => json!({"devices": [], "auth": auth}),
+			| (0, _) => json!({"auth": auth}),
 			| _ => json!({"devices": [target], "auth": auth}),
 		};
 
@@ -226,13 +228,13 @@ async fn exercise_retention(services: &Services, base: &str) -> Result {
 			.await?;
 
 		assert_eq!(response.status(), StatusCode::OK);
-		assert!(
-			services
-				.users
-				.device_exists(&user_id, &target)
-				.await
-				.is_false()
-		);
+
+		let exists = services
+			.users
+			.device_exists(&user_id, &target)
+			.await;
+
+		assert_eq!(exists, emptied);
 
 		assert!(
 			services

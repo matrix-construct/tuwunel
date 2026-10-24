@@ -28,6 +28,17 @@ const TOKEN: &str = "media-upload-free-space-access-token";
 const FILE: &[u8] = b"a file small enough for any filesystem";
 const FILE_TYPE: &str = "text/plain";
 
+/// Files each upload route must store byte for byte, with their media types.
+///
+/// A JSON file's whitespace and key order belong to the file, so it is stored
+/// as sent whatever its bytes would parse as.
+const FILES: [(&[u8], &str); 4] = [
+	(FILE, FILE_TYPE),
+	(b"{\n  \"b\": 1,\n  \"a\": 2\n}\n", "application/json"),
+	(b"[\n  {\"b\": 1, \"a\": 2}\n]\n", "application/json"),
+	(b"\x00\xFF\x80\r\nbinary\x00", "application/octet-stream"),
+];
+
 // two servers boot in this binary and only one may install the logger
 const QUIET: &str = "log_enable=false";
 
@@ -35,7 +46,8 @@ const QUIET: &str = "log_enable=false";
 ///
 /// A minimum no filesystem can meet, the largest a TOML integer holds, stands
 /// in for a full disk, so every route an upload begins on is refused while a
-/// message is still sent. With the check off the same uploads are stored.
+/// message is still sent. With the check off the same routes store every file
+/// byte for byte.
 #[test]
 fn uploads_are_refused_while_storage_is_short_of_space() -> Result {
 	let short = [QUIET, &format!("media_upload_min_free_space={}", i64::MAX)];
@@ -106,14 +118,26 @@ async fn expect_refused(response: Response, route: &str) -> Result {
 
 async fn uploads_are_stored(services: &Services, base: &str) -> Result {
 	let client = uploader(services, base).await?;
+
+	for (file, file_type) in FILES {
+		file_is_stored(&client, file, file_type).await?;
+	}
+
+	Ok(())
+}
+
+/// Upload one file on each route an upload begins on and download it back.
+///
+/// The asynchronous upload fills a content URI reserved for it just before.
+async fn file_is_stored(client: &Client<'_>, file: &'static [u8], file_type: &str) -> Result {
 	let upload = client
-		.upload(Method::POST, &client.media_url("v3/upload"), FILE_TYPE, FILE)
+		.upload(Method::POST, &client.media_url("v3/upload"), file_type, file)
 		.await?;
 
 	let uploaded = accepted(upload).await?;
 	let stored = field(&uploaded, "content_uri")?;
 
-	expect_stored(&client, stored).await?;
+	expect_stored(client, stored, file).await?;
 
 	let created = client
 		.post_json(&client.media_url("v1/create"), &json!({}))
@@ -123,14 +147,14 @@ async fn uploads_are_stored(services: &Services, base: &str) -> Result {
 	let reserved_path = media_path(reserved)?;
 	let reserved_url = client.media_url(&format!("v3/upload/{reserved_path}"));
 	let upload_async = client
-		.upload(Method::PUT, &reserved_url, FILE_TYPE, FILE)
+		.upload(Method::PUT, &reserved_url, file_type, file)
 		.await?;
 
 	accepted(upload_async).await?;
-	expect_stored(&client, reserved).await
+	expect_stored(client, reserved, file).await
 }
 
-async fn expect_stored(client: &Client<'_>, content_uri: &str) -> Result {
+async fn expect_stored(client: &Client<'_>, content_uri: &str, file: &[u8]) -> Result {
 	let path = media_path(content_uri)?;
 	let download = client.client_url("v1/", &format!("media/download/{path}"));
 	let stored = client
@@ -140,8 +164,8 @@ async fn expect_stored(client: &Client<'_>, content_uri: &str) -> Result {
 		.bytes()
 		.await?;
 
-	if stored != FILE {
-		return Err!("{content_uri} did not download as the file uploaded to it");
+	if stored != file {
+		return Err!("{content_uri} downloaded as {stored:?}, not the file uploaded to it");
 	}
 
 	Ok(())

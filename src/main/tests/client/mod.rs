@@ -18,9 +18,9 @@ use tuwunel_service::{Services, users::Register};
 
 /// Password every harness account registers with.
 ///
-/// Requests use the device token installed by `register`; UIA retries can
-/// authenticate with this password.
-pub(crate) const PASSWORD: &str = "tuwunel-test-harness-password";
+/// No test authenticates through it, since `register` installs the device
+/// token each request then carries.
+const PASSWORD: &str = "tuwunel-test-harness-password";
 
 const POLL_INTERVAL: Duration = Duration::from_millis(20);
 
