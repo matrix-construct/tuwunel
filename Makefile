@@ -47,8 +47,8 @@ complement/run: ## Run Complement; set var t or v for REGEX filter/select
 
 .PHONY: complement/all
 complement/all: ## Build images, then run Complement
-	$(MAKE) complement-build
-	$(MAKE) complement t='$(COMPLEMENT_TESTS)'
+	$(MAKE) complement/build
+	$(MAKE) complement/run COMPLEMENT_TESTS='$(COMPLEMENT_TESTS)'
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

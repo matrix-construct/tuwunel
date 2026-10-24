@@ -286,7 +286,10 @@ impl ServiceTrait for Reconcile {
 impl Reconcile {
 	/// Drops the room's synchronized cooldown and schedules an early sweep.
 	pub fn room_activity(&self, room_id: &RoomId) {
-		lock(&self.last_done).retain(|(room, _), _| room != room_id);
+		let now = Instant::now();
+		lock(&self.last_done).retain(|(room, _), until| {
+			room != room_id || *until > now + PEER_COOLDOWN + Duration::from_secs(1)
+		});
 		let mut pending = lock(&self.pending_rooms);
 		if pending.len() < MAX_PENDING_ROOMS {
 			pending.insert(room_id.to_owned());
