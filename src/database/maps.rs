@@ -329,7 +329,7 @@ pub(super) static MAPS: &[Descriptor] = &[
 	},
 	Descriptor {
 		name: "relatesto_typed",
-		key_size_hint: Some(40),
+		key_size_hint: Some(33),
 		val_size_hint: Some(8),
 		..descriptor::RANDOM_SMALL
 	},
@@ -585,8 +585,7 @@ pub(super) static MAPS: &[Descriptor] = &[
 	},
 	Descriptor {
 		name: "tofrom_relation",
-		key_size_hint: Some(8),
-		val_size_hint: Some(8),
+		key_size_hint: Some(16),
 		..descriptor::RANDOM_SMALL
 	},
 	Descriptor {
