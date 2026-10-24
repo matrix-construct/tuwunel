@@ -509,11 +509,13 @@ pub(crate) async fn sso_callback_route(
 		.commit_identity_session(&unique_id, complete_identity)
 		.await?;
 
-	if let Some(old_sess_id) = old_sess_id
+	if let Some(old) = old_sess_id
 		.as_deref()
 		.filter(is_not_equal_to!(&sess_id))
+		&& let Err(error) = services.oauth.sessions.delete(old).await
+		&& !error.is_missing()
 	{
-		services.oauth.sessions.delete(old_sess_id).await;
+		warn!(%old, %error, "previous OAuth session was kept");
 	}
 
 	if !services.users.is_active_local(&user_id).await {

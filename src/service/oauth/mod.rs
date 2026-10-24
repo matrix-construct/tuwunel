@@ -27,7 +27,12 @@ use serde_json::Value as JsonValue;
 use tuwunel_core::{
 	Err, Error, Result, err, implement,
 	smallstr::SmallString,
-	utils::{hash::sha256, result::LogErr, stream::ReadyExt, string::truncate_deterministic},
+	utils::{
+		hash::sha256,
+		result::{LogErr, NotFound},
+		stream::{ReadyExt, TryReadyExt},
+		string::truncate_deterministic,
+	},
 	warn,
 };
 use url::Url;
@@ -36,7 +41,7 @@ use self::{providers::Providers, sessions::Sessions};
 pub use self::{
 	providers::{Provider, ProviderId},
 	server::Server,
-	sessions::{CODE_VERIFIER_LENGTH, SESSION_ID_LENGTH, Session, SessionId},
+	sessions::{CODE_VERIFIER_LENGTH, Deleted, Deletions, SESSION_ID_LENGTH, Session, SessionId},
 	token_response::TokenResponse,
 	user_info::UserInfo,
 };
@@ -186,19 +191,24 @@ fn check_bucket_at(
 	Ok(())
 }
 
-/// Remove all session state for a user. For debug and developer use only;
-/// deleting state can cause registration conflicts and unintended
-/// re-registrations.
+/// Remove every session listed under a user.
+///
+/// Each listed session is deleted whether or not its provider still resolves,
+/// and one that cannot be read is kept; the result counts each outcome, and an
+/// unreadable list is an error. For debug and developer use only; deleting
+/// state can cause registration conflicts and unintended re-registrations.
 #[implement(Service)]
 #[tracing::instrument(level = "debug", skip(self))]
-pub async fn delete_user_sessions(&self, user_id: &UserId) {
-	self.user_sessions(user_id)
-		.ready_filter_map(Result::ok)
-		.ready_filter_map(|(_, session)| session.sess_id)
-		.for_each(async |sess_id| {
-			self.sessions.delete(&sess_id).await;
+pub async fn delete_user_sessions(&self, user_id: &UserId) -> Result<Deletions> {
+	self.sessions
+		.get_sess_id_by_user(user_id)
+		// A user with no sessions has no index row to list them.
+		.ready_filter(|listed| !listed.is_missing())
+		.and_then(async |sess_id| Ok((self.sessions.delete(&sess_id).await, sess_id)))
+		.ready_try_fold_default(|deletions: Deletions, (deleted, sess_id)| {
+			Ok(deletions.tally(deleted, &sess_id))
 		})
-		.await;
+		.await
 }
 
 /// Revoke all session tokens for a user.

@@ -1,6 +1,10 @@
 use futures::StreamExt;
 use ruma::OwnedUserId;
-use tuwunel_core::{Err, Result, apply, err, itertools::Itertools, utils::stream::ReadyExt};
+use tuwunel_core::{
+	Err, Result, apply, err,
+	itertools::Itertools,
+	utils::{BoolExt, stream::ReadyExt},
+};
 
 use crate::admin_command;
 
@@ -59,11 +63,21 @@ pub(super) async fn oauth_associate(
 		);
 	}
 
-	if committed > 0 {
-		self.services
-			.oauth
-			.delete_user_sessions(&user_id)
-			.await;
+	let deletions = committed
+		.gt(&0)
+		.then_async(|| self.services.oauth.delete_user_sessions(&user_id))
+		.await
+		.transpose()?
+		.unwrap_or_default();
+
+	// A session the delete kept would shadow the claim at login.
+	if deletions.unreadable > 0 {
+		return Err!(
+			"Deleted {} of {user_id}'s OAuth session(s), but {} could not be read and were \
+			 kept; see the log. The pending association was not added.",
+			deletions.deleted(),
+			deletions.unreadable,
+		);
 	}
 
 	let replaced = self

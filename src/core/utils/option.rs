@@ -1,8 +1,8 @@
 //! Asynchronous mapping adapters for optional values.
 //!
-//! [`OptionExt`] turns an optional value into an optional future or a
-//! zero-or-one stream. The mapping closure runs only when the option contains a
-//! value.
+//! [`OptionExt`] turns an optional value into an optional future, a fallible
+//! future of an option, or a zero-or-one stream. The mapping closure runs only
+//! when the option contains a value.
 
 use futures::{FutureExt, Stream, future::OptionFuture};
 
@@ -12,6 +12,8 @@ use super::IterStream;
 ///
 /// [`OptionExt::map_async`] preserves optionality through future completion.
 /// [`OptionExt::map_stream`] exposes the mapped result as a zero-or-one stream.
+/// [`OptionExt::try_map_async`] lifts a fallible future's error out of the
+/// option.
 pub trait OptionExt<T> {
 	/// Maps the contained value to a future without eagerly awaiting it.
 	///
@@ -41,6 +43,26 @@ pub trait OptionExt<T> {
 			.map(Option::into_iter)
 			.map(IterStream::stream)
 			.flatten_stream()
+	}
+
+	/// Maps the contained value to a fallible future and lifts its error out.
+	///
+	/// A [`Some`] value resolves to the mapped output in `Ok(Some(_))`, or to
+	/// the future's error. [`None`] resolves to `Ok(None)` and never calls the
+	/// mapping closure.
+	#[inline]
+	fn try_map_async<F, Fut, U, E>(
+		self,
+		f: F,
+	) -> impl Future<Output = Result<Option<U>, E>> + Send
+	where
+		F: FnOnce(T) -> Fut,
+		Fut: Future<Output = Result<U, E>> + Send,
+		U: Send,
+		E: Send,
+		Self: Sized,
+	{
+		self.map_async(f).map(Option::transpose)
 	}
 }
 

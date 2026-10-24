@@ -2,6 +2,7 @@ mod adopt;
 pub mod association;
 
 use std::{
+	fmt::Display,
 	iter::once,
 	sync::{Arc, Mutex},
 	time::SystemTime,
@@ -12,14 +13,15 @@ use futures::{FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt};
 use ruma::{OwnedUserId, UserId};
 use serde::{Deserialize, Serialize};
 use tuwunel_core::{
-	Err, Result, at, implement,
+	Err, Error, Result, at, err, implement,
 	itertools::Itertools,
 	redacted_debug,
 	result::NotFound,
 	utils::{
-		MutexMap,
-		stream::{IterStream, ReadyExt, TryExpect},
+		MutexMap, OptionExt,
+		stream::{IterStream, ReadyExt, TryExpect, TryReadyExt},
 	},
+	warn,
 };
 use tuwunel_database::{Cbor, Database, Deserialized, Ignore, Map};
 use url::Url;
@@ -118,6 +120,38 @@ pub struct Session {
 	pub user_info: Option<UserInfo>,
 }
 
+/// What deleting one session left of its indexes.
+///
+/// The identity binding is keyed by a hash only the session's provider can
+/// derive, so without that provider the binding cannot be found.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Deleted {
+	/// Every index naming the session went with it.
+	Complete,
+
+	/// No configured provider derived the identity key, so a binding may remain.
+	ProviderUnresolved,
+}
+
+/// Outcome counts of one user-wide session delete.
+///
+/// Each session the user's index lists is counted under one outcome, so a
+/// session that fails is counted rather than stopping the rest.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Deletions {
+	/// Sessions removed with every index naming them.
+	pub complete: usize,
+
+	/// Sessions removed while an identity binding naming them may remain.
+	pub unresolved: usize,
+
+	/// Sessions the user's index lists without a stored record.
+	pub absent: usize,
+
+	/// Sessions kept because they or their indexes could not be read.
+	pub unreadable: usize,
+}
+
 /// Session Identifier type.
 pub type SessionId = String;
 
@@ -147,14 +181,14 @@ pub(super) fn build(args: &crate::Args<'_>, providers: Arc<Providers>) -> Self {
 /// Delete database state for the session.
 ///
 /// The canonical session and every association index that still refers to it
-/// commit together.
+/// commit together. The result reports an identity binding that may remain
+/// because no configured provider derives its key. An absent session, or one
+/// whose record or indexes cannot be read, is an error, and nothing is deleted.
 #[implement(Sessions)]
 #[tracing::instrument(level = "debug", skip(self))]
-pub async fn delete(&self, sess_id: &str) {
+pub async fn delete(&self, sess_id: &str) -> Result<Deleted> {
 	let (session, unique_id, _write_guard) = loop {
-		let Ok(snapshot) = self.get(sess_id).await else {
-			return;
-		};
+		let snapshot = self.get(sess_id).await?;
 
 		let provider = async {
 			let idp_id = snapshot.idp_id.as_deref()?;
@@ -172,9 +206,7 @@ pub async fn delete(&self, sess_id: &str) {
 			| None => None,
 		};
 
-		let Ok(session) = self.get(sess_id).await else {
-			return;
-		};
+		let session = self.get(sess_id).await?;
 
 		if session.idp_id.as_deref() != snapshot.idp_id.as_deref() {
 			continue;
@@ -189,30 +221,42 @@ pub async fn delete(&self, sess_id: &str) {
 		}
 	};
 
+	// Only a session holding user_info was ever bound to an identity.
+	let deleted = if unique_id.is_none() && session.user_info.is_some() {
+		Deleted::ProviderUnresolved
+	} else {
+		Deleted::Complete
+	};
+
 	// Preserve a unique identity association updated to a newer session.
-	let unique_id = async {
-		let unique_id = unique_id.as_deref()?;
-		let assoc_id = self
-			.get_sess_id_by_unique_id(unique_id)
-			.map(Result::ok)
-			.await?;
+	let unique_id = unique_id
+		.as_deref()
+		.try_map_async(|unique_id| {
+			self.get_sess_id_by_unique_id(unique_id)
+				.map(NotFound::present)
+				.map_err(unreadable(&self.db.oauthuniqid_oauthid, unique_id))
+				.map_ok(move |assoc_id| {
+					assoc_id
+						.is_some_and(|assoc_id| assoc_id == sess_id)
+						.then_some(unique_id)
+				})
+		})
+		.map_ok(Option::flatten)
+		.await?;
 
-		(assoc_id == sess_id).then_some(unique_id)
-	}
-	.await;
-
-	let user_sessions = async {
-		let user_id = session.user_id.as_deref()?;
-		let sess_ids: Vec<_> = self
-			.get_sess_id_by_user(user_id)
-			.ready_filter_map(Result::ok)
-			.ready_filter(|assoc_id| assoc_id != sess_id)
-			.collect()
-			.await;
-
-		Some((user_id, sess_ids))
-	}
-	.await;
+	let user_sessions = session
+		.user_id
+		.as_deref()
+		.try_map_async(|user_id| {
+			self.get_sess_id_by_user(user_id)
+				// A user with no index row has no other session to keep.
+				.ready_filter(|listed| !listed.is_missing())
+				.ready_try_filter(|listed| listed != sess_id)
+				.map_err(unreadable(&self.db.userid_oauthid, user_id))
+				.try_collect()
+				.map_ok(move |sess_ids: Vec<_>| (user_id, sess_ids))
+		})
+		.await?;
 
 	let mut txn = self.db.database.txn();
 
@@ -230,7 +274,48 @@ pub async fn delete(&self, sess_id: &str) {
 
 	txn.del_raw(&self.db.oauthid_session, sess_id);
 	txn.execute();
+
+	Ok(deleted)
 }
+
+fn unreadable<K: Display>(map: &Map, key: K) -> impl Fn(Error) -> Error {
+	move |e| err!(Database("{} {key} is unreadable: {e}", map.name()))
+}
+
+#[implement(Deletions)]
+pub(super) fn tally(self, result: Result<Deleted>, sess_id: &str) -> Self {
+	match result {
+		| Ok(Deleted::Complete) => Self {
+			complete: self.complete.saturating_add(1),
+			..self
+		},
+		| Ok(Deleted::ProviderUnresolved) => Self {
+			unresolved: self.unresolved.saturating_add(1),
+			..self
+		},
+		| Err(e) if e.is_missing() => Self {
+			absent: self.absent.saturating_add(1),
+			..self
+		},
+		| Err(e) => {
+			warn!(%sess_id, error = %e, "an OAuth session could not be read for deletion");
+
+			Self {
+				unreadable: self.unreadable.saturating_add(1),
+				..self
+			}
+		},
+	}
+}
+
+/// Counts the sessions removed, whether or not a binding naming them remains.
+///
+/// That is every complete delete plus every delete no configured provider
+/// could derive the binding for.
+#[implement(Deletions)]
+#[inline]
+#[must_use]
+pub fn deleted(&self) -> usize { self.complete.saturating_add(self.unresolved) }
 
 /// Create or overwrite database state for the session.
 ///
