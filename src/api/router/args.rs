@@ -233,6 +233,10 @@ where
 
 /// Builds typed arguments after authentication and any UIA body merge.
 ///
+/// Re-serializing an object body canonically, merged or not, is deliberate: a
+/// duplicate key keeps its last value, as in Synapse, and a federation request
+/// parses from the content its X-Matrix signature was checked against.
+///
 /// Transfers the original HTTP parts without cloning headers or the URI.
 fn make_args<T, const ADMIN: bool>(
 	services: &Services,
