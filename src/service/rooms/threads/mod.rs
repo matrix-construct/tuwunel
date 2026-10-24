@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, pin::pin, sync::Arc};
+use std::{collections::BTreeMap, iter::once, pin::pin, sync::Arc};
 
 use futures::{Stream, StreamExt, TryFutureExt, TryStreamExt, future::join3};
 use ruma::{
@@ -16,6 +16,10 @@ use serde::Deserialize;
 use serde_json::json;
 use tuwunel_core::{
 	Result, err, implement,
+	itertools::{
+		Either::{Left, Right},
+		Itertools,
+	},
 	utils::{
 		BoolExt, ReadyExt,
 		result::{LogErr, NotFound},
@@ -243,16 +247,24 @@ impl Service {
 			.await
 			.map_err(|e| err!(Request(InvalidParam("Thread root pdu not found: {e:?}"))))?;
 
-		let mut users = self
-			.get_participants(&root_id)
-			.await
-			.unwrap_or_else(|_| vec![root_pdu.sender().to_owned()]);
-
-		users.push(event.sender().to_owned());
+		let sender = event.sender();
+		let participants = self.db.threadid_userids.get(&root_id).await;
+		let participated = participants
+			.as_ref()
+			.is_ok_and(|participants| lists_participant(participants, sender));
 
 		let mut txn = self.services.db.txn();
 
-		self.update_participants(&mut txn, &root_id, &users);
+		if !participated {
+			let stored: Result<Vec<OwnedUserId>> = participants.deserialized();
+			let users = stored
+				.as_deref()
+				.map(|users| Left(users.iter().map(AsRef::as_ref)))
+				.unwrap_or_else(|_| Right(once(root_pdu.sender())))
+				.chain(once(sender));
+
+			self.update_participants(&mut txn, &root_id, users);
+		}
 
 		let count = pdu_id.pdu_count();
 
@@ -422,22 +434,24 @@ impl Service {
 			.threadid_userids
 			.get(root_id)
 			.await
-			.is_ok_and(|participants| {
-				participants
-					.split(|&byte| byte == 0xFF)
-					.any(|user| user == user_id.as_bytes())
-			})
+			.is_ok_and(|participants| lists_participant(&participants, user_id))
 	}
 
-	pub(super) fn update_participants(
+	/// Stages a thread's participant list, replacing the stored row.
+	///
+	/// Each user is written once, in the order first seen.
+	pub(super) fn update_participants<'a, I>(
 		&self,
 		txn: &mut Txn,
 		root_id: &RawPduId,
-		participants: &[OwnedUserId],
-	) {
+		participants: I,
+	) where
+		I: IntoIterator<Item = &'a UserId>,
+	{
 		let users = participants
-			.iter()
-			.map(|user| user.as_bytes())
+			.into_iter()
+			.unique()
+			.map(UserId::as_bytes)
 			.collect::<Vec<_>>()
 			.join(&[0xFF][..]);
 
@@ -563,6 +577,16 @@ impl Service {
 			})
 			.await
 	}
+}
+
+/// Reports whether a stored participant row names `user_id`.
+///
+/// The row separates user IDs with `0xFF` and is compared as bytes, so it
+/// needs no decoding.
+fn lists_participant(participants: &[u8], user_id: &UserId) -> bool {
+	participants
+		.split(|&byte| byte == 0xFF)
+		.any(|user| user == user_id.as_bytes())
 }
 
 #[implement(Service)]

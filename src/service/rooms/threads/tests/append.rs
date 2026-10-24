@@ -54,6 +54,82 @@ async fn participant_notification_observes_activity_and_bundle() -> Result {
 	Ok(())
 }
 
+#[tokio::test]
+async fn participants_are_recorded_once() -> Result {
+	let Some(fixture) = fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+
+	let services = &fixture.services;
+	let room_id = room_id!("!thread:localhost");
+	let root_sender = user_id!("@root:localhost");
+	let reply_sender = user_id!("@reply:localhost");
+	let lone_sender = user_id!("@lone:localhost");
+	let root = pdu(room_id, event_id!("$root:localhost"), root_sender);
+	let first = pdu(room_id, event_id!("$first:localhost"), reply_sender);
+	let again = pdu(room_id, event_id!("$again:localhost"), reply_sender);
+	let own = pdu(room_id, event_id!("$own:localhost"), root_sender);
+	let lone = pdu(room_id, event_id!("$lone:localhost"), lone_sender);
+	let lone_own = pdu(room_id, event_id!("$lone_own:localhost"), lone_sender);
+	let root_id = pdu_id(1);
+	let lone_id = pdu_id(5);
+	let _guard = services.state.mutex.lock(room_id).await;
+
+	store(services, &root_id, &root);
+	store(services, &lone_id, &lone);
+
+	services
+		.threads
+		.add_to_thread(&root.event_id, pdu_id(2), &first)
+		.await?;
+
+	let waker = Waker::noop();
+	let mut watcher = pin!(services.db["threadid_userids"].watch_raw_prefix_once(root_id)); // Future::poll requires mutable access.
+
+	assert!(poll_once(watcher.as_mut(), waker).is_pending());
+
+	// Replies from recorded senders leave the participant row unwritten.
+	for (count, reply) in [(3, &again), (4, &own)] {
+		services
+			.threads
+			.add_to_thread(&root.event_id, pdu_id(count), reply)
+			.await?;
+	}
+
+	assert!(poll_once(watcher.as_mut(), waker).is_pending());
+
+	let latest = services.db["threadrootid_latestcount"]
+		.get(&root_id)
+		.await?;
+
+	assert_eq!(&*latest, &pdu_id(4).pdu_count().to_be_bytes());
+
+	let thread = &stored(services, &root_id).await?["unsigned"]["m.relations"]["m.thread"];
+
+	assert_eq!(thread["count"], 3);
+
+	services
+		.threads
+		.add_to_thread(&lone.event_id, pdu_id(6), &lone_own)
+		.await?;
+
+	let participants = services
+		.threads
+		.get_participants(&root_id)
+		.await?;
+
+	assert_eq!(participants, [root.sender, first.sender]);
+
+	let participants = services
+		.threads
+		.get_participants(&lone_id)
+		.await?;
+
+	assert_eq!(participants, [lone.sender]);
+
+	Ok(())
+}
+
 fn pdu(room_id: &RoomId, event_id: &EventId, sender: &UserId) -> PduEvent {
 	serde_json::from_value(json!({
 		"type": "m.room.message",
