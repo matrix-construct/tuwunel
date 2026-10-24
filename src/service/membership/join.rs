@@ -635,7 +635,7 @@ async fn ingest_send_join_state(
 		})
 		.inspect_err(|e| debug_error!("Invalid send_join state event: {e:?}"))
 		.ready_filter_map(Result::ok)
-		.ready_filter_map(|(event_id, value)| {
+		.ready_filter_map(|(event_id, value, _)| {
 			Pdu::from_object_federation(room_id, &event_id, value, room_version_rules)
 				.inspect_err(|error| {
 					debug_warn!(?event_id, %error, "Invalid PDU in the join response.");
@@ -686,7 +686,7 @@ async fn ingest_send_join_auth_chain(
 		})
 		.inspect_err(|e| debug_error!("Invalid send_join auth_chain event: {e:?}"))
 		.ready_filter_map(Result::ok)
-		.ready_filter_map(|(event_id, value)| {
+		.ready_filter_map(|(event_id, value, _)| {
 			Pdu::from_object_federation(room_id, &event_id, value, room_version_rules)
 				.inspect_err(|error| {
 					debug_warn!(?event_id, %error, "Invalid PDU in the join response.");
@@ -1195,3 +1195,6 @@ pub(super) async fn get_servers_for_room(
 	debug_info!(?servers);
 	Ok(servers)
 }
+
+#[cfg(test)]
+mod tests;

@@ -102,7 +102,7 @@ pub(super) async fn force_set_room_state_from_server(
 		.iter()
 		.stream()
 		.wide_filter_map(async |pdu| {
-			let (event_id, value) = validate(pdu).await.ok()?;
+			let (event_id, value, _) = validate(pdu).await.ok()?;
 
 			ingest_state_pdu(self.services, &room_id, &event_id, value, &rules)
 				.await
@@ -118,7 +118,7 @@ pub(super) async fn force_set_room_state_from_server(
 		.stream()
 		.broad_then(|pdu| validate(pdu))
 		.ready_filter_map(Result::ok)
-		.ready_for_each(|(event_id, value)| {
+		.ready_for_each(|(event_id, value, _)| {
 			let value = from_incoming_federation(&room_id, &event_id, value, &rules);
 
 			self.services

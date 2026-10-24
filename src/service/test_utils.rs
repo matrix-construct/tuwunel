@@ -9,9 +9,12 @@ use std::{
 };
 
 use futures::future::ready;
-use ruma::{CanonicalJsonObject, DeviceId, EventId, RoomId, UserId, events::StateEventType};
+use ruma::{
+	CanonicalJsonObject, DeviceId, EventId, OwnedEventId, RoomId, RoomVersionId, UInt, UserId,
+	events::StateEventType,
+};
 use serde::Serialize;
-use serde_json::{Value as JsonValue, from_value, json};
+use serde_json::{Value as JsonValue, from_value, json, to_value};
 use tokio::{process::Command, runtime::Handle};
 use tracing::{
 	Level,
@@ -30,7 +33,8 @@ use tuwunel_core::{
 	metrics::Metrics,
 	utils::random_string,
 };
-use tuwunel_matrix::{PduCount, PduId, RawPduId};
+use tuwunel_database::Json;
+use tuwunel_matrix::{PduCount, PduId, RawPduId, event::gen_event_id};
 
 use crate::{Services, rooms::state_compressor::CompressedStateEvent, users};
 
@@ -56,6 +60,33 @@ pub(crate) struct Warnings {
 
 const CHILD_TEST_ENV: &str = "SERVICE_TEST_CHILD";
 const CHILD_DATABASE_ENV: &str = "SERVICE_TEST_DATABASE";
+
+/// Builds a [`fixture`] with this server's verify key stored as a fetched key
+/// would be.
+///
+/// Verification limited to stored keys then accepts this server's signatures,
+/// as it does once a key fetch has stored the key.
+pub(crate) async fn keyed_fixture(config: Figment) -> Result<Option<Fixture>> {
+	Ok(fixture(config)
+		.await?
+		.inspect(|fixture| store_own_verify_key(&fixture.services)))
+}
+
+fn store_own_verify_key(services: &Services) {
+	let server_name = services.globals.server_name();
+	let (key_id, verify_key) = services.server_keys.active_verify_key();
+
+	let keys = json!({
+		"server_name": server_name,
+		"verify_keys": { key_id.as_str(): { "key": verify_key.key } },
+		"old_verify_keys": {},
+		"signatures": {},
+		// The farthest future that canonical JSON's integer range can carry.
+		"valid_until_ts": UInt::MAX,
+	});
+
+	services.db["server_signingkeys"].raw_put(server_name, Json(&keys));
+}
 
 /// Runs the calling test in a child process and builds its services there.
 ///
@@ -162,9 +193,56 @@ where
 /// Sets the state key of an event built by [`pdu_json`].
 ///
 /// Panics if the event is neither a JSON object nor null.
-pub(crate) fn with_state_key(mut pdu: JsonValue, state_key: &str) -> JsonValue {
-	pdu["state_key"] = json!(state_key);
+pub(crate) fn with_state_key(pdu: JsonValue, state_key: &str) -> JsonValue {
+	with_field(pdu, "state_key", json!(state_key))
+}
+
+/// Sets one top-level field of a JSON event.
+///
+/// A signed event keeps its hashes and signatures, so it no longer verifies
+/// unless redaction strips the field. Panics if the event is neither a JSON
+/// object nor null.
+pub(crate) fn with_field(mut pdu: JsonValue, key: &str, value: JsonValue) -> JsonValue {
+	pdu[key] = value;
 	pdu
+}
+
+/// Builds a v11 state event signed by this server.
+///
+/// The event carries a real content hash and signature, so it verifies with the
+/// key [`keyed_fixture`] stores. It is returned in its wire form with its
+/// derived ID.
+pub(crate) fn signed_state(
+	services: &Services,
+	room_id: &RoomId,
+	kind: &str,
+	state_key: &str,
+	content: &JsonValue,
+) -> Result<(OwnedEventId, JsonValue)> {
+	let version = RoomVersionId::V11;
+	let sender = format!("@bob:{}", services.globals.server_name());
+	let event = json!({
+		"room_id": room_id, "sender": sender, "type": kind, "state_key": state_key,
+		"content": content, "origin_server_ts": 1, "depth": 1, "prev_events": [],
+		"auth_events": [],
+	});
+
+	let event = sign_event(services, &version, from_value(event)?)?;
+	let event_id = gen_event_id(&event, &version)?;
+
+	Ok((event_id, to_value(event)?))
+}
+
+fn sign_event(
+	services: &Services,
+	version: &RoomVersionId,
+	mut event: CanonicalJsonObject,
+) -> Result<CanonicalJsonObject> {
+	services
+		.server_keys
+		.hash_and_sign_event(&mut event, version)?;
+
+	Ok(event)
 }
 
 /// Stores a JSON event as an outlier and compresses its state entry.
