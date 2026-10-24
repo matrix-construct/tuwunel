@@ -5,7 +5,7 @@
 //! refreshes room counts, server participation, and appservice decisions after
 //! the per-user transition lands.
 
-use std::collections::HashSet;
+use std::{collections::HashSet, sync::Arc};
 
 use futures::{
 	FutureExt, StreamExt,
@@ -33,14 +33,14 @@ use tuwunel_core::{
 	},
 	warn,
 };
-use tuwunel_database::{Json, Txn, keyval::ValBuf, serialize_key, serialize_val};
+use tuwunel_database::{Json, Map, Txn, keyval::ValBuf, serialize_key, serialize_val};
 use tuwunel_matrix::PduCount;
 
 /// Optional stripped room state attached to invite and knock transitions.
 ///
 /// `None` means the caller supplied no state, while `Some` can contain an empty
-/// event vector. Invite handling preserves an existing nonempty row when no new
-/// state is supplied.
+/// event vector. Invite and knock handling preserve an existing nonempty row
+/// when no new state is supplied.
 pub type StrippedRoomState = Option<Vec<Raw<AnyStrippedStateEvent>>>;
 
 /// Parameters for one membership cache transition.
@@ -71,7 +71,8 @@ pub struct MembershipUpdate<'a> {
 	/// Stripped room state associated with an invite or knock.
 	///
 	/// Other membership transitions leave this value unused. An absent or empty
-	/// value preserves an invite's stored state rather than clearing it.
+	/// value preserves an invite's or knock's stored state rather than clearing
+	/// it.
 	pub last_state: StrippedRoomState,
 
 	/// Servers supplied as routing hints for an invite.
@@ -152,7 +153,8 @@ pub async fn update_membership(
 			}
 		},
 		| MembershipState::Knock => {
-			self.mark_as_knocked(user_id, room_id, count, last_state);
+			self.mark_as_knocked(user_id, room_id, count, last_state)
+				.await?;
 		},
 		| _ => {},
 	}
@@ -298,26 +300,28 @@ pub(crate) fn mark_as_left(&self, user_id: &UserId, room_id: &RoomId, count: Pdu
 
 /// Writes the paired indexes for a current knock transition.
 ///
-/// Missing stripped state is stored as an empty array, and join, invite, and
-/// leave rows are removed in the same transaction. This low-level helper skips
-/// aggregate rebuilding performed by [`super::Service::update_membership`].
+/// Missing or empty stripped state preserves an existing nonempty knock row,
+/// while a new state replaces it. Join, invite, and leave rows are removed in
+/// the same transaction, and aggregate rebuilding is left to
+/// [`super::Service::update_membership`].
 #[implement(super::Service)]
-#[tracing::instrument(skip(self), level = "debug")]
-pub(crate) fn mark_as_knocked(
+#[tracing::instrument(skip(self, knocked_state), level = "debug")]
+pub(crate) async fn mark_as_knocked(
 	&self,
 	user_id: &UserId,
 	room_id: &RoomId,
 	count: PduCount,
 	knocked_state: StrippedRoomState,
-) {
+) -> Result {
 	let userroom_id = (user_id, room_id);
 	let userroom_id = serialize_key(userroom_id).expect("failed to serialize userroom_id");
 
 	let roomuser_id = (room_id, user_id);
 	let roomuser_id = serialize_key(roomuser_id).expect("failed to serialize roomuser_id");
 
-	let knocked_state = serialize_val(Json(knocked_state.unwrap_or_default()))
-		.expect("failed to serialize knocked state");
+	let knocked_state = self
+		.stripped_state_row(&self.db.userroomid_knockedstate, &userroom_id, knocked_state)
+		.await?;
 
 	let count = count.into_unsigned().to_be_bytes();
 	let mut txn = self.services.db.txn();
@@ -331,6 +335,40 @@ pub(crate) fn mark_as_knocked(
 	txn.del_raw(&self.db.userroomid_leftstate, &userroom_id);
 	txn.del_raw(&self.db.roomuserid_leftcount, &roomuser_id);
 	txn.execute();
+
+	Ok(())
+}
+
+/// The stripped state a membership row stores.
+///
+/// A replay carrying no stripped state must not blank a row that has some, so
+/// missing or empty state keeps the row's stored value. A probe that fails to
+/// read the row is an error, not an absence.
+#[implement(super::Service)]
+async fn stripped_state_row(
+	&self,
+	states: &Arc<Map>,
+	userroom_id: &[u8],
+	last_state: StrippedRoomState,
+) -> Result<ValBuf> {
+	let last_state = last_state.filter(is_not_empty!());
+	let stored = last_state
+		.is_none()
+		.then_async(|| states.get(userroom_id))
+		.await
+		.transpose()
+		.optional()?
+		.flatten();
+
+	let state = stored
+		.as_deref()
+		.map(ValBuf::from_slice)
+		.unwrap_or_else(|| {
+			serialize_val(Json(last_state.unwrap_or_default()))
+				.expect("failed to serialize stripped state")
+		});
+
+	Ok(state)
 }
 
 /// Forgets a user's retained leave state for a room.
@@ -390,24 +428,10 @@ pub(crate) async fn mark_as_invited(
 	let roomuser_id = (room_id, user_id);
 	let roomuser_id = serialize_key(roomuser_id).expect("failed to serialize roomuser_id");
 
-	// A replay carrying no stripped state must not blank a row that has some, or
-	// the read side loses the sender it judges the invite by.
-	let last_state = last_state.filter(is_not_empty!());
-	let stored = last_state
-		.is_none()
-		.then_async(|| self.db.userroomid_invitestate.get(&userroom_id))
-		.await
-		.transpose()
-		.optional()?
-		.flatten();
-
-	let invite_state = stored.as_deref().map_or_else(
-		|| {
-			serialize_val(Json(last_state.unwrap_or_default()))
-				.expect("failed to serialize invite state")
-		},
-		ValBuf::from_slice,
-	);
+	// A blanked row would lose the sender the read side judges the invite by.
+	let invite_state = self
+		.stripped_state_row(&self.db.userroomid_invitestate, &userroom_id, last_state)
+		.await?;
 
 	let count = count.into_unsigned().to_be_bytes();
 	let mut txn = self.services.db.txn();

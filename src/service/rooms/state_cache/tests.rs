@@ -1,9 +1,17 @@
 use futures::StreamExt;
-use ruma::{OwnedRoomId, room_id, user_id};
-use serde_json::json;
+use ruma::{
+	OwnedRoomId,
+	events::room::member::{MembershipState, RoomMemberEventContent},
+	room_id,
+	serde::Raw,
+	user_id,
+};
+use serde_json::{Value as JsonValue, json};
 use tuwunel_core::{Result, config::Figment};
 use tuwunel_database::Json;
+use tuwunel_matrix::PduCount;
 
+use super::MembershipUpdate;
 use crate::test_utils::{fixture, json_events};
 
 /// A user's room lists hold only the rows keyed by that exact user ID, not
@@ -44,6 +52,56 @@ async fn room_lists_stop_at_the_user_id_boundary() -> Result {
 
 		assert_eq!(rooms, [own.to_owned()]);
 	}
+
+	Ok(())
+}
+
+/// A replayed knock carrying no stripped state keeps the summary stored with
+/// the knock.
+///
+/// A remote join by another local user replays the knock with no stripped
+/// state. A replay carrying an empty list keeps the stored summary too.
+#[tokio::test]
+async fn a_replayed_knock_keeps_its_stored_summary() -> Result {
+	let Some(fixture) = fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+
+	let state_cache = &fixture.services.state_cache;
+	let alice = user_id!("@alice:localhost");
+	let room_id = room_id!("!knock:example.test");
+	let name_event = json!({
+		"type": "m.room.name", "state_key": "", "sender": "@bob:example.test",
+		"content": {"name": "Knock"},
+	});
+
+	let summary = vec![Raw::new(&name_event)?.cast_unchecked()];
+	let knock = |count, last_state| MembershipUpdate {
+		room_id,
+		user_id: alice,
+		membership_event: RoomMemberEventContent::new(MembershipState::Knock),
+		sender: alice,
+		last_state,
+		invite_via: None,
+		update_joined_count: false,
+		count: PduCount::Normal(count),
+	};
+
+	state_cache
+		.update_membership(knock(1, Some(summary)))
+		.await?;
+
+	for replay in [knock(2, None), knock(3, Some(Vec::new()))] {
+		state_cache.update_membership(replay).await?;
+	}
+
+	let stored = state_cache.knock_state(alice, room_id).await?;
+
+	assert_eq!(stored.len(), 1, "the stored summary survives the replays");
+
+	let stored_event: JsonValue = stored[0].deserialize_as_unchecked()?;
+
+	assert_eq!(stored_event, name_event);
 
 	Ok(())
 }
