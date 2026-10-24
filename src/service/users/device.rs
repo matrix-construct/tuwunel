@@ -138,8 +138,9 @@ pub(super) async fn lock_device(&self, user_id: &UserId, device_id: &DeviceId) -
 
 /// Removes a device from a user.
 ///
-/// Everything keyed by the device goes with it, its identity keys included,
-/// so a later session under the same ID starts with none.
+/// Everything keyed by the device goes with it except its sync connections,
+/// so a later session under the same ID starts with no keys, identity keys
+/// included, and resumes its sync position.
 #[implement(super::Service)]
 #[tracing::instrument(level = "debug", skip(self))]
 pub async fn remove_device(&self, user_id: &UserId, device_id: &DeviceId) {

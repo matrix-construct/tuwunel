@@ -34,7 +34,7 @@ use tuwunel_core::{
 use tuwunel_service::{
 	Services,
 	presence::Ping,
-	sync::{Connection, into_connection_key},
+	sync::{Connection, ConnectionKey, ConnectionVal, into_connection_key},
 };
 
 use self::{
@@ -124,7 +124,7 @@ pub(crate) async fn sync_events_v5_route(
 	let conn_val = services
 		.sync
 		.load_or_init_connection(&conn_key)
-		.await;
+		.await?;
 
 	let conn = conn_val.lock();
 	let ping = Ping {
@@ -152,7 +152,11 @@ pub(crate) async fn sync_events_v5_route(
 
 	if since == 0 {
 		*conn = Connection::default();
-		conn.store(&services.sync, &conn_key);
+		services
+			.sync
+			.store_connection(&conn_key, &conn_val, &conn)
+			.await?;
+
 		debug_warn!(?conn_key, "Client cleared cache and reloaded.");
 	}
 
@@ -240,10 +244,7 @@ pub(crate) async fn sync_events_v5_route(
 			response.extensions = extensions.into_response(&response.rooms);
 
 			if !is_empty_response(&mut response, woken) {
-				response.pos = conn.next_batch.to_string().into();
-				trace!(conn.globalsince, conn.next_batch, "response {response:?}");
-				conn.store(&services.sync, &conn_key);
-				return Ok(response);
+				return respond(services, (&conn_key, &conn_val), &conn, response).await;
 			}
 		}
 
@@ -255,10 +256,7 @@ pub(crate) async fn sync_events_v5_route(
 		};
 
 		if timeout == 0 || services.server.is_stopping() || waiter().boxed().await {
-			response.pos = conn.next_batch.to_string().into();
-			trace!(conn.globalsince, conn.next_batch, "empty response {response:?}");
-			conn.store(&services.sync, &conn_key);
-			return Ok(response);
+			return respond(services, (&conn_key, &conn_val), &conn, response).await;
 		}
 
 		debug!(
@@ -338,4 +336,30 @@ fn is_empty_response(response: &mut Response, woken: bool) -> bool {
 		.device_unused_fallback_key_types = fallback_key_types;
 
 	empty
+}
+
+/// Positions a response at the connection's next batch and stores the
+/// connection.
+///
+/// The connection is stored as this response leaves it, so the client's next
+/// request resumes from the position the response carries.
+async fn respond(
+	services: &Services,
+	(key, loaded): (&ConnectionKey, &ConnectionVal),
+	conn: &Connection,
+	response: Response,
+) -> Result<Response> {
+	let response = Response {
+		pos: conn.next_batch.to_string().into(),
+		..response
+	};
+
+	trace!(conn.globalsince, conn.next_batch, ?response, "Responding");
+
+	services
+		.sync
+		.store_connection(key, loaded, conn)
+		.await?;
+
+	Ok(response)
 }

@@ -16,8 +16,12 @@ use ruma::{
 	room_id,
 };
 use serde::{Deserialize, Serialize};
+use tuwunel_core::Err;
 
-use super::{Connection, Lists, RequiredState, Room, RoomUpdate, Subscriptions, UnreadState};
+use super::{
+	Connection, Lists, RequiredState, Room, RoomUpdate, Subscriptions, UnreadState,
+	confirmed_removed,
+};
 
 const LIST_ID: &str = "main";
 
@@ -885,6 +889,15 @@ fn room_cbor_leaves_out_the_checkpoint() {
 	assert_eq!(bytes, to_vec(&without_checkpoint).expect("room must encode"));
 	assert_eq!(decoded.roomsince, 9);
 	assert_eq!(decoded.config_hash, 23);
+}
+
+#[test]
+fn device_removal_needs_a_confirmed_absence() {
+	assert!(matches!(confirmed_removed(None), Ok(false)));
+	assert!(matches!(confirmed_removed(Some(Ok(true))), Ok(false)));
+	assert!(matches!(confirmed_removed(Some(Ok(false))), Ok(true)));
+	confirmed_removed(Some(Err!(Database("unreadable"))))
+		.expect_err("a failed lookup must stay an error");
 }
 
 fn request_with_list(list: List) -> Request {

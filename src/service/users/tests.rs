@@ -11,10 +11,13 @@ use ruma::{
 use serde_json::{Value, from_value, json};
 use tokio::sync::Notify;
 use tuwunel_core::{Result, config::Figment, utils::to_canonical_object};
-use tuwunel_database::{Deserialized, Json, serialize_key};
+use tuwunel_database::{Cbor, Deserialized, Json, serialize_key};
 
 use super::{PASSWORD_SENTINEL, Service, device::DeviceLock};
-use crate::test_utils::{fixture, released_after, released_by};
+use crate::{
+	sync::{Connection, into_connection_key},
+	test_utils::{fixture, released_after, released_by},
+};
 
 const OLD_PASSWORD: &str = "old password";
 const NEW_PASSWORD: &str = "new password";
@@ -374,6 +377,49 @@ async fn remote_master_key_keeps_our_signatures() -> Result {
 			.is_cross_signing_key_id(user_id, &root_key)
 			.await?
 	);
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn device_removal_keeps_its_connections() -> Result {
+	let Some(fixture) = fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+
+	let services = &fixture.services;
+	let (users, sync) = (&services.users, &services.sync);
+	let user_id = user_id!("@conn:localhost");
+	let device_id = device_id!("D");
+	let key = into_connection_key(user_id, Some(device_id), Some("room-list"));
+	let next_batch = 42;
+
+	create_devices(users, user_id, &[device_id]).await?;
+
+	let conn = sync.load_or_init_connection(&key).await?;
+
+	conn.lock().await.next_batch = next_batch;
+	sync.store_connection(&key, &conn, &*conn.lock().await)
+		.await?;
+
+	users.remove_device(user_id, device_id).await;
+
+	assert!(sync.is_connection_stored(&key).await);
+
+	users
+		.create_device(user_id, Some(device_id), (None, None), None, None, None)
+		.await?;
+
+	let resumed = sync.load_or_init_connection(&key).await?;
+
+	assert_eq!(resumed.lock().await.next_batch, next_batch);
+
+	let Cbor(stored): Cbor<Connection> = services.db["userdeviceconnid_conn"]
+		.qry(&key)
+		.await
+		.deserialized()?;
+
+	assert_eq!(stored.next_batch, next_batch);
 
 	Ok(())
 }

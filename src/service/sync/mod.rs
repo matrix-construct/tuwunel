@@ -9,7 +9,7 @@ use std::{
 	sync::Arc,
 };
 
-use futures::{FutureExt, Stream};
+use futures::Stream;
 use ruma::{
 	DeviceId, OwnedDeviceId, OwnedRoomId, OwnedUserId, RoomId, UserId,
 	api::client::sync::sync_events::v5::{
@@ -21,9 +21,11 @@ use ruma::{
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex as TokioMutex;
 use tuwunel_core::{
-	Result, at, debug, err, implement, is_equal_to, smallvec::SmallVec, utils::stream::TryIgnore,
+	Result, at, debug, err, implement, is_equal_to,
+	smallvec::SmallVec,
+	utils::{OptionExt, stream::TryIgnore},
 };
-use tuwunel_database::{Cbor, Deserialized, Map};
+use tuwunel_database::{Cbor, Deserialized, Map, serialize_val};
 
 use crate::rooms::short::ShortStateHash;
 
@@ -240,29 +242,60 @@ pub async fn drop_connection(&self, key: &ConnectionKey) {
 	cache.remove(key);
 }
 
+/// Returns the connection for a key, from the cache or else from storage.
+///
+/// An uncached connection for a removed device is returned fresh and left
+/// uncached, and a device that cannot be read fails the load. Otherwise the
+/// stored state, or a default when none is stored, is cached.
 #[implement(Service)]
 #[tracing::instrument(level = "debug", skip(self))]
-pub async fn load_or_init_connection(&self, key: &ConnectionKey) -> ConnectionVal {
+pub async fn load_or_init_connection(&self, key: &ConnectionKey) -> Result<ConnectionVal> {
 	let mut cache = self.connections.lock().await;
 
-	match cache.entry(key.clone()) {
-		| Entry::Occupied(val) => val.get().clone(),
-		| Entry::Vacant(val) => {
-			let conn = self
-				.db
-				.userdeviceconnid_conn
-				.qry(key)
-				.boxed()
-				.await
-				.deserialized::<Cbor<_>>()
-				.map(at!(0))
-				.map(TokioMutex::new)
-				.map(Arc::new)
-				.unwrap_or_default();
-
-			val.insert(conn).clone()
-		},
+	if let Some(conn) = cache.get(key) {
+		return Ok(conn.clone());
 	}
+
+	// Left uncached, a removed device's connection can never be stored.
+	if self.device_removed(key).await? {
+		return Ok(ConnectionVal::default());
+	}
+
+	let conn: ConnectionVal = self
+		.db
+		.userdeviceconnid_conn
+		.qry(key)
+		.await
+		.deserialized()
+		.map(|Cbor(conn)| conn)
+		.map(TokioMutex::new)
+		.map(Arc::new)
+		.unwrap_or_default();
+
+	cache.insert(key.clone(), conn.clone());
+
+	Ok(conn)
+}
+
+#[implement(Service)]
+async fn device_removed(&self, (user_id, device_id, _): &ConnectionKey) -> Result<bool> {
+	let exists = device_id
+		.as_deref()
+		.map_async(|device_id| {
+			self.services
+				.users
+				.try_device_exists(user_id, device_id)
+		})
+		.await;
+
+	confirmed_removed(exists)
+}
+
+/// Reads a device lookup as a removal only when it found no device.
+///
+/// No device to look up removes nothing, and a failed lookup stays an error.
+fn confirmed_removed(exists: Option<Result<bool>>) -> Result<bool> {
+	exists.transpose().map(is_equal_to!(Some(false)))
 }
 
 #[implement(Service)]
@@ -283,6 +316,42 @@ pub async fn load_connection(&self, key: &ConnectionKey) -> Result<ConnectionVal
 			.map(Arc::new)
 			.map(|conn| val.insert(conn).clone()),
 	}
+}
+
+/// Stores a connection's state while the cache still holds that connection.
+///
+/// A connection dropped, or replaced by a newer load, while a request held it
+/// is not stored again. The check and the write hold the one server-wide cache
+/// lock, so no drop falls between them and every store briefly waits on it.
+#[implement(Service)]
+#[tracing::instrument(level = "debug", skip(self, loaded, conn))]
+pub async fn store_connection(
+	&self,
+	key: &ConnectionKey,
+	loaded: &ConnectionVal,
+	conn: &Connection,
+) -> Result {
+	// Encoded before the lock, so the wait on it stays short.
+	let state = serialize_val(Cbor(conn))?;
+	let cache = self.connections.lock().await;
+	let cached = cache
+		.get(key)
+		.is_some_and(|current| Arc::ptr_eq(current, loaded));
+
+	if !cached {
+		debug!(?key, "Not persisting a dropped connection");
+		return Ok(());
+	}
+
+	self.db.userdeviceconnid_conn.put_raw(key, state);
+
+	debug!(
+		since = %conn.globalsince,
+		next_batch = %conn.next_batch,
+		"Persisted connection state"
+	);
+
+	Ok(())
 }
 
 #[implement(Service)]
@@ -337,21 +406,6 @@ where
 	C: Into<ConnectionId>,
 {
 	(user_id.into(), device_id.map(Into::into), conn_id.map(Into::into))
-}
-
-#[implement(Connection)]
-#[tracing::instrument(level = "debug", skip(self, service))]
-pub fn store(&self, service: &Service, key: &ConnectionKey) {
-	service
-		.db
-		.userdeviceconnid_conn
-		.put(key, Cbor(self));
-
-	debug!(
-		since = %self.globalsince,
-		next_batch = %self.next_batch,
-		"Persisted connection state"
-	);
 }
 
 /// Rewind each room past a retried position to where that position left it.

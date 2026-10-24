@@ -23,6 +23,9 @@ pub(crate) enum SyncCommand {
 	},
 
 	/// Drop connections for a user, device, or all.
+	///
+	/// Each affected client starts over with an initial sync, even one with a
+	/// request in flight.
 	DropConnections {
 		user_id: Option<OwnedUserId>,
 		device_id: Option<OwnedDeviceId>,
