@@ -5394,7 +5394,6 @@ dependencies = [
  "serde_urlencoded",
  "similar 3.2.0",
  "tokio",
- "tokio-metrics",
  "tracing",
  "tracing-flame",
  "tracing-opentelemetry",
