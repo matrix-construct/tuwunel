@@ -29,7 +29,7 @@ use ruma::{
 };
 use serde::de::DeserializeOwned;
 use tuwunel_core::{
-	Result, debug_warn, implement, trace,
+	Result, at, debug_warn, implement, trace,
 	utils::{
 		self, BoolExt,
 		result::NotFound,
@@ -79,7 +79,8 @@ struct Data {
 }
 
 type AppServiceInRoomCache = RwLock<HashMap<OwnedRoomId, HashMap<String, bool>>>;
-type StrippedStateEventItem = (OwnedRoomId, Vec<Raw<AnyStrippedStateEvent>>);
+type StrippedState = Vec<Raw<AnyStrippedStateEvent>>;
+type StrippedStateEventItem = (OwnedRoomId, StrippedState);
 type SyncStateEventItem = (OwnedRoomId, Vec<Raw<AnySyncStateEvent>>);
 
 impl crate::Service for Service {
@@ -778,8 +779,9 @@ pub fn rooms_invited_state<'a>(
 
 /// Streams stored stripped state for a user's current knocks.
 ///
-/// Each item owns its room identifier and decoded state vector. Storage,
-/// key-decoding, and state-deserialization failures are skipped.
+/// Each item owns its room identifier and decoded state vector, read as
+/// [`Self::knock_state`] reads it. Storage, key-decoding, and
+/// state-deserialization failures are skipped.
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "trace")]
 pub fn rooms_knocked_state<'a>(
@@ -797,6 +799,7 @@ pub fn rooms_knocked_state<'a>(
 		.map(|((_, room_id), state): KeyVal<'_>| (room_id.to_owned(), state))
 		.map(|(room_id, state)| Ok((room_id, state.deserialize_as_unchecked()?)))
 		.ignore_err()
+		.map(move |(room_id, state)| (room_id, without_superseded_membership(state, user_id)))
 }
 
 /// Streams stored state for rooms a user has left but not forgotten.
@@ -868,7 +871,8 @@ pub async fn has_invite_state(&self, user_id: &UserId, room_id: &RoomId) -> Resu
 
 /// Returns the stripped state stored for a user's current knock.
 ///
-/// The value is decoded as an array of stripped state events. Missing rows,
+/// The value is decoded as an array of stripped state events, keeping only the
+/// last of the user's own member events, which is the knock. Missing rows,
 /// storage failures, and malformed state return an error.
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "trace")]
@@ -878,6 +882,7 @@ pub async fn knock_state(
 	room_id: &RoomId,
 ) -> Result<Vec<Raw<AnyStrippedStateEvent>>> {
 	let key = (user_id, room_id);
+
 	self.db
 		.userroomid_knockedstate
 		.qry(&key)
@@ -886,6 +891,28 @@ pub async fn knock_state(
 		.and_then(|val: Raw<Vec<AnyStrippedStateEvent>>| {
 			val.deserialize_as_unchecked().map_err(Into::into)
 		})
+		.map(|state| without_superseded_membership(state, user_id))
+}
+
+/// Drops all but the last of the user's member events from a knock summary.
+///
+/// A summary stored by an earlier version can carry the user's superseded
+/// membership ahead of the knock, and a client reads the first one it finds.
+fn without_superseded_membership(state: StrippedState, user_id: &UserId) -> StrippedState {
+	let own_member = |event: &Raw<AnyStrippedStateEvent>| {
+		let field = |key| event.get_field::<&str>(key).ok().flatten();
+
+		field("type") == Some("m.room.member") && field("state_key") == Some(user_id.as_str())
+	};
+
+	let last = state.iter().rposition(own_member);
+
+	state
+		.into_iter()
+		.enumerate()
+		.filter(|(i, event)| Some(*i) == last || !own_member(event))
+		.map(at!(1))
+		.collect()
 }
 
 /// Returns the cached state for a room a user has left.

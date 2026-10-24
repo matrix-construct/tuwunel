@@ -11,7 +11,8 @@ use std::{
 use futures::future::ready;
 use ruma::{
 	CanonicalJsonObject, DeviceId, EventId, OwnedEventId, RoomId, RoomVersionId, UInt, UserId,
-	events::StateEventType,
+	events::{AnyStrippedStateEvent, StateEventType},
+	serde::Raw,
 };
 use serde::Serialize;
 use serde_json::{Value as JsonValue, from_value, json, to_value};
@@ -243,6 +244,21 @@ fn sign_event(
 		.hash_and_sign_event(&mut event, version)?;
 
 	Ok(event)
+}
+
+/// Decodes stripped state events as JSON values, for comparing what a client is
+/// shown.
+///
+/// Fails on the first event that is not valid JSON.
+pub(crate) fn json_events(state: &[Raw<AnyStrippedStateEvent>]) -> Result<Vec<JsonValue>> {
+	state
+		.iter()
+		.map(|event| {
+			event
+				.deserialize_as_unchecked()
+				.map_err(Into::into)
+		})
+		.collect()
 }
 
 /// Stores a JSON event as an outlier and compresses its state entry.
