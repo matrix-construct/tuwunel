@@ -327,17 +327,20 @@ where
 
 	let exchangeable = token.exchangeable();
 	let kept = match token {
-		| RefreshToken::Unknown =>
-			return Err!(Request(Forbidden("Refresh token is unrecognized."))),
+		| RefreshToken::Unknown => {
+			return Err!(Request(Forbidden("Refresh token is unrecognized.")));
+		},
 
-		| RefreshToken::Current { .. } if !exchangeable =>
+		| RefreshToken::Current { .. } if !exchangeable => {
 			return self
 				.expire_refresh_token(&lock, user_id, device_id)
 				.map(Err)
-				.await,
+				.await;
+		},
 
-		| RefreshToken::Replayed { .. } if !exchangeable =>
-			return Err!(Request(Forbidden("Refresh token has already been used."))),
+		| RefreshToken::Replayed { .. } if !exchangeable => {
+			return Err!(Request(Forbidden("Refresh token has already been used.")));
+		},
 
 		| RefreshToken::Current { .. } => None,
 		| RefreshToken::Replayed { current, .. } => Some(current),

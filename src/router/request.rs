@@ -191,10 +191,12 @@ fn handle_result(
 	);
 
 	match status {
-		| status if status.is_redirection() =>
-			debug!(method = ?method, %uri, status = code, %reason, "request complete"),
-		| status if status.is_server_error() =>
-			error!(method = ?method, %uri, status = code, %reason, "request complete"),
+		| status if status.is_redirection() => {
+			debug!(method = ?method, %uri, status = code, %reason, "request complete")
+		},
+		| status if status.is_server_error() => {
+			error!(method = ?method, %uri, status = code, %reason, "request complete")
+		},
 		| status if status.is_client_error() => {
 			debug_error!(method = ?method, %uri, status = code, %reason, "request complete");
 		},

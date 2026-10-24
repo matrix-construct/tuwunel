@@ -24,8 +24,9 @@ impl Display for Elapsed {
 
 		match fraction {
 			| 0 => write!(formatter, "{whole}{unit}"),
-			| fraction if fraction % 10 == 0 =>
-				write!(formatter, "{whole}.{}{unit}", fraction / 10),
+			| fraction if fraction % 10 == 0 => {
+				write!(formatter, "{whole}.{}{unit}", fraction / 10)
+			},
 			| _ => write!(formatter, "{whole}.{fraction:02}{unit}"),
 		}
 	}

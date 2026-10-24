@@ -641,7 +641,9 @@ fn config_can_be_selected_solely_through_the_path_environment() {
 			command.env_remove(key);
 			command
 		})
-		.arg("config::regenerate::tests::config_can_be_selected_solely_through_the_path_environment")
+		.arg(
+			"config::regenerate::tests::config_can_be_selected_solely_through_the_path_environment",
+		)
 		.arg(exact)
 		.env("TUWUNEL_CONFIG", &input)
 		.env("TUWUNEL_PORT", "6555")

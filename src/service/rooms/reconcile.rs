@@ -42,12 +42,14 @@ pub mod api {
 	};
 
 	pub mod version {
-		use super::*;
+		use ruma::api::auth_scheme::NoAuthentication;
+
+		use super::{BTreeMap, metadata, request, response};
 		metadata! { method: GET, rate_limited: false, authentication: NoAuthentication,
 		path: "/_matrix/federation/v1/version", }
 		#[request]
 		#[derive(Copy)]
-		pub struct Request {}
+		pub struct Request;
 		#[response]
 		pub struct Response {
 			pub server: Option<ruma::api::federation::discovery::get_server_version::v1::Server>,
@@ -57,7 +59,9 @@ pub mod api {
 	}
 
 	pub mod digest {
-		use super::*;
+		use ruma::api::federation::authentication::ServerSignatures;
+
+		use super::{OwnedEventId, OwnedRoomId, metadata, request, response};
 		metadata! { method: GET, rate_limited: false, authentication: ServerSignatures,
 		history: { unstable => "/_matrix/federation/unstable/tk.nutra.msc0501/room_digest/{room_id}", } }
 		#[request]
@@ -78,7 +82,9 @@ pub mod api {
 		}
 	}
 	pub mod strata {
-		use super::*;
+		use ruma::api::federation::authentication::ServerSignatures;
+
+		use super::{OwnedEventId, OwnedRoomId, metadata, request, response};
 		metadata! { method: GET, rate_limited: false, authentication: ServerSignatures,
 		history: { unstable => "/_matrix/federation/unstable/tk.nutra.msc0501/room_digest/{room_id}/strata", } }
 		#[request]
@@ -100,7 +106,9 @@ pub mod api {
 		}
 	}
 	pub mod diff {
-		use super::*;
+		use ruma::api::federation::authentication::ServerSignatures;
+
+		use super::{OwnedEventId, OwnedRoomId, metadata, request, response};
 		#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 		pub struct SketchBucket {
 			pub depth: u64,
@@ -159,7 +167,7 @@ const MAX_SAMPLE_FAILURE_PERCENT: usize = 25;
 const DIGEST_FEATURE: &str = "tk.nutra.msc4521.digest.algebraic_v1.0.0";
 const BINDING_FEATURE: &str = "tk.nutra.msc4521.binding.event_id_v1";
 const STRATA_FEATURE: &str = "tk.nutra.msc0501.strata";
-const UNSUPPORTED_COOLDOWN: Duration = Duration::from_secs(24 * 3600);
+const UNSUPPORTED_COOLDOWN: Duration = Duration::from_hours(24);
 
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 	mutex
@@ -199,7 +207,7 @@ impl ServiceTrait for Reconcile {
 			tokio::select! {
 				() = self.server.until_shutdown() => return Ok(()),
 				_ = tick.tick() => {},
-				_ = self.wake.notified() => {},
+				() = self.wake.notified() => {},
 			}
 			if !self.server.config.allow_federation || !self.server.config.msc4521_enabled {
 				continue;
@@ -254,7 +262,7 @@ impl ServiceTrait for Reconcile {
 					if peer == ours {
 						continue;
 					}
-					let key = (room.clone(), peer.to_owned());
+					let key = (room.clone(), peer.clone());
 					if lock(&self.last_done)
 						.get(&key)
 						.is_some_and(|until| *until > Instant::now())
@@ -272,7 +280,12 @@ impl ServiceTrait for Reconcile {
 						lock(&self.last_done).insert(
 							key,
 							Instant::now()
-								+ if supported { PEER_COOLDOWN } else { UNSUPPORTED_COOLDOWN },
+								.checked_add(if supported {
+									PEER_COOLDOWN
+								} else {
+									UNSUPPORTED_COOLDOWN
+								})
+								.unwrap_or_else(Instant::now),
 						);
 					}
 				}
@@ -288,7 +301,12 @@ impl Reconcile {
 	pub fn room_activity(&self, room_id: &RoomId) {
 		let now = Instant::now();
 		lock(&self.last_done).retain(|(room, _), until| {
-			room != room_id || *until > now + PEER_COOLDOWN + Duration::from_secs(1)
+			room != room_id
+				|| *until
+					> now
+						.checked_add(PEER_COOLDOWN)
+						.and_then(|time| time.checked_add(Duration::from_secs(1)))
+						.unwrap_or(now)
 		});
 		let mut pending = lock(&self.pending_rooms);
 		if pending.len() < MAX_PENDING_ROOMS {
@@ -298,6 +316,10 @@ impl Reconcile {
 		self.wake.notify_one();
 	}
 
+	#[expect(
+		clippy::too_many_lines,
+		reason = "exchange follows the reconciliation protocol phases"
+	)]
 	async fn exchange(&self, room: &RoomId, peer: &ServerName) -> Result<bool> {
 		if !self
 			.services
@@ -333,7 +355,7 @@ impl Reconcile {
 		let version = self
 			.services
 			.federation
-			.execute(peer, api::version::Request {})
+			.execute(peer, api::version::Request)
 			.await?;
 		if !version
 			.unstable_features
@@ -374,8 +396,8 @@ impl Reconcile {
 		let mut offered = std::collections::BTreeSet::new();
 		for _ in 0..MAX_RECONCILIATION_ROUNDS {
 			match action {
-				| ClientAction::Synchronized => break,
-				| ClientAction::ExtremityDiff => break,
+				| ClientAction::Synchronized
+				| ClientAction::ExtremityDiff
 				| ClientAction::ResolveRoots { .. } => break,
 				| ClientAction::BucketSketches { requests, accumulated_roots } => {
 					let sketches = build_bucket_sketches(local.population.h64s(), &requests)
@@ -404,10 +426,14 @@ impl Reconcile {
 								.map(|r| api::diff::SketchBucket {
 									depth: u64::from(r.depth),
 									prefix: r.prefix.to_string(),
-									capacity: r.capacity as u64,
+									capacity: u64::try_from(r.capacity)
+										.expect("bucket capacity fits the wire type"),
 								})
 								.collect(),
-							local_sketches: sketches.iter().map(|s| s.encode()).collect(),
+							local_sketches: sketches
+								.iter()
+								.map(rezzy_recon::SyndromeSketch::encode)
+								.collect(),
 						})
 						.await?;
 					if response.sketch_status == "capacity_exceeded" {
@@ -441,12 +467,12 @@ impl Reconcile {
 					}
 					if let Some(ids) = &response.requester_only_short_ids {
 						for id in ids {
-							if let Ok(bytes) = URL_SAFE_NO_PAD.decode(id) {
-								if bytes.len() == 8 {
-									roots.push(u64::from_be_bytes(
-										bytes.try_into().expect("checked length"),
-									));
-								}
+							if let Ok(bytes) = URL_SAFE_NO_PAD.decode(id)
+								&& bytes.len() == 8
+							{
+								roots.push(u64::from_be_bytes(
+									bytes.try_into().expect("checked length"),
+								));
 							}
 						}
 					}
@@ -522,10 +548,11 @@ impl Reconcile {
 						self.remember_unusable(key);
 					}
 					if index < sample_count {
-						failed_sample += 1;
+						failed_sample = failed_sample.saturating_add(1);
 					}
-					if index + 1 >= sample_count
-						&& failed_sample * 100 > sample_count * MAX_SAMPLE_FAILURE_PERCENT
+					if index.saturating_add(1) >= sample_count
+						&& failed_sample.saturating_mul(100)
+							> sample_count.saturating_mul(MAX_SAMPLE_FAILURE_PERCENT)
 					{
 						break;
 					}
@@ -535,10 +562,11 @@ impl Reconcile {
 			let Ok(value) = serde_json::from_str::<serde_json::Value>(response.pdu.get()) else {
 				self.remember_unusable(key);
 				if index < sample_count {
-					failed_sample += 1;
+					failed_sample = failed_sample.saturating_add(1);
 				}
-				if index + 1 >= sample_count
-					&& failed_sample * 100 > sample_count * MAX_SAMPLE_FAILURE_PERCENT
+				if index.saturating_add(1) >= sample_count
+					&& failed_sample.saturating_mul(100)
+						> sample_count.saturating_mul(MAX_SAMPLE_FAILURE_PERCENT)
 				{
 					break;
 				}
@@ -546,16 +574,17 @@ impl Reconcile {
 			};
 			let depth = value
 				.get("depth")
-				.and_then(|v| v.as_u64())
+				.and_then(serde_json::Value::as_u64)
 				.unwrap_or(u64::MAX);
 			let Ok(raw) = serde_json::value::RawValue::from_string(response.pdu.get().to_owned())
 			else {
 				self.remember_unusable(key);
 				if index < sample_count {
-					failed_sample += 1;
+					failed_sample = failed_sample.saturating_add(1);
 				}
-				if index + 1 >= sample_count
-					&& failed_sample * 100 > sample_count * MAX_SAMPLE_FAILURE_PERCENT
+				if index.saturating_add(1) >= sample_count
+					&& failed_sample.saturating_mul(100)
+						> sample_count.saturating_mul(MAX_SAMPLE_FAILURE_PERCENT)
 				{
 					break;
 				}
@@ -569,10 +598,11 @@ impl Reconcile {
 			else {
 				self.remember_unusable(key);
 				if index < sample_count {
-					failed_sample += 1;
+					failed_sample = failed_sample.saturating_add(1);
 				}
-				if index + 1 >= sample_count
-					&& failed_sample * 100 > sample_count * MAX_SAMPLE_FAILURE_PERCENT
+				if index.saturating_add(1) >= sample_count
+					&& failed_sample.saturating_mul(100)
+						> sample_count.saturating_mul(MAX_SAMPLE_FAILURE_PERCENT)
 				{
 					break;
 				}
@@ -583,11 +613,12 @@ impl Reconcile {
 			} else {
 				self.remember_unusable(key);
 				if index < sample_count {
-					failed_sample += 1;
+					failed_sample = failed_sample.saturating_add(1);
 				}
 			}
-			if index + 1 >= sample_count
-				&& failed_sample * 100 > sample_count * MAX_SAMPLE_FAILURE_PERCENT
+			if index.saturating_add(1) >= sample_count
+				&& failed_sample.saturating_mul(100)
+					> sample_count.saturating_mul(MAX_SAMPLE_FAILURE_PERCENT)
 			{
 				break;
 			}
@@ -610,7 +641,7 @@ impl Reconcile {
 		let mut unusable = lock(&self.unusable);
 		unusable.retain(|_, until| *until > now);
 		if unusable.len() < MAX_REMEMBERED_EVENTS {
-			unusable.insert(key, now + REMEMBER_FOR);
+			unusable.insert(key, now.checked_add(REMEMBER_FOR).unwrap_or(now));
 		}
 	}
 }
@@ -622,5 +653,10 @@ fn short_hash(id: &OwnedEventId) -> Option<u64> {
 		.map(|hash| hash.h64)
 }
 fn bucket_prefix(hash: u64, depth: u8) -> u64 {
-	if depth == 0 { 0 } else { hash >> (64 - u32::from(depth)) }
+	if depth == 0 {
+		0
+	} else {
+		hash.checked_shr(64_u32.checked_sub(u32::from(depth)).unwrap_or(0))
+			.unwrap_or(0)
+	}
 }

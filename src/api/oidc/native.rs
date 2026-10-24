@@ -169,8 +169,9 @@ async fn provider_redirect(
 
 	let req_id = match context {
 		| Flow::Authorization(req_id) => req_id,
-		| Flow::Device(user_code) =>
-			return device_sso_redirect(services, user_code, Some(provider_id)),
+		| Flow::Device(user_code) => {
+			return device_sso_redirect(services, user_code, Some(provider_id));
+		},
 		| Flow::Account { action, device_id } => {
 			validate_account_action(action)?;
 
@@ -703,8 +704,9 @@ where
 {
 	let query = match context {
 		| Flow::Authorization(req_id) => format!("oidc_req_id={}", url_encode(req_id)),
-		| Flow::Account { action, device_id } =>
-			format!("action={}&amp;device_id={}", url_encode(action), url_encode(device_id)),
+		| Flow::Account { action, device_id } => {
+			format!("action={}&amp;device_id={}", url_encode(action), url_encode(device_id))
+		},
 		| Flow::Device(user_code) => format!("user_code={}", url_encode(user_code)),
 	};
 

@@ -64,8 +64,9 @@ fn stated_retry_after(error: &Error) -> Option<Duration> {
 				.as_ref()
 				.map(|retry| match retry {
 					| RetryAfter::Delay(delay) => *delay,
-					| RetryAfter::DateTime(_) =>
-						panic!("a login refusal states a delay, not a date"),
+					| RetryAfter::DateTime(_) => {
+						panic!("a login refusal states a delay, not a date")
+					},
 				}),
 		| other => panic!("expected M_LIMIT_EXCEEDED, got {other:?}"),
 	}

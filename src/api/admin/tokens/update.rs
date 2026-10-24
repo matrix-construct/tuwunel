@@ -28,8 +28,9 @@ pub(crate) async fn admin_update_token_route(
 
 	let info = match info {
 		| TokenInfo::Database(info) => info,
-		| TokenInfo::Config =>
-			return Err!(Request(Forbidden("Tokens set in the config file can't be updated"))),
+		| TokenInfo::Config => {
+			return Err!(Request(Forbidden("Tokens set in the config file can't be updated")));
+		},
 	};
 
 	let max_uses = apply_uses(body.uses_allowed, info.expires.max_uses);

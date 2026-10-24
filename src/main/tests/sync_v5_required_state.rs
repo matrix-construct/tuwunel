@@ -166,8 +166,9 @@ async fn exercise(services: &Services, base: &str) -> Result {
 fn config(room: &RoomId, limit: u64, key: &str, subscribed: bool) -> Value {
 	let subscriptions = match subscribed {
 		| false => json!({}),
-		| true =>
-			json!({ room.as_str(): { "required_state": [[PINNED, ""]], "timeline_limit": 20 } }),
+		| true => {
+			json!({ room.as_str(): { "required_state": [[PINNED, ""]], "timeline_limit": 20 } })
+		},
 	};
 
 	json!({

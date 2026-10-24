@@ -398,8 +398,9 @@ fn handle_resolve_error(e: &NetError, host: &'_ str) -> Result {
 			Ok(())
 		},
 		// Remote-supplied name (server name, delegation or SRV target), not a local fault.
-		| NetError::Proto(_) if Name::from_utf8(host).is_err() =>
-			Err!(debug_error!(%host, error = %e, "Invalid DNS name")),
+		| NetError::Proto(_) if Name::from_utf8(host).is_err() => {
+			Err!(debug_error!(%host, error = %e, "Invalid DNS name"))
+		},
 		| NetError::Timeout => Err!(warn!(%host, "DNS {e}")),
 		| NetError::NoConnections => {
 			error!(

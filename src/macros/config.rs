@@ -230,8 +230,9 @@ fn generate_example(input: &ItemStruct, args: &[Meta], emit: bool) -> Result<Tok
 fn display_value(ident: &Ident, directive: impl Fn(&str) -> bool) -> TokenStream2 {
 	match () {
 		| () if directive("sensitive") => quote! { "***********" },
-		| () if directive("uri-userinfo") =>
-			quote! { crate::config::format::UriUserinfo(self.#ident.as_deref()) },
+		| () if directive("uri-userinfo") => {
+			quote! { crate::config::format::UriUserinfo(self.#ident.as_deref()) }
+		},
 		| () => quote! { format_args!("{:?}", self.#ident) },
 	}
 }

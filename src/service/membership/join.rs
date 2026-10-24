@@ -127,7 +127,7 @@ pub async fn join<'a>(
 	}
 
 	match federation_lock {
-		| Some(federation_lock) if !self.is_local_join(room_id, &servers).await =>
+		| Some(federation_lock) if !self.is_local_join(room_id, &servers).await => {
 			self.join_remote(
 				sender_user,
 				room_id,
@@ -138,7 +138,8 @@ pub async fn join<'a>(
 				extra_content,
 			)
 			.boxed() // cold arm: remote join
-			.await?,
+			.await?
+		},
 		| federation_lock => {
 			drop(federation_lock);
 			self.join_local(sender_user, room_id, reason, &servers, state_lock, extra_content)

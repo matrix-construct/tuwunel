@@ -41,6 +41,7 @@ use crate::{
 pub async fn execute<T>(&self, dest: &ServerName, request: T) -> Result<T::IncomingResponse>
 where
 	T: OutgoingRequest + Debug + Send,
+	T::IncomingResponse: Send,
 	T::Authentication: FedAuth,
 	T::PathBuilder: FedPath,
 {
@@ -59,6 +60,7 @@ where
 pub async fn execute_keys<T>(&self, dest: &ServerName, request: T) -> Result<T::IncomingResponse>
 where
 	T: OutgoingRequest + Debug + Send,
+	T::IncomingResponse: Send,
 	T::Authentication: FedAuth,
 	T::PathBuilder: FedPath,
 {
@@ -94,6 +96,7 @@ pub async fn execute_synapse<T>(
 ) -> Result<T::IncomingResponse>
 where
 	T: OutgoingRequest + Debug + Send,
+	T::IncomingResponse: Send,
 	T::Authentication: FedAuth,
 	T::PathBuilder: FedPath,
 {
@@ -116,6 +119,7 @@ pub async fn execute_on<T>(
 ) -> Result<T::IncomingResponse>
 where
 	T: OutgoingRequest + Send,
+	T::IncomingResponse: Send,
 	T::Authentication: FedAuth,
 	T::PathBuilder: FedPath,
 {
@@ -147,6 +151,7 @@ pub(super) async fn execute_on_allow_self<T>(
 ) -> Result<T::IncomingResponse>
 where
 	T: OutgoingRequest + Send,
+	T::IncomingResponse: Send,
 	T::Authentication: FedAuth,
 	T::PathBuilder: FedPath,
 {
@@ -183,6 +188,7 @@ pub(super) async fn execute_uncounted<T>(
 ) -> Result<T::IncomingResponse>
 where
 	T: OutgoingRequest + Send,
+	T::IncomingResponse: Send,
 	T::Authentication: FedAuth,
 	T::PathBuilder: FedPath,
 {
@@ -212,6 +218,7 @@ pub(super) async fn execute_uncounted_allow_self<T>(
 ) -> Result<T::IncomingResponse>
 where
 	T: OutgoingRequest + Send,
+	T::IncomingResponse: Send,
 	T::Authentication: FedAuth,
 	T::PathBuilder: FedPath,
 {
@@ -255,6 +262,7 @@ async fn perform<T>(
 ) -> Result<T::IncomingResponse>
 where
 	T: OutgoingRequest + Send,
+	T::IncomingResponse: Send,
 	T::Authentication: FedAuth,
 	T::PathBuilder: FedPath,
 {
@@ -313,6 +321,7 @@ async fn handle_response<T>(
 ) -> Result<T::IncomingResponse>
 where
 	T: OutgoingRequest + Send,
+	T::IncomingResponse: Send,
 	T::Authentication: FedAuth,
 	T::PathBuilder: FedPath,
 {

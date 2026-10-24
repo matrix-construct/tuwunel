@@ -284,10 +284,12 @@ pub(super) async fn corrupt_timeline_pdu(
 	match (failure, result) {
 		| (PduFailure::Missing, Err(error)) if error.is_not_found() => Ok(()),
 		| (PduFailure::MalformedMembership, Ok(_)) => Ok(()),
-		| (PduFailure::Missing, result) =>
-			Err!("missing timeline PDU {event_id} returned {result:?}"),
-		| (PduFailure::MalformedMembership, result) =>
-			Err!("valid malformed-membership PDU {event_id} returned {result:?}"),
+		| (PduFailure::Missing, result) => {
+			Err!("missing timeline PDU {event_id} returned {result:?}")
+		},
+		| (PduFailure::MalformedMembership, result) => {
+			Err!("valid malformed-membership PDU {event_id} returned {result:?}")
+		},
 	}
 }
 

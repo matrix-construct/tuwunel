@@ -433,8 +433,9 @@ async fn answer_peer(uri: Uri, State(state): State<Arc<PeerState>>) -> Response 
 			| CLIENT_OMISSION_QUERY_TS => &state.client_missing,
 			| ADMIN_OMISSION_QUERY_TS => &state.admin_missing,
 			| REMOTE_QUERY_TS => &state.remote,
-			| _ =>
-				return (StatusCode::BAD_REQUEST, "unexpected timestamp query").into_response(),
+			| _ => {
+				return (StatusCode::BAD_REQUEST, "unexpected timestamp query").into_response();
+			},
 		};
 
 		let origin_server_ts = match query_ts {
@@ -470,8 +471,9 @@ async fn answer_peer(uri: Uri, State(state): State<Arc<PeerState>>) -> Response 
 
 		state.backfills.fetch_add(1, SeqCst);
 		let pdus = match anchor.as_str() {
-			| anchor if anchor == state.client_missing.as_str() =>
-				json!([&state.client_decoy_pdu]),
+			| anchor if anchor == state.client_missing.as_str() => {
+				json!([&state.client_decoy_pdu])
+			},
 			| anchor if anchor == state.admin_missing.as_str() => json!([&state.admin_decoy_pdu]),
 			| anchor if anchor == state.remote.as_str() => json!([{}, &state.remote_pdu]),
 			| _ => json!([&state.pdu]),

@@ -293,8 +293,9 @@ async fn verify_badge_recovery(services: &Services, recovery: &mut BadgeRecovery
 
 	match recovery.rx.try_recv() {
 		| Err(TryRecvError::Empty) => Ok(()),
-		| Err(TryRecvError::Disconnected) =>
-			Err!("stub gateway channel closed after badge recovery"),
+		| Err(TryRecvError::Disconnected) => {
+			Err!("stub gateway channel closed after badge recovery")
+		},
 		| Ok(_) => Err!("stale badge wake produced a duplicate notification"),
 	}
 }
@@ -519,8 +520,9 @@ async fn verify_permanent_push_error(services: &Services) -> Result {
 
 	match services.pusher.get_pusher(&user, pushkey).await {
 		| Ok(_) => Ok(()),
-		| Err(error) if error.is_not_found() =>
-			Err!("permanently invalid pusher was removed during delivery"),
+		| Err(error) if error.is_not_found() => {
+			Err!("permanently invalid pusher was removed during delivery")
+		},
 		| Err(error) => Err(error),
 	}
 }
@@ -952,8 +954,9 @@ async fn badge_count_opt_out(fixture: &Fixture<'_>) -> Result {
 
 	match rx.try_recv() {
 		| Err(TryRecvError::Empty) => Ok(()),
-		| Err(TryRecvError::Disconnected) =>
-			Err!("stub gateway channel closed after badge opt-out"),
+		| Err(TryRecvError::Disconnected) => {
+			Err!("stub gateway channel closed after badge opt-out")
+		},
 		| Ok(_) => Err!("badge opt-out emitted a counts-only notification"),
 	}
 }
@@ -995,8 +998,9 @@ async fn badge_delivery_memo(fixture: &Fixture<'_>, room_id: &RoomId) -> Result 
 	refresh().await?;
 	match rx.try_recv() {
 		| Err(TryRecvError::Empty) => (),
-		| Err(TryRecvError::Disconnected) =>
-			return Err!("stub gateway channel closed during memo dedupe"),
+		| Err(TryRecvError::Disconnected) => {
+			return Err!("stub gateway channel closed during memo dedupe");
+		},
 		| Ok(_) => return Err!("unchanged badge total was re-sent to the gateway"),
 	}
 
@@ -1023,8 +1027,9 @@ async fn badge_delivery_memo(fixture: &Fixture<'_>, room_id: &RoomId) -> Result 
 	refresh().await?;
 	match rx.try_recv() {
 		| Err(TryRecvError::Empty) => (),
-		| Err(TryRecvError::Disconnected) =>
-			return Err!("stub gateway channel closed after the event notice"),
+		| Err(TryRecvError::Disconnected) => {
+			return Err!("stub gateway channel closed after the event notice");
+		},
 		| Ok(_) => return Err!("event-stamped badge total was re-sent to the gateway"),
 	}
 
