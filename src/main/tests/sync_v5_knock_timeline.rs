@@ -2,19 +2,24 @@
 
 use serde_json::{Value, json};
 use tuwunel_core::{
-	Result, implement,
-	ruma::{RoomId, events::StateEventType},
+	Result, implement, is_equal_to,
+	ruma::{RoomId, UserId, events::StateEventType},
 };
+use tuwunel_database::Json;
 use tuwunel_service::Services;
 
 use self::{
 	client::{Client, field, register},
 	fixture::boot,
+	member_event::find_member_event,
 };
 
 mod client;
 mod fixture;
 mod sliding_sync;
+
+#[path = "client/member_event.rs"]
+mod member_event;
 
 #[path = "client/put.rs"]
 mod put;
@@ -60,21 +65,21 @@ async fn exercise(services: &Services, base: &str) -> Result {
 
 	let zero = knocker.sync(None, &request("zero", 0)).await?;
 
-	assert_knock(&zero, &older, older_count);
-	assert_knock(&zero, &newer, newer_count);
+	assert_knock(&zero, &older, &user, older_count);
+	assert_knock(&zero, &newer, &user, newer_count);
 
 	let initial = knocker
 		.sync(None, &request("timeline", 10))
 		.await?;
 
-	assert_knock(&initial, &older, older_count);
-	assert_knock(&initial, &newer, newer_count);
+	assert_knock(&initial, &older, &user, older_count);
+	assert_knock(&initial, &newer, &user, newer_count);
 
 	owner.message(&older, "hidden").await?;
 	let fresh = knocker.sync(None, &request("fresh", 10)).await?;
 
-	assert_knock(&fresh, &older, older_count);
-	assert_knock(&fresh, &newer, newer_count);
+	assert_knock(&fresh, &older, &user, older_count);
+	assert_knock(&fresh, &newer, &user, newer_count);
 
 	let quiet = knocker
 		.sync(Some(&initial), &request("timeline", 10))
@@ -90,14 +95,14 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	let expanded = request("timeline", 20);
 	let redraw = knocker.sync(Some(&quiet), &expanded).await?;
 
-	assert_knock(&redraw, &older, older_count);
-	assert_knock(&redraw, &newer, newer_count);
+	assert_knock(&redraw, &older, &user, older_count);
+	assert_knock(&redraw, &newer, &user, newer_count);
 
 	let replay = knocker.sync(Some(&quiet), &expanded).await?;
 
 	assert_eq!(replay["rooms"], redraw["rooms"], "replay changed room payloads");
-	assert_knock(&replay, &older, older_count);
-	assert_knock(&replay, &newer, newer_count);
+	assert_knock(&replay, &older, &user, older_count);
+	assert_knock(&replay, &newer, &user, newer_count);
 
 	let membership = services
 		.state_accessor
@@ -118,8 +123,8 @@ async fn exercise(services: &Services, base: &str) -> Result {
 		.await?;
 
 	assert_eq!(redacted_count, older_count, "redaction changed the own knock count");
-	assert_knock(&redacted, &older, older_count);
-	assert_knock(&redacted, &newer, newer_count);
+	assert_knock(&redacted, &older, &user, older_count);
+	assert_knock(&redacted, &newer, &user, newer_count);
 
 	owner
 		.post(&format!("rooms/{older}/invite"), &json!({ "user_id": user }))
@@ -175,14 +180,25 @@ async fn exercise(services: &Services, base: &str) -> Result {
 		.await?;
 
 	assert!(repeated_count > newer_count);
-	assert_knock(&repeated, &older, repeated_count);
+	assert_knock(&repeated, &older, &user, repeated_count);
 
 	let reordered = knocker
 		.sync(None, &request("reordered", 10))
 		.await?;
 
-	assert_knock(&reordered, &older, repeated_count);
-	assert_knock(&reordered, &newer, newer_count);
+	assert_knock(&reordered, &older, &user, repeated_count);
+	assert_knock(&reordered, &newer, &user, newer_count);
+
+	services.db["userroomid_knockedstate"].put((&user, &newer), Json(json!([])));
+
+	let emptied = knocker
+		.sync(None, &request("emptied", 10))
+		.await?;
+
+	let room = &emptied["rooms"][newer.as_str()];
+
+	assert_eq!(room["membership"], "knock", "emptied knock missing: {emptied}");
+	assert!(room.get("invite_state").is_none(), "empty stripped state sent: {room}");
 
 	Ok(())
 }
@@ -196,12 +212,23 @@ fn request(connection: &str, limit: u64) -> Value {
 	})
 }
 
-fn assert_knock(response: &Value, room_id: &RoomId, count: u64) {
+fn assert_knock(response: &Value, room_id: &RoomId, user: &UserId, count: u64) {
 	let room = &response["rooms"][room_id.as_str()];
 
 	assert!(count > 0);
 	assert_eq!(room["membership"], "knock", "knocked room missing: {response}");
 	assert_eq!(room["bump_stamp"].as_u64(), Some(count), "wrong knock recency: {room}");
+	assert!(room.get("num_live").is_none(), "knocked room counted live events: {room}");
+
+	// Clients classify the room by the first member event about the user.
+	let own_membership = find_member_event(&room["invite_state"], user)
+		.map(|event| &event["content"]["membership"]);
+
+	assert!(
+		own_membership.is_some_and(is_equal_to!("knock")),
+		"the user's first stripped member event is not the knock: {room}"
+	);
+
 	for field in ["timeline", "required_state"] {
 		assert!(
 			room.get(field)

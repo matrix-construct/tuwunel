@@ -46,7 +46,7 @@ use tuwunel_matrix::{
 };
 use tuwunel_service::{
 	Services,
-	rooms::short::ShortStateHash,
+	rooms::{short::ShortStateHash, state_cache::StrippedRoomState},
 	sync::{RequiredState, Room, RoomConfig, UnreadState},
 };
 
@@ -148,7 +148,7 @@ pub(super) async fn handle_room(
 			.await;
 	}
 
-	let is_invite = *membership == Some(MembershipState::Invite);
+	let pending = matches!(membership, Some(MembershipState::Invite | MembershipState::Knock));
 
 	let encrypted = services.state_accessor.is_encrypted_room(room_id);
 
@@ -228,12 +228,7 @@ pub(super) async fn handle_room(
 	);
 
 	// TODO: figure out a timestamp we can use for remote invites
-	let invite_state = is_invite.then_async(|| {
-		services
-			.state_cache
-			.invite_state(sender_user, room_id)
-			.ok()
-	});
+	let stripped_state = stripped_state(services, sender_user, room_id, membership.as_ref());
 
 	let timeline = timeline_pdus
 		.iter()
@@ -252,12 +247,12 @@ pub(super) async fn handle_room(
 		.collect::<Vec<_>>();
 
 	let meta = room_meta_future(services, room_id);
-	let events = join3(timeline, required_state, invite_state);
+	let events = join3(timeline, required_state, stripped_state);
 	let member_counts = member_counts_future(services, room_id);
 	let notification_counts = notification_counts_future(services, sender_user, room_id);
 	let (
 		(room_name, room_avatar),
-		(timeline, (required_state, state_read), invite_state),
+		(timeline, (required_state, state_read), stripped_state),
 		(joined_count, invited_count),
 		(highlight_count, notification_count, _last_notification_read, thread_counts),
 	) = join4(meta, events, member_counts, notification_counts)
@@ -273,7 +268,7 @@ pub(super) async fn handle_room(
 	)
 	.await;
 
-	let previous_connection_pos = previous_connection_pos.filter(|_| !is_invite);
+	let previous_connection_pos = previous_connection_pos.filter(|_| !pending);
 	let (initial, num_live) =
 		room_timeline_metadata(roomsince, previous_connection_pos, &timeline);
 
@@ -290,7 +285,7 @@ pub(super) async fn handle_room(
 		is_dm: direct_rooms.contains(room_id).then_some(true),
 		heroes,
 		required_state,
-		invite_state: invite_state.flatten(),
+		invite_state: stripped_state,
 		prev_batch: prev_batch.as_deref().map(Into::into),
 		num_live,
 		limited,
@@ -454,6 +449,39 @@ async fn resolve_heroes(
 		.then_async(|| calculate_heroes(services, sender_user, room_id, room_name, room_avatar))
 		.await
 		.unwrap_or_default()
+}
+
+/// The stripped state MSC4186 sends for an invited or knocked room.
+///
+/// For a knocked room this is the summary stored with the knock, ending with
+/// the user's own knock event, so a client can present a room this server is
+/// not in. An empty knock summary is omitted, since a client reading the
+/// user's membership from it would take the room for an invite.
+async fn stripped_state(
+	services: &Services,
+	sender_user: &UserId,
+	room_id: &RoomId,
+	membership: Option<&MembershipState>,
+) -> StrippedRoomState {
+	let membership = membership?;
+	let state_cache = &services.state_cache;
+	let state = match membership {
+		| MembershipState::Invite =>
+			state_cache
+				.invite_state(sender_user, room_id)
+				.await,
+		| MembershipState::Knock =>
+			state_cache
+				.knock_state(sender_user, room_id)
+				.await,
+		| _ => return None,
+	};
+
+	state
+		.present()
+		.inspect_err(|error| warn!(%room_id, %error, "Unreadable stripped room state"))
+		.flat_ok()
+		.filter(|state| !state.is_empty() || *membership == MembershipState::Invite)
 }
 
 fn room_meta_future<'a>(

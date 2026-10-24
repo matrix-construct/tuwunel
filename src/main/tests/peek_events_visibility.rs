@@ -11,10 +11,15 @@ use tuwunel_service::Services;
 use self::{
 	client::{Client, field, register},
 	fixture::boot,
+	member_event::is_member_event,
 };
 
 mod client;
 mod fixture;
+
+#[path = "client/member_event.rs"]
+#[expect(dead_code)]
+mod member_event;
 
 const OWNER_TOKEN: &str = "peek-events-visibility-owner-access-token";
 const MEMBER_TOKEN: &str = "peek-events-visibility-member-access-token";
@@ -430,9 +435,7 @@ fn memberships<'a>(page: &'a Value, user_id: &UserId) -> Vec<&'a str> {
 ///
 /// Events about any other user, and every non-member event, are skipped.
 fn member_events<'a>(page: &'a Value, user_id: &UserId) -> impl Iterator<Item = &'a Value> {
-	chunk(page).filter(move |event| {
-		event["type"] == "m.room.member" && event["state_key"] == user_id.as_str()
-	})
+	chunk(page).filter(move |event| is_member_event(event, user_id))
 }
 
 /// Whether a page carries the event that made the room world-readable.

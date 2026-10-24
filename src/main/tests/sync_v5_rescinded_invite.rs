@@ -19,12 +19,16 @@ use tuwunel_service::{Services, rooms::state_cache::MembershipUpdate};
 use self::{
 	client::{Client, field, register},
 	fixture::boot,
+	member_event::find_member_event,
 };
 
 #[expect(dead_code)] // This test creates no rooms through the client API.
 mod client;
 mod fixture;
 mod sliding_sync;
+
+#[path = "client/member_event.rs"]
+mod member_event;
 
 #[path = "sliding_sync/resume.rs"]
 mod resume;
@@ -198,10 +202,5 @@ fn sign_kick(
 ///
 /// An absent event reads as null, so the caller's assertion reports it.
 fn own_member<'a>(events: &'a Value, invitee: &UserId) -> &'a Value {
-	events
-		.as_array()
-		.into_iter()
-		.flatten()
-		.find(|event| event["type"] == "m.room.member" && event["state_key"] == invitee.as_str())
-		.unwrap_or(&Value::Null)
+	find_member_event(events, invitee).unwrap_or(&Value::Null)
 }
