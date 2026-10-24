@@ -154,7 +154,6 @@ pub(crate) async fn wait_until_ready(services: &Services, base: &str) -> Result 
 /// negative case is only proven by the whole deadline elapsing.
 // AsyncFn cannot express a Send bound on its call future without an unstable
 // associated type, and every caller drives this on one runtime thread.
-#[expect(clippy::future_not_send)]
 pub(crate) async fn poll_until<Condition>(deadline: Duration, condition: Condition) -> bool
 where
 	Condition: AsyncFn() -> bool,

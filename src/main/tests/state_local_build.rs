@@ -1,5 +1,6 @@
 #![allow(clippy::expect_used)]
 #![allow(clippy::tests_outside_test_module)]
+#![recursion_limit = "256"]
 
 use std::{fs::remove_dir_all, net::TcpListener, time::Duration};
 

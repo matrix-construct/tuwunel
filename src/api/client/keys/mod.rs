@@ -39,7 +39,7 @@ fn federation_failures(
 	faults.into_iter().map(move |(server, fault)| {
 		match &fault {
 			| Fault::Error(error) => {
-				debug_warn!(%server, %error, endpoint, "key federation request failed")
+				debug_warn!(%server, %error, endpoint, "key federation request failed");
 			},
 			| _ => debug_warn!(%server, ?fault, endpoint, "key federation request failed"),
 		}

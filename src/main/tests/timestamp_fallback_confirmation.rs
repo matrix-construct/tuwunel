@@ -1,4 +1,5 @@
 #![cfg(test)]
+#![recursion_limit = "256"]
 
 use std::{
 	convert::identity,
