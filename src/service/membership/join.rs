@@ -6,7 +6,7 @@ use std::{
 	sync::Arc,
 };
 
-use futures::{FutureExt, StreamExt, TryFutureExt, TryStreamExt, future::join};
+use futures::{FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt, future::join};
 use ruma::{
 	CanonicalJsonObject, CanonicalJsonValue, OwnedEventId, OwnedServerName, OwnedUserId, RoomId,
 	RoomOrAliasId, RoomVersionId, UserId,
@@ -27,7 +27,7 @@ use serde_json::value::{RawValue as RawJsonValue, to_raw_value};
 use tuwunel_core::{
 	Err, Result, async_noinline, at, debug, debug_error, debug_info, debug_warn, err, error,
 	implement, info, trace,
-	utils::{self, BoolExt, IterStream, ReadyExt, math::Expected, shuffle},
+	utils::{self, BoolExt, IterStream, ReadyExt, math::Expected, shuffle, stream::WidebandExt},
 	warn,
 };
 use tuwunel_matrix::{
@@ -37,7 +37,7 @@ use tuwunel_matrix::{
 	room_version,
 };
 
-use super::Service;
+use super::{Service, VerifiedPdu};
 use crate::{
 	Services,
 	federation::{Candidates, WhenAllBackedOff},
@@ -625,45 +625,51 @@ async fn ingest_send_join_state(
 ) -> HashMap<u64, OwnedEventId> {
 	info!(events = state_pdus.len(), "Going through send_join response room_state...");
 	let cork = self.services.db.cork_and_flush();
-	let state = state_pdus
-		.iter()
-		.stream()
-		.then(|pdu| {
-			self.services
-				.server_keys
-				.validate_and_add_event_id_no_fetch(pdu, room_version_id)
-		})
-		.inspect_err(|e| debug_error!("Invalid send_join state event: {e:?}"))
-		.ready_filter_map(Result::ok)
-		.ready_filter_map(|(event_id, value, _)| {
-			Pdu::from_object_federation(room_id, &event_id, value, room_version_rules)
-				.inspect_err(|error| {
-					debug_warn!(?event_id, %error, "Invalid PDU in the join response.");
-				})
-				.map(move |(pdu, value)| (event_id, pdu, value))
-				.ok()
-		})
-		.fold(HashMap::new(), async |mut state, (event_id, pdu, value)| {
+	let state = self
+		.verified_pdus(room_id, room_version_id, room_version_rules, state_pdus, "state")
+		.then(async |(event_id, pdu, value, verified)| {
 			self.services
 				.timeline
-				.add_pdu_outlier(&event_id, &value);
+				.add_verified_outlier(&event_id, &value, &verified)
+				.await;
 
-			if let Some(state_key) = &pdu.state_key {
-				let shortstatekey = self
-					.services
-					.short
-					.get_or_create_shortstatekey(&pdu.kind.to_string().into(), state_key)
-					.await;
-
-				state.insert(shortstatekey, pdu.event_id.clone());
-			}
-
-			state
+			(event_id, pdu)
 		})
+		.wide_filter_map(async |(event_id, pdu)| {
+			let state_key = pdu.state_key.as_ref()?;
+			let shortstatekey = self
+				.services
+				.short
+				.get_or_create_shortstatekey(&pdu.kind.to_cow_str().as_ref().into(), state_key)
+				.await;
+
+			Some((shortstatekey, event_id))
+		})
+		.collect()
 		.await;
 
 	drop(cork);
 	state
+}
+
+/// Verifies the events of one send_join response list, dropping each that fails.
+///
+/// The events come back in their response order, each in the form this server
+/// stores it. The list's name labels the log of a failing event.
+#[implement(Service)]
+fn verified_pdus<'a>(
+	&'a self,
+	room_id: &'a RoomId,
+	room_version_id: &'a RoomVersionId,
+	room_version_rules: &'a RoomVersionRules,
+	pdus: &'a [Box<RawJsonValue>],
+	list: &'static str,
+) -> impl Stream<Item = VerifiedPdu> + Send + 'a {
+	pdus.iter()
+		.stream()
+		.wide_then(|pdu| self.verified_pdu(room_id, room_version_id, room_version_rules, pdu))
+		.inspect_err(move |error| debug_error!(?error, list, "Invalid send_join event."))
+		.ready_filter_map(Result::ok)
 }
 
 #[implement(Service)]
@@ -676,28 +682,13 @@ async fn ingest_send_join_auth_chain(
 ) {
 	info!(events = auth_chain.len(), "Going through send_join response auth_chain...");
 	let cork = self.services.db.cork_and_flush();
-	auth_chain
-		.iter()
-		.stream()
-		.then(|pdu| {
-			self.services
-				.server_keys
-				.validate_and_add_event_id_no_fetch(pdu, room_version_id)
-		})
-		.inspect_err(|e| debug_error!("Invalid send_join auth_chain event: {e:?}"))
-		.ready_filter_map(Result::ok)
-		.ready_filter_map(|(event_id, value, _)| {
-			Pdu::from_object_federation(room_id, &event_id, value, room_version_rules)
-				.inspect_err(|error| {
-					debug_warn!(?event_id, %error, "Invalid PDU in the join response.");
-				})
-				.map(move |(_, value)| (event_id, value))
-				.ok()
-		})
-		.ready_for_each(|(event_id, value)| {
+
+	self.verified_pdus(room_id, room_version_id, room_version_rules, auth_chain, "auth_chain")
+		.for_each(async |(event_id, _, value, verified)| {
 			self.services
 				.timeline
-				.add_pdu_outlier(&event_id, &value);
+				.add_verified_outlier(&event_id, &value, &verified)
+				.await;
 		})
 		.await;
 

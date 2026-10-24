@@ -25,7 +25,7 @@ use futures::{
 };
 use ruma::{
 	CanonicalJsonObject, EventId, MilliSecondsSinceUnixEpoch, OwnedEventId, OwnedRoomId, RoomId,
-	UserId, api::Direction, events::room::encrypted::Relation,
+	UserId, api::Direction, events::room::encrypted::Relation, signatures::Verified,
 };
 use serde::Deserialize;
 use tuwunel_core::{
@@ -197,6 +197,33 @@ pub(super) fn stage_replace_pdu(
 	pdu_json: &CanonicalJsonObject,
 ) {
 	txn.raw_put(&self.db.pduid_pdu, pdu_id, Json(pdu_json));
+}
+
+/// Stores a verified federation event as an outlier unless this server's copy
+/// takes precedence.
+///
+/// An accepted event keeps its copy, and so does any stored event whose new
+/// copy had to be redacted. A copy whose content matches its hash replaces an
+/// outlier, such as one stored from knock state without a hash check.
+#[implement(Service)]
+#[tracing::instrument(skip(self, pdu), level = "debug")]
+pub async fn add_verified_outlier(
+	&self,
+	event_id: &EventId,
+	pdu: &CanonicalJsonObject,
+	verified: &Verified,
+) {
+	let kept = match verified {
+		| Verified::All =>
+			self.non_outlier_pdu_exists(event_id)
+				.is_ok()
+				.await,
+		| Verified::Signatures => self.pdu_exists(event_id).await,
+	};
+
+	if !kept {
+		self.add_pdu_outlier(event_id, pdu);
+	}
 }
 
 /// Stores an event as an outlier outside the accepted room timeline.
