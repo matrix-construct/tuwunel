@@ -30,6 +30,7 @@ use crate::{
 			difference_sorted_stream2, intersection, intersection_sorted,
 			intersection_sorted_stream2,
 		},
+		stream::TryTools,
 		sys::page_size,
 		time::pretty,
 		two_phase_counter::Counter,
@@ -551,4 +552,18 @@ fn budget_skips_items_past_the_limit() {
 		.collect();
 
 	assert_eq!(kept, [4, 6]);
+}
+
+#[tokio::test]
+async fn try_unzip_partial_keeps_every_pair_and_error() {
+	let items = [Ok((1, 'a')), Err(Error::Arithmetic("unread".into())), Ok((2, 'b'))];
+	let ((numbers, letters), errors): ((Vec<_>, Vec<_>), Vec<_>) = items
+		.into_iter()
+		.stream()
+		.try_unzip_partial()
+		.await;
+
+	assert_eq!(numbers, [1, 2]);
+	assert_eq!(letters, ['a', 'b']);
+	assert!(matches!(errors.as_slice(), [Error::Arithmetic(_)]));
 }

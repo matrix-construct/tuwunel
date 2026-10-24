@@ -6,7 +6,7 @@ use tuwunel_core::{
 	Err, Result, Server,
 	config::{Config, Figment, Sources},
 	log::{LogLevelReloadHandles, Logging},
-	utils::{TryReadyExt, result::NotFound},
+	utils::{ReadyExt, result::NotFound},
 };
 use tuwunel_database::{Database, Txn, TxnError};
 
@@ -813,14 +813,18 @@ async fn identity_only_heal_invalidates_space_summaries() -> Result {
 	db["shortstatehash_statediff"].insert(&41_u64.to_be_bytes(), words(&[0, 21, 31]));
 	db["roomid_shortstatehash"].insert(space, 41_u64.to_be_bytes());
 	db["roomid_spacehierarchy"].insert(space, b"cached summary");
-	assert_eq!(space_child_count(services, space).await?, 0, "unresolvable child is omitted");
+	assert_eq!(
+		space_child_counts(services, space).await,
+		(0, 1),
+		"unresolvable child is reported, not listed"
+	);
 
 	repair_identities(services).await?;
 	assert_absent(db, "roomid_spacehierarchy", space, "heal-only repair clears summaries").await;
 	assert_stored(db, "shorteventid_eventid", &31_u64.to_be_bytes(), b"$child:example.org")
 		.await?;
 
-	assert_eq!(space_child_count(services, space).await?, 1, "healed child is enumerated");
+	assert_eq!(space_child_counts(services, space).await, (1, 0), "healed child is listed");
 
 	Ok(())
 }
@@ -935,10 +939,17 @@ fn relation_key() -> Vec<u8> { [words(&[1, 2]), vec![1], words(&[3, 4])].concat(
 
 fn interrupted<T>(result: Result<T>) -> bool { result.is_err_and(|error| error.is_interrupted()) }
 
-async fn space_child_count(services: &Services, space: &RoomId) -> Result<usize> {
+/// Counts the space's child entries that resolve and those reported as failed.
+///
+/// The pair is `(listed, failed)`; an entry whose short IDs cannot be resolved
+/// counts as failed.
+async fn space_child_counts(services: &Services, space: &RoomId) -> (usize, usize) {
 	services
 		.state_accessor
 		.room_state_keys_with_ids(space, &StateEventType::SpaceChild)
-		.ready_try_fold(0_usize, |count, _| Ok(count.saturating_add(1)))
+		.ready_fold((0_usize, 0_usize), |(listed, failed), entry| match entry {
+			| Ok(_) => (listed.saturating_add(1), failed),
+			| Err(_) => (listed, failed.saturating_add(1)),
+		})
 		.await
 }

@@ -43,6 +43,8 @@ const CALL_MEMBER: &str = "org.matrix.msc3401.call.member";
 const NAME: &str = "m.room.name";
 const COUNTED_KEY: &str = "counted";
 const OUTLIER_KEY: &str = "outlier";
+const EVENT_IDS: &str = "shorteventid_eventid";
+const STATE_KEYS: &str = "shortstatekey_statekey";
 
 /// One room's sliding sync replies, each checked for its required state.
 ///
@@ -222,6 +224,91 @@ async fn unreadable(services: &Services, base: &str) -> Result {
 		.expect_next(Some(&widened), &wide, &[missing.as_str()], "widened outlier stored")
 		.await
 		.map(drop)
+}
+
+/// Sends state whose short ID mapping could not be read, once it reads again.
+///
+/// A wildcard selector lists a type's state through its short ID mappings, and
+/// an entry whose mapping cannot be read is left out of the reply. The event
+/// arrives on the first state change after the mapping is restored, whether its
+/// event ID or its state key failed to resolve.
+#[test]
+fn unmapped_state_is_sent_once_mapped() -> Result {
+	boot("sync-v5-unmapped-state", ["log_enable=false"], unmapped)
+}
+
+async fn unmapped(services: &Services, base: &str) -> Result {
+	let user = register(services, "unmapped", TOKEN).await?;
+	let client = Client { services, base, token: TOKEN };
+	let room = client
+		.create_room(&json!({ "preset": "public_chat" }))
+		.await?;
+
+	let outlier = install_outlier(services, &user, &room, 1).await?;
+	let short_event_id = services
+		.short
+		.get_shorteventid(&outlier)
+		.await?
+		.to_be_bytes();
+
+	let event_id = unmap(services, EVENT_IDS, &short_event_id).await?;
+	let request = sync_request("*");
+	let replies = Replies { client: &client, room: &room };
+	let initial = replies
+		.expect_next(None, &request, &[], "unmapped event ID")
+		.await?;
+
+	services.db[EVENT_IDS].insert(&short_event_id, event_id);
+	client.set_topic(&room, "event ID mapped").await?;
+
+	let mapped = replies
+		.expect_next(Some(&initial), &request, &[outlier.as_str()], "event ID mapped")
+		.await?;
+
+	let replaced = install_outlier(services, &user, &room, 2).await?;
+	let short_state_key = services
+		.short
+		.get_shortstatekey(&CALL_MEMBER.into(), OUTLIER_KEY)
+		.await?
+		.to_be_bytes();
+
+	let type_and_key = unmap(services, STATE_KEYS, &short_state_key).await?;
+
+	client
+		.set_topic(&room, "beside an unmapped state key")
+		.await?;
+
+	let hidden = replies
+		.expect_next(Some(&mapped), &request, &[], "unmapped state key")
+		.await?;
+
+	services.db[STATE_KEYS].insert(&short_state_key, type_and_key);
+	client
+		.set_topic(&room, "state key mapped")
+		.await?;
+
+	let remapped = replies
+		.expect_next(Some(&hidden), &request, &[replaced.as_str()], "state key mapped")
+		.await?;
+
+	client.set_topic(&room, "read in full").await?;
+
+	replies
+		.expect_next(Some(&remapped), &request, &[], "snapshot recorded again")
+		.await
+		.map(drop)
+}
+
+/// Remove one row of a short ID reverse mapping, returning its value.
+///
+/// Writing the value back under the same key restores the mapping.
+async fn unmap(services: &Services, name: &str, key: &[u8]) -> Result<Vec<u8>> {
+	let map = &services.db[name];
+	let value = map.get(key).await?.to_vec();
+
+	map.remove(key);
+
+	Ok(value)
 }
 
 /// Sign a state event and install it as current state without a timeline

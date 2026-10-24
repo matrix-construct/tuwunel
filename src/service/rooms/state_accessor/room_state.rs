@@ -1,8 +1,8 @@
 //! Resolves the current state snapshot for a room.
 //!
 //! These adapters obtain a room's current short-state hash and delegate to the
-//! historical snapshot readers. Stream variants surface a missing room snapshot
-//! while retaining the delegated readers' best-effort item behavior.
+//! historical snapshot readers. Stream variants yield a missing room snapshot as
+//! an error and otherwise pass the delegated reader's items through unchanged.
 
 use futures::{Stream, StreamExt, TryFutureExt};
 use ruma::{OwnedEventId, RoomId, events::StateEventType};
@@ -109,8 +109,8 @@ pub async fn room_state_get_id(
 
 /// Streams state keys and event IDs for one current state event type.
 ///
-/// Failure to resolve the current snapshot is yielded as an error. Individual
-/// short-ID mapping failures are omitted by the best-effort inner stream.
+/// Failure to resolve the current snapshot, to load it, or to resolve an
+/// entry's short IDs is yielded as an error beside the entries that resolved.
 #[implement(super::Service)]
 #[tracing::instrument(skip(self), level = "debug")]
 pub fn room_state_keys_with_ids<'a>(
@@ -121,10 +121,7 @@ pub fn room_state_keys_with_ids<'a>(
 	self.services
 		.state
 		.get_room_shortstatehash(room_id)
-		.map_ok(|shortstatehash| {
-			self.state_keys_with_ids(shortstatehash, event_type)
-				.map(Ok)
-		})
+		.map_ok(|shortstatehash| self.state_keys_with_ids(shortstatehash, event_type))
 		.map_err(move |e| err!(Database("Missing state for {room_id:?}: {e:?}")))
 		.try_flatten_stream()
 }

@@ -2,7 +2,7 @@
 #![expect(clippy::type_complexity)]
 
 use futures::{
-	TryStream, TryStreamExt, future,
+	StreamExt, TryStream, TryStreamExt, future,
 	future::{Ready, ready},
 	stream::TryTakeWhile,
 };
@@ -12,7 +12,8 @@ use crate::Result;
 /// Adds general-purpose operations to fallible streams.
 ///
 /// Operations preserve the source error type and process successful items in
-/// source order. They support limiting the stream and collecting successful pairs.
+/// source order. They support limiting the stream and collecting successful
+/// pairs, with or without the errors beside them.
 pub trait TryTools<T, E, S>
 where
 	S: TryStream<Ok = T, Error = E, Item = Result<T, E>> + ?Sized,
@@ -39,6 +40,17 @@ where
 	fn try_unzip<FromA, FromB>(self) -> impl Future<Output = Result<(FromA, FromB), S::Error>>
 	where
 		(FromA, FromB): Default + Extend<T>;
+
+	/// Collects successful pairs into two collections and every error into a third.
+	///
+	/// Collections are extended in source order, starting from their defaults.
+	/// Unlike [`Self::try_unzip`], an error does not end the fold.
+	fn try_unzip_partial<FromA, FromB, FromE>(
+		self,
+	) -> impl Future<Output = ((FromA, FromB), FromE)>
+	where
+		(FromA, FromB): Default + Extend<T>,
+		FromE: Default + Extend<E>;
 }
 
 impl<T, E, S> TryTools<T, E, S> for S
@@ -71,5 +83,26 @@ where
 			collections.extend([item]);
 			ready(Ok(collections))
 		})
+	}
+
+	#[inline]
+	fn try_unzip_partial<FromA, FromB, FromE>(
+		self,
+	) -> impl Future<Output = ((FromA, FromB), FromE)>
+	where
+		(FromA, FromB): Default + Extend<T>,
+		FromE: Default + Extend<E>,
+	{
+		self.into_stream().fold(
+			<((FromA, FromB), FromE)>::default(),
+			|(mut collections, mut errors), item| {
+				match item {
+					| Ok(item) => collections.extend([item]),
+					| Err(error) => errors.extend([error]),
+				}
+
+				ready((collections, errors))
+			},
+		)
 	}
 }
