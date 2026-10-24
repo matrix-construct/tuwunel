@@ -39,13 +39,16 @@ type Exchange = (String, Result<String>);
 #[test]
 fn refresh_device_lock() -> Result {
 	let quiet = "log_enable=false";
+	let grace = "refresh_token_reuse_grace=3600";
+	let ttl = "refresh_token_ttl=2";
+	let absolute = "refresh_token_idle_only=false";
 
-	boot("refresh-device-lock", ["refresh_token_reuse_grace=3600", quiet], with_grace)?;
+	boot("refresh-device-lock", [grace, quiet], with_grace)?;
 	boot("refresh-reuse", ["refresh_token_reuse_grace=0", quiet], reuse_without_grace)?;
-	boot("refresh-soft-expiry", ["refresh_token_ttl=2", quiet], soft_expiry)?;
+	boot("refresh-soft-expiry", [ttl, absolute, grace, quiet], soft_expiry)?;
 	boot(
 		"refresh-hard-expiry",
-		["refresh_token_ttl=2", "refresh_token_hard_logout=true", quiet],
+		[ttl, absolute, grace, "refresh_token_hard_logout=true", quiet],
 		hard_expiry,
 	)
 }
@@ -54,6 +57,7 @@ async fn with_grace(services: &Services, _base: &str) -> Result {
 	removed_device_is_issued_no_tokens(services).await?;
 	concurrent_refreshes_keep_one_successor(services).await?;
 	stale_grace_is_refused(services).await?;
+	grace_without_successor_is_refused(services).await?;
 	refused_gate_spends_nothing(services).await?;
 	contenders_wait_for_the_device_lock(services).await?;
 	metadata_updates_keep_removal(services).await
@@ -122,9 +126,9 @@ async fn concurrent_refreshes_keep_one_successor(services: &Services) -> Result 
 async fn stale_grace_is_refused(services: &Services) -> Result {
 	let device = device_id!("STALEGRACEDEVICE");
 	let (_, original) = session(services, "stalegrace", device).await?;
-	let (_, successor) = refresh(services, &original).await?;
+	let successor = refreshed_token(services, &original).await?;
 	let seen = classify(services, &original).await;
-	let (_, latest) = refresh(services, &successor?).await?;
+	let latest = refreshed_token(services, &successor).await?;
 	let (access, kept) = exchange(services, &seen, &original).await?;
 
 	if !seen.exchangeable()
@@ -134,8 +138,40 @@ async fn stale_grace_is_refused(services: &Services) -> Result {
 		return Err!("a stale grace classification was exchanged");
 	}
 
-	if !is_current(services, &latest?).await {
+	if !is_current(services, &latest).await {
 		return Err!("the refused refresh disturbed the device's current token");
+	}
+
+	Ok(())
+}
+
+/// A spent token presented again inside the grace window is refused as
+/// unrecognized once its successor no longer resolves, as presenting the
+/// successor is.
+///
+/// Retiring the successor as an access token leaves the device pointing at it,
+/// and the refusals leave the device in place.
+async fn grace_without_successor_is_refused(services: &Services) -> Result {
+	let device = device_id!("RETIREDDEVICE");
+	let (user, original) = session(services, "retired", device).await?;
+	let successor = refreshed_token(services, &original).await?;
+
+	services
+		.users
+		.remove_access_token_value(&successor)
+		.await;
+
+	let seen = classify(services, &original).await;
+	let (access, replay) = exchange(services, &seen, &original).await?;
+	let (_, successor_outcome) = refresh(services, &successor).await?;
+
+	if !matches!(seen, RefreshToken::Unknown)
+		|| !refused_with(&replay, &ErrorKind::forbidden())
+		|| !refused_with(&successor_outcome, &ErrorKind::forbidden())
+		|| resolves(services, &access).await
+		|| !services.users.device_exists(&user, device).await
+	{
+		return Err!("a grace replay whose successor no longer resolves was not refused alone");
 	}
 
 	Ok(())
@@ -154,9 +190,9 @@ async fn refused_gate_spends_nothing(services: &Services) -> Result {
 		return Err!("a refused account check let a current token through or spent it");
 	}
 
-	let (_, successor) = refresh(services, &original).await?;
+	let successor = refreshed_token(services, &original).await?;
 
-	if !locked_out(services, &original, &successor?).await? {
+	if !locked_out(services, &original, &successor).await? {
 		return Err!("a refused account check let a spent token through or lost its successor");
 	}
 
@@ -341,40 +377,95 @@ async fn reuse_without_grace(services: &Services, _base: &str) -> Result {
 }
 
 async fn soft_expiry(services: &Services, _base: &str) -> Result {
-	expiry_while_waiting(services, false).await
+	expiry_while_waiting(services, false).await?;
+	grace_after_deadline(services, false).await
 }
 
 async fn hard_expiry(services: &Services, _base: &str) -> Result {
-	expiry_while_waiting(services, true).await
+	expiry_while_waiting(services, true).await?;
+	grace_after_deadline(services, true).await
 }
 
 /// A refresh that found its token current is refused when the token has
 /// expired by the time it holds the device lock.
 ///
-/// Soft logout retires only the refresh token and hard logout the device. The
-/// wait outlasts the configured `refresh_token_ttl`.
+/// Soft logout retires only the refresh token and hard logout the device.
 async fn expiry_while_waiting(services: &Services, hard: bool) -> Result {
 	let device = device_id!("EXPIRYDEVICE");
-	let (user, original) = session(services, "expiry", device).await?;
+	let (_, original) = session(services, "expiry", device).await?;
 	let seen = classify(services, &original).await;
 	let exchangeable = seen.exchangeable();
-	let ttl = services.server.config.refresh_token_ttl;
 
-	sleep(Duration::from_secs(ttl.saturating_add(1))).await;
+	outlast_ttl(services).await;
 
-	let (access, expired) = exchange(services, &seen, &original).await?;
-	let kept = services.users.device_exists(&user, device).await;
-
-	if !exchangeable
-		|| !refused(&expired, !hard)
-		|| resolves(services, &access).await
-		|| resolves(services, &original).await
-		|| kept == hard
-	{
+	if !exchangeable || !logged_out(services, &seen, &original, &original, hard).await? {
 		return Err!("an expired refresh token was exchanged or left in place");
 	}
 
 	Ok(())
+}
+
+/// A spent token presented again inside the grace window is refused with the
+/// configured logout once the deadline its successor inherited has passed.
+///
+/// Before the deadline the same replay keeps the successor.
+async fn grace_after_deadline(services: &Services, hard: bool) -> Result {
+	let device = device_id!("DEADLINEDEVICE");
+	let (_, original) = session(services, "deadline", device).await?;
+	let successor = refreshed_token(services, &original).await?;
+	let replayed = refreshed_token(services, &original).await?;
+
+	if replayed != successor {
+		return Err!("a grace replay before the deadline did not keep the successor");
+	}
+
+	outlast_ttl(services).await;
+
+	let seen = classify(services, &original).await;
+
+	if !matches!(seen, RefreshToken::Replayed { grace: true, .. })
+		|| seen.exchangeable()
+		|| !logged_out(services, &seen, &original, &successor, hard).await?
+	{
+		return Err!("a grace replay past the deadline was exchanged or left in place");
+	}
+
+	Ok(())
+}
+
+/// Waits until a refresh token issued before the call has expired.
+///
+/// The wait outlasts the configured `refresh_token_ttl`.
+async fn outlast_ttl(services: &Services) {
+	let ttl = services.server.config.refresh_token_ttl;
+
+	sleep(Duration::from_secs(ttl.saturating_add(1))).await;
+}
+
+/// Exchanges `presented`, classified as `seen`, and reports whether it was
+/// refused with the logout `hard` selects.
+///
+/// Neither the access token it offered nor `retired` may resolve afterwards,
+/// and the device remains only under soft logout.
+async fn logged_out(
+	services: &Services,
+	seen: &RefreshToken,
+	presented: &str,
+	retired: &str,
+	hard: bool,
+) -> Result<bool> {
+	let Some((user, device)) = seen.owner() else {
+		return Ok(false);
+	};
+
+	let (access, outcome) = exchange(services, seen, presented).await?;
+	let kept = services.users.device_exists(user, device).await;
+	let refused_and_retired = refused(&outcome, !hard)
+		&& !resolves(services, &access).await
+		&& !resolves(services, retired).await
+		&& kept != hard;
+
+	Ok(refused_and_retired)
 }
 
 async fn session(
@@ -406,6 +497,16 @@ async fn session(
 /// arrives.
 async fn classify(services: &Services, token: &str) -> RefreshToken {
 	services.users.classify_refresh_token(token).await
+}
+
+/// Refreshes `presented` and returns the refresh token the exchange keeps.
+///
+/// The access token it offered is dropped, and a refused exchange fails the
+/// call.
+async fn refreshed_token(services: &Services, presented: &str) -> Result<String> {
+	refresh(services, presented)
+		.await
+		.and_then(|(_, kept)| kept)
 }
 
 /// Exchanges a refresh token for a request that classifies it on arrival, with

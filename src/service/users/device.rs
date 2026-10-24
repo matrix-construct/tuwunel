@@ -292,9 +292,9 @@ pub async fn set_access_token(
 /// and its device revoked when so configured. Otherwise the token is classified
 /// again under the device lock, where a current one rotates and a spent one
 /// inside the grace window keeps its successor, each once `gate`, the caller's
-/// account check, passes. One that expired meanwhile is refused with the
-/// configured logout, and one spent meanwhile by a concurrent exchange is
-/// refused alone.
+/// account check, passes. One found expired, or spent inside the grace window
+/// with an expired successor, is refused with the configured logout, and one
+/// spent meanwhile by a concurrent exchange is refused alone.
 #[implement(super::Service)]
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn rotate_refresh_token<Gate>(
@@ -330,7 +330,8 @@ where
 		| RefreshToken::Unknown =>
 			return Err!(Request(Forbidden("Refresh token is unrecognized."))),
 
-		| RefreshToken::Current { .. } if !exchangeable =>
+		| RefreshToken::Current { .. } | RefreshToken::Replayed { grace: true, .. }
+			if !exchangeable =>
 			return self
 				.expire_refresh_token(&lock, user_id, device_id)
 				.map(Err)
@@ -389,14 +390,15 @@ fn owned_by(self, user_id: &UserId, device_id: &DeviceId) -> Self {
 /// Whether the token may be exchanged for new tokens as classified.
 ///
 /// A current token qualifies until it expires, and a spent one only inside the
-/// reuse grace window.
+/// reuse grace window and until its successor expires.
 #[implement(RefreshToken)]
 #[must_use]
 pub fn exchangeable(&self) -> bool {
 	match self {
-		| Self::Current { expires_at, .. } => !expires_at.is_some_and(timepoint_has_passed),
-		| Self::Replayed { grace, .. } => *grace,
-		| Self::Unknown => false,
+		| Self::Current { expires_at, .. } | Self::Replayed { grace: true, expires_at, .. } =>
+			!expires_at.is_some_and(timepoint_has_passed),
+
+		| Self::Replayed { .. } | Self::Unknown => false,
 	}
 }
 
@@ -735,22 +737,40 @@ async fn forget_spent_refresh_token(
 
 /// Classification of a refresh token presented for rotation at a token
 /// endpoint.
+///
+/// A token endpoint classifies the token on arrival to find its device, and the
+/// exchange classifies it again under that device's lock.
 pub enum RefreshToken {
 	/// The device's current refresh token; rotate it.
 	Current {
+		/// The user the token was issued to.
 		user_id: OwnedUserId,
+
+		/// The device the token was issued to.
 		device_id: OwnedDeviceId,
+
+		/// The token's deadline, past which it is no longer exchangeable.
 		expires_at: Option<SystemTime>,
 	},
 
-	/// A spent (already-rotated) token retained for one generation. `grace` is
-	/// set when its successor is still current and it was spent within the
-	/// configured window, marking a benign double-submit rather than a replay;
-	/// `current` is the successor for which to re-issue an access token.
+	/// A spent (already-rotated) token retained for one generation.
 	Replayed {
+		/// The user the token was issued to.
 		user_id: OwnedUserId,
+
+		/// The device the token was issued to.
 		device_id: OwnedDeviceId,
+
+		/// The successor, for which to re-issue an access token.
 		current: String,
+
+		/// The successor's deadline, past which this token is no longer
+		/// exchangeable; read only when `grace` is set.
+		expires_at: Option<SystemTime>,
+
+		/// Set when the successor is still current and this token was spent
+		/// within the configured window, marking a benign double-submit rather
+		/// than a replay.
 		grace: bool,
 	},
 
@@ -759,6 +779,10 @@ pub enum RefreshToken {
 }
 
 /// Classify a presented refresh token for the token-endpoint rotation path.
+///
+/// A current token carries its own expiry, and the one retained spent token its
+/// successor, with that successor's expiry when `grace` is set. A grace replay
+/// whose successor no longer resolves is unknown, as is anything else.
 #[implement(super::Service)]
 pub async fn classify_refresh_token(&self, presented: &str) -> RefreshToken {
 	// The current refresh token resolves and matches the device's active
@@ -810,10 +834,20 @@ pub async fn classify_refresh_token(&self, presented: &str) -> RefreshToken {
 		&& elapsed <= grace_window
 		&& current.as_deref() == Some(successor.as_str());
 
+	// A successor that no longer resolves makes this unknown, as presenting it would.
+	let Ok(resolved) = grace
+		.then_async(|| self.find_from_token(&successor))
+		.map(Option::transpose)
+		.await
+	else {
+		return RefreshToken::Unknown;
+	};
+
 	RefreshToken::Replayed {
 		user_id,
 		device_id,
 		current: successor,
+		expires_at: resolved.and_then(at!(2)),
 		grace,
 	}
 }
