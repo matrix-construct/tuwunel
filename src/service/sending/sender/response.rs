@@ -180,7 +180,7 @@ fn fail_status(dest: &Destination, statuses: &mut TransactionStatuses) -> RetryA
 fn log_failure(dest: &Destination, error: &Error, statuses: &TransactionStatuses) {
 	match statuses.get(dest) {
 		| Some(TransactionStatus::Retrying { tries: 1 }) if is_content_rejection(error) => {
-			warn!(?dest, chain = %error_chain(error), "Transaction failed")
+			warn!(?dest, chain = %error_chain(error), "Transaction failed");
 		},
 		| _ => debug!(?dest, chain = %error_chain(error), "Transaction failed"),
 	}

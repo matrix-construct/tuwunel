@@ -35,10 +35,7 @@ pub mod api {
 
 	use ruma::{
 		OwnedEventId, OwnedRoomId,
-		api::{
-			auth_scheme::NoAuthentication, federation::authentication::ServerSignatures,
-			metadata, request, response,
-		},
+		api::{metadata, request, response},
 	};
 
 	pub mod version {
@@ -532,7 +529,7 @@ impl Reconcile {
 		event_ids.shuffle(&mut rand::rng());
 		event_ids.truncate(MAX_EVENT_FETCHES);
 		let sample_count = event_ids.len().min(SAMPLE_FETCHES);
-		let mut failed_sample = 0;
+		let mut failed_sample: usize = 0;
 		let mut fetched = Vec::new();
 		for (index, event_id) in event_ids.into_iter().enumerate() {
 			let key = (peer.to_owned(), event_id.clone());
@@ -656,7 +653,7 @@ fn bucket_prefix(hash: u64, depth: u8) -> u64 {
 	if depth == 0 {
 		0
 	} else {
-		hash.checked_shr(64_u32.checked_sub(u32::from(depth)).unwrap_or(0))
+		hash.checked_shr(64_u32.saturating_sub(u32::from(depth)))
 			.unwrap_or(0)
 	}
 }

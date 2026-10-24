@@ -138,7 +138,7 @@ pub async fn join<'a>(
 				extra_content,
 			)
 			.boxed() // cold arm: remote join
-			.await?
+			.await?;
 		},
 		| federation_lock => {
 			drop(federation_lock);
