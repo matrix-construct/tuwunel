@@ -3020,14 +3020,18 @@
 #auto_accept_invites_local_only = false
 
 # Enforce MSC4311 validation of the create event in federated invite and
-# knock stripped state. When enabled, an invite whose m.room.create event
-# is missing, not a full PDU, bound to a different room, or fails
-# signature checks is rejected, and such events are dropped from knock
-# stripped state. When disabled (the default), failures are logged but
-# tolerated to preserve interoperability during ecosystem migration; a
-# create event that is present as a full PDU but cryptographically bound
-# to a different room is always rejected for room version 12 and above
-# regardless of this setting.
+# knock stripped state.
+#
+# When enabled, an invite whose m.room.create event is missing, not a
+# full PDU, bound to a different room, or fails signature checks is
+# rejected, and such events are dropped from knock stripped state. When
+# disabled (the default), failures are logged but tolerated to preserve
+# interoperability during ecosystem migration; a create event that is
+# present as a full PDU but cryptographically bound to a different room is
+# always rejected for room version 12 and above regardless of this
+# setting. A full PDU in knock stripped state that fails its checks is
+# always omitted, so for knocks this setting governs only a create sent in
+# the legacy stripped form.
 #
 # reloadable: yes
 #

@@ -127,17 +127,20 @@ pub fn without_member(
 ) -> impl Iterator<Item = RawStrippedState> {
 	state
 		.into_iter()
-		.filter(move |entry| !occupies_member_cell(entry, user_id))
+		.filter(move |entry| !occupies_cell(entry, &StateEventType::RoomMember, user_id.as_str()))
 }
 
 fn state_cell(state: &RawStrippedState) -> Option<StateCell> {
 	cell(state).map(|cell| (cell.kind.as_ref().into(), cell.state_key.as_ref().into()))
 }
 
-fn occupies_member_cell(state: &RawStrippedState, user_id: &UserId) -> bool {
+pub(super) fn occupies_cell(
+	state: &RawStrippedState,
+	kind: &StateEventType,
+	state_key: &str,
+) -> bool {
 	cell(state).is_some_and(|cell| {
-		StateEventType::from(cell.kind.as_ref()) == StateEventType::RoomMember
-			&& cell.state_key == user_id.as_str()
+		cell.state_key == state_key && StateEventType::from(cell.kind.as_ref()) == *kind
 	})
 }
 
@@ -290,8 +293,7 @@ mod tests {
 	use serde_json::{Value as JsonValue, json, value::RawValue as RawJsonValue};
 
 	use super::{
-		dedup_stripped_state, entry_json, is_legacy, occupies_member_cell, state_cell,
-		without_member,
+		dedup_stripped_state, entry_json, is_legacy, occupies_cell, state_cell, without_member,
 	};
 
 	#[test]
@@ -382,11 +384,15 @@ mod tests {
 			   "sender":"@forged:example.org","content":{"membership":"invite"}}"#,
 		);
 
-		assert!(occupies_member_cell(&escaped, user_id!("@invitee:example.org")));
+		let invitee = user_id!("@invitee:example.org");
 
-		let mut kept = without_member(vec![escaped], user_id!("@invitee:example.org"));
+		assert!(occupies_cell(&escaped, &StateEventType::RoomMember, invitee.as_str()));
 
-		assert!(kept.next().is_none());
+		assert!(
+			without_member(vec![escaped], invitee)
+				.next()
+				.is_none()
+		);
 	}
 
 	fn legacy(event: &JsonValue) -> RawStrippedState {
