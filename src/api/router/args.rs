@@ -6,7 +6,14 @@ use bytes::{BufMut, Bytes, BytesMut};
 use http::{Method, Request as HttpRequest};
 use ruma::{
 	CanonicalJsonObject, CanonicalJsonValue, DeviceId, OwnedDeviceId, OwnedServerName,
-	OwnedUserId, ServerName, UserId, api::IncomingRequest,
+	OwnedUserId, ServerName, UserId,
+	api::{
+		IncomingRequest,
+		client::media::{
+			create_content::v3::Request as UploadRequest,
+			create_content_async::v3::Request as AsyncUploadRequest,
+		},
+	},
 };
 use serde_json::{Value as JsonValue, from_slice};
 use tuwunel_core::{Error, Result, err, implement, utils::string::EMPTY};
@@ -117,14 +124,15 @@ where
 		request: HttpRequest<Body>,
 		services: &State,
 	) -> Result<Self, Self::Rejection> {
+		let route = TypeId::of::<T>();
 		let request = request_from(services, request).await?;
 		let json_body = match ADMIN {
-			| true => parse_json(&request),
-			| false => Ok(parse_json(&request)?),
+			| true => parse_json(&request, route),
+			| false => Ok(parse_json(&request, route)?),
 		};
 
 		let json = json_body.as_ref().ok().and_then(Option::as_ref);
-		let (request, auth) = authenticate::<T>(request, services, json).await?;
+		let (request, auth) = authenticate::<T>(request, services, json, route).await?;
 
 		_ = request
 			.parts
@@ -166,15 +174,10 @@ fn record_auth_context(span: &tracing::Span, auth: &Auth) {
 
 /// Parses canonical JSON while retaining ordinary JSON for typed deserialization.
 ///
-/// Media namespace bodies are not parsed and pass through unchanged.
-/// Empty POST and DELETE bodies on JSON endpoints become objects for UIA.
-fn parse_json(request: &Request) -> Result<Option<CanonicalJsonValue>> {
-	if request
-		.parts
-		.uri
-		.path()
-		.starts_with("/_matrix/media/")
-	{
+/// A raw-body route's bytes are never parsed and pass through unchanged. Empty
+/// POST and DELETE bodies on other routes become objects for UIA.
+fn parse_json(request: &Request, route: TypeId) -> Result<Option<CanonicalJsonValue>> {
+	if takes_raw_body(route) {
 		return Ok(None);
 	}
 
@@ -182,7 +185,7 @@ fn parse_json(request: &Request) -> Result<Option<CanonicalJsonValue>> {
 	let json_endpoint = matches!(
 		request.parts.method,
 		Method::POST | Method::PUT | Method::DELETE | Method::PATCH
-	) && !request.parts.uri.path().contains("/media/");
+	);
 
 	if json_body.is_some() || !json_endpoint {
 		return Ok(json_body);
@@ -201,6 +204,15 @@ fn parse_json(request: &Request) -> Result<Option<CanonicalJsonValue>> {
 	Ok(empty_object)
 }
 
+/// Identifies the routes whose request body is an uploaded file, not JSON.
+///
+/// These are the media uploads the specification exempts from JSON request
+/// bodies and the only ruma requests declaring a raw body; a new one belongs
+/// here too, so its bytes are stored and served exactly as sent.
+fn takes_raw_body(route: TypeId) -> bool {
+	route == TypeId::of::<UploadRequest>() || route == TypeId::of::<AsyncUploadRequest>()
+}
+
 /// Authenticates a request while retaining the headers consumed by extraction.
 ///
 /// The parsed canonical body remains available to federation authentication.
@@ -208,13 +220,13 @@ async fn authenticate<T>(
 	mut request: Request,
 	services: &State,
 	json_body: Option<&CanonicalJsonValue>,
+	route: TypeId,
 ) -> Result<(Request, Auth)>
 where
 	T: IncomingRequest + Debug + Send + Sync + 'static,
 	T::Authentication: AuthDispatch,
 {
-	let auth =
-		auth::<T::Authentication>(services, &mut request, json_body, TypeId::of::<T>()).await?;
+	let auth = auth::<T::Authentication>(services, &mut request, json_body, route).await?;
 
 	Ok((request, auth))
 }
