@@ -7,12 +7,14 @@ use std::{
 	time::SystemTime,
 };
 
+use derive_more::Debug;
 use futures::{FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt};
 use ruma::{OwnedUserId, UserId};
 use serde::{Deserialize, Serialize};
 use tuwunel_core::{
 	Err, Result, at, implement,
 	itertools::Itertools,
+	redacted_debug,
 	result::NotFound,
 	utils::{
 		MutexMap,
@@ -65,9 +67,11 @@ pub struct Session {
 	pub token_type: Option<String>,
 
 	/// Access token to the provider.
+	#[debug("{}", redacted_debug!(access_token))]
 	pub access_token: Option<String>,
 
 	/// OIDC ID token returned by the provider.
+	#[debug("{}", redacted_debug!(id_token))]
 	pub id_token: Option<String>,
 
 	/// Duration in seconds the access_token is valid for.
@@ -77,6 +81,7 @@ pub struct Session {
 	pub expires_at: Option<SystemTime>,
 
 	/// Token used to refresh the access_token.
+	#[debug("{}", redacted_debug!(refresh_token))]
 	pub refresh_token: Option<String>,
 
 	/// Duration in seconds the refresh_token is valid for
@@ -92,12 +97,15 @@ pub struct Session {
 	pub redirect_url: Option<Url>,
 
 	/// Challenge preimage
+	#[debug("{}", redacted_debug!(code_verifier))]
 	pub code_verifier: Option<String>,
 
 	/// Random string passed exclusively in the grant session cookie.
+	#[debug("{}", redacted_debug!(cookie_nonce))]
 	pub cookie_nonce: Option<String>,
 
 	/// Random single-use string passed in the provider redirect.
+	#[debug("{}", redacted_debug!(query_nonce))]
 	pub query_nonce: Option<String>,
 
 	/// Point in time the authorization grant session expires.

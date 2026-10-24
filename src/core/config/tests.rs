@@ -739,6 +739,36 @@ fn s3_storage_provider_debug_masks_credentials() {
 }
 
 #[test]
+fn identity_provider_debug_masks_client_secret() {
+	let config = config_from_toml(
+		r#"[[global.identity_provider]]
+brand = "test"
+client_id = "test"
+client_secret = "client-secret-sentinel"
+"#,
+	)
+	.expect("identity provider config should parse");
+
+	let provider = config
+		.identity_provider
+		.values()
+		.next()
+		.expect("one identity provider configured");
+
+	let dump = format!("{provider:#?}");
+
+	assert!(
+		!dump.contains("client-secret-sentinel"),
+		"client_secret leaked in Debug: {dump}"
+	);
+
+	assert!(
+		dump.contains("client_secret: Some(<redacted>)"),
+		"client_secret should appear as Some(<redacted>): {dump}"
+	);
+}
+
+#[test]
 fn reload_accepts_unchanged_none_and_unchanged_some() {
 	let none = default_config();
 	let some = config_from_toml(

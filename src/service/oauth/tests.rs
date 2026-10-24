@@ -3,7 +3,7 @@ use std::{
 	time::{Duration, Instant},
 };
 
-use super::{Ratelimiter, check_bucket_at};
+use super::{Ratelimiter, Session, check_bucket_at};
 
 #[test]
 fn rate_limiter_evicts_oldest_without_exceeding_cap() {
@@ -37,4 +37,43 @@ fn rate_limiter_evicts_oldest_without_exceeding_cap() {
 
 	assert_eq!(buckets.len(), 2, "existing key must not grow the table");
 	assert!(buckets.contains_key(&retained), "existing hit must not evict another bucket");
+}
+
+#[test]
+fn session_debug_masks_credentials() {
+	let secrets = [
+		"access_token",
+		"id_token",
+		"refresh_token",
+		"code_verifier",
+		"cookie_nonce",
+		"query_nonce",
+	];
+
+	let sentinel = |field: &str| format!("{field}-sentinel");
+	let [access_token, id_token, refresh_token, code_verifier, cookie_nonce, query_nonce] =
+		secrets.map(sentinel).map(Some);
+
+	let session = Session {
+		sess_id: Some("visible-session".to_owned()),
+		access_token,
+		id_token,
+		refresh_token,
+		code_verifier,
+		cookie_nonce,
+		query_nonce,
+		..Default::default()
+	};
+
+	let dump = format!("{session:#?}");
+
+	assert!(dump.contains("visible-session"), "sess_id should stay visible: {dump}");
+
+	for field in secrets {
+		assert!(!dump.contains(&sentinel(field)), "{field} leaked in Debug: {dump}");
+		assert!(
+			dump.contains(&format!("{field}: Some(<redacted>)")),
+			"{field} should appear as Some(<redacted>): {dump}"
+		);
+	}
 }

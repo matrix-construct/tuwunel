@@ -4917,6 +4917,7 @@ pub struct IdentityProvider {
 	/// whenever the provider regenerates one for you.
 	///
 	/// display: sensitive
+	#[debug("{}", redacted_debug!(client_secret))]
 	pub client_secret: Option<String>,
 
 	/// Secret key to use, read from the file path specified.
