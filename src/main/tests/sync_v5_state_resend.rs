@@ -3,7 +3,7 @@
 use serde_json::{Map, Value, json, value::to_raw_value};
 use tuwunel_core::{
 	Result, err,
-	ruma::{OwnedEventId, OwnedRoomId, RoomId, UserId},
+	ruma::{CanonicalJsonObject, OwnedEventId, OwnedRoomId, RoomId, UserId},
 	utils::BoolExt,
 };
 use tuwunel_matrix::pdu::PduBuilder;
@@ -34,12 +34,23 @@ mod resume;
 #[path = "client/state.rs"]
 mod state;
 
+#[path = "client/topic.rs"]
+mod topic;
+
 const TOKEN: &str = "sync-v5-state-resend-test-access-token";
 const BYSTANDER_TOKEN: &str = "sync-v5-state-resend-bystander-access-token";
 const CALL_MEMBER: &str = "org.matrix.msc3401.call.member";
-const TOPIC: &str = "m.room.topic";
+const NAME: &str = "m.room.name";
 const COUNTED_KEY: &str = "counted";
 const OUTLIER_KEY: &str = "outlier";
+
+/// One room's sliding sync replies, each checked for its required state.
+///
+/// It carries the test client and the room, so each step of a test is one call.
+struct Replies<'a> {
+	client: &'a Client<'a>,
+	room: &'a RoomId,
+}
 
 /// Delivers state without a timeline position once, then only its changes.
 ///
@@ -66,36 +77,35 @@ async fn outliers(services: &Services, base: &str) -> Result {
 		.await?;
 
 	let outlier = install_outlier(services, &user, &room, 1).await?;
-	let request = sync_request();
-	let initial = client.sync(None, &request).await?;
-
-	expect_state(&initial, &room, &[counted.as_str(), outlier.as_str()], "initial")?;
-
-	client
-		.put_state(&room, TOPIC, "", &json!({ "topic": "unrelated" }))
+	let request = sync_request("*");
+	let replies = Replies { client: &client, room: &room };
+	let initial = replies
+		.expect_next(None, &request, &[counted.as_str(), outlier.as_str()], "initial")
 		.await?;
 
-	let unrelated = client.sync(Some(&initial), &request).await?;
+	client.set_topic(&room, "unrelated").await?;
 
-	expect_state(&unrelated, &room, &[], "unrelated state change")?;
+	let unrelated = replies
+		.expect_next(Some(&initial), &request, &[], "unrelated state change")
+		.await?;
 
 	let recounted = client
 		.put_state(&room, CALL_MEMBER, COUNTED_KEY, &json!({ "revision": 2 }))
 		.await?;
 
-	let changed = client.sync(Some(&unrelated), &request).await?;
-
-	expect_state(&changed, &room, &[recounted.as_str()], "changed counted state")?;
+	let changed = replies
+		.expect_next(Some(&unrelated), &request, &[recounted.as_str()], "changed counted state")
+		.await?;
 
 	let replaced = install_outlier(services, &user, &room, 2).await?;
 
 	client
-		.put_state(&room, TOPIC, "", &json!({ "topic": "after the outlier" }))
+		.set_topic(&room, "after the outlier")
 		.await?;
 
-	let resolved = client.sync(Some(&changed), &request).await?;
-
-	expect_state(&resolved, &room, &[replaced.as_str()], "outlier made current")?;
+	let resolved = replies
+		.expect_next(Some(&changed), &request, &[replaced.as_str()], "outlier made current")
+		.await?;
 
 	forget_delivered_snapshots(services).await?;
 
@@ -105,25 +115,113 @@ async fn outliers(services: &Services, base: &str) -> Result {
 		.send_text(&room, "after-the-outlier", "after the outlier")
 		.await?;
 
-	let messaged = client.sync(Some(&resolved), &request).await?;
-
-	expect_state(&messaged, &room, &[], "message without a snapshot")?;
-
-	client
-		.put_state(&room, TOPIC, "", &json!({ "topic": "before snapshots" }))
+	let messaged = replies
+		.expect_next(Some(&resolved), &request, &[], "message without a snapshot")
 		.await?;
 
-	let legacy = client.sync(Some(&messaged), &request).await?;
-
-	expect_state(&legacy, &room, &[unrecorded.as_str()], "outlier without a snapshot")?;
-
 	client
-		.put_state(&room, TOPIC, "", &json!({ "topic": "recorded again" }))
+		.set_topic(&room, "before snapshots")
 		.await?;
 
-	let recorded = client.sync(Some(&legacy), &request).await?;
+	let legacy = replies
+		.expect_next(
+			Some(&messaged),
+			&request,
+			&[unrecorded.as_str()],
+			"outlier without a snapshot",
+		)
+		.await?;
 
-	expect_state(&recorded, &room, &[], "snapshot recorded again")
+	client.set_topic(&room, "recorded again").await?;
+
+	replies
+		.expect_next(Some(&legacy), &request, &[], "snapshot recorded again")
+		.await
+		.map(drop)
+}
+
+impl Replies<'_> {
+	/// Sync once and fail unless the room came back with exactly the expected
+	/// required state.
+	///
+	/// The reply is returned, so the next step resumes from its position.
+	async fn expect_next(
+		&self,
+		since: Option<&Value>,
+		request: &Value,
+		expected: &[&str],
+		context: &str,
+	) -> Result<Value> {
+		let reply = self.client.sync(since, request).await?;
+
+		expect_state(&reply, self.room, expected, context).map(|()| reply)
+	}
+}
+
+/// Sends state whose event could not be read, on the first state change after
+/// the event is stored.
+///
+/// Current state can name an event whose PDU cannot be read, and the reply
+/// leaves that event out. The event arrives once stored whether it was first
+/// due in a full reply or newly requested by a widened selector.
+#[test]
+fn unreadable_state_is_sent_once_readable() -> Result {
+	boot("sync-v5-unreadable-state", ["log_enable=false"], unreadable)
+}
+
+async fn unreadable(services: &Services, base: &str) -> Result {
+	let user = register(services, "unreadable", TOKEN).await?;
+	let client = Client { services, base, token: TOKEN };
+	let room = client
+		.create_room(&json!({ "preset": "public_chat" }))
+		.await?;
+
+	let (missing, pdu) = install_unreadable_state(services, &user, &room, 1).await?;
+	let wide = sync_request("*");
+	let replies = Replies { client: &client, room: &room };
+	let initial = replies
+		.expect_next(None, &wide, &[], "unreadable outlier")
+		.await?;
+
+	services.timeline.add_pdu_outlier(&missing, &pdu);
+	client.set_topic(&room, "unrelated").await?;
+
+	let stored = replies
+		.expect_next(Some(&initial), &wide, &[missing.as_str()], "outlier stored")
+		.await?;
+
+	client.set_topic(&room, "read in full").await?;
+
+	let recorded = replies
+		.expect_next(Some(&stored), &wide, &[], "snapshot recorded again")
+		.await?;
+
+	let narrow = sync_request(COUNTED_KEY);
+	let narrowed = replies
+		.expect_next(Some(&recorded), &narrow, &[], "narrowed selector")
+		.await?;
+
+	let (missing, pdu) = install_unreadable_state(services, &user, &room, 2).await?;
+
+	client
+		.set_topic(&room, "beside an unread outlier")
+		.await?;
+
+	let unselected = replies
+		.expect_next(Some(&narrowed), &narrow, &[], "unread outlier not selected")
+		.await?;
+
+	let widened = replies
+		.expect_next(Some(&unselected), &wide, &[], "widened onto an unread outlier")
+		.await?;
+
+	services.timeline.add_pdu_outlier(&missing, &pdu);
+	client.set_topic(&room, "after widening").await?;
+
+	replies
+		.expect_next(Some(&widened), &wide, &[missing.as_str()], "widened outlier stored")
+		.await
+		.map(drop)
 }
 
 /// Sign a state event and install it as current state without a timeline
@@ -138,6 +236,23 @@ async fn install_outlier(
 	room: &RoomId,
 	revision: u64,
 ) -> Result<OwnedEventId> {
+	let (event_id, pdu) = install_unreadable_state(services, user, room, revision).await?;
+
+	services.timeline.add_pdu_outlier(&event_id, &pdu);
+
+	Ok(event_id)
+}
+
+/// Sign a state event and install it as current state without storing its PDU.
+///
+/// The state names an event whose PDU cannot be read; storing the returned PDU
+/// as an outlier makes it readable under the same ID.
+async fn install_unreadable_state(
+	services: &Services,
+	user: &UserId,
+	room: &RoomId,
+	revision: u64,
+) -> Result<(OwnedEventId, CanonicalJsonObject)> {
 	let event = PduBuilder {
 		event_type: CALL_MEMBER.into(),
 		content: to_raw_value(&json!({ "revision": revision }))?.into(),
@@ -151,24 +266,26 @@ async fn install_outlier(
 		.create_hash_and_sign_event(event, user, room, &state_lock)
 		.await?;
 
-	services
-		.timeline
-		.add_pdu_outlier(&pdu.event_id, &pdu_json);
-
 	let shortstatehash = services.state.append_to_state(&pdu).await?;
 
 	services
 		.state
 		.set_room_state(room, shortstatehash, &state_lock);
 
-	Ok(pdu.event_id)
+	Ok((pdu.event_id, pdu_json))
 }
 
-fn sync_request() -> Value {
+/// A request for the call member state under one state key, or all of it.
+///
+/// It also asks for a room name these rooms never set, so every reply looks up
+/// a key that current state does not hold; a missing key is not an unread event.
+fn sync_request(state_key: &str) -> Value {
 	json!({
 		"conn_id": "state-resend",
 		"lists": { "all": {
-			"ranges": [[0, 9]], "required_state": [[CALL_MEMBER, "*"]], "timeline_limit": 1,
+			"ranges": [[0, 9]],
+			"required_state": [[CALL_MEMBER, state_key], [NAME, ""]],
+			"timeline_limit": 1,
 		} },
 	})
 }
@@ -212,7 +329,7 @@ async fn retries(services: &Services, base: &str) -> Result {
 	let bystander = Client { services, base, token: BYSTANDER_TOKEN };
 	let busy = room_with_call_member(&client).await?;
 	let quiet = room_with_call_member(&client).await?;
-	let request = sync_request();
+	let request = sync_request("*");
 	let initial = client.sync(None, &request).await?;
 	let message_id = client.send_text(&busy, "news", "news").await?;
 	let answered = client.sync(Some(&initial), &request).await?;

@@ -101,8 +101,9 @@ pub struct Room {
 
 	/// Snapshot the delivered required state was read against.
 	///
-	/// Zero when unknown, as for a room recorded by an older build: its deltas
-	/// compare against the cursor and resend outliers until a delivery records one.
+	/// Zero when unknown, as for a room recorded by an older build or delivered
+	/// without reading every event its required state named: its deltas compare
+	/// against the cursor and resend outliers until a delivery records one.
 	#[serde(default)]
 	pub shortstatehash: ShortStateHash,
 

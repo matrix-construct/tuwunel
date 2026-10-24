@@ -7,7 +7,7 @@ mod tests;
 use std::collections::{BTreeMap, HashSet};
 
 use futures::{
-	FutureExt, StreamExt, TryFutureExt,
+	FutureExt, StreamExt, TryFutureExt, TryStreamExt,
 	future::{join, join3, join4},
 };
 use ruma::{
@@ -57,7 +57,7 @@ use super::{
 	super::{load_timeline_fallible, stand_in_leave, strip_prev_state},
 	Connection, ListIds, SyncInfo, WindowRoom,
 };
-use crate::{annotate_membership, ignored_filter, with_membership};
+use crate::{ignored_filter, with_membership};
 
 #[derive(Debug)]
 pub(super) enum Failure {
@@ -70,7 +70,8 @@ type EventTypeString = SmallString<[u8; 32]>;
 type TimelineMembers<'a> = SmallVec<[&'a str; 2]>;
 pub(super) type RoomDetails = (usize, HashSet<(StateEventType, StateKey)>);
 pub(super) type Delivery = (ResponseRoom, Option<ShortStateHash>);
-type CollectedState = (Vec<Raw<AnySyncStateEvent>>, Option<ShortStateHash>);
+type StateEvent = Raw<AnySyncStateEvent>;
+type CollectedState = (Vec<StateEvent>, Option<ShortStateHash>);
 type Snapshots = (Option<ShortStateHash>, Option<(PduCount, ShortStateHash)>);
 
 /// Most timeline events one room returns per response, as legacy sync allows.
@@ -593,8 +594,10 @@ async fn collect_required_state(
 			services
 				.state_accessor
 				.room_state_keys_with_ids(room_id, event_type)
-				.ready_filter_map(Result::ok)
-				.map(move |(state_key, event_id)| {
+				.inspect_err(move |error| {
+					warn!(%room_id, %event_type, %error, "Unreadable required state keys");
+				})
+				.map_ok(move |(state_key, event_id)| {
 					((event_type.clone(), state_key), Some(event_id), false)
 				})
 		});
@@ -622,18 +625,18 @@ async fn collect_required_state(
 		.iter()
 		.filter(|_| !state_unchanged || previous.is_some())
 		.cloned()
-		.map(|state| (state, None, false))
+		.map(|state| Ok((state, None, false)))
 		.stream()
 		.chain(wildcard_state)
 		.chain(
 			timeline_members
-				.map(|state| (state, None, true))
+				.map(|state| Ok((state, None, true)))
 				.stream(),
 		)
-		.broad_filter_map(async |(state, event_id, lazy)| {
-			let (event_type, state_key) = state;
+		.broad_then(async |selected| -> Result<Option<StateEvent>> {
+			let ((event_type, state_key), event_id, lazy) = selected?;
 			let state_key: StateKey = match state_key.as_str() {
-				| "$LAZY" | "*" => return None,
+				| "$LAZY" | "*" => return Ok(None),
 				| "$ME" => sender_user.as_str().into(),
 				| _ => state_key,
 			};
@@ -646,17 +649,16 @@ async fn collect_required_state(
 				.unwrap_or(state_mode);
 
 			if state_unchanged && !lazy && state_mode != StateMode::Full {
-				return None;
+				return Ok(None);
 			}
 
 			let event_id = match event_id {
-				| Some(event_id) => event_id,
-				| None =>
-					services
-						.state_accessor
-						.room_state_get_id(room_id, &event_type, &state_key)
-						.ok()
-						.await?,
+				| Some(event_id) => Some(event_id),
+				| None => current_state_id(services, room_id, &event_type, &state_key).await?,
+			};
+
+			let Some(event_id) = event_id else {
+				return Ok(None);
 			};
 
 			let pdu_id = services.timeline.get_pdu_id(&event_id).await.ok();
@@ -680,31 +682,37 @@ async fn collect_required_state(
 				.flatten()
 				.is_some_and(|previous_event_id| previous_event_id == event_id);
 
-			let pdu_id = state_is_required(state_mode, Candidate { count, lazy, same_at_since })
-				.then_some(pdu_id)?;
+			if !state_is_required(state_mode, Candidate { count, lazy, same_at_since }) {
+				return Ok(None);
+			}
 
-			let mut pdu = match pdu_id {
-				| None => services
-					.timeline
-					.get_outlier_pdu(&event_id)
-					.await
-					.ok()?,
-				| Some(pdu_id) => services
-					.timeline
-					.get_pdu_from_id(&pdu_id)
-					.or_else(|_| services.timeline.get_outlier_pdu(&event_id))
-					.await
-					.ok()?,
+			let pdu = match pdu_id {
+				| None => services.timeline.get_outlier_pdu(&event_id).await,
+				| Some(pdu_id) =>
+					services
+						.timeline
+						.get_pdu_from_id(&pdu_id)
+						.or_else(|_| services.timeline.get_outlier_pdu(&event_id))
+						.await,
 			};
 
-			annotate_membership(services, &mut pdu, sender_user, encrypted).await;
+			let pdu = pdu.inspect_err(|error| {
+				warn!(%room_id, %event_id, %error, "Unreadable required state event");
+			})?;
 
+			let pdu = with_membership(services, pdu, sender_user, encrypted).await;
 			let pdu = strip_prev_state(pdu, sender_user, in_timeline);
 
-			Some(Event::into_format(pdu))
+			Ok(Some(Event::into_format(pdu)))
 		})
-		.collect()
-		.map(|events| (events, snapshot))
+		.ready_fold((Vec::new(), true), |(mut events, read), event| {
+			let read = read && event.is_ok();
+
+			events.extend(event.ok().flatten());
+
+			(events, read)
+		})
+		.map(|(events, read)| (events, recorded_snapshot(snapshot, read)))
 		.await
 }
 
@@ -759,6 +767,26 @@ fn state_was_requested(
 	contains("*") || contains(state_key) || (state_key == sender_user.as_str() && contains("$ME"))
 }
 
+/// The ID of the event the room's current state holds under one requested key.
+///
+/// A key the state does not hold is absent; any other failure is logged and
+/// returned, since the event it hides may still be due.
+async fn current_state_id(
+	services: &Services,
+	room_id: &RoomId,
+	event_type: &StateEventType,
+	state_key: &str,
+) -> Result<Option<OwnedEventId>> {
+	services
+		.state_accessor
+		.room_state_get_id(room_id, event_type, state_key)
+		.map(NotFound::present)
+		.inspect_err(|error| {
+			warn!(%room_id, %event_type, %state_key, %error, "Unreadable required state key");
+		})
+		.await
+}
+
 fn state_is_required(
 	state_mode: StateMode,
 	Candidate { count, lazy, same_at_since }: Candidate,
@@ -767,4 +795,13 @@ fn state_is_required(
 		| StateMode::Full => true,
 		| StateMode::Delta(since) => count.is_some_and(|count| count > since) || !same_at_since,
 	}
+}
+
+/// The snapshot a delivery records, given whether it read every requested event.
+///
+/// When a requested event could not be read, no snapshot vouches for what the
+/// client holds, so the delivery records zero and the next delta compares
+/// against the cursor and resends outliers.
+fn recorded_snapshot(snapshot: Option<ShortStateHash>, read: bool) -> Option<ShortStateHash> {
+	read.copy_or(Some(0), snapshot)
 }

@@ -14,9 +14,9 @@ use tuwunel_matrix::pdu::PduCount;
 
 use super::{
 	Candidate, Connection, ListIds, StateMode, TIMELINE_LIMIT_MAX,
-	membership_allows_required_state, merged_room_details, required_state_hash, room_config,
-	room_timeline_limited, room_timeline_metadata, state_is_required, state_may_have_changed,
-	state_mode, state_was_requested,
+	membership_allows_required_state, merged_room_details, recorded_snapshot,
+	required_state_hash, room_config, room_timeline_limited, room_timeline_metadata,
+	state_is_required, state_may_have_changed, state_mode, state_was_requested,
 };
 
 #[test]
@@ -142,6 +142,14 @@ fn incremental_required_state_keeps_lazy_members() {
 	};
 
 	assert!(state_is_required(mode, candidate));
+}
+
+#[test]
+fn delivered_snapshot_vouches_only_for_state_it_read() {
+	assert_eq!(recorded_snapshot(Some(9), true), Some(9));
+	assert_eq!(recorded_snapshot(None, true), None);
+	assert_eq!(recorded_snapshot(Some(9), false), Some(0));
+	assert_eq!(recorded_snapshot(None, false), Some(0));
 }
 
 #[test]

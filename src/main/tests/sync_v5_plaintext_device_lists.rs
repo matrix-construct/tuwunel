@@ -23,6 +23,9 @@ mod put;
 #[path = "client/state.rs"]
 mod state;
 
+#[path = "client/topic.rs"]
+mod topic;
+
 const READER_TOKEN: &str = "sync-v5-plaintext-device-lists-reader-token";
 const SENDER_TOKEN: &str = "sync-v5-plaintext-device-lists-sender-token";
 
@@ -92,11 +95,8 @@ async fn exercise(services: &Services, base: &str) -> Result {
 
 	let opening = reader.sync_e2ee(None).await?;
 	let pos = next_pos(&opening)?;
-	let topic = json!({ "topic": "still plaintext" });
 
-	sender
-		.put_state(&room, "m.room.topic", "", &topic)
-		.await?;
+	sender.set_topic(&room, "still plaintext").await?;
 
 	let retitled = reader.sync_e2ee(Some(pos)).await?;
 	let pos = next_pos(&retitled)?;
