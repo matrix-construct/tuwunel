@@ -3,10 +3,19 @@
 use serde_json::{Value, json};
 use tuwunel_core::{
 	Result, implement, is_equal_to,
-	ruma::{RoomId, UserId, events::StateEventType},
+	ruma::{
+		RoomId, UserId,
+		events::{
+			StateEventType,
+			room::member::{MembershipState, RoomMemberEventContent},
+		},
+		room_id,
+		serde::Raw,
+	},
 };
 use tuwunel_database::Json;
-use tuwunel_service::Services;
+use tuwunel_matrix::PduCount;
+use tuwunel_service::{Services, rooms::state_cache::MembershipUpdate};
 
 use self::{
 	client::{Client, field, register},
@@ -199,6 +208,82 @@ async fn exercise(services: &Services, base: &str) -> Result {
 
 	assert_eq!(room["membership"], "knock", "emptied knock missing: {emptied}");
 	assert!(room.get("invite_state").is_none(), "empty stripped state sent: {room}");
+
+	summary_only_knock_filters(services, &knocker, &user).await
+}
+
+/// Checks that a knock known only by its summary is named and filtered by it.
+///
+/// A remote knock leaves this server no room state, so the room's name,
+/// avatar, encryption and type come from the stored summary.
+async fn summary_only_knock_filters(
+	services: &Services,
+	knocker: &Client<'_>,
+	user: &UserId,
+) -> Result {
+	let remote = room_id!("!remote-knock:example.test");
+	let creator = "@creator:example.test";
+	let state = |kind: &str, content: Value| json!({ "type": kind, "state_key": "", "sender": creator, "content": content });
+
+	let summary = [
+		state("m.room.create", json!({ "room_version": "11", "type": "m.space" })),
+		state("m.room.encryption", json!({ "algorithm": "m.megolm.v1.aes-sha2" })),
+		state("m.room.name", json!({ "name": "Remote" })),
+		state("m.room.avatar", json!({ "url": "mxc://example.test/remote" })),
+		json!({
+			"type": "m.room.member", "state_key": user, "sender": user,
+			"content": { "membership": "knock" },
+		}),
+	];
+
+	let summary = summary
+		.iter()
+		.map(|event| Raw::new(event).map(Raw::cast_unchecked))
+		.collect::<Result<_, _>>()?;
+
+	services
+		.short
+		.get_or_create_shortroomid(remote)
+		.await;
+
+	let count = services.globals.next_count();
+
+	services
+		.state_cache
+		.update_membership(MembershipUpdate {
+			room_id: remote,
+			user_id: user,
+			membership_event: RoomMemberEventContent::new(MembershipState::Knock),
+			sender: user,
+			last_state: Some(summary),
+			invite_via: None,
+			update_joined_count: false,
+			count: PduCount::Normal(*count),
+		})
+		.await?;
+
+	drop(count);
+
+	let list =
+		|filters: Value| json!({ "ranges": [[0, 9]], "timeline_limit": 0, "filters": filters });
+
+	let lists = json!({
+		"conn_id": "filtered",
+		"lists": {
+			"encrypted": list(json!({ "is_encrypted": true })),
+			"spaces": list(json!({ "room_types": ["m.space"] })),
+		},
+	});
+
+	let filtered = knocker.sync(None, &lists).await?;
+
+	assert_eq!(filtered["lists"]["encrypted"]["count"], 1, "{filtered}");
+	assert_eq!(filtered["lists"]["spaces"]["count"], 1, "{filtered}");
+	let room = &filtered["rooms"][remote.as_str()];
+
+	assert_eq!(room["membership"], "knock", "{filtered}");
+	assert_eq!(room["name"], "Remote", "the summary names the room: {room}");
+	assert_eq!(room["avatar"], "mxc://example.test/remote", "{room}");
 
 	Ok(())
 }

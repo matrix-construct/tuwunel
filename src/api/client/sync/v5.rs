@@ -17,10 +17,12 @@ use std::{
 use axum::extract::{Extension, State};
 use futures::{FutureExt, TryFutureExt, future::join};
 use ruma::{
-	DeviceId, OwnedRoomId, UserId,
+	DeviceId, OwnedRoomId, RoomId, UserId,
 	api::client::sync::sync_events::v5::{ListId, Request, Response, response},
-	events::room::member::MembershipState,
+	events::{AnyStrippedStateEvent, StateEventType, room::member::MembershipState},
+	serde::Raw,
 };
+use serde::Deserialize;
 use tokio::{sync::Notify, time::timeout_at};
 use tuwunel_core::{
 	Err, Result, debug,
@@ -29,11 +31,17 @@ use tuwunel_core::{
 	error::inspect_log,
 	smallvec::SmallVec,
 	trace,
-	utils::{TryFutureExtExt, time::millis},
+	utils::{
+		TryFutureExtExt,
+		result::{FlatOk, NotFound},
+		time::millis,
+	},
+	warn,
 };
 use tuwunel_service::{
 	Services,
 	presence::Ping,
+	rooms::state_cache::StrippedRoomState,
 	sync::{Connection, ConnectionKey, ConnectionVal, into_connection_key},
 };
 
@@ -362,4 +370,68 @@ async fn respond(
 		.await?;
 
 	Ok(response)
+}
+
+/// The stripped state MSC4186 sends for an invited or knocked room.
+///
+/// For a knocked room this is the summary stored with the knock, ending with
+/// the user's own knock event, so a client can present a room this server is
+/// not in. An empty knock summary is omitted, since a client reading the
+/// user's membership from it would take the room for an invite.
+#[tracing::instrument(level = "trace", skip_all)]
+async fn stripped_state(
+	services: &Services,
+	sender_user: &UserId,
+	room_id: &RoomId,
+	membership: Option<&MembershipState>,
+) -> StrippedRoomState {
+	let membership = membership?;
+	let state_cache = &services.state_cache;
+	let state = match membership {
+		| MembershipState::Invite =>
+			state_cache
+				.invite_state(sender_user, room_id)
+				.await,
+		| MembershipState::Knock =>
+			state_cache
+				.knock_state(sender_user, room_id)
+				.await,
+		| _ => return None,
+	};
+
+	state
+		.present()
+		.inspect_err(|error| warn!(%room_id, %error, "Unreadable stripped room state"))
+		.flat_ok()
+		.filter(|state| !state.is_empty() || *membership == MembershipState::Invite)
+}
+
+/// The content of the stripped state event with this type and an empty state
+/// key.
+///
+/// The first match wins; an event whose type or state key does not parse is
+/// skipped.
+fn stripped_content<'a, T>(
+	state: &'a [Raw<AnyStrippedStateEvent>],
+	kind: &StateEventType,
+) -> Option<T>
+where
+	T: Deserialize<'a>,
+{
+	state
+		.iter()
+		.filter(|event| {
+			event
+				.get_field("type")
+				.flat_ok()
+				.is_some_and(|event_type: StateEventType| event_type == *kind)
+		})
+		.find(|event| {
+			event
+				.get_field("state_key")
+				.flat_ok()
+				.is_some_and(str::is_empty)
+		})?
+		.get_field("content")
+		.flat_ok()
 }

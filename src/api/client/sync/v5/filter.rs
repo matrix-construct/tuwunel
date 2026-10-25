@@ -1,10 +1,12 @@
 use futures::StreamExt;
 use ruma::{
-	RoomId,
+	RoomId, UserId,
 	api::client::sync::sync_events::v5::request::ListFilters,
 	directory::RoomTypeFilter,
-	events::{room::member::MembershipState, tag::TagName},
+	events::{StateEventType, room::member::MembershipState, tag::TagName},
+	room::RoomType,
 };
+use serde::{Deserialize, de::IgnoredAny};
 use tuwunel_core::{
 	is_equal_to, is_true,
 	utils::{
@@ -13,8 +15,15 @@ use tuwunel_core::{
 		option::OptionExt,
 	},
 };
+use tuwunel_service::{Services, rooms::state_cache::StrippedRoomState};
 
-use super::SyncInfo;
+use super::{SyncInfo, stripped_content, stripped_state};
+
+#[derive(Deserialize)]
+struct CreateContent {
+	#[serde(rename = "type")]
+	room_type: Option<RoomType>,
+}
 
 #[tracing::instrument(name = "filter", level = "trace", skip_all)]
 pub(super) async fn filter_room(
@@ -43,14 +52,18 @@ pub(super) async fn filter_room(
 		.is_dm
 		.is_none_or(is_equal_to!(direct_rooms.contains(room_id)));
 
+	let pending_knock = membership == Some(&MembershipState::Knock);
 	let match_encrypted = filter
 		.is_encrypted
 		.map_async(async |is_encrypted| {
-			services
+			// Encryption is never turned off, so the knock summary can only add it.
+			let encrypted = services
 				.state_accessor
 				.is_encrypted_room(room_id)
-				.eq(&is_encrypted)
 				.await
+				|| (pending_knock && knock_encrypted(services, sender_user, room_id).await);
+
+			encrypted == is_encrypted
 		});
 
 	let match_space_child = filter
@@ -90,7 +103,13 @@ pub(super) async fn filter_room(
 			.await
 			.ok();
 
+		let room_type = match room_type {
+			| None if pending_knock => knock_room_type(services, sender_user, room_id).await,
+			| room_type => room_type,
+		};
+
 		let room_type = RoomTypeFilter::from(room_type);
+
 		(filter.not_room_types.is_empty() || !filter.not_room_types.contains(&room_type))
 			&& (filter.room_types.is_empty() || filter.room_types.contains(&room_type))
 	});
@@ -104,6 +123,36 @@ pub(super) async fn filter_room(
 			match_room_tag.is_none_or(is_true!()),
 		)
 		.await
+}
+
+async fn knock_encrypted(services: &Services, sender_user: &UserId, room_id: &RoomId) -> bool {
+	knock_summary(services, sender_user, room_id)
+		.await
+		.is_some_and(|summary| {
+			let encryption: Option<IgnoredAny> =
+				stripped_content(&summary, &StateEventType::RoomEncryption);
+
+			encryption.is_some()
+		})
+}
+
+async fn knock_room_type(
+	services: &Services,
+	sender_user: &UserId,
+	room_id: &RoomId,
+) -> Option<RoomType> {
+	let summary = knock_summary(services, sender_user, room_id).await?;
+
+	stripped_content(&summary, &StateEventType::RoomCreate)
+		.and_then(|content: CreateContent| content.room_type)
+}
+
+async fn knock_summary(
+	services: &Services,
+	sender_user: &UserId,
+	room_id: &RoomId,
+) -> StrippedRoomState {
+	stripped_state(services, sender_user, room_id, Some(&MembershipState::Knock)).await
 }
 
 #[tracing::instrument(name = "filter_meta", level = "trace", skip_all)]

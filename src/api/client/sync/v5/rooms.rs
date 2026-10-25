@@ -5,7 +5,10 @@ mod heroes;
 #[cfg(test)]
 mod tests;
 
-use std::collections::{BTreeMap, HashSet};
+use std::{
+	borrow::Cow,
+	collections::{BTreeMap, HashSet},
+};
 
 use futures::{
 	FutureExt, Stream, StreamExt, TryFutureExt, TryStreamExt,
@@ -21,10 +24,12 @@ use ruma::{
 		},
 	},
 	events::{
-		AnySyncStateEvent, StateEventType, TimelineEventType, room::member::MembershipState,
+		AnyStrippedStateEvent, AnySyncStateEvent, StateEventType, TimelineEventType,
+		room::member::MembershipState,
 	},
 	serde::Raw,
 };
+use serde::Deserialize;
 use tuwunel_core::{
 	Error, Result, at, format_small_string, is_equal_to, ref_at,
 	smallstr::SmallString,
@@ -46,7 +51,7 @@ use tuwunel_matrix::{
 };
 use tuwunel_service::{
 	Services,
-	rooms::{short::ShortStateHash, state_cache::StrippedRoomState},
+	rooms::short::ShortStateHash,
 	sync::{RequiredState, Room, RoomConfig, UnreadState},
 };
 
@@ -57,7 +62,7 @@ use self::{
 };
 use super::{
 	super::{load_timeline_fallible, stand_in_leave, strip_prev_state},
-	Connection, ListIds, SyncInfo, WindowRoom,
+	Connection, ListIds, SyncInfo, WindowRoom, stripped_content, stripped_state,
 };
 use crate::{ignored_filter, with_membership};
 
@@ -67,6 +72,17 @@ pub(super) enum Failure {
 	Payload(Error),
 }
 
+#[derive(Deserialize)]
+struct NameContent<'a> {
+	#[serde(borrow)]
+	name: Cow<'a, str>,
+}
+
+#[derive(Deserialize)]
+struct AvatarContent {
+	url: Option<OwnedMxcUri>,
+}
+
 type ThreadCounts = BTreeMap<OwnedEventId, (u64, u64)>;
 type EventTypeString = SmallString<[u8; 32]>;
 type TimelineMembers<'a> = SmallVec<[&'a str; 2]>;
@@ -74,6 +90,7 @@ pub(super) type RoomDetails = (usize, HashSet<(StateEventType, StateKey)>);
 pub(super) type Delivery = (ResponseRoom, StateRead);
 type StateRead = (Option<ShortStateHash>, UnreadState);
 type StateEvent = Raw<AnySyncStateEvent>;
+type StrippedEvent = Raw<AnyStrippedStateEvent>;
 type Selected = ((StateEventType, StateKey), Option<OwnedEventId>, bool);
 type CollectedState = (Vec<StateEvent>, StateRead);
 type Snapshots = (Option<ShortStateHash>, Option<(PduCount, ShortStateHash)>);
@@ -259,6 +276,9 @@ pub(super) async fn handle_room(
 		.boxed()
 		.await;
 
+	let (room_name, room_avatar) =
+		knock_meta(membership.as_ref(), stripped_state.as_deref(), room_name, room_avatar);
+
 	let (heroes, heroes_name, heroes_avatar) = resolve_heroes(
 		services,
 		sender_user,
@@ -436,6 +456,34 @@ fn room_timeline_metadata<Event>(
 	(initial, num_live)
 }
 
+/// The name and avatar a knocked room's summary gives where room state has none.
+///
+/// A remote knock leaves this server no room state, so its summary names the
+/// room.
+fn knock_meta(
+	membership: Option<&MembershipState>,
+	stripped_state: Option<&[StrippedEvent]>,
+	room_name: Option<DisplayName>,
+	room_avatar: Option<OwnedMxcUri>,
+) -> (Option<DisplayName>, Option<OwnedMxcUri>) {
+	let summary = stripped_state
+		.filter(|_| membership == Some(&MembershipState::Knock))
+		.unwrap_or_default();
+
+	let room_name = room_name.or_else(|| {
+		stripped_content(summary, &StateEventType::RoomName)
+			.filter(|content: &NameContent<'_>| !content.name.is_empty())
+			.map(|content| DisplayName::from(&*content.name))
+	});
+
+	let room_avatar = room_avatar.or_else(|| {
+		stripped_content(summary, &StateEventType::RoomAvatar)
+			.and_then(|content: AvatarContent| content.url)
+	});
+
+	(room_name, room_avatar)
+}
+
 async fn resolve_heroes(
 	services: &Services,
 	sender_user: &UserId,
@@ -449,39 +497,6 @@ async fn resolve_heroes(
 		.then_async(|| calculate_heroes(services, sender_user, room_id, room_name, room_avatar))
 		.await
 		.unwrap_or_default()
-}
-
-/// The stripped state MSC4186 sends for an invited or knocked room.
-///
-/// For a knocked room this is the summary stored with the knock, ending with
-/// the user's own knock event, so a client can present a room this server is
-/// not in. An empty knock summary is omitted, since a client reading the
-/// user's membership from it would take the room for an invite.
-async fn stripped_state(
-	services: &Services,
-	sender_user: &UserId,
-	room_id: &RoomId,
-	membership: Option<&MembershipState>,
-) -> StrippedRoomState {
-	let membership = membership?;
-	let state_cache = &services.state_cache;
-	let state = match membership {
-		| MembershipState::Invite =>
-			state_cache
-				.invite_state(sender_user, room_id)
-				.await,
-		| MembershipState::Knock =>
-			state_cache
-				.knock_state(sender_user, room_id)
-				.await,
-		| _ => return None,
-	};
-
-	state
-		.present()
-		.inspect_err(|error| warn!(%room_id, %error, "Unreadable stripped room state"))
-		.flat_ok()
-		.filter(|state| !state.is_empty() || *membership == MembershipState::Invite)
 }
 
 fn room_meta_future<'a>(
