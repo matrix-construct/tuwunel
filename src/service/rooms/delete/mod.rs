@@ -7,6 +7,9 @@ use tuwunel_core::{Result, debug, result::LogErr, trace, utils::future::BoolExt,
 
 use crate::rooms::timeline::RoomMutexGuard;
 
+#[cfg(test)]
+mod tests;
+
 pub struct Service {
 	services: Arc<crate::services::OnceServices>,
 }
@@ -186,6 +189,12 @@ impl Service {
 			.await
 			.log_err()
 			.ok();
+
+		debug!("Deleting all the room's soft-fail markers");
+		self.services
+			.pdu_metadata
+			.delete_all_soft_failed_for_room(room_id)
+			.await;
 
 		debug!("Deleting all the room's member counts");
 		self.services

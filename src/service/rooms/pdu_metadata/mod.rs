@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use ruma::{
+	OwnedRoomId,
 	events::{AnySyncMessageLikeEvent, room::encrypted::Relation},
 	serde::Raw,
 };
@@ -35,6 +36,11 @@ struct Data {
 struct ExtractRelatesTo {
 	#[serde(rename = "m.relates_to")]
 	relates_to: Relation,
+}
+
+#[derive(Deserialize)]
+struct ExtractRoomId {
+	room_id: OwnedRoomId,
 }
 
 /// Requester-specific MSC3856 adjustment for one thread root in `/threads`.

@@ -3,7 +3,7 @@ use ruma::{EventId, OwnedEventId, RoomId};
 use tuwunel_core::{
 	Result, implement, trace,
 	utils::{
-		stream::{ReadyExt, TryIgnore, WidebandExt},
+		stream::{BroadbandExt, ReadyExt, TryIgnore, WidebandExt},
 		u64_from_u8,
 	},
 };
@@ -11,7 +11,7 @@ use tuwunel_database::Interfix;
 use tuwunel_matrix::{Event, Pdu, PduId};
 
 use super::{
-	Service,
+	ExtractRoomId, Service,
 	typed_relations::{Tag, prefix},
 };
 
@@ -105,6 +105,26 @@ pub async fn is_event_soft_failed(&self, event_id: &EventId) -> bool {
 		.get(event_id)
 		.await
 		.is_ok()
+}
+
+/// Clears the soft-fail markers belonging to a room.
+///
+/// Markers are keyed by event alone, so each is matched to the room named by
+/// its stored event, accepted or outlier. Unreadable events keep their markers.
+#[implement(Service)]
+#[tracing::instrument(skip(self), level = "debug")]
+pub async fn delete_all_soft_failed_for_room(&self, room_id: &RoomId) {
+	self.soft_failed_event_ids()
+		.broad_filter_map(async |event_id| {
+			self.services
+				.timeline
+				.get(&event_id)
+				.await
+				.is_ok_and(|event: ExtractRoomId| event.room_id == room_id)
+				.then_some(event_id)
+		})
+		.ready_for_each(|event_id| self.clear_event_soft_failed(&event_id))
+		.await;
 }
 
 /// Streams owned event IDs with soft-fail markers.
