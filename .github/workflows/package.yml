@@ -81,7 +81,7 @@ jobs:
       && (fromJSON(inputs.enable_distro) || fromJSON(inputs.enable_checks))
       && contains(fromJSON(inputs.feat_sets), fromJSON('["default"]')[0])
       && contains(fromJSON(inputs.cargo_profiles), fromJSON('["release"]')[0])
-      && contains(fromJSON(inputs.rust_toolchains), fromJSON('["stable"]')[0])
+      && contains(fromJSON(inputs.rust_toolchains), fromJSON('["msrv"]')[0])
       && inputs.machines
       && fromJSON(inputs.machines)[0] != null
 
@@ -140,7 +140,7 @@ jobs:
       && fromJSON(inputs.enable_book)
       && contains(fromJSON(inputs.cargo_profiles), fromJSON('["release"]')[0])
       && contains(fromJSON(inputs.feat_sets), fromJSON('["default"]')[0])
-      && contains(fromJSON(inputs.rust_toolchains), fromJSON('["stable"]')[0])
+      && contains(fromJSON(inputs.rust_toolchains), fromJSON('["msrv"]')[0])
       && contains(fromJSON(inputs.sys_targets), fromJSON('["x86_64-v1-linux-gnu"]')[0])
 
     name: Book
@@ -149,7 +149,7 @@ jobs:
       bake_targets: '["book"]'
       cargo_profiles: '["release"]'
       feat_sets: '["default"]'
-      rust_toolchains: '["stable"]'
+      rust_toolchains: '["msrv"]'
       rust_targets: ${{inputs.rust_targets}}
       sys_names: ${{inputs.sys_names}}
       sys_versions: ${{inputs.sys_versions}}
@@ -243,7 +243,7 @@ jobs:
       && fromJSON(inputs.enable_distro)
       && contains(fromJSON(inputs.feat_sets), fromJSON('["default"]')[0])
       && contains(fromJSON(inputs.cargo_profiles), fromJSON('["release"]')[0])
-      && contains(fromJSON(inputs.rust_toolchains), fromJSON('["stable"]')[0])
+      && contains(fromJSON(inputs.rust_toolchains), fromJSON('["msrv"]')[0])
 
     name: Distro Packages
     needs: [base]
@@ -252,7 +252,7 @@ jobs:
       bake_targets: ${{inputs.distros}}
       cargo_profiles: '["release"]'
       feat_sets: '["default"]'
-      rust_toolchains: '["stable"]'
+      rust_toolchains: '["msrv"]'
       sys_names: '["debian"]'
       sys_versions: ${{needs.base.outputs.sys_versions}}
       rust_targets: ${{inputs.rust_targets}}
@@ -289,7 +289,7 @@ jobs:
       && fromJSON(inputs.enable_checks)
       && contains(fromJSON(inputs.feat_sets), fromJSON('["default"]')[0])
       && contains(fromJSON(inputs.cargo_profiles), fromJSON('["release"]')[0])
-      && contains(fromJSON(inputs.rust_toolchains), fromJSON('["stable"]')[0])
+      && contains(fromJSON(inputs.rust_toolchains), fromJSON('["msrv"]')[0])
 
     name: Check Packages
     needs: [base, distro]
@@ -298,7 +298,7 @@ jobs:
       bake_targets: '["deb-install", "rpm-install"]'
       cargo_profiles: '["release"]'
       feat_sets: '["default"]'
-      rust_toolchains: '["stable"]'
+      rust_toolchains: '["msrv"]'
       sys_names: '["debian"]'
       sys_versions: ${{needs.base.outputs.sys_versions}}
       rust_targets: ${{inputs.rust_targets}}
@@ -314,7 +314,7 @@ jobs:
       && fromJSON(inputs.enable_checks)
       && contains(fromJSON(inputs.feat_sets), fromJSON('["default"]')[0])
       && contains(fromJSON(inputs.cargo_profiles), fromJSON('["release"]')[0])
-      && contains(fromJSON(inputs.rust_toolchains), fromJSON('["stable"]')[0])
+      && contains(fromJSON(inputs.rust_toolchains), fromJSON('["msrv"]')[0])
 
     name: Check Apt Repository
     uses: ./.github/workflows/bake.yml
@@ -322,7 +322,7 @@ jobs:
       bake_targets: '["apt-repo-install"]'
       cargo_profiles: '["release"]'
       feat_sets: '["default"]'
-      rust_toolchains: '["stable"]'
+      rust_toolchains: '["msrv"]'
       sys_names: '["debian", "ubuntu"]'
       sys_versions: '["stable-slim", "noble"]'
       rust_targets: ${{inputs.rust_targets}}

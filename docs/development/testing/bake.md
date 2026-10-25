@@ -74,7 +74,7 @@ positional arguments and reads matrix dimensions from environment variables.
 docker/bake.sh <target> [<target>...]
 
 # With environment overrides (singular form for convenience)
-cargo_profile="release" rust_toolchain="stable" docker/bake.sh install
+cargo_profile="release" rust_toolchain="msrv" docker/bake.sh install
 
 # Multiple targets
 docker/bake.sh fmt clippy
@@ -124,7 +124,7 @@ For multi-value matrix runs (as used in CI), set the `cargo_profiles`,
 ```hcl
 variable "cargo_profiles"   { default = "[\"test\", \"release\"]"          }
 variable "feat_sets"        { default = "[\"none\", \"default\", \"all\"]" }
-variable "rust_toolchains"  { default = "[\"nightly\", \"stable\"]"        }
+variable "rust_toolchains"  { default = "[\"nightly\", \"msrv\"]"          }
 variable "rust_targets"     { default = "[\"x86_64-unknown-linux-gnu\"]"   }
 variable "sys_names"        { default = "[\"debian\"]"                     }
 variable "sys_versions"     { default = "[\"testing-slim\"]"               }

@@ -258,21 +258,22 @@ jobs:
           {"cargo_profile": "test", "feat_set": "default"},
           {"cargo_profile": "test", "feat_set": "logging"},
           {"cargo_profile": "test", "feat_set": "none", "bake_target": "smoke-valgrind"},
-          {"cargo_profile": "test", "rust_toolchain": "stable"},
+          {"cargo_profile": "test", "rust_toolchain": "msrv"},
+          {"rust_toolchain": "stable"},
           {"cargo_profile": "test", "rust_target": "aarch64-unknown-linux-gnu"},
           {"cargo_profile": "test", "sys_target": "x86_64-v2-linux-gnu"},
           {"cargo_profile": "test", "sys_target": "x86_64-v3-linux-gnu"},
           {"cargo_profile": "test", "bake_target": "smoke-valgrind"},
           {"cargo_profile": "bench"},
           {"cargo_profile": "release", "rust_toolchain": "nightly"},
-          {"cargo_profile": "release", "rust_toolchain": "stable", "feat_set": "none"},
+          {"cargo_profile": "release", "rust_toolchain": "msrv", "feat_set": "none"},
           {"cargo_profile": "release", "bake_target": "smoke-valgrind"},
           {"cargo_profile": "release-debuginfo", "feat_set": "logging"},
           {"cargo_profile": "release-debuginfo", "rust_toolchain": "nightly"},
-          {"cargo_profile": "release-debuginfo", "rust_toolchain": "stable", "feat_set": "none"},
+          {"cargo_profile": "release-debuginfo", "rust_toolchain": "msrv", "feat_set": "none"},
           {"cargo_profile": "release-debuginfo", "bake_target": "smoke"},
           {"cargo_profile": "release-debuginfo", "rust_target": "aarch64-unknown-linux-gnu"},
-          {"cargo_profile": "release-native", "rust_toolchain": "stable"},
+          {"cargo_profile": "release-native", "rust_toolchain": "msrv"},
           {"cargo_profile": "release-native", "feat_set": "none"},
           {"cargo_profile": "release-native", "feat_set": "default"},
           {"cargo_profile": "release-native", "feat_set": "logging"},
@@ -315,7 +316,7 @@ jobs:
       && !contains(github.ref, 'refs/pull')
       && contains(fromJSON(inputs.cargo_profiles), fromJSON('["release"]')[0])
       && contains(fromJSON(inputs.feat_sets), fromJSON('["all"]')[0])
-      && contains(fromJSON(inputs.rust_toolchains), fromJSON('["stable"]')[0])
+      && contains(fromJSON(inputs.rust_toolchains), fromJSON('["msrv"]')[0])
       && contains(fromJSON(inputs.sys_targets), fromJSON('["x86_64-v1-linux-gnu"]')[0])
 
     name: Smoke NixOS
@@ -324,7 +325,7 @@ jobs:
       bake_targets: '["smoke-nix"]'
       cargo_profiles: '["release"]'
       feat_sets: '["all"]'
-      rust_toolchains: '["stable"]'
+      rust_toolchains: '["msrv"]'
       sys_names: ${{inputs.sys_names}}
       sys_versions: ${{inputs.sys_versions}}
       rust_targets: ${{inputs.rust_targets}}

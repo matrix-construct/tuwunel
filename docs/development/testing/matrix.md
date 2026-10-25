@@ -59,12 +59,18 @@ target; used for clippy, doc tests, and integration tests.
 | Toolchain key | Resolved to | Used for |
 |---|---|---|
 | `nightly` | The current nightly (or a specific nightly in CI) | Default for all builds; required for some flags and `rustfmt` options |
-| `stable` | The MSRV from `rust-toolchain.toml` | Release packages, Nix smoke test |
+| `msrv` | The MSRV from `rust-toolchain.toml` | Release packages, Nix smoke test |
+| `stable` | The current stable release | One clippy cell (test profile, all features) |
 
-The `bake.sh` script reads `rust-toolchain.toml` to resolve `stable` to the
+The `bake.sh` script reads `rust-toolchain.toml` to resolve `msrv` to the
 project's minimum supported Rust version, ensuring released binaries are always
 built against a pinned toolchain rather than whatever stable happens to be
 current. Nix additionally verifies this with a SHA256 check in `flake.nix`.
+
+`stable` is the moving stable channel, installed when a builder's toolchain
+layer is built and refreshed with `[ci clean-rust]`. Its one clippy cell
+catches lints that a newer stable adds and that neither the older pin nor
+nightly reports the same way.
 
 
 ## Rust Targets (Cross-compilation)
@@ -131,7 +137,7 @@ toolchain:
 
 | Condition | Linking |
 |---|---|
-| `release` or `bench` profile with `stable` toolchain | Static (`-C relocation-model=static`, `+crt-static`) |
+| `release` or `bench` profile with `msrv` or `stable` toolchain | Static (`-C relocation-model=static`, `+crt-static`) |
 | All other combinations | Dynamic (PIC, shared libc) |
 
 Static linking produces fully portable binaries that run on any Linux system
@@ -147,16 +153,16 @@ of the matrix appropriate to its task:
 
 | Job | Profiles | Feature sets | Toolchains | CPU targets |
 |---|---|---|---|---|
-| `clippy` | test, release, bench | none, default, all | nightly, stable | v1 |
+| `clippy` | test, release, bench | none, default, all | nightly, msrv, stable (one cell) | v1 |
 | `unit` | test | all | nightly | v1 |
 | `bench` | bench | all | nightly | v3 |
 | `memcheck` | bench | all | nightly | v3 |
 | `smoke` | test, release | default, all | nightly | v1, v3 |
 | `rust-sdk-integ` | test, release | all | nightly | v1 |
 | `complement` | test, release | all | nightly | v1 |
-| `binary` (package) | release | default | stable | v1, v2, v3, v4, aarch64-v8 |
-| `container` (package) | release | default | stable | v3 |
-| `distro` (package) | release | default | stable | v1 |
+| `binary` (package) | release | default | msrv | v1, v2, v3, v4, aarch64-v8 |
+| `container` (package) | release | default | msrv | v3 |
+| `distro` (package) | release | default | msrv | v1 |
 
 The `test.yml` workflow embeds about 51 explicit exclusions to remove
 combinations that are redundant, impossible, or not worth the resource cost.

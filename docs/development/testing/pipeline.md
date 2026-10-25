@@ -76,9 +76,10 @@ inevitably fail on the same error. Only one instance of this is usually run.
 
 `cargo clippy` runs with `--deny warnings` — any lint warning is a build
 failure. Crucially, clippy runs for **every combination** of the build matrix:
-all cargo profiles, all feature sets, stable and nightly toolchains. This
-catches warnings that only manifest under specific feature combinations or with
-a specific compiler, which individual developers rarely exercise locally.
+all cargo profiles, all feature sets, msrv and nightly toolchains, plus one
+cell on the current stable. This catches warnings that only manifest under
+specific feature combinations or with a specific compiler, which individual
+developers rarely exercise locally.
 
 - Bake target: `clippy`
 - Policy: zero warnings permitted across all matrix dimensions
@@ -151,7 +152,7 @@ the Nix build also runs its own set of tests:
   `rust-toolchain.toml` version — this catches MSRV bumps where the flake was
   not updated
 
-Only runs on `main` and `test` branches with the `stable` toolchain. Pull
+Only runs on `main` and `test` branches with the `msrv` toolchain. Pull
 requests skip this test intentionally — it is expensive and rarely fails for
 routine code changes.
 
@@ -219,7 +220,7 @@ Builds the Rust API documentation with `cargo doc`. Runs on `release` profile,
 #### mdBook (`book`)
 
 Builds this documentation site using [mdBook](https://rust-lang.github.io/mdBook/).
-Runs on `release` profile, `stable`, `x86_64-v1`.
+Runs on `release` profile, `msrv`, `x86_64-v1`.
 
 - Bake target: `book`
 - Output: `/book/`

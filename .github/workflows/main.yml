@@ -27,7 +27,7 @@ on:
         description: "Matrix Selector: Cargo feature sets"
       rust_toolchains:
         type: string
-        default: '["nightly", "stable"]'
+        default: '["nightly", "msrv", "stable"]'
         description: "Matrix Selector: Rust toolchains"
       rust_targets:
         type: string
@@ -109,7 +109,7 @@ jobs:
     env:
       default_cargo_profiles: '["test", "bench", "release"]'
       default_feat_sets: '["none", "default", "all"]'
-      default_rust_toolchains: '["nightly", "stable"]'
+      default_rust_toolchains: '["nightly", "msrv", "stable"]'
       default_sys_names: '["debian"]'
       default_sys_versions: '["testing-slim"]'
       default_rust_targets: '["x86_64-unknown-linux-gnu"]'
@@ -130,7 +130,7 @@ jobs:
     outputs:
       cargo_profiles: ${{inputs.cargo_profiles || vars.CARGO_PROFILES || env.default_cargo_profiles}}
       feat_sets: ${{inputs.feat_sets || vars.FEAT_SETS || env.default_feat_sets}}
-      rust_toolchains: ${{inputs.rust_toolchains || vars.RUST_TOOLCHAINS || env.default_rust_toolchains}}
+      rust_toolchains: ${{inputs.rust_toolchains || env.default_rust_toolchains}}
       rust_targets: ${{inputs.rust_targets || vars.RUST_TARGETS || env.default_rust_targets}}
       sys_names: ${{inputs.sys_names || vars.SYS_NAMES || env.default_sys_names}}
       sys_targets: ${{inputs.sys_targets || vars.SYS_TARGETS || env.default_sys_targets}}
@@ -259,7 +259,11 @@ jobs:
       excludes: >
         [
           {"cargo_profile": "test", "feat_set": "logging"},
-          {"cargo_profile": "test", "rust_toolchain": "stable", "feat_set": "none"},
+          {"cargo_profile": "test", "rust_toolchain": "msrv", "feat_set": "none"},
+          {"rust_toolchain": "stable", "cargo_profile": "release"},
+          {"rust_toolchain": "stable", "cargo_profile": "release-native"},
+          {"rust_toolchain": "stable", "feat_set": "none"},
+          {"rust_toolchain": "stable", "feat_set": "default"},
           {"cargo_profile": "test", "rust_target": "aarch64-unknown-linux-gnu"},
           {"cargo_profile": "bench"},
           {"cargo_profile": "release", "rust_toolchain": "nightly", "feat_set": "none"},
@@ -269,7 +273,7 @@ jobs:
           {"cargo_profile": "release-native", "feat_set": "none"},
           {"cargo_profile": "release-native", "feat_set": "default"},
           {"cargo_profile": "release-native", "feat_set": "logging"},
-          {"cargo_profile": "release-native", "rust_toolchain": "stable"},
+          {"cargo_profile": "release-native", "rust_toolchain": "msrv"},
           {"cargo_profile": "release-native", "rust_target": "aarch64-unknown-linux-gnu"},
           {"rust_target": "aarch64-unknown-linux-gnu", "feat_set": "none"},
           {"rust_target": "aarch64-unknown-linux-gnu", "feat_set": "default"},
@@ -332,12 +336,13 @@ jobs:
       machines: ${{needs.init.outputs.machines}}
       excludes: >
         [
-          {"cargo_profile": "test", "rust_toolchain": "stable", "feat_set": "none"},
+          {"rust_toolchain": "stable"},
+          {"cargo_profile": "test", "rust_toolchain": "msrv", "feat_set": "none"},
           {"cargo_profile": "test", "rust_target": "aarch64-unknown-linux-gnu"},
           {"cargo_profile": "release-debuginfo"},
           {"cargo_profile": "release-native", "feat_set": "none"},
           {"cargo_profile": "release-native", "feat_set": "default"},
-          {"cargo_profile": "release-native", "rust_toolchain": "stable"},
+          {"cargo_profile": "release-native", "rust_toolchain": "msrv"},
           {"cargo_profile": "release-native", "rust_target": "aarch64-unknown-linux-gnu"},
           {"rust_target": "aarch64-unknown-linux-gnu", "feat_set": "none"},
           {"rust_target": "aarch64-unknown-linux-gnu", "feat_set": "default"},
@@ -411,6 +416,7 @@ jobs:
           {"cargo_profile": "release-debuginfo", "sys_target": "x86_64-v3-linux-gnu"},
           {"cargo_profile": "release-debuginfo", "sys_target": "x86_64-v4-linux-gnu"},
           {"cargo_profile": "release", "rust_toolchain": "nightly"},
+          {"rust_toolchain": "stable"},
           {"rust_target": "aarch64-unknown-linux-gnu", "feat_set": "all"},
           {"rust_target": "aarch64-unknown-linux-gnu", "bake_target": "nix"},
           {"rust_target": "aarch64-unknown-linux-gnu", "sys_target": "x86_64-v1-linux-gnu"},
@@ -475,6 +481,7 @@ jobs:
           {"cargo_profile": "release-debuginfo"},
           {"cargo_profile": "release-native"},
           {"rust_toolchain": "nightly"},
+          {"rust_toolchain": "stable"},
           {"rust_target": "aarch64-unknown-linux-gnu", "sys_target": "x86_64-v1-linux-gnu"},
           {"rust_target": "aarch64-unknown-linux-gnu", "sys_target": "x86_64-v2-linux-gnu"},
           {"rust_target": "aarch64-unknown-linux-gnu", "sys_target": "x86_64-v3-linux-gnu"},

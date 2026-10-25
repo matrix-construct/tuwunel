@@ -58,7 +58,7 @@ variable "rust_nightly" {
     default = "nightly"
 }
 variable "rust_toolchains" {
-    default = "[\"nightly\", \"stable\"]"
+    default = "[\"nightly\", \"msrv\"]"
 }
 variable "rust_targets" {
     default = "[\"x86_64-unknown-linux-gnu\"]"
@@ -1214,7 +1214,7 @@ target "docker" {
     ]
     contexts = {
         input = (
-            rust_toolchain == "stable"
+            static_toolchain(rust_toolchain)
             || cargo_profile == "release"
             || cargo_profile == "release-debuginfo"
             || cargo_profile == "release-native"?
@@ -1307,7 +1307,7 @@ target "install" {
         assert_linkage = (
             substr(cargo_profile, 0, 5) == "bench"?     "static":
             substr(cargo_profile, 0, 7) == "release"?   "static":
-            substr(rust_toolchain, 0, 6) == "stable"?   "static":
+            static_toolchain(rust_toolchain)?           "static":
             ""
         )
     }
@@ -1957,7 +1957,7 @@ target "deps-base" {
                         "-C link-arg=-l:libgcc.a": "",
                 ]):
 
-            substr(rust_toolchain, 0, 6) == "stable"?
+            static_toolchain(rust_toolchain)?
                 join(" ", [
                     join(" ", rustflags),
                     join(" ", static_rustflags),
@@ -2315,7 +2315,7 @@ target "rust" {
     }
     args = {
         rust_toolchain = (
-            rust_toolchain == "stable"?
+            rust_toolchain == "msrv"?
                 rust_msrv:
             rust_toolchain == "nightly"?
                 rust_nightly:
@@ -2593,6 +2593,13 @@ target "system" {
 #
 # Utils
 #
+
+# The pinned msrv and the moving stable channel link static in every profile,
+# with the stable-legal flag set.
+function "static_toolchain" {
+    params = [rust_toolchain]
+    result = rust_toolchain == "msrv" || substr(rust_toolchain, 0, 6) == "stable"
+}
 
 function "sys_target_isa" {
     params = [sys_target]

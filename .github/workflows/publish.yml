@@ -180,7 +180,7 @@ jobs:
       && inputs.docker_repo != ''
       && contains(fromJSON(inputs.cargo_profiles), fromJSON('["release"]')[0])
       && contains(fromJSON(inputs.feat_sets), fromJSON('["default"]')[0])
-      && contains(fromJSON(inputs.rust_toolchains), fromJSON('["stable"]')[0])
+      && contains(fromJSON(inputs.rust_toolchains), fromJSON('["msrv"]')[0])
       && (github.ref == 'refs/heads/main' || contains(github.ref, 'refs/tags/v'))
 
     name: Bundles
@@ -193,7 +193,7 @@ jobs:
         bake_target: ${{fromJSON('["docker_io", "ghcr_io"]')}}
         cargo_profile: ${{fromJSON('["release"]')}}
         feat_set: ${{fromJSON('["default"]')}}
-        rust_toolchain: ${{fromJSON('["stable"]')}}
+        rust_toolchain: ${{fromJSON('["msrv"]')}}
         sys_name: ${{fromJSON(inputs.sys_names)}}
         sys_version: ${{fromJSON(inputs.sys_versions)}}
         rust_target: ${{fromJSON(inputs.rust_targets)}}

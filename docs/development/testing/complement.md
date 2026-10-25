@@ -49,11 +49,11 @@ cargo_profile="release" docker/bake.sh complement-tester complement-testee && \
   cargo_profile="release" docker/complement.sh
 ```
 
-##### Release build with stable Rust toolchain
+##### Release build with the msrv toolchain
 
 ```bash
 export cargo_profile="release"
-export rust_toolchain="stable"
+export rust_toolchain="msrv"
 docker/bake.sh complement-tester complement-testee && docker/complement.sh
 ```
 
