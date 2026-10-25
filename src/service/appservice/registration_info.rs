@@ -1,7 +1,7 @@
 use ruma::{OwnedUserId, ServerName, UserId, api::appservice::Registration};
-use tuwunel_core::Result;
+use tuwunel_core::{Err, Result};
 
-use super::NamespaceRegex;
+use super::{NamespaceRegex, socket_path};
 
 /// Appservice registration combined with its compiled regular expressions.
 #[derive(Clone, Debug)]
@@ -14,7 +14,16 @@ pub struct RegistrationInfo {
 }
 
 impl RegistrationInfo {
+	/// Validates an application service registration.
+	///
+	/// Checks its URL and sender, and compiles its namespace expressions.
 	pub fn new(registration: Registration, server_name: &ServerName) -> Result<Self> {
+		if socket_path(registration.url.as_deref().unwrap_or_default())?.is_some()
+			&& cfg!(not(unix))
+		{
+			return Err!("Unix sockets are not supported on this platform");
+		}
+
 		Ok(Self {
 			aliases: NamespaceRegex::new(false, registration.namespaces.aliases.iter())?,
 			users: NamespaceRegex::new(false, registration.namespaces.users.iter())?,

@@ -203,16 +203,7 @@ fn make_clients(services: &Services) -> Result<Clients> {
 		synapse,
 		sender,
 
-		appservice: with!(cb => cb
-			.dns_resolver(appservice_resolver(services))
-			.connect_timeout(Duration::from_secs(5))
-			.read_timeout(Duration::from_secs(services.config.appservice_timeout))
-			.timeout(Duration::from_secs(services.config.appservice_timeout))
-			.pool_max_idle_per_host(1)
-			.pool_idle_timeout(Duration::from_secs(
-				services.config.appservice_idle_timeout,
-			))
-			.redirect(Policy::limited(2))),
+		appservice: with!(cb => appservice_builder(services, cb)),
 
 		pusher: with!(cb => cb
 			.dns_resolver(Validating::new(
@@ -231,6 +222,28 @@ fn make_clients(services: &Services) -> Result<Clients> {
 			.redirect(Policy::limited(0))
 			.pool_max_idle_per_host(1)),
 	})
+}
+
+#[cfg(unix)]
+pub(crate) fn make_appservice_unix(services: &Services, path: &str) -> Result<Client> {
+	let builder = base(&services.config, &services.client.proxy, None)?;
+	let client = appservice_builder(services, builder)
+		.no_proxy()
+		.unix_socket(path)
+		.build()?;
+
+	Ok(client)
+}
+
+fn appservice_builder(services: &Services, builder: ClientBuilder) -> ClientBuilder {
+	builder
+		.dns_resolver(appservice_resolver(services))
+		.connect_timeout(Duration::from_secs(5))
+		.read_timeout(Duration::from_secs(services.config.appservice_timeout))
+		.timeout(Duration::from_secs(services.config.appservice_timeout))
+		.pool_max_idle_per_host(1)
+		.pool_idle_timeout(Duration::from_secs(services.config.appservice_idle_timeout))
+		.redirect(Policy::limited(2))
 }
 
 fn make_federation(

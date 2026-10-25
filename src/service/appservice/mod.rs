@@ -3,8 +3,12 @@ mod namespace_regex;
 mod ping;
 mod registration_info;
 pub(crate) mod request;
+#[cfg(test)]
+mod tests;
 mod thirdparty;
 
+#[cfg(unix)]
+use std::sync::Mutex;
 use std::{
 	collections::BTreeMap,
 	ffi::OsStr,
@@ -14,15 +18,28 @@ use std::{
 
 use async_trait::async_trait;
 use futures::{FutureExt, Stream, TryStreamExt};
+use reqwest::Client;
 use ruma::{RoomAliasId, RoomId, UserId, api::appservice::Registration};
 use tokio::sync::{RwLock, RwLockReadGuard, SetOnce};
-use tuwunel_core::{Err, Result, defer, err, utils::stream::IterStream};
+#[cfg(unix)]
+use tuwunel_core::smallstr::SmallString;
+use tuwunel_core::{Err, Result, defer, err, implement, utils::stream::IterStream};
 use tuwunel_database::Map;
 
 pub use self::{namespace_regex::NamespaceRegex, registration_info::RegistrationInfo};
+#[cfg(unix)]
+use crate::client::make_appservice_unix;
+
+#[cfg(unix)]
+type SocketPath = SmallString<[u8; 64]>;
 
 pub struct Service {
 	registration_info: RwLock<Registrations>,
+	/// Live client pools indexed by socket path.
+	///
+	/// Entries persist for the service lifetime, including after unregistration.
+	#[cfg(unix)]
+	unix_clients: Mutex<BTreeMap<SocketPath, Client>>,
 	loaded: SetOnce<()>,
 	services: Arc<crate::services::OnceServices>,
 	db: Data,
@@ -39,6 +56,8 @@ impl crate::Service for Service {
 	fn build(args: &crate::Args<'_>) -> Result<Arc<Self>> {
 		Ok(Arc::new(Self {
 			registration_info: RwLock::new(BTreeMap::new()),
+			#[cfg(unix)]
+			unix_clients: Mutex::default(),
 			loaded: SetOnce::new(),
 			services: args.services.clone(),
 			db: Data {
@@ -299,4 +318,43 @@ impl Service {
 	/// will not complete.
 	#[inline]
 	pub async fn loaded(&self) { self.loaded.wait().await; }
+}
+
+#[implement(Service)]
+fn transport<'a>(&self, url: &'a str) -> Result<(&'a str, Client)> {
+	match socket_path(url)? {
+		| None => Ok((url, self.services.client.appservice.clone())),
+		#[cfg(not(unix))]
+		| Some(_) => Err!("Unix sockets are not supported on this platform"),
+		#[cfg(unix)]
+		| Some(path) => Ok(("http://localhost", self.unix_client(path)?)),
+	}
+}
+
+#[cfg(unix)]
+#[implement(Service)]
+fn unix_client(&self, path: &str) -> Result<Client> {
+	let mut clients = self.unix_clients.lock().expect("locked");
+
+	match clients.get(path) {
+		| Some(client) => Ok(client.clone()),
+		| None => {
+			let client = make_appservice_unix(&self.services, path)?;
+
+			clients.insert(path.into(), client.clone());
+			Ok(client)
+		},
+	}
+}
+
+fn socket_path(url: &str) -> Result<Option<&str>> {
+	url.split_once(':')
+		.filter(|(scheme, _)| scheme.eq_ignore_ascii_case("unix"))
+		.map(|(_, path)| path.strip_prefix("//").unwrap_or(path))
+		.map(|path| {
+			path.starts_with('/')
+				.then_some(path)
+				.ok_or_else(|| err!("Appservice Unix socket URL must name an absolute path"))
+		})
+		.transpose()
 }

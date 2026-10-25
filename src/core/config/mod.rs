@@ -5494,6 +5494,10 @@ pub struct AppService {
 	/// The URL for the application service.
 	///
 	/// Optionally set to `null` if no traffic is required.
+	///
+	/// On Unix, use `unix:///absolute/path.sock` to connect over a Unix socket.
+	///
+	/// example: "unix:///run/mautrix-whatsapp/appservice.sock"
 	pub url: Option<String>,
 
 	/// A unique token for application services to use to authenticate requests

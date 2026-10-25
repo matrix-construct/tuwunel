@@ -30,9 +30,10 @@ pub async fn ping(
 		return Ok(());
 	}
 
+	let (base, client) = self.transport(&dest)?;
 	let hs_token = registration.hs_token.as_str();
 	let mut http_request = request
-		.try_into_http_request::<BytesMut>(&dest, SendAccessToken::IfRequired(hs_token), ())
+		.try_into_http_request::<BytesMut>(base, SendAccessToken::IfRequired(hs_token), ())
 		.map_err(|e| {
 			err!(Request(ConnectionFailed(warn!(
 				appservice = %registration.id,
@@ -47,10 +48,7 @@ pub async fn ping(
 
 	let reqwest_request = Request::try_from(http_request)?;
 
-	let response = self
-		.services
-		.client
-		.appservice
+	let response = client
 		.execute(reqwest_request)
 		.await
 		.map_err(|e| {
