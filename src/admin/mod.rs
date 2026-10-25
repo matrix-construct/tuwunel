@@ -1,3 +1,4 @@
+#![recursion_limit = "256"]
 #![expect(clippy::too_many_arguments)]
 
 pub(crate) mod admin;

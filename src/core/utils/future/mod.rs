@@ -3,6 +3,8 @@
 //! The extensions compose Boolean, optional, and fallible outputs without
 //! awaiting them early. Comparison and selection helpers are included.
 
+use std::pin::Pin;
+
 mod bool_ext;
 mod ext_ext;
 mod option_ext;
@@ -10,6 +12,14 @@ mod option_stream;
 mod ready_bool_ext;
 mod ready_eq_ext;
 mod try_ext_ext;
+
+/// Boxes a `Send` future behind a pinned trait object.
+pub fn boxed_send<'a, F>(future: F) -> Pin<Box<dyn Future<Output = F::Output> + Send + 'a>>
+where
+	F: Future + Send + 'a,
+{
+	Box::pin(future)
+}
 
 pub use self::{
 	bool_ext::{BoolExt, and, and4, and5, and6, and7, or},

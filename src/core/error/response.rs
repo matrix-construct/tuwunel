@@ -38,8 +38,9 @@ impl From<Error> for UiaaResponse {
 		}
 
 		let status = match &error {
-			| Error::Federation(origin, remote) if !is_relayable(ruma_error_kind(remote)) =>
-				return withheld_remote_error(origin),
+			| Error::Federation(origin, remote) if !is_relayable(ruma_error_kind(remote)) => {
+				return withheld_remote_error(origin);
+			},
 
 			// A remote's 401 reads to a client as its own session failing.
 			| Error::Federation(..) if error.status_code() == StatusCode::UNAUTHORIZED =>

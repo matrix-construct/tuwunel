@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 mod get_nonce;
 mod is_user_locked;
 mod is_user_suspended;

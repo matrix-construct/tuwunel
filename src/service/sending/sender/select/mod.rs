@@ -109,8 +109,9 @@ pub(super) async fn select_events(
 
 	let retry = match current {
 		| Current::Busy => return Ok(Selection::Busy),
-		| Current::Refused { earliest_retry } =>
-			return Ok(Selection::Refused { earliest_retry }),
+		| Current::Refused { earliest_retry } => {
+			return Ok(Selection::Refused { earliest_retry });
+		},
 		| Current::Ready { replay } => replay,
 		| Current::Split(split) => match self.slice(dest, split).await {
 			| Some((items, split)) => return Ok(Selection::Slice(items, split)),

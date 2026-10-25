@@ -297,7 +297,10 @@ pub(super) async fn partition_backoffs<T>(
 	prepared: &Prepared,
 	backoffs: &Backoffs,
 	now: u64,
-) -> (Vec<OwnedServerName>, Vec<Outcome<T>>) {
+) -> (Vec<OwnedServerName>, Vec<Outcome<T>>)
+where
+	T: Send,
+{
 	context
 		.services
 		.state_cache

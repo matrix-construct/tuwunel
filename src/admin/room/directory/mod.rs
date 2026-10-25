@@ -43,8 +43,9 @@ fn local_alias<'a>(
 	room: &'a RoomOrAliasId,
 ) -> Result<Option<&'a RoomAliasId>> {
 	match <&RoomAliasId>::try_from(room).ok() {
-		| Some(alias) if !services.globals.alias_is_local(alias) =>
-			Err!("Alias {alias} is not local to this server; use the room id instead"),
+		| Some(alias) if !services.globals.alias_is_local(alias) => {
+			Err!("Alias {alias} is not local to this server; use the room id instead")
+		},
 		| alias => Ok(alias),
 	}
 }

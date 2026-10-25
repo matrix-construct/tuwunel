@@ -1180,6 +1180,13 @@ pub struct Config {
 	#[serde(default = "true_fn")]
 	pub allow_federation: bool,
 
+	/// MSC4521: serve algebraic room digests and sketch-based set differences,
+	/// and participate in periodic reconciliation with room peers.
+	///
+	/// default: false
+	#[serde(default)]
+	pub msc4521_enabled: bool,
+
 	/// (EXPERIMENTAL) Resolve the base event of a room context request by
 	/// fetching it from federation when the server never received it.
 	///

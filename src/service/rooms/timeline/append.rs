@@ -194,6 +194,9 @@ where
 
 	// Insert pdu
 	self.append_pdu_json(&pdu_id, pdu, &pdu_json);
+	if let Some(services) = self.services.try_get() {
+		services.reconcile.room_activity(pdu.room_id());
+	}
 
 	drop(insert_lock);
 
@@ -313,12 +316,13 @@ async fn append_pdu_effects(
 		| TimelineEventType::RoomMessage =>
 			self.append_message_effects(&pdu_id, pdu, shortroomid)
 				.await?,
-		| TimelineEventType::RoomTopic =>
+		| TimelineEventType::RoomTopic => {
 			if let Some(topic) = pdu.get_content().ok().and_then(plain_text_topic) {
 				self.services
 					.search
 					.index_pdu(shortroomid, &pdu_id, &topic);
-			},
+			}
+		},
 		| _ => {},
 	}
 

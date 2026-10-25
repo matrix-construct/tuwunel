@@ -75,7 +75,7 @@ pub(super) fn async_noinline(item: ItemFn, _args: &[Meta]) -> Result<TokenStream
 			>>
 		#where_clause
 		{
-			::std::boxed::Box::pin(#call)
+			::tuwunel_core::utils::future::boxed_send(#call)
 		}
 
 		#(#body_attrs)*

@@ -789,8 +789,9 @@ where
 
 pub(super) fn auth_input_error(error: Error) -> Error {
 	match error {
-		| error @ (Error::Err(..) | Error::Request(InvalidParam, ..)) =>
-			err!(Database("invalid authorization dependency: {error}")),
+		| error @ (Error::Err(..) | Error::Request(InvalidParam, ..)) => {
+			err!(Database("invalid authorization dependency: {error}"))
+		},
 		| error => error,
 	}
 }

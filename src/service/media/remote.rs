@@ -384,6 +384,7 @@ async fn federation_request<Request>(
 ) -> Result<Request::IncomingResponse>
 where
 	Request: OutgoingRequest + Send + Debug,
+	Request::IncomingResponse: Send,
 	Request::Authentication: FedAuth,
 	Request::PathBuilder: FedPath,
 {

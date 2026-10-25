@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 use tuwunel_api::router::{self, ClientIp, Ruma, State};
 
 pub(crate) mod backfill;
@@ -14,6 +16,8 @@ pub(crate) mod media;
 pub(crate) mod openid;
 pub(crate) mod publicrooms;
 pub(crate) mod query;
+pub(crate) mod reconciliation_api;
+pub(crate) mod room_reconciliation;
 /// Provides the server route builder.
 ///
 /// It includes discovery endpoints and applies the federation setting.
@@ -44,6 +48,10 @@ pub(crate) use self::{
 	openid::get_openid_userinfo_route,
 	publicrooms::{get_public_rooms_filtered_route, get_public_rooms_route},
 	query::{get_profile_information_route, get_room_information_route},
+	room_reconciliation::{
+		get_room_reconciliation_digest_route, get_room_reconciliation_strata_route,
+		post_room_reconciliation_diff_route,
+	},
 	send::send_transaction_message_route,
 	send_join::create_join_event_v2_route,
 	send_knock::create_knock_event_v1_route,

@@ -79,6 +79,7 @@ COPY <<EOF complement.toml
     max_fetch_prev_events = 224
     media_compat_file_link = false
     media_startup_check = true
+    msc4521_enabled = true
     port = [8008, 8448]
     prune_missing_media = true
     query_trusted_key_servers_first = false

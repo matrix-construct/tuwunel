@@ -104,8 +104,9 @@ pub(super) fn decode(column: usize, key: &[u8], value: &[u8]) -> Option<Decoded>
 			normal(room, count)?;
 			return Some(Decoded { rooms: [room, 0], spots: [None; 2] });
 		},
-		| 8 | 9 if value.is_empty().is_false() =>
-			return Some(Decoded { rooms: [0; 2], spots: [None; 2] }),
+		| 8 | 9 if value.is_empty().is_false() => {
+			return Some(Decoded { rooms: [0; 2], spots: [None; 2] });
+		},
 		| 8 | 9 => {
 			let end = destination(key)?;
 

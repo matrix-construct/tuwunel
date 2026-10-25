@@ -38,8 +38,9 @@ fn federation_failures(
 ) -> impl Iterator<Item = (String, JsonValue)> {
 	faults.into_iter().map(move |(server, fault)| {
 		match &fault {
-			| Fault::Error(error) =>
-				debug_warn!(%server, %error, endpoint, "key federation request failed"),
+			| Fault::Error(error) => {
+				debug_warn!(%server, %error, endpoint, "key federation request failed");
+			},
 			| _ => debug_warn!(%server, ?fault, endpoint, "key federation request failed"),
 		}
 

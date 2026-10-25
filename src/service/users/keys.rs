@@ -596,8 +596,9 @@ pub async fn sign_key(
 		.qry(&key)
 		.await
 		.map_err(|error| match error {
-			| error if error.is_not_found() =>
-				err!(Request(NotFound("Tried to sign nonexistent key"))),
+			| error if error.is_not_found() => {
+				err!(Request(NotFound("Tried to sign nonexistent key")))
+			},
 			| error => error,
 		})?
 		.deserialized()
@@ -949,7 +950,9 @@ fn replace_signatures(
 			if signatures
 				.as_object()
 				.is_some_and(|signatures| signatures == &replacement) =>
-			return Ok(false),
+		{
+			return Ok(false);
+		},
 		| Some(signatures) => *signatures = replacement.into(),
 		| None => {
 			signatures.insert(sender_id.to_string(), replacement.into());

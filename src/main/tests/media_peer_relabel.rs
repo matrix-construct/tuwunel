@@ -722,8 +722,9 @@ async fn exercise_bucket(services: &Services, peer: &ServerName) -> Result {
 
 	match asked(before) == 1 {
 		| true => Ok(()),
-		| false =>
-			Err!("a sibling size in the same bucket refetched, {} in total", asked(before)),
+		| false => {
+			Err!("a sibling size in the same bucket refetched, {} in total", asked(before))
+		},
 	}
 }
 
