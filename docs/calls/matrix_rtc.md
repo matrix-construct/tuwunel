@@ -207,7 +207,8 @@ The final file should look something like this:
 > in Step 3.1, so the `rtc/transports` endpoint advertises the same
 > focus. Without it that endpoint answers with an empty list and clients
 > report that the server has no MatrixRTC transport, even though your
-> `.well-known` is correct.
+> `.well-known` is correct. If it names a different URL, current clients
+> use that one instead of your `.well-known` (see Troubleshooting).
 
 ## 4. Configure Firewall
 
@@ -635,6 +636,41 @@ curl -s https://matrix.yourdomain.com/_matrix/client/unstable/org.matrix.msc4143
 
 An empty `rtc_transports` array means `livekit_url` is unset. Add it per
 step 3.1 and restart Tuwunel.
+
+### Element X fails every call with `OPEN_ID_ERROR`
+
+Element X, and other clients built on a current matrix-rust-sdk, fail
+every call with `OPEN_ID_ERROR`, while clients that still read
+`.well-known` first may keep working. The reverse proxy logs requests
+for `/sfu/get` on the wrong host, typically `"OPTIONS /sfu/get" 405` on
+its default or homeserver site. The same error also covers token
+failures, so this is one cause to check, not the only one.
+
+The usual cause is a `livekit_url` in `tuwunel.toml` that names the
+wrong address (often the homeserver itself) while a separately served
+`.well-known/matrix/client` is correct. Current clients ask the
+`rtc/transports` endpoint first and read `.well-known` only when the
+server does not implement it, so Tuwunel's answer wins. When Tuwunel
+serves `.well-known` itself, both come from the same settings and
+cannot disagree, so this applies to step 3.2 setups. Compare the two:
+
+```bash
+curl -s https://matrix.yourdomain.com/_matrix/client/unstable/org.matrix.msc4143/rtc/transports
+curl -s https://yourdomain.com/.well-known/matrix/client
+```
+
+Each `livekit_service_url` must be the same URL in both, the
+`matrix-rtc` address from step 3, never the homeserver itself. Entries
+under `[[global.well_known.rtc_transports]]` are advertised alongside
+`livekit_url`, so remove stale ones. Correct `livekit_url` and restart
+Tuwunel.
+
+Element X keeps the previous answer in memory for up to a day and can
+go on calling the old address after the fix. Closing the app fully
+clears it (on Android, App info, then Force stop; swiping it away may
+leave it running). If it still uses the old address, wait: the cached
+answer expires within a day, and the first call after that may still
+use it once while the client refreshes.
 
 ### Docker bridge addresses advertised as candidates
 
