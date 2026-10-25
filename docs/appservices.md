@@ -58,6 +58,29 @@ appservice_dir = "/etc/tuwunel/appservices"
 
 Files use the same YAML format that bridges produce for Synapse. New or removed files are not picked up without a restart.
 
+## Unix sockets
+
+On Unix systems, set the registration URL to an absolute socket path:
+
+```yaml
+url: unix:///run/mautrix-whatsapp/appservice.sock
+```
+
+For an inline registration, use the same URL:
+
+```toml
+[global.appservice.whatsapp]
+url = "unix:///run/mautrix-whatsapp/appservice.sock"
+```
+
+Both `unix:///absolute/path.sock` and `unix:/absolute/path.sock` are accepted. The path is literal, without percent-decoding; a path prefix after the socket and TLS over the socket are not supported. The bridge may create the socket after tuwunel starts.
+
+For mautrix-go bridges, set `appservice.hostname` to `/run/mautrix-whatsapp/appservice.sock` and `appservice.address` to `unix:///run/mautrix-whatsapp/appservice.sock`. A leading `/` in the hostname selects a socket listener, so the port is optional. The bridge copies its address into the generated registration. Mautrix-python bridges listen on TCP only.
+
+The tuwunel process needs write permission on the bridge's socket file. Run both services as the same user or give tuwunel access through a shared group.
+
+For the reverse direction, set tuwunel's `unix_socket_path` to `/run/tuwunel/tuwunel.sock` and the bridge's `homeserver.address` to `unix:///run/tuwunel/tuwunel.sock`. See the [Unix socket configuration](deploying/nixos.md#unix-sockets) and [socket activation guide](deploying/socket-activation.md#unix-sockets).
+
 ## Namespaces
 
 Each registration declares which users, room aliases, and room IDs the appservice claims. Entries under `users`, `aliases`, and `rooms` are lists; each entry has a `regex` and an optional `exclusive` flag.
@@ -79,7 +102,7 @@ Fields under `[global.appservice.<ID>]`:
 | Field | Default | Description |
 |---|---|---|
 | `id` | section key | Unique registration ID. Inferred from the TOML section key when omitted. |
-| `url` | -- | Base URL the homeserver pushes events to. Set to `null` for receive-only registrations. |
+| `url` | -- | Base URL the homeserver pushes events to, or `unix:///absolute/path.sock` on Unix. Set to `null` for receive-only registrations. |
 | `as_token` | -- | Token the appservice sends to the homeserver in `Authorization` headers. |
 | `hs_token` | -- | Token the homeserver sends to the appservice on every push. |
 | `sender_localpart` | `id` | Localpart of the appservice bot user. Defaults to the registration ID. |
@@ -113,9 +136,10 @@ These options go in the top-level `[global]` section:
 
 | Option | Default | Description |
 |---|---|---|
-| `appservice_timeout` | `35` | Request timeout in seconds when pushing events to an appservice. |
-| `appservice_idle_timeout` | `300` | Idle connection pool timeout in seconds. |
-| `dns_passthru_appservices` | `false` | Bypass DNS passthru domain matching for all appservice URLs. More efficient than listing each domain in `dns_passthru_domains` when all appservices share the same network. |
+| `appservice_timeout` | `35` | Read and total request timeout in seconds, including socket registrations; connect timeout is 5 seconds. |
+| `appservice_idle_timeout` | `300` | Idle connection pool timeout in seconds, including socket registrations. |
+| `dns_passthru_appservices` | `false` | Bypass DNS passthru domain matching for all appservice URLs. More efficient than listing each domain in `dns_passthru_domains` when all appservices share the same network. Does not apply to socket registrations. |
+| `proxy` | none | Outbound HTTP proxy settings do not apply to socket registrations. |
 | `show_appservice_users_in_user_directory` | `false` | Include appservice senders and users in exclusive appservice user namespaces in user directory searches. They remain subject to the normal room visibility rules unless `show_all_local_users_in_user_directory` is also enabled; Synapse has no equivalent and always hides them. Reloadable. |
 
 ## Getting help

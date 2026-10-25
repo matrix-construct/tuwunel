@@ -670,7 +670,7 @@
 #
 #sender_retry_grace = 15
 
-# Appservice URL request connection timeout. Defaults to 35 seconds as
+# Appservice URL read and total timeout, defaulting to 35 seconds as
 # generally appservices are hosted within the same network.
 #
 #appservice_timeout = 35

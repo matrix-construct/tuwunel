@@ -905,7 +905,7 @@ pub struct Config {
 	#[serde(default = "default_sender_retry_grace")]
 	pub sender_retry_grace: u64,
 
-	/// Appservice URL request connection timeout. Defaults to 35 seconds as
+	/// Appservice URL read and total timeout, defaulting to 35 seconds as
 	/// generally appservices are hosted within the same network.
 	///
 	/// default: 35
