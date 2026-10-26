@@ -155,8 +155,8 @@ impl crate::Service for Service {
 #[implement(Service)]
 pub fn check_rate_limit(&self, client: IpAddr) -> Result {
 	let config = &self.services.server.config;
-	let rate = f64::from(config.rendezvous_rc_per_second.max(1));
-	let burst = f64::from(config.rendezvous_rc_burst_count.max(1));
+	let rate = f64::from(config.rendezvous.rc_per_second.max(1));
+	let burst = f64::from(config.rendezvous.rc_burst_count.max(1));
 
 	check_bucket_at(&self.ratelimiter, client, rate, burst, Instant::now())
 }
@@ -227,9 +227,9 @@ fn check_bucket_at(
 #[implement(Service)]
 pub fn create(&self, data: Bytes) -> (SessionId, Meta) {
 	let config = &self.services.server.config;
-	let ttl = Duration::from_secs(config.rendezvous_session_ttl);
+	let ttl = Duration::from_secs(config.rendezvous.session_ttl);
 
-	self.create_at(data, SystemTime::now(), ttl, config.rendezvous_max_sessions)
+	self.create_at(data, SystemTime::now(), ttl, config.rendezvous.max_sessions)
 }
 
 #[implement(Service)]
@@ -330,7 +330,7 @@ fn get_at(&self, id: &str, if_none_match: Option<&str>, now: SystemTime) -> Get 
 /// Panics if the session lock has been poisoned.
 #[implement(Service)]
 pub fn put(&self, id: &str, if_match: &str, data: Bytes) -> Put {
-	let ttl = Duration::from_secs(self.services.server.config.rendezvous_session_ttl);
+	let ttl = Duration::from_secs(self.services.server.config.rendezvous.session_ttl);
 
 	self.put_at(id, if_match, data, SystemTime::now(), ttl)
 }
@@ -350,7 +350,7 @@ fn put_at(&self, id: &str, if_match: &str, data: Bytes, now: SystemTime, ttl: Du
 /// Panics if the session lock has been poisoned.
 #[implement(Service)]
 pub fn put_token(&self, id: &str, sequence_token: &str, data: Bytes) -> Put {
-	let ttl = Duration::from_secs(self.services.server.config.rendezvous_session_ttl);
+	let ttl = Duration::from_secs(self.services.server.config.rendezvous.session_ttl);
 
 	self.put_token_at(id, sequence_token, data, SystemTime::now(), ttl)
 }

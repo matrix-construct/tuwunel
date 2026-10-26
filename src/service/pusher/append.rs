@@ -229,7 +229,7 @@ async fn append_pdu_for_user(
 		}
 	}
 
-	if notify || highlight || self.services.config.push_everything {
+	if notify || highlight || self.services.config.push.everything {
 		self.get_pushkeys(user)
 			.map(ToOwned::to_owned)
 			.ready_for_each(|push_key| {

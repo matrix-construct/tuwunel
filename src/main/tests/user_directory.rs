@@ -82,7 +82,7 @@ fn run_case(case: &Case) -> Result {
 		.with_option(format!("http.listen.address=[\"{HOST}\"]"))
 		.with_option(format!("http.listen.port={port}"))
 		.with_option("listening=true")
-		.with_option("log_enable=false")
+		.with_option("logging.enable=false")
 		.with_option(format!("directory.users.show_all_local={}", case.show_all));
 
 	let args = case

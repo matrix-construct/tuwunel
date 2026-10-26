@@ -80,7 +80,7 @@ fn server_user_identity_is_durable() -> Result {
 fn seed_phase(database: &Path) -> Result {
 	let args = Args::default_test(&["fresh"])
 		.with_option(format!("database_path={database:?}"))
-		.with_option("create_admin_room=true");
+		.with_option("admin.room.create=true");
 
 	boot(&args, async |services| {
 		assert_eq!(established(services).await?.as_deref(), Some("conduit"));
@@ -237,7 +237,7 @@ fn legacy_phase(database: &Path) -> Result {
 fn adopted_phase(database: &Path) -> Result {
 	let args = Args::default_test(&[])
 		.with_option(format!("database_path={database:?}"))
-		.with_option("server_user_localpart=\"_server\"");
+		.with_option("admin.server_user_localpart=\"_server\"");
 
 	boot(&args, async |services| {
 		assert_eq!(established(services).await?.as_deref(), Some("_server"));
@@ -259,7 +259,7 @@ fn changed_phase(database: &Path) -> Result {
 fn refused(database: &Path, localpart: &str, refusal: &str) -> Result {
 	let args = Args::default_test(&[])
 		.with_option(format!("database_path={database:?}"))
-		.with_option(format!("server_user_localpart={localpart:?}"));
+		.with_option(format!("admin.server_user_localpart={localpart:?}"));
 
 	let (runtime, server) = start(&args)?;
 	let result = runtime.block_on(async_start(&server));

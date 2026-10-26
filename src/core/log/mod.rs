@@ -33,7 +33,7 @@ pub use self::{
 pub struct Logging {
 	/// Retains the subscriber configured for the server.
 	///
-	/// Initialization may register it globally when `log_global_default` is
+	/// Initialization may register it globally when `logging.global_default` is
 	/// enabled. Otherwise no global registration occurs, and disabled logging
 	/// can retain a no-op subscriber.
 	pub subscriber: Arc<dyn Subscriber + Send + Sync>,

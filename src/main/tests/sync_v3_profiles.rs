@@ -52,8 +52,8 @@ fn serves_filtered_profile_updates() -> Result {
 		.with_loopback_listener(port)
 		.with_option("listening=true")
 		// A presence ping would fill a round this test expects to find empty.
-		.with_option("allow_local_presence=false")
-		.with_option("allow_outgoing_presence=false");
+		.with_option("presence.allow_local=false")
+		.with_option("presence.allow_outgoing=false");
 
 	let runtime = Runtime::new(Some(&args))?;
 	let server = Server::new(Some(&args), Some(&runtime))?;

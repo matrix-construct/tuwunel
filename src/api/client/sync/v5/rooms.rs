@@ -493,6 +493,8 @@ async fn resolve_heroes(
 ) -> (Option<Heroes>, Option<DisplayName>, Option<OwnedMxcUri>) {
 	services
 		.config
+		.client
+		.sync
 		.calculate_heroes
 		.then_async(|| calculate_heroes(services, sender_user, room_id, room_name, room_avatar))
 		.await

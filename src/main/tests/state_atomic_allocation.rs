@@ -32,8 +32,8 @@ fn state_hash_allocation_persists_an_atomic_pair() -> Result {
 	// Prevent presence startup from consuming the global count under test.
 	args.option.extend([
 		format!("database_path={:?}", db_path.0),
-		"allow_local_presence=false".into(),
-		"allow_outgoing_presence=false".into(),
+		"presence.allow_local=false".into(),
+		"presence.allow_outgoing=false".into(),
 	]);
 
 	let runtime = Runtime::new(Some(&args))?;

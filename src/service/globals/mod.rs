@@ -15,7 +15,7 @@ use std::{ops::Range, sync::Arc};
 pub use data::Data;
 use ruma::{OwnedUserId, RoomAliasId, ServerName, UserId};
 use tuwunel_core::{
-	Result, Server, err,
+	Result, Server, err, implement,
 	utils::{Secret, resolve_secret},
 };
 
@@ -39,7 +39,7 @@ impl crate::Service for Service {
 		let db = Data::new(args);
 
 		let server_user =
-			server_user(&args.server.config.server_user_localpart, &args.server.name)?;
+			server_user(&args.server.config.admin.server_user_localpart, &args.server.name)?;
 
 		Ok(Arc::new(Self {
 			db,
@@ -57,13 +57,13 @@ impl crate::Service for Service {
 /// belonging to another server. Invalid input names the configuration setting.
 fn server_user(localpart: &str, server_name: &ServerName) -> Result<OwnedUserId> {
 	UserId::parse_with_server_name(localpart, server_name)
-		.map_err(|e| err!("Invalid server_user_localpart configuration: {e}"))
+		.map_err(|e| err!("Invalid admin.server_user_localpart configuration: {e}"))
 		.and_then(|user| {
 			user.localpart()
 				.eq(localpart)
 				.then_some(user)
 				.ok_or_else(|| {
-					err!("server_user_localpart must be a localpart, not a full user ID")
+					err!("admin.server_user_localpart must be a localpart, not a full user ID")
 				})
 		})
 }
@@ -165,22 +165,6 @@ impl Service {
 	#[must_use]
 	pub fn is_read_only(&self) -> bool { self.db.db.is_read_only() }
 
-	/// Resolves the secret used to authenticate TURN credentials.
-	///
-	/// The configured secret file is read and trimmed on every call, allowing rotation without a
-	/// restart. A successfully read file, including an empty file, takes precedence; read failures
-	/// fall back to the inline secret.
-	#[must_use]
-	pub fn turn_secret(&self) -> Option<Secret> {
-		let config = &self.server.config;
-
-		resolve_secret(
-			config.turn_secret_file.as_deref(),
-			config.turn_secret.as_deref(),
-			"TURN secret",
-		)
-	}
-
 	/// Installs the default rustls cryptography provider when none exists.
 	///
 	/// Existing process-wide providers are preserved. A failure to install the AWS-LC provider is
@@ -196,6 +180,23 @@ impl Service {
 			Ok(())
 		}
 	}
+}
+
+/// Resolves the secret used to authenticate TURN credentials.
+///
+/// The configured secret file is read and trimmed on every call, allowing rotation without a
+/// restart. A successfully read file, including an empty file, takes precedence; read failures
+/// fall back to the inline secret.
+#[implement(Service)]
+#[must_use]
+pub fn turn_secret(&self) -> Option<Secret> {
+	let config = &self.server.config;
+
+	resolve_secret(
+		config.turn.secret_file.as_deref(),
+		config.turn.secret.as_deref(),
+		"TURN secret",
+	)
 }
 
 #[cfg(test)]

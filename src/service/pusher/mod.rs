@@ -30,7 +30,7 @@ use tracing::Level;
 use tuwunel_core::{
 	Err, Result, err, implement,
 	utils::{
-		MutexMap,
+		BoolExt, MutexMap,
 		future::TryExtExt,
 		result::ErrLog,
 		stream::{BroadbandExt, IterStream, ReadyExt, TryIgnore, WidebandExt},
@@ -393,7 +393,7 @@ pub async fn get_actions<'a>(
 
 /// Resolve the events an event relates to, for the MSC3664 push condition.
 ///
-/// `None` while `msc3664_related_event_match` is disabled, which leaves every
+/// `None` while `push.msc3664_related_event_match` is disabled, which leaves every
 /// MSC3664 condition unable to match. The relations do not vary by recipient,
 /// so the append path resolves them once for the whole room; the push-notice
 /// path resolves them per notice, since it holds one event at a time.
@@ -402,41 +402,44 @@ pub async fn get_actions<'a>(
 pub async fn related_events<E: Event>(&self, event: &E) -> Option<Arc<RelatedEvents>> {
 	let config = &self.services.server.config;
 
-	if !config.msc3664_related_event_match {
-		return None;
-	}
+	config
+		.push
+		.msc3664_related_event_match
+		.then_async(async || {
+			let Ok(ExtractRelatesTo { relates_to }) = event.get_content() else {
+				return Some(NO_RELATED_EVENTS.clone());
+			};
 
-	let Ok(ExtractRelatesTo { relates_to }) = event.get_content() else {
-		return Some(NO_RELATED_EVENTS.clone());
-	};
+			let reply = relates_to
+				.in_reply_to
+				.map(|reply| (IN_REPLY_TO.to_owned(), reply.event_id));
 
-	let reply = relates_to
-		.in_reply_to
-		.map(|reply| (IN_REPLY_TO.to_owned(), reply.event_id));
+			let related = relates_to
+				.rel_type
+				.zip(relates_to.event_id)
+				.into_iter()
+				.chain(reply)
+				.stream()
+				.wide_filter_map(async |(rel_type, event_id)| {
+					let related = self
+						.services
+						.timeline
+						.get_pdu(&event_id)
+						.await
+						.ok()
+						// A relation crossing rooms is not one the sender could have made, and
+						// following it would expose an event the recipient may not be in a room for.
+						.filter(|related| related.room_id() == event.room_id())?;
 
-	let related = relates_to
-		.rel_type
-		.zip(relates_to.event_id)
-		.into_iter()
-		.chain(reply)
-		.stream()
-		.wide_filter_map(async |(rel_type, event_id)| {
-			let related = self
-				.services
-				.timeline
-				.get_pdu(&event_id)
-				.await
-				.ok()
-				// A relation crossing rooms is not one the sender could have made, and
-				// following it would expose an event the recipient may not be in a room for.
-				.filter(|related| related.room_id() == event.room_id())?;
+					let related: Raw<AnySyncTimelineEvent> = related.to_format();
 
-			let related: Raw<AnySyncTimelineEvent> = related.to_format();
+					Some((rel_type, FlattenedJson::from_raw(&related)))
+				})
+				.collect()
+				.await;
 
-			Some((rel_type, FlattenedJson::from_raw(&related)))
+			Some(Arc::new(related))
 		})
-		.collect()
-		.await;
-
-	Some(Arc::new(related))
+		.await
+		.flatten()
 }

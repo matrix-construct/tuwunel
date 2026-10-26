@@ -30,22 +30,28 @@ pub(crate) async fn create_typing_event_route(
 
 	match body.state {
 		| Typing::Yes(info) => {
-			let duration = Ord::clamp(
-				info.timeout
-					.as_millis()
-					.try_into()
-					.unwrap_or(u64::MAX),
-				services
-					.server
-					.config
-					.typing_client_timeout_min_s
-					.try_mul(1000)?,
-				services
-					.server
-					.config
-					.typing_client_timeout_max_s
-					.try_mul(1000)?,
-			);
+			let timeout = info
+				.timeout
+				.as_millis()
+				.try_into()
+				.unwrap_or(u64::MAX);
+
+			let minimum = services
+				.server
+				.config
+				.typing
+				.client_timeout_min_s
+				.try_mul(1000)?;
+
+			let maximum = services
+				.server
+				.config
+				.typing
+				.client_timeout_max_s
+				.try_mul(1000)?;
+
+			let duration = Ord::clamp(timeout, minimum, maximum);
+
 			services
 				.typing
 				.typing_add(

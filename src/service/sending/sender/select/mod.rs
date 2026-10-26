@@ -400,7 +400,8 @@ pub(super) async fn select_edus(
 	let receipts = self
 		.server
 		.config
-		.allow_outgoing_read_receipts
+		.read_receipts
+		.allow_outgoing
 		.then_async(|| {
 			self.select_edus_receipts(server_name, batch, &max_edu_count, &events_len)
 		});
@@ -408,7 +409,8 @@ pub(super) async fn select_edus(
 	let presence = self
 		.server
 		.config
-		.allow_outgoing_presence
+		.presence
+		.allow_outgoing
 		.then_async(|| {
 			self.select_edus_presence(server_name, batch, &max_edu_count, &events_len)
 		});

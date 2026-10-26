@@ -24,7 +24,7 @@ const KIND: &str = "org.example.deletable";
 
 #[test]
 fn deletion_respects_protected_types_and_ownership() -> Result {
-	boot("account-data-delete", ["log_enable=false"], exercise)
+	boot("account-data-delete", ["logging.enable=false"], exercise)
 }
 
 async fn exercise(services: &Services, base: &str) -> Result {

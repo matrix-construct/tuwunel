@@ -20,8 +20,8 @@ fn signatures_are_canonical_and_foreign_updates_are_private() -> Result {
 
 	let args = Args::default_test(&["fresh", "cleanup"])
 		.with_database_path(&database)
-		.with_option("allow_local_presence=false")
-		.with_option("allow_outgoing_presence=false")
+		.with_option("presence.allow_local=false")
+		.with_option("presence.allow_outgoing=false")
 		.with_option("encryption.device_key_update_encrypted_rooms_only=false");
 
 	let args = Args { maintenance: true, ..args };

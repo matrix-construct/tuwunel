@@ -24,8 +24,8 @@ fn private_receipts_reject_events_from_another_room() -> Result {
 	let args = Args::default_test(&["fresh", "cleanup"])
 		.with_loopback_listener(port)
 		.with_option("listening=true")
-		.with_option("allow_local_presence=false")
-		.with_option("allow_outgoing_presence=false");
+		.with_option("presence.allow_local=false")
+		.with_option("presence.allow_outgoing=false");
 
 	let runtime = Runtime::new(Some(&args))?;
 	let server = Server::new(Some(&args), Some(&runtime))?;

@@ -52,7 +52,7 @@ const COMMAND_DEADLINE: Duration = Duration::from_secs(10);
 /// taken effect.
 #[test]
 fn revoke_admin_spares_the_server_user_and_the_sender() -> Result {
-	let options = ["create_admin_room=true", "registration.grant_admin_to_first_user=false"];
+	let options = ["admin.room.create=true", "registration.grant_admin_to_first_user=false"];
 
 	boot("admin-revoke", options, exercise)
 }
@@ -132,9 +132,9 @@ async fn join_admin_room(services: &Services, user_id: &UserId) -> Result {
 #[test]
 fn put_user_leaves_a_non_admin_alone() -> Result {
 	let options = [
-		"create_admin_room=true",
+		"admin.room.create=true",
 		"registration.grant_admin_to_first_user=false",
-		"log_enable=false",
+		"logging.enable=false",
 	];
 
 	boot("admin-revoke-put-user", options, put_user_requests)

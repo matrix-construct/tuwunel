@@ -8,7 +8,7 @@ pub(super) async fn change_log_level(&self, filter: Option<String>, reset: bool)
 	let handles = &["console"];
 
 	let filter = reset
-		.then_some(&self.services.config.log)
+		.then_some(&self.services.config.logging.filter)
 		.or(filter.as_ref())
 		.ok_or_else(|| err!("No log level was specified."))?;
 

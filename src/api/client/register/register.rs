@@ -141,7 +141,9 @@ pub(crate) async fn register_route(
 
 	debug_info!(%user_id, %device_id, "User account was created");
 
-	if body.appservice_info.is_none() && (!is_guest || services.config.log_guest_registrations) {
+	if body.appservice_info.is_none()
+		&& (!is_guest || services.config.admin.room.log_guest_registrations)
+	{
 		announce_new_user(services, &user_id, &body, is_guest, &client).await?;
 	}
 

@@ -80,7 +80,7 @@ mod tests {
 			"network.http.allow_invalid_tls_certificates=true".to_owned(),
 			format!("tls.certs={certificate:?}"),
 			format!("tls.key={private_key:?}"),
-			"log=\"error\"".to_owned(),
+			"logging.filter=\"error\"".to_owned(),
 		]
 		.into_iter()
 		.fold(args, Args::with_option);

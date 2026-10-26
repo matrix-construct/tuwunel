@@ -464,7 +464,8 @@ async fn build_sync_events(
 
 	let presence_updates = services
 		.config
-		.allow_local_presence
+		.presence
+		.allow_local
 		.then_async(|| {
 			process_presence_updates(services, since, next_batch, sender_user, filter)
 		});
@@ -2408,6 +2409,8 @@ async fn calculate_counts(
 
 	let heroes = services
 		.config
+		.client
+		.sync
 		.calculate_heroes
 		.and_is(include_heroes)
 		.and_is(small_room)

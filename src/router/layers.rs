@@ -81,7 +81,9 @@ pub(crate) fn build(services: &Arc<Services>) -> Result<(Router, Guard)> {
 	#[cfg(feature = "sentry_telemetry")]
 	let sentry = server
 		.config
+		.telemetry
 		.sentry
+		.enable
 		.then(NewSentryLayer::<Request>::new_from_top);
 
 	#[cfg(feature = "sentry_telemetry")]

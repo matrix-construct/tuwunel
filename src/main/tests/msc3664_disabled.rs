@@ -34,7 +34,7 @@ const READER_TOKEN: &str = "msc3664-disabled-reader-access-token";
 
 /// Holds the default off state of the MSC3664 condition.
 ///
-/// The server resolves no relations unless `msc3664_related_event_match` is
+/// The server resolves no relations unless `push.msc3664_related_event_match` is
 /// set, so a rule using the condition must match nothing at all, including the
 /// relation-type-only shape that needs no related event to decide. Reactions
 /// then stay suppressed by the default rule, as on any server without MSC3664.
@@ -88,8 +88,8 @@ fn related_event_match_is_inert_by_default() -> Result {
 async fn exercise(services: &Services, base: &str) -> Result {
 	wait_until_ready(services, base).await?;
 
-	if services.config.msc3664_related_event_match {
-		return Err!("msc3664_related_event_match must default to off");
+	if services.config.push.msc3664_related_event_match {
+		return Err!("push.msc3664_related_event_match must default to off");
 	}
 
 	let author = register(services, "msc3664offauthor", AUTHOR_TOKEN).await?;
@@ -194,11 +194,11 @@ async fn exercise(services: &Services, base: &str) -> Result {
 		.await?;
 
 	if notified(services, &author, &room, baseline.saturating_add(1)).await {
-		return Err!("a reaction notified while msc3664_related_event_match was off");
+		return Err!("a reaction notified while push.msc3664_related_event_match was off");
 	}
 
 	if highlighted(services, &author, &room, 1).await {
-		return Err!("a reaction highlighted while msc3664_related_event_match was off");
+		return Err!("a reaction highlighted while push.msc3664_related_event_match was off");
 	}
 
 	Ok(())

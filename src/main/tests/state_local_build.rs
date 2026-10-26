@@ -117,7 +117,7 @@ fn run_case(case: Case) -> Result {
 		.with_database_path(&db_path)
 		.with_loopback_listener(port)
 		.with_option("listening=true")
-		.with_option("log_enable=false")
+		.with_option("logging.enable=false")
 		.with_option(resolve_locally);
 
 	let args = match case {

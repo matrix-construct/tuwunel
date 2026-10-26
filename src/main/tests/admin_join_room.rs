@@ -31,7 +31,7 @@ const USER_TOKEN: &str = "admin-join-room-user-access-token";
 /// user already meets, admits the join without the admin present at all.
 #[test]
 fn invites_only_where_the_join_rule_requires_it() -> Result {
-	let options = ["create_admin_room=true", "registration.grant_admin_to_first_user=false"];
+	let options = ["admin.room.create=true", "registration.grant_admin_to_first_user=false"];
 
 	boot("admin-join-room", options, exercise)
 }

@@ -43,7 +43,7 @@ fn exercise_server(format: &str) -> Result {
 	let args = Args::default_test(&["fresh", "cleanup"])
 		.with_loopback_listener(port)
 		.with_option("listening=true")
-		.with_option("log_global_default=false")
+		.with_option("logging.global_default=false")
 		.with_option("jwt.enable=true")
 		.with_option(format!("jwt.key=\"{JWT_KEY_BASE64}\""))
 		.with_option(format!("jwt.format=\"{format}\""))

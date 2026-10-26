@@ -54,12 +54,14 @@ impl Service {
 				self.services
 					.server
 					.config
-					.presence_idle_timeout_s,
+					.presence
+					.idle_timeout_s,
 			| _ =>
 				self.services
 					.server
 					.config
-					.presence_offline_timeout_s,
+					.presence
+					.offline_timeout_s,
 		};
 
 		self.timer_channel
@@ -246,7 +248,7 @@ impl Service {
 		const REFRESH_TIMEOUT: u64 = 30 * 1000;
 
 		if args.appservice.is_some()
-			|| !self.services.server.config.allow_local_presence
+			|| !self.services.server.config.presence.allow_local
 			|| self.services.db.is_read_only()
 		{
 			return Ok(());

@@ -75,15 +75,15 @@ pub(super) fn ensure_create_available<T>(services: &Services, body: &Ruma<T>) ->
 
 	let authenticated = body.sender_user.is_some() || body.appservice_info.is_some();
 
-	(!services.config.rendezvous_authenticated_only || authenticated)
-		.then_some(())
-		.ok_or_else(|| {
-			err!(Request(Forbidden("Rendezvous session creation requires authentication")))
-		})
+	let allowed = !services.config.rendezvous.authenticated_only || authenticated;
+
+	allowed.then_some(()).ok_or_else(|| {
+		err!(Request(Forbidden("Rendezvous session creation requires authentication")))
+	})
 }
 
 pub(super) fn ensure_data_size(services: &Services, data: &str) -> CoreResult {
-	let max_bytes = max_data_bytes(services.config.rendezvous_session_max_bytes);
+	let max_bytes = max_data_bytes(services.config.rendezvous.session_max_bytes);
 
 	(data.len() <= max_bytes)
 		.then_some(())

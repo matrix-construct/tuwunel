@@ -71,7 +71,7 @@ pub fn new(args: Option<&Args>, runtime: Option<&Runtime>) -> Result<Arc<Self>, 
 	info!(
 		server_name = %config.server_name,
 		database_path = ?config.database_path,
-		log_levels = %config.log,
+		log_levels = %config.logging.filter,
 		"{}",
 		tuwunel_core::version(),
 	);

@@ -44,7 +44,7 @@ const IDLE_SLACK: u64 = 100;
 /// waits would poll just as hard.
 #[test]
 fn lists_without_rooms_report_a_zero_count() -> Result {
-	boot("sync-v5-empty-lists", ["log_enable=false"], exercise)
+	boot("sync-v5-empty-lists", ["logging.enable=false"], exercise)
 }
 
 async fn exercise(services: &Services, base: &str) -> Result {

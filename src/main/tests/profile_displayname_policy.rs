@@ -33,10 +33,10 @@ const BRIDGE: Bridge<'static> = Bridge {
 
 #[test]
 fn displayname_writes_follow_the_policy() -> Result {
-	boot("profile-displayname-enabled", ["log_enable=false"], enabled).and_then(|()| {
+	boot("profile-displayname-enabled", ["logging.enable=false"], enabled).and_then(|()| {
 		boot(
 			"profile-displayname-disabled",
-			["log_enable=false", "profile.enable_set_displayname=false"],
+			["logging.enable=false", "profile.enable_set_displayname=false"],
 			disabled,
 		)
 	})

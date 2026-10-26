@@ -79,9 +79,9 @@ pub(crate) fn sync_deadline(services: &Services, timeout: Option<Duration>) -> I
 	let config = &services.config;
 	let timeout = timeout
 		.and_then(millis)
-		.unwrap_or(config.client_sync_timeout_default)
-		.max(config.client_sync_timeout_min)
-		.min(config.client_sync_timeout_max);
+		.unwrap_or(config.client.sync.timeout_default)
+		.max(config.client.sync.timeout_min)
+		.min(config.client.sync.timeout_max);
 
 	poll_deadline(timeout)
 }

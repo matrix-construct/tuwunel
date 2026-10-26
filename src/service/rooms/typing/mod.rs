@@ -367,7 +367,7 @@ impl Service {
 			"tried to broadcast typing status of remote user",
 		);
 
-		if !self.server.config.allow_outgoing_typing {
+		if !self.server.config.typing.allow_outgoing {
 			return Ok(());
 		}
 

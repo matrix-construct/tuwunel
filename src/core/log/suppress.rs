@@ -24,7 +24,7 @@ impl Suppress {
 	/// Panics if the shared reload-handle map mutex is poisoned.
 	pub fn new(server: &Arc<Server>) -> Self {
 		let handle = "console";
-		let config = &server.config.log;
+		let config = &server.config.logging.filter;
 		let suppress = EnvFilter::default();
 		let restore = server
 			.log

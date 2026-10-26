@@ -106,16 +106,18 @@ fn warn_legacy_state_local(config: &Config) {
 }
 
 fn check_observability(config: &Config) -> Result {
-	if config.sentry && config.sentry_endpoint.is_none() {
+	if config.telemetry.sentry.enable && config.telemetry.sentry.endpoint.is_none() {
 		return Err!(Config(
-			"sentry_endpoint",
+			"telemetry.sentry.endpoint",
 			"Sentry cannot be enabled without an endpoint set"
 		));
 	}
 
-	if config.sentry && !(0.0..=1.0).contains(&config.sentry_traces_sample_rate) {
+	if config.telemetry.sentry.enable
+		&& !(0.0..=1.0).contains(&config.telemetry.sentry.traces_sample_rate)
+	{
 		return Err!(Config(
-			"sentry_traces_sample_rate",
+			"telemetry.sentry.traces_sample_rate",
 			"Sentry traces sample rate must be between 0.0 and 1.0 inclusive"
 		));
 	}
@@ -507,15 +509,15 @@ fn check_jwt(config: &Config) -> Result {
 
 fn check_turn_and_media_misc(config: &Config) -> Result {
 	// A blank secret resolves to none at all, so it is checked the same way here.
-	if !config.turn_uris.is_empty()
-		&& !is_secret_set(config.turn_secret_file.as_deref(), config.turn_secret.as_deref())
-		&& config.turn_username.is_empty()
-		&& config.turn_password.is_empty()
+	if !config.turn.uris.is_empty()
+		&& !is_secret_set(config.turn.secret_file.as_deref(), config.turn.secret.as_deref())
+		&& config.turn.username.is_empty()
+		&& config.turn.password.is_empty()
 	{
 		warn!(
-			"turn_uris is configured but no credential source is set; the endpoint \
+			"turn.uris is configured but no credential source is set; the endpoint \
 			 /_matrix/client/v3/voip/turnServer will return empty username and password. Set \
-			 turn_secret, turn_secret_file, or both turn_username and turn_password."
+			 turn.secret, turn.secret_file, or both turn.username and turn.password."
 		);
 	}
 
@@ -527,18 +529,18 @@ fn check_turn_and_media_misc(config: &Config) -> Result {
 		));
 	}
 
-	if config.allow_outgoing_presence && !config.allow_local_presence {
+	if config.presence.allow_outgoing && !config.presence.allow_local {
 		return Err!(Config(
-			"allow_local_presence",
+			"presence.allow_local",
 			"Outgoing presence requires allowing local presence. Please enable \
-			 'allow_local_presence' or disable outgoing presence."
+			 'presence.allow_local' or disable outgoing presence."
 		));
 	}
 
-	if config.suppress_push_when_active {
+	if config.push.suppress_when_active {
 		warn!(
 			"Push suppression when active is enabled (EXPERIMENTAL): behavior may change or be \
-			 unstable. Disable by removing or setting suppress_push_when_active to false."
+			 unstable. Disable by removing or setting push.suppress_when_active to false."
 		);
 	}
 
@@ -1081,7 +1083,7 @@ fn warn_unknown_key(config: &Config) -> Result {
 		.keys()
 		.filter(|key| !known_keys.is_match(key))
 		.inspect(|key| {
-			if config.error_on_unknown_config_opts {
+			if config.configuration.error_on_unknown_opts {
 				error!("Config parameter \"{key}\" is unknown to tuwunel");
 			} else {
 				warn!("Config parameter \"{key}\" is unknown to tuwunel, ignoring.");
@@ -1089,7 +1091,7 @@ fn warn_unknown_key(config: &Config) -> Result {
 		})
 		.collect_vec();
 
-	if !unknown_keys.is_empty() && config.error_on_unknown_config_opts {
+	if !unknown_keys.is_empty() && config.configuration.error_on_unknown_opts {
 		Err!("Unknown config options were found: {unknown_keys:?}")
 	} else {
 		Ok(())

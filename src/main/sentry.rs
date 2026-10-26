@@ -17,37 +17,44 @@ static SEND_ERROR: OnceLock<bool> = OnceLock::new();
 
 pub(crate) fn init(config: &Config) -> Option<sentry::ClientInitGuard> {
 	config
+		.telemetry
 		.sentry
+		.enable
 		.then(|| sentry::init(options(config)))
 }
 
 fn options(config: &Config) -> ClientOptions {
 	SEND_PANIC
-		.set(config.sentry_send_panic)
+		.set(config.telemetry.sentry.send_panic)
 		.expect("SEND_PANIC was not previously set");
+
 	SEND_ERROR
-		.set(config.sentry_send_error)
+		.set(config.telemetry.sentry.send_error)
 		.expect("SEND_ERROR was not previously set");
 
 	let dsn = config
-		.sentry_endpoint
+		.telemetry
+		.sentry
+		.endpoint
 		.as_ref()
 		.expect("init_sentry should only be called if sentry is enabled and this is not None")
 		.as_str();
 
 	let options = ClientOptions::new()
 		.dsn(dsn)
-		.traces_sample_rate(config.sentry_traces_sample_rate)
+		.traces_sample_rate(config.telemetry.sentry.traces_sample_rate)
 		.debug(cfg!(debug_assertions))
 		.maybe_release(release_name!())
 		.user_agent(user_agent())
-		.attach_stacktrace(config.sentry_attach_stacktrace)
+		.attach_stacktrace(config.telemetry.sentry.attach_stacktrace)
 		.before_send(before_send)
 		.before_breadcrumb(before_breadcrumb)
 		.transport(build_transport);
 
 	config
-		.sentry_send_server_name
+		.telemetry
+		.sentry
+		.send_server_name
 		.then(|| config.server_name.to_string())
 		.into_iter()
 		.fold(options, ClientOptions::server_name)

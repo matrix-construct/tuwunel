@@ -194,7 +194,7 @@ async fn find_notice_room(services: &Services, target: &UserId) -> Option<OwnedR
 		.map(Result::ok)
 		.await;
 
-	let tag = notice_tag(&services.config.admin_room_tag);
+	let tag = notice_tag(&services.config.admin.room.tag);
 
 	services
 		.state_cache
@@ -285,7 +285,7 @@ async fn create_notice_room(services: &Services, target: &UserId) -> Result<Owne
 
 	services
 		.account_data
-		.set_room_tag(target, &room_id, notice_tag(&services.config.admin_room_tag), None)
+		.set_room_tag(target, &room_id, notice_tag(&services.config.admin.room.tag), None)
 		.await?;
 
 	Ok(room_id)

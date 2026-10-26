@@ -102,7 +102,9 @@ pub async fn make_user_admin(&self, user_id: &UserId) -> Result {
 		.services
 		.server
 		.config
-		.admin_room_tag
+		.admin
+		.room
+		.tag
 		.as_str();
 
 	if !already_granted
@@ -116,7 +118,7 @@ pub async fn make_user_admin(&self, user_id: &UserId) -> Result {
 		error!(?room_id, ?user_id, ?room_tag, "Failed to set tag for admin grant: {e}");
 	}
 
-	if !already_member && self.services.server.config.admin_room_notices {
+	if !already_member && self.services.server.config.admin.room.notices {
 		let welcome_message = String::from(
 			"## Thank you for trying out tuwunel!\n\nTuwunel is a continuation of conduwuit which was technically a hard fork of Conduit.\n\nHelpful links:\n> GitHub Repo: https://github.com/matrix-construct/tuwunel\n> Documentation: https://matrix-construct.github.io/tuwunel\n> Report issues: https://github.com/matrix-construct/tuwunel/issues\n\nFor a list of available commands, send the following message in this room: `!admin --help`",
 		);

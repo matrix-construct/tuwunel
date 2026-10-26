@@ -24,7 +24,7 @@ const TOKEN: &str = "fully-read-monotonic-reader-token-0";
 
 #[test]
 fn fully_read_moves_back_only_on_request() -> Result {
-	boot("fully-read-monotonic", ["log_enable=false"], exercise)
+	boot("fully-read-monotonic", ["logging.enable=false"], exercise)
 }
 
 async fn exercise(services: &Services, base: &str) -> Result {

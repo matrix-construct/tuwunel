@@ -449,11 +449,11 @@ pub fn update(mut config: Figment, args: &Args) -> Result<Figment> {
 	// Indicate the admin console should be spawned automatically if the
 	// configuration file hasn't already.
 	if args.console {
-		config = config.join(("admin_console_automatic", true));
+		config = config.join(("admin.console_automatic", true));
 	}
 
 	// Execute commands after any commands listed in configuration file
-	config = config.adjoin(("admin_execute", &args.execute));
+	config = config.adjoin(("admin.execute", &args.execute));
 
 	// Update config with names of any functional-tests
 	config = config.adjoin(("test", &args.test));
@@ -532,11 +532,11 @@ mod tests {
 				.unwrap()
 		);
 
-		assert_eq!(
-			raw.extract_inner::<Vec<String>>("admin_execute")
-				.unwrap(),
-			["configured", "command-line"]
-		);
+		let commands = raw
+			.extract_inner::<Vec<String>>("admin.execute")
+			.unwrap();
+
+		assert_eq!(commands, ["configured", "command-line"]);
 
 		let invalid = updated(&["tuwunel", "-O", "rocksdb.checksums='invalid'"], configured)
 			.expect("CLI raw input accepted");

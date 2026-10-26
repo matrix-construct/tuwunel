@@ -36,6 +36,21 @@ pub mod encryption;
 pub mod profile;
 pub mod registration;
 
+pub mod admin;
+pub mod appservice_client;
+pub mod client;
+pub mod compatibility;
+pub mod configuration;
+pub mod logging;
+pub mod presence;
+pub mod push;
+pub mod read_receipts;
+pub mod rendezvous;
+pub mod telemetry;
+pub mod tracing;
+pub mod turn;
+pub mod typing;
+
 use std::{
 	collections::{BTreeMap, BTreeSet},
 	path::{Path, PathBuf},
@@ -61,28 +76,42 @@ use tuwunel_macros::config_example_generator;
 use url::Url;
 
 pub use self::{
+	admin::Admin,
+	appservice_client::AppserviceClient,
 	authentication::Authentication,
 	cache::Cache,
 	check::check,
+	client::Client,
+	compatibility::Compatibility,
+	configuration::Configuration,
 	database::Database,
 	directory::Directory,
 	encryption::Encryption,
 	federation::Federation,
 	http::Http,
 	ip_source::IpSource,
+	logging::Logging,
 	manager::Manager,
 	media::Media,
 	network::Network,
+	presence::Presence,
 	profile::Profile,
+	push::Push,
+	read_receipts::ReadReceipts,
 	regenerate::{
 		Overwrite, RegenerateOptions, RegenerationSummary, example_config, regenerate_config,
 		write_example_config,
 	},
 	registration::Registration,
+	rendezvous::Rendezvous,
 	rooms::Rooms,
 	runtime::Runtime,
 	sending::Sending,
 	sources::Sources,
+	telemetry::Telemetry,
+	tracing::Tracing,
+	turn::Turn,
+	typing::Typing,
 };
 use self::{
 	format::Toml,
@@ -140,7 +169,8 @@ pub type StorageBucketName = SmallString<[u8; 64]>;
 	ignore = "rocksdb catchall well_known tls rate_limiting ldap jwt appservice \
 	          identity_provider storage_provider registration_terms smtp cache database runtime \
 	          http network media federation rooms sending authentication directory encryption \
-	          profile registration",
+	          profile registration admin appservice_client client compatibility configuration \
+	          logging presence push read_receipts rendezvous telemetry tracing turn typing",
 	forbidden = "database_restore_backup force_migration"
 )]
 pub struct Config {
@@ -184,15 +214,6 @@ pub struct Config {
 	#[serde(default)]
 	pub tls: TlsConfig,
 
-	/// Error on startup if any config option specified is unknown to Tuwunel.
-	///
-	/// This is false by default to allow easier deprecation or removal of
-	/// config options in the future without breaking existing deployments. The
-	/// default behaviour is to simply warn on startup.
-	/// reloadable: yes
-	#[serde(default)]
-	pub error_on_unknown_config_opts: bool,
-
 	/// Restore this online database backup on startup, before the database is
 	/// opened. The value is a backup ID as listed by `!admin server
 	/// list-backups`, or 0 for the most recent backup. Set by the
@@ -201,58 +222,6 @@ pub struct Config {
 	/// startup.
 	pub database_restore_backup: Option<u32>,
 
-	/// Minimum timeout a client can request for long-polling sync. Requests
-	/// will be clamped up to this value if smaller.
-	///
-	/// reloadable: yes
-	/// default: 5000
-	#[serde(default = "default_client_sync_timeout_min")]
-	pub client_sync_timeout_min: u64,
-
-	/// Default timeout for long-polling sync if a client does not request
-	/// another in their query-string.
-	///
-	/// reloadable: yes
-	/// default: 30000
-	#[serde(default = "default_client_sync_timeout_default")]
-	pub client_sync_timeout_default: u64,
-
-	/// Maximum timeout a client can request for long-polling sync. Requests
-	/// will be clamped down to this value if larger.
-	///
-	/// reloadable: yes
-	/// default: 90000
-	#[serde(default = "default_client_sync_timeout_max")]
-	pub client_sync_timeout_max: u64,
-
-	/// Appservice URL read and total timeout, defaulting to 35 seconds as
-	/// generally appservices are hosted within the same network.
-	///
-	/// default: 35
-	#[serde(default = "default_appservice_timeout")]
-	pub appservice_timeout: u64,
-
-	/// Appservice URL idle connection pool timeout (seconds).
-	///
-	/// default: 300
-	#[serde(default = "default_appservice_idle_timeout")]
-	pub appservice_idle_timeout: u64,
-
-	/// Notification gateway pusher idle connection pool timeout.
-	///
-	/// default: 15
-	#[serde(default = "default_pusher_idle_timeout")]
-	pub pusher_idle_timeout: u64,
-
-	/// Allow guest users to access TURN credentials.
-	///
-	/// This is the equivalent of Synapse's `turn_allow_guests` config option.
-	/// Setting this to true allows guest users to call the endpoint
-	/// `/_matrix/client/v3/voip/turnServer`.
-	/// reloadable: yes
-	#[serde(default)]
-	pub turn_allow_guests: bool,
-
 	/// Configures Matrix discovery documents and related endpoints.
 	///
 	/// Values are read from the separate `[global.well_known]` section. Client,
@@ -260,36 +229,6 @@ pub struct Config {
 	// external structure; separate section
 	#[serde(default)]
 	pub well_known: WellKnownConfig,
-
-	/// Enables OTLP span export for Jaeger-compatible tracing.
-	///
-	/// A build with performance measurements installs an OpenTelemetry layer
-	/// when this is enabled. It defaults to false, and `jaeger_filter` selects
-	/// the exported spans.
-	#[serde(default)]
-	pub allow_jaeger: bool,
-
-	/// default: "info"
-	#[serde(default = "default_jaeger_filter")]
-	pub jaeger_filter: String,
-
-	/// If the 'perf_measurements' compile-time feature is enabled, enables
-	/// collecting folded stack trace profile of tracing spans using
-	/// tracing_flame. The resulting profile can be visualized with inferno[1],
-	/// speedscope[2], or a number of other tools.
-	///
-	/// [1]: https://github.com/jonhoo/inferno
-	/// [2]: www.speedscope.app
-	#[serde(default)]
-	pub tracing_flame: bool,
-
-	/// default: "info"
-	#[serde(default = "default_tracing_flame_filter")]
-	pub tracing_flame_filter: String,
-
-	/// default: "./tracing.folded"
-	#[serde(default = "default_tracing_flame_output_path")]
-	pub tracing_flame_output_path: String,
 
 	#[cfg(not(doctest))]
 	/// Examples:
@@ -325,564 +264,11 @@ pub struct Config {
 	#[serde(default)]
 	pub proxy: ProxyConfig,
 
-	/// Max log level for tuwunel. Allows debug, info, warn, or error.
-	///
-	/// See also:
-	/// https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html#directives
-	///
-	/// **Caveat**:
-	/// For release builds, the tracing crate is configured to only implement
-	/// levels higher than error to avoid unnecessary overhead in the compiled
-	/// binary from trace macros. For debug builds, this restriction is not
-	/// applied.
-	///
-	/// default: "info"
-	#[serde(default = "default_log")]
-	pub log: String,
-
-	/// Output logs with ANSI colours.
-	///
-	/// Colours are suppressed while entries are submitted to journald, which
-	/// takes the formatted line verbatim and reads control bytes in it as
-	/// binary rather than text.
-	#[serde(default = "true_fn", alias = "log_colours")]
-	pub log_colors: bool,
-
-	/// Sets the log format to compact mode.
-	#[serde(default)]
-	pub log_compact: bool,
-
-	/// Configures the span events which will be outputted with the log.
-	///
-	/// default: "none"
-	#[serde(default = "default_log_span_events")]
-	pub log_span_events: String,
-
-	/// Configures whether TUWUNEL_LOG EnvFilter matches values using regular
-	/// expressions. See the tracing_subscriber documentation on Directives.
-	///
-	/// default: true
-	#[serde(default = "true_fn")]
-	pub log_filter_regex: bool,
-
-	/// Toggles the display of ThreadId in tracing log output.
-	///
-	/// default: false
-	#[serde(default)]
-	pub log_thread_ids: bool,
-
-	/// Redirects logging to standard error (stderr). The default is false for
-	/// stdout. For those using our systemd features the redirection to stderr
-	/// occurs as necessary and setting this option should not be required. We
-	/// offer this option for all other users who desire such redirection.
-	///
-	/// default: false
-	#[serde(default)]
-	pub log_to_stderr: bool,
-
-	/// Submits log output directly to the journald socket instead of the
-	/// console when running under systemd. Each entry carries its actual
-	/// severity as the journal priority, so tools such as `journalctl
-	/// --priority warning` catch Tuwunel's warnings and errors; console output
-	/// is captured by journald at a single fixed priority instead. The message
-	/// is formatted exactly as the console formats it, span fields included,
-	/// while the target, source location and every tracing field are attached
-	/// as journal fields, the latter under an `F_` prefix for queries such as
-	/// `journalctl F_ROOM_ID='!room:example.com'`. This option has no effect
-	/// when not running under systemd, and the console is kept when the
-	/// journald socket cannot be opened.
-	///
-	/// default: true
-	#[serde(default = "true_fn")]
-	pub log_journald: bool,
-
-	/// Setting to false disables the logging/tracing system at a lower level.
-	/// In contrast to configuring an empty `log` string where the system is
-	/// still operating but muted, when this option is false the system was not
-	/// initialized and is not operating. Changing this option has no effect
-	/// after startup. This option is intended for developers and expert use
-	/// only: configuring an empty log string is preferred over using this.
-	///
-	/// default: true
-	#[serde(default = "true_fn")]
-	pub log_enable: bool,
-
-	/// Setting to false disables the logging/tracing system at a lower level
-	/// similar to `log_enable`. In this case the system is configured normally,
-	/// but not registered as the global handler in the final steps. This option
-	/// is for developers and expert use only.
-	///
-	/// default: true
-	#[serde(default = "true_fn")]
-	pub log_global_default: bool,
-
 	/// Configures request rate limits, one `[global.rate_limiting]` subsection
 	/// per kind of request.
 	// external structure; separate section
 	#[serde(default)]
 	pub rate_limiting: RateLimits,
-
-	/// Enable the rendezvous session APIs used to sign in with a QR code
-	/// (MSC4108 and MSC4388).
-	///
-	/// The rendezvous session relays the handshake between two devices before
-	/// the OAuth device authorization grant completes the sign-in. This
-	/// requires the built-in OIDC server. When disabled, clients hide the
-	/// feature and the endpoints return an unrecognized response.
-	///
-	/// reloadable: yes
-	/// default: true
-	#[serde(default = "true_fn")]
-	pub rendezvous_enabled: bool,
-
-	/// Maximum size in bytes of a rendezvous session payload.
-	///
-	/// QR sign-in handshake messages are normally much smaller than the
-	/// default.
-	///
-	/// reloadable: yes
-	/// default: 4096
-	#[serde(default = "default_rendezvous_session_max_bytes")]
-	pub rendezvous_session_max_bytes: usize,
-
-	/// Seconds a rendezvous session lives after its last write.
-	///
-	/// Each update restarts the window, but the device displaying the QR
-	/// times the whole sign-in against the expiry advertised at creation.
-	/// The default leaves time for an interactive account login on the
-	/// approval page.
-	///
-	/// reloadable: yes
-	/// default: 600
-	#[serde(default = "default_rendezvous_session_ttl")]
-	pub rendezvous_session_ttl: u64,
-
-	/// Maximum number of concurrent rendezvous sessions.
-	///
-	/// Creating a session beyond this limit evicts the oldest session instead
-	/// of failing. A value of zero retains one session so creation remains
-	/// available.
-	///
-	/// reloadable: yes
-	/// default: 100
-	#[serde(default = "default_rendezvous_max_sessions")]
-	pub rendezvous_max_sessions: usize,
-
-	/// Require an access token for MSC4388 discovery and session creation.
-	///
-	/// When disabled, clients without an access token may discover and create
-	/// MSC4388 sessions. The MSC4108 endpoint remains open in either mode.
-	///
-	/// reloadable: yes
-	/// default: true
-	#[serde(default = "true_fn")]
-	pub rendezvous_authenticated_only: bool,
-
-	/// Per-client-IP request refill rate for the MSC4388 rendezvous endpoints.
-	///
-	/// A value of zero is treated as one request per second.
-	///
-	/// reloadable: yes
-	/// default: 10
-	#[serde(default = "default_rendezvous_rc_per_second")]
-	pub rendezvous_rc_per_second: u32,
-
-	/// Token-bucket depth for the MSC4388 rendezvous request throttle.
-	///
-	/// This is the number of requests one client IP may make in a burst before
-	/// `rendezvous_rc_per_second` governs. A value of zero is treated as one.
-	///
-	/// reloadable: yes
-	/// default: 20
-	#[serde(default = "default_rendezvous_rc_burst_count")]
-	pub rendezvous_rc_burst_count: u32,
-
-	/// Static TURN username to provide the client if not using a shared secret
-	/// ("turn_secret"), It is recommended to use a shared secret over static
-	/// credentials.
-	/// reloadable: yes
-	#[serde(default)]
-	pub turn_username: String,
-
-	/// Static TURN password to provide the client if not using a shared secret
-	/// ("turn_secret"). It is recommended to use a shared secret over static
-	/// credentials.
-	///
-	/// display: sensitive
-	/// reloadable: yes
-	#[serde(default)]
-	pub turn_password: String,
-
-	#[expect(clippy::doc_link_with_quotes)]
-	/// Vector list of TURN URIs/servers to use.
-	///
-	/// Replace "example.turn.uri" with your TURN domain, such as the coturn
-	/// "realm" config option. If using TURN over TLS, replace the URI prefix
-	/// "turn:" with "turns:".
-	///
-	/// reloadable: yes
-	/// example: ["turn:example.turn.uri?transport=udp",
-	/// "turn:example.turn.uri?transport=tcp"]
-	///
-	/// default: []
-	#[serde(default)]
-	pub turn_uris: Vec<String>,
-
-	/// TURN secret to use for generating the HMAC-SHA1 hash apart of username
-	/// and password generation.
-	///
-	/// This is more secure, but if needed you can use traditional static
-	/// username/password credentials.
-	///
-	/// display: sensitive
-	/// reloadable: yes
-	#[serde(default)]
-	pub turn_secret: Option<String>,
-
-	/// TURN secret to use that's read from the file path specified.
-	///
-	/// This takes priority over "turn_secret", and falls back to it when the
-	/// file cannot be opened. Surrounding whitespace is trimmed off, so a
-	/// trailing newline does not become part of the secret. A file which is
-	/// present but blank resolves to no secret rather than falling back.
-	///
-	/// reloadable: yes
-	/// example: "/etc/tuwunel/.turn_secret"
-	pub turn_secret_file: Option<PathBuf>,
-
-	/// TURN TTL, in seconds.
-	///
-	/// reloadable: yes
-	/// default: 86400
-	#[serde(default = "default_turn_ttl")]
-	pub turn_ttl: u64,
-
-	/// Suffix stripped from the gateway URL before constructing a push request.
-	///
-	/// reloadable: yes
-	/// default: "/_matrix/push/v1/notify"
-	#[serde(default = "default_notification_push_path")]
-	pub notification_push_path: String,
-
-	/// For compatibility and special purpose use only. Setting this option to
-	/// true will not filter messages sent to pushers based on rules or actions.
-	/// Everything will be sent to the pusher. This option is offered for
-	/// several reasons, but should not be necessary:
-	/// - Bypass to workaround bugs or outdated server-side ruleset support.
-	/// - Allow clients to evaluate pushrules themselves (due to the above).
-	/// - Hosting or companies which have custom pushers and internal needs.
-	///
-	/// Note that setting this option to true will not affect the record of
-	/// notifications found in the notifications pane.
-	/// reloadable: yes
-	#[serde(default)]
-	pub push_everything: bool,
-
-	/// Evaluate the `im.nheko.msc3664.related_event_match` push rule condition,
-	/// which matches on a property of the event that an incoming event relates
-	/// to.
-	///
-	/// A user can then write a push rule that notifies for replies or reactions
-	/// to their own messages, which no other condition can express. Enabling
-	/// this costs one extra event lookup for every event carrying a relation.
-	///
-	/// The default `.im.nheko.msc3664.reply` push rule uses the condition.
-	/// Disabling evaluation leaves the rule present but unable to match
-	/// replies, while clients implementing MSC3664 may still evaluate it
-	/// locally.
-	///
-	/// reloadable: yes
-	#[serde(default)]
-	pub msc3664_related_event_match: bool,
-
-	/// Setting to false disables the heroes calculation made by sliding and
-	/// legacy client sync. The heroes calculation is mandated by the Matrix
-	/// specification and your client may not operate properly unless this
-	/// option is set to true.
-	///
-	/// This option is intended for custom software deployments seeking purely
-	/// to minimize unused resources; the overall savings are otherwise
-	/// negligible.
-	/// reloadable: yes
-	#[serde(default = "true_fn")]
-	pub calculate_heroes: bool,
-
-	/// Allow local (your server only) presence updates/requests.
-	///
-	/// Note that presence on tuwunel is very fast unlike Synapse's. If using
-	/// outgoing presence, this MUST be enabled.
-	/// reloadable: yes
-	#[serde(default = "true_fn")]
-	pub allow_local_presence: bool,
-
-	/// Allow incoming federated presence updates/requests.
-	///
-	/// This option receives presence updates from other servers, but does not
-	/// send any unless `allow_outgoing_presence` is true. Note that presence on
-	/// tuwunel is very fast unlike Synapse's.
-	/// reloadable: yes
-	#[serde(default = "true_fn")]
-	pub allow_incoming_presence: bool,
-
-	/// Allow outgoing presence updates/requests.
-	///
-	/// This option sends presence updates to other servers, but does not
-	/// receive any unless `allow_incoming_presence` is true. Note that presence
-	/// on tuwunel is very fast unlike Synapse's. If using outgoing presence,
-	/// you MUST enable `allow_local_presence` as well.
-	/// reloadable: yes
-	#[serde(default = "true_fn")]
-	pub allow_outgoing_presence: bool,
-
-	/// How many seconds without presence updates before you become idle.
-	/// Defaults to 5 minutes.
-	///
-	/// default: 300
-	#[serde(default = "default_presence_idle_timeout_s")]
-	pub presence_idle_timeout_s: u64,
-
-	/// How many seconds without presence updates before you become offline.
-	/// Defaults to 30 minutes.
-	///
-	/// default: 1800
-	#[serde(default = "default_presence_offline_timeout_s")]
-	pub presence_offline_timeout_s: u64,
-
-	/// Enable the presence idle timer for remote users.
-	///
-	/// Disabling is offered as an optimization for servers participating in
-	/// many large rooms or when resources are limited. Disabling it may cause
-	/// incorrect presence states (i.e. stuck online) to be seen for some remote
-	/// users.
-	#[serde(default = "true_fn")]
-	pub presence_timeout_remote_users: bool,
-
-	/// Suppresses push notifications for users marked as active. (Experimental)
-	///
-	/// When enabled, users with `Online` presence and recent activity
-	/// (based on presence state and sync activity) won’t receive push
-	/// notifications, reducing duplicate alerts while they're active
-	/// on another client.
-	///
-	/// Disabled by default to preserve legacy behavior.
-	/// reloadable: yes
-	#[serde(default)]
-	pub suppress_push_when_active: bool,
-
-	/// Allow receiving incoming read receipts from remote servers.
-	/// reloadable: yes
-	#[serde(default = "true_fn")]
-	pub allow_incoming_read_receipts: bool,
-
-	/// Allow sending read receipts to remote servers.
-	/// reloadable: yes
-	#[serde(default = "true_fn")]
-	pub allow_outgoing_read_receipts: bool,
-
-	/// Allow outgoing typing updates to federation.
-	/// reloadable: yes
-	#[serde(default = "true_fn")]
-	pub allow_outgoing_typing: bool,
-
-	/// Allow incoming typing updates from federation.
-	/// reloadable: yes
-	#[serde(default = "true_fn")]
-	pub allow_incoming_typing: bool,
-
-	/// Maximum time federation user can indicate typing.
-	///
-	/// reloadable: yes
-	/// default: 30
-	#[serde(default = "default_typing_federation_timeout_s")]
-	pub typing_federation_timeout_s: u64,
-
-	/// Minimum time local client can indicate typing. This does not override a
-	/// client's request to stop typing. It only enforces a minimum value in
-	/// case of no stop request.
-	///
-	/// reloadable: yes
-	/// default: 15
-	#[serde(default = "default_typing_client_timeout_min_s")]
-	pub typing_client_timeout_min_s: u64,
-
-	/// Maximum time local client can indicate typing.
-	///
-	/// reloadable: yes
-	/// default: 45
-	#[serde(default = "default_typing_client_timeout_max_s")]
-	pub typing_client_timeout_max_s: u64,
-
-	/// Set to true to log guest registrations in the admin room. Note that
-	/// these may be noisy or unnecessary if you're a public homeserver.
-	/// reloadable: yes
-	#[serde(default)]
-	pub log_guest_registrations: bool,
-
-	/// Allow admins to run commands outside the admin room ("#admins") by
-	/// prefixing a message with "\!admin" or "\\!admin" and a normal command.
-	///
-	/// The reply is publicly visible to the room, originating from the sender.
-	/// Disabled by default: the server cannot tell a command an admin typed
-	/// from one in a message the admin forwarded or a bot on their account
-	/// reposted. Message formatting can also hide the command from the admin.
-	///
-	/// reloadable: yes
-	/// example: \\!admin debug ping puppygock.gay
-	#[serde(default)]
-	pub admin_escape_commands: bool,
-
-	/// Automatically activate the tuwunel admin room console / CLI on
-	/// startup. This option can also be enabled with `--console` tuwunel
-	/// argument. Activation requires standard input to be a terminal.
-	#[serde(default)]
-	pub admin_console_automatic: bool,
-
-	#[expect(clippy::doc_link_with_quotes)]
-	/// List of admin commands to execute on startup.
-	///
-	/// This option can also be configured with the `--execute` tuwunel
-	/// argument and can take standard shell commands and environment variables
-	///
-	/// For example: `./tuwunel --execute "server admin-notice tuwunel has
-	/// started up at $(date)"`
-	///
-	/// example: admin_execute = ["debug ping puppygock.gay", "debug echo hi"]`
-	///
-	/// default: []
-	#[serde(default)]
-	pub admin_execute: Vec<String>,
-
-	/// Ignore errors in startup commands.
-	///
-	/// If false, tuwunel will error and fail to start if an admin execute
-	/// command (`--execute` / `admin_execute`) fails.
-	/// reloadable: yes
-	#[serde(default)]
-	pub admin_execute_errors_ignore: bool,
-
-	/// List of admin commands to execute on SIGUSR2.
-	///
-	/// Similar to admin_execute, but these commands are executed when the
-	/// server receives SIGUSR2 on supporting platforms.
-	///
-	/// reloadable: yes
-	/// default: []
-	#[serde(default)]
-	pub admin_signal_execute: Vec<String>,
-
-	/// Controls the max log level for admin command log captures (logs
-	/// generated from running admin commands). Defaults to "info" on release
-	/// builds, else "debug" on debug builds.
-	///
-	/// reloadable: yes
-	/// default: "info"
-	#[serde(default = "default_admin_log_capture")]
-	pub admin_log_capture: String,
-
-	/// The default room tag to apply on the admin room.
-	///
-	/// On some clients like Element, the room tag "m.server_notice" is a
-	/// special pinned room at the very bottom of your room list. The tuwunel
-	/// admin room can be pinned here so you always have an easy-to-access
-	/// shortcut dedicated to your admin room.
-	///
-	/// reloadable: yes
-	/// default: "m.server_notice"
-	#[serde(default = "default_admin_room_tag")]
-	pub admin_room_tag: String,
-
-	/// The localpart of the server's administrative user.
-	///
-	/// This identity is durable after first boot. Changing it on an existing
-	/// database is unsupported and prevents startup.
-	///
-	/// default: "conduit"
-	#[serde(default = "default_server_user_localpart")]
-	pub server_user_localpart: ServerUserLocalpart,
-
-	/// The room that user, room, and event reports are posted to, instead of
-	/// the admin room. Accepts a room ID or room alias; the server user must be
-	/// joined with permission to post there. Reports fall back to the admin
-	/// room when this is unset, cannot be resolved, or the server user is not a
-	/// member.
-	///
-	/// reloadable: yes
-	/// default: (none)
-	#[serde(default)]
-	pub report_room: Option<OwnedRoomOrAliasId>,
-
-	/// Whether the admin room is created on first startup. Users should not set
-	/// this to false. Developers can set this to false during integration tests
-	/// to reduce activity and output.
-	///
-	/// default: true
-	#[serde(default = "true_fn")]
-	pub create_admin_room: bool,
-
-	/// Whether to enable federation on the admin room. This cannot be changed
-	/// after the admin room is created.
-	///
-	/// default: true
-	#[serde(default = "true_fn")]
-	pub federate_admin_room: bool,
-
-	/// Sentry.io crash/panic reporting, performance monitoring/metrics, etc.
-	/// This is NOT enabled by default. tuwunel's default Sentry reporting
-	/// endpoint domain is `o4509498990067712.ingest.us.sentry.io`.
-	#[serde(default)]
-	pub sentry: bool,
-
-	/// Sentry reporting URL, if a custom one is desired.
-	///
-	/// display: sensitive
-	/// default: ""
-	#[serde(default = "default_sentry_endpoint")]
-	pub sentry_endpoint: Option<Url>,
-
-	/// Report your tuwunel server_name in Sentry.io crash reports and
-	/// metrics.
-	#[serde(default)]
-	pub sentry_send_server_name: bool,
-
-	/// Performance monitoring/tracing sample rate for Sentry.io.
-	///
-	/// Sentry reads this as a fraction, so it must lie between 0.0 and 1.0
-	/// inclusive when Sentry is enabled. High values may impact performance;
-	/// 0.0 disables sampling.
-	///
-	/// default: 0.15
-	#[serde(default = "default_sentry_traces_sample_rate")]
-	pub sentry_traces_sample_rate: f32,
-
-	/// Whether to attach a stacktrace to Sentry reports.
-	#[serde(default)]
-	pub sentry_attach_stacktrace: bool,
-
-	/// Send panics to Sentry. This is true by default, but Sentry has to be
-	/// enabled. The global `sentry` config option must be enabled to send any
-	/// data.
-	#[serde(default = "true_fn")]
-	pub sentry_send_panic: bool,
-
-	/// Send errors to sentry. This is true by default, but sentry has to be
-	/// enabled. This option is only effective in release-mode; forced to false
-	/// in debug-mode.
-	#[serde(default = "true_fn")]
-	pub sentry_send_error: bool,
-
-	/// Controls the tracing log level for Sentry to send things like
-	/// breadcrumbs and transactions
-	///
-	/// default: "info"
-	#[serde(default = "default_sentry_filter")]
-	pub sentry_filter: String,
-
-	/// Enable the tokio-console. This option is only relevant to developers.
-	///
-	///	For more information, see:
-	/// https://tuwunel.chat/development.html#debugging-with-tokio-console
-	#[serde(default)]
-	pub tokio_console: bool,
 
 	/// Arbitrary argument vector for integration testing. Functionality in the
 	/// server is altered or informed for the requirements of integration tests.
@@ -906,68 +292,10 @@ pub struct Config {
 	#[serde(default)]
 	pub maintenance: bool,
 
-	/// Controls whether admin room notices like account registrations, password
-	/// changes, account deactivations, room directory publications, etc will be
-	/// sent to the admin room. Update notices and normal admin command
-	/// responses will still be sent.
-	/// reloadable: yes
-	#[serde(default = "true_fn")]
-	pub admin_room_notices: bool,
-
-	/// Maximum number of message events an admin command's output may be split
-	/// across as replies in the admin room. Output needing more events than
-	/// this is uploaded to the media repository instead and returned as a text
-	/// file attachment replying to the command. When 1, output which fits in a
-	/// single event is posted as a single reply and anything larger becomes an
-	/// attachment. When 0, output is always posted as an attachment regardless
-	/// of size.
-	///
-	/// reloadable: yes
-	/// default: 1
-	#[serde(default = "default_admin_output_max_events")]
-	pub admin_output_max_events: usize,
-
-	/// Post admin command output into a thread on the command event rather than
-	/// as replies. Output split across multiple events per
-	/// `admin_output_max_events` is contained in a single thread; attachment
-	/// outputs are posted into the thread as well.
-	///
-	/// reloadable: yes
-	#[serde(default)]
-	pub admin_output_threads: bool,
-
 	/// Enables listener sockets; can be set to false to disable listening. This
 	/// option is intended for developer/diagnostic purposes only.
 	#[serde(default = "true_fn")]
 	pub listening: bool,
-
-	/// Enables configuration reload when the server receives SIGUSR1 on
-	/// supporting platforms.
-	///
-	/// reloadable: yes
-	/// default: true
-	#[serde(default = "true_fn")]
-	pub config_reload_signal: bool,
-
-	/// Backport state-reset security fixes to all room versions.
-	///
-	/// This option applies the State Resolution 2.1 mitigation developed during
-	/// project Hydra for room version 12 to all prior State Resolution 2.0 room
-	/// versions (all room versions supported by this server). These mitigations
-	/// increase resilience to state-resets without any new definition of
-	/// correctness; therefor it is safe to set this to true for existing rooms.
-	///
-	/// Furthermore, state-reset attacks are not consistent as they result in
-	/// rooms without any single consensus, therefor it is unnecessary to set
-	/// this to false to match other servers which set this to false or simply
-	/// lack support; even if replicating the post-reset state suffered by other
-	/// servers is somehow desired.
-	///
-	/// This option exists for developer and debug use, and as a failsafe in
-	/// lieu of hardcoding it.
-	/// reloadable: yes
-	#[serde(default = "true_fn")]
-	pub hydra_backports: bool,
 
 	/// Directory containing appservice yaml registration files.
 	///
@@ -1157,6 +485,90 @@ pub struct Config {
 	/// display: section
 	#[serde(default)]
 	pub registration: Registration,
+
+	/// Settings for admin.
+	///
+	/// display: section
+	#[serde(default)]
+	pub admin: Admin,
+
+	/// Settings for appservice client.
+	///
+	/// display: section
+	#[serde(default)]
+	pub appservice_client: AppserviceClient,
+
+	/// Settings for client.
+	///
+	/// display: section
+	#[serde(default)]
+	pub client: Client,
+
+	/// Settings for compatibility.
+	///
+	/// display: section
+	#[serde(default)]
+	pub compatibility: Compatibility,
+
+	/// Settings for configuration.
+	///
+	/// display: section
+	#[serde(default)]
+	pub configuration: Configuration,
+
+	/// Settings for logging.
+	///
+	/// display: section
+	#[serde(default)]
+	pub logging: Logging,
+
+	/// Settings for presence.
+	///
+	/// display: section
+	#[serde(default)]
+	pub presence: Presence,
+
+	/// Settings for push.
+	///
+	/// display: section
+	#[serde(default)]
+	pub push: Push,
+
+	/// Settings for read receipts.
+	///
+	/// display: section
+	#[serde(default)]
+	pub read_receipts: ReadReceipts,
+
+	/// Settings for rendezvous.
+	///
+	/// display: section
+	#[serde(default)]
+	pub rendezvous: Rendezvous,
+
+	/// Settings for telemetry.
+	///
+	/// display: section
+	#[serde(default)]
+	pub telemetry: Telemetry,
+
+	/// Settings for tracing.
+	///
+	/// display: section
+	#[serde(default)]
+	pub tracing: Tracing,
+
+	/// Settings for turn.
+	///
+	/// display: section
+	#[serde(default)]
+	pub turn: Turn,
+
+	/// Settings for typing.
+	///
+	/// display: section
+	#[serde(default)]
+	pub typing: Typing,
 }
 
 /// Configures direct TLS listener behavior.
@@ -2846,16 +2258,6 @@ impl Default for LoginAccountRateLimit {
 
 fn true_fn() -> bool { true }
 
-fn default_rendezvous_session_max_bytes() -> usize { 4096 }
-
-fn default_rendezvous_session_ttl() -> u64 { 600 }
-
-fn default_rendezvous_max_sessions() -> usize { 100 }
-
-fn default_rendezvous_rc_per_second() -> u32 { 10 }
-
-fn default_rendezvous_rc_burst_count() -> u32 { 20 }
-
 // Synapse's `rc_login` defaults, taken unchanged:
 // https://element-hq.github.io/synapse/latest/usage/configuration/config_documentation.html#rc_login
 fn default_login_failed_per_second() -> f64 { 0.17 }
@@ -2872,86 +2274,6 @@ fn some_true_fn() -> Option<bool> { Some(true) }
 fn default_server_name() -> OwnedServerName { ruma::owned_server_name!("localhost") }
 
 fn default_database_path() -> PathBuf { "/var/lib/tuwunel".to_owned().into() }
-
-fn default_appservice_timeout() -> u64 { 35 }
-
-fn default_appservice_idle_timeout() -> u64 { 300 }
-
-fn default_pusher_idle_timeout() -> u64 { 15 }
-
-fn default_tracing_flame_filter() -> String {
-	cfg!(debug_assertions)
-		.then_some("trace,h2=off")
-		.unwrap_or("info")
-		.to_owned()
-}
-
-fn default_jaeger_filter() -> String {
-	cfg!(debug_assertions)
-		.then_some("trace,h2=off")
-		.unwrap_or("info")
-		.to_owned()
-}
-
-fn default_tracing_flame_output_path() -> String { "./tracing.folded".to_owned() }
-
-/// do debug logging by default for debug builds
-#[must_use]
-pub fn default_log() -> String {
-	cfg!(debug_assertions)
-		.then_some("debug")
-		.unwrap_or("info")
-		.to_owned()
-}
-
-/// Returns the default tracing span-event mode.
-///
-/// The value is `none`, which disables span lifecycle event emission. It is
-/// used when `log_span_events` is omitted.
-#[must_use]
-pub fn default_log_span_events() -> String { "none".into() }
-
-fn default_notification_push_path() -> String { "/_matrix/push/v1/notify".to_owned() }
-
-fn default_turn_ttl() -> u64 { 60 * 60 * 24 }
-
-fn default_presence_idle_timeout_s() -> u64 { 5 * 60 }
-
-fn default_presence_offline_timeout_s() -> u64 { 30 * 60 }
-
-fn default_typing_federation_timeout_s() -> u64 { 30 }
-
-fn default_typing_client_timeout_min_s() -> u64 { 15 }
-
-fn default_typing_client_timeout_max_s() -> u64 { 45 }
-
-fn default_sentry_endpoint() -> Option<Url> {
-	let url = "https://8994b1762a6a95af9502a7900edabc4c@o4509498990067712.ingest.us.sentry.io/4509498993213440"
-		.try_into()
-		.expect("default sentry url is invalid");
-
-	Some(url)
-}
-
-fn default_sentry_traces_sample_rate() -> f32 { 0.15 }
-
-fn default_sentry_filter() -> String { "info".to_owned() }
-
-fn default_admin_log_capture() -> String {
-	cfg!(debug_assertions)
-		.then_some("debug")
-		.unwrap_or("info")
-		.to_owned()
-}
-
-fn default_admin_room_tag() -> String { "m.server_notice".to_owned() }
-
-/// Preserves the administrative identity used before it was configurable.
-///
-/// Omitting the setting keeps existing installations on their original user.
-fn default_server_user_localpart() -> ServerUserLocalpart { "conduit".into() }
-
-fn default_admin_output_max_events() -> usize { 1 }
 
 #[expect(clippy::as_conversions, clippy::cast_precision_loss)]
 fn parallelism_scaled_f64(val: f64) -> f64 { val * (sys::available_parallelism() as f64) }
@@ -2974,12 +2296,6 @@ fn default_ldap_uid_attribute() -> String { String::from("uid") }
 fn default_jwt_algorithm() -> String { "HS256".to_owned() }
 
 fn default_jwt_format() -> String { "HMAC".to_owned() }
-
-fn default_client_sync_timeout_min() -> u64 { 5000 }
-
-fn default_client_sync_timeout_default() -> u64 { 30000 }
-
-fn default_client_sync_timeout_max() -> u64 { 90000 }
 
 fn default_sso_grant_session_duration() -> Option<u64> { Some(300) }
 

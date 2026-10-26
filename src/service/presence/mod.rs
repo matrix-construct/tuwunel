@@ -73,11 +73,12 @@ type TimerFired = (OwnedUserId, u64);
 impl crate::Service for Service {
 	fn build(args: &crate::Args<'_>) -> Result<Arc<Self>> {
 		let config = &args.server.config;
-		let idle_timeout_s = config.presence_idle_timeout_s;
-		let offline_timeout_s = config.presence_offline_timeout_s;
+		let idle_timeout_s = config.presence.idle_timeout_s;
+		let offline_timeout_s = config.presence.offline_timeout_s;
+
 		Ok(Arc::new(Self {
 			timer_channel: loole::unbounded(),
-			timeout_remote_users: config.presence_timeout_remote_users,
+			timeout_remote_users: config.presence.timeout_remote_users,
 			idle_timeout: checked!(idle_timeout_s * 1_000)?,
 			offline_timeout: checked!(offline_timeout_s * 1_000)?,
 			db: Data::new(args),
@@ -165,7 +166,7 @@ impl Service {
 	/// record that a user has just successfully completed a /sync (or
 	/// equivalent activity)
 	pub async fn note_sync(&self, user_id: &UserId, appservice: Option<&RegistrationInfo>) {
-		if appservice.is_some() || !self.services.config.suppress_push_when_active {
+		if appservice.is_some() || !self.services.config.push.suppress_when_active {
 			return;
 		}
 
@@ -203,7 +204,7 @@ impl Service {
 
 	// Unset online/unavailable presence to offline on startup
 	async fn unset_all_presence(&self) {
-		if !self.services.server.config.allow_local_presence || self.services.db.is_read_only() {
+		if !self.services.server.config.presence.allow_local || self.services.db.is_read_only() {
 			return;
 		}
 

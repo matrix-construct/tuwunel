@@ -33,7 +33,8 @@ pub(super) const TEXT_PLAIN: &str = "text/plain";
 pub(super) fn ensure_enabled(services: &Services) -> Result {
 	services
 		.config
-		.rendezvous_enabled
+		.rendezvous
+		.enable
 		.then_some(())
 		.ok_or_else(|| err!(Request(Unrecognized("QR login rendezvous is disabled"))))
 }

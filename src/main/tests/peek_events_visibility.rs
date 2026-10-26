@@ -36,7 +36,7 @@ const STRANGER_TOKEN: &str = "peek-events-visibility-stranger-access-token";
 /// became world-readable. Without a `from` token the stream starts now.
 #[test]
 fn room_event_stream_honours_history_visibility() -> Result {
-	boot("peek-events-visibility", ["client_sync_timeout_min=0"], exercise)
+	boot("peek-events-visibility", ["client.sync.timeout_min=0"], exercise)
 }
 
 async fn exercise(services: &Services, base: &str) -> Result {

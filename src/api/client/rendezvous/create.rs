@@ -24,7 +24,7 @@ pub(crate) async fn create_rendezvous_route(
 	let oidc = services.oauth.get_server()?;
 	let base = oidc.issuer_url()?;
 	let base = base.trim_end_matches('/');
-	let max_bytes = services.config.rendezvous_session_max_bytes;
+	let max_bytes = services.config.rendezvous.session_max_bytes;
 	let (parts, body) = request.into_parts();
 	let data = read_plain_body(&parts.headers, body, max_bytes).await?;
 	let (id, meta) = services.rendezvous.create(data);

@@ -38,7 +38,7 @@ type Exchange = (String, Result<String>);
 
 #[test]
 fn refresh_device_lock() -> Result {
-	let quiet = "log_enable=false";
+	let quiet = "logging.enable=false";
 	let grace = "authentication.refresh_token.reuse_grace=3600";
 	let ttl = "authentication.refresh_token.ttl=2";
 	let absolute = "authentication.refresh_token.idle_only=false";

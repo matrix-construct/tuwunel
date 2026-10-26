@@ -33,7 +33,7 @@ fn unusable_localpart_is_skipped() {
 
 #[tokio::test]
 async fn thread_reply_recount_runs_once() -> Result {
-	let config = Figment::new().merge(("create_admin_room", false));
+	let config = Figment::new().merge(("admin.room.create", false));
 	let Some(fixture) = fixture(config).await? else {
 		return Ok(());
 	};
@@ -64,7 +64,7 @@ async fn thread_reply_recount_runs_once() -> Result {
 
 #[tokio::test]
 async fn redacted_thread_latest_scrub_runs_once() -> Result {
-	let config = Figment::new().merge(("create_admin_room", false));
+	let config = Figment::new().merge(("admin.room.create", false));
 	let Some(fixture) = fixture(config).await? else {
 		return Ok(());
 	};

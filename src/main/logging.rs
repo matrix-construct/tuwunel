@@ -10,7 +10,7 @@ use tuwunel_core::{
 	debug_warn, err,
 	log::{
 		ConsoleFormat, ConsoleWriter, LogLevelReloadHandles, Logging, ansi_enabled, capture,
-		fmt_span, journald::Fields,
+		fmt_span::from_str as parse_span_events, journald::Fields,
 	},
 	result::UnwrapOrErr,
 };
@@ -21,6 +21,7 @@ use {
 	opentelemetry_sdk::{
 		Resource, propagation::TraceContextPropagator, trace::SdkTracerProvider,
 	},
+	tracing_flame::FlameLayer,
 };
 
 #[cfg(feature = "perf_measurements")]
@@ -34,7 +35,7 @@ pub(crate) fn init(config: &Config) -> Result<(TracingFlameGuard, Logging)> {
 	let reload_handles = LogLevelReloadHandles::default();
 	let cap_state = Arc::new(capture::State::new());
 
-	if !config.log_enable {
+	if !config.logging.enable {
 		return Ok((None, Logging {
 			reload: reload_handles,
 			capture: cap_state,
@@ -49,7 +50,9 @@ pub(crate) fn init(config: &Config) -> Result<(TracingFlameGuard, Logging)> {
 
 	#[cfg(feature = "sentry_telemetry")]
 	let sentry = config
+		.telemetry
 		.sentry
+		.enable
 		.then(|| sentry_layer(config, &reload_handles))
 		.transpose()?;
 
@@ -75,13 +78,13 @@ pub(crate) fn init(config: &Config) -> Result<(TracingFlameGuard, Logging)> {
 
 	let subscriber = Arc::new(subscriber);
 
-	if config.log_global_default {
+	if config.logging.global_default {
 		set_global_default(subscriber.clone());
 	}
 
 	// If there's a reason the tokio console was disabled when it might be desired
 	// we output that here after initializing logging
-	if !console_enabled && !console_disabled_reason.is_empty() && config.log_global_default {
+	if !console_enabled && !console_disabled_reason.is_empty() && config.logging.global_default {
 		debug_warn!("{console_disabled_reason}");
 	}
 
@@ -99,16 +102,16 @@ fn console_layer<S>(
 where
 	S: Subscriber + for<'a> LookupSpan<'a> + 'static,
 {
-	let span_events = fmt_span::from_str(&config.log_span_events).unwrap_or_err();
+	let span_events = parse_span_events(&config.logging.span_events).unwrap_or_err();
 
 	let filter = EnvFilter::builder()
-		.with_regex(config.log_filter_regex)
-		.parse(&config.log)
-		.map_err(|e| err!(Config("log", "{e}.")))?;
+		.with_regex(config.logging.filter_regex)
+		.parse(&config.logging.filter)
+		.map_err(|e| err!(Config("logging.filter", "{e}.")))?;
 
 	let layer = fmt::Layer::new()
 		.with_ansi(ansi_enabled(config))
-		.with_thread_ids(config.log_thread_ids)
+		.with_thread_ids(config.logging.thread_ids)
 		.with_span_events(span_events)
 		.fmt_fields(ConsoleFormat::new(config))
 		.event_format(ConsoleFormat::new(config))
@@ -129,8 +132,8 @@ fn sentry_layer<S>(
 where
 	S: Subscriber + for<'a> LookupSpan<'a> + 'static,
 {
-	let filter = EnvFilter::try_new(&config.sentry_filter)
-		.map_err(|e| err!(Config("sentry_filter", "{e}.")))?;
+	let filter = EnvFilter::try_new(&config.telemetry.sentry.filter)
+		.map_err(|e| err!(Config("telemetry.sentry.filter", "{e}.")))?;
 
 	let layer = sentry_tracing::layer();
 	let (reload_filter, reload_handle) = reload::Layer::new(filter);
@@ -144,15 +147,15 @@ fn tracing_flame_layer<S>(config: &Config) -> Result<(Option<impl Layer<S>>, Tra
 where
 	S: Subscriber + for<'a> LookupSpan<'a> + 'static,
 {
-	if !config.tracing_flame {
+	if !config.tracing.flame.enable {
 		return Ok((None, None));
 	}
 
-	let filter = EnvFilter::try_new(&config.tracing_flame_filter)
-		.map_err(|e| err!(Config("tracing_flame_filter", "{e}.")))?;
+	let filter = EnvFilter::try_new(&config.tracing.flame.filter)
+		.map_err(|e| err!(Config("tracing.flame.filter", "{e}.")))?;
 
-	let (layer, guard) = tracing_flame::FlameLayer::with_file(&config.tracing_flame_output_path)
-		.map_err(|e| err!(Config("tracing_flame_output_path", "{e}.")))?;
+	let (layer, guard) = FlameLayer::with_file(&config.tracing.flame.output_path)
+		.map_err(|e| err!(Config("tracing.flame.output_path", "{e}.")))?;
 
 	let layer = layer
 		.with_empty_samples(false)
@@ -169,10 +172,10 @@ fn opentelemetry_layer<S>(
 where
 	S: Subscriber + for<'a> LookupSpan<'a> + 'static,
 {
-	let filter = EnvFilter::try_new(&config.jaeger_filter)
-		.map_err(|e| err!(Config("jaeger_filter", "{e}.")))?;
+	let filter = EnvFilter::try_new(&config.telemetry.jaeger.filter)
+		.map_err(|e| err!(Config("telemetry.jaeger.filter", "{e}.")))?;
 
-	let layer = config.allow_jaeger.then(|| {
+	let layer = config.telemetry.jaeger.enable.then(|| {
 		opentelemetry::global::set_text_map_propagator(TraceContextPropagator::new());
 
 		let exporter = SpanExporter::builder()
@@ -213,7 +216,7 @@ fn tokio_console_enabled(config: &Config) -> (bool, &'static str) {
 		);
 	}
 
-	if !config.tokio_console {
+	if !config.tracing.tokio_console {
 		return (false, "tokio console is available but disabled by the configuration.");
 	}
 
@@ -225,7 +228,9 @@ fn tokio_console_layer<S>(config: &Config, console_enabled: bool) -> impl Layer<
 where
 	S: Subscriber + for<'a> LookupSpan<'a> + 'static,
 {
-	(console_enabled && config.log_global_default).then(|| {
+	let enabled = console_enabled && config.logging.global_default;
+
+	enabled.then(|| {
 		console_subscriber::ConsoleLayer::builder()
 			.with_default_env()
 			.spawn()

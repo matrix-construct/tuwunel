@@ -18,7 +18,7 @@ pub(crate) async fn is_notice_room(
 	room_id: &RoomId,
 ) -> Result<bool> {
 	let server_user = services.globals.server_user.as_ref();
-	let tag = notice_tag(&services.config.admin_room_tag);
+	let tag = notice_tag(&services.config.admin.room.tag);
 
 	if services
 		.admin

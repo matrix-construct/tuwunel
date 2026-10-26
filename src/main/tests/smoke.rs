@@ -56,7 +56,7 @@ fn smoke() -> Result {
 fn boots_with_federation_disabled() -> Result {
 	boot(
 		"federation-disabled",
-		["federation.enable=false", "log_enable=false"],
+		["federation.enable=false", "logging.enable=false"],
 		async |services, base| {
 			let inbound = format!("{base}/_matrix/federation/v1/version");
 			let outbound =

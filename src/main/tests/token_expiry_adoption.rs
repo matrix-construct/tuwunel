@@ -204,7 +204,7 @@ fn phase_args(database: &Path, port: u16, phase: Phase) -> Args {
 		.with_database_path(database)
 		.with_loopback_listener(port)
 		.with_option("listening=true")
-		.with_option("log_enable=false");
+		.with_option("logging.enable=false");
 
 	provider
 		.iter()

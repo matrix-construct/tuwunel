@@ -413,17 +413,18 @@ async fn handle_edu(
 	edu: Edu,
 ) {
 	match edu {
-		| Edu::Presence(presence) if services.server.config.allow_incoming_presence =>
+		| Edu::Presence(presence) if services.server.config.presence.allow_incoming =>
 			handle_edu_presence(services, client, origin, presence).await,
 
 		| Edu::Receipt(receipt)
 			if services
 				.server
 				.config
-				.allow_incoming_read_receipts =>
+				.read_receipts
+				.allow_incoming =>
 			handle_edu_receipt(services, client, origin, receipt).await,
 
-		| Edu::Typing(typing) if services.server.config.allow_incoming_typing =>
+		| Edu::Typing(typing) if services.server.config.typing.allow_incoming =>
 			handle_edu_typing(services, client, origin, typing).await,
 
 		| Edu::DeviceListUpdate(content) =>
@@ -617,7 +618,7 @@ async fn handle_edu_typing(
 	}
 
 	if typing.typing {
-		let secs = services.server.config.typing_federation_timeout_s;
+		let secs = services.server.config.typing.federation_timeout_s;
 		let timeout = millis_since_unix_epoch().saturating_add(secs.saturating_mul(1000));
 
 		services

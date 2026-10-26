@@ -134,7 +134,7 @@ async fn runner_contains_errors_and_honors_only_its_marker() -> Result {
 #[tokio::test]
 #[tracing::instrument(level = "trace", skip_all)]
 async fn ordinary_ladder_repairs_independent_work_and_retains_ambiguity() -> Result {
-	let config = Figment::new().merge(("create_admin_room", false));
+	let config = Figment::new().merge(("admin.room.create", false));
 	let Some(fixture) = fixture(config).await? else {
 		return Ok(());
 	};

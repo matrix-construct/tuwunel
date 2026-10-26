@@ -59,7 +59,7 @@ fn login_refuses_deactivated_accounts_and_limits_wrong_passwords() -> Result {
 	let args = Args::default_test(&["fresh", "cleanup"])
 		.with_loopback_listener(port)
 		.with_option("listening=true")
-		.with_option("log_global_default=false")
+		.with_option("logging.global_default=false")
 		.with_option("jwt.enable=true")
 		.with_option(format!("jwt.key=\"{JWT_SECRET}\""))
 		.with_option("jwt.format=\"HMAC\"")

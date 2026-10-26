@@ -60,7 +60,7 @@ const ADMIN_TOKEN: &str = "context-snapshotless-state-admin-access-token";
 /// room of its own.
 #[test]
 fn context_without_snapshot_serves_only_readable_state() -> Result {
-	let options = ["create_admin_room=true", "registration.grant_admin_to_first_user=false"];
+	let options = ["admin.room.create=true", "registration.grant_admin_to_first_user=false"];
 
 	boot("context-snapshotless-state", options, exercise)
 }

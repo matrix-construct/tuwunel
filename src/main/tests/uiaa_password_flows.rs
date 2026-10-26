@@ -39,7 +39,7 @@ fn exercise_server(ldap_enabled: bool) -> Result {
 	let args = Args::default_test(&["fresh", "cleanup"])
 		.with_loopback_listener(port)
 		.with_option("listening=true")
-		.with_option("log_global_default=false")
+		.with_option("logging.global_default=false")
 		.with_option(format!("ldap.enable={ldap_enabled}"))
 		.with_option("jwt.enable=false")
 		.with_option("identity_provider.test.client_id=\"uiaa-test-idp\"")

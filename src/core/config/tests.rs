@@ -9,10 +9,10 @@ use std::{
 	sync::{Arc, Mutex, Once},
 };
 
+use ::tracing::{level_filters::LevelFilter, subscriber::set_global_default};
 use argon2::Params;
 use figment::providers::Data;
 use ipaddress::IPAddress;
-use tracing::{level_filters::LevelFilter, subscriber::set_global_default};
 use tracing_subscriber::fmt::{MakeWriter, fmt};
 
 use super::*;
@@ -128,7 +128,7 @@ fn check_with_captured_logs(config: &Config) -> (Result, String) {
 fn admin_escape_commands_default_to_off() {
 	let config = default_config();
 
-	assert!(!config.admin_escape_commands);
+	assert!(!config.admin.escape_commands);
 }
 
 fn default_config() -> Config {
@@ -1395,7 +1395,7 @@ fn an_out_of_range_sentry_sample_rate_fails_the_config_check() {
 			assert!(
 				error
 					.to_string()
-					.contains("'sentry_traces_sample_rate' directive"),
+					.contains("'telemetry.sentry.traces_sample_rate' directive"),
 				"{error}"
 			);
 		}
@@ -1442,7 +1442,7 @@ fn an_unknown_jwt_key_format_fails_the_config_check() {
 /// "varies by system" and non-literal bodies are out of reach here.
 #[test]
 fn documented_defaults_match_the_code() {
-	const SOURCES: [&str; 16] = [
+	const SOURCES: [&str; 30] = [
 		include_str!("mod.rs"),
 		include_str!("rocksdb.rs"),
 		include_str!("cache.rs"),
@@ -1459,6 +1459,20 @@ fn documented_defaults_match_the_code() {
 		include_str!("encryption.rs"),
 		include_str!("profile.rs"),
 		include_str!("registration.rs"),
+		include_str!("admin.rs"),
+		include_str!("appservice_client.rs"),
+		include_str!("client.rs"),
+		include_str!("compatibility.rs"),
+		include_str!("configuration.rs"),
+		include_str!("logging.rs"),
+		include_str!("presence.rs"),
+		include_str!("push.rs"),
+		include_str!("read_receipts.rs"),
+		include_str!("rendezvous.rs"),
+		include_str!("telemetry.rs"),
+		include_str!("tracing.rs"),
+		include_str!("turn.rs"),
+		include_str!("typing.rs"),
 	];
 
 	const SERDE_DEFAULT: &str = "#[serde(default = \"";

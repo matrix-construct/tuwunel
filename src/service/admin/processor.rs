@@ -160,9 +160,9 @@ async fn process(
 }
 
 fn capture_create(context: &Context<'_>) -> (Arc<Capture>, Arc<Mutex<String>>) {
-	let env_config = &context.services.server.config.admin_log_capture;
+	let env_config = &context.services.server.config.admin.log_capture;
 	let env_filter = EnvFilter::try_new(env_config).unwrap_or_else(|e| {
-		warn!("admin_log_capture filter invalid: {e:?}");
+		warn!(?e, "admin.log_capture filter invalid");
 		cfg!(debug_assertions)
 			.then_some("debug")
 			.or(Some("info"))

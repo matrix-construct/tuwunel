@@ -113,7 +113,7 @@ fn server_args(
 	args.option.extend([
 		"listening=true".to_owned(),
 		// The test starts multiple servers, so none may claim global tracing.
-		"log_enable=false".to_owned(),
+		"logging.enable=false".to_owned(),
 		"well_known.client=\"https://localhost\"".to_owned(),
 		"smtp.connection_uri=\"smtp://127.0.0.1:1\"".to_owned(),
 		"smtp.sender=\"Tests <test@example.test>\"".to_owned(),

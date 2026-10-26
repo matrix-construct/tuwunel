@@ -107,7 +107,7 @@ mod tests {
 		let args = [
 			"listening=true".to_owned(),
 			"media.allow_legacy=true".to_owned(),
-			"log=\"error\"".to_owned(),
+			"logging.filter=\"error\"".to_owned(),
 		]
 		.into_iter()
 		.fold(args, Args::with_option);

@@ -75,7 +75,7 @@ impl ConsoleWriter {
 			stdout: io::stdout(),
 			stderr: io::stderr(),
 			_journal_stream: journal_stream.into(),
-			use_stderr: journal_stream.0 != 0 || config.log_to_stderr,
+			use_stderr: journal_stream.0 != 0 || config.logging.to_stderr,
 			journal: Journal::open(config),
 		}
 	}
@@ -131,7 +131,7 @@ impl io::Write for &'_ ConsoleWriter {
 ///
 /// Compact mode applies globally. Otherwise non-debug errors use the pretty
 /// formatter and remaining events use the full formatter. ANSI follows
-/// `log_colors` and is disabled for native journal submission.
+/// `logging.colors` and is disabled for native journal submission.
 pub struct ConsoleFormat {
 	pretty: Format<Pretty>,
 	full: Format<Full>,
@@ -161,12 +161,12 @@ impl ConsoleFormat {
 				.with_source_location(true),
 
 			full: Format::<Full>::default()
-				.with_thread_ids(config.log_thread_ids)
+				.with_thread_ids(config.logging.thread_ids)
 				.with_ansi(ansi),
 
 			compact: fmt::format().compact().with_ansi(ansi),
 
-			compact_mode: config.log_compact,
+			compact_mode: config.logging.compact,
 		}
 	}
 }
@@ -244,7 +244,9 @@ fn get_journal_stream() -> (u64, u64) {
 /// entries are submitted to it.
 #[inline]
 #[must_use]
-pub fn ansi_enabled(config: &Config) -> bool { config.log_colors && !journald_enabled(config) }
+pub fn ansi_enabled(config: &Config) -> bool {
+	config.logging.colors && !journald_enabled(config)
+}
 
 /// Whether the process was started by systemd, sampled once.
 ///

@@ -100,7 +100,7 @@ fn pusher_notify() -> Result {
 		.push("sending.startup_netburst=true".to_owned());
 
 	args.option
-		.push("suppress_push_when_active=true".to_owned());
+		.push("push.suppress_when_active=true".to_owned());
 
 	args.option
 		.push("sending.retry_backoff_limit=1".to_owned());

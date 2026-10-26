@@ -36,7 +36,7 @@ fn authorization_and_notice_membership() -> Result {
 		.with_database_path(&database)
 		.with_loopback_listener(port)
 		.with_option("listening=true")
-		.with_option("create_admin_room=true")
+		.with_option("admin.room.create=true")
 		.with_option("registration.grant_admin_to_first_user=false")
 		.with_option("registration.shared_secret=\"notices-test\"");
 

@@ -125,7 +125,7 @@ fn timestamp_fallback_confirms_the_requested_event() -> Result {
 		"network.http.ip_range_denylist=[]".to_owned(),
 		"federation.loopback=true".to_owned(),
 		format!("federation.keys.trusted_servers=[\"{peer_address}\"]"),
-		"log=\"error\"".to_owned(),
+		"logging.filter=\"error\"".to_owned(),
 	]);
 
 	let runtime = Runtime::new(Some(&args))?;

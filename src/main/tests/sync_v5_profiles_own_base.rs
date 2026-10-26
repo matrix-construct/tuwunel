@@ -72,8 +72,8 @@ fn seeds_the_whole_own_profile() -> Result {
 		.with_loopback_listener(port)
 		.with_option("listening=true")
 		// A presence ping would advance the count between the late rounds.
-		.with_option("allow_local_presence=false")
-		.with_option("allow_outgoing_presence=false");
+		.with_option("presence.allow_local=false")
+		.with_option("presence.allow_outgoing=false");
 
 	let runtime = Runtime::new(Some(&args))?;
 	let server = Server::new(Some(&args), Some(&runtime))?;

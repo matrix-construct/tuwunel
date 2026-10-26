@@ -42,7 +42,8 @@ where
 		let push_path = self
 			.services
 			.config
-			.notification_push_path
+			.push
+			.notification_path
 			.trim_end_matches('/');
 
 		let dest = dest.trim_end_matches('/');

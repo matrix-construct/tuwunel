@@ -181,7 +181,7 @@ fn a_peers_mislabelled_thumbnail_is_cached_under_its_container() -> Result {
 		"network.http.allow_invalid_tls_certificates=true".to_owned(),
 		"network.http.ip_range_denylist=[]".to_owned(),
 		"federation.loopback=true".to_owned(),
-		"log=\"error\"".to_owned(),
+		"logging.filter=\"error\"".to_owned(),
 	]
 	.into_iter()
 	.fold(Args::default_test(&["fresh", "cleanup"]), Args::with_option);

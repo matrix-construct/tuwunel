@@ -66,7 +66,7 @@ struct Replies<'a> {
 /// miss it.
 #[test]
 fn outlier_state_is_resent_only_when_it_changes() -> Result {
-	boot("sync-v5-outlier-state", ["log_enable=false"], outliers)
+	boot("sync-v5-outlier-state", ["logging.enable=false"], outliers)
 }
 
 async fn outliers(services: &Services, base: &str) -> Result {
@@ -181,7 +181,7 @@ async fn expect_recorded(&self, since: &Value, request: &Value) -> Result<Value>
 /// due in a full reply or newly requested by a widened selector.
 #[test]
 fn unreadable_state_is_sent_once_readable() -> Result {
-	boot("sync-v5-unreadable-state", ["log_enable=false"], unreadable)
+	boot("sync-v5-unreadable-state", ["logging.enable=false"], unreadable)
 }
 
 async fn unreadable(services: &Services, base: &str) -> Result {
@@ -243,7 +243,7 @@ async fn unreadable(services: &Services, base: &str) -> Result {
 /// reads again.
 #[test]
 fn unreadable_counted_state_is_sent_once_readable() -> Result {
-	boot("sync-v5-unreadable-counted-state", ["log_enable=false"], unreadable_counted)
+	boot("sync-v5-unreadable-counted-state", ["logging.enable=false"], unreadable_counted)
 }
 
 async fn unreadable_counted(services: &Services, base: &str) -> Result {
@@ -315,7 +315,7 @@ async fn replace_row(
 /// event ID or its state key failed to resolve.
 #[test]
 fn unmapped_state_is_sent_once_mapped() -> Result {
-	boot("sync-v5-unmapped-state", ["log_enable=false"], unmapped)
+	boot("sync-v5-unmapped-state", ["logging.enable=false"], unmapped)
 }
 
 async fn unmapped(services: &Services, base: &str) -> Result {
@@ -472,7 +472,7 @@ async fn forget_delivered_snapshots(services: &Services) -> Result {
 /// only its new events.
 #[test]
 fn retried_position_repeats_only_the_lost_delta() -> Result {
-	boot("sync-v5-retried-position", ["log_enable=false"], retries)
+	boot("sync-v5-retried-position", ["logging.enable=false"], retries)
 }
 
 async fn retries(services: &Services, base: &str) -> Result {

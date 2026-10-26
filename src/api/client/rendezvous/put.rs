@@ -28,7 +28,7 @@ pub(crate) async fn put_rendezvous_route(
 ) -> Result<Response> {
 	ensure_enabled(&services)?;
 
-	let max_bytes = services.config.rendezvous_session_max_bytes;
+	let max_bytes = services.config.rendezvous.session_max_bytes;
 	let (parts, body) = request.into_parts();
 	let data = read_plain_body(&parts.headers, body, max_bytes).await?;
 	let if_match = parts

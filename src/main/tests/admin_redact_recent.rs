@@ -25,7 +25,7 @@ const TOKEN: &str = "redact-recent-owner-access-token-for-test";
 
 #[test]
 fn redacts_recent_messages_from_one_local_user() -> Result {
-	boot("admin-redact-recent", ["create_admin_room=true"], exercise)
+	boot("admin-redact-recent", ["admin.room.create=true"], exercise)
 }
 
 async fn exercise(services: &Services, base: &str) -> Result {

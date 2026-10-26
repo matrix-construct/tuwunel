@@ -115,7 +115,7 @@ fn capabilities(
 
 	// MSC3664: absent rather than present-and-disabled, since a client testing
 	// for the key rather than its value would otherwise read support.
-	if services.config.msc3664_related_event_match {
+	if services.config.push.msc3664_related_event_match {
 		capabilities.set("im.nheko.msc3664.related_event_match", json!({"enabled": true}))?;
 	}
 

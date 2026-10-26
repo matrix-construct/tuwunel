@@ -80,7 +80,8 @@ fn handle_reload(&self) -> Result {
 	let reloaded = self
 		.server
 		.config
-		.config_reload_signal
+		.configuration
+		.reload_signal
 		.then(|| self.reload(empty()))
 		.transpose();
 

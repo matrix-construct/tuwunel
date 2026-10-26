@@ -82,7 +82,7 @@ pub(super) async fn handle_response(
 		pdu.sender()
 	};
 
-	let threads = self.services.server.config.admin_output_threads;
+	let threads = self.services.server.config.admin.output_threads;
 	let mode = command_thread(&pdu)
 		.or_else(|| threads.then(|| reply_id.to_owned()))
 		.map_or_else(|| Mode::Reply(reply_id.to_owned()), Mode::Thread);
@@ -92,9 +92,10 @@ pub(super) async fn handle_response(
 		.await
 }
 
-/// Splits the output across up to `admin_output_max_events` reply or thread
-/// events; output needing more events, or any output when the limit is zero,
-/// is uploaded and posted as a single file attachment instead.
+/// Splits output across up to `admin.output_max_events` reply or thread events.
+///
+/// Output needing more events, or any output when the limit is zero, is uploaded
+/// and posted as a single file attachment instead.
 #[implement(super::Service)]
 async fn respond(
 	&self,
@@ -108,7 +109,8 @@ async fn respond(
 		.services
 		.server
 		.config
-		.admin_output_max_events;
+		.admin
+		.output_max_events;
 
 	let segments = (max_events != 0)
 		.then(|| {

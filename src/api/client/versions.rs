@@ -40,7 +40,8 @@ pub(crate) async fn get_supported_versions_route(
 			.chain(
 				services
 					.config
-					.rendezvous_enabled
+					.rendezvous
+					.enable
 					.then_some("org.matrix.msc4108"),
 			)
 			.map(Into::into)

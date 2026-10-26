@@ -19,22 +19,23 @@ pub(crate) async fn turn_server_route(
 	body: Ruma<get_turn_server_info::v3::Request>,
 ) -> Result<get_turn_server_info::v3::Response> {
 	// MSC4166: return M_NOT_FOUND 404 if no TURN URIs are specified in any way
-	if services.server.config.turn_uris.is_empty() {
+	if services.server.config.turn.uris.is_empty() {
 		return Err!(Request(NotFound("Not Found")));
 	}
 
 	let user = body.sender_user();
 
-	if !services.config.turn_allow_guests && sender_is_guest(&services, &body).await {
+	if !services.config.turn.allow_guests && sender_is_guest(&services, &body).await {
 		return Err!(Request(Forbidden("Guest users are not allowed to get TURN credentials")));
 	}
 
-	let (username, password) = services.globals.turn_secret().map_or_else(
-		|| (services.config.turn_username.clone(), services.config.turn_password.clone()),
-		|turn_secret| {
+	let (username, password) = services
+		.globals
+		.turn_secret()
+		.map(|turn_secret| {
 			let expiry = SecondsSinceUnixEpoch::from_system_time(
 				SystemTime::now()
-					.checked_add(Duration::from_secs(services.config.turn_ttl))
+					.checked_add(Duration::from_secs(services.config.turn.ttl))
 					.expect("TURN TTL should not get this high"),
 			)
 			.expect("time is valid");
@@ -47,13 +48,15 @@ pub(crate) async fn turn_server_route(
 			let password = STANDARD.encode(mac.finalize().into_bytes());
 
 			(username, password)
-		},
-	);
+		})
+		.unwrap_or_else(|| {
+			(services.config.turn.username.clone(), services.config.turn.password.clone())
+		});
 
 	Ok(get_turn_server_info::v3::Response {
 		username,
 		password,
-		uris: services.config.turn_uris.clone(),
-		ttl: Duration::from_secs(services.config.turn_ttl),
+		uris: services.config.turn.uris.clone(),
+		ttl: Duration::from_secs(services.config.turn.ttl),
 	})
 }

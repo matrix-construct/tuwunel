@@ -15,8 +15,8 @@ use tuwunel_core::{
 	utils::stream::{IterStream, ReadyExt, TryWidebandExt, WidebandExt},
 };
 use tuwunel_matrix::{
-	room::state::resolution::{self as state_res, AuthSet, FetchEvent, StateMap},
-	room_version,
+	room::state::resolution::{AuthSet, FetchEvent, StateMap, resolve},
+	room_version::rules,
 };
 
 use crate::rooms::{state_compressor::CompressedState, timeline};
@@ -139,21 +139,23 @@ where
 		complete,
 	};
 
-	state_res::resolve(
-		&room_version::rules(room_version)?,
-		state_sets,
-		auth_chains,
-		fetch,
-		self.services.server.config.hydra_backports,
-	)
-	.inspect_err(|error| {
-		if let Some(complete) = complete {
-			complete.store(false, Ordering::Relaxed);
-		}
+	let rules = rules(room_version)?;
+	let hydra_backports = self
+		.services
+		.server
+		.config
+		.compatibility
+		.hydra_backports;
 
-		error!(?error, "State resolution failed.");
-	})
-	.await
+	resolve(&rules, state_sets, auth_chains, fetch, hydra_backports)
+		.inspect_err(|error| {
+			if let Some(complete) = complete {
+				complete.store(false, Ordering::Relaxed);
+			}
+
+			error!(?error, "State resolution failed.");
+		})
+		.await
 }
 
 impl FetchEvent for Strict<'_> {

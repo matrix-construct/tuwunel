@@ -147,7 +147,7 @@ fn serde_aliases_are_rendered_with_canonical_names() {
 	let parsed = parse(&rendered);
 	let values = global(&parsed);
 
-	assert_eq!(values["log_colors"].as_bool(), Some(false));
+	assert_eq!(values["logging"]["colors"].as_bool(), Some(false));
 	assert!(!values.contains_key("log_colours"));
 	assert_eq!(values["jwt"]["key"].as_str(), Some("legacy-jwt-key"));
 	assert!(

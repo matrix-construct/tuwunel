@@ -55,7 +55,7 @@ mod tests {
 			"media.allow_legacy=true".to_owned(),
 			format!("media.deny_framing={deny_framing}"),
 			format!("media.deny_inline_styles={deny_inline_styles}"),
-			"log_enable=false".to_owned(),
+			"logging.enable=false".to_owned(),
 		]
 		.into_iter()
 		.fold(args, Args::with_option);

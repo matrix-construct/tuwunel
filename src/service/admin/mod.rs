@@ -62,7 +62,7 @@ enum Queue {
 /// sent it.
 ///
 /// An input without a sender is the operator's, from the console or the
-/// `admin_execute` and `admin_signal_execute` lists; converting a bare command
+/// `admin.execute` and `admin.signal_execute` lists; converting a bare command
 /// string builds one.
 #[derive(Clone, Debug, Default)]
 pub struct CommandInput {
@@ -335,10 +335,18 @@ impl Service {
 			.ok_or_else(|| err!(Request(NotFound("Admin user not joined to admin room"))))
 	}
 
-	/// Gets the room reports are posted to: the configured report room when set
-	/// and usable, otherwise the admin room.
+	/// Gets the room reports are posted to.
+	///
+	/// Uses the configured report room when set and usable, otherwise the admin room.
 	pub async fn get_report_room(&self) -> Result<OwnedRoomId> {
-		let Some(report_room) = self.services.server.config.report_room.as_ref() else {
+		let Some(report_room) = self
+			.services
+			.server
+			.config
+			.admin
+			.report_room
+			.as_ref()
+		else {
 			return self.get_admin_room().await;
 		};
 
@@ -407,7 +415,7 @@ impl Service {
 		}
 
 		// Check if server-side command-escape is disabled by configuration
-		if is_public_escape && !self.services.server.config.admin_escape_commands {
+		if is_public_escape && !self.services.server.config.admin.escape_commands {
 			return false;
 		}
 

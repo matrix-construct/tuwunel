@@ -40,7 +40,7 @@ const FILES: [(&[u8], &str); 4] = [
 ];
 
 // two servers boot in this binary and only one may install the logger
-const QUIET: &str = "log_enable=false";
+const QUIET: &str = "logging.enable=false";
 
 /// Uploads are refused while storage is short of space, and nothing else is.
 ///

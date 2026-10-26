@@ -225,7 +225,7 @@ fn make_clients(services: &Services) -> Result<Clients> {
 			))
 			.pool_max_idle_per_host(1)
 			.pool_idle_timeout(Duration::from_secs(
-				services.config.pusher_idle_timeout,
+				services.config.push.idle_timeout,
 			))
 			.redirect(guarded_redirect(services, 2))),
 
@@ -251,10 +251,10 @@ fn appservice_builder(services: &Services, builder: ClientBuilder) -> ClientBuil
 	builder
 		.dns_resolver(appservice_resolver(services))
 		.connect_timeout(Duration::from_secs(5))
-		.read_timeout(Duration::from_secs(services.config.appservice_timeout))
-		.timeout(Duration::from_secs(services.config.appservice_timeout))
+		.read_timeout(Duration::from_secs(services.config.appservice_client.timeout))
+		.timeout(Duration::from_secs(services.config.appservice_client.timeout))
 		.pool_max_idle_per_host(1)
-		.pool_idle_timeout(Duration::from_secs(services.config.appservice_idle_timeout))
+		.pool_idle_timeout(Duration::from_secs(services.config.appservice_client.idle_timeout))
 		.redirect(Policy::limited(2))
 }
 

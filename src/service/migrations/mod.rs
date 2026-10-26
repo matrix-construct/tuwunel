@@ -267,7 +267,7 @@ async fn fresh(services: &Services) -> Result {
 	mark_clean_injectivity(services);
 
 	// Create the admin room and server user on first run
-	if services.config.create_admin_room {
+	if services.config.admin.room.create {
 		crate::admin::create_admin_room(services)
 			.boxed()
 			.await?;

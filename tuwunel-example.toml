@@ -42,88 +42,6 @@
 #
 #database_path = "/var/lib/tuwunel"
 
-# Error on startup if any config option specified is unknown to Tuwunel.
-#
-# This is false by default to allow easier deprecation or removal of
-# config options in the future without breaking existing deployments. The
-# default behaviour is to simply warn on startup.
-# reloadable: yes
-#
-#error_on_unknown_config_opts = false
-
-# Minimum timeout a client can request for long-polling sync. Requests
-# will be clamped up to this value if smaller.
-#
-# reloadable: yes
-#
-#client_sync_timeout_min = 5000
-
-# Default timeout for long-polling sync if a client does not request
-# another in their query-string.
-#
-# reloadable: yes
-#
-#client_sync_timeout_default = 30000
-
-# Maximum timeout a client can request for long-polling sync. Requests
-# will be clamped down to this value if larger.
-#
-# reloadable: yes
-#
-#client_sync_timeout_max = 90000
-
-# Appservice URL read and total timeout, defaulting to 35 seconds as
-# generally appservices are hosted within the same network.
-#
-#appservice_timeout = 35
-
-# Appservice URL idle connection pool timeout (seconds).
-#
-#appservice_idle_timeout = 300
-
-# Notification gateway pusher idle connection pool timeout.
-#
-#pusher_idle_timeout = 15
-
-# Allow guest users to access TURN credentials.
-#
-# This is the equivalent of Synapse's `turn_allow_guests` config option.
-# Setting this to true allows guest users to call the endpoint
-# `/_matrix/client/v3/voip/turnServer`.
-# reloadable: yes
-#
-#turn_allow_guests = false
-
-# Enables OTLP span export for Jaeger-compatible tracing.
-#
-# A build with performance measurements installs an OpenTelemetry layer
-# when this is enabled. It defaults to false, and `jaeger_filter` selects
-# the exported spans.
-#
-#allow_jaeger = false
-
-# This item is undocumented. Please contribute documentation for it.
-#
-#jaeger_filter = "info"
-
-# If the 'perf_measurements' compile-time feature is enabled, enables
-# collecting folded stack trace profile of tracing spans using
-# tracing_flame. The resulting profile can be visualized with inferno[1],
-# speedscope[2], or a number of other tools.
-#
-# [1]: https://github.com/jonhoo/inferno
-# [2]: www.speedscope.app
-#
-#tracing_flame = false
-
-# This item is undocumented. Please contribute documentation for it.
-#
-#tracing_flame_filter = "info"
-
-# This item is undocumented. Please contribute documentation for it.
-#
-#tracing_flame_output_path = "./tracing.folded"
-
 # Examples:
 #
 # - No proxy (default):
@@ -155,503 +73,6 @@
 #
 #proxy = "none"
 
-# Max log level for tuwunel. Allows debug, info, warn, or error.
-#
-# See also:
-# https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html#directives
-#
-# **Caveat**:
-# For release builds, the tracing crate is configured to only implement
-# levels higher than error to avoid unnecessary overhead in the compiled
-# binary from trace macros. For debug builds, this restriction is not
-# applied.
-#
-#log = "info"
-
-# Output logs with ANSI colours.
-#
-# Colours are suppressed while entries are submitted to journald, which
-# takes the formatted line verbatim and reads control bytes in it as
-# binary rather than text.
-#
-#log_colors = true
-
-# Sets the log format to compact mode.
-#
-#log_compact = false
-
-# Configures the span events which will be outputted with the log.
-#
-#log_span_events = "none"
-
-# Configures whether TUWUNEL_LOG EnvFilter matches values using regular
-# expressions. See the tracing_subscriber documentation on Directives.
-#
-#log_filter_regex = true
-
-# Toggles the display of ThreadId in tracing log output.
-#
-#log_thread_ids = false
-
-# Redirects logging to standard error (stderr). The default is false for
-# stdout. For those using our systemd features the redirection to stderr
-# occurs as necessary and setting this option should not be required. We
-# offer this option for all other users who desire such redirection.
-#
-#log_to_stderr = false
-
-# Submits log output directly to the journald socket instead of the
-# console when running under systemd. Each entry carries its actual
-# severity as the journal priority, so tools such as `journalctl
-# --priority warning` catch Tuwunel's warnings and errors; console output
-# is captured by journald at a single fixed priority instead. The message
-# is formatted exactly as the console formats it, span fields included,
-# while the target, source location and every tracing field are attached
-# as journal fields, the latter under an `F_` prefix for queries such as
-# `journalctl F_ROOM_ID='!room:example.com'`. This option has no effect
-# when not running under systemd, and the console is kept when the
-# journald socket cannot be opened.
-#
-#log_journald = true
-
-# Setting to false disables the logging/tracing system at a lower level.
-# In contrast to configuring an empty `log` string where the system is
-# still operating but muted, when this option is false the system was not
-# initialized and is not operating. Changing this option has no effect
-# after startup. This option is intended for developers and expert use
-# only: configuring an empty log string is preferred over using this.
-#
-#log_enable = true
-
-# Setting to false disables the logging/tracing system at a lower level
-# similar to `log_enable`. In this case the system is configured normally,
-# but not registered as the global handler in the final steps. This option
-# is for developers and expert use only.
-#
-#log_global_default = true
-
-# Enable the rendezvous session APIs used to sign in with a QR code
-# (MSC4108 and MSC4388).
-#
-# The rendezvous session relays the handshake between two devices before
-# the OAuth device authorization grant completes the sign-in. This
-# requires the built-in OIDC server. When disabled, clients hide the
-# feature and the endpoints return an unrecognized response.
-#
-# reloadable: yes
-#
-#rendezvous_enabled = true
-
-# Maximum size in bytes of a rendezvous session payload.
-#
-# QR sign-in handshake messages are normally much smaller than the
-# default.
-#
-# reloadable: yes
-#
-#rendezvous_session_max_bytes = 4096
-
-# Seconds a rendezvous session lives after its last write.
-#
-# Each update restarts the window, but the device displaying the QR
-# times the whole sign-in against the expiry advertised at creation.
-# The default leaves time for an interactive account login on the
-# approval page.
-#
-# reloadable: yes
-#
-#rendezvous_session_ttl = 600
-
-# Maximum number of concurrent rendezvous sessions.
-#
-# Creating a session beyond this limit evicts the oldest session instead
-# of failing. A value of zero retains one session so creation remains
-# available.
-#
-# reloadable: yes
-#
-#rendezvous_max_sessions = 100
-
-# Require an access token for MSC4388 discovery and session creation.
-#
-# When disabled, clients without an access token may discover and create
-# MSC4388 sessions. The MSC4108 endpoint remains open in either mode.
-#
-# reloadable: yes
-#
-#rendezvous_authenticated_only = true
-
-# Per-client-IP request refill rate for the MSC4388 rendezvous endpoints.
-#
-# A value of zero is treated as one request per second.
-#
-# reloadable: yes
-#
-#rendezvous_rc_per_second = 10
-
-# Token-bucket depth for the MSC4388 rendezvous request throttle.
-#
-# This is the number of requests one client IP may make in a burst before
-# `rendezvous_rc_per_second` governs. A value of zero is treated as one.
-#
-# reloadable: yes
-#
-#rendezvous_rc_burst_count = 20
-
-# Static TURN username to provide the client if not using a shared secret
-# ("turn_secret"), It is recommended to use a shared secret over static
-# credentials.
-# reloadable: yes
-#
-#turn_username = false
-
-# Static TURN password to provide the client if not using a shared secret
-# ("turn_secret"). It is recommended to use a shared secret over static
-# credentials.
-#
-# reloadable: yes
-#
-#turn_password = false
-
-# Vector list of TURN URIs/servers to use.
-#
-# Replace "example.turn.uri" with your TURN domain, such as the coturn
-# "realm" config option. If using TURN over TLS, replace the URI prefix
-# "turn:" with "turns:".
-#
-# reloadable: yes
-# example: ["turn:example.turn.uri?transport=udp",
-# "turn:example.turn.uri?transport=tcp"]
-#
-#turn_uris = []
-
-# TURN secret to use for generating the HMAC-SHA1 hash apart of username
-# and password generation.
-#
-# This is more secure, but if needed you can use traditional static
-# username/password credentials.
-#
-# reloadable: yes
-#
-#turn_secret = false
-
-# TURN secret to use that's read from the file path specified.
-#
-# This takes priority over "turn_secret", and falls back to it when the
-# file cannot be opened. Surrounding whitespace is trimmed off, so a
-# trailing newline does not become part of the secret. A file which is
-# present but blank resolves to no secret rather than falling back.
-#
-# reloadable: yes
-# example: "/etc/tuwunel/.turn_secret"
-#
-#turn_secret_file =
-
-# TURN TTL, in seconds.
-#
-# reloadable: yes
-#
-#turn_ttl = 86400
-
-# Suffix stripped from the gateway URL before constructing a push request.
-#
-# reloadable: yes
-#
-#notification_push_path = "/_matrix/push/v1/notify"
-
-# For compatibility and special purpose use only. Setting this option to
-# true will not filter messages sent to pushers based on rules or actions.
-# Everything will be sent to the pusher. This option is offered for
-# several reasons, but should not be necessary:
-# - Bypass to workaround bugs or outdated server-side ruleset support.
-# - Allow clients to evaluate pushrules themselves (due to the above).
-# - Hosting or companies which have custom pushers and internal needs.
-#
-# Note that setting this option to true will not affect the record of
-# notifications found in the notifications pane.
-# reloadable: yes
-#
-#push_everything = false
-
-# Evaluate the `im.nheko.msc3664.related_event_match` push rule condition,
-# which matches on a property of the event that an incoming event relates
-# to.
-#
-# A user can then write a push rule that notifies for replies or reactions
-# to their own messages, which no other condition can express. Enabling
-# this costs one extra event lookup for every event carrying a relation.
-#
-# The default `.im.nheko.msc3664.reply` push rule uses the condition.
-# Disabling evaluation leaves the rule present but unable to match
-# replies, while clients implementing MSC3664 may still evaluate it
-# locally.
-#
-# reloadable: yes
-#
-#msc3664_related_event_match = false
-
-# Setting to false disables the heroes calculation made by sliding and
-# legacy client sync. The heroes calculation is mandated by the Matrix
-# specification and your client may not operate properly unless this
-# option is set to true.
-#
-# This option is intended for custom software deployments seeking purely
-# to minimize unused resources; the overall savings are otherwise
-# negligible.
-# reloadable: yes
-#
-#calculate_heroes = true
-
-# Allow local (your server only) presence updates/requests.
-#
-# Note that presence on tuwunel is very fast unlike Synapse's. If using
-# outgoing presence, this MUST be enabled.
-# reloadable: yes
-#
-#allow_local_presence = true
-
-# Allow incoming federated presence updates/requests.
-#
-# This option receives presence updates from other servers, but does not
-# send any unless `allow_outgoing_presence` is true. Note that presence on
-# tuwunel is very fast unlike Synapse's.
-# reloadable: yes
-#
-#allow_incoming_presence = true
-
-# Allow outgoing presence updates/requests.
-#
-# This option sends presence updates to other servers, but does not
-# receive any unless `allow_incoming_presence` is true. Note that presence
-# on tuwunel is very fast unlike Synapse's. If using outgoing presence,
-# you MUST enable `allow_local_presence` as well.
-# reloadable: yes
-#
-#allow_outgoing_presence = true
-
-# How many seconds without presence updates before you become idle.
-# Defaults to 5 minutes.
-#
-#presence_idle_timeout_s = 300
-
-# How many seconds without presence updates before you become offline.
-# Defaults to 30 minutes.
-#
-#presence_offline_timeout_s = 1800
-
-# Enable the presence idle timer for remote users.
-#
-# Disabling is offered as an optimization for servers participating in
-# many large rooms or when resources are limited. Disabling it may cause
-# incorrect presence states (i.e. stuck online) to be seen for some remote
-# users.
-#
-#presence_timeout_remote_users = true
-
-# Suppresses push notifications for users marked as active. (Experimental)
-#
-# When enabled, users with `Online` presence and recent activity
-# (based on presence state and sync activity) won’t receive push
-# notifications, reducing duplicate alerts while they're active
-# on another client.
-#
-# Disabled by default to preserve legacy behavior.
-# reloadable: yes
-#
-#suppress_push_when_active = false
-
-# Allow receiving incoming read receipts from remote servers.
-# reloadable: yes
-#
-#allow_incoming_read_receipts = true
-
-# Allow sending read receipts to remote servers.
-# reloadable: yes
-#
-#allow_outgoing_read_receipts = true
-
-# Allow outgoing typing updates to federation.
-# reloadable: yes
-#
-#allow_outgoing_typing = true
-
-# Allow incoming typing updates from federation.
-# reloadable: yes
-#
-#allow_incoming_typing = true
-
-# Maximum time federation user can indicate typing.
-#
-# reloadable: yes
-#
-#typing_federation_timeout_s = 30
-
-# Minimum time local client can indicate typing. This does not override a
-# client's request to stop typing. It only enforces a minimum value in
-# case of no stop request.
-#
-# reloadable: yes
-#
-#typing_client_timeout_min_s = 15
-
-# Maximum time local client can indicate typing.
-#
-# reloadable: yes
-#
-#typing_client_timeout_max_s = 45
-
-# Set to true to log guest registrations in the admin room. Note that
-# these may be noisy or unnecessary if you're a public homeserver.
-# reloadable: yes
-#
-#log_guest_registrations = false
-
-# Allow admins to run commands outside the admin room ("#admins") by
-# prefixing a message with "\!admin" or "\\!admin" and a normal command.
-#
-# The reply is publicly visible to the room, originating from the sender.
-# Disabled by default: the server cannot tell a command an admin typed
-# from one in a message the admin forwarded or a bot on their account
-# reposted. Message formatting can also hide the command from the admin.
-#
-# reloadable: yes
-# example: \\!admin debug ping puppygock.gay
-#
-#admin_escape_commands = false
-
-# Automatically activate the tuwunel admin room console / CLI on
-# startup. This option can also be enabled with `--console` tuwunel
-# argument. Activation requires standard input to be a terminal.
-#
-#admin_console_automatic = false
-
-# List of admin commands to execute on startup.
-#
-# This option can also be configured with the `--execute` tuwunel
-# argument and can take standard shell commands and environment variables
-#
-# For example: `./tuwunel --execute "server admin-notice tuwunel has
-# started up at $(date)"`
-#
-# example: admin_execute = ["debug ping puppygock.gay", "debug echo hi"]`
-#
-#admin_execute = []
-
-# Ignore errors in startup commands.
-#
-# If false, tuwunel will error and fail to start if an admin execute
-# command (`--execute` / `admin_execute`) fails.
-# reloadable: yes
-#
-#admin_execute_errors_ignore = false
-
-# List of admin commands to execute on SIGUSR2.
-#
-# Similar to admin_execute, but these commands are executed when the
-# server receives SIGUSR2 on supporting platforms.
-#
-# reloadable: yes
-#
-#admin_signal_execute = []
-
-# Controls the max log level for admin command log captures (logs
-# generated from running admin commands). Defaults to "info" on release
-# builds, else "debug" on debug builds.
-#
-# reloadable: yes
-#
-#admin_log_capture = "info"
-
-# The default room tag to apply on the admin room.
-#
-# On some clients like Element, the room tag "m.server_notice" is a
-# special pinned room at the very bottom of your room list. The tuwunel
-# admin room can be pinned here so you always have an easy-to-access
-# shortcut dedicated to your admin room.
-#
-# reloadable: yes
-#
-#admin_room_tag = "m.server_notice"
-
-# The localpart of the server's administrative user.
-#
-# This identity is durable after first boot. Changing it on an existing
-# database is unsupported and prevents startup.
-#
-#server_user_localpart = "conduit"
-
-# The room that user, room, and event reports are posted to, instead of
-# the admin room. Accepts a room ID or room alias; the server user must be
-# joined with permission to post there. Reports fall back to the admin
-# room when this is unset, cannot be resolved, or the server user is not a
-# member.
-#
-# reloadable: yes
-#
-#report_room = (none)
-
-# Whether the admin room is created on first startup. Users should not set
-# this to false. Developers can set this to false during integration tests
-# to reduce activity and output.
-#
-#create_admin_room = true
-
-# Whether to enable federation on the admin room. This cannot be changed
-# after the admin room is created.
-#
-#federate_admin_room = true
-
-# Sentry.io crash/panic reporting, performance monitoring/metrics, etc.
-# This is NOT enabled by default. tuwunel's default Sentry reporting
-# endpoint domain is `o4509498990067712.ingest.us.sentry.io`.
-#
-#sentry = false
-
-# Sentry reporting URL, if a custom one is desired.
-#
-#sentry_endpoint = ""
-
-# Report your tuwunel server_name in Sentry.io crash reports and
-# metrics.
-#
-#sentry_send_server_name = false
-
-# Performance monitoring/tracing sample rate for Sentry.io.
-#
-# Sentry reads this as a fraction, so it must lie between 0.0 and 1.0
-# inclusive when Sentry is enabled. High values may impact performance;
-# 0.0 disables sampling.
-#
-#sentry_traces_sample_rate = 0.15
-
-# Whether to attach a stacktrace to Sentry reports.
-#
-#sentry_attach_stacktrace = false
-
-# Send panics to Sentry. This is true by default, but Sentry has to be
-# enabled. The global `sentry` config option must be enabled to send any
-# data.
-#
-#sentry_send_panic = true
-
-# Send errors to sentry. This is true by default, but sentry has to be
-# enabled. This option is only effective in release-mode; forced to false
-# in debug-mode.
-#
-#sentry_send_error = true
-
-# Controls the tracing log level for Sentry to send things like
-# breadcrumbs and transactions
-#
-#sentry_filter = "info"
-
-# Enable the tokio-console. This option is only relevant to developers.
-#
-#	For more information, see:
-# https://tuwunel.chat/development.html#debugging-with-tokio-console
-#
-#tokio_console = false
-
 # Arbitrary argument vector for integration testing. Functionality in the
 # server is altered or informed for the requirements of integration tests.
 # - "smoke" performs a shutdown after startup admin commands rather than
@@ -670,66 +91,10 @@
 #
 #maintenance = false
 
-# Controls whether admin room notices like account registrations, password
-# changes, account deactivations, room directory publications, etc will be
-# sent to the admin room. Update notices and normal admin command
-# responses will still be sent.
-# reloadable: yes
-#
-#admin_room_notices = true
-
-# Maximum number of message events an admin command's output may be split
-# across as replies in the admin room. Output needing more events than
-# this is uploaded to the media repository instead and returned as a text
-# file attachment replying to the command. When 1, output which fits in a
-# single event is posted as a single reply and anything larger becomes an
-# attachment. When 0, output is always posted as an attachment regardless
-# of size.
-#
-# reloadable: yes
-#
-#admin_output_max_events = 1
-
-# Post admin command output into a thread on the command event rather than
-# as replies. Output split across multiple events per
-# `admin_output_max_events` is contained in a single thread; attachment
-# outputs are posted into the thread as well.
-#
-# reloadable: yes
-#
-#admin_output_threads = false
-
 # Enables listener sockets; can be set to false to disable listening. This
 # option is intended for developer/diagnostic purposes only.
 #
 #listening = true
-
-# Enables configuration reload when the server receives SIGUSR1 on
-# supporting platforms.
-#
-# reloadable: yes
-#
-#config_reload_signal = true
-
-# Backport state-reset security fixes to all room versions.
-#
-# This option applies the State Resolution 2.1 mitigation developed during
-# project Hydra for room version 12 to all prior State Resolution 2.0 room
-# versions (all room versions supported by this server). These mitigations
-# increase resilience to state-resets without any new definition of
-# correctness; therefor it is safe to set this to true for existing rooms.
-#
-# Furthermore, state-reset attacks are not consistent as they result in
-# rooms without any single consensus, therefor it is unnecessary to set
-# this to false to match other servers which set this to false or simply
-# lack support; even if replicating the post-reset state suffered by other
-# servers is somehow desired.
-#
-# This option exists for developer and debug use, and as a failsafe in
-# lieu of hardcoding it.
-# reloadable: yes
-#
-#hydra_backports = true
 
 # Directory containing appservice yaml registration files.
 #
@@ -751,6 +116,148 @@
 # false continues to skip migrations as configured.
 #
 #database_migrations = true
+
+
+
+#[global.admin]
+
+# Allows admins to run commands outside the admin room by prefixing
+# messages with "\!admin" or "\\!admin".
+#
+# Follow the prefix with a normal command, as in the "#admins" room; the
+# reply is publicly visible in the current room and originates from the
+# sender. This is disabled by default because we cannot distinguish a
+# typed command from a forwarded message or an account bot's repost.
+# Message formatting can also hide a command from the admin.
+#
+# reloadable: yes
+# example: \\!admin debug ping puppygock.gay
+#
+#escape_commands = false
+
+# Activates the admin console automatically at startup.
+#
+# The console command-line argument also enables it. Activation requires
+# standard input to be a terminal.
+#
+#console_automatic = false
+
+# Lists admin commands to execute at startup.
+#
+# The execute command-line argument also configures these commands and
+# supports shell commands and environment-variable expansion. A shell
+# can, for example, supply `server admin-notice tuwunel has started up at
+# $(date)` as the execute argument.
+#
+# example: ["debug ping puppygock.gay", "debug echo hi"]
+#
+#execute = []
+
+# Ignores failures in startup admin commands.
+#
+# When false, a failing command supplied by the execute command-line
+# argument or `admin.execute` prevents startup.
+#
+# reloadable: yes
+#
+#execute_errors_ignore = false
+
+# Lists admin commands to execute on SIGUSR2.
+#
+# This is like `admin.execute`, but runs when the signal arrives on
+# supporting platforms.
+#
+# reloadable: yes
+#
+#signal_execute = []
+
+# Sets the maximum log level captured during admin commands.
+#
+# The default is info for release builds and debug for debug builds.
+#
+# reloadable: yes
+#
+#log_capture = "info"
+
+# Sets the localpart of the server's administrative user.
+#
+# The identity becomes durable after first boot. Changing it on an
+# existing database is unsupported and prevents startup.
+#
+#server_user_localpart = "conduit"
+
+# Selects a room for user, room, and event reports instead of the admin
+# room.
+#
+# Accepts a room ID or alias, and the server user must be joined with
+# permission to post. Reports fall back to the admin room when unset,
+# unresolvable, or the server user is not a member.
+#
+# reloadable: yes
+#
+#report_room = (none)
+
+# Limits message events used for an admin command's output replies.
+#
+# Output requiring more events is uploaded to the media repository and
+# returned as a text attachment replying to the command. With 1, output
+# fitting one event is a single reply and larger output becomes an
+# attachment. With 0, output is always an attachment regardless of size.
+#
+# reloadable: yes
+#
+#output_max_events = 1
+
+# Posts admin-command output in a thread on the command event instead of
+# replies.
+#
+# Output split across events by `admin.output_max_events` stays in one
+# thread. Attachments are also posted in that thread.
+#
+# reloadable: yes
+#
+#output_threads = false
+
+
+
+#[global.admin.room]
+
+# Logs guest registrations in the admin room, which may be noisy or
+# unnecessary on a public server.
+#
+# reloadable: yes
+#
+#log_guest_registrations = false
+
+# Sets the default tag applied to the admin room, with `m.server_notice`
+# providing a dedicated, easily accessed shortcut pinned at the bottom of
+# the room list in clients such as Element.
+#
+# reloadable: yes
+#
+#tag = "m.server_notice"
+
+# Creates the admin room on first startup and should remain enabled for
+# users, though developers can disable it in integration tests to reduce
+# activity and output.
+#
+#create = true
+
+# Enables federation for the admin room.
+#
+# This cannot be changed after the room is created.
+#
+#federate = true
+
+# Sends administrative notices to the admin room.
+#
+# These include registrations, password changes, account deactivations,
+# and room-directory publications. Update notices and ordinary
+# admin-command responses are sent regardless.
+#
+# reloadable: yes
+#
+#notices = true
 
 
 
@@ -820,6 +327,19 @@
 # A regular expression defining which values this namespace includes.
 #
 #regex =
+
+
+
+#[global.appservice_client]
+
+# Sets appservice URL read and total timeouts in seconds, defaulting to
+# 35 because appservices are generally hosted on the same network.
+#
+#timeout = 35
+
+# Sets the appservice URL idle connection-pool timeout in seconds.
+#
+#idle_timeout = 300
 
 
 
@@ -1380,6 +900,86 @@
 # reloadable: yes
 #
 #ttl_max = 64800
+
+
+
+#[global.client]
+
+
+
+#[global.client.sync]
+
+# Sets the minimum requested timeout for long-polling sync.
+#
+# Smaller client requests are clamped up to this value.
+#
+# reloadable: yes
+#
+#timeout_min = 5000
+
+# Sets the long-polling sync timeout when the client supplies none in its
+# query string.
+#
+# reloadable: yes
+#
+#timeout_default = 30000
+
+# Sets the maximum requested timeout for long-polling sync.
+#
+# Larger client requests are clamped down to this value.
+#
+# reloadable: yes
+#
+#timeout_max = 90000
+
+# Calculates room heroes in sliding and legacy client sync.
+#
+# The Matrix specification requires this calculation, so clients may
+# malfunction when it is disabled. Disabling is intended for custom
+# software minimizing unused resources; otherwise the savings are
+# negligible.
+#
+# reloadable: yes
+#
+#calculate_heroes = true
+
+
+
+#[global.compatibility]
+
+# Backports state-reset security mitigations to all supported room
+# versions.
+#
+# This applies project Hydra's State Resolution 2.1 mitigations for room
+# version 12 to prior State Resolution 2.0 versions, increasing
+# resilience without redefining correctness and making it safe to enable
+# for existing rooms. State-reset attacks produce rooms without one
+# consensus, so disabling is unnecessary to match servers that disable or
+# lack the mitigations, even when replicating their post-reset state is
+# desired. The setting exists for developer and debug use and as a
+# failsafe instead of being hardcoded.
+#
+# reloadable: yes
+#
+#hydra_backports = true
+
+
+
+#[global.configuration]
+
+# Rejects startup when an unknown configuration option is specified,
+# whereas the default false warns to allow future deprecation or removal
+# of options without breaking existing deployments.
+#
+# reloadable: yes
+#
+#error_on_unknown_opts = false
+
+# Reloads configuration on SIGUSR1 on supporting platforms when enabled.
+#
+# reloadable: yes
+#
+#reload_signal = true
 
 
 
@@ -2486,6 +2086,87 @@
 
 
 
+#[global.logging]
+
+# Sets the maximum log level, accepting debug, info, warn, or error.
+#
+# The filter also accepts [tracing-subscriber
+# directives](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html#directives).
+# Release builds with `release_max_log_level` omit debug and trace levels
+# to reduce compiled tracing overhead; debug builds do not apply that
+# release cap.
+#
+#filter = "info"
+
+# Adds ANSI colors to log output.
+#
+# Colors are suppressed for journald submissions because it treats
+# control bytes in formatted lines as binary instead of text.
+#
+#colors = true
+
+# Selects the compact log format.
+#
+#compact = false
+
+# Selects span events included in log output.
+#
+#span_events = "none"
+
+# Allows the log EnvFilter to match values using regular expressions.
+#
+# This controls `TUWUNEL_LOG` filter matching; see the
+# [tracing-subscriber directives
+# documentation](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html#directives).
+#
+#filter_regex = true
+
+# Displays thread IDs in tracing log output.
+#
+#thread_ids = false
+
+# Redirects logging to standard error.
+#
+# The default false writes to standard output. Systemd integration
+# redirects to standard error as needed without this setting; this option
+# serves other deployments requiring redirection.
+#
+#to_stderr = false
+
+# Submits logs directly to journald instead of the console when running
+# under systemd.
+#
+# Each entry carries its real severity as journal priority, so
+# `journalctl -p warning` finds warnings and errors; console capture
+# instead assigns one fixed priority. Messages retain console formatting
+# and span fields, with target, source location, and all tracing fields
+# attached as journal fields, the latter prefixed `F_` for queries such
+# as `journalctl F_ROOM_ID='!room:example.com'`. Outside systemd this has
+# no effect, and failure to open the journald socket retains console
+# output.
+#
+#journald = true
+
+# Initializes the logging and tracing system when enabled.
+#
+# When false the system is neither initialized nor operating, whereas an
+# empty `logging.filter` leaves it operating but muted. Changes have no
+# effect after startup. This is for developers and expert use; prefer an
+# empty filter to disabling the system.
+#
+#enable = true
+
+# Registers the configured logging and tracing system as the global
+# handler.
+#
+# Disabling this is a low-level developer or expert setting similar to
+# `logging.enable`, but the system is configured normally and only the
+# final global registration is omitted.
+#
+#global_default = true
+
+
+
 #[global.media]
 
 # Limits the number of concurrent pending asynchronous media uploads per
@@ -3197,6 +2878,54 @@
 
 
 
+#[global.presence]
+
+# Allows local presence updates and requests.
+#
+# This must be enabled when using `presence.allow_outgoing`.
+#
+# reloadable: yes
+#
+#allow_local = true
+
+# Allows incoming federated presence updates and requests.
+#
+# This receives updates but sends none unless `presence.allow_outgoing`
+# is enabled.
+#
+# reloadable: yes
+#
+#allow_incoming = true
+
+# Allows outgoing federated presence updates and requests.
+#
+# This sends updates but receives none unless `presence.allow_incoming`
+# is enabled, and it requires `presence.allow_local`.
+#
+# reloadable: yes
+#
+#allow_outgoing = true
+
+# Sets the seconds without presence updates before a user becomes idle,
+# defaulting to five minutes.
+#
+#idle_timeout_s = 300
+
+# Sets the seconds without presence updates before a user becomes
+# offline, defaulting to thirty minutes.
+#
+#offline_timeout_s = 1800
+
+# Enables the presence idle timer for remote users.
+#
+# Disabling it can reduce resource use on servers participating in many
+# large rooms or with limited resources. Some remote users may then show
+# incorrect presence states, such as remaining online indefinitely.
+#
+#timeout_remote_users = true
+
+
+
 #[global.profile]
 
 # Requires authentication on profile retrieval endpoints when enabled.
@@ -3294,6 +3023,62 @@
 
 
 
+#[global.push]
+
+# Sets the notification-gateway pusher idle connection-pool timeout.
+#
+#idle_timeout = 15
+
+# Selects the suffix stripped from a gateway URL before constructing a
+# push request.
+#
+# reloadable: yes
+#
+#notification_path = "/_matrix/push/v1/notify"
+
+# Sends every message to pushers without filtering by push rules or
+# actions.
+#
+# This compatibility and special-purpose setting should not normally be
+# needed, but can bypass bugs or outdated server-side rule support, let
+# clients evaluate rules themselves, or support hosting and custom-pusher
+# requirements. It does not alter the notification records shown in the
+# notifications pane.
+#
+# reloadable: yes
+#
+#everything = false
+
+# Evaluates the `im.nheko.msc3664.related_event_match` push-rule
+# condition.
+#
+# The condition matches properties of the event an incoming event relates
+# to, enabling reply or reaction notifications for a user's own messages
+# that no other condition can express. Enabling it costs one extra event
+# lookup for each event carrying a relation. The default
+# `.im.nheko.msc3664.reply` rule uses it; disabling evaluation leaves
+# that rule present but unable to match replies, although clients
+# implementing
+# [MSC3664](https://github.com/matrix-org/matrix-spec-proposals/pull/3664)
+# may still evaluate it locally.
+#
+# reloadable: yes
+#
+#msc3664_related_event_match = false
+
+# Experimentally suppresses push notifications for active users.
+#
+# When enabled, users with Online presence and recent activity,
+# determined from presence and sync activity, receive no push
+# notifications, reducing duplicate alerts while active on another
+# client. The default is disabled to preserve legacy behavior.
+#
+# reloadable: yes
+#
+#suppress_when_active = false
+
+
+
 #[global.rate_limiting]
 
 
@@ -3363,6 +3148,22 @@
 # reloadable: yes
 #
 #burst_count = 3
+
+
+
+#[global.read_receipts]
+
+# Allows receiving read receipts from remote servers.
+#
+# reloadable: yes
+#
+#allow_incoming = true
+
+# Allows sending read receipts to remote servers.
+#
+# reloadable: yes
+#
+#allow_outgoing = true
 
 
 
@@ -3537,6 +3338,84 @@
 # reloadable: yes
 #
 #url =
+
+
+
+#[global.rendezvous]
+
+# Enables QR sign-in rendezvous sessions under
+# [MSC4108](https://github.com/matrix-org/matrix-spec-proposals/pull/4108)
+# and
+# [MSC4388](https://github.com/matrix-org/matrix-spec-proposals/pull/4388).
+#
+# Sessions relay the handshake between two devices before an OAuth
+# device-authorization grant completes sign-in, requiring the built-in
+# OIDC server. When disabled, clients hide the feature and the endpoints
+# return an unrecognized response.
+#
+# reloadable: yes
+#
+#enable = true
+
+# Limits rendezvous session payloads in bytes, with a default much larger
+# than normal QR sign-in handshake messages.
+#
+# reloadable: yes
+#
+#session_max_bytes = 4096
+
+# Sets the rendezvous session lifetime in seconds after its last write.
+#
+# Each update restarts the window, but the device showing the QR code
+# times the whole sign-in against the expiry advertised at creation. The
+# default allows time for interactive account login on the approval page.
+#
+# reloadable: yes
+#
+#session_ttl = 600
+
+# Limits concurrent rendezvous sessions.
+#
+# Creating beyond the limit evicts the oldest session instead of failing.
+# Zero retains one session so creation remains available.
+#
+# reloadable: yes
+#
+#max_sessions = 100
+
+# Requires an access token for
+# [MSC4388](https://github.com/matrix-org/matrix-spec-proposals/pull/4388)
+# discovery and session creation.
+#
+# When disabled, clients can discover and create these sessions without a
+# token. The
+# [MSC4108](https://github.com/matrix-org/matrix-spec-proposals/pull/4108)
+# endpoint stays open in either mode.
+#
+# reloadable: yes
+#
+#authenticated_only = true
+
+# Sets the per-client-IP refill rate for
+# [MSC4388](https://github.com/matrix-org/matrix-spec-proposals/pull/4388)
+# rendezvous requests.
+#
+# Zero is treated as one request per second.
+#
+# reloadable: yes
+#
+#rc_per_second = 10
+
+# Sets the token-bucket depth for the rendezvous request throttle under
+# [MSC4388](https://github.com/matrix-org/matrix-spec-proposals/pull/4388).
+#
+# This is the requests one client IP can make in a burst before
+# `rendezvous.rc_per_second` governs replenishment. Zero is treated as
+# one.
+#
+# reloadable: yes
+#
+#rc_burst_count = 20
 
 
 
@@ -4477,6 +4356,73 @@
 
 
 
+#[global.telemetry]
+
+
+
+#[global.telemetry.jaeger]
+
+# Enables OTLP span export for Jaeger-compatible tracing.
+#
+# A build with performance measurements installs an OpenTelemetry layer
+# when enabled. The default is false, and `telemetry.jaeger.filter`
+# selects exported spans.
+#
+#enable = false
+
+# Selects tracing spans exported to Jaeger-compatible collectors.
+#
+#filter = "info"
+
+
+
+#[global.telemetry.sentry]
+
+# Enables Sentry crash and panic reporting, performance monitoring, and
+# metrics, disabled at runtime by default and sent to the default endpoint
+# domain `o4509498990067712.ingest.us.sentry.io` unless overridden.
+#
+#enable = false
+
+# Selects a custom Sentry reporting URL.
+#
+#endpoint = ""
+
+# Includes `server_name` in Sentry crash reports and metrics.
+#
+#send_server_name = false
+
+# Sets the fraction of performance-monitoring traces sampled by Sentry.
+#
+# When Sentry is enabled, this must be between 0.0 and 1.0 inclusive.
+# High values may affect performance; 0.0 disables sampling.
+#
+#traces_sample_rate = 0.15
+
+# Attaches a stack trace to Sentry reports.
+#
+#attach_stacktrace = false
+
+# Sends panics to Sentry when telemetry is enabled.
+#
+# This defaults to true, but `telemetry.sentry.enable` must also be
+# enabled before any data is sent.
+#
+#send_panic = true
+
+# Sends errors to Sentry when telemetry is enabled.
+#
+# This defaults to true but requires Sentry enablement. It applies only
+# in release mode and is forced false in debug mode.
+#
+#send_error = true
+
+# Selects the tracing log level for Sentry breadcrumbs and transactions.
+#
+#filter = "info"
+
+
+
 #[global.tls]
 
 # Path to a valid TLS certificate file; this section requires a build with
@@ -4498,6 +4444,137 @@
 # weakens transport security and is disabled by default.
 #
 #dual_protocol = false
+
+
+
+#[global.tracing]
+
+# Enables tokio-console for developer use as described in the
+# [tokio-console debugging
+# guide](https://tuwunel.chat/development.html#debugging-with-tokio-console).
+#
+#tokio_console = false
+
+
+
+#[global.tracing.flame]
+
+# Collects folded stack profiles of tracing spans through tracing-flame
+# when the `perf_measurements` build feature is enabled, for visualization
+# with [inferno](https://github.com/jonhoo/inferno),
+# [Speedscope](https://www.speedscope.app), or other compatible tools.
+#
+#enable = false
+
+# Selects tracing spans included in the folded stack profile.
+#
+#filter = "info"
+
+# Selects the output path for the folded tracing-span profile.
+#
+#output_path = "./tracing.folded"
+
+
+
+#[global.turn]
+
+# Allows guest users to access TURN credentials.
+#
+# This is equivalent to Synapse's `turn_allow_guests` setting and permits
+# guests to call `/_matrix/client/v3/voip/turnServer`.
+#
+# reloadable: yes
+#
+#allow_guests = false
+
+# Supplies a static TURN username when the recommended shared secret
+# `turn.secret` is not used.
+#
+# reloadable: yes
+#
+#username = false
+
+# Supplies a static TURN password when the recommended shared secret
+# `turn.secret` is not used.
+#
+# reloadable: yes
+#
+#password = false
+
+# Lists TURN server URIs.
+#
+# Replace "example.turn.uri" with the TURN domain, such as coturn's
+# `realm` setting. For TURN over TLS, replace the `turn:` prefix with
+# `turns:`.
+#
+# reloadable: yes
+# example: ["turn:example.turn.uri?transport=udp",
+# "turn:example.turn.uri?transport=tcp"]
+#
+#uris = []
+
+# Supplies the TURN shared secret for HMAC-SHA1 credential generation,
+# which is more secure than the traditional static username-and-password
+# credentials that remain available when needed.
+#
+# reloadable: yes
+#
+#secret = false
+
+# Reads the TURN shared secret from a file.
+#
+# This takes precedence over `turn.secret` and falls back to it when the
+# file cannot be opened. Surrounding whitespace is trimmed so a trailing
+# newline is not part of the secret. A present but blank file resolves to
+# no secret without falling back.
+#
+# reloadable: yes
+# example: "/etc/tuwunel/.turn_secret"
+#
+#secret_file =
+
+# Sets the TURN lifetime in seconds.
+#
+# reloadable: yes
+#
+#ttl = 86400
+
+
+
+#[global.typing]
+
+# Allows sending typing updates over federation.
+#
+# reloadable: yes
+#
+#allow_outgoing = true
+
+# Allows receiving typing updates over federation.
+#
+# reloadable: yes
+#
+#allow_incoming = true
+
+# Limits how long a federated user can indicate typing.
+#
+# reloadable: yes
+#
+#federation_timeout_s = 30
+
+# Sets the minimum time a local client can indicate typing.
+#
+# A request to stop typing still takes effect. The minimum applies only
+# when no stop request arrives.
+#
+# reloadable: yes
+#
+#client_timeout_min_s = 15
+
+# Limits how long a local client can indicate typing.
+#
+# reloadable: yes
+#
+#client_timeout_max_s = 45
 
 
 

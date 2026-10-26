@@ -91,7 +91,7 @@ mod tests {
 			.with_option(format!("database_path={:?}", db_path.0))
 			.with_loopback_listener(port);
 
-		let args = ["listening=true".to_owned(), "log=\"error\"".to_owned()]
+		let args = ["listening=true".to_owned(), "logging.filter=\"error\"".to_owned()]
 			.into_iter()
 			.fold(args, Args::with_option);
 

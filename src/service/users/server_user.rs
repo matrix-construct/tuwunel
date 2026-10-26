@@ -20,7 +20,7 @@ pub const SERVER_USER_KEY: &[u8] = b"server_user_localpart";
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn validate_server_user(&self) -> Result {
 	let config = &self.services.server.config;
-	let configured = config.server_user_localpart.as_str();
+	let configured = config.admin.server_user_localpart.as_str();
 
 	let established = self.services.db["global"]
 		.get(SERVER_USER_KEY)
@@ -32,8 +32,8 @@ pub async fn validate_server_user(&self) -> Result {
 		| None => self.backfill_server_user(configured).await,
 		| Some(established) if established == configured => Ok(()),
 		| Some(established) => Err!(Database(
-			"server_user_localpart is {configured} but this database established {established}; \
-			 changing it after first boot is unsupported"
+			"admin.server_user_localpart is {configured} but this database established \
+			 {established}; changing it after first boot is unsupported"
 		)),
 	}
 }
@@ -58,8 +58,8 @@ async fn backfill_server_user(&self, configured: &str) -> Result {
 	if !established {
 		return BoolExt::ok_or_else(legacy, || {
 			err!(Database(
-				"server_user_localpart is {configured} but neither the admin room nor an empty \
-				 user table establishes that identity; changing it after first boot is \
+				"admin.server_user_localpart is {configured} but neither the admin room nor an \
+				 empty user table establishes that identity; changing it after first boot is \
 				 unsupported"
 			))
 		});

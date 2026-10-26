@@ -17,7 +17,8 @@ pub(super) async fn console_auto_start(&self) {
 		.services
 		.server
 		.config
-		.admin_console_automatic
+		.admin
+		.console_automatic
 	{
 		if !is_terminal_mode() {
 			warn!("Not starting the admin console: standard input is not a terminal");
@@ -42,7 +43,7 @@ pub(super) async fn console_auto_stop(&self) {
 #[implement(super::Service)]
 pub async fn startup_execute(&self) -> Result {
 	// List of commands to execute
-	let commands = &self.services.server.config.admin_execute;
+	let commands = &self.services.server.config.admin.execute;
 
 	// Determine if we're running in smoketest-mode which will change some behaviors
 	let smoketest = self.services.server.config.test.contains("smoke");
@@ -53,7 +54,8 @@ pub async fn startup_execute(&self) -> Result {
 			.services
 			.server
 			.config
-			.admin_execute_errors_ignore;
+			.admin
+			.execute_errors_ignore;
 
 	for (i, command) in commands.iter().enumerate() {
 		if let Err(e) = self.execute_command(i, command.clone()).await
@@ -87,7 +89,8 @@ pub(super) async fn signal_execute(&self) -> Result {
 		.services
 		.server
 		.config
-		.admin_signal_execute
+		.admin
+		.signal_execute
 		.clone();
 
 	// When true, errors are ignored and execution continues.
@@ -95,7 +98,8 @@ pub(super) async fn signal_execute(&self) -> Result {
 		.services
 		.server
 		.config
-		.admin_execute_errors_ignore;
+		.admin
+		.execute_errors_ignore;
 
 	for (i, command) in commands.iter().enumerate() {
 		if let Err(e) = self.execute_command(i, command.clone()).await

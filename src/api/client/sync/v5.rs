@@ -126,7 +126,7 @@ pub(crate) async fn sync_events_v5_route(
 		.and_then(|string| string.parse().ok())
 		.unwrap_or(0);
 
-	let timeout = poll_timeout(request, services.config.client_sync_timeout_max);
+	let timeout = poll_timeout(request, services.config.client.sync.timeout_max);
 
 	let conn_key = into_connection_key(sender_user, sender_device, request.conn_id.as_deref());
 	let conn_val = services

@@ -33,9 +33,9 @@ const COMMAND_DEADLINE: Duration = Duration::from_secs(10);
 #[test]
 fn only_typed_text_runs_as_a_command() -> Result {
 	let options = [
-		"create_admin_room=true",
+		"admin.room.create=true",
 		"registration.grant_admin_to_first_user=false",
-		"admin_escape_commands=true",
+		"admin.escape_commands=true",
 	];
 
 	boot("admin-command-msgtype", options, exercise)

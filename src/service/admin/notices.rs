@@ -2,20 +2,22 @@ use futures::FutureExt;
 use ruma::{RoomId, events::room::message::RoomMessageEventContent};
 use tuwunel_core::{Result, implement};
 
-/// Sends a notice gated on the admin_room_notices config; admin command
-/// responses use the unconditional notice().
+/// Sends a notice gated on `admin.room.notices`.
+///
+/// Admin command responses use the unconditional `notice()`.
 #[implement(super::Service)]
 pub async fn notify(&self, body: &str) {
-	if self.services.server.config.admin_room_notices {
+	if self.services.server.config.admin.room.notices {
 		self.notice(body).await;
 	}
 }
 
-/// Sends a message gated on the admin_room_notices config; admin command
-/// responses use the unconditional send_text().
+/// Sends a message gated on `admin.room.notices`.
+///
+/// Admin command responses use the unconditional `send_text()`.
 #[implement(super::Service)]
 pub async fn notify_loud(&self, body: &str) {
-	if self.services.server.config.admin_room_notices {
+	if self.services.server.config.admin.room.notices {
 		self.send_text(body).await;
 	}
 }

@@ -96,7 +96,7 @@ fn hierarchy_rejects_wrong_root_and_prefers_joined_local_state() -> Result {
 		"network.http.allow_invalid_tls_certificates=true",
 		"network.http.ip_range_denylist=[]",
 		"federation.loopback=true",
-		"log=\"error\"",
+		"logging.filter=\"error\"",
 	];
 
 	boot("hierarchy-cache-authority", options, async move |services, base| {

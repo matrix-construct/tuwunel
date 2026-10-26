@@ -67,7 +67,7 @@ where
 		"Push notice decision",
 	);
 
-	if notify || self.services.config.push_everything {
+	if notify || self.services.config.push.everything {
 		let tweaks: Vec<Tweak> = actions
 			.iter()
 			.filter_map(|action| match action {

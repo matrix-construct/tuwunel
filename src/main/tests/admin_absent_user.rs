@@ -35,7 +35,7 @@ const ABSENT: &str = "does not exist on this server";
 /// is still joined to a room admitting guests.
 #[test]
 fn user_commands_refuse_an_absent_user() -> Result {
-	let options = ["create_admin_room=true", "registration.grant_admin_to_first_user=false"];
+	let options = ["admin.room.create=true", "registration.grant_admin_to_first_user=false"];
 
 	boot("admin-absent-user", options, exercise)
 }

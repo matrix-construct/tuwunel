@@ -64,7 +64,7 @@ const OWN_ACTIVITY_DELAY: Duration = Duration::from_millis(500);
 /// answer.
 #[test]
 fn fallback_key_types_alone_do_not_end_a_long_poll() -> Result {
-	boot("sync-v5-fallback-key-wakeups", ["log_enable=false"], exercise)
+	boot("sync-v5-fallback-key-wakeups", ["logging.enable=false"], exercise)
 }
 
 async fn exercise(services: &Services, base: &str) -> Result {
