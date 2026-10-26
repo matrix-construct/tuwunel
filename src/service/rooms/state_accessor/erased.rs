@@ -32,6 +32,8 @@ pub async fn erased_for_server(
 	if !self
 		.services
 		.config
+		.rooms
+		.redaction
 		.enforce_erasure_over_federation
 	{
 		return pdu;

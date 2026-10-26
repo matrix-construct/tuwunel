@@ -75,7 +75,7 @@ mod tests {
 
 		let args = [
 			"listening=true".to_owned(),
-			"federation_loopback=true".to_owned(),
+			"federation.loopback=true".to_owned(),
 			"network.http.ip_range_denylist=[]".to_owned(),
 			"network.http.allow_invalid_tls_certificates=true".to_owned(),
 			format!("tls.certs={certificate:?}"),

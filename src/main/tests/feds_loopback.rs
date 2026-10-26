@@ -86,9 +86,10 @@ mod tests {
 	async fn exercise(services: &Services, base: &str) -> Result {
 		wait_until_ready(services, base).await?;
 		assert!(
-			!services.config.federation_loopback,
+			!services.config.federation.loopback,
 			"the feds test must leave global loopback disabled",
 		);
+
 		init(&services.admin);
 
 		let outcome = async {

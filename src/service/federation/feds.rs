@@ -195,7 +195,9 @@ where
 	R::PathBuilder: FedPath,
 {
 	let config = &self.services.server.config;
-	let opts = resolve_opts(opts, config.feds_max_width, config.feds_timeout);
+	let opts =
+		resolve_opts(opts, config.federation.fanout.max_width, config.federation.fanout.timeout);
+
 	let client = &self.services.client.federation;
 	let record = opts.record;
 

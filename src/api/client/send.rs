@@ -79,7 +79,7 @@ pub(crate) async fn send_message_event_route(
 		.and_then(|content| content.redacts);
 
 	if body.event_type == MessageLikeEventType::RoomRedaction
-		&& services.config.disable_local_redactions
+		&& services.config.rooms.redaction.disable_local
 		&& !services.admin.user_is_admin(sender_user).await
 	{
 		warn!(

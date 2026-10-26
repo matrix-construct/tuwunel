@@ -32,7 +32,7 @@ pub(crate) async fn leave_room_route(
 		.leave(sender, &body.room_id, body.reason, false, &state_lock)
 		.await?;
 
-	if services.config.delete_rooms_after_leave {
+	if services.config.rooms.delete_after_leave {
 		services
 			.delete
 			.delete_if_empty_local(&body.room_id, state_lock)

@@ -97,11 +97,13 @@ fn pusher_notify() -> Result {
 		.push("network.http.ip_range_denylist=[]".to_owned());
 
 	args.option
-		.push("startup_netburst=true".to_owned());
+		.push("sending.startup_netburst=true".to_owned());
+
 	args.option
 		.push("suppress_push_when_active=true".to_owned());
+
 	args.option
-		.push("sender_retry_backoff_limit=1".to_owned());
+		.push("sending.retry_backoff_limit=1".to_owned());
 
 	let runtime = Runtime::new(Some(&args))?;
 	let server = Server::new(Some(&args), Some(&runtime))?;

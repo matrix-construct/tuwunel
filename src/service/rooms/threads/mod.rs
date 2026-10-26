@@ -616,6 +616,8 @@ async fn latest_thread_reply(
 		.services
 		.server
 		.config
+		.rooms
+		.redaction
 		.thread_latest_reply_search_limit;
 
 	let replies = self

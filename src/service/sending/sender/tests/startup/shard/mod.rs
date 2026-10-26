@@ -8,7 +8,7 @@ use crate::sending::{Destination, SendingEvent};
 
 #[tokio::test]
 async fn startup_discovery_arms_each_destination_only_on_its_worker() -> Result {
-	let config = config(false, 0).merge(("sender_workers", 2));
+	let config = config(false, 0).merge(("sending.workers", 2));
 	let Some(fixture) = fixture(config).await? else {
 		return Ok(());
 	};

@@ -56,8 +56,8 @@ async fn content_rejection_arms_the_sender_curve() -> Result {
 	let delay = due.duration_since(started);
 
 	assert_eq!(armed, &dest);
-	assert!(delay >= Duration::from_secs(4 * sending.server.config.sender_timeout));
-	assert!(delay < Duration::from_secs(8 * sending.server.config.sender_timeout + 1));
+	assert!(delay >= Duration::from_secs(4 * sending.server.config.sending.timeout));
+	assert!(delay < Duration::from_secs(8 * sending.server.config.sending.timeout + 1));
 
 	statuses.insert(dest.clone(), TransactionStatus::Running { tries: 2 });
 	wakes.clear();
@@ -75,8 +75,8 @@ async fn content_rejection_arms_the_sender_curve() -> Result {
 #[tokio::test]
 async fn zero_timing_bounds_still_arm_a_retry() -> Result {
 	let config = Figment::new()
-		.merge(("sender_timeout", 0))
-		.merge(("sender_retry_backoff_limit", 0));
+		.merge(("sending.timeout", 0))
+		.merge(("sending.retry_backoff_limit", 0));
 
 	let Some(fixture) = service_fixture(config).await? else {
 		return Ok(());

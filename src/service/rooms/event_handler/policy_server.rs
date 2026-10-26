@@ -20,7 +20,11 @@ use ruma::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::value::to_raw_value;
-use tuwunel_core::{Err, Result, at, debug, implement, trace, utils::time::now_secs, warn};
+use tuwunel_core::{
+	Err, Result, at, debug, implement, trace,
+	utils::{BoolExt as _, time::now_secs},
+	warn,
+};
 use tuwunel_database::{Cbor, Deserialized};
 use tuwunel_matrix::{
 	Event, pdu::into_outgoing_federation, room_version::rules as room_version_rules,
@@ -220,7 +224,15 @@ pub async fn sign_outgoing_pdu<E>(&self, pdu_json: &mut CanonicalJsonObject, pdu
 where
 	E: Event,
 {
-	if !self.services.server.config.enable_policy_servers {
+	if self
+		.services
+		.server
+		.config
+		.rooms
+		.policy_server
+		.enable
+		.is_false()
+	{
 		return Ok(());
 	}
 
@@ -306,12 +318,15 @@ async fn fetch_policy_signature(
 		return FetchOutcome::FailOpen;
 	};
 
-	let timeout = Duration::from_secs(
-		self.services
-			.server
-			.config
-			.policy_server_request_timeout,
-	);
+	let timeout_secs = self
+		.services
+		.server
+		.config
+		.rooms
+		.policy_server
+		.request_timeout;
+
+	let timeout = Duration::from_secs(timeout_secs);
 
 	let response = match tokio::time::timeout(
 		timeout,
@@ -524,7 +539,15 @@ pub async fn check_inbound_policy_signature<E>(
 where
 	E: Event,
 {
-	if !self.services.server.config.enable_policy_servers {
+	if self
+		.services
+		.server
+		.config
+		.rooms
+		.policy_server
+		.enable
+		.is_false()
+	{
 		return PolicyCheck::NotApplicable;
 	}
 

@@ -345,6 +345,7 @@ async fn walk_task(
 		.services
 		.server
 		.config
+		.federation
 		.resolve_state_locally_max;
 
 	let mut walk = Walk::new(
@@ -420,6 +421,7 @@ pub async fn local_state_report(&self, event_id: &EventId) -> Result<LocalBuildR
 		.services
 		.server
 		.config
+		.federation
 		.resolve_state_locally_max;
 
 	let top_prevs = pdu.prev_events().map(ToOwned::to_owned).collect();

@@ -364,7 +364,7 @@ async fn replacement_error_omits_the_redacted_latest_and_decrements_count() -> R
 
 #[tokio::test]
 async fn replacement_search_counts_missing_relation_rows() -> Result {
-	let config = Figment::new().merge(("thread_latest_reply_search_limit", 3));
+	let config = Figment::new().merge(("rooms.redaction.thread_latest_reply_search_limit", 3));
 	let Some(fixture) = fixture(config).await? else {
 		return Ok(());
 	};
@@ -431,7 +431,7 @@ async fn replacement_search_counts_missing_relation_rows() -> Result {
 
 #[tokio::test]
 async fn replacement_search_keeps_a_reply_at_the_limit() -> Result {
-	let config = Figment::new().merge(("thread_latest_reply_search_limit", 3));
+	let config = Figment::new().merge(("rooms.redaction.thread_latest_reply_search_limit", 3));
 	let Some(fixture) = fixture(config).await? else {
 		return Ok(());
 	};

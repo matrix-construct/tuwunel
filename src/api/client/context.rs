@@ -275,8 +275,10 @@ async fn resolve_base_event(
 
 	let resolve_remote = services
 		.config
-		.fetch_unreceived_contexts_over_federation
-		&& services.config.allow_federation;
+		.federation
+		.history
+		.fetch_unreceived_contexts
+		&& services.config.federation.enable;
 
 	let (base_id, base_pdu) = match lookup().await {
 		| Ok(found) => found,

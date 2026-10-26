@@ -259,6 +259,8 @@ async fn counted_by_replies(
 		.services
 		.server
 		.config
+		.rooms
+		.redaction
 		.thread_latest_reply_search_limit;
 
 	// Err ends the walk: the limit was reached or a row failed to read.
@@ -494,7 +496,9 @@ mod tests {
 	/// and comes off.
 	#[tokio::test]
 	async fn redaction_keeps_a_count_the_reply_budget_cannot_settle() -> Result {
-		let config = Figment::new().merge(("thread_latest_reply_search_limit", 3));
+		let config =
+			Figment::new().merge(("rooms.redaction.thread_latest_reply_search_limit", 3));
+
 		let Some(fixture) = fixture(config).await? else {
 			return Ok(());
 		};

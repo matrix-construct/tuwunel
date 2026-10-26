@@ -95,7 +95,7 @@ fn hierarchy_rejects_wrong_root_and_prefers_joined_local_state() -> Result {
 	let options = [
 		"network.http.allow_invalid_tls_certificates=true",
 		"network.http.ip_range_denylist=[]",
-		"federation_loopback=true",
+		"federation.loopback=true",
 		"log=\"error\"",
 	];
 

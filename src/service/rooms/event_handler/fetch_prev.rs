@@ -81,7 +81,14 @@ where
 		.any(async |event_id| !self.services.timeline.pdu_exists(event_id).await)
 		.await;
 
-	let wait_ms = self.services.server.config.fetch_prev_wait_ms;
+	let wait_ms = self
+		.services
+		.server
+		.config
+		.federation
+		.history
+		.fetch_prev_wait_ms;
+
 	let has_gap = (has_gap && wait_ms > 0)
 		.then_async(|| self.await_prev_gap(initial_set.clone(), Duration::from_millis(wait_ms)))
 		.await
@@ -127,7 +134,15 @@ where
 		.try_collect()
 		.await?;
 
-	let limit = usize::from(self.services.server.config.max_fetch_prev_events);
+	let limit: usize = self
+		.services
+		.server
+		.config
+		.federation
+		.history
+		.max_fetch_prev_events
+		.into();
+
 	let mut amount = 0_usize;
 	let mut pdus = HashMap::new();
 	let mut graph: HashMap<OwnedEventId, _> = HashMap::with_capacity(todo_outlier_stack.len());

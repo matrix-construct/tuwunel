@@ -123,7 +123,8 @@ pub(super) fn num_senders(args: &Args<'_>) -> usize {
 	// The config default 0 clamps to one sender; multiple senders are experimental.
 	args.server
 		.config
-		.sender_workers
+		.sending
+		.workers
 		.clamp(MIN_SENDERS, max_senders)
 }
 

@@ -33,7 +33,7 @@ pub(super) async fn room_prune_extremities(
 
 	let config = &self.services.server.config;
 	let target = target
-		.unwrap_or(config.forward_extremities_max)
+		.unwrap_or(config.rooms.extremities.max)
 		.max(1);
 
 	let goal = band.len().saturating_sub(target);

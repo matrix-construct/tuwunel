@@ -119,6 +119,16 @@ fn conditional_default(name: &str) -> Option<String> {
 }
 
 fn fields_1(config: &Config) -> impl Iterator<Item = (&'static str, &dyn Debug)> {
+	let thread_limit = &config
+		.rooms
+		.redaction
+		.thread_latest_reply_search_limit;
+
+	let fetch_contexts = &config
+		.federation
+		.history
+		.fetch_unreceived_contexts;
+
 	let fields: [(&str, &dyn Debug); 117] = [
 		("server_name", &config.server_name),
 		("database_path", &config.database_path),
@@ -179,10 +189,10 @@ fn fields_1(config: &Config) -> impl Iterator<Item = (&'static str, &dyn Debug)>
 		("media_rc_create_per_second", &config.media.rc_create_per_second),
 		("media_rc_create_burst_count", &config.media.rc_create_burst_count),
 		("media_upload_min_free_space", &config.media.upload_min_free_space),
-		("max_fetch_prev_events", &config.max_fetch_prev_events),
-		("thread_latest_reply_search_limit", &config.thread_latest_reply_search_limit),
-		("prev_events_concurrency", &config.prev_events_concurrency),
-		("fetch_prev_wait_ms", &config.fetch_prev_wait_ms),
+		("max_fetch_prev_events", &config.federation.history.max_fetch_prev_events),
+		("thread_latest_reply_search_limit", thread_limit),
+		("prev_events_concurrency", &config.federation.history.prev_events_concurrency),
+		("fetch_prev_wait_ms", &config.federation.history.fetch_prev_wait_ms),
 		("request_conn_timeout", &config.network.http.conn_timeout),
 		("request_timeout", &config.network.http.timeout),
 		("request_total_timeout", &config.network.http.total_timeout),
@@ -193,15 +203,15 @@ fn fields_1(config: &Config) -> impl Iterator<Item = (&'static str, &dyn Debug)>
 		("request_zstd", &config.network.http.zstd),
 		("well_known_conn_timeout", &config.network.discovery.conn_timeout),
 		("well_known_timeout", &config.network.discovery.timeout),
-		("federation_timeout", &config.federation_timeout),
-		("federation_keys_timeout", &config.federation_keys_timeout),
-		("feds_timeout", &config.feds_timeout),
-		("federation_idle_timeout", &config.federation_idle_timeout),
-		("federation_idle_per_host", &config.federation_idle_per_host),
-		("sender_timeout", &config.sender_timeout),
-		("sender_idle_timeout", &config.sender_idle_timeout),
-		("sender_retry_backoff_limit", &config.sender_retry_backoff_limit),
-		("sender_retry_grace", &config.sender_retry_grace),
+		("federation_timeout", &config.federation.transport.timeout),
+		("federation_keys_timeout", &config.federation.transport.keys_timeout),
+		("feds_timeout", &config.federation.fanout.timeout),
+		("federation_idle_timeout", &config.federation.transport.idle_timeout),
+		("federation_idle_per_host", &config.federation.transport.idle_per_host),
+		("sender_timeout", &config.sending.timeout),
+		("sender_idle_timeout", &config.sending.idle_timeout),
+		("sender_retry_backoff_limit", &config.sending.retry_backoff_limit),
+		("sender_retry_grace", &config.sending.retry_grace),
 		("appservice_timeout", &config.appservice_timeout),
 		("appservice_idle_timeout", &config.appservice_idle_timeout),
 		("pusher_idle_timeout", &config.pusher_idle_timeout),
@@ -211,7 +221,7 @@ fn fields_1(config: &Config) -> impl Iterator<Item = (&'static str, &dyn Debug)>
 		("client_shutdown_timeout", &config.http.shutdown_timeout),
 		("ip_source", &config.http.ip_source),
 		("ip_source_trusted_subnets", &config.http.ip_source_trusted_subnets),
-		("sender_shutdown_timeout", &config.sender_shutdown_timeout),
+		("sender_shutdown_timeout", &config.sending.shutdown_timeout),
 		("allow_registration", &config.allow_registration),
 		(
 			"yes_i_am_very_very_sure_i_want_an_open_registration_server_prone_to_abuse",
@@ -230,24 +240,21 @@ fn fields_1(config: &Config) -> impl Iterator<Item = (&'static str, &dyn Debug)>
 			"encryption_enabled_by_default_for_room_type",
 			&config.encryption_enabled_by_default_for_room_type,
 		),
-		("allow_federation", &config.allow_federation),
-		(
-			"fetch_unreceived_contexts_over_federation",
-			&config.fetch_unreceived_contexts_over_federation,
-		),
-		("fetch_fanout_max_width", &config.fetch_fanout_max_width),
-		("fetch_fanout_rounds", &config.fetch_fanout_rounds),
-		("feds_max_width", &config.feds_max_width),
-		("feds_destination_limit", &config.feds_destination_limit),
-		("resolve_state_locally", &config.resolve_state_locally),
-		("resolve_state_locally_max", &config.resolve_state_locally_max),
-		("resolve_state_locally_shadow", &config.resolve_state_locally_shadow),
-		("forward_extremities_max", &config.forward_extremities_max),
-		("forward_extremities_emergency_max", &config.forward_extremities_emergency_max),
-		("forward_extremities_prune_batch", &config.forward_extremities_prune_batch),
-		("federate_created_rooms", &config.federate_created_rooms),
-		("federation_loopback", &config.federation_loopback),
-		("forget_forced_upon_leave", &config.forget_forced_upon_leave),
+		("allow_federation", &config.federation.enable),
+		("fetch_unreceived_contexts_over_federation", fetch_contexts),
+		("fetch_fanout_max_width", &config.federation.history.fetch_fanout_max_width),
+		("fetch_fanout_rounds", &config.federation.history.fetch_fanout_rounds),
+		("feds_max_width", &config.federation.fanout.max_width),
+		("feds_destination_limit", &config.federation.fanout.destination_limit),
+		("resolve_state_locally", &config.federation.resolve_state_locally),
+		("resolve_state_locally_max", &config.federation.resolve_state_locally_max),
+		("resolve_state_locally_shadow", &config.federation.resolve_state_locally_shadow),
+		("forward_extremities_max", &config.rooms.extremities.max),
+		("forward_extremities_emergency_max", &config.rooms.extremities.emergency_max),
+		("forward_extremities_prune_batch", &config.rooms.extremities.prune_batch),
+		("federate_created_rooms", &config.rooms.federate_by_default),
+		("federation_loopback", &config.federation.loopback),
+		("forget_forced_upon_leave", &config.rooms.forget_forced_upon_leave),
 		("require_auth_for_profile_requests", &config.require_auth_for_profile_requests),
 		("max_remote_profile_fields", &config.max_remote_profile_fields),
 		("max_profile_fields_per_request", &config.max_profile_fields_per_request),
@@ -258,7 +265,17 @@ fn fields_1(config: &Config) -> impl Iterator<Item = (&'static str, &dyn Debug)>
 }
 
 fn fields_2(config: &Config) -> impl Iterator<Item = (&'static str, &dyn Debug)> {
-	let fields: [(&str, &dyn Debug); 96] = [
+	let trusted_first = &config
+		.federation
+		.keys
+		.query_trusted_servers_first_on_join;
+
+	let batch_concurrency = &config
+		.federation
+		.keys
+		.trusted_server_batch_concurrency;
+
+	let fields: [(&str, &dyn Debug); 88] = [
 		(
 			"limit_profile_requests_to_users_who_share_rooms",
 			&config.limit_profile_requests_to_users_who_share_rooms,
@@ -289,18 +306,18 @@ fn fields_2(config: &Config) -> impl Iterator<Item = (&'static str, &dyn Debug)>
 			"allow_inbound_profile_lookup_federation_requests",
 			&config.allow_inbound_profile_lookup_federation_requests,
 		),
-		("allow_room_creation", &config.allow_room_creation),
-		("allow_room_alias_creation", &config.allow_room_alias_creation),
-		("allow_unstable_room_versions", &config.allow_unstable_room_versions),
-		("allow_experimental_room_versions", &config.allow_experimental_room_versions),
-		("enable_policy_servers", &config.enable_policy_servers),
-		("policy_server_request_timeout", &config.policy_server_request_timeout),
-		("bundle_edit_relations", &config.bundle_edit_relations),
-		("bundle_reference_relations", &config.bundle_reference_relations),
-		("default_room_version", &config.default_room_version),
+		("allow_room_creation", &config.rooms.allow_creation),
+		("allow_room_alias_creation", &config.rooms.allow_alias_creation),
+		("allow_unstable_room_versions", &config.rooms.allow_unstable_versions),
+		("allow_experimental_room_versions", &config.rooms.allow_experimental_versions),
+		("enable_policy_servers", &config.rooms.policy_server.enable),
+		("policy_server_request_timeout", &config.rooms.policy_server.request_timeout),
+		("bundle_edit_relations", &config.rooms.relations.bundle_edits),
+		("bundle_reference_relations", &config.rooms.relations.bundle_references),
+		("default_room_version", &config.rooms.default_version),
 		(
 			"default_power_level_content_override",
-			&config.default_power_level_content_override,
+			&config.rooms.default_power_level_content_override,
 		),
 		("well_known", &config.well_known),
 		("allow_jaeger", &config.allow_jaeger),
@@ -309,15 +326,18 @@ fn fields_2(config: &Config) -> impl Iterator<Item = (&'static str, &dyn Debug)>
 		("tracing_flame_filter", &config.tracing_flame_filter),
 		("tracing_flame_output_path", &config.tracing_flame_output_path),
 		("proxy", &config.proxy),
-		("trusted_servers", &config.trusted_servers),
-		("query_trusted_key_servers_first", &config.query_trusted_key_servers_first),
+		("trusted_servers", &config.federation.keys.trusted_servers),
 		(
-			"query_trusted_key_servers_first_on_join",
-			&config.query_trusted_key_servers_first_on_join,
+			"query_trusted_key_servers_first",
+			&config.federation.keys.query_trusted_servers_first,
 		),
-		("only_query_trusted_key_servers", &config.only_query_trusted_key_servers),
-		("trusted_server_batch_size", &config.trusted_server_batch_size),
-		("trusted_server_batch_concurrency", &config.trusted_server_batch_concurrency),
+		("query_trusted_key_servers_first_on_join", trusted_first),
+		(
+			"only_query_trusted_key_servers",
+			&config.federation.keys.only_query_trusted_servers,
+		),
+		("trusted_server_batch_size", &config.federation.keys.trusted_server_batch_size),
+		("trusted_server_batch_concurrency", batch_concurrency),
 		("log", &config.log),
 		("log_colors", &config.log_colors),
 		("log_compact", &config.log_compact),
@@ -372,7 +392,7 @@ fn fields_2(config: &Config) -> impl Iterator<Item = (&'static str, &dyn Debug)>
 		("auto_join_rooms", &config.auto_join_rooms),
 		(
 			"auto_deactivate_banned_room_attempts",
-			&config.auto_deactivate_banned_room_attempts,
+			&config.rooms.auto_deactivate_banned_room_attempts,
 		),
 		("rocksdb_log_level", &config.rocksdb.log_level),
 		("rocksdb_log_stderr", &config.rocksdb.log_stderr),
@@ -383,6 +403,21 @@ fn fields_2(config: &Config) -> impl Iterator<Item = (&'static str, &dyn Debug)>
 			&config.rocksdb.optimize_for_spinning_disks,
 		),
 		("rocksdb_direct_io", &config.rocksdb.direct_io),
+	];
+
+	fields.into_iter()
+}
+
+fn fields_3(config: &Config) -> impl Iterator<Item = (&'static str, &dyn Debug)> {
+	let allowed_servers = &config
+		.federation
+		.allowed_remote_server_names_experimental;
+
+	let enforce_stripped = &config
+		.federation
+		.enforce_stripped_state_pdu_validation;
+
+	let fields: [(&str, &dyn Debug); 101] = [
 		("rocksdb_parallelism_threads", &config.rocksdb.parallelism_threads),
 		("rocksdb_max_log_files", &config.rocksdb.max_log_files),
 		("rocksdb_compression_algo", &config.rocksdb.compression_algo),
@@ -394,13 +429,6 @@ fn fields_2(config: &Config) -> impl Iterator<Item = (&'static str, &dyn Debug)>
 		("rocksdb_bottommost_compression", &config.rocksdb.bottommost_compression),
 		("rocksdb_recovery_mode", &config.rocksdb.recovery_mode),
 		("rocksdb_paranoid_file_checks", &config.rocksdb.paranoid_file_checks),
-	];
-
-	fields.into_iter()
-}
-
-fn fields_3(config: &Config) -> impl Iterator<Item = (&'static str, &dyn Debug)> {
-	let fields: [(&str, &dyn Debug); 111] = [
 		("rocksdb_checksums", &config.rocksdb.checksums),
 		("rocksdb_atomic_flush", &config.rocksdb.atomic_flush),
 		("rocksdb_repair", &config.rocksdb.repair),
@@ -461,11 +489,11 @@ fn fields_3(config: &Config) -> impl Iterator<Item = (&'static str, &dyn Debug)>
 		("store_media_on_providers", &config.media.store_on_providers),
 		("media_allow_redirect", &config.media.allow_redirect),
 		("prevent_media_downloads_from", &config.media.prevent_downloads_from),
-		("forbidden_remote_server_names", &config.forbidden_remote_server_names),
 		(
-			"allowed_remote_server_names_experimental",
-			&config.allowed_remote_server_names_experimental,
+			"forbidden_remote_server_names",
+			&config.federation.forbidden_remote_server_names,
 		),
+		("allowed_remote_server_names_experimental", allowed_servers),
 		(
 			"forbidden_remote_room_directory_server_names",
 			&config.forbidden_remote_room_directory_server_names,
@@ -495,24 +523,24 @@ fn fields_3(config: &Config) -> impl Iterator<Item = (&'static str, &dyn Debug)>
 		("url_preview_user_agent", &config.media.url_preview.user_agent),
 		("url_preview_media_user_agent", &config.media.url_preview.media_user_agent),
 		("url_preview_accept_language", &config.media.url_preview.accept_language),
-		("forbidden_alias_names", &config.forbidden_alias_names),
+		("forbidden_alias_names", &config.rooms.forbidden_alias_names),
 		("forbidden_usernames", &config.forbidden_usernames),
-		("deprioritize_joins_through_servers", &config.deprioritize_joins_through_servers),
+		("deprioritize_joins_through_servers", &config.rooms.joins.deprioritize_servers),
 		(
 			"max_make_join_attempts_per_join_attempt",
-			&config.max_make_join_attempts_per_join_attempt,
+			&config.rooms.joins.max_make_join_per_attempt,
 		),
-		("max_join_attempts_per_join_request", &config.max_join_attempts_per_join_request),
-		("startup_netburst", &config.startup_netburst),
-		("startup_netburst_keep", &config.startup_netburst_keep),
-		("block_non_admin_invites", &config.block_non_admin_invites),
-		("auto_accept_invites", &config.auto_accept_invites),
-		("auto_accept_invites_direct_only", &config.auto_accept_invites_direct_only),
-		("auto_accept_invites_local_only", &config.auto_accept_invites_local_only),
 		(
-			"enforce_stripped_state_pdu_validation",
-			&config.enforce_stripped_state_pdu_validation,
+			"max_join_attempts_per_join_request",
+			&config.rooms.joins.max_attempts_per_request,
 		),
+		("startup_netburst", &config.sending.startup_netburst),
+		("startup_netburst_keep", &config.sending.startup_netburst_keep),
+		("block_non_admin_invites", &config.rooms.invites.block_non_admin),
+		("auto_accept_invites", &config.rooms.invites.auto_accept),
+		("auto_accept_invites_direct_only", &config.rooms.invites.auto_accept_direct_only),
+		("auto_accept_invites_local_only", &config.rooms.invites.auto_accept_local_only),
+		("enforce_stripped_state_pdu_validation", enforce_stripped),
 		("admin_escape_commands", &config.admin_escape_commands),
 		("admin_console_automatic", &config.admin_console_automatic),
 		("admin_execute", &config.admin_execute),
@@ -521,6 +549,23 @@ fn fields_3(config: &Config) -> impl Iterator<Item = (&'static str, &dyn Debug)>
 		("admin_log_capture", &config.admin_log_capture),
 		("admin_room_tag", &config.admin_room_tag),
 		("server_user_localpart", &config.server_user_localpart),
+	];
+
+	fields.into_iter()
+}
+
+fn fields_4(config: &Config) -> impl Iterator<Item = (&'static str, &dyn Debug)> {
+	let allow_unredacted = &config
+		.rooms
+		.redaction
+		.allow_room_admins_to_request_unredacted_events;
+
+	let enforce_erasure = &config
+		.rooms
+		.redaction
+		.enforce_erasure_over_federation;
+
+	let fields: [(&str, &dyn Debug); 58] = [
 		("report_room", &config.report_room),
 		("grant_admin_to_first_user", &config.grant_admin_to_first_user),
 		("create_admin_room", &config.create_admin_room),
@@ -539,21 +584,11 @@ fn fields_3(config: &Config) -> impl Iterator<Item = (&'static str, &dyn Debug)>
 		("admin_room_notices", &config.admin_room_notices),
 		("admin_output_max_events", &config.admin_output_max_events),
 		("admin_output_threads", &config.admin_output_threads),
-	];
-
-	fields.into_iter()
-}
-
-fn fields_4(config: &Config) -> impl Iterator<Item = (&'static str, &dyn Debug)> {
-	let fields: [(&str, &dyn Debug); 40] = [
-		("save_unredacted_events", &config.save_unredacted_events),
-		("redaction_retention_seconds", &config.redaction_retention_seconds),
-		(
-			"allow_room_admins_to_request_unredacted_events",
-			&config.allow_room_admins_to_request_unredacted_events,
-		),
-		("disable_local_redactions", &config.disable_local_redactions),
-		("enforce_erasure_over_federation", &config.enforce_erasure_over_federation),
+		("save_unredacted_events", &config.rooms.redaction.save_unredacted_events),
+		("redaction_retention_seconds", &config.rooms.redaction.retention_seconds),
+		("allow_room_admins_to_request_unredacted_events", allow_unredacted),
+		("disable_local_redactions", &config.rooms.redaction.disable_local),
+		("enforce_erasure_over_federation", enforce_erasure),
 		("db_pool_affinity", &config.database.pool.affinity),
 		("db_pool_workers", &config.database.pool.workers),
 		("db_pool_workers_limit", &config.database.pool.workers_limit),
@@ -562,7 +597,7 @@ fn fields_4(config: &Config) -> impl Iterator<Item = (&'static str, &dyn Debug)>
 		("stream_width_default", &config.runtime.stream.width_default),
 		("stream_width_scale", &config.runtime.stream.width_scale),
 		("stream_amplification", &config.runtime.stream.amplification),
-		("sender_workers", &config.sender_workers),
+		("sender_workers", &config.sending.workers),
 		("listening", &config.listening),
 		("config_reload_signal", &config.config_reload_signal),
 		(
@@ -571,7 +606,7 @@ fn fields_4(config: &Config) -> impl Iterator<Item = (&'static str, &dyn Debug)>
 		),
 		("access_control_allow_origin", &config.http.access_control_allow_origin),
 		("hydra_backports", &config.hydra_backports),
-		("delete_rooms_after_leave", &config.delete_rooms_after_leave),
+		("delete_rooms_after_leave", &config.rooms.delete_after_leave),
 		("one_time_key_limit", &config.one_time_key_limit),
 		("single_sso", &config.single_sso),
 		("sso_custom_providers_page", &config.sso_custom_providers_page),

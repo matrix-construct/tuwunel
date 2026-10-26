@@ -246,7 +246,9 @@ pub(super) async fn prepare(
 		.services
 		.server
 		.config
-		.feds_destination_limit;
+		.federation
+		.fanout
+		.destination_limit;
 
 	if destinations > destination_limit && !sweep.yes_i_want_to_do_this {
 		return Err!(

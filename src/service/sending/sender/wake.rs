@@ -161,8 +161,8 @@ pub(super) async fn arm_federation_wake(
 		| ShouldAttempt::No { earliest_retry } => arm_wake(wakes, dest, earliest_retry),
 		| _ => {
 			let delay = exponential_backoff_remaining_secs(
-				self.server.config.sender_timeout,
-				self.server.config.sender_retry_backoff_limit,
+				self.server.config.sending.timeout,
+				self.server.config.sending.retry_backoff_limit,
 				Duration::ZERO,
 				tries,
 			)
@@ -206,8 +206,8 @@ pub(super) fn push_backoff_remaining(
 	};
 
 	exponential_backoff_remaining_secs(
-		self.server.config.sender_timeout,
-		self.server.config.sender_retry_backoff_limit,
+		self.server.config.sending.timeout,
+		self.server.config.sending.retry_backoff_limit,
 		last.elapsed(),
 		*tries,
 	)

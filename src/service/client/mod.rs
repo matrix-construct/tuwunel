@@ -158,9 +158,11 @@ fn make_clients(services: &Services) -> Result<Clients> {
 	}
 
 	let federation = make_federation(services, |cb| {
-		cb.read_timeout(Duration::from_secs(services.config.federation_timeout))
-			.pool_max_idle_per_host(services.config.federation_idle_per_host.into())
-			.pool_idle_timeout(Duration::from_secs(services.config.federation_idle_timeout))
+		let transport = &services.config.federation.transport;
+
+		cb.read_timeout(Duration::from_secs(transport.timeout))
+			.pool_max_idle_per_host(transport.idle_per_host.into())
+			.pool_idle_timeout(Duration::from_secs(transport.idle_timeout))
 			.redirect(Policy::none())
 	})?;
 
@@ -171,10 +173,10 @@ fn make_clients(services: &Services) -> Result<Clients> {
 	})?;
 
 	let sender = make_federation(services, |cb| {
-		cb.read_timeout(Duration::from_secs(services.config.sender_timeout))
-			.timeout(Duration::from_secs(services.config.sender_timeout))
+		cb.read_timeout(Duration::from_secs(services.config.sending.timeout))
+			.timeout(Duration::from_secs(services.config.sending.timeout))
 			.pool_max_idle_per_host(1)
-			.pool_idle_timeout(Duration::from_secs(services.config.sender_idle_timeout))
+			.pool_idle_timeout(Duration::from_secs(services.config.sending.idle_timeout))
 			.redirect(Policy::none())
 	})?;
 

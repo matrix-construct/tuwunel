@@ -31,7 +31,7 @@ fn threads_retain_roots_when_every_reply_is_ignored() -> Result {
 	let args = Args::default_test(&["fresh", "cleanup"])
 		.with_loopback_listener(port)
 		.with_option("listening=true")
-		.with_option("bundle_edit_relations=true");
+		.with_option("rooms.relations.bundle_edits=true");
 
 	let runtime = Runtime::new(Some(&args))?;
 	let server = Server::new(Some(&args), Some(&runtime))?;

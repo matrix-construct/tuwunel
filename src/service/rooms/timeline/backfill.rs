@@ -210,6 +210,8 @@ async fn backfill_candidates(&self, room_id: &RoomId) -> Candidates {
 		.services
 		.server
 		.config
+		.federation
+		.keys
 		.trusted_servers
 		.iter()
 		.map(ToOwned::to_owned)

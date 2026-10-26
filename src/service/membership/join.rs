@@ -540,17 +540,20 @@ fn omitted_state_servers(
 		.flatten()
 		.filter_map(|server| OwnedServerName::parse(server.as_str()).ok());
 
+	let limit = self
+		.services
+		.config
+		.rooms
+		.joins
+		.max_make_join_per_attempt;
+
 	let mut seen = BTreeSet::new();
 	once(remote_server.clone())
 		.chain(extracted)
 		.chain(servers.iter().cloned())
 		.filter(|server| !self.services.globals.server_is_ours(server))
 		.filter(move |server| seen.insert(server.clone()))
-		.take(
-			self.services
-				.config
-				.max_make_join_attempts_per_join_attempt,
-		)
+		.take(limit)
 		.collect()
 }
 
@@ -1072,7 +1075,9 @@ async fn make_join_request(
 			let max_attempts = self
 				.services
 				.config
-				.max_make_join_attempts_per_join_attempt;
+				.rooms
+				.joins
+				.max_make_join_per_attempt;
 
 			if make_join_counter >= max_attempts {
 				warn!(?remote_server, "last make_join failure reason: {e}");
@@ -1174,7 +1179,9 @@ pub(super) async fn get_servers_for_room(
 			if services
 				.server
 				.config
-				.deprioritize_joins_through_servers
+				.rooms
+				.joins
+				.deprioritize_servers
 				.is_match(servers[i].host())
 			{
 				let server = servers.remove(i);

@@ -46,7 +46,13 @@ pub(crate) async fn join_room_by_id_route(
 		.await
 	{
 		errors = errors.saturating_add(1);
-		if errors >= services.config.max_join_attempts_per_join_request {
+		if services
+			.config
+			.rooms
+			.joins
+			.max_attempts_per_request
+			.le(&errors)
+		{
 			warn!(
 				"Several servers failed. Giving up for this request. Try again for different \
 				 server selection."
@@ -101,7 +107,13 @@ pub(crate) async fn join_room_by_id_or_alias_route(
 		.await
 	{
 		errors = errors.saturating_add(1);
-		if errors >= services.config.max_join_attempts_per_join_request {
+		if services
+			.config
+			.rooms
+			.joins
+			.max_attempts_per_request
+			.le(&errors)
+		{
 			warn!(
 				"Several servers failed. Giving up for this request. Try again for different \
 				 server selection."

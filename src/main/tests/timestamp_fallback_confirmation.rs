@@ -123,8 +123,8 @@ fn timestamp_fallback_confirms_the_requested_event() -> Result {
 		"listening=true".to_owned(),
 		"network.http.allow_invalid_tls_certificates=true".to_owned(),
 		"network.http.ip_range_denylist=[]".to_owned(),
-		"federation_loopback=true".to_owned(),
-		format!("trusted_servers=[\"{peer_address}\"]"),
+		"federation.loopback=true".to_owned(),
+		format!("federation.keys.trusted_servers=[\"{peer_address}\"]"),
 		"log=\"error\"".to_owned(),
 	]);
 

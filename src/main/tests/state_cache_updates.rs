@@ -20,7 +20,7 @@ fn membership_updates_preserve_counts_servers_and_forgetting() -> Result {
 	let option = args
 		.option
 		.into_iter()
-		.chain(["forget_forced_upon_leave=false".into()])
+		.chain(["rooms.forget_forced_upon_leave=false".into()])
 		.collect();
 
 	let args = Args { maintenance: true, option, ..args };

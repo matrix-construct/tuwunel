@@ -255,7 +255,7 @@ fn schedule_events<'a>(
 	),
 )]
 async fn finish_responses<'a>(&'a self, futures: &mut SendingFutures<'a>) {
-	let timeout = Duration::from_secs(self.server.config.sender_shutdown_timeout);
+	let timeout = Duration::from_secs(self.server.config.sending.shutdown_timeout);
 	let now = TokioInstant::now();
 	let deadline = now.checked_add(timeout).unwrap_or(now);
 

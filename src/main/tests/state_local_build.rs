@@ -110,15 +110,18 @@ fn run_case(case: Case) -> Result {
 		.port();
 
 	let db_path = Args::test_database_path(format_args!("state-local-build-{name}"));
+	let resolve_locally =
+		format!("federation.resolve_state_locally={}", !matches!(case, Case::Disabled));
+
 	let args = Args::default_test(&["fresh", "cleanup"])
 		.with_database_path(&db_path)
 		.with_loopback_listener(port)
 		.with_option("listening=true")
 		.with_option("log_enable=false")
-		.with_option(format!("resolve_state_locally={}", !matches!(case, Case::Disabled)));
+		.with_option(resolve_locally);
 
 	let args = match case {
-		| Case::MaxDisabled => args.with_option("resolve_state_locally_max=0"),
+		| Case::MaxDisabled => args.with_option("federation.resolve_state_locally_max=0"),
 		| Case::LegacyDisabled => args.with_option("resolve_state_locally_shadow=true"),
 		| _ => args,
 	};

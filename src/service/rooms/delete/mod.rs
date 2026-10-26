@@ -36,8 +36,8 @@ impl crate::Service for Service {
 impl Service {
 	pub async fn delete_if_empty_local(&self, room_id: &RoomId, state_lock: RoomMutexGuard) {
 		debug_assert!(
-			self.services.config.delete_rooms_after_leave,
-			"Caller must checking if delete_rooms_after_leave configured."
+			self.services.config.rooms.delete_after_leave,
+			"Caller must check whether rooms.delete_after_leave is configured."
 		);
 
 		let has_local_users = self

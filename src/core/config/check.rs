@@ -97,10 +97,10 @@ pub fn check(config: &Config) -> Result {
 }
 
 fn warn_legacy_state_local(config: &Config) {
-	if config.resolve_state_locally_shadow {
+	if config.federation.resolve_state_locally_shadow {
 		warn!(
-			"resolve_state_locally_shadow is deprecated; use resolve_state_locally=false to \
-			 disable local state derivation."
+			"resolve_state_locally_shadow is deprecated; use \
+			 federation.resolve_state_locally=false to disable local state derivation."
 		);
 	}
 }
@@ -146,8 +146,16 @@ fn check_profile_requests(config: &Config) -> Result {
 }
 
 fn check_relation_limits(config: &Config) -> Result {
-	if config.thread_latest_reply_search_limit == 0 {
-		return Err!(Config("thread_latest_reply_search_limit", "Must be greater than zero"));
+	if config
+		.rooms
+		.redaction
+		.thread_latest_reply_search_limit
+		.eq(&0)
+	{
+		return Err!(Config(
+			"rooms.redaction.thread_latest_reply_search_limit",
+			"Must be greater than zero"
+		));
 	}
 
 	Ok(())
@@ -204,9 +212,9 @@ fn check_network(config: &Config) -> Result {
 		warn!("Configuration item `listening` is set to `false`. Cannot hear anyone.");
 	}
 
-	if config.prev_events_concurrency == 0 {
+	if config.federation.history.prev_events_concurrency == 0 {
 		return Err!(Config(
-			"prev_events_concurrency",
+			"federation.history.prev_events_concurrency",
 			"Previous-event recovery concurrency must be at least one; zero stalls every \
 			 incoming event with a backward extremity."
 		));
@@ -657,21 +665,22 @@ fn check_url_previews(config: &Config) -> Result {
 }
 
 fn check_room_version(config: &Config) -> Result {
-	if !config.supported_room_version(&config.default_room_version) {
+	if !config.supported_room_version(&config.rooms.default_version) {
 		return Err!(Config(
-			"default_room_version",
+			"rooms.default_version",
 			"Room version {:?} is not available",
-			config.default_room_version
+			config.rooms.default_version
 		));
 	}
 
 	if config
+		.rooms
 		.default_power_level_content_override
 		.as_ref()
 		.is_some_and(|value| !value.is_object())
 	{
 		return Err!(Config(
-			"default_power_level_content_override",
+			"rooms.default_power_level_content_override",
 			"must be a table (a JSON object)"
 		));
 	}
@@ -975,21 +984,25 @@ fn warn_deprecated(config: &Config) {
 /// anchored depends on what the operator meant it to match, and a substring
 /// match is sometimes the intent.
 fn warn_literal_patterns(config: &Config) {
+	let allowed = &config
+		.federation
+		.allowed_remote_server_names_experimental;
+
 	let options = [
 		("network.dns.passthru_domains", &config.network.dns.passthru_domains),
-		(
-			"allowed_remote_server_names_experimental",
-			&config.allowed_remote_server_names_experimental,
-		),
+		("federation.allowed_remote_server_names_experimental", allowed),
 		("media.prevent_downloads_from", &config.media.prevent_downloads_from),
-		("forbidden_remote_server_names", &config.forbidden_remote_server_names),
+		(
+			"federation.forbidden_remote_server_names",
+			&config.federation.forbidden_remote_server_names,
+		),
 		(
 			"forbidden_remote_room_directory_server_names",
 			&config.forbidden_remote_room_directory_server_names,
 		),
-		("forbidden_alias_names", &config.forbidden_alias_names),
+		("rooms.forbidden_alias_names", &config.rooms.forbidden_alias_names),
 		("forbidden_usernames", &config.forbidden_usernames),
-		("deprioritize_joins_through_servers", &config.deprioritize_joins_through_servers),
+		("rooms.joins.deprioritize_servers", &config.rooms.joins.deprioritize_servers),
 	];
 
 	options

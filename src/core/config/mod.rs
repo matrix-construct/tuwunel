@@ -7,6 +7,7 @@
 pub mod cache;
 pub mod check;
 pub mod database;
+pub mod federation;
 mod format;
 pub mod http;
 mod identity_provider_serde;
@@ -21,7 +22,9 @@ pub mod proxy;
 mod regenerate;
 mod rocksdb;
 pub mod room_version;
+pub mod rooms;
 pub mod runtime;
+pub mod sending;
 pub mod sources;
 #[cfg(test)]
 mod tests;
@@ -43,7 +46,7 @@ use itertools::Itertools;
 use regex::RegexSet;
 pub use rocksdb::Rocksdb;
 use ruma::{
-	OwnedMxcUri, OwnedRoomOrAliasId, OwnedServerName, OwnedUserId, RoomVersionId,
+	OwnedMxcUri, OwnedRoomOrAliasId, OwnedServerName, OwnedUserId,
 	api::client::discovery::discover_support::ContactRole,
 };
 use serde::{Deserialize, de::IgnoredAny};
@@ -55,6 +58,7 @@ pub use self::{
 	cache::Cache,
 	check::check,
 	database::Database,
+	federation::Federation,
 	http::Http,
 	ip_source::IpSource,
 	manager::Manager,
@@ -64,7 +68,9 @@ pub use self::{
 		Overwrite, RegenerateOptions, RegenerationSummary, example_config, regenerate_config,
 		write_example_config,
 	},
+	rooms::Rooms,
 	runtime::Runtime,
+	sending::Sending,
 	sources::Sources,
 };
 use self::{
@@ -75,9 +81,7 @@ use self::{
 	proxy::ProxyConfig,
 };
 use crate::{
-	Err, Result, err, implement,
-	matrix::MAX_PREV_EVENTS,
-	redacted_debug,
+	Err, Result, err, implement, redacted_debug,
 	utils::{
 		self,
 		bytes::{deserialize_bytesize_u64, deserialize_bytesize_usize},
@@ -124,8 +128,7 @@ pub type StorageBucketName = SmallString<[u8; 64]>;
 "#,
 	ignore = "rocksdb catchall well_known tls rate_limiting ldap jwt appservice \
 	          identity_provider storage_provider registration_terms smtp cache database runtime \
-	          http network media",
-	hidden = "resolve_state_locally_shadow",
+	          http network media federation rooms sending",
 	forbidden = "database_restore_backup force_migration"
 )]
 pub struct Config {
@@ -221,126 +224,6 @@ pub struct Config {
 	#[serde(default = "default_client_sync_timeout_max")]
 	pub client_sync_timeout_max: u64,
 
-	/// reloadable: yes
-	/// default: 1024
-	///
-	/// This limits how many prior events one recovery traversal visits. Raising
-	/// it increases recovery work; it is not a count of network requests.
-	#[serde(default = "default_max_fetch_prev_events")]
-	pub max_fetch_prev_events: u16,
-
-	/// Maximum relation rows each thread scan of a redaction reads.
-	///
-	/// Replacing a redacted latest thread reply, and correcting each of a
-	/// member's unread counters after a redacted reply, each read at most this
-	/// many rows; missing, malformed, unrelated, and redacted events consume
-	/// the budget before event filtering. When it runs out, the thread summary
-	/// is omitted and the thread's unread count may stay one too high until a
-	/// thread or unthreaded receipt clears it.
-	///
-	/// reloadable: yes
-	/// default: 1024
-	#[serde(default = "default_thread_latest_reply_search_limit")]
-	pub thread_latest_reply_search_limit: usize,
-
-	/// Simultaneous backward-extremity upgrades during incoming-event recovery.
-	///
-	/// Lower values reduce recovery load at the cost of latency. This does not
-	/// change the protocol `prev_events` bound or the traversal budget above.
-	///
-	/// reloadable: yes
-	/// default: 20
-	#[serde(default = "default_prev_events_concurrency")]
-	pub prev_events_concurrency: u16,
-
-	/// Maximum time, in milliseconds, to wait for the missing prev_events of an
-	/// incoming timeline event to arrive on their own before fetching them over
-	/// federation. A gap that closes within this window skips the fetch. The
-	/// wait is event-driven and wakes the instant the events arrive, so this is
-	/// a ceiling on added latency, not a fixed cost. Set to 0 to fetch
-	/// immediately.
-	///
-	/// reloadable: yes
-	/// default: 750
-	#[serde(default = "default_fetch_prev_wait_ms")]
-	pub fetch_prev_wait_ms: u64,
-
-	/// Federation client request timeout (seconds). This applies to each read
-	/// from the remote server rather than to the request as a whole, which
-	/// remains bounded by `request_total_timeout`.
-	///
-	/// default: 25
-	#[serde(default = "default_federation_timeout")]
-	pub federation_timeout: u64,
-
-	/// Timeout (seconds) for client-initiated federation key lookups, namely
-	/// /keys/query and /keys/claim against remote servers. Should be well
-	/// below `federation_timeout` so an interactive request to an unresponsive
-	/// server does not outlast the requesting client's own send deadline. A
-	/// lookup that exceeds this bound records a transient federation failure
-	/// for that server, so subsequent lookups back off instead of blocking
-	/// again.
-	///
-	/// default: 8
-	#[serde(default = "default_federation_keys_timeout")]
-	pub federation_keys_timeout: u64,
-
-	/// Timeout (seconds) for each request in a bounded federation fanout.
-	///
-	/// This applies to admin surveys and migrated room fanouts. A server that
-	/// exceeds the deadline is reported as timed out while other destinations
-	/// continue. Keep this below `federation_timeout` and above
-	/// `federation_keys_timeout`.
-	///
-	/// reloadable: yes
-	/// default: 15
-	#[serde(default = "default_feds_timeout")]
-	pub feds_timeout: u64,
-
-	/// Federation client idle connection pool timeout (seconds).
-	///
-	/// default: 25
-	#[serde(default = "default_federation_idle_timeout")]
-	pub federation_idle_timeout: u64,
-
-	/// Federation client max idle connections per host. Defaults to 1 as
-	/// generally the same open connection can be re-used.
-	///
-	/// default: 1
-	#[serde(default = "default_federation_idle_per_host")]
-	pub federation_idle_per_host: u16,
-
-	/// Federation sender request timeout (seconds). The time it takes for the
-	/// remote server to process sent transactions can take a while.
-	///
-	/// default: 180
-	#[serde(default = "default_sender_timeout")]
-	pub sender_timeout: u64,
-
-	/// Federation sender idle connection pool timeout (seconds).
-	///
-	/// default: 180
-	#[serde(default = "default_sender_idle_timeout")]
-	pub sender_idle_timeout: u64,
-
-	/// Federation sender transaction retry backoff limit (seconds).
-	///
-	/// reloadable: yes
-	/// default: 86400
-	#[serde(default = "default_sender_retry_backoff_limit")]
-	pub sender_retry_backoff_limit: u64,
-
-	/// Grace period (seconds) before the first retry of a federation
-	/// destination that has failed exactly once, applied in place of the
-	/// quadratic backoff curve so a single transient failure does not hold
-	/// delivery until the next backoff window. A second consecutive failure
-	/// returns to the backoff curve. Set to 0 to disable the grace and back off
-	/// from the first failure.
-	///
-	/// default: 15
-	#[serde(default = "default_sender_retry_grace")]
-	pub sender_retry_grace: u64,
-
 	/// Appservice URL read and total timeout, defaulting to 35 seconds as
 	/// generally appservices are hosted within the same network.
 	///
@@ -359,13 +242,6 @@ pub struct Config {
 	/// default: 15
 	#[serde(default = "default_pusher_idle_timeout")]
 	pub pusher_idle_timeout: u64,
-
-	/// Grace period for clean shutdown of federation requests (seconds).
-	///
-	/// reloadable: yes
-	/// default: 5
-	#[serde(default = "default_sender_shutdown_timeout")]
-	pub sender_shutdown_timeout: u64,
 
 	/// Enables registration. If set to false, no users can register on this
 	/// server.
@@ -511,157 +387,6 @@ pub struct Config {
 	/// default: "none"
 	#[serde(default)]
 	pub encryption_enabled_by_default_for_room_type: Option<String>,
-
-	/// Controls whether federation is allowed or not. It is not recommended to
-	/// disable this after installation due to potential federation breakage but
-	/// this is technically not a permanent setting.
-	#[serde(default = "true_fn")]
-	pub allow_federation: bool,
-
-	/// (EXPERIMENTAL) Resolve the base event of a room context request by
-	/// fetching it from federation when the server never received it.
-	///
-	/// When a client requests
-	/// `/_matrix/client/v3/rooms/{roomId}/context/{eventId}` for an event
-	/// the server does not hold locally, the server fetches it from a room
-	/// peer and persists it before responding, rather than returning a
-	/// 404. This is gated on `allow_federation`; with federation disabled
-	/// it has no effect. Other on-demand federation fetch sites are gated
-	/// separately.
-	///
-	/// reloadable: yes
-	/// default: false
-	#[serde(default)]
-	pub fetch_unreceived_contexts_over_federation: bool,
-
-	/// Per-round ceiling on how many servers a federation event fetch contacts
-	/// concurrently. Tightens the built-in fan-out profile of every fetch kind;
-	/// it never widens one. 0 leaves the profiles unchanged.
-	///
-	/// reloadable: yes
-	/// default: 0
-	#[serde(default)]
-	pub fetch_fanout_max_width: usize,
-
-	/// Ceiling on how many staged rounds a federation event fetch runs before
-	/// giving up. Tightens the built-in round count of every fetch kind; it
-	/// never raises one. 0 leaves the profiles unchanged.
-	///
-	/// reloadable: yes
-	/// default: 0
-	#[serde(default)]
-	pub fetch_fanout_rounds: usize,
-
-	/// Maximum concurrency for bounded federation fanouts.
-	///
-	/// This caps admin surveys and migrated room and key fanouts. Lower values
-	/// trade sweep latency for load without dropping destinations. 0 selects
-	/// the built-in bounded default.
-	///
-	/// reloadable: yes
-	/// default: 0
-	#[serde(default)]
-	pub feds_max_width: usize,
-
-	/// Maximum destinations an admin feds survey contacts without confirmation.
-	///
-	/// A room exceeding this requires the command's confirmation flag. Higher
-	/// values permit longer diagnostic commands on the serial admin worker.
-	///
-	/// reloadable: yes
-	/// default: 2048
-	#[serde(default = "default_feds_destination_limit")]
-	pub feds_destination_limit: usize,
-
-	/// Derive the state at an incoming federation event from locally held
-	/// events when its previous events are stored but not yet resolved,
-	/// instead of requesting /state_ids from the origin server. Only an event
-	/// whose entire unresolved local ancestry is present participates; any
-	/// other case still falls back to the federation state fetch. Disabling
-	/// this restores the previous behavior of always fetching.
-	///
-	/// reloadable: yes
-	#[serde(default = "true_fn")]
-	pub resolve_state_locally: bool,
-
-	/// Ceiling on how many unresolved local events one local state derivation
-	/// may visit before falling back to the federation state fetch. Bounds
-	/// worst-case memory and latency in rooms with a large unresolved
-	/// backlog. 0 disables local derivation entirely.
-	///
-	/// reloadable: yes
-	/// default: 256
-	#[serde(default = "default_resolve_state_locally_max")]
-	pub resolve_state_locally_max: usize,
-
-	/// Legacy compatibility switch for local state derivation.
-	///
-	/// A configured value of true disables local derivation and its memo
-	/// shortcut. Use `resolve_state_locally = false` in new configurations.
-	///
-	/// reloadable: yes
-	/// display: hidden
-	#[serde(default)]
-	pub resolve_state_locally_shadow: bool,
-
-	/// Soft cap on the number of forward extremities tracked per room. When
-	/// applying an incoming federation event would leave the room's frontier
-	/// larger than this, the least useful leaves are pruned from the tracked
-	/// set until it is back at the cap. Pruned events are not deleted and can
-	/// still be referenced by other servers; this server merely stops citing
-	/// them as frontier tips. Events created by this server are never pruned.
-	/// 0 disables automatic pruning.
-	///
-	/// reloadable: yes
-	/// default: 60
-	#[serde(default = "default_forward_extremities_max")]
-	pub forward_extremities_max: usize,
-
-	/// Emergency bound on the per-room frontier. A frontier larger than this
-	/// is cut down to it in a single step, ignoring the per-event pruning
-	/// batch limit. Values at or below forward_extremities_max remove the
-	/// pacing entirely, pruning straight to the cap in one step.
-	///
-	/// reloadable: yes
-	/// default: 256
-	#[serde(default = "default_forward_extremities_emergency_max")]
-	pub forward_extremities_emergency_max: usize,
-
-	/// Upper bound on how many forward extremities one incoming event may
-	/// prune while the frontier is between the cap and the emergency bound.
-	/// Spreads convergence across events to bound the work done by any single
-	/// one. 0 stops paced pruning, leaving only the emergency bound.
-	///
-	/// reloadable: yes
-	/// default: 32
-	#[serde(default = "default_forward_extremities_prune_batch")]
-	pub forward_extremities_prune_batch: usize,
-
-	/// Sets the default `m.federate` property for newly created rooms when the
-	/// client does not request one. If `allow_federation` is set to false at
-	/// the same time this value is set to false, it then always overrides the
-	/// client-requested `m.federate` value to false.
-	///
-	/// Rooms are fixed to the setting at the time of their creation and can
-	/// never be changed; changing this value only affects new rooms.
-	/// reloadable: yes
-	#[serde(default = "true_fn")]
-	pub federate_created_rooms: bool,
-
-	/// Allows federation requests to be made to itself
-	///
-	/// This isn't intended and is very likely a bug if federation requests are
-	/// being sent to yourself. This currently mainly exists for development
-	/// purposes.
-	/// reloadable: yes
-	#[serde(default)]
-	pub federation_loopback: bool,
-
-	/// Always calls /forget on behalf of the user if leaving a room. This is a
-	/// part of MSC4267 "Automatically forgetting rooms on leave"
-	/// reloadable: yes
-	#[serde(default)]
-	pub forget_forced_upon_leave: bool,
 
 	/// Set this to true to require authentication on the normally
 	/// unauthenticated profile retrieval endpoints (GET)
@@ -851,112 +576,6 @@ pub struct Config {
 	)]
 	pub allow_inbound_profile_lookup_federation_requests: bool,
 
-	/// Allow standard users to create rooms. Appservices and admins are always
-	/// allowed to create rooms
-	/// reloadable: yes
-	#[serde(default = "true_fn")]
-	pub allow_room_creation: bool,
-
-	/// Allow standard users to create room aliases. Appservices and admins are
-	/// always allowed to create room aliases.
-	/// reloadable: yes
-	/// default: true
-	#[serde(default = "true_fn")]
-	pub allow_room_alias_creation: bool,
-
-	/// Set to false to disable users from joining or creating room versions
-	/// that aren't officially supported by tuwunel. Unstable room versions may
-	/// have flawed specifications or our implementation may be non-conforming.
-	/// Correct operation may not be guaranteed, but incorrect operation may be
-	/// tolerable and unnoticed.
-	///
-	/// tuwunel officially supports room versions 6+. tuwunel has slightly
-	/// experimental (though works fine in practice) support for versions 3 - 5.
-	///
-	/// reloadable: yes
-	/// default: true
-	#[serde(default = "true_fn")]
-	pub allow_unstable_room_versions: bool,
-
-	/// Set to true to enable experimental room versions.
-	///
-	/// Unlike unstable room versions these versions are either under
-	/// development, protype spec-changes, or somehow present a serious risk to
-	/// the server's operation or database corruption. This is for developer use
-	/// only.
-	/// reloadable: yes
-	#[serde(default)]
-	pub allow_experimental_room_versions: bool,
-
-	/// MSC4284: ask the room's policy server to sign outgoing events. When a
-	/// room has a valid `m.room.policy` state event, the homeserver requests a
-	/// signature from that policy server's federation `/sign` endpoint before
-	/// federating each event. Refusal aborts the local request; network or
-	/// timeout failures fail open with a warn log so a transient policy-server
-	/// outage does not silently take the room offline.
-	///
-	/// reloadable: yes
-	/// default: false
-	#[serde(default)]
-	pub enable_policy_servers: bool,
-
-	/// MSC4284: timeout (seconds) for requests to a room's policy server.
-	/// Applies to both outbound `/sign` calls and inbound signature-fetches.
-	///
-	/// reloadable: yes
-	/// default: 5
-	#[serde(default = "default_policy_server_request_timeout")]
-	pub policy_server_request_timeout: u64,
-
-	/// MSC3925: fold the most recent message edit (an `m.replace` relation)
-	/// into `unsigned.m.relations` on a served event as the full replacement
-	/// event, on the client read endpoints. Off by default: it adds a typed
-	/// index seek per served event and a server-authoritative edit summary that
-	/// most clients reconstruct locally anyway, so it is opt-in.
-	///
-	/// reloadable: yes
-	/// default: false
-	#[serde(default)]
-	pub bundle_edit_relations: bool,
-
-	/// MSC2675/MSC3267: fold reference relations (`m.reference`) into
-	/// `unsigned.m.relations` on a served event as `{ chunk: [{ event_id },
-	/// ...] }`, on the client read endpoints. Off by default: no surveyed
-	/// client renders reference bundles (references are plumbing for polls,
-	/// beacons, and verification, which clients resolve directly), so most
-	/// deployments gain nothing from the added read-time cost.
-	///
-	/// reloadable: yes
-	/// default: false
-	#[serde(default)]
-	pub bundle_reference_relations: bool,
-
-	/// Default room version tuwunel will create rooms with.
-	///
-	/// The default is prescribed by the spec, but may be selected by developer
-	/// recommendation. To prevent stale documentation we no longer list it
-	/// here. It is only advised to override this if you know what you are
-	/// doing, and by doing so, updates with new versions are precluded.
-	/// reloadable: yes
-	#[serde(default = "default_default_room_version")]
-	pub default_room_version: RoomVersionId,
-
-	/// Default power-level overrides applied when this homeserver creates a new
-	/// room.
-	///
-	/// Uses the same top-level shape as the client `/createRoom`
-	/// `power_level_content_override` parameter and is merged before any
-	/// per-request override, so a client can still override it per room. Only
-	/// affects newly created rooms. Top-level keys replace wholesale rather
-	/// than deep-merging (matching the client parameter): setting `users` or
-	/// `events` replaces the entire computed default submap for that key.
-	///
-	/// reloadable: yes
-	/// default: unset
-	/// config-example: { users_default = 50 }
-	#[serde(default)]
-	pub default_power_level_content_override: Option<serde_json::Value>,
-
 	/// Configures Matrix discovery documents and related endpoints.
 	///
 	/// Values are read from the separate `[global.well_known]` section. Client,
@@ -1028,68 +647,6 @@ pub struct Config {
 	/// default: "none"
 	#[serde(default)]
 	pub proxy: ProxyConfig,
-
-	#[expect(clippy::doc_link_with_quotes)]
-	/// Servers listed here will be used to gather public keys of other servers
-	/// (notary trusted key servers).
-	///
-	/// Currently, tuwunel doesn't support inbound batched key requests, so
-	/// this list should only contain other Synapse servers.
-	///
-	/// reloadable: yes
-	/// example: ["matrix.org", "tchncs.de"]
-	///
-	/// default: ["matrix.org"]
-	#[serde(default = "default_trusted_servers")]
-	pub trusted_servers: Vec<OwnedServerName>,
-
-	/// Whether to query the servers listed in trusted_servers first or query
-	/// the origin server first. For best security, querying the origin server
-	/// first is advised to minimize the exposure to a compromised trusted
-	/// server. For maximum federation/join performance this can be set to true,
-	/// however other options exist to query trusted servers first under
-	/// specific high-load circumstances and should be evaluated before setting
-	/// this to true.
-	/// reloadable: yes
-	#[serde(default)]
-	pub query_trusted_key_servers_first: bool,
-
-	/// Whether to query the servers listed in trusted_servers first
-	/// specifically on room joins. This option limits the exposure to a
-	/// compromised trusted server to room joins only. The join operation
-	/// requires gathering keys from many origin servers which can cause
-	/// significant delays. Therefor this defaults to true to mitigate
-	/// unexpected delays out-of-the-box. The security-paranoid or those willing
-	/// to tolerate delays are advised to set this to false. Note that setting
-	/// query_trusted_key_servers_first to true causes this option to be
-	/// ignored.
-	/// reloadable: yes
-	#[serde(default = "true_fn")]
-	pub query_trusted_key_servers_first_on_join: bool,
-
-	/// Only query trusted servers for keys and never the origin server. This is
-	/// intended for clusters or custom deployments using their trusted_servers
-	/// as forwarding-agents to cache and deduplicate requests. Notary servers
-	/// do not act as forwarding-agents by default, therefor do not enable this
-	/// unless you know exactly what you are doing.
-	/// reloadable: yes
-	#[serde(default)]
-	pub only_query_trusted_key_servers: bool,
-
-	/// Maximum number of keys to request in each trusted server batch query.
-	///
-	/// reloadable: yes
-	/// default: 192
-	#[serde(default = "default_trusted_server_batch_size")]
-	pub trusted_server_batch_size: usize,
-
-	/// Maximum number of request batches in flight simultaneously when querying
-	/// a trusted server.
-	///
-	/// reloadable: yes
-	/// default: 2
-	#[serde(default = "default_trusted_server_batch_concurrency")]
-	pub trusted_server_batch_concurrency: usize,
 
 	/// Max log level for tuwunel. Allows debug, info, warn, or error.
 	///
@@ -1642,26 +1199,6 @@ pub struct Config {
 	#[serde(default = "Vec::new")]
 	pub auto_join_rooms: Vec<OwnedRoomOrAliasId>,
 
-	/// Config option to automatically deactivate the account of any user who
-	/// attempts to join a:
-	/// - banned room
-	/// - forbidden room alias
-	/// - room alias or ID with a forbidden server name
-	///
-	/// This may be useful if all your banned lists consist of toxic rooms or
-	/// servers that no good faith user would ever attempt to join, and
-	/// to automatically remediate the problem without any admin user
-	/// intervention.
-	///
-	/// This will also make the user leave all rooms. Federation (e.g. remote
-	/// room invites) are ignored here.
-	///
-	/// Defaults to false as rooms can be banned for non-moderation-related
-	/// reasons and this performs a full user deactivation.
-	/// reloadable: yes
-	#[serde(default)]
-	pub auto_deactivate_banned_room_attempts: bool,
-
 	/// This is a password that can be configured that will let you login to the
 	/// server bot account (currently `@conduit`) for emergency troubleshooting
 	/// purposes such as recovering/recreating your admin room, or inviting
@@ -1851,51 +1388,6 @@ pub struct Config {
 	#[serde(default)]
 	pub allow_guests_auto_join_rooms: bool,
 
-	/// List of forbidden server names via regex patterns that we will block
-	/// incoming AND outgoing federation with, and block client room joins /
-	/// remote user invites.
-	///
-	/// This check is applied on the room ID, room alias, sender server name,
-	/// sender user's server name, inbound federation X-Matrix origin, and
-	/// outbound federation handler.
-	///
-	/// Basically "global" ACLs.
-	///
-	/// The server's own name is always permitted and is never subject to this
-	/// list.
-	///
-	/// reloadable: yes
-	/// example: ["badserver\.tld$", "badphrase", "19dollarfortnitecards"]
-	///
-	/// default: []
-	#[serde(default, with = "serde_regex")]
-	pub forbidden_remote_server_names: RegexSet,
-
-	/// (EXPERIMENTAL) The behavior of this option will change; the
-	/// _experimental suffix will be removed for that change in an upcoming
-	/// release.
-	///
-	/// List of allowed server names via regex patterns. This is an allow-list
-	/// rather than a deny-list with all the same details as its counterpart in
-	/// `forbidden_remote_server_names`.
-	///
-	/// This feature becomes active when this list has one or more entries;
-	/// everything not matching is denied. By default it is empty and inactive.
-	///
-	/// The server's own name is always permitted and is never subject to this
-	/// list.
-	///
-	/// Entries in `forbidden_remote_server_names` are still applied after
-	/// this is applied. This allows you to match e.g. "*\.example\.com" here
-	/// while still singling out "bad\.example\.com" for exclusion.
-	///
-	/// reloadable: yes
-	/// example: ["badserver\.tld$", "badphrase", "19dollarfortnitecards"]
-	///
-	/// default: []
-	#[serde(default, with = "serde_regex")]
-	pub allowed_remote_server_names_experimental: RegexSet,
-
 	/// List of forbidden server names via regex patterns that we will block all
 	/// outgoing federated room directory requests for. Useful for preventing
 	/// our users from wandering into bad servers or spaces.
@@ -1906,23 +1398,6 @@ pub struct Config {
 	/// default: []
 	#[serde(default, with = "serde_regex")]
 	pub forbidden_remote_room_directory_server_names: RegexSet,
-
-	/// List of forbidden room aliases and room IDs as strings of regex
-	/// patterns.
-	///
-	/// Regex can be used or explicit contains matches can be done by just
-	/// specifying the words (see example).
-	///
-	/// This is checked upon room alias creation, custom room ID creation if
-	/// used, and startup as warnings if any room aliases in your database have
-	/// a forbidden room alias/ID.
-	///
-	/// reloadable: yes
-	/// example: ["19dollarfortnitecards", "b[4a]droom", "badphrase"]
-	///
-	/// default: []
-	#[serde(default, with = "serde_regex")]
-	pub forbidden_alias_names: RegexSet,
 
 	/// List of forbidden username patterns/strings.
 	///
@@ -1939,122 +1414,6 @@ pub struct Config {
 	/// default: []
 	#[serde(default, with = "serde_regex")]
 	pub forbidden_usernames: RegexSet,
-
-	/// List of server names to deprioritize joining through.
-	///
-	/// If a client requests a join through one of these servers,
-	/// they will be tried last.
-	///
-	/// Useful for preventing failed joins due to timeouts
-	/// from a certain homeserver.
-	///
-	/// reloadable: yes
-	/// default: ["matrix\.org"]
-	/// config-example: ["matrix\\.org"]
-	#[serde(
-		default = "default_deprioritize_joins_through_servers",
-		with = "serde_regex"
-	)]
-	pub deprioritize_joins_through_servers: RegexSet,
-
-	/// Maximum make_join requests to attempt within each join attempt. Each
-	/// attempt tries a different server, as each server is only tried once;
-	/// though retries can occur when the join request as a whole is retried.
-	///
-	/// reloadable: yes
-	/// default: 48
-	#[serde(default = "default_max_make_join_attempts_per_join_attempt")]
-	pub max_make_join_attempts_per_join_attempt: usize,
-
-	/// Maximum join attempts to conduct per client join request. Each join
-	/// attempt consists of one or more make_join requests limited above, and a
-	/// single send_join request. This value allows for additional servers to
-	/// act as the join-server prior to reporting the last error back to the
-	/// client, which can be frustrating for users. Therefor the default value
-	/// is greater than one, but less than excessively exceeding the client's
-	/// request timeout, though that may not be avoidable in some cases.
-	///
-	/// reloadable: yes
-	/// default: 3
-	#[serde(default = "default_max_join_attempts_per_join_request")]
-	pub max_join_attempts_per_join_request: usize,
-
-	/// Retry failed and incomplete messages to remote servers immediately upon
-	/// startup.
-	///
-	/// This is called bursting. If this is disabled, queued messages are retried
-	/// on a paced timer after startup instead of all at once. Do not
-	/// change this option unless server resources are extremely limited or the
-	/// scale of the server's deployment is huge. Do not disable this unless you
-	/// know what you are doing.
-	#[serde(default = "true_fn")]
-	pub startup_netburst: bool,
-
-	/// Messages are dropped and not reattempted. The `startup_netburst` option
-	/// must be enabled for this value to have any effect. Do not change this
-	/// value unless you know what you are doing. Set this value to -1 to
-	/// reattempt every message without trimming the queues; this may consume
-	/// significant disk. Set this value to 0 to drop all messages without any
-	/// attempt at redelivery.
-	///
-	/// default: 50
-	#[serde(default = "default_startup_netburst_keep")]
-	pub startup_netburst_keep: i64,
-
-	/// Block non-admin local users from sending room invites (local and
-	/// remote), and block non-admin users from receiving remote room invites.
-	///
-	/// Admins are always allowed to send and receive all room invites.
-	/// reloadable: yes
-	#[serde(default)]
-	pub block_non_admin_invites: bool,
-
-	/// Automatically join local users to any room they are invited to.
-	///
-	/// The join runs in the background once the invite is recorded, and is
-	/// retried for a short while when a federated invite has not yet settled
-	/// on the inviting server. Users who are deactivated, suspended, or locked
-	/// are never joined.
-	///
-	/// reloadable: yes
-	#[serde(default)]
-	pub auto_accept_invites: bool,
-
-	/// Restrict `auto_accept_invites` to direct-message invites.
-	///
-	/// The invite must carry `is_direct` in its membership content, which
-	/// clients set when starting a direct chat. Invites to any other room are
-	/// left for the user to answer.
-	///
-	/// reloadable: yes
-	#[serde(default)]
-	pub auto_accept_invites_direct_only: bool,
-
-	/// Restrict `auto_accept_invites` to invites sent by local users.
-	///
-	/// Invites arriving from another server are left for the user to answer.
-	///
-	/// reloadable: yes
-	#[serde(default)]
-	pub auto_accept_invites_local_only: bool,
-
-	/// Enforce MSC4311 validation of the create event in federated invite and
-	/// knock stripped state.
-	///
-	/// When enabled, an invite whose m.room.create event is missing, not a
-	/// full PDU, bound to a different room, or fails signature checks is
-	/// rejected, and such events are dropped from knock stripped state. When
-	/// disabled (the default), failures are logged but tolerated to preserve
-	/// interoperability during ecosystem migration; a create event that is
-	/// present as a full PDU but cryptographically bound to a different room is
-	/// always rejected for room version 12 and above regardless of this
-	/// setting. A full PDU in knock stripped state that fails its checks is
-	/// always omitted, so for knocks this setting governs only a create sent in
-	/// the legacy stripped form.
-	///
-	/// reloadable: yes
-	#[serde(default)]
-	pub enforce_stripped_state_pdu_validation: bool,
 
 	/// Allow admins to run commands outside the admin room ("#admins") by
 	/// prefixing a message with "\!admin" or "\\!admin" and a normal command.
@@ -2284,61 +1643,6 @@ pub struct Config {
 	#[serde(default)]
 	pub admin_output_threads: bool,
 
-	/// Save original events before applying redaction to them.
-	///
-	/// They can be retrieved with `admin debug get-retained-pdu` or MSC2815.
-	///
-	/// reloadable: yes
-	/// default: true
-	#[serde(default = "true_fn")]
-	pub save_unredacted_events: bool,
-
-	/// Redaction retention period in seconds.
-	///
-	/// By default the unredacted events are stored for 60 days.
-	///
-	/// reloadable: yes
-	/// default: 5184000
-	#[serde(default = "default_redaction_retention_seconds")]
-	pub redaction_retention_seconds: u64,
-
-	/// Allows users with `redact` power level to request unredacted events with
-	/// MSC2815.
-	///
-	/// Server admins can request unredacted events regardless of the value of
-	/// this option.
-	///
-	/// reloadable: yes
-	/// default: true
-	#[serde(default = "true_fn")]
-	pub allow_room_admins_to_request_unredacted_events: bool,
-
-	/// Prevents local users from sending redactions.
-	///
-	/// This check does not apply to server admins.
-	/// reloadable: yes
-	#[serde(default)]
-	pub disable_local_redactions: bool,
-
-	/// Serve erased senders' events as pruned copies over federation
-	/// (MSC4025). A requesting server retains the unredacted view only when
-	/// one of its users was joined in the room state at the event; join
-	/// handshakes are not gated.
-	///
-	/// reloadable: yes
-	/// default: true
-	#[serde(default = "true_fn")]
-	pub enforce_erasure_over_federation: bool,
-
-	/// Number of sender task workers; determines sender parallelism. Default is
-	/// '0' which means the value is determined internally, likely matching the
-	/// number of tokio worker-threads or number of cores, etc. Override by
-	/// setting a non-zero value.
-	///
-	/// default: 0
-	#[serde(default)]
-	pub sender_workers: usize,
-
 	/// Enables listener sockets; can be set to false to disable listening. This
 	/// option is intended for developer/diagnostic purposes only.
 	#[serde(default = "true_fn")]
@@ -2371,20 +1675,6 @@ pub struct Config {
 	/// reloadable: yes
 	#[serde(default = "true_fn")]
 	pub hydra_backports: bool,
-
-	/// Delete rooms when the last user from this server leaves. This feature is
-	/// experimental and for the purpose of least-surprise is not enabled by
-	/// default but can be enabled for deployments interested in conserving
-	/// space. It may eventually default to true in a future release.
-	///
-	/// Note that not all pathways which can remove the last local user
-	/// currently invoke this operation, so in some cases you may find the room
-	/// still exists.
-	///
-	/// reloadable: yes
-	/// default: false
-	#[serde(default)]
-	pub delete_rooms_after_leave: bool,
 
 	/// Limits the number of One Time Keys per device (not per-algorithm). The
 	/// reference implementation maintains 50 OTK's at any given time, therefor
@@ -2587,6 +1877,24 @@ pub struct Config {
 	/// display: section
 	#[serde(default)]
 	pub media: Media,
+
+	/// Settings for federation.
+	///
+	/// display: section
+	#[serde(default)]
+	pub federation: Federation,
+
+	/// Settings for rooms.
+	///
+	/// display: section
+	#[serde(default)]
+	pub rooms: Rooms,
+
+	/// Settings for sending.
+	///
+	/// display: section
+	#[serde(default)]
+	pub sending: Sending,
 }
 
 /// Configures direct TLS listener behavior.
@@ -4270,8 +3578,6 @@ impl Default for LoginAccountRateLimit {
 
 fn true_fn() -> bool { true }
 
-fn default_policy_server_request_timeout() -> u64 { 5 }
-
 fn default_rendezvous_session_max_bytes() -> usize { 4096 }
 
 fn default_rendezvous_session_ttl() -> u64 { 600 }
@@ -4303,49 +3609,11 @@ fn default_max_remote_profile_fields() -> usize { 100 }
 
 fn default_max_profile_fields_per_request() -> usize { 64 }
 
-fn default_federation_timeout() -> u64 { 25 }
-
-fn default_federation_keys_timeout() -> u64 { 8 }
-
-fn default_feds_timeout() -> u64 { 15 }
-
-fn default_feds_destination_limit() -> usize { 2048 }
-
-fn default_federation_idle_timeout() -> u64 { 25 }
-
-fn default_federation_idle_per_host() -> u16 { 1 }
-
-fn default_sender_timeout() -> u64 { 180 }
-
-fn default_sender_idle_timeout() -> u64 { 180 }
-
-fn default_sender_retry_backoff_limit() -> u64 { 86400 }
-
-fn default_sender_retry_grace() -> u64 { 15 }
-
 fn default_appservice_timeout() -> u64 { 35 }
 
 fn default_appservice_idle_timeout() -> u64 { 300 }
 
 fn default_pusher_idle_timeout() -> u64 { 15 }
-
-fn default_max_fetch_prev_events() -> u16 { 1024_u16 }
-
-fn default_thread_latest_reply_search_limit() -> usize { 1024 }
-
-fn default_prev_events_concurrency() -> u16 {
-	u16::try_from(MAX_PREV_EVENTS).expect("MAX_PREV_EVENTS exceeds u16")
-}
-
-fn default_fetch_prev_wait_ms() -> u64 { 750 }
-
-fn default_resolve_state_locally_max() -> usize { 256 }
-
-fn default_forward_extremities_max() -> usize { 60 }
-
-fn default_forward_extremities_emergency_max() -> usize { 256 }
-
-fn default_forward_extremities_prune_batch() -> usize { 32 }
 
 fn default_tracing_flame_filter() -> String {
 	cfg!(debug_assertions)
@@ -4362,10 +3630,6 @@ fn default_jaeger_filter() -> String {
 }
 
 fn default_tracing_flame_output_path() -> String { "./tracing.folded".to_owned() }
-
-fn default_trusted_servers() -> Vec<OwnedServerName> {
-	vec![OwnedServerName::try_from("matrix.org").expect("valid ServerName")]
-}
 
 /// do debug logging by default for debug builds
 #[must_use]
@@ -4401,15 +3665,6 @@ fn default_typing_client_timeout_min_s() -> u64 { 15 }
 
 fn default_typing_client_timeout_max_s() -> u64 { 45 }
 
-/// Returns the default Matrix room version.
-///
-/// Room version 12 is selected when `default_room_version` is omitted. The
-/// value is returned without consulting runtime configuration.
-// I know, it's a great name
-#[must_use]
-#[inline]
-pub fn default_default_room_version() -> RoomVersionId { RoomVersionId::V12 }
-
 fn default_new_user_displayname_suffix() -> String { "💕".to_owned() }
 
 fn default_argon2_m_cost() -> u32 { 19 * 1024 }
@@ -4429,8 +3684,6 @@ fn default_sentry_endpoint() -> Option<Url> {
 fn default_sentry_traces_sample_rate() -> f32 { 0.15 }
 
 fn default_sentry_filter() -> String { "info".to_owned() }
-
-fn default_startup_netburst_keep() -> i64 { 50 }
 
 fn default_admin_log_capture() -> String {
 	cfg!(debug_assertions)
@@ -4462,12 +3715,6 @@ fn parallelism_scaled_u32(val: u32) -> u32 {
 
 fn parallelism_scaled(val: usize) -> usize { val.saturating_mul(sys::available_parallelism()) }
 
-fn default_trusted_server_batch_size() -> usize { 192 }
-
-fn default_trusted_server_batch_concurrency() -> usize { 2 }
-
-fn default_sender_shutdown_timeout() -> u64 { 5 }
-
 fn default_ldap_search_filter() -> String { "(objectClass=*)".to_owned() }
 
 fn default_ldap_uid_attribute() -> String { String::from("uid") }
@@ -4486,19 +3733,9 @@ fn default_access_token_ttl() -> u64 { 604_800 }
 
 fn default_refresh_token_reuse_grace() -> u64 { 15 }
 
-fn default_deprioritize_joins_through_servers() -> RegexSet {
-	RegexSet::new([r"matrix\.org"]).expect("valid set of regular expressions")
-}
-
 fn default_one_time_key_limit() -> usize { 256 }
 
-fn default_max_make_join_attempts_per_join_attempt() -> usize { 48 }
-
-fn default_max_join_attempts_per_join_request() -> usize { 3 }
-
 fn default_sso_grant_session_duration() -> Option<u64> { Some(300) }
-
-fn default_redaction_retention_seconds() -> u64 { 5_184_000 }
 
 fn default_multipart_threshold() -> ByteSize { ByteSize::mib(100) }
 

@@ -5,7 +5,7 @@
 //! the classification and exact failure time. A scan derives the latest
 //! anchor and surviving bucket span before applying the retry curve. Successful
 //! outbound or inbound contact clears the server prefix. The bucket width
-//! comes from `sender_timeout`, keeping this gate aligned with sender backoff.
+//! comes from `sending.timeout`, keeping this gate aligned with sender backoff.
 
 use std::{
 	collections::BTreeMap,

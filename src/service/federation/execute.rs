@@ -66,12 +66,15 @@ where
 		return Err!("{dest} is in federation backoff; skipping key lookup");
 	}
 
-	let timeout_dur = Duration::from_secs(
-		self.services
-			.server
-			.config
-			.federation_keys_timeout,
-	);
+	let timeout_secs = self
+		.services
+		.server
+		.config
+		.federation
+		.transport
+		.keys_timeout;
+
+	let timeout_dur = Duration::from_secs(timeout_secs);
 
 	let client = &self.services.client.federation;
 

@@ -512,6 +512,7 @@ async fn knock_summary(
 	let enforce = self
 		.services
 		.config
+		.federation
 		.enforce_stripped_state_pdu_validation;
 
 	let drop_create = enforce_stripped_create(verdict, v12_room_ids(room_version_id), enforce);

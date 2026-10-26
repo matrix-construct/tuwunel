@@ -132,7 +132,7 @@ fn scan_phase(database: &Path, phase: &str) -> Result {
 		| "users" =>
 			("forbidden_usernames=[\"^scanuser\"]", "matches forbidden username patterns"),
 		| "aliases" => (
-			"forbidden_alias_names=[\"^scanalias\"]",
+			"rooms.forbidden_alias_names=[\"^scanalias\"]",
 			"matches the following forbidden alias name patterns",
 		),
 		| _ => return Err!("unknown migration scan phase: {phase}"),

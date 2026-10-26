@@ -56,7 +56,7 @@ async fn inbound_admission_and_delayed_consumption_preserve_stalled_lifecycle() 
 		.expect_err("no replay admitted");
 
 	let aged = last
-		.checked_sub(Duration::from_secs(sending.server.config.sender_timeout))
+		.checked_sub(Duration::from_secs(sending.server.config.sending.timeout))
 		.expect("failure floor");
 
 	sending

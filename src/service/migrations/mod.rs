@@ -7,7 +7,7 @@
 use std::{cmp::Ordering, time::Duration};
 
 use futures::{FutureExt, StreamExt, TryStreamExt};
-use ruma::{OwnedUserId, ServerName, UserId};
+use ruma::{OwnedUserId, RoomId, ServerName, UserId};
 use tokio::time::sleep;
 use tuwunel_core::{
 	Err, Result, err, format_small_string, info,
@@ -541,7 +541,12 @@ async fn warn_forbidden_names(services: &Services) -> Result {
 
 	services.server.check_running()?;
 
-	if !services.config.forbidden_alias_names.is_empty() {
+	if !services
+		.config
+		.rooms
+		.forbidden_alias_names
+		.is_empty()
+	{
 		services
 			.server
 			.progress
@@ -556,39 +561,41 @@ async fn warn_forbidden_names(services: &Services) -> Result {
 					.check_running()
 					.map(|()| room_id.to_owned())
 			})
-			.try_for_each(async |room_id| {
-				services
-					.alias
-					.local_aliases_for_room(&room_id)
-					.map(|room_alias| {
-						services
-							.server
-							.check_running()
-							.map(|()| room_alias)
-					})
-					.ready_try_for_each(|room_alias| {
-						let patterns = &services.config.forbidden_alias_names;
-						let matches = patterns.matches(room_alias.alias());
-						let matched_patterns = matches
-							.iter()
-							.map(|pattern_index| &patterns.patterns()[pattern_index])
-							.join(", ");
-
-						if matches.matched_any() {
-							warn!(
-								"Room {room_id} with alias {room_alias} matches the following \
-								 forbidden alias name patterns: {matched_patterns}"
-							);
-						}
-
-						Ok(())
-					})
-					.await
-			})
+			.try_for_each(async |room_id| scan_room_aliases(services, &room_id).await)
 			.await?;
 	}
 
 	Ok(())
+}
+
+async fn scan_room_aliases(services: &Services, room_id: &RoomId) -> Result {
+	services
+		.alias
+		.local_aliases_for_room(room_id)
+		.map(|room_alias| {
+			services
+				.server
+				.check_running()
+				.map(|()| room_alias)
+		})
+		.ready_try_for_each(|room_alias| {
+			let patterns = &services.config.rooms.forbidden_alias_names;
+			let matches = patterns.matches(room_alias.alias());
+			let matched_patterns = matches
+				.iter()
+				.map(|pattern_index| &patterns.patterns()[pattern_index])
+				.join(", ");
+
+			if matches.matched_any() {
+				warn!(
+					"Room {room_id} with alias {room_alias} matches the following forbidden \
+					 alias name patterns: {matched_patterns}"
+				);
+			}
+
+			Ok(())
+		})
+		.await
 }
 
 /// Whether a named migration step still needs to run, refusing once shutdown

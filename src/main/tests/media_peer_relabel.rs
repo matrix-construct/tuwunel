@@ -180,7 +180,7 @@ fn a_peers_mislabelled_thumbnail_is_cached_under_its_container() -> Result {
 		format!("database_path={:?}", db_path.0),
 		"network.http.allow_invalid_tls_certificates=true".to_owned(),
 		"network.http.ip_range_denylist=[]".to_owned(),
-		"federation_loopback=true".to_owned(),
+		"federation.loopback=true".to_owned(),
 		"log=\"error\"".to_owned(),
 	]
 	.into_iter()

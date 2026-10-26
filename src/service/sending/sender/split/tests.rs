@@ -275,7 +275,7 @@ async fn a_transaction_that_sends_nothing_ends_its_split() -> Result {
 }
 
 async fn sender_fixture() -> Result<Option<Fixture>> {
-	fixture(Figment::new().merge(("sender_workers", 1))).await
+	fixture(Figment::new().merge(("sending.workers", 1))).await
 }
 
 fn active(sending: &Service, dest: &Destination, event: SendingEvent) -> QueueItem {

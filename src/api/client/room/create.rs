@@ -72,7 +72,7 @@ pub(crate) async fn create_room_route(
 	let (room_version, version_rules) = body
 		.room_version
 		.as_ref()
-		.map_or(Ok(&services.server.config.default_room_version), |version| {
+		.map_or(Ok(&services.server.config.rooms.default_version), |version| {
 			services
 				.config
 				.supported_room_version(version)
@@ -231,6 +231,7 @@ async fn apply_power_levels_pdu(
 
 	let default_override = services
 		.config
+		.rooms
 		.default_power_level_content_override
 		.as_ref();
 
@@ -622,8 +623,8 @@ async fn create_create_event(
 					))))
 				})?;
 
-			if !services.config.federate_created_rooms
-				&& (!services.config.allow_federation || !content.contains_key("m.federate"))
+			if !services.config.rooms.federate_by_default
+				&& (!services.config.federation.enable || !content.contains_key("m.federate"))
 			{
 				content.insert("m.federate".into(), json!(false).try_into()?);
 			}
@@ -643,7 +644,7 @@ async fn create_create_event(
 			let mut content =
 				serde_json::from_str::<CanonicalJsonObject>(to_raw_value(&content)?.get())?;
 
-			if !services.config.federate_created_rooms {
+			if !services.config.rooms.federate_by_default {
 				content.insert("m.federate".into(), json!(false).try_into()?);
 			}
 
@@ -749,8 +750,8 @@ async fn create_create_event_legacy(
 				);
 			}
 
-			if !services.config.federate_created_rooms
-				&& (!services.config.allow_federation || !content.contains_key("m.federate"))
+			if !services.config.rooms.federate_by_default
+				&& (!services.config.federation.enable || !content.contains_key("m.federate"))
 			{
 				content.insert("m.federate".into(), json!(false).try_into()?);
 			}
@@ -774,7 +775,7 @@ async fn create_create_event_legacy(
 			let mut content =
 				serde_json::from_str::<CanonicalJsonObject>(to_raw_value(&content)?.get())?;
 
-			if !services.config.federate_created_rooms {
+			if !services.config.rooms.federate_by_default {
 				content.insert("m.federate".into(), json!(false).try_into()?);
 			}
 
@@ -910,6 +911,7 @@ async fn room_alias_check(
 	// check if room alias is forbidden
 	if services
 		.config
+		.rooms
 		.forbidden_alias_names
 		.is_match(room_alias_name)
 	{
@@ -957,6 +959,7 @@ async fn custom_room_id_check(services: &Services, custom_room_id: &str) -> Resu
 	// apply forbidden room alias checks to custom room IDs too
 	if services
 		.config
+		.rooms
 		.forbidden_alias_names
 		.is_match(custom_room_id)
 	{
@@ -1030,7 +1033,7 @@ async fn can_create_room_check(
 	services: &Services,
 	body: &Ruma<create_room::v3::Request>,
 ) -> Result {
-	if !services.config.allow_room_creation
+	if !services.config.rooms.allow_creation
 		&& body.appservice_info.is_none()
 		&& !services
 			.admin

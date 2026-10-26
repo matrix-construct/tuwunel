@@ -80,7 +80,7 @@ fn boot(database: &Path, peer: &str, seed: bool) -> Result {
 		.with_option("listening=true")
 		.with_option("network.http.allow_invalid_tls_certificates=true")
 		.with_option("network.http.ip_range_denylist=[]")
-		.with_option("federation_loopback=true");
+		.with_option("federation.loopback=true");
 
 	let runtime = Runtime::new(Some(&args))?;
 	let server = Server::new(Some(&args), Some(&runtime))?;

@@ -47,49 +47,16 @@ pub async fn bundle_aggregations(&self, sender_user: &UserId, mut pdu: Pdu) -> P
 		return pruned;
 	}
 
-	let has_thread = pdu.has_thread_bundle().log_err().unwrap_or(true);
-
-	if has_thread {
-		if pdu
-			.thread_latest_event()
-			.log_err()
-			.ok()
-			.flatten()
-			.is_none()
-			|| pdu
-				.remove_thread_latest_transaction_id_unless_sender(sender_user)
-				.log_err()
-				.is_err()
-		{
-			drop_thread_bundle(&mut pdu);
-		} else {
-			let participated = self
-				.services
-				.threads
-				.user_participated(pdu.event_id(), sender_user)
-				.await;
-
-			let participation = pdu
-				.set_thread_participated(participated)
-				.log_err();
-
-			if thread_result_or_drop(&mut pdu, participation).is_some() {
-				self.erase_thread_latest(sender_user, &mut pdu)
-					.await;
-
-				if self.services.server.config.bundle_edit_relations {
-					self.bundle_thread_latest_edit(sender_user, &mut pdu)
-						.await;
-				}
-			}
-		}
-	}
+	self.bundle_thread_for(sender_user, &mut pdu)
+		.await;
 
 	let replacement = self
 		.services
 		.server
 		.config
-		.bundle_edit_relations
+		.rooms
+		.relations
+		.bundle_edits
 		.then_async(|| self.newest_replacement(&pdu))
 		.await
 		.flatten();
@@ -114,7 +81,9 @@ pub async fn bundle_aggregations(&self, sender_user: &UserId, mut pdu: Pdu) -> P
 		.services
 		.server
 		.config
-		.bundle_reference_relations
+		.rooms
+		.relations
+		.bundle_references
 		.then_async(|| self.references(&pdu))
 		.await
 		.unwrap_or_default();
@@ -126,6 +95,60 @@ pub async fn bundle_aggregations(&self, sender_user: &UserId, mut pdu: Pdu) -> P
 	}
 
 	pdu
+}
+
+#[implement(Service)]
+#[tracing::instrument(skip_all, level = "trace")]
+async fn bundle_thread_for(&self, sender_user: &UserId, pdu: &mut Pdu) {
+	if pdu
+		.has_thread_bundle()
+		.log_err()
+		.unwrap_or(true)
+		.is_false()
+	{
+		return;
+	}
+
+	if pdu
+		.thread_latest_event()
+		.log_err()
+		.ok()
+		.flatten()
+		.is_none()
+		|| pdu
+			.remove_thread_latest_transaction_id_unless_sender(sender_user)
+			.log_err()
+			.is_err()
+	{
+		drop_thread_bundle(pdu);
+		return;
+	}
+
+	let participated = self
+		.services
+		.threads
+		.user_participated(pdu.event_id(), sender_user)
+		.await;
+
+	let participation = pdu
+		.set_thread_participated(participated)
+		.log_err();
+
+	if thread_result_or_drop(pdu, participation).is_none() {
+		return;
+	}
+
+	self.erase_thread_latest(sender_user, pdu).await;
+
+	let _: Option<()> = self
+		.services
+		.server
+		.config
+		.rooms
+		.relations
+		.bundle_edits
+		.then_async(|| self.bundle_thread_latest_edit(sender_user, pdu))
+		.await;
 }
 
 /// MSC4025: the stored thread bundle carries a full `latest_event` of any

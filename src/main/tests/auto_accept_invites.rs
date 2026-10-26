@@ -50,8 +50,8 @@ fn direct_invites_are_accepted_and_others_are_not() -> Result {
 
 	args.option.extend([
 		"listening=true".to_owned(),
-		"auto_accept_invites=true".to_owned(),
-		"auto_accept_invites_direct_only=true".to_owned(),
+		"rooms.invites.auto_accept=true".to_owned(),
+		"rooms.invites.auto_accept_direct_only=true".to_owned(),
 	]);
 
 	let runtime = Runtime::new(Some(&args))?;

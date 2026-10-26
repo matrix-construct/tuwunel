@@ -442,7 +442,7 @@ pub fn update(mut config: Figment, args: &Args) -> Result<Figment> {
 	if args.maintenance || args.read_only {
 		config = config.join(("maintenance", true));
 		config = config.join(("listening", false));
-		config = config.join(("startup_netburst", false));
+		config = config.join(("sending.startup_netburst", false));
 	}
 
 	#[cfg(feature = "console")]

@@ -423,7 +423,7 @@ fn validate_dest(&self, dest: &ServerName, allow_self: bool) -> Result {
 fn validate_self_destination(&self, dest: &ServerName, allow_self: bool) -> Result {
 	if !allow_self
 		&& dest == self.services.server.name
-		&& !self.services.server.config.federation_loopback
+		&& !self.services.server.config.federation.loopback
 	{
 		return Err!("Won't send federation request to ourselves");
 	}

@@ -27,7 +27,7 @@ struct Sequence {
 
 #[tokio::test]
 async fn original_and_expiry_are_visible_before_notification() -> Result {
-	let config = Figment::new().merge(("save_unredacted_events", true));
+	let config = Figment::new().merge(("rooms.redaction.save_unredacted_events", true));
 	let Some(fixture) = fixture(config).await? else {
 		return Ok(());
 	};
@@ -92,7 +92,7 @@ async fn original_and_expiry_are_visible_before_notification() -> Result {
 
 #[tokio::test]
 async fn disabled_retention_writes_neither_row() -> Result {
-	let config = Figment::new().merge(("save_unredacted_events", false));
+	let config = Figment::new().merge(("rooms.redaction.save_unredacted_events", false));
 	let Some(fixture) = fixture(config).await? else {
 		return Ok(());
 	};

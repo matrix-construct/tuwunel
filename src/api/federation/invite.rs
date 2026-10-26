@@ -151,13 +151,12 @@ async fn enforce_stripped_state(
 		);
 	}
 
-	if enforce_stripped_create(
-		verdict,
-		v12_room_ids(&body.room_version),
-		services
-			.config
-			.enforce_stripped_state_pdu_validation,
-	) {
+	let enforce = services
+		.config
+		.federation
+		.enforce_stripped_state_pdu_validation;
+
+	if enforce_stripped_create(verdict, v12_room_ids(&body.room_version), enforce) {
 		return Err!(Request(MissingParam(
 			"The invite's m.room.create event is missing or does not validate for this room."
 		)));
@@ -276,7 +275,7 @@ async fn check_invite_permitted(
 		return Err!(Request(Forbidden("This room is banned on this homeserver.")));
 	}
 
-	if services.config.block_non_admin_invites
+	if services.config.rooms.invites.block_non_admin
 		&& !services.admin.user_is_admin(invited_user).await
 	{
 		return Err!(Request(Forbidden("This server does not allow room invites.")));

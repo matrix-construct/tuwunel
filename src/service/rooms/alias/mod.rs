@@ -54,7 +54,7 @@ pub async fn creation_check(
 	user_id: &UserId,
 	appservice_info: Option<&RegistrationInfo>,
 ) -> Result {
-	if self.services.config.allow_room_alias_creation
+	if self.services.config.rooms.allow_alias_creation
 		|| appservice_info.is_some()
 		|| self.services.admin.user_is_admin(user_id).await
 	{

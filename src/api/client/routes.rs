@@ -30,7 +30,7 @@ pub fn build(server: &Server) -> Router<State> {
 
 	let router = register_client_misc_routes(router);
 	let router = register_rendezvous_routes(router);
-	let router = if config.allow_federation {
+	let router = if config.federation.enable {
 		router.route("/_tuwunel/local_user_count", get(client::tuwunel_local_user_count))
 	} else {
 		router

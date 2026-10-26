@@ -81,7 +81,11 @@ fn regenerated_configuration_round_trips_and_is_idempotent() {
 
 	let rendered = regenerate(from_ref(&input), &first);
 	let parsed = parse(&rendered);
-	let original = parse(&document.replace("port = 10443", "http.listen.port = 10443"));
+	let canonical = document
+		.replace("port = 10443", "http.listen.port = 10443")
+		.replace("trusted_servers =", "federation.keys.trusted_servers =");
+
+	let original = parse(&canonical);
 
 	assert_eq!(parsed, original);
 
@@ -90,7 +94,7 @@ fn regenerated_configuration_round_trips_and_is_idempotent() {
 	assert_eq!(values["server_name"].as_str(), Some("round-trip.example"));
 	assert_eq!(values["http"]["listen"]["port"].as_integer(), Some(10443));
 	assert_eq!(
-		values["trusted_servers"]
+		values["federation"]["keys"]["trusted_servers"]
 			.as_array()
 			.expect("trusted servers array")
 			.len(),
@@ -198,8 +202,8 @@ fn residue_is_preserved_but_dangerous_controls_are_dropped() {
 	assert!(rendered.contains("# UNDOCUMENTED: `allow_invalid_tls_certificates`"));
 	assert!(rendered.contains("# DEPRECATED: `name_attribute`"));
 	assert_eq!(values["unknown_future_option"].as_str(), Some("preserved"));
-	assert_eq!(values["resolve_state_locally"].as_bool(), Some(true));
-	assert_eq!(values["resolve_state_locally_shadow"].as_bool(), Some(true));
+	assert_eq!(values["federation"]["resolve_state_locally"].as_bool(), Some(true));
+	assert_eq!(values["federation"]["resolve_state_locally_shadow"].as_bool(), Some(true));
 	assert!(rendered.contains(
 		"# UNDOCUMENTED: `resolve_state_locally_shadow` is valid but omitted from the example"
 	));
@@ -245,7 +249,11 @@ fn residue_is_preserved_but_dangerous_controls_are_dropped() {
 		Some(true)
 	);
 
-	assert_eq!(stripped_values["resolve_state_locally_shadow"].as_bool(), Some(true),);
+	assert_eq!(
+		stripped_values["federation"]["resolve_state_locally_shadow"].as_bool(),
+		Some(true),
+	);
+
 	assert!(stripped_rendered.contains("unknown_future_option = \"preserved\""));
 	assert!(stripped_rendered.contains("name_attribute = \"cn\""));
 }

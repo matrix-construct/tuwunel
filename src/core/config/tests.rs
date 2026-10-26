@@ -22,6 +22,7 @@ use crate::{
 		media::UrlPreview,
 		proxy::{ProxySnapshot, parse_environment_proxy_url},
 	},
+	matrix::MAX_PREV_EVENTS,
 	utils::{
 		BoolExt,
 		hash::{password, verify_password},
@@ -322,13 +323,13 @@ resolve_state_locally_shadow = true
 	)
 	.unwrap();
 
-	assert!(!default.resolve_state_locally_shadow);
-	assert!(disabled.resolve_state_locally_shadow);
+	assert!(!default.federation.resolve_state_locally_shadow);
+	assert!(disabled.federation.resolve_state_locally_shadow);
 
 	let (result, logs) = check_with_captured_logs(&disabled);
 
 	result.expect("legacy state-local switch should pass config check");
-	assert!(logs.contains("use resolve_state_locally=false"));
+	assert!(logs.contains("use federation.resolve_state_locally=false"));
 }
 
 #[test]
@@ -444,7 +445,11 @@ fn prev_events_concurrency_is_nonzero_and_reloadable() {
 	let zero = config_from_toml("[global]\nprev_events_concurrency = 0\n").unwrap();
 	let one = config_from_toml("[global]\nprev_events_concurrency = 1\n").unwrap();
 
-	assert_eq!(default.prev_events_concurrency, u16::try_from(MAX_PREV_EVENTS).unwrap());
+	assert_eq!(
+		default.federation.history.prev_events_concurrency,
+		u16::try_from(MAX_PREV_EVENTS).unwrap()
+	);
+
 	assert!(check(&default).is_ok(), "default concurrency should pass validation");
 	assert!(check(&zero).is_err(), "zero concurrency should fail validation");
 	assert!(check(&one).is_ok(), "one recovery slot should pass validation");
@@ -699,7 +704,12 @@ max_profile_fields_per_request = 3
 fn thread_latest_reply_search_limit_is_positive_and_reloadable() {
 	let default = default_config();
 
-	assert_eq!(default.thread_latest_reply_search_limit, 1024);
+	let limit = default
+		.rooms
+		.redaction
+		.thread_latest_reply_search_limit;
+
+	assert_eq!(limit, 1024);
 
 	let changed = config_from_toml("[global]\nthread_latest_reply_search_limit = 3\n").unwrap();
 
@@ -712,7 +722,7 @@ fn thread_latest_reply_search_limit_is_positive_and_reloadable() {
 	assert!(
 		error
 			.to_string()
-			.contains("thread_latest_reply_search_limit")
+			.contains("rooms.redaction.thread_latest_reply_search_limit")
 	);
 
 	assert!(reload(&default, &zero).is_err());
@@ -877,7 +887,8 @@ default_power_level_content_override = false
 	let err = check(&config)
 		.expect_err("a non-table default_power_level_content_override must be rejected")
 		.to_string();
-	assert!(err.contains("default_power_level_content_override"), "{err}");
+
+	assert!(err.contains("rooms.default_power_level_content_override"), "{err}");
 }
 
 #[test]
@@ -1416,7 +1427,7 @@ fn an_unknown_jwt_key_format_fails_the_config_check() {
 /// "varies by system" and non-literal bodies are out of reach here.
 #[test]
 fn documented_defaults_match_the_code() {
-	const SOURCES: [&str; 8] = [
+	const SOURCES: [&str; 11] = [
 		include_str!("mod.rs"),
 		include_str!("rocksdb.rs"),
 		include_str!("cache.rs"),
@@ -1425,6 +1436,9 @@ fn documented_defaults_match_the_code() {
 		include_str!("http.rs"),
 		include_str!("network.rs"),
 		include_str!("media.rs"),
+		include_str!("federation.rs"),
+		include_str!("rooms.rs"),
+		include_str!("sending.rs"),
 	];
 
 	const SERDE_DEFAULT: &str = "#[serde(default = \"";

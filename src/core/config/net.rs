@@ -111,7 +111,8 @@ pub fn is_address_defaulted(&self) -> bool { self.http.listen.address.is_none() 
 #[implement(super::Config)]
 #[inline]
 pub fn require_federation(&self) -> Result {
-	self.allow_federation
+	self.federation
+		.enable
 		.into_option()
 		.ok_or_else(|| err!(Request(Forbidden("Federation is disabled."))))
 }
@@ -147,17 +148,20 @@ pub fn is_forbidden_remote_server_name(&self, server_name: &ServerName) -> bool 
 	}
 
 	let deny_list_active = self
+		.federation
 		.forbidden_remote_server_names
 		.is_empty()
 		.is_false();
 
 	let allow_list_active = self
+		.federation
 		.allowed_remote_server_names_experimental
 		.is_empty()
 		.is_false();
 
 	if deny_list_active
 		&& self
+			.federation
 			.forbidden_remote_server_names
 			.is_match(server_name.host())
 	{
@@ -165,9 +169,11 @@ pub fn is_forbidden_remote_server_name(&self, server_name: &ServerName) -> bool 
 	}
 
 	if allow_list_active
-		&& !self
+		&& self
+			.federation
 			.allowed_remote_server_names_experimental
 			.is_match(server_name.host())
+			.is_false()
 	{
 		return true;
 	}

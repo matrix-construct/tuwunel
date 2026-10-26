@@ -406,6 +406,8 @@ async fn handle_prev_events(
 		self.services
 			.server
 			.config
+			.federation
+			.history
 			.prev_events_concurrency,
 	);
 

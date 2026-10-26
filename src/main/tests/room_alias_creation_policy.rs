@@ -28,7 +28,7 @@ const BRIDGE: Bridge<'static> = Bridge {
 
 #[test]
 fn alias_creation_preserves_admin_and_appservice_access() -> Result {
-	boot("room-alias-creation-policy", ["allow_room_alias_creation=false"], exercise)
+	boot("room-alias-creation-policy", ["rooms.allow_alias_creation=false"], exercise)
 }
 
 async fn exercise(services: &Services, base: &str) -> Result {

@@ -25,7 +25,7 @@ fn media_delete_range_empty_set() -> Result {
 	let args = Args::default_test(&["fresh", "cleanup"])
 		.with_database_path(&db_path)
 		.with_maintenance()
-		.with_option("save_unredacted_events=true");
+		.with_option("rooms.redaction.save_unredacted_events=true");
 
 	let runtime = Runtime::new(Some(&args))?;
 	let server = Server::new(Some(&args), Some(&runtime))?;

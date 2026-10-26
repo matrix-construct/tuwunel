@@ -429,7 +429,8 @@ pub async fn notify_peer_alive(&self, server: &ServerName) -> bool {
 			.get(server)
 			.is_some_and(|last| {
 				last.is_none_or(|last| {
-					last.elapsed() >= Duration::from_secs(self.server.config.sender_timeout)
+					last.elapsed()
+						.ge(&Duration::from_secs(self.server.config.sending.timeout))
 				})
 			});
 

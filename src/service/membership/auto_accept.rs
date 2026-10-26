@@ -50,10 +50,10 @@ const ATTEMPTS: u32 = 5;
 pub fn auto_accept(&self, room_id: &RoomId, user_id: &UserId, sender: &UserId, is_direct: bool) {
 	let config = &self.services.config;
 
-	let accepts = config.auto_accept_invites
-		&& (is_direct || !config.auto_accept_invites_direct_only)
+	let accepts = config.rooms.invites.auto_accept
+		&& (is_direct || !config.rooms.invites.auto_accept_direct_only)
 		&& self.services.globals.user_is_local(user_id)
-		&& (!config.auto_accept_invites_local_only
+		&& (!config.rooms.invites.auto_accept_local_only
 			|| self.services.globals.user_is_local(sender));
 
 	if !accepts {

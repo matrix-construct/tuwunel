@@ -37,8 +37,8 @@ pub(super) async fn startup_netburst<'a>(
 	statuses: &mut TransactionStatuses,
 	wakes: &mut WakeQueue,
 ) {
-	let netburst = self.server.config.startup_netburst;
-	let keep = usize::try_from(self.server.config.startup_netburst_keep).ok();
+	let netburst = self.server.config.sending.startup_netburst;
+	let keep = usize::try_from(self.server.config.sending.startup_netburst_keep).ok();
 	let txns = self
 		.db
 		.active_requests()
@@ -178,7 +178,7 @@ pub(super) async fn arm_startup_wake(
 			index
 		},
 		| ShouldAttempt::Yes | ShouldAttempt::Deprioritize => {
-			let delay = boot_delay(self.server.config.sender_timeout, index);
+			let delay = boot_delay(self.server.config.sending.timeout, index);
 
 			arm_wake_in(wakes, dest, delay);
 			index.saturating_add(1)

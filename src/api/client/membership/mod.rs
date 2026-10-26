@@ -99,6 +99,7 @@ async fn maybe_deactivate(services: &Services, user_id: &UserId, client_ip: IpAd
 	if services
 		.server
 		.config
+		.rooms
 		.auto_deactivate_banned_room_attempts
 	{
 		let notice = format!(

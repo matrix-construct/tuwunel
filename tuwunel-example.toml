@@ -82,106 +82,6 @@
 #
 #client_sync_timeout_max = 90000
 
-# reloadable: yes
-#
-# This limits how many prior events one recovery traversal visits. Raising
-# it increases recovery work; it is not a count of network requests.
-#
-#max_fetch_prev_events = 1024
-
-# Maximum relation rows each thread scan of a redaction reads.
-#
-# Replacing a redacted latest thread reply, and correcting each of a
-# member's unread counters after a redacted reply, each read at most this
-# many rows; missing, malformed, unrelated, and redacted events consume
-# the budget before event filtering. When it runs out, the thread summary
-# is omitted and the thread's unread count may stay one too high until a
-# thread or unthreaded receipt clears it.
-#
-# reloadable: yes
-#
-#thread_latest_reply_search_limit = 1024
-
-# Simultaneous backward-extremity upgrades during incoming-event recovery.
-#
-# Lower values reduce recovery load at the cost of latency. This does not
-# change the protocol `prev_events` bound or the traversal budget above.
-#
-# reloadable: yes
-#
-#prev_events_concurrency = 20
-
-# Maximum time, in milliseconds, to wait for the missing prev_events of an
-# incoming timeline event to arrive on their own before fetching them over
-# federation. A gap that closes within this window skips the fetch. The
-# wait is event-driven and wakes the instant the events arrive, so this is
-# a ceiling on added latency, not a fixed cost. Set to 0 to fetch
-# immediately.
-#
-# reloadable: yes
-#
-#fetch_prev_wait_ms = 750
-
-# Federation client request timeout (seconds). This applies to each read
-# from the remote server rather than to the request as a whole, which
-# remains bounded by `request_total_timeout`.
-#
-#federation_timeout = 25
-
-# Timeout (seconds) for client-initiated federation key lookups, namely
-# /keys/query and /keys/claim against remote servers. Should be well
-# below `federation_timeout` so an interactive request to an unresponsive
-# server does not outlast the requesting client's own send deadline. A
-# lookup that exceeds this bound records a transient federation failure
-# for that server, so subsequent lookups back off instead of blocking
-# again.
-#
-#federation_keys_timeout = 8
-
-# Timeout (seconds) for each request in a bounded federation fanout.
-#
-# This applies to admin surveys and migrated room fanouts. A server that
-# exceeds the deadline is reported as timed out while other destinations
-# continue. Keep this below `federation_timeout` and above
-# `federation_keys_timeout`.
-#
-# reloadable: yes
-#
-#feds_timeout = 15
-
-# Federation client idle connection pool timeout (seconds).
-#
-#federation_idle_timeout = 25
-
-# Federation client max idle connections per host. Defaults to 1 as
-# generally the same open connection can be re-used.
-#
-#federation_idle_per_host = 1
-
-# Federation sender request timeout (seconds). The time it takes for the
-# remote server to process sent transactions can take a while.
-#
-#sender_timeout = 180
-
-# Federation sender idle connection pool timeout (seconds).
-#
-#sender_idle_timeout = 180
-
-# Federation sender transaction retry backoff limit (seconds).
-#
-# reloadable: yes
-#
-#sender_retry_backoff_limit = 86400
-
-# Grace period (seconds) before the first retry of a federation
-# destination that has failed exactly once, applied in place of the
-# quadratic backoff curve so a single transient failure does not hold
-# delivery until the next backoff window. A second consecutive failure
-# returns to the backoff curve. Set to 0 to disable the grace and back off
-# from the first failure.
-#
-#sender_retry_grace = 15
-
 # Appservice URL read and total timeout, defaulting to 35 seconds as
 # generally appservices are hosted within the same network.
 #
@@ -194,12 +94,6 @@
 # Notification gateway pusher idle connection pool timeout.
 #
 #pusher_idle_timeout = 15
-
-# Grace period for clean shutdown of federation requests (seconds).
-#
-# reloadable: yes
-#
-#sender_shutdown_timeout = 5
 
 # Enables registration. If set to false, no users can register on this
 # server.
@@ -337,138 +231,6 @@
 # reloadable: yes
 #
 #encryption_enabled_by_default_for_room_type = "none"
-
-# Controls whether federation is allowed or not. It is not recommended to
-# disable this after installation due to potential federation breakage but
-# this is technically not a permanent setting.
-#
-#allow_federation = true
-
-# (EXPERIMENTAL) Resolve the base event of a room context request by
-# fetching it from federation when the server never received it.
-#
-# When a client requests
-# `/_matrix/client/v3/rooms/{roomId}/context/{eventId}` for an event
-# the server does not hold locally, the server fetches it from a room
-# peer and persists it before responding, rather than returning a
-# 404. This is gated on `allow_federation`; with federation disabled
-# it has no effect. Other on-demand federation fetch sites are gated
-# separately.
-#
-# reloadable: yes
-#
-#fetch_unreceived_contexts_over_federation = false
-
-# Per-round ceiling on how many servers a federation event fetch contacts
-# concurrently. Tightens the built-in fan-out profile of every fetch kind;
-# it never widens one. 0 leaves the profiles unchanged.
-#
-# reloadable: yes
-#
-#fetch_fanout_max_width = 0
-
-# Ceiling on how many staged rounds a federation event fetch runs before
-# giving up. Tightens the built-in round count of every fetch kind; it
-# never raises one. 0 leaves the profiles unchanged.
-#
-# reloadable: yes
-#
-#fetch_fanout_rounds = 0
-
-# Maximum concurrency for bounded federation fanouts.
-#
-# This caps admin surveys and migrated room and key fanouts. Lower values
-# trade sweep latency for load without dropping destinations. 0 selects
-# the built-in bounded default.
-#
-# reloadable: yes
-#
-#feds_max_width = 0
-
-# Maximum destinations an admin feds survey contacts without confirmation.
-#
-# A room exceeding this requires the command's confirmation flag. Higher
-# values permit longer diagnostic commands on the serial admin worker.
-#
-# reloadable: yes
-#
-#feds_destination_limit = 2048
-
-# Derive the state at an incoming federation event from locally held
-# events when its previous events are stored but not yet resolved,
-# instead of requesting /state_ids from the origin server. Only an event
-# whose entire unresolved local ancestry is present participates; any
-# other case still falls back to the federation state fetch. Disabling
-# this restores the previous behavior of always fetching.
-#
-# reloadable: yes
-#
-#resolve_state_locally = true
-
-# Ceiling on how many unresolved local events one local state derivation
-# may visit before falling back to the federation state fetch. Bounds
-# worst-case memory and latency in rooms with a large unresolved
-# backlog. 0 disables local derivation entirely.
-#
-# reloadable: yes
-#
-#resolve_state_locally_max = 256
-
-# Soft cap on the number of forward extremities tracked per room. When
-# applying an incoming federation event would leave the room's frontier
-# larger than this, the least useful leaves are pruned from the tracked
-# set until it is back at the cap. Pruned events are not deleted and can
-# still be referenced by other servers; this server merely stops citing
-# them as frontier tips. Events created by this server are never pruned.
-# 0 disables automatic pruning.
-#
-# reloadable: yes
-#
-#forward_extremities_max = 60
-
-# Emergency bound on the per-room frontier. A frontier larger than this
-# is cut down to it in a single step, ignoring the per-event pruning
-# batch limit. Values at or below forward_extremities_max remove the
-# pacing entirely, pruning straight to the cap in one step.
-#
-# reloadable: yes
-#
-#forward_extremities_emergency_max = 256
-
-# Upper bound on how many forward extremities one incoming event may
-# prune while the frontier is between the cap and the emergency bound.
-# Spreads convergence across events to bound the work done by any single
-# one. 0 stops paced pruning, leaving only the emergency bound.
-#
-# reloadable: yes
-#
-#forward_extremities_prune_batch = 32
-
-# Sets the default `m.federate` property for newly created rooms when the
-# client does not request one. If `allow_federation` is set to false at
-# the same time this value is set to false, it then always overrides the
-# client-requested `m.federate` value to false.
-#
-# Rooms are fixed to the setting at the time of their creation and can
-# never be changed; changing this value only affects new rooms.
-# reloadable: yes
-#
-#federate_created_rooms = true
-
-# Allows federation requests to be made to itself
-#
-# This isn't intended and is very likely a bug if federation requests are
-# being sent to yourself. This currently mainly exists for development
-# purposes.
-# reloadable: yes
-#
-#federation_loopback = false
-
-# Always calls /forget on behalf of the user if leaving a room. This is a
-# part of MSC4267 "Automatically forgetting rooms on leave"
-# reloadable: yes
-#
-#forget_forced_upon_leave = false
 
 # Set this to true to require authentication on the normally
 # unauthenticated profile retrieval endpoints (GET)
@@ -646,104 +408,6 @@
 #
 #allow_inbound_profile_lookup_federation_requests = true
 
-# Allow standard users to create rooms. Appservices and admins are always
-# allowed to create rooms
-# reloadable: yes
-#
-#allow_room_creation = true
-
-# Allow standard users to create room aliases. Appservices and admins are
-# always allowed to create room aliases.
-# reloadable: yes
-#
-#allow_room_alias_creation = true
-
-# Set to false to disable users from joining or creating room versions
-# that aren't officially supported by tuwunel. Unstable room versions may
-# have flawed specifications or our implementation may be non-conforming.
-# Correct operation may not be guaranteed, but incorrect operation may be
-# tolerable and unnoticed.
-#
-# tuwunel officially supports room versions 6+. tuwunel has slightly
-# experimental (though works fine in practice) support for versions 3 - 5.
-#
-# reloadable: yes
-#
-#allow_unstable_room_versions = true
-
-# Set to true to enable experimental room versions.
-#
-# Unlike unstable room versions these versions are either under
-# development, protype spec-changes, or somehow present a serious risk to
-# the server's operation or database corruption. This is for developer use
-# only.
-# reloadable: yes
-#
-#allow_experimental_room_versions = false
-
-# MSC4284: ask the room's policy server to sign outgoing events. When a
-# room has a valid `m.room.policy` state event, the homeserver requests a
-# signature from that policy server's federation `/sign` endpoint before
-# federating each event. Refusal aborts the local request; network or
-# timeout failures fail open with a warn log so a transient policy-server
-# outage does not silently take the room offline.
-#
-# reloadable: yes
-#
-#enable_policy_servers = false
-
-# MSC4284: timeout (seconds) for requests to a room's policy server.
-# Applies to both outbound `/sign` calls and inbound signature-fetches.
-#
-# reloadable: yes
-#
-#policy_server_request_timeout = 5
-
-# MSC3925: fold the most recent message edit (an `m.replace` relation)
-# into `unsigned.m.relations` on a served event as the full replacement
-# event, on the client read endpoints. Off by default: it adds a typed
-# index seek per served event and a server-authoritative edit summary that
-# most clients reconstruct locally anyway, so it is opt-in.
-#
-# reloadable: yes
-#
-#bundle_edit_relations = false
-
-# MSC2675/MSC3267: fold reference relations (`m.reference`) into
-# `unsigned.m.relations` on a served event as `{ chunk: [{ event_id },
-# ...] }`, on the client read endpoints. Off by default: no surveyed
-# client renders reference bundles (references are plumbing for polls,
-# beacons, and verification, which clients resolve directly), so most
-# deployments gain nothing from the added read-time cost.
-#
-# reloadable: yes
-#
-#bundle_reference_relations = false
-
-# Default room version tuwunel will create rooms with.
-#
-# The default is prescribed by the spec, but may be selected by developer
-# recommendation. To prevent stale documentation we no longer list it
-# here. It is only advised to override this if you know what you are
-# doing, and by doing so, updates with new versions are precluded.
-# reloadable: yes
-#
-#default_room_version =
-
-# Default power-level overrides applied when this homeserver creates a new
-# room.
-#
-# Uses the same top-level shape as the client `/createRoom`
-# `power_level_content_override` parameter and is merged before any
-# per-request override, so a client can still override it per room. Only
-# affects newly created rooms. Top-level keys replace wholesale rather
-# than deep-merging (matching the client parameter): setting `users` or
-# `events` replaces the entire computed default submap for that key.
-#
-# reloadable: yes
-#
-#default_power_level_content_override = { users_default = 50 }
-
 # Enables OTLP span export for Jaeger-compatible tracing.
 #
 # A build with performance measurements installs an OpenTelemetry layer
@@ -804,63 +468,6 @@
 #   `hello.myspecial.onion`.
 #
 #proxy = "none"
-
-# Servers listed here will be used to gather public keys of other servers
-# (notary trusted key servers).
-#
-# Currently, tuwunel doesn't support inbound batched key requests, so
-# this list should only contain other Synapse servers.
-#
-# reloadable: yes
-# example: ["matrix.org", "tchncs.de"]
-#
-#trusted_servers = ["matrix.org"]
-
-# Whether to query the servers listed in trusted_servers first or query
-# the origin server first. For best security, querying the origin server
-# first is advised to minimize the exposure to a compromised trusted
-# server. For maximum federation/join performance this can be set to true,
-# however other options exist to query trusted servers first under
-# specific high-load circumstances and should be evaluated before setting
-# this to true.
-# reloadable: yes
-#
-#query_trusted_key_servers_first = false
-
-# Whether to query the servers listed in trusted_servers first
-# specifically on room joins. This option limits the exposure to a
-# compromised trusted server to room joins only. The join operation
-# requires gathering keys from many origin servers which can cause
-# significant delays. Therefor this defaults to true to mitigate
-# unexpected delays out-of-the-box. The security-paranoid or those willing
-# to tolerate delays are advised to set this to false. Note that setting
-# query_trusted_key_servers_first to true causes this option to be
-# ignored.
-# reloadable: yes
-#
-#query_trusted_key_servers_first_on_join = true
-
-# Only query trusted servers for keys and never the origin server. This is
-# intended for clusters or custom deployments using their trusted_servers
-# as forwarding-agents to cache and deduplicate requests. Notary servers
-# do not act as forwarding-agents by default, therefor do not enable this
-# unless you know exactly what you are doing.
-# reloadable: yes
-#
-#only_query_trusted_key_servers = false
-
-# Maximum number of keys to request in each trusted server batch query.
-#
-# reloadable: yes
-#
-#trusted_server_batch_size = 192
-
-# Maximum number of request batches in flight simultaneously when querying
-# a trusted server.
-#
-# reloadable: yes
-#
-#trusted_server_batch_concurrency = 2
 
 # Max log level for tuwunel. Allows debug, info, warn, or error.
 #
@@ -1354,26 +961,6 @@
 #
 #auto_join_rooms = []
 
-# Config option to automatically deactivate the account of any user who
-# attempts to join a:
-# - banned room
-# - forbidden room alias
-# - room alias or ID with a forbidden server name
-#
-# This may be useful if all your banned lists consist of toxic rooms or
-# servers that no good faith user would ever attempt to join, and
-# to automatically remediate the problem without any admin user
-# intervention.
-#
-# This will also make the user leave all rooms. Federation (e.g. remote
-# room invites) are ignored here.
-#
-# Defaults to false as rooms can be banned for non-moderation-related
-# reasons and this performs a full user deactivation.
-# reloadable: yes
-#
-#auto_deactivate_banned_room_attempts = false
-
 # This is a password that can be configured that will let you login to the
 # server bot account (currently `@conduit`) for emergency troubleshooting
 # purposes such as recovering/recreating your admin room, or inviting
@@ -1554,47 +1141,6 @@
 #
 #allow_guests_auto_join_rooms = false
 
-# List of forbidden server names via regex patterns that we will block
-# incoming AND outgoing federation with, and block client room joins /
-# remote user invites.
-#
-# This check is applied on the room ID, room alias, sender server name,
-# sender user's server name, inbound federation X-Matrix origin, and
-# outbound federation handler.
-#
-# Basically "global" ACLs.
-#
-# The server's own name is always permitted and is never subject to this
-# list.
-#
-# reloadable: yes
-# example: ["badserver\.tld$", "badphrase", "19dollarfortnitecards"]
-#
-#forbidden_remote_server_names = []
-
-# (EXPERIMENTAL) The behavior of this option will change; the
-# _experimental suffix will be removed for that change in an upcoming
-# release.
-#
-# List of allowed server names via regex patterns. This is an allow-list
-# rather than a deny-list with all the same details as its counterpart in
-# `forbidden_remote_server_names`.
-#
-# This feature becomes active when this list has one or more entries;
-# everything not matching is denied. By default it is empty and inactive.
-#
-# The server's own name is always permitted and is never subject to this
-# list.
-#
-# Entries in `forbidden_remote_server_names` are still applied after
-# this is applied. This allows you to match e.g. "*\.example\.com" here
-# while still singling out "bad\.example\.com" for exclusion.
-#
-# reloadable: yes
-# example: ["badserver\.tld$", "badphrase", "19dollarfortnitecards"]
-#
-#allowed_remote_server_names_experimental = []
-
 # List of forbidden server names via regex patterns that we will block all
 # outgoing federated room directory requests for. Useful for preventing
 # our users from wandering into bad servers or spaces.
@@ -1603,21 +1149,6 @@
 # example: ["badserver\.tld$", "badphrase", "19dollarfortnitecards"]
 #
 #forbidden_remote_room_directory_server_names = []
-
-# List of forbidden room aliases and room IDs as strings of regex
-# patterns.
-#
-# Regex can be used or explicit contains matches can be done by just
-# specifying the words (see example).
-#
-# This is checked upon room alias creation, custom room ID creation if
-# used, and startup as warnings if any room aliases in your database have
-# a forbidden room alias/ID.
-#
-# reloadable: yes
-# example: ["19dollarfortnitecards", "b[4a]droom", "badphrase"]
-#
-#forbidden_alias_names = []
 
 # List of forbidden username patterns/strings.
 #
@@ -1632,113 +1163,6 @@
 # example: ["administrator", "b[a4]dusernam[3e]", "badphrase"]
 #
 #forbidden_usernames = []
-
-# List of server names to deprioritize joining through.
-#
-# If a client requests a join through one of these servers,
-# they will be tried last.
-#
-# Useful for preventing failed joins due to timeouts
-# from a certain homeserver.
-#
-# reloadable: yes
-#
-#deprioritize_joins_through_servers = ["matrix\\.org"]
-
-# Maximum make_join requests to attempt within each join attempt. Each
-# attempt tries a different server, as each server is only tried once;
-# though retries can occur when the join request as a whole is retried.
-#
-# reloadable: yes
-#
-#max_make_join_attempts_per_join_attempt = 48
-
-# Maximum join attempts to conduct per client join request. Each join
-# attempt consists of one or more make_join requests limited above, and a
-# single send_join request. This value allows for additional servers to
-# act as the join-server prior to reporting the last error back to the
-# client, which can be frustrating for users. Therefor the default value
-# is greater than one, but less than excessively exceeding the client's
-# request timeout, though that may not be avoidable in some cases.
-#
-# reloadable: yes
-#
-#max_join_attempts_per_join_request = 3
-
-# Retry failed and incomplete messages to remote servers immediately upon
-# startup.
-#
-# This is called bursting. If this is disabled, queued messages are retried
-# on a paced timer after startup instead of all at once. Do not
-# change this option unless server resources are extremely limited or the
-# scale of the server's deployment is huge. Do not disable this unless you
-# know what you are doing.
-#
-#startup_netburst = true
-
-# Messages are dropped and not reattempted. The `startup_netburst` option
-# must be enabled for this value to have any effect. Do not change this
-# value unless you know what you are doing. Set this value to -1 to
-# reattempt every message without trimming the queues; this may consume
-# significant disk. Set this value to 0 to drop all messages without any
-# attempt at redelivery.
-#
-#startup_netburst_keep = 50
-
-# Block non-admin local users from sending room invites (local and
-# remote), and block non-admin users from receiving remote room invites.
-#
-# Admins are always allowed to send and receive all room invites.
-# reloadable: yes
-#
-#block_non_admin_invites = false
-
-# Automatically join local users to any room they are invited to.
-#
-# The join runs in the background once the invite is recorded, and is
-# retried for a short while when a federated invite has not yet settled
-# on the inviting server. Users who are deactivated, suspended, or locked
-# are never joined.
-#
-# reloadable: yes
-#
-#auto_accept_invites = false
-
-# Restrict `auto_accept_invites` to direct-message invites.
-#
-# The invite must carry `is_direct` in its membership content, which
-# clients set when starting a direct chat. Invites to any other room are
-# left for the user to answer.
-#
-# reloadable: yes
-#
-#auto_accept_invites_direct_only = false
-
-# Restrict `auto_accept_invites` to invites sent by local users.
-#
-# Invites arriving from another server are left for the user to answer.
-#
-# reloadable: yes
-#
-#auto_accept_invites_local_only = false
-
-# Enforce MSC4311 validation of the create event in federated invite and
-# knock stripped state.
-#
-# When enabled, an invite whose m.room.create event is missing, not a
-# full PDU, bound to a different room, or fails signature checks is
-# rejected, and such events are dropped from knock stripped state. When
-# disabled (the default), failures are logged but tolerated to preserve
-# interoperability during ecosystem migration; a create event that is
-# present as a full PDU but cryptographically bound to a different room is
-# always rejected for room version 12 and above regardless of this
-# setting. A full PDU in knock stripped state that fails its checks is
-# always omitted, so for knocks this setting governs only a create sent in
-# the legacy stripped form.
-#
-# reloadable: yes
-#
-#enforce_stripped_state_pdu_validation = false
 
 # Allow admins to run commands outside the admin room ("#admins") by
 # prefixing a message with "\!admin" or "\\!admin" and a normal command.
@@ -1942,55 +1366,6 @@
 #
 #admin_output_threads = false
 
-# Save original events before applying redaction to them.
-#
-# They can be retrieved with `admin debug get-retained-pdu` or MSC2815.
-#
-# reloadable: yes
-#
-#save_unredacted_events = true
-
-# Redaction retention period in seconds.
-#
-# By default the unredacted events are stored for 60 days.
-#
-# reloadable: yes
-#
-#redaction_retention_seconds = 5184000
-
-# Allows users with `redact` power level to request unredacted events with
-# MSC2815.
-#
-# Server admins can request unredacted events regardless of the value of
-# this option.
-#
-# reloadable: yes
-#
-#allow_room_admins_to_request_unredacted_events = true
-
-# Prevents local users from sending redactions.
-#
-# This check does not apply to server admins.
-# reloadable: yes
-#
-#disable_local_redactions = false
-
-# Serve erased senders' events as pruned copies over federation
-# (MSC4025). A requesting server retains the unredacted view only when
-# one of its users was joined in the room state at the event; join
-# handshakes are not gated.
-#
-# reloadable: yes
-#
-#enforce_erasure_over_federation = true
-
-# Number of sender task workers; determines sender parallelism. Default is
-# '0' which means the value is determined internally, likely matching the
-# number of tokio worker-threads or number of cores, etc. Override by
-# setting a non-zero value.
-#
-#sender_workers = 0
-
 # Enables listener sockets; can be set to false to disable listening. This
 # option is intended for developer/diagnostic purposes only.
 #
@@ -2022,19 +1397,6 @@
 # reloadable: yes
 #
 #hydra_backports = true
-
-# Delete rooms when the last user from this server leaves. This feature is
-# experimental and for the purpose of least-surprise is not enabled by
-# default but can be enabled for deployments interested in conserving
-# space. It may eventually default to true in a future release.
-#
-# Note that not all pathways which can remove the last local user
-# currently invoke this operation, so in some cases you may find the room
-# still exists.
-#
-# reloadable: yes
-#
-#delete_rooms_after_leave = false
 
 # Limits the number of One Time Keys per device (not per-algorithm). The
 # reference implementation maintains 50 OTK's at any given time, therefor
@@ -2424,6 +1786,295 @@
 # low can inhibit throughput.
 #
 #queue_mult = 4
+
+
+
+#[global.federation]
+
+# Allows federation with other servers.
+#
+# Disabling this after installation risks federation breakage and is not
+# recommended, although the setting is not permanent.
+#
+#enable = true
+
+# Derives incoming federation event state from locally held unresolved
+# ancestry.
+#
+# When previous events are stored but unresolved, we derive state locally
+# instead of requesting `/state_ids` from the origin server. This
+# requires the entire unresolved local ancestry to be present; every
+# other case falls back to a federation state fetch. Disabling this
+# restores the previous behavior of always fetching.
+#
+# reloadable: yes
+#
+#resolve_state_locally = true
+
+# Limits unresolved local events visited by one local state derivation
+# before falling back to federation.
+#
+# This bounds worst-case memory and latency in rooms with a large
+# unresolved backlog. A value of 0 disables local derivation entirely.
+#
+# reloadable: yes
+#
+#resolve_state_locally_max = 256
+
+# Allows federation requests to this server itself.
+#
+# This exists mainly for development. Requests to ourselves are
+# unintended in ordinary operation and very likely indicate a bug.
+#
+# reloadable: yes
+#
+#loopback = false
+
+# Blocks server names matching listed regular expressions from incoming
+# and outgoing federation and client joins or remote invites.
+#
+# These global access controls check room IDs, room aliases, sender
+# server names, sender users' server names, inbound federation X-Matrix
+# origins, and the outbound federation handler. This server's own name is
+# always permitted and exempt from the list.
+#
+# reloadable: yes
+# example: ["badserver\.tld$", "badphrase", "19dollarfortnitecards"]
+#
+#forbidden_remote_server_names = []
+
+# Experimentally permits only server names matching listed regular
+# expressions.
+#
+# The behavior will change and the `_experimental` suffix will be removed
+# in an upcoming release; the matching details otherwise follow
+# `federation.forbidden_remote_server_names`. The list is empty and
+# inactive by default; any entry activates it and denies nonmatches,
+# while this server's own name is always permitted. The denylist still
+# applies afterward, allowing a broad match such as "^([^.]+\.)+example\.com$"
+# here and an exclusion such as "^bad\.example\.com$" there.
+#
+# reloadable: yes
+# example: ["badserver\.tld$", "badphrase", "19dollarfortnitecards"]
+#
+#allowed_remote_server_names_experimental = []
+
+# Enforces
+# [MSC4311](https://github.com/matrix-org/matrix-spec-proposals/pull/4311)
+# create-event validation in federated invite and knock stripped state.
+#
+# When enabled, an invite is rejected if its `m.room.create` event is
+# missing, not a full PDU, bound to a different room, or fails signature
+# checks, and such events are dropped from knock stripped state. When
+# disabled, as by default, failures are logged but tolerated for
+# ecosystem interoperability; a full PDU bound cryptographically to a
+# different room is always rejected for room versions 12 and later. A
+# full PDU in knock stripped state that fails validation is always
+# omitted, so this setting governs only legacy stripped creates for
+# knocks.
+#
+# reloadable: yes
+#
+#enforce_stripped_state_pdu_validation = false
+
+
+
+#[global.federation.fanout]
+
+# Sets the timeout in seconds for each bounded federation fanout request.
+#
+# This applies to admin surveys and migrated room fanouts. A server that
+# exceeds the deadline is reported as timed out while other destinations
+# continue. Keep this below `federation.transport.timeout` and above
+# `federation.transport.keys_timeout`.
+#
+# reloadable: yes
+#
+#timeout = 15
+
+# Limits concurrency for bounded federation fanouts.
+#
+# This caps admin surveys and migrated room and key fanouts. Lower values
+# trade sweep latency for load without dropping destinations. 0 selects
+# the built-in bounded default.
+#
+# reloadable: yes
+#
+#max_width = 0
+
+# Limits destinations contacted by an admin feds survey without
+# confirmation.
+#
+# A room exceeding this requires the command's confirmation flag. Higher
+# values permit longer diagnostic commands on the serial admin worker.
+#
+# reloadable: yes
+#
+#destination_limit = 2048
+
+
+
+#[global.federation.history]
+
+# Limits prior events visited by one recovery traversal.
+#
+# reloadable: yes
+#
+# Raising this limit increases recovery work; it is not a count of network
+# requests.
+#
+#max_fetch_prev_events = 1024
+
+# Limits simultaneous backward-extremity upgrades during incoming-event
+# recovery.
+#
+# Lower values reduce recovery load at the cost of latency. This does not
+# change the protocol `prev_events` bound or
+# `federation.history.max_fetch_prev_events`.
+#
+# reloadable: yes
+#
+#prev_events_concurrency = 20
+
+# Limits how many milliseconds an incoming timeline event waits for
+# missing previous events before federation fetching.
+#
+# A gap closing within this window skips the fetch. The event-driven wait
+# wakes as soon as those events arrive, so the limit is a ceiling on
+# added latency rather than a fixed cost. Set to 0 to fetch immediately.
+#
+# reloadable: yes
+#
+#fetch_prev_wait_ms = 750
+
+# Enables experimental federation fetching of missing base events for
+# room context requests.
+#
+# For `/_matrix/client/v3/rooms/{roomId}/context/{eventId}` requests
+# whose event is not held locally, we fetch it from a room peer and
+# persist it before responding instead of returning a 404. This requires
+# `federation.enable` and has no effect when federation is disabled.
+# Other on-demand federation fetch sites are gated separately.
+#
+# reloadable: yes
+#
+#fetch_unreceived_contexts = false
+
+# Limits concurrent server contacts per round of a federation event
+# fetch.
+#
+# This tightens the built-in fanout profile of every fetch kind and never
+# widens one. A value of 0 leaves the profiles unchanged.
+#
+# reloadable: yes
+#
+#fetch_fanout_max_width = 0
+
+# Limits staged rounds attempted by a federation event fetch before
+# giving up.
+#
+# This tightens the built-in round count of every fetch kind and never
+# raises one. A value of 0 leaves the profiles unchanged.
+#
+# reloadable: yes
+#
+#fetch_fanout_rounds = 0
+
+
+
+#[global.federation.keys]
+
+# Selects trusted notary servers used to gather other servers' public
+# keys.
+#
+# We do not currently support inbound batched key requests, so this list
+# should contain only Synapse servers.
+#
+# reloadable: yes
+# example: ["matrix.org", "tchncs.de"]
+#
+#trusted_servers = ["matrix.org"]
+
+# Queries configured trusted key servers before the origin when enabled.
+#
+# Querying the origin first offers the best security by reducing exposure
+# to a compromised trusted server. Enabling this can maximize federation
+# and join performance, but evaluate the other settings that query
+# trusted servers first only under specific high-load conditions before
+# enabling it globally.
+#
+# reloadable: yes
+#
+#query_trusted_servers_first = false
+
+# Queries configured trusted key servers before origins specifically
+# during room joins.
+#
+# This limits exposure to compromised trusted servers to joins, whose
+# many origin-key lookups can cause significant delays; it defaults to
+# true to mitigate unexpected delays. Set to false when minimizing that
+# exposure matters more than latency. This setting is ignored when
+# `federation.keys.query_trusted_servers_first` is true.
+#
+# reloadable: yes
+#
+#query_trusted_servers_first_on_join = true
+
+# Queries only trusted key servers and never the origin.
+#
+# This is intended for clusters or custom deployments using
+# `federation.keys.trusted_servers` as forwarding agents to cache and
+# deduplicate requests. Notary servers do not act as forwarding agents by
+# default, so enable this only with a full understanding of the
+# deployment.
+#
+# reloadable: yes
+#
+#only_query_trusted_servers = false
+
+# Limits keys requested in each trusted-server batch query.
+#
+# reloadable: yes
+#
+#trusted_server_batch_size = 192
+
+# Limits simultaneous request batches when querying a trusted server.
+#
+# reloadable: yes
+#
+#trusted_server_batch_concurrency = 2
+
+
+
+#[global.federation.transport]
+
+# Sets the federation client read timeout in seconds.
+#
+# This applies to each read from a remote server rather than the whole
+# request, which remains bounded by `network.http.total_timeout`.
+#
+#timeout = 25
+
+# Sets the timeout in seconds for client-initiated federation key
+# lookups.
+#
+# This covers `/keys/query` and `/keys/claim` against remote servers and
+# should be well below `federation.transport.timeout`, so an unresponsive
+# server does not outlast the requesting client's send deadline.
+# Exceeding this bound records a transient federation failure for the
+# remote server, making subsequent lookups back off instead of blocking
+# again.
+#
+#keys_timeout = 8
+
+# Sets the federation client idle connection pool timeout (seconds).
+#
+#idle_timeout = 25
+
+# Limits idle federation client connections per host, defaulting to one
+# because an open connection can generally be reused.
+#
+#idle_per_host = 1
 
 
 
@@ -4089,6 +3740,370 @@
 
 
 
+#[global.rooms]
+
+# Sets the default `m.federate` property for newly created rooms when the
+# client does not request one.
+#
+# When both this setting and `federation.enable` are false, we always
+# override the client-requested `m.federate` value to false. Rooms
+# permanently retain the setting chosen at creation, so changing this
+# value affects only new rooms.
+#
+# reloadable: yes
+#
+#federate_by_default = true
+
+# Calls `/forget` on the user's behalf whenever they leave a room.
+#
+# This implements
+# [MSC4267](https://github.com/matrix-org/matrix-spec-proposals/pull/4267),
+# automatically forgetting rooms on leave.
+#
+# reloadable: yes
+#
+#forget_forced_upon_leave = false
+
+# Allows standard users to create rooms.
+#
+# Appservices and admins can always create rooms.
+#
+# reloadable: yes
+#
+#allow_creation = true
+
+# Allows standard users to create room aliases.
+#
+# Appservices and admins can always create room aliases.
+#
+# reloadable: yes
+#
+#allow_alias_creation = true
+
+# Allows joining or creating room versions we do not officially support.
+#
+# Unstable versions may have flawed specifications or a non-conforming
+# implementation, so correct operation is not guaranteed even when
+# incorrect behavior is tolerable or unnoticed. We officially support
+# versions 6 and later, with slightly experimental support for versions 3
+# through 5 that works in practice. Set to false to disable these
+# unsupported versions.
+#
+# reloadable: yes
+#
+#allow_unstable_versions = true
+
+# Enables experimental room versions for developer use.
+#
+# Unlike unstable versions, these may be under development, prototype
+# specification changes, or present serious risks to server operation or
+# database integrity. Set to true only for developer use.
+#
+# reloadable: yes
+#
+#allow_experimental_versions = false
+
+# Selects the room version used by default when creating rooms.
+#
+# The default follows the specification but may follow developer
+# recommendations.
+# Override it only with an understanding that doing so precludes updates
+# to newer versions.
+#
+# reloadable: yes
+#
+#default_version =
+
+# Sets default power-level overrides for newly created rooms.
+#
+# This uses the client `/createRoom` parameter's
+# `power_level_content_override` shape and is merged before per-request
+# overrides, so clients can still override it per room. Only new rooms
+# are affected. Top-level keys replace wholesale rather than deep-merge,
+# matching the client parameter: `users` or `events` replaces that entire
+# computed default submap.
+#
+# reloadable: yes
+#
+#default_power_level_content_override = { users_default = 50 }
+
+# Deactivates users who try to join banned rooms or forbidden room
+# aliases or server names.
+#
+# This includes room aliases or IDs with forbidden server names and makes
+# the user leave all rooms; federation activity such as remote invites is
+# ignored. It can remove the need for admin intervention when banned
+# lists contain only toxic rooms or servers that no good-faith user would
+# try to join. The default is false because rooms may be banned for
+# non-moderation reasons and this performs full account deactivation.
+#
+# reloadable: yes
+#
+#auto_deactivate_banned_room_attempts = false
+
+# Forbids room aliases and room IDs matching listed regular expressions.
+#
+# Patterns can use regular expressions or simple words for containment
+# matches, as in the example. Checks run on room alias creation and
+# custom room ID creation, with startup warnings for existing database
+# aliases with forbidden aliases or IDs.
+#
+# reloadable: yes
+# example: ["19dollarfortnitecards", "b[4a]droom", "badphrase"]
+#
+#forbidden_alias_names = []
+
+# Deletes rooms after the last local user leaves.
+#
+# This experimental feature is disabled by default to avoid surprises,
+# but deployments conserving space may enable it; it may default to true
+# in a future release. Some paths that remove the last local user do not
+# yet invoke deletion, so a room can remain afterward.
+#
+# reloadable: yes
+#
+#delete_after_leave = false
+
+
+
+#[global.rooms.extremities]
+
+# Sets the soft cap on forward extremities tracked per room.
+#
+# When applying an incoming federation event would exceed this cap, we
+# prune the least useful leaves from the tracked frontier until it meets
+# the cap. Pruned events remain stored and referenceable by other
+# servers; we only stop citing them as frontier tips. Events created by
+# this server are never pruned, and 0 disables automatic pruning.
+#
+# reloadable: yes
+#
+#max = 60
+
+# Sets the emergency bound on a room's forward extremities.
+#
+# A larger frontier is cut down to this bound in one step, ignoring the
+# per-event pruning batch limit. Values at or below
+# `rooms.extremities.max` remove pacing entirely and prune straight to
+# the cap.
+#
+# reloadable: yes
+#
+#emergency_max = 256
+
+# Limits forward extremities pruned by one incoming event between the
+# soft cap and emergency bound.
+#
+# This spreads convergence across events to bound each event's work. A
+# value of 0 stops paced pruning and leaves only the emergency bound.
+#
+# reloadable: yes
+#
+#prune_batch = 32
+
+
+
+#[global.rooms.invites]
+
+# Blocks non-admin local users from sending local or remote invites and
+# non-admin users from receiving remote invites.
+#
+# Admins can always send and receive all room invites.
+#
+# reloadable: yes
+#
+#block_non_admin = false
+
+# Automatically joins local users to any room they are invited to.
+#
+# The join runs in the background once the invite is recorded, and is
+# retried for a short while when a federated invite has not yet settled
+# on the inviting server. Users who are deactivated, suspended, or locked
+# are never joined.
+#
+# reloadable: yes
+#
+#auto_accept = false
+
+# Restricts automatic invite acceptance to direct-message invites.
+#
+# This restricts `rooms.invites.auto_accept`. The invite must carry
+# `is_direct` in its membership content, which clients set when starting
+# a direct chat. Invites to any other room are left for the user to
+# answer.
+#
+# reloadable: yes
+#
+#auto_accept_direct_only = false
+
+# Restricts automatic invite acceptance to invites sent by local users.
+#
+# This restricts `rooms.invites.auto_accept`. Invites arriving from
+# another server are left for the user to answer.
+#
+# reloadable: yes
+#
+#auto_accept_local_only = false
+
+
+
+#[global.rooms.joins]
+
+# Lists server names to try last when joining rooms.
+#
+# Client-requested joins through these servers try them last, which can
+# prevent failed joins caused by a particular server's timeouts.
+#
+# reloadable: yes
+#
+#deprioritize_servers = ["matrix\\.org"]
+
+# Limits `make_join` requests within each join attempt.
+#
+# Each request tries a different server, with each server tried only once
+# per attempt. Servers can be retried when the entire join request is
+# retried.
+#
+# reloadable: yes
+#
+#max_make_join_per_attempt = 48
+
+# Limits join attempts per client join request.
+#
+# Each attempt contains one or more `make_join` requests bounded by
+# `rooms.joins.max_make_join_per_attempt` and one `send_join` request.
+# Additional attempts let more servers act as the join server before
+# returning the last error to the client.
+# The default exceeds one while limiting the risk of exceeding the
+# client's request timeout, although exceeding it may sometimes be
+# unavoidable.
+#
+# reloadable: yes
+#
+#max_attempts_per_request = 3
+
+
+
+#[global.rooms.policy_server]
+
+# Requests policy-server signatures for outgoing events under
+# [MSC4284](https://github.com/matrix-org/matrix-spec-proposals/pull/4284).
+#
+# For a room with a valid `m.room.policy` state event, we request a
+# signature from its policy server's federation `/sign` endpoint before
+# federating each event. Refusal aborts the local request; network and
+# timeout failures fail open with a warning log so a transient outage
+# does not silently take the room offline.
+#
+# reloadable: yes
+#
+#enable = false
+
+# Sets the policy-server request timeout in seconds under
+# [MSC4284](https://github.com/matrix-org/matrix-spec-proposals/pull/4284).
+#
+# This applies to outbound `/sign` calls and inbound signature fetches.
+#
+# reloadable: yes
+#
+#request_timeout = 5
+
+
+
+#[global.rooms.redaction]
+
+# Limits relation rows read by each thread scan during redaction.
+#
+# Replacing a redacted latest thread reply, and correcting each of a
+# member's unread counters after a redacted reply, each read at most this
+# many rows; missing, malformed, unrelated, and redacted events consume
+# the budget before event filtering. When it runs out, the thread summary
+# is omitted and the thread's unread count may stay one too high until a
+# thread or unthreaded receipt clears it.
+#
+# reloadable: yes
+#
+#thread_latest_reply_search_limit = 1024
+
+# Saves original events before applying redactions.
+#
+# Retrieve them with `admin debug get-retained-pdu` or
+# [MSC2815](https://github.com/matrix-org/matrix-spec-proposals/pull/2815).
+#
+# reloadable: yes
+#
+#save_unredacted_events = true
+
+# Sets the redaction retention period in seconds.
+#
+# By default the unredacted events are stored for 60 days.
+#
+# reloadable: yes
+#
+#retention_seconds = 5184000
+
+# Allows users with `redact` power level to request unredacted events
+# under
+# [MSC2815](https://github.com/matrix-org/matrix-spec-proposals/pull/2815).
+#
+# Server admins can request unredacted events regardless of this setting.
+#
+# reloadable: yes
+#
+#allow_room_admins_to_request_unredacted_events = true
+
+# Prevents local users from sending redactions.
+#
+# This check does not apply to server admins.
+#
+# reloadable: yes
+#
+#disable_local = false
+
+# Serves erased senders' events as pruned copies over federation under
+# [MSC4025](https://github.com/matrix-org/matrix-spec-proposals/pull/4025).
+#
+# A requesting server retains the unredacted view only when one of its
+# users was joined in the room state at the event. Join handshakes are
+# not gated.
+#
+# reloadable: yes
+#
+#enforce_erasure_over_federation = true
+
+
+
+#[global.rooms.relations]
+
+# Bundles the latest message edit under
+# [MSC3925](https://github.com/matrix-org/matrix-spec-proposals/pull/3925).
+#
+# Client read endpoints fold the most recent `m.replace` relation into
+# `unsigned.m.relations` as the full replacement event. This is opt-in
+# and disabled by default because it adds a typed index seek per served
+# event and a server-authoritative summary most clients reconstruct
+# locally.
+#
+# reloadable: yes
+#
+#bundle_edits = false
+
+# Bundles reference relations under
+# [MSC2675](https://github.com/matrix-org/matrix-spec-proposals/pull/2675)
+# and
+# [MSC3267](https://github.com/matrix-org/matrix-spec-proposals/pull/3267).
+#
+# Client read endpoints fold `m.reference` relations into
+# `unsigned.m.relations` as `{ chunk: [{ event_id }, ...] }`. This is
+# disabled by default and adds read-time work when enabled; clients can
+# resolve references for polls, beacons, and verification directly.
+#
+# reloadable: yes
+#
+#bundle_references = false
+
+
+
 #[global.runtime]
 
 
@@ -4128,6 +4143,69 @@
 # hardware.
 #
 #amplification = 1024
+
+
+
+#[global.sending]
+
+# Sets the federation sender request timeout in seconds.
+#
+#timeout = 180
+
+# Sets the federation sender idle connection pool timeout (seconds).
+#
+#idle_timeout = 180
+
+# Sets the federation sender transaction retry backoff limit (seconds).
+#
+# reloadable: yes
+#
+#retry_backoff_limit = 86400
+
+# Sets the grace period in seconds before retrying a federation
+# destination that has failed exactly once.
+#
+# This replaces the quadratic backoff curve for the first retry, so a
+# single transient failure does not hold delivery until the next backoff
+# window. A second consecutive failure returns to the backoff curve. Set
+# to 0 to disable the grace and back off from the first failure.
+#
+#retry_grace = 15
+
+# Sets the grace period for clean shutdown of federation requests
+# (seconds).
+#
+# reloadable: yes
+#
+#shutdown_timeout = 5
+
+# Retries failed and incomplete messages to remote servers immediately at
+# startup.
+#
+# This is called bursting; disabling it retries queued messages on a
+# paced timer after startup instead of all at once, reducing startup load
+# when resources are extremely limited or deployment scale is huge.
+#
+#startup_netburst = true
+
+# Controls startup message retention when `sending.startup_netburst` is
+# enabled.
+#
+# Dropped messages are not reattempted, and this setting has no effect
+# without startup bursting; -1 retries every message without trimming
+# queues and can
+# consume significant disk, while 0 drops all messages without any
+# redelivery attempt.
+#
+#startup_netburst_keep = 50
+
+# Sets the number of sender task workers and their parallelism.
+#
+# The default 0 selects the count internally, likely matching Tokio
+# worker threads or CPU cores. Set a nonzero value to override that
+# count.
+#
+#workers = 0
 
 
 

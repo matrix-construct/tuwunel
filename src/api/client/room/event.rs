@@ -33,6 +33,8 @@ pub(crate) async fn get_room_event_route(
 
 			let can_redact = services
 				.config
+				.rooms
+				.redaction
 				.allow_room_admins_to_request_unredacted_events
 				.then_async(|| {
 					services

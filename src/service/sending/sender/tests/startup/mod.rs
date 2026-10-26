@@ -216,7 +216,7 @@ async fn netburst_keeps_active_generations_and_arms_only_queued_federation() -> 
 
 #[tokio::test]
 async fn zero_keep_leaves_badges_queued_and_arms_queued_federation() -> Result {
-	let config = config(true, 0).merge(("startup_netburst_keep", 0));
+	let config = config(true, 0).merge(("sending.startup_netburst_keep", 0));
 	let Some(fixture) = fixture(config).await? else {
 		return Ok(());
 	};
@@ -297,10 +297,10 @@ async fn maintenance_preserves_rows_without_arming_or_sending() -> Result {
 
 fn config(netburst: bool, timeout: u64) -> Figment {
 	Figment::new()
-		.merge(("startup_netburst", netburst))
-		.merge(("startup_netburst_keep", -1))
-		.merge(("sender_timeout", timeout))
-		.merge(("sender_workers", 1))
+		.merge(("sending.startup_netburst", netburst))
+		.merge(("sending.startup_netburst_keep", -1))
+		.merge(("sending.timeout", timeout))
+		.merge(("sending.workers", 1))
 }
 
 fn destination(name: &str) -> Destination {

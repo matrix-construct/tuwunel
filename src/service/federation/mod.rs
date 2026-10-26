@@ -55,9 +55,9 @@ pub struct Service {
 
 impl crate::Service for Service {
 	fn build(args: &crate::Args<'_>) -> Result<Arc<Self>> {
-		let window_secs = args.server.config.sender_timeout.max(1);
+		let window_secs = args.server.config.sending.timeout.max(1);
 		let n_max = exponential_backoff_streak_cap(Duration::from_secs(window_secs), MAX_BACKOFF);
-		let grace = Duration::from_secs(args.server.config.sender_retry_grace);
+		let grace = Duration::from_secs(args.server.config.sending.retry_grace);
 
 		Ok(Arc::new(Self {
 			services: args.services.clone(),

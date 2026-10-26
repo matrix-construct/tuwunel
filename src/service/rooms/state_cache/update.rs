@@ -581,7 +581,13 @@ async fn handle_leave(&self, room_id: &RoomId, user_id: &UserId, count: PduCount
 		return;
 	}
 
-	if !self.services.config.forget_forced_upon_leave {
+	if self
+		.services
+		.config
+		.rooms
+		.forget_forced_upon_leave
+		.is_false()
+	{
 		let not_disabled = self
 			.services
 			.metadata

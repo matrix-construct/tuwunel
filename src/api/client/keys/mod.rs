@@ -25,9 +25,11 @@ pub(crate) use upload_signing_keys::upload_signing_keys_route;
 type FailureMap = BTreeMap<String, JsonValue>;
 
 fn federation_opts(services: &Services) -> Opts {
+	let config = &services.server.config.federation;
+
 	Opts {
-		width: NonZeroUsize::new(services.server.config.feds_max_width),
-		timeout: Some(Duration::from_secs(services.server.config.federation_keys_timeout)),
+		width: NonZeroUsize::new(config.fanout.max_width),
+		timeout: Some(Duration::from_secs(config.transport.keys_timeout)),
 		..Default::default()
 	}
 }

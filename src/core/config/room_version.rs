@@ -53,13 +53,13 @@ impl Config {
 
 		let unstable_room_versions = UNSTABLE_ROOM_VERSIONS
 			.iter()
-			.filter(|_| self.allow_unstable_room_versions)
+			.filter(|_| self.rooms.allow_unstable_versions)
 			.cloned()
 			.map(|version| (version, RoomVersionStability::Unstable));
 
 		let experimental_room_versions = EXPERIMENTAL_ROOM_VERSIONS
 			.iter()
-			.filter(|_| self.allow_experimental_room_versions)
+			.filter(|_| self.rooms.allow_experimental_versions)
 			.cloned()
 			.map(|version| (version, RoomVersionStability::Unstable));
 

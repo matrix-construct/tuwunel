@@ -54,7 +54,8 @@ fn capabilities(
 	let default = services
 		.server
 		.config
-		.default_room_version
+		.rooms
+		.default_version
 		.clone();
 
 	// Matrix 1.16 clients read the display name policy from m.profile_fields.
@@ -89,11 +90,11 @@ fn capabilities(
 	};
 
 	capabilities.forget_forced_upon_leave =
-		ForgetForcedUponLeaveCapability::new(services.config.forget_forced_upon_leave);
+		ForgetForcedUponLeaveCapability::new(services.config.rooms.forget_forced_upon_leave);
 
 	capabilities.set(
 		"org.matrix.msc4267.forget_forced_upon_leave",
-		json!({"enabled": services.config.forget_forced_upon_leave}),
+		json!({"enabled": services.config.rooms.forget_forced_upon_leave}),
 	)?;
 
 	// MSC4452: enabled mirrors the per-URL gate; empty allowlists 403 every URL.

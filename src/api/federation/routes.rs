@@ -15,7 +15,7 @@ pub fn build(server: &Server) -> Router<State> {
 	let router = Router::new();
 	let router = register_server_misc_routes(router);
 
-	register_federation_routes(router, server.config.allow_federation)
+	register_federation_routes(router, server.config.federation.enable)
 }
 
 fn register_server_misc_routes(router: Router<State>) -> Router<State> {

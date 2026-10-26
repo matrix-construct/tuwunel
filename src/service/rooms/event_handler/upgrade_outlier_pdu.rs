@@ -141,7 +141,7 @@ pub(super) async fn upgrade_outlier_to_timeline_pdu(
 		.await;
 
 	let config = &self.services.server.config;
-	let max = config.forward_extremities_max;
+	let max = config.rooms.extremities.max;
 	let len = extremities
 		.len()
 		.saturating_add(usize::from(!soft_fail));
@@ -150,8 +150,8 @@ pub(super) async fn upgrade_outlier_to_timeline_pdu(
 		let goal = prune_goal(
 			len,
 			max,
-			config.forward_extremities_emergency_max,
-			config.forward_extremities_prune_batch,
+			config.rooms.extremities.emergency_max,
+			config.rooms.extremities.prune_batch,
 		);
 
 		let summary = self
@@ -418,9 +418,9 @@ async fn resolve_state_at_incoming_event(
 	}
 
 	let config = &self.services.server.config;
-	let enabled = config.resolve_state_locally
-		&& config.resolve_state_locally_max > 0
-		&& !config.resolve_state_locally_shadow;
+	let enabled = config.federation.resolve_state_locally
+		&& config.federation.resolve_state_locally_max > 0
+		&& !config.federation.resolve_state_locally_shadow;
 
 	if enabled {
 		match self

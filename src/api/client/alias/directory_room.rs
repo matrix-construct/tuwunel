@@ -35,6 +35,7 @@ pub(crate) async fn create_alias_route(
 	// allow removing forbidden room aliases
 	if services
 		.config
+		.rooms
 		.forbidden_alias_names
 		.is_match(body.room_alias.alias())
 	{
