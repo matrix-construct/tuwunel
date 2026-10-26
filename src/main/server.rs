@@ -6,7 +6,10 @@ use tuwunel_core::{
 	config::{Config, Figment, Sources},
 	implement, info,
 	metrics::Metrics,
-	utils::{stream, sys},
+	utils::{
+		stream::{set_amplification, set_width},
+		sys,
+	},
 };
 
 use crate::{
@@ -62,8 +65,8 @@ pub fn new(args: Option<&Args>, runtime: Option<&Runtime>) -> Result<Arc<Self>, 
 
 	sys::maximize_thread_limit().expect("Unable to increase maximum thread count limit");
 
-	let (_old_width, _new_width) = stream::set_width(config.stream_width_default);
-	let (_old_amp, _new_amp) = stream::set_amplification(config.stream_amplification);
+	let (_old_width, _new_width) = set_width(config.runtime.stream.width_default);
+	let (_old_amp, _new_amp) = set_amplification(config.runtime.stream.amplification);
 
 	info!(
 		server_name = %config.server_name,

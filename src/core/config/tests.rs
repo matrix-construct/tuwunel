@@ -1381,30 +1381,41 @@ fn an_unknown_jwt_key_format_fails_the_config_check() {
 /// "varies by system" and non-literal bodies are out of reach here.
 #[test]
 fn documented_defaults_match_the_code() {
-	const SRC: &str = concat!(include_str!("mod.rs"), "\n", include_str!("rocksdb.rs"));
+	const SOURCES: [&str; 5] = [
+		include_str!("mod.rs"),
+		include_str!("rocksdb.rs"),
+		include_str!("cache.rs"),
+		include_str!("database.rs"),
+		include_str!("runtime.rs"),
+	];
+
 	const SERDE_DEFAULT: &str = "#[serde(default = \"";
 
-	let lines: Vec<&str> = SRC.lines().collect();
-	let bodies: BTreeMap<&str, &str> = lines
-		.iter()
-		.copied()
-		.filter_map(default_fn_body)
-		.collect();
+	let compared: Vec<(&str, u64, u64)> = SOURCES
+		.into_iter()
+		.flat_map(|source| {
+			let lines: Vec<&str> = source.lines().collect();
+			let bodies: BTreeMap<&str, &str> = SOURCES[0]
+				.lines()
+				.chain(lines.iter().copied())
+				.filter_map(default_fn_body)
+				.collect();
 
-	let compared: Vec<(&str, u64, u64)> = lines
-		.iter()
-		.enumerate()
-		.filter_map(|(at, line)| {
-			let name = line
-				.trim()
-				.strip_prefix(SERDE_DEFAULT)?
-				.split('"')
-				.next()?;
+			source
+				.lines()
+				.enumerate()
+				.filter_map(move |(at, line)| {
+					let name = line
+						.trim()
+						.strip_prefix(SERDE_DEFAULT)?
+						.split('"')
+						.next()?;
 
-			let documented = documented_default(&lines, at)?;
-			let actual = bodies.get(name).copied().and_then(eval_int)?;
+					let documented = documented_default(&lines, at)?;
+					let actual = bodies.get(name).copied().and_then(eval_int)?;
 
-			Some((name, documented, actual))
+					Some((name, documented, actual))
+				})
 		})
 		.collect();
 

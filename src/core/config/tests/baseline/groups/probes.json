@@ -1,0 +1,652 @@
+[
+  {
+    "section": "global.admin",
+    "field": "admin_console_automatic",
+    "canonical": "global.admin.console_automatic",
+    "empty": "[global]\n[global.admin]\n",
+    "partial": "[global]\n[global.admin]\nconsole_automatic = true\n",
+    "unknown_input": "[global.admin]\nfuture_setting = [\"retained\"]\nruntime_extra = true\n",
+    "unknown_path": "admin.future_setting",
+    "runtime_path": "admin.runtime_extra"
+  },
+  {
+    "section": "global.admin.room",
+    "field": "create_admin_room",
+    "canonical": "global.admin.room.create",
+    "empty": "[global]\n[global.admin.room]\n",
+    "partial": "[global]\n[global.admin.room]\ncreate = false\n",
+    "unknown_input": "[global.admin.room]\nfuture_setting = [\"retained\"]\nruntime_extra = true\n",
+    "unknown_path": "admin.room.future_setting",
+    "runtime_path": "admin.room.runtime_extra"
+  },
+  {
+    "section": "global.appservice_client",
+    "field": "appservice_idle_timeout",
+    "canonical": "global.appservice_client.idle_timeout",
+    "empty": "[global]\n[global.appservice_client]\n",
+    "partial": "[global]\n[global.appservice_client]\nidle_timeout = 19\n",
+    "unknown_input": "[global.appservice_client]\nfuture_setting = [\"retained\"]\nruntime_extra = true\n",
+    "unknown_path": "appservice_client.future_setting",
+    "runtime_path": "appservice_client.runtime_extra"
+  },
+  {
+    "section": "global.authentication",
+    "field": "access_token_ttl",
+    "canonical": "global.authentication.access_token_ttl",
+    "empty": "[global]\n[global.authentication]\n",
+    "partial": "[global]\n[global.authentication]\naccess_token_ttl = 19\n",
+    "unknown_input": "[global.authentication]\nfuture_setting = [\"retained\"]\nruntime_extra = true\n",
+    "unknown_path": "authentication.future_setting",
+    "runtime_path": "authentication.runtime_extra"
+  },
+  {
+    "section": "global.authentication.argon2",
+    "field": "argon2_m_cost",
+    "canonical": "global.authentication.argon2.m_cost",
+    "empty": "[global]\n[global.authentication.argon2]\n",
+    "partial": "[global]\n[global.authentication.argon2]\nm_cost = 9\n",
+    "unknown_input": "[global.authentication.argon2]\nfuture_setting = [\"retained\"]\nruntime_extra = true\n",
+    "unknown_path": "authentication.argon2.future_setting",
+    "runtime_path": "authentication.argon2.runtime_extra"
+  },
+  {
+    "section": "global.authentication.login",
+    "field": "oidc_aware_preferred",
+    "canonical": "global.authentication.login.oidc_aware_preferred",
+    "empty": "[global]\n[global.authentication.login]\n",
+    "partial": "[global]\n[global.authentication.login]\noidc_aware_preferred = true\n",
+    "unknown_input": "[global.authentication.login]\nfuture_setting = [\"retained\"]\nruntime_extra = true\n",
+    "unknown_path": "authentication.login.future_setting",
+    "runtime_path": "authentication.login.runtime_extra"
+  },
+  {
+    "section": "global.authentication.oidc",
+    "field": "oidc_native_auth",
+    "canonical": "global.authentication.oidc.native_auth",
+    "empty": "[global]\n[global.authentication.oidc]\n",
+    "partial": "[global]\n[global.authentication.oidc]\nnative_auth = true\n",
+    "unknown_input": "[global.authentication.oidc]\nfuture_setting = [\"retained\"]\nruntime_extra = true\n",
+    "unknown_path": "authentication.oidc.future_setting",
+    "runtime_path": "authentication.oidc.runtime_extra"
+  },
+  {
+    "section": "global.authentication.refresh_token",
+    "field": "refresh_token_hard_logout",
+    "canonical": "global.authentication.refresh_token.hard_logout",
+    "empty": "[global]\n[global.authentication.refresh_token]\n",
+    "partial": "[global]\n[global.authentication.refresh_token]\nhard_logout = true\n",
+    "unknown_input": "[global.authentication.refresh_token]\nfuture_setting = [\"retained\"]\nruntime_extra = true\n",
+    "unknown_path": "authentication.refresh_token.future_setting",
+    "runtime_path": "authentication.refresh_token.runtime_extra"
+  },
+  {
+    "section": "global.cache",
+    "field": "auth_chain_cache_capacity",
+    "canonical": "global.cache.auth_chain_capacity",
+    "empty": "[global]\n[global.cache]\n",
+    "partial": "[global]\n[global.cache]\nauth_chain_capacity = 10\n",
+    "unknown_input": "[global.cache]\nfuture_setting = [\"retained\"]\nruntime_extra = true\n",
+    "unknown_path": "cache.future_setting",
+    "runtime_path": "cache.runtime_extra"
+  },
+  {
+    "section": "global.cache.space_hierarchy",
+    "field": "spacehierarchy_cache_ttl_max",
+    "canonical": "global.cache.space_hierarchy.ttl_max",
+    "empty": "[global]\n[global.cache.space_hierarchy]\n",
+    "partial": "[global]\n[global.cache.space_hierarchy]\nttl_max = 10\n",
+    "unknown_input": "[global.cache.space_hierarchy]\nfuture_setting = [\"retained\"]\nruntime_extra = true\n",
+    "unknown_path": "cache.space_hierarchy.future_setting",
+    "runtime_path": "cache.space_hierarchy.runtime_extra"
+  },
+  {
+    "section": "global.client",
+    "field": "calculate_heroes",
+    "canonical": "global.client.sync.calculate_heroes",
+    "empty": "[global]\n[global.client]\n",
+    "partial": "[global]\n[global.client]\n[global.client.sync]\ncalculate_heroes = false\n",
+    "unknown_input": "[global.client]\nfuture_setting = [\"retained\"]\nruntime_extra = true\n",
+    "unknown_path": "client.future_setting",
+    "runtime_path": "client.runtime_extra"
+  },
+  {
+    "section": "global.client.sync",
+    "field": "calculate_heroes",
+    "canonical": "global.client.sync.calculate_heroes",
+    "empty": "[global]\n[global.client.sync]\n",
+    "partial": "[global]\n[global.client.sync]\ncalculate_heroes = false\n",
+    "unknown_input": "[global.client.sync]\nfuture_setting = [\"retained\"]\nruntime_extra = true\n",
+    "unknown_path": "client.sync.future_setting",
+    "runtime_path": "client.sync.runtime_extra"
+  },
+  {
+    "section": "global.compatibility",
+    "field": "hydra_backports",
+    "canonical": "global.compatibility.hydra_backports",
+    "empty": "[global]\n[global.compatibility]\n",
+    "partial": "[global]\n[global.compatibility]\nhydra_backports = false\n",
+    "unknown_input": "[global.compatibility]\nfuture_setting = [\"retained\"]\nruntime_extra = true\n",
+    "unknown_path": "compatibility.future_setting",
+    "runtime_path": "compatibility.runtime_extra"
+  },
+  {
+    "section": "global.configuration",
+    "field": "error_on_unknown_config_opts",
+    "canonical": "global.configuration.error_on_unknown_opts",
+    "empty": "[global]\n[global.configuration]\n",
+    "partial": "[global]\n[global.configuration]\nerror_on_unknown_opts = true\n",
+    "unknown_input": "[global.configuration]\nfuture_setting = [\"retained\"]\nruntime_extra = true\n",
+    "unknown_path": "configuration.future_setting",
+    "runtime_path": "configuration.runtime_extra"
+  },
+  {
+    "section": "global.database",
+    "field": "database_backups_to_keep",
+    "canonical": "global.database.backup.keep",
+    "empty": "[global]\n[global.database]\n",
+    "partial": "[global]\n[global.database]\n[global.database.backup]\nkeep = 17\n",
+    "unknown_input": "[global.database]\nfuture_setting = [\"retained\"]\nruntime_extra = true\n",
+    "unknown_path": "database.future_setting",
+    "runtime_path": "database.runtime_extra"
+  },
+  {
+    "section": "global.database.backup",
+    "field": "database_backups_to_keep",
+    "canonical": "global.database.backup.keep",
+    "empty": "[global]\n[global.database.backup]\n",
+    "partial": "[global]\n[global.database.backup]\nkeep = 17\n",
+    "unknown_input": "[global.database.backup]\nfuture_setting = [\"retained\"]\nruntime_extra = true\n",
+    "unknown_path": "database.backup.future_setting",
+    "runtime_path": "database.backup.runtime_extra"
+  },
+  {
+    "section": "global.database.pool",
+    "field": "db_pool_affinity",
+    "canonical": "global.database.pool.affinity",
+    "empty": "[global]\n[global.database.pool]\n",
+    "partial": "[global]\n[global.database.pool]\naffinity = false\n",
+    "unknown_input": "[global.database.pool]\nfuture_setting = [\"retained\"]\nruntime_extra = true\n",
+    "unknown_path": "database.pool.future_setting",
+    "runtime_path": "database.pool.runtime_extra"
+  },
+  {
+    "section": "global.directory",
+    "field": "allow_public_room_directory_over_federation",
+    "canonical": "global.directory.rooms.allow_over_federation",
+    "empty": "[global]\n[global.directory]\n",
+    "partial": "[global]\n[global.directory]\n[global.directory.rooms]\nallow_over_federation = true\n",
+    "unknown_input": "[global.directory]\nfuture_setting = [\"retained\"]\nruntime_extra = true\n",
+    "unknown_path": "directory.future_setting",
+    "runtime_path": "directory.runtime_extra"
+  },
+  {
+    "section": "global.directory.rooms",
+    "field": "allow_public_room_directory_over_federation",
+    "canonical": "global.directory.rooms.allow_over_federation",
+    "empty": "[global]\n[global.directory.rooms]\n",
+    "partial": "[global]\n[global.directory.rooms]\nallow_over_federation = true\n",
+    "unknown_input": "[global.directory.rooms]\nfuture_setting = [\"retained\"]\nruntime_extra = true\n",
+    "unknown_path": "directory.rooms.future_setting",
+    "runtime_path": "directory.rooms.runtime_extra"
+  },
+  {
+    "section": "global.directory.users",
+    "field": "show_all_local_users_in_user_directory",
+    "canonical": "global.directory.users.show_all_local",
+    "empty": "[global]\n[global.directory.users]\n",
+    "partial": "[global]\n[global.directory.users]\nshow_all_local = true\n",
+    "unknown_input": "[global.directory.users]\nfuture_setting = [\"retained\"]\nruntime_extra = true\n",
+    "unknown_path": "directory.users.future_setting",
+    "runtime_path": "directory.users.runtime_extra"
+  },
+  {
+    "section": "global.encryption",
+    "field": "allow_encryption",
+    "canonical": "global.encryption.allow",
+    "empty": "[global]\n[global.encryption]\n",
+    "partial": "[global]\n[global.encryption]\nallow = false\n",
+    "unknown_input": "[global.encryption]\nfuture_setting = [\"retained\"]\nruntime_extra = true\n",
+    "unknown_path": "encryption.future_setting",
+    "runtime_path": "encryption.runtime_extra"
+  },
+  {
+    "section": "global.federation",
+    "field": "allowed_remote_server_names_experimental",
+    "canonical": "global.federation.allowed_remote_server_names_experimental",
+    "empty": "[global]\n[global.federation]\n",
+    "partial": "[global]\n[global.federation]\nallowed_remote_server_names_experimental = [\"^baseline\\\\.example$\"]\n",
+    "unknown_input": "[global.federation]\nfuture_setting = [\"retained\"]\nruntime_extra = true\n",
+    "unknown_path": "federation.future_setting",
+    "runtime_path": "federation.runtime_extra"
+  },
+  {
+    "section": "global.federation.fanout",
+    "field": "feds_destination_limit",
+    "canonical": "global.federation.fanout.destination_limit",
+    "empty": "[global]\n[global.federation.fanout]\n",
+    "partial": "[global]\n[global.federation.fanout]\ndestination_limit = 19\n",
+    "unknown_input": "[global.federation.fanout]\nfuture_setting = [\"retained\"]\nruntime_extra = true\n",
+    "unknown_path": "federation.fanout.future_setting",
+    "runtime_path": "federation.fanout.runtime_extra"
+  },
+  {
+    "section": "global.federation.history",
+    "field": "fetch_fanout_max_width",
+    "canonical": "global.federation.history.fetch_fanout_max_width",
+    "empty": "[global]\n[global.federation.history]\n",
+    "partial": "[global]\n[global.federation.history]\nfetch_fanout_max_width = 16\n",
+    "unknown_input": "[global.federation.history]\nfuture_setting = [\"retained\"]\nruntime_extra = true\n",
+    "unknown_path": "federation.history.future_setting",
+    "runtime_path": "federation.history.runtime_extra"
+  },
+  {
+    "section": "global.federation.keys",
+    "field": "only_query_trusted_key_servers",
+    "canonical": "global.federation.keys.only_query_trusted_servers",
+    "empty": "[global]\n[global.federation.keys]\n",
+    "partial": "[global]\n[global.federation.keys]\nonly_query_trusted_servers = true\n",
+    "unknown_input": "[global.federation.keys]\nfuture_setting = [\"retained\"]\nruntime_extra = true\n",
+    "unknown_path": "federation.keys.future_setting",
+    "runtime_path": "federation.keys.runtime_extra"
+  },
+  {
+    "section": "global.federation.transport",
+    "field": "federation_idle_per_host",
+    "canonical": "global.federation.transport.idle_per_host",
+    "empty": "[global]\n[global.federation.transport]\n",
+    "partial": "[global]\n[global.federation.transport]\nidle_per_host = 13\n",
+    "unknown_input": "[global.federation.transport]\nfuture_setting = [\"retained\"]\nruntime_extra = true\n",
+    "unknown_path": "federation.transport.future_setting",
+    "runtime_path": "federation.transport.runtime_extra"
+  },
+  {
+    "section": "global.http",
+    "field": "access_control_allow_origin",
+    "canonical": "global.http.access_control_allow_origin",
+    "empty": "[global]\n[global.http]\n",
+    "partial": "[global]\n[global.http]\naccess_control_allow_origin = [\"baseline-access_control_allow_origin\"]\n",
+    "unknown_input": "[global.http]\nfuture_setting = [\"retained\"]\nruntime_extra = true\n",
+    "unknown_path": "http.future_setting",
+    "runtime_path": "http.runtime_extra"
+  },
+  {
+    "section": "global.http.compression",
+    "field": "brotli_compression",
+    "canonical": "global.http.compression.brotli",
+    "empty": "[global]\n[global.http.compression]\n",
+    "partial": "[global]\n[global.http.compression]\nbrotli = true\n",
+    "unknown_input": "[global.http.compression]\nfuture_setting = [\"retained\"]\nruntime_extra = true\n",
+    "unknown_path": "http.compression.future_setting",
+    "runtime_path": "http.compression.runtime_extra"
+  },
+  {
+    "section": "global.http.listen",
+    "field": "address",
+    "canonical": "global.http.listen.address",
+    "empty": "[global]\n[global.http.listen]\n",
+    "partial": "[global]\n[global.http.listen]\naddress = [\"127.0.0.2\", \"::1\"]\n",
+    "unknown_input": "[global.http.listen]\nfuture_setting = [\"retained\"]\nruntime_extra = true\n",
+    "unknown_path": "http.listen.future_setting",
+    "runtime_path": "http.listen.runtime_extra"
+  },
+  {
+    "section": "global.logging",
+    "field": "log_colors",
+    "canonical": "global.logging.colors",
+    "empty": "[global]\n[global.logging]\n",
+    "partial": "[global]\n[global.logging]\ncolors = false\n",
+    "unknown_input": "[global.logging]\nfuture_setting = [\"retained\"]\nruntime_extra = true\n",
+    "unknown_path": "logging.future_setting",
+    "runtime_path": "logging.runtime_extra"
+  },
+  {
+    "section": "global.media",
+    "field": "allow_legacy_media",
+    "canonical": "global.media.allow_legacy",
+    "empty": "[global]\n[global.media]\n",
+    "partial": "[global]\n[global.media]\nallow_legacy = true\n",
+    "unknown_input": "[global.media]\nfuture_setting = [\"retained\"]\nruntime_extra = true\n",
+    "unknown_path": "media.future_setting",
+    "runtime_path": "media.runtime_extra"
+  },
+  {
+    "section": "global.media.import",
+    "field": "conduit_media_directory_depth",
+    "canonical": "global.media.import.conduit.directory_depth",
+    "empty": "[global]\n[global.media.import]\n",
+    "partial": "[global]\n[global.media.import]\n[global.media.import.conduit]\ndirectory_depth = 8\n",
+    "unknown_input": "[global.media.import]\nfuture_setting = [\"retained\"]\nruntime_extra = true\n",
+    "unknown_path": "media.import.future_setting",
+    "runtime_path": "media.import.runtime_extra"
+  },
+  {
+    "section": "global.media.import.conduit",
+    "field": "conduit_media_directory_depth",
+    "canonical": "global.media.import.conduit.directory_depth",
+    "empty": "[global]\n[global.media.import.conduit]\n",
+    "partial": "[global]\n[global.media.import.conduit]\ndirectory_depth = 8\n",
+    "unknown_input": "[global.media.import.conduit]\nfuture_setting = [\"retained\"]\nruntime_extra = true\n",
+    "unknown_path": "media.import.conduit.future_setting",
+    "runtime_path": "media.import.conduit.runtime_extra"
+  },
+  {
+    "section": "global.media.thumbnail",
+    "field": "media_thumbnail_animated",
+    "canonical": "global.media.thumbnail.animated",
+    "empty": "[global]\n[global.media.thumbnail]\n",
+    "partial": "[global]\n[global.media.thumbnail]\nanimated = false\n",
+    "unknown_input": "[global.media.thumbnail]\nfuture_setting = [\"retained\"]\nruntime_extra = true\n",
+    "unknown_path": "media.thumbnail.future_setting",
+    "runtime_path": "media.thumbnail.runtime_extra"
+  },
+  {
+    "section": "global.media.url_preview",
+    "field": "url_preview_accept_language",
+    "canonical": "global.media.url_preview.accept_language",
+    "empty": "[global]\n[global.media.url_preview]\n",
+    "partial": "[global]\n[global.media.url_preview]\naccept_language = \"baseline-url_preview_accept_language\"\n",
+    "unknown_input": "[global.media.url_preview]\nfuture_setting = [\"retained\"]\nruntime_extra = true\n",
+    "unknown_path": "media.url_preview.future_setting",
+    "runtime_path": "media.url_preview.runtime_extra"
+  },
+  {
+    "section": "global.media.video_thumbnail",
+    "field": "media_video_thumbnail_command",
+    "canonical": "global.media.video_thumbnail.command",
+    "empty": "[global]\n[global.media.video_thumbnail]\n",
+    "partial": "[global]\n[global.media.video_thumbnail]\ncommand = [\"baseline-media_video_thumbnail_command\"]\n",
+    "unknown_input": "[global.media.video_thumbnail]\nfuture_setting = [\"retained\"]\nruntime_extra = true\n",
+    "unknown_path": "media.video_thumbnail.future_setting",
+    "runtime_path": "media.video_thumbnail.runtime_extra"
+  },
+  {
+    "section": "global.network",
+    "field": "well_known_conn_timeout",
+    "canonical": "global.network.discovery.conn_timeout",
+    "empty": "[global]\n[global.network]\n",
+    "partial": "[global]\n[global.network]\n[global.network.discovery]\nconn_timeout = 7\n",
+    "unknown_input": "[global.network]\nfuture_setting = [\"retained\"]\nruntime_extra = true\n",
+    "unknown_path": "network.future_setting",
+    "runtime_path": "network.runtime_extra"
+  },
+  {
+    "section": "global.network.discovery",
+    "field": "well_known_conn_timeout",
+    "canonical": "global.network.discovery.conn_timeout",
+    "empty": "[global]\n[global.network.discovery]\n",
+    "partial": "[global]\n[global.network.discovery]\nconn_timeout = 7\n",
+    "unknown_input": "[global.network.discovery]\nfuture_setting = [\"retained\"]\nruntime_extra = true\n",
+    "unknown_path": "network.discovery.future_setting",
+    "runtime_path": "network.discovery.runtime_extra"
+  },
+  {
+    "section": "global.network.dns",
+    "field": "dns_attempts",
+    "canonical": "global.network.dns.attempts",
+    "empty": "[global]\n[global.network.dns]\n",
+    "partial": "[global]\n[global.network.dns]\nattempts = 18\n",
+    "unknown_input": "[global.network.dns]\nfuture_setting = [\"retained\"]\nruntime_extra = true\n",
+    "unknown_path": "network.dns.future_setting",
+    "runtime_path": "network.dns.runtime_extra"
+  },
+  {
+    "section": "global.network.http",
+    "field": "allow_invalid_tls_certificates",
+    "canonical": "global.network.http.allow_invalid_tls_certificates",
+    "empty": "[global]\n[global.network.http]\n",
+    "partial": "[global]\n[global.network.http]\nallow_invalid_tls_certificates = true\n",
+    "unknown_input": "[global.network.http]\nfuture_setting = [\"retained\"]\nruntime_extra = true\n",
+    "unknown_path": "network.http.future_setting",
+    "runtime_path": "network.http.runtime_extra"
+  },
+  {
+    "section": "global.presence",
+    "field": "allow_incoming_presence",
+    "canonical": "global.presence.allow_incoming",
+    "empty": "[global]\n[global.presence]\n",
+    "partial": "[global]\n[global.presence]\nallow_incoming = false\n",
+    "unknown_input": "[global.presence]\nfuture_setting = [\"retained\"]\nruntime_extra = true\n",
+    "unknown_path": "presence.future_setting",
+    "runtime_path": "presence.runtime_extra"
+  },
+  {
+    "section": "global.profile",
+    "field": "allow_device_name_federation",
+    "canonical": "global.profile.allow_device_name_federation",
+    "empty": "[global]\n[global.profile]\n",
+    "partial": "[global]\n[global.profile]\nallow_device_name_federation = true\n",
+    "unknown_input": "[global.profile]\nfuture_setting = [\"retained\"]\nruntime_extra = true\n",
+    "unknown_path": "profile.future_setting",
+    "runtime_path": "profile.runtime_extra"
+  },
+  {
+    "section": "global.push",
+    "field": "push_everything",
+    "canonical": "global.push.everything",
+    "empty": "[global]\n[global.push]\n",
+    "partial": "[global]\n[global.push]\neverything = true\n",
+    "unknown_input": "[global.push]\nfuture_setting = [\"retained\"]\nruntime_extra = true\n",
+    "unknown_path": "push.future_setting",
+    "runtime_path": "push.runtime_extra"
+  },
+  {
+    "section": "global.read_receipts",
+    "field": "allow_incoming_read_receipts",
+    "canonical": "global.read_receipts.allow_incoming",
+    "empty": "[global]\n[global.read_receipts]\n",
+    "partial": "[global]\n[global.read_receipts]\nallow_incoming = false\n",
+    "unknown_input": "[global.read_receipts]\nfuture_setting = [\"retained\"]\nruntime_extra = true\n",
+    "unknown_path": "read_receipts.future_setting",
+    "runtime_path": "read_receipts.runtime_extra"
+  },
+  {
+    "section": "global.registration",
+    "field": "auto_join_rooms",
+    "canonical": "global.registration.auto_join_rooms",
+    "empty": "[global]\n[global.registration]\n",
+    "partial": "[global]\n[global.registration]\nauto_join_rooms = [\"#test:example.org\"]\n",
+    "unknown_input": "[global.registration]\nfuture_setting = [\"retained\"]\nruntime_extra = true\n",
+    "unknown_path": "registration.future_setting",
+    "runtime_path": "registration.runtime_extra"
+  },
+  {
+    "section": "global.registration.guests",
+    "field": "allow_guests_auto_join_rooms",
+    "canonical": "global.registration.guests.allow_auto_join_rooms",
+    "empty": "[global]\n[global.registration.guests]\n",
+    "partial": "[global]\n[global.registration.guests]\nallow_auto_join_rooms = true\n",
+    "unknown_input": "[global.registration.guests]\nfuture_setting = [\"retained\"]\nruntime_extra = true\n",
+    "unknown_path": "registration.guests.future_setting",
+    "runtime_path": "registration.guests.runtime_extra"
+  },
+  {
+    "section": "global.rendezvous",
+    "field": "rendezvous_authenticated_only",
+    "canonical": "global.rendezvous.authenticated_only",
+    "empty": "[global]\n[global.rendezvous]\n",
+    "partial": "[global]\n[global.rendezvous]\nauthenticated_only = false\n",
+    "unknown_input": "[global.rendezvous]\nfuture_setting = [\"retained\"]\nruntime_extra = true\n",
+    "unknown_path": "rendezvous.future_setting",
+    "runtime_path": "rendezvous.runtime_extra"
+  },
+  {
+    "section": "global.rocksdb",
+    "field": "rocksdb_allow_fallocate",
+    "canonical": "global.rocksdb.allow_fallocate",
+    "empty": "[global]\n[global.rocksdb]\n",
+    "partial": "[global]\n[global.rocksdb]\nallow_fallocate = false\n",
+    "unknown_input": "[global.rocksdb]\nfuture_setting = [\"retained\"]\nruntime_extra = true\n",
+    "unknown_path": "rocksdb.future_setting",
+    "runtime_path": "rocksdb.runtime_extra"
+  },
+  {
+    "section": "global.rooms",
+    "field": "allow_room_alias_creation",
+    "canonical": "global.rooms.allow_alias_creation",
+    "empty": "[global]\n[global.rooms]\n",
+    "partial": "[global]\n[global.rooms]\nallow_alias_creation = false\n",
+    "unknown_input": "[global.rooms]\nfuture_setting = [\"retained\"]\nruntime_extra = true\n",
+    "unknown_path": "rooms.future_setting",
+    "runtime_path": "rooms.runtime_extra"
+  },
+  {
+    "section": "global.rooms.extremities",
+    "field": "forward_extremities_emergency_max",
+    "canonical": "global.rooms.extremities.emergency_max",
+    "empty": "[global]\n[global.rooms.extremities]\n",
+    "partial": "[global]\n[global.rooms.extremities]\nemergency_max = 11\n",
+    "unknown_input": "[global.rooms.extremities]\nfuture_setting = [\"retained\"]\nruntime_extra = true\n",
+    "unknown_path": "rooms.extremities.future_setting",
+    "runtime_path": "rooms.extremities.runtime_extra"
+  },
+  {
+    "section": "global.rooms.invites",
+    "field": "auto_accept_invites",
+    "canonical": "global.rooms.invites.auto_accept",
+    "empty": "[global]\n[global.rooms.invites]\n",
+    "partial": "[global]\n[global.rooms.invites]\nauto_accept = true\n",
+    "unknown_input": "[global.rooms.invites]\nfuture_setting = [\"retained\"]\nruntime_extra = true\n",
+    "unknown_path": "rooms.invites.future_setting",
+    "runtime_path": "rooms.invites.runtime_extra"
+  },
+  {
+    "section": "global.rooms.joins",
+    "field": "deprioritize_joins_through_servers",
+    "canonical": "global.rooms.joins.deprioritize_servers",
+    "empty": "[global]\n[global.rooms.joins]\n",
+    "partial": "[global]\n[global.rooms.joins]\ndeprioritize_servers = [\"^baseline\\\\.example$\"]\n",
+    "unknown_input": "[global.rooms.joins]\nfuture_setting = [\"retained\"]\nruntime_extra = true\n",
+    "unknown_path": "rooms.joins.future_setting",
+    "runtime_path": "rooms.joins.runtime_extra"
+  },
+  {
+    "section": "global.rooms.policy_server",
+    "field": "enable_policy_servers",
+    "canonical": "global.rooms.policy_server.enable",
+    "empty": "[global]\n[global.rooms.policy_server]\n",
+    "partial": "[global]\n[global.rooms.policy_server]\nenable = true\n",
+    "unknown_input": "[global.rooms.policy_server]\nfuture_setting = [\"retained\"]\nruntime_extra = true\n",
+    "unknown_path": "rooms.policy_server.future_setting",
+    "runtime_path": "rooms.policy_server.runtime_extra"
+  },
+  {
+    "section": "global.rooms.redaction",
+    "field": "allow_room_admins_to_request_unredacted_events",
+    "canonical": "global.rooms.redaction.allow_room_admins_to_request_unredacted_events",
+    "empty": "[global]\n[global.rooms.redaction]\n",
+    "partial": "[global]\n[global.rooms.redaction]\nallow_room_admins_to_request_unredacted_events = false\n",
+    "unknown_input": "[global.rooms.redaction]\nfuture_setting = [\"retained\"]\nruntime_extra = true\n",
+    "unknown_path": "rooms.redaction.future_setting",
+    "runtime_path": "rooms.redaction.runtime_extra"
+  },
+  {
+    "section": "global.rooms.relations",
+    "field": "bundle_edit_relations",
+    "canonical": "global.rooms.relations.bundle_edits",
+    "empty": "[global]\n[global.rooms.relations]\n",
+    "partial": "[global]\n[global.rooms.relations]\nbundle_edits = true\n",
+    "unknown_input": "[global.rooms.relations]\nfuture_setting = [\"retained\"]\nruntime_extra = true\n",
+    "unknown_path": "rooms.relations.future_setting",
+    "runtime_path": "rooms.relations.runtime_extra"
+  },
+  {
+    "section": "global.runtime",
+    "field": "stream_amplification",
+    "canonical": "global.runtime.stream.amplification",
+    "empty": "[global]\n[global.runtime]\n",
+    "partial": "[global]\n[global.runtime]\n[global.runtime.stream]\namplification = 18\n",
+    "unknown_input": "[global.runtime]\nfuture_setting = [\"retained\"]\nruntime_extra = true\n",
+    "unknown_path": "runtime.future_setting",
+    "runtime_path": "runtime.runtime_extra"
+  },
+  {
+    "section": "global.runtime.stream",
+    "field": "stream_amplification",
+    "canonical": "global.runtime.stream.amplification",
+    "empty": "[global]\n[global.runtime.stream]\n",
+    "partial": "[global]\n[global.runtime.stream]\namplification = 18\n",
+    "unknown_input": "[global.runtime.stream]\nfuture_setting = [\"retained\"]\nruntime_extra = true\n",
+    "unknown_path": "runtime.stream.future_setting",
+    "runtime_path": "runtime.stream.runtime_extra"
+  },
+  {
+    "section": "global.sending",
+    "field": "sender_idle_timeout",
+    "canonical": "global.sending.idle_timeout",
+    "empty": "[global]\n[global.sending]\n",
+    "partial": "[global]\n[global.sending]\nidle_timeout = 15\n",
+    "unknown_input": "[global.sending]\nfuture_setting = [\"retained\"]\nruntime_extra = true\n",
+    "unknown_path": "sending.future_setting",
+    "runtime_path": "sending.runtime_extra"
+  },
+  {
+    "section": "global.telemetry",
+    "field": "allow_jaeger",
+    "canonical": "global.telemetry.jaeger.enable",
+    "empty": "[global]\n[global.telemetry]\n",
+    "partial": "[global]\n[global.telemetry]\n[global.telemetry.jaeger]\nenable = true\n",
+    "unknown_input": "[global.telemetry]\nfuture_setting = [\"retained\"]\nruntime_extra = true\n",
+    "unknown_path": "telemetry.future_setting",
+    "runtime_path": "telemetry.runtime_extra"
+  },
+  {
+    "section": "global.telemetry.jaeger",
+    "field": "allow_jaeger",
+    "canonical": "global.telemetry.jaeger.enable",
+    "empty": "[global]\n[global.telemetry.jaeger]\n",
+    "partial": "[global]\n[global.telemetry.jaeger]\nenable = true\n",
+    "unknown_input": "[global.telemetry.jaeger]\nfuture_setting = [\"retained\"]\nruntime_extra = true\n",
+    "unknown_path": "telemetry.jaeger.future_setting",
+    "runtime_path": "telemetry.jaeger.runtime_extra"
+  },
+  {
+    "section": "global.telemetry.sentry",
+    "field": "sentry_attach_stacktrace",
+    "canonical": "global.telemetry.sentry.attach_stacktrace",
+    "empty": "[global]\n[global.telemetry.sentry]\n",
+    "partial": "[global]\n[global.telemetry.sentry]\nattach_stacktrace = true\n",
+    "unknown_input": "[global.telemetry.sentry]\nfuture_setting = [\"retained\"]\nruntime_extra = true\n",
+    "unknown_path": "telemetry.sentry.future_setting",
+    "runtime_path": "telemetry.sentry.runtime_extra"
+  },
+  {
+    "section": "global.tracing",
+    "field": "tokio_console",
+    "canonical": "global.tracing.tokio_console",
+    "empty": "[global]\n[global.tracing]\n",
+    "partial": "[global]\n[global.tracing]\ntokio_console = true\n",
+    "unknown_input": "[global.tracing]\nfuture_setting = [\"retained\"]\nruntime_extra = true\n",
+    "unknown_path": "tracing.future_setting",
+    "runtime_path": "tracing.runtime_extra"
+  },
+  {
+    "section": "global.tracing.flame",
+    "field": "tracing_flame",
+    "canonical": "global.tracing.flame.enable",
+    "empty": "[global]\n[global.tracing.flame]\n",
+    "partial": "[global]\n[global.tracing.flame]\nenable = true\n",
+    "unknown_input": "[global.tracing.flame]\nfuture_setting = [\"retained\"]\nruntime_extra = true\n",
+    "unknown_path": "tracing.flame.future_setting",
+    "runtime_path": "tracing.flame.runtime_extra"
+  },
+  {
+    "section": "global.turn",
+    "field": "turn_allow_guests",
+    "canonical": "global.turn.allow_guests",
+    "empty": "[global]\n[global.turn]\n",
+    "partial": "[global]\n[global.turn]\nallow_guests = true\n",
+    "unknown_input": "[global.turn]\nfuture_setting = [\"retained\"]\nruntime_extra = true\n",
+    "unknown_path": "turn.future_setting",
+    "runtime_path": "turn.runtime_extra"
+  },
+  {
+    "section": "global.typing",
+    "field": "allow_incoming_typing",
+    "canonical": "global.typing.allow_incoming",
+    "empty": "[global]\n[global.typing]\n",
+    "partial": "[global]\n[global.typing]\nallow_incoming = false\n",
+    "unknown_input": "[global.typing]\nfuture_setting = [\"retained\"]\nruntime_extra = true\n",
+    "unknown_path": "typing.future_setting",
+    "runtime_path": "typing.runtime_extra"
+  }
+]

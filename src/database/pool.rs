@@ -326,7 +326,7 @@ fn worker_init(&self, id: usize, chan_id: usize) {
 		.topology
 		.iter()
 		.enumerate()
-		.filter(|_| self.server.config.db_pool_affinity)
+		.filter(|_| self.server.config.database.pool.affinity)
 		.filter_map(|(core_id, &queue_id)| (chan_id == queue_id).then_some(core_id));
 
 	// affinity is empty (no-op) if there's only one queue

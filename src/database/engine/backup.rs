@@ -23,11 +23,11 @@ use crate::{Context, util::map_err};
 #[implement(Engine)]
 #[tracing::instrument(level = "debug", skip(self))]
 pub fn backup(&self) -> Result {
-	let to_keep = self.ctx.server.config.database_backups_to_keep;
+	let to_keep = self.ctx.server.config.database.backup.keep;
 
 	if to_keep <= 0 {
 		return Err!(Config(
-			"database_backups_to_keep",
+			"database.backup.keep",
 			"Set above zero to enable backups; no backup was created."
 		));
 	}
@@ -184,8 +184,10 @@ fn backup_engine(ctx: &Context) -> Result<BackupEngine> {
 
 fn backup_path(config: &Config) -> Result<&Path> {
 	config
-		.database_backup_path
+		.database
+		.backup
+		.path
 		.as_deref()
 		.filter(|path| !path.as_os_str().is_empty())
-		.ok_or_else(|| err!(Config("database_backup_path", "Configure path to enable backups")))
+		.ok_or_else(|| err!(Config("database.backup.path", "Configure path to enable backups")))
 }

@@ -4,7 +4,9 @@
 //! settings to the rest of the workspace. Field documentation also supplies the
 //! generated example configuration.
 
+pub mod cache;
 pub mod check;
+pub mod database;
 mod format;
 mod identity_provider_serde;
 pub mod ip_source;
@@ -16,6 +18,7 @@ pub mod proxy;
 mod regenerate;
 mod rocksdb;
 pub mod room_version;
+pub mod runtime;
 pub mod sources;
 #[cfg(test)]
 mod tests;
@@ -49,13 +52,16 @@ use tuwunel_macros::config_example_generator;
 use url::Url;
 
 pub use self::{
+	cache::Cache,
 	check::check,
+	database::Database,
 	ip_source::IpSource,
 	manager::Manager,
 	regenerate::{
 		Overwrite, RegenerateOptions, RegenerationSummary, example_config, regenerate_config,
 		write_example_config,
 	},
+	runtime::Runtime,
 	sources::Sources,
 };
 use self::{
@@ -115,7 +121,7 @@ pub type StorageBucketName = SmallString<[u8; 64]>;
 ### https://tuwunel.chat/configuration.html
 "#,
 	ignore = "rocksdb catchall well_known tls rate_limiting ldap jwt appservice \
-	          identity_provider storage_provider registration_terms smtp",
+	          identity_provider storage_provider registration_terms smtp cache database runtime",
 	hidden = "allow_invalid_tls_certificates resolve_state_locally_shadow",
 	forbidden = "database_restore_backup force_migration"
 )]
@@ -226,26 +232,6 @@ pub struct Config {
 	#[serde(default)]
 	pub error_on_unknown_config_opts: bool,
 
-	/// tuwunel supports online database backups using RocksDB's Backup engine
-	/// API. To use this, set a database backup path that tuwunel can write
-	/// to.
-	///
-	/// For more information, see:
-	/// https://tuwunel.chat/maintenance.html#backups
-	///
-	/// reloadable: yes
-	/// example: "/opt/tuwunel-db-backups"
-	pub database_backup_path: Option<PathBuf>,
-
-	/// The amount of online RocksDB database backups to keep/retain, if using
-	/// "database_backup_path", before deleting the oldest one. This must be at
-	/// least 1; "backup-database" is an error at 0 or below.
-	///
-	/// reloadable: yes
-	/// default: 1
-	#[serde(default = "default_database_backups_to_keep")]
-	pub database_backups_to_keep: i16,
-
 	/// Restore this online database backup on startup, before the database is
 	/// opened. The value is a backup ID as listed by `!admin server
 	/// list-backups`, or 0 for the most recent backup. Set by the
@@ -253,193 +239,6 @@ pub struct Config {
 	/// configuration file, where it would repeat the restore on every
 	/// startup.
 	pub database_restore_backup: Option<u32>,
-
-	/// Set this to any float value to multiply tuwunel's in-memory LRU caches
-	/// with such as "auth_chain_cache_capacity".
-	///
-	/// May be useful if you have significant memory to spare to increase
-	/// performance.
-	///
-	/// If you have low memory, reducing this may be viable.
-	///
-	/// By default, the individual caches such as "auth_chain_cache_capacity"
-	/// are scaled by your CPU core count.
-	///
-	/// default: 1.0
-	#[serde(
-		default = "default_cache_capacity_modifier",
-		alias = "conduit_cache_capacity_modifier"
-	)]
-	pub cache_capacity_modifier: f64,
-
-	/// Maximum number of entries in the RocksDB block cache shared by the
-	/// `pduid_pdu` and `eventid_outlierpdu` column families: a PDU's full
-	/// body, keyed by its PDU ID, and the same body keyed by event ID when
-	/// the PDU is an outlier.
-	///
-	/// This is an entry count, not a byte size. The cache's actual capacity
-	/// in bytes is this value multiplied by an internal per-column-family
-	/// key+value size estimate, then multiplied by `cache_capacity_modifier`.
-	///
-	/// Scaled by your CPU core count by default; see
-	/// `cache_capacity_modifier` to scale this along with the other
-	/// individual LRU caches at once.
-	///
-	/// default: varies by system
-	#[serde(default = "default_pdu_cache_capacity")]
-	pub pdu_cache_capacity: u32,
-
-	/// Maximum number of entries in the RocksDB block cache for the
-	/// `authchainkey_authchain` column family: a room event's full auth
-	/// chain, keyed by the set of events the chain was derived from.
-	///
-	/// Same entry-count semantics as `pdu_cache_capacity` above; see there
-	/// for how this becomes a byte capacity and how
-	/// `cache_capacity_modifier` applies.
-	///
-	/// default: varies by system
-	#[serde(default = "default_auth_chain_cache_capacity")]
-	pub auth_chain_cache_capacity: u32,
-
-	/// Maximum number of entries in the RocksDB block cache for the
-	/// `shorteventid_eventid` column family: an event's full event ID,
-	/// looked up from its short event ID.
-	///
-	/// Same entry-count semantics as `pdu_cache_capacity`.
-	///
-	/// default: varies by system
-	#[serde(default = "default_shorteventid_cache_capacity")]
-	pub shorteventid_cache_capacity: u32,
-
-	/// Maximum number of entries in the RocksDB block cache for the
-	/// `eventid_shorteventid` column family: an event's short event ID,
-	/// looked up from its full event ID. The reverse lookup of
-	/// `shorteventid_cache_capacity`.
-	///
-	/// Same entry-count semantics as `pdu_cache_capacity`.
-	///
-	/// default: varies by system
-	#[serde(default = "default_eventidshort_cache_capacity")]
-	pub eventidshort_cache_capacity: u32,
-
-	/// Maximum number of entries in the RocksDB block cache for the
-	/// `eventid_pduid` column family: an event's PDU ID, looked up from its
-	/// full event ID.
-	///
-	/// Same entry-count semantics as `pdu_cache_capacity`.
-	///
-	/// default: varies by system
-	#[serde(default = "default_eventid_pdu_cache_capacity")]
-	pub eventid_pdu_cache_capacity: u32,
-
-	/// Maximum number of entries in the RocksDB block cache for the
-	/// `eventid_backoff` column family: the recent fetch, auth, upgrade, and
-	/// delivery outcomes an event is rate-gated against, keyed by federation
-	/// step, event ID, and time bucket.
-	///
-	/// Same entry-count semantics as `pdu_cache_capacity`. A server working
-	/// through a large missing-ancestry gap reads this column heavily.
-	///
-	/// default: varies by system
-	#[serde(default = "default_eventid_backoff_cache_capacity")]
-	pub eventid_backoff_cache_capacity: u32,
-
-	/// Maximum number of entries in the RocksDB block cache for the
-	/// `shortstatekey_statekey` column family: a state event's full state
-	/// key, looked up from its short state key.
-	///
-	/// Same entry-count semantics as `pdu_cache_capacity`.
-	///
-	/// default: varies by system
-	#[serde(default = "default_shortstatekey_cache_capacity")]
-	pub shortstatekey_cache_capacity: u32,
-
-	/// Maximum number of entries in the RocksDB block cache for the
-	/// `statekey_shortstatekey` column family: a state event's short state
-	/// key, looked up from its full state key. The reverse lookup of
-	/// `shortstatekey_cache_capacity`.
-	///
-	/// Same entry-count semantics as `pdu_cache_capacity`.
-	///
-	/// default: varies by system
-	#[serde(default = "default_statekeyshort_cache_capacity")]
-	pub statekeyshort_cache_capacity: u32,
-
-	/// Maximum number of entries in the RocksDB block cache for the
-	/// `servernameevent_data` column family: outbound federation events
-	/// (PDUs and EDUs) queued for delivery, keyed by destination server
-	/// name.
-	///
-	/// Same entry-count semantics as `pdu_cache_capacity`.
-	///
-	/// default: varies by system
-	#[serde(default = "default_servernameevent_data_cache_capacity")]
-	pub servernameevent_data_cache_capacity: u32,
-
-	/// Maximum number of entries in the RocksDB block cache for the
-	/// `mediaid_lazycontent` column family: preview images staged by the URL
-	/// preview fetcher, keyed by media ID, until a download promotes the row.
-	///
-	/// Same entry-count semantics as `pdu_cache_capacity`, against a modal
-	/// 256 KiB entry. Staged rows are read once and deleted at promotion, so
-	/// this mostly holds index blocks, and a single outsized preview can
-	/// exceed the whole pool.
-	///
-	/// default: 128
-	#[serde(default = "default_mediaid_lazycontent_cache_capacity")]
-	pub mediaid_lazycontent_cache_capacity: u32,
-
-	/// Maximum number of entries in the RocksDB block cache pool shared by the
-	/// `servername_destination` and `servername_override` column families: a
-	/// remote server's resolved federation destination, keyed by server name,
-	/// and the address override for a resolved hostname.
-	///
-	/// Same entry-count semantics as `pdu_cache_capacity`, counted across the
-	/// pool rather than per column.
-	///
-	/// default: varies by system
-	#[serde(default = "default_resolver_cache_capacity")]
-	pub resolver_cache_capacity: u32,
-
-	/// Maximum number of entries in the RocksDB block cache for the
-	/// `servername_status` column family: a remote server's recent
-	/// reachability outcome, keyed by server name and time bucket.
-	///
-	/// Same entry-count semantics as `pdu_cache_capacity`.
-	///
-	/// default: varies by system
-	#[serde(default = "default_servername_status_cache_capacity")]
-	pub servername_status_cache_capacity: u32,
-
-	/// Maximum number of entries in the in-memory LRU cache of decompressed
-	/// room state (a list of short state-info entries per state hash), used
-	/// by the state compressor to avoid re-walking
-	/// `shortstatehash_statediff` on every lookup.
-	///
-	/// Unlike the other caches on this page, this one is not backed by
-	/// RocksDB: it is a plain in-process cache sized directly in entries,
-	/// with no per-entry byte-size conversion. `cache_capacity_modifier`
-	/// still applies to it.
-	///
-	/// default: varies by system
-	#[serde(default = "default_stateinfo_cache_capacity")]
-	pub stateinfo_cache_capacity: u32,
-
-	/// Minimum time-to-live in seconds for room summary entries in the spaces
-	/// cache.
-	///
-	/// reloadable: yes
-	/// default: 10800
-	#[serde(default = "default_spacehierarchy_cache_ttl_min")]
-	pub spacehierarchy_cache_ttl_min: u64,
-
-	/// Maximum time-to-live in seconds for room summary entries in the spaces
-	/// cache.
-	///
-	/// reloadable: yes
-	/// default: 64800
-	#[serde(default = "default_spacehierarchy_cache_ttl_max")]
-	pub spacehierarchy_cache_ttl_max: u64,
 
 	/// Minimum timeout a client can request for long-polling sync. Requests
 	/// will be clamped up to this value if smaller.
@@ -3475,110 +3274,6 @@ pub struct Config {
 	#[serde(default = "true_fn")]
 	pub enforce_erasure_over_federation: bool,
 
-	/// Enable database pool affinity support. On supporting systems, block
-	/// device queue topologies are detected and the request pool is optimized
-	/// for the hardware; db_pool_workers is determined automatically.
-	///
-	/// default: true
-	#[serde(default = "true_fn")]
-	pub db_pool_affinity: bool,
-
-	/// Sets the number of worker threads in the frontend-pool of the database.
-	/// This number should reflect the I/O capabilities of the system,
-	/// such as the queue-depth or the number of simultaneous requests in
-	/// flight. The default is four times the available CPU thread count,
-	/// clamped from 32 through 1024.
-	///
-	/// Note: This value is only used if db_pool_affinity is disabled or not
-	/// detected on the system, otherwise it is determined automatically.
-	///
-	/// default: varies by system
-	#[serde(default = "default_db_pool_workers")]
-	pub db_pool_workers: usize,
-
-	/// When db_pool_affinity is enabled and detected, the size of any worker
-	/// group will not exceed the determined value. This is necessary when
-	/// thread-pooling approach does not scale to the full capabilities of
-	/// high-end hardware; using detected values without limitation could
-	/// degrade performance.
-	///
-	/// The value is multiplied by the number of cores which share a device
-	/// queue, since group workers can be scheduled on any of those cores.
-	///
-	/// default: 32
-	#[serde(default = "default_db_pool_workers_limit")]
-	pub db_pool_workers_limit: usize,
-
-	/// Limits the total number of workers across all worker groups. When the
-	/// sum of all groups exceeds this value the worker counts are reduced until
-	/// this constraint is satisfied.
-	///
-	/// Each populated worker group retains at least one worker, so the number
-	/// of populated groups is the effective floor of this value.
-	///
-	/// By default this value is only effective on larger systems (e.g. 16+
-	/// cores) where it will tamper the overall thread-count. The thread-pool
-	/// model will never achieve hardware capacity but this value can be raised
-	/// on huge systems if the scheduling overhead is determined to not
-	/// bottleneck and the worker groups are divided too small.
-	///
-	/// default: 2048
-	#[serde(default = "default_db_pool_max_workers")]
-	pub db_pool_max_workers: usize,
-
-	/// Determines the size of the queues feeding the database's frontend-pool.
-	/// The size of the queue is determined by multiplying this value with the
-	/// number of pool workers. When this queue is full, tokio tasks conducting
-	/// requests will yield until space is available; this is good for
-	/// flow-control by avoiding buffer-bloat, but can inhibit throughput if
-	/// too low.
-	///
-	/// default: 4
-	#[serde(default = "default_db_pool_queue_mult")]
-	pub db_pool_queue_mult: usize,
-
-	/// Sets the initial value for the concurrency of streams. This value simply
-	/// allows overriding the default in the code. The default is 32, which is
-	/// the same as the default in the code. Note this value is itself
-	/// overridden by the computed stream_width_scale, unless that is disabled;
-	/// this value can serve as a fixed-width instead.
-	///
-	/// default: 32
-	#[serde(default = "default_stream_width_default")]
-	pub stream_width_default: usize,
-
-	/// Scales the stream width starting from a base value detected for the
-	/// specific system. The base value is the database pool worker count
-	/// determined from the hardware queue size (e.g. 32 for SSD or 64 or 128+
-	/// for NVMe). This float allows scaling the width up or down by multiplying
-	/// it (e.g. 1.5, 2.0, etc). The maximum result can be the size of the pool
-	/// queue (see: db_pool_queue_mult) as any larger value will stall the tokio
-	/// task. The value can also be scaled down (e.g. 0.5)  to improve
-	/// responsiveness for many users at the cost of throughput for each.
-	///
-	/// Setting this value to 0.0 causes the stream width to be fixed at the
-	/// value of stream_width_default. The default scale is 1.0 to match the
-	/// capabilities detected for the system.
-	///
-	/// default: 1.0
-	#[serde(default = "default_stream_width_scale")]
-	pub stream_width_scale: f32,
-
-	/// Sets the initial amplification factor. This controls batch sizes of
-	/// requests made by each pool worker, multiplying the throughput of each
-	/// stream. This value is somewhat abstract from specific hardware
-	/// characteristics and can be significantly larger than any thread count or
-	/// queue size. This is because each database query may require several
-	/// index lookups, thus many database queries in a batch may make progress
-	/// independently while also sharing index and data blocks which may or may
-	/// not be cached. It is worthwhile to submit huge batches to reduce
-	/// complexity. The maximum value is 32768, though sufficient hardware is
-	/// still advised for that.
-	///
-	/// default: 1024
-	#[serde(default = "default_stream_amplification")]
-	pub stream_amplification: usize,
-
 	/// Number of sender task workers; determines sender parallelism. Default is
 	/// '0' which means the value is determined internally, likely matching the
 	/// number of tokio worker-threads or number of cores, etc. Override by
@@ -3858,6 +3553,24 @@ pub struct Config {
 	#[expect(clippy::zero_sized_map_values)]
 	// this is a catchall, the map shouldn't be zero at runtime
 	catchall: BTreeMap<String, IgnoredAny>,
+
+	/// Settings for cache.
+	///
+	/// display: section
+	#[serde(default)]
+	pub cache: Cache,
+
+	/// Settings for database.
+	///
+	/// display: section
+	#[serde(default)]
+	pub database: Database,
+
+	/// Settings for runtime.
+	///
+	/// display: section
+	#[serde(default)]
+	pub runtime: Runtime,
 }
 
 /// Configures direct TLS listener behavior.
@@ -5578,60 +5291,6 @@ fn default_port() -> ListeningPort { ListeningPort { ports: Left(8008) } }
 
 fn default_unix_socket_perms() -> u32 { 660 }
 
-fn default_database_backups_to_keep() -> i16 { 1 }
-
-fn default_pdu_cache_capacity() -> u32 { parallelism_scaled_u32(10_000).saturating_add(100_000) }
-
-fn default_cache_capacity_modifier() -> f64 { 1.0 }
-
-fn default_auth_chain_cache_capacity() -> u32 {
-	parallelism_scaled_u32(250_000).saturating_add(750_000)
-}
-
-fn default_shorteventid_cache_capacity() -> u32 {
-	parallelism_scaled_u32(200_000).saturating_add(400_000)
-}
-
-fn default_eventidshort_cache_capacity() -> u32 {
-	parallelism_scaled_u32(100_000).saturating_add(400_000)
-}
-
-fn default_eventid_pdu_cache_capacity() -> u32 {
-	parallelism_scaled_u32(100_000).saturating_add(400_000)
-}
-
-fn default_eventid_backoff_cache_capacity() -> u32 {
-	parallelism_scaled_u32(4_000).saturating_add(200_000)
-}
-
-fn default_shortstatekey_cache_capacity() -> u32 {
-	parallelism_scaled_u32(4_000).saturating_add(40_000)
-}
-
-fn default_statekeyshort_cache_capacity() -> u32 {
-	parallelism_scaled_u32(4_000).saturating_add(40_000)
-}
-
-fn default_servernameevent_data_cache_capacity() -> u32 {
-	parallelism_scaled_u32(50_000).saturating_add(200_000)
-}
-
-fn default_servername_status_cache_capacity() -> u32 {
-	parallelism_scaled_u32(15_000).saturating_add(200_000)
-}
-
-fn default_resolver_cache_capacity() -> u32 {
-	parallelism_scaled_u32(10_000).saturating_add(100_000)
-}
-
-fn default_mediaid_lazycontent_cache_capacity() -> u32 { 128 }
-
-fn default_stateinfo_cache_capacity() -> u32 { parallelism_scaled_u32(100) }
-
-fn default_spacehierarchy_cache_ttl_min() -> u64 { 60 * 60 * 3 }
-
-fn default_spacehierarchy_cache_ttl_max() -> u64 { 60 * 60 * 18 }
-
 fn default_dns_cache_entries() -> u32 { 32768 }
 
 fn default_dns_min_ttl() -> u64 { 60 * 180 }
@@ -5886,24 +5545,6 @@ fn parallelism_scaled(val: usize) -> usize { val.saturating_mul(sys::available_p
 fn default_trusted_server_batch_size() -> usize { 192 }
 
 fn default_trusted_server_batch_concurrency() -> usize { 2 }
-
-fn default_db_pool_workers() -> usize {
-	sys::available_parallelism()
-		.saturating_mul(4)
-		.clamp(32, 1024)
-}
-
-fn default_db_pool_workers_limit() -> usize { 32 }
-
-fn default_db_pool_max_workers() -> usize { 2048 }
-
-fn default_db_pool_queue_mult() -> usize { 4 }
-
-fn default_stream_width_default() -> usize { 32 }
-
-fn default_stream_width_scale() -> f32 { 1.0 }
-
-fn default_stream_amplification() -> usize { 1024 }
 
 fn default_client_receive_timeout() -> u64 { 75 }
 

@@ -1465,7 +1465,7 @@ async fn a_restore_is_not_repeated_on_reopen() -> Result {
 	let path = database_path("restore");
 	let backups = path.with_extension("backups");
 	let raw_config = base_config(&path)
-		.merge(("database_backup_path", &backups))
+		.merge(("database.backup.path", &backups))
 		.merge(("database_restore_backup", 1));
 
 	let server = new_server(&raw_config)?;

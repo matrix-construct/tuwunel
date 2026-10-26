@@ -101,180 +101,6 @@
 #
 #error_on_unknown_config_opts = false
 
-# tuwunel supports online database backups using RocksDB's Backup engine
-# API. To use this, set a database backup path that tuwunel can write
-# to.
-#
-# For more information, see:
-# https://tuwunel.chat/maintenance.html#backups
-#
-# reloadable: yes
-# example: "/opt/tuwunel-db-backups"
-#
-#database_backup_path =
-
-# The amount of online RocksDB database backups to keep/retain, if using
-# "database_backup_path", before deleting the oldest one. This must be at
-# least 1; "backup-database" is an error at 0 or below.
-#
-# reloadable: yes
-#
-#database_backups_to_keep = 1
-
-# Set this to any float value to multiply tuwunel's in-memory LRU caches
-# with such as "auth_chain_cache_capacity".
-#
-# May be useful if you have significant memory to spare to increase
-# performance.
-#
-# If you have low memory, reducing this may be viable.
-#
-# By default, the individual caches such as "auth_chain_cache_capacity"
-# are scaled by your CPU core count.
-#
-#cache_capacity_modifier = 1.0
-
-# Maximum number of entries in the RocksDB block cache shared by the
-# `pduid_pdu` and `eventid_outlierpdu` column families: a PDU's full
-# body, keyed by its PDU ID, and the same body keyed by event ID when
-# the PDU is an outlier.
-#
-# This is an entry count, not a byte size. The cache's actual capacity
-# in bytes is this value multiplied by an internal per-column-family
-# key+value size estimate, then multiplied by `cache_capacity_modifier`.
-#
-# Scaled by your CPU core count by default; see
-# `cache_capacity_modifier` to scale this along with the other
-# individual LRU caches at once.
-#
-#pdu_cache_capacity = varies by system
-
-# Maximum number of entries in the RocksDB block cache for the
-# `authchainkey_authchain` column family: a room event's full auth
-# chain, keyed by the set of events the chain was derived from.
-#
-# Same entry-count semantics as `pdu_cache_capacity` above; see there
-# for how this becomes a byte capacity and how
-# `cache_capacity_modifier` applies.
-#
-#auth_chain_cache_capacity = varies by system
-
-# Maximum number of entries in the RocksDB block cache for the
-# `shorteventid_eventid` column family: an event's full event ID,
-# looked up from its short event ID.
-#
-# Same entry-count semantics as `pdu_cache_capacity`.
-#
-#shorteventid_cache_capacity = varies by system
-
-# Maximum number of entries in the RocksDB block cache for the
-# `eventid_shorteventid` column family: an event's short event ID,
-# looked up from its full event ID. The reverse lookup of
-# `shorteventid_cache_capacity`.
-#
-# Same entry-count semantics as `pdu_cache_capacity`.
-#
-#eventidshort_cache_capacity = varies by system
-
-# Maximum number of entries in the RocksDB block cache for the
-# `eventid_pduid` column family: an event's PDU ID, looked up from its
-# full event ID.
-#
-# Same entry-count semantics as `pdu_cache_capacity`.
-#
-#eventid_pdu_cache_capacity = varies by system
-
-# Maximum number of entries in the RocksDB block cache for the
-# `eventid_backoff` column family: the recent fetch, auth, upgrade, and
-# delivery outcomes an event is rate-gated against, keyed by federation
-# step, event ID, and time bucket.
-#
-# Same entry-count semantics as `pdu_cache_capacity`. A server working
-# through a large missing-ancestry gap reads this column heavily.
-#
-#eventid_backoff_cache_capacity = varies by system
-
-# Maximum number of entries in the RocksDB block cache for the
-# `shortstatekey_statekey` column family: a state event's full state
-# key, looked up from its short state key.
-#
-# Same entry-count semantics as `pdu_cache_capacity`.
-#
-#shortstatekey_cache_capacity = varies by system
-
-# Maximum number of entries in the RocksDB block cache for the
-# `statekey_shortstatekey` column family: a state event's short state
-# key, looked up from its full state key. The reverse lookup of
-# `shortstatekey_cache_capacity`.
-#
-# Same entry-count semantics as `pdu_cache_capacity`.
-#
-#statekeyshort_cache_capacity = varies by system
-
-# Maximum number of entries in the RocksDB block cache for the
-# `servernameevent_data` column family: outbound federation events
-# (PDUs and EDUs) queued for delivery, keyed by destination server
-# name.
-#
-# Same entry-count semantics as `pdu_cache_capacity`.
-#
-#servernameevent_data_cache_capacity = varies by system
-
-# Maximum number of entries in the RocksDB block cache for the
-# `mediaid_lazycontent` column family: preview images staged by the URL
-# preview fetcher, keyed by media ID, until a download promotes the row.
-#
-# Same entry-count semantics as `pdu_cache_capacity`, against a modal
-# 256 KiB entry. Staged rows are read once and deleted at promotion, so
-# this mostly holds index blocks, and a single outsized preview can
-# exceed the whole pool.
-#
-#mediaid_lazycontent_cache_capacity = 128
-
-# Maximum number of entries in the RocksDB block cache pool shared by the
-# `servername_destination` and `servername_override` column families: a
-# remote server's resolved federation destination, keyed by server name,
-# and the address override for a resolved hostname.
-#
-# Same entry-count semantics as `pdu_cache_capacity`, counted across the
-# pool rather than per column.
-#
-#resolver_cache_capacity = varies by system
-
-# Maximum number of entries in the RocksDB block cache for the
-# `servername_status` column family: a remote server's recent
-# reachability outcome, keyed by server name and time bucket.
-#
-# Same entry-count semantics as `pdu_cache_capacity`.
-#
-#servername_status_cache_capacity = varies by system
-
-# Maximum number of entries in the in-memory LRU cache of decompressed
-# room state (a list of short state-info entries per state hash), used
-# by the state compressor to avoid re-walking
-# `shortstatehash_statediff` on every lookup.
-#
-# Unlike the other caches on this page, this one is not backed by
-# RocksDB: it is a plain in-process cache sized directly in entries,
-# with no per-entry byte-size conversion. `cache_capacity_modifier`
-# still applies to it.
-#
-#stateinfo_cache_capacity = varies by system
-
-# Minimum time-to-live in seconds for room summary entries in the spaces
-# cache.
-#
-# reloadable: yes
-#
-#spacehierarchy_cache_ttl_min = 10800
-
-# Maximum time-to-live in seconds for room summary entries in the spaces
-# cache.
-#
-# reloadable: yes
-#
-#spacehierarchy_cache_ttl_max = 64800
-
 # Minimum timeout a client can request for long-polling sync. Requests
 # will be clamped up to this value if smaller.
 #
@@ -2991,94 +2817,6 @@
 #
 #enforce_erasure_over_federation = true
 
-# Enable database pool affinity support. On supporting systems, block
-# device queue topologies are detected and the request pool is optimized
-# for the hardware; db_pool_workers is determined automatically.
-#
-#db_pool_affinity = true
-
-# Sets the number of worker threads in the frontend-pool of the database.
-# This number should reflect the I/O capabilities of the system,
-# such as the queue-depth or the number of simultaneous requests in
-# flight. The default is four times the available CPU thread count,
-# clamped from 32 through 1024.
-#
-# Note: This value is only used if db_pool_affinity is disabled or not
-# detected on the system, otherwise it is determined automatically.
-#
-#db_pool_workers = varies by system
-
-# When db_pool_affinity is enabled and detected, the size of any worker
-# group will not exceed the determined value. This is necessary when
-# thread-pooling approach does not scale to the full capabilities of
-# high-end hardware; using detected values without limitation could
-# degrade performance.
-#
-# The value is multiplied by the number of cores which share a device
-# queue, since group workers can be scheduled on any of those cores.
-#
-#db_pool_workers_limit = 32
-
-# Limits the total number of workers across all worker groups. When the
-# sum of all groups exceeds this value the worker counts are reduced until
-# this constraint is satisfied.
-#
-# Each populated worker group retains at least one worker, so the number
-# of populated groups is the effective floor of this value.
-#
-# By default this value is only effective on larger systems (e.g. 16+
-# cores) where it will tamper the overall thread-count. The thread-pool
-# model will never achieve hardware capacity but this value can be raised
-# on huge systems if the scheduling overhead is determined to not
-# bottleneck and the worker groups are divided too small.
-#
-#db_pool_max_workers = 2048
-
-# Determines the size of the queues feeding the database's frontend-pool.
-# The size of the queue is determined by multiplying this value with the
-# number of pool workers. When this queue is full, tokio tasks conducting
-# requests will yield until space is available; this is good for
-# flow-control by avoiding buffer-bloat, but can inhibit throughput if
-# too low.
-#
-#db_pool_queue_mult = 4
-
-# Sets the initial value for the concurrency of streams. This value simply
-# allows overriding the default in the code. The default is 32, which is
-# the same as the default in the code. Note this value is itself
-# overridden by the computed stream_width_scale, unless that is disabled;
-# this value can serve as a fixed-width instead.
-#
-#stream_width_default = 32
-
-# Scales the stream width starting from a base value detected for the
-# specific system. The base value is the database pool worker count
-# determined from the hardware queue size (e.g. 32 for SSD or 64 or 128+
-# for NVMe). This float allows scaling the width up or down by multiplying
-# it (e.g. 1.5, 2.0, etc). The maximum result can be the size of the pool
-# queue (see: db_pool_queue_mult) as any larger value will stall the tokio
-# task. The value can also be scaled down (e.g. 0.5)  to improve
-# responsiveness for many users at the cost of throughput for each.
-#
-# Setting this value to 0.0 causes the stream width to be fixed at the
-# value of stream_width_default. The default scale is 1.0 to match the
-# capabilities detected for the system.
-#
-#stream_width_scale = 1.0
-
-# Sets the initial amplification factor. This controls batch sizes of
-# requests made by each pool worker, multiplying the throughput of each
-# stream. This value is somewhat abstract from specific hardware
-# characteristics and can be significantly larger than any thread count or
-# queue size. This is because each database query may require several
-# index lookups, thus many database queries in a batch may make progress
-# independently while also sharing index and data blocks which may or may
-# not be cached. It is worthwhile to submit huge batches to reduce
-# complexity. The maximum value is 32768, though sufficient hardware is
-# still advised for that.
-#
-#stream_amplification = 1024
-
 # Number of sender task workers; determines sender parallelism. Default is
 # '0' which means the value is determined internally, likely matching the
 # number of tokio worker-threads or number of cores, etc. Override by
@@ -3325,6 +3063,245 @@
 # A regular expression defining which values this namespace includes.
 #
 #regex =
+
+
+
+#[global.cache]
+
+# Multiplies cache capacities by a floating-point factor.
+#
+# Increase this value to use spare memory for performance, or reduce it
+# when memory is limited. Individual capacities such as
+# `cache.auth_chain_capacity` scale with the CPU core count by default.
+#
+#capacity_modifier = 1.0
+
+# Maximum number of entries in the RocksDB block cache shared by the
+# `pduid_pdu` and `eventid_outlierpdu` column families: a PDU's full
+# body, keyed by its PDU ID, and the same body keyed by event ID when
+# the PDU is an outlier.
+#
+# This is an entry count, not a byte size. The cache's actual capacity
+# in bytes is this value multiplied by an internal per-column-family
+# key+value size estimate, then multiplied by `cache.capacity_modifier`.
+# Scaled by your CPU core count by default; see
+# `cache.capacity_modifier` to scale this along with the other
+# individual LRU caches at once.
+#
+#pdu_capacity = varies by system
+
+# Maximum number of entries in the RocksDB block cache for the
+# `authchainkey_authchain` column family: a room event's full auth
+# chain, keyed by the set of events the chain was derived from.
+#
+# Same entry-count semantics as `cache.pdu_capacity` above; see there
+# for how this becomes a byte capacity and how
+# `cache.capacity_modifier` applies.
+#
+#auth_chain_capacity = varies by system
+
+# Maximum number of entries in the RocksDB block cache for the
+# `shorteventid_eventid` column family: an event's full event ID,
+# looked up from its short event ID.
+#
+# Same entry-count semantics as `cache.pdu_capacity`.
+#
+#shorteventid_capacity = varies by system
+
+# Maximum number of entries in the RocksDB block cache for the
+# `eventid_shorteventid` column family: an event's short event ID,
+# looked up from its full event ID.
+#
+# This is the reverse lookup of `cache.shorteventid_capacity`.
+# Same entry-count semantics as `cache.pdu_capacity`.
+#
+#eventidshort_capacity = varies by system
+
+# Maximum number of entries in the RocksDB block cache for the
+# `eventid_pduid` column family: an event's PDU ID, looked up from its
+# full event ID.
+#
+# Same entry-count semantics as `cache.pdu_capacity`.
+#
+#eventid_pdu_capacity = varies by system
+
+# Maximum number of entries in the RocksDB block cache for the
+# `eventid_backoff` column family: the recent fetch, auth, upgrade, and
+# delivery outcomes an event is rate-gated against, keyed by federation
+# step, event ID, and time bucket.
+#
+# Same entry-count semantics as `cache.pdu_capacity`. A server working
+# through a large missing-ancestry gap reads this column heavily.
+#
+#eventid_backoff_capacity = varies by system
+
+# Maximum number of entries in the RocksDB block cache for the
+# `shortstatekey_statekey` column family: a state event's full state
+# key, looked up from its short state key.
+#
+# Same entry-count semantics as `cache.pdu_capacity`.
+#
+#shortstatekey_capacity = varies by system
+
+# Maximum number of entries in the RocksDB block cache for the
+# `statekey_shortstatekey` column family: a state event's short state
+# key, looked up from its full state key.
+#
+# This is the reverse lookup of `cache.shortstatekey_capacity`.
+# Same entry-count semantics as `cache.pdu_capacity`.
+#
+#statekeyshort_capacity = varies by system
+
+# Maximum number of entries in the RocksDB block cache for the
+# `servernameevent_data` column family: outbound federation events
+# (PDUs and EDUs) queued for delivery, keyed by destination server
+# name.
+#
+# Same entry-count semantics as `cache.pdu_capacity`.
+#
+#servernameevent_data_capacity = varies by system
+
+# Maximum number of entries in the RocksDB block cache for the
+# `mediaid_lazycontent` column family: preview images staged by the URL
+# preview fetcher, keyed by media ID, until a download promotes the row.
+#
+# Same entry-count semantics as `cache.pdu_capacity`, against a modal
+# 256 KiB entry. Staged rows are read once and deleted at promotion, so
+# this mostly holds index blocks, and a single outsized preview can
+# exceed the whole pool.
+#
+#mediaid_lazycontent_capacity = 128
+
+# Maximum number of entries in the RocksDB block cache pool shared by the
+# `servername_destination` and `servername_override` column families: a
+# remote server's resolved federation destination, keyed by server name,
+# and the address override for a resolved hostname.
+#
+# Same entry-count semantics as `cache.pdu_capacity`, counted across the
+# pool rather than per column.
+#
+#resolver_capacity = varies by system
+
+# Maximum number of entries in the RocksDB block cache for the
+# `servername_status` column family: a remote server's recent
+# reachability outcome, keyed by server name and time bucket.
+#
+# Same entry-count semantics as `cache.pdu_capacity`.
+#
+#servername_status_capacity = varies by system
+
+# Maximum number of entries in the in-memory LRU cache of decompressed
+# room state (a list of short state-info entries per state hash), used
+# by the state compressor to avoid re-walking
+# `shortstatehash_statediff` on every lookup.
+#
+# Unlike the other caches on this page, this one is not backed by
+# RocksDB: it is a plain in-process cache sized directly in entries,
+# with no per-entry byte-size conversion. `cache.capacity_modifier`
+# still applies to it.
+#
+#stateinfo_capacity = varies by system
+
+
+
+#[global.cache.space_hierarchy]
+
+# Minimum time-to-live in seconds for room summary entries in the spaces
+# cache.
+#
+# reloadable: yes
+#
+#ttl_min = 10800
+
+# Maximum time-to-live in seconds for room summary entries in the spaces
+# cache.
+#
+# reloadable: yes
+#
+#ttl_max = 64800
+
+
+
+#[global.database]
+
+
+
+#[global.database.backup]
+
+# Selects a writable directory for online database backups.
+#
+# Backups use the RocksDB Backup engine API. See
+# https://tuwunel.chat/maintenance.html#backups for setup and
+# maintenance.
+#
+# reloadable: yes
+# example: "/opt/tuwunel-db-backups"
+#
+#path =
+
+# Sets how many online RocksDB backups to retain.
+#
+# When `database.backup.path` is configured, the oldest backups are
+# deleted to enforce this limit. The value must be at least 1;
+# `backup-database` returns an error at 0 or below.
+#
+# reloadable: yes
+#
+#keep = 1
+
+
+
+#[global.database.pool]
+
+# Enables database pool affinity support.
+#
+# On supporting systems, detected block device queue topology
+# determines `database.pool.workers` automatically and optimizes the
+# request pool for the hardware.
+#
+#affinity = true
+
+# Sets the number of database frontend pool worker threads.
+#
+# Match the system I/O capabilities, such as queue depth or
+# simultaneous requests in flight. The default is four times the
+# available CPU thread count, clamped from 32 through 1024. This
+# setting applies only when `database.pool.affinity` is disabled or
+# unavailable; otherwise the worker count is determined automatically.
+#
+#workers = varies by system
+
+# Limits each automatically detected database worker group.
+#
+# When `database.pool.affinity` is enabled and available, this value is
+# multiplied by the number of CPU cores sharing a device queue because
+# workers can run on any of those cores. The limit prevents performance
+# degradation when thread pooling cannot scale to the full capacity of
+# high-end hardware.
+#
+#workers_limit = 32
+
+# Limits the total number of workers across all database worker groups.
+#
+# Worker counts are reduced when their sum exceeds this limit, but each
+# populated group retains at least one worker, making the populated
+# group count the effective floor. The default generally constrains
+# larger systems with 16 or more cores. Thread pooling cannot reach
+# full hardware capacity, but this limit can be raised on huge systems
+# when groups are too small and scheduling overhead is not the
+# bottleneck.
+#
+#max_workers = 2048
+
+# Sets the capacity multiplier for database frontend pool request
+# queues.
+#
+# Each queue capacity is this value multiplied by the pool worker
+# count. Tokio tasks submitting requests yield when the queue is full,
+# providing flow control that avoids buffer bloat. A value that is too
+# low can inhibit throughput.
+#
+#queue_mult = 4
 
 
 
@@ -4126,6 +4103,48 @@
 # touch it otherwise.
 #
 #allow_fallocate = true
+
+
+
+#[global.runtime]
+
+
+
+#[global.runtime.stream]
+
+# Sets the initial stream concurrency.
+#
+# The default is 32. The computed
+# `runtime.stream.width_scale` overrides this value unless scaling is
+# disabled, in which case it provides a fixed stream width.
+#
+#width_default = 32
+
+# Scales stream concurrency from the detected system capacity.
+#
+# The base is the database pool worker count derived from hardware
+# queue size, such as 32 for SSDs or 64 or 128+ for NVMe; multipliers
+# such as 1.5 or 2.0 increase it, while 0.5 improves responsiveness for
+# many users at the cost of per-user throughput. The result cannot
+# exceed the pool queue size set by `database.pool.queue_mult`, because
+# larger values stall the Tokio task. A value of 0.0 fixes the width at
+# `runtime.stream.width_default`. The default scale of 1.0 matches
+# detected system capabilities.
+#
+#width_scale = 1.0
+
+# Sets the initial request batch amplification factor.
+#
+# The factor controls batch sizes submitted by each pool worker,
+# multiplying stream throughput independently of specific hardware
+# characteristics, so it can greatly exceed thread counts or queue
+# sizes. Each database query may require several index lookups,
+# allowing queries in a batch to progress independently while sharing
+# index and data blocks, whether cached or not. Large batches reduce
+# complexity. The maximum is 32768, which still requires sufficient
+# hardware.
+#
+#amplification = 1024
 
 
 

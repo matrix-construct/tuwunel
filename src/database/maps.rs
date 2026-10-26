@@ -374,7 +374,7 @@ pub(super) static MAPS: &[Descriptor] = &[
 	Descriptor {
 		name: "roomid_spacehierarchy",
 		limit_size: 1024 * 1024 * 64,
-		ttl: 60 * 60 * 24 * 7, // above spacehierarchy_cache_ttl_max (18h default)
+		ttl: 60 * 60 * 24 * 7, // above cache.space_hierarchy.ttl_max (18h default)
 		..descriptor::RANDOM_SMALL_CACHE
 	},
 	Descriptor {

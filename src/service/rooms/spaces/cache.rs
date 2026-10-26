@@ -92,7 +92,7 @@ impl From<Cached> for Option<SpaceHierarchyRoomsChunk> {
 #[inline]
 fn generate_ttl(&self) -> SystemTime {
 	time_from_now_secs(
-		self.services.config.spacehierarchy_cache_ttl_min
-			..self.services.config.spacehierarchy_cache_ttl_max,
+		self.services.config.cache.space_hierarchy.ttl_min
+			..self.services.config.cache.space_hierarchy.ttl_max,
 	)
 }

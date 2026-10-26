@@ -113,7 +113,7 @@ fn nan_values_survive_semantic_verification() {
 
 	let rendered = regenerate(from_ref(&input), &output);
 	let parsed = parse(&rendered);
-	let value = global(&parsed)["cache_capacity_modifier"]
+	let value = global(&parsed)["cache"]["capacity_modifier"]
 		.as_float()
 		.expect("cache capacity modifier is a float");
 

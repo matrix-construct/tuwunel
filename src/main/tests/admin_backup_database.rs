@@ -20,7 +20,7 @@ fn admin_backup_database() -> Result {
 
 	args.option.extend([
 		format!("database_path=\"{}\"", db.display()),
-		format!("database_backup_path=\"{}\"", backup.display()),
+		format!("database.backup.path=\"{}\"", backup.display()),
 	]);
 
 	args.execute.extend([

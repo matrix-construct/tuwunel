@@ -1,4 +1,5 @@
 mod aggregate;
+mod groups;
 mod loading;
 mod regeneration;
 

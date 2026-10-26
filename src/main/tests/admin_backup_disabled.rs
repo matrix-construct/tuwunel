@@ -20,8 +20,8 @@ fn admin_backup_disabled() -> Result {
 
 	args.option.extend([
 		format!("database_path=\"{}\"", db.display()),
-		format!("database_backup_path=\"{}\"", backup.display()),
-		"database_backups_to_keep=0".to_owned(),
+		format!("database.backup.path=\"{}\"", backup.display()),
+		"database.backup.keep=0".to_owned(),
 	]);
 
 	args.execute.push("server backup-database".into());

@@ -239,19 +239,19 @@ fn get_cache(ctx: &Context, desc: &Descriptor) -> Option<Cache> {
 	// descriptor's size hints; the lookup by column name is legacy-compat.
 	let config = &ctx.server.config;
 	let cap = match desc.name {
-		| "eventid_pduid" => Some(config.eventid_pdu_cache_capacity),
-		| "eventid_shorteventid" => Some(config.eventidshort_cache_capacity),
-		| "eventid_backoff" => Some(config.eventid_backoff_cache_capacity),
-		| "shorteventid_eventid" => Some(config.shorteventid_cache_capacity),
-		| "shortstatekey_statekey" => Some(config.shortstatekey_cache_capacity),
-		| "statekey_shortstatekey" => Some(config.statekeyshort_cache_capacity),
-		| "servernameevent_data" => Some(config.servernameevent_data_cache_capacity),
+		| "eventid_pduid" => Some(config.cache.eventid_pdu_capacity),
+		| "eventid_shorteventid" => Some(config.cache.eventidshort_capacity),
+		| "eventid_backoff" => Some(config.cache.eventid_backoff_capacity),
+		| "shorteventid_eventid" => Some(config.cache.shorteventid_capacity),
+		| "shortstatekey_statekey" => Some(config.cache.shortstatekey_capacity),
+		| "statekey_shortstatekey" => Some(config.cache.statekeyshort_capacity),
+		| "servernameevent_data" => Some(config.cache.servernameevent_data_capacity),
 		| "servername_destination" | "servername_override" =>
-			Some(config.resolver_cache_capacity),
-		| "servername_status" => Some(config.servername_status_cache_capacity),
-		| "mediaid_lazycontent" => Some(config.mediaid_lazycontent_cache_capacity),
-		| "pduid_pdu" | "eventid_outlierpdu" => Some(config.pdu_cache_capacity),
-		| "authchainkey_authchain" => Some(config.auth_chain_cache_capacity),
+			Some(config.cache.resolver_capacity),
+		| "servername_status" => Some(config.cache.servername_status_capacity),
+		| "mediaid_lazycontent" => Some(config.cache.mediaid_lazycontent_capacity),
+		| "pduid_pdu" | "eventid_outlierpdu" => Some(config.cache.pdu_capacity),
+		| "authchainkey_authchain" => Some(config.cache.auth_chain_capacity),
 		| _ => None,
 	}
 	.map(TryInto::try_into)
@@ -340,10 +340,10 @@ pub(crate) fn cache_size(config: &Config, base_size: u32, entity_size: usize) ->
 	clippy::cast_possible_truncation
 )]
 pub(crate) fn cache_size_f64(config: &Config, base_size: f64, entity_size: usize) -> usize {
-	let ents = base_size * config.cache_capacity_modifier;
+	let ents = base_size * config.cache.capacity_modifier;
 
 	(ents as usize)
 		.checked_mul(entity_size)
-		.ok_or_else(|| err!(Config("cache_capacity_modifier", "Cache size is too large.")))
+		.ok_or_else(|| err!(Config("cache.capacity_modifier", "Cache size is too large.")))
 		.expect("invalid cache size")
 }
