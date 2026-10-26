@@ -5,7 +5,7 @@
 ###
 ### You should rename this file before configuring your server. Changes to
 ### documentation and defaults can be contributed in source code at
-### src/core/config/mod.rs. This file is generated when building.
+### src/core/config/. This file is generated when building.
 ###
 ### Any values pre-populated are the default values for said config option.
 ###
@@ -133,34 +133,6 @@
 # are scaled by your CPU core count.
 #
 #cache_capacity_modifier = 1.0
-
-# Set this to any float value in megabytes for tuwunel to tell the
-# database engine that this much memory is available for database read
-# caches.
-#
-# May be useful if you have significant memory to spare to increase
-# performance.
-#
-# Similar to the individual LRU caches, this is scaled up with your CPU
-# core count.
-#
-# This defaults to 128.0 + (64.0 * CPU core count).
-#
-#db_cache_capacity_mb = varies by system
-
-# Set this to any float value in megabytes for tuwunel to tell the
-# database engine that this much memory is available for database write
-# caches.
-#
-# May be useful if you have significant memory to spare to increase
-# performance.
-#
-# Similar to the individual LRU caches, this is scaled up with your CPU
-# core count.
-#
-# This defaults to 48.0 + (4.0 * CPU core count).
-#
-#db_write_buffer_capacity_mb = varies by system
 
 # Maximum number of entries in the RocksDB block cache shared by the
 # `pduid_pdu` and `eventid_outlierpdu` column families: a PDU's full
@@ -1943,268 +1915,6 @@
 #
 #auto_deactivate_banned_room_attempts = false
 
-# RocksDB log level. This is not the same as tuwunel's log level. This
-# is the log level for the RocksDB engine/library which show up in your
-# database folder/path as `LOG` files. tuwunel will log RocksDB errors
-# as normal through tracing or panics if severe for safety.
-#
-#rocksdb_log_level = "error"
-
-# Routes RocksDB log messages to standard error.
-#
-# `rocksdb_log_level` still filters the emitted records. When disabled,
-# RocksDB uses the application's callback logger instead.
-#
-#rocksdb_log_stderr = false
-
-# Max RocksDB `LOG` file size before rotating. Accepts an integer byte
-# count or a string with SI/IEC suffix such as "4 MiB".
-#
-#rocksdb_max_log_file_size = 4194304
-
-# Time in seconds before RocksDB will forcibly rotate logs.
-#
-#rocksdb_log_time_to_roll = 0
-
-# Use RocksDB tunings tailored to spinning disks (HDDs). On NVMe or SSD
-# storage, leave this disabled.
-#
-# When enabled, RocksDB skips compaction readahead and parallel file-open
-# threads at startup. This option does not affect Direct IO; for that, see
-# `rocksdb_direct_io`.
-#
-#rocksdb_optimize_for_spinning_disks = false
-
-# Enables direct-io to increase database performance via unbuffered I/O.
-#
-# For more details about direct I/O and RockDB, see:
-# https://github.com/facebook/rocksdb/wiki/Direct-IO
-#
-# Set this option to false if the database resides on a filesystem which
-# does not support direct-io like FUSE, or any form of complex filesystem
-# setup such as possibly ZFS.
-#
-#rocksdb_direct_io = true
-
-# Amount of threads that RocksDB will use for parallelism on database
-# operations such as cleanup, sync, flush and compaction. The stored value
-# 0 selects the available logical thread count, with a minimum of two.
-#
-#rocksdb_parallelism_threads = 0
-
-# Maximum number of LOG files RocksDB will keep. This must *not* be set to
-# 0. It must be at least 1. Defaults to 3 as these are not very useful
-# unless troubleshooting/debugging a RocksDB bug.
-#
-#rocksdb_max_log_files = 3
-
-# Type of RocksDB database compression to use.
-#
-# Available options are "zstd", "bz2", "lz4", or "none".
-#
-# It is best to use ZSTD as an overall good balance between
-# speed/performance, storage, IO amplification, and CPU usage. For more
-# performance but less compression (more storage used) and less CPU usage,
-# use LZ4.
-#
-# For more details, see:
-# https://github.com/facebook/rocksdb/wiki/Compression
-#
-# "none" will disable compression.
-#
-#rocksdb_compression_algo = "zstd"
-
-# Level of compression the specified compression algorithm for RocksDB to
-# use.
-#
-# Default is 32767, which is internally read by RocksDB as the default
-# magic number and translated to the library's default compression level
-# as they all differ. See their `kDefaultCompressionLevel`.
-#
-# Note when using the default value we may override it with a setting
-# tailored specifically tuwunel.
-#
-#rocksdb_compression_level = 32767
-
-# Level of compression the specified compression algorithm for the
-# bottommost level/data for RocksDB to use. Default is 32767, which is
-# internally read by RocksDB as the default magic number and translated to
-# the library's default compression level as they all differ. See their
-# `kDefaultCompressionLevel`.
-#
-# Since this is the bottommost level (generally old and least used data),
-# it may be desirable to have a very high compression level here as it's
-# less likely for this data to be used. Research your chosen compression
-# algorithm.
-#
-# Note when using the default value we may override it with a setting
-# tailored specifically tuwunel.
-#
-#rocksdb_bottommost_compression_level = 32767
-
-# Whether to enable RocksDB's "bottommost_compression".
-#
-# At the expense of more CPU usage, this will further compress the
-# database to reduce more storage. It is recommended to use ZSTD
-# compression with this for best compression results. This may be useful
-# if you're trying to reduce storage usage from the database.
-#
-# See https://github.com/facebook/rocksdb/wiki/Compression for more details.
-#
-#rocksdb_bottommost_compression = true
-
-# Database recovery mode (for RocksDB WAL corruption).
-#
-# Use this option when the server reports corruption and refuses to start.
-# Set mode 2 (PointInTime) to cleanly recover from this corruption. The
-# server will continue from the last good state, several seconds or
-# minutes prior to the crash. Clients may have to run "clear-cache &
-# reload" to account for the rollback. Upon success, you may reset the
-# mode back to default and restart again. Please note in some cases the
-# corruption error may not be cleared for at least 30 minutes of operation
-# in PointInTime mode.
-#
-# As a very last ditch effort, if PointInTime does not fix or resolve
-# anything, you can try mode 3 (SkipAnyCorruptedRecord) but this will
-# leave the server in a potentially inconsistent state.
-#
-# The default mode 1 (TolerateCorruptedTailRecords) will automatically
-# drop the last entry in the database if corrupted during shutdown, but
-# nothing more. It is extraordinarily unlikely this will desynchronize
-# clients. To disable any form of silent rollback set mode 0
-# (AbsoluteConsistency).
-#
-# The options are:
-# 0 = AbsoluteConsistency
-# 1 = TolerateCorruptedTailRecords (default)
-# 2 = PointInTime (use me if trying to recover)
-# 3 = SkipAnyCorruptedRecord (you now voided your tuwunel warranty)
-#
-# For more information on these modes, see:
-# https://github.com/facebook/rocksdb/wiki/WAL-Recovery-Modes
-#
-# For more details on recovering a corrupt database, see:
-# https://tuwunel.chat/troubleshooting.html#database-corruption
-#
-#rocksdb_recovery_mode = 1
-
-# Enables or disables paranoid SST file checks. This can improve RocksDB
-# database consistency at a potential performance impact due to further
-# safety checks ran.
-#
-# For more information, see:
-# https://github.com/facebook/rocksdb/wiki/Online-Verification#columnfamilyoptionsparanoid_file_checks
-#
-#rocksdb_paranoid_file_checks = false
-
-# Enables or disables checksum verification in rocksdb at runtime.
-# Checksums are usually hardware accelerated with low overhead; they are
-# enabled in rocksdb by default. Older or slower platforms may see gains
-# from disabling.
-#
-#rocksdb_checksums = true
-
-# Enables the "atomic flush" mode in rocksdb. This option is not intended
-# for users. It may be removed or ignored in future versions. Atomic flush
-# may be enabled by the paranoid to possibly improve database integrity at
-# the cost of performance.
-#
-#rocksdb_atomic_flush = false
-
-# Database repair mode (for RocksDB SST corruption).
-#
-# Use this option when the server reports corruption while running or
-# panics. If the server refuses to start use the recovery mode options
-# first. Corruption errors containing the acronym 'SST' which occur after
-# startup will likely require this option.
-#
-# - Backing up your database directory is recommended prior to running the
-#   repair.
-#
-# - Disabling repair mode and restarting the server is recommended after
-#   running the repair.
-#
-# See https://tuwunel.chat/troubleshooting.html#database-corruption for more details on recovering a corrupt database.
-#
-#rocksdb_repair = false
-
-# Opens RocksDB in read-only mode.
-#
-# Writes are rejected and missing column families cannot be created. This
-# mode is disabled by default.
-#
-#rocksdb_read_only = false
-
-# Opens RocksDB as a secondary follower of a primary instance.
-#
-# Writes are rejected while the primary's latest WAL can be replayed into
-# this instance's view. Missing column families cannot be created.
-#
-#rocksdb_secondary = false
-
-# Enables idle CPU priority for compaction thread. This is not enabled by
-# default to prevent compaction from falling too far behind on busy
-# systems.
-#
-#rocksdb_compaction_prio_idle = false
-
-# Enables idle IO priority for compaction thread. This prevents any
-# unexpected lag in the server's operation and is usually a good idea.
-# Enabled by default.
-#
-#rocksdb_compaction_ioprio_idle = true
-
-# Enables RocksDB compaction. You should never ever have to set this
-# option to false. If you for some reason find yourself needing to use
-# this option as part of troubleshooting or a bug, please reach out to us
-# in the tuwunel Matrix room with information and details.
-#
-# Disabling compaction will lead to a significantly bloated and
-# explosively large database, gradually poor performance, unnecessarily
-# excessive disk read/writes, and slower shutdowns and startups.
-#
-#rocksdb_compaction = true
-
-# Level of statistics collection. Some admin commands to display database
-# statistics may require this option to be set. Database performance may
-# be impacted by higher settings.
-#
-# Option is a number ranging from 0 to 6:
-# 0 = No statistics.
-# 1 = No statistics in release mode (default).
-# 2 to 3 = Statistics with no performance impact.
-# 3 to 5 = Statistics with possible performance impact.
-# 6 = All statistics.
-#
-#rocksdb_stats_level = 1
-
-# Ignores the list of dropped columns set by developers.
-#
-# This should be set to true when knowingly moving between versions in
-# ways which are not recommended or otherwise forbidden, or for
-# diagnostic and development purposes; requiring preservation across such
-# movements.
-#
-# The developer's list of dropped columns is meant to safely reduce space
-# by erasing data no longer in use. If this is set to true that storage
-# will not be reclaimed as intended.
-#
-#rocksdb_never_drop_columns = false
-
-# Configures RocksDB to not preallocate WAL logs.
-#
-# Normally, RocksDB allocates certain types of files by calling
-# fallocate, writing the file contents, then truncating the logs to the
-# proper size. This causes pathological disk space usage on btrfs due to
-# how it interacts with its Copy-on-Write implementation. On ZFS,
-# fallocate(2) for preallocation is unsupported and returns EOPNOTSUPP;
-# only `FALLOC_FL_PUNCH_HOLE` and `FALLOC_FL_ZERO_RANGE` are implemented.
-#
-# Set this to false if you run the server on btrfs or ZFS, and do not
-# touch it otherwise.
-#
-#rocksdb_allow_fallocate = true
-
 # This is a password that can be configured that will let you login to the
 # server bot account (currently `@conduit`) for emergency troubleshooting
 # purposes such as recovering/recreating your admin room, or inviting
@@ -3549,480 +3259,72 @@
 
 
 
-#[global.tls]
+#[global.appservice.<ID>]
 
-# Path to a valid TLS certificate file; this section requires a build with
-# the `direct_tls` Cargo feature.
+# The URL for the application service.
 #
-# example: "/path/to/my/certificate.crt"
+# Optionally set to `null` if no traffic is required.
 #
-#certs =
-
-# Path to a valid TLS certificate private key.
+# On Unix, use `unix:///absolute/path.sock` to connect over a Unix socket.
 #
-# example: "/path/to/my/certificate.key"
-#
-#key =
-
-# Controls whether listeners accept both HTTP and HTTPS.
-#
-# Plain requests are served without redirecting them to HTTPS. This
-# weakens transport security and is disabled by default.
-#
-#dual_protocol = false
-
-
-
-#[global.well_known]
-
-# The server URL that the client well-known file will serve.
-#
-# This should not contain a port, and should just be a valid HTTPS URL.
-# While this is unset, `/.well-known/matrix/client` answers 404 and
-# auto-discovery from the server name yields nothing, so the base URL has
-# to reach clients some other way. Leave it unset only when a reverse
-# proxy or another host publishes that file for this domain.
-#
-# example: "https://matrix.example.com"
-#
-#client =
-
-# The server base domain of the URL with a specific port that the server
-# well-known file will serve. This should contain a port at the end, and
-# should not be a URL.
-#
-# reloadable: yes
-# example: "matrix.example.com:443"
-#
-#server =
-
-# LiveKit JWT endpoint.
-# Required for Element Call / MatrixRTC (MSC4143).
-#
-# Note: You must also set `client` above to your homeserver URL.
-#
-# reloadable: yes
-#
-#livekit_url = ""
-
-# Custom MatrixRTC transports.
-#
-# If you're looking to setup Element Call / MatrixRTC with Livekit,
-# you should not use this option and instead set `livekit_url`.
-# This is only required if you want to configure a non-livekit MatrixRTC
-# transport. There are no known client implementations that support any
-# other transport types.
-#
-# This option was previously the only way to configure a Livekit
-# transport. It has been superseded by `livekit_url`.
-#
-# Example:
-# ```toml
-# [global.well_known]
-# client = "https://matrix.yourdomain.com"
-#
-# [[global.well_known.rtc_transports]]
-# type = "livekit"
-# livekit_service_url = "https://livekit.yourdomain.com"
-# ```
-#
-# reloadable: yes
-#
-#rtc_transports = []
-
-
-
-#[global.well_known.support_policy.<ID>]
-
-# Version string of the policy document.
-#
-# example: "v6.7"
-# reloadable: yes
-#
-#version =
-
-
-
-#[global.well_known.support_policy.<ID>.policy_translation.<LANG>]
-
-# User friendly name of the policy document.
-#
-# example: "Privacy Policy"
-# reloadable: yes
-#
-#name =
-
-# Link to the test of the policy document. A valid URL must be specified.
-#
-# example: "https://website.local/privacy-policy"
-# reloadable: yes
+# example: "unix:///run/mautrix-whatsapp/appservice.sock"
 #
 #url =
 
-
-
-#[global.registration_terms.<ID>]
-
-# Version of this policy document, presented to the client. Configuring
-# any `[global.registration_terms.<ID>]` block makes registration
-# require an `m.login.terms` stage listing every such document; the
-# `<ID>` is the policy id sent to clients.
-#
-# example: "1.2"
-# reloadable: yes
-#
-#version =
-
-
-
-#[global.registration_terms.<ID>.translations.<LANG>]
-
-# User friendly name of the policy document in this language.
-#
-# example: "Terms of Service"
-# reloadable: yes
-#
-#name =
-
-# Link to the text of the policy document. Must be a valid http(s) URL.
-#
-# example: "https://example.org/terms-1.2-en.html"
-# reloadable: yes
-#
-#url =
-
-
-
-#[global.well_known.support_contact.<ID>]
-
-# The name of the support role.
-#
-# example: "m.role.admin"
-#
-#role =
-
-# The email address for the above support role.
-#
-# example: "admin@example.com"
-#
-#email_address =
-
-# The Matrix User ID for the above support role.
-#
-# example "@admin:example.com"
-#
-#matrix_id =
-
-# The PGP key (i.e. OpenPGP) that one may use for encrypted communications
-# for the above support role. The value must be a URI. Use a web URL
-# pointing to the key (for example "https://example.com/key.asc"), an
-# OPENPGPKEY DNS record ("dns:..."), or a fingerprint carried with the
-# "openpgp4fpr:" scheme. A bare fingerprint without a scheme, or raw
-# inlined key material, is rejected at startup.
-#
-# As this is a spec proposal (MSC4439), the identifier/prefix for this
-# field is currently "dev.zirco.msc4439.pgp_key"
-#
-# example: "openpgp4fpr:8B77919975EAFA5E2456EE03665FE73077489DB0"
-#
-#pgp_key =
-
-
-
-#[global.ldap]
-
-# Whether to enable LDAP login.
-#
-# reloadable: yes
-# example: "true"
-#
-#enable = false
-
-# URI of the LDAP server.
-#
-# reloadable: yes
-# example: "ldap://ldap.example.com:389"
-#
-#uri =
-
-# Root of the searches.
-#
-# reloadable: yes
-# example: "ou=users,dc=example,dc=org"
-#
-#base_dn =
-
-# Bind DN if anonymous search is not enabled.
-#
-# You can use the variable `{username}` that will be replaced by the
-# entered username. In such case, the password used to bind will be the
-# one provided for the login and not the one given by
-# `bind_password_file`. Beware: automatically granting admin rights will
-# not work if you use this direct bind instead of a LDAP search.
-#
-# reloadable: yes
-# example: "cn=ldap-reader,dc=example,dc=org" or
-# "cn={username},ou=users,dc=example,dc=org"
-#
-#bind_dn = ""
-
-# Path to a file on the system that contains the password for the
-# `bind_dn`.
-#
-# The server must be able to access the file, and it must not be empty.
-#
-# reloadable: yes
-#
-#bind_password_file = ""
-
-# Search filter to limit user searches.
-#
-# You can use the variable `{username}` that will be replaced by the
-# entered username for more complex filters.
-#
-# reloadable: yes
-# example: "(&(objectClass=person)(memberOf=matrix))"
-#
-#filter = "(objectClass=*)"
-
-# Attribute to use to uniquely identify the user.
-#
-# reloadable: yes
-# example: "uid" or "cn"
-#
-#uid_attribute = "uid"
-
-# Root of the searches for admin users.
-#
-# Defaults to `base_dn` if empty.
-#
-# reloadable: yes
-# example: "ou=admins,dc=example,dc=org"
-#
-#admin_base_dn =
-
-# The LDAP search filter to find administrative users for tuwunel.
-#
-# If left blank, administrative state must be configured manually for each
-# user.
-#
-# You can use the variable `{username}` that will be replaced by the
-# entered username for more complex filters.
+# A unique token for application services to use to authenticate requests
+# to Homeservers.
 #
-# reloadable: yes
-# example: "(objectClass=tuwunelAdmin)" or "(uid={username})"
-#
-#admin_filter =
-
-
-
-#[global.jwt]
-
-# Enable JWT logins
-#
-# reloadable: yes
-#
-#enable = false
-
-# Validation key, also called 'secret' in Synapse config. The type of key
-# can be configured in 'format', but defaults to the common HMAC which
-# is a plaintext shared-secret, so you should keep this value private.
-#
-# reloadable: yes
-#
-#key =
-
-# Format of the 'key': HMAC, B64HMAC, ECDSA, or EDDSA, case-insensitive.
-#
-# HMAC is a plaintext shared secret, and B64HMAC (also spelled HMACB64)
-# is the same secret base64-encoded in the standard alphabet with '='
-# padding, for random binary secrets that cannot be pasted as text.
-# ECDSA and EDDSA are PEM-encoded public keys, EDDSA for Ed25519.
-# Startup and reload both refuse an unknown format while JWT is enabled.
-#
-# reloadable: yes
-#
-#format = "HMAC"
-
-# Automatically create new user from a valid claim, otherwise access is
-# denied for an unknown even with an authentic token.
-#
-# reloadable: yes
-#
-#register_user = true
-
-# Signature algorithm for validating tokens.
-#
-# The name must suit the key format: HS256, HS384, or HS512 for HMAC
-# and B64HMAC, ES256 or ES384 for ECDSA, and EdDSA for EDDSA.
-#
-# reloadable: yes
-#
-#algorithm = "HS256"
-
-# Optional audience claim list. The token must claim one or more values
-# from this list when set.
-#
-# reloadable: yes
-#
-#audience = []
-
-# Optional issuer claim list. The token must claim one or more values
-# from this list when set.
-#
-# reloadable: yes
-#
-#issuer = []
-
-# Require expiration claim in the token. This defaults to false for
-# synapse migration compatibility.
-#
-# reloadable: yes
-#
-#require_exp = false
-
-# Require not-before claim in the token. This defaults to false for
-# synapse migration compatibility.
-#
-# reloadable: yes
-#
-#require_nbf = false
+#as_token =
 
-# Validate expiration time of the token when present. Whether or not it is
-# required depends on require_exp, but when present this ensures the token
-# is not used after a time.
-#
-# reloadable: yes
+# A unique token for Homeservers to use to authenticate requests to
+# application services.
 #
-#validate_exp = true
+#hs_token =
 
-# Validate not-before time of the token when present. Whether or not it is
-# required depends on require_nbf, but when present this ensures the token
-# is not used before a time.
+# The localpart of the user associated with the application service.
 #
-# reloadable: yes
-#
-#validate_nbf = true
+#sender_localpart =
 
-# Bypass validation for diagnostic/debug use only.
+# Whether requests from masqueraded users are rate-limited.
 #
-# reloadable: yes
+# The sender is excluded.
 #
-#validate_signature = true
-
-
-
-#[global.rate_limiting]
-
-
+#rate_limited = false
 
-#[global.rate_limiting.login]
-
-
-
-#[global.rate_limiting.login.failed]
-
-# Token-bucket refill rate (failures per second) for wrong passwords
-# against one account.
+# The external protocols which the application service provides (e.g.
+# IRC).
 #
-# Every password attempt takes a token before the password is checked,
-# and only a wrong password keeps it; once the bucket is empty, even the
-# owner's correct password is refused with `M_LIMIT_EXCEEDED`. Applies to
-# `/login` (but not to the LDAP binds it makes), the built-in OIDC login
-# page and password re-entry for sensitive actions (UIAA), keyed on the
-# account. Mirrors Synapse's `rc_login.failed_attempts` and its default:
-# `burst_count` failures, then about one attempt every six seconds, or
-# some 14,700 a day.
-#
-# `0` disables this limit rather than making a bucket that never refills.
-#
-# reloadable: yes
-#
-#per_second = 0.17
+#protocols = []
 
-# Token-bucket depth (burst size) for wrong passwords against one
-# account.
-#
-# The number of failures allowed before `per_second` governs. `0`
-# disables this limit, as does a `0` rate. The default is Synapse's
-# `rc_login.failed_attempts.burst_count`.
+# Whether the application service wants to receive ephemeral data.
 #
-# reloadable: yes
-#
-#burst_count = 3
-
-
-
-#[global.rate_limiting.login.account]
+#receive_ephemeral = false
 
-# Token-bucket refill rate (sign-ins per second) for successful password
-# logins to one account.
+# Whether the application service wants to do device management, as part
+# of MSC4190.
 #
-# Applies to `/login` with `m.login.password` (but not to the LDAP binds it
-# makes) and to the built-in OIDC login page, keyed on the account rather
-# than the client IP. Mirrors Synapse's `rc_login.account` and its default
-# of `burst_count` sign-ins, then about one every five and a half minutes;
-# once those are used up, a correct password is refused with
-# `M_LIMIT_EXCEEDED`.
-#
-# `0` disables this limit rather than making a bucket that never refills.
-#
-# reloadable: yes
-#
-#per_second = 0.003
+#device_management = false
 
-# Token-bucket depth (burst size) for successful password logins to one
-# account.
-#
-# The number of sign-ins allowed before `per_second` governs. `0` disables
-# this limit, as does a `0` rate. The default is Synapse's
-# `rc_login.account.burst_count`.
+# Whether the application service wants MSC3202 transaction extensions
+# (device lists, one-time-key counts, and unused fallback key types).
 #
-# reloadable: yes
+# The registration-file key is `org.matrix.msc3202`; this inline-config
+# key is `msc3202_transaction_extensions`.
 #
-#burst_count = 5
+#msc3202_transaction_extensions = false
 
 
 
-#[global.smtp]
-
-# Connection URL for the outbound SMTP relay used to send email
-# verification messages. Setting this enables the email subsystem;
-# without it no mail is sent.
-#
-# Use a `smtp://` URL for an unencrypted or STARTTLS connection and a
-# `smtps://` URL for implicit TLS. Credentials and the host go inline:
-# `smtps://user:pass@host:port`. The port defaults per scheme when
-# omitted.
-#
-# The userinfo component is URL-encoded, so an `@` inside the username
-# must be written as `%40` (for example a login of `bot@example.com`
-# becomes `smtps://bot%40example.com:pass@host:465`). Other reserved
-# characters in the username or password are percent-encoded the same
-# way.
-#
-# example: "smtps://user:pass@mail.example.com:465"
-#
-#connection_uri =
-
-# The mailbox that outbound verification messages are sent from. Accepts
-# either a bare address or a display-name form.
-#
-# example: "Example <noreply@example.com>"
-#
-#sender =
+#[[global.appservice.<ID>.<users|rooms|aliases>]]
 
-# Require a verified email address to complete registration. When set,
-# the registration flow does not finish until the user proves control of
-# an email address.
+# Whether this application service has exclusive access to events within
+# this namespace.
 #
-#require_email_for_registration = false
+#exclusive = false
 
-# Require a verified email address when registering with a registration
-# token. When set, token-based registration also demands a verified
-# email address.
+# A regular expression defining which values this namespace includes.
 #
-#require_email_for_token_registration = false
+#regex =
 
 
 
@@ -4295,6 +3597,639 @@
 
 
 
+#[global.jwt]
+
+# Enable JWT logins
+#
+# reloadable: yes
+#
+#enable = false
+
+# Validation key, also called 'secret' in Synapse config. The type of key
+# can be configured in 'format', but defaults to the common HMAC which
+# is a plaintext shared-secret, so you should keep this value private.
+#
+# reloadable: yes
+#
+#key =
+
+# Format of the 'key': HMAC, B64HMAC, ECDSA, or EDDSA, case-insensitive.
+#
+# HMAC is a plaintext shared secret, and B64HMAC (also spelled HMACB64)
+# is the same secret base64-encoded in the standard alphabet with '='
+# padding, for random binary secrets that cannot be pasted as text.
+# ECDSA and EDDSA are PEM-encoded public keys, EDDSA for Ed25519.
+# Startup and reload both refuse an unknown format while JWT is enabled.
+#
+# reloadable: yes
+#
+#format = "HMAC"
+
+# Automatically create new user from a valid claim, otherwise access is
+# denied for an unknown even with an authentic token.
+#
+# reloadable: yes
+#
+#register_user = true
+
+# Signature algorithm for validating tokens.
+#
+# The name must suit the key format: HS256, HS384, or HS512 for HMAC
+# and B64HMAC, ES256 or ES384 for ECDSA, and EdDSA for EDDSA.
+#
+# reloadable: yes
+#
+#algorithm = "HS256"
+
+# Optional audience claim list. The token must claim one or more values
+# from this list when set.
+#
+# reloadable: yes
+#
+#audience = []
+
+# Optional issuer claim list. The token must claim one or more values
+# from this list when set.
+#
+# reloadable: yes
+#
+#issuer = []
+
+# Require expiration claim in the token. This defaults to false for
+# synapse migration compatibility.
+#
+# reloadable: yes
+#
+#require_exp = false
+
+# Require not-before claim in the token. This defaults to false for
+# synapse migration compatibility.
+#
+# reloadable: yes
+#
+#require_nbf = false
+
+# Validate expiration time of the token when present. Whether or not it is
+# required depends on require_exp, but when present this ensures the token
+# is not used after a time.
+#
+# reloadable: yes
+#
+#validate_exp = true
+
+# Validate not-before time of the token when present. Whether or not it is
+# required depends on require_nbf, but when present this ensures the token
+# is not used before a time.
+#
+# reloadable: yes
+#
+#validate_nbf = true
+
+# Bypass validation for diagnostic/debug use only.
+#
+# reloadable: yes
+#
+#validate_signature = true
+
+
+
+#[global.ldap]
+
+# Whether to enable LDAP login.
+#
+# reloadable: yes
+# example: "true"
+#
+#enable = false
+
+# URI of the LDAP server.
+#
+# reloadable: yes
+# example: "ldap://ldap.example.com:389"
+#
+#uri =
+
+# Root of the searches.
+#
+# reloadable: yes
+# example: "ou=users,dc=example,dc=org"
+#
+#base_dn =
+
+# Bind DN if anonymous search is not enabled.
+#
+# You can use the variable `{username}` that will be replaced by the
+# entered username. In such case, the password used to bind will be the
+# one provided for the login and not the one given by
+# `bind_password_file`. Beware: automatically granting admin rights will
+# not work if you use this direct bind instead of a LDAP search.
+#
+# reloadable: yes
+# example: "cn=ldap-reader,dc=example,dc=org" or
+# "cn={username},ou=users,dc=example,dc=org"
+#
+#bind_dn = ""
+
+# Path to a file on the system that contains the password for the
+# `bind_dn`.
+#
+# The server must be able to access the file, and it must not be empty.
+#
+# reloadable: yes
+#
+#bind_password_file = ""
+
+# Search filter to limit user searches.
+#
+# You can use the variable `{username}` that will be replaced by the
+# entered username for more complex filters.
+#
+# reloadable: yes
+# example: "(&(objectClass=person)(memberOf=matrix))"
+#
+#filter = "(objectClass=*)"
+
+# Attribute to use to uniquely identify the user.
+#
+# reloadable: yes
+# example: "uid" or "cn"
+#
+#uid_attribute = "uid"
+
+# Root of the searches for admin users.
+#
+# Defaults to `base_dn` if empty.
+#
+# reloadable: yes
+# example: "ou=admins,dc=example,dc=org"
+#
+#admin_base_dn =
+
+# The LDAP search filter to find administrative users for tuwunel.
+#
+# If left blank, administrative state must be configured manually for each
+# user.
+#
+# You can use the variable `{username}` that will be replaced by the
+# entered username for more complex filters.
+#
+# reloadable: yes
+# example: "(objectClass=tuwunelAdmin)" or "(uid={username})"
+#
+#admin_filter =
+
+
+
+#[global.rate_limiting]
+
+
+
+#[global.rate_limiting.login]
+
+
+
+#[global.rate_limiting.login.account]
+
+# Token-bucket refill rate (sign-ins per second) for successful password
+# logins to one account.
+#
+# Applies to `/login` with `m.login.password` (but not to the LDAP binds it
+# makes) and to the built-in OIDC login page, keyed on the account rather
+# than the client IP. Mirrors Synapse's `rc_login.account` and its default
+# of `burst_count` sign-ins, then about one every five and a half minutes;
+# once those are used up, a correct password is refused with
+# `M_LIMIT_EXCEEDED`.
+#
+# `0` disables this limit rather than making a bucket that never refills.
+#
+# reloadable: yes
+#
+#per_second = 0.003
+
+# Token-bucket depth (burst size) for successful password logins to one
+# account.
+#
+# The number of sign-ins allowed before `per_second` governs. `0` disables
+# this limit, as does a `0` rate. The default is Synapse's
+# `rc_login.account.burst_count`.
+#
+# reloadable: yes
+#
+#burst_count = 5
+
+
+
+#[global.rate_limiting.login.failed]
+
+# Token-bucket refill rate (failures per second) for wrong passwords
+# against one account.
+#
+# Every password attempt takes a token before the password is checked,
+# and only a wrong password keeps it; once the bucket is empty, even the
+# owner's correct password is refused with `M_LIMIT_EXCEEDED`. Applies to
+# `/login` (but not to the LDAP binds it makes), the built-in OIDC login
+# page and password re-entry for sensitive actions (UIAA), keyed on the
+# account. Mirrors Synapse's `rc_login.failed_attempts` and its default:
+# `burst_count` failures, then about one attempt every six seconds, or
+# some 14,700 a day.
+#
+# `0` disables this limit rather than making a bucket that never refills.
+#
+# reloadable: yes
+#
+#per_second = 0.17
+
+# Token-bucket depth (burst size) for wrong passwords against one
+# account.
+#
+# The number of failures allowed before `per_second` governs. `0`
+# disables this limit, as does a `0` rate. The default is Synapse's
+# `rc_login.failed_attempts.burst_count`.
+#
+# reloadable: yes
+#
+#burst_count = 3
+
+
+
+#[global.registration_terms.<ID>]
+
+# Version of this policy document, presented to the client. Configuring
+# any `[global.registration_terms.<ID>]` block makes registration
+# require an `m.login.terms` stage listing every such document; the
+# `<ID>` is the policy id sent to clients.
+#
+# example: "1.2"
+# reloadable: yes
+#
+#version =
+
+
+
+#[global.registration_terms.<ID>.translations.<LANG>]
+
+# User friendly name of the policy document in this language.
+#
+# example: "Terms of Service"
+# reloadable: yes
+#
+#name =
+
+# Link to the text of the policy document. Must be a valid http(s) URL.
+#
+# example: "https://example.org/terms-1.2-en.html"
+# reloadable: yes
+#
+#url =
+
+
+
+#[global.rocksdb]
+
+# Sets the memory available to database read caches as a float in megabytes.
+#
+# Increasing this may improve performance when memory is available; like
+# individual LRU caches, the default scales with CPU core count to 128.0 + (64.0
+# * CPU core count).
+#
+#cache_capacity_mb = varies by system
+
+# Sets the memory available to database write caches as a float in megabytes.
+#
+# Increasing this may improve performance when memory is available; like
+# individual LRU caches, the default scales with CPU core count to 48.0 + (4.0 *
+# CPU core count).
+#
+#write_buffer_capacity_mb = varies by system
+
+# Sets the log level for RocksDB LOG files in the database directory.
+#
+# This differs from the application log level; tuwunel still reports RocksDB
+# errors through tracing or panics on severe errors for safety.
+#
+#log_level = "error"
+
+# Routes RocksDB log messages to standard error.
+#
+# `rocksdb.log_level` still filters the emitted records. When disabled,
+# RocksDB uses the application's callback logger instead.
+#
+#log_stderr = false
+
+# Sets the maximum RocksDB LOG file size before rotation.
+#
+# Accepts an integer byte count or a string with SI/IEC suffix such as "4 MiB".
+#
+#max_log_file_size = 4194304
+
+# Time in seconds before RocksDB will forcibly rotate logs.
+#
+#log_time_to_roll = 0
+
+# Uses RocksDB tunings tailored to spinning disks (HDDs).
+#
+# Leave this disabled on NVMe or SSD storage. When enabled, RocksDB skips
+# compaction readahead and parallel file-open threads at startup. This does not
+# affect Direct IO; see `rocksdb.direct_io`.
+#
+#optimize_for_spinning_disks = false
+
+# Enables direct-io to increase database performance via unbuffered I/O.
+#
+# For more details about direct I/O and RockDB, see:
+# https://github.com/facebook/rocksdb/wiki/Direct-IO
+#
+# Set this option to false if the database resides on a filesystem which
+# does not support direct-io like FUSE, or any form of complex filesystem
+# setup such as possibly ZFS.
+#
+#direct_io = true
+
+# Sets the number of RocksDB threads for cleanup, sync, flush, and compaction.
+#
+# The stored value 0 selects the available logical thread count, with a minimum
+# of two.
+#
+#parallelism_threads = 0
+
+# Sets the maximum number of RocksDB LOG files retained.
+#
+# This must be at least 1, never 0. The default is 3 because these logs are
+# mainly useful for troubleshooting or debugging RocksDB bugs.
+#
+#max_log_files = 3
+
+# Sets the RocksDB database compression algorithm.
+#
+# Available options are "zstd", "bz2", "lz4", or "none", which disables
+# compression. ZSTD balances speed, storage, IO amplification, and CPU usage;
+# LZ4 offers more performance and lower CPU usage with less compression and more
+# storage use. See https://github.com/facebook/rocksdb/wiki/Compression for
+# details.
+#
+#compression_algo = "zstd"
+
+# Level of compression the specified compression algorithm for RocksDB to
+# use.
+#
+# Default is 32767, which is internally read by RocksDB as the default
+# magic number and translated to the library's default compression level
+# as they all differ. See their `kDefaultCompressionLevel`.
+#
+# Note when using the default value we may override it with a setting
+# tailored specifically tuwunel.
+#
+#compression_level = 32767
+
+# Sets the compression level for the bottommost RocksDB data.
+#
+# The default 32767 is RocksDB's `kDefaultCompressionLevel`, translated to the
+# selected library's default level; tuwunel may override it with a tailored
+# setting. Bottommost data is generally old and less frequently accessed, so
+# higher compression may be useful; research the chosen algorithm.
+#
+#bottommost_compression_level = 32767
+
+# Whether to enable RocksDB's "bottommost_compression".
+#
+# At the expense of more CPU usage, this will further compress the
+# database to reduce more storage. It is recommended to use ZSTD
+# compression with this for best compression results. This may be useful
+# if you're trying to reduce storage usage from the database.
+#
+# See https://github.com/facebook/rocksdb/wiki/Compression for more details.
+#
+#bottommost_compression = true
+
+# Sets the database recovery mode for RocksDB WAL corruption.
+#
+# When corruption prevents startup, use mode 2 (PointInTime) to recover to the
+# last good state, seconds or minutes before the crash. Clients may need
+# "clear-cache & reload" after this rollback. After recovery succeeds, reset the mode
+# to its default and restart. In some cases the corruption error persists for at
+# least 30 minutes of operation in PointInTime mode.
+#
+# Only as a last resort if PointInTime fails, try mode 3
+# (SkipAnyCorruptedRecord), which may leave the server inconsistent. Default
+# mode 1 (TolerateCorruptedTailRecords) drops only the last entry if corrupted
+# during shutdown, with an extraordinarily low risk of desynchronizing clients.
+# Mode 0 (AbsoluteConsistency) disables all silent rollback. See
+# https://github.com/facebook/rocksdb/wiki/WAL-Recovery-Modes for mode details
+# and https://tuwunel.chat/troubleshooting.html#database-corruption for recovery
+# guidance.
+#
+#recovery_mode = 1
+
+# Enables paranoid SST file checks.
+#
+# Additional safety checks may improve database consistency at a performance
+# cost; see the RocksDB documentation for details:
+# https://github.com/facebook/rocksdb/wiki/Online-Verification#columnfamilyoptionsparanoid_file_checks
+#
+#paranoid_file_checks = false
+
+# Enables runtime checksum verification in RocksDB.
+#
+# Checksums are enabled by default and usually hardware accelerated with low
+# overhead. Older or slower platforms may gain performance by disabling them.
+#
+#checksums = true
+
+# Enables RocksDB atomic flush mode.
+#
+# This option is not intended for users and may be removed or ignored in future
+# versions. It may improve database integrity at the cost of performance.
+#
+#atomic_flush = false
+
+# Enables database repair for RocksDB SST corruption.
+#
+# Use this when the server reports corruption while running or panics,
+# especially for errors containing SST after startup; if startup fails, try
+# recovery mode first. Back up the database directory before running repair.
+# Disable repair mode and restart the server after repair finishes. See
+# https://tuwunel.chat/troubleshooting.html#database-corruption for recovery
+# details.
+#
+#repair = false
+
+# Opens RocksDB in read-only mode.
+#
+# Writes are rejected and missing column families cannot be created. This
+# mode is disabled by default.
+#
+#read_only = false
+
+# Opens RocksDB as a secondary follower of a primary instance.
+#
+# Writes are rejected while the primary's latest WAL can be replayed into
+# this instance's view. Missing column families cannot be created.
+#
+#secondary = false
+
+# Enables idle CPU priority for the compaction thread.
+#
+# This is disabled by default to prevent compaction from falling too far behind
+# on busy systems.
+#
+#compaction_prio_idle = false
+
+# Enables idle IO priority for the compaction thread.
+#
+# This is enabled by default and usually advisable to prevent unexpected server
+# lag.
+#
+#compaction_ioprio_idle = true
+
+# Enables RocksDB compaction.
+#
+# You should never need to disable this; if troubleshooting or a bug appears to
+# require it, contact the tuwunel Matrix room with details. Disabling compaction
+# causes explosive database growth, gradually poor performance, excessive disk
+# reads and writes, and slower shutdowns and startups.
+#
+#compaction = true
+
+# Sets the level of database statistics collection from 0 to 6.
+#
+# Some admin commands that display database statistics require this setting;
+# higher levels may affect performance. Level 0 disables statistics, level 1
+# disables them in release mode and is the default, levels 2 to 3 have no
+# performance impact, levels 3 to 5 may affect performance, and level 6 collects
+# all statistics.
+#
+#stats_level = 1
+
+# Ignores the list of dropped columns set by developers.
+#
+# This should be set to true when knowingly moving between versions in
+# ways which are not recommended or otherwise forbidden, or for
+# diagnostic and development purposes; requiring preservation across such
+# movements.
+#
+# The developer's list of dropped columns is meant to safely reduce space
+# by erasing data no longer in use. If this is set to true that storage
+# will not be reclaimed as intended.
+#
+#never_drop_columns = false
+
+# Allows RocksDB to preallocate WAL logs.
+#
+# Normally, RocksDB allocates certain types of files by calling
+# fallocate, writing the file contents, then truncating the logs to the
+# proper size. This causes pathological disk space usage on btrfs due to
+# how it interacts with its Copy-on-Write implementation. On ZFS,
+# fallocate(2) for preallocation is unsupported and returns EOPNOTSUPP;
+# only `FALLOC_FL_PUNCH_HOLE` and `FALLOC_FL_ZERO_RANGE` are implemented.
+#
+# Set this to false if you run the server on btrfs or ZFS, and do not
+# touch it otherwise.
+#
+#allow_fallocate = true
+
+
+
+#[global.smtp]
+
+# Connection URL for the outbound SMTP relay used to send email
+# verification messages. Setting this enables the email subsystem;
+# without it no mail is sent.
+#
+# Use a `smtp://` URL for an unencrypted or STARTTLS connection and a
+# `smtps://` URL for implicit TLS. Credentials and the host go inline:
+# `smtps://user:pass@host:port`. The port defaults per scheme when
+# omitted.
+#
+# The userinfo component is URL-encoded, so an `@` inside the username
+# must be written as `%40` (for example a login of `bot@example.com`
+# becomes `smtps://bot%40example.com:pass@host:465`). Other reserved
+# characters in the username or password are percent-encoded the same
+# way.
+#
+# example: "smtps://user:pass@mail.example.com:465"
+#
+#connection_uri =
+
+# The mailbox that outbound verification messages are sent from. Accepts
+# either a bare address or a display-name form.
+#
+# example: "Example <noreply@example.com>"
+#
+#sender =
+
+# Require a verified email address to complete registration. When set,
+# the registration flow does not finish until the user proves control of
+# an email address.
+#
+#require_email_for_registration = false
+
+# Require a verified email address when registering with a registration
+# token. When set, token-based registration also demands a verified
+# email address.
+#
+#require_email_for_token_registration = false
+
+
+
+#[global.storage_provider.<ID>.gcs]
+
+# The name of the GCS bucket, e.g. "my-media-bucket". Required; an unset
+# bucket disables this provider.
+#
+# A `gs://bucket/path` URL is intentionally not accepted here: the path
+# component would not be applied as an object prefix. Set `bucket` and
+# `base_path` separately instead.
+#
+#bucket =
+
+# Optional path prefix within the bucket where all our operations will take
+# place.
+#
+#base_path =
+
+# (expert use) Path to a Google service account key file. Leave unset to
+# resolve credentials from the environment, which on GCE/GKE ends at the
+# instance metadata server; that is the keyless path and the recommended
+# configuration. Setting this requires exported key material.
+#
+#service_account_path =
+
+# (expert use) Path to an application default credentials file. Leave unset
+# to resolve credentials from the environment. Only service-account and
+# authorized-user documents are recognised, not every
+# external-account/workload-identity-federation file format.
+#
+#application_credentials_path =
+
+# (expert use) Threshold size for switching to multi-part uploads. This value
+# determines what a "large" upload is. The value is a parsed string allowing
+# SI or IEC units for convenience.
+#
+#multipart_threshold = "100 MiB"
+
+# (expert use) Size of each individual part within a multi-part upload. Once
+# an upload exceeds `multipart_threshold` the payload is split into parts of
+# this size, each sent as a separate request. The value is a parsed string
+# allowing SI or IEC units for convenience.
+#
+#multipart_part_size = "10 MiB"
+
+# (developer use) Allows skipping request signatures.
+#
+#use_signatures = true
+
+# (developer use) Enables checks performed at startup, such as probing the
+# provider. Failures are considered critical startup errors and abort
+# startup. When set to false, faulty providers are only discovered on first
+# use and will not be fatal errors.
+#
+# The check is a listing probe: it requires `storage.objects.list`, proves
+# neither write nor delete permission, and passes on an empty bucket.
+#
+#startup_check = true
+
+
+
 #[global.storage_provider.<ID>.local]
 
 # Absolute path to this local filesystem storage provider. Technically the
@@ -4417,128 +4352,148 @@
 
 
 
-#[global.storage_provider.<ID>.gcs]
+#[global.tls]
 
-# The name of the GCS bucket, e.g. "my-media-bucket". Required; an unset
-# bucket disables this provider.
+# Path to a valid TLS certificate file; this section requires a build with
+# the `direct_tls` Cargo feature.
 #
-# A `gs://bucket/path` URL is intentionally not accepted here: the path
-# component would not be applied as an object prefix. Set `bucket` and
-# `base_path` separately instead.
+# example: "/path/to/my/certificate.crt"
 #
-#bucket =
+#certs =
 
-# Optional path prefix within the bucket where all our operations will take
-# place.
+# Path to a valid TLS certificate private key.
 #
-#base_path =
+# example: "/path/to/my/certificate.key"
+#
+#key =
 
-# (expert use) Path to a Google service account key file. Leave unset to
-# resolve credentials from the environment, which on GCE/GKE ends at the
-# instance metadata server; that is the keyless path and the recommended
-# configuration. Setting this requires exported key material.
+# Controls whether listeners accept both HTTP and HTTPS.
 #
-#service_account_path =
-
-# (expert use) Path to an application default credentials file. Leave unset
-# to resolve credentials from the environment. Only service-account and
-# authorized-user documents are recognised, not every
-# external-account/workload-identity-federation file format.
+# Plain requests are served without redirecting them to HTTPS. This
+# weakens transport security and is disabled by default.
 #
-#application_credentials_path =
-
-# (expert use) Threshold size for switching to multi-part uploads. This value
-# determines what a "large" upload is. The value is a parsed string allowing
-# SI or IEC units for convenience.
-#
-#multipart_threshold = "100 MiB"
-
-# (expert use) Size of each individual part within a multi-part upload. Once
-# an upload exceeds `multipart_threshold` the payload is split into parts of
-# this size, each sent as a separate request. The value is a parsed string
-# allowing SI or IEC units for convenience.
-#
-#multipart_part_size = "10 MiB"
-
-# (developer use) Allows skipping request signatures.
-#
-#use_signatures = true
-
-# (developer use) Enables checks performed at startup, such as probing the
-# provider. Failures are considered critical startup errors and abort
-# startup. When set to false, faulty providers are only discovered on first
-# use and will not be fatal errors.
-#
-# The check is a listing probe: it requires `storage.objects.list`, proves
-# neither write nor delete permission, and passes on an empty bucket.
-#
-#startup_check = true
+#dual_protocol = false
 
 
 
-#[global.appservice.<ID>]
+#[global.well_known]
 
-# The URL for the application service.
+# The server URL that the client well-known file will serve.
 #
-# Optionally set to `null` if no traffic is required.
+# This should not contain a port, and should just be a valid HTTPS URL.
+# While this is unset, `/.well-known/matrix/client` answers 404 and
+# auto-discovery from the server name yields nothing, so the base URL has
+# to reach clients some other way. Leave it unset only when a reverse
+# proxy or another host publishes that file for this domain.
 #
-# On Unix, use `unix:///absolute/path.sock` to connect over a Unix socket.
+# example: "https://matrix.example.com"
 #
-# example: "unix:///run/mautrix-whatsapp/appservice.sock"
+#client =
+
+# The server base domain of the URL with a specific port that the server
+# well-known file will serve. This should contain a port at the end, and
+# should not be a URL.
+#
+# reloadable: yes
+# example: "matrix.example.com:443"
+#
+#server =
+
+# LiveKit JWT endpoint.
+# Required for Element Call / MatrixRTC (MSC4143).
+#
+# Note: You must also set `client` above to your homeserver URL.
+#
+# reloadable: yes
+#
+#livekit_url = ""
+
+# Custom MatrixRTC transports.
+#
+# If you're looking to setup Element Call / MatrixRTC with Livekit,
+# you should not use this option and instead set `livekit_url`.
+# This is only required if you want to configure a non-livekit MatrixRTC
+# transport. There are no known client implementations that support any
+# other transport types.
+#
+# This option was previously the only way to configure a Livekit
+# transport. It has been superseded by `livekit_url`.
+#
+# Example:
+# ```toml
+# [global.well_known]
+# client = "https://matrix.yourdomain.com"
+#
+# [[global.well_known.rtc_transports]]
+# type = "livekit"
+# livekit_service_url = "https://livekit.yourdomain.com"
+# ```
+#
+# reloadable: yes
+#
+#rtc_transports = []
+
+
+
+#[global.well_known.support_contact.<ID>]
+
+# The name of the support role.
+#
+# example: "m.role.admin"
+#
+#role =
+
+# The email address for the above support role.
+#
+# example: "admin@example.com"
+#
+#email_address =
+
+# The Matrix User ID for the above support role.
+#
+# example "@admin:example.com"
+#
+#matrix_id =
+
+# The PGP key (i.e. OpenPGP) that one may use for encrypted communications
+# for the above support role. The value must be a URI. Use a web URL
+# pointing to the key (for example "https://example.com/key.asc"), an
+# OPENPGPKEY DNS record ("dns:..."), or a fingerprint carried with the
+# "openpgp4fpr:" scheme. A bare fingerprint without a scheme, or raw
+# inlined key material, is rejected at startup.
+#
+# As this is a spec proposal (MSC4439), the identifier/prefix for this
+# field is currently "dev.zirco.msc4439.pgp_key"
+#
+# example: "openpgp4fpr:8B77919975EAFA5E2456EE03665FE73077489DB0"
+#
+#pgp_key =
+
+
+
+#[global.well_known.support_policy.<ID>]
+
+# Version string of the policy document.
+#
+# example: "v6.7"
+# reloadable: yes
+#
+#version =
+
+
+
+#[global.well_known.support_policy.<ID>.policy_translation.<LANG>]
+
+# User friendly name of the policy document.
+#
+# example: "Privacy Policy"
+# reloadable: yes
+#
+#name =
+
+# Link to the test of the policy document. A valid URL must be specified.
+#
+# example: "https://website.local/privacy-policy"
+# reloadable: yes
 #
 #url =
-
-# A unique token for application services to use to authenticate requests
-# to Homeservers.
-#
-#as_token =
-
-# A unique token for Homeservers to use to authenticate requests to
-# application services.
-#
-#hs_token =
-
-# The localpart of the user associated with the application service.
-#
-#sender_localpart =
-
-# Whether requests from masqueraded users are rate-limited.
-#
-# The sender is excluded.
-#
-#rate_limited = false
-
-# The external protocols which the application service provides (e.g.
-# IRC).
-#
-#protocols = []
-
-# Whether the application service wants to receive ephemeral data.
-#
-#receive_ephemeral = false
-
-# Whether the application service wants to do device management, as part
-# of MSC4190.
-#
-#device_management = false
-
-# Whether the application service wants MSC3202 transaction extensions
-# (device lists, one-time-key counts, and unused fallback key types).
-#
-# The registration-file key is `org.matrix.msc3202`; this inline-config
-# key is `msc3202_transaction_extensions`.
-#
-#msc3202_transaction_extensions = false
-
-
-
-#[[global.appservice.<ID>.<users|rooms|aliases>]]
-
-# Whether this application service has exclusive access to events within
-# this namespace.
-#
-#exclusive = false
-
-# A regular expression defining which values this namespace includes.
-#
-#regex =

@@ -113,7 +113,7 @@ async fn runner_contains_errors_and_honors_only_its_marker() -> Result {
 
 	assert!(Boundary::writable(&readonly).is_none());
 	assert!(stands(&readonly, || ready(Ok(false))).await, "a read-only open skips unchecked");
-	let secondary_server = open_server(server, "rocksdb_secondary")?;
+	let secondary_server = open_server(server, "rocksdb.secondary")?;
 	let secondary = Database::open(&secondary_server).await?;
 
 	assert!(secondary.engine.is_secondary());
@@ -837,7 +837,7 @@ where
 }
 
 fn readonly_server(server: &Server) -> Result<Arc<Server>> {
-	open_server(server, "rocksdb_read_only")
+	open_server(server, "rocksdb.read_only")
 }
 
 fn open_server(server: &Server, mode: &str) -> Result<Arc<Server>> {

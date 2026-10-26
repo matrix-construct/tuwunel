@@ -3,6 +3,9 @@
 //! The service exposes the active configuration and replaces it after validation.
 //! Reloads replay the startup sources so command-line paths and overrides remain in force.
 
+#[cfg(test)]
+mod tests;
+
 #[cfg(all(feature = "systemd", target_os = "linux"))]
 use std::borrow::Cow;
 use std::{iter::empty, ops::Deref, path::Path, sync::Arc};

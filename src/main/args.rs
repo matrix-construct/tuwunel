@@ -10,7 +10,7 @@ use std::{
 use clap::{ArgAction, Parser, builder::RangedU64ValueParser};
 use tuwunel_core::{
 	Err, Result,
-	config::{Figment, FigmentValue},
+	config::{Config, Figment, FigmentValue},
 	err, implement, is_true, toml,
 	utils::{available_parallelism, random_string},
 };
@@ -425,7 +425,7 @@ pub fn update(mut config: Figment, args: &Args) -> Result<Figment> {
 	}
 
 	if args.read_only {
-		config = config.join(("rocksdb_read_only", true));
+		config = config.join(("rocksdb.read_only", true));
 	}
 
 	if args.maintenance || args.read_only {
@@ -471,7 +471,7 @@ pub fn update(mut config: Figment, args: &Args) -> Result<Figment> {
 		let val = toml::from_str::<FigmentValue>(option)?;
 
 		// Figment::merge() overrides existing
-		config = config.merge((path, val.find(path)));
+		config = config.merge(Config::normalize((path, val.find(path)))?);
 	}
 
 	Ok(config)
@@ -479,9 +479,104 @@ pub fn update(mut config: Figment, args: &Args) -> Result<Figment> {
 
 #[cfg(test)]
 mod tests {
-	use std::ffi::OsString;
+	use std::{
+		env::{current_exe, var_os},
+		ffi::OsString,
+		iter::empty,
+		process::Command,
+	};
 
-	use super::{Args, Figment, Parser, RESTORE_KEY, Result, update};
+	use super::{Args, Config, Figment, Parser, RESTORE_KEY, Result, update};
+
+	#[test]
+	fn environment_cli_precedence_and_configured_array_adjoin() {
+		const CHILD: &str = "CONFIG_HIERARCHY_ARGS_CHILD";
+		if var_os(CHILD).is_none() {
+			let status = Command::new(current_exe().unwrap())
+				.args([
+					"--exact",
+					"args::tests::environment_cli_precedence_and_configured_array_adjoin",
+				])
+				.env_clear()
+				.env(CHILD, "1")
+				.env("TUWUNEL_SERVER_NAME", "example.com")
+				.env("TUWUNEL_ROCKSDB", "{checksums=false}")
+				.env("TUWUNEL_ADMIN_EXECUTE", "[configured]")
+				.status()
+				.unwrap();
+
+			assert!(status.success());
+			return;
+		}
+
+		let configured = Config::load(empty()).expect("environment source");
+		let raw = updated(
+			&["tuwunel", "--execute", "command-line", "-O", "rocksdb_checksums=true"],
+			configured.clone(),
+		)
+		.expect("CLI update");
+
+		assert!(
+			raw.extract_inner::<bool>("rocksdb.checksums")
+				.unwrap()
+		);
+
+		assert_eq!(
+			raw.extract_inner::<Vec<String>>("admin_execute")
+				.unwrap(),
+			["configured", "command-line"]
+		);
+
+		let invalid = updated(&["tuwunel", "-O", "rocksdb.checksums='invalid'"], configured)
+			.expect("CLI raw input accepted");
+
+		let error = Config::new(&invalid)
+			.err()
+			.expect("typed CLI error")
+			.to_string();
+
+		assert!(error.contains("rocksdb.checksums"));
+		assert!(!error.contains("TUWUNEL_ROCKSDB"));
+	}
+
+	#[test]
+	fn mixed_config_spellings_keep_cli_occurrence_order() {
+		for options in [["rocksdb_checksums=true", "rocksdb.checksums=false"], [
+			"rocksdb.checksums=true",
+			"rocksdb_checksums=false",
+		]] {
+			let raw = updated(&["tuwunel", "-O", options[0], "-O", options[1]], Figment::new())
+				.expect("ordered overrides accepted");
+
+			assert!(
+				!raw.extract_inner::<bool>("rocksdb.checksums")
+					.unwrap()
+			);
+
+			assert!(!raw.contains("rocksdb_checksums"));
+		}
+	}
+
+	#[test]
+	fn read_only_flag_keeps_join_precedence_after_normalization() {
+		let configured = Config::normalize(("rocksdb_read_only", false)).unwrap();
+		let raw = updated(&["tuwunel", "--read-only"], Figment::from(configured)).unwrap();
+
+		assert!(
+			!raw.extract_inner::<bool>("rocksdb.read_only")
+				.unwrap()
+		);
+
+		let raw = updated(&["tuwunel", "--read-only"], Figment::new()).unwrap();
+
+		assert!(
+			raw.extract_inner::<bool>("rocksdb.read_only")
+				.unwrap()
+		);
+
+		assert!(raw.extract_inner::<bool>("maintenance").unwrap());
+		assert!(!raw.extract_inner::<bool>("listening").unwrap());
+	}
 
 	#[test]
 	fn the_restore_argument_sets_the_key() {

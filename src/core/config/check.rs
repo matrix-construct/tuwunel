@@ -276,14 +276,14 @@ fn warn_loopback_in_container(addr: &SocketAddr) {
 
 fn check_storage(config: &Config) -> Result {
 	// rocksdb does not allow max_log_files to be 0
-	if config.rocksdb_max_log_files == 0 {
+	if config.rocksdb.max_log_files == 0 {
 		return Err!(Config(
 			"max_log_files",
 			"rocksdb_max_log_files cannot be 0. Please set a value at least 1."
 		));
 	}
 
-	if config.rocksdb_allow_fallocate
+	if config.rocksdb.allow_fallocate
 		&& let Some(filesystem) = database_filesystem(config)
 	{
 		warn!(

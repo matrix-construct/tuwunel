@@ -1,5 +1,8 @@
 #![cfg(test)]
 
+mod baseline;
+mod hierarchy;
+
 use std::{
 	cell::RefCell,
 	io::{Result as IoResult, Write},
@@ -86,7 +89,7 @@ fn smtp_display_redacts_userinfo() {
 }
 
 fn config_from_toml(toml: &str) -> Result<Config> {
-	Config::new(&Figment::new().merge(Data::nested(Toml::string(toml))))
+	Config::new(&Figment::new().merge(Config::normalize(Data::nested(Toml::string(toml)))?))
 }
 
 fn check_with_captured_logs(config: &Config) -> (Result, String) {
@@ -1378,7 +1381,7 @@ fn an_unknown_jwt_key_format_fails_the_config_check() {
 /// "varies by system" and non-literal bodies are out of reach here.
 #[test]
 fn documented_defaults_match_the_code() {
-	const SRC: &str = include_str!("mod.rs");
+	const SRC: &str = concat!(include_str!("mod.rs"), "\n", include_str!("rocksdb.rs"));
 	const SERDE_DEFAULT: &str = "#[serde(default = \"";
 
 	let lines: Vec<&str> = SRC.lines().collect();

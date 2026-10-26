@@ -11,8 +11,10 @@ pub mod ip_source;
 mod jwt;
 pub mod manager;
 mod net;
+mod normalize;
 pub mod proxy;
 mod regenerate;
+mod rocksdb;
 pub mod room_version;
 pub mod sources;
 #[cfg(test)]
@@ -36,6 +38,7 @@ use figment::{
 use ipnet::IpNet;
 use itertools::Itertools;
 use regex::RegexSet;
+pub use rocksdb::Rocksdb;
 use ruma::{
 	OwnedMxcUri, OwnedRoomOrAliasId, OwnedServerName, OwnedUserId, RoomVersionId,
 	api::client::discovery::discover_support::ContactRole,
@@ -58,6 +61,9 @@ pub use self::{
 use self::{
 	format::Toml,
 	net::{ListeningAddr, ListeningPort},
+	normalize::{
+		assert_canonical, environment, normalize as normalize_provider, redact_error, unknown,
+	},
 	proxy::ProxyConfig,
 };
 use crate::{
@@ -98,7 +104,7 @@ pub type StorageBucketName = SmallString<[u8; 64]>;
 ###
 ### You should rename this file before configuring your server. Changes to
 ### documentation and defaults can be contributed in source code at
-### src/core/config/mod.rs. This file is generated when building.
+### src/core/config/. This file is generated when building.
 ###
 ### Any values pre-populated are the default values for said config option.
 ###
@@ -108,12 +114,18 @@ pub type StorageBucketName = SmallString<[u8; 64]>;
 ### For more information, see:
 ### https://tuwunel.chat/configuration.html
 "#,
-	ignore = "catchall well_known tls rate_limiting ldap jwt appservice identity_provider \
-	          storage_provider registration_terms smtp",
+	ignore = "rocksdb catchall well_known tls rate_limiting ldap jwt appservice \
+	          identity_provider storage_provider registration_terms smtp",
 	hidden = "allow_invalid_tls_certificates resolve_state_locally_shadow",
 	forbidden = "database_restore_backup force_migration"
 )]
 pub struct Config {
+	/// RocksDB engine settings.
+	///
+	/// display: section
+	#[serde(default)]
+	pub rocksdb: Rocksdb,
+
 	/// The server_name is the pretty name of this server. It is used as a
 	/// suffix for user and room IDs/aliases.
 	///
@@ -259,38 +271,6 @@ pub struct Config {
 		alias = "conduit_cache_capacity_modifier"
 	)]
 	pub cache_capacity_modifier: f64,
-
-	/// Set this to any float value in megabytes for tuwunel to tell the
-	/// database engine that this much memory is available for database read
-	/// caches.
-	///
-	/// May be useful if you have significant memory to spare to increase
-	/// performance.
-	///
-	/// Similar to the individual LRU caches, this is scaled up with your CPU
-	/// core count.
-	///
-	/// This defaults to 128.0 + (64.0 * CPU core count).
-	///
-	/// default: varies by system
-	#[serde(default = "default_db_cache_capacity_mb")]
-	pub db_cache_capacity_mb: f64,
-
-	/// Set this to any float value in megabytes for tuwunel to tell the
-	/// database engine that this much memory is available for database write
-	/// caches.
-	///
-	/// May be useful if you have significant memory to spare to increase
-	/// performance.
-	///
-	/// Similar to the individual LRU caches, this is scaled up with your CPU
-	/// core count.
-	///
-	/// This defaults to 48.0 + (4.0 * CPU core count).
-	///
-	/// default: varies by system
-	#[serde(default = "default_db_write_buffer_capacity_mb")]
-	pub db_write_buffer_capacity_mb: f64,
 
 	/// Maximum number of entries in the RocksDB block cache shared by the
 	/// `pduid_pdu` and `eventid_outlierpdu` column families: a PDU's full
@@ -2323,297 +2303,6 @@ pub struct Config {
 	/// reloadable: yes
 	#[serde(default)]
 	pub auto_deactivate_banned_room_attempts: bool,
-
-	/// RocksDB log level. This is not the same as tuwunel's log level. This
-	/// is the log level for the RocksDB engine/library which show up in your
-	/// database folder/path as `LOG` files. tuwunel will log RocksDB errors
-	/// as normal through tracing or panics if severe for safety.
-	///
-	/// default: "error"
-	#[serde(default = "default_rocksdb_log_level")]
-	pub rocksdb_log_level: String,
-
-	/// Routes RocksDB log messages to standard error.
-	///
-	/// `rocksdb_log_level` still filters the emitted records. When disabled,
-	/// RocksDB uses the application's callback logger instead.
-	#[serde(default)]
-	pub rocksdb_log_stderr: bool,
-
-	/// Max RocksDB `LOG` file size before rotating. Accepts an integer byte
-	/// count or a string with SI/IEC suffix such as "4 MiB".
-	///
-	/// default: 4194304
-	#[serde(
-		default = "default_rocksdb_max_log_file_size",
-		deserialize_with = "deserialize_bytesize_usize"
-	)]
-	pub rocksdb_max_log_file_size: usize,
-
-	/// Time in seconds before RocksDB will forcibly rotate logs.
-	///
-	/// default: 0
-	#[serde(default = "default_rocksdb_log_time_to_roll")]
-	pub rocksdb_log_time_to_roll: usize,
-
-	/// Use RocksDB tunings tailored to spinning disks (HDDs). On NVMe or SSD
-	/// storage, leave this disabled.
-	///
-	/// When enabled, RocksDB skips compaction readahead and parallel file-open
-	/// threads at startup. This option does not affect Direct IO; for that, see
-	/// `rocksdb_direct_io`.
-	#[serde(default)]
-	pub rocksdb_optimize_for_spinning_disks: bool,
-
-	/// Enables direct-io to increase database performance via unbuffered I/O.
-	///
-	/// For more details about direct I/O and RockDB, see:
-	/// https://github.com/facebook/rocksdb/wiki/Direct-IO
-	///
-	/// Set this option to false if the database resides on a filesystem which
-	/// does not support direct-io like FUSE, or any form of complex filesystem
-	/// setup such as possibly ZFS.
-	#[serde(default = "true_fn")]
-	pub rocksdb_direct_io: bool,
-
-	/// Amount of threads that RocksDB will use for parallelism on database
-	/// operations such as cleanup, sync, flush and compaction. The stored value
-	/// 0 selects the available logical thread count, with a minimum of two.
-	///
-	/// default: 0
-	#[serde(default = "default_rocksdb_parallelism_threads")]
-	pub rocksdb_parallelism_threads: usize,
-
-	/// Maximum number of LOG files RocksDB will keep. This must *not* be set to
-	/// 0. It must be at least 1. Defaults to 3 as these are not very useful
-	/// unless troubleshooting/debugging a RocksDB bug.
-	///
-	/// default: 3
-	#[serde(default = "default_rocksdb_max_log_files")]
-	pub rocksdb_max_log_files: usize,
-
-	/// Type of RocksDB database compression to use.
-	///
-	/// Available options are "zstd", "bz2", "lz4", or "none".
-	///
-	/// It is best to use ZSTD as an overall good balance between
-	/// speed/performance, storage, IO amplification, and CPU usage. For more
-	/// performance but less compression (more storage used) and less CPU usage,
-	/// use LZ4.
-	///
-	/// For more details, see:
-	/// https://github.com/facebook/rocksdb/wiki/Compression
-	///
-	/// "none" will disable compression.
-	///
-	/// default: "zstd"
-	#[serde(default = "default_rocksdb_compression_algo")]
-	pub rocksdb_compression_algo: String,
-
-	/// Level of compression the specified compression algorithm for RocksDB to
-	/// use.
-	///
-	/// Default is 32767, which is internally read by RocksDB as the default
-	/// magic number and translated to the library's default compression level
-	/// as they all differ. See their `kDefaultCompressionLevel`.
-	///
-	/// Note when using the default value we may override it with a setting
-	/// tailored specifically tuwunel.
-	///
-	/// default: 32767
-	#[serde(default = "default_rocksdb_compression_level")]
-	pub rocksdb_compression_level: i32,
-
-	/// Level of compression the specified compression algorithm for the
-	/// bottommost level/data for RocksDB to use. Default is 32767, which is
-	/// internally read by RocksDB as the default magic number and translated to
-	/// the library's default compression level as they all differ. See their
-	/// `kDefaultCompressionLevel`.
-	///
-	/// Since this is the bottommost level (generally old and least used data),
-	/// it may be desirable to have a very high compression level here as it's
-	/// less likely for this data to be used. Research your chosen compression
-	/// algorithm.
-	///
-	/// Note when using the default value we may override it with a setting
-	/// tailored specifically tuwunel.
-	///
-	/// default: 32767
-	#[serde(default = "default_rocksdb_bottommost_compression_level")]
-	pub rocksdb_bottommost_compression_level: i32,
-
-	/// Whether to enable RocksDB's "bottommost_compression".
-	///
-	/// At the expense of more CPU usage, this will further compress the
-	/// database to reduce more storage. It is recommended to use ZSTD
-	/// compression with this for best compression results. This may be useful
-	/// if you're trying to reduce storage usage from the database.
-	///
-	/// See https://github.com/facebook/rocksdb/wiki/Compression for more details.
-	#[serde(default = "true_fn")]
-	pub rocksdb_bottommost_compression: bool,
-
-	/// Database recovery mode (for RocksDB WAL corruption).
-	///
-	/// Use this option when the server reports corruption and refuses to start.
-	/// Set mode 2 (PointInTime) to cleanly recover from this corruption. The
-	/// server will continue from the last good state, several seconds or
-	/// minutes prior to the crash. Clients may have to run "clear-cache &
-	/// reload" to account for the rollback. Upon success, you may reset the
-	/// mode back to default and restart again. Please note in some cases the
-	/// corruption error may not be cleared for at least 30 minutes of operation
-	/// in PointInTime mode.
-	///
-	/// As a very last ditch effort, if PointInTime does not fix or resolve
-	/// anything, you can try mode 3 (SkipAnyCorruptedRecord) but this will
-	/// leave the server in a potentially inconsistent state.
-	///
-	/// The default mode 1 (TolerateCorruptedTailRecords) will automatically
-	/// drop the last entry in the database if corrupted during shutdown, but
-	/// nothing more. It is extraordinarily unlikely this will desynchronize
-	/// clients. To disable any form of silent rollback set mode 0
-	/// (AbsoluteConsistency).
-	///
-	/// The options are:
-	/// 0 = AbsoluteConsistency
-	/// 1 = TolerateCorruptedTailRecords (default)
-	/// 2 = PointInTime (use me if trying to recover)
-	/// 3 = SkipAnyCorruptedRecord (you now voided your tuwunel warranty)
-	///
-	/// For more information on these modes, see:
-	/// https://github.com/facebook/rocksdb/wiki/WAL-Recovery-Modes
-	///
-	/// For more details on recovering a corrupt database, see:
-	/// https://tuwunel.chat/troubleshooting.html#database-corruption
-	///
-	/// default: 1
-	#[serde(default = "default_rocksdb_recovery_mode")]
-	pub rocksdb_recovery_mode: u8,
-
-	/// Enables or disables paranoid SST file checks. This can improve RocksDB
-	/// database consistency at a potential performance impact due to further
-	/// safety checks ran.
-	///
-	/// For more information, see:
-	/// https://github.com/facebook/rocksdb/wiki/Online-Verification#columnfamilyoptionsparanoid_file_checks
-	#[serde(default)]
-	pub rocksdb_paranoid_file_checks: bool,
-
-	/// Enables or disables checksum verification in rocksdb at runtime.
-	/// Checksums are usually hardware accelerated with low overhead; they are
-	/// enabled in rocksdb by default. Older or slower platforms may see gains
-	/// from disabling.
-	///
-	/// default: true
-	#[serde(default = "true_fn")]
-	pub rocksdb_checksums: bool,
-
-	/// Enables the "atomic flush" mode in rocksdb. This option is not intended
-	/// for users. It may be removed or ignored in future versions. Atomic flush
-	/// may be enabled by the paranoid to possibly improve database integrity at
-	/// the cost of performance.
-	#[serde(default)]
-	pub rocksdb_atomic_flush: bool,
-
-	/// Database repair mode (for RocksDB SST corruption).
-	///
-	/// Use this option when the server reports corruption while running or
-	/// panics. If the server refuses to start use the recovery mode options
-	/// first. Corruption errors containing the acronym 'SST' which occur after
-	/// startup will likely require this option.
-	///
-	/// - Backing up your database directory is recommended prior to running the
-	///   repair.
-	///
-	/// - Disabling repair mode and restarting the server is recommended after
-	///   running the repair.
-	///
-	/// See https://tuwunel.chat/troubleshooting.html#database-corruption for more details on recovering a corrupt database.
-	#[serde(default)]
-	pub rocksdb_repair: bool,
-
-	/// Opens RocksDB in read-only mode.
-	///
-	/// Writes are rejected and missing column families cannot be created. This
-	/// mode is disabled by default.
-	#[serde(default)]
-	pub rocksdb_read_only: bool,
-
-	/// Opens RocksDB as a secondary follower of a primary instance.
-	///
-	/// Writes are rejected while the primary's latest WAL can be replayed into
-	/// this instance's view. Missing column families cannot be created.
-	#[serde(default)]
-	pub rocksdb_secondary: bool,
-
-	/// Enables idle CPU priority for compaction thread. This is not enabled by
-	/// default to prevent compaction from falling too far behind on busy
-	/// systems.
-	#[serde(default)]
-	pub rocksdb_compaction_prio_idle: bool,
-
-	/// Enables idle IO priority for compaction thread. This prevents any
-	/// unexpected lag in the server's operation and is usually a good idea.
-	/// Enabled by default.
-	#[serde(default = "true_fn")]
-	pub rocksdb_compaction_ioprio_idle: bool,
-
-	/// Enables RocksDB compaction. You should never ever have to set this
-	/// option to false. If you for some reason find yourself needing to use
-	/// this option as part of troubleshooting or a bug, please reach out to us
-	/// in the tuwunel Matrix room with information and details.
-	///
-	/// Disabling compaction will lead to a significantly bloated and
-	/// explosively large database, gradually poor performance, unnecessarily
-	/// excessive disk read/writes, and slower shutdowns and startups.
-	#[serde(default = "true_fn")]
-	pub rocksdb_compaction: bool,
-
-	/// Level of statistics collection. Some admin commands to display database
-	/// statistics may require this option to be set. Database performance may
-	/// be impacted by higher settings.
-	///
-	/// Option is a number ranging from 0 to 6:
-	/// 0 = No statistics.
-	/// 1 = No statistics in release mode (default).
-	/// 2 to 3 = Statistics with no performance impact.
-	/// 3 to 5 = Statistics with possible performance impact.
-	/// 6 = All statistics.
-	///
-	/// default: 1
-	#[serde(default = "default_rocksdb_stats_level")]
-	pub rocksdb_stats_level: u8,
-
-	/// Ignores the list of dropped columns set by developers.
-	///
-	/// This should be set to true when knowingly moving between versions in
-	/// ways which are not recommended or otherwise forbidden, or for
-	/// diagnostic and development purposes; requiring preservation across such
-	/// movements.
-	///
-	/// The developer's list of dropped columns is meant to safely reduce space
-	/// by erasing data no longer in use. If this is set to true that storage
-	/// will not be reclaimed as intended.
-	///
-	/// default: false
-	#[serde(default)]
-	pub rocksdb_never_drop_columns: bool,
-
-	/// Configures RocksDB to not preallocate WAL logs.
-	///
-	/// Normally, RocksDB allocates certain types of files by calling
-	/// fallocate, writing the file contents, then truncating the logs to the
-	/// proper size. This causes pathological disk space usage on btrfs due to
-	/// how it interacts with its Copy-on-Write implementation. On ZFS,
-	/// fallocate(2) for preallocation is unsupported and returns EOPNOTSUPP;
-	/// only `FALLOC_FL_PUNCH_HOLE` and `FALLOC_FL_ZERO_RANGE` are implemented.
-	///
-	/// Set this to false if you run the server on btrfs or ZFS, and do not
-	/// touch it otherwise.
-	///
-	/// default: true
-	#[serde(default = "true_fn")]
-	pub rocksdb_allow_fallocate: bool,
 
 	/// This is a password that can be configured that will let you login to the
 	/// server bot account (currently `@conduit`) for emergency troubleshooting
@@ -5658,7 +5347,7 @@ impl Config {
 		let paths = Self::file_paths(paths);
 		let config = Self::load_files(paths)?;
 
-		Ok(Self::merge_environment(config))
+		Self::merge_environment(config)
 	}
 }
 
@@ -5731,26 +5420,42 @@ fn load_file(path: &Path) -> Result<Figment> {
 		| false => provider.nested(),
 	};
 
-	Ok(Figment::new().merge(provider))
+	let config = Figment::new().merge(Self::normalize(provider)?);
+
+	Ok(config)
+}
+
+/// Normalizes one configuration source before it is combined with others.
+///
+/// Legacy paths retain source metadata and follow the same precedence as
+/// canonical paths. Conflicting spellings within one source are rejected.
+/// The returned provider supplies its snapshot to one combination operation.
+#[implement(Config)]
+pub fn normalize<P: Provider>(provider: P) -> Result<impl Provider> {
+	normalize_provider(provider).map_err(Into::into)
 }
 
 #[implement(Config)]
-pub(crate) fn merge_environment(config: Figment) -> Figment {
+pub(crate) fn merge_environment(config: Figment) -> Result<Figment> {
 	ENV_PREFIXES
 		.into_iter()
-		.fold(config, |config, prefix| {
-			config.merge(Env::prefixed(prefix).global().split("__"))
+		.try_fold(config, |config, prefix| {
+			environment(prefix)
+				.map(|provider| config.merge(provider))
+				.map_err(Into::into)
 		})
 }
 
 impl Config {
 	/// Finalize config
 	pub fn new(raw_config: &Figment) -> Result<Self> {
+		assert_canonical(raw_config)?;
 		let config = raw_config
 			.extract::<Self>()
+			.map_err(redact_error)
 			.map_err(|e| err!("There was a problem with your configuration file: {e}"))?;
 
-		Ok(config)
+		Ok(with_unknown(config, raw_config))
 	}
 
 	/// Validates the complete configuration.
@@ -5759,6 +5464,14 @@ impl Config {
 	/// reject invalid combinations. Reload-specific comparisons are performed
 	/// by the configuration manager separately.
 	pub fn check(&self) -> Result { check(self) }
+}
+
+fn with_unknown(mut config: Config, raw: &Figment) -> Config {
+	config
+		.catchall
+		.extend(unknown(raw).map(|path| (path, IgnoredAny)));
+
+	config
 }
 
 /// Argon2id cost parameters for hashing a new password.
@@ -5866,10 +5579,6 @@ fn default_port() -> ListeningPort { ListeningPort { ports: Left(8008) } }
 fn default_unix_socket_perms() -> u32 { 660 }
 
 fn default_database_backups_to_keep() -> i16 { 1 }
-
-fn default_db_write_buffer_capacity_mb() -> f64 { 48.0 + parallelism_scaled_f64(4.0) }
-
-fn default_db_cache_capacity_mb() -> f64 { 128.0 + parallelism_scaled_f64(64.0) }
 
 fn default_pdu_cache_capacity() -> u32 { parallelism_scaled_u32(10_000).saturating_add(100_000) }
 
@@ -6076,42 +5785,6 @@ fn default_typing_federation_timeout_s() -> u64 { 30 }
 fn default_typing_client_timeout_min_s() -> u64 { 15 }
 
 fn default_typing_client_timeout_max_s() -> u64 { 45 }
-
-fn default_rocksdb_recovery_mode() -> u8 { 1 }
-
-fn default_rocksdb_log_level() -> String { "error".to_owned() }
-
-fn default_rocksdb_log_time_to_roll() -> usize { 0 }
-
-fn default_rocksdb_max_log_files() -> usize { 3 }
-
-fn default_rocksdb_max_log_file_size() -> usize {
-	// 4 megabytes
-	4 * 1024 * 1024
-}
-
-fn default_rocksdb_parallelism_threads() -> usize { 0 }
-
-fn default_rocksdb_compression_algo() -> String {
-	cfg!(feature = "zstd_compression")
-		.then_some("zstd")
-		.unwrap_or("none")
-		.to_owned()
-}
-
-/// Default RocksDB compression level is 32767, which is internally read by
-/// RocksDB as the default magic number and translated to the library's default
-/// compression level as they all differ. See their `kDefaultCompressionLevel`.
-#[expect(clippy::doc_markdown)]
-fn default_rocksdb_compression_level() -> i32 { 32767 }
-
-/// Default RocksDB compression level is 32767, which is internally read by
-/// RocksDB as the default magic number and translated to the library's default
-/// compression level as they all differ. See their `kDefaultCompressionLevel`.
-#[expect(clippy::doc_markdown)]
-fn default_rocksdb_bottommost_compression_level() -> i32 { 32767 }
-
-fn default_rocksdb_stats_level() -> u8 { 1 }
 
 /// Returns the default Matrix room version.
 ///

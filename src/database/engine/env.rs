@@ -32,8 +32,8 @@ static ENV: Mutex<Weak<Env>> = Mutex::new(Weak::new());
 #[implement(Env)]
 pub(super) fn acquire(server: &Server) -> Result<Arc<Self>> {
 	Self::acquire_with_priorities(
-		server.config.rocksdb_compaction_prio_idle,
-		server.config.rocksdb_compaction_ioprio_idle,
+		server.config.rocksdb.compaction_prio_idle,
+		server.config.rocksdb.compaction_ioprio_idle,
 	)
 }
 

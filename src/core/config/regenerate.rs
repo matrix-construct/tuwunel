@@ -32,7 +32,7 @@ use self::{
 	},
 	write::write_atomic,
 };
-use super::{Config, DEPRECATED_KEYS, Sources, format::Toml};
+use super::{Config, DEPRECATED_KEYS, Sources, format::Toml, normalize::validate_registry};
 use crate::{Err, Error, Result, err, implement, utils::BoolExt};
 
 const NEVER_EMIT: [&str; 2] = ["database_restore_backup", "force_migration"];
@@ -48,6 +48,8 @@ pub(super) enum FieldClass {
 #[derive(Clone, Copy, Debug)]
 pub(super) struct FieldSpec {
 	pub(super) name: &'static str,
+	pub(super) path: &'static str,
+	pub(super) legacy: &'static [&'static str],
 	pub(super) aliases: &'static [&'static str],
 	pub(super) example: &'static str,
 	pub(super) class: FieldClass,
@@ -59,14 +61,7 @@ pub(super) struct SectionSpec {
 	pub(super) aliases: &'static [&'static str],
 	pub(super) example: &'static str,
 	pub(super) fields: &'static [FieldSpec],
-	pub(super) position: SourcePosition,
-}
-
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-pub(super) struct SourcePosition {
-	pub(super) file: &'static str,
-	pub(super) line: u32,
-	pub(super) column: u32,
+	pub(super) group: bool,
 }
 
 /// Selects how an existing configuration is regenerated.
@@ -161,12 +156,14 @@ enum ResidueDisposition {
 #[link_section::section(typed)]
 pub(super) static REGISTERED_SECTIONS: TypedSection<SectionSpec>;
 
+type MetadataKeys<'a> = SmallVec<[&'a str; 4]>;
+
 type OrderedSections = SmallVec<[&'static SectionSpec; 16]>;
 
 static ORDERED_SECTIONS: LazyLock<OrderedSections> = LazyLock::new(ordered_sections);
 
 #[inline]
-fn schema() -> &'static [&'static SectionSpec] { ORDERED_SECTIONS.as_slice() }
+pub(super) fn schema() -> &'static [&'static SectionSpec] { ORDERED_SECTIONS.as_slice() }
 
 fn ordered_sections() -> OrderedSections {
 	let mut sections = REGISTERED_SECTIONS
@@ -174,33 +171,20 @@ fn ordered_sections() -> OrderedSections {
 		.iter()
 		.collect::<OrderedSections>();
 
-	// Linker-section order is unspecified, so restore source declaration order.
-	sections.sort_unstable_by_key(|section| section.position);
+	// Section paths put each parent before its alphabetically ordered children.
+	sections.sort_unstable_by_key(|section| section.section.trim_matches(['[', ']']));
 	validate_schema(&sections);
 
 	sections
 }
 
 fn validate_schema(sections: &[&SectionSpec]) {
+	validate_registry(sections);
 	let first = sections
 		.first()
 		.expect("configuration schema must contain the global section");
 
-	assert!(
-		sections
-			.iter()
-			.all(|section| section.position.file == first.position.file),
-		"configuration sections must be declared in one source file",
-	);
-
 	assert_eq!(first.section, "global", "global must be the first configuration section");
-
-	for pair in sections.windows(2) {
-		assert_ne!(
-			pair[0].position, pair[1].position,
-			"configuration sections share a source location"
-		);
-	}
 
 	for (index, section) in sections.iter().enumerate() {
 		assert!(
@@ -253,14 +237,14 @@ pub fn regenerate_config(
 	sources: &Sources,
 	options: RegenerateOptions<'_>,
 ) -> Result<RegenerationSummary> {
-	let paths = sources.file_paths().unique().collect_vec();
-	let input_count = paths.len();
+	let paths = sources.file_paths().collect_vec();
+	let input_count = paths.iter().sorted_unstable().dedup().count();
 
 	if paths.is_empty() {
 		return Err!("Configuration regeneration requires at least one input file.");
 	}
 
-	if paths.len() > 1 && options.output.is_none() {
+	if input_count > 1 && options.output.is_none() {
 		return Err!(
 			"Layered configuration files require an explicit output path because they are \
 			 collapsed into one document."
@@ -281,7 +265,8 @@ pub fn regenerate_config(
 		.then(|| files.extract::<Dict>())
 		.transpose()?;
 
-	let effective = Config::merge_environment(files);
+	let effective = Config::merge_environment(files)?;
+
 	Config::new(&effective)?;
 
 	let mut values = match file_values {
@@ -311,9 +296,7 @@ pub fn regenerate_config(
 	let mut stats = RenderStats::default();
 	let rendered = {
 		let mut context = RenderContext {
-			environment: effective_values
-				.as_ref()
-				.map(|values| (&effective, values)),
+			environment: Some((&effective, effective_values.as_ref().unwrap_or(&values))),
 			strip_unknown: options.strip_unknown,
 			expected: &mut expected,
 			stats: &mut stats,
@@ -482,6 +465,25 @@ fn render_instance(
 	}
 
 	render_unlisted_fields(output, spec, instance, context)
+}
+
+#[cfg(test)]
+pub(super) fn render_fixture(spec: &SectionSpec, values: &Dict) -> Result<String> {
+	let mut output = String::new();
+	let mut expected = Dict::new();
+	let mut stats = RenderStats::default();
+	let mut context = RenderContext {
+		environment: None,
+		strip_unknown: false,
+		expected: &mut expected,
+		stats: &mut stats,
+	};
+
+	for instance in resolve_instances(spec, values) {
+		render_instance(&mut output, spec, &instance, &mut context)?;
+	}
+
+	Ok(output)
 }
 
 fn render_environment_instance(
@@ -678,10 +680,11 @@ fn annotate_environment(
 		return Ok(());
 	};
 
-	let action = file_value
-		.is_some()
-		.then_some("currently overridden by")
-		.unwrap_or("currently set by");
+	let action = match file_value {
+		| None => "currently set by",
+		| Some(value) if is_file_value(figment, value) => "currently overridden by",
+		| Some(_) => "materialized from",
+	};
 
 	write!(output, "# {action} ").expect("written to configuration buffer");
 	write_environment_name(output, figment, value, path);
@@ -781,32 +784,21 @@ fn write_environment_name(
 	value: &Value,
 	path: &[PathPart<'_>],
 ) {
-	let prefix = figment
-		.get_metadata(value.tag())
-		.and_then(|metadata| metadata.name.strip_prefix('`'))
-		.and_then(|name| name.split_once('`'))
-		.map(|(prefix, _)| prefix)
-		.unwrap_or("TUWUNEL_");
+	if let Some(metadata) = figment.get_metadata(value.tag()) {
+		let keys = path
+			.iter()
+			.filter_map(|part| match part {
+				| PathPart::Key(key) => Some(*key),
+				| PathPart::Index(_) => None,
+			})
+			.collect::<MetadataKeys<'_>>();
 
-	output.push_str(prefix);
+		let profile = value
+			.tag()
+			.profile()
+			.unwrap_or_else(|| figment.profile().clone());
 
-	for (index, key) in path
-		.iter()
-		.take_while(|part| matches!(part, PathPart::Key(_)))
-		.filter_map(|part| match part {
-			| PathPart::Key(key) => Some(*key),
-			| PathPart::Index(_) => None,
-		})
-		.enumerate()
-	{
-		if index > 0 {
-			output.push_str("__");
-		}
-
-		output.extend(
-			key.chars()
-				.map(|character| character.to_ascii_uppercase()),
-		);
+		output.push_str(&metadata.interpolate(&profile, &keys));
 	}
 }
 

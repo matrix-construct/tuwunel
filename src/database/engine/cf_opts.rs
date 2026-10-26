@@ -131,7 +131,7 @@ fn set_compression(desc: &mut Descriptor, config: &Config) {
 		return;
 	}
 
-	desc.compression = match config.rocksdb_compression_algo.as_ref() {
+	desc.compression = match config.rocksdb.compression_algo.as_ref() {
 		| "snappy" => CompressionType::Snappy,
 		| "zlib" => CompressionType::Zlib,
 		| "bz2" => CompressionType::Bz2,
@@ -141,22 +141,22 @@ fn set_compression(desc: &mut Descriptor, config: &Config) {
 		| _ => CompressionType::Zstd,
 	};
 
-	let can_override_level = config.rocksdb_compression_level == SENTINEL_COMPRESSION_LEVEL
+	let can_override_level = config.rocksdb.compression_level == SENTINEL_COMPRESSION_LEVEL
 		&& desc.compression == CompressionType::Zstd;
 
 	if !can_override_level {
-		desc.compression_level = config.rocksdb_compression_level;
+		desc.compression_level = config.rocksdb.compression_level;
 	}
 
-	let can_override_bottom = config.rocksdb_bottommost_compression_level
+	let can_override_bottom = config.rocksdb.bottommost_compression_level
 		== SENTINEL_COMPRESSION_LEVEL
 		&& desc.compression == CompressionType::Zstd;
 
 	if !can_override_bottom {
-		desc.bottommost_level = Some(config.rocksdb_bottommost_compression_level);
+		desc.bottommost_level = Some(config.rocksdb.bottommost_compression_level);
 	}
 
-	if !config.rocksdb_bottommost_compression {
+	if !config.rocksdb.bottommost_compression {
 		desc.bottommost_level = None;
 	}
 }

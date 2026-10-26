@@ -56,7 +56,7 @@ pub(crate) const SHARED_POOL: &str = "Shared";
 impl Context {
 	pub(crate) fn new(server: &Arc<Server>) -> Result<Arc<Self>> {
 		let config = &server.config;
-		let cache_capacity_bytes = config.db_cache_capacity_mb * 1024.0 * 1024.0;
+		let cache_capacity_bytes = config.rocksdb.cache_capacity_mb * 1024.0 * 1024.0;
 
 		let col_cache_shards: i32 = 128;
 		let col_shard_bits = col_cache_shards.ilog2().try_into()?;

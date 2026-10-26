@@ -45,21 +45,22 @@ pub(crate) async fn open(ctx: Arc<Context>, desc: &[Descriptor]) -> Result<Arc<S
 	debug!("Configured {num_cfds} column descriptors...");
 
 	let load_time = std::time::Instant::now();
-	if config.rocksdb_repair {
+
+	if config.rocksdb.repair {
 		repair(&db_opts, &config.database_path)?;
 	}
 
 	debug!("Opening database...");
-	let db = if config.rocksdb_read_only {
-		Db::open_cf_descriptors_read_only(&db_opts, path, cfds, false)
-	} else if config.rocksdb_secondary {
-		Db::open_cf_descriptors_as_secondary(&db_opts, path, path, cfds)
-	} else {
-		Db::open_cf_descriptors(&db_opts, path, cfds)
+	let db = match () {
+		| () if config.rocksdb.read_only =>
+			Db::open_cf_descriptors_read_only(&db_opts, path, cfds, false),
+		| () if config.rocksdb.secondary =>
+			Db::open_cf_descriptors_as_secondary(&db_opts, path, path, cfds),
+		| () => Db::open_cf_descriptors(&db_opts, path, cfds),
 	}
 	.or_else(or_else)?;
 
-	if !config.rocksdb_read_only && !config.rocksdb_secondary {
+	if !config.rocksdb.read_only && !config.rocksdb.secondary {
 		drop_columns(dropped.iter().map(String::as_str), |name| {
 			db.drop_cf(name).or_else(or_else)
 		})?;
@@ -76,9 +77,9 @@ pub(crate) async fn open(ctx: Arc<Context>, desc: &[Descriptor]) -> Result<Arc<S
 		db,
 		pool: ctx.pool.clone(),
 		ctx: ctx.clone(),
-		read_only: config.rocksdb_read_only,
-		secondary: config.rocksdb_secondary,
-		checksums: config.rocksdb_checksums,
+		read_only: config.rocksdb.read_only,
+		secondary: config.rocksdb.secondary,
+		checksums: config.rocksdb.checksums,
 		write_options: WriteOptions::default(),
 		cf_index: OnceLock::new(),
 		corks: AtomicU32::new(0),
@@ -148,7 +149,7 @@ fn configure_cfds(
 		.iter()
 		.filter(|desc| desc.dropped)
 		.filter(|desc| existing.contains(desc.name))
-		.filter(|_| !config.rocksdb_never_drop_columns);
+		.filter(|_| !config.rocksdb.never_drop_columns);
 
 	// Described dropped columns which are no longer found.
 	let dropped = desc
@@ -201,7 +202,7 @@ fn configure_cfds(
 	};
 
 	// RocksDB cannot create column families in read-only or secondary mode.
-	let read_only = config.rocksdb_read_only || config.rocksdb_secondary;
+	let read_only = config.rocksdb.read_only || config.rocksdb.secondary;
 	let openable = |desc: &&Descriptor| !read_only || existing.contains(desc.name);
 
 	let dropping = dropping
