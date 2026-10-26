@@ -1258,6 +1258,21 @@ pub struct JwtConfig {
 	#[serde(default)]
 	pub enable: bool,
 
+	/// Expire JWT login access tokens without issuing refresh tokens.
+	///
+	/// Uses `authentication.access_token_ttl` in seconds, even if the client
+	/// does not request refresh tokens. A client's `refresh_token` request is
+	/// ignored when enabled. Retires current and spent refresh credentials of
+	/// the login device, including a reused device ID. Applies to subsequent
+	/// JWT logins; existing access tokens are not revoked. This lifetime is
+	/// independent of the JWT's `exp` claim. When disabled, normal refresh
+	/// negotiation applies.
+	///
+	/// reloadable: yes
+	/// default: false
+	#[serde(default)]
+	pub expire_access_token: bool,
+
 	/// Validation key, also called 'secret' in Synapse config. The type of key
 	/// can be configured in 'format', but defaults to the common HMAC which
 	/// is a plaintext shared-secret, so you should keep this value private.

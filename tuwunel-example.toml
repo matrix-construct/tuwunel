@@ -495,7 +495,8 @@
 #   `[[global.identity_provider]]` entry with `brand = "MAS"`; startup warns
 #   when it is missing.
 # - `access_token_ttl` applies only to sessions holding a refresh token
-#   (see `[global.authentication.refresh_token]`).
+#   (see `[global.authentication.refresh_token]`), and to JWT logins when
+#   `jwt.expire_access_token` is enabled.
 #
 #[global.authentication]
 
@@ -526,6 +527,8 @@
 # For clients supporting refresh tokens, the access token supplied at
 # login is invalidated after this interval, soft-logging out the client
 # until it refreshes.
+# Also applies to JWT logins when `jwt.expire_access_token` is enabled;
+# those sessions must log in again after expiry without a refresh token.
 #
 # reloadable: yes
 #
@@ -2454,6 +2457,20 @@
 # reloadable: yes
 #
 #enable = false
+
+# Expire JWT login access tokens without issuing refresh tokens.
+#
+# Uses `authentication.access_token_ttl` in seconds, even if the client
+# does not request refresh tokens. A client's `refresh_token` request is
+# ignored when enabled. Retires current and spent refresh credentials of
+# the login device, including a reused device ID. Applies to subsequent
+# JWT logins; existing access tokens are not revoked. This lifetime is
+# independent of the JWT's `exp` claim. When disabled, normal refresh
+# negotiation applies.
+#
+# reloadable: yes
+#
+#expire_access_token = false
 
 # Validation key, also called 'secret' in Synapse config. The type of key
 # can be configured in 'format', but defaults to the common HMAC which

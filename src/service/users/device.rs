@@ -29,6 +29,21 @@ use super::DeviceListChange;
 
 pub(super) type DeviceLock = MutexMapGuard<(OwnedUserId, OwnedDeviceId), ()>;
 
+/// Refresh credential handling during locked device-token issuance.
+#[derive(Clone, Copy, Debug)]
+pub enum RefreshTokenPolicy<'a> {
+	/// Keep the device's current and spent refresh state.
+	Preserve,
+	/// Issue a refresh token using the normal rotation rules.
+	Issue(&'a str),
+	/// Retire both current and spent refresh credentials.
+	Revoke,
+}
+
+impl<'a> From<Option<&'a str>> for RefreshTokenPolicy<'a> {
+	fn from(token: Option<&'a str>) -> Self { token.map_or(Self::Preserve, Self::Issue) }
+}
+
 /// generated device ID length
 const DEVICE_ID_LENGTH: usize = 10;
 
@@ -48,13 +63,36 @@ pub const TOKEN_LENGTH: usize = 32;
 /// cross-signing key IDs. The device is written and given its tokens under the
 /// device lock.
 #[implement(super::Service)]
-#[tracing::instrument(level = "debug", skip(self, access_token, refresh_token))]
+#[tracing::instrument(level = "debug", skip(self, access, refresh_token))]
 pub async fn create_device(
 	&self,
 	user_id: &UserId,
 	device_id: Option<&DeviceId>,
-	(access_token, expires_in): (Option<&str>, Option<Duration>),
+	access: (Option<&str>, Option<Duration>),
 	refresh_token: Option<&str>,
+	initial_device_display_name: Option<&str>,
+	client_ip: Option<IpAddr>,
+) -> Result<OwnedDeviceId> {
+	self.create_device_with_refresh_policy(
+		user_id,
+		device_id,
+		access,
+		refresh_token.into(),
+		initial_device_display_name,
+		client_ip,
+	)
+	.await
+}
+
+/// Creates a device and applies its refresh policy under the same device lock.
+#[implement(super::Service)]
+#[tracing::instrument(level = "debug", skip(self, access_token, refresh_policy))]
+pub async fn create_device_with_refresh_policy(
+	&self,
+	user_id: &UserId,
+	device_id: Option<&DeviceId>,
+	(access_token, expires_in): (Option<&str>, Option<Duration>),
+	refresh_policy: RefreshTokenPolicy<'_>,
 	initial_device_display_name: Option<&str>,
 	client_ip: Option<IpAddr>,
 ) -> Result<OwnedDeviceId> {
@@ -82,7 +120,7 @@ pub async fn create_device(
 	.await;
 
 	if let Some(access_token) = access_token {
-		self.issue_tokens(&lock, user_id, &device_id, (access_token, expires_in), refresh_token)
+		self.issue_tokens(&lock, user_id, &device_id, (access_token, expires_in), refresh_policy)
 			.await?;
 	}
 
@@ -295,9 +333,30 @@ pub async fn set_access_token(
 	expires_in: Option<Duration>,
 	refresh_token: Option<&str>,
 ) -> Result {
+	self.set_access_token_with_refresh_policy(
+		user_id,
+		device_id,
+		access_token,
+		expires_in,
+		refresh_token.into(),
+	)
+	.await
+}
+
+/// Issues tokens with an explicit refresh policy under the device lock.
+#[implement(super::Service)]
+#[tracing::instrument(level = "debug", skip(self, access_token, refresh_policy))]
+pub async fn set_access_token_with_refresh_policy(
+	&self,
+	user_id: &UserId,
+	device_id: &DeviceId,
+	access_token: &str,
+	expires_in: Option<Duration>,
+	refresh_policy: RefreshTokenPolicy<'_>,
+) -> Result {
 	let lock = self.lock_device(user_id, device_id).await;
 
-	self.issue_tokens(&lock, user_id, device_id, (access_token, expires_in), refresh_token)
+	self.issue_tokens(&lock, user_id, device_id, (access_token, expires_in), refresh_policy)
 		.await
 }
 
@@ -368,7 +427,7 @@ where
 
 	let rotated = rotated.then_some(refresh_token.as_str());
 
-	self.issue_tokens(&lock, user_id, device_id, access, rotated)
+	self.issue_tokens(&lock, user_id, device_id, access, rotated.into())
 		.await?;
 
 	Ok(refresh_token)
@@ -469,8 +528,7 @@ async fn revoke_reused_refresh_token(
 	Error::unknown_token(!revoke, "Refresh token has already been used.")
 }
 
-/// Issues an access token, and a refresh token when one is given, to one
-/// device.
+/// Issues an access token and applies the explicit refresh policy to one device.
 ///
 /// A device removed before its lock was taken gets none.
 #[implement(super::Service)]
@@ -480,7 +538,7 @@ async fn issue_tokens(
 	user_id: &UserId,
 	device_id: &DeviceId,
 	(access_token, expires_in): (&str, Option<Duration>),
-	refresh_token: Option<&str>,
+	refresh_policy: RefreshTokenPolicy<'_>,
 ) -> Result {
 	assert!(
 		access_token.len() >= TOKEN_LENGTH,
@@ -491,9 +549,14 @@ async fn issue_tokens(
 		return Err!(Request(Forbidden("Cannot issue tokens for a removed device.")));
 	}
 
-	if let Some(refresh_token) = refresh_token {
-		self.set_refresh_token(lock, user_id, device_id, refresh_token)
-			.await?;
+	match refresh_policy {
+		| RefreshTokenPolicy::Preserve => {},
+		| RefreshTokenPolicy::Issue(token) =>
+			self.set_refresh_token(lock, user_id, device_id, token)
+				.await?,
+		| RefreshTokenPolicy::Revoke =>
+			self.remove_refresh_token(user_id, device_id)
+				.await?,
 	}
 
 	let expires_at = expires_in
