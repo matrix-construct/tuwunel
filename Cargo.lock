@@ -5485,6 +5485,7 @@ name = "tuwunel_api_admin"
 version = "1.9.4"
 dependencies = [
  "axum",
+ "bytes",
  "const-str",
  "ctor",
  "dtor",
