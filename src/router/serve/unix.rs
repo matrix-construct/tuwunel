@@ -20,7 +20,7 @@ pub(super) async fn serve<'a>(
 	path: Option<&Path>,
 	socket_perms: u32,
 ) -> Result<Vec<BoxFuture<'a, Result<(), std::io::Error>>>> {
-	// Loopback so a unix-socket peer bypasses a configured `ip_source`.
+	// Loopback so a unix-socket peer bypasses a configured `http.ip_source`.
 	let router = router
 		.clone()
 		.layer(Extension(ConnectInfo(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0))))
@@ -40,14 +40,17 @@ pub(super) async fn serve<'a>(
 			warn!("Removing existing UNIX socket {path:?} (unclean shutdown?)...");
 			fs::remove_file(path).map_err(|e| {
 				err!(Config(
-					"unix_socket_path",
+					"http.listen.unix_socket_path",
 					"Failed to remove stale UNIX socket at {path:?}: {e}",
 				))
 			})?;
 		}
 
 		let unix_listener = UnixListener::bind(path).map_err(|e| {
-			err!(Config("unix_socket_path", "Failed to bind UNIX socket at {path:?}: {e}",))
+			err!(Config(
+				"http.listen.unix_socket_path",
+				"Failed to bind UNIX socket at {path:?}: {e}",
+			))
 		})?;
 
 		unix_listener.set_nonblocking(true)?;
@@ -55,7 +58,7 @@ pub(super) async fn serve<'a>(
 		let perms = fs::Permissions::from_mode(socket_perms);
 		fs::set_permissions(path, perms).map_err(|e| {
 			err!(Config(
-				"unix_socket_path",
+				"http.listen.unix_socket_path",
 				"Failed to set permissions {socket_perms:o} on UNIX socket at {path:?}: {e}",
 			))
 		})?;

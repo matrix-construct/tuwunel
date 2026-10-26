@@ -42,8 +42,7 @@ fn device_removal_drops_its_identity_keys() -> Result {
 
 	let args = Args::default_test(&["fresh", "cleanup"])
 		.with_option(format!("database_path={db_path:?}"))
-		.with_option("address=[\"127.0.0.1\"]")
-		.with_option(format!("port={port}"))
+		.with_loopback_listener(port)
 		.with_option("listening=true");
 
 	let runtime = Runtime::new(Some(&args))?;

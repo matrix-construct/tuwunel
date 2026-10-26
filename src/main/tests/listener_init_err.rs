@@ -9,14 +9,14 @@ use tuwunel::{Args, Runtime, Server};
 use tuwunel_core::Err;
 
 #[test]
-#[should_panic = "'unix_socket_path' directive in your configuration"]
+#[should_panic = "'http.listen.unix_socket_path' directive in your configuration"]
 fn listener_init_err() {
 	with_settings!({
 		description => "Listener Initialization Err",
 		snapshot_suffix => "listener_init_err",
 	}, {
 		let args = Args::default_test(&["fresh", "cleanup"])
-			.with_option("unix_socket_path=\"/non/existent/path\"");
+			.with_option("http.listen.unix_socket_path=\"/non/existent/path\"");
 
 		let runtime = Runtime::new(Some(&args)).unwrap();
 		let server = Server::new(Some(&args), Some(&runtime)).unwrap();

@@ -106,12 +106,11 @@ fn server_args(
 	test_modes: &[&str],
 	config: RegistrationConfig,
 ) -> Args {
-	let mut args = Args::default_test(test_modes);
+	let mut args = Args::default_test(test_modes)
+		.with_option(format!("database_path=\"{}\"", db_path.display()))
+		.with_loopback_listener(port);
 
 	args.option.extend([
-		format!("database_path=\"{}\"", db_path.display()),
-		"address=[\"127.0.0.1\"]".to_owned(),
-		format!("port={port}"),
 		"listening=true".to_owned(),
 		// The test starts multiple servers, so none may claim global tracing.
 		"log_enable=false".to_owned(),

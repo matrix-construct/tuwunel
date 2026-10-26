@@ -350,7 +350,7 @@ async fn handle_pdu(
 			return;
 		}
 
-		if pdu_start_time.elapsed() >= Duration::from_secs(services.config.client_request_timeout) {
+		if pdu_start_time.elapsed() >= Duration::from_secs(services.config.http.request_timeout) {
 			error!(
 				%origin, %txn_id, %room_id, %event_id, %ri, %ti,
 				elapsed = ?pdu_start_time.elapsed(),

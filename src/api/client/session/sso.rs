@@ -887,7 +887,13 @@ async fn set_avatar(
 	};
 
 	let content_disposition = make_content_disposition(None, content_type.as_deref(), None);
-	let limit = services.server.config.max_response_size;
+	let limit = services
+		.server
+		.config
+		.network
+		.http
+		.max_response_size;
+
 	let bytes = read_response_capped(response, limit).await?;
 	services
 		.media

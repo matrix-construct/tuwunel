@@ -44,12 +44,11 @@ fn direct_invites_are_accepted_and_others_are_not() -> Result {
 
 	let db_path = Args::test_database_path("auto-accept");
 
-	let mut args = Args::default_test(&["fresh", "cleanup"]);
+	let mut args = Args::default_test(&["fresh", "cleanup"])
+		.with_option(format!("database_path={db_path:?}"))
+		.with_loopback_listener(port);
 
 	args.option.extend([
-		format!("database_path={db_path:?}"),
-		"address=[\"127.0.0.1\"]".to_owned(),
-		format!("port={port}"),
 		"listening=true".to_owned(),
 		"auto_accept_invites=true".to_owned(),
 		"auto_accept_invites_direct_only=true".to_owned(),

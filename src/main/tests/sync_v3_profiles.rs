@@ -49,8 +49,7 @@ fn serves_filtered_profile_updates() -> Result {
 	let port = listener.local_addr()?.port();
 
 	let args = Args::default_test(&["fresh", "cleanup"])
-		.with_option("address=[\"127.0.0.1\"]")
-		.with_option(format!("port={port}"))
+		.with_loopback_listener(port)
 		.with_option("listening=true")
 		// A presence ping would fill a round this test expects to find empty.
 		.with_option("allow_local_presence=false")

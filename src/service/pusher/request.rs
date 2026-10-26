@@ -123,7 +123,13 @@ where
 			.expect("http::response::Builder is usable"),
 	);
 
-	let limit = self.services.config.max_response_size;
+	let limit = self
+		.services
+		.config
+		.network
+		.http
+		.max_response_size;
+
 	let body = read_response_capped(response, limit).await?;
 
 	if !status.is_success() {

@@ -164,7 +164,7 @@ fn request_authorization(request: &Request) -> &str {
 
 #[tokio::test]
 async fn configured_ipv6_mapped_range_remains_load_bearing() -> Result {
-	let config = Figment::new().merge(("ip_range_denylist", ["::ffff:0:0/96"]));
+	let config = Figment::new().merge(("network.http.ip_range_denylist", ["::ffff:0:0/96"]));
 	let Some(fixture) = fixture(config).await? else {
 		return Ok(());
 	};
@@ -193,7 +193,7 @@ async fn configured_ipv6_mapped_range_remains_load_bearing() -> Result {
 
 #[tokio::test]
 async fn configured_ipv4_range_checks_mapped_addresses_only() -> Result {
-	let config = Figment::new().merge(("ip_range_denylist", ["127.0.0.0/8"]));
+	let config = Figment::new().merge(("network.http.ip_range_denylist", ["127.0.0.0/8"]));
 	let Some(fixture) = fixture(config).await? else {
 		return Ok(());
 	};
@@ -323,7 +323,7 @@ async fn direct_and_delegated_routes_prepare_exact_authorities() -> Result {
 
 #[tokio::test]
 async fn empty_denylist_allows_final_private_literal_preparation() -> Result {
-	let config = Figment::new().merge(("ip_range_denylist", Vec::<String>::new()));
+	let config = Figment::new().merge(("network.http.ip_range_denylist", Vec::<String>::new()));
 	let Some(fixture) = fixture(config).await? else {
 		return Ok(());
 	};

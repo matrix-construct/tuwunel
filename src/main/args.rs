@@ -324,6 +324,17 @@ pub fn default_test(name: &[&str]) -> Self {
 		.with_database_path(&test_database_root().join(random_string(32)))
 }
 
+/// Returns these arguments with an IPv4 loopback listener configured.
+///
+/// The address and port overrides are appended together, preserving existing
+/// arguments and allowing later overrides to take precedence.
+#[implement(Args)]
+#[must_use]
+pub fn with_loopback_listener(self, port: u16) -> Self {
+	self.with_option("http.listen.address=[\"127.0.0.1\"]")
+		.with_option(format!("http.listen.port={port}"))
+}
+
 /// Returns these arguments with the database path override appended.
 ///
 /// The path is quoted as a TOML basic string, escaping backslashes and quotes,

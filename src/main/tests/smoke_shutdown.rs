@@ -17,7 +17,7 @@ fn smoke_shutdown() -> Result {
 		let port = listener.local_addr()?.port();
 
 		let args = Args::default_test(&["fresh", "cleanup"])
-			.with_option(format!("port={port}"));
+			.with_option(format!("http.listen.port={port}"));
 
 		let runtime = Runtime::new(Some(&args))?;
 		let server = Server::new(Some(&args), Some(&runtime))?;

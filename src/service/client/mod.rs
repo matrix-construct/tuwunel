@@ -91,6 +91,17 @@ impl crate::Service for Service {
 
 		probe_tls(config, &proxy)?;
 
+		let cidr_range_denylist = config
+			.network
+			.http
+			.ip_range_denylist
+			.iter()
+			.map(IPAddress::parse)
+			.inspect(|cidr| trace!("Denied CIDR range: {cidr:?}"))
+			.collect::<Result<Vec<_>, String>>()
+			.map(Arc::from)
+			.map_err(|e| err!(Config("network.http.ip_range_denylist", e)))?;
+
 		Ok(Arc::new(Self {
 			clients: LazyLock::new(Box::new({
 				let services = args.services.clone();
@@ -99,14 +110,7 @@ impl crate::Service for Service {
 			})),
 
 			proxy,
-			cidr_range_denylist: config
-				.ip_range_denylist
-				.iter()
-				.map(IPAddress::parse)
-				.inspect(|cidr| trace!("Denied CIDR range: {cidr:?}"))
-				.collect::<Result<Vec<_>, String>>()
-				.map(Arc::from)
-				.map_err(|e| err!(Config("ip_range_denylist", e)))?,
+			cidr_range_denylist,
 		}))
 	}
 
@@ -174,30 +178,36 @@ fn make_clients(services: &Services) -> Result<Clients> {
 			.redirect(Policy::none())
 	})?;
 
-	Ok(Clients {
-		default: with!(cb => cb.dns_resolver(Arc::clone(&services.resolver.resolver))),
+	let default = with!(cb => cb.dns_resolver(Arc::clone(&services.resolver.resolver)));
 
-		url_preview: with!("preview", cb => preview_builder(services, cb)?),
+	let url_preview = with!("preview", cb => preview_builder(services, cb)?);
 
-		extern_media: with!(cb => cb
+	let extern_media = with!(cb => cb
 			.dns_resolver(Validating::new(
 				Arc::clone(&services.resolver.resolver),
 				Arc::clone(&services.client.cidr_range_denylist),
 				services.client.proxy.shared_hosts(),
 			))
-			.redirect(guarded_redirect(services, 3))),
+			.redirect(guarded_redirect(services, 3)));
 
-		well_known: with!(cb => cb
+	let well_known = with!(cb => cb
 			.dns_resolver(Arc::clone(&services.resolver.resolver))
 			.connect_timeout(Duration::from_secs(
-				services.config.well_known_conn_timeout,
+				services.config.network.discovery.conn_timeout,
 			))
-			.read_timeout(Duration::from_secs(services.config.well_known_timeout))
-			.timeout(Duration::from_secs(services.config.well_known_timeout))
+			.read_timeout(Duration::from_secs(services.config.network.discovery.timeout))
+			.timeout(Duration::from_secs(services.config.network.discovery.timeout))
 			.pool_max_idle_per_host(0)
 			// Discovery always starts over HTTPS; this refuses redirects to plain HTTP.
 			.https_only(true)
-			.redirect(guarded_redirect(services, 4))),
+			.redirect(guarded_redirect(services, 4)));
+
+	Ok(Clients {
+		default,
+		url_preview,
+		extern_media,
+
+		well_known,
 
 		federation,
 		synapse,
@@ -331,22 +341,22 @@ fn base(config: &Config, proxy: &ProxySnapshot, name: Option<&str>) -> Result<Cl
 		.unwrap_or_else(|| user_agent.try_into())?;
 
 	let builder = Client::builder()
-		.connect_timeout(Duration::from_secs(config.request_conn_timeout))
-		.read_timeout(Duration::from_secs(config.request_timeout))
-		.timeout(Duration::from_secs(config.request_total_timeout))
-		.pool_idle_timeout(Duration::from_secs(config.request_idle_timeout))
-		.pool_max_idle_per_host(config.request_idle_per_host.into())
+		.connect_timeout(Duration::from_secs(config.network.http.conn_timeout))
+		.read_timeout(Duration::from_secs(config.network.http.timeout))
+		.timeout(Duration::from_secs(config.network.http.total_timeout))
+		.pool_idle_timeout(Duration::from_secs(config.network.http.idle_timeout))
+		.pool_max_idle_per_host(config.network.http.idle_per_host.into())
 		.user_agent(user_agent)
 		.redirect(Policy::limited(6))
-		.danger_accept_invalid_certs(config.allow_invalid_tls_certificates)
+		.danger_accept_invalid_certs(config.network.http.allow_invalid_tls_certificates)
 		.connection_verbose(cfg!(debug_assertions))
 		// Check if env var is set to avoid locking the keyfile mutex on every connection open
 		.tls_sslkeylogfile(std::env::var_os("SSLKEYLOGFILE").is_some());
 
 	let encodings: [(bool, DisableEncoding); 3] = [
-		(config.request_gzip, ClientBuilder::no_gzip),
-		(config.request_brotli, ClientBuilder::no_brotli),
-		(config.request_zstd, ClientBuilder::no_zstd),
+		(config.network.http.gzip, ClientBuilder::no_gzip),
+		(config.network.http.brotli, ClientBuilder::no_brotli),
+		(config.network.http.zstd, ClientBuilder::no_zstd),
 	];
 
 	let builder = encodings
@@ -421,7 +431,13 @@ fn builder_interface(builder: ClientBuilder, config: Option<&str>) -> Result<Cli
 }
 
 fn appservice_resolver(services: &Services) -> Arc<dyn Resolve> {
-	if services.server.config.dns_passthru_appservices {
+	if services
+		.server
+		.config
+		.network
+		.dns
+		.passthru_appservices
+	{
 		services.resolver.resolver.passthru.clone()
 	} else {
 		services.resolver.resolver.clone()

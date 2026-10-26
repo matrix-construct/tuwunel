@@ -93,8 +93,8 @@ fn hierarchy_rejects_wrong_root_and_prefers_joined_local_state() -> Result {
 	failed_listener.set_nonblocking(true)?;
 
 	let options = [
-		"allow_invalid_tls_certificates=true",
-		"ip_range_denylist=[]",
+		"network.http.allow_invalid_tls_certificates=true",
+		"network.http.ip_range_denylist=[]",
 		"federation_loopback=true",
 		"log=\"error\"",
 	];

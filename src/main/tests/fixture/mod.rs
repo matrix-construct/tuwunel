@@ -35,8 +35,8 @@ where
 
 	let args = Args::default_test(&["fresh", "cleanup"])
 		.with_database_path(&database)
-		.with_option(format!("address=[\"{}\"]", address.ip()))
-		.with_option(format!("port={}", address.port()))
+		.with_option(format!("http.listen.address=[\"{}\"]", address.ip()))
+		.with_option(format!("http.listen.port={}", address.port()))
 		.with_option("listening=true");
 
 	let args = options.into_iter().fold(args, Args::with_option);

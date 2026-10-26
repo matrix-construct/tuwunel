@@ -112,8 +112,7 @@ fn run_case(case: Case) -> Result {
 	let db_path = Args::test_database_path(format_args!("state-local-build-{name}"));
 	let args = Args::default_test(&["fresh", "cleanup"])
 		.with_database_path(&db_path)
-		.with_option("address=[\"127.0.0.1\"]")
-		.with_option(format!("port={port}"))
+		.with_loopback_listener(port)
 		.with_option("listening=true")
 		.with_option("log_enable=false")
 		.with_option(format!("resolve_state_locally={}", !matches!(case, Case::Disabled)));

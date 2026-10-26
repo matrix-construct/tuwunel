@@ -34,8 +34,7 @@ fn authorization_and_notice_membership() -> Result {
 
 	let args = Args::default_test(&["fresh", "cleanup"])
 		.with_database_path(&database)
-		.with_option("address=[\"127.0.0.1\"]")
-		.with_option(format!("port={port}"))
+		.with_loopback_listener(port)
 		.with_option("listening=true")
 		.with_option("create_admin_room=true")
 		.with_option("grant_admin_to_first_user=false")

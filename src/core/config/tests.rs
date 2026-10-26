@@ -136,6 +136,38 @@ fn default_config() -> Config {
 }
 
 #[test]
+fn unix_socket_permissions_preserve_octal_digits_and_reject_invalid_digits() {
+	for (digits, expected) in [
+		(0, Some(0)),
+		(660, Some(0o660)),
+		(4_000_000_000, Some(0o4_000_000_000)),
+		(888, None),
+		(u32::MAX, None),
+	] {
+		let document = format!("[global.http.listen]\nunix_socket_perms = {digits}\n");
+		let config =
+			config_from_toml(&document).expect("permission digits parse as configuration");
+
+		let result = config.get_unix_socket_perms();
+
+		match expected {
+			| Some(expected) =>
+				assert_eq!(result.expect("valid octal digits convert"), expected, "{digits}"),
+			| None => {
+				let error = result.expect_err("invalid octal digits must fail");
+
+				assert!(
+					error
+						.to_string()
+						.contains("http.listen.unix_socket_perms"),
+					"{error}"
+				);
+			},
+		}
+	}
+}
+
+#[test]
 fn media_upload_min_free_space_defaults_to_one_gib_and_takes_either_form() {
 	let default = default_config();
 	let integer = config_from_toml("[global]\nmedia_upload_min_free_space = 10737418240\n")
@@ -264,7 +296,7 @@ fn url_preview_accept_language_rejects_invalid_headers() {
 fn ip_source_absent_parses_as_none() {
 	let config = default_config();
 
-	assert_eq!(config.ip_source, None);
+	assert_eq!(config.http.ip_source, None);
 }
 
 #[test]
@@ -299,7 +331,7 @@ dns_passthru_domains = [\"example.com\"]
 	let (result, logs) = check_with_captured_logs(&config);
 
 	result.expect("a literal pattern should warn rather than refuse the config");
-	assert!(logs.contains("dns_passthru_domains"));
+	assert!(logs.contains("network.dns.passthru_domains"));
 	// A raw string: the rendered suggestion carries the doubled backslash a TOML
 	// basic string needs, so this is the text an operator can paste.
 	assert!(
@@ -435,7 +467,7 @@ ip_source = "connect_info"
 	)
 	.unwrap();
 
-	assert_eq!(config.ip_source, Some(IpSource::ConnectInfo));
+	assert_eq!(config.http.ip_source, Some(IpSource::ConnectInfo));
 }
 
 #[test]
@@ -447,7 +479,7 @@ ip_source = "rightmost_x_forwarded_for"
 	)
 	.unwrap();
 
-	assert_eq!(config.ip_source, Some(IpSource::RightmostXForwardedFor));
+	assert_eq!(config.http.ip_source, Some(IpSource::RightmostXForwardedFor));
 }
 
 #[test]
@@ -459,7 +491,7 @@ ip_source = "cf_connecting_ip"
 	)
 	.unwrap();
 
-	assert_eq!(config.ip_source, Some(IpSource::CfConnectingIp));
+	assert_eq!(config.http.ip_source, Some(IpSource::CfConnectingIp));
 }
 
 #[test]
@@ -481,7 +513,7 @@ ip_source = "{value}"
 		))
 		.unwrap();
 
-		assert_eq!(config.ip_source, Some(expected), "{value}");
+		assert_eq!(config.http.ip_source, Some(expected), "{value}");
 	}
 }
 
@@ -500,7 +532,8 @@ ip_source = "{value}"
 
 		let err = err.to_string();
 		assert!(err.contains("ip_source"), "{err}");
-		assert!(err.contains(value), "{err}");
+		assert!(err.contains("global.ip_source"), "{err}");
+		assert!(!err.contains(value), "{err}");
 	}
 }
 
@@ -522,15 +555,16 @@ ip_source = "cf_connecting_ip"
 
 	let (result, logs) = check_with_captured_logs(&absent);
 	result.expect("absent ip_source should pass config check");
-	assert!(!logs.contains("ip_source is set to"));
+	assert!(!logs.contains("http.ip_source selects a header-based source"));
 
 	let (result, logs) = check_with_captured_logs(&connect_info);
 	result.expect("connect_info should pass config check");
-	assert!(!logs.contains("ip_source is set to"));
+	assert!(!logs.contains("http.ip_source selects a header-based source"));
 
 	let (result, logs) = check_with_captured_logs(&cf_connecting_ip);
 	result.expect("cf_connecting_ip should pass config check");
-	assert!(logs.contains("ip_source is set to CfConnectingIp"));
+	assert!(logs.contains("http.ip_source selects a header-based source"));
+	assert!(logs.contains("source=CfConnectingIp"));
 }
 
 #[test]
@@ -688,31 +722,18 @@ ip_source = "rightmost_x_forwarded_for"
 	)
 	.unwrap();
 
-	let err = reload(&none, &some).unwrap_err();
-	assert!(
-		err.to_string().contains("'ip_source'")
-			&& err
-				.to_string()
-				.contains("cannot be changed at runtime"),
-		"{err}"
-	);
+	assert_ip_source_reload_rejected(&none, &some);
+	assert_ip_source_reload_rejected(&some, &none);
+	assert_ip_source_reload_rejected(&some, &other_some);
+}
 
-	let err = reload(&some, &none).unwrap_err();
-	assert!(
-		err.to_string().contains("'ip_source'")
-			&& err
-				.to_string()
-				.contains("cannot be changed at runtime"),
-		"{err}"
-	);
+fn assert_ip_source_reload_rejected(old: &Config, new: &Config) {
+	let error = reload(old, new).expect_err("changing the IP source must fail");
+	let message = error.to_string();
 
-	let err = reload(&some, &other_some).unwrap_err();
 	assert!(
-		err.to_string().contains("'ip_source'")
-			&& err
-				.to_string()
-				.contains("cannot be changed at runtime"),
-		"{err}"
+		message.contains("'http.ip_source'") && message.contains("cannot be changed at runtime"),
+		"{error}"
 	);
 }
 
@@ -1226,7 +1247,9 @@ fn proxy_snapshots_own_their_configured_and_environment_generations() {
 
 #[test]
 fn default_ip_range_denylist_covers_the_unspecified_addresses() {
-	let denylist: Vec<IPAddress> = default_ip_range_denylist()
+	let denylist: Vec<IPAddress> = Network::default()
+		.http
+		.ip_range_denylist
 		.iter()
 		.map(|cidr| IPAddress::parse(cidr).expect("default denylist range parses"))
 		.collect();
@@ -1381,12 +1404,14 @@ fn an_unknown_jwt_key_format_fails_the_config_check() {
 /// "varies by system" and non-literal bodies are out of reach here.
 #[test]
 fn documented_defaults_match_the_code() {
-	const SOURCES: [&str; 5] = [
+	const SOURCES: [&str; 7] = [
 		include_str!("mod.rs"),
 		include_str!("rocksdb.rs"),
 		include_str!("cache.rs"),
 		include_str!("database.rs"),
 		include_str!("runtime.rs"),
+		include_str!("http.rs"),
+		include_str!("network.rs"),
 	];
 
 	const SERDE_DEFAULT: &str = "#[serde(default = \"";

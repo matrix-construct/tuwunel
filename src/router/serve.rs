@@ -56,7 +56,7 @@ pub(super) async fn serve(services: Arc<Services>, handle: ServerHandle) -> Resu
 
 	let mut join_set = JoinSet::new();
 
-	let socket_path = &config.unix_socket_path;
+	let socket_path = &config.http.listen.unix_socket_path;
 
 	#[cfg(unix)]
 	let (passed_tcp_listeners, passed_unix_listeners) = systemd_listeners()?;
@@ -290,7 +290,12 @@ fn bind_addrs(
 				error!(%addr, %e, "Not binding: the default address is unavailable.");
 				continue;
 			},
-			| Err(e) => return Err!(Config("address", "Failed to bind {addr}: {e}")),
+			| Err(e) => {
+				let key = "http.listen.address";
+				let message = format!("Failed to bind {addr}: {e}").into();
+
+				return Err!(Config(key, message));
+			},
 		};
 
 		listener.set_nonblocking(true)?;

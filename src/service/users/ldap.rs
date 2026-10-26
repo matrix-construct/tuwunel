@@ -178,6 +178,8 @@ async fn ldap_connect(&self, principal: &str) -> Result<(JoinHandle<()>, Ldap)> 
 		.set_no_tls_verify(
 			self.services
 				.config
+				.network
+				.http
 				.allow_invalid_tls_certificates,
 		);
 

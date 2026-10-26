@@ -1,18 +1,13 @@
-//! Tuwunel's client-IP extractor.
+//! Extracts the client IP address from request metadata.
 //!
-//! Two modes:
-//!
-//! * If the operator configured `ip_source`, a [`ConfiguredIpSource`] marker is
-//!   installed in request extensions and the extractor reads from the chosen
-//!   source. Exception: if the peer shown by `ConnectInfo` is on a loopback
-//!   interface, or sits inside an operator-listed trusted subnet (see
-//!   [`TrustedPeerSubnets`]), the insecure header-scan + `ConnectInfo` fallback
-//!   runs instead, since such peers (e.g. a locally-connected appservice
-//!   bridge, or a containerized bridge on a private Docker network) cannot have
-//!   spoofed the address at the IP layer.
-//! * Otherwise the insecure header-scan + `ConnectInfo` fallback runs directly,
-//!   preserving the prior default behaviour, including the socket-address
-//!   fallback that matters for Unix-socket deployments.
+//! Configuring `http.ip_source` installs [`ConfiguredIpSource`] in request
+//! extensions and selects its address source. Loopback peers and peers in
+//! [`TrustedPeerSubnets`] instead use the insecure header scan and `ConnectInfo`
+//! fallback, because locally connected appservices and containerized bridges on
+//! trusted private networks, including Docker networks, cannot spoof their peer
+//! address at the IP layer.
+//! Without a configured source, that same fallback preserves the default
+//! behavior, including the socket-address fallback needed by UNIX sockets.
 
 use std::{
 	fmt,
@@ -25,21 +20,27 @@ use http::{Extensions, HeaderMap, StatusCode, request::Parts};
 use ipnet::IpNet;
 use tuwunel_core::config::IpSource;
 
-/// Tuwunel client-IP extractor. See module docs.
+/// Resolves the client IP address from request metadata.
+///
+/// Source selection and trusted-peer fallbacks follow the module's policy.
 #[derive(Clone, Copy, Debug)]
 pub struct ClientIp(
 	/// Client IP address resolved from the request.
 	pub IpAddr,
 );
 
-/// Marker wrapper around [`IpSource`] placed into request extensions
-/// only when an operator has explicitly configured `ip_source`.
+/// Marks the explicitly configured client IP source.
+///
+/// Request extensions contain this wrapper only when an operator has set
+/// `http.ip_source`.
 #[derive(Clone, Copy, Debug)]
 pub struct ConfiguredIpSource(pub IpSource);
 
-/// Operator-configured subnets whose TCP peers bypass the secure
-/// `ip_source` extraction in the same way loopback peers do. Installed
-/// in request extensions only when the configured list is non-empty.
+/// Identifies trusted subnets whose TCP peers bypass secure IP extraction.
+///
+/// Their peers bypass `http.ip_source` in the same way loopback peers do.
+/// Request extensions contain this wrapper only when the configured list is
+/// non-empty.
 #[derive(Clone, Debug)]
 pub struct TrustedPeerSubnets(pub Arc<[IpNet]>);
 
@@ -57,7 +58,7 @@ where
 		{
 			return secure_extract(source, &parts.headers, &parts.extensions)
 				.map(Self)
-				.ok_or((ERROR, "Can't extract client IP from configured ip_source"));
+				.ok_or((ERROR, "Can't extract client IP from configured http.ip_source"));
 		}
 
 		insecure_fallback(&parts.headers, &parts.extensions)
@@ -300,7 +301,7 @@ mod tests {
 			.insert(ConfiguredIpSource(IpSource::RightmostXForwardedFor));
 		let err = extract_client_ip(&mut parts).await.unwrap_err();
 		assert_eq!(err.0, StatusCode::INTERNAL_SERVER_ERROR);
-		assert_eq!(err.1, "Can't extract client IP from configured ip_source");
+		assert_eq!(err.1, "Can't extract client IP from configured http.ip_source");
 	}
 
 	#[tokio::test]
@@ -367,7 +368,7 @@ mod tests {
 
 		let err = extract_client_ip(&mut parts).await.unwrap_err();
 		assert_eq!(err.0, StatusCode::INTERNAL_SERVER_ERROR);
-		assert_eq!(err.1, "Can't extract client IP from configured ip_source");
+		assert_eq!(err.1, "Can't extract client IP from configured http.ip_source");
 	}
 
 	#[tokio::test]
@@ -416,7 +417,7 @@ mod tests {
 
 		let err = extract_client_ip(&mut parts).await.unwrap_err();
 		assert_eq!(err.0, StatusCode::INTERNAL_SERVER_ERROR);
-		assert_eq!(err.1, "Can't extract client IP from configured ip_source");
+		assert_eq!(err.1, "Can't extract client IP from configured http.ip_source");
 	}
 
 	#[tokio::test]

@@ -393,7 +393,13 @@ where
 		request = request.bearer_auth(access_token);
 	}
 
-	let limit = self.services.config.max_response_size;
+	let limit = self
+		.services
+		.config
+		.network
+		.http
+		.max_response_size;
+
 	let http_response = request.send().await?.error_for_status()?;
 
 	let body = read_response_capped(http_response, limit).await?;

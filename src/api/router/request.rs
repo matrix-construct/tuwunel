@@ -63,7 +63,7 @@ pub(super) async fn from(
 	let query = serde_html_form::from_str(query)
 		.map_err(|e| err!(Request(Unknown("Failed to read query parameters: {e}"))))?;
 
-	let max_body_size = services.server.config.max_request_size;
+	let max_body_size = services.server.config.http.max_request_size;
 	let body = axum::body::to_bytes(body, max_body_size)
 		.await
 		.map_err(|e| err!(Request(TooLarge("Request body too large: {e}"))))?;

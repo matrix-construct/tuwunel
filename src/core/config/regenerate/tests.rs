@@ -81,14 +81,14 @@ fn regenerated_configuration_round_trips_and_is_idempotent() {
 
 	let rendered = regenerate(from_ref(&input), &first);
 	let parsed = parse(&rendered);
-	let original = parse(&read_to_string(&input).expect("input configuration read"));
+	let original = parse(&document.replace("port = 10443", "http.listen.port = 10443"));
 
 	assert_eq!(parsed, original);
 
 	let values = global(&parsed);
 
 	assert_eq!(values["server_name"].as_str(), Some("round-trip.example"));
-	assert_eq!(values["port"].as_integer(), Some(10443));
+	assert_eq!(values["http"]["listen"]["port"].as_integer(), Some(10443));
 	assert_eq!(
 		values["trusted_servers"]
 			.as_array()
@@ -203,7 +203,11 @@ fn residue_is_preserved_but_dangerous_controls_are_dropped() {
 	assert!(rendered.contains(
 		"# UNDOCUMENTED: `resolve_state_locally_shadow` is valid but omitted from the example"
 	));
-	assert_eq!(values["allow_invalid_tls_certificates"].as_bool(), Some(true));
+	assert_eq!(
+		values["network"]["http"]["allow_invalid_tls_certificates"].as_bool(),
+		Some(true)
+	);
+
 	assert_eq!(values["ldap"]["name_attribute"].as_str(), Some("cn"));
 	assert!(!values.contains_key("database_restore_backup"));
 	assert!(!values.contains_key("force_migration"));
@@ -235,7 +239,12 @@ fn residue_is_preserved_but_dangerous_controls_are_dropped() {
 			.expect("ldap table")
 			.contains_key("name_attribute")
 	);
-	assert_eq!(stripped_values["allow_invalid_tls_certificates"].as_bool(), Some(true));
+
+	assert_eq!(
+		stripped_values["network"]["http"]["allow_invalid_tls_certificates"].as_bool(),
+		Some(true)
+	);
+
 	assert_eq!(stripped_values["resolve_state_locally_shadow"].as_bool(), Some(true),);
 	assert!(stripped_rendered.contains("unknown_future_option = \"preserved\""));
 	assert!(stripped_rendered.contains("name_attribute = \"cn\""));
@@ -375,7 +384,7 @@ fn layered_inputs_require_an_output_and_collapse_in_order() {
 	let values = global(&parsed);
 
 	assert_eq!(values["server_name"].as_str(), Some("layered.example"));
-	assert_eq!(values["port"].as_integer(), Some(7178));
+	assert_eq!(values["http"]["listen"]["port"].as_integer(), Some(7178));
 }
 
 #[test]
@@ -389,7 +398,7 @@ fn source_overrides_are_excluded_from_regeneration() {
 
 	let sources = Sources {
 		paths: vec![input],
-		overrides: Some(Box::new(|raw: Figment| Ok(raw.merge(("port", 9199))))),
+		overrides: Some(Box::new(|raw: Figment| Ok(raw.merge(("http.listen.port", 9199))))),
 	};
 
 	regenerate_config(&sources, options(&output))
@@ -397,7 +406,7 @@ fn source_overrides_are_excluded_from_regeneration() {
 
 	let rendered = read_to_string(output).expect("override output read");
 
-	assert_eq!(global(&parse(&rendered))["port"].as_integer(), Some(6167));
+	assert_eq!(global(&parse(&rendered))["http"]["listen"]["port"].as_integer(), Some(6167));
 }
 
 #[test]
@@ -421,7 +430,7 @@ fn headerless_input_is_normalized_and_named_profiles_are_rejected() {
 	let parsed = parse(&rendered);
 
 	assert_eq!(global(&parsed)["server_name"].as_str(), Some("headerless.example"));
-	assert_eq!(global(&parsed)["port"].as_integer(), Some(8189));
+	assert_eq!(global(&parsed)["http"]["listen"]["port"].as_integer(), Some(8189));
 
 	write(&named, "[staging]\nserver_name = \"named.example\"\n").expect("named profile written");
 	let sources = Sources { paths: vec![named], overrides: None };
@@ -605,7 +614,7 @@ fn config_can_be_selected_solely_through_the_path_environment() {
 		let rendered_values = global(&rendered_values);
 
 		assert_eq!(rendered_values["server_name"].as_str(), Some("environment.example"));
-		assert_eq!(rendered_values["port"].as_integer(), Some(6167));
+		assert_eq!(rendered_values["http"]["listen"]["port"].as_integer(), Some(6167));
 		assert!(rendered.contains("# currently overridden by TUWUNEL_PORT."));
 
 		let included_options = RegenerateOptions {
@@ -621,7 +630,7 @@ fn config_can_be_selected_solely_through_the_path_environment() {
 		let included = parse(&included);
 		let included_values = global(&included);
 
-		assert_eq!(included_values["port"].as_integer(), Some(6555));
+		assert_eq!(included_values["http"]["listen"]["port"].as_integer(), Some(6555));
 		assert!(!included_values.contains_key("config"));
 		assert!(!included_values.contains_key("runtime_worker_threads"));
 		return;

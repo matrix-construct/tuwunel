@@ -101,7 +101,8 @@ where
 				response = execute(&services, req, inner, &parent) => response,
 				response = services.server.until_shutdown()
 					.then(|()| {
-						let timeout = services.config.client_shutdown_timeout;
+						let timeout = services.config.http.shutdown_timeout;
+
 						sleep(Duration::from_secs(timeout))
 					})
 					.map(|()| StatusCode::SERVICE_UNAVAILABLE)

@@ -11,7 +11,8 @@ fn listener_conf_err() {
 		snapshot_suffix => "listener_conf_err",
 	}, {
 		let mut args = Args::default_test(&["smoke", "fresh", "cleanup"]);
-		args.option.push("address=[\"256.256.256.256\"]".into());
+
+		args.option.push("http.listen.address=[\"256.256.256.256\"]".into());
 
 		let runtime = Runtime::new(Some(&args)).unwrap();
 		let server = Server::new(Some(&args), Some(&runtime)).unwrap();

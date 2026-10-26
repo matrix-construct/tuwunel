@@ -34,14 +34,11 @@ fn timestamp_route_requires_room_access() -> Result {
 	let port = listener.local_addr()?.port();
 
 	let db_path = DatabasePath(Args::test_database_path("timestamp-access"));
-	let mut args = Args::default_test(&["fresh", "cleanup"]);
+	let mut args = Args::default_test(&["fresh", "cleanup"])
+		.with_option(format!("database_path={:?}", db_path.0))
+		.with_loopback_listener(port);
 
-	args.option.extend([
-		format!("database_path={:?}", db_path.0),
-		"address=[\"127.0.0.1\"]".to_owned(),
-		format!("port={port}"),
-		"listening=true".to_owned(),
-	]);
+	args.option.extend(["listening=true".to_owned()]);
 
 	let runtime = Runtime::new(Some(&args))?;
 	let server = Server::new(Some(&args), Some(&runtime))?;

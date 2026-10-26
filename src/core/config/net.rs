@@ -7,7 +7,14 @@ use either::{
 use ruma::ServerName;
 use serde::Deserialize;
 
-use crate::{Err, Result, err, implement, utils::BoolExt};
+use crate::{
+	Err, Result,
+	arrayvec::ArrayString,
+	err, implement,
+	utils::{BoolExt, string::to_array_string},
+};
+
+type PermissionDigits = ArrayString<10>;
 
 #[derive(Deserialize, Clone, Debug)]
 #[serde(transparent)]
@@ -29,9 +36,10 @@ pub(super) struct ListeningAddr {
 /// invalid octal digit produces a configuration error.
 #[implement(super::Config)]
 pub fn get_unix_socket_perms(&self) -> Result<u32> {
-	let octal_perms = self.unix_socket_perms.to_string();
-	let socket_perms = u32::from_str_radix(&octal_perms, 8)
-		.map_err(|_| err!(Config("unix_socket_perms", "failed to convert octal permissions")))?;
+	let octal_perms: PermissionDigits = to_array_string(self.http.listen.unix_socket_perms);
+	let socket_perms = u32::from_str_radix(&octal_perms, 8).map_err(|_| {
+		err!(Config("http.listen.unix_socket_perms", "failed to convert octal permissions"))
+	})?;
 
 	Ok(socket_perms)
 }
@@ -60,37 +68,41 @@ pub fn get_bind_addrs(&self) -> Vec<SocketAddr> {
 
 #[implement(super::Config)]
 fn get_bind_hosts(&self) -> Vec<IpAddr> {
-	self.address.as_ref().map_or_else(
-		|| {
-			self.unix_socket_path
+	self.http
+		.listen
+		.address
+		.as_ref()
+		.map(|address| match &address.addrs {
+			| Left(addr) => vec![*addr],
+			| Right(addrs) => addrs.clone(),
+		})
+		.unwrap_or_else(|| {
+			self.http
+				.listen
+				.unix_socket_path
 				.is_none()
 				.then(|| vec![Ipv4Addr::LOCALHOST.into(), Ipv6Addr::LOCALHOST.into()])
 				.unwrap_or_default()
-		},
-		|address| match &address.addrs {
-			| Left(addr) => vec![*addr],
-			| Right(addrs) => addrs.clone(),
-		},
-	)
+		})
 }
 
 #[implement(super::Config)]
 fn get_bind_ports(&self) -> Vec<u16> {
-	match &self.port.ports {
+	match &self.http.listen.port.ports {
 		| Left(port) => vec![*port],
 		| Right(ports) => ports.clone(),
 	}
 }
 
 /// Whether the addresses to bind come from the built-in default rather than
-/// the `address` option.
+/// the `http.listen.address` option.
 ///
 /// The default is a guess that both loopback families exist on the host, so
 /// one of them failing to bind is tolerable where a configured address is not.
 #[implement(super::Config)]
 #[inline]
 #[must_use]
-pub fn is_address_defaulted(&self) -> bool { self.address.is_none() }
+pub fn is_address_defaulted(&self) -> bool { self.http.listen.address.is_none() }
 
 /// Refuses a request that needs federation while federation is disabled.
 ///

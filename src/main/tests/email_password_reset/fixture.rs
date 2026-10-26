@@ -133,12 +133,11 @@ where
 {
 	let listener = TcpListener::bind(("127.0.0.1", 0))?;
 	let port = listener.local_addr()?.port();
-	let mut args = Args::default_test(test_modes);
+	let mut args = Args::default_test(test_modes)
+		.with_option(format!("database_path={db_path:?}"))
+		.with_loopback_listener(port);
 
 	args.option.extend([
-		format!("database_path={db_path:?}"),
-		"address=[\"127.0.0.1\"]".to_owned(),
-		format!("port={port}"),
 		"listening=true".to_owned(),
 		format!("smtp.connection_uri=\"smtp://127.0.0.1:{}\"", config.smtp_port),
 		"smtp.sender=\"noreply@example.org\"".to_owned(),

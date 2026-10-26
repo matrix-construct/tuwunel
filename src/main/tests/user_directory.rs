@@ -79,8 +79,8 @@ fn run_case(case: &Case) -> Result {
 	let listener = TcpListener::bind((HOST, 0))?;
 	let port = listener.local_addr()?.port();
 	let args = Args::default_test(&["fresh", "cleanup"])
-		.with_option(format!("address=[\"{HOST}\"]"))
-		.with_option(format!("port={port}"))
+		.with_option(format!("http.listen.address=[\"{HOST}\"]"))
+		.with_option(format!("http.listen.port={port}"))
 		.with_option("listening=true")
 		.with_option("log_enable=false")
 		.with_option(format!("show_all_local_users_in_user_directory={}", case.show_all));

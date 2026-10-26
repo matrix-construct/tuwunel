@@ -39,8 +39,7 @@ fn native_completion_ends_form_navigation() -> Result {
 	let listener = TcpListener::bind(("127.0.0.1", 0))?;
 	let port = listener.local_addr()?.port();
 	let args = Args::default_test(&["fresh", "cleanup"])
-		.with_option("address=[\"127.0.0.1\"]")
-		.with_option(format!("port={port}"))
+		.with_loopback_listener(port)
 		.with_option("listening=true")
 		.with_option("well_known.client=\"https://localhost\"")
 		.with_option("allow_registration=true")

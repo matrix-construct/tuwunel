@@ -68,21 +68,22 @@ mod tests {
 		let certificate = manifest.join(CERTIFICATE);
 		let private_key = manifest.join(PRIVATE_KEY);
 
+		let args = Args::default_test(&["fresh", "cleanup"])
+			.with_option(format!("database_path={:?}", db_path.0))
+			.with_option(format!("server_name=\"127.0.0.1:{port}\""))
+			.with_loopback_listener(port);
+
 		let args = [
-			format!("database_path={:?}", db_path.0),
-			format!("server_name=\"127.0.0.1:{port}\""),
-			"address=[\"127.0.0.1\"]".to_owned(),
-			format!("port={port}"),
 			"listening=true".to_owned(),
 			"federation_loopback=true".to_owned(),
-			"ip_range_denylist=[]".to_owned(),
-			"allow_invalid_tls_certificates=true".to_owned(),
+			"network.http.ip_range_denylist=[]".to_owned(),
+			"network.http.allow_invalid_tls_certificates=true".to_owned(),
 			format!("tls.certs={certificate:?}"),
 			format!("tls.key={private_key:?}"),
 			"log=\"error\"".to_owned(),
 		]
 		.into_iter()
-		.fold(Args::default_test(&["fresh", "cleanup"]), Args::with_option);
+		.fold(args, Args::with_option);
 
 		let runtime = Runtime::new(Some(&args))?;
 		let server = Server::new(Some(&args), Some(&runtime))?;

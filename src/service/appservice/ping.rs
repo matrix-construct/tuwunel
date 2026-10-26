@@ -77,7 +77,13 @@ pub async fn ping(
 		return Ok(());
 	}
 
-	let limit = self.services.config.max_response_size;
+	let limit = self
+		.services
+		.config
+		.network
+		.http
+		.max_response_size;
+
 	let body = read_response_capped(response, limit)
 		.await
 		.ok()

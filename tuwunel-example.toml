@@ -52,46 +52,6 @@
 #
 #new_user_displayname_suffix = "💕"
 
-# The default address (IPv4 or IPv6) tuwunel will listen on.
-#
-# If you are using Docker or a container NAT networking setup, this must
-# be "0.0.0.0".
-#
-# To listen on multiple addresses, specify a vector e.g. ["127.0.0.1",
-# "::1"]
-#
-# An address set here must bind or the server refuses to start. The
-# default is only a guess that both loopback families exist, so one of
-# them failing to bind is logged and skipped instead.
-#
-#address = ["127.0.0.1", "::1"]
-
-# The port(s) tuwunel will listen on.
-#
-# For reverse proxying, see:
-# https://tuwunel.chat/deploying/generic.html#setting-up-the-reverse-proxy
-#
-# If you are using Docker, don't change this, you'll need to map an
-# external port to this.
-#
-# To listen on multiple ports, specify a vector e.g. [8080, 8448]
-#
-#port = 8008
-
-# The UNIX socket tuwunel will listen on.
-#
-# Remember to make sure that your reverse proxy has access to this socket
-# file, either by adding your reverse proxy to the 'tuwunel' group or
-# granting world R/W permissions with `unix_socket_perms` (666 minimum).
-#
-# example: "/run/tuwunel/tuwunel.sock"
-#
-#unix_socket_path =
-
-# The default permissions (in octal) to create the UNIX socket with.
-#
-#unix_socket_perms = 660
-
 # Error on startup if any config option specified is unknown to Tuwunel.
 #
 # This is false by default to allow easier deprecation or removal of
@@ -121,142 +81,6 @@
 # reloadable: yes
 #
 #client_sync_timeout_max = 90000
-
-# Custom DNS servers to query instead of the operating system's default
-# resolvers; when this list is non-empty, `/etc/resolv.conf` is never
-# read. Each entry is an IP address with an optional port, defaulting to
-# port 53. The servers are assumed to support both UDP and TCP on that
-# port; enable `query_over_tcp_only` if any of them is TCP-only.
-#
-# example: ["127.0.0.53", "1.1.1.1:5353", "[fd00::1]:53"]
-#
-#dns_servers = []
-
-# Maximum entries stored in DNS memory-cache. The size of an entry may
-# vary so please take care if raising this value excessively. Only
-# decrease this when using an external DNS cache. Please note that
-# systemd-resolved does *not* count as an external cache, even when
-# configured to do so.
-#
-#dns_cache_entries = 32768
-
-# Minimum time-to-live in seconds for entries in the DNS cache. The
-# default may appear high to most administrators; this is by design as the
-# exotic loads of federating to many other servers require a higher TTL
-# than many domains have set. Even when using an external DNS cache the
-# problem is shifted to that cache which is ignorant of its role for
-# this application and can adhere to many low TTL's increasing its load.
-#
-#dns_min_ttl = 10800
-
-# Minimum time-to-live in seconds for NXDOMAIN entries in the DNS cache.
-# This value is critical for the server to federate efficiently.
-# NXDOMAIN's are assumed to not be returning to the federation and
-# aggressively cached rather than constantly rechecked.
-#
-# Defaults to 3 days as these are *very rarely* false negatives.
-#
-#dns_min_ttl_nxdomain = 259200
-
-# Number of DNS nameserver retries after a timeout or error.
-#
-#dns_attempts = 10
-
-# The number of seconds to wait for a reply to a DNS query. Please note
-# that recursive queries can take up to several seconds for some domains,
-# so this value should not be too low, especially on slower hardware or
-# resolvers.
-#
-#dns_timeout = 10
-
-# Fallback to TCP on DNS errors. Set this to false if unsupported by
-# nameserver.
-#
-#dns_tcp_fallback = true
-
-# Enable to query all nameservers until the domain is found. Referred to
-# as "trust_negative_responses" in hickory_resolver. This can avoid
-# useless DNS queries if the first nameserver responds with NXDOMAIN or
-# an empty NOERROR response.
-#
-#query_all_nameservers = true
-
-# Enable using *only* TCP for querying your specified nameservers instead
-# of UDP.
-#
-# If you are running tuwunel in a container environment, this config
-# option may need to be enabled. For more details, see:
-# https://tuwunel.chat/troubleshooting.html#potential-dns-issues-when-using-docker
-#
-#query_over_tcp_only = false
-
-# DNS A/AAAA record lookup strategy
-#
-# Takes a number of one of the following options:
-# 1 - Ipv4Only (Only query for A records, no AAAA/IPv6)
-#
-# 2 - Ipv6Only (Only query for AAAA records, no A/IPv4)
-#
-# 3 - Ipv4AndIpv6 (Query for A and AAAA records in parallel, uses whatever
-# returns a successful response first)
-#
-# 4 - Ipv6thenIpv4 (Query for AAAA record, if that fails then query the A
-# record)
-#
-# 5 - Ipv4thenIpv6 (Query for A record, if that fails then query the AAAA
-# record)
-#
-# If you don't have IPv6 networking, then for better DNS performance it
-# may be suitable to set this to Ipv4Only (1) as you will never ever use
-# the AAAA record contents even if the AAAA record is successful instead
-# of the A record.
-#
-#ip_lookup_strategy = 5
-
-# List of domain patterns resolved via the alternative path without any
-# persistent cache, very small memory cache, and no enforced TTL. This
-# is intended for internal network and application services which require
-# these specific properties. This path does not support federation or
-# general purposes.
-#
-# reloadable: yes
-# example: ["*\.dns\.podman$"]
-#
-#dns_passthru_domains = []
-
-# Whether to resolve appservices via the alternative path; setting this is
-# superior to providing domains in `dns_passthru_domains` if all
-# appservices intend to be matched anyway. The overhead of matching regex
-# and maintaining the list of domains can be avoided.
-#
-#dns_passthru_appservices = false
-
-# Enable or disable case randomization for DNS queries. This is a security
-# mitigation where answer spoofing is prevented by having to exactly match
-# the question. Occasional errors seen in logs which may have lead you
-# here tend to be from overloading DNS. Nevertheless for servers which
-# are truly incapable this can be set to false.
-#
-# This currently defaults to false due to user reports regarding some
-# popular DNS caches which may or may not be patched soon. It may again
-# default to true in an upcoming release.
-#
-#dns_case_randomization = false
-
-# Max request size for file uploads. Accepts an integer byte count or a
-# string with SI/IEC suffix such as "24 MiB".
-#
-#max_request_size = "24 MiB"
-
-# Maximum size of a response body buffered from a remote server. Applies
-# to federation requests, push gateway and appservice transactions, and
-# remote media fetched for URL previews. A peer cannot be trusted to honor
-# a requested limit, so this bounds the response held in memory
-# regardless, guarding against a remote driving the process out of
-# memory. Accepts an integer byte count or a string with SI/IEC suffix
-# such as "256 MiB".
-#
-#max_response_size = "256 MiB"
 
 # Maximum number of concurrently pending (asynchronous) media uploads a
 # user can have.
@@ -340,74 +164,6 @@
 #
 #fetch_prev_wait_ms = 750
 
-# Default connection timeout (seconds) for outbound HTTP clients;
-# individual clients may override it.
-#
-#request_conn_timeout = 10
-
-# Default read timeout (seconds) for outbound HTTP clients; individual
-# clients may override it.
-#
-#request_timeout = 35
-
-# Default whole-request timeout (seconds) for outbound HTTP clients.
-#
-# Set high enough not to cancel healthy requests while remaining a
-# backstop. Individual clients may override it.
-#
-#request_total_timeout = 320
-
-# Default idle connection pool timeout (seconds) for outbound HTTP
-# clients; individual clients may override it.
-#
-#request_idle_timeout = 5
-
-# Default maximum idle connections per host for outbound HTTP clients;
-# individual clients may override it.
-#
-#request_idle_per_host = 1
-
-# Allow the outbound HTTP client to negotiate gzip with other servers:
-# advertise it in Accept-Encoding and transparently decompress responses.
-# This covers federation, media, and URL preview traffic, and is separate
-# from `gzip_compression`, which compresses tuwunel's own responses.
-#
-# Enabled by default. Set to false to force the client to neither request
-# nor decompress gzip. Does nothing unless tuwunel was built with the
-# `gzip_compression` feature.
-#
-#request_gzip = true
-
-# Allow the outbound HTTP client to negotiate brotli with other servers:
-# advertise it in Accept-Encoding and transparently decompress responses.
-# This covers federation, media, and URL preview traffic, and is separate
-# from `brotli_compression`, which compresses tuwunel's own responses.
-#
-# Enabled by default. Set to false to force the client to neither request
-# nor decompress brotli. Does nothing unless tuwunel was built with the
-# `brotli_compression` feature.
-#
-#request_brotli = true
-
-# Allow the outbound HTTP client to negotiate zstd with other servers:
-# advertise it in Accept-Encoding and transparently decompress responses.
-# This covers federation, media, and URL preview traffic, and is separate
-# from `zstd_compression`, which compresses tuwunel's own responses.
-#
-# Enabled by default. Set to false to force the client to neither request
-# nor decompress zstd. Does nothing unless tuwunel was built with the
-# `zstd_compression` feature.
-#
-#request_zstd = true
-
-# Federation well-known resolution connection timeout (seconds).
-#
-#well_known_conn_timeout = 6
-
-# Federation HTTP well-known resolution request timeout (seconds).
-#
-#well_known_timeout = 10
-
 # Federation client request timeout (seconds). This applies to each read
 # from the remote server rather than to the request as a whole, which
 # remains bounded by `request_total_timeout`.
@@ -480,87 +236,6 @@
 # Notification gateway pusher idle connection pool timeout.
 #
 #pusher_idle_timeout = 15
-
-# Maximum time to receive a request from a client (seconds).
-#
-#client_receive_timeout = 75
-
-# Maximum time to process a request received from a client (seconds).
-#
-#client_request_timeout = 240
-
-# Maximum time to transmit a response to a client (seconds)
-#
-#client_response_timeout = 120
-
-# Grace period for clean shutdown of client requests (seconds).
-#
-# reloadable: yes
-#
-#client_shutdown_timeout = 15
-
-# Source of the client IP address for rate limiting, logging, and
-# security tooling.
-#
-# When unset (the default), the `ClientIp` extractor scans common
-# proxy headers in leftmost-IP mode (`X-Forwarded-For`, RFC 7239
-# `Forwarded`, `X-Real-IP`, `Fly-Client-IP`, `True-Client-IP`,
-# `CF-Connecting-IP`, `CloudFront-Viewer-Address`) and falls back
-# to the TCP peer address; clients can spoof their address via
-# request headers in that mode.
-#
-# When set, `ClientIp` resolves exclusively from the selected
-# source. The rightmost value is used for multi-valued headers;
-# only the proxy can append to the right, so this is resistant to
-# client spoofing.
-#
-# Supported values:
-# - "connect_info" - TCP peer address only (direct connections)
-# - "rightmost_x_forwarded_for" - nginx, Caddy
-# - "rightmost_forwarded" - RFC 7239 proxies
-# - "x_real_ip" - nginx `X-Real-IP`
-# - "cf_connecting_ip" - Cloudflare / cloudflared
-# - "true_client_ip" - Akamai, Cloudflare Enterprise
-# - "fly_client_ip" - Fly.io
-# - "cloudfront_viewer_address" - AWS CloudFront
-#
-# On Unix-socket deployments, leave this unset rather than setting
-# "connect_info"; that source requires a TCP peer address.
-#
-# WARNING: A header-based value without a trusted reverse proxy in
-# front of tuwunel allows clients to forge their IP. Changing this
-# value requires a server restart.
-#
-#ip_source = "connect_info"
-
-# Subnets whose TCP peers are treated as trusted and bypass the
-# `ip_source`-based extraction, falling through to the same
-# insecure header-scan + `ConnectInfo` fallback used when
-# `ip_source` is unset. Each entry is CIDR notation, including
-# the prefix length (use `/32` or `/128` to trust a single host).
-#
-# Loopback (`127.0.0.0/8`, `::1/128`) is always bypassed and
-# need not be listed.
-#
-# Use this when locally attached bridges or other server-side
-# clients connect from a private container or VPN subnet that
-# cannot carry the configured proxy header (e.g. a user-defined
-# Docker bridge network without `network_mode: host`).
-#
-# NOTE: If you configure an entire subnet here, be sure that it
-# does not include the address Tuwunel receives external traffic
-# from, i.e. that of your proxy. This would, for example, happen
-# if you deployed the proxy in a common bridge network with your
-# other components (e.g. in a Compose deployment) and specified
-# said network's subnet here. Traffic from the proxy would then
-# also have the bypass applied, rendering the `ip_source` option
-# effectively useless.
-#
-# WARNING: Any peer in these subnets can forge the client IP via
-# request headers. Only include subnets you control end-to-end.
-# Changing this value requires a server restart.
-#
-#ip_source_trusted_subnets = ["172.18.0.0/16", "fd00::/8"]
 
 # Grace period for clean shutdown of federation requests (seconds).
 #
@@ -1903,36 +1578,6 @@
 #
 #typing_client_timeout_max_s = 45
 
-# Set this to true for tuwunel to compress HTTP response bodies using
-# zstd. This option does nothing if tuwunel was not built with
-# `zstd_compression` feature. Please be aware that enabling HTTP
-# compression may weaken TLS. Most users should not need to enable this.
-# See https://breachattack.com/ and https://wikipedia.org/wiki/BREACH
-# before deciding to enable this.
-#
-#zstd_compression = false
-
-# Set this to true for tuwunel to compress HTTP response bodies using
-# gzip. This option does nothing if tuwunel was not built with
-# `gzip_compression` feature. Please be aware that enabling HTTP
-# compression may weaken TLS. Most users should not need to enable this.
-# See https://breachattack.com/ and https://wikipedia.org/wiki/BREACH before
-# deciding to enable this.
-#
-# If you are in a large amount of rooms, you may find that enabling this
-# is necessary to reduce the significantly large response bodies.
-#
-#gzip_compression = false
-
-# Set this to true for tuwunel to compress HTTP response bodies using
-# brotli. This option does nothing if tuwunel was not built with
-# `brotli_compression` feature. Please be aware that enabling HTTP
-# compression may weaken TLS. Most users should not need to enable this.
-# See https://breachattack.com/ and https://wikipedia.org/wiki/BREACH
-# before deciding to enable this.
-#
-#brotli_compression = false
-
 # Set to true to allow user type "guest" registrations. Some clients like
 # Element attempt to register guest users automatically.
 # reloadable: yes
@@ -2262,33 +1907,6 @@
 # example: ["badserver\.tld$", "badphrase", "19dollarfortnitecards"]
 #
 #forbidden_remote_room_directory_server_names = []
-
-# Vector list of IPv4 and IPv6 CIDR ranges / subnets *in quotes* that you
-# do not want tuwunel to send outbound requests to. Defaults to
-# RFC1918, unroutable, loopback, multicast, and testnet addresses for
-# security.
-#
-# Please be aware that this is *not* a guarantee. You should be using a
-# firewall with zones as doing this on the application layer may have
-# bypasses.
-#
-# Proxy endpoints selected by configuration or environment variables are
-# exempt so a private forward proxy can be reached. Destination addresses
-# remain filtered for direct requests and for locally resolving `socks4`
-# and `socks5` proxies. HTTP(S) forward proxies and `socks4a` or
-# `socks5h` resolve the destination remotely, so their egress policy must
-# enforce the destination network boundary instead.
-#
-# To disable, set this to be an empty vector (`[]`).
-#
-# Defaults to:
-# ["127.0.0.0/8", "0.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12",
-# "192.168.0.0/16", "100.64.0.0/10", "192.0.0.0/24", "169.254.0.0/16",
-# "192.88.99.0/24", "198.18.0.0/15", "192.0.2.0/24", "198.51.100.0/24",
-# "203.0.113.0/24", "224.0.0.0/4", "::1/128", "::/128", "fe80::/10",
-# "fc00::/7", "2001:db8::/32", "ff00::/8", "fec0::/10"]
-#
-#ip_range_denylist =
 
 # Optional IP address or network interface-name to bind as the source of
 # URL preview requests. If not set, it will not bind to a specific
@@ -2836,15 +2454,6 @@
 #
 #config_reload_signal = true
 
-# Sets the `Access-Control-Allow-Origin` header included by this server in
-# all responses. A list of multiple values can be specified. The default
-# is an empty list. The actual header defaults to `*` upon an empty list.
-#
-# There is no reason to configure this without specific intent. Incorrect
-# values may degrade or disrupt clients.
-#
-#access_control_allow_origin = []
-
 # Backport state-reset security fixes to all room versions.
 #
 # This option applies the State Resolution 2.1 mitigation developed during
@@ -3305,6 +2914,156 @@
 
 
 
+#[global.http]
+
+# Sets the maximum request size for file uploads.
+#
+# Accepts an integer byte count or a string with an SI/IEC suffix such as
+# "24 MiB".
+#
+#max_request_size = "24 MiB"
+
+# Sets the maximum time in seconds to receive a client request.
+#
+#receive_timeout = 75
+
+# Sets the maximum time in seconds to process a client request.
+#
+#request_timeout = 240
+
+# Sets the maximum time in seconds to transmit a client response.
+#
+#response_timeout = 120
+
+# Sets the grace period in seconds for clean shutdown of client requests.
+#
+# reloadable: yes
+#
+#shutdown_timeout = 15
+
+# Selects the client IP source for rate limiting, logging, and security
+# tooling.
+#
+# When unset, `ClientIp` scans common proxy headers in leftmost-IP mode
+# (`X-Forwarded-For`, RFC 7239 `Forwarded`, `X-Real-IP`, `Fly-Client-IP`,
+# `True-Client-IP`, `CF-Connecting-IP`, `CloudFront-Viewer-Address`)
+# before falling back to the TCP peer address, allowing clients to spoof
+# their address through request headers. When set, extraction uses only
+# the selected source and takes the rightmost value of multi-valued
+# headers, where only the proxy can append, resisting client spoofing;
+# header sources still require a trusted reverse proxy in front of
+# tuwunel to prevent forgery.
+#
+# Supported values are "connect_info" for direct TCP peers,
+# "rightmost_x_forwarded_for" for nginx or Caddy, "rightmost_forwarded"
+# for RFC 7239 proxies, "x_real_ip" for nginx `X-Real-IP`,
+# "cf_connecting_ip" for Cloudflare or cloudflared, "true_client_ip" for
+# Akamai or Cloudflare Enterprise, "fly_client_ip" for Fly.io, and
+# "cloudfront_viewer_address" for AWS CloudFront. Unix-socket deployments
+# should leave this unset instead of using "connect_info", which requires
+# a TCP peer address; changing this setting requires a server restart.
+#
+#ip_source = "connect_info"
+
+# Selects TCP peer subnets that bypass the configured client IP source.
+#
+# Matching peers use the insecure header scan and `ConnectInfo` fallback
+# used when `http.ip_source` is unset; entries require CIDR prefixes
+# (`/32` or `/128` for a single host), while loopback (`127.0.0.0/8`,
+# `::1/128`) always bypasses extraction without being listed. Use this
+# for locally attached bridges or server-side clients on private
+# container or VPN subnets that cannot carry the configured proxy header,
+# such as a Docker bridge without `network_mode: host`.
+#
+# Exclude the address receiving external traffic from your proxy: listing
+# a shared bridge subnet containing the proxy, such as a common Compose
+# network, also bypasses proxy traffic and defeats `http.ip_source`. Any
+# peer in these subnets can forge client IPs through request headers, so
+# include only subnets controlled end-to-end; changing this setting
+# requires a server restart.
+#
+#ip_source_trusted_subnets = ["172.18.0.0/16", "fd00::/8"]
+
+# Sets the `Access-Control-Allow-Origin` header included in all
+# responses.
+#
+# Multiple values may be specified. The default empty list produces the
+# header value `*`. Configure this only for a specific purpose, because
+# incorrect values can degrade or disrupt clients.
+#
+#access_control_allow_origin = []
+
+
+
+#[global.http.compression]
+
+# Compresses the server's HTTP response bodies with zstd.
+#
+# This has no effect unless tuwunel was built with the `zstd_compression`
+# feature. Most users do not need it, and HTTP compression can weaken
+# TLS; review https://breachattack.com/ and
+# https://wikipedia.org/wiki/BREACH before enabling it.
+#
+#zstd = false
+
+# Compresses the server's HTTP response bodies with gzip.
+#
+# This has no effect unless tuwunel was built with the `gzip_compression`
+# feature. Most users do not need it, and HTTP compression can weaken
+# TLS; review https://breachattack.com/ and
+# https://wikipedia.org/wiki/BREACH before enabling it. Servers in many
+# rooms may need it to reduce very large response bodies.
+#
+#gzip = false
+
+# Compresses the server's HTTP response bodies with brotli.
+#
+# This has no effect unless tuwunel was built with the
+# `brotli_compression` feature. Most users do not need it, and HTTP
+# compression can weaken TLS; review https://breachattack.com/ and
+# https://wikipedia.org/wiki/BREACH before enabling it.
+#
+#brotli = false
+
+
+
+#[global.http.listen]
+
+# Selects the IPv4 or IPv6 addresses on which tuwunel listens.
+#
+# Docker or container NAT deployments require "0.0.0.0". To listen on
+# multiple addresses, use a vector such as ["127.0.0.1", "::1"]. Every
+# explicitly configured address must bind or startup fails. The default
+# only assumes both loopback families exist, so a default address that
+# cannot bind is logged and skipped.
+#
+#address = ["127.0.0.1", "::1"]
+
+# Selects the ports on which tuwunel listens.
+#
+# For reverse proxy setup, see
+# https://tuwunel.chat/deploying/generic.html#setting-up-the-reverse-proxy.
+# Docker deployments should keep this value and map an external port to
+# it. To listen on multiple ports, use a vector such as [8080, 8448].
+#
+#port = 8008
+
+# Selects the UNIX socket on which tuwunel listens.
+#
+# The reverse proxy must be able to access this socket file. Add the
+# proxy to the 'tuwunel' group or grant world read/write access with
+# `http.listen.unix_socket_perms` set to at least 666.
+#
+# example: "/run/tuwunel/tuwunel.sock"
+#
+#unix_socket_path =
+
+# Sets the default permissions, in octal, for creating the UNIX socket.
+#
+#unix_socket_perms = 660
+
+
+
 #[[global.identity_provider]]
 
 # The brand-name of the service (e.g. Apple, Facebook, GitHub, GitLab,
@@ -3754,6 +3513,226 @@
 # example: "(objectClass=tuwunelAdmin)" or "(uid={username})"
 #
 #admin_filter =
+
+
+
+#[global.network]
+
+
+
+#[global.network.discovery]
+
+# Sets the federation well-known resolution connection timeout in
+# seconds.
+#
+#conn_timeout = 6
+
+# Sets the federation HTTP well-known resolution request timeout in
+# seconds.
+#
+#timeout = 10
+
+
+
+#[global.network.dns]
+
+# Selects custom DNS servers instead of the operating system resolvers.
+#
+# A non-empty list prevents reading `/etc/resolv.conf`. Each entry is an
+# IP address with an optional port, defaulting to 53. Servers are
+# expected to support both UDP and TCP on that port; enable
+# `network.dns.query_over_tcp_only` if any server supports only TCP.
+#
+# example: ["127.0.0.53", "1.1.1.1:5353", "[fd00::1]:53"]
+#
+#servers = []
+
+# Sets the maximum DNS memory cache entries; increase cautiously because
+# entry sizes vary, and decrease only with an external DNS cache, excluding
+# systemd-resolved even when configured to cache.
+#
+#cache_entries = 32768
+
+# Sets the minimum DNS cache lifetime in seconds, intentionally high by
+# default for federation with many servers whose domains have shorter TTLs;
+# an external cache merely shifts this load to a cache unaware of the
+# application's needs, where honoring low TTLs can increase load.
+#
+#min_ttl = 10800
+
+# Sets the minimum cached NXDOMAIN lifetime in seconds, defaulting to three
+# days because false negatives are very rare and efficient federation
+# requires aggressively caching domains assumed not to return rather than
+# repeatedly checking them.
+#
+#min_ttl_nxdomain = 259200
+
+# Sets the number of DNS nameserver retries after a timeout or error.
+#
+#attempts = 10
+
+# Sets the DNS response timeout in seconds; recursive queries to some
+# domains can take several seconds, so avoid overly short timeouts,
+# especially with slower hardware or resolvers.
+#
+#timeout = 10
+
+# Enables TCP fallback after DNS errors.
+#
+# Disable this if the nameserver does not support it.
+#
+#tcp_fallback = true
+
+# Enables querying all nameservers until the domain is found.
+#
+# Hickory resolver calls this "trust_negative_responses". It can avoid
+# unnecessary queries when the first nameserver returns NXDOMAIN or an
+# empty NOERROR response.
+#
+#query_all_nameservers = true
+
+# Queries configured nameservers using only TCP instead of UDP, as some
+# container deployments require (see [DNS
+# troubleshooting](https://tuwunel.chat/troubleshooting.html#potential-dns-issues-when-using-docker)).
+#
+#query_over_tcp_only = false
+
+# Selects the DNS A/AAAA lookup strategy by number.
+#
+# Use 1 (Ipv4Only) to query only A records with no AAAA/IPv6, or 2
+# (Ipv6Only) to query only AAAA records with no A/IPv4. Use 3
+# (Ipv4AndIpv6) to query both in parallel and accept the first successful
+# response. Use 4 (Ipv6thenIpv4) to query AAAA then A on failure, or 5
+# (Ipv4thenIpv6) to query A then AAAA on failure. Without IPv6
+# networking, 1 can improve DNS performance because successful AAAA
+# results cannot be used.
+#
+#ip_lookup_strategy = 5
+
+# Selects domain patterns resolved through the alternative DNS path.
+#
+# This path has no persistent cache, a very small memory cache, and no
+# enforced TTL. It serves internal networks and application services that
+# require those properties, and does not support federation or general
+# use.
+#
+# reloadable: yes
+# example: ["*\.dns\.podman$"]
+#
+#passthru_domains = []
+
+# Resolves application services through the alternative DNS path; when all
+# should match, prefer this to listing domains in
+# `network.dns.passthru_domains` to avoid regex matching overhead and
+# domain list maintenance.
+#
+#passthru_appservices = false
+
+# Randomizes DNS query case and requires matching answer case to mitigate
+# spoofing; occasional logged errors usually indicate DNS overload, it can
+# be disabled for servers lacking support, and the false default follows
+# reports about popular DNS caches whose possible fixes may allow a future
+# release to restore true.
+#
+#case_randomization = false
+
+
+
+#[global.network.http]
+
+# Limits the size of a response body buffered from a remote server.
+#
+# This applies to federation requests, push gateway and appservice
+# transactions, and remote media fetched for URL previews. Peers cannot
+# be trusted to honor requested limits, so the local bound protects
+# against a remote exhausting process memory. Accepts an integer byte
+# count or a string with an SI/IEC suffix such as "256 MiB".
+#
+#max_response_size = "256 MiB"
+
+# Sets the default outbound HTTP connection timeout in seconds;
+# individual clients may override it.
+#
+#conn_timeout = 10
+
+# Sets the default outbound HTTP read timeout in seconds; individual
+# clients may override it.
+#
+#timeout = 35
+
+# Sets the default outbound HTTP whole-request timeout in seconds.
+#
+# Keep it high enough for healthy requests while retaining a timeout
+# backstop. Individual clients may override it.
+#
+#total_timeout = 320
+
+# Sets the default outbound HTTP idle connection pool timeout in seconds;
+# individual clients may override it.
+#
+#idle_timeout = 5
+
+# Sets the default maximum idle outbound HTTP connections per host;
+# individual clients may override it.
+#
+#idle_per_host = 1
+
+# Allows outbound HTTP clients to negotiate gzip response compression.
+#
+# Clients advertise gzip in `Accept-Encoding` and transparently
+# decompress responses for federation, media, and URL preview traffic.
+# This is separate from `http.compression.gzip`, which compresses
+# tuwunel's own responses. It is enabled by default; disabling it
+# prevents both requesting and decompressing gzip. It has no effect
+# unless tuwunel was built with the `gzip_compression` feature.
+#
+#gzip = true
+
+# Allows outbound HTTP clients to negotiate brotli response compression.
+#
+# Clients advertise brotli in `Accept-Encoding` and transparently
+# decompress responses for federation, media, and URL preview traffic.
+# This is separate from `http.compression.brotli`, which compresses
+# tuwunel's own responses. It is enabled by default; disabling it
+# prevents both requesting and decompressing brotli. It has no effect
+# unless tuwunel was built with the `brotli_compression` feature.
+#
+#brotli = true
+
+# Allows outbound HTTP clients to negotiate zstd response compression.
+#
+# Clients advertise zstd in `Accept-Encoding` and transparently
+# decompress responses for federation, media, and URL preview traffic.
+# This is separate from `http.compression.zstd`, which compresses
+# tuwunel's own responses. It is enabled by default; disabling it
+# prevents both requesting and decompressing zstd. It has no effect
+# unless tuwunel was built with the `zstd_compression` feature.
+#
+#zstd = true
+
+# Blocks outbound requests to the listed IPv4 and IPv6 CIDR ranges.
+#
+# Entries are quoted strings; the defaults cover RFC1918, unroutable,
+# loopback, multicast, and testnet addresses for security, and an empty
+# vector (`[]`) disables this filter. Application filtering can have
+# bypasses, so enforce network boundaries with firewall zones rather than
+# treating this as a guarantee.
+#
+# Proxy endpoints selected through configuration or environment variables
+# are exempt so private forward proxies remain reachable, while direct
+# requests and locally resolving `socks4` or `socks5` proxies still
+# filter destination addresses. HTTP(S) forward proxies and `socks4a` or
+# `socks5h` resolve destinations remotely, so their egress policy must
+# enforce destination network boundaries instead.
+#
+# Defaults to:
+# ["127.0.0.0/8", "0.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12",
+# "192.168.0.0/16", "100.64.0.0/10", "192.0.0.0/24", "169.254.0.0/16",
+# "192.88.99.0/24", "198.18.0.0/15", "192.0.2.0/24", "198.51.100.0/24",
+# "203.0.113.0/24", "224.0.0.0/4", "::1/128", "::/128", "fe80::/10",
+# "fc00::/7", "2001:db8::/32", "ff00::/8", "fec0::/10"]
+#
+#ip_range_denylist =
 
 
 

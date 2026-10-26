@@ -185,7 +185,7 @@ async fn signal(server: Arc<Server>, handle: ServerHandle) {
 }
 
 fn handle_shutdown(server: &Arc<Server>, handle: &ServerHandle) {
-	let timeout = server.config.client_shutdown_timeout;
+	let timeout = server.config.http.shutdown_timeout;
 	let timeout = Duration::from_secs(timeout);
 	debug!(
 		?timeout,

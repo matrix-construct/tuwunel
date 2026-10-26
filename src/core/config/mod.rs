@@ -8,11 +8,13 @@ pub mod cache;
 pub mod check;
 pub mod database;
 mod format;
+pub mod http;
 mod identity_provider_serde;
 pub mod ip_source;
 mod jwt;
 pub mod manager;
 mod net;
+pub mod network;
 mod normalize;
 pub mod proxy;
 mod regenerate;
@@ -32,13 +34,12 @@ use std::{
 
 use bytesize::ByteSize;
 use derive_more::Debug;
-use either::{Either, Either::Left};
+use either::Either;
 pub use figment::{Figment, value::Value as FigmentValue};
 use figment::{
 	Profile, Provider,
 	providers::{Env, Format},
 };
-use ipnet::IpNet;
 use itertools::Itertools;
 use regex::RegexSet;
 pub use rocksdb::Rocksdb;
@@ -55,8 +56,10 @@ pub use self::{
 	cache::Cache,
 	check::check,
 	database::Database,
+	http::Http,
 	ip_source::IpSource,
 	manager::Manager,
+	network::Network,
 	regenerate::{
 		Overwrite, RegenerateOptions, RegenerationSummary, example_config, regenerate_config,
 		write_example_config,
@@ -66,7 +69,6 @@ pub use self::{
 };
 use self::{
 	format::Toml,
-	net::{ListeningAddr, ListeningPort},
 	normalize::{
 		assert_canonical, environment, normalize as normalize_provider, redact_error, unknown,
 	},
@@ -121,8 +123,9 @@ pub type StorageBucketName = SmallString<[u8; 64]>;
 ### https://tuwunel.chat/configuration.html
 "#,
 	ignore = "rocksdb catchall well_known tls rate_limiting ldap jwt appservice \
-	          identity_provider storage_provider registration_terms smtp cache database runtime",
-	hidden = "allow_invalid_tls_certificates resolve_state_locally_shadow",
+	          identity_provider storage_provider registration_terms smtp cache database runtime \
+	          http network",
+	hidden = "resolve_state_locally_shadow",
 	forbidden = "database_restore_backup force_migration"
 )]
 pub struct Config {
@@ -169,37 +172,6 @@ pub struct Config {
 	#[serde(default = "default_new_user_displayname_suffix")]
 	pub new_user_displayname_suffix: String,
 
-	#[expect(clippy::doc_link_with_quotes)]
-	/// The default address (IPv4 or IPv6) tuwunel will listen on.
-	///
-	/// If you are using Docker or a container NAT networking setup, this must
-	/// be "0.0.0.0".
-	///
-	/// To listen on multiple addresses, specify a vector e.g. ["127.0.0.1",
-	/// "::1"]
-	///
-	/// An address set here must bind or the server refuses to start. The
-	/// default is only a guess that both loopback families exist, so one of
-	/// them failing to bind is logged and skipped instead.
-	///
-	/// default: ["127.0.0.1", "::1"]
-	#[serde(default)]
-	address: Option<ListeningAddr>,
-
-	/// The port(s) tuwunel will listen on.
-	///
-	/// For reverse proxying, see:
-	/// https://tuwunel.chat/deploying/generic.html#setting-up-the-reverse-proxy
-	///
-	/// If you are using Docker, don't change this, you'll need to map an
-	/// external port to this.
-	///
-	/// To listen on multiple ports, specify a vector e.g. [8080, 8448]
-	///
-	/// default: 8008
-	#[serde(default = "default_port")]
-	port: ListeningPort,
-
 	/// Configures direct TLS listeners.
 	///
 	/// Values are read from the separate `[global.tls]` section. Certificate
@@ -207,21 +179,6 @@ pub struct Config {
 	// external structure; separate section
 	#[serde(default)]
 	pub tls: TlsConfig,
-
-	/// The UNIX socket tuwunel will listen on.
-	///
-	/// Remember to make sure that your reverse proxy has access to this socket
-	/// file, either by adding your reverse proxy to the 'tuwunel' group or
-	/// granting world R/W permissions with `unix_socket_perms` (666 minimum).
-	///
-	/// example: "/run/tuwunel/tuwunel.sock"
-	pub unix_socket_path: Option<PathBuf>,
-
-	/// The default permissions (in octal) to create the UNIX socket with.
-	///
-	/// default: 660
-	#[serde(default = "default_unix_socket_perms")]
-	pub unix_socket_perms: u32,
 
 	/// Error on startup if any config option specified is unknown to Tuwunel.
 	///
@@ -263,168 +220,6 @@ pub struct Config {
 	/// default: 90000
 	#[serde(default = "default_client_sync_timeout_max")]
 	pub client_sync_timeout_max: u64,
-
-	/// Custom DNS servers to query instead of the operating system's default
-	/// resolvers; when this list is non-empty, `/etc/resolv.conf` is never
-	/// read. Each entry is an IP address with an optional port, defaulting to
-	/// port 53. The servers are assumed to support both UDP and TCP on that
-	/// port; enable `query_over_tcp_only` if any of them is TCP-only.
-	///
-	/// example: ["127.0.0.53", "1.1.1.1:5353", "[fd00::1]:53"]
-	///
-	/// default: []
-	#[serde(default)]
-	pub dns_servers: Vec<String>,
-
-	/// Maximum entries stored in DNS memory-cache. The size of an entry may
-	/// vary so please take care if raising this value excessively. Only
-	/// decrease this when using an external DNS cache. Please note that
-	/// systemd-resolved does *not* count as an external cache, even when
-	/// configured to do so.
-	///
-	/// default: 32768
-	#[serde(default = "default_dns_cache_entries")]
-	pub dns_cache_entries: u32,
-
-	/// Minimum time-to-live in seconds for entries in the DNS cache. The
-	/// default may appear high to most administrators; this is by design as the
-	/// exotic loads of federating to many other servers require a higher TTL
-	/// than many domains have set. Even when using an external DNS cache the
-	/// problem is shifted to that cache which is ignorant of its role for
-	/// this application and can adhere to many low TTL's increasing its load.
-	///
-	/// default: 10800
-	#[serde(default = "default_dns_min_ttl")]
-	pub dns_min_ttl: u64,
-
-	/// Minimum time-to-live in seconds for NXDOMAIN entries in the DNS cache.
-	/// This value is critical for the server to federate efficiently.
-	/// NXDOMAIN's are assumed to not be returning to the federation and
-	/// aggressively cached rather than constantly rechecked.
-	///
-	/// Defaults to 3 days as these are *very rarely* false negatives.
-	///
-	/// default: 259200
-	#[serde(default = "default_dns_min_ttl_nxdomain")]
-	pub dns_min_ttl_nxdomain: u64,
-
-	/// Number of DNS nameserver retries after a timeout or error.
-	///
-	/// default: 10
-	#[serde(default = "default_dns_attempts")]
-	pub dns_attempts: u16,
-
-	/// The number of seconds to wait for a reply to a DNS query. Please note
-	/// that recursive queries can take up to several seconds for some domains,
-	/// so this value should not be too low, especially on slower hardware or
-	/// resolvers.
-	///
-	/// default: 10
-	#[serde(default = "default_dns_timeout")]
-	pub dns_timeout: u64,
-
-	/// Fallback to TCP on DNS errors. Set this to false if unsupported by
-	/// nameserver.
-	#[serde(default = "true_fn")]
-	pub dns_tcp_fallback: bool,
-
-	/// Enable to query all nameservers until the domain is found. Referred to
-	/// as "trust_negative_responses" in hickory_resolver. This can avoid
-	/// useless DNS queries if the first nameserver responds with NXDOMAIN or
-	/// an empty NOERROR response.
-	#[serde(default = "true_fn")]
-	pub query_all_nameservers: bool,
-
-	/// Enable using *only* TCP for querying your specified nameservers instead
-	/// of UDP.
-	///
-	/// If you are running tuwunel in a container environment, this config
-	/// option may need to be enabled. For more details, see:
-	/// https://tuwunel.chat/troubleshooting.html#potential-dns-issues-when-using-docker
-	#[serde(default)]
-	pub query_over_tcp_only: bool,
-
-	/// DNS A/AAAA record lookup strategy
-	///
-	/// Takes a number of one of the following options:
-	/// 1 - Ipv4Only (Only query for A records, no AAAA/IPv6)
-	///
-	/// 2 - Ipv6Only (Only query for AAAA records, no A/IPv4)
-	///
-	/// 3 - Ipv4AndIpv6 (Query for A and AAAA records in parallel, uses whatever
-	/// returns a successful response first)
-	///
-	/// 4 - Ipv6thenIpv4 (Query for AAAA record, if that fails then query the A
-	/// record)
-	///
-	/// 5 - Ipv4thenIpv6 (Query for A record, if that fails then query the AAAA
-	/// record)
-	///
-	/// If you don't have IPv6 networking, then for better DNS performance it
-	/// may be suitable to set this to Ipv4Only (1) as you will never ever use
-	/// the AAAA record contents even if the AAAA record is successful instead
-	/// of the A record.
-	///
-	/// default: 5
-	#[serde(default = "default_ip_lookup_strategy")]
-	pub ip_lookup_strategy: u8,
-
-	/// List of domain patterns resolved via the alternative path without any
-	/// persistent cache, very small memory cache, and no enforced TTL. This
-	/// is intended for internal network and application services which require
-	/// these specific properties. This path does not support federation or
-	/// general purposes.
-	///
-	/// reloadable: yes
-	/// example: ["*\.dns\.podman$"]
-	///
-	/// default: []
-	#[serde(default, with = "serde_regex")]
-	pub dns_passthru_domains: RegexSet,
-
-	/// Whether to resolve appservices via the alternative path; setting this is
-	/// superior to providing domains in `dns_passthru_domains` if all
-	/// appservices intend to be matched anyway. The overhead of matching regex
-	/// and maintaining the list of domains can be avoided.
-	#[serde(default)]
-	pub dns_passthru_appservices: bool,
-
-	/// Enable or disable case randomization for DNS queries. This is a security
-	/// mitigation where answer spoofing is prevented by having to exactly match
-	/// the question. Occasional errors seen in logs which may have lead you
-	/// here tend to be from overloading DNS. Nevertheless for servers which
-	/// are truly incapable this can be set to false.
-	///
-	/// This currently defaults to false due to user reports regarding some
-	/// popular DNS caches which may or may not be patched soon. It may again
-	/// default to true in an upcoming release.
-	#[serde(default)]
-	pub dns_case_randomization: bool,
-
-	/// Max request size for file uploads. Accepts an integer byte count or a
-	/// string with SI/IEC suffix such as "24 MiB".
-	///
-	/// default: "24 MiB"
-	#[serde(
-		default = "default_max_request_size",
-		deserialize_with = "deserialize_bytesize_usize"
-	)]
-	pub max_request_size: usize,
-
-	/// Maximum size of a response body buffered from a remote server. Applies
-	/// to federation requests, push gateway and appservice transactions, and
-	/// remote media fetched for URL previews. A peer cannot be trusted to honor
-	/// a requested limit, so this bounds the response held in memory
-	/// regardless, guarding against a remote driving the process out of
-	/// memory. Accepts an integer byte count or a string with SI/IEC suffix
-	/// such as "256 MiB".
-	///
-	/// default: "256 MiB"
-	#[serde(
-		default = "default_max_response_size",
-		deserialize_with = "deserialize_bytesize_usize"
-	)]
-	pub max_response_size: usize,
 
 	/// Maximum number of concurrently pending (asynchronous) media uploads a
 	/// user can have.
@@ -520,94 +315,6 @@ pub struct Config {
 	#[serde(default = "default_fetch_prev_wait_ms")]
 	pub fetch_prev_wait_ms: u64,
 
-	/// Default connection timeout (seconds) for outbound HTTP clients;
-	/// individual clients may override it.
-	///
-	/// default: 10
-	#[serde(default = "default_request_conn_timeout")]
-	pub request_conn_timeout: u64,
-
-	/// Default read timeout (seconds) for outbound HTTP clients; individual
-	/// clients may override it.
-	///
-	/// default: 35
-	#[serde(default = "default_request_timeout")]
-	pub request_timeout: u64,
-
-	/// Default whole-request timeout (seconds) for outbound HTTP clients.
-	///
-	/// Set high enough not to cancel healthy requests while remaining a
-	/// backstop. Individual clients may override it.
-	///
-	/// default: 320
-	#[serde(default = "default_request_total_timeout")]
-	pub request_total_timeout: u64,
-
-	/// Default idle connection pool timeout (seconds) for outbound HTTP
-	/// clients; individual clients may override it.
-	///
-	/// default: 5
-	#[serde(default = "default_request_idle_timeout")]
-	pub request_idle_timeout: u64,
-
-	/// Default maximum idle connections per host for outbound HTTP clients;
-	/// individual clients may override it.
-	///
-	/// default: 1
-	#[serde(default = "default_request_idle_per_host")]
-	pub request_idle_per_host: u16,
-
-	/// Allow the outbound HTTP client to negotiate gzip with other servers:
-	/// advertise it in Accept-Encoding and transparently decompress responses.
-	/// This covers federation, media, and URL preview traffic, and is separate
-	/// from `gzip_compression`, which compresses tuwunel's own responses.
-	///
-	/// Enabled by default. Set to false to force the client to neither request
-	/// nor decompress gzip. Does nothing unless tuwunel was built with the
-	/// `gzip_compression` feature.
-	///
-	/// default: true
-	#[serde(default = "true_fn")]
-	pub request_gzip: bool,
-
-	/// Allow the outbound HTTP client to negotiate brotli with other servers:
-	/// advertise it in Accept-Encoding and transparently decompress responses.
-	/// This covers federation, media, and URL preview traffic, and is separate
-	/// from `brotli_compression`, which compresses tuwunel's own responses.
-	///
-	/// Enabled by default. Set to false to force the client to neither request
-	/// nor decompress brotli. Does nothing unless tuwunel was built with the
-	/// `brotli_compression` feature.
-	///
-	/// default: true
-	#[serde(default = "true_fn")]
-	pub request_brotli: bool,
-
-	/// Allow the outbound HTTP client to negotiate zstd with other servers:
-	/// advertise it in Accept-Encoding and transparently decompress responses.
-	/// This covers federation, media, and URL preview traffic, and is separate
-	/// from `zstd_compression`, which compresses tuwunel's own responses.
-	///
-	/// Enabled by default. Set to false to force the client to neither request
-	/// nor decompress zstd. Does nothing unless tuwunel was built with the
-	/// `zstd_compression` feature.
-	///
-	/// default: true
-	#[serde(default = "true_fn")]
-	pub request_zstd: bool,
-
-	/// Federation well-known resolution connection timeout (seconds).
-	///
-	/// default: 6
-	#[serde(default = "default_well_known_conn_timeout")]
-	pub well_known_conn_timeout: u64,
-
-	/// Federation HTTP well-known resolution request timeout (seconds).
-	///
-	/// default: 10
-	#[serde(default = "default_well_known_timeout")]
-	pub well_known_timeout: u64,
-
 	/// Federation client request timeout (seconds). This applies to each read
 	/// from the remote server rather than to the request as a whole, which
 	/// remains bounded by `request_total_timeout`.
@@ -702,104 +409,6 @@ pub struct Config {
 	/// default: 15
 	#[serde(default = "default_pusher_idle_timeout")]
 	pub pusher_idle_timeout: u64,
-
-	/// Maximum time to receive a request from a client (seconds).
-	///
-	/// default: 75
-	#[serde(default = "default_client_receive_timeout")]
-	pub client_receive_timeout: u64,
-
-	/// Maximum time to process a request received from a client (seconds).
-	///
-	/// default: 240
-	#[serde(default = "default_client_request_timeout")]
-	pub client_request_timeout: u64,
-
-	/// Maximum time to transmit a response to a client (seconds)
-	///
-	/// default: 120
-	#[serde(default = "default_client_response_timeout")]
-	pub client_response_timeout: u64,
-
-	/// Grace period for clean shutdown of client requests (seconds).
-	///
-	/// reloadable: yes
-	/// default: 15
-	#[serde(default = "default_client_shutdown_timeout")]
-	pub client_shutdown_timeout: u64,
-
-	/// Source of the client IP address for rate limiting, logging, and
-	/// security tooling.
-	///
-	/// When unset (the default), the `ClientIp` extractor scans common
-	/// proxy headers in leftmost-IP mode (`X-Forwarded-For`, RFC 7239
-	/// `Forwarded`, `X-Real-IP`, `Fly-Client-IP`, `True-Client-IP`,
-	/// `CF-Connecting-IP`, `CloudFront-Viewer-Address`) and falls back
-	/// to the TCP peer address; clients can spoof their address via
-	/// request headers in that mode.
-	///
-	/// When set, `ClientIp` resolves exclusively from the selected
-	/// source. The rightmost value is used for multi-valued headers;
-	/// only the proxy can append to the right, so this is resistant to
-	/// client spoofing.
-	///
-	/// Supported values:
-	/// - "connect_info" - TCP peer address only (direct connections)
-	/// - "rightmost_x_forwarded_for" - nginx, Caddy
-	/// - "rightmost_forwarded" - RFC 7239 proxies
-	/// - "x_real_ip" - nginx `X-Real-IP`
-	/// - "cf_connecting_ip" - Cloudflare / cloudflared
-	/// - "true_client_ip" - Akamai, Cloudflare Enterprise
-	/// - "fly_client_ip" - Fly.io
-	/// - "cloudfront_viewer_address" - AWS CloudFront
-	///
-	/// On Unix-socket deployments, leave this unset rather than setting
-	/// "connect_info"; that source requires a TCP peer address.
-	///
-	/// WARNING: A header-based value without a trusted reverse proxy in
-	/// front of tuwunel allows clients to forge their IP. Changing this
-	/// value requires a server restart.
-	///
-	/// default: unset
-	/// config-example: "connect_info"
-	#[serde(default)]
-	pub ip_source: Option<IpSource>,
-
-	/// Subnets whose TCP peers are treated as trusted and bypass the
-	/// `ip_source`-based extraction, falling through to the same
-	/// insecure header-scan + `ConnectInfo` fallback used when
-	/// `ip_source` is unset. Each entry is CIDR notation, including
-	/// the prefix length (use `/32` or `/128` to trust a single host).
-	///
-	/// Loopback (`127.0.0.0/8`, `::1/128`) is always bypassed and
-	/// need not be listed.
-	///
-	/// Use this when locally attached bridges or other server-side
-	/// clients connect from a private container or VPN subnet that
-	/// cannot carry the configured proxy header (e.g. a user-defined
-	/// Docker bridge network without `network_mode: host`).
-	///
-	/// NOTE: If you configure an entire subnet here, be sure that it
-	/// does not include the address Tuwunel receives external traffic
-	/// from, i.e. that of your proxy. This would, for example, happen
-	/// if you deployed the proxy in a common bridge network with your
-	/// other components (e.g. in a Compose deployment) and specified
-	/// said network's subnet here. Traffic from the proxy would then
-	/// also have the bypass applied, rendering the `ip_source` option
-	/// effectively useless.
-	///
-	/// WARNING: Any peer in these subnets can forge the client IP via
-	/// request headers. Only include subnets you control end-to-end.
-	/// Changing this value requires a server restart.
-	///
-	/// default: []
-	/// config-example: ["172.18.0.0/16", "fd00::/8"]
-	#[expect(
-		clippy::doc_link_with_quotes,
-		reason = "config-example directive emits literal quoted strings, not an intra-doc link"
-	)]
-	#[serde(default)]
-	pub ip_source_trusted_subnets: Vec<IpNet>,
 
 	/// Grace period for clean shutdown of federation requests (seconds).
 	///
@@ -2274,36 +1883,6 @@ pub struct Config {
 	#[serde(default = "default_typing_client_timeout_max_s")]
 	pub typing_client_timeout_max_s: u64,
 
-	/// Set this to true for tuwunel to compress HTTP response bodies using
-	/// zstd. This option does nothing if tuwunel was not built with
-	/// `zstd_compression` feature. Please be aware that enabling HTTP
-	/// compression may weaken TLS. Most users should not need to enable this.
-	/// See https://breachattack.com/ and https://wikipedia.org/wiki/BREACH
-	/// before deciding to enable this.
-	#[serde(default)]
-	pub zstd_compression: bool,
-
-	/// Set this to true for tuwunel to compress HTTP response bodies using
-	/// gzip. This option does nothing if tuwunel was not built with
-	/// `gzip_compression` feature. Please be aware that enabling HTTP
-	/// compression may weaken TLS. Most users should not need to enable this.
-	/// See https://breachattack.com/ and https://wikipedia.org/wiki/BREACH before
-	/// deciding to enable this.
-	///
-	/// If you are in a large amount of rooms, you may find that enabling this
-	/// is necessary to reduce the significantly large response bodies.
-	#[serde(default)]
-	pub gzip_compression: bool,
-
-	/// Set this to true for tuwunel to compress HTTP response bodies using
-	/// brotli. This option does nothing if tuwunel was not built with
-	/// `brotli_compression` feature. Please be aware that enabling HTTP
-	/// compression may weaken TLS. Most users should not need to enable this.
-	/// See https://breachattack.com/ and https://wikipedia.org/wiki/BREACH
-	/// before deciding to enable this.
-	#[serde(default)]
-	pub brotli_compression: bool,
-
 	/// Set to true to allow user type "guest" registrations. Some clients like
 	/// Element attempt to register guest users automatically.
 	/// reloadable: yes
@@ -2657,34 +2236,6 @@ pub struct Config {
 	/// default: []
 	#[serde(default, with = "serde_regex")]
 	pub forbidden_remote_room_directory_server_names: RegexSet,
-
-	#[expect(clippy::doc_link_with_quotes)]
-	/// Vector list of IPv4 and IPv6 CIDR ranges / subnets *in quotes* that you
-	/// do not want tuwunel to send outbound requests to. Defaults to
-	/// RFC1918, unroutable, loopback, multicast, and testnet addresses for
-	/// security.
-	///
-	/// Please be aware that this is *not* a guarantee. You should be using a
-	/// firewall with zones as doing this on the application layer may have
-	/// bypasses.
-	///
-	/// Proxy endpoints selected by configuration or environment variables are
-	/// exempt so a private forward proxy can be reached. Destination addresses
-	/// remain filtered for direct requests and for locally resolving `socks4`
-	/// and `socks5` proxies. HTTP(S) forward proxies and `socks4a` or
-	/// `socks5h` resolve the destination remotely, so their egress policy must
-	/// enforce the destination network boundary instead.
-	///
-	/// To disable, set this to be an empty vector (`[]`).
-	///
-	/// Defaults to:
-	/// ["127.0.0.0/8", "0.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12",
-	/// "192.168.0.0/16", "100.64.0.0/10", "192.0.0.0/24", "169.254.0.0/16",
-	/// "192.88.99.0/24", "198.18.0.0/15", "192.0.2.0/24", "198.51.100.0/24",
-	/// "203.0.113.0/24", "224.0.0.0/4", "::1/128", "::/128", "fe80::/10",
-	/// "fc00::/7", "2001:db8::/32", "ff00::/8", "fec0::/10"]
-	#[serde(default = "default_ip_range_denylist")]
-	pub ip_range_denylist: Vec<String>,
 
 	/// Optional IP address or network interface-name to bind as the source of
 	/// URL preview requests. If not set, it will not bind to a specific
@@ -3296,26 +2847,6 @@ pub struct Config {
 	#[serde(default = "true_fn")]
 	pub config_reload_signal: bool,
 
-	/// Toggles ignore checking/validating TLS certificates
-	///
-	/// This applies to everything, including URL previews, federation requests,
-	/// etc. This is a hidden argument that should NOT be used in production as
-	/// it is highly insecure and I will personally yell at you if I catch you
-	/// using this.
-	#[serde(default)]
-	pub allow_invalid_tls_certificates: bool,
-
-	/// Sets the `Access-Control-Allow-Origin` header included by this server in
-	/// all responses. A list of multiple values can be specified. The default
-	/// is an empty list. The actual header defaults to `*` upon an empty list.
-	///
-	/// There is no reason to configure this without specific intent. Incorrect
-	/// values may degrade or disrupt clients.
-	///
-	/// default: []
-	#[serde(default)]
-	pub access_control_allow_origin: BTreeSet<String>,
-
 	/// Backport state-reset security fixes to all room versions.
 	///
 	/// This option applies the State Resolution 2.1 mitigation developed during
@@ -3571,6 +3102,18 @@ pub struct Config {
 	/// display: section
 	#[serde(default)]
 	pub runtime: Runtime,
+
+	/// Settings for http.
+	///
+	/// display: section
+	#[serde(default)]
+	pub http: Http,
+
+	/// Settings for network.
+	///
+	/// display: section
+	#[serde(default)]
+	pub network: Network,
 }
 
 /// Configures direct TLS listener behavior.
@@ -5287,26 +4830,6 @@ fn default_conduit_media_directory_depth() -> u8 { 2 }
 
 fn default_conduit_media_directory_length() -> u8 { 2 }
 
-fn default_port() -> ListeningPort { ListeningPort { ports: Left(8008) } }
-
-fn default_unix_socket_perms() -> u32 { 660 }
-
-fn default_dns_cache_entries() -> u32 { 32768 }
-
-fn default_dns_min_ttl() -> u64 { 60 * 180 }
-
-fn default_dns_min_ttl_nxdomain() -> u64 { 60 * 60 * 24 * 3 }
-
-fn default_dns_attempts() -> u16 { 10 }
-
-fn default_dns_timeout() -> u64 { 10 }
-
-fn default_ip_lookup_strategy() -> u8 { 5 }
-
-fn default_max_request_size() -> usize { 24 * 1024 * 1024 }
-
-fn default_max_response_size() -> usize { 256 * 1024 * 1024 }
-
 fn default_max_remote_profile_fields() -> usize { 100 }
 
 fn default_max_profile_fields_per_request() -> usize { 64 }
@@ -5332,20 +4855,6 @@ fn default_media_video_thumbnail_timeout() -> u64 { 30 }
 fn default_media_video_thumbnail_concurrency() -> usize { 1 }
 
 fn default_media_video_thumbnail_max_size() -> usize { 128 * 1024 * 1024 }
-
-fn default_request_conn_timeout() -> u64 { 10 }
-
-fn default_request_timeout() -> u64 { 35 }
-
-fn default_request_total_timeout() -> u64 { 320 }
-
-fn default_request_idle_timeout() -> u64 { 5 }
-
-fn default_request_idle_per_host() -> u16 { 1 }
-
-fn default_well_known_conn_timeout() -> u64 { 6 }
-
-fn default_well_known_timeout() -> u64 { 10 }
 
 fn default_federation_timeout() -> u64 { 25 }
 
@@ -5454,32 +4963,6 @@ fn default_typing_client_timeout_max_s() -> u64 { 45 }
 #[inline]
 pub fn default_default_room_version() -> RoomVersionId { RoomVersionId::V12 }
 
-fn default_ip_range_denylist() -> Vec<String> {
-	vec![
-		"127.0.0.0/8".to_owned(),
-		"0.0.0.0/8".to_owned(),
-		"10.0.0.0/8".to_owned(),
-		"172.16.0.0/12".to_owned(),
-		"192.168.0.0/16".to_owned(),
-		"100.64.0.0/10".to_owned(),
-		"192.0.0.0/24".to_owned(),
-		"169.254.0.0/16".to_owned(),
-		"192.88.99.0/24".to_owned(),
-		"198.18.0.0/15".to_owned(),
-		"192.0.2.0/24".to_owned(),
-		"198.51.100.0/24".to_owned(),
-		"203.0.113.0/24".to_owned(),
-		"224.0.0.0/4".to_owned(),
-		"::1/128".to_owned(),
-		"::/128".to_owned(),
-		"fe80::/10".to_owned(),
-		"fc00::/7".to_owned(),
-		"2001:db8::/32".to_owned(),
-		"ff00::/8".to_owned(),
-		"fec0::/10".to_owned(),
-	]
-}
-
 fn default_url_preview_max_spider_size() -> usize {
 	768 * 1024 // 768 KiB
 }
@@ -5545,14 +5028,6 @@ fn parallelism_scaled(val: usize) -> usize { val.saturating_mul(sys::available_p
 fn default_trusted_server_batch_size() -> usize { 192 }
 
 fn default_trusted_server_batch_concurrency() -> usize { 2 }
-
-fn default_client_receive_timeout() -> u64 { 75 }
-
-fn default_client_request_timeout() -> u64 { 240 }
-
-fn default_client_response_timeout() -> u64 { 120 }
-
-fn default_client_shutdown_timeout() -> u64 { 15 }
 
 fn default_sender_shutdown_timeout() -> u64 { 5 }
 

@@ -76,11 +76,10 @@ fn boot(database: &Path, peer: &str, seed: bool) -> Result {
 	let tests: &[&str] = if seed { &["fresh"] } else { &[] };
 	let args = Args::default_test(tests)
 		.with_database_path(database)
-		.with_option("address=[\"127.0.0.1\"]")
-		.with_option(format!("port={}", address.port()))
+		.with_loopback_listener(address.port())
 		.with_option("listening=true")
-		.with_option("allow_invalid_tls_certificates=true")
-		.with_option("ip_range_denylist=[]")
+		.with_option("network.http.allow_invalid_tls_certificates=true")
+		.with_option("network.http.ip_range_denylist=[]")
 		.with_option("federation_loopback=true");
 
 	let runtime = Runtime::new(Some(&args))?;

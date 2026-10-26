@@ -69,8 +69,7 @@ fn seeds_the_whole_own_profile() -> Result {
 	let port = listener.local_addr()?.port();
 
 	let args = Args::default_test(&["fresh", "cleanup"])
-		.with_option("address=[\"127.0.0.1\"]")
-		.with_option(format!("port={port}"))
+		.with_loopback_listener(port)
 		.with_option("listening=true")
 		// A presence ping would advance the count between the late rounds.
 		.with_option("allow_local_presence=false")

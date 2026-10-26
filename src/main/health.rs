@@ -28,7 +28,12 @@ pub fn check(args: &Args) -> Result {
 		.and_then(|raw| Config::new(&raw))?;
 
 	#[cfg(unix)]
-	let unix = config.unix_socket_path.as_deref().map(probe_unix);
+	let unix = config
+		.http
+		.listen
+		.unix_socket_path
+		.as_deref()
+		.map(probe_unix);
 
 	#[cfg(not(unix))]
 	let unix: Option<Result> = None;

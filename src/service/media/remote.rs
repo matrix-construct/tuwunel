@@ -270,7 +270,13 @@ async fn handle_content_file(&self, mxc: &Mxc<'_>, content: Content) -> Result<F
 
 #[implement(super::Service)]
 async fn handle_location(&self, mxc: &Mxc<'_>, location: &str) -> Result<Fetched> {
-	let limit = self.services.server.config.max_response_size;
+	let limit = self
+		.services
+		.server
+		.config
+		.network
+		.http
+		.max_response_size;
 
 	let media = self
 		.location_request(Fetch::Extern, location, limit)

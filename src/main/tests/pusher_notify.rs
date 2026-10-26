@@ -94,7 +94,8 @@ fn pusher_notify() -> Result {
 		.push(format!("database_path={db_path:?}"));
 
 	args.option
-		.push("ip_range_denylist=[]".to_owned());
+		.push("network.http.ip_range_denylist=[]".to_owned());
+
 	args.option
 		.push("startup_netburst=true".to_owned());
 	args.option

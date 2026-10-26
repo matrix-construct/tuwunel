@@ -87,15 +87,13 @@ mod tests {
 
 		let db_path = DatabasePath(Args::test_database_path("media-appservice"));
 
-		let args = [
-			format!("database_path={:?}", db_path.0),
-			"address=[\"127.0.0.1\"]".to_owned(),
-			format!("port={port}"),
-			"listening=true".to_owned(),
-			"log=\"error\"".to_owned(),
-		]
-		.into_iter()
-		.fold(Args::default_test(&["fresh", "cleanup"]), Args::with_option);
+		let args = Args::default_test(&["fresh", "cleanup"])
+			.with_option(format!("database_path={:?}", db_path.0))
+			.with_loopback_listener(port);
+
+		let args = ["listening=true".to_owned(), "log=\"error\"".to_owned()]
+			.into_iter()
+			.fold(args, Args::with_option);
 
 		let runtime = Runtime::new(Some(&args))?;
 		let server = Server::new(Some(&args), Some(&runtime))?;

@@ -155,7 +155,7 @@ async fn literal_routes_apply_default_policy_and_preserve_authority() -> Result 
 
 #[tokio::test]
 async fn empty_literal_denylist_allows_private_and_unspecified_routes() -> Result {
-	let config = Figment::new().merge(("ip_range_denylist", Vec::<String>::new()));
+	let config = Figment::new().merge(("network.http.ip_range_denylist", Vec::<String>::new()));
 	let Some(fixture) = fixture(config).await? else {
 		return Ok(());
 	};
@@ -401,7 +401,10 @@ async fn validating_resolver_still_denies_a_destination_host() {
 		.expect("denylist failure is an IO error");
 
 	assert_eq!(error.kind(), PermissionDenied);
-	assert_eq!(error.to_string(), "All resolved addresses are denied by ip_range_denylist");
+	assert_eq!(
+		error.to_string(),
+		"All resolved addresses are denied by network.http.ip_range_denylist"
+	);
 }
 
 #[tokio::test]

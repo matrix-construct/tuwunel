@@ -49,10 +49,11 @@ pub fn reload(old: &Config, new: &Config) -> Result {
 		));
 	}
 
-	if new.ip_source != old.ip_source {
+	if new.http.ip_source != old.http.ip_source {
 		return Err!(Config(
-			"ip_source",
-			"ip_source cannot be changed at runtime; restart the server to apply this change."
+			"http.ip_source",
+			"http.ip_source cannot be changed at runtime; restart the server to apply this \
+			 change."
 		));
 	}
 
@@ -154,11 +155,11 @@ fn check_relation_limits(config: &Config) -> Result {
 
 fn check_network(config: &Config) -> Result {
 	#[cfg(not(unix))]
-	if config.unix_socket_path.is_some() {
+	if config.http.listen.unix_socket_path.is_some() {
 		return Err!(Config(
-			"unix_socket_path",
+			"http.listen.unix_socket_path",
 			"UNIX socket support is only available on *nix platforms. Please remove \
-			 'unix_socket_path' from your config."
+			 'http.listen.unix_socket_path' from your config."
 		));
 	}
 
@@ -186,13 +187,14 @@ fn check_network(config: &Config) -> Result {
 		));
 	}
 
-	if let Some(source) = config.ip_source
+	if let Some(source) = config.http.ip_source
 		&& !matches!(source, IpSource::ConnectInfo)
 	{
 		warn!(
-			"ip_source is set to {source:?}, a header-based source. Ensure a trusted reverse \
-			 proxy populates this header for every request; otherwise clients can spoof their \
-			 IP address."
+			?source,
+			"http.ip_source selects a header-based source. Ensure a trusted reverse proxy \
+			 populates this header for every request; otherwise clients can spoof their IP \
+			 address."
 		);
 	}
 
@@ -208,27 +210,27 @@ fn check_network(config: &Config) -> Result {
 		));
 	}
 
-	if config.unix_socket_path.is_none() {
+	if config.http.listen.unix_socket_path.is_none() {
 		config
 			.get_bind_addrs()
 			.iter()
 			.for_each(warn_loopback_in_container);
 	}
 
-	for server in &config.dns_servers {
+	for server in &config.network.dns.servers {
 		if server.parse::<SocketAddr>().is_err() && server.parse::<IpAddr>().is_err() {
 			return Err!(Config(
-				"dns_servers",
+				"network.dns.servers",
 				"{server:?} is not an IP address or socket address."
 			));
 		}
 	}
 
 	// check if user specified valid IP CIDR ranges on startup
-	for cidr in &config.ip_range_denylist {
+	for cidr in &config.network.http.ip_range_denylist {
 		if let Err(e) = ipaddress::IPAddress::parse(cidr) {
 			return Err!(Config(
-				"ip_range_denylist",
+				"network.http.ip_range_denylist",
 				"Parsing specified IP CIDR range from string failed: {e}."
 			));
 		}
@@ -496,9 +498,9 @@ fn check_turn_and_media_misc(config: &Config) -> Result {
 		);
 	}
 
-	if config.max_request_size < 10_000_000 {
+	if config.http.max_request_size < 10_000_000 {
 		return Err!(Config(
-			"max_request_size",
+			"http.max_request_size",
 			"Max request size is less than 10MB. Please increase it as this is too low for \
 			 operable federation."
 		));
@@ -949,7 +951,7 @@ fn warn_deprecated(config: &Config) {
 /// match is sometimes the intent.
 fn warn_literal_patterns(config: &Config) {
 	let options = [
-		("dns_passthru_domains", &config.dns_passthru_domains),
+		("network.dns.passthru_domains", &config.network.dns.passthru_domains),
 		(
 			"allowed_remote_server_names_experimental",
 			&config.allowed_remote_server_names_experimental,

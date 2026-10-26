@@ -196,8 +196,7 @@ fn phase_args(database: &Path, port: u16, phase: Phase) -> Args {
 
 	let args = Args::default_test(harnesses)
 		.with_database_path(database)
-		.with_option("address=[\"127.0.0.1\"]")
-		.with_option(format!("port={port}"))
+		.with_loopback_listener(port)
 		.with_option("listening=true")
 		.with_option("log_enable=false");
 

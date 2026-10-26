@@ -60,15 +60,12 @@ fn reaction_to_my_message_notifies_me() -> Result {
 
 	let db_path = Args::test_database_path("msc3664-reaction");
 
-	let mut args = Args::default_test(&["fresh", "cleanup"]);
+	let mut args = Args::default_test(&["fresh", "cleanup"])
+		.with_option(format!("database_path={db_path:?}"))
+		.with_loopback_listener(port);
 
-	args.option.extend([
-		format!("database_path={db_path:?}"),
-		"address=[\"127.0.0.1\"]".to_owned(),
-		format!("port={port}"),
-		"listening=true".to_owned(),
-		"msc3664_related_event_match=true".to_owned(),
-	]);
+	args.option
+		.extend(["listening=true".to_owned(), "msc3664_related_event_match=true".to_owned()]);
 
 	let runtime = Runtime::new(Some(&args))?;
 	let server = Server::new(Some(&args), Some(&runtime))?;

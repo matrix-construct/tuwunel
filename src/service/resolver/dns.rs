@@ -16,7 +16,11 @@ use hickory_resolver::{
 };
 use ipaddress::IPAddress;
 use reqwest::dns::{Addrs, Name, Resolve, Resolving};
-use tuwunel_core::{Result, Server, config::proxy::ProxyHosts, err, trace};
+use tuwunel_core::{
+	Result, Server,
+	config::{network::Dns, proxy::ProxyHosts},
+	err, trace,
+};
 
 use super::cache::{Cache, CachedOverride};
 use crate::client::valid_cidr_range_ip;
@@ -54,20 +58,10 @@ type ResolvingResult = Result<Addrs, Box<dyn std::error::Error + Send + Sync>>;
 
 impl Resolver {
 	pub(super) fn build(server: &Arc<Server>, cache: Arc<Cache>) -> Result<Arc<Self>> {
-		let config = &server.config;
-
-		// Create the primary resolver.
-		let (conf, mut opts) = Self::configure(server)?;
-		opts.negative_min_ttl = Some(Duration::from_secs(config.dns_min_ttl_nxdomain));
-		opts.positive_min_ttl = Some(Duration::from_secs(config.dns_min_ttl));
-		opts.cache_size = config.dns_cache_entries.into();
+		let (conf, opts) = Self::configure(server)?;
+		let opts = cache_opts(opts, &server.config.network.dns);
 		let resolver = Self::create(server, conf.clone(), opts.clone())?;
-
-		// Create the passthru resolver with modified options.
-		let (conf, mut opts) = (conf, opts);
-		opts.negative_min_ttl = Some(Duration::ZERO);
-		opts.positive_min_ttl = Some(Duration::ZERO);
-		opts.cache_size = ResolverOpts::default().cache_size;
+		let opts = passthru_opts(opts);
 		let passthru = Arc::new(Passthru {
 			resolver: Self::create(server, conf, opts)?,
 			server: server.clone(),
@@ -93,7 +87,8 @@ impl Resolver {
 	) -> Result<Arc<TokioResolver>> {
 		let mut builder =
 			TokioResolver::builder_with_config(conf, TokioRuntimeProvider::default());
-		*builder.options_mut() = Self::configure_opts(server, opts);
+
+		*builder.options_mut() = Self::configure_opts(&server.config.network.dns, opts);
 
 		builder
 			.build()
@@ -106,20 +101,20 @@ impl Resolver {
 
 		// hickory's android system_conf panics in ndk-context without a JVM.
 		#[cfg(target_os = "android")]
-		if config.dns_servers.is_empty() {
+		if config.network.dns.servers.is_empty() {
 			return Err(err!(Config(
-				"dns_servers",
-				"The system resolver requires a JVM on Android; set dns_servers to your \
+				"network.dns.servers",
+				"The system resolver requires a JVM on Android; set network.dns.servers to your \
 				 upstream nameservers instead."
 			)));
 		}
 
-		let (base_conf, opts) = if config.dns_servers.is_empty() {
+		let (base_conf, opts) = if config.network.dns.servers.is_empty() {
 			read_system_conf().map_err(|e| {
 				err!(error!("Failed to configure DNS resolver from `/etc/resolv.conf': {e}"))
 			})?
 		} else {
-			(Self::configure_custom(&config.dns_servers)?, ResolverOpts::default())
+			(Self::configure_custom(&config.network.dns.servers)?, ResolverOpts::default())
 		};
 
 		let name_servers = base_conf
@@ -127,8 +122,8 @@ impl Resolver {
 			.iter()
 			.cloned()
 			.map(|mut ns| {
-				ns.trust_negative_responses = !config.query_all_nameservers;
-				if config.query_over_tcp_only {
+				ns.trust_negative_responses = !config.network.dns.query_all_nameservers;
+				if config.network.dns.query_over_tcp_only {
 					ns.connections
 						.retain(|conn| matches!(conn.protocol, ProtocolConfig::Tcp));
 				}
@@ -163,7 +158,7 @@ impl Resolver {
 			.or_else(|_| server.parse::<IpAddr>().map(|ip| (ip, 53)))
 			.map_err(|e| {
 				err!(Config(
-					"dns_servers",
+					"network.dns.servers",
 					"{server:?} is not an IP address or socket address: {e}"
 				))
 			})?;
@@ -176,18 +171,15 @@ impl Resolver {
 		Ok(conf)
 	}
 
-	#[expect(clippy::as_conversions)]
-	fn configure_opts(server: &Arc<Server>, mut opts: ResolverOpts) -> ResolverOpts {
-		let config = &server.config;
-
+	fn configure_opts(config: &Dns, mut opts: ResolverOpts) -> ResolverOpts {
 		opts.negative_max_ttl = Some(Duration::from_hours(720));
 		opts.positive_max_ttl = Some(Duration::from_hours(168));
-		opts.timeout = Duration::from_secs(config.dns_timeout);
-		opts.attempts = config.dns_attempts as usize;
-		opts.try_tcp_on_error = config.dns_tcp_fallback;
+		opts.timeout = Duration::from_secs(config.timeout);
+		opts.attempts = usize::from(config.attempts);
+		opts.try_tcp_on_error = config.tcp_fallback;
 		opts.num_concurrent_reqs = 1;
 		opts.edns0 = true;
-		opts.case_randomization = config.dns_case_randomization;
+		opts.case_randomization = config.case_randomization;
 		opts.preserve_intermediates = true;
 		opts.ip_strategy = match config.ip_lookup_strategy {
 			| 1 => LookupIpStrategy::Ipv4Only,
@@ -203,6 +195,22 @@ impl Resolver {
 	/// Clear the in-memory hickory-dns caches
 	#[inline]
 	pub fn clear_cache(&self) { self.resolver.clear_cache(); }
+}
+
+fn cache_opts(mut opts: ResolverOpts, config: &Dns) -> ResolverOpts {
+	opts.negative_min_ttl = Some(Duration::from_secs(config.min_ttl_nxdomain));
+	opts.positive_min_ttl = Some(Duration::from_secs(config.min_ttl));
+	opts.cache_size = config.cache_entries.into();
+
+	opts
+}
+
+fn passthru_opts(mut opts: ResolverOpts) -> ResolverOpts {
+	opts.negative_min_ttl = Some(Duration::ZERO);
+	opts.positive_min_ttl = Some(Duration::ZERO);
+	opts.cache_size = ResolverOpts::default().cache_size;
+
+	opts
 }
 
 impl<R: Resolve + 'static> Validating<R> {
@@ -243,7 +251,7 @@ async fn validate_addrs<R: Resolve + 'static>(
 	if filtered.peek().is_none() {
 		return Err(Box::new(io::Error::new(
 			PermissionDenied,
-			"All resolved addresses are denied by ip_range_denylist",
+			"All resolved addresses are denied by network.http.ip_range_denylist",
 		)));
 	}
 
@@ -255,7 +263,9 @@ impl Resolve for Resolver {
 		let resolver = if self
 			.server
 			.config
-			.dns_passthru_domains
+			.network
+			.dns
+			.passthru_domains
 			.is_match(name.as_str())
 		{
 			trace!(?name, "matched to passthru resolver");
@@ -274,7 +284,9 @@ impl Resolve for Hooked {
 		let resolver = if self
 			.server
 			.config
-			.dns_passthru_domains
+			.network
+			.dns
+			.passthru_domains
 			.is_match(name.as_str())
 		{
 			trace!(?name, "matched to passthru resolver");

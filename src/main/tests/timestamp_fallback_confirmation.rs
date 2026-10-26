@@ -115,15 +115,14 @@ fn timestamp_fallback_confirms_the_requested_event() -> Result {
 	let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
 	let certificate = manifest.join(CERTIFICATE);
 	let private_key = manifest.join(PRIVATE_KEY);
-	let mut args = Args::default_test(&["fresh", "cleanup"]);
+	let mut args = Args::default_test(&["fresh", "cleanup"])
+		.with_option(format!("database_path={:?}", db_path.0))
+		.with_loopback_listener(port);
 
 	args.option.extend([
-		format!("database_path={:?}", db_path.0),
-		"address=[\"127.0.0.1\"]".to_owned(),
-		format!("port={port}"),
 		"listening=true".to_owned(),
-		"allow_invalid_tls_certificates=true".to_owned(),
-		"ip_range_denylist=[]".to_owned(),
+		"network.http.allow_invalid_tls_certificates=true".to_owned(),
+		"network.http.ip_range_denylist=[]".to_owned(),
 		"federation_loopback=true".to_owned(),
 		format!("trusted_servers=[\"{peer_address}\"]"),
 		"log=\"error\"".to_owned(),

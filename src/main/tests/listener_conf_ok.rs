@@ -17,8 +17,8 @@ fn listener_conf_ok() -> Result {
 		let port = listener.local_addr()?.port();
 
 		let args = Args::default_test(&["smoke", "fresh", "cleanup"])
-			.with_option("address=[\"0.0.0.0\"]")
-			.with_option(format!("port={port}"));
+			.with_option("http.listen.address=[\"0.0.0.0\"]")
+			.with_option(format!("http.listen.port={port}"));
 
 		let runtime = Runtime::new(Some(&args))?;
 		let server = Server::new(Some(&args), Some(&runtime))?;

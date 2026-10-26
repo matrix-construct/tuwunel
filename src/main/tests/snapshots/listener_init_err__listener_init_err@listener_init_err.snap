@@ -4,5 +4,5 @@ description: Listener Initialization Err
 expression: result
 ---
 Err(
-    There was a problem with the 'unix_socket_path' directive in your configuration: Failed to bind UNIX socket at "/non/existent/path": No such file or directory (os error 2),
+    There was a problem with the 'http.listen.unix_socket_path' directive in your configuration: Failed to bind UNIX socket at "/non/existent/path": No such file or directory (os error 2),
 )
