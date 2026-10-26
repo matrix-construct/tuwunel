@@ -65,8 +65,8 @@ fn login_refuses_deactivated_accounts_and_limits_wrong_passwords() -> Result {
 		.with_option("jwt.format=\"HMAC\"")
 		.with_option("jwt.algorithm=\"HS256\"")
 		.with_option("jwt.register_user=false")
-		.with_option("argon2_m_cost=64")
-		.with_option("argon2_t_cost=1");
+		.with_option("authentication.argon2.m_cost=64")
+		.with_option("authentication.argon2.t_cost=1");
 
 	let runtime = Runtime::new(Some(&args))?;
 	let server = Server::new(Some(&args), Some(&runtime))?;

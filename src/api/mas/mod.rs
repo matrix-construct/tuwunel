@@ -50,6 +50,7 @@ impl FromRequestParts<State> for Mas {
 	) -> Result<Self, Self::Rejection> {
 		let secret = services
 			.config
+			.authentication
 			.mas_secret
 			.as_deref()
 			.filter(|secret| !secret.is_empty());

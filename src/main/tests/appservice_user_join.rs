@@ -40,7 +40,11 @@ const BRIDGE: Bridge<'static> = Bridge {
 /// as one.
 #[test]
 fn appservice_users_are_not_guests() -> Result {
-	boot("appservice-user-join", ["grant_admin_to_first_user=false"], exercise)
+	boot(
+		"appservice-user-join",
+		["registration.grant_admin_to_first_user=false"],
+		exercise,
+	)
 }
 
 async fn exercise(services: &Services, base: &str) -> Result {

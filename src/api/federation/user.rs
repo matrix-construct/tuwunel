@@ -56,6 +56,7 @@ pub(crate) async fn get_devices_route(
 		.filter_map(async |Device { device_id, display_name, .. }: Device| {
 			let device_display_name = services
 				.config
+				.profile
 				.allow_device_name_federation
 				.then_some(display_name)
 				.flatten()
@@ -103,12 +104,17 @@ pub(crate) async fn get_keys_route(
 		return Err!(Request(InvalidParam("User does not belong to this server.")));
 	}
 
+	let allow_device_name = services
+		.config
+		.profile
+		.allow_device_name_federation;
+
 	let result = get_keys_helper(
 		&services,
 		None,
 		&body.device_keys,
 		|u| Some(u.server_name()) == body.origin.as_deref(),
-		services.config.allow_device_name_federation,
+		allow_device_name,
 	)
 	.await?;
 

@@ -103,13 +103,15 @@ const DEVICE_RC_PER_SECOND: f64 = 1.0;
 /// Generous allowance for the one code a real user enters.
 const DEVICE_RC_BURST: f64 = 60.0;
 
-/// Shared per-client-IP token-bucket throttle for the OIDC endpoints. A no-op
-/// unless both `oidc_rc_per_second` and `oidc_rc_burst_count` are configured.
+/// Shared per-client-IP token-bucket throttle for the OIDC endpoints.
+///
+/// A no-op unless both `authentication.oidc.rc_per_second` and
+/// `authentication.oidc.rc_burst_count` are configured.
 #[implement(Service)]
 pub fn check_rate_limit(&self, client: IpAddr) -> Result {
 	let config = &self.services.config;
-	let rate = f64::from(config.oidc_rc_per_second);
-	let burst = f64::from(config.oidc_rc_burst_count);
+	let rate = f64::from(config.authentication.oidc.rc_per_second);
+	let burst = f64::from(config.authentication.oidc.rc_burst_count);
 
 	if rate <= 0.0 || burst <= 0.0 {
 		return Ok(());

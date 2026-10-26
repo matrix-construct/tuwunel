@@ -17,6 +17,7 @@ pub(crate) async fn admin_username_available_route(
 
 	if services
 		.config
+		.registration
 		.forbidden_usernames
 		.is_match(&body.username)
 	{

@@ -14,6 +14,7 @@ pub(crate) async fn is_localpart_available_route(
 ) -> Result<Response> {
 	if services
 		.config
+		.registration
 		.forbidden_usernames
 		.is_match(&body.localpart)
 	{

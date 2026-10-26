@@ -157,6 +157,7 @@ async fn collect_room(
 	if !current_encrypted
 		&& services
 			.config
+			.encryption
 			.device_key_update_encrypted_rooms_only
 	{
 		return Ok(lists);

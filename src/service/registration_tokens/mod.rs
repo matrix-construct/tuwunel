@@ -160,7 +160,7 @@ impl Service {
 	pub async fn get_config_tokens(&self) -> HashSet<String> {
 		let mut tokens = HashSet::new();
 
-		if let Some(file) = &self.services.config.registration_token_file {
+		if let Some(file) = &self.services.config.registration.token_file {
 			match tokio::fs::read_to_string(file).await {
 				| Err(e) => error!("Failed to read the registration token file: {e}"),
 				| Ok(text) => tokens.extend(
@@ -170,7 +170,7 @@ impl Service {
 			}
 		}
 
-		if let Some(token) = &self.services.config.registration_token {
+		if let Some(token) = &self.services.config.registration.token {
 			tokens.insert(token.to_owned());
 		}
 

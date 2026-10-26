@@ -331,7 +331,8 @@ async fn allowed_to_send_state_event(
 fn validate_encryption(services: &Services) -> Result {
 	services
 		.config
-		.allow_encryption
+		.encryption
+		.allow
 		.then_some(())
 		.ok_or_else(|| err!(Request(Forbidden("Encryption is disabled on this homeserver."))))
 }

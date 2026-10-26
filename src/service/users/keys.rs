@@ -419,7 +419,8 @@ pub async fn count_one_time_keys(
 		.filter_map(Result::ok)
 		.fold(0_usize, usize::saturating_add);
 
-	let limit = self.services.config.one_time_key_limit;
+	let limit = self.services.config.encryption.one_time_key_limit;
+
 	if let Some(excess) = total.checked_sub(limit).filter(|&n| n > 0) {
 		self.prune_one_time_keys(user_id, device_id, excess)
 			.await;
@@ -1129,6 +1130,7 @@ pub async fn mark_device_key_update(
 	let update_all_rooms = !self
 		.services
 		.config
+		.encryption
 		.device_key_update_encrypted_rooms_only;
 
 	let all_or_is_encrypted = async |room_id: &RoomId| {

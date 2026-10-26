@@ -47,7 +47,11 @@ pub(crate) async fn get_login_types_route(
 	ClientIp(client): ClientIp,
 	_body: Ruma<get_login_types::v3::Request>,
 ) -> Result<get_login_types::v3::Response> {
-	let get_login_token = services.config.login_via_existing_session;
+	let get_login_token = services
+		.config
+		.authentication
+		.login
+		.via_existing_session;
 
 	let list_idps = services.config.lists_identity_providers();
 
@@ -75,13 +79,21 @@ pub(crate) async fn get_login_types_route(
 
 	let password = services
 		.config
-		.login_with_password
+		.authentication
+		.login
+		.with_password
 		.then(|| LoginType::Password(PasswordLoginType::default()));
 
 	let sso = show_sso.then(|| {
+		let oauth_aware_preferred = services
+			.config
+			.authentication
+			.login
+			.oidc_aware_preferred;
+
 		LoginType::Sso(SsoLoginType {
 			identity_providers: identity_providers.unwrap_or_default(),
-			oauth_aware_preferred: services.config.oidc_aware_preferred,
+			oauth_aware_preferred,
 		})
 	});
 
@@ -125,7 +137,7 @@ pub(crate) async fn login_route(
 	body: Ruma<login::v3::Request>,
 ) -> Result<login::v3::Response> {
 	let user_id = match &body.login_info {
-		| LoginInfo::Password(info) if services.config.login_with_password =>
+		| LoginInfo::Password(info) if services.config.authentication.login.with_password =>
 			password::handle_login(&services, &body, info).await?,
 		| LoginInfo::Token(info) => token::handle_login(&services, &body, info).await?,
 		| LoginInfo::Jwt(info) if services.config.jwt.enable =>

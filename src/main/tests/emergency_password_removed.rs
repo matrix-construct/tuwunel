@@ -69,7 +69,8 @@ impl Drop for DatabasePath {
 	fn drop(&mut self) { remove_dir_all(&self.0).ok(); }
 }
 
-/// Removing `emergency_password` undoes what setting it did: the server
+/// Removing `authentication.emergency_password` undoes what setting it did: the
+/// server
 /// user's password is cleared and the sessions opened with it are signed out,
 /// as `docs/authentication/legacy.md` promises.
 ///
@@ -154,7 +155,7 @@ fn untouched_phase(database: &Path) -> Result {
 /// stands in for one linked to the server user through SSO.
 fn set_phase(database: &Path) -> Result {
 	let args = database_args(database, &["fresh"])
-		.with_option(format!("emergency_password=\"{EMERGENCY_PASSWORD}\""));
+		.with_option(format!("authentication.emergency_password=\"{EMERGENCY_PASSWORD}\""));
 
 	boot(&args, async |services| {
 		let server_user = &services.globals.server_user;

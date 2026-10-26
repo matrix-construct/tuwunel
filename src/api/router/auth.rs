@@ -150,16 +150,14 @@ fn check_auth_still_required(services: &Services, token: &Token, route: TypeId) 
 
 	let is_public_rooms = route == TypeId::of::<get_public_rooms::v3::Request>();
 
-	if (is_profile
-		&& services
-			.server
-			.config
-			.require_auth_for_profile_requests)
+	if (is_profile && services.server.config.profile.require_auth)
 		|| (is_public_rooms
 			&& !services
 				.server
 				.config
-				.allow_public_room_directory_without_auth)
+				.directory
+				.rooms
+				.allow_without_auth)
 	{
 		match token {
 			| Token::Appservice(_) | Token::User(_) => Ok(()),

@@ -129,8 +129,10 @@ async fn seed_records(services: &Services) -> Result {
 
 fn scan_phase(database: &Path, phase: &str) -> Result {
 	let (option, warning) = match phase {
-		| "users" =>
-			("forbidden_usernames=[\"^scanuser\"]", "matches forbidden username patterns"),
+		| "users" => (
+			"registration.forbidden_usernames=[\"^scanuser\"]",
+			"matches forbidden username patterns",
+		),
 		| "aliases" => (
 			"rooms.forbidden_alias_names=[\"^scanalias\"]",
 			"matches the following forbidden alias name patterns",

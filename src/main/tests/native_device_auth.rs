@@ -15,7 +15,7 @@ fn native_device_grant_approves_without_idp() -> Result {
 		.with_database_path(&db_path)
 		.with_maintenance()
 		.with_option("well_known.client=\"https://localhost\"")
-		.with_option("oidc_native_auth=true");
+		.with_option("authentication.oidc.native_auth=true");
 
 	let runtime = Runtime::new(Some(&args))?;
 	let server = Server::new(Some(&args), Some(&runtime))?;

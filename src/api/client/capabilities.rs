@@ -75,9 +75,14 @@ fn capabilities(
 	capabilities.thirdparty_id_changes =
 		ThirdPartyIdChangesCapability { enabled: services.sendmail.is_enabled() };
 
-	capabilities.get_login_token = GetLoginTokenCapability {
-		enabled: services.server.config.login_via_existing_session,
-	};
+	let enabled = services
+		.server
+		.config
+		.authentication
+		.login
+		.via_existing_session;
+
+	capabilities.get_login_token = GetLoginTokenCapability { enabled };
 
 	capabilities.profile_fields = ProfileFieldsCapability {
 		disallowed,
@@ -85,9 +90,14 @@ fn capabilities(
 	}
 	.into();
 
-	capabilities.change_password = ChangePasswordCapability {
-		enabled: services.server.config.login_with_password,
-	};
+	let enabled = services
+		.server
+		.config
+		.authentication
+		.login
+		.with_password;
+
+	capabilities.change_password = ChangePasswordCapability { enabled };
 
 	capabilities.forget_forced_upon_leave =
 		ForgetForcedUponLeaveCapability::new(services.config.rooms.forget_forced_upon_leave);

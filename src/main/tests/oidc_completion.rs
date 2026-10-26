@@ -42,16 +42,17 @@ fn native_completion_ends_form_navigation() -> Result {
 		.with_loopback_listener(port)
 		.with_option("listening=true")
 		.with_option("well_known.client=\"https://localhost\"")
-		.with_option("allow_registration=true")
-		.with_option(format!("registration_token=\"{REGISTRATION_TOKEN}\""))
-		.with_option("oidc_native_auth=true")
-		.with_option("oidc_require_pkce=false")
-		.with_option("oidc_require_client_approval=true")
-		.with_option("oidc_rc_per_second=0")
-		.with_option("refresh_token_reuse_grace=3600")
+		.with_option("registration.enable=true")
+		.with_option(format!("registration.token=\"{REGISTRATION_TOKEN}\""))
+		.with_option("authentication.oidc.native_auth=true")
+		.with_option("authentication.oidc.require_pkce=false")
+		.with_option("authentication.oidc.require_client_approval=true")
+		.with_option("authentication.oidc.rc_per_second=0")
+		.with_option("authentication.refresh_token.reuse_grace=3600")
 		.with_option("rate_limiting.login.account.burst_count=1000")
 		.with_option(
-			"oidc_registration_allowed_redirect_hosts=[\"trusted.example\",\"127.0.0.1\"]",
+			"authentication.oidc.registration_allowed_redirect_hosts=[\"trusted.example\",\"127.\
+			 0.0.1\"]",
 		);
 
 	let args = [("first", "First SSO"), ("second", "Second SSO")]

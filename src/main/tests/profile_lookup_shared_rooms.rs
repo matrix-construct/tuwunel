@@ -33,8 +33,8 @@ const BRIDGE: Bridge<'static> = Bridge {
 #[test]
 fn profile_lookups_require_a_shared_room() -> Result {
 	let options = [
-		"require_auth_for_profile_requests=true",
-		"limit_profile_requests_to_users_who_share_rooms=true",
+		"profile.require_auth=true",
+		"profile.limit_requests_to_users_who_share_rooms=true",
 	];
 
 	boot("profile-lookup-shared-rooms", options, exercise)

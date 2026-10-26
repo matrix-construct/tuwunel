@@ -102,6 +102,13 @@ async fn token_authorization_code(
 		.as_deref()
 		.ok_or_else(|| err!(Request(InvalidParam("client_id is required"))))?;
 
+	let require_pkce = services
+		.server
+		.config
+		.authentication
+		.oidc
+		.require_pkce;
+
 	let session = services
 		.oauth
 		.get_server()?
@@ -110,7 +117,7 @@ async fn token_authorization_code(
 			client_id,
 			redirect_uri,
 			body.code_verifier.as_deref(),
-			services.server.config.oidc_require_pkce,
+			require_pkce,
 		)
 		.await?;
 
@@ -180,14 +187,27 @@ async fn issue_tokens(services: &Services, grant: ApprovedGrant<'_>) -> Result<R
 
 	require_account_usable(services, user_id).await?;
 
-	let (granted_scope, requested_device_id) =
-		narrow_scope(scope, services.server.config.oidc_strict_scope)?;
+	let strict_scope = services
+		.server
+		.config
+		.authentication
+		.oidc
+		.strict_scope;
+
+	let (granted_scope, requested_device_id) = narrow_scope(scope, strict_scope)?;
 
 	let requested_device: Option<OwnedDeviceId> = requested_device_id
 		.as_deref()
 		.map(OwnedDeviceId::from);
 
-	if requested_device.is_none() && services.server.config.oidc_require_device_scope {
+	if requested_device.is_none()
+		&& services
+			.server
+			.config
+			.authentication
+			.oidc
+			.require_device_scope
+	{
 		return Err!(Request(InvalidParam(
 			"a device scope (urn:matrix:client:device:<id>) is required"
 		)));

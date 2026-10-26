@@ -118,7 +118,7 @@ fn server_args(
 		"smtp.connection_uri=\"smtp://127.0.0.1:1\"".to_owned(),
 		"smtp.sender=\"Tests <test@example.test>\"".to_owned(),
 		"smtp.require_email_for_registration=true".to_owned(),
-		"allow_registration=true".to_owned(),
+		"registration.enable=true".to_owned(),
 	]);
 
 	if config.terms {
@@ -132,7 +132,7 @@ fn server_args(
 
 	if let Some(token) = config.token {
 		args.option
-			.push(format!("registration_token={token:?}"));
+			.push(format!("registration.token={token:?}"));
 	}
 
 	args

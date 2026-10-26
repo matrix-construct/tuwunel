@@ -48,7 +48,7 @@ pub(crate) async fn send_message_event_route(
 	let appservice_info = body.appservice_info.as_ref();
 
 	// Forbid m.room.encrypted if encryption is disabled
-	if body.event_type == MessageLikeEventType::RoomEncrypted && !services.config.allow_encryption
+	if body.event_type == MessageLikeEventType::RoomEncrypted && !services.config.encryption.allow
 	{
 		return Err!(Request(Forbidden("Encryption has been disabled")));
 	}

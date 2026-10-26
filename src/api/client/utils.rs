@@ -41,7 +41,8 @@ pub(crate) async fn is_self_redaction(
 		.is_ok_and(|target| target.sender() == user_id)
 }
 
-/// Whether the caller may change display names under `enable_set_displayname`.
+/// Whether the caller may change display names under
+/// `profile.enable_set_displayname`.
 ///
 /// Appservices and server admins are exempt, matching Synapse's exemption for
 /// admins. `is_admin` is awaited only when the option is off and the caller
@@ -54,7 +55,9 @@ pub(crate) async fn may_set_displayname<T>(
 where
 	T: Sync,
 {
-	services.config.enable_set_displayname || body.appservice_info.is_some() || is_admin().await
+	services.config.profile.enable_set_displayname
+		|| body.appservice_info.is_some()
+		|| is_admin().await
 }
 
 /// Whether the sender of a request is a guest.

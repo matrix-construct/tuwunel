@@ -37,7 +37,11 @@ pub(crate) async fn registration_route(
 	let config = &services.config;
 
 	// Initial access token (RFC 7591): gate registration when one is configured.
-	let required_token = config.oidc_registration_access_token.as_str();
+	let required_token = config
+		.authentication
+		.oidc
+		.registration_access_token
+		.as_str();
 
 	if !required_token.is_empty() {
 		let presented = headers
@@ -48,12 +52,15 @@ pub(crate) async fn registration_route(
 		if presented != Some(required_token) {
 			return Err!(Request(Forbidden(
 				"A valid initial access token is required; this server has \
-				 oidc_registration_access_token set"
+				 authentication.oidc.registration_access_token set"
 			)));
 		}
 	}
 
-	let require_client_uri = config.oidc_registration_require_client_uri;
+	let require_client_uri = config
+		.authentication
+		.oidc
+		.registration_require_client_uri;
 
 	if let Err(error) = validate_client_metadata(&body, require_client_uri) {
 		return Ok(error.into_response());
@@ -61,7 +68,10 @@ pub(crate) async fn registration_route(
 
 	// Redirect allowlist (RFC 7591): every redirect_uri must name a listed host,
 	// or a listed private-use scheme when it carries no host.
-	let allowed = &config.oidc_registration_allowed_redirect_hosts;
+	let allowed = &config
+		.authentication
+		.oidc
+		.registration_allowed_redirect_hosts;
 
 	if !allowed.is_empty()
 		&& !body

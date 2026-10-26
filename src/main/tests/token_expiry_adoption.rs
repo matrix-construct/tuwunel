@@ -190,8 +190,14 @@ fn phase_args(database: &Path, port: u16, phase: Phase) -> Args {
 	let (harnesses, provider): (&[&str], &[&str]) = match phase {
 		| Phase::Register => (&["fresh"], &[]),
 		| Phase::WithoutProvider => (&[], &[]),
-		| Phase::WithProvider =>
-			(&[], &["well_known.client=\"https://localhost\"", "oidc_native_auth=true"]),
+		| Phase::WithProvider => {
+			let provider: &[&str] = &[
+				"well_known.client=\"https://localhost\"",
+				"authentication.oidc.native_auth=true",
+			];
+
+			(&[], provider)
+		},
 	};
 
 	let args = Args::default_test(harnesses)

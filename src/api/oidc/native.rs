@@ -362,7 +362,7 @@ async fn do_register(
 	req_id: &str,
 	body: &NativeSubmit,
 ) -> Result<OwnedUserId> {
-	if !services.config.allow_registration {
+	if !services.config.registration.enable {
 		return Err!(Request(Forbidden("Registration is disabled on this server.")));
 	}
 
@@ -391,6 +391,7 @@ async fn do_register(
 
 	if services
 		.config
+		.registration
 		.forbidden_usernames
 		.is_match(&username)
 	{
@@ -527,7 +528,9 @@ fn require_native(services: &Services) -> Result {
 
 	services
 		.config
-		.oidc_native_auth
+		.authentication
+		.oidc
+		.native_auth
 		.then_some(())
 		.ok_or_else(|| err!(Request(NotFound("Native authentication is not enabled"))))
 }
@@ -542,7 +545,7 @@ async fn render_page(
 	context: Flow<'_>,
 	error: Option<&str>,
 ) -> Result<String> {
-	let registration_enabled = services.config.allow_registration;
+	let registration_enabled = services.config.registration.enable;
 	let Flow::Authorization(req_id) = context else {
 		let sso_options = match context {
 			| Flow::Account { .. } | Flow::Device(_) =>
@@ -672,7 +675,8 @@ fn render_bound(req_id: &str, provider: ProviderChoice<'_>, error: Option<&str>)
 
 /// Providers the login page offers, as the client login flows list them.
 ///
-/// When `single_sso` or `sso_custom_providers_page` replaces that list, the page
+/// When `authentication.login.single_sso` or
+/// `authentication.login.sso_custom_providers_page` replaces that list, the page
 /// offers one single sign-on entry for the default provider instead.
 fn sso_choices(services: &Services) -> impl Iterator<Item = ProviderChoice<'_>> {
 	let listed = services

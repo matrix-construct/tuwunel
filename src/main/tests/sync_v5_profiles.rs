@@ -42,7 +42,7 @@ fn serves_visible_profiles_without_acknowledging_failures() -> Result {
 		.with_option("listening=true")
 		.with_option("allow_local_presence=false")
 		.with_option("allow_outgoing_presence=false")
-		.with_option("max_profile_fields_per_request=2");
+		.with_option("profile.max_fields_per_request=2");
 
 	let runtime = Runtime::new(Some(&args))?;
 	let server = Server::new(Some(&args), Some(&runtime))?;
@@ -185,7 +185,7 @@ async fn selector_limits(owner: &Client<'_>, owner_id: &UserId) -> Result {
 	let pos = field(&opening, "pos")?;
 	let mut config = (*owner.services.server.config.clone()).clone();
 
-	config.max_profile_fields_per_request = 1;
+	config.profile.max_fields_per_request = 1;
 	reload(&owner.services.config, &config)?;
 	owner.services.server.config.update(config)?;
 

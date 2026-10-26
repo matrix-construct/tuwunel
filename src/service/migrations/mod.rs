@@ -498,7 +498,12 @@ where
 async fn warn_forbidden_names(services: &Services) -> Result {
 	services.server.check_running()?;
 
-	if !services.config.forbidden_usernames.is_empty() {
+	if !services
+		.config
+		.registration
+		.forbidden_usernames
+		.is_empty()
+	{
 		services
 			.server
 			.progress
@@ -521,7 +526,7 @@ async fn warn_forbidden_names(services: &Services) -> Result {
 					.then_some(user_id))
 			})
 			.ready_try_filter_map(|user_id| {
-				let patterns = &services.config.forbidden_usernames;
+				let patterns = &services.config.registration.forbidden_usernames;
 				let matches = patterns.matches(user_id.localpart());
 				let matched_patterns = matches
 					.iter()

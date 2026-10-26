@@ -26,6 +26,7 @@ pub(crate) async fn get_register_available_route(
 
 	if services
 		.config
+		.registration
 		.forbidden_usernames
 		.is_match(&body.username)
 	{

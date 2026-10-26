@@ -24,6 +24,7 @@ impl crate::Service for Service {
 		let password = self
 			.services
 			.config
+			.authentication
 			.emergency_password
 			.as_deref()
 			.filter(|password| !password.is_empty());
@@ -54,7 +55,7 @@ impl crate::Service for Service {
 
 /// Whether the server user still holds a password.
 ///
-/// Only an earlier start with `emergency_password` set gives it one.
+/// Only an earlier start with `authentication.emergency_password` set gives it one.
 #[implement(Service)]
 async fn emergency_access_remains(&self) -> bool {
 	self.services

@@ -106,7 +106,7 @@ pub(crate) async fn get_account_route(
 fn account_auth_redirect(services: &Services, action: &str, device_id: &str) -> Result<Response> {
 	validate_account_action(action)?;
 
-	match services.config.oidc_native_auth {
+	match services.config.authentication.oidc.native_auth {
 		| true => account_native_redirect(services, action, device_id),
 		| false => {
 			let idp_id = services.oauth.providers.get_default_id();
@@ -223,14 +223,14 @@ async fn handle_account_callback(
 	// burn the user's single-use login_token needlessly.
 	services.oauth.get_server()?;
 
-	(services.config.oidc_native_auth
+	let has_provider = services.config.authentication.oidc.native_auth
 		|| services
 			.oauth
 			.providers
 			.get_default_id()
-			.is_some())
-	.then_some(())
-	.ok_or_else(|| {
+			.is_some();
+
+	has_provider.then_some(()).ok_or_else(|| {
 		err!(Config(
 			"identity_provider",
 			"No identity provider or native authentication configured"

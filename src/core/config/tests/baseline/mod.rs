@@ -129,10 +129,14 @@ fn fields_1(config: &Config) -> impl Iterator<Item = (&'static str, &dyn Debug)>
 		.history
 		.fetch_unreceived_contexts;
 
+	let open_registration = &config
+		.registration
+		.yes_i_am_very_very_sure_i_want_an_open_registration_server_prone_to_abuse;
+
 	let fields: [(&str, &dyn Debug); 117] = [
 		("server_name", &config.server_name),
 		("database_path", &config.database_path),
-		("new_user_displayname_suffix", &config.new_user_displayname_suffix),
+		("new_user_displayname_suffix", &config.registration.displayname_suffix),
 		("address", &config.http.listen.address),
 		("port", &config.http.listen.port),
 		("tls", &config.tls),
@@ -222,23 +226,23 @@ fn fields_1(config: &Config) -> impl Iterator<Item = (&'static str, &dyn Debug)>
 		("ip_source", &config.http.ip_source),
 		("ip_source_trusted_subnets", &config.http.ip_source_trusted_subnets),
 		("sender_shutdown_timeout", &config.sending.shutdown_timeout),
-		("allow_registration", &config.allow_registration),
+		("allow_registration", &config.registration.enable),
 		(
 			"yes_i_am_very_very_sure_i_want_an_open_registration_server_prone_to_abuse",
-			&config.yes_i_am_very_very_sure_i_want_an_open_registration_server_prone_to_abuse,
+			open_registration,
 		),
-		("registration_token", &config.registration_token),
-		("registration_token_file", &config.registration_token_file),
-		("registration_shared_secret", &config.registration_shared_secret),
-		("registration_shared_secret_file", &config.registration_shared_secret_file),
-		("mas_secret", &config.mas_secret),
-		("argon2_m_cost", &config.argon2_m_cost),
-		("argon2_t_cost", &config.argon2_t_cost),
-		("argon2_p_cost", &config.argon2_p_cost),
-		("allow_encryption", &config.allow_encryption),
+		("registration_token", &config.registration.token),
+		("registration_token_file", &config.registration.token_file),
+		("registration_shared_secret", &config.registration.shared_secret),
+		("registration_shared_secret_file", &config.registration.shared_secret_file),
+		("mas_secret", &config.authentication.mas_secret),
+		("argon2_m_cost", &config.authentication.argon2.m_cost),
+		("argon2_t_cost", &config.authentication.argon2.t_cost),
+		("argon2_p_cost", &config.authentication.argon2.p_cost),
+		("allow_encryption", &config.encryption.allow),
 		(
 			"encryption_enabled_by_default_for_room_type",
-			&config.encryption_enabled_by_default_for_room_type,
+			&config.encryption.enabled_by_default_for_room_type,
 		),
 		("allow_federation", &config.federation.enable),
 		("fetch_unreceived_contexts_over_federation", fetch_contexts),
@@ -255,10 +259,10 @@ fn fields_1(config: &Config) -> impl Iterator<Item = (&'static str, &dyn Debug)>
 		("federate_created_rooms", &config.rooms.federate_by_default),
 		("federation_loopback", &config.federation.loopback),
 		("forget_forced_upon_leave", &config.rooms.forget_forced_upon_leave),
-		("require_auth_for_profile_requests", &config.require_auth_for_profile_requests),
-		("max_remote_profile_fields", &config.max_remote_profile_fields),
-		("max_profile_fields_per_request", &config.max_profile_fields_per_request),
-		("enable_set_displayname", &config.enable_set_displayname),
+		("require_auth_for_profile_requests", &config.profile.require_auth),
+		("max_remote_profile_fields", &config.profile.max_remote_fields),
+		("max_profile_fields_per_request", &config.profile.max_fields_per_request),
+		("enable_set_displayname", &config.profile.enable_set_displayname),
 	];
 
 	fields.into_iter()
@@ -275,36 +279,55 @@ fn fields_2(config: &Config) -> impl Iterator<Item = (&'static str, &dyn Debug)>
 		.keys
 		.trusted_server_batch_concurrency;
 
+	let shared_rooms = &config
+		.profile
+		.limit_requests_to_users_who_share_rooms;
+
+	let registration_token = &config
+		.authentication
+		.oidc
+		.registration_access_token;
+
+	let redirect_hosts = &config
+		.authentication
+		.oidc
+		.registration_allowed_redirect_hosts;
+
+	let require_client_uri = &config
+		.authentication
+		.oidc
+		.registration_require_client_uri;
+
 	let fields: [(&str, &dyn Debug); 88] = [
-		(
-			"limit_profile_requests_to_users_who_share_rooms",
-			&config.limit_profile_requests_to_users_who_share_rooms,
-		),
-		("preserve_room_profile_overrides", &config.preserve_room_profile_overrides),
+		("limit_profile_requests_to_users_who_share_rooms", shared_rooms),
+		("preserve_room_profile_overrides", &config.profile.preserve_room_overrides),
 		(
 			"allow_public_room_directory_over_federation",
-			&config.allow_public_room_directory_over_federation,
+			&config.directory.rooms.allow_over_federation,
 		),
 		(
 			"allow_public_room_directory_without_auth",
-			&config.allow_public_room_directory_without_auth,
+			&config.directory.rooms.allow_without_auth,
 		),
-		("allow_public_room_search_by_id", &config.allow_public_room_search_by_id),
-		("allow_unlisted_room_search_by_id", &config.allow_unlisted_room_search_by_id),
 		(
-			"show_all_local_users_in_user_directory",
-			&config.show_all_local_users_in_user_directory,
+			"allow_public_room_search_by_id",
+			&config.directory.rooms.allow_public_search_by_id,
 		),
+		(
+			"allow_unlisted_room_search_by_id",
+			&config.directory.rooms.allow_unlisted_search_by_id,
+		),
+		("show_all_local_users_in_user_directory", &config.directory.users.show_all_local),
 		(
 			"show_appservice_users_in_user_directory",
-			&config.show_appservice_users_in_user_directory,
+			&config.directory.users.show_appservice,
 		),
 		("turn_allow_guests", &config.turn_allow_guests),
-		("lockdown_public_room_directory", &config.lockdown_public_room_directory),
-		("allow_device_name_federation", &config.allow_device_name_federation),
+		("lockdown_public_room_directory", &config.directory.rooms.lockdown),
+		("allow_device_name_federation", &config.profile.allow_device_name_federation),
 		(
 			"allow_inbound_profile_lookup_federation_requests",
-			&config.allow_inbound_profile_lookup_federation_requests,
+			&config.profile.allow_inbound_federation_lookups,
 		),
 		("allow_room_creation", &config.rooms.allow_creation),
 		("allow_room_alias_creation", &config.rooms.allow_alias_creation),
@@ -348,34 +371,31 @@ fn fields_2(config: &Config) -> impl Iterator<Item = (&'static str, &dyn Debug)>
 		("log_journald", &config.log_journald),
 		("log_enable", &config.log_enable),
 		("log_global_default", &config.log_global_default),
-		("openid_token_ttl", &config.openid_token_ttl),
-		("login_via_existing_session", &config.login_via_existing_session),
-		("login_via_token", &config.login_via_token),
-		("login_with_password", &config.login_with_password),
+		("openid_token_ttl", &config.authentication.openid_token_ttl),
+		("login_via_existing_session", &config.authentication.login.via_existing_session),
+		("login_via_token", &config.authentication.login.via_token),
+		("login_with_password", &config.authentication.login.with_password),
 		("rate_limiting", &config.rate_limiting),
-		("login_token_ttl", &config.login_token_ttl),
-		("access_token_ttl", &config.access_token_ttl),
-		("refresh_token_ttl", &config.refresh_token_ttl),
-		("refresh_token_idle_only", &config.refresh_token_idle_only),
-		("refresh_token_hard_logout", &config.refresh_token_hard_logout),
-		("refresh_token_reuse_grace", &config.refresh_token_reuse_grace),
-		("refresh_token_reuse_revoke", &config.refresh_token_reuse_revoke),
-		("oidc_native_auth", &config.oidc_native_auth),
-		("oidc_require_device_scope", &config.oidc_require_device_scope),
-		("oidc_require_pkce", &config.oidc_require_pkce),
-		("oidc_strict_scope", &config.oidc_strict_scope),
-		("oidc_registration_access_token", &config.oidc_registration_access_token),
+		("login_token_ttl", &config.authentication.login.token_ttl),
+		("access_token_ttl", &config.authentication.access_token_ttl),
+		("refresh_token_ttl", &config.authentication.refresh_token.ttl),
+		("refresh_token_idle_only", &config.authentication.refresh_token.idle_only),
+		("refresh_token_hard_logout", &config.authentication.refresh_token.hard_logout),
+		("refresh_token_reuse_grace", &config.authentication.refresh_token.reuse_grace),
+		("refresh_token_reuse_revoke", &config.authentication.refresh_token.reuse_revoke),
+		("oidc_native_auth", &config.authentication.oidc.native_auth),
+		("oidc_require_device_scope", &config.authentication.oidc.require_device_scope),
+		("oidc_require_pkce", &config.authentication.oidc.require_pkce),
+		("oidc_strict_scope", &config.authentication.oidc.strict_scope),
+		("oidc_registration_access_token", registration_token),
+		("oidc_registration_allowed_redirect_hosts", redirect_hosts),
 		(
-			"oidc_registration_allowed_redirect_hosts",
-			&config.oidc_registration_allowed_redirect_hosts,
+			"oidc_require_client_approval",
+			&config.authentication.oidc.require_client_approval,
 		),
-		("oidc_require_client_approval", &config.oidc_require_client_approval),
-		(
-			"oidc_registration_require_client_uri",
-			&config.oidc_registration_require_client_uri,
-		),
-		("oidc_rc_per_second", &config.oidc_rc_per_second),
-		("oidc_rc_burst_count", &config.oidc_rc_burst_count),
+		("oidc_registration_require_client_uri", require_client_uri),
+		("oidc_rc_per_second", &config.authentication.oidc.rc_per_second),
+		("oidc_rc_burst_count", &config.authentication.oidc.rc_burst_count),
 		("rendezvous_enabled", &config.rendezvous_enabled),
 		("rendezvous_session_max_bytes", &config.rendezvous_session_max_bytes),
 		("rendezvous_session_ttl", &config.rendezvous_session_ttl),
@@ -389,7 +409,7 @@ fn fields_2(config: &Config) -> impl Iterator<Item = (&'static str, &dyn Debug)>
 		("turn_secret", &config.turn_secret),
 		("turn_secret_file", &config.turn_secret_file),
 		("turn_ttl", &config.turn_ttl),
-		("auto_join_rooms", &config.auto_join_rooms),
+		("auto_join_rooms", &config.registration.auto_join_rooms),
 		(
 			"auto_deactivate_banned_room_attempts",
 			&config.rooms.auto_deactivate_banned_room_attempts,
@@ -417,6 +437,11 @@ fn fields_3(config: &Config) -> impl Iterator<Item = (&'static str, &dyn Debug)>
 		.federation
 		.enforce_stripped_state_pdu_validation;
 
+	let directory_servers = &config
+		.directory
+		.rooms
+		.forbidden_remote_server_names;
+
 	let fields: [(&str, &dyn Debug); 101] = [
 		("rocksdb_parallelism_threads", &config.rocksdb.parallelism_threads),
 		("rocksdb_max_log_files", &config.rocksdb.max_log_files),
@@ -440,7 +465,7 @@ fn fields_3(config: &Config) -> impl Iterator<Item = (&'static str, &dyn Debug)>
 		("rocksdb_stats_level", &config.rocksdb.stats_level),
 		("rocksdb_never_drop_columns", &config.rocksdb.never_drop_columns),
 		("rocksdb_allow_fallocate", &config.rocksdb.allow_fallocate),
-		("emergency_password", &config.emergency_password),
+		("emergency_password", &config.authentication.emergency_password),
 		("notification_push_path", &config.notification_push_path),
 		("push_everything", &config.push_everything),
 		("msc3664_related_event_match", &config.msc3664_related_event_match),
@@ -462,9 +487,12 @@ fn fields_3(config: &Config) -> impl Iterator<Item = (&'static str, &dyn Debug)>
 		("zstd_compression", &config.http.compression.zstd),
 		("gzip_compression", &config.http.compression.gzip),
 		("brotli_compression", &config.http.compression.brotli),
-		("allow_guest_registration", &config.allow_guest_registration),
+		("allow_guest_registration", &config.registration.guests.enable),
 		("log_guest_registrations", &config.log_guest_registrations),
-		("allow_guests_auto_join_rooms", &config.allow_guests_auto_join_rooms),
+		(
+			"allow_guests_auto_join_rooms",
+			&config.registration.guests.allow_auto_join_rooms,
+		),
 		("media_deny_framing", &config.media.deny_framing),
 		("media_deny_inline_styles", &config.media.deny_inline_styles),
 		("allow_legacy_media", &config.media.allow_legacy),
@@ -494,10 +522,7 @@ fn fields_3(config: &Config) -> impl Iterator<Item = (&'static str, &dyn Debug)>
 			&config.federation.forbidden_remote_server_names,
 		),
 		("allowed_remote_server_names_experimental", allowed_servers),
-		(
-			"forbidden_remote_room_directory_server_names",
-			&config.forbidden_remote_room_directory_server_names,
-		),
+		("forbidden_remote_room_directory_server_names", directory_servers),
 		("ip_range_denylist", &config.network.http.ip_range_denylist),
 		("url_preview_bound_interface", &config.media.url_preview.bound_interface),
 		(
@@ -524,7 +549,7 @@ fn fields_3(config: &Config) -> impl Iterator<Item = (&'static str, &dyn Debug)>
 		("url_preview_media_user_agent", &config.media.url_preview.media_user_agent),
 		("url_preview_accept_language", &config.media.url_preview.accept_language),
 		("forbidden_alias_names", &config.rooms.forbidden_alias_names),
-		("forbidden_usernames", &config.forbidden_usernames),
+		("forbidden_usernames", &config.registration.forbidden_usernames),
 		("deprioritize_joins_through_servers", &config.rooms.joins.deprioritize_servers),
 		(
 			"max_make_join_attempts_per_join_attempt",
@@ -565,9 +590,18 @@ fn fields_4(config: &Config) -> impl Iterator<Item = (&'static str, &dyn Debug)>
 		.redaction
 		.enforce_erasure_over_federation;
 
+	let custom_sso_page = &config
+		.authentication
+		.login
+		.sso_custom_providers_page;
+
+	let encrypted_only = &config
+		.encryption
+		.device_key_update_encrypted_rooms_only;
+
 	let fields: [(&str, &dyn Debug); 58] = [
 		("report_room", &config.report_room),
-		("grant_admin_to_first_user", &config.grant_admin_to_first_user),
+		("grant_admin_to_first_user", &config.registration.grant_admin_to_first_user),
 		("create_admin_room", &config.create_admin_room),
 		("federate_admin_room", &config.federate_admin_room),
 		("sentry", &config.sentry),
@@ -607,10 +641,10 @@ fn fields_4(config: &Config) -> impl Iterator<Item = (&'static str, &dyn Debug)>
 		("access_control_allow_origin", &config.http.access_control_allow_origin),
 		("hydra_backports", &config.hydra_backports),
 		("delete_rooms_after_leave", &config.rooms.delete_after_leave),
-		("one_time_key_limit", &config.one_time_key_limit),
-		("single_sso", &config.single_sso),
-		("sso_custom_providers_page", &config.sso_custom_providers_page),
-		("oidc_aware_preferred", &config.oidc_aware_preferred),
+		("one_time_key_limit", &config.encryption.one_time_key_limit),
+		("single_sso", &config.authentication.login.single_sso),
+		("sso_custom_providers_page", custom_sso_page),
+		("oidc_aware_preferred", &config.authentication.login.oidc_aware_preferred),
 		("appservice_dir", &config.appservice_dir),
 		("database_migrations", &config.database_migrations),
 		("force_migration", &config.force_migration),
@@ -618,10 +652,7 @@ fn fields_4(config: &Config) -> impl Iterator<Item = (&'static str, &dyn Debug)>
 		("conduit_media_directory_depth", &config.media.import.conduit.directory_depth),
 		("conduit_media_directory_length", &config.media.import.conduit.directory_length),
 		("conduit_source_media_provider", &config.media.import.conduit.source_provider),
-		(
-			"device_key_update_encrypted_rooms_only",
-			&config.device_key_update_encrypted_rooms_only,
-		),
+		("device_key_update_encrypted_rooms_only", encrypted_only),
 		("storage_provider", &config.storage_provider),
 		("registration_terms", &config.registration_terms),
 		("ldap", &config.ldap),

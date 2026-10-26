@@ -122,12 +122,14 @@ pub async fn send_device_list_appservices(&self, user_id: &UserId, count: u64) -
 /// Whether `user_id` shares a device-list-interesting room with `info`.
 ///
 /// A joined room the appservice participates in counts when it is encrypted,
-/// or unconditionally when `device_key_update_encrypted_rooms_only` is off.
+/// or unconditionally when `encryption.device_key_update_encrypted_rooms_only` is
+/// off.
 #[implement(Service)]
 async fn shares_device_list_room(&self, user_id: &UserId, info: &RegistrationInfo) -> bool {
 	let update_all_rooms = !self
 		.services
 		.config
+		.encryption
 		.device_key_update_encrypted_rooms_only;
 
 	self.services

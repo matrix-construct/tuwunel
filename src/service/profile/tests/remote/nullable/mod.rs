@@ -98,7 +98,7 @@ async fn repeated_nulls_and_replacements_publish_only_changes() -> Result {
 
 #[tokio::test]
 async fn old_null_rows_remain_in_the_bounded_union() -> Result {
-	let config = Figment::new().merge(("max_remote_profile_fields", 2));
+	let config = Figment::new().merge(("profile.max_remote_fields", 2));
 	let Some(fixture) = fixture(config).await? else {
 		return Ok(());
 	};

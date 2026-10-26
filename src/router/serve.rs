@@ -30,8 +30,11 @@ pub(super) async fn serve(services: Arc<Services>, handle: ServerHandle) -> Resu
 
 	#[cfg(not(feature = "oidc"))]
 	if services.oauth.get_server().is_ok() {
-		return if config.oidc_native_auth {
-			Err!(Config("oidc_native_auth", "tuwunel was not built with OIDC support (\"oidc\")"))
+		return if config.authentication.oidc.native_auth {
+			Err!(Config(
+				"authentication.oidc.native_auth",
+				"tuwunel was not built with OIDC support (\"oidc\")"
+			))
 		} else {
 			Err!(Config(
 				"identity_provider",
@@ -42,12 +45,13 @@ pub(super) async fn serve(services: Arc<Services>, handle: ServerHandle) -> Resu
 
 	#[cfg(not(feature = "mas"))]
 	if config
+		.authentication
 		.mas_secret
 		.as_deref()
 		.is_some_and(|secret| !secret.is_empty())
 	{
 		return Err!(Config(
-			"mas_secret",
+			"authentication.mas_secret",
 			"tuwunel was not built with MAS provisioning support (\"mas\")"
 		));
 	}

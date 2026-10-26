@@ -49,7 +49,11 @@ pub(super) fn handle_login(
 		return Err!(Request(Unknown("User ID does not belong to this homeserver")));
 	}
 
-	let emergency_mode_enabled = services.config.emergency_password.is_some();
+	let emergency_mode_enabled = services
+		.config
+		.authentication
+		.emergency_password
+		.is_some();
 
 	if !info.is_user_match(&user_id) && !emergency_mode_enabled {
 		return Err!(Request(Exclusive("Username is not in an appservice namespace.")));

@@ -46,7 +46,11 @@ pub(crate) async fn register_route(
 	body: Ruma<register::v3::Request>,
 ) -> Result<register::v3::Response> {
 	let is_guest = body.kind == RegistrationKind::Guest;
-	let emergency_mode_enabled = services.config.emergency_password.is_some();
+	let emergency_mode_enabled = services
+		.config
+		.authentication
+		.emergency_password
+		.is_some();
 
 	gate_registration_allowed(services, &body, is_guest)?;
 
@@ -161,7 +165,7 @@ fn gate_registration_allowed(
 		.as_deref()
 		.unwrap_or("");
 
-	if !services.config.allow_registration && body.appservice_info.is_none() {
+	if !services.config.registration.enable && body.appservice_info.is_none() {
 		info!(
 			%is_guest,
 			%user,
@@ -172,7 +176,7 @@ fn gate_registration_allowed(
 		return Err!(Request(Forbidden("Registration has been disabled.")));
 	}
 
-	if is_guest && !services.config.allow_guest_registration {
+	if is_guest && !services.config.registration.guests.enable {
 		debug_warn!(
 			%device_name,
 			"Guest registration disabled, rejecting guest registration attempt"
@@ -207,6 +211,7 @@ async fn resolve_registration_user_id(
 
 	if services
 		.config
+		.registration
 		.forbidden_usernames
 		.is_match(username)
 		&& !emergency_mode_enabled

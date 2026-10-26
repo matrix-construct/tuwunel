@@ -60,7 +60,7 @@ pub(crate) async fn authorize_route(
 	// RFC 7636 / MSC2964: require an explicit S256 challenge; bare `plain` is
 	// rejected.
 	match (&params.code_challenge, params.code_challenge_method.as_deref()) {
-		| (None, _) if services.config.oidc_require_pkce =>
+		| (None, _) if services.config.authentication.oidc.require_pkce =>
 			return Err!(Request(InvalidParam("code_challenge is required (PKCE with S256)"))),
 
 		| (Some(_), method) if method != Some("S256") =>
@@ -78,7 +78,7 @@ pub(crate) async fn authorize_route(
 
 	let idp_id: Option<String> = match params.idp_id.as_deref() {
 		// The native page offers local accounts alongside every provider.
-		| None if services.config.oidc_native_auth => None,
+		| None if services.config.authentication.oidc.native_auth => None,
 
 		| Some(requested) => services
 			.oauth

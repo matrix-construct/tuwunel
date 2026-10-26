@@ -25,8 +25,11 @@ mod timeline;
 
 #[test]
 fn refuses_names_once_joined_to_admin_room() -> Result {
-	let options =
-		["create_admin_room=true", "grant_admin_to_first_user=true", "log_enable=false"];
+	let options = [
+		"create_admin_room=true",
+		"registration.grant_admin_to_first_user=true",
+		"log_enable=false",
+	];
 
 	boot("admin-grant-registration", options, exercise)
 }

@@ -58,7 +58,8 @@ pub(crate) async fn get_profile_information_route(
 	if !services
 		.server
 		.config
-		.allow_inbound_profile_lookup_federation_requests
+		.profile
+		.allow_inbound_federation_lookups
 	{
 		return Err!(Request(Forbidden(
 			"Profile lookup over federation is not allowed on this homeserver.",

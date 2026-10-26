@@ -22,7 +22,7 @@ fn signatures_are_canonical_and_foreign_updates_are_private() -> Result {
 		.with_database_path(&database)
 		.with_option("allow_local_presence=false")
 		.with_option("allow_outgoing_presence=false")
-		.with_option("device_key_update_encrypted_rooms_only=false");
+		.with_option("encryption.device_key_update_encrypted_rooms_only=false");
 
 	let args = Args { maintenance: true, ..args };
 

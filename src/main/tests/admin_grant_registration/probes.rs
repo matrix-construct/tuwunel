@@ -19,12 +19,12 @@ const TOKEN: &str = "admin-name-one-use";
 const REQ_ID: &str = "registration-test";
 const OPTIONS: [&str; 7] = [
 	"create_admin_room=true",
-	"grant_admin_to_first_user=true",
+	"registration.grant_admin_to_first_user=true",
 	"log_enable=false",
-	"allow_registration=true",
-	"yes_i_am_very_very_sure_i_want_an_open_registration_server_prone_to_abuse=true",
+	"registration.enable=true",
+	"registration.yes_i_am_very_very_sure_i_want_an_open_registration_server_prone_to_abuse=true",
 	"well_known.client=\"https://localhost\"",
-	"oidc_native_auth=true",
+	"authentication.oidc.native_auth=true",
 ];
 
 #[test]

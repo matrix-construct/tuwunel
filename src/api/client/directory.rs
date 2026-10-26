@@ -120,24 +120,22 @@ pub(crate) async fn set_room_visibility_route(
 
 	match &body.visibility {
 		| room::Visibility::Public => {
-			if services
-				.server
-				.config
-				.lockdown_public_room_directory
+			if services.server.config.directory.rooms.lockdown
 				&& !services.admin.user_is_admin(sender_user).await
 				&& body.appservice_info.is_none()
 			{
 				info!(
-					"Non-admin user {sender_user} tried to publish {0} to the room directory \
-					 while \"lockdown_public_room_directory\" is enabled",
-					body.room_id
+					%sender_user,
+					room_id = %body.room_id,
+					"Non-admin user tried to publish a room to the directory while \
+					 directory.rooms.lockdown is enabled"
 				);
 
 				services
 					.admin
 					.notify_loud(&format!(
 						"Non-admin user {sender_user} tried to publish {0} to the room \
-						 directory while \"lockdown_public_room_directory\" is enabled",
+						 directory while \"directory.rooms.lockdown\" is enabled",
 						body.room_id
 					))
 					.await;
@@ -274,12 +272,24 @@ pub async fn get_public_rooms_filtered_helper(
 	let search_room_id = filter
 		.generic_search_term
 		.as_deref()
-		.filter(|_| services.config.allow_public_room_search_by_id)
+		.filter(|_| {
+			services
+				.config
+				.directory
+				.rooms
+				.allow_public_search_by_id
+		})
 		.filter(|s| s.starts_with('!'))
 		.filter(|s| s.len() > 5); // require some characters to limit scope.
 
 	let meta_public_rooms = search_room_id
-		.filter(|_| services.config.allow_unlisted_room_search_by_id)
+		.filter(|_| {
+			services
+				.config
+				.directory
+				.rooms
+				.allow_unlisted_search_by_id
+		})
 		.map(|prefix| services.metadata.public_ids_prefix(prefix))
 		.into_iter()
 		.stream()
@@ -493,7 +503,9 @@ fn check_server_banned(services: &Services, server: Option<&ServerName>) -> Resu
 
 	if services
 		.config
-		.forbidden_remote_room_directory_server_names
+		.directory
+		.rooms
+		.forbidden_remote_server_names
 		.is_match(server.host())
 		|| services
 			.config

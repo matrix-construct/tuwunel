@@ -39,16 +39,21 @@ type Exchange = (String, Result<String>);
 #[test]
 fn refresh_device_lock() -> Result {
 	let quiet = "log_enable=false";
-	let grace = "refresh_token_reuse_grace=3600";
-	let ttl = "refresh_token_ttl=2";
-	let absolute = "refresh_token_idle_only=false";
+	let grace = "authentication.refresh_token.reuse_grace=3600";
+	let ttl = "authentication.refresh_token.ttl=2";
+	let absolute = "authentication.refresh_token.idle_only=false";
 
 	boot("refresh-device-lock", [grace, quiet], with_grace)?;
-	boot("refresh-reuse", ["refresh_token_reuse_grace=0", quiet], reuse_without_grace)?;
+	boot(
+		"refresh-reuse",
+		["authentication.refresh_token.reuse_grace=0", quiet],
+		reuse_without_grace,
+	)?;
+
 	boot("refresh-soft-expiry", [ttl, absolute, grace, quiet], soft_expiry)?;
 	boot(
 		"refresh-hard-expiry",
-		[ttl, absolute, grace, "refresh_token_hard_logout=true", quiet],
+		[ttl, absolute, grace, "authentication.refresh_token.hard_logout=true", quiet],
 		hard_expiry,
 	)
 }
@@ -435,9 +440,14 @@ async fn grace_after_deadline(services: &Services, hard: bool) -> Result {
 
 /// Waits until a refresh token issued before the call has expired.
 ///
-/// The wait outlasts the configured `refresh_token_ttl`.
+/// The wait outlasts the configured `authentication.refresh_token.ttl`.
 async fn outlast_ttl(services: &Services) {
-	let ttl = services.server.config.refresh_token_ttl;
+	let ttl = services
+		.server
+		.config
+		.authentication
+		.refresh_token
+		.ttl;
 
 	sleep(Duration::from_secs(ttl.saturating_add(1))).await;
 }

@@ -30,9 +30,10 @@ fn records_follow_the_device_lifecycle() -> Result {
 	let args = Args::default_test(&["fresh", "cleanup"])
 		.with_loopback_listener(port)
 		.with_option("listening=true")
-		.with_option("allow_registration=true")
+		.with_option("registration.enable=true")
 		.with_option(
-			"yes_i_am_very_very_sure_i_want_an_open_registration_server_prone_to_abuse=true",
+			"registration.\
+			 yes_i_am_very_very_sure_i_want_an_open_registration_server_prone_to_abuse=true",
 		);
 
 	let runtime = Runtime::new(Some(&args))?;

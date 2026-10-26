@@ -1,11 +1,9 @@
 //! Synapse-compatible shared-secret registration backend.
 //!
 //! Pairs with the HTTP handlers in `tuwunel_api_admin` that serve
-//! `/_synapse/admin/v1/register`. Owns:
-//!
-//! 1. resolution of the shared secret (from `registration_shared_secret` or its
-//!    `_file` companion), performed at each use;
-//! 2. a short-lived in-memory nonce store with a 60-second TTL.
+//! `/_synapse/admin/v1/register`. Resolves the shared secret from
+//! `registration.shared_secret` or its `_file` companion at each use and
+//! maintains an in-memory nonce store with a 60-second TTL.
 //!
 //! The nonce store lives in RAM rather than RocksDB on purpose: each entry's
 //! useful lifespan is shorter than a single block-cache eviction tick, and
@@ -65,20 +63,21 @@ pub fn register_is_enabled(&self) -> bool {
 	let config = &self.services.server.config;
 
 	is_secret_set(
-		config.registration_shared_secret_file.as_deref(),
-		config.registration_shared_secret.as_deref(),
+		config.registration.shared_secret_file.as_deref(),
+		config.registration.shared_secret.as_deref(),
 	)
 }
 
-/// Reads `registration_shared_secret_file` on every call, so a rotated secret
-/// takes effect without a restart.
+/// Reads `registration.shared_secret_file` on every call.
+///
+/// A rotated secret takes effect without a restart.
 #[implement(super::Service)]
 pub fn register_shared_secret(&self) -> Option<Secret> {
 	let config = &self.services.server.config;
 
 	resolve_secret(
-		config.registration_shared_secret_file.as_deref(),
-		config.registration_shared_secret.as_deref(),
+		config.registration.shared_secret_file.as_deref(),
+		config.registration.shared_secret.as_deref(),
 		"registration shared secret",
 	)
 }

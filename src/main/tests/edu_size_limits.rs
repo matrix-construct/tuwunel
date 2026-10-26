@@ -35,9 +35,10 @@ const MAS_SECRET: &str = "edu-size-limits-test-mas-secret";
 #[test]
 fn edu_size_limits() -> Result {
 	let options = [
-		"allow_registration=true",
-		"yes_i_am_very_very_sure_i_want_an_open_registration_server_prone_to_abuse=true",
-		&format!("mas_secret=\"{MAS_SECRET}\""),
+		"registration.enable=true",
+		"registration.\
+		 yes_i_am_very_very_sure_i_want_an_open_registration_server_prone_to_abuse=true",
+		&format!("authentication.mas_secret=\"{MAS_SECRET}\""),
 	];
 
 	boot("edu-size-limits", options, exercise)

@@ -193,17 +193,18 @@ impl Approval<'_> {
 /// Whether the authorization code goes out without asking the user first.
 ///
 /// Two conditions waive the prompt: the operator turned it off with
-/// `oidc_require_client_approval`, or listed this redirect target in the
+/// `authentication.oidc.require_client_approval`, or listed this redirect target in
+/// the
 /// registration allowlist. Neither holds on a server running open dynamic
 /// registration, where an attacker can register a client of their own and phish
 /// an authorization link. An initial access token deliberately does not waive
 /// it, since closing registration says nothing about the clients that were
 /// already registered when it closed.
 fn approval_waived(services: &Services, redirect_uri: &str) -> bool {
-	let config = &services.config;
+	let config = &services.config.authentication.oidc;
 
-	!config.oidc_require_client_approval
-		|| redirect_allowlisted(&config.oidc_registration_allowed_redirect_hosts, redirect_uri)
+	!config.require_client_approval
+		|| redirect_allowlisted(&config.registration_allowed_redirect_hosts, redirect_uri)
 }
 
 /// Mint the authorization code for an approved sign-in.

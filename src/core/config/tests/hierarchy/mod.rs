@@ -1,4 +1,5 @@
 mod aggregate;
+mod compatibility;
 mod groups;
 mod loading;
 mod regeneration;

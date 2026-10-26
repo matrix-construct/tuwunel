@@ -186,10 +186,15 @@ pub(crate) async fn sso_login_route(
 	ClientIp(client): ClientIp,
 	body: Ruma<sso_login::v3::Request>,
 ) -> Result<sso_login::v3::Response> {
-	if services.config.sso_custom_providers_page {
+	if services
+		.config
+		.authentication
+		.login
+		.sso_custom_providers_page
+	{
 		return Err!(Request(NotImplemented(
-			"sso_custom_providers_page has been enabled but this URL has not been overridden \
-			 with any custom page listing the available providers..."
+			"authentication.login.sso_custom_providers_page has been enabled but this URL has \
+			 not been overridden with any custom page listing the available providers..."
 		)));
 	}
 
@@ -630,7 +635,7 @@ fn chain_next_idp_id(services: &Services, idp_id: &str) -> Option<String> {
 		.config
 		.identity_provider
 		.values()
-		.filter(|idp| idp.default || services.config.single_sso)
+		.filter(|idp| idp.default || services.config.authentication.login.single_sso)
 		.skip_while(|idp| idp.id() != idp_id)
 		.nth(1)
 		.map(IdentityProvider::id)
@@ -679,7 +684,9 @@ fn validate_redirect_url(redirect_url: &Url) -> Result {
 fn redirect_trusted(services: &Services, redirect_url: &Url) -> bool {
 	let allowed = &services
 		.config
-		.oidc_registration_allowed_redirect_hosts;
+		.authentication
+		.oidc
+		.registration_allowed_redirect_hosts;
 
 	let own_origin = services
 		.config
@@ -1002,6 +1009,7 @@ async fn try_user_id(
 
 	if services
 		.config
+		.registration
 		.forbidden_usernames
 		.is_match(username)
 	{

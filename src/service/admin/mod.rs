@@ -433,8 +433,10 @@ impl Service {
 			.services
 			.server
 			.config
+			.authentication
 			.emergency_password
 			.is_some();
+
 		let from_server = event.sender() == server_user && !emergency_password_set;
 		if from_server && self.is_admin_room(event.room_id()).await {
 			return false;

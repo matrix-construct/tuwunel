@@ -42,16 +42,6 @@
 #
 #database_path = "/var/lib/tuwunel"
 
-# Text which will be added to the end of the user's displayname upon
-# registration with a space before the text. In Conduit, this was the
-# lightning bolt emoji.
-#
-# To disable, set this to "" (an empty string).
-#
-# reloadable: yes
-#
-#new_user_displayname_suffix = "💕"
-
 # Error on startup if any config option specified is unknown to Tuwunel.
 #
 # This is false by default to allow easier deprecation or removal of
@@ -95,281 +85,6 @@
 #
 #pusher_idle_timeout = 15
 
-# Enables registration. If set to false, no users can register on this
-# server.
-#
-# If set to true without a token configured, users can register with no
-# form of 2nd-step only if you set the following option to true:
-# `yes_i_am_very_very_sure_i_want_an_open_registration_server_prone_to_abuse`
-#
-# If you would like registration only via token reg, please configure
-# `registration_token` or `registration_token_file`.
-# reloadable: yes
-#
-#allow_registration = false
-
-# Enabling this setting opens registration to anyone without restrictions.
-# This makes your server vulnerable to abuse
-# reloadable: yes
-#
-#yes_i_am_very_very_sure_i_want_an_open_registration_server_prone_to_abuse = false
-
-# A static registration token that new users will have to provide when
-# creating an account. If unset and `allow_registration` is true,
-# you must set
-# `yes_i_am_very_very_sure_i_want_an_open_registration_server_prone_to_abuse`
-# to true to allow open registration without any conditions.
-#
-# YOU NEED TO EDIT THIS OR USE registration_token_file.
-#
-# reloadable: yes
-# example: "o&^uCtes4HPf0Vu@F20jQeeWE7"
-#
-#registration_token =
-
-# Path to a file on the system that gets read for additional registration
-# tokens. Multiple tokens can be added if you separate them with
-# whitespace
-#
-# tuwunel must be able to access the file, and it must not be empty
-#
-# reloadable: yes
-# example: "/etc/tuwunel/.reg_token"
-#
-#registration_token_file =
-
-# A pre-shared secret enabling out-of-band account creation via the
-# Synapse-style `/_synapse/admin/v1/register` endpoint. The endpoint is
-# only available when this is set. Requests authenticate by HMAC-SHA1
-# keyed on this value; UIAA is bypassed.
-#
-# Use a high-entropy value (at least 32 bytes) and treat it as a
-# secret of equivalent power to a server admin's access token.
-#
-# reloadable: yes
-# example: "kZ2hN5pQ8wXyL4mR7tBfCgJxV3aD6sE1u"
-#
-#registration_shared_secret =
-
-# Path to a file containing the registration shared secret. Takes
-# precedence over `registration_shared_secret`, and falls back to it when
-# the file cannot be opened. Surrounding whitespace is trimmed off, so a
-# trailing newline does not become part of the secret. A file which is
-# present but blank resolves to no secret rather than falling back.
-#
-# reloadable: yes
-# example: "/etc/tuwunel/.reg_shared_secret"
-#
-#registration_shared_secret_file =
-
-# Shared secret the Matrix Authentication Service (MAS) authenticates its
-# provisioning calls with. When set, the `/_synapse/mas/*` endpoints
-# accept only requests bearing this exact secret as their bearer token,
-# rejecting all others; when unset, those endpoints reject every request.
-#
-# Use a high-entropy value and keep it identical to the secret configured
-# on the MAS side.
-#
-# reloadable: yes
-# example: "kZ2hN5pQ8wXyL4mR7tBfCgJxV3aD6sE1u"
-#
-#mas_secret =
-
-# Size of the Argon2id working buffer used to hash a new password, in 1
-# KiB blocks.
-#
-# Each hash holds the buffer for its duration, so peak memory rises by
-# roughly this much for every password operation in flight, with no bound
-# on how many run at once. Stored hashes carry the values they were made
-# with, so a change reaches an account only when its password is next set.
-#
-# Lowering this weakens the hash against parallel cracking hardware unless
-# `argon2_t_cost` rises to compensate; the equivalent-strength pairs of
-# (`argon2_m_cost`, `argon2_t_cost`) are (47104, 1), (19456, 2), (12288,
-# 3), (9216, 4) and (7168, 5). The default and those pairs are the OWASP
-# Argon2id recommendation:
-# <https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html#argon2id>
-#
-# reloadable: yes
-#
-#argon2_m_cost = 19456
-
-# Number of passes an Argon2id hash makes over its working buffer.
-#
-# Raising it scales the CPU cost of a hash without changing its memory
-# cost. See `argon2_m_cost` for the equivalent-strength pairs.
-#
-# reloadable: yes
-#
-#argon2_t_cost = 2
-
-# Number of lanes an Argon2id working buffer is divided into.
-#
-# Lanes are computed sequentially here, so raising this changes the hash
-# without buying any parallelism. `argon2_m_cost` must be at least eight
-# times this value.
-#
-# reloadable: yes
-#
-#argon2_p_cost = 1
-
-# Controls whether encrypted rooms and events are allowed.
-# reloadable: yes
-#
-#allow_encryption = true
-
-# Controls whether locally-created rooms should be end-to-end encrypted by
-# default. This option is equivalent to the one found in Synapse.
-#
-# Options:
-# - "all": All created rooms are encrypted.
-# - "invite": Any room created with `private_chat` or
-#   `trusted_private_chat` presets.
-# - "none": Explicit value for no effect.
-# - Other values default to no effect.
-#
-# reloadable: yes
-#
-#encryption_enabled_by_default_for_room_type = "none"
-
-# Set this to true to require authentication on the normally
-# unauthenticated profile retrieval endpoints (GET)
-# "/_matrix/client/v3/profile/{userId}".
-#
-# This can prevent profile scraping.
-# reloadable: yes
-#
-#require_auth_for_profile_requests = false
-
-# Maximum fields retained in a remote user's cached profile.
-#
-# Includes displayname and avatar_url and must be greater than zero.
-# A refresh exceeding this count is rejected without changing the cache.
-# Lowering it leaves existing profiles intact; their refreshes must fit
-# the new limit.
-#
-# reloadable: yes
-#
-#max_remote_profile_fields = 100
-
-# Maximum selected profile fields in a sync request or stored filter.
-#
-# Counts raw selectors before duplicate removal for sliding and legacy sync
-# and must be greater than zero.
-# Requests exceeding this count or the 255-byte name limit are rejected.
-# Sliding sync retains normalized selections across omitted selectors;
-# after lowering the limit, an oversized selection requires replacement
-# or a restarted connection.
-# Unfiltered sliding sync profiles are not limited by this count.
-#
-# reloadable: yes
-#
-#max_profile_fields_per_request = 64
-
-# Allow standard users to set or clear their display names through the
-# client profile API.
-#
-# Server admins and appservices are always allowed to change display
-# names.
-#
-# reloadable: yes
-#
-#enable_set_displayname = true
-
-# Restrict client profile retrieval to the user themselves or users who
-# currently share a joined room.
-#
-# Appservices are exempt, and other users are refused with 403
-# `M_FORBIDDEN`. The server refuses to start, or to reload its
-# configuration, with this enabled unless
-# `require_auth_for_profile_requests` is enabled too. Federation profile
-# lookups are unaffected; `allow_inbound_profile_lookup_federation_requests`
-# controls those.
-#
-# reloadable: yes
-#
-#limit_profile_requests_to_users_who_share_rooms = false
-
-# Preserve per-room profile overrides during a global profile update.
-#
-# When `true` (default), a profile change (displayname or avatar_url)
-# arriving via the profile endpoints skips rooms whose current
-# `m.room.member` already differs from the user's prior global
-# profile. This is the natural behavior users expect after setting a
-# per-room nickname or avatar with a client's `/myroomnick`-style
-# command: a subsequent global change does not clobber the override.
-#
-# Set to `false` to always rewrite every joined room's member event
-# to match the new global profile. That matches the literal spec
-# reading.
-#
-# MSC4466 lets clients pick this per request via the
-# `org.matrix.msc4466.propagate_to` query parameter
-# (`all` / `unchanged` / `none`); an explicit value overrides this
-# default in either direction.
-#
-# reloadable: yes
-#
-#preserve_room_profile_overrides = true
-
-# Set this to true to allow your server's public room directory to be
-# federated. Set this to false to protect against /publicRooms spiders,
-# but will forbid external users from viewing your server's public room
-# directory. If federation is disabled entirely (`allow_federation`), this
-# is inherently false.
-# reloadable: yes
-#
-#allow_public_room_directory_over_federation = false
-
-# Set this to true to allow your server's public room directory to be
-# queried without client authentication (access token) through the Client
-# APIs. Set this to false to protect against /publicRooms spiders.
-# reloadable: yes
-#
-#allow_public_room_directory_without_auth = false
-
-# Allows room directory searches to match on partial room_id's when the
-# search term starts with '!'.
-#
-# reloadable: yes
-#
-#allow_public_room_search_by_id = true
-
-# Set this to false to limit results of rooms when searching by ID to
-# those that would be found by an alias or other query; specifically
-# those listed in the public rooms directory. By default this is set to
-# true allowing any joinable room to match. This satisfies the Principle
-# of Least Expectation when pasting a room_id into a search box with
-# intent to join; many rooms simply opt-out of public listings. Therefor
-# to prevent this feature from abuse, knowledge of several characters of
-# the room_id is required before any results are returned.
-#
-# reloadable: yes
-#
-#allow_unlisted_room_search_by_id = true
-
-# Show all local users in user directory.
-#
-# With this set to false, only users in public rooms or those that share
-# a room with the user making the search will be shown. Appservice
-# senders and users in exclusive appservice user namespaces stay hidden
-# unless `show_appservice_users_in_user_directory` is also enabled.
-#
-# reloadable: yes
-#
-#show_all_local_users_in_user_directory = false
-
-# Include appservice senders and users in exclusive appservice user
-# namespaces in user directory searches.
-#
-# They remain subject to the normal room visibility rules unless
-# `show_all_local_users_in_user_directory` is also enabled. Synapse has
-# no equivalent and always hides them.
-#
-# reloadable: yes
-#
-#show_appservice_users_in_user_directory = false
-
 # Allow guest users to access TURN credentials.
 #
 # This is the equivalent of Synapse's `turn_allow_guests` config option.
@@ -378,35 +93,6 @@
 # reloadable: yes
 #
 #turn_allow_guests = false
-
-# Set this to true to lock down your server's public room directory and
-# only allow admins to publish rooms to the room directory. Unpublishing
-# is still allowed by all users with this enabled.
-# reloadable: yes
-#
-#lockdown_public_room_directory = false
-
-# Set this to true to allow federating device display names / allow
-# external users to see your device display name. If federation is
-# disabled entirely (`allow_federation`), this is inherently false. For
-# privacy reasons, this is best left disabled.
-# reloadable: yes
-#
-#allow_device_name_federation = false
-
-# Config option to allow or disallow incoming federation requests that
-# obtain the profiles of our local users from
-# `/_matrix/federation/v1/query/profile`
-#
-# Increases privacy of your local user's such as display names, but some
-# remote users may get a false "this user does not exist" error when they
-# try to invite you to a DM or room. Also can protect against profile
-# spiders.
-#
-# This is inherently false if `allow_federation` is disabled
-# reloadable: yes
-#
-#allow_inbound_profile_lookup_federation_requests = true
 
 # Enables OTLP span export for Jaeger-compatible tracing.
 #
@@ -544,290 +230,6 @@
 #
 #log_global_default = true
 
-# OpenID token expiration/TTL in seconds.
-#
-# These are the OpenID tokens that are primarily used for Matrix account
-# integrations (e.g. Vector Integrations in Element), *not* OIDC/OpenID
-# Connect/etc.
-#
-# reloadable: yes
-#
-#openid_token_ttl = 3600
-
-# Allow an existing session to mint a login token for another client.
-# This requires interactive authentication, but has security ramifications
-# as a malicious client could use the mechanism to spawn more than one
-# session. Enabled by default.
-#
-# reloadable: yes
-#
-#login_via_existing_session = true
-
-# Whether to enable the login token route to accept login tokens at all.
-# Login tokens may be generated by the server for authorization flows such
-# as SSO; disabling tokens may break such features.
-#
-# This option is distinct from `login_via_existing_session` and does not
-# carry the same security implications; the intent is to leave this
-# enabled while disabling the former to prevent clients from commanding
-# login token creation but without preventing the server from doing so.
-#
-# reloadable: yes
-#
-#login_via_token = true
-
-# Whether to enable login using traditional user/password authorization
-# flow.
-#
-# Set this option to false if you intend to allow logging in only using
-# other mechanisms, such as SSO.
-#
-# reloadable: yes
-#
-#login_with_password = true
-
-# Login token expiration/TTL in milliseconds.
-#
-# These are short-lived tokens for the m.login.token endpoint.
-# This is used to allow existing sessions to create new sessions.
-# see login_via_existing_session.
-#
-# reloadable: yes
-#
-#login_token_ttl = 120000
-
-# Access token TTL in seconds.
-#
-# For clients that support refresh-tokens, the access-token provided on
-# login will be invalidated after this amount of time and the client will
-# be soft-logged-out until refreshing it.
-#
-# reloadable: yes
-#
-#access_token_ttl = 604800
-
-# Refresh token TTL in seconds.
-#
-# Refresh tokens are rejected once this lifetime elapses. Whether the
-# deadline slides forward on each use or stays fixed at issuance is
-# controlled by `refresh_token_idle_only`. The default of `0` disables
-# refresh-token expiry entirely; a typical enabled value is `259200`
-# (three days).
-#
-# reloadable: yes
-#
-#refresh_token_ttl = 0
-
-# Whether `refresh_token_ttl` acts as an idle timeout or an absolute
-# session lifetime.
-#
-# When `true` (default), each successful refresh resets the deadline to
-# `now + refresh_token_ttl`. A session in continuous use never expires.
-# When `false`, the deadline is fixed at first issuance and rotation
-# carries it forward, forcing re-auth after `refresh_token_ttl`
-# regardless of activity. This setting applies only to tokens issued with
-# a nonzero refresh-token TTL; a zero TTL issues tokens without expiry.
-#
-# reloadable: yes
-#
-#refresh_token_idle_only = true
-
-# Whether refresh-token expiry triggers a hard logout instead of a soft
-# one.
-#
-# When `false` (default), an expired refresh token is rejected with
-# `M_UNKNOWN_TOKEN` carrying `soft_logout: true`. The client can preserve
-# E2EE keys and local state, then re-authenticate to resume the same
-# device.
-#
-# When `true`, the device is removed entirely on expiry: the access
-# token is invalidated, the device record is deleted, and the client is
-# signalled with `soft_logout: false`. The next session is a brand-new
-# device, so the client cannot recover E2EE history from local state
-# alone; this is the CWE-613 stance and trades usability for that
-# guarantee. Tokens issued with a zero refresh-token TTL do not expire,
-# and changing the current TTL does not erase an expiry already stored.
-#
-# reloadable: yes
-#
-#refresh_token_hard_logout = false
-
-# Grace window in seconds for a benign refresh-token double-submit.
-#
-# After a refresh token rotates, the spent token is retained for one
-# generation so a later reuse is detectable. If that spent token is
-# presented again within this window while its successor is still the
-# device's current refresh token, the request is treated as a client that
-# lost the rotated response: a fresh access token is issued for the
-# unchanged refresh token rather than revoking the device. Outside the
-# window, or once the chain has advanced, a replayed refresh token revokes
-# the device as a suspected compromise. Set to `0` to treat every reuse as
-# a compromise.
-#
-# reloadable: yes
-#
-#refresh_token_reuse_grace = 15
-
-# Whether a detected refresh-token reuse revokes the device.
-#
-# When true (default), presenting a refresh token that was already rotated
-# (outside the `refresh_token_reuse_grace` window) removes the device, the
-# RFC 6819 stance that treats reuse as a compromised session. When false,
-# the replayed request is rejected but the device is left intact, the
-# laxer behaviour an operator fronting another OAuth client may prefer.
-#
-# reloadable: yes
-#
-#refresh_token_reuse_revoke = true
-
-# Enable native registration and login on the built-in OIDC provider
-# (next-gen auth), authenticating Matrix clients against this server's own
-# accounts without a third-party `identity_provider`.
-#
-# When false (default), the OIDC server runs only to broker for a
-# configured `identity_provider`, redirecting users to that upstream IdP.
-# When true, an authorization request that selects no provider is served a
-# login or registration page; `well_known.client` must be set. The login
-# page offers local accounts and each configured identity provider (one
-# single sign-on entry under `single_sso` or `sso_custom_providers_page`),
-# and an explicit `idp_id` goes directly to that provider. Registration
-# here honors `allow_registration`, the registration token, and
-# `registration_terms` exactly as the client registration endpoint does.
-#
-# reloadable: yes
-#
-#oidc_native_auth = false
-
-# Require OIDC clients (next-gen auth) to request an MSC2967 device scope.
-#
-# When false, a client that omits the `urn:matrix:client:device:<id>`
-# scope is assigned a server-generated device id, which is echoed back in
-# the granted scope. When true, the authorization-code grant is rejected
-# unless the client supplies a device scope, per the MSC2967 expectation
-# that the client owns its device id.
-#
-# reloadable: yes
-#
-#oidc_require_device_scope = false
-
-# Require PKCE (RFC 7636) with the S256 method on the OIDC
-# authorization-code grant.
-#
-# When true, the authorize endpoint rejects a request that carries no
-# `code_challenge`, as MSC2964 mandates for public clients. A present
-# challenge must always use S256; the `plain` method is rejected
-# regardless of this setting. Set to false only as a transition escape
-# hatch for a legacy client that cannot send a challenge.
-#
-# reloadable: yes
-#
-#oidc_require_pkce = true
-
-# Reject an OIDC authorization-code grant that requests a scope this
-# server does not recognise, instead of narrowing the granted scope down
-# to the recognised tokens.
-#
-# When false (default), an unrecognised scope token is dropped and the
-# narrowed `scope` is echoed back to the client per RFC 6749. When true,
-# an unrecognised scope is rejected. `openid` and the MSC2967 device and
-# api scopes (both spellings) are always recognised.
-#
-# reloadable: yes
-#
-#oidc_strict_scope = false
-
-# Initial access token required to register an OIDC client dynamically
-# (RFC 7591).
-#
-# When set, the registration endpoint requires the caller to present this
-# token as an `Authorization: Bearer` credential. No Matrix client sends
-# one, so any value here blocks next-gen auth login for every ordinary
-# client, Element X included. Leave it empty unless every OAuth client on
-# this server is registered out of band.
-#
-# reloadable: yes
-#
-#oidc_registration_access_token =
-
-# Allowlist of hostnames permitted in a dynamically-registered OIDC
-# client's redirect_uris.
-#
-# When non-empty, every redirect_uri presented at registration must match
-# this list or the registration is rejected. A redirect_uri with a host
-# matches an entry naming that host, compared case-insensitively; a
-# private-use scheme carries no host (RFC 8252, as in
-# `io.element.android:/`) and matches an entry naming the scheme, so
-# `["element.io", "io.element.android"]` covers a client on both web and
-# mobile.
-#
-# The default (empty) imposes no restriction at registration, but then
-# vouches for no client either, so every sign-in is subject to
-# `oidc_require_client_approval`. Listing an entry vouches for whatever
-# answers to it, so a scheme entry covers any app on the device claiming
-# that scheme (RFC 8252 §8.6) and a host entry covers every path on it.
-#
-# reloadable: yes
-#
-#oidc_registration_allowed_redirect_hosts = []
-
-# Ask the user to approve an unvetted OIDC client before its
-# authorization code is issued.
-#
-# Dynamic client registration is open by default, so anyone can register a
-# client with a redirect target they control and send an authorization
-# link to one of your users; without this prompt a single click hands that
-# client an authorization code for the account. When true (default), a
-# sign-in whose redirect target is not vetted shows an approve/deny page
-# naming the client first.
-#
-# A client is vetted when its redirect host or private-use scheme appears
-# in `oidc_registration_allowed_redirect_hosts`, so listing the clients
-# you serve restores a prompt-free sign-in. Because the prompt is a step
-# a person takes, a server that shows it wants a `login_token_ttl` long
-# enough to read the page.
-#
-# reloadable: yes
-#
-#oidc_require_client_approval = true
-
-# Require a `client_uri` in dynamic client registration requests
-# (RFC 7591 / MSC2966).
-#
-# When false (default), `client_uri` is optional; a client that supplies
-# one still has it validated (https, host, no userinfo) and the other URLs
-# in the request must share its host or a subdomain. When true, a
-# registration without an https `client_uri` is rejected with
-# `invalid_client_metadata`, enforcing the MSC2966 common-base model on
-# every client.
-#
-# reloadable: yes
-#
-#oidc_registration_require_client_uri = false
-
-# Token-bucket refill rate (requests per second) for the OIDC endpoints.
-#
-# Applies a shared per-client-IP throttle across the authorize, token,
-# dynamic-registration and device-grant endpoints. The default of `0`
-# disables the throttle, preserving open
-# access; raise it together with `oidc_rc_burst_count` to protect a server
-# exposed to a hostile network. The key is the client IP, so a rate low
-# enough to bite a brute-force attempt can also throttle many users behind
-# one NAT; size the burst accordingly.
-#
-# reloadable: yes
-#
-#oidc_rc_per_second = 0
-
-# Token-bucket depth (burst size) for the OIDC endpoint throttle.
-#
-# The number of requests a single client IP may make in a burst before the
-# `oidc_rc_per_second` refill rate governs. Ignored while
-# `oidc_rc_per_second` is `0`.
-#
-# reloadable: yes
-#
-#oidc_rc_burst_count = 0
-
 # Enable the rendezvous session APIs used to sign in with a QR code
 # (MSC4108 and MSC4388).
 #
@@ -950,31 +352,6 @@
 # reloadable: yes
 #
 #turn_ttl = 86400
-
-# List/vector of room IDs or room aliases that tuwunel will make newly
-# registered users join. The rooms specified must be rooms that you have
-# joined at least once on the server, and must be public.
-#
-# reloadable: yes
-# example: ["#tuwunel:grin.hu",
-# "!l2xV0sd51lraysuRcsWVECge4NULaH3g-ou95vgDgiM"]
-#
-#auto_join_rooms = []
-
-# This is a password that can be configured that will let you login to the
-# server bot account (currently `@conduit`) for emergency troubleshooting
-# purposes such as recovering/recreating your admin room, or inviting
-# yourself back.
-#
-# See https://tuwunel.chat/troubleshooting.html#lost-access-to-admin-room
-# for other ways to get back into your admin room.
-#
-# Once this password is unset, all sessions will be logged out for
-# security purposes.
-#
-# example: "F670$2CP@Hw8mG7RY1$%!#Ic7YA"
-#
-#emergency_password =
 
 # Suffix stripped from the gateway URL before constructing a push request.
 #
@@ -1123,46 +500,11 @@
 #
 #typing_client_timeout_max_s = 45
 
-# Set to true to allow user type "guest" registrations. Some clients like
-# Element attempt to register guest users automatically.
-# reloadable: yes
-#
-#allow_guest_registration = false
-
 # Set to true to log guest registrations in the admin room. Note that
 # these may be noisy or unnecessary if you're a public homeserver.
 # reloadable: yes
 #
 #log_guest_registrations = false
-
-# Set to true to allow guest registrations/users to auto join any rooms
-# specified in `auto_join_rooms`.
-# reloadable: yes
-#
-#allow_guests_auto_join_rooms = false
-
-# List of forbidden server names via regex patterns that we will block all
-# outgoing federated room directory requests for. Useful for preventing
-# our users from wandering into bad servers or spaces.
-#
-# reloadable: yes
-# example: ["badserver\.tld$", "badphrase", "19dollarfortnitecards"]
-#
-#forbidden_remote_room_directory_server_names = []
-
-# List of forbidden username patterns/strings.
-#
-# Regex can be used or explicit contains matches can be done by just
-# specifying the words (see example).
-#
-# This is checked upon username availability check, registration, and
-# startup as warnings if any local users in your database have a forbidden
-# username.
-#
-# reloadable: yes
-# example: ["administrator", "b[a4]dusernam[3e]", "badphrase"]
-#
-#forbidden_usernames = []
 
 # Allow admins to run commands outside the admin room ("#admins") by
 # prefixing a message with "\!admin" or "\\!admin" and a normal command.
@@ -1247,15 +589,6 @@
 # reloadable: yes
 #
 #report_room = (none)
-
-# Whether to grant the first user to register admin privileges by joining
-# them to the admin room. Note that technically the next user to register
-# when the admin room is empty (or only contains the server-user) is
-# granted, and only when the admin room is enabled.
-#
-# reloadable: yes
-#
-#grant_admin_to_first_user = true
 
 # Whether the admin room is created on first startup. Users should not set
 # this to false. Developers can set this to false during integration tests
@@ -1398,57 +731,6 @@
 #
 #hydra_backports = true
 
-# Limits the number of One Time Keys per device (not per-algorithm). The
-# reference implementation maintains 50 OTK's at any given time, therefor
-# our default is at least five times that. There is no known reason for an
-# administrator to adjust this value; it is provided here rather than
-# hardcoding it.
-#
-# reloadable: yes
-#
-#one_time_key_limit = 256
-
-# (EXPERIMENTAL) Setting this option to true replaces the list of identity
-# providers displayed on a client's login page with a single button "Sign
-# in with single sign-on" linking to the URL
-# `/_matrix/client/v3/login/sso/redirect`. All configured providers are
-# attempted for authorization. All authorizations associate with the same
-# Matrix user. NOTE: All authorizations must succeed, as there is no
-# reliable way to skip a provider.
-#
-# This option is disabled by default, allowing the client to list
-# configured providers and permitting privacy-conscious users to authorize
-# only their choice.
-#
-# Note that fluffychat always displays a single button anyway. You do not
-# need to enable this to use fluffychat; instead we offer a
-# default-provider option, see `default` in the provider config section.
-# reloadable: yes
-#
-#single_sso = false
-
-# Setting this option to true replaces the list of identity providers on
-# the client's login screen with a single button "Sign in with single
-# sign-on" linking to the URL `/_matrix/client/v3/login/sso/redirect`. The
-# deployment is expected to intercept this URL with their reverse-proxy to
-# provide a custom webpage listing providers; each entry linking or
-# redirecting back to one of the configured identity providers at
-# /_matrix/client/v3/login/sso/redirect/<client_id>`.
-#
-# This option defaults to false, allowing the client to generate the list
-# of providers or hide all SSO-related options when none configured.
-# reloadable: yes
-#
-#sso_custom_providers_page = false
-
-# From MSC3824:
-# > If the client finds oauth_aware_preferred to be true then, assuming it
-# > supports that auth type, it should present this as the only
-# > login/registration method available to the user.
-# reloadable: yes
-#
-#oidc_aware_preferred = false
-
 # Directory containing appservice yaml registration files.
 #
 #appservice_dir = ""
@@ -1469,15 +751,6 @@
 # false continues to skip migrations as configured.
 #
 #database_migrations = true
-
-# Set this to true for excluding unencrypted rooms from the common-rooms
-# calculation deciding the receivers of device list updates.
-#
-# Setting this to true can help performance on very large homeservers,
-# but it may not be spec compliant and risky for client expectations.
-# reloadable: yes
-#
-#device_key_update_encrypted_rooms_only = false
 
 
 
@@ -1547,6 +820,410 @@
 # A regular expression defining which values this namespace includes.
 #
 #regex =
+
+
+
+#[global.authentication]
+
+# Authenticates Matrix Authentication Service provisioning calls with a
+# shared secret.
+#
+# When set, the `/_synapse/mas/*` endpoints accept only requests bearing
+# this exact secret as their bearer token; when unset, they reject every
+# request. Use a high-entropy value identical to the secret configured in
+# MAS.
+#
+# reloadable: yes
+# example: "kZ2hN5pQ8wXyL4mR7tBfCgJxV3aD6sE1u"
+#
+#mas_secret =
+
+# Sets the OpenID token lifetime in seconds.
+#
+# These tokens primarily serve Matrix account integrations, such as
+# Vector Integrations in Element, rather than OIDC or OpenID Connect.
+#
+# reloadable: yes
+#
+#openid_token_ttl = 3600
+
+# Sets the access-token lifetime in seconds.
+#
+# For clients supporting refresh tokens, the access token supplied at
+# login is invalidated after this interval, soft-logging out the client
+# until it refreshes.
+#
+# reloadable: yes
+#
+#access_token_ttl = 604800
+
+# Allows emergency login to the server bot account, currently `@conduit`.
+#
+# Use it for troubleshooting such as recovering or recreating the admin
+# room or inviting yourself back. Other recovery methods are described in
+# the [admin-room troubleshooting
+# guide](https://tuwunel.chat/troubleshooting.html#lost-access-to-admin-room).
+# Unsetting this password logs out all sessions for security.
+#
+# example: "F670$2CP@Hw8mG7RY1$%!#Ic7YA"
+#
+#emergency_password =
+
+
+
+#[global.authentication.argon2]
+
+# Sets the Argon2id working-buffer size for hashing a new password, in 1
+# KiB blocks.
+#
+# Each concurrent password operation retains roughly this much memory
+# for its duration, with no concurrency bound. Stored hashes retain their
+# parameters until the account's password is next set.
+#
+# Lowering this weakens resistance to parallel cracking hardware unless
+# `authentication.argon2.t_cost` compensates; equivalent-strength
+# (`authentication.argon2.m_cost`, `authentication.argon2.t_cost`) pairs
+# are (47104, 1), (19456, 2), (12288, 3), (9216, 4), and (7168, 5). The
+# default and these pairs follow the [OWASP Argon2id
+# recommendation](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html#argon2id).
+#
+# reloadable: yes
+#
+#m_cost = 19456
+
+# Sets the number of Argon2id passes over its working buffer.
+#
+# Raising this increases CPU cost without changing memory cost. See
+# `authentication.argon2.m_cost` for equivalent-strength parameter pairs.
+#
+# reloadable: yes
+#
+#t_cost = 2
+
+# Sets the number of lanes in an Argon2id working buffer.
+#
+# Lanes are computed sequentially here, so raising this changes the hash
+# without adding parallelism. `authentication.argon2.m_cost` must be at
+# least eight times this value.
+#
+# reloadable: yes
+#
+#p_cost = 1
+
+
+
+#[global.authentication.login]
+
+# Allows an existing session to mint a login token for another client.
+#
+# This requires interactive authentication and is enabled by default. A
+# malicious client could use it to spawn additional sessions, so enabling
+# it has security implications.
+#
+# reloadable: yes
+#
+#via_existing_session = true
+
+# Enables the login-token route to accept tokens.
+#
+# The server can generate tokens for authorization flows such as SSO,
+# which disabling this may break. This differs from
+# `authentication.login.via_existing_session` and lacks that setting's
+# security implications: keep this enabled while disabling the other to
+# prevent clients from commanding token creation without preventing the
+# server from creating tokens.
+#
+# reloadable: yes
+#
+#via_token = true
+
+# Enables traditional username-and-password login.
+#
+# Disable this to allow only other mechanisms, such as SSO.
+#
+# reloadable: yes
+#
+#with_password = true
+
+# Sets the login-token lifetime in milliseconds.
+#
+# These short-lived tokens serve `m.login.token`, allowing existing
+# sessions to create new sessions. See
+# `authentication.login.via_existing_session`.
+#
+# reloadable: yes
+#
+#token_ttl = 120000
+
+# Experimentally replaces the client login provider list with one "Sign
+# in with single sign-on" button.
+#
+# The button links to `/_matrix/client/v3/login/sso/redirect`, attempting
+# every configured provider for the same Matrix user; every authorization
+# must succeed because providers cannot reliably be skipped. Disabled by
+# default, it otherwise lets clients list providers so privacy-conscious
+# users can authorize only their choice. For clients that already show
+# one button, use the provider configuration's `default` option instead.
+#
+# reloadable: yes
+#
+#single_sso = false
+
+# Replaces the client login provider list with one button for a custom
+# provider page.
+#
+# The "Sign in with single sign-on" button links to
+# `/_matrix/client/v3/login/sso/redirect`, which the deployment's reverse
+# proxy must intercept to serve a custom list. Each entry links or
+# redirects to its configured provider at
+# `/_matrix/client/v3/login/sso/redirect/<client_id>`. The default false
+# lets clients generate their provider list or hide SSO options when none
+# are configured.
+#
+# reloadable: yes
+#
+#sso_custom_providers_page = false
+
+# Prefers OIDC-aware authentication under
+# [MSC3824](https://github.com/matrix-org/matrix-spec-proposals/pull/3824).
+#
+# When clients find `oauth_aware_preferred` true and support that
+# authentication type, they should present it as the only login or
+# registration method.
+#
+# reloadable: yes
+#
+#oidc_aware_preferred = false
+
+
+
+#[global.authentication.oidc]
+
+# Enables native registration and login on the built-in OIDC provider.
+#
+# This authenticates next-generation Matrix clients against local
+# accounts without a third-party `identity_provider`; when false, as by
+# default, the provider only brokers authentication through a configured
+# upstream provider. When true, requests selecting no provider receive a
+# login or registration page and require `well_known.client`; the login
+# page offers local accounts and configured providers, with one SSO entry
+# under `authentication.login.single_sso` or
+# `authentication.login.sso_custom_providers_page`. An explicit `idp_id`
+# goes directly to its provider. Registration honors
+# `registration.enable`, the registration token, and root
+# `registration_terms` exactly as client registration does.
+#
+# reloadable: yes
+#
+#native_auth = false
+
+# Requires OIDC clients to request an
+# [MSC2967](https://github.com/matrix-org/matrix-spec-proposals/pull/2967)
+# device scope.
+#
+# When false, clients omitting `urn:matrix:client:device:<id>` receive a
+# server-generated device ID echoed in the granted scope. When true,
+# authorization-code grants without a device scope are rejected,
+# following the proposal's expectation that clients own their device IDs.
+#
+# reloadable: yes
+#
+#require_device_scope = false
+
+# Requires [RFC 7636](https://www.rfc-editor.org/rfc/rfc7636) PKCE with
+# S256 on OIDC authorization-code grants.
+#
+# When true, the authorize endpoint rejects requests without
+# `code_challenge`, as
+# [MSC2964](https://github.com/matrix-org/matrix-spec-proposals/pull/2964)
+# mandates for public clients. A supplied challenge must always use S256,
+# and `plain` is rejected regardless of this setting. Disable only
+# temporarily for a legacy client unable to send a challenge.
+#
+# reloadable: yes
+#
+#require_pkce = true
+
+# Rejects OIDC authorization-code grants containing unrecognized scopes
+# instead of narrowing the grant.
+#
+# When false, as by default, unknown scope tokens are dropped and the
+# narrowed `scope` is echoed to the client under [RFC
+# 6749](https://www.rfc-editor.org/rfc/rfc6749); when true, an unknown
+# scope is rejected. `openid` and both spellings of the
+# [MSC2967](https://github.com/matrix-org/matrix-spec-proposals/pull/2967)
+# device and API scopes are always recognized.
+#
+# reloadable: yes
+#
+#strict_scope = false
+
+# Requires an initial access token for dynamic OIDC client registration
+# under [RFC 7591](https://www.rfc-editor.org/rfc/rfc7591).
+#
+# When set, callers must supply it as an `Authorization: Bearer`
+# credential; clients that omit it cannot dynamically register for
+# next-generation login. Leave empty unless every OAuth client is
+# registered out of band.
+#
+# reloadable: yes
+#
+#registration_access_token =
+
+# Lists permitted hosts and private-use schemes for dynamically
+# registered OIDC redirect URIs.
+#
+# When nonempty, every redirect URI must match or registration is
+# rejected: hosts match case-insensitively, while hostless private-use
+# URIs such as `io.element.android:/` match their scheme under [RFC
+# 8252](https://www.rfc-editor.org/rfc/rfc8252). For example,
+# `["element.io", "io.element.android"]` covers web and mobile clients.
+#
+# The empty default imposes no registration restriction and vouches for
+# no client, so every sign-in remains subject to
+# `authentication.oidc.require_client_approval`. Listing an entry vouches
+# for any responding client: a scheme covers any device app claiming it
+# under [RFC 8252 section
+# 8.6](https://www.rfc-editor.org/rfc/rfc8252#section-8.6), and a host
+# covers every path.
+#
+# reloadable: yes
+#
+#registration_allowed_redirect_hosts = []
+
+# Asks users to approve unvetted OIDC clients before issuing
+# authorization codes.
+#
+# Dynamic registration is open by default, so anyone can register a
+# controlled redirect target and send users an authorization link;
+# without confirmation, one click gives that client an account
+# authorization code. When true, as by default, unvetted sign-ins first
+# show an approve/deny page naming the client. A host or private-use
+# scheme listed in
+# `authentication.oidc.registration_allowed_redirect_hosts` vets its
+# client and restores prompt-free sign-in. When showing this prompt,
+# allow enough `authentication.login.token_ttl` for users to read it.
+#
+# reloadable: yes
+#
+#require_client_approval = true
+
+# Requires `client_uri` in dynamic registration under [RFC
+# 7591](https://www.rfc-editor.org/rfc/rfc7591) and
+# [MSC2966](https://github.com/matrix-org/matrix-spec-proposals/pull/2966).
+#
+# When false, as by default, it is optional; any supplied URI still
+# requires HTTPS, a host, and no userinfo, and other request URLs must
+# share that host or a subdomain. When true, registrations lacking an
+# HTTPS `client_uri` fail with `invalid_client_metadata`, enforcing the
+# common-base model for every client.
+#
+# reloadable: yes
+#
+#registration_require_client_uri = false
+
+# Sets the per-client-IP token-bucket refill rate for OIDC endpoints in
+# requests per second.
+#
+# The throttle is shared across authorize, token, dynamic-registration,
+# and device-grant endpoints. The default 0 disables it and preserves
+# open access; raise this with `authentication.oidc.rc_burst_count` to
+# protect an exposed server. Because the key is client IP, rates that
+# limit brute force can also affect many users behind one NAT, so size
+# the burst accordingly.
+#
+# reloadable: yes
+#
+#rc_per_second = 0
+
+# Sets the token-bucket depth for the OIDC endpoint throttle.
+#
+# This is the requests one client IP can make in a burst before
+# `authentication.oidc.rc_per_second` governs replenishment. It is
+# ignored when that refill rate is 0.
+#
+# reloadable: yes
+#
+#rc_burst_count = 0
+
+
+
+#[global.authentication.refresh_token]
+
+# Sets the refresh-token lifetime in seconds.
+#
+# Tokens are rejected after this interval;
+# `authentication.refresh_token.idle_only` determines whether the
+# deadline slides with use or stays fixed at issuance. The default 0
+# disables refresh-token expiry entirely. A typical enabled value is
+# 259200, or three days.
+#
+# reloadable: yes
+#
+#ttl = 0
+
+# Uses the refresh-token lifetime as an idle timeout instead of an
+# absolute session lifetime.
+#
+# With a nonzero `authentication.refresh_token.ttl`, true, the default,
+# resets the deadline to now plus that lifetime after each successful
+# rotation; false retains an existing deadline rather than extending it. A
+# successful grace replay retains its current successor and does not
+# reset that successor's deadline. A zero TTL issues replacement tokens
+# without expiry.
+#
+# reloadable: yes
+#
+#idle_only = true
+
+# Removes the device on refresh-token expiry instead of soft-logging out.
+#
+# When false, as by default, expiry returns `M_UNKNOWN_TOKEN` with
+# `soft_logout: true`, allowing the client to retain E2EE keys and local
+# state and reauthenticate on the same device. When true, expiry
+# invalidates the access token, deletes the device record, and signals
+# `soft_logout: false`; the next session uses a new device and cannot
+# recover E2EE history from local state alone, trading usability for the
+# [CWE-613](https://cwe.mitre.org/data/definitions/613.html) guarantee.
+# Tokens issued with zero TTL do not expire, and changing the current TTL
+# does not remove an already stored expiry.
+#
+# reloadable: yes
+#
+#hard_logout = false
+
+# Sets the grace window in seconds for a benign refresh-token double
+# submission.
+#
+# After rotation, the spent token is retained for one generation; within
+# a nonzero window, a replay can issue a fresh access token while
+# retaining its current, resolvable, unexpired successor. An expired
+# successor triggers the configured expiry logout, while an unresolvable
+# successor is refused without changes.
+#
+# A token classified as spent outside grace on arrival is rejected, with
+# device revocation only when `authentication.refresh_token.reuse_revoke`
+# is enabled; zero disables grace. A request current on arrival but spent
+# while waiting for the device lock can instead be refused without
+# revocation, including at zero grace.
+#
+# reloadable: yes
+#
+#reuse_grace = 15
+
+# Revokes the device when refresh-token reuse is detected.
+#
+# When true, as by default, reuse detected outside
+# `authentication.refresh_token.reuse_grace` on arrival removes the
+# device under the
+# [RFC 6819](https://www.rfc-editor.org/rfc/rfc6819) compromised-session
+# model. When false, the replayed request is rejected but the device
+# remains intact, a less restrictive behavior operators using another
+# OAuth client may prefer.
+#
+# reloadable: yes
+#
+#reuse_revoke = true
 
 
 
@@ -1786,6 +1463,134 @@
 # low can inhibit throughput.
 #
 #queue_mult = 4
+
+
+
+#[global.directory]
+
+
+
+#[global.directory.rooms]
+
+# Allows federation access to the public room directory.
+#
+# Disabling this protects against `/publicRooms` spiders but prevents
+# external users from viewing the directory. This is inherently false
+# when `federation.enable` is disabled.
+#
+# reloadable: yes
+#
+#allow_over_federation = false
+
+# Allows client API queries of the public room directory without an
+# access token, exposing it to unauthenticated `/publicRooms` spiders.
+#
+# reloadable: yes
+#
+#allow_without_auth = false
+
+# Allows directory searches to match partial room IDs when the search
+# starts with "!".
+#
+# reloadable: yes
+#
+#allow_public_search_by_id = true
+
+# Allows room-ID searches to return joinable rooms absent from public
+# listings.
+#
+# The default true lets users paste room IDs into search boxes to join,
+# matching their expectations even when rooms opt out of public listings.
+# Set false to restrict results to rooms discoverable through aliases or
+# other queries, specifically those in the public directory. To prevent
+# abuse, several room-ID characters must be known before results are
+# returned.
+#
+# reloadable: yes
+#
+#allow_unlisted_search_by_id = true
+
+# Restricts publishing rooms in the public directory to admins.
+#
+# All users can still unpublish rooms when this is enabled.
+#
+# reloadable: yes
+#
+#lockdown = false
+
+# Blocks outgoing federated room-directory requests to server names
+# matching listed regular expressions to prevent users from wandering
+# into unwanted servers or spaces.
+#
+# reloadable: yes
+# example: ["badserver\.tld$", "badphrase", "19dollarfortnitecards"]
+#
+#forbidden_remote_server_names = []
+
+
+
+#[global.directory.users]
+
+# Shows all local users in directory searches.
+#
+# When false, only users in public rooms or rooms shared with the
+# searcher appear. Appservice senders and users in exclusive appservice
+# namespaces remain hidden unless `directory.users.show_appservice` is
+# also enabled.
+#
+# reloadable: yes
+#
+#show_all_local = false
+
+# Includes appservice senders and users in exclusive appservice
+# namespaces in directory searches.
+#
+# Normal room-visibility rules still apply unless
+# `directory.users.show_all_local` is also enabled.
+#
+# reloadable: yes
+#
+#show_appservice = false
+
+
+
+#[global.encryption]
+
+# Allows encrypted rooms and events.
+#
+# reloadable: yes
+#
+#allow = true
+
+# Selects which locally created rooms use end-to-end encryption by
+# default.
+#
+# "all" encrypts every created room, while "invite" encrypts rooms using
+# the `private_chat` or `trusted_private_chat` preset. The explicit "none"
+# value and all other values have no effect.
+#
+# reloadable: yes
+#
+#enabled_by_default_for_room_type = "none"
+
+# Limits one-time keys per device across all algorithms.
+#
+# The default allows 256 keys; there is no known reason for an
+# administrator to change it.
+#
+# reloadable: yes
+#
+#one_time_key_limit = 256
+
+# Excludes unencrypted rooms when selecting common-room recipients of
+# device-list updates.
+#
+# Enabling this can improve performance on very large servers but may
+# violate the specification and client expectations.
+#
+# reloadable: yes
+#
+#device_key_update_encrypted_rooms_only = false
 
 
 
@@ -2298,7 +2103,8 @@
 #callback_url =
 
 # When more than one identity_provider has been configured and
-# `single_sso` is false and `sso_custom_providers_page` is false this will
+# `authentication.login.single_sso` is false and
+# `authentication.login.sso_custom_providers_page` is false this will
 # determine the behavior of the `/_matrix/client/v3/login/sso/redirect`
 # endpoint (note the url lacks a trailing `client_id`).
 #
@@ -3391,6 +3197,103 @@
 
 
 
+#[global.profile]
+
+# Requires authentication on profile retrieval endpoints when enabled.
+#
+# This covers normally unauthenticated GET requests to
+# `/_matrix/client/v3/profile/{userId}` and can prevent profile scraping.
+#
+# reloadable: yes
+#
+#require_auth = false
+
+# Limits fields retained in a remote user's cached profile.
+#
+# The count includes `displayname` and `avatar_url` and must exceed zero.
+# A refresh exceeding it is rejected without changing the cache. Lowering
+# the limit leaves existing profiles intact, but subsequent refreshes
+# must fit.
+#
+# reloadable: yes
+#
+#max_remote_fields = 100
+
+# Limits selected profile fields in a sync request or stored filter.
+#
+# This positive limit counts raw selectors before deduplication in
+# sliding and legacy sync; requests exceeding it or the 255-byte name
+# limit are rejected. Sliding sync retains normalized selections when
+# selectors are omitted, so after lowering the limit an oversized
+# selection needs replacement or a restarted connection. Unfiltered
+# sliding-sync profiles are not limited by this count.
+#
+# reloadable: yes
+#
+#max_fields_per_request = 64
+
+# Allows standard users to set or clear display names through the client
+# profile API.
+#
+# Server admins and appservices can always change display names.
+#
+# reloadable: yes
+#
+#enable_set_displayname = true
+
+# Restricts client profile retrieval to the user themselves or users
+# sharing a currently joined room.
+#
+# Appservices are exempt; other users receive 403 `M_FORBIDDEN`. Startup
+# and configuration reload refuse this setting unless
+# `profile.require_auth` is also enabled. Federation profile lookups are
+# unaffected and remain controlled by
+# `profile.allow_inbound_federation_lookups`.
+#
+# reloadable: yes
+#
+#limit_requests_to_users_who_share_rooms = false
+
+# Preserves per-room profile overrides when no propagation mode is
+# supplied to the profile service.
+#
+# For such calls, true, the default, skips display-name or avatar changes
+# in rooms where that field differs from the prior global profile,
+# preserving overrides such as `/myroomnick`; false applies the new
+# global value throughout the joined rooms. The client profile endpoints
+# supply an explicit mode and default to `all`, so this setting does not
+# protect overrides through those endpoints. Clients can request `all`,
+# `unchanged`, or `none` with the
+# [MSC4466](https://github.com/matrix-org/matrix-spec-proposals/pull/4466)
+# `computer.gingershaped.msc4466.propagate_to` query parameter.
+#
+# reloadable: yes
+#
+#preserve_room_overrides = true
+
+# Allows device display names to be federated and seen by external users.
+#
+# This is inherently false when `federation.enable` is disabled. Leave
+# disabled for privacy.
+#
+# reloadable: yes
+#
+#allow_device_name_federation = false
+
+# Allows incoming federation profile lookups for local users.
+#
+# Disabling `/_matrix/federation/v1/query/profile` lookups protects local
+# profile information such as display names and can deter scraping, but
+# remote users may see a false "this user does not exist" error when
+# inviting local users to a room or direct message. This is inherently
+# false when `federation.enable` is disabled.
+#
+# reloadable: yes
+#
+#allow_inbound_federation_lookups = true
+
+
+
 #[global.rate_limiting]
 
 
@@ -3460,6 +3363,148 @@
 # reloadable: yes
 #
 #burst_count = 3
+
+
+
+#[global.registration]
+
+# Appends text to a new user's display name at registration, separated by
+# a space.
+#
+# Conduit used a lightning-bolt emoji for this suffix. Set to an empty
+# string to disable it.
+#
+# reloadable: yes
+#
+#displayname_suffix = "💕"
+
+# Enables ordinary new account registration.
+#
+# When false, ordinary registration is disabled; appservice registration
+# is exempt from this switch. Without a configured token, registration
+# without a second step requires
+# `registration.yes_i_am_very_very_sure_i_want_an_open_registration_server_prone_to_abuse`
+# to be true. For token-only registration, configure `registration.token`
+# or `registration.token_file`.
+#
+# reloadable: yes
+#
+#enable = false
+
+# Opens registration to anyone without restrictions.
+#
+# This makes the server vulnerable to abuse.
+#
+# reloadable: yes
+#
+#yes_i_am_very_very_sure_i_want_an_open_registration_server_prone_to_abuse = false
+
+# Requires new users to supply this static token when creating an
+# account.
+#
+# Configure this value or use `registration.token_file`. If unset while
+# `registration.enable` is true, unrestricted registration requires
+# `registration.yes_i_am_very_very_sure_i_want_an_open_registration_server_prone_to_abuse`
+# to be true.
+#
+# reloadable: yes
+# example: "o&^uCtes4HPf0Vu@F20jQeeWE7"
+#
+#token =
+
+# Reads additional registration tokens from a file.
+#
+# Separate multiple tokens with whitespace. The file must be nonempty and
+# accessible to the server.
+#
+# reloadable: yes
+# example: "/etc/tuwunel/.reg_token"
+#
+#token_file =
+
+# Enables out-of-band account creation with a pre-shared secret.
+#
+# The Synapse-style `/_synapse/admin/v1/register` endpoint requires a
+# build with `synapse_admin` and is not routed when MAS delegation is
+# active. Configure this value or `registration.shared_secret_file`;
+# requests authenticate with HMAC-SHA1 keyed by the resolved secret and
+# bypass UIAA. The file takes precedence when successfully read. Use a
+# high-entropy secret of at least 32 bytes and protect it like a server
+# admin's access token.
+#
+# reloadable: yes
+# example: "kZ2hN5pQ8wXyL4mR7tBfCgJxV3aD6sE1u"
+#
+#shared_secret =
+
+# Reads the registration shared secret from a file.
+#
+# This takes precedence over `registration.shared_secret` and falls back
+# to it only when the file cannot be read. Surrounding whitespace is
+# trimmed, so a trailing newline is not part of the secret. A present but
+# blank file resolves to no secret without falling back.
+#
+# reloadable: yes
+# example: "/etc/tuwunel/.reg_shared_secret"
+#
+#shared_secret_file =
+
+# Lists room IDs or aliases that eligible newly registered users
+# automatically join.
+#
+# The server must already participate in each room, and the user must
+# satisfy its normal join authorization rules, including for restricted
+# rooms. Rooms are processed in configured order, so an earlier join can
+# satisfy a later room's membership requirement. Appservice registrations
+# are excluded; guests require `registration.guests.allow_auto_join_rooms`.
+# Failed joins are logged without failing registration.
+#
+# reloadable: yes
+# example: ["#tuwunel:grin.hu",
+# "!l2xV0sd51lraysuRcsWVECge4NULaH3g-ou95vgDgiM"]
+#
+#auto_join_rooms = []
+
+# Forbids usernames matching listed patterns.
+#
+# Use regular expressions or plain words for containment matches, as in
+# the example. Checks run during username-availability requests and
+# registration, with startup warnings for existing local users whose
+# names match.
+#
+# reloadable: yes
+# example: ["administrator", "b[a4]dusernam[3e]", "badphrase"]
+#
+#forbidden_usernames = []
+
+# Grants admin privileges during eligible registration by joining the
+# user to the admin room.
+#
+# The registering user must be neither a guest nor an appservice user,
+# and the registration caller must permit the first-user grant. The admin
+# room must exist and have exactly one joined member, normally the server
+# user; an empty admin room does not qualify.
+#
+# reloadable: yes
+#
+#grant_admin_to_first_user = true
+
+
+
+#[global.registration.guests]
+
+# Allows registrations with user type "guest".
+#
+# reloadable: yes
+#
+#enable = false
+
+# Allows guest users to automatically join rooms listed in
+# `registration.auto_join_rooms`.
+#
+# reloadable: yes
+#
+#allow_auto_join_rooms = false
 
 
 

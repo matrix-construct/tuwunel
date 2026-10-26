@@ -506,7 +506,8 @@ async fn set_profile_keys_locked(
 		if self
 			.services
 			.config
-			.preserve_room_profile_overrides
+			.profile
+			.preserve_room_overrides
 		{
 			Propagation::Unchanged
 		} else {
@@ -861,7 +862,8 @@ pub fn check_requested_fields(&self, fields: &[ProfileFieldName]) -> Result {
 		> self
 			.services
 			.config
-			.max_profile_fields_per_request
+			.profile
+			.max_fields_per_request
 	{
 		return Err!(Request(InvalidParam("Too many selected profile fields.")));
 	}

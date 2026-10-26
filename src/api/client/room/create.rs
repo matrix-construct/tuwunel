@@ -329,7 +329,7 @@ async fn apply_preset_state_pdus(
 		.iter()
 		.map(|state| Ok(state.deserialize_as_unchecked::<InitialEvent>()?))
 		.filter_ok(|event| {
-			services.config.allow_encryption || event.event_type != StateEventType::RoomEncryption
+			services.config.encryption.allow || event.event_type != StateEventType::RoomEncryption
 		})
 		.filter_ok(|event| {
 			// client/appservice workaround: if a user sends an initial_state event with a
@@ -427,13 +427,14 @@ async fn apply_initial_state_pdus(
 			.await?;
 	}
 
-	if !services.config.allow_encryption || is_encrypted {
+	if !services.config.encryption.allow || is_encrypted {
 		return Ok(());
 	}
 
 	let config = services
 		.config
-		.encryption_enabled_by_default_for_room_type
+		.encryption
+		.enabled_by_default_for_room_type
 		.as_deref();
 
 	let should_encrypt = match config {
@@ -1003,10 +1004,7 @@ async fn can_publish_directory_check(
 	services: &Services,
 	body: &Ruma<create_room::v3::Request>,
 ) -> Result {
-	if !services
-		.server
-		.config
-		.lockdown_public_room_directory
+	if !services.server.config.directory.rooms.lockdown
 		|| body.appservice_info.is_some()
 		|| body.visibility != room::Visibility::Public
 		|| services
@@ -1018,8 +1016,8 @@ async fn can_publish_directory_check(
 	}
 
 	let msg = format!(
-		"Non-admin user {} tried to publish new to the directory while \
-		 lockdown_public_room_directory is enabled",
+		"Non-admin user {} tried to publish new to the directory while directory.rooms.lockdown \
+		 is enabled",
 		body.sender_user(),
 	);
 

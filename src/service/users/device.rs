@@ -415,7 +415,7 @@ async fn expire_refresh_token(
 	device_id: &DeviceId,
 ) -> Error {
 	let config = &self.services.server.config;
-	let hard = config.refresh_token_hard_logout;
+	let hard = config.authentication.refresh_token.hard_logout;
 
 	hard.then_async(|| self.remove_device_locked(lock, user_id, device_id))
 		.unwrap_or_else_async(async || {
@@ -431,7 +431,7 @@ async fn expire_refresh_token(
 /// Refuses a refresh token presented again after its rotation.
 ///
 /// Reuse outside the grace window suggests the token was copied, so the device
-/// is removed when `refresh_token_reuse_revoke` is set.
+/// is removed when `authentication.refresh_token.reuse_revoke` is set.
 #[implement(super::Service)]
 async fn revoke_reused_refresh_token(
 	&self,
@@ -440,7 +440,7 @@ async fn revoke_reused_refresh_token(
 	device_id: &DeviceId,
 ) -> Error {
 	let config = &self.services.server.config;
-	let revoke = config.refresh_token_reuse_revoke;
+	let revoke = config.authentication.refresh_token.reuse_revoke;
 
 	if revoke {
 		warn!(%user_id, %device_id, "Revoking a device whose refresh token was reused.");
@@ -585,9 +585,14 @@ pub async fn remove_access_token_value(&self, access_token: &str) {
 #[implement(super::Service)]
 pub fn generate_access_token(&self, expires: bool) -> (String, Option<Duration>) {
 	let access_token = random_string(TOKEN_LENGTH);
-	let expires_in = expires
-		.then_some(self.services.server.config.access_token_ttl)
-		.map(Duration::from_secs);
+	let ttl = self
+		.services
+		.server
+		.config
+		.authentication
+		.access_token_ttl;
+
+	let expires_in = expires.then_some(ttl).map(Duration::from_secs);
 
 	(access_token, expires_in)
 }
@@ -609,8 +614,8 @@ async fn set_refresh_token(
 	debug_assert!(refresh_token.starts_with("refresh_"), "refresh_token missing prefix");
 
 	let config = &self.services.server.config;
-	let ttl = config.refresh_token_ttl;
-	let idle_only = config.refresh_token_idle_only;
+	let ttl = config.authentication.refresh_token.ttl;
+	let idle_only = config.authentication.refresh_token.idle_only;
 	let userdeviceid = (user_id, device_id);
 	let outgoing = self
 		.db
@@ -826,7 +831,10 @@ pub async fn classify_refresh_token(&self, presented: &str) -> RefreshToken {
 		.services
 		.server
 		.config
-		.refresh_token_reuse_grace;
+		.authentication
+		.refresh_token
+		.reuse_grace;
+
 	let elapsed = duration_since_epoch(SystemTime::now())
 		.as_secs()
 		.saturating_sub(spent_at);

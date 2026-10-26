@@ -580,7 +580,13 @@ impl Service {
 	pub fn create_openid_token(&self, user_id: &UserId, token: &str) -> Result<u64> {
 		use std::num::Saturating as Sat;
 
-		let expires_in = self.services.server.config.openid_token_ttl;
+		let expires_in = self
+			.services
+			.server
+			.config
+			.authentication
+			.openid_token_ttl;
+
 		let expires_at = Sat(utils::millis_since_unix_epoch()) + Sat(expires_in) * Sat(1000);
 
 		let mut value = expires_at.0.to_be_bytes().to_vec();
@@ -646,7 +652,14 @@ impl Service {
 	) -> u64 {
 		use std::num::Saturating as Sat;
 
-		let expires_in = self.services.server.config.login_token_ttl;
+		let expires_in = self
+			.services
+			.server
+			.config
+			.authentication
+			.login
+			.token_ttl;
+
 		let expires_at = Sat(utils::millis_since_unix_epoch()) + Sat(expires_in);
 
 		// A trailing Option is additive under the workspace KV codec evolution rule.

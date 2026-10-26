@@ -37,8 +37,8 @@ fn authorization_and_notice_membership() -> Result {
 		.with_loopback_listener(port)
 		.with_option("listening=true")
 		.with_option("create_admin_room=true")
-		.with_option("grant_admin_to_first_user=false")
-		.with_option("registration_shared_secret=\"notices-test\"");
+		.with_option("registration.grant_admin_to_first_user=false")
+		.with_option("registration.shared_secret=\"notices-test\"");
 
 	let runtime = Runtime::new(Some(&args))?;
 	let server = Server::new(Some(&args), Some(&runtime))?;

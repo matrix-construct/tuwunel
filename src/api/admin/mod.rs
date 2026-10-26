@@ -66,7 +66,8 @@ async fn authorize(services: &State, caller: &UserId, target: &UserId) -> Result
 
 /// Refuses the server user as the target of a user endpoint.
 ///
-/// Its password comes only from the `emergency_password` option, whose removal
+/// Its password comes only from the `authentication.emergency_password` option,
+/// whose removal
 /// signs it out again; a password, session or status set here would outlast
 /// that.
 pub(crate) fn refuse_server_user(services: State, user_id: &UserId) -> Result {
@@ -85,6 +86,7 @@ pub(crate) fn refuse_server_user(services: State, user_id: &UserId) -> Result {
 /// mirroring Synapse's de-registration of those servlets.
 pub(crate) fn mas_active(config: &Config) -> bool {
 	config
+		.authentication
 		.mas_secret
 		.as_deref()
 		.is_some_and(|secret| !secret.is_empty())

@@ -160,7 +160,7 @@ fn handle_device_verify(services: &Services, user_code: Option<&str>) -> Result<
 
 	// Validating the code before authentication exposes the RFC 8628 §5.1
 	// brute-force oracle, so defer it to the authenticated callback.
-	match services.config.oidc_native_auth {
+	match services.config.authentication.oidc.native_auth {
 		| true => device_native_redirect(services, user_code),
 		| false => {
 			let idp_id = services.oauth.providers.get_default_id();

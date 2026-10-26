@@ -213,7 +213,7 @@ pub(crate) async fn delete_profile_field_route(
 }
 
 /// Refuses a profile read withheld by
-/// `limit_profile_requests_to_users_who_share_rooms`.
+/// `profile.limit_requests_to_users_who_share_rooms`.
 ///
 /// Appservices and a user reading their own profile are exempt. The refusal
 /// precedes the existence check, so it discloses nothing about the profile.
@@ -223,7 +223,8 @@ where
 {
 	if services
 		.config
-		.limit_profile_requests_to_users_who_share_rooms
+		.profile
+		.limit_requests_to_users_who_share_rooms
 		.is_false()
 		|| body.appservice_info.is_some()
 	{
@@ -245,7 +246,7 @@ where
 		.ok_or_else(|| err!(Request(Forbidden("Profile isn't available."))))
 }
 
-/// Refuses a display name change withheld by `enable_set_displayname`.
+/// Refuses a display name change withheld by `profile.enable_set_displayname`.
 ///
 /// Only display name writes are gated; `may_set_displayname` decides who is
 /// exempt.

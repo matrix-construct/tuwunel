@@ -30,7 +30,7 @@ type Fields = SmallVec<[(ProfileFieldName, Option<Value>); 2]>;
 #[implement(Service)]
 #[tracing::instrument(level = "debug", skip_all, fields(%user_id))]
 pub(super) async fn merge_profile(&self, user_id: &UserId, response: Response) -> Result {
-	let max_fields = self.services.config.max_remote_profile_fields;
+	let max_fields = self.services.config.profile.max_remote_fields;
 
 	check_served_profile(&response, max_fields)?;
 
@@ -119,7 +119,7 @@ pub(super) async fn mirror_profile(
 	user_id: &UserId,
 	response: Response,
 ) -> Result<Removed> {
-	check_served_profile(&response, self.services.config.max_remote_profile_fields)?;
+	check_served_profile(&response, self.services.config.profile.max_remote_fields)?;
 
 	let profile_lock = self.mutex.lock(user_id).await;
 	let removed: Removed = self

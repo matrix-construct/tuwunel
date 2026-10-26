@@ -30,6 +30,12 @@ pub mod sources;
 mod tests;
 pub mod well_known;
 
+pub mod authentication;
+pub mod directory;
+pub mod encryption;
+pub mod profile;
+pub mod registration;
+
 use std::{
 	collections::{BTreeMap, BTreeSet},
 	path::{Path, PathBuf},
@@ -39,7 +45,7 @@ use bytesize::ByteSize;
 use derive_more::Debug;
 pub use figment::{Figment, value::Value as FigmentValue};
 use figment::{
-	Profile, Provider,
+	Profile as FigmentProfile, Provider,
 	providers::{Env, Format},
 };
 use itertools::Itertools;
@@ -55,19 +61,24 @@ use tuwunel_macros::config_example_generator;
 use url::Url;
 
 pub use self::{
+	authentication::Authentication,
 	cache::Cache,
 	check::check,
 	database::Database,
+	directory::Directory,
+	encryption::Encryption,
 	federation::Federation,
 	http::Http,
 	ip_source::IpSource,
 	manager::Manager,
 	media::Media,
 	network::Network,
+	profile::Profile,
 	regenerate::{
 		Overwrite, RegenerateOptions, RegenerationSummary, example_config, regenerate_config,
 		write_example_config,
 	},
+	registration::Registration,
 	rooms::Rooms,
 	runtime::Runtime,
 	sending::Sending,
@@ -83,7 +94,7 @@ use self::{
 use crate::{
 	Err, Result, err, implement, redacted_debug,
 	utils::{
-		self,
+		self, BoolExt,
 		bytes::{deserialize_bytesize_u64, deserialize_bytesize_usize},
 		hash::Cost,
 		sys,
@@ -128,7 +139,8 @@ pub type StorageBucketName = SmallString<[u8; 64]>;
 "#,
 	ignore = "rocksdb catchall well_known tls rate_limiting ldap jwt appservice \
 	          identity_provider storage_provider registration_terms smtp cache database runtime \
-	          http network media federation rooms sending",
+	          http network media federation rooms sending authentication directory encryption \
+	          profile registration",
 	forbidden = "database_restore_backup force_migration"
 )]
 pub struct Config {
@@ -163,17 +175,6 @@ pub struct Config {
 	/// default: "/var/lib/tuwunel"
 	#[serde(default = "default_database_path")]
 	pub database_path: PathBuf,
-
-	/// Text which will be added to the end of the user's displayname upon
-	/// registration with a space before the text. In Conduit, this was the
-	/// lightning bolt emoji.
-	///
-	/// To disable, set this to "" (an empty string).
-	///
-	/// reloadable: yes
-	/// default: "💕"
-	#[serde(default = "default_new_user_displayname_suffix")]
-	pub new_user_displayname_suffix: String,
 
 	/// Configures direct TLS listeners.
 	///
@@ -243,298 +244,6 @@ pub struct Config {
 	#[serde(default = "default_pusher_idle_timeout")]
 	pub pusher_idle_timeout: u64,
 
-	/// Enables registration. If set to false, no users can register on this
-	/// server.
-	///
-	/// If set to true without a token configured, users can register with no
-	/// form of 2nd-step only if you set the following option to true:
-	/// `yes_i_am_very_very_sure_i_want_an_open_registration_server_prone_to_abuse`
-	///
-	/// If you would like registration only via token reg, please configure
-	/// `registration_token` or `registration_token_file`.
-	/// reloadable: yes
-	#[serde(default)]
-	pub allow_registration: bool,
-
-	/// Enabling this setting opens registration to anyone without restrictions.
-	/// This makes your server vulnerable to abuse
-	/// reloadable: yes
-	#[serde(default)]
-	pub yes_i_am_very_very_sure_i_want_an_open_registration_server_prone_to_abuse: bool,
-
-	/// A static registration token that new users will have to provide when
-	/// creating an account. If unset and `allow_registration` is true,
-	/// you must set
-	/// `yes_i_am_very_very_sure_i_want_an_open_registration_server_prone_to_abuse`
-	/// to true to allow open registration without any conditions.
-	///
-	/// YOU NEED TO EDIT THIS OR USE registration_token_file.
-	///
-	/// reloadable: yes
-	/// example: "o&^uCtes4HPf0Vu@F20jQeeWE7"
-	///
-	/// display: sensitive
-	pub registration_token: Option<String>,
-
-	/// Path to a file on the system that gets read for additional registration
-	/// tokens. Multiple tokens can be added if you separate them with
-	/// whitespace
-	///
-	/// tuwunel must be able to access the file, and it must not be empty
-	///
-	/// reloadable: yes
-	/// example: "/etc/tuwunel/.reg_token"
-	pub registration_token_file: Option<PathBuf>,
-
-	/// A pre-shared secret enabling out-of-band account creation via the
-	/// Synapse-style `/_synapse/admin/v1/register` endpoint. The endpoint is
-	/// only available when this is set. Requests authenticate by HMAC-SHA1
-	/// keyed on this value; UIAA is bypassed.
-	///
-	/// Use a high-entropy value (at least 32 bytes) and treat it as a
-	/// secret of equivalent power to a server admin's access token.
-	///
-	/// reloadable: yes
-	/// example: "kZ2hN5pQ8wXyL4mR7tBfCgJxV3aD6sE1u"
-	///
-	/// display: sensitive
-	pub registration_shared_secret: Option<String>,
-
-	/// Path to a file containing the registration shared secret. Takes
-	/// precedence over `registration_shared_secret`, and falls back to it when
-	/// the file cannot be opened. Surrounding whitespace is trimmed off, so a
-	/// trailing newline does not become part of the secret. A file which is
-	/// present but blank resolves to no secret rather than falling back.
-	///
-	/// reloadable: yes
-	/// example: "/etc/tuwunel/.reg_shared_secret"
-	pub registration_shared_secret_file: Option<PathBuf>,
-
-	/// Shared secret the Matrix Authentication Service (MAS) authenticates its
-	/// provisioning calls with. When set, the `/_synapse/mas/*` endpoints
-	/// accept only requests bearing this exact secret as their bearer token,
-	/// rejecting all others; when unset, those endpoints reject every request.
-	///
-	/// Use a high-entropy value and keep it identical to the secret configured
-	/// on the MAS side.
-	///
-	/// reloadable: yes
-	/// example: "kZ2hN5pQ8wXyL4mR7tBfCgJxV3aD6sE1u"
-	///
-	/// display: sensitive
-	pub mas_secret: Option<String>,
-
-	/// Size of the Argon2id working buffer used to hash a new password, in 1
-	/// KiB blocks.
-	///
-	/// Each hash holds the buffer for its duration, so peak memory rises by
-	/// roughly this much for every password operation in flight, with no bound
-	/// on how many run at once. Stored hashes carry the values they were made
-	/// with, so a change reaches an account only when its password is next set.
-	///
-	/// Lowering this weakens the hash against parallel cracking hardware unless
-	/// `argon2_t_cost` rises to compensate; the equivalent-strength pairs of
-	/// (`argon2_m_cost`, `argon2_t_cost`) are (47104, 1), (19456, 2), (12288,
-	/// 3), (9216, 4) and (7168, 5). The default and those pairs are the OWASP
-	/// Argon2id recommendation:
-	/// <https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html#argon2id>
-	///
-	/// reloadable: yes
-	///
-	/// default: 19456
-	#[serde(default = "default_argon2_m_cost")]
-	pub argon2_m_cost: u32,
-
-	/// Number of passes an Argon2id hash makes over its working buffer.
-	///
-	/// Raising it scales the CPU cost of a hash without changing its memory
-	/// cost. See `argon2_m_cost` for the equivalent-strength pairs.
-	///
-	/// reloadable: yes
-	///
-	/// default: 2
-	#[serde(default = "default_argon2_t_cost")]
-	pub argon2_t_cost: u32,
-
-	/// Number of lanes an Argon2id working buffer is divided into.
-	///
-	/// Lanes are computed sequentially here, so raising this changes the hash
-	/// without buying any parallelism. `argon2_m_cost` must be at least eight
-	/// times this value.
-	///
-	/// reloadable: yes
-	///
-	/// default: 1
-	#[serde(default = "default_argon2_p_cost")]
-	pub argon2_p_cost: u32,
-
-	/// Controls whether encrypted rooms and events are allowed.
-	/// reloadable: yes
-	#[serde(default = "true_fn")]
-	pub allow_encryption: bool,
-
-	/// Controls whether locally-created rooms should be end-to-end encrypted by
-	/// default. This option is equivalent to the one found in Synapse.
-	///
-	/// Options:
-	/// - "all": All created rooms are encrypted.
-	/// - "invite": Any room created with `private_chat` or
-	///   `trusted_private_chat` presets.
-	/// - "none": Explicit value for no effect.
-	/// - Other values default to no effect.
-	///
-	/// reloadable: yes
-	/// default: "none"
-	#[serde(default)]
-	pub encryption_enabled_by_default_for_room_type: Option<String>,
-
-	/// Set this to true to require authentication on the normally
-	/// unauthenticated profile retrieval endpoints (GET)
-	/// "/_matrix/client/v3/profile/{userId}".
-	///
-	/// This can prevent profile scraping.
-	/// reloadable: yes
-	#[serde(default)]
-	pub require_auth_for_profile_requests: bool,
-
-	/// Maximum fields retained in a remote user's cached profile.
-	///
-	/// Includes displayname and avatar_url and must be greater than zero.
-	/// A refresh exceeding this count is rejected without changing the cache.
-	/// Lowering it leaves existing profiles intact; their refreshes must fit
-	/// the new limit.
-	///
-	/// reloadable: yes
-	/// default: 100
-	#[serde(default = "default_max_remote_profile_fields")]
-	pub max_remote_profile_fields: usize,
-
-	/// Maximum selected profile fields in a sync request or stored filter.
-	///
-	/// Counts raw selectors before duplicate removal for sliding and legacy sync
-	/// and must be greater than zero.
-	/// Requests exceeding this count or the 255-byte name limit are rejected.
-	/// Sliding sync retains normalized selections across omitted selectors;
-	/// after lowering the limit, an oversized selection requires replacement
-	/// or a restarted connection.
-	/// Unfiltered sliding sync profiles are not limited by this count.
-	///
-	/// reloadable: yes
-	/// default: 64
-	#[serde(default = "default_max_profile_fields_per_request")]
-	pub max_profile_fields_per_request: usize,
-
-	/// Allow standard users to set or clear their display names through the
-	/// client profile API.
-	///
-	/// Server admins and appservices are always allowed to change display
-	/// names.
-	///
-	/// reloadable: yes
-	/// default: true
-	#[serde(default = "true_fn")]
-	pub enable_set_displayname: bool,
-
-	/// Restrict client profile retrieval to the user themselves or users who
-	/// currently share a joined room.
-	///
-	/// Appservices are exempt, and other users are refused with 403
-	/// `M_FORBIDDEN`. The server refuses to start, or to reload its
-	/// configuration, with this enabled unless
-	/// `require_auth_for_profile_requests` is enabled too. Federation profile
-	/// lookups are unaffected; `allow_inbound_profile_lookup_federation_requests`
-	/// controls those.
-	///
-	/// reloadable: yes
-	/// default: false
-	#[serde(default)]
-	pub limit_profile_requests_to_users_who_share_rooms: bool,
-
-	/// Preserve per-room profile overrides during a global profile update.
-	///
-	/// When `true` (default), a profile change (displayname or avatar_url)
-	/// arriving via the profile endpoints skips rooms whose current
-	/// `m.room.member` already differs from the user's prior global
-	/// profile. This is the natural behavior users expect after setting a
-	/// per-room nickname or avatar with a client's `/myroomnick`-style
-	/// command: a subsequent global change does not clobber the override.
-	///
-	/// Set to `false` to always rewrite every joined room's member event
-	/// to match the new global profile. That matches the literal spec
-	/// reading.
-	///
-	/// MSC4466 lets clients pick this per request via the
-	/// `org.matrix.msc4466.propagate_to` query parameter
-	/// (`all` / `unchanged` / `none`); an explicit value overrides this
-	/// default in either direction.
-	///
-	/// reloadable: yes
-	/// default: true
-	#[serde(default = "true_fn")]
-	pub preserve_room_profile_overrides: bool,
-
-	/// Set this to true to allow your server's public room directory to be
-	/// federated. Set this to false to protect against /publicRooms spiders,
-	/// but will forbid external users from viewing your server's public room
-	/// directory. If federation is disabled entirely (`allow_federation`), this
-	/// is inherently false.
-	/// reloadable: yes
-	#[serde(default)]
-	pub allow_public_room_directory_over_federation: bool,
-
-	/// Set this to true to allow your server's public room directory to be
-	/// queried without client authentication (access token) through the Client
-	/// APIs. Set this to false to protect against /publicRooms spiders.
-	/// reloadable: yes
-	#[serde(default)]
-	pub allow_public_room_directory_without_auth: bool,
-
-	/// Allows room directory searches to match on partial room_id's when the
-	/// search term starts with '!'.
-	///
-	/// reloadable: yes
-	/// default: true
-	#[serde(default = "true_fn")]
-	pub allow_public_room_search_by_id: bool,
-
-	/// Set this to false to limit results of rooms when searching by ID to
-	/// those that would be found by an alias or other query; specifically
-	/// those listed in the public rooms directory. By default this is set to
-	/// true allowing any joinable room to match. This satisfies the Principle
-	/// of Least Expectation when pasting a room_id into a search box with
-	/// intent to join; many rooms simply opt-out of public listings. Therefor
-	/// to prevent this feature from abuse, knowledge of several characters of
-	/// the room_id is required before any results are returned.
-	///
-	/// reloadable: yes
-	/// default: true
-	#[serde(default = "true_fn")]
-	pub allow_unlisted_room_search_by_id: bool,
-
-	/// Show all local users in user directory.
-	///
-	/// With this set to false, only users in public rooms or those that share
-	/// a room with the user making the search will be shown. Appservice
-	/// senders and users in exclusive appservice user namespaces stay hidden
-	/// unless `show_appservice_users_in_user_directory` is also enabled.
-	///
-	/// reloadable: yes
-	/// default: false
-	#[serde(default)]
-	pub show_all_local_users_in_user_directory: bool,
-
-	/// Include appservice senders and users in exclusive appservice user
-	/// namespaces in user directory searches.
-	///
-	/// They remain subject to the normal room visibility rules unless
-	/// `show_all_local_users_in_user_directory` is also enabled. Synapse has
-	/// no equivalent and always hides them.
-	///
-	/// reloadable: yes
-	/// default: false
-	#[serde(default)]
-	pub show_appservice_users_in_user_directory: bool,
-
 	/// Allow guest users to access TURN credentials.
 	///
 	/// This is the equivalent of Synapse's `turn_allow_guests` config option.
@@ -543,38 +252,6 @@ pub struct Config {
 	/// reloadable: yes
 	#[serde(default)]
 	pub turn_allow_guests: bool,
-
-	/// Set this to true to lock down your server's public room directory and
-	/// only allow admins to publish rooms to the room directory. Unpublishing
-	/// is still allowed by all users with this enabled.
-	/// reloadable: yes
-	#[serde(default)]
-	pub lockdown_public_room_directory: bool,
-
-	/// Set this to true to allow federating device display names / allow
-	/// external users to see your device display name. If federation is
-	/// disabled entirely (`allow_federation`), this is inherently false. For
-	/// privacy reasons, this is best left disabled.
-	/// reloadable: yes
-	#[serde(default)]
-	pub allow_device_name_federation: bool,
-
-	/// Config option to allow or disallow incoming federation requests that
-	/// obtain the profiles of our local users from
-	/// `/_matrix/federation/v1/query/profile`
-	///
-	/// Increases privacy of your local user's such as display names, but some
-	/// remote users may get a false "this user does not exist" error when they
-	/// try to invite you to a DM or room. Also can protect against profile
-	/// spiders.
-	///
-	/// This is inherently false if `allow_federation` is disabled
-	/// reloadable: yes
-	#[serde(
-		default = "true_fn",
-		alias = "allow_profile_lookup_federation_requests"
-	)]
-	pub allow_inbound_profile_lookup_federation_requests: bool,
 
 	/// Configures Matrix discovery documents and related endpoints.
 	///
@@ -739,317 +416,11 @@ pub struct Config {
 	#[serde(default = "true_fn")]
 	pub log_global_default: bool,
 
-	/// OpenID token expiration/TTL in seconds.
-	///
-	/// These are the OpenID tokens that are primarily used for Matrix account
-	/// integrations (e.g. Vector Integrations in Element), *not* OIDC/OpenID
-	/// Connect/etc.
-	///
-	/// reloadable: yes
-	/// default: 3600
-	#[serde(default = "default_openid_token_ttl")]
-	pub openid_token_ttl: u64,
-
-	/// Allow an existing session to mint a login token for another client.
-	/// This requires interactive authentication, but has security ramifications
-	/// as a malicious client could use the mechanism to spawn more than one
-	/// session. Enabled by default.
-	///
-	/// reloadable: yes
-	/// default: true
-	#[serde(default = "true_fn")]
-	pub login_via_existing_session: bool,
-
-	/// Whether to enable the login token route to accept login tokens at all.
-	/// Login tokens may be generated by the server for authorization flows such
-	/// as SSO; disabling tokens may break such features.
-	///
-	/// This option is distinct from `login_via_existing_session` and does not
-	/// carry the same security implications; the intent is to leave this
-	/// enabled while disabling the former to prevent clients from commanding
-	/// login token creation but without preventing the server from doing so.
-	///
-	/// reloadable: yes
-	/// default: true
-	#[serde(default = "true_fn")]
-	pub login_via_token: bool,
-
-	/// Whether to enable login using traditional user/password authorization
-	/// flow.
-	///
-	/// Set this option to false if you intend to allow logging in only using
-	/// other mechanisms, such as SSO.
-	///
-	/// reloadable: yes
-	/// default: true
-	#[serde(default = "true_fn")]
-	pub login_with_password: bool,
-
 	/// Configures request rate limits, one `[global.rate_limiting]` subsection
 	/// per kind of request.
 	// external structure; separate section
 	#[serde(default)]
 	pub rate_limiting: RateLimits,
-
-	/// Login token expiration/TTL in milliseconds.
-	///
-	/// These are short-lived tokens for the m.login.token endpoint.
-	/// This is used to allow existing sessions to create new sessions.
-	/// see login_via_existing_session.
-	///
-	/// reloadable: yes
-	/// default: 120000
-	#[serde(default = "default_login_token_ttl")]
-	pub login_token_ttl: u64,
-
-	/// Access token TTL in seconds.
-	///
-	/// For clients that support refresh-tokens, the access-token provided on
-	/// login will be invalidated after this amount of time and the client will
-	/// be soft-logged-out until refreshing it.
-	///
-	/// reloadable: yes
-	/// default: 604800
-	#[serde(default = "default_access_token_ttl")]
-	pub access_token_ttl: u64,
-
-	/// Refresh token TTL in seconds.
-	///
-	/// Refresh tokens are rejected once this lifetime elapses. Whether the
-	/// deadline slides forward on each use or stays fixed at issuance is
-	/// controlled by `refresh_token_idle_only`. The default of `0` disables
-	/// refresh-token expiry entirely; a typical enabled value is `259200`
-	/// (three days).
-	///
-	/// reloadable: yes
-	/// default: 0
-	#[serde(default)]
-	pub refresh_token_ttl: u64,
-
-	/// Whether `refresh_token_ttl` acts as an idle timeout or an absolute
-	/// session lifetime.
-	///
-	/// When `true` (default), each successful refresh resets the deadline to
-	/// `now + refresh_token_ttl`. A session in continuous use never expires.
-	/// When `false`, the deadline is fixed at first issuance and rotation
-	/// carries it forward, forcing re-auth after `refresh_token_ttl`
-	/// regardless of activity. This setting applies only to tokens issued with
-	/// a nonzero refresh-token TTL; a zero TTL issues tokens without expiry.
-	///
-	/// reloadable: yes
-	/// default: true
-	#[serde(default = "true_fn")]
-	pub refresh_token_idle_only: bool,
-
-	/// Whether refresh-token expiry triggers a hard logout instead of a soft
-	/// one.
-	///
-	/// When `false` (default), an expired refresh token is rejected with
-	/// `M_UNKNOWN_TOKEN` carrying `soft_logout: true`. The client can preserve
-	/// E2EE keys and local state, then re-authenticate to resume the same
-	/// device.
-	///
-	/// When `true`, the device is removed entirely on expiry: the access
-	/// token is invalidated, the device record is deleted, and the client is
-	/// signalled with `soft_logout: false`. The next session is a brand-new
-	/// device, so the client cannot recover E2EE history from local state
-	/// alone; this is the CWE-613 stance and trades usability for that
-	/// guarantee. Tokens issued with a zero refresh-token TTL do not expire,
-	/// and changing the current TTL does not erase an expiry already stored.
-	///
-	/// reloadable: yes
-	/// default: false
-	#[serde(default)]
-	pub refresh_token_hard_logout: bool,
-
-	/// Grace window in seconds for a benign refresh-token double-submit.
-	///
-	/// After a refresh token rotates, the spent token is retained for one
-	/// generation so a later reuse is detectable. If that spent token is
-	/// presented again within this window while its successor is still the
-	/// device's current refresh token, the request is treated as a client that
-	/// lost the rotated response: a fresh access token is issued for the
-	/// unchanged refresh token rather than revoking the device. Outside the
-	/// window, or once the chain has advanced, a replayed refresh token revokes
-	/// the device as a suspected compromise. Set to `0` to treat every reuse as
-	/// a compromise.
-	///
-	/// reloadable: yes
-	/// default: 15
-	#[serde(default = "default_refresh_token_reuse_grace")]
-	pub refresh_token_reuse_grace: u64,
-
-	/// Whether a detected refresh-token reuse revokes the device.
-	///
-	/// When true (default), presenting a refresh token that was already rotated
-	/// (outside the `refresh_token_reuse_grace` window) removes the device, the
-	/// RFC 6819 stance that treats reuse as a compromised session. When false,
-	/// the replayed request is rejected but the device is left intact, the
-	/// laxer behaviour an operator fronting another OAuth client may prefer.
-	///
-	/// reloadable: yes
-	/// default: true
-	#[serde(default = "true_fn")]
-	pub refresh_token_reuse_revoke: bool,
-
-	/// Enable native registration and login on the built-in OIDC provider
-	/// (next-gen auth), authenticating Matrix clients against this server's own
-	/// accounts without a third-party `identity_provider`.
-	///
-	/// When false (default), the OIDC server runs only to broker for a
-	/// configured `identity_provider`, redirecting users to that upstream IdP.
-	/// When true, an authorization request that selects no provider is served a
-	/// login or registration page; `well_known.client` must be set. The login
-	/// page offers local accounts and each configured identity provider (one
-	/// single sign-on entry under `single_sso` or `sso_custom_providers_page`),
-	/// and an explicit `idp_id` goes directly to that provider. Registration
-	/// here honors `allow_registration`, the registration token, and
-	/// `registration_terms` exactly as the client registration endpoint does.
-	///
-	/// reloadable: yes
-	/// default: false
-	#[serde(default)]
-	pub oidc_native_auth: bool,
-
-	/// Require OIDC clients (next-gen auth) to request an MSC2967 device scope.
-	///
-	/// When false, a client that omits the `urn:matrix:client:device:<id>`
-	/// scope is assigned a server-generated device id, which is echoed back in
-	/// the granted scope. When true, the authorization-code grant is rejected
-	/// unless the client supplies a device scope, per the MSC2967 expectation
-	/// that the client owns its device id.
-	///
-	/// reloadable: yes
-	/// default: false
-	#[serde(default)]
-	pub oidc_require_device_scope: bool,
-
-	/// Require PKCE (RFC 7636) with the S256 method on the OIDC
-	/// authorization-code grant.
-	///
-	/// When true, the authorize endpoint rejects a request that carries no
-	/// `code_challenge`, as MSC2964 mandates for public clients. A present
-	/// challenge must always use S256; the `plain` method is rejected
-	/// regardless of this setting. Set to false only as a transition escape
-	/// hatch for a legacy client that cannot send a challenge.
-	///
-	/// reloadable: yes
-	/// default: true
-	#[serde(default = "true_fn")]
-	pub oidc_require_pkce: bool,
-
-	/// Reject an OIDC authorization-code grant that requests a scope this
-	/// server does not recognise, instead of narrowing the granted scope down
-	/// to the recognised tokens.
-	///
-	/// When false (default), an unrecognised scope token is dropped and the
-	/// narrowed `scope` is echoed back to the client per RFC 6749. When true,
-	/// an unrecognised scope is rejected. `openid` and the MSC2967 device and
-	/// api scopes (both spellings) are always recognised.
-	///
-	/// reloadable: yes
-	/// default: false
-	#[serde(default)]
-	pub oidc_strict_scope: bool,
-
-	/// Initial access token required to register an OIDC client dynamically
-	/// (RFC 7591).
-	///
-	/// When set, the registration endpoint requires the caller to present this
-	/// token as an `Authorization: Bearer` credential. No Matrix client sends
-	/// one, so any value here blocks next-gen auth login for every ordinary
-	/// client, Element X included. Leave it empty unless every OAuth client on
-	/// this server is registered out of band.
-	///
-	/// display: sensitive
-	/// reloadable: yes
-	/// default:
-	#[serde(default)]
-	pub oidc_registration_access_token: String,
-
-	/// Allowlist of hostnames permitted in a dynamically-registered OIDC
-	/// client's redirect_uris.
-	///
-	/// When non-empty, every redirect_uri presented at registration must match
-	/// this list or the registration is rejected. A redirect_uri with a host
-	/// matches an entry naming that host, compared case-insensitively; a
-	/// private-use scheme carries no host (RFC 8252, as in
-	/// `io.element.android:/`) and matches an entry naming the scheme, so
-	/// `["element.io", "io.element.android"]` covers a client on both web and
-	/// mobile.
-	///
-	/// The default (empty) imposes no restriction at registration, but then
-	/// vouches for no client either, so every sign-in is subject to
-	/// `oidc_require_client_approval`. Listing an entry vouches for whatever
-	/// answers to it, so a scheme entry covers any app on the device claiming
-	/// that scheme (RFC 8252 §8.6) and a host entry covers every path on it.
-	///
-	/// reloadable: yes
-	/// default: []
-	#[serde(default)]
-	pub oidc_registration_allowed_redirect_hosts: Vec<String>,
-
-	/// Ask the user to approve an unvetted OIDC client before its
-	/// authorization code is issued.
-	///
-	/// Dynamic client registration is open by default, so anyone can register a
-	/// client with a redirect target they control and send an authorization
-	/// link to one of your users; without this prompt a single click hands that
-	/// client an authorization code for the account. When true (default), a
-	/// sign-in whose redirect target is not vetted shows an approve/deny page
-	/// naming the client first.
-	///
-	/// A client is vetted when its redirect host or private-use scheme appears
-	/// in `oidc_registration_allowed_redirect_hosts`, so listing the clients
-	/// you serve restores a prompt-free sign-in. Because the prompt is a step
-	/// a person takes, a server that shows it wants a `login_token_ttl` long
-	/// enough to read the page.
-	///
-	/// reloadable: yes
-	/// default: true
-	#[serde(default = "true_fn")]
-	pub oidc_require_client_approval: bool,
-
-	/// Require a `client_uri` in dynamic client registration requests
-	/// (RFC 7591 / MSC2966).
-	///
-	/// When false (default), `client_uri` is optional; a client that supplies
-	/// one still has it validated (https, host, no userinfo) and the other URLs
-	/// in the request must share its host or a subdomain. When true, a
-	/// registration without an https `client_uri` is rejected with
-	/// `invalid_client_metadata`, enforcing the MSC2966 common-base model on
-	/// every client.
-	///
-	/// reloadable: yes
-	/// default: false
-	#[serde(default)]
-	pub oidc_registration_require_client_uri: bool,
-
-	/// Token-bucket refill rate (requests per second) for the OIDC endpoints.
-	///
-	/// Applies a shared per-client-IP throttle across the authorize, token,
-	/// dynamic-registration and device-grant endpoints. The default of `0`
-	/// disables the throttle, preserving open
-	/// access; raise it together with `oidc_rc_burst_count` to protect a server
-	/// exposed to a hostile network. The key is the client IP, so a rate low
-	/// enough to bite a brute-force attempt can also throttle many users behind
-	/// one NAT; size the burst accordingly.
-	///
-	/// reloadable: yes
-	/// default: 0
-	#[serde(default)]
-	pub oidc_rc_per_second: u32,
-
-	/// Token-bucket depth (burst size) for the OIDC endpoint throttle.
-	///
-	/// The number of requests a single client IP may make in a burst before the
-	/// `oidc_rc_per_second` refill rate governs. Ignored while
-	/// `oidc_rc_per_second` is `0`.
-	///
-	/// reloadable: yes
-	/// default: 0
-	#[serde(default)]
-	pub oidc_rc_burst_count: u32,
 
 	/// Enable the rendezvous session APIs used to sign in with a QR code
 	/// (MSC4108 and MSC4388).
@@ -1185,35 +556,6 @@ pub struct Config {
 	/// default: 86400
 	#[serde(default = "default_turn_ttl")]
 	pub turn_ttl: u64,
-
-	#[expect(clippy::doc_link_with_quotes)]
-	/// List/vector of room IDs or room aliases that tuwunel will make newly
-	/// registered users join. The rooms specified must be rooms that you have
-	/// joined at least once on the server, and must be public.
-	///
-	/// reloadable: yes
-	/// example: ["#tuwunel:grin.hu",
-	/// "!l2xV0sd51lraysuRcsWVECge4NULaH3g-ou95vgDgiM"]
-	///
-	/// default: []
-	#[serde(default = "Vec::new")]
-	pub auto_join_rooms: Vec<OwnedRoomOrAliasId>,
-
-	/// This is a password that can be configured that will let you login to the
-	/// server bot account (currently `@conduit`) for emergency troubleshooting
-	/// purposes such as recovering/recreating your admin room, or inviting
-	/// yourself back.
-	///
-	/// See https://tuwunel.chat/troubleshooting.html#lost-access-to-admin-room
-	/// for other ways to get back into your admin room.
-	///
-	/// Once this password is unset, all sessions will be logged out for
-	/// security purposes.
-	///
-	/// example: "F670$2CP@Hw8mG7RY1$%!#Ic7YA"
-	///
-	/// display: sensitive
-	pub emergency_password: Option<String>,
 
 	/// Suffix stripped from the gateway URL before constructing a push request.
 	///
@@ -1370,50 +712,11 @@ pub struct Config {
 	#[serde(default = "default_typing_client_timeout_max_s")]
 	pub typing_client_timeout_max_s: u64,
 
-	/// Set to true to allow user type "guest" registrations. Some clients like
-	/// Element attempt to register guest users automatically.
-	/// reloadable: yes
-	#[serde(default)]
-	pub allow_guest_registration: bool,
-
 	/// Set to true to log guest registrations in the admin room. Note that
 	/// these may be noisy or unnecessary if you're a public homeserver.
 	/// reloadable: yes
 	#[serde(default)]
 	pub log_guest_registrations: bool,
-
-	/// Set to true to allow guest registrations/users to auto join any rooms
-	/// specified in `auto_join_rooms`.
-	/// reloadable: yes
-	#[serde(default)]
-	pub allow_guests_auto_join_rooms: bool,
-
-	/// List of forbidden server names via regex patterns that we will block all
-	/// outgoing federated room directory requests for. Useful for preventing
-	/// our users from wandering into bad servers or spaces.
-	///
-	/// reloadable: yes
-	/// example: ["badserver\.tld$", "badphrase", "19dollarfortnitecards"]
-	///
-	/// default: []
-	#[serde(default, with = "serde_regex")]
-	pub forbidden_remote_room_directory_server_names: RegexSet,
-
-	/// List of forbidden username patterns/strings.
-	///
-	/// Regex can be used or explicit contains matches can be done by just
-	/// specifying the words (see example).
-	///
-	/// This is checked upon username availability check, registration, and
-	/// startup as warnings if any local users in your database have a forbidden
-	/// username.
-	///
-	/// reloadable: yes
-	/// example: ["administrator", "b[a4]dusernam[3e]", "badphrase"]
-	///
-	/// default: []
-	#[serde(default, with = "serde_regex")]
-	pub forbidden_usernames: RegexSet,
 
 	/// Allow admins to run commands outside the admin room ("#admins") by
 	/// prefixing a message with "\!admin" or "\\!admin" and a normal command.
@@ -1507,16 +810,6 @@ pub struct Config {
 	/// default: (none)
 	#[serde(default)]
 	pub report_room: Option<OwnedRoomOrAliasId>,
-
-	/// Whether to grant the first user to register admin privileges by joining
-	/// them to the admin room. Note that technically the next user to register
-	/// when the admin room is empty (or only contains the server-user) is
-	/// granted, and only when the admin room is enabled.
-	///
-	/// reloadable: yes
-	/// default: true
-	#[serde(default = "true_fn")]
-	pub grant_admin_to_first_user: bool,
 
 	/// Whether the admin room is created on first startup. Users should not set
 	/// this to false. Developers can set this to false during integration tests
@@ -1676,58 +969,6 @@ pub struct Config {
 	#[serde(default = "true_fn")]
 	pub hydra_backports: bool,
 
-	/// Limits the number of One Time Keys per device (not per-algorithm). The
-	/// reference implementation maintains 50 OTK's at any given time, therefor
-	/// our default is at least five times that. There is no known reason for an
-	/// administrator to adjust this value; it is provided here rather than
-	/// hardcoding it.
-	///
-	/// reloadable: yes
-	/// default: 256
-	#[serde(default = "default_one_time_key_limit")]
-	pub one_time_key_limit: usize,
-
-	/// (EXPERIMENTAL) Setting this option to true replaces the list of identity
-	/// providers displayed on a client's login page with a single button "Sign
-	/// in with single sign-on" linking to the URL
-	/// `/_matrix/client/v3/login/sso/redirect`. All configured providers are
-	/// attempted for authorization. All authorizations associate with the same
-	/// Matrix user. NOTE: All authorizations must succeed, as there is no
-	/// reliable way to skip a provider.
-	///
-	/// This option is disabled by default, allowing the client to list
-	/// configured providers and permitting privacy-conscious users to authorize
-	/// only their choice.
-	///
-	/// Note that fluffychat always displays a single button anyway. You do not
-	/// need to enable this to use fluffychat; instead we offer a
-	/// default-provider option, see `default` in the provider config section.
-	/// reloadable: yes
-	#[serde(default)]
-	pub single_sso: bool,
-
-	/// Setting this option to true replaces the list of identity providers on
-	/// the client's login screen with a single button "Sign in with single
-	/// sign-on" linking to the URL `/_matrix/client/v3/login/sso/redirect`. The
-	/// deployment is expected to intercept this URL with their reverse-proxy to
-	/// provide a custom webpage listing providers; each entry linking or
-	/// redirecting back to one of the configured identity providers at
-	/// /_matrix/client/v3/login/sso/redirect/<client_id>`.
-	///
-	/// This option defaults to false, allowing the client to generate the list
-	/// of providers or hide all SSO-related options when none configured.
-	/// reloadable: yes
-	#[serde(default)]
-	pub sso_custom_providers_page: bool,
-
-	/// From MSC3824:
-	/// > If the client finds oauth_aware_preferred to be true then, assuming it
-	/// > supports that auth type, it should present this as the only
-	/// > login/registration method available to the user.
-	/// reloadable: yes
-	#[serde(default, alias = "sso_aware_preferred")]
-	pub oidc_aware_preferred: bool,
-
 	/// Directory containing appservice yaml registration files.
 	///
 	/// default: ""
@@ -1769,15 +1010,6 @@ pub struct Config {
 	/// it may cause permanent damage and permanent loss of data.
 	#[serde(default)]
 	pub force_migration: bool,
-
-	/// Set this to true for excluding unencrypted rooms from the common-rooms
-	/// calculation deciding the receivers of device list updates.
-	///
-	/// Setting this to true can help performance on very large homeservers,
-	/// but it may not be spec compliant and risky for client expectations.
-	/// reloadable: yes
-	#[serde(default)]
-	pub device_key_update_encrypted_rooms_only: bool,
 
 	/// Defines named media storage providers.
 	///
@@ -1895,6 +1127,36 @@ pub struct Config {
 	/// display: section
 	#[serde(default)]
 	pub sending: Sending,
+
+	/// Settings for authentication.
+	///
+	/// display: section
+	#[serde(default)]
+	pub authentication: Authentication,
+
+	/// Settings for directory.
+	///
+	/// display: section
+	#[serde(default)]
+	pub directory: Directory,
+
+	/// Settings for encryption.
+	///
+	/// display: section
+	#[serde(default)]
+	pub encryption: Encryption,
+
+	/// Settings for profile.
+	///
+	/// display: section
+	#[serde(default)]
+	pub profile: Profile,
+
+	/// Settings for registration.
+	///
+	/// display: section
+	#[serde(default)]
+	pub registration: Registration,
 }
 
 /// Configures direct TLS listener behavior.
@@ -2681,7 +1943,8 @@ pub struct IdentityProvider {
 	pub callback_url: Option<Url>,
 
 	/// When more than one identity_provider has been configured and
-	/// `single_sso` is false and `sso_custom_providers_page` is false this will
+	/// `authentication.login.single_sso` is false and
+	/// `authentication.login.sso_custom_providers_page` is false this will
 	/// determine the behavior of the `/_matrix/client/v3/login/sso/redirect`
 	/// endpoint (note the url lacks a trailing `client_id`).
 	///
@@ -3436,7 +2699,7 @@ where
 fn load_file(path: &Path) -> Result<Figment> {
 	let provider = Toml::file(path);
 	let profiles = Provider::data(&provider)?;
-	let values = profiles.get(&Profile::Default);
+	let values = profiles.get(&FigmentProfile::Default);
 	let headerless = values.is_some_and(|values| {
 		values
 			.values()
@@ -3453,7 +2716,7 @@ fn load_file(path: &Path) -> Result<Figment> {
 	}
 
 	let provider = match headerless {
-		| true => provider.profile(Profile::Global),
+		| true => provider.profile(FigmentProfile::Global),
 		| false => provider.nested(),
 	};
 
@@ -3521,21 +2784,26 @@ fn with_unknown(mut config: Config, raw: &Figment) -> Config {
 #[must_use]
 pub fn password_hash_cost(&self) -> Cost {
 	Cost {
-		m_cost: self.argon2_m_cost,
-		t_cost: self.argon2_t_cost,
-		p_cost: self.argon2_p_cost,
+		m_cost: self.authentication.argon2.m_cost,
+		t_cost: self.authentication.argon2.t_cost,
+		p_cost: self.authentication.argon2.p_cost,
 	}
 }
 
 /// Returns whether login screens list each identity provider by name.
 ///
-/// `single_sso` and `sso_custom_providers_page` each replace that list with
+/// `authentication.login.single_sso` and
+/// `authentication.login.sso_custom_providers_page` each replace that list with
 /// one single sign-on entry.
 #[implement(Config)]
 #[inline]
 #[must_use]
 pub fn lists_identity_providers(&self) -> bool {
-	!self.sso_custom_providers_page && !self.single_sso
+	self.authentication
+		.login
+		.sso_custom_providers_page
+		.is_false()
+		&& !self.authentication.login.single_sso
 }
 
 impl TlsConfig {
@@ -3605,10 +2873,6 @@ fn default_server_name() -> OwnedServerName { ruma::owned_server_name!("localhos
 
 fn default_database_path() -> PathBuf { "/var/lib/tuwunel".to_owned().into() }
 
-fn default_max_remote_profile_fields() -> usize { 100 }
-
-fn default_max_profile_fields_per_request() -> usize { 64 }
-
 fn default_appservice_timeout() -> u64 { 35 }
 
 fn default_appservice_idle_timeout() -> u64 { 300 }
@@ -3649,10 +2913,6 @@ pub fn default_log_span_events() -> String { "none".into() }
 
 fn default_notification_push_path() -> String { "/_matrix/push/v1/notify".to_owned() }
 
-fn default_openid_token_ttl() -> u64 { 60 * 60 }
-
-fn default_login_token_ttl() -> u64 { 2 * 60 * 1000 }
-
 fn default_turn_ttl() -> u64 { 60 * 60 * 24 }
 
 fn default_presence_idle_timeout_s() -> u64 { 5 * 60 }
@@ -3664,14 +2924,6 @@ fn default_typing_federation_timeout_s() -> u64 { 30 }
 fn default_typing_client_timeout_min_s() -> u64 { 15 }
 
 fn default_typing_client_timeout_max_s() -> u64 { 45 }
-
-fn default_new_user_displayname_suffix() -> String { "💕".to_owned() }
-
-fn default_argon2_m_cost() -> u32 { 19 * 1024 }
-
-fn default_argon2_t_cost() -> u32 { 2 }
-
-fn default_argon2_p_cost() -> u32 { 1 }
 
 fn default_sentry_endpoint() -> Option<Url> {
 	let url = "https://8994b1762a6a95af9502a7900edabc4c@o4509498990067712.ingest.us.sentry.io/4509498993213440"
@@ -3728,12 +2980,6 @@ fn default_client_sync_timeout_min() -> u64 { 5000 }
 fn default_client_sync_timeout_default() -> u64 { 30000 }
 
 fn default_client_sync_timeout_max() -> u64 { 90000 }
-
-fn default_access_token_ttl() -> u64 { 604_800 }
-
-fn default_refresh_token_reuse_grace() -> u64 { 15 }
-
-fn default_one_time_key_limit() -> usize { 256 }
 
 fn default_sso_grant_session_duration() -> Option<u64> { Some(300) }
 

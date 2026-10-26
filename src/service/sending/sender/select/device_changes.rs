@@ -269,6 +269,7 @@ async fn device_delta_edu(&self, user_id: &UserId, delta: Delta<'_>) -> EduBuf {
 		let metadata = self
 			.server
 			.config
+			.profile
 			.allow_device_name_federation
 			.then_async(|| {
 				self.services

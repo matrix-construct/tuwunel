@@ -21,7 +21,7 @@ pub(super) async fn handle_login(
 ) -> Result<OwnedUserId> {
 	let Token { token } = info;
 
-	if !services.config.login_via_token {
+	if !services.config.authentication.login.via_token {
 		return Err!(Request(Unknown("Token login is not enabled.")));
 	}
 
@@ -40,7 +40,13 @@ pub(crate) async fn login_token_route(
 	ClientIp(client): ClientIp,
 	body: Ruma<get_login_token::v1::Request>,
 ) -> Result<get_login_token::v1::Response> {
-	if !services.config.login_via_existing_session || !services.config.login_via_token {
+	if !services
+		.config
+		.authentication
+		.login
+		.via_existing_session
+		|| !services.config.authentication.login.via_token
+	{
 		return Err!(Request(Forbidden("Login via an existing session is not enabled")));
 	}
 

@@ -90,7 +90,7 @@ async fn merge_counts_canonical_fields_at_the_default_boundary() -> Result {
 
 #[tokio::test]
 async fn remote_count_override_bounds_merge_and_mirror() -> Result {
-	let config = Figment::new().merge(("max_remote_profile_fields", 2));
+	let config = Figment::new().merge(("profile.max_remote_fields", 2));
 	let Some(fixture) = fixture(config).await? else {
 		return Ok(());
 	};

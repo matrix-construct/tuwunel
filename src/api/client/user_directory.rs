@@ -21,15 +21,12 @@ use crate::Ruma;
 const LIMIT_MAX: usize = 500;
 const LIMIT_DEFAULT: usize = 10;
 
-/// # `POST /_matrix/client/r0/user_directory/search`
+/// Searches known users at `POST /_matrix/client/r0/user_directory/search`.
 ///
-/// Searches all known users for a match.
-///
-/// - Hides any local users that aren't in any public rooms (i.e. those that
-///   have the join rule set to public) and don't share a room with the sender
-///   unless `show_all_local_users_in_user_directory` is enabled
-/// - Hides appservice senders and users in exclusive appservice user namespaces
-///   unless `show_appservice_users_in_user_directory` is enabled
+/// Hides local users who neither belong to rooms with public join rules nor
+/// share a room with the sender unless `directory.users.show_all_local` is
+/// enabled. Hides appservice senders and users in exclusive appservice user
+/// namespaces unless `directory.users.show_appservice` is enabled.
 pub(crate) async fn search_users_route(
 	State(services): State<crate::State>,
 	body: Ruma<Request>,
@@ -82,7 +79,7 @@ async fn should_show_user(
 ) -> bool {
 	let config = &services.server.config;
 
-	if !config.show_appservice_users_in_user_directory
+	if !config.directory.users.show_appservice
 		&& services
 			.appservice
 			.is_exclusive_user_id(target_user)
@@ -91,7 +88,7 @@ async fn should_show_user(
 		return false;
 	}
 
-	if config.show_all_local_users_in_user_directory {
+	if config.directory.users.show_all_local {
 		return true;
 	}
 

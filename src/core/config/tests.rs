@@ -18,15 +18,13 @@ use tracing_subscriber::fmt::{MakeWriter, fmt};
 use super::*;
 use crate::{
 	config::{
+		authentication::Argon2,
 		check::reload,
 		media::UrlPreview,
 		proxy::{ProxySnapshot, parse_environment_proxy_url},
 	},
 	matrix::MAX_PREV_EVENTS,
-	utils::{
-		BoolExt,
-		hash::{password, verify_password},
-	},
+	utils::hash::{password, verify_password},
 };
 
 thread_local! {
@@ -367,7 +365,7 @@ forbidden_usernames = [\"bad_user.name\"]
 	let (result, logs) = check_with_captured_logs(&config);
 
 	result.expect("a literal pattern should warn rather than refuse the config");
-	assert!(logs.contains("forbidden_usernames"));
+	assert!(logs.contains("registration.forbidden_usernames"));
 	assert!(!logs.contains("host name"), "localparts are not host names: {logs}");
 }
 
@@ -649,10 +647,19 @@ oidc_registration_access_token = "initial-access-token"
 	for (name, toml, warns) in cases {
 		let config = config_from_toml(toml).expect("OIDC registration config should parse");
 		let (result, logs) = check_with_captured_logs(&config);
-		let secret = config.oidc_registration_access_token.as_str();
+		let secret = config
+			.authentication
+			.oidc
+			.registration_access_token
+			.as_str();
 
 		result.expect("OIDC registration config should pass config check");
-		assert_eq!(logs.contains("oidc_registration_access_token is set"), warns, "{name}");
+		assert_eq!(
+			logs.contains("authentication.oidc.registration_access_token is set"),
+			warns,
+			"{name}"
+		);
+
 		assert!(secret.is_empty() || !logs.contains(secret), "{name} leaked the token value");
 	}
 }
@@ -677,8 +684,8 @@ fn check_bounds_the_animated_thumbnail_concurrency() {
 fn profile_count_limits_are_positive_and_reloadable() {
 	let default = default_config();
 
-	assert_eq!(default.max_remote_profile_fields, 100);
-	assert_eq!(default.max_profile_fields_per_request, 64);
+	assert_eq!(default.profile.max_remote_fields, 100);
+	assert_eq!(default.profile.max_fields_per_request, 64);
 
 	let changed = config_from_toml(
 		"[global]
@@ -691,11 +698,14 @@ max_profile_fields_per_request = 3
 	check(&changed).expect("positive overrides should load");
 	reload(&default, &changed).expect("positive overrides should reload");
 
-	for name in ["max_remote_profile_fields", "max_profile_fields_per_request"] {
+	for (name, path) in [
+		("max_remote_profile_fields", "profile.max_remote_fields"),
+		("max_profile_fields_per_request", "profile.max_fields_per_request"),
+	] {
 		let config = config_from_toml(&format!("[global]\n{name} = 0\n")).unwrap();
 		let error = check(&config).expect_err("zero must not disable a count limit");
 
-		assert!(error.to_string().contains(name));
+		assert!(error.to_string().contains(path));
 		assert!(reload(&default, &config).is_err());
 	}
 }
@@ -1292,9 +1302,11 @@ fn default_ip_range_denylist_covers_the_unspecified_addresses() {
 /// stored.
 #[test]
 fn argon2_defaults_are_the_owasp_recommendation() {
-	assert_eq!(default_argon2_m_cost(), Params::DEFAULT_M_COST);
-	assert_eq!(default_argon2_t_cost(), Params::DEFAULT_T_COST);
-	assert_eq!(default_argon2_p_cost(), Params::DEFAULT_P_COST);
+	let costs = Argon2::default();
+
+	assert_eq!(costs.m_cost, Params::DEFAULT_M_COST);
+	assert_eq!(costs.t_cost, Params::DEFAULT_T_COST);
+	assert_eq!(costs.p_cost, Params::DEFAULT_P_COST);
 }
 
 /// A configured cost reaches the parameters a stored hash records.
@@ -1322,9 +1334,12 @@ fn a_configured_cost_reaches_the_stored_hash() {
 #[test]
 fn an_impossible_cost_fails_the_config_check() {
 	for (toml, key) in [
-		("[global]\nargon2_m_cost = 8\nargon2_p_cost = 4\n", "argon2_m_cost"),
-		("[global]\nargon2_t_cost = 0\n", "argon2_t_cost"),
-		("[global]\nargon2_p_cost = 0\n", "argon2_p_cost"),
+		(
+			"[global]\nargon2_m_cost = 8\nargon2_p_cost = 4\n",
+			"authentication.argon2.m_cost",
+		),
+		("[global]\nargon2_t_cost = 0\n", "authentication.argon2.t_cost"),
+		("[global]\nargon2_p_cost = 0\n", "authentication.argon2.p_cost"),
 	] {
 		let config = config_from_toml(toml).expect("the config should parse");
 		let error = check(&config).expect_err("the cost should be rejected");
@@ -1427,7 +1442,7 @@ fn an_unknown_jwt_key_format_fails_the_config_check() {
 /// "varies by system" and non-literal bodies are out of reach here.
 #[test]
 fn documented_defaults_match_the_code() {
-	const SOURCES: [&str; 11] = [
+	const SOURCES: [&str; 16] = [
 		include_str!("mod.rs"),
 		include_str!("rocksdb.rs"),
 		include_str!("cache.rs"),
@@ -1439,6 +1454,11 @@ fn documented_defaults_match_the_code() {
 		include_str!("federation.rs"),
 		include_str!("rooms.rs"),
 		include_str!("sending.rs"),
+		include_str!("authentication.rs"),
+		include_str!("directory.rs"),
+		include_str!("encryption.rs"),
+		include_str!("profile.rs"),
+		include_str!("registration.rs"),
 	];
 
 	const SERDE_DEFAULT: &str = "#[serde(default = \"";

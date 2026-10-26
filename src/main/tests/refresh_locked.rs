@@ -17,7 +17,11 @@ mod fixture;
 
 #[test]
 fn refresh_refuses_locked_accounts_without_spending_tokens() -> Result {
-	let options = ["refresh_token_reuse_grace=3600", "argon2_m_cost=64", "argon2_t_cost=1"];
+	let options = [
+		"authentication.refresh_token.reuse_grace=3600",
+		"authentication.argon2.m_cost=64",
+		"authentication.argon2.t_cost=1",
+	];
 
 	boot("refresh-locked", options, exercise)
 }

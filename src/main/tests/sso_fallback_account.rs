@@ -57,7 +57,7 @@ fn sso_fallback_account() -> Result {
 
 	let option = |key: &str, value: &str| format!("identity_provider.{IDP}.{key}=\"{value}\"");
 	let options = [
-		"oidc_registration_allowed_redirect_hosts=[\"client.example\"]",
+		"authentication.oidc.registration_allowed_redirect_hosts=[\"client.example\"]",
 		&option("client_id", IDP),
 		&option("client_secret", "test-secret"),
 		&option("brand", "test"),

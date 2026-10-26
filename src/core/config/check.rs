@@ -124,21 +124,23 @@ fn check_observability(config: &Config) -> Result {
 }
 
 fn check_profile_requests(config: &Config) -> Result {
-	if config.max_remote_profile_fields == 0 {
-		return Err!(Config("max_remote_profile_fields", "Must be greater than zero"));
+	if config.profile.max_remote_fields == 0 {
+		return Err!(Config("profile.max_remote_fields", "Must be greater than zero"));
 	}
 
-	if config.max_profile_fields_per_request == 0 {
-		return Err!(Config("max_profile_fields_per_request", "Must be greater than zero"));
+	if config.profile.max_fields_per_request == 0 {
+		return Err!(Config("profile.max_fields_per_request", "Must be greater than zero"));
 	}
 
-	if config.limit_profile_requests_to_users_who_share_rooms
-		&& !config.require_auth_for_profile_requests
+	if config
+		.profile
+		.limit_requests_to_users_who_share_rooms
+		&& !config.profile.require_auth
 	{
 		return Err!(Config(
-			"limit_profile_requests_to_users_who_share_rooms",
-			"limit_profile_requests_to_users_who_share_rooms requires \
-			 require_auth_for_profile_requests to be enabled"
+			"profile.limit_requests_to_users_who_share_rooms",
+			"profile.limit_requests_to_users_who_share_rooms requires profile.require_auth to \
+			 be enabled"
 		));
 	}
 
@@ -333,43 +335,47 @@ fn database_filesystem(config: &Config) -> Option<Filesystem> {
 
 fn check_registration(config: &Config) -> Result {
 	if config
+		.authentication
 		.emergency_password
 		.as_ref()
 		.is_some_and(|emergency_password| emergency_password == "F670$2CP@Hw8mG7RY1$%!#Ic7YA")
 	{
 		return Err!(Config(
-			"emergency_password",
+			"authentication.emergency_password",
 			"The public example emergency password is being used, this is insecure. Please \
 			 change this."
 		));
 	}
 
 	if config
+		.authentication
 		.emergency_password
 		.as_ref()
 		.is_some_and(String::is_empty)
 	{
 		return Err!(Config(
-			"emergency_password",
+			"authentication.emergency_password",
 			"Emergency password was set to an empty string, this is not valid. Unset \
-			 emergency_password to disable it or set it to a real password."
+			 authentication.emergency_password to disable it or set it to a real password."
 		));
 	}
 
 	if config
-		.registration_token
+		.registration
+		.token
 		.as_ref()
 		.is_some_and(String::is_empty)
 	{
 		return Err!(Config(
-			"registration_token",
+			"registration.token",
 			"Registration token was specified but is empty (\"\")"
 		));
 	}
 
 	// check if we can read the token file path, and check if the file is empty
 	if config
-		.registration_token_file
+		.registration
+		.token_file
 		.as_ref()
 		.is_some_and(|path| {
 			let Ok(token) = read_to_string(path).inspect_err(|e| {
@@ -381,43 +387,48 @@ fn check_registration(config: &Config) -> Result {
 			token == String::new()
 		}) {
 		return Err!(Config(
-			"registration_token_file",
+			"registration.token_file",
 			"Registration token file was specified but is empty or failed to be read"
 		));
 	}
 
 	let no_token =
-		config.registration_token.is_none() && config.registration_token_file.is_none();
+		config.registration.token.is_none() && config.registration.token_file.is_none();
 
 	let email_required =
 		config.smtp.connection_uri.is_some() && config.smtp.require_email_for_registration;
 
-	if config.allow_registration
+	if config.registration.enable
 		&& no_token
 		&& !email_required
-		&& !config.yes_i_am_very_very_sure_i_want_an_open_registration_server_prone_to_abuse
+		&& !config
+			.registration
+			.yes_i_am_very_very_sure_i_want_an_open_registration_server_prone_to_abuse
 	{
 		return Err!(Config(
-			"registration_token",
-			"!! You have `allow_registration` enabled without a registration token or a \
+			"registration.token",
+			"!! You have `registration.enable` enabled without a registration token or a \
 			 required email stage (`smtp.require_email_for_registration` with \
 			 `smtp.connection_uri`). This allows ANYONE to register without any 2nd-step. \
 			 Please set a registration token or require an email stage. For security and safety \
 			 reasons, tuwunel will shut down. If you are extra sure this is the desired \
 			 behaviour you want, please set the following config option to true:
-`yes_i_am_very_very_sure_i_want_an_open_registration_server_prone_to_abuse`"
+`registration.yes_i_am_very_very_sure_i_want_an_open_registration_server_prone_to_abuse`"
 		));
 	}
 
-	if config.allow_registration
+	if config.registration.enable
 		&& no_token
 		&& !email_required
-		&& config.yes_i_am_very_very_sure_i_want_an_open_registration_server_prone_to_abuse
+		&& config
+			.registration
+			.yes_i_am_very_very_sure_i_want_an_open_registration_server_prone_to_abuse
 	{
 		warn!(
 			"Open registration is enabled via setting \
-			 `yes_i_am_very_very_sure_i_want_an_open_registration_server_prone_to_abuse` and \
-			 `allow_registration` to true without a registration token or a required email \
+			 `registration.\
+			 yes_i_am_very_very_sure_i_want_an_open_registration_server_prone_to_abuse` and \
+			 `registration.enable` to true without a registration token or a required email \
 			 stage (`smtp.require_email_for_registration` with `smtp.connection_uri`). You are \
 			 expected to be aware of the risks now. If this is not the desired behaviour, \
 			 please set a registration token or require an email stage."
@@ -460,23 +471,23 @@ fn check_password_hashing(config: &Config) -> Result {
 	let cost = config.password_hash_cost();
 
 	cost.check().map_err(|e| match e {
-		| Argon2Error::TimeTooSmall => err!(Config("argon2_t_cost", "{e}")),
+		| Argon2Error::TimeTooSmall => err!(Config("authentication.argon2.t_cost", "{e}")),
 		| Argon2Error::ThreadsTooFew | Argon2Error::ThreadsTooMany => {
-			err!(Config("argon2_p_cost", "{e}"))
+			err!(Config("authentication.argon2.p_cost", "{e}"))
 		},
 		| Argon2Error::MemoryTooLittle => err!(Config(
-			"argon2_m_cost",
-			"{e}; it needs at least eight blocks per lane of argon2_p_cost"
+			"authentication.argon2.m_cost",
+			"{e}; it needs at least eight blocks per lane of authentication.argon2.p_cost"
 		)),
-		| _ => err!(Config("argon2_m_cost", "{e}")),
+		| _ => err!(Config("authentication.argon2.m_cost", "{e}")),
 	})?;
 
 	if !cost.is_recommended() {
 		warn!(
 			?cost,
 			"The Argon2id cost is below the weakest OWASP recommendation, so new password \
-			 hashes are cheaper to crack than the default. See argon2_m_cost for the \
-			 recommended pairs."
+			 hashes are cheaper to crack than the default. See authentication.argon2.m_cost for \
+			 the recommended pairs."
 		);
 	}
 
@@ -710,7 +721,10 @@ fn check_identity_providers(config: &Config) -> Result {
 		check_identity_provider_secret(i, provider)?;
 	}
 
-	if !config.sso_custom_providers_page
+	if !config
+		.authentication
+		.login
+		.sso_custom_providers_page
 		&& config.identity_provider.len() > 1
 		&& config
 			.identity_provider
@@ -734,6 +748,7 @@ fn check_identity_providers(config: &Config) -> Result {
 	}
 
 	let mas_active = config
+		.authentication
 		.mas_secret
 		.as_deref()
 		.is_some_and(|secret| !secret.is_empty());
@@ -745,11 +760,11 @@ fn check_identity_providers(config: &Config) -> Result {
 			.any(|provider| provider.brand == "mas")
 	{
 		warn!(
-			"mas_secret is set but no identity_provider is configured with `brand = MAS`. \
-			 Tuwunel is its own OpenID Connect issuer and does not delegate authentication to \
-			 MAS; the secret only authorizes MAS provisioning calls on `/_synapse/mas/`. \
-			 Logging in through MAS additionally requires an identity_provider entry with \
-			 `brand = MAS`."
+			"authentication.mas_secret is set but no identity_provider is configured with \
+			 `brand = MAS`. Tuwunel is its own OpenID Connect issuer and does not delegate \
+			 authentication to MAS; the secret only authorizes MAS provisioning calls on \
+			 `/_synapse/mas/`. Logging in through MAS additionally requires an \
+			 identity_provider entry with `brand = MAS`."
 		);
 	}
 
@@ -761,12 +776,12 @@ fn check_identity_providers(config: &Config) -> Result {
 			.for_each(|provider| {
 				warn!(
 					provider = provider.id(),
-					"`mas_secret` is set and this MAS identity provider is configured without \
-					 `trusted = true`. Existing accounts provisioned by MAS will not be matched \
-					 automatically during SSO login, so users may receive separate accounts. \
-					 Set `trusted = true` only when this identity provider is the same \
-					 self-hosted MAS instance that provisions this server and you fully control \
-					 it; otherwise associate users explicitly."
+					"`authentication.mas_secret` is set and this MAS identity provider is \
+					 configured without `trusted = true`. Existing accounts provisioned by MAS \
+					 will not be matched automatically during SSO login, so users may receive \
+					 separate accounts. Set `trusted = true` only when this identity provider \
+					 is the same self-hosted MAS instance that provisions this server and you \
+					 fully control it; otherwise associate users explicitly."
 				);
 			});
 	}
@@ -804,24 +819,31 @@ fn check_identity_provider_secret(i: &str, provider: &IdentityProvider) -> Resul
 }
 
 fn warn_oidc_client_approval(config: &Config) {
-	if !config.oidc_require_client_approval {
+	if !config.authentication.oidc.require_client_approval {
 		warn!(
-			"oidc_require_client_approval is disabled, so an authorization code is issued \
-			 without asking the user, whichever client requested it. Anyone who can reach \
-			 dynamic client registration can then register a client with a redirect target they \
-			 control and phish a sign-in link. Prefer listing the clients you serve in \
-			 oidc_registration_allowed_redirect_hosts, which waives the prompt for them alone."
+			"authentication.oidc.require_client_approval is disabled, so an authorization code \
+			 is issued without asking the user, whichever client requested it. Anyone who can \
+			 reach dynamic client registration can then register a client with a redirect \
+			 target they control and phish a sign-in link. Prefer listing the clients you serve \
+			 in authentication.oidc.registration_allowed_redirect_hosts, which waives the \
+			 prompt for them alone."
 		);
 	}
 }
 
 fn warn_oidc_registration_token(config: &Config) {
-	if !config.oidc_registration_access_token.is_empty() {
+	if !config
+		.authentication
+		.oidc
+		.registration_access_token
+		.is_empty()
+	{
 		warn!(
-			"oidc_registration_access_token is set, so dynamic client registration requires an \
-			 RFC 7591 initial access token. No Matrix client sends one, so next-gen auth login \
-			 will fail with `M_FORBIDDEN` for every ordinary client. Leave it empty unless \
-			 every OAuth client on this server is registered out of band."
+			"authentication.oidc.registration_access_token is set, so dynamic client \
+			 registration requires an RFC 7591 initial access token. No Matrix client sends \
+			 one, so next-gen auth login will fail with `M_FORBIDDEN` for every ordinary \
+			 client. Leave it empty unless every OAuth client on this server is registered out \
+			 of band."
 		);
 	}
 }
@@ -988,6 +1010,11 @@ fn warn_literal_patterns(config: &Config) {
 		.federation
 		.allowed_remote_server_names_experimental;
 
+	let directory_servers = &config
+		.directory
+		.rooms
+		.forbidden_remote_server_names;
+
 	let options = [
 		("network.dns.passthru_domains", &config.network.dns.passthru_domains),
 		("federation.allowed_remote_server_names_experimental", allowed),
@@ -996,12 +1023,9 @@ fn warn_literal_patterns(config: &Config) {
 			"federation.forbidden_remote_server_names",
 			&config.federation.forbidden_remote_server_names,
 		),
-		(
-			"forbidden_remote_room_directory_server_names",
-			&config.forbidden_remote_room_directory_server_names,
-		),
+		("directory.rooms.forbidden_remote_server_names", directory_servers),
 		("rooms.forbidden_alias_names", &config.rooms.forbidden_alias_names),
-		("forbidden_usernames", &config.forbidden_usernames),
+		("registration.forbidden_usernames", &config.registration.forbidden_usernames),
 		("rooms.joins.deprioritize_servers", &config.rooms.joins.deprioritize_servers),
 	];
 
