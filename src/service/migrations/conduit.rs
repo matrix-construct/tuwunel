@@ -33,9 +33,10 @@ struct HasRoomId {
 	room_id: Option<IgnoredAny>,
 }
 
-/// Where a Conduit database kept its original media files: on the local
-/// filesystem (the default), or in an object store named by
-/// `conduit_source_media_provider` for a Conduit that backed its media with S3.
+/// Selects the source of a Conduit database's original media files.
+///
+/// The local filesystem is the default. For Conduit media backed by S3,
+/// `media.import.conduit.source_provider` names the source object store.
 enum MediaSource {
 	Filesystem(PathBuf),
 	Provider(Arc<Provider>),
@@ -56,14 +57,23 @@ struct ConduitMediaEntry<'a> {
 fn media_source(services: &Services) -> Result<MediaSource> {
 	let config = &services.server.config;
 
-	match config.conduit_source_media_provider.as_deref() {
+	match config
+		.media
+		.import
+		.conduit
+		.source_provider
+		.as_deref()
+	{
 		| Some(name) => services
 			.storage
 			.provider(name)
 			.map(|provider| MediaSource::Provider(provider.clone())),
 		| None => {
 			let media_dir = config
-				.conduit_source_media_path
+				.media
+				.import
+				.conduit
+				.source_path
 				.clone()
 				.unwrap_or_else(|| config.database_path.join("media"));
 
@@ -104,8 +114,8 @@ pub(super) async fn migrate_conduit_media(services: &Services) -> Result {
 	let blocklist = db.open_cf("blocked_servername_mediaid")?;
 	let blocklist = blocklist.as_ref();
 
-	let depth = config.conduit_media_directory_depth;
-	let length = config.conduit_media_directory_length;
+	let depth = config.media.import.conduit.directory_depth;
+	let length = config.media.import.conduit.directory_length;
 	let source = media_source(services)?;
 
 	warn!("Importing Conduit media originals into tuwunel's key-addressed store...");

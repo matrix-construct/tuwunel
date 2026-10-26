@@ -100,7 +100,7 @@ pub(super) async fn get_thumbnail_generate(
 	animate: Animate,
 	data: Metadata,
 ) -> Result<Media> {
-	let animation_enabled = self.services.config.media_thumbnail_animated;
+	let animation_enabled = self.services.config.media.thumbnail.animated;
 	let admission = animation_enabled
 		.then_async(async || {
 			let slots = self.animated_thumbnail_slots.clone();
@@ -300,7 +300,7 @@ pub(super) async fn store_encoded(
 #[implement(super::super::Service)]
 #[tracing::instrument(name = "decode", level = "trace", skip_all)]
 pub(super) fn decode(&self, bytes: &[u8]) -> Result<DynamicImage> {
-	let budget = self.services.config.media_thumbnail_max_pixels;
+	let budget = self.services.config.media.thumbnail.max_pixels;
 	let (width, height) = reader(bytes)?
 		.into_dimensions()
 		.map_err(|error| err!(debug_warn!(?error, "Failed to read picture dimensions.")))?;

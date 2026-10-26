@@ -276,7 +276,7 @@ fn make_federation(
 /// The configured User-Agent is applied per request rather than here, so a
 /// configuration reload takes effect without rebuilding the client.
 fn preview_builder(services: &Services, builder: ClientBuilder) -> Result<ClientBuilder> {
-	let interface = &services.config.url_preview_bound_interface;
+	let interface = &services.config.media.url_preview.bound_interface;
 
 	let bind_addr = interface.clone().and_then(Either::left);
 	let bind_iface = interface.clone().and_then(Either::right);

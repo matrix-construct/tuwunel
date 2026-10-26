@@ -107,8 +107,8 @@ pub(super) async fn video_frame(
 		.as_deref()
 		.is_some_and(|content_type| content_type.starts_with(VIDEO));
 
-	let workable = !config.media_video_thumbnail_command.is_empty()
-		&& media.content.len() <= config.media_video_thumbnail_max_size
+	let workable = !config.media.video_thumbnail.command.is_empty()
+		&& media.content.len() <= config.media.video_thumbnail.max_size
 		&& !self.failed_recently(mxc);
 
 	is_video
@@ -145,18 +145,18 @@ pub(super) fn remember_failure(&self, mxc: &Mxc<'_>) {
 #[tracing::instrument(level = "debug", skip(self, content))]
 async fn extract_frame(&self, mxc: &Mxc<'_>, dim: &Dim, content: &[u8]) -> Result<Vec<u8>> {
 	let config = &self.services.config;
-	let timeout = Duration::from_secs(config.media_video_thumbnail_timeout);
+	let timeout = Duration::from_secs(config.media.video_thumbnail.timeout);
 
 	// one deadline spans the wait for a slot, the staging write and the program,
 	// so a queue cannot compound into a multiple of the configured timeout
 	let deadline = Instant::now()
 		.checked_add(timeout)
 		.ok_or_else(|| {
-			err!(Config("media_video_thumbnail_timeout", "Timeout is out of range."))
+			err!(Config("media.video_thumbnail.timeout", "Timeout is out of range."))
 		})?;
 
-	let Some((program, args)) = config.media_video_thumbnail_command.split_first() else {
-		return Err!(Config("media_video_thumbnail_command", "No program is configured."));
+	let Some((program, args)) = config.media.video_thumbnail.command.split_first() else {
+		return Err!(Config("media.video_thumbnail.command", "No program is configured."));
 	};
 
 	let Ok(Ok(_slot)) = timeout_at(deadline, self.video_thumbnail_slots.acquire()).await else {
@@ -185,7 +185,7 @@ async fn extract_frame(&self, mxc: &Mxc<'_>, dim: &Dim, content: &[u8]) -> Resul
 		.iter()
 		.map(|arg| substitute(arg, &path, &width, &height));
 
-	let limit = u64_from_usize_saturating(config.media_video_thumbnail_max_size);
+	let limit = u64_from_usize_saturating(config.media.video_thumbnail.max_size);
 	let frame = run(program, args, limit, deadline).await;
 
 	// the program reached a verdict on this video, so a failure is the video's
@@ -201,7 +201,9 @@ async fn extract_frame(&self, mxc: &Mxc<'_>, dim: &Dim, content: &[u8]) -> Resul
 /// directory, which is commonly memory-backed and sized for small files.
 fn staging_dir(config: &Config) -> Cow<'_, Path> {
 	config
-		.media_video_thumbnail_path
+		.media
+		.video_thumbnail
+		.path
 		.as_deref()
 		.map_or_else(|| config.database_path.join("tmp").into(), Cow::Borrowed)
 }

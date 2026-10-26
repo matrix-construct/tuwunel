@@ -30,7 +30,7 @@ fn descriptor_cf_options(
 	cache: Option<&Cache>,
 ) -> Result<Options> {
 	set_compression(&mut desc, config);
-	set_preview_retention(&mut desc, config.url_preview_cache_ttl);
+	set_preview_retention(&mut desc, config.media.url_preview.cache_ttl);
 	set_table_options(&mut opts, &desc, cache)?;
 
 	opts.set_min_write_buffer_number(1);

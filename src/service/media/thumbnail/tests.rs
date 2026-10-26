@@ -534,8 +534,8 @@ async fn build_services(path: &Path) -> Result<Arc<Services>> {
 	let raw_config = Figment::new()
 		.merge(("server_name", "localhost"))
 		.merge(("database_path", path.as_ref()))
-		.merge(("media_thumbnail_animated", true))
-		.merge(("media_thumbnail_animated_concurrency", 1))
+		.merge(("media.thumbnail.animated", true))
+		.merge(("media.thumbnail.animated_concurrency", 1))
 		.merge(("test", ["fresh", "cleanup"]));
 
 	let config = Config::new(&raw_config)?;

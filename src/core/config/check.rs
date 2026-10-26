@@ -171,19 +171,21 @@ fn check_network(config: &Config) -> Result {
 
 	// A non-zero depth shards the 64-char SHA-256 hex digest into `depth`
 	// segments of `length` plus a remainder, so the product must stay below 64.
-	let depth = config.conduit_media_directory_depth;
-	let length = config.conduit_media_directory_length;
+	let depth = config.media.import.conduit.directory_depth;
+	let length = config.media.import.conduit.directory_length;
+
 	if depth > 0 && length == 0 {
 		return Err!(Config(
-			"conduit_media_directory_length",
-			"must be non-zero when conduit_media_directory_depth is non-zero"
+			"media.import.conduit.directory_length",
+			"must be non-zero when media.import.conduit.directory_depth is non-zero"
 		));
 	}
+
 	if depth > 0 && usize::from(depth).saturating_mul(usize::from(length)) >= 64 {
 		return Err!(Config(
-			"conduit_media_directory_depth",
-			"conduit_media_directory_depth times conduit_media_directory_length must be less \
-			 than 64, the length of a SHA-256 hex digest"
+			"media.import.conduit.directory_depth",
+			"media.import.conduit.directory_depth times media.import.conduit.directory_length \
+			 must be less than 64, the length of a SHA-256 hex digest"
 		));
 	}
 
@@ -526,17 +528,17 @@ fn check_turn_and_media_misc(config: &Config) -> Result {
 }
 
 fn check_thumbnails(config: &Config) -> Result {
-	if config.media_thumbnail_max_pixels == 0 {
+	if config.media.thumbnail.max_pixels == 0 {
 		return Err!(Config(
-			"media_thumbnail_max_pixels",
+			"media.thumbnail.max_pixels",
 			"A pixel budget of zero refuses every picture; remove the setting to take the \
 			 default."
 		));
 	}
 
-	if unusable_concurrency(config.media_thumbnail_animated_concurrency) {
+	if unusable_concurrency(config.media.thumbnail.animated_concurrency) {
 		return Err!(Config(
-			"media_thumbnail_animated_concurrency",
+			"media.thumbnail.animated_concurrency",
 			"Animated thumbnail source jobs permitted at once must be between 1 and \
 			 {MAX_THUMBNAIL_CONCURRENCY}: zero leaves every source read waiting for a slot that \
 			 never frees, and the ceiling is far past any useful degree of parallelism."
@@ -547,18 +549,18 @@ fn check_thumbnails(config: &Config) -> Result {
 }
 
 fn check_video_thumbnails(config: &Config) -> Result {
-	if unusable_concurrency(config.media_video_thumbnail_concurrency) {
+	if unusable_concurrency(config.media.video_thumbnail.concurrency) {
 		return Err!(Config(
-			"media_video_thumbnail_concurrency",
+			"media.video_thumbnail.concurrency",
 			"Video thumbnail programs permitted at once must be between 1 and \
 			 {MAX_THUMBNAIL_CONCURRENCY}: zero leaves every extraction waiting for a slot that \
 			 never frees, and the ceiling is far past any useful degree of parallelism."
 		));
 	}
 
-	if config.media_video_thumbnail_timeout == 0 {
+	if config.media.video_thumbnail.timeout == 0 {
 		return Err!(Config(
-			"media_video_thumbnail_timeout",
+			"media.video_thumbnail.timeout",
 			"A video thumbnail deadline of zero expires before the program can start."
 		));
 	}
@@ -578,14 +580,17 @@ fn check_url_previews(config: &Config) -> Result {
 	let wildcard = "*".to_owned();
 	let url_preview_wildcards = [
 		(
-			"url_preview_domain_contains_allowlist",
-			&config.url_preview_domain_contains_allowlist,
+			"media.url_preview.domain_contains_allowlist",
+			&config.media.url_preview.domain_contains_allowlist,
 		),
 		(
-			"url_preview_domain_explicit_allowlist",
-			&config.url_preview_domain_explicit_allowlist,
+			"media.url_preview.domain_explicit_allowlist",
+			&config.media.url_preview.domain_explicit_allowlist,
 		),
-		("url_preview_url_contains_allowlist", &config.url_preview_url_contains_allowlist),
+		(
+			"media.url_preview.url_contains_allowlist",
+			&config.media.url_preview.url_contains_allowlist,
+		),
 	];
 
 	for (name, list) in url_preview_wildcards {
@@ -598,39 +603,55 @@ fn check_url_previews(config: &Config) -> Result {
 		}
 	}
 
-	if let Some(Either::Right(_)) = config.url_preview_bound_interface.as_ref()
+	if let Some(Either::Right(_)) = config.media.url_preview.bound_interface.as_ref()
 		&& !matches!(OS, "android" | "fuchsia" | "linux")
 	{
 		return Err!(Config(
-			"url_preview_bound_interface",
+			"media.url_preview.bound_interface",
 			"Not a valid IP address. Interface names not supported on {OS}."
 		));
 	}
 
-	if let Some(user_agent) = config.url_preview_user_agent.as_deref()
+	if let Some(user_agent) = config.media.url_preview.user_agent.as_deref()
 		&& HeaderValue::from_str(user_agent).is_err()
 	{
-		return Err!(Config("url_preview_user_agent", "Not a valid HTTP header value."));
+		return Err!(Config("media.url_preview.user_agent", "Not a valid HTTP header value."));
 	}
 
-	if let Some(user_agent) = config.url_preview_media_user_agent.as_deref()
+	if let Some(user_agent) = config
+		.media
+		.url_preview
+		.media_user_agent
+		.as_deref()
 		&& HeaderValue::from_str(user_agent).is_err()
 	{
-		return Err!(Config("url_preview_media_user_agent", "Not a valid HTTP header value."));
+		return Err!(Config(
+			"media.url_preview.media_user_agent",
+			"Not a valid HTTP header value."
+		));
 	}
 
-	if let Some(accept_language) = config.url_preview_accept_language.as_deref()
+	if let Some(accept_language) = config
+		.media
+		.url_preview
+		.accept_language
+		.as_deref()
 		&& HeaderValue::from_str(accept_language).is_err()
 	{
-		return Err!(Config("url_preview_accept_language", "Not a valid HTTP header value."));
+		return Err!(Config(
+			"media.url_preview.accept_language",
+			"Not a valid HTTP header value."
+		));
 	}
 
-	timepoint_from_now(Duration::from_secs(config.url_preview_cache_ttl)).map_err(|_| {
-		err!(Config(
-			"url_preview_cache_ttl",
-			"Value is too large to add to the current time."
-		))
-	})?;
+	timepoint_from_now(Duration::from_secs(config.media.url_preview.cache_ttl)).map_err(
+		|_| {
+			err!(Config(
+				"media.url_preview.cache_ttl",
+				"Value is too large to add to the current time."
+			))
+		},
+	)?;
 
 	Ok(())
 }
@@ -797,41 +818,45 @@ fn warn_oidc_registration_token(config: &Config) {
 }
 
 fn check_media_providers(config: &Config) -> Result {
-	for provider in &config.store_media_on_providers {
-		if !config.media_storage_providers.contains(provider) {
-			return Err!(Config(
-				"store_media_on_providers",
-				"Providers must be listed in 'media_storage_providers'"
-			));
-		}
+	if config
+		.media
+		.store_on_providers
+		.iter()
+		.any(|provider| !config.media.storage_providers.contains(provider))
+	{
+		return Err!(Config(
+			"media.store_on_providers",
+			"Providers must be listed in 'media.storage_providers'"
+		));
 	}
 
 	if config
-		.media_storage_providers
+		.media
+		.storage_providers
 		.iter()
 		.filter(|&provider| {
 			if config.storage_provider.contains_key(provider) || provider == "media" {
 				return false;
 			}
 
-			error!("`media_storage_providers` references non-existent provider {provider:?}");
+			error!(?provider, "`media.storage_providers` references non-existent provider");
 			true
 		})
 		.count()
 		.gt(&0)
 	{
 		return Err!(Config(
-			"media_storage_providers",
+			"media.storage_providers",
 			"Contains missing or unconfigured storage providers."
 		));
 	}
 
-	if config.media_storage_providers.len() > 1 && config.store_media_on_providers.is_empty() {
+	if config.media.storage_providers.len() > 1 && config.media.store_on_providers.is_empty() {
 		warn!(
-			"Media will be duplicated to multiple providers {:?} until \
-			 `store_media_on_providers` is configured. This warning can be suppressed by \
-			 explicitly configuring `store_media_on_providers`",
-			config.media_storage_providers
+			providers = ?config.media.storage_providers,
+			"Media will be duplicated to multiple providers until \
+			 `media.store_on_providers` is configured. This warning can be suppressed by \
+			 explicitly configuring `media.store_on_providers`"
 		);
 	}
 
@@ -956,7 +981,7 @@ fn warn_literal_patterns(config: &Config) {
 			"allowed_remote_server_names_experimental",
 			&config.allowed_remote_server_names_experimental,
 		),
-		("prevent_media_downloads_from", &config.prevent_media_downloads_from),
+		("media.prevent_downloads_from", &config.media.prevent_downloads_from),
 		("forbidden_remote_server_names", &config.forbidden_remote_server_names),
 		(
 			"forbidden_remote_room_directory_server_names",

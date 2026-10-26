@@ -19,6 +19,7 @@ use super::*;
 use crate::{
 	config::{
 		check::reload,
+		media::UrlPreview,
 		proxy::{ProxySnapshot, parse_environment_proxy_url},
 	},
 	utils::{
@@ -176,16 +177,16 @@ fn media_upload_min_free_space_defaults_to_one_gib_and_takes_either_form() {
 	let suffixed = config_from_toml("[global]\nmedia_upload_min_free_space = \"10 GiB\"\n")
 		.expect("a size with a suffix should parse");
 
-	assert_eq!(default.media_upload_min_free_space, 1_073_741_824);
-	assert_eq!(integer.media_upload_min_free_space, 10_737_418_240);
-	assert_eq!(suffixed.media_upload_min_free_space, 10_737_418_240);
+	assert_eq!(default.media.upload_min_free_space, 1_073_741_824);
+	assert_eq!(integer.media.upload_min_free_space, 10_737_418_240);
+	assert_eq!(suffixed.media.upload_min_free_space, 10_737_418_240);
 }
 
 #[test]
 fn url_preview_accept_language_defaults_to_none() {
 	let config = default_config();
 
-	assert!(config.url_preview_accept_language.is_none());
+	assert!(config.media.url_preview.accept_language.is_none());
 }
 
 #[test]
@@ -258,15 +259,29 @@ url_preview_accept_language = "en-US,en;q=0.9"
 	)
 	.expect("language preference should parse");
 
-	let german = Config {
-		url_preview_accept_language: Some("de-DE,de;q=0.9,en;q=0.5".to_owned()),
-		..english.clone()
-	};
+	let german = with_preview_language(&english, "de-DE,de;q=0.9,en;q=0.5");
+	let language = english
+		.media
+		.url_preview
+		.accept_language
+		.as_deref();
 
-	assert_eq!(english.url_preview_accept_language.as_deref(), Some("en-US,en;q=0.9"));
+	assert_eq!(language, Some("en-US,en;q=0.9"));
+
 	reload(&original, &english).expect("setting a language should reload");
 	reload(&english, &german).expect("changing the language should reload");
 	reload(&german, &original).expect("removing the language should reload");
+}
+
+fn with_preview_language(base: &Config, language: &str) -> Config {
+	let url_preview = UrlPreview {
+		accept_language: Some(language.to_owned()),
+		..base.media.url_preview.clone()
+	};
+
+	let media = Media { url_preview, ..base.media.clone() };
+
+	Config { media, ..base.clone() }
 }
 
 #[test]
@@ -274,17 +289,14 @@ fn url_preview_accept_language_rejects_invalid_headers() {
 	let original = default_config();
 
 	for value in ["en\r\nX-Injected: true", "en\n", "en\0"] {
-		let config = Config {
-			url_preview_accept_language: Some(value.to_owned()),
-			..original.clone()
-		};
+		let config = with_preview_language(&original, value);
 
 		let error = check(&config).expect_err("invalid header must fail at startup");
 
 		assert!(
 			error
 				.to_string()
-				.contains("url_preview_accept_language"),
+				.contains("media.url_preview.accept_language"),
 			"{error}"
 		);
 
@@ -1404,7 +1416,7 @@ fn an_unknown_jwt_key_format_fails_the_config_check() {
 /// "varies by system" and non-literal bodies are out of reach here.
 #[test]
 fn documented_defaults_match_the_code() {
-	const SOURCES: [&str; 7] = [
+	const SOURCES: [&str; 8] = [
 		include_str!("mod.rs"),
 		include_str!("rocksdb.rs"),
 		include_str!("cache.rs"),
@@ -1412,6 +1424,7 @@ fn documented_defaults_match_the_code() {
 		include_str!("runtime.rs"),
 		include_str!("http.rs"),
 		include_str!("network.rs"),
+		include_str!("media.rs"),
 	];
 
 	const SERDE_DEFAULT: &str = "#[serde(default = \"";

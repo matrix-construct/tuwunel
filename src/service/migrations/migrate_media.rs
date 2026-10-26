@@ -31,12 +31,16 @@ pub(super) async fn migrate_media(services: &Services) -> Result {
 		return Ok(());
 	}
 
-	if !sha256_done {
-		progress.begin("migrate_sha256_media");
-		migrate_sha256_media(services).await?;
-	} else if config.media_startup_check {
-		progress.begin("checkup_sha256_media");
-		checkup_sha256_media(services).await?;
+	match () {
+		| () if !sha256_done => {
+			progress.begin("migrate_sha256_media");
+			migrate_sha256_media(services).await?;
+		},
+		| () if config.media.startup_check => {
+			progress.begin("checkup_sha256_media");
+			checkup_sha256_media(services).await?;
+		},
+		| () => {},
 	}
 
 	Ok(())

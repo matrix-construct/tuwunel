@@ -16,12 +16,12 @@ type Providers = SmallVec<[Arc<Provider>; 1]>;
 ///
 /// Each local storage provider an upload is written to is asked for the space
 /// available on its filesystem, and the upload is refused while any of them
-/// has less than `media_upload_min_free_space`. A provider that is not a
+/// has less than `media.upload_min_free_space`. A provider that is not a
 /// directory has no such figure, and one that cannot be read refuses nothing.
 #[implement(super::Service)]
 #[tracing::instrument(level = "debug", skip_all)]
 pub async fn check_upload_space(&self) -> Result {
-	let min_free_space = self.services.config.media_upload_min_free_space;
+	let min_free_space = self.services.config.media.upload_min_free_space;
 
 	if min_free_space == 0 {
 		return Ok(());

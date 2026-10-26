@@ -212,7 +212,7 @@ pub(super) static MAPS: &[Descriptor] = &[
 	},
 	Descriptor {
 		name: "mediaid_lazy",
-		ttl: 60 * 60 * 24 * 30, // raised by url_preview_cache_ttl; must outlive url_preview
+		ttl: 60 * 60 * 24 * 30, // raised by media.url_preview.cache_ttl; must outlive url_preview
 		limit_size: 1024 * 1024 * 512,
 		..descriptor::RANDOM_SMALL_CACHE
 	},
@@ -603,7 +603,7 @@ pub(super) static MAPS: &[Descriptor] = &[
 	},
 	Descriptor {
 		name: "url_preview",
-		ttl: 60 * 60 * 24 * 7, // floor; url_preview_cache_ttl raises it when higher
+		ttl: 60 * 60 * 24 * 7, // floor; media.url_preview.cache_ttl raises it when higher
 		limit_size: 1024 * 1024 * 128,
 		..descriptor::RANDOM_SMALL_CACHE
 	},

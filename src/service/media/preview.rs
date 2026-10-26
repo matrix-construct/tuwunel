@@ -234,7 +234,9 @@ pub async fn request_url_preview(&self, url: &Url) -> Result<UrlPreviewData> {
 	} else if self
 		.services
 		.config
-		.url_preview_media_user_agent
+		.media
+		.url_preview
+		.media_user_agent
 		.is_some()
 	{
 		(self.media_response(url).await?, true)
@@ -297,7 +299,7 @@ pub async fn request_url_preview(&self, url: &Url) -> Result<UrlPreviewData> {
 		| _ => return Err!(Request(Unknown("Unsupported Content-Type"))),
 	};
 
-	let ttl = Duration::from_secs(self.services.config.url_preview_cache_ttl);
+	let ttl = Duration::from_secs(self.services.config.media.url_preview.cache_ttl);
 	let cached = CachedPreview::new(ttl, data)?;
 
 	self.db.set_url_preview(url.as_str(), &cached)?;
@@ -329,12 +331,15 @@ pub(super) fn preview_headers(
 	agent: Agent,
 ) -> reqwest::RequestBuilder {
 	let config: &Config = &self.services.config;
+	let default_user_agent = config.media.url_preview.user_agent.as_deref();
 	let user_agent = match agent {
-		| Agent::Page => config.url_preview_user_agent.as_deref(),
+		| Agent::Page => default_user_agent,
 		| Agent::Media => config
-			.url_preview_media_user_agent
+			.media
+			.url_preview
+			.media_user_agent
 			.as_deref()
-			.or(config.url_preview_user_agent.as_deref()),
+			.or(default_user_agent),
 	};
 
 	let request = match user_agent {
@@ -342,7 +347,12 @@ pub(super) fn preview_headers(
 		| None => request,
 	};
 
-	let request = match config.url_preview_accept_language.as_deref() {
+	let request = match config
+		.media
+		.url_preview
+		.accept_language
+		.as_deref()
+	{
 		| Some(accept_language) => request.header(ACCEPT_LANGUAGE, accept_language),
 		| None => request,
 	};
@@ -576,7 +586,13 @@ pub async fn download_image(&self, response: reqwest::Response) -> Result<UrlPre
 		.and_then(|value| value.to_str().ok())
 		.map(ToOwned::to_owned);
 
-	let limit = self.services.config.url_preview_max_media_size;
+	let limit = self
+		.services
+		.config
+		.media
+		.url_preview
+		.max_media_size;
+
 	let image = read_response_capped(response, limit).await?;
 
 	let cursor = std::io::Cursor::new(&image);
@@ -670,7 +686,9 @@ async fn media_refetch(
 		|| self
 			.services
 			.config
-			.url_preview_media_user_agent
+			.media
+			.url_preview
+			.media_user_agent
 			.is_none()
 	{
 		return Ok(response);
@@ -731,8 +749,14 @@ fn mint_lazy_media(&self) -> String {
 #[implement(Service)]
 #[expect(clippy::unused_async)]
 pub async fn download_video(&self, response: reqwest::Response) -> Result<UrlPreviewData> {
-	let video_size =
-		checked_media_size(&response, self.services.config.url_preview_max_media_size)?;
+	let limit = self
+		.services
+		.config
+		.media
+		.url_preview
+		.max_media_size;
+
+	let video_size = checked_media_size(&response, limit)?;
 
 	Ok(UrlPreviewData {
 		video: Some(self.register_lazy_media(response.url().as_str())),
@@ -752,8 +776,14 @@ pub async fn download_video(&self, _response: reqwest::Response) -> Result<UrlPr
 #[implement(Service)]
 #[expect(clippy::unused_async)]
 pub async fn download_audio(&self, response: reqwest::Response) -> Result<UrlPreviewData> {
-	let audio_size =
-		checked_media_size(&response, self.services.config.url_preview_max_media_size)?;
+	let limit = self
+		.services
+		.config
+		.media
+		.url_preview
+		.max_media_size;
+
+	let audio_size = checked_media_size(&response, limit)?;
 
 	Ok(UrlPreviewData {
 		audio: Some(self.register_lazy_media(response.url().as_str())),
@@ -778,7 +808,7 @@ fn checked_media_size(response: &reqwest::Response, limit: usize) -> Result<Opti
 		.and_then(|len| usize::try_from(len).ok());
 
 	if size.is_some_and(|size| size > limit) {
-		return Err!(Request(TooLarge("Media exceeds url_preview_max_media_size")));
+		return Err!(Request(TooLarge("Media exceeds media.url_preview.max_media_size")));
 	}
 
 	Ok(size)
@@ -789,7 +819,13 @@ fn checked_media_size(response: &reqwest::Response, limit: usize) -> Result<Opti
 async fn download_html(&self, url: &Url, response: reqwest::Response) -> Result<UrlPreviewData> {
 	use webpage::HTML;
 
-	let limit = self.services.config.url_preview_max_spider_size;
+	let limit = self
+		.services
+		.config
+		.media
+		.url_preview
+		.max_spider_size;
+
 	let (bytes, truncated) = spider_body(response, limit).await?;
 
 	// the parser needs an owned string, so the read buffer becomes one rather
@@ -885,7 +921,7 @@ async fn download_html(&self, url: &Url, response: reqwest::Response) -> Result<
 			%url,
 			%limit,
 			"Preview page was truncated before any metadata was found; a larger \
-			 url_preview_max_spider_size or a different url_preview_user_agent may be needed"
+			 media.url_preview.max_spider_size or a different media.url_preview.user_agent may be needed"
 		);
 	}
 
@@ -1029,19 +1065,30 @@ pub fn url_preview_allowed(&self, url: &Url) -> bool {
 	let allowlist_domain_contains = &self
 		.services
 		.config
-		.url_preview_domain_contains_allowlist;
+		.media
+		.url_preview
+		.domain_contains_allowlist;
+
 	let allowlist_domain_explicit = &self
 		.services
 		.config
-		.url_preview_domain_explicit_allowlist;
+		.media
+		.url_preview
+		.domain_explicit_allowlist;
+
 	let denylist_domain_explicit = &self
 		.services
 		.config
-		.url_preview_domain_explicit_denylist;
+		.media
+		.url_preview
+		.domain_explicit_denylist;
+
 	let allowlist_url_contains = &self
 		.services
 		.config
-		.url_preview_url_contains_allowlist;
+		.media
+		.url_preview
+		.url_contains_allowlist;
 
 	if allowlist_domain_contains.contains(&"*".to_owned())
 		|| allowlist_domain_explicit.contains(&"*".to_owned())
@@ -1051,80 +1098,78 @@ pub fn url_preview_allowed(&self, url: &Url) -> bool {
 		return true;
 	}
 
-	if !host.is_empty() {
-		if denylist_domain_explicit.contains(&host) {
-			debug!(
-				"Host {} is not allowed by url_preview_domain_explicit_denylist (check 1/4)",
-				&host
-			);
-			return false;
-		}
+	if host.is_empty() {
+		return false;
+	}
 
-		if allowlist_domain_explicit.contains(&host) {
-			debug!(
-				"Host {} is allowed by url_preview_domain_explicit_allowlist (check 2/4)",
-				&host
-			);
-			return true;
-		}
+	if denylist_domain_explicit.contains(&host) {
+		debug!(%host, "Host is not allowed by media.url_preview.domain_explicit_denylist (check \
+			 1/4)");
 
-		if allowlist_domain_contains
-			.iter()
-			.any(|domain_s| domain_s.contains(&host.clone()))
-		{
-			debug!(
-				"Host {} is allowed by url_preview_domain_contains_allowlist (check 3/4)",
-				&host
-			);
-			return true;
-		}
+		return false;
+	}
 
-		if allowlist_url_contains
-			.iter()
-			.any(|url_s| url.to_string().contains(url_s))
-		{
-			debug!("URL {} is allowed by url_preview_url_contains_allowlist (check 4/4)", &host);
-			return true;
-		}
+	if allowlist_domain_explicit.contains(&host) {
+		debug!(%host, "Host is allowed by media.url_preview.domain_explicit_allowlist (check 2/4)");
 
-		// check root domain if available and if user has root domain checks
-		if self.services.config.url_preview_check_root_domain {
-			debug!("Checking root domain");
-			match host.split_once('.') {
-				| None => return false,
-				| Some((_, root_domain)) => {
-					if denylist_domain_explicit.contains(&root_domain.to_owned()) {
-						debug!(
-							"Root domain {} is not allowed by \
-							 url_preview_domain_explicit_denylist (check 1/3)",
-							&root_domain
-						);
-						return false;
-					}
+		return true;
+	}
 
-					if allowlist_domain_explicit.contains(&root_domain.to_owned()) {
-						debug!(
-							"Root domain {} is allowed by url_preview_domain_explicit_allowlist \
-							 (check 2/3)",
-							&root_domain
-						);
-						return true;
-					}
+	if allowlist_domain_contains
+		.iter()
+		.any(|domain_s| domain_s.contains(host.as_str()))
+	{
+		debug!(%host, "Host is allowed by media.url_preview.domain_contains_allowlist (check 3/4)");
 
-					if allowlist_domain_contains
-						.iter()
-						.any(|domain_s| domain_s.contains(&root_domain.to_owned()))
-					{
-						debug!(
-							"Root domain {} is allowed by url_preview_domain_contains_allowlist \
-							 (check 3/3)",
-							&root_domain
-						);
-						return true;
-					}
-				},
-			}
-		}
+		return true;
+	}
+
+	if allowlist_url_contains
+		.iter()
+		.any(|url_s| url.as_str().contains(url_s))
+	{
+		debug!(%host, "URL is allowed by media.url_preview.url_contains_allowlist (check 4/4)");
+
+		return true;
+	}
+
+	if !self
+		.services
+		.config
+		.media
+		.url_preview
+		.check_root_domain
+	{
+		return false;
+	}
+
+	debug!("Checking root domain");
+	let Some((_, root_domain)) = host.split_once('.') else {
+		return false;
+	};
+
+	if denylist_domain_explicit.contains(&root_domain.to_owned()) {
+		debug!(%root_domain, "Root domain is not allowed by \
+			 media.url_preview.domain_explicit_denylist (check 1/3)");
+
+		return false;
+	}
+
+	if allowlist_domain_explicit.contains(&root_domain.to_owned()) {
+		debug!(%root_domain, "Root domain is allowed by \
+			 media.url_preview.domain_explicit_allowlist (check 2/3)");
+
+		return true;
+	}
+
+	if allowlist_domain_contains
+		.iter()
+		.any(|domain_s| domain_s.contains(root_domain))
+	{
+		debug!(%root_domain, "Root domain is allowed by \
+			 media.url_preview.domain_contains_allowlist (check 3/3)");
+
+		return true;
 	}
 
 	false

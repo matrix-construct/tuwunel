@@ -13,6 +13,7 @@ mod identity_provider_serde;
 pub mod ip_source;
 mod jwt;
 pub mod manager;
+pub mod media;
 mod net;
 pub mod network;
 mod normalize;
@@ -28,13 +29,11 @@ pub mod well_known;
 
 use std::{
 	collections::{BTreeMap, BTreeSet},
-	net::IpAddr,
 	path::{Path, PathBuf},
 };
 
 use bytesize::ByteSize;
 use derive_more::Debug;
-use either::Either;
 pub use figment::{Figment, value::Value as FigmentValue};
 use figment::{
 	Profile, Provider,
@@ -59,6 +58,7 @@ pub use self::{
 	http::Http,
 	ip_source::IpSource,
 	manager::Manager,
+	media::Media,
 	network::Network,
 	regenerate::{
 		Overwrite, RegenerateOptions, RegenerationSummary, example_config, regenerate_config,
@@ -124,7 +124,7 @@ pub type StorageBucketName = SmallString<[u8; 64]>;
 "#,
 	ignore = "rocksdb catchall well_known tls rate_limiting ldap jwt appservice \
 	          identity_provider storage_provider registration_terms smtp cache database runtime \
-	          http network",
+	          http network media",
 	hidden = "resolve_state_locally_shadow",
 	forbidden = "database_restore_backup force_migration"
 )]
@@ -220,56 +220,6 @@ pub struct Config {
 	/// default: 90000
 	#[serde(default = "default_client_sync_timeout_max")]
 	pub client_sync_timeout_max: u64,
-
-	/// Maximum number of concurrently pending (asynchronous) media uploads a
-	/// user can have.
-	///
-	/// reloadable: yes
-	/// default: 5
-	#[serde(default = "default_max_pending_media_uploads")]
-	pub max_pending_media_uploads: usize,
-
-	/// The time in seconds before an unused pending MXC URI expires and is
-	/// removed.
-	///
-	/// reloadable: yes
-	/// default: 86400 (24 hours)
-	#[serde(default = "default_media_create_unused_expiration_time")]
-	pub media_create_unused_expiration_time: u64,
-
-	/// The maximum number of media create requests per second allowed from a
-	/// single user.
-	///
-	/// reloadable: yes
-	/// default: 10
-	#[serde(default = "default_media_rc_create_per_second")]
-	pub media_rc_create_per_second: u32,
-
-	/// The maximum burst count for media create requests from a single user.
-	///
-	/// reloadable: yes
-	/// default: 50
-	#[serde(default = "default_media_rc_create_burst_count")]
-	pub media_rc_create_burst_count: u32,
-
-	/// Writable space below which media uploads are refused, on the filesystem
-	/// of each local storage provider an upload would be written to.
-	///
-	/// Blocks a filesystem reserves for privileged processes are not counted.
-	/// Media is stored beside the database by default, and the database cannot
-	/// be written once the disk fills, so uploads stop first with
-	/// M_RESOURCE_LIMIT_EXCEEDED and resume once space returns. Remote media,
-	/// URL previews and thumbnails are never refused. Accepts an integer byte
-	/// count or a string with SI/IEC suffix such as "10 GiB"; 0 disables the
-	/// check, which a network mount reporting no free space needs.
-	///
-	/// reloadable: yes
-	/// default: "1 GiB"
-	#[serde(
-		default = "default_media_upload_min_free_space",
-		deserialize_with = "deserialize_bytesize_u64"
-	)]
-	pub media_upload_min_free_space: u64,
 
 	/// reloadable: yes
 	/// default: 1024
@@ -1901,286 +1851,6 @@ pub struct Config {
 	#[serde(default)]
 	pub allow_guests_auto_join_rooms: bool,
 
-	/// Prevent media from being embedded in frames, including same-origin frames.
-	///
-	/// This is disabled by default for compatibility with attachment viewers.
-	/// Enabling it adds `frame-ancestors 'none'` to the download and thumbnail
-	/// Content-Security-Policy. Requires a restart, and reverse proxy headers may
-	/// still prevent framing.
-	#[serde(default)]
-	pub media_deny_framing: bool,
-
-	/// Prevent inline styles in media documents.
-	///
-	/// This is disabled by default so browser image viewers retain their
-	/// presentation styles. Enabling it omits `style-src 'unsafe-inline'` from
-	/// the download and thumbnail Content-Security-Policy. Requires a restart,
-	/// and reverse proxy headers may still restrict styles.
-	#[serde(default)]
-	pub media_deny_inline_styles: bool,
-
-	/// Enable the legacy unauthenticated Matrix media repository endpoints.
-	///
-	/// These endpoints consist of:
-	/// - /_matrix/media/*/config
-	/// - /_matrix/media/*/preview_url
-	/// - /_matrix/media/*/download/*
-	/// - /_matrix/media/*/thumbnail/*
-	///
-	/// The authenticated equivalent endpoints are always enabled. Defaults to
-	/// false.
-	#[serde(default)]
-	pub allow_legacy_media: bool,
-
-	/// Fallback to requesting legacy unauthenticated media from remote servers.
-	/// Unauthenticated media was removed in ~2024Q3; enabling this adds
-	/// considerable federation requests which are unlikely to succeed.
-	/// reloadable: yes
-	#[serde(default)]
-	pub request_legacy_media: bool,
-
-	/// When true, remote legacy content and thumbnail fetching is permitted.
-	/// When false, those remote legacy requests are rejected.
-	///
-	/// reloadable: yes
-	#[serde(default = "true_fn")]
-	pub freeze_legacy_media: bool,
-
-	/// Check consistency of the media directory at startup:
-	/// 1. When `media_compat_file_link` is enabled, this check will upgrade
-	///    media when switching back and forth between Conduit and tuwunel. Both
-	///    options must be enabled to handle this.
-	/// 2. When media is deleted from the directory, this check will also delete
-	///    its database entry.
-	///
-	/// If none of these checks apply to your use cases, and your media
-	/// directory is significantly large setting this to false may reduce
-	/// startup time.
-	#[serde(default = "true_fn")]
-	pub media_startup_check: bool,
-
-	/// Enable backward-compatibility with Conduit's media directory by creating
-	/// symlinks of media.
-	///
-	/// This option is only necessary if you plan on using Conduit again.
-	/// Otherwise setting this to false reduces filesystem clutter and overhead
-	/// for managing these symlinks in the directory. This is now disabled by
-	/// default. You may still return to upstream Conduit but you have to run
-	/// tuwunel at least once with this set to true and allow the
-	/// media_startup_check to take place before shutting down to return to
-	/// Conduit.
-	#[serde(default)]
-	pub media_compat_file_link: bool,
-
-	/// Prune missing media from the database as part of the media startup
-	/// checks.
-	///
-	/// This means if you delete files from the media directory the
-	/// corresponding entries will be removed from the database. This is
-	/// disabled by default because if the media directory is accidentally moved
-	/// or inaccessible, the metadata entries in the database will be lost with
-	/// sadness.
-	#[serde(default)]
-	pub prune_missing_media: bool,
-
-	/// Largest picture, in pixels, the thumbnailer will decode. Dimensions
-	/// cost memory whatever the encoded file weighs, so a picture declaring
-	/// more than this is left without a thumbnail instead of decoded. A video
-	/// frame inherits the resolution of the video it came from and is bounded
-	/// here too.
-	///
-	/// 50 megapixels is roughly four 8K frames and more than any ordinary
-	/// camera produces. Each pixel is budgeted at four bytes, so the default
-	/// admits a decode of about 200 MiB. The budget is per in-flight request,
-	/// which is what to size it against rather than one decode: thumbnail
-	/// requests are not otherwise limited in number.
-	///
-	/// reloadable: yes
-	/// default: 50000000
-	#[serde(default = "default_media_thumbnail_max_pixels")]
-	pub media_thumbnail_max_pixels: u64,
-
-	/// Answer a request for an animated thumbnail with one, per MSC2705.
-	///
-	/// A client that asks is served an animated GIF when the source carries a
-	/// frame sequence and a still when it does not, and a client that does not
-	/// ask is served a still either way. Encoding quantizes every frame on its
-	/// own palette, which costs far more than a still, so the frame count and
-	/// pixel budget below bound the work too. Turning this off leaves every
-	/// thumbnail a still PNG.
-	///
-	/// reloadable: yes
-	/// default: true
-	#[serde(default = "true_fn")]
-	pub media_thumbnail_animated: bool,
-
-	/// Frames an animated thumbnail carries at most.
-	///
-	/// A source with more of them is truncated to this and loops short, which
-	/// the client is not told about, rather than being refused a thumbnail.
-	/// Frames are also budgeted against `media_thumbnail_max_pixels` in total
-	/// rather than one at a time, so a long animation stops at whichever limit
-	/// it meets first. Both bound a request any remote server can make.
-	///
-	/// reloadable: yes
-	/// default: 50
-	#[serde(default = "default_media_thumbnail_max_frames")]
-	pub media_thumbnail_max_frames: usize,
-
-	/// Source jobs admitted for animated thumbnail generation.
-	///
-	/// A job acquires a slot before reading the complete source. On a live
-	/// request, it remains occupied through source I/O, animated storage, and
-	/// subsequent still or video work until generation returns. A running
-	/// blocking worker retains it after request cancellation. Static images and
-	/// videos are admitted too because their bytes determine whether animation
-	/// work is needed. A restart is required to apply a change.
-	///
-	/// default: 4
-	#[serde(default = "default_media_thumbnail_animated_concurrency")]
-	pub media_thumbnail_animated_concurrency: usize,
-
-	/// Program invoked to extract a still frame from a video, giving videos
-	/// uploaded without a thumbnail one anyway. Tuwunel decodes no video
-	/// itself; the frame is scaled and cropped like any other image and the
-	/// result is cached as an ordinary thumbnail.
-	///
-	/// The list is an argument vector whose first entry is the program and
-	/// whose remaining entries are its arguments. It is executed directly,
-	/// never through a shell. Every argument has these tokens substituted
-	/// before each call:
-	///
-	/// - `{input}` path of a temporary file holding the source video.
-	/// - `{width}` and `{height}` the requested thumbnail dimensions.
-	///
-	/// The program writes one frame to standard output in any format the
-	/// thumbnailer decodes: PNG, JPEG, WebP or GIF. Videos are served without
-	/// a thumbnail while the list is empty.
-	///
-	/// reloadable: yes
-	/// example: [
-	/// "ffmpeg", "-loglevel", "error", "-i", "{input}", "-vf", "thumbnail",
-	/// "-frames:v", "1", "-f", "image2pipe", "-c:v", "mjpeg", "pipe:1",
-	/// ]
-	///
-	/// default: []
-	#[serde(default)]
-	pub media_video_thumbnail_command: Vec<String>,
-
-	/// Seconds a video thumbnail request may spend on frame extraction. One
-	/// deadline spans the wait for a free slot, staging the video and the
-	/// program itself, so a queue cannot compound it into a multiple. On
-	/// expiry the program and anything it spawned are killed and the video is
-	/// served without a thumbnail. Extraction requires a nonempty
-	/// `media_video_thumbnail_command`.
-	///
-	/// reloadable: yes
-	/// default: 30
-	#[serde(default = "default_media_video_thumbnail_timeout")]
-	pub media_video_thumbnail_timeout: u64,
-
-	/// Video thumbnail extractions permitted to run at once. Decoding video
-	/// costs far more than scaling an image, so requests past this limit wait
-	/// for a slot instead of piling load onto the host. A slot is held from
-	/// staging the video through to the program exiting, so this also bounds
-	/// how many staged videos occupy the staging directory at once. Raise it
-	/// where cores are spare; a restart is required to apply a change. This
-	/// setting applies only when `media_video_thumbnail_command` is nonempty.
-	///
-	/// default: 1
-	#[serde(default = "default_media_video_thumbnail_concurrency")]
-	pub media_video_thumbnail_concurrency: usize,
-
-	/// Largest video, in bytes, staged for the thumbnail program, and largest
-	/// frame read back from it. A video past this is served without a
-	/// thumbnail rather than written out, and a frame past it is refused
-	/// rather than decoded from a truncation. Accepts an integer byte count or
-	/// a string with SI/IEC suffix such as "128 MiB".
-	/// Extraction requires a nonempty `media_video_thumbnail_command`.
-	///
-	/// reloadable: yes
-	/// default: "128 MiB"
-	#[serde(
-		default = "default_media_video_thumbnail_max_size",
-		deserialize_with = "deserialize_bytesize_usize"
-	)]
-	pub media_video_thumbnail_max_size: usize,
-
-	/// Directory a video is staged in for the thumbnail program to read, one
-	/// file per running program, removed as soon as it exits. Leave unset to
-	/// use a `tmp` subdirectory of the database path, which keeps large videos
-	/// off the memory-backed `/tmp` a service manager commonly provides. Files
-	/// left behind by a killed server are reclaimed at startup, including when
-	/// `media_video_thumbnail_command` is empty. Extraction itself requires a
-	/// nonempty command.
-	///
-	/// reloadable: yes
-	/// example: "/var/tmp/tuwunel"
-	pub media_video_thumbnail_path: Option<PathBuf>,
-
-	/// List of storage providers to use for media. Providers can be configured
-	/// below in respective sections designated by
-	/// `global.storage_provider.<NAME>.<brand>` where `NAME` can be listed
-	/// here.
-	///
-	/// For advanced features and future extensions involving multiple providers
-	/// the list may contain multiple entries. You MUST take note of other
-	/// configuration options when listing multiple providers or resource
-	/// duplication costs and poor performance can result.
-	///
-	/// The list defaults to `["media"]` which is an implicit storage provider
-	/// representing the media directory on the local filesystem. It can be
-	/// altered by configuring `global.storage_provider.media.local` explicitly
-	/// or disabled by omitting it from this list entirely. Users with existing
-	/// deployments are advised to continue listing "media" as a fallback along
-	/// with their new provider.
-	///
-	/// reloadable: yes
-	/// default: ["media"]
-	#[serde(default = "default_media_storage_providers")]
-	pub media_storage_providers: BTreeSet<String>,
-
-	/// List of configured storage providers where new media will be sent. When
-	/// this list is not explicitly configured all entries in
-	/// `media_storage_providers` are used as default.
-	///
-	/// This list is important for users passively migrating to a new media
-	/// storage provider by only writing to one while querying the other as a
-	/// fallback.
-	///
-	/// For example:
-	///
-	/// `media_storage_providers = ["media", "media_on_s3"]`
-	/// `store_media_on_providers = ["media_on_s3"]`
-	///
-	/// Entries in this list must also be listed in `media_storage_providers`.
-	///
-	/// reloadable: yes
-	/// default: []
-	#[serde(default)]
-	pub store_media_on_providers: BTreeSet<String>,
-
-	/// Redirect local media downloads to a presigned object-store URL when the
-	/// client sends `allow_redirect=true` (MSC3860). When a configured storage
-	/// provider can presign the object (S3), the download responds with a 307
-	/// to a short-lived URL instead of proxying the bytes. Media held only on
-	/// the local filesystem is always served directly.
-	///
-	/// reloadable: yes
-	/// default: false
-	#[serde(default)]
-	pub media_allow_redirect: bool,
-
-	/// Vector list of regex patterns of server names that tuwunel will refuse
-	/// to download remote media from.
-	///
-	/// reloadable: yes
-	/// example: ["badserver\.tld$", "badphrase", "19dollarfortnitecards"]
-	///
-	/// default: []
-	#[serde(default, with = "serde_regex")]
-	pub prevent_media_downloads_from: RegexSet,
-
 	/// List of forbidden server names via regex patterns that we will block
 	/// incoming AND outgoing federation with, and block client room joins /
 	/// remote user invites.
@@ -2236,171 +1906,6 @@ pub struct Config {
 	/// default: []
 	#[serde(default, with = "serde_regex")]
 	pub forbidden_remote_room_directory_server_names: RegexSet,
-
-	/// Optional IP address or network interface-name to bind as the source of
-	/// URL preview requests. If not set, it will not bind to a specific
-	/// address or interface.
-	///
-	/// Interface names only supported on Linux, Android, and Fuchsia platforms;
-	/// all other platforms can specify the IP address. To list the interfaces
-	/// on your system, use the command `ip link show`.
-	///
-	/// example: `"eth0"` or `"1.2.3.4"`
-	///
-	/// default:
-	#[serde(default, with = "either::serde_untagged_optional")]
-	pub url_preview_bound_interface: Option<Either<IpAddr, String>>,
-
-	/// Vector list of domains allowed to send requests to for URL previews.
-	///
-	/// This is a *contains* match, not an explicit match. Putting "google.com"
-	/// will match "https://google.com" and
-	/// "http://mymaliciousdomainexamplegoogle.com" Setting this to "*" will
-	/// allow all URL previews. Please note that this opens up significant
-	/// attack surface to your server, you are expected to be aware of the risks
-	/// by doing so.
-	///
-	/// reloadable: yes
-	/// default: []
-	#[serde(default)]
-	pub url_preview_domain_contains_allowlist: Vec<String>,
-
-	/// Vector list of explicit domains allowed to send requests to for URL
-	/// previews.
-	///
-	/// This is an *explicit* match, not a contains match. Putting "google.com"
-	/// will match "https://google.com", "http://google.com", but not
-	/// "https://mymaliciousdomainexamplegoogle.com". Setting this to "*" will
-	/// allow all URL previews. Please note that this opens up significant
-	/// attack surface to your server, you are expected to be aware of the risks
-	/// by doing so.
-	///
-	/// reloadable: yes
-	/// default: []
-	#[serde(default)]
-	pub url_preview_domain_explicit_allowlist: Vec<String>,
-
-	/// Vector list of explicit domains not allowed to send requests to for URL
-	/// previews.
-	///
-	/// This is an *explicit* match, not a contains match. Putting "google.com"
-	/// will match "https://google.com", "http://google.com", but not
-	/// "https://mymaliciousdomainexamplegoogle.com". The denylist is checked
-	/// first before allowlist. Setting this to "*" will not do anything.
-	///
-	/// reloadable: yes
-	/// default: []
-	#[serde(default)]
-	pub url_preview_domain_explicit_denylist: Vec<String>,
-
-	/// Vector list of URLs allowed to send requests to for URL previews.
-	///
-	/// Note that this is a *contains* match, not an explicit match. Putting
-	/// "google.com" will match "https://google.com/",
-	/// "https://google.com/url?q=https://mymaliciousdomainexample.com", and
-	/// "https://mymaliciousdomainexample.com/hi/google.com" Setting this to "*"
-	/// will allow all URL previews. Please note that this opens up significant
-	/// attack surface to your server, you are expected to be aware of the risks
-	/// by doing so.
-	///
-	/// reloadable: yes
-	/// default: []
-	#[serde(default)]
-	pub url_preview_url_contains_allowlist: Vec<String>,
-
-	/// Maximum body size allowed when spidering a URL for previews.
-	///
-	/// Accepts an integer byte count or a string with SI/IEC suffix such as
-	/// "768 KiB". A page whose OpenGraph tags sit past this point yields an
-	/// empty preview, so a site that front-loads a large script block needs a
-	/// larger budget than one that does not.
-	///
-	/// reloadable: yes
-	/// default: 786432
-	#[serde(
-		default = "default_url_preview_max_spider_size",
-		deserialize_with = "deserialize_bytesize_usize"
-	)]
-	pub url_preview_max_spider_size: usize,
-
-	/// Maximum size of a single media item fetched or relayed for a URL
-	/// preview: the og:image measurement fetch and the lazy-media relay.
-	/// Media whose advertised length exceeds this is not registered, and a
-	/// relay that would exceed it is refused. Accepts an integer byte count
-	/// or a string with SI/IEC suffix such as "50 MiB".
-	///
-	/// reloadable: yes
-	/// default: "50 MiB"
-	#[serde(
-		default = "default_url_preview_max_media_size",
-		deserialize_with = "deserialize_bytesize_usize"
-	)]
-	pub url_preview_max_media_size: usize,
-
-	/// Lifetime in seconds of a cached URL preview, including an empty one.
-	///
-	/// Raising it spares origins in a room whose history is read often, at the
-	/// cost of serving OpenGraph metadata a page has since changed. A value of
-	/// 0 fetches on every request. Raising it beyond seven days takes effect at
-	/// the next restart, since the database applies its retention floor when it
-	/// opens.
-	///
-	/// reloadable: yes
-	/// default: 86400
-	#[serde(default = "default_url_preview_cache_ttl")]
-	pub url_preview_cache_ttl: u64,
-
-	/// Option to decide whether you would like to run the domain allowlist
-	/// checks (contains and explicit) on the root domain or not. Does not apply
-	/// to URL contains allowlist. Defaults to false.
-	///
-	/// Example usecase: If this is enabled and you have "wikipedia.org" allowed
-	/// in the explicit and/or contains domain allowlist, it will allow all
-	/// subdomains under "wikipedia.org" such as "en.m.wikipedia.org" as the
-	/// root domain is checked and matched. Useful if the domain contains
-	/// allowlist is still too broad for you but you still want to allow all the
-	/// subdomains under a root domain.
-	/// reloadable: yes
-	#[serde(default)]
-	pub url_preview_check_root_domain: bool,
-
-	/// User-Agent header the URL preview client sends when fetching pages
-	/// to extract their OpenGraph tags.
-	///
-	/// When unset, the versioned server User-Agent is used followed by
-	/// "preview", e.g. "Tuwunel/1.8.1 preview". Some origins serve their
-	/// OpenGraph tags only to an agent they recognise as a link-preview
-	/// crawler, and serve everyone else a page whose tags sit past
-	/// `url_preview_max_spider_size`.
-	///
-	/// reloadable: yes
-	/// default:
-	#[serde(default)]
-	pub url_preview_user_agent: Option<String>,
-
-	/// User-Agent header sent when fetching and relaying URL preview media
-	/// files themselves (og:image, og:video, og:audio, and direct links),
-	/// as opposed to the pages they appear on. When unset, falls back to
-	/// `url_preview_user_agent`, then to the versioned server User-Agent.
-	///
-	/// reloadable: yes
-	/// default:
-	#[serde(default)]
-	pub url_preview_media_user_agent: Option<String>,
-
-	/// Accept-Language header sent when fetching URL preview pages and media.
-	///
-	/// For example, "en-US,en;q=0.9" requests English from sites that support
-	/// language negotiation. Sites that select a language solely by IP address
-	/// may ignore this header.
-	///
-	/// When unset, no Accept-Language header is sent. Changes affect new
-	/// requests; existing cached previews retain their language until expiry.
-	///
-	/// reloadable: yes
-	/// default:
-	#[serde(default)]
-	pub url_preview_accept_language: Option<String>,
 
 	/// List of forbidden room aliases and room IDs as strings of regex
 	/// patterns.
@@ -2975,44 +2480,6 @@ pub struct Config {
 	#[serde(default)]
 	pub force_migration: bool,
 
-	/// When importing a Conduit database in place, the filesystem path to
-	/// Conduit's media directory. Leave unset to use `<database_path>/media`,
-	/// which is Conduit's own default location.
-	///
-	/// example: "/var/lib/matrix-conduit/media"
-	pub conduit_source_media_path: Option<PathBuf>,
-
-	/// When importing a Conduit database, the sharding depth of Conduit's media
-	/// directory (0 for a flat directory). Must match the importing Conduit's
-	/// `media.directory_structure`; the default matches Conduit's own default
-	/// of `Deep { length = 2, depth = 2 }`.
-	///
-	/// default: 2
-	#[serde(default = "default_conduit_media_directory_depth")]
-	pub conduit_media_directory_depth: u8,
-
-	/// When importing a Conduit database, the shard-segment length of Conduit's
-	/// media directory. Paired with `conduit_media_directory_depth`.
-	///
-	/// default: 2
-	#[serde(default = "default_conduit_media_directory_length")]
-	pub conduit_media_directory_length: u8,
-
-	/// When importing a Conduit database whose media lived in an S3 bucket
-	/// rather than on disk, the name of a `[global.storage_provider.<name>]`
-	/// entry to read the source originals from. Leave unset to read from the
-	/// filesystem at `conduit_source_media_path`. Define the named provider
-	/// with Conduit's own S3 credentials and set its `base_path` to Conduit's
-	/// `media.path` prefix; the importer reads each content-addressed object
-	/// using `conduit_media_directory_depth`/`length` for the key sharding.
-	///
-	/// Scope `media_storage_providers` to your destination provider only (e.g.
-	/// `["media"]`) so the import writes solely there; otherwise media is also
-	/// copied back into the read-only source bucket.
-	///
-	/// example: "conduit_source"
-	pub conduit_source_media_provider: Option<String>,
-
 	/// Set this to true for excluding unencrypted rooms from the common-rooms
 	/// calculation deciding the receivers of device list updates.
 	///
@@ -3114,6 +2581,12 @@ pub struct Config {
 	/// display: section
 	#[serde(default)]
 	pub network: Network,
+
+	/// Settings for media.
+	///
+	/// display: section
+	#[serde(default)]
+	pub media: Media,
 }
 
 /// Configures direct TLS listener behavior.
@@ -4826,35 +4299,9 @@ fn default_server_name() -> OwnedServerName { ruma::owned_server_name!("localhos
 
 fn default_database_path() -> PathBuf { "/var/lib/tuwunel".to_owned().into() }
 
-fn default_conduit_media_directory_depth() -> u8 { 2 }
-
-fn default_conduit_media_directory_length() -> u8 { 2 }
-
 fn default_max_remote_profile_fields() -> usize { 100 }
 
 fn default_max_profile_fields_per_request() -> usize { 64 }
-
-fn default_max_pending_media_uploads() -> usize { 5 }
-
-fn default_media_create_unused_expiration_time() -> u64 { 86400 }
-
-fn default_media_rc_create_per_second() -> u32 { 10 }
-
-fn default_media_rc_create_burst_count() -> u32 { 50 }
-
-fn default_media_upload_min_free_space() -> u64 { 1024 * 1024 * 1024 }
-
-fn default_media_thumbnail_max_pixels() -> u64 { 50_000_000 }
-
-fn default_media_thumbnail_max_frames() -> usize { 50 }
-
-fn default_media_thumbnail_animated_concurrency() -> usize { 4 }
-
-fn default_media_video_thumbnail_timeout() -> u64 { 30 }
-
-fn default_media_video_thumbnail_concurrency() -> usize { 1 }
-
-fn default_media_video_thumbnail_max_size() -> usize { 128 * 1024 * 1024 }
 
 fn default_federation_timeout() -> u64 { 25 }
 
@@ -4963,16 +4410,6 @@ fn default_typing_client_timeout_max_s() -> u64 { 45 }
 #[inline]
 pub fn default_default_room_version() -> RoomVersionId { RoomVersionId::V12 }
 
-fn default_url_preview_max_spider_size() -> usize {
-	768 * 1024 // 768 KiB
-}
-
-fn default_url_preview_max_media_size() -> usize {
-	50 * 1024 * 1024 // 50 MiB
-}
-
-fn default_url_preview_cache_ttl() -> u64 { 60 * 60 * 24 }
-
 fn default_new_user_displayname_suffix() -> String { "💕".to_owned() }
 
 fn default_argon2_m_cost() -> u32 { 19 * 1024 }
@@ -5062,8 +4499,6 @@ fn default_max_join_attempts_per_join_request() -> usize { 3 }
 fn default_sso_grant_session_duration() -> Option<u64> { Some(300) }
 
 fn default_redaction_retention_seconds() -> u64 { 5_184_000 }
-
-fn default_media_storage_providers() -> BTreeSet<String> { ["media".to_owned()].into() }
 
 fn default_multipart_threshold() -> ByteSize { ByteSize::mib(100) }
 

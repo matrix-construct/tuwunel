@@ -102,9 +102,11 @@ pub(crate) async fn create_mxc_uri_route(
 		services
 			.server
 			.config
-			.media_create_unused_expiration_time
+			.media
+			.create_unused_expiration_time
 			.saturating_mul(1000),
 	);
+
 	services
 		.media
 		.create_pending(&mxc, user, unused_expires_at)

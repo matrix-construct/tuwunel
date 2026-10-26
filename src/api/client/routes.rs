@@ -24,8 +24,8 @@ pub fn build(server: &Server) -> Router<State> {
 	let router = register_client_state_and_sync_routes(router);
 	let router = register_client_media_and_device_routes(
 		router,
-		config.media_deny_framing,
-		config.media_deny_inline_styles,
+		config.media.deny_framing,
+		config.media.deny_inline_styles,
 	);
 
 	let router = register_client_misc_routes(router);
@@ -38,9 +38,9 @@ pub fn build(server: &Server) -> Router<State> {
 
 	register_legacy_media_routes(
 		router,
-		config.allow_legacy_media,
-		config.media_deny_framing,
-		config.media_deny_inline_styles,
+		config.media.allow_legacy,
+		config.media.deny_framing,
+		config.media.deny_inline_styles,
 	)
 }
 

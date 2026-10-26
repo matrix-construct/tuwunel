@@ -51,7 +51,7 @@ pub(crate) async fn migrate_sha256_media(services: &Services) -> Result {
 	for (old_path, path) in changes {
 		if old_path.exists() {
 			tokio::fs::rename(&old_path, &path).await?;
-			if config.media_compat_file_link {
+			if config.media.compat_file_link {
 				symlink_file(&path, &old_path).await?;
 			}
 		}
@@ -125,7 +125,7 @@ async fn handle_media_check(
 			.is_ok_and(|md| md.is_symlink())
 	};
 
-	if config.prune_missing_media && !old_exists && !new_exists {
+	if config.media.prune_missing && !old_exists && !new_exists {
 		error!(
 			media_id = ?encode_key(key), ?new_path, ?old_path,
 			"Media is missing at all paths. Removing from database..."
@@ -138,7 +138,7 @@ async fn handle_media_check(
 		txn.execute();
 	}
 
-	if config.media_compat_file_link && !old_exists && new_exists {
+	if config.media.compat_file_link && !old_exists && new_exists {
 		debug_warn!(
 			media_id = ?encode_key(key), ?new_path, ?old_path,
 			"Media found but missing legacy link. Fixing..."
@@ -147,7 +147,7 @@ async fn handle_media_check(
 		symlink_file(&new_path, &old_path).await?;
 	}
 
-	if config.media_compat_file_link && !new_exists && old_exists {
+	if config.media.compat_file_link && !new_exists && old_exists {
 		debug_warn!(
 			media_id = ?encode_key(key), ?new_path, ?old_path,
 			"Legacy media found without sha256 migration. Fixing..."
@@ -162,7 +162,7 @@ async fn handle_media_check(
 		symlink_file(&new_path, &old_path).await?;
 	}
 
-	if !config.media_compat_file_link && old_exists && old_is_symlink().await {
+	if !config.media.compat_file_link && old_exists && old_is_symlink().await {
 		debug_warn!(
 			media_id = ?encode_key(key), ?new_path, ?old_path,
 			"Legacy link found but compat disabled. Cleansing symlink..."

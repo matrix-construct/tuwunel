@@ -132,12 +132,11 @@ const REDIRECT_TTL: Duration = Duration::from_mins(5);
 impl crate::Service for Service {
 	fn build(args: &crate::Args<'_>) -> Result<Arc<Self>> {
 		#[cfg(feature = "media_thumbnail")]
-		let animated_thumbnail_slots = Arc::new(Semaphore::new(
-			args.server
-				.config
-				.media_thumbnail_animated_concurrency
-				.max(1),
-		));
+		let media = &args.server.config.media;
+
+		#[cfg(feature = "media_thumbnail")]
+		let animated_thumbnail_slots =
+			Arc::new(Semaphore::new(media.thumbnail.animated_concurrency.max(1)));
 
 		let service = Arc::new(Self {
 			db: Data::new(args.db),
@@ -153,12 +152,7 @@ impl crate::Service for Service {
 			#[cfg(feature = "media_thumbnail")]
 			animated_thumbnail_slots,
 			#[cfg(feature = "media_thumbnail")]
-			video_thumbnail_slots: Semaphore::new(
-				args.server
-					.config
-					.media_video_thumbnail_concurrency
-					.max(1),
-			),
+			video_thumbnail_slots: Semaphore::new(media.video_thumbnail.concurrency.max(1)),
 		});
 
 		#[cfg(feature = "media_thumbnail")]
@@ -187,8 +181,8 @@ impl Service {
 		let config = &self.services.server.config;
 
 		// Rate limiting (rc_media_create)
-		let rate = f64::from(config.media_rc_create_per_second);
-		let burst = f64::from(config.media_rc_create_burst_count);
+		let rate = f64::from(config.media.rc_create_per_second);
+		let burst = f64::from(config.media.rc_create_burst_count);
 
 		// Check rate limiting
 		if rate > 0.0 && burst > 0.0 {
@@ -218,7 +212,7 @@ impl Service {
 
 		self.check_upload_space().await?;
 
-		let max_uploads = config.max_pending_media_uploads;
+		let max_uploads = config.media.max_pending_uploads;
 		let (current_uploads, earliest_expiration) =
 			self.db.count_pending_mxc_for_user(user).await;
 
@@ -530,7 +524,12 @@ impl Service {
 					return Err!(Request(NotFound("Media not found.")));
 				};
 
-				let limit = self.services.config.url_preview_max_media_size;
+				let limit = self
+					.services
+					.config
+					.media
+					.url_preview
+					.max_media_size;
 
 				self.location_request(Fetch::Preview(Agent::Media), &url, limit)
 					.await?
@@ -579,7 +578,7 @@ impl Service {
 		dim: &Dim,
 		animate: Animate,
 	) -> Result<Option<Url>> {
-		if !self.services.config.media_allow_redirect {
+		if !self.services.config.media.allow_redirect {
 			return Ok(None);
 		}
 
@@ -995,18 +994,16 @@ impl Service {
 
 	/// Storage providers a new media file is written to.
 	///
-	/// An empty `store_media_on_providers` selects every media provider.
+	/// An empty `media.store_on_providers` selects every media provider.
 	fn upload_providers(&self) -> impl Iterator<Item = &Arc<Provider>> + Send + '_ {
-		let store_media_on_providers = &self.services.config.store_media_on_providers;
+		let providers = &self.services.config.media.store_on_providers;
 
-		self.storage_providers().filter(move |provider| {
-			store_media_on_providers.is_empty()
-				|| store_media_on_providers.contains(&provider.name)
-		})
+		self.storage_providers()
+			.filter(move |provider| providers.is_empty() || providers.contains(&provider.name))
 	}
 
 	fn storage_providers(&self) -> impl Iterator<Item = &Arc<Provider>> + Send + '_ {
-		let explicit_providers = &self.services.config.media_storage_providers;
+		let explicit_providers = &self.services.config.media.storage_providers;
 
 		let or_all_providers = explicit_providers
 			.is_empty()

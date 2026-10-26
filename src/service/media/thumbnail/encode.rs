@@ -71,8 +71,8 @@ pub(super) async fn store_animated(
 	admission: OwnedSemaphorePermit,
 ) -> Result<Output> {
 	let config = &self.services.config;
-	let max_frames = config.media_thumbnail_max_frames;
-	let budget = config.media_thumbnail_max_pixels;
+	let max_frames = config.media.thumbnail.max_frames;
+	let budget = config.media.thumbnail.max_pixels;
 	let requested = Dim::new(dim.width, dim.height, Some(dim.method.clone()));
 
 	#[cfg(test)]

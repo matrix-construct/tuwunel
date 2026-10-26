@@ -119,12 +119,18 @@ fn preview_url_enabled(services: &Services) -> bool {
 	let config = &services.config;
 
 	!config
-		.url_preview_domain_contains_allowlist
+		.media
+		.url_preview
+		.domain_contains_allowlist
 		.is_empty()
 		|| !config
-			.url_preview_domain_explicit_allowlist
+			.media
+			.url_preview
+			.domain_explicit_allowlist
 			.is_empty()
 		|| !config
-			.url_preview_url_contains_allowlist
+			.media
+			.url_preview
+			.url_contains_allowlist
 			.is_empty()
 }

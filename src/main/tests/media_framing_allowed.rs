@@ -52,9 +52,9 @@ mod tests {
 
 		let args = [
 			"listening=true".to_owned(),
-			"allow_legacy_media=true".to_owned(),
-			format!("media_deny_framing={deny_framing}"),
-			format!("media_deny_inline_styles={deny_inline_styles}"),
+			"media.allow_legacy=true".to_owned(),
+			format!("media.deny_framing={deny_framing}"),
+			format!("media.deny_inline_styles={deny_inline_styles}"),
 			"log_enable=false".to_owned(),
 		]
 		.into_iter()
@@ -63,8 +63,8 @@ mod tests {
 		let runtime = Runtime::new(Some(&args))?;
 		let server = Server::new(Some(&args), Some(&runtime))?;
 
-		assert_eq!(server.server.config.media_deny_framing, deny_framing);
-		assert_eq!(server.server.config.media_deny_inline_styles, deny_inline_styles);
+		assert_eq!(server.server.config.media.deny_framing, deny_framing);
+		assert_eq!(server.server.config.media.deny_inline_styles, deny_inline_styles);
 
 		runtime.block_on(async {
 			let services = async_start(&server).await?;
