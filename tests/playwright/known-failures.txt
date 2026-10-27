@@ -38,7 +38,7 @@ settings/appearance-user-settings-tab/message-layout-panel.spec.ts :: should cha
 settings/appearance-user-settings-tab/message-layout-panel.spec.ts :: should disable compact layout when the modern layout is not selected
 settings/appearance-user-settings-tab/message-layout-panel.spec.ts :: should enable compact layout when the modern layout is selected
 settings/encryption-user-tab/other-devices.spec.ts :: verified devices should be able to decrypt while global blacklist is toggled
-settings/encryption-user-tab/recovery.spec.ts :: should setup the recovery key
+settings/encryption-user-tab/recovery.spec.ts :: should set up the recovery key
 settings/room-settings/roles-permissions-room-settings-tab.spec.ts :: should be able to change the role of a user
 settings/room-settings/room-security-tab.spec.ts :: should disallow changing from public to private if the user cannot alter history
 sliding-sync/sliding-sync.spec.ts :: should show and be able to accept/reject/rescind invites
