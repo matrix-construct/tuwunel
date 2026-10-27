@@ -3,6 +3,7 @@ use std::{
 	fs::remove_dir_all,
 	path::{Path, PathBuf},
 	pin::{Pin, pin},
+	process::Command as StdCommand,
 	sync::{Arc, Mutex},
 	task::{Context, Poll, Waker},
 	thread::current as current_thread,
@@ -35,7 +36,7 @@ use tuwunel_core::{
 		capture::{Capture, Data, Guard, Layer, State, Value},
 	},
 	metrics::Metrics,
-	utils::random_string,
+	utils::{random_string, sys::command_without_env_prefixes},
 };
 use tuwunel_database::Json;
 use tuwunel_matrix::{PduCount, PduId, RawPduId, event::gen_event_id};
@@ -126,7 +127,9 @@ pub(crate) async fn fixture(config: Figment) -> Result<Option<Fixture>> {
 
 async fn run_test(name: &str) -> Result {
 	let path = temp_dir().join("tuwunel").join(random_string(32));
-	let status = Command::new(current_exe()?)
+	let command = StdCommand::new(current_exe()?);
+	let command = command_without_env_prefixes(command, &["CONDUIT_", "CONDUWUIT_", "TUWUNEL_"]);
+	let status = Command::from(command)
 		.arg(concat!("-", "-exact"))
 		.arg(name)
 		.env(CHILD_TEST_ENV, name)

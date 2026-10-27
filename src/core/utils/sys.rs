@@ -17,7 +17,7 @@ mod tests;
 
 #[cfg(unix)]
 use std::os::fd::AsFd;
-use std::path::PathBuf;
+use std::{env::vars_os, path::PathBuf, process::Command};
 
 #[cfg(unix)]
 use nix::{
@@ -31,6 +31,29 @@ pub use self::{
 	usage::{Usage, statm, thread_usage, usage},
 };
 use crate::{Result, at};
+
+/// Removes inherited environment names matching any supplied prefix from a command.
+///
+/// Names are trimmed before ASCII-case-insensitive prefix matching. Other
+/// environment variables and command settings are retained.
+#[must_use]
+pub fn command_without_env_prefixes(command: Command, prefixes: &[&str]) -> Command {
+	vars_os()
+		.map(|(name, _)| name)
+		.filter(|name| {
+			let name = name.to_string_lossy();
+			let name = name.trim();
+
+			prefixes.iter().any(|prefix| {
+				name.get(..prefix.len())
+					.is_some_and(|head| head.eq_ignore_ascii_case(prefix))
+			})
+		})
+		.fold(command, |mut command, name| {
+			command.env_remove(name);
+			command
+		})
+}
 
 /// Returns the current executable path without a trailing deletion marker.
 ///

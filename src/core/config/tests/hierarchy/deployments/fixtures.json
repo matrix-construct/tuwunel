@@ -1,0 +1,154 @@
+[
+  {
+    "source": "docs/deploying/docker-compose.for-traefik.yml",
+    "sha256": "3cc2bfd5dc33d12801f1fe0bdb599258c2b1d91f885dc1f0afd859a0e7df4bb3",
+    "environment": {
+      "TUWUNEL_SERVER_NAME": "your.server.name.example",
+      "TUWUNEL_DATABASE_PATH": "/var/lib/tuwunel",
+      "TUWUNEL_PORT": "6167",
+      "TUWUNEL_MAX_REQUEST_SIZE": "20000000",
+      "TUWUNEL_ALLOW_REGISTRATION": "true",
+      "TUWUNEL_REGISTRATION_TOKEN": "YOUR_TOKEN",
+      "TUWUNEL_ALLOW_FEDERATION": "true",
+      "TUWUNEL_TRUSTED_SERVERS": "[\"matrix.org\"]",
+      "TUWUNEL_ADDRESS": "0.0.0.0",
+      "TUWUNEL_WELL_KNOWN": "{\nclient=https://your.server.name.example,\nserver=your.server.name.example:443\n}\n"
+    },
+    "expected": {
+      "server_name": "your.server.name.example",
+      "database_path": "/var/lib/tuwunel",
+      "http.listen.port": 6167,
+      "http.max_request_size": 20000000,
+      "registration.enable": true,
+      "registration.token": "YOUR_TOKEN",
+      "federation.enable": true,
+      "federation.keys.trusted_servers": [
+        "matrix.org"
+      ],
+      "http.listen.address": "0.0.0.0",
+      "well_known": {
+        "client": "https://your.server.name.example",
+        "server": "your.server.name.example:443"
+      }
+    }
+  },
+  {
+    "source": "docs/deploying/docker-compose.with-caddy.yml",
+    "sha256": "4ea9a0d770efb8b820c3a432d6f55e80e95d911ea164eab77a65999c9e9e4d92",
+    "environment": {
+      "TUWUNEL_SERVER_NAME": "example.com",
+      "TUWUNEL_DATABASE_PATH": "/var/lib/tuwunel",
+      "TUWUNEL_PORT": "6167",
+      "TUWUNEL_MAX_REQUEST_SIZE": "20000000",
+      "TUWUNEL_ALLOW_REGISTRATION": "true",
+      "TUWUNEL_REGISTRATION_TOKEN": "YOUR_TOKEN",
+      "TUWUNEL_ALLOW_FEDERATION": "true",
+      "TUWUNEL_TRUSTED_SERVERS": "[\"matrix.org\"]",
+      "TUWUNEL_ADDRESS": "0.0.0.0",
+      "TUWUNEL_IP_SOURCE": "rightmost_x_forwarded_for"
+    },
+    "expected": {
+      "server_name": "example.com",
+      "database_path": "/var/lib/tuwunel",
+      "http.listen.port": 6167,
+      "http.max_request_size": 20000000,
+      "registration.enable": true,
+      "registration.token": "YOUR_TOKEN",
+      "federation.enable": true,
+      "federation.keys.trusted_servers": [
+        "matrix.org"
+      ],
+      "http.listen.address": "0.0.0.0",
+      "http.ip_source": "rightmost_x_forwarded_for"
+    }
+  },
+  {
+    "source": "docs/deploying/docker-compose.with-traefik.yml",
+    "sha256": "a8b26a21af050015ae46a6444aa74ea917989610fa0d14bed441af8e65d3daa6",
+    "environment": {
+      "TUWUNEL_SERVER_NAME": "your.server.name.example",
+      "TUWUNEL_TRUSTED_SERVERS": "[\"matrix.org\"]",
+      "TUWUNEL_ALLOW_REGISTRATION": "false",
+      "TUWUNEL_REGISTRATION_TOKEN": "",
+      "TUWUNEL_ADDRESS": "0.0.0.0",
+      "TUWUNEL_PORT": "6167",
+      "TUWUNEL_DATABASE_PATH": "/var/lib/tuwunel",
+      "TUWUNEL_WELL_KNOWN": "{\n  client=https://your.server.name.example,\n  server=your.server.name.example:443\n}\n"
+    },
+    "expected": {
+      "server_name": "your.server.name.example",
+      "federation.keys.trusted_servers": [
+        "matrix.org"
+      ],
+      "registration.enable": false,
+      "registration.token": "",
+      "http.listen.address": "0.0.0.0",
+      "http.listen.port": 6167,
+      "database_path": "/var/lib/tuwunel",
+      "well_known": {
+        "client": "https://your.server.name.example",
+        "server": "your.server.name.example:443"
+      }
+    }
+  },
+  {
+    "source": "docs/deploying/docker-compose.yml",
+    "sha256": "4cb949b94cea7b3286db4ac020fa31bc9c554ed15c395d4e6b016eb46c3fae5b",
+    "environment": {
+      "TUWUNEL_SERVER_NAME": "your.server.name",
+      "TUWUNEL_DATABASE_PATH": "/var/lib/tuwunel",
+      "TUWUNEL_PORT": "6167",
+      "TUWUNEL_MAX_REQUEST_SIZE": "20000000",
+      "TUWUNEL_ALLOW_REGISTRATION": "true",
+      "TUWUNEL_REGISTRATION_TOKEN": "YOUR_TOKEN",
+      "TUWUNEL_ALLOW_FEDERATION": "true",
+      "TUWUNEL_TRUSTED_SERVERS": "[\"matrix.org\"]",
+      "TUWUNEL_ADDRESS": "0.0.0.0"
+    },
+    "expected": {
+      "server_name": "your.server.name",
+      "database_path": "/var/lib/tuwunel",
+      "http.listen.port": 6167,
+      "http.max_request_size": 20000000,
+      "registration.enable": true,
+      "registration.token": "YOUR_TOKEN",
+      "federation.enable": true,
+      "federation.keys.trusted_servers": [
+        "matrix.org"
+      ],
+      "http.listen.address": "0.0.0.0"
+    }
+  },
+  {
+    "source": "quadlet/tuwunel.env",
+    "sha256": "68114d64aca85d3de665a19613050576b1d17f6542334b58334a2ea0c796b83a",
+    "environment": {
+      "TUWUNEL_SERVER_NAME": "\"your.server.tld\"",
+      "TUWUNEL_PORT": "8008",
+      "TUWUNEL_MAX_REQUEST_SIZE": "20000000",
+      "TUWUNEL_ALLOW_REGISTRATION": "true",
+      "TUWUNEL_REGISTRATION_TOKEN": "<replace with a passphrase or random string>",
+      "TUWUNEL_ALLOW_FEDERATION": "true",
+      "TUWUNEL_TRUSTED_SERVERS": "[\"matrix.org\"]",
+      "TUWUNEL_LOG": "info",
+      "TUWUNEL_ADDRESS": "[\"0.0.0.0\", \"::\"]",
+      "TUWUNEL_CONFIG": "/etc/tuwunel.toml"
+    },
+    "expected": {
+      "server_name": "your.server.tld",
+      "http.listen.port": 8008,
+      "http.max_request_size": 20000000,
+      "registration.enable": true,
+      "registration.token": "<replace with a passphrase or random string>",
+      "federation.enable": true,
+      "federation.keys.trusted_servers": [
+        "matrix.org"
+      ],
+      "logging.filter": "info",
+      "http.listen.address": [
+        "0.0.0.0",
+        "::"
+      ]
+    }
+  }
+]

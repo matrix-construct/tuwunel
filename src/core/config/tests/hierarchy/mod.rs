@@ -1,12 +1,15 @@
 mod aggregate;
 mod aliases;
 mod compatibility;
+mod deployments;
 mod groups;
 mod loading;
 mod regeneration;
+mod residue;
+mod secrets;
 
 use std::{
-	env::{current_exe, temp_dir, var, vars_os},
+	env::{current_exe, temp_dir, var},
 	fs::{create_dir_all, read_to_string, remove_dir_all, write},
 	iter::empty,
 	path::{Path, PathBuf},
@@ -18,7 +21,10 @@ use figment::Profile;
 use tuwunel_macros::implement;
 
 use super::{baseline::assert_defaults, check_with_captured_logs, config_from_toml};
-use crate::config::{Config, ENV_PREFIXES, RegenerateOptions, Sources, regenerate_config};
+use crate::{
+	config::{Config, ENV_PREFIXES, RegenerateOptions, Sources, regenerate_config},
+	utils::sys::command_without_env_prefixes,
+};
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
 const CHILD: &str = "CONFIG_HIERARCHY_CHILD";
@@ -224,11 +230,14 @@ fn environment_prefixes_and_spellings_keep_precedence_and_provenance() {
 		}
 	}
 
-	run_environment(
-		&[("TUWUNEL_ROCKSDB_CHECKSUMS", "true"), ("TUWUNEL_ROCKSDB__CHECKSUMS", "true")],
-		"conflict",
-		"",
-	);
+	for prefix in prefixes {
+		for value in ["true", "false"] {
+			let flat = format!("{prefix}ROCKSDB_CHECKSUMS");
+			let nested = format!("{prefix}ROCKSDB__CHECKSUMS");
+
+			run_environment(&[(&flat, "true"), (&nested, value)], "conflict", "");
+		}
+	}
 }
 
 fn run_prefix_pair(low: &str, high: &str) {
@@ -271,6 +280,15 @@ fn environment_child(expected: &str) {
 		let input =
 			files.write("input.toml", "server_name = 'env.example'\nrocksdb_checksums = true\n");
 
+		let startup = Config::load([input.as_path()].into_iter()).expect("file and env loaded");
+
+		assert!(
+			!Config::new(&startup)
+				.expect("startup config extracts")
+				.rocksdb
+				.checksums
+		);
+
 		let output = files.0.join("file-only.toml");
 		let included = files.0.join("included.toml");
 		let sources = Sources { paths: vec![input], overrides: None };
@@ -301,12 +319,26 @@ fn environment_child(expected: &str) {
 }
 
 fn run_environment(values: &[(&str, &str)], expected: &str, native: &str) {
-	let status = Command::new(current_exe().expect("test executable"))
+	let output = environment_command()
 		.arg("config::tests::hierarchy::environment_prefixes_and_spellings_keep_precedence_and_provenance")
-		.env_clear().env(CHILD, "1").env(EXPECTED, expected).env(NATIVE, native)
-		.envs(values.iter().copied()).status().expect("child launched");
+		.env(CHILD, "1").env(EXPECTED, expected).env(NATIVE, native)
+		.envs(values.iter().copied()).output().expect("child launched");
 
-	assert!(status.success(), "environment scenario failed");
+	assert!(
+		output.status.success(),
+		"environment scenario failed: {}\n{}{}",
+		output.status,
+		String::from_utf8_lossy(&output.stdout),
+		String::from_utf8_lossy(&output.stderr),
+	);
+}
+
+fn environment_command() -> Command {
+	// Preserve the loader environment required by the Nix check phase.
+	let executable = current_exe().expect("test executable found");
+	let command = Command::new(executable);
+
+	command_without_env_prefixes(command, &ENV_PREFIXES)
 }
 
 fn isolated(name: &str, environment: &[(&str, &str)]) -> bool {
@@ -316,22 +348,7 @@ fn isolated(name: &str, environment: &[(&str, &str)]) -> bool {
 		return true;
 	}
 
-	let executable = current_exe().expect("test executable found");
-	let status = vars_os()
-		.map(|(name, _)| name)
-		.filter(|name| {
-			let name = name.to_string_lossy();
-			let name = name.trim();
-
-			ENV_PREFIXES.iter().any(|prefix| {
-				name.get(..prefix.len())
-					.is_some_and(|head| head.eq_ignore_ascii_case(prefix))
-			})
-		})
-		.fold(Command::new(executable), |mut command, name| {
-			command.env_remove(name);
-			command
-		})
+	let status = environment_command()
 		.arg(name)
 		.arg(["-", "-exact"].concat())
 		.env(CASE, name)

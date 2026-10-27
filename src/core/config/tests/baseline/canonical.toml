@@ -1,0 +1,482 @@
+[global]
+appservice_dir = "baseline/appservice_dir"
+database_migrations = false
+database_path = "baseline-database"
+database_restore_backup = 7
+force_migration = true
+listening = false
+maintenance = true
+server_name = "baseline.example"
+test = ["baseline-test"]
+
+[global.admin]
+console_automatic = true
+escape_commands = true
+execute = ["baseline-admin_execute"]
+execute_errors_ignore = true
+log_capture = "baseline-admin_log_capture"
+output_max_events = 17
+output_threads = true
+report_room = "!report:example.org"
+server_user_localpart = "baseline-server_user_localpart"
+signal_execute = ["baseline-admin_signal_execute"]
+
+[global.admin.room]
+create = false
+federate = false
+log_guest_registrations = true
+notices = false
+tag = "baseline-admin_room_tag"
+
+[global.appservice_client]
+idle_timeout = 19
+timeout = 18
+
+[global.authentication]
+access_token_ttl = 19
+emergency_password = "baseline-emergency_password"
+mas_secret = "baseline-mas_secret"
+openid_token_ttl = 13
+
+[global.authentication.argon2]
+m_cost = 9
+p_cost = 11
+t_cost = 10
+
+[global.authentication.login]
+oidc_aware_preferred = true
+single_sso = true
+sso_custom_providers_page = true
+token_ttl = 18
+via_existing_session = false
+via_token = false
+with_password = false
+
+[global.authentication.oidc]
+native_auth = true
+rc_burst_count = 8
+rc_per_second = 7
+registration_access_token = "baseline-oidc_registration_access_token"
+registration_allowed_redirect_hosts = ["baseline-oidc_registration_allowed_redirect_hosts"]
+registration_require_client_uri = true
+require_client_approval = false
+require_device_scope = true
+require_pkce = false
+strict_scope = true
+
+[global.authentication.refresh_token]
+hard_logout = true
+idle_only = false
+reuse_grace = 10
+reuse_revoke = false
+ttl = 7
+
+[global.cache]
+auth_chain_capacity = 10
+capacity_modifier = 1.25
+eventid_backoff_capacity = 14
+eventid_pdu_capacity = 13
+eventidshort_capacity = 12
+mediaid_lazycontent_capacity = 18
+pdu_capacity = 9
+resolver_capacity = 19
+servername_status_capacity = 7
+servernameevent_data_capacity = 17
+shorteventid_capacity = 11
+shortstatekey_capacity = 15
+stateinfo_capacity = 8
+statekeyshort_capacity = 16
+
+[global.cache.space_hierarchy]
+ttl_max = 10
+ttl_min = 9
+
+[global.client.sync]
+calculate_heroes = false
+timeout_default = 12
+timeout_max = 13
+timeout_min = 11
+
+[global.compatibility]
+hydra_backports = false
+
+[global.configuration]
+error_on_unknown_opts = true
+reload_signal = false
+
+[global.database.backup]
+keep = 17
+path = "baseline/database_backup_path"
+
+[global.database.pool]
+affinity = false
+max_workers = 14
+queue_mult = 15
+workers = 12
+workers_limit = 13
+
+[global.directory.rooms]
+allow_over_federation = true
+allow_public_search_by_id = false
+allow_unlisted_search_by_id = false
+allow_without_auth = true
+forbidden_remote_server_names = ["^baseline\\.example$"]
+lockdown = true
+
+[global.directory.users]
+show_all_local = true
+show_appservice = true
+
+[global.encryption]
+allow = false
+device_key_update_encrypted_rooms_only = true
+enabled_by_default_for_room_type = "baseline-encryption_enabled_by_default_for_room_type"
+one_time_key_limit = 13
+
+[global.federation]
+allowed_remote_server_names_experimental = ["^baseline\\.example$"]
+enable = false
+enforce_stripped_state_pdu_validation = true
+forbidden_remote_server_names = ["^baseline\\.example$"]
+loopback = true
+resolve_state_locally = false
+resolve_state_locally_max = 8
+resolve_state_locally_shadow = true
+
+[global.federation.fanout]
+destination_limit = 19
+max_width = 18
+timeout = 11
+
+[global.federation.history]
+fetch_fanout_max_width = 16
+fetch_fanout_rounds = 17
+fetch_prev_wait_ms = 11
+fetch_unreceived_contexts = true
+max_fetch_prev_events = 8
+prev_events_concurrency = 10
+
+[global.federation.keys]
+only_query_trusted_servers = true
+query_trusted_servers_first = true
+query_trusted_servers_first_on_join = false
+trusted_server_batch_concurrency = 15
+trusted_server_batch_size = 14
+trusted_servers = ["example.org"]
+
+[global.federation.transport]
+idle_per_host = 13
+idle_timeout = 12
+keys_timeout = 10
+timeout = 9
+
+[global.http]
+access_control_allow_origin = ["baseline-access_control_allow_origin"]
+ip_source = "x_real_ip"
+ip_source_trusted_subnets = ["192.0.2.0/24"]
+max_request_size = 14
+receive_timeout = 8
+request_timeout = 9
+response_timeout = 10
+shutdown_timeout = 11
+
+[global.http.compression]
+brotli = true
+gzip = true
+zstd = true
+
+[global.http.listen]
+address = ["127.0.0.2", "::1"]
+port = [18008, 18009]
+unix_socket_path = "baseline/unix_socket_path"
+unix_socket_perms = 14
+
+[global.logging]
+colors = false
+compact = true
+enable = false
+filter = "baseline-log"
+filter_regex = false
+global_default = false
+journald = false
+span_events = "baseline-log_span_events"
+thread_ids = true
+to_stderr = true
+
+[global.media]
+allow_legacy = true
+allow_redirect = true
+compat_file_link = true
+create_unused_expiration_time = 17
+deny_framing = true
+deny_inline_styles = true
+freeze_legacy = false
+max_pending_uploads = 16
+prevent_downloads_from = ["^baseline\\.example$"]
+prune_missing = true
+rc_create_burst_count = 19
+rc_create_per_second = 18
+request_legacy = true
+startup_check = false
+storage_providers = ["baseline-media_storage_providers"]
+store_on_providers = ["baseline-store_media_on_providers"]
+upload_min_free_space = 7
+
+[global.media.import.conduit]
+directory_depth = 8
+directory_length = 9
+source_path = "baseline/conduit_source_media_path"
+source_provider = "baseline-conduit_source_media_provider"
+
+[global.media.thumbnail]
+animated = false
+animated_concurrency = 7
+max_frames = 19
+max_pixels = 17
+
+[global.media.url_preview]
+accept_language = "baseline-url_preview_accept_language"
+bound_interface = "127.0.0.2"
+cache_ttl = 15
+check_root_domain = true
+domain_contains_allowlist = ["baseline-url_preview_domain_contains_allowlist"]
+domain_explicit_allowlist = ["baseline-url_preview_domain_explicit_allowlist"]
+domain_explicit_denylist = ["baseline-url_preview_domain_explicit_denylist"]
+max_media_size = 14
+max_spider_size = 13
+media_user_agent = "baseline-url_preview_media_user_agent"
+url_contains_allowlist = ["baseline-url_preview_url_contains_allowlist"]
+user_agent = "baseline-url_preview_user_agent"
+
+[global.media.video_thumbnail]
+command = ["baseline-media_video_thumbnail_command"]
+concurrency = 10
+max_size = 11
+path = "baseline/media_video_thumbnail_path"
+timeout = 9
+
+[global.network.discovery]
+conn_timeout = 7
+timeout = 8
+
+[global.network.dns]
+attempts = 18
+cache_entries = 15
+case_randomization = true
+ip_lookup_strategy = 10
+min_ttl = 16
+min_ttl_nxdomain = 17
+passthru_appservices = true
+passthru_domains = ["^baseline\\.example$"]
+query_all_nameservers = false
+query_over_tcp_only = true
+servers = ["baseline-dns_servers"]
+tcp_fallback = false
+timeout = 19
+
+[global.network.http]
+allow_invalid_tls_certificates = true
+brotli = false
+conn_timeout = 12
+gzip = false
+idle_per_host = 16
+idle_timeout = 15
+ip_range_denylist = ["baseline-ip_range_denylist"]
+max_response_size = 15
+timeout = 13
+total_timeout = 14
+zstd = false
+
+[global.presence]
+allow_incoming = false
+allow_local = false
+allow_outgoing = false
+idle_timeout_s = 18
+offline_timeout_s = 19
+timeout_remote_users = false
+
+[global.profile]
+allow_device_name_federation = true
+allow_inbound_federation_lookups = false
+enable_set_displayname = false
+limit_requests_to_users_who_share_rooms = true
+max_fields_per_request = 18
+max_remote_fields = 17
+preserve_room_overrides = false
+require_auth = true
+
+[global.push]
+everything = true
+idle_timeout = 7
+msc3664_related_event_match = true
+notification_path = "baseline-notification_push_path"
+suppress_when_active = true
+
+[global.read_receipts]
+allow_incoming = false
+allow_outgoing = false
+
+[global.registration]
+auto_join_rooms = ["#test:example.org"]
+displayname_suffix = "baseline-new_user_displayname_suffix"
+enable = true
+forbidden_usernames = ["^baseline\\.example$"]
+grant_admin_to_first_user = false
+shared_secret = "baseline-registration_shared_secret"
+shared_secret_file = "baseline/registration_shared_secret_file"
+token = "baseline-registration_token"
+token_file = "baseline/registration_token_file"
+yes_i_am_very_very_sure_i_want_an_open_registration_server_prone_to_abuse = true
+
+[global.registration.guests]
+allow_auto_join_rooms = true
+enable = true
+
+[global.rendezvous]
+authenticated_only = false
+enable = false
+max_sessions = 12
+rc_burst_count = 15
+rc_per_second = 14
+session_max_bytes = 10
+session_ttl = 11
+
+[global.rocksdb]
+allow_fallocate = false
+atomic_flush = true
+bottommost_compression = false
+bottommost_compression_level = 8
+cache_capacity_mb = 1.25
+checksums = false
+compaction = false
+compaction_ioprio_idle = false
+compaction_prio_idle = true
+compression_algo = "baseline-rocksdb_compression_algo"
+compression_level = 7
+direct_io = false
+log_level = "baseline-rocksdb_log_level"
+log_stderr = true
+log_time_to_roll = 14
+max_log_file_size = 13
+max_log_files = 18
+never_drop_columns = true
+optimize_for_spinning_disks = true
+parallelism_threads = 17
+paranoid_file_checks = true
+read_only = true
+recovery_mode = 10
+repair = true
+secondary = true
+stats_level = 7
+write_buffer_capacity_mb = 1.25
+
+[global.rooms]
+allow_alias_creation = false
+allow_creation = false
+allow_experimental_versions = true
+allow_unstable_versions = false
+auto_deactivate_banned_room_attempts = true
+default_power_level_content_override = { users_default = 7, events = { "m.room.name" = 42 } }
+default_version = "11"
+delete_after_leave = true
+federate_by_default = false
+forbidden_alias_names = ["^baseline\\.example$"]
+forget_forced_upon_leave = true
+
+[global.rooms.extremities]
+emergency_max = 11
+max = 10
+prune_batch = 12
+
+[global.rooms.invites]
+auto_accept = true
+auto_accept_direct_only = true
+auto_accept_local_only = true
+block_non_admin = true
+
+[global.rooms.joins]
+deprioritize_servers = ["^baseline\\.example$"]
+max_attempts_per_request = 11
+max_make_join_per_attempt = 10
+
+[global.rooms.policy_server]
+enable = true
+request_timeout = 11
+
+[global.rooms.redaction]
+allow_room_admins_to_request_unredacted_events = false
+disable_local = true
+enforce_erasure_over_federation = false
+retention_seconds = 7
+save_unredacted_events = false
+thread_latest_reply_search_limit = 9
+
+[global.rooms.relations]
+bundle_edits = true
+bundle_references = true
+
+[global.runtime.stream]
+amplification = 18
+width_default = 16
+width_scale = 1.25
+
+[global.sending]
+idle_timeout = 15
+retry_backoff_limit = 16
+retry_grace = 17
+shutdown_timeout = 14
+startup_netburst = false
+startup_netburst_keep = 13
+timeout = 14
+workers = 19
+
+[global.telemetry.jaeger]
+enable = true
+filter = "baseline-jaeger_filter"
+
+[global.telemetry.sentry]
+attach_stacktrace = true
+enable = true
+endpoint = "https://public@example.org/1"
+filter = "baseline-sentry_filter"
+send_error = false
+send_panic = false
+send_server_name = true
+traces_sample_rate = 1.25
+
+[global.tracing]
+tokio_console = true
+
+[global.tracing.flame]
+enable = true
+filter = "baseline-tracing_flame_filter"
+output_path = "baseline-tracing_flame_output_path"
+
+[global.turn]
+allow_guests = true
+password = "baseline-turn_password"
+secret = "baseline-turn_secret"
+secret_file = "baseline/turn_secret_file"
+ttl = 8
+uris = ["baseline-turn_uris"]
+username = "baseline-turn_username"
+
+[global.typing]
+allow_incoming = false
+allow_outgoing = false
+client_timeout_max_s = 15
+client_timeout_min_s = 14
+federation_timeout_s = 13
+
+[global.tls]
+certs = "baseline/cert.pem"
+key = "baseline/key.pem"
+
+[global.smtp]
+connection_uri = "smtps://baseline:dummy-secret@mail.example.org:465"
+
+[global.well_known]
+client = "https://baseline.example"
+
+[global.storage_provider.sample.local]
+path = "baseline/media"

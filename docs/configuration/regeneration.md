@@ -2,15 +2,14 @@
 
 Tuwunel can rebuild an existing configuration with the schema and documentation
 compiled into the current binary. Explicitly configured values remain active,
-aliases are rewritten to their canonical names, and fields return to the order
-used by the current example configuration. Unset fields remain commented so
+aliases are rewritten to their canonical paths, and sections follow the current example configuration: global first, then each parent followed by its children, with siblings in alphabetical order. Unset fields remain commented so
 that future default changes still apply. Dynamic sections such as identity
 providers, appservices, and storage providers are rendered from their current
 instances.
 
 Regeneration only writes a configuration document. The standalone command exits
 before normal server startup and does not open the database. The admin command
-does not reload the generated file.
+does not reload the generated file. Loading an existing configuration never rewrites it; regeneration is optional, and supported flat names continue to work throughout 2.x.
 
 ## Commands
 
@@ -47,13 +46,13 @@ environment and unknown-key controls apply only to regeneration, not pristine
 example generation.
 
 Without `--include-env`, file-backed values are retained and environment-backed
-values are identified by comments naming their environment variables. This
+values are identified by comments naming the actual environment variables used, including legacy spellings. This
 avoids making a temporary environment override persistent. Command-line
 overrides such as `-O` are never copied into the generated file.
 
 Using `--include-env` can copy secrets and temporary overrides from the process
 environment into the file. Those values remain configured if the environment
-variables are later removed.
+variables are later removed. Their annotations still name the actual source variables, including legacy spellings or a variable that supplied an entire table.
 
 Deprecated and unknown keys remain active by default, with an explanatory
 comment. This preserves the behavior and startup warnings of the input. Valid
@@ -128,7 +127,7 @@ systemctl show tuwunel -p ReadWritePaths -p SystemCallFilter -p User
 - Headerless input is normalized into `[global]`. Named profiles other than
   `default` and `global` are refused.
 - Multiple input files lose their layer boundaries in the combined output.
-- Regeneration uses the schema of the binary that runs the command.
+- Regeneration uses the schema of the binary that runs the command. Canonical output from a 2.x binary is intended for 2.x; it is not promised to load on 1.x. Retain the original configuration or its backup if you need to roll back to 1.x.
 - The generated file is not reloaded or adopted automatically.
 
 ## Review and adopt the result

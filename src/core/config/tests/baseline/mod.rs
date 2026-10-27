@@ -19,7 +19,7 @@ fn defaults_match_frozen_baseline() {
 
 #[test]
 fn legacy_files_match_frozen_baseline() {
-	for filename in ["legacy.toml", "global.toml"] {
+	for filename in ["legacy.toml", "global.toml", "canonical.toml"] {
 		let path = Path::new(env!("CARGO_MANIFEST_DIR"))
 			.join("config/tests/baseline")
 			.join(filename);

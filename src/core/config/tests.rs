@@ -22,6 +22,7 @@ use crate::{
 		check::reload,
 		media::UrlPreview,
 		proxy::{ProxySnapshot, parse_environment_proxy_url},
+		regenerate::schema,
 	},
 	matrix::MAX_PREV_EVENTS,
 	utils::hash::{password, verify_password},
@@ -90,6 +91,19 @@ fn smtp_display_redacts_userinfo() {
 
 fn config_from_toml(toml: &str) -> Result<Config> {
 	Config::new(&Figment::new().merge(Config::normalize(Data::nested(Toml::string(toml)))?))
+}
+
+fn assert_group_coverage<'a, Sections>(sections: Sections)
+where
+	Sections: Iterator<Item = &'a str>,
+{
+	let registered = schema()
+		.iter()
+		.filter(|section| section.group)
+		.map(|section| section.section)
+		.sorted_unstable();
+
+	assert!(registered.eq(sections.sorted_unstable()));
 }
 
 fn check_with_captured_logs(config: &Config) -> (Result, String) {

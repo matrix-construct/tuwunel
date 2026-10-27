@@ -5,7 +5,10 @@ use serde::Deserialize;
 use serde_json::from_str;
 
 use super::{assert_defaults, conditional_default, values};
-use crate::config::{Config, regenerate::schema, tests::config_from_toml};
+use crate::config::{
+	Config,
+	tests::{assert_group_coverage, config_from_toml},
+};
 
 #[derive(Deserialize)]
 struct Probe {
@@ -22,26 +25,19 @@ fn grouping_sections_preserve_omitted_and_partial_defaults() {
 
 	assert_eq!(probes.len(), 65);
 	assert_defaults(&config_from_toml("[global]\n").expect("omitted groups parse"));
-	schema()
+	assert_group_coverage(probes.iter().map(|probe| probe.section.as_str()));
+
+	for probe in &probes {
+		let empty = config_from_toml(&probe.empty).expect("empty group parses");
+		let partial = config_from_toml(&probe.partial).expect("partial group parses");
+
+		assert_defaults(&empty);
+		assert_partial(&partial, &probe.field);
+	}
+
+	let empty_groups = probes
 		.iter()
-		.filter(|section| section.group)
-		.for_each(|section| {
-			let probe = probes
-				.iter()
-				.find(|probe| probe.section == section.section)
-				.expect("registered grouping has an independent probe");
-
-			let empty = config_from_toml(&probe.empty).expect("empty group parses");
-			let partial = config_from_toml(&probe.partial).expect("partial group parses");
-
-			assert_defaults(&empty);
-			assert_partial(&partial, &probe.field);
-		});
-
-	let empty_groups = schema()
-		.iter()
-		.filter(|section| section.group)
-		.map(|section| format!("[{}]\n", section.section))
+		.map(|probe| format!("[{}]\n", probe.section))
 		.join("");
 
 	let config = config_from_toml(&format!("[global]\n{empty_groups}"))

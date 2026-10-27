@@ -49,7 +49,7 @@ fn frozen_typed_values_survive_regeneration_and_reload() {
 
 	let files = Files::new();
 
-	for name in ["legacy.toml", "global.toml"] {
+	for name in ["legacy.toml", "global.toml", "canonical.toml"] {
 		let input = Path::new(env!("CARGO_MANIFEST_DIR"))
 			.join("config/tests/baseline")
 			.join(name);

@@ -10,10 +10,8 @@ use serde_json::from_str;
 
 use super::{Files, options};
 use crate::config::{
-	Config, Sources,
-	regenerate::schema,
-	regenerate_config,
-	tests::{check_with_captured_logs, config_from_toml},
+	Config, Sources, regenerate_config,
+	tests::{assert_group_coverage, check_with_captured_logs, config_from_toml},
 };
 
 #[derive(Deserialize)]
@@ -38,22 +36,9 @@ fn cases() -> impl Iterator<Item = Case> {
 		.expect("independent group cases parse");
 
 	assert_eq!(cases.len(), 65);
-	schema()
-		.iter()
-		.filter(|section| section.group)
-		.for_each(|section| {
-			assert!(
-				cases
-					.iter()
-					.any(|case| case.section == section.section)
-			);
-		});
+	assert_group_coverage(cases.iter().map(|case| case.section.as_str()));
 
-	cases.into_iter().filter(|case| {
-		schema()
-			.iter()
-			.any(|section| section.group && section.section == case.section)
-	})
+	cases.into_iter()
 }
 
 fn check_unknown(case: &Case, strict: bool) {

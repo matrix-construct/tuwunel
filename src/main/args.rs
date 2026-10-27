@@ -497,35 +497,49 @@ mod tests {
 		process::Command,
 	};
 
+	use tuwunel_core::utils::sys::command_without_env_prefixes;
+
 	use super::{Args, Config, Figment, Parser, RESTORE_KEY, Result, update};
 
 	#[test]
 	fn environment_cli_precedence_and_configured_array_adjoin() {
 		const CHILD: &str = "CONFIG_HIERARCHY_ARGS_CHILD";
 		if var_os(CHILD).is_none() {
-			let status = Command::new(current_exe().unwrap())
+			let output = environment_command()
 				.args([
 					"--exact",
 					"args::tests::environment_cli_precedence_and_configured_array_adjoin",
 				])
-				.env_clear()
 				.env(CHILD, "1")
 				.env("TUWUNEL_SERVER_NAME", "example.com")
 				.env("TUWUNEL_ROCKSDB", "{checksums=false}")
 				.env("TUWUNEL_ADMIN_EXECUTE", "[configured]")
-				.status()
-				.unwrap();
+				.env("TUWUNEL_TEST", "[configured-test]")
+				.output()
+				.expect("environment test child launched");
 
-			assert!(status.success());
+			assert!(
+				output.status.success(),
+				"environment test child failed: {}\n{}{}",
+				output.status,
+				String::from_utf8_lossy(&output.stdout),
+				String::from_utf8_lossy(&output.stderr),
+			);
+
 			return;
 		}
 
 		let configured = Config::load(empty()).expect("environment source");
-		let raw = updated(
-			&["tuwunel", "--execute", "command-line", "-O", "rocksdb_checksums=true"],
-			configured.clone(),
-		)
-		.expect("CLI update");
+		let arguments = [
+			"tuwunel",
+			"--execute",
+			"command-line",
+			"--test=command-test",
+			"-O",
+			"rocksdb_checksums=true",
+		];
+
+		let raw = updated(&arguments, configured.clone()).expect("CLI update");
 
 		assert!(
 			raw.extract_inner::<bool>("rocksdb.checksums")
@@ -537,6 +551,10 @@ mod tests {
 			.unwrap();
 
 		assert_eq!(commands, ["configured", "command-line"]);
+
+		let tests = raw.extract_inner::<Vec<String>>("test").unwrap();
+
+		assert_eq!(tests, ["configured-test", "command-test"]);
 
 		let invalid = updated(&["tuwunel", "-O", "rocksdb.checksums='invalid'"], configured)
 			.expect("CLI raw input accepted");
@@ -550,12 +568,22 @@ mod tests {
 		assert!(!error.contains("TUWUNEL_ROCKSDB"));
 	}
 
+	fn environment_command() -> Command {
+		// Preserve the loader environment required by the Nix check phase.
+		let executable = current_exe().expect("test executable found");
+		let command = Command::new(executable);
+
+		command_without_env_prefixes(command, &["CONDUIT_", "CONDUWUIT_", "TUWUNEL_"])
+	}
+
 	#[test]
 	fn mixed_config_spellings_keep_cli_occurrence_order() {
-		for options in [["rocksdb_checksums=true", "rocksdb.checksums=false"], [
-			"rocksdb.checksums=true",
-			"rocksdb_checksums=false",
-		]] {
+		for options in [
+			["rocksdb_checksums=true", "rocksdb.checksums=false"],
+			["rocksdb.checksums=true", "rocksdb_checksums=false"],
+			["rocksdb_checksums=true", "rocksdb_checksums=false"],
+			["rocksdb.checksums=true", "rocksdb.checksums=false"],
+		] {
 			let raw = updated(&["tuwunel", "-O", options[0], "-O", options[1]], Figment::new())
 				.expect("ordered overrides accepted");
 
@@ -587,6 +615,75 @@ mod tests {
 
 		assert!(raw.extract_inner::<bool>("maintenance").unwrap());
 		assert!(!raw.extract_inner::<bool>("listening").unwrap());
+	}
+
+	#[test]
+	fn maintenance_flags_keep_configured_values_and_explicit_overrides() {
+		for flag in ["--maintenance", "--read-only"] {
+			let configured = Config::normalize(("startup_netburst", true)).unwrap();
+			let configured = Figment::from(configured)
+				.merge(("maintenance", false))
+				.merge(("listening", true));
+
+			let raw = updated(&["tuwunel", flag], configured).unwrap();
+
+			assert!(!raw.extract_inner::<bool>("maintenance").unwrap());
+			assert!(raw.extract_inner::<bool>("listening").unwrap());
+			assert!(
+				raw.extract_inner::<bool>("sending.startup_netburst")
+					.unwrap()
+			);
+
+			let raw = updated(&["tuwunel", flag], Figment::new()).unwrap();
+
+			assert!(raw.extract_inner::<bool>("maintenance").unwrap());
+			assert!(!raw.extract_inner::<bool>("listening").unwrap());
+			assert!(
+				!raw.extract_inner::<bool>("sending.startup_netburst")
+					.unwrap()
+			);
+
+			let raw = updated(
+				&["tuwunel", flag, "-O", "sending.startup_netburst=true"],
+				Figment::new(),
+			)
+			.unwrap();
+
+			assert!(
+				raw.extract_inner::<bool>("sending.startup_netburst")
+					.unwrap()
+			);
+		}
+	}
+
+	#[cfg(feature = "console")]
+	#[test]
+	fn console_flag_keeps_join_precedence_after_normalization() {
+		let configured = Config::normalize(("admin_console_automatic", false)).unwrap();
+		let raw = updated(&["tuwunel", "--console"], Figment::from(configured)).unwrap();
+
+		assert!(
+			!raw.extract_inner::<bool>("admin.console_automatic")
+				.unwrap()
+		);
+
+		let raw = updated(&["tuwunel", "--console"], Figment::new()).unwrap();
+
+		assert!(
+			raw.extract_inner::<bool>("admin.console_automatic")
+				.unwrap()
+		);
+
+		let raw = updated(
+			&["tuwunel", "--console", "-O", "admin.console_automatic=false"],
+			Figment::new(),
+		)
+		.unwrap();
+
+		assert!(
+			!raw.extract_inner::<bool>("admin.console_automatic")
+				.unwrap()
+		);
 	}
 
 	#[test]
