@@ -184,6 +184,11 @@ pub struct Media {
 	/// reloadable: yes
 	/// default: ["media"]
 	/// legacy: media_storage_providers
+	#[allow(
+		clippy::doc_link_with_quotes,
+		clippy::allow_attributes,
+		reason = "configuration arrays contain literal quoted strings, not intra-doc links"
+	)]
 	#[serde(default = "default_storage_providers")]
 	pub storage_providers: BTreeSet<String>,
 

@@ -221,6 +221,11 @@ pub struct Listen {
 	///
 	/// default: ["127.0.0.1", "::1"]
 	/// legacy: address
+	#[allow(
+		clippy::doc_link_with_quotes,
+		clippy::allow_attributes,
+		reason = "configuration arrays contain literal quoted strings, not intra-doc links"
+	)]
 	#[serde(default)]
 	pub(super) address: Option<ListeningAddr>,
 
