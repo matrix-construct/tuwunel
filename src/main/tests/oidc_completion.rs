@@ -6,13 +6,17 @@
 )]
 mod client;
 
-use std::{net::TcpListener, time::Duration};
+use std::{iter::once, net::TcpListener, time::Duration};
 
 use futures::{
 	future::{join, try_join},
 	pin_mut, poll,
 };
-use reqwest::{Client, Response, StatusCode, Url, redirect::Policy};
+use reqwest::{
+	Client, Response, StatusCode, Url,
+	header::{HeaderName, HeaderValue},
+	redirect::Policy,
+};
 use serde_json::{Value, from_value, json};
 use serde_urlencoded::from_str;
 use tokio::task::{JoinSet, consume_budget, coop::has_budget_remaining};
@@ -41,6 +45,7 @@ fn native_completion_ends_form_navigation() -> Result {
 	let args = Args::default_test(&["fresh", "cleanup"])
 		.with_loopback_listener(port)
 		.with_option("listening=true")
+		.with_option("http.ip_source=\"x_real_ip\"")
 		.with_option("well_known.client=\"https://localhost\"")
 		.with_option("registration.enable=true")
 		.with_option(format!("registration.token=\"{REGISTRATION_TOKEN}\""))
@@ -50,6 +55,9 @@ fn native_completion_ends_form_navigation() -> Result {
 		.with_option("authentication.oidc.rc_per_second=0")
 		.with_option("authentication.refresh_token.reuse_grace=3600")
 		.with_option("rate_limiting.login.account.burst_count=1000")
+		.with_option("rate_limiting.login.address.burst_count=1000")
+		.with_option("rate_limiting.login.failed.burst_count=3")
+		.with_option("rate_limiting.login.failed.per_second=0.000001")
 		.with_option(
 			"authentication.oidc.registration_allowed_redirect_hosts=[\"trusted.example\",\"127.\
 			 0.0.1\"]",
@@ -112,7 +120,13 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	let client = Client::builder()
 		.redirect(Policy::none())
 		.timeout(Duration::from_secs(10))
+		.default_headers(
+			once((HeaderName::from_static("x-real-ip"), HeaderValue::from_static("127.0.0.1")))
+				.collect(),
+		)
 		.build()?;
+
+	check_password_limits(services, &client, base).await?;
 
 	check_provider_choices(services, &client, base).await?;
 	check_local_resubmission(services, &client, base).await?;
@@ -217,6 +231,105 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	}
 
 	Ok(())
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+async fn check_password_limits(services: &Services, client: &Client, base: &str) -> Result {
+	let redirect = "https://trusted.example/limited";
+	let client_id = register_client(services, redirect).await?;
+	let req_id = new_native_request(client, base, &client_id, redirect).await?;
+	let grant = services
+		.oauth
+		.get_server()?
+		.create_device_grant(&client_id, "openid");
+
+	let missing = Client::builder()
+		.redirect(Policy::none())
+		.timeout(Duration::from_secs(10))
+		.build()?;
+
+	for (context, source) in [
+		(("oidc_req_id", req_id.as_str()), "127.0.0.2"),
+		(("user_code", grant.user_code.as_str()), "127.0.0.3"),
+	] {
+		let fields = [context, ("username", USERNAME), ("password", PASSWORD)];
+		let wrong = [context, ("username", USERNAME), ("password", "wrong-password")];
+		let response = client
+			.post(format!("{base}/_tuwunel/oidc/native"))
+			.header("x-real-ip", source)
+			.form(&wrong)
+			.send()
+			.await?;
+
+		assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+		for _ in 0..2 {
+			let response = matrix_password(client, base, source, "wrong-password").await?;
+
+			assert_eq!(response.status(), StatusCode::FORBIDDEN);
+		}
+
+		let response = matrix_password(client, base, source, PASSWORD).await?;
+
+		assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+
+		let response = client
+			.post(format!("{base}/_tuwunel/oidc/native"))
+			.header("x-real-ip", source)
+			.form(&fields)
+			.send()
+			.await?;
+
+		assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+
+		let response = post_form(&missing, base, "native", &fields).await?;
+
+		assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+
+		let response = post_form(client, base, "native", &fields).await?;
+
+		assert_eq!(response.status(), StatusCode::SEE_OTHER);
+
+		let completion = location(&response)?;
+
+		assert_ne!(parameter(&completion, "loginToken"), "");
+	}
+
+	let req_id = new_native_request(client, base, &client_id, redirect).await?;
+	let response =
+		submit_registration(&missing, base, &req_id, "no-limiter-address", REGISTRATION_TOKEN)
+			.await?;
+
+	assert_eq!(response.status(), StatusCode::SEE_OTHER);
+
+	let user =
+		UserId::parse_with_server_name("no-limiter-address", services.globals.server_name())?;
+
+	assert!(services.users.exists(&user).await);
+
+	Ok(())
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+async fn matrix_password(
+	client: &Client,
+	base: &str,
+	source: &str,
+	password: &str,
+) -> Result<Response> {
+	let body = json!({
+		"type": "m.login.password",
+		"identifier": {"type": "m.id.user", "user": USERNAME},
+		"password": password,
+	});
+
+	client
+		.post(format!("{base}/_matrix/client/v3/login"))
+		.header("x-real-ip", source)
+		.json(&body)
+		.send()
+		.await
+		.map_err(Into::into)
 }
 
 async fn concurrent_authorization_code_exchange_is_single_use(

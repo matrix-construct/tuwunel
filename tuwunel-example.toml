@@ -1513,7 +1513,12 @@
 # Selects the client IP source for rate limiting, logging, and security
 # tooling.
 #
-# When unset, `ClientIp` scans common proxy headers in leftmost-IP mode
+# For password login and password re-entry (UIAA), an unset source uses
+# the TCP peer address and ignores forwarding headers; when configured,
+# the selected source is required even from loopback or trusted peers, and a
+# missing or invalid source refuses authentication.
+#
+# For other uses, an unset source scans common proxy headers in leftmost-IP mode
 # (`X-Forwarded-For`, RFC 7239 `Forwarded`, `X-Real-IP`, `Fly-Client-IP`,
 # `True-Client-IP`, `CF-Connecting-IP`, `CloudFront-Viewer-Address`)
 # before falling back to the TCP peer address, allowing clients to spoof
@@ -1528,9 +1533,10 @@
 # for RFC 7239 proxies, "x_real_ip" for nginx `X-Real-IP`,
 # "cf_connecting_ip" for Cloudflare or cloudflared, "true_client_ip" for
 # Akamai or Cloudflare Enterprise, "fly_client_ip" for Fly.io, and
-# "cloudfront_viewer_address" for AWS CloudFront. Unix-socket deployments
-# should leave this unset instead of using "connect_info", which requires
-# a TCP peer address; changing this setting requires a server restart.
+# "cloudfront_viewer_address" for AWS CloudFront. Password authentication
+# without a TCP peer address requires a configured header source because
+# "connect_info" requires that address; changing this setting requires
+# a server restart.
 #
 #ip_source = "connect_info"
 
@@ -1539,8 +1545,9 @@
 # Matching peers use the insecure header scan and `ConnectInfo` fallback
 # used when `http.ip_source` is unset; entries require CIDR prefixes
 # (`/32` or `/128` for a single host), while loopback (`127.0.0.0/8`,
-# `::1/128`) always bypasses extraction without being listed. Use this
-# for locally attached bridges or server-side clients on private
+# `::1/128`) bypasses extraction without being listed, except for password
+# login and password re-entry (UIAA), which require the selected source.
+# Use this for locally attached bridges or server-side clients on private
 # container or VPN subnets that cannot carry the configured proxy header,
 # such as a Docker bridge without `network_mode: host`.
 #
@@ -3118,19 +3125,44 @@
 
 
 
+#[global.rate_limiting.login.address]
+
+# Token-bucket refill rate for password attempts per client address.
+#
+# IPv6 addresses share a bucket within each /64; clients behind a shared
+# address share its allowance.
+# Public login and authenticated password re-entry use separate buckets.
+# Configure trusted client-address forwarding behind a proxy, or its
+# users share the proxy's address budget.
+#
+# `0` disables this limit rather than making a bucket that never refills.
+#
+# reloadable: yes
+#
+#per_second = 1.0
+
+# Token-bucket depth for password attempts per client address.
+#
+# The number of attempts allowed before `per_second` governs.
+# `0` disables this limit, as does a `0` rate.
+#
+# reloadable: yes
+#
+#burst_count = 20
+
+
+
 #[global.rate_limiting.login.failed]
 
-# Token-bucket refill rate (failures per second) for wrong passwords
-# against one account.
+# Token-bucket refill rate for wrong passwords per account and client
+# address.
 #
-# Every password attempt takes a token before the password is checked,
-# and only a wrong password keeps it; once the bucket is empty, even the
-# owner's correct password is refused with `M_LIMIT_EXCEEDED`. Applies to
-# `/login` (but not to the LDAP binds it makes), the built-in OIDC login
-# page and password re-entry for sensitive actions (UIAA), keyed on the
-# account. Mirrors Synapse's `rc_login.failed_attempts` and its default:
-# `burst_count` failures, then about one attempt every six seconds, or
-# some 14,700 a day.
+# Every attempt reserves a token before verification; a correct password
+# returns it, while a wrong password keeps it.
+# An empty bucket refuses even a correct password from that address,
+# without blocking the account from other addresses.
+# IPv6 addresses share a bucket within each /64, and authenticated
+# password re-entry (UIAA) uses separate buckets from public login.
 #
 # `0` disables this limit rather than making a bucket that never refills.
 #
@@ -3138,12 +3170,10 @@
 #
 #per_second = 0.17
 
-# Token-bucket depth (burst size) for wrong passwords against one
-# account.
+# Token-bucket depth for wrong passwords per account and client address.
 #
-# The number of failures allowed before `per_second` governs. `0`
-# disables this limit, as does a `0` rate. The default is Synapse's
-# `rc_login.failed_attempts.burst_count`.
+# The number of failures allowed before `per_second` governs.
+# `0` disables this limit, as does a `0` rate.
 #
 # reloadable: yes
 #

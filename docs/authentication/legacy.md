@@ -128,36 +128,44 @@ accounts were created.
 
 ## Login rate limits
 
-These bound password guessing, with the semantics of Synapse's
-`rc_login.failed_attempts` and `rc_login.account`. Both are keyed on the
-account being tried rather than on the client's address, so they hold behind a
-reverse proxy or tunnel that does not forward the caller's address, where a
-per-address limit would see one client for every user. A refused attempt gets
-`M_LIMIT_EXCEEDED`, with a `retry_after_ms` unless the sign-in table is full
-(see below).
+Password sign-in uses three token buckets. A refused attempt gets
+`M_LIMIT_EXCEEDED`, with a `retry_after_ms` unless a limit's table is full.
 
-- **Wrong passwords.** Every password attempt takes a token from the account's
-  wrong-password bucket before the password is checked, and only a wrong
-  password keeps it. Attempts made at the same moment each hold a token until
-  their password is checked, so more simultaneous sign-ins to one account than
-  the burst are refused with a retry hint, even with the correct password. A
-  name that matches no account counts as a wrong password, so the limit does not
-  reveal which accounts exist; a refusal that checks no password at all, such as
-  for a deactivated account, gives the token back. Once the bucket is empty,
-  every password attempt for the account is refused, including one with the
-  correct password, until it refills. This applies to `/login`, the built-in
-  OIDC login page, and password re-entry for sensitive actions (UIAA).
-- **Successful sign-ins.** Only a sign-in whose password verified counts
-  against the account's sign-in bucket, so wrong passwords never do. An account
-  that has signed in too often is refused even with the correct password. This
-  applies to `/login` and the built-in OIDC login page.
+- **Wrong passwords:** each account and client address pair has its own budget.
+  An attempt reserves a token before checking the password and returns it on
+  success; wrong passwords and unknown accounts keep it. Once exhausted, that
+  pair is refused until a token refills, including attempts with the correct
+  password. Attempts from another address still have their own allowance.
+  Concurrent attempts each reserve a token, so they cannot bypass the limit.
+- **Client addresses:** all password attempts from one address share a broader
+  budget across accounts, charged before verification and kept on success too.
+  This bounds password spraying and password-verification work.
+- **Successful sign-ins:** only a verified password consumes the account's
+  sign-in budget. Wrong guesses never consume it, but an account that has
+  signed in too often is refused even with the correct password.
 
-Neither limit covers the LDAP binds `/login` makes: with LDAP enabled, only
-an account `/login` does not find in the directory, and so checks locally, is
-limited.
+Public `/login` and the built-in OIDC login page share the first two budgets.
+Password re-entry for sensitive actions (UIAA) has separate failed-attempt and
+address budgets with the same settings, so public login attempts cannot
+exhaust its allowance. The successful-sign-in budget does not apply to UIAA.
+LDAP binds made by `/login` remain outside these limits; an account not found
+in LDAP that falls back to local password checking is limited.
 
-Each limit has its own section in the config file, shown here with its
-defaults:
+IPv4 addresses have individual budgets. IPv4-mapped IPv6 addresses use their
+IPv4 identity, and other IPv6 addresses share budgets within each /64.
+Clients sharing a NAT address also share its address budget. By default the
+address comes from the socket peer. Behind a reverse proxy, configure
+`http.ip_source`, restrict backend access to trusted proxies, and have
+the proxy replace the selected forwarding header with a verified address.
+Do not accept client-supplied forwarding headers unchanged. Without reliable
+forwarding, all users behind the proxy share its address and allowance.
+Password login and password UIAA require the selected source even for loopback
+peers and peers listed in `http.ip_source_trusted_subnets`; they do not use
+those peers' usual extraction bypass. A missing or invalid selected source
+refuses authentication. Deployments without a TCP peer address must configure
+a header source and supply it through their trusted proxy.
+
+Each limit has its own config section, shown here with its defaults:
 
 ```toml
 [global.rate_limiting.login.failed]
@@ -167,38 +175,30 @@ burst_count = 3
 [global.rate_limiting.login.account]
 per_second = 0.003
 burst_count = 5
+
+[global.rate_limiting.login.address]
+per_second = 1.0
+burst_count = 20
 ```
 
-| Section | Option | Description |
-|---|---|---|
-| `failed` | `per_second` | Refill rate for wrong passwords against one account. |
-| `failed` | `burst_count` | Wrong passwords allowed before that rate governs. |
-| `account` | `per_second` | Refill rate for successful password sign-ins to one account. |
-| `account` | `burst_count` | Sign-ins allowed before that rate governs. |
+The failed-attempt budget allows three wrong passwords per account/address
+pair, then about one attempt every six seconds. The address budget allows
+20 attempts across accounts, then one per second. The account budget allows
+five successful sign-ins, then about one every five and a half minutes.
+Setting either `burst_count` or `per_second` to `0` disables that limit.
 
-The defaults are Synapse's own, so a server moving between the two keeps the
-same behaviour: three wrong passwords, then about one attempt every six
-seconds; and five sign-ins, then about one every five and a half minutes.
-Setting either `burst_count`, or either `per_second`, to `0` disables that
-limit, rather than making a bucket that never refills.
+Separating addresses prevents guesses from one address from exhausting an
+account's allowance at another address. It also means distributed guesses
+from different addresses have separate failed-attempt budgets. Users sharing
+an address or IPv6 /64 can still affect one another. Existing sessions and
+non-password login methods (`m.login.token`, SSO and JWT) are unaffected.
 
-**What this costs.** While someone keeps sending wrong passwords for an
-account, its owner cannot sign in with a password either; the refusal is what
-bounds the guessing. At the defaults that lasts only while the wrong passwords
-keep coming, since the bucket gives back one attempt about every six seconds.
-That rate still allows about 14,700 wrong passwords a day against one account,
-and there is no per-address limit, so a per-IP limit at the reverse proxy is
-the lever for tightening it. Existing sessions are untouched, and so is any
-login that is not a password: `m.login.token`, SSO and JWT.
-
-**When a limit's table is full.** Each limit tracks at most 65536 accounts in
-memory, and forgets them all on restart. A bucket that has refilled completely
-is dropped to make room, but one that is still limiting never is, since that
-would hand the account being guessed a fresh start. When the wrong-password
-table is full, accounts not already in it are not limited on that axis until
-room frees up; when the sign-in table is full, a correct password for an
-account not in it is refused. Either case logs a warning, and a full
-wrong-password table usually means a spray of distinct user names.
+Each table holds at most 65536 entries in memory and resets on restart.
+Fully refilled buckets can be removed to make room; buckets still limiting
+are retained. Full failed-attempt and address tables admit untracked pairs
+and addresses until room frees up, while retaining limits for existing
+entries. A full successful-sign-in table refuses untracked accounts.
+Table exhaustion logs a warning.
 
 ## Token and session lifetimes
 

@@ -1,15 +1,14 @@
-//! Per-account throttles on password authentication.
+//! Password throttles by account and client address.
 //!
-//! Every password attempt reserves a token from the account's failed-attempt
-//! bucket before the password is checked, and only a wrong password keeps it,
-//! so concurrent guesses cannot share one token. Only a sign-in by a verified
-//! password debits the account bucket. Both are keyed on the account rather
-//! than the client address, mirroring Synapse's `rc_login.failed_attempts` and
-//! `rc_login.account`; the operator documentation for the
-//! `[global.rate_limiting.login]` options sets out their costs.
+//! Each attempt spends an address token and reserves an account/address failure
+//! token before verification; only a wrong password keeps the reservation.
+//! Verified sign-ins also spend an account token, while UIAA uses separate
+//! attempt tables so public login traffic cannot exhaust its allowance.
 
 use std::{
+	borrow::Borrow,
 	collections::BTreeMap,
+	net::{IpAddr, Ipv6Addr},
 	ops::Bound::{Excluded, Included, Unbounded},
 	sync::{Arc, Mutex},
 	time::{Duration, Instant},
@@ -20,58 +19,72 @@ use ruma::{
 	UserId,
 	api::error::{ErrorKind, LimitExceededErrorData, RetryAfter},
 };
-use tuwunel_core::{Error, Result, Server, implement, warn};
+use tuwunel_core::{
+	Error, Result, Server, implement, smallstr::SmallString, smallvec::SmallVec, warn,
+};
 
-/// Per-account login throttles.
+/// Password login and reauthentication throttles.
 ///
 /// The tables live here rather than on [`crate::users::Service`] so that the
 /// interior mutability they need stays out of a type whose `&self` methods are
 /// linted as taking nothing mutable.
 pub struct Service {
 	server: Arc<Server>,
-	account: Ratelimiter,
-	failed: Ratelimiter,
+	account: Ratelimiter<AccountKey>,
+	login: Attempts,
+	uiaa: Attempts,
 }
 
 /// A failed-attempt token reserved for one password attempt.
 ///
-/// It carries the account key, built once per request, and whether a token was
-/// actually taken. Dropping it keeps the token, as a wrong password does;
-/// anything else hands it to [`Service::refund_login_attempt`] or
-/// [`Service::record_login`]. A held bucket that fully refills and is pruned
-/// while the password is verified, then re-created by another guess, takes
-/// this reservation's refund in its place.
+/// Dropping it keeps the token, as a wrong password does; other outcomes pass it
+/// to [`Service::refund_login_attempt`] or [`Service::record_login`]. The scope
+/// keeps public login refunds separate from UIAA refunds.
 #[derive(Debug)]
 #[must_use]
 pub struct Reservation {
-	key: String,
+	key: FailedKey,
 	hold: Hold,
+	scope: Scope,
 }
 
-type Ratelimiter = Mutex<Table>;
+type AccountKey = SmallString<[u8; 48]>;
+type FailedKey = (AccountKey, IpAddr);
+type Ratelimiter<K = String> = Mutex<Table<K>>;
+type Buckets<K> = BTreeMap<K, (Instant, f64)>;
+type Pruned<K> = SmallVec<[K; 1]>;
 
-/// One axis's token buckets, and where the next prune of them resumes.
-///
-/// Each account maps to its last-refill instant and remaining tokens, ordered
-/// by account so that pruning can resume in place. It holds at most
-/// [`RATELIMIT_MAP_CAP`] accounts, each only until its bucket refills to the
-/// burst and a prune or refund drops it.
 #[derive(Default)]
-struct Table {
-	buckets: Buckets,
+struct Attempts {
+	/// Refilled buckets expire on admission or refund; each table holds at most 65536 keys.
+	failed: Ratelimiter<FailedKey>,
 
-	/// The last account a prune inspected; the next one starts after it.
-	cursor: String,
+	/// Refilled buckets expire on admission; each table holds at most 65536 addresses.
+	address: Ratelimiter<IpAddr>,
 }
 
-type Buckets = BTreeMap<String, (Instant, f64)>;
+struct Table<K = String> {
+	buckets: Buckets<K>,
+	cursor: Option<K>,
+}
+
+#[derive(Clone, Copy, Debug)]
+enum Scope {
+	Login,
+	Uiaa,
+}
+
+impl<K> Default for Table<K> {
+	fn default() -> Self { Self { buckets: BTreeMap::new(), cursor: None } }
+}
 
 impl crate::Service for Service {
 	fn build(args: &crate::Args<'_>) -> Result<Arc<Self>> {
 		Ok(Arc::new(Self {
 			server: args.server.clone(),
 			account: Ratelimiter::default(),
-			failed: Ratelimiter::default(),
+			login: Attempts::default(),
+			uiaa: Attempts::default(),
 		}))
 	}
 
@@ -94,6 +107,8 @@ const MAX_RETRY_AFTER: Duration = Duration::from_hours(24);
 const FULL_WARNING_INTERVAL: Duration = Duration::from_mins(1);
 
 static FAILED_FULL_WARNING: Mutex<Option<Instant>> = Mutex::new(None);
+
+static ADDRESS_FULL_WARNING: Mutex<Option<Instant>> = Mutex::new(None);
 
 static ACCOUNT_FULL_WARNING: Mutex<Option<Instant>> = Mutex::new(None);
 
@@ -135,6 +150,9 @@ enum Axis {
 	/// Wrong passwords; an account the full table cannot admit goes untracked.
 	Failed,
 
+	/// All password attempts by address; a full table admits untracked addresses.
+	Address,
+
 	/// Verified sign-ins; an account the full table cannot admit is refused.
 	Account,
 }
@@ -142,7 +160,7 @@ enum Axis {
 impl Axis {
 	fn when_full(self) -> Result<Hold> {
 		match self {
-			| Self::Failed => Ok(Hold::Untracked),
+			| Self::Failed | Self::Address => Ok(Hold::Untracked),
 			| Self::Account => Err(limit_exceeded(None)),
 		}
 	}
@@ -150,57 +168,84 @@ impl Axis {
 	fn last_full_warning(self) -> &'static Mutex<Option<Instant>> {
 		match self {
 			| Self::Failed => &FAILED_FULL_WARNING,
+			| Self::Address => &ADDRESS_FULL_WARNING,
 			| Self::Account => &ACCOUNT_FULL_WARNING,
 		}
 	}
 }
 
-/// Reserve one failed-attempt token for a password about to be checked.
+/// Reserve an account/address failure token before checking a login password.
 ///
-/// The debit is atomic, so concurrent guesses cannot all pass on one remaining
-/// token, and an account with none left is refused with `M_LIMIT_EXCEEDED`.
-/// Only a wrong password keeps the reservation: every other outcome hands it
-/// back through [`record_login`] or [`refund_login_attempt`].
-///
-/// [`record_login`]: Service::record_login
-/// [`refund_login_attempt`]: Service::refund_login_attempt
+/// The address budget is spent first and is never refunded. Atomic reservations
+/// prevent simultaneous guesses from sharing the last failure token.
 #[implement(Service)]
-pub fn reserve_login_attempt(&self, user_id: &UserId) -> Result<Reservation> {
+pub fn reserve_login_attempt(&self, user_id: &UserId, address: IpAddr) -> Result<Reservation> {
+	self.reserve_attempt(user_id, address, Scope::Login)
+}
+
+/// Reserve a password reauthentication attempt independently of public login.
+///
+/// Both the address and failed-attempt budgets are separate from sign-in budgets.
+#[implement(Service)]
+pub fn reserve_uiaa_attempt(&self, user_id: &UserId, address: IpAddr) -> Result<Reservation> {
+	self.reserve_attempt(user_id, address, Scope::Uiaa)
+}
+
+#[implement(Service)]
+fn reserve_attempt(
+	&self,
+	user_id: &UserId,
+	address: IpAddr,
+	scope: Scope,
+) -> Result<Reservation> {
 	reserve_at(
-		&self.failed,
-		account_key(user_id),
-		self.failed_limit(),
+		self.attempts(scope),
+		(user_id, address),
+		(self.failed_limit(), self.address_limit()),
+		scope,
 		Instant::now(),
-		RATELIMIT_MAP_CAP,
 	)
+}
+
+#[implement(Service)]
+fn attempts(&self, scope: Scope) -> &Attempts {
+	match scope {
+		| Scope::Login => &self.login,
+		| Scope::Uiaa => &self.uiaa,
+	}
 }
 
 /// Record a sign-in by a verified password.
 ///
-/// The reservation is handed back first, because the password was right
-/// whatever the account bucket decides. The account bucket is then debited,
-/// refusing with `M_LIMIT_EXCEEDED` an account that has signed in too often.
+/// Refund its failure token before spending the account's successful-login
+/// allowance; a correct password never consumes a failed-attempt token.
 #[implement(Service)]
 pub fn record_login(&self, reservation: Reservation) -> Result {
-	let Reservation { key, hold } = reservation;
+	let Reservation { key, hold, scope } = reservation;
 	let now = Instant::now();
 
-	refund_at(&self.failed, &key, hold, self.failed_limit(), now)?;
-
-	debit_at(&self.account, &key, self.account_limit(), Axis::Account, now, RATELIMIT_MAP_CAP)?;
+	refund_at(&self.attempts(scope).failed, &key, hold, self.failed_limit(), now)?;
+	debit_at(
+		&self.account,
+		&key.0,
+		self.account_limit(),
+		Axis::Account,
+		now,
+		RATELIMIT_MAP_CAP,
+	)?;
 
 	Ok(())
 }
 
-/// Hand back a reservation whose attempt found no wrong password.
+/// Refund an attempt that found no wrong password.
 ///
-/// That covers a password re-entered for UIAA, which opens no session, and
-/// every refusal made without checking a password at all.
+/// The reservation selects its original login or UIAA failure table; the
+/// address budget still counts the request.
 #[implement(Service)]
 pub fn refund_login_attempt(&self, reservation: Reservation) -> Result {
-	let Reservation { key, hold } = reservation;
+	let Reservation { key, hold, scope } = reservation;
 
-	refund_at(&self.failed, &key, hold, self.failed_limit(), Instant::now())
+	refund_at(&self.attempts(scope).failed, &key, hold, self.failed_limit(), Instant::now())
 }
 
 #[implement(Service)]
@@ -223,20 +268,55 @@ fn account_limit(&self) -> Limit {
 	}
 }
 
-/// One bucket per account regardless of the case it was typed in, matching
-/// the lowercase fallback the password check itself applies.
-fn account_key(user_id: &UserId) -> String { user_id.as_str().to_lowercase() }
+#[implement(Service)]
+fn address_limit(&self) -> Limit {
+	let address = &self.server.config.rate_limiting.login.address;
+
+	Limit {
+		rate: address.per_second,
+		burst: address.burst_count,
+	}
+}
 
 fn reserve_at(
-	table: &Ratelimiter,
-	key: String,
-	limit: Limit,
+	attempts: &Attempts,
+	(user_id, address): (&UserId, IpAddr),
+	(failed, limit): (Limit, Limit),
+	scope: Scope,
 	now: Instant,
-	cap: usize,
 ) -> Result<Reservation> {
-	let hold = debit_at(table, &key, limit, Axis::Failed, now, cap)?;
+	let address = address_key(address);
 
-	Ok(Reservation { key, hold })
+	debit_at(&attempts.address, &address, limit, Axis::Address, now, RATELIMIT_MAP_CAP)?;
+
+	let key = (account_key(user_id), address);
+	let hold = debit_at(&attempts.failed, &key, failed, Axis::Failed, now, RATELIMIT_MAP_CAP)?;
+
+	Ok(Reservation { key, hold, scope })
+}
+
+fn address_key(address: IpAddr) -> IpAddr {
+	match address.to_canonical() {
+		| IpAddr::V4(address) => address.into(),
+		| IpAddr::V6(address) => {
+			let [a, b, c, d, ..] = address.segments();
+
+			Ipv6Addr::new(a, b, c, d, 0, 0, 0, 0).into()
+		},
+	}
+}
+
+fn account_key(user_id: &UserId) -> AccountKey {
+	let account = user_id.as_str();
+
+	if account.is_ascii() {
+		account
+			.chars()
+			.map(|ch| ch.to_ascii_lowercase())
+			.collect()
+	} else {
+		AccountKey::from_str(&account.to_lowercase())
+	}
 }
 
 /// Take one token from an account's bucket, refusing when none is left.
@@ -244,14 +324,18 @@ fn reserve_at(
 /// An account the table does not hold starts with a full bucket. When the
 /// table holds `cap` accounts and nothing can be pruned, the axis decides
 /// whether such an account is refused or let through untracked.
-fn debit_at(
-	table: &Ratelimiter,
-	key: &str,
+fn debit_at<K, Q>(
+	table: &Ratelimiter<K>,
+	key: &Q,
 	limit: Limit,
 	axis: Axis,
 	now: Instant,
 	cap: usize,
-) -> Result<Hold> {
+) -> Result<Hold>
+where
+	K: Borrow<Q> + Clone + Ord,
+	Q: Ord + ToOwned<Owned = K> + ?Sized,
+{
 	if !limit.enabled() {
 		return Ok(Hold::Untracked);
 	}
@@ -296,7 +380,17 @@ fn debit_at(
 /// A bucket refunded back to full carries no information and is removed, so
 /// ordinary sign-ins do not fill the table. An untracked reservation took
 /// nothing and gets nothing back.
-fn refund_at(table: &Ratelimiter, key: &str, hold: Hold, limit: Limit, now: Instant) -> Result {
+fn refund_at<K, Q>(
+	table: &Ratelimiter<K>,
+	key: &Q,
+	hold: Hold,
+	limit: Limit,
+	now: Instant,
+) -> Result
+where
+	K: Borrow<Q> + Ord,
+	Q: Ord + ?Sized,
+{
 	if hold == Hold::Untracked || !limit.enabled() {
 		return Ok(());
 	}
@@ -335,19 +429,32 @@ fn refill(last: Instant, tokens: f64, rate: f64, burst: f64, now: Instant) -> f6
 /// wraps around at the end, so successive samples reach every bucket even
 /// while the leading ones stay restricted. A bucket that is still restricted
 /// is never removed.
-fn prune_sample(buckets: &mut Buckets, cursor: &mut String, rate: f64, burst: f64, now: Instant) {
-	let after = (Excluded(cursor.as_str()), Unbounded);
-	let wrapped = (Unbounded, Included(cursor.as_str()));
+fn prune_sample<K: Clone + Ord>(
+	buckets: &mut Buckets<K>,
+	cursor: &mut Option<K>,
+	rate: f64,
+	burst: f64,
+	now: Instant,
+) {
+	let after = (cursor.as_ref().map_or(Unbounded, Excluded), Unbounded);
+	let wrapped = (Unbounded, cursor.as_ref().map_or(Unbounded, Included));
 	let sample = buckets
-		.range::<str, _>(after)
-		.chain(buckets.range::<str, _>(wrapped))
+		.range::<K, _>(after)
+		.chain(
+			buckets
+				.range::<K, _>(wrapped)
+				.take(if cursor.is_some() { PRUNE_SAMPLE } else { 0 }),
+		)
 		.take(PRUNE_SAMPLE);
 
 	if let Some((key, _)) = sample.clone().last() {
-		cursor.clone_from(key);
+		match cursor {
+			| None => *cursor = Some(key.clone()),
+			| Some(cursor) => cursor.clone_from(key),
+		}
 	}
 
-	let refilled: Vec<String> = sample
+	let refilled: Pruned<K> = sample
 		.filter(|(_, (last, tokens))| refill(*last, *tokens, rate, burst, now) >= burst)
 		.map(|(key, _)| key.clone())
 		.collect();
@@ -373,11 +480,11 @@ fn warn_table_full(axis: Axis, now: Instant) {
 	*last = Some(now);
 
 	match axis {
-		| Axis::Failed => warn!(
+		| Axis::Failed | Axis::Address => warn!(
 			table = ?axis,
 			cap = RATELIMIT_MAP_CAP,
-			"Login rate-limit table is full of accounts still being limited; wrong passwords for \
-			 accounts not already in it go untracked. Likely a spray of distinct user names."
+			"Password rate-limit table is full of keys still being limited; attempts for \
+			 keys not already in it go untracked."
 		),
 		| Axis::Account => warn!(
 			table = ?axis,
@@ -403,7 +510,7 @@ fn limit_exceeded(retry_after: Option<Duration>) -> Error {
 		ErrorKind::LimitExceeded(LimitExceededErrorData {
 			retry_after: retry_after.map(RetryAfter::Delay),
 		}),
-		"Too many login attempts for this account.".into(),
+		"Too many password authentication attempts.".into(),
 		StatusCode::TOO_MANY_REQUESTS,
 	)
 }

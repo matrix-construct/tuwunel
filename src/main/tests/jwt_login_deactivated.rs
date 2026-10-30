@@ -1,9 +1,12 @@
 #![cfg(test)]
 
-use std::{fmt::Display, net::TcpListener};
+use std::{
+	fmt::Display,
+	net::{IpAddr, Ipv4Addr, TcpListener},
+};
 
 use futures::future::join;
-use reqwest::{RequestBuilder, StatusCode};
+use reqwest::{Client, RequestBuilder, StatusCode};
 use serde_json::{Value, json};
 use tuwunel::{Args, Runtime, Server, async_run, async_start, async_stop};
 use tuwunel_core::{
@@ -41,17 +44,12 @@ const BRIDGE: Bridge<'static> = Bridge {
 	aliases: None,
 };
 
-/// Login refuses deactivated accounts and limits wrong passwords per account.
+/// Login refuses deactivated accounts and isolates password limits by address.
 ///
-/// A deactivated account keeps its record with an empty password hash, so
-/// password login refuses it with `M_USER_DEACTIVATED` before comparing
-/// anything, and repeating that refusal never spends the account's
-/// failed-attempt limit. JWT and login-token logins, which check no password,
-/// must refuse it the same way, as must the JWT stage of UIAA, through which
-/// another session could otherwise give it a new password. Appservice login is
-/// exempt, so an appservice still signs in its passwordless bot. Wrong passwords past that limit's burst are refused with
-/// `M_LIMIT_EXCEEDED`, the correct password included, while a correct
-/// password inside the burst still signs in.
+/// Password, JWT, login-token and JWT UIAA authentication refuse deactivated
+/// accounts, while an appservice can still sign in its passwordless bot.
+/// Exhausting one address's failed-password allowance leaves another address
+/// and authenticated password re-entry usable, without trusting forged headers.
 #[test]
 fn login_refuses_deactivated_accounts_and_limits_wrong_passwords() -> Result {
 	let listener = TcpListener::bind(("127.0.0.1", 0))?;
@@ -65,6 +63,8 @@ fn login_refuses_deactivated_accounts_and_limits_wrong_passwords() -> Result {
 		.with_option("jwt.format=\"HMAC\"")
 		.with_option("jwt.algorithm=\"HS256\"")
 		.with_option("jwt.register_user=false")
+		.with_option("rate_limiting.login.failed.per_second=0.000001")
+		.with_option("rate_limiting.login.address.per_second=0.000001")
 		.with_option("authentication.argon2.m_cost=64")
 		.with_option("authentication.argon2.t_cost=1");
 
@@ -138,8 +138,8 @@ async fn exercise(services: &Services, base: &str) -> Result {
 		expect_error(context, status, &body, StatusCode::FORBIDDEN, DEACTIVATED)?;
 	}
 
-	wrong_passwords_are_limited(services, base, &guessed, burst).await?;
-	correct_password_inside_the_burst(services, base, &owner, burst).await
+	correct_password_inside_the_burst(services, base, &owner, burst).await?;
+	wrong_passwords_are_limited(services, base, &guessed, burst).await
 }
 
 async fn token_login_refuses_deactivated(
@@ -238,7 +238,106 @@ async fn wrong_passwords_are_limited(
 
 	let (status, body) = password_login(services, base, user_id, PASSWORD).await?;
 
-	expect_error("correct password past the burst", status, &body, limited, LIMITED)
+	expect_error("correct password past the burst", status, &body, limited, LIMITED)?;
+	address_isolation(services, base, user_id).await
+}
+
+#[tracing::instrument(level = "debug", skip(services))]
+async fn address_isolation(services: &Services, base: &str, user_id: &UserId) -> Result {
+	let body = password_body(user_id, PASSWORD);
+	let forged = post(services, base, "login", &body)
+		.header("X-Forwarded-For", "192.0.2.1")
+		.header("X-Real-IP", "192.0.2.2")
+		.header("Forwarded", "for=192.0.2.3");
+
+	let (status, body) = send(forged).await?;
+
+	expect_error("forged client address", status, &body, StatusCode::TOO_MANY_REQUESTS, LIMITED)?;
+
+	let client = Client::builder()
+		.no_proxy()
+		.local_address(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 2)))
+		.build()?;
+
+	let body = password_body(user_id, PASSWORD);
+	let request = client
+		.post(format!("{base}/_matrix/client/v3/login"))
+		.json(&body);
+
+	let (status, session) = send(request).await?;
+
+	expect_signed_in("correct password from another address", status, &session)?;
+	password_reentry_after_login_limit(services, base, user_id, &session).await?;
+	address_exhaustion_preserves_reentry(services, base, user_id, &session).await
+}
+
+#[tracing::instrument(level = "debug", skip(services, session))]
+async fn password_reentry_after_login_limit(
+	services: &Services,
+	base: &str,
+	user_id: &UserId,
+	session: &Value,
+) -> Result {
+	let access_token = session["access_token"]
+		.as_str()
+		.ok_or_else(|| err!("the alternate-address session has no access token"))?;
+
+	let auth = password_body(user_id, PASSWORD);
+	let body = json!({"new_password": PASSWORD, "logout_devices": false, "auth": auth});
+	let request = post(services, base, "account/password", &body).bearer_auth(access_token);
+	let (status, body) = send(request).await?;
+
+	if status != StatusCode::OK {
+		return Err!("public login exhaustion blocked password UIAA: {status}: {body}");
+	}
+
+	Ok(())
+}
+
+#[tracing::instrument(level = "debug", skip(services, session))]
+async fn address_exhaustion_preserves_reentry(
+	services: &Services,
+	base: &str,
+	user_id: &UserId,
+	session: &Value,
+) -> Result {
+	let server_name = services.globals.server_name();
+	let untouched = UserId::parse_with_server_name("address-victim", server_name)?;
+
+	services
+		.users
+		.create(&untouched, Some(PASSWORD), None)
+		.await?;
+
+	for attempt in 0..=services
+		.config
+		.rate_limiting
+		.login
+		.address
+		.burst_count
+	{
+		let unknown = UserId::parse_with_server_name(format!("spray-{attempt}"), server_name)?;
+		let (status, body) = password_login(services, base, &unknown, WRONG_PASSWORD).await?;
+
+		if status == StatusCode::TOO_MANY_REQUESTS {
+			expect_error("address spray", status, &body, status, LIMITED)?;
+			break;
+		}
+
+		expect_error("address spray", status, &body, StatusCode::FORBIDDEN, "M_FORBIDDEN")?;
+	}
+
+	let (status, body) = password_login(services, base, &untouched, PASSWORD).await?;
+
+	expect_error(
+		"address budget across accounts",
+		status,
+		&body,
+		StatusCode::TOO_MANY_REQUESTS,
+		LIMITED,
+	)?;
+
+	password_reentry_after_login_limit(services, base, user_id, session).await
 }
 
 async fn correct_password_inside_the_burst(
@@ -281,13 +380,17 @@ async fn password_login(
 	user_id: &UserId,
 	password: &str,
 ) -> Result<(StatusCode, Value)> {
-	let body = json!({
+	let body = password_body(user_id, password);
+
+	login(services, base, &body).await
+}
+
+fn password_body(user_id: &UserId, password: &str) -> Value {
+	json!({
 		"type": "m.login.password",
 		"identifier": {"type": "m.id.user", "user": user_id.localpart()},
 		"password": password,
-	});
-
-	login(services, base, &body).await
+	})
 }
 
 async fn login(services: &Services, base: &str, body: &Value) -> Result<(StatusCode, Value)> {

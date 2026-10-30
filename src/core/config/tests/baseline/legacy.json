@@ -227,7 +227,7 @@
   "query_over_tcp_only": "true",
   "query_trusted_key_servers_first": "true",
   "query_trusted_key_servers_first_on_join": "false",
-  "rate_limiting": "RateLimits { login: LoginRateLimits { failed: LoginFailedRateLimit { per_second: 0.17, burst_count: 3 }, account: LoginAccountRateLimit { per_second: 0.003, burst_count: 5 } } }",
+  "rate_limiting": "RateLimits { login: LoginRateLimits { failed: LoginFailedRateLimit { per_second: 0.17, burst_count: 3 }, account: LoginAccountRateLimit { per_second: 0.003, burst_count: 5 }, address: LoginAddressRateLimit { per_second: 1.0, burst_count: 20 } } }",
   "redaction_retention_seconds": "7",
   "refresh_token_hard_logout": "true",
   "refresh_token_idle_only": "false",

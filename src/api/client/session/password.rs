@@ -1,3 +1,5 @@
+use std::net::IpAddr;
+
 use futures::{FutureExt, TryFutureExt};
 use ruma::{
 	OwnedUserId, UserId,
@@ -16,6 +18,7 @@ pub(super) async fn handle_login(
 	services: &Services,
 	body: &Ruma<Request>,
 	info: &Password,
+	client: IpAddr,
 ) -> Result<OwnedUserId> {
 	#[expect(deprecated)]
 	let Password { identifier, password, user, .. } = info;
@@ -51,11 +54,11 @@ pub(super) async fn handle_login(
 	}
 
 	if cfg!(feature = "ldap") && services.config.ldap.enable {
-		ldap_login(services, &user_id, &lowercased_user_id, password)
+		ldap_login(services, &user_id, &lowercased_user_id, password, client)
 			.boxed()
 			.await
 	} else {
-		password_login(services, &user_id, &lowercased_user_id, password).await
+		password_login(services, &user_id, &lowercased_user_id, password, client).await
 	}
 }
 
@@ -68,11 +71,12 @@ pub(super) async fn password_login(
 	user_id: &UserId,
 	lowercased_user_id: &UserId,
 	password: &str,
+	client: IpAddr,
 ) -> Result<OwnedUserId> {
 	// Before any account lookup, so a refusal reads alike for real and unknown accounts.
 	let reservation = services
 		.login_ratelimit
-		.reserve_login_attempt(user_id)?;
+		.reserve_login_attempt(user_id, client)?;
 
 	let wrong = || err!(Request(Forbidden("Wrong username or password.")));
 

@@ -1,3 +1,5 @@
+use std::net::IpAddr;
+
 use futures::FutureExt;
 use ruma::{OwnedUserId, UserId};
 use tuwunel_core::{Err, Result, debug};
@@ -15,6 +17,7 @@ pub(super) async fn ldap_login(
 	user_id: &UserId,
 	lowercased_user_id: &UserId,
 	password: &str,
+	client: IpAddr,
 ) -> Result<OwnedUserId> {
 	let bind_dn = services
 		.users
@@ -31,7 +34,8 @@ pub(super) async fn ldap_login(
 			}
 
 			let Some((user_dn, is_admin)) = dns.first() else {
-				return password_login(services, user_id, lowercased_user_id, password).await;
+				return password_login(services, user_id, lowercased_user_id, password, client)
+					.await;
 			};
 
 			(user_dn.clone(), *is_admin)

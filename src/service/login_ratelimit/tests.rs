@@ -1,22 +1,28 @@
 use std::{
+	array::from_fn,
 	iter::repeat_with,
+	net::{IpAddr, Ipv4Addr},
 	sync::MutexGuard,
+	thread::scope,
 	time::{Duration, Instant},
 };
 
 use http::StatusCode;
 use ruma::{
+	UserId,
 	api::error::{ErrorKind, RetryAfter},
 	user_id,
 };
 use tuwunel_core::{Error, Result};
 
 use super::{
-	Axis, Hold, Limit, MAX_RETRY_AFTER, PRUNE_SAMPLE, Ratelimiter, Reservation, Table,
-	account_key, debit_at, refund_at, reserve_at, retry_after,
+	Attempts, Axis, Hold, Limit, MAX_RETRY_AFTER, PRUNE_SAMPLE, Ratelimiter, Scope, Table,
+	account_key, address_key, debit_at, refund_at, reserve_at, retry_after,
 };
 
 const CAP: usize = 16;
+
+const GUESS_THREADS: usize = 32;
 
 const KEY: &str = "@a:x";
 
@@ -84,7 +90,7 @@ fn burst_then_refused_then_refilled() {
 		.expect("one token should have refilled after six seconds");
 }
 
-fn drain_failed(table: &Ratelimiter, now: Instant) -> Vec<Reservation> {
+fn drain_failed(table: &Ratelimiter, now: Instant) -> Vec<Hold> {
 	(0..FAILED.burst)
 		.map(|i| {
 			reserve(table, now)
@@ -93,8 +99,8 @@ fn drain_failed(table: &Ratelimiter, now: Instant) -> Vec<Reservation> {
 		.collect()
 }
 
-fn reserve(table: &Ratelimiter, now: Instant) -> Result<Reservation> {
-	reserve_at(table, KEY.to_owned(), FAILED, now, CAP)
+fn reserve(table: &Ratelimiter, now: Instant) -> Result<Hold> {
+	debit_at(table, KEY, FAILED, Axis::Failed, now, CAP)
 }
 
 #[test]
@@ -111,7 +117,7 @@ fn unrefunded_reservations_hold_the_burst_until_one_is_refunded() {
 		.first()
 		.expect("a reservation in flight");
 
-	refund_at(&table, &verified.key, verified.hold, FAILED, now).expect("refund");
+	refund_at(&table, KEY, *verified, FAILED, now).expect("refund");
 
 	let _next = reserve(&table, now).expect("one refund frees one attempt");
 
@@ -125,10 +131,10 @@ fn refund_to_the_burst_removes_the_bucket() {
 	let first = reserve(&table, now).expect("first reservation");
 	let second = reserve(&table, now).expect("second reservation");
 
-	refund_at(&table, &first.key, first.hold, FAILED, now).expect("refund");
+	refund_at(&table, KEY, first, FAILED, now).expect("refund");
 	assert!(holds(&table, 2.0), "a refund returns one token");
 
-	refund_at(&table, &second.key, second.hold, FAILED, now).expect("refund");
+	refund_at(&table, KEY, second, FAILED, now).expect("refund");
 	assert!(!tracked(&table, KEY), "a bucket refunded back to full is removed");
 }
 
@@ -342,7 +348,7 @@ fn attempt(
 		return Outcome::WrongPassword;
 	}
 
-	refund_at(failed, &reservation.key, reservation.hold, FAILED, now).expect("refund");
+	refund_at(failed, KEY, reservation, FAILED, now).expect("refund");
 
 	debit_at(account, KEY, ACCOUNT, Axis::Account, now, CAP)
 		.map_or(Outcome::Limited, |_| Outcome::SignedIn)
@@ -440,4 +446,158 @@ fn retry_after_is_capped_and_never_panics() {
 	assert_eq!(retry_after(f64::MIN_POSITIVE, 0.0), Some(MAX_RETRY_AFTER));
 	assert_eq!(retry_after(1e-12, 0.0), Some(MAX_RETRY_AFTER));
 	assert_eq!(retry_after(0.17, 0.0), Some(Duration::from_secs(6)));
+}
+
+#[test]
+fn failed_passwords_do_not_block_another_address() {
+	let attempts = Attempts::default();
+	let now = Instant::now();
+	let user = user_id!("@victim:example.org");
+	let attacker = IpAddr::from(Ipv4Addr::new(192, 0, 2, 1));
+	let owner = IpAddr::from(Ipv4Addr::new(192, 0, 2, 2));
+	let limits = (FAILED, limit(1.0, 20));
+
+	for _ in 0..FAILED.burst {
+		let _guess = reserve_at(&attempts, (user, attacker), limits, Scope::Login, now)
+			.expect("a guess within the failed burst");
+	}
+
+	reserve_at(&attempts, (user, attacker), limits, Scope::Login, now)
+		.expect_err("the attacker's failed budget is exhausted");
+
+	let reservation = reserve_at(&attempts, (user, owner), limits, Scope::Login, now)
+		.expect("the owner's independent address can verify its password");
+
+	refund_at(&attempts.failed, &reservation.key, reservation.hold, FAILED, now)
+		.expect("a correct password refunds its own reservation");
+
+	reserve_at(&attempts, (user, attacker), limits, Scope::Login, now)
+		.expect_err("the owner's success cannot refund the attacker's budget");
+}
+
+#[test]
+fn address_budget_limits_password_spraying_and_is_not_refunded() {
+	let attempts = Attempts::default();
+	let now = Instant::now();
+	let address = IpAddr::from(Ipv4Addr::new(192, 0, 2, 1));
+	let limits = (FAILED, limit(1.0, 2));
+
+	for user in [user_id!("@one:example.org"), user_id!("@two:example.org")] {
+		let reservation = reserve_at(&attempts, (user, address), limits, Scope::Login, now)
+			.expect("a distinct account within the address budget");
+
+		refund_at(&attempts.failed, &reservation.key, reservation.hold, FAILED, now)
+			.expect("even correct passwords count against the address budget");
+	}
+
+	let user = user_id!("@three:example.org");
+
+	reserve_at(&attempts, (user, address), limits, Scope::Login, now)
+		.expect_err("a fresh account cannot bypass the exhausted address budget");
+
+	let _refilled = reserve_at(&attempts, (user, address), limits, Scope::Login, at(now, 1.0))
+		.expect("the address budget refills at its configured rate");
+}
+
+#[test]
+fn simultaneous_guesses_cannot_share_a_failure_token() {
+	assert_eq!(
+		concurrent_attempts(1, (FAILED, limit(1.0, 100))),
+		3,
+		"only the configured failed burst reaches verification"
+	);
+}
+
+#[test]
+fn simultaneous_accounts_cannot_share_an_address_token() {
+	assert_eq!(
+		concurrent_attempts(GUESS_THREADS, (limit(1.0, 100), limit(1.0, 3))),
+		3,
+		"distinct accounts still share the address burst"
+	);
+}
+
+fn concurrent_attempts(accounts: usize, limits: (Limit, Limit)) -> usize {
+	let attempts = Attempts::default();
+	let now = Instant::now();
+
+	scope(|scope| {
+		let attempts = &attempts;
+		let threads: [_; GUESS_THREADS] = from_fn(|i| {
+			scope.spawn(move || concurrent_attempt(attempts, i, accounts, limits, now))
+		});
+
+		threads
+			.into_iter()
+			.map(|thread| usize::from(thread.join().expect("guess thread")))
+			.sum()
+	})
+}
+
+fn concurrent_attempt(
+	attempts: &Attempts,
+	index: usize,
+	accounts: usize,
+	limits: (Limit, Limit),
+	now: Instant,
+) -> bool {
+	let account = index
+		.checked_rem(accounts)
+		.expect("nonzero account count");
+
+	let user = UserId::parse(format!("@guess{account}:example.org")).expect("test account");
+	let address = IpAddr::from(Ipv4Addr::new(192, 0, 2, 1));
+
+	reserve_at(attempts, (&user, address), limits, Scope::Login, now).is_ok()
+}
+
+#[test]
+fn address_keys_group_ipv6_prefixes_and_mapped_ipv4() {
+	let parse = |value: &str| value.parse().expect("test address");
+
+	assert_eq!(
+		address_key(parse("2001:db8:1:2::1")),
+		address_key(parse("2001:db8:1:2:ffff:ffff:ffff:ffff")),
+		"rotating the host half must not grant another budget"
+	);
+
+	assert_ne!(
+		address_key(parse("2001:db8:1:2::1")),
+		address_key(parse("2001:db8:1:3::1")),
+		"distinct IPv6 prefixes retain independent budgets"
+	);
+
+	assert_eq!(address_key(parse("::ffff:192.0.2.1")), address_key(parse("192.0.2.1")));
+}
+
+#[test]
+fn full_address_table_preserves_tracked_limits_and_admits_untracked_addresses() {
+	let table = Ratelimiter::default();
+	let now = Instant::now();
+	let first = IpAddr::from(Ipv4Addr::new(192, 0, 2, 1));
+	let second = IpAddr::from(Ipv4Addr::new(192, 0, 2, 2));
+	let one = limit(1.0, 1);
+
+	debit_at(&table, &first, one, Axis::Address, now, 1).expect("one tracked source");
+	debit_at(&table, &first, one, Axis::Address, now, 1)
+		.expect_err("tracked source stays limited");
+
+	assert_eq!(
+		debit_at(&table, &second, one, Axis::Address, now, 1).expect("new source"),
+		Hold::Untracked
+	);
+}
+
+#[test]
+fn account_keys_preserve_unicode_lowercase_and_stay_inline_for_common_ids() {
+	let ascii = account_key(user_id!("@Alice:example.org"));
+
+	assert_eq!(ascii.as_str(), "@alice:example.org");
+	assert!(!ascii.spilled(), "ordinary account keys use inline storage");
+
+	for raw in ["@ΟΣ:example.org", "@İ:example.org"] {
+		let user = UserId::parse(raw).expect("historical Unicode user id");
+
+		assert_eq!(account_key(&user).as_str(), raw.to_lowercase());
+	}
 }

@@ -29,6 +29,17 @@ pub struct ClientIp(
 	pub IpAddr,
 );
 
+/// Resolves an address for authentication rate limits.
+///
+/// Uses the configured source without trusted-peer bypasses, or the socket peer
+/// when no source is configured. Header sources require a protected listener and
+/// a proxy that supplies the selected header reliably.
+#[derive(Clone, Copy, Debug)]
+pub struct RateLimitIp(
+	/// Address used to partition authentication attempts.
+	pub IpAddr,
+);
+
 /// Marks the explicitly configured client IP source.
 ///
 /// Request extensions contain this wrapper only when an operator has set
@@ -69,6 +80,28 @@ where
 
 impl fmt::Display for ClientIp {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { fmt::Display::fmt(&self.0, f) }
+}
+
+impl<S> FromRequestParts<S> for RateLimitIp
+where
+	S: Sync,
+{
+	type Rejection = (StatusCode, &'static str);
+
+	async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+		rate_limit_ip(parts).map(Self)
+	}
+}
+
+pub(crate) fn rate_limit_ip(parts: &Parts) -> Result<IpAddr, (StatusCode, &'static str)> {
+	let source = parts
+		.extensions
+		.get()
+		.map(|ConfiguredIpSource(source): &ConfiguredIpSource| *source)
+		.unwrap_or(IpSource::ConnectInfo);
+
+	secure_extract(source, &parts.headers, &parts.extensions)
+		.ok_or((StatusCode::INTERNAL_SERVER_ERROR, "Can't extract authentication rate-limit IP"))
 }
 
 fn peer_is_trusted(extensions: &Extensions) -> bool {
@@ -199,7 +232,11 @@ fn cloudfront_viewer_address(headers: &HeaderMap) -> Option<IpAddr> {
 
 #[cfg(test)]
 mod tests {
-	use std::{iter, net::SocketAddr, sync::Arc};
+	use std::{
+		iter,
+		net::{IpAddr, SocketAddr},
+		sync::Arc,
+	};
 
 	use axum::{
 		extract::{ConnectInfo, FromRequestParts},
@@ -208,7 +245,77 @@ mod tests {
 	use ipnet::IpNet;
 	use tuwunel_core::config::IpSource;
 
-	use super::{ClientIp, ConfiguredIpSource, TrustedPeerSubnets};
+	use super::{ClientIp, ConfiguredIpSource, TrustedPeerSubnets, rate_limit_ip};
+
+	#[test]
+	fn rate_limit_default_ignores_forwarded_headers() {
+		let peer: SocketAddr = "203.0.113.9:443".parse().unwrap();
+		let (parts, ()) = Request::builder()
+			.extension(ConnectInfo(peer))
+			.header("X-Forwarded-For", "192.0.2.1")
+			.header("Forwarded", "for=192.0.2.2")
+			.header("X-Real-IP", "192.0.2.3")
+			.body(())
+			.unwrap()
+			.into_parts();
+
+		assert_eq!(rate_limit_ip(&parts).unwrap(), peer.ip());
+	}
+
+	#[test]
+	fn rate_limit_configured_source_has_no_trusted_peer_bypass() {
+		let expected = IpAddr::from([203, 0, 113, 9]);
+
+		for peer in ["127.0.0.1:443", "172.18.0.5:443"] {
+			let peer: SocketAddr = peer.parse().unwrap();
+			let (parts, ()) = Request::builder()
+				.extension(ConnectInfo(peer))
+				.extension(trusted(&["172.18.0.0/16"]))
+				.extension(ConfiguredIpSource(IpSource::RightmostXForwardedFor))
+				.header("X-Forwarded-For", "192.0.2.1, 203.0.113.9")
+				.body(())
+				.unwrap()
+				.into_parts();
+
+			assert_eq!(rate_limit_ip(&parts).unwrap(), expected);
+		}
+	}
+
+	#[test]
+	fn rate_limit_connect_info_ignores_headers_on_loopback() {
+		let peer: SocketAddr = "127.0.0.1:443".parse().unwrap();
+		let (parts, ()) = Request::builder()
+			.extension(ConnectInfo(peer))
+			.extension(ConfiguredIpSource(IpSource::ConnectInfo))
+			.header("X-Forwarded-For", "192.0.2.1")
+			.body(())
+			.unwrap()
+			.into_parts();
+
+		assert_eq!(rate_limit_ip(&parts).unwrap(), peer.ip());
+	}
+
+	#[test]
+	fn rate_limit_missing_address_refuses_fallback() {
+		let headers_only = parts([("X-Forwarded-For", "192.0.2.1")]);
+		let peer: SocketAddr = "127.0.0.1:443".parse().unwrap();
+		let (missing_header, ()) = Request::builder()
+			.extension(ConnectInfo(peer))
+			.extension(ConfiguredIpSource(IpSource::RightmostXForwardedFor))
+			.body(())
+			.unwrap()
+			.into_parts();
+
+		assert_eq!(
+			rate_limit_ip(&headers_only).unwrap_err().0,
+			StatusCode::INTERNAL_SERVER_ERROR
+		);
+
+		assert_eq!(
+			rate_limit_ip(&missing_header).unwrap_err().0,
+			StatusCode::INTERNAL_SERVER_ERROR
+		);
+	}
 
 	fn trusted(nets: &[&str]) -> TrustedPeerSubnets {
 		let nets: Arc<[IpNet]> = nets

@@ -21,10 +21,13 @@ use ruma::api::client::session::{
 		v3::{DiscoveryInfo, HomeserverInfo, LoginInfo},
 	},
 };
-use tuwunel_core::{Err, Result, info, utils::stream::ReadyExt};
+use tuwunel_core::{Err, Result, err, info, utils::stream::ReadyExt};
 use tuwunel_service::users::device::generate_refresh_token;
 
-use self::{ldap::ldap_login, password::password_login};
+use self::{
+	ldap::ldap_login,
+	password::{handle_login as password_handle_login, password_login},
+};
 pub(crate) use self::{
 	logout::{logout_all_route, logout_route},
 	refresh::refresh_token_route,
@@ -137,9 +140,14 @@ pub(crate) async fn login_route(
 	body: Ruma<login::v3::Request>,
 ) -> Result<login::v3::Response> {
 	let user_id = match &body.login_info {
-		| LoginInfo::Password(info) if services.config.authentication.login.with_password =>
-			password::handle_login(&services, &body, info).await?,
 		| LoginInfo::Token(info) => token::handle_login(&services, &body, info).await?,
+		| LoginInfo::Password(info) if services.config.authentication.login.with_password => {
+			let client = body
+				.rate_limit_ip
+				.map_err(|message| err!("{message}"))?;
+
+			password_handle_login(&services, &body, info, client).await?
+		},
 		| LoginInfo::Jwt(info) if services.config.jwt.enable =>
 			jwt::handle_login(&services, &body, info).await?,
 		| LoginInfo::ApplicationService(info) =>

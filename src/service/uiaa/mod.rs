@@ -1,4 +1,5 @@
 use std::{
+	net::IpAddr,
 	ops::ControlFlow,
 	sync::{Arc, Mutex},
 };
@@ -58,6 +59,15 @@ enum EmailIdentityMode {
 	Claim,
 }
 
+struct Request<'a> {
+	user_id: &'a UserId,
+	device_id: &'a DeviceId,
+	auth: &'a AuthData,
+	uiaainfo: &'a UiaaInfo,
+	email_identity_mode: EmailIdentityMode,
+	client_ip: Option<IpAddr>,
+}
+
 impl crate::Service for Service {
 	fn build(args: &crate::Args<'_>) -> Result<Arc<Self>> {
 		Ok(Arc::new(Self {
@@ -104,9 +114,17 @@ pub async fn try_auth(
 	device_id: &DeviceId,
 	auth: &AuthData,
 	uiaainfo: &UiaaInfo,
+	client_ip: Option<IpAddr>,
 ) -> Result<(bool, UiaaInfo)> {
-	self.try_auth_inner(user_id, device_id, auth, uiaainfo, EmailIdentityMode::Validate)
-		.await
+	self.try_auth_inner(Request {
+		user_id,
+		device_id,
+		auth,
+		uiaainfo,
+		email_identity_mode: EmailIdentityMode::Validate,
+		client_ip,
+	})
+	.await
 }
 
 /// Authenticate one registration stage and claim an email proof when present.
@@ -120,20 +138,30 @@ pub async fn try_auth_registration(
 	device_id: &DeviceId,
 	auth: &AuthData,
 	uiaainfo: &UiaaInfo,
+	client_ip: Option<IpAddr>,
 ) -> Result<(bool, UiaaInfo)> {
-	self.try_auth_inner(user_id, device_id, auth, uiaainfo, EmailIdentityMode::Claim)
-		.await
+	self.try_auth_inner(Request {
+		user_id,
+		device_id,
+		auth,
+		uiaainfo,
+		email_identity_mode: EmailIdentityMode::Claim,
+		client_ip,
+	})
+	.await
 }
 
 #[implement(Service)]
-async fn try_auth_inner(
-	&self,
-	user_id: &UserId,
-	device_id: &DeviceId,
-	auth: &AuthData,
-	uiaainfo: &UiaaInfo,
-	email_identity_mode: EmailIdentityMode,
-) -> Result<(bool, UiaaInfo)> {
+async fn try_auth_inner(&self, request: Request<'_>) -> Result<(bool, UiaaInfo)> {
+	let Request {
+		user_id,
+		device_id,
+		auth,
+		uiaainfo,
+		email_identity_mode,
+		client_ip,
+	} = request;
+
 	let mut uiaainfo = if let Some(session) = auth.session() {
 		self.get_uiaa_session(user_id, device_id, session)
 			.await?
@@ -148,8 +176,11 @@ async fn try_auth_inner(
 	match auth {
 		// Find out what the user completed
 		| AuthData::Password(password) => {
+			let client_ip = client_ip
+				.ok_or_else(|| err!("Missing client address for password authentication."))?;
+
 			if let ControlFlow::Break(authed) = self
-				.verify_password(user_id, &mut uiaainfo, password)
+				.verify_password(user_id, &mut uiaainfo, password, client_ip)
 				.await?
 			{
 				return Ok((authed, uiaainfo));
@@ -335,6 +366,7 @@ async fn verify_password(
 	user_id: &UserId,
 	uiaainfo: &mut UiaaInfo,
 	password: &Password,
+	client_ip: IpAddr,
 ) -> Result<ControlFlow<bool>> {
 	let Password { identifier, password, user, .. } = password;
 
@@ -351,20 +383,18 @@ async fn verify_password(
 		return Err!(Request(Forbidden("User ID and access token mismatch.")));
 	}
 
-	let user_id = user_id_from_username;
-
 	// A stolen access token must not become an unlimited password oracle.
 	let reservation = self
 		.services
 		.login_ratelimit
-		.reserve_login_attempt(&user_id)?;
+		.reserve_uiaa_attempt(user_id, client_ip)?;
 
 	// First try local password hash verification; `None` when the account has
 	// no local password to check.
 	let verified = self
 		.services
 		.users
-		.password_hash(&user_id)
+		.password_hash(user_id)
 		.await
 		.ok()
 		.filter(|hash| is_password_hash(hash))
@@ -378,10 +408,10 @@ async fn verify_password(
 		&& self
 			.services
 			.users
-			.origin(&user_id)
+			.origin(user_id)
 			.await
 			.is_ok_and(|origin| origin == "ldap")
-		&& let Ok(dns) = self.services.users.search_ldap(&user_id).await
+		&& let Ok(dns) = self.services.users.search_ldap(user_id).await
 		&& let Some((user_dn, _is_admin)) = dns.first()
 	{
 		let bound = self

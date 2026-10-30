@@ -1125,18 +1125,18 @@ pub struct RateLimits {
 	pub login: LoginRateLimits,
 }
 
-/// Limits password sign-in per account on two axes.
+/// Limits password sign-in by account and client address.
 ///
-/// Both mirror Synapse's `rc_login` limits of the same purpose and are keyed on
-/// the account rather than the client address.
+/// Public login and authenticated password re-entry use separate attempt
+/// budgets, so public guesses cannot consume the re-entry allowance.
 #[derive(Clone, Copy, Debug, Default, Deserialize)]
 #[config_example_generator(
 	filename = "tuwunel-example.toml",
 	section = "global.rate_limiting.login",
-	ignore = "failed account"
+	ignore = "failed account address"
 )]
 pub struct LoginRateLimits {
-	/// Limits wrong passwords against one account.
+	/// Limits wrong passwords against one account from one client address.
 	// external structure; separate section
 	#[serde(default)]
 	pub failed: LoginFailedRateLimit,
@@ -1145,9 +1145,14 @@ pub struct LoginRateLimits {
 	// external structure; separate section
 	#[serde(default)]
 	pub account: LoginAccountRateLimit,
+
+	/// Limits password attempts across accounts from one client address.
+	// external structure; separate section
+	#[serde(default)]
+	pub address: LoginAddressRateLimit,
 }
 
-/// Limits wrong passwords against one account.
+/// Limits wrong passwords against one account from one client address.
 ///
 /// A name that matches no account counts as a wrong password, so the limit
 /// does not reveal which accounts exist.
@@ -1157,17 +1162,15 @@ pub struct LoginRateLimits {
 	section = "global.rate_limiting.login.failed"
 )]
 pub struct LoginFailedRateLimit {
-	/// Token-bucket refill rate (failures per second) for wrong passwords
-	/// against one account.
+	/// Token-bucket refill rate for wrong passwords per account and client
+	/// address.
 	///
-	/// Every password attempt takes a token before the password is checked,
-	/// and only a wrong password keeps it; once the bucket is empty, even the
-	/// owner's correct password is refused with `M_LIMIT_EXCEEDED`. Applies to
-	/// `/login` (but not to the LDAP binds it makes), the built-in OIDC login
-	/// page and password re-entry for sensitive actions (UIAA), keyed on the
-	/// account. Mirrors Synapse's `rc_login.failed_attempts` and its default:
-	/// `burst_count` failures, then about one attempt every six seconds, or
-	/// some 14,700 a day.
+	/// Every attempt reserves a token before verification; a correct password
+	/// returns it, while a wrong password keeps it.
+	/// An empty bucket refuses even a correct password from that address,
+	/// without blocking the account from other addresses.
+	/// IPv6 addresses share a bucket within each /64, and authenticated
+	/// password re-entry (UIAA) uses separate buckets from public login.
 	///
 	/// `0` disables this limit rather than making a bucket that never refills.
 	///
@@ -1176,16 +1179,50 @@ pub struct LoginFailedRateLimit {
 	#[serde(default = "default_login_failed_per_second")]
 	pub per_second: f64,
 
-	/// Token-bucket depth (burst size) for wrong passwords against one
-	/// account.
+	/// Token-bucket depth for wrong passwords per account and client address.
 	///
-	/// The number of failures allowed before `per_second` governs. `0`
-	/// disables this limit, as does a `0` rate. The default is Synapse's
-	/// `rc_login.failed_attempts.burst_count`.
+	/// The number of failures allowed before `per_second` governs.
+	/// `0` disables this limit, as does a `0` rate.
 	///
 	/// reloadable: yes
 	/// default: 3
 	#[serde(default = "default_login_failed_burst_count")]
+	pub burst_count: u32,
+}
+
+/// Limits password attempts across accounts from one client address.
+///
+/// Both successful and failed attempts consume this budget before password
+/// verification, limiting password spraying and verification work.
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[config_example_generator(
+	filename = "tuwunel-example.toml",
+	section = "global.rate_limiting.login.address"
+)]
+pub struct LoginAddressRateLimit {
+	/// Token-bucket refill rate for password attempts per client address.
+	///
+	/// IPv6 addresses share a bucket within each /64; clients behind a shared
+	/// address share its allowance.
+	/// Public login and authenticated password re-entry use separate buckets.
+	/// Configure trusted client-address forwarding behind a proxy, or its
+	/// users share the proxy's address budget.
+	///
+	/// `0` disables this limit rather than making a bucket that never refills.
+	///
+	/// reloadable: yes
+	/// default: 1.0
+	#[serde(default = "default_login_address_per_second")]
+	pub per_second: f64,
+
+	/// Token-bucket depth for password attempts per client address.
+	///
+	/// The number of attempts allowed before `per_second` governs.
+	/// `0` disables this limit, as does a `0` rate.
+	///
+	/// reloadable: yes
+	/// default: 20
+	#[serde(default = "default_login_address_burst_count")]
 	pub burst_count: u32,
 }
 
@@ -2246,6 +2283,19 @@ impl Default for LoginFailedRateLimit {
 		}
 	}
 }
+
+impl Default for LoginAddressRateLimit {
+	fn default() -> Self {
+		Self {
+			per_second: default_login_address_per_second(),
+			burst_count: default_login_address_burst_count(),
+		}
+	}
+}
+
+fn default_login_address_per_second() -> f64 { 1.0 }
+
+fn default_login_address_burst_count() -> u32 { 20 }
 
 impl Default for LoginAccountRateLimit {
 	fn default() -> Self {

@@ -20,7 +20,7 @@ use axum::{Json, body::Body, response::IntoResponse};
 use http::{Response, StatusCode};
 use ruma::{OwnedUserId, UserId};
 use serde_json::json;
-use tuwunel_api::router::{ClientIp, State};
+use tuwunel_api::router::{ClientIp, RateLimitIp, State};
 pub(crate) use tuwunel_core::utils::url::{redirect_allowlisted, url_encode};
 use tuwunel_core::{Result, err, mod_ctor, mod_dtor};
 use tuwunel_service::{Services, users::LoginToken};

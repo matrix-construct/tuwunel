@@ -12,7 +12,7 @@ pub use client_ip::{ConfiguredIpSource, TrustedPeerSubnets};
 pub use self::{
 	args::{Args as Ruma, ArgsAdmin as RumaAdmin},
 	auth::{admin::require_admin, auth_uiaa, jwt::validate_user},
-	client_ip::ClientIp,
+	client_ip::{ClientIp, RateLimitIp},
 	handler::{RouterExt, RumaHandler},
 	html::ACCOUNT_HEAD,
 	response::RumaResponse,

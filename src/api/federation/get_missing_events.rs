@@ -237,6 +237,7 @@ mod tests {
 			sender_device: None,
 			appservice_info: None,
 			json_body: None,
+			rate_limit_ip: Err("No client address in this fixture."),
 		}
 	}
 

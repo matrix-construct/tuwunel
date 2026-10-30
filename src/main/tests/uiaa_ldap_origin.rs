@@ -111,7 +111,13 @@ async fn reauth(services: &Arc<Services>) -> Result {
 
 	let (worked, _) = services
 		.uiaa
-		.try_auth(&user_id, "ALICEDEVICE".into(), &auth, &UiaaInfo::default())
+		.try_auth(
+			&user_id,
+			"ALICEDEVICE".into(),
+			&auth,
+			&UiaaInfo::default(),
+			Some([192, 0, 2, 1].into()),
+		)
 		.await?;
 
 	if worked {

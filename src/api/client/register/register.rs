@@ -349,12 +349,24 @@ async fn enforce_uiaa(
 				| true =>
 					services
 						.uiaa
-						.try_auth_registration(&server_user, server_device, auth, &uiaainfo)
+						.try_auth_registration(
+							&server_user,
+							server_device,
+							auth,
+							&uiaainfo,
+							body.rate_limit_ip.ok(),
+						)
 						.await?,
 				| false =>
 					services
 						.uiaa
-						.try_auth(&server_user, server_device, auth, &uiaainfo)
+						.try_auth(
+							&server_user,
+							server_device,
+							auth,
+							&uiaainfo,
+							body.rate_limit_ip.ok(),
+						)
 						.await?,
 			};
 

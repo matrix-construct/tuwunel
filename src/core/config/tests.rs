@@ -228,6 +228,9 @@ per_second = 1.5
 
 [global.rate_limiting.login.account]
 per_second = 2.5
+
+[global.rate_limiting.login.address]
+per_second = 3.5
 ";
 
 	let bursts = "[global.rate_limiting.login.failed]
@@ -235,17 +238,25 @@ burst_count = 7
 
 [global.rate_limiting.login.account]
 burst_count = 9
+
+[global.rate_limiting.login.address]
+burst_count = 11
 ";
 
 	let account = "[global.rate_limiting.login.account]
 burst_count = 9
 ";
 
+	let address = "[global.rate_limiting.login.address]
+per_second = 4.5
+";
+
 	for (toml, expected) in [
-		("[global]\n", [(0.17, 3), (0.003, 5)]),
-		(rates, [(1.5, 3), (2.5, 5)]),
-		(bursts, [(0.17, 7), (0.003, 9)]),
-		(account, [(0.17, 3), (0.003, 9)]),
+		("[global]\n", [(0.17, 3), (0.003, 5), (1.0, 20)]),
+		(rates, [(1.5, 3), (2.5, 5), (3.5, 20)]),
+		(bursts, [(0.17, 7), (0.003, 9), (1.0, 11)]),
+		(account, [(0.17, 3), (0.003, 9), (1.0, 20)]),
+		(address, [(0.17, 3), (0.003, 5), (4.5, 20)]),
 	] {
 		let config = config_from_toml(toml).expect("the config should parse");
 
@@ -253,12 +264,13 @@ burst_count = 9
 	}
 }
 
-fn login_limits(config: &Config) -> [(f64, u32); 2] {
-	let LoginRateLimits { failed, account } = &config.rate_limiting.login;
+fn login_limits(config: &Config) -> [(f64, u32); 3] {
+	let LoginRateLimits { failed, account, address } = &config.rate_limiting.login;
 
 	[
 		(failed.per_second, failed.burst_count),
 		(account.per_second, account.burst_count),
+		(address.per_second, address.burst_count),
 	]
 }
 

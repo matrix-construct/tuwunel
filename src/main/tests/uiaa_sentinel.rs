@@ -64,6 +64,8 @@ async fn exercise(services: &Services) -> Result {
 		..Default::default()
 	};
 
+	password_requires_client_address(services, &user_id, &info).await?;
+
 	if try_wrong_password(services, &user_id, &info).await? {
 		return Err!("a password sentinel must not satisfy UIAA without an OAuth session");
 	}
@@ -85,19 +87,48 @@ async fn exercise(services: &Services) -> Result {
 	Ok(())
 }
 
+async fn password_requires_client_address(
+	services: &Services,
+	user_id: &UserId,
+	info: &UiaaInfo,
+) -> Result {
+	let password = Password::new(
+		UserIdentifier::Matrix(MatrixUserIdentifier::new(user_id.localpart().to_owned())),
+		"wrong-password".to_owned(),
+	);
+
+	let auth = AuthData::Password(password);
+
+	let error = services
+		.uiaa
+		.try_auth(user_id, "ALICEDEVICE".into(), &auth, info, None)
+		.await
+		.expect_err("password UIAA must require a client address");
+
+	assert!(
+		error
+			.to_string()
+			.contains("Missing client address")
+	);
+
+	Ok(())
+}
+
 async fn try_wrong_password(
 	services: &Services,
 	user_id: &UserId,
 	info: &UiaaInfo,
 ) -> Result<bool> {
-	let auth = AuthData::Password(Password::new(
+	let password = Password::new(
 		UserIdentifier::Matrix(MatrixUserIdentifier::new(user_id.localpart().to_owned())),
 		"wrong-password".to_owned(),
-	));
+	);
+
+	let auth = AuthData::Password(password);
 
 	services
 		.uiaa
-		.try_auth(user_id, "ALICEDEVICE".into(), &auth, info)
+		.try_auth(user_id, "ALICEDEVICE".into(), &auth, info, Some([192, 0, 2, 1].into()))
 		.await
 		.map(|(worked, _)| worked)
 }

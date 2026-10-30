@@ -30,7 +30,9 @@ use super::{
 	device::device_sso_redirect,
 	require_account_usable, url_encode,
 };
-use crate::ClientIp;
+use crate::{ClientIp, RateLimitIp};
+
+type LoginAddress = Result<RateLimitIp, (StatusCode, &'static str)>;
 
 type AccountAction = SmallString<[u8; 32]>;
 type DeviceId = SmallString<[u8; 24]>;
@@ -191,9 +193,10 @@ async fn provider_redirect(
 pub(crate) async fn native_submit_route(
 	State(services): State<crate::State>,
 	ClientIp(client): ClientIp,
+	address: LoginAddress,
 	Form(body): Form<NativeSubmit>,
 ) -> Response {
-	match native_submit(&services, client, &body).await {
+	match native_submit(&services, client, address, &body).await {
 		| Ok(response) => response,
 		| Err(e) => render_submit_error(&services, &body, &e).await,
 	}
@@ -202,6 +205,7 @@ pub(crate) async fn native_submit_route(
 async fn native_submit(
 	services: &Services,
 	client: IpAddr,
+	address: LoginAddress,
 	body: &NativeSubmit,
 ) -> Result<Response> {
 	require_native(services)?;
@@ -217,8 +221,9 @@ async fn native_submit(
 	)?;
 
 	let user_id = match context {
-		| Flow::Authorization(req_id) => authenticate_local(services, req_id, body).await?,
-		| _ => verify_credentials(services, &body.username, &body.password).await?,
+		| Flow::Authorization(req_id) =>
+			authenticate_local(services, req_id, address, body).await?,
+		| _ => verify_credentials(services, &body.username, &body.password, address).await?,
 	};
 
 	let token = utils::random_string(LOGIN_TOKEN_LENGTH);
@@ -271,6 +276,7 @@ async fn render_submit_error(
 async fn authenticate_local(
 	services: &Services,
 	req_id: &str,
+	address: LoginAddress,
 	body: &NativeSubmit,
 ) -> Result<OwnedUserId> {
 	let oidc = services.oauth.get_server()?;
@@ -281,7 +287,7 @@ async fn authenticate_local(
 		return do_register(services, req_id, body).await;
 	}
 
-	let user_id = verify_credentials(services, &body.username, &body.password).await?;
+	let user_id = verify_credentials(services, &body.username, &body.password, address).await?;
 
 	oidc.bind_auth_request_to_local(req_id).await?;
 
@@ -294,7 +300,9 @@ async fn verify_credentials(
 	services: &Services,
 	username: &str,
 	password: &str,
+	address: LoginAddress,
 ) -> Result<OwnedUserId> {
+	let RateLimitIp(client) = address.map_err(|(_, message)| err!("{message}"))?;
 	let invalid = || err!(Request(Forbidden("Invalid username or password.")));
 	let server_name = &services.config.server_name;
 
@@ -304,11 +312,10 @@ async fn verify_credentials(
 		return Err(invalid());
 	}
 
-	// The same per-account throttle as `/login`, sharing its buckets, so this
-	// page is not a second, unthrottled way to guess the same password.
+	// Share `/login` buckets so switching routes cannot renew the allowance.
 	let reservation = services
 		.login_ratelimit
-		.reserve_login_attempt(&user_id)?;
+		.reserve_login_attempt(&user_id, client)?;
 
 	// Native registration lowercases the localpart, so resolve to whichever case
 	// carries the password, mirroring `/login`. An unknown account keeps the

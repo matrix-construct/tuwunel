@@ -141,7 +141,7 @@ where
 			let sender_device = body.sender_device()?;
 			let (worked, uiaainfo) = services
 				.uiaa
-				.try_auth(sender_user, sender_device, auth, &uiaainfo)
+				.try_auth(sender_user, sender_device, auth, &uiaainfo, body.rate_limit_ip.ok())
 				.await?;
 
 			if !worked {

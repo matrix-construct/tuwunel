@@ -1,4 +1,4 @@
-use std::{any::TypeId, fmt::Debug, ops::Deref};
+use std::{any::TypeId, fmt::Debug, net::IpAddr, ops::Deref};
 
 use axum::{body::Body, extract::FromRequest};
 use axum_extra::extract::cookie::CookieJar;
@@ -21,6 +21,7 @@ use tuwunel_service::{Services, appservice::RegistrationInfo};
 
 use super::{
 	auth::{Auth, AuthDispatch, admin::require_admin, auth},
+	client_ip::rate_limit_ip,
 	request::{Request, from as request_from},
 };
 use crate::State;
@@ -51,6 +52,9 @@ pub struct Args<T, const ADMIN: bool = false> {
 
 	/// Parsed canonical JSON, absent for raw or noncanonical request bodies.
 	pub json_body: Option<CanonicalJsonValue>,
+
+	/// Client address for password throttling, resolved independently of legacy IP hints.
+	pub rate_limit_ip: Result<IpAddr, &'static str>,
 }
 
 /// Requires administrator authorization before returning request body errors.
@@ -257,6 +261,7 @@ where
 		.filter(|json| json.is_object())
 		.map_or(request.body, serialize_body);
 
+	let rate_limit_ip = rate_limit_ip(&request.parts).map_err(|(_, message)| message);
 	let http_request = HttpRequest::from_parts(request.parts, body);
 	let body = T::try_from_http_request(http_request, &request.path)
 		.map_err(|e| err!(Request(BadJson(debug_warn!("{e}")))))?;
@@ -269,6 +274,7 @@ where
 		sender_device: auth.sender_device,
 		appservice_info: auth.appservice_info,
 		json_body,
+		rate_limit_ip,
 	})
 }
 

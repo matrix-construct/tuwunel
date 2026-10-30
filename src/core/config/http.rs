@@ -74,7 +74,12 @@ pub struct Http {
 	/// Selects the client IP source for rate limiting, logging, and security
 	/// tooling.
 	///
-	/// When unset, `ClientIp` scans common proxy headers in leftmost-IP mode
+	/// For password login and password re-entry (UIAA), an unset source uses
+	/// the TCP peer address and ignores forwarding headers; when configured,
+	/// the selected source is required even from loopback or trusted peers, and a
+	/// missing or invalid source refuses authentication.
+	///
+	/// For other uses, an unset source scans common proxy headers in leftmost-IP mode
 	/// (`X-Forwarded-For`, RFC 7239 `Forwarded`, `X-Real-IP`, `Fly-Client-IP`,
 	/// `True-Client-IP`, `CF-Connecting-IP`, `CloudFront-Viewer-Address`)
 	/// before falling back to the TCP peer address, allowing clients to spoof
@@ -89,9 +94,10 @@ pub struct Http {
 	/// for RFC 7239 proxies, "x_real_ip" for nginx `X-Real-IP`,
 	/// "cf_connecting_ip" for Cloudflare or cloudflared, "true_client_ip" for
 	/// Akamai or Cloudflare Enterprise, "fly_client_ip" for Fly.io, and
-	/// "cloudfront_viewer_address" for AWS CloudFront. Unix-socket deployments
-	/// should leave this unset instead of using "connect_info", which requires
-	/// a TCP peer address; changing this setting requires a server restart.
+	/// "cloudfront_viewer_address" for AWS CloudFront. Password authentication
+	/// without a TCP peer address requires a configured header source because
+	/// "connect_info" requires that address; changing this setting requires
+	/// a server restart.
 	///
 	/// default: unset
 	/// config-example: "connect_info"
@@ -104,8 +110,9 @@ pub struct Http {
 	/// Matching peers use the insecure header scan and `ConnectInfo` fallback
 	/// used when `http.ip_source` is unset; entries require CIDR prefixes
 	/// (`/32` or `/128` for a single host), while loopback (`127.0.0.0/8`,
-	/// `::1/128`) always bypasses extraction without being listed. Use this
-	/// for locally attached bridges or server-side clients on private
+	/// `::1/128`) bypasses extraction without being listed, except for password
+	/// login and password re-entry (UIAA), which require the selected source.
+	/// Use this for locally attached bridges or server-side clients on private
 	/// container or VPN subnets that cannot carry the configured proxy header,
 	/// such as a Docker bridge without `network_mode: host`.
 	///

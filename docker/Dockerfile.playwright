@@ -27,6 +27,7 @@ COPY <<EOF /playwright/playwright.toml
     rc_messages_per_second = 10000
     rc_message_burst_count = 10000
     rate_limiting.login.account.burst_count = 1000
+    rate_limiting.login.address.burst_count = 1000
     rate_limiting.login.failed.burst_count = 1000
     log = "warn,tuwunel=info"
     log_colors = false
