@@ -29,7 +29,7 @@ mod unerase;
 
 use std::num::NonZeroUsize;
 
-use clap::{ArgGroup, Subcommand, ValueEnum};
+use clap::{ArgAction, ArgGroup, Subcommand, ValueEnum};
 use futures::FutureExt;
 use ruma::{OwnedDeviceId, OwnedEventId, OwnedRoomId, OwnedRoomOrAliasId, OwnedUserId, UserId};
 use tuwunel_core::Result;
@@ -76,9 +76,16 @@ pub(super) enum UserCommand {
 	},
 
 	/// - Reset user password
+	///
+	/// Logs out every device of the user unless `--no-logout-devices` is given.
 	ResetPassword {
+		/// Keep the user's devices logged in
+		#[arg(long = "no-logout-devices", action = ArgAction::SetFalse)]
+		logout_devices: bool,
+
 		/// Username of the user for whom the password should be reset
 		username: String,
+
 		/// New password for the user, if unspecified one is generated
 		password: Option<String>,
 	},

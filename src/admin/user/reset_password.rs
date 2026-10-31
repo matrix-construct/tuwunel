@@ -1,10 +1,15 @@
-use tuwunel_core::{Err, Result, utils};
+use tuwunel_core::{Err, Result, err, utils::random_string};
 
 use super::AUTO_GEN_PASSWORD_LENGTH;
 use crate::{admin_command, utils::parse_existing_local_user_id};
 
 #[admin_command]
-pub(super) async fn reset_password(&self, username: String, password: Option<String>) -> Result {
+pub(super) async fn reset_password(
+	&self,
+	logout_devices: bool,
+	username: String,
+	password: Option<String>,
+) -> Result {
 	let user_id = parse_existing_local_user_id(self.services, &username).await?;
 
 	if user_id == self.services.globals.server_user {
@@ -14,18 +19,20 @@ pub(super) async fn reset_password(&self, username: String, password: Option<Str
 		);
 	}
 
-	let new_password = password.unwrap_or_else(|| utils::random_string(AUTO_GEN_PASSWORD_LENGTH));
+	let new_password = password.unwrap_or_else(|| random_string(AUTO_GEN_PASSWORD_LENGTH));
 
-	match self
-		.services
+	self.services
 		.users
 		.set_password(&user_id, Some(new_password.as_str()))
 		.await
-	{
-		| Err(e) => return Err!("Couldn't reset the password for user {user_id}: {e}"),
-		| Ok(()) => {
-			write!(self, "Successfully reset the password for user {user_id}: `{new_password}`")
-		},
+		.map_err(|e| err!("Couldn't reset the password for user {user_id}: {e}"))?;
+
+	if logout_devices {
+		self.services
+			.users
+			.remove_devices(&user_id, None)
+			.await;
 	}
-	.await
+
+	write!(self, "Successfully reset the password for user {user_id}: `{new_password}`").await
 }
