@@ -5,7 +5,9 @@ use std::{
 
 use futures::TryStreamExt;
 use ruma::user_id;
+use serde_json::{Value as JsonValue, from_value, json};
 use tuwunel_core::{Result, config::Figment, result::NotFound};
+use tuwunel_database::{Cbor, deserialize_from_slice, serialize_to_vec};
 
 use super::{Deletions, Ratelimiter, Session, UserInfo, check_bucket_at};
 use crate::test_utils::fixture;
@@ -173,4 +175,71 @@ async fn deleting_a_session_keeps_it_while_its_user_index_cannot_be_read() -> Re
 	assert!(kept.is_ok(), "the session is kept");
 
 	Ok(())
+}
+
+#[test]
+fn userinfo_reads_email_verified_leniently() {
+	let read = |claim: JsonValue| {
+		let claims =
+			json!({ "sub": "alice", "email": "alice@example.org", "email_verified": claim });
+
+		let user_info: UserInfo =
+			from_value(claims).expect("any email_verified claim deserializes");
+
+		user_info.email_verified
+	};
+
+	assert_eq!(read(json!(true)), Some(true));
+	assert_eq!(read(json!(false)), Some(false));
+	assert_eq!(read(json!("true")), Some(true));
+	assert_eq!(read(json!("True")), Some(true));
+	assert_eq!(read(json!("false")), Some(false));
+	assert_eq!(read(json!("False")), Some(false));
+	assert_eq!(read(json!("yes")), Some(false));
+	assert_eq!(read(json!(1)), Some(false));
+	assert_eq!(read(json!({ "verified": true })), Some(false));
+	assert_eq!(read(JsonValue::Null), None);
+
+	let absent: UserInfo = from_value(json!({ "sub": "alice" })).expect("claim may be absent");
+
+	assert_eq!(absent.email_verified, None);
+}
+
+#[test]
+fn verified_email_follows_the_claim_then_trust() {
+	let user_info = |email_verified| UserInfo {
+		email: Some("alice@example.org".to_owned()),
+		email_verified,
+		..Default::default()
+	};
+
+	assert_eq!(user_info(Some(true)).verified_email(false), Some("alice@example.org"));
+	assert_eq!(user_info(Some(false)).verified_email(true), None);
+	assert_eq!(user_info(None).verified_email(true), Some("alice@example.org"));
+	assert_eq!(user_info(None).verified_email(false), None);
+	assert_eq!(UserInfo::default().verified_email(true), None);
+}
+
+/// A session stored before `email_verified` existed still decodes.
+///
+/// Sessions keep their userinfo CBOR-encoded, so the field's serde default is
+/// what lets an old blob decode, and every value survives a round trip.
+#[test]
+fn stored_userinfo_decodes_with_or_without_email_verified() {
+	// {"sub": "alice"}, as written before the claim was read.
+	let legacy = [0xA1, 0x63, b's', b'u', b'b', 0x65, b'a', b'l', b'i', b'c', b'e'];
+	let Cbor(decoded): Cbor<UserInfo> =
+		deserialize_from_slice(&legacy).expect("legacy userinfo decodes");
+
+	assert_eq!(decoded.sub, "alice");
+	assert_eq!(decoded.email_verified, None);
+
+	for email_verified in [Some(true), Some(false), None] {
+		let user_info = UserInfo { email_verified, ..Default::default() };
+		let encoded = serialize_to_vec(Cbor(&user_info)).expect("userinfo encodes");
+		let Cbor(decoded): Cbor<UserInfo> =
+			deserialize_from_slice(&encoded).expect("userinfo decodes");
+
+		assert_eq!(decoded.email_verified, email_verified);
+	}
 }

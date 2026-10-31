@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use tuwunel_core::utils::deserialize_lenient_bool;
 
 /// Selection of userinfo response claims.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -34,9 +35,28 @@ pub struct UserInfo {
 	/// Email address (`email` scope).
 	pub email: Option<String>,
 
+	/// Whether the provider verified `email`, false for any claim other than a
+	/// boolean or its string spelling.
+	#[serde(default, deserialize_with = "deserialize_lenient_bool")]
+	pub email_verified: Option<bool>,
+
 	/// URL to pfp (github/gitlab)
 	pub avatar_url: Option<String>,
 
 	/// URL to pfp (google)
 	pub picture: Option<String>,
+}
+
+impl UserInfo {
+	/// The email address the provider vouches for.
+	///
+	/// An `email_verified` claim decides when present. Without one, only a
+	/// trusted provider vouches for the address it reports.
+	#[inline]
+	#[must_use]
+	pub fn verified_email(&self, trusted: bool) -> Option<&str> {
+		self.email
+			.as_deref()
+			.filter(|_| self.email_verified.unwrap_or(trusted))
+	}
 }

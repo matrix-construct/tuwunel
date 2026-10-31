@@ -46,10 +46,12 @@ const CLIENT: &str = "https://client.example/callback";
 /// Alice claims the localpart derived from Bob's subject as her username, so
 /// Bob, whose own claimed username is then taken, falls back to her account.
 /// His callback must answer 400 and leave his identity unlinked, while Carol
-/// still reaches her own fallback account after an admin unlinks her. Before
-/// that, while her identity binding cannot be read, a user-wide delete keeps
-/// her session and a forced association is refused. The unlink also removes
-/// her session on a provider no longer configured.
+/// still reaches her own fallback account after an admin unlinks her, which
+/// also removes her session on a provider no longer configured. Before that,
+/// while her identity binding cannot be read, a user-wide delete keeps her
+/// session and a forced association is refused. Alice's provider-verified
+/// address is bound to her new account, and Carol's registration leaves the
+/// identical address with Alice.
 #[test]
 fn sso_fallback_account() -> Result {
 	let provider = TcpListener::bind(("127.0.0.1", 0))?;
@@ -80,7 +82,9 @@ fn sso_fallback_account() -> Result {
 ///
 /// A callback's code is `sub:username`, which the token endpoint returns as the
 /// access token and userinfo splits into `sub` and `preferred_username`, so each
-/// callback names the identity it signs in as. Serving stops only on failure.
+/// callback names the identity it signs in as. Userinfo also reports the
+/// username at a mixed-case domain as a verified address, the claim spelled as
+/// a string. Serving stops only on failure.
 async fn serve_provider(listener: TcpListener, issuer: String) -> Result {
 	let app = Router::new()
 		.route("/.well-known/openid-configuration", get(discover))
@@ -122,6 +126,8 @@ async fn userinfo(headers: HeaderMap) -> Json<Value> {
 	Json(json!({
 		"sub": sub,
 		"preferred_username": username,
+		"email": format!("{username}@Example.ORG"),
+		"email_verified": "true",
 	}))
 }
 
@@ -136,8 +142,19 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	let fallback = fallback_localpart(&bob);
 
 	let response = sign_in(&client, base, "alice", &fallback).await?;
+	let alice_account = signed_in(services, &response).await?;
+	let email = format!("{fallback}@example.org");
+	let holder = services
+		.threepid
+		.user_id_for_email(&email)
+		.await?;
 
-	assert_eq!(fallback, signed_in(services, &response).await?.localpart());
+	assert_eq!(fallback, alice_account.localpart());
+	assert_eq!(
+		holder.as_ref(),
+		Some(&alice_account),
+		"alice's verified address is bound to her"
+	);
 
 	let response = sign_in(&client, base, "bob", &fallback).await?;
 
@@ -156,8 +173,13 @@ async fn exercise(services: &Services, base: &str) -> Result {
 	let carol = unique_id_sub((&provider, "carol"))?;
 	let response = sign_in(&client, base, "carol", &fallback).await?;
 	let account = signed_in(services, &response).await?;
+	let holder = services
+		.threepid
+		.user_id_for_email(&email)
+		.await?;
 
 	assert_eq!(fallback_localpart(&carol), account.localpart());
+	assert_eq!(holder, Some(alice_account), "carol's identical address stays with alice");
 
 	let bindings = &services.db["oauthuniqid_oauthid"];
 	let sess_id = services

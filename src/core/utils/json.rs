@@ -2,19 +2,30 @@
 //!
 //! The conversion functions bridge Serde values to Ruma's raw and canonical
 //! representations. A generic deserializer adapts string-backed fields to types
-//! implementing `FromStr`.
+//! implementing `FromStr`, and a lenient one reads a boolean that may arrive
+//! spelled as a string.
 
-use std::{fmt, io, marker::PhantomData, str::FromStr};
+use std::{borrow::Cow, fmt, io, marker::PhantomData, str::FromStr};
 
 use ruma::{
 	CanonicalJsonError, CanonicalJsonObject, canonical_json::try_from_json_map, serde::Raw,
 };
+use serde::{Deserialize, Deserializer, de::IgnoredAny};
 
 use crate::Result;
 
 /// An `io::Write` sink that counts bytes without buffering them.
 #[derive(Default)]
 struct Counter(usize);
+
+/// A boolean as a loosely typed source may spell it.
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum LenientBool<'a> {
+	Bool(bool),
+	Str(#[serde(borrow)] Cow<'a, str>),
+	Other(IgnoredAny),
+}
 
 /// Serializes a value into Ruma's raw JSON representation.
 ///
@@ -70,7 +81,7 @@ impl io::Write for Counter {
 /// errors using their `Display` messages.
 pub fn deserialize_from_str<'de, D, T, E>(deserializer: D) -> Result<T, D::Error>
 where
-	D: serde::de::Deserializer<'de>,
+	D: Deserializer<'de>,
 	T: FromStr<Err = E>,
 	E: fmt::Display,
 {
@@ -96,4 +107,27 @@ where
 	}
 
 	deserializer.deserialize_str(Visitor(PhantomData))
+}
+
+/// Deserializes an optional boolean that may arrive spelled as a string.
+///
+/// Null reads as `None`. A boolean reads as itself and a string as `true` only
+/// when it spells true in any letter case; every other value reads as `false`,
+/// so a malformed value neither passes for true nor fails the enclosing value.
+pub fn deserialize_lenient_bool<'de, D>(deserializer: D) -> Result<Option<bool>, D::Error>
+where
+	D: Deserializer<'de>,
+{
+	Deserialize::deserialize(deserializer)
+		.map(|value: Option<LenientBool<'_>>| value.map(bool::from))
+}
+
+impl From<LenientBool<'_>> for bool {
+	fn from(value: LenientBool<'_>) -> Self {
+		match value {
+			| LenientBool::Bool(value) => value,
+			| LenientBool::Str(value) => value.eq_ignore_ascii_case("true"),
+			| LenientBool::Other(_) => false,
+		}
+	}
 }

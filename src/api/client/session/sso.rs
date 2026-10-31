@@ -40,6 +40,7 @@ use tuwunel_core::{
 	utils,
 	utils::{
 		content_disposition::make_content_disposition,
+		deserialize_lenient_bool,
 		hash::sha256,
 		html::escape as html_escape,
 		result::{FlatOk, LogErr},
@@ -58,13 +59,14 @@ use tuwunel_service::{
 		CODE_VERIFIER_LENGTH, Provider, SESSION_ID_LENGTH, Session, TokenResponse, UserInfo,
 		fallback_localpart, unique_id_sub,
 	},
+	threepid::canonicalize_email,
 	users::{PASSWORD_SENTINEL, Register},
 };
 use url::Url;
 
 pub(crate) use self::uiaa::{sso_complete_js_route, sso_css_route, sso_fallback_route};
 use super::TOKEN_LENGTH;
-use crate::{ClientIp, Ruma, RumaResponse, router::ACCOUNT_HEAD};
+use crate::{ClientIp, Ruma, RumaResponse, router::ACCOUNT_HEAD, utils::bind_new_account_email};
 
 /// Grant phase query string.
 #[derive(Debug, Serialize)]
@@ -142,6 +144,12 @@ fn decode_apple_userinfo_from_id_token(session: &Session) -> Result<UserInfo> {
 		.and_then(JsonValue::as_str)
 		.map(ToOwned::to_owned);
 
+	let email_verified = payload
+		.get("email_verified")
+		.map(deserialize_lenient_bool)
+		.flat_ok()
+		.flatten();
+
 	let preferred_username = email
 		.as_deref()
 		.and_then(|value| value.split_once('@'))
@@ -166,6 +174,7 @@ fn decode_apple_userinfo_from_id_token(session: &Session) -> Result<UserInfo> {
 			.and_then(JsonValue::as_str)
 			.map(ToOwned::to_owned),
 		email,
+		email_verified,
 		avatar_url: None,
 		picture: None,
 	})
@@ -846,6 +855,13 @@ async fn register_user(
 			.ok();
 	}
 
+	if let Some(email) = userinfo.verified_email(provider.trusted) {
+		bind_email(services, user_id, email)
+			.await
+			.inspect_err(|error| warn!(%user_id, %error, "Skipping registration email binding"))
+			.ok();
+	}
+
 	let idp_id = provider.id();
 	let idp_name = provider
 		.name
@@ -914,6 +930,12 @@ async fn set_avatar(
 		.await?;
 
 	Ok(())
+}
+
+async fn bind_email(services: &Services, user_id: &UserId, email: &str) -> Result {
+	let email = canonicalize_email(email)?;
+
+	bind_new_account_email(services, user_id, &email).await
 }
 
 #[tracing::instrument(

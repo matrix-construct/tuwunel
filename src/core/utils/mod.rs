@@ -45,7 +45,7 @@ pub use self::{
 	debug::slice_truncated as debug_slice_truncated,
 	future::{BoolExt as FutureBoolExt, OptionStream, TryExtExt as TryFutureExtExt},
 	hash::sha256::delimited as calculate_hash,
-	json::{deserialize_from_str, serialized_len, to_canonical_object},
+	json::{deserialize_from_str, deserialize_lenient_bool, serialized_len, to_canonical_object},
 	mutex::MutexExt,
 	mutex_map::{Guard as MutexMapGuard, MutexMap},
 	option::OptionExt,
