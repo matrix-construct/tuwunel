@@ -574,7 +574,7 @@ ip_source = "{value}"
 		let err = err.to_string();
 		assert!(err.contains("ip_source"), "{err}");
 		assert!(err.contains("global.ip_source"), "{err}");
-		assert!(!err.contains(value), "{err}");
+		assert!(err.contains(value), "{err}");
 	}
 }
 

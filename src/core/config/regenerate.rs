@@ -53,6 +53,7 @@ pub(super) struct FieldSpec {
 	pub(super) aliases: &'static [&'static str],
 	pub(super) example: &'static str,
 	pub(super) class: FieldClass,
+	pub(super) sensitive: bool,
 }
 
 #[derive(Clone, Copy, Debug)]

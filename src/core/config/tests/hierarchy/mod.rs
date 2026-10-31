@@ -22,6 +22,7 @@ use tuwunel_macros::implement;
 
 use super::{baseline::assert_defaults, check_with_captured_logs, config_from_toml};
 use crate::{
+	Result,
 	config::{Config, ENV_PREFIXES, RegenerateOptions, Sources, regenerate_config},
 	utils::sys::command_without_env_prefixes,
 };
@@ -126,30 +127,45 @@ fn conflicting_file_spellings_and_scalar_ancestors_are_rejected() {
 }
 
 #[test]
-fn moved_type_errors_preserve_native_paths_without_values() {
+fn type_errors_preserve_native_paths_and_omit_secret_values() {
 	let files = Files::new();
 	let old =
-		files.write("old.toml", "rocksdb_checksums = 'secret sentinel'\n__aliased = 'spoof'\n");
+		files.write("old.toml", "registration_token = 9876543210123\n__aliased = 'spoof'\n");
 
-	let new = files.write("new.toml", "[global.rocksdb]\nchecksums = 'another sentinel'\n");
-	let scalar = files.write("scalar.toml", "rocksdb = 'group sentinel'\n");
+	let new = files.write("new.toml", "[global.registration]\ntoken = 9876543210456\n");
+	let scalar = files.write("scalar.toml", "registration = 'group sentinel'\n");
+	let jwt = files.write("jwt.toml", "[global.jwt]\nkey = 9876543210789\n");
 
 	for (paths, native, source) in [
-		(vec![&old], "rocksdb_checksums", "old.toml"),
-		(vec![&old, &new], "rocksdb.checksums", "new.toml"),
-		(vec![&scalar], "rocksdb", "scalar.toml"),
+		(vec![&old], "registration_token", "old.toml"),
+		(vec![&old, &new], "registration.token", "new.toml"),
+		(vec![&scalar], "registration", "scalar.toml"),
+		(vec![&jwt], "jwt.key", "jwt.toml"),
 	] {
 		let raw = Config::load_files(paths.into_iter()).expect("raw values accepted");
-		let error = Config::new(&raw)
-			.err()
-			.expect("type rejected")
-			.to_string();
+		let error = rejection(Config::new(&raw));
 
 		assert!(error.contains(native), "{error}");
 		assert!(error.contains(source), "{error}");
+		assert!(!error.contains("9876543210"), "{error}");
 		assert!(!error.contains("sentinel"), "{error}");
 		assert!(!error.contains("spoof"), "{error}");
 	}
+}
+
+#[track_caller]
+fn rejection<T>(result: Result<T>) -> String {
+	result
+		.err()
+		.expect("configuration rejected")
+		.to_string()
+}
+
+#[test]
+fn type_errors_keep_the_detail_of_ordinary_values() {
+	let error = rejection(config_from_toml("[global]\nrocksdb_checksums = 'yes'\n"));
+
+	assert!(error.contains("expected a boolean"), "{error}");
 }
 
 #[test]

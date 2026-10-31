@@ -1,6 +1,6 @@
 use figment::{Figment, providers::Format, value::Dict};
 
-use super::Files;
+use super::{Files, rejection};
 use crate::config::{Config, format::Toml};
 
 #[test]
@@ -24,11 +24,11 @@ fn three_files_preserve_unmodified_siblings_in_both_spelling_orders() {
 #[test]
 fn separate_scalar_and_table_sources_keep_figments_combination_rule() {
 	let files = Files::new();
-	let scalar = files.write("scalar.toml", "rocksdb = 'scalar sentinel'\n");
+	let scalar = files.write("scalar.toml", "rocksdb = 'not a table'\n");
 	let legacy = files.write("legacy.toml", "rocksdb_checksums = false\n");
 	let canonical = files.write("canonical.toml", "[global.rocksdb]\nchecksums = false\n");
 	let reference_scalar =
-		files.write("reference-scalar.toml", "[global]\nrocksdb = 'scalar sentinel'\n");
+		files.write("reference-scalar.toml", "[global]\nrocksdb = 'not a table'\n");
 
 	for (paths, scalar_last) in [
 		([&scalar, &legacy], false),
@@ -53,13 +53,9 @@ fn separate_scalar_and_table_sources_keep_figments_combination_rule() {
 
 		assert_eq!(config.is_err(), scalar_last);
 		if scalar_last {
-			let error = config
-				.err()
-				.expect("scalar cannot populate section")
-				.to_string();
+			let error = rejection(config);
 
 			assert!(error.contains("scalar.toml"), "{error}");
-			assert!(!error.contains("scalar sentinel"), "{error}");
 		} else {
 			assert!(
 				!config

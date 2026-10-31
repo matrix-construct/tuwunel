@@ -15,6 +15,7 @@ static CHECKSUMS: FieldSpec = FieldSpec {
 	aliases: &[],
 	example: "",
 	class: FieldClass::Documented,
+	sensitive: false,
 };
 
 static COLORS: FieldSpec = FieldSpec {
@@ -24,6 +25,7 @@ static COLORS: FieldSpec = FieldSpec {
 	aliases: &["log_colours"],
 	example: "",
 	class: FieldClass::Documented,
+	sensitive: false,
 };
 
 #[test]

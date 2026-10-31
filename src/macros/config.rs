@@ -219,8 +219,7 @@ fn render_field((field, ident): (&Field, &Ident), rendering: &Rendering<'_>) -> 
 
 	let (path, field_spec) = generate_field_spec(field, section, &name, &class, spec_example);
 
-	let nested = get_doc_comment_line(field, "display").as_deref() == Some("section");
-	let nested = nested
+	let nested = has_display_directive(field, "section")
 		.then(|| quote! { self.#ident.fmt_config(out)?; })
 		.unwrap_or_default();
 
@@ -237,19 +236,10 @@ fn render_field((field, ident): (&Field, &Ident), rendering: &Rendering<'_>) -> 
 	let example_separator = if example.is_empty() { "" } else { " " };
 	let example = format!("\n{doc}#{ident} ={example_separator}{example}\n");
 
-	let display = get_doc_comment_line(field, "display");
-	let display_directive = |key: &str| {
-		display
-			.as_ref()
-			.into_iter()
-			.flat_map(|display| display.split(' '))
-			.any(|directive| directive == key)
-	};
-
-	let display = display_directive("hidden")
+	let display = has_display_directive(field, "hidden")
 		.then_some(TokenStream2::new())
 		.unwrap_or_else(|| {
-			let value = display_value(ident, display_directive);
+			let value = display_value(ident, |directive| has_display_directive(field, directive));
 			let name = if *group { &path } else { &name };
 
 			quote! { writeln!(out, "| {} | {} |", #name, #value)?; }
@@ -260,6 +250,13 @@ fn render_field((field, ident): (&Field, &Ident), rendering: &Rendering<'_>) -> 
 		spec: field_spec,
 		example,
 	}
+}
+
+fn has_display_directive(field: &Field, directive: &str) -> bool {
+	get_doc_comment_line(field, "display")
+		.unwrap_or_default()
+		.split(' ')
+		.any(|candidate| candidate == directive)
 }
 
 fn merge_rendered(mut output: Rendered, field: RenderedField) -> Rendered {
@@ -298,6 +295,7 @@ fn generate_field_spec(
 				.map(local_alias),
 		);
 
+	let sensitive = has_display_directive(field, "sensitive");
 	let spec = quote! {
 		crate::config::regenerate::FieldSpec {
 			name: #name,
@@ -306,6 +304,7 @@ fn generate_field_spec(
 			aliases: &[#(#aliases),*],
 			example: #example,
 			class: #class,
+			sensitive: #sensitive,
 		}
 	};
 

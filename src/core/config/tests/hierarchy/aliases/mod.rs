@@ -2,7 +2,7 @@ use std::fs::read_to_string;
 
 use figment::Profile;
 
-use super::{Files, isolated, options};
+use super::{Files, isolated, options, rejection};
 use crate::config::{Config, Sources, regenerate_config};
 
 #[test]
@@ -72,17 +72,13 @@ fn logging_type_errors_report_the_winning_native_key() {
 	let canonical = files.write("canonical.toml", "[global.logging]\ncolors = true\n");
 
 	for native in ["log_colours", "logging.log_colours"] {
-		let document = format!("[global]\n{native} = 'private sentinel'\n");
+		let document = format!("[global]\n{native} = 'yes'\n");
 		let alias = files.write("invalid-alias.toml", &document);
 		let raw = Config::load_files([&canonical, &alias].into_iter()).expect("raw alias loads");
-		let error = Config::new(&raw)
-			.err()
-			.expect("invalid winning alias rejected")
-			.to_string();
+		let error = rejection(Config::new(&raw));
 
 		assert!(error.contains(native), "{error}");
 		assert!(error.contains("invalid-alias.toml"), "{error}");
-		assert!(!error.contains("private sentinel"), "{error}");
 	}
 }
 

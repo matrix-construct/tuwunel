@@ -2,7 +2,7 @@ use std::{fs::read_to_string, iter::empty};
 
 use figment::{Figment, Profile};
 
-use super::{Files, isolated, options};
+use super::{Files, isolated, options, rejection};
 use crate::config::{Config, RegenerateOptions, Sources, regenerate_config};
 
 #[test]
@@ -54,7 +54,7 @@ fn array_environment_keeps_its_assignment_boundary() {
 fn malformed_dictionary_leaf_names_the_supplied_variable() {
 	if !isolated(
 		"config::tests::hierarchy::aggregate::malformed_dictionary_leaf_names_the_supplied_variable",
-		&[("TUWUNEL_ROCKSDB", "{checksums=secret-sentinel}")],
+		&[("TUWUNEL_ROCKSDB", "{checksums=invalid}")],
 	) {
 		return;
 	}
@@ -66,7 +66,7 @@ fn malformed_dictionary_leaf_names_the_supplied_variable() {
 fn malformed_array_leaf_names_the_supplied_variable() {
 	if !isolated(
 		"config::tests::hierarchy::aggregate::malformed_array_leaf_names_the_supplied_variable",
-		&[("TUWUNEL_IDENTITY_PROVIDER", "[{brand=generic,client_id={bad=secret-sentinel}}]")],
+		&[("TUWUNEL_IDENTITY_PROVIDER", "[{brand=generic,client_id={bad=invalid}}]")],
 	) {
 		return;
 	}
@@ -117,12 +117,8 @@ fn assert_error(native: &str, invented: &str) {
 	};
 
 	assert!(structured, "malformed fixture is an aggregate with a bad leaf");
-	let error = Config::new(&raw)
-		.err()
-		.expect("malformed leaf rejected")
-		.to_string();
+	let error = rejection(Config::new(&raw));
 
 	assert!(error.contains(native), "{error}");
 	assert!(!error.contains(invented), "{error}");
-	assert!(!error.contains("secret-sentinel"), "{error}");
 }

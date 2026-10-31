@@ -169,15 +169,16 @@ fn aliases() -> impl Iterator<Item = (&'static str, &'static FieldSpec)> + Clone
 fn aliases_in<'a>(
 	sections: &'a [&SectionSpec],
 ) -> impl Iterator<Item = (&'static str, &'a FieldSpec)> + Clone {
-	sections
-		.iter()
-		.flat_map(|section| section.fields)
-		.flat_map(|field| {
-			field
-				.legacy
-				.iter()
-				.map(move |from| (*from, field))
-		})
+	fields(sections).flat_map(|field| {
+		field
+			.legacy
+			.iter()
+			.map(move |from| (*from, field))
+	})
+}
+
+fn fields<'a>(sections: &'a [&SectionSpec]) -> impl Iterator<Item = &'a FieldSpec> + Clone {
+	sections.iter().flat_map(|section| section.fields)
 }
 
 fn provenance(metadata: Metadata, rewrites: &Rewrites, tag: Tag) -> Metadata {
@@ -299,13 +300,20 @@ fn unknown_in<'a>(
 		})
 }
 
+/// Omits the contents of errors at, above or below a sensitive field.
+///
+/// A value assigned above a sensitive field, such as a scalar given for its
+/// whole section, can carry the secret into the reported value. Every other
+/// error keeps its detail, so the operator still sees the expected type.
 pub(super) fn redact_error(error: Error) -> Error {
 	error
 		.into_iter()
 		.map(|error| {
-			let moved = aliases().any(|(_, field)| path_overlaps(&error.path, field.path));
+			let sensitive = fields(schema())
+				.filter(|field| field.sensitive)
+				.any(|field| path_overlaps(&error.path, field.path));
 
-			if moved { redact_leaf(error) } else { error }
+			if sensitive { redact_leaf(error) } else { error }
 		})
 		.reduce(Error::chain)
 		.expect("a configuration error has at least one cause")
@@ -322,7 +330,7 @@ fn path_overlaps(path: &[String], field: &str) -> bool {
 }
 
 fn redact_leaf(mut error: Error) -> Error {
-	error.kind = Kind::Message("Invalid configuration value (contents omitted).".to_owned());
+	error.kind = Kind::Message("invalid configuration value (contents omitted)".to_owned());
 	error
 }
 
@@ -374,23 +382,21 @@ fn overlapping(left: &str, right: &str) -> bool {
 }
 
 fn valid_source(sections: &[&SectionSpec], from: &str, target: &FieldSpec) -> bool {
-	sections
-		.iter()
-		.flat_map(|section| section.fields)
-		.all(|candidate| {
-			let ancestor = from
-				.strip_prefix(candidate.path)
-				.is_some_and(|tail| tail.starts_with('.'));
+	fields(sections).all(|candidate| {
+		let ancestor = from
+			.strip_prefix(candidate.path)
+			.is_some_and(|tail| tail.starts_with('.'));
 
-			let canonical = !overlapping(candidate.path, from)
-				|| (ancestor && registered_group(sections, candidate));
+		let canonical = !overlapping(candidate.path, from)
+			|| (ancestor && registered_group(sections, candidate));
 
-			let aliases = candidate.aliases.iter().all(|alias| {
-				target.path == candidate.path || distinct_alias(candidate, alias, from)
-			});
+		let aliases = candidate
+			.aliases
+			.iter()
+			.all(|alias| target.path == candidate.path || distinct_alias(candidate, alias, from));
 
-			canonical && aliases
-		})
+		canonical && aliases
+	})
 }
 
 fn registered_group(sections: &[&SectionSpec], field: &FieldSpec) -> bool {
