@@ -13,7 +13,8 @@ use super::{Url, true_fn};
 /// Sentry handles crash reports and performance sampling. Jaeger-compatible
 /// collectors receive selected tracing spans.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
-#[derive(Clone, Debug, Deserialize, Default)]
+// No Debug: secrets are reachable from this section.
+#[derive(Clone, Deserialize, Default)]
 #[config_example_generator(
 	filename = "tuwunel-example.toml",
 	section = "global.telemetry",
@@ -69,7 +70,8 @@ pub struct Jaeger {
 /// Report content, event selection, and trace sampling have separate
 /// controls. Runtime enablement is required before telemetry is sent.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
-#[derive(Clone, Debug, Deserialize)]
+// No Debug: secrets are reachable from this section.
+#[derive(Clone, Deserialize)]
 #[config_example_generator(
 	filename = "tuwunel-example.toml",
 	section = "global.telemetry.sentry",

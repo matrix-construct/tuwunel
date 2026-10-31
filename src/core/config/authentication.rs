@@ -15,7 +15,8 @@ use super::true_fn;
 /// settings. The integration secret authenticates MAS provisioning calls;
 /// the emergency password grants access to the server bot account.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
-#[derive(Clone, Debug, Deserialize)]
+// No Debug: secrets are reachable from this section.
+#[derive(Clone, Deserialize)]
 #[config_example_generator(
 	filename = "tuwunel-example.toml",
 	section = "global.authentication",
@@ -268,7 +269,8 @@ pub struct Login {
 /// have separate controls. Per-IP rate limits bound requests to its
 /// endpoints.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
-#[derive(Clone, Debug, Deserialize)]
+// No Debug: secrets are reachable from this section.
+#[derive(Clone, Deserialize)]
 #[config_example_generator(
 	filename = "tuwunel-example.toml",
 	section = "global.authentication.oidc",

@@ -15,7 +15,8 @@ use super::{OwnedRoomOrAliasId, PathBuf, RegexSet, true_fn};
 /// paths. New-user defaults and guest policy govern initial account
 /// behavior.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
-#[derive(Clone, Debug, Deserialize)]
+// No Debug: secrets are reachable from this section.
+#[derive(Clone, Deserialize)]
 #[config_example_generator(
 	filename = "tuwunel-example.toml",
 	section = "global.registration",
