@@ -294,12 +294,7 @@ fn bind_addrs(
 				error!(%addr, %e, "Not binding: the default address is unavailable.");
 				continue;
 			},
-			| Err(e) => {
-				let key = "http.listen.address";
-				let message = format!("Failed to bind {addr}: {e}").into();
-
-				return Err!(Config(key, message));
-			},
+			| Err(e) => return Err!(Config("http.listen.address", "Failed to bind {addr}: {e}")),
 		};
 
 		listener.set_nonblocking(true)?;
