@@ -2,7 +2,7 @@ use std::{fmt::Write, net::IpAddr};
 
 use axum::extract::State;
 use ruma::{
-	DeviceId, MilliSecondsSinceUnixEpoch, OwnedUserId, UserId,
+	DeviceId, OwnedUserId, UserId,
 	api::client::{
 		account::register::{self, LoginType, RegistrationKind},
 		uiaa::{AuthFlow, AuthType, UiaaInfo},
@@ -17,7 +17,7 @@ use tuwunel_service::{
 };
 
 use super::{SESSION_ID_LENGTH, is_matrix_appservice_irc};
-use crate::{ClientIp, Ruma};
+use crate::{ClientIp, Ruma, utils::bind_new_account_email};
 
 const RANDOM_USER_ID_LENGTH: usize = 10;
 
@@ -469,35 +469,9 @@ async fn bind_registration_email(
 		return;
 	};
 
-	if let Err(e) = try_bind_registration_email(services, user_id, association).await {
-		warn!(%user_id, "Skipping registration email binding: {e}");
+	if let Err(error) = bind_new_account_email(&services, user_id, &association.address).await {
+		warn!(%user_id, %error, "Skipping registration email binding");
 	}
-}
-
-async fn try_bind_registration_email(
-	services: crate::State,
-	user_id: &UserId,
-	association: &Association,
-) -> Result {
-	if services
-		.threepid
-		.user_id_for_email(&association.address)
-		.await?
-		.is_some_and(|bound| bound != user_id)
-	{
-		warn!(%user_id, "Skipping registration email binding: address bound to another user");
-
-		return Ok(());
-	}
-
-	let now = MilliSecondsSinceUnixEpoch::now();
-
-	services
-		.threepid
-		.put_binding(user_id, &association.address, Medium::Email, now, now)
-		.await;
-
-	Ok(())
 }
 
 async fn announce_new_user(

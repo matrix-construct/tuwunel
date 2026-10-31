@@ -45,6 +45,11 @@ pub struct Service {
 	db: Data,
 	pending_mutex: MutexMap<String, ()>,
 	claim_mutex: MutexMap<UiaaKey, ()>,
+
+	/// One entry per address in a `bind_unclaimed` call; MAS provisioning, the
+	/// admin API and `del_binding` write bindings without it.
+	binding_mutex: MutexMap<EmailKey, ()>,
+
 	ip_ratelimiter: Ratelimiter<IpAddr>,
 	address_ratelimiter: Ratelimiter<EmailKey>,
 }
@@ -105,6 +110,7 @@ impl crate::Service for Service {
 			},
 			pending_mutex: MutexMap::new(),
 			claim_mutex: MutexMap::new(),
+			binding_mutex: MutexMap::new(),
 			ip_ratelimiter: Mutex::new(HashMap::new()),
 			address_ratelimiter: Mutex::new(HashMap::new()),
 		}))

@@ -90,20 +90,10 @@ async fn adopt_one(
 		return Ok(false);
 	};
 
-	if services
-		.threepid
-		.bound_elsewhere(&user_id, &email_canon)
-		.await?
-	{
-		return Ok(false);
-	}
-
 	services
 		.threepid
-		.put_binding(&user_id, &email_canon, Medium::Email, bound_at, bound_at)
-		.await;
-
-	Ok(true)
+		.bind_unclaimed(&user_id, &email_canon, Medium::Email, bound_at)
+		.await
 }
 
 fn tally_adoption(

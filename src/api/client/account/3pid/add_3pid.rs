@@ -3,7 +3,7 @@ use ruma::{
 	MilliSecondsSinceUnixEpoch,
 	api::client::account::add_3pid::{self, v3::Response},
 };
-use tuwunel_core::{Err, Result};
+use tuwunel_core::{Err, Result, err, utils::BoolExt};
 
 use crate::{ClientIp, Ruma, router::auth_uiaa};
 
@@ -30,21 +30,14 @@ pub(crate) async fn add_3pid_route(
 		.redeem_validated(body.sid.as_str(), body.client_secret.as_str())
 		.await?;
 
-	if services
-		.threepid
-		.user_id_for_email(&association.address)
-		.await?
-		.is_some_and(|bound| bound != *sender_user)
-	{
-		return Err!(Request(ThreepidInUse("That email address is already in use")));
-	}
-
 	let now = MilliSecondsSinceUnixEpoch::now();
 
 	services
 		.threepid
-		.put_binding(sender_user, &association.address, association.medium, now, now)
-		.await;
+		.bind_unclaimed(sender_user, &association.address, association.medium, now)
+		.await?
+		.into_option()
+		.ok_or_else(|| err!(Request(ThreepidInUse("That email address is already in use"))))?;
 
 	Ok(Response::new())
 }

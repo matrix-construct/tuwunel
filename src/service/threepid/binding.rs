@@ -12,7 +12,44 @@ use ruma::{
 use tuwunel_core::{Result, implement, result::NotFound, utils::stream::TryIgnore};
 use tuwunel_database::{Cbor, Deserialized, Ignore, Interfix};
 
-use super::Binding;
+use super::{Binding, EmailKey};
+
+/// Persists a canonical email binding unless another account holds it.
+///
+/// Returns whether `user_id` now holds the address; an address bound to a
+/// different account is left with it. Calls are serialized per address, so of
+/// two concurrent calls for different accounts only the first binds it; direct
+/// `put_binding` and `del_binding` writers do not take that lock. Storage and
+/// decoding failures from the ownership lookup are propagated.
+#[implement(super::Service)]
+#[tracing::instrument(
+	level = "debug",
+	skip(self),
+	fields(
+		%user_id,
+	),
+)]
+pub async fn bind_unclaimed(
+	&self,
+	user_id: &UserId,
+	email_canon: &str,
+	medium: Medium,
+	bound_at: MilliSecondsSinceUnixEpoch,
+) -> Result<bool> {
+	let _binding = self
+		.binding_mutex
+		.lock(&EmailKey::from(email_canon))
+		.await;
+
+	if self.bound_elsewhere(user_id, email_canon).await? {
+		return Ok(false);
+	}
+
+	self.put_binding(user_id, email_canon, medium, bound_at, bound_at)
+		.await;
+
+	Ok(true)
+}
 
 /// Persists a canonical email binding in both index directions.
 ///

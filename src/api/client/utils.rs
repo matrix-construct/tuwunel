@@ -1,6 +1,9 @@
 use std::time::Duration;
 
-use ruma::{EventId, RoomId, UserId, api::client::filter::FilterDefinition};
+use ruma::{
+	EventId, MilliSecondsSinceUnixEpoch, RoomId, UserId, api::client::filter::FilterDefinition,
+	thirdparty::Medium,
+};
 use tokio::time::Instant;
 use tuwunel_core::{Err, Result, utils::time::millis, warn};
 use tuwunel_matrix::Event;
@@ -93,4 +96,27 @@ pub(crate) fn poll_deadline(timeout: u64) -> Instant {
 	Instant::now()
 		.checked_add(Duration::from_millis(timeout))
 		.expect("configuration must limit maximum timeout")
+}
+
+/// Bind a new account's canonical email address unless another account holds
+/// it.
+///
+/// An address held elsewhere is skipped with a warning rather than failing the
+/// registration that brought it.
+pub(crate) async fn bind_new_account_email(
+	services: &Services,
+	user_id: &UserId,
+	email_canon: &str,
+) -> Result {
+	let now = MilliSecondsSinceUnixEpoch::now();
+	let bound = services
+		.threepid
+		.bind_unclaimed(user_id, email_canon, Medium::Email, now)
+		.await?;
+
+	if !bound {
+		warn!(%user_id, "Skipping registration email binding: address bound to another user");
+	}
+
+	Ok(())
 }

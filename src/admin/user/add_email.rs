@@ -1,5 +1,5 @@
 use ruma::{MilliSecondsSinceUnixEpoch, thirdparty::Medium};
-use tuwunel_core::{Err, Result};
+use tuwunel_core::{Err, Result, err, utils::BoolExt};
 use tuwunel_service::threepid::canonicalize_email;
 
 use crate::{admin_command, utils::parse_active_local_user_id};
@@ -14,21 +14,14 @@ pub(super) async fn add_email(&self, username: String, address: String) -> Resul
 
 	let email_canon = canonicalize_email(&address)?;
 
-	if self
-		.services
-		.threepid
-		.bound_elsewhere(&user_id, &email_canon)
-		.await?
-	{
-		return Err!("Email {email_canon} is already bound to another user.");
-	}
-
 	let now = MilliSecondsSinceUnixEpoch::now();
 
 	self.services
 		.threepid
-		.put_binding(&user_id, &email_canon, Medium::Email, now, now)
-		.await;
+		.bind_unclaimed(&user_id, &email_canon, Medium::Email, now)
+		.await?
+		.into_option()
+		.ok_or_else(|| err!("Email {email_canon} is already bound to another user."))?;
 
 	write!(self, "Bound email {email_canon} to user {user_id}.").await
 }
