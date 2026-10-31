@@ -29,15 +29,15 @@
 
 | ✅ `yes` | 🟨 `part` | ❌ `no` | ⬛ `n/a` | total |
 |---:|---:|---:|---:|---:|
-| 256 | 54 | 435 | 330 | 1075 |
+| 281 | 57 | 439 | 298 | 1075 |
 
 ### Status by inventory bucket
 
 | Inv | yes | part | no | n/a | total |
 |---|---|---|---|---|---|
-| merged | 182 | 15 | 12 | 60 | 269 |
-| open | 43 | 27 | 336 | 198 | 604 |
-| closed | 31 | 12 | 87 | 72 | 202 |
+| merged | 185 | 16 | 13 | 55 | 269 |
+| open | 63 | 28 | 339 | 174 | 604 |
+| closed | 33 | 13 | 87 | 69 | 202 |
 
 ## Merged
 
@@ -51,6 +51,7 @@ in the [Out of scope](#out-of-scope) section.
 | MSC4402 | ✅ ◐ | 100/100 | Consistent redirects for .well-known-files | [→ MSC2499?] Global CORS layer covers any 30x; well-known client returns 200 ... |
 | MSC4380 | ✅ ● | 100/100 | Invite blocking | src/api/client/sync/{v3.rs,v5/selector.rs} suppress stored invites; createRoo... |
 | MSC4376 | ✅ ● | 100/100 | Remove /v1/send_join and /v1/send_leave | v1 send_join and v1 send_leave routes are not registered |
+| MSC4356 | ✅ ● | 100/100 | Recently used emoji | global account-data passthrough (2026-06-22 ruling); m.recent_emoji round-trips |
 | MSC4341 | ✅ ● | 95/100 | Support for RFC 8628 Device Authorization Grant | src/api/oidc/device.rs:62; RFC 8628 device grant advertised, minted, polled |
 | MSC4335 | ❌ ● | 0/0 | M_USER_LIMIT_EXCEEDED error code | M_USER_LIMIT_EXCEEDED error code not used |
 | MSC4326 | ✅ ● | 100/100 | Device masquerading for appservices | appservice query device_id asserted; M_UNKNOWN_DEVICE-equivalent on missing |
@@ -63,7 +64,9 @@ in the [Out of scope](#out-of-scope) section.
 | MSC4297 | ✅ ● | 100/100 | State Resolution v2.1 | src/service/rooms/state_res/resolve.rs:257 conflicted state subgraph; tests pass |
 | MSC4291 | ✅ ● | 100/100 | Room IDs as hashes of the create event | v12 upgrade create event omits deprecated predecessor.event_id |
 | MSC4289 | ✅ ● | 100/100 | Explicitly privilege room creators | Room v12 creator privilege; complement 22 pass, 0 fail across six named tests |
+| MSC4287 | ✅ ● | 100/100 | Sharing key backup preference between clients | global account-data passthrough (2026-06-22 ruling); m.key_backup round-trips |
 | MSC4284 | 🟨 ● | 70/90 | Policy Servers | outbound /sign, inbound verify, fetch-on-missing, reversible soft-fail |
+| MSC4278 | ✅ ● | 100/100 | Media preview controls | global+room passthrough ok; seeded-value mutability met; no content validation |
 | MSC4277 | ✅ ● | 100/100 | Harmonizing the reporting endpoints | all 3 wired; score removed; user report 200 regardless to deter enumeration |
 | MSC4267 | ✅ ● | 90/100 | Automatically forgetting rooms on leave | auto-forget on Leave/Ban; stable + unstable capability advertised |
 | MSC4260 | ✅ ● | 85/90 | Reporting users (Client-Server API) | src/api/client/report.rs:63; admin notification, 404 M_NOT_FOUND on unknown u... |
@@ -88,14 +91,13 @@ in the [Out of scope](#out-of-scope) section.
 | MSC4151 | ✅ ● | 100/100 | Reporting rooms (Client-Server API) | POST /rooms/{roomId}/report implemented and routed |
 | MSC4140 | ❌ ● | 0/0 | Cancellable delayed events | No delayed_event routes, no m.delayed_events capability, no delay_id anywhere |
 | MSC4138 | ✅ ● | 100/100 | Update allowed HTTP methods in CORS responses | CORS METHODS list includes HEAD and PATCH; excludes CONNECT/TRACE |
-| MSC4133 | ✅ ● | 90/100 | Extending User Profile API with Custom Key:Value Pairs | endpoints + caps/errcodes; unset legacy 200 omit by choice, 404 key-scoped |
+| MSC4133 | ✅ ● | 85/95 | Extending User Profile API with Custom Key:Value Pairs | endpoints + caps/errcodes; unset legacy 200 omit by choice, 404 key-scoped |
 | MSC4127 | ❌ ● | 0/0 | Removal of query string auth | src/api/router/auth.rs:78 still falls back to request.query.access_token |
-| MSC4126 | ✅ ● | 100/100 | Deprecation of query string auth | deprecation of query string auth; server still accepts both |
-| MSC4115 | ✅ ● | 100/100 | membership metadata on events | src/core/matrix/pdu/unsigned.rs add_membership; src/service/rooms/state_acces... |
+| MSC4115 | ✅ ● | 85/85 | membership metadata on events | src/core/matrix/pdu/unsigned.rs add_membership; src/service/rooms/state_acces... |
 | MSC4041 | ✅ ◐ | 90/90 | Use http header Retry-After to enable library-assisted retry handling | Ruma error type emits Retry-After header for LimitExceeded responses. |
 | MSC4040 | ✅ ● | 100/100 | Update SRV service name to IANA registration | Tuwunel queries _matrix-fed first then falls back to _matrix. |
 | MSC4026 | ✅ ◐ | 80/90 | Allow /versions to optionally accept authentication | versions endpoint accepts optional auth via Ruma |
-| MSC4025 | ✅ ● | 95/100 | Local user erasure requests | phase B landed: erased senders serve pruned to clients and federation |
+| MSC4025 | ✅ ● | 85/85 | Local user erasure requests | phase B landed: erased senders serve pruned to clients and federation |
 | MSC4010 | ✅ ● | 100/100 | Push rules and account data | m.push_rules and m.fully_read rejected on /account_data |
 | MSC4009 | ✅ ● | 100/100 | Expanding the Matrix ID grammar to enable E.164 IDs | E.164 + character allowed via Ruma localpart validation |
 | MSC3989 | ✅ ● | 100/100 | Redact `origin` property on events | V11 redaction drops origin via Ruma RedactionRules |
@@ -120,7 +122,6 @@ in the [Out of scope](#out-of-scope) section.
 | MSC3861 | ✅ ● | 90/95 | Next-generation auth for Matrix, based on OAuth 2.0/OIDC | Advertised as org.matrix.msc3861; cores 2964-2967 + merged periphery all yes |
 | MSC3860 | ✅ ◐ | 95/100 | Media Download Redirects | Emits 307 to presigned object-store URL on allow_redirect; default-off gate |
 | MSC3856 | ✅ ● | 90/100 | Threads List API | src/api/client/threads.rs:81 roots retained; full API, residual fallbacks |
-| MSC3844 | ✅ ● | 100/100 | Remove "Mjolnir" (policy room) sharing mechanism | removal of unused Mjolnir share endpoint; Tuwunel never implemented it |
 | MSC3828 | ✅ ● | 100/100 | Content Repository Cross Origin Resource Policy (CORP) Headers | media endpoints return Cross-Origin-Resource-Policy: cross-origin |
 | MSC3827 | ✅ ● | 100/100 | Filtering of `/publicRooms` by room type | /publicRooms supports room_types filter and returns room_type |
 | MSC3824 | ✅ ◐ | 90/100 | OAuth 2.0 API aware clients | oauth_aware_preferred set; SSO redirect action forwards as OIDC prompt (opt-in) |
@@ -142,7 +143,6 @@ in the [Out of scope](#out-of-scope) section.
 | MSC3666 | ✅ ● | 90/100 | Bundled aggregations for server side search | result + context events bundled; thread always, edit/ref gated default-off |
 | MSC3604 | ✅ ● | 100/100 | Room Version 10 | V10 supported; integer_power_levels and knock_restricted enforced |
 | MSC3589 | ✅ ● | 100/100 | Room version 9 as a default | default_room_version defaults to V12 (exceeds V9) |
-| MSC3582 | ✅ ● | 100/100 | Remove m.room.message.feedback | feedback removal; tuwunel never produces or dispatches on m.room.message.feed... |
 | MSC3567 | ✅ ● | 100/100 | Allow requesting events from the start/end of the room history | from is optional; defaults to start/end based on dir |
 | MSC3550 | ❌ ◐ | 0/0 | Add HTTP 403 to possible profile lookup responses | CS /profile returns 403 M_FORBIDDEN when outbound profile lookup disabled |
 | MSC3442 | ✅ ● | 100/100 | move the `prev_content` key to `unsigned` | prev_content placed under unsigned in created/appended PDUs |
@@ -157,6 +157,7 @@ in the [Out of scope](#out-of-scope) section.
 | MSC3267 | 🟨 ◐ | 60/80 | reference relationships | m.reference bundle added; gated default-off; no ignore/visibility filter |
 | MSC3266 | ✅ ● | 100/100 | Room Summary API | summary endpoint routed at unstable and (via Ruma) stable paths |
 | MSC3231 | ✅ ● | 100/100 | Token Authenticated Registration | registration token UIA + validity endpoint implemented |
+| MSC3226 | ✅ ● | 100/100 | Per-room spell check | room account data passthrough (m.input_language, fractal type); UI excluded |
 | MSC3173 | ✅ ● | 100/100 | Expose stripped state events to any potential joiner | summary_stripped includes recommended events incl create |
 | MSC3083 | ✅ ● | 100/100 | Restricting room membership based on membership in other rooms | restricted_join_rule auth via RoomVersionRules; v8/v9 |
 | MSC3069 | ✅ ◐ | 80/100 | Allow guests to use /account/whoami | whoami returns is_guest; uses is_deactivated heuristic |
@@ -168,6 +169,7 @@ in the [Out of scope](#out-of-scope) section.
 | MSC2964 | ✅ ● | 88/100 | Usage of OAuth 2.0 authorization code grant and refresh token grant | src/api/oidc/authorize.rs:57; S256 PKCE now required on the auth-code grant |
 | MSC2946 | ✅ ● | 90/100 | Spaces Summary | client and federation hierarchy endpoints implemented |
 | MSC2918 | ✅ ● | 90/100 | Refresh tokens | /refresh, expires_in_ms, refresh_token in /login and /register |
+| MSC2874 | ✅ ● | 100/100 | Single SSSS | SSSS key and default_key account data passthrough; client key choice excluded |
 | MSC2870 | ✅ ◐ | 100/100 | Protect server ACLs from redaction | redaction dispatches on RoomVersionRules.redaction; ruma MSC2870 enabled |
 | MSC2867 | ✅ ◐ | 100/100 | Marking rooms as unread | client convention; account data type stored generically |
 | MSC2858 | ✅ ● | 100/100 | Multiple SSO Identity Providers | identity_providers in /login flows; /login/sso/redirect/{idpId} routed |
@@ -175,6 +177,7 @@ in the [Out of scope](#out-of-scope) section.
 | MSC2832 | ✅ ● | 100/100 | Homeserver -&gt; Application Service authorization header | src/service/appservice/request.rs sends Bearer header and query |
 | MSC2788 | ✅ ● | 100/100 | Room version 6 as a default | default_default_room_version is V12 in src/core/config/mod.rs:5752 |
 | MSC2778 | ✅ ● | 100/100 | Providing authentication method for appservice users | src/api/client/session/appservice.rs implements m.login.application_service |
+| MSC2765 | ✅ ● | 100/100 | Widget avatars | avatar_url in m.widgets kept verbatim; rendering and room widget state excluded |
 | MSC2732 | ✅ ● | 100/100 | Olm fallback keys | src/api/client/keys/claim_keys.rs:86; upload, claim-fallback, sync-unused-lis... |
 | MSC2705 | ✅ ● | 90/90 | Animated thumbnails | animated honored and animated GIF generated; webp output preference unmet |
 | MSC2702 | ✅ ● | 100/100 | `Content-Disposition` usage in the media repo | Content-Disposition and inline allowlist enforced for media downloads, thumbn... |
@@ -187,11 +190,11 @@ in the [Out of scope](#out-of-scope) section.
 | MSC2666 | ✅ ● | 92/100 | Get rooms in common with another user | v1 stable path + count + cursor pagination; self-query/non-compliant 400 |
 | MSC2663 | ✅ ● | 100/100 | Errors for dealing with non-existent push rules | src/api/client/push.rs all 7 endpoints return NotFound |
 | MSC2659 | ✅ ● | 95/100 | Application service ping endpoint | ping surfaces M_CONNECTION_TIMEOUT/FAILED and M_BAD_STATUS per spec |
-| MSC2611 | ✅ ● | 100/100 | Remove `m.login.token` User-Interactive Authentication type from the specific... | AuthType::Token UIAA not advertised; m.login.token login is unrelated |
-| MSC2610 | ✅ ● | 100/100 | Remove `m.login.oauth2` User-Interactive Authentication type from the specifi... | AuthType::OAuth2 not advertised; only Password/Sso/Jwt flows |
 | MSC2604 | ❌ ● | 0/0 | Parameters for Login Fallback | login fallback page is homeserver served, so not n/a; Tuwunel ships no page |
+| MSC2545 | ✅ ◐ | 100/100 | Image Packs (Emoticons &amp; Stickers) | image_pack.rooms passthrough; federated packs never grammar-checked; UX excluded |
 | MSC2540 | ✅ ◐ | 80/80 | Stricter event validation: JSON compliance | canonical JSON enforced at the parse boundary, not keyed off room version |
 | MSC2526 | ✅ ● | 100/100 | Add ability to delete key backups | src/api/client/backup.rs:134 delete_backup_version_route |
+| MSC2472 | ✅ ● | 100/100 | Symmetric SSSS | SSSS key metadata and secrets kept verbatim; client crypto and trust excluded |
 | MSC2457 | ✅ ● | 100/100 | Invalidating devices during password modification | src/api/client/account.rs:41 honors body.logout_devices |
 | MSC2454 | ✅ ● | 90/90 | User-Interactive Authentication for SSO-backed homeserver | src/api/router/auth/uiaa.rs:53 sso_flow; sso/uiaa.rs serves fallback |
 | MSC2451 | ✅ ● | 100/100 | Remove the `query_auth` federation endpoint | No /query_auth route registered in src/api/router.rs |
@@ -201,6 +204,8 @@ in the [Out of scope](#out-of-scope) section.
 | MSC2403 | ✅ ● | 90/90 | Add "knock" feature | Knock CS+SS endpoints, sync key, public-rooms join_rule all wired |
 | MSC2367 | ✅ ● | 100/100 | Allowing Reasons in all Membership Events | reason field handled in invite/leave/kick/ban/unban/join membership routes |
 | MSC2334 | ✅ ● | 100/100 | [MSC2334](https://github.com/matrix-org/matrix-doc/pull/2334) - Change defaul... | Default room version is V12, well past V5 |
+| MSC2324 | 🟨 ◐ | 60/100 | Facilitating early releases of software dependent on spec | two MUST misses: unprefixed unstable SSO callback; stable v1/auth_issuer |
+| MSC2313 | ❌ ● | 0/0 | Moderation policies as rooms (ban lists) | no server-side policy-list consumption; bot/client subscribers excluded |
 | MSC2290 | 🟨 ● | 65/55 | Separate Endpoints for Binding Threepids | add endpoint (UIA+dupe) + HS email validation; IS-bind half out of scope |
 | MSC2285 | ✅ ● | 90/100 | Private read receipts | src/api/client/read_marker.rs handles ReadPrivate via private_read_set |
 | MSC2265 | 🟨 ● | 75/100 | Proposal for mandating case folding when processing e-mail addresses | HS case-folds whole email (ss-fold) before storage; IS migration out of scope |
@@ -210,6 +215,7 @@ in the [Out of scope](#out-of-scope) section.
 | MSC2246 | ✅ ● | 100/100 | Asynchronous media uploads | async media routes wired; create_pending, upload_pending, error codes present |
 | MSC2244 | ❌ ● | 0/0 | Mass redactions | Single-target redactions only; no array redacts handling |
 | MSC2240 | ✅ ● | 100/100 | Room Version 6 | V6 in STABLE_ROOM_VERSIONS; v6 auth rules and rules engine implemented |
+| MSC2230 | ✅ ● | 100/100 | Store Identity Server in Account Data | m.identity_server kept verbatim, base_url null too; client IS choice excluded |
 | MSC2229 | 🟨 ● | 0/20 | Allowing 3PID Owners to Rebind | [→ MSC2290] owner exemption at 3pid/add only; requestToken still rejects the ... |
 | MSC2209 | ✅ ● | 100/100 | Update auth rules to check notifications key in m.room.power_levels | limit_notifications_power_levels enforced for v6+ |
 | MSC2197 | ✅ ● | 100/100 | Search Filtering in Public Room Directory over Federation | POST /_matrix/federation/v1/publicRooms with filter implemented |
@@ -224,7 +230,6 @@ in the [Out of scope](#out-of-scope) section.
 | MSC2076 | ❌ ◐ | 0/10 | Enforce key-validity periods when validating event signatures | minimum_valid_until_ts passed for fetches; per-event ts check absent |
 | MSC2033 | ✅ ● | 100/100 | Proposal to include device IDs in `/account/whoami` | src/api/client/account.rs:74 returns device_id in whoami response |
 | MSC2002 | ✅ ● | 100/100 | MSC 2002 - Rooms V4 | v4 in supported_room_versions; ruma rules implement v4 |
-| MSC1983 | ✅ ● | 100/100 | Proposal to add reasons for leaving a room | src/api/client/membership/leave.rs:21 passes body.reason to leave |
 | MSC1957 | 🟨 ● | 50/50 | Integration manager discovery | account-data passthrough only; no m.integrations key in well-known client |
 | MSC1954 | ✅ ● | 100/100 | Remove prev_content from the essential keys list | merged; identical to MSC1953; ruma redact omits prev_content |
 | MSC1946 | ✅ ◐ | 80/90 | Secure Secret Storage and Sharing | generic account_data + to-device pipe carry secret storage/sharing |
@@ -272,6 +277,7 @@ for spec compliance.
 | MSC4284 | 🟨 ● | 70/90 | 1.18 | Policy Servers | outbound /sign, inbound verify, fetch-on-missing, reversible soft-fail |
 | MSC2290 | 🟨 ● | 65/55 |  | Separate Endpoints for Binding Threepids | add endpoint (UIA+dupe) + HS email validation; IS-bind half out of scope |
 | MSC1915 | 🟨 ● | 60/55 |  | MSC 1915 - Add unbind 3PID APIs | delete + deactivate return id_server_unbind_result; IS unbind out of HS scope |
+| MSC2324 | 🟨 ◐ | 60/100 |  | Facilitating early releases of software dependent on spec | two MUST misses: unprefixed unstable SSO callback; stable v1/auth_issuer |
 | MSC2675 | 🟨 ◐ | 60/75 | 1.3 | Serverside aggregations of message relationships | thread+edit+reference bundled (edit/ref gated); reactions unbundled |
 | MSC3267 | 🟨 ◐ | 60/80 | 1.5 | reference relationships | m.reference bundle added; gated default-off; no ignore/visibility filter |
 | MSC1957 | 🟨 ● | 50/50 |  | Integration manager discovery | account-data passthrough only; no m.integrations key in well-known client |
@@ -284,6 +290,7 @@ for spec compliance.
 | MSC2076 | ❌ ◐ | 0/10 |  | Enforce key-validity periods when validating event signatures | minimum_valid_until_ts passed for fetches; per-event ts check absent |
 | MSC2134 | ❌ ● | 0/0 |  | Identity Hash Lookups | no IS lookup client; no hash_details, pepper or v1 fallback code |
 | MSC2244 | ❌ ● | 0/0 |  | Mass redactions | Single-target redactions only; no array redacts handling |
+| MSC2313 | ❌ ● | 0/0 |  | Moderation policies as rooms (ban lists) | no server-side policy-list consumption; bot/client subscribers excluded |
 | MSC2604 | ❌ ● | 0/0 | 1.1 | Parameters for Login Fallback | login fallback page is homeserver served, so not n/a; Tuwunel ships no page |
 | MSC3288 | ❌ ● | 0/0 | 1.2 | Add room type to `/_matrix/identity/v2/store-invite` API | sole clause is addressed to homeservers, so not n/a; no 3PID invite at all |
 | MSC3550 | ❌ ◐ | 0/0 | 1.2 | Add HTTP 403 to possible profile lookup responses | CS /profile returns 403 M_FORBIDDEN when outbound profile lookup disabled |
@@ -299,12 +306,15 @@ in the [Out of scope](#out-of-scope) section.
 
 | MSC | Status | Impl | Title | Note |
 |---|---|---:|---|---|
+| MSC4534 | ✅ ● | 100/100 | Simple room rules | Account-data passthrough; m.room.rules.accepted room data stored and synced |
 | MSC4532 | ❌ ● | 0/0 | Revised Social Presence | no m.presence.persistent or active/idle states; tuwunel still auto-idles |
+| MSC4529 | ✅ ● | 100/100 | Client-side profile overrides | Account-data passthrough; m.profile_overrides map stored, served, synced |
 | MSC4528 | ❌ ● | 0/0 | `M_INCOMPATIBLE_SERVER` error code | M_INCOMPATIBLE_SERVER absent from Tuwunel and from the ruma fork |
 | MSC4527 | ❌ ● | 0/0 | State event power levels | no state map in power levels and no MSC4527 room version |
 | MSC4526 | ✅ ◐ | 80/100 | Improve OAuth 2.0 refresh token grant error handling | invalid_grant on refresh failures, but every 4xx maps to it, bad params too |
 | MSC4525 | ❌ ● | 0/0 | Paginated Sync | no paginated sync endpoint; only MSC4186 simplified sliding sync exists |
 | MSC4524 | ❌ ● | 0/0 | Federation Bi-directional Ping | no federation ping or pong route; the cited commit is a Continuwuity branch |
+| MSC4522 | ✅ ● | 100/100 | Username colors | Custom profile field passthrough; object value stored and served via MSC4133 |
 | MSC4521 | ❌ ● | 0/0 | Adaptive set reconciliation | no PinSketch, minisketch or algebraic_v1 digest anywhere in the tree |
 | MSC4519 | 🟨 ● | 60/80 | MatrixRTC Transports Registry | src/api/client/rtc.rs:7 serves the MSC4143-prefixed unstable transports route |
 | MSC4517 | ❌ ● | 0/0 | Federated thirdparty lookups | no server= parameter and no federation thirdparty routes; local lookups only |
@@ -317,6 +327,7 @@ in the [Out of scope](#out-of-scope) section.
 | MSC4507 | ❌ ● | 0/0 | Return additional room state from `/_matrix/federation/v1/hierarchy/{roomId}` | federation /hierarchy has no additional_state param or m.public_state |
 | MSC4506 | ❌ ● | 0/0 | Push Rules for Knocking | no recipient_permission condition and no .m.rule.knock default rule |
 | MSC4505 | ❌ ● | 0/0 | Push Rules for Live Location Sharing | no beacon push rules; ruma's default ruleset defines none |
+| MSC4504 | 🟨 ◐ | 50/100 | Using a global version number for the entire specification (v2) | Drops spec removals in Y%6 releases it advertises (v1.6, v1.18); not yet live |
 | MSC4503 | ❌ ● | 0/0 | External Protocol Handles | m.external_handle unrecognized; generic MSC4133 passthrough only |
 | MSC4502 | ❌ ● | 0/0 | Targeted and unrestricted room member queries | no is_joined route, no scope token, no AS registration scopes |
 | MSC4501 | ❌ ◐ | 0/0 | Social Media on Matrix | no m.social.* handling; the plumbing it rides on is generic and pre-existing |
@@ -333,7 +344,10 @@ in the [Out of scope](#out-of-scope) section.
 | MSC4486 | ❌ ● | 0/0 | Listing delayed events with filtering &amp; pagination | MSC4140 delayed events absent entirely, so the list endpoint has no base |
 | MSC4485 | ❌ ● | 0/0 | Homeserver feature controls | no .well-known/matrix/featured route |
 | MSC4484 | ❌ ● | 0/0 | Server Administration OAuth Scope | no OAuth scope gating on admin endpoints; no msc4484 flag |
+| MSC4483 | ✅ ● | 100/100 | Encrypted Account Data | Account-data passthrough; ADK secret and encrypted envelopes stored opaque |
+| MSC4482 | ✅ ● | 100/100 | Ability to bookmark messages | Account-data passthrough; m.bookmarks_room stored, served, synced opaque |
 | MSC4480 | ❌ ● | 0/0 | MSC4480 Sliding Sync Extension: Sticky Events | no sticky events; ruma unstable-msc4480 feature not enabled |
+| MSC4476 | ✅ ● | 100/100 | Image pack rooms | Account-data passthrough; m.image_pack.rooms stored, served, synced opaque |
 | MSC4473 | ❌ ● | 0/0 | Proxied room alias resolution | No federation v2 query/directory; no signing/proxy logic. |
 | MSC4472 | ❌ ● | 0/0 | Deprecated room version kind | No `deprecated` stability kind in room_versions capability. |
 | MSC4470 | ❌ ● | 0/0 | Routing reports to non-local destinations | `/report` does not accept `must_send_to`; no fan-out. |
@@ -345,6 +359,7 @@ in the [Out of scope](#out-of-scope) section.
 | MSC4461 | ✅ ◐ | 100/100 | Storing per-message profiles for users | Pure account data passthrough; generic CS account-data covers it |
 | MSC4458 | ✅ ◐ | 90/100 | Handling incoming JSON in the server-server API | Federation JSON parsed first; signatures checked on the parsed object |
 | MSC4457 | ❌ ● | 0/0 | Generic reporting API | No /_matrix/client/v1/safety/report endpoint or harm handling |
+| MSC4456 | ❌ ● | 0/0 | Harms taxonomy | No endpoint accepts or emits harm identifiers; consumers MSC4457/4387 absent |
 | MSC4453 | ❌ ● | 0/0 | Deprecate old room versions | v3-v5 marked unstable; v6-v9 still stable; create/upgrade not gated |
 | MSC4452 | ✅ ● | 100/100 | Preview URL capabilities API | capabilities.rs:89 advertises io.element.msc4452.preview_url |
 | MSC4450 | ❌ ● | 0/0 | Identity Provider selection for User-Interactive Authentication with Legacy S... | UIAA SSO fallback derives idp from session, not idp_id query |
@@ -353,6 +368,7 @@ in the [Out of scope](#out-of-scope) section.
 | MSC4447 | ❌ ● | 0/0 | Move OpenID userinfo endpoint out of `/_matrix/federation` | Old /federation/v1/openid/userinfo present; new /_matrix/openid/v1/userinfo n... |
 | MSC4446 | ✅ ● | 90/100 | Allow moving the fully read marker to older events | Fully-read gated; allow_backward on both routes; racing writes unordered |
 | MSC4445 | ❌ ◐ | 0/0 | Clarify `/sync` timeline order | No msc4445 unstable_features flags advertised |
+| MSC4441 | ✅ ● | 100/100 | Encrypted User Profile Annotations via Account Data | Account-data passthrough; owner-only global store, GET, v3 and v5 sync |
 | MSC4440 | ❌ ● | 0/0 | Profile Biography via Global Profiles | Generic MSC4133 passthrough only; no m.biography validation |
 | MSC4439 | 🟨 ● | 70/85 | Encryption key URIs in `/.well-known/matrix/support` | check.rs:780 validates URI and rejects raw keys; new https MUST unenforced |
 | MSC4438 | ✅ ● | 100/100 | Message bookmarks via account data | Pure account-data convention; existing endpoints store arbitrary types |
@@ -369,14 +385,15 @@ in the [Out of scope](#out-of-scope) section.
 | MSC4420 | ❌ ● | 0/0 | Duplicate one-time key error response for /keys/upload | add_one_time_key silently overwrites; no M_DUPLICATE_ONE_TIME_KEY emitted. |
 | MSC4417 | ❌ ● | 0/0 | URL Previews via Appservices | client preview_url exists; no appservice fan-out or namespace check. |
 | MSC4416 | ❌ ● | 0/0 | Optionally requiring policy server signatures in a room | depends on MSC4284; no policy-server signature checks anywhere. |
-| MSC4413 | ✅ ◐ | 100/100 | Remove `private` join_rule | private join_rule treated as unknown; effective semantics already aligned. |
 | MSC4406 | 🟨 ● | 50/55 | `M_SENDER_IGNORED` error code | src/api/client/{room/event.rs:74,context.rs:86,relations.rs:175}; M_SENDER_IG... |
 | MSC4401 | ❌ ◐ | 0/0 | Publishing client capabilities via profiles | generic profile keys exist; logout cleanup of client_capability missing. |
+| MSC4397 | ✅ ● | 100/100 | Tags as Spaces | global account-data passthrough (2026-06-22 ruling); m.tag_space round-trips |
 | MSC4396 | ❌ ● | 0/0 | Inline linked media | no multipart/mixed event-with-media; no m.media mixin or M_GONE wired. |
 | MSC4388 | ✅ ● | 90/100 | Secure out-of-band channel for sign in with QR | router.rs:471 five MSC4388 routes; TTL default 600s exceeds SHOULD 300s |
 | MSC4387 | ❌ ● | 0/0 | `M_SAFETY` error code | M_SAFETY errcode not used anywhere in src/; no harms field handling. |
 | MSC4383 | ✅ ● | 100/100 | Client-Server Discovery of Server Version | versions.rs:30 server object; :149 advertises net.zemos.msc4383 |
 | MSC4382 | ❌ ● | 0/0 | Peppered hash verification for E2EE content moderation | No verification_hash check on report endpoint |
+| MSC4377 | ✅ ● | 100/100 | Clarify Image Pack Ordering | account-data passthrough (2026-06-22 ruling); nested order keys kept verbatim |
 | MSC4371 | ❌ ● | 0/0 | On the elimination of federation transactions. | No PUT /_matrix/federation/v2/send/{eventId\|eduId} endpoint |
 | MSC4370 | ❌ ● | 0/0 | Federation endpoint for retrieving current extremities | No /_matrix/federation/v1/extremities endpoint |
 | MSC4369 | ❌ ● | 0/10 | M_CAPABILITY_NOT_ENABLED error code for when capability is not enabled on an ... | Endpoints exist but return M_FORBIDDEN/Unknown not M_CAPABILITY_NOT_ENABLED |
@@ -389,6 +406,7 @@ in the [Out of scope](#out-of-scope) section.
 | MSC4360 | ❌ ● | 0/0 | Threads extension to Sliding Sync | No /thread_updates endpoint or threads sliding sync extension |
 | MSC4359 | 🟨 ● | 50/50 | "Do not Disturb" notification settings | DnD account data passes through; device removal leaves the per device key |
 | MSC4358 | ❌ ● | 0/0 | Out of room server discovery | No /discover_common_rooms federation endpoint |
+| MSC4357 | ❌ ● | 0/0 | Live Messages via Event Replacement | no live-marker or live_messaging handling; rejection capability absent |
 | MSC4354 | ❌ ● | 0/0 | Sticky Events | No sticky object, sticky_duration_ms param, or sync sticky section |
 | MSC4353 | ❌ ● | 0/0 | Per-origin linear chain | No origin_predecessor field or per-origin chain validation |
 | MSC4352 | ❌ ● | 0/0 | Customizable HTTPS permalink base URLs via server discovery | No permalink_base_url in /.well-known/matrix/client output |
@@ -431,10 +449,10 @@ in the [Out of scope](#out-of-scope) section.
 | MSC4249 | ✅ ● | 100/100 | Removal of legacy media endpoints | allow_legacy_media defaults to false; legacy disabled |
 | MSC4247 | ❌ ◐ | 10/10 | User Pronouns | MSC4133 generic profile fields cover m.pronouns transparently |
 | MSC4246 | ❌ ● | 0/0 | Sending to-device messages as/to a server | Empty-localpart server addressing for to-device absent |
-| MSC4245 | ❌ ● | 0/0 | Immutable encryption algorithm | encryption_algorithm in m.room.create not honored |
 | MSC4244 | ❌ ● | 0/0 | RFC 9420 MLS for Matrix | MLS for Matrix not implemented |
 | MSC4243 | ❌ ● | 0/0 | User ID localparts as Account Keys | Account keys / federation query/accounts not implemented |
 | MSC4242 | ❌ ● | 0/0 | State DAGs | State DAGs not implemented; uses standard auth chain |
+| MSC4238 | ✅ ● | 100/100 | Pinned events read marker | room account-data passthrough (2026-06-22 ruling); stored, served, synced |
 | MSC4235 | ❌ ● | 0/0 | `via` query param for hierarchy endpoint | hierarchy endpoint lacks via query parameter |
 | MSC4234 | ❌ ● | 0/0 | Update app badge counts when rooms are read | cleared_notifs read-receipt flag not handled |
 | MSC4233 | ❌ ● | 0/0 | Remembering which server a user knocked through | Knocked-through server not remembered; leave and rejection paths unchanged |
@@ -480,7 +498,7 @@ in the [Out of scope](#out-of-scope) section.
 | MSC4120 | ❌ ● | 0/0 | Allow `HEAD` on `/download` | HEAD on /download not wired; routes mounted via Ruma metadata GET only |
 | MSC4117 | ❌ ● | 0/0 | Reinstating Events (Reversible Redactions) | m.room.reinstate (reversible redactions) not implemented |
 | MSC4109 | ❌ ● | 0/0 | Appservices &amp; soft-failed events | appservice v2/transactions endpoint with soft-failed events absent |
-| MSC4108 | ✅ ● | 100/100 | Mechanism to allow OAuth 2.0 API sign in and E2EE set up via QR code | src/api/oidc/device.rs:169 serves native or IdP approval; transports complete |
+| MSC4108 | ✅ ● | 90/90 | Mechanism to allow OAuth 2.0 API sign in and E2EE set up via QR code | src/api/oidc/device.rs:169 serves native or IdP approval; transports complete |
 | MSC4106 | ❌ ● | 0/0 | Join as Muted | join-as-muted default_membership not implemented |
 | MSC4104 | ❌ ● | 0/0 | Auth Lock: Soft-failure-be-gone! | m.auth_lock event and auth-rule not implemented |
 | MSC4103 | ❌ ◐ | 0/0 | Make threaded read receipts opt-in in /sync | threaded_read_receipts sync filter not implemented |
@@ -515,6 +533,7 @@ in the [Out of scope](#out-of-scope) section.
 | MSC4038 | ❌ ● | 0/0 | Key backup for MLS | No MLS or m.dmls_backup.v1.aes-hmac-sha2 backup algorithm support. |
 | MSC4034 | ❌ ● | 0/0 | Media limits | No /usage endpoint and no m.storage.* fields in /config. |
 | MSC4033 | ❌ ● | 0/0 | Explicit ordering of events for receipts | No order field on events or receipts. |
+| MSC4032 | ✅ ● | 100/100 | Asset Collections | account-data passthrough (2026-06-22 ruling); both keys stored, served, synced |
 | MSC4031 | ❌ ● | 0/0 | Pre-generating invites and room invite codes | pre-generated invites and m.room.invite state event not implemented |
 | MSC4029 | 🟨 ◐ | 40/50 | Fixing `X-Matrix` request authentication | X-Matrix verification covers basics; canonicalization rules not fully specified |
 | MSC4028 | ❌ ● | 0/0 | Push all encrypted events except for muted rooms | No .m.rule.encrypted_event override in the default ruleset Tuwunel serves |
@@ -546,7 +565,6 @@ in the [Out of scope](#out-of-scope) section.
 | MSC3960 | ✅ ● | 90/100 | Sliding Sync Extension: Receipts | sliding sync receipts extension implemented |
 | MSC3959 | ✅ ● | 90/100 | Sliding Sync Extension: Account Data | sliding sync account_data extension implemented |
 | MSC3947 | ❌ ● | 0/0 | Allow Clients to Request Searching the User Directory Constrained to Only Hom... | exclude_sources parameter on user_directory/search not implemented. |
-| MSC3946 | ❌ ● | 0/0 | Dynamic room predecessor | m.room.predecessor state event not handled. |
 | MSC3944 | ❌ ● | 0/0 | Dropping stale send-to-device messages | Stale-to-device cancellation/dedup logic not implemented. |
 | MSC3934 | ❌ ● | 0/0 | Bulk push rules change endpoint | PUT /pushrules_bulk/.../actions and /enabled endpoints not implemented. |
 | MSC3933 | ❌ ● | 0/0 | Core push rules for Extensible Events | Extensible-event default underride push rules not added. |
@@ -558,6 +576,8 @@ in the [Out of scope](#out-of-scope) section.
 | MSC3914 | ❌ ● | 0/0 | Matrix native group call push rule | .m.rule.room.call push rule + call_started condition not implemented. |
 | MSC3911 | ❌ ● | 0/0 | Linking media to events | attach_media query, /media/copy, restrictions block in federation media not p... |
 | MSC3909 | ❌ ● | 0/0 | Membership based mutes | Membership-based mutes via new mute/leave-mute states; not implemented. |
+| MSC3908 | ❌ ● | 0/0 | Expiring Policy List Recommendations | no policy-list consumer; expiry never read, no expiry-driven reversal |
+| MSC3907 | ❌ ● | 0/0 | Mute Policy Recommendation | no policy-list consumer, so m.mute is never applied (suspension exists, unwired) |
 | MSC3901 | ❌ ◐ | 0/0 | Deleting State | meta-MSC of sub-proposals; obsolete-state cleanup not implemented |
 | MSC3896 | ❌ ● | 0/0 | Appservice media | appservice media namespace not implemented |
 | MSC3895 | ❌ ● | 0/0 | Federation API Behaviour of Partial-State Resident Servers | M_UNABLE_DUE_TO_PARTIAL_STATE error code not implemented |
@@ -580,7 +600,9 @@ in the [Out of scope](#out-of-scope) section.
 | MSC3839 | ❌ ● | 0/0 | primary-identity-as-key | No public-key identity or challenge login; five login types, none key-based |
 | MSC3837 | ❌ ● | 0/0 | Cascading profile tags for push rules | no profile_tags array; only single profile_tag handled |
 | MSC3834 | ❌ ● | 0/0 | Opportunistic user key pinning (TOFU) | TOFU signing key is client-side; no server hooks |
+| MSC3815 | ✅ ● | 100/100 | 3D Worlds | m.world.profile global account data passthrough; 3D and world state excluded |
 | MSC3814 | 🟨 ● | 75/90 | Dehydrated devices with SSSS | All four routes wired; events endpoint is the deprecated POST, not the GET |
+| MSC3803 | ✅ ● | 100/100 | Matrix Widget API v2 | m.widgets account data passthrough; widget protocol and room state excluded |
 | MSC3767 | ❌ ● | 0/0 | Time based notification filtering | time_and_day push condition not present |
 | MSC3759 | ❌ ● | 0/0 | Leave event metadata for deactivated users | deactivation leaves omit m.deactivated metadata |
 | MSC3744 | ❌ ● | 0/0 | Support for flexible authentication | no flexible-auth /register or /account/authenticator endpoints |
@@ -616,6 +638,7 @@ in the [Out of scope](#out-of-scope) section.
 | MSC3277 | ❌ ● | 0/0 | Scheduled messages | no scheduled-message at= query param support |
 | MSC3269 | ❌ ● | 0/0 | An error code for busy servers | no M_SERVER_BUSY error code |
 | MSC3262 | ❌ ● | 0/0 | aPAKE authentication | SRP6a aPAKE login/registration not implemented |
+| MSC3230 | ✅ ● | 100/100 | Spaces top level order | room account data passthrough (m.space_order); ordering logic client-side |
 | MSC3219 | ❌ ● | 0/0 | Space Flair | space flair events and member flag not implemented |
 | MSC3216 | ❌ ● | 0/0 | Synchronized access control for Spaces | space-level synchronized PL replication absent |
 | MSC3214 | ✅ ◐ | 90/100 | Allow overriding `m.room.power_levels` using `initial_state` | initial_state PL effectively replaces default via later append |
@@ -631,15 +654,19 @@ in the [Out of scope](#out-of-scope) section.
 | MSC3018 | ❌ ◐ | 0/0 | Support for private federation networks | branch; no m.networks capability or network query |
 | MSC3015 | ✅ ● | 100/100 | Room state personal overrides | override.* room account data rides the generic per-room endpoint and sync |
 | MSC3014 | ❌ ● | 0/0 | HTTP Pushers for the full event with extra rooms information | open; no full_event_with_rooms pusher format |
+| MSC3009 | ✅ ● | 100/100 | Websocket transport for client &lt;--&gt; widget communications | m.widgets account data passthrough; transports field opaque; client ws excluded |
+| MSC3008 | ✅ ● | 100/100 | Scoped access for widgets | m.widgets account data passthrough; auth.scopes opaque; OAuth, client excluded |
 | MSC2970 | 🟨 ◐ | 40/50 | Remove pusher path requirement | path/scheme constraints relaxed; lacks fragment/userinfo/8000-char checks |
 | MSC2962 | ❌ ● | 0/0 | Managing power levels via Spaces | no auto_users or m.room.power_level_mappings handling |
 | MSC2961 | ❌ ◐ | 0/10 | External Signatures | endpoint accepts arbitrary signature keys; object form discarded |
+| MSC2949 | ✅ ◐ | 100/100 | Proposal to clarify "Requires auth" and "Rate-limited" in the spec | own auth and rate policy diverges from spec annotations; client advice excluded |
 | MSC2943 | ❌ ● | 0/0 | Return an event ID for membership endpoints | membership endpoint responses lack event_id |
 | MSC2938 | ❌ ● | 0/10 | Report content to moderators | target field and room_moderators routing not implemented |
 | MSC2923 | ❌ ◐ | 0/0 | Matrix to Matrix connections | speculative idea-stage; no concrete API |
 | MSC2895 | 🟨 ● | 20/30 | Improving the way membership lists are queried | membership filter present but single valued; no /rooms, joined_* not deprecated |
 | MSC2883 | ❌ ● | 0/0 | [WIP] Matrix-flavoured MLS | WIP MLS; no DMLS support |
 | MSC2882 | ❌ ◐ | 0/0 | [WIP] Tempered Transitive Trust | WIP; new public_user_signing key, m.device.signature EDU not implemented |
+| MSC2872 | ✅ ● | 100/100 | Move the widget `title` to the root | m.widgets account data passthrough; top-level title opaque; client UI excluded |
 | MSC2855 | ❌ ◐ | 0/0 | Server-Initiated Client Clear-Cache &amp; Reload | no clear-cache signal mechanism |
 | MSC2848 | ❌ ● | 0/10 | Globally unique event IDs | only legacy GET /event/:eventId; new room-scoped path absent |
 | MSC2846 | ❌ ● | 0/0 | Decentralizing media through CIDs | open; CID-based MXC URLs not implemented |
@@ -666,6 +693,7 @@ in the [Out of scope](#out-of-scope) section.
 | MSC2499 | 🟨 ◐ | 10/30 | Fixes for Well-known URIs | src/service/resolver/well_known.rs follows redirects; 12288B cap; uses /versions |
 | MSC2487 | ❌ ◐ | 0/0 | Filtering for Appservices | No filter field on appservice registration |
 | MSC2477 | ❌ ◐ | 0/0 | User-defined ephemeral events in rooms | No PUT /rooms/{roomId}/ephemeral/{type}/{txnId} route |
+| MSC2474 | ✅ ● | 100/100 | Add key backup version to SSSS account data | plaintext version in m.megolm_backup.v1 kept verbatim; client matching excluded |
 | MSC2448 | 🟨 ● | 70/80 | Using BlurHash as a Placeholder for Matrix Media | blurhash on profile, federation query, media upload, member events |
 | MSC2444 | 🟨 ● | 30/30 | Proposal for implementing peeking over federation (peek API) | world_readable allowed on some federation reads; no /peek subscription API |
 | MSC2438 | ❌ ● | 0/10 | Local and Federated User Erasure Requests | deactivate present but no erase param, no fed/AS erase endpoints |
@@ -679,6 +707,7 @@ in the [Out of scope](#out-of-scope) section.
 | MSC2370 | ❌ ● | 0/0 | Resolve URL API | No /resolve_url endpoint in source |
 | MSC2326 | ❌ ● | 0/0 | Label based filtering | No labels/not_labels EventFilter support; no m.label handling |
 | MSC2316 | ❌ ● | 0/0 | Federation queries to aid with database recovery | No /_matrix/federation/v1/query/members route |
+| MSC2315 | ✅ ● | 100/100 | Allow users to select "none" as an integration manager | m.integrations kept verbatim incl. unstable name; client rendering excluded |
 | MSC2301 | ❌ ● | 0/0 | Proposal for an /info endpoint on the CS API | No /info merger of /versions; no branding fields exposed |
 | MSC2300 | ❌ ● | 0/0 | Proposal for a /ping endpoint on the CS API | No GET /_matrix/client/r0/ping route |
 | MSC2278 | ❌ ◐ | 0/10 | Proposal for deleting content for expired and redacted messages | No DELETE /media client API; only admin-only delete helper |
@@ -687,6 +716,7 @@ in the [Out of scope](#out-of-scope) section.
 | MSC2214 | ❌ ● | 0/0 | Joining upgraded private rooms | m.room.previous_member event not implemented |
 | MSC2213 | ❌ ● | 0/0 | Rejoinability of private rooms | rejoin_rule field not implemented |
 | MSC2212 | ❌ ● | 0/0 | Third party user power levels | third_party_users not present in PL handling or auth rules |
+| MSC2211 | ❌ ● | 0/0 | Identity Servers Storing Threepid Hashes at Rest | no identity-server client at all; IS hash-at-rest storage and API excluded |
 | MSC2199 | ❌ ● | 0/0 | Canonical DMs (server-side middle ground edition) | no m.kind in sync summary; uses legacy m.direct account data |
 | MSC2190 | ✅ ◐ | 80/80 | Allow appservice bots to use /sync | appservice token defaults to sender_localpart user |
 | MSC2162 | ❌ ● | 0/0 | Signaling Errors at Bridges | no m.bridge_error on appservice delivery failure; absent in src and ruma |
@@ -704,6 +734,7 @@ in the [Out of scope](#out-of-scope) section.
 | MSC1762 | ❌ ● | 0/0 | Support user-owned identifiers as new 3PID type | no m.did mediums; ruma Medium is email or msisdn; 3PID invites rejected |
 | MSC1740 | ❌ ◐ | ?/0 | Using the Accept header to select an encoding | no Accept-based content negotiation; only application/json supported |
 | MSC1607 | ❌ ◐ | 0/0 | Proposal for room alias grammar | alias parsing delegated to Ruma RoomAliasId; no NFKC/punycode/blacklist logic |
+| MSC1236 | ✅ ● | 100/100 | Matrix Widget API v2 | m.widgets via generic account data; widget API/UI and room state excluded |
 | MSC1228 | ❌ ● | ?/0 | Removing MXIDs from events | removing mxids never merged; no user_room_key or pseudo IDs in src |
 
 ## Closed
@@ -731,6 +762,7 @@ in the [Out of scope](#out-of-scope) section.
 | MSC4299 | ✅ ◐ | 100/100 | trusted users | Generic account data stores and syncs m.trusted_users; no trust logic to break |
 | MSC4294 | ❌ ● | 0/0 | Ignore and mass ignore invites | no ignored_inviters list, no auto invite cleanup |
 | MSC4276 | ❌ ● | 0/0 | Soft unfailure for self redactions | no self-redaction soft-fail bypass |
+| MSC4231 | 🟨 ◐ | 0/100 | Backwards compatibility for media captions | thread-root check exists, but reply-bearing fallback parses as Reply; accepted |
 | MSC4214 | ❌ ● | 0/0 | Embedding Widgets in Messages | closed MSC; m.widget event/capability not implemented |
 | MSC4202 | ❌ ◐ | 20/20 | Reporting User Profiles | client report endpoint exists; federation forwarding absent |
 | MSC4184 | ❌ ● | 0/0 | Dynamic Notification Suppression | no m.push_rules_executed field on events |
@@ -779,6 +811,7 @@ in the [Out of scope](#out-of-scope) section.
 | MSC3391 | ✅ ● | 100/100 | API to delete account data | Both DELETE routes reject protected keys before mutation |
 | MSC3306 | ❌ ● | 0/0 | How to count unread messages | notification_count uses push-rule Notify actions, not MSC3306 algo |
 | MSC3302 | ✅ ● | 100/100 | Stories via To-Device-Messaging | m.stories.blocklist and m.stories.ignore ride the generic account-data path |
+| MSC3270 | ✅ ● | 100/100 | Symmetric megolm backup | backup algorithm, auth_data, session_data kept raw; SSSS secret via account data |
 | MSC3244 | ❌ ● | 0/10 | Room version capabilities | capabilities lacks room_capabilities knock/restricted info |
 | MSC3174 | ❌ ● | 0/0 | An error code for spam rejections | M_ANTISPAM_REJECTION error code not used |
 | MSC3137 | ✅ ● | 100/100 | Define space room type, subset of MSC1772 | type:m.space in m.room.create accepted; used in directory and spaces |
@@ -800,6 +833,7 @@ in the [Out of scope](#out-of-scope) section.
 | MSC2821 | ❌ ● | 0/0 | Test Pusher | POST /pushers/push test endpoint not implemented |
 | MSC2810 | 🟨 ● | 70/70 | Consistent globs specification | ACL and push globs go through wildmatch; the backslash escape is unimplemented |
 | MSC2773 | ❌ ◐ | 0/0 | Room kinds | closed; no m.kind summary or m.room.kind handling |
+| MSC2771 | ✅ ● | 100/100 | Bookmarks | room account data passthrough (m.bookmarks); client selection, UI excluded |
 | MSC2706 | ❌ ● | 0/0 | IPFS as a media repository | No IPFS support; no m.ipfs capability |
 | MSC2704 | ✅ ◐ | 100/100 | Handling duplicate media on `/upload` + clarifying the origin of an MXC URI | Fresh MXC per upload; no dedup |
 | MSC2703 | ✅ ● | 100/100 | Media ID grammar | 32-char alphanumeric media IDs; opaque |
@@ -824,12 +858,12 @@ in the [Out of scope](#out-of-scope) section.
 | MSC2061 | ✅ ● | 100/100 | make the trailing slash on `GET /_matrix/key/v2/server/` optional | src/api/router.rs:250 routes both /key/v2/server and /server/{key_id} |
 | MSC2000 | ❌ ● | 0/0 | MSC 2000: Proposal for server-side password policies | branch; no /password_policy endpoint or password validation |
 | MSC1998 | ❌ ● | 0/0 | Two-Factor Authentication Providers | closed; TOTP/recovery 2FA never adopted by spec |
+| MSC1958 | ✅ ● | 100/100 | Widget architecture changes | revised m.widgets stored verbatim; client widget rendering and OpenID excluded |
 | MSC1953 | ✅ ● | 100/100 | Remove prev_content from the essential keys list | ruma redact() does not retain prev_content |
 | MSC1943 | ✅ ● | 100/100 | Set v3 to be the default room version | default room version V12 (&gt;= v3) |
 | MSC1935 | 🟨 ● | 30/40 | Key validity enforcement | [→ MSC2076] no valid_until_ts enforcement; v4 and v5 supported but listed uns... |
 | MSC1888 | ✅ ● | 90/100 | Proposal to send EDUs to appservices | [→ MSC2409] appservice receive_ephemeral with EDU push; src/service/sending/s... |
 | MSC1840 | 🟨 ● | 60/100 | Typed rooms | room_types filter on sliding sync only; v3 filter API unextended |
-| MSC1818 | ✅ ● | 100/100 | Remove references to presence lists | presence list endpoints absent (compliant by removal) |
 | MSC1796 | ❌ ◐ | 0/0 | Proposal for improving notifications for E2E encrypted rooms | branch; m.mentions on encrypted events not honored server-side |
 | MSC1777 | ❌ ● | 0/0 | Proposal for implementing peeking over federation (server pseudousers) | branch; server pseudouser peeking not implemented |
 | MSC1776 | ❌ ● | 0/0 | Proposal for implementing peeking via /sync in the CS API | branch; POST /sync with peek not implemented |
@@ -856,51 +890,39 @@ place of the (uniformly empty) `Impl` cell.
 
 | MSC | Status | Inv | Title | Note |
 |---|---|---|---|---|
-| MSC4534 | ⬛ ● | open | Simple room rules | client-enforced room rules; the MSC avoids server-side changes by design |
 | MSC4533 | ⬛ ● | open | MatrixRTC widget actions for authenticated livekit realted endpoints | widget API actions delegating MSC4195 endpoints; no homeserver scope |
 | MSC4531 | ⬛ ◐ | open | Deprecate legacy VoIP | spec deprecation of legacy VoIP; no server behaviour change is required |
-| MSC4529 | ⬛ ● | open | Client-side profile overrides | account data read by clients; MSC states servers need no knowledge of it |
-| MSC4522 | ⬛ ◐ | open | Username colors | client rendering rules; the server side is generic MSC4133 field storage |
 | MSC4518 | ⬛ ● | open | Registries | process MSC for spec registries; no homeserver behaviour is defined |
 | MSC4515 | ⬛ ● | open | RTC Transports discovery for widgets | widget API action; the hosting client calls the endpoint, no server scope |
-| MSC4504 | ⬛ ● | open | Using a global version number for the entire specification (v2) | process MSC for the Spec Core Team; only the SCT may implement it |
 | MSC4489 | ⬛ ● | open | Per-room contact state event | client and bot only; m.room.contact is ordinary room state |
 | MSC4487 | ⬛ ● | open | Deprecate internal use of matrix.to navigation | client-only; server sends no matrix.to or matrix: URIs |
-| MSC4483 | ⬛ ● | open | Encrypted Account Data | client-only; server already stores account data opaquely |
-| MSC4482 | ⬛ ● | open | Ability to bookmark messages | client-only; m.bookmarks room type and m.bookmark event are passthrough |
 | MSC4481 | ⬛ ● | open | Non-sigil matrix.to | client-only URL format; server emits no matrix.to links |
-| MSC4476 | ⬛ ● | open | Image pack rooms | client-only; m.image_pack room type needs no server-side handling |
 | MSC4475 | ⬛ ● | open | Media galleries by inline MXC links | Inline MXC gallery rendering is client-side; link tracking deferred |
 | MSC4474 | ⬛ ◐ | open | Clarify usage of content blocks in Extensible Events | Spec clarification for MSC1767 authors; no homeserver requirement |
 | MSC4471 | ⬛ ● | open | Streaming ephemeral event updates for room events | MSC states no homeserver work required; to-device transport suffices |
 | MSC4468 | ⬛ ◐ | open | Reporting to communities (via to-device) | Pure state-event plus to-device passthrough; no HS-specific work. |
 | MSC4460 | ⬛ ● | open | Extensible Events - Alternative unstable support | Client-side hybrid extensible-events rendering rules; no Tuwunel dispatch. |
 | MSC4459 | ⬛ ● | open | Image pack references | Client-side image pack reference field; homeserver passes events through tran... |
-| MSC4456 | ⬛ ● | open | Harms taxonomy | Harm identifier taxonomy; the server MUST is conditional on other MSCs |
 | MSC4455 | ⬛ ● | open | Catch-all property for spaces | Client-only space catch-all state event; MSC says servers not required |
 | MSC4454 | ⬛ ● | open | Deprecating Spoiler Fallback In Media Repository | Client spoiler body construction; no homeserver behavior |
 | MSC4451 | ⬛ ● | open | Deprecate notifications endpoint | Spec-only deprecation; endpoint still served per MSC |
 | MSC4444 | ⬛ ● | closed | Malicious PDUs | April Fools joke MSC, status closed |
-| MSC4441 | ⬛ ● | open | Encrypted User Profile Annotations via Account Data | Client-side encrypted account data convention; no server change |
 | MSC4421 | ⬛ ● | closed | Standardize the spec on US English | spec house-style proposal (en-US); no protocol surface. |
 | MSC4414 | ⬛ ● | open | Design decision - Errors | design-direction proposal with no technical changes. |
+| MSC4413 | ⬛ ◐ | open | Remove `private` join_rule | private join_rule treated as unknown; effective semantics already aligned. |
 | MSC4412 | ⬛ ● | open | Widget Base PostMessage API | Widget postMessage negotiation; no homeserver footprint |
 | MSC4411 | ⬛ ● | open | Widget State Event | Widget state event schema; server stores m.widget state opaquely |
 | MSC4409 | ⬛ ● | merged | Clarify thumbnailing behavior in E2EE | Client thumbnail guidance in E2EE; no homeserver requirement |
 | MSC4407 | ⬛ ● | open | Sticky Events (Widget API) | widget API for sticky events; no homeserver involvement beyond MSC4354. |
 | MSC4405 | ⬛ ● | open | Deprecate the emoji method for SAS verification | deprecates emoji SAS in favor of decimal; client-side method choice. |
 | MSC4404 | ⬛ ● | closed | Compare emoji by name rather than image | adds accept_languages to to-device verification; client SAS UI guidance. |
-| MSC4397 | ⬛ ● | open | Tags as Spaces | account_data key m.tag_space points at a private space; server is opaque. |
 | MSC4392 | ⬛ ● | open | Encrypted reactions and replies | client puts m.relates_to inside encrypted payload; server forwards untouched. |
 | MSC4391 | ⬛ ● | open | Simplified in-room bot commands | in-room bot command UI; state and message events forwarded opaquely. |
 | MSC4389 | ⬛ ● | open | Image ordering within packs | image pack ordering is account-data; server passes through opaque blobs. |
 | MSC4386 | ⬛ ● | open | Automatically sharing secrets after device verification | client-to-client to-device verification protocol; server forwards opaque events. |
 | MSC4385 | ⬛ ● | open | Pushing secrets to other devices | Client to-device convention; server forwards m.secret.push opaquely |
 | MSC4381 | ⬛ ◐ | merged | Remove plaintext sender key | Removal of plaintext sender_key is client-side; server is opaque |
-| MSC4377 | ⬛ ● | open | Clarify Image Pack Ordering | Image pack ordering is client-side account/state data convention |
 | MSC4362 | ⬛ ● | open | Simplified Encrypted State Events | No encrypt_state_events handling in m.room.encryption |
-| MSC4357 | ⬛ ● | open | Live Messages via Event Replacement | Client-only convention reusing m.replace; no server work |
-| MSC4356 | ⬛ ● | merged | Recently used emoji | Pure client-side account data convention; no server work |
 | MSC4349 | ⬛ ● | open | Causal barriers and enforcement | causal barrier terminology and deferred authorization not adopted |
 | MSC4347 | ⬛ ● | closed | Emoji verification images | client-side emoji image rendering for SAS verification; not server |
 | MSC4340 | ⬛ ● | open | Prompts and partial commands for in room commands. | bot command prompts; client-side concern, no server changes |
@@ -916,11 +938,9 @@ place of the (uniformly empty) `Impl` cell.
 | MSC4296 | ⬛ ● | open | Mentions for device IDs | client-side mentions field extension |
 | MSC4295 | ⬛ ● | open | Bot bounce limit - a better loop prevention mechanism | bot/client behavior; servers relay events unmodified |
 | MSC4292 | ⬛ ● | open | Handling incompatible room versions in clients | [→ MSC4331] |
-| MSC4287 | ⬛ ● | merged | Sharing key backup preference between clients | client-side account data for key backup preference |
 | MSC4286 | ⬛ ● | open | App store compliant handling of payment links within events | client-side HTML rendering attribute |
 | MSC4283 | ⬛ ● | open | Distinction between Ignore and Block | terminology MSC, no implementation surface |
 | MSC4281 | ⬛ ● | closed | Mitigating Membership Mistakes, or "Invisible" Cryptography | closed April 1 joke MSC; client-only encryption mode |
-| MSC4278 | ⬛ ● | merged | Media preview controls | Client rendering preference in account data; the only server clause is a MAY |
 | MSC4274 | ⬛ ● | open | Inline media galleries via msgtypes | new client msgtype m.gallery, no server logic |
 | MSC4273 | ⬛ ● | open | Approve and Disapprove ratings for moderation policies | new event type for moderation tools, no server logic |
 | MSC4270 | ⬛ ● | open | Matrix Glossary | glossary/spec doc proposal, not an implementation feature |
@@ -928,8 +948,7 @@ place of the (uniformly empty) `Impl` cell.
 | MSC4268 | ⬛ ● | merged | Sharing room keys for past messages | client-only E2EE key sharing; server only relays to-device and stores media |
 | MSC4253 | ⬛ ● | open | Modifying or rejecting accepted MSCs | Spec process MSC; no implementable behavior |
 | MSC4252 | ⬛ ● | open | Extensible Events modification: State event handling | Client-side guidance for extensible state events |
-| MSC4238 | ⬛ ● | open | Pinned events read marker | Client-set m.read.pinned_events account data only |
-| MSC4231 | ⬛ ● | closed | Backwards compatibility for media captions | Client-side caption fallback rendering; no server work |
+| MSC4245 | ⬛ ● | open | Immutable encryption algorithm | encryption_algorithm in m.room.create not honored |
 | MSC4230 | ⬛ ● | merged | 'Animated' flag for images | event-only; passthrough; merged in spec |
 | MSC4229 | ⬛ ● | closed | Pass through `unsigned` data from `/keys/upload` to `/keys-query` | template/example proposal; no real change |
 | MSC4227 | ⬛ ● | open | Audio based quick login | no MSC4108 rendezvous support; audio/DTMF login absent |
@@ -955,6 +974,7 @@ place of the (uniformly empty) `Impl` cell.
 | MSC4139 | ⬛ ● | open | Bot buttons &amp; conversations | m.prompts mixin is client-only event content |
 | MSC4132 | ⬛ ● | merged | Deprecate Linking to an Event Against a Room Alias. | deprecation of event-on-room-alias URIs is client-only |
 | MSC4131 | ⬛ ● | open | Handling `m.room.encryption` events | client-side guidance on handling m.room.encryption events |
+| MSC4126 | ⬛ ● | merged | Deprecation of query string auth | deprecation of query string auth; server still accepts both |
 | MSC4119 | ⬛ ● | open | Voluntary content flagging | client-only m.room.context flagging mixin; server is content-agnostic |
 | MSC4114 | ⬛ ● | open | Matrix as a password manager | client-only password manager via rooms; no server-side requirements |
 | MSC4113 | ⬛ ● | closed | Image hashes in Policy Lists | m.policy.media_hash unknown to server (closed MSC) |
@@ -969,7 +989,6 @@ place of the (uniformly empty) `Impl` cell.
 | MSC4050 | ⬛ ● | open | MXID verification | Pure client/third-party signaling via custom event types. |
 | MSC4039 | ⬛ ● | open | Access the Content repository with the Widget API | Widget API extension; entirely client-to-widget scope. |
 | MSC4036 | ⬛ ● | closed | Room organization by promoting threads | Pure client UI behavior toggled by m.promote_threads state event. |
-| MSC4032 | ⬛ ● | open | Asset Collections | Asset Collections defines client-side data structures for 3D worlds; no serve... |
 | MSC4013 | ⬛ ● | open | Poll history cache | client convention using existing relations API |
 | MSC4006 | ⬛ ● | open | Answered Elsewhere for VoIP | VoIP m.call.hangup reason value, client concern |
 | MSC4004 | ⬛ ● | open | unified view of identity service | identity service API, not homeserver |
@@ -987,14 +1006,13 @@ place of the (uniformly empty) `Impl` cell.
 | MSC3954 | ⬛ ● | open | Extensible Events - Text Emotes | Extensible m.emote event type not specifically handled. |
 | MSC3949 | ⬛ ● | open | Power Level Tags | Power-level tag state event is client UX; no server enforcement. |
 | MSC3948 | ⬛ ● | open | Repository room for Thirdroom | ThirdRoom 3D-asset repository room type; no homeserver semantics. |
+| MSC3946 | ⬛ ● | open | Dynamic room predecessor | m.room.predecessor state event not handled. |
 | MSC3935 | ⬛ ● | open | Cute Events against social distancing | Client-side cute event msgtype; no server behavior. |
 | MSC3927 | ⬛ ● | open | Extensible Events - Audio | Extensible m.audio event type not specifically dispatched. |
 | MSC3923 | ⬛ ● | merged | Bringing Matrix into the IETF process | Spec-process MSC about IETF coordination; no homeserver code. |
 | MSC3919 | ⬛ ● | open | Matrix Message Format (IETF/MIMI) | IETF informational draft on Matrix message format; not a server feature. |
 | MSC3918 | ⬛ ● | open | Matrix Message Transport (IETF/MIMI) | IETF informational draft about Matrix as MIMI transport; not a server feature. |
 | MSC3910 | ⬛ ● | closed | Content tokens for media | [→ MSC3916] |
-| MSC3908 | ⬛ ● | open | Expiring Policy List Recommendations | expiring policy field interpreted by clients/bots |
-| MSC3907 | ⬛ ● | open | Mute Policy Recommendation | mute policy recommendation enforced by clients/bots |
 | MSC3906 | ⬛ ● | closed | Protocol to use an existing Matrix client session to complete login and setup... | [→ MSC4108] QR sign-in protocol depends on unimplemented rendezvous |
 | MSC3903 | ⬛ ● | closed | X25519 Elliptic-curve Diffie-Hellman ephemeral for establishing secure channe... | [→ MSC4108] client-to-client X25519 ECDH; no server role |
 | MSC3898 | ⬛ ● | open | Native Matrix VoIP signalling for cascaded SFUs | VoIP SFU signalling is opaque events between clients |
@@ -1009,14 +1027,13 @@ place of the (uniformly empty) `Impl` cell.
 | MSC3849 | ⬛ ● | open | Observations and Reinforcement | no observation/reinforcement event handling |
 | MSC3846 | ⬛ ● | open | Allowing widgets to access TURN servers | widget TURN access; client-widget API only |
 | MSC3845 | ⬛ ● | open | Draft: Expanding policy rooms to reputation | no m.opinion recommendation handling |
+| MSC3844 | ⬛ ● | merged | Remove "Mjolnir" (policy room) sharing mechanism | removal of unused Mjolnir share endpoint; Tuwunel never implemented it |
 | MSC3842 | ⬛ ● | open | Power levels on message (extensible) events | proposal body is TBD; nothing to implement |
 | MSC3825 | ⬛ ◐ | open | Obvious relation fallback location | is_falling_back location handled by Ruma types passively |
 | MSC3819 | ⬛ ● | open | Allowing widgets to send/receive to-device messages | widget to-device is client-widget API only |
 | MSC3817 | ⬛ ● | open | Allow widgets to create rooms | widget API only, no server-side surface |
-| MSC3815 | ⬛ ● | open | 3D Worlds | 3D worlds is client-side room type and state events; no server behavior |
 | MSC3813 | ⬛ ● | open | Obfuscated events | obfuscated events; client-side dummy traffic |
 | MSC3812 | ⬛ ● | open | Hint buttons in messages | hint buttons in messages; client UI |
-| MSC3803 | ⬛ ● | open | Matrix Widget API v2 | Widget API v2 issue placeholder |
 | MSC3796 | ⬛ ◐ | open | Auth/linking for content repo (and enforcing GDPR erasure) | [→ MSC3916] |
 | MSC3790 | ⬛ ● | closed | Register Clients | client launcher registry; client-only |
 | MSC3784 | ⬛ ● | merged | Using room type of `m.policy` for policy rooms | Room type string only; the text leaves all handling to clients |
@@ -1038,6 +1055,7 @@ place of the (uniformly empty) `Impl` cell.
 | MSC3639 | ⬛ ● | open | Matrix for the social media use case | client-side social media room/event conventions; no server changes |
 | MSC3635 | ⬛ ● | open | Early Media for VoIP | client-side VoIP signalling; no server changes required |
 | MSC3592 | ⬛ ● | open | Markup locations for PDF documents | client-side PDF markup event types; no server implementation required |
+| MSC3582 | ⬛ ● | merged | Remove m.room.message.feedback | feedback removal; tuwunel never produces or dispatches on m.room.message.feed... |
 | MSC3575 | ⬛ ● | closed | Sliding Sync (aka Sync v3) | [→ MSC4186] |
 | MSC3574 | ⬛ ● | open | Marking up resources | no m.markup.resource or annotation handling |
 | MSC3554 | ⬛ ● | open | Extensible Events - Translatable Messages | no lang field handling; ruma feature not enabled |
@@ -1059,13 +1077,10 @@ place of the (uniformly empty) `Impl` cell.
 | MSC3286 | ⬛ ● | closed | Media spoilers | server passes events opaquely; no spoiler-aware code |
 | MSC3282 | ⬛ ● | closed | Expose enable_set_displayname in capabilities response | [→ MSC3283] |
 | MSC3279 | ⬛ ● | closed | Expose enable_set_displayname in capabilities response | [→ MSC3283] |
-| MSC3270 | ⬛ ● | closed | Symmetric megolm backup | server stores backup auth_data/session_data opaquely |
 | MSC3265 | ⬛ ● | closed | Login and SSSS with a Single Password | client-only construction; explicitly no server-side changes |
 | MSC3255 | ⬛ ● | closed | Use SRV record for homeservers discovery by clients | client-side discovery via SRV; closed proposal |
 | MSC3246 | ⬛ ● | open | Audio waveforms (extensible events) | client message-content field; no server role |
 | MSC3245 | ⬛ ● | open | Voice messages (using extensible events) | client message type; ruma feature enabled but server has no role |
-| MSC3230 | ⬛ ● | open | Spaces top level order | m.space_order is account_data; uses generic API |
-| MSC3226 | ⬛ ● | merged | Per-room spell check | per-room spellcheck language is account_data; no server logic |
 | MSC3217 | ⬛ ● | open | Clientside hints for a soft kick | m.softkick hint on member event not implemented |
 | MSC3215 | ⬛ ● | closed | Aristotle - Moderation in all things | decentralized moderation room scheme not implemented |
 | MSC3184 | ⬛ ● | open | Challenges Messages | client-only challenge message types |
@@ -1082,17 +1097,12 @@ place of the (uniformly empty) `Impl` cell.
 | MSC3067 | ⬛ ● | closed | Prevent/remove legacy groups from being in the spec | meta MSC; spec-process decision to drop legacy groups |
 | MSC3062 | ⬛ ● | open | Bot verification | client-only verification method |
 | MSC3061 | ⬛ ● | merged | Sharing room keys for past messages | client-only; sender-flagged room key property |
-| MSC3009 | ⬛ ● | open | Websocket transport for client &lt;--&gt; widget communications | client to widget transport; not server-side |
-| MSC3008 | ⬛ ● | open | Scoped access for widgets | widget client/UA concern; obsoleted by OIDC scopes |
 | MSC2997 | ⬛ ● | open | Add t-shirt | joke proposal; t-shirt design |
 | MSC2974 | ⬛ ● | open | Widgets: Re-exchange capabilities | widget-side request_capabilities; client-only |
-| MSC2949 | ⬛ ● | open | Proposal to clarify "Requires auth" and "Rate-limited" in the spec | spec-text clarification; no homeserver behavior |
 | MSC2931 | ⬛ ● | open | Widget navigate permission | widget navigate capability; client-only |
 | MSC2881 | ⬛ ● | closed | Message Attachments | new event content schema (m.attachment relation); generic event passthrough |
 | MSC2876 | ⬛ ● | closed | Allowing widgets to read events in a room | widget read_events action; client-only |
-| MSC2874 | ⬛ ● | merged | Single SSSS | client interpretation of SSSS default key; account data passthrough |
 | MSC2873 | ⬛ ● | open | Identifying clients and user settings in widgets | widget URL template variables and theme_change; client-only |
-| MSC2872 | ⬛ ● | open | Move the widget `title` to the root | widget definition field reorder; client-only |
 | MSC2871 | ⬛ ● | open | Sending approved capabilities back to the widget | widget-only feature; homeserver not involved |
 | MSC2813 | ⬛ ● | open | Handling invalid Widget API requests | client/widget error handling rules |
 | MSC2801 | ⬛ ● | merged | Make it explicit that event bodies are untrusted data | spec note: clients should treat events as untrusted |
@@ -1101,8 +1111,6 @@ place of the (uniformly empty) `Impl` cell.
 | MSC2779 | ⬛ ● | closed | Clarify that event IDs are globally unique | spec clarification issue; closed; no server behavior change |
 | MSC2775 | ⬛ ◐ | closed | Lazy loading room membership over federation | [→ MSC3706/MSC3902] |
 | MSC2774 | ⬛ ● | merged | Giving widgets their ID so they can communicate | client widget URL template variable |
-| MSC2771 | ⬛ ● | closed | Bookmarks | client-side bookmarks via account_data; closed |
-| MSC2765 | ⬛ ● | merged | Widget avatars | client-side widget definition field |
 | MSC2762 | ⬛ ● | open | Allowing widgets to send/receive events | client-side widget API; homeserver not involved |
 | MSC2758 | ⬛ ● | merged | Common grammar for textual identifiers | meta grammar guideline for future identifiers; not directly implementable |
 | MSC2747 | ⬛ ● | open | Transferring VoIP Calls | Client-only m.call.replaces event semantics |
@@ -1112,16 +1120,15 @@ place of the (uniformly empty) `Impl` cell.
 | MSC2644 | ⬛ ● | open | `matrix.to` URI syntax v2 | matrix.to URI syntax; client-only |
 | MSC2630 | ⬛ ◐ | merged | Checking public keys in SAS verification | Client SAS verification crypto; server transports key.verification events |
 | MSC2618 | ⬛ ● | closed | Helping others with mandatory implementation guides | Spec process MSC; no homeserver behavior |
+| MSC2611 | ⬛ ● | merged | Remove `m.login.token` User-Interactive Authentication type from the specific... | AuthType::Token UIAA not advertised; m.login.token login is unrelated |
+| MSC2610 | ⬛ ● | merged | Remove `m.login.oauth2` User-Interactive Authentication type from the specifi... | AuthType::OAuth2 not advertised; only Password/Sso/Jwt flows |
 | MSC2589 | ⬛ ◐ | closed | Improve replies | Client reply rendering; closed MSC; server ignores reply_body fields |
 | MSC2582 | ⬛ ◐ | merged | Remove `mimetype` from `EncryptedFile` object | Removes mimetype example from spec; pure spec/client cleanup |
 | MSC2557 | ⬛ ◐ | merged | Clarifications on spoilers | Client-only spoiler rendering clarification |
-| MSC2545 | ⬛ ◐ | merged | Image Packs (Emoticons &amp; Stickers) | Client pack UX; HS clauses are a federation no-reject plus an optional check |
 | MSC2530 | ⬛ ◐ | merged | Body field as media caption | Client rendering of body+filename for media msgtypes |
 | MSC2529 | ⬛ ◐ | closed | Use existing m.room.message/m.text events as captions for images | [→ MSC2530] Client-only relation/caption rendering; superseded by MSC2530 |
 | MSC2516 | ⬛ ◐ | closed | Add a new message type for voice messages | Client-only msgtype; server does no msgtype-specific handling |
 | MSC2475 | ⬛ ○ | closed | API versioning | Spec process meta-MSC about API version naming; closed |
-| MSC2474 | ⬛ ◐ | open | Add key backup version to SSSS account data | Client-side SSSS field; server stores account_data opaquely |
-| MSC2472 | ⬛ ◐ | merged | Symmetric SSSS | Client-side SSSS crypto; server only stores account_data |
 | MSC2461 | ⬛ ◐ | closed | Proposal for Authenticated Content Repository API | [→ MSC3916] |
 | MSC2427 | ⬛ ◐ | open | Proposal for JSON-based message formatting | Client-only message formatting alternative to HTML |
 | MSC2425 | ⬛ ● | closed | Remove Authentication on /submitToken Identity Service API | Identity Server endpoint; not a homeserver concern |
@@ -1135,32 +1142,28 @@ place of the (uniformly empty) `Impl` cell.
 | MSC2359 | ⬛ ◐ | closed | E2E Encrypted SFU VoIP conferencing via Matrix | [→ MSC3401] Architectural sketch for client+SFU; no homeserver requirements |
 | MSC2354 | ⬛ ◐ | open | Device to device streaming file transfers | Client-only WebRTC signaling over event types; server transports opaquely |
 | MSC2346 | ⬛ ● | open | MSC 2346: Bridge information state event | m.bridge state event; bridge/client concern |
-| MSC2324 | ⬛ ● | merged | Facilitating early releases of software dependent on spec | Process change about FCP and stable prefixes |
 | MSC2320 | ⬛ ● | merged | Versions information for identity servers | Identity server endpoint, not homeserver |
-| MSC2315 | ⬛ ● | open | Allow users to select "none" as an integration manager | Client account_data m.integrations toggle |
-| MSC2313 | ⬛ ● | merged | Moderation policies as rooms (ban lists) | State events m.policy.rule.*; no homeserver enforcement |
 | MSC2312 | ⬛ ● | merged | URI scheme for Matrix | Client-side URI scheme; no homeserver endpoint required |
 | MSC2299 | ⬛ ● | open | Proposal to add m.textfile msgtype | Client-only msgtype m.textfile |
 | MSC2291 | ⬛ ● | open | Configuration to Control Crawling | Bot-only advisory state event; no homeserver behavior |
 | MSC2284 | ⬛ ● | merged | Making the identity server optional during discovery | Client-side .well-known FAIL_PROMPT behavior |
 | MSC2241 | ⬛ ◐ | merged | Key verification in DMs | Client-side verification flow over m.room.message; server passes events trans... |
 | MSC2232 | ⬛ ● | closed | Expose Homeserver Email Configuration in Registration Parameters | proposal text is the empty MSC template |
-| MSC2230 | ⬛ ◐ | merged | Store Identity Server in Account Data | client behavior over generic account data; HS already supports account data |
-| MSC2211 | ⬛ ● | open | Identity Servers Storing Threepid Hashes at Rest | identity server storage details; not HS |
 | MSC2192 | ⬛ ● | open | Inline widgets | client extensible event m.embed; no server logic |
 | MSC2191 | ⬛ ● | merged | Markup for mathematical messages | client formatted_body rendering only |
 | MSC2184 | ⬛ ● | merged | Allow the HTML `<details>` tag in messages | client HTML rendering; no server impact |
 | MSC2063 | ⬛ ◐ | closed | Add "server information" public API proposal | closed; no real proposal text (template file only) |
 | MSC2010 | ⬛ ● | merged | MSC 2010: Proposal to add client-side spoilers | client-side rendering of data-mx-spoiler in formatted_body |
+| MSC1983 | ⬛ ● | merged | Proposal to add reasons for leaving a room | src/api/client/membership/leave.rs:21 passes body.reason to leave |
 | MSC1961 | ⬛ ● | merged | Integration manager authentication | merged; integration-manager auth API is on the manager, not homeserver |
 | MSC1960 | ⬛ ● | merged | OpenID Connect information exchange for widgets | OpenID Connect exchange for widgets; the new flow is widget-to-client, server... |
 | MSC1959 | ⬛ ● | open | Sticker picker API | branch; sticker picker API on integration manager, not homeserver |
-| MSC1958 | ⬛ ● | closed | Widget architecture changes | client widget account_data shape; servers do not interpret widget content |
 | MSC1956 | ⬛ ● | open | Integrations API | branch; integrations API is integration-manager scope, not homeserver |
 | MSC1951 | ⬛ ◐ | closed | Custom emoji and sticker packs in Matrix | branch; client/integration manager concept; uses generic rooms |
 | MSC1920 | ⬛ ◐ | closed | Alternative texts for stickers | branch; client-side rendering field on m.sticker; no server logic |
 | MSC1902 | ⬛ ● | closed | Splitting the media repo into a client-side and server-side component | [→ MSC3916] |
 | MSC1849 | ⬛ ◐ | closed | Proposal for aggregations via relations | [→ MSC2674/MSC2675/MSC2676] |
+| MSC1818 | ⬛ ● | closed | Remove references to presence lists | presence list endpoints absent (compliant by removal) |
 | MSC1781 | ⬛ ● | open | Proposal for associations for DIDs and DID names | identity-server endpoints for DID validation; not a homeserver concern |
 | MSC1779 | ⬛ ● | merged | Proposal for Open Governance of Matrix.org | governance/foundation document; not a homeserver feature |
 | MSC1769 | ⬛ ● | open | Proposal for extensible profiles as rooms | branch; profile-as-rooms not implemented |
@@ -1179,7 +1182,6 @@ place of the (uniformly empty) `Impl` cell.
 | MSC1301 | ⬛ ◐ | closed | Proposal for improving authorization for the matrix profile API | legacy 2018 issue (closed) tracked via redirect; profile-share-room limit not... |
 | MSC1286 | ⬛ ● | open | Formally spec an API for interacting with integration managers | legacy 2018 issue tracked via cross-repo redirect; integration manager API is... |
 | MSC1267 | ⬛ ● | closed | Interactive key verification using short authentication strings | stub Google doc; SAS verification specified later (MSC2241+); client-only fea... |
-| MSC1236 | ⬛ ● | open | Matrix Widget API v2 | legacy 2018 issue tracked via redirect; widget API v2 is a client-side concern |
 | MSC1229 | ⬛ ◐ | open | Mitigating abuse of the event depth parameter over federation | legacy 2018 issue tracked via redirect; depth-abuse mitigations not implement... |
 | MSC1225 | ⬛ ● | closed | Extensible event types &amp; fallback in Matrix | empty Google-doc stub; extensible events specified later in MSC1767 |
 | MSC1215 | ⬛ ● | closed | Groups as Rooms | [→ MSC1772] empty Google-doc stub; groups feature dropped in favor of Spaces |
