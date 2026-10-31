@@ -7,8 +7,7 @@ use std::io::{Error as IoError, ErrorKind};
 #[cfg(unix)]
 use std::os::unix::fs::{PermissionsExt as _, symlink};
 use std::{
-	env::{current_exe, temp_dir, var_os, vars_os},
-	ffi::OsStr,
+	env::{current_exe, temp_dir, var_os},
 	fs::{
 		OpenOptions, Permissions, create_dir_all, metadata, read_to_string, remove_dir_all,
 		set_permissions, write,
@@ -35,7 +34,10 @@ use super::{
 	Overwrite, RegenerateOptions, adjacent_new_path, example_config, regenerate_config,
 	write::write_atomic_with_precommit, write_example_config,
 };
-use crate::config::{ENV_PREFIXES, Sources};
+use crate::{
+	config::{ENV_PREFIXES, Sources},
+	utils::sys::command_without_env_prefixes,
+};
 
 #[cfg(target_os = "macos")]
 type XattrValue = SmallVec<[u8; 32]>;
@@ -651,13 +653,7 @@ fn config_can_be_selected_solely_through_the_path_environment() {
 	let executable = current_exe().expect("current test executable found");
 
 	// env_clear() would drop the loader environment the nix check phase supplies.
-	let executed = vars_os()
-		.map(|(key, _)| key)
-		.filter(|key| is_config_env(key))
-		.fold(Command::new(executable), |mut command, key| {
-			command.env_remove(key);
-			command
-		})
+	let executed = command_without_env_prefixes(Command::new(executable), &ENV_PREFIXES)
 		.arg("config::regenerate::tests::config_can_be_selected_solely_through_the_path_environment")
 		.arg(exact)
 		.env("TUWUNEL_CONFIG", &input)
@@ -705,17 +701,6 @@ fn get_xattr(path: &Path, name: &str) -> Option<XattrValue> {
 	let length = usize::try_from(length).ok()?;
 
 	value.get(..length).map(XattrValue::from_slice)
-}
-
-// Matches figment's uncased prefix filter, which trims the key first.
-fn is_config_env(key: &OsStr) -> bool {
-	let key = key.to_string_lossy();
-	let key = key.trim();
-
-	ENV_PREFIXES.into_iter().any(|prefix| {
-		key.get(..prefix.len())
-			.is_some_and(|head| head.eq_ignore_ascii_case(prefix))
-	})
 }
 
 impl TempDir {

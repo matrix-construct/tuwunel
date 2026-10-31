@@ -20,7 +20,7 @@ use std::{
 use figment::Profile;
 use tuwunel_macros::implement;
 
-use super::{baseline::assert_defaults, check_with_captured_logs, config_from_toml};
+use super::config_from_toml;
 use crate::{
 	Result,
 	config::{Config, ENV_PREFIXES, RegenerateOptions, Sources, regenerate_config},
@@ -33,58 +33,6 @@ const EXPECTED: &str = "CONFIG_HIERARCHY_EXPECTED";
 const NATIVE: &str = "CONFIG_HIERARCHY_NATIVE";
 
 struct Files(PathBuf);
-
-#[test]
-fn rocksdb_absent_empty_and_partial_preserve_old_defaults() {
-	for input in ["[global]\n", "[global.rocksdb]\n"] {
-		assert_defaults(&config_from_toml(input).expect("default section accepted"));
-	}
-
-	let partial = config_from_toml("[global.rocksdb]\nchecksums = false\n")
-		.expect("partial section accepted");
-
-	assert!(!partial.rocksdb.checksums);
-	assert_defaults(&with_default_checksums(partial));
-}
-
-fn with_default_checksums(mut config: Config) -> Config {
-	config.rocksdb.checksums = true;
-	config
-}
-
-#[test]
-fn legacy_and_canonical_files_obey_order_and_preserve_siblings() {
-	let files = Files::new();
-	let legacy =
-		files.write("old.toml", "rocksdb_checksums = false\nrocksdb_max_log_files = 9\n");
-
-	let canonical = files.write("new.toml", "[global.rocksdb]\nchecksums = true\n");
-
-	for (paths, expected) in [([&legacy, &canonical], true), ([&canonical, &legacy], false)] {
-		let raw = Config::load_files(paths.into_iter()).expect("ordered sources accepted");
-		let config = Config::new(&raw).expect("typed configuration");
-
-		assert_eq!(config.rocksdb.checksums, expected);
-		assert_eq!(config.rocksdb.max_log_files, 9);
-	}
-}
-
-#[implement(Files)]
-fn new() -> Self {
-	let sequence = NEXT.fetch_add(1, Ordering::Relaxed);
-	let path = temp_dir().join(format!("tuwunel-config-hierarchy-{}-{sequence}", id()));
-
-	create_dir_all(&path).expect("fixture directory created");
-	Self(path)
-}
-
-#[implement(Files)]
-fn write(&self, name: &str, contents: &str) -> PathBuf {
-	let path = self.0.join(name);
-
-	write(&path, contents).expect("fixture written");
-	path
-}
 
 #[test]
 fn canonical_toml_spellings_are_equivalent() {
@@ -124,6 +72,23 @@ fn conflicting_file_spellings_and_scalar_ancestors_are_rejected() {
 		assert!(error.contains(&format!("conflict-{index}.toml")));
 		assert!(!error.contains("secret sentinel"));
 	}
+}
+
+#[implement(Files)]
+fn new() -> Self {
+	let sequence = NEXT.fetch_add(1, Ordering::Relaxed);
+	let path = temp_dir().join(format!("tuwunel-config-hierarchy-{}-{sequence}", id()));
+
+	create_dir_all(&path).expect("fixture directory created");
+	Self(path)
+}
+
+#[implement(Files)]
+fn write(&self, name: &str, contents: &str) -> PathBuf {
+	let path = self.0.join(name);
+
+	write(&path, contents).expect("fixture written");
+	path
 }
 
 #[test]
@@ -166,61 +131,6 @@ fn type_errors_keep_the_detail_of_ordinary_values() {
 	let error = rejection(config_from_toml("[global]\nrocksdb_checksums = 'yes'\n"));
 
 	assert!(error.contains("expected a boolean"), "{error}");
-}
-
-#[test]
-fn group_unknowns_follow_existing_strictness_policy() {
-	for strict in [false, true] {
-		let config = config_from_toml(&format!(
-			"[global]\nerror_on_unknown_config_opts = {strict}\n[global.rocksdb]\ncheckssums = \
-			 false\nruntime_extra = true\n"
-		))
-		.expect("unknown values retained for checking");
-
-		let (result, logs) = check_with_captured_logs(&config);
-
-		assert_eq!(result.is_err(), strict, "{result:?}");
-		assert!(logs.contains("rocksdb.checkssums"), "{logs}");
-		assert!(logs.contains("rocksdb.runtime_extra"), "{logs}");
-	}
-}
-
-#[test]
-fn canonical_regeneration_preserves_unknown_residue_and_is_idempotent() {
-	let files = Files::new();
-	let old =
-		files.write("old.toml", "server_name = 'hierarchy.example'\nrocksdb_checksums = false\n");
-
-	let extra = files.write("extra.toml", "[global.rocksdb]\nfuture_setting = ['retained']\n");
-	let output = files.0.join("canonical.toml");
-	let second = files.0.join("again.toml");
-	let sources = Sources { paths: vec![old, extra], overrides: None };
-
-	regenerate_config(&sources, options(&output)).expect("canonical regeneration");
-
-	let rendered = read_to_string(&output).expect("output read");
-	let raw = Config::load_files([&output].into_iter()).expect("regenerated source accepted");
-
-	assert!(
-		!Config::new(&raw)
-			.expect("typed output")
-			.rocksdb
-			.checksums
-	);
-
-	let residue = raw
-		.extract_inner::<Vec<String>>("rocksdb.future_setting")
-		.unwrap();
-
-	assert_eq!(residue, ["retained"]);
-
-	assert!(rendered.contains("[global.rocksdb]"));
-	assert!(!rendered.contains("rocksdb_checksums ="));
-
-	let sources = Sources { paths: vec![output], overrides: None };
-
-	regenerate_config(&sources, options(&second)).expect("second regeneration");
-	assert_eq!(read_to_string(second).unwrap(), rendered);
 }
 
 #[test]

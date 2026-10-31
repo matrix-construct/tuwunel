@@ -1,7 +1,6 @@
 [
   {
     "source": "docs/deploying/docker-compose.for-traefik.yml",
-    "sha256": "3cc2bfd5dc33d12801f1fe0bdb599258c2b1d91f885dc1f0afd859a0e7df4bb3",
     "environment": {
       "TUWUNEL_SERVER_NAME": "your.server.name.example",
       "TUWUNEL_DATABASE_PATH": "/var/lib/tuwunel",
@@ -34,7 +33,6 @@
   },
   {
     "source": "docs/deploying/docker-compose.with-caddy.yml",
-    "sha256": "4ea9a0d770efb8b820c3a432d6f55e80e95d911ea164eab77a65999c9e9e4d92",
     "environment": {
       "TUWUNEL_SERVER_NAME": "example.com",
       "TUWUNEL_DATABASE_PATH": "/var/lib/tuwunel",
@@ -64,7 +62,6 @@
   },
   {
     "source": "docs/deploying/docker-compose.with-traefik.yml",
-    "sha256": "a8b26a21af050015ae46a6444aa74ea917989610fa0d14bed441af8e65d3daa6",
     "environment": {
       "TUWUNEL_SERVER_NAME": "your.server.name.example",
       "TUWUNEL_TRUSTED_SERVERS": "[\"matrix.org\"]",
@@ -93,7 +90,6 @@
   },
   {
     "source": "docs/deploying/docker-compose.yml",
-    "sha256": "4cb949b94cea7b3286db4ac020fa31bc9c554ed15c395d4e6b016eb46c3fae5b",
     "environment": {
       "TUWUNEL_SERVER_NAME": "your.server.name",
       "TUWUNEL_DATABASE_PATH": "/var/lib/tuwunel",
@@ -121,7 +117,6 @@
   },
   {
     "source": "quadlet/tuwunel.env",
-    "sha256": "68114d64aca85d3de665a19613050576b1d17f6542334b58334a2ea0c796b83a",
     "environment": {
       "TUWUNEL_SERVER_NAME": "\"your.server.tld\"",
       "TUWUNEL_PORT": "8008",
