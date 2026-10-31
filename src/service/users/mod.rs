@@ -264,10 +264,7 @@ impl Service {
 			)));
 		}
 
-		// Remove all associated devices
-		self.all_device_ids(user_id)
-			.for_each(|device_id| self.remove_device(user_id, device_id))
-			.await;
+		self.remove_devices(user_id, None).await;
 
 		// Set the password to "" to indicate a deactivated account. Hashes will never
 		// result in an empty string, so the user will not be able to log in again.

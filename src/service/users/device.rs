@@ -15,7 +15,7 @@ use tuwunel_core::{
 		BoolExt, MutexMapGuard, OptionExt, ReadyExt,
 		future::OptionFutureExt,
 		random_string,
-		stream::{IterStream, TryIgnore},
+		stream::{IterStream, TryIgnore, automatic_width},
 		string::to_small_string,
 		time::{
 			duration_since_epoch, timepoint_from_epoch, timepoint_from_now, timepoint_has_passed,
@@ -134,6 +134,22 @@ pub(super) async fn lock_device(&self, user_id: &UserId, device_id: &DeviceId) -
 	let key = (user_id.to_owned(), device_id.to_owned());
 
 	self.updating_device.lock(&key).await
+}
+
+/// Removes every device of a user except the one to keep, if any.
+///
+/// Each device is removed as by `remove_device`, so its access token stops
+/// working. Removals run concurrently, in no particular order.
+#[implement(super::Service)]
+#[tracing::instrument(level = "debug", skip(self))]
+pub async fn remove_devices(&self, user_id: &UserId, keep: Option<&DeviceId>) {
+	self.all_device_ids(user_id)
+		.ready_filter(|&device_id| Some(device_id) != keep)
+		.map(ToOwned::to_owned)
+		.for_each_concurrent(automatic_width(), async |device_id| {
+			self.remove_device(user_id, &device_id).await;
+		})
+		.await;
 }
 
 /// Removes a device from a user.

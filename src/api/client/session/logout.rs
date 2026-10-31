@@ -1,5 +1,4 @@
 use axum::extract::State;
-use futures::StreamExt;
 use ruma::api::client::session::{logout, logout_all};
 use tuwunel_core::Result;
 
@@ -49,12 +48,7 @@ pub(crate) async fn logout_all_route(
 ) -> Result<logout_all::v3::Response> {
 	services
 		.users
-		.all_device_ids(body.sender_user())
-		.for_each(|device_id| {
-			services
-				.users
-				.remove_device(body.sender_user(), device_id)
-		})
+		.remove_devices(body.sender_user(), None)
 		.await;
 
 	Ok(logout_all::v3::Response::new())

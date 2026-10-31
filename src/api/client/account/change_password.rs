@@ -1,5 +1,4 @@
 use axum::extract::State;
-use futures::StreamExt;
 use ruma::{
 	OwnedUserId,
 	api::client::{
@@ -8,7 +7,7 @@ use ruma::{
 	},
 	thirdparty::Medium,
 };
-use tuwunel_core::{Err, Error, Result, info, utils::ReadyExt};
+use tuwunel_core::{Err, Error, Result, info};
 
 use crate::{ClientIp, Ruma, router::auth_uiaa};
 
@@ -54,9 +53,7 @@ pub(crate) async fn change_password_route(
 		// A logged-out reset has no current device to preserve.
 		services
 			.users
-			.all_device_ids(&sender_user)
-			.ready_filter(|&id| Some(id) != body.sender_device.as_deref())
-			.for_each(|id| services.users.remove_device(&sender_user, id))
+			.remove_devices(&sender_user, body.sender_device.as_deref())
 			.await;
 	}
 

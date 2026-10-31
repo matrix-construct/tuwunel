@@ -69,17 +69,7 @@ pub(crate) async fn admin_create_or_modify_route(
 			.await?;
 
 		if body.logout_devices {
-			services
-				.users
-				.all_device_ids(user_id)
-				.map(ToOwned::to_owned)
-				.for_each_concurrent(automatic_width(), async |device_id| {
-					services
-						.users
-						.remove_device(user_id, &device_id)
-						.await;
-				})
-				.await;
+			services.users.remove_devices(user_id, None).await;
 		}
 	}
 
