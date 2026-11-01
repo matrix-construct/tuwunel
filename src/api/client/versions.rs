@@ -100,7 +100,7 @@ static VERSIONS: [&str; 27] = [
 	"v1.19",  /* mutual rooms (MSC2666) */
 ];
 
-static UNSTABLE_FEATURES: [&str; 36] = [
+static UNSTABLE_FEATURES: [&str; 37] = [
 	"org.matrix.e2e_cross_signing",
 	// private read receipts (https://github.com/matrix-org/matrix-spec-proposals/pull/2285)
 	"org.matrix.msc2285.stable",
@@ -168,6 +168,8 @@ static UNSTABLE_FEATURES: [&str; 36] = [
 	"org.matrix.msc4222",
 	// Backward fully-read moves on request (https://github.com/matrix-org/matrix-spec-proposals/pull/4446)
 	"com.beeper.msc4446",
+	// Profile change propagation (https://github.com/matrix-org/matrix-spec-proposals/pull/4466)
+	"computer.gingershaped.msc4466",
 ];
 
 static OIDC_FEATURES: [&str; 6] = [
