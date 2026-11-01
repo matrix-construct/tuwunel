@@ -33,7 +33,7 @@ use self::{
 	write::write_atomic,
 };
 use super::{Config, DEPRECATED_KEYS, Sources, format::Toml, normalize::validate_registry};
-use crate::{Err, Error, Result, err, implement, utils::BoolExt};
+use crate::{Err, Result, err, implement, utils::BoolExt};
 
 const NEVER_EMIT: [&str; 2] = ["database_restore_backup", "force_migration"];
 
@@ -60,6 +60,7 @@ pub(super) struct FieldSpec {
 pub(super) struct SectionSpec {
 	pub(super) section: &'static str,
 	pub(super) aliases: &'static [&'static str],
+	pub(super) about: &'static str,
 	pub(super) example: &'static str,
 	pub(super) fields: &'static [FieldSpec],
 	pub(super) group: bool,
@@ -139,6 +140,13 @@ struct RenderContext<'a> {
 	strip_unknown: bool,
 	expected: &'a mut Dict,
 	stats: &'a mut RenderStats,
+}
+
+#[derive(Clone, Copy)]
+enum Block<'a, 'v> {
+	Instance(&'a Instance<'v>),
+	Environment(&'a Instance<'v>, (&'a Figment, &'a Dict)),
+	Template,
 }
 
 #[derive(Clone, Copy)]
@@ -376,41 +384,76 @@ pub fn dropped_keys(&self) -> impl Iterator<Item = &'static str> + '_ {
 
 fn render_schema(values: &Dict, context: &mut RenderContext<'_>) -> Result<String> {
 	let schema = schema();
-	let mut output = String::with_capacity(schema.iter().map(|spec| spec.example.len()).sum());
+	let capacity = schema
+		.iter()
+		.flat_map(|spec| [spec.about, spec.example])
+		.map(str::len)
+		.sum();
 
-	for &spec in schema {
-		let instances = resolve_instances(spec, values);
-		let dynamic = is_dynamic(spec.section);
+	schema
+		.iter()
+		.try_fold(String::with_capacity(capacity), |output, &spec| {
+			render_section(output, spec, values, context)
+		})
+}
 
-		for instance in &instances {
-			render_instance(&mut output, spec, instance, context)?;
-		}
+fn render_section(
+	output: String,
+	spec: &SectionSpec,
+	values: &Dict,
+	context: &mut RenderContext<'_>,
+) -> Result<String> {
+	let environment = context.environment;
+	let instances = resolve_instances(spec, values);
+	let environment_instances = environment
+		.map(|(_, environment_values)| resolve_instances(spec, environment_values))
+		.unwrap_or_default();
 
-		let rendered_instance = instances.is_empty().is_false();
+	let rendered = instances.is_empty().is_false()
+		|| environment_instances
+			.iter()
+			.any(|candidate| is_unrendered(&instances, candidate));
 
-		let rendered_instance = match context.environment {
-			| None => rendered_instance,
-			| Some(environment @ (_, environment_values)) => {
-				let environment_instances = resolve_instances(spec, environment_values);
+	let templated = is_dynamic(spec.section) || rendered.is_false();
+	let environment_blocks = environment_instances
+		.iter()
+		.filter(|candidate| is_unrendered(&instances, candidate))
+		.filter_map(|candidate| {
+			environment.map(|environment| Block::Environment(candidate, environment))
+		});
 
-				environment_instances
-					.iter()
-					.filter(|candidate| {
-						instances
-							.iter()
-							.all(|instance| instance.path != candidate.path)
-					})
-					.try_fold(rendered_instance, |_, candidate| {
-						render_environment_instance(&mut output, spec, candidate, environment)?;
+	instances
+		.iter()
+		.map(Block::Instance)
+		.chain(environment_blocks)
+		.chain(templated.then_some(Block::Template))
+		.enumerate()
+		.try_fold(output, |output, (index, block)| {
+			render_block(output, index, spec, block, context)
+		})
+}
 
-						Ok::<_, Error>(true)
-					})?
-			},
-		};
+fn is_unrendered<'v>(instances: &[Instance<'v>], candidate: &Instance<'v>) -> bool {
+	instances
+		.iter()
+		.all(|instance| instance.path != candidate.path)
+}
 
-		if dynamic || !rendered_instance {
-			output.push_str(spec.example);
-		}
+fn render_block(
+	mut output: String,
+	index: usize,
+	spec: &SectionSpec,
+	block: Block<'_, '_>,
+	context: &mut RenderContext<'_>,
+) -> Result<String> {
+	let lead = if index == 0 { spec.about } else { "\n\n" };
+
+	output.push_str(lead);
+	match block {
+		| Block::Instance(instance) => render_instance(&mut output, spec, instance, context)?,
+		| Block::Environment(instance, environment) =>
+			render_environment_instance(&mut output, spec, instance, environment)?,
+		| Block::Template => output.push_str(spec.example),
 	}
 
 	Ok(output)

@@ -2,7 +2,6 @@ use std::{
 	borrow::Cow,
 	collections::BTreeMap,
 	ffi::c_int,
-	fmt::Write as _,
 	fs::{read, write},
 	sync::{Mutex, OnceLock, PoisonError},
 };
@@ -11,8 +10,8 @@ use proc_macro::TokenStream;
 use proc_macro2::{Ident, TokenStream as TokenStream2};
 use quote::{ToTokens, format_ident, quote};
 use syn::{
-	Error, Expr, ExprLit, Field, Fields, FieldsNamed, ItemStruct, Lit, LitStr, Meta, MetaList,
-	MetaNameValue, Token, Type, TypePath, ext::IdentExt as _, parse::Parser,
+	Attribute, Error, Expr, ExprLit, Field, Fields, FieldsNamed, ItemStruct, Lit, LitStr, Meta,
+	MetaList, MetaNameValue, Token, Type, TypePath, ext::IdentExt as _, parse::Parser,
 	punctuated::Punctuated, spanned::Spanned,
 };
 
@@ -25,6 +24,8 @@ const UNDOCUMENTED: &str = "# This item is undocumented. Please contribute docum
 
 const HIDDEN: &[&str] = &["default", "display", "config-example", "legacy"];
 
+const RULE_WIDTH: usize = 80;
+
 type Sections = BTreeMap<String, Vec<u8>>;
 
 struct Registration<'a> {
@@ -32,6 +33,7 @@ struct Registration<'a> {
 	cfg_attrs: &'a [TokenStream2],
 	section: &'a str,
 	section_aliases: &'a str,
+	about: &'a str,
 	section_buf: &'a str,
 	fields: &'a [TokenStream2],
 	group: bool,
@@ -136,12 +138,13 @@ fn generate_example(input: &ItemStruct, args: &[Meta], emit: bool) -> Result<Tok
 
 	let header = settings.get("header").map_or("", String::as_str);
 	let footer = settings.get("footer").map_or("", String::as_str);
-	let comment_prefix = if section != "global" { "\n#" } else { "" };
+	let about = section_documentation(input, header)?;
+	let comment_prefix = if section != "global" { "#" } else { "" };
 	let Rendered { summary, fields, example } = rendered;
-	let section_buf = format!("{header}\n\n{comment_prefix}[{section}]\n{example}{footer}");
+	let section_buf = format!("{comment_prefix}[{section}]\n{example}{footer}");
 
 	if emit {
-		append_section(filename, section, section_buf.as_bytes());
+		append_section(filename, section, &[about.as_bytes(), section_buf.as_bytes()]);
 	}
 
 	let struct_name = &input.ident;
@@ -151,6 +154,7 @@ fn generate_example(input: &ItemStruct, args: &[Meta], emit: bool) -> Result<Tok
 		cfg_attrs: &cfg_attrs,
 		section,
 		section_aliases,
+		about: &about,
 		section_buf: &section_buf,
 		fields: &fields,
 		group,
@@ -183,6 +187,15 @@ fn generate_example(input: &ItemStruct, args: &[Meta], emit: bool) -> Result<Tok
 	};
 
 	Ok(generated)
+}
+
+fn section_documentation(input: &ItemStruct, header: &str) -> Result<String> {
+	let doc = get_doc_comment(&input.attrs)
+		.ok_or_else(|| Error::new(input.ident.span(), "config section requires a doc comment"))?;
+
+	let (doc, suffix) = trim_comment(&doc);
+
+	Ok(format!("{header}\n\n{:#<RULE_WIDTH$}\n{doc}{suffix}", ""))
 }
 
 fn render_field((field, ident): (&Field, &Ident), rendering: &Rendering<'_>) -> RenderedField {
@@ -312,8 +325,8 @@ fn generate_field_spec(
 }
 
 fn field_documentation(field: &Field, undocumented: &str) -> String {
-	let doc = get_doc_comment(field);
-	let doc = doc.as_deref().unwrap_or(undocumented).trim_end();
+	let doc = get_doc_comment(&field.attrs);
+	let (doc, suffix) = trim_comment(doc.as_deref().unwrap_or(undocumented));
 	let empty = doc.lines().all(|line| {
 		let body = line.trim_start_matches('#').trim();
 
@@ -322,9 +335,15 @@ fn field_documentation(field: &Field, undocumented: &str) -> String {
 
 	let prefix = if empty { undocumented } else { "" };
 	let separator = if empty { "\n" } else { "" };
-	let suffix = if doc.ends_with('#') { "\n" } else { "\n#\n" };
 
 	format!("{prefix}{separator}{doc}{suffix}")
+}
+
+fn trim_comment(doc: &str) -> (&str, &'static str) {
+	let doc = doc.trim_end();
+	let suffix = if doc.ends_with('#') { "\n" } else { "\n#\n" };
+
+	(doc, suffix)
 }
 
 fn display_value(ident: &Ident, directive: impl Fn(&str) -> bool) -> TokenStream2 {
@@ -381,6 +400,7 @@ fn generate_registration(registration: &Registration<'_>) -> TokenStream2 {
 		cfg_attrs,
 		section,
 		section_aliases,
+		about,
 		section_buf,
 		fields,
 		group,
@@ -400,6 +420,7 @@ fn generate_registration(registration: &Registration<'_>) -> TokenStream2 {
 			crate::config::regenerate::SectionSpec {
 				section: #section,
 				aliases: &[#(#section_aliases),*],
+				about: #about,
 				example: #section_buf,
 				fields: &[#(#fields),*],
 				group: #group,
@@ -436,7 +457,7 @@ fn get_serde_aliases(field: &Field) -> impl Iterator<Item = LitStr> + '_ {
 		})
 }
 
-fn append_section(filename: &str, section: &str, content: &[u8]) {
+fn append_section(filename: &str, section: &str, parts: &[&[u8]]) {
 	let mut buffers = FILE_BUFFERS
 		.lock()
 		.unwrap_or_else(PoisonError::into_inner);
@@ -444,7 +465,7 @@ fn append_section(filename: &str, section: &str, content: &[u8]) {
 	buffers
 		.entry(filename.to_owned())
 		.or_default()
-		.insert(section.trim_matches(['[', ']']).to_owned(), content.to_vec());
+		.insert(section.trim_matches(['[', ']']).to_owned(), parts.concat());
 
 	drop(buffers);
 
@@ -527,73 +548,64 @@ fn example_value(field: &Field) -> Cow<'static, str> {
 		.unwrap_or_default()
 }
 
-fn get_doc_comment(field: &Field) -> Option<String> {
-	let comment = get_doc_comment_full(field)?;
+fn get_doc_comment(attrs: &[Attribute]) -> Option<String> {
+	let comment = doc_values(attrs).fold(String::new(), |comment, value| {
+		value
+			.split('\n')
+			.filter(|line| !is_hidden_line(line))
+			.fold(comment, push_comment_line)
+	});
 
-	let out = comment
-		.lines()
-		.filter(|line| {
-			!HIDDEN.iter().any(|key| {
-				line.trim().starts_with(key) && line.trim().chars().nth(key.len()) == Some(':')
-			})
-		})
-		.fold(String::new(), |mut full, line| {
-			full.push('#');
-			full.push_str(line);
-			full.push('\n');
-			full
-		});
-
-	(!out.is_empty()).then_some(out)
+	Some(comment).filter(|comment| !comment.is_empty())
 }
 
 fn get_doc_comment_line(field: &Field, label: &str) -> Option<String> {
-	let comment = get_doc_comment_full(field)?;
-
-	comment
-		.lines()
-		.map(str::trim)
-		.filter(|line| line.starts_with(label))
-		.filter(|line| line.chars().nth(label.len()) == Some(':'))
-		.map(|line| {
-			line.split_once(':')
-				.map(|(_, v)| v)
-				.map(str::trim)
-				.map(ToOwned::to_owned)
-		})
-		.next()
-		.flatten()
+	doc_values(&field.attrs).find_map(|value| {
+		value
+			.split('\n')
+			.map(str::trim)
+			.find_map(|line| directive(line, label))
+			.map(str::trim)
+			.map(ToOwned::to_owned)
+	})
 }
 
-fn get_doc_comment_full(field: &Field) -> Option<String> {
-	let mut out = String::new();
-	for attr in &field.attrs {
-		let Meta::NameValue(MetaNameValue { path, value, .. }) = &attr.meta else {
-			continue;
-		};
+fn doc_values(attrs: &[Attribute]) -> impl Iterator<Item = String> + '_ {
+	attrs.iter().filter_map(doc_value)
+}
 
-		if path
-			.segments
+fn doc_value(attr: &Attribute) -> Option<String> {
+	let Meta::NameValue(MetaNameValue {
+		path,
+		value: Expr::Lit(ExprLit { lit: Lit::Str(token), .. }),
+		..
+	}) = &attr.meta
+	else {
+		return None;
+	};
+
+	path.is_ident("doc").then(|| token.value())
+}
+
+fn is_hidden_line(line: &str) -> bool {
+	let line = line.trim();
+
+	// Fences keep TOML examples out of rustdoc's doctests.
+	line.starts_with("```")
+		|| HIDDEN
 			.iter()
-			.next()
-			.is_none_or(|s| s.ident != "doc")
-		{
-			continue;
-		}
+			.any(|key| directive(line, key).is_some())
+}
 
-		let Expr::Lit(ExprLit { lit, .. }) = &value else {
-			continue;
-		};
+fn directive<'a>(line: &'a str, key: &str) -> Option<&'a str> {
+	line.strip_prefix(key)?.strip_prefix(':')
+}
 
-		let Lit::Str(token) = &lit else {
-			continue;
-		};
-
-		let value = token.value();
-		writeln!(&mut out, "{value}").expect("wrote to output string buffer");
-	}
-
-	(!out.is_empty()).then_some(out)
+fn push_comment_line(mut comment: String, line: &str) -> String {
+	comment.push('#');
+	comment.push_str(line);
+	comment.push('\n');
+	comment
 }
 
 fn get_type_name(field: &Field) -> Option<String> {
@@ -610,10 +622,11 @@ fn get_type_name(field: &Field) -> Option<String> {
 #[cfg(test)]
 mod tests {
 	use quote::quote;
-	use syn::{Field, parse_quote};
+	use syn::{Field, ItemStruct, parse_quote};
 
 	use super::{
 		example_value, generate_field_spec, get_default, get_doc_comment, get_serde_aliases,
+		section_documentation,
 	};
 
 	#[test]
@@ -690,8 +703,48 @@ mod tests {
 			name: String
 		};
 
-		let comment = get_doc_comment(&field).expect("visible comment to be emitted");
+		let comment = get_doc_comment(&field.attrs).expect("visible comment to be emitted");
 		assert!(comment.contains("#visible setting docs"));
 		assert!(!comment.contains("config-example:"));
+	}
+
+	#[test]
+	fn section_documentation_renders_rule_doc_and_closing_line() {
+		let input: ItemStruct = parse_quote! {
+			/// Section title.
+			///
+			/// Section overview.
+			struct Section;
+		};
+
+		let about = section_documentation(&input, "").expect("documented section");
+		let rule = "#".repeat(80);
+
+		assert_eq!(about, format!("\n\n{rule}\n# Section title.\n#\n# Section overview.\n#\n"));
+	}
+
+	#[test]
+	fn code_fences_are_hidden_from_emitted_comments() {
+		let input: ItemStruct = parse_quote! {
+			/// Section title.
+			///
+			/// ```toml
+			///     [section]
+			/// ```
+			struct Section;
+		};
+
+		let about = section_documentation(&input, "").expect("documented section");
+		let rule = "#".repeat(80);
+
+		assert_eq!(about, format!("\n\n{rule}\n# Section title.\n#\n#     [section]\n#\n"));
+	}
+
+	#[test]
+	fn undocumented_section_is_rejected() {
+		let input: ItemStruct = parse_quote! { struct Section; };
+		let error = section_documentation(&input, "").unwrap_err();
+
+		assert!(error.to_string().contains("doc comment"));
 	}
 }

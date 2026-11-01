@@ -16,6 +16,9 @@
 ### https://tuwunel.chat/configuration.html
 
 
+################################################################################
+# All the config options for tuwunel.
+#
 [global]
 
 # The server_name is the pretty name of this server. It is used as a
@@ -118,7 +121,13 @@
 #database_migrations = true
 
 
-
+################################################################################
+# Configures server administration and command output.
+#
+# Startup and signal commands share administration policy with interactive
+# commands. Room settings and the durable server-user identity govern
+# administrative communication.
+#
 #[global.admin]
 
 # Allows admins to run commands outside the admin room by prefixing
@@ -219,7 +228,12 @@
 #output_threads = false
 
 
-
+################################################################################
+# Configures the administration room.
+#
+# Creation and federation settings determine its initial setup. Tags and
+# notice policies control its presentation and routine messages.
+#
 #[global.admin.room]
 
 # Logs guest registrations in the admin room, which may be noisy or
@@ -260,7 +274,13 @@
 #notices = true
 
 
-
+################################################################################
+# Defines one inline Matrix application service registration.
+#
+# Tokens, namespaces, and protocol flags are converted to the Matrix
+# registration model. The enclosing config map supplies the registration ID
+# when `id` is empty.
+#
 #[global.appservice.<ID>]
 
 # The URL for the application service.
@@ -316,7 +336,13 @@
 #msc3202_transaction_extensions = false
 
 
-
+################################################################################
+# Defines one namespace claimed by an application service.
+#
+# The regular expression selects users, aliases, or rooms according to the
+# list containing this value. `exclusive` controls whether the service owns
+# every matching identifier.
+#
 #[[global.appservice.<ID>.<users|rooms|aliases>]]
 
 # Whether this application service has exclusive access to events within
@@ -329,7 +355,12 @@
 #regex =
 
 
-
+################################################################################
+# Configures outgoing application-service transport.
+#
+# Request timeouts bound application-service calls. Idle connections have
+# a separate pool lifetime.
+#
 #[global.appservice_client]
 
 # Sets appservice URL read and total timeouts in seconds, defaulting to
@@ -342,7 +373,13 @@
 #idle_timeout = 300
 
 
-
+################################################################################
+# Configures account authentication and session lifetimes.
+#
+# Login, OIDC, password hashing, and refresh-token policy have dedicated
+# settings. The integration secret authenticates MAS provisioning calls;
+# the emergency password grants access to the server bot account.
+#
 #[global.authentication]
 
 # Authenticates Matrix Authentication Service provisioning calls with a
@@ -390,7 +427,12 @@
 #emergency_password =
 
 
-
+################################################################################
+# Configures Argon2id password hashing.
+#
+# Memory, pass, and lane settings determine new password hashes. Stored
+# hashes retain the parameters used when created.
+#
 #[global.authentication.argon2]
 
 # Sets the Argon2id working-buffer size for hashing a new password, in 1
@@ -431,7 +473,13 @@
 #p_cost = 1
 
 
-
+################################################################################
+# Configures client login methods and login tokens.
+#
+# Password, token, and existing-session flows have separate enablement
+# controls. SSO presentation settings select how clients show identity
+# providers.
+#
 #[global.authentication.login]
 
 # Allows an existing session to mint a login token for another client.
@@ -519,7 +567,13 @@
 #oidc_aware_preferred = false
 
 
-
+################################################################################
+# Configures the built-in OpenID Connect provider.
+#
+# Native authentication, client registration, and authorization policy
+# have separate controls. Per-IP rate limits bound requests to its
+# endpoints.
+#
 #[global.authentication.oidc]
 
 # Enables native registration and login on the built-in OIDC provider.
@@ -670,7 +724,13 @@
 #rc_burst_count = 0
 
 
-
+################################################################################
+# Configures refresh-token expiry and reuse handling.
+#
+# Lifetime policy selects idle or absolute deadlines and soft or hard
+# logout. Reuse controls distinguish a grace window from suspected
+# compromise.
+#
 #[global.authentication.refresh_token]
 
 # Sets the refresh-token lifetime in seconds.
@@ -749,7 +809,12 @@
 #reuse_revoke = true
 
 
-
+################################################################################
+# Controls cache capacities and room summary retention.
+#
+# Individual capacities select the size of each cache, while a shared modifier
+# scales their memory use. Space hierarchy settings control summary lifetimes.
+#
 #[global.cache]
 
 # Multiplies cache capacities by a floating-point factor.
@@ -887,7 +952,12 @@
 #stateinfo_capacity = varies by system
 
 
-
+################################################################################
+# Bounds the lifetime of cached space hierarchy summaries.
+#
+# Minimum and maximum lifetimes are measured in seconds. Both limits can be
+# changed when the configuration is reloaded.
+#
 #[global.cache.space_hierarchy]
 
 # Minimum time-to-live in seconds for room summary entries in the spaces
@@ -905,11 +975,21 @@
 #ttl_max = 64800
 
 
-
+################################################################################
+# Configures client-facing protocol behavior.
+#
+# Sync settings bound long-polling timeouts. Room-summary controls select
+# sync calculations.
+#
 #[global.client]
 
 
-
+################################################################################
+# Configures client synchronization.
+#
+# Timeout bounds constrain client-requested long polling. The default
+# timeout applies when the client supplies none.
+#
 #[global.client.sync]
 
 # Sets the minimum requested timeout for long-polling sync.
@@ -947,7 +1027,13 @@
 #calculate_heroes = true
 
 
-
+################################################################################
+# Configures compatibility behavior across room versions.
+#
+# State-resolution backports extend existing mitigations to older
+# supported versions. The switch remains available for development and
+# recovery.
+#
 #[global.compatibility]
 
 # Backports state-reset security mitigations to all supported room
@@ -967,7 +1053,12 @@
 #hydra_backports = true
 
 
-
+################################################################################
+# Configures loading and reloading policy.
+#
+# Unknown-option handling selects warnings or startup errors. The signal
+# switch controls configuration reload requests.
+#
 #[global.configuration]
 
 # Rejects startup when an unknown configuration option is specified,
@@ -985,11 +1076,21 @@
 #reload_signal = true
 
 
-
+################################################################################
+# Groups database backup and request pool settings.
+#
+# Backups control snapshot storage and retention. The request pool controls
+# how database work is distributed across workers and hardware queues.
+#
 #[global.database]
 
 
-
+################################################################################
+# Configures RocksDB online backup storage and retention.
+#
+# Backups require a writable destination path. Retention limits how many
+# snapshots remain after a backup completes.
+#
 #[global.database.backup]
 
 # Selects a writable directory for online database backups.
@@ -1014,7 +1115,12 @@
 #keep = 1
 
 
-
+################################################################################
+# Configures the worker pool serving database requests.
+#
+# Affinity can derive worker groups from block device queue topology. Worker
+# limits and queue capacity constrain concurrency and scheduling overhead.
+#
 #[global.database.pool]
 
 # Enables database pool affinity support.
@@ -1068,11 +1174,21 @@
 #queue_mult = 4
 
 
-
+################################################################################
+# Configures room and user discovery.
+#
+# Room-directory settings govern publication and searching. User-directory
+# settings govern which local users can appear.
+#
 #[global.directory]
 
 
-
+################################################################################
+# Configures room-directory publication and searches.
+#
+# Client and federation access have separate controls. Search policy
+# determines when room IDs can find listed or unlisted rooms.
+#
 #[global.directory.rooms]
 
 # Allows federation access to the public room directory.
@@ -1131,7 +1247,12 @@
 #forbidden_remote_server_names = []
 
 
-
+################################################################################
+# Configures local user visibility in directory searches.
+#
+# Room visibility limits ordinary search results unless all local users
+# are shown. Appservice users require their separate visibility setting.
+#
 #[global.directory.users]
 
 # Shows all local users in directory searches.
@@ -1156,7 +1277,12 @@
 #show_appservice = false
 
 
-
+################################################################################
+# Configures encrypted rooms and device-key distribution.
+#
+# Room defaults select when encryption is enabled automatically. Key
+# limits and update-recipient policy govern device encryption data.
+#
 #[global.encryption]
 
 # Allows encrypted rooms and events.
@@ -1196,7 +1322,13 @@
 #device_key_update_encrypted_rooms_only = false
 
 
-
+################################################################################
+# Configures federation access and local state derivation.
+#
+# Transport, key lookup, history recovery, and bounded fanouts have
+# dedicated settings. Access controls apply to remote server
+# communication.
+#
 #[global.federation]
 
 # Allows federation with other servers.
@@ -1286,7 +1418,12 @@
 #enforce_stripped_state_pdu_validation = false
 
 
-
+################################################################################
+# Configures bounded federation fanouts.
+#
+# Concurrency and request timeouts limit survey work. Destination limits
+# require confirmation for larger admin surveys.
+#
 #[global.federation.fanout]
 
 # Sets the timeout in seconds for each bounded federation fanout request.
@@ -1321,7 +1458,13 @@
 #destination_limit = 2048
 
 
-
+################################################################################
+# Configures federation history fetching and recovery.
+#
+# Traversal, concurrency, and fetch-round limits bound recovery work.
+# Context fetching and previous-event waiting control when remote requests
+# begin.
+#
 #[global.federation.history]
 
 # Limits prior events visited by one recovery traversal.
@@ -1389,7 +1532,12 @@
 #fetch_fanout_rounds = 0
 
 
-
+################################################################################
+# Configures federation signing-key lookup.
+#
+# Trusted notaries can supplement or replace origin requests according to
+# policy. Batch size and concurrency limits bound trusted-server queries.
+#
 #[global.federation.keys]
 
 # Selects trusted notary servers used to gather other servers' public
@@ -1453,7 +1601,12 @@
 #trusted_server_batch_concurrency = 2
 
 
-
+################################################################################
+# Configures federation client transport.
+#
+# Request and key-lookup timeouts bound remote operations. Idle settings
+# control connection reuse.
+#
 #[global.federation.transport]
 
 # Sets the federation client read timeout in seconds.
@@ -1485,7 +1638,13 @@
 #idle_per_host = 1
 
 
-
+################################################################################
+# Configures inbound HTTP requests and responses.
+#
+# Request limits and client address extraction apply to server traffic.
+# Listener and compression settings control how that traffic reaches
+# clients.
+#
 #[global.http]
 
 # Sets the maximum request size for file uploads.
@@ -1571,7 +1730,12 @@
 #access_control_allow_origin = []
 
 
-
+################################################################################
+# Selects compression for outbound server responses.
+#
+# Each codec requires its matching build feature. These settings affect
+# server responses independently of outbound HTTP client negotiation.
+#
 #[global.http.compression]
 
 # Compresses the server's HTTP response bodies with zstd.
@@ -1603,7 +1767,13 @@
 #brotli = false
 
 
-
+################################################################################
+# Configures TCP and UNIX socket listeners.
+#
+# Explicit TCP addresses must bind successfully during startup. UNIX
+# socket settings control the path and permissions used by reverse
+# proxies.
+#
 #[global.http.listen]
 
 # Selects the IPv4 or IPv6 addresses on which tuwunel listens.
@@ -1640,7 +1810,13 @@
 #unix_socket_perms = 660
 
 
-
+################################################################################
+# Configures one OpenID Connect identity provider.
+#
+# Client credentials and endpoint discovery establish the upstream
+# authorization flow. Claim and trust settings control account mapping and
+# optional registration.
+#
 #[[global.identity_provider]]
 
 # The brand-name of the service (e.g. Apple, Facebook, GitHub, GitLab,
@@ -1884,10 +2060,8 @@
 # the identity provider.
 #
 # E.g. to force re-authentication even if IdP cookies are present:
-# ```toml
 # [[global.identity_provider]]
 # extra_authorization_parameters = { prompt = "login" }
-# ```
 #
 #extra_authorization_parameters = {}
 
@@ -1909,7 +2083,12 @@
 #forward_action_prompt = false
 
 
-
+################################################################################
+# Configures authentication using JSON Web Tokens.
+#
+# Key format, signature algorithm, and claim rules determine token validity.
+# Optional provisioning creates a local account for an otherwise valid token.
+#
 #[global.jwt]
 
 # Enable JWT logins
@@ -2005,7 +2184,13 @@
 #validate_signature = true
 
 
-
+################################################################################
+# Configures LDAP authentication and directory-backed administration.
+#
+# Connection, bind, search, and attribute settings determine how users are
+# located and authenticated. Optional admin search settings identify directory
+# entries treated as server administrators.
+#
 #[global.ldap]
 
 # Whether to enable LDAP login.
@@ -2092,7 +2277,12 @@
 #admin_filter =
 
 
-
+################################################################################
+# Configures log filtering, formatting, and output.
+#
+# Console and journal settings select destinations and presentation.
+# Low-level initialization controls support developer and expert use.
+#
 #[global.logging]
 
 # Sets the maximum log level, accepting debug, info, warn, or error.
@@ -2173,7 +2363,12 @@
 #global_default = true
 
 
-
+################################################################################
+# Configures media uploads, storage, and access.
+#
+# Provider selection controls where media is read and written. Import,
+# thumbnail, and URL preview settings govern related processing.
+#
 #[global.media]
 
 # Limits the number of concurrent pending asynchronous media uploads per
@@ -2343,11 +2538,21 @@
 #prevent_downloads_from = []
 
 
-
+################################################################################
+# Configures media imported from other server implementations.
+#
+# Source settings describe the existing media layout. Conduit imports can
+# read filesystem or object-store originals.
+#
 #[global.media.import]
 
 
-
+################################################################################
+# Describes source media for a Conduit database import.
+#
+# Directory settings identify the source sharding layout. An optional
+# storage provider supplies originals from Conduit object storage.
+#
 #[global.media.import.conduit]
 
 # Selects Conduit's media directory when importing its database in place.
@@ -2392,7 +2597,12 @@
 #source_provider =
 
 
-
+################################################################################
+# Configures image and animated thumbnail generation.
+#
+# Pixel and frame limits bound decoding and encoding work. Animated job
+# admission limits source processing concurrency.
+#
 #[global.media.thumbnail]
 
 # Limits the pixel count the thumbnailer will decode.
@@ -2447,7 +2657,12 @@
 #animated_concurrency = 4
 
 
-
+################################################################################
+# Configures URL preview fetching, caching, and origin access.
+#
+# Allowlists and denylists select permitted requests. Size limits, request
+# headers, and cache lifetime control generated previews.
+#
 #[global.media.url_preview]
 
 # Selects an optional source IP address or interface for URL preview
@@ -2592,7 +2807,12 @@
 #accept_language =
 
 
-
+################################################################################
+# Configures external video frame extraction for thumbnails.
+#
+# The command writes a still image for ordinary thumbnail processing.
+# Time, size, and concurrency limits bound extraction and staging work.
+#
 #[global.media.video_thumbnail]
 
 # Selects the program used to extract a still frame for videos uploaded
@@ -2664,11 +2884,22 @@
 #path =
 
 
-
+################################################################################
+# Configures outbound networking and name resolution.
+#
+# Discovery settings bound federation well-known requests. DNS and HTTP
+# client settings control resolution, request limits, and connection
+# behavior.
+#
 #[global.network]
 
 
-
+################################################################################
+# Bounds federation well-known discovery requests.
+#
+# Connection and request timeouts are measured in seconds. They apply to
+# HTTP discovery of federation destinations.
+#
 #[global.network.discovery]
 
 # Sets the federation well-known resolution connection timeout in
@@ -2682,7 +2913,13 @@
 #timeout = 10
 
 
-
+################################################################################
+# Configures DNS resolvers, caching, and query behavior.
+#
+# Cache lifetimes and lookup strategy shape federation resolution.
+# Alternative resolution settings serve internal networks and application
+# services.
+#
 #[global.network.dns]
 
 # Selects custom DNS servers instead of the operating system resolvers.
@@ -2786,7 +3023,13 @@
 #case_randomization = false
 
 
-
+################################################################################
+# Configures outbound HTTP clients.
+#
+# Response limits and address filtering constrain remote requests.
+# Timeouts, connection reuse, compression, and certificate checks supply
+# client defaults.
+#
 #[global.network.http]
 
 # Limits the size of a response body buffered from a remote server.
@@ -2884,7 +3127,12 @@
 #ip_range_denylist =
 
 
-
+################################################################################
+# Configures local and federated presence.
+#
+# Incoming and outgoing updates have separate controls. Idle and offline
+# timers determine how inactivity changes presence.
+#
 #[global.presence]
 
 # Allows local presence updates and requests.
@@ -2932,7 +3180,12 @@
 #timeout_remote_users = true
 
 
-
+################################################################################
+# Configures profile access, updates, and remote caching.
+#
+# Visibility settings distinguish client and federation requests. Field
+# limits bound cached profiles and requested selections.
+#
 #[global.profile]
 
 # Requires authentication on profile retrieval endpoints when enabled.
@@ -3029,7 +3282,12 @@
 #allow_inbound_federation_lookups = true
 
 
-
+################################################################################
+# Configures push-gateway delivery and notification policy.
+#
+# Gateway transport settings control requests. Rule evaluation and
+# active-user suppression control notification selection.
+#
 #[global.push]
 
 # Sets the notification-gateway pusher idle connection-pool timeout.
@@ -3085,15 +3343,29 @@
 #suppress_when_active = false
 
 
-
+################################################################################
+# Configures request rate limits.
+#
+# Each subsection limits one kind of request, such as password sign-in.
+#
 #[global.rate_limiting]
 
 
-
+################################################################################
+# Limits password sign-in by account and client address.
+#
+# Public login and authenticated password re-entry use separate attempt
+# budgets, so public guesses cannot consume the re-entry allowance.
+#
 #[global.rate_limiting.login]
 
 
-
+################################################################################
+# Limits successful sign-ins to one account.
+#
+# Only a sign-in by a verified password takes a token, so wrong guesses never
+# lock the owner out on this axis.
+#
 #[global.rate_limiting.login.account]
 
 # Token-bucket refill rate (sign-ins per second) for successful password
@@ -3124,7 +3396,12 @@
 #burst_count = 5
 
 
-
+################################################################################
+# Limits password attempts across accounts from one client address.
+#
+# Both successful and failed attempts consume this budget before password
+# verification, limiting password spraying and verification work.
+#
 #[global.rate_limiting.login.address]
 
 # Token-bucket refill rate for password attempts per client address.
@@ -3152,7 +3429,12 @@
 #burst_count = 20
 
 
-
+################################################################################
+# Limits wrong passwords against one account from one client address.
+#
+# A name that matches no account counts as a wrong password, so the limit
+# does not reveal which accounts exist.
+#
 #[global.rate_limiting.login.failed]
 
 # Token-bucket refill rate for wrong passwords per account and client
@@ -3181,7 +3463,11 @@
 #burst_count = 3
 
 
-
+################################################################################
+# Configures federated read receipts.
+#
+# Incoming and outgoing receipt delivery have separate controls.
+#
 #[global.read_receipts]
 
 # Allows receiving read receipts from remote servers.
@@ -3197,7 +3483,13 @@
 #allow_outgoing = true
 
 
-
+################################################################################
+# Configures account registration and initial user setup.
+#
+# Registration tokens and shared secrets control separate account-creation
+# paths. New-user defaults and guest policy govern initial account
+# behavior.
+#
 #[global.registration]
 
 # Appends text to a new user's display name at registration, separated by
@@ -3323,7 +3615,13 @@
 #grant_admin_to_first_user = true
 
 
-
+################################################################################
+# Configures guest account registration.
+#
+# Guest registration and automatic room joining have separate controls.
+# Automatic joins use the ordinary registration room list; some clients,
+# including Element, try to register guests automatically.
+#
 #[global.registration.guests]
 
 # Allows registrations with user type "guest".
@@ -3340,7 +3638,12 @@
 #allow_auto_join_rooms = false
 
 
-
+################################################################################
+# Defines a policy document required during registration.
+#
+# The enclosing map key becomes the policy identifier presented to clients.
+# Its version and translations form the `m.login.terms` stage parameters.
+#
 #[global.registration_terms.<ID>]
 
 # Version of this policy document, presented to the client. Configuring
@@ -3354,7 +3657,12 @@
 #version =
 
 
-
+################################################################################
+# Defines one localized registration policy document.
+#
+# `name` is the user-facing title for this language. `url` points clients to
+# the policy text whose acceptance is recorded.
+#
 #[global.registration_terms.<ID>.translations.<LANG>]
 
 # User friendly name of the policy document in this language.
@@ -3372,7 +3680,13 @@
 #url =
 
 
-
+################################################################################
+# Configures QR sign-in rendezvous sessions.
+#
+# Payload size, lifetime, and session count bound retained handshakes.
+# Authentication policy and per-IP throttling govern discovery and
+# creation.
+#
 #[global.rendezvous]
 
 # Enables QR sign-in rendezvous sessions under
@@ -3450,7 +3764,11 @@
 #rc_burst_count = 20
 
 
-
+################################################################################
+# RocksDB engine configuration.
+#
+# Omitted settings preserve the server's engine defaults.
+#
 #[global.rocksdb]
 
 # Sets the memory available to database read caches as a float in megabytes.
@@ -3695,7 +4013,13 @@
 #allow_fallocate = true
 
 
-
+################################################################################
+# Configures room creation, access, and lifecycle.
+#
+# Defaults govern newly created rooms and supported versions. Dedicated
+# settings cover joins, invites, relations, redaction, policy servers, and
+# extremities.
+#
 #[global.rooms]
 
 # Sets the default `m.federate` property for newly created rooms when the
@@ -3821,7 +4145,12 @@
 #delete_after_leave = false
 
 
-
+################################################################################
+# Configures forward-extremity pruning for incoming federation events.
+#
+# A soft cap and emergency bound control the tracked frontier. Batch
+# limits pace convergence across events.
+#
 #[global.rooms.extremities]
 
 # Sets the soft cap on forward extremities tracked per room.
@@ -3858,7 +4187,12 @@
 #prune_batch = 32
 
 
-
+################################################################################
+# Configures room invitation policy.
+#
+# Restrictions control non-admin invitations. Automatic acceptance can be
+# limited to direct messages or local senders.
+#
 #[global.rooms.invites]
 
 # Blocks non-admin local users from sending local or remote invites and
@@ -3902,7 +4236,12 @@
 #auto_accept_local_only = false
 
 
-
+################################################################################
+# Configures room-join server selection and retries.
+#
+# Deprioritized servers are tried last. Attempt limits bound requests
+# before reporting a join failure.
+#
 #[global.rooms.joins]
 
 # Lists server names to try last when joining rooms.
@@ -3939,7 +4278,12 @@
 #max_attempts_per_request = 3
 
 
-
+################################################################################
+# Configures room policy-server requests.
+#
+# The enablement setting controls outgoing event-signature requests. The
+# timeout also bounds inbound signature fetching.
+#
 #[global.rooms.policy_server]
 
 # Requests policy-server signatures for outgoing events under
@@ -3965,7 +4309,12 @@
 #request_timeout = 5
 
 
-
+################################################################################
+# Configures redaction, retained originals, and erasure.
+#
+# Retention and access policies govern original events. Thread-scan limits
+# bound summary correction after redaction.
+#
 #[global.rooms.redaction]
 
 # Limits relation rows read by each thread scan during redaction.
@@ -4028,7 +4377,12 @@
 #enforce_erasure_over_federation = true
 
 
-
+################################################################################
+# Configures optional relation bundles in client responses.
+#
+# Edit and reference bundles add summaries to served events. Each bundle
+# has an independent enablement setting.
+#
 #[global.rooms.relations]
 
 # Bundles the latest message edit under
@@ -4059,11 +4413,21 @@
 #bundle_references = false
 
 
-
+################################################################################
+# Groups runtime stream scheduling settings.
+#
+# Stream settings control initial concurrency, hardware scaling, and batch
+# amplification for database work.
+#
 #[global.runtime]
 
 
-
+################################################################################
+# Controls stream concurrency and request batch amplification.
+#
+# Width can remain fixed or scale with detected hardware capacity.
+# Amplification adjusts how much work each pool worker receives in a batch.
+#
 #[global.runtime.stream]
 
 # Sets the initial stream concurrency.
@@ -4101,7 +4465,12 @@
 #amplification = 1024
 
 
-
+################################################################################
+# Configures outbound delivery workers and retries.
+#
+# The queue serves federation, appservice, and push destinations.
+# Timeouts, retry pacing, and startup bursting control delivery work.
+#
 #[global.sending]
 
 # Sets the federation sender request timeout in seconds.
@@ -4164,7 +4533,12 @@
 #workers = 0
 
 
-
+################################################################################
+# Configures outbound email verification through SMTP.
+#
+# The connection URI and sender identify the relay and source mailbox.
+# Registration flags control which flows require a verified email address.
+#
 #[global.smtp]
 
 # Connection URL for the outbound SMTP relay used to send email
@@ -4206,7 +4580,15 @@
 #require_email_for_token_registration = false
 
 
-
+################################################################################
+# Configures a Google Cloud Storage provider.
+#
+# Only the bucket and an optional object prefix are required. Credentials are
+# resolved by the object-store client in this order: an explicit service
+# account key, an application-credentials file, then the instance metadata
+# server. On GKE the metadata-server fallback means Workload Identity works
+# with no credential settings at all and no exported key material.
+#
 #[global.storage_provider.<ID>.gcs]
 
 # The name of the GCS bucket, e.g. "my-media-bucket". Required; an unset
@@ -4265,7 +4647,12 @@
 #startup_check = true
 
 
-
+################################################################################
+# Configures local filesystem object storage.
+#
+# `base_path` prefixes every object path belonging to this provider. Remaining
+# options control directory creation, cleanup, and startup checks.
+#
 #[global.storage_provider.<ID>.local]
 
 # Absolute path to this local filesystem storage provider. Technically the
@@ -4291,7 +4678,13 @@
 #startup_check = true
 
 
-
+################################################################################
+# Configures an S3-compatible object storage provider.
+#
+# Bucket, endpoint, and credential fields identify the remote store.
+# Transport, encryption, multipart, and startup options tune how objects are
+# accessed.
+#
 #[global.storage_provider.<ID>.s3]
 
 # Supply an s3 URL e.g. "s3://bucket/path". These URLs may contain one
@@ -4387,11 +4780,21 @@
 #startup_check = true
 
 
-
+################################################################################
+# Configures optional external telemetry.
+#
+# Sentry handles crash reports and performance sampling. Jaeger-compatible
+# collectors receive selected tracing spans.
+#
 #[global.telemetry]
 
 
-
+################################################################################
+# Configures Jaeger-compatible OTLP span export.
+#
+# Enablement controls the export layer in builds with performance
+# measurements. A tracing filter selects exported spans.
+#
 #[global.telemetry.jaeger]
 
 # Enables OTLP span export for Jaeger-compatible tracing.
@@ -4407,7 +4810,12 @@
 #filter = "info"
 
 
-
+################################################################################
+# Configures optional Sentry reporting.
+#
+# Report content, event selection, and trace sampling have separate
+# controls. Runtime enablement is required before telemetry is sent.
+#
 #[global.telemetry.sentry]
 
 # Enables Sentry crash and panic reporting, performance monitoring, and
@@ -4454,7 +4862,12 @@
 #filter = "info"
 
 
-
+################################################################################
+# Configures direct TLS listener behavior.
+#
+# Certificate and key paths must be supplied together. Optional dual-protocol
+# mode accepts encrypted and plain connections on the same listeners.
+#
 #[global.tls]
 
 # Path to a valid TLS certificate file; this section requires a build with
@@ -4478,7 +4891,12 @@
 #dual_protocol = false
 
 
-
+################################################################################
+# Configures developer tracing tools.
+#
+# Folded span profiles support offline visualization. Tokio-console
+# supports runtime inspection.
+#
 #[global.tracing]
 
 # Enables tokio-console for developer use as described in the
@@ -4488,7 +4906,12 @@
 #tokio_console = false
 
 
-
+################################################################################
+# Configures folded tracing-span profiles.
+#
+# A filter selects collected spans. The output path names the resulting
+# profile file.
+#
 #[global.tracing.flame]
 
 # Collects folded stack profiles of tracing spans through tracing-flame
@@ -4507,7 +4930,13 @@
 #output_path = "./tracing.folded"
 
 
-
+################################################################################
+# Configures TURN relay credentials and servers.
+#
+# Shared secrets generate credentials, with static credentials available
+# as an alternative. URI, lifetime, and guest-access settings govern
+# client use.
+#
 #[global.turn]
 
 # Allows guest users to access TURN credentials.
@@ -4572,7 +5001,12 @@
 #ttl = 86400
 
 
-
+################################################################################
+# Configures typing notifications.
+#
+# Federation delivery has separate incoming and outgoing controls. Local
+# and remote timeout bounds constrain typing indications.
+#
 #[global.typing]
 
 # Allows sending typing updates over federation.
@@ -4609,7 +5043,13 @@
 #client_timeout_max_s = 45
 
 
-
+################################################################################
+# Configures Matrix discovery documents and related response data.
+#
+# Client and server fields drive the standard well-known responses. Support
+# contacts, policies, and MatrixRTC transports populate their corresponding
+# discovery data.
+#
 #[global.well_known]
 
 # The server URL that the client well-known file will serve.
@@ -4654,21 +5094,24 @@
 # transport. It has been superseded by `livekit_url`.
 #
 # Example:
-# ```toml
 # [global.well_known]
 # client = "https://matrix.yourdomain.com"
 #
 # [[global.well_known.rtc_transports]]
 # type = "livekit"
 # livekit_service_url = "https://livekit.yourdomain.com"
-# ```
 #
 # reloadable: yes
 #
 #rtc_transports = []
 
 
-
+################################################################################
+# Defines a contact published by the support discovery endpoint.
+#
+# Every contact has a Matrix support role. Email, Matrix ID, and OpenPGP key
+# fields provide optional communication channels.
+#
 #[global.well_known.support_contact.<ID>]
 
 # The name of the support role.
@@ -4704,7 +5147,12 @@
 #pgp_key =
 
 
-
+################################################################################
+# Defines one policy published by the support discovery endpoint.
+#
+# The enclosing map key supplies the policy identifier. Its version and
+# localized translations are emitted in the discovery response.
+#
 #[global.well_known.support_policy.<ID>]
 
 # Version string of the policy document.
@@ -4715,7 +5163,12 @@
 #version =
 
 
-
+################################################################################
+# Defines one localized support policy document.
+#
+# `name` is the user-facing title for this language. `url` points clients to
+# the corresponding policy text.
+#
 #[global.well_known.support_policy.<ID>.policy_translation.<LANG>]
 
 # User friendly name of the policy document.

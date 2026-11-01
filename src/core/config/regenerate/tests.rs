@@ -31,7 +31,7 @@ use super::write::owner_error;
 #[cfg(target_os = "macos")]
 use super::write::path_cstring;
 use super::{
-	Overwrite, RegenerateOptions, adjacent_new_path, example_config, regenerate_config,
+	Overwrite, RegenerateOptions, adjacent_new_path, example_config, regenerate_config, schema,
 	write::write_atomic_with_precommit, write_example_config,
 };
 use crate::{
@@ -47,6 +47,7 @@ static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 const ENV_CHILD: &str = "CONFIG_REGEN_TEST_CHILD";
 const ENV_INCLUDED_OUTPUT: &str = "CONFIG_REGEN_TEST_INCLUDED_OUTPUT";
 const ENV_OUTPUT: &str = "CONFIG_REGEN_TEST_OUTPUT";
+const RULE_WIDTH: usize = 80;
 
 struct TempDir {
 	path: PathBuf,
@@ -363,6 +364,10 @@ fn dynamic_sections_keep_namespaces_and_repeatable_identity_providers() {
 			.len(),
 		1,
 	);
+
+	assert_eq!(rule_count(&rendered), schema().len());
+	assert!(rendered.contains("\n\n\n#[global.storage_provider.<ID>.local]\n"));
+	assert!(!rendered.contains("\n\n\n\n#[global.storage_provider.<ID>.local]\n"));
 }
 
 #[test]
@@ -744,4 +749,11 @@ fn global(document: &Value) -> &Table {
 		.get("global")
 		.and_then(Value::as_table)
 		.expect("global table present")
+}
+
+fn rule_count(document: &str) -> usize {
+	document
+		.lines()
+		.filter(|line| line.len() == RULE_WIDTH && line.bytes().all(|byte| byte == b'#'))
+		.count()
 }

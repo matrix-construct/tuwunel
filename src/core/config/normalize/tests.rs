@@ -28,6 +28,15 @@ static COLORS: FieldSpec = FieldSpec {
 	sensitive: false,
 };
 
+static EMPTY: SectionSpec = SectionSpec {
+	section: "",
+	aliases: &[],
+	about: "",
+	example: "",
+	fields: &[],
+	group: false,
+};
+
 #[test]
 fn rewrites_explicit_legacy_values_without_defaults() {
 	let actual = normalized("rocksdb_checksums = false\nlog_colours = true")
@@ -93,18 +102,14 @@ fn leaves_terminal_maps_and_unknown_keys_intact() {
 fn rejects_ancestor_related_legacy_paths_in_either_order() {
 	static PARENT: SectionSpec = SectionSpec {
 		section: "new",
-		aliases: &[],
-		example: "",
 		fields: &[FieldSpec { legacy: &["old"], ..CHECKSUMS }],
-		group: false,
+		..EMPTY
 	};
 
 	static CHILD: SectionSpec = SectionSpec {
 		section: "other",
-		aliases: &[],
-		example: "",
 		fields: &[FieldSpec { legacy: &["old.child"], ..COLORS }],
-		group: false,
+		..EMPTY
 	};
 
 	for sections in [[&PARENT, &CHILD], [&CHILD, &PARENT]] {
@@ -116,8 +121,6 @@ fn rejects_ancestor_related_legacy_paths_in_either_order() {
 fn rejects_terminal_alias_and_reserved_schema_collisions() {
 	static TERMINAL: SectionSpec = SectionSpec {
 		section: "global",
-		aliases: &[],
-		example: "",
 		fields: &[
 			FieldSpec {
 				name: "opaque",
@@ -127,7 +130,7 @@ fn rejects_terminal_alias_and_reserved_schema_collisions() {
 			},
 			FieldSpec { legacy: &["opaque.old"], ..CHECKSUMS },
 		],
-		group: false,
+		..EMPTY
 	};
 
 	static ALIAS: SectionSpec = SectionSpec {
@@ -195,16 +198,14 @@ fn preserves_tagged_metadata_and_consumes_snapshot_once() {
 fn section_local_aliases_keep_source_precedence_and_provenance() {
 	static LOGGING: SectionSpec = SectionSpec {
 		section: "global.logging",
-		aliases: &[],
 		example: "[global.logging]\n#colors = true\n",
 		fields: &[COLORS],
 		group: true,
+		..EMPTY
 	};
 
 	static ROOT: SectionSpec = SectionSpec {
 		section: "global",
-		aliases: &[],
-		example: "",
 		fields: &[FieldSpec {
 			name: "logging",
 			path: "logging",
@@ -212,7 +213,7 @@ fn section_local_aliases_keep_source_precedence_and_provenance() {
 			class: FieldClass::Structural,
 			..CHECKSUMS
 		}],
-		group: false,
+		..EMPTY
 	};
 
 	validate_registry(&[&ROOT, &LOGGING]);
