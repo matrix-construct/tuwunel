@@ -8,10 +8,16 @@ use tuwunel_macros::config_example_generator;
 
 use super::true_fn;
 
-/// Configures typing notifications.
+/// Typing notifications
 ///
-/// Federation delivery has separate incoming and outgoing controls. Local
-/// and remote timeout bounds constrain typing indications.
+/// Controls whether typing notifications are exchanged with other servers
+/// and how long a typing indicator lasts when no stop request arrives.
+/// Federation is on in both directions by default.
+///
+/// Tips:
+/// - Keep `client_timeout_min_s` at or below `client_timeout_max_s`; the
+///   pair is not checked at startup, and every request to start typing
+///   fails with a server error otherwise.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 #[derive(Clone, Copy, Debug, Deserialize)]
 #[config_example_generator(

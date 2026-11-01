@@ -8,10 +8,21 @@ use tuwunel_macros::config_example_generator;
 
 use super::true_fn;
 
-/// Configures local and federated presence.
+/// Presence
 ///
-/// Incoming and outgoing updates have separate controls. Idle and offline
-/// timers determine how inactivity changes presence.
+/// Controls online, idle and offline status for local users and how it is
+/// exchanged with other servers. Presence is on by default, both locally and
+/// over federation, where a local user's status goes only to servers that
+/// share a room with them.
+///
+/// Tips:
+/// - To turn presence off, set `allow_local`, `allow_incoming` and
+///   `allow_outgoing` all to false; startup and reload refuse
+///   `allow_outgoing` without `allow_local`.
+/// - With `allow_local` off, sync and other client activity stop refreshing
+///   each device's last-seen time and IP address.
+/// - To keep presence between local users but cut its federation traffic,
+///   turn off `allow_incoming` and `allow_outgoing` instead.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 #[derive(Clone, Copy, Debug, Deserialize)]
 #[config_example_generator(

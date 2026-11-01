@@ -6,10 +6,18 @@
 use serde::Deserialize;
 use tuwunel_macros::config_example_generator;
 
-/// Configures push-gateway delivery and notification policy.
+/// Push notifications
 ///
-/// Gateway transport settings control requests. Rule evaluation and
-/// active-user suppression control notification selection.
+/// Controls delivery to the push gateways that clients register for their
+/// users, and which events reach them. Push works with nothing set here: by
+/// default the server evaluates each user's push rules and forwards only
+/// events the rules mark as notifying.
+///
+/// Tips:
+/// - Gateway requests obey `network.http.ip_range_denylist`, so with its
+///   default a gateway on a loopback or private address is refused.
+/// - `suppress_when_active` is experimental and logs a warning at startup.
+///   It judges activity from presence, so it needs `presence.allow_local`.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 #[derive(Clone, Debug, Deserialize)]
 #[config_example_generator(

@@ -9,11 +9,11 @@ use tuwunel_macros::config_example_generator;
 
 use super::true_fn;
 
-/// Configures compatibility behavior across room versions.
+/// Room-version compatibility
 ///
-/// State-resolution backports extend existing mitigations to older
-/// supported versions. The switch remains available for development and
-/// recovery.
+/// Carries protections from newer room versions back to rooms on older
+/// versions. Its single switch is on by default and safe for existing
+/// rooms; leave it on unless you are debugging state resolution.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 #[derive(Clone, Copy, Debug, Deserialize)]
 #[config_example_generator(

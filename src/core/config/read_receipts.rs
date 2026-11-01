@@ -9,9 +9,11 @@ use tuwunel_macros::config_example_generator;
 
 use super::true_fn;
 
-/// Configures federated read receipts.
+/// Federated read receipts
 ///
-/// Incoming and outgoing receipt delivery have separate controls.
+/// Controls whether read receipts are exchanged with other servers. Both
+/// directions are on by default. Receipts between users of this server work
+/// regardless of these keys.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 #[derive(Clone, Copy, Debug, Deserialize)]
 #[config_example_generator(

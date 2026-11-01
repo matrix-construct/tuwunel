@@ -12,11 +12,32 @@ use tuwunel_macros::config_example_generator;
 
 use super::true_fn;
 
-/// Configures room creation, access, and lifecycle.
+/// Room creation, versions and lifecycle
 ///
-/// Defaults govern newly created rooms and supported versions. Dedicated
-/// settings cover joins, invites, relations, redaction, policy servers, and
-/// extremities.
+/// Defaults for rooms created here (version, federation, power levels), who
+/// may create rooms and aliases, which room versions this server accepts,
+/// and what happens when users leave. Creation defaults apply only to rooms
+/// created after a change. The room directory is configured separately in
+/// `[global.directory.rooms]`.
+///
+/// Sub-sections:
+///
+/// - `[global.rooms.extremities]`: forward-extremity pruning.
+/// - `[global.rooms.invites]`: invite restrictions and automatic acceptance.
+/// - `[global.rooms.joins]`: server selection when joining remote rooms.
+/// - `[global.rooms.policy_server]`: room policy servers (MSC4284).
+/// - `[global.rooms.redaction]`: redaction, retained originals, erasure.
+/// - `[global.rooms.relations]`: optional edit and reference bundles.
+///
+/// Tips:
+/// - Startup fails when `default_version` names a version that is not
+///   enabled. Stable versions (6 and later) always are; 3 to 5 only while
+///   `allow_unstable_versions` is on (the default).
+/// - `default_power_level_content_override` must be a table, such as
+///   `{ users_default = 50 }`; any other value fails startup.
+/// - `forbidden_alias_names` entries are regular expressions. An entry that
+///   reads as a dotted name draws a startup warning; escape the dot
+///   (`"a\\.b"`) to match it literally.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 #[derive(Clone, Debug, Deserialize)]
 #[config_example_generator(
@@ -203,10 +224,16 @@ pub struct Rooms {
 	pub relations: Relations,
 }
 
-/// Configures forward-extremity pruning for incoming federation events.
+/// Forward-extremity pruning
 ///
-/// A soft cap and emergency bound control the tracked frontier. Batch
-/// limits pace convergence across events.
+/// Forward extremities are a room's newest events that no later event
+/// references yet; events this server creates cite them as `prev_events`.
+/// Busy federated rooms can pile them up, so these keys trim the set while
+/// incoming federation events are processed. The defaults suit most servers.
+///
+/// Tips:
+/// - `!admin rooms list-extremities` and `!admin rooms prune-extremities`
+///   inspect and trim one room on demand.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 #[derive(Clone, Copy, Debug, Deserialize)]
 #[config_example_generator(
@@ -255,10 +282,20 @@ pub struct Extremities {
 	pub prune_batch: usize,
 }
 
-/// Configures room invitation policy.
+/// Room invites
 ///
-/// Restrictions control non-admin invitations. Automatic acceptance can be
-/// limited to direct messages or local senders.
+/// Restricts who may send and receive invites, and can accept invites on
+/// users' behalf. At the defaults neither applies: invites follow the normal
+/// room rules and wait for the user to answer.
+///
+/// Tips:
+/// - `auto_accept_direct_only` and `auto_accept_local_only` only narrow
+///   `auto_accept`; with `auto_accept = false` they do nothing.
+/// - `auto_accept` on its own also accepts invites from users on other
+///   servers, joining local users to remote rooms; add
+///   `auto_accept_local_only` to prevent that.
+/// - These keys do not filter by server. To refuse everything from a
+///   server, invites included, use `federation.forbidden_remote_server_names`.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 #[derive(Clone, Copy, Debug, Default, Deserialize)]
 #[config_example_generator(
@@ -312,10 +349,17 @@ pub struct Invites {
 	pub auto_accept_local_only: bool,
 }
 
-/// Configures room-join server selection and retries.
+/// Joining remote rooms
 ///
-/// Deprioritized servers are tried last. Attempt limits bound requests
-/// before reporting a join failure.
+/// Controls which resident servers this server asks, and how many, when
+/// joining a room through other servers. At the defaults, servers matching
+/// `matrix\.org` are tried last and a join request gives up after three
+/// failed attempts.
+///
+/// Tips:
+/// - `deprioritize_servers` entries are regular expressions matched against
+///   server names. An entry that reads as a dotted name draws a startup
+///   warning; write `"example\\.org"`, not `"example.org"`.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 #[derive(Clone, Debug, Deserialize)]
 #[config_example_generator(
@@ -368,10 +412,19 @@ pub struct Joins {
 	pub max_attempts_per_request: usize,
 }
 
-/// Configures room policy-server requests.
+/// Room policy servers (MSC4284)
 ///
-/// The enablement setting controls outgoing event-signature requests. The
-/// timeout also bounds inbound signature fetching.
+/// A room can name a policy server in its `m.room.policy` state event; that
+/// server is asked to sign each event before it federates. These keys decide
+/// whether this server takes part. Off by default, in which case policy
+/// servers are ignored: outgoing events are not sent for signing and
+/// incoming events are not checked.
+///
+/// Tips:
+/// - When enabled, an outgoing event the policy server refuses is not sent
+///   and the client request fails; an incoming event it refuses is
+///   soft-failed. When the policy server cannot be reached, events pass.
+/// - `request_timeout` has no effect unless `enable = true`.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 #[derive(Clone, Copy, Debug, Deserialize)]
 #[config_example_generator(
@@ -407,10 +460,19 @@ pub struct PolicyServer {
 	pub request_timeout: u64,
 }
 
-/// Configures redaction, retained originals, and erasure.
+/// Redaction, retained originals and erasure
 ///
-/// Retention and access policies govern original events. Thread-scan limits
-/// bound summary correction after redaction.
+/// Governs redactions and what survives them. By default the server keeps
+/// each redacted event's original content for 60 days, readable by server
+/// admins and by users whose power level reaches `redact`, and serves erased
+/// users' events as pruned copies to servers that had no user in the room.
+///
+/// Tips:
+/// - `retention_seconds = 0` keeps originals forever; otherwise expired
+///   originals are removed in an hourly pass.
+/// - Turning off `save_unredacted_events` stops new copies only; copies
+///   already kept stay until `retention_seconds` expires them.
+/// - `thread_latest_reply_search_limit = 0` fails startup.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 #[derive(Clone, Copy, Debug, Deserialize)]
 #[config_example_generator(
@@ -490,10 +552,12 @@ pub struct Redaction {
 	pub enforce_erasure_over_federation: bool,
 }
 
-/// Configures optional relation bundles in client responses.
+/// Relation bundles
 ///
-/// Edit and reference bundles add summaries to served events. Each bundle
-/// has an independent enablement setting.
+/// Adds optional edit and reference summaries to events served to clients.
+/// Both are off by default; most clients build these themselves, so enable
+/// one only for a client that relies on it. Thread summaries are always
+/// bundled and do not depend on these keys.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 #[derive(Clone, Copy, Debug, Default, Deserialize)]
 #[config_example_generator(

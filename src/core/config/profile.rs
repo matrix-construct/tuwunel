@@ -8,10 +8,19 @@ use tuwunel_macros::config_example_generator;
 
 use super::true_fn;
 
-/// Configures profile access, updates, and remote caching.
+/// User profiles
 ///
-/// Visibility settings distinguish client and federation requests. Field
-/// limits bound cached profiles and requested selections.
+/// Controls who can read profiles, whether users can change their own
+/// display name, and how much of a remote profile is cached. By default the
+/// client profile endpoints answer without an access token, other servers
+/// can look up local profiles, and device names are not shared over
+/// federation.
+///
+/// Tips:
+/// - To hide profiles from people outside a user's rooms, set
+///   `require_auth` and `limit_requests_to_users_who_share_rooms` together;
+///   startup and reload refuse the second alone. Requests from other
+///   servers are governed by `allow_inbound_federation_lookups` instead.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 #[derive(Clone, Copy, Debug, Deserialize)]
 #[config_example_generator(

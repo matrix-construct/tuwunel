@@ -8,10 +8,20 @@ use tuwunel_macros::config_example_generator;
 
 use super::true_fn;
 
-/// Configures encrypted rooms and device-key distribution.
+/// End-to-end encryption
 ///
-/// Room defaults select when encryption is enabled automatically. Key
-/// limits and update-recipient policy govern device encryption data.
+/// Controls whether local users may use end-to-end encryption, whether the
+/// server turns it on by itself in new rooms, and how device keys are
+/// shared. Encryption is allowed by default, and with
+/// `enabled_by_default_for_room_type` at its default the server never
+/// enables it on its own; clients decide per room.
+///
+/// Tips:
+/// - `enabled_by_default_for_room_type` ignores `is_direct`: `invite`
+///   applies to every room created with a private preset, DM or not,
+///   including a non-public room created without a preset.
+/// - `allow = false` also stops local users from sending encrypted messages
+///   in rooms that are already encrypted.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 #[derive(Clone, Debug, Deserialize)]
 #[config_example_generator(

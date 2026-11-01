@@ -8,10 +8,11 @@ use tuwunel_macros::config_example_generator;
 
 use super::true_fn;
 
-/// Configures client-facing protocol behavior.
+/// Client API
 ///
-/// Sync settings bound long-polling timeouts. Room-summary controls select
-/// sync calculations.
+/// Groups settings for how the server answers client requests.
+/// `[global.client.sync]` bounds sync long polling and turns room hero
+/// calculation on or off.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 #[derive(Clone, Copy, Debug, Deserialize, Default)]
 #[config_example_generator(
@@ -28,10 +29,17 @@ pub struct Client {
 	pub sync: Sync,
 }
 
-/// Configures client synchronization.
+/// Client sync long polling
 ///
-/// Timeout bounds constrain client-requested long polling. The default
-/// timeout applies when the client supplies none.
+/// Bounds how long a client's sync request may wait for new events before
+/// the server answers anyway, and whether sync computes room heroes.
+///
+/// Tips:
+/// - Sliding sync honors only `timeout_max`; `timeout_min` and
+///   `timeout_default` apply to legacy `/sync` and to `/events`.
+/// - Keep `timeout_max` (milliseconds) below `request_timeout` in
+///   `[global.http]` (seconds) and below the read timeout of any reverse
+///   proxy in front of the server, or long polls fail instead of returning.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 #[derive(Clone, Copy, Debug, Deserialize)]
 #[config_example_generator(

@@ -8,10 +8,12 @@ use tuwunel_macros::config_example_generator;
 
 use super::{RegexSet, true_fn};
 
-/// Configures room and user discovery.
+/// Room and user directories
 ///
-/// Room-directory settings govern publication and searching. User-directory
-/// settings govern which local users can appear.
+/// Groups the two discovery directories. `[global.directory.rooms]` covers
+/// the public room directory: who can list it, who can publish to it, and
+/// how it is searched. `[global.directory.users]` covers which accounts a
+/// user search returns.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 #[derive(Clone, Debug, Deserialize, Default)]
 #[config_example_generator(
@@ -34,10 +36,24 @@ pub struct Directory {
 	pub users: Users,
 }
 
-/// Configures room-directory publication and searches.
+/// Public room directory
 ///
-/// Client and federation access have separate controls. Search policy
-/// determines when room IDs can find listed or unlisted rooms.
+/// Controls who can read this server's public room directory, who can
+/// publish rooms to it, and how searches behave. By default only clients
+/// with an access token can list it, other servers cannot query it over
+/// federation, and any user whose power level in a room allows changing its
+/// history visibility can publish that room (guests cannot).
+///
+/// Tips:
+/// - `lockdown` limits publishing to server admins and appservices, both
+///   when a room is created and afterwards.
+/// - Servers that `[global.federation]` already blocks, through its
+///   `forbidden_remote_server_names` or its allowlist, are refused here
+///   too; this section's `forbidden_remote_server_names` adds blocks that
+///   apply only to browsing a remote server's directory.
+/// - `forbidden_remote_server_names` takes regular expressions; startup
+///   warns about a plain dotted name such as `example.com`, whose dots
+///   match any character.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 #[derive(Clone, Debug, Deserialize)]
 #[config_example_generator(
@@ -112,10 +128,18 @@ pub struct Rooms {
 	pub forbidden_remote_server_names: RegexSet,
 }
 
-/// Configures local user visibility in directory searches.
+/// User directory
 ///
-/// Room visibility limits ordinary search results unless all local users
-/// are shown. Appservice users require their separate visibility setting.
+/// Controls which accounts a local user's directory search can find. The
+/// search covers local accounts and the remote users this server has seen
+/// in its rooms. By default it returns only users who are in a room with a
+/// public join rule or share a room with the searcher, and it hides users
+/// that belong exclusively to an appservice. Other servers cannot query
+/// it; federation profile lookups are set in `[global.profile]`.
+///
+/// Tips:
+/// - `show_all_local` lifts the room filter for every account the server
+///   knows, including those remote users, not only local accounts.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 #[derive(Clone, Copy, Debug, Deserialize, Default)]
 #[config_example_generator(
