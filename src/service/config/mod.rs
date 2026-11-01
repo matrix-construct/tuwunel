@@ -17,7 +17,7 @@ use sd_notify::{NotifyState, notify};
 use tuwunel_core::itertools::Itertools;
 use tuwunel_core::{
 	Result, Server,
-	config::{Config, check},
+	config::{Config, check::reload as check_reload},
 	error, implement,
 };
 
@@ -126,15 +126,21 @@ pub fn reload<'a, I>(&'a self, paths: I) -> Result<Arc<Config>>
 where
 	I: Iterator<Item = &'a Path>,
 {
-	let old = self.server.config.clone();
-
 	// Replay the startup command line so -c paths and -O overrides survive.
-	let new = self
-		.server
+	self.server
 		.config_sources
 		.load(paths)
-		.and_then(|raw| Config::new(&raw))?;
+		.and_then(|raw| Config::new(&raw))
+		.and_then(|new| self.replace(new))
+}
 
-	check::reload(&old, &new)?;
+/// Validates and publishes a replacement configuration.
+///
+/// The active configuration remains unchanged when reload validation fails.
+#[implement(Service)]
+pub fn replace(&self, new: Config) -> Result<Arc<Config>> {
+	let old = self.server.config.clone();
+
+	check_reload(&old, &new)?;
 	self.server.config.update(new)
 }

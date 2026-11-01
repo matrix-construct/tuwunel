@@ -7,9 +7,7 @@ use reqwest::{Response, StatusCode};
 use serde_json::{Value, json};
 use tuwunel::{Args, Runtime, Server, async_run, async_start, async_stop};
 use tuwunel_core::{
-	Result,
-	config::check::reload,
-	implement,
+	Result, implement,
 	ruma::{UserId, profile::ProfileFieldName},
 };
 use tuwunel_service::Services;
@@ -186,8 +184,7 @@ async fn selector_limits(owner: &Client<'_>, owner_id: &UserId) -> Result {
 	let mut config = (*owner.services.server.config.clone()).clone();
 
 	config.profile.max_fields_per_request = 1;
-	reload(&owner.services.config, &config)?;
-	owner.services.server.config.update(config)?;
+	owner.services.config.replace(config)?;
 
 	let response = owner
 		.sync_field_selection("tightened", Some(pos), None)
