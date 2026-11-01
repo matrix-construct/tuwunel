@@ -1032,11 +1032,37 @@ impl From<SupportContact> for ruma::api::client::discovery::discover_support::Co
 	}
 }
 
-/// Configures LDAP authentication and directory-backed administration.
+/// LDAP login
 ///
-/// Connection, bind, search, and attribute settings determine how users are
-/// located and authenticated. Optional admin search settings identify directory
-/// entries treated as server administrators.
+/// Checks password sign-ins against an LDAP directory and creates the local
+/// account on first successful bind, regardless of `registration.enable`.
+/// Off by default; needs the `ldap` build feature, which the default build
+/// includes.
+///
+/// Set `enable` and `uri`. With both `bind_dn` and `bind_password_file`,
+/// the server binds as that service account, then searches `base_dn` with
+/// `filter`; leaving either unset searches anonymously. A `bind_dn`
+/// containing `{username}` skips the search and binds directly as the user.
+///
+/// Minimal example (search with a service account):
+///
+/// ```toml
+///     [global.ldap]
+///     enable = true
+///     uri = "ldaps://ldap.example.org:636"
+///     base_dn = "ou=users,dc=example,dc=org"
+///     bind_dn = "cn=ldap-reader,dc=example,dc=org"
+///     bind_password_file = "/etc/tuwunel/.ldap_bind_password"
+/// ```
+///
+/// Tips:
+/// - A search with no match falls back to the local password, and two or
+///   more matches refuse the login. Direct bind never falls back, and with a
+///   nonempty `admin_filter` it revokes admin from every user who signs in.
+/// - `authentication.login.with_password = false` turns LDAP login off, and
+///   `authentication.emergency_password` is ignored while LDAP is enabled.
+/// - Only `uri` is checked at startup, and only that it parses as a URL: a
+///   missing `uri` or an unreachable directory shows up as failed logins.
 #[derive(Clone, Debug, Default, Deserialize)]
 #[config_example_generator(filename = "tuwunel-example.toml", section = "global.ldap")]
 pub struct LdapConfig {
@@ -1136,10 +1162,32 @@ pub struct LdapConfig {
 	pub admin_filter: String,
 }
 
-/// Configures authentication using JSON Web Tokens.
+/// JSON Web Token login
 ///
-/// Key format, signature algorithm, and claim rules determine token validity.
-/// Optional provisioning creates a local account for an otherwise valid token.
+/// Accepts a signed JWT as proof of identity, both as the
+/// `org.matrix.login.jwt` login type and as a user-interactive
+/// authentication stage, for deployments where an external system mints
+/// tokens for its users. The token's `sub` claim is the user's localpart on
+/// this server, lowercased. Off by default.
+///
+/// Set `enable` and `key`. The default `format` and `algorithm` expect an
+/// HMAC shared secret with HS256; an issuer signing with ECDSA or EdDSA needs
+/// its PEM public key in `key` and a matching `format` and `algorithm`.
+///
+/// Minimal example:
+///
+/// ```toml
+///     [global.jwt]
+///     enable = true
+///     key = "replace-with-a-long-random-secret"
+/// ```
+///
+/// Tips:
+/// - Startup and reload refuse an unknown `format` while enabled, but a `key`
+///   that does not decode or an unsuitable `algorithm` fails only at login.
+/// - With `register_user` (the default), a valid token for an unknown user
+///   creates the account regardless of `registration.enable`.
+/// - `validate_signature = false` has an effect only in debug builds.
 #[derive(Clone, Debug, Default, Deserialize)]
 #[config_example_generator(filename = "tuwunel-example.toml", section = "global.jwt")]
 pub struct JwtConfig {
@@ -1249,9 +1297,12 @@ pub struct JwtConfig {
 	pub validate_signature: bool,
 }
 
-/// Configures request rate limits.
+/// Rate limits
 ///
-/// Each subsection limits one kind of request, such as password sign-in.
+/// Groups request rate limits by kind of request. It holds
+/// `[global.rate_limiting.login]` for password sign-in; the built-in OIDC
+/// endpoints have a separate per-IP throttle,
+/// `authentication.oidc.rc_per_second`.
 #[derive(Clone, Copy, Debug, Default, Deserialize)]
 #[config_example_generator(
 	filename = "tuwunel-example.toml",
@@ -1266,10 +1317,26 @@ pub struct RateLimits {
 	pub login: LoginRateLimits,
 }
 
-/// Limits password sign-in by account and client address.
+/// Password sign-in limits
 ///
-/// Public login and authenticated password re-entry use separate attempt
-/// budgets, so public guesses cannot consume the re-entry allowance.
+/// Three token buckets guard password checks, each in its own sub-section:
+/// `[global.rate_limiting.login.failed]` counts wrong passwords per account
+/// and client address, `[global.rate_limiting.login.address]` counts every
+/// attempt per client address across accounts, and
+/// `[global.rate_limiting.login.account]` counts successful sign-ins per
+/// account from any address. They cover `m.login.password` at `/login` and
+/// the built-in OIDC login page. Password re-entry for sensitive actions
+/// (UIAA) has its own `failed` and `address` buckets with the same settings
+/// and no `account` limit. A refused attempt gets `M_LIMIT_EXCEEDED`.
+///
+/// Tips:
+/// - Behind a reverse proxy, set `http.ip_source` to the header it writes.
+///   Without it, password checks use the TCP peer address: a proxy on the
+///   same host (or the Unix socket) gets no per-address limit, and every
+///   user behind a proxy on another host shares one address.
+/// - Sign-ins that `[global.ldap]` decides by binding to the directory are
+///   not counted; its fallback to the local password is.
+/// - Buckets are kept in memory and reset on restart.
 #[derive(Clone, Copy, Debug, Default, Deserialize)]
 #[config_example_generator(
 	filename = "tuwunel-example.toml",
@@ -1293,10 +1360,12 @@ pub struct LoginRateLimits {
 	pub address: LoginAddressRateLimit,
 }
 
-/// Limits wrong passwords against one account from one client address.
+/// Wrong-password limit
 ///
-/// A name that matches no account counts as a wrong password, so the limit
-/// does not reveal which accounts exist.
+/// Throttles password guessing against one account from one client address.
+/// Only wrong passwords, including names that match no account, use up the
+/// allowance: `burst_count` at once, then one more every 1/`per_second`
+/// seconds. Other addresses keep their own allowance for the same account.
 #[derive(Clone, Copy, Debug, Deserialize)]
 #[config_example_generator(
 	filename = "tuwunel-example.toml",
@@ -1331,10 +1400,15 @@ pub struct LoginFailedRateLimit {
 	pub burst_count: u32,
 }
 
-/// Limits password attempts across accounts from one client address.
+/// Per-address attempt limit
 ///
-/// Both successful and failed attempts consume this budget before password
-/// verification, limiting password spraying and verification work.
+/// Caps all password attempts from one client address across every account,
+/// successful or not, bounding password spraying and hashing work:
+/// `burst_count` attempts at once, then one more every 1/`per_second`
+/// seconds. Clients behind one NAT, one IPv6 /64, or a reverse proxy on
+/// another host share a budget unless `http.ip_source` names a forwarding
+/// header. Without one, a loopback peer (a local proxy or the Unix
+/// socket) is not limited per address.
 #[derive(Clone, Copy, Debug, Deserialize)]
 #[config_example_generator(
 	filename = "tuwunel-example.toml",
@@ -1368,10 +1442,13 @@ pub struct LoginAddressRateLimit {
 	pub burst_count: u32,
 }
 
-/// Limits successful sign-ins to one account.
+/// Successful sign-in limit
 ///
-/// Only a sign-in by a verified password takes a token, so wrong guesses never
-/// lock the owner out on this axis.
+/// Caps how often one account can sign in with a correct password, from any
+/// address: `burst_count` sign-ins at once, then one more every
+/// 1/`per_second` seconds. Wrong passwords never count, so guessing cannot
+/// lock the owner out on this axis. A script that logs in repeatedly can
+/// reach the default limit.
 #[derive(Clone, Copy, Debug, Deserialize)]
 #[config_example_generator(
 	filename = "tuwunel-example.toml",
@@ -1457,11 +1534,41 @@ pub struct SmtpConfig {
 	pub require_email_for_token_registration: bool,
 }
 
-/// Configures one OpenID Connect identity provider.
+/// Upstream identity providers (SSO)
 ///
-/// Client credentials and endpoint discovery establish the upstream
-/// authorization flow. Claim and trust settings control account mapping and
-/// optional registration.
+/// Delegates sign-in to external OAuth 2.0 or OpenID Connect providers;
+/// repeat the `[[global.identity_provider]]` header once per provider. Both
+/// legacy `m.login.sso` and the built-in OIDC server
+/// (`[global.authentication.oidc]`) sign users in through these entries.
+///
+/// Each entry needs `brand`, a unique `client_id`, and `client_secret` or
+/// a readable, nonempty `client_secret_file`; startup refuses a repeated
+/// `client_id`, a provider with neither secret key, and an unreadable or
+/// empty `client_secret_file`. `issuer_url` is
+/// required except for the `github`, `gitlab` and `google` brands.
+/// Register `well_known.client` followed by
+/// `/_matrix/client/unstable/login/sso/callback/<client_id>` as the redirect
+/// URI at the provider; it is the default `callback_url`, so set that
+/// yourself when `well_known.client` is unset.
+///
+/// Minimal example:
+///
+/// ```toml
+///     [[global.identity_provider]]
+///     brand = "keycloak"
+///     client_id = "tuwunel"
+///     client_secret_file = "/etc/tuwunel/.client_secret"
+///     issuer_url = "https://sso.example.com/realms/example"
+/// ```
+///
+/// Tips:
+/// - With several providers, mark one `default = true`; otherwise the first
+///   entry serves the bare SSO redirect, and startup warns unless
+///   `authentication.login.sso_custom_providers_page` is set.
+/// - Discovery runs on first use, not at startup: a missing `issuer_url`, or
+///   one that differs from the issuer the provider reports, fails sign-in.
+/// - New accounts from a provider follow its `registration` key, not
+///   `registration.enable`.
 #[derive(Clone, Debug, Deserialize)]
 #[config_example_generator(
 	filename = "tuwunel-example.toml",

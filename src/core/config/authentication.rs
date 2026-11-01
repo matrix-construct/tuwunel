@@ -9,11 +9,28 @@ use tuwunel_macros::config_example_generator;
 
 use super::true_fn;
 
-/// Configures account authentication and session lifetimes.
+/// Authentication and sessions
 ///
-/// Login, OIDC, password hashing, and refresh-token policy have dedicated
-/// settings. The integration secret authenticates MAS provisioning calls;
-/// the emergency password grants access to the server bot account.
+/// Server-wide credentials and token lifetimes, plus the sub-sections that
+/// decide how users sign in: `[global.authentication.login]` (accepted login
+/// methods and SSO presentation), `[global.authentication.oidc]` (the
+/// built-in OIDC server for next-generation clients),
+/// `[global.authentication.argon2]` (password-hash cost) and
+/// `[global.authentication.refresh_token]` (refresh-token expiry and reuse).
+/// The defaults suit a password-login server. Other sign-in sources have
+/// their own sections: `[[global.identity_provider]]`, `[global.jwt]` and
+/// `[global.ldap]`.
+///
+/// Tips:
+/// - Startup refuses an empty `emergency_password` and the example value
+///   shown below; while `ldap.enable` is true the emergency password is
+///   ignored with a warning.
+/// - `mas_secret` only authorizes Matrix Authentication Service provisioning
+///   calls under `/_synapse/mas/`. Signing in through MAS also needs an
+///   `[[global.identity_provider]]` entry with `brand = "MAS"`; startup warns
+///   when it is missing.
+/// - `access_token_ttl` applies only to sessions holding a refresh token
+///   (see `[global.authentication.refresh_token]`).
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 // No Debug: secrets are reachable from this section.
 #[derive(Clone, Deserialize)]
@@ -101,10 +118,17 @@ pub struct Authentication {
 	pub refresh_token: RefreshToken,
 }
 
-/// Configures Argon2id password hashing.
+/// Password hashing cost
 ///
-/// Memory, pass, and lane settings determine new password hashes. Stored
-/// hashes retain the parameters used when created.
+/// Sets the Argon2id cost used whenever a password is hashed. Existing hashes
+/// keep the cost they were created with until that password is next set, so
+/// a change takes effect gradually. The defaults follow the OWASP
+/// recommendation.
+///
+/// Tips:
+/// - Startup and reload refuse a combination Argon2 rejects, such as
+///   `m_cost` below eight blocks per lane of `p_cost`, and warn when the cost
+///   falls below the weakest OWASP pair listed under `m_cost`.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 #[derive(Clone, Copy, Debug, Deserialize)]
 #[config_example_generator(
@@ -157,11 +181,18 @@ pub struct Argon2 {
 	pub p_cost: u32,
 }
 
-/// Configures client login methods and login tokens.
+/// Login methods
 ///
-/// Password, token, and existing-session flows have separate enablement
-/// controls. SSO presentation settings select how clients show identity
-/// providers.
+/// Chooses which login types `/_matrix/client/v3/login` advertises and
+/// accepts, how long login tokens last, and how clients present single
+/// sign-on providers. The defaults accept passwords and login tokens, and let
+/// a signed-in session mint a login token for another device.
+///
+/// Tips:
+/// - `with_password = false` also turns off `[global.ldap]` sign-in, which
+///   arrives as a password login, and refuses password registration.
+/// - JWT login is switched on by `jwt.enable`, not here; password attempt
+///   limits live in `[global.rate_limiting.login]`.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 #[derive(Clone, Copy, Debug, Deserialize)]
 #[config_example_generator(
@@ -266,11 +297,35 @@ pub struct Login {
 	pub oidc_aware_preferred: bool,
 }
 
-/// Configures the built-in OpenID Connect provider.
+/// Built-in OIDC server (next-generation login)
 ///
-/// Native authentication, client registration, and authorization policy
-/// have separate controls. Per-IP rate limits bound requests to its
-/// endpoints.
+/// Provides a built-in OAuth 2.0 and OpenID Connect authorization server
+/// for clients using next-generation Matrix authentication (MSC2965). It
+/// runs only when `well_known.client` is set (it becomes the issuer URL)
+/// and at least one `[[global.identity_provider]]` exists or `native_auth`
+/// is true; otherwise these keys have no effect. Without `native_auth`,
+/// sign-in goes through the default identity provider; with it, a login
+/// page offers local accounts alongside the providers.
+///
+/// Minimal example (local accounts):
+///
+/// ```toml
+///     [global.well_known]
+///     client = "https://matrix.example.com"
+///
+///     [global.authentication.oidc]
+///     native_auth = true
+/// ```
+///
+/// Tips:
+/// - Whether the OIDC server runs is decided at startup: enabling it on a
+///   running server takes a restart.
+/// - Startup warns when `registration_access_token` is set (no Matrix client
+///   sends one), when `require_client_approval` is false, and when
+///   `native_auth` has neither password login nor a provider to offer.
+/// - The endpoint throttle needs both `rc_per_second` and `rc_burst_count`
+///   above zero; password checks on the built-in login page count against
+///   `[global.rate_limiting.login]` instead.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 // No Debug: secrets are reachable from this section.
 #[derive(Clone, Deserialize)]
@@ -449,11 +504,15 @@ pub struct Oidc {
 	pub rc_burst_count: u32,
 }
 
-/// Configures refresh-token expiry and reuse handling.
+/// Refresh-token expiry and reuse
 ///
-/// Lifetime policy selects idle or absolute deadlines and soft or hard
-/// logout. Reuse controls distinguish a grace window from suspected
-/// compromise.
+/// Applies to sessions that hold a refresh token: clients that request one
+/// at login or registration, and every client signed in through the built-in
+/// OIDC server. By default refresh tokens never expire, and a replay outside
+/// the 15-second grace window removes the device. Set `ttl` to expire idle
+/// sessions (`idle_only`) or sessions of a fixed age;
+/// `authentication.access_token_ttl` sets the access-token lifetime between
+/// refreshes.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 #[derive(Clone, Copy, Debug, Deserialize)]
 #[config_example_generator(

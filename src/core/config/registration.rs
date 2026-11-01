@@ -9,11 +9,37 @@ use tuwunel_macros::config_example_generator;
 
 use super::{OwnedRoomOrAliasId, PathBuf, RegexSet, true_fn};
 
-/// Configures account registration and initial user setup.
+/// Account registration
 ///
-/// Registration tokens and shared secrets control separate account-creation
-/// paths. New-user defaults and guest policy govern initial account
-/// behavior.
+/// Controls who may create an ordinary account through `/register` or the
+/// built-in OIDC login page, and how new accounts are set up. Off by
+/// default. Terms users must accept live in
+/// `[global.registration_terms.<ID>]`, and email verification in
+/// `[global.smtp]`.
+///
+/// With `enable`, startup also requires a registration token (`token` or
+/// `token_file`) or a required email stage
+/// (`smtp.require_email_for_registration` with `smtp.connection_uri`).
+/// Without one the server refuses to start unless
+/// `yes_i_am_very_very_sure_i_want_an_open_registration_server_prone_to_abuse`
+/// is true, which startup warns about.
+///
+/// Minimal example (token-gated):
+///
+/// ```toml
+///     [global.registration]
+///     enable = true
+///     token_file = "/etc/tuwunel/.reg_token"
+/// ```
+///
+/// Tips:
+/// - Startup refuses an empty `token` and an empty or unreadable
+///   `token_file`; both may be set. Tokens from `!admin token issue` also
+///   work at registration but do not satisfy the startup check.
+/// - Password registration also needs `authentication.login.with_password`.
+///   Identity providers (their `registration` key), `jwt.register_user` and
+///   LDAP create accounts without `enable`, and `shared_secret` enables
+///   `/_synapse/admin/v1/register` independently of it.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 // No Debug: secrets are reachable from this section.
 #[derive(Clone, Deserialize)]
@@ -170,11 +196,17 @@ pub struct Registration {
 	pub guests: Guests,
 }
 
-/// Configures guest account registration.
+/// Guest accounts
 ///
-/// Guest registration and automatic room joining have separate controls.
-/// Automatic joins use the ordinary registration room list; some clients,
-/// including Element, try to register guests automatically.
+/// Guests are password-less accounts with a generated user ID that a client
+/// can create without credentials. Off by default.
+///
+/// Tips:
+/// - Guest registration also requires `registration.enable`, then skips
+///   interactive auth (token, email and terms stages), so enabling it on a
+///   token-gated server lets anyone create guest accounts.
+/// - New guests are announced in the admin room only with
+///   `admin.room.log_guest_registrations`.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 #[derive(Clone, Copy, Debug, Deserialize, Default)]
 #[config_example_generator(
