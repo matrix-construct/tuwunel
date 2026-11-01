@@ -27,7 +27,7 @@ namespaces:
 \`\`\`
 ```
 
-The registration is persisted in the database and survives restarts. Registering with an existing ID replaces the old entry. No restart is required.
+The registration is persisted in the database and survives restarts. Registering with an existing ID replaces the old entry, unless that ID comes from the server configuration or `appservice_dir`. No restart is required.
 
 ### Server configuration
 
@@ -125,7 +125,7 @@ All commands run from the admin room (`!admin appservices <subcommand>`):
 
 | Command | Description |
 |---|---|
-| `register` | Register or replace an appservice. Paste the YAML in a code block below the command. |
+| `register` | Register or replace an appservice. Paste the YAML in a code block below the command. Config-file registrations cannot be replaced this way. |
 | `unregister <id>` | Remove a database-registered appservice and cancel pending deliveries. Config-file registrations cannot be unregistered this way. |
 | `show-config <id>` | Print the stored registration as YAML. |
 | `list` | List IDs of all loaded appservices. |

@@ -178,6 +178,23 @@ pub fn clear_appservice_in_room_cache(&self) {
 		.clear();
 }
 
+/// Clears the memoized membership decisions of one appservice.
+///
+/// Its cached answers may not hold once its registration's namespaces change;
+/// every other registration keeps its own. A lookup already in flight can
+/// republish an older result after the clear.
+#[implement(Service)]
+#[tracing::instrument(level = "debug", skip(self))]
+pub fn clear_appservice_in_room_cache_for(&self, appservice_id: &str) {
+	self.appservice_in_room_cache
+		.write()
+		.expect("locked")
+		.retain(|_, appservices| {
+			appservices.remove(appservice_id);
+			!appservices.is_empty()
+		});
+}
+
 /// Returns a stream of the remote servers participating in this room.
 ///
 /// Our own server is filtered out, so the result is the federation fan-out
