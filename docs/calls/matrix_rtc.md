@@ -139,7 +139,10 @@ addresses at the node IP.
 
 If your server is behind NAT with a dynamic public address, keep
 `use_external_ip: true` and add `external_ip_only: true` to the `rtc`
-block to suppress the bridge addresses instead.
+block to suppress the bridge addresses instead. Livekit looks up the
+public address only when it starts, so it also needs a restart whenever
+that address changes; see
+[Calls stop working after some hours](#calls-stop-working-after-some-hours).
 
 ## 3. Configure .well-known
 
@@ -616,6 +619,66 @@ rewrite", or "host override" setting. Alternatively, run a small local
 DNS resolver (dnsmasq, AdGuard Home, Pi-hole) on the network and point
 LAN clients at it. External clients continue to resolve the subdomain
 to the public IP via public DNS.
+
+### Calls stop working after some hours
+
+If calls work after Livekit starts but begin failing some hours later,
+and restarting Livekit (or rebooting the server) brings them back until
+the next time, your public IP address is probably changing. Many home
+internet connections receive a new address from time to time, some on a
+fixed schedule.
+
+With `use_external_ip: true`, Livekit discovers the public address once,
+when it starts, and advertises it to clients for as long as it runs.
+After the address changes, clients are still sent the old one and cannot
+reach Livekit. Keeping your DNS records current, for example with a
+dynamic DNS client, does not change what Livekit advertises.
+
+To confirm, compare the address in Livekit's startup log with your
+current public address while calls are failing:
+
+```bash
+docker logs matrix-rtc-livekit 2>&1 | grep "using external IPs"
+curl -4 https://ifconfig.me
+```
+
+If they differ, Livekit needs a restart whenever the address changes.
+The script below checks the public address and restarts the container
+when it has changed. Save it as `/usr/local/bin/livekit-ip-watch.sh`,
+set `CONTAINER` to your Livekit container's name if it differs
+(`docker ps` lists them), and make it executable with
+`sudo chmod +x /usr/local/bin/livekit-ip-watch.sh`.
+
+```sh
+#!/bin/sh
+# Restart Livekit whenever the public IP address changes.
+
+CONTAINER=matrix-rtc-livekit
+STATE=/var/lib/livekit-ip
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+NEW=$(curl -4 -fsS -m 10 https://ifconfig.me) || exit 0
+echo "$NEW" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' || exit 0
+OLD=$(cat "$STATE" 2>/dev/null)
+
+if [ "$NEW" != "$OLD" ]; then
+    logger -t livekit-ip-watch "Public IP changed from ${OLD:-unknown} to $NEW, restarting $CONTAINER"
+    docker restart "$CONTAINER" >/dev/null && echo "$NEW" > "$STATE"
+fi
+```
+
+Run it once by hand with `sudo /usr/local/bin/livekit-ip-watch.sh`. The
+first run restarts Livekit, since no address has been saved yet, and
+records the current one in `/var/lib/livekit-ip`. Then run it every five
+minutes by adding this line to root's crontab (`sudo crontab -e`):
+
+```
+*/5 * * * * /usr/local/bin/livekit-ip-watch.sh
+```
+
+Each restart is logged, and `journalctl -t livekit-ip-watch` lists them.
+A call in progress when the address changes still drops; new calls work
+again once the script has restarted Livekit.
 
 ### Clients report that the server has no MatrixRTC transport
 
