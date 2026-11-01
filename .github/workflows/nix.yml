@@ -61,7 +61,7 @@ jobs:
       shells: ${{steps.attrs.outputs.shells}}
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{inputs.committish || github.ref}}
           persist-credentials: false
@@ -140,7 +140,7 @@ jobs:
         attr: ${{fromJSON(needs.discover.outputs.attrs)}}
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{inputs.committish || github.ref}}
           persist-credentials: false
@@ -150,7 +150,7 @@ jobs:
 
       # Installs a post-build hook, so every path realised below is uploaded,
       # build dependencies included, not just the final output.
-      - uses: cachix/cachix-action@v17
+      - uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
         with:
           name: tuwunel
           authToken: ${{secrets.CACHIX_AUTH_TOKEN}}
@@ -187,7 +187,7 @@ jobs:
         shell: ${{fromJSON(needs.discover.outputs.shells)}}
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{inputs.committish || github.ref}}
           persist-credentials: false
@@ -195,7 +195,7 @@ jobs:
       - name: Install Nix
         uses: ./.github/actions/install-nix
 
-      - uses: cachix/cachix-action@v17
+      - uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
         with:
           name: tuwunel
           authToken: ${{secrets.CACHIX_AUTH_TOKEN}}

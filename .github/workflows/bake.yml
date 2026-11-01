@@ -131,7 +131,7 @@ jobs:
         machine: ${{fromJSON(inputs.machines)}}
 
     steps:
-    - uses: actions/checkout@v7
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         ref: ${{inputs.checkout || github.sha}}
         fetch-depth: 1
@@ -265,7 +265,7 @@ jobs:
         !failure() && !cancelled()
         && fromJSON(inputs.artifact)[matrix.bake_target].dst
 
-      uses: actions/upload-artifact@v7
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
       with:
         path: _artifact/*
         name: ${{matrix.cargo_profile}}-${{matrix.feat_set}}-${{matrix.sys_target}}-${{fromJSON(inputs.artifact)[matrix.bake_target].dst}}
@@ -277,7 +277,7 @@ jobs:
         && fromJSON(inputs.artifact)[matrix.bake_target].dst
         && fromJSON(inputs.artifact)[matrix.bake_target].pages == true
 
-      uses: actions/upload-pages-artifact@v5
+      uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
       with:
         path: _artifact/${{fromJSON(inputs.artifact)[matrix.bake_target].dst}}
         name: github-pages-${{fromJSON(inputs.artifact)[matrix.bake_target].dst}}
@@ -291,7 +291,7 @@ jobs:
         && contains(github.ref, 'refs/tags/v')
         && inputs.release_url
 
-      uses: actions/upload-release-asset@v1
+      uses: actions/upload-release-asset@e8f9f06c4b078e705bd2ea027f0926603fc9b4d5 # v1.0.2
       env:
         GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
       with:

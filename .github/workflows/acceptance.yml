@@ -90,7 +90,7 @@ jobs:
         include: ${{fromJSON(inputs.includes)}}
 
     steps:
-    - uses: actions/checkout@v7
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         ref: ${{inputs.checkout || github.sha}}
 
@@ -115,7 +115,7 @@ jobs:
     - if: success() || (failure() && steps.execute.outcome == 'failure')
       name: Upload Results
       id: upload-result
-      uses: actions/upload-artifact@v7
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
       with:
         name: playwright_results-${{matrix.feat_set}}-${{matrix.sys_name}}-${{matrix.sys_target}}-shard-${{matrix.shard}}.json
         path: ./tests/playwright/results.json
@@ -125,7 +125,7 @@ jobs:
     - if: success() || (failure() && steps.execute.outcome == 'failure')
       name: Upload Log Output
       id: upload-output
-      uses: actions/upload-artifact@v7
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
       with:
         name: playwright_output-${{matrix.feat_set}}-${{matrix.sys_name}}-${{matrix.sys_target}}-shard-${{matrix.shard}}.log
         path: ./tests/playwright/output.log
@@ -135,7 +135,7 @@ jobs:
     - if: success() || (failure() && steps.execute.outcome == 'failure')
       name: Upload Failure Artifacts
       id: upload-artifacts
-      uses: actions/upload-artifact@v7
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
       with:
         name: playwright_artifacts-${{matrix.feat_set}}-${{matrix.sys_name}}-${{matrix.sys_target}}-shard-${{matrix.shard}}
         path: ./tests/playwright/test-results
@@ -167,12 +167,12 @@ jobs:
 
     runs-on: ["${{fromJSON(inputs.machines)[0]}}", "${{inputs.runner}}"]
     steps:
-    - uses: actions/checkout@v7
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         ref: ${{inputs.checkout || github.sha}}
 
     - name: Collect Shard Results
-      uses: actions/download-artifact@v7
+      uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
       with:
         pattern: playwright_results-*
         path: ./shard-results

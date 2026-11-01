@@ -196,7 +196,7 @@ jobs:
         exclude: ${{fromJSON(vars.RUNNERS_EXCLUDES || '[]')}}
 
     steps:
-    - uses: actions/checkout@v7
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         ref: ${{inputs.checkout || github.sha}}
 
@@ -224,7 +224,7 @@ jobs:
 
       id: release
       name: Create Release
-      uses: actions/create-release@v1
+      uses: actions/create-release@0cb9c9b65d5d1901c1f53e5e66eaf4afd303e70e # v1.1.4
       env:
         GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
       with:
