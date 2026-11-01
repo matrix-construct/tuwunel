@@ -12,10 +12,47 @@ use tuwunel_macros::config_example_generator;
 
 use super::{deserialize_bytesize_u64, deserialize_bytesize_usize, true_fn};
 
-/// Configures media uploads, storage, and access.
+/// Media repository
 ///
-/// Provider selection controls where media is read and written. Import,
-/// thumbnail, and URL preview settings govern related processing.
+/// Uploads, storage, downloads and the legacy media endpoints, with
+/// sub-sections for Conduit media import, thumbnails, URL previews and
+/// video thumbnails. Every key has a working default; with nothing set,
+/// media is kept in `<database_path>/media` by the built-in local provider
+/// `media`, which a `[global.storage_provider.media.local]` (or `.s3`,
+/// `.gcs`) section replaces.
+///
+/// Reads try the providers in `storage_providers` until one holds the
+/// file; uploads go to those in `store_on_providers`, or to all of them
+/// when it is empty. Any name other than `media` needs its own
+/// `[global.storage_provider.<ID>.*]` section.
+///
+/// Example (new uploads to S3, older files still read from disk):
+///
+/// ```toml
+///     [global.media]
+///     storage_providers = ["media", "media_on_s3"]
+///     store_on_providers = ["media_on_s3"]
+///
+///     [global.storage_provider.media_on_s3.s3]
+///     bucket = "matrix-media"
+///     key = "ACCESS_KEY_ID"
+///     secret = "SECRET_ACCESS_KEY"
+/// ```
+///
+/// Tips:
+/// - The config is refused when `store_on_providers` names a provider
+///   missing from `storage_providers`, or `storage_providers` names one
+///   (other than `media`) with no `[global.storage_provider.<ID>.*]`
+///   section. An S3 or GCS section without `bucket` (or S3 `url`), or a
+///   local one with `base_path = ""`, passes that check but is skipped,
+///   not refused, at startup.
+/// - Several `storage_providers` with `store_on_providers` empty copies
+///   every upload to all of them; a startup warning says so.
+/// - Copy existing files to a new provider with
+///   `!admin query storage sync media media_on_s3`, then drop `media` from
+///   both lists.
+/// - Provider sections are read only at startup; one added or changed by
+///   a config reload is not used until a restart.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 #[derive(Clone, Debug, Deserialize)]
 #[config_example_generator(
@@ -257,10 +294,12 @@ pub struct Media {
 	pub video_thumbnail: VideoThumbnail,
 }
 
-/// Configures media imported from other server implementations.
+/// Media import
 ///
-/// Source settings describe the existing media layout. Conduit imports can
-/// read filesystem or object-store originals.
+/// Settings for importing media from a database created by another
+/// server. Conduit is the only supported source, configured in
+/// `[global.media.import.conduit]`; nothing here needs setting for a
+/// database that did not come from Conduit.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 #[derive(Clone, Debug, Default, Deserialize)]
 #[config_example_generator(
@@ -277,10 +316,40 @@ pub struct Import {
 	pub conduit: ImportConduit,
 }
 
-/// Describes source media for a Conduit database import.
+/// Conduit media import
 ///
-/// Directory settings identify the source sharding layout. An optional
-/// storage provider supplies originals from Conduit object storage.
+/// When the server first starts on a database taken over from Conduit, it
+/// copies each original media file into its own store through the normal
+/// upload path, so the copies land on the providers that receive uploads
+/// (see `[global.media]`). With nothing set, the files are read from
+/// `<database_path>/media` in Conduit's default directory layout.
+///
+/// Set `source_path` when Conduit kept media in another directory, or
+/// `source_provider` when it kept media in object storage.
+///
+/// Example (importing from an S3 bucket):
+///
+/// ```toml
+///     [global.media.import.conduit]
+///     source_provider = "conduit_source"
+///
+///     [global.storage_provider.conduit_source.s3]
+///     bucket = "conduit-media"
+///     key = "ACCESS_KEY_ID"
+///     secret = "SECRET_ACCESS_KEY"
+/// ```
+///
+/// Tips:
+/// - The import runs once and is then recorded as done; changing these
+///   keys afterwards has no effect.
+/// - The source provider needs no entry in `media.storage_providers`.
+///   Keep it out of that list, and keep the list non-empty, so imported
+///   files are not also written back into the source.
+/// - A `source_provider` that names no defined provider, or stays
+///   unreachable after a retry, fails startup; the next start repeats the
+///   import from the beginning. Missing source files are skipped.
+/// - When `directory_depth` is non-zero, `directory_length` must be
+///   non-zero and their product under 64, or the config is refused.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 #[derive(Clone, Debug, Deserialize)]
 #[config_example_generator(
@@ -337,10 +406,18 @@ pub struct ImportConduit {
 	pub source_provider: Option<String>,
 }
 
-/// Configures image and animated thumbnail generation.
+/// Image thumbnails
 ///
-/// Pixel and frame limits bound decoding and encoding work. Animated job
-/// admission limits source processing concurrency.
+/// Limits on the thumbnails generated on demand from images, and from the
+/// frames extracted for video thumbnails. Image thumbnails need no setup;
+/// these keys bound the work each one may cost and how many sources are
+/// processed at once.
+///
+/// Tips:
+/// - The config is refused when `max_pixels` is 0 or
+///   `animated_concurrency` is outside 1 to 1024.
+/// - Video thumbnails also need `[global.media.video_thumbnail]`, which is
+///   off until its `command` is set.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 #[derive(Clone, Copy, Debug, Deserialize)]
 #[config_example_generator(
@@ -410,10 +487,31 @@ pub struct Thumbnail {
 	pub animated_concurrency: usize,
 }
 
-/// Configures URL preview fetching, caching, and origin access.
+/// URL previews
 ///
-/// Allowlists and denylists select permitted requests. Size limits, request
-/// headers, and cache lifetime control generated previews.
+/// Link previews the server fetches on behalf of clients, built from the
+/// page's OpenGraph tags. Previews are off by default: with
+/// `domain_explicit_allowlist`, `domain_contains_allowlist` and
+/// `url_contains_allowlist` all empty, every preview request is refused
+/// and clients are told previews are disabled. To enable previews, list
+/// the hosts to allow.
+///
+/// Minimal example:
+///
+/// ```toml
+///     [global.media.url_preview]
+///     domain_explicit_allowlist = ["en.wikipedia.org", "github.com"]
+/// ```
+///
+/// Tips:
+/// - A host in `domain_explicit_denylist` is refused even when an
+///   allowlist admits it, except that `"*"` in any allowlist admits every
+///   URL before the denylist is consulted (and draws a startup warning).
+/// - An allowed URL is still refused when its host is an address in
+///   `network.http.ip_range_denylist`, or resolves to one.
+/// - `check_root_domain` strips only the first label of the host:
+///   `en.wikipedia.org` is also checked as `wikipedia.org`, but
+///   `en.m.wikipedia.org` only as `m.wikipedia.org`.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 #[derive(Clone, Debug, Deserialize)]
 #[config_example_generator(
@@ -593,10 +691,25 @@ pub struct UrlPreview {
 	pub accept_language: Option<String>,
 }
 
-/// Configures external video frame extraction for thumbnails.
+/// Video thumbnails
 ///
-/// The command writes a still image for ordinary thumbnail processing.
-/// Time, size, and concurrency limits bound extraction and staging work.
+/// The server decodes no video itself. To thumbnail a video it runs the
+/// external program named in `command`, such as `ffmpeg`, which must be
+/// installed where the server runs; the frame it writes is then
+/// thumbnailed under the limits of `[global.media.thumbnail]`. With
+/// `command` empty (the default), videos are served without a thumbnail.
+///
+/// Tips:
+/// - The published container images hold only the `tuwunel` binary and a
+///   CA bundle; add the program with a derived image or by mounting a
+///   statically linked build.
+/// - A systemd unit that filters out the `@ipc` syscalls must allow
+///   `pipe` and `pipe2` again (`SystemCallFilter=pipe pipe2`, as the
+///   packaged units do), or spawning the program fails.
+/// - A video whose extraction failed is not retried for five minutes, so
+///   test a corrected `command` with another video.
+/// - The config is refused when `timeout` is 0 or `concurrency` is outside
+///   1 to 1024.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 #[derive(Clone, Debug, Deserialize)]
 #[config_example_generator(
