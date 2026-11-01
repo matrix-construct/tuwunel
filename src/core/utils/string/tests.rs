@@ -2,11 +2,35 @@
 
 use std::borrow::Cow;
 
-use super::{markdown_cell, plural};
+use super::{contains_any, equals_any, markdown_cell, plural};
 use crate::{arrayvec::ArrayString, smallstr::SmallString};
 
 type SmallBuf = SmallString<[u8; 16]>;
 type ArrayBuf = ArrayString<16>;
+
+#[test]
+fn contains_any_skips_empty_needles() {
+	let needles = ["google.com"];
+	let none: [&str; 0] = [];
+
+	assert!(contains_any("google.com", &needles));
+	assert!(contains_any("www.google.com", &needles));
+	assert!(!contains_any("e.com", &needles));
+	assert!(!contains_any("google.com", &none));
+	assert!(!contains_any("google.com", [""]));
+}
+
+#[test]
+fn equals_any_matches_whole_items() {
+	let candidates = ["*".to_owned(), "example.com".to_owned()];
+	let none: [&str; 0] = [];
+
+	assert!(equals_any("*", &candidates));
+	assert!(equals_any("example.com", &candidates));
+	assert!(!equals_any("www.example.com", &candidates));
+	assert!(!equals_any("example", &candidates));
+	assert!(!equals_any("*", &none));
+}
 
 #[test]
 fn common_prefix() {

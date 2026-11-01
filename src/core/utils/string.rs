@@ -184,6 +184,37 @@ pub fn common_prefix<T: AsRef<str>>(choice: &[T]) -> &str {
 	})
 }
 
+/// Reports whether `haystack` contains any of the non-empty `needles`.
+///
+/// An empty needle is skipped rather than matching every haystack, so an
+/// empty list or a list of empty strings matches nothing.
+#[must_use]
+pub fn contains_any<Needles>(haystack: &str, needles: Needles) -> bool
+where
+	Needles: IntoIterator,
+	Needles::Item: AsRef<str>,
+{
+	needles
+		.into_iter()
+		.filter(|needle| !needle.as_ref().is_empty())
+		.any(|needle| haystack.contains(needle.as_ref()))
+}
+
+/// Reports whether any of `candidates` equals `item`.
+///
+/// Unlike a slice's `contains`, the candidates need not share the type of
+/// `item`, so a list of `String` is searched for a `&str` without allocating.
+#[must_use]
+pub fn equals_any<Candidates>(item: &str, candidates: Candidates) -> bool
+where
+	Candidates: IntoIterator,
+	Candidates::Item: AsRef<str>,
+{
+	candidates
+		.into_iter()
+		.any(|candidate| candidate.as_ref() == item)
+}
+
 /// Returns a deterministic prefix selected from the string contents.
 ///
 /// The candidate index is the wrapping sum of input bytes modulo the byte

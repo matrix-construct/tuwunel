@@ -23,6 +23,7 @@ use crate::{
 	Config, Err, Result, debug, debug_info, err, error,
 	utils::{
 		is_secret_set,
+		string::equals_any,
 		sys::storage::{Filesystem, filesystem_from_path},
 		time::timepoint_from_now,
 	},
@@ -656,7 +657,6 @@ fn unusable_concurrency(slots: usize) -> bool {
 }
 
 fn check_url_previews(config: &Config) -> Result {
-	let wildcard = "*".to_owned();
 	let url_preview_wildcards = [
 		(
 			"media.url_preview.domain_contains_allowlist",
@@ -672,15 +672,19 @@ fn check_url_previews(config: &Config) -> Result {
 		),
 	];
 
-	for (name, list) in url_preview_wildcards {
-		if list.contains(&wildcard) {
+	url_preview_wildcards
+		.into_iter()
+		.filter(|&(_, list)| equals_any("*", list))
+		.for_each(|(name, _)| {
 			warn!(
-				"All URLs are allowed for URL previews via setting \"{name}\" to \"*\". This \
-				 opens up significant attack surface to your server. You are expected to be \
-				 aware of the risks by doing this."
+				setting = name,
+				"All URLs are allowed for URL previews by \"*\" in this setting. This opens up \
+				 significant attack surface to your server. You are expected to be aware of the \
+				 risks by doing this."
 			);
-		}
-	}
+		});
+
+	warn_domain_contains_entries(config);
 
 	if let Some(Either::Right(_)) = config.media.url_preview.bound_interface.as_ref()
 		&& !matches!(OS, "android" | "fuchsia" | "linux")
@@ -733,6 +737,32 @@ fn check_url_previews(config: &Config) -> Result {
 	)?;
 
 	Ok(())
+}
+
+/// Warns about `domain_contains_allowlist` entries that can never match.
+///
+/// An empty entry matches nothing, and an entry holding a `/` is never found
+/// in a host, which carries no scheme or path.
+fn warn_domain_contains_entries(config: &Config) {
+	let entries = &config.media.url_preview.domain_contains_allowlist;
+
+	if entries.iter().any(String::is_empty) {
+		warn!(
+			setting = "media.url_preview.domain_contains_allowlist",
+			"An empty entry matches nothing."
+		);
+	}
+
+	entries
+		.iter()
+		.filter(|entry| entry.contains('/'))
+		.for_each(|entry| {
+			warn!(
+				setting = "media.url_preview.domain_contains_allowlist",
+				?entry,
+				"Matched against the host alone, so this entry never matches."
+			);
+		});
 }
 
 fn check_room_version(config: &Config) -> Result {

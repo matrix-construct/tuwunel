@@ -3247,13 +3247,14 @@
 #
 #cache_ttl = 86400
 
-# Applies domain allowlist checks to the root domain when enabled.
+# Checks the host again with its first label removed when no list admitted
+# it.
 #
-# This affects both contains and explicit domain allowlists, but not the
-# URL contains allowlist, and defaults to false. Allowing "wikipedia.org"
-# then permits subdomains such as "en.m.wikipedia.org" because the root
-# domain matches. Use this when domain containment is too broad but all
-# subdomains of a root should be allowed.
+# Only the explicit denylist and allowlist are consulted for the shortened
+# name, since a contains entry it holds already matched the full host.
+# One label is removed: with "wikipedia.org" in
+# `domain_explicit_allowlist`, "en.wikipedia.org" is admitted, while
+# "en.m.wikipedia.org" is checked only as "m.wikipedia.org" and refused.
 #
 # reloadable: yes
 #

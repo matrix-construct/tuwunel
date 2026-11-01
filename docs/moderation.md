@@ -231,9 +231,10 @@ Domain policy:
 - `url_preview_domain_explicit_allowlist`: strict equality match on the host.
 - `url_preview_domain_explicit_denylist`: strict equality match, evaluated
   before the allowlist.
-- `url_preview_check_root_domain`: when `true`, applies the contains and
-  explicit allowlists against the root domain, so an allow on `wikipedia.org`
-  also lets `en.m.wikipedia.org` through.
+- `url_preview_check_root_domain`: when `true`, retries the explicit
+  denylist and allowlist against the host with its first label removed, so an
+  explicit allow on `wikipedia.org` also lets `en.wikipedia.org` through, but
+  not `en.m.wikipedia.org`.
 - `url_preview_max_spider_size` (bytes; SI/IEC suffix accepted): caps the
   spider response body.
 - `url_preview_bound_interface`: pins outbound preview requests to a specific

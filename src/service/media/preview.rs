@@ -17,8 +17,14 @@ use reqwest::header::{ACCEPT_LANGUAGE, CONTENT_TYPE, COOKIE, HeaderValue, USER_A
 use ruma::Mxc;
 use serde::{Deserialize, Serialize};
 use tuwunel_core::{
-	Config, Err, Result, debug, err, implement, smallstr::SmallString,
-	utils::time::timepoint_from_now,
+	Config, Err, Result,
+	config::media::UrlPreview,
+	debug, err, implement,
+	smallstr::SmallString,
+	utils::{
+		string::{contains_any, equals_any},
+		time::timepoint_from_now,
+	},
 };
 #[cfg(feature = "url_preview")]
 use tuwunel_core::{debug_warn, utils::random_string};
@@ -1044,57 +1050,46 @@ pub(super) fn check_url_host(&self, url: &Url) -> Result {
 	Ok(())
 }
 
+/// Reports whether the `media.url_preview` settings allow previewing `url`.
+///
+/// Only HTTP and HTTPS URLs with a host qualify. `"*"` in any allowlist admits
+/// every such URL; otherwise the explicit denylist is checked before the
+/// allowlists, and `check_root_domain` retries the explicit lists with the
+/// host's first label removed.
 #[implement(Service)]
+#[inline]
 pub fn url_preview_allowed(&self, url: &Url) -> bool {
+	url_allowed(&self.services.config.media.url_preview, url)
+}
+
+fn url_allowed(url_preview: &UrlPreview, url: &Url) -> bool {
 	if ["http", "https"]
 		.iter()
 		.all(|&scheme| !scheme.eq_ignore_ascii_case(url.scheme()))
 	{
-		debug!("Ignoring non-HTTP/HTTPS URL to preview: {}", url);
+		debug!(%url, "Ignoring a non-HTTP/HTTPS URL for preview");
 		return false;
 	}
 
-	let host = match url.host_str() {
-		| None => {
-			debug!("Ignoring URL preview for a URL that does not have a host (?): {}", url);
-			return false;
-		},
-		| Some(h) => h.to_owned(),
+	let Some(host) = url.host_str() else {
+		debug!(%url, "Ignoring URL preview for a URL without a host");
+		return false;
 	};
 
-	let allowlist_domain_contains = &self
-		.services
-		.config
-		.media
-		.url_preview
-		.domain_contains_allowlist;
+	let UrlPreview {
+		domain_contains_allowlist,
+		domain_explicit_allowlist,
+		domain_explicit_denylist,
+		url_contains_allowlist,
+		check_root_domain,
+		..
+	} = url_preview;
 
-	let allowlist_domain_explicit = &self
-		.services
-		.config
-		.media
-		.url_preview
-		.domain_explicit_allowlist;
-
-	let denylist_domain_explicit = &self
-		.services
-		.config
-		.media
-		.url_preview
-		.domain_explicit_denylist;
-
-	let allowlist_url_contains = &self
-		.services
-		.config
-		.media
-		.url_preview
-		.url_contains_allowlist;
-
-	if allowlist_domain_contains.contains(&"*".to_owned())
-		|| allowlist_domain_explicit.contains(&"*".to_owned())
-		|| allowlist_url_contains.contains(&"*".to_owned())
+	if equals_any("*", domain_contains_allowlist)
+		|| equals_any("*", domain_explicit_allowlist)
+		|| equals_any("*", url_contains_allowlist)
 	{
-		debug!("Config key contains * which is allowing all URL previews. Allowing URL {}", url);
+		debug!(%url, "An allowlist holding \"*\" allows every URL preview");
 		return true;
 	}
 
@@ -1102,44 +1097,37 @@ pub fn url_preview_allowed(&self, url: &Url) -> bool {
 		return false;
 	}
 
-	if denylist_domain_explicit.contains(&host) {
+	if equals_any(host, domain_explicit_denylist) {
 		debug!(%host, "Host is not allowed by media.url_preview.domain_explicit_denylist (check \
 			 1/4)");
 
 		return false;
 	}
 
-	if allowlist_domain_explicit.contains(&host) {
+	if equals_any(host, domain_explicit_allowlist) {
 		debug!(%host, "Host is allowed by media.url_preview.domain_explicit_allowlist (check 2/4)");
 
 		return true;
 	}
 
-	if allowlist_domain_contains
-		.iter()
-		.any(|domain_s| domain_s.contains(host.as_str()))
-	{
+	if contains_any(host, domain_contains_allowlist) {
 		debug!(%host, "Host is allowed by media.url_preview.domain_contains_allowlist (check 3/4)");
 
 		return true;
 	}
 
-	if allowlist_url_contains
+	// An empty entry matches every URL, where contains_any skips it for
+	// domain_contains_allowlist.
+	if url_contains_allowlist
 		.iter()
-		.any(|url_s| url.as_str().contains(url_s))
+		.any(|entry| url.as_str().contains(entry.as_str()))
 	{
 		debug!(%host, "URL is allowed by media.url_preview.url_contains_allowlist (check 4/4)");
 
 		return true;
 	}
 
-	if !self
-		.services
-		.config
-		.media
-		.url_preview
-		.check_root_domain
-	{
+	if !check_root_domain {
 		return false;
 	}
 
@@ -1148,26 +1136,16 @@ pub fn url_preview_allowed(&self, url: &Url) -> bool {
 		return false;
 	};
 
-	if denylist_domain_explicit.contains(&root_domain.to_owned()) {
+	if equals_any(root_domain, domain_explicit_denylist) {
 		debug!(%root_domain, "Root domain is not allowed by \
-			 media.url_preview.domain_explicit_denylist (check 1/3)");
+			 media.url_preview.domain_explicit_denylist (check 1/2)");
 
 		return false;
 	}
 
-	if allowlist_domain_explicit.contains(&root_domain.to_owned()) {
+	if equals_any(root_domain, domain_explicit_allowlist) {
 		debug!(%root_domain, "Root domain is allowed by \
-			 media.url_preview.domain_explicit_allowlist (check 2/3)");
-
-		return true;
-	}
-
-	if allowlist_domain_contains
-		.iter()
-		.any(|domain_s| domain_s.contains(root_domain))
-	{
-		debug!(%root_domain, "Root domain is allowed by \
-			 media.url_preview.domain_contains_allowlist (check 3/3)");
+			 media.url_preview.domain_explicit_allowlist (check 2/2)");
 
 		return true;
 	}
@@ -1183,30 +1161,62 @@ mod tests {
 	use tuwunel_core::utils::time::timepoint_ago;
 	use url::Url;
 
-	use super::{CachedPreview, UrlPreviewData, is_youtube};
+	use super::{CachedPreview, UrlPreview, UrlPreviewData, is_youtube, url_allowed};
 	#[cfg(feature = "url_preview")]
 	use super::{oembed_endpoint, reserve_capped, video_type};
 
 	const TTL: Duration = Duration::from_hours(24);
 
-	fn sample() -> UrlPreviewData {
-		UrlPreviewData {
-			title: Some("Title".to_owned()),
-			description: Some("Description".to_owned()),
-			image: Some("mxc://example.org/image".to_owned()),
-			// values carrying a 0xFF byte, which sheared fields in the old codec
-			image_size: Some(0xFF01),
-			image_width: Some(640),
-			image_height: Some(0xFF),
-			video: Some("mxc://example.org/video".to_owned()),
-			video_type: Some("video/mp4".into()),
-			video_size: Some(123_456),
-			video_width: Some(1920),
-			video_height: Some(1080),
-			audio: Some("mxc://example.org/audio".to_owned()),
-			audio_size: Some(4096),
-			og_type: Some("website".to_owned()),
-			og_url: Some("https://example.org/".to_owned()),
+	#[test]
+	fn url_allowed_by_the_preview_lists() {
+		let base = UrlPreview {
+			domain_contains_allowlist: vec!["google.com".to_owned()],
+			domain_explicit_allowlist: vec!["wikipedia.org".to_owned()],
+			domain_explicit_denylist: vec!["ads.google.com".to_owned()],
+			url_contains_allowlist: vec!["example.org/allowed/".to_owned()],
+			check_root_domain: true,
+			..Default::default()
+		};
+
+		let no_root = UrlPreview { check_root_domain: false, ..base.clone() };
+
+		let root_denied = UrlPreview {
+			domain_explicit_denylist: vec!["wikipedia.org".to_owned()],
+			..base.clone()
+		};
+
+		let wildcard = UrlPreview {
+			url_contains_allowlist: vec!["*".to_owned()],
+			..base.clone()
+		};
+
+		let empty_url_entry = UrlPreview {
+			url_contains_allowlist: vec![String::new()],
+			..base.clone()
+		};
+
+		let cases = [
+			("base", &base, "https://google.com/", true),
+			("base", &base, "https://www.google.com/search", true),
+			("base", &base, "https://oogle.com/", false),
+			("base", &base, "https://ads.google.com/", false),
+			("base", &base, "ftp://google.com/", false),
+			("base", &base, "https://example.org/allowed/page", true),
+			("base", &base, "https://example.org/other", false),
+			("base", &base, "https://wikipedia.org/", true),
+			("base", &base, "https://en.wikipedia.org/", true),
+			("base", &base, "https://en.m.wikipedia.org/", false),
+			("no_root", &no_root, "https://en.wikipedia.org/", false),
+			("root_denied", &root_denied, "https://en.wikipedia.org/", false),
+			("wildcard", &wildcard, "https://ads.google.com/", true),
+			("empty_url_entry", &empty_url_entry, "https://unlisted.example/", true),
+			("empty_url_entry", &empty_url_entry, "https://ads.google.com/", false),
+		];
+
+		for (name, url_preview, url, allowed) in cases {
+			let url = Url::parse(url).expect("a valid URL");
+
+			assert_eq!(url_allowed(url_preview, &url), allowed, "{name}: {url}");
 		}
 	}
 
@@ -1239,6 +1249,27 @@ mod tests {
 
 		let empty = serde_json::to_value(UrlPreviewData::default()).expect("json");
 		assert!(empty.as_object().expect("object").is_empty());
+	}
+
+	fn sample() -> UrlPreviewData {
+		UrlPreviewData {
+			title: Some("Title".to_owned()),
+			description: Some("Description".to_owned()),
+			image: Some("mxc://example.org/image".to_owned()),
+			// values carrying a 0xFF byte, which sheared fields in the old codec
+			image_size: Some(0xFF01),
+			image_width: Some(640),
+			image_height: Some(0xFF),
+			video: Some("mxc://example.org/video".to_owned()),
+			video_type: Some("video/mp4".into()),
+			video_size: Some(123_456),
+			video_width: Some(1920),
+			video_height: Some(1080),
+			audio: Some("mxc://example.org/audio".to_owned()),
+			audio_size: Some(4096),
+			og_type: Some("website".to_owned()),
+			og_url: Some("https://example.org/".to_owned()),
+		}
 	}
 
 	#[test]

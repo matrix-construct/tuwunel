@@ -752,6 +752,45 @@ oidc_registration_access_token = "initial-access-token"
 }
 
 #[test]
+fn check_warns_about_url_preview_allowlist_entries() {
+	let cases = [
+		("a host entry", r#"domain_contains_allowlist = ["youtube.com"]"#, None),
+		(
+			"a URL entry",
+			r#"domain_contains_allowlist = ["https://youtube.com"]"#,
+			Some("host alone"),
+		),
+		(
+			"an empty domain entry",
+			r#"domain_contains_allowlist = [""]"#,
+			Some("matches nothing"),
+		),
+		("an empty URL entry", r#"url_contains_allowlist = [""]"#, None),
+		(
+			"a wildcard entry",
+			r#"domain_contains_allowlist = ["*"]"#,
+			Some("All URLs are allowed"),
+		),
+	];
+
+	for (name, setting, warning) in cases {
+		let config =
+			config_from_toml(&format!("[global.media.url_preview]\n{setting}\n")).unwrap();
+
+		let (result, logs) = check_with_captured_logs(&config);
+
+		result.expect("a preview allowlist should pass config check");
+		let warned = ["never matches", "matches nothing", "All URLs are allowed"]
+			.iter()
+			.any(|marker| logs.contains(marker));
+
+		assert_eq!(warned, warning.is_some(), "{name}");
+
+		assert!(warning.is_none_or(|warning| logs.contains(warning)), "{name}");
+	}
+}
+
+#[test]
 fn check_bounds_the_animated_thumbnail_concurrency() {
 	let cases = [
 		("the default", "[global]\n", true),
