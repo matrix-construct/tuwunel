@@ -9,11 +9,13 @@ use tuwunel_macros::config_example_generator;
 
 use super::{deserialize_bytesize_usize, true_fn};
 
-/// Configures outbound networking and name resolution.
+/// Outbound networking
 ///
-/// Discovery settings bound federation well-known requests. DNS and HTTP
-/// client settings control resolution, request limits, and connection
-/// behavior.
+/// How the server reaches other hosts. `[global.network.dns]` configures
+/// the built-in resolver, `[global.network.discovery]` bounds well-known
+/// lookups of federation destinations, and `[global.network.http]` sets
+/// limits and address filtering for outbound HTTP requests. The server's
+/// own listener is configured under `[global.http]` instead.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 #[derive(Clone, Debug, Default, Deserialize)]
 #[config_example_generator(
@@ -42,10 +44,10 @@ pub struct Network {
 	pub http: Http,
 }
 
-/// Bounds federation well-known discovery requests.
+/// Federation server discovery
 ///
-/// Connection and request timeouts are measured in seconds. They apply to
-/// HTTP discovery of federation destinations.
+/// Timeouts for fetching `https://<server>/.well-known/matrix/server` from
+/// other homeservers while working out where to send federation requests.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 #[derive(Clone, Copy, Debug, Deserialize)]
 #[config_example_generator(
@@ -71,11 +73,21 @@ pub struct Discovery {
 	pub timeout: u64,
 }
 
-/// Configures DNS resolvers, caching, and query behavior.
+/// DNS resolver
 ///
-/// Cache lifetimes and lookup strategy shape federation resolution.
-/// Alternative resolution settings serve internal networks and application
-/// services.
+/// The server resolves host names for its outbound HTTP requests with its
+/// own resolver rather than the system library. With `servers` empty it
+/// takes its nameservers from `/etc/resolv.conf` at startup. Answers are
+/// kept for at least `min_ttl` (`min_ttl_nxdomain` for missing domains)
+/// whatever their TTL.
+///
+/// Tips:
+/// - `servers` entries must be IP addresses with an optional port; a host
+///   name fails startup.
+/// - `passthru_domains` entries are regular expressions; a plain dotted
+///   name logs a startup warning because each dot matches any character.
+/// - Only `passthru_domains` applies on reload; other changes need a
+///   restart.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 #[derive(Clone, Debug, Deserialize)]
 #[config_example_generator(
@@ -219,11 +231,26 @@ pub struct Dns {
 	pub case_randomization: bool,
 }
 
-/// Configures outbound HTTP clients.
+/// Outbound HTTP requests
 ///
-/// Response limits and address filtering constrain remote requests.
-/// Timeouts, connection reuse, compression, and certificate checks supply
-/// client defaults.
+/// Defaults for HTTP requests the server makes to other hosts: federation,
+/// remote media and URL previews, push gateways, appservices and identity
+/// providers. The server's own listener is configured in `[global.http]`
+/// instead. Some clients override the timeouts here:
+/// `[global.federation.transport]`, `[global.sending]`,
+/// `[global.appservice_client]`, `[global.push]` and
+/// `[global.network.discovery]`.
+///
+/// Tips:
+/// - The default `ip_range_denylist` refuses private, loopback and
+///   link-local addresses, including a push gateway or URL preview target
+///   on your LAN. Remove just the range you need rather than emptying
+///   the list. Appservice requests are not checked against it.
+/// - An `ip_range_denylist` entry that is not a valid CIDR range fails
+///   startup.
+/// - Outbound proxies are set with `proxy` (the `[global.proxy]` table) or,
+///   while `proxy` stays `"none"`, by the `HTTP_PROXY`, `HTTPS_PROXY` and
+///   `ALL_PROXY` environment variables.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 #[derive(Clone, Debug, Deserialize)]
 #[config_example_generator(

@@ -15,11 +15,22 @@ use super::{
 	net::{ListeningAddr, ListeningPort},
 };
 
-/// Configures inbound HTTP requests and responses.
+/// HTTP listener
 ///
-/// Request limits and client address extraction apply to server traffic.
-/// Listener and compression settings control how that traffic reaches
-/// clients.
+/// Settings for the server's own HTTP listener, which serves clients and
+/// other homeservers alike: request size, timeouts, client address
+/// detection and CORS. Where it listens is set in `[global.http.listen]`,
+/// response compression in `[global.http.compression]`, and direct TLS in
+/// `[global.tls]`. Requests the server sends to other hosts are configured
+/// in `[global.network.http]` instead.
+///
+/// Tips:
+/// - `max_request_size` also caps requests from other homeservers, and a
+///   value under 10 MB (`10000000` bytes) fails startup. A reverse proxy in
+///   front needs a body limit at least as large, or big uploads fail there.
+/// - Behind a reverse proxy, set `ip_source` to the header that proxy
+///   writes. A reload that changes `ip_source` is rejected; restart
+///   instead.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 #[derive(Clone, Debug, Deserialize)]
 #[config_example_generator(
@@ -156,10 +167,12 @@ pub struct Http {
 	pub listen: Listen,
 }
 
-/// Selects compression for outbound server responses.
+/// Response compression
 ///
-/// Each codec requires its matching build feature. These settings affect
-/// server responses independently of outbound HTTP client negotiation.
+/// Compresses the server's own HTTP responses for clients that accept it.
+/// Every codec is off by default; a reverse proxy can compress instead.
+/// Outbound requests negotiate compression separately in
+/// `[global.network.http]`.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 #[derive(Clone, Copy, Debug, Default, Deserialize)]
 #[config_example_generator(
@@ -203,11 +216,23 @@ pub struct Compression {
 	pub brotli: bool,
 }
 
-/// Configures TCP and UNIX socket listeners.
+/// Listening addresses, ports and Unix socket
 ///
-/// Explicit TCP addresses must bind successfully during startup. UNIX
-/// socket settings control the path and permissions used by reverse
-/// proxies.
+/// By default the server listens for plain HTTP on port 8008 at `127.0.0.1`
+/// and `::1`, reachable only from the same host, which suits a reverse proxy
+/// there. It binds every combination of `address` and `port`. Setting
+/// `unix_socket_path` adds a Unix socket; with `address` left unset, the
+/// socket replaces the default TCP listeners.
+///
+/// Tips:
+/// - Listener settings are read once at startup; a reload does not rebind.
+/// - Sockets passed in by systemd socket activation are served alongside
+///   these, as plain HTTP or TLS like the other TCP listeners.
+/// - Other homeservers connect to port 8448 of `server_name` unless
+///   `well_known.server` or a DNS SRV record delegates elsewhere, so a
+///   reverse proxy, or this listener with `[global.tls]`, must answer
+///   there.
+/// - The Unix socket always speaks plain HTTP, even with `[global.tls]`.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 #[derive(Clone, Debug, Deserialize)]
 #[config_example_generator(

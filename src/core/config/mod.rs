@@ -571,10 +571,35 @@ pub struct Config {
 	pub typing: Typing,
 }
 
-/// Configures direct TLS listener behavior.
+/// Direct TLS
 ///
-/// Certificate and key paths must be supplied together. Optional dual-protocol
-/// mode accepts encrypted and plain connections on the same listeners.
+/// Lets the server terminate TLS itself. Most deployments leave
+/// `[global.tls]` unset and let a reverse proxy handle HTTPS and
+/// certificates, in which case every TCP listener speaks plain HTTP. Use it
+/// when nothing sits in front of the server, together with a public
+/// `http.listen.address` and the `http.listen.port` values that clients and
+/// other homeservers connect to.
+///
+/// Set `certs` to a PEM file holding the full certificate chain and `key`
+/// to its PEM private key; setting only one of the two fails startup.
+///
+/// Minimal example:
+///
+/// ```toml
+///     [global.tls]
+///     certs = "/etc/tuwunel/tls/fullchain.pem"
+///     key = "/etc/tuwunel/tls/privkey.pem"
+/// ```
+///
+/// Tips:
+/// - TLS covers every TCP listener, including sockets passed by systemd.
+///   One port cannot serve TLS while another serves plain HTTP;
+///   `dual_protocol` makes every port accept both. The Unix socket stays
+///   plain HTTP.
+/// - The files are read once at startup; restart after renewing the
+///   certificate.
+/// - Builds without the `direct_tls` feature (on by default) refuse to start
+///   while `certs` and `key` are set.
 #[derive(Clone, Debug, Deserialize, Default)]
 #[config_example_generator(filename = "tuwunel-example.toml", section = "global.tls")]
 pub struct TlsConfig {

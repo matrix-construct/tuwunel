@@ -12,11 +12,28 @@ use tuwunel_macros::config_example_generator;
 use super::true_fn;
 use crate::matrix::MAX_PREV_EVENTS;
 
-/// Configures federation access and local state derivation.
+/// Federation with other homeservers
 ///
-/// Transport, key lookup, history recovery, and bounded fanouts have
-/// dedicated settings. Access controls apply to remote server
-/// communication.
+/// Controls whether this server federates and which remote servers it
+/// accepts. Federation is on by default and open to every server not
+/// matched by `forbidden_remote_server_names`. The subsections tune signing
+/// key lookup (`[global.federation.keys]`), the federation client
+/// (`[global.federation.transport]`), history recovery
+/// (`[global.federation.history]`) and multi-server queries
+/// (`[global.federation.fanout]`).
+///
+/// To run a closed server, set `enable = false` and restart. Local users and
+/// rooms keep working; the federation and key endpoints answer
+/// `403 M_FORBIDDEN`, and requests to other servers are refused.
+///
+/// Tips:
+/// - Rooms created while federation is off are not marked local-only unless
+///   `rooms.federate_by_default` is also false, so they federate once it is
+///   back on.
+/// - Server name lists are regular expressions: an unescaped dot matches any
+///   character, and a plain dotted name logs a startup warning. Put escaped
+///   patterns in single quotes, since TOML rejects `\.` inside double
+///   quotes: `forbidden_remote_server_names = ['^evil\.example$']`.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 #[derive(Clone, Debug, Deserialize)]
 #[config_example_generator(
@@ -163,10 +180,13 @@ pub struct Federation {
 	pub transport: Transport,
 }
 
-/// Configures bounded federation fanouts.
+/// Federation fanout limits
 ///
-/// Concurrency and request timeouts limit survey work. Destination limits
-/// require confirmation for larger admin surveys.
+/// Bounds requests sent to many homeservers at once: `!admin query feds`
+/// surveys, room summary and space hierarchy lookups, and remote device-key
+/// queries. `destination_limit` guards only the admin survey, and device-key
+/// queries take `max_width` but time out after `transport.keys_timeout`
+/// rather than `timeout`. All three settings apply on reload.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 #[derive(Clone, Copy, Debug, Deserialize)]
 #[config_example_generator(
@@ -213,11 +233,15 @@ pub struct Fanout {
 	pub destination_limit: usize,
 }
 
-/// Configures federation history fetching and recovery.
+/// Federation history recovery
 ///
-/// Traversal, concurrency, and fetch-round limits bound recovery work.
-/// Context fetching and previous-event waiting control when remote requests
-/// begin.
+/// Limits the work spent filling gaps when an incoming event refers to
+/// earlier events this server does not hold and, with
+/// `fetch_unreceived_contexts`, when a client asks for context around an
+/// event it never received. All settings apply on reload.
+///
+/// Tips:
+/// - `prev_events_concurrency = 0` is refused at startup and on reload.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 #[derive(Clone, Copy, Debug, Deserialize)]
 #[config_example_generator(
@@ -303,10 +327,21 @@ pub struct History {
 	pub fetch_fanout_rounds: usize,
 }
 
-/// Configures federation signing-key lookup.
+/// Federation signing keys
 ///
-/// Trusted notaries can supplement or replace origin requests according to
-/// policy. Batch size and concurrency limits bound trusted-server queries.
+/// Verifying events from other homeservers needs their public signing keys.
+/// The server asks the origin server first and falls back to the notaries
+/// in `trusted_servers` (`matrix.org` by default); for joins and knocks it
+/// asks the notaries first by default. Fetched keys are cached, and every
+/// setting here applies on reload.
+///
+/// Tips:
+/// - With `trusted_servers = []`, keys come only from their origin. A server
+///   that is offline or unreachable cannot supply keys not already cached,
+///   so its events cannot be verified, and joins of large rooms can slow
+///   down.
+/// - `only_query_trusted_servers` with an empty `trusted_servers` leaves no
+///   source at all for keys not already cached.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 #[derive(Clone, Debug, Deserialize)]
 #[config_example_generator(
@@ -387,10 +422,13 @@ pub struct Keys {
 	pub trusted_server_batch_concurrency: usize,
 }
 
-/// Configures federation client transport.
+/// Federation client transport
 ///
-/// Request and key-lookup timeouts bound remote operations. Idle settings
-/// control connection reuse.
+/// Timeouts and connection reuse for requests this server sends to other
+/// homeservers, such as event, state and key fetches, joins, and remote
+/// device-key queries. Outgoing transactions (`/send`) use the client in
+/// `[global.sending]` instead, and connect and whole-request limits come
+/// from `[global.network.http]`.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 #[derive(Clone, Copy, Debug, Deserialize)]
 #[config_example_generator(
