@@ -8,10 +8,16 @@ use tuwunel_macros::config_example_generator;
 
 use super::{Url, true_fn};
 
-/// Configures optional external telemetry.
+/// External telemetry
 ///
-/// Sentry handles crash reports and performance sampling. Jaeger-compatible
-/// collectors receive selected tracing spans.
+/// Sends diagnostics to services outside the server. Both exporters are off
+/// by default.
+///
+/// - `[global.telemetry.sentry]`: crash, error and performance reports to a
+///   Sentry service. Included in the default build.
+/// - `[global.telemetry.jaeger]`: tracing spans to an OpenTelemetry (OTLP)
+///   collector such as Jaeger. Needs a build with the `perf_measurements`
+///   Cargo feature.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 // No Debug: secrets are reachable from this section.
 #[derive(Clone, Deserialize, Default)]
@@ -35,10 +41,21 @@ pub struct Telemetry {
 	pub sentry: Sentry,
 }
 
-/// Configures Jaeger-compatible OTLP span export.
+/// Jaeger span export (OpenTelemetry)
 ///
-/// Enablement controls the export layer in builds with performance
-/// measurements. A tracing filter selects exported spans.
+/// Exports tracing spans over OTLP (gRPC) to an OpenTelemetry collector such
+/// as Jaeger. Off by default, and available only in a build with the
+/// `perf_measurements` Cargo feature; the default build and the published
+/// packages ignore these keys.
+///
+/// Tips:
+/// - There is no key for the collector address. The exporter reads the
+///   standard `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` environment variable (or
+///   `OTEL_EXPORTER_OTLP_ENDPOINT`) and otherwise sends to
+///   `http://localhost:4317`.
+/// - Spans arrive under the service name `tuwunel`.
+/// - In a `perf_measurements` build a malformed `filter` stops startup even
+///   with `enable` off.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 #[derive(Clone, Debug, Deserialize)]
 #[config_example_generator(
@@ -65,10 +82,26 @@ pub struct Jaeger {
 	pub filter: String,
 }
 
-/// Configures optional Sentry reporting.
+/// Sentry error reporting
 ///
-/// Report content, event selection, and trace sampling have separate
-/// controls. Runtime enablement is required before telemetry is sent.
+/// Reports panics, error-level log events and a sampled share of performance
+/// traces to a Sentry service. Support is in the default build, but `enable`
+/// is off, so nothing is sent until you turn it on. Settings are read once at
+/// startup; a configuration reload neither starts nor stops reporting.
+///
+/// Set `enable = true` to report. `endpoint` takes a Sentry DSN; the default
+/// DSN reports to the tuwunel project's Sentry
+/// (`o4509498990067712.ingest.us.sentry.io`). Set your own DSN to keep
+/// reports in your Sentry.
+///
+/// Tips:
+/// - Error events carry the log message and its fields, with recent `info`
+///   and `warn` log lines attached as breadcrumbs, so reports can include
+///   user IDs and room IDs.
+/// - Sentry fills its own `server_name` field with the machine's hostname
+///   unless `send_server_name` replaces it with the Matrix server name. OS
+///   and Rust version details are attached to events as well.
+/// - With `enable` on, a malformed `filter` stops startup.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 // No Debug: secrets are reachable from this section.
 #[derive(Clone, Deserialize)]

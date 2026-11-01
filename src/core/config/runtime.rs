@@ -6,10 +6,12 @@
 use serde::Deserialize;
 use tuwunel_macros::config_example_generator;
 
-/// Groups runtime stream scheduling settings.
+/// Runtime scheduling
 ///
-/// Stream settings control initial concurrency, hardware scaling, and batch
-/// amplification for database work.
+/// Groups internal scheduling settings. `[global.runtime.stream]` sets how
+/// much work the server's internal streams run at once and how large their
+/// database request batches are. The defaults adapt to the hardware
+/// detected at startup.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 #[derive(Clone, Copy, Debug, Default, Deserialize)]
 #[config_example_generator(
@@ -26,10 +28,17 @@ pub struct Runtime {
 	pub stream: Stream,
 }
 
-/// Controls stream concurrency and request batch amplification.
+/// Stream concurrency
 ///
-/// Width can remain fixed or scale with detected hardware capacity.
-/// Amplification adjusts how much work each pool worker receives in a batch.
+/// Sets the concurrency (width) and database batch size (amplification) of
+/// the server's internal streams. With `width_scale` above zero, both are
+/// recalculated at startup from the `[global.database.pool]` size, using
+/// `width_default` and `amplification` as the base values. All keys are
+/// read once at startup.
+///
+/// Tips:
+/// - Width is clamped to 1 through 1024 and amplification to 32 through
+///   32768.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 #[derive(Clone, Copy, Debug, Deserialize)]
 #[config_example_generator(
@@ -55,8 +64,8 @@ pub struct Stream {
 	/// queue size, such as 32 for SSDs or 64 or 128+ for NVMe; multipliers
 	/// such as 1.5 or 2.0 increase it, while 0.5 improves responsiveness for
 	/// many users at the cost of per-user throughput. The result cannot
-	/// exceed the pool queue size set by `database.pool.queue_mult`, because
-	/// larger values stall the Tokio task. A value of 0.0 fixes the width at
+	/// exceed the pool's worker count per queue, because larger values stall
+	/// the Tokio task. A value of 0.0 fixes the width at
 	/// `runtime.stream.width_default`. The default scale of 1.0 matches
 	/// detected system capabilities.
 	///

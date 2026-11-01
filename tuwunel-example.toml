@@ -17,7 +17,31 @@
 
 
 ################################################################################
-# All the config options for tuwunel.
+# Global settings
+#
+# Every setting lives under `[global]`. The first keys below name the
+# server and its storage; each `[global.<name>]` section further down is
+# optional and keeps its defaults when left out.
+#
+# Before the first start, set `server_name` and check `database_path`.
+# The first start records `server_name` in the database, and a database
+# recorded under another name is refused, so changing the name later
+# means starting over with an empty database. `database_path` holds the
+# database and, by default, uploaded media.
+#
+# Tips:
+# - No config file is read by default. Name one with `TUWUNEL_CONFIG`
+#   (or `CONDUWUIT_CONFIG`, `CONDUIT_CONFIG`) or with `-c`/`--config`,
+#   which is repeatable and loads after it; later files win. A file that
+#   mixes bare keys with a `[global]` header is refused.
+# - Environment variables override files: `TUWUNEL_` plus the key path
+#   with `__` between levels, so `database.backup.path` becomes
+#   `TUWUNEL_DATABASE__BACKUP__PATH`. `-O key=value` overrides both.
+# - Keys marked `reloadable: yes` apply on `SIGUSR1` or
+#   `!admin server reload-config`; others may need a restart. A reload
+#   that changes `server_name` fails.
+# - Misspelled keys are ignored, not rejected; most log a warning, and
+#   `configuration.error_on_unknown_opts = true` makes that fatal.
 #
 [global]
 
@@ -122,11 +146,23 @@
 
 
 ################################################################################
-# Configures server administration and command output.
+# Server administration
 #
-# Startup and signal commands share administration policy with interactive
-# commands. Room settings and the durable server-user identity govern
-# administrative communication.
+# Controls how admin commands run and how their output is posted. Admins
+# are the accounts joined to the admin room, `#admins:<server_name>` (see
+# `[global.admin.room]`), where a text message starting with `!admin` or
+# the server user's ID (`@conduit:<server_name>` by default) runs a
+# command. Commands can also run from the terminal console (`--console`),
+# at startup (`execute` or `--execute`), or on `SIGUSR2` (`signal_execute`).
+#
+# Tips:
+# - On a new server the first account to register becomes an admin while
+#   `registration.grant_admin_to_first_user` is on (the default). Grant more
+#   with `!admin users make-user-admin <username>`.
+# - To regain admin access, start the server once with
+#   `--execute "users make-user-admin <username>"`, or run that command in
+#   the console. See
+#   <https://tuwunel.chat/troubleshooting.html#lost-access-to-admin-room>.
 #
 #[global.admin]
 
@@ -229,10 +265,20 @@
 
 
 ################################################################################
-# Configures the administration room.
+# Admin room
 #
-# Creation and federation settings determine its initial setup. Tags and
-# notice policies control its presentation and routine messages.
+# The invite-only room whose members are the server's admins. It is created
+# the first time the server starts with an empty database, under the alias
+# `#admins:<server_name>`, with the server user in charge.
+# `!admin users make-user-admin <username>` joins a local account to it.
+#
+# Tips:
+# - `create` and `federate` act only at that first start; changing them
+#   later neither creates nor alters the room.
+# - The server finds the room through its `#admins:<server_name>` alias and
+#   treats it as the admin room only while the server user is joined. With
+#   `create` off, the alias removed or the server user gone from the room,
+#   there is no admin room and only the server user is an admin.
 #
 #[global.admin.room]
 
@@ -409,10 +455,11 @@
 
 
 ################################################################################
-# Configures outgoing application-service transport.
+# Appservice HTTP client
 #
-# Request timeouts bound application-service calls. Idle connections have
-# a separate pool lifetime.
+# Timeouts for the requests the server makes to appservices (bridges and
+# bots). The defaults assume each appservice runs on the same host or
+# network; raise `timeout` when one is remote or slow to answer.
 #
 #[global.appservice_client]
 
@@ -920,10 +967,17 @@
 
 
 ################################################################################
-# Controls cache capacities and room summary retention.
+# Cache sizes
 #
-# Individual capacities select the size of each cache, while a shared modifier
-# scales their memory use. Space hierarchy settings control summary lifetimes.
+# Sizes the RocksDB block caches reserved for specific database columns,
+# and the in-memory room state cache (`stateinfo_capacity`). Capacities
+# count entries, not bytes. Most columns without a key here share one
+# cache carved from `rocksdb.cache_capacity_mb`. Sizes are fixed at
+# startup.
+#
+# Tips:
+# - `capacity_modifier` also scales `rocksdb.write_buffer_capacity_mb`,
+#   but not `rocksdb.cache_capacity_mb`.
 #
 #[global.cache]
 
@@ -1063,10 +1117,17 @@
 
 
 ################################################################################
-# Bounds the lifetime of cached space hierarchy summaries.
+# Space hierarchy cache lifetime
 #
-# Minimum and maximum lifetimes are measured in seconds. Both limits can be
-# changed when the configuration is reloaded.
+# How long a room summary used to answer space hierarchy requests is
+# cached before it is rebuilt or fetched again. Each entry expires at a
+# random time between `ttl_min` and `ttl_max` seconds, which spreads
+# refreshes out. Both keys apply on reload.
+#
+# Tips:
+# - Keep `ttl_min` below `ttl_max`. Nothing checks the pair at startup or
+#   on reload, and an equal or inverted pair panics when a summary is
+#   cached.
 #
 #[global.cache.space_hierarchy]
 
@@ -1172,10 +1233,21 @@
 
 
 ################################################################################
-# Configures loading and reloading policy.
+# Configuration loading and reload
 #
-# Unknown-option handling selects warnings or startup errors. The signal
-# switch controls configuration reload requests.
+# Controls how strictly the configuration is checked and whether `SIGUSR1`
+# reloads it. By default an unknown key logs a warning and is ignored, and
+# `SIGUSR1` (what `systemctl reload` sends with the packaged service units)
+# re-reads every configuration source, applying the keys marked
+# `reloadable: yes`.
+#
+# Tips:
+# - A reload runs the same checks as startup. If the new configuration
+#   fails them, the server keeps the running one and logs why.
+#   `server_name` and `http.ip_source` cannot change on reload.
+# - `reload_signal` gates only the signal; the admin command
+#   `!admin server reload-config` reloads regardless.
+# - Guide: <https://tuwunel.chat/deploying/configuration-reload.html>.
 #
 #[global.configuration]
 
@@ -1195,19 +1267,35 @@
 
 
 ################################################################################
-# Groups database backup and request pool settings.
+# Database backups and worker pool
 #
-# Backups control snapshot storage and retention. The request pool controls
-# how database work is distributed across workers and hardware queues.
+# Holds two sub-sections: `[global.database.backup]` for online backups,
+# which stay unavailable until `database.backup.path` is set, and
+# `[global.database.pool]` for the threads that serve database requests,
+# sized from the hardware at startup. The database location is
+# `database_path` under `[global]`; engine tuning is in `[global.rocksdb]`.
 #
 #[global.database]
 
 
 ################################################################################
-# Configures RocksDB online backup storage and retention.
+# Online database backups
 #
-# Backups require a writable destination path. Retention limits how many
-# snapshots remain after a backup completes.
+# Copies the RocksDB database into a backup repository while the server
+# keeps running. Backups are unavailable until `path` names a directory
+# the server can write to, and even then run only on request, with
+# `!admin server backup-database`. Both keys apply on reload.
+#
+# Tips:
+# - `keep` defaults to 1, so each backup replaces the previous one; raise
+#   it to retain more.
+# - Backups hold the database only. Media stored under `database_path` or
+#   in storage providers needs its own copy.
+# - For scheduled backups, add `"server backup-database"` to
+#   `admin.signal_execute` and send the server `SIGUSR2` from a timer.
+# - To restore, stop the server and start it with `--restore-backup`; it
+#   replaces the database at `database_path` before opening it. See
+#   <https://tuwunel.chat/backups.html>.
 #
 #[global.database.backup]
 
@@ -1234,10 +1322,17 @@
 
 
 ################################################################################
-# Configures the worker pool serving database requests.
+# Database worker pool
 #
-# Affinity can derive worker groups from block device queue topology. Worker
-# limits and queue capacity constrain concurrency and scheduling overhead.
+# The threads that execute database reads and writes, and the queues that
+# feed them. Sizes are derived when the database opens, from the CPU count
+# and, where it can be detected, the queue layout of the storage device
+# under `database_path`. Changes need a restart.
+#
+# Tips:
+# - Under a cgroup task (pids) limit, as in many containers, startup warns
+#   when the pool may exceed it; raise the limit or lower `max_workers`.
+# - `[global.runtime.stream]` scales its concurrency from this pool.
 #
 #[global.database.pool]
 
@@ -2565,10 +2660,21 @@
 
 
 ################################################################################
-# Configures log filtering, formatting, and output.
+# Logging
 #
-# Console and journal settings select destinations and presentation.
-# Low-level initialization controls support developer and expert use.
+# Controls what the server logs and where the output goes. By default it
+# logs at `info` (`debug` in debug builds) to standard output with colors;
+# under systemd it writes straight to the journal instead, keeping each
+# line's severity.
+#
+# Tips:
+# - Release builds, including the published packages, compile out `debug`
+#   and `trace` events (the default `release_max_log_level` Cargo feature),
+#   so a more verbose `filter` shows nothing more until you rebuild without
+#   that feature.
+# - A malformed `filter` stops startup. To change the filter on a running
+#   server, use `!admin debug change-log-level <filter>`; `--reset` in
+#   place of a filter restores the configured one.
 #
 #[global.logging]
 
@@ -4238,11 +4344,20 @@
 
 
 ################################################################################
-# Configures QR sign-in rendezvous sessions.
+# QR code sign-in
 #
-# Payload size, lifetime, and session count bound retained handshakes.
-# Authentication policy and per-IP throttling govern discovery and
-# creation.
+# Relays the short handshake between a new device and a signed-in one
+# during QR code sign-in (MSC4108 and MSC4388), before an OAuth device
+# grant completes the login. On by default, but sessions can be created
+# only while the built-in OIDC server runs, which needs `well_known.client`
+# plus an `identity_provider` or `authentication.oidc.native_auth`.
+# Sessions live in memory and are lost on restart.
+#
+# Tips:
+# - Reverse proxies must not cache or compress responses under the
+#   rendezvous paths; compression weakens the `ETag` and sign-in fails
+#   right after the scan. See
+#   <https://tuwunel.chat/authentication/qr-login.html>.
 #
 #[global.rendezvous]
 
@@ -4322,9 +4437,22 @@
 
 
 ################################################################################
-# RocksDB engine configuration.
+# RocksDB storage engine
 #
-# Omitted settings preserve the server's engine defaults.
+# Tunes the RocksDB engine behind the database at `database_path`. Every
+# key is read when the database opens, so changes need a restart. The
+# defaults assume SSD or NVMe storage, and most keys only trade memory,
+# threads or log volume for speed or diagnostics.
+#
+# The recovery keys are different: `recovery_mode` 2 or 3 and `repair`
+# can discard data, so back up `database_path` first and revert them once
+# the server starts cleanly.
+#
+# Tips:
+# - On btrfs or ZFS set `allow_fallocate = false`; startup warns while it
+#   is left on there. On ZFS also set `direct_io = false`.
+# - `recovery_mode` accepts 0 to 3; a larger value panics at startup.
+# - `cache.capacity_modifier` also scales `write_buffer_capacity_mb`.
 #
 #[global.rocksdb]
 
@@ -5035,19 +5163,28 @@
 
 
 ################################################################################
-# Groups runtime stream scheduling settings.
+# Runtime scheduling
 #
-# Stream settings control initial concurrency, hardware scaling, and batch
-# amplification for database work.
+# Groups internal scheduling settings. `[global.runtime.stream]` sets how
+# much work the server's internal streams run at once and how large their
+# database request batches are. The defaults adapt to the hardware
+# detected at startup.
 #
 #[global.runtime]
 
 
 ################################################################################
-# Controls stream concurrency and request batch amplification.
+# Stream concurrency
 #
-# Width can remain fixed or scale with detected hardware capacity.
-# Amplification adjusts how much work each pool worker receives in a batch.
+# Sets the concurrency (width) and database batch size (amplification) of
+# the server's internal streams. With `width_scale` above zero, both are
+# recalculated at startup from the `[global.database.pool]` size, using
+# `width_default` and `amplification` as the base values. All keys are
+# read once at startup.
+#
+# Tips:
+# - Width is clamped to 1 through 1024 and amplification to 32 through
+#   32768.
 #
 #[global.runtime.stream]
 
@@ -5065,8 +5202,8 @@
 # queue size, such as 32 for SSDs or 64 or 128+ for NVMe; multipliers
 # such as 1.5 or 2.0 increase it, while 0.5 improves responsiveness for
 # many users at the cost of per-user throughput. The result cannot
-# exceed the pool queue size set by `database.pool.queue_mult`, because
-# larger values stall the Tokio task. A value of 0.0 fixes the width at
+# exceed the pool's worker count per queue, because larger values stall
+# the Tokio task. A value of 0.0 fixes the width at
 # `runtime.stream.width_default`. The default scale of 1.0 matches
 # detected system capabilities.
 #
@@ -5087,10 +5224,17 @@
 
 
 ################################################################################
-# Configures outbound delivery workers and retries.
+# Outbound delivery queue
 #
-# The queue serves federation, appservice, and push destinations.
-# Timeouts, retry pacing, and startup bursting control delivery work.
+# Timeouts, retry pacing, worker count and startup behavior for the
+# outbound queue that delivers federation transactions, appservice
+# transactions and push notifications.
+#
+# Tips:
+# - Every startup trims each destination's failed or unfinished
+#   deliveries to the first `startup_netburst_keep` and deletes the rest
+#   without retrying, whether or not `startup_netburst` is enabled; `-1`
+#   keeps them all.
 #
 #[global.sending]
 
@@ -5134,14 +5278,12 @@
 #
 #startup_netburst = true
 
-# Controls startup message retention when `sending.startup_netburst` is
-# enabled.
+# Caps the unsent messages kept per destination at startup.
 #
-# Dropped messages are not reattempted, and this setting has no effect
-# without startup bursting; -1 retries every message without trimming
-# queues and can
-# consume significant disk, while 0 drops all messages without any
-# redelivery attempt.
+# The cap applies whether or not `sending.startup_netburst` is enabled,
+# and messages past it are dropped and never reattempted. -1 keeps every
+# message and can consume significant disk, while 0 drops all messages
+# without any redelivery attempt.
 #
 #startup_netburst_keep = 50
 
@@ -5155,10 +5297,33 @@
 
 
 ################################################################################
-# Configures outbound email verification through SMTP.
+# Outbound email (SMTP)
 #
-# The connection URI and sender identify the relay and source mailbox.
-# Registration flags control which flows require a verified email address.
+# Sends verification mail so users can prove they own an email address:
+# at registration, when adding an address, and for password reset. With
+# no `connection_uri`, no mail is sent and those requests are refused.
+#
+# `connection_uri` needs `sender` and `well_known.client` (verification
+# links point there), and the `require_email_*` keys need `connection_uri`;
+# otherwise startup fails.
+#
+# Minimal example:
+#
+#     [global.well_known]
+#     client = "https://matrix.example.com"
+#
+#     [global.smtp]
+#     connection_uri = "smtps://user:pass@mail.example.com:465"
+#     sender = "Example <noreply@example.com>"
+#
+# Tips:
+# - `require_email_for_registration` with `connection_uri` adds a
+#   verified-email stage to registration, which startup accepts in place
+#   of the registration token that `registration.enable` otherwise needs.
+# - Verification links open `/_tuwunel/3pid/email/validate` under
+#   `well_known.client`; the reverse proxy must forward that path.
+# - The built-in OIDC sign-up page cannot collect an email address, so it
+#   refuses registration while an email is required.
 #
 #[global.smtp]
 
@@ -5481,19 +5646,36 @@
 
 
 ################################################################################
-# Configures optional external telemetry.
+# External telemetry
 #
-# Sentry handles crash reports and performance sampling. Jaeger-compatible
-# collectors receive selected tracing spans.
+# Sends diagnostics to services outside the server. Both exporters are off
+# by default.
+#
+# - `[global.telemetry.sentry]`: crash, error and performance reports to a
+#   Sentry service. Included in the default build.
+# - `[global.telemetry.jaeger]`: tracing spans to an OpenTelemetry (OTLP)
+#   collector such as Jaeger. Needs a build with the `perf_measurements`
+#   Cargo feature.
 #
 #[global.telemetry]
 
 
 ################################################################################
-# Configures Jaeger-compatible OTLP span export.
+# Jaeger span export (OpenTelemetry)
 #
-# Enablement controls the export layer in builds with performance
-# measurements. A tracing filter selects exported spans.
+# Exports tracing spans over OTLP (gRPC) to an OpenTelemetry collector such
+# as Jaeger. Off by default, and available only in a build with the
+# `perf_measurements` Cargo feature; the default build and the published
+# packages ignore these keys.
+#
+# Tips:
+# - There is no key for the collector address. The exporter reads the
+#   standard `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` environment variable (or
+#   `OTEL_EXPORTER_OTLP_ENDPOINT`) and otherwise sends to
+#   `http://localhost:4317`.
+# - Spans arrive under the service name `tuwunel`.
+# - In a `perf_measurements` build a malformed `filter` stops startup even
+#   with `enable` off.
 #
 #[global.telemetry.jaeger]
 
@@ -5511,10 +5693,26 @@
 
 
 ################################################################################
-# Configures optional Sentry reporting.
+# Sentry error reporting
 #
-# Report content, event selection, and trace sampling have separate
-# controls. Runtime enablement is required before telemetry is sent.
+# Reports panics, error-level log events and a sampled share of performance
+# traces to a Sentry service. Support is in the default build, but `enable`
+# is off, so nothing is sent until you turn it on. Settings are read once at
+# startup; a configuration reload neither starts nor stops reporting.
+#
+# Set `enable = true` to report. `endpoint` takes a Sentry DSN; the default
+# DSN reports to the tuwunel project's Sentry
+# (`o4509498990067712.ingest.us.sentry.io`). Set your own DSN to keep
+# reports in your Sentry.
+#
+# Tips:
+# - Error events carry the log message and its fields, with recent `info`
+#   and `warn` log lines attached as breadcrumbs, so reports can include
+#   user IDs and room IDs.
+# - Sentry fills its own `server_name` field with the machine's hostname
+#   unless `send_server_name` replaces it with the Matrix server name. OS
+#   and Rust version details are attached to events as well.
+# - With `enable` on, a malformed `filter` stops startup.
 #
 #[global.telemetry.sentry]
 
@@ -5615,10 +5813,18 @@
 
 
 ################################################################################
-# Configures developer tracing tools.
+# Developer tracing tools
 #
-# Folded span profiles support offline visualization. Tokio-console
-# supports runtime inspection.
+# Diagnostics for developers profiling the server. Neither `tokio_console`
+# nor `[global.tracing.flame]` does anything in the default build or the
+# published packages, so production servers can leave `[global.tracing]`
+# out.
+#
+# Tips:
+# - `tokio_console` needs a build with the `tokio_console` Cargo feature
+#   and `--cfg tokio_unstable` in `RUSTFLAGS`, and a release build must
+#   also drop the default `release_max_log_level` feature. See
+#   <https://tuwunel.chat/development.html#debugging-with-tokio-console>.
 #
 #[global.tracing]
 
@@ -5630,10 +5836,17 @@
 
 
 ################################################################################
-# Configures folded tracing-span profiles.
+# Tracing span profiles (flame graphs)
 #
-# A filter selects collected spans. The output path names the resulting
-# profile file.
+# Profiles time spent in the server's tracing spans and writes it to a
+# folded-stack file for flame-graph tools. Off by default, and it works only
+# in a build with the `perf_measurements` Cargo feature, which the default
+# build and the published packages leave out.
+#
+# Tips:
+# - In such a build with `enable` on, an unwritable `output_path` or a
+#   malformed `filter` stops startup.
+# - Output is buffered, so the file is complete only after the server stops.
 #
 #[global.tracing.flame]
 
@@ -5654,11 +5867,35 @@
 
 
 ################################################################################
-# Configures TURN relay credentials and servers.
+# TURN relay for calls
 #
-# Shared secrets generate credentials, with static credentials available
-# as an alternative. URI, lifetime, and guest-access settings govern
-# client use.
+# Tells clients which TURN servers relay their legacy Matrix calls, and
+# with what credentials, through `/_matrix/client/v3/voip/turnServer`.
+# No TURN server is built in; the guide at
+# <https://tuwunel.chat/calls/turn.html> uses coturn. With `uris` empty,
+# the default, that endpoint answers 404.
+#
+# Pick one credential source:
+#
+# - Shared secret (recommended): `secret` or `secret_file`, equal to
+#   coturn's `static-auth-secret`. Each request gets a fresh username
+#   `<expiry>:<user_id>` and HMAC-SHA1 password, valid for `ttl` seconds.
+# - Static: `username` and `password`, sent to every client as they are;
+#   ignored while a secret is set.
+#
+# With `uris` set and neither source, startup logs a warning and clients
+# receive an empty username and password.
+#
+# Minimal example:
+#
+#     [global.turn]
+#     uris = ["turn:turn.example.com?transport=udp"]
+#     secret_file = "/etc/tuwunel/.turn_secret"
+#
+# Tips:
+# - `secret_file` is read on every request, so rotating the secret needs
+#   no reload or restart.
+# - Guests get 403 from the endpoint unless `allow_guests` is on.
 #
 #[global.turn]
 

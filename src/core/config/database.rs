@@ -11,10 +11,13 @@ use tuwunel_macros::config_example_generator;
 use super::true_fn;
 use crate::utils::sys::available_parallelism;
 
-/// Groups database backup and request pool settings.
+/// Database backups and worker pool
 ///
-/// Backups control snapshot storage and retention. The request pool controls
-/// how database work is distributed across workers and hardware queues.
+/// Holds two sub-sections: `[global.database.backup]` for online backups,
+/// which stay unavailable until `database.backup.path` is set, and
+/// `[global.database.pool]` for the threads that serve database requests,
+/// sized from the hardware at startup. The database location is
+/// `database_path` under `[global]`; engine tuning is in `[global.rocksdb]`.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 #[derive(Clone, Debug, Default, Deserialize)]
 #[config_example_generator(
@@ -37,10 +40,23 @@ pub struct Database {
 	pub pool: Pool,
 }
 
-/// Configures RocksDB online backup storage and retention.
+/// Online database backups
 ///
-/// Backups require a writable destination path. Retention limits how many
-/// snapshots remain after a backup completes.
+/// Copies the RocksDB database into a backup repository while the server
+/// keeps running. Backups are unavailable until `path` names a directory
+/// the server can write to, and even then run only on request, with
+/// `!admin server backup-database`. Both keys apply on reload.
+///
+/// Tips:
+/// - `keep` defaults to 1, so each backup replaces the previous one; raise
+///   it to retain more.
+/// - Backups hold the database only. Media stored under `database_path` or
+///   in storage providers needs its own copy.
+/// - For scheduled backups, add `"server backup-database"` to
+///   `admin.signal_execute` and send the server `SIGUSR2` from a timer.
+/// - To restore, stop the server and start it with `--restore-backup`; it
+///   replaces the database at `database_path` before opening it. See
+///   <https://tuwunel.chat/backups.html>.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 #[derive(Clone, Debug, Deserialize)]
 #[config_example_generator(
@@ -73,10 +89,17 @@ pub struct Backup {
 	pub keep: i16,
 }
 
-/// Configures the worker pool serving database requests.
+/// Database worker pool
 ///
-/// Affinity can derive worker groups from block device queue topology. Worker
-/// limits and queue capacity constrain concurrency and scheduling overhead.
+/// The threads that execute database reads and writes, and the queues that
+/// feed them. Sizes are derived when the database opens, from the CPU count
+/// and, where it can be detected, the queue layout of the storage device
+/// under `database_path`. Changes need a restart.
+///
+/// Tips:
+/// - Under a cgroup task (pids) limit, as in many containers, startup warns
+///   when the pool may exceed it; raise the limit or lower `max_workers`.
+/// - `[global.runtime.stream]` scales its concurrency from this pool.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 #[derive(Clone, Copy, Debug, Deserialize)]
 #[config_example_generator(

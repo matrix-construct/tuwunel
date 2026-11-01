@@ -142,7 +142,31 @@ pub type ServerUserLocalpart = SmallString<[u8; 32]>;
 /// Stores an object-storage bucket name inline in the common case.
 pub type StorageBucketName = SmallString<[u8; 64]>;
 
-/// All the config options for tuwunel.
+/// Global settings
+///
+/// Every setting lives under `[global]`. The first keys below name the
+/// server and its storage; each `[global.<name>]` section further down is
+/// optional and keeps its defaults when left out.
+///
+/// Before the first start, set `server_name` and check `database_path`.
+/// The first start records `server_name` in the database, and a database
+/// recorded under another name is refused, so changing the name later
+/// means starting over with an empty database. `database_path` holds the
+/// database and, by default, uploaded media.
+///
+/// Tips:
+/// - No config file is read by default. Name one with `TUWUNEL_CONFIG`
+///   (or `CONDUWUIT_CONFIG`, `CONDUIT_CONFIG`) or with `-c`/`--config`,
+///   which is repeatable and loads after it; later files win. A file that
+///   mixes bare keys with a `[global]` header is refused.
+/// - Environment variables override files: `TUWUNEL_` plus the key path
+///   with `__` between levels, so `database.backup.path` becomes
+///   `TUWUNEL_DATABASE__BACKUP__PATH`. `-O key=value` overrides both.
+/// - Keys marked `reloadable: yes` apply on `SIGUSR1` or
+///   `!admin server reload-config`; others may need a restart. A reload
+///   that changes `server_name` fails.
+/// - Misspelled keys are ignored, not rejected; most log a warning, and
+///   `configuration.error_on_unknown_opts = true` makes that fatal.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 #[derive(Clone, Deserialize)]
 #[config_example_generator(
@@ -1510,10 +1534,35 @@ pub struct LoginAccountRateLimit {
 	pub burst_count: u32,
 }
 
-/// Configures outbound email verification through SMTP.
+/// Outbound email (SMTP)
 ///
-/// The connection URI and sender identify the relay and source mailbox.
-/// Registration flags control which flows require a verified email address.
+/// Sends verification mail so users can prove they own an email address:
+/// at registration, when adding an address, and for password reset. With
+/// no `connection_uri`, no mail is sent and those requests are refused.
+///
+/// `connection_uri` needs `sender` and `well_known.client` (verification
+/// links point there), and the `require_email_*` keys need `connection_uri`;
+/// otherwise startup fails.
+///
+/// Minimal example:
+///
+/// ```toml
+///     [global.well_known]
+///     client = "https://matrix.example.com"
+///
+///     [global.smtp]
+///     connection_uri = "smtps://user:pass@mail.example.com:465"
+///     sender = "Example <noreply@example.com>"
+/// ```
+///
+/// Tips:
+/// - `require_email_for_registration` with `connection_uri` adds a
+///   verified-email stage to registration, which startup accepts in place
+///   of the registration token that `registration.enable` otherwise needs.
+/// - Verification links open `/_tuwunel/3pid/email/validate` under
+///   `well_known.client`; the reverse proxy must forward that path.
+/// - The built-in OIDC sign-up page cannot collect an email address, so it
+///   refuses registration while an email is required.
 #[derive(Clone, Debug, Default, Deserialize)]
 #[config_example_generator(filename = "tuwunel-example.toml", section = "global.smtp")]
 pub struct SmtpConfig {

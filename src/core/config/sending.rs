@@ -8,10 +8,17 @@ use tuwunel_macros::config_example_generator;
 
 use super::true_fn;
 
-/// Configures outbound delivery workers and retries.
+/// Outbound delivery queue
 ///
-/// The queue serves federation, appservice, and push destinations.
-/// Timeouts, retry pacing, and startup bursting control delivery work.
+/// Timeouts, retry pacing, worker count and startup behavior for the
+/// outbound queue that delivers federation transactions, appservice
+/// transactions and push notifications.
+///
+/// Tips:
+/// - Every startup trims each destination's failed or unfinished
+///   deliveries to the first `startup_netburst_keep` and deletes the rest
+///   without retrying, whether or not `startup_netburst` is enabled; `-1`
+///   keeps them all.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 #[derive(Clone, Copy, Debug, Deserialize)]
 #[config_example_generator(
@@ -75,14 +82,12 @@ pub struct Sending {
 	#[serde(default = "true_fn")]
 	pub startup_netburst: bool,
 
-	/// Controls startup message retention when `sending.startup_netburst` is
-	/// enabled.
+	/// Caps the unsent messages kept per destination at startup.
 	///
-	/// Dropped messages are not reattempted, and this setting has no effect
-	/// without startup bursting; -1 retries every message without trimming
-	/// queues and can
-	/// consume significant disk, while 0 drops all messages without any
-	/// redelivery attempt.
+	/// The cap applies whether or not `sending.startup_netburst` is enabled,
+	/// and messages past it are dropped and never reattempted. -1 keeps every
+	/// message and can consume significant disk, while 0 drops all messages
+	/// without any redelivery attempt.
 	///
 	/// default: 50
 	/// legacy: startup_netburst_keep

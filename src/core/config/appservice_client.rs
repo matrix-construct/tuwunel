@@ -8,10 +8,11 @@ pub use Client as AppserviceClient;
 use serde::Deserialize;
 use tuwunel_macros::config_example_generator;
 
-/// Configures outgoing application-service transport.
+/// Appservice HTTP client
 ///
-/// Request timeouts bound application-service calls. Idle connections have
-/// a separate pool lifetime.
+/// Timeouts for the requests the server makes to appservices (bridges and
+/// bots). The defaults assume each appservice runs on the same host or
+/// network; raise `timeout` when one is remote or slow to answer.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 #[derive(Clone, Copy, Debug, Deserialize)]
 #[config_example_generator(

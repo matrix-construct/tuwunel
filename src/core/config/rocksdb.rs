@@ -8,9 +8,22 @@ use tuwunel_macros::config_example_generator;
 use super::{parallelism_scaled_f64, true_fn};
 use crate::utils::bytes::deserialize_bytesize_usize;
 
-/// RocksDB engine configuration.
+/// RocksDB storage engine
 ///
-/// Omitted settings preserve the server's engine defaults.
+/// Tunes the RocksDB engine behind the database at `database_path`. Every
+/// key is read when the database opens, so changes need a restart. The
+/// defaults assume SSD or NVMe storage, and most keys only trade memory,
+/// threads or log volume for speed or diagnostics.
+///
+/// The recovery keys are different: `recovery_mode` 2 or 3 and `repair`
+/// can discard data, so back up `database_path` first and revert them once
+/// the server starts cleanly.
+///
+/// Tips:
+/// - On btrfs or ZFS set `allow_fallocate = false`; startup warns while it
+///   is left on there. On ZFS also set `direct_io = false`.
+/// - `recovery_mode` accepts 0 to 3; a larger value panics at startup.
+/// - `cache.capacity_modifier` also scales `write_buffer_capacity_mb`.
 #[derive(Clone, Debug, Deserialize)]
 #[config_example_generator(
 	filename = "tuwunel-example.toml",

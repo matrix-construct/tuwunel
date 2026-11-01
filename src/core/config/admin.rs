@@ -9,11 +9,23 @@ use tuwunel_macros::config_example_generator;
 
 use super::{OwnedRoomOrAliasId, ServerUserLocalpart, true_fn};
 
-/// Configures server administration and command output.
+/// Server administration
 ///
-/// Startup and signal commands share administration policy with interactive
-/// commands. Room settings and the durable server-user identity govern
-/// administrative communication.
+/// Controls how admin commands run and how their output is posted. Admins
+/// are the accounts joined to the admin room, `#admins:<server_name>` (see
+/// `[global.admin.room]`), where a text message starting with `!admin` or
+/// the server user's ID (`@conduit:<server_name>` by default) runs a
+/// command. Commands can also run from the terminal console (`--console`),
+/// at startup (`execute` or `--execute`), or on `SIGUSR2` (`signal_execute`).
+///
+/// Tips:
+/// - On a new server the first account to register becomes an admin while
+///   `registration.grant_admin_to_first_user` is on (the default). Grant more
+///   with `!admin users make-user-admin <username>`.
+/// - To regain admin access, start the server once with
+///   `--execute "users make-user-admin <username>"`, or run that command in
+///   the console. See
+///   <https://tuwunel.chat/troubleshooting.html#lost-access-to-admin-room>.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 #[derive(Clone, Debug, Deserialize)]
 #[config_example_generator(
@@ -147,10 +159,20 @@ pub struct Admin {
 	pub room: Room,
 }
 
-/// Configures the administration room.
+/// Admin room
 ///
-/// Creation and federation settings determine its initial setup. Tags and
-/// notice policies control its presentation and routine messages.
+/// The invite-only room whose members are the server's admins. It is created
+/// the first time the server starts with an empty database, under the alias
+/// `#admins:<server_name>`, with the server user in charge.
+/// `!admin users make-user-admin <username>` joins a local account to it.
+///
+/// Tips:
+/// - `create` and `federate` act only at that first start; changing them
+///   later neither creates nor alters the room.
+/// - The server finds the room through its `#admins:<server_name>` alias and
+///   treats it as the admin room only while the server user is joined. With
+///   `create` off, the alias removed or the server user gone from the room,
+///   there is no admin room and only the server user is an admin.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 #[derive(Clone, Debug, Deserialize)]
 #[config_example_generator(

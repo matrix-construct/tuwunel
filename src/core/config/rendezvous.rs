@@ -9,11 +9,20 @@ use tuwunel_macros::config_example_generator;
 
 use super::true_fn;
 
-/// Configures QR sign-in rendezvous sessions.
+/// QR code sign-in
 ///
-/// Payload size, lifetime, and session count bound retained handshakes.
-/// Authentication policy and per-IP throttling govern discovery and
-/// creation.
+/// Relays the short handshake between a new device and a signed-in one
+/// during QR code sign-in (MSC4108 and MSC4388), before an OAuth device
+/// grant completes the login. On by default, but sessions can be created
+/// only while the built-in OIDC server runs, which needs `well_known.client`
+/// plus an `identity_provider` or `authentication.oidc.native_auth`.
+/// Sessions live in memory and are lost on restart.
+///
+/// Tips:
+/// - Reverse proxies must not cache or compress responses under the
+///   rendezvous paths; compression weakens the `ETag` and sign-in fails
+///   right after the scan. See
+///   <https://tuwunel.chat/authentication/qr-login.html>.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 #[derive(Clone, Copy, Debug, Deserialize)]
 #[config_example_generator(

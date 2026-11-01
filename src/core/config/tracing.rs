@@ -6,10 +6,18 @@
 use serde::Deserialize;
 use tuwunel_macros::config_example_generator;
 
-/// Configures developer tracing tools.
+/// Developer tracing tools
 ///
-/// Folded span profiles support offline visualization. Tokio-console
-/// supports runtime inspection.
+/// Diagnostics for developers profiling the server. Neither `tokio_console`
+/// nor `[global.tracing.flame]` does anything in the default build or the
+/// published packages, so production servers can leave `[global.tracing]`
+/// out.
+///
+/// Tips:
+/// - `tokio_console` needs a build with the `tokio_console` Cargo feature
+///   and `--cfg tokio_unstable` in `RUSTFLAGS`, and a release build must
+///   also drop the default `release_max_log_level` feature. See
+///   <https://tuwunel.chat/development.html#debugging-with-tokio-console>.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 #[derive(Clone, Debug, Deserialize, Default)]
 #[config_example_generator(
@@ -34,10 +42,17 @@ pub struct Tracing {
 	pub flame: Flame,
 }
 
-/// Configures folded tracing-span profiles.
+/// Tracing span profiles (flame graphs)
 ///
-/// A filter selects collected spans. The output path names the resulting
-/// profile file.
+/// Profiles time spent in the server's tracing spans and writes it to a
+/// folded-stack file for flame-graph tools. Off by default, and it works only
+/// in a build with the `perf_measurements` Cargo feature, which the default
+/// build and the published packages leave out.
+///
+/// Tips:
+/// - In such a build with `enable` on, an unwritable `output_path` or a
+///   malformed `filter` stops startup.
+/// - Output is buffered, so the file is complete only after the server stops.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 #[derive(Clone, Debug, Deserialize)]
 #[config_example_generator(

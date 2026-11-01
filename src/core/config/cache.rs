@@ -8,10 +8,17 @@ use tuwunel_macros::config_example_generator;
 
 use super::parallelism_scaled_u32;
 
-/// Controls cache capacities and room summary retention.
+/// Cache sizes
 ///
-/// Individual capacities select the size of each cache, while a shared modifier
-/// scales their memory use. Space hierarchy settings control summary lifetimes.
+/// Sizes the RocksDB block caches reserved for specific database columns,
+/// and the in-memory room state cache (`stateinfo_capacity`). Capacities
+/// count entries, not bytes. Most columns without a key here share one
+/// cache carved from `rocksdb.cache_capacity_mb`. Sizes are fixed at
+/// startup.
+///
+/// Tips:
+/// - `capacity_modifier` also scales `rocksdb.write_buffer_capacity_mb`,
+///   but not `rocksdb.cache_capacity_mb`.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 #[derive(Clone, Copy, Debug, Deserialize)]
 #[config_example_generator(
@@ -207,10 +214,17 @@ pub struct Cache {
 	pub space_hierarchy: SpaceHierarchy,
 }
 
-/// Bounds the lifetime of cached space hierarchy summaries.
+/// Space hierarchy cache lifetime
 ///
-/// Minimum and maximum lifetimes are measured in seconds. Both limits can be
-/// changed when the configuration is reloaded.
+/// How long a room summary used to answer space hierarchy requests is
+/// cached before it is rebuilt or fetched again. Each entry expires at a
+/// random time between `ttl_min` and `ttl_max` seconds, which spreads
+/// refreshes out. Both keys apply on reload.
+///
+/// Tips:
+/// - Keep `ttl_min` below `ttl_max`. Nothing checks the pair at startup or
+///   on reload, and an equal or inverted pair panics when a summary is
+///   cached.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 #[derive(Clone, Copy, Debug, Deserialize)]
 #[config_example_generator(

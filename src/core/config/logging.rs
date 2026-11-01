@@ -8,10 +8,21 @@ use tuwunel_macros::config_example_generator;
 
 use super::true_fn;
 
-/// Configures log filtering, formatting, and output.
+/// Logging
 ///
-/// Console and journal settings select destinations and presentation.
-/// Low-level initialization controls support developer and expert use.
+/// Controls what the server logs and where the output goes. By default it
+/// logs at `info` (`debug` in debug builds) to standard output with colors;
+/// under systemd it writes straight to the journal instead, keeping each
+/// line's severity.
+///
+/// Tips:
+/// - Release builds, including the published packages, compile out `debug`
+///   and `trace` events (the default `release_max_log_level` Cargo feature),
+///   so a more verbose `filter` shows nothing more until you rebuild without
+///   that feature.
+/// - A malformed `filter` stops startup. To change the filter on a running
+///   server, use `!admin debug change-log-level <filter>`; `--reset` in
+///   place of a filter restores the configured one.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 #[derive(Clone, Debug, Deserialize)]
 #[config_example_generator(

@@ -9,11 +9,37 @@ use tuwunel_macros::config_example_generator;
 
 use super::PathBuf;
 
-/// Configures TURN relay credentials and servers.
+/// TURN relay for calls
 ///
-/// Shared secrets generate credentials, with static credentials available
-/// as an alternative. URI, lifetime, and guest-access settings govern
-/// client use.
+/// Tells clients which TURN servers relay their legacy Matrix calls, and
+/// with what credentials, through `/_matrix/client/v3/voip/turnServer`.
+/// No TURN server is built in; the guide at
+/// <https://tuwunel.chat/calls/turn.html> uses coturn. With `uris` empty,
+/// the default, that endpoint answers 404.
+///
+/// Pick one credential source:
+///
+/// - Shared secret (recommended): `secret` or `secret_file`, equal to
+///   coturn's `static-auth-secret`. Each request gets a fresh username
+///   `<expiry>:<user_id>` and HMAC-SHA1 password, valid for `ttl` seconds.
+/// - Static: `username` and `password`, sent to every client as they are;
+///   ignored while a secret is set.
+///
+/// With `uris` set and neither source, startup logs a warning and clients
+/// receive an empty username and password.
+///
+/// Minimal example:
+///
+/// ```toml
+///     [global.turn]
+///     uris = ["turn:turn.example.com?transport=udp"]
+///     secret_file = "/etc/tuwunel/.turn_secret"
+/// ```
+///
+/// Tips:
+/// - `secret_file` is read on every request, so rotating the secret needs
+///   no reload or restart.
+/// - Guests get 403 from the endpoint unless `allow_guests` is on.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 // No Debug: secrets are reachable from this section.
 #[derive(Clone, Deserialize)]
