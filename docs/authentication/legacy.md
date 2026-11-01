@@ -7,11 +7,12 @@ created.
 ## Enabling registration
 
 Set `allow_registration = true` to enable registration. On its own this is not
-enough — you must also configure at least one of the following:
+enough; you must also configure at least one of the following:
 
 - A registration token (recommended)
+- [Required email at registration](#requiring-email-at-registration), with an
+  SMTP `connection_uri` set
 - The open-registration confirmation flag (not recommended)
-- One or more [identity providers](providers.md)
 
 Password registration also needs `login_with_password` left at its default of
 `true`. With it disabled, only identity providers can register new accounts.
@@ -37,7 +38,7 @@ allow_registration = true
 registration_token_file = "/etc/tuwunel/.reg_tokens"
 ```
 
-Both options can be set at the same time; the file takes priority.
+Both options can be set at the same time; tokens from both are accepted.
 
 **Admin-issued tokens** — generate short-lived or single-use tokens from the
 admin room without touching the config file:

@@ -230,7 +230,7 @@ Domain policy:
   loose; treat as "anything mentioning this string passes".
 - `url_preview_domain_explicit_allowlist`: strict equality match on the host.
 - `url_preview_domain_explicit_denylist`: strict equality match, evaluated
-  before the allowlist.
+  before the allowlists unless one of them holds `"*"`.
 - `url_preview_check_root_domain`: when `true`, retries the explicit
   denylist and allowlist against the host with its first label removed, so an
   explicit allow on `wikipedia.org` also lets `en.wikipedia.org` through, but

@@ -38,8 +38,8 @@ please refer to the section on [environment variables](#configuring-via-environm
 
 | Field | Default | Description |
 |---|---|---|
-| `client_secret` | — | OAuth client secret issued by the provider. |
-| `client_secret_file` | — | Path to a file containing the client secret. Takes priority over `client_secret`. Example: `/etc/tuwunel/.github_secret` |
+| `client_secret` | none | OAuth client secret issued by the provider. |
+| `client_secret_file` | none | Path to a file containing the client secret. Ignored when `client_secret` is also set. Example: `/etc/tuwunel/.github_secret` |
 
 ### Discovery
 
@@ -47,7 +47,7 @@ please refer to the section on [environment variables](#configuring-via-environm
 |---|---|---|
 | `issuer_url` | brand default | Provider's OIDC issuer URL. Pre-supplied for well-known public providers. Required for self-hosted providers. Must match exactly what the provider expects and **must never change**. |
 | `base_path` | brand default | Extra path after `issuer_url` leading to the `.well-known` directory. GitHub uses `login/oauth/`, for example. Pre-populated for known brands. |
-| `discovery_url` | — | Fully overrides the `.well-known/openid-configuration` location. For developers or non-standard providers. |
+| `discovery_url` | none | Fully overrides the `.well-known/openid-configuration` location. For developers or non-standard providers. |
 | `discovery` | `true` | Whether to perform OIDC discovery at all. |
 
 ### Callback

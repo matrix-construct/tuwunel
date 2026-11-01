@@ -24,8 +24,8 @@ When `store_media_on_providers` is empty, all providers in
 
 Providers are declared as TOML sections named
 `[global.storage_provider.<NAME>.<brand>]`, where `<NAME>` is the identifier
-you reference in `media_storage_providers`, and `<brand>` is either `local`
-or `s3`. For container deployments (Docker Compose, Podman, Kubernetes) where
+you reference in `media_storage_providers`, and `<brand>` is `local`,
+`s3` or `gcs`. For container deployments (Docker Compose, Podman, Kubernetes) where
 mounting a configuration file is inconvenient, please refer to the section on
 [environment variables](#environment-variables) instead.
 
@@ -57,31 +57,33 @@ key    = "AKIAIOSFODNN7EXAMPLE"
 secret = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
 ```
 
-Alternatively, supply a full S3 URL that encodes bucket, region, and path:
+Alternatively, supply an S3 URL in place of `bucket`. An `s3://` URL sets only
+the bucket and its path is ignored, so set an object prefix with `base_path`:
 
 ```toml
 [global.storage_provider.media_on_s3.s3]
-url    = "s3://my-matrix-media/prefix"
-key    = "AKIAIOSFODNN7EXAMPLE"
-secret = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+url       = "s3://my-matrix-media"
+base_path = "prefix"
+key       = "AKIAIOSFODNN7EXAMPLE"
+secret    = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
 ```
 
 #### S3 configuration reference
 
 | Field | Default | Description |
 |---|---|---|
-| `url` | — | S3 URL of the form `s3://bucket/path`. Components not present in the URL can be set individually below. |
-| `bucket` | — | Bucket name. |
+| `url` | none | S3 URL such as `s3://bucket`, or an AWS `https://` bucket URL. An `s3://` URL sets only the bucket and its path is ignored; an `https://s3.<region>.amazonaws.com/<bucket>` or `https://<bucket>.s3.<region>.amazonaws.com` URL also sets the region, and a Cloudflare R2 URL sets it to `auto`. Values from the URL override `bucket` and `region`. Use `base_path` for an object prefix. |
+| `bucket` | none | Bucket name. |
 | `region` | `us-east-1` | AWS region where the bucket resides. |
-| `key` | — | IAM Access Key ID. |
-| `secret` | — | IAM Secret Access Key. Not logged or serialized. |
-| `token` | — | Session token for temporary credentials. Not logged or serialized. |
-| `base_path` | — | Path prefix inside the bucket. All objects are stored under this prefix. |
-| `endpoint` | — | Override the S3 endpoint URL. Required for self-hosted S3-compatible services such as MinIO or DigitalOcean Spaces. |
+| `key` | none | IAM Access Key ID. |
+| `secret` | none | IAM Secret Access Key. Not logged or serialized. |
+| `token` | none | Session token for temporary credentials. Not logged or serialized. |
+| `base_path` | none | Path prefix inside the bucket. All objects are stored under this prefix. |
+| `endpoint` | none | Override the S3 endpoint URL. Required for self-hosted S3-compatible services such as MinIO or DigitalOcean Spaces. A dual-stack AWS or Cloudflare R2 `url` sets its own endpoint, which overrides this one. |
 | `multipart_threshold` | `100 MiB` | Files at or above this size use the S3 multipart upload API. Accepts SI/IEC unit strings. |
-| `kms` | — | SSE-KMS key ARN for server-side encryption. |
-| `use_bucket_key` | — | Enable S3 Bucket Keys for KMS encryption. Should match the bucket setting. |
-| `use_vhost_request` | — | Override virtual-hosted-style request path. Derived automatically from the URL by default. |
+| `kms` | none | SSE-KMS key ARN for server-side encryption. |
+| `use_bucket_key` | none | Enable S3 Bucket Keys for KMS encryption. Should match the bucket setting. |
+| `use_vhost_request` | none | Turn virtual-hosted-style requests on or off. A virtual-hosted AWS `url` (`https://<bucket>.s3.<region>.amazonaws.com`) turns them on regardless. |
 | `use_https` | `true` | Require HTTPS. Set `false` only for local development with HTTP-only test endpoints. |
 | `startup_check` | `true` | Ping the bucket at startup to confirm connectivity. Failure aborts startup. Set `false` if the provider may be unavailable during startup. |
 

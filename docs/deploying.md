@@ -18,8 +18,8 @@ block with no extra work.
 **[Nginx](deploying/reverse-proxy-nginx.md)** is a solid choice if you are
 already running it. The configuration is more verbose but well-documented. Set
 `client_max_body_size` to match or exceed Tuwunel's `max_request_size` (default
-20 MiB), and never use `$request_uri` in the proxy pass — it causes subtle
-breakage.
+24 MiB), and never use `$request_uri` in the proxy pass, since it causes
+subtle breakage.
 
 > [!WARNING]
 > Apache and Lighttpd are **not supported** for Matrix federation. Both alter
