@@ -120,7 +120,7 @@ pub struct Rooms {
 	/// into unwanted servers or spaces.
 	///
 	/// reloadable: yes
-	/// example: ["badserver\.tld$", "badphrase", "19dollarfortnitecards"]
+	/// example: ['badserver\.tld$', 'badphrase', '19dollarfortnitecards']
 	///
 	/// default: []
 	/// legacy: forbidden_remote_room_directory_server_names

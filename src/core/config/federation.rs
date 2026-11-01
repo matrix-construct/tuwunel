@@ -110,7 +110,7 @@ pub struct Federation {
 	/// always permitted and exempt from the list.
 	///
 	/// reloadable: yes
-	/// example: ["badserver\.tld$", "badphrase", "19dollarfortnitecards"]
+	/// example: ['badserver\.tld$', 'badphrase', '19dollarfortnitecards']
 	///
 	/// default: []
 	/// legacy: forbidden_remote_server_names
@@ -125,11 +125,12 @@ pub struct Federation {
 	/// `federation.forbidden_remote_server_names`. The list is empty and
 	/// inactive by default; any entry activates it and denies nonmatches,
 	/// while this server's own name is always permitted. The denylist still
-	/// applies afterward, allowing a broad match such as "^([^.]+\.)+example\.com$"
-	/// here and an exclusion such as "^bad\.example\.com$" there.
+	/// applies afterward, allowing a broad match such as
+	/// `'^([^.]+\.)+example\.com$'` here and an exclusion such as
+	/// `'^bad\.example\.com$'` there.
 	///
 	/// reloadable: yes
-	/// example: ["badserver\.tld$", "badphrase", "19dollarfortnitecards"]
+	/// example: ['badserver\.tld$', 'badphrase', '19dollarfortnitecards']
 	///
 	/// default: []
 	/// legacy: allowed_remote_server_names_experimental

@@ -264,7 +264,7 @@ pub struct Media {
 	/// refused.
 	///
 	/// reloadable: yes
-	/// example: ["badserver\.tld$", "badphrase", "19dollarfortnitecards"]
+	/// example: ['badserver\.tld$', 'badphrase', '19dollarfortnitecards']
 	///
 	/// default: []
 	/// legacy: prevent_media_downloads_from
@@ -569,7 +569,8 @@ pub struct UrlPreview {
 	/// Matching is exact rather than by containment: "google.com" matches
 	/// "https://google.com" and "http://google.com", but not
 	/// "https://mymaliciousdomainexamplegoogle.com". The denylist is checked
-	/// before allowlists. A value of "*" has no effect.
+	/// before the allowlists, unless an allowlist holds "*". A value of "*"
+	/// here has no effect.
 	///
 	/// reloadable: yes
 	/// default: []

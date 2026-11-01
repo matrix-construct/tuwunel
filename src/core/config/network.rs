@@ -204,7 +204,7 @@ pub struct Dns {
 	/// use.
 	///
 	/// reloadable: yes
-	/// example: ["*\.dns\.podman$"]
+	/// example: ['\.dns\.podman$']
 	///
 	/// default: []
 	/// legacy: dns_passthru_domains

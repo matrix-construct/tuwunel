@@ -1470,7 +1470,7 @@
 # into unwanted servers or spaces.
 #
 # reloadable: yes
-# example: ["badserver\.tld$", "badphrase", "19dollarfortnitecards"]
+# example: ['badserver\.tld$', 'badphrase', '19dollarfortnitecards']
 #
 #forbidden_remote_server_names = []
 
@@ -1642,7 +1642,7 @@
 # always permitted and exempt from the list.
 #
 # reloadable: yes
-# example: ["badserver\.tld$", "badphrase", "19dollarfortnitecards"]
+# example: ['badserver\.tld$', 'badphrase', '19dollarfortnitecards']
 #
 #forbidden_remote_server_names = []
 
@@ -1654,11 +1654,12 @@
 # `federation.forbidden_remote_server_names`. The list is empty and
 # inactive by default; any entry activates it and denies nonmatches,
 # while this server's own name is always permitted. The denylist still
-# applies afterward, allowing a broad match such as "^([^.]+\.)+example\.com$"
-# here and an exclusion such as "^bad\.example\.com$" there.
+# applies afterward, allowing a broad match such as
+# `'^([^.]+\.)+example\.com$'` here and an exclusion such as
+# `'^bad\.example\.com$'` there.
 #
 # reloadable: yes
-# example: ["badserver\.tld$", "badphrase", "19dollarfortnitecards"]
+# example: ['badserver\.tld$', 'badphrase', '19dollarfortnitecards']
 #
 #allowed_remote_server_names_experimental = []
 
@@ -2961,7 +2962,7 @@
 # refused.
 #
 # reloadable: yes
-# example: ["badserver\.tld$", "badphrase", "19dollarfortnitecards"]
+# example: ['badserver\.tld$', 'badphrase', '19dollarfortnitecards']
 #
 #prevent_downloads_from = []
 
@@ -3191,7 +3192,8 @@
 # Matching is exact rather than by containment: "google.com" matches
 # "https://google.com" and "http://google.com", but not
 # "https://mymaliciousdomainexamplegoogle.com". The denylist is checked
-# before allowlists. A value of "*" has no effect.
+# before the allowlists, unless an allowlist holds "*". A value of "*"
+# here has no effect.
 #
 # reloadable: yes
 #
@@ -3515,7 +3517,7 @@
 # use.
 #
 # reloadable: yes
-# example: ["*\.dns\.podman$"]
+# example: ['\.dns\.podman$']
 #
 #passthru_domains = []
 
@@ -5557,9 +5559,16 @@
 #
 #[global.storage_provider.<ID>.s3]
 
-# Supply an s3 URL e.g. "s3://bucket/path". These URLs may contain one
-# or all of `bucket`, `region`, and `path` . When not supplied, such
-# additional items can be supplied below individually.
+# Sets the bucket, and for some forms the region, from an S3 URL.
+#
+# An `s3://bucket` URL supplies only the bucket, and its path is ignored,
+# so set `base_path` for a prefix within the bucket. An AWS `https://` URL
+# that names a region (`https://s3.<region>.amazonaws.com/<bucket>` or
+# `https://<bucket>.s3.<region>.amazonaws.com`) supplies it too, a
+# Cloudflare R2 URL sets it to `auto`, and values taken from the URL
+# override `bucket` and `region`.
+#
+# example: "s3://my-media-bucket"
 #
 #url =
 
@@ -5585,13 +5594,19 @@
 #
 #base_path =
 
-# (expert use) Override the location of s3 applied after components of the
-# parsed `url` (or when none set).
+# (expert use) Sets the S3 endpoint for self-hosted or other compatible
+# services.
+#
+# A dual-stack AWS or Cloudflare R2 `url` sets its own endpoint, which
+# overrides this value.
 #
 #endpoint =
 
-# (expert use) Override this property useful for some self-hosted
-# environments. By default it is derived when parsing the primary `url`.
+# (expert use) Turns virtual-hosted-style requests on or off, which some
+# self-hosted services need.
+#
+# A virtual-hosted AWS `url` (`https://<bucket>.s3.<region>.amazonaws.com`)
+# turns them on regardless of this value.
 #
 #use_vhost_request = false
 
@@ -6064,6 +6079,16 @@
 #
 #server =
 
+# Publishes a support web page URL at `/.well-known/matrix/support`.
+#
+# It is served beside the support contacts and policies, and any one of
+# the three makes the endpoint answer instead of returning 404.
+#
+# reloadable: yes
+# example: "https://example.com/support"
+#
+#support_page =
+
 # LiveKit JWT endpoint.
 # Required for Element Call / MatrixRTC (MSC4143).
 #
@@ -6139,7 +6164,7 @@
 
 # The Matrix User ID for the above support role.
 #
-# example "@admin:example.com"
+# example: "@admin:example.com"
 #
 #matrix_id =
 

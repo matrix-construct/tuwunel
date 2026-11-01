@@ -688,7 +688,7 @@ pub struct TlsConfig {
 	filename = "tuwunel-example.toml",
 	section = "global.well_known",
 	ignore = "support_contact support_policy",
-	hidden = "support_role support_email support_mxid support_page support_pgp_key"
+	hidden = "support_role support_email support_mxid support_pgp_key"
 )]
 pub struct WellKnownConfig {
 	/// The server URL that the client well-known file will serve.
@@ -726,9 +726,12 @@ pub struct WellKnownConfig {
 	#[serde(default)]
 	pub support_policy: BTreeMap<String, SupportPolicy>,
 
-	/// The URL of the support web page. This and the below generate the content
-	/// of `/.well-known/matrix/support`.
+	/// Publishes a support web page URL at `/.well-known/matrix/support`.
 	///
+	/// It is served beside the support contacts and policies, and any one of
+	/// the three makes the endpoint answer instead of returning 404.
+	///
+	/// reloadable: yes
 	/// example: "https://example.com/support"
 	pub support_page: Option<Url>,
 
@@ -1061,7 +1064,7 @@ pub struct SupportContact {
 
 	/// The Matrix User ID for the above support role.
 	///
-	/// example "@admin:example.com"
+	/// example: "@admin:example.com"
 	pub matrix_id: Option<OwnedUserId>,
 
 	/// The PGP key (i.e. OpenPGP) that one may use for encrypted communications
@@ -2115,9 +2118,16 @@ pub struct StorageProviderLocal {
 	section_aliases = "S3"
 )]
 pub struct StorageProviderS3 {
-	/// Supply an s3 URL e.g. "s3://bucket/path". These URLs may contain one
-	/// or all of `bucket`, `region`, and `path` . When not supplied, such
-	/// additional items can be supplied below individually.
+	/// Sets the bucket, and for some forms the region, from an S3 URL.
+	///
+	/// An `s3://bucket` URL supplies only the bucket, and its path is ignored,
+	/// so set `base_path` for a prefix within the bucket. An AWS `https://` URL
+	/// that names a region (`https://s3.<region>.amazonaws.com/<bucket>` or
+	/// `https://<bucket>.s3.<region>.amazonaws.com`) supplies it too, a
+	/// Cloudflare R2 URL sets it to `auto`, and values taken from the URL
+	/// override `bucket` and `region`.
+	///
+	/// example: "s3://my-media-bucket"
 	pub url: Option<String>,
 
 	/// The name of the S3 bucket. e.g. "bucketname-123456789-us-west-2-an".
@@ -2146,12 +2156,18 @@ pub struct StorageProviderS3 {
 	#[serde(alias = "path")]
 	pub base_path: Option<String>,
 
-	/// (expert use) Override the location of s3 applied after components of the
-	/// parsed `url` (or when none set).
+	/// (expert use) Sets the S3 endpoint for self-hosted or other compatible
+	/// services.
+	///
+	/// A dual-stack AWS or Cloudflare R2 `url` sets its own endpoint, which
+	/// overrides this value.
 	pub endpoint: Option<String>,
 
-	/// (expert use) Override this property useful for some self-hosted
-	/// environments. By default it is derived when parsing the primary `url`.
+	/// (expert use) Turns virtual-hosted-style requests on or off, which some
+	/// self-hosted services need.
+	///
+	/// A virtual-hosted AWS `url` (`https://<bucket>.s3.<region>.amazonaws.com`)
+	/// turns them on regardless of this value.
 	#[serde(default)]
 	pub use_vhost_request: Option<bool>,
 
