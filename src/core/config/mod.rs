@@ -597,11 +597,34 @@ pub struct TlsConfig {
 	pub dual_protocol: bool,
 }
 
-/// Configures Matrix discovery documents and related response data.
+/// Matrix discovery (well-known) responses
 ///
-/// Client and server fields drive the standard well-known responses. Support
-/// contacts, policies, and MatrixRTC transports populate their corresponding
-/// discovery data.
+/// Sets what the server answers at `/.well-known/matrix/client`,
+/// `/.well-known/matrix/server` and `/.well-known/matrix/support`. Clients
+/// and other servers fetch these files over HTTPS from the `server_name`
+/// host, so the settings take effect only when requests for that host reach
+/// the server, directly or through a reverse proxy. An endpoint with nothing
+/// configured answers 404.
+///
+/// Support contacts and policies have their own tables,
+/// `[global.well_known.support_contact.<ID>]` and
+/// `[global.well_known.support_policy.<ID>]`; with `support_page` they make
+/// up `/.well-known/matrix/support`. `livekit_url` publishes the MatrixRTC
+/// (Element Call) backend in the client response.
+///
+/// Example for `example.com` served from `matrix.example.com`:
+///
+/// ```toml
+///     [global.well_known]
+///     client = "https://matrix.example.com"
+///     server = "matrix.example.com:443"
+/// ```
+///
+/// Tips:
+/// - Other features need `client`: startup fails when `smtp.connection_uri`
+///   is set without it, and the built-in OIDC server (any
+///   `[global.identity_provider]` entry or `authentication.oidc.native_auth`)
+///   stays off with a warning.
 #[expect(rustdoc::bare_urls)]
 #[derive(Clone, Debug, Deserialize, Default)]
 #[config_example_generator(
@@ -731,10 +754,39 @@ pub struct WellKnownConfig {
 	pub rtc_transports: Vec<serde_json::Value>,
 }
 
-/// Defines one policy published by the support discovery endpoint.
+/// Support policy document
 ///
-/// The enclosing map key supplies the policy identifier. Its version and
-/// localized translations are emitted in the discovery response.
+/// Publishes one policy document, such as a privacy policy or terms of
+/// service, in `/.well-known/matrix/support` (the
+/// `org.matrix.msc4266.policies` field of MSC4266). These are informational;
+/// to make new users accept documents at sign-up, use
+/// `[global.registration_terms.<ID>]`.
+///
+/// - `<ID>`: the policy id published to clients, such as `privacy_policy`.
+///   The id is not validated (the spec allows `0-9 a-z A-Z . _ ~ -`). Bare
+///   keys may use `A-Z a-z 0-9 _ -`; anything else must be quoted
+///   (`[global.well_known.support_policy."privacy.v2"]`), and an unquoted
+///   dot splits the name into nested tables.
+///
+/// `version` and a
+/// `[global.well_known.support_policy.<ID>.policy_translation.<LANG>]`
+/// table are required; a policy table without them fails to load. Give
+/// it at least one language.
+///
+/// Minimal example:
+///
+/// ```toml
+///     [global.well_known.support_policy.privacy_policy]
+///     version = "1.0"
+///
+///     [global.well_known.support_policy.privacy_policy.policy_translation.en]
+///     name = "Privacy Policy"
+///     url = "https://example.com/privacy"
+/// ```
+///
+/// Tips:
+/// - The translation table is `policy_translation` here but `translations`
+///   under `[global.registration_terms.<ID>]`.
 #[derive(Clone, Debug, Deserialize)]
 #[config_example_generator(
 	filename = "tuwunel-example.toml",
@@ -756,10 +808,28 @@ pub struct SupportPolicy {
 	pub policy_translation: BTreeMap<String, SupportPolicyTranslation>,
 }
 
-/// Defines one localized support policy document.
+/// Support policy translation
 ///
-/// `name` is the user-facing title for this language. `url` points clients to
-/// the corresponding policy text.
+/// One language version of a `[global.well_known.support_policy.<ID>]`
+/// document: the title and link clients show for that language. Add one
+/// table per language; `name` and `url` are both required.
+///
+/// - `<ID>`: the `<ID>` of the policy table this translation belongs to,
+///   spelled (and quoted) the same way.
+/// - `<LANG>`: the language code, such as `en`, `fr` or `en-US` (RFC 5646;
+///   some clients use `en_US`). It is published as the key for this
+///   translation next to the policy's `version`, so it must not be
+///   `version`; it is not validated otherwise. Bare keys may use
+///   `A-Z a-z 0-9 _ -`; anything else must be quoted, and an unquoted dot
+///   splits the name into nested tables.
+///
+/// Example:
+///
+/// ```toml
+///     [global.well_known.support_policy.privacy_policy.policy_translation.de]
+///     name = "Datenschutzrichtlinie"
+///     url = "https://example.com/privacy-de"
+/// ```
 #[derive(Clone, Debug, Deserialize)]
 #[config_example_generator(
 	filename = "tuwunel-example.toml",
@@ -779,10 +849,40 @@ pub struct SupportPolicyTranslation {
 	pub url: Url,
 }
 
-/// Defines a policy document required during registration.
+/// Registration terms
 ///
-/// The enclosing map key becomes the policy identifier presented to clients.
-/// Its version and translations form the `m.login.terms` stage parameters.
+/// Requires new users to accept policy documents, such as terms of service
+/// or a privacy policy, when they register. Each table adds one document to
+/// the `m.login.terms` stage of registration and to the built-in sign-up
+/// page (`authentication.oidc.native_auth`). With none configured,
+/// registration has no terms stage.
+///
+/// - `<ID>`: the policy id sent to clients, such as `terms_of_service`.
+///   Checked at startup: 1 to 255 characters from `0-9 a-z A-Z . _ ~ -`.
+///   Bare keys may use `A-Z a-z 0-9 _ -`, so an id with `.` or `~` must be
+///   quoted (`[global.registration_terms."tos.v2"]`); an unquoted dot
+///   splits the name into nested tables.
+///
+/// `version` and a `[global.registration_terms.<ID>.translations.<LANG>]`
+/// table are required; give it at least one language.
+///
+/// Minimal example:
+///
+/// ```toml
+///     [global.registration_terms.terms_of_service]
+///     version = "1.0"
+///
+///     [global.registration_terms.terms_of_service.translations.en]
+///     name = "Terms of Service"
+///     url = "https://example.com/terms"
+/// ```
+///
+/// Tips:
+/// - A terms stage does not satisfy the open-registration startup check:
+///   `registration.enable` still needs a registration token or a required
+///   email stage.
+/// - Only new accounts see the terms (appservice and guest registrations
+///   skip them); changing `version` does not ask existing users again.
 #[derive(Clone, Debug, Deserialize)]
 #[config_example_generator(
 	filename = "tuwunel-example.toml",
@@ -807,10 +907,29 @@ pub struct TermsPolicy {
 	pub translations: BTreeMap<String, TermsPolicyTranslation>,
 }
 
-/// Defines one localized registration policy document.
+/// Registration terms translation
 ///
-/// `name` is the user-facing title for this language. `url` points clients to
-/// the policy text whose acceptance is recorded.
+/// One language version of a `[global.registration_terms.<ID>]` document:
+/// the title and link shown for that language. Every translation's `url`
+/// is recorded as accepted in the new account's `m.accepted_terms` account
+/// data.
+///
+/// - `<ID>`: the `<ID>` of the policy table this translation belongs to,
+///   spelled (and quoted) the same way.
+/// - `<LANG>`: the language code, such as `en`, `fr` or `en-US` (RFC 5646;
+///   some clients use `en_US`). It is sent as the key for this translation
+///   next to the policy's `version`, so it must not be `version`; it is not
+///   validated otherwise. Bare keys may use `A-Z a-z 0-9 _ -`; anything
+///   else must be quoted, and an unquoted dot splits the name into nested
+///   tables.
+///
+/// `name` and `url` are required; a `url` whose scheme is not `http` or
+/// `https` fails the startup check.
+///
+/// Tips:
+/// - The built-in sign-up page (`authentication.oidc.native_auth`) links
+///   one translation per policy: `en` when present, otherwise the first
+///   `<LANG>` in sort order.
 #[derive(Clone, Debug, Deserialize)]
 #[config_example_generator(
 	filename = "tuwunel-example.toml",
@@ -841,10 +960,32 @@ impl From<SupportPolicyTranslation>
 	}
 }
 
-/// Defines a contact published by the support discovery endpoint.
+/// Support contact
 ///
-/// Every contact has a Matrix support role. Email, Matrix ID, and OpenPGP key
-/// fields provide optional communication channels.
+/// Publishes one contact in the `contacts` list of
+/// `/.well-known/matrix/support`, where users and other server admins look
+/// for someone to reach. With no contact, `support_page` or support policy
+/// configured, the endpoint answers 404.
+///
+/// - `<ID>`: your label for this contact. It is not published; contacts
+///   are listed in `<ID>` order, and startup errors name the entry by it.
+///   Bare keys may use `A-Z a-z 0-9 _ -`; anything else must be quoted
+///   (`[global.well_known.support_contact."ops.team"]`), and an unquoted
+///   dot splits the name into nested tables.
+///
+/// `role` is required, normally `m.role.admin` or `m.role.security`;
+/// `m.role.moderator` and `m.role.dpo` are accepted but published under
+/// their unstable MSC4121 and MSC4265 names. Startup fails unless at least
+/// one of `email_address` or `matrix_id` is set.
+///
+/// Example:
+///
+/// ```toml
+///     [global.well_known.support_contact.admin]
+///     role = "m.role.admin"
+///     email_address = "admin@example.com"
+///     matrix_id = "@admin:example.com"
+/// ```
 #[derive(Clone, Debug, Deserialize)]
 #[config_example_generator(
 	filename = "tuwunel-example.toml",
@@ -1675,10 +1816,38 @@ pub enum StorageProvider {
 	None,
 }
 
-/// Configures local filesystem object storage.
+/// Local filesystem storage provider
 ///
-/// `base_path` prefixes every object path belonging to this provider. Remaining
-/// options control directory creation, cleanup, and startup checks.
+/// Stores media files under a local directory. Unless replaced, a built-in
+/// local provider named `media` keeps media in the `media` directory under
+/// `database_path`; add a table here to move that directory or to add
+/// another one.
+///
+/// - `<ID>`: your name for this provider. Media uses a provider only when
+///   `media.storage_providers` (default `["media"]`) lists it;
+///   `media.store_on_providers` and `media.import.conduit.source_provider`
+///   name providers the same way. Listing an undefined id fails startup.
+///   `media` is the built-in local provider, and a `media` entry replaces
+///   it. Use one backend (`local`, `s3` or `gcs`) per `<ID>`. Bare keys may
+///   use `A-Z a-z 0-9 _ -`; anything else must be quoted
+///   (`[global.storage_provider."my.media".local]`), and an unquoted dot
+///   splits the name into nested tables.
+///
+/// `base_path` is required; an empty value disables the entry. Unless
+/// `create_if_missing` is set, the directory must already exist or startup
+/// fails.
+///
+/// Example (moving the built-in `media` directory):
+///
+/// ```toml
+///     [global.storage_provider.media.local]
+///     base_path = "/srv/tuwunel/media"
+/// ```
+///
+/// Tips:
+/// - The built-in `media` provider creates its directory; an explicit
+///   `media` entry does so only with `create_if_missing`.
+/// - Providers are built once at startup; changes need a restart.
 #[derive(Clone, Debug, Default, Deserialize)]
 #[config_example_generator(
 	filename = "tuwunel-example.toml",
@@ -1710,11 +1879,43 @@ pub struct StorageProviderLocal {
 	pub startup_check: bool,
 }
 
-/// Configures an S3-compatible object storage provider.
+/// S3 storage provider
 ///
-/// Bucket, endpoint, and credential fields identify the remote store.
-/// Transport, encryption, multipart, and startup options tune how objects are
-/// accessed.
+/// Stores media in an S3-compatible object store: AWS S3, or another
+/// service reached through `endpoint`.
+///
+/// - `<ID>`: your name for this provider. Media uses a provider only when
+///   `media.storage_providers` (default `["media"]`) lists it;
+///   `media.store_on_providers` and `media.import.conduit.source_provider`
+///   name providers the same way. Listing an undefined id fails startup.
+///   `media` is the built-in local provider, and a `media` entry replaces
+///   it. Use one backend (`local`, `s3` or `gcs`) per `<ID>`. Bare keys may
+///   use `A-Z a-z 0-9 _ -`; anything else must be quoted
+///   (`[global.storage_provider."my.media".s3]`), and an unquoted dot
+///   splits the name into nested tables.
+///
+/// Set `url` or `bucket`; with neither, the entry is skipped without an
+/// error, even when `media.storage_providers` lists it. Keys left unset
+/// fall back to the standard `AWS_*` environment variables.
+///
+/// Example:
+///
+/// ```toml
+///     [global.storage_provider.s3_media.s3]
+///     bucket = "my-media-bucket"
+///     region = "us-west-2"
+///     key = "CHANGE_ME"
+///     secret = "CHANGE_ME"
+/// ```
+///
+/// Tips:
+/// - `media.storage_providers = ["media", "s3_media"]` with
+///   `media.store_on_providers = ["s3_media"]` writes new media to S3 and
+///   still reads older media from `media`. Without `store_on_providers`,
+///   every upload goes to both (startup warns).
+/// - The path in an `s3://bucket/path` `url` is not used as a prefix; set
+///   `base_path` instead.
+/// - Providers are built once at startup; changes need a restart.
 #[derive(Clone, Debug, Default, Deserialize)]
 #[config_example_generator(
 	filename = "tuwunel-example.toml",
@@ -1834,13 +2035,38 @@ pub struct StorageProviderS3 {
 	pub startup_check: bool,
 }
 
-/// Configures a Google Cloud Storage provider.
+/// Google Cloud Storage provider
 ///
-/// Only the bucket and an optional object prefix are required. Credentials are
-/// resolved by the object-store client in this order: an explicit service
-/// account key, an application-credentials file, then the instance metadata
-/// server. On GKE the metadata-server fallback means Workload Identity works
-/// with no credential settings at all and no exported key material.
+/// Stores media in a Google Cloud Storage bucket. With no credential keys
+/// set, credentials come from the environment and finally the instance
+/// metadata server, so GKE Workload Identity needs no key file.
+///
+/// - `<ID>`: your name for this provider. Media uses a provider only when
+///   `media.storage_providers` (default `["media"]`) lists it;
+///   `media.store_on_providers` and `media.import.conduit.source_provider`
+///   name providers the same way. Listing an undefined id fails startup.
+///   `media` is the built-in local provider, and a `media` entry replaces
+///   it. Use one backend (`local`, `s3` or `gcs`) per `<ID>`. Bare keys may
+///   use `A-Z a-z 0-9 _ -`; anything else must be quoted
+///   (`[global.storage_provider."my.media".gcs]`), and an unquoted dot
+///   splits the name into nested tables.
+///
+/// `bucket` is the only required key; without it the entry is skipped
+/// without an error, even when `media.storage_providers` lists it.
+///
+/// Minimal example:
+///
+/// ```toml
+///     [global.storage_provider.gcs_media.gcs]
+///     bucket = "my-media-bucket"
+/// ```
+///
+/// Tips:
+/// - `media.storage_providers = ["media", "gcs_media"]` with
+///   `media.store_on_providers = ["gcs_media"]` writes new media to GCS and
+///   still reads older media from `media`. Without `store_on_providers`,
+///   every upload goes to both (startup warns).
+/// - Providers are built once at startup; changes need a restart.
 #[derive(Clone, Debug, Default, Deserialize)]
 #[config_example_generator(
 	filename = "tuwunel-example.toml",
@@ -1909,11 +2135,42 @@ pub struct StorageProviderGcs {
 	pub startup_check: bool,
 }
 
-/// Defines one inline Matrix application service registration.
+/// Application services (bridges and bots)
 ///
-/// Tokens, namespaces, and protocol flags are converted to the Matrix
-/// registration model. The enclosing config map supplies the registration ID
-/// when `id` is empty.
+/// Registers an appservice inline, instead of through a registration file
+/// in `appservice_dir` or `!admin appservices register`. Add one table per
+/// appservice, with its namespaces in `[[global.appservice.<ID>.users]]`,
+/// `rooms` and `aliases` tables. Inline appservices load at startup; a
+/// config reload does not apply changes here.
+///
+/// - `<ID>`: your name for this appservice. It becomes the registration
+///   `id` used by `!admin appservices` commands (an explicit `id` key must
+///   match it), and the bot user is `@<ID>:<server_name>` unless
+///   `sender_localpart` is set. It must be unique across all appservices.
+///   Lowercase letters, digits, `_` and `-` suit both a bare key and a
+///   localpart; anything else must be quoted
+///   (`[global.appservice."my.bridge"]`), and an unquoted dot splits the
+///   name into nested tables.
+///
+/// `as_token` and `hs_token` are required and must match the bridge's
+/// registration; `url` is where events are sent (omit it if none are
+/// needed).
+///
+/// Example:
+///
+/// ```toml
+///     [global.appservice.whatsapp]
+///     url = "http://127.0.0.1:29318"
+///     as_token = "CHANGE_ME_AS_TOKEN"
+///     hs_token = "CHANGE_ME_HS_TOKEN"
+/// ```
+///
+/// Tips:
+/// - An `id` or `as_token` that another registration also uses (inline,
+///   in `appservice_dir` or from the admin room) aborts appservice loading
+///   at startup, and registrations after it are not loaded; unregister an
+///   admin-room copy before moving it here. The admin commands can neither
+///   register over nor unregister an inline appservice.
 #[derive(Clone, Debug, Default, Deserialize)]
 #[config_example_generator(
 	filename = "tuwunel-example.toml",
@@ -2033,11 +2290,37 @@ impl From<AppService> for ruma::api::appservice::Registration {
 	}
 }
 
-/// Defines one namespace claimed by an application service.
+/// Appservice namespaces
 ///
-/// The regular expression selects users, aliases, or rooms according to the
-/// list containing this value. `exclusive` controls whether the service owns
-/// every matching identifier.
+/// Claims the user IDs, room aliases or room IDs an appservice manages.
+/// Each `[[...]]` header appends one entry to the list it names, so repeat
+/// the header for more patterns. The appservice may act only as users
+/// matching `users` and create only aliases matching `aliases`; the server
+/// sends it events from rooms that hold its users or match its `aliases` or
+/// `rooms` entries.
+///
+/// - `<ID>`: the `<ID>` of the `[global.appservice.<ID>]` table this entry
+///   belongs to, spelled (and quoted) the same way.
+/// - `<users|rooms|aliases>`: one of the literal names `users` (user IDs
+///   on this server), `aliases` (room aliases) or `rooms` (room IDs). Any
+///   other name is ignored without a warning.
+///
+/// `regex` is required. Matching is unanchored (add `^` and `$`),
+/// case-insensitive for `users` and `aliases`, case-sensitive for `rooms`.
+/// Write the pattern as a single-quoted TOML string so backslashes stay
+/// literal.
+///
+/// Example:
+///
+/// ```toml
+///     [[global.appservice.whatsapp.users]]
+///     exclusive = true
+///     regex = '^@whatsapp_.*:example\.com$'
+/// ```
+///
+/// Tips:
+/// - `exclusive = true` stops ordinary users from registering matching user
+///   IDs or creating matching aliases; on `rooms` entries it has no effect.
 #[derive(Clone, Debug, Default, Deserialize)]
 #[config_example_generator(
 	filename = "tuwunel-example.toml",
