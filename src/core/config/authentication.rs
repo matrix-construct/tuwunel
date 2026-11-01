@@ -199,7 +199,10 @@ pub struct Login {
 
 	/// Enables traditional username-and-password login.
 	///
-	/// Disable this to allow only other mechanisms, such as SSO.
+	/// Disable this to allow only other mechanisms, such as SSO. Disabling it
+	/// also refuses password registration, at `/register` and on the native
+	/// OIDC login page, which then offers only the identity providers;
+	/// appservice and guest registration are unaffected.
 	///
 	/// reloadable: yes
 	/// default: true

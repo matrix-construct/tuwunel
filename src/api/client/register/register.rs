@@ -187,6 +187,19 @@ fn gate_registration_allowed(
 		return Err!(Request(GuestAccessForbidden("Guest registration is disabled.")));
 	}
 
+	if !is_guest
+		&& body.appservice_info.is_none()
+		&& !services.config.allows_password_registration()
+	{
+		debug_warn!(
+			%user,
+			%device_name,
+			"Rejecting registration attempt as password login is disabled"
+		);
+
+		return Err!(Request(Forbidden("Password registration has been disabled.")));
+	}
+
 	Ok(())
 }
 

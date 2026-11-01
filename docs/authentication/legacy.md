@@ -13,6 +13,9 @@ enough — you must also configure at least one of the following:
 - The open-registration confirmation flag (not recommended)
 - One or more [identity providers](providers.md)
 
+Password registration also needs `login_with_password` left at its default of
+`true`. With it disabled, only identity providers can register new accounts.
+
 ### Token-based registration
 
 A registration token acts as a shared secret that prospective users must
@@ -122,7 +125,7 @@ accounts were created.
 
 | Option | Default | Description |
 |---|---|---|
-| `login_with_password` | `true` | Accept username and password login. Set to `false` to enforce SSO-only login. |
+| `login_with_password` | `true` | Accept username and password login. Set to `false` to enforce SSO-only login; password registration is then refused too, while identity providers can still register new accounts. |
 | `login_via_token` | `true` | Accept `m.login.token` login tokens. Disabling this can break SSO flows where the server issues a token to complete the login. |
 | `login_via_existing_session` | `true` | Allow an authenticated session to mint a login token that a second client can use to log in. Requires interactive re-authentication. Disable if you want to prevent clients from spawning additional sessions this way. |
 

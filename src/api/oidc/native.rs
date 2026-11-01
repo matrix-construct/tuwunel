@@ -81,6 +81,22 @@ enum Flow<'a> {
 	Device(&'a str),
 }
 
+/// Password authentication the login page offers beside the providers.
+///
+/// Read from `authentication.login.with_password` and the registration
+/// settings; registration implies login.
+#[derive(Clone, Copy)]
+enum PasswordAuth {
+	/// Password login is disabled, so only the providers are offered.
+	Disabled,
+
+	/// Existing accounts sign in with a password.
+	Login,
+
+	/// Accounts may also be registered with a password.
+	Register,
+}
+
 /// Renders the native login or registration page for a pending authorization,
 /// device, or account flow.
 ///
@@ -295,13 +311,20 @@ async fn authenticate_local(
 }
 
 /// Authenticate a local account by password, mirroring the `/login` password
-/// flow (`password_login`): password-origin accounts only, uniform error.
+/// flow (`password_login`).
+///
+/// Refused while password login is disabled. Only password-origin accounts
+/// pass, and every credential failure returns one uniform error.
 async fn verify_credentials(
 	services: &Services,
 	username: &str,
 	password: &str,
 	address: LoginAddress,
 ) -> Result<OwnedUserId> {
+	if !services.config.authentication.login.with_password {
+		return Err!(Request(Forbidden("Password login is disabled on this server.")));
+	}
+
 	let RateLimitIp(client) = address.map_err(|(_, message)| err!("{message}"))?;
 	let invalid = || err!(Request(Forbidden("Invalid username or password.")));
 	let server_name = &services.config.server_name;
@@ -369,7 +392,7 @@ async fn do_register(
 	req_id: &str,
 	body: &NativeSubmit,
 ) -> Result<OwnedUserId> {
-	if !services.config.registration.enable {
+	if !services.config.allows_password_registration() {
 		return Err!(Request(Forbidden("Registration is disabled on this server.")));
 	}
 
@@ -552,7 +575,7 @@ async fn render_page(
 	context: Flow<'_>,
 	error: Option<&str>,
 ) -> Result<String> {
-	let registration_enabled = services.config.registration.enable;
+	let password_auth = configured_password_auth(services);
 	let Flow::Authorization(req_id) = context else {
 		let sso_options = match context {
 			| Flow::Account { .. } | Flow::Device(_) =>
@@ -560,7 +583,7 @@ async fn render_page(
 			| _ => String::new(),
 		};
 
-		return Ok(render_login(context, error, registration_enabled, &sso_options));
+		return Ok(render_login(context, error, password_auth, &sso_options));
 	};
 
 	let bound = services
@@ -571,7 +594,7 @@ async fn render_page(
 		.idp_id;
 
 	let page = match bound.as_deref() {
-		| None if view == "register" && registration_enabled =>
+		| None if view == "register" && matches!(password_auth, PasswordAuth::Register) =>
 			render_register(services, req_id, error).await,
 
 		| Some(idp_id) => {
@@ -584,17 +607,27 @@ async fn render_page(
 			let sso_options =
 				render_sso_options("Or sign in with", context, sso_choices(services));
 
-			render_login(context, error, registration_enabled, &sso_options)
+			render_login(context, error, password_auth, &sso_options)
 		},
 	};
 
 	Ok(page)
 }
 
+fn configured_password_auth(services: &Services) -> PasswordAuth {
+	let config = &services.config;
+
+	match (config.authentication.login.with_password, config.allows_password_registration()) {
+		| (false, _) => PasswordAuth::Disabled,
+		| (true, false) => PasswordAuth::Login,
+		| (true, true) => PasswordAuth::Register,
+	}
+}
+
 fn render_login(
 	context: Flow<'_>,
 	error: Option<&str>,
-	show_register: bool,
+	password_auth: PasswordAuth,
 	sso_options: &str,
 ) -> String {
 	let (context_fields, register_link) = match context {
@@ -625,7 +658,7 @@ fn render_login(
 				html_escape(req_id),
 			);
 
-			let register_link = show_register
+			let register_link = matches!(password_auth, PasswordAuth::Register)
 				.then(|| {
 					format!(
 						r#"<p class="auth-nav">New to this server? <a href="/_tuwunel/oidc/native?oidc_req_id={}&amp;view=register">Create an account</a></p>"#,
@@ -638,7 +671,12 @@ fn render_login(
 		},
 	};
 
+	let password_form = matches!(password_auth, PasswordAuth::Login | PasswordAuth::Register)
+		.then_some(PASSWORD_FORM)
+		.unwrap_or_default();
+
 	LOGIN_HTML
+		.replace("{password_form}", password_form)
 		.replace("{register_link}", &register_link)
 		.replace("{sso_options}", sso_options)
 		.replace("{error}", &error_block(error))
@@ -799,15 +837,7 @@ static LOGIN_HTML: &str = const_format!(
 			<h1 id="auth-title">Sign in</h1>
 			<p class="auth-description">Sign in to your Tuwunel account.</p>
 			{{error}}
-			<form class="auth-form" method="POST" action="/_tuwunel/oidc/native">
-				{{context_fields}}
-				<input type="hidden" name="mode" value="login">
-				<label for="auth-username">Username</label>
-				<input id="auth-username" type="text" name="username" autocomplete="username" autofocus required>
-				<label for="auth-password">Password</label>
-				<input id="auth-password" type="password" name="password" autocomplete="current-password" required>
-				<button type="submit">Sign in</button>
-			</form>
+			{{password_form}}
 			{{sso_options}}
 			{{register_link}}
 		</main>
@@ -864,6 +894,16 @@ static BOUND_HTML: &str = const_format!(
 </html>"#
 );
 
+static PASSWORD_FORM: &str = r#"<form class="auth-form" method="POST" action="/_tuwunel/oidc/native">
+				{context_fields}
+				<input type="hidden" name="mode" value="login">
+				<label for="auth-username">Username</label>
+				<input id="auth-username" type="text" name="username" autocomplete="username" autofocus required>
+				<label for="auth-password">Password</label>
+				<input id="auth-password" type="password" name="password" autocomplete="current-password" required>
+				<button type="submit">Sign in</button>
+			</form>"#;
+
 static TOKEN_FIELD: &str = r#"<label for="auth-token">Registration token</label>
 				<input id="auth-token" type="text" name="registration_token" autocomplete="off" placeholder="Enter your token" required>"#;
 
@@ -872,13 +912,13 @@ mod tests {
 	use serde_html_form::from_str;
 
 	use super::{
-		Flow, NativeQuery, error_block, parse_flow, render_bound, render_login,
+		Flow, NativeQuery, PasswordAuth, error_block, parse_flow, render_bound, render_login,
 		render_sso_options,
 	};
 
 	#[test]
 	fn login_page_has_form_and_hidden_req_id() {
-		let html = render_login(Flow::Authorization("REQ123"), None, false, "");
+		let html = render_login(Flow::Authorization("REQ123"), None, PasswordAuth::Login, "");
 
 		assert!(html.contains(r#"action="/_tuwunel/oidc/native""#));
 		assert!(html.contains(r#"name="oidc_req_id" value="REQ123""#));
@@ -889,7 +929,7 @@ mod tests {
 
 	#[test]
 	fn login_page_links_to_register_when_enabled() {
-		let html = render_login(Flow::Authorization("REQ123"), None, true, "");
+		let html = render_login(Flow::Authorization("REQ123"), None, PasswordAuth::Register, "");
 
 		assert!(html.contains("oidc_req_id=REQ123&amp;view=register"));
 	}
@@ -902,13 +942,29 @@ mod tests {
 		let options =
 			render_sso_options("Or sign in with", Flow::Authorization("REQ123"), providers);
 
-		let html = render_login(Flow::Authorization("REQ123"), None, false, &options);
+		let html =
+			render_login(Flow::Authorization("REQ123"), None, PasswordAuth::Login, &options);
 
 		assert!(html.contains("oidc_req_id=REQ123&amp;idp_id=first%2Fprovider"));
 		assert!(html.contains("oidc_req_id=REQ123&amp;idp_id=second"));
 		assert!(html.contains("Second &#123;error&#125; &lt;provider&gt;"));
 		assert!(!html.contains("<provider>"));
 		assert!(html.contains(r#"name="password""#));
+	}
+
+	#[test]
+	fn login_page_offers_only_providers_without_password_login() {
+		let context = Flow::Authorization("REQ123");
+		let options =
+			render_sso_options("Or sign in with", context, [("first", "First provider")]);
+
+		let html = render_login(context, None, PasswordAuth::Disabled, &options);
+
+		assert!(html.contains("oidc_req_id=REQ123&amp;idp_id=first"));
+		assert!(!html.contains("<form"));
+		assert!(!html.contains(r#"name="password""#));
+		assert!(!html.contains("{context_fields}"));
+		assert!(!html.contains("view=register"));
 	}
 
 	#[test]
@@ -927,7 +983,7 @@ mod tests {
 		let html = render_login(
 			Flow::Authorization("a<b>c"),
 			Some("<script>alert(1)</script>"),
-			false,
+			PasswordAuth::Login,
 			"",
 		);
 
@@ -940,7 +996,8 @@ mod tests {
 	#[test]
 	fn login_page_does_not_expand_smuggled_placeholder() {
 		// A req_id of "{error}" must not be re-expanded by the later error fill.
-		let html = render_login(Flow::Authorization("{error}"), Some("BOOM"), false, "");
+		let html =
+			render_login(Flow::Authorization("{error}"), Some("BOOM"), PasswordAuth::Login, "");
 
 		assert_eq!(html.matches("BOOM").count(), 1);
 		assert!(html.contains(r#"value="{error}""#));
@@ -948,7 +1005,7 @@ mod tests {
 
 	#[test]
 	fn device_login_page_has_only_hidden_user_code() {
-		let html = render_login(Flow::Device("BCDF-GHJK"), None, true, "");
+		let html = render_login(Flow::Device("BCDF-GHJK"), None, PasswordAuth::Register, "");
 
 		assert!(html.contains(r#"name="user_code" value="BCDF-GHJK""#));
 		assert!(!html.contains(r#"name="oidc_req_id""#));
@@ -960,7 +1017,7 @@ mod tests {
 		let context = Flow::Device("BCDF/GHJK");
 		let providers = [("first/provider", "First provider")];
 		let options = render_sso_options("Or sign in with", context, providers);
-		let html = render_login(context, None, true, &options);
+		let html = render_login(context, None, PasswordAuth::Register, &options);
 
 		assert!(html.contains("user_code=BCDF%2FGHJK&amp;idp_id=first%2Fprovider"));
 		assert!(html.contains(r#"name="user_code" value="BCDF/GHJK""#));
@@ -969,7 +1026,8 @@ mod tests {
 
 	#[test]
 	fn device_login_page_escapes_and_does_not_expand_context() {
-		let html = render_login(Flow::Device("a<{error}>"), Some("BOOM"), true, "");
+		let html =
+			render_login(Flow::Device("a<{error}>"), Some("BOOM"), PasswordAuth::Register, "");
 
 		assert_eq!(html.matches("BOOM").count(), 1);
 		assert!(!html.contains("a<{error}>"));
@@ -983,7 +1041,7 @@ mod tests {
 			device_id: "",
 		};
 
-		let html = render_login(context, None, true, "");
+		let html = render_login(context, None, PasswordAuth::Register, "");
 
 		assert!(html.contains(r#"name="action" value="org.matrix.sessions_list""#));
 		assert!(html.contains(r#"name="device_id" value="""#));
@@ -1000,7 +1058,7 @@ mod tests {
 		let providers = [("google/provider", "Google {error} <SSO>")];
 		let options = render_sso_options("Or sign in with", context, providers);
 
-		let html = render_login(context, None, true, &options);
+		let html = render_login(context, None, PasswordAuth::Register, &options);
 		let link = html
 			.split(r#"href="/_tuwunel/oidc/native?"#)
 			.nth(1)
@@ -1037,7 +1095,7 @@ mod tests {
 			device_id: "b<{error}>",
 		};
 
-		let html = render_login(context, Some("BOOM"), true, "");
+		let html = render_login(context, Some("BOOM"), PasswordAuth::Register, "");
 
 		assert_eq!(html.matches("BOOM").count(), 1);
 		assert!(!html.contains("a<{error}>"));

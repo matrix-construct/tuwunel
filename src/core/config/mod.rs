@@ -2254,6 +2254,19 @@ pub fn lists_identity_providers(&self) -> bool {
 		&& !self.authentication.login.single_sso
 }
 
+/// Returns whether new accounts may be registered with a password.
+///
+/// Password registration needs both `registration.enable` and
+/// `authentication.login.with_password`, since a password account on a server
+/// refusing password login could never sign in again. Registration through an
+/// identity provider follows that provider's own `registration` option instead.
+#[implement(Config)]
+#[inline]
+#[must_use]
+pub fn allows_password_registration(&self) -> bool {
+	self.registration.enable && self.authentication.login.with_password
+}
+
 impl TlsConfig {
 	/// Returns the configured TLS certificate and key paths together.
 	///

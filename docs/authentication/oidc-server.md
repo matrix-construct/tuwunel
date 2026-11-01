@@ -211,8 +211,11 @@ request with `prompt=create` opens the registration view. Registration there
 enforces the same `allow_registration`,
 registration-token, and `registration_terms` policy as the Matrix registration
 endpoint, and the metadata document advertises `prompt_values_supported =
-["create"]` so clients can offer account creation. Enabling this knob where the
-OIDC server was not already running takes effect on the next restart.
+["create"]` so clients can offer account creation. With
+`login_with_password = false` the page drops its password form and registration
+view, offering only the configured providers, and `create` is not advertised.
+Enabling this knob where the OIDC server was not already running takes effect
+on the next restart.
 
 ### Authorization hardening
 

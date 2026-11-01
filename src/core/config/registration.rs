@@ -43,7 +43,8 @@ pub struct Registration {
 	/// without a second step requires
 	/// `registration.yes_i_am_very_very_sure_i_want_an_open_registration_server_prone_to_abuse`
 	/// to be true. For token-only registration, configure `registration.token`
-	/// or `registration.token_file`.
+	/// or `registration.token_file`. Ordinary registration also requires
+	/// `authentication.login.with_password`.
 	///
 	/// reloadable: yes
 	/// legacy: allow_registration

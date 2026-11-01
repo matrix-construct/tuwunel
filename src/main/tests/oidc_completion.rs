@@ -21,7 +21,7 @@ use serde_json::{Value, from_value, json};
 use serde_urlencoded::from_str;
 use tokio::task::{JoinSet, consume_budget, coop::has_budget_remaining};
 use tuwunel::{Args, Runtime, Server, async_run, async_start, async_stop};
-use tuwunel_core::{Result, ruma::UserId};
+use tuwunel_core::{Config, Result, ruma::UserId};
 use tuwunel_service::{Services, oauth::server::AuthRequest, users::Register};
 
 use self::client::wait_until_ready;
@@ -230,7 +230,7 @@ async fn exercise(services: &Services, base: &str) -> Result {
 		);
 	}
 
-	Ok(())
+	check_password_disabled(services, &client, base).await
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
@@ -1092,6 +1092,104 @@ async fn approve(
 	let fields = [("oidc_req_id", req_id.as_str()), ("loginToken", &token), ("action", action)];
 
 	post_form(client, base, "_complete", &fields).await
+}
+
+/// Checks that disabling password login closes every password sign-in and
+/// sign-up route.
+///
+/// The native page then offers only the providers, the metadata stops
+/// advertising `create`, and guest registration still works. The original
+/// configuration is restored afterwards.
+#[tracing::instrument(level = "debug", skip_all)]
+async fn check_password_disabled(services: &Services, client: &Client, base: &str) -> Result {
+	let original = Config::clone(&services.server.config);
+
+	assert!(offers_create(client, base).await?);
+
+	services
+		.config
+		.replace(passwordless_with_guests(original.clone()))?;
+
+	assert!(!offers_create(client, base).await?);
+
+	let redirect = "https://trusted.example/passwordless";
+	let client_id = register_client(services, redirect).await?;
+	let req_id = new_native_request(client, base, &client_id, redirect).await?;
+	let html = native_page(client, base, &req_id).await?;
+
+	assert!(html.contains("First SSO"));
+	assert!(!html.contains(r#"name="password""#));
+	assert!(!html.contains("view=register"));
+
+	let response = submit_password(client, base, &req_id).await?;
+
+	account_error(response, StatusCode::FORBIDDEN, "Password login is disabled").await?;
+
+	let response = matrix_password(client, base, "127.0.0.4", PASSWORD).await?;
+
+	account_error(response, StatusCode::BAD_REQUEST, "unsupported login type").await?;
+
+	let username = "passwordlessregistration";
+	let user = UserId::parse_with_server_name(username, services.globals.server_name())?;
+	let response =
+		submit_registration(client, base, &req_id, username, REGISTRATION_TOKEN).await?;
+
+	account_error(response, StatusCode::FORBIDDEN, "Registration is disabled").await?;
+
+	let body = json!({ "username": username, "password": PASSWORD });
+	let response = matrix_register(client, base, "user", &body).await?;
+
+	account_error(response, StatusCode::FORBIDDEN, "Password registration has been disabled")
+		.await?;
+
+	assert!(!services.users.exists(&user).await);
+
+	let response = matrix_register(client, base, "guest", &json!({})).await?;
+
+	assert_eq!(response.status(), StatusCode::OK);
+
+	services.config.replace(original)?;
+
+	Ok(())
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+async fn offers_create(client: &Client, base: &str) -> Result<bool> {
+	let metadata: Value = client
+		.get(format!("{base}/_matrix/client/v1/auth_metadata"))
+		.send()
+		.await?
+		.error_for_status()?
+		.json()
+		.await?;
+
+	let create = metadata["prompt_values_supported"]
+		.as_array()
+		.is_some_and(|prompts| prompts.iter().any(|prompt| prompt == "create"));
+
+	Ok(create)
+}
+
+fn passwordless_with_guests(mut config: Config) -> Config {
+	config.authentication.login.with_password = false;
+	config.registration.guests.enable = true;
+	config
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+async fn matrix_register(
+	client: &Client,
+	base: &str,
+	kind: &str,
+	body: &Value,
+) -> Result<Response> {
+	client
+		.post(format!("{base}/_matrix/client/v3/register"))
+		.query(&[("kind", kind)])
+		.json(body)
+		.send()
+		.await
+		.map_err(Into::into)
 }
 
 fn parameter(url: &Url, name: &str) -> String {

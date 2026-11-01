@@ -89,6 +89,7 @@ pub fn check(config: &Config) -> Result {
 	check_identity_providers(config)?;
 	warn_oidc_registration_token(config);
 	warn_oidc_client_approval(config);
+	warn_native_auth_without_sign_in(config);
 	check_media_providers(config)?;
 	check_well_known_support_contact_validity(config)?;
 	check_email(config)?;
@@ -846,6 +847,19 @@ fn warn_oidc_registration_token(config: &Config) {
 			 one, so next-gen auth login will fail with `M_FORBIDDEN` for every ordinary \
 			 client. Leave it empty unless every OAuth client on this server is registered out \
 			 of band."
+		);
+	}
+}
+
+fn warn_native_auth_without_sign_in(config: &Config) {
+	if config.authentication.oidc.native_auth
+		&& !config.authentication.login.with_password
+		&& config.identity_provider.is_empty()
+	{
+		warn!(
+			"authentication.oidc.native_auth is enabled, but authentication.login.with_password \
+			 is false and no identity_provider is configured, so the native login page offers \
+			 no way to sign in. Enable password login or configure an identity provider."
 		);
 	}
 }

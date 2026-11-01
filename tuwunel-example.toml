@@ -459,7 +459,10 @@
 
 # Enables traditional username-and-password login.
 #
-# Disable this to allow only other mechanisms, such as SSO.
+# Disable this to allow only other mechanisms, such as SSO. Disabling it
+# also refuses password registration, at `/register` and on the native
+# OIDC login page, which then offers only the identity providers;
+# appservice and guest registration are unaffected.
 #
 # reloadable: yes
 #
@@ -3215,7 +3218,8 @@
 # without a second step requires
 # `registration.yes_i_am_very_very_sure_i_want_an_open_registration_server_prone_to_abuse`
 # to be true. For token-only registration, configure `registration.token`
-# or `registration.token_file`.
+# or `registration.token_file`. Ordinary registration also requires
+# `authentication.login.with_password`.
 #
 # reloadable: yes
 #

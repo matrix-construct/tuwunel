@@ -37,8 +37,8 @@ pub(crate) async fn openid_configuration_route(
 
 	// MSC2964: advertise `create` only when a client can act on it, i.e. native
 	// auth is serving local registration.
-	let native_registration =
-		services.config.authentication.oidc.native_auth && services.config.registration.enable;
+	let native_registration = services.config.authentication.oidc.native_auth
+		&& services.config.allows_password_registration();
 
 	let prompt_values: Vec<String> = native_registration
 		.then(|| "create".to_owned())
