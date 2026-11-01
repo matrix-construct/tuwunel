@@ -96,6 +96,7 @@ on:
           Write token for the self-hosted binary cache. Independent of the
           Cachix token; either, both, or neither may be present.
 
+# No permissions block: inherit the caller's, so package.yml can grant release uploads.
 jobs:
   bake:
     if: >

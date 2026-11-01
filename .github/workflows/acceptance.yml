@@ -56,6 +56,9 @@ on:
         type: string
         default: ${{github.sha}}
 
+permissions:
+  contents: read
+
 jobs:
   acceptance:
     name: >

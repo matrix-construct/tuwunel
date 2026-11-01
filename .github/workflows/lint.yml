@@ -42,6 +42,9 @@ on:
         type: string
         default: 'true'
 
+permissions:
+  contents: read
+
 jobs:
   fmt:
     if: >

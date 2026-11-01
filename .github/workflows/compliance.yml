@@ -79,6 +79,9 @@ on:
         type: string
         default: ${{github.sha}}
 
+permissions:
+  contents: read
+
 jobs:
   compliance:
     name: >
@@ -155,7 +158,6 @@ jobs:
         feat_set: ${{matrix.feat_set}}
         sys_name: ${{matrix.sys_name}}
         sys_target: ${{matrix.sys_target}}
-        GH_TOKEN: ${{secrets.GITHUB_TOKEN}}
         execute_outcome: ${{steps.execute.outcome}}
         RUNTIME_DIGEST_OWN: ${{inputs.runtime_history && format('{0}/_ci_digest/{1}.json', github.workspace, github.ref_name) || ''}}
         RUNTIME_DIGEST_MAIN: ${{(inputs.runtime_history && github.ref_name != (github.event.repository.default_branch || 'main')) && format('{0}/_ci_digest/{1}.json', github.workspace, github.event.repository.default_branch || 'main') || ''}}

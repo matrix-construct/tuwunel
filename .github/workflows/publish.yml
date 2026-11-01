@@ -61,6 +61,9 @@ on:
         type: string
         description: For pages deployment
 
+permissions:
+  contents: read
+
 jobs:
   documents:
     if: >
@@ -72,8 +75,8 @@ jobs:
     runs-on: ['X64', 'het']
     permissions:
       contents: read
-      id-token: write
-      pages: write
+      id-token: write # deploy-pages OIDC
+      pages: write # deploy-pages
 
     environment:
       name: github-pages
@@ -116,7 +119,6 @@ jobs:
 
     name: Containers
     runs-on: ${{matrix.machine}}
-    permissions: write-all
     strategy:
       fail-fast: true
       matrix:
@@ -186,7 +188,6 @@ jobs:
     name: Bundles
     needs: [containers]
     runs-on: 'het'
-    permissions: write-all
     strategy:
       fail-fast: true
       matrix:
@@ -345,7 +346,6 @@ jobs:
     name: Delivery
     needs: [bundles, documents, apt]
     runs-on: 'het'
-    permissions: write-all
     steps:
       - name: GitHub Login
         uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0

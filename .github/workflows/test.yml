@@ -128,6 +128,9 @@ on:
         required: false
         description: Write token for the self-hosted binary cache.
 
+permissions:
+  contents: read
+
 jobs:
   doc:
     if: >

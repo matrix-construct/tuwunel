@@ -74,6 +74,9 @@ on:
         required: false
         description: Write token for the self-hosted binary cache.
 
+permissions:
+  contents: read
+
 jobs:
   base:
     if: >
@@ -109,6 +112,8 @@ jobs:
       && contains(fromJSON(inputs.sys_targets), fromJSON('["x86_64-v1-linux-gnu"]')[0])
 
     name: Docs
+    permissions:
+      contents: write # release asset upload in bake.yml
     uses: ./.github/workflows/bake.yml
     with:
       bake_targets: '["docs"]'
@@ -144,6 +149,8 @@ jobs:
       && contains(fromJSON(inputs.sys_targets), fromJSON('["x86_64-v1-linux-gnu"]')[0])
 
     name: Book
+    permissions:
+      contents: write # release asset upload in bake.yml
     uses: ./.github/workflows/bake.yml
     with:
       bake_targets: '["book"]'
@@ -174,6 +181,8 @@ jobs:
       && fromJSON(inputs.enable_binary)
 
     name: Binaries
+    permissions:
+      contents: write # release asset upload in bake.yml
     uses: ./.github/workflows/bake.yml
     with:
       bake_targets: '["static"]'
@@ -206,6 +215,8 @@ jobs:
       && fromJSON(inputs.enable_container)
 
     name: Containers
+    permissions:
+      contents: write # release asset upload in bake.yml
     uses: ./.github/workflows/bake.yml
     with:
       bake_targets: ${{inputs.containers}}
@@ -247,6 +258,8 @@ jobs:
 
     name: Distro Packages
     needs: [base]
+    permissions:
+      contents: write # release asset upload in bake.yml
     uses: ./.github/workflows/bake.yml
     with:
       bake_targets: ${{inputs.distros}}

@@ -102,10 +102,15 @@ concurrency:
   group: ${{github.workflow}}-${{github.ref}}
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 jobs:
   init:
     name: Init
     runs-on: ${{matrix.runner}}
+    permissions:
+      contents: write # Create Release on tags
     env:
       default_cargo_profiles: '["test", "bench", "release"]'
       default_feat_sets: '["none", "default", "all"]'
@@ -379,6 +384,8 @@ jobs:
       && !contains(needs.init.outputs.pipeline, '[ci no package]')
 
     name: Package
+    permissions:
+      contents: write # release asset upload in bake.yml
     needs: [init, test]
     uses: ./.github/workflows/package.yml
     with:
@@ -455,6 +462,10 @@ jobs:
 
     name: Publish
     needs: [init, test, package]
+    permissions:
+      contents: read
+      id-token: write # deploy-pages OIDC
+      pages: write # deploy-pages
     uses: ./.github/workflows/publish.yml
     with:
       checkout: ${{needs.init.outputs.checkout}}
