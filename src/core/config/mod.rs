@@ -58,11 +58,11 @@ use std::{
 
 use bytesize::ByteSize;
 use derive_more::Debug;
-pub use figment::{Figment, value::Value as FigmentValue};
 use figment::{
-	Profile as FigmentProfile, Provider,
+	Error as FigmentError, Profile as FigmentProfile, Provider, Source,
 	providers::{Env, Format},
 };
+pub use figment::{Figment, value::Value as FigmentValue};
 use itertools::Itertools;
 use regex::RegexSet;
 pub use rocksdb::Rocksdb;
@@ -121,7 +121,7 @@ use self::{
 	proxy::ProxyConfig,
 };
 use crate::{
-	Err, Result, err, implement, redacted_debug,
+	Err, Error, Result, err, implement, redacted_debug,
 	utils::{
 		self, BoolExt,
 		bytes::{deserialize_bytesize_u64, deserialize_bytesize_usize},
@@ -2123,16 +2123,17 @@ where
 {
 	let toml_files = paths.map(Into::into).collect_vec();
 
+	// figment reads only `is_file()` paths and silently loads anything else as empty.
 	let invalid_toml_files = toml_files
 		.iter()
-		.filter(|path| !path.exists())
+		.filter(|path| !path.is_file())
 		.map(|path| path.as_os_str())
 		.collect_vec();
 
 	if !invalid_toml_files.is_empty() {
 		return Err!(
-			"The following config files do not exist or have broken symlinks: \
-			 {invalid_toml_files:?}"
+			"The following config files do not exist, are not regular files, or have broken \
+			 symlinks: {invalid_toml_files:?}"
 		);
 	}
 
@@ -2195,13 +2196,18 @@ pub(crate) fn merge_environment(config: Figment) -> Result<Figment> {
 }
 
 impl Config {
-	/// Finalize config
+	/// Extracts the typed configuration from the merged raw sources.
+	///
+	/// A rejection is reported against the configuration file when one was
+	/// loaded. With none loaded, the field detail is followed by a note that
+	/// no file was selected, naming `--config` and `TUWUNEL_CONFIG`. Keys the
+	/// schema does not know are recorded in `catchall`.
 	pub fn new(raw_config: &Figment) -> Result<Self> {
 		assert_canonical(raw_config)?;
 		let config = raw_config
 			.extract::<Self>()
 			.map_err(redact_error)
-			.map_err(|e| err!("There was a problem with your configuration file: {e}"))?;
+			.map_err(|e| extraction_error(raw_config, &e))?;
 
 		Ok(with_unknown(config, raw_config))
 	}
@@ -2212,6 +2218,20 @@ impl Config {
 	/// reject invalid combinations. Reload-specific comparisons are performed
 	/// by the configuration manager separately.
 	pub fn check(&self) -> Result { check(self) }
+}
+
+fn extraction_error(raw: &Figment, error: &FigmentError) -> Error {
+	let from_file = raw
+		.metadata()
+		.any(|metadata| matches!(metadata.source, Some(Source::File(_))));
+
+	match from_file {
+		| true => err!("There was a problem with your configuration file: {error}"),
+		| false => err!(
+			"There was a problem with your configuration: {error} (no configuration file was \
+			 loaded; pass one with --config or set TUWUNEL_CONFIG)"
+		),
+	}
 }
 
 fn with_unknown(mut config: Config, raw: &Figment) -> Config {

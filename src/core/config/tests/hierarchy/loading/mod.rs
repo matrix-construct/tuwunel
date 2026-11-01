@@ -1,6 +1,6 @@
 use figment::{Figment, providers::Format, value::Dict};
 
-use super::{Files, rejection};
+use super::{Files, config_from_toml, rejection};
 use crate::config::{Config, format::Toml};
 
 #[test]
@@ -87,5 +87,37 @@ fn table_only_headerless_document_keeps_its_named_profile_boundary() {
 		!raw.select("rocksdb")
 			.extract_inner::<bool>("checksums")
 			.expect("named profile remains available")
+	);
+}
+
+#[test]
+fn selectors_naming_a_directory_are_refused() {
+	let files = Files::new();
+	let error = Config::load_files([&files.0].into_iter())
+		.expect_err("directory selector refused")
+		.to_string();
+
+	assert!(error.contains("are not regular files"), "{error}");
+	assert!(error.contains(files.0.to_string_lossy().as_ref()), "{error}");
+}
+
+#[test]
+fn rejections_without_a_file_name_the_selectors() {
+	let document = "[global.rocksdb]\nchecksums = 'not a boolean'\n";
+	let error = rejection(config_from_toml(document));
+
+	assert!(error.contains("no configuration file was loaded"), "{error}");
+	assert!(error.contains("--config"), "{error}");
+	assert!(error.contains("TUWUNEL_CONFIG"), "{error}");
+
+	let files = Files::new();
+	let path = files.write("invalid.toml", document);
+	let raw = Config::load_files([&path].into_iter()).expect("raw value accepted");
+	let error = rejection(Config::new(&raw));
+
+	assert!(!error.contains("TUWUNEL_CONFIG"), "{error}");
+	assert!(
+		error.starts_with("There was a problem with your configuration file: "),
+		"{error}"
 	);
 }

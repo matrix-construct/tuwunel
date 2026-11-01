@@ -17,6 +17,11 @@ Alternatively, you can use the environment variable `TUWUNEL_CONFIG` to specify
 the config file to used. Conduit's environment variables are supported for 
 backwards compatibility.
 
+Tuwunel has no default config file path. The packaged services select
+`/etc/tuwunel/tuwunel.toml` through `TUWUNEL_CONFIG`, so running the binary by
+hand needs `-c` to read the same file. Every selected path must be a regular
+file (a symlink to one is fine); a directory or a device is refused at startup.
+
 > [!IMPORTANT]
 > It is bad practice to uncomment default options without changing them. Many
 > defaults are updated by developers as features evolve and can be essential
