@@ -28,7 +28,9 @@ use ruma::{
 use tokio::sync::Semaphore;
 use tokio::{fs, sync::Notify};
 use tuwunel_core::{
-	Err, Error, Result, debug, debug_error, debug_info, debug_warn, err, trace,
+	Err, Error, Result,
+	config::Media as MediaConfig,
+	debug, debug_error, debug_info, debug_warn, err, implement, trace,
 	utils::{
 		self, BoolExt, MutexMap,
 		result::LogDebugErr,
@@ -992,31 +994,6 @@ impl Service {
 			.await
 	}
 
-	/// Storage providers a new media file is written to.
-	///
-	/// An empty `media.store_on_providers` selects every media provider.
-	fn upload_providers(&self) -> impl Iterator<Item = &Arc<Provider>> + Send + '_ {
-		let providers = &self.services.config.media.store_on_providers;
-
-		self.storage_providers()
-			.filter(move |provider| providers.is_empty() || providers.contains(&provider.name))
-	}
-
-	fn storage_providers(&self) -> impl Iterator<Item = &Arc<Provider>> + Send + '_ {
-		let explicit_providers = &self.services.config.media.storage_providers;
-
-		let or_all_providers = explicit_providers
-			.is_empty()
-			.then(|| self.services.storage.providers())
-			.into_iter()
-			.flatten();
-
-		explicit_providers
-			.iter()
-			.filter_map(|id| self.services.storage.provider(id).ok())
-			.chain(or_all_providers)
-	}
-
 	#[inline]
 	pub async fn get_metadata(&self, mxc: &Mxc<'_>) -> Option<Metadata> {
 		self.db
@@ -1060,6 +1037,42 @@ impl Service {
 			.database_path
 			.join("media")
 	}
+}
+
+/// Storage providers media is read from.
+///
+/// An empty `media.storage_providers` selects every built provider.
+#[implement(Service)]
+#[inline]
+fn storage_providers(&self) -> impl Iterator<Item = &Arc<Provider>> + Send + '_ {
+	self.selected_providers(MediaConfig::reads_from)
+}
+
+/// Storage providers a new media file is written to.
+///
+/// An empty `media.store_on_providers` selects every media provider.
+#[implement(Service)]
+#[inline]
+fn upload_providers(&self) -> impl Iterator<Item = &Arc<Provider>> + Send + '_ {
+	self.selected_providers(MediaConfig::writes_to)
+}
+
+/// Built storage providers that `select` accepts under the live media
+/// settings.
+///
+/// One snapshot of the config judges every provider, so a reload while the
+/// consumer awaits cannot change the selection midway through.
+#[implement(Service)]
+fn selected_providers(
+	&self,
+	select: fn(&MediaConfig, &str) -> bool,
+) -> impl Iterator<Item = &Arc<Provider>> + Send + '_ {
+	let config = Arc::clone(&self.services.server.config);
+
+	self.services
+		.storage
+		.providers()
+		.filter(move |provider| select(&config.media, &provider.name))
 }
 
 #[inline]

@@ -52,7 +52,9 @@ pub mod turn;
 pub mod typing;
 
 use std::{
+	borrow::Cow,
 	collections::{BTreeMap, BTreeSet},
+	iter::once,
 	path::{Path, PathBuf},
 };
 
@@ -141,6 +143,12 @@ pub type ServerUserLocalpart = SmallString<[u8; 32]>;
 
 /// Stores an object-storage bucket name inline in the common case.
 pub type StorageBucketName = SmallString<[u8; 64]>;
+
+/// Names a storage provider section and holds its settings.
+///
+/// Configured sections are borrowed from the config; the built-in `media`
+/// provider is built on demand and owned.
+pub type ProviderSection<'a> = (&'a str, Cow<'a, StorageProvider>);
 
 /// Global settings
 ///
@@ -1962,7 +1970,7 @@ pub fn display_name(&self) -> &str { self.name.as_deref().unwrap_or(&self.brand)
 ///
 /// Local providers store objects beneath a filesystem path, while S3 providers
 /// use a compatible object store. The default variant disables the entry.
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq)]
 pub enum StorageProvider {
 	/// Selects a local filesystem backend.
 	///
@@ -2028,8 +2036,9 @@ pub enum StorageProvider {
 /// Tips:
 /// - The built-in `media` provider creates its directory; an explicit
 ///   `media` entry does so only with `create_if_missing`.
-/// - Providers are built once at startup; changes need a restart.
-#[derive(Clone, Debug, Default, Deserialize)]
+/// - Providers are built once at startup, so a config reload that adds,
+///   removes or changes a provider section is refused; restart instead.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq)]
 #[config_example_generator(
 	filename = "tuwunel-example.toml",
 	section = "global.storage_provider.<ID>.local"
@@ -2075,9 +2084,10 @@ pub struct StorageProviderLocal {
 ///   (`[global.storage_provider."my.media".s3]`), and an unquoted dot
 ///   splits the name into nested tables.
 ///
-/// Set `url` or `bucket`; with neither, the entry is skipped without an
-/// error, even when `media.storage_providers` lists it. Keys left unset
-/// fall back to the standard `AWS_*` environment variables.
+/// Set `url` or `bucket`; with neither, the entry is skipped, even when
+/// `media.storage_providers` lists it. Skipping it is an error only when no
+/// enabled provider is left to receive uploads. Keys left unset fall back
+/// to the standard `AWS_*` environment variables.
 ///
 /// Example:
 ///
@@ -2096,8 +2106,9 @@ pub struct StorageProviderLocal {
 ///   every upload goes to both (startup warns).
 /// - The path in an `s3://bucket/path` `url` is not used as a prefix; set
 ///   `base_path` instead.
-/// - Providers are built once at startup; changes need a restart.
-#[derive(Clone, Debug, Default, Deserialize)]
+/// - Providers are built once at startup, so a config reload that adds,
+///   removes or changes a provider section is refused; restart instead.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq)]
 #[config_example_generator(
 	filename = "tuwunel-example.toml",
 	section = "global.storage_provider.<ID>.s3",
@@ -2232,8 +2243,9 @@ pub struct StorageProviderS3 {
 ///   (`[global.storage_provider."my.media".gcs]`), and an unquoted dot
 ///   splits the name into nested tables.
 ///
-/// `bucket` is the only required key; without it the entry is skipped
-/// without an error, even when `media.storage_providers` lists it.
+/// `bucket` is the only required key; without it the entry is skipped,
+/// even when `media.storage_providers` lists it. Skipping it is an error
+/// only when no enabled provider is left to receive uploads.
 ///
 /// Minimal example:
 ///
@@ -2247,8 +2259,9 @@ pub struct StorageProviderS3 {
 ///   `media.store_on_providers = ["gcs_media"]` writes new media to GCS and
 ///   still reads older media from `media`. Without `store_on_providers`,
 ///   every upload goes to both (startup warns).
-/// - Providers are built once at startup; changes need a restart.
-#[derive(Clone, Debug, Default, Deserialize)]
+/// - Providers are built once at startup, so a config reload that adds,
+///   removes or changes a provider section is refused; restart instead.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq)]
 #[config_example_generator(
 	filename = "tuwunel-example.toml",
 	section = "global.storage_provider.<ID>.gcs",
@@ -2752,6 +2765,37 @@ pub fn allows_password_registration(&self) -> bool {
 	self.registration.enable && self.authentication.login.with_password
 }
 
+/// Lists the storage provider sections the storage service builds from.
+///
+/// These are the configured sections plus the built-in local `media`
+/// provider, which keeps media in the `media` directory under
+/// `database_path` and is left out when a `media` section replaces it.
+#[implement(Config)]
+pub fn storage_provider_sections(&self) -> impl Iterator<Item = ProviderSection<'_>> {
+	let builtin = once("media")
+		.filter(|name| !self.storage_provider.contains_key(*name))
+		.map(|name| {
+			let base_path = self
+				.database_path
+				.join(name)
+				.to_string_lossy()
+				.into_owned();
+
+			let provider = StorageProviderLocal {
+				create_if_missing: true,
+				base_path,
+				..Default::default()
+			};
+
+			(name, Cow::Owned(StorageProvider::local(provider)))
+		});
+
+	self.storage_provider
+		.iter()
+		.map(|(name, provider)| (name.as_str(), Cow::Borrowed(provider)))
+		.chain(builtin)
+}
+
 impl TlsConfig {
 	/// Returns the configured TLS certificate and key paths together.
 	///
@@ -2770,6 +2814,49 @@ impl TlsConfig {
 
 		Some((cert, key))
 	}
+}
+
+impl StorageProvider {
+	/// Reports whether this entry selects a backend the storage service builds.
+	///
+	/// `None` is never enabled; a backend variant defers to that backend's own
+	/// rule.
+	#[must_use]
+	pub fn is_enabled(&self) -> bool {
+		match self {
+			| Self::local(local) => local.is_enabled(),
+			| Self::s3(s3) => s3.is_enabled(),
+			| Self::gcs(gcs) => gcs.is_enabled(),
+			| Self::None => false,
+		}
+	}
+}
+
+impl StorageProviderLocal {
+	/// Reports whether this local provider is enabled.
+	///
+	/// An empty `base_path` disables the entry.
+	#[inline]
+	#[must_use]
+	pub fn is_enabled(&self) -> bool { !self.base_path.is_empty() }
+}
+
+impl StorageProviderS3 {
+	/// Reports whether this S3 provider is enabled.
+	///
+	/// Setting neither `url` nor `bucket` disables the entry.
+	#[inline]
+	#[must_use]
+	pub fn is_enabled(&self) -> bool { self.url.is_some() || self.bucket.is_some() }
+}
+
+impl StorageProviderGcs {
+	/// Reports whether this GCS provider is enabled.
+	///
+	/// An unset `bucket` disables the entry.
+	#[inline]
+	#[must_use]
+	pub fn is_enabled(&self) -> bool { self.bucket.is_some() }
 }
 
 impl Default for LoginFailedRateLimit {

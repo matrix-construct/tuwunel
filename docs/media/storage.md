@@ -222,7 +222,8 @@ To migrate from local storage to S3 (or between any two providers) without
 downtime:
 
 **Step 1** — Add the new provider and list both in `media_storage_providers`,
-but direct new writes only to the new one via `store_media_on_providers`:
+but direct new writes only to the new one via `store_media_on_providers`, then
+restart (a configuration reload refuses a new provider section):
 
 ```toml
 media_storage_providers  = ["media", "media_on_s3"]
@@ -236,7 +237,7 @@ secret = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
 ```
 
 Tuwunel now writes new media to S3 and reads from whichever provider holds
-the file, falling back to local if not found on S3.
+the file, trying the providers in name order (`media` before `media_on_s3`).
 
 **Step 2** — Copy existing files to the new provider using the storage sync
 admin command:
@@ -248,7 +249,7 @@ admin command:
 This copies all objects present in `media` but absent from `media_on_s3`.
 
 **Step 3** — Once the sync is complete and verified, remove `"media"` from
-both lists and restart:
+both lists and restart or reload the configuration:
 
 ```toml
 media_storage_providers  = ["media_on_s3"]

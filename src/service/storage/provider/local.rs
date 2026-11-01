@@ -25,8 +25,7 @@ pub(in super::super) fn new(
 	name: &str,
 	config: &StorageProviderLocal,
 ) -> Result<Option<(String, Arc<Provider>)>> {
-	// Fail successfully if this provider is disabled by the configuration..
-	if config.base_path.is_empty() {
+	if !config.is_enabled() {
 		debug!(?name, "'base_path' is not set. This configuration will be skipped");
 		return Ok(None);
 	}

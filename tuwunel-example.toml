@@ -2765,9 +2765,9 @@
 # `media`, which a `[global.storage_provider.media.local]` (or `.s3`,
 # `.gcs`) section replaces.
 #
-# Reads try the providers in `storage_providers` until one holds the
-# file; uploads go to those in `store_on_providers`, or to all of them
-# when it is empty. Any name other than `media` needs its own
+# Reads try the providers in `storage_providers`, in name order, until
+# one holds the file; uploads go to those in `store_on_providers`, or to
+# all of them when it is empty. Any name other than `media` needs its own
 # `[global.storage_provider.<ID>.*]` section.
 #
 # Example (new uploads to S3, older files still read from disk):
@@ -2786,15 +2786,16 @@
 #   missing from `storage_providers`, or `storage_providers` names one
 #   (other than `media`) with no `[global.storage_provider.<ID>.*]`
 #   section. An S3 or GCS section without `bucket` (or S3 `url`), or a
-#   local one with `base_path = ""`, passes that check but is skipped,
-#   not refused, at startup.
+#   local one with `base_path = ""`, passes that check but is skipped at
+#   startup; skipping is an error only when it leaves no enabled provider
+#   to receive uploads.
 # - Several `storage_providers` with `store_on_providers` empty copies
 #   every upload to all of them; a startup warning says so.
 # - Copy existing files to a new provider with
 #   `!admin query storage sync media media_on_s3`, then drop `media` from
 #   both lists.
-# - Provider sections are read only at startup; one added or changed by
-#   a config reload is not used until a restart.
+# - Provider sections are read only at startup, so a config reload that
+#   adds, removes or changes one is refused; restart instead.
 #
 #[global.media]
 
@@ -5382,8 +5383,9 @@
 #   (`[global.storage_provider."my.media".gcs]`), and an unquoted dot
 #   splits the name into nested tables.
 #
-# `bucket` is the only required key; without it the entry is skipped
-# without an error, even when `media.storage_providers` lists it.
+# `bucket` is the only required key; without it the entry is skipped,
+# even when `media.storage_providers` lists it. Skipping it is an error
+# only when no enabled provider is left to receive uploads.
 #
 # Minimal example:
 #
@@ -5395,7 +5397,8 @@
 #   `media.store_on_providers = ["gcs_media"]` writes new media to GCS and
 #   still reads older media from `media`. Without `store_on_providers`,
 #   every upload goes to both (startup warns).
-# - Providers are built once at startup; changes need a restart.
+# - Providers are built once at startup, so a config reload that adds,
+#   removes or changes a provider section is refused; restart instead.
 #
 #[global.storage_provider.<ID>.gcs]
 
@@ -5485,7 +5488,8 @@
 # Tips:
 # - The built-in `media` provider creates its directory; an explicit
 #   `media` entry does so only with `create_if_missing`.
-# - Providers are built once at startup; changes need a restart.
+# - Providers are built once at startup, so a config reload that adds,
+#   removes or changes a provider section is refused; restart instead.
 #
 #[global.storage_provider.<ID>.local]
 
@@ -5528,9 +5532,10 @@
 #   (`[global.storage_provider."my.media".s3]`), and an unquoted dot
 #   splits the name into nested tables.
 #
-# Set `url` or `bucket`; with neither, the entry is skipped without an
-# error, even when `media.storage_providers` lists it. Keys left unset
-# fall back to the standard `AWS_*` environment variables.
+# Set `url` or `bucket`; with neither, the entry is skipped, even when
+# `media.storage_providers` lists it. Skipping it is an error only when no
+# enabled provider is left to receive uploads. Keys left unset fall back
+# to the standard `AWS_*` environment variables.
 #
 # Example:
 #
@@ -5547,7 +5552,8 @@
 #   every upload goes to both (startup warns).
 # - The path in an `s3://bucket/path` `url` is not used as a prefix; set
 #   `base_path` instead.
-# - Providers are built once at startup; changes need a restart.
+# - Providers are built once at startup, so a config reload that adds,
+#   removes or changes a provider section is refused; restart instead.
 #
 #[global.storage_provider.<ID>.s3]
 

@@ -859,6 +859,55 @@ fn inverted_bounds_are_refused_at_startup_and_reload() {
 }
 
 #[test]
+fn a_reload_that_changes_storage_providers_is_refused() {
+	let default = default_config();
+	let section =
+		|bucket: &str| format!("[global.storage_provider.archive.s3]\nbucket = {bucket}\n");
+
+	let added = config_from_toml(&section("\"archive\"")).unwrap();
+	let changed = config_from_toml(&section("\"elsewhere\"")).unwrap();
+
+	check(&added).expect("an unused provider section should load");
+	reload(&added, &added).expect("an unchanged provider section should reload");
+
+	for (old, new) in [(&default, &added), (&added, &changed), (&added, &default)] {
+		let error = reload(old, new).expect_err("a provider change must not reload");
+
+		assert!(error.to_string().contains("storage_provider"));
+	}
+}
+
+#[test]
+fn a_config_with_no_enabled_upload_provider_is_refused() {
+	let disabled = "[global.storage_provider.archive.s3]\nregion = \"us-west-2\"\n";
+	let media = |lists: &str| format!("[global.media]\n{lists}\n{disabled}");
+	let both = r#"storage_providers = ["media", "archive"]"#;
+	let fallback = config_from_toml(&media(both)).unwrap();
+
+	check(&fallback).expect("the built-in provider should still receive uploads");
+
+	for document in [
+		media(r#"storage_providers = ["archive"]"#),
+		media(&format!("{both}\nstore_on_providers = [\"archive\"]")),
+	] {
+		let config = config_from_toml(&document).unwrap();
+
+		for result in [check(&config), reload(&fallback, &config)] {
+			let error = result.expect_err("uploads must have a provider");
+
+			assert!(error.to_string().contains("No enabled"), "{document}");
+		}
+	}
+
+	let replaced =
+		config_from_toml("[global.storage_provider.media.local]\nbase_path = \"\"\n").unwrap();
+
+	let error = check(&replaced).expect_err("an empty built-in replacement leaves none");
+
+	assert!(error.to_string().contains("No enabled"));
+}
+
+#[test]
 fn reload_rejects_none_to_some_and_some_to_none() {
 	let none = default_config();
 	let some = config_from_toml(

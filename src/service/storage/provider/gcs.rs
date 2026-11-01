@@ -36,7 +36,11 @@ pub(in super::super) fn new(
 	name: &str,
 	config: &StorageProviderGcs,
 ) -> Result<Option<Registration>> {
-	let Some(bucket) = config.bucket.as_deref() else {
+	let Some(bucket) = config
+		.bucket
+		.as_deref()
+		.filter(|_| config.is_enabled())
+	else {
 		debug!(?name, "gcs_provider.bucket not set. This configuration will be skipped");
 		return Ok(None);
 	};

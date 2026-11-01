@@ -11,6 +11,7 @@ use serde::Deserialize;
 use tuwunel_macros::config_example_generator;
 
 use super::{deserialize_bytesize_u64, deserialize_bytesize_usize, true_fn};
+use crate::{implement, utils::set::is_empty_or_contains};
 
 /// Media repository
 ///
@@ -21,9 +22,9 @@ use super::{deserialize_bytesize_u64, deserialize_bytesize_usize, true_fn};
 /// `media`, which a `[global.storage_provider.media.local]` (or `.s3`,
 /// `.gcs`) section replaces.
 ///
-/// Reads try the providers in `storage_providers` until one holds the
-/// file; uploads go to those in `store_on_providers`, or to all of them
-/// when it is empty. Any name other than `media` needs its own
+/// Reads try the providers in `storage_providers`, in name order, until
+/// one holds the file; uploads go to those in `store_on_providers`, or to
+/// all of them when it is empty. Any name other than `media` needs its own
 /// `[global.storage_provider.<ID>.*]` section.
 ///
 /// Example (new uploads to S3, older files still read from disk):
@@ -44,15 +45,16 @@ use super::{deserialize_bytesize_u64, deserialize_bytesize_usize, true_fn};
 ///   missing from `storage_providers`, or `storage_providers` names one
 ///   (other than `media`) with no `[global.storage_provider.<ID>.*]`
 ///   section. An S3 or GCS section without `bucket` (or S3 `url`), or a
-///   local one with `base_path = ""`, passes that check but is skipped,
-///   not refused, at startup.
+///   local one with `base_path = ""`, passes that check but is skipped at
+///   startup; skipping is an error only when it leaves no enabled provider
+///   to receive uploads.
 /// - Several `storage_providers` with `store_on_providers` empty copies
 ///   every upload to all of them; a startup warning says so.
 /// - Copy existing files to a new provider with
 ///   `!admin query storage sync media media_on_s3`, then drop `media` from
 ///   both lists.
-/// - Provider sections are read only at startup; one added or changed by
-///   a config reload is not used until a restart.
+/// - Provider sections are read only at startup, so a config reload that
+///   adds, removes or changes one is refused; restart instead.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 #[derive(Clone, Debug, Deserialize)]
 #[config_example_generator(
@@ -826,6 +828,27 @@ impl Default for Media {
 			video_thumbnail: VideoThumbnail::default(),
 		}
 	}
+}
+
+/// Reports whether new media is written to the named storage provider.
+///
+/// A provider qualifies only when media is read from it, and an empty
+/// `store_on_providers` list selects every such provider.
+#[implement(Media)]
+#[inline]
+#[must_use]
+pub fn writes_to(&self, provider: &str) -> bool {
+	self.reads_from(provider) && is_empty_or_contains(&self.store_on_providers, provider)
+}
+
+/// Reports whether media is read from the named storage provider.
+///
+/// An empty `storage_providers` list selects every provider.
+#[implement(Media)]
+#[inline]
+#[must_use]
+pub fn reads_from(&self, provider: &str) -> bool {
+	is_empty_or_contains(&self.storage_providers, provider)
 }
 
 impl Default for ImportConduit {

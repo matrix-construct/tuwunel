@@ -57,6 +57,14 @@ pub fn reload(old: &Config, new: &Config) -> Result {
 		));
 	}
 
+	if new.storage_provider != old.storage_provider {
+		return Err!(Config(
+			"storage_provider",
+			"Storage providers cannot be changed at runtime; restart the server to apply this \
+			 change."
+		));
+	}
+
 	Ok(())
 }
 
@@ -947,6 +955,27 @@ fn check_media_providers(config: &Config) -> Result {
 		));
 	}
 
+	if !has_upload_provider(config) {
+		config
+			.storage_provider_sections()
+			.filter(|(name, _)| config.media.writes_to(name))
+			.for_each(|(provider, _)| {
+				error!(?provider, "Storage provider for uploads is disabled");
+			});
+
+		return if config.media.store_on_providers.is_empty() {
+			Err!(Config(
+				"media.storage_providers",
+				"No enabled storage provider is left to receive uploads."
+			))
+		} else {
+			Err!(Config(
+				"media.store_on_providers",
+				"No enabled storage provider is left to receive uploads."
+			))
+		};
+	}
+
 	if config.media.storage_providers.len() > 1 && config.media.store_on_providers.is_empty() {
 		warn!(
 			providers = ?config.media.storage_providers,
@@ -957,6 +986,17 @@ fn check_media_providers(config: &Config) -> Result {
 	}
 
 	Ok(())
+}
+
+/// Reports whether any provider the storage service builds receives uploads.
+///
+/// The service skips a disabled section, and the media lists narrow the rest
+/// to the upload targets.
+fn has_upload_provider(config: &Config) -> bool {
+	config
+		.storage_provider_sections()
+		.filter(|(_, provider)| provider.is_enabled())
+		.any(|(name, _)| config.media.writes_to(name))
 }
 
 fn check_well_known_support_contact_validity(config: &Config) -> Result {

@@ -9,7 +9,7 @@ mod intersection;
 mod intersection_sorted;
 mod intersection_sorted_stream2;
 
-use std::{pin::Pin, task::ready};
+use std::{borrow::Borrow, collections::BTreeSet, pin::Pin, task::ready};
 
 use futures::{
 	Stream,
@@ -21,6 +21,19 @@ pub use self::{
 	intersection_sorted::intersection_sorted,
 	intersection_sorted_stream2::intersection_sorted_stream2,
 };
+
+/// Reports whether `allowed` is empty or contains `item`.
+///
+/// An empty set acts as an unrestricted allowlist and selects every candidate.
+#[inline]
+#[must_use]
+pub fn is_empty_or_contains<T, Q>(allowed: &BTreeSet<T>, item: &Q) -> bool
+where
+	T: Borrow<Q> + Ord,
+	Q: Ord + ?Sized,
+{
+	allowed.is_empty() || allowed.contains(item)
+}
 
 /// Lazily fill the cached head of `stream` into `peeked` and return a borrow.
 ///

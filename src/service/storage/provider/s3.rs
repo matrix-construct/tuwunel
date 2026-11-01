@@ -33,9 +33,8 @@ pub(in super::super) fn new(
 	name: &str,
 	config: &StorageProviderS3,
 ) -> Result<Option<(String, Arc<Provider>)>> {
-	// Fail successfully if this provider is disabled by the configuration..
-	if config.url.is_none() && config.bucket.is_none() {
-		debug!(?name, "s3_provider.bucket not set. This configuration will be skipped");
+	if !config.is_enabled() {
+		debug!(?name, "Neither url nor bucket set. This configuration will be skipped");
 		return Ok(None);
 	}
 
