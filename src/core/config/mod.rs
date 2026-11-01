@@ -89,7 +89,7 @@ pub use self::{
 	encryption::Encryption,
 	federation::Federation,
 	http::Http,
-	ip_source::IpSource,
+	ip_source::{IpSource, UNIX_SOCKET_PEER},
 	logging::Logging,
 	manager::Manager,
 	media::Media,
@@ -1205,8 +1205,9 @@ pub struct LoginAddressRateLimit {
 	/// IPv6 addresses share a bucket within each /64; clients behind a shared
 	/// address share its allowance.
 	/// Public login and authenticated password re-entry use separate buckets.
-	/// Configure trusted client-address forwarding behind a proxy, or its
-	/// users share the proxy's address budget.
+	/// Unless `http.ip_source` names a forwarding header, a loopback peer such
+	/// as a local proxy or the Unix socket is not limited per address; configure
+	/// trusted forwarding behind a proxy to limit its clients by address.
 	///
 	/// `0` disables this limit rather than making a bucket that never refills.
 	///

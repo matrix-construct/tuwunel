@@ -157,16 +157,21 @@ in LDAP that falls back to local password checking is limited.
 IPv4 addresses have individual budgets. IPv4-mapped IPv6 addresses use their
 IPv4 identity, and other IPv6 addresses share budgets within each /64.
 Clients sharing a NAT address also share its address budget. By default the
-address comes from the socket peer. Behind a reverse proxy, configure
-`http.ip_source`, restrict backend access to trusted proxies, and have
-the proxy replace the selected forwarding header with a verified address.
-Do not accept client-supplied forwarding headers unchanged. Without reliable
-forwarding, all users behind the proxy share its address and allowance.
-Password login and password UIAA require the selected source even for loopback
-peers and peers listed in `http.ip_source_trusted_subnets`; they do not use
-those peers' usual extraction bypass. A missing or invalid selected source
-refuses authentication. Deployments without a TCP peer address must configure
-a header source and supply it through their trusted proxy.
+address comes from the socket peer. A loopback peer, such as a reverse proxy
+connecting over loopback or any client of the Unix socket, stands for every
+client behind it, so its attempts are not limited per address and keep only
+the failed-attempt and successful-sign-in limits. Behind a reverse proxy,
+configure `http.ip_source`, restrict backend access to trusted proxies, and
+have the proxy replace the selected forwarding header with a verified address;
+this also applies the address budget behind a local proxy or the Unix socket.
+Do not accept client-supplied forwarding headers unchanged. A proxy that
+connects from a non-loopback address, including a container on a bridge
+network, gives all its users one address and allowance unless it forwards the
+client address. Password login and password UIAA require the selected source
+even for loopback peers and peers listed in `http.ip_source_trusted_subnets`;
+they do not use those peers' usual extraction bypass. A missing or invalid
+selected source refuses authentication. At startup and on reload, a warning
+says when a Unix socket or loopback listener has no per-address limit.
 
 Each limit has its own config section, shown here with its defaults:
 

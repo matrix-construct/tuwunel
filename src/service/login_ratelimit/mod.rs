@@ -3,7 +3,9 @@
 //! Each attempt spends an address token and reserves an account/address failure
 //! token before verification; only a wrong password keeps the reservation.
 //! Verified sign-ins also spend an account token, while UIAA uses separate
-//! attempt tables so public login traffic cannot exhaust its allowance.
+//! attempt tables so public login traffic cannot exhaust its allowance. When the
+//! client address is the TCP peer, a loopback peer stands for everyone behind a
+//! local proxy and is not limited by address.
 
 use std::{
 	borrow::Borrow,
@@ -123,6 +125,8 @@ struct Limit {
 }
 
 impl Limit {
+	const OFF: Self = Self { rate: 0.0, burst: 0 };
+
 	/// A zero burst, or a rate that is zero, negative or not a number, turns
 	/// the bucket off rather than making it one that never refills.
 	fn enabled(self) -> bool { self.burst > 0 && self.rate > 0.0 && self.rate.is_finite() }
@@ -201,7 +205,7 @@ fn reserve_attempt(
 	reserve_at(
 		self.attempts(scope),
 		(user_id, address),
-		(self.failed_limit(), self.address_limit()),
+		(self.failed_limit(), self.address_limit(address)),
 		scope,
 		Instant::now(),
 	)
@@ -268,13 +272,24 @@ fn account_limit(&self) -> Limit {
 	}
 }
 
+/// The address budget, off for an address that identifies no single client.
+///
+/// Budgeting a loopback socket peer would give everyone behind a local proxy
+/// or the Unix listener one shared allowance, which a single client could
+/// exhaust; those attempts keep their failed-attempt and account limits.
 #[implement(Service)]
-fn address_limit(&self) -> Limit {
-	let address = &self.server.config.rate_limiting.login.address;
+fn address_limit(&self, address: IpAddr) -> Limit {
+	let config = &self.server.config;
+	let budget = &config.rate_limiting.login.address;
+	let source = config.http.ip_source.unwrap_or_default();
+
+	if !source.identifies_client(address) {
+		return Limit::OFF;
+	}
 
 	Limit {
-		rate: address.per_second,
-		burst: address.burst_count,
+		rate: budget.per_second,
+		burst: budget.burst_count,
 	}
 }
 

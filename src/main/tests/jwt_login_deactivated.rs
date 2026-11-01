@@ -50,6 +50,8 @@ const BRIDGE: Bridge<'static> = Bridge {
 /// accounts, while an appservice can still sign in its passwordless bot.
 /// Exhausting one address's failed-password allowance leaves another address
 /// and authenticated password re-entry usable, without trusting forged headers.
+/// A loopback peer has no address budget, while a non-loopback address shares
+/// one budget across accounts and leaves password re-entry its own.
 #[test]
 fn login_refuses_deactivated_accounts_and_limits_wrong_passwords() -> Result {
 	let listener = TcpListener::bind(("127.0.0.1", 0))?;
@@ -268,7 +270,7 @@ async fn address_isolation(services: &Services, base: &str, user_id: &UserId) ->
 
 	expect_signed_in("correct password from another address", status, &session)?;
 	password_reentry_after_login_limit(services, base, user_id, &session).await?;
-	address_exhaustion_preserves_reentry(services, base, user_id, &session).await
+	loopback_peer_has_no_address_budget(services, base, user_id).await
 }
 
 #[tracing::instrument(level = "debug", skip(services, session))]
@@ -294,12 +296,11 @@ async fn password_reentry_after_login_limit(
 	Ok(())
 }
 
-#[tracing::instrument(level = "debug", skip(services, session))]
-async fn address_exhaustion_preserves_reentry(
+#[tracing::instrument(level = "debug", skip(services))]
+async fn loopback_peer_has_no_address_budget(
 	services: &Services,
 	base: &str,
 	user_id: &UserId,
-	session: &Value,
 ) -> Result {
 	let server_name = services.globals.server_name();
 	let untouched = UserId::parse_with_server_name("address-victim", server_name)?;
@@ -309,35 +310,55 @@ async fn address_exhaustion_preserves_reentry(
 		.create(&untouched, Some(PASSWORD), None)
 		.await?;
 
-	for attempt in 0..=services
+	for attempt in 0..=address_burst(services) {
+		let unknown = UserId::parse_with_server_name(format!("spray-{attempt}"), server_name)?;
+		let (status, body) = password_login(services, base, &unknown, WRONG_PASSWORD).await?;
+
+		expect_error("loopback spray", status, &body, StatusCode::FORBIDDEN, "M_FORBIDDEN")?;
+	}
+
+	let (status, body) = password_login(services, base, &untouched, PASSWORD).await?;
+
+	expect_signed_in("correct password after a loopback spray", status, &body)?;
+	address_budget_spans_accounts(services, &untouched, user_id)
+}
+
+#[tracing::instrument(level = "debug", skip(services))]
+fn address_budget_spans_accounts(
+	services: &Services,
+	untouched: &UserId,
+	user_id: &UserId,
+) -> Result {
+	let limiter = &services.login_ratelimit;
+	let server_name = services.globals.server_name();
+	let client = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10));
+
+	for attempt in 0..address_burst(services) {
+		let unknown = UserId::parse_with_server_name(format!("remote-{attempt}"), server_name)?;
+
+		drop(limiter.reserve_login_attempt(&unknown, client)?);
+	}
+
+	let limited = limiter
+		.reserve_login_attempt(untouched, client)
+		.is_err_and(|error| error.status_code() == StatusCode::TOO_MANY_REQUESTS);
+
+	if !limited {
+		return Err!("a remote address kept no budget across accounts");
+	}
+
+	let reentry = limiter.reserve_uiaa_attempt(user_id, client)?;
+
+	limiter.refund_login_attempt(reentry)
+}
+
+fn address_burst(services: &Services) -> u32 {
+	services
 		.config
 		.rate_limiting
 		.login
 		.address
 		.burst_count
-	{
-		let unknown = UserId::parse_with_server_name(format!("spray-{attempt}"), server_name)?;
-		let (status, body) = password_login(services, base, &unknown, WRONG_PASSWORD).await?;
-
-		if status == StatusCode::TOO_MANY_REQUESTS {
-			expect_error("address spray", status, &body, status, LIMITED)?;
-			break;
-		}
-
-		expect_error("address spray", status, &body, StatusCode::FORBIDDEN, "M_FORBIDDEN")?;
-	}
-
-	let (status, body) = password_login(services, base, &untouched, PASSWORD).await?;
-
-	expect_error(
-		"address budget across accounts",
-		status,
-		&body,
-		StatusCode::TOO_MANY_REQUESTS,
-		LIMITED,
-	)?;
-
-	password_reentry_after_login_limit(services, base, user_id, session).await
 }
 
 async fn correct_password_inside_the_burst(

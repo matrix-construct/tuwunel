@@ -18,7 +18,7 @@ use itertools::Itertools;
 use regex::RegexSet;
 use url::Url;
 
-use super::{DEPRECATED_KEYS, IdentityProvider, IpSource, KNOWN_KEYS};
+use super::{DEPRECATED_KEYS, IdentityProvider, KNOWN_KEYS};
 use crate::{
 	Config, Err, Result, debug, debug_info, err, error,
 	utils::{
@@ -202,8 +202,10 @@ fn check_network(config: &Config) -> Result {
 		));
 	}
 
+	let bind_addrs = config.get_bind_addrs();
+
 	if let Some(source) = config.http.ip_source
-		&& !matches!(source, IpSource::ConnectInfo)
+		&& source.is_header()
 	{
 		warn!(
 			?source,
@@ -211,6 +213,8 @@ fn check_network(config: &Config) -> Result {
 			 populates this header for every request; otherwise clients can spoof their IP \
 			 address."
 		);
+	} else {
+		warn_unforwarded_local_listeners(config, &bind_addrs);
 	}
 
 	if !config.listening {
@@ -226,8 +230,7 @@ fn check_network(config: &Config) -> Result {
 	}
 
 	if config.http.listen.unix_socket_path.is_none() {
-		config
-			.get_bind_addrs()
+		bind_addrs
 			.iter()
 			.for_each(warn_loopback_in_container);
 	}
@@ -252,6 +255,24 @@ fn check_network(config: &Config) -> Result {
 	}
 
 	Ok(())
+}
+
+fn warn_unforwarded_local_listeners<'a, Addrs>(config: &Config, bind_addrs: Addrs)
+where
+	Addrs: IntoIterator<Item = &'a SocketAddr>,
+{
+	let local = config.http.listen.unix_socket_path.is_some()
+		|| bind_addrs
+			.into_iter()
+			.any(|addr| addr.ip().is_loopback());
+
+	if local {
+		warn!(
+			"Password attempts through a Unix socket or loopback listener have no per-address \
+			 limit, since http.ip_source names no forwarding header to identify their clients. \
+			 Behind a reverse proxy, set http.ip_source to the header the proxy sets."
+		);
+	}
 }
 
 fn warn_loopback_in_container(addr: &SocketAddr) {

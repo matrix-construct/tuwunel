@@ -1516,30 +1516,28 @@
 # Selects the client IP source for rate limiting, logging, and security
 # tooling.
 #
-# For password login and password re-entry (UIAA), an unset source uses
-# the TCP peer address and ignores forwarding headers; when configured,
-# the selected source is required even from loopback or trusted peers, and a
-# missing or invalid source refuses authentication.
+# Password login and password re-entry (UIAA) use the TCP peer address and
+# ignore forwarding headers unless a header source is configured, and that
+# peer is not limited per address when it is loopback (a local reverse
+# proxy or the Unix socket). For other uses, an unset source scans common
+# proxy headers in leftmost-IP mode (`X-Forwarded-For`, RFC 7239
+# `Forwarded`, `X-Real-IP`, `Fly-Client-IP`, `True-Client-IP`,
+# `CF-Connecting-IP`, `CloudFront-Viewer-Address`) before the TCP peer
+# address, letting a client spoof its address.
 #
-# For other uses, an unset source scans common proxy headers in leftmost-IP mode
-# (`X-Forwarded-For`, RFC 7239 `Forwarded`, `X-Real-IP`, `Fly-Client-IP`,
-# `True-Client-IP`, `CF-Connecting-IP`, `CloudFront-Viewer-Address`)
-# before falling back to the TCP peer address, allowing clients to spoof
-# their address through request headers. When set, extraction uses only
-# the selected source and takes the rightmost value of multi-valued
-# headers, where only the proxy can append, resisting client spoofing;
-# header sources still require a trusted reverse proxy in front of
-# tuwunel to prevent forgery.
-#
-# Supported values are "connect_info" for direct TCP peers,
+# A configured source is used alone, taking the rightmost value of a
+# multi-valued header, the one only the proxy appends; password
+# authentication requires it even from loopback or trusted peers and
+# refuses when it is missing or invalid, and a header source still needs a
+# trusted reverse proxy in front of tuwunel. Supported values are
+# "connect_info" for direct TCP peers,
 # "rightmost_x_forwarded_for" for nginx or Caddy, "rightmost_forwarded"
 # for RFC 7239 proxies, "x_real_ip" for nginx `X-Real-IP`,
 # "cf_connecting_ip" for Cloudflare or cloudflared, "true_client_ip" for
 # Akamai or Cloudflare Enterprise, "fly_client_ip" for Fly.io, and
-# "cloudfront_viewer_address" for AWS CloudFront. Password authentication
-# without a TCP peer address requires a configured header source because
-# "connect_info" requires that address; changing this setting requires
-# a server restart.
+# "cloudfront_viewer_address" for AWS CloudFront; behind a reverse proxy,
+# including one on the Unix socket, select the header it sets, and restart
+# the server after changing this setting.
 #
 #ip_source = "connect_info"
 
@@ -3134,8 +3132,9 @@
 # IPv6 addresses share a bucket within each /64; clients behind a shared
 # address share its allowance.
 # Public login and authenticated password re-entry use separate buckets.
-# Configure trusted client-address forwarding behind a proxy, or its
-# users share the proxy's address budget.
+# Unless `http.ip_source` names a forwarding header, a loopback peer such
+# as a local proxy or the Unix socket is not limited per address; configure
+# trusted forwarding behind a proxy to limit its clients by address.
 #
 # `0` disables this limit rather than making a bucket that never refills.
 #

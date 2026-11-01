@@ -2,7 +2,6 @@
 
 use std::{
 	fs,
-	net::{IpAddr, Ipv4Addr, SocketAddr},
 	os::unix::{self, fs::PermissionsExt, net::UnixListener},
 	path::Path,
 };
@@ -10,7 +9,7 @@ use std::{
 use axum::{Extension, Router, extract::ConnectInfo};
 use axum_server::Handle;
 use futures::{FutureExt, future::BoxFuture};
-use tuwunel_core::{Result, err, warn};
+use tuwunel_core::{Result, config::UNIX_SOCKET_PEER, err, warn};
 
 #[tracing::instrument(skip_all, level = "debug")]
 pub(super) async fn serve<'a>(
@@ -20,10 +19,9 @@ pub(super) async fn serve<'a>(
 	path: Option<&Path>,
 	socket_perms: u32,
 ) -> Result<Vec<BoxFuture<'a, Result<(), std::io::Error>>>> {
-	// Loopback so a unix-socket peer bypasses a configured `http.ip_source`.
 	let router = router
 		.clone()
-		.layer(Extension(ConnectInfo(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0))))
+		.layer(Extension(ConnectInfo(UNIX_SOCKET_PEER)))
 		.into_make_service();
 
 	let mut acceptors = listeners

@@ -39,8 +39,9 @@ address rather than the real client. If Caddy is the only way clients can
 reach Tuwunel, set `ip_source = "rightmost_x_forwarded_for"` in
 `tuwunel.toml` (or `TUWUNEL_IP_SOURCE=rightmost_x_forwarded_for` in Docker).
 This makes Tuwunel trust the `X-Forwarded-For` header that Caddy's
-`reverse_proxy` directive already sets. If you use the Unix-socket
-`reverse_proxy` target, leave `ip_source` unset instead.
+`reverse_proxy` directive already sets. The same value applies to the
+Unix-socket `reverse_proxy` target; without it, password attempts through the
+socket get no per-address limit.
 
 The setting only takes effect at startup, so restart Tuwunel after changing
 it.

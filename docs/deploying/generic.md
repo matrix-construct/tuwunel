@@ -242,10 +242,12 @@ the legacy fallback behavior.
 
 Use `ip_source = "connect_info"` only when Tuwunel accepts direct TCP
 connections and should use the TCP peer address. Do not use `connect_info` for
-Unix-socket deployments; leave `ip_source` unset there.
+Unix-socket deployments, which have no TCP peer address.
 
 If Tuwunel is behind a trusted reverse proxy, set `ip_source` to match the
-header that proxy controls. Caddy, Nginx, and Traefik usually use
+header that proxy controls, including when the proxy connects over the Unix
+socket. Without it, password attempts from a local proxy or the Unix socket get
+no per-address limit. Caddy, Nginx, and Traefik usually use
 `ip_source = "rightmost_x_forwarded_for"`. Cloudflare and cloudflared
 deployments can use `ip_source = "cf_connecting_ip"` when Cloudflare supplies
 that header.

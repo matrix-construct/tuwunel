@@ -6,6 +6,7 @@ mod hierarchy;
 use std::{
 	cell::RefCell,
 	io::{Result as IoResult, Write},
+	net::IpAddr,
 	sync::{Arc, Mutex, Once},
 };
 
@@ -609,6 +610,67 @@ ip_source = "cf_connecting_ip"
 }
 
 #[test]
+fn only_a_loopback_socket_peer_identifies_no_client() {
+	let parse = |address: &str| -> IpAddr { address.parse().expect("test address parses") };
+	let cases = [
+		(IpSource::ConnectInfo, "127.0.0.1", false),
+		(IpSource::ConnectInfo, "127.0.0.2", false),
+		(IpSource::ConnectInfo, "::1", false),
+		(IpSource::ConnectInfo, "::ffff:127.0.0.1", false),
+		(IpSource::ConnectInfo, "192.0.2.1", true),
+		(IpSource::ConnectInfo, "2001:db8::1", true),
+		(IpSource::RightmostXForwardedFor, "127.0.0.1", true),
+		(IpSource::XRealIp, "192.0.2.1", true),
+	];
+
+	for (source, address, expected) in cases {
+		let identified = source.identifies_client(parse(address));
+
+		assert_eq!(identified, expected, "{source:?} {address}");
+	}
+
+	assert!(
+		!IpSource::ConnectInfo.identifies_client(UNIX_SOCKET_PEER.ip()),
+		"the Unix listener's peer must identify no single client"
+	);
+}
+
+#[test]
+fn check_warns_when_local_listeners_have_no_forwarding_header() {
+	const WARNING: &str = "listener have no per-address limit";
+
+	let unix = "[global]\nunix_socket_path = \"/run/tuwunel.sock\"\n";
+	let cases = [
+		("default loopback listeners", "[global]\n".to_owned(), true),
+		("unix socket", unix.to_owned(), true),
+		(
+			"unix socket with connect_info",
+			format!("{unix}ip_source = \"connect_info\"\n"),
+			true,
+		),
+		(
+			"unix socket with a header source",
+			format!("{unix}ip_source = \"rightmost_x_forwarded_for\"\n"),
+			false,
+		),
+		("public listener", "[global]\naddress = \"0.0.0.0\"\n".to_owned(), false),
+	];
+
+	for (name, toml, warns) in cases {
+		let (result, logs) = check_toml(&toml);
+
+		result.expect("listener config should pass config check");
+		assert_eq!(logs.contains(WARNING), warns, "{name}");
+	}
+}
+
+fn check_toml(toml: &str) -> (Result, String) {
+	let config = config_from_toml(toml).expect("test config should parse");
+
+	check_with_captured_logs(&config)
+}
+
+#[test]
 fn check_warns_when_mas_provisioning_provider_is_untrusted() {
 	let untrusted_provisioning = r#"[global]
 mas_secret = "provisioning-secret"
@@ -644,8 +706,7 @@ client_secret = "oauth-secret"
 	];
 
 	for (name, toml, warns) in cases {
-		let config = config_from_toml(toml).expect("MAS provider config should parse");
-		let (result, logs) = check_with_captured_logs(&config);
+		let (result, logs) = check_toml(toml);
 
 		result.expect("MAS provider config should pass config check");
 		assert_eq!(logs.contains("configured without `trusted = true`"), warns, "{name}");
@@ -869,8 +930,8 @@ fn check_support_pgp_key(value: &str) -> Result {
 		"[global.well_known.support_contact.admin]\nrole = \"m.role.admin\"\nemail_address = \
 		 \"admin@example.com\"\npgp_key = \"{value}\"\n"
 	);
-	let config = config_from_toml(&toml).expect("support_contact config should parse");
-	check_with_captured_logs(&config).0
+
+	check_toml(&toml).0
 }
 
 #[test]
@@ -1386,8 +1447,7 @@ fn a_weak_cost_passes_the_config_check_with_a_warning() {
 		("[global]\n", false),
 		("[global]\nargon2_m_cost = 64\nargon2_t_cost = 1\n", true),
 	] {
-		let config = config_from_toml(toml).expect("the config should parse");
-		let (result, logs) = check_with_captured_logs(&config);
+		let (result, logs) = check_toml(toml);
 
 		result.expect("a valid cost should pass the config check");
 		assert_eq!(logs.contains("below the weakest OWASP"), warns, "{toml}");

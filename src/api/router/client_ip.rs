@@ -243,7 +243,7 @@ mod tests {
 		http::{Request, StatusCode, request::Parts},
 	};
 	use ipnet::IpNet;
-	use tuwunel_core::config::IpSource;
+	use tuwunel_core::config::{IpSource, UNIX_SOCKET_PEER};
 
 	use super::{ClientIp, ConfiguredIpSource, TrustedPeerSubnets, rate_limit_ip};
 
@@ -432,6 +432,20 @@ mod tests {
 
 		let ClientIp(ip) = extract_client_ip(&mut parts).await.unwrap();
 		assert_eq!(ip, socket_addr.ip());
+	}
+
+	#[tokio::test]
+	async fn unix_socket_peer_bypasses_configured_source() {
+		let (mut parts, ()) = Request::builder()
+			.extension(ConnectInfo(UNIX_SOCKET_PEER))
+			.extension(ConfiguredIpSource(IpSource::RightmostXForwardedFor))
+			.body(())
+			.unwrap()
+			.into_parts();
+
+		let ClientIp(ip) = extract_client_ip(&mut parts).await.unwrap();
+
+		assert_eq!(ip, UNIX_SOCKET_PEER.ip());
 	}
 
 	#[tokio::test]
