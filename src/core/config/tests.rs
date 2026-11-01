@@ -826,6 +826,39 @@ fn thread_latest_reply_search_limit_is_positive_and_reloadable() {
 }
 
 #[test]
+fn inverted_bounds_are_refused_at_startup_and_reload() {
+	let default = default_config();
+	let hierarchy = |min: u64, max: u64| {
+		format!("[global.cache.space_hierarchy]\nttl_min = {min}\nttl_max = {max}\n")
+	};
+
+	let typing = |min: u64, max: u64| {
+		format!("[global.typing]\nclient_timeout_min_s = {min}\nclient_timeout_max_s = {max}\n")
+	};
+
+	let ttl_min = "cache.space_hierarchy.ttl_min";
+
+	for (document, key) in [
+		(hierarchy(600, 600), ttl_min),
+		(hierarchy(601, 600), ttl_min),
+		(typing(46, 45), "typing.client_timeout_min_s"),
+	] {
+		let config = config_from_toml(&document).unwrap();
+		let error = check(&config).expect_err("an inverted pair must not load");
+
+		assert!(error.to_string().contains(key), "{document}");
+		assert!(reload(&default, &config).is_err(), "{document}");
+	}
+
+	for document in [hierarchy(599, 600), typing(45, 45)] {
+		let config = config_from_toml(&document).unwrap();
+
+		check(&config).expect("an ordered pair should load");
+		reload(&default, &config).expect("an ordered pair should reload");
+	}
+}
+
+#[test]
 fn reload_rejects_none_to_some_and_some_to_none() {
 	let none = default_config();
 	let some = config_from_toml(

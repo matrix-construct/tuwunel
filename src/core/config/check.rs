@@ -81,6 +81,8 @@ pub fn check(config: &Config) -> Result {
 	check_registration_terms(config)?;
 	check_profile_requests(config)?;
 	check_relation_limits(config)?;
+	check_space_hierarchy_cache(config)?;
+	check_typing_timeouts(config)?;
 	check_password_hashing(config)?;
 	check_jwt(config)?;
 	check_turn_and_media_misc(config)?;
@@ -160,6 +162,32 @@ fn check_relation_limits(config: &Config) -> Result {
 		return Err!(Config(
 			"rooms.redaction.thread_latest_reply_search_limit",
 			"Must be greater than zero"
+		));
+	}
+
+	Ok(())
+}
+
+fn check_space_hierarchy_cache(config: &Config) -> Result {
+	let cache = &config.cache.space_hierarchy;
+
+	if cache.ttl_min >= cache.ttl_max {
+		return Err!(Config(
+			"cache.space_hierarchy.ttl_min",
+			"Must be less than cache.space_hierarchy.ttl_max"
+		));
+	}
+
+	Ok(())
+}
+
+fn check_typing_timeouts(config: &Config) -> Result {
+	let typing = &config.typing;
+
+	if typing.client_timeout_min_s > typing.client_timeout_max_s {
+		return Err!(Config(
+			"typing.client_timeout_min_s",
+			"Must not exceed typing.client_timeout_max_s"
 		));
 	}
 

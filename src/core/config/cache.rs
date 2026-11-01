@@ -222,9 +222,8 @@ pub struct Cache {
 /// refreshes out. Both keys apply on reload.
 ///
 /// Tips:
-/// - Keep `ttl_min` below `ttl_max`. Nothing checks the pair at startup or
-///   on reload, and an equal or inverted pair panics when a summary is
-///   cached.
+/// - `ttl_min` must be below `ttl_max`. Startup and reload refuse an equal
+///   or inverted pair.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 #[derive(Clone, Copy, Debug, Deserialize)]
 #[config_example_generator(

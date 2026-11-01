@@ -1125,9 +1125,8 @@
 # refreshes out. Both keys apply on reload.
 #
 # Tips:
-# - Keep `ttl_min` below `ttl_max`. Nothing checks the pair at startup or
-#   on reload, and an equal or inverted pair panics when a summary is
-#   cached.
+# - `ttl_min` must be below `ttl_max`. Startup and reload refuse an equal
+#   or inverted pair.
 #
 #[global.cache.space_hierarchy]
 
@@ -5969,9 +5968,8 @@
 # Federation is on in both directions by default.
 #
 # Tips:
-# - Keep `client_timeout_min_s` at or below `client_timeout_max_s`; the
-#   pair is not checked at startup, and every request to start typing
-#   fails with a server error otherwise.
+# - `client_timeout_min_s` must not exceed `client_timeout_max_s`. Startup
+#   and reload refuse an inverted pair.
 #
 #[global.typing]
 
