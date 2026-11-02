@@ -32,9 +32,11 @@ use libc::{COPYFILE_ACL, COPYFILE_XATTR, RENAME_SWAP, fcopyfile, renamex_np};
 #[cfg(unix)]
 use libc::{O_CLOEXEC, O_NOFOLLOW, O_NONBLOCK, fchown};
 
+#[cfg(unix)]
+use crate::utils::BoolExt;
 #[cfg(target_os = "macos")]
 use crate::warn;
-use crate::{Err, Error, Result, debug_warn, err, utils::BoolExt};
+use crate::{Err, Error, Result, debug_warn, err};
 
 type Origin<'a> = (&'a File, &'a Metadata);
 
