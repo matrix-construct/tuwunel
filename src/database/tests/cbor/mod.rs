@@ -209,7 +209,10 @@ fn clock_windows() {
 }
 
 fn assert_pinned_clock(nanos: u32, expected: &str) {
-	let time = UNIX_EPOCH + Duration::new(1_700_000_000, nanos);
+	let time = UNIX_EPOCH
+		.checked_add(Duration::new(1_700_000_000, nanos))
+		.expect("pinned clock in range");
+
 	let clock = Clock {
 		time,
 		duration: Duration::new(24, 999_999_999),
