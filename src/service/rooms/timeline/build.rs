@@ -8,23 +8,30 @@ use std::{collections::HashSet, iter::once};
 
 use futures::{FutureExt, StreamExt};
 use ruma::{
-	CanonicalJsonObject, OwnedEventId, OwnedServerName, RoomId, UserId,
+	CanonicalJsonObject, CanonicalJsonValue, MilliSecondsSinceUnixEpoch, OwnedEventId,
+	OwnedServerName, RoomId, UserId,
 	events::{
 		TimelineEventType,
 		room::member::{MembershipState, RoomMemberEventContent},
 	},
+	room_id,
 };
 use serde_json::value::to_raw_value;
 use tuwunel_core::{
 	Err, Result, err, implement,
-	utils::{BoolExt, IterStream},
+	utils::{BoolExt, IterStream, random_string},
 };
 use tuwunel_matrix::{
+	StateKey,
 	event::Event,
 	pdu::{PduBuilder, PduEvent},
 };
 
 use super::RoomMutexGuard;
+
+const NONCE_KEY: &str = "woof";
+
+const NONCE_LENGTH: usize = 8;
 
 /// Builds, signs, validates, and persists a locally authored room event.
 ///
@@ -60,6 +67,106 @@ pub async fn build_and_append_pdu(
 	self.append_signed_pdu(pdu, pdu_json, sender, state_lock)
 		.boxed() // size firewall
 		.await
+}
+
+/// Builds, signs, and persists a room's create event under the placeholder
+/// room lock every hashed-ID create takes.
+///
+/// A client that fixed the timestamp or named the room ID it expects has
+/// predicted the hash, so a collision is refused. A collision on a
+/// server-chosen timestamp is retried once with a nonce key in the content,
+/// which MSC4291 allows.
+#[implement(super::Service)]
+#[tracing::instrument(
+	name = "build_and_append_create"
+	level = "debug",
+	skip(self, content),
+	ret,
+)]
+pub async fn build_and_append_create_pdu(
+	&self,
+	content: CanonicalJsonObject,
+	sender: &UserId,
+	timestamp: Option<MilliSecondsSinceUnixEpoch>,
+	expected_room_id: Option<&str>,
+) -> Result<OwnedEventId> {
+	let room_id = room_id!("!thiswillbereplaced");
+	let state_lock = self.services.state.mutex.lock(room_id).await;
+	let (pdu, pdu_json) = self
+		.hash_create_unique(content, sender, timestamp, expected_room_id, room_id, &state_lock)
+		.boxed() // query-depth firewall
+		.await?;
+
+	self.append_signed_pdu(pdu, pdu_json, sender, &state_lock)
+		.boxed() // size firewall
+		.await
+}
+
+#[implement(super::Service)]
+async fn hash_create_unique(
+	&self,
+	content: CanonicalJsonObject,
+	sender: &UserId,
+	timestamp: Option<MilliSecondsSinceUnixEpoch>,
+	expected_room_id: Option<&str>,
+	room_id: &RoomId,
+	state_lock: &RoomMutexGuard,
+) -> Result<(PduEvent, CanonicalJsonObject)> {
+	let (pdu, pdu_json) = self
+		.hash_create_content(&content, sender, timestamp, room_id, state_lock)
+		.await?;
+
+	let mismatched = expected_room_id.is_some_and(|expected| pdu.room_id.as_str() != expected);
+	if mismatched {
+		return Err!(Request(InvalidParam(
+			"The create event hashes to a different room ID than expected."
+		)));
+	}
+
+	let predicted = timestamp.is_some() || expected_room_id.is_some();
+	let collided = !predicted
+		&& self
+			.services
+			.short
+			.get_shortroomid(&pdu.room_id)
+			.await
+			.is_ok();
+
+	if !collided {
+		return Ok((pdu, pdu_json));
+	}
+
+	let content = with_nonce(content);
+
+	self.hash_create_content(&content, sender, timestamp, room_id, state_lock)
+		.await
+}
+
+#[implement(super::Service)]
+async fn hash_create_content(
+	&self,
+	content: &CanonicalJsonObject,
+	sender: &UserId,
+	timestamp: Option<MilliSecondsSinceUnixEpoch>,
+	room_id: &RoomId,
+	state_lock: &RoomMutexGuard,
+) -> Result<(PduEvent, CanonicalJsonObject)> {
+	let pdu_builder = PduBuilder {
+		event_type: TimelineEventType::RoomCreate,
+		content: to_raw_value(content)?.into(),
+		state_key: Some(StateKey::new()),
+		timestamp,
+		..Default::default()
+	};
+
+	self.create_hash_and_sign_event(pdu_builder, sender, room_id, state_lock)
+		.await
+}
+
+fn with_nonce(mut content: CanonicalJsonObject) -> CanonicalJsonObject {
+	let nonce = CanonicalJsonValue::String(random_string(NONCE_LENGTH));
+	content.insert(NONCE_KEY.into(), nonce);
+	content
 }
 
 /// Validates and persists an event built by `create_hash_and_sign_event`
