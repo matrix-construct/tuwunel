@@ -78,15 +78,6 @@ async fn append_signed_pdu(
 	sender: &UserId,
 	state_lock: &RoomMutexGuard,
 ) -> Result<OwnedEventId> {
-	//TODO: Use proper room version here
-	if *pdu.kind() == TimelineEventType::RoomCreate && pdu.room_id().server_name().is_none() {
-		let _short_id = self
-			.services
-			.short
-			.get_or_create_shortroomid(pdu.room_id())
-			.await;
-	}
-
 	if self
 		.services
 		.admin
@@ -111,6 +102,11 @@ async fn append_signed_pdu(
 		.sign_outgoing_pdu(&mut pdu_json, &pdu)
 		.boxed() // size firewall
 		.await?;
+
+	//TODO: Use proper room version here
+	if *pdu.kind() == TimelineEventType::RoomCreate && pdu.room_id().server_name().is_none() {
+		self.reserve_room_id(pdu.room_id()).await?;
+	}
 
 	// Store the event snapshot first; append_pdu installs current state after
 	// the timeline row exists and before publishing its stream count.
@@ -158,6 +154,22 @@ async fn append_signed_pdu(
 		.await?;
 
 	Ok(pdu.event_id().to_owned())
+}
+
+/// Allocates the short ID of a room named by its create event's hash.
+///
+/// A short ID already present belongs to an earlier create event with the
+/// same hash, so the new room is refused rather than merged into it.
+#[implement(super::Service)]
+async fn reserve_room_id(&self, room_id: &RoomId) -> Result {
+	let short = &self.services.short;
+	if short.get_shortroomid(room_id).await.is_ok() {
+		return Err!(Request(RoomInUse("A room with this create event already exists.")));
+	}
+
+	short.get_or_create_shortroomid(room_id).await;
+
+	Ok(())
 }
 
 #[implement(super::Service)]
