@@ -6,7 +6,7 @@ authors = [
 description = "Tuwunel, a high performance successor to Conduit and Conduwuit"
 language = "en"
 src = "docs"
-title = "Tuwunel One"
+title = "Tuwunel Two"
 text-direction = "ltr"
 
 [build]
