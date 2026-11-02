@@ -16,7 +16,7 @@ use ruma::{
 };
 use tuwunel_core::{
 	Error, Result, debug_warn, is_equal_to,
-	utils::{ReadyExt, result::LogErr, stream::BroadbandExt, time::now_millis},
+	utils::{result::LogErr, stream::BroadbandExt, time::now_millis},
 };
 use tuwunel_matrix::{
 	Event, PduCount,
@@ -148,17 +148,15 @@ async fn share_encrypted_room(
 	services: &Services,
 	sender_user: &UserId,
 	user_id: &UserId,
-	ignore_room: Option<&RoomId>,
 ) -> bool {
 	services
 		.state_cache
 		.get_shared_rooms(sender_user, user_id)
-		.ready_filter(|&room_id| Some(room_id) != ignore_room)
 		.map(ToOwned::to_owned)
-		.broad_any(async |other_room_id| {
+		.broad_any(async |room_id| {
 			services
 				.state_accessor
-				.is_encrypted_room(&other_room_id)
+				.is_encrypted_room(&room_id)
 				.await
 		})
 		.await

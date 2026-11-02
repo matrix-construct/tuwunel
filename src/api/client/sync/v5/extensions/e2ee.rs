@@ -61,7 +61,7 @@ pub(super) async fn collect(
 		.into_iter()
 		.stream()
 		.filter_map(async |user_id| {
-			share_encrypted_room(services, sender_user, &user_id, None)
+			share_encrypted_room(services, sender_user, &user_id)
 				.await
 				.is_false()
 				.then_some(user_id)
@@ -214,15 +214,11 @@ async fn collect_room(
 			Some((content.membership, user_id))
 		})
 		.chain(joined_members_burst.stream())
-		.fold(lists, async |(mut changed, mut left), (membership, user_id)| {
+		.ready_fold(lists, |(mut changed, mut left), (membership, user_id)| {
 			use MembershipState::*;
 
-			let should_add = async |user_id| {
-				!share_encrypted_room(services, sender_user, user_id, Some(room_id)).await
-			};
-
 			match membership {
-				| Join if should_add(&user_id).await => changed.insert(user_id),
+				| Join => changed.insert(user_id),
 				| Leave => left.insert(user_id),
 				| _ => false,
 			};

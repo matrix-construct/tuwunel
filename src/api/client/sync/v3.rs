@@ -744,9 +744,9 @@ fn collect_device_list_left<'a>(
 		.into_iter()
 		.stream()
 		.broad_filter_map(async |user_id: OwnedUserId| {
-			share_encrypted_room(services, sender_user, &user_id, None)
+			share_encrypted_room(services, sender_user, &user_id)
 				.await
-				.eq(&false)
+				.is_false()
 				.then_some(user_id)
 		})
 		.collect()
@@ -1451,7 +1451,6 @@ async fn await_join_aggregates(
 
 	let device_list_updates = gather_device_list_updates(
 		services,
-		sender_user,
 		room_id,
 		timeline_membership_changes(&timeline_pdus, initial),
 		state_events,
@@ -2087,10 +2086,8 @@ fn extract_membership(event: &PduEvent) -> Option<(MembershipState, OwnedUserId)
 	Some((content.membership, user_id))
 }
 
-#[expect(clippy::too_many_arguments)]
 async fn gather_device_list_updates(
 	services: &Services,
-	sender_user: &UserId,
 	room_id: &RoomId,
 	timeline_membership_changes: Vec<(MembershipState, OwnedUserId)>,
 	state_events: &[PduEvent],
@@ -2103,34 +2100,28 @@ async fn gather_device_list_updates(
 		.room_keys_changed(room_id, since, Some(next_batch))
 		.map(|(user_id, _)| user_id)
 		.map(ToOwned::to_owned)
-		.collect::<Vec<_>>();
+		.collect()
+		.await;
 
-	let (mut dlu, leu) = state_events
+	let lists = (keys_changed, HashSet::new());
+
+	state_events
 		.iter()
-		.stream()
-		.ready_filter(|_| !initial)
-		.ready_filter(|state_event| *state_event.event_type() == RoomMember)
-		.ready_filter_map(extract_membership)
-		.chain(timeline_membership_changes.into_iter().stream())
-		.fold_default(async |(mut dlu, mut leu): pair_of!(HashSet<_>), (membership, user_id)| {
+		.filter(|_| !initial)
+		.filter(|state_event| *state_event.event_type() == RoomMember)
+		.filter_map(extract_membership)
+		.chain(timeline_membership_changes)
+		.fold(lists, |(mut dlu, mut leu): pair_of!(HashSet<_>), (membership, user_id)| {
 			use MembershipState::*;
 
-			let requires_update = async |user_id| {
-				!share_encrypted_room(services, sender_user, user_id, Some(room_id)).await
-			};
-
 			match membership {
-				| Join if requires_update(&user_id).await => dlu.insert(user_id),
+				| Join => dlu.insert(user_id),
 				| Leave => leu.insert(user_id),
 				| _ => false,
 			};
 
 			(dlu, leu)
 		})
-		.await;
-
-	dlu.extend(keys_changed.await);
-	(dlu, leu)
 }
 
 async fn assemble_state_events(
