@@ -39,7 +39,7 @@ use serde_json::{
 	value::{RawValue as RawJsonValue, to_raw_value},
 };
 use tuwunel_core::{
-	Err, Result, debug_info, debug_warn, err, info,
+	Err, Error, Result, debug_info, debug_warn, err, info,
 	utils::{BoolExt, IterStream, ReadyExt, option::OptionExt, result::FlatOk},
 	warn,
 };
@@ -107,8 +107,11 @@ pub(crate) async fn create_room_route(
 		| RoomIdFormatVersion::V2 =>
 			create_create_event(&services, &body, &preset, room_version, &version_rules)
 				.await
-				.map_err(|e| {
-					err!(Request(InvalidParam("Error while creating m.room.create event: {e}")))
+				.map_err(|e| match e {
+					| Error::Request(..) | Error::BadRequest(..) => e,
+					| e => err!(Request(InvalidParam(
+						"Error while creating m.room.create event: {e}"
+					))),
 				})?,
 	};
 
@@ -684,32 +687,42 @@ async fn create_create_event(
 		}
 	}
 
-	// 1. The room create event, using a placeholder room_id
-	let room_id = ruma::room_id!("!thiswillbereplaced").to_owned();
-	let state_lock = services.state.mutex.lock(&room_id).await;
+	let expected_room_id = body
+		.room_id
+		.as_deref()
+		.map(expected_room_id_check)
+		.transpose()?;
+
+	// 1. The room create event, hashed under the placeholder room ID
 	let create_event_id = services
 		.timeline
-		.build_and_append_pdu(
-			PduBuilder {
-				event_type: TimelineEventType::RoomCreate,
-				content: to_raw_value(&create_content)?.into(),
-				state_key: Some(StateKey::new()),
-				..Default::default()
-			},
+		.build_and_append_create_pdu(
+			create_content,
 			body.sender_user(),
-			&room_id,
-			&state_lock,
+			body.origin_server_ts,
+			expected_room_id,
 		)
 		.boxed()
 		.await?;
-
-	drop(state_lock);
 
 	// The real room_id is now the event_id.
 	let room_id = OwnedRoomId::from_parts('!', create_event_id.localpart(), None)?;
 	let state_lock = services.state.mutex.lock(&room_id).await;
 
 	Ok((room_id, state_lock))
+}
+
+/// Admits only a hash-form room ID as the one a create event is expected to
+/// produce, since a custom localpart cannot be honoured in these versions.
+fn expected_room_id_check(expected: &str) -> Result<&str> {
+	let hashed = expected.starts_with('!') && !expected.contains(':');
+
+	hashed.then_some(expected).ok_or_else(|| {
+		err!(Request(InvalidParam(
+			"This room version derives the room ID from the create event; only that ID can be \
+			 expected."
+		)))
+	})
 }
 
 async fn create_create_event_legacy(
