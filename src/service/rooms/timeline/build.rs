@@ -8,7 +8,7 @@ use std::{collections::HashSet, iter::once};
 
 use futures::{FutureExt, StreamExt};
 use ruma::{
-	OwnedEventId, OwnedServerName, RoomId, UserId,
+	CanonicalJsonObject, OwnedEventId, OwnedServerName, RoomId, UserId,
 	events::{
 		TimelineEventType,
 		room::member::{MembershipState, RoomMemberEventContent},
@@ -19,7 +19,10 @@ use tuwunel_core::{
 	Err, Result, err, implement,
 	utils::{BoolExt, IterStream},
 };
-use tuwunel_matrix::{event::Event, pdu::PduBuilder};
+use tuwunel_matrix::{
+	event::Event,
+	pdu::{PduBuilder, PduEvent},
+};
 
 use super::RoomMutexGuard;
 
@@ -49,11 +52,32 @@ pub async fn build_and_append_pdu(
 			.await?;
 	}
 
-	let (pdu, mut pdu_json) = self
+	let (pdu, pdu_json) = self
 		.create_hash_and_sign_event(pdu_builder, sender, room_id, state_lock)
 		.boxed() // query-depth firewall
 		.await?;
 
+	self.append_signed_pdu(pdu, pdu_json, sender, state_lock)
+		.boxed() // size firewall
+		.await
+}
+
+/// Validates and persists an event built by `create_hash_and_sign_event`
+/// under the state guard it was built under.
+#[implement(super::Service)]
+#[tracing::instrument(
+	name = "append_signed"
+	level = "debug",
+	skip(self, pdu_json, state_lock),
+	ret,
+)]
+async fn append_signed_pdu(
+	&self,
+	pdu: PduEvent,
+	mut pdu_json: CanonicalJsonObject, // sign_outgoing_pdu signs in place
+	sender: &UserId,
+	state_lock: &RoomMutexGuard,
+) -> Result<OwnedEventId> {
 	//TODO: Use proper room version here
 	if *pdu.kind() == TimelineEventType::RoomCreate && pdu.room_id().server_name().is_none() {
 		let _short_id = self
