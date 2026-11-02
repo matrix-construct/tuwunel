@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 use tuwunel_core::{
-	Err, Result, async_noinline, err, implement, info,
+	Err, Result, async_noinline, debug_warn, err, implement, info,
 	result::NotFound,
 	smallvec::SmallVec,
 	utils::{TryReadyExt, u64_from_bytes},
@@ -449,7 +449,7 @@ async fn attempt(
 	if let Some(outcome) = recorded {
 		db.engine.sync()?;
 		if outcome.status == Status::Unfinished {
-			warn!(
+			debug_warn!(
 				?outcome.counts,
 				"Injectivity repair left unrepaired rows on an earlier start."
 			);
@@ -464,7 +464,7 @@ async fn attempt(
 	db.engine.sync()?;
 	self.record(bytes)?;
 	if outcome.status == Status::Unfinished {
-		warn!(
+		debug_warn!(
 			?outcome.counts,
 			?outcome.samples,
 			truncated = outcome.truncated,
