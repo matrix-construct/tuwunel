@@ -5,15 +5,10 @@ use ruma::{
 	CanonicalJsonObject, CanonicalJsonValue, EventId, OwnedEventId, OwnedUserId, RoomId, UInt,
 	UserId,
 	api::{Direction, client::threads::get_threads::v1::IncludeThreads},
-	events::{
-		AnySyncMessageLikeEvent, TimelineEventType, relation::RelationType,
-		room::encrypted::Relation,
-	},
-	serde::Raw,
+	events::{TimelineEventType, relation::RelationType, room::encrypted::Relation},
 	uint,
 };
 use serde::Deserialize;
-use serde_json::json;
 use tuwunel_core::{
 	Err, Error, Result, err, error, implement,
 	itertools::{
@@ -32,8 +27,14 @@ use tuwunel_matrix::{
 	pdu::{PduCount, PduEvent, PduId, RawPduId},
 };
 
+pub(crate) use self::summary::thread_bundle_mut;
+use self::summary::{
+	counts_replies, omit_thread_latest, set_thread_count, set_thread_latest, thread_bundle,
+	thread_count, thread_latest, thread_reply_json, update_thread_bundle,
+};
 use crate::rooms::{pdu_metadata::RelationQuery, timeline::ExtractRelatesTo};
 
+mod summary;
 #[cfg(test)]
 mod tests;
 
@@ -51,59 +52,6 @@ struct ExtractThreadRelation {
 struct ThreadRelation {
 	rel_type: RelationType,
 	event_id: OwnedEventId,
-}
-
-fn canonical_object_field<'a>(
-	object: &'a mut CanonicalJsonObject,
-	field: &str,
-) -> &'a mut CanonicalJsonObject {
-	if !matches!(object.get(field), Some(CanonicalJsonValue::Object(_))) {
-		object.insert(field.into(), CanonicalJsonValue::Object(BTreeMap::new()));
-	}
-
-	let Some(CanonicalJsonValue::Object(value)) = object.get_mut(field) else {
-		unreachable!("canonical object field was initialized as an object");
-	};
-
-	value
-}
-
-/// Persist a latest event whose embedded sender and event ID come from the
-/// same validated event used to index the thread activity.
-fn update_thread_bundle<E>(unsigned: &mut CanonicalJsonObject, event: &E)
-where
-	E: Event,
-{
-	let latest_event = event.to_sync_message_like_without_unsigned();
-	update_thread_bundle_raw(unsigned, &latest_event);
-}
-
-fn update_thread_bundle_raw(
-	unsigned: &mut CanonicalJsonObject,
-	latest_event: &Raw<AnySyncMessageLikeEvent>,
-) {
-	let relations = canonical_object_field(unsigned, "m.relations");
-	let thread = canonical_object_field(relations, "m.thread");
-	let count = thread
-		.get("count")
-		.cloned()
-		.and_then(|count| serde_json::from_value::<UInt>(count.into()).ok());
-
-	let count = count.map_or_else(|| uint!(1), |count| count.saturating_add(uint!(1)));
-	let latest_event = serde_json::from_str(latest_event.json().get())
-		.expect("thread latest event should be canonical JSON");
-
-	thread.insert("latest_event".into(), latest_event);
-	thread.insert(
-		"count".into(),
-		json!(count)
-			.try_into()
-			.expect("thread count is canonical JSON"),
-	);
-
-	if !matches!(thread.get("current_user_participated"), Some(CanonicalJsonValue::Bool(_))) {
-		thread.insert("current_user_participated".into(), CanonicalJsonValue::Bool(true));
-	}
 }
 
 pub struct Service {
@@ -826,110 +774,6 @@ fn unreadable_only(error: Error) -> Result {
 		.is_transient_io()
 		.then_some(error)
 		.map_or(Ok(()), Err)
-}
-
-/// Whether a root's `m.thread` summary still counts a reply.
-///
-/// A summary recounted to zero lists no thread; one without a count is taken to
-/// count a reply.
-fn counts_replies(root: &CanonicalJsonObject) -> bool {
-	thread_bundle(root).is_some() && thread_count(root) != Some(uint!(0))
-}
-
-fn thread_count(root: &CanonicalJsonObject) -> Option<UInt> {
-	UInt::try_from(i64::from(thread_bundle(root)?.get("count")?.as_integer()?)).ok()
-}
-
-fn thread_bundle(root: &CanonicalJsonObject) -> Option<&CanonicalJsonObject> {
-	["unsigned", "m.relations", "m.thread"]
-		.into_iter()
-		.try_fold(root, |object, field| object.get(field)?.as_object())
-}
-
-fn thread_latest(root: &CanonicalJsonObject) -> Option<&str> {
-	thread_bundle(root)?
-		.get("latest_event")?
-		.as_object()?
-		.get("event_id")?
-		.as_str()
-}
-
-fn set_thread_count(mut root: CanonicalJsonObject, count: Option<UInt>) -> CanonicalJsonObject {
-	if let Some((thread, count)) = thread_bundle_mut(&mut root).zip(count) {
-		thread.insert("count".into(), CanonicalJsonValue::Integer(count.into()));
-	}
-
-	root
-}
-
-/// Borrows the stored thread bundle for a summary rewrite.
-///
-/// Missing or non-object components leave the root unchanged.
-pub(crate) fn thread_bundle_mut(
-	root: &mut CanonicalJsonObject,
-) -> Option<&mut CanonicalJsonObject> {
-	["unsigned", "m.relations", "m.thread"]
-		.into_iter()
-		.try_fold(root, |object, field| object.get_mut(field)?.as_object_mut())
-}
-
-fn set_thread_latest(
-	mut root: CanonicalJsonObject,
-	latest: Option<CanonicalJsonValue>,
-) -> CanonicalJsonObject {
-	let Some(latest) = latest else {
-		return remove_thread_bundle(root);
-	};
-
-	if let Some(thread) = thread_bundle_mut(&mut root) {
-		thread.insert("latest_event".into(), latest);
-	}
-
-	root
-}
-
-fn omit_thread_latest(mut root: CanonicalJsonObject) -> CanonicalJsonObject {
-	if thread_count(&root).is_none_or(|count| count == uint!(0)) {
-		return remove_thread_bundle(root);
-	}
-
-	if let Some(thread) = thread_bundle_mut(&mut root) {
-		thread.remove("latest_event");
-	}
-
-	root
-}
-
-fn remove_thread_bundle(mut root: CanonicalJsonObject) -> CanonicalJsonObject {
-	let Some(unsigned) = root
-		.get_mut("unsigned")
-		.and_then(CanonicalJsonValue::as_object_mut)
-	else {
-		return root;
-	};
-
-	let Some(relations) = unsigned
-		.get_mut("m.relations")
-		.and_then(CanonicalJsonValue::as_object_mut)
-	else {
-		return root;
-	};
-
-	relations.remove("m.thread");
-	if relations.is_empty() {
-		unsigned.remove("m.relations");
-	}
-
-	root
-}
-
-fn thread_reply_json(pdu: &Pdu) -> Option<CanonicalJsonValue> {
-	serde_json::from_str(
-		pdu.to_sync_message_like_without_unsigned()
-			.json()
-			.get(),
-	)
-	.ok()
 }
 
 fn is_thread_reply(pdu: &impl Event) -> bool {
