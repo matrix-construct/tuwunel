@@ -35,7 +35,7 @@ use tuwunel_core::{
 	debug::INFO_SPAN_LEVEL,
 	debug_error, err,
 	error::{inspect_debug_log, inspect_log},
-	extract_variant, is_equal_to, is_false, is_true, pair_of, ref_at,
+	extract_variant, is_equal_to, is_false, pair_of, ref_at,
 	result::FlatOk,
 	smallvec::SmallVec,
 	trace,
@@ -1139,7 +1139,6 @@ async fn load_joined_room(
 		initial,
 		timeline_changed,
 		encrypted_room,
-		since_shortstatehash,
 	)
 	.boxed()
 	.await;
@@ -1902,7 +1901,6 @@ async fn gather_user_metadata(
 	initial: bool,
 	timeline_changed: bool,
 	encrypted_room: Option<bool>,
-	since_shortstatehash: Option<ShortStateHash>,
 ) -> UserMetadata {
 	let lazy_load_options =
 		[&filter.room.state.lazy_load_options, &filter.room.timeline.lazy_load_options];
@@ -1943,12 +1941,6 @@ async fn gather_user_metadata(
 	let joined_since_last_sync =
 		timeline_changed.then_async(|| joined_since(services, room_id, sender_user, since));
 
-	let since_encryption = since_shortstatehash.map_async(|shortstatehash| {
-		services
-			.state_accessor
-			.state_get(shortstatehash, &StateEventType::RoomEncryption, "")
-	});
-
 	// Busy rounds need these cursors too, to authorize an explicit zero count.
 	let last_notification_read = services
 		.pusher
@@ -1965,17 +1957,14 @@ async fn gather_user_metadata(
 
 	let (
 		(last_privateread_update, last_notification_read, thread_last_reads),
-		(joined_since_last_sync, since_encryption),
+		joined_since_last_sync,
 		witness,
 	) = join3(
 		join3(last_privateread_update, last_notification_read, thread_last_reads),
-		join(joined_since_last_sync, since_encryption),
+		joined_since_last_sync,
 		witness,
 	)
 	.await;
-
-	let _encrypted_since_last_sync =
-		!initial && encrypted_room.is_some_and(is_true!()) && since_encryption.is_none();
 
 	UserMetadata {
 		witness,
