@@ -11,6 +11,11 @@ use tuwunel_core::{
 };
 use tuwunel_service::{Services, users::Register};
 
+use self::sync::joined_room;
+
+#[path = "client/sync.rs"]
+mod sync;
+
 const STABLE_REQUEST: &str = "use_state_after";
 const STABLE_RESPONSE: &str = "state_after";
 const UNSTABLE_REQUEST: &str = "org.matrix.msc4222.use_state_after";
@@ -358,10 +363,4 @@ fn assert_empty_requested_field(response: &Value, room_id: &OwnedRoomId, field: 
 	}
 
 	Ok(())
-}
-
-fn joined_room<'a>(response: &'a Value, room_id: &OwnedRoomId) -> Result<&'a Value> {
-	response["rooms"]["join"]
-		.get(room_id.as_str())
-		.ok_or_else(|| err!("sync response omitted joined room {room_id}"))
 }

@@ -49,7 +49,7 @@ use self::{
 	extensions::{apply_profiles, apply_ranges, handle as handle_extensions},
 	range::collect as collect_ranges,
 };
-use super::share_encrypted_room;
+use super::{joined_since, share_encrypted_room};
 use crate::{ClientIp, Ruma, utils::poll_deadline};
 
 #[derive(Copy, Clone)]

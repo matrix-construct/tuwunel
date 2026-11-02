@@ -162,6 +162,26 @@ async fn share_encrypted_room(
 		.await
 }
 
+/// Whether a user's join to a room is fresh since a sync token.
+///
+/// The joined count moves on every join-membership event, a profile change
+/// included, so a rename after the token also reads as fresh. An unreadable
+/// count reads as unmoved.
+#[tracing::instrument(level = "trace", skip(services))]
+async fn joined_since(
+	services: &Services,
+	room_id: &RoomId,
+	user_id: &UserId,
+	since: u64,
+) -> bool {
+	services
+		.state_cache
+		.get_joined_count(room_id, user_id)
+		.await
+		.inspect_err(|error| debug_warn!(%room_id, %user_id, %error, "joined count unreadable"))
+		.is_ok_and(|recorded| recorded > since)
+}
+
 /// MSC4155: whether a stored invite may be served to the invitee.
 ///
 /// The verdict is the recipient's own, judged against the sender of the

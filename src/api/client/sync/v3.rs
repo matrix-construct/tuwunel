@@ -67,8 +67,8 @@ use tuwunel_service::{
 };
 
 use super::{
-	invite_permitted, load_timeline, profiles::collect as collect_profiles, share_encrypted_room,
-	stand_in_leave, strip_prev_state, timeline_prev_batch,
+	invite_permitted, joined_since, load_timeline, profiles::collect as collect_profiles,
+	share_encrypted_room, stand_in_leave, strip_prev_state, timeline_prev_batch,
 };
 use crate::{
 	ClientIp, Ruma, ignored_filter, is_empty_account_data_event,
@@ -1940,12 +1940,8 @@ async fn gather_user_metadata(
 			.witness_retain(witness, lazy_loading_context)
 	});
 
-	let sender_joined_count = timeline_changed.then_async(|| {
-		services
-			.state_cache
-			.get_joined_count(room_id, sender_user)
-			.unwrap_or(0)
-	});
+	let joined_since_last_sync =
+		timeline_changed.then_async(|| joined_since(services, room_id, sender_user, since));
 
 	let since_encryption = since_shortstatehash.map_async(|shortstatehash| {
 		services
@@ -1969,11 +1965,11 @@ async fn gather_user_metadata(
 
 	let (
 		(last_privateread_update, last_notification_read, thread_last_reads),
-		(sender_joined_count, since_encryption),
+		(joined_since_last_sync, since_encryption),
 		witness,
 	) = join3(
 		join3(last_privateread_update, last_notification_read, thread_last_reads),
-		join(sender_joined_count, since_encryption),
+		join(joined_since_last_sync, since_encryption),
 		witness,
 	)
 	.await;
@@ -1981,14 +1977,12 @@ async fn gather_user_metadata(
 	let _encrypted_since_last_sync =
 		!initial && encrypted_room.is_some_and(is_true!()) && since_encryption.is_none();
 
-	let joined_since_last_sync = sender_joined_count.unwrap_or(0) > since;
-
 	UserMetadata {
 		witness,
 		last_notification_read,
 		thread_last_reads,
 		last_privateread_update,
-		joined_since_last_sync,
+		joined_since_last_sync: joined_since_last_sync.unwrap_or_default(),
 	}
 }
 

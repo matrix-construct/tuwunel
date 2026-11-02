@@ -24,7 +24,7 @@ use tuwunel_core::{
 use tuwunel_matrix::{Event, pdu::PduCount};
 use tuwunel_service::sync::Connection;
 
-use super::{SyncInfo, share_encrypted_room};
+use super::{SyncInfo, joined_since, share_encrypted_room};
 
 #[tracing::instrument(name = "e2ee", level = "trace", skip_all)]
 pub(super) async fn collect(
@@ -163,17 +163,14 @@ async fn collect_room(
 		return Ok(lists);
 	}
 
-	let joined_since_last_sync = services
-		.state_cache
-		.get_joined_count(room_id, sender_user)
-		.map_ok_or(false, |count| count > conn.globalsince);
+	let joined_since_last_sync = joined_since(services, room_id, sender_user, conn.globalsince);
 
 	// A plaintext room bursts only on the sender's own join.
 	let newly_encrypted = current_encrypted
 		.then_async(|| encrypted_at(since_shortstatehash).is_false())
 		.unwrap_or_default();
 
-	// The keyed membership read leads; the state lookup trails it.
+	// The join check leads; the state lookup trails.
 	let members_burst = joined_since_last_sync
 		.is_false()
 		.and(newly_encrypted.is_false())

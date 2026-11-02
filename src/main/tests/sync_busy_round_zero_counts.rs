@@ -12,9 +12,15 @@ use tuwunel_core::{
 };
 use tuwunel_service::Services;
 
-use self::client::{Client, field, poll_until, register, wait_until_ready};
+use self::{
+	client::{Client, field, poll_until, register, wait_until_ready},
+	sync::joined_room,
+};
 
 mod client;
+
+#[path = "client/sync.rs"]
+mod sync;
 
 #[expect(dead_code)] // Only the self-membership action is used from the add-on.
 #[path = "client/membership.rs"]
@@ -260,10 +266,4 @@ fn carries_reaction(response: &Value, room_id: &RoomId) -> Result<bool> {
 		.any(|event_type| event_type == "m.reaction");
 
 	Ok(reacted)
-}
-
-fn joined_room<'a>(response: &'a Value, room_id: &RoomId) -> Result<&'a Value> {
-	response["rooms"]["join"]
-		.get(room_id.as_str())
-		.ok_or_else(|| err!("sync response omitted joined room {room_id}"))
 }

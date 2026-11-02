@@ -26,7 +26,7 @@ use self::{
 	profiles::collect as collect_profiles,
 	receipts::collect_ranges as collect_receipt_ranges,
 };
-use super::{SyncInfo, Window, WindowRoom, range::Results, share_encrypted_room};
+use super::{SyncInfo, Window, WindowRoom, joined_since, range::Results, share_encrypted_room};
 
 pub(super) struct Collected {
 	response: Extensions,

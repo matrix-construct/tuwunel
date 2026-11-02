@@ -6,15 +6,27 @@ use futures::future::join;
 use serde_json::{Value, json};
 use tuwunel::{Args, Runtime, Server, async_run, async_start, async_stop};
 use tuwunel_core::{
-	Result, err, implement,
+	Result, implement,
 	ruma::{OwnedEventId, RoomId, UserId},
 	utils::BoolExt,
 };
 use tuwunel_service::{Services, users::DeviceListChange};
 
-use self::client::{Client, field, register, wait_until_ready};
+use self::{
+	account::account,
+	client::{Client, field, wait_until_ready},
+	device_lists::device_list_changed,
+	require::require,
+};
 
 mod client;
+
+#[path = "client/account.rs"]
+mod account;
+
+#[expect(dead_code)] // Only the single-object read is used from the device-list add-on.
+#[path = "client/device_lists.rs"]
+mod device_lists;
 
 #[expect(dead_code)] // Only the event PUT is used from the event add-on.
 #[path = "client/event.rs"]
@@ -26,6 +38,9 @@ mod membership;
 
 #[path = "client/put.rs"]
 mod put;
+
+#[path = "client/require.rs"]
+mod require;
 
 const READER_TOKEN: &str = "sync-lazy-members-device-lists-reader-token";
 const SENDER_TOKEN: &str = "sync-lazy-members-device-lists-sender-token";
@@ -81,11 +96,9 @@ fn lazy_members_are_not_device_list_changes() -> Result {
 async fn exercise(services: &Services, base: &str) -> Result {
 	wait_until_ready(services, base).await?;
 
-	register(services, "lazymembersreader", READER_TOKEN).await?;
-	let sender_id = register(services, "lazymemberssender", SENDER_TOKEN).await?;
+	let (_, reader) = account(services, base, "lazymembersreader", READER_TOKEN).await?;
+	let (sender_id, sender) = account(services, base, "lazymemberssender", SENDER_TOKEN).await?;
 
-	let reader = Client { services, base, token: READER_TOKEN };
-	let sender = Client { services, base, token: SENDER_TOKEN };
 	let room = sender
 		.create_room(&json!({ "preset": "public_chat" }))
 		.await?;
@@ -102,13 +115,14 @@ async fn exercise(services: &Services, base: &str) -> Result {
 
 	let spoken = reader.sync(Some(since)).await?;
 	let since = next_batch(&spoken)?;
+	let loaded = lazily_loaded(&spoken, &room, &sender_id);
+	let listed = device_list_changed(&spoken["device_lists"], &sender_id);
 
-	lazily_loaded(&spoken, &room, &sender_id)
-		.ok_or_else(|| err!("the spoken round did not lazily load the sender's membership"))?;
-
-	device_list_changed(&spoken, &sender_id)
-		.is_false()
-		.ok_or_else(|| err!("the spoken round reported the lazily loaded sender as changed"))?;
+	require(loaded, "the spoken round did not lazily load the sender's membership")?;
+	require(
+		listed.is_false(),
+		"the spoken round reported the lazily loaded sender as changed",
+	)?;
 
 	services
 		.users
@@ -116,11 +130,9 @@ async fn exercise(services: &Services, base: &str) -> Result {
 		.await;
 
 	let rekeyed = reader.sync(Some(since)).await?;
+	let listed = device_list_changed(&rekeyed["device_lists"], &sender_id);
 
-	device_list_changed(&rekeyed, &sender_id)
-		.ok_or_else(|| err!("the rekeyed round withheld the sender's device-list change"))?;
-
-	Ok(())
+	require(listed, "the rekeyed round withheld the sender's device-list change")
 }
 
 /// One non-blocking lazily loaded sync, optionally resuming from a token.
@@ -171,13 +183,4 @@ fn lazily_loaded(response: &Value, room_id: &RoomId, user_id: &UserId) -> bool {
 			event["type"].as_str() == Some("m.room.member")
 				&& event["state_key"].as_str() == Some(user_id.as_str())
 		})
-}
-
-fn device_list_changed(response: &Value, user_id: &UserId) -> bool {
-	response["device_lists"]["changed"]
-		.as_array()
-		.into_iter()
-		.flatten()
-		.filter_map(Value::as_str)
-		.any(|user| user == user_id.as_str())
 }

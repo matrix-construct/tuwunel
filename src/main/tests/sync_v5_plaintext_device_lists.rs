@@ -5,20 +5,35 @@ use std::net::TcpListener;
 use futures::future::join;
 use serde_json::{Value, json};
 use tuwunel::{Args, Runtime, Server, async_run, async_start, async_stop};
-use tuwunel_core::{
-	Result, err, implement,
-	ruma::{RoomId, UserId},
-	utils::BoolExt,
-};
+use tuwunel_core::{Result, ruma::RoomId, utils::BoolExt};
 use tuwunel_service::Services;
 
-use self::client::{Client, field, register, wait_until_ready};
+use self::{
+	account::account,
+	client::{field, wait_until_ready},
+	device_lists::{device_list_changed, e2ee_device_lists},
+	require::require,
+};
 
 mod client;
 mod sliding_sync;
 
+#[path = "client/account.rs"]
+mod account;
+
+#[expect(dead_code)] // The paired read for both surfaces is unused here.
+#[path = "client/device_lists.rs"]
+mod device_lists;
+
+#[expect(dead_code)] // Only the sliding sync request is used from the add-on.
+#[path = "client/e2ee.rs"]
+mod e2ee;
+
 #[path = "client/put.rs"]
 mod put;
+
+#[path = "client/require.rs"]
+mod require;
 
 #[path = "client/state.rs"]
 mod state;
@@ -32,12 +47,6 @@ mod membership;
 
 const READER_TOKEN: &str = "sync-v5-plaintext-device-lists-reader-token";
 const SENDER_TOKEN: &str = "sync-v5-plaintext-device-lists-sender-token";
-
-/// How long a resumed sync polls for, in milliseconds.
-///
-/// Every resumed round follows a change already written, so the poll answers
-/// on its first pass and the budget only bounds a round that found nothing.
-const POLL_TIMEOUT: u64 = 1_500;
 
 /// Drives the sliding-sync e2ee extension over a plaintext room.
 ///
@@ -85,33 +94,35 @@ fn plaintext_state_changes_do_not_burst_device_lists() -> Result {
 async fn exercise(services: &Services, base: &str) -> Result {
 	wait_until_ready(services, base).await?;
 
-	register(services, "plaintextreader", READER_TOKEN).await?;
-	let sender_id = register(services, "plaintextsender", SENDER_TOKEN).await?;
+	let (_, reader) = account(services, base, "plaintextreader", READER_TOKEN).await?;
+	let (sender_id, sender) = account(services, base, "plaintextsender", SENDER_TOKEN).await?;
 
-	let reader = Client { services, base, token: READER_TOKEN };
-	let sender = Client { services, base, token: SENDER_TOKEN };
+	// Asking for the topic proves a round visited the room.
+	let required_state = json!([["m.room.topic", ""]]);
 	let room = sender
 		.create_room(&json!({ "preset": "public_chat" }))
 		.await?;
 
 	reader.act(&room, "join").await?;
 
-	let opening = reader.sync_e2ee(None).await?;
+	let opening = reader.sync_e2ee(None, &required_state).await?;
 	let pos = next_pos(&opening)?;
 
 	sender.set_topic(&room, "still plaintext").await?;
 
-	let retitled = reader.sync_e2ee(Some(pos)).await?;
+	let retitled = reader
+		.sync_e2ee(Some(pos), &required_state)
+		.await?;
+
 	let pos = next_pos(&retitled)?;
+	let delivered = state_delivered(&retitled, &room, "m.room.topic");
+	let listed = device_list_changed(e2ee_device_lists(&retitled), &sender_id);
 
-	state_delivered(&retitled, &room, "m.room.topic")
-		.ok_or_else(|| err!("the retitled round did not carry the topic change"))?;
-
-	device_list_changed(&retitled, &sender_id)
-		.is_false()
-		.ok_or_else(|| {
-			err!("a plaintext state change burst the members into the device lists")
-		})?;
+	require(delivered, "the retitled round did not carry the topic change")?;
+	require(
+		listed.is_false(),
+		"a plaintext state change burst the members into the device lists",
+	)?;
 
 	let encryption = json!({ "algorithm": "m.megolm.v1.aes-sha2" });
 
@@ -119,36 +130,13 @@ async fn exercise(services: &Services, base: &str) -> Result {
 		.put_state(&room, "m.room.encryption", "", &encryption)
 		.await?;
 
-	let encrypted = reader.sync_e2ee(Some(pos)).await?;
+	let encrypted = reader
+		.sync_e2ee(Some(pos), &required_state)
+		.await?;
 
-	device_list_changed(&encrypted, &sender_id).ok_or_else(|| {
-		err!("turning on encryption withheld the members from the device lists")
-	})?;
+	let listed = device_list_changed(e2ee_device_lists(&encrypted), &sender_id);
 
-	Ok(())
-}
-
-/// One sliding sync carrying the e2ee extension, optionally resuming a pos.
-///
-/// The single list keeps the room in the connection's window and asks for the
-/// topic, which proves a round visited the room; the extension is what the
-/// case reads.
-#[implement(Client, params = "<'_>")]
-async fn sync_e2ee(&self, pos: Option<&str>) -> Result<Value> {
-	let body = json!({
-		"lists": {
-			"all": {
-				"ranges": [[0, 9]],
-				"required_state": [["m.room.topic", ""]],
-				"timeline_limit": 0,
-			},
-		},
-		"extensions": {
-			"e2ee": { "enabled": true },
-		},
-	});
-
-	self.sliding_sync(pos, POLL_TIMEOUT, &body).await
+	require(listed, "turning on encryption withheld the members from the device lists")
 }
 
 fn next_pos(response: &Value) -> Result<&str> { field(response, "pos") }
@@ -159,13 +147,4 @@ fn state_delivered(response: &Value, room_id: &RoomId, event_type: &str) -> bool
 		.into_iter()
 		.flatten()
 		.any(|event| event["type"] == event_type)
-}
-
-fn device_list_changed(response: &Value, user_id: &UserId) -> bool {
-	response["extensions"]["e2ee"]["device_lists"]["changed"]
-		.as_array()
-		.into_iter()
-		.flatten()
-		.filter_map(Value::as_str)
-		.any(|user| user == user_id.as_str())
 }
