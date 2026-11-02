@@ -1,12 +1,13 @@
 //! Durable transaction-response deduplication.
 //!
 //! Opaque response bytes are keyed by user, optional device, and transaction
-//! identifier. Room-send operations add a domain tag, room, and event type so
-//! independent send scopes cannot replay one another's responses.
+//! identifier. Room operations add a domain tag, the room, and a scope (the
+//! event type of a send, the target of a redaction) so independent scopes
+//! cannot replay one another's responses.
 
 use std::sync::Arc;
 
-use ruma::{DeviceId, RoomId, TransactionId, UserId};
+use ruma::{DeviceId, EventId, RoomId, TransactionId, UserId};
 use tuwunel_core::{Result, implement};
 use tuwunel_database::{Handle, Map};
 
@@ -18,6 +19,37 @@ use tuwunel_database::{Handle, Map};
 /// transaction identifier against concurrent execution.
 pub struct Service {
 	db: Data,
+}
+
+/// A client transaction against one room.
+///
+/// Paired with a [`RoomScope`], it keys the response a retry replays.
+#[derive(Clone, Copy)]
+pub struct RoomTxn<'a> {
+	/// The user who sent the transaction.
+	pub user_id: &'a UserId,
+
+	/// The sending device, absent for a device-less sender.
+	pub device_id: Option<&'a DeviceId>,
+
+	/// The client's transaction identifier.
+	pub txn_id: &'a TransactionId,
+
+	/// The room the transaction acts on.
+	pub room_id: &'a RoomId,
+}
+
+/// What a room transaction acts on within its room.
+///
+/// Each variant has its own domain tag, so a send and a redaction never share
+/// a key.
+#[derive(Clone, Copy)]
+pub enum RoomScope<'a> {
+	/// A send, scoped by its event type.
+	Send(&'a str),
+
+	/// A redaction, scoped by its target event.
+	Redact(&'a EventId),
 }
 
 struct Data {
@@ -35,6 +67,7 @@ type RoomKey<'a> = (
 );
 
 const ROOM_SEND_TAG: &str = "room-send";
+const ROOM_REDACT_TAG: &str = "room-redact";
 
 impl crate::Service for Service {
 	fn build(args: &crate::Args<'_>) -> Result<Arc<Self>> {
@@ -86,21 +119,13 @@ pub async fn existing_txnid(
 }
 
 #[implement(Service)]
-/// Records a response under the scoped room-send transaction key.
+/// Records a response under a scoped room transaction key.
 ///
-/// A domain tag, room, and event type extend the legacy key so unrelated send
-/// scopes cannot alias. Writing the same complete key again replaces its
-/// opaque response bytes.
-pub fn add_room_txnid(
-	&self,
-	user_id: &UserId,
-	device_id: Option<&DeviceId>,
-	txn_id: &TransactionId,
-	room_id: &RoomId,
-	event_type: &str,
-	data: &[u8],
-) {
-	let key = room_txnid_key(user_id, device_id, txn_id, room_id, event_type);
+/// A domain tag, the room, and the scope extend the legacy key so unrelated
+/// room operations cannot alias. Writing the same complete key again replaces
+/// its opaque response bytes.
+pub fn add_room_txnid(&self, txn: RoomTxn<'_>, scope: RoomScope<'_>, data: &[u8]) {
+	let key = room_txnid_key(txn, scope);
 
 	self.db
 		.userdevicetxnid_response
@@ -108,20 +133,17 @@ pub fn add_room_txnid(
 }
 
 #[implement(Service)]
-/// Looks up a response under the scoped room-send transaction key.
+/// Looks up a response under a scoped room transaction key.
 ///
-/// A domain tag, room, and event type extend the legacy key so unrelated send
-/// scopes cannot alias. A missing row remains a database not-found error, and
-/// a hit returns the stored opaque bytes through a database handle.
+/// A domain tag, the room, and the scope extend the legacy key so unrelated
+/// room operations cannot alias. A missing row remains a database not-found
+/// error, and a hit returns the stored opaque bytes through a database handle.
 pub async fn existing_room_txnid(
 	&self,
-	user_id: &UserId,
-	device_id: Option<&DeviceId>,
-	txn_id: &TransactionId,
-	room_id: &RoomId,
-	event_type: &str,
+	txn: RoomTxn<'_>,
+	scope: RoomScope<'_>,
 ) -> Result<Handle<'_>> {
-	let key = room_txnid_key(user_id, device_id, txn_id, room_id, event_type);
+	let key = room_txnid_key(txn, scope);
 
 	self.db.userdevicetxnid_response.qry(&key).await
 }
@@ -134,14 +156,13 @@ fn txnid_key<'a>(
 	(user_id, device_id, txn_id)
 }
 
-fn room_txnid_key<'a>(
-	user_id: &'a UserId,
-	device_id: Option<&'a DeviceId>,
-	txn_id: &'a TransactionId,
-	room_id: &'a RoomId,
-	event_type: &'a str,
-) -> RoomKey<'a> {
-	(user_id, device_id, txn_id, ROOM_SEND_TAG, room_id, event_type)
+fn room_txnid_key<'a>(txn: RoomTxn<'a>, scope: RoomScope<'a>) -> RoomKey<'a> {
+	let (tag, scope) = match scope {
+		| RoomScope::Send(event_type) => (ROOM_SEND_TAG, event_type),
+		| RoomScope::Redact(event_id) => (ROOM_REDACT_TAG, event_id.as_str()),
+	};
+
+	(txn.user_id, txn.device_id, txn.txn_id, tag, txn.room_id, scope)
 }
 
 #[cfg(test)]

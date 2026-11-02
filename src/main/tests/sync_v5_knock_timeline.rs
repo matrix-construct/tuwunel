@@ -30,8 +30,15 @@ mod sliding_sync;
 #[path = "client/member_event.rs"]
 mod member_event;
 
+#[expect(dead_code)] // Only the event PUT is used from the event add-on.
+#[path = "client/event.rs"]
+mod event;
+
 #[path = "client/put.rs"]
 mod put;
+
+#[path = "client/redact.rs"]
+mod redact;
 
 #[path = "sliding_sync/resume.rs"]
 mod resume;
@@ -119,7 +126,7 @@ async fn exercise(services: &Services, base: &str) -> Result {
 		.await?;
 
 	owner
-		.put(&format!("rooms/{older}/redact/{membership}/redact-knock"), &json!({}))
+		.redact(&older, &membership, "redact-knock")
 		.await?;
 
 	let redacted_count = services

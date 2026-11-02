@@ -1,11 +1,16 @@
-use std::time::Duration;
+use std::{collections::BTreeMap, time::Duration};
 
 use ruma::{
-	EventId, MilliSecondsSinceUnixEpoch, RoomId, UserId, api::client::filter::FilterDefinition,
-	thirdparty::Medium,
+	EventId, MilliSecondsSinceUnixEpoch, OwnedEventId, RoomId, TransactionId, UserId,
+	api::client::filter::FilterDefinition, thirdparty::Medium,
 };
+use serde_json::Value as JsonValue;
 use tokio::time::Instant;
-use tuwunel_core::{Err, Result, utils::time::millis, warn};
+use tuwunel_core::{
+	Err, Result, err,
+	utils::{string::str_from_bytes, time::millis},
+	warn,
+};
 use tuwunel_matrix::Event;
 use tuwunel_service::Services;
 
@@ -42,6 +47,25 @@ pub(crate) async fn is_self_redaction(
 		.get_pdu(event_id)
 		.await
 		.is_ok_and(|target| target.sender() == user_id)
+}
+
+/// The unsigned fields carrying a client's transaction ID on the event it sent.
+///
+/// Timeline, thread and bundled-relation reads remove it for anyone but the
+/// sender.
+pub(crate) fn txnid_unsigned(txn_id: &TransactionId) -> BTreeMap<String, JsonValue> {
+	BTreeMap::from([("transaction_id".to_owned(), txn_id.as_str().into())])
+}
+
+/// Decodes the event ID a room transaction stored as its response.
+///
+/// Stored bytes that are not an event ID are corrupt data, reported as a
+/// database error.
+pub(crate) fn txnid_event_id(response: &[u8]) -> Result<OwnedEventId> {
+	str_from_bytes(response)
+		.ok()
+		.and_then(|event_id| event_id.try_into().ok())
+		.ok_or_else(|| err!(Database("Invalid event_id in txn_id data: {response:?}.")))
 }
 
 /// Whether the caller may change display names under
