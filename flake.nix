@@ -456,7 +456,6 @@
               [
                 #"x86_64-apple-darwin"
                 #"aarch64-apple-darwin"
-                "x86_64-linux-gnu"
                 "x86_64-linux-musl"
                 "aarch64-linux-musl"
               ]
