@@ -155,13 +155,12 @@ required for any other reason, I would be happy to receive your DM at
 be my pleasure to help you when possible. As an emergency contact you can send an email to
 jasonzemos@gmail.com.
 
-##### Tuwunel Fanclub
+##### Tuwunel Chat
 
-We have an unofficial community-run chat which is publicly accessible at
-[#tuwunel:matrix.org](https://matrix.to/#/#tuwunel:matrix.org). The members, content, or moderation
-decisions of this room are not in any way related or endorsed by this project or its sponsors,
-and not all project staff will be present there. There will be at least some presence by staff to
-offer assistance so long as the room remains in minimally good standing.
+Our official chat is publicly accessible at
+[#tuwunel:matrix.org](https://matrix.to/#/#tuwunel:matrix.org). Project staff are present there to
+offer assistance, and everyone is welcome to ask questions or share their experience running
+Tuwunel.
 
 
 ## Tuwunel<sup>💕</sup>
