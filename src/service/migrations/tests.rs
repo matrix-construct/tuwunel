@@ -2,8 +2,9 @@ use ruma::server_name;
 use serde_json::{Value, json};
 use tuwunel_core::{Result, config::Figment};
 use tuwunel_database::Json;
+use tuwunel_matrix::pdu::PduCount;
 
-use super::{fresh, local_user_id, marker_present, migrate};
+use super::{REBUILD_LIVE_THREAD_ACTIVITY, fresh, local_user_id, marker_present, migrate};
 use crate::{
 	Services,
 	test_utils::{fixture, pdu_id},
@@ -103,6 +104,49 @@ async fn redacted_thread_latest_scrub_runs_once() -> Result {
 	assert_eq!(root_thread(services).await?, Value::Null);
 
 	Ok(())
+}
+
+#[tokio::test]
+async fn emptied_thread_unlisting_runs_once() -> Result {
+	let config = Figment::new().merge(("admin.room.create", false));
+	let Some(fixture) = fixture(config).await? else {
+		return Ok(());
+	};
+
+	let services = &fixture.services;
+	let markers = ["rebuild_thread_summaries", REBUILD_LIVE_THREAD_ACTIVITY];
+
+	fresh(services).await?;
+
+	assert!(marker_present(services, REBUILD_LIVE_THREAD_ACTIVITY).await?);
+
+	// A summary the summary pass drops: its only reply is gone.
+	set_root_latest(services, &json!({ "event_id": "$purged:localhost" }));
+
+	for marker in markers {
+		services.db["global"].remove(marker);
+	}
+
+	for (run, listed) in [(1, false), (2, true)] {
+		list_root(services);
+		migrate(services, false).await?;
+
+		let pointer = services.db["threadrootid_latestcount"]
+			.exists(&pdu_id(1))
+			.await;
+
+		assert_eq!(pointer.is_ok(), listed, "run {run}");
+	}
+
+	Ok(())
+}
+
+fn list_root(services: &Services) {
+	let latest = PduCount::Normal(2).to_be_bytes();
+
+	services.db["threadid_userids"].insert(&pdu_id(1), "@alice:localhost");
+	services.db["threadactivityid_rootid"].insert(&pdu_id(2), pdu_id(1));
+	services.db["threadrootid_latestcount"].insert(&pdu_id(1), latest);
 }
 
 fn set_root_latest(services: &Services, latest: &Value) {

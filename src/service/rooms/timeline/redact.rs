@@ -32,8 +32,9 @@ use crate::rooms::{
 /// from unread counts occur before the accepted row is replaced, so the
 /// operation is not atomic if a later step fails. A redacted thread reply is
 /// removed from its root's `m.thread` summary (the count, and the latest event
-/// when it was the latest) in the same write as the accepted row; a redacted
-/// thread root keeps its summary.
+/// when it was the latest) in the same write as the accepted row, which also
+/// takes a thread left with no replies off the thread list; a redacted thread
+/// root keeps its summary.
 #[implement(super::Service)]
 #[tracing::instrument(name = "redact", level = "debug", skip(self))]
 pub async fn redact_pdu<Pdu: Event + Send + Sync>(

@@ -82,6 +82,8 @@ const FORCE_MIGRATION_DELAY: Duration = Duration::from_secs(15);
 
 const CLEAR_STATE_LOCAL_ERROR_MEMOS: &str = "clear_state_local_error_memos";
 
+const REBUILD_LIVE_THREAD_ACTIVITY: &str = "rebuild_live_thread_activity";
+
 /// A marker written by a sibling conduwuit-lineage server but never by tuwunel.
 /// Its presence identifies a foreign database at a higher schema number even
 /// after tuwunel has stamped its own `server_name`, so a database opened by
@@ -255,6 +257,7 @@ async fn fresh(services: &Services) -> Result {
 	db["global"].insert("rebuild_roomid_tscount_pducount", []);
 	db["global"].insert("rebuild_relatesto_typed", []);
 	db["global"].insert("migrate_profile_keys_to_useridprofilekey", []);
+	// Older versions rebuild the thread index under this marker.
 	db["global"].insert("rebuild_thread_activity", []);
 	db["global"].insert("rebuild_thread_summaries", []);
 	db["global"].insert("clear_servername_status", []);
@@ -264,6 +267,7 @@ async fn fresh(services: &Services) -> Result {
 	db["global"].insert(token_expiry::RESTORE_MARKER, []);
 	db["global"].insert(token_expiry::ADOPT_MARKER, []);
 	db["global"].insert(redactions::MARKER, []);
+	db["global"].insert(REBUILD_LIVE_THREAD_ACTIVITY, []);
 	mark_clean_injectivity(services);
 
 	// Create the admin room and server user on first run
@@ -365,12 +369,6 @@ async fn migrate(services: &Services, foreign_lineage: bool) -> Result {
 		migrate_profile_keys(services).await?;
 	}
 
-	if pending(services, "rebuild_thread_activity").await? {
-		services.threads.rebuild_thread_activity().await?;
-
-		db["global"].insert("rebuild_thread_activity", []);
-	}
-
 	if pending(services, "rebuild_thread_summaries").await? {
 		rebuild_thread_summaries(services).await;
 
@@ -413,6 +411,12 @@ async fn migrate(services: &Services, foreign_lineage: bool) -> Result {
 	until_finished(services, token_expiry::ADOPT_MARKER, migrate_token_expiry).await?;
 
 	run_once(services, redactions::MARKER, restore_redactions).await?;
+
+	// Runs after the summary and redaction passes, which can empty a thread.
+	run_once(services, REBUILD_LIVE_THREAD_ACTIVITY, async |services: &Services| {
+		services.threads.rebuild_thread_activity().await
+	})
+	.await?;
 
 	services.server.check_running()?;
 

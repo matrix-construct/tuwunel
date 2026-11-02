@@ -15,7 +15,7 @@ use ruma::{
 use serde::Deserialize;
 use serde_json::json;
 use tuwunel_core::{
-	Result, err, implement,
+	Err, Error, Result, err, error, implement,
 	itertools::{
 		Either::{Left, Right},
 		Itertools,
@@ -23,7 +23,7 @@ use tuwunel_core::{
 	utils::{
 		BoolExt, ReadyExt,
 		result::{LogErr, NotFound},
-		stream::{TryIgnore, TryReadyExt, WidebandExt, automatic_width},
+		stream::{TryBroadbandExt, TryIgnore, TryReadyExt, WidebandExt},
 	},
 };
 use tuwunel_database::{Deserialized, Map, Txn};
@@ -115,6 +115,20 @@ pub(super) struct Data {
 	threadid_userids: Arc<Map>,
 	threadactivityid_rootid: Arc<Map>,
 	threadrootid_latestcount: Arc<Map>,
+}
+
+/// A thread root rewritten for the redaction of one of its replies.
+///
+/// A root left with no replies also leaves the room's thread list.
+pub(crate) struct RedactedRoot {
+	id: RawPduId,
+	pdu: CanonicalJsonObject,
+
+	/// No reply remains, so the thread's listing and participants go.
+	emptied: bool,
+
+	/// The activity row listing an emptied thread, when its pointer was read.
+	activity: Option<RawPduId>,
 }
 
 impl crate::Service for Service {
@@ -292,14 +306,15 @@ impl Service {
 	///
 	/// The caller holds the room lock while the count decreases and the latest
 	/// reply is replaced. A bounded miss omits the latest event while preserving
-	/// the count; the whole bundle is removed when no reply remains.
-	/// Missing roots and unchanged summaries return `None`; storage errors are logged.
-	pub async fn redacted_reply_root(
+	/// the count; when no reply remains, the whole bundle is removed and the
+	/// result carries what unlisting the thread needs. Missing roots and unchanged
+	/// summaries return `None`; storage errors are logged.
+	pub(crate) async fn redacted_reply_root(
 		&self,
 		root_event_id: &EventId,
 		reply_id: &RawPduId,
 		reply_event_id: &EventId,
-	) -> Option<(RawPduId, CanonicalJsonObject)> {
+	) -> Option<RedactedRoot> {
 		matches!(reply_id.pdu_count(), PduCount::Normal(_)).into_option()?;
 
 		let root_id = self
@@ -332,14 +347,20 @@ impl Service {
 		changed.into_option()?;
 
 		let root = set_thread_count(root, count);
-		let root = match (count, latest) {
+		let pdu = match (count, latest) {
 			| (Some(count), _) if count == uint!(0) => set_thread_latest(root, None),
 			| (_, None) => root,
 			| (_, Some(None)) => omit_thread_latest(root),
 			| (_, Some(Some(latest))) => set_thread_latest(root, Some(latest)),
 		};
 
-		Some((root_id, root))
+		let emptied = !counts_replies(&pdu);
+		let activity = emptied
+			.then_async(|| self.listed_activity(root_id))
+			.await
+			.flatten();
+
+		Some(RedactedRoot { id: root_id, pdu, emptied, activity })
 	}
 
 	pub fn threads_until<'a>(
@@ -390,15 +411,7 @@ impl Service {
 		root_id: RawPduId,
 	) -> Option<(PduCount, PduEvent)> {
 		let count = activity_id.pdu_count();
-
-		let pointer = self
-			.db
-			.threadrootid_latestcount
-			.get(&root_id)
-			.await
-			.deserialized()
-			.map(PduCount::from_unsigned)
-			.ok()?;
+		let pointer = self.latest_count(&root_id).await.ok()?;
 
 		if count != pointer {
 			// A row ahead of the pointer is a write in flight; only rows behind
@@ -501,29 +514,48 @@ impl Service {
 		Ok(())
 	}
 
-	/// Rebuild the thread activity index from every thread root. Run once at
-	/// startup behind a `global` marker, and on demand from the admin command.
-	/// Clears first so a partial or stale index is replaced wholesale.
+	/// Rebuild the thread activity index from every thread root.
+	///
+	/// Clears first so a partial or stale index is replaced wholesale, and leaves
+	/// out a root whose summary counts no reply. A root or key the storage engine
+	/// could not read fails the rebuild so a marker-gated caller retries; any
+	/// other failed root is logged and skipped.
 	pub async fn rebuild_thread_activity(&self) -> Result {
 		self.db.threadactivityid_rootid.clear().await;
 		self.db.threadrootid_latestcount.clear().await;
 
-		self.db
+		let unreadable = self
+			.db
 			.threadid_userids
 			.raw_keys()
-			.ignore_err()
-			.map(RawPduId::from)
-			.for_each_concurrent(automatic_width(), async |root_id| {
-				self.index_thread_activity(root_id).await;
+			.map_ok(RawPduId::from)
+			.broad_and_then(async |root_id| {
+				self.index_thread_activity(root_id)
+					.inspect_err(|error| error!(?root_id, %error, "Thread activity not indexed."))
+					.await
+					.or_else(unreadable_only)
 			})
+			.ready_filter(Result::is_err)
+			.count()
 			.await;
+
+		if unreadable > 0 {
+			return Err!(Database("{unreadable} thread roots could not be read"));
+		}
 
 		Ok(())
 	}
 
-	async fn index_thread_activity(&self, root_id: RawPduId) {
-		let root: PduId = root_id.into();
+	#[tracing::instrument(skip(self), level = "trace")]
+	async fn index_thread_activity(&self, root_id: RawPduId) -> Result {
+		let Some(pdu) = self.try_summary_root(&root_id).await? else {
+			return Ok(());
+		};
 
+		// A redaction unlists its thread under this lock.
+		let room_id: &RoomId = pdu.get("room_id").try_into()?;
+		let _lock = self.services.state.mutex.lock(room_id).await;
+		let root: PduId = root_id.into();
 		let replies = self
 			.services
 			.pdu_metadata
@@ -536,21 +568,16 @@ impl Service {
 					.then_some(count)
 			});
 
-		let mut replies = pin!(replies);
+		// A backfilled root's replies are not in the relation index, so its summary decides.
+		let latest = match pin!(replies).next().await {
+			| Some(latest) => latest,
+			| None if self.root_counts_replies(&root_id).await? => root.count,
+			| None => return Ok(()),
+		};
 
-		let latest = replies.next().await.unwrap_or(root.count);
+		self.activity_txn(root_id, latest).execute();
 
-		let activity_id: RawPduId = PduId {
-			shortroomid: root.shortroomid,
-			count: latest,
-		}
-		.into();
-
-		let mut txn = self.services.db.txn();
-
-		txn.insert_raw(&self.db.threadactivityid_rootid, activity_id, root_id);
-		txn.insert_raw(&self.db.threadrootid_latestcount, root_id, latest.to_be_bytes());
-		txn.execute();
+		Ok(())
 	}
 
 	/// Rebuilds stored thread counts and removes redacted latest replies.
@@ -576,6 +603,29 @@ impl Service {
 				| Err(_) => (changed, failed.saturating_add(1)),
 			})
 			.await
+	}
+}
+
+/// Stages the root row a reply's redaction rewrote.
+///
+/// An emptied thread leaves the thread list, and its participants go with it
+/// so a later reply starts the thread afresh. Older activity rows the list
+/// has not reaped yet stay behind unlisted until a later reply or a rebuild.
+#[implement(Service)]
+pub(crate) fn stage_redacted_root(&self, txn: &mut Txn, root: &RedactedRoot) {
+	let RedactedRoot { id, pdu, emptied, activity } = root;
+
+	self.services
+		.timeline
+		.stage_replace_pdu(txn, id, pdu);
+
+	if *emptied {
+		txn.del_raw(&self.db.threadid_userids, id);
+		txn.del_raw(&self.db.threadrootid_latestcount, id);
+	}
+
+	if let Some(activity) = activity {
+		txn.del_raw(&self.db.threadactivityid_rootid, activity);
 	}
 }
 
@@ -652,6 +702,62 @@ fn thread_replies(
 		.ready_try_filter(|(_, pdu)| is_thread_reply(pdu))
 }
 
+/// The activity row listing a thread, read from its validity pointer.
+///
+/// An unlisted thread has none; a failed read is logged and also yields none.
+#[implement(Service)]
+async fn listed_activity(&self, root_id: RawPduId) -> Option<RawPduId> {
+	self.latest_count(&root_id)
+		.map_ok(|count| activity_key(root_id, count))
+		.await
+		.optional()
+		.log_err()
+		.ok()
+		.flatten()
+}
+
+/// Reads a thread's validity pointer.
+///
+/// It holds the count of the one activity row that lists the thread.
+#[implement(Service)]
+async fn latest_count(&self, root_id: &RawPduId) -> Result<PduCount> {
+	self.db
+		.threadrootid_latestcount
+		.get(root_id)
+		.await
+		.map_de(PduCount::from_unsigned)
+}
+
+fn activity_key(root_id: RawPduId, count: PduCount) -> RawPduId {
+	let PduId { shortroomid, .. } = root_id.into();
+
+	PduId { shortroomid, count }.into()
+}
+
+/// Whether the root's stored `m.thread` summary still counts a reply.
+///
+/// A missing root has none; a read error is returned.
+#[implement(Service)]
+async fn root_counts_replies(&self, root_id: &RawPduId) -> Result<bool> {
+	self.try_summary_root(root_id)
+		.map_ok(|root| root.as_ref().is_some_and(counts_replies))
+		.await
+}
+
+/// Stages a thread's activity row at `latest` and the validity pointer to it.
+///
+/// The pair is written together so the listing never sees one without the other.
+#[implement(Service)]
+fn activity_txn(&self, root_id: RawPduId, latest: PduCount) -> Txn {
+	let activity_id = activity_key(root_id, latest);
+	let latest = latest.to_be_bytes();
+
+	Txn::insert_each_slice(&[
+		(&self.db.threadactivityid_rootid, activity_id.as_bytes(), root_id.as_bytes()),
+		(&self.db.threadrootid_latestcount, root_id.as_bytes(), latest.as_slice()),
+	])
+}
+
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "debug")]
 async fn rebuild_thread_summary(&self, root_id: RawPduId) -> Result<bool> {
@@ -710,6 +816,24 @@ async fn rebuild_thread_summary(&self, root_id: RawPduId) -> Result<bool> {
 		.await?;
 
 	Ok(true)
+}
+
+/// Keeps a failed root's error only when the storage engine could not read it.
+///
+/// Any other failure skips that root, already logged by the caller.
+fn unreadable_only(error: Error) -> Result {
+	error
+		.is_transient_io()
+		.then_some(error)
+		.map_or(Ok(()), Err)
+}
+
+/// Whether a root's `m.thread` summary still counts a reply.
+///
+/// A summary recounted to zero lists no thread; one without a count is taken to
+/// count a reply.
+fn counts_replies(root: &CanonicalJsonObject) -> bool {
+	thread_bundle(root).is_some() && thread_count(root) != Some(uint!(0))
 }
 
 fn thread_count(root: &CanonicalJsonObject) -> Option<UInt> {

@@ -1,5 +1,8 @@
-//! Redacting a thread reply takes it off its root's `m.thread.count`, and the
-//! recount repairs counts kept before that.
+//! Thread redaction keeps `m.thread` summaries and the thread list consistent.
+//!
+//! Redacting a thread reply takes it off its root's `m.thread.count`, and
+//! redacting the last one takes the thread off the thread list. The recount
+//! and the index rebuild repair stale counts and listings.
 
 use std::{
 	pin::pin,
@@ -7,9 +10,18 @@ use std::{
 	task::{Wake, Waker},
 };
 
-use ruma::{EventId, OwnedEventId, RoomId, event_id, events::StateEventType, room_id, user_id};
+use futures::{StreamExt, TryStreamExt};
+use ruma::{
+	EventId, OwnedEventId, RoomId, UserId, api::client::threads::get_threads::v1::IncludeThreads,
+	event_id, events::StateEventType, room_id, user_id,
+};
 use serde_json::{Value, json, to_string, to_value};
-use tuwunel_core::{Result, config::Figment, utils::BoolExt};
+use tuwunel_core::{
+	Result,
+	config::Figment,
+	implement,
+	utils::{BoolExt, ReadyExt, result::NotFound, stream::TryIgnore},
+};
 use tuwunel_database::Json;
 use tuwunel_matrix::{
 	Event,
@@ -27,6 +39,17 @@ struct Room<'a>(&'a Services, ShortRoomId, &'static RoomId);
 
 /// The root's stored count when the redacted reply's write is announced.
 struct CountAtReplyWrite(Arc<Services>, RawPduId, Mutex<Value>);
+
+/// The thread index rows naming one root.
+///
+/// Counts its activity rows, and records whether its validity pointer and its
+/// participant row are stored.
+#[derive(Debug, PartialEq)]
+struct IndexRows {
+	activity: usize,
+	pointer: bool,
+	participants: bool,
+}
 
 #[tokio::test]
 async fn redaction_takes_each_thread_reply_off_once() -> Result {
@@ -234,6 +257,156 @@ async fn redacted_root_keeps_its_thread_summary() -> Result {
 }
 
 #[tokio::test]
+async fn redacting_every_reply_unlists_the_thread() -> Result {
+	let Some(fixture) = fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+
+	let room = Room::new(&fixture.services).await?;
+	let [root, first, second, other, answer, live, reply, again] =
+		["root", "first", "second", "other", "answer", "live", "reply", "again"].map(id);
+
+	room.append(1, &root, text()).await?;
+	room.append(2, &first, thread(&root)).await?;
+	room.append(3, &second, thread(&root)).await?;
+	room.append(4, &other, text()).await?;
+	room.append(5, &answer, thread(&other)).await?;
+	room.append(6, &live, text()).await?;
+	room.append(7, &reply, thread(&live)).await?;
+
+	assert_eq!(room.listed().await?, [&*live, &*other, &*root]);
+
+	room.redact(&first).await?;
+	assert_eq!(room.listed().await?, [&*live, &*other, &*root]);
+
+	// Whichever goes last, the root or its reply, the emptied thread is unlisted.
+	room.redact(&second).await?;
+	room.redact(&root).await?;
+	room.redact(&other).await?;
+	assert_eq!(room.listed().await?, [&*live, &*other]);
+
+	room.redact(&answer).await?;
+	assert_eq!(room.listed().await?, [&*live]);
+
+	let unlisted = IndexRows {
+		activity: 0,
+		pointer: false,
+		participants: false,
+	};
+
+	for emptied in [&root, &other] {
+		assert_eq!(room.index_rows(emptied).await?, unlisted, "{emptied}");
+	}
+
+	room.append(8, &again, thread(&root)).await?;
+
+	let listed = IndexRows {
+		activity: 1,
+		pointer: true,
+		participants: true,
+	};
+
+	assert_eq!(room.listed().await?, [&*root, &*live]);
+	assert_eq!(room.index_rows(&root).await?, listed);
+
+	Ok(())
+}
+
+#[implement(Room, params = "<'_>")]
+async fn listed(&self) -> Result<Vec<OwnedEventId>> {
+	let Self(services, _, room) = self;
+
+	services
+		.threads
+		.threads_until(sender(), room, PduCount::max(), &IncludeThreads::All)
+		.map_ok(|(_, pdu)| pdu.event_id)
+		.try_collect()
+		.await
+}
+
+#[implement(Room, params = "<'_>")]
+async fn index_rows(&self, root: &EventId) -> Result<IndexRows> {
+	let db = &self.0.db;
+	let (root_id, _) = self.stored(root).await?;
+	let activity = db["threadactivityid_rootid"]
+		.raw_stream()
+		.ignore_err()
+		.ready_filter(|(_, value)| *value == root_id.as_bytes())
+		.count()
+		.await;
+
+	let pointer = db["threadrootid_latestcount"]
+		.exists(&root_id)
+		.await
+		.present()?
+		.is_some();
+
+	let participants = db["threadid_userids"]
+		.exists(&root_id)
+		.await
+		.present()?
+		.is_some();
+
+	Ok(IndexRows { activity, pointer, participants })
+}
+
+#[tokio::test]
+async fn rebuild_leaves_out_threads_with_no_replies() -> Result {
+	let Some(fixture) = fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+
+	let room = Room::new(&fixture.services).await?;
+	let [emptied, reply, zero, last, kept, answer, old, late] =
+		["emptied", "reply", "zero", "last", "kept", "answer", "old", "late"].map(id);
+
+	let emptied_id = room.append(1, &emptied, text()).await?;
+	let reply_id = room.append(2, &reply, thread(&emptied)).await?;
+	let zero_id = room.append(3, &zero, text()).await?;
+	let last_id = room.append(4, &last, thread(&zero)).await?;
+
+	room.append(5, &kept, text()).await?;
+	room.append(6, &answer, thread(&kept)).await?;
+	room.store(PduCount::Backfilled(-1), &old, text())?;
+	room.append(7, &late, thread(&old)).await?;
+
+	// An earlier version kept these listed after redacting their last replies.
+	room.redact(&reply).await?;
+	room.relist(emptied_id, reply_id);
+	room.redact(&last).await?;
+	room.relist(zero_id, last_id);
+
+	// A recount left this one a summary counting no reply.
+	room.set_count(&zero, 0).await?;
+
+	// A redacted root with a reply left keeps its summary, and its listing.
+	room.redact(&kept).await?;
+
+	assert_eq!(room.listed().await?, [&*old, &*kept, &*zero, &*emptied]);
+
+	fixture
+		.services
+		.threads
+		.rebuild_thread_activity()
+		.await?;
+
+	// The backfilled root's reply is not in the relation index; its summary lists it.
+	assert_eq!(room.listed().await?, [&*kept, &*old]);
+
+	Ok(())
+}
+
+#[implement(Room, params = "<'_>")]
+fn relist(&self, root_id: RawPduId, reply_id: RawPduId) {
+	let db = &self.0.db;
+	let latest = reply_id.pdu_count().to_be_bytes();
+
+	db["threadid_userids"].insert(&root_id, sender().as_str());
+	db["threadactivityid_rootid"].insert(&reply_id, root_id);
+	db["threadrootid_latestcount"].insert(&root_id, latest);
+}
+
+#[tokio::test]
 async fn redacted_self_rooted_reply_keeps_no_summary() -> Result {
 	let Some(fixture) = fixture(Figment::new()).await? else {
 		return Ok(());
@@ -280,7 +453,7 @@ async fn redacting_the_latest_reply_shows_the_newest_remaining_one() -> Result {
 	let served = services.timeline.get_pdu(&root).await?;
 	let served = services
 		.pdu_metadata
-		.bundle_aggregations(user_id!("@alice:localhost"), served);
+		.bundle_aggregations(sender(), served);
 
 	assert!(!to_string(&served.await)?.contains("secret"));
 	assert_eq!(room.latest(&root).await?, json!(second));
@@ -341,7 +514,7 @@ async fn replacement_error_omits_the_redacted_latest_and_decrements_count() -> R
 	let served = services.timeline.get_pdu(&root).await?;
 	let served = services
 		.pdu_metadata
-		.bundle_aggregations(user_id!("@alice:localhost"), served)
+		.bundle_aggregations(sender(), served)
 		.await;
 
 	assert!(
@@ -403,7 +576,7 @@ async fn replacement_search_counts_missing_relation_rows() -> Result {
 	let served = fixture
 		.services
 		.pdu_metadata
-		.bundle_aggregations(user_id!("@alice:localhost"), served)
+		.bundle_aggregations(sender(), served)
 		.await;
 
 	assert!(
@@ -464,7 +637,7 @@ impl<'a> Room<'a> {
 	async fn create(services: &'a Services, room: &'static RoomId) -> Result<Self> {
 		let (short, state) = (&services.short, &services.state);
 		let create = &id(&format!("create-{}", room.strip_sigil().replace(':', "-")));
-		let content = json!({ "creator": "@alice:localhost", "room_version": "10" });
+		let content = json!({ "creator": sender(), "room_version": "10" });
 		let mut pdu = event(room, create, "m.room.create", content);
 
 		pdu["state_key"] = json!("");
@@ -582,7 +755,7 @@ fn id(name: &str) -> OwnedEventId {
 
 fn event(room: &RoomId, event_id: &EventId, kind: &str, content: Value) -> Value {
 	let mut event = json!({
-		"type": kind, "event_id": event_id, "room_id": room, "sender": "@alice:localhost",
+		"type": kind, "event_id": event_id, "room_id": room, "sender": sender(),
 		"origin_server_ts": 1, "depth": 1, "hashes": { "sha256": "hash" },
 		"prev_events": [], "auth_events": [],
 	});
@@ -590,6 +763,8 @@ fn event(room: &RoomId, event_id: &EventId, kind: &str, content: Value) -> Value
 	event["content"] = content;
 	event
 }
+
+fn sender() -> &'static UserId { user_id!("@alice:localhost") }
 
 fn text() -> Value { json!({ "msgtype": "m.text", "body": "text" }) }
 

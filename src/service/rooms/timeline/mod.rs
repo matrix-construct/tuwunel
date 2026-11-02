@@ -53,7 +53,10 @@ use tuwunel_matrix::{
 ///
 /// Timeline consumers use these alongside the service's directional streams.
 pub use self::pdus::{PdusIterItem, bias_count};
-use crate::rooms::short::{ShortRoomId, ShortStateHash};
+use crate::rooms::{
+	short::{ShortRoomId, ShortStateHash},
+	threads::RedactedRoot,
+};
 
 /// Provides persistent event lookup, insertion, and room timeline traversal.
 ///
@@ -152,28 +155,43 @@ pub async fn replace_pdu(&self, pdu_id: &RawPduId, pdu_json: &CanonicalJsonObjec
 
 /// Replaces a redacted event and its optional thread root in one batch.
 ///
-/// The caller retains the room guard through this write. The redacted row is
-/// staged last so it wins when a reply names itself as its root.
+/// The caller retains the room guard through this write. The root's thread
+/// index changes are part of the same batch.
 #[implement(Service)]
 #[tracing::instrument(skip(self, pdu, root), level = "debug")]
 pub(super) async fn replace_redacted_pdu(
 	&self,
 	pdu_id: &RawPduId,
 	pdu: &CanonicalJsonObject,
-	root: Option<(RawPduId, CanonicalJsonObject)>,
+	root: Option<RedactedRoot>,
 ) -> Result {
 	self.require_pdu(pdu_id).await?;
-	root.as_ref()
-		.map(|(id, json)| (id, json))
-		.into_iter()
-		.chain([(pdu_id, pdu)])
-		.fold(self.db.db.txn(), |mut txn, (id, json)| {
-			self.stage_replace_pdu(&mut txn, id, json);
-			txn
-		})
+	self.redaction_txn(pdu_id, pdu, root.as_ref())
 		.execute();
 
 	Ok(())
+}
+
+/// Stages a redacted event after its thread root.
+///
+/// The redacted row comes last so it wins when a reply names itself as its root.
+#[implement(Service)]
+fn redaction_txn(
+	&self,
+	pdu_id: &RawPduId,
+	pdu: &CanonicalJsonObject,
+	root: Option<&RedactedRoot>,
+) -> Txn {
+	let mut txn = self.db.db.txn();
+
+	if let Some(root) = root {
+		self.services
+			.threads
+			.stage_redacted_root(&mut txn, root);
+	}
+
+	self.stage_replace_pdu(&mut txn, pdu_id, pdu);
+	txn
 }
 
 #[implement(Service)]
