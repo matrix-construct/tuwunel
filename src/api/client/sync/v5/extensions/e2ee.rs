@@ -60,7 +60,7 @@ pub(super) async fn collect(
 	let left = left
 		.into_iter()
 		.stream()
-		.filter_map(async |user_id| {
+		.broad_filter_map(async |user_id| {
 			share_encrypted_room(services, sender_user, &user_id)
 				.await
 				.is_false()

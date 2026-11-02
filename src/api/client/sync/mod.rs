@@ -16,7 +16,7 @@ use ruma::{
 };
 use tuwunel_core::{
 	Error, Result, debug_warn, is_equal_to,
-	utils::{result::LogErr, stream::BroadbandExt, time::now_millis},
+	utils::{result::LogErr, time::now_millis},
 };
 use tuwunel_matrix::{
 	Event, PduCount,
@@ -153,7 +153,7 @@ async fn share_encrypted_room(
 		.state_cache
 		.get_shared_rooms(sender_user, user_id)
 		.map(ToOwned::to_owned)
-		.broad_any(async |room_id| {
+		.any(async |room_id| {
 			services
 				.state_accessor
 				.is_encrypted_room(&room_id)
