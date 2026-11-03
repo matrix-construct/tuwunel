@@ -107,7 +107,7 @@ fn server_args(
 	config: RegistrationConfig,
 ) -> Args {
 	let mut args = Args::default_test(test_modes)
-		.with_option(format!("database_path=\"{}\"", db_path.display()))
+		.with_database_path(db_path)
 		.with_loopback_listener(port);
 
 	args.option.extend([

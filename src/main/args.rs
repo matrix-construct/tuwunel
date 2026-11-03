@@ -346,17 +346,27 @@ pub fn with_loopback_listener(self, port: u16) -> Self {
 
 /// Returns these arguments with the database path override appended.
 ///
-/// The path is quoted as a TOML basic string, escaping backslashes and quotes,
-/// so any platform path survives the option parser.
+/// The path is escaped through `with_path_option`, so any platform path parses.
 #[implement(Args)]
 #[must_use]
 pub fn with_database_path(self, path: &Path) -> Self {
+	self.with_path_option("database_path", path)
+}
+
+/// Returns these arguments with a path-valued option override appended.
+///
+/// The path is quoted as a TOML basic string, escaping backslashes and quotes,
+/// so any platform path survives the option parser. The key is written as given,
+/// so it must already be a valid, possibly dotted, option name.
+#[implement(Args)]
+#[must_use]
+pub fn with_path_option(self, key: &str, path: &Path) -> Self {
 	let escaped = path
 		.to_string_lossy()
 		.replace('\\', "\\\\")
 		.replace('"', "\\\"");
 
-	self.with_option(format!("database_path=\"{escaped}\""))
+	self.with_option(format!("{key}=\"{escaped}\""))
 }
 
 /// Returns a dedicated database path for a named test.
