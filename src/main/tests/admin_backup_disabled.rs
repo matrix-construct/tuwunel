@@ -16,15 +16,11 @@ fn admin_backup_disabled() -> Result {
 	create_dir_all(&db)?;
 	create_dir_all(&backup)?;
 
-	let mut args = Args::default_test(&["smoke", "fresh", "cleanup"]);
-
-	args.option.extend([
-		format!("database_path=\"{}\"", db.display()),
-		format!("database.backup.path=\"{}\"", backup.display()),
-		"database.backup.keep=0".to_owned(),
-	]);
-
-	args.execute.push("server backup-database".into());
+	let args = Args::default_test(&["smoke", "fresh", "cleanup"])
+		.with_database_path(&db)
+		.with_path_option("database.backup.path", &backup)
+		.with_option("database.backup.keep=0")
+		.with_execute("server backup-database");
 
 	let runtime = Runtime::new(Some(&args))?;
 	let server = Server::new(Some(&args), Some(&runtime))?;
