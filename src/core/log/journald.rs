@@ -59,6 +59,7 @@ mod unsupported {
 	pub(super) fn unbound() -> io::Result<Self> { Err(unavailable()) }
 
 	#[implement(UnixDatagram)]
+	#[expect(clippy::unused_self)]
 	pub(super) fn send_to(&self, _payload: &[u8], _path: &str) -> io::Result<usize> {
 		Err(unavailable())
 	}
