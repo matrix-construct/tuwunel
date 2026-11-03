@@ -918,18 +918,22 @@ async fn load_left_room(
 				.ok()
 		});
 
-	// MSC4222 `state_after` describes the state at the leave.
-	let after_shortstatehash = state_after.requested().then_async(|| {
+	let after_leave = || {
 		services
 			.timeline
 			.shortstatehash_after(room_id, PduCount::Normal(left_count))
 			.inspect_err(inspect_debug_log)
-	});
+	};
 
+	// MSC4222 `state_after` describes the state at the leave.
+	let after_shortstatehash = state_after.requested().then_async(after_leave);
+
+	// A left count holding no event (a foreign or synthetic one) resolves to the state after it.
 	let left_shortstatehash = services
 		.timeline
 		.get_shortstatehash(room_id, PduCount::Normal(left_count))
-		.inspect_err(inspect_debug_log)
+		.inspect_err(|error| debug!(?error, left_count, "no snapshot at the left count"))
+		.or_else(|_| after_leave())
 		.or_else(|_| services.state.get_room_shortstatehash(room_id))
 		.map_err(|_| err!(Database(error!("Room {room_id} has no state"))));
 
