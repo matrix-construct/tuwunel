@@ -27,7 +27,7 @@ use ruma::{
 use tuwunel_core::{
 	Result, at, implement, is_not_empty,
 	utils::{
-		BoolExt, FutureBoolExt, ReadyExt,
+		BoolExt, FutureBoolExt, OptionExt, ReadyExt,
 		future::ReadyBoolExt,
 		result::{LogErr, NotFound},
 	},
@@ -87,6 +87,15 @@ pub struct MembershipUpdate<'a> {
 	/// applied.
 	pub update_joined_count: bool,
 
+	/// Stream position of the user's own join this event replaces, set only for
+	/// a profile change.
+	///
+	/// Such a join keeps a recorded position no later than the one it replaces,
+	/// so it never reads as a fresh join. Any other join records its own
+	/// position, as does a profile change over a position a forced replay
+	/// recorded after the replaced join.
+	pub replaced_join: Option<PduCount>,
+
 	/// Stream position associated with the membership event.
 	///
 	/// Count-indexed membership rows store its unsigned representation.
@@ -97,9 +106,10 @@ pub struct MembershipUpdate<'a> {
 ///
 /// Remote users are created before their transition is recorded, and paired
 /// forward and reverse rows change together. Joins can copy predecessor-room
-/// account data, while leaves can trigger push-badge refresh and configured
-/// forget behavior. Aggregate room counts are rebuilt only when requested by
-/// the update descriptor.
+/// account data and keep the recorded join position across a profile change,
+/// while leaves can trigger push-badge refresh and configured forget behavior.
+/// Aggregate room counts are rebuilt only when requested by the update
+/// descriptor.
 #[implement(super::Service)]
 #[tracing::instrument(
 		level = "debug",
@@ -122,6 +132,7 @@ pub async fn update_membership(
 		last_state,
 		invite_via,
 		update_joined_count,
+		replaced_join,
 		count,
 	}: MembershipUpdate<'_>,
 ) -> Result {
@@ -131,7 +142,8 @@ pub async fn update_membership(
 
 	match membership {
 		| MembershipState::Join => {
-			self.handle_join(room_id, user_id, count).await?;
+			self.handle_join(room_id, user_id, count, replaced_join)
+				.await?;
 		},
 		| MembershipState::Invite => {
 			// An ignored sender's invite is stored anyway; the recipient's list
@@ -164,6 +176,33 @@ pub async fn update_membership(
 	}
 
 	Ok(())
+}
+
+impl<'a> MembershipUpdate<'a> {
+	/// A transition a user makes to their own membership.
+	///
+	/// The user is also the sender; the update carries no stripped state or
+	/// invite routing, is not a profile change, and rebuilds the room's aggregate
+	/// counts. A caller changes any of these by struct update.
+	#[must_use]
+	pub fn self_sent(
+		room_id: &'a RoomId,
+		user_id: &'a UserId,
+		membership_event: RoomMemberEventContent,
+		count: PduCount,
+	) -> Self {
+		Self {
+			room_id,
+			user_id,
+			membership_event,
+			sender: user_id,
+			last_state: None,
+			invite_via: None,
+			update_joined_count: true,
+			replaced_join: None,
+			count,
+		}
+	}
 }
 
 /// Rebuilds a room's aggregate membership and server indexes.
@@ -469,14 +508,34 @@ async fn ensure_remote_user(&self, user_id: &UserId) -> Result {
 }
 
 #[implement(super::Service)]
-async fn handle_join(&self, room_id: &RoomId, user_id: &UserId, count: PduCount) -> Result {
+async fn handle_join(
+	&self,
+	room_id: &RoomId,
+	user_id: &UserId,
+	count: PduCount,
+	replaced_join: Option<PduCount>,
+) -> Result {
 	if !self.once_joined(user_id, room_id).await {
 		self.mark_as_once_joined(user_id, room_id);
 		self.copy_predecessor_data(room_id, user_id)
 			.await?;
 	}
 
-	self.mark_as_joined(user_id, room_id, count);
+	// A missing, malformed or legacy empty row (read as zero) takes the position.
+	let keep = replaced_join
+		.map_async(async |replaced| {
+			let replaced = replaced.into_normal().into_unsigned();
+
+			self.get_joined_count(room_id, user_id)
+				.await
+				.is_ok_and(|recorded| (1..=replaced).contains(&recorded))
+		})
+		.await
+		.unwrap_or_default();
+
+	if !keep {
+		self.mark_as_joined(user_id, room_id, count);
+	}
 
 	Ok(())
 }

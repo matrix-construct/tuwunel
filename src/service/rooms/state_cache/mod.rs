@@ -590,11 +590,13 @@ pub async fn get_left_count(&self, room_id: &RoomId, user_id: &UserId) -> Result
 
 /// Returns the stream position last recorded for a user's current join.
 ///
-/// Each join event for the user, a profile change while joined included,
-/// rewrites it, as does a forced state replay, so it neither counts joins nor
-/// marks the join transition. A join recorded before positions were stored
-/// holds an empty value and reads as zero. Missing or malformed index rows
-/// return an error.
+/// Every join and every forced state replay records it, except an appended
+/// profile change over a position no later than the join it replaces, which
+/// keeps that position. Federation ingest replays each accepted member event
+/// before appending it, so a remote user's accepted profile change still moves
+/// their position. A join recorded before positions were stored holds an empty value
+/// that reads as zero, and the next join rewrites it, as it does a malformed
+/// row. Missing or malformed rows return an error.
 #[implement(Service)]
 #[tracing::instrument(skip(self), level = "trace")]
 pub async fn get_joined_count(&self, room_id: &RoomId, user_id: &UserId) -> Result<u64> {

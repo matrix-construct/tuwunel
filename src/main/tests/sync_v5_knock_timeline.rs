@@ -5,22 +5,19 @@ use tuwunel_core::{
 	Result, implement, is_equal_to,
 	ruma::{
 		RoomId, UserId,
-		events::{
-			StateEventType,
-			room::member::{MembershipState, RoomMemberEventContent},
-		},
+		events::{StateEventType, room::member::MembershipState},
 		room_id,
 		serde::Raw,
 	},
 };
 use tuwunel_database::Json;
-use tuwunel_matrix::PduCount;
 use tuwunel_service::{Services, rooms::state_cache::MembershipUpdate};
 
 use self::{
 	client::{Client, field, register},
 	fixture::boot,
 	member_event::find_member_event,
+	state_cache::membership_update,
 };
 
 mod client;
@@ -42,6 +39,9 @@ mod redact;
 
 #[path = "sliding_sync/resume.rs"]
 mod resume;
+
+#[path = "fixture/state_cache.rs"]
+mod state_cache;
 
 const OWNER_TOKEN: &str = "sync-v5-knock-timeline-owner-access-token";
 const KNOCKER_TOKEN: &str = "sync-v5-knock-timeline-knocker-access-token";
@@ -258,14 +258,9 @@ async fn summary_only_knock_filters(
 	services
 		.state_cache
 		.update_membership(MembershipUpdate {
-			room_id: remote,
-			user_id: user,
-			membership_event: RoomMemberEventContent::new(MembershipState::Knock),
-			sender: user,
 			last_state: Some(summary),
-			invite_via: None,
 			update_joined_count: false,
-			count: PduCount::Normal(*count),
+			..membership_update(remote, user, MembershipState::Knock, *count)
 		})
 		.await?;
 

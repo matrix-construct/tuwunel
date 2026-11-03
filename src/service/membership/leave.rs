@@ -249,17 +249,17 @@ async fn clear_local_leave(
 	}
 
 	let count = self.services.globals.next_count();
+
 	self.services
 		.state_cache
 		.update_membership(MembershipUpdate {
-			room_id,
-			user_id,
-			membership_event: leave_content,
-			sender: user_id,
 			last_state,
-			invite_via: None,
-			update_joined_count: true,
-			count: PduCount::Normal(*count),
+			..MembershipUpdate::self_sent(
+				room_id,
+				user_id,
+				leave_content,
+				PduCount::Normal(*count),
+			)
 		})
 		.await
 }

@@ -10,6 +10,9 @@ mod client;
 #[path = "fixture/mod.rs"]
 mod fixture;
 
+#[path = "fixture/state_cache.rs"]
+mod state_cache;
+
 use std::{
 	convert::identity,
 	net::TcpListener,
@@ -32,21 +35,17 @@ use tuwunel_core::{
 	Err, Result, err,
 	ruma::{
 		OwnedRoomId, OwnedServerName, RoomId, ServerName, UInt, UserId,
-		events::room::member::{MembershipState, RoomMemberEventContent},
+		events::room::member::MembershipState,
 	},
 };
 use tuwunel_database::Json as DbJson;
-use tuwunel_matrix::PduCount;
 use tuwunel_service::{
 	Services,
-	rooms::{
-		spaces::{Accessibility, Identifier},
-		state_cache::MembershipUpdate,
-	},
+	rooms::spaces::{Accessibility, Identifier},
 	users::Register,
 };
 
-use self::fixture::boot;
+use self::{fixture::boot, state_cache::membership_update};
 
 const CERTIFICATE: &str = "../../nix/pkgs/complement/certificate.crt";
 const PRIVATE_KEY: &str = "../../nix/pkgs/complement/private_key.key";
@@ -497,16 +496,12 @@ async fn transition(
 ) -> Result {
 	services
 		.state_cache
-		.update_membership(MembershipUpdate {
+		.update_membership(membership_update(
 			room_id,
 			user_id,
-			membership_event: RoomMemberEventContent::new(membership),
-			sender: user_id,
-			last_state: None,
-			invite_via: None,
-			update_joined_count: true,
-			count: PduCount::Normal(*services.globals.next_count()),
-		})
+			membership,
+			*services.globals.next_count(),
+		))
 		.await
 }
 

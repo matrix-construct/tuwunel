@@ -277,6 +277,7 @@ async fn force_member_effects(&self, room_id: &RoomId, pdu: &PduEvent) -> Result
 			last_state,
 			invite_via: None,
 			update_joined_count: false,
+			replaced_join: None,
 			count: PduCount::Normal(*count),
 		})
 		.await

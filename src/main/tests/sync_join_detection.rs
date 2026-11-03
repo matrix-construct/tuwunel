@@ -5,7 +5,10 @@ use std::sync::Arc;
 use serde_json::{Value, json};
 use tuwunel_core::{
 	Result, err, implement,
-	ruma::{OwnedRoomId, OwnedUserId, RoomId, UserId},
+	ruma::{
+		OwnedRoomId, OwnedUserId, RoomId, UserId,
+		events::room::member::{MembershipState, RoomMemberEventContent},
+	},
 	utils::BoolExt,
 };
 use tuwunel_service::Services;
@@ -16,6 +19,8 @@ use self::{
 	device_lists::{device_list_changed, listed_on_both},
 	fixture::boot,
 	require::require,
+	sign_member::sign_member,
+	state_cache::membership_update,
 	sync::joined_room,
 };
 
@@ -41,11 +46,26 @@ mod get;
 #[path = "client/membership.rs"]
 mod membership;
 
+#[path = "client/profile.rs"]
+mod profile;
+
 #[path = "client/put.rs"]
 mod put;
 
 #[path = "client/require.rs"]
 mod require;
+
+#[path = "fixture/sign.rs"]
+mod sign;
+
+#[path = "fixture/sign_member.rs"]
+mod sign_member;
+
+#[path = "client/snapshot.rs"]
+mod snapshot;
+
+#[path = "fixture/state_cache.rs"]
+mod state_cache;
 
 #[path = "client/sync.rs"]
 mod sync;
@@ -78,6 +98,9 @@ const READER_TOKEN: &str = "sync-join-detection-reader-token";
 const JOINER_TOKEN: &str = "sync-join-detection-joiner-token";
 const INVITER_TOKEN: &str = "sync-join-detection-own-inviter-token";
 const INVITEE_TOKEN: &str = "sync-join-detection-own-invitee-token";
+const RENAMER_TOKEN: &str = "sync-join-detection-renamer-token";
+const RENAMER_PEER_TOKEN: &str = "sync-join-detection-renamer-peer-token";
+const RENAMER_THIRD_TOKEN: &str = "sync-join-detection-renamer-third-token";
 const REJOINER_TOKEN: &str = "sync-join-detection-rejoiner-token";
 const REJOIN_PEER_TOKEN: &str = "sync-join-detection-rejoin-peer-token";
 const FORCED_RENAMER_TOKEN: &str = "sync-join-detection-forced-renamer-token";
@@ -88,6 +111,12 @@ const WINDOW_RENAMER_TOKEN: &str = "sync-join-detection-window-renamer-token";
 const WINDOW_RENAMER_PEER_TOKEN: &str = "sync-join-detection-window-renamer-peer-token";
 const RESTORED_TOKEN: &str = "sync-join-detection-restored-token";
 const RESTORED_PEER_TOKEN: &str = "sync-join-detection-restored-peer-token";
+const REPLAYED_LEAVER_TOKEN: &str = "sync-join-detection-replayed-leaver-token";
+const REPLAYED_LEAVER_PEER_TOKEN: &str = "sync-join-detection-replayed-leaver-peer-token";
+const INGEST_INVITER_TOKEN: &str = "sync-join-detection-ingest-inviter-token";
+const INGEST_JOINER_TOKEN: &str = "sync-join-detection-ingest-joiner-token";
+const STALE_INVITER_TOKEN: &str = "sync-join-detection-stale-inviter-token";
+const STALE_JOINER_TOKEN: &str = "sync-join-detection-stale-joiner-token";
 
 /// Checks what `/sync` and the sliding sync e2ee extension count as a join.
 ///
@@ -98,11 +127,15 @@ fn joins_are_read_from_membership() -> Result { boot("sync-join-detection", [], 
 async fn exercise(services: &Services, base: &str) -> Result {
 	joiners_sharing_another_encrypted_room(services, base).await?;
 	own_join(services, base).await?;
+	own_profile_change(services, base).await?;
 	own_rejoin(services, base).await?;
 	forced_rename(services, base).await?;
 	forced_rename_at_leave(services, base).await?;
 	forced_rename_in_window(services, base).await?;
-	forced_rejoin_in_window(services, base).await
+	forced_rejoin_in_window(services, base).await?;
+	replayed_leave(services, base).await?;
+	ingested_join(services, base).await?;
+	ingested_rejoin(services, base).await
 }
 
 /// An invitee joins two encrypted rooms between two of a reader's syncs.
@@ -130,8 +163,9 @@ async fn joiners_sharing_another_encrypted_room(services: &Services, base: &str)
 	joiner.act(&first, "join").await?;
 	joiner.act(&second, "join").await?;
 
-	let (sync, sliding) = reader.resume_syncs(&tokens, "").await?;
-	let (listed, e2ee_listed) = listed_on_both(&sync, &sliding, &joiner_id);
+	let (_, listed, e2ee_listed) = reader
+		.resume_listing(&tokens, "", &joiner_id)
+		.await?;
 
 	require(listed, "/sync withheld a joiner who shares another encrypted room")?;
 	require(e2ee_listed, "sliding sync withheld a joiner who shares another encrypted room")
@@ -155,13 +189,56 @@ async fn own_join(services: &Services, base: &str) -> Result {
 
 	invitee.act(&room, "join").await?;
 
-	let (sync, sliding) = invitee.resume_syncs(&tokens, "").await?;
-	let (listed, e2ee_listed) = listed_on_both(&sync, &sliding, &inviter_id);
+	let (sync, listed, e2ee_listed) = invitee
+		.resume_listing(&tokens, "", &inviter_id)
+		.await?;
+
 	let joined = joined_room(&sync, &room)?;
 
 	require(resends_state(joined), "/sync sent a delta for the user's own join")?;
 	require(listed, "/sync withheld the room's member after the user's own join")?;
 	require(e2ee_listed, "sliding sync withheld the room's member after the user's own join")
+}
+
+/// A user renames themselves after another member leaves, between two of their
+/// own syncs.
+///
+/// The rename writes a member event into the shared encrypted room without
+/// changing the user's membership. `/sync` must answer with an unlimited
+/// timeline and a state delta, and neither v3 `/sync` nor the sliding sync
+/// e2ee extension may list the room's other member in `device_lists.changed`.
+async fn own_profile_change(services: &Services, base: &str) -> Result {
+	let (renamer_id, renamer) = account(services, base, "renamer", RENAMER_TOKEN).await?;
+	let (peer_id, peer) = account(services, base, "renamerpeer", RENAMER_PEER_TOKEN).await?;
+	let (third_id, third) = account(services, base, "renamerthird", RENAMER_THIRD_TOKEN).await?;
+	let room = renamer
+		.encrypted_room_with(&peer, &peer_id)
+		.await?;
+
+	renamer.admit(&room, &third, &third_id).await?;
+
+	// The next delta starts from the state at `since`, which must not rest on the third's join.
+	peer.send_text(&room, "settle", "joined").await?;
+
+	let tokens = renamer.open_syncs("").await?;
+	let displayname = "renamed";
+
+	third.act(&room, "leave").await?;
+	renamer.rename(&renamer_id, displayname).await?;
+
+	let (sync, listed, e2ee_listed) = renamer
+		.resume_listing(&tokens, "", &peer_id)
+		.await?;
+
+	let joined = joined_room(&sync, &room)?;
+	let timeline = &joined["timeline"];
+	let renamed = carries_rename(timeline, &renamer_id, displayname);
+
+	require(renamed, "the rename missed the timeline")?;
+	require(timeline["limited"] != true, "the rename limited the timeline")?;
+	require(resends_state(joined).is_false(), "the rename resent all state")?;
+	require(listed.is_false(), "/sync read the rename as a join")?;
+	require(e2ee_listed.is_false(), "sliding sync read the rename as a join")
 }
 
 /// A user leaves and rejoins between two of their own syncs.
@@ -191,8 +268,10 @@ async fn own_rejoin(services: &Services, base: &str) -> Result {
 	peer.send_text(&room, "first", "one").await?;
 	peer.send_text(&room, "second", "two").await?;
 
-	let (sync, sliding) = rejoiner.resume_syncs(&tokens, &query).await?;
-	let (listed, e2ee_listed) = listed_on_both(&sync, &sliding, &peer_id);
+	let (sync, listed, e2ee_listed) = rejoiner
+		.resume_listing(&tokens, &query, &peer_id)
+		.await?;
+
 	let joined = joined_room(&sync, &room)?;
 	let timeline = &joined["timeline"];
 
@@ -278,6 +357,107 @@ async fn forced_rejoin_in_window(services: &Services, base: &str) -> Result {
 	)
 }
 
+/// A user syncs while a forced state replay holds them on an old leave, and a
+/// second replay restores their later join before they rename.
+///
+/// The restore is the user's fresh join on both surfaces. The rename is a join
+/// event from a user already joined, so it keeps the join position the second
+/// replay recorded rather than hiding the restore.
+async fn replayed_leave(services: &Services, base: &str) -> Result {
+	let user = ("replayedleaver", REPLAYED_LEAVER_TOKEN);
+	let peer = ("replayedleaverpeer", REPLAYED_LEAVER_PEER_TOKEN);
+	let case = restorable(services, base, user, peer).await?;
+	let Restorable { user_id, user, peer, room, .. } = &case;
+
+	user.act(room, "leave").await?;
+
+	let left_state = peer
+		.state_after_text(room, "gone", "left")
+		.await?;
+
+	peer.admit(room, user, user_id).await?;
+
+	let joined_state = peer
+		.state_after_text(room, "back", "rejoined")
+		.await?;
+
+	force_state(services, room, left_state).await?;
+
+	let tokens = user.open_syncs("").await?;
+
+	Restorable { joined_state, ..case }
+		.rename_after_restore_since(&tokens)
+		.await
+}
+
+/// A user's own join, ingested over federation as a restricted join's fallback
+/// delivers it, records its own timeline position.
+///
+/// A sync between the ingest's replay of the join and its append takes a token
+/// past the replayed position, so a join left there would never read as fresh.
+async fn ingested_join(services: &Services, base: &str) -> Result {
+	let (_, inviter) = account(services, base, "ingestinviter", INGEST_INVITER_TOKEN).await?;
+	let (joiner_id, _) = account(services, base, "ingestjoiner", INGEST_JOINER_TOKEN).await?;
+	let room = inviter.create_encrypted_room().await?;
+
+	inviter
+		.act_on(&room, "invite", &joiner_id)
+		.await?;
+
+	ingest_join(services, &room, &joiner_id).await
+}
+
+/// Ingest a user's own join over federation and require the recorded join
+/// position to be the join's own timeline position.
+///
+/// The ingest replays the join into the state cache at an earlier position
+/// before appending it.
+async fn ingest_join(services: &Services, room_id: &RoomId, user_id: &UserId) -> Result {
+	let join = RoomMemberEventContent::new(MembershipState::Join);
+	let (event_id, signed) = sign_member(services, user_id, room_id, &join).await?;
+
+	services
+		.event_handler
+		.handle_incoming_pdu(services.globals.server_name(), room_id, &event_id, signed, true)
+		.await?;
+
+	let appended = services.timeline.get_pdu_count(&event_id).await?;
+	let recorded = services
+		.state_cache
+		.get_joined_count(room_id, user_id)
+		.await?;
+
+	require(
+		recorded == appended.into_unsigned(),
+		"the ingested join kept its replayed position",
+	)
+}
+
+/// A user's own join, ingested over federation while the room's state still
+/// holds their earlier join, records its own timeline position.
+///
+/// A leave recorded only in the state cache, as when a room's remote leave
+/// fails, leaves that join in the room's state. The ingest's replay records a
+/// position after the leave, and the append must still move it to its own.
+async fn ingested_rejoin(services: &Services, base: &str) -> Result {
+	let (_, inviter) = account(services, base, "staleinviter", STALE_INVITER_TOKEN).await?;
+	let (joiner_id, joiner) = account(services, base, "stalejoiner", STALE_JOINER_TOKEN).await?;
+	let room = inviter
+		.encrypted_room_with(&joiner, &joiner_id)
+		.await?;
+
+	let count = services.globals.next_count();
+	let local_leave = membership_update(&room, &joiner_id, MembershipState::Leave, *count);
+
+	services
+		.state_cache
+		.update_membership(local_leave)
+		.await?;
+
+	drop(count);
+	ingest_join(services, &room, &joiner_id).await
+}
+
 /// Register a user and a peer, and have the peer admit the user to a new
 /// encrypted room whose state is then saved.
 ///
@@ -292,8 +472,9 @@ async fn restorable<'a>(
 	let (user_id, user) = account(services, base, localpart, token).await?;
 	let (peer_id, peer) = account(services, base, peer_localpart, peer_token).await?;
 	let room = peer.encrypted_room_with(&user, &user_id).await?;
-	let anchor = peer.send_text(&room, "anchor", "joined").await?;
-	let joined_state = services.state.pdu_shortstatehash(&anchor).await?;
+	let joined_state = peer
+		.state_after_text(&room, "anchor", "joined")
+		.await?;
 
 	Ok(Restorable {
 		user_id,
@@ -323,19 +504,22 @@ async fn rename_after_restore(&self) -> Result {
 /// both surfaces list the peer.
 #[implement(Restorable, params = "<'_>")]
 async fn rename_after_restore_since(&self, tokens: &Tokens) -> Result {
-	let displayname = json!({ "displayname": "restored" });
+	let displayname = "restored";
 
 	force_state(self.user.services, &self.room, self.joined_state).await?;
-
 	self.user
-		.put(&format!("profile/{}/displayname", self.user_id), &displayname)
+		.rename(&self.user_id, displayname)
 		.await?;
 
-	let (sync, sliding) = self.user.resume_syncs(tokens, "").await?;
-	let (listed, e2ee_listed) = listed_on_both(&sync, &sliding, &self.peer_id);
-	let joined = joined_room(&sync, &self.room)?;
+	let (sync, listed, e2ee_listed) = self
+		.user
+		.resume_listing(tokens, "", &self.peer_id)
+		.await?;
 
-	require(carries(&joined["timeline"], "m.room.member"), "the rename missed the timeline")?;
+	let joined = joined_room(&sync, &self.room)?;
+	let renamed = carries_rename(&joined["timeline"], &self.user_id, displayname);
+
+	require(renamed, "the rename missed the timeline")?;
 	require(resends_state(joined), "/sync sent a delta for a rename after a restored join")?;
 	require(listed, "/sync withheld the room's member after a restored join")?;
 	require(e2ee_listed, "sliding sync withheld the room's member after a restored join")
@@ -355,6 +539,25 @@ async fn open_syncs(&self, query: &str) -> Result<Tokens> {
 	let pos = field(&sliding, "pos")?;
 
 	Ok((since.to_owned(), pos.to_owned()))
+}
+
+/// Resume both syncs from their tokens, and report whether each lists a member
+/// in `device_lists.changed`.
+///
+/// The `/sync` response comes back for a case's own checks, and the `/sync`
+/// answer comes before the sliding sync answer. The sliding sync response
+/// serves only the listing.
+#[implement(Client, params = "<'_>")]
+async fn resume_listing(
+	&self,
+	tokens: &Tokens,
+	query: &str,
+	member_id: &UserId,
+) -> Result<(Value, bool, bool)> {
+	let (sync, sliding) = self.resume_syncs(tokens, query).await?;
+	let (listed, e2ee_listed) = listed_on_both(&sync, &sliding, member_id);
+
+	Ok((sync, listed, e2ee_listed))
 }
 
 /// Resume both syncs from their tokens and return the two responses.
@@ -384,11 +587,22 @@ async fn resume_syncs(&self, tokens: &Tokens, query: &str) -> Result<(Value, Val
 fn resends_state(joined: &Value) -> bool { carries(&joined["state"], "m.room.create") }
 
 fn carries(section: &Value, event_type: &str) -> bool {
-	section["events"]
-		.as_array()
-		.into_iter()
-		.flatten()
-		.any(|event| event["type"] == event_type)
+	events(section).any(|event| event["type"] == event_type)
+}
+
+/// Whether a section holds the member event renaming a user to a display name.
+///
+/// Another member's event in the same window cannot pass for the rename.
+fn carries_rename(section: &Value, user_id: &UserId, displayname: &str) -> bool {
+	events(section).any(|event| {
+		event["type"] == "m.room.member"
+			&& event["state_key"] == user_id.as_str()
+			&& event["content"]["displayname"] == displayname
+	})
+}
+
+fn events(section: &Value) -> impl Iterator<Item = &Value> {
+	section["events"].as_array().into_iter().flatten()
 }
 
 /// Create an encrypted invite-only room and admit one member to it.

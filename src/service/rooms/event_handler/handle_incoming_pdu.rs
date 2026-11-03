@@ -366,6 +366,7 @@ async fn handle_rescinded_invite(
 			last_state: None,
 			invite_via: None,
 			update_joined_count: false,
+			replaced_join: None,
 			count: PduCount::Normal(*count),
 		})
 		.await?;

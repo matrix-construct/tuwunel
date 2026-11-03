@@ -18,7 +18,6 @@ use serde_json::{Value, json};
 use tokio::{sync::Notify, task_local, time::timeout};
 use tuwunel_core::{Err, Result, config::Figment, err, utils::time::now};
 use tuwunel_database::Json;
-use tuwunel_matrix::PduCount;
 
 use super::{Accessibility, Identifier, PaginationToken, get_parent_children_via};
 use crate::{
@@ -161,7 +160,7 @@ async fn transition(
 	membership: MembershipState,
 ) -> Result {
 	let count = services.globals.next_count();
-	let update = membership_update(room_id, user_id, membership, PduCount::Normal(*count));
+	let update = membership_update(room_id, user_id, membership, *count);
 
 	services
 		.state_cache

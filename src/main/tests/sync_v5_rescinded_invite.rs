@@ -6,20 +6,18 @@ use tuwunel_core::{
 	ruma::{
 		CanonicalJsonObject, MilliSecondsSinceUnixEpoch, OwnedEventId, RoomId, RoomVersionId,
 		UserId,
-		events::{
-			AnyStrippedStateEvent,
-			room::member::{MembershipState, RoomMemberEventContent},
-		},
+		events::{AnyStrippedStateEvent, room::member::MembershipState},
 		serde::Raw,
 	},
 };
-use tuwunel_matrix::{PduCount, pdu::into_outgoing_federation};
+use tuwunel_matrix::pdu::into_outgoing_federation;
 use tuwunel_service::{Services, rooms::state_cache::MembershipUpdate};
 
 use self::{
 	client::{Client, field, register},
 	fixture::boot,
 	member_event::find_member_event,
+	state_cache::membership_update,
 };
 
 #[expect(dead_code)] // This test creates no rooms through the client API.
@@ -32,6 +30,9 @@ mod member_event;
 
 #[path = "sliding_sync/resume.rs"]
 mod resume;
+
+#[path = "fixture/state_cache.rs"]
+mod state_cache;
 
 const INVITER_TOKEN: &str = "sync-v5-rescinded-invite-inviter-access-token";
 const INVITEE_TOKEN: &str = "sync-v5-rescinded-invite-invitee-access-token";
@@ -131,17 +132,16 @@ async fn plant_invite(
 		.map(serde_json::from_value)
 		.collect::<Result<_, _>>()?;
 
+	let count = services.globals.next_count();
+	let invite = membership_update(room_id, invitee, MembershipState::Invite, *count);
+
 	services
 		.state_cache
 		.update_membership(MembershipUpdate {
-			room_id,
-			user_id: invitee,
-			membership_event: RoomMemberEventContent::new(MembershipState::Invite),
 			sender: inviter,
 			last_state: Some(last_state),
-			invite_via: None,
 			update_joined_count: false,
-			count: PduCount::Normal(*services.globals.next_count()),
+			..invite
 		})
 		.await
 }

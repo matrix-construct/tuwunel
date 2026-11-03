@@ -18,10 +18,14 @@ use tuwunel_service::Services;
 use self::{
 	client::{Client, register},
 	fixture::boot,
+	sign::sign,
 };
 
 mod client;
 mod fixture;
+
+#[path = "fixture/sign.rs"]
+mod sign;
 
 const TOKEN: &str = "federation-prev-event-room-access-token";
 
@@ -187,14 +191,7 @@ async fn sign_message(
 		..PduBuilder::timeline(&RoomMessageEventContent::text_plain("hello"))
 	};
 
-	let (_, mut pdu) = {
-		let state_lock = services.state.mutex.lock(room_id).await;
-
-		services
-			.timeline
-			.create_hash_and_sign_event(builder, user_id, room_id, &state_lock)
-			.await?
-	};
+	let (_, mut pdu) = sign(services, user_id, room_id, builder).await?;
 
 	let prev_events = prev_event_ids
 		.iter()

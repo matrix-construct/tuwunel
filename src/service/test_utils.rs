@@ -371,26 +371,19 @@ pub(crate) async fn set_room_state(
 
 /// Builds a state-cache membership update with no event behind it.
 ///
-/// The user sends it themselves, it carries no prior state or invite routing,
-/// and it updates the joined counts; a caller changes any of these by struct
-/// update. A count taken from `next_count` keeps its permit alive until the
-/// update is awaited, so the row lands before the count retires.
+/// It is the user's own transition to a bare membership, with the defaults of
+/// `MembershipUpdate::self_sent`. A caller taking the count from `next_count`
+/// must hold its permit until the update is awaited, so the row lands before
+/// the count retires.
 pub(crate) fn membership_update<'a>(
 	room_id: &'a RoomId,
 	user_id: &'a UserId,
 	membership: MembershipState,
-	count: PduCount,
+	count: u64,
 ) -> MembershipUpdate<'a> {
-	MembershipUpdate {
-		room_id,
-		user_id,
-		membership_event: RoomMemberEventContent::new(membership),
-		sender: user_id,
-		last_state: None,
-		invite_via: None,
-		update_joined_count: true,
-		count,
-	}
+	let content = RoomMemberEventContent::new(membership);
+
+	MembershipUpdate::self_sent(room_id, user_id, content, PduCount::Normal(count))
 }
 
 /// Polls a pinned future once with `waker` and returns the result.

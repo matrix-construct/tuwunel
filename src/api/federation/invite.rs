@@ -359,6 +359,7 @@ async fn record_local_invite(
 			last_state: Some(invite_state),
 			invite_via: body.via.clone(),
 			update_joined_count: true,
+			replaced_join: None,
 			count: PduCount::Normal(*count),
 		})
 		.await?;

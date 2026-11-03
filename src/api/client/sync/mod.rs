@@ -164,9 +164,9 @@ async fn share_encrypted_room(
 
 /// Whether a user's join to a room is fresh since a sync token.
 ///
-/// The joined count moves on every join-membership event, a profile change
-/// included, so a rename after the token also reads as fresh. An unreadable
-/// count reads as unmoved.
+/// The joined count moves on every join and forced state replay except a local
+/// user's profile change over the position its join recorded, which keeps it.
+/// An unreadable count reads as unmoved.
 #[tracing::instrument(level = "trace", skip(services))]
 async fn joined_since(
 	services: &Services,

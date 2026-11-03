@@ -599,17 +599,19 @@ async fn record_knock(
 		.log_err()
 		.ok();
 
+	let knock = MembershipUpdate::self_sent(
+		room_id,
+		sender_user,
+		membership_event,
+		PduCount::Normal(*count),
+	);
+
 	self.services
 		.state_cache
 		.update_membership(MembershipUpdate {
-			room_id,
-			user_id: sender_user,
-			membership_event,
-			sender: sender_user,
 			last_state: Some(summary),
-			invite_via: None,
 			update_joined_count: false,
-			count: PduCount::Normal(*count),
+			..knock
 		})
 		.await
 }

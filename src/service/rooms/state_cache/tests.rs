@@ -1,18 +1,12 @@
 use futures::StreamExt;
-use ruma::{
-	OwnedRoomId,
-	events::room::member::{MembershipState, RoomMemberEventContent},
-	room_id,
-	serde::Raw,
-	user_id,
-};
+use ruma::{OwnedRoomId, events::room::member::MembershipState, room_id, serde::Raw, user_id};
 use serde_json::{Value as JsonValue, json};
 use tuwunel_core::{Result, config::Figment};
 use tuwunel_database::Json;
 use tuwunel_matrix::PduCount;
 
 use super::MembershipUpdate;
-use crate::test_utils::{fixture, json_events};
+use crate::test_utils::{fixture, json_events, membership_update};
 
 /// A user's room lists hold only the rows keyed by that exact user ID, not
 /// those of a user whose server name extends hers.
@@ -77,14 +71,9 @@ async fn a_replayed_knock_keeps_its_stored_summary() -> Result {
 
 	let summary = vec![Raw::new(&name_event)?.cast_unchecked()];
 	let knock = |count, last_state| MembershipUpdate {
-		room_id,
-		user_id: alice,
-		membership_event: RoomMemberEventContent::new(MembershipState::Knock),
-		sender: alice,
 		last_state,
-		invite_via: None,
 		update_joined_count: false,
-		count: PduCount::Normal(count),
+		..membership_update(room_id, alice, MembershipState::Knock, count)
 	};
 
 	state_cache
@@ -147,6 +136,66 @@ async fn a_knock_summary_reads_only_the_latest_own_membership() -> Result {
 	assert_eq!(json_events(&read)?, [name_event.clone(), member("knock")]);
 	assert_eq!(listed.len(), 1);
 	assert_eq!(json_events(&listed[0])?, [name_event, member("knock")]);
+
+	Ok(())
+}
+
+/// A profile change keeps a recorded join position no later than the join it
+/// replaces.
+///
+/// Any other join records its own position even while the user is joined, as a
+/// replayed join does. A profile change after it then records one too. So does
+/// a profile change over a legacy empty row or over no join row.
+#[tokio::test]
+async fn a_profile_change_keeps_the_join_position() -> Result {
+	let Some(fixture) = fixture(Figment::new()).await? else {
+		return Ok(());
+	};
+
+	let services = &fixture.services;
+	let state_cache = &services.state_cache;
+	let alice = user_id!("@alice:localhost");
+	let room_id = room_id!("!joined:example.test");
+	let update = |membership, count| membership_update(room_id, alice, membership, count);
+	let profile = |replaced, count| MembershipUpdate {
+		replaced_join: Some(PduCount::Normal(replaced)),
+		..update(MembershipState::Join, count)
+	};
+
+	let joined_after = async |update| {
+		state_cache.update_membership(update).await?;
+		state_cache.get_joined_count(room_id, alice).await
+	};
+
+	let join = |count| update(MembershipState::Join, count);
+
+	assert_eq!(joined_after(join(1)).await?, 1, "a join recorded no position");
+	assert_eq!(joined_after(profile(1, 2)).await?, 1, "a profile change moved the position");
+	assert_eq!(joined_after(join(3)).await?, 3, "a join while joined kept the old position");
+	assert_eq!(
+		joined_after(profile(1, 4)).await?,
+		4,
+		"a profile change kept a later join's position"
+	);
+
+	services.db["roomuserid_joined"].put_raw((room_id, alice), b"");
+	services.db["userroomid_joined"].put_raw((alice, room_id), b"");
+
+	assert_eq!(
+		joined_after(profile(4, 5)).await?,
+		5,
+		"a profile change kept a legacy row's empty position"
+	);
+
+	state_cache
+		.update_membership(update(MembershipState::Leave, 6))
+		.await?;
+
+	assert_eq!(
+		joined_after(profile(5, 7)).await.ok(),
+		Some(7),
+		"a profile change over no join row recorded none"
+	);
 
 	Ok(())
 }

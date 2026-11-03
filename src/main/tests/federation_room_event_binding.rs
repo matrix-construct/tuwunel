@@ -29,7 +29,7 @@ use tuwunel_core::{
 	utils::stream::{IterStream, TryBroadbandExt},
 };
 use tuwunel_matrix::{
-	Event, PduEvent,
+	Event,
 	event::gen_event_id,
 	pdu::{PduBuilder, into_outgoing_federation},
 };
@@ -40,6 +40,8 @@ use self::{
 	federation::{prepare, send, submit},
 	fixture::boot,
 	room_state::state_id,
+	sign::sign,
+	sign_member::{SignedEvent, sign_member},
 };
 
 mod client;
@@ -51,6 +53,10 @@ mod room_state;
 mod event;
 #[path = "client/put.rs"]
 mod put;
+#[path = "fixture/sign.rs"]
+mod sign;
+#[path = "fixture/sign_member.rs"]
+mod sign_member;
 
 const ROUTES: [Route; 3] = [Route::State, Route::StateIds, Route::EventAuth];
 
@@ -74,8 +80,6 @@ type Served = BTreeMap<OwnedEventId, AuthEvents>;
 type ServedEvent = (OwnedEventId, AuthEvents);
 
 type AuthEvents = Vec<OwnedEventId>;
-
-type SignedEvent = (OwnedEventId, CanonicalJsonObject);
 
 type Fields<'a, T> = BTreeMap<&'a str, Vec<T>>;
 
@@ -343,30 +347,12 @@ async fn sign_rename(
 	room_id: &RoomId,
 	displayname: &str,
 ) -> Result<SignedEvent> {
-	let room_version = services.state.get_room_version(room_id).await?;
 	let content = RoomMemberEventContent {
 		displayname: Some(displayname.to_owned()),
 		..RoomMemberEventContent::new(MembershipState::Join)
 	};
 
-	let builder = PduBuilder::state(member_id.as_str(), &content);
-	let (pdu, pdu_json) = sign(services, member_id, room_id, builder).await?;
-
-	Ok((pdu.event_id, into_outgoing_federation(pdu_json, &room_version)))
-}
-
-async fn sign(
-	services: &Services,
-	user_id: &UserId,
-	room_id: &RoomId,
-	builder: PduBuilder,
-) -> Result<(PduEvent, CanonicalJsonObject)> {
-	let state_lock = services.state.mutex.lock(room_id).await;
-
-	services
-		.timeline
-		.create_hash_and_sign_event(builder, user_id, room_id, &state_lock)
-		.await
+	sign_member(services, member_id, room_id, &content).await
 }
 
 async fn accept(

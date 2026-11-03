@@ -473,7 +473,7 @@ where
 		let update = MembershipUpdate {
 			sender,
 			update_joined_count: false,
-			..membership_update(room_id, user_id, membership, PduCount::Normal(count))
+			..membership_update(room_id, user_id, membership, count)
 		};
 
 		services

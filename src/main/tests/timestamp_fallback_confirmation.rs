@@ -33,14 +33,16 @@ use tuwunel_core::{
 	ruma::{
 		MilliSecondsSinceUnixEpoch, OwnedEventId, OwnedRoomId, OwnedServerName, RoomId,
 		RoomVersionId, ServerName, UInt, UserId,
-		events::room::{
-			member::{MembershipState, RoomMemberEventContent},
-			message::RoomMessageEventContent,
-		},
+		events::room::{member::MembershipState, message::RoomMessageEventContent},
 	},
 };
-use tuwunel_matrix::{PduCount, pdu::PduBuilder};
-use tuwunel_service::{Services, rooms::state_cache::MembershipUpdate, users::Register};
+use tuwunel_matrix::pdu::PduBuilder;
+use tuwunel_service::{Services, users::Register};
+
+use self::state_cache::membership_update;
+
+#[path = "fixture/state_cache.rs"]
+mod state_cache;
 
 const CERTIFICATE: &str = "../../nix/pkgs/complement/certificate.crt";
 const PRIVATE_KEY: &str = "../../nix/pkgs/complement/private_key.key";
@@ -286,16 +288,12 @@ async fn exercise(
 
 	services
 		.state_cache
-		.update_membership(MembershipUpdate {
-			room_id: &room_id,
-			user_id: &remote_user,
-			membership_event: RoomMemberEventContent::new(MembershipState::Join),
-			sender: &remote_user,
-			last_state: None,
-			invite_via: None,
-			update_joined_count: true,
-			count: PduCount::Normal(*services.globals.next_count()),
-		})
+		.update_membership(membership_update(
+			&room_id,
+			&remote_user,
+			MembershipState::Join,
+			*services.globals.next_count(),
+		))
 		.await?;
 
 	let outcome =

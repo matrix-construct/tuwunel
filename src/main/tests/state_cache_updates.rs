@@ -5,14 +5,17 @@ use tuwunel::{Args, Runtime, Server, async_run, async_start, async_stop};
 use tuwunel_core::{
 	Err, Result,
 	ruma::{
-		RoomId, ServerName, UserId,
-		events::room::member::{MembershipState, RoomMemberEventContent},
-		room_id, server_name, user_id,
+		RoomId, ServerName, UserId, events::room::member::MembershipState, room_id, server_name,
+		user_id,
 	},
 	utils::stream::ReadyExt,
 };
-use tuwunel_matrix::PduCount;
 use tuwunel_service::{Services, rooms::state_cache::MembershipUpdate};
+
+use self::state_cache::membership_update;
+
+#[path = "fixture/state_cache.rs"]
+mod state_cache;
 
 #[test]
 fn membership_updates_preserve_counts_servers_and_forgetting() -> Result {
@@ -80,14 +83,8 @@ async fn transition(
 	services
 		.state_cache
 		.update_membership(MembershipUpdate {
-			room_id,
-			user_id,
-			membership_event: RoomMemberEventContent::new(membership),
-			sender: user_id,
-			last_state: None,
-			invite_via: None,
 			update_joined_count: false,
-			count: PduCount::Normal(*services.globals.next_count()),
+			..membership_update(room_id, user_id, membership, *services.globals.next_count())
 		})
 		.await
 }
