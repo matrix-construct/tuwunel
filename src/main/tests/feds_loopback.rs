@@ -40,19 +40,16 @@ mod tests {
 		let source = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
 		let certificate = source.join(CERTIFICATE);
 		let private_key = source.join(PRIVATE_KEY);
-		let mut args = Args::default_test(&["fresh", "cleanup"])
-			.with_option(format!("database_path={:?}", database.0))
+		let args = Args::default_test(&["fresh", "cleanup"])
+			.with_maintenance()
+			.with_database_path(&database.0)
 			.with_option(format!("server_name=\"127.0.0.1:{port}\""))
-			.with_loopback_listener(port);
-
-		args.maintenance = true;
-		args.option.extend([
-			"listening=true".to_owned(),
-			"network.http.ip_range_denylist=[]".to_owned(),
-			"network.http.allow_invalid_tls_certificates=true".to_owned(),
-			format!("tls.certs={certificate:?}"),
-			format!("tls.key={private_key:?}"),
-		]);
+			.with_loopback_listener(port)
+			.with_option("listening=true")
+			.with_option("network.http.ip_range_denylist=[]")
+			.with_option("network.http.allow_invalid_tls_certificates=true")
+			.with_path_option("tls.certs", &certificate)
+			.with_path_option("tls.key", &private_key);
 
 		let runtime = Runtime::new(Some(&args))?;
 		let server = Server::new(Some(&args), Some(&runtime))?;

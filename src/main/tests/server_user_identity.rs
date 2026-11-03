@@ -79,7 +79,7 @@ fn server_user_identity_is_durable() -> Result {
 /// the state of every database from before the stamp existed.
 fn seed_phase(database: &Path) -> Result {
 	let args = Args::default_test(&["fresh"])
-		.with_option(format!("database_path={database:?}"))
+		.with_database_path(database)
 		.with_option("admin.room.create=true");
 
 	boot(&args, async |services| {
@@ -188,7 +188,7 @@ fn foreign_phase(database: &Path) -> Result {
 /// of them still writes under a read-only engine.
 fn read_only_phase(database: &Path) -> Result {
 	let args = Args::default_test(&[])
-		.with_option(format!("database_path={database:?}"))
+		.with_database_path(database)
 		.with_option("rocksdb_read_only=true")
 		.with_option("database_migrations=false");
 
@@ -205,7 +205,7 @@ fn read_only_phase(database: &Path) -> Result {
 /// admits a foreign account to the room and strips the stamp again, leaving
 /// the database for the adoption that follows.
 fn legacy_phase(database: &Path) -> Result {
-	let args = Args::default_test(&[]).with_option(format!("database_path={database:?}"));
+	let args = Args::default_test(&[]).with_database_path(database);
 
 	boot(&args, async |services| {
 		assert_eq!(established(services).await?.as_deref(), Some("conduit"));
@@ -236,7 +236,7 @@ fn legacy_phase(database: &Path) -> Result {
 /// it.
 fn adopted_phase(database: &Path) -> Result {
 	let args = Args::default_test(&[])
-		.with_option(format!("database_path={database:?}"))
+		.with_database_path(database)
 		.with_option("admin.server_user_localpart=\"_server\"");
 
 	boot(&args, async |services| {
@@ -258,7 +258,7 @@ fn changed_phase(database: &Path) -> Result {
 /// Startup itself fails, so the shutdown ladder of `boot` never runs here.
 fn refused(database: &Path, localpart: &str, refusal: &str) -> Result {
 	let args = Args::default_test(&[])
-		.with_option(format!("database_path={database:?}"))
+		.with_database_path(database)
 		.with_option(format!("admin.server_user_localpart={localpart:?}"));
 
 	let (runtime, server) = start(&args)?;

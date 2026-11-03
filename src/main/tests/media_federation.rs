@@ -69,17 +69,17 @@ mod tests {
 		let private_key = manifest.join(PRIVATE_KEY);
 
 		let args = Args::default_test(&["fresh", "cleanup"])
-			.with_option(format!("database_path={:?}", db_path.0))
+			.with_database_path(&db_path.0)
 			.with_option(format!("server_name=\"127.0.0.1:{port}\""))
-			.with_loopback_listener(port);
+			.with_loopback_listener(port)
+			.with_path_option("tls.certs", &certificate)
+			.with_path_option("tls.key", &private_key);
 
 		let args = [
 			"listening=true".to_owned(),
 			"federation.loopback=true".to_owned(),
 			"network.http.ip_range_denylist=[]".to_owned(),
 			"network.http.allow_invalid_tls_certificates=true".to_owned(),
-			format!("tls.certs={certificate:?}"),
-			format!("tls.key={private_key:?}"),
 			"logging.filter=\"error\"".to_owned(),
 		]
 		.into_iter()

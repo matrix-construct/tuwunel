@@ -29,7 +29,7 @@ fn corrupt_state_after_is_scoped_to_one_joined_room() -> Result {
 	let db_path = Args::test_database_path("sync-state-after-corruption");
 
 	let mut args = Args::default_test(&["fresh", "cleanup"])
-		.with_option(format!("database_path={db_path:?}"))
+		.with_database_path(&db_path)
 		.with_loopback_listener(port);
 
 	args.option.extend(["listening=true".to_owned()]);

@@ -134,7 +134,7 @@ where
 	let listener = TcpListener::bind(("127.0.0.1", 0))?;
 	let port = listener.local_addr()?.port();
 	let mut args = Args::default_test(test_modes)
-		.with_option(format!("database_path={db_path:?}"))
+		.with_database_path(db_path)
 		.with_loopback_listener(port);
 
 	args.option.extend([

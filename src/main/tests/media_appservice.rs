@@ -88,7 +88,7 @@ mod tests {
 		let db_path = DatabasePath(Args::test_database_path("media-appservice"));
 
 		let args = Args::default_test(&["fresh", "cleanup"])
-			.with_option(format!("database_path={:?}", db_path.0))
+			.with_database_path(&db_path.0)
 			.with_loopback_listener(port);
 
 		let args = ["listening=true".to_owned(), "logging.filter=\"error\"".to_owned()]

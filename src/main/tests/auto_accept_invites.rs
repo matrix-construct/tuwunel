@@ -45,7 +45,7 @@ fn direct_invites_are_accepted_and_others_are_not() -> Result {
 	let db_path = Args::test_database_path("auto-accept");
 
 	let mut args = Args::default_test(&["fresh", "cleanup"])
-		.with_option(format!("database_path={db_path:?}"))
+		.with_database_path(&db_path)
 		.with_loopback_listener(port);
 
 	args.option.extend([

@@ -75,7 +75,7 @@ fn run_child(database: &Path, phase: &str) -> Result {
 }
 
 fn seed_phase(database: &Path) -> Result {
-	let args = Args::default_test(&["fresh"]).with_option(format!("database_path={database:?}"));
+	let args = Args::default_test(&["fresh"]).with_database_path(database);
 
 	with_started_server(&args, async |services| {
 		services.db["global"].exists(MARKER).await?;
@@ -102,7 +102,7 @@ fn seed_phase(database: &Path) -> Result {
 }
 
 fn migrate_phase(database: &Path) -> Result {
-	let args = Args::default_test(&[]).with_option(format!("database_path={database:?}"));
+	let args = Args::default_test(&[]).with_database_path(database);
 
 	with_started_server(&args, async |services| {
 		services.db["global"].exists(MARKER).await?;
@@ -125,7 +125,7 @@ fn migrate_phase(database: &Path) -> Result {
 
 fn restart_phase(database: &Path) -> Result {
 	let args = Args::default_test(&[])
-		.with_option(format!("database_path={database:?}"))
+		.with_database_path(database)
 		.with_option("database_migrations=false");
 
 	with_started_server(&args, async |services| {
@@ -145,7 +145,7 @@ fn restart_phase(database: &Path) -> Result {
 
 fn reject_phase(database: &Path) -> Result {
 	let args = Args::default_test(&[])
-		.with_option(format!("database_path={database:?}"))
+		.with_database_path(database)
 		.with_option("database_migrations=false");
 
 	let runtime = Runtime::new(Some(&args))?;
@@ -163,7 +163,7 @@ fn reject_phase(database: &Path) -> Result {
 }
 
 fn restore_phase(database: &Path) -> Result {
-	let args = Args::default_test(&[]).with_option(format!("database_path={database:?}"));
+	let args = Args::default_test(&[]).with_database_path(database);
 
 	with_started_server(&args, async |services| {
 		services.db["global"].exists(MARKER).await?;
