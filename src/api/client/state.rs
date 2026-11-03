@@ -1,8 +1,8 @@
 use axum::extract::State;
 use futures::{FutureExt, StreamExt, TryFutureExt};
 use ruma::{
-	CanonicalJsonObject, MilliSecondsSinceUnixEpoch, OwnedEventId, OwnedRoomAliasId, RoomId,
-	UserId,
+	CanonicalJsonObject, CanonicalJsonValue, MilliSecondsSinceUnixEpoch, OwnedEventId,
+	OwnedRoomAliasId, RoomId, UserId,
 	api::client::state::{
 		get_state_event_for_key::{self, v3::StateEventFormat},
 		get_state_events, send_state_event,
@@ -24,13 +24,13 @@ use serde_json::{json, value::to_raw_value};
 use tuwunel_core::{
 	Err, Result, err, is_false,
 	result::NotFound,
-	utils::{BoolExt, stream::BroadbandExt},
+	utils::{BoolExt, json::serialized_len, stream::BroadbandExt},
 };
 use tuwunel_matrix::{
 	Event,
 	pdu::{PduBuilder, PduEvent},
 };
-use tuwunel_service::Services;
+use tuwunel_service::{Services, profile::check_member_content};
 
 use crate::{Ruma, RumaResponse, with_membership};
 
@@ -206,6 +206,11 @@ async fn send_state_event_for_key_helper(
 	timestamp: Option<MilliSecondsSinceUnixEpoch>,
 ) -> Result<OwnedEventId> {
 	allowed_to_send_state_event(services, sender, room_id, event_type, state_key, json).await?;
+
+	if *event_type == StateEventType::RoomMember {
+		check_member_content_size(services, json)?;
+	}
+
 	let state_lock = services.state.mutex.lock(room_id).await;
 
 	let current = match state_dedup_eligible(event_type, timestamp.as_ref()) {
@@ -250,6 +255,26 @@ async fn send_state_event_for_key_helper(
 		.await?;
 
 	Ok(event_id)
+}
+
+/// Refuses a client's member event whose content exceeds the configured budget
+/// or carries a display name longer than the profile limit.
+///
+/// Server-built member events are typed and bounded by the profile service, so
+/// only client-supplied content is checked here.
+fn check_member_content_size(services: &Services, json: &Raw<AnyStateEventContent>) -> Result {
+	let content = json.deserialize_as_unchecked::<CanonicalJsonObject>()?;
+
+	// A non-string displayname is not bounded here; the typed content rejects it.
+	let displayname = content
+		.get("displayname")
+		.and_then(CanonicalJsonValue::as_str);
+
+	check_member_content(
+		services.config.profile.member_event_max_bytes,
+		serialized_len(&content)?,
+		displayname,
+	)
 }
 
 fn state_dedup_eligible(

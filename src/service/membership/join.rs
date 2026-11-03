@@ -27,7 +27,10 @@ use serde_json::value::{RawValue as RawJsonValue, to_raw_value};
 use tuwunel_core::{
 	Err, Result, async_noinline, at, debug, debug_error, debug_info, debug_warn, err, error,
 	implement, info, trace,
-	utils::{self, BoolExt, IterStream, ReadyExt, math::Expected, shuffle, stream::WidebandExt},
+	utils::{
+		self, BoolExt, IterStream, ReadyExt, json::serialized_len, math::Expected, shuffle,
+		stream::WidebandExt,
+	},
 	warn,
 };
 use tuwunel_matrix::{
@@ -41,6 +44,7 @@ use super::{Service, VerifiedPdu};
 use crate::{
 	Services,
 	federation::{Candidates, WhenAllBackedOff},
+	profile::check_member_content,
 	rooms::{
 		state::{IdMapState, RoomMutexGuard},
 		state_compressor::{CompressedState, HashSetCompressStateEvent},
@@ -806,7 +810,13 @@ async fn join_local(
 		})
 		.await;
 
-	let content = merge_member_content(content, extra_content.as_ref())?;
+	let max_bytes = self
+		.services
+		.config
+		.profile
+		.member_event_max_bytes;
+
+	let content = merge_member_content(max_bytes, content, extra_content.as_ref())?;
 
 	let pdu_builder = PduBuilder {
 		event_type: StateEventType::RoomMember.into(),
@@ -937,7 +947,13 @@ async fn create_join_event(
 		})
 		.await;
 
-	let content = merge_member_content(content, extra_content.as_ref())?;
+	let max_bytes = self
+		.services
+		.config
+		.profile
+		.member_event_max_bytes;
+
+	let content = merge_member_content(max_bytes, content, extra_content.as_ref())?;
 
 	event.insert("content".into(), content);
 
@@ -977,22 +993,50 @@ async fn create_join_event(
 
 // Server-computed membership fields win; client custom keys only fill the gaps.
 fn merge_member_content(
+	max_bytes: usize,
 	content: RoomMemberEventContent,
 	extra_content: Option<&CanonicalJsonObject>,
 ) -> Result<CanonicalJsonValue> {
+	// The server's own name wins the merge, so only a name the client supplied is bounded.
+	let client_name = content.displayname.is_none();
 	let mut content = to_canonical_value(content)?;
 
-	if let (CanonicalJsonValue::Object(content), Some(extra_content)) =
-		(&mut content, extra_content)
-	{
+	let Some(extra_content) = extra_content else {
+		return Ok(content);
+	};
+
+	if let CanonicalJsonValue::Object(merged) = &mut content {
 		for (key, value) in extra_content {
-			content
+			merged
 				.entry(key.clone())
 				.or_insert_with(|| value.clone());
 		}
 	}
 
+	check_merged_member_content(max_bytes, &content, client_name)?;
+
 	Ok(content)
+}
+
+// The cap covers the merged event, since client keys ride on top of the server fields.
+fn check_merged_member_content(
+	max_bytes: usize,
+	content: &CanonicalJsonValue,
+	client_name: bool,
+) -> Result {
+	let CanonicalJsonValue::Object(merged) = content else {
+		return Ok(());
+	};
+
+	let displayname = if client_name {
+		merged
+			.get("displayname")
+			.and_then(CanonicalJsonValue::as_str)
+	} else {
+		None
+	};
+
+	check_member_content(max_bytes, serialized_len(merged)?, displayname)
 }
 
 #[implement(Service)]

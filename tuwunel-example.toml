@@ -3839,6 +3839,17 @@
 #
 #preserve_room_overrides = true
 
+# Limits the content size of membership events a client sends.
+#
+# A client state event for `m.room.member` whose content exceeds this many
+# bytes is refused with `M_BAD_JSON`. Events the server builds, including
+# the profile changes it propagates into member events, are not limited by
+# this setting.
+#
+# reloadable: yes
+#
+#member_event_max_bytes = 4096
+
 # Allows device display names to be federated and seen by external users.
 #
 # This is inherently false when `federation.enable` is disabled. Leave

@@ -1,9 +1,12 @@
 use axum::extract::State;
 use ruma::{
 	CanonicalJsonObject, CanonicalJsonValue, RoomId,
-	api::client::membership::{join_room_by_id, join_room_by_id_or_alias},
+	api::{
+		client::membership::{join_room_by_id, join_room_by_id_or_alias},
+		error::ErrorKind,
+	},
 };
-use tuwunel_core::{Result, warn};
+use tuwunel_core::{Error, Result, warn};
 use tuwunel_service::membership::Join;
 
 use super::banned_room_check;
@@ -46,6 +49,10 @@ pub(crate) async fn join_room_by_id_route(
 		.await
 	{
 		errors = errors.saturating_add(1);
+		if is_refused_body(&e) {
+			return Err(e);
+		}
+
 		if services
 			.config
 			.rooms
@@ -107,6 +114,10 @@ pub(crate) async fn join_room_by_id_or_alias_route(
 		.await
 	{
 		errors = errors.saturating_add(1);
+		if is_refused_body(&e) {
+			return Err(e);
+		}
+
 		if services
 			.config
 			.rooms
@@ -124,6 +135,9 @@ pub(crate) async fn join_room_by_id_or_alias_route(
 
 	Ok(join_room_by_id_or_alias::v3::Response { room_id: room_id.clone() })
 }
+
+// A refused body fails the same way on every attempt, so the join is not retried.
+fn is_refused_body(e: &Error) -> bool { matches!(e.kind(), ErrorKind::BadJson) }
 
 const RESERVED_JOIN_KEYS: [&str; 3] =
 	["reason", "third_party_signed", "join_authorised_via_users_server"];

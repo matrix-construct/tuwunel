@@ -4,8 +4,8 @@ use axum::extract::State;
 use futures::{FutureExt, StreamExt};
 use itertools::Itertools;
 use ruma::{
-	CanonicalJsonObject, EventEncryptionAlgorithm, Int, OwnedRoomAliasId, OwnedRoomId,
-	OwnedUserId, RoomAliasId, RoomId, RoomVersionId, UserId,
+	CanonicalJsonObject, CanonicalJsonValue, EventEncryptionAlgorithm, Int, OwnedRoomAliasId,
+	OwnedRoomId, OwnedUserId, RoomAliasId, RoomId, RoomVersionId, UserId,
 	api::client::room::{
 		self,
 		create_room::{
@@ -40,7 +40,9 @@ use serde_json::{
 };
 use tuwunel_core::{
 	Err, Error, Result, debug_info, debug_warn, err, info,
-	utils::{BoolExt, IterStream, ReadyExt, option::OptionExt, result::FlatOk},
+	utils::{
+		BoolExt, IterStream, ReadyExt, json::serialized_len, option::OptionExt, result::FlatOk,
+	},
 	warn,
 };
 use tuwunel_matrix::{
@@ -48,7 +50,10 @@ use tuwunel_matrix::{
 	pdu::{Content, PduBuilder},
 	room_version,
 };
-use tuwunel_service::{Services, appservice::RegistrationInfo, rooms::state::RoomMutexGuard};
+use tuwunel_service::{
+	Services, appservice::RegistrationInfo, profile::check_member_content,
+	rooms::state::RoomMutexGuard,
+};
 
 use crate::{Ruma, utils::invite_check};
 
@@ -58,6 +63,8 @@ pub(crate) async fn create_room_route(
 ) -> Result<create_room::v3::Response> {
 	can_create_room_check(&services, &body).await?;
 	can_publish_directory_check(&services, &body).await?;
+	let initial_events = parse_initial_state(&body)?;
+	check_initial_member_content(&services, &initial_events)?;
 
 	// Figure out preset. We need it for preset specific events
 	let preset = body
@@ -141,10 +148,17 @@ pub(crate) async fn create_room_route(
 	}
 
 	// 5. Events set by preset
-	let initial_state =
-		apply_preset_state_pdus(&services, &body, &preset, sender_user, &room_id, &state_lock)
-			.boxed()
-			.await?;
+	let initial_state = apply_preset_state_pdus(
+		&services,
+		&body,
+		initial_events,
+		&preset,
+		sender_user,
+		&room_id,
+		&state_lock,
+	)
+	.boxed()
+	.await?;
 
 	// 6. Events listed in initial_state
 	apply_initial_state_pdus(
@@ -322,15 +336,15 @@ async fn apply_canonical_alias_pdu(
 async fn apply_preset_state_pdus(
 	services: &Services,
 	body: &Ruma<create_room::v3::Request>,
+	initial_events: Vec<InitialEvent>,
 	preset: &RoomPreset,
 	sender_user: &UserId,
 	room_id: &RoomId,
 	state_lock: &RoomMutexGuard,
 ) -> Result<Vec<InitialEvent>> {
-	let mut initial_state = body
-		.initial_state
-		.iter()
-		.map(|state| Ok(state.deserialize_as_unchecked::<InitialEvent>()?))
+	let mut initial_state = initial_events
+		.into_iter()
+		.map(Ok)
 		.filter_ok(|event| {
 			services.config.encryption.allow || event.event_type != StateEventType::RoomEncryption
 		})
@@ -1038,6 +1052,32 @@ async fn can_publish_directory_check(
 	services.admin.notify(&msg).await;
 
 	Err!(Request(Forbidden("Publishing rooms to the room directory is not allowed")))
+}
+
+// The entries are parsed once, before any PDU is appended, so a refusal cannot leave a
+// half-built room behind.
+fn parse_initial_state(body: &Ruma<create_room::v3::Request>) -> Result<Vec<InitialEvent>> {
+	body.initial_state
+		.iter()
+		.map(|state| Ok(state.deserialize_as_unchecked::<InitialEvent>()?))
+		.collect::<Result<Vec<_>>>()
+}
+
+// Client member events in `initial_state` are bounded by their canonical size.
+fn check_initial_member_content(services: &Services, initial_events: &[InitialEvent]) -> Result {
+	let max_bytes = services.config.profile.member_event_max_bytes;
+
+	initial_events
+		.iter()
+		.filter(|event| event.event_type == StateEventType::RoomMember)
+		.try_for_each(|event| {
+			let content = event.content.deserialize()?;
+			let displayname = content
+				.get("displayname")
+				.and_then(CanonicalJsonValue::as_str);
+
+			check_member_content(max_bytes, serialized_len(&content)?, displayname)
+		})
 }
 
 async fn can_create_room_check(

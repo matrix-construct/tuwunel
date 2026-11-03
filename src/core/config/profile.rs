@@ -124,6 +124,18 @@ pub struct Profile {
 	#[serde(default = "true_fn")]
 	pub preserve_room_overrides: bool,
 
+	/// Limits the content size of membership events a client sends.
+	///
+	/// A client state event for `m.room.member` whose content exceeds this many
+	/// bytes is refused with `M_BAD_JSON`. Events the server builds, including
+	/// the profile changes it propagates into member events, are not limited by
+	/// this setting.
+	///
+	/// reloadable: yes
+	/// default: 4096
+	#[serde(default = "default_member_event_max_bytes")]
+	pub member_event_max_bytes: usize,
+
 	/// Allows device display names to be federated and seen by external users.
 	///
 	/// This is inherently false when `federation.enable` is disabled. Leave
@@ -161,6 +173,7 @@ impl Default for Profile {
 			enable_set_avatar_url: true_fn(),
 			limit_requests_to_users_who_share_rooms: Default::default(),
 			preserve_room_overrides: true_fn(),
+			member_event_max_bytes: default_member_event_max_bytes(),
 			allow_device_name_federation: Default::default(),
 			allow_inbound_federation_lookups: true_fn(),
 		}
@@ -170,3 +183,5 @@ impl Default for Profile {
 fn default_max_remote_fields() -> usize { 100 }
 
 fn default_max_fields_per_request() -> usize { 64 }
+
+fn default_member_event_max_bytes() -> usize { 4096 }
