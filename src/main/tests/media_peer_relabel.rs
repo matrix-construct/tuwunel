@@ -176,18 +176,18 @@ fn a_peers_mislabelled_thumbnail_is_cached_under_its_container() -> Result {
 	let certificate = manifest.join(CERTIFICATE);
 	let private_key = manifest.join(PRIVATE_KEY);
 
+	let base = Args::default_test(&["fresh", "cleanup"])
+		.with_maintenance()
+		.with_database_path(&db_path.0);
+
 	let args = [
-		format!("database_path={:?}", db_path.0),
 		"network.http.allow_invalid_tls_certificates=true".to_owned(),
 		"network.http.ip_range_denylist=[]".to_owned(),
 		"federation.loopback=true".to_owned(),
 		"logging.filter=\"error\"".to_owned(),
 	]
 	.into_iter()
-	.fold(Args::default_test(&["fresh", "cleanup"]), Args::with_option);
-
-	// the option form of this one is refused, so the field is the only way in
-	let args = Args { maintenance: true, ..args };
+	.fold(base, Args::with_option);
 
 	let runtime = Runtime::new(Some(&args))?;
 	let server = Server::new(Some(&args), Some(&runtime))?;

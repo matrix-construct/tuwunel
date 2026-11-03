@@ -118,7 +118,7 @@ fn timestamp_fallback_confirms_the_requested_event() -> Result {
 	let certificate = manifest.join(CERTIFICATE);
 	let private_key = manifest.join(PRIVATE_KEY);
 	let mut args = Args::default_test(&["fresh", "cleanup"])
-		.with_option(format!("database_path={:?}", db_path.0))
+		.with_database_path(&db_path.0)
 		.with_loopback_listener(port);
 
 	args.option.extend([

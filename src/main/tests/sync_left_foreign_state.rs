@@ -20,7 +20,7 @@ fn left_rooms_survive_foreign_leftstate() -> Result {
 	let db_path = Args::test_database_path("sync-left-foreign-state");
 
 	let mut args = Args::default_test(&["fresh", "cleanup"])
-		.with_option(format!("database_path={db_path:?}"))
+		.with_database_path(&db_path)
 		.with_loopback_listener(port);
 
 	args.option.extend(["listening=true".to_owned()]);

@@ -51,7 +51,7 @@ fn membership_nonacceptance_is_forbidden() -> Result {
 	let db_path = DatabasePath(Args::test_database_path("membership-refusal"));
 
 	let mut args = Args::default_test(&["fresh", "cleanup"])
-		.with_option(format!("database_path={:?}", db_path.0))
+		.with_database_path(&db_path.0)
 		.with_loopback_listener(port);
 
 	args.option.extend(["listening=true".to_owned()]);

@@ -25,13 +25,9 @@ impl Drop for DatabasePath {
 fn change_log_bounds_its_range() -> Result {
 	let db_path = DatabasePath(Args::test_database_path("profile-change-log"));
 
-	let mut args = Args {
-		maintenance: true,
-		..Args::default_test(&["fresh", "cleanup"])
-	};
-
-	args.option
-		.push(format!("database_path={:?}", db_path.0));
+	let args = Args::default_test(&["fresh", "cleanup"])
+		.with_maintenance()
+		.with_database_path(&db_path.0);
 
 	let runtime = Runtime::new(Some(&args))?;
 	let server = Server::new(Some(&args), Some(&runtime))?;

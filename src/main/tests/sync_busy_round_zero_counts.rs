@@ -46,7 +46,7 @@ fn busy_round_reports_the_zeroed_notification_count() -> Result {
 	let db_path = Args::test_database_path("sync-busy-round");
 
 	let args = Args::default_test(&["fresh", "cleanup"])
-		.with_option(format!("database_path={db_path:?}"))
+		.with_database_path(&db_path)
 		.with_loopback_listener(port)
 		.with_option("listening=true");
 

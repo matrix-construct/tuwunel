@@ -13,13 +13,10 @@ use tuwunel_core::Result;
 fn peer_status_snapshot_reads_recorded_failure() -> Result {
 	let db_dir = Args::test_database_path("peer-status-snapshot");
 
-	let mut args = Args::default_test(&["smoke", "fresh", "cleanup"]);
-	args.option
-		.push(format!("database_path={:?}", db_dir.to_str().expect("utf-8 path")));
-	args.execute
-		.push("query peer-status record-failure fail.example.com".into());
-	args.execute
-		.push("query peer-status snapshot".into());
+	let args = Args::default_test(&["smoke", "fresh", "cleanup"])
+		.with_database_path(&db_dir)
+		.with_execute("query peer-status record-failure fail.example.com")
+		.with_execute("query peer-status snapshot");
 
 	let runtime = Runtime::new(Some(&args))?;
 	let server = Server::new(Some(&args), Some(&runtime))?;

@@ -35,7 +35,7 @@ fn timestamp_route_requires_room_access() -> Result {
 
 	let db_path = DatabasePath(Args::test_database_path("timestamp-access"));
 	let mut args = Args::default_test(&["fresh", "cleanup"])
-		.with_option(format!("database_path={:?}", db_path.0))
+		.with_database_path(&db_path.0)
 		.with_loopback_listener(port);
 
 	args.option.extend(["listening=true".to_owned()]);

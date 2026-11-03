@@ -283,7 +283,7 @@ async fn check_removal(services: &Services, provider: &Provider) -> Result {
 }
 
 fn database_args(database: &Path, test: &[&str]) -> Args {
-	Args::default_test(test).with_option(format!("database_path={database:?}"))
+	Args::default_test(test).with_database_path(database)
 }
 
 async fn open_session(services: &Services) -> Result {

@@ -37,7 +37,7 @@ fn thread_root_receipt_preserves_unread_replies() -> Result {
 	let db_path = DatabasePath(Args::test_database_path("thread-root-receipt"));
 
 	let args = Args::default_test(&["fresh", "cleanup"])
-		.with_option(format!("database_path={:?}", db_path.0))
+		.with_database_path(&db_path.0)
 		.with_loopback_listener(port)
 		.with_option("listening=true");
 
