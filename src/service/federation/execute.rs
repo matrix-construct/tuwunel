@@ -12,7 +12,7 @@ use ruma::{
 	api::{
 		EndpointError, IncomingResponse, MatrixVersion, OutgoingRequest, OutgoingRequestExt,
 		SupportedVersions,
-		error::{Error as RumaError, ErrorBody},
+		error::{Error as RumaError, ErrorBody, ErrorKind},
 	},
 };
 use tokio::time::timeout;
@@ -34,8 +34,9 @@ use crate::{
 /// Sends a federation request with the standard federation client.
 ///
 /// The destination is validated and resolved before the request is signed and
-/// sent. Success clears peer failures and classifiable errors record a failure;
-/// this entry point does not itself consult peer backoff.
+/// sent. Success clears peer failures and classifiable errors record a failure,
+/// except a local refusal; this entry point does not itself consult peer
+/// backoff.
 #[implement(super::Service)]
 #[tracing::instrument(skip_all, name = "request", level = "debug")]
 pub async fn execute<T>(&self, dest: &ServerName, request: T) -> Result<T::IncomingResponse>
@@ -108,8 +109,9 @@ where
 ///
 /// The destination's resolved route picks the direct or SRV half of the client.
 /// A successful response clears every stored failure row for the destination.
-/// Only errors classified as peer failures are recorded, and no backoff gate is
-/// consulted before sending.
+/// A request refused because federation is disabled or the server is forbidden
+/// records nothing; other errors are recorded only when classified as peer
+/// failures, and no backoff gate is consulted before sending.
 #[implement(super::Service)]
 pub async fn execute_on<T>(
 	&self,
@@ -126,21 +128,36 @@ where
 		.execute_uncounted(client, dest, request)
 		.await;
 
-	match &result {
-		| Ok(_) => self.record_success(dest).await,
-		| Err(error) =>
-			if let Some(class) = classify_error(error) {
-				self.record_failure(dest, class);
-			},
-	}
+	self.record_outcome(dest, result.as_ref().err())
+		.await;
 
 	result
+}
+
+#[implement(super::Service)]
+async fn record_outcome(&self, dest: &ServerName, error: Option<&Error>) {
+	if error.is_some_and(is_local_refusal) {
+		return;
+	}
+
+	match error.map(classify_error) {
+		| None => self.record_success(dest).await,
+		| Some(Some(class)) => self.record_failure(dest, class),
+		| Some(None) => {},
+	}
+}
+
+// Only `require_remote_permitted` raises this on the send path; a peer's 403 is `Federation`.
+fn is_local_refusal(error: &Error) -> bool {
+	matches!(error, Error::Request(ErrorKind::Forbidden, ..))
 }
 
 /// Executes one Feds request while permitting only this server as a
 /// self-destination and preserving ordinary peer-status recording.
 ///
-/// Other federation entry points retain the configured loopback gate.
+/// Other federation entry points retain the configured loopback gate. A request
+/// refused because federation is disabled or the server is forbidden records
+/// nothing.
 #[implement(super::Service)]
 pub(super) async fn execute_on_allow_self<T>(
 	&self,
@@ -157,13 +174,8 @@ where
 		.execute_uncounted_allow_self(client, dest, request)
 		.await;
 
-	match &result {
-		| Ok(_) => self.record_success(dest).await,
-		| Err(error) =>
-			if let Some(class) = classify_error(error) {
-				self.record_failure(dest, class);
-			},
-	}
+	self.record_outcome(dest, result.as_ref().err())
+		.await;
 
 	result
 }

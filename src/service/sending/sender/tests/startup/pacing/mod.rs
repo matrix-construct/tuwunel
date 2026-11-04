@@ -132,6 +132,32 @@ async fn closed_gate_and_existing_wake_do_not_advance_boot_pacing() -> Result {
 }
 
 #[tokio::test]
+async fn refused_destination_does_not_advance_boot_pacing() -> Result {
+	let forbidden = [r"^refused\.example$"];
+	let config = config(false, 0).merge(("federation.forbidden_remote_server_names", forbidden));
+	let Some(fixture) = fixture(config).await? else {
+		return Ok(());
+	};
+
+	let sending = &fixture.services.sending;
+	let mut wakes = WakeQueue::new(); // boot arming state out-param
+
+	for (name, next, armed) in [
+		("refused.example", 0, 1),
+		("refused.example", 0, 1),
+		("permitted.example", 1, 2),
+	] {
+		let index = sending
+			.arm_startup_wake(destination(name), 0, &mut wakes)
+			.await;
+
+		assert_eq!((index, wakes.len()), (next, armed), "{name}");
+	}
+
+	Ok(())
+}
+
+#[tokio::test]
 async fn overflowing_boot_pace_uses_the_existing_wake_fallback() -> Result {
 	let Some(fixture) = fixture(config(false, 0)).await? else {
 		return Ok(());

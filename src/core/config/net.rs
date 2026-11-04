@@ -127,13 +127,24 @@ pub fn require_federation(&self) -> Result {
 pub fn require_remote_permitted(&self, server_name: &ServerName) -> Result {
 	self.require_federation()?;
 
-	if self.is_forbidden_remote_server_name(server_name) {
+	if !self.is_remote_permitted(server_name) {
 		return Err!(Request(Forbidden(debug_warn!(
 			"Federation with {server_name} is not allowed."
 		))));
 	}
 
 	Ok(())
+}
+
+/// Determines whether federation with a remote server is allowed.
+///
+/// `require_remote_permitted` wraps this check; call this directly where
+/// refusals are too frequent to build an error each time.
+#[implement(super::Config)]
+#[inline]
+#[must_use]
+pub fn is_remote_permitted(&self, server_name: &ServerName) -> bool {
+	self.federation.enable && !self.is_forbidden_remote_server_name(server_name)
 }
 
 /// Determines whether a remote server name is forbidden.

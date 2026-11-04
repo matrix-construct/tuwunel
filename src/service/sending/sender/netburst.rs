@@ -167,12 +167,16 @@ pub(super) async fn arm_startup_wake(
 		return index;
 	};
 
-	match self
-		.services
-		.federation
-		.should_attempt(server)
-		.await
-	{
+	let verdict = match self.refused_recheck(server) {
+		| Some(earliest_retry) => ShouldAttempt::No { earliest_retry },
+		| None =>
+			self.services
+				.federation
+				.should_attempt(server)
+				.await,
+	};
+
+	match verdict {
 		| ShouldAttempt::No { earliest_retry } => {
 			arm_wake(wakes, dest, earliest_retry);
 			index

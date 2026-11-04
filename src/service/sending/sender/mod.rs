@@ -36,7 +36,7 @@ use super::{Destination, Msg, SendingEvent, Service, data::QueueItem};
 
 /// In-flight bookkeeping for one `Destination`.
 ///
-/// Federation uses the peer gate when refused and the sender curve otherwise.
+/// Federation waits out a refusal and follows the sender curve otherwise.
 /// Appservice and push retain their own destination status across retries.
 #[derive(Debug)]
 enum TransactionStatus {

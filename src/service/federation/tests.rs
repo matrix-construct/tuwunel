@@ -14,7 +14,7 @@ use bytes::Bytes;
 use http::StatusCode;
 use reqwest::{Request, Url};
 use ruma::{
-	OwnedEventId, OwnedServerName,
+	OwnedEventId, OwnedServerName, ServerName,
 	api::{
 		error::ErrorBody,
 		federation::{
@@ -32,7 +32,7 @@ use super::peer::{
 };
 use crate::{
 	resolver::{cache::CachedDest, fed::FedDest},
-	test_utils::fixture,
+	test_utils::{Fixture, fixture},
 };
 
 #[tokio::test]
@@ -346,6 +346,79 @@ async fn empty_denylist_allows_final_private_literal_preparation() -> Result {
 
 	assert_eq!(request.url().host_str(), Some("[::1]"));
 	assert_eq!(request.url().port(), Some(8448));
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn disabled_federation_records_no_peer_status() -> Result {
+	let config = Figment::new().merge(("federation.enable", false));
+	let Some(fixture) = fixture(config).await? else {
+		return Ok(());
+	};
+
+	assert_refused_without_a_record(&fixture, "remote.example".try_into()?).await;
+
+	Ok(())
+}
+
+async fn assert_refused_without_a_record(fixture: &Fixture, dest: &ServerName) {
+	let federation = &fixture.services.federation;
+	let client = &fixture.services.client.federation;
+	let refused = async |entry: &str, result: Result<_>| {
+		assert_eq!(result.expect_err(entry).status_code(), StatusCode::FORBIDDEN, "{entry}");
+		assert!(!federation.peer_has_failures(dest).await, "{entry}");
+	};
+
+	let result = federation.execute(dest, VersionRequest {}).await;
+
+	refused("execute", result).await;
+
+	let result = federation
+		.execute_on_allow_self(client, dest, VersionRequest {})
+		.await;
+
+	refused("execute_on_allow_self", result).await;
+}
+
+#[tokio::test]
+async fn forbidden_server_records_no_peer_status() -> Result {
+	let config = Figment::new()
+		.merge(("federation.forbidden_remote_server_names", [r"^forbidden\.example$"]));
+
+	let Some(fixture) = fixture(config).await? else {
+		return Ok(());
+	};
+
+	assert_refused_without_a_record(&fixture, "forbidden.example".try_into()?).await;
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn failed_request_records_peer_status() -> Result {
+	let config = Figment::new().merge(("network.http.ip_range_denylist", Vec::<String>::new()));
+	let Some(fixture) = fixture(config).await? else {
+		return Ok(());
+	};
+
+	let federation = &fixture.services.federation;
+	let client = &fixture.services.client.federation;
+	let standard: OwnedServerName = "127.0.0.1:1".try_into()?;
+	let allow_self: OwnedServerName = "127.0.0.1:2".try_into()?;
+
+	federation
+		.execute(&standard, VersionRequest {})
+		.await
+		.expect_err("nothing listens on port 1");
+
+	federation
+		.execute_on_allow_self(client, &allow_self, VersionRequest {})
+		.await
+		.expect_err("nothing listens on port 2");
+
+	assert!(federation.peer_has_failures(&standard).await);
+	assert!(federation.peer_has_failures(&allow_self).await);
 
 	Ok(())
 }

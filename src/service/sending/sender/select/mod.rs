@@ -6,14 +6,17 @@ use std::{
 	iter::repeat_with,
 	mem::replace,
 	sync::atomic::{AtomicU64, AtomicUsize, Ordering},
-	time::SystemTime,
+	time::{Duration, SystemTime},
 };
 
 use futures::{StreamExt, future::join3};
 use ruma::{ServerName, api::federation::transactions::edu::Edu};
 use tuwunel_core::{
 	Result, implement, trace,
-	utils::{BoolExt, ReadyExt, time::now_secs},
+	utils::{
+		BoolExt, ReadyExt,
+		time::{now_secs, timepoint_from_now},
+	},
 };
 use tuwunel_matrix::ShortRoomId;
 
@@ -153,6 +156,12 @@ async fn select_events_current(
 		return Current::Busy;
 	}
 
+	if let Destination::Federation(server) = dest
+		&& let Some(earliest_retry) = self.refused_recheck(server)
+	{
+		return Current::Refused { earliest_retry };
+	}
+
 	// peer_status gates federation only; appservice and push fall through.
 	if let Destination::Federation(server) = dest
 		&& let ShouldAttempt::No { earliest_retry } = self
@@ -176,6 +185,24 @@ async fn select_events_current(
 	}
 
 	current
+}
+
+/// When to recheck a server that local policy refuses, or `None` if permitted.
+///
+/// No peer status paces a refusal, so this timer takes the place of backoff and
+/// notices the configuration reload that lifts it.
+#[implement(Service)]
+pub(super) fn refused_recheck(&self, server: &ServerName) -> Option<SystemTime> {
+	let config = &self.server.config;
+
+	config
+		.is_remote_permitted(server)
+		.is_false()
+		.then(|| {
+			let recheck = Duration::from_secs(config.sending.timeout);
+
+			timepoint_from_now(recheck).unwrap_or_else(|_| SystemTime::now())
+		})
 }
 
 /// Advance a destination's status for a new selection.

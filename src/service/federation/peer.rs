@@ -454,7 +454,8 @@ pub(super) fn failure_secs(bytes: &[u8]) -> Option<u64> {
 }
 
 /// Whether a failed federation attempt is a content rejection from a reachable
-/// peer, the one failure the peer-reachability store does not record.
+/// peer, the one failure of a sent request the peer-reachability store does not
+/// record.
 ///
 /// A caller that retries the same request cannot learn of such a rejection
 /// from peer backoff and has to report it itself.
