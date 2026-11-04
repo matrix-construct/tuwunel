@@ -5,11 +5,11 @@ use std::sync::Arc;
 
 use futures::{Stream, StreamExt};
 use ruma::{
-	OwnedRoomId, OwnedServerName, OwnedUserId, RoomAliasId, RoomId, RoomOrAliasId, UserId,
-	api::federation::query::get_room_information::v1::Request, events::StateEventType,
+	OwnedRoomId, OwnedServerName, OwnedUserId, RoomAliasId, RoomId, RoomOrAliasId, ServerName,
+	UserId, api::federation::query::get_room_information::v1::Request, events::StateEventType,
 };
 use tuwunel_core::{
-	Err, Result, err, implement,
+	Err, Error, Result, err, implement,
 	utils::{ReadyExt, stream::TryIgnore},
 };
 use tuwunel_database::{Deserialized, Ignore, Interfix, Map};
@@ -205,7 +205,8 @@ impl Service {
 			.services
 			.federation
 			.execute(server, request)
-			.await?;
+			.await
+			.map_err(|error| gateway_error(server, error))?;
 
 		Ok((response.room_id, response.servers))
 	}
@@ -352,5 +353,19 @@ impl Service {
 		}
 
 		Ok(())
+	}
+}
+
+/// Reports a failure to reach an alias's server as a gateway error.
+///
+/// A timeout reads as any other failure, because a 504 has clients repeat a
+/// join that already waited it out. A remote's own answer, a local refusal and
+/// a shutdown pass through unchanged. For an alias naming another server,
+/// `Error::Err` comes only from the resolver, for a failed address lookup.
+fn gateway_error(server: &ServerName, error: Error) -> Error {
+	match error {
+		| Error::Reqwest(_) | Error::Err(_) =>
+			err!(Request(ConnectionFailed("Failed to fetch alias from {server}."))),
+		| _ => error,
 	}
 }

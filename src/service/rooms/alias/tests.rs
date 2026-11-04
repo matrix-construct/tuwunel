@@ -1,11 +1,17 @@
-use futures::StreamExt;
-use ruma::{
-	OwnedRoomAliasId, RoomAliasId, RoomId, UserId, api::error::ErrorKind, room_alias_id, room_id,
-	user_id,
-};
-use tuwunel_core::{Result, config::Figment, smallvec::SmallVec, utils::result::NotFound};
+use std::{io::ErrorKind as IoErrorKind, mem::discriminant};
 
-use super::Service;
+use futures::StreamExt;
+use http::StatusCode;
+use ruma::{
+	OwnedRoomAliasId, RoomAliasId, RoomId, UserId,
+	api::error::{ErrorBody, ErrorKind, StandardErrorBody},
+	owned_server_name, room_alias_id, room_id, server_name, user_id,
+};
+use tuwunel_core::{
+	Error, Result, config::Figment, err, smallvec::SmallVec, utils::result::NotFound,
+};
+
+use super::{Service, gateway_error};
 use crate::test_utils::fixture;
 
 type Aliases = SmallVec<[OwnedRoomAliasId; 2]>;
@@ -147,6 +153,26 @@ async fn deletion_removes_every_matching_legacy_row() -> Result {
 	Ok(())
 }
 
+#[test]
+fn gateway_error_keeps_answers_and_refusals() {
+	let refused = err!(Request(Forbidden("Federation is disabled.")));
+	let shutdown = Error::Io(IoErrorKind::Interrupted.into());
+	let unusable = err!(BadServerResponse("Server returned bad 200 response."));
+
+	passes_through(remote_not_found(), StatusCode::NOT_FOUND);
+	passes_through(refused, StatusCode::FORBIDDEN);
+	passes_through(shutdown, StatusCode::SERVICE_UNAVAILABLE);
+	passes_through(unusable, StatusCode::INTERNAL_SERVER_ERROR);
+}
+
+#[test]
+fn gateway_error_reports_a_resolver_failure() {
+	let error = gateway_error(server_name!("remote.example"), err!("DNS error"));
+
+	assert!(matches!(error, Error::Request(ErrorKind::ConnectionFailed, ..)), "{error:?}");
+	assert_eq!(error.status_code(), StatusCode::BAD_GATEWAY);
+}
+
 async fn listing(service: &Service, room: &RoomId, expected: &[&RoomAliasId]) {
 	let aliases = service
 		.local_aliases_for_room(room)
@@ -192,4 +218,20 @@ async fn absent(service: &Service, alias: &RoomAliasId) -> Result {
 	);
 
 	Ok(())
+}
+
+fn passes_through(error: Error, status: StatusCode) {
+	let variant = discriminant(&error);
+	let error = gateway_error(server_name!("remote.example"), error);
+
+	assert_eq!(discriminant(&error), variant, "{error:?}");
+	assert_eq!(error.status_code(), status, "{error:?}");
+}
+
+fn remote_not_found() -> Error {
+	let origin = owned_server_name!("remote.example");
+	let message = "Room alias not found.".to_owned();
+	let body = ErrorBody::Standard(StandardErrorBody { kind: ErrorKind::NotFound, message });
+
+	Error::Federation(origin, body.into_error(StatusCode::NOT_FOUND))
 }
