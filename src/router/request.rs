@@ -130,7 +130,6 @@ where
 	level = "debug",
 	parent = parent,
 	skip_all,
-	ret(level = "trace"),
 	fields(
 		task = %task::id(),
 	)

@@ -9,7 +9,7 @@ mod admin;
 mod client;
 mod fixture;
 
-use std::{collections::HashMap, net::TcpListener, pin::pin, time::Duration};
+use std::{collections::HashMap, net::TcpListener, pin::pin, sync::Mutex, time::Duration};
 
 use axum::{
 	Form, Json, Router,
@@ -25,6 +25,12 @@ use reqwest::{
 	redirect::Policy,
 };
 use serde_json::{Value, json};
+use tracing::{
+	Level,
+	level_filters::{LevelFilter, STATIC_MAX_LEVEL},
+	subscriber::set_global_default,
+};
+use tracing_subscriber::fmt::{MakeWriter, fmt, format::FmtSpan};
 use tuwunel_core::{Err, Result, err, result::NotFound, ruma::OwnedUserId};
 use tuwunel_service::{
 	Services,
@@ -40,6 +46,8 @@ type TokenForm = HashMap<String, String>;
 
 const IDP: &str = "test-idp";
 const CLIENT: &str = "https://client.example/callback";
+
+static LOGS: Mutex<Vec<u8>> = Mutex::new(Vec::new());
 
 /// A taken username never hands an identity another identity's fallback account.
 ///
@@ -59,6 +67,8 @@ fn sso_fallback_account() -> Result {
 
 	let option = |key: &str, value: &str| format!("identity_provider.{IDP}.{key}=\"{value}\"");
 	let options = [
+		// The capture below is the global subscriber, in the server's place.
+		"logging.enable=false",
 		"authentication.oidc.registration_allowed_redirect_hosts=[\"client.example\"]",
 		&option("client_id", IDP),
 		&option("client_secret", "test-secret"),
@@ -67,6 +77,15 @@ fn sso_fallback_account() -> Result {
 	];
 
 	provider.set_nonblocking(true)?;
+
+	let capture = fmt()
+		.with_max_level(Level::TRACE)
+		.with_span_events(FmtSpan::NEW)
+		.with_ansi(false)
+		.with_writer(|| LOGS.make_writer())
+		.finish();
+
+	set_global_default(capture).expect("the log capture is the first subscriber");
 
 	boot("sso-fallback-account", options, async move |services, base| {
 		let serve = serve_provider(provider, issuer);
@@ -80,7 +99,7 @@ fn sso_fallback_account() -> Result {
 
 /// Serve the identity provider endpoints until the test is done.
 ///
-/// A callback's code is `sub:username`, which the token endpoint returns as the
+/// A callback's code is `sub.username`, which the token endpoint returns as the
 /// access token and userinfo splits into `sub` and `preferred_username`, so each
 /// callback names the identity it signs in as. Userinfo also reports the
 /// username at a mixed-case domain as a verified address, the claim spelled as
@@ -109,8 +128,12 @@ async fn discover(State(issuer): State<String>) -> Json<Value> {
 }
 
 async fn token(Form(form): Form<TokenForm>) -> Json<Value> {
+	let code = &form["code"];
+
 	Json(json!({
-		"access_token": form["code"],
+		"access_token": code,
+		"refresh_token": format!("refresh.{code}"),
+		"id_token": format!("id.{code}"),
 		"token_type": "Bearer",
 	}))
 }
@@ -120,7 +143,7 @@ async fn userinfo(headers: HeaderMap) -> Json<Value> {
 		.to_str()
 		.expect("bearer token")
 		.trim_start_matches("Bearer ")
-		.split_once(':')
+		.split_once('.')
 		.expect("subject and username");
 
 	Json(json!({
@@ -245,6 +268,14 @@ async fn exercise(services: &Services, base: &str) -> Result {
 
 	assert_eq!(signed_in(services, &response).await?, account);
 
+	let session = services
+		.oauth
+		.sessions
+		.get_by_unique_id(&carol)
+		.await?;
+
+	assert_unlogged(&session);
+
 	Ok(())
 }
 
@@ -271,7 +302,7 @@ async fn sign_in(client: &Client, base: &str, sub: &str, username: &str) -> Resu
 		.expect("cookie pair");
 
 	let url = format!("{base}/_matrix/client/unstable/login/sso/callback/{IDP}");
-	let code = format!("{sub}:{username}");
+	let code = format!("{sub}.{username}");
 
 	client
 		.get(url)
@@ -296,6 +327,37 @@ async fn signed_in(services: &Services, response: &Response) -> Result<OwnedUser
 		.users
 		.find_from_login_token(&parameter(&destination, "loginToken"))
 		.await
+}
+
+/// Assert that a finished sign-in's nonces and tokens reached no log output.
+///
+/// The stand-in's access token is the callback's code, whose encoded and decoded
+/// spellings match, so that entry covers the code in a URL as well. A release
+/// build compiles out the span showing the capture ran.
+fn assert_unlogged(session: &Session) {
+	let logs = String::from_utf8_lossy(&LOGS.lock().expect("log capture")).into_owned();
+	let credentials = [
+		("cookie_nonce", &session.cookie_nonce),
+		("query_nonce", &session.query_nonce),
+		("code_verifier", &session.code_verifier),
+		("access_token", &session.access_token),
+		("refresh_token", &session.refresh_token),
+		("id_token", &session.id_token),
+	];
+
+	assert!(
+		STATIC_MAX_LEVEL < LevelFilter::DEBUG || logs.contains("sso_callback"),
+		"the capture should have seen the callback's span"
+	);
+
+	for (name, credential) in credentials {
+		let credential = credential.as_deref().expect(name);
+		let leak = logs
+			.lines()
+			.find(|line| line.contains(credential));
+
+		assert_eq!(leak, None, "{name} reached the log output");
+	}
 }
 
 fn location(response: &Response) -> Result<Url> {

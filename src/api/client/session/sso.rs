@@ -232,7 +232,7 @@ pub(crate) async fn sso_login_route(
 	name = "sso_login_with_provider",
 	level = "info",
 	skip_all,
-	ret(level = "debug")
+	err(level = "debug"),
 	fields(
 		%client,
 		idp_id = body.body.idp_id,
@@ -393,8 +393,8 @@ fn grant_session_cookie_path(callback_url: Option<&Url>) -> &str {
 	skip_all,
 	fields(
 		%client,
-		cookie = ?body.cookie,
-		body = ?body.body,
+		idp_id = ?body.body.idp_id,
+		state = ?body.body.state,
 	),
 )]
 pub(crate) async fn sso_callback_route(
