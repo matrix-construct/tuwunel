@@ -91,7 +91,7 @@ Each registration declares which users, room aliases, and room IDs the appservic
 | `aliases` | Room aliases (`#alias:server`) | Case-insensitive |
 | `rooms` | Room IDs (`!opaque:server`) | Case-sensitive |
 
-Regex matching is unanchored -- add `^` and `$` if you need to match the full string.
+A regular expression can match part of an ID or alias. Add `^` at the start and `$` at the end if you need to match the full string.
 
 When `exclusive: true`, the homeserver rejects any attempt by a normal user to register a conflicting user ID or room alias. Multiple appservices can share a non-exclusive namespace; exclusive ranges must not overlap.
 
@@ -102,9 +102,9 @@ Fields under `[global.appservice.<ID>]`:
 | Field | Default | Description |
 |---|---|---|
 | `id` | section key | Unique registration ID. Inferred from the TOML section key when omitted. |
-| `url` | -- | Base URL the homeserver pushes events to, or `unix:///absolute/path.sock` on Unix. Set to `null` for receive-only registrations. |
-| `as_token` | -- | Token the appservice sends to the homeserver in `Authorization` headers. |
-| `hs_token` | -- | Token the homeserver sends to the appservice on every push. |
+| `url` | none | Base URL the homeserver pushes events to, or `unix:///absolute/path.sock` on Unix. Set to `null` for receive-only registrations. |
+| `as_token` | required | Token the appservice sends to the homeserver in `Authorization` headers. |
+| `hs_token` | required | Token the homeserver sends to the appservice on every push. |
 | `sender_localpart` | `id` | Localpart of the appservice bot user. Defaults to the registration ID. |
 | `rate_limited` | `false` | Whether requests from masqueraded virtual users are rate-limited. The bot user is always exempt. |
 | `protocols` | `[]` | Protocols bridged (e.g. `["irc"]`). Reported via the `/thirdparty/protocols` endpoint. |
@@ -117,7 +117,7 @@ Namespace entries under `[[global.appservice.<ID>.users]]`, `aliases`, and `room
 | Field | Default | Description |
 |---|---|---|
 | `exclusive` | `false` | Claim exclusive ownership of matching IDs, blocking regular users from registering them. |
-| `regex` | -- | Regular expression. Unanchored by default. |
+| `regex` | required | Regular expression. Unanchored by default. |
 
 ## Admin commands
 
