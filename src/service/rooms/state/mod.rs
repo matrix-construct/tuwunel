@@ -110,6 +110,7 @@ type RoomMutexMap = MutexMap<OwnedRoomId, ()>;
 /// guard when the same operation needs all three.
 pub type RoomMutexGuard = MutexMapGuard<OwnedRoomId, ()>;
 type ForwardExtremities = SmallVec<[OwnedEventId; 1]>;
+type SummaryCell<'a> = (&'a StateEventType, &'a str);
 
 #[derive(Deserialize)]
 struct CreateEvent {
@@ -697,21 +698,19 @@ where
 /// Builds stripped invite-state context for a membership event.
 ///
 /// Recommended room state cells are fetched on a best-effort basis, then the
-/// supplied membership event is appended last. Failed state lookups are
-/// omitted from the summary.
+/// supplied membership event is appended last. A cell absent from the current
+/// state is skipped, which is every cell before a room's first snapshot; any
+/// other failed lookup is logged and omitted.
 #[implement(Service)]
 #[tracing::instrument(skip_all, level = "debug")]
 pub async fn summary_stripped<Pdu: Event>(&self, event: &Pdu) -> Vec<Raw<AnyStrippedStateEvent>> {
-	let fetches = summary_cells(event).map(|(event_type, state_key)| {
-		self.services
-			.state_accessor
-			.room_state_get(event.room_id(), event_type, state_key)
-	});
+	let room_id = event.room_id();
+	let fetches = summary_cells(event).map(|cell| self.summary_state_event(room_id, cell));
 
 	join_all(fetches)
 		.await
 		.into_iter()
-		.filter_map(Result::ok)
+		.flatten()
 		.map(Event::into_format)
 		.chain(once(event.to_format()))
 		.collect()
@@ -722,7 +721,7 @@ pub async fn summary_stripped<Pdu: Event>(&self, event: &Pdu) -> Vec<Raw<AnyStri
 /// The sender's member event is recommended only when the event is about
 /// another user, so an invite carries its inviter's (MSC4319). A knock's
 /// sender is its subject, whose earlier membership would precede the knock.
-fn summary_cells<Pdu: Event>(event: &Pdu) -> impl Iterator<Item = (&StateEventType, &str)> {
+fn summary_cells<Pdu: Event>(event: &Pdu) -> impl Iterator<Item = SummaryCell<'_>> {
 	let sender = event.sender().as_str();
 	let inviter = event
 		.state_key()
@@ -739,6 +738,52 @@ fn summary_cells<Pdu: Event>(event: &Pdu) -> impl Iterator<Item = (&StateEventTy
 	.into_iter()
 	.chain(inviter)
 	.chain([(&StateEventType::RoomEncryption, ""), (&StateEventType::RoomTopic, "")])
+}
+
+/// Reads one recommended cell of the room's current state.
+///
+/// The cell's lookup and its event read are separate steps because both report
+/// a miss the same way, and only the first of those is an absent cell.
+#[implement(Service)]
+#[tracing::instrument(level = "trace", skip_all)]
+async fn summary_state_event(&self, room_id: &RoomId, cell: SummaryCell<'_>) -> Option<PduEvent> {
+	let (event_type, state_key) = cell;
+	let event_id = self
+		.services
+		.state_accessor
+		.room_state_get_id(room_id, event_type, state_key)
+		.map(|lookup| summary_event_id(room_id, cell, lookup))
+		.await?;
+
+	self.services
+		.timeline
+		.get_pdu(&event_id)
+		.inspect_err(unreadable_summary_event(room_id, &event_id))
+		.ok()
+		.await
+}
+
+fn summary_event_id(
+	room_id: &RoomId,
+	(event_type, state_key): SummaryCell<'_>,
+	lookup: Result<OwnedEventId>,
+) -> Option<OwnedEventId> {
+	lookup
+		.present()
+		.inspect_err(|error| {
+			warn!(
+				%room_id,
+				%event_type,
+				%state_key,
+				%error,
+				"Omitting unreadable summary state."
+			);
+		})
+		.flat_ok()
+}
+
+fn unreadable_summary_event(room_id: &RoomId, event_id: &EventId) -> impl Fn(&Error) {
+	move |error| warn!(%room_id, %event_id, %error, "Omitting unreadable summary event.")
 }
 
 /// Builds full-PDU invite-state context for a membership event.
@@ -792,24 +837,15 @@ async fn summary_state_pdu(
 	&self,
 	room_id: &RoomId,
 	shortstatehash: ShortStateHash,
-	(event_type, state_key): (&StateEventType, &str),
+	cell: SummaryCell<'_>,
 	room_version: &RoomVersionId,
 ) -> Option<Box<RawJsonValue>> {
+	let (event_type, state_key) = cell;
 	let event_id = self
 		.services
 		.state_accessor
 		.state_get_id(shortstatehash, event_type, state_key)
-		.map(NotFound::present)
-		.inspect_err(|error| {
-			warn!(
-				%room_id,
-				%event_type,
-				%state_key,
-				%error,
-				"Omitting unreadable summary state."
-			);
-		})
-		.map(FlatOk::flat_ok)
+		.map(|lookup| summary_event_id(room_id, cell, lookup))
 		.await?;
 
 	// MSC4311 serves PDUs only, so the row must parse as one before it is formatted.
@@ -821,9 +857,7 @@ async fn summary_state_pdu(
 				.federation
 				.get_pdu_into(&event_id, Some(room_version))
 		})
-		.inspect_err(|error| {
-			warn!(%room_id, %event_id, %error, "Omitting unreadable summary event.");
-		})
+		.inspect_err(unreadable_summary_event(room_id, &event_id))
 		.ok()
 		.await
 }
