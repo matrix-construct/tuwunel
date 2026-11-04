@@ -32,22 +32,31 @@ pub(crate) async fn get_supported_versions_route(
 		..Server::new(package_name().into(), package_version().into())
 	};
 
+	let unstable_features = UNSTABLE_FEATURES
+		.into_iter()
+		.chain(
+			services
+				.config
+				.rendezvous
+				.enable
+				.then_some("org.matrix.msc4108"),
+		)
+		.chain(
+			services
+				.oauth
+				.server
+				.is_some()
+				.then_some(OIDC_FEATURES)
+				.into_iter()
+				.flatten(),
+		)
+		.map(Into::into)
+		.zip(once(true).cycle())
+		.collect();
+
 	Ok(get_supported_versions::Response {
 		versions: VERSIONS.into_iter().map(Into::into).collect(),
-
-		unstable_features: UNSTABLE_FEATURES
-			.into_iter()
-			.chain(
-				services
-					.config
-					.rendezvous
-					.enable
-					.then_some("org.matrix.msc4108"),
-			)
-			.map(Into::into)
-			.zip(once(true).cycle())
-			.collect(),
-
+		unstable_features,
 		server: Some(server),
 	})
 }
@@ -82,7 +91,7 @@ static VERSIONS: [&str; 27] = [
 	"v1.19",  /* mutual rooms (MSC2666) */
 ];
 
-static UNSTABLE_FEATURES: [&str; 42] = [
+static UNSTABLE_FEATURES: [&str; 35] = [
 	"org.matrix.e2e_cross_signing",
 	// private read receipts (https://github.com/matrix-org/matrix-spec-proposals/pull/2285)
 	"org.matrix.msc2285.stable",
@@ -129,6 +138,28 @@ static UNSTABLE_FEATURES: [&str; 42] = [
 	"org.matrix.msc4429",
 	// Allow room moderators to view redacted event content (https://github.com/matrix-org/matrix-spec-proposals/pull/2815)
 	"fi.mau.msc2815",
+	// Backwards-compatible redaction sending via /send (https://github.com/matrix-org/matrix-spec-proposals/pull/4169)
+	"com.beeper.msc4169",
+	// Invite filtering lists in m.invite_permission_config (https://github.com/matrix-org/matrix-spec-proposals/pull/4155)
+	"org.matrix.msc4155",
+	// Invite blocking via m.invite_permission_config (https://github.com/matrix-org/matrix-spec-proposals/pull/4380)
+	"org.matrix.msc4380",
+	"org.matrix.msc4380.stable",
+	// Client-server discovery of server version (https://github.com/matrix-org/matrix-spec-proposals/pull/4383)
+	"net.zemos.msc4383",
+	// Read receipts for threads (https://github.com/matrix-org/matrix-spec-proposals/pull/3771)
+	"org.matrix.msc3771",
+	// Notifications for threads (https://github.com/matrix-org/matrix-spec-proposals/pull/3773)
+	"org.matrix.msc3773",
+	// Threading via m.thread relations, stable since Matrix 1.4 (https://github.com/matrix-org/matrix-spec-proposals/pull/3440)
+	"org.matrix.msc3440.stable",
+	// state_after on /sync (https://github.com/matrix-org/matrix-spec-proposals/pull/4222)
+	"org.matrix.msc4222",
+	// Backward fully-read moves on request (https://github.com/matrix-org/matrix-spec-proposals/pull/4446)
+	"com.beeper.msc4446",
+];
+
+static OIDC_FEATURES: [&str; 6] = [
 	// OIDC-native auth umbrella (https://github.com/matrix-org/matrix-spec-proposals/pull/3861)
 	"org.matrix.msc3861",
 	// OIDC-native auth: authorization code grant (https://github.com/matrix-org/matrix-spec-proposals/pull/2964)
@@ -141,25 +172,4 @@ static UNSTABLE_FEATURES: [&str; 42] = [
 	"org.matrix.msc2967",
 	// OIDC delegation aware
 	"org.matrix.msc3824",
-	// Backwards-compatible redaction sending via /send (https://github.com/matrix-org/matrix-spec-proposals/pull/4169)
-	"com.beeper.msc4169",
-	// Invite filtering lists in m.invite_permission_config (https://github.com/matrix-org/matrix-spec-proposals/pull/4155)
-	"org.matrix.msc4155",
-	// Invite blocking via m.invite_permission_config (https://github.com/matrix-org/matrix-spec-proposals/pull/4380)
-	"org.matrix.msc4380",
-	"org.matrix.msc4380.stable",
-	// Client-server discovery of server version (https://github.com/matrix-org/matrix-spec-proposals/pull/4383)
-	"net.zemos.msc4383",
-	// Policy servers (https://github.com/matrix-org/matrix-spec-proposals/pull/4284)
-	"org.matrix.msc4284",
-	// Read receipts for threads (https://github.com/matrix-org/matrix-spec-proposals/pull/3771)
-	"org.matrix.msc3771",
-	// Notifications for threads (https://github.com/matrix-org/matrix-spec-proposals/pull/3773)
-	"org.matrix.msc3773",
-	// Threading via m.thread relations, stable since Matrix 1.4 (https://github.com/matrix-org/matrix-spec-proposals/pull/3440)
-	"org.matrix.msc3440.stable",
-	// state_after on /sync (https://github.com/matrix-org/matrix-spec-proposals/pull/4222)
-	"org.matrix.msc4222",
-	// Backward fully-read moves on request (https://github.com/matrix-org/matrix-spec-proposals/pull/4446)
-	"com.beeper.msc4446",
 ];
