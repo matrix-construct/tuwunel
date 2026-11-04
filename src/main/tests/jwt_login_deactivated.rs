@@ -376,7 +376,8 @@ async fn correct_password_inside_the_burst(
 ///
 /// The JWT login gets no refresh token whether or not the client asks for one,
 /// expires into a soft logout, and resumes its device with another login. A
-/// refresh token the device already held keeps working.
+/// refresh token the device already held keeps working, and an expired token
+/// can still log out.
 async fn exercise_expiry(services: &Services, base: &str) -> Result {
 	let server_name = services.globals.server_name();
 	let user_id = UserId::parse_with_server_name("expiring", server_name)?;
@@ -394,7 +395,9 @@ async fn exercise_expiry(services: &Services, base: &str) -> Result {
 	let refreshing_auth = on_device(refreshing(password_auth));
 	let refreshing_session = expect_login(services, base, &refreshing_auth, refreshable).await?;
 
-	expect_login(services, base, &jwt_auth(&user_id)?, expiring).await?;
+	let plain_login = jwt_auth(&user_id)?;
+	let leaving = expect_login(services, base, &plain_login, expiring).await?;
+	let leaving_all = expect_login(services, base, &plain_login, expiring).await?;
 
 	let device_login = on_device(refreshing(jwt_auth(&user_id)?));
 	let session = expect_login(services, base, &device_login, expiring).await?;
@@ -407,9 +410,7 @@ async fn exercise_expiry(services: &Services, base: &str) -> Result {
 		return Err!("the password login expired with the JWT login: {status} {body}");
 	}
 
-	let (status, body) = whoami(services, base, access_token(&session)?).await?;
-
-	expect_error("expired JWT login", status, &body, StatusCode::UNAUTHORIZED, UNKNOWN_TOKEN)?;
+	let body = expect_unknown_token(services, base, "expired JWT login", &session).await?;
 
 	if body["soft_logout"] != true {
 		return Err!("the expired JWT login was not a soft logout: {body}");
@@ -425,7 +426,46 @@ async fn exercise_expiry(services: &Services, base: &str) -> Result {
 	let refresh = json!({"refresh_token": refreshing_session["refresh_token"]});
 	let (status, body) = send(post(services, base, "refresh", &refresh)).await?;
 
-	expect_signed_in("the device's earlier refresh token", status, &body)
+	expect_signed_in("the device's earlier refresh token", status, &body)?;
+
+	expect_logout(services, base, "logout", &leaving).await?;
+	expect_logout(services, base, "logout/all", &leaving_all).await?;
+
+	expect_unknown_token(services, base, "a session outliving logout/all", &password_session)
+		.await?;
+
+	Ok(())
+}
+
+async fn expect_logout(services: &Services, base: &str, path: &str, session: &Value) -> Result {
+	let token = access_token(session)?;
+	let request = post(services, base, path, &json!({})).bearer_auth(token);
+	let (status, body) = send(request).await?;
+
+	if status != StatusCode::OK {
+		return Err!("{path} with an expired token: expected 200, got {status}: {body}");
+	}
+
+	let body = expect_unknown_token(services, base, path, session).await?;
+
+	if body["soft_logout"] == true {
+		return Err!("{path} left its expired token recorded: {body}");
+	}
+
+	Ok(())
+}
+
+async fn expect_unknown_token(
+	services: &Services,
+	base: &str,
+	context: &str,
+	session: &Value,
+) -> Result<Value> {
+	let (status, body) = whoami(services, base, access_token(session)?).await?;
+
+	expect_error(context, status, &body, StatusCode::UNAUTHORIZED, UNKNOWN_TOKEN)?;
+
+	Ok(body)
 }
 
 async fn outlast_access_token(services: &Services) {

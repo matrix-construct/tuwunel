@@ -28,7 +28,9 @@ use ruma::{
 		},
 		profile::{delete_profile_field, get_profile, get_profile_field, set_profile_field},
 		room::{create_room, upgrade_room},
-		session::{logout, logout_all},
+		session::{
+			logout::v3::Request as LogoutRequest, logout_all::v3::Request as LogoutAllRequest,
+		},
 	},
 };
 use tuwunel_core::{Err, Result, utils::deadline_has_passed};
@@ -71,8 +73,11 @@ pub(super) async fn auth<A: AuthDispatch>(
 		| None => request.query.access_token.as_deref(),
 	};
 
+	// An expired token can still sign out, so a client can end a session it cannot resume.
 	let token = match find_token(services, access_token).await? {
-		| Token::User((_, _, expires_at)) if deadline_has_passed(expires_at) => Token::Expired,
+		| Token::User((_, _, expires_at))
+			if deadline_has_passed(expires_at) && !is_logout(route) =>
+			Token::Expired,
 
 		| token => token,
 	};
@@ -92,6 +97,10 @@ pub(super) async fn auth<A: AuthDispatch>(
 	Ok(auth)
 }
 
+fn is_logout(route: TypeId) -> bool {
+	route == TypeId::of::<LogoutRequest>() || route == TypeId::of::<LogoutAllRequest>()
+}
+
 /// MSC3939: 401 `M_USER_LOCKED` for locked accounts; logout endpoints
 /// bypass. `soft_logout: true` is emitted by ruma for this errcode.
 #[inline(never)]
@@ -100,10 +109,7 @@ async fn locked_account_check(services: &Services, auth: &Auth, route: TypeId) -
 		return Ok(());
 	};
 
-	let is_logout = route == TypeId::of::<logout::v3::Request>()
-		|| route == TypeId::of::<logout_all::v3::Request>();
-
-	if is_logout {
+	if is_logout(route) {
 		return Ok(());
 	}
 
