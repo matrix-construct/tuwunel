@@ -193,7 +193,7 @@ pub async fn event_context(
 	let state_at = events_after
 		.last()
 		.map(ref_at!(1))
-		.map_or_else(|| event_id, |pdu| pdu.event_id.as_ref());
+		.map_or(event_id, Event::event_id);
 
 	let state_ids = load_state_ids(services, room_id, state_at, sender_user, bypass_visibility);
 
