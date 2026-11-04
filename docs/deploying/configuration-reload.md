@@ -7,11 +7,18 @@ connections. The packaged service units wire `systemctl reload` to that signal:
 systemctl reload tuwunel
 ```
 
-Sending the signal by hand does the same thing, and is the route to use in a
-container or when running the binary directly:
+If you run the binary directly, send the same signal by hand:
 
 ```bash
 kill -USR1 "$(pidof tuwunel)"
+```
+
+For a container deployment, send the signal from the host with `docker kill`.
+The release images have no shell, `kill` or `pidof` to run inside them. Their
+entrypoint is `tuwunel`, so it receives the signal directly:
+
+```bash
+docker kill --signal=USR1 <container>
 ```
 
 A reload rebuilds the configuration from the same sources the server started
