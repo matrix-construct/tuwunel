@@ -71,7 +71,11 @@ async fn userinfo_inner(services: &Services, request: Request) -> Result<Respons
 		return Err!(Request(MissingToken("No access token provided")));
 	};
 
-	let Ok((user_id, device_id, _expires)) = services.users.find_from_token(&token).await else {
+	let Some((user_id, device_id)) = services
+		.users
+		.find_from_unexpired_token(&token)
+		.await
+	else {
 		return Err!(Request(Unauthorized("Invalid access token")));
 	};
 

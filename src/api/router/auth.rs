@@ -31,7 +31,7 @@ use ruma::{
 		session::{logout, logout_all},
 	},
 };
-use tuwunel_core::{Err, Result, is_less_than, smallstr::SmallString};
+use tuwunel_core::{Err, Result, utils::deadline_has_passed};
 use tuwunel_service::{Services, appservice::RegistrationInfo};
 
 pub(super) use self::dispatch::AuthDispatch;
@@ -39,12 +39,10 @@ use self::dispatch::Scheme;
 pub use self::uiaa::auth_uiaa;
 use super::request::Request;
 
-type AccessToken = SmallString<[u8; 32]>;
-
 pub(super) enum Token {
 	Appservice(Box<RegistrationInfo>),
 	User((OwnedUserId, OwnedDeviceId, Option<SystemTime>)),
-	Expired(AccessToken),
+	Expired,
 	Invalid,
 	None,
 }
@@ -74,9 +72,7 @@ pub(super) async fn auth<A: AuthDispatch>(
 	};
 
 	let token = match find_token(services, access_token).await? {
-		| Token::User((_, _, expires_at))
-			if expires_at.is_some_and(is_less_than!(SystemTime::now())) =>
-			Token::Expired(access_token.unwrap_or_default().into()),
+		| Token::User((_, _, expires_at)) if deadline_has_passed(expires_at) => Token::Expired,
 
 		| token => token,
 	};
@@ -161,7 +157,7 @@ fn check_auth_still_required(services: &Services, token: &Token, route: TypeId) 
 	{
 		match token {
 			| Token::Appservice(_) | Token::User(_) => Ok(()),
-			| Token::None | Token::Expired(_) | Token::Invalid =>
+			| Token::None | Token::Expired | Token::Invalid =>
 				Err!(Request(MissingToken("Missing or invalid access token."))),
 		}
 	} else {

@@ -154,17 +154,14 @@ async fn stale_grace_is_refused(services: &Services) -> Result {
 /// unrecognized once its successor no longer resolves, as presenting the
 /// successor is.
 ///
-/// Retiring the successor as an access token leaves the device pointing at it,
-/// and the refusals leave the device in place.
+/// Losing the successor's token row leaves the device pointing at it, and the
+/// refusals leave the device in place.
 async fn grace_without_successor_is_refused(services: &Services) -> Result {
 	let device = device_id!("RETIREDDEVICE");
 	let (user, original) = session(services, "retired", device).await?;
 	let successor = refreshed_token(services, &original).await?;
 
-	services
-		.users
-		.remove_access_token_value(&successor)
-		.await;
+	services.db["token_userdeviceid"].remove(&successor);
 
 	let seen = classify(services, &original).await;
 	let (access, replay) = exchange(services, &seen, &original).await?;

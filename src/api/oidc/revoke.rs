@@ -64,7 +64,7 @@ async fn revoke(services: &Services, body: RevokeRequest) -> Result<Response, Re
 	}
 
 	// RFC7009 §2.2: invalid or unknown tokens still produce a 200 OK.
-	// remove_device drops both the access and refresh tokens (and the device).
+	// An expired token still revokes: a client may log out with that alone.
 	if let Ok((user_id, device_id, _)) = services.users.find_from_token(&token).await {
 		services
 			.users

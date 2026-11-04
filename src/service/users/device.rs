@@ -18,7 +18,8 @@ use tuwunel_core::{
 		stream::{IterStream, TryIgnore, automatic_width},
 		string::to_small_string,
 		time::{
-			duration_since_epoch, timepoint_from_epoch, timepoint_from_now, timepoint_has_passed,
+			deadline_has_passed, duration_since_epoch, timepoint_from_epoch, timepoint_from_now,
+			timepoint_has_passed,
 		},
 	},
 	warn,
@@ -244,6 +245,23 @@ pub fn all_device_ids<'a>(
 		.map(|(_, device_id): (Ignore, &DeviceId)| device_id)
 }
 
+/// Find out which user a token belongs to, unless the token has expired.
+///
+/// An expired token stays recorded so its client keeps reading a soft logout,
+/// so a route granting access needs this rather than the plain lookup.
+#[implement(super::Service)]
+#[tracing::instrument(level = "debug", skip(self, token))]
+pub async fn find_from_unexpired_token(
+	&self,
+	token: &str,
+) -> Option<(OwnedUserId, OwnedDeviceId)> {
+	self.find_from_token(token)
+		.await
+		.ok()
+		.filter(|&(.., expires_at)| deadline_has_passed(expires_at).is_false())
+		.map(|(user_id, device_id, _)| (user_id, device_id))
+}
+
 /// Find out which user an access or refresh token belongs to.
 #[implement(super::Service)]
 #[tracing::instrument(level = "trace", skip(self, token))]
@@ -413,7 +431,7 @@ fn owned_by(self, user_id: &UserId, device_id: &DeviceId) -> Self {
 pub fn exchangeable(&self) -> bool {
 	match self {
 		| Self::Current { expires_at, .. } | Self::Replayed { grace: true, expires_at, .. } =>
-			!expires_at.is_some_and(timepoint_has_passed),
+			deadline_has_passed(*expires_at).is_false(),
 
 		| Self::Replayed { .. } | Self::Unknown => false,
 	}
@@ -571,31 +589,6 @@ pub async fn remove_access_token(&self, user_id: &UserId, device_id: &DeviceId) 
 	txn.execute();
 
 	Ok(())
-}
-
-/// Revoke a single access token by value, leaving the device and any other
-/// tokens it holds intact.
-#[implement(super::Service)]
-pub async fn remove_access_token_value(&self, access_token: &str) {
-	let owner = self
-		.db
-		.token_userdeviceid
-		.get(access_token)
-		.await
-		.deserialized::<(OwnedUserId, OwnedDeviceId, Option<u64>)>()
-		.ok();
-
-	let mut txn = self.services.db.txn();
-
-	if let Some((user_id, device_id, _)) = owner {
-		let user_device_token = (&*user_id, &*device_id, access_token);
-
-		txn.del(&self.db.userdeviceidtoken_index, user_device_token);
-	}
-
-	txn.del_raw(&self.db.token_userdeviceid, access_token);
-
-	txn.execute();
 }
 
 #[implement(super::Service)]

@@ -92,14 +92,14 @@ pub(super) async fn migrate_token_expiry(services: &Services) -> Result<bool> {
 /// no provider to refresh it against, returning whether the pass is finished.
 ///
 /// Before the adoption waited for a provider it stamped every origin expiry,
-/// each long past, so a session that has not authenticated since is refused and
-/// removed on its next request while its client, with nothing to refresh
-/// against, never signs out. The origin column still names every adopted device
-/// with the value stamped, so a token carrying exactly that value goes back to
-/// the foreign shape, and the adoption marker is cleared so the gated pass owns
-/// the column again from this boot on. With a provider an adopted expiry can be
-/// refreshed and stays, so the pass waits rather than finishing, and a provider
-/// removed later still gets the restore.
+/// each long past, so a session that has not authenticated since is refused on
+/// its next request while its client, with nothing to refresh against, never
+/// signs out. The origin column still names every adopted device with the value
+/// stamped, so a token carrying exactly that value goes back to the foreign
+/// shape, and the adoption marker is cleared so the gated pass owns the column
+/// again from this boot on. With a provider an adopted expiry can be refreshed
+/// and stays, so the pass waits rather than finishing, and a provider removed
+/// later still gets the restore.
 #[tracing::instrument(level = "debug", skip_all)]
 pub(super) async fn restore_token_expiry(services: &Services) -> Result<bool> {
 	let Some(tokenexpires) = services.db.open_cf(ORIGIN_COLUMN)? else {

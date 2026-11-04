@@ -55,6 +55,7 @@ pub use self::{
 	string::{str_from_bytes, string_from_bytes},
 	sys::compute::available_parallelism,
 	time::{
+		deadline_has_passed,
 		exponential_backoff::{
 			continue_exponential_backoff, continue_exponential_backoff_secs,
 			exponential_backoff_remaining, exponential_backoff_remaining_secs,

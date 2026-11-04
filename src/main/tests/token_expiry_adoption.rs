@@ -28,7 +28,7 @@ use futures::{
 	TryFutureExt,
 	future::{join, try_join},
 };
-use reqwest::StatusCode;
+use reqwest::{Response, StatusCode};
 use rust_rocksdb::{DB, Error as EngineError, Options};
 use serde_json::Value;
 use tuwunel::{Args, Runtime, Server, async_run, async_start, async_stop};
@@ -40,13 +40,19 @@ use tuwunel_core::{
 use tuwunel_database::serialize_key;
 use tuwunel_service::Services;
 
-use self::client::{register, wait_until_ready};
+use self::client::{Client, register, wait_until_ready};
 
 #[expect(
 	dead_code,
 	reason = "the shared client harness exposes helpers used by sibling integration tests"
 )]
 mod client;
+#[expect(
+	dead_code,
+	reason = "only the raw GET is shared with this test"
+)]
+#[path = "client/get.rs"]
+mod get;
 
 const CHILD_DATABASE_ENV: &str = "TOKEN_EXPIRY_TEST_DATABASE";
 const CHILD_PHASE_ENV: &str = "TOKEN_EXPIRY_TEST_PHASE";
@@ -275,8 +281,12 @@ async fn restored_phase(services: &Services, base: &str, _: &Path) -> Result {
 	Ok(())
 }
 
-// The stamped token is not presented, since a refusal would remove it.
 async fn kept_phase(services: &Services, base: &str, _: &Path) -> Result {
+	// A refusal leaves the token in place, so a later restore still recovers it.
+	let (status, body) = whoami(services, base, FOREIGN_TOKEN).await?;
+
+	assert_eq!(status, StatusCode::UNAUTHORIZED);
+	assert_eq!(body["soft_logout"], true);
 	assert_eq!(whoami(services, base, NATIVE_TOKEN).await?.0, StatusCode::OK);
 	assert!(
 		!marker_stamped(services, RESTORE_MARKER).await?,
@@ -292,22 +302,51 @@ async fn kept_phase(services: &Services, base: &str, _: &Path) -> Result {
 }
 
 async fn adopted_phase(services: &Services, base: &str, _: &Path) -> Result {
-	let (status, body) = whoami(services, base, FOREIGN_TOKEN).await?;
+	// Every refusal carries the sign-out hint, so a concurrent request reads the same.
+	for _ in 0..2 {
+		let (status, body) = whoami(services, base, FOREIGN_TOKEN).await?;
 
-	assert_eq!(status, StatusCode::UNAUTHORIZED);
-	assert_eq!(body["errcode"], "M_UNKNOWN_TOKEN");
-	assert_eq!(body["soft_logout"], true);
+		assert_eq!(status, StatusCode::UNAUTHORIZED);
+		assert_eq!(body["errcode"], "M_UNKNOWN_TOKEN");
+		assert_eq!(body["soft_logout"], true);
+	}
 
-	// The first refusal removed the token, so only it carries the sign-out hint.
-	let (status, body) = whoami(services, base, FOREIGN_TOKEN).await?;
-
-	assert_eq!(status, StatusCode::UNAUTHORIZED);
-	assert_eq!(body["errcode"], "M_UNKNOWN_TOKEN");
-	assert!(body.get("soft_logout").is_none());
 	assert_eq!(whoami(services, base, NATIVE_TOKEN).await?.0, StatusCode::OK);
 	assert!(marker_stamped(services, ADOPT_MARKER).await?, "adoption must stamp the marker");
 
-	refresh_rejected(services, base).await
+	refresh_rejected(services, base).await?;
+	expired_token_only_signs_out(services, base).await
+}
+
+async fn expired_token_only_signs_out(services: &Services, base: &str) -> Result {
+	let (user_id, device_id, _) = services
+		.users
+		.find_from_token(FOREIGN_TOKEN)
+		.await?;
+
+	// Userinfo refuses any device not signed in through OIDC, which proves nothing.
+	services
+		.users
+		.mark_oidc_device(&user_id, &device_id, "");
+
+	let client = Client { services, base, token: FOREIGN_TOKEN };
+	let userinfo = format!("{base}/_tuwunel/oidc/userinfo");
+	let response = client.get_url(&userinfo).await?;
+
+	assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+	let response = post_form(services, base, "revoke", &[("token", FOREIGN_TOKEN)]).await?;
+
+	assert_eq!(response.status(), StatusCode::OK);
+
+	let kept = services
+		.users
+		.device_exists(&user_id, &device_id)
+		.await;
+
+	assert!(!kept, "a client logging out with an expired token must end its session");
+
+	Ok(())
 }
 
 async fn refresh_rejected(services: &Services, base: &str) -> Result {
@@ -328,18 +367,13 @@ async fn refresh_rejected(services: &Services, base: &str) -> Result {
 
 	assert!(token_endpoint.ends_with("/_tuwunel/oidc/token"));
 
-	let refresh = services
-		.client
-		.clients
-		.default
-		.post(format!("{base}/_tuwunel/oidc/token"))
-		.form(&[
-			("grant_type", "refresh_token"),
-			("refresh_token", "origin-refresh-token"),
-			("client_id", "origin-client"),
-		])
-		.send()
-		.await?;
+	let fields = [
+		("grant_type", "refresh_token"),
+		("refresh_token", "origin-refresh-token"),
+		("client_id", "origin-client"),
+	];
+
+	let refresh = post_form(services, base, "token", &fields).await?;
 
 	assert_eq!(refresh.status(), StatusCode::BAD_REQUEST);
 
@@ -458,17 +492,28 @@ async fn marker_stamped(services: &Services, marker: &[u8]) -> Result<bool> {
 }
 
 async fn whoami(services: &Services, base: &str, token: &str) -> Result<(StatusCode, Value)> {
-	let response = services
-		.client
-		.clients
-		.default
-		.get(format!("{base}/_matrix/client/v3/account/whoami"))
-		.bearer_auth(token)
-		.send()
-		.await?;
-
+	let client = Client { services, base, token };
+	let whoami = format!("{base}/_matrix/client/v3/account/whoami");
+	let response = client.get_url(&whoami).await?;
 	let status = response.status();
 	let body = response.json().await?;
 
 	Ok((status, body))
+}
+
+async fn post_form(
+	services: &Services,
+	base: &str,
+	path: &str,
+	fields: &[(&str, &str)],
+) -> Result<Response> {
+	services
+		.client
+		.clients
+		.default
+		.post(format!("{base}/_tuwunel/oidc/{path}"))
+		.form(fields)
+		.send()
+		.err_into()
+		.await
 }

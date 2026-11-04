@@ -40,13 +40,13 @@ use tuwunel_core::{
 	utils,
 	utils::{
 		content_disposition::make_content_disposition,
-		deserialize_lenient_bool,
+		deadline_has_passed, deserialize_lenient_bool,
 		hash::sha256,
 		html::escape as html_escape,
 		result::{FlatOk, LogErr},
 		stream::ReadyExt,
 		string::EMPTY,
-		timepoint_from_now, timepoint_has_passed,
+		timepoint_from_now,
 		url::redirect_allowlisted,
 	},
 	warn,
@@ -439,10 +439,7 @@ pub(crate) async fn sso_callback_route(
 		)));
 	}
 
-	if session
-		.authorize_expires_at
-		.is_some_and(timepoint_has_passed)
-	{
+	if deadline_has_passed(session.authorize_expires_at) {
 		return Err!(Request(Unauthorized("Authorization grant session has expired.")));
 	}
 

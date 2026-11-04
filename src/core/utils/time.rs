@@ -118,6 +118,15 @@ pub fn parse_duration(duration: &str) -> Result<Duration> {
 		.map_err(|error| err!("'{duration:?}' is not a valid duration string: {error:?}"))
 }
 
+/// Checks whether an optional deadline has passed.
+///
+/// An absent deadline never passes.
+#[inline]
+#[must_use]
+pub fn deadline_has_passed(deadline: Option<SystemTime>) -> bool {
+	deadline.is_some_and(timepoint_has_passed)
+}
+
 /// Checks whether a system time is at or before the current wall-clock time.
 ///
 /// Equality is considered passed. A time later than the sampled current time

@@ -77,7 +77,7 @@ impl AuthDispatch for NoAuthentication {
 		match token {
 			// check_auth_still_required already enforced any auth-required config for
 			// these no-auth routes, so a stale or unknown token serves anonymously.
-			| Token::Invalid | Token::Expired(_) | Token::None => Ok(Auth::default()),
+			| Token::Invalid | Token::Expired | Token::None => Ok(Auth::default()),
 
 			| Token::User(user) => Ok(Auth {
 				sender_user: Some(user.0),
@@ -106,7 +106,7 @@ impl AuthDispatch for AccessToken {
 	) -> Result<Auth> {
 		match token {
 			| Token::Invalid => unknown_token(),
-			| Token::Expired(access_token) => expired_token(services, &access_token).await,
+			| Token::Expired => expired_token(),
 			| Token::Appservice(info) => Ok(auth_appservice(services, request, info).await?),
 			| Token::User(user) => Ok(Auth {
 				sender_user: Some(user.0),
@@ -135,7 +135,7 @@ impl AuthDispatch for AccessTokenOptional {
 	const SCHEME: Scheme = Scheme::AccessTokenOptional;
 
 	async fn dispatch(
-		services: &Services,
+		_services: &Services,
 		_request: &mut Request,
 		_json_body: Option<&CanonicalJsonValue>,
 		token: Token,
@@ -143,7 +143,7 @@ impl AuthDispatch for AccessTokenOptional {
 	) -> Result<Auth> {
 		match token {
 			| Token::Invalid => unknown_token(),
-			| Token::Expired(access_token) => expired_token(services, &access_token).await,
+			| Token::Expired => expired_token(),
 			| Token::User(user) => Ok(Auth {
 				sender_user: Some(user.0),
 				sender_device: Some(user.1),
@@ -163,7 +163,7 @@ impl AuthDispatch for AppserviceToken {
 	const SCHEME: Scheme = Scheme::AppserviceToken;
 
 	async fn dispatch(
-		services: &Services,
+		_services: &Services,
 		_request: &mut Request,
 		_json_body: Option<&CanonicalJsonValue>,
 		token: Token,
@@ -171,7 +171,7 @@ impl AuthDispatch for AppserviceToken {
 	) -> Result<Auth> {
 		match token {
 			| Token::Invalid => unknown_token(),
-			| Token::Expired(access_token) => expired_token(services, &access_token).await,
+			| Token::Expired => expired_token(),
 			| Token::User(_) =>
 				Err!(Request(Unauthorized("Appservice tokens must be used on this endpoint."))),
 			| Token::Appservice(info) => Ok(Auth {
@@ -187,7 +187,7 @@ impl AuthDispatch for AppserviceTokenOptional {
 	const SCHEME: Scheme = Scheme::AppserviceTokenOptional;
 
 	async fn dispatch(
-		services: &Services,
+		_services: &Services,
 		_request: &mut Request,
 		_json_body: Option<&CanonicalJsonValue>,
 		token: Token,
@@ -195,7 +195,7 @@ impl AuthDispatch for AppserviceTokenOptional {
 	) -> Result<Auth> {
 		match token {
 			| Token::Invalid => unknown_token(),
-			| Token::Expired(access_token) => expired_token(services, &access_token).await,
+			| Token::Expired => expired_token(),
 			| Token::User(user) => Ok(Auth {
 				sender_user: Some(user.0),
 				sender_device: Some(user.1),
@@ -223,7 +223,7 @@ impl AuthDispatch for ServerSignatures {
 	) -> Result<Auth> {
 		match token {
 			| Token::Invalid => unknown_token(),
-			| Token::Expired(access_token) => expired_token(services, &access_token).await,
+			| Token::Expired => expired_token(),
 			| Token::Appservice(_) | Token::User(_) =>
 				Err!(Request(Unauthorized("Server signatures must be used on this endpoint."))),
 			| Token::None => Ok(auth_server(services, request, json_body).await?),
@@ -237,12 +237,8 @@ fn unknown_token() -> Result<Auth> {
 	Err(Error::unknown_token(soft_logout, "Unknown access token."))
 }
 
-async fn expired_token(services: &Services, access_token: &str) -> Result<Auth> {
-	services
-		.users
-		.remove_access_token_value(access_token)
-		.await;
-
+// The token stays recorded, so a retry or concurrent request reads as expired too.
+fn expired_token() -> Result<Auth> {
 	let soft_logout = true;
 
 	Err(Error::unknown_token(soft_logout, "Expired access token."))

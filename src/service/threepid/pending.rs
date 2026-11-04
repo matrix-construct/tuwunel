@@ -18,7 +18,7 @@ use tuwunel_core::{
 	utils::{
 		self,
 		hash::sha256,
-		time::{timepoint_from_now, timepoint_has_passed},
+		time::{deadline_has_passed, timepoint_from_now},
 	},
 };
 use tuwunel_database::{Cbor, Deserialized};
@@ -512,11 +512,7 @@ fn derive_sid(medium: &Medium, address: &str, client_secret: &str) -> String {
 	b64encode.encode(digest)
 }
 
-fn expired(pending: &Pending) -> bool {
-	pending
-		.expires_at
-		.is_some_and(timepoint_has_passed)
-}
+fn expired(pending: &Pending) -> bool { deadline_has_passed(pending.expires_at) }
 
 fn ct_eq(a: &str, b: &str) -> bool { a.as_bytes().ct_eq(b.as_bytes()).into() }
 
