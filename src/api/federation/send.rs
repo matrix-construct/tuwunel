@@ -367,7 +367,7 @@ async fn handle_pdu(
 
 	let result = services
 		.event_handler
-		.handle_incoming_pdu(origin, room_id, &event_id, value, true)
+		.handle_pushed_pdu(origin, room_id, &event_id, value)
 		.map_ok(|_| ())
 		.await;
 

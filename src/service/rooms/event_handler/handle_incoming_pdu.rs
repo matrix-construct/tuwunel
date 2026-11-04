@@ -1,4 +1,4 @@
-use futures::{FutureExt, TryFutureExt, TryStreamExt, future::try_join5};
+use futures::{FutureExt, TryFutureExt, TryStreamExt, future::try_join4};
 use ruma::{
 	CanonicalJsonObject, CanonicalJsonValue, EventId, OwnedEventId, RoomId, ServerName, UserId,
 	events::{
@@ -36,8 +36,55 @@ type PrevSplit = SmallVec<[OwnedEventId; MAX_PREV_EVENTS]>;
 
 type Handled = Option<(RawPduId, bool)>;
 
-/// When receiving an event one needs to:
-/// 0. Check the server is in the room
+/// Handle a PDU a peer pushed to this server in a federation transaction.
+///
+/// A room every local user has left keeps its stored events and frozen state,
+/// and resolving a pushed event against them can rewrite a local member's
+/// membership, so such a room takes an inviter's rescission and nothing else.
+/// A rescission is signature-checked and clears only that inviter's own invite,
+/// so the room's frozen ACLs and disabled flag do not gate it. Anything else is
+/// dropped as handled, since the sender's view of the room is stale and a retry
+/// cannot help.
+///
+/// The caller holds the room's federation mutex, which a remote join keeps
+/// until its join event is appended, so a PDU arriving during a join waits for
+/// that join and reads the server as resident.
+#[implement(super::Service)]
+pub async fn handle_pushed_pdu<'a>(
+	&'a self,
+	origin: &'a ServerName,
+	room_id: &'a RoomId,
+	event_id: &'a EventId,
+	pdu: CanonicalJsonObject,
+) -> Result<Handled> {
+	let resident = self
+		.services
+		.state_cache
+		.server_in_room_result(self.services.globals.server_name(), room_id)
+		.await?;
+
+	if resident {
+		return self
+			.handle_incoming_pdu(origin, room_id, event_id, pdu, true)
+			.await;
+	}
+
+	if self
+		.handle_rescinded_invite(room_id, &pdu)
+		.await?
+		.is_false()
+	{
+		debug!(%origin, "Dropping a PDU for a room this server is not in.");
+	}
+
+	Ok(None)
+}
+
+/// Handle an event received from a federation peer.
+///
+/// Only a push is gated on this server being in the room, through
+/// `handle_pushed_pdu`; backfill and the membership routes reach rooms it has
+/// left. When receiving an event one needs to:
 /// 1. Skip the PDU if we already know about it
 /// 1.1. Remove unsigned field
 /// 2. Check signatures, otherwise drop
@@ -87,20 +134,14 @@ pub async fn handle_incoming_pdu<'a>(
 		return Ok(Some((pdu_id, false)));
 	}
 
-	// 1.1 Check the server is in the room
-	let meta_exists = self.services.metadata.exists(room_id).map(Ok);
-
-	// 1.2 Check if the room is disabled
 	let is_disabled = self
 		.services
 		.metadata
 		.is_disabled(room_id)
 		.map(Ok);
 
-	// 1.3.1 Check room ACL on origin field/server
 	let origin_acl_check = self.acl_check(origin, room_id);
 
-	// 1.3.2 Check room ACL on sender's server name
 	let sender: &UserId = pdu
 		.get("sender")
 		.try_into()
@@ -111,34 +152,20 @@ pub async fn handle_incoming_pdu<'a>(
 		.ne(origin)
 		.then_async(|| self.acl_check(sender.server_name(), room_id));
 
-	// Fetch create event; absent when we are not resident in the room.
+	// Absent when the room's state was never stored or was deleted.
 	let create_event = self
 		.services
 		.state_accessor
 		.room_state_get(room_id, &StateEventType::RoomCreate, "")
 		.map(|result| Ok(result.ok()));
 
-	let (meta_exists, is_disabled, (), (), create_event) = try_join5(
-		meta_exists,
+	let (is_disabled, (), (), create_event) = try_join4(
 		is_disabled,
 		origin_acl_check,
 		sender_acl_check.map(|o| o.unwrap_or(Ok(()))),
 		create_event,
 	)
 	.await?;
-
-	// When not resident, the only event we can act on is a leave rescinding an
-	// out-of-band invite we hold for a local user.
-	if !meta_exists {
-		return if self
-			.handle_rescinded_invite(room_id, &pdu)
-			.await?
-		{
-			Ok(None)
-		} else {
-			Err!(Request(NotFound("Room is unknown to this server")))
-		};
-	}
 
 	if is_disabled {
 		return Err!(Request(Forbidden("Federation of this room is disabled by this server.")));
@@ -259,18 +286,25 @@ pub async fn handle_incoming_pdu<'a>(
 /// Apply a federated leave that rescinds an out-of-band invite for a local
 /// user.
 ///
-/// We are not resident in the room, so the kick cannot be processed as a normal
-/// timeline event for lack of room state; but it must still clear the invite so
-/// the invited user's `/sync` reflects the rescission. Mirrors Synapse's
+/// We are not resident in the room, so we hold no current state to process the
+/// kick against as a normal timeline event; but it must still clear the invite
+/// so the invited user's `/sync` reflects the rescission. Mirrors Synapse's
 /// out-of-band membership handling: only a kick from the original inviter is
 /// honored, since without the room state we cannot judge any other sender's
 /// authority. Returns `true` when a rescission was applied.
 #[implement(super::Service)]
-#[tracing::instrument(skip_all, level = "debug", fields(%room_id))]
-async fn handle_rescinded_invite(
-	&self,
-	room_id: &RoomId,
-	pdu: &CanonicalJsonObject,
+// cold arm: rescission, whose layout overflows the route's depth limit
+#[async_noinline]
+#[tracing::instrument(
+	name = "rescinded_invite",
+	level = "debug",
+	skip_all,
+	fields(%room_id),
+)]
+async fn handle_rescinded_invite<'a>(
+	&'a self,
+	room_id: &'a RoomId,
+	pdu: &'a CanonicalJsonObject,
 ) -> Result<bool> {
 	if pdu
 		.get("type")

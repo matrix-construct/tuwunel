@@ -8,15 +8,20 @@ use futures::{StreamExt, pin_mut};
 use ruma::{
 	EventId, OwnedUserId, RoomId, UserId,
 	events::{
-		AnyStrippedStateEvent, AnySyncStateEvent,
+		AnyStrippedStateEvent, AnySyncStateEvent, StateEventType,
 		TimelineEventType::{RoomCreate, RoomMember},
+		room::member::MembershipState,
 	},
 	serde::Raw,
 	uint,
 };
 use tuwunel_core::{
 	Error, Result, debug_warn, is_equal_to,
-	utils::{result::LogErr, time::now_millis},
+	utils::{
+		result::{LogErr, NotFound},
+		time::now_millis,
+	},
+	warn,
 };
 use tuwunel_matrix::{
 	Event, PduCount,
@@ -281,6 +286,33 @@ fn strip_prev_state(
 	}
 
 	pdu
+}
+
+/// The user's own departure in a left room's state, when it holds one.
+///
+/// A ban counts, since the membership indexes file a banned user as left. Any
+/// other membership yields `None`, as a room this server left still holds the
+/// invite a later rescission withdrew. A failed read is logged and yields `None`
+/// too, so the client still learns of the departure.
+async fn own_departure(
+	services: &Services,
+	room_id: &RoomId,
+	user_id: &UserId,
+) -> Option<PduEvent> {
+	services
+		.state_accessor
+		.room_state_get(room_id, &StateEventType::RoomMember, user_id.as_str())
+		.await
+		.optional()
+		.inspect_err(|error| warn!(%room_id, %user_id, %error, "Unreadable own departure event"))
+		.ok()
+		.flatten()
+		.filter(|event| {
+			matches!(
+				event.membership_for(user_id),
+				Some(MembershipState::Leave | MembershipState::Ban)
+			)
+		})
 }
 
 /// Builds a minimal leave event for a left room whose state supplies none.

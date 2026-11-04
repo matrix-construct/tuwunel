@@ -110,11 +110,8 @@ pub async fn join<'a>(
 
 	// Resolved state can lag a federated re-invite; trust the invite index.
 	if self
-		.services
-		.state_accessor
-		.get_member(room_id, sender_user)
+		.banned_from_resident_room(sender_user, room_id)
 		.await
-		.is_ok_and(|content| content.membership == MembershipState::Ban)
 		&& self
 			.services
 			.state_cache

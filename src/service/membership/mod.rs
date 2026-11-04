@@ -13,8 +13,9 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use loole::{Receiver, Sender, unbounded};
 use ruma::{
-	CanonicalJsonObject, OwnedEventId, RoomId, RoomVersionId,
-	room_version_rules::RoomVersionRules, signatures::Verified,
+	CanonicalJsonObject, OwnedEventId, RoomId, RoomVersionId, UserId,
+	events::room::member::MembershipState, room_version_rules::RoomVersionRules,
+	signatures::Verified,
 };
 use serde_json::value::RawValue as RawJsonValue;
 use tuwunel_core::{Result, err, implement};
@@ -63,6 +64,29 @@ impl crate::Service for Service {
 	}
 
 	fn name(&self) -> &str { crate::service::make_name(std::module_path!()) }
+}
+
+/// Whether a room this server is in holds a ban on the user.
+///
+/// A room we left can lift a ban without telling us, so its frozen state
+/// answers for nothing here and the room itself refuses or admits the user. A
+/// failed residency read keeps the state's answer.
+#[implement(Service)]
+async fn banned_from_resident_room(&self, user_id: &UserId, room_id: &RoomId) -> bool {
+	let resident = self
+		.services
+		.state_cache
+		.server_in_room_result(self.services.globals.server_name(), room_id)
+		.await
+		.unwrap_or(true);
+
+	resident
+		&& self
+			.services
+			.state_accessor
+			.get_member(room_id, user_id)
+			.await
+			.is_ok_and(|content| content.membership == MembershipState::Ban)
 }
 
 /// Verifies a federation event and binds it to the room as a PDU.

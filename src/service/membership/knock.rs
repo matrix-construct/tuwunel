@@ -111,11 +111,8 @@ pub async fn knock<'a>(
 	}
 
 	if self
-		.services
-		.state_accessor
-		.get_member(room_id, sender_user)
+		.banned_from_resident_room(sender_user, room_id)
 		.await
-		.is_ok_and(|content| content.membership == MembershipState::Ban)
 	{
 		debug_warn!(%sender_user, %room_id, "Banned user attempted to knock.");
 		return Err!(Request(Forbidden("You cannot knock on a room you are banned from.")));

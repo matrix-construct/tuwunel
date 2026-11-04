@@ -67,8 +67,9 @@ use tuwunel_service::{
 };
 
 use super::{
-	invite_permitted, joined_since, load_timeline, profiles::collect as collect_profiles,
-	share_encrypted_room, stand_in_leave, strip_prev_state, timeline_prev_batch,
+	invite_permitted, joined_since, load_timeline, own_departure,
+	profiles::collect as collect_profiles, share_encrypted_room, stand_in_leave,
+	strip_prev_state, timeline_prev_batch,
 };
 use crate::{
 	ClientIp, Ruma, ignored_filter, is_empty_account_data_event,
@@ -839,7 +840,13 @@ async fn handle_left_room(
 
 	let is_banned = services.metadata.is_banned(room_id);
 
-	if is_not_found.or2(is_disabled, is_banned).await {
+	// Last, so a refusal on the same poll spares its reads.
+	let is_out_of_band = departed_out_of_band(services, room_id, sender_user, since);
+
+	if is_not_found
+		.or3(is_disabled, is_banned, is_out_of_band)
+		.await
+	{
 		let event = stand_in_leave(services, room_id, sender_user)?;
 		let state = state_after.wrap(StateEvents {
 			events: vec![trim_event_fields(event, filter.event_fields.as_deref())],
@@ -867,6 +874,36 @@ async fn handle_left_room(
 		filter,
 	)
 	.await
+}
+
+/// Whether the room holds no departure event this sync can send.
+///
+/// An invite rescinded or rejected after this server left the room writes only
+/// the membership row. The state then holds no departure for the user, or an
+/// older one with no event after the client's position to diff it against, and
+/// either way the rest of the room's frozen state is not theirs to receive. A
+/// ban stays with the ordinary loader, which serves it whatever the row's count
+/// says, and so does any departure when the read of the room's last event
+/// fails, which is logged and proves nothing.
+async fn departed_out_of_band(
+	services: &Services,
+	room_id: &RoomId,
+	sender_user: &UserId,
+	since: u64,
+) -> bool {
+	let no_later_event = since != 0
+		&& services
+			.timeline
+			.last_timeline_count(None, room_id, None)
+			.await
+			.inspect_err(|error| warn!(%room_id, %since, %error, "Unreadable last event count"))
+			.is_ok_and(|last| last <= PduCount::Normal(since));
+
+	own_departure(services, room_id, sender_user)
+		.await
+		.is_none_or(|event| {
+			no_later_event && event.membership_for(sender_user) != Some(MembershipState::Ban)
+		})
 }
 
 #[tracing::instrument(name = "load", level = "debug", skip_all)]

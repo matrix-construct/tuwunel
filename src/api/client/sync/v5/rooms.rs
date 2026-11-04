@@ -61,7 +61,7 @@ use self::{
 	heroes::calculate_heroes,
 };
 use super::{
-	super::{load_timeline_fallible, stand_in_leave, strip_prev_state},
+	super::{load_timeline_fallible, own_departure, stand_in_leave, strip_prev_state},
 	Connection, ListIds, SyncInfo, WindowRoom, stripped_content, stripped_state,
 };
 use crate::{ignored_filter, with_membership};
@@ -326,15 +326,9 @@ async fn leave_or_ban_response(
 	roomsince: u64,
 ) -> Result<ResponseRoom> {
 	// Clients read the departure from this event, not `membership`.
-	let member_event = services
-		.state_accessor
-		.room_state_get(room_id, &StateEventType::RoomMember, sender_user.as_str())
-		.map_ok(Event::into_format)
+	let member_event = own_departure(services, room_id, sender_user)
 		.await
-		.optional()
-		.inspect_err(|error| warn!(%room_id, %error, "Unreadable own departure event"))
-		.ok()
-		.flatten()
+		.map(Event::into_format)
 		.or_else(|| {
 			matches!(membership, Some(MembershipState::Leave))
 				.then(|| stand_in_leave(services, room_id, sender_user))
