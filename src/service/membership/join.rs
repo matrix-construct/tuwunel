@@ -1005,6 +1005,14 @@ fn merge_member_content(
 		return Ok(content);
 	};
 
+	// Only client keys are measured; stored profile fields may predate the limits.
+	let displayname = extra_content
+		.get("displayname")
+		.and_then(CanonicalJsonValue::as_str)
+		.filter(|_| client_name);
+
+	check_member_content(max_bytes, serialized_len(extra_content)?, displayname)?;
+
 	if let CanonicalJsonValue::Object(merged) = &mut content {
 		for (key, value) in extra_content {
 			merged
@@ -1013,30 +1021,7 @@ fn merge_member_content(
 		}
 	}
 
-	check_merged_member_content(max_bytes, &content, client_name)?;
-
 	Ok(content)
-}
-
-// The cap covers the merged event, since client keys ride on top of the server fields.
-fn check_merged_member_content(
-	max_bytes: usize,
-	content: &CanonicalJsonValue,
-	client_name: bool,
-) -> Result {
-	let CanonicalJsonValue::Object(merged) = content else {
-		return Ok(());
-	};
-
-	let displayname = if client_name {
-		merged
-			.get("displayname")
-			.and_then(CanonicalJsonValue::as_str)
-	} else {
-		None
-	};
-
-	check_member_content(max_bytes, serialized_len(merged)?, displayname)
 }
 
 #[implement(Service)]

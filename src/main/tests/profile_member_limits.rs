@@ -119,7 +119,6 @@ async fn displayname_limit(owner: &Client<'_>, user_id: &UserId) -> Result {
 }
 
 async fn avatar_url_limit(owner: &Client<'_>, user_id: &UserId) -> Result {
-	let avatar_url = |len: usize| format!("mxc://localhost/{}", "a".repeat(len));
 	let longest = avatar_url(984);
 	let oversized = avatar_url(985);
 
@@ -139,6 +138,8 @@ async fn avatar_url_limit(owner: &Client<'_>, user_id: &UserId) -> Result {
 
 	expect_profile(owner, user_id, "avatar_url", &json!(longest), "1000-byte avatar URL").await
 }
+
+fn avatar_url(len: usize) -> String { format!("mxc://localhost/{}", "a".repeat(len)) }
 
 async fn member_event_limit(owner: &Client<'_>, user_id: &UserId) -> Result {
 	let room = create_public_room(owner).await?;
@@ -234,7 +235,7 @@ async fn member_displayname_limit(owner: &Client<'_>, user_id: &UserId) -> Resul
 	.await
 }
 
-// A join's client extras ride on the member event, so the cap applies to the merged event.
+// A join's client extras are capped alone; the profile's fields ride along unmeasured.
 async fn join_extra_limit(owner: &Client<'_>, user_id: &UserId) -> Result {
 	let room = create_public_room(owner).await?;
 
@@ -257,38 +258,31 @@ async fn join_extra_limit(owner: &Client<'_>, user_id: &UserId) -> Result {
 	)])
 	.await?;
 
-	// Fits on its own, but the profile's avatar and name push the merged event over the cap.
-	let overflowing = "p".repeat(3300);
+	// Extras under the cap join beside a full-size profile.
+	let fitting = "p".repeat(3300);
 
-	expect_size(&json!({ (PAD): overflowing }), 3000, MEMBER_MAX, "join extras alone")?;
-
-	let refused = owner
-		.post_url(&join_url, &json!({ (PAD): overflowing }))
-		.await?;
-
-	expect_bad_json(refused, "join extras that overflow once merged").await?;
-	expect_member(owner, &room, user_id, "member after merged-overflow join", &[(
-		"membership",
-		Some(&json!("leave")),
-	)])
-	.await?;
-
-	// The profile's own avatar and name share the cap with the extras, so the
-	// fitting pad stays well under it.
-	let pad = "p".repeat(2000);
+	expect_size(&json!({ (PAD): fitting }), 3000, MEMBER_MAX, "join extras")?;
 
 	accepted(
 		owner
-			.post_url(&join_url, &json!({ (PAD): pad }))
+			.post_url(&join_url, &json!({ (PAD): fitting }))
 			.await?,
 	)
 	.await?;
 
+	let avatar = avatar_url(984);
+
 	expect_member(owner, &room, user_id, "fitting join extras", &[
 		("membership", Some(&json!("join"))),
-		(PAD, Some(&json!(pad))),
+		(PAD, Some(&json!(fitting))),
+		("avatar_url", Some(&json!(avatar))),
 	])
-	.await
+	.await?;
+
+	// The merged event is over the cap, so the stored avatar and name are not counted.
+	let content = owner.member_content(&room, user_id).await?;
+
+	expect_size(&content, MEMBER_MAX + 1, usize::MAX, "merged join beside a full profile")
 }
 
 // Client member events in `initial_state` are bounded before the room is created.
