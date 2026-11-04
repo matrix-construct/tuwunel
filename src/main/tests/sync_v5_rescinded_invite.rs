@@ -127,6 +127,7 @@ async fn exercise(services: &Services, base: &str) -> Result {
 		.left_history(History { joined: true, unreadable: true })
 		.await?;
 
+	accounts.forgotten_member().await?;
 	accounts.recorded_ban_stays_a_ban().await?;
 	accounts
 		.missing_snapshot_keeps_the_timeline()
@@ -225,6 +226,56 @@ fn has_event(events: &Value, event_id: &OwnedEventId) -> bool {
 		.into_iter()
 		.flatten()
 		.any(|event| event["event_id"] == event_id.as_str())
+}
+
+#[implement(Accounts, params = "<'_>")]
+#[tracing::instrument(level = "debug", skip_all)]
+async fn forgotten_member(&self) -> Result {
+	let &Self { services, inviter, invitee, .. } = self;
+	let room_id = self.joined_room().await?;
+	let member = self.member_event_id(&room_id, invitee).await?;
+
+	self.move_left_rows(&room_id, &[inviter, invitee])
+		.await?;
+
+	services.state_cache.forget(&room_id, invitee);
+
+	let request = json!({ "room_subscriptions": {
+		room_id.as_str(): { "required_state": [["m.room.member", "$ME"]], "timeline_limit": 0 }
+	} });
+
+	let reply = self.invitee_client.sync(None, &request).await?;
+	let room = &reply["rooms"][room_id.as_str()];
+
+	assert_eq!(room["membership"], "ban", "forgotten membership: {reply}");
+	assert_eq!(
+		room["required_state"][0]["event_id"],
+		member.as_str(),
+		"forgotten member lost: {reply}"
+	);
+
+	let pdu_id = services.timeline.get_pdu_id(&member).await?;
+
+	for missing in [true, false] {
+		if missing {
+			services.db["pduid_pdu"].del(pdu_id.as_ref());
+		} else {
+			services.db["pduid_pdu"].insert(pdu_id.as_ref(), b"{");
+		}
+
+		let reply = self.invitee_client.sync(None, &request).await?;
+		let room = &reply["rooms"][room_id.as_str()];
+
+		assert_eq!(room["membership"], "ban", "fallback membership: {reply}");
+		assert!(
+			room["required_state"]
+				.as_array()
+				.is_none_or(Vec::is_empty),
+			"fallback synthesized leave: {reply}"
+		);
+	}
+
+	Ok(())
 }
 
 /// Store an out-of-band invite the way a federated invite leaves it.

@@ -326,14 +326,23 @@ async fn leave_or_ban_response(
 	roomsince: u64,
 ) -> Result<ResponseRoom> {
 	// Clients read the departure from this event, not `membership`.
-	let member_event = own_departure(services, room_id, sender_user)
-		.await
-		.map(Event::into_format)
-		.or_else(|| {
-			matches!(membership, Some(MembershipState::Leave))
-				.then(|| stand_in_leave(services, room_id, sender_user))
-				.and_then(Result::ok)
-		});
+	let member_event = match membership {
+		| Some(MembershipState::Ban) => services
+			.state_accessor
+			.room_state_get(room_id, &StateEventType::RoomMember, sender_user.as_str())
+			.await
+			.optional()
+			.inspect_err(|error| warn!(%room_id, %sender_user, %error, "Unreadable member event"))
+			.ok()
+			.flatten(),
+		| _ => own_departure(services, room_id, sender_user).await,
+	};
+
+	let member_event = member_event.map(Event::into_format).or_else(|| {
+		matches!(membership, Some(MembershipState::Leave))
+			.then(|| stand_in_leave(services, room_id, sender_user))
+			.and_then(Result::ok)
+	});
 
 	Ok(ResponseRoom {
 		initial: roomsince.eq(&0).then_some(true),
