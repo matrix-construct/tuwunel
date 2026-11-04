@@ -119,7 +119,7 @@ in the [Out of scope](#out-of-scope) section.
 | MSC3904 | ✅ ● | 100/100 | Room version 10 as the default room version | default is V12, at or above the v10 the MSC suggests |
 | MSC3882 | ✅ ● | 90/100 | Allow an existing session to sign in a new session | POST /login/get_token implemented with UIA |
 | MSC3873 | ✅ ● | 100/100 | event_match dotted keys | dotted-key escape semantics handled in ruma flattened JSON |
-| MSC3861 | ✅ ● | 90/95 | Next-generation auth for Matrix, based on OAuth 2.0/OIDC | Advertised as org.matrix.msc3861; cores 2964-2967 + merged periphery all yes |
+| MSC3861 | ✅ ● | 90/95 | Next-generation auth for Matrix, based on OAuth 2.0/OIDC | Flag needs the OIDC server; cores 2964-2967 + merged periphery all yes |
 | MSC3860 | ✅ ◐ | 95/100 | Media Download Redirects | Emits 307 to presigned object-store URL on allow_redirect; default-off gate |
 | MSC3856 | ✅ ● | 90/100 | Threads List API | src/api/client/threads.rs:81 roots retained; full API, residual fallbacks |
 | MSC3828 | ✅ ● | 100/100 | Content Repository Cross Origin Resource Policy (CORP) Headers | media endpoints return Cross-Origin-Resource-Policy: cross-origin |
