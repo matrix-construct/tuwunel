@@ -202,5 +202,10 @@ login for everyone (apart from accounts that authenticate via SSO), pair LDAP
 with a restrictive `filter` that matches every legitimate user, and remove or
 invalidate local passwords for accounts that should no longer be able to log
 in directly. Direct-bind mode already has no fallback, so it enforces this on
-its own. Alternatively, set `login_with_password = false` and rely on
-[identity providers](providers.md) for non-LDAP users.
+its own.
+
+> [!WARNING]
+> Setting `login_with_password = false` blocks LDAP logins as well as local
+> password logins. Keep password login enabled if your users sign in through
+> LDAP. With it disabled, only [identity provider](providers.md), JWT, token
+> and appservice logins remain available.
