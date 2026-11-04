@@ -1,11 +1,39 @@
 use axum::extract::State;
-use ruma::{EventId, RoomId, UserId, api::client::room::report_content};
-use tuwunel_core::{Err, Result, debug_info, info, utils::ReadyExt};
-use tuwunel_matrix::pdu::PduEvent;
+use futures::{StreamExt, pin_mut};
+use ruma::{EventId, RoomAliasId, RoomId, UserId, api::client::room::report_content};
+use serde::Deserialize;
+use tuwunel_core::{
+	Err, Result, debug_info, info,
+	utils::{ReadyExt, TryFutureExtExt, html, string::markdown_cell},
+};
+use tuwunel_matrix::{Event, pdu::PduEvent};
 use tuwunel_service::Services;
 
 use super::REASON_MAX_LEN;
 use crate::{ClientIp, Ruma};
+
+#[cfg(test)]
+mod tests;
+
+/// Reported message text longer than this many characters is cut off.
+const BODY_MAX_CHARS: usize = 500;
+
+struct EventReport<'a> {
+	reporter: &'a UserId,
+	reason: &'a str,
+	event_id: &'a EventId,
+	room_id: &'a RoomId,
+	room_type: &'a str,
+	room_alias: Option<&'a RoomAliasId>,
+	body: Option<&'a str>,
+	sender: &'a UserId,
+	sender_is_local: bool,
+}
+
+#[derive(Deserialize)]
+struct ReportedContent {
+	body: Option<String>,
+}
 
 /// # `POST /_matrix/client/v3/rooms/{roomId}/report/{eventId}`
 ///
@@ -40,13 +68,41 @@ pub(crate) async fn report_event_route(
 	)
 	.await?;
 
+	let room_type = services
+		.state_accessor
+		.get_room_type(&pdu.room_id)
+		.ok()
+		.await;
+
+	let room_type = room_type.map_or_else(|| "regular".to_owned(), |kind| kind.to_string());
+
+	let aliases = services
+		.alias
+		.local_aliases_for_room(&pdu.room_id);
+
+	pin_mut!(aliases);
+	let room_alias = aliases.next().await;
+
+	let body = pdu
+		.get_content::<ReportedContent>()
+		.ok()
+		.and_then(|content| content.body);
+
+	let report = EventReport {
+		reporter: sender_user,
+		reason,
+		event_id: &pdu.event_id,
+		room_id: &pdu.room_id,
+		room_type: &room_type,
+		room_alias,
+		body: body.as_deref(),
+		sender: &pdu.sender,
+		sender_is_local: services.globals.user_is_local(&pdu.sender),
+	};
+
 	services
 		.admin
-		.send_report(&format!(
-			"@room Event report received from {}\nReport Reason: {}\n\nEvent ID: {}\nRoom ID: \
-			 {}\nSent By: {}",
-			sender_user, reason, pdu.event_id, pdu.room_id, pdu.sender,
-		))
+		.send_report(&format_report(&report))
 		.await;
 
 	Ok(report_content::v3::Response {})
@@ -93,4 +149,41 @@ async fn is_event_report_valid(
 	}
 
 	Ok(())
+}
+
+fn format_report(report: &EventReport<'_>) -> String {
+	let room_alias = report
+		.room_alias
+		.map_or("none", RoomAliasId::as_str);
+
+	let body = report
+		.body
+		.map_or_else(|| "unavailable".to_owned(), quote_body);
+
+	let redact_hint = if report.sender_is_local {
+		format!("\n\nTo redact it: `!admin users redact-event {}`", report.event_id)
+	} else {
+		String::new()
+	};
+
+	format!(
+		"@room Event report received from {}\nReport Reason: {}\n\nEvent ID: {}\nRoom ID: \
+		 {}\nRoom Type: {}\nRoom Alias: {}\nSent By: {}\nMessage: {}{}",
+		report.reporter,
+		report.reason,
+		report.event_id,
+		report.room_id,
+		report.room_type,
+		room_alias,
+		report.sender,
+		body,
+		redact_hint,
+	)
+}
+
+/// Makes text written by the reported user safe to show in a markdown message.
+fn quote_body(body: &str) -> String {
+	let text: String = body.chars().take(BODY_MAX_CHARS).collect();
+
+	html::escape(&markdown_cell(&text)).replace('[', "\\[")
 }
