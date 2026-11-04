@@ -2,13 +2,13 @@
 
 use std::{
 	fmt::Display,
-	net::{IpAddr, Ipv4Addr, TcpListener},
+	net::{IpAddr, Ipv4Addr},
+	time::Duration,
 };
 
-use futures::future::join;
 use reqwest::{Client, RequestBuilder, StatusCode};
 use serde_json::{Value, json};
-use tuwunel::{Args, Runtime, Server, async_run, async_start, async_stop};
+use tokio::time::sleep;
 use tuwunel_core::{
 	Err, Result, err,
 	jwt::{EncodingKey, Header, encode},
@@ -18,7 +18,7 @@ use tuwunel_service::Services;
 
 use self::{
 	appservice::{Bridge, register_appservice},
-	client::wait_until_ready,
+	fixture::boot,
 };
 
 mod appservice;
@@ -27,14 +27,17 @@ mod appservice;
 	reason = "Only listener readiness is shared with the client API harness."
 )]
 mod client;
+mod fixture;
 
 const JWT_SECRET: &str = "jwt-login-deactivated-test-secret";
 const PASSWORD: &str = "test-password";
 const WRONG_PASSWORD: &str = "not-the-test-password";
 const DEACTIVATED: &str = "M_USER_DEACTIVATED";
 const LIMITED: &str = "M_LIMIT_EXCEEDED";
+const UNKNOWN_TOKEN: &str = "M_UNKNOWN_TOKEN";
 const LOGIN_TOKEN: &str = "jwt-login-deactivated-login-token";
 const BRIDGE_TOKEN: &str = "jwt-login-deactivated-bridge-token";
+const DEVICE: &str = "JWTLOGINDEVICE";
 
 const BRIDGE: Bridge<'static> = Bridge {
 	id: "jwt-login-deactivated",
@@ -44,7 +47,18 @@ const BRIDGE: Bridge<'static> = Bridge {
 	aliases: None,
 };
 
-/// Login refuses deactivated accounts and isolates password limits by address.
+const LASTING: Grant = Grant { lifetime: None, refreshable: false };
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Grant {
+	/// How long the access token lasts, in milliseconds.
+	lifetime: Option<u64>,
+
+	/// Whether a refresh token came with it.
+	refreshable: bool,
+}
+
+/// Login enforces account state, password limits and the JWT expiry option.
 ///
 /// Password, JWT, login-token and JWT UIAA authentication refuse deactivated
 /// accounts, while an appservice can still sign in its passwordless bot.
@@ -53,52 +67,32 @@ const BRIDGE: Bridge<'static> = Bridge {
 /// A loopback peer has no address budget, while a non-loopback address shares
 /// one budget across accounts and leaves password re-entry its own.
 #[test]
-fn login_refuses_deactivated_accounts_and_limits_wrong_passwords() -> Result {
-	let listener = TcpListener::bind(("127.0.0.1", 0))?;
-	let port = listener.local_addr()?.port();
-	let args = Args::default_test(&["fresh", "cleanup"])
-		.with_loopback_listener(port)
-		.with_option("listening=true")
-		.with_option("logging.global_default=false")
-		.with_option("jwt.enable=true")
-		.with_option(format!("jwt.key=\"{JWT_SECRET}\""))
-		.with_option("jwt.format=\"HMAC\"")
-		.with_option("jwt.algorithm=\"HS256\"")
-		.with_option("jwt.register_user=false")
-		.with_option("rate_limiting.login.failed.per_second=0.000001")
-		.with_option("rate_limiting.login.address.per_second=0.000001")
-		.with_option("authentication.argon2.m_cost=64")
-		.with_option("authentication.argon2.t_cost=1");
+fn login_enforces_account_state_password_limits_and_jwt_expiry() -> Result {
+	let jwt_key = format!("jwt.key=\"{JWT_SECRET}\"");
+	let common = [
+		"logging.global_default=false",
+		"jwt.enable=true",
+		&jwt_key,
+		"jwt.format=\"HMAC\"",
+		"jwt.algorithm=\"HS256\"",
+		"jwt.register_user=false",
+		"authentication.argon2.m_cost=64",
+		"authentication.argon2.t_cost=1",
+	];
 
-	let runtime = Runtime::new(Some(&args))?;
-	let server = Server::new(Some(&args), Some(&runtime))?;
+	let limits = [
+		"rate_limiting.login.failed.per_second=0.000001",
+		"rate_limiting.login.address.per_second=0.000001",
+	];
 
-	runtime.block_on(async {
-		let services = async_start(&server).await?;
-		let base = format!("http://127.0.0.1:{port}");
+	// Expiry floors to whole seconds, so this lifetime leaves a slow runner a margin.
+	let expiry = ["jwt.expire_access_token=true", "authentication.access_token_ttl=5"];
 
-		drop(listener);
-
-		let exercise = async {
-			let outcome = exercise(&services, &base).await;
-			let shutdown = server.server.shutdown();
-
-			outcome.and(shutdown)
-		};
-
-		let (run, outcome) = join(async_run(&server), exercise).await;
-
-		drop(services);
-		async_stop(&server).await?;
-		run?;
-
-		outcome
-	})
+	boot("jwt-login-limits", common.into_iter().chain(limits), exercise)?;
+	boot("jwt-login-expiry", common.into_iter().chain(expiry), exercise_expiry)
 }
 
 async fn exercise(services: &Services, base: &str) -> Result {
-	wait_until_ready(services, base).await?;
-
 	let server_name = services.globals.server_name();
 	let active = UserId::parse_with_server_name("active", server_name)?;
 	let deactivated = UserId::parse_with_server_name("deactivated", server_name)?;
@@ -117,9 +111,13 @@ async fn exercise(services: &Services, base: &str) -> Result {
 		.deactivate_account(&deactivated)
 		.await?;
 
-	let (status, session) = jwt_login(services, base, &active).await?;
+	let session = expect_login(services, base, &jwt_auth(&active)?, LASTING).await?;
+	let refreshable = Grant {
+		lifetime: Some(lifetime_ms(services)),
+		refreshable: true,
+	};
 
-	expect_signed_in("active account", status, &session)?;
+	expect_login(services, base, &refreshing(jwt_auth(&active)?), refreshable).await?;
 
 	let (status, body) = jwt_login(services, base, &deactivated).await?;
 
@@ -180,10 +178,7 @@ async fn jwt_stage_admits_only_active_subjects(
 	active: &UserId,
 	deactivated: &UserId,
 ) -> Result {
-	let access_token = session["access_token"]
-		.as_str()
-		.ok_or_else(|| err!("the active session has no access token: {session}"))?;
-
+	let access_token = access_token(session)?;
 	let (status, body) =
 		change_password_by_jwt(services, base, access_token, deactivated).await?;
 
@@ -280,10 +275,7 @@ async fn password_reentry_after_login_limit(
 	user_id: &UserId,
 	session: &Value,
 ) -> Result {
-	let access_token = session["access_token"]
-		.as_str()
-		.ok_or_else(|| err!("the alternate-address session has no access token"))?;
-
+	let access_token = access_token(session)?;
 	let auth = password_body(user_id, PASSWORD);
 	let body = json!({"new_password": PASSWORD, "logout_devices": false, "auth": auth});
 	let request = post(services, base, "account/password", &body).bearer_auth(access_token);
@@ -377,6 +369,129 @@ async fn correct_password_inside_the_burst(
 	let (status, body) = password_login(services, base, user_id, PASSWORD).await?;
 
 	expect_signed_in("correct password inside the burst", status, &body)
+}
+
+/// Checks that `jwt.expire_access_token` ends a JWT login at the access-token
+/// lifetime and leaves a password login alone.
+///
+/// The JWT login gets no refresh token whether or not the client asks for one,
+/// expires into a soft logout, and resumes its device with another login. A
+/// refresh token the device already held keeps working.
+async fn exercise_expiry(services: &Services, base: &str) -> Result {
+	let server_name = services.globals.server_name();
+	let user_id = UserId::parse_with_server_name("expiring", server_name)?;
+	let lifetime = Some(lifetime_ms(services));
+	let expiring = Grant { lifetime, refreshable: false };
+	let refreshable = Grant { lifetime, refreshable: true };
+
+	services
+		.users
+		.create(&user_id, Some(PASSWORD), None)
+		.await?;
+
+	let password_auth = password_body(&user_id, PASSWORD);
+	let password_session = expect_login(services, base, &password_auth, LASTING).await?;
+	let refreshing_auth = on_device(refreshing(password_auth));
+	let refreshing_session = expect_login(services, base, &refreshing_auth, refreshable).await?;
+
+	expect_login(services, base, &jwt_auth(&user_id)?, expiring).await?;
+
+	let device_login = on_device(refreshing(jwt_auth(&user_id)?));
+	let session = expect_login(services, base, &device_login, expiring).await?;
+
+	outlast_access_token(services).await;
+
+	let (status, body) = whoami(services, base, access_token(&password_session)?).await?;
+
+	if status != StatusCode::OK {
+		return Err!("the password login expired with the JWT login: {status} {body}");
+	}
+
+	let (status, body) = whoami(services, base, access_token(&session)?).await?;
+
+	expect_error("expired JWT login", status, &body, StatusCode::UNAUTHORIZED, UNKNOWN_TOKEN)?;
+
+	if body["soft_logout"] != true {
+		return Err!("the expired JWT login was not a soft logout: {body}");
+	}
+
+	let session = expect_login(services, base, &device_login, expiring).await?;
+	let (status, body) = whoami(services, base, access_token(&session)?).await?;
+
+	if status != StatusCode::OK || body["device_id"] != DEVICE {
+		return Err!("another JWT login did not resume {DEVICE}: {status} {body}");
+	}
+
+	let refresh = json!({"refresh_token": refreshing_session["refresh_token"]});
+	let (status, body) = send(post(services, base, "refresh", &refresh)).await?;
+
+	expect_signed_in("the device's earlier refresh token", status, &body)
+}
+
+async fn outlast_access_token(services: &Services) {
+	let ttl = services.config.authentication.access_token_ttl;
+
+	sleep(Duration::from_secs(ttl.saturating_add(1))).await;
+}
+
+async fn whoami(services: &Services, base: &str, token: &str) -> Result<(StatusCode, Value)> {
+	let request = services
+		.client
+		.clients
+		.default
+		.get(format!("{base}/_matrix/client/v3/account/whoami"))
+		.bearer_auth(token);
+
+	send(request).await
+}
+
+async fn expect_login(
+	services: &Services,
+	base: &str,
+	body: &Value,
+	expected: Grant,
+) -> Result<Value> {
+	let (status, session) = login(services, base, body).await?;
+
+	expect_signed_in(body, status, &session)?;
+
+	let granted = Grant {
+		lifetime: session["expires_in_ms"].as_u64(),
+		refreshable: session["refresh_token"].is_string(),
+	};
+
+	if granted != expected {
+		return Err!("{body}: expected {expected:?}, got {session}");
+	}
+
+	Ok(session)
+}
+
+fn lifetime_ms(services: &Services) -> u64 {
+	services
+		.config
+		.authentication
+		.access_token_ttl
+		.saturating_mul(1000)
+}
+
+fn refreshing(body: Value) -> Value { with_field(body, "refresh_token", true) }
+
+fn on_device(body: Value) -> Value { with_field(body, "device_id", DEVICE) }
+
+fn with_field<T>(mut body: Value, key: &str, value: T) -> Value
+where
+	T: Into<Value>,
+{
+	body[key] = value.into();
+
+	body
+}
+
+fn access_token(session: &Value) -> Result<&str> {
+	session["access_token"]
+		.as_str()
+		.ok_or_else(|| err!("the session has no access token: {session}"))
 }
 
 async fn jwt_login(

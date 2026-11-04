@@ -60,6 +60,7 @@ issuer must agree with the server on this naming.
 | `format` | `"HMAC"` | One of `HMAC`, `B64HMAC`, `ECDSA`, `EDDSA`, in any case (`HMACB64` is also accepted for `B64HMAC`). Selects how `key` is decoded. |
 | `algorithm` | `"HS256"` | JWT `alg` header value. Must be compatible with `format`. |
 | `register_user` | `true` | Auto-create a Matrix account on first valid login if the user doesn't already exist. Set to `false` to require pre-existing accounts. |
+| `expire_access_token` | `false` | Expire the access token of a JWT login after `access_token_ttl` and withhold its refresh token, so the token issuer decides how long a login lasts. See [Session lifetime](#session-lifetime). |
 | `audience` | `[]` | Optional list of accepted `aud` claim values. When non-empty, tokens must claim at least one entry; `aud` becomes a required claim. |
 | `issuer` | `[]` | Optional list of accepted `iss` claim values. When non-empty, tokens must claim at least one entry; `iss` becomes a required claim. |
 | `require_exp` | `false` | If `true`, tokens without an `exp` claim are rejected. Defaults to `false` for Synapse compatibility. |
@@ -108,6 +109,58 @@ JWT does not synchronize admin status, group membership, or display
 names; the token grants login only. If you need ongoing identity
 attribute synchronization, use [LDAP](ldap.md) or an
 [OIDC identity provider](providers.md) instead.
+
+
+## Session lifetime
+
+A JWT is checked once, at login. The session it opens then follows the
+usual rules: the access token never expires unless the client asks for a
+refresh token, and a refresh token keeps the session going for as long as
+it lasts, which by default is indefinitely. The JWT's own `exp` has no say,
+so a login can far outlast the token that opened it.
+
+Set `expire_access_token` to let the token issuer decide instead:
+
+```toml
+[global.jwt]
+enable = true
+key = "..."
+expire_access_token = true
+require_exp = true
+```
+
+Every JWT login then gets an access token that expires after
+`access_token_ttl`, and no refresh token, even when the client asks for one.
+Once the token expires the client is soft-logged-out: its requests fail with
+`M_UNKNOWN_TOKEN` and `soft_logout: true`, and it keeps its device and
+encryption keys. To stay signed in, it logs in with a fresh JWT and the same
+`device_id`.
+
+The option is off by default because a client that cannot obtain a fresh JWT
+would be signed out for good. It also has limits to plan around:
+
+- **The lifetime is server-wide.** It comes from `access_token_ttl` in
+  `[global.authentication]` (7 days by default), not from the JWT's `exp`,
+  and the same setting governs every session holding a refresh token.
+- **The JWT itself must expire.** A client can log in again with any JWT that
+  is still valid, so have the issuer set `exp`, and keep `require_exp = true`
+  to refuse a token without one.
+- **Existing sessions are untouched.** A session opened earlier keeps its
+  tokens, and a device holding a refresh token keeps it even across a later
+  JWT login. Remove those devices once when you enable the option.
+- **Other sign-in routes stay open.** Password, LDAP and SSO logins keep their
+  usual lifetimes. A fresh JWT also passes the interactive authentication of
+  `/login/get_token`, and the login token it yields opens a session outside
+  this option. To hold a JWT-only deployment to the issuer's decision, close
+  both:
+
+  ```toml
+  [global.authentication.login]
+  via_existing_session = false
+  with_password = false
+  ```
+
+  `with_password = false` also turns off [LDAP](ldap.md) sign-in.
 
 
 ## UIAA: JWT for account override

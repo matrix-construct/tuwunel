@@ -214,7 +214,7 @@ Table exhaustion logs a warning.
 | Option | Default | Description |
 |---|---|---|
 | `login_token_ttl` | `120000` | Lifetime of `m.login.token` tokens in milliseconds (default: 2 minutes). |
-| `access_token_ttl` | `604800` | Lifetime of access tokens in seconds for clients that support refresh tokens. After expiry the client is soft-logged-out until it refreshes (default: 7 days). |
+| `access_token_ttl` | `604800` | Lifetime of access tokens in seconds for clients that support refresh tokens. After expiry the client is soft-logged-out until it refreshes. [`jwt.expire_access_token`](jwt.md#session-lifetime) applies it to JWT logins too (default: 7 days). |
 | `openid_token_ttl` | `3600` | Lifetime of OpenID 1.0 tokens in seconds. These are used for Matrix account integrations such as Vector Integrations in Element, **not** for OIDC/OpenID Connect logins (default: 1 hour). |
 
 ## Emergency password

@@ -29,8 +29,9 @@ use super::true_fn;
 ///   calls under `/_synapse/mas/`. Signing in through MAS also needs an
 ///   `[[global.identity_provider]]` entry with `brand = "MAS"`; startup warns
 ///   when it is missing.
-/// - `access_token_ttl` applies only to sessions holding a refresh token
-///   (see `[global.authentication.refresh_token]`).
+/// - `access_token_ttl` applies only to sessions holding a refresh token (see
+///   `[global.authentication.refresh_token]`) and, under
+///   `jwt.expire_access_token`, to JWT logins.
 #[expect(rustdoc::broken_intra_doc_links, rustdoc::bare_urls)]
 // No Debug: secrets are reachable from this section.
 #[derive(Clone, Deserialize)]
@@ -71,7 +72,8 @@ pub struct Authentication {
 	///
 	/// For clients supporting refresh tokens, the access token supplied at
 	/// login is invalidated after this interval, soft-logging out the client
-	/// until it refreshes.
+	/// until it refreshes. Under `jwt.expire_access_token`, a JWT login expires
+	/// the same way and needs a fresh JWT instead.
 	///
 	/// reloadable: yes
 	/// default: 604800

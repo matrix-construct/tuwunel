@@ -563,6 +563,13 @@ fn check_jwt(config: &Config) -> Result {
 		jwt.key_format()?;
 	}
 
+	if jwt.enable && jwt.expire_access_token && config.authentication.access_token_ttl == 0 {
+		return Err!(Config(
+			"jwt.expire_access_token",
+			"Needs an authentication.access_token_ttl greater than zero."
+		));
+	}
+
 	Ok(())
 }
 

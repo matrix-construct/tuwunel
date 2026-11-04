@@ -494,8 +494,9 @@
 #   calls under `/_synapse/mas/`. Signing in through MAS also needs an
 #   `[[global.identity_provider]]` entry with `brand = "MAS"`; startup warns
 #   when it is missing.
-# - `access_token_ttl` applies only to sessions holding a refresh token
-#   (see `[global.authentication.refresh_token]`).
+# - `access_token_ttl` applies only to sessions holding a refresh token (see
+#   `[global.authentication.refresh_token]`) and, under
+#   `jwt.expire_access_token`, to JWT logins.
 #
 #[global.authentication]
 
@@ -525,7 +526,8 @@
 #
 # For clients supporting refresh tokens, the access token supplied at
 # login is invalidated after this interval, soft-logging out the client
-# until it refreshes.
+# until it refreshes. Under `jwt.expire_access_token`, a JWT login expires
+# the same way and needs a fresh JWT instead.
 #
 # reloadable: yes
 #
@@ -2481,6 +2483,20 @@
 # reloadable: yes
 #
 #register_user = true
+
+# Expire the access token of a new JWT login and withhold a refresh token.
+#
+# The access token lasts `authentication.access_token_ttl` seconds
+# whatever the client asks for, so staying signed in takes a fresh JWT and
+# the token issuer decides how long a login lasts. Off by default because
+# a client that cannot obtain a fresh JWT would be signed out for good.
+# A device already holding a refresh token keeps it, even across a later
+# JWT login, so remove those devices when enabling this. Startup and
+# reload refuse a zero `authentication.access_token_ttl` while enabled.
+#
+# reloadable: yes
+#
+#expire_access_token = false
 
 # Signature algorithm for validating tokens.
 #

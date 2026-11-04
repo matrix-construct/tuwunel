@@ -482,6 +482,24 @@ fn prev_events_concurrency_is_nonzero_and_reloadable() {
 }
 
 #[test]
+fn jwt_expiry_needs_a_nonzero_access_token_ttl() {
+	let config = |enable: bool, expire: bool, ttl: u64| {
+		let toml = format!(
+			"[global.jwt]\nenable = {enable}\nexpire_access_token = \
+			 {expire}\n[global.authentication]\naccess_token_ttl = {ttl}\n"
+		);
+
+		config_from_toml(&toml).unwrap()
+	};
+
+	assert!(check(&config(true, true, 1)).is_ok(), "a lasting token should pass validation");
+	assert!(check(&config(true, true, 0)).is_err(), "a dead token should fail validation");
+	assert!(check(&config(true, false, 0)).is_ok(), "no expiry should pass validation");
+	assert!(check(&config(false, true, 0)).is_ok(), "no JWT login should pass validation");
+	reload(&default_config(), &config(true, true, 1)).expect("JWT expiry should reload");
+}
+
+#[test]
 fn malformed_legacy_state_local_switch_is_rejected() {
 	let result = config_from_toml(
 		r#"[global]

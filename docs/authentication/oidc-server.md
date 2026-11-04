@@ -189,7 +189,7 @@ behavior, so an existing deployment is unaffected until you opt in.
 
 | Option | Default | Description |
 |---|---|---|
-| `access_token_ttl` | `604800` | Access-token lifetime in seconds (7 days). After expiry a refresh-capable client is soft-logged-out until it refreshes. Shared with legacy refresh-token logins. |
+| `access_token_ttl` | `604800` | Access-token lifetime in seconds (7 days). After expiry a refresh-capable client is soft-logged-out until it refreshes. Shared with legacy refresh-token logins, and with JWT logins under [`jwt.expire_access_token`](jwt.md#session-lifetime). |
 | `refresh_token_ttl` | `0` | Refresh-token lifetime in seconds. `0` disables refresh-token expiry entirely. A typical enabled value is `259200` (three days). |
 | `refresh_token_idle_only` | `true` | When `true`, each successful refresh slides the deadline forward, so a session in continuous use never expires. When `false`, the deadline is fixed at first issuance and the user must re-authenticate after `refresh_token_ttl` regardless of activity. |
 | `refresh_token_hard_logout` | `false` | When `false`, an expired refresh token is rejected with `soft_logout: true`, letting the client keep its E2EE keys and resume the same device after re-auth. When `true`, expiry deletes the device entirely and signals `soft_logout: false`, so the next session is a fresh device. |

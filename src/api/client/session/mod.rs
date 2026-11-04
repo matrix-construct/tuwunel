@@ -164,11 +164,16 @@ pub(crate) async fn login_route(
 
 	services.users.locked_check(&user_id).await?;
 
+	// Only another JWT extends an expiring session, so the issuer decides how long it lasts.
+	let expiring =
+		matches!(body.login_info, LoginInfo::Jwt(_)) && services.config.jwt.expire_access_token;
+
+	let refreshable = body.body.refresh_token && !expiring;
 	let (access_token, expires_in) = services
 		.users
-		.generate_access_token(body.body.refresh_token);
+		.generate_access_token(expiring || refreshable);
 
-	let refresh_token = expires_in.is_some().then(generate_refresh_token);
+	let refresh_token = refreshable.then(generate_refresh_token);
 
 	let device_id = if let Some(device_id) = &body.device_id
 		&& services

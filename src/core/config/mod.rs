@@ -1289,6 +1289,21 @@ pub struct JwtConfig {
 	#[serde(default = "true_fn")]
 	pub register_user: bool,
 
+	/// Expire the access token of a new JWT login and withhold a refresh token.
+	///
+	/// The access token lasts `authentication.access_token_ttl` seconds
+	/// whatever the client asks for, so staying signed in takes a fresh JWT and
+	/// the token issuer decides how long a login lasts. Off by default because
+	/// a client that cannot obtain a fresh JWT would be signed out for good.
+	/// A device already holding a refresh token keeps it, even across a later
+	/// JWT login, so remove those devices when enabling this. Startup and
+	/// reload refuse a zero `authentication.access_token_ttl` while enabled.
+	///
+	/// reloadable: yes
+	/// default: false
+	#[serde(default)]
+	pub expire_access_token: bool,
+
 	/// Signature algorithm for validating tokens.
 	///
 	/// The name must suit the key format: HS256, HS384, or HS512 for HMAC

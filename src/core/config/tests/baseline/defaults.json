@@ -143,7 +143,7 @@
   "ip_source": "None",
   "ip_source_trusted_subnets": "[]",
   "jaeger_filter": "\"trace,h2=off\"",
-  "jwt": "JwtConfig { enable: false, key: \"\", format: \"\", register_user: false, algorithm: \"\", audience: [], issuer: [], require_exp: false, require_nbf: false, validate_exp: false, validate_nbf: false, validate_signature: false }",
+  "jwt": "JwtConfig { enable: false, key: \"\", format: \"\", register_user: false, expire_access_token: false, algorithm: \"\", audience: [], issuer: [], require_exp: false, require_nbf: false, validate_exp: false, validate_nbf: false, validate_signature: false }",
   "ldap": "LdapConfig { enable: false, uri: None, base_dn: \"\", bind_dn: None, bind_password_file: None, filter: \"\", uid_attribute: \"\", admin_base_dn: \"\", admin_filter: \"\" }",
   "limit_profile_requests_to_users_who_share_rooms": "false",
   "listening": "true",
