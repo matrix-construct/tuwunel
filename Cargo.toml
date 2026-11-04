@@ -566,7 +566,7 @@ version = "2.0"
 default-features = false
 
 [workspace.dependencies.tokio]
-version = "1.53"
+version = "1.54"
 default-features = false
 features = [
 	"fs",
