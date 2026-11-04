@@ -1,4 +1,6 @@
+use derive_more::Debug;
 use serde::Deserialize;
+use tuwunel_core::redacted_debug;
 
 /// Fields deserialized from an upstream provider's `/token` response.
 ///
@@ -11,12 +13,14 @@ pub struct TokenResponse {
 	pub token_type: Option<String>,
 
 	/// Access token granted by the provider.
+	#[debug("{}", redacted_debug!(access_token))]
 	pub access_token: Option<String>,
 
 	/// Duration in seconds the access_token is valid for.
 	pub expires_in: Option<u64>,
 
 	/// Token used to refresh the access_token.
+	#[debug("{}", redacted_debug!(refresh_token))]
 	pub refresh_token: Option<String>,
 
 	/// Duration in seconds the refresh_token is valid for.
@@ -26,5 +30,6 @@ pub struct TokenResponse {
 	pub scope: Option<String>,
 
 	/// Signed JWT containing the user's identity claims (OIDC).
+	#[debug("{}", redacted_debug!(id_token))]
 	pub id_token: Option<String>,
 }

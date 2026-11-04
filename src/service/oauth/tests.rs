@@ -9,7 +9,7 @@ use serde_json::{Value as JsonValue, from_value, json};
 use tuwunel_core::{Result, config::Figment, result::NotFound};
 use tuwunel_database::{Cbor, deserialize_from_slice, serialize_to_vec};
 
-use super::{Deletions, Ratelimiter, Session, UserInfo, check_bucket_at};
+use super::{Deletions, Ratelimiter, Session, TokenResponse, UserInfo, check_bucket_at};
 use crate::test_utils::fixture;
 
 #[test]
@@ -57,7 +57,6 @@ fn session_debug_masks_credentials() {
 		"query_nonce",
 	];
 
-	let sentinel = |field: &str| format!("{field}-sentinel");
 	let [access_token, id_token, refresh_token, code_verifier, cookie_nonce, query_nonce] =
 		secrets.map(sentinel).map(Some);
 
@@ -75,14 +74,37 @@ fn session_debug_masks_credentials() {
 	let dump = format!("{session:#?}");
 
 	assert!(dump.contains("visible-session"), "sess_id should stay visible: {dump}");
+	assert_masked(&dump, &secrets);
+}
 
-	for field in secrets {
+fn sentinel(field: &str) -> String { format!("{field}-sentinel") }
+
+fn assert_masked(dump: &str, fields: &[&str]) {
+	for field in fields {
 		assert!(!dump.contains(&sentinel(field)), "{field} leaked in Debug: {dump}");
 		assert!(
 			dump.contains(&format!("{field}: Some(<redacted>)")),
 			"{field} should appear as Some(<redacted>): {dump}"
 		);
 	}
+}
+
+#[test]
+fn token_response_debug_masks_credentials() {
+	let secrets = ["access_token", "refresh_token", "id_token"];
+	let [access_token, refresh_token, id_token] = secrets.map(sentinel);
+	let response: TokenResponse = from_value(json!({
+		"token_type": "visible-type",
+		"access_token": access_token,
+		"refresh_token": refresh_token,
+		"id_token": id_token,
+	}))
+	.expect("token response");
+
+	let dump = format!("{response:#?}");
+
+	assert!(dump.contains("visible-type"), "token_type should stay visible: {dump}");
+	assert_masked(&dump, &secrets);
 }
 
 #[tokio::test]

@@ -360,12 +360,7 @@ pub async fn request_token(
 /// uses the oauth-specific http client and is configured for JSON with special
 /// casing for an `error` property in the response.
 #[implement(Service)]
-#[tracing::instrument(
-	name = "request",
-	level = "debug",
-	ret(level = "trace"),
-	skip(self, body)
-)]
+#[tracing::instrument(name = "request", level = "debug", skip(self, body))]
 pub async fn request<Body>(
 	&self,
 	(provider, session): (Option<&Provider>, Option<&Session>),
