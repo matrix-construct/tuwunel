@@ -146,6 +146,22 @@ async fn readers(services: &Services, base: &str) -> Result {
 		assert_stripped(&reply, &reply["event"], event_id);
 	}
 
+	let search = json!({"search_categories": {"room_events": {"search_term": "message"}}});
+	let hit =
+		|reply: &Value| reply["search_categories"]["room_events"]["results"][0]["result"].clone();
+
+	let reply = author.post("search", &search).await?;
+
+	assert_eq!(hit(&reply)["unsigned"]["transaction_id"], "message-txn", "{reply}");
+
+	let reply = member.post("search", &search).await?;
+
+	assert_stripped(&reply, &hit(&reply), &message);
+
+	let reply = member.get("notifications").await?;
+
+	assert_stripped(&reply, &reply["notifications"][0]["event"], &message);
+
 	Ok(())
 }
 

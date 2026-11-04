@@ -5,7 +5,9 @@ use ruma::{RoomId, UserId, api::client::search::search_events::v3::Criteria};
 use tuwunel_core::{
 	Result,
 	arrayvec::ArrayVec,
-	implement, trace,
+	implement,
+	result::LogErr,
+	trace,
 	utils::{
 		ArrayVecExt, IterStream, ReadyExt, set,
 		stream::{TryIgnore, WidebandExt},
@@ -124,6 +126,12 @@ pub async fn search_pdus<'a>(
 				.user_can_see_event(query.user_id?, &pdu)
 				.await
 				.then_some((count, pdu))
+		})
+		.ready_filter_map(|(count, pdu)| {
+			pdu.without_transaction_id_unless_sender(query.user_id)
+				.log_err()
+				.ok()
+				.map(|pdu| (count, pdu))
 		})
 		.take(query.limit);
 

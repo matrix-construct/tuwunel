@@ -51,8 +51,7 @@ pub(crate) async fn is_self_redaction(
 
 /// The unsigned fields carrying a client's transaction ID on the event it sent.
 ///
-/// Timeline, thread and bundled-relation reads remove it for anyone but the
-/// sender.
+/// Every client read removes the ID for anyone but the sender.
 pub(crate) fn txnid_unsigned(txn_id: &TransactionId) -> BTreeMap<String, JsonValue> {
 	BTreeMap::from([("transaction_id".to_owned(), txn_id.as_str().into())])
 }

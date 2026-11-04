@@ -3,6 +3,7 @@ use futures::StreamExt;
 use ruma::{MilliSecondsSinceUnixEpoch, api::client::push::get_notifications, push::Action};
 use tuwunel_core::{
 	Result, at, err,
+	result::LogErr,
 	utils::{
 		stream::{ReadyExt, WidebandExt},
 		string::to_small_string,
@@ -64,7 +65,10 @@ pub(crate) async fn get_notifications_route(
 				.get_pdu_from_id(&pdu_id.into())
 				.await
 				.ok()
-				.filter(|event| !event.is_redacted())?;
+				.filter(|event| !event.is_redacted())?
+				.without_transaction_id_unless_sender(Some(sender_user))
+				.log_err()
+				.ok()?;
 
 			let read = services
 				.pusher
