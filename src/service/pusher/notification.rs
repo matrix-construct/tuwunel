@@ -4,11 +4,12 @@ use futures::{StreamExt, future::join3, stream::select};
 use ruma::{EventId, OwnedEventId, RoomId, UserId, events::receipt::ReceiptThread};
 use serde::Serialize;
 use tuwunel_core::{
-	Result, implement, trace,
+	Error, Result, implement, trace,
 	utils::{
+		bytes::{escape_bytes, u64_from_bytes},
 		stream::{BroadbandExt, ReadyExt, TryIgnore},
-		u64_from_u8,
 	},
+	warn,
 };
 use tuwunel_database::{
 	Deserialized, Ignore, IgnoreAll, Interfix, KeyBuf, deserialize_from_slice as deserialize_key,
@@ -178,7 +179,8 @@ pub async fn notification_count(&self, user_id: &UserId, room_id: &RoomId) -> u6
 
 /// Return the user's account-wide unread notification count.
 ///
-/// Joined main and thread rows contribute to a saturating total.
+/// Joined main and thread rows contribute to a saturating total. A row whose
+/// key or count cannot be read is logged and contributes nothing.
 #[implement(super::Service)]
 #[tracing::instrument(level = "trace", skip(self), ret)]
 pub async fn global_notification_count(&self, user_id: &UserId) -> u64 {
@@ -187,13 +189,16 @@ pub async fn global_notification_count(&self, user_id: &UserId) -> u64 {
 		.stream_prefix_raw(&(user_id, Interfix))
 		.ignore_err()
 		.ready_filter_map(|(key, count)| {
-			let count = u64_from_u8(count);
+			let count = u64_from_bytes(count)
+				.inspect_err(|error| warn_unreadable(key, error))
+				.ok()?;
 
-			(count > 0).then(|| (KeyBuf::from(key), count))
+			count.gt(&0).then(|| (KeyBuf::from(key), count))
 		})
 		.broad_filter_map(async |(key, count)| {
-			let (_, room_id, _): (Ignore, &RoomId, IgnoreAll) =
-				deserialize_key(&key).expect("notification count key");
+			let (_, room_id, _): (Ignore, &RoomId, IgnoreAll) = deserialize_key(&key)
+				.inspect_err(|error| warn_unreadable(&key, error))
+				.ok()?;
 
 			self.services
 				.state_cache
@@ -203,6 +208,11 @@ pub async fn global_notification_count(&self, user_id: &UserId) -> u64 {
 		})
 		.ready_fold(0_u64, u64::saturating_add)
 		.await
+}
+
+fn warn_unreadable(key: &[u8], error: &Error) {
+	// Stock release builds strip `debug_warn!`, and nothing else would show this row.
+	warn!(key = %escape_bytes(key), %error, "Skipping unreadable notification count.");
 }
 
 #[implement(super::Service)]

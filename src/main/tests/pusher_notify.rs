@@ -615,7 +615,8 @@ async fn run_cases(services: &Services) -> Result {
 	account_wide_count_delivery(&fixture, &room_id).await?;
 	badge_count_opt_out(&fixture).await?;
 	badge_delivery_memo(&fixture, &room_id).await?;
-	badge_bypasses_suppression(&fixture).await
+	badge_bypasses_suppression(&fixture).await?;
+	corrupt_count_rows_skipped(&fixture, &room_id).await
 }
 
 fn message_event(room_id: &str, event_id: &str) -> Result<Pdu> {
@@ -1112,6 +1113,38 @@ async fn badge_bypasses_suppression(fixture: &Fixture<'_>) -> Result {
 	if path != NOTIFY_PATH {
 		return Err!("suppressed-window badge notification hit unexpected path {path}");
 	}
+
+	Ok(())
+}
+
+/// Rows that do not decode leave the account-wide total at the readable sum.
+///
+/// Runs last, since a corrupt thread row panics any later thread count read in
+/// a debug build. Each row carries a count that would move the total if read.
+async fn corrupt_count_rows_skipped(fixture: &Fixture<'_>, room_id: &RoomId) -> Result {
+	let unread = fixture
+		.services
+		.db
+		.get("userroomid_notificationcount")?;
+
+	let total = || {
+		fixture
+			.services
+			.pusher
+			.global_notification_count(fixture.user)
+	};
+
+	unread.put((fixture.user, room_id), 3_u64);
+	assert_eq!(total().await, 3, "a readable row was not counted");
+
+	unread.put_raw((fixture.user, room_id, "$short"), [1_u8; 7]);
+	assert_eq!(total().await, 3, "a short count moved the total");
+
+	unread.put_raw((fixture.user, room_id, "$long"), [1_u8; 9]);
+	assert_eq!(total().await, 3, "a long count moved the total");
+
+	unread.put((fixture.user, "\u{1}no-sigil"), 11_u64);
+	assert_eq!(total().await, 3, "an unreadable key moved the total");
 
 	Ok(())
 }
