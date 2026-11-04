@@ -164,7 +164,6 @@ pub async fn handle_incoming_pdu<'a>(
 		return Ok(None);
 	}
 
-	// Skip old events
 	let first_normal_ts = self
 		.services
 		.timeline
@@ -172,21 +171,23 @@ pub async fn handle_incoming_pdu<'a>(
 		.await?
 		.origin_server_ts();
 
-	if incoming_pdu.origin_server_ts() < first_normal_ts {
+	let gapped = self
+		.services
+		.timeline
+		.non_outlier_pdus_exist(incoming_pdu.prev_events())
+		.eq(&false)
+		.await;
+
+	// An application service can backdate an event at the tip of the DAG.
+	if gapped && incoming_pdu.origin_server_ts() < first_normal_ts {
 		debug!(
 			origin_server_ts = ?incoming_pdu.origin_server_ts(),
 			?first_normal_ts,
 			"Skipping old event."
 		);
+
 		return Ok(None);
 	}
-
-	let gapped = self
-		.services
-		.timeline
-		.non_outlier_pdus_exist(incoming_pdu.prev_events())
-		.await
-		.is_false();
 
 	self.prev_walk.enter(gapped);
 

@@ -74,23 +74,14 @@ async fn exercise(services: &Services, base: &str) -> Result {
 		.await?
 		.origin_server_ts();
 
-	let (prev_id, prev) =
-		sign_message(services, &user_id, &room_id, &[&other_event_id], Some(first_ts)).await?;
-
-	services
-		.event_handler
-		.handle_incoming_pdu(services.globals.server_name(), &room_id, &prev_id, prev, false)
-		.await?;
+	let prev_id =
+		store_outlier(services, &user_id, &room_id, &other_event_id, Some(first_ts)).await?;
 
 	let (event_id, pdu) = sign_message(services, &user_id, &room_id, &[&prev_id], None).await?;
 
 	assert_rejected(services, &room_id, &event_id, pdu, "boundary").await?;
 	assert!(
-		services
-			.timeline
-			.non_outlier_pdu_exists(&prev_id)
-			.await
-			.is_err(),
+		!in_timeline(services, &prev_id).await,
 		"the stored prev event reached the timeline"
 	);
 
@@ -113,23 +104,14 @@ async fn exercise(services: &Services, base: &str) -> Result {
 
 	assert_accepted(services, &room_id, &event_id, pdu).await?;
 
-	let (prev_id, prev) =
-		sign_message(services, &user_id, &room_id, &[&local_event_id], Some(first_ts)).await?;
-
-	services
-		.event_handler
-		.handle_incoming_pdu(services.globals.server_name(), &room_id, &prev_id, prev, false)
-		.await?;
+	let prev_id =
+		store_outlier(services, &user_id, &room_id, &local_event_id, Some(first_ts)).await?;
 
 	let (event_id, pdu) = sign_message(services, &user_id, &room_id, &[&prev_id], None).await?;
 
 	assert_accepted(services, &room_id, &event_id, pdu).await?;
 	assert!(
-		services
-			.timeline
-			.non_outlier_pdu_exists(&prev_id)
-			.await
-			.is_ok(),
+		in_timeline(services, &prev_id).await,
 		"the same-room predecessor did not reach the timeline"
 	);
 
@@ -142,7 +124,43 @@ async fn exercise(services: &Services, base: &str) -> Result {
 		"the same-room predecessor has no state association"
 	);
 
+	assert_backdated_event_kept(services, &user_id, &room_id, &local_event_id).await?;
 	assert_backfill_keeps_cutoff(services, &user_id, &room_id, &local_event_id).await
+}
+
+/// An event extending our timeline is kept whatever date it claims.
+///
+/// An application service can date an event in the past without moving it from
+/// the tip of the room. With its prev events missing, the same date marks an
+/// event as older than the room.
+async fn assert_backdated_event_kept(
+	services: &Services,
+	user_id: &UserId,
+	room_id: &RoomId,
+	prev_id: &EventId,
+) -> Result {
+	let past_ts = MilliSecondsSinceUnixEpoch(UInt::new_saturating(1_000_000_000_000));
+	let (event_id, pdu) =
+		sign_message(services, user_id, room_id, &[prev_id], Some(past_ts)).await?;
+
+	assert_accepted(services, room_id, &event_id, pdu).await?;
+
+	let outlier_id = store_outlier(services, user_id, room_id, prev_id, None).await?;
+	let (event_id, pdu) =
+		sign_message(services, user_id, room_id, &[&outlier_id], Some(past_ts)).await?;
+
+	let accepted = services
+		.event_handler
+		.handle_incoming_pdu(services.globals.server_name(), room_id, &event_id, pdu, true)
+		.await?;
+
+	assert!(accepted.is_none(), "the old gapped event was accepted");
+	assert!(
+		!in_timeline(services, &event_id).await,
+		"the old gapped event reached the timeline"
+	);
+
+	Ok(())
 }
 
 /// A backfilled event dated in the future does not make later live events
@@ -173,9 +191,28 @@ async fn assert_backfill_keeps_cutoff(
 
 	assert_eq!(first_id, backfill_id, "the backfilled event is not the room's first");
 
-	let (event_id, pdu) = sign_message(services, user_id, room_id, &[prev_id], None).await?;
+	// Only an event with missing prev events is held against the cutoff.
+	let outlier_id = store_outlier(services, user_id, room_id, prev_id, None).await?;
+	let (event_id, pdu) = sign_message(services, user_id, room_id, &[&outlier_id], None).await?;
 
 	assert_accepted(services, room_id, &event_id, pdu).await
+}
+
+async fn store_outlier(
+	services: &Services,
+	user_id: &UserId,
+	room_id: &RoomId,
+	prev_id: &EventId,
+	timestamp: Option<MilliSecondsSinceUnixEpoch>,
+) -> Result<OwnedEventId> {
+	let (event_id, pdu) = sign_message(services, user_id, room_id, &[prev_id], timestamp).await?;
+
+	services
+		.event_handler
+		.handle_incoming_pdu(services.globals.server_name(), room_id, &event_id, pdu, false)
+		.await?;
+
+	Ok(event_id)
 }
 
 async fn sign_message(
@@ -230,11 +267,7 @@ async fn assert_rejected(
 
 	assert!(error.to_string().contains("wrong room"), "rejected for another reason: {error}");
 	assert!(
-		services
-			.timeline
-			.non_outlier_pdu_exists(event_id)
-			.await
-			.is_err(),
+		!in_timeline(services, event_id).await,
 		"the rejected event reached the timeline"
 	);
 
@@ -270,11 +303,7 @@ async fn assert_accepted(
 
 	assert!(result.is_some(), "same-room event was not accepted");
 	assert!(
-		services
-			.timeline
-			.non_outlier_pdu_exists(event_id)
-			.await
-			.is_ok(),
+		in_timeline(services, event_id).await,
 		"the same-room event did not reach the timeline"
 	);
 
@@ -288,4 +317,12 @@ async fn assert_accepted(
 	);
 
 	Ok(())
+}
+
+async fn in_timeline(services: &Services, event_id: &EventId) -> bool {
+	services
+		.timeline
+		.non_outlier_pdu_exists(event_id)
+		.await
+		.is_ok()
 }

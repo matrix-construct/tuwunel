@@ -33,8 +33,8 @@ type Walks = BTreeMap<u64, InFlightWalk>;
 /// passes are in flight.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct PrevWalkMetrics {
-	/// Top-level incoming timeline events that reached the gap check, whether from
-	/// a federation transaction, a join, an invite or backfill.
+	/// Top-level incoming timeline events not skipped as old, whether from a
+	/// federation transaction, a join, an invite or backfill.
 	pub entered: u64,
 
 	/// Events with a previous event missing from the timeline.
