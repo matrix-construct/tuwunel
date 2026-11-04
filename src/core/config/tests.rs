@@ -1007,17 +1007,22 @@ fn s3_storage_provider_debug_masks_credentials() {
 
 	let dump = format!("{config:?}");
 
-	assert!(!dump.contains("AKIAIOSFODNN7EXAMPLE"), "key leaked in Debug: {dump}");
-	assert!(!dump.contains("wJalrXUtnFEMI"), "secret leaked in Debug: {dump}");
-	assert!(!dump.contains("session-token"), "token leaked in Debug: {dump}");
-	assert!(!dump.contains("kms-material"), "kms leaked in Debug: {dump}");
-
-	for field in ["key", "secret", "token", "kms"] {
-		assert!(
-			dump.contains(&format!("{field}: Some(<redacted>)")),
-			"{field} should appear as Some(<redacted>): {dump}"
-		);
+	for (field, secret) in [
+		("key", "AKIAIOSFODNN7EXAMPLE"),
+		("secret", "wJalrXUtnFEMI"),
+		("token", "session-token"),
+		("kms", "kms-material"),
+	] {
+		assert_masked(&dump, field, secret, "Some(<redacted>)");
 	}
+}
+
+fn assert_masked(dump: &str, field: &str, secret: &str, mask: &str) {
+	assert!(!dump.contains(secret), "{field} leaked in Debug: {dump}");
+	assert!(
+		dump.contains(&format!("{field}: {mask}")),
+		"{field} should appear as {mask}: {dump}"
+	);
 }
 
 #[test]
@@ -1039,15 +1044,33 @@ client_secret = "client-secret-sentinel"
 
 	let dump = format!("{provider:#?}");
 
-	assert!(
-		!dump.contains("client-secret-sentinel"),
-		"client_secret leaked in Debug: {dump}"
-	);
+	assert_masked(&dump, "client_secret", "client-secret-sentinel", "Some(<redacted>)");
+}
 
-	assert!(
-		dump.contains("client_secret: Some(<redacted>)"),
-		"client_secret should appear as Some(<redacted>): {dump}"
-	);
+#[test]
+fn jwt_config_debug_masks_key() {
+	let config = JwtConfig {
+		key: "jwt-key-sentinel".to_owned(),
+		..Default::default()
+	};
+
+	let dump = format!("{config:#?}");
+
+	assert_masked(&dump, "key", "jwt-key-sentinel", "<redacted>");
+}
+
+#[test]
+fn appservice_debug_masks_tokens() {
+	let config = AppService {
+		as_token: "as-token-sentinel".to_owned(),
+		hs_token: "hs-token-sentinel".to_owned(),
+		..Default::default()
+	};
+
+	let dump = format!("{config:#?}");
+
+	assert_masked(&dump, "as_token", "as-token-sentinel", "<redacted>");
+	assert_masked(&dump, "hs_token", "hs-token-sentinel", "<redacted>");
 }
 
 #[test]

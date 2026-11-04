@@ -50,11 +50,16 @@ pub fn str_truncated(s: &str, max_len: usize) -> tracing::field::DebugValue<Trun
 ///
 /// The macro expands to `"Some(<redacted>)"` when the identifier reports a
 /// present value and to `"None"` otherwise. Its argument must be an identifier
-/// supporting an `is_some` method.
+/// supporting an `is_some` method. The `str` form is for a secret whose absence
+/// is an empty string: it needs `is_empty` and expands to `"<redacted>"`, or to
+/// the quoted empty string a plain `Debug` would print.
 #[macro_export]
 macro_rules! redacted_debug {
 	($f:ident) => {
 		if $f.is_some() { "Some(<redacted>)" } else { "None" }
+	};
+	(str $f:ident) => {
+		if $f.is_empty() { "\"\"" } else { "<redacted>" }
 	};
 }
 

@@ -1265,6 +1265,7 @@ pub struct JwtConfig {
 	/// display: sensitive
 	/// reloadable: yes
 	/// default:
+	#[debug("{}", redacted_debug!(str key))]
 	#[serde(default, alias = "secret")]
 	pub key: String,
 
@@ -2425,6 +2426,7 @@ pub struct AppService {
 	///
 	/// default:
 	/// display: sensitive
+	#[debug("{}", redacted_debug!(str as_token))]
 	pub as_token: String,
 
 	/// A unique token for Homeservers to use to authenticate requests to
@@ -2432,6 +2434,7 @@ pub struct AppService {
 	///
 	/// default:
 	/// display: sensitive
+	#[debug("{}", redacted_debug!(str hs_token))]
 	pub hs_token: String,
 
 	/// The localpart of the user associated with the application service.
