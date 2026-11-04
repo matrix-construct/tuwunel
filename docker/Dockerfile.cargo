@@ -98,9 +98,9 @@ RUN mkdir -p "${LINKER_WRAP_DIR}" \
     && ln -sf /usr/local/bin/linker_wrap.sh "${LINKER_WRAP_DIR}/cc" \
     && ln -sf /usr/local/bin/linker_wrap.sh "${LINKER_WRAP_DIR}/${CC##*/}"
 RUN \
---mount=type=cache,dst=${RUSTUP_HOME}/downloads,sharing=locked \
---mount=type=cache,dst=${CARGO_HOME}/registry,sharing=locked \
---mount=type=cache,dst=${CARGO_HOME}/git,sharing=locked \
+--mount=type=cache,dst=${RUSTUP_HOME}/downloads,sharing=private \
+--mount=type=cache,dst=${CARGO_HOME}/registry,sharing=private \
+--mount=type=cache,dst=${CARGO_HOME}/git,sharing=private \
 --mount=type=cache,id=tuwunel-lto-${rust_toolchain}-${CARGO_TARGET}-${cargo_profile},dst=${LTO_CACHE_DIR},sharing=shared \
 --mount=type=cache,id=tuwunel-linker-slots,dst=${LINKER_LOCK_DIR},sharing=shared \
 <<EOF
@@ -176,9 +176,9 @@ ENV sched_prio=${sched_prio}
 ENV sched_scope=${sched_scope}
 ENV sched_cpus=${sched_cpus}
 RUN \
---mount=type=cache,dst=${RUSTUP_HOME}/downloads,sharing=locked \
---mount=type=cache,dst=${CARGO_HOME}/registry,sharing=locked \
---mount=type=cache,dst=${CARGO_HOME}/git,sharing=locked \
+--mount=type=cache,dst=${RUSTUP_HOME}/downloads,sharing=private \
+--mount=type=cache,dst=${CARGO_HOME}/registry,sharing=private \
+--mount=type=cache,dst=${CARGO_HOME}/git,sharing=private \
 --mount=type=cache,id=tuwunel-lto-${rust_toolchain}-${CARGO_TARGET}-${cargo_profile},dst=${LTO_CACHE_DIR},sharing=shared \
 --mount=type=cache,id=tuwunel-linker-slots,dst=${LINKER_LOCK_DIR},sharing=shared \
 <<EOF
